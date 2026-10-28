@@ -107,7 +107,7 @@ When operating as or delegating to smaller models, enforce scoping safeguards:
    - Restrict test authoring to one atomic reproduction or regression test demonstrating the defect or behavior change; no sprawling suites when one witness suffices.
    - Target only the explicit requirement or failure mode, not speculative permutations or redundant assertion variations.
    - Keep execution deterministic, bounded, and fast-failing within the package (`go test -v ./internal/<pkg>` and `go vet ./internal/<pkg>`).
-   - **Declare the wall-clock a new test adds to its suite.** A cost-shaped test carries `// fak-test:runtime <class> est=<duration> [lane=<lane>]` (`class` is `fast | medium | slow | integration`; `lane` is `default | short | optin | race`); a package in no suite module is unreachable by any lane. The rule is why: `go test ./...` is bounded by the slowest test binary, not the sum over binaries, so one undeclared multi-minute test is what an agent actually waits on, and the companion `fak-testruntime` gate refuses a cost-shaped test with no marker. Prefer `t.Parallel()` or a non-default lane, and record a deliberate cost rather than hiding it. Full contract: [`platform/testruntime/doc.go`](../fak-private/platform/testruntime/doc.go).
+   - **Declare the wall-clock a new test adds to its suite.** A cost-shaped test carries `// fak-test:runtime <class> est=<duration> [lane=<lane>]` (`class` is `fast | medium | slow | integration`; `lane` is `default | short | optin | race`); a package in no suite module is unreachable by any lane. The rule is why: `go test ./...` is bounded by the slowest test binary, not the sum over binaries, so one undeclared multi-minute test is what an agent actually waits on, and the companion `fak-testruntime` gate refuses a cost-shaped test with no marker. Prefer `t.Parallel()` or a non-default lane, and record a deliberate cost rather than hiding it. Full contract: the companion fak-private `platform/testruntime` gate.
 
 ## First local-agent product milestone
 
@@ -280,7 +280,7 @@ just a code change and a "looks fixed". Pick the witness the bug actually has:
   path**, not an in-memory mock. Hermes' rule: "mocks hide integration bugs." Shift real-world smoke testing
   earlier into the process: run `fak validate --mine <paths> --smoke` in your inner loop, run `make smoke`
   (`smoke-exec` + `dogfood-test`) or `make test-fast` before commit, and enforce execution via dogfood (`make dogfood-test`,
-  `scripts/dogfood-claude.sh --probe`, `recent_feature_dogfood.py`) or a loopback integration test
+  `scripts/dogfood-claude.sh --probe`, `tools/recent_feature_dogfood.py`) or a loopback integration test
   (`make test-integration`, `*integration*test.go`) against a temporary workspace before claiming
   completion. A green unit test that only asserts mocks or verifies syntax without executing the
   real path is unproven and must not be declared done. Shift left: prove execution early during

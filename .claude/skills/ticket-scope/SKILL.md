@@ -19,7 +19,7 @@ metadata:
 > [`issue-triage`](../issue-triage/SKILL.md)'s discipline: the tool decides what is
 > *true*; the operator decides what *is done*.
 
-The concept and the six axes live in **[docs/ticket-scope.md](../../docs/ticket-scope.md)** —
+The concept and the six axes live in **[docs/ticket-scope.md](../../../docs/ticket-scope.md)** —
 read it once. This skill is the executable pass over that contract.
 
 A ticket's **scope** is the contract for one unit of agent work: what one worker

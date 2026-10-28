@@ -88,7 +88,7 @@ control-pane ratchet. Then attack the largest `pressure_by_term`. The genuine mo
 - **`docmap_covers_steering` (HARD, discoverability).** A steering surface (steerability,
   operator-heaviness) is not reachable from a *linked* doc-map entry. Fix it by adding a
   real `llms.txt` line that links to the surface's doc (e.g.
-  `- [Operator-heaviness scorecard](docs/OPERATOR-HEAVINESS.md): ...`). A bare prose mention
+  `- [Operator-heaviness scorecard](../../../docs/OPERATOR-HEAVINESS.md): ...`). A bare prose mention
   with no markdown link does NOT retire the gate — the oracle requires the link shape.
 - **`appeal_channel_wired` (HARD, recovery).** The dispatch table has no in-product appeal
   verb for a wrong refusal. Fix it by wiring `fak complain` (the `internal/guardcomplaint`

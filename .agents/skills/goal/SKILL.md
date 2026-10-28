@@ -1,9 +1,10 @@
 ---
 name: goal
-description: Autonomous goal-directed execution loop. Establishes an immutable objective pin, durable scratch state (_scratch/goals/GOAL.md & todowrite), a deterministic witness exit-gate, and executes atomic steps until verified.
+description: Autonomous goal-directed execution loop. Establishes an immutable objective pin, durable scratch state (_scratch/goals/GOAL-<slug>.md, whose markdown checklist is the step tracker on pi), a deterministic witness...
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/goal/SKILL.md
+  canonical-description-hash: d7a71890f95c98a18878a1eb187fd07069490f07e0fafa1c2bc56916055bee62
 ---
 
 # Canonical project skill adapter

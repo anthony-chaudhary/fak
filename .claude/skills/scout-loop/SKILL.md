@@ -27,7 +27,7 @@ first, one lead per pass, no monolith, and a crawl is never a ship.**
 |---|---|---|---|
 | `fak idea-scout` | an outward **feed** | dry-run arXiv/GitHub/HN/Reddit scan + filed-stamp dedup | plans raw triage issues; `--live` files |
 | [`/study-repo`](../study-repo/SKILL.md) | one **repo URL** | clone → read the code → decompose | files many small witnessed leaves |
-| [`/field-borrow`](../field-borrow/SKILL.md) | one **named capability** | dogfood `fak_feature_query`/`fak index` | files one grounded issue |
+| [`/field-borrow`](../field-borrow/SKILL.md) | one **named capability** | dogfood `fak_feature_query`/`fak-dev index` | files one grounded issue |
 | [`/industry-score`](../industry-score/SKILL.md) | the **field taxonomy** | coverage + parity-debt scorecard | a scorecard (files nothing) |
 | [`/super-loop`](../super-loop/SKILL.md) | the **ready backlog** | launch N detached `/goal` workers | resolves leaves (witnessed ancestry) |
 | **`/scout-loop`** (this) | **the crawler output** | **crawl → select → study → witness → file**, cadenced | **runs the study pass unattended, one lead per pass** |
@@ -106,7 +106,7 @@ any of that here; drive it.
 ### 4 — WITNESS + FILE: `/field-borrow`'s witness step, then file small
 
 For **each** surviving candidate, run [`/field-borrow`](../field-borrow/SKILL.md)'s
-witness step — dogfood `fak_feature_query` / `fak index docs|leaves|verbs|claims`
+witness step — dogfood `fak_feature_query` / `fak-dev index docs|leaves|verbs|claims`
 (plus a raw `Grep` to guard the lexical ranker's false-ABSENT) → classify
 **PRESENT / PARTIAL / ABSENT**:
 
@@ -125,7 +125,7 @@ Record the pass in a dated `docs/notes/CONCEPT-STUDY-<repo>-<date>.md` (URL +
 pinned `@sha`, what you read, the borrow · source `path:line@sha` · witness ·
 inspire|integrate · filed # table), add its **`INDEX.md`** line, and commit the
 docs lane by explicit path with a `(fak docs)` trailer. This registration — not
-the issues alone — is what makes the research durable and keeps `fak index
+the issues alone — is what makes the research durable and keeps `fak-dev index
 freshness` clean.
 
 ### 6 — CADENCE: set it to run (unattended)
@@ -179,7 +179,7 @@ Because each fire spawns a Claude session, the launch path keeps the
 - **No monolith** was filed; the work is small independently-shippable leaves under
   the right epic.
 - The pass is **registered**: a dated `docs/notes/CONCEPT-STUDY-*` note + its
-  `INDEX.md` line; `fak index freshness` reads clean.
+  `INDEX.md` line; `fak-dev index freshness` reads clean.
 - If unattended: the `FleetScoutLoop` fire is witnessed in the loop ledger
   (`fak loop status`), and no issue was reported "resolved" by the loop.
 

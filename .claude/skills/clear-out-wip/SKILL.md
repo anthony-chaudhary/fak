@@ -172,7 +172,7 @@ For each `SHIP_NOW` or `SHIP_ENABLER` unit:
 2. Run the narrow witness, then `fak validate --mine <path> ...` for the committed tip plus only
    that unit. On this Windows host, use the repository's WSL test path where tests are required.
 3. Follow `/commit-clean`: preview the subject, ensure local HEAD is converged with upstream without raw merges or `--autostash` (`fak sync apply` or `fak sync reconcile` supporting `ROUTE_DISJOINT_INTEGRATE`, `ROUTE_SUPERSET_MERGE`, or `ROUTE_HOLD_DIRTY_COLLISION` with `fak wip park`). Commit exactly the paths under the lock, verify the committed path set, and push through the safe sync path (`fak sync push`).
-   - When clearing WIP spanning shared boundaries (`pkg/*`) with `fak-private`, verify boundary leak hygiene (`python tools/scrub_public_copy.py --audit-staged`), run `go work sync`, and coordinate safe pushes across both repositories (`fak sync push` in `fak`, `fak-sync push` in `fak-private`).
+   - When clearing WIP spanning shared boundaries (`pkg/*`) with `fak-private`, verify boundary leak hygiene (`python tools/scrub_public_copy.py --audit-staged`), run `go work sync`, and coordinate safe pushes across both repositories (`fak sync push` in `fak`, `fak-sync push --apply` in `fak-private`).
    One coherent unit, one commit, one leaf.
 4. Cite the changed `module@rev` and witness. State `parent remains open` for an enabling slice.
 5. Rerun `fak sweep --json`; peers may have changed the tree while the unit landed. Never apply a

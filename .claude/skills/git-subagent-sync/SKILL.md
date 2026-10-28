@@ -251,7 +251,7 @@ For each verified lane:
      python tools/scrub_public_copy.py --audit-staged
      ```
      Ensure zero leak needles (exit code 0).
-   - Push companion `fak-private` changes first or synchronously using its sanctioned workflow (`fak-sync push`).
+   - Push companion `fak-private` changes first or synchronously using its sanctioned workflow (`fak-sync push --apply`).
    - Push `fak` commits via `fak sync push`.
    - Confirm both repositories have reached their intended synchronized tip.
 

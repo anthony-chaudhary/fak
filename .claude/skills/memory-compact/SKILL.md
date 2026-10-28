@@ -94,7 +94,7 @@ absent → a broken promise), no duplicate references. The witness checks this.
 4. **Tiering move (the main lever):** to move an entry cold, copy its index line
    **byte-identical** into the right section of `MEMORY_archive.md`, then delete it
    from `MEMORY.md`. Tiering is *where it lives*, NOT a re-summarize (re-summarize
-   is step 3, a separate concern). Keep the `[MEMORY_archive.md](MEMORY_archive.md)`
+   is step 3, a separate concern). Keep the `MEMORY_archive.md`
    pointer in the `MEMORY.md` header so the cold tier stays one hop away.
 
 5. **Deletion needs sign-off.** Hard-deleting an entry (index line **and** topic

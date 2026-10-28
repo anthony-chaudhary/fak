@@ -187,7 +187,7 @@ from memory:
 
 - **`fak_feature_query`** (MCP) / `fak capabilities <intent>` — intent → ranked capability
   cards (name, summary, `witness` content-address, the call to make).
-- **`fak index docs|leaves|verbs|claims <terms>`** — the dev self-index over docs, packages,
+- **`fak-dev index docs|leaves|verbs|claims <terms>`** — the dev self-index over docs, packages,
   CLI verbs, and the CLAIMS ledger.
 - Also a plain `Grep` for the concept's obvious symbol, to catch a capability the lexical
   ranker missed (see Honest limits).
@@ -230,7 +230,7 @@ deliberately (quote bodies through `--body-file`, not inline heredocs that the s
 
 Record the instance in a dated `docs/notes/CONCEPT-<topic>-<date>.md`: source → witness →
 seam → filed issues, with a `Companions:` block. Add its **`INDEX.md`** line in the
-*Notes & research* section (an unindexed dated note is an orphan `fak index freshness`
+*Notes & research* section (an unindexed dated note is an orphan `fak-dev index freshness`
 flags). Link the children from the parent epic. **This registration — not the issues alone —
 is what makes the research path durable.**
 
@@ -245,7 +245,7 @@ novel, spine-shaped gap can seed `spine-fanout` once a working spine ships.
   seam**, a **named dated external source**, and a **first checkable step**.
 - No gap was filed that fak already ships (step 2 caught the PRESENT cases).
 - The instance is registered: a dated `docs/notes` entry, its `INDEX.md` line, and the epic
-  links its children. `python tools/... ` freshness / `fak index freshness` reads clean for
+  links its children. `python tools/... ` freshness / `fak-dev index freshness` reads clean for
   the new note.
 
 ## The anti-gaming rule (specific to this surface)

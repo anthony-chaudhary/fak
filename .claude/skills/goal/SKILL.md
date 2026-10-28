@@ -1,6 +1,6 @@
 ---
 name: goal
-description: Autonomous goal-directed execution loop. Establishes an immutable objective pin, durable scratch state (_scratch/goals/GOAL.md & todowrite), a deterministic witness exit-gate, and executes atomic steps until verified.
+description: Autonomous goal-directed execution loop. Establishes an immutable objective pin, durable scratch state (_scratch/goals/GOAL-<slug>.md, whose markdown checklist is the step tracker on pi), a deterministic witness exit-gate, and executes atomic steps until verified.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Edit, Write, Grep, Glob, Bash
@@ -24,7 +24,7 @@ It unifies the best patterns from existing open-source agent systems:
 1. **The Objective Pin**: The objective statement is pinned verbatim and never mutates during the run. Pinning prevents goal drift (Arike et al., 2025).
 2. **State on Disk, Not Ephemeral Memory**: Progress, plans, and scratchpad live in `_scratch/goals/GOAL.md` (or `_scratch/goals/GOAL-<slug>.md`) on disk. Goal specs are noisy, disposable scratchpad memory for surviving context compaction; they are not coordination artifacts. First-class coordination occurs via lane leases (`dos arbitrate` / `internal/leaseref`), claims (`CLAIMS.md`), issue comments, and commit trailers.
 3. **External Witness Exit-Gate (and Live Hardware Shift-Left)**: Model proposes, test disposes. The agent never grades its own work. A goal is satisfied only when a deterministic external command (test suite, buildcheck, validator) exits 0. For tasks touching hardware, compute kernels, or accelerator paths (CUDA, Vulkan, Metal, APU/UMA), bias heavily toward testing sub-components on live physical hardware (divide and conquer) with high volume and frequency (e.g. `fak validate --strix --subkernels=...`, `make mac-perf`, `make cuda-test`) rather than relying on synthetic host mocks or deferring verification to monolithic post-merge runs.
-4. **Atomic S0/S1 Steps (Divide & Conquer, Subdivide, and Scope Abstention)**: Divide and conquer substantive or multi-concern objectives into atomic leaves (1–3 files touched per step). When tasks have independent components, delegate to isolated subagents or workers (`task`: worker, researcher, explore, cross-validator) to prevent coordinator context pollution. Divide and conquer applies to compute pipelines as well: decompose hardware verification into isolated sub-components (sub-kernels, GEMV/GEMM microbenchmarks, Vulkan primitives) to execute on live hardware frequently and in high volume. Parallel subagent cohorts (4–8 parallel subagents across independent packages, tests, or diagnostic probes) are authorized while maintaining the single active goal milestone in `todowrite`. Top-level coordinators fan out subagents, while leaf workers execute directly without nested recursion (#12028). Keep exactly one step `in_progress` in `todowrite`. When encountering high-difficulty boundaries (e.g. frozen ABI, kernel SIMD), scope abstention strictly to the bounded aspect: emit a structured `ABSTAIN` record for that boundary while advancing all independent, safe, solvable sub-components (reproduction tests, diagnostics, disjoint packages).
+4. **Atomic S0/S1 Steps (Divide & Conquer, Subdivide, and Scope Abstention)**: Divide and conquer substantive or multi-concern objectives into atomic leaves (1–3 files touched per step). When tasks have independent components, delegate to isolated subagents or workers (`task`: worker, researcher, explore, cross-validator) to prevent coordinator context pollution. Divide and conquer applies to compute pipelines as well: decompose hardware verification into isolated sub-components (sub-kernels, GEMV/GEMM microbenchmarks, Vulkan primitives) to execute on live hardware frequently and in high volume. Parallel subagent cohorts (4–8 parallel subagents across independent packages, tests, or diagnostic probes) are authorized while maintaining the single active goal milestone in the goal checklist. Top-level coordinators fan out subagents, while leaf workers execute directly without nested recursion (#12028). Keep exactly one step `in_progress` in the goal checklist. When encountering high-difficulty boundaries (e.g. frozen ABI, kernel SIMD), scope abstention strictly to the bounded aspect: emit a structured `ABSTAIN` record for that boundary while advancing all independent, safe, solvable sub-components (reproduction tests, diagnostics, disjoint packages).
 5. **Failure Memory Scratchpad & Persistence (Move Forward Over Conclusions)**: Genuine guard refusals carrying a closed reason token or unexpected process crashes are recorded in `# Scratch / last-refusal` in `_scratch/goals/GOAL.md` (or `_scratch/goals/GOAL-<slug>.md`). Routine CLI return codes from read-only commands (such as `grep` returning 1 on no match, or `git diff --quiet` detecting changes) are normal tool execution results and must not be logged as failures in `# Scratch / last-refusal`. A refusal or tool crash is diagnostic feedback, not a session abort. Query `fak recover <TOKEN>` for structured recovery, adapt the execution path or decompose the step, and maintain momentum on the pinned objective without repeating identical failing calls. Focus on forward momentum over terminal conclusions: rather than defeatist conclusions when a step underperforms (e.g. rather *"the next step to get better performance is X"* than *"X didn't work ... therefore we suck..."*), treat unmet targets as empirical data that eliminates a variable, and formulate the concrete next checkable step.
 
 ---
@@ -40,7 +40,7 @@ Formulate three fields:
 - **Non-Goals / Scope Fences**: Explicitly state what is NOT part of this run to prevent over-scaffolding and companion abstraction sprawl.
 - **Witness Criterion**: The exact deterministic command that proves success (e.g. `go test -v ./internal/gateway/... -run TestGatewayReady` or `fak validate --mine <paths>`).
 
-### Step 2: Initialize Durable Scratch State (_scratch/goals/GOAL.md & todowrite)
+### Step 2: Initialize Durable Scratch State (_scratch/goals/GOAL-<slug>.md; its checklist is the step tracker)
 
 Ensure directory exists (`mkdir -p _scratch/goals`) and create or update `_scratch/goals/GOAL.md` (or `_scratch/goals/GOAL-<slug>.md`). Never create or commit a tracked `GOAL.md` at the workspace root. Goal specs are local, disposable execution scratchpad memory. First-class coordination occurs via lane leases (`dos arbitrate`), claims (`CLAIMS.md`), issue comments, and commit trailers (`(fak <leaf>)`).
 
@@ -72,7 +72,10 @@ If the `fak` binary is available, optionally register the goal in the canonical 
 fak goal create --title "<title>" --summary "<summary>"
 ```
 
-If running in OpenCode or an environment with `todowrite`, populate the task list with the plan items, marking the first item `in_progress`.
+If running on pi (or any harness with no todo tool), the plan items ARE the tracker: keep
+`- [ ]` / `- [x]` state in the goal scratch file and mirror it in the plan block. In
+OpenCode, additionally populate `todowrite` with the plan items, marking the first item
+`in_progress`.
 
 ### Step 3: Baseline Reproduction First (SWE-agent Invariant)
 
@@ -85,17 +88,30 @@ Before editing code:
 
 Iterate through plan items sequentially:
 1. **Divide and conquer by delegation**: For substantive, complex, or multi-component goals, launch specialized subagents concurrently for independent parts (e.g. `task` with `worker` for implementation, `researcher` for prior art, `cross-validator` for verification). Pull only compact receipts and decisions into the coordinator.
-2. Keep only one task `in_progress` in `todowrite`.
+2. Keep only one step marked in-progress in the goal checklist.
 3. Confine edits to 1–3 closely related files using `Edit` or `Write`.
 4. If a command or tool fails:
    - Routine CLI return codes from read-only commands (such as `grep` returning 1 on no match, or `git diff --quiet` detecting changes) are normal tool execution results and must not be logged as failures in `# Scratch / last-refusal`.
    - Log only genuine guard refusals carrying a closed reason token or unexpected process crashes to `# Scratch / last-refusal` in `_scratch/goals/GOAL.md`.
    - Query structured recovery: if a guard refused the call, run `fak recover <TOKEN>` or `dos man wedge <TOKEN> --explain` to obtain the sanctioned remedy.
-   - Handle transient locks: if blocked by `MERGE_IN_PROGRESS`, `COLLISION_RISK`, or `LOCK_BUSY`, unstage paths (`git restore --staged`), wait for quiescence, or switch to an independent disjoint subtask.
+   - For `MERGE_IN_PROGRESS`, `COLLISION_RISK`, or `LOCK_BUSY`, inspect the
+     typed recovery, wait for quiescence, or continue an independent disjoint
+     subtask. These tokens grant no authority to change the index.
+   - For an actual owned `PRESTAGED_PATH_OVERLAP`, the native recovery accepts
+     one existing regular tracked stage-0 modification in its managed ticket
+     checkout. Retain the original `EXECUTING` claim's worker and explicit
+     epoch, confirm the path is in scope, and preview with full content pins:
+     ```bash
+     fak-run fak-flow index unstage --repo-root <managed-checkout> --path <owned-path> --expected-head <full-head> --expected-index-blob <stage-0-blob> --expected-worktree-sha256 <sha256> --ticket <ticket> --worker <original-worker> --epoch <original-epoch> --json
+     fak-run fak-flow index unstage --repo-root <managed-checkout> --path <owned-path> --expected-head <full-head> --expected-index-blob <stage-0-blob> --expected-worktree-sha256 <sha256> --ticket <ticket> --worker <original-worker> --epoch <original-epoch> --json --expected-index-generation <preview-token> --owner-authorized --apply
+     ```
+     Review the preview before applying with its exact generation token and
+     unchanged pins. The owner attestation supplements live SDK/scope checks.
+     A refusal preserves source and index; keep other work and peers untouched.
    - Decompose rather than abandon: if a subtask is blocked or too complex, divide it into smaller verifiable leaves (e.g. capture baseline reproduction tests first) while keeping the pinned objective intact.
    - Adapt the approach: halt repetition of the identical failing call; select a sanctioned alternative tool or modified arguments.
 5. Verify the step using package tests (`go test ./internal/<pkg>/...` or platform test script).
-6. Mark the task `- [x]` in `_scratch/goals/GOAL.md` and `completed` in `todowrite`.
+6. Mark the task `- [x]` in the session's `_scratch/goals/GOAL-<slug>.md` — on pi that file is the sole step tracker; on OpenCode mirror the same transition into that harness's todo list.
 
 ### Step 5: Witness Gate Evaluation
 
@@ -146,13 +162,18 @@ make cuda-accept
 
 ## Tool Mapping Across Agent Harnesses
 
-| Operation | OpenCode | Claude Code | Codex / fakc |
-|---|---|---|---|
-| Step tracking | `todowrite` | `TodoWrite` / markdown | `update_plan` |
-| File inspection | `read`, `glob`, `grep` | `Read`, `Glob`, `Grep` | `read_file`, `glob` |
-| Code editing | `edit`, `write` | `Edit`, `Write` | `edit_file` |
-| Execution | `bash` | `Bash` | `shell_command` |
-| Subagents | `task` | `Task` | detached worker |
+| Operation | pi (primary) | OpenCode | Claude Code | Codex / fakc |
+|---|---|---|---|---|
+| Step tracking | markdown checklist in the goal scratch file (`- [ ]` / `- [x]`); pi has no `todowrite` tool | `todowrite` | `TodoWrite` / markdown | `update_plan` |
+| File inspection | `read`, `grep`, `find`, `ls` | `read`, `glob`, `grep` | `Read`, `Glob`, `Grep` | `read_file`, `glob` |
+| Code editing | `edit`, `write` | `edit`, `write` | `Edit`, `Write` | `edit_file` |
+| Execution | `bash`, `powershell` | `bash` | `Bash` | `shell_command` |
+| Subagents | `subagent` (agent scope `user`, `project`, or `both`) | `task` | `Task` | detached worker |
+
+On pi the goal checklist is a plain markdown file, not a tool call. Render the plan
+items as `- [ ]` lines in `_scratch/goals/GOAL-<slug>.md`, flip the active one to
+`- [ ]`-with-an-in-progress note, and mark finished items `- [x]`. Editing that file is
+the step-tracking operation; there is no separate todo tool to call.
 
 ---
 

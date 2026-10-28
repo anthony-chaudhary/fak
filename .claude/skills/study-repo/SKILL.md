@@ -86,7 +86,7 @@ witness discipline rather than re-implementing it.
 | Skill / tool | Starts from | Mechanism | License-aware? | Files issues? |
 |---|---|---|---|---|
 | `fak idea-scout` | an outward **feed** | dry-run arXiv/GitHub/HN/Reddit scan + filed-stamp dedup; `--live` files | no | yes (triage queue) |
-| `field-borrow` | a **named capability** | dogfood `fak_feature_query`/`fak index` → witness the gap, file epic-anchored | no | yes (grounded) |
+| `field-borrow` | a **named capability** | dogfood `fak_feature_query`/`fak-dev index` → witness the gap, file epic-anchored | no | yes (grounded) |
 | `sota-check` | a **kernel op** you're about to write | `fak sota` prior-art matrix, route borrow/bind/stay-minimal | per-row route | no |
 | `industry-score` | the **field taxonomy** | coverage + parity-debt scorecard | no | no |
 | **study-repo** (this) | **anything that names code** | acquire → read DEEP (fan-out) + reconstruct their worldview → extract → ablate to the axis → scope small → witness **on-axis** → **FILE** | **yes — borrow vs integrate** | **yes — by default** |
@@ -302,7 +302,7 @@ and a fleet worker can only act on a leaf.
 For **each** surviving candidate, run [`field-borrow`](../field-borrow/SKILL.md)'s witness
 step — do not restate it, use it:
 
-- Dogfood `fak_feature_query` / `fak capabilities` / `fak index docs|leaves|verbs|claims`
+- Dogfood `fak_feature_query` / `fak capabilities` / `fak-dev index docs|leaves|verbs|claims`
   → a **first-pass PRESENT / PARTIAL / ABSENT** (refined to the axis just below — this is only
   where fak sits in the neighborhood). Guard the lexical ranker's false-ABSENT by varying the
   phrasing **and** a raw `Grep` for the obvious symbol; for a high-value borrow, witness twice
@@ -375,7 +375,7 @@ and a candidate table — **borrow · source `path:line@sha` · the AXIS · thei
 witness on-axis (PRESENT/PARTIAL/ABSENT/DIVERGENT) · inspire|integrate · filed #** — with a
 `Companions:` block linking `field-borrow` and any epic. The axis + worldview columns are what
 make a later reader able to *re-check your dismissal* instead of inheriting your ego. Add its **`INDEX.md`** line in the *Notes & research* section (an unindexed
-dated note is an orphan `fak index freshness` flags). Link the children from the parent
+dated note is an orphan `fak-dev index freshness` flags). Link the children from the parent
 epic. Commit the note lane by explicit path (`fak commit --path
 docs/notes/CONCEPT-STUDY-<REPO>-<date>.md -m "docs(notes): study <repo> (fak docs)"`; never
 `git add -A`, no `Co-Authored-By`). **This registration — with the issues — is what makes
@@ -410,7 +410,7 @@ the research durable.**
   caught the true-PRESENT cases) — but an enhancement to a nominally-PRESENT capability *was*
   filed when fak was weaker on the axis.
 - The instance is registered: a dated `docs/notes` entry, its `INDEX.md` line, the epic
-  linking its children; `fak index freshness` reads clean for the new note.
+  linking its children; `fak-dev index freshness` reads clean for the new note.
 
 ## The anti-gaming rule (specific to this surface)
 
