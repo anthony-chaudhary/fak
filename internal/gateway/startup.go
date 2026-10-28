@@ -235,6 +235,37 @@ type ModelLoadMemoryCapacity struct {
 	FreeKnown  bool
 }
 
+// ModelLoadFitClassRow is one per-class planned-vs-allocated row of the post-load
+// fit confirmation (the import-decoupled mirror of fitplan.ConfirmClassRow).
+type ModelLoadFitClassRow struct {
+	Class          string `json:"class"`
+	PlannedBytes   int64  `json:"planned_bytes"`
+	AllocatedBytes int64  `json:"allocated_bytes"`
+}
+
+// ModelLoadFitScopeRow is one scope's (device or host) breakdown of the post-load
+// fit confirmation: total, free-after-load, the per-class rows and the unaccounted
+// residual (total - free_after - self). Mirror of fitplan.ConfirmScopeRow.
+type ModelLoadFitScopeRow struct {
+	Scope            string                 `json:"scope"`
+	TotalBytes       int64                  `json:"total_bytes"`
+	FreeAfterLoad    int64                  `json:"free_after_load_bytes"`
+	FreeKnown        bool                   `json:"free_known"`
+	Classes          []ModelLoadFitClassRow `json:"classes"`
+	UnaccountedBytes int64                  `json:"unaccounted_bytes"`
+}
+
+// ModelLoadFitConfirm is the boot-time two-phase fit confirmation attached to the
+// load profile after a successful load: what the plan charged per class against the
+// post-load capacity reading, plus the unaccounted residual. nil when the load path
+// did not produce one (proxy/replica serves, unknown capacity).
+type ModelLoadFitConfirm struct {
+	Schema  string                 `json:"schema"`
+	Model   string                 `json:"model,omitempty"`
+	Backend string                 `json:"backend,omitempty"`
+	Scopes  []ModelLoadFitScopeRow `json:"scopes"`
+}
+
 // ModelLoadProfile is the boot-time weight-load breakdown the dashboard renders.
 // nil (the default for a mock / proxy serve that loads no weights) suppresses every
 // fak_model_load_* metric entirely, so an empty series never masquerades as a 0ms
@@ -256,6 +287,9 @@ type ModelLoadProfile struct {
 	MemoryPlan          []ModelLoadMemoryDemand
 	MemoryCapacities    []ModelLoadMemoryCapacity
 	MemoryHeadroomRatio float64
+	// FitConfirm is the post-load two-phase confirmation (planned vs allocated per
+	// class, unaccounted residual); nil until the load path attaches it.
+	FitConfirm *ModelLoadFitConfirm
 	// StartupResidency is the GGUF files' OS page-cache residency measured before the
 	// load read them; nil when it was not measured.
 	StartupResidency *ModelLoadResidency
@@ -280,6 +314,14 @@ func (p *ModelLoadProfile) clone() *ModelLoadProfile {
 	out.LoadPaths = append([]ModelLoadPath(nil), p.LoadPaths...)
 	out.MemoryPlan = append([]ModelLoadMemoryDemand(nil), p.MemoryPlan...)
 	out.MemoryCapacities = append([]ModelLoadMemoryCapacity(nil), p.MemoryCapacities...)
+	if p.FitConfirm != nil {
+		fc := *p.FitConfirm
+		fc.Scopes = append([]ModelLoadFitScopeRow(nil), p.FitConfirm.Scopes...)
+		for i := range fc.Scopes {
+			fc.Scopes[i].Classes = append([]ModelLoadFitClassRow(nil), p.FitConfirm.Scopes[i].Classes...)
+		}
+		out.FitConfirm = &fc
+	}
 	out.Messages = append([]StartupMessage(nil), p.Messages...)
 	if p.StartupResidency != nil {
 		pc := *p.StartupResidency

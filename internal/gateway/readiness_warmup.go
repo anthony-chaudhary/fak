@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -98,6 +99,145 @@ func warmupCeiling(getenv func(string) string) time.Duration {
 // DeepSeek V4.1 (strix3 ABBA, 2026-10-22): the turn's routed-expert page-in is
 // reused by the probe and the first request, not wasted.
 const warmupSeparateTurnEnv = "FAK_WARMUP_SEPARATE_TURN"
+
+// DefaultDecodeConfirmTokens is the first-N-token decode confirm's default N: after
+// the boot warmup turn succeeds, ONE tagged probe completion decodes N tokens and
+// its measured ms/step is the load's silicon reading against the fitplan nominal.
+const DefaultDecodeConfirmTokens = 32
+
+// decodeConfirmTokensEnv overrides the confirm's N; "0" (or unset-and-disabled) is
+// the opt-out. Unset keeps the default 32. A non-positive or unparseable value
+// disables the probe so a typo can never turn the confirm into an infinite decode.
+const decodeConfirmTokensEnv = "FAK_DECODE_CONFIRM_TOKENS"
+
+// decodeConfirmTokens resolves the effective N from the environment: unset keeps
+// DefaultDecodeConfirmTokens; a positive integer wins; anything else disables.
+func decodeConfirmTokens(getenv func(string) string) int {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	v := strings.TrimSpace(getenv(decodeConfirmTokensEnv))
+	if v == "" {
+		return DefaultDecodeConfirmTokens
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
+}
+
+// DecodeConfirmResult is what one tagged probe completion measured: the tokens it
+// produced, the wall it took, and the decode ms/step (the planner's own
+// prefill/decode split when it reports one, else wall over produced tokens).
+type DecodeConfirmResult struct {
+	Tokens    int
+	Elapsed   time.Duration
+	MsPerStep float64
+}
+
+// decodeConfirmState holds the host sink that records a successful decode confirm
+// (the calibration-store write and the startup log line live in the host, not the
+// gateway). Zero value == no sink: the probe does NOT run at all, so every
+// consumer that never installs a sink (mock/proxy serves, gateway unit tests)
+// stays byte-identical to the pre-confirm warmup.
+type decodeConfirmState struct {
+	mu   sync.Mutex
+	sink func(DecodeConfirmResult)
+}
+
+// SetDecodeConfirmSink installs the host sink invoked with the result of each
+// successful decode confirm. It is the seam that keeps the gateway free of any
+// calibration-store import: the gateway measures, the host records. Safe on a nil
+// Server; a nil sink clears the hook.
+func (s *Server) SetDecodeConfirmSink(sink func(DecodeConfirmResult)) {
+	if s == nil {
+		return
+	}
+	s.decodeConfirm.mu.Lock()
+	defer s.decodeConfirm.mu.Unlock()
+	s.decodeConfirm.sink = sink
+}
+
+// runDecodeConfirm issues the tagged first-N-token probe AFTER the boot warmup
+// succeeded and observes its result through the installed sink. It is MEASUREMENT,
+// never correctness: a failed or short probe is logged and swallowed, so the
+// confirm can never hold readiness or fail a boot whose warmup already proved the
+// backend decodes. It runs ONLY when the host installed a sink (the serve host
+// does, before arming the warmup gate); without one the warmup stays
+// byte-identical to today. FAK_DECODE_CONFIRM_TOKENS=0 is the host-side opt-out.
+func (s *Server) runDecodeConfirm(ctx context.Context, ceiling time.Duration) {
+	if s == nil || s.planner == nil {
+		return
+	}
+	s.decodeConfirm.mu.Lock()
+	hasSink := s.decodeConfirm.sink != nil
+	s.decodeConfirm.mu.Unlock()
+	if !hasSink {
+		return
+	}
+	n := decodeConfirmTokens(os.Getenv)
+	if n <= 0 {
+		return
+	}
+	start := time.Now()
+	type outcome struct {
+		comp *agent.Completion
+		err  error
+	}
+	done := make(chan struct{})
+	var out outcome
+	go func() {
+		out.comp, out.err = s.completeBootProbe(ctx, []agent.Message{{Role: agent.RoleUser, Content: "decode-confirm"}}, agent.WithMaxTokens(n))
+		close(done)
+	}()
+	var timeout <-chan time.Time
+	if ceiling > 0 {
+		timer := time.NewTimer(ceiling)
+		defer timer.Stop()
+		timeout = timer.C
+	}
+	select {
+	case <-done:
+	case <-ctx.Done():
+		if s.logf != nil {
+			s.logf("[DECODE-CONFIRM] skipped: %v", ctx.Err())
+		}
+		return
+	case <-timeout:
+		if s.logf != nil {
+			s.logf("[DECODE-CONFIRM] skipped: probe did not return within %s", ceiling)
+		}
+		return
+	}
+	if out.err != nil {
+		if s.logf != nil {
+			s.logf("[DECODE-CONFIRM] probe failed (readiness unaffected): %v", out.err)
+		}
+		return
+	}
+	res := DecodeConfirmResult{Tokens: out.comp.Usage.CompletionTokens, Elapsed: time.Since(start)}
+	if t := out.comp.Timings; t != nil && t.PredictedN > 0 && t.PredictedPerTokenMS > 0 {
+		res.MsPerStep = t.PredictedPerTokenMS
+	} else if res.Tokens > 0 {
+		res.MsPerStep = res.Elapsed.Seconds() * 1000 / float64(res.Tokens)
+	}
+	if res.Tokens < 2 {
+		if s.logf != nil {
+			s.logf("[DECODE-CONFIRM] probe produced %d token(s); need >= 2 for a step rate (readiness unaffected)", res.Tokens)
+		}
+		return
+	}
+	if s.logf != nil {
+		s.logf("[DECODE-CONFIRM] %d tokens in %s (%.1f ms/step)", res.Tokens, res.Elapsed.Round(time.Millisecond), res.MsPerStep)
+	}
+	s.decodeConfirm.mu.Lock()
+	sink := s.decodeConfirm.sink
+	s.decodeConfirm.mu.Unlock()
+	if sink != nil {
+		sink(res)
+	}
+}
 
 // coherenceProbeIsFirstDecode reports whether the armed count probe replaces the
 // separate warmup turn as the boot's first decode: only on an explicit opt-in.
@@ -286,6 +426,12 @@ func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 	if err := s.runStartupCoherenceProbe(ctx, ceiling); err != nil {
 		return time.Since(start), s.failWarmup(err, probeFailure)
 	}
+	// First-N-token decode confirm: one tagged probe completion now that the warmup
+	// (and, when folded, the coherence probe) proved the backend decodes. It runs
+	// INSIDE the warmup window, so time_to_ready_ms includes it and the operator's
+	// first real turn never contends with the probe. Measurement only: it cannot
+	// fail the boot (runDecodeConfirm swallows its own failures).
+	s.runDecodeConfirm(ctx, ceiling)
 	d := time.Since(start)
 
 	if rep, ok := s.planner.(agent.KVMemoryReporter); ok {

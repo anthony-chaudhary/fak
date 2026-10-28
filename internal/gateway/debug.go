@@ -340,9 +340,12 @@ type debugModelLoadVars struct {
 	MemoryCapacities    []debugModelLoadCapacityVars   `json:"memory_capacities,omitempty"`
 	MemoryFit           []debugMemoryFitVars           `json:"memory_fit,omitempty"`
 	MemoryHeadroomRatio float64                        `json:"memory_headroom_ratio,omitempty"`
-	LoadPaths           []debugModelLoadPathVars       `json:"load_paths,omitempty"`
-	StartupResidency    *debugModelLoadResidencyVars   `json:"page_cache,omitempty"`
-	Messages            []StartupMessage               `json:"messages,omitempty"`
+	// FitConfirm is the post-load two-phase confirmation: planned vs allocated per
+	// class plus the unaccounted residual, exposed as JSON on /debug/vars.
+	FitConfirm       *ModelLoadFitConfirm         `json:"fit_confirm,omitempty"`
+	LoadPaths        []debugModelLoadPathVars     `json:"load_paths,omitempty"`
+	StartupResidency *debugModelLoadResidencyVars `json:"page_cache,omitempty"`
+	Messages         []StartupMessage             `json:"messages,omitempty"`
 }
 
 type debugModelLoadResidencyVars struct {
@@ -1232,6 +1235,9 @@ func debugModelLoadProfile(p *ModelLoadProfile) *debugModelLoadVars {
 		out.MemoryCapacities = appendDebugCapacityVar(out.MemoryCapacities, cap.Scope, cap.TotalBytes, cap.FreeBytes, cap.Known, cap.FreeKnown)
 	}
 	out.MemoryFit = debugMemoryFitRows(modelLoadMemoryFitRows(p.MemoryPlan, p.MemoryCapacities, p.MemoryHeadroomRatio))
+	if p.FitConfirm != nil {
+		out.FitConfirm = p.FitConfirm
+	}
 	return out
 }
 

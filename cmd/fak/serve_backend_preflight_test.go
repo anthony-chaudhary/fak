@@ -235,10 +235,13 @@ func TestServeBackendForwardPreflightProductionOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	src := string(stages)
+	// loadServeInKernelModelFitted is the two-phase fit-commit entry point (T03):
+	// attempt 0 is the historical single-shot loadServeInKernelModelPlaced call,
+	// so the stage order asserted here is unchanged.
 	ordered := []string{
 		"preflightServeBackendForward(*sf.ggufPath, rt.chatBackend)",
 		"var expertShard *ggufload.ExpertShard",
-		"loadServeInKernelModelPlaced(",
+		"loadServeInKernelModelFitted(",
 		"resolveServeTokenizer(",
 	}
 	last := -1

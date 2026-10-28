@@ -38,6 +38,11 @@ type ReceiptKind string
 const (
 	ReceiptDecode    ReceiptKind = "decode"    // a decode step: bytes streamed and step seconds
 	ReceiptBandwidth ReceiptKind = "bandwidth" // an achieved memory-bandwidth probe
+	// ReceiptConfirm names the post-load two-phase fit confirmation (FitConfirmRecord in
+	// confirm.go): planned-vs-allocated bytes per class plus the unaccounted residual.
+	// It is a RECORD kind, not a fitter input: a confirm record never flows into
+	// FitCalibration, so CalibrationReceipt.Validate keeps refusing it by design.
+	ReceiptConfirm ReceiptKind = "fit_confirm"
 )
 
 // FitKind names how a row's numbers were derived from its receipts.
@@ -134,6 +139,11 @@ type CalibrationReceipt struct {
 	Key   CalibrationKey `json:"key"`
 	Kind  ReceiptKind    `json:"kind"`
 	Label string         `json:"label,omitempty"` // arm or model the receipt measured
+	// TierHint, when set, is the evidence tier the row fitted from this receipt adopts
+	// instead of the default calibrated tier: a silicon-measured decode confirm marks its
+	// row TierSilicon so the store can tell host-fitted rows apart from on-silicon ones.
+	// Zero value keeps every pre-existing receipt byte-for-byte unchanged.
+	TierHint Tier `json:"tier_hint,omitempty"`
 	// Decode: bytes one step streams and the measured step seconds.
 	BytesPerStep float64 `json:"bytes_per_step,omitempty"`
 	StepSeconds  float64 `json:"step_s,omitempty"`
@@ -341,7 +351,13 @@ func rowLess(a, b CalibrationRow) bool {
 }
 
 func newRow(k CalibrationKey, fit FitKind, rs []CalibrationReceipt) CalibrationRow {
-	row := CalibrationRow{Key: k, Tier: TierCalibrated, State: RowFit, Fit: fit, Receipts: len(rs)}
+	tier := TierCalibrated
+	for _, r := range rs {
+		if r.TierHint != "" {
+			tier = r.TierHint
+		}
+	}
+	row := CalibrationRow{Key: k, Tier: tier, State: RowFit, Fit: fit, Receipts: len(rs)}
 	seen := map[Provenance]bool{}
 	for _, r := range rs {
 		if !seen[r.Provenance] {
