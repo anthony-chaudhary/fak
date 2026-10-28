@@ -192,7 +192,7 @@ func withBuildCheckSeams(t *testing.T, untracked []string, modifiedDirs map[stri
 	buildCheckModifiedDirs = func(string) (map[string]bool, error) { return modifiedDirs, nil }
 	buildCheckRun = runFn
 	buildCheckNow = func() time.Time { return time.Unix(0, 0) }
-	buildCheckAcquireSlot = func(context.Context, time.Duration) (func(), error) { return func() {}, nil }
+	buildCheckAcquireSlot = func(context.Context, time.Duration, string) (func(), error) { return func() {}, nil }
 }
 
 func TestRunBuildCheckIsolatesSiblings(t *testing.T) {
@@ -664,6 +664,7 @@ func TestRunBuildCheckCompileManifestIncludesAdmittedSource(t *testing.T) {
 func TestRunBuildCheckAcquiresSlot(t *testing.T) {
 	acquired := false
 	released := false
+	var gotLabel string
 	withBuildCheckSeams(t, nil, nil, func(_ string, _ []string, _, _ io.Writer) (int, error) {
 		if !acquired {
 			t.Error("expected slot to be acquired before buildCheckRun executes")
@@ -673,8 +674,9 @@ func TestRunBuildCheckAcquiresSlot(t *testing.T) {
 		}
 		return 0, nil
 	})
-	buildCheckAcquireSlot = func(ctx context.Context, timeout time.Duration) (func(), error) {
+	buildCheckAcquireSlot = func(ctx context.Context, timeout time.Duration, label string) (func(), error) {
 		acquired = true
+		gotLabel = label
 		return func() {
 			released = true
 		}, nil
@@ -691,6 +693,9 @@ func TestRunBuildCheckAcquiresSlot(t *testing.T) {
 	if !released {
 		t.Error("build slot was not released after RunBuildCheck returned")
 	}
+	if gotLabel != "fak buildcheck" {
+		t.Errorf("label = %q, want \"fak buildcheck\" so the shared ledger names this holder", gotLabel)
+	}
 }
 
 func TestRunBuildCheckSlotUnavailable(t *testing.T) {
@@ -698,7 +703,7 @@ func TestRunBuildCheckSlotUnavailable(t *testing.T) {
 		t.Fatal("buildCheckRun should not execute when slot acquisition fails")
 		return 0, nil
 	})
-	buildCheckAcquireSlot = func(ctx context.Context, timeout time.Duration) (func(), error) {
+	buildCheckAcquireSlot = func(ctx context.Context, timeout time.Duration, label string) (func(), error) {
 		return nil, ErrBuildSlotTimeout
 	}
 

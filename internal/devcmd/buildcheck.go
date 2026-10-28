@@ -70,7 +70,7 @@ var (
 	buildCheckLoadBearing  = buildoverlay.LoadBearingUntrackedFiles
 	buildCheckRun          = runGoBuildCheck
 	buildCheckNow          = time.Now
-	buildCheckAcquireSlot  = AcquireBuildSlot
+	buildCheckAcquireSlot  = AcquireBuildSlotLabel
 	buildCheckSlotTimeout  = 5 * time.Minute
 )
 
@@ -203,7 +203,7 @@ func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
 		runOut, runErr = &buf, &buf
 	}
 
-	releaseSlot, slotErr := buildCheckAcquireSlot(context.Background(), buildCheckSlotTimeout)
+	releaseSlot, slotErr := buildCheckAcquireSlot(context.Background(), buildCheckSlotTimeout, "fak buildcheck")
 	if slotErr != nil {
 		elapsed := buildCheckNow().Sub(start)
 		if *asJSON {
