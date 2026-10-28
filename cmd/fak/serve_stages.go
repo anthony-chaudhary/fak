@@ -616,6 +616,16 @@ func validateServeHaloCPUOffload(halo, cpuOffloadExperts bool, flagGrade, envGra
 	return nil
 }
 
+// serveRingContextSizing reports whether this serve sizes its native context against the
+// activated-expert device-ring placement instead of the full resident weight plan: an eligible
+// backend (a device-only serve, or a discrete CUDA backend whose capacity is probeable — see
+// serveExpertRingEligible), single rank, and no host expert offload (the offload arm keeps its own
+// streamed sizing). The session-wide requireDeviceExecution policy stays false on non-Halo hosts;
+// only the ring's context charge is capability-gated here (fak#12640).
+func (rt *serveRuntime) serveRingContextSizing(cpuOffloadExperts bool, ranks int) bool {
+	return serveExpertRingEligible(rt.chatBackend, rt.requireDeviceExecution) && !cpuOffloadExperts && ranks <= 1
+}
+
 // resolveNativeContext reads only GGUF metadata and sizing estimates. It runs
 // before loadServeInKernelModel, so an invalid explicit ceiling cannot trigger a
 // tensor payload read or device allocation.
@@ -645,7 +655,7 @@ func (rt *serveRuntime) resolveNativeContext(sf *serveFlags, ranks int) error {
 			}
 			if ringSize, sizeErr := resolveServeExpertRingSize("", os.Getenv); sizeErr != nil {
 				return sizeErr
-			} else if ringWeights, ok := serveExpertRingContextWeights(ws, rt.chatBackend, rt.requireDeviceExecution && !*sf.cpuOffloadExperts && ranks <= 1, ringSize, weights, fit); ok {
+			} else if ringWeights, ok := serveExpertRingContextWeights(ws, rt.chatBackend, rt.serveRingContextSizing(*sf.cpuOffloadExperts, ranks), ringSize, weights, fit); ok {
 				weights = ringWeights
 			}
 			rt.fitBudget = &fit
