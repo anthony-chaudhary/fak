@@ -401,8 +401,10 @@ __global__ void k_q4k_gemm(const unsigned char *Q4K, const float2 *coeff, const 
         int code = (group & 1) ? (packed >> 4) : (packed & 0x0f);
         float2 c = cb[group];
         float xval = xb[group * 32 + lane];
-        sum = fmaf(c.x * (float)code, xval, sum);
-        sum = fmaf(-c.y, xval, sum);
+        // Dequantize before accumulation: split FMAs leave rounding residue
+        // even when the scale/code and minimum cancel to an exact zero weight.
+        float w = c.x * (float)code - c.y;
+        sum = fmaf(w, xval, sum);
       }
     }
   }
