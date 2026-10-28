@@ -1276,6 +1276,9 @@ func (s *WeightSource) computeQwen35MTPQ4KTensorWork(info TensorInfo, canon stri
 
 func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w3Requested bool, streamed map[string]bool, loadOpts q4kLoadOptions, innerWorkers int) tensorWork {
 	tw := tensorWork{tickBytes: tensorOnDiskBytes(info)}
+	if cfg.IsDeepSeekV41() && deepSeek41EngramAuxTensor(info.Name) {
+		return tw // Config already consumed these lossless integer auxiliaries.
+	}
 	if w3Requested && info.Type == TensorIQ3_XXS &&
 		archShipsMTPOrVisionSidecar(cfg.ModelType) && glmMoeDsaMTPOrVisionTensor(info.Name) {
 		tw.err = fmt.Errorf("gguf: FAK_W3_MLP refuses IQ3_XXS tensor %s outside dense MLP W3 band", info.Name)

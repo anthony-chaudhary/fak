@@ -426,6 +426,14 @@ func applyDeepSeek41Config(f *File, p string, cfg *model.Config, ropeDim int) er
 	}
 
 	// ---- Engram (ds4 converter keys; legacy flat keys are fallback-only) -----
+	sourceFile := f
+	if f.readEngramAux != nil {
+		var err error
+		f, err = f.readEngramAux(f, p, cfg)
+		if err != nil {
+			return err
+		}
+	}
 	eng := &DeepSeek41Engram{
 		LayerIDs:            intArrayOrNil(f, p+ds41KeyEngramLayerIDs),
 		NumEmbeddings:       intArrayOrNil(f, p+ds41KeyEngramNumEmbedding),
@@ -486,7 +494,7 @@ func applyDeepSeek41Config(f *File, p string, cfg *model.Config, ropeDim int) er
 	if err := validateDeepSeek41Engram(f, p, cfg, eng); err != nil {
 		return err
 	}
-	f.DeepSeek41Engram = eng
+	sourceFile.DeepSeek41Engram = eng
 	return applyDeepSeek41Topology(f, cfg)
 }
 

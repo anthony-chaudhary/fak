@@ -222,13 +222,22 @@ func LoadModelQuantProfile(path string, p *LoadProfiler) (*model.Model, error) {
 // indexing tensors by name and erroring on a duplicate tensor name.
 func NewWeightSource(f *File, r io.ReaderAt, size int64) (*WeightSource, error) {
 	byName := make(map[string]int, len(f.Tensors))
+	hasEngramAux := false
 	for i, t := range f.Tensors {
 		if _, ok := byName[t.Name]; ok {
 			return nil, fmt.Errorf("gguf: duplicate tensor %s", t.Name)
 		}
 		byName[t.Name] = i
+		hasEngramAux = hasEngramAux || deepSeek41EngramAuxTensor(t.Name)
 	}
-	return &WeightSource{File: f, r: r, size: size, byName: byName}, nil
+	s := &WeightSource{File: f, r: r, size: size, byName: byName}
+	if arch, _ := f.String("general.architecture"); hasEngramAux && archIsDeepSeek41(canonicalGGUFArch(arch)) {
+		// Each source owns its lazy binding, even when callers reuse a parsed header.
+		sourceFile := *f
+		s.File = &sourceFile
+		sourceFile.readEngramAux = s.readDeepSeek41EngramAux
+	}
+	return s, nil
 }
 
 // weightSourceReadLifetime is zero-value ready, including for literal fixtures.
@@ -457,6 +466,9 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 	p.SetTotal(len(s.File.Tensors)) // arm the progress reporter (no-op on nil / unset Progress)
 	for _, info := range s.File.Tensors {
 		p.Tick(tensorOnDiskBytes(info)) // one GGUF tensor consumed -> advance the % status
+		if cfg.IsDeepSeekV41() && deepSeek41EngramAuxTensor(info.Name) {
+			continue // Config already consumed these lossless integer auxiliaries.
+		}
 		name, qwenMTPHandled := qwen35MTPMaterializationName(info.Name, cfg)
 		if qwenMTPHandled && name == "" {
 			continue
@@ -626,6 +638,9 @@ func (s *WeightSource) F32Tensors() (model.Config, []model.NamedTensorF32, error
 	kvbHalf := map[int]glmKVBHalf{} // MLA KV-b 2->1 merge buffer (see QuantModelProfile)
 	qwenMTPSeen := newQwen35MTPSeen(cfg)
 	for _, info := range s.File.Tensors {
+		if cfg.IsDeepSeekV41() && deepSeek41EngramAuxTensor(info.Name) {
+			continue // Config already consumed these lossless integer auxiliaries.
+		}
 		name, qwenMTPHandled := qwen35MTPMaterializationName(info.Name, cfg)
 		if qwenMTPHandled && name == "" {
 			continue
