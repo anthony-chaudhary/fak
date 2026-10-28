@@ -142,3 +142,55 @@ func TestCUDAKV16RoundsTiesEven(t *testing.T) {
 		kv.Free()
 	}
 }
+
+// The prompt kernel must keep each query's causal bound when shared KV tiles
+// cross a prefix, and inactive tail warps must not skip block barriers.
+// fak-test:runtime integration est=1s lane=optin
+func TestCUDAKV16Prompt4CausalTail(t *testing.T) {
+	be := cudaGDNBackend(t)
+	for _, tier := range []KVPrecision{KVPrecisionF16, KVPrecisionBF16} {
+		for _, shape := range []struct{ tokens, prefix, hd int }{{5, 3, 256}, {7, 9, 65}, {4, 0, 128}, {3, 2, 256}} {
+			func() {
+				cfg := KVConfig{NumLayers: 1, NumKVHeads: 2, HeadDim: shape.hd, Precision: tier}
+				kv := be.NewKV(cfg)
+				defer kv.Free()
+				width, heads := cfg.NumKVHeads*cfg.HeadDim, 4
+				for pos := 0; pos < shape.prefix+shape.tokens; pos++ {
+					key, value := make([]float32, width), make([]float32, width)
+					for i := range key {
+						key[i] = float32(math.Sin(float64(pos*width+i))) / 4
+						value[i] = float32((pos*7+i)%19-9) / 16
+					}
+					k := mkResident(be, []int{width}, key)
+					v := mkResident(be, []int{width}, value)
+					kv.AppendKV(0, k, k, v, pos)
+					be.Free(k)
+					be.Free(v)
+				}
+				queries := make([]float32, shape.tokens*heads*shape.hd)
+				for i := range queries {
+					queries[i] = float32(i%13-6) / 16
+				}
+				q := mkResident(be, []int{shape.tokens, heads * shape.hd}, queries)
+				defer be.Free(q)
+				scale := float32(1 / math.Sqrt(float64(shape.hd)))
+				t.Setenv("FAK_CUDA_KV16_PREFILL", "")
+				ref := be.PromptPanelAttention(q, kv, 0, shape.tokens, shape.prefix, 2, scale)
+				want := be.Read(ref)
+				be.Free(ref)
+				t.Setenv("FAK_CUDA_KV16_PREFILL", "tile4")
+				out := be.PromptPanelAttention(q, kv, 0, shape.tokens, shape.prefix, 2, scale)
+				got := be.Read(out)
+				be.Free(out)
+				if len(got) != len(want) {
+					t.Fatalf("%s shape=%+v: output length %d want %d", tier, shape, len(got), len(want))
+				}
+				for i := range got {
+					if math.IsNaN(float64(got[i])) || math.IsInf(float64(got[i]), 0) || math.IsNaN(float64(want[i])) || math.IsInf(float64(want[i]), 0) || math.Abs(float64(got[i]-want[i])) > 1e-5 {
+						t.Fatalf("%s shape=%+v at %d: got %g want %g", tier, shape, i, got[i], want[i])
+					}
+				}
+			}()
+		}
+	}
+}
