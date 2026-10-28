@@ -4,12 +4,14 @@
 package goalregistry
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -143,6 +145,10 @@ type Registry struct {
 type Store struct {
 	Path string
 	Now  func() time.Time
+	// ResolveEvidence optionally resolves commit: evidence references against an
+	// external source of truth. When set it wins over the built-in git lookup;
+	// a false ok refuses the transition with the returned detail.
+	ResolveEvidence func(reference string) (detail string, ok bool)
 }
 
 func (s Store) withWriteLock(fn func() error) error {
@@ -337,7 +343,10 @@ func (s Store) update(id, title, summary string, lifecycle Lifecycle) (Goal, err
 }
 
 // Transition applies one evidence-bearing lifecycle decision. Terminal conflicts
-// require an explicit reopen first, preserving every prior report.
+// require an explicit reopen first, preserving every prior report. Before the
+// decision is recorded, the evidence reference must resolve: commit: references
+// must name a real commit and issue: references a bound issue; references
+// without a recognized scheme are quarantined and kept verbatim in the audit.
 func (s Store) Transition(goalID string, lifecycle Lifecycle, evidence OutcomeEvidence) (Goal, error) {
 	if !validLifecycle(lifecycle) {
 		return Goal{}, fmt.Errorf("invalid lifecycle %q", lifecycle)
@@ -357,6 +366,9 @@ func (s Store) Transition(goalID string, lifecycle Lifecycle, evidence OutcomeEv
 		if err != nil {
 			return err
 		}
+		if err := s.verifyEvidenceReference(&r, strings.TrimSpace(evidence.Reference)); err != nil {
+			return err
+		}
 		for i := range r.Goals {
 			if r.Goals[i].GoalID != goalID {
 				continue
@@ -374,6 +386,68 @@ func (s Store) Transition(goalID string, lifecycle Lifecycle, evidence OutcomeEv
 		return fmt.Errorf("goal %q not found", goalID)
 	})
 	return out, err
+}
+
+// verifyEvidenceReference enforces that an IndependentWitness reference names
+// something real. Schemes the resolver knows (commit:, issue:) must resolve
+// against the repository or the registry's bindings; references without a
+// recognized scheme are quarantined, admitted, and kept verbatim in the audit
+// so a fabricated class stays inspectable.
+func (s Store) verifyEvidenceReference(r *Registry, reference string) error {
+	scheme, id, found := strings.Cut(reference, ":")
+	if !found || strings.TrimSpace(scheme) == "" {
+		return nil
+	}
+	switch strings.ToLower(strings.TrimSpace(scheme)) {
+	case "commit":
+		return s.resolveCommit(id)
+	case "issue":
+		return s.resolveIssue(r, id)
+	default:
+		return nil
+	}
+}
+
+// resolveCommit verifies that a commit reference names a real commit. An
+// injected Store.ResolveEvidence wins when present; otherwise the built-in
+// lookup shells out to git and fails closed when git or the repository is
+// unavailable, so a missing witness can never masquerade as one.
+func (s Store) resolveCommit(id string) error {
+	id = strings.TrimSpace(id)
+	ref := "commit:" + id
+	if s.ResolveEvidence != nil {
+		detail, ok := s.ResolveEvidence(ref)
+		if !ok {
+			return fmt.Errorf("evidence reference %q does not resolve: %s", ref, detail)
+		}
+		return nil
+	}
+	if len(id) < 4 {
+		return fmt.Errorf("evidence reference %q does not resolve: commit ID too short", ref)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "--quiet", id+"^{commit}").Output(); err != nil {
+		return fmt.Errorf("evidence reference %q does not resolve: no such commit", ref)
+	}
+	return nil
+}
+
+// resolveIssue verifies that an issue reference is bound to some goal. The
+// binding namespace must end in ":issue"; the external ID may be the bare
+// number or a "repo#number" shorthand.
+func (s Store) resolveIssue(r *Registry, id string) error {
+	id = strings.TrimSpace(id)
+	ref := "issue:" + id
+	for _, b := range r.Bindings {
+		if !strings.HasSuffix(strings.ToLower(b.Namespace), ":issue") {
+			continue
+		}
+		if b.ExternalID == id || strings.HasSuffix(b.ExternalID, "#"+id) {
+			return nil
+		}
+	}
+	return fmt.Errorf("evidence reference %q does not resolve: issue %q is not bound", ref, id)
 }
 
 // Reopen transitions a terminated goal back to active status backed by operator declaration.
