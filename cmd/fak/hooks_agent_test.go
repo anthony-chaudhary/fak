@@ -340,7 +340,9 @@ func TestProjectSettingsUsesCrossPlatformRepoGuardDelegate(t *testing.T) {
 	if len(guardMatchers) != 1 {
 		t.Fatalf("PreToolUse must have exactly one project repo-guard hook, got %d: %+v", len(guardMatchers), pretool)
 	}
-	if guardMatchers[0] != "Bash|Read|Write|Edit|MultiEdit|NotebookEdit" {
+	// Keep every supported guarded tool explicit; MultiEdit is not a current tool.
+	// The native delegate and exactly-one-hook checks above remain mandatory.
+	if guardMatchers[0] != "Bash|Read|Write|Edit|NotebookEdit" {
 		t.Fatalf("repo-guard matcher changed: %q", guardMatchers[0])
 	}
 }
