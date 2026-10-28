@@ -38,20 +38,6 @@ import (
 // unaffected — readiness stays governed only by port-bind + the existing gates.
 // The POLICY lives here in the gateway; the host owns the warmup turn itself.
 
-// ErrWarmupTimeout is returned by RunWarmup when the backend's synthetic warmup
-// inference does not return its first token within the configured boot/warmup
-// ceiling. It is a TYPED, bounded failure — the fix for the strix1 hang where a
-// non-returning forward (a stale SPIR-V bundle makes the CPU-side q4k/q8 path spin
-// before any device dispatch, in a user-space tight loop that ignores ctx) held
-// readiness warmup_pending FOREVER with no journal line. RunWarmup calls
-// planner.Complete on a worker goroutine and waits with the ceiling, so a
-// non-returning backend is reported instead of holding readiness unbounded. The
-// gate stays PENDING on a timeout (a hung backend is not warm) exactly as it does
-// on an error/cancellation, so a failed boot never advertises readiness. The
-// synthetic turn may still be spinning on the leaked goroutine; this is the best a
-// bounded wait can do without cooperative cancellation from the backend.
-var ErrWarmupTimeout = errors.New("backend startup warmup timed out")
-
 // ErrWarmupPanic identifies a recovered Go panic from either boot-probe planner
 // call. The backend is not ready; a later successful warmup may clear the failure.
 var ErrWarmupPanic = errors.New("backend startup warmup panicked")
@@ -142,8 +128,9 @@ type DecodeConfirmResult struct {
 // consumer that never installs a sink (mock/proxy serves, gateway unit tests)
 // stays byte-identical to the pre-confirm warmup.
 type decodeConfirmState struct {
-	mu   sync.Mutex
-	sink func(DecodeConfirmResult)
+	lifecycle warmupProbeLifecycle
+	mu        sync.Mutex
+	sink      func(DecodeConfirmResult)
 }
 
 // SetDecodeConfirmSink installs the host sink invoked with the result of each
@@ -161,60 +148,49 @@ func (s *Server) SetDecodeConfirmSink(sink func(DecodeConfirmResult)) {
 
 // runDecodeConfirm issues the tagged first-N-token probe AFTER the boot warmup
 // succeeded and observes its result through the installed sink. It is MEASUREMENT,
-// never correctness: a failed or short probe is logged and swallowed, so the
-// confirm can never hold readiness or fail a boot whose warmup already proved the
-// backend decodes. It runs ONLY when the host installed a sink (the serve host
+// never a quality gate: a completed failed or short probe is logged and swallowed.
+// An unfinished probe is different: readiness must stay held because requesting
+// cancellation is not proof that the backend stopped.
+// It runs ONLY when the host installed a sink (the serve host
 // does, before arming the warmup gate); without one the warmup stays
 // byte-identical to today. FAK_DECODE_CONFIRM_TOKENS=0 is the host-side opt-out.
-func (s *Server) runDecodeConfirm(ctx context.Context, ceiling time.Duration) {
+func (s *Server) runDecodeConfirm(ctx context.Context, ceiling time.Duration) error {
 	if s == nil || s.planner == nil {
-		return
+		return nil
 	}
 	s.decodeConfirm.mu.Lock()
 	hasSink := s.decodeConfirm.sink != nil
 	s.decodeConfirm.mu.Unlock()
 	if !hasSink {
-		return
+		return nil
 	}
 	n := decodeConfirmTokens(os.Getenv)
 	if n <= 0 {
-		return
+		return nil
 	}
 	start := time.Now()
 	type outcome struct {
 		comp *agent.Completion
 		err  error
 	}
-	done := make(chan struct{})
 	var out outcome
-	go func() {
-		out.comp, out.err = s.completeBootProbe(ctx, []agent.Message{{Role: agent.RoleUser, Content: "decode-confirm"}}, agent.WithMaxTokens(n))
-		close(done)
-	}()
-	var timeout <-chan time.Time
-	if ceiling > 0 {
-		timer := time.NewTimer(ceiling)
-		defer timer.Stop()
-		timeout = timer.C
-	}
-	select {
-	case <-done:
-	case <-ctx.Done():
+	if err := s.decodeConfirm.lifecycle.run(ctx, ceiling, func(probeCtx context.Context) {
+		out.comp, out.err = s.completeBootProbe(probeCtx, []agent.Message{{Role: agent.RoleUser, Content: "decode-confirm"}}, agent.WithMaxTokens(n))
+	}); err != nil {
 		if s.logf != nil {
-			s.logf("[DECODE-CONFIRM] skipped: %v", ctx.Err())
+			if errors.Is(err, ErrWarmupTimeout) {
+				s.logf("[DECODE-CONFIRM] skipped: probe did not return within %s", ceiling)
+			} else {
+				s.logf("[DECODE-CONFIRM] skipped: %v", err)
+			}
 		}
-		return
-	case <-timeout:
-		if s.logf != nil {
-			s.logf("[DECODE-CONFIRM] skipped: probe did not return within %s", ceiling)
-		}
-		return
+		return err
 	}
 	if out.err != nil {
 		if s.logf != nil {
 			s.logf("[DECODE-CONFIRM] probe failed (readiness unaffected): %v", out.err)
 		}
-		return
+		return nil
 	}
 	res := DecodeConfirmResult{Tokens: out.comp.Usage.CompletionTokens, Elapsed: time.Since(start)}
 	if t := out.comp.Timings; t != nil && t.PredictedN > 0 && t.PredictedPerTokenMS > 0 {
@@ -226,7 +202,7 @@ func (s *Server) runDecodeConfirm(ctx context.Context, ceiling time.Duration) {
 		if s.logf != nil {
 			s.logf("[DECODE-CONFIRM] probe produced %d token(s); need >= 2 for a step rate (readiness unaffected)", res.Tokens)
 		}
-		return
+		return nil
 	}
 	if s.logf != nil {
 		s.logf("[DECODE-CONFIRM] %d tokens in %s (%.1f ms/step)", res.Tokens, res.Elapsed.Round(time.Millisecond), res.MsPerStep)
@@ -237,6 +213,7 @@ func (s *Server) runDecodeConfirm(ctx context.Context, ceiling time.Duration) {
 	if sink != nil {
 		sink(res)
 	}
+	return nil
 }
 
 // coherenceProbeIsFirstDecode reports whether the armed count probe replaces the
@@ -409,6 +386,16 @@ func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 	if s == nil {
 		return 0, nil
 	}
+	if err := s.decodeConfirm.lifecycle.begin(); err != nil {
+		// A rejected caller owns no reservation. Preserve the prior failure or
+		// active attempt's gate; a late worker may acknowledge before we return.
+		return 0, err
+	}
+	defer s.decodeConfirm.lifecycle.end()
+	// Readiness is already published; do not inject fresh synthetic traffic.
+	if d, ready := s.warmup.ready(); ready {
+		return d, nil
+	}
 	if s.planner == nil {
 		s.MarkWarmupComplete(0)
 		return 0, nil
@@ -429,9 +416,11 @@ func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 	// First-N-token decode confirm: one tagged probe completion now that the warmup
 	// (and, when folded, the coherence probe) proved the backend decodes. It runs
 	// INSIDE the warmup window, so time_to_ready_ms includes it and the operator's
-	// first real turn never contends with the probe. Measurement only: it cannot
-	// fail the boot (runDecodeConfirm swallows its own failures).
-	s.runDecodeConfirm(ctx, ceiling)
+	// first real turn never contends with the probe. Completed measurement failures
+	// are nonfatal, but an unacknowledged worker must not release readiness.
+	if err := s.runDecodeConfirm(ctx, ceiling); err != nil {
+		return time.Since(start), s.failWarmup(err, "")
+	}
 	d := time.Since(start)
 
 	if rep, ok := s.planner.(agent.KVMemoryReporter); ok {
