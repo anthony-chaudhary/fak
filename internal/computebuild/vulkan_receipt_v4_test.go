@@ -53,16 +53,16 @@ iq2xs_matvec iq1s_matvec v41_tail_rope_qk v41_shared_attention`)
 			windows = append(windows, match[1])
 		}
 		// Windows retains its own historical build order; membership is exact.
-		sortedWant := append(append([]string(nil), want...), "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_checked", "v41_routed_swiglu", "v41_engram_gate", "v41_compressor_pool", "v41_tail_rope_exact", "v41_scale_exact", "v41_engram_row_decode", "v41_q2k_matvec_id", "v41_q3k_matvec_id", "v41_routed_swiglu_id", "v41_routed_publish_sum", "v41_shared_attention_fast", "v41_routed_gate_up_swiglu_id", "v41_routed_down_sum", "v41_q2k_token_panel", "v41_q3k_token_panel", "v41_routed_swiglu_panel_row", "v41_routed_down_panel_row", "v41_index_scale_bf16", "v41_routed_swiglu_panel_chunk", "v41_routed_down_panel_chunk", "v41_q2k_token_pair", "mm_cm1_q2k", "mm_cm1_iq2xxs", "mm_cm1_iq2xs", "mm_cm1_iq2s", "mm_cm1_iq3xxs", "mm_cm1_iq3s", "mm_cm1_iq1s", "mm_cm1_iq4xs", "mm_cm1_q4k", "attention_split_kv", "v41_f32_finite", "qwen35_value_head_tile", "v41_router_gate_topk", "v41_compressor_ring", "v41_shared_attention_split")
+		sortedWant := append(append([]string(nil), want...), "v41_indexer_score", "v41_mhc", "v41_router_topk", "v41_index_select", "v41_q2k_embed_gather", "v41_exact_rmsnorm", "v41_bf16_checked", "v41_routed_swiglu", "v41_engram_gate", "v41_compressor_pool", "v41_tail_rope_exact", "v41_scale_exact", "v41_engram_row_decode", "v41_q2k_matvec_id", "v41_q3k_matvec_id", "v41_routed_swiglu_id", "v41_routed_publish_sum", "v41_shared_attention_fast", "v41_routed_gate_up_swiglu_id", "v41_routed_down_sum", "v41_q2k_token_panel", "v41_q3k_token_panel", "v41_routed_swiglu_panel_row", "v41_routed_down_panel_row", "v41_index_scale_bf16", "v41_routed_swiglu_panel_chunk", "v41_routed_down_panel_chunk", "v41_q2k_token_pair", "mm_cm1_q2k", "mm_cm1_iq2xxs", "mm_cm1_iq2xs", "mm_cm1_iq2s", "mm_cm1_iq3xxs", "mm_cm1_iq3s", "mm_cm1_iq1s", "mm_cm1_iq4xs", "mm_cm1_q4k", "attention_split_kv", "v41_f32_finite", "qwen35_value_head_tile", "v41_router_gate_topk", "v41_compressor_ring", "v41_shared_attention_split", "qwen35_gdn_q8_in_proj_panel", "qwen35_attention_postprocess", "q6k_matmul_panel", "qwen35_residual_norm", "q5k_matmul_panel", "qwen35_attention_qg")
 		sort.Strings(sortedWant)
 		sort.Strings(windows)
 		current := vulkanCurrentRegistry.stems()
 		sort.Strings(current)
-		if len(sortedWant) != 104 || !reflect.DeepEqual(current, sortedWant) { //boundarylint:ignore CHANGE_DETECTOR_TEST the current receipt registry must match independent exact membership
-			t.Fatalf("current shader names = %v, want independent exact104 names", current)
+		if len(sortedWant) != 110 || !reflect.DeepEqual(current, sortedWant) { //boundarylint:ignore CHANGE_DETECTOR_TEST the current receipt registry must match independent exact membership
+			t.Fatalf("current shader names = %v, want independent exact110 names", current)
 		}
 		if !reflect.DeepEqual(windows, sortedWant) {
-			t.Fatalf("Windows current shader names = %v, want current exact104 names", windows)
+			t.Fatalf("Windows current shader names = %v, want current exact110 names", windows)
 		}
 		copy := CurrentVulkanShaderRegistryV4()
 		copy[0] = "forged"
