@@ -186,6 +186,13 @@ func openV41EngramRowSource(ws *WeightSource, decoderLayer int) (model.V41Engram
 	if ws == nil || ws.File == nil {
 		return nil, 0, 0, &V41EngramQ2KError{Kind: V41EngramQ2KGeometry, Detail: "requires a parsed WeightSource"}
 	}
+	if info, ok := ws.Tensor(name); ok && info.Type == TensorIQ4_NL {
+		src, err := V41EngramIQ4NLOpen(ws, decoderLayer)
+		if err != nil {
+			return nil, 0, 0, err
+		}
+		return src, src.TableRows(), src.RowBytes(), nil
+	}
 	if info, ok := ws.Tensor(name); ok && info.Type == TensorQ4_K {
 		src, err := V41EngramQ4KOpen(ws, decoderLayer)
 		if err != nil {

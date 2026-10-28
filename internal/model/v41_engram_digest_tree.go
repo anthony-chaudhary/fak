@@ -40,6 +40,11 @@ const V41EngramEncodingQ2K = "q2_k"
 // f32 rows; this tag does not enable the Q2_K-only packed cache/device decoder.
 const V41EngramEncodingQ4K = "q4_k"
 
+// V41EngramEncodingIQ4NL names eight 18-byte IQ4_NL blocks per 256-wide row.
+// Although its stride equals Q4_K, its bytes and decode have a distinct identity.
+// It serves bounded f32 rows; the Q2_K-only packed cache/device path is unchanged.
+const V41EngramEncodingIQ4NL = "iq4_nl"
+
 const (
 	v41EngramDigestFlat       = "sha256"
 	v41EngramDigestTreePrefix = "sha256t1-"
@@ -55,8 +60,9 @@ const (
 // v41EngramEncodedRowBytes is the closed set of encodings a tree digest may
 // cover, with the encoded width of one row.
 var v41EngramEncodedRowBytes = map[string]int{
-	V41EngramEncodingQ2K: v41EngramQ2KEncodedRowBytes,
-	V41EngramEncodingQ4K: 144,
+	V41EngramEncodingQ2K:   v41EngramQ2KEncodedRowBytes,
+	V41EngramEncodingQ4K:   144,
+	V41EngramEncodingIQ4NL: 144,
 }
 
 // V41EngramEncodedRows is implemented by a reader whose served rows are a

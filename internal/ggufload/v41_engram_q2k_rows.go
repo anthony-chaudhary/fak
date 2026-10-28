@@ -43,7 +43,7 @@ const (
 )
 
 // V41EngramQ2KError is the historical typed refusal shared by the Q2_K and
-// Q4_K Engram row sources. Callers (and the negative witness) assert on the type via
+// Q4_K and IQ4_NL Engram row sources. Callers (and the negative witness) assert on the type via
 // errors.As, so an unsupported encoding is distinguishable from a plain string
 // and can never be mistaken for a successful zero-filled read.
 type V41EngramQ2KError struct {
@@ -81,8 +81,9 @@ func (e *V41EngramQ2KError) Unwrap() error {
 	return e.Err
 }
 
-// V41EngramKSource reads one 256-element K-quant super-block per Engram row
-// from its owning shard and decodes only the requested rows to little-endian f32.
+// V41EngramKSource reads 256-element quantized Engram rows from their owning
+// shard and decodes only the requested rows to little-endian f32. Each row is
+// one K-quant super-block or eight IQ4_NL blocks.
 // It borrows its WeightSource and must not outlive it. The zero-value dialect is
 // Q2_K, preserving existing package-local Q2_K source literals.
 type V41EngramKSource struct {
@@ -90,12 +91,16 @@ type V41EngramKSource struct {
 	tableRows  int
 	payloadOff int64
 	q4K        bool
+	iq4NL      bool
 }
 
 // V41EngramQ2KSource retains the existing Q2_K row-source API.
 type V41EngramQ2KSource = V41EngramKSource
 
 func (s *V41EngramKSource) encodedRow() (int, string) {
+	if s.iq4NL {
+		return qkK / qkIQ4NL * blockIQ4NLBytes, model.V41EngramEncodingIQ4NL
+	}
 	if s.q4K {
 		return blockQ4KBytes, model.V41EngramEncodingQ4K
 	}
@@ -103,7 +108,9 @@ func (s *V41EngramKSource) encodedRow() (int, string) {
 }
 
 func (s *V41EngramKSource) dequantRows(dst []float32, raw []byte) {
-	if s.q4K {
+	if s.iq4NL {
+		dequantIQ4NL(dst, raw)
+	} else if s.q4K {
 		dequantQ4K(dst, raw)
 	} else {
 		dequantQ2K(dst, raw)
@@ -146,6 +153,14 @@ func V41EngramQ2KOpen(ws *WeightSource, decoderLayer int) (*V41EngramQ2KSource, 
 // Geometry, shard ownership, and typed refusals are shared with the Q2_K path.
 func V41EngramQ4KOpen(ws *WeightSource, decoderLayer int) (*V41EngramKSource, error) {
 	return openV41EngramK(ws, decoderLayer, TensorQ4_K)
+}
+
+// V41EngramIQ4NLOpen opens an IQ4_NL Engram table with dims [256, rows].
+// Eight 18-byte blocks form each encoded row; only requested rows expand to
+// 1024 f32 bytes. The distinct IQ4_NL binding commits to the encoded bytes,
+// not the table-sized f32 expansion. Shard and geometry checks match K-quants.
+func V41EngramIQ4NLOpen(ws *WeightSource, decoderLayer int) (*V41EngramKSource, error) {
+	return openV41EngramK(ws, decoderLayer, TensorIQ4_NL)
 }
 
 func openV41EngramK(ws *WeightSource, decoderLayer int, typ TensorType) (*V41EngramKSource, error) {
@@ -234,6 +249,8 @@ func openV41EngramK(ws *WeightSource, decoderLayer int, typ TensorType) (*V41Eng
 	stride := blockQ2KBytes
 	if typ == TensorQ4_K {
 		stride = blockQ4KBytes
+	} else if typ == TensorIQ4_NL {
+		stride = qkK / qkIQ4NL * blockIQ4NLBytes
 	}
 	// The geometry check bounds both the encoded and decoded int64 extents.
 	extent := int64(rows) * int64(stride)
@@ -245,7 +262,7 @@ func openV41EngramK(ws *WeightSource, decoderLayer int, typ TensorType) (*V41Eng
 		return nil, &V41EngramQ2KError{Kind: V41EngramQ2KExtent, Tensor: name, Type: info.Type,
 			Detail: fmt.Sprintf("extent offset=%d size=%d overruns its shard (%d bytes)", info.FileOffset, extent, size)}
 	}
-	return &V41EngramKSource{r: r, tableRows: rows, payloadOff: info.FileOffset, q4K: typ == TensorQ4_K}, nil
+	return &V41EngramKSource{r: r, tableRows: rows, payloadOff: info.FileOffset, q4K: typ == TensorQ4_K, iq4NL: typ == TensorIQ4_NL}, nil
 }
 
 // RowBytes returns the DEQUANTIZED f32 width of one Engram row (qkK*4 = 1024).
@@ -254,7 +271,7 @@ func (s *V41EngramKSource) RowBytes() int { return v41EngramQ2KRowBytes }
 // TableRows returns the table's resolved row count.
 func (s *V41EngramKSource) TableRows() int { return s.tableRows }
 
-// V41EngramEncodedRows names the K-quant super-blocks rows [start, start+count)
+// V41EngramEncodedRows names the encoded blocks rows [start, start+count)
 // decode from: exactly the bytes ReadRows reads for that range. A binding then
 // addresses the checkpoint bytes instead of their f32 expansion.
 func (s *V41EngramKSource) V41EngramEncodedRows(start, count int) (io.ReaderAt, int64, int64, string, error) {
