@@ -392,7 +392,22 @@ func TestClaudeGLMGCPFakNativeServeWiring(t *testing.T) {
 		requireContainsForClaudeGLMGCP(t, serve, want)
 	}
 	bc := readRepoTextForClaudeGLMGCP(t, root, "internal", "compute", "build_cuda.sh")
-	requireContainsForClaudeGLMGCP(t, bc, "binary)") // the DRY cuda-binary subcommand
+	// The compatibility shim forwards the legacy binary arguments to native Go;
+	// the binary implementation no longer lives in a shell case statement.
+	requireContainsForClaudeGLMGCP(t, bc, `exec "${GO:-go}" run ./cmd/fak-dev build-cuda legacy "$@"`)
+	build := readRepoTextForClaudeGLMGCP(t, root, "internal", "devcmd", "build_cuda.go")
+	requireContainsForClaudeGLMGCP(t, build, `if sub == "legacy" {`)
+	requireContainsForClaudeGLMGCP(t, build, `return runCUDALegacy(stdout, stderr, flagArgs, run, command)`)
+	legacy := readRepoTextForClaudeGLMGCP(t, root, "internal", "devcmd", "build_cuda_legacy.go")
+	for _, want := range []string{
+		`case "binary":`,
+		`if len(argv) != 2 {`,
+		`args = append(args, "--out-pkg", argv[0], "--out-bin", argv[1])`,
+		`return runBuildCUDAWith(stdout, stderr, args,`,
+		`return build(ctx, selected)`,
+	} {
+		requireContainsForClaudeGLMGCP(t, legacy, want)
+	}
 }
 
 func TestClaudeGLMGCPFakNativeServeStaysAttachedAfterReady(t *testing.T) {
