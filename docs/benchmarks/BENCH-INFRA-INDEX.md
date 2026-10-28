@@ -29,7 +29,7 @@ The benchmark infrastructure enables:
 | `tools/bench_catalog.py` | Build/update master catalog |
 | `fak bench-runs` | Query and compare results |
 | `tools/bench_chart.py` | Generate visualizations |
-| `tools/bench_onboard.py` | Register a new machine |
+| `fak bench local onboard` | Register a new machine (native Go verb, `internal/localbench`) |
 | `tools/bench_migrate.py` | Migrate existing data |
 
 ## Key Concepts
@@ -65,7 +65,7 @@ All artifacts use JSON Schema validation:
 
 ```bash
 # 1. Onboard machine
-python tools/bench_onboard.py --interactive
+fak bench local onboard --machine-id <id> [--gpu-model MODEL] [--vram-gib N] [--arch sm_NNN]
 
 # 2. Migrate existing data (optional)
 python tools/bench_migrate.py --apply
@@ -90,8 +90,8 @@ python tools/bench_chart.py all
 ### Onboarding New Machine
 
 ```bash
-# On the new machine
-python tools/bench_onboard.py --interactive
+# On the new machine, from the repo root
+fak bench local onboard --machine-id <new-machine-id> [--gpu-model MODEL] [--vram-gib N] [--arch sm_NNN]
 
 # Then on any machine (update catalog)
 python tools/bench_catalog.py update

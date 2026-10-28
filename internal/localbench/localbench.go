@@ -80,9 +80,11 @@ type Integrity struct {
 func RunCLI(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		usage(stderr)
-		return errors.New("choose inventory, run, verify, or submit")
+		return errors.New("choose inventory, onboard, run, verify, or submit")
 	}
 	switch args[0] {
+	case "onboard":
+		return onboardCommand(args[1:], stdout, stderr)
 	case "run":
 		return runCommand(args[1:], stdout, stderr)
 	case "inventory":
@@ -171,6 +173,7 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, `fak bench local: explicit, no-upload local benchmark receipts
 
   fak bench local inventory
+  fak bench local onboard --machine-id ID [--gpu-model MODEL] [--vram-gib N] [--arch sm_NNN] [--json]
   fak bench local run --benchmark NAME --engine LABEL --out receipt.json -- COMMAND [ARGS...]
   fak bench local verify receipt.json
   fak bench local submit receipt.json
@@ -178,7 +181,11 @@ func usage(w io.Writer) {
 inventory discovers benchmark names from fak's benchmark catalog. run records the
 operator-selected catalog name, engine label, and exact command. It never selects,
 switches, or falls back to another engine. submit prints a deterministic review
-packet and URL; it never uploads.`)
+packet and URL; it never uploads.
+onboard registers a machine under experiments/benchmark/machines/ID/ (specs.json
+plus a version-stamped smoke receipt in onboard-receipts/, so re-runs append
+history instead of corrupting prior receipts). --arch defaults to sm_120 when
+--gpu-model matches an RTX 5090. It writes files only and never uploads.`)
 }
 
 func runCommand(args []string, stdout, stderr io.Writer) error {
