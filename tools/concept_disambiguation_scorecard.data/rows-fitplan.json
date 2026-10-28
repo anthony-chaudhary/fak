@@ -70,7 +70,8 @@
       "distinct_from": [
         "x-plan-memoryplan",
         "fitplan-host-pool-usable-bytes",
-        "slotstream-multitensor-for-device"
+        "slotstream-multitensor-for-device",
+        "fitplan-memory-pool"
       ],
       "aliases": [],
       "grounding": "PoolUsableBytes",

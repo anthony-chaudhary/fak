@@ -12,7 +12,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 )
 
-const modelUsage = "usage: fak model <plan|load|pull|ls|provider-contracts|qwen38-ladder|canary-gate|canary-run|acceptance-gate|acceptance-run|acceptance-refold|readiness-inventory|preflight|trace-stub> ...\n" +
+const modelUsage = "usage: fak model <fit|plan|load|pull|ls|provider-contracts|qwen38-ladder|canary-gate|canary-run|acceptance-gate|acceptance-run|acceptance-refold|readiness-inventory|preflight|trace-stub> ...\n" +
+	"  fak model fit compose|plan|check|compare declared multi-device memory fit; no deployment\n" +
 	"  fak model plan         choose a Qwen3.8-27B load from goals and declared capacity without downloading\n" +
 	"  fak model load <ref>   resolve a model ref (alias | hf://… | path) to a cached file path\n" +
 	"  fak model pull <ref>   download a model ref into the local cache (alias-aware)\n" +
@@ -41,6 +42,8 @@ func cmdModel(args []string) {
 		os.Exit(2)
 	}
 	switch args[0] {
+	case "fit":
+		os.Exit(runModelFit(os.Stdin, os.Stdout, os.Stderr, args[1:]))
 	case "plan":
 		os.Exit(runModelPlan(os.Stdout, os.Stderr, args[1:]))
 	case "load":

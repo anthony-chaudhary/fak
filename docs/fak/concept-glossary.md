@@ -1917,3 +1917,24 @@ NVML-reported CUDA compute capability of a bound GPU row, encoded as major*10+mi
 Constructor that sizes a MultiTensorSlotPool against a device's reported total VRAM via VRAMBudgetForDevice instead of the 24 GiB fallback.
 
 **Distinct from:** A pool constructor entrypoint, not a pool or a budget value: it derives the budget from device VRAM, unlike PoolUsableBytes which reports a fit-plan pool's usable bytes.
+
+
+### MemoryPool
+
+A declared physical memory allocation pool with an identity and usable capacity for model placement accounting.
+
+**Distinct from:** Capacity input shared by ranks, unlike PoolDemand which reports summed allocations against that capacity.
+
+
+### pool_capacity_unknown
+
+A model placement omission indicating that the usable capacity of a referenced physical memory pool was not supplied.
+
+**Distinct from:** An unknown input yields no capacity approval; it differs from a known pool capacity being exceeded and from the capacity value itself.
+
+
+### SupportUnsupported
+
+The placement planner value declaring that the requested model placement lacks runtime support in the caller supplied execution envelope.
+
+**Distinct from:** A caller declaration that prevents eligibility even when memory fits; it is neither a hardware qualification result nor a capacity overflow.
