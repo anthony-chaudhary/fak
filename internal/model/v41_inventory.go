@@ -10,34 +10,43 @@ package model
 // it reads no weights, allocates no payload, and does not admit or implement the
 // native forward (ErrV41NativeUnsupported still fences every execution seam).
 //
-// Naming scheme. The on-disk V4.1 safetensors tensors use the checkpoint's own
-// compact namespace, shared with V4-Flash's quant path:
+// Naming scheme. The names and dtypes below are the pinned on-disk headers of
+// the DeepSeek-V4.1-Flash text checkpoint (issue #14028 crosschecked the
+// published shards against this inventory): the checkpoint uses its own
+// compact namespace, not the HuggingFace-style model.* / lm_head aliases.
 //
+//	embed.weight                       BF16 [vocab, hidden]
+//	norm.weight                        BF16 [hidden]
+//	head.weight                        BF16 [vocab, hidden] (untied; V4.1 ties are false)
+//	layers.<N>.attn_norm.weight        BF16 [hidden]
+//	layers.<N>.ffn_norm.weight         BF16 [hidden]
 //	layers.<N>.attn.wq_a.weight        dense FP8, F8_E4M3 + .scale F8_E8M0
 //	layers.<N>.attn.wq_b.weight        dense FP8
 //	layers.<N>.attn.wkv.weight         dense FP8 (fused MLA KV latent)
 //	layers.<N>.attn.wo_a.weight        dense FP8 (grouped low-rank output A)
 //	layers.<N>.attn.wo_b.weight        dense FP8 (grouped low-rank output B)
-//	layers.<N>.ffn.gate.weight         router, dense FP8
-//	layers.<N>.ffn.gate.e_score_correction_bias   F32
+//	layers.<N>.ffn.gate.weight         router, plain BF16 [experts, hidden]
+//	layers.<N>.ffn.gate.bias           F32 [experts]
 //	layers.<N>.ffn.shared_experts.w1.weight        dense FP8
 //	layers.<N>.ffn.shared_experts.w2.weight        dense FP8
 //	layers.<N>.ffn.shared_experts.w3.weight        dense FP8
 //	layers.<N>.ffn.experts.<E>.w1.weight           packed MXFP4, I8 + .scale F8_E8M0
 //	layers.<N>.ffn.experts.<E>.w2.weight           packed MXFP4
 //	layers.<N>.ffn.experts.<E>.w3.weight           packed MXFP4
-//	layers.<N>.attn_norm.weight        F32
-//	layers.<N>.ffn_norm.weight         F32
-//	model.embed_tokens.weight          BF16
-//	model.norm.weight                  F32
-//	lm_head.weight                     dense FP8 (untied; V4.1 ties are false)
+//
+// The grouped low-rank output A projects each group's heads, not the model
+// hidden width: its on-disk shape is [o_lora_rank*o_groups,
+// num_heads*head_dim/o_groups] (pinned [8192, 4096]), so num_heads must be a
+// multiple of o_groups or the inventory fails closed.
 //
 // Every dense FP8 weight carries a sibling `<name-without-.weight>.scale` of
 // dtype F8_E8M0 with shape [ceil(O/32), ceil(I/32)] (config weight_block_size
 // [32,32]). Every routed expert weight carries its own `<...>.scale` sibling and
 // packs two OCP E2M1 nibbles per byte with one E8M0 byte per 32 unpacked K
 // values. The sibling name is exactly the weight name with its trailing
-// ".weight" replaced by ".scale", matching the existing pair convention.
+// ".weight" replaced by ".scale", matching the existing pair convention. The
+// plain BF16 family (embed/head/norms/router) and the F32 gate bias carry no
+// scale sibling.
 //
 // Shapes are exact and derived only from admitted config fields, except the KV
 // latent width, which the published V4.1 text config does not carry as a key and
@@ -214,6 +223,12 @@ func DeepSeekV41Inventory(c Config) (*V41Inventory, error) {
 	if !ok || oDim <= 0 {
 		return nil, fmt.Errorf("%w: o_lora_rank*o_groups overflow", ErrV41Inventory)
 	}
+	// The grouped low-rank output A (wo_a) stores one projection per group of
+	// heads with input width num_heads*head_dim/o_groups; a non-integral split
+	// is not representable on disk, so refuse rather than emit a wrong shape.
+	if c.NumHeads%c.OGroups != 0 {
+		return nil, fmt.Errorf("%w: num_heads %d is not a multiple of o_groups %d", ErrV41Inventory, c.NumHeads, c.OGroups)
+	}
 
 	inv := &V41Inventory{byName: map[string]V41TensorRef{}, layers: c.NumLayers}
 	add := func(ref V41TensorRef) error {
@@ -251,21 +266,21 @@ func DeepSeekV41Inventory(c Config) (*V41Inventory, error) {
 		}
 	}
 
-	if err := add(plain("model.embed_tokens.weight", V41ClassEmbedding, "BF16", 0, c.VocabSize, c.HiddenSize)); err != nil {
+	if err := add(plain("embed.weight", V41ClassEmbedding, "BF16", 0, c.VocabSize, c.HiddenSize)); err != nil {
 		return nil, err
 	}
 	for layer := 0; layer < c.NumLayers; layer++ {
 		prefix := "layers." + strconv.Itoa(layer)
 		for _, ref := range []V41TensorRef{
-			plain(prefix+".attn_norm.weight", V41ClassNorm, "F32", layer, c.HiddenSize),
-			plain(prefix+".ffn_norm.weight", V41ClassNorm, "F32", layer, c.HiddenSize),
+			plain(prefix+".attn_norm.weight", V41ClassNorm, "BF16", layer, c.HiddenSize),
+			plain(prefix+".ffn_norm.weight", V41ClassNorm, "BF16", layer, c.HiddenSize),
 			dense(prefix+".attn.wq_a.weight", V41ClassAttentionDense, layer, c.QLoraRank, c.HiddenSize),
 			dense(prefix+".attn.wq_b.weight", V41ClassAttentionDense, layer, qHeadDim, c.QLoraRank),
 			dense(prefix+".attn.wkv.weight", V41ClassAttentionDense, layer, v41KVLoraRank, c.HiddenSize),
-			dense(prefix+".attn.wo_a.weight", V41ClassAttentionDense, layer, oDim, c.HiddenSize),
+			dense(prefix+".attn.wo_a.weight", V41ClassAttentionDense, layer, oDim, qHeadDim/c.OGroups),
 			dense(prefix+".attn.wo_b.weight", V41ClassAttentionDense, layer, c.HiddenSize, oDim),
-			dense(prefix+".ffn.gate.weight", V41ClassRouter, layer, c.NumExperts, c.HiddenSize),
-			plain(prefix+".ffn.gate.e_score_correction_bias", V41ClassRouterBias, "F32", layer, c.NumExperts),
+			plain(prefix+".ffn.gate.weight", V41ClassRouter, "BF16", layer, c.NumExperts, c.HiddenSize),
+			plain(prefix+".ffn.gate.bias", V41ClassRouterBias, "F32", layer, c.NumExperts),
 			dense(prefix+".ffn.shared_experts.w1.weight", V41ClassSharedExpert, layer, c.MoEIntermediateSize, c.HiddenSize),
 			dense(prefix+".ffn.shared_experts.w3.weight", V41ClassSharedExpert, layer, c.MoEIntermediateSize, c.HiddenSize),
 			dense(prefix+".ffn.shared_experts.w2.weight", V41ClassSharedExpert, layer, c.HiddenSize, c.MoEIntermediateSize),
@@ -287,11 +302,12 @@ func DeepSeekV41Inventory(c Config) (*V41Inventory, error) {
 			}
 		}
 	}
-	if err := add(plain("model.norm.weight", V41ClassNorm, "F32", 0, c.HiddenSize)); err != nil {
+	if err := add(plain("norm.weight", V41ClassNorm, "BF16", 0, c.HiddenSize)); err != nil {
 		return nil, err
 	}
-	// V4.1 sets tie_word_embeddings=false, so the head is a distinct FP8 tensor.
-	if err := add(dense("lm_head.weight", V41ClassHead, 0, c.VocabSize, c.HiddenSize)); err != nil {
+	// V4.1 sets tie_word_embeddings=false, so the head is a distinct plain BF16
+	// tensor (pinned shard 43: head.weight BF16 [vocab, hidden], no scale).
+	if err := add(plain("head.weight", V41ClassHead, "BF16", 0, c.VocabSize, c.HiddenSize)); err != nil {
 		return nil, err
 	}
 

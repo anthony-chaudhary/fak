@@ -26,8 +26,10 @@ type v41DenseFP8Role struct {
 // published [O,I] weight shape, derived from the admitted config geometry:
 // hidden 5120, q_lora_rank 1280, o_lora_rank 1024 and o_groups 8 give
 // wq_a [q_lora,hidden], wq_b [num_heads*head_dim,q_lora], wkv [v41KVLoraRank,hidden],
-// wo_a [o_lora*o_groups,hidden], wo_b [hidden,o_lora*o_groups] and the shared
+// wo_a [o_lora*o_groups,num_heads*head_dim/o_groups] (the pinned checkpoint stores
+// the grouped form, #14028), wo_b [hidden,o_lora*o_groups] and the shared
 // expert w1/w3 [moe_intermediate,hidden] / w2 [hidden,moe_intermediate].
+// A non-integral num_heads % o_groups split fails closed for wo_a.
 func v41DenseFP8RoleForName(name string, cfg Config) (v41DenseFP8Role, bool, error) {
 	weightName := name
 	if strings.HasSuffix(name, ".scale") {
@@ -62,7 +64,10 @@ func v41DenseFP8RoleForName(name string, cfg Config) (v41DenseFP8Role, bool, err
 	case "attn.wkv.weight":
 		shape = [2]int{v41KVLoraRank, cfg.HiddenSize}
 	case "attn.wo_a.weight":
-		shape = [2]int{oDim, cfg.HiddenSize}
+		if cfg.NumHeads%cfg.OGroups != 0 {
+			return v41DenseFP8Role{}, true, fmt.Errorf("safetensors: V4.1 dense FP8 tensor %s needs num_heads %% o_groups == 0, got %d %% %d", name, cfg.NumHeads, cfg.OGroups)
+		}
+		shape = [2]int{oDim, qHeadDim / cfg.OGroups}
 	case "attn.wo_b.weight":
 		shape = [2]int{cfg.HiddenSize, oDim}
 	case "ffn.shared_experts.w1.weight", "ffn.shared_experts.w3.weight":
