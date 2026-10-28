@@ -158,7 +158,7 @@ func executionOwnerAvailable(t *testing.T, owner *sync.Mutex, sessions ...*Sessi
 // fak-test:runtime medium est=3s lane=default
 func TestBackendExecutionOwnerLifecycle(t *testing.T) {
 	t.Setenv(v41StepBatchEnv, "1")
-	for _, entry := range []string{"step", "prefill", "prefill-no-logits", "close", "snapshot", "snapshot-clone", "snapshot-restore", "snapshot-close", "constructor", "evict"} {
+	for _, entry := range []string{"step", "prefill", "prefill-no-logits", "close", "snapshot", "snapshot-clone", "snapshot-restore", "snapshot-close", "constructor", "evict", "disable-retained-logits"} {
 		t.Run(entry, func(t *testing.T) {
 			var owner sync.Mutex
 			m := v41CompressorTestFixtureIndex(t, 128)
@@ -172,6 +172,17 @@ func TestBackendExecutionOwnerLifecycle(t *testing.T) {
 			}
 			t.Cleanup(snapshot.Close)
 			target := v41DenseTestSession(t, m, b)
+			if entry == "disable-retained-logits" {
+				// Prepare B's owned CPU-reference storage before A starts its
+				// paused forward. This is lifetime protocol, not CUDA allocation.
+				func() {
+					owner.Lock()
+					defer owner.Unlock()
+					x := compute.NewF32(compute.Default(), []int{m.Cfg.VocabSize}, make([]float32, m.Cfg.VocabSize))
+					sb.greedyLogits = b.Upload(x, compute.F32)
+				}()
+				sb.SetRetainGreedyLogits(true)
+			}
 			entered, release := make(chan struct{}), make(chan struct{})
 			var releaseOnce sync.Once
 			releaseFirst := func() { releaseOnce.Do(func() { close(release) }) }
@@ -187,6 +198,14 @@ func TestBackendExecutionOwnerLifecycle(t *testing.T) {
 			executionOwnerSignal(t, entered)
 			b.query = make(chan struct{}, 4)
 			before := b.calls.Load()
+			var frees atomic.Int64
+			if entry == "disable-retained-logits" {
+				b.hook = func(site string) {
+					if site == "free" {
+						frees.Add(1)
+					}
+				}
+			}
 			second := executionOwnerAsync(func() {
 				switch entry {
 				case "step":
@@ -223,18 +242,62 @@ func TestBackendExecutionOwnerLifecycle(t *testing.T) {
 					got.Close()
 				case "evict":
 					sb.evictKV(0, 1)
+				case "disable-retained-logits":
+					sb.SetRetainGreedyLogits(false)
 				}
 			})
-			executionOwnerSignal(t, b.query)
+			firstFinished, secondFinished := false, false
+			if entry == "disable-retained-logits" {
+				t.Cleanup(func() {
+					releaseFirst()
+					if !firstFinished {
+						if r := executionOwnerWait(t, first); r != nil {
+							t.Errorf("first forward cleanup panic: %v", r)
+						}
+					}
+					if !secondFinished {
+						if r := executionOwnerWait(t, second); r != nil {
+							t.Errorf("setter cleanup panic: %v", r)
+						}
+					}
+				})
+				select {
+				case <-b.query:
+				case r := <-second:
+					secondFinished = true
+					t.Fatalf("disable setter completed while another session owned its forward: %v", r)
+				case <-time.After(5 * time.Second):
+					t.Fatal("disable setter did not attempt owner acquisition")
+				}
+				if !sb.retainGreedyLogits || sb.greedyLogits.Buf() == nil {
+					t.Fatal("disable setter mutated retained state before acquiring owner")
+				}
+			} else {
+				executionOwnerSignal(t, b.query)
+			}
 			if got := b.calls.Load(); got != before {
 				t.Fatalf("foreign operation entered active window: %d -> %d", before, got)
 			}
 			releaseFirst()
-			if r := executionOwnerWait(t, first); r != nil {
+			firstResult := executionOwnerWait(t, first)
+			firstFinished = true
+			if r := firstResult; r != nil {
 				t.Fatalf("first forward panic: %v", r)
 			}
-			if r := executionOwnerWait(t, second); r != nil {
+			secondResult := executionOwnerWait(t, second)
+			secondFinished = true
+			if r := secondResult; r != nil {
 				t.Fatalf("second public operation panic: %v", r)
+			}
+			if entry == "disable-retained-logits" {
+				if frees.Load() != 1 || b.calls.Load() != before+1 || sb.retainGreedyLogits || sb.greedyLogits.Buf() != nil {
+					t.Fatal("disable setter did not free exactly once and clear retained state")
+				}
+				queries := len(b.query)
+				sb.SetRetainGreedyLogits(false)
+				if frees.Load() != 1 || b.calls.Load() != before+1 || len(b.query) != queries {
+					t.Fatal("repeated empty disable acquired owner or freed again")
+				}
 			}
 			executionOwnerAvailable(t, &owner, sa, sb, target)
 		})

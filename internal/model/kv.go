@@ -626,6 +626,15 @@ func (s *Session) tokenGreedy(id, pos int) ([]float32, int) {
 // SetRetainGreedyLogits arms StepGreedy to keep the latest device-selected distribution
 // resident, for a caller that may still need it once (a continuation snapshot).
 func (s *Session) SetRetainGreedyLogits(on bool) {
+	if !on && s.greedyLogits.Buf() != nil {
+		scope := s.beginBackendExecution()
+		complete := false
+		defer scope.finishCompleted(&complete)
+		s.retainGreedyLogits = false
+		s.releaseGreedyLogits()
+		complete = true
+		return
+	}
 	s.retainGreedyLogits = on
 	if !on {
 		s.releaseGreedyLogits()
