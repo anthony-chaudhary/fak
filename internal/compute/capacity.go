@@ -856,6 +856,18 @@ func fitsWithinReportedMemory(total, free int64, known bool, wantBytes int64, he
 // free-memory probe).
 func FitsOnDevice(b Backend, wantBytes int64, headroom float64) (verdict FitVerdict, avail int64) {
 	total, free, known := DeviceMemoryInfo(b)
+	return FitsCapacity(total, free, known, wantBytes, headroom)
+}
+
+// FitsCapacity answers the device-fit question against a REGISTERED or
+// previously-measured capacity snapshot instead of probing a live backend.
+// It is the offline twin of FitsOnDevice: same verdicts, same fail-open
+// contract (known=false yields FitUnknown, never FitTooBig), and the same
+// headroom semantics, so a plan checked against a registry row or a saved
+// probe is byte-identical to the live check. free may be FreeUnknown to fall
+// back to the total ceiling; that is the form an offline machine-fit check
+// uses when only the card's registered capacity (an M-GiB card) is known.
+func FitsCapacity(total, free int64, known bool, wantBytes int64, headroom float64) (verdict FitVerdict, avail int64) {
 	return fitsWithinReportedMemory(total, free, known, wantBytes, headroom)
 }
 

@@ -1910,3 +1910,10 @@ Model.NewBackendSessionCheckedDeferredState constructs a checked HAL model.Sessi
 NVML-reported CUDA compute capability of a bound GPU row, encoded as major*10+minor (120 = sm_120).
 
 **Distinct from:** Observed per-device property on gpubinding rows, not an admission threshold: MinComputeCapability is the floor this value must meet; capability-floor is the policy side.
+
+
+### NewMultiTensorSlotPoolForDevice
+
+Constructor that sizes a MultiTensorSlotPool against a device's reported total VRAM via VRAMBudgetForDevice instead of the 24 GiB fallback.
+
+**Distinct from:** A pool constructor entrypoint, not a pool or a budget value: it derives the budget from device VRAM, unlike PoolUsableBytes which reports a fit-plan pool's usable bytes.

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 const (
@@ -13,8 +15,18 @@ const (
 	// DefaultDenseTrunkBytes is the pinned dense trunk size (~3.8 GB).
 	DefaultDenseTrunkBytes int64 = 3800000000
 
-	// DefaultVRAMBudgetBytes is the 24 GB consumer GPU VRAM cap.
+	// DefaultVRAMBudgetBytes is the 24 GB consumer GPU VRAM cap. It is the
+	// FALLBACK budget for devices whose reported VRAM is unknown; a device
+	// that reports its ceiling gets VRAMBudgetForDevice instead.
 	DefaultVRAMBudgetBytes int64 = 24 * 1024 * 1024 * 1024
+
+	// vramHeadroomRatio is the fraction of a device's reported VRAM that the
+	// slotstream budget does NOT cover. The 24 GiB default equals the full
+	// reported capacity of a nominal 24 GB consumer card (CUDA totalGlobalMem
+	// = 25,769,803,776 B == 24 GiB), so the default implies zero reserved
+	// headroom: a known device budgets its full reported VRAM, and a 24 GB
+	// device keeps today's exact behavior.
+	vramHeadroomRatio float64 = 0
 
 	// DefaultGLM5NextSlotsPerLayer is the preallocated resident expert-slot
 	// count per GLM5Next sparse MoE layer. 288 routed experts are served from
@@ -45,8 +57,37 @@ type MultiTensorSlotPool struct {
 	TotalVRAMBytes  int64
 }
 
-// NewMultiTensorSlotPool initializes preallocated slots for all layers within the VRAM budget.
+// VRAMBudgetForDevice derives the slotstream VRAM budget from a device's
+// reported total VRAM. A non-positive deviceVRAMBytes means "unknown" and
+// falls back to DefaultVRAMBudgetBytes (the 24 GiB consumer cap), preserving
+// pre-lift behavior for devices that cannot report their ceiling. A known
+// device budgets its full reported VRAM under vramHeadroomRatio, applied with
+// the same arithmetic as the HAL fit checks (compute.BudgetAfterHeadroom).
+func VRAMBudgetForDevice(deviceVRAMBytes int64) int64 {
+	if deviceVRAMBytes <= 0 {
+		return DefaultVRAMBudgetBytes
+	}
+	return compute.BudgetAfterHeadroom(deviceVRAMBytes, vramHeadroomRatio)
+}
+
+// NewMultiTensorSlotPool initializes preallocated slots for all layers within
+// the VRAM budget. Devices that cannot report their VRAM get the 24 GiB
+// consumer cap (DefaultVRAMBudgetBytes); pass a device's reported ceiling to
+// NewMultiTensorSlotPoolForDevice instead.
 func NewMultiTensorSlotPool(numLayers, slotsPerLayer int) (*MultiTensorSlotPool, error) {
+	return newMultiTensorSlotPoolWithBudget(numLayers, slotsPerLayer, DefaultVRAMBudgetBytes)
+}
+
+// NewMultiTensorSlotPoolForDevice is NewMultiTensorSlotPool sized against a
+// device's reported total VRAM: the budget is derived from deviceVRAMBytes
+// (VRAMBudgetForDevice) rather than the 24 GiB fallback, so a larger card
+// (e.g. the owned 32 GB RTX 5090) is no longer refused or mis-sized on the
+// expert-slot path. A non-positive deviceVRAMBytes keeps the fallback.
+func NewMultiTensorSlotPoolForDevice(numLayers, slotsPerLayer int, deviceVRAMBytes int64) (*MultiTensorSlotPool, error) {
+	return newMultiTensorSlotPoolWithBudget(numLayers, slotsPerLayer, VRAMBudgetForDevice(deviceVRAMBytes))
+}
+
+func newMultiTensorSlotPoolWithBudget(numLayers, slotsPerLayer int, budget int64) (*MultiTensorSlotPool, error) {
 	if numLayers <= 0 || slotsPerLayer <= 0 {
 		return nil, fmt.Errorf("slotstream: invalid geometry: layers=%d, slots=%d", numLayers, slotsPerLayer)
 	}
@@ -54,8 +95,8 @@ func NewMultiTensorSlotPool(numLayers, slotsPerLayer int) (*MultiTensorSlotPool,
 	slotBytes := int64(numLayers) * int64(slotsPerLayer) * ExpertChunkBytes
 	totalVRAM := DefaultDenseTrunkBytes + slotBytes
 
-	if totalVRAM > DefaultVRAMBudgetBytes {
-		return nil, fmt.Errorf("slotstream: requested VRAM %d bytes exceeds budget %d bytes", totalVRAM, DefaultVRAMBudgetBytes)
+	if totalVRAM > budget {
+		return nil, fmt.Errorf("slotstream: requested VRAM %d bytes exceeds budget %d bytes", totalVRAM, budget)
 	}
 
 	pool := &MultiTensorSlotPool{
