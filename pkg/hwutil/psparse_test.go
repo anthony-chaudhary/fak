@@ -145,6 +145,86 @@ func TestLastCounterValuesKeepsLastSample(t *testing.T) {
 	}
 }
 
+// Instance-free object path (\\Memory has no parenthesized instance); the
+// LAST non-null sample wins and nulls stay unread.
+func TestLastCounterByNameKeepsLastSample(t *testing.T) {
+	rows := decodePSRows(`[
+		{"Path":"\\\\h\\memory\\page faults/sec","CookedValue":111},
+		{"Path":"\\\\h\\memory\\page faults/sec","CookedValue":null},
+		{"Path":"\\\\h\\memory\\page faults/sec","CookedValue":222},
+		{"Path":"\\\\h\\physicaldisk(0 c:)\\disk reads/sec","CookedValue":9}
+	]`)
+	v, ok := lastCounterByName(rows, `\memory\page faults/sec`)
+	if !ok || v != 222 {
+		t.Fatalf("got %v ok=%v", v, ok)
+	}
+	allNull := decodePSRows(`[{"Path":"\\\\h\\memory\\page faults/sec","CookedValue":null}]`)
+	if _, ok := lastCounterByName(allNull, `\memory\page faults/sec`); ok {
+		t.Fatal("all-null samples reported present")
+	}
+	if _, ok := lastCounterByName(rows, `\memory\other counter/sec`); ok {
+		t.Fatal("non-matching suffix accepted")
+	}
+}
+
+func TestPageFileSwapUsed(t *testing.T) {
+	rows := decodePSRows(`[
+		{"Name":"C:\\pagefile.sys","AllocatedBaseSize":8192,"CurrentUsage":2048},
+		{"Name":"D:\\pagefile.sys","AllocatedBaseSize":4096,"CurrentUsage":null}
+	]`)
+	b, ok := pageFileSwapUsed(rows)
+	if !ok || b != (2048+4096)*1024 {
+		t.Fatalf("got %d ok=%v", b, ok)
+	}
+	// Missing-property edge: every row null reports absent, not zero.
+	none := decodePSRows(`[{"AllocatedBaseSize":null,"CurrentUsage":null}]`)
+	if _, ok := pageFileSwapUsed(none); ok {
+		t.Fatal("all-null rows reported present")
+	}
+	if _, ok := pageFileSwapUsed(nil); ok {
+		t.Fatal("no rows reported present")
+	}
+}
+
+func TestNetDropRates(t *testing.T) {
+	before := decodePSRows(`[
+		{"Name":"Ethernet","InboundDiscards":100,"OutboundDiscards":50,"PacketErrors":7},
+		{"Name":"Virtual","InboundDiscards":null,"OutboundDiscards":null,"PacketErrors":null}
+	]`)
+	after := decodePSRows(`[
+		{"Name":"Ethernet","InboundDiscards":130,"OutboundDiscards":50,"PacketErrors":9},
+		{"Name":"Virtual","InboundDiscards":null,"OutboundDiscards":null,"PacketErrors":null}
+	]`)
+	drops := netDropRates(before, after, 1.0)
+	e := drops["ethernet"]
+	if e.rxPerS == nil || *e.rxPerS != 30 {
+		t.Fatalf("rx = %v", e.rxPerS)
+	}
+	if e.txPerS == nil || *e.txPerS != 0 {
+		t.Fatalf("tx (measured zero movement) = %v", e.txPerS)
+	}
+	if e.errorsTotal == nil || *e.errorsTotal != 9 {
+		t.Fatalf("errors_total = %v", e.errorsTotal)
+	}
+	// Missing-property edge: null properties stay nil, never zero-filled.
+	v := drops["virtual"]
+	if v.rxPerS != nil || v.txPerS != nil || v.errorsTotal != nil {
+		t.Fatalf("missing properties must stay nil: %+v", v)
+	}
+	// Backwards counter (provider reset) keeps its rate nil.
+	back := decodePSRows(`[{"Name":"Reset","InboundDiscards":100}]`)
+	fwd := decodePSRows(`[{"Name":"Reset","InboundDiscards":50}]`)
+	if dr := netDropRates(back, fwd, 1.0)["reset"]; dr.rxPerS != nil {
+		t.Fatalf("backwards counter produced a rate: %v", *dr.rxPerS)
+	}
+	// Adapter seen only in the AFTER poll has no baseline: rates nil, but a
+	// present PacketErrors still lands.
+	onlyAfter := decodePSRows(`[{"Name":"New","InboundDiscards":5,"PacketErrors":2}]`)
+	if dr := netDropRates(nil, onlyAfter, 1.0)["new"]; dr.rxPerS != nil || dr.errorsTotal == nil || *dr.errorsTotal != 2 {
+		t.Fatalf("after-only adapter = %+v", dr)
+	}
+}
+
 func TestMatchCounterInstanceClaimsOnce(t *testing.T) {
 	rates := map[string]map[string]float64{
 		"Ethernet":         {"bytes received/sec": 1},

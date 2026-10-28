@@ -15,9 +15,10 @@ import (
 )
 
 // Windows host collection without cgo: CPU utilization from kernel32
-// GetSystemTimes deltas, DRAM from GlobalMemoryStatusEx, and disk/net
-// counters from OS-native surfaces reached through one inline powershell.exe
-// expression per family (no .ps1 files, per the repo script ban). The
+// GetSystemTimes deltas, DRAM levels from GlobalMemoryStatusEx plus
+// page-fault/swap counters, and disk/net counters from OS-native surfaces
+// reached through one inline powershell.exe expression per family (no .ps1
+// files, per the repo script ban). The
 // kernel32 handles follow the repo's zero-dependency lazy-DLL pattern.
 // Anything unreadable stays nil.
 
@@ -36,10 +37,13 @@ func collectFamilies(ctx context.Context, o Options) familyResults {
 		res.errs = append(res.errs, "cpu: GetSystemTimes unreadable")
 	}
 
-	// DRAM: global memory status (levels only; fault/swap/bandwidth have no
-	// stdlib-only source on Windows and stay nil).
+	// DRAM: global memory status for the level fields; the page-fault rate
+	// and in-use pagefile bytes come from OS-native counter surfaces. A
+	// failing extras poll leaves those fields nil on the base row; bandwidth
+	// has no Windows source and stays nil.
 	if d, ok := windowsDRAM(); ok {
 		res.dram = d
+		windowsDRAMExtras(ctx, res.dram)
 	} else {
 		res.errs = append(res.errs, "dram: GlobalMemoryStatusEx unreadable")
 	}
@@ -51,7 +55,7 @@ func collectFamilies(ctx context.Context, o Options) familyResults {
 	} else {
 		res.disks = disks
 	}
-	if nets, err := windowsNet(ctx); err != nil {
+	if nets, err := windowsNet(ctx, o); err != nil {
 		res.errs = append(res.errs, "net: "+err.Error())
 	} else {
 		res.net = nets
@@ -161,10 +165,45 @@ $counters = Get-Counter -SampleInterval 1 -MaxSamples 2 -Counter @('\PhysicalDis
 Write-Output 'DRIVE'; Write-Output $drive; Write-Output 'COUNTER'; Write-Output $counters
 `
 
-const windowsNetPS = `
-$adapters = Get-CimInstance Win32_NetworkAdapter | Where-Object {$_.NetConnectionID -ne $null} | Select-Object Name,NetConnectionID,Speed,AdminStatus | ConvertTo-Json -Compress
+// windowsDRAMPS polls the two DRAM extras that have no kernel32 surface:
+// the \Memory page-fault rate (standard performance counter, last sample;
+// the first is a since-boot average) and the in-use pagefile bytes
+// (Win32_PageFile; empty when the system runs without a paging file).
+const windowsDRAMPS = `
+$pf = Get-CimInstance Win32_PageFile | Select-Object AllocatedBaseSize,CurrentUsage | ConvertTo-Json -Compress
+$counters = Get-Counter -SampleInterval 1 -MaxSamples 2 -Counter @('\Memory\Page Faults/sec') | ForEach-Object { $_.CounterSamples } | Select-Object Path,CookedValue | ConvertTo-Json -Compress
+Write-Output 'PAGEFILE'; Write-Output $pf; Write-Output 'COUNTER'; Write-Output $counters
+`
+
+// windowsDRAMExtras fills PageFaultsPerSec and SwapUsedBytes on the base
+// DRAM row. Any failing or empty source leaves the matching field nil; the
+// base row survives an extras failure.
+func windowsDRAMExtras(ctx context.Context, d *DRAM) {
+	out, err := runPowerShell(ctx, windowsDRAMPS)
+	if err != nil {
+		return
+	}
+	sec := psSections(out)
+	if v, ok := lastCounterByName(decodePSRows(sec["COUNTER"]), `\memory\page faults/sec`); ok {
+		d.PageFaultsPerSec = f64(v)
+	}
+	if pf := decodePSRows(sec["PAGEFILE"]); len(pf) > 0 {
+		if b, ok := pageFileSwapUsed(pf); ok {
+			d.SwapUsedBytes = i64(b)
+		}
+	}
+}
+
+// windowsNetPSFmt polls Win32_NetworkAdapter twice, %d milliseconds apart,
+// so InboundDiscards/OutboundDiscards deltas become drop rates; the second
+// poll also carries the cumulative PacketErrors. Adapters that report null
+// for these properties keep their fields nil.
+const windowsNetPSFmt = `
+$adapters = Get-CimInstance Win32_NetworkAdapter | Where-Object {$_.NetConnectionID -ne $null} | Select-Object Name,NetConnectionID,Speed,AdminStatus,InboundDiscards,OutboundDiscards,PacketErrors | ConvertTo-Json -Compress
+Start-Sleep -Milliseconds %d
+$adapters2 = Get-CimInstance Win32_NetworkAdapter | Where-Object {$_.NetConnectionID -ne $null} | Select-Object Name,NetConnectionID,Speed,AdminStatus,InboundDiscards,OutboundDiscards,PacketErrors | ConvertTo-Json -Compress
 $counters = Get-Counter -SampleInterval 1 -MaxSamples 2 -Counter @('\Network Interface(*)\Bytes Received/sec','\Network Interface(*)\Bytes Sent/sec','\Network Interface(*)\Packets Received/sec','\Network Interface(*)\Packets Sent/sec') | ForEach-Object { $_.CounterSamples } | Select-Object Path,CookedValue | ConvertTo-Json -Compress
-Write-Output 'ADAPTER'; Write-Output $adapters; Write-Output 'COUNTER'; Write-Output $counters
+Write-Output 'ADAPTER'; Write-Output $adapters; Write-Output 'ADAPTER2'; Write-Output $adapters2; Write-Output 'COUNTER'; Write-Output $counters
 `
 
 // windowsDisks joins Win32_DiskDrive identities (size, bus kind) with
@@ -255,14 +294,17 @@ type adapterRow struct {
 // performance-counter instance becomes a data row (enriched with adapter
 // identity when the names line up), and every adapter that no counter
 // instance claims stays visible as an identity-only row with nil rates.
-// Drops/errors have no universal standard counter and remain nil.
-func windowsNet(ctx context.Context) ([]NetIfc, error) {
-	out, err := runPowerShell(ctx, windowsNetPS)
+// Drop rates and the cumulative error total come from the
+// Win32_NetworkAdapter discard/error properties where the adapter exposes
+// them; adapters reporting null keep those fields nil.
+func windowsNet(ctx context.Context, o Options) ([]NetIfc, error) {
+	out, err := runPowerShell(ctx, fmt.Sprintf(windowsNetPSFmt, o.Interval.Milliseconds()))
 	if err != nil {
 		return nil, fmt.Errorf("network WMI query failed")
 	}
 	sec := psSections(out)
 	adapters := decodePSRows(sec["ADAPTER"])
+	drops := netDropRates(adapters, decodePSRows(sec["ADAPTER2"]), o.Interval.Seconds())
 	rates := lastCounterValues(decodePSRows(sec["COUNTER"]))
 
 	// Each adapter contributes exactly one row; its name and connection id
@@ -297,13 +339,14 @@ func windowsNet(ctx context.Context) ([]NetIfc, error) {
 		if cid := strings.ToLower(row.connID); cid != "" && cid != key {
 			keys = append(keys, cid)
 		}
+		n := netIfcIdentity(row)
 		if _, m, ok := matchCounterInstance(keys, rates, matched); ok {
-			n := netIfcIdentity(row)
 			fillNetRates(&n, m)
-			nets = append(nets, n)
-			continue
 		}
-		nets = append(nets, netIfcIdentity(row))
+		if dr, ok := drops[key]; ok {
+			applyNetDrops(&n, dr)
+		}
+		nets = append(nets, n)
 	}
 	for inst, m := range rates {
 		if matched[inst] {
@@ -335,4 +378,12 @@ func fillNetRates(n *NetIfc, m map[string]float64) {
 	if v, ok := m["packets sent/sec"]; ok {
 		n.TxPacketsPerS = f64(v)
 	}
+}
+
+// applyNetDrops copies the derived drop rates and cumulative errors onto the
+// row; a nil-derived field leaves the wire field nil.
+func applyNetDrops(n *NetIfc, dr netDropRow) {
+	n.RxDropsPerS = dr.rxPerS
+	n.TxDropsPerS = dr.txPerS
+	n.ErrorsTotal = dr.errorsTotal
 }

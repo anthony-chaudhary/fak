@@ -23,7 +23,7 @@ func psSections(out []byte) map[string]string {
 			continue
 		}
 		switch l {
-		case "DRIVE", "PHYS", "ADAPTER", "PERF", "COUNTER":
+		case "DRIVE", "PHYS", "ADAPTER", "ADAPTER2", "PERF", "PAGEFILE", "COUNTER":
 			cur = l
 			sections[cur] = nil
 		default:
@@ -181,6 +181,108 @@ func matchCounterInstance(keys []string, rates map[string]map[string]float64, ma
 	}
 	matched[best] = true
 	return best, rates[best], true
+}
+
+// lastCounterByName returns the cooked value of the LAST row whose counter
+// path ends with the given lowercased "\\object\\counter" suffix. Instance-
+// free objects (such as \\Memory) carry no parenthesized instance, which
+// splitCounterPath deliberately rejects, so they are matched by suffix.
+// Rows arrive in sample order and later samples overwrite earlier ones (the
+// first sample of a /sec counter is a since-boot average); null or missing
+// CookedValues stay unread.
+func lastCounterByName(rows []map[string]any, suffix string) (float64, bool) {
+	var v float64
+	seen := false
+	for _, row := range rows {
+		p := strings.ToLower(strings.TrimSpace(stringField(row, "Path")))
+		if !strings.HasSuffix(p, suffix) {
+			continue
+		}
+		if n, ok := numberField(row, "CookedValue"); ok {
+			v, seen = n, true
+		}
+	}
+	return v, seen
+}
+
+// pageFileSwapUsed sums in-use pagefile bytes across Win32_PageFile rows:
+// CurrentUsage when present, otherwise AllocatedBaseSize; WMI reports both
+// in KiB. A row exposing neither usable value contributes nothing, and if no
+// row does, ok=false (no pagefile surface means nil downstream, never an
+// invented zero).
+func pageFileSwapUsed(rows []map[string]any) (int64, bool) {
+	var total int64
+	any := false
+	for _, row := range rows {
+		v, ok := numberField(row, "CurrentUsage")
+		if !ok {
+			v, ok = numberField(row, "AllocatedBaseSize")
+		}
+		if ok && v >= 0 {
+			total += int64(int64(v) * int64(kilobyte))
+			any = true
+		}
+	}
+	return total, any
+}
+
+// netDropRow carries one adapter's drop rates and cumulative error count
+// derived from two Win32_NetworkAdapter polls. Every field stays nil until a
+// usable source value exists (never an invented zero).
+type netDropRow struct {
+	rxPerS      *float64
+	txPerS      *float64
+	errorsTotal *int64
+}
+
+// netDropRates reduces two Win32_NetworkAdapter polls (before and after,
+// dt seconds apart) into per-adapter drop rates plus the cumulative error
+// total. Rates are safeDelta over InboundDiscards/OutboundDiscards; a
+// backwards step (provider reset) keeps its rate nil. errors_total is the
+// LATEST PacketErrors. An adapter missing from either poll, or one whose
+// property is null or absent (common on virtual adapters), leaves the
+// matching field nil.
+func netDropRates(before, after []map[string]any, dt float64) map[string]netDropRow {
+	prev := map[string]map[string]any{}
+	for _, row := range before {
+		key := normalizeCounterInstance(stringField(row, "Name"))
+		if key == "" {
+			continue
+		}
+		if _, seen := prev[key]; !seen {
+			prev[key] = row
+		}
+	}
+	out := map[string]netDropRow{}
+	for _, row := range after {
+		key := normalizeCounterInstance(stringField(row, "Name"))
+		if key == "" {
+			continue
+		}
+		if _, seen := out[key]; seen {
+			continue
+		}
+		dr := netDropRow{}
+		if e, ok := numberField(row, "PacketErrors"); ok {
+			dr.errorsTotal = i64(int64(e))
+		}
+		if b, ok := prev[key]; ok {
+			rate := func(dst **float64, prop string) {
+				a, okA := numberField(b, prop)
+				c, okC := numberField(row, prop)
+				if !okA || !okC {
+					return
+				}
+				if d, ok := safeDelta(uint64(a), uint64(c)); ok {
+					*dst = avg(float64(d), dt)
+				}
+			}
+			rate(&dr.rxPerS, "InboundDiscards")
+			rate(&dr.txPerS, "OutboundDiscards")
+		}
+		out[key] = dr
+	}
+	return out
 }
 
 // lastCounterValues reduces a flat list of {Path, CookedValue} rows emitted
