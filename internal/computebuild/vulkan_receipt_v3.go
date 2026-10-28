@@ -30,6 +30,9 @@ func buildReceiptWireValue(receipt *ComputeBuildReceipt) any {
 	if vulkanSuccessorForSchema(receipt.Schema) != nil {
 		return successorReceiptWire(receipt)
 	}
+	if receipt.Schema == CUDABuildReceiptSchema {
+		return cudaBuildReceiptV1Wire{computeBuildReceiptV2Wire: computeBuildReceiptV2Wire(*receipt), CUDA: receipt.CUDA}
+	}
 	if receipt.Schema == VulkanBuildReceiptSchemaV4 {
 		return vulkanBuildReceiptV4Wire{computeBuildReceiptV2Wire: computeBuildReceiptV2Wire(*receipt), ShaderRegistry: receipt.VulkanRegistry}
 	}

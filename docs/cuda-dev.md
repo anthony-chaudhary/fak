@@ -108,6 +108,43 @@ witnessed byte-stable only on Linux (GNU ar's deterministic default); native Win
 not normalized, so there an unchanged rebuild may re-stamp and recompile the compute package:
 slower, never stale.
 
+### Build provenance (`fak.cuda-build-receipt.v1`)
+
+A successful `build-cuda build` or `build-cuda binary` observes the built artifact back with
+`cuobjdump` before the receipt is written, so the receipt proves which architectures the
+artifact actually contains instead of echoing what was requested. On success the receipt schema
+switches from `fak.compute-build-receipt.v1` to the successor `fak.cuda-build-receipt.v1`
+exactly when the `cuda` block is attached; `--json` output reports both via `receipt_schema`
+and `provenance`.
+
+The block carries:
+
+| Field | Meaning |
+|---|---|
+| `artifact_kind` | `binary` (the linked executable) or `libfakcuda` (the archive) — whichever artifact was observed |
+| `artifact_sha256` | content digest of the observed artifact |
+| `requested_archs` | image targets derived from the gencode arguments that `ParseCUDAArchMatrix` builds from `internal/compute/cuda_arch.txt` (`sm_*` SASS targets plus the last arch's `compute_*` PTX target), sorted by numeric compute capability then suffix |
+| `sass_archs` | SASS images observed in the artifact via `cuobjdump --list-elf`, parsed as `sm_<cc>` with an optional `a` or `f` suffix |
+| `ptx_archs` | PTX images observed via `cuobjdump --list-ptx`; a PTX image named `sm_<cc>` is recorded as its requested target form `compute_<cc>` |
+| `nvcc` | `{version, role, executable, sha256}` — version parsed from the `nvcc --version` banner, executable SHA-256 without any host path |
+| `cublas_version` | build-time cuBLAS version read from `cublas_api.h` under the toolchain's CUDA include directories (falling back to the toolkit include dir); the header the kernels were compiled against, not the runtime-loaded library |
+
+Presence and failure rules:
+
+- The block is attached **only** on a successful `build` or `binary`. Failed receipts keep
+  `fak.compute-build-receipt.v1` and never carry a `cuda` block; the tracker clears the block
+  and resets the schema on any later failure (including a post-attach smoke failure).
+- If a requested SASS arch or requested PTX target has no matching image in the artifact, the
+  build fails with the exported sentinel `computebuild.ErrCUDAArchMissing` (use `errors.Is`).
+  The receipt is written failed with no CUDA block.
+- If `cuobjdump` is missing beside the selected nvcc, a listing or the nvcc version banner is
+  unparseable, or `cublas_api.h` cannot be read, the build fails with
+  `computebuild.ErrCUDAProvenanceInvalid`. An unobserved CUDA block is never written.
+- `ArchiveCUDALib` records `libfakcuda.a`'s SHA-256 in the archive artifact identity,
+  independent of the provenance block.
+- The `cuda` field lives only on the successor wire envelope; the shared receipt JSON type keeps
+  it out of V2 marshaling, so Vulkan v2 unknown-field rejection is unchanged.
+
 ## 4. Validate — prove correctness against the CPU reference
 
 The CUDA backend is an **Approx** peer of the `cpuref` f32 Reference: it is held to an

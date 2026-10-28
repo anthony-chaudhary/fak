@@ -26,6 +26,14 @@ type CUDABuildResult struct {
 	OutBin     string `json:"out_bin,omitempty"`
 	Error      string `json:"error,omitempty"`
 	DurationMS int64  `json:"duration_ms"`
+
+	// ReceiptSchema is the schema actually written to the receipt file. A
+	// successful CUDA build/binary switches it to fak.cuda-build-receipt.v1;
+	// failures keep fak.compute-build-receipt.v1 with no provenance block.
+	ReceiptSchema string `json:"receipt_schema,omitempty"`
+	// Provenance carries the observed artifact image coverage when the receipt
+	// attached the CUDA block; absent otherwise.
+	Provenance *computebuild.CUDABuildProvenance `json:"provenance,omitempty"`
 }
 
 // RunBuildCUDA parses CLI arguments and runs CUDA build/test/check tasks via computebuild.RunCUDA.
@@ -228,6 +236,14 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 		}
 		if err != nil {
 			res.Error = err.Error()
+		}
+		if (sub == "build" || sub == "binary") && cfg.Receipt != nil {
+			// Report the schema the receipt actually landed under and the
+			// observed arch lists, so consumers can tell a witnessed build from
+			// one whose provenance could not be observed. Failures keep the base
+			// schema and carry no provenance block.
+			res.ReceiptSchema = cfg.Receipt.Schema
+			res.Provenance = cfg.Receipt.CUDA
 		}
 		_ = json.NewEncoder(stdout).Encode(res)
 		if err != nil {
