@@ -25,6 +25,14 @@ func TestCUDAQ8ResidentGeometryHost(t *testing.T) {
 	if os.Getenv("FAK_TEST_CUDA_Q8_RESIDENT_GEOMETRY_HOST") != "1" {
 		t.Skip("set FAK_TEST_CUDA_Q8_RESIDENT_GEOMETRY_HOST=1 for the host admission witness")
 	}
+	runCUDAQ8ResidentHostProbe(t, "^TestAdmission$", "")
+}
+
+// The optional owner declaration comes from production, not a mirrored cache
+// implementation. Its absence on the baseline must still compile and exercise
+// the original method so a stale cache hit, not a missing symbol, is the RED.
+func runCUDAQ8ResidentHostProbe(t *testing.T, run, extra string) {
+	t.Helper()
 	// go test runs in the package directory. runtime.Caller paths can be module-
 	// relative under -trimpath, so they are not reliable filesystem locations.
 	path := "cuda_upload.go"
@@ -37,8 +45,18 @@ func TestCUDAQ8ResidentGeometryHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var method []byte
+	var method, owner []byte
 	for _, decl := range f.Decls {
+		if group, ok := decl.(*ast.GenDecl); ok && group.Tok == token.TYPE {
+			for _, spec := range group.Specs {
+				if typ, ok := spec.(*ast.TypeSpec); ok && typ.Name.Name == "cudaQ8UploadSource" {
+					if owner != nil {
+						t.Fatal("duplicate production Q8 source owner")
+					}
+					owner = append([]byte("type "), src[fs.Position(typ.Pos()).Offset:fs.Position(typ.End()).Offset]...)
+				}
+			}
+		}
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok || fn.Name.Name != "uploadQ8Resident" || fn.Recv == nil || len(fn.Recv.List) != 1 {
 			continue
@@ -60,9 +78,10 @@ func TestCUDAQ8ResidentGeometryHost(t *testing.T) {
 		t.Fatal("production uploadQ8Resident method not found")
 	}
 	t.Logf("production method SHA256=%x", sha256.Sum256(method))
+	t.Logf("production optional owner bytes=%d SHA256=%x", len(owner), sha256.Sum256(owner))
 	dir := t.TempDir()
 	probe := filepath.Join(dir, "admission_test.go")
-	if err := os.WriteFile(probe, []byte(cudaQ8AdmissionHostShim+"\n"+string(method)+"\n"), 0600); err != nil {
+	if err := os.WriteFile(probe, []byte(cudaQ8AdmissionHostShim+"\n"+string(owner)+"\n"+string(method)+"\n"+extra), 0600); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -82,7 +101,7 @@ func TestCUDAQ8ResidentGeometryHost(t *testing.T) {
 		}
 	}
 	t.Logf("host witness Go executable: %s", goExe)
-	cmd := exec.CommandContext(ctx, goExe, "test", "-p=1", "-trimpath", "-buildvcs=false", "-count=1", "-v", "-timeout=45s", probe)
+	cmd := exec.CommandContext(ctx, goExe, "test", "-p=1", "-trimpath", "-buildvcs=false", "-count=1", "-v", "-timeout=45s", "-run", run, probe)
 	cmd.Dir = dir
 	for _, entry := range os.Environ() {
 		key, _, _ := strings.Cut(entry, "=")
@@ -175,7 +194,16 @@ func TestAdmission(t *testing.T) {
 				key := ucKey{uintptr(unsafe.Pointer(&h.codes[0])), Q8_0, RowMajor}
 				uploadCache = make(map[ucKey]Tensor)
 				seed := &cudaBuf{owner: c}
-				if cached { uploadCache[key] = Tensor{Dtype: Q8_0, Layout: RowMajor, Shape: []int{2, tc.width}, buf: seed} }
+				if cached {
+					if tc.reject {
+						uploadCache[key] = Tensor{Dtype: Q8_0, Layout: RowMajor, Shape: []int{2, tc.width}, buf: seed}
+					} else {
+						seeded := c.uploadQ8Resident(input, h)
+						seed = seeded.buf.(*cudaBuf)
+						*c = cudaBackend{}
+						h.reads = 0
+					}
+				}
 				var got Tensor
 				var recovered any
 				func() { defer func() { recovered = recover() }(); got = c.uploadQ8Resident(input, h) }()
@@ -204,7 +232,7 @@ func TestAdmission(t *testing.T) {
 				if !ok || buf == nil || c.allocs != 1 || c.uploads != 1 || c.accounts != 1 || c.bytes != len(h.codes)+4*len(scales) || c.lastBlock != tc.block || c.lastScales != len(scales) {
 					t.Fatalf("valid fresh geometry did not upload exact payload: backend=%+v", c)
 				}
-				if got.Numel() != input.Numel() || got.Quant.Block != tc.block || buf.hostKeep != h || buf.host != key.host || buf.hostDt != Q8_0 || buf.hostLo != RowMajor || len(uploadCache) != 1 || uploadCache[key].buf != buf {
+				if got.Numel() != input.Numel() || got.Quant.Block != tc.block || buf.hostKeep == nil || &buf.hostKeep.I8()[0] != &h.codes[0] || buf.host != key.host || buf.hostDt != Q8_0 || buf.hostLo != RowMajor || len(uploadCache) != 1 || uploadCache[key].buf != buf {
 					t.Fatal("valid upload lost ownership, geometry or cache publication")
 				}
 				if len(buf.codes) != len(h.codes) || len(buf.scales) != len(scales) { t.Fatal("payload lengths changed") }
