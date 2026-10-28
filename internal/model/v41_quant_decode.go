@@ -371,6 +371,7 @@ type v41ExpertDeviceWeight struct {
 	O, I       int // unpacked output/input dims
 	weight     []byte
 	scales     []byte
+	source     *v41ExpertFaultIn
 }
 
 // v41ExpertDeviceInstall retains copied host-packed bytes, not device handles.
@@ -381,6 +382,11 @@ type v41ExpertDeviceInstall struct {
 	mu              sync.RWMutex
 	weights         map[string]*v41ExpertDeviceWeight
 	packedPreserved bool
+	// Source-backed projections share one bounded staging slab. The synchronous
+	// byte-in backend may borrow it only while faultMu is held.
+	faultMu     sync.Mutex
+	faultBudget int
+	faultSlab   []byte
 }
 
 func v41ExpertDeviceStore(m *Model, create bool) *v41ExpertDeviceInstall {
@@ -422,6 +428,9 @@ func (owner *weightCloserState) releaseV41ExpertPackedStore() {
 		store.weights = nil
 		store.packedPreserved = false
 		store.mu.Unlock()
+		store.faultMu.Lock()
+		store.faultSlab = nil
+		store.faultMu.Unlock()
 	}
 }
 
@@ -551,6 +560,9 @@ func (m *Model) V41ExpertDeviceMatmul(weightName string, be compute.Backend, x [
 	}
 	if len(x) != w.I {
 		return nil, v4QuantMetadataf("V4.1 device matmul %s: x has %d entries, want %d", weightName, len(x), w.I)
+	}
+	if w.source != nil {
+		return m.v41ExpertFaultMatmul(weightName, store, w, be, x)
 	}
 	switch w.dtype {
 	case "F8_E4M3":
