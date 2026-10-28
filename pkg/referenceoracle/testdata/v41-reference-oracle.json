@@ -18,7 +18,17 @@
   "shards": 7,
   "shard1": "DeepSeek-V4.1-Flash-Q2_K-00001-of-00007.gguf",
   "shard1_sha256": "0bcee934bd4e8350c54410681d9300b0321a300fcb1df1437a20703394d08ee0",
-  "total_bytes": 264515279456
+  "total_bytes": 264515279456,
+  "rebind": {
+   "from_revision": "543d86fd975044332d4366204eadd6da1b0cbeda",
+   "to_revision": "c4a085541cb53f67ee5e57b63d255e80cef286e7",
+   "witnessed_utc": "2026-10-27",
+   "matched": [
+    "shard_count",
+    "shard1_sha256",
+    "total_bytes"
+   ]
+  }
  },
  "request": {
   "temperature": 0,

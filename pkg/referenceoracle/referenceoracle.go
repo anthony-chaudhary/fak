@@ -9,7 +9,9 @@
 // An oracle records:
 //
 //   - reference: the engine build (repo, commit, license, binary digest);
-//   - artifact: the checkpoint it ran (repo, revision, shard digests);
+//   - artifact: the checkpoint it ran (repo, revision, shard digests, and an
+//     optional rebind recording that the pinned download locator moved while
+//     the bytes stayed identical);
 //   - prompts: per prompt, the exact input token ids, the greedy continuation
 //     and the top-5 log-probabilities at each generated position;
 //   - self_parity: whether a second identical run reproduced the first;
@@ -80,6 +82,9 @@ type Artifact struct {
 	// the ones whose digest was taken.
 	ShardCount int     `json:"shard_count,omitempty"`
 	Shards     []Shard `json:"shards,omitempty"`
+	// Rebind, when present, records that the pinned download locator moved
+	// while the checkpoint bytes stayed identical; see Rebind.
+	Rebind *Rebind `json:"rebind,omitempty"`
 }
 
 // Shard is one checkpoint file and its digest.
@@ -87,6 +92,18 @@ type Shard struct {
 	Name      string `json:"name"`
 	SHA256    string `json:"sha256"`
 	SizeBytes int64  `json:"size_bytes,omitempty"`
+}
+
+// Rebind witnesses that a checkpoint's download locator moved from FromRev to
+// ToRev while the captured bytes stayed identical: Rev keeps naming the
+// capture identity, and ToRev is the live revision independently witnessed to
+// carry the same checkpoint. Matched lists which pin facts were re-verified
+// against ToRev (for example "shard_count", "shard1_sha256", "total_bytes").
+type Rebind struct {
+	FromRev      string   `json:"from_rev"`
+	ToRev        string   `json:"to_rev"`
+	WitnessedUTC string   `json:"witnessed_utc"`
+	Matched      []string `json:"matched,omitempty"`
 }
 
 // Prompt is one prompt's exact input and the reference's greedy continuation.
@@ -196,6 +213,14 @@ func (o Oracle) Validate() error {
 	}
 	if o.Artifact.Repo == "" {
 		return invalid("artifact repo is required")
+	}
+	if rb := o.Artifact.Rebind; rb != nil {
+		if rb.FromRev == "" || rb.ToRev == "" || rb.WitnessedUTC == "" {
+			return invalid("artifact.rebind: from_rev, to_rev and witnessed_utc are required")
+		}
+		if rb.ToRev == rb.FromRev {
+			return invalid("artifact.rebind: to_rev %q equals from_rev", rb.ToRev)
+		}
 	}
 	if len(o.Prompts) == 0 {
 		return invalid("no prompts")

@@ -11,7 +11,8 @@ import (
 //
 //	schema, evidence_label, host, captured_utc
 //	reference_engine.{repo, commit, license, binary_sha256, sha256{<binary>: <digest>}}
-//	model.{repo_id, revision, quant, shard1, shard1_sha256, shards: <count> | [{name, sha256, size_bytes}]}
+//	model.{repo_id, revision, quant, shard1, shard1_sha256, shards: <count> | [{name, sha256, size_bytes}],
+//	      rebind: {from_revision, to_revision, witnessed_utc, matched}}
 //	prompts{<text>: {input_token_ids, greedy_token_ids, top5[[{id, piece, logprob}]]}}
 //	determinism.{method, results[{greedy_tokens_identical, top5_logprobs_identical_1e-6}]}
 //	trace_refs (fak.reference_oracle.v1 shape)
@@ -37,6 +38,12 @@ type legacyDoc struct {
 		Shard1       string          `json:"shard1"`
 		Shard1SHA256 string          `json:"shard1_sha256"`
 		Shards       json.RawMessage `json:"shards"`
+		Rebind       *struct {
+			FromRevision string   `json:"from_revision"`
+			ToRevision   string   `json:"to_revision"`
+			WitnessedUTC string   `json:"witnessed_utc"`
+			Matched      []string `json:"matched"`
+		} `json:"rebind"`
 	} `json:"model"`
 	Prompts     json.RawMessage `json:"prompts"`
 	Determinism *struct {
@@ -88,6 +95,14 @@ func adaptLegacy(data []byte) (Oracle, error) {
 	}
 	if len(o.Artifact.Shards) == 0 && d.Model.Shard1 != "" {
 		o.Artifact.Shards = []Shard{{Name: d.Model.Shard1, SHA256: d.Model.Shard1SHA256}}
+	}
+	if d.Model.Rebind != nil {
+		o.Artifact.Rebind = &Rebind{
+			FromRev:      d.Model.Rebind.FromRevision,
+			ToRev:        d.Model.Rebind.ToRevision,
+			WitnessedUTC: d.Model.Rebind.WitnessedUTC,
+			Matched:      d.Model.Rebind.Matched,
+		}
 	}
 	prompts, err := orderedPrompts(d.Prompts)
 	if err != nil {

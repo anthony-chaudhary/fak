@@ -26,6 +26,13 @@ func TestV41OracleLoadsThroughAdapter(t *testing.T) {
 	if o.Artifact.Rev != "543d86fd975044332d4366204eadd6da1b0cbeda" || o.Artifact.ShardCount != 7 || len(o.Artifact.Shards) != 1 {
 		t.Fatalf("artifact=%+v", o.Artifact)
 	}
+	rb := o.Artifact.Rebind
+	if rb == nil || rb.FromRev != "543d86fd975044332d4366204eadd6da1b0cbeda" || rb.ToRev != "c4a085541cb53f67ee5e57b63d255e80cef286e7" || rb.WitnessedUTC != "2026-10-27" {
+		t.Fatalf("rebind=%+v", rb)
+	}
+	if !slices.Equal(rb.Matched, []string{"shard_count", "shard1_sha256", "total_bytes"}) {
+		t.Fatalf("rebind matched=%v", rb.Matched)
+	}
 	wantTexts := []string{"The chemical symbol for gold is", "The capital of France is", "Say hello.", "What is 17 times 3?"}
 	var texts []string
 	for _, p := range o.Prompts {
@@ -67,6 +74,9 @@ func TestNativeOracleRoundTrip(t *testing.T) {
 	if _, ok := back.TraceRef(0); ok {
 		t.Fatal("prompt 0 has no trace ref")
 	}
+	if back.Artifact.Rebind == nil || back.Artifact.Rebind.ToRev != "c4a085541cb53f67ee5e57b63d255e80cef286e7" {
+		t.Fatalf("rebind lost in native round trip: %+v", back.Artifact.Rebind)
+	}
 	if !referenceoracle.IsOracleSchema("fak.qwen38_reference_oracle.v1") || referenceoracle.IsOracleSchema("fak.compute_trace.v1") {
 		t.Fatal("IsOracleSchema")
 	}
@@ -98,6 +108,12 @@ func TestOracleRefusals(t *testing.T) {
 		"trace ref escapes":      func(o *referenceoracle.Oracle) { o.TraceRefs = []referenceoracle.TraceRef{{Path: "../t.json"}} },
 		"duplicate trace ref": func(o *referenceoracle.Oracle) {
 			o.TraceRefs = []referenceoracle.TraceRef{{Path: "a.json"}, {Path: "b.json"}}
+		},
+		"rebind missing to rev": func(o *referenceoracle.Oracle) {
+			o.Artifact.Rebind = &referenceoracle.Rebind{FromRev: "a", WitnessedUTC: "2026-10-27"}
+		},
+		"rebind same rev": func(o *referenceoracle.Oracle) {
+			o.Artifact.Rebind = &referenceoracle.Rebind{FromRev: "a", ToRev: "a", WitnessedUTC: "2026-10-27"}
 		},
 	}
 	for name, mutate := range cases {
