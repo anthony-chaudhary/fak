@@ -43,11 +43,31 @@ func TestRunCUDAArchFailureOutput(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=20ms
+func TestRunCUDAArchMissingNativeSource(t *testing.T) {
+	root := copyCUDAArchFixture(t)
+	path := filepath.Join(root, "internal", "computebuild", "cuda.go")
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	if code := runCUDAArch(&out, &errOut, []string{"--root", root}); code != 1 {
+		t.Fatalf("runCUDAArch() code = %d, stdout = %q, stderr = %q", code, out.String(), errOut.String())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q", out.String())
+	}
+	if got := errOut.String(); !strings.HasPrefix(got, "cuda-arch-matrix: ") || !strings.Contains(got, path) {
+		t.Fatalf("stderr = %q, want missing source %q", got, path)
+	}
+}
+
 func copyCUDAArchFixture(t *testing.T) string {
 	t.Helper()
 	sourceRoot := filepath.Join("..", "..")
 	destRoot := t.TempDir()
-	files := []string{"internal/compute/cuda_arch.txt", "internal/compute/build_cuda.sh", "tools/build_cuda_windows.ps1", "Dockerfile.cuda", "docs/cuda-dev.md"}
+	files := []string{"internal/compute/cuda_arch.txt", "internal/compute/build_cuda.sh", "internal/computebuild/cuda.go", "internal/devcmd/build_cuda.go", "tools/build_cuda_windows.ps1", "Dockerfile.cuda", "docs/cuda-dev.md"}
 	for _, rel := range files {
 		contents, err := os.ReadFile(filepath.Join(sourceRoot, filepath.FromSlash(rel)))
 		if err != nil {
