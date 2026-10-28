@@ -1,0 +1,19 @@
+# origin/main symbol polls, 2026-10-28 UTC (5-min cadence; icompute = TestCUDADeviceReceipt file count in internal/compute, nvfp4lines = run_nvfp4_w4a4_family line count in tools/cuda_acceptance.sh)
+06:06:34 attempt=1 icompute=0 nvfp4lines=0 anytree=0 head=1d46cb93fe
+06:11:48 attempt=2 icompute=0 nvfp4lines=0 anytree=0 head=1d46cb93fe
+06:17:12 attempt=3 icompute=0 nvfp4lines=0 anytree=0 head=1d46cb93fe
+06:22:23 attempt=4 icompute=0 nvfp4lines=0 anytree=0 head=1d46cb93fe
+06:27:43 attempt=5 icompute=0 nvfp4lines=0 anytree=0 head=1d46cb93fe
+06:32:58 attempt=6 icompute=0 nvfp4lines=0 anytree=0 head=1d46cb93fe
+06:38:15 attempt=7 icompute=0 nvfp4lines=0 anytree=0 head=1d46cb93fe
+06:43:42 attempt=8 icompute=0 nvfp4lines=0 anytree=0 head=7219a9f438
+
+# extended combined polls (gpu column added):
+06:46:43 ext_1 icompute=0 nvfp4lines=0 gpu=[22858 MiB 813, 22848 MiB ] head=7219a9f438
+06:51:56 ext_2 icompute=0 nvfp4lines=0 gpu=[22858 MiB 813, 22848 MiB ] head=7219a9f438
+06:57:10 ext_3 icompute=0 nvfp4lines=0 gpu=[22858 MiB 813, 22848 MiB ] head=7219a9f438
+07:02:23 ext_4 icompute=0 nvfp4lines=0 gpu=[22858 MiB 813, 22848 MiB ] head=7219a9f438
+07:07:37 ext_5 icompute=0 nvfp4lines=0 gpu=[22858 MiB 813, 22848 MiB ] head=7219a9f438
+07:12:43 ext_6 icompute=0 nvfp4lines=0 gpu=[22858 MiB 813, 22848 MiB ] head=7219a9f438
+07:18:08 ext_7 icompute=0 nvfp4lines=0 gpu=[22858 MiB 813, 22848 MiB ] head=7219a9f438
+07:23:23 ext_8 icompute=0 nvfp4lines=0 gpu=[22858 MiB 813, 22848 MiB ] head=7b47b8acfb

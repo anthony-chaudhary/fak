@@ -31,9 +31,12 @@ cd "$MOD_DIR"
 
 # The witness family roster: a label, the script/command that proves it, and the floor it
 # clears. Each `run_48X` script already enforces SKIP-is-not-PASS (exit 3/4 on no-GPU); the
-# GLM-DSA family runs its device Go witnesses through tools/dgx_glm_gpu_witness.sh.
+# GLM-DSA family runs its device Go witnesses through tools/dgx_glm_gpu_witness.sh; the
+# NVFP4 W4A4 native family is an in-script witness (run_nvfp4_w4a4_family below) because the
+# no-new-.sh gate keeps new shell scripts out of tools/.
 #   479 = base f32 SGEMM forward · 482 = async host-transfer · 483 = CUDA-graph decode
 #   484 = fp16 tensor-core HGEMM · 485 = native Q8_0/Q4_K GEMM · 486 = fused flash attention
+#   NVFP4 W4A4 native = cuBLASLt W4A4 GEMM on qualified Blackwell (sm_100/103/120, Lt >= 12.8.4)
 declare -a FAM_LABEL=(
   "base-forward (#479, f32 SGEMM)"
   "async-hostxfer (#482)"
@@ -43,6 +46,7 @@ declare -a FAM_LABEL=(
   "flash-attention (#486, cudaFlashAttnCosineMin)"
   "GLM-DSA (cudaDsaSparseAttnCosineMin + cudaDsaIndexSelectionExact)"
   "AWQ 4-bit (#926, cudaAWQCosineMin)"
+  "NVFP4 W4A4 native (sm_100/103/120, cuBLASLt>=12.8.4)"
 )
 declare -a FAM_CMD=(
   "tools/run_479_acceptance_on_gpu.sh"
@@ -53,11 +57,142 @@ declare -a FAM_CMD=(
   "tools/run_486_acceptance_on_gpu.sh"
   "tools/dgx_glm_gpu_witness.sh"
   "tools/run_926_acceptance_on_gpu.sh"
+  "run_nvfp4_w4a4_family"
 )
+
+# ---- NVFP4 W4A4 native witness (in-script family) ----------------------------------
+# Proves the native cuBLASLt NVFP4 W4A4 GEMM (internal/compute/cuda.go — policy-admitted at
+# sm in {100,103,120} with cuBLASLt >= 12.8.4) against the CPU oracle by running
+# FAK_REQUIRE_CUDA_NVFP4_NATIVE=1 go test -tags cuda over TestCUDANVFP4NativeScaleTileCrossings
+# (internal/compute/cuda_nvfp4_native_test.go). The require-env turns every "could not prove"
+# path inside the test into a hard failure instead of a silent skip, so this wrapper pre-gates
+# the node and reads SKIP (rc 4, never FAIL) wherever the witness cannot be proven here:
+# no toolkit, no reachable GPU, non-Blackwell tier, or cuBLASLt below the 12.8.4 floor.
+# On a qualified Blackwell node the test must PASS (bit-exact vs the CPU oracle).
+run_nvfp4_w4a4_family() {
+  local pkg_dir="$MOD_DIR/internal/compute"
+  local cuda_home="${CUDA_HOME:-${HOME:-/tmp/fakgpu/home}/cudaenv}"
+  local nvcc="$cuda_home/bin/nvcc"
+  if [ ! -x "$nvcc" ]; then
+    if command -v nvcc >/dev/null 2>&1; then
+      nvcc="$(command -v nvcc)"
+      cuda_home="$(dirname "$(dirname "$nvcc")")"
+    elif [ -x /usr/local/cuda/bin/nvcc ]; then
+      nvcc=/usr/local/cuda/bin/nvcc
+      cuda_home=/usr/local/cuda
+    else
+      echo "[nvfp4] SKIP: no reachable CUDA toolkit (no nvcc at $cuda_home, /usr/local/cuda, or PATH)."
+      return 4
+    fi
+  fi
+
+  # Device gate: only qualified Blackwell can prove this witness; anywhere else it is
+  # unprovable, and FAK_REQUIRE_CUDA_NVFP4_NATIVE=1 would turn that into a hard FAIL.
+  local cap major minor sm
+  cap="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n1)"
+  if [[ ! "$cap" =~ ^[0-9]+\.[0-9]+$ ]]; then
+    echo "[nvfp4] SKIP: no reachable CUDA device on this node (nvidia-smi reported no compute capability)."
+    return 4
+  fi
+  major="${cap%%.*}"; minor="${cap##*.}"
+  sm=$((major * 10 + minor))
+  case "$sm" in
+    100|103|120) : ;;
+    *)
+      echo "[nvfp4] SKIP: native CUDA NVFP4 requires a qualified Blackwell GPU; found sm_$sm."
+      return 4
+      ;;
+  esac
+
+  # cuBLASLt floor gate: cuBLASLt ships with the CUDA toolkit, so the toolkit build number
+  # is the shell-side proxy for the Lt version; the authoritative check stays the in-test
+  # cuBLASLt preflight (fcuda_nvfp4_w4a4_preflight + nvfp4CUBLASLtPolicy).
+  local rel lt_major lt_minor lt_patch lt_ok
+  rel="$( "$nvcc" --version 2>/dev/null | grep -oE 'V[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1 | cut -c2- )"
+  [ -z "$rel" ] && rel="$(awk '$1 == "CUDA" && $2 == "Version" {print $3}' "$cuda_home/version.txt" 2>/dev/null)"
+  if [[ ! "$rel" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+    echo "[nvfp4] SKIP: cuBLASLt version undetermined on this node; the W4A4 native witness cannot be proven."
+    return 4
+  fi
+  IFS=. read -r lt_major lt_minor lt_patch <<<"$rel"
+  lt_patch="${lt_patch:-0}"
+  lt_ok=0
+  if [ "$lt_major" -gt 12 ]; then
+    lt_ok=1
+  elif [ "$lt_major" -eq 12 ]; then
+    if [ "$lt_minor" -gt 8 ]; then
+      lt_ok=1
+    elif [ "$lt_minor" -eq 8 ] && [ "$lt_patch" -ge 4 ]; then
+      lt_ok=1
+    fi
+  fi
+  if [ "$lt_ok" -ne 1 ]; then
+    echo "[nvfp4] SKIP: cuBLASLt $rel is below the 12.8.4 policy floor; the NVFP4 W4A4 native path is ineligible on this node."
+    return 4
+  fi
+
+  # Build the kernels exactly like the run_48X witnesses (nvcc -> libfakcuda.a), for the
+  # detected device arch unless the operator pinned FAK_CUDA_ARCH.
+  local arch="${FAK_CUDA_ARCH:-sm_$sm}" inc="" lib="-L$pkg_dir" rpath="" ldpath=""
+  case "$arch" in sm_*) ;; *) arch="sm_$arch" ;; esac
+  for d in "$cuda_home/include" "$cuda_home/targets/x86_64-linux/include"; do
+    [ -d "$d" ] && inc="$inc -I$d"
+  done
+  [ -d /usr/lib/wsl/lib ] && { rpath="-Wl,-rpath,/usr/lib/wsl/lib"; ldpath="/usr/lib/wsl/lib"; }
+  for d in "$cuda_home/lib64" "$cuda_home/lib" "$cuda_home/targets/x86_64-linux/lib"; do
+    if [ -d "$d" ]; then
+      lib="$lib -L$d"; rpath="${rpath:+$rpath }-Wl,-rpath,$d"; ldpath="${ldpath:+$ldpath:}$d"
+    fi
+  done
+  echo "[nvfp4] nvcc compile kernels ($arch) ..."
+  if ! ( cd "$pkg_dir"
+    "$nvcc" -O3 -std=c++14 -arch="$arch" -ccbin "${FAK_NVCC_CCBIN:-/usr/bin/g++}" $inc \
+      -Xcompiler -fPIC -c cuda_kernels.cu -o cuda_kernels.o
+    ar rcs libfakcuda.a cuda_kernels.o ); then
+    echo "[nvfp4] FAIL: kernel build failed for $arch."
+    return 1
+  fi
+
+  # Run the witness with the require-env ON: on this qualified node any non-pass is a defect.
+  local go_scratch log rc
+  go_scratch="$(mktemp -d -t fakanvfp4.XXXXXX)"
+  log="$(mktemp -t fakanvfp4.XXXXXX.log)"
+  ( cd "$MOD_DIR"
+    export GOCACHE="${GOCACHE:-$go_scratch/build}"
+    export GOMODCACHE="${GOMODCACHE:-$go_scratch/mod}"
+    export GOPATH="${GOPATH:-$go_scratch/gopath}"
+    mkdir -p "$GOCACHE" "$GOMODCACHE" "$GOPATH"
+    export GOTOOLCHAIN="${GOTOOLCHAIN:-auto}"
+    export CGO_ENABLED=1
+    export CC="${CC:-/usr/bin/gcc}"
+    export CXX="${CXX:-/usr/bin/g++}"
+    export CGO_CFLAGS="$inc"
+    export CGO_LDFLAGS="$lib $rpath"
+    export LD_LIBRARY_PATH="${ldpath:+$ldpath:}${LD_LIBRARY_PATH:-}"
+    export FAK_REQUIRE_CUDA_NVFP4_NATIVE=1
+    go test -tags cuda -count=1 -v -run '^TestCUDANVFP4NativeScaleTileCrossings$' ./internal/compute/ ) >"$log" 2>&1
+  rc=$?
+  rm -rf "$go_scratch"
+  if grep -aq "no CUDA device\|not registered (no reachable CUDA device)" "$log"; then
+    tail -4 "$log" | sed 's/^/    | /'
+    echo "[nvfp4] SKIP: no reachable CUDA device on this node — NOT a pass"
+    rm -f "$log"
+    return 4
+  fi
+  if [ "$rc" -ne 0 ] || ! grep -aq -- "--- PASS: TestCUDANVFP4NativeScaleTileCrossings" "$log"; then
+    tail -6 "$log" | sed 's/^/    | /'
+    echo "[nvfp4] FAIL: the NVFP4 W4A4 native witness did not pass (go test rc=$rc)."
+    rm -f "$log"
+    return 1
+  fi
+  echo "[nvfp4] PASS: native cuBLASLt NVFP4 W4A4 GEMM is bit-exact vs the CPU oracle on sm_$sm (cuBLASLt $rel >= 12.8.4)."
+  rm -f "$log"
+  return 0
+}
 
 echo "== CUDA acceptance — every GPU witness, one verdict (SKIP is NOT pass) =="
 echo "[accept] repo root : $MOD_DIR"
-echo "[accept] families  : ${#FAM_LABEL[@]} (run_479/482/483/484/485/486/926 + GLM-DSA witness)"
+echo "[accept] families  : ${#FAM_LABEL[@]} (run_479/482/483/484/485/486/926 + GLM-DSA + NVFP4 W4A4 native)"
 echo
 
 declare -a STATE
@@ -66,12 +201,18 @@ n_pass=0; n_fail=0; n_skip=0; n_missing=0
 for i in "${!FAM_LABEL[@]}"; do
   label="${FAM_LABEL[$i]}"; cmd="${FAM_CMD[$i]}"
   printf -- "---- %-2s %s\n" "$((i + 1))" "$label"
-  if [ ! -f "$cmd" ]; then
+  log="$(mktemp -t fakaccept.XXXXXX.log)"
+  if declare -F "$cmd" >/dev/null 2>&1; then
+    # In-script witness: the no-new-.sh gate keeps the NVFP4 family in this file rather than
+    # as another tools/*.sh, so it registers as a function name, not a path.
+    "$cmd" >"$log" 2>&1
+  elif [ -f "$cmd" ]; then
+    bash "$cmd" >"$log" 2>&1
+  else
     echo "    MISSING: $cmd not on disk — cannot run this witness"
+    rm -f "$log"
     STATE[$i]="MISSING"; n_missing=$((n_missing + 1)); continue
   fi
-  log="$(mktemp -t fakaccept.XXXXXX.log)"
-  bash "$cmd" >"$log" 2>&1
   rc=$?
   # SKIP detection: the run_48X scripts exit 3/4 and log a no-GPU marker; mirror that here so
   # a CPU-only box reads SKIP, never PASS. Anything else non-zero is a real FAIL.
