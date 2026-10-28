@@ -567,8 +567,8 @@ var kvaluesIQ4NL = [16]float32{-127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 
 
 // dequantIQ4NL expands the GGML IQ4_NL 32-element block: a little-endian f16 scale d
 // followed by qkIQ4NL/2 bytes of packed 4-bit codes. The GGML layout
-// (dequantize_row_iq4_nl) is sequential — byte j holds element 2j in its low nibble and
-// element 2j+1 in its high nibble — and each code indexes kvaluesIQ4NL before the block
+// (dequantize_row_iq4_nl) is split-half — byte j holds element j in its low nibble and
+// element j+16 in its high nibble — and each code indexes kvaluesIQ4NL before the block
 // scale: y = d*kvaluesIQ4NL[code].
 func dequantIQ4NL(out []float32, raw []byte) {
 	dequantIQ4NLLimited(out, raw, 0)
@@ -585,8 +585,8 @@ func dequantIQ4NLScalar(out []float32, raw []byte) {
 		qs := raw[base+2 : base+blockIQ4NLBytes]
 		yi := block * qkIQ4NL
 		for j := 0; j < qkIQ4NL/2; j++ {
-			out[yi+2*j] = d * kvaluesIQ4NL[qs[j]&0x0f]
-			out[yi+2*j+1] = d * kvaluesIQ4NL[qs[j]>>4]
+			out[yi+j] = d * kvaluesIQ4NL[qs[j]&0x0f]
+			out[yi+j+qkIQ4NL/2] = d * kvaluesIQ4NL[qs[j]>>4]
 		}
 	}
 }

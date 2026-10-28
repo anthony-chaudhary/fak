@@ -15,11 +15,14 @@ import "testing"
 //	idx:  0    1    2    3    4    5    6    7   8   9  10  11  12  13  14   15
 //	val: -127 -104 -83  -65  -49  -35  -22  -10  1  13  25  38  53  69  89  113
 
+// Reference: llama.cpp 83078fec0db82d6b5a00d9599062c38c39145755,
+// ggml/src/ggml-quants.c, dequantize_row_iq4_nl.
+// fak-test:runtime fast est=1ms lane=default
 func TestDequantIQ4NLKnownAnswer(t *testing.T) {
 	// One 32-element block. d = 2.0 (f16 0x4000, little-endian 0x00 0x40). qs[j]
 	// packs the low nibble = j and the high nibble = 15-j, so the low nibble walks
 	// the codebook up and the high nibble walks it down — catching any low/high
-	// swap or position error. y[2j] = d*kvalues[j]; y[2j+1] = d*kvalues[15-j].
+	// swap or position error. y[j] = d*kvalues[j]; y[j+16] = d*kvalues[15-j].
 	raw := []byte{
 		0x00, 0x40, // d = 2.0
 		0xF0, 0xE1, 0xD2, 0xC3, 0xB4, 0xA5, 0x96, 0x87,
@@ -29,8 +32,8 @@ func TestDequantIQ4NLKnownAnswer(t *testing.T) {
 		t.Fatalf("test block is %d bytes, want blockIQ4NLBytes=%d", len(raw), blockIQ4NLBytes)
 	}
 	want := []float32{
-		-254, 226, -208, 178, -166, 138, -130, 106, -98, 76, -70, 50, -44, 26, -20, 2,
-		2, -20, 26, -44, 50, -70, 76, -98, 106, -130, 138, -166, 178, -208, 226, -254,
+		-254, -208, -166, -130, -98, -70, -44, -20, 2, 26, 50, 76, 106, 138, 178, 226,
+		226, 178, 138, 106, 76, 50, 26, 2, -20, -44, -70, -98, -130, -166, -208, -254,
 	}
 	tns := TensorInfo{Name: "iq4nl.test", Dims: []uint64{32}, Type: TensorIQ4_NL}
 	got, err := dequantF32(tns, raw)
