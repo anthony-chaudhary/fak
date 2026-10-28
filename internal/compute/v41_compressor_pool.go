@@ -35,8 +35,10 @@ func validateV41CompressorPool(kv, scores Tensor, ratio, width int) error {
 	if ratio < 2 || ratio > V41CompressorPoolMaxRatio || width <= 0 {
 		return fmt.Errorf("compute: V4.1 compressor pool ratio=%d width=%d outside the gated domain", ratio, width)
 	}
-	if uint64(ratio)*uint64(width) > math.MaxInt32 {
-		return fmt.Errorf("compute: V4.1 compressor pool ratio=%d width=%d exceeds the shader index range", ratio, width)
+	// The preceding positive ratio bound makes division safe. Do not multiply
+	// until both the native element count and the host byte count are bounded.
+	if width > math.MaxInt32/ratio || width > math.MaxInt/(ratio*4) {
+		return fmt.Errorf("compute: V4.1 compressor pool ratio=%d width=%d exceeds native index or host byte range", ratio, width)
 	}
 	for _, operand := range []struct {
 		name string

@@ -60,7 +60,10 @@ func (e *V41CompressorRingNonFiniteError) Unwrap() error { return ErrV41Compress
 // ValidateV41CompressorRingAlloc checks a ring geometry. Ratio one has no gate
 // and therefore no ring.
 func ValidateV41CompressorRingAlloc(ratio, width int) error {
-	if ratio < 2 || ratio > V41CompressorPoolMaxRatio || width <= 0 || uint64(ratio)*uint64(width) > math.MaxInt32 {
+	// Divide only after positive bounded ratio validation. Multiplication here
+	// can wrap even uint64 on 64-bit hosts; bytes must also fit the host int.
+	if ratio < 2 || ratio > V41CompressorPoolMaxRatio || width <= 0 ||
+		width > math.MaxInt32/ratio || width > math.MaxInt/(ratio*4) {
 		return fmt.Errorf("%w: ratio=%d width=%d", ErrV41CompressorRingGeometry, ratio, width)
 	}
 	return nil
