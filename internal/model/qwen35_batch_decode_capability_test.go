@@ -13,12 +13,14 @@ import (
 // numerical parity. Its projection receipts and logits are deliberately synthetic.
 type portableQwen35BatchBackend struct {
 	*sequencePrefillBackend
-	batchPath  string
-	batchCalls int
-	batchErr   error
-	badReceipt bool
-	request    compute.Qwen35IndependentDecodeBatchRequest
-	logits     compute.Tensor
+	batchPath   string
+	batchCalls  int
+	batchErr    error
+	badReceipt  bool
+	shortLogits bool
+	mutatedKV   []int
+	request     compute.Qwen35IndependentDecodeBatchRequest
+	logits      compute.Tensor
 }
 
 func (*portableQwen35BatchBackend) Name() string { return "portable-batch-test" }
@@ -28,6 +30,14 @@ func (*portableQwen35BatchBackend) Qwen35GDNPath() string {
 func (b *portableQwen35BatchBackend) Qwen35IndependentDecodeBatchPath() string {
 	return b.batchPath
 }
+func (b *portableQwen35BatchBackend) Read(t compute.Tensor) []float32 {
+	flat := b.sequencePrefillBackend.Read(t)
+	if b.shortLogits && t.Buf() == b.logits.Buf() && len(flat) > 0 {
+		return flat[:len(flat)-1]
+	}
+	return flat
+}
+
 func (b *portableQwen35BatchBackend) Qwen35IndependentDecodeBatch(req compute.Qwen35IndependentDecodeBatchRequest) (compute.Qwen35IndependentDecodeBatchResult, error) {
 	b.batchCalls++
 	b.request = req
@@ -51,6 +61,8 @@ func (b *portableQwen35BatchBackend) Qwen35IndependentDecodeBatch(req compute.Qw
 			b.Backend.Free(row)
 			attention++
 		}
+		// Capture real fixture mutation before production retirement can clear KV.
+		b.mutatedKV = append(b.mutatedKV, lane.KV.Len())
 	}
 	b.logits = compute.NewF32(b.Backend, []int{len(req.Lanes), vocab}, flat)
 	result := compute.Qwen35IndependentDecodeBatchResult{
@@ -246,18 +258,77 @@ func TestQwen35IndependentDecodeBatchCapabilityDispatch(t *testing.T) {
 		}
 	})
 
-	t.Run("malformed_selected_receipt", func(t *testing.T) {
-		bs, be, ids := newPortableQwen35Batch(t, 2)
-		be.badReceipt = true
-		fallbacks := 0
-		bs.ObserveSerialStep = func(string, time.Duration) { fallbacks++ }
-		var recovered any
-		func() { defer func() { recovered = recover() }(); bs.StepBatch(ids) }()
-		if recovered == nil || be.batchCalls != 1 || be.gdnCalls != 0 || fallbacks != 0 || bs.LastStepSharedPanels() != 0 || bs.LastStepMACs() != 0 {
-			t.Fatalf("panic=%v calls=%d scalar=%d fallbacks=%d", recovered, be.batchCalls, be.gdnCalls, fallbacks)
+	// fak-test:runtime fast est=100ms lane=default
+	// Both failures happen after the actual provider has mutated every lane.
+	// The estimate is inherited from this existing small synthetic host family.
+	for _, output := range []string{"malformed_selected_receipt", "short_selected_logits"} {
+		for _, cleanupPanic := range []bool{false, true} {
+			// Short logits frees its output before validation; inject retained-state
+			// cleanup failure only on the receipt branch, not that earlier Free.
+			if output == "short_selected_logits" && cleanupPanic {
+				continue
+			}
+			t.Run(fmt.Sprintf("%s/cleanup_panic_%t", output, cleanupPanic), func(t *testing.T) {
+				bs, be, ids := newPortableQwen35Batch(t, 2)
+				be.badReceipt = output == "malformed_selected_receipt"
+				be.shortLogits = output == "short_selected_logits"
+				cleanupCalls := 0
+				if cleanupPanic {
+					be.freeHook = func() { cleanupCalls++; panic("cleanup must not replace selected failure") }
+				}
+				fallbacks := 0
+				bs.ObserveSerialStep = func(string, time.Duration) { fallbacks++ }
+				var recovered any
+				func() { defer func() { recovered = recover() }(); bs.StepBatch(ids) }()
+				want := "model: malformed Qwen Vulkan independent decode logits"
+				if be.badReceipt {
+					want = fmt.Sprintf("model: malformed Qwen Vulkan independent decode result: lanes=2 panels=0 fallback=0 shape=[2 %d]", bs.M.Cfg.VocabSize)
+				}
+				if recovered != want {
+					t.Errorf("initial panic = %#v, want unchanged string %#v", recovered, want)
+				}
+				if len(be.mutatedKV) != 2 || be.mutatedKV[0] != 1 || be.mutatedKV[1] != 1 {
+					t.Fatalf("provider did not mutate both KV owners: %v", be.mutatedKV)
+				}
+				if be.batchCalls != 1 || be.gdnCalls != 0 || fallbacks != 0 || bs.LastStepSharedPanels() != 0 || bs.LastStepMACs() != 0 {
+					t.Errorf("calls=%d scalar=%d fallbacks=%d panels=%d macs=%d", be.batchCalls, be.gdnCalls, fallbacks, bs.LastStepSharedPanels(), bs.LastStepMACs())
+				}
+				var failure error
+				for i, s := range bs.Seqs {
+					if !s.BackendSessionClosed() || s.halFailure == nil || s.halFailure.Error() != want {
+						t.Errorf("lane %d survived mutated failure: closed=%t failure=%v", i, s.BackendSessionClosed(), s.halFailure)
+					}
+					if i == 0 {
+						failure = s.halFailure
+					} else if s.halFailure != failure {
+						t.Error("participants did not retain one failure")
+					}
+				}
+				if cleanupPanic && cleanupCalls == 0 {
+					t.Error("retirement never attempted injected cleanup")
+				}
+				if cleanupPanic && (bs.Seqs[0].qwen35HAL == nil || bs.Seqs[0].halKV == nil) {
+					t.Error("cleanup-panic fixture did not retain both structural pointers for batch retry")
+				}
+				// Restore a healthy provider: retry refusal must come from session state,
+				// not another provider error. Keep output ownership cleanup fixture-local.
+				be.freeHook = nil
+				be.badReceipt, be.shortLogits = false, false
+				if be.freeCalls[be.logits.Buf()] == 0 {
+					be.Free(be.logits)
+				}
+				var retry any
+				func() { defer func() { retry = recover() }(); bs.StepBatch(ids) }()
+				if failure == nil || retry != failure || be.batchCalls != 1 || be.gdnCalls != 0 || fallbacks != 0 {
+					t.Errorf("batch retry re-entered selected work: panic=%v failure=%v calls=%d scalar=%d fallbacks=%d", retry, failure, be.batchCalls, be.gdnCalls, fallbacks)
+				}
+				for i, s := range bs.Seqs {
+					func() { defer func() { retry = recover() }(); s.Step(41 + i) }()
+					if failure == nil || retry != failure || be.batchCalls != 1 || be.gdnCalls != 0 {
+						t.Errorf("lane %d scalar retry resumed: panic=%v failure=%v calls=%d scalar=%d", i, retry, failure, be.batchCalls, be.gdnCalls)
+					}
+				}
+			})
 		}
-		// Existing malformed-result handling does not own this synthetic panel.
-		// Release the fixture here without claiming production cleanup changed.
-		be.Free(be.logits)
-	})
+	}
 }

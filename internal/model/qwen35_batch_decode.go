@@ -73,6 +73,8 @@ func stepBatchQwen35HybridQ4KIndependent(bs *BatchSession, ids []int) ([][]float
 	lanes := make([]compute.Qwen35SequencePrefillRequest, len(ids))
 	finishes := make([]func(), 0, len(ids))
 	for i, s := range bs.Seqs {
+		// Failed cleanup can retain state pointers; they do not reopen a retired lane.
+		s.ensureOpenBackendSession()
 		if s == nil || s.M != bs.M || s.Backend == nil || s.qwen35HAL == nil || s.halKV == nil {
 			return nil, false
 		}
@@ -117,12 +119,16 @@ func stepBatchQwen35HybridQ4KIndependent(bs *BatchSession, ids []int) ([][]float
 		return nil, false
 	}
 	if result.Lanes != len(ids) || result.SharedProjectionPanels <= 0 || result.ProjectionMACs <= 0 || result.SerialFallbacks != 0 || result.Transfers.ActivationD2HBytes != 0 || result.Logits.Buf() == nil || len(result.Logits.Shape) != 2 || result.Logits.Shape[0] != len(ids) || result.Logits.Shape[1] != bs.M.Cfg.VocabSize {
-		panic(fmt.Sprintf("model: malformed Qwen Vulkan independent decode result: lanes=%d panels=%d fallback=%d shape=%v", result.Lanes, result.SharedProjectionPanels, result.SerialFallbacks, result.Logits.Shape))
+		cause := fmt.Errorf("model: malformed Qwen Vulkan independent decode result: lanes=%d panels=%d fallback=%d shape=%v", result.Lanes, result.SharedProjectionPanels, result.SerialFallbacks, result.Logits.Shape)
+		failQwen35IndependentDecodeBatchSessions(bs.Seqs, cause)
+		panic(cause.Error()) // preserve the existing initial string-panic contract
 	}
 	flat := be.Read(result.Logits)
 	be.Free(result.Logits)
 	if len(flat) != len(ids)*bs.M.Cfg.VocabSize {
-		panic("model: malformed Qwen Vulkan independent decode logits")
+		cause := fmt.Errorf("model: malformed Qwen Vulkan independent decode logits")
+		failQwen35IndependentDecodeBatchSessions(bs.Seqs, cause)
+		panic(cause.Error()) // retries retain cause through the session failure latch
 	}
 	bs.lastStepSharedPanels = result.SharedProjectionPanels
 	bs.lastStepMACs = result.ProjectionMACs
