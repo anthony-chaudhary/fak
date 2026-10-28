@@ -78,7 +78,11 @@ type GCWorktree struct {
 	Eligible      bool       `json:"eligible"`
 	Removed       bool       `json:"removed,omitempty"`
 	Reason        string     `json:"reason"`
+	ReasonCode    GCReason   `json:"reason_code,omitempty"`
 }
+
+// GCReason is a machine-readable selection or refusal reason.
+type GCReason string
 
 // GCOptions supplies the clock and the two independent liveness witnesses. Nil
 // PID/lease liveness functions mean "unknown" and therefore keep every worktree.
@@ -86,23 +90,34 @@ type GCWorktree struct {
 // to DefaultRoot(); explicit roots are principally for a reviewed custom worker root
 // and hermetic tests.
 type GCOptions struct {
-	Now          time.Time
-	MaxAge       time.Duration
-	Apply        bool
-	ProcessAlive ProcessLiveFn
-	LeaseLive    LeaseIDLiveFn
-	PathActive   WorktreePathActiveFn
-	AllowedRoots []string
+	// Targets narrows the registered inventory; it never grants eligibility.
+	// Callers must separately establish explicit owner release and retained-evidence
+	// disposition. Cleanliness/lease expiry cannot prove external source custody.
+	Targets []string
+	// ReceiptDir must name a fresh absolute directory outside every worker root.
+	// before.json is durable before mutation; result.json records the outcome.
+	ReceiptDir string
+	// syncReceiptDirectory is a test seam; nil uses filesystem directory Sync.
+	syncReceiptDirectory func(string) error
+	Now                  time.Time
+	MaxAge               time.Duration
+	Apply                bool
+	ProcessAlive         ProcessLiveFn
+	LeaseLive            LeaseIDLiveFn
+	PathActive           WorktreePathActiveFn
+	AllowedRoots         []string
 }
 
 // GCReport is the dry-run/apply result returned by GarbageCollect.
 type GCReport struct {
-	Mode      string       `json:"mode"`
-	MaxAgeSec int64        `json:"max_age_sec"`
-	Worktrees []GCWorktree `json:"worktrees"`
-	Failures  []GCFailure  `json:"failures"`
-	WouldReap int          `json:"would_reap"`
-	Reaped    int          `json:"reaped"`
+	Kept       []GCWorktree `json:"kept,omitempty"`
+	ReceiptDir string       `json:"receipt_dir,omitempty"`
+	Mode       string       `json:"mode"`
+	MaxAgeSec  int64        `json:"max_age_sec"`
+	Worktrees  []GCWorktree `json:"worktrees"`
+	Failures   []GCFailure  `json:"failures"`
+	WouldReap  int          `json:"would_reap"`
+	Reaped     int          `json:"reaped"`
 }
 
 type GCFailure struct {
@@ -231,18 +246,32 @@ func GarbageCollect(root string, git GitRunner, opts GCOptions) GCReport {
 	report := GCReport{
 		Mode:      "dry-run",
 		MaxAgeSec: int64(opts.MaxAge / time.Second),
-		Worktrees: GCList(root, git, opts),
+		Worktrees: []GCWorktree{},
 		Failures:  []GCFailure{},
 	}
 	if opts.Apply {
 		report.Mode = "apply"
+	}
+	gcPlan(root, git, opts, &report)
+	if len(report.Failures) > 0 {
+		return report
+	}
+	for _, row := range report.Worktrees {
+		if row.Eligible {
+			report.WouldReap++
+		}
+	}
+	if opts.ReceiptDir != "" {
+		if err := gcBeginReceipt(opts, &report); err != nil {
+			report.Failures = append(report.Failures, GCFailure{Path: opts.ReceiptDir, Reason: "pre_action_receipt_failed: " + err.Error()})
+			return report
+		}
 	}
 	for i := range report.Worktrees {
 		row := &report.Worktrees[i]
 		if !row.Eligible {
 			continue
 		}
-		report.WouldReap++
 		if opts.Apply {
 			failure := ""
 			lockErr := withPoolLaneLock(filepath.Dir(row.Path), LaneOf(row.Path), func() error {
@@ -264,9 +293,21 @@ func GarbageCollect(root string, git GitRunner, opts GCOptions) GCReport {
 				}
 				if reason := gcRemoveDirectoryFirst(root, row.Path, git); reason != "" {
 					failure = reason
+					// A failed administrative prune cannot undo filesystem removal.
+					// Report verified absence even when follow-on cleanup failed.
+					if _, err := os.Stat(row.Path); os.IsNotExist(err) {
+						row.Removed = true
+						row.ReasonCode = "removed_with_cleanup_failure"
+						report.Reaped++
+					} else if err != nil {
+						row.ReasonCode = "removal_state_unknown"
+					} else {
+						row.ReasonCode = "removal_failed_or_partial"
+					}
 					return nil
 				}
 				row.Removed = true
+				row.ReasonCode = "removed"
 				report.Reaped++
 				return nil
 			})
@@ -278,7 +319,150 @@ func GarbageCollect(root string, git GitRunner, opts GCOptions) GCReport {
 			}
 		}
 	}
+	if report.ReceiptDir != "" {
+		if err := gcWriteReceipt(opts, report.ReceiptDir, "result", report); err != nil {
+			report.Failures = append(report.Failures, GCFailure{Path: report.ReceiptDir, Reason: "result_receipt_failed: " + err.Error()})
+		}
+	}
 	return report
+}
+
+type gcReceipt struct {
+	Schema string   `json:"schema"`
+	Phase  string   `json:"phase"`
+	Report GCReport `json:"report"`
+}
+
+// Selection errors fail the entire invocation before receipt creation or deletion.
+func gcPlan(root string, git GitRunner, opts GCOptions, report *GCReport) {
+	rc, out := run(git, root, []string{"worktree", "list", "--porcelain"})
+	if rc != 0 {
+		report.Failures = append(report.Failures, GCFailure{Path: root, Reason: "worktree_inventory_failed"})
+		return
+	}
+	// The historical porcelain parser trims path fields. Do not allow that
+	// normalization to silently substitute a different filesystem identity.
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "worktree ") {
+			path := strings.TrimPrefix(line, "worktree ")
+			if path != strings.TrimSpace(path) || filepath.Clean(path) != path {
+				report.Failures = append(report.Failures, GCFailure{Path: path, Reason: "noncanonical_worktree_inventory"})
+				return
+			}
+		}
+	}
+	selected := map[string]bool{}
+	for _, target := range opts.Targets {
+		if err := gcCanonicalPath(target); err != nil || selected[target] {
+			report.Failures = append(report.Failures, GCFailure{Path: target, Reason: "invalid_or_duplicate_target"})
+			return
+		}
+		selected[target] = true
+	}
+	seen := map[string]bool{}
+	for _, path := range parseWorktreePaths(out) {
+		if !IsWorkerWorktree(path) {
+			continue
+		}
+		path = filepath.Clean(path)
+		if seen[path] {
+			report.Failures = append(report.Failures, GCFailure{Path: path, Reason: "ambiguous_worktree_inventory"})
+			return
+		}
+		seen[path] = true
+		row, eligible, reason := gcEntry(root, path, git, opts)
+		if !eligible {
+			row.Reason, row.ReasonCode = reason, GCReason(reason)
+			report.Kept = append(report.Kept, row)
+		} else if len(selected) > 0 && !selected[path] {
+			row.Eligible = false
+			row.Reason, row.ReasonCode = "not_selected", "not_selected"
+			report.Kept = append(report.Kept, row)
+		} else {
+			row.ReasonCode = "eligible"
+			report.Worktrees = append(report.Worktrees, row)
+		}
+	}
+	for _, target := range opts.Targets {
+		if !seen[target] {
+			report.Failures = append(report.Failures, GCFailure{Path: target, Reason: "target_not_registered"})
+		}
+	}
+}
+
+// Existing paths must be canonical, absolute, and free of symlink aliases.
+func gcCanonicalPath(path string) error {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path || strings.TrimSpace(path) != path {
+		return fmt.Errorf("path must be absolute and clean")
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return err
+	}
+	if resolved != path {
+		return fmt.Errorf("symlink path refused")
+	}
+	return nil
+}
+
+func gcBeginReceipt(opts GCOptions, report *GCReport) error {
+	path := opts.ReceiptDir
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path || strings.TrimSpace(path) != path {
+		return fmt.Errorf("receipt directory must be absolute and clean")
+	}
+	if err := gcCanonicalPath(filepath.Dir(path)); err != nil {
+		return err
+	}
+	for _, root := range opts.AllowedRoots {
+		abs, err := filepath.Abs(root)
+		if err != nil {
+			return err
+		}
+		resolved, err := filepath.EvalSymlinks(abs)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(resolved, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
+			return fmt.Errorf("receipt directory is inside worker root")
+		}
+	}
+	// Mkdir, unlike MkdirAll, reserves a new name without replacing any evidence.
+	if err := os.Mkdir(path, 0o700); err != nil {
+		return err
+	}
+	report.ReceiptDir = path
+	// Persist the newly reserved directory entry before relying on it. Unsupported
+	// directory Sync is an error for this opt-in mode, never permission to delete.
+	if err := gcSyncReceiptDirectory(opts, filepath.Dir(path)); err != nil {
+		return err
+	}
+	return gcWriteReceipt(opts, path, "before", *report)
+}
+
+func gcWriteReceipt(opts GCOptions, dir, phase string, report GCReport) error {
+	if err := atomicWriteJSON(filepath.Join(dir, phase+".json"), gcReceipt{"fak-worker-gc-receipt/1", phase, report}, 0o600); err != nil {
+		return err
+	}
+	return gcSyncReceiptDirectory(opts, dir)
+}
+
+func gcSyncReceiptDirectory(opts GCOptions, path string) error {
+	if opts.syncReceiptDirectory != nil {
+		return opts.syncReceiptDirectory(path)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func normalizeGCOptions(opts GCOptions) GCOptions {

@@ -85,6 +85,9 @@ func worktreeWorkerReap(argv []string) {
 
 func worktreeWorkerGC(argv []string) {
 	flags := flag.NewFlagSet("worktree worker gc", flag.ExitOnError)
+	receiptDir := flags.String("receipt-dir", "", "fresh absolute directory outside worker roots for atomic before.json/result.json receipts")
+	var targets []string
+	flags.Func("worktree", "restrict GC to this exact registered absolute path (repeatable; owner release and evidence disposition must already be reviewed)", func(path string) error { targets = append(targets, path); return nil })
 	maxAge := flags.Duration("max-age", workerworktree.DefaultColdAgeFloor, "minimum owner-stamp age before a dead-owner/released-lease worktree is eligible (for example 30m, 24h)")
 	dryRun := flags.Bool("dry-run", false, "list candidates and delete nothing (this is already the default)")
 	apply := flags.Bool("apply", false, "force-remove selected worktrees and prune git administrative entries")
@@ -92,16 +95,26 @@ func worktreeWorkerGC(argv []string) {
 	legacyMaxAge := flags.Duration("legacy-max-age", workerworktree.LegacyCandidateMaxAge, "with --candidates, minimum untouched age before a candidate whose name carries no owner identity is eligible")
 	root := flags.String("root", "", "repo root (default: discover from cwd)")
 	flags.Parse(argv)
+	if flags.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "fak worktree worker gc: unexpected positional arguments")
+		os.Exit(2)
+	}
 	if *dryRun && *apply {
 		fmt.Fprintln(os.Stderr, "fak worktree worker gc: --dry-run and --apply are mutually exclusive")
 		os.Exit(2)
 	}
 	repoRoot := worktreeWorkerRoot(*root)
+	if *candidates && (*receiptDir != "" || len(targets) > 0) {
+		fmt.Fprintln(os.Stderr, "fak worktree worker gc: --candidates cannot be combined with --receipt-dir or --worktree")
+		os.Exit(2)
+	}
 	if *candidates {
 		worktreeWorkerGCCandidates(repoRoot, *apply, *legacyMaxAge)
 		return
 	}
 	report := workerworktree.GarbageCollect(repoRoot, nil, workerworktree.GCOptions{
+		Targets:      targets,
+		ReceiptDir:   *receiptDir,
 		Now:          time.Now(),
 		MaxAge:       *maxAge,
 		Apply:        *apply,
@@ -113,6 +126,9 @@ func worktreeWorkerGC(argv []string) {
 		fmt.Fprintf(os.Stderr, "reaped %d/%d owner-dead, lease-released worktrees (apply)\n", report.Reaped, report.WouldReap)
 	} else {
 		fmt.Fprintf(os.Stderr, "would reap %d owner-dead, lease-released worktrees, 0 deleted (dry-run; pass --apply to collect)\n", report.WouldReap)
+	}
+	if len(report.Failures) > 0 {
+		os.Exit(1)
 	}
 }
 

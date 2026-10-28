@@ -17762,6 +17762,11 @@
           "category": "incidental",
           "reason": "Function-local dense KV payload cardinality predicate n/width == rows and n%width == 0 after positive-width admission. It checks full numeric K/V/raw or packed-code arrays, not planning, search, scheduling, lifecycle, or policy.",
           "token": "fullPlane"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private GC inventory and exact-target validation helper for existing GCOptions; it introduces no plan data type, persistence format, or planning authority. Targets only narrow existing GC eligibility.",
+          "token": "gcPlan"
         }
       ],
       "exclude": [
@@ -17945,6 +17950,7 @@
         "fixturePlanner",
         "foldCandidate",
         "fullPlane",
+        "gcPlan",
         "hostPlan",
         "idCandidate",
         "inKernelPlannerEPCoordinated",
