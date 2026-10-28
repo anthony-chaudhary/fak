@@ -252,6 +252,11 @@ func (e *FlashAttentionEngine) Execute(q, k, v []float32, qTokens, kvTokens int)
 				globalQPos = (kvTokens - qTokens) + qi
 			}
 
+			// Jump over fully expired window tiles once per query. Keep logical
+			// skip counters compatible with the former prefix scan; retained tiles
+			// and their online-softmax reduction order are unchanged.
+			firstKB, expiredWindowBlocks := flashAttentionWindowTileStart(kvTokens, globalQPos, e.cfg.SlidingWindow, Bc)
+
 			// Process each query head independently
 			for h := 0; h < nH; h++ {
 				kvh := h / grp
@@ -277,8 +282,10 @@ func (e *FlashAttentionEngine) Execute(q, k, v []float32, qTokens, kvTokens int)
 				l := float32(0.0)
 				acc := make([]float32, vd) // Local SIMD accumulator, strictly O(1) per thread
 
+				totalBlocks += expiredWindowBlocks
+				skippedWindow += expiredWindowBlocks
 				// Inner tile loop over key/value blocks Bc
-				for kb := 0; kb < kvTokens; kb += Bc {
+				for kb := firstKB; kb < kvTokens; kb += Bc {
 					kBlockEnd := kb + Bc
 					if kBlockEnd > kvTokens {
 						kBlockEnd = kvTokens
@@ -446,6 +453,21 @@ func (e *FlashAttentionEngine) Execute(q, k, v []float32, qTokens, kvTokens int)
 	e.ExecutionCount++
 
 	return out, nil
+}
+
+// flashAttentionWindowTileStart skips only wholly expired tiles. Execute has
+// validated positive kvTokens and tile size. A fully masked context may end in
+// a partial tile, so its logical skip count must use ceiling division.
+func flashAttentionWindowTileStart(kvTokens, queryPos, window, tile int) (int, int64) {
+	if window <= 0 || queryPos < window {
+		return 0, 0
+	}
+	lower := queryPos - window + 1
+	if lower >= kvTokens {
+		return kvTokens, int64((kvTokens-1)/tile + 1)
+	}
+	skipped := lower / tile
+	return skipped * tile, int64(skipped)
 }
 
 // ExecuteDecode executes single-query-token decode attention (qTokens=1).

@@ -2269,6 +2269,11 @@
           "category": "incidental",
           "reason": "Private ABI-qualified availability accessor requiring predecessor postprocess availability, opt-in QG flag, nonnull pipeline, eleven descriptors and36-byte push ABI. These meaningful guards expose availability, not separate numerical computation or command ownership.",
           "token": "fvk_have_qwen35_attention_qg"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private integer tile-boundary helper for existing sliding-window attention semantics; not a new attention algorithm or backend capability. Preserves retained softmax order and existing skip counters.",
+          "token": "flashAttentionWindowTileStart"
         }
       ],
       "exclude": [
@@ -2314,6 +2319,7 @@
         "estimated_attention_s",
         "executevulkanattentionwithdequantonce",
         "fak_qwen35_attention_postprocess_launch_count",
+        "flashAttentionWindowTileStart",
         "fvk_have_qwen35_attention_postprocess",
         "fvk_have_qwen35_attention_qg",
         "haveQwenAttentionPostprocess",
