@@ -51,6 +51,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunBuildMatrix(stdout, stderr, argv[1:])
 	case "buildcheck":
 		return devcmd.RunBuildCheck(stdout, stderr, argv[1:])
+	case "allocation-check":
+		return runAllocationCheck(stdout, stderr, argv[1:])
 	case "build-vulkan", "vulkan-build":
 		return devcmd.RunBuildVulkan(stdout, stderr, argv[1:])
 	case "build-cuda", "cuda-build":
@@ -215,6 +217,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  build [--profile P] [--out F] [--receipt F] [--json]  build fak and record phase timings")
 	fmt.Fprintln(w, "  build-matrix [flags]                  validate compile matrix across build variants and targets")
 	fmt.Fprintln(w, "  buildcheck [--vet] [packages...]       compile-check while masking peer WIP")
+	fmt.Fprintln(w, "  allocation-check GGUF --sidecar F     audit a GGUF tensor inventory against its RCO allocation sidecar")
 	fmt.Fprintln(w, "  build-vulkan [subcommand] [flags]     orchestrate Vulkan compute build (shaders|lib|build|binary|test|verify)")
 	fmt.Fprintln(w, "  build-cuda [subcommand] [flags]       orchestrate CUDA compute build (check|build|test|bench|binary)")
 	fmt.Fprintln(w, "  goal-launch [flags]                   launch a detached goal worker")
