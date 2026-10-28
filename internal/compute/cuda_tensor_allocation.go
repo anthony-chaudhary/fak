@@ -87,7 +87,13 @@ func (c *cudaBackend) devF16(shape []int, layout Layout) (Tensor, *cudaBuf) {
 // super-block bytes (d/dmin/scales/codes all packed; no scale side-channel). nbytes is the size of
 // the host byte slice (= (out*in/256)*144). The QuantSpec records the 256-elem super-block.
 func (c *cudaBackend) devRawKQuant(dt Dtype, shape []int, nbytes int) (Tensor, *cudaBuf) {
-	buf := c.dallocWeight(nbytes)
+	return c.devRawKQuantWithAllocator(dt, shape, nbytes, c.dallocWeight)
+}
+
+// devRawKQuantWithAllocator keeps the packed tensor descriptor identical for
+// immutable weights and independently owned offload allocations.
+func (c *cudaBackend) devRawKQuantWithAllocator(dt Dtype, shape []int, nbytes int, allocate func(int) *cudaBuf) (Tensor, *cudaBuf) {
+	buf := allocate(nbytes)
 	bits := 4
 	switch dt {
 	case Q2_K:

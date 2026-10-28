@@ -510,7 +510,7 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 				Class: class,
 			})
 		}
-		return c.uploadRawKQuant(t, hb)
+		return c.uploadRawKQuantClass(t, hb, class, site)
 	}
 	if t.Dtype == Q2_0 {
 		// An ALREADY-packed ternary Q2_0 host weight (2-bit codes + per-block f32 scales), copied
