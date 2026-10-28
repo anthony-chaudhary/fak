@@ -21,6 +21,28 @@ func prospectiveReuseFake(deltaPaths string) *fakeGit {
 	return g
 }
 
+// prospectiveTwoLostCASFake stubs TWO peers landing in the CAS gap: attempt 1
+// loses to peerhead222, attempt 2 loses to finalhead333, attempt 3 wins. Each
+// re-seed's reuse decision reads its own diff-tree reply: deltaA is the trunk
+// delta from the verdict base (oldhead000) to the first re-seed, deltaB the
+// trunk delta from the most recent verified base to the second re-seed.
+func prospectiveTwoLostCASFake(deltaA, deltaB string) *fakeGit {
+	g := isolatedHappyFake().
+		replyOnce("rev-parse", 0, "oldhead000\n").
+		replyOnce("rev-parse", 0, "peerhead222\n").
+		replyOnce("rev-parse", 0, "finalhead333\n").
+		replyOnce("update-ref", 1, "fatal: update_ref failed: ref moved").
+		replyOnce("update-ref", 1, "fatal: update_ref failed: ref moved").
+		replyOnce("update-ref", 0, "")
+	if deltaA != "" {
+		g.replyOnce("diff-tree", 0, deltaA)
+	}
+	if deltaB != "" {
+		g.replyOnce("diff-tree", 0, deltaB)
+	}
+	return g
+}
+
 func countPhase(receipt *LandCostReceipt, phase string) int {
 	n := 0
 	for _, p := range receipt.Phases {
@@ -117,6 +139,50 @@ func TestLandProspectiveVerifyRerunsWhenTrunkDeltaUnreadable(t *testing.T) {
 	}
 	if ran != 2 {
 		t.Fatalf("an unreadable trunk delta must re-verify, but the prospective verifier ran %d times", ran)
+	}
+}
+
+// Two peers landing in the CAS gap whose deltas BOTH leave the closure
+// untouched: the one GREEN verdict survives the whole storm — the verifier runs
+// once total and the receipt discloses the reuse.
+func TestLandProspectiveVerifyTwoLostCASDisjointReusesOnce(t *testing.T) {
+	ran := 0
+	res, receipt := runProspectiveReuseLand(t,
+		prospectiveTwoLostCASFake("docs/notes.md\n", "docs/GO-RUN.md\n"),
+		[]string{"pkg/calc/**", "internal/workerworktree/**"}, &ran)
+	if !res.OK || !res.Committed || !res.Applied {
+		t.Fatalf("retry after two lost CASes must land: %+v", res)
+	}
+	if ran != 1 {
+		t.Fatalf("two disjoint trunk deltas must reuse the verdict, but the prospective verifier ran %d times", ran)
+	}
+	if n := countPhase(receipt, "prospective-commit-verification"); n != 1 {
+		t.Fatalf("cost receipt must report exactly ONE prospective-commit-verification phase across two disjoint retries, got %d: %+v", n, receipt.Phases)
+	}
+	if !receipt.Reused {
+		t.Fatalf("a reused verdict must be disclosed in the cost receipt: %+v", receipt)
+	}
+	if !strings.Contains(receipt.CacheState, "prospective-verdict-reused") {
+		t.Fatalf("cache state must name what was reused: %+v", receipt)
+	}
+}
+
+// Two peers landing in the CAS gap where the SECOND delta touches the closure:
+// the first retry reuses the verdict, the second candidate is a different program
+// and must be re-verified before it may move the trunk.
+func TestLandProspectiveVerifyTwoLostCASOverlapReruns(t *testing.T) {
+	ran := 0
+	res, receipt := runProspectiveReuseLand(t,
+		prospectiveTwoLostCASFake("docs/notes.md\n", "pkg/calc/calc.go\n"),
+		[]string{"pkg/calc/**", "internal/workerworktree/**"}, &ran)
+	if !res.OK || !res.Committed {
+		t.Fatalf("retry after two lost CASes must land: %+v", res)
+	}
+	if ran != 2 {
+		t.Fatalf("a closure-touching trunk delta must re-verify, but the prospective verifier ran %d times", ran)
+	}
+	if n := countPhase(receipt, "prospective-commit-verification"); n != 2 {
+		t.Fatalf("cost receipt must report TWO prospective-commit-verification phases, got %d: %+v", n, receipt.Phases)
 	}
 }
 

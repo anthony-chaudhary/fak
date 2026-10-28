@@ -805,6 +805,18 @@ func worktreeWorkerPreparedVerificationBindingForPolicyAndTests(verify, fixPolic
 	return workerworktree.ProspectiveVerificationBinding{Command: string(recipe), Tags: uniq}, nil
 }
 
+// worktreeWorkerVerifyClosureGlobs turns the repeatable --verify-closure flag into
+// the dependency-closure globs a bounded CAS retry may reuse a GREEN prospective
+// verdict on: trimmed, empties dropped, order canonical. Nil means no closure was
+// declared, so every re-seeded attempt re-verifies (current behavior unchanged).
+func worktreeWorkerVerifyClosureGlobs(closures repeatedString) []string {
+	globs := normalizeWorkerLandStrings([]string(closures))
+	if len(globs) == 0 {
+		return nil
+	}
+	return globs
+}
+
 func normalizeWorkerLandStrings(values []string) []string {
 	normalized := make([]string, 0, len(values))
 	for _, value := range values {
@@ -1093,6 +1105,9 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 	expectedRecipeDigest := fs.String("expected-recipe-digest", "", "expected lowercase sha256 recipe digest (required by accept-pending)")
 	var paths repeatedString
 	fs.Var(&paths, "paths", "path to scope the commit to (repeatable); omit to commit the whole applied diff")
+	var verifyClosures repeatedString
+	fs.Var(&verifyClosures, "verify-closure",
+		"path glob declaring the pre-land verification's dependency closure (repeatable); on a lost-CAS retry a GREEN verdict is reused only when the trunk delta touches none of these")
 	if err := fs.Parse(argv); err != nil {
 		return returnEarly(workerworktree.Result{OK: false, Reason: err.Error()}, 2)
 	}
@@ -1183,6 +1198,12 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 			remote = "origin"
 		}
 		opts = append(opts, workerworktree.WithRecoveryRemote(remote, *requireRemote))
+	}
+	// One shared option keeps every land branch (prepare, direct, pending) identical:
+	// declare the verification's dependency closure so a bounded CAS retry may reuse
+	// a GREEN verdict when the trunk delta leaves it untouched (SB-33 / #3411).
+	if closures := worktreeWorkerVerifyClosureGlobs(verifyClosures); len(closures) > 0 {
+		opts = append(opts, workerworktree.WithVerificationClosure(closures...))
 	}
 	if mode != "legacy" {
 		if mode == "prepare-pending" || mode == "accept-pending" {
