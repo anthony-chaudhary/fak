@@ -1,6 +1,7 @@
 package ggufload
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -39,6 +40,17 @@ func OpenWeightsMapped(path string) (*WeightSource, error) {
 }
 
 func openWeights(path string, mmap bool) (*WeightSource, error) {
+	ws, err := openBackboneWeights(path, mmap)
+	if err != nil {
+		return nil, err
+	}
+	if err := attachDeepSeek41EngramCompanion(ws, path, mmap); err != nil {
+		return nil, errors.Join(err, ws.Close())
+	}
+	return ws, nil
+}
+
+func openBackboneWeights(path string, mmap bool) (*WeightSource, error) {
 	f, gg, size, err := openAndRead(path)
 	if err != nil {
 		return nil, err
