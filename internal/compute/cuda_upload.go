@@ -92,11 +92,12 @@ func (c *cudaBackend) uploadQ8Resident(t Tensor, hb HostBuffer) Tensor {
 	}
 	out, in := t.Shape[0], t.Shape[1]
 	blk := t.Quant.Block
-	if blk <= 0 || in%blk != 0 {
+	// DP4A consumes four codes at a time; partial blocks would lose their tail.
+	if blk <= 0 || blk%4 != 0 || in%blk != 0 {
 		panic(&CUDAOpError{
 			Op:    "Upload",
 			Site:  "upload-q8-resident",
-			Msg:   "cuda Upload(Q8_0 host) needs in divisible by QuantSpec.Block (block=" + itoaC(blk) + ")",
+			Msg:   "cuda Upload(Q8_0 host) needs QuantSpec.Block divisible by 4 and exactly dividing in (block=" + itoaC(blk) + ")",
 			Class: MemoryWeights,
 		})
 	}
