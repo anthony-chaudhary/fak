@@ -14850,6 +14850,11 @@
           "category": "incidental",
           "reason": "Per-invocation geometry, doubled-input index and Vulkan grid eligibility, not release maturity, support tier or hardware certification. Its genuine attention eligibility contract is separately positioned.",
           "token": "fvk_qwen35_attention_qg_supported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Diagnostic marker for unattempted packages after a failed prepush build; not a support level, maturity tier, or readiness claim.",
+          "token": "prepushIncompleteBuildCoverage"
         }
       ],
       "exclude": [
@@ -15091,6 +15096,7 @@
         "partial_provider_coverage",
         "payloadCompatibilitySupported",
         "platform_unsupported",
+        "prepushIncompleteBuildCoverage",
         "provenance_correctness",
         "recurrentevictunsupportederror",
         "registrationCoverage",

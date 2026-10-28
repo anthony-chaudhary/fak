@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1503,5 +1505,294 @@ func TestPrepushClaimWaitPreservesOwnerAndReleasePreservesSuccessor(t *testing.T
 	release()
 	if got, err := os.ReadFile(path); err != nil || string(got) != "successor\n" {
 		t.Fatalf("old release removed successor: %q %v", got, err)
+	}
+}
+
+// The real command launcher is exercised through this test binary standing in for
+// go. It records argv/environment/cwd before TestMain or test flag parsing runs.
+func init() {
+	trace := os.Getenv("FAK_PREPUSH_RETENTION_TRACE")
+	if trace == "" || len(os.Args) < 2 || os.Args[1] != "build" {
+		return
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		os.Exit(91)
+	}
+	f, err := os.OpenFile(trace, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		os.Exit(92)
+	}
+	err = json.NewEncoder(f).Encode(struct {
+		Args                 []string
+		Dir, Flags, Sentinel string
+	}{os.Args[1:], cwd, os.Getenv("GOFLAGS"), os.Getenv("FAK_PREPUSH_RETENTION_SENTINEL")})
+	_ = f.Close()
+	if err != nil {
+		os.Exit(93)
+	}
+	pkg := os.Args[len(os.Args)-1]
+	switch os.Getenv("FAK_PREPUSH_RETENTION_MODE") {
+	case "unbuildable":
+		fmt.Fprintln(os.Stderr, "package example.test/a: build constraints exclude all Go files in fixture")
+		os.Exit(1)
+	case "last":
+		if strings.HasSuffix(pkg, "/c") {
+			fmt.Fprintf(os.Stderr, "# %s\nundefined: retentionFixtureSymbol\n", pkg)
+			os.Exit(1)
+		}
+	case "mixed":
+		if strings.HasSuffix(pkg, "/b") {
+			fmt.Fprintln(os.Stderr, "package example.test/b is not in std")
+			os.Exit(1)
+		}
+		fallthrough
+	case "compiler":
+		if strings.HasSuffix(pkg, "/a") || strings.HasSuffix(pkg, "/c") {
+			fmt.Fprintf(os.Stderr, "# %s\nundefined: retentionFixtureSymbol\n", pkg)
+			os.Exit(1)
+		}
+	case "signal":
+		p, _ := os.FindProcess(os.Getpid())
+		_ = p.Kill()
+		os.Exit(94) // Unexpected on supported POSIX signal test hosts.
+	}
+	os.Exit(0)
+}
+
+func prepushRetentionFixture(t *testing.T, mode string) (string, string) {
+	t.Helper()
+	root, bin := t.TempDir(), t.TempDir()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "go"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	target := filepath.Join(bin, name)
+	if err := os.Link(self, target); err != nil {
+		// Cross-device temp roots cannot hardlink the running test executable.
+		in, err := os.Open(self)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer in.Close()
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0700)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, copyErr := io.Copy(out, in)
+		closeErr := out.Close()
+		if copyErr != nil || closeErr != nil {
+			t.Fatalf("copy helper: %v; close: %v", copyErr, closeErr)
+		}
+	}
+	trace := filepath.Join(root, "trace.jsonl")
+	t.Setenv("PATH", bin)
+	t.Setenv("GOFLAGS", "-p=1 -tags=retention_fixture")
+	t.Setenv("FAK_PREPUSH_RETENTION_SENTINEL", "preserved")
+	t.Setenv("FAK_PREPUSH_RETENTION_TRACE", trace)
+	t.Setenv("FAK_PREPUSH_RETENTION_MODE", mode)
+	return root, trace
+}
+
+func prepushRetentionTrace(t *testing.T, path string) [][]string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls [][]string
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	for {
+		var call struct {
+			Args                 []string
+			Dir, Flags, Sentinel string
+		}
+		if err := dec.Decode(&call); err == io.EOF {
+			break
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		if call.Dir != filepath.Dir(path) || call.Flags != "-p=1 -tags=retention_fixture" || call.Sentinel != "preserved" {
+			t.Fatalf("command context changed: %+v", call)
+		}
+		calls = append(calls, call.Args)
+	}
+	return calls
+}
+
+// fak-test:justify why=regression when=changed:cmd/fak/prepush_build.go
+// fak-test:runtime fast est=1s
+func TestGoBuildPackagesSerialExactCoverage(t *testing.T) {
+	root, trace := prepushRetentionFixture(t, "")
+	packages := []string{"example.test/a", "example.test/library", "example.test/b"}
+	detail, ok := prepushBuild(root, packages)
+	if !ok || detail != "" {
+		t.Fatalf("successful selected build = %v, %q", ok, detail)
+	}
+	calls := prepushRetentionTrace(t, trace)
+	var want [][]string
+	for _, pkg := range packages {
+		want = append(want, []string{"build", "-trimpath", "-buildvcs=false", "-o", os.DevNull, pkg})
+	}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("selected builds = %q, want one final-link invocation per package: %q", calls, want)
+	}
+	if !reflect.DeepEqual(packages, []string{"example.test/a", "example.test/library", "example.test/b"}) {
+		t.Fatal("selected package slice mutated")
+	}
+}
+
+// fak-test:justify why=regression when=changed:cmd/fak/prepush_build.go
+// fak-test:runtime fast est=1s
+func TestGoBuildPackagesFirstFailureStopsSuffix(t *testing.T) {
+	root, trace := prepushRetentionFixture(t, "compiler")
+	detail, ok := prepushBuild(root, []string{"example.test/a", "example.test/b", "example.test/c"})
+	if ok || !strings.Contains(detail, "# example.test/a") || strings.Contains(detail, "# example.test/c") || !strings.Contains(detail, "2 unattempted") {
+		t.Fatalf("first failure/coverage not reported: ok=%v detail=%q", ok, detail)
+	}
+	if calls := prepushRetentionTrace(t, trace); len(calls) != 1 {
+		t.Fatalf("launched suffix after first failure: %v", calls)
+	}
+}
+
+// fak-test:justify why=regression when=changed:cmd/fak/prepush_build.go
+// fak-test:runtime fast est=1s
+func TestGoBuildPackagesLastFailureRetainsCompleteAttemptCoverage(t *testing.T) {
+	root, trace := prepushRetentionFixture(t, "last")
+	detail, ok := prepushBuild(root, []string{"example.test/a", "example.test/b", "example.test/c"})
+	if ok || !reflect.DeepEqual(failingPackagesFromBuild(detail), []string{"example.test/c"}) || !strings.Contains(detail, "0 unattempted") || strings.Contains(detail, "incomplete selected-package coverage") {
+		t.Fatalf("last failure/coverage not reported: ok=%v detail=%q", ok, detail)
+	}
+	if calls := prepushRetentionTrace(t, trace); len(calls) != 3 {
+		t.Fatalf("successful prefix omitted: %v", calls)
+	}
+}
+
+// fak-test:justify why=regression when=changed:cmd/fak/prepush_build.go
+// fak-test:runtime fast est=1s
+func TestGoBuildPackagesIncompleteCoverageCannotBeBaselineExcused(t *testing.T) {
+	root, trace := prepushRetentionFixture(t, "compiler")
+	detail, ok := prepushBuild(root, []string{"example.test/a", "example.test/b", "example.test/c"})
+	if ok || !strings.Contains(detail, "# example.test/a") || !strings.Contains(detail, "incomplete selected-package coverage") {
+		t.Fatalf("incomplete build not fail-closed: ok=%v detail=%q", ok, detail)
+	}
+	if calls := prepushRetentionTrace(t, trace); len(calls) != 1 {
+		t.Fatalf("unattempted suffix was launched: %v", calls)
+	}
+	snap := snapshotPrepushSeams()
+	t.Cleanup(snap.restore)
+	oldTolerance := prepushBaselineTolerance
+	t.Cleanup(func() { prepushBaselineTolerance = oldTolerance })
+	prepushBaselineTolerance = true
+	prepushRevParse = func(string, string) (string, error) {
+		t.Fatal("incomplete coverage attempted baseline excuse")
+		return "", errors.New("unexpected baseline access")
+	}
+	res := trunkBuildResult{Detail: detail}
+	if code := resolveTipBuildFailure(root, "base", &res); code != 1 || res.Verdict != "TRUNK_WOULD_NOT_COMPILE" {
+		t.Fatalf("incomplete coverage escaped the gate: code=%d result=%+v", code, res)
+	}
+}
+
+// fak-test:justify why=regression when=changed:cmd/fak/prepush_build.go
+// fak-test:runtime fast est=1s
+func TestGoBuildPackagesSharedCommitContractUnchanged(t *testing.T) {
+	root, trace := prepushRetentionFixture(t, "unbuildable")
+	detail, ok := goBuildPackages(root, []string{"example.test/a", "example.test/b"})
+	if ok || detail != "package example.test/a: build constraints exclude all Go files in fixture" || !commitBuildCheckOnlyUnbuildable(detail) {
+		t.Fatalf("shared commit helper lost unbuildable classification: ok=%v detail=%q", ok, detail)
+	}
+	want := [][]string{{"build", "-trimpath", "-buildvcs=false", "example.test/a", "example.test/b"}}
+	if calls := prepushRetentionTrace(t, trace); !reflect.DeepEqual(calls, want) {
+		t.Fatalf("shared commit helper argv changed: %v", calls)
+	}
+}
+
+// fak-test:justify why=regression when=changed:cmd/fak/prepush_build.go
+// fak-test:runtime fast est=1s
+func TestGoBuildPackagesStopsAfterSignal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX signal exit status is not represented on Windows")
+	}
+	root, trace := prepushRetentionFixture(t, "signal")
+	detail, ok := prepushBuild(root, []string{"example.test/a", "example.test/b"})
+	if ok || len(failingPackagesFromBuild(detail)) != 0 || !strings.Contains(detail, "signal") {
+		t.Fatalf("signal treated as compiler verdict: ok=%v detail=%q", ok, detail)
+	}
+	if calls := prepushRetentionTrace(t, trace); len(calls) != 1 {
+		t.Fatalf("started descendant after interrupted command: %v", calls)
+	}
+}
+
+// fak-test:justify why=regression when=changed:cmd/fak/prepush_build.go
+// fak-test:runtime fast est=1ms
+func TestGoBuildPackagesEmptySelectionAndLaunchFailure(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	if detail, ok := prepushBuild(t.TempDir(), nil); !ok || detail != "" {
+		t.Fatalf("empty selection launched a command: ok=%v detail=%q", ok, detail)
+	}
+	if detail, ok := prepushBuild(t.TempDir(), []string{"example.test/a", "example.test/b"}); ok || detail == "" || len(failingPackagesFromBuild(detail)) != 0 {
+		t.Fatalf("missing go produced success/compile attribution: ok=%v detail=%q", ok, detail)
+	}
+}
+
+func prepushRetentionRealModule(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skipf("real Go toolchain unavailable: %v", err)
+	}
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOENV", "off")
+	t.Setenv("GOTOOLCHAIN", "local")
+	t.Setenv("GOPROXY", "off")
+	t.Setenv("GOFLAGS", "-p=1 -mod=readonly")
+	root := t.TempDir()
+	writePrepushFixtureFile(t, filepath.Join(root, "go.mod"), "module example.test/retention\n\ngo 1.26\n")
+	writePrepushFixtureFile(t, filepath.Join(root, "library", "library.go"), "package library\nfunc Value() int { return 3 }\n")
+	for _, name := range []string{"a", "b"} {
+		writePrepushFixtureFile(t, filepath.Join(root, name, "main.go"), "package main\nimport \"example.test/retention/library\"\nfunc main() { println(library.Value()) }\n")
+	}
+	return root
+}
+
+// fak-test:justify why=regression when=changed:cmd/fak/prepush_build.go
+// fak-test:runtime medium est=3s
+func TestGoBuildPackagesRealFinalLinksLeaveNoExecutable(t *testing.T) {
+	root := prepushRetentionRealModule(t)
+	detail, ok := prepushBuild(root, []string{"example.test/retention/a", "example.test/retention/library", "example.test/retention/b"})
+	if !ok {
+		t.Fatalf("real final links failed: %s", detail)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	if !reflect.DeepEqual(names, []string{"a", "b", "go.mod", "library"}) {
+		t.Fatalf("verification-only build left output in source root: %v", names)
+	}
+}
+
+// fak-test:justify why=regression when=changed:cmd/fak/prepush_build.go
+// fak-test:runtime medium est=5s
+func TestGoBuildPackagesRealCgoFinalLinkFailure(t *testing.T) {
+	cc, err := exec.LookPath("cc")
+	if err != nil {
+		t.Skipf("real host C compiler unavailable: %v", err)
+	}
+	root := prepushRetentionRealModule(t)
+	t.Setenv("CGO_ENABLED", "1")
+	t.Setenv("CC", cc)
+	writePrepushFixtureFile(t, filepath.Join(root, "broken", "main.go"), "package main\n/* extern int retention_missing_symbol(void); */\nimport \"C\"\nfunc main() { println(C.retention_missing_symbol()) }\n")
+	detail, ok := prepushBuild(root, []string{"example.test/retention/a", "example.test/retention/broken", "example.test/retention/b"})
+	if ok || !strings.Contains(detail, "retention_missing_symbol") || !strings.Contains(detail, "link") {
+		t.Fatalf("missing final C symbol was not rejected by linker: ok=%v detail=%q", ok, detail)
 	}
 }
