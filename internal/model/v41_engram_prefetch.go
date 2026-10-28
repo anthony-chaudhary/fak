@@ -134,6 +134,25 @@ func (c *V41EngramRowCache) gatherKnownRowsOwned(rows []uint32, contiguous bool)
 	if maxRows < 1 {
 		maxRows = 1
 	}
+	// Bound one reusable read slab by the largest planned consecutive miss
+	// span, not by all requested rows or the cache budget. Readahead can only
+	// split or eliminate these spans. serve and cache admission copy their
+	// bytes, so no returned row or resident entry borrows this scratch.
+	scratchRows := 0
+	for lo := 0; lo < len(missing); {
+		hi := lo + 1
+		for hi < len(missing) && hi-lo < maxRows && uint64(missing[hi]) == uint64(missing[hi-1])+1 {
+			hi++
+		}
+		if hi-lo > scratchRows {
+			scratchRows = hi - lo
+		}
+		lo = hi
+	}
+	var scratch []byte
+	if scratchRows > 0 {
+		scratch = make([]byte, scratchRows*c.opts.RowBytes)
+	}
 	for lo := 0; lo < len(missing); {
 		// Readahead from an earlier range may already hold this row.
 		resident, err := serveResident(missing[lo])
@@ -153,7 +172,7 @@ func (c *V41EngramRowCache) gatherKnownRowsOwned(rows []uint32, contiguous bool)
 		}
 		count := hi - lo
 		want := count * c.opts.RowBytes
-		buf := make([]byte, want)
+		buf := scratch[:want:want]
 		c.stats.Misses += int64(count)
 		n, err := c.src.ReadRows(int(missing[lo]), count, buf)
 		if n < 0 || n > want {
