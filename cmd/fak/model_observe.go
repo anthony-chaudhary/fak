@@ -9,10 +9,12 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/modelperfobs"
+	"github.com/anthony-chaudhary/fak/pkg/hwutil"
 )
 
 var measureHostMemoryRooflineForObserve = modelperfobs.MeasureHostMemoryRoofline
@@ -89,6 +91,11 @@ func cmdModelObserve(args []string) {
 		}
 	case "cache-state-bench":
 		if err := runModelObserveStateBench(args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, "model-observe:", err)
+			os.Exit(1)
+		}
+	case "hwutil":
+		if err := runModelObserveHWUtil(args[1:]); err != nil {
 			fmt.Fprintln(os.Stderr, "model-observe:", err)
 			os.Exit(1)
 		}
@@ -540,6 +547,58 @@ func modelObserveRooflineCollectBudget(o modelperfobs.CollectionOptions, rooflin
 	return total, nil
 }
 
+// runModelObserveHWUtil serves the hardware-usage telemetry plane next to
+// the bandwidth surface: one bounded sample of host/device/link/tier
+// counters in the frozen fak.hwutil.v1 shape.
+func runModelObserveHWUtil(args []string) error {
+	if len(args) > 0 && args[0] == "collect" {
+		return runModelObserveHWUtilCollect(args[1:])
+	}
+	fmt.Fprintln(os.Stderr, "usage: fak model-observe hwutil collect [--interval S] [--samples N] [--json] [--drill node|device|link|tier] [--cap N]")
+	return fmt.Errorf("unknown hwutil subcommand")
+}
+
+func runModelObserveHWUtilCollect(args []string) error {
+	fs := flag.NewFlagSet("model-observe hwutil collect", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	interval := fs.Duration("interval", hwutil.DefaultInterval, "delta window between polls")
+	samples := fs.Int("samples", 1, "number of windows to average")
+	jsonOut := fs.Bool("json", false, "emit the full fak.hwutil.v1 JSON document (nulls preserved)")
+	drill := fs.String("drill", string(hwutil.DrillNode), "text drill level: node, device, link, or tier")
+	capLines := fs.Int("cap", hwutil.MaxTextLines, "hard text line cap (clamped to 1.."+strconv.Itoa(hwutil.MaxTextLines)+")")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	level, err := hwutil.ParseDrillLevel(*drill)
+	if err != nil {
+		return err
+	}
+	if *samples < 1 {
+		return fmt.Errorf("--samples must be >= 1")
+	}
+	if *interval <= 0 {
+		return fmt.Errorf("--interval must be positive")
+	}
+	snap, err := hwutil.Collect(context.Background(), hwutil.Options{Interval: *interval, Samples: *samples})
+	if err != nil {
+		return err
+	}
+	if *jsonOut {
+		raw, err := hwutil.RenderJSON(snap)
+		if err != nil {
+			return err
+		}
+		_, err = os.Stdout.Write(append(raw, '\n'))
+		return err
+	}
+	text, err := hwutil.RenderText(snap, hwutil.TextOptions{Drill: level, MaxLines: *capLines})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stdout, text)
+	return nil
+}
+
 func runModelObserveStateBench(args []string) error {
 	fs := flag.NewFlagSet("model-observe cache-state-bench", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -599,5 +658,6 @@ func modelObserveUsage() string {
 		"       fak model-observe bandwidth collect --host-counter-import FILE --host-counter-provider PROVIDER --host-counter-scope system|socket|controller [--host-counter-scope-id ID --host-counter-format FORMAT --capture-start RFC3339 --capture-end RFC3339]\n" +
 		"       fak model-observe bandwidth collect --apple-memory-import FILE --apple-memory-provider PROVIDER --apple-memory-provider-version VERSION --apple-memory-scope system|package [--apple-memory-format generic-json --apple-memory-interval DURATION --capture-start RFC3339 --capture-end RFC3339]\n" +
 		"       fak model-observe cache-state-bench [--output FILE --pretty=true]\n" +
-		"       fak model-observe cache-state-bench --verify FILE"
+		"       fak model-observe cache-state-bench --verify FILE\n" +
+		"       fak model-observe hwutil collect [--interval S] [--samples N] [--json] [--drill node|device|link|tier] [--cap N]"
 }
