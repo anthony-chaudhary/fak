@@ -255,6 +255,27 @@ artifact is tracked separately in issue #6024.
 
 ## Build profiles
 
+`fak-dev build --profile dev --json` runs the canonical recipe and writes a
+`fak.build-receipt.v1` receipt to `.fak/build-receipt.json` (override with
+`--receipt`). The receipt separates provenance, compile/link, artifact inspection,
+and smoke timings. Smoke invokes the exact output path with `version --json`,
+then `runtime-capabilities` (which always emits JSON and takes no `--json` flag).
+It validates the version identity and the capability schema, requires runnable
+binary/control-plane declarations, and checks that both reports name the same
+OS and architecture. Build success also requires a stamped binary commit equal
+to the receipt's source commit. Source probes discard inherited Git routing
+variables; the build receives the owning checkout's explicit `GIT_DIR` and
+`GIT_WORK_TREE`, preserving linked-worktree provenance. Each command has a
+10-second deadline, a 1-second pipe-drain
+bound, and separate 64-KiB stdout/stderr limits; exceeding a bound fails the build.
+JSON validation reads stdout; stderr warnings remain diagnostic evidence. The
+`smoke.runtime` result records the capability probe separately. Optional
+`failure_code` distinguishes `process_error`, `timeout`, `output_limit`,
+`invalid_identity`, `invalid_capabilities`, `platform_mismatch`, and
+`source_mismatch`. A pass proves
+these two verbs execute in the built artifact; model execution, GPU readiness,
+and other verbs still require their own behavioral witnesses.
+
 Every shipping build routes through **one** entrypoint, `scripts/build.sh`, so the
 `-trimpath`/`-ldflags`/version-stamp flags live in a single place and cannot drift apart
 (both Dockerfiles and `release-artifacts.yml` call it; the guard `tools/build_entrypoint_test.py`

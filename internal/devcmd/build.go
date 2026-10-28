@@ -2,6 +2,7 @@ package devcmd
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/runtimecap"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -84,11 +86,14 @@ type buildArtifact struct {
 }
 
 type buildSmokeResult struct {
-	Command  []string `json:"command"`
-	Outcome  string   `json:"outcome"`
-	ExitCode int      `json:"exit_code"`
-	Output   string   `json:"output,omitempty"`
-	Error    string   `json:"error,omitempty"`
+	Command     []string          `json:"command"`
+	Outcome     string            `json:"outcome"`
+	ExitCode    int               `json:"exit_code"`
+	Output      string            `json:"output,omitempty"`
+	Stderr      string            `json:"stderr,omitempty"`
+	FailureCode string            `json:"failure_code,omitempty"`
+	Error       string            `json:"error,omitempty"`
+	Runtime     *buildSmokeResult `json:"runtime,omitempty"`
 }
 
 type buildReceipt struct {
@@ -115,6 +120,7 @@ type buildProvenance struct {
 	Source       buildSource
 	Toolchain    buildToolchain
 	PackageCount int
+	GitDirectory string
 }
 
 var (
@@ -126,12 +132,13 @@ var (
 	buildSmoke            = smokeBuildArtifact
 	buildWriteReceipt     = writeBuildReceiptAtomic
 	buildCaptureOutput    = buildCommandOutput
+	buildSmokeTimeout     = 10 * time.Second
 )
 
 // RunBuild creates the runnable fak product through scripts/build.sh, the repository's
 // sole build-flag recipe. It records the whole path rather than presenting compile time
 // alone as build time: source/toolchain provenance, compile+link, artifact inspection,
-// and a real version smoke are separate ordered phases in the durable receipt.
+// and version/runtime capability probes are ordered phases in the durable receipt.
 func RunBuild(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("fak build", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -201,6 +208,9 @@ func RunBuild(stdout, stderr io.Writer, argv []string) int {
 	receipt.Toolchain = provenance.Toolchain
 	receipt.PackageCount = provenance.PackageCount
 	receipt.Command = canonicalBuildCommand(root, output, *profile, provenance.Toolchain, settings, pgo)
+	// Go's VCS discovery skips a worktree's .git file; pin Git to this source.
+	receipt.Command.Environment["GIT_DIR"] = provenance.GitDirectory
+	receipt.Command.Environment["GIT_WORK_TREE"] = root
 
 	_, err = runBuildPhase(&receipt, "output_prepare", func() (struct{}, error) {
 		return struct{}{}, buildPrepareOutput(output)
@@ -240,6 +250,18 @@ func RunBuild(stdout, stderr io.Writer, argv []string) int {
 
 	phaseStart = buildNow()
 	smoke := buildSmoke(output)
+	if smoke.Outcome == "success" {
+		var identity struct {
+			Commit  string `json:"commit"`
+			Stamped bool   `json:"stamped"`
+		}
+		if err := json.Unmarshal([]byte(smoke.Output), &identity); err != nil ||
+			!identity.Stamped || identity.Commit == "" || identity.Commit != receipt.Source.Commit {
+			smoke.Outcome, smoke.ExitCode = "failed", 1
+			smoke.FailureCode = buildSmokeFailureSource
+			smoke.Error = fmt.Sprintf("artifact commit %q does not attest source commit %q", identity.Commit, receipt.Source.Commit)
+		}
+	}
 	if smoke.Output != "" {
 		fmt.Fprintln(stderr, smoke.Output)
 	}
@@ -256,8 +278,12 @@ func RunBuild(stdout, stderr io.Writer, argv []string) int {
 		if code == 0 {
 			code = 1
 		}
+		failedCommand := smoke.Command
+		if smoke.Runtime != nil && smoke.Runtime.Outcome != "success" {
+			failedCommand = smoke.Runtime.Command
+		}
 		return finishBuild(stdout, stderr, *asJSON, overallStart, receiptPath, &receipt, code,
-			fmt.Errorf("artifact smoke failed; run `%s version --json`: %w", output, smokeErr))
+			fmt.Errorf("artifact smoke failed; run `%s`: %w", strings.Join(failedCommand, " "), smokeErr))
 	}
 
 	return finishBuild(stdout, stderr, *asJSON, overallStart, receiptPath, &receipt, 0, nil)
@@ -503,6 +529,14 @@ func renderBuildCommand(command buildCommand) string {
 }
 
 func gatherBuildProvenance(root string) (buildProvenance, error) {
+	gitDirectoryRaw, err := buildCaptureOutput(root, "git", "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return buildProvenance{}, fmt.Errorf("resolve Git directory: %w", err)
+	}
+	gitDirectory := strings.TrimSpace(string(gitDirectoryRaw))
+	if !filepath.IsAbs(gitDirectory) {
+		return buildProvenance{}, errors.New("resolve Git directory: expected an absolute path")
+	}
 	commitRaw, err := buildCaptureOutput(root, "git", "rev-parse", "HEAD")
 	if err != nil {
 		return buildProvenance{}, fmt.Errorf("resolve commit: %w", err)
@@ -554,12 +588,14 @@ func gatherBuildProvenance(root string) (buildProvenance, error) {
 			GOCache: envLines[2], CGOEnabled: envLines[3], GoToolchain: envLines[4], GoFlags: envLines[5],
 		},
 		PackageCount: packageCount,
+		GitDirectory: filepath.Clean(gitDirectory),
 	}, nil
 }
 
 func buildCommandOutput(root, name string, args ...string) ([]byte, error) {
 	cmd := windowgate.Command(name, args...)
 	cmd.Dir = root
+	cmd.Env = buildGitEnv(os.Environ())
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -645,7 +681,7 @@ func executeCanonicalBuild(execution buildExecution, stderr io.Writer) (int, err
 	command := execution.command
 	cmd := windowgate.Command(command.Argv[0], command.Argv[1:]...)
 	cmd.Dir = command.Directory
-	cmd.Env = overriddenBuildEnv(os.Environ(), execution.environment)
+	cmd.Env = overriddenBuildEnv(buildGitEnv(os.Environ()), execution.environment)
 	cmd.Stdout = stderr
 	cmd.Stderr = stderr
 	windowgate.ConfigureBackgroundCommand(cmd)
@@ -685,6 +721,21 @@ func overriddenBuildEnv(base []string, overrides map[string]string) []string {
 	return result
 }
 
+func buildGitEnv(base []string) []string {
+	env := make([]string, 0, len(base))
+	for _, entry := range base {
+		name, _, _ := strings.Cut(entry, "=")
+		switch strings.ToUpper(name) {
+		case "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE",
+			"GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_PREFIX",
+			"GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM":
+			continue
+		}
+		env = append(env, entry)
+	}
+	return env
+}
+
 func inspectBuildArtifact(path string) (buildArtifact, error) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -705,28 +756,113 @@ func inspectBuildArtifact(path string) (buildArtifact, error) {
 	return buildArtifact{Path: path, SizeBytes: info.Size(), SHA256: hex.EncodeToString(h.Sum(nil))}, nil
 }
 
+const (
+	buildSmokeOutputLimit         = 64 << 10
+	buildSmokeFailureProcess      = "process_error"
+	buildSmokeFailureTimeout      = "timeout"
+	buildSmokeFailureOutput       = "output_limit"
+	buildSmokeFailureIdentity     = "invalid_identity"
+	buildSmokeFailureCapabilities = "invalid_capabilities"
+	buildSmokeFailurePlatform     = "platform_mismatch"
+	buildSmokeFailureSource       = "source_mismatch"
+)
+
+type buildSmokeOutput struct {
+	data     []byte
+	overflow bool
+	cancel   context.CancelFunc
+}
+
+func (out *buildSmokeOutput) Write(p []byte) (int, error) {
+	n := len(p)
+	room := buildSmokeOutputLimit - len(out.data)
+	out.data = append(out.data, p[:min(room, n)]...)
+	if n > room {
+		out.overflow = true
+		out.cancel()
+	}
+	return n, nil
+}
+
 func smokeBuildArtifact(path string) buildSmokeResult {
-	result := buildSmokeResult{Command: []string{path, "version", "--json"}, Outcome: "failed"}
-	cmd := windowgate.Command(path, "version", "--json")
+	result := runBuildSmokeCommand(path, "version", "--json")
+	if result.Outcome != "success" {
+		return result
+	}
+	var identity struct {
+		AppVersion string `json:"app_version"`
+		Go         string `json:"go"`
+		OS         string `json:"os"`
+		Arch       string `json:"arch"`
+	}
+	if err := json.Unmarshal([]byte(result.Output), &identity); err != nil {
+		result.Error = fmt.Sprintf("version --json returned invalid identity: %v", err)
+	} else if strings.TrimSpace(identity.AppVersion) == "" || strings.TrimSpace(identity.Go) == "" || strings.TrimSpace(identity.OS) == "" || strings.TrimSpace(identity.Arch) == "" {
+		result.Error = "version --json requires non-empty app_version, go, os, and arch"
+	}
+	if result.Error != "" {
+		result.Outcome, result.ExitCode = "failed", 1
+		result.FailureCode = buildSmokeFailureIdentity
+		return result
+	}
+
+	runtime := runBuildSmokeCommand(path, "runtime-capabilities")
+	result.Runtime = &runtime
+	if runtime.Outcome == "success" {
+		var report runtimecap.Report
+		if err := json.Unmarshal([]byte(runtime.Output), &report); err != nil {
+			runtime.Error = fmt.Sprintf("invalid capability report: %v", err)
+			runtime.FailureCode = buildSmokeFailureCapabilities
+		} else if report.Schema != runtimecap.Schema || !report.BinaryRunnable || !report.ControlPlaneRunnable {
+			runtime.Error = "requires fak-runtime-capabilities/1 with binary_runnable and control_plane_runnable true"
+			runtime.FailureCode = buildSmokeFailureCapabilities
+		} else if report.GOOS != identity.OS || report.GOARCH != identity.Arch {
+			runtime.Error = "capability platform does not match version identity"
+			runtime.FailureCode = buildSmokeFailurePlatform
+		}
+		if runtime.Error != "" {
+			runtime.Outcome, runtime.ExitCode = "failed", 1
+		}
+	}
+	if runtime.Outcome != "success" {
+		result.Outcome, result.ExitCode = "failed", runtime.ExitCode
+		result.Error = "runtime-capabilities: " + runtime.Error
+		result.FailureCode = runtime.FailureCode
+	}
+	return result
+}
+
+func runBuildSmokeCommand(path string, args ...string) buildSmokeResult {
+	result := buildSmokeResult{Command: append([]string{path}, args...), Outcome: "failed"}
+	ctx, cancel := context.WithTimeout(context.Background(), buildSmokeTimeout)
+	defer cancel()
+	stdout, stderr := buildSmokeOutput{cancel: cancel}, buildSmokeOutput{cancel: cancel}
+	cmd := windowgate.CommandContext(ctx, path, args...)
 	windowgate.ConfigureBackgroundCommand(cmd)
-	out, err := cmd.CombinedOutput()
-	result.Output = strings.TrimSpace(string(out))
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	cmd.WaitDelay = time.Second
+	err := cmd.Run()
+	result.Output = strings.TrimSpace(string(stdout.data))
+	result.Stderr = strings.TrimSpace(string(stderr.data))
 	if cmd.ProcessState != nil {
 		result.ExitCode = cmd.ProcessState.ExitCode()
+	}
+	if result.ExitCode < 0 || err != nil && result.ExitCode == 0 {
+		result.ExitCode = 1
+	}
+	if stdout.overflow || stderr.overflow {
+		result.ExitCode = 1
+		result.FailureCode = buildSmokeFailureOutput
+		result.Error = fmt.Sprintf("output exceeded %d bytes per stream", buildSmokeOutputLimit)
+	} else if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		result.FailureCode = buildSmokeFailureTimeout
+		result.Error = fmt.Sprintf("timed out after %s", buildSmokeTimeout)
 	} else if err != nil {
-		result.ExitCode = 1
-	}
-	if err != nil {
+		result.FailureCode = buildSmokeFailureProcess
 		result.Error = err.Error()
-		return result
+	} else {
+		result.Outcome = "success"
 	}
-	var payload any
-	if err := json.Unmarshal(out, &payload); err != nil {
-		result.Error = fmt.Sprintf("version --json returned invalid JSON: %v", err)
-		result.ExitCode = 1
-		return result
-	}
-	result.Outcome = "success"
 	return result
 }
 
