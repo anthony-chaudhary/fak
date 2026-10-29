@@ -70,6 +70,9 @@ type CUDAConfig struct {
 	Toolchain          *Toolchain           // Pre-discovered or custom toolchain
 	Stdout             io.Writer            // Standard output stream
 	Stderr             io.Writer            // Standard error stream
+
+	EnableFlashMLAPrefill bool // Explicit SM100a/103a FlashMLA sparse-prefill candidate
+	DisableFlashMLALDRed  bool // Select the pinned donor's non-LD.RED specialization; requires FlashMLA
 }
 
 // BuildArtifact records metadata about a generated binary or static library.
