@@ -195,6 +195,9 @@ type InKernelPlanner struct {
 	// this planner builds and closes PER REQUEST, so without a planner-scoped ledger the whole
 	// ladder's accounting is destroyed at each teardown and no serve surface can see it.
 	moeResidencyState
+	// planLedgerDiffState is the once-per-serve first-prefill planner-vs-allocation-ledger
+	// diff (inkernel_plan_ledger_diff.go). Observability only.
+	planLedgerDiffState
 
 	// inKernelTurnTaxState is the per-turn cache-decision ledger (#1538, inkernel_turntax.go),
 	// embedded for the same reason as moeResidencyState directly above: the decision is taken

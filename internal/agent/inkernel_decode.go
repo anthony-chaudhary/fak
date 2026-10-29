@@ -631,6 +631,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		// Snapshot the Q4_K GEMM route this prefill observed before decode (an MTP
 		// verify panel can dispatch the same GEMM) so the summary line attributes it.
 		p.prefillQ4KGEMM.Store(s.Q4KPrefillGEMMObservation())
+		p.observeFirstPrefillPlanLedgerDiff(len(ids), maxNew)
 	}
 	if err = ctx.Err(); err != nil {
 		return

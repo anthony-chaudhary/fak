@@ -558,6 +558,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		prefillS = time.Since(tp).Seconds()
 		enginestep.Default.ObservePhase(enginestep.PhasePrefill, time.Since(tp))
 		p.recordNativePhase(nativePhaseTraceID(ctx), NativePhasePrefill, tp, time.Since(tp), true)
+		p.observeFirstPrefillPlanLedgerDiff(len(ids), maxNew)
 	} else {
 		logits = append([]float32(nil), cachedLogits...)
 	}
@@ -1358,6 +1359,7 @@ func (p *InKernelPlanner) generateReusedMetalMTP(
 		prefillS = time.Since(tp).Seconds()
 		enginestep.Default.ObservePhase(enginestep.PhasePrefill, time.Since(tp))
 		p.recordNativePhase(nativePhaseTraceID(ctx), NativePhasePrefill, tp, time.Since(tp), true)
+		p.observeFirstPrefillPlanLedgerDiff(len(ids), maxNew)
 	} else {
 		logits = append([]float32(nil), cachedLogits...)
 	}
