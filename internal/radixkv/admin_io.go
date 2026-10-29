@@ -91,7 +91,7 @@ func walkNS(root *node, s *AdminSnapshot) {
 		if n != root { // skip every namespace root; count real nodes once
 			s.Nodes++
 			s.Bytes += int64(len(n.key))
-			if n.snapshot != nil || n.hostSnapshot != nil || n.remoteSnapshot != nil {
+			if n.snapshot != nil || n.hostSnapshot != nil || n.remoteSnapshot != nil || n.ssdSnapshot != nil {
 				s.SnapshotHold++
 			}
 			if n.kv != nil {

@@ -292,7 +292,7 @@ func (t *Tree) EvictHostSnapshot(digest string) int {
 		return 0
 	}
 	n := t.findSnapshotByDigest(digest)
-	if n == nil || n.hostSnapshot == nil || (n.snapshot == nil && n.remoteSnapshot == nil) {
+	if n == nil || n.hostSnapshot == nil || (n.snapshot == nil && n.remoteSnapshot == nil && n.ssdSnapshot == nil) {
 		return 0
 	}
 	positions := n.plen
