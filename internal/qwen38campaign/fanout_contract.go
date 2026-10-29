@@ -193,8 +193,8 @@ type PhysicalTrialResult struct {
 	// (session setup + prefill + first sample + decode + teardown); it is NOT
 	// decode-only. See DecodeTokensPerSecond for the phase-pure decode rate.
 	TokensPerSec float64 `json:"tokens_per_sec"`
-	// DecodeTokensPerSecond is the phase-pure decode rate: useful tokens divided by
-	// the decode phase duration in seconds; 0 when the decode phase is not positive.
+	// DecodeTokensPerSecond is the phase-pure rate of tokens generated during
+	// decode, excluding the prefill sample; 0 when no decode tokens or time exist.
 	DecodeTokensPerSecond float64                   `json:"decode_tokens_per_second,omitempty"`
 	QueueLatencyMS        float64                   `json:"queue_latency_ms"`
 	TTFTMS                float64                   `json:"ttft_ms,omitempty"`
