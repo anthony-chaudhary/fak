@@ -76,6 +76,7 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 		fusedBackend = nil
 	}
 	prefetch := os.Getenv(v41RoutedPrefetchEnv) == "1"
+	crossLayer := s.v41CrossLayerPrefetchEnabled()
 	return func(layer int, picks []routePick, x []float32) (result []float32, outcome v41RoutedExpertOutcome, cause error) {
 		if len(picks) == 0 || len(x) != H {
 			return nil, v41RoutedExpertDeclined, nil
@@ -212,7 +213,13 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 			}
 			return true
 		}
-		if !admitted() {
+		ok := admitted()
+		if crossLayer {
+			// After this layer's demand page-ins, before its GEMMs: the hints
+			// for layer+1 overlap this layer's compute.
+			s.v41CrossLayerPrefetch(layer, picks, x)
+		}
+		if !ok {
 			return nil, v41RoutedExpertDeclined, nil
 		}
 
