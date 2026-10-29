@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 )
 
 // ErrV41SparseSinkNonFinite identifies arithmetic overflow or a non-finite
@@ -177,11 +178,17 @@ func (r v41SparseSinkRows) row(batch, index, count, width int) []float32 {
 func v41SparseAttentionSinkChecked(q, sink []float32, idx []int32, opt V41SparseAttentionSinkOptions, rows v41SparseSinkRows) ([]float32, error) {
 	negInf := float32(math.Inf(-1))
 	o := make([]float32, opt.B*opt.M*opt.Heads*opt.HeadDim)
-	// Each head reuses its rounded scores and then its exponential terms. The
-	// inputs stay read-only until contraction ends, so recomputing either in
-	// later passes only repeats work. Masked slots are never read from scratch.
-	// Bound scratch by the existing index payload even for overflowed shapes.
-	terms := make([]float32, min(opt.TopK, len(idx)))
+	// Independent heads share only immutable inputs. Saturate the scheduling
+	// estimate rather than adding a new geometry refusal to the public API.
+	work := opt.HeadDim
+	maxInt := int(^uint(0) >> 1)
+	for _, factor := range []int{opt.TopK, opt.Heads} {
+		if factor > 0 && work > maxInt/factor {
+			work = maxInt
+		} else {
+			work *= factor
+		}
+	}
 	for b := 0; b < opt.B; b++ {
 		for m := 0; m < opt.M; m++ {
 			idxBase := (b*opt.M + m) * opt.TopK
@@ -191,81 +198,104 @@ func v41SparseAttentionSinkChecked(q, sink []float32, idx []int32, opt V41Sparse
 			if opt.TopKLength != nil {
 				validCount = int(opt.TopKLength[b*opt.M+m])
 			}
-			for h := 0; h < opt.Heads; h++ {
-				qBase := ((b*opt.M+m)*opt.Heads + h) * opt.HeadDim
-				// Stage 1: max over valid scaled scores, seeded with the sink.
-				maxScore := negInf
-				if sink != nil {
-					maxScore = sink[h]
-				}
-				for i := 0; i < validCount; i++ {
-					row := int(idx[idxBase+i])
-					if row < 0 {
-						continue
+			var firstErr error
+			firstHead := opt.Heads
+			var errorMu sync.Mutex
+			parForRange(opt.Heads, work, func(lo, hi int) {
+				// One score/exp scratch per active chunk, reused across its heads.
+				terms := make([]float32, min(opt.TopK, len(idx)))
+				contract := func(h int) error {
+					qBase := ((b*opt.M+m)*opt.Heads + h) * opt.HeadDim
+					// Stage 1: max over valid scaled scores, seeded with the sink.
+					maxScore := negInf
+					if sink != nil {
+						maxScore = sink[h]
 					}
-					values := rows.row(b, row, opt.N, opt.HeadDim)
-					var dot float32
-					for d := 0; d < opt.HeadDim; d++ {
-						dot += float32(q[qBase+d] * values[d])
-					}
-					dot *= opt.Softmax
-					if !finite32(dot) {
-						return nil, sparseSinkNonFinite(v41SinkStageScore, b, m, h, row, -1, dot)
-					}
-					terms[i] = dot
-					if dot > maxScore {
-						maxScore = dot
-					}
-				}
-				if maxScore == negInf {
-					// No valid row and no sink: the reference's finite bound
-					// yields an all-zero output row.
-					continue
-				}
-				// Stage 2: softmax denominator with the sink included.
-				var sum float32
-				if sink != nil {
-					sum = exp32(sink[h] - maxScore)
-				}
-				for i := 0; i < validCount; i++ {
-					row := int(idx[idxBase+i])
-					if row < 0 {
-						continue
-					}
-					// Match the rounded float32 score used by the maximum pass.
-					// A finite score gap may round to -Inf; exp(-Inf)=0 is valid.
-					term := exp32(terms[i] - maxScore)
-					if !finite32(term) {
-						return nil, sparseSinkNonFinite(v41SinkStageSoftmax, b, m, h, row, -1, term)
-					}
-					terms[i] = term
-					sum += term
-				}
-				if !finite32(sum) {
-					return nil, sparseSinkNonFinite(v41SinkStageSoftmax, b, m, h, -1, -1, sum)
-				}
-				if sum == 0 {
-					continue
-				}
-				// Stage 3: weighted value sum, normalized by the denominator.
-				oBase := qBase
-				for i := 0; i < validCount; i++ {
-					row := int(idx[idxBase+i])
-					if row < 0 {
-						continue
-					}
-					values := rows.row(b, row, opt.N, opt.HeadDim)
-					weight := terms[i] / sum
-					if !finite32(weight) {
-						return nil, sparseSinkNonFinite(v41SinkStageValue, b, m, h, row, -1, weight)
-					}
-					for d := 0; d < opt.HeadDim; d++ {
-						o[oBase+d] += float32(weight * values[d])
-						if !finite32(o[oBase+d]) {
-							return nil, sparseSinkNonFinite(v41SinkStageValue, b, m, h, row, d, o[oBase+d])
+					for i := 0; i < validCount; i++ {
+						row := int(idx[idxBase+i])
+						if row < 0 {
+							continue
+						}
+						values := rows.row(b, row, opt.N, opt.HeadDim)
+						var dot float32
+						for d := 0; d < opt.HeadDim; d++ {
+							dot += float32(q[qBase+d] * values[d])
+						}
+						dot *= opt.Softmax
+						if !finite32(dot) {
+							return sparseSinkNonFinite(v41SinkStageScore, b, m, h, row, -1, dot)
+						}
+						terms[i] = dot
+						if dot > maxScore {
+							maxScore = dot
 						}
 					}
+					if maxScore == negInf {
+						// No valid row and no sink: the reference's finite bound
+						// yields an all-zero output row.
+						return nil
+					}
+					// Stage 2: softmax denominator with the sink included.
+					var sum float32
+					if sink != nil {
+						sum = exp32(sink[h] - maxScore)
+					}
+					for i := 0; i < validCount; i++ {
+						row := int(idx[idxBase+i])
+						if row < 0 {
+							continue
+						}
+						// Match the rounded float32 score used by the maximum pass.
+						// A finite score gap may round to -Inf; exp(-Inf)=0 is valid.
+						term := exp32(terms[i] - maxScore)
+						if !finite32(term) {
+							return sparseSinkNonFinite(v41SinkStageSoftmax, b, m, h, row, -1, term)
+						}
+						terms[i] = term
+						sum += term
+					}
+					if !finite32(sum) {
+						return sparseSinkNonFinite(v41SinkStageSoftmax, b, m, h, -1, -1, sum)
+					}
+					if sum == 0 {
+						return nil
+					}
+					// Stage 3: weighted value sum, normalized by the denominator.
+					oBase := qBase
+					for i := 0; i < validCount; i++ {
+						row := int(idx[idxBase+i])
+						if row < 0 {
+							continue
+						}
+						values := rows.row(b, row, opt.N, opt.HeadDim)
+						weight := terms[i] / sum
+						if !finite32(weight) {
+							return sparseSinkNonFinite(v41SinkStageValue, b, m, h, row, -1, weight)
+						}
+						for d := 0; d < opt.HeadDim; d++ {
+							o[oBase+d] += float32(weight * values[d])
+							if !finite32(o[oBase+d]) {
+								return sparseSinkNonFinite(v41SinkStageValue, b, m, h, row, d, o[oBase+d])
+							}
+						}
+					}
+					return nil
 				}
+				for h := lo; h < hi; h++ {
+					if err := contract(h); err != nil {
+						errorMu.Lock()
+						if h < firstHead {
+							firstHead, firstErr = h, err
+						}
+						errorMu.Unlock()
+						// Later heads in this chunk cannot precede its first failure.
+						break
+					}
+				}
+			})
+			// All writers drain before error selection or any inverse callback.
+			if firstErr != nil {
+				return nil, firstErr
 			}
 		}
 	}
