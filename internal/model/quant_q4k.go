@@ -182,8 +182,8 @@ func (qt *q4kTensor) q4kRowBytes() int { return qt.nblk * q4kBlockBytes }
 func (qt *q4kTensor) requireRawCPU(op string) {
 	if len(qt.raw) == 0 && qt.out > 0 {
 		panic(fmt.Sprintf("model: Q4_K %s on a freed CPU weight (out=%d in=%d): the resident raw "+
-			"Q4_K bytes were dropped after a device upload (FAK_Q4K_FREE_CPU=1, single residency: "+
-			"Metal on Apple Silicon, or Vulkan on a unified-memory APU) but a CPU Q4_K matmul ran — "+
+			"Q4_K bytes were dropped after a device upload (FAK_Q4K_FREE_CPU=1|device, single residency: "+
+			"Metal on Apple Silicon, Vulkan on a unified-memory APU, or a discrete device) but a CPU Q4_K matmul ran — "+
 			"prefill is not device-routed for this weight. Unset FAK_Q4K_FREE_CPU to keep the CPU "+
 			"copy, or route the prefill GEMM through the device (#1067).", op, qt.out, qt.in))
 	}
