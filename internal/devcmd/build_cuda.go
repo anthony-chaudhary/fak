@@ -66,6 +66,7 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 
 	arch := fs.String("arch", os.Getenv("FAK_CUDA_ARCH"), "target CUDA architecture (defaults to FAK_CUDA_ARCH, empty for all)")
 	cudaHome := fs.String("cuda-home", "", "path to CUDA Toolkit root directory")
+	archSpecific := fs.Bool("arch-specific", false, "compile opt-in CUDA 13 arch-specific translation units")
 	nccl := fs.Bool("nccl", os.Getenv("FAK_CUDA_NCCL") == "1", "compile with NCCL collectives enabled (-tags cuda,nccl)")
 	ncclHome := fs.String("nccl-home", os.Getenv("NCCL_HOME"), "optional path to NCCL installation directory")
 	jsonOut := fs.Bool("json", false, "emit machine-readable JSON output")
@@ -147,6 +148,7 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 		PkgDir:             *pkgDir,
 		Arch:               *arch,
 		EnableNCCL:         *nccl,
+		EnableArchSpecific: *archSpecific,
 		NCCLHome:           *ncclHome,
 		OutPkg:             *outPkg,
 		OutBin:             *outBin,
