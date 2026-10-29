@@ -311,6 +311,11 @@ func TestRefusalSentinelsAreClosed(t *testing.T) {
 		ReasonContextExceedsPool:     ErrContextExceedsPool,
 		ReasonConcurrencyExceedsPool: ErrConcurrencyExceedsPool,
 		ReasonPinUnmatched:           ErrPinUnmatched,
+		ReasonFitsOnlyAtCtxLT:        ErrFitsOnlyAtCtxLT,
+		ReasonNeedsRing:              ErrNeedsRing,
+		ReasonBelowSLO:               ErrBelowSLO,
+		ReasonPinInfeasible:          ErrPinInfeasible,
+		ReasonNoRankableCalibration:  ErrNoRankableCalibration,
 	}
 	for r, own := range all {
 		if r.Sentinel() != own {

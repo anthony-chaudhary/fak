@@ -22,7 +22,7 @@ const (
 // V41RoutedTopKEnv opts a native V4.1 process into a reduced routed-expert
 // count ("faster mode"): the router keeps its top N of the published top-6 and
 // renormalises the route weights over those N. Unset keeps the published 6.
-// Valid values are 1..V41RouterTopK. Routed expert bytes per token scale with
+// Valid values are 1..V41RouterTopK or "auto". Routed expert bytes per token scale with
 // N, so N=5 cuts them by 1/6. The rule is adapted (no code copied) from Strata
 // src/dsv41/ds4_experts_rule.hpp:30-44 @46c152a1 (MIT), which reports +4% to
 // +13% decode at a KL cost of ~0.0015 for 5 vs 6 (upstream-reported, not a
@@ -32,11 +32,39 @@ const V41RoutedTopKEnv = "FAK_V41_ROUTED_TOPK"
 // ErrV41RoutedTopK classifies a refused routed top-k override.
 var ErrV41RoutedTopK = errors.New("model: V4.1 routed top-k override refused")
 
+// V41RoutedTopKAuto is the opt-in auto value of V41RoutedTopKEnv. It resolves
+// through V41AutoRoutedTopK from the registered device probe; with no probe it
+// keeps the published 6.
+const V41RoutedTopKAuto = "auto"
+
+// v41RoutedTopKAutoVRAMCeiling is Strata's small-VRAM threshold (16 GiB).
+const v41RoutedTopKAutoVRAMCeiling int64 = 16 << 30
+
+// V41AutoRoutedTopK is the auto rule adapted from Strata ds4_experts_rule.hpp
+// @46c152a1 (MIT, rule only): 5 when the GPU shares host RAM or its total VRAM
+// is known and at most 16 GiB, otherwise the published 6.
+func V41AutoRoutedTopK(totalVRAMBytes int64, known, sharesHostRAM bool) int {
+	if sharesHostRAM || (known && totalVRAMBytes > 0 && totalVRAMBytes <= v41RoutedTopKAutoVRAMCeiling) {
+		return V41RouterTopK - 1
+	}
+	return V41RouterTopK
+}
+
+// v41RoutedTopKDeviceProbe reports the serving device for the auto rule. It is
+// nil until a runtime registers one, so auto resolves to 6 by default.
+var v41RoutedTopKDeviceProbe func() (totalVRAMBytes int64, known, sharesHostRAM bool)
+
 // v41RoutedTopK parses a routed top-k override; empty means the published 6.
 func v41RoutedTopK(raw string) (int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return V41RouterTopK, nil
+	}
+	if strings.EqualFold(raw, V41RoutedTopKAuto) {
+		if v41RoutedTopKDeviceProbe == nil {
+			return V41RouterTopK, nil
+		}
+		return V41AutoRoutedTopK(v41RoutedTopKDeviceProbe()), nil
 	}
 	n, err := strconv.Atoi(raw)
 	if err != nil {

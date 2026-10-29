@@ -573,16 +573,13 @@ func (kr kernelRule) admit(a Artifact, bits int, sv version, capability Capabili
 	return "", sevNone
 }
 
-// Invariant: vLLM quantization kernel selection is fail-closed and deterministic.
-// No winner is picked among ambiguous kernels without explicit server preference.
-//
-// Guard: undeclared configurations, unknown methods, or contradictory descriptor
-// parameters immediately reject admission with typed reasons rather than guessing.
-//
 // Adjudicate decides which advertised kernel may serve the artifact, or reports
 // precisely why no answer is available. It never ranks kernels: a tie between
 // admissible kernels is broken only by Server.KernelOrderIsPreference or
 // Server.RuntimeSelects, and otherwise delegates with the candidate set.
+// Undeclared configurations, unknown methods, or contradictory descriptor
+// parameters are rejected with typed reasons rather than guessed into a
+// fallback kernel.
 func Adjudicate(r Request) Selection {
 	if r.Schema != SchemaVersion {
 		return verdict(OutcomeAbstain, MethodUnknown, ClaimNone, ReasonSchemaUnknown)

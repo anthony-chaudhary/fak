@@ -484,33 +484,110 @@ __global__ void k_q4k_gemm_panel(const unsigned char *Q4K, const float *X, float
   }
 }
 
-struct q4_coeff_cache_entry { const uint8_t *q; float2 *coeff; int out; int in; int device; };
-static q4_coeff_cache_entry g_q4_coeff_cache[512];
-static int g_q4_coeff_cache_n = 0;
+// Bounded Q4 decode coefficient cache (#raider-kv-sizing-footprint): the P<4 decode GEMV reads
+// a per-tensor f32 table (d*sc, dmin*mn per 32-elem group - 0.444x the tensor's packed Q4_K
+// bytes). The pre-fix cache raw-cudaMalloc'd one table per distinct weight pointer and held it
+// until the pointer itself was freed: an unbounded ~6.5-7 GiB steady-state resident derivative
+// on Qwen3.8-27B-class models (vs llama.cpp's in-register scales) that pushed post-load free
+// VRAM under the ~653 MiB request-admission bar. This replaces it with a FIXED-SIZE RING ARENA:
+// one cudaMalloc of kQ4CoeffArenaBytes, minted into FIFO from the front when the ring laps.
+// Under the serve decode pattern - every resident Q4_K tensor touched exactly once per token,
+// in fixed layer order - FIFO recycles exactly the LRU entry, so hot tensors keep their tables
+// and only the cold tail re-mints.
+//
+// In-flight safety: everything runs on g_stream, so a re-mint kernel enqueued NOW executes after
+// every k_q4k_gemm that read the table being overwritten - stream ordering IS the
+// pointer-lifetime guard; no cudaFree/cudaMalloc ever touches the hot path (both implicitly
+// serialize the device, see the g_pool comment above), which also keeps the captured decode
+// graph allocation-free. Retained entries stay byte-identical: the mint kernel is unchanged and
+// deterministic over the immutable packed super-blocks.
+constexpr size_t kQ4CoeffArenaBytes = 2ull << 30; // 2 GiB: clears the ~653 MiB post-load-free bar
+                                                  // with margin while dropping the old ~6.5-7 GiB
+                                                  // steady state by >= ~4 GiB
+struct q4_coeff_cache_entry {
+  const uint8_t *q;   // weight pointer key
+  float2 *coeff;      // table base inside the arena
+  int out;            // rows
+  int in;             // cols
+  int device;         // owning CUDA device
+  size_t len;         // absolute region length in the ring
+  bool alive;         // false => weight freed; region reserved until the ring laps it
+};
+static constexpr int kQ4CoeffSlots = 512;
+static q4_coeff_cache_entry g_q4_coeff_cache[kQ4CoeffSlots];
+static int g_q4_coeff_head = 0;   // slot of the window front (oldest region)
+static int g_q4_coeff_n = 0;      // regions in the live window (alive + dead)
+static float2 *g_q4_coeff_arena = nullptr;
+static size_t g_q4_coeff_cap = 0; // actual arena size after alloc fallback
+static size_t g_q4_coeff_cursor = 0; // absolute next-mint position (monotonic)
+static size_t g_q4_coeff_span = 0;   // cursor - window front; always <= cap
+static inline int q4_coeff_slot(int k) { return (g_q4_coeff_head + k) % kQ4CoeffSlots; }
+static void q4_coeff_pop_front() {
+  int s = g_q4_coeff_head;
+  g_q4_coeff_span -= g_q4_coeff_cache[s].len;
+  g_q4_coeff_cache[s] = {};
+  g_q4_coeff_head = (s + 1) % kQ4CoeffSlots;
+  --g_q4_coeff_n;
+}
+// q4_coeff_cache_evict drops the LIVE entry for a freed weight pointer (fcuda_free /
+// fcuda_free_on call it before releasing the source bytes). The region stays reserved until the
+// ring naturally laps it - keeping the live window contiguous is what lets future mints never
+// alias a live table - but lookup stops returning it immediately.
 static void q4_coeff_cache_evict(const void *q) {
   int device = 0;
   CK(cudaGetDevice(&device));
-  for (int i = 0; i < g_q4_coeff_cache_n; ++i) {
-    if (g_q4_coeff_cache[i].q != q || g_q4_coeff_cache[i].device != device) continue;
-    CK(cudaFree(g_q4_coeff_cache[i].coeff));
-    g_q4_coeff_cache[i] = g_q4_coeff_cache[--g_q4_coeff_cache_n];
-    g_q4_coeff_cache[g_q4_coeff_cache_n] = {};
+  for (int k = 0; k < g_q4_coeff_n; ++k) {
+    q4_coeff_cache_entry &entry = g_q4_coeff_cache[q4_coeff_slot(k)];
+    if (!entry.alive || entry.q != q || entry.device != device) continue;
+    entry.alive = false;
     return;
   }
+}
+static bool q4_coeff_arena_ready() {
+  if (g_q4_coeff_arena) return true;
+  if (g_capture_open) {
+    fprintf(stderr, "fak-cuda: q4 coeff arena needed during graph capture\n");
+    return false;
+  }
+  size_t want = kQ4CoeffArenaBytes;
+  for (int attempt = 0; attempt < 3 && !g_q4_coeff_arena; ++attempt) {
+    if (cudaMalloc((void **)&g_q4_coeff_arena, want) == cudaSuccess) { g_q4_coeff_cap = want; break; }
+    g_q4_coeff_arena = nullptr;
+    want >>= 1;
+    if (want < (512ull << 20)) want = 512ull << 20;
+  }
+  if (!g_q4_coeff_arena) fprintf(stderr, "fak-cuda: q4 coeff arena alloc failed\n");
+  return g_q4_coeff_arena != nullptr;
 }
 static float2 *q4_coeffs_for(const uint8_t *q, int out, int in) {
   int device = 0;
   CK(cudaGetDevice(&device));
-  for (int i = 0; i < g_q4_coeff_cache_n; ++i) {
-    q4_coeff_cache_entry &entry = g_q4_coeff_cache[i];
-    if (entry.q == q && entry.out == out && entry.in == in && entry.device == device) return entry.coeff;
+  for (int k = 0; k < g_q4_coeff_n; ++k) {
+    q4_coeff_cache_entry &entry = g_q4_coeff_cache[q4_coeff_slot(k)];
+    if (entry.alive && entry.q == q && entry.out == out && entry.in == in && entry.device == device)
+      return entry.coeff;
   }
-  if (g_q4_coeff_cache_n >= 512) { fprintf(stderr, "fak-cuda: q4 coeff cache full\n"); abort(); }
+  if (!q4_coeff_arena_ready()) return nullptr;
   size_t n = (size_t)out * (in / 256) * 8;
-  float2 *coeff = nullptr;
-  CK(cudaMalloc(&coeff, n * sizeof(float2)));
+  size_t bytes = n * sizeof(float2);
+  if (bytes > g_q4_coeff_cap) {
+    fprintf(stderr, "fak-cuda: q4 coeff table exceeds arena\n");
+    return nullptr;
+  }
+  // Recycle from the front until the new region fits. The front region is the oldest: any kernel
+  // that read its table was enqueued on g_stream before this mint, so the overwrite stream-orders
+  // after every in-flight reader - no live table is ever evicted mid-batch.
+  while (g_q4_coeff_n == kQ4CoeffSlots || g_q4_coeff_span + bytes > g_q4_coeff_cap) q4_coeff_pop_front();
+  // All ring bookkeeping is in BYTES; the arena base is cudaMalloc-aligned (>= 256 B) and every
+  // table length is a multiple of 64 B, so each region start stays float2-aligned.
+  float2 *coeff = reinterpret_cast<float2 *>(reinterpret_cast<char *>(g_q4_coeff_arena) +
+                                             (g_q4_coeff_cursor % g_q4_coeff_cap));
   FCUDA_TS("k_q4k_coeffs", (n + 255) / 256, k_q4k_coeffs<<<(n + 255) / 256, 256, 0, g_stream>>>(q, coeff, out, in));
-  g_q4_coeff_cache[g_q4_coeff_cache_n++] = {q, coeff, out, in, device};
+  int s = q4_coeff_slot(g_q4_coeff_n);
+  g_q4_coeff_cache[s] = {q, coeff, out, in, device, bytes, true};
+  ++g_q4_coeff_n;
+  g_q4_coeff_span += bytes;
+  g_q4_coeff_cursor += bytes;
   return coeff;
 }
 
@@ -560,6 +637,7 @@ extern "C" int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float 
   if (P < 4) {
     if (g_q4k_decode_arm == 1) return fcuda_q4k_mmvq_matmul(dQ4K, dX, dY, out, in, P);
     float2 *coeff = q4_coeffs_for(dQ4K, out, in);
+    if (!coeff) return FCUDA_SCRATCH_ALLOC_FAILED;
     FCUDA_TS("k_q4k_gemm", dim3((out + 1) / 2, P), k_q4k_gemm<<<dim3((out + 1) / 2, P), 256, 0, g_stream>>>(
         (const unsigned char *)dQ4K, coeff, dX, dY, out, in, P));
     return 0;
