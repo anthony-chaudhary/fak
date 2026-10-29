@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // This file instruments the ONE-TIME boot of a fak gateway: the cost of every
@@ -290,6 +292,10 @@ type ModelLoadProfile struct {
 	// FitConfirm is the post-load two-phase confirmation (planned vs allocated per
 	// class, unaccounted residual); nil until the load path attaches it.
 	FitConfirm *ModelLoadFitConfirm
+	// PlanLedgerDiff is the post-load planner-vs-ledger diff (predicted vs live
+	// device bytes per allocation-ledger class); nil when the backend carries no
+	// allocation ledger.
+	PlanLedgerDiff *compute.MemoryPlanLedgerDiff
 	// StartupResidency is the GGUF files' OS page-cache residency measured before the
 	// load read them; nil when it was not measured.
 	StartupResidency *ModelLoadResidency
@@ -322,6 +328,7 @@ func (p *ModelLoadProfile) clone() *ModelLoadProfile {
 		}
 		out.FitConfirm = &fc
 	}
+	out.PlanLedgerDiff = p.PlanLedgerDiff.Clone()
 	out.Messages = append([]StartupMessage(nil), p.Messages...)
 	if p.StartupResidency != nil {
 		pc := *p.StartupResidency

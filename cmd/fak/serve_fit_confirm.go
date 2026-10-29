@@ -145,6 +145,24 @@ func attachServeFitConfirm(p *gateway.ModelLoadProfile, plan compute.MemoryPlan,
 	p.Messages = append(p.Messages, gateway.StartupMessage{Source: "model-load", Kind: "fit-confirm", Level: "info", Text: line})
 }
 
+// attachServePlanLedgerDiff attaches the post-load planner-vs-allocation-ledger
+// diff (phase "load") and emits its one stable-key log line. It is a no-op on a
+// backend without a tagged allocation ledger. Observability only.
+func attachServePlanLedgerDiff(p *gateway.ModelLoadProfile, plan compute.MemoryPlan, be compute.Backend) {
+	if p == nil || be == nil {
+		return
+	}
+	snap, ok := compute.DeviceAllocLedgerOf(be)
+	if !ok {
+		return
+	}
+	d := compute.DiffMemoryPlanAgainstLedger("load", plan, snap)
+	p.PlanLedgerDiff = &d
+	line := d.LogLine()
+	fmt.Fprintln(os.Stderr, "fak serve: "+line)
+	p.Messages = append(p.Messages, gateway.StartupMessage{Source: "model-load", Kind: "plan-ledger-diff", Level: "info", Text: line})
+}
+
 // fitplanTextOf renders the gateway mirror back into the canonical log-line form
 // without importing fitplan into the gateway package.
 func fitplanTextOf(rec *gateway.ModelLoadFitConfirm) string {

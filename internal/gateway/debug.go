@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/guardvars"
 	"github.com/anthony-chaudhary/fak/internal/harnessres"
 	"github.com/anthony-chaudhary/fak/internal/resumemetrics"
@@ -57,6 +58,9 @@ type debugVarsResponse struct {
 	Startup       debugStartupVars        `json:"startup"`
 	KVMemory      *debugKVMemoryVars      `json:"kv_memory,omitempty"`
 	RequestMemory *debugRequestMemoryVars `json:"request_memory,omitempty"`
+	// MemoryPlanDiff is the planner-vs-allocation-ledger diff taken after the first
+	// prefill (phase "first_prefill"); omitted until one is observed.
+	MemoryPlanDiff *compute.MemoryPlanLedgerDiff `json:"memory_plan_diff,omitempty"`
 	// MoEResidency is what a serve that declared an expert budget paid to keep the top-k
 	// activated experts resident (R6, #5617). Omitted unless some request actually engaged a
 	// routed-expert ring, so its absence means "not engaged" rather than "engaged, cost zero".
@@ -342,10 +346,13 @@ type debugModelLoadVars struct {
 	MemoryHeadroomRatio float64                        `json:"memory_headroom_ratio,omitempty"`
 	// FitConfirm is the post-load two-phase confirmation: planned vs allocated per
 	// class plus the unaccounted residual, exposed as JSON on /debug/vars.
-	FitConfirm       *ModelLoadFitConfirm         `json:"fit_confirm,omitempty"`
-	LoadPaths        []debugModelLoadPathVars     `json:"load_paths,omitempty"`
-	StartupResidency *debugModelLoadResidencyVars `json:"page_cache,omitempty"`
-	Messages         []StartupMessage             `json:"messages,omitempty"`
+	FitConfirm *ModelLoadFitConfirm `json:"fit_confirm,omitempty"`
+	// PlanLedgerDiff is the post-load fit-planner prediction vs allocation-ledger
+	// live bytes per class (phase "load").
+	PlanLedgerDiff   *compute.MemoryPlanLedgerDiff `json:"plan_ledger_diff,omitempty"`
+	LoadPaths        []debugModelLoadPathVars      `json:"load_paths,omitempty"`
+	StartupResidency *debugModelLoadResidencyVars  `json:"page_cache,omitempty"`
+	Messages         []StartupMessage              `json:"messages,omitempty"`
 }
 
 type debugModelLoadResidencyVars struct {
@@ -800,6 +807,7 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 		Startup:          debugStartupProfile(s.startup.snapshot(), startupReport, modelLoad),
 		KVMemory:         debugKVMemory(s.planner),
 		RequestMemory:    debugRequestMemory(s.planner),
+		MemoryPlanDiff:   debugMemoryPlanDiff(s.planner),
 		MoEResidency:     debugMoEResidency(s.planner),
 		RequestAdmission: s.debugRequestAdmission(now),
 		Sessions:         observation.Sessions,
@@ -1052,6 +1060,18 @@ func inferenceVarsFromSnapshot(snap inferenceSnapshot, inflightMaxAge float64) d
 	return out
 }
 
+func debugMemoryPlanDiff(p agent.Planner) *compute.MemoryPlanLedgerDiff {
+	reporter, ok := p.(agent.MemoryPlanDiffReporter)
+	if !ok {
+		return nil
+	}
+	d, ok := reporter.MemoryPlanDiff()
+	if !ok {
+		return nil
+	}
+	return &d
+}
+
 func debugRequestMemory(p agent.Planner) *debugRequestMemoryVars {
 	reporter, ok := p.(agent.RequestMemoryReporter)
 	if !ok {
@@ -1238,6 +1258,7 @@ func debugModelLoadProfile(p *ModelLoadProfile) *debugModelLoadVars {
 	if p.FitConfirm != nil {
 		out.FitConfirm = p.FitConfirm
 	}
+	out.PlanLedgerDiff = p.PlanLedgerDiff.Clone()
 	return out
 }
 
