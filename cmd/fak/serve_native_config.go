@@ -113,7 +113,7 @@ func serveNativeControlConfig(sf *serveFlags) nativeControlConfig {
 			// decode coalescer `fak up` already wires (#1590), so N concurrent
 			// same-prefix turns share one batched forward instead of serializing on
 			// devMu (fak#13263). This is the structural gate only: the coalescer's
-			// device half (q4k && metal && qwen35-hybrid) still decides at run time,
+			// device half (q4k && (metal || device backend) && qwen35-hybrid) decides at run time,
 			// and a non-eligible model falls back to the byte-identical serial loop.
 			BatchDecode: true,
 		},

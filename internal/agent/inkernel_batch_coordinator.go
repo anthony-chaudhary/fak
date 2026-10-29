@@ -147,8 +147,14 @@ type inKernelCoalesceRequest struct {
 
 type inKernelCoalesceContextKey struct{}
 
+// coalescesQwenDecode admits Qwen3.5-hybrid Q4_K decode to the rolling cohort on
+// either device seam: the Metal host session or a compute.Backend (CUDA, Vulkan).
+// Both already serialize on devMu, which the cohort holds across every shared step,
+// and a backend-bound request is priced by admitCoalescedDeviceMemory first. A
+// backend without a batched Qwen entrypoint still decodes the cohort per lane
+// (BatchSession serial fallback, attributed by ObserveSerialStep).
 func (p *InKernelPlanner) coalescesQwenDecode() bool {
-	return p != nil && p.batchDecode && p.q4k && p.metal && p.m != nil && p.m.Cfg.IsQwen35Hybrid()
+	return p != nil && p.batchDecode && p.q4k && (p.metal || p.backend != nil) && p.m != nil && p.m.Cfg.IsQwen35Hybrid()
 }
 
 func (p *InKernelPlanner) runCoalescedGenerate(ctx context.Context, run func(context.Context) (inKernelGenerateResult, error)) (inKernelGenerateResult, error) {
