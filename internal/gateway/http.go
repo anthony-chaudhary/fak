@@ -197,6 +197,9 @@ func (s *Server) routeTable() []gatewayRoute {
 		// N served turns' TTFT / prefill / decode / e2e / cache rows and their
 		// quantile summary, seeded from the durable perf ledger across restarts.
 		{"/v1/fak/perf/recent", s.handleFakPerfRecent},
+		// /v1/fak/perf/phases is the per-request native phase receipt read
+		// (fak-request-phases/1 JSONL) joined to perf rows by request_id.
+		{"/v1/fak/perf/phases", s.handleFakPerfPhases},
 		{"/v1/fak/fleet", s.handleFakFleet},
 		// /v1/fak/tasks is the read-only process task-manager snapshot. Inert (404)
 		// unless a host installs a provider via SetTasksSnapshotProvider and the
@@ -676,7 +679,7 @@ func requestFromLAN(r *http.Request) bool {
 // surface here widens both at once, which is the intent.
 func readScopedPath(r *http.Request) bool {
 	switch r.URL.Path {
-	case "/v1/fak/features/proof", "/metrics", "/debug/vars", "/v1/fak/observation", "/v1/fak/observation/requests", "/v1/fak/observation/engine", "/v1/fak/perf/recent", "/v1/fak/arms", "/v1/fak/arms/traffic",
+	case "/v1/fak/features/proof", "/metrics", "/debug/vars", "/v1/fak/observation", "/v1/fak/observation/requests", "/v1/fak/observation/engine", "/v1/fak/perf/recent", "/v1/fak/perf/phases", "/v1/fak/arms", "/v1/fak/arms/traffic",
 		// /props and /slots are the llama-server-shaped engine introspection
 		// pair, served from the same live state as /metrics and carrying the
 		// same class of information: counts, ratios, and build labels. They join
