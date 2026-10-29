@@ -15,8 +15,8 @@ import (
 // ErrCUDAArchSpecific refuses an unsupported opt-in build before kernel compilation.
 var ErrCUDAArchSpecific = errors.New("computebuild: arch-specific CUDA build unavailable")
 
-type cudaArchSpecificContext struct{}
-type cudaArchSpecificPlan struct {
+type cudaArchSpecificKey struct{}
+type cudaArchSpecificOptions struct {
 	arches  []string
 	minimum string
 }
@@ -25,8 +25,8 @@ var cudaNVCCRelease = regexp.MustCompile(`\brelease ([0-9]+\.[0-9]+)\b`)
 
 // The initial lane deliberately supports exactly the targets in #13981. The
 // CUDA 13.0 floor is this opt-in lane's policy, not the generic toolkit minimum.
-func parseCUDAArchSpecific(text string) (*cudaArchSpecificPlan, error) {
-	p := &cudaArchSpecificPlan{}
+func parseCUDAArchSpecific(text string) (*cudaArchSpecificOptions, error) {
+	p := &cudaArchSpecificOptions{}
 	seen := map[string]bool{}
 	for line, raw := range strings.Split(text, "\n") {
 		raw, _, _ = strings.Cut(raw, "#")
@@ -48,7 +48,7 @@ func parseCUDAArchSpecific(text string) (*cudaArchSpecificPlan, error) {
 	return p, nil
 }
 
-func prepareCUDAArchSpecific(ctx context.Context, tc *Toolchain, root string) (*cudaArchSpecificPlan, error) {
+func prepareCUDAArchSpecific(ctx context.Context, tc *Toolchain, root string) (*cudaArchSpecificOptions, error) {
 	if tc == nil || tc.NVCC == "" || tc.IsWindows || runtime.GOOS == "windows" {
 		return nil, fmt.Errorf("%w: requires Linux nvcc", ErrCUDAArchSpecific)
 	}
@@ -72,7 +72,7 @@ func prepareCUDAArchSpecific(ctx context.Context, tc *Toolchain, root string) (*
 	return p, nil
 }
 
-func cudaArchSpecificCompileArgs(tc *Toolchain, p *cudaArchSpecificPlan, obj string) []string {
+func cudaArchSpecificCompileArgs(tc *Toolchain, p *cudaArchSpecificOptions, obj string) []string {
 	args := []string{"-O3", "-std=c++17"}
 	for _, arch := range p.arches {
 		args = append(args, "-gencode", "arch=compute_"+strings.TrimPrefix(arch, "sm_")+",code="+arch)

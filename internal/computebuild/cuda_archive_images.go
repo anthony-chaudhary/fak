@@ -241,7 +241,7 @@ func AuditCUDAArchiveImages(ctx context.Context, tc *Toolchain, repoRoot, arch, 
 	if err != nil {
 		return nil, err
 	}
-	if plan, ok := ctx.Value(cudaArchSpecificContext{}).(*cudaArchSpecificPlan); ok {
+	if plan, ok := ctx.Value(cudaArchSpecificKey{}).(*cudaArchSpecificOptions); ok {
 		wantSASS = append(wantSASS, plan.arches...)
 		sortCUDAImageArchitectures(wantSASS)
 	}

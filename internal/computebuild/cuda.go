@@ -166,7 +166,7 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 			}
 		}
 	}
-	if plan, ok := ctx.Value(cudaArchSpecificContext{}).(*cudaArchSpecificPlan); ok {
+	if plan, ok := ctx.Value(cudaArchSpecificKey{}).(*cudaArchSpecificOptions); ok {
 		obj := filepath.Join(pkgDir, "cuda_sm10x_probe.o")
 		args := cudaArchSpecificCompileArgs(tc, plan, obj)
 		if err := compileCUDAObject(ctx, tc, pkgDir, "cuda_sm10x_probe.cu", obj, args, env, receipt, stdout); err != nil {
@@ -333,7 +333,7 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 		if err != nil {
 			return err
 		}
-		ctx = context.WithValue(ctx, cudaArchSpecificContext{}, plan)
+		ctx = context.WithValue(ctx, cudaArchSpecificKey{}, plan)
 	}
 	if cfg.ReceiptPath == "" {
 		cfg.ReceiptPath = filepath.Join(cfg.RepoRoot, DefaultCUDABuildReceiptPath)
