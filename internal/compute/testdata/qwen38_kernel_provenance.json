@@ -159,6 +159,15 @@
       "parity_witness": "internal/compute/cuda_q4k_prefill_arms_cuda_test.go"
     },
     {
+      "id": "qwen38-cuda-q4k-decode-mmvq",
+      "upstream": "llama.cpp",
+      "source_path": "ggml/src/ggml-cuda/mmvq.cu",
+      "destination": "internal/compute/cuda/q4k_mmvq.cuh",
+      "decision": "ADAPT",
+      "attribution": "Adapted from llama.cpp ggml/src/ggml-cuda/mmvq.cu (mul_mat_vec_q, calc_nwarps,\n// calc_rows_per_block), vecdotq.cuh (vec_dot_q4_K_q8_1, vec_dot_q4_K_q8_1_impl_vmmq) and\n// quantize.cu (quantize_q8_1) at\n// 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT).",
+      "parity_witness": "internal/compute/cuda_q4k_decode_arms_cuda_test.go"
+    },
+    {
       "id": "qwen38-cuda-gdn-prompt-panel",
       "upstream": "project-maya",
       "source_path": "src/prefill/kernels.cu",

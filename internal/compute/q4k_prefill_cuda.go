@@ -127,5 +127,59 @@ func cudaQ4KScratch(out, in, rows int) cudaGEMMScratch {
 		padded := (in + 511) / 512 * 512
 		return cudaGEMMScratch{main: rows*padded/q81Values*q81Block + 128*q81Block}
 	}
+	if rows < 4 && CUDAQ4KDecodeArmInUse() == CUDAQ4KDecodeMMVQ {
+		return cudaGEMMScratch{main: rows * (in / 32) * 36} // block_q8_1 per 32 values
+	}
 	return cudaKQuantScratch(out, in, rows)
+}
+
+// cudaQ4KDecodeArm mirrors the C P < 4 Q4_K GEMV arm (fak#8635); cudaQ4KPrefillArmMu guards it.
+var cudaQ4KDecodeArm = CUDAQ4KDecodeF32
+
+// initCUDAQ4KDecodeArm resolves FAK_CUDA_Q4K_DECODE once. An unknown value keeps the f32 arm and
+// says so on stderr: decode has no refusal path a whole serve could survive.
+func initCUDAQ4KDecodeArm() {
+	arm, err := ParseCUDAQ4KDecodeArm(os.Getenv(CUDAQ4KDecodeEnv))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak-cuda: %v; Q4_K decode keeps arm=%s\n", err, CUDAQ4KDecodeF32)
+		arm = CUDAQ4KDecodeF32
+	}
+	applyCUDAQ4KDecodeArm(arm)
+	if arm != CUDAQ4KDecodeF32 {
+		fmt.Fprintf(os.Stderr, "fak-cuda: q4k decode arm=%s\n", arm)
+	}
+}
+
+func applyCUDAQ4KDecodeArm(arm CUDAQ4KDecodeArm) {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	C.fcuda_set_q4k_decode_arm(C.int(cudaQ4KDecodeArmCodes[arm]))
+	cudaQ4KPrefillArmMu.Lock()
+	cudaQ4KDecodeArm = arm
+	cudaQ4KPrefillArmMu.Unlock()
+}
+
+// SetCUDAQ4KDecodeArm switches the P < 4 Q4_K GEMV arm at runtime. An unknown arm returns
+// ErrCUDAQ4KDecodeArmUnknown and leaves the current arm in place.
+func SetCUDAQ4KDecodeArm(arm CUDAQ4KDecodeArm) error {
+	if err := CheckCUDAQ4KDecodeArm(arm); err != nil {
+		return err
+	}
+	applyCUDAQ4KDecodeArm(arm)
+	return nil
+}
+
+// CUDAQ4KDecodeArmInUse reports the arm the P < 4 Q4_K GEMV runs.
+func CUDAQ4KDecodeArmInUse() CUDAQ4KDecodeArm {
+	cudaQ4KPrefillArmMu.Lock()
+	defer cudaQ4KPrefillArmMu.Unlock()
+	return cudaQ4KDecodeArm
+}
+
+// q4kMMVQLaunchesForTest reports mmvq-arm GEMV launches, so the parity witness can refuse a run
+// where the f32 arm produced the output.
+func (c *cudaBackend) q4kMMVQLaunchesForTest() uint64 {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return uint64(C.fcuda_q4k_mmvq_launch_count())
 }

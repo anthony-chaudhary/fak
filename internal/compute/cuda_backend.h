@@ -318,6 +318,12 @@ int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY, int ou
 void fcuda_set_q4k_prefill_arm(int arm);
 /* fcuda_q4k_mmq_launch_count counts completed mmq-arm launches (P-04 parity witness). */
 unsigned long long fcuda_q4k_mmq_launch_count(void);
+/* fcuda_set_q4k_decode_arm selects the P<4 Q4_K GEMV arm (fak#8635): 0 f32 (k_q4k_gemm), 1 mmvq
+ * (llama.cpp q8_1 DP4A, cuda/q4k_mmvq.cuh). The mmvq arm returns 80001 when its persistent q8_1
+ * scratch misses and 80006 for a shape it refuses; nothing is launched on either. */
+void fcuda_set_q4k_decode_arm(int arm);
+/* fcuda_q4k_mmvq_launch_count counts mmvq-arm GEMV launches (parity witness). */
+unsigned long long fcuda_q4k_mmvq_launch_count(void);
 /* Counts accepted fp8lt GEMM enqueues; a synchronized read is still required. */
 unsigned long long fcuda_q4k_fp8lt_launch_count(void);
 

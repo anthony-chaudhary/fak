@@ -1016,6 +1016,21 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## llama.cpp Q4_K MMVQ decode GEMV
+
+The opt-in `mmvq` arm of the CUDA Q4_K decode GEMV (`FAK_CUDA_Q4K_DECODE=mmvq`),
+`internal/compute/cuda/q4k_mmvq.cuh`, adapts the Q4_K instantiation of `mul_mat_vec_q` with its
+NVIDIA generic parameter rows (`ggml/src/ggml-cuda/mmvq.cu`), the `vec_dot_q4_K_q8_1` DP4A dot
+product (`vecdotq.cuh`) and the `quantize_q8_1` activation quantizer (`quantize.cu`), at
+llama.cpp revision `0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd`:
+https://github.com/ggml-org/llama.cpp/tree/0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd/ggml/src/ggml-cuda
+
+Changed for Fak: only Q4_K for one to three activation columns; no fusion, MoE ids, channel
+or sample broadcast; the second row of a two-row block clamps its weight read; the q8_1 scratch
+is a persistent buffer. No upstream runtime is included. The upstream license is the MIT
+License reproduced under "llama.cpp Q4_K MMQ prompt-panel GEMM" above
+(Copyright (c) 2023-2026 The ggml authors).
+
 ## NVIDIA cuBLASLt FP8 sample
 
 The experimental Q4_K FP8 arm in `internal/compute/cuda/q4k_fp8lt.cuh` adapts the

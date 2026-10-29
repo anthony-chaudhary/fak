@@ -523,6 +523,10 @@ static float2 *q4_coeffs_for(const uint8_t *q, int out, int in) {
 #define FCUDA_Q4K_MMQ_MIN_COLS 8
 static int g_q4k_prefill_arm = 0;
 extern "C" void fcuda_set_q4k_prefill_arm(int arm) { g_q4k_prefill_arm = arm; }
+// g_q4k_decode_arm is the P<4 Q4_K GEMV arm the Go side resolved from FAK_CUDA_Q4K_DECODE:
+// 0 f32 (k_q4k_gemm, f32 activation), 1 mmvq (llama.cpp q8_1 DP4A, cuda/q4k_mmvq.cuh).
+static int g_q4k_decode_arm = 0;
+extern "C" void fcuda_set_q4k_decode_arm(int arm) { g_q4k_decode_arm = arm; }
 static int fcuda_q4k_fp8lt_matmul(const uint8_t *, const float *, float *, int, int, int);
 
 extern "C" int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY,
@@ -554,6 +558,7 @@ extern "C" int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float 
     return 0;
   }
   if (P < 4) {
+    if (g_q4k_decode_arm == 1) return fcuda_q4k_mmvq_matmul(dQ4K, dX, dY, out, in, P);
     float2 *coeff = q4_coeffs_for(dQ4K, out, in);
     FCUDA_TS("k_q4k_gemm", dim3((out + 1) / 2, P), k_q4k_gemm<<<dim3((out + 1) / 2, P), 256, 0, g_stream>>>(
         (const unsigned char *)dQ4K, coeff, dX, dY, out, in, P));
