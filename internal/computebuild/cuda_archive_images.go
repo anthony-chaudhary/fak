@@ -245,6 +245,10 @@ func AuditCUDAArchiveImages(ctx context.Context, tc *Toolchain, repoRoot, arch, 
 		wantSASS = append(wantSASS, plan.arches...)
 		sortCUDAImageArchitectures(wantSASS)
 	}
+	return auditCUDAImages(ctx, tc, archive, wantSASS, wantPTX)
+}
+
+func auditCUDAImages(ctx context.Context, tc *Toolchain, archive string, wantSASS, wantPTX []string) (*CUDAArchiveImageAudit, error) {
 	tool, err := cudaImageAuditTool(tc)
 	if err != nil {
 		return nil, err
