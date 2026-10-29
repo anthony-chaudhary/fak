@@ -101,6 +101,11 @@ static void q4_coeff_cache_evict(const void *q);
 
 extern "C" void fcuda_free(void *d) {
   if (!d) return;
+#ifdef FAK_CUDA_V41_INDEXER
+  for (const void *held : g_v41_indexer_quarantine) {
+    if (d == held) return;
+  }
+#endif
 #ifdef FAK_CUDA_V41_BF16_PUBLISH
   for (const void *held : g_v41_bf16_quarantine) {
     if (d == held) return;

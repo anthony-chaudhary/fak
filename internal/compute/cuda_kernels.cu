@@ -78,7 +78,14 @@ static uint64_t g_v41_rope_test_free_attempts = 0;
 #endif
 #endif
 
-#if defined(FAK_CUDA_V41_BF16_PUBLISH) || defined(FAK_CUDA_V41_TAIL_ROPE)
+#ifdef FAK_CUDA_V41_INDEXER
+// Terminal uncertain score operation retains its three inputs and one output.
+static const void *g_v41_indexer_quarantine[4] = {nullptr, nullptr, nullptr, nullptr};
+static bool g_v41_indexer_uncertain = false;
+static uint64_t g_v41_indexer_completed = 0;
+#endif
+
+#if defined(FAK_CUDA_V41_BF16_PUBLISH) || defined(FAK_CUDA_V41_TAIL_ROPE) || defined(FAK_CUDA_V41_INDEXER)
 // Both candidates share g_stream. A successful peer call cannot rehabilitate
 // an uncertain operation, even when the Go backend has no fault latch.
 static bool v41_candidates_stream_uncertain(void) {
@@ -87,6 +94,9 @@ static bool v41_candidates_stream_uncertain(void) {
 #endif
 #ifdef FAK_CUDA_V41_TAIL_ROPE
   if (g_v41_rope_uncertain) return true;
+#endif
+#ifdef FAK_CUDA_V41_INDEXER
+  if (g_v41_indexer_uncertain) return true;
 #endif
   return false;
 }
@@ -115,6 +125,7 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/runtime_memory.cuh"
 #include "cuda/runtime_services.cuh"
 #include "cuda/model_candidates.cuh"
+#include "cuda_v41_indexer.cu"
 #include "cuda/qwen35_gdn.cuh"
 #include "cuda/q4k_mmq.cuh"
 #include "cuda/quant_matmul.cuh"
