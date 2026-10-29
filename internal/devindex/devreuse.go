@@ -304,6 +304,8 @@ var maintainerDevCommands = []string{
 	"route",
 	"routebench",
 	"router",
+	// Bounded reader for a serve's go_runtime receipt: fak's own runtime diagnostics.
+	"runtime-mem",
 	"rungstats",
 	"savings",
 	"savings-vector",
