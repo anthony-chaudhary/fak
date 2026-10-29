@@ -827,6 +827,41 @@ __global__ void k_q2k_dequant_transient(const unsigned char *Q2K, float *W, int 
   W[i] = dl * (float)code - ml;
 }
 
+// Preserve the 84-byte Q2_K decode and contraction policy, but materialize
+// only compensated half weights instead of an extra F32 image (#14097).
+__global__ void k_q2k_dequant_split(const unsigned char *Q2K, __half *hi, __half *lo, int out, int in) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int total = out * in;
+  if (i >= total) return;
+
+  int o = i / in;
+  int k = i % in;
+  int sb = k / 256;
+  int elem = k % 256;
+
+  const unsigned char *blk = Q2K + ((size_t)o * (in / 256) + sb) * 84;
+  float d = __half2float(*(const __half *)(blk + 80));
+  float min = __half2float(*(const __half *)(blk + 82));
+
+  int h = elem / 128;
+  int rem = elem % 128;
+  int j = rem / 32;
+  int lane = rem % 32;
+  int lane_half = lane >> 4;
+  int is = h * 8 + 2 * j + lane_half;
+  unsigned char sc = blk[is];
+  float dl = d * (float)(sc & 0x0f);
+  float ml = min * (float)(sc >> 4);
+
+  unsigned char qb = blk[16 + h * 32 + lane];
+  int code = (qb >> (2 * j)) & 3;
+
+  float value = dl * (float)code - ml;
+  __half hval = __float2half_rn(value);
+  hi[i] = hval;
+  lo[i] = __float2half_rn(__fsub_rn(value, __half2float(hval)));
+}
+
 // k_q2k_gemv: 1 warp (32 threads) per output row.
 // 256 threads per block = 8 rows per block. Zero shared memory, warp shuffle reduction.
 // sm_80/sm_89/sm_90 native execution eliminating CPU decode offload.
@@ -950,13 +985,21 @@ extern "C" void fcuda_q2k_gemm_panel(const uint8_t *dQ2K, const float *dX, float
 extern "C" int fcuda_q2k_matmul_f32(const uint8_t *dQ2K, const float *dX, float *dY,
                                     int out, int in, int P) {
   if (P >= 128) {
-    float *wide = (float *)scratch_malloc((size_t)out * in * sizeof(float));
-    if (!wide) return FCUDA_SCRATCH_ALLOC_FAILED;
-    FCUDA_TS("k_q2k_dequant_transient", ((size_t)out * in + 255) / 256, k_q2k_dequant_transient<<<((size_t)out * in + 255) / 256, 256, 0, g_stream>>>(
-        (const unsigned char *)dQ2K, wide, out, in));
-    int status = fp16_compensated_matmul(wide, dX, dY, out, in, P);
-    fcuda_free(wide);
-    return status;
+    size_t wn = (size_t)out * in, xn = (size_t)P * in;
+    __half *wHi = (__half *)scratch_malloc(wn * sizeof(__half));
+    __half *wLo = (__half *)scratch_malloc(wn * sizeof(__half));
+    __half *xHi = (__half *)scratch_malloc(xn * sizeof(__half));
+    __half *xLo = (__half *)scratch_malloc(xn * sizeof(__half));
+    if (!wHi || !wLo || !xHi || !xLo) {
+      fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
+      return FCUDA_SPLIT_SCRATCH_ALLOC_FAILED;
+    }
+    FCUDA_TS("k_q2k_dequant_split", (wn + 255) / 256, k_q2k_dequant_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(
+        (const unsigned char *)dQ2K, wHi, wLo, out, in));
+    FCUDA_TS("k_fp16_split", (xn + 255) / 256, k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(dX, xHi, xLo, xn));
+    fp16_compensated_gemm(wHi, wLo, xHi, xLo, dY, out, in, P);
+    fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
+    return 0;
   }
   if (P < 4) {
     fcuda_q2k_gemv(dQ2K, dX, dY, out, in, P);

@@ -9,7 +9,7 @@ import (
 )
 
 // TestCUDAGEMMScratchMissFailsClosed arms the dequant + fp16 GEMM scratch fault at both scratch
-// sites (the f32 dequant copy and the fp16 split) for each P>=128 entry (Q4_K, Q2_K and Q8_0
+// sites (the two fp16 weight halves) for each P>=128 entry (Q4_K, Q2_K and Q8_0
 // BatchedMatMul). Each must raise a typed DeviceAllocError naming the allocation that missed
 // instead of returning an output tensor holding a previous op's bytes, and the next call must
 // compute normally.
@@ -32,26 +32,18 @@ func TestCUDAGEMMScratchMissFailsClosed(t *testing.T) {
 		binary.LittleEndian.PutUint16(q2k[base+82:base+84], 0x2c00) // dmin = 0.0625
 	}
 	weights["Q2_K"] = cb.Upload(NewQ2K(cb, []int{out, in}, q2k), Q2_K)
-	// nth 1 misses the f32 dequant copy; nth 2 misses the first fp16 split half inside
-	// fp16_compensated_matmul, after the dequant copy was allocated and launched.
-	// Q4_K and Q8 directly split resident codes: its first two allocations are the two
-	// fp16 weight halves, with no F32 dequant image (#14097).
+	// All three large-P routes split resident weights directly; the first two
+	// allocations are FP16 weight halves, with no F32 dequant image (#14097).
 	sites := []struct {
 		name  string
 		nth   int
 		bytes int
 	}{
-		{"dequant", 1, cudaDequantScratch(out, in).main},
+		{"fp16-hi", 1, cudaDequantScratch(out, in).split},
 		{"fp16-split", 2, cudaDequantScratch(out, in).split},
 	}
 	for name, w := range weights {
 		for _, site := range sites {
-			if name == "Q8_0" || name == "Q4_K" {
-				site.bytes = cudaDequantScratch(out, in).split
-				if site.nth == 1 {
-					site.name = "fp16-hi"
-				}
-			}
 			t.Run(name+"/"+site.name, func(t *testing.T) {
 				var y Tensor
 				err := func() (err error) {
