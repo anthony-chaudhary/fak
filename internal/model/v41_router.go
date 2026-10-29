@@ -1,8 +1,12 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"math"
+	"os"
+	"strconv"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/model/ffn"
 )
@@ -14,6 +18,35 @@ const (
 	V41RouterMoEWidth    = 2304
 	V41RouterRouteScale  = 1.5
 )
+
+// V41RoutedTopKEnv opts a native V4.1 process into a reduced routed-expert
+// count ("faster mode"): the router keeps its top N of the published top-6 and
+// renormalises the route weights over those N. Unset keeps the published 6.
+// Valid values are 1..V41RouterTopK. Routed expert bytes per token scale with
+// N, so N=5 cuts them by 1/6. The rule is adapted (no code copied) from Strata
+// src/dsv41/ds4_experts_rule.hpp:30-44 @46c152a1 (MIT), which reports +4% to
+// +13% decode at a KL cost of ~0.0015 for 5 vs 6 (upstream-reported, not a
+// fak witness). The default stays 6 until a fak quality gate passes.
+const V41RoutedTopKEnv = "FAK_V41_ROUTED_TOPK"
+
+// ErrV41RoutedTopK classifies a refused routed top-k override.
+var ErrV41RoutedTopK = errors.New("model: V4.1 routed top-k override refused")
+
+// v41RoutedTopK parses a routed top-k override; empty means the published 6.
+func v41RoutedTopK(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return V41RouterTopK, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %s=%q is not an integer", ErrV41RoutedTopK, V41RoutedTopKEnv, raw)
+	}
+	if n < 1 || n > V41RouterTopK {
+		return 0, fmt.Errorf("%w: %s=%d outside 1..%d", ErrV41RoutedTopK, V41RoutedTopKEnv, n, V41RouterTopK)
+	}
+	return n, nil
+}
 
 // v41RouterConfig is the admitted V4.1 routed+shared geometry.
 type v41RouterConfig struct {
@@ -35,6 +68,7 @@ func v41DefaultRouterConfig() v41RouterConfig {
 
 // v41RouterConfigFromConfig reads the routed+shared geometry from a Config and
 // refuses anything but the admitted 384/top-6/1-shared 1.5-scale V4.1 shapes.
+// An explicit V41RoutedTopKEnv override then narrows the routed count.
 func v41RouterConfigFromConfig(c Config) (v41RouterConfig, error) {
 	if c.NumExperts != V41RouterExperts {
 		return v41RouterConfig{}, &v4RouteError{Field: "v41_experts", Reason: fmt.Sprintf("want %d, got %d", V41RouterExperts, c.NumExperts)}
@@ -48,7 +82,13 @@ func v41RouterConfigFromConfig(c Config) (v41RouterConfig, error) {
 	if c.RoutedScalingFactor != float64(V41RouterRouteScale) {
 		return v41RouterConfig{}, &v4RouteError{Field: "v41_route_scale", Reason: fmt.Sprintf("want %g, got %g", float64(V41RouterRouteScale), c.RoutedScalingFactor)}
 	}
-	return v41DefaultRouterConfig(), nil
+	topK, err := v41RoutedTopK(os.Getenv(V41RoutedTopKEnv))
+	if err != nil {
+		return v41RouterConfig{}, err
+	}
+	cfg := v41DefaultRouterConfig()
+	cfg.TopK = topK
+	return cfg, nil
 }
 
 // v41SqrtSoftplus is the overflow-safe sqrt(softplus(z)) scoring function.
@@ -61,8 +101,8 @@ func (cfg v41RouterConfig) validate() error {
 	if cfg.Experts != V41RouterExperts {
 		return &v4RouteError{Field: "v41_experts", Reason: fmt.Sprintf("want %d, got %d", V41RouterExperts, cfg.Experts)}
 	}
-	if cfg.TopK != V41RouterTopK {
-		return &v4RouteError{Field: "v41_topk", Reason: fmt.Sprintf("want %d, got %d", V41RouterTopK, cfg.TopK)}
+	if cfg.TopK < 1 || cfg.TopK > V41RouterTopK {
+		return &v4RouteError{Field: "v41_topk", Reason: fmt.Sprintf("want 1..%d, got %d", V41RouterTopK, cfg.TopK)}
 	}
 	if cfg.SharedCount < 1 {
 		return &v4RouteError{Field: "v41_shared", Reason: fmt.Sprintf("want >=1, got %d", cfg.SharedCount)}
