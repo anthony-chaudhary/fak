@@ -17,8 +17,8 @@ var (
 
 // Account tracks cumulative token and concurrent worker session allowances for a wave.
 //
-// Invariant: wave fuel accounting is fail-closed and bounded across all fleet wave allocations.
-// Guard: allocations and debits past the landing deadline or exceeding the budget are refused immediately.
+// Allocations and debits are refused immediately once the landing deadline passes or
+// the budget is exceeded, keeping every allocation fail-closed and bounded.
 type Account struct {
 	mu           sync.Mutex
 	maxTokens    int64
