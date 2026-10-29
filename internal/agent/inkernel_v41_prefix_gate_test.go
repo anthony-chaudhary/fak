@@ -141,6 +141,18 @@ func TestV41PlannerPrefixGate(t *testing.T) {
 			t.Fatal("a Vulkan V4.1 planner built no radix tree, so no prefix can be reused")
 		}
 	})
+
+	// TestV41BackendPrefixSnapshotCUDA qualified the CUDA identity on the physical
+	// device, so a V4.1 CUDA serve reuses prefixes instead of re-prefilling each turn.
+	t.Run("witnessed CUDA identity builds the serving tree", func(t *testing.T) {
+		cuda := &v41GateBackend{Backend: cpuRef, name: "cuda"}
+		if !inKernelPlannerPrefixReuseSupported(m, cuda) {
+			t.Fatal("witnessed CUDA backend was refused for the V4.1 planner route")
+		}
+		if p := NewInKernelPlanner(m, nil, "v41-cuda", false, cuda, false); p.tree == nil {
+			t.Fatal("a CUDA V4.1 planner built no radix tree, so no prefix can be reused")
+		}
+	})
 }
 
 // v41CountingBackend is the CW-28 counting capability fixture. It wraps a real backend and
