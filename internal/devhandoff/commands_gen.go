@@ -3,6 +3,7 @@
 package devhandoff
 
 var Commands = []Command{
+	{Name: "allocation-check", Owner: "dev", Handler: "runAllocationCheck", SourceOrigin: "cmd/fak-dev/allocation_check.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "amd-gotchas", Owner: "dev", Handler: "devcmd.RunAMDGotchas", SourceOrigin: "internal/devcmd/amd_gotchas.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "amd-gpu-facts", Owner: "dev", Handler: "devcmd.RunAMDGPUFacts", SourceOrigin: "internal/devcmd/amd_gpu_facts.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "amd-gpudirect", Owner: "dev", Handler: "devcmd.RunAMDGPUDirect", SourceOrigin: "internal/devcmd/amd_gpudirect.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},

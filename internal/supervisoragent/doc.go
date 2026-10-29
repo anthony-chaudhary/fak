@@ -33,4 +33,16 @@
 // receipt / packet head); anything outside the union is rejected before any
 // verb runs. No action reaches a raw shell or a private spawn path, so the
 // agent's authority is exactly a human operator's.
+//
+// Build-plan step S3 (issue #13464) adds the bounded seat-loop driver over
+// those contracts: Seat.RunWake (loop.go) drives one wake through
+// assemble -> decide -> gate -> lower -> journal, appending exactly one
+// addressed DecisionRecord per wake. Live wakes lower ONLY through
+// LowerInEnvelope; dry-run wakes make ZERO admission calls and record
+// OutcomeDryRun instead. FileJournal (filejournal.go) is the durable JSONL
+// backend behind the same Journal interface MemoryJournal owns the golden
+// behavior for, so a restart resumes the decision series rather than
+// restarting it. The cycle is deterministic-first by construction: every
+// stage lowers to a pure function or an existing admission verb, and no
+// stage reaches a model.
 package supervisoragent
