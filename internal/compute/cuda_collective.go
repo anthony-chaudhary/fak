@@ -75,7 +75,8 @@ func (c *cudaBackend) UploadRank(t Tensor, as Dtype, rank int) (Tensor, error) {
 }
 
 func (c *cudaBackend) dallocOnDevice(device, nbytes int) (*cudaBuf, error) {
-	p := C.fcuda_malloc_on(C.int(device), C.size_t(nbytes))
+	cls, siteID := cudaAllocTag(MemorySignalBuffer, "collective-rank-buffer", false)
+	p := C.fcuda_malloc_on_tagged(C.int(device), C.size_t(nbytes), cls, siteID)
 	if p == nil {
 		return nil, fmt.Errorf("compute: cudaMalloc on rank/device %d failed for %d bytes", device, nbytes)
 	}

@@ -453,9 +453,10 @@ func (c *cudaBackend) dallocClass(nbytes int, class MemoryClass, site string) *c
 	if c.promptPanel && (class == MemoryScratchpad || class == MemoryActivation) {
 		return c.dallocPromptPanel(nbytes, class, site)
 	}
-	p := C.fcuda_malloc(C.size_t(nbytes))
+	cls, siteID := cudaAllocTag(class, site, false)
+	p := C.fcuda_malloc_tagged(C.size_t(nbytes), cls, siteID)
 	if p == nil {
-		p = C.fcuda_malloc_managed(C.size_t(nbytes))
+		p = C.fcuda_malloc_managed_tagged(C.size_t(nbytes), cls, siteID)
 		if p == nil {
 			// fcuda_malloc and fcuda_malloc_managed print the real CUDA errors (OOM vs a context
 			// poisoned by a prior async kernel fault) to stderr before returning nil; carry the
@@ -477,7 +478,8 @@ func (c *cudaBackend) dallocDeviceOnlyClass(nbytes int, class MemoryClass, site 
 	if err := qwen35GDNInjectedAllocationFailure(site, nbytes); err != nil {
 		return nil, err
 	}
-	p := C.fcuda_malloc(C.size_t(nbytes))
+	cls, siteID := cudaAllocTag(class, site, false)
+	p := C.fcuda_malloc_tagged(C.size_t(nbytes), cls, siteID)
 	if p == nil {
 		return nil, &Qwen35GDNAllocationError{Operand: site, Bytes: nbytes}
 	}
@@ -487,7 +489,8 @@ func (c *cudaBackend) dallocDeviceOnlyClass(nbytes int, class MemoryClass, site 
 // dallocManagedClass allocates directly from cudaMallocManaged. Used by the residency-budget
 // path for cold weights. Caller holds cudaMu.
 func (c *cudaBackend) dallocManagedClass(nbytes int, class MemoryClass, site string) *cudaBuf {
-	p := C.fcuda_malloc_managed(C.size_t(nbytes))
+	cls, siteID := cudaAllocTag(class, site, false)
+	p := C.fcuda_malloc_managed_tagged(C.size_t(nbytes), cls, siteID)
 	if p == nil {
 		panic(&DeviceAllocError{Bytes: nbytes, Site: site, Class: class})
 	}
@@ -955,7 +958,8 @@ func (c *cudaBackend) MatMulNVFP4(w, a Tensor) (Tensor, error) {
 		return Tensor{}, fmt.Errorf("%w: output byte size overflows", ErrNVFP4Shape)
 	}
 	allocDevice := func(bytes int, class MemoryClass, site string) (*cudaBuf, error) {
-		p := C.fcuda_malloc(C.size_t(bytes))
+		cls, siteID := cudaAllocTag(class, site, false)
+		p := C.fcuda_malloc_tagged(C.size_t(bytes), cls, siteID)
 		if p == nil {
 			return nil, &DeviceAllocError{Bytes: bytes, Site: site, Class: class}
 		}

@@ -521,6 +521,7 @@ static bool ensure_argmax_idx(void) {
     g_argmax_idx = nullptr;
     return false;
   }
+  fak_alloc_track(g_argmax_idx, FAK_ALLOC_SAMPLING, FAK_ALLOC_DEVICE_LOCAL, FAK_ALLOC_SITE("argmax-index"), sizeof(int));
   return true;
 }
 

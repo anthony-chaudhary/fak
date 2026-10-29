@@ -212,13 +212,18 @@ static int fcuda_q4k_mmvq_matmul(const uint8_t *dQ4K, const float *dX, float *dY
         return FCUDA_Q4K_MMVQ_REFUSED;
     size_t need = (size_t)P * (in / QK8_1) * sizeof(block_q8_1);
     if (need > g_q4k_mmvq_y_cap) {
-        if (g_q4k_mmvq_y) cudaFree(g_q4k_mmvq_y);
+        if (g_q4k_mmvq_y) {
+            fak_alloc_untrack(g_q4k_mmvq_y);
+            cudaFree(g_q4k_mmvq_y);
+        }
         g_q4k_mmvq_y = nullptr;
         g_q4k_mmvq_y_cap = 0;
         if (fcuda_alloc_status(cudaMalloc(&g_q4k_mmvq_y, need)) != cudaSuccess || !g_q4k_mmvq_y) {
             g_q4k_mmvq_y = nullptr;
             return FCUDA_SCRATCH_ALLOC_FAILED;
         }
+        fak_alloc_track(g_q4k_mmvq_y, FAK_ALLOC_ACTIVATIONS_SCRATCH, FAK_ALLOC_DEVICE_LOCAL,
+                        FAK_ALLOC_SITE("q4k-mmvq-q8_1-activations"), need);
         g_q4k_mmvq_y_cap = need;
     }
     dim3 qgrid((in + 255) / 256, P);

@@ -55,7 +55,10 @@ extern "C" void fcuda_attention_f32(const float *dQ, const float *dK, const floa
                                     int nPos, int maxPos, int nH, int nKV, int hd, float scale) {
   int need = nH * (maxPos > nPos ? maxPos : nPos);
   if (need > g_attn_scratch_cap) {
-    if (g_attn_scratch) cudaFree(g_attn_scratch);
+    if (g_attn_scratch) {
+      fak_alloc_untrack(g_attn_scratch);
+      cudaFree(g_attn_scratch);
+    }
     g_attn_scratch = nullptr;
     g_attn_scratch_cap = 0;
     // Pending-status site: on a miss, never launch onto a null scratch (an illegal access would
@@ -68,6 +71,8 @@ extern "C" void fcuda_attention_f32(const float *dQ, const float *dK, const floa
       g_attn_scratch = nullptr;
       return;
     }
+    fak_alloc_track(g_attn_scratch, FAK_ALLOC_ATTENTION_SCRATCH, FAK_ALLOC_DEVICE_LOCAL,
+                    FAK_ALLOC_SITE("attention-f32-scratch"), (size_t)need * sizeof(float));
     g_attn_scratch_cap = need;
   }
   FCUDA_TS("k_attention", nH, k_attention<<<nH, 128, 0, g_stream>>>(dQ, dK, dV, dOut, g_attn_scratch, nPos, nH, nKV, hd, scale));

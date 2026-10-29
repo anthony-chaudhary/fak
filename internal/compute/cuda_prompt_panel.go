@@ -91,7 +91,8 @@ func cudaKQuantScratch(out, in, rows int) cudaGEMMScratch {
 // dallocPromptPanel serves panel scratch from the panel free list. A miss is a typed
 // DeviceAllocError: panel scratch never falls back to managed memory. Caller holds cudaMu.
 func (c *cudaBackend) dallocPromptPanel(nbytes int, class MemoryClass, site string) *cudaBuf {
-	p := C.fcuda_malloc_panel(C.size_t(nbytes))
+	cls, siteID := cudaAllocTag(class, site, true)
+	p := C.fcuda_malloc_panel_tagged(C.size_t(nbytes), cls, siteID)
 	if p == nil {
 		panic(&DeviceAllocError{Bytes: nbytes, Site: "prompt-panel " + site, Class: class})
 	}

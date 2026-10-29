@@ -818,7 +818,10 @@ static int fak_qwen38_fattn_mma_hd256_launch(
     const size_t need = 2 * total2 * sizeof(half2);
     if (need > g_qwen38_fattn_kv16_bytes) {
         if (g_capture_open) return -2;
-        if (g_qwen38_fattn_kv16) cudaFree(g_qwen38_fattn_kv16);
+        if (g_qwen38_fattn_kv16) {
+            fak_alloc_untrack(g_qwen38_fattn_kv16);
+            cudaFree(g_qwen38_fattn_kv16);
+        }
         g_qwen38_fattn_kv16 = nullptr;
         g_qwen38_fattn_kv16_bytes = 0;
         cudaError_t grown = fcuda_alloc_status(cudaMalloc(&g_qwen38_fattn_kv16, need));
@@ -827,6 +830,8 @@ static int fak_qwen38_fattn_mma_hd256_launch(
             cudaGetLastError();
             return -2;
         }
+        fak_alloc_track(g_qwen38_fattn_kv16, FAK_ALLOC_ATTENTION_SCRATCH, FAK_ALLOC_DEVICE_LOCAL,
+                        FAK_ALLOC_SITE("qwen38-fattn-kv16"), need);
         g_qwen38_fattn_kv16_bytes = need;
     }
     half2 *K16 = g_qwen38_fattn_kv16, *V16 = g_qwen38_fattn_kv16 + total2;

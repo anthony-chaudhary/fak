@@ -54,6 +54,7 @@ extern "C" void *fcuda_handoff_alloc(int device, size_t bytes) {
   cudaError_t e = cudaSetDevice(device);
   if (e == cudaSuccess) e = fcuda_alloc_status(cudaMalloc(&d, bytes ? bytes : 1));
   if (fcuda_handoff_status(e, "cudaMalloc") != 0) return nullptr;
+  fak_alloc_track(d, FAK_ALLOC_OTHER, FAK_ALLOC_DEVICE_LOCAL, FAK_ALLOC_SITE("peer-handoff"), bytes ? bytes : 1);
   return d;
 }
 
@@ -62,6 +63,7 @@ extern "C" int fcuda_handoff_free(int device, void *d) {
   fcuda_handoff_device_guard guard;
   cudaError_t e = cudaSetDevice(device);
   if (e == cudaSuccess) e = cudaFree(d);
+  if (e == cudaSuccess) fak_alloc_untrack(d);
   return fcuda_handoff_status(e, "cudaFree");
 }
 
@@ -69,12 +71,15 @@ extern "C" void *fcuda_handoff_pinned_alloc(size_t bytes) {
   void *h = nullptr;
   if (fcuda_handoff_status(cudaHostAlloc(&h, bytes ? bytes : 1, cudaHostAllocPortable), "cudaHostAlloc") != 0)
     return nullptr;
+  fak_alloc_track(h, FAK_ALLOC_OTHER, FAK_ALLOC_PINNED_HOST, FAK_ALLOC_SITE("peer-handoff-pinned"), bytes ? bytes : 1);
   return h;
 }
 
 extern "C" int fcuda_handoff_pinned_free(void *h) {
   if (!h) return 0;
-  return fcuda_handoff_status(cudaFreeHost(h), "cudaFreeHost");
+  cudaError_t e = cudaFreeHost(h);
+  if (e == cudaSuccess) fak_alloc_untrack(h);
+  return fcuda_handoff_status(e, "cudaFreeHost");
 }
 
 extern "C" int fcuda_handoff_h2d(int device, void *d, const void *h, size_t bytes) {

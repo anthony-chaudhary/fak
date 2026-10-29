@@ -272,23 +272,33 @@ static int q8_quant_rows(const float *dX, int in, int P, int block) {
   int needQX = P * in;          // int8 activation codes
   int needScale = P * nblk;     // per-block act scales (floats)
   if (needQX > g_q8_qX_cap) {
-    if (g_q8_qX) cudaFree(g_q8_qX);
+    if (g_q8_qX) {
+      fak_alloc_untrack(g_q8_qX);
+      cudaFree(g_q8_qX);
+    }
     g_q8_qX = nullptr;
     g_q8_qX_cap = 0;
     if (cudaMalloc(&g_q8_qX, (size_t)needQX) != cudaSuccess || !g_q8_qX) {
       g_q8_qX = nullptr;
       return FCUDA_SCRATCH_ALLOC_FAILED;
     }
+    fak_alloc_track(g_q8_qX, FAK_ALLOC_ACTIVATIONS_SCRATCH, FAK_ALLOC_DEVICE_LOCAL,
+                    FAK_ALLOC_SITE("q8-activation-codes"), (size_t)needQX);
     g_q8_qX_cap = needQX;
   }
   if (needScale > g_q8_xScale_cap) {
-    if (g_q8_xScale) cudaFree(g_q8_xScale);
+    if (g_q8_xScale) {
+      fak_alloc_untrack(g_q8_xScale);
+      cudaFree(g_q8_xScale);
+    }
     g_q8_xScale = nullptr;
     g_q8_xScale_cap = 0;
     if (cudaMalloc(&g_q8_xScale, (size_t)needScale * sizeof(float)) != cudaSuccess || !g_q8_xScale) {
       g_q8_xScale = nullptr;
       return FCUDA_SCRATCH_ALLOC_FAILED;
     }
+    fak_alloc_track(g_q8_xScale, FAK_ALLOC_ACTIVATIONS_SCRATCH, FAK_ALLOC_DEVICE_LOCAL,
+                    FAK_ALLOC_SITE("q8-activation-scales"), (size_t)needScale * sizeof(float));
     g_q8_xScale_cap = needScale;
   }
   FCUDA_TS("k_q8_quant_act", dim3(nblk, P), k_q8_quant_act<<<dim3(nblk, P), 64, 0, g_stream>>>(dX, g_q8_qX, g_q8_xScale, P, in, block));
@@ -551,7 +561,12 @@ static bool q4_coeff_arena_ready() {
   }
   size_t want = kQ4CoeffArenaBytes;
   for (int attempt = 0; attempt < 3 && !g_q4_coeff_arena; ++attempt) {
-    if (cudaMalloc((void **)&g_q4_coeff_arena, want) == cudaSuccess) { g_q4_coeff_cap = want; break; }
+    if (cudaMalloc((void **)&g_q4_coeff_arena, want) == cudaSuccess) {
+      g_q4_coeff_cap = want;
+      fak_alloc_track(g_q4_coeff_arena, FAK_ALLOC_Q4_COEFF_CACHE, FAK_ALLOC_DEVICE_LOCAL,
+                      FAK_ALLOC_SITE("q4-coeff-ring-arena"), want);
+      break;
+    }
     g_q4_coeff_arena = nullptr;
     want >>= 1;
     if (want < (512ull << 20)) want = 512ull << 20;

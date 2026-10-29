@@ -271,7 +271,8 @@ func (k *cudaKV) Evict(from, n int) int {
 		}
 	}
 	if scratchFloats > 0 {
-		scratch = unsafe.Pointer(C.fcuda_malloc(C.size_t(scratchFloats * 4)))
+		cls, siteID := cudaAllocTag(MemoryScratchpad, "kv-attention-scratch", false)
+		scratch = unsafe.Pointer(C.fcuda_malloc_tagged(C.size_t(scratchFloats*4), cls, siteID))
 		if scratch == nil {
 			panic(&DeviceAllocError{Bytes: scratchFloats * 4, Site: "evict-scratch", Class: MemoryScratchpad})
 		}

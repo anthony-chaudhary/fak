@@ -69,7 +69,8 @@ func (c *cudaBackend) PrepareQwen4ExpPLEHash(batch Qwen4ExpPLEHashBatch, spec Qw
 			return nil, &Qwen4ExpPLEHashError{Stage: "prepare", Reason: site + " byte size overflow"}
 		}
 		bytes := elements * width
-		ptr := C.fcuda_malloc(C.size_t(bytes))
+		cls, siteID := cudaAllocTag(MemoryWeights, "qwen4exp-ple-hash "+site, false)
+		ptr := C.fcuda_malloc_tagged(C.size_t(bytes), cls, siteID)
 		if ptr == nil {
 			return nil, &Qwen4ExpPLEHashError{Stage: "prepare", Reason: fmt.Sprintf("%s CUDA allocation of %d bytes failed", site, bytes)}
 		}
