@@ -74,6 +74,9 @@ const (
 	// ExpertPrefetchOnDemand keeps the pre-R3 behaviour: each expert is staged when its own GEMM
 	// reaches for it, serialized behind the expert before it.
 	ExpertPrefetchOnDemand
+	// ExpertPrefetchCrossLayer is ExpertPrefetchActivatedSet plus, on the V4.1 batched routed
+	// layer, read-ahead hints for the predicted next-layer set (v41_cross_layer_prefetch.go).
+	ExpertPrefetchCrossLayer
 )
 
 // String names the mode for a report or a log line.
@@ -81,6 +84,8 @@ func (m ExpertPrefetchMode) String() string {
 	switch m {
 	case ExpertPrefetchOnDemand:
 		return "on-demand"
+	case ExpertPrefetchCrossLayer:
+		return "cross-layer"
 	default:
 		return "activated-set"
 	}

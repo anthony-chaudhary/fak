@@ -85,6 +85,10 @@ type CrossLayerPrefetchStats struct {
 	Predicted int `json:"predicted"` // total predicted expert slots across layers
 	Actual    int `json:"actual"`    // total realized activated expert slots
 	Hits      int `json:"hits"`      // predicted intersect actual (per slot)
+	// HintedBytes is checkpoint payload advised for predicted next-layer picks on the V4.1 routed
+	// path; HashRouted counts next layers routed by token id, for which no gate prediction runs.
+	HintedBytes int64 `json:"hinted_bytes,omitempty"`
+	HashRouted  int   `json:"hash_routed,omitempty"`
 }
 
 // Precision is Hits/Predicted Ã¢â‚¬â€ of the slots the predictor named, the share that were really
@@ -142,6 +146,19 @@ func ResetCrossLayerPrefetchStats(s *Session) {
 	crossLayerGateState.mu.Lock()
 	delete(crossLayerGateState.stats, s)
 	delete(crossLayerGateState.pending, s)
+	crossLayerGateState.mu.Unlock()
+}
+
+// addCrossLayerPrefetchStats adds delta's HintedBytes and HashRouted to s's ledger.
+func addCrossLayerPrefetchStats(s *Session, delta CrossLayerPrefetchStats) {
+	if s == nil {
+		return
+	}
+	crossLayerGateState.mu.Lock()
+	st := crossLayerGateState.stats[s]
+	st.HintedBytes += delta.HintedBytes
+	st.HashRouted += delta.HashRouted
+	crossLayerGateState.stats[s] = st
 	crossLayerGateState.mu.Unlock()
 }
 
