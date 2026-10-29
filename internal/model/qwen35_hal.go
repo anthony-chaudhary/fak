@@ -519,6 +519,14 @@ func (s *Session) initQwen35HALState(gdn Qwen35GDNBackend) {
 	cfg := s.M.Cfg
 	_, nV, kHd, vHd, _, _, convDim := cfg.linearAttnDims()
 	state := &qwen35HALState{backend: gdn, layers: make([]qwen35HALLayerState, cfg.NumLayers)}
+	published := false
+	defer func() {
+		if !published {
+			// Keep the original upload panic or Goexit while releasing every
+			// returned handle; the session cannot see this unpublished state.
+			suppressBackendCleanupPanic(func() { state.free(s.Backend) })
+		}
+	}()
 	for l := 0; l < cfg.NumLayers; l++ {
 		if !cfg.isLinearAttnLayer(l) {
 			continue
@@ -529,6 +537,9 @@ func (s *Session) initQwen35HALState(gdn Qwen35GDNBackend) {
 			compute.MemoryKVCache,
 			"qwen35-gdn-conv-state layer "+itoa(l),
 		)
+		// Publish this partial pair before the next backend callback can fail.
+		// free adopts the convolution-only owner on the rollback path.
+		state.layers[l].conv = conv
 		recurrent := s.uploadHostF32(
 			[]int{nV, kHd, vHd},
 			make([]float32, nV*kHd*vHd),
@@ -538,6 +549,7 @@ func (s *Session) initQwen35HALState(gdn Qwen35GDNBackend) {
 		state.layers[l] = newQwen35HALLayerState(s.Backend, conv, recurrent)
 	}
 	s.qwen35HAL = state
+	published = true
 }
 
 // cloneQwen35HALState creates a read-only shared checkpoint of recurrent

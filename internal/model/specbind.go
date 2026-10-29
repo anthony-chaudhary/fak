@@ -348,6 +348,17 @@ func (tx *qwen35MTPTargetTransaction) commitPreparedOwned(accepted int) (logits 
 	rollback = nil // ownership transferred; local cleanup is now disarmed
 	logits = append([]float32(nil), tx.beforeLogits...)
 	started := time.Now()
+	if accepted > 0 && tx.target.Backend != nil && tx.target.qwen35HAL != nil {
+		// Snapshot clones share recurrent owners. Prepare their physical COW
+		// copies before Step so an allocation failure can restore the retained
+		// prefix without entering the fail-closed decode path.
+		_, err := tx.target.qwen35HAL.mutateSequence(tx.target.Backend, func([]compute.Qwen35SequenceState) (compute.Qwen35SequencePrefillResult, error) {
+			return compute.Qwen35SequencePrefillResult{}, nil
+		})
+		if err != nil {
+			return nil, tx.rollbackFailure("prepare commit recurrent state", err)
+		}
+	}
 	// Synchronization includes accepted-prefix Step replay; TargetDecodeSteps
 	// describes verification execution, not these separately timed commit steps.
 	for _, token := range tx.draft[:accepted] {
