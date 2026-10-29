@@ -67,11 +67,17 @@ type CUDANativeBuildReceipt struct {
 	Executed                      int                      `json:"executed"`
 	Reused                        int                      `json:"reused"`
 	Objects                       []CUDAObjectBuildReceipt `json:"objects"`
+
+	FlashMLAPrefill *CUDAFlashMLAPrefillReceipt `json:"flashmla_prefill,omitempty"`
 }
 
 func newCUDANativeReceipt(ctx context.Context, root, arch string, nccl bool) *CUDANativeBuildReceipt {
 	host, _ := os.Hostname()
 	r := &CUDANativeBuildReceipt{Schema: CUDANativeBuildReceiptSchema, Outcome: "failed", Mode: "not_started", Architecture: arch, NCCL: nccl, HostOS: runtime.GOOS, HostArch: runtime.GOARCH, Hostname: host, StartedAt: time.Now().UTC()}
+	if plan, ok := ctx.Value(cudaFlashMLAKey{}).(*cudaFlashMLAOptions); ok {
+		candidate := plan.receipt
+		r.FlashMLAPrefill = &candidate
+	}
 	r.ReceiptPath, _ = ctx.Value(cudaReceiptPathContext{}).(string)
 	if r.ReceiptPath == "" {
 		r.ReceiptPath = CUDANativeReceiptPath(root, "")

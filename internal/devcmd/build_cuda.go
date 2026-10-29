@@ -67,6 +67,8 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 	arch := fs.String("arch", os.Getenv("FAK_CUDA_ARCH"), "target CUDA architecture (defaults to FAK_CUDA_ARCH, empty for all)")
 	cudaHome := fs.String("cuda-home", "", "path to CUDA Toolkit root directory")
 	archSpecific := fs.Bool("arch-specific", false, "compile opt-in CUDA 13 arch-specific translation units")
+	flashMLA := fs.Bool("flashmla-prefill", false, "compile explicit Linux CUDA 13.1 SM100a/103a FlashMLA sparse-prefill candidate; requires --arch-specific")
+	flashMLADisableLDRed := fs.Bool("flashmla-disable-ld-red", false, "select pinned non-LD.RED FlashMLA specialization; requires --flashmla-prefill")
 	nccl := fs.Bool("nccl", os.Getenv("FAK_CUDA_NCCL") == "1", "compile with NCCL collectives enabled (-tags cuda,nccl)")
 	ncclHome := fs.String("nccl-home", os.Getenv("NCCL_HOME"), "optional path to NCCL installation directory")
 	jsonOut := fs.Bool("json", false, "emit machine-readable JSON output")
@@ -164,6 +166,9 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 		TimestampURL:       *timestampURL,
 		Stdout:             stdout,
 		Stderr:             stderr,
+
+		EnableFlashMLAPrefill: *flashMLA,
+		DisableFlashMLALDRed:  *flashMLADisableLDRed,
 	}
 
 	// For binary subcommand, allow trailing positional args: [pkg] [out]
@@ -395,6 +400,12 @@ func runCUDABuildAcceptance(stdout, stderr io.Writer, cfg *computebuild.CUDAConf
 	tags := "cuda"
 	if cfg.EnableNCCL {
 		tags += ",nccl"
+	}
+	if cfg.EnableArchSpecific {
+		tags += ",cudaarchspecific"
+	}
+	if cfg.EnableFlashMLAPrefill {
+		tags += ",fak_cuda_flashmla_prefill"
 	}
 	for i := range results {
 		family := &results[i]

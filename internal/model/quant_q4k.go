@@ -33,6 +33,7 @@ package model
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -710,6 +711,7 @@ type weightCloserState struct {
 	err             error
 	halWeights      *modelHALWeightResidency
 	v41ExpertPacked *v41ExpertDeviceInstall
+	v41DensePacked  *v41ModelWKVStore
 	sessions        int
 	closing         bool
 	closed          bool
@@ -771,6 +773,7 @@ func (m *Model) finishWeightClose(s *weightCloserState) {
 				s.err = &ModelWeightRetirementIncompleteError{}
 			}
 		}()
+		denseErr := s.releaseV41DensePackedStore()
 		s.releaseV41ExpertPackedStore()
 		// Immutable HAL weights are model-owned and may outlive every individual request,
 		// but never the mapped Q4_K/Q8 or checkpoint bytes from which they were staged.
@@ -786,6 +789,9 @@ func (m *Model) finishWeightClose(s *weightCloserState) {
 		m.closeSharedExpertRings()
 		if s.c != nil {
 			s.err = s.c.Close()
+		}
+		if denseErr != nil {
+			s.err = errors.Join(s.err, denseErr)
 		}
 		complete = true // Preserve ordinary checkpoint-close errors verbatim.
 	})
