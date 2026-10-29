@@ -23,6 +23,9 @@ func greedyCUDAQwen35Decode(t *testing.T, m *model.Model, be compute.Backend, pr
 		t.Fatalf("NewBackendSessionChecked: %v", err)
 	}
 	defer s.Close()
+	// The served in-kernel planner runs a LoadModelQ4K model with Quant and Q4K both set;
+	// without Q4K the session takes the Q8/f32 matmul path, not the served Q4_K one.
+	s.Quant, s.Q4K = true, true
 	next := argmaxF32(s.Prefill(prompt))
 	toks := make([]int, 0, steps)
 	for i := 0; i < steps; i++ {
