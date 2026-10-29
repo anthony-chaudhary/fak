@@ -824,6 +824,11 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 	if loadPhase.Name != "" {
 		rt.startupPhases = append(rt.startupPhases, loadPhase)
 	}
+	if inKernelModel != nil {
+		limitMsg := serveApplyHostFractionGoMemoryLimit(os.Getenv)
+		fmt.Fprintln(os.Stderr, "fak serve: go memory limit:", limitMsg.Text)
+		rt.addStartupMessage(limitMsg)
+	}
 	// A sharded EP rank now joins the DistComm process group and wires the rank-local forward: each
 	// rank computes only its band and reduces its single [H] partial across the group. The group is
 	// formed AFTER the load (a load failure must not block peers) and BEFORE binding the listener.
