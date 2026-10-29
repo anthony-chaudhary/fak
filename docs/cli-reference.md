@@ -101,6 +101,13 @@ from token execution. A diagnostic write failure after commit leaves the token
 committed exactly once. Complete captures establish internal evidence coverage;
 external parity requires an independently produced, source-bound reference.
 
+### V4.1 runtime knobs
+
+| Variable | Values | Effect |
+| --- | --- | --- |
+| `FAK_V41_ACTIVATION_TRACE` | file path | Captures the latest committed `Session.Step` activation checkpoints (above). |
+| `FAK_V41_ROUTED_TOPK` | unset, `1`..`6`, `auto` | Keeps the router's top N of the published top-6 routed experts and renormalises their weights. Fewer experts means fewer routed-expert bytes per token. Unset means 6. `auto` picks 5 when the GPU shares host RAM or has 16 GiB of VRAM or less, and 6 otherwise. It also picks 6 while no device probe is registered. Out-of-range values are refused (`ErrV41RoutedTopK`). Quality is not gated yet: 5 must pass `TestV41RoutedTopKQualityGate` (mean KL <= 0.006 against top-6, `FAK_V41_GGUF`) before it becomes a default. |
+
 ## `runtime-capabilities`: inspect the deployable runtime before payload load
 
 ```text
