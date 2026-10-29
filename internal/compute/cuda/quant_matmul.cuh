@@ -516,8 +516,11 @@ static float2 *q4_coeffs_for(const uint8_t *q, int out, int in) {
 
 // g_q4k_prefill_arm is the P>=128 Q4_K GEMM arm the Go side resolved from FAK_CUDA_Q4K_PREFILL
 // (cuda_backend.h): 0 compensated, 1 mmq, 2 experimental fp8lt. Any other arm returns
-// FCUDA_Q4K_PREFILL_ARM_REFUSED.
+// FCUDA_Q4K_PREFILL_ARM_REFUSED. The mmq arm also serves FCUDA_Q4K_MMQ_MIN_COLS <= P < 128.
 #define FCUDA_Q4K_PREFILL_ARM_REFUSED 80003
+// FCUDA_Q4K_MMQ_MIN_COLS is the smallest P below 128 the mmq arm takes (cudaQ4KMMQMinCols in Go);
+// smaller panels and decode keep k_q4k_gemm / k_q4k_gemm_panel.
+#define FCUDA_Q4K_MMQ_MIN_COLS 8
 static int g_q4k_prefill_arm = 0;
 extern "C" void fcuda_set_q4k_prefill_arm(int arm) { g_q4k_prefill_arm = arm; }
 static int fcuda_q4k_fp8lt_matmul(const uint8_t *, const float *, float *, int, int, int);
@@ -542,6 +545,12 @@ extern "C" int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float 
     FCUDA_TS("k_fp16_split", (xn + 255) / 256, k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(dX, xHi, xLo, xn));
     fp16_compensated_gemm(wHi, wLo, xHi, xLo, dY, out, in, P);
     fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
+    return 0;
+  }
+  // Small panels on the mmq arm read each weight byte once instead of ceil(P/4) times on the
+  // token panel. Any mmq refusal or scratch miss falls back to the panel, never fails.
+  if (g_q4k_prefill_arm == 1 && P >= FCUDA_Q4K_MMQ_MIN_COLS &&
+      fcuda_q4k_mmq_matmul(dQ4K, dX, dY, out, in, P) == 0) {
     return 0;
   }
   if (P < 4) {

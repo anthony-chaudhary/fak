@@ -136,6 +136,49 @@ func TestCUDAQ4KPrefillArmMMQMatchesRef(t *testing.T) {
 	}
 }
 
+// TestCUDAQ4KPrefillArmMMQSmallPanels is the small-panel routing witness (QWEN-T01): on the
+// mmq arm a panel of cudaQ4KMMQMinCols..127 tokens runs exactly one MMQ launch (not the token
+// panel that re-reads every weight byte ceil(P/4) times) and passes the same strict gate as
+// P >= 128; a panel below cudaQ4KMMQMinCols never launches MMQ.
+//
+// fak-test:runtime slow est=20s
+func TestCUDAQ4KPrefillArmMMQSmallPanels(t *testing.T) {
+	cb := cudaQ4KMMQOrSkip(t)
+	ref := Default()
+	for _, shape := range q4kMMQParityShapes {
+		var seed lcg = 0x4b4d
+		g := &seed
+		raw := randQ4KBytes(g, shape.out, shape.in)
+		w := mkResident(ref, []int{shape.out, shape.in}, dequantQ4KWeight(raw, shape.out, shape.in))
+		wQ4K := cb.Upload(newQ4KHost(cb, []int{shape.out, shape.in}, raw), Q4_K)
+		for _, P := range []int{cudaQ4KMMQMinCols, 16, 68, 127} {
+			t.Run(fmt.Sprintf("%dx%d/P%d", shape.out, shape.in, P), func(t *testing.T) {
+				X := rscale(g, P*shape.in, 1.0)
+				want := ref.Read(ref.BatchedMatMul(w, mkResident(ref, []int{P, shape.in}, X), P))
+				got := runQ4KMMQPanel(t, cb, wQ4K, X, shape.in, P)
+				cos, maxAbs := cosine(want, got), maxAbsDelta(want, got)
+				if cos < cudaQ4KCosineMin || maxAbs > 0.02 || argmaxF32(got) != argmaxF32(want) {
+					t.Fatalf("mmq Q4_K small panel: cosine=%.8f maxAbs=%.3e argmax=%d want=%d", cos, maxAbs, argmaxF32(got), argmaxF32(want))
+				}
+				t.Logf("mmq Q4_K small panel %dx%d P=%d cosine=%.8f maxAbs=%.3e (tier=%s)", shape.out, shape.in, P, cos, maxAbs, cb.Tier())
+			})
+		}
+		t.Run(fmt.Sprintf("%dx%d/P%d-panel", shape.out, shape.in, cudaQ4KMMQMinCols-1), func(t *testing.T) {
+			if err := SetCUDAQ4KPrefillArm(CUDAQ4KPrefillMMQ); err != nil {
+				t.Fatal(err)
+			}
+			P := cudaQ4KMMQMinCols - 1
+			launches := cb.q4kMMQLaunchesForTest()
+			cb.Read(cb.BatchedMatMul(wQ4K, mkResident(cb, []int{P, shape.in}, rscale(g, P*shape.in, 1.0)), P))
+			if n := cb.q4kMMQLaunchesForTest() - launches; n != 0 {
+				t.Fatalf("P=%d ran %d MMQ launches, want 0 (token panel)", P, n)
+			}
+		})
+		cb.Free(wQ4K)
+		ref.Free(w)
+	}
+}
+
 // TestCUDAQ4KPrefillArmMMQMatchesInt8Model checks the port against a CPU replay of the MMQ
 // arithmetic (q4kMMQInt8Model). It does not decide keep or remove; it tells a port defect apart
 // from the int8 activation error the strict gate above measures.
@@ -185,7 +228,7 @@ func cudaQ4KMMQOrSkip(t *testing.T) *cudaBackend {
 	return cb
 }
 
-// runQ4KMMQPanel runs one P >= 128 Q4_K panel on the mmq arm and proves the MMQ kernel ran.
+// runQ4KMMQPanel runs one P >= cudaQ4KMMQMinCols Q4_K panel on the mmq arm and proves the MMQ kernel ran.
 func runQ4KMMQPanel(t *testing.T, cb *cudaBackend, wQ4K Tensor, X []float32, in, P int) []float32 {
 	t.Helper()
 	if err := SetCUDAQ4KPrefillArm(CUDAQ4KPrefillMMQ); err != nil {
