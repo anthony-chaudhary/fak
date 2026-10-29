@@ -345,7 +345,10 @@ func V41GroupedOutputProjection(o, woA, woB []float32, b, m, heads, headDim, gro
 		}
 	}
 
-	joined := make([]float32, b*m*groups*oLoRARank)
+	// Each position consumes its grouped projection before the next position.
+	// Reuse one joined row instead of retaining the full prompt intermediate.
+	joined := make([]float32, groups*oLoRARank)
+	out := make([]float32, b*m*dim)
 	for pos := 0; pos < b*m; pos++ {
 		oBase := pos * heads * headDim
 		for g := 0; g < groups; g++ {
@@ -356,19 +359,14 @@ func V41GroupedOutputProjection(o, woA, woB []float32, b, m, heads, headDim, gro
 				for k := 0; k < aRow; k++ {
 					acc += float32(o[groupBase+k] * woA[aBase+k])
 				}
-				joined[pos*groups*oLoRARank+g*oLoRARank+r] = acc
+				joined[g*oLoRARank+r] = acc
 			}
 		}
-	}
-
-	out := make([]float32, b*m*dim)
-	for pos := 0; pos < b*m; pos++ {
-		joinedBase := pos * groups * oLoRARank
 		for d := 0; d < dim; d++ {
 			bBase := d * groups * oLoRARank
 			var acc float32
 			for k := 0; k < groups*oLoRARank; k++ {
-				acc += float32(woB[bBase+k] * joined[joinedBase+k])
+				acc += float32(woB[bBase+k] * joined[k])
 			}
 			out[pos*dim+d] = acc
 		}
