@@ -44,6 +44,20 @@ static void *scratch_malloc(size_t bytes) {
   if (g_scratch_alloc_test_fault > 0 && --g_scratch_alloc_test_fault == 0) return nullptr;
   return fcuda_malloc(bytes);
 }
+// Same three ordered GEMMs for both already-split weight routes.
+static void fp16_compensated_gemm(const __half *wHi, const __half *wLo,
+    const __half *xHi, const __half *xLo, float *Y, int out, int in, int tokens) {
+  const float one = 1.0f, zero = 0.0f;
+  FCUDA_TS("cublas_gemm_ex", dim3(out, tokens), cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
+      wHi, CUDA_R_16F, in, xHi, CUDA_R_16F, in, &zero, Y, CUDA_R_32F, out,
+      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+  FCUDA_TS("cublas_gemm_ex", dim3(out, tokens), cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
+      wLo, CUDA_R_16F, in, xHi, CUDA_R_16F, in, &one, Y, CUDA_R_32F, out,
+      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+  FCUDA_TS("cublas_gemm_ex", dim3(out, tokens), cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
+      wHi, CUDA_R_16F, in, xLo, CUDA_R_16F, in, &one, Y, CUDA_R_32F, out,
+      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+}
 static int fp16_compensated_matmul(const float *W, const float *X, float *Y,
                                    int out, int in, int tokens) {
   size_t wn = (size_t)out * in, xn = (size_t)tokens * in;
@@ -57,16 +71,7 @@ static int fp16_compensated_matmul(const float *W, const float *X, float *Y,
   }
   FCUDA_TS("k_fp16_split", (wn + 255) / 256, k_fp16_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(W, wHi, wLo, wn));
   FCUDA_TS("k_fp16_split", (xn + 255) / 256, k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(X, xHi, xLo, xn));
-  const float one = 1.0f, zero = 0.0f;
-  FCUDA_TS("cublas_gemm_ex", dim3(out, tokens), cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
-      wHi, CUDA_R_16F, in, xHi, CUDA_R_16F, in, &zero, Y, CUDA_R_32F, out,
-      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
-  FCUDA_TS("cublas_gemm_ex", dim3(out, tokens), cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
-      wLo, CUDA_R_16F, in, xHi, CUDA_R_16F, in, &one, Y, CUDA_R_32F, out,
-      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
-  FCUDA_TS("cublas_gemm_ex", dim3(out, tokens), cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
-      wHi, CUDA_R_16F, in, xLo, CUDA_R_16F, in, &one, Y, CUDA_R_32F, out,
-      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+  fp16_compensated_gemm(wHi, wLo, xHi, xLo, Y, out, in, tokens);
   fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
   return 0;
 }
@@ -80,15 +85,37 @@ __global__ void k_q8_dequant_transient(const signed char *codes, const float *sc
   W[i] = (float)codes[i] * scales[(size_t)row * (cols / block) + col / block];
 }
 
+// Q8 sequence-prefill weights need only the two fp16 halves, not an
+// additional full F32 weight image (#14097). Explicit rounding preserves the
+// old F32 store followed by k_fp16_split; no dequant/subtract contraction.
+__global__ void k_q8_dequant_split(const signed char *codes, const float *scales,
+    __half *hi, __half *lo, size_t n, int cols, int block) {
+  size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= n) return;
+  size_t row = i / (size_t)cols, col = i % (size_t)cols;
+  float value = __fmul_rn((float)codes[i], scales[row * (cols / block) + col / block]);
+  __half h = __float2half_rn(value);
+  hi[i] = h;
+  lo[i] = __float2half_rn(__fsub_rn(value, __half2float(h)));
+}
+
 static int q8_dequant_sgemm(const void *codes, const float *scales,
                             const float *X, float *Y, int rows, int cols, int tokens, int block) {
-  float *wide = (float *)scratch_malloc((size_t)rows * cols * sizeof(float));
-  if (!wide) return FCUDA_SCRATCH_ALLOC_FAILED;
-  FCUDA_TS("k_q8_dequant_transient", ((size_t)rows * cols + 255) / 256, k_q8_dequant_transient<<<((size_t)rows * cols + 255) / 256, 256, 0, g_stream>>>(
-      (const signed char *)codes, scales, wide, rows, cols, block));
-  int status = fp16_compensated_matmul(wide, X, Y, rows, cols, tokens);
-  fcuda_free(wide);
-  return status;
+  size_t wn = (size_t)rows * cols, xn = (size_t)tokens * cols;
+  __half *wHi = (__half *)scratch_malloc(wn * sizeof(__half));
+  __half *wLo = (__half *)scratch_malloc(wn * sizeof(__half));
+  __half *xHi = (__half *)scratch_malloc(xn * sizeof(__half));
+  __half *xLo = (__half *)scratch_malloc(xn * sizeof(__half));
+  if (!wHi || !wLo || !xHi || !xLo) {
+    fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
+    return FCUDA_SPLIT_SCRATCH_ALLOC_FAILED;
+  }
+  FCUDA_TS("k_q8_dequant_split", (wn + 255) / 256, k_q8_dequant_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(
+      (const signed char *)codes, scales, wHi, wLo, wn, cols, block));
+  FCUDA_TS("k_fp16_split", (xn + 255) / 256, k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(X, xHi, xLo, xn));
+  fp16_compensated_gemm(wHi, wLo, xHi, xLo, Y, rows, cols, tokens);
+  fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
+  return 0;
 }
 
 __global__ void k_qwen35_gdn_fused_in_proj(

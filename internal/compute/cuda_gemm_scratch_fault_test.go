@@ -34,6 +34,8 @@ func TestCUDAGEMMScratchMissFailsClosed(t *testing.T) {
 	weights["Q2_K"] = cb.Upload(NewQ2K(cb, []int{out, in}, q2k), Q2_K)
 	// nth 1 misses the f32 dequant copy; nth 2 misses the first fp16 split half inside
 	// fp16_compensated_matmul, after the dequant copy was allocated and launched.
+	// Q8 directly splits resident codes: its first two allocations are the two
+	// fp16 weight halves, with no F32 dequant image (#14097).
 	sites := []struct {
 		name  string
 		nth   int
@@ -44,6 +46,12 @@ func TestCUDAGEMMScratchMissFailsClosed(t *testing.T) {
 	}
 	for name, w := range weights {
 		for _, site := range sites {
+			if name == "Q8_0" {
+				site.bytes = cudaDequantScratch(out, in).split
+				if site.nth == 1 {
+					site.name = "fp16-hi"
+				}
+			}
 			t.Run(name+"/"+site.name, func(t *testing.T) {
 				var y Tensor
 				err := func() (err error) {
