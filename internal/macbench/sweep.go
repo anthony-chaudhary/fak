@@ -372,6 +372,9 @@ func executeFakNative(ctx context.Context, opts SweepOptions, phase string, prom
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(opts.Gateway, "/")+"/v1/chat/completions", bytes.NewReader(body))
 			if err == nil {
 				req.Header.Set("Content-Type", "application/json")
+				// First-party benchmark probe declares itself so the gateway's durable
+				// perf ledger stamps these rows synthetic/probe (#14110).
+				req.Header.Set("X-Fak-Probe", "1")
 				start := time.Now()
 				resp, err := opts.HTTPClient.Do(req)
 				if err == nil && resp.StatusCode/100 == 2 {
@@ -401,6 +404,9 @@ func executeFakNative(ctx context.Context, opts SweepOptions, phase string, prom
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(opts.Gateway, "/")+"/v1/chat/completions", bytes.NewReader(body))
 			if err == nil {
 				req.Header.Set("Content-Type", "application/json")
+				// First-party benchmark probe declares itself so the gateway's durable
+				// perf ledger stamps these rows synthetic/probe (#14110).
+				req.Header.Set("X-Fak-Probe", "1")
 				start := time.Now()
 				resp, err := opts.HTTPClient.Do(req)
 				if err == nil && resp.StatusCode/100 == 2 {

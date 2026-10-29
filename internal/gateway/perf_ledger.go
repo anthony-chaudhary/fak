@@ -53,7 +53,10 @@ type perfDetail struct {
 	// serving engine reused from its KV cache. Deadline admission falls back
 	// to it when the usage block carries no cached-token counter.
 	kvCacheN int
-	src      perfSource
+	// usageUnreported marks a content-bearing turn whose upstream reported no token
+	// counts at all: the row's zeros mean "unobserved", not "free" (#14110).
+	usageUnreported bool
+	src             perfSource
 }
 
 // perfSource carries the HTTP-edge observation: arrival time, closed client
@@ -302,6 +305,7 @@ func (m *gatewayMetrics) recordPerf(loc servingLocality, promptTok, complTok, ca
 		rec = perfledger.NewFailureRecord(time.Now(), loc.perfLabel(), perfledger.ErrorClientWriteTimeout, 0, elapsed, 0)
 	}
 	rec.Model = strings.TrimSpace(detail.model)
+	rec.UsageUnreported = detail.usageUnreported
 	rec.Engine = detail.engine
 	rec.NativeTiming = detail.nativeTiming
 	rec.PrefillRoute = detail.prefillRoute

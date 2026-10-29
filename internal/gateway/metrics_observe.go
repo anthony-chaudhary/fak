@@ -933,6 +933,16 @@ func (m *gatewayMetrics) observeInferenceServedTimedFrom(src perfSource, loc ser
 	m.attributeServedTurn(loc, promptTok, complTok)
 }
 
+// observeInferenceServedStreamDetail is observeInferenceServedTimedFrom for callers
+// that know more than the requested model id: a caller-built perfDetail carrying the
+// upstream-reported served model and the usage-unreported marker. detail.src is
+// filled from src here, so the caller leaves it zero.
+func (m *gatewayMetrics) observeInferenceServedStreamDetail(src perfSource, loc servingLocality, detail perfDetail, promptTok, complTok, cachedTok, cacheCreateTok int, finishReason string, dur, ttft time.Duration) {
+	detail.src = src
+	m.observeInferenceTimedDetail(loc, promptTok, complTok, cachedTok, cacheCreateTok, finishReason, dur, ttft, detail)
+	m.attributeServedTurn(loc, promptTok, complTok)
+}
+
 // attributeServedTurn books one served turn's volume against the side that
 // generated it. Clamps negatives out the same way the unsplit accumulators do, so a
 // provider that reports a nonsense count cannot make a group exceed the total it is
