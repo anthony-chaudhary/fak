@@ -87,7 +87,19 @@ func (r *q4CoeffRing) mint(key string, out, in int, bytes int64) (int64, bool) {
 	if bytes > r.cap {
 		return 0, false
 	}
-	for r.n == q4CoeffMirrorSlots || r.span+bytes > r.cap {
+	offset := r.cursor % r.cap
+	if bytes > r.cap-offset {
+		padding := r.cap - offset
+		for r.n > 0 && r.span > r.cap-padding {
+			r.popFront()
+		}
+		if r.n > 0 {
+			r.slots[r.slotAt(r.n-1)].length += padding
+			r.span += padding
+		}
+		r.cursor += padding
+	}
+	for r.n == q4CoeffMirrorSlots || bytes > r.cap-r.span {
 		r.popFront()
 	}
 	phys := r.cursor % r.cap
@@ -135,8 +147,11 @@ func (r *q4CoeffRing) checkInvariants(t *testing.T) {
 	}
 	used := make([]string, r.cap)
 	for _, reg := range r.liveRegions() {
+		if reg.phys < 0 || reg.len > r.cap-reg.phys {
+			t.Fatalf("contiguous region %q at %d length %d crosses arena cap %d", reg.key, reg.phys, reg.len, r.cap)
+		}
 		for i := int64(0); i < reg.len; i++ {
-			p := (reg.phys + i) % r.cap
+			p := reg.phys + i
 			if used[p] != "" {
 				t.Fatalf("aliasing: physical byte %d held by both %q and %q", p, used[p], reg.key)
 			}
@@ -276,4 +291,18 @@ func itoa(v int) string {
 		v /= 10
 	}
 	return string(b[i:])
+}
+
+func TestQ4CoeffRingContiguousEnd(t *testing.T) {
+	r := &q4CoeffRing{cap: 8}
+	if offset, ok := r.mint("A", 1, 1, 6); !ok || offset != 0 {
+		t.Fatalf("first mint = %d, %v", offset, ok)
+	}
+	if offset, ok := r.mint("B", 1, 1, 4); !ok || offset != 0 {
+		t.Fatalf("cross-end mint = %d, %v; want contiguous offset zero", offset, ok)
+	}
+	if r.span != 4 || r.n != 1 || r.lookup("A", 1, 1) {
+		t.Fatalf("padding/old owner retained after complete eviction: span=%d n=%d", r.span, r.n)
+	}
+	r.checkInvariants(t)
 }

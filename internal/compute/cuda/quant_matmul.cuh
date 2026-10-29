@@ -577,7 +577,26 @@ static float2 *q4_coeffs_for(const uint8_t *q, int out, int in) {
   // Recycle from the front until the new region fits. The front region is the oldest: any kernel
   // that read its table was enqueued on g_stream before this mint, so the overwrite stream-orders
   // after every in-flight reader - no live table is ever evicted mid-batch.
-  while (g_q4_coeff_n == kQ4CoeffSlots || g_q4_coeff_span + bytes > g_q4_coeff_cap) q4_coeff_pop_front();
+  // A mint is one contiguous kernel write, not a modulo-wrapped byte range.
+  // Charge end padding to the preceding region so it remains reserved until
+  // FIFO eviction removes that region (including a dead last region).
+  const size_t offset = g_q4_coeff_cursor % g_q4_coeff_cap;
+  if (bytes > g_q4_coeff_cap - offset) {
+    const size_t padding = g_q4_coeff_cap - offset;
+    // Keep span and each region length <= cap before adding padding. This also
+    // avoids overflowing size_t in the reservation accounting.
+    while (g_q4_coeff_n > 0 && g_q4_coeff_span > g_q4_coeff_cap - padding)
+      q4_coeff_pop_front();
+    if (g_q4_coeff_n > 0) {
+      g_q4_coeff_cache[q4_coeff_slot(g_q4_coeff_n - 1)].len += padding;
+      g_q4_coeff_span += padding;
+    }
+    // The fixed/fallback arena capacities are powers of two, so unsigned
+    // cursor wrap preserves this aligned physical offset.
+    g_q4_coeff_cursor += padding;
+  }
+  while (g_q4_coeff_n == kQ4CoeffSlots || bytes > g_q4_coeff_cap - g_q4_coeff_span)
+    q4_coeff_pop_front();
   // All ring bookkeeping is in BYTES; the arena base is cudaMalloc-aligned (>= 256 B) and every
   // table length is a multiple of 64 B, so each region start stays float2-aligned.
   float2 *coeff = reinterpret_cast<float2 *>(reinterpret_cast<char *>(g_q4_coeff_arena) +
