@@ -751,7 +751,8 @@ func (m *Model) v41CandidateIndexList(l, seq, hd int, plan V41AttentionPlan, sco
 func (m *Model) v41LayerPublishAttentionState(l, seq, hd int, src v41LayerSources, qkv v41LayerQKV, preByPos [][]float32, indexList []int32, st *v41ForwardState) error {
 	cfg := m.Cfg
 	plan := src.plan
-	layerState, err := NewV41AttentionState(hd, 8)
+	// This private target cannot escape until the complete temporal seed below.
+	layerState, err := newV41TemporalSeedTarget(hd, 8)
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
 	}
