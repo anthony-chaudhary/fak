@@ -381,8 +381,14 @@ func (c Config) DeviceKVRefusal(backend string, prec KVPrecision) string {
 	case pagedHALKVEnabled():
 		return "FAK_PAGED_KV block-paged HAL store holds only f32"
 	}
-	// These forward paths keep KV outside the typed attention/append seam (e.g. the
-	// Qwen3.5 recurrent sequence kernel writes the planes as f32).
+	// Qwen3.5/3.8 hybrid on CUDA keeps its full-attention planes in the typed HAL
+	// store: the sequence prefill appends and attends by plane dtype, the fused f32
+	// postprocess declines narrowed planes, and decode uses AppendKV/Attention. The
+	// Gated-DeltaNet recurrent state is not KV and stays f32.
+	if c.IsQwen35Hybrid() {
+		return ""
+	}
+	// These forward paths keep KV outside the typed attention/append seam.
 	return c.QuantizedKVUnsupportedReason()
 }
 

@@ -58,6 +58,8 @@ func TestDeviceKVPrecisionRefusesUnrealized(t *testing.T) {
 	t.Setenv("FAK_PAGED_KV", "")
 	hybrid := kv16DenseConfig()
 	hybrid.LayerTypes = []string{"linear_attention", "full_attention"}
+	mla := kv16DenseConfig()
+	mla.ModelType = "deepseek2"
 	for _, tc := range []struct {
 		name    string
 		backend string
@@ -66,7 +68,8 @@ func TestDeviceKVPrecisionRefusesUnrealized(t *testing.T) {
 	}{
 		{"vulkan store is f32", "vulkan", kv16DenseConfig(), KVPrecisionFP16},
 		{"cpu-ref store is f32", "cpu-ref", kv16DenseConfig(), KVPrecisionBF16},
-		{"hybrid recurrent path", "cuda", hybrid, KVPrecisionFP16},
+		{"hybrid off cuda", "vulkan", hybrid, KVPrecisionFP16},
+		{"MLA layout bypasses the typed store", "cuda", mla, KVPrecisionFP16},
 		{"q8_0 is a host tier", "cuda", kv16DenseConfig(), KVPrecisionQ8_0},
 	} {
 		be := &kv16RecordingBackend{Backend: compute.Default(), name: tc.backend}
@@ -112,5 +115,31 @@ func TestParseKVPrecisionBF16(t *testing.T) {
 	}
 	if got := KVVectorBytes(64, KVPrecisionBF16); got != 128 {
 		t.Fatalf("bf16 vector bytes = %d, want 128", got)
+	}
+}
+
+// Qwen3.5/3.8 hybrid full-attention planes live in the CUDA typed HAL store (the
+// recurrent Gated-DeltaNet state is not KV), so a 16-bit tier is realized there.
+// fak-test:runtime fast est=5ms lane=default
+func TestDeviceKVPrecisionCUDARealizesQwen35Hybrid(t *testing.T) {
+	t.Setenv("FAK_PAGED_KV", "")
+	hybrid := kv16DenseConfig()
+	hybrid.LayerTypes = []string{"linear_attention", "full_attention"}
+	if !hybrid.IsQwen35Hybrid() {
+		t.Fatal("precondition: config must be a Qwen3.5 hybrid")
+	}
+	for _, prec := range []KVPrecision{KVPrecisionFP16, KVPrecisionBF16} {
+		be := &kv16RecordingBackend{Backend: compute.Default(), name: "cuda"}
+		s := kv16Session(be, hybrid)
+		if err := s.SetDeviceKVPrecision(prec); err != nil {
+			t.Fatalf("%s on cuda hybrid: %v", prec, err)
+		}
+		want, _ := DeviceKVPrecision(prec)
+		if got := s.HALKVPrecision(); got != want {
+			t.Fatalf("%s: HAL KV precision = %v, want %v", prec, got, want)
+		}
+	}
+	if reason := hybrid.DeviceKVRefusal("cuda", KVPrecisionQ8_0); reason == "" {
+		t.Fatal("q8_0 stays a host tier for the hybrid device path")
 	}
 }
