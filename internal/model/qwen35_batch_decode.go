@@ -65,6 +65,30 @@ func failQwen35IndependentDecodeBatchSessions(sessions []*Session, cause error) 
 	}
 }
 
+// qwen35DecodeBatchLaneRequest builds one lane's one-token decode request. A resident
+// embedding table is shared by every lane; a packed (Q2_K) or oversized table instead
+// uploads this lane's gathered row, as the sequence prefill does, and returns its release.
+// ok=false is a decline before any state mutation.
+func (s *Session) qwen35DecodeBatchLaneRequest(id int) (compute.Qwen35SequencePrefillRequest, func(), bool) {
+	packed := s.M.Q2KEmbedding != nil
+	shape := []int{s.M.Cfg.VocabSize, s.M.Cfg.HiddenSize}
+	if meta, ok := s.M.manifest["model.embed_tokens.weight"]; ok && len(meta.Shape) == 2 {
+		shape = meta.Shape
+	}
+	if !packed && deviceEmbeddingTableFits(s.Backend, shape) {
+		return s.qwen35SequencePrefillRequest([]int{id}, true), nil, true
+	}
+	if rows, ok := s.Backend.(compute.Qwen35SequenceEmbeddingRowsBackend); !ok || rows.Qwen35SequenceEmbeddingRowsPath() != compute.Qwen35SequenceEmbeddingRowsPath {
+		return compute.Qwen35SequencePrefillRequest{}, nil, false
+	}
+	data, err := s.qwen35EmbeddingRows([]int{id})
+	if err != nil {
+		return compute.Qwen35SequencePrefillRequest{}, nil, false
+	}
+	row := s.uploadHostF32([]int{1, s.M.Cfg.HiddenSize}, data, compute.MemoryActivation, "qwen35-decode-batch-embedding-row")
+	return s.qwen35SequencePrefillRequestWithEmbedding([]int{id}, true, row, true, s.M.Cfg.VocabSize), func() { s.Backend.Free(row) }, true
+}
+
 func stepBatchQwen35HybridQ4KIndependent(bs *BatchSession, ids []int) ([][]float32, bool) {
 	if bs == nil || bs.M == nil || len(ids) < 2 || len(ids) > 8 || len(ids) != len(bs.Seqs) {
 		return nil, false
@@ -72,6 +96,12 @@ func stepBatchQwen35HybridQ4KIndependent(bs *BatchSession, ids []int) ([][]float
 	var be compute.Backend
 	lanes := make([]compute.Qwen35SequencePrefillRequest, len(ids))
 	finishes := make([]func(), 0, len(ids))
+	var releases []func()
+	defer func() {
+		for _, release := range releases {
+			release()
+		}
+	}()
 	for i, s := range bs.Seqs {
 		// Failed cleanup can retain state pointers; they do not reopen a retired lane.
 		s.ensureOpenBackendSession()
@@ -83,7 +113,14 @@ func stepBatchQwen35HybridQ4KIndependent(bs *BatchSession, ids []int) ([][]float
 		} else if s.Backend != be {
 			return nil, false
 		}
-		lanes[i] = s.qwen35SequencePrefillRequest([]int{ids[i]}, true)
+		req, release, ok := s.qwen35DecodeBatchLaneRequest(ids[i])
+		if !ok {
+			return nil, false
+		}
+		if release != nil {
+			releases = append(releases, release)
+		}
+		lanes[i] = req
 	}
 	batch, ok := qwen35IndependentDecodeBatchFor(be)
 	if !ok {

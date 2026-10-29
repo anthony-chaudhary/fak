@@ -239,6 +239,27 @@ int fcuda_qwen35_gdn_sequence_f32(
     float *dQNorm, float *dKNorm, float *dCore,
     int hidden, int nK, int nV, int kHd, int vHd, int convKernel, float rmsEps);
 
+/* Lane-panel twin of fcuda_qwen35_gdn_decode_f32 for 2..8 independent one-token decode
+ * lanes. dX/dOut and every scratch are row-major [lanes, width] panels; lane l reads and
+ * updates only convStates[l] / recurrentStates[l]. Each projection weight row is streamed
+ * once for the whole lane panel (multi-column GEMV, after llama.cpp ggml-cuda mmvq.cu
+ * ncols_dst, MIT). No stream synchronization: the caller fences the batch. */
+int fcuda_qwen35_gdn_decode_lanes_f32(
+    const float *dX, int lanes,
+    const void *dInQKV, const float *dInQKVScale, int inQKVQ8,
+    const void *dInZ, const float *dInZScale, int inZQ8,
+    const void *dInB, const float *dInBScale, int inBQ8,
+    const void *dInA, const float *dInAScale, int inAQ8,
+    const float *dConvW, const float *dALog, const float *dDtBias,
+    const float *dNorm,
+    const void *dOutW, const float *dOutWScale, int outWQ8,
+    float *const *convStates, float *const *recurrentStates, float *dOut,
+    float *dMixed, float *dZ, float *dB, float *dA, float *dConvOut,
+    float *dQNorm, float *dKNorm, float *dCore,
+    int hidden, int nK, int nV, int kHd, int vHd, int convKernel, float rmsEps);
+/* Count of lane-panel GDN launches that enqueued every stage (execution witness). */
+size_t fcuda_qwen35_gdn_lane_panel_launches(void);
+
 /* One-shot deterministic fault seam for package-local -tags cuda tests. stage 2..6
  * simulates that launch check failing (after draining queued work); stage 7 simulates
  * final asynchronous execution failure. Production Go APIs do not expose this knob. */

@@ -857,6 +857,287 @@ extern "C" int fcuda_qwen35_gdn_decode_f32(
   return 0;
 }
 
+// ---- Lane-panel decode: 2..8 independent one-token lanes ------------------------------------
+// The projections follow llama.cpp ggml-cuda mmvq.cu's ncols_dst multi-column GEMV (MIT): one
+// block streams one weight row once and dots it against every lane's activation row. Each
+// lane keeps exactly the per-thread stride, fmaf order, and warp/block reduction tree of the
+// single-lane kernels above, so lane l's projection is bitwise the decode kernel's. Conv,
+// q/k norm, and the recurrent update are per lane (grid.y = lane) over lane-owned state.
+constexpr int kQwen35GDNMaxLanes = 8;
+struct Qwen35GDNLaneStates {
+  float *conv[kQwen35GDNMaxLanes];
+  float *recurrent[kQwen35GDNMaxLanes];
+};
+
+__global__ void k_qwen35_gdn_fused_in_proj_lanes(
+    const float *x, int lanes,
+    const void *wQKV, const float *sQKV, int qQKV,
+    const void *wZ, const float *sZ, int qZ,
+    const void *wB, const float *sB, int qB,
+    const void *wA, const float *sA, int qA,
+    float *mixed, float *z, float *b, float *a,
+    int hidden, int convDim, int valueDim, int nV) {
+  int row = blockIdx.x;
+  const void *w = wQKV;
+  const float *scale = sQKV;
+  int q8 = qQKV;
+  float *dst = mixed;
+  int dstStride = convDim;
+  if (row >= convDim) {
+    row -= convDim;
+    w = wZ; scale = sZ; q8 = qZ; dst = z; dstStride = valueDim;
+    if (row >= valueDim) {
+      row -= valueDim;
+      w = wB; scale = sB; q8 = qB; dst = b; dstStride = nV;
+      if (row >= nV) {
+        row -= nV;
+        w = wA; scale = sA; q8 = qA; dst = a;
+      }
+    }
+  }
+  float sum[kQwen35GDNMaxLanes];
+#pragma unroll
+  for (int l = 0; l < kQwen35GDNMaxLanes; ++l) sum[l] = 0.0f;
+  size_t base = (size_t)row * hidden;
+  if (q8) {
+    const signed char *codes = (const signed char *)w + base;
+    int nblk = hidden / 32;
+    const float *rowScale = scale + (size_t)row * nblk;
+    for (int blk = threadIdx.x; blk < nblk; blk += blockDim.x) {
+      const signed char *qb = codes + blk * 32;
+      char4 q[8];
+#pragma unroll
+      for (int i = 0; i < 8; ++i) q[i] = *(const char4 *)(qb + 4 * i);
+      float s = rowScale[blk];
+#pragma unroll
+      for (int l = 0; l < kQwen35GDNMaxLanes; ++l) {
+        if (l >= lanes) break;
+        const float *xb = x + (size_t)l * hidden + blk * 32;
+        float blockSum = 0.0f;
+#pragma unroll
+        for (int i = 0; i < 8; ++i) {
+          float4 xv = *(const float4 *)(xb + 4 * i);
+          blockSum = fmaf((float)q[i].x, xv.x, blockSum);
+          blockSum = fmaf((float)q[i].y, xv.y, blockSum);
+          blockSum = fmaf((float)q[i].z, xv.z, blockSum);
+          blockSum = fmaf((float)q[i].w, xv.w, blockSum);
+        }
+        sum[l] = fmaf(blockSum, s, sum[l]);
+      }
+    }
+  } else {
+    for (int i = threadIdx.x; i < hidden; i += blockDim.x) {
+      float wv = ((const float *)w)[base + i];
+#pragma unroll
+      for (int l = 0; l < kQwen35GDNMaxLanes; ++l) {
+        if (l >= lanes) break;
+        sum[l] += wv * x[(size_t)l * hidden + i];
+      }
+    }
+  }
+  __shared__ float warpSums[kQwen35GDNMaxLanes][8];
+  int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
+#pragma unroll
+  for (int l = 0; l < kQwen35GDNMaxLanes; ++l) {
+    if (l >= lanes) break;
+    float v = sum[l];
+#pragma unroll
+    for (int off = 16; off > 0; off >>= 1) v += __shfl_down_sync(0xffffffff, v, off);
+    if (lane == 0) warpSums[l][warp] = v;
+  }
+  __syncthreads();
+  if (warp == 0) {
+    for (int l = 0; l < lanes; ++l) {
+      float v = lane < 8 ? warpSums[l][lane] : 0.0f;
+#pragma unroll
+      for (int off = 16; off > 0; off >>= 1) v += __shfl_down_sync(0xffffffff, v, off);
+      if (lane == 0) dst[(size_t)l * dstStride + row] = v;
+    }
+  }
+}
+
+__global__ void k_qwen35_gdn_conv_state_lanes(
+    const float *mixed, const float *convW, Qwen35GDNLaneStates states, float *convOut,
+    int convDim, int K) {
+  int c = blockIdx.x * blockDim.x + threadIdx.x;
+  int l = blockIdx.y;
+  if (c >= convDim) return;
+  mixed += (size_t)l * convDim;
+  convOut += (size_t)l * convDim;
+  float *convState = states.conv[l];
+  float acc = 0.0f;
+  const float *cw = convW + (size_t)c * K;
+  for (int j = 0; j < K - 1; j++) acc += cw[j] * convState[(size_t)j * convDim + c];
+  acc += cw[K - 1] * mixed[c];
+  convOut[c] = qwen35_gdn_silu(acc);
+  if (K > 1) {
+    for (int j = 0; j < K - 2; j++)
+      convState[(size_t)j * convDim + c] = convState[(size_t)(j + 1) * convDim + c];
+    convState[(size_t)(K - 2) * convDim + c] = mixed[c];
+  }
+}
+
+template <bool kRegisterState>
+__global__ void __launch_bounds__(kQwen35GDNDecodeRegisterMaxThreads) k_qwen35_gdn_recurrent_gated_norm_lanes(
+    const float *convOut, const float *qNorm, const float *kNorm,
+    const float *z, const float *b, const float *a,
+    const float *aLog, const float *dtBias, const float *norm,
+    Qwen35GDNLaneStates states, float *core,
+    int nK, int nV, int kHd, int vHd, float eps) {
+  int l = blockIdx.y;
+  int keyDim = nK * kHd, valueDim = nV * vHd;
+  int convDim = 2 * keyDim + valueDim;
+  qwen35_gdn_recurrent_gated_norm_body<kRegisterState>(
+      convOut + (size_t)l * convDim, qNorm + (size_t)l * keyDim, kNorm + (size_t)l * keyDim,
+      z + (size_t)l * valueDim, b + (size_t)l * nV, a + (size_t)l * nV,
+      aLog, dtBias, norm, states.recurrent[l], core + (size_t)l * valueDim,
+      nK, nV, kHd, vHd, eps);
+}
+
+__global__ void k_qwen35_gdn_out_proj_lanes(
+    const void *w, const float *scale, int q8,
+    const float *x, float *out, int lanes, int hidden, int valueDim) {
+  int row = blockIdx.x;
+  float sum[kQwen35GDNMaxLanes];
+#pragma unroll
+  for (int l = 0; l < kQwen35GDNMaxLanes; ++l) sum[l] = 0.0f;
+  size_t base = (size_t)row * valueDim;
+  if (q8) {
+    const signed char *codes = (const signed char *)w + base;
+    int nblk = valueDim / 32;
+    const float *rowScale = scale + (size_t)row * nblk;
+    for (int blk = threadIdx.x; blk < nblk; blk += blockDim.x) {
+      const signed char *qb = codes + blk * 32;
+      char4 q[8];
+#pragma unroll
+      for (int i = 0; i < 8; ++i) q[i] = *(const char4 *)(qb + 4 * i);
+      float s = rowScale[blk];
+#pragma unroll
+      for (int l = 0; l < kQwen35GDNMaxLanes; ++l) {
+        if (l >= lanes) break;
+        const float *xb = x + (size_t)l * valueDim + blk * 32;
+        float blockSum = 0.0f;
+#pragma unroll
+        for (int i = 0; i < 8; ++i) {
+          float4 xv = *(const float4 *)(xb + 4 * i);
+          blockSum = fmaf((float)q[i].x, xv.x, blockSum);
+          blockSum = fmaf((float)q[i].y, xv.y, blockSum);
+          blockSum = fmaf((float)q[i].z, xv.z, blockSum);
+          blockSum = fmaf((float)q[i].w, xv.w, blockSum);
+        }
+        sum[l] = fmaf(blockSum, s, sum[l]);
+      }
+    }
+  } else {
+    for (int i = threadIdx.x; i < valueDim; i += blockDim.x) {
+      float wv = ((const float *)w)[base + i];
+#pragma unroll
+      for (int l = 0; l < kQwen35GDNMaxLanes; ++l) {
+        if (l >= lanes) break;
+        sum[l] += wv * x[(size_t)l * valueDim + i];
+      }
+    }
+  }
+  __shared__ float warpSums[kQwen35GDNMaxLanes][8];
+  int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
+#pragma unroll
+  for (int l = 0; l < kQwen35GDNMaxLanes; ++l) {
+    if (l >= lanes) break;
+    float v = sum[l];
+#pragma unroll
+    for (int off = 16; off > 0; off >>= 1) v += __shfl_down_sync(0xffffffff, v, off);
+    if (lane == 0) warpSums[l][warp] = v;
+  }
+  __syncthreads();
+  if (warp == 0) {
+    for (int l = 0; l < lanes; ++l) {
+      float v = lane < 8 ? warpSums[l][lane] : 0.0f;
+#pragma unroll
+      for (int off = 16; off > 0; off >>= 1) v += __shfl_down_sync(0xffffffff, v, off);
+      if (lane == 0) out[(size_t)l * hidden + row] = v;
+    }
+  }
+}
+
+static size_t g_qwen35_gdn_lane_panel_launches = 0;
+extern "C" size_t fcuda_qwen35_gdn_lane_panel_launches(void) { return g_qwen35_gdn_lane_panel_launches; }
+
+extern "C" int fcuda_qwen35_gdn_decode_lanes_f32(
+    const float *dX, int lanes,
+    const void *dInQKV, const float *dInQKVScale, int inQKVQ8,
+    const void *dInZ, const float *dInZScale, int inZQ8,
+    const void *dInB, const float *dInBScale, int inBQ8,
+    const void *dInA, const float *dInAScale, int inAQ8,
+    const float *dConvW, const float *dALog, const float *dDtBias,
+    const float *dNorm,
+    const void *dOutW, const float *dOutWScale, int outWQ8,
+    float *const *convStates, float *const *recurrentStates, float *dOut,
+    float *dMixed, float *dZ, float *dB, float *dA, float *dConvOut,
+    float *dQNorm, float *dKNorm, float *dCore,
+    int hidden, int nK, int nV, int kHd, int vHd, int convKernel, float rmsEps) {
+  if (!dX || lanes < 1 || lanes > kQwen35GDNMaxLanes || !convStates || !recurrentStates ||
+      !dInQKV || !dInZ || !dInB || !dInA || !dConvW || !dALog || !dDtBias || !dNorm ||
+      !dOutW || !dOut || !dMixed || !dZ || !dB || !dA || !dConvOut || !dQNorm || !dKNorm ||
+      !dCore || hidden <= 0 || nK <= 0 || nV <= 0 || kHd <= 0 || vHd <= 0 || convKernel < 1 ||
+      nV % nK != 0 || kHd > 1024 || vHd > 1024 || !(rmsEps > 0.0f) || !isfinite(rmsEps))
+    return -1;
+  // The q8 projections read eight char4 codes per 32-wide block.
+  if ((inQKVQ8 || inZQ8 || inBQ8 || inAQ8) && hidden % 32 != 0) return -1;
+  long long keyDim64 = (long long)nK * kHd;
+  long long valueDim64 = (long long)nV * vHd;
+  long long convDim64 = 2 * keyDim64 + valueDim64;
+  long long fusedRows64 = convDim64 + valueDim64 + 2LL * nV;
+  if (fusedRows64 > 2147483647LL) return -1;
+  if (outWQ8 && valueDim64 % 32 != 0) return -1;
+  int valueDim = (int)valueDim64, convDim = (int)convDim64;
+  Qwen35GDNLaneStates states = {};
+  for (int l = 0; l < lanes; ++l) {
+    if (!convStates[l] || !recurrentStates[l]) return -1;
+    states.conv[l] = convStates[l];
+    states.recurrent[l] = recurrentStates[l];
+  }
+  cudaError_t stale = cudaGetLastError();
+  if (stale != cudaSuccess) {
+    fprintf(stderr, "fak-cuda: Qwen3.5 GDN lane panel preflight found stale CUDA status: %s\n", cudaGetErrorString(stale));
+    return qwen35_gdn_drain_after_error(10000 + (int)stale);
+  }
+  FCUDA_TS("k_qwen35_gdn_fused_in_proj_lanes", (int)fusedRows64, k_qwen35_gdn_fused_in_proj_lanes<<<(int)fusedRows64, 256, 0, g_stream>>>(
+      dX, lanes, dInQKV, dInQKVScale, inQKVQ8, dInZ, dInZScale, inZQ8,
+      dInB, dInBScale, inBQ8, dInA, dInAScale, inAQ8,
+      dMixed, dZ, dB, dA, hidden, convDim, valueDim, nV));
+  int status = qwen35_gdn_launch_status(2);
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
+  dim3 convGrid((unsigned)((convDim + 255) / 256), (unsigned)lanes);
+  FCUDA_TS("k_qwen35_gdn_conv_state_lanes", convGrid, k_qwen35_gdn_conv_state_lanes<<<convGrid, 256, 0, g_stream>>>(
+      dMixed, dConvW, states, dConvOut, convDim, convKernel));
+  status = qwen35_gdn_launch_status(3);
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
+  int qThreads = qwen35_gdn_threads(kHd);
+  FCUDA_TS("k_qwen35_gdn_qk_norm_panel", dim3(nK, lanes), k_qwen35_gdn_qk_norm_panel<<<dim3(nK, lanes), qThreads, (size_t)2 * qThreads * sizeof(float), g_stream>>>(
+      dConvOut, dQNorm, dKNorm, lanes, convDim, nK, kHd));
+  status = qwen35_gdn_launch_status(4);
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
+  int vThreads = qwen35_gdn_threads(vHd);
+  if (vThreads > kQwen35GDNDecodeRegisterMaxThreads) return -1;
+  dim3 recGrid((unsigned)nV, (unsigned)lanes);
+  if (kHd <= kQwen35GDNDecodeRegisterMaxKeyHeadDim) {
+    FCUDA_TS("k_qwen35_gdn_recurrent_gated_norm_lanes", recGrid, k_qwen35_gdn_recurrent_gated_norm_lanes<true><<<recGrid, vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
+        dConvOut, dQNorm, dKNorm, dZ, dB, dA, dALog, dDtBias, dNorm, states, dCore, nK, nV, kHd, vHd, rmsEps));
+  } else {
+    FCUDA_TS("k_qwen35_gdn_recurrent_gated_norm_lanes", recGrid, k_qwen35_gdn_recurrent_gated_norm_lanes<false><<<recGrid, vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
+        dConvOut, dQNorm, dKNorm, dZ, dB, dA, dALog, dDtBias, dNorm, states, dCore, nK, nV, kHd, vHd, rmsEps));
+  }
+  status = qwen35_gdn_launch_status(5);
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
+  FCUDA_TS("k_qwen35_gdn_out_proj_lanes", hidden, k_qwen35_gdn_out_proj_lanes<<<hidden, 256, 0, g_stream>>>(
+      dOutW, dOutWScale, outWQ8, dCore, dOut, lanes, hidden, valueDim));
+  status = qwen35_gdn_launch_status(6);
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
+  g_qwen35_gdn_lane_panel_launches++;
+  g_qwen35_gdn_operations += (size_t)lanes;
+  return 0;
+}
+
 /* Sequence spine adapted from llama.cpp gated_delta_net.cu at
  * 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT). Unlike calling the public
  * decode ABI from Go, this loop preserves every panel row and recurrent state on

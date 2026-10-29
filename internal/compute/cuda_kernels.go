@@ -373,6 +373,28 @@ func (c *cudaBackend) qwen35SequenceAttentionLocked(q Tensor, kv *cudaKV, layer,
 	return out, b, nil
 }
 
+// qwen35BatchAttentionIntoLocked is qwen35SequenceAttentionLocked for one decode row whose
+// output lands in a caller-owned row view of the lane panel instead of a fresh allocation.
+func (c *cudaBackend) qwen35BatchAttentionIntoLocked(q Tensor, kv *cudaKV, layer, prefix, heads int, scale float32, out Tensor) error {
+	if err := validateQwen35CausalAttentionPanelGeometry(1, prefix, heads, kv.cfg.NumKVHeads, kv.cfg.HeadDim); err != nil {
+		return err
+	}
+	if err := validateQwen35CausalAttentionPanelScale(scale); err != nil {
+		return err
+	}
+	status := 0
+	if kv.K[layer].dtype == F32 {
+		status = int(C.fak_qwen35_causal_attention_panel_f32(c.cf(q), (*C.float)(kv.K[layer].ptr), (*C.float)(kv.V[layer].ptr), c.cf(out), C.int(1), C.int(prefix), C.int(heads), C.int(kv.cfg.NumKVHeads), C.int(kv.cfg.HeadDim), C.float(scale)))
+	} else {
+		status = int(C.fcuda_kv_attention_typed(c.cf(q), kv.K[layer].ptr, kv.V[layer].ptr, c.cf(out), cudaKVElements(1), C.int(prefix), cudaKVElements(heads), cudaKVElements(kv.cfg.NumKVHeads), cudaKVElements(kv.cfg.HeadDim), C.float(scale), C.int(kv.K[layer].dtype)))
+	}
+	if status != 0 {
+		C.fak_qwen35_sequence_sync()
+		return &Qwen35SequenceError{Stage: "batch-causal-attention", Layer: layer, Reason: fmt.Sprintf("CUDA status %d", status)}
+	}
+	return nil
+}
+
 // qwen38PrefillAttentionMMALaunchesForTest reports how many prompt-attention calls took the
 // tensor-core path, so the mma parity witness can refuse a silent SIMT fallback.
 func (c *cudaBackend) qwen38PrefillAttentionMMALaunchesForTest() uint64 {
