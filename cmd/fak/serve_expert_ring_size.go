@@ -80,6 +80,9 @@ type serveExpertRingSize struct {
 	// HostDefault: neither the flag nor the environment named a size, so the host's MemTotal
 	// picks token or auto (forHostTotal).
 	HostDefault bool
+	// PoolFractionIgnored holds an invalid FAK_EXPERT_RING_POOL_FRACTION a host-defaulted size
+	// skipped: an operator who named no ring size is never refused over the fraction.
+	PoolFractionIgnored string
 }
 
 // forHostTotal resolves a host-defaulted size: auto on a high-RAM host, token otherwise.
@@ -130,7 +133,8 @@ func parseServeExpertRingSize(raw string) (serveExpertRingSize, error) {
 
 // resolveServeExpertRingSize lets a non-empty flag select the mode over the environment;
 // auto uses the pool fraction regardless of how it was selected. With neither set the size is
-// token marked HostDefault, which forHostTotal turns into auto on a high-RAM host.
+// token marked HostDefault, which forHostTotal turns into auto on a high-RAM host; there an
+// invalid fraction falls back to the host tier's default instead of refusing the launch.
 func resolveServeExpertRingSize(flagValue string, getenv func(string) string) (serveExpertRingSize, error) {
 	if strings.TrimSpace(flagValue) == "" && getenv != nil {
 		flagValue = getenv(FakExpertRingBytesEnv)
@@ -142,7 +146,11 @@ func resolveServeExpertRingSize(flagValue string, getenv func(string) string) (s
 	if err != nil || (size.Mode != serveExpertRingAuto && !size.HostDefault) || getenv == nil {
 		return size, err
 	}
-	size.PoolFraction, err = parseServeExpertRingPoolFraction(getenv(FakExpertRingPoolFractionEnv))
+	raw := getenv(FakExpertRingPoolFractionEnv)
+	size.PoolFraction, err = parseServeExpertRingPoolFraction(raw)
+	if err != nil && size.HostDefault {
+		size.PoolFraction, size.PoolFractionIgnored, err = 0, raw, nil
+	}
 	return size, err
 }
 
@@ -233,6 +241,8 @@ type serveExpertRingSizing struct {
 	PoolCapBytes int64
 	// HostDefaultAuto: auto was chosen because no size was named and the host is high-RAM.
 	HostDefaultAuto bool
+	// PoolFractionIgnored is the invalid fraction a host-defaulted auto ring skipped.
+	PoolFractionIgnored string
 }
 
 // sizeServeExpertRing picks the ring for a non-token mode from the plan the token ring was
@@ -246,6 +256,9 @@ func sizeServeExpertRing(size serveExpertRingSize, f ggufload.ActivatedExpertFit
 		HostGatheredBytes: f.HostGatheredBytes, HostGatheredReserve: f.HostGatheredPageReserve(),
 		SharedPool:      host.SharedPool,
 		HostDefaultAuto: size.HostDefault && size.Mode == serveExpertRingAuto,
+	}
+	if s.HostDefaultAuto {
+		s.PoolFractionIgnored = size.PoolFractionIgnored
 	}
 	if s.Mode == "" {
 		s.Mode = serveExpertRingToken
@@ -363,7 +376,11 @@ func (s serveExpertRingSizing) poolCapText() string {
 	if s.PoolCapBytes <= 0 {
 		return "none"
 	}
-	return fmt.Sprintf("%d (fraction=%.2f)", s.PoolCapBytes, s.PoolFraction)
+	text := fmt.Sprintf("%d (fraction=%.2f)", s.PoolCapBytes, s.PoolFraction)
+	if s.PoolFractionIgnored != "" {
+		text += fmt.Sprintf(" ignored %s=%q", FakExpertRingPoolFractionEnv, s.PoolFractionIgnored)
+	}
+	return text
 }
 
 // serveExpertRingBytesFlag is the flag name, kept in one place so registration and refusals agree.
