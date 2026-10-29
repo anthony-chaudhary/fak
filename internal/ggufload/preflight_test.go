@@ -620,3 +620,27 @@ func TestPreflightRenderMentionsVerdictAndEstimate(t *testing.T) {
 		}
 	}
 }
+
+// TestPreflightCUDAResidentQ4KChargesResidentNotDequantizedBytes: the backed CUDA -q4k loader
+// keeps Q4_K packed on the device, so its fit must charge resident bytes. Charging the f32
+// dequant total refused Qwen3.8-27B Q4_K_M on a 24 GB card that holds it.
+func TestPreflightCUDAResidentQ4KChargesResidentNotDequantizedBytes(t *testing.T) {
+	ws := mixedVulkanWeightSource(t)
+	f32 := BuildModelPreflight(PreflightInput{Source: ws})
+	in := PreflightInput{Source: ws}
+	v := reflect.ValueOf(&in).Elem().FieldByName("CUDAResidentQ4K")
+	if !v.IsValid() {
+		t.Fatal("PreflightInput is missing the CUDA resident Q4_K selector")
+	}
+	v.SetBool(true)
+	resident := BuildModelPreflight(in)
+	if resident.Refused() || resident.EstDeviceResidentBytes <= 0 || resident.EstDeviceResidentBytes >= f32.EstDeviceResidentBytes {
+		t.Fatalf("resident device bytes %d (verdict %s), want 0 < x < f32 %d", resident.EstDeviceResidentBytes, resident.Verdict, f32.EstDeviceResidentBytes)
+	}
+	// A device that fits the resident plan but not the dequantized one must admit the load.
+	capacity := (resident.EstDeviceResidentBytes + f32.EstDeviceResidentBytes) / 2
+	in.Backend, in.Headroom = capBackend{total: capacity, free: capacity, known: true}, 0
+	if pf := BuildModelPreflight(in); pf.Verdict != PreflightReady || pf.FitState != FitOK {
+		t.Fatalf("resident preflight on %d B = %s/%s (%s), want READY/FIT_OK", capacity, pf.Verdict, pf.FitState, pf.Reason)
+	}
+}

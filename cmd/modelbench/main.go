@@ -1203,6 +1203,9 @@ func preflightInputFor(f *benchFlags, be compute.Backend) ggufload.PreflightInpu
 	// eligible Q4_K host/staging lifecycle, but not its device representation.
 	convertedDense := *f.q4k && be != nil
 	vulkanMixed := convertedDense && *f.backendName == "vulkan"
+	// Backed CUDA Q4_K keeps Q4_K matrices packed on the device; streaming changes only the
+	// host lifecycle, so the resident estimate bounds both loader routes.
+	cudaResident := convertedDense && be.Name() == "cuda"
 	streamedDenseQ4K := vulkanMixed && streamQ4KEnabled(f)
 	residentQ2KEmbedding := vulkanMixed && q2kEmbeddingSourceEligible(ws)
 	// The single-residency release is armed by the -single-residency-q4k flag (defaulting to the
@@ -1222,6 +1225,7 @@ func preflightInputFor(f *benchFlags, be compute.Backend) ggufload.PreflightInpu
 		Lean:                          *f.lean && !convertedDense,
 		Q4K:                           *f.q4k && !convertedDense,
 		VulkanMixedQ4K:                vulkanMixed,
+		CUDAResidentQ4K:               cudaResident,
 		StreamedExperts:               streamedExpertsEnabled(f),
 		StreamedExpertDeviceRingBytes: ringBytes,
 		StreamedDenseWorkingSetBytes:  denseBytes,
