@@ -352,3 +352,37 @@ func burndownNativeReceipt(row Observation) RequestPhaseReceipt {
 	}
 	return RequestPhaseReceipt{Schema: "fak-request-phases/1", RequestID: row.RequestID, Model: row.Model, Backend: row.Backend, Receipt: nativeperf.PhaseReceipt{Engine: "inkernel", Backend: "cuda", ForwardPath: "qwen3.8_cuda", Wall: 100 * time.Millisecond, Phases: phases}}
 }
+
+// fak-test:justify why=contract when=changed:internal/modelperfobs/**
+// fak-test:runtime fast est=5ms
+func TestTimeBurndownUnattributedRemainderRoundTripsAndRejectsNegative(t *testing.T) {
+	row := burndownObservation("native-gap", "warm", 120, 90)
+	envelope := burndownNativeReceipt(row)
+	gap := 20.0
+	envelope.UnattributedMS = &gap
+	var wire bytes.Buffer
+	if err := json.NewEncoder(&wire).Encode(envelope); err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := ReadRequestPhaseReceipts(&wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded) != 1 || decoded[0].UnattributedMS == nil || *decoded[0].UnattributedMS != gap {
+		t.Fatal("unattributed remainder lost on JSONL read")
+	}
+	report, err := ReduceTimeBurndown([]Observation{row}, decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g := burndownGroup(t, report, "warm"); g.OutsideNativeMS != gap {
+		t.Fatalf("outside native = %g, want unattributed %g", g.OutsideNativeMS, gap)
+	}
+	for _, bad := range []float64{-1, math.NaN(), math.Inf(1)} {
+		v := bad
+		envelope.UnattributedMS = &v
+		if _, err := ReduceTimeBurndown([]Observation{row}, []RequestPhaseReceipt{envelope}); !errors.Is(err, ErrInvalidTimeBurndown) {
+			t.Fatalf("unattributed %g accepted: %v", bad, err)
+		}
+	}
+}

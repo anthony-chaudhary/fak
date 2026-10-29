@@ -1959,6 +1959,39 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
 
+  /v1/fak/perf/phases:
+    get:
+      tags: [fak-native]
+      summary: Read retained per-request native phase receipts (fak-request-phases/1)
+      description: |
+        One JSONL envelope per completed native turn (`schema`, `request_id`,
+        `model`, `backend`, `receipt`, `unattributed_ms`), oldest first, from
+        a bounded in-memory ring of 1024 envelopes. `request_id` joins the
+        `/v1/fak/perf/recent` rows. The receipt wall is the engine-measured
+        prefill + decode span; decode-window kernel and synchronization nest
+        under decode only when they fit. `unattributed_ms` is the request
+        wall outside the receipt that no measured phase covers. Proxied,
+        mock and failed turns carry no envelope. Native rows whose receipt
+        failed to build or validate are omitted and counted in the
+        `X-Fak-Phases-Refused` header; `X-Fak-Phases-Capped` is true once the
+        ring dropped its oldest envelope. This is the `--phases` input of
+        `fak model-observe time-burndown`. Same observability auth floor as
+        `/v1/fak/perf/recent`.
+      parameters:
+        - name: n
+          in: query
+          description: Newest envelopes to return (default all retained).
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: fak-request-phases/1 envelopes, one JSON object per line.
+          content:
+            application/x-ndjson:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
   /v1/fak/loops:
 
     get:
