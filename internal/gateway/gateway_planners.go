@@ -146,7 +146,7 @@ func newInKernelChatPlanner(cfg Config, modelID string, logf func(string, ...any
 			Enabled:  true,
 			MaxDraft: 4,
 		}), 4)
-		logf("gateway: enabled prompt n-gram speculation with resident Vulkan target verification")
+		logf("gateway: enabled prompt n-gram speculation with resident %s target verification", cfg.Backend.Name())
 	}
 	return ikp
 }
