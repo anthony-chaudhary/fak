@@ -1945,3 +1945,17 @@ A model placement omission indicating that the usable capacity of a referenced p
 The placement planner value declaring that the requested model placement lacks runtime support in the caller supplied execution envelope.
 
 **Distinct from:** A caller declaration that prevents eligibility even when memory fits; it is neither a hardware qualification result nor a capacity overflow.
+
+
+### ActivityCoverage
+
+Per-axis provenance for retained gateway activity observations.
+
+**Distinct from:** Describes which request outcomes are observed; it does not certify subprocess execution, external effects, or lifetime completeness.
+
+
+### ActivityCoverageNativeSyscallResults
+
+Coverage token for completed admitted syscall request results in the retained observation window.
+
+**Distinct from:** Supports tool-request and failed-result counts only; cached outcomes do not prove subprocess execution or file and network effects.

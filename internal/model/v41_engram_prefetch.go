@@ -134,24 +134,30 @@ func (c *V41EngramRowCache) gatherKnownRowsOwned(rows []uint32, contiguous bool)
 	if maxRows < 1 {
 		maxRows = 1
 	}
-	// Bound one reusable read slab by the largest planned consecutive miss
-	// span, not by all requested rows or the cache budget. Readahead can only
-	// split or eliminate these spans. serve and cache admission copy their
-	// bytes, so no returned row or resident entry borrows this scratch.
-	scratchRows := 0
-	for lo := 0; lo < len(missing); {
-		hi := lo + 1
-		for hi < len(missing) && hi-lo < maxRows && uint64(missing[hi]) == uint64(missing[hi-1])+1 {
-			hi++
+	// One bounded source-read slab covers every coalesced miss span in this
+	// gather: size it to the largest planned span - the longest run of
+	// consecutive missing rows, capped at the coalescer ceiling. Residency can
+	// only shorten a span mid-gather, never extend one, so no read needs more
+	// than slabRows. Reusing the slab across the sequential reads drops one
+	// transient allocation per coalesced miss; served payloads copy out
+	// immediately, so nothing aliases the slab past its span.
+	slabRows := 0
+	for i, run := 0, 0; i < len(missing); i++ {
+		if i > 0 && missing[i] == missing[i-1]+1 {
+			run++
+		} else {
+			run = 1
 		}
-		if hi-lo > scratchRows {
-			scratchRows = hi - lo
+		if run > slabRows {
+			slabRows = run
 		}
-		lo = hi
 	}
-	var scratch []byte
-	if scratchRows > 0 {
-		scratch = make([]byte, scratchRows*c.opts.RowBytes)
+	if slabRows > maxRows {
+		slabRows = maxRows
+	}
+	var slab []byte
+	if slabRows > 0 {
+		slab = make([]byte, slabRows*c.opts.RowBytes)
 	}
 	for lo := 0; lo < len(missing); {
 		// Readahead from an earlier range may already hold this row.
@@ -172,7 +178,7 @@ func (c *V41EngramRowCache) gatherKnownRowsOwned(rows []uint32, contiguous bool)
 		}
 		count := hi - lo
 		want := count * c.opts.RowBytes
-		buf := scratch[:want:want]
+		buf := slab[:want]
 		c.stats.Misses += int64(count)
 		n, err := c.src.ReadRows(int(missing[lo]), count, buf)
 		if n < 0 || n > want {

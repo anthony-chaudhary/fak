@@ -46,7 +46,9 @@ func (s *Server) handleFakSessions(w http.ResponseWriter, r *http.Request) {
 			snap := s.table.Snapshot()
 			sessions := make([]SessionState, 0, len(snap))
 			for _, st := range snap {
-				sessions = append(sessions, toGatewaySessionState(st))
+				row := toGatewaySessionState(st)
+				row.Activity = s.activity.actionCounts(row.TraceID)
+				sessions = append(sessions, row)
 			}
 			writeJSON(w, http.StatusOK, SessionListResponse{Sessions: sessions, Count: len(sessions)})
 			return
@@ -54,6 +56,13 @@ func (s *Server) handleFakSessions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "session list is not configured")
 		return
 	}
-	sessions := s.listSessions(r.Context())
+	sessions := append([]SessionState(nil), s.listSessions(r.Context())...)
+	for i := range sessions {
+		// Explicit coverage or nonzero legacy counters belong to the provider;
+		// their observation window cannot safely be summed with this registry.
+		if sessions[i].Activity.IsZero() {
+			sessions[i].Activity = s.activity.actionCounts(sessions[i].TraceID)
+		}
+	}
 	writeJSON(w, http.StatusOK, SessionListResponse{Sessions: sessions, Count: len(sessions)})
 }

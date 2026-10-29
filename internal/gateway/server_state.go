@@ -222,12 +222,28 @@ type SessionThroughput struct {
 	ObservedTokensPerSec float64 `json:"observed_tokens_per_sec,omitempty"`
 }
 
-// ActionCounts records tool execution and effect activity metrics.
+// ActionCounts reports activity with its observation coverage. Native syscall
+// result counts represent completed requests, not subprocess execution.
 type ActionCounts struct {
-	Tools   int `json:"tools,omitempty"`
-	Execs   int `json:"execs,omitempty"`
-	Fail    int `json:"fail,omitempty"`
-	Effects int `json:"effects,omitempty"`
+	Tools    int               `json:"tools,omitempty"`
+	Execs    int               `json:"execs,omitempty"`
+	Fail     int               `json:"fail,omitempty"`
+	Effects  int               `json:"effects,omitempty"`
+	Coverage *ActivityCoverage `json:"coverage,omitempty"`
+}
+
+const (
+	ActivityCoverageUnavailable          = "unavailable"
+	ActivityCoverageNativeSyscallResults = "native_syscall_results"
+)
+
+// ActivityCoverage bounds counters to retained observations, not session lifetime.
+type ActivityCoverage struct {
+	Tools         string `json:"tools"`
+	Execs         string `json:"execs"`
+	Fail          string `json:"fail"`
+	Effects       string `json:"effects"`
+	SinceUnixNano int64  `json:"since_unix_nano,omitempty"`
 }
 
 // IsZero reports whether no actions have been counted, for json omitzero.

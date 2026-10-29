@@ -1,0 +1,41 @@
+{
+  "rows": [
+    {
+      "id": "gateway-activity-coverage",
+      "canonical": "ActivityCoverage",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Per-axis provenance for retained gateway activity observations.",
+      "distinction": "Describes which request outcomes are observed; it does not certify subprocess execution, external effects, or lifetime completeness.",
+      "distinct_from": [
+        "coverage"
+      ],
+      "aliases": [],
+      "grounding": "ActivityCoverage",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "gateway-native-syscall-observations",
+      "canonical": "ActivityCoverageNativeSyscallResults",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Coverage token for completed admitted syscall request results in the retained observation window.",
+      "distinction": "Supports tool-request and failed-result counts only; cached outcomes do not prove subprocess execution or file and network effects.",
+      "distinct_from": [
+        "coverage"
+      ],
+      "aliases": [],
+      "grounding": "ActivityCoverageNativeSyscallResults",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
