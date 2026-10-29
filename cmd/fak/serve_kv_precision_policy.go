@@ -18,6 +18,7 @@ const (
 	kvBackendHost   = "host"
 	kvBackendMetal  = "metal"
 	kvBackendVulkan = "vulkan"
+	kvBackendCUDA   = "cuda"
 )
 
 // haloKVPrecisionPreference is the Halo profile's default order: densest exact-enough
@@ -27,11 +28,15 @@ var haloKVPrecisionPreference = []model.KVPrecision{model.KVPrecisionFP16, model
 // realizedServeKVPrecisions is the tier set each serving backend actually stores.
 // Host KVCache realizes f32 and q8_0 (fp16 is declared, unrealized: kvcache_q8.go).
 // Metal's q8_0 declines the device decode mirror (prepareDecodeMirror), so only f32
-// keeps device KV. A HAL device store (vulkan, cuda, cpu-ref) gets no precision from
-// halKVConfig and appends f32 rows.
+// keeps device KV. The CUDA HAL store holds fp16/bf16 attended K/V (compute/cuda_kv.go,
+// f32 pre-RoPE shadow); the planner falls those back to f32 for a forward path that
+// bypasses the typed store. Other HAL stores (vulkan, cpu-ref) hold only f32.
 func realizedServeKVPrecisions(backend string) []model.KVPrecision {
-	if backend == kvBackendHost {
+	switch backend {
+	case kvBackendHost:
 		return []model.KVPrecision{model.KVPrecisionFP32, model.KVPrecisionQ8_0}
+	case kvBackendCUDA:
+		return []model.KVPrecision{model.KVPrecisionFP32, model.KVPrecisionFP16, model.KVPrecisionBF16}
 	}
 	return []model.KVPrecision{model.KVPrecisionFP32}
 }

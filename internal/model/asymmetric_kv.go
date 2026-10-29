@@ -40,6 +40,9 @@ const (
 	// KVPrecisionFP16 indicates IEEE 754 binary16 half-precision float (2 bytes/elem).
 	KVPrecisionFP16 KVPrecision = "fp16"
 
+	// KVPrecisionBF16 indicates bfloat16 (2 bytes/elem); only the CUDA device KV store realizes it.
+	KVPrecisionBF16 KVPrecision = "bf16"
+
 	// KVPrecisionQ8_0 indicates 8-bit group-32 affine quantization with per-group f32 scale/min.
 	KVPrecisionQ8_0 KVPrecision = "q8_0"
 
@@ -55,12 +58,14 @@ func ParseKVPrecision(s string) (KVPrecision, error) {
 		return KVPrecisionFP32, nil
 	case "fp16", "16", "f16":
 		return KVPrecisionFP16, nil
+	case "bf16", "bfloat16":
+		return KVPrecisionBF16, nil
 	case "q8_0", "q8", "8":
 		return KVPrecisionQ8_0, nil
 	case "q4_0", "q4", "4":
 		return KVPrecisionQ4_0, nil
 	default:
-		return "", fmt.Errorf("unknown KV precision %q (must be fp32, fp16, q8_0, or q4_0)", s)
+		return "", fmt.Errorf("unknown KV precision %q (must be fp32, fp16, bf16, q8_0, or q4_0)", s)
 	}
 }
 
@@ -73,7 +78,7 @@ func KVVectorBytes(dim int, prec KVPrecision) int64 {
 	switch prec {
 	case KVPrecisionFP32:
 		return int64(dim) * 4
-	case KVPrecisionFP16:
+	case KVPrecisionFP16, KVPrecisionBF16:
 		return int64(dim) * 2
 	case KVPrecisionQ8_0:
 		groups := int64((dim + KVQuantQ8_0BlockSize - 1) / KVQuantQ8_0BlockSize)

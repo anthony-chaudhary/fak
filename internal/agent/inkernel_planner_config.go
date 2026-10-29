@@ -131,6 +131,12 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 	if cfg.IncrementalContext {
 		p.incrementalContext = EmptyIncrementalContext()
 	}
+	if m != nil {
+		p.kvPrecision, p.kvPrecisionFallback = pickDeviceKVTier(m.Cfg, backend, cfg.KVPrecision)
+		if p.kvPrecisionFallback != "" {
+			fmt.Fprintln(os.Stderr, "fak inkernel:", p.kvPrecisionFallback)
+		}
+	}
 	if backend == nil && metal {
 		m.PrepareMetalResidency(q4k)
 	}
