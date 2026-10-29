@@ -13,67 +13,57 @@ import (
 )
 
 // State represents the tri-state debounced condition of a native performance SLO.
-// Invariant: State is always one of StateGood, StateRegression, or StateMissing.
-// Guard: Any unobserved or invalid metric forces StateMissing immediately without zero-coercion.
+// Unobserved or invalid metrics force StateMissing immediately rather than
+// coercing zeros, so consumers never read fabricated health.
 type State string
 
 const (
 	// StateGood indicates all monitored objectives satisfy their relative and absolute thresholds.
-	// Invariant: Requires consecutive healthy evaluations to reach or maintain.
+	// Reached only after consecutive healthy evaluations, so one sample cannot flip state.
 	StateGood State = "good"
 
 	// StateRegression indicates one or more objectives have persistently violated thresholds.
-	// Guard: Requires consecutive violating evaluations to trigger, debouncing transient spikes.
+	// Triggered only after consecutive violating evaluations, debouncing transient spikes.
 	StateRegression State = "regression"
 
 	// StateMissing indicates insufficient, malformed, or missing evidence.
-	// Guard: Fail-closed fallback; immediately resets streaks to zero.
+	// Fail-closed fallback that immediately resets streaks to zero.
 	StateMissing State = "missing_evidence"
 )
 
 // Objective identifies an individual measured performance dimension in benchmark evaluation.
-// Invariant: Objective names are lowercase alphanumeric tokens matched across baseline and candidate.
+// Names are lowercase alphanumeric tokens matched across baseline and candidate.
 type Objective string
 
 const (
 	// TTFT measures time to first token in seconds (lower is better).
-	// Invariant: Evaluated against MaxRegression threshold relative to baseline.
 	TTFT Objective = "ttft"
 
 	// TPOT measures time per output token in seconds (lower is better).
-	// Invariant: Evaluated against MaxRegression threshold relative to baseline.
 	TPOT Objective = "tpot"
 
 	// Throughput measures generated tokens per second (higher is better).
-	// Invariant: Evaluated against MinRetention threshold relative to baseline.
 	Throughput Objective = "throughput"
 
 	// QueueDelay measures scheduler queue dwell time in seconds (lower is better).
-	// Invariant: Evaluated against MaxRegression threshold relative to baseline.
 	QueueDelay Objective = "queue_delay"
 
 	// CacheEfficiency measures prompt and prefix cache hit efficiency ratio in [0, 1] (higher is better).
-	// Invariant: Evaluated against MinRetention threshold relative to baseline.
 	CacheEfficiency Objective = "cache_efficiency"
 
 	// TransferShare measures memory bus transfer time fraction in [0, 1] (lower is better).
-	// Invariant: Evaluated against MaxRegression threshold relative to baseline.
 	TransferShare Objective = "transfer_share"
 
 	// KernelShare measures compute execution time fraction in [0, 1] (lower is better).
-	// Invariant: Evaluated against MaxRegression threshold relative to baseline.
 	KernelShare Objective = "kernel_share"
 
 	// MemoryPressure measures accelerator memory utilization ratio in [0, 1].
-	// Guard: Evaluated against absolute MaxMemoryPressure threshold.
 	MemoryPressure Objective = "memory_pressure"
 
 	// EvidenceFresh measures elapsed seconds since candidate benchmark execution.
-	// Guard: Evaluated against MaxEvidenceAge to reject stale measurements.
 	EvidenceFresh Objective = "evidence_freshness"
 
 	// ReceiptCoverage measures fraction of expected execution receipts collected.
-	// Guard: Evaluated against MinReceiptCoverage to reject incomplete runs.
 	ReceiptCoverage Objective = "receipt_coverage"
 )
 
@@ -83,7 +73,6 @@ var objectives = [...]Objective{
 }
 
 // LifecycleEvent represents a release or deployment milestone attached to performance series.
-// Invariant: Non-empty event annotations are rendered into Prometheus metadata series.
 type LifecycleEvent string
 
 const (
@@ -98,16 +87,15 @@ const (
 )
 
 // LifecycleAnnotation records deployment or release metadata associated with an observation.
-// Invariant: Both Event and Release must be non-empty for lifecycle info metrics to be rendered.
-// Guard: Emitted series preserve explicit provenance without fabricating absent tags.
+// Both fields must be non-empty for lifecycle info metrics to render; absent tags are
+// omitted rather than fabricated.
 type LifecycleAnnotation struct {
 	Event   LifecycleEvent `json:"event"`
 	Release string         `json:"release"`
 }
 
 // SupervisionStatus describes the operational state of the supervising benchmark harness.
-// Invariant: SupervisionFailed causes evaluation to immediately fail-closed as unavailable.
-// Guard: Only healthy supervision statuses permit series emission.
+// Only healthy statuses permit series emission; failure fails closed as unavailable.
 type SupervisionStatus string
 
 const (
@@ -118,13 +106,11 @@ const (
 	SupervisionDegraded SupervisionStatus = "degraded"
 
 	// SupervisionFailed indicates harness breakdown, invalidating benchmark output.
-	// Guard: Enforces immediate SeriesUnavailable with ReasonIncomplete.
 	SupervisionFailed SupervisionStatus = "failed"
 )
 
 // LifecycleStatus indicates the lifecycle classification of an evaluated candidate.
-// Invariant: Mapped deterministically from Evaluator result state or invalidity conditions.
-// Guard: Fail-closed fallback to LifecycleMissing or LifecycleMismatched when inputs are invalid.
+// Invalid inputs fail closed to LifecycleMissing or LifecycleMismatched.
 type LifecycleStatus string
 
 const (
@@ -145,8 +131,7 @@ const (
 )
 
 // SeriesStatus indicates whether time-series output could be generated.
-// Invariant: Must be SeriesProduced or SeriesUnavailable.
-// Guard: SeriesUnavailable guarantees no misleading or zero-filled series are published.
+// Unavailable runs publish no series rather than misleading or zero-filled ones.
 type SeriesStatus string
 
 const (
@@ -158,8 +143,7 @@ const (
 )
 
 // UnavailableReason details why time-series generation was refused.
-// Invariant: ReasonNone when Status is SeriesProduced; specific failure reason otherwise.
-// Guard: Explicit refusal categorization ensures actionable diagnostics.
+// ReasonNone only accompanies SeriesProduced; every refusal names its cause.
 type UnavailableReason string
 
 const (
@@ -183,8 +167,8 @@ const (
 )
 
 // LiveRunInput bundles input parameters required to produce live SLO time-series.
-// Invariant: Baseline and Candidate envelopes must validate and match identically.
-// Guard: ObservedAt must be non-zero and not in the future relative to the evaluation timestamp.
+// Baseline and Candidate envelopes must validate and match identically; ObservedAt
+// must be non-zero and not in the future.
 type LiveRunInput struct {
 	ObservedAt        time.Time
 	Baseline          Observation
@@ -194,8 +178,7 @@ type LiveRunInput struct {
 }
 
 // LiveSeriesResult contains the outcome of live time-series generation.
-// Invariant: Status == SeriesProduced iff Prometheus text contains valid metric lines.
-// Guard: Fail-closed; unavailable runs emit zero Prometheus metrics to avoid polluting dashboards.
+// Unavailable runs emit zero Prometheus metrics to avoid polluting dashboards.
 type LiveSeriesResult struct {
 	Status            SeriesStatus      `json:"status"`
 	UnavailableReason UnavailableReason `json:"unavailable_reason"`
@@ -206,8 +189,8 @@ type LiveSeriesResult struct {
 
 // ProduceLiveSeries evaluates a candidate observation against a matched baseline,
 // verifies envelope validity and freshness, and emits bounded SLO and lifecycle Prometheus series.
-// Invariant: Baseline and Candidate comparison envelopes must be identical.
-// Guard: Returns SeriesUnavailable with ReasonIncomplete or ReasonStale on validation failure; never manufactures zeroes.
+// Validation failures return SeriesUnavailable with a specific reason; it never
+// manufactures zeroes.
 func ProduceLiveSeries(now time.Time, maxAge time.Duration, evaluator *Evaluator, input LiveRunInput) LiveSeriesResult {
 	unavailable := func(reason UnavailableReason, lstatus LifecycleStatus) LiveSeriesResult {
 		return LiveSeriesResult{
@@ -292,9 +275,8 @@ func ProduceLiveSeries(now time.Time, maxAge time.Duration, evaluator *Evaluator
 }
 
 // Envelope defines the complete benchmark comparison identity. ModuleRev is
-// intentionally a module@rev value, not a bare commit SHA.
-// Invariant: Comparisons are valid only between identical envelopes.
-// Guard: ModuleRev must follow the module@rev format, model must prefix Qwen3.8, and backend must be supported.
+// intentionally a module@rev value, not a bare commit SHA. Comparisons are valid
+// only between identical envelopes.
 type Envelope struct {
 	ModuleRev string
 	Benchmark string
@@ -303,9 +285,7 @@ type Envelope struct {
 }
 
 // Validate checks whether the Envelope contains structurally sound and supported identity fields.
-// Invariant: Returns nil iff ModuleRev contains "@r", Benchmark is non-empty, Model has prefix "Qwen3.8",
-// and Backend is one of "metal", "cuda", or "cpu".
-// Guard: Fails closed on any empty, malformed, or unsupported backend configuration.
+// It fails closed on any empty, malformed, or unsupported configuration.
 func (e Envelope) Validate() error {
 	if !strings.Contains(e.ModuleRev, "@r") {
 		return errors.New("module_rev must be module@rev")
@@ -325,16 +305,14 @@ func (e Envelope) Validate() error {
 }
 
 // Value represents a single measured objective value with explicit availability tracking.
-// Invariant: Available is false when evidence is missing, distinct from a measured zero.
-// Guard: Unavailable or non-finite values are never rendered into Prometheus metrics.
+// An unavailable value is distinct from a measured zero and is never rendered.
 type Value struct {
 	Available bool
 	Value     float64
 }
 
 // Observation records one quality-constrained benchmark receipt projection.
-// Invariant: Receipts <= Expected when receipts are tracked.
-// Guard: Envelope must be valid and At timestamp must represent the run time.
+// Receipts must not exceed Expected when receipts are tracked; At is the run time.
 type Observation struct {
 	At       time.Time
 	Envelope Envelope
@@ -344,9 +322,7 @@ type Observation struct {
 }
 
 // Thresholds configure relative candidate/baseline limits and absolute bounds.
-// Invariant: MaxRegression > 1.0, 0 < MinRetention < 1.0, 0 < MaxMemoryPressure <= 1.0,
-// MaxEvidenceAge > 0, 0 < MinReceiptCoverage <= 1.0, and Consecutive >= 1.
-// Guard: Used by Evaluator to classify objective violations and manage debouncing streaks.
+// Evaluator uses them to classify objective violations and manage debouncing streaks.
 type Thresholds struct {
 	MaxRegression      float64
 	MinRetention       float64
@@ -357,9 +333,7 @@ type Thresholds struct {
 }
 
 // DefaultThresholds returns recommended baseline SLO thresholds for native inference.
-// Invariant: Default configuration enforces MaxRegression 1.10, MinRetention 0.90, MaxMemoryPressure 0.90,
-// MaxEvidenceAge 5m, MinReceiptCoverage 0.95, and Consecutive streak requirement of 2.
-// Guard: Fail-closed defaults ensure strict bounds without permissive unconfigured evaluations.
+// The defaults are deliberately strict: no permissive unconfigured evaluations.
 func DefaultThresholds() Thresholds {
 	return Thresholds{
 		MaxRegression:      1.10,
@@ -372,8 +346,8 @@ func DefaultThresholds() Thresholds {
 }
 
 // Result captures the debounced evaluation state and detailed objective ratios.
-// Invariant: State reflects debounced streaks; GoodStreak and BadStreak are mutually exclusive counters.
-// Guard: Ratios and Violations are populated only when candidate and baseline values are available and finite.
+// GoodStreak and BadStreak are mutually exclusive counters; Ratios and Violations are
+// populated only when both sides' values are available and finite.
 type Result struct {
 	At         time.Time
 	Envelope   Envelope
@@ -386,8 +360,8 @@ type Result struct {
 }
 
 // Evaluator debounces regression and recovery transitions across benchmark observations.
-// Invariant: Missing evidence immediately resets both good and bad streaks to zero.
-// Guard: Requires Consecutive complete samples to transition state, preventing single-sample flapping.
+// Missing evidence immediately resets both streaks to zero, and Consecutive complete
+// samples are required to transition state, preventing single-sample flapping.
 type Evaluator struct {
 	thresholds Thresholds
 	state      State
@@ -396,8 +370,7 @@ type Evaluator struct {
 }
 
 // New constructs an Evaluator configured with sanitized thresholds and initial StateMissing.
-// Invariant: Sanitizes out-of-bound threshold values to safe defaults.
-// Guard: Initial state is StateMissing until consecutive valid observations establish health.
+// Out-of-bound threshold values are clamped to safe defaults.
 func New(thresholds Thresholds) *Evaluator {
 	if thresholds.MaxRegression <= 1 {
 		thresholds.MaxRegression = 1.10
@@ -421,8 +394,8 @@ func New(thresholds Thresholds) *Evaluator {
 }
 
 // Observe evaluates candidate performance against baseline and updates internal debouncing state.
-// Invariant: Both envelopes must validate and be identical; baseline values must be positive and finite.
-// Guard: Fails closed to StateMissing if any required objective is unavailable or non-finite.
+// Both envelopes must validate and be identical; baseline values must be positive and
+// finite. Any unavailable or non-finite required objective fails closed to StateMissing.
 func (e *Evaluator) Observe(now time.Time, baseline, candidate Observation) (Result, error) {
 	if err := baseline.Envelope.Validate(); err != nil {
 		return Result{}, fmt.Errorf("baseline: %w", err)
@@ -524,8 +497,7 @@ func cloneValues(in map[Objective]Value) map[Objective]Value {
 func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0 }
 
 // RenderPrometheus formats evaluation results into standard Prometheus text exposition format.
-// Invariant: Renders only available, finite measurements with stable envelope labels.
-// Guard: Unavailable objectives are omitted entirely rather than coerced to zero.
+// Unavailable objectives are omitted entirely rather than coerced to zero.
 func RenderPrometheus(result Result) string {
 	labels := fmt.Sprintf("engine=\"fak-native\",module_rev=%q,benchmark_envelope=%q,model=%q,backend=%q",
 		result.Envelope.ModuleRev, result.Envelope.Benchmark, result.Envelope.Model, result.Envelope.Backend)
