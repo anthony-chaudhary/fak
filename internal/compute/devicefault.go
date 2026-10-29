@@ -48,8 +48,10 @@ const (
 	// DeviceFaultContext is a context/device-level fault (Xid, device reset, ECC fallout).
 	// Nothing on the device survives it.
 	DeviceFaultContext DeviceFaultClass = "context"
-	// DeviceFaultAllocation is an allocation that returned nil because a PRIOR async fault
-	// already poisoned the context, as opposed to a genuine capacity miss.
+	// DeviceFaultAllocation is an allocation that returned nil. It is suspect, not proven
+	// fatal: the miss may hide a PRIOR async fault that already poisoned the context, or be a
+	// genuine capacity miss. It poisons until a fence validates the context, which
+	// ClearAllocationSuspect does when every fault since the last healthy edge is this class.
 	DeviceFaultAllocation DeviceFaultClass = "allocation"
 )
 
