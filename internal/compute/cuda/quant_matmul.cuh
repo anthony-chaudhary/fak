@@ -370,6 +370,26 @@ __global__ void k_q4k_dequant_transient(const unsigned char *Q4K, float *W, int 
   W[i] = d * (float)sc * (float)q - dm * (float)mn;
 }
 
+// Retain the original dequant expression and compiler contraction policy,
+// then split its F32 result without a weight-sized F32 allocation (#14097).
+// Finite half-scale * six-bit scale * four-bit code products fit in F32.
+__global__ void k_q4k_dequant_split(const unsigned char *Q4K, __half *hi, __half *lo, int out, int in) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int total = out * in;
+  if (i >= total) return;
+  int o = i / in, k = i % in;
+  int sb = k / 256, group = (k % 256) / 32, lane = k & 31;
+  const unsigned char *blk = Q4K + ((size_t)o * (in / 256) + sb) * 144;
+  float d = __half2float(*(const __half *)blk), dm = __half2float(*(const __half *)(blk + 2));
+  unsigned char sc, mn; getScaleMinK4_dev(group, blk + 4, &sc, &mn);
+  unsigned char packed = blk[16 + (group >> 1) * 32 + lane];
+  int q = (group & 1) ? packed >> 4 : packed & 15;
+  float value = d * (float)sc * (float)q - dm * (float)mn;
+  __half h = __float2half_rn(value);
+  hi[i] = h;
+  lo[i] = __float2half_rn(__fsub_rn(value, __half2float(h)));
+}
+
 // k_q4k_gemm: four warps cooperate on each output row. Each warp owns a disjoint stride of
 // 256-value super-blocks, preserving the exact f32-dequantized dot while exposing the short Qwen
 // hidden-width K loop to the GPU. Two rows per block retain 256-thread occupancy; only the four
@@ -508,13 +528,21 @@ extern "C" int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float 
     if (g_q4k_prefill_arm == 1) return fcuda_q4k_mmq_matmul(dQ4K, dX, dY, out, in, P);
     if (g_q4k_prefill_arm == 2) return fcuda_q4k_fp8lt_matmul(dQ4K, dX, dY, out, in, P);
     if (g_q4k_prefill_arm != 0) return FCUDA_Q4K_PREFILL_ARM_REFUSED;
-    float *wide = (float *)scratch_malloc((size_t)out * in * sizeof(float));
-    if (!wide) return FCUDA_SCRATCH_ALLOC_FAILED;
-    FCUDA_TS("k_q4k_dequant_transient", ((size_t)out * in + 255) / 256, k_q4k_dequant_transient<<<((size_t)out * in + 255) / 256, 256, 0, g_stream>>>(
-        (const unsigned char *)dQ4K, wide, out, in));
-    int status = fp16_compensated_matmul(wide, dX, dY, out, in, P);
-    fcuda_free(wide);
-    return status;
+    size_t wn = (size_t)out * in, xn = (size_t)P * in;
+    __half *wHi = (__half *)scratch_malloc(wn * sizeof(__half));
+    __half *wLo = (__half *)scratch_malloc(wn * sizeof(__half));
+    __half *xHi = (__half *)scratch_malloc(xn * sizeof(__half));
+    __half *xLo = (__half *)scratch_malloc(xn * sizeof(__half));
+    if (!wHi || !wLo || !xHi || !xLo) {
+      fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
+      return FCUDA_SPLIT_SCRATCH_ALLOC_FAILED;
+    }
+    FCUDA_TS("k_q4k_dequant_split", (wn + 255) / 256, k_q4k_dequant_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(
+        (const unsigned char *)dQ4K, wHi, wLo, out, in));
+    FCUDA_TS("k_fp16_split", (xn + 255) / 256, k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(dX, xHi, xLo, xn));
+    fp16_compensated_gemm(wHi, wLo, xHi, xLo, dY, out, in, P);
+    fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
+    return 0;
   }
   if (P < 4) {
     float2 *coeff = q4_coeffs_for(dQ4K, out, in);
