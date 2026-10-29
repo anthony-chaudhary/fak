@@ -478,6 +478,18 @@ func (m *Model) v41LayerProjectQKV(l, seq int, preByPos [][]float32, full bool, 
 		if err != nil {
 			return out, err
 		}
+		if full && seq > 1 {
+			// The projection adapter owns fresh panels, and full RoPE publication
+			// owns its validated outputs even when callbacks alias their results.
+			// Reuse the projected rows only after both publications succeed: keeping
+			// separate published rows would retain a second prompt-sized Q/KV panel
+			// while the unprocessed projection rows are still live.
+			qRow := qPanel[t*nH*hd : (t+1)*nH*hd : (t+1)*nH*hd]
+			kvRow := kvPanel[t*kvRank : t*kvRank+hd : t*kvRank+hd]
+			copy(qRow, q)
+			copy(kvRow, kv)
+			q, kv = qRow, kvRow
+		}
 		out.qHeads[t] = q
 		out.kvRows[t] = kv
 		out.qLatRows[t] = qLat
