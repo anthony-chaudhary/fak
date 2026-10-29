@@ -22,3 +22,19 @@ fak_sched_preempt_paged_misuse_releases_total counter. A repeated release of a b
 that is still shared, or of a block id that was freed and reallocated, still
 looks legitimate and is not counted. Fak does not adopt the upstream FIFO free
 order, the reserved null block 0, or a count for pinning a free block.
+
+Also consulted (INSPIRE-ONLY): deepseek-ai/DeepInfer
+  deepinfer/worker/cache_engine.py (:141-198, :309-492)
+Revision: 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+https://github.com/deepseek-ai/DeepInfer/blob/774ce244b87cc0eb8d4b94ab9f5de2ab22049f01/deepinfer/worker/cache_engine.py
+
+Inspiration only, nothing copied: the upstream cache engine budgets its KV
+memory from the rows it actually keeps — owner-layer compressed rows plus
+indexer keys, with the per-layer device row mirror accounted per layer —
+instead of a uniform per-token product. Fak's DeepSeek-V4.1 context plan
+under FAK_HYBRID_KV (#13914) takes that kept-KV accounting shape: each
+decoder layer's bounded window mirror is charged per layer, the published
+compressed rows and index keys ride their source layers' entries, and the
+compressor's in-flight rows are charged once in session state. No upstream
+type, constant, or logic was ported; the arithmetic is fak's own
+(compute.CompressedKVLayer over the published retention schedule).

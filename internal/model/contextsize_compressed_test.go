@@ -41,14 +41,18 @@ func TestContextSizeV4FlashCompressedGoldenAndGate(t *testing.T) {
 }
 
 // fak-test:runtime fast est=1ms
-func TestContextSizeV41CompressionNeverWindowOnly(t *testing.T) {
+func TestContextSizeV41CompressedChargesKeptKVNotWindowOnly(t *testing.T) {
 	_, cfg := readDeepSeekV41Config(t)
 	t.Setenv("FAK_HYBRID_KV", "0")
 	off := cfg.ContextSizeConfigWithPrecision(compute.KVPrecisionF32)
 	t.Setenv("FAK_HYBRID_KV", "1")
 	on := cfg.ContextSizeConfigWithPrecision(compute.KVPrecisionF32)
-	if got, want := on.KVBytes(32768), off.KVBytes(32768); got != want {
-		t.Fatalf("V4.1 unsupported compressed projection discounted uniform: got=%d want=%d", got, want)
+	// #13914: gate-on sizes the plan from the kept KV — the per-layer window
+	// mirror plus the published compressed rows and index keys — strictly above
+	// the window-only floor and strictly below the uniform 3-row store.
+	windowOnly := int64(v41PublishedNumLayers) * v41WindowSize * int64(cfg.HeadDim) * 4
+	if got := on.KVBytes(32768); got <= windowOnly || got >= off.KVBytes(32768) {
+		t.Fatalf("V4.1 kept-KV charge=%d not in (window-only %d, uniform %d)", got, windowOnly, off.KVBytes(32768))
 	}
 	if got, want := cfg.KVCacheShape().KVBytesPerStream(32768, kvbudget.F32), cfg.KVCacheShape().KVBytesPerStream(1048576, kvbudget.F32); got == want {
 		t.Fatal("V4.1 shape collapsed schedule to bounded window-only")
