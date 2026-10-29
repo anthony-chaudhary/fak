@@ -129,7 +129,7 @@ extern "C" int fcuda_set_device(int device) {
 #include "device_scope.h"
 #include "alloc_status.h"
 
-extern "C" void *fcuda_malloc_on(int device, size_t bytes) {
+extern "C" void *fcuda_malloc_on_tagged(int device, size_t bytes, int cls, int site) {
   if (bytes == 0) bytes = 1;
   fcuda_device_scope scope(device);
   if (scope.status() != 0) return nullptr;
@@ -139,7 +139,12 @@ extern "C" void *fcuda_malloc_on(int device, size_t bytes) {
     fprintf(stderr, "fak-cuda: cudaMalloc(%zu bytes) on device %d failed: %s\n", bytes, device, cudaGetErrorString(e));
     return nullptr;
   }
+  fak_alloc_track(d, cls, FAK_ALLOC_DEVICE_LOCAL, site, bytes);
   return d;
+}
+
+extern "C" void *fcuda_malloc_on(int device, size_t bytes) {
+  return fcuda_malloc_on_tagged(device, bytes, FAK_ALLOC_OTHER, FAK_ALLOC_SITE("fcuda_malloc_on"));
 }
 
 extern "C" void fcuda_free_on(int device, void *d) {
@@ -165,7 +170,9 @@ extern "C" void fcuda_free_on(int device, void *d) {
 #if defined(FAK_CUDA_V41_TAIL_ROPE) && defined(FAK_CUDA_V41_TAIL_ROPE_TEST)
   ++g_v41_rope_test_free_attempts;
 #endif
-  CK(cudaFree(d));
+  cudaError_t freed = cudaFree(d);
+  if (freed == cudaSuccess) fak_alloc_untrack(d);
+  CK(freed);
 }
 
 extern "C" void fcuda_h2d_on(int device, void *d, const void *h, size_t n) {

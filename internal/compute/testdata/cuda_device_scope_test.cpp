@@ -83,6 +83,7 @@ static void q4_coeff_cache_evict(const void *ptr) {
 static void fcuda_ts_untimed_transfer() { ++untimed; }
 #define CK(call) do { (void)(call); } while (0)
 #define FAK_CUDA_DEVICE_SCOPE_HOST_TEST
+#include "alloc_ledger.h"
 #include "runtime_services.cuh"
 
 static void restored() { assert(selected == 0 && view == 0); }
@@ -174,5 +175,13 @@ int main() {
   fcuda_free_on(1, b);
   restored();
   assert(owners.empty() && g_v41_rope_test_free_attempts == 3);
+  // Every successful device allocation was ledgered and every free decremented it.
+  int64_t cells[FAK_ALLOC_CELLS * 5] = {};
+  int64_t untracked = -1;
+  assert(fcuda_alloc_ledger_read(cells, FAK_ALLOC_CELLS, &untracked) == FAK_ALLOC_CELLS);
+  const int other = FAK_ALLOC_OTHER * FAK_ALLOC_KIND_COUNT + FAK_ALLOC_DEVICE_LOCAL;
+  assert(cells[other * 5 + 0] == 0 && cells[other * 5 + 2] == 0);
+  assert(cells[other * 5 + 3] > 0 && cells[other * 5 + 3] == cells[other * 5 + 4]);
+  assert(untracked == 0);
   return 0;
 }

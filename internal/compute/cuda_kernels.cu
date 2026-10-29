@@ -26,6 +26,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "cuda/alloc_ledger.h"
+
 static cublasHandle_t g_blas = nullptr;
 static cublasLtHandle_t g_cublas_lt = nullptr; // shared by explicit FP8 and NVFP4 arms
 static void *g_blas_workspace = nullptr; // explicit cuBLAS workspace so it never cudaMalloc's mid-capture (#969)

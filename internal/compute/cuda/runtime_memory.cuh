@@ -22,8 +22,11 @@ extern "C" int fcuda_init(char *name, int namelen, int *sm, size_t *total_mem) {
   // 32 MiB is NVIDIA's recommended size for Hopper and is safe (a superset) on Ampere/Ada too.
   if (!g_blas_workspace) {
     const size_t ws = (size_t)32 * 1024 * 1024;
-    if (fcuda_alloc_status(cudaMalloc(&g_blas_workspace, ws)) == cudaSuccess)
+    if (fcuda_alloc_status(cudaMalloc(&g_blas_workspace, ws)) == cudaSuccess) {
+      fak_alloc_track(g_blas_workspace, FAK_ALLOC_WORKSPACE_CUBLAS, FAK_ALLOC_DEVICE_LOCAL,
+                      FAK_ALLOC_SITE("cublas-workspace"), ws);
       cublasSetWorkspace(g_blas, g_blas_workspace, ws);
+    }
   }
   return 0;
 }
@@ -55,13 +58,14 @@ extern "C" int fcuda_mem_info(size_t *free_mem, size_t *total_mem) {
   return 0;
 }
 
-extern "C" void *fcuda_malloc(size_t bytes) {
+extern "C" void *fcuda_malloc_tagged(size_t bytes, int cls, int site) {
   if (bytes == 0) bytes = 1;
   auto it = g_pool.find(bytes);
   void *d = nullptr;
   if (it != g_pool.end() && !it->second.empty()) {
     d = it->second.back();
     it->second.pop_back();
+    fak_alloc_retag(d, cls, site);
   } else {
     if (g_capture_open) {
       // #969: a device alloc on the captured decode path is the exact bug this guard exists to
@@ -83,11 +87,15 @@ extern "C" void *fcuda_malloc(size_t bytes) {
       fprintf(stderr, "fak-cuda: cudaMalloc(%zu bytes) failed: %s\n", bytes, cudaGetErrorString(_e));
       return nullptr;
     }
+    fak_alloc_track(d, cls, FAK_ALLOC_DEVICE_LOCAL, site, bytes);
   }
   g_live[d] = bytes;
   return d;
 }
-extern "C" void *fcuda_malloc_managed(size_t bytes) {
+extern "C" void *fcuda_malloc(size_t bytes) {
+  return fcuda_malloc_tagged(bytes, FAK_ALLOC_OTHER, FAK_ALLOC_SITE("fcuda_malloc"));
+}
+extern "C" void *fcuda_malloc_managed_tagged(size_t bytes, int cls, int site) {
   if (bytes == 0) bytes = 1;
   void *d = nullptr;
   cudaError_t _e = fcuda_alloc_status(cudaMallocManaged(&d, bytes, cudaMemAttachGlobal));
@@ -95,8 +103,12 @@ extern "C" void *fcuda_malloc_managed(size_t bytes) {
     fprintf(stderr, "fak-cuda: cudaMallocManaged(%zu bytes) failed: %s\n", bytes, cudaGetErrorString(_e));
     return nullptr;
   }
+  fak_alloc_track(d, cls, FAK_ALLOC_MANAGED, site, bytes);
   g_managed_live[d] = bytes;
   return d;
+}
+extern "C" void *fcuda_malloc_managed(size_t bytes) {
+  return fcuda_malloc_managed_tagged(bytes, FAK_ALLOC_OTHER, FAK_ALLOC_SITE("fcuda_malloc_managed"));
 }
 static void q4_coeff_cache_evict(const void *q);
 
@@ -124,11 +136,13 @@ extern "C" void fcuda_free(void *d) {
 #if defined(FAK_CUDA_V41_TAIL_ROPE) && defined(FAK_CUDA_V41_TAIL_ROPE_TEST)
     ++g_v41_rope_test_free_attempts;
 #endif
+    fak_alloc_untrack(d);
     cudaFree(d);
     return;
   }
   auto pit = g_panel_live.find(d);
   if (pit != g_panel_live.end()) {
+    fak_alloc_retag(d, FAK_ALLOC_IDLE_POOL, FAK_ALLOC_SITE("panel-pool"));
     g_panel_pool[pit->second].push_back(d); // panel scratch stays out of g_pool
     g_panel_live_bytes -= pit->second;
     g_panel_cached_bytes += pit->second;
@@ -137,12 +151,14 @@ extern "C" void fcuda_free(void *d) {
   }
   auto it = g_live.find(d);
   if (it != g_live.end()) {
+    fak_alloc_retag(d, FAK_ALLOC_IDLE_POOL, FAK_ALLOC_SITE("device-pool"));
     g_pool[it->second].push_back(d); // return to the pool for reuse, don't cudaFree
     g_live.erase(it);
   } else {
 #if defined(FAK_CUDA_V41_TAIL_ROPE) && defined(FAK_CUDA_V41_TAIL_ROPE_TEST)
     ++g_v41_rope_test_free_attempts;
 #endif
+    fak_alloc_untrack(d);
     cudaFree(d);
   }
 }
@@ -173,6 +189,7 @@ extern "C" int fcuda_discard_unsubmitted(void *d, size_t expected_bytes) {
   if (status != cudaSuccess) return (int)status;
   status = cudaFree(d);
   if (status != cudaSuccess) return (int)status;
+  fak_alloc_untrack(d);
   g_live.erase(it);
   return 0;
 }
@@ -183,7 +200,7 @@ extern "C" size_t fcuda_live_allocations(void) {
 
 // fcuda_malloc_panel serves prompt-panel scratch from g_panel_pool, never managed memory.
 // nullptr means the device allocation failed or a graph capture is open.
-extern "C" void *fcuda_malloc_panel(size_t bytes) {
+extern "C" void *fcuda_malloc_panel_tagged(size_t bytes, int cls, int site) {
   if (bytes == 0) bytes = 1;
   if (g_capture_open) return nullptr;
   void *d = nullptr;
@@ -192,18 +209,23 @@ extern "C" void *fcuda_malloc_panel(size_t bytes) {
     d = it->second.back();
     it->second.pop_back();
     g_panel_cached_bytes -= bytes;
+    fak_alloc_retag(d, cls, site);
   } else {
     cudaError_t e = fcuda_alloc_status(cudaMalloc(&d, bytes));
     if (e != cudaSuccess || !d) {
       fprintf(stderr, "fak-cuda: prompt panel cudaMalloc(%zu bytes) failed: %s\n", bytes, cudaGetErrorString(e));
       return nullptr;
     }
+    fak_alloc_track(d, cls, FAK_ALLOC_DEVICE_LOCAL, site, bytes);
   }
   g_panel_live[d] = bytes;
   g_panel_live_bytes += bytes;
   if (g_panel_live_bytes + g_panel_cached_bytes > g_panel_peak_bytes)
     g_panel_peak_bytes = g_panel_live_bytes + g_panel_cached_bytes;
   return d;
+}
+extern "C" void *fcuda_malloc_panel(size_t bytes) {
+  return fcuda_malloc_panel_tagged(bytes, FAK_ALLOC_PREFILL_SCRATCH, FAK_ALLOC_SITE("fcuda_malloc_panel"));
 }
 
 // fcuda_panel_peak_reset restarts the panel peak at the bytes held now (a new panel scope).
@@ -217,7 +239,10 @@ extern "C" void fcuda_panel_peak_reset(void) {
 extern "C" size_t fcuda_panel_release(void) {
   cudaStreamSynchronize(g_stream);
   for (auto &kv : g_panel_pool) {
-    for (void *p : kv.second) cudaFree(p);
+    for (void *p : kv.second) {
+      fak_alloc_untrack(p);
+      cudaFree(p);
+    }
   }
   g_panel_pool.clear();
   g_panel_cached_bytes = 0;
@@ -265,6 +290,7 @@ extern "C" void fcuda_graph_prewarm(int extra) {
       if (e != cudaSuccess || !d) {
         break; // best-effort; a real OOM still fails loud later
       }
+      fak_alloc_track(d, FAK_ALLOC_GRAPH_POOL, FAK_ALLOC_DEVICE_LOCAL, FAK_ALLOC_SITE("graph-prewarm"), bytes);
       bucket.push_back(d);
     }
   }
@@ -274,6 +300,7 @@ extern "C" void fcuda_trim_pool_large(size_t max_keep_bytes) {
   for (auto it = g_pool.begin(); it != g_pool.end(); ) {
     if (it->first > max_keep_bytes) {
       for (void *p : it->second) {
+        fak_alloc_untrack(p);
         cudaFree(p);
       }
       it = g_pool.erase(it);

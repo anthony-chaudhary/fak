@@ -44,6 +44,16 @@ void fcuda_trim_pool_large(size_t max_keep_bytes);
  * panel-sized buffers never reach the decode pool. fcuda_malloc_panel returns NULL on failure
  * (no managed fallback); fcuda_panel_release returns the panel buffers still held. */
 void *fcuda_malloc_panel(size_t bytes);
+/* Tagged device-allocation ledger (cuda/alloc_ledger.h). cls/site are the ledger's class
+ * ordinal and an interned site id; the untagged entry points record class other. */
+void *fcuda_malloc_tagged(size_t bytes, int cls, int site);
+void *fcuda_malloc_managed_tagged(size_t bytes, int cls, int site);
+void *fcuda_malloc_panel_tagged(size_t bytes, int cls, int site);
+void *fcuda_malloc_on_tagged(int device, size_t bytes, int cls, int site);
+int fcuda_alloc_site_intern(const char *name);
+int fcuda_alloc_ledger_read(int64_t *out, int cells, int64_t *untracked_frees);
+int fcuda_alloc_site_read(int i, char *name, int namelen, int64_t *out5);
+void fcuda_alloc_ledger_reset_peak(void);
 /* Test seam: the Nth next dequant + fp16 GEMM scratch allocation misses (1 = the f32 dequant
  * copy, 2..5 = the fp16 split halves); 0 disarms. */
 void fcuda_scratch_alloc_test_fault(int nth);

@@ -39,6 +39,9 @@ func TestQ4CoeffRingProductionContiguousBounds(t *testing.T) {
 	if err := os.WriteFile(cpp, []byte(q4CoeffBoundsHarness+body+q4CoeffBoundsMain), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "alloc_ledger.h"), cudaAllocLedgerHeader, 0600); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if out, err := exec.CommandContext(ctx, compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", cpp, "-o", binary).CombinedOutput(); err != nil {
@@ -56,6 +59,7 @@ const q4CoeffBoundsHarness = `
 #include <cstring>
 #include <cstddef>
 #include <initializer_list>
+#include "alloc_ledger.h"
 
 struct float2 { float x, y; };
 static_assert(sizeof(float2) == 8, "CUDA float2 geometry");
