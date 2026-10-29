@@ -433,10 +433,10 @@ func (s *Session) weightHALQ4K(name string, qt *q4kTensor) compute.Tensor {
 		}
 		return compute.NewQ4K(compute.Default(), []int{qt.out, qt.in}, raw)
 	}, compute.Q4_K, q4kResidentBytes(qt))
-	if q4kHostCopyReleasable(s, qt, wt.Ready()) {
-		// Single residency on a unified-memory APU: the device tensor is authoritative for every
-		// q4_k matmul (useHALQ4KWeights), so the host packed copy is pure duplicated footprint on
-		// the SAME physical pool. Dropping it is what lets a 27B Q4_K fit one 64 GB Strix Halo.
+	if q4kHostCopyReleasable(s, name, qt, wt.Ready()) {
+		// Single residency: the device tensor is authoritative for every q4_k matmul
+		// (useHALQ4KWeights), so the host packed copy is duplicated footprint: the SAME pool on a
+		// unified-memory APU, ~15 GiB of Go heap for a 27B on a discrete card (FAK_Q4K_FREE_CPU=device).
 		// Idempotent: a second call with raw already nil re-derives false (len(raw)==0, but the
 		// gate never reads raw) and, being a no-op assignment, cannot resurrect a stale copy.
 		qt.raw = nil

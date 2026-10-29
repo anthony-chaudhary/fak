@@ -13,12 +13,14 @@ import (
 // discrete: GPU without hardware).
 type tierRecordingBackend struct {
 	compute.Backend
-	tier string
+	tier         string
+	deviceMemory bool
 }
 
 func (b *tierRecordingBackend) Caps() compute.Caps {
 	c := b.Backend.Caps()
 	c.UploadDtype = true
+	c.DeviceMemory = c.DeviceMemory || b.deviceMemory
 	return c
 }
 
@@ -28,7 +30,10 @@ func (b *tierRecordingBackend) Tier() string { return b.tier }
 // packed Q4_K bytes are dropped ONLY when the session is HAL-Q4K routed AND the device reports an
 // integrated: (unified-memory) tier AND the FAK_Q4K_FREE_CPU knob is on. A cpu-ref / discrete /
 // lazy tensor keeps its host copy, and the release is idempotent (a second call cannot resurrect
-// a stale copy).
+// a stale copy). FAK_Q4K_FREE_CPU=device extends the release to a discrete device-memory backend
+// for dense weights held by the model-lifetime residency.
+//
+// fak-test:runtime fast est=50ms
 func TestWeightHALQ4KDropsHostCopyOnlyOnIntegratedSingleResidency(t *testing.T) {
 	const out, in = 8, 256
 	newResident := func() *q4kTensor {
@@ -97,6 +102,38 @@ func TestWeightHALQ4KDropsHostCopyOnlyOnIntegratedSingleResidency(t *testing.T) 
 		s.weightHALQ4K("dense.weight", qt)
 		if qt.lazy == nil {
 			t.Fatal("lazy descriptor cleared by the release")
+		}
+	})
+
+	t.Run("discrete device arm drops dense", func(t *testing.T) {
+		t.Setenv("FAK_Q4K_FREE_CPU", "device")
+		qt := newResident()
+		s := newSession(&tierRecordingBackend{Backend: compute.Default(), tier: "sm_120", deviceMemory: true})
+		if wt := s.weightHALQ4K("dense.weight", qt); !wt.Ready() {
+			t.Fatal("upload returned an unready device tensor")
+		}
+		if len(qt.raw) != 0 {
+			t.Fatalf("host raw retained (%d bytes) under the discrete device arm", len(qt.raw))
+		}
+	})
+
+	t.Run("discrete device arm keeps routed expert", func(t *testing.T) {
+		t.Setenv("FAK_Q4K_FREE_CPU", "device")
+		qt := newResident()
+		s := newSession(&tierRecordingBackend{Backend: compute.Default(), tier: "sm_120", deviceMemory: true})
+		s.weightHALQ4K("model.layers.0.mlp.experts.3.up_proj.weight", qt)
+		if len(qt.raw) == 0 {
+			t.Fatal("routed expert host raw dropped; a ring eviction would re-stage from nil")
+		}
+	})
+
+	t.Run("discrete device arm keeps host-memory backend", func(t *testing.T) {
+		t.Setenv("FAK_Q4K_FREE_CPU", "device")
+		qt := newResident()
+		s := newSession(&tierRecordingBackend{Backend: compute.Default(), tier: "sm_120"})
+		s.weightHALQ4K("dense.weight", qt)
+		if len(qt.raw) == 0 {
+			t.Fatal("host raw dropped on a backend without device memory")
 		}
 	})
 }
