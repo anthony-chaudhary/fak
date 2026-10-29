@@ -70,7 +70,12 @@ type PreflightInput struct {
 	// VulkanMixedQ4K selects the backed Vulkan -q4k loader's actual storage policy:
 	// eligible Q4_K/Q2_K matrices remain packed while unsupported dense formats make
 	// the bounded f32 -> Q8 round trip.
-	VulkanMixedQ4K                bool
+	VulkanMixedQ4K bool
+	// CUDAResidentQ4K selects the backed CUDA -q4k loader's storage policy
+	// (WithDenseKQuantResident(false)): Q4_K matrices stay packed on the device and other
+	// dense k-quants become native Q8, so the device charge is the resident logical bytes,
+	// not the dequantized f32 total. Unqualified layouts keep the raw payload estimate.
+	CUDAResidentQ4K               bool
 	StreamedExperts               bool
 	StreamedExpertDeviceRingBytes int64
 	StreamedDenseWorkingSetBytes  int64
@@ -259,6 +264,11 @@ func estimateLoadFor(in PreflightInput) (preflightEstimate, error) {
 	switch {
 	case in.VulkanMixedQ4K:
 		return estimateVulkanMixedQ4K(in.Source, in.ResidentQ2KEmbedding, in.StreamedDenseQ4K, in.SingleResidencyQ4K)
+	case in.CUDAResidentQ4K:
+		plan, err = in.Source.EstimateQ4KLoadMemoryPlan(WithDenseKQuantResident(false))
+		if errors.Is(err, ErrQ4KLoadEstimateUnsupported) {
+			plan, err = in.Source.EstimateLoadMemoryPlan()
+		}
 	case in.OffloadExperts:
 		plan, err = in.Source.EstimateCPUOffloadExpertsMemoryPlan()
 	case in.Lean || in.Q4K:

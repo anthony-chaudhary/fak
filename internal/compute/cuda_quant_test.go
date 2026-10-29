@@ -306,9 +306,18 @@ func TestCUDAQ4KMatMulApproxMatchesRef(t *testing.T) {
 	}
 	c := cosine(nonTarget(yRef, out, target), nonTarget(yCu, out, target))
 	maxAbs := maxAbsDelta(yRef, yCu)
-	const maxAbsLimit = 0.02
+	// The f32 GEMV keeps the absolute bound; the mmvq arm's q8_1 activation error scales with
+	// |y|, so it takes the relative gate TestCUDAQ4KDecodeArmMMVQMatchesRef pins.
+	maxAbsLimit := 0.02
+	if CUDAQ4KDecodeArmInUse() == CUDAQ4KDecodeMMVQ {
+		scale := 0.0
+		for _, v := range yRef {
+			scale = math.Max(scale, math.Abs(float64(v)))
+		}
+		maxAbsLimit = q4kMMVQRelMaxAbs * scale
+	}
 	if maxAbs > maxAbsLimit {
-		t.Fatalf("Q4_K MatMul maxAbs %.6g > %.6g; catches activation-quantization scale/layout drift", maxAbs, maxAbsLimit)
+		t.Fatalf("Q4_K MatMul maxAbs %.6g > %.6g (arm=%s); catches activation-quantization scale/layout drift", maxAbs, maxAbsLimit, CUDAQ4KDecodeArmInUse())
 	}
 	if c < cudaQ4KCosineMin {
 		t.Fatalf("Q4_K MatMul cosine %.6f < recorded Q4_K gate %.6f (cudaQ4KCosineMin)", c, cudaQ4KCosineMin)

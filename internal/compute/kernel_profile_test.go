@@ -557,7 +557,10 @@ func cudaEnclosingFunc(src string, at int) string {
 
 // cudaUntimedTransferSites lists the async copies that run outside the event
 // ring: a peer device's copy on the multi-GPU path (the profile keeps one device).
-var cudaUntimedTransferSites = map[string]bool{"cuda/runtime_services.cuh:fcuda_d2d_on": true}
+var cudaUntimedTransferSites = map[string]bool{
+	"cuda/runtime_services.cuh:fcuda_d2d_on":   true,
+	"cuda/async_upload.cuh:fcuda_upload_async": true,
+}
 
 // fak-test:runtime fast est=30ms lane=default
 func TestCUDATimestampSourceCoversEveryLaunch(t *testing.T) {
