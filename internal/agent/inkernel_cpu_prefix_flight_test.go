@@ -153,13 +153,24 @@ func TestInKernelCPUConcurrentPrefixFlight(t *testing.T) {
 		if callbacks.Load() != 1 {
 			t.Fatalf("leader callbacks=%d, want 1", callbacks.Load())
 		}
-		perClone := cloneBytes.Load()
+		published := cloneBytes.Load()
+		if published <= 0 {
+			t.Fatalf("publication payload bytes=%d, want positive", published)
+		}
 		// The publication is detached from the leader. A follower copies it
 		// while another reader is registered; the last reader may instead
-		// take ownership after its sibling has finished reading.
+		// take ownership after its sibling has finished reading. Since #14063 a
+		// follower copies only the retained dense prefix when the strict
+		// dense-prefix contract applies, so derive its cost through the same gate.
+		refSession := p.m.NewSession()
+		refSession.Prefill(prompts[0])
+		followerClone := refSession.Cache.Clone().ClonePayloadBytes()
+		if cp, ok := refSession.Cache.TryCloneDensePrefixExact(len(common)); ok {
+			followerClone = cp.ClonePayloadBytes()
+		}
 		copied := p.prefixFlights.ClonePayloadBytes()
-		if perClone <= 0 || (copied != 2*perClone && copied != 3*perClone) {
-			t.Fatalf("flight clone bytes=%d, want publication plus one or two follower clones (%d or %d)", copied, 2*perClone, 3*perClone)
+		if wantOne, wantTwo := published+followerClone, published+2*followerClone; copied != wantOne && copied != wantTwo {
+			t.Fatalf("flight clone bytes=%d, want publication plus one or two follower clones (%d or %d)", copied, wantOne, wantTwo)
 		}
 	})
 

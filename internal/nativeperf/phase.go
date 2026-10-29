@@ -65,6 +65,10 @@ type PhaseReceipt struct {
 	FallbackActive bool              `json:"fallback_active"`
 	Wall           time.Duration     `json:"wall"`
 	Phases         []PhaseAccounting `json:"phases"`
+	// HostDownloadBytes is device-to-host payload delivered by observed host
+	// syncs. It is a byte count only: the host_device_download phase stays zero
+	// until a copy is timed on its own.
+	HostDownloadBytes uint64 `json:"host_device_download_bytes,omitempty"`
 }
 
 // Validate proves that the receipt identifies fak-native execution, uses only

@@ -3,6 +3,7 @@
 package devhandoff
 
 var Commands = []Command{
+	{Name: "allocation-check", Owner: "dev", Handler: "runAllocationCheck", SourceOrigin: "cmd/fak-dev/allocation_check.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "amd-gotchas", Owner: "dev", Handler: "devcmd.RunAMDGotchas", SourceOrigin: "internal/devcmd/amd_gotchas.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "amd-gpu-facts", Owner: "dev", Handler: "devcmd.RunAMDGPUFacts", SourceOrigin: "internal/devcmd/amd_gpu_facts.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "amd-gpudirect", Owner: "dev", Handler: "devcmd.RunAMDGPUDirect", SourceOrigin: "internal/devcmd/amd_gpudirect.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
@@ -55,6 +56,7 @@ var Commands = []Command{
 	{Name: "provenance", Owner: "dev", Handler: "devcmd.RunCompanionProvenance", SourceOrigin: "internal/devcmd/companion_bridge.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "readme-visual-audit", Owner: "dev", Handler: "devcmd.RunReadmeVisualAudit", SourceOrigin: "internal/devcmd/readme_visual_audit.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "refactor-verify", Owner: "dev", Handler: "devcmd.RunRefactorVerify", SourceOrigin: "internal/devcmd/refactorverify.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
+	{Name: "runtime-mem", Owner: "dev", Handler: "runRuntimeMem", SourceOrigin: "cmd/fak-dev/runtime_mem.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "sessiondiag", Owner: "dev", Handler: "devcmd.RunSessionDiag", SourceOrigin: "internal/devcmd/sessiondiag.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "strix", Owner: "dev", Handler: "devcmd.RunCompanionStrix", SourceOrigin: "internal/devcmd/companion_bridge.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "study-adjacency", Owner: "dev", Handler: "devcmd.RunStudyAdjacency", SourceOrigin: "internal/devcmd/study_adjacency.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},

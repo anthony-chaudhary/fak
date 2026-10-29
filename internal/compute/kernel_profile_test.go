@@ -557,7 +557,10 @@ func cudaEnclosingFunc(src string, at int) string {
 
 // cudaUntimedTransferSites lists the async copies that run outside the event
 // ring: a peer device's copy on the multi-GPU path (the profile keeps one device).
-var cudaUntimedTransferSites = map[string]bool{"cuda/runtime_services.cuh:fcuda_d2d_on": true}
+var cudaUntimedTransferSites = map[string]bool{
+	"cuda/runtime_services.cuh:fcuda_d2d_on":   true,
+	"cuda/async_upload.cuh:fcuda_upload_async": true,
+}
 
 // fak-test:runtime fast est=30ms lane=default
 func TestCUDATimestampSourceCoversEveryLaunch(t *testing.T) {
@@ -651,6 +654,7 @@ var cudaKernelOtherAllowlist = map[string]bool{
 	"k_q8_quant_act": true, "k_qwen35_embedding_gather": true, "k_qwen35_split_qg_panel": true,
 	"k_qwen4exp_ple_hash_i64": true, "k_sigmoid_mul": true, "k_split_qwen35_qg": true,
 	"k_v41_bf16_publish": true, "k_v41_bf16_publish_status": true, "quantize_mmq_q8_1_ds4": true,
+	"quantize_q8_1": true,
 }
 
 // fak-test:runtime fast est=20ms lane=default
@@ -680,7 +684,7 @@ func TestKernelOpClassCUDANames(t *testing.T) {
 	}
 	for name, want := range map[string]string{
 		"k_q5k_gemm_panel": KernelOpMatmul, "k_q6k_gemm_panel": KernelOpMatmul, "q4k_fp8lt_matmul": KernelOpMatmul,
-		"k_q4k_gemm": KernelOpMatmul, "k_q8_gemm_rowtile": KernelOpMatmul, "k_q2k_gemv": KernelOpMatvec,
+		"k_q4k_gemm": KernelOpMatmul, "k_q8_gemm_rowtile": KernelOpMatmul, "k_q2k_gemv": KernelOpMatvec, "k_q4k_mmvq_gemv": KernelOpMatvec,
 		"k_awq_gemv": KernelOpMatvec, "k_rex_gemv_mxfp4_e8m0": KernelOpMatvec, "k_rex_gemv_fp8_block32_e8m0": KernelOpMatvec,
 		"mul_mat_q": KernelOpMatmul, "mul_mat_q_stream_k_fixup": KernelOpMatmul, "k_nvfp4_w4a16_f32": KernelOpMatmul,
 		"cublas_sgemm": KernelOpMatmul, "cublas_gemm_ex": KernelOpMatmul, "cublaslt_matmul": KernelOpMatmul,

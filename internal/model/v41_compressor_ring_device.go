@@ -249,7 +249,7 @@ func (st *v41CompressorRingStep) project(lr *v41CompressorRingLayer, slot int, i
 			name := layerName(st.layer, leaf)
 			weights[i] = s.v41HeadWeightHAL(name, st.dtypes[i], st.width, st.hidden)
 			if st.dtypes[i] == compute.Q4_K {
-				if q := m.q4kw[name]; q4kHostCopyReleasable(s, q, weights[i].Ready()) {
+				if q := m.q4kw[name]; q4kHostCopyReleasable(s, name, q, weights[i].Ready()) {
 					q.raw = nil
 				}
 			}

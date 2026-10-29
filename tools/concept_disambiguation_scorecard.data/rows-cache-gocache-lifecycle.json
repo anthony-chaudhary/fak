@@ -10,7 +10,10 @@
       "distinct_from": [
         "x3-cache-gocache",
         "gocacherootfromenv",
-        "sweepgocache"
+        "sweepgocache",
+        "gocacheplacement",
+        "checkgocacheplacement",
+        "checkgocacheplan"
       ],
       "aliases": [],
       "grounding": "GoCacheReport",
@@ -48,7 +51,10 @@
       "distinct_from": [
         "x3-cache-gocache",
         "gocachereport",
-        "sweepgocache"
+        "sweepgocache",
+        "gocacheplacement",
+        "checkgocacheplacement",
+        "checkgocacheplan"
       ],
       "aliases": [],
       "grounding": "GoCacheRootFromEnv",
@@ -68,7 +74,10 @@
       "distinct_from": [
         "x3-cache-gocache",
         "gocachereport",
-        "gocacherootfromenv"
+        "gocacherootfromenv",
+        "gocacheplacement",
+        "checkgocacheplacement",
+        "checkgocacheplan"
       ],
       "aliases": [],
       "grounding": "SweepGoCache",

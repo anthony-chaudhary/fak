@@ -6,8 +6,14 @@ import (
 )
 
 // CUDAQ4KPrefillArm names the kernel the CUDA Q4_K GEMM runs for a prompt panel of 128 or more
-// tokens (P-04, fak#13983). Decode (P < 4) and small panels keep their own kernels.
+// tokens (P-04, fak#13983). Decode (P < 4) and small panels keep their own kernels, except that
+// the mmq arm also takes panels of cudaQ4KMMQMinCols..127 tokens and falls back to the token
+// panel when it refuses.
 type CUDAQ4KPrefillArm string
+
+// cudaQ4KMMQMinCols mirrors FCUDA_Q4K_MMQ_MIN_COLS (cuda/quant_matmul.cuh): the smallest P the mmq
+// arm takes. It equals the narrowest MMQ column tile (q4k_mmq.cuh mul_mat_q_switch_J).
+const cudaQ4KMMQMinCols = 8
 
 const (
 	// CUDAQ4KPrefillCompensated dequantizes the weight to an f32 transient and runs three

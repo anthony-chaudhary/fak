@@ -199,7 +199,7 @@ func nativeCacheRestoreSourceFor(tier radixkv.SnapshotTier, matched int) model.N
 	switch tier {
 	case radixkv.SnapshotTierDeviceL1:
 		return model.NativeCacheRestoreDevice
-	case radixkv.SnapshotTierHostL2, radixkv.SnapshotTierRemoteL3:
+	case radixkv.SnapshotTierHostL2, radixkv.SnapshotTierRemoteL3, radixkv.SnapshotTierLocalL3:
 		return model.NativeCacheRestoreHost
 	default:
 		// A live match under an unknown tier cannot be claimed as a device hit;

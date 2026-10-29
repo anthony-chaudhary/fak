@@ -218,11 +218,12 @@ func (h *HostPrefixSnapshot) restoreOwned(scope *backendExecutionScope) (out *Pr
 		return nil, fmt.Errorf("model: restore prefix attention KV from host: %w", err)
 	}
 	candidate := &PrefixSnapshot{
-		Cache:      h.cache.Clone(),
-		halKV:      kv,
-		halLineage: h.halLineage.clone(0),
-		Backend:    h.backend,
-		Tokens:     h.tokens,
+		Cache:          h.cache.Clone(),
+		halKV:          kv,
+		halKVPrecision: h.kv.Config.Precision,
+		halLineage:     h.halLineage.clone(0),
+		Backend:        h.backend,
+		Tokens:         h.tokens,
 	}
 	restoreTensor := func(t hostTensor, site string) compute.Tensor {
 		tensor := hostTensorRestore(h.backend, t, site)

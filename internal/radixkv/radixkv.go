@@ -90,6 +90,12 @@ type node struct {
 	// HostPrefixSnapshot in the configured l3kv/blobhttp tier. It owns no local
 	// payload bytes and remains usable after both local physical copies are gone.
 	remoteSnapshot *remoteSnapshotRef
+	// ssdSnapshot is a verified reference to a complete serialized HostPrefixSnapshot
+	// demoted to the local-SSD overflow tier when host L2 pressure evicted it. Like a
+	// remote reference it owns no local payload bytes and keeps the record incarnation
+	// alive after every in-memory copy is gone; its on-disk bytes count against the
+	// tree's SSD budget while the reference is attached.
+	ssdSnapshot *ssdSnapshotRef
 	// logits is the final-token distribution for this exact full prefix, when the caller
 	// provided it. It lets an exact-hit replay sample the first generated token without
 	// refeeding the prompt's final token just to recover logits. Splits intentionally do
@@ -315,16 +321,29 @@ type Tree struct {
 	remoteConfig        model.Config
 	remoteSnapshotBytes int64
 	remoteBreaker       *RemoteL3Breaker
-	l3Hits              int
-	l3Misses            int
-	l3Faults            int
-	l3HitTokens         int
-	l3StageBytes        int64
-	l3RestoreBytes      int64
-	l3StageNanos        int64
-	l3RestoreNanos      int64
-	l3StageFaults       int
-	l3RestoreFaults     int
+
+	localSSDStore         SnapshotStore
+	localSSDModelID       string
+	localSSDBackend       compute.Backend
+	localSSDConfig        model.Config
+	localSSDBudget        int64
+	localSSDSnapshotBytes int64
+	l3LocalHits           int
+	l3LocalMisses         int
+	l3LocalFaults         int
+	l3LocalHitTokens      int
+	l3LocalStageBytes     int64
+	l3LocalRestoreBytes   int64
+	l3Hits                int
+	l3Misses              int
+	l3Faults              int
+	l3HitTokens           int
+	l3StageBytes          int64
+	l3RestoreBytes        int64
+	l3StageNanos          int64
+	l3RestoreNanos        int64
+	l3StageFaults         int
+	l3RestoreFaults       int
 
 	// policy is the legacy two-value enum, retained as the back-compat knob and the
 	// selector for the cost-aware eviction counter (Stats.CostEvictions). strategy is the
@@ -807,7 +826,7 @@ func (t *Tree) LookupSnapshotTieredContext(ctx context.Context, tokens []int) (*
 		return n, snap, candidate.plen, SnapshotTierDeviceL1, nil
 	}
 	t.l1Misses++
-	if !t.HostL2Enabled() && !t.RemoteSnapshotEnabled() {
+	if !t.HostL2Enabled() && !t.RemoteSnapshotEnabled() && !t.LocalSSDSnapshotEnabled() {
 		return n, nil, 0, SnapshotTierMiss, nil
 	}
 	for candidate := n; candidate != nil; candidate = candidate.parent {
@@ -826,6 +845,24 @@ func (t *Tree) LookupSnapshotTieredContext(ctx context.Context, tokens []int) (*
 	}
 	if t.HostL2Enabled() {
 		t.l2Misses++
+	}
+	// The local-SSD overflow sits below host DRAM but above the remote tier: it holds exactly
+	// the images L2 pressure demoted, so a node whose hot and host copies are gone can still be
+	// restored from disk without crossing the network.
+	if t.LocalSSDSnapshotEnabled() {
+		for candidate := n; candidate != nil; candidate = candidate.parent {
+			if candidate.ssdSnapshot == nil {
+				continue
+			}
+			snap, found, err := t.restoreSnapshotFromLocalSSD(ctx, candidate)
+			if err != nil {
+				return n, nil, candidate.plen, SnapshotTierLocalL3, err
+			}
+			if found {
+				return n, snap, candidate.plen, SnapshotTierLocalL3, nil
+			}
+		}
+		t.l3LocalMisses++
 	}
 	if t.RemoteSnapshotEnabled() {
 		for candidate := n; candidate != nil; candidate = candidate.parent {
@@ -882,6 +919,7 @@ func (t *Tree) InsertSnapshot(boundary *node, suffix []int, snap *model.PrefixSn
 	// re-admission cannot close the owner that remains live.
 	t.releaseHostSnapshot(n)
 	t.releaseRemoteSnapshot(n)
+	t.releaseSSDSnapshot(n)
 	n.cachedLogits = append([]float32(nil), logits...)
 	t.snapshotBytes += incoming
 	// Successful admission of a complete local snapshot record mints a fresh
@@ -910,7 +948,7 @@ func (t *Tree) invalidateRecordIfNoLocalCopy(n *node) {
 	if n == nil || !n.hasRecord {
 		return
 	}
-	if n.snapshot == nil && n.hostSnapshot == nil && n.remoteSnapshot == nil {
+	if n.snapshot == nil && n.hostSnapshot == nil && n.remoteSnapshot == nil && n.ssdSnapshot == nil {
 		n.hasRecord = false
 		n.recordGen = 0
 	}
@@ -923,7 +961,7 @@ func (t *Tree) ValidateRecord(h RecordHandle) bool {
 	if t == nil || h.node == nil || !h.node.hasRecord || h.gen == 0 || h.gen != h.node.recordGen {
 		return false
 	}
-	if h.node.snapshot == nil && h.node.hostSnapshot == nil && h.node.remoteSnapshot == nil {
+	if h.node.snapshot == nil && h.node.hostSnapshot == nil && h.node.remoteSnapshot == nil && h.node.ssdSnapshot == nil {
 		return false
 	}
 	return t.nodeAttached(h.node)
@@ -1058,7 +1096,7 @@ func (t *Tree) releaseHotSnapshot(n *node) {
 	t.snapshotBytes -= snapshotResidentBytes(n.snapshot, n.cachedLogits)
 	n.snapshot.Close()
 	n.snapshot = nil
-	if n.hostSnapshot == nil && n.remoteSnapshot == nil {
+	if n.hostSnapshot == nil && n.remoteSnapshot == nil && n.ssdSnapshot == nil {
 		n.cachedLogits = nil
 	}
 	// The record follows the node across tiers: only drop the incarnation when this
@@ -1193,7 +1231,7 @@ func (n *node) Logits() []float32 {
 	if n == nil {
 		return nil
 	}
-	if n.snapshot != nil || n.hostSnapshot != nil || n.remoteSnapshot != nil {
+	if n.snapshot != nil || n.hostSnapshot != nil || n.remoteSnapshot != nil || n.ssdSnapshot != nil {
 		return append([]float32(nil), n.cachedLogits...)
 	}
 	return append([]float32(nil), n.logits...)

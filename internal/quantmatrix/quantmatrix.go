@@ -3,10 +3,9 @@
 // The registry describes interoperability boundaries; it does not rank
 // quantization methods or imply quality or performance.
 //
-// Invariant: quant matrix lookups are fail-closed and deterministic across all capability queries.
-// Guard: Unknown capability identifiers or unverified artifact versions
-// abstain rather than speculate, while unsupported runtime combinations
-// explicitly refuse execution.
+// Lookups are fail-closed and deterministic: unknown capability identifiers
+// and unverified artifact versions abstain rather than speculate, while
+// unsupported runtime combinations explicitly refuse execution.
 package quantmatrix
 
 import (
@@ -102,9 +101,9 @@ func Entries() []Entry {
 	return out
 }
 
-// Lookup returns the registered capability entry for the given capability identifier.
-// Invariant: quant matrix lookups are fail-closed and deterministic. Unregistered
-// identifiers return an empty Entry and false without fallback speculation.
+// Lookup returns the registered capability entry for the given capability
+// identifier. Unregistered identifiers return an empty Entry and false
+// without fallback speculation.
 func Lookup(id EntryID) (Entry, bool) {
 	for _, capability := range registry {
 		if capability.ID == id {
@@ -125,10 +124,10 @@ type Decision struct {
 	Reason  Code
 }
 
-// Adjudicate evaluates a capability request against registered quantization envelopes.
-// Invariant: quant matrix adjudication is fail-closed and deterministic. Unknown capability
-// identifiers or mismatched artifact versions return OutcomeAbstain, while unsupported
-// combinations return OutcomeRefuse. Adjudicate never guesses a replacement format or runtime.
+// Adjudicate evaluates a capability request against registered quantization
+// envelopes. Unknown capability identifiers or mismatched artifact versions
+// return OutcomeAbstain, while unsupported combinations return OutcomeRefuse;
+// it never guesses a replacement format or runtime.
 func Adjudicate(req Request) Decision {
 	capability, ok := Lookup(req.ID)
 	if !ok {

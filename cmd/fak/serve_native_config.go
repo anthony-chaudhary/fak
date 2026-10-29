@@ -44,7 +44,7 @@ func registerNativeControlFlags(fs *flag.FlagSet) nativeControlFlags {
 		qwen35GDNSequence:     fs.Bool("native-qwen35-metal-gdn-sequence", false, "enable the experimental Qwen3.5 Metal GDN preprojected sequence path"),
 		q4kGateUpSlab:         fs.Bool("native-q4k-gateup-slab", false, "reuse the bounded Q4_K gate/up output slab within each native session"),
 		v41PrefillSumReadback: fs.Bool("native-v41-prefill-sum-readback", false, "enable experimental bounded DeepSeek V4.1 prefill routed-expert sum readback"),
-		kvPrecision:           fs.String("kv-precision", "", "KV cache storage tier: f32 (default, exact) or q8_0 (dense mixed: f32 pre-RoPE K + q8_0 K/V; ~2x more context). Also settable via FAK_UP_KV_PRECISION."),
+		kvPrecision:           fs.String("kv-precision", "", "KV cache storage tier: f32 (default, exact), q8_0 (host: f32 pre-RoPE K + q8_0 K/V; ~2x more context), or fp16/bf16 (--backend cuda: f32 pre-RoPE K + 16-bit K/V). Also settable via FAK_UP_KV_PRECISION."),
 		prefixProfile:         fs.String("native-prefix-profile", "", "write native prefix-cache operation profiles to this JSONL path"),
 		vulkanQ4KProfile:      fs.Bool("vulkan-q4k-profile", false, "enable Vulkan Q4_K timing profiles (requires a Vulkan backend)"),
 		vulkanStageQ4K:        fs.Bool("vulkan-stage-q4k", false, "use Vulkan host-visible Q4_K staging (requires a Vulkan backend)"),
@@ -113,7 +113,7 @@ func serveNativeControlConfig(sf *serveFlags) nativeControlConfig {
 			// decode coalescer `fak up` already wires (#1590), so N concurrent
 			// same-prefix turns share one batched forward instead of serializing on
 			// devMu (fak#13263). This is the structural gate only: the coalescer's
-			// device half (q4k && metal && qwen35-hybrid) still decides at run time,
+			// device half (Q4_K hybrid with Metal or an exact backend batch capability) decides at run time,
 			// and a non-eligible model falls back to the byte-identical serial loop.
 			BatchDecode: true,
 		},
@@ -162,7 +162,7 @@ func validateServeKVPrecision(flagValue string) error {
 		if raw == "" {
 			raw = strings.TrimSpace(os.Getenv("FAK_UP_KV_PRECISION"))
 		}
-		return fmt.Errorf("--kv-precision %q is invalid (want f32 or q8_0)", raw)
+		return fmt.Errorf("--kv-precision %q is invalid (want f32, q8_0, fp16 or bf16)", raw)
 	}
 	return nil
 }

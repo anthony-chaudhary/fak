@@ -50,6 +50,9 @@ var maintainerDevCommands = []string{
 	"agentdemo",
 	"agents",
 	"ailuminate",
+	// Host-only GGUF-vs-RCO-sidecar tensor audit (#14091): fak's own weight
+	// machinery, not a portable adopter pattern.
+	"allocation-check",
 	"answer-shape",
 	"antipattern-scorecard",
 	"api-host",
@@ -301,6 +304,8 @@ var maintainerDevCommands = []string{
 	"route",
 	"routebench",
 	"router",
+	// Bounded reader for a serve's go_runtime receipt: fak's own runtime diagnostics.
+	"runtime-mem",
 	"rungstats",
 	"savings",
 	"savings-vector",
@@ -347,6 +352,11 @@ var maintainerDevCommands = []string{
 	"subagent-fanout-bench",
 	"superloop",
 	"superstream",
+	// The deterministic supervisor seat's dispatch-side wake (#13464 S3): one
+	// dry-run assemble-decide-gate-journal cycle over payload-free typed
+	// witnesses. It operates fak's own fleet/dispatch machinery, so it is
+	// maintainer surface, not a portable adopter pattern.
+	"supervisor-seat",
 	"support",
 	"support-maturity-scorecard",
 	"swebench",

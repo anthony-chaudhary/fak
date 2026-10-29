@@ -63,6 +63,40 @@ func TestNGramSpeculativeRequiresExplicitEligibleVulkanSelection(t *testing.T) {
 	}
 }
 
+// TestNGramSpeculativeAdmitsCUDAWithAllLogitsPath pins the CUDA arm: a CUDA
+// backend that advertises the all-row logits contract admits prompt n-gram
+// speculation exactly like Vulkan; one without the marker stays ordinary.
+//
+// fak-test:runtime fast est=5ms lane=default
+func TestNGramSpeculativeAdmitsCUDAWithAllLogitsPath(t *testing.T) {
+	t.Setenv("FAK_SPECULATIVE", "ngram")
+	t.Setenv("SPECULATIVE", "")
+	cfg := gatewayNGramEligibleConfig()
+	cfg.Backend = ngramGatewayBackend{Backend: compute.Default(), name: "cuda", path: compute.Qwen35SequenceAllLogitsPath}
+	if !shouldEnableNGramSpeculative(cfg) {
+		t.Fatal("eligible CUDA Qwen hybrid route advertising all-row logits was not admitted")
+	}
+	planner := newInKernelChatPlanner(cfg, "qwen38-cuda", t.Logf).(*agent.InKernelPlanner)
+	engine := planner.SpeculativeEngine()
+	if engine == nil || engine.PrimaryGenerator() == nil || engine.PrimaryGenerator().Name() != "ngram" {
+		t.Fatal("eligible CUDA route did not install the n-gram proposal generator")
+	}
+	for name, backend := range map[string]compute.Backend{
+		"cuda without marker": ngramGatewayBackend{Backend: compute.Default(), name: "cuda", path: ""},
+		"cuda stale identity": ngramGatewayBackend{Backend: compute.Default(), name: "cuda", path: "stale-contract"},
+		"metal with marker":   ngramGatewayBackend{Backend: compute.Default(), name: "metal", path: compute.Qwen35SequenceAllLogitsPath},
+		"unknown gpu backend": ngramGatewayBackend{Backend: compute.Default(), name: "rocm", path: compute.Qwen35SequenceAllLogitsPath},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := gatewayNGramEligibleConfig()
+			cfg.Backend = backend
+			if shouldEnableNGramSpeculative(cfg) {
+				t.Fatal("ineligible backend admitted n-gram speculation")
+			}
+		})
+	}
+}
+
 func TestNGramSpeculativeLeavesUnsupportedAndUnselectedRoutesOrdinary(t *testing.T) {
 	base := gatewayNGramEligibleConfig()
 	tests := []struct {
@@ -79,7 +113,7 @@ func TestNGramSpeculativeLeavesUnsupportedAndUnselectedRoutesOrdinary(t *testing
 		{name: "non hybrid model", env: "ngram", edit: func(c *Config) {
 			c.InKernelModel = model.NewSynthetic(model.Config{ModelType: "qwen3_5_text", LayerTypes: []string{"full_attention"}})
 		}},
-		{name: "non Vulkan backend", env: "ngram", edit: func(c *Config) {
+		{name: "non GPU backend", env: "ngram", edit: func(c *Config) {
 			c.Backend = ngramGatewayBackend{Backend: compute.Default(), name: "cpu-ref", path: compute.Qwen35SequenceAllLogitsPath}
 		}},
 		{name: "missing all logits marker", env: "ngram", edit: func(c *Config) { c.Backend = compute.Default() }},

@@ -17,6 +17,9 @@ const (
 	SnapshotTierDeviceL1 SnapshotTier = "device_l1"
 	SnapshotTierHostL2   SnapshotTier = "host_dram_l2"
 	SnapshotTierRemoteL3 SnapshotTier = "remote_http_l3"
+	// SnapshotTierLocalL3 is the durable local-SSD overflow below host DRAM L2: a
+	// complete serialized prefix snapshot that survived an L2 eviction on local disk.
+	SnapshotTierLocalL3 SnapshotTier = "local_ssd_l3"
 )
 
 // NodeState models the lifecycle and computation states of a radix tree node.

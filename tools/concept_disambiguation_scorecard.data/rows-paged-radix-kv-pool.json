@@ -1,0 +1,25 @@
+{
+  "rows": [
+    {
+      "id": "x2-pool-pagedradixkvpool",
+      "canonical": "PagedRadixKVPool (radix prefix tree bound to paged KV blocks)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "radixkv.PagedRadixKVPool (internal/radixkv/paged_binding.go) binds a RadixAttention prefix tree to reference-counted physical page blocks in a ctxmmu.KVPool: a prefix hit binds the cached block chain into a stream's PagedBlockTable (refcount++) instead of cloning KV tensors; NewPagedRadixKVPoolWithTree wraps an existing tree. The in-kernel device planner's paged prefix ledger (internal/agent/inkernel_paged_prefix.go) is its production consumer.",
+      "distinction": "It is the prefix-tree-to-page-block BINDING, NOT the model.PagedKVPool float block allocator nor the ctxmmu.KVPool physical page pool it draws from.",
+      "distinct_from": [
+        "x2-pool-pagedkvpool"
+      ],
+      "aliases": [
+        "newpagedradixkvpool",
+        "newpagedradixkvpoolwithtree"
+      ],
+      "grounding": "pagedradixkvpool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

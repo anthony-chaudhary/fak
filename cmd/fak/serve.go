@@ -206,6 +206,12 @@ type serveFlags struct {
 	nativeV41PrefillSumReadback  *bool
 	nativeV41EngramLookAhead     *bool
 	kvPrecision                  *string
+	fit                          *string
+	workloadPromptTokens         *int
+	workloadOutputTokens         *int
+	workloadConcurrency          *int
+	sloTPOTMS                    *float64
+	sloTTFTMS                    *float64
 	nativePrefixProfile          *string
 	vulkanQ4KProfile             *bool
 	vulkanStageQ4K               *bool
@@ -354,11 +360,17 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.contextBudgetTokens = fs.Int("context-budget-tokens", 0, "seed the default session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
 	fs.IntVar(sf.contextBudgetTokens, "ctx", 0, "alias for --context-budget-tokens: managed-session lifetime prompt/context-token budget")
 	sf.nativeContextTokens = fs.Int("native-context-tokens", 0, "with --gguf: native model context window in prompt plus reserved output tokens (0 = auto-size from model metadata and memory headroom)")
+	sf.fit = fs.String("fit", "off", "with --gguf: joint model-fit planner (T04). off (default) sizes every axis exactly as today; auto runs the pre-load context x KV-dtype x slots search against the stated workload (--workload-*) and SLO (--slo-*), prints the chosen row (or typed refusal) to stderr, applies the choice to every UNPINNED sizing axis, and exits 2 on a typed refusal before the multi-minute load. An explicitly set sizing flag pins its axis: the search never moves it, and an infeasible pin refuses PIN_INFEASIBLE instead of being silently changed. An unprobeable pool fails open (today's sizing).")
+	sf.workloadPromptTokens = fs.Int("workload-prompt-tokens", 0, "with --fit auto: the prompt-token count (ISL) the stated workload prices against (0 = default 2048)")
+	sf.workloadOutputTokens = fs.Int("workload-output-tokens", 0, "with --fit auto: the output-token count (OSL) that bounds the chunked-prefill token budget (0 = default 512)")
+	sf.workloadConcurrency = fs.Int("workload-concurrency", 0, "with --fit auto: the target concurrent-stream count the chosen row must reach (0 = 1)")
+	sf.sloTPOTMS = fs.Float64("slo-tpot-ms", 0, "with --fit auto: per-token latency ceiling in milliseconds the chosen batch must hold (0 = unconstrained)")
+	sf.sloTTFTMS = fs.Float64("slo-ttft-ms", 0, "with --fit auto: time-to-first-token ceiling in milliseconds the chosen context must hold (0 = unconstrained)")
 	sf.nativeCompactHistoryBudget = fs.Int("native-compact-history-budget", 0, "on the NATIVE (in-kernel) wire: compact old conversation turns down to this resident-token budget before tokenization, so a transcript that outgrows the resolved window is SHRUNK and served instead of refused with HTTP 400 context_length_exceeded. 0 = derive from the resolved --native-context-tokens window as (window - 32000 output reserve) * 60%, so a 1M-declared model is neither flattened to the 48k passthrough default nor allowed to treat the raw cap as a target (docs/long-context-defaults.md). Distinct from --compact-history-budget, which is Anthropic-passthrough-only.")
 	sf.resetOnBudget = fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
 	sf.executionPolicy = fs.String(serveExecutionPolicyFlag, serveExecutionPolicyProduction, "production (default) keeps every GFX1151 device-only refusal. bringup admits a recorded host/offload path on a device-memory backend or Strix Halo only when "+ServeBringupDedicatedEnv+" names the served --model (a bring-up-dedicated node); each refusal it lifts is logged on stderr and listed under /healthz execution_policy.bypassed. bringup without that dedication refuses with "+ExecutionPolicyNotDedicated+".")
 	sf.cpuOffloadExperts = fs.Bool("cpu-offload-experts", false, "with --gguf --backend: keep the MoE expert GEMMs on host RAM while dense projections + router + attention run on the device — the `--n-cpu-moe` hybrid that lets a model whose experts dwarf VRAM (e.g. GLM-5.2 Q4 ~424GB experts) serve at all on a smaller VRAM pool. The device load uses the memory-lean Q8 quantize-at-load path when the backend advertises quantized upload; otherwise it falls back to F32 weights until that backend implements UploadDtype.")
-	sf.expertRingBytes = fs.String(serveExpertRingBytesFlag, "", "with --gguf on a device-only serve whose full plan does not fit: size the activated-expert device ring. `token` (the default) keeps one token's activated experts, byte-for-byte the historical ring; `auto` takes the smaller of 0.85 x device heap - dense base - KV - transient and MemAvailable - anon peak - Engram page reserve - max(6 GiB, 5%), clamped to [one layer's experts, the routed band]; a byte count (suffix K/M/G/T allowed) asks for that ring. On a UMA box the plan is judged against MemAvailable as one pool, and a size that does not fit refuses at load. Equivalent to "+FakExpertRingBytesEnv+"; the flag wins.")
+	sf.expertRingBytes = fs.String(serveExpertRingBytesFlag, "", "with --gguf on a device-only serve whose full plan does not fit: size the activated-expert device ring. `token` keeps one token's activated experts, byte-for-byte the historical ring (the OFF arm; unset defaults to auto on a host with >= 64 GiB MemTotal and to token elsewhere); `auto` takes the smaller of 0.85 x device heap - dense base - KV - transient and MemAvailable - anon peak - Engram page reserve - max(6 GiB, 5%), clamped to [one layer's experts, the routed band]; a byte count (suffix K/M/G/T allowed) asks for that ring. On a UMA box the plan is judged against MemAvailable as one pool, and a size that does not fit refuses at load. Equivalent to "+FakExpertRingBytesEnv+"; the flag wins.")
 	sf.nCPUMoE = fs.String(serveNCPUMoEFlag, "", "with --gguf --backend: GRADE the expert spill instead of taking --cpu-offload-experts' all-or-nothing split (#5628, epic #5606). `auto` sizes the number of host-spilled MoE layers against the device budget compute.DeviceMemoryInfo measures, keeping the rest device-resident behind a bounded expert ring; `N` spills exactly N MoE layers; `off` (the default) is the ungraded placement --cpu-offload-experts alone makes, byte-for-byte. Spelled as llama.cpp spells it, so a working --n-cpu-moe number carries over. A grade that is not auto/off/a count >= 0 REFUSES the launch here, before the multi-minute load — a misspelled grade must never fall back to a placement the operator did not choose. Equivalent to "+agent.ExpertSpillEnv+"; passing the flag WINS over that env var, including an explicit `off`.")
 	sf.nativeGPULayers = fs.Int("gpu-layers", 0, "number of contiguous layers [0, N) to place on the GPU (Backend), with the remainder executing on host CPU; alias for --native-gpu-layers")
 	fs.IntVar(sf.nativeGPULayers, "native-gpu-layers", 0, "number of contiguous layers [0, N) to place on the GPU (Backend), with the remainder executing on host CPU (alias for --gpu-layers)")
@@ -566,6 +578,10 @@ func cmdServe(argv []string) {
 		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
 		os.Exit(2)
 	}
+	if err := validateServeFitFlags(*sf.fit, *sf.workloadPromptTokens, *sf.workloadOutputTokens, *sf.workloadConcurrency, *sf.sloTPOTMS, *sf.sloTTFTMS); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
 	policy, err := serveNativeAdmissionPolicy(sf)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
@@ -625,6 +641,13 @@ func cmdServe(argv []string) {
 	if *sf.sizingJSON {
 		runServeSizingJSON(sf)
 		return
+	}
+
+	// --fit auto (T04): run the joint model-fit search pre-load and apply the chosen
+	// row to the unpinned sizing axes. A typed refusal exits 2 here, before the
+	// multi-minute load; an unprobeable pool fails open on today's sizing.
+	if *sf.fit == "auto" {
+		runServeFitAutoLive(sf)
 	}
 
 	// --opencode-config: emit opencode.json provider configuration and exit before load.

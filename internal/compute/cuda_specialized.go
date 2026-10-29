@@ -229,6 +229,10 @@ func (c *cudaBackend) failQwen35GDN(buffers []*cudaBuf, convState, recurrentStat
 	atomic.StoreUint32(&recurrentState.buf.(*cudaBuf).invalid, 1)
 	c.releaseTransientBuffers(buffers)
 	kernelErr := &Qwen35GDNKernelError{Stage: qwen35GDNKernelStage(status), Code: status}
+	if status > cudaScratchRetireFailedBase && status < cudaScratchRetireFailedBase+1000 {
+		kernelErr.Stage = "scratch-retirement"
+		kernelErr.Code = status - cudaScratchRetireFailedBase
+	}
 	c.faultLatch.ObserveError(kernelErr, site)
 	return kernelErr
 }

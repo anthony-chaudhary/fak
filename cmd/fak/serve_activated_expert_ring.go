@@ -180,6 +180,9 @@ func serveActivatedExpertRingPathPlacement(ggufPath string, be compute.Backend, 
 		return serveActivatedExpertRing{}, false, fullErr
 	}
 	defer ws.Close()
+	if size.HostDefault {
+		size = size.forHostTotal(serveExpertRingHostTotal(be, compute.HostSystemMemoryInfo))
+	}
 	var host serveExpertRingHost
 	if size.Mode != serveExpertRingToken && size.Mode != "" {
 		host = serveExpertRingHostProbe(ggufPath, be, baseOpts, compute.HostSystemMemoryInfo)
@@ -192,10 +195,7 @@ func serveActivatedExpertRingPathPlacement(ggufPath string, be compute.Backend, 
 // draws on that same pool (integrated tier with a carve-out <= 4 GiB or an unreadable one).
 func serveExpertRingHostProbe(ggufPath string, be compute.Backend, baseOpts []ggufload.Q4KLoadOption, hostMemoryInfo func() (int64, int64, bool)) serveExpertRingHost {
 	var h serveExpertRingHost
-	h.Total, h.Avail, h.Known = compute.HostMemoryInfo(be)
-	if !h.Known {
-		h.Total, h.Avail, h.Known = hostMemoryInfo()
-	}
+	h.Total, h.Avail, h.Known = serveExpertRingHostMemory(be, hostMemoryInfo)
 	h.Carveout, h.CarveoutKnown = compute.DedicatedVRAMCarveoutInfo(be)
 	h.SharedPool = serveExpertRingSharedPool(ggufload.BackendSharesHostRAM(be), h.Carveout, h.CarveoutKnown)
 	opts := append(append([]ggufload.Q4KLoadOption(nil), baseOpts...), ggufload.WithStreamedExperts(0), ggufload.WithStreamedExpertDeviceRing(1), ggufload.WithStreamedDenseQ4KWorkingSet(0))
@@ -203,6 +203,22 @@ func serveExpertRingHostProbe(ggufPath string, be compute.Backend, baseOpts []gg
 		h.RSSAnonPeak = peak.PeakAnonBytes
 	}
 	return h
+}
+
+// serveExpertRingHostMemory reads host MemTotal/MemAvailable, preferring the backend's view.
+func serveExpertRingHostMemory(be compute.Backend, hostMemoryInfo func() (int64, int64, bool)) (total, avail int64, known bool) {
+	total, avail, known = compute.HostMemoryInfo(be)
+	if !known && hostMemoryInfo != nil {
+		total, avail, known = hostMemoryInfo()
+	}
+	return total, avail, known
+}
+
+// serveExpertRingHostTotal is the cheap MemTotal read that picks a host-defaulted ring size
+// before the full host probe (which opens the checkpoint) runs.
+func serveExpertRingHostTotal(be compute.Backend, hostMemoryInfo func() (int64, int64, bool)) (int64, bool) {
+	total, _, known := serveExpertRingHostMemory(be, hostMemoryInfo)
+	return total, known
 }
 
 // serveActivatedExpertRingLoadOptions streams every routed expert through the checkpoint tier with

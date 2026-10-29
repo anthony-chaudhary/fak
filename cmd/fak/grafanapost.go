@@ -21,6 +21,7 @@ import (
 //	fak grafana post --rollup public-demo                           # only long-lived demo links
 //	fak grafana post --link fak-gateway-observability               # one dashboard link
 //	fak grafana contract [--dashboard <path>]                       # verify dashboard contracts
+//	fak grafana coverage --root DIR --json  # verify all four native-perf dashboards against their contracts.
 //
 // A plain snapshot post is a POST of a URL the operator already exported from Grafana.
 // With --create it instead PULLS one: it calls the live Grafana snapshots API
@@ -29,9 +30,10 @@ import (
 // FAK_GRAFANA_* workspace (Slack token falls back to the scoreboard token; channel falls
 // back to the public built-in default) and honor --dry-run.
 func cmdGrafana(argv []string) {
-	dispatchSubcommands("grafana", "post | contract", argv,
+	dispatchSubcommands("grafana", "post | contract | coverage", argv,
 		subcommand{"post", runGrafanaPost},
 		subcommand{"contract", runGrafanaContract},
+		subcommand{"coverage", runGrafanaCoverage},
 	)
 }
 

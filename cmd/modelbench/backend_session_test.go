@@ -1347,3 +1347,30 @@ func TestModelbenchReportFormattingAndMarshalFailure(t *testing.T) {
 		t.Fatalf("marshal failure diagnostic missing: %s", diagnostic)
 	}
 }
+
+// benchCUDANamedBackend reports the cuda backend name so preflightInputFor selects the backed
+// CUDA Q4_K regime without a device.
+type benchCUDANamedBackend struct{ compute.Backend }
+
+func (benchCUDANamedBackend) Name() string { return "cuda" }
+
+// TestModelbenchCUDAQ4KPreflightChargesResidentQ4K: -backend cuda -q4k loads with
+// WithDenseKQuantResident(false), so the fit gate must charge that loader's resident device
+// bytes, not the dequantized f32 total that refused Qwen3.8-27B Q4_K_M on a 24 GB card.
+func TestModelbenchCUDAQ4KPreflightChargesResidentQ4K(t *testing.T) {
+	f := testCompleteBenchFlags()
+	*f.gguf, *f.q4k, *f.backendName = benchMixedQuantGGUF(t), true, "cuda"
+	in := preflightInputFor(f, benchCUDANamedBackend{compute.Default()})
+	if in.Source == nil {
+		t.Fatalf("open fixture: %v", in.OpenErr)
+	}
+	defer in.Source.Close()
+	want, err := in.Source.EstimateQ4KLoadMemoryPlan(ggufload.WithDenseKQuantResident(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pf := ggufload.BuildModelPreflight(in)
+	if pf.Refused() || pf.EstDeviceResidentBytes != want.DeviceTotal() {
+		t.Fatalf("cuda -q4k preflight device bytes = %d (verdict %s), want resident Q4_K %d", pf.EstDeviceResidentBytes, pf.Verdict, want.DeviceTotal())
+	}
+}

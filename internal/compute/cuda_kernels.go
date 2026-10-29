@@ -460,3 +460,12 @@ func (c *cudaBackend) qwen35SequenceSyncLocked() error {
 	atomic.AddUint64(&c.fenceGen, 1)
 	return nil
 }
+
+// DeviceContextProbe fences g_stream: a sticky execution or context fault fails the
+// synchronize, while a context that only missed capacity completes it. It is the validate
+// step that lets an allocation-only suspect latch reopen (DeviceFaultLatch.ClearAllocationSuspect).
+func (c *cudaBackend) DeviceContextProbe() error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return c.qwen35SequenceSyncLocked()
+}

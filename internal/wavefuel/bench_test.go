@@ -25,12 +25,12 @@ func TestWaveFuelAccounting(t *testing.T) {
 		t.Fatalf("expected 1900000 remaining, got %d", rem)
 	}
 
-	// Fail-closed on exceeding budget
+	// Over-budget debit must be refused (fail-closed).
 	if err := acct.Debit(2_000_000, now); err != ErrExhausted {
 		t.Fatalf("expected ErrExhausted, got %v", err)
 	}
 
-	// Fail-closed on past deadline
+	// Post-deadline debit must be refused (fail-closed).
 	expired := deadline.Add(time.Second)
 	if err := acct.Debit(1_000, expired); err != ErrDeadlineExceeded {
 		t.Fatalf("expected ErrDeadlineExceeded, got %v", err)

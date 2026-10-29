@@ -28,6 +28,11 @@ package compute
 #include <cuda.h>
 #include "cuda_backend.h"
 #include "cuda_kv_precision.h"
+#include <stdint.h>
+// Always-on device-work counters (cuda/kernel_profile.cuh; fold in cuda_device_work.go).
+extern void fcuda_dw_counters(uint64_t *out, int n);
+extern int fcuda_dw_site_rows(uint32_t *site, uint32_t *stage, uint64_t *syncs, uint64_t *wait_ns, uint64_t *d2h, int cap);
+extern const char *fcuda_dw_stage_name(uint32_t id);
 */
 import "C"
 
@@ -120,7 +125,9 @@ func init() {
 		}, CUDABuildArches{}),
 	}
 	Register(cudaDev)
+	RegisterDeviceWorkReader("cuda", readCUDADeviceWork)
 	initCUDAQ4KPrefillArm(int(sm))
+	initCUDAQ4KDecodeArm()
 	if C.fcuda_ts_enabled() != 0 {
 		installCUDAKernelProfile()
 	}
@@ -175,6 +182,38 @@ func readCUDAKernelProfile() (KernelProfile, bool) {
 		UntimedCompute: uint64(tot.untimed_compute), UntimedTransfer: uint64(tot.untimed_transfer),
 		BarriersElided: uint64(tot.barriers_elided), GPUNS: float64(tot.gpu_ns), WallNS: float64(tot.wall_ns),
 	}, n, rows, func(kid uint32) string { return C.GoString(C.fcuda_ts_kernel_name(C.uint32_t(kid))) })
+}
+
+// readCUDADeviceWork reads the shim's always-on atomics without cudaMu, so a scrape or
+// decode-loop sample never waits behind an in-flight launch or sync. The cell table can grow
+// between the size and fill calls; the loop retries with room to spare.
+func readCUDADeviceWork() DeviceWork {
+	var counters [cudaDWCounterCount]C.uint64_t
+	C.fcuda_dw_counters(&counters[0], C.int(len(counters)))
+	var raw [cudaDWCounterCount]uint64
+	for i, v := range counters {
+		raw[i] = uint64(v)
+	}
+	n := int(C.fcuda_dw_site_rows(nil, nil, nil, nil, nil, 0))
+	for {
+		capRows := n + 8
+		ids := make([]C.uint32_t, 2*capRows)
+		vals := make([]C.uint64_t, 3*capRows)
+		n = int(C.fcuda_dw_site_rows(&ids[0], &ids[capRows], &vals[0], &vals[capRows], &vals[2*capRows], C.int(capRows)))
+		if n > capRows {
+			continue
+		}
+		cells := make([]cudaSyncCell, n)
+		for i := range cells {
+			cells[i] = cudaSyncCell{
+				Site: uint32(ids[i]), Stage: uint32(ids[capRows+i]),
+				Syncs: uint64(vals[i]), WaitNS: uint64(vals[capRows+i]), D2HBytes: uint64(vals[2*capRows+i]),
+			}
+		}
+		return cudaDeviceWorkFromShim(raw, n, cells, func(id uint32) string {
+			return C.GoString(C.fcuda_dw_stage_name(C.uint32_t(id)))
+		})
+	}
 }
 
 // Recycle returns every transient op-output buffer allocated since the last Recycle to the
@@ -501,7 +540,7 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 		}
 		return c.uploadNVFP4(t, hb)
 	}
-	if t.Dtype == Q4_K || t.Dtype == Q5_K || t.Dtype == Q6_K || t.Dtype == Q2_K {
+	if t.Dtype == Q4_K || t.Dtype == Q5_K || t.Dtype == Q6_K || t.Dtype == Q2_K || t.Dtype == IQ2_XXS || t.Dtype == IQ2_XS {
 		if as != t.Dtype {
 			panic(&CUDAOpError{
 				Op:    "Upload",
@@ -529,7 +568,7 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 		panic(&CUDAOpError{
 			Op:    "Upload",
 			Site:  site,
-			Msg:   "cuda Upload supports F32 host data (optionally narrowing to F16/Q8_0), prequantized Q8_0 codes, or raw Q4_K/Q5_K/Q6_K/Q2_K bytes today (got " + t.Dtype.String() + ")",
+			Msg:   "cuda Upload supports F32 host data (optionally narrowing to F16/Q8_0), prequantized Q8_0 codes, or raw Q4_K/Q5_K/Q6_K/Q2_K/IQ2_XXS/IQ2_XS bytes today (got " + t.Dtype.String() + ")",
 			Class: class,
 		})
 	}
@@ -718,6 +757,7 @@ func (c *cudaBackend) Free(t Tensor) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	if db, ok := t.buf.(*cudaBuf); ok && db.ptr != nil {
+		awaitAsyncUploadLocked(db.ptr) // never pool a buffer the copy stream still writes
 		if db.host != 0 {
 			// evict the exact (ptr, dtype, layout) entry so a re-upload of the same host buffer re-stages
 			delete(uploadCache, ucKey{db.host, db.hostDt, db.hostLo})
@@ -1032,7 +1072,7 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 		// GEMM tile straight off the resident super-block bytes; the weight stays int4 in VRAM.
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{out}, F32)
-		cudaGEMMStatus("MatMul", int(C.fcuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)), cudaGEMMScratch{})
+		cudaGEMMStatus("MatMul", int(C.fcuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)), cudaQ4KScratch(out, in, 1))
 	case Q5_K:
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{out}, F32)
@@ -1047,6 +1087,12 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{out}, F32)
 		cudaGEMMStatus("MatMul", int(C.fcuda_q2k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)), cudaGEMMScratch{})
+	case IQ2_XXS, IQ2_XS:
+		// native IQ2_XXS / IQ2_XS GEMV (oss-index TICKET-01): grid-codebook decode fused into a
+		// warp-per-row GEMV off the resident verbatim super-block bytes (2.06 / 2.31 bpw in VRAM).
+		wb := c.cudaBufForSubmit(w)
+		y, _ = c.devTr([]int{out}, F32)
+		cudaIQ2GEMV(w.Dtype, wb, c.cf(x), c.cf(y), out, in, 1)
 	case Q2_0:
 		// native packed-ternary Q2_0 GEMV (#4872): 2-bit codes + per-block f32 scales resident, the
 		// signed indicator unpacked and multiply-accumulated against the f32 activation on device
@@ -1064,7 +1110,7 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 		panic(&CUDAOpError{
 			Op:    "MatMul",
 			Site:  "matmul-weight-dtype",
-			Msg:   "cuda MatMul supports F32/F16/Q8_0/Q4_K/Q5_K/Q6_K/Q2_0/Q2_K/NVFP4 weights today (got " + w.Dtype.String() + "); other quantized device GEMM is a tracked follow-up",
+			Msg:   "cuda MatMul supports F32/F16/Q8_0/Q4_K/Q5_K/Q6_K/Q2_0/Q2_K/IQ2_XXS/IQ2_XS/NVFP4 weights today (got " + w.Dtype.String() + "); other quantized device GEMM is a tracked follow-up",
 			Class: MemoryActivation,
 		})
 	}
@@ -1130,6 +1176,10 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
 		cudaGEMMStatus("BatchedMatMul", int(C.fcuda_q2k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))), cudaKQuantScratch(out, in, P))
+	case IQ2_XXS, IQ2_XS:
+		wb := c.cudaBufForSubmit(w)
+		y, _ = c.devTr([]int{P, out}, F32)
+		cudaIQ2GEMV(w.Dtype, wb, c.cf(X), c.cf(y), out, in, P)
 	case Q2_0:
 		// native packed-ternary Q2_0 prefill GEMM (#4872): each of the P f32 activation rows dotted
 		// against the resident 2-bit ternary weight (unpacked signed indicator, one block scale folded
@@ -1147,7 +1197,7 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		panic(&CUDAOpError{
 			Op:    "BatchedMatMul",
 			Site:  "batched-matmul-weight-dtype",
-			Msg:   "cuda BatchedMatMul supports F32/F16/Q8_0/Q4_K/Q5_K/Q6_K/Q2_0/Q2_K/NVFP4 weights today (got " + w.Dtype.String() + ")",
+			Msg:   "cuda BatchedMatMul supports F32/F16/Q8_0/Q4_K/Q5_K/Q6_K/Q2_0/Q2_K/IQ2_XXS/IQ2_XS/NVFP4 weights today (got " + w.Dtype.String() + ")",
 			Class: MemoryActivation,
 		})
 	}

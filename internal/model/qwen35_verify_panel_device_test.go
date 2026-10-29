@@ -453,6 +453,7 @@ func TestVerifyGreedyDeviceDraftNormalizesHALMetadataToCommittedPrefix(t *testin
 	})
 }
 
+// fak-test:runtime fast est=100ms lane=default
 func TestQwen35DeviceTargetTransactionAcceptRollbackAndFailureAtomicity(t *testing.T) {
 	m := NewSynthetic(qwen35HybridTestCfg())
 	prefix := []int{3, 7, 11, 5, 17, 19}
@@ -551,11 +552,22 @@ func TestQwen35DeviceTargetTransactionAcceptRollbackAndFailureAtomicity(t *testi
 		if _, err := tx.Verify(draft); err != nil {
 			t.Fatal(err)
 		}
+		replaySteps := 0
+		tx.step = func(token int) []float32 {
+			replaySteps++
+			return target.stepOwned(token)
+		}
 		backend.failCloneAt = backend.cloneCalls + 1
 		if _, err := tx.Commit(2); err == nil || !strings.Contains(err.Error(), "injected tensor clone failure") {
 			t.Fatalf("commit error=%v, want injected preservation clone failure", err)
 		}
 		backend.failCloneAt = 0
+		if replaySteps != 0 || target.halClosed || target.halFailure != nil {
+			t.Fatalf("clone preparation entered replay or closed session: steps=%d closed=%t failure=%v", replaySteps, target.halClosed, target.halFailure)
+		}
+		if !tx.closed || tx.snapshot != nil || tx.closeCount != 1 {
+			t.Fatalf("failed commit retained transaction ownership: closed=%t snapshot=%p closes=%d", tx.closed, tx.snapshot, tx.closeCount)
+		}
 		if target.halStep != beforeStep || target.halLogitsWarm != beforeWarm {
 			t.Fatalf("clone failure metadata step/warm=%d/%t, want %d/%t", target.halStep, target.halLogitsWarm, beforeStep, beforeWarm)
 		}
@@ -564,6 +576,15 @@ func TestQwen35DeviceTargetTransactionAcceptRollbackAndFailureAtomicity(t *testi
 			t.Fatal(err)
 		}
 		defer after.Close()
+		assertPrefixSnapshotsEqual(t, after, before)
+		serial := m.NewSession()
+		defer serial.Close()
+		committed := append(append([]int(nil), prefix...), warmToken)
+		serial.Prefill(prefix)
+		serial.Step(warmToken)
+		next := argmaxF32(boundary)
+		assertFloat32BitsEqual(t, "continuation after clone failure", target.Step(next), serial.Step(next))
+		assertDeviceStateMatchesSerial(t, target, serial, append(committed, next))
 		assertPrefixSnapshotsEqual(t, after, before)
 	})
 }

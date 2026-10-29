@@ -837,12 +837,17 @@ func loadResidentQ4KDevice(ggufPath string, tLoad time.Time, memPlan compute.Mem
 // so the driver can fingerprint repeated layouts.
 func loadResidentQ4KDeviceErr(ggufPath string, tLoad time.Time, memPlan compute.MemoryPlan, backend compute.Backend, messages []gateway.StartupMessage, opts ...ggufload.Q4KLoadOption) (*fakmodel.Model, bool, *gateway.ModelLoadProfile, gateway.StartupPhase, compute.MemoryPlan, error) {
 	mapped := serveDeviceMappedQ4KResidency(backend, opts)
-	admission, err := serveNativeHostLoadPeakAdmission(ggufPath, mapped, opts, os.Getenv)
+	admission, peak, peakOK, err := serveNativeHostLoadPeakAdmissionPeak(ggufPath, mapped, opts, os.Getenv)
 	if err != nil {
 		return nil, false, nil, gateway.StartupPhase{}, memPlan, err
 	}
 	fmt.Fprintln(os.Stderr, "fak serve: host-peak admission:", admission.Text)
 	messages = append(messages, admission)
+	if peakOK {
+		limitMsg := applyServeGoMemoryLimit(planServeGoMemoryLimit(peak, true, 0, false, os.Getenv))
+		fmt.Fprintln(os.Stderr, "fak serve: go memory limit:", limitMsg.Text)
+		messages = append(messages, limitMsg)
+	}
 	mm, prof, loadNanos, err := loadResidentQ4KProfiledForErr(mapped, ggufPath, tLoad, opts...)
 	if err != nil {
 		return nil, false, nil, gateway.StartupPhase{}, memPlan, err

@@ -2,11 +2,13 @@ package agent
 
 import (
 	"context"
+	"reflect"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/enginestep"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -147,8 +149,22 @@ type inKernelCoalesceRequest struct {
 
 type inKernelCoalesceContextKey struct{}
 
+// coalescesQwenDecode admits the Metal host route or a backend with the exact
+// independent Qwen batch contract. Device serialization alone does not qualify
+// a backend for cohort execution: unsupported backends retain the ordinary
+// whole-turn devMu route, including startup coherence probes (fak#14118).
 func (p *InKernelPlanner) coalescesQwenDecode() bool {
-	return p != nil && p.batchDecode && p.q4k && p.metal && p.m != nil && p.m.Cfg.IsQwen35Hybrid()
+	if p == nil || !p.batchDecode || !p.q4k || p.m == nil || !p.m.Cfg.IsQwen35Hybrid() {
+		return false
+	}
+	if p.backend == nil {
+		return p.metal
+	}
+	batch, ok := p.backend.(compute.Qwen35IndependentDecodeBatchBackend)
+	if !ok || (reflect.ValueOf(batch).Kind() == reflect.Pointer && reflect.ValueOf(batch).IsNil()) {
+		return false
+	}
+	return batch.Qwen35IndependentDecodeBatchPath() == compute.Qwen35IndependentDecodeBatchPath
 }
 
 func (p *InKernelPlanner) runCoalescedGenerate(ctx context.Context, run func(context.Context) (inKernelGenerateResult, error)) (inKernelGenerateResult, error) {

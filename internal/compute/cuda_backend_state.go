@@ -258,6 +258,22 @@ func (c *cudaBackend) Class() CorrectnessClass          { return Approx } // dev
 // admissions with their refusal reasons). It satisfies CUDADeviceReceiptProvider so
 // consumers read it through CUDADeviceReceiptOf.
 func (c *cudaBackend) CUDADeviceReceipt() CUDADeviceReceipt { return c.receipt }
+
+// DeviceLocalCeiling reports the immutable device-local VRAM total (totalGlobalMem captured
+// once at init, cuda.go:111) - the STABLE ceiling a device-destined weight-residency plan
+// lands in, as distinct from the volatile cudaMemGetInfo free reading DeviceMemory reports.
+// It implements DeviceCeiling so serve fit checks size a device-destined plan against the
+// capacity it is destined for instead of a fluctuating live-free reading (the fak#13186-class
+// admit-at-one-reading / OOM-at-another flake; raider-kv-sizing-20261029). known=false on a
+// nil/zero-total backend keeps the fail-open contract; no lock is needed because totalMem is
+// immutable after init.
+func (c *cudaBackend) DeviceLocalCeiling() (ceiling int64, known bool) {
+	if c == nil || c.totalMem <= 0 {
+		return 0, false
+	}
+	return c.totalMem, true
+}
+
 func (c *cudaBackend) Caps() Caps {
 	// Async (#482): ops enqueue on g_stream and return unready Buffers; the SOLE host fences
 	// are Read and Argmax. DeviceMemory: resident tensors (incl. the KV cache) are not host-

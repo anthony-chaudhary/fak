@@ -1426,7 +1426,7 @@ func (s *Session) v41BindDenseProjection() v41BoundDenseProjection {
 						}
 						if guarded && dtype == compute.Q4_K {
 							q := s.M.q4kw[name]
-							if q4kHostCopyReleasable(s, q, weight.Ready()) {
+							if q4kHostCopyReleasable(s, name, q, weight.Ready()) {
 								q.raw = nil
 							}
 						}

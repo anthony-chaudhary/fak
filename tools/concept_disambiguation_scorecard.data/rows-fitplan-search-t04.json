@@ -1,0 +1,175 @@
+{
+  "rows": [
+    {
+      "id": "fitplan-search-omit-context-unknown",
+      "canonical": "OmitContextUnknown",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The typed omission fitplan reports (value context_unknown) when the model header carries no context_length, so neither Plan nor the T04 joint search can bound the requested context from facts.",
+      "distinction": "An input-gap marker, not a refusal: the pool may still fit and the serve boot proceeds fail-open on today's sizing; unlike ReasonContextExceedsPool nothing was priced and found too big.",
+      "distinct_from": [
+        "fitplan-pool-capacity-unknown",
+        "serve-native-context-resolution-record"
+      ],
+      "aliases": [],
+      "grounding": "OmitContextUnknown",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "fitplan-search-omit-host-pool-capacity-unknown",
+      "canonical": "OmitHostPoolCapacityUnknown",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The typed omission fitplan reports (value host_pool_capacity_unknown) when a discrete topology's host DRAM pool size cannot be probed, so host-scoped weight and ring rows are priced without a host-side cap.",
+      "distinction": "A probe-gap marker on the HOST pool of a discrete topology only; OmitPoolCapacityUnknown covers the device pool, and neither is a refusal - the plan continues on whatever capacity was readable.",
+      "distinct_from": [
+        "fitplan-search-omit-pool-capacity-unknown",
+        "fitplan-host-pool-usable-bytes"
+      ],
+      "aliases": [],
+      "grounding": "OmitHostPoolCapacityUnknown",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "fitplan-search-omit-pool-capacity-unknown",
+      "canonical": "OmitPoolCapacityUnknown",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The typed omission fitplan reports (value pool_capacity_unknown) when the usable pool budget for the selected arm cannot be determined, so candidate rows are priced with an unknown pool term.",
+      "distinction": "A probe-gap marker on the DEVICE pool budget; OmitHostPoolCapacityUnknown names the same gap on a discrete topology's host pool, and neither refuses - pricing proceeds with the missing term flagged.",
+      "distinct_from": [
+        "fitplan-search-omit-host-pool-capacity-unknown",
+        "fitplan-pool-usable-bytes"
+      ],
+      "aliases": [],
+      "grounding": "OmitPoolCapacityUnknown",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "fitplan-search-reason-weights-exceed-pool",
+      "canonical": "ReasonWeightsExceedPool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The typed refusal reason fitplan returns (value weights_exceed_pool) when the selected arm's weights alone exceed the usable pool before any KV or slot term is added, so no candidate row can fit.",
+      "distinction": "A weights-only infeasibility verdict: it stops a live --fit auto boot with exit 2 and names the shortfall bytes, whereas context/concurrency refusals mean the weights fit but the requested context or slots do not.",
+      "distinct_from": [
+        "fitplan-planner",
+        "fitplan-pool-usable-bytes"
+      ],
+      "aliases": [],
+      "grounding": "ReasonWeightsExceedPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "fitplan-search-refusal-host-pool-flag",
+      "canonical": "HostPool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The Refusal.HostPool bool flag (JSON host_pool) marking that a weights_exceed_pool refusal is short on a discrete topology's host DRAM pool rather than the device pool.",
+      "distinction": "A side-of-the-topology marker on one refusal, not a pool descriptor: PoolUsableBytes and HostPoolUsableBytes carry the actual budgets, while this flag only says which pool the shortfall belongs to.",
+      "distinct_from": [
+        "fitplan-pool-usable-bytes",
+        "fitplan-host-pool-usable-bytes"
+      ],
+      "aliases": [],
+      "grounding": "HostPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "fitplan-search-new-planner",
+      "canonical": "newPlanner",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The unexported constructor that binds a fitplan Input (hardware, weights, demand, calibration) to the internal planner struct shared by Plan's single-arm pricing and the T04 joint context x KV-dtype x slots search.",
+      "distinction": "Builds the pricer; it does no ranking itself: Plan prices one preselected demand list while Search drives the same planner over a candidate grid and applies operator pins.",
+      "distinct_from": [
+        "fitplan-planner",
+        "fitplan-build-candidates"
+      ],
+      "aliases": [],
+      "grounding": "newPlanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "serve-fit-plan-arch",
+      "canonical": "serveFitPlanArch",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The cmd/fak glue that extracts the GGUF architecture string into the fitplan report so the --plan-json sizing artifact records which architecture the sizing ran under.",
+      "distinction": "A report-label extractor, not a planner: it reads the loaded header for provenance display and feeds no sizing decision back into internal/fitplan.",
+      "distinct_from": [
+        "fitplan-planner",
+        "serve-native-context-resolution-record"
+      ],
+      "aliases": [],
+      "grounding": "serveFitPlanArch",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "serve-fit-plan-hardware",
+      "canonical": "serveFitPlanHardware",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The cmd/fak glue that snapshots the host hardware facts (backend, sizing-fit and host-fit budgets) into the fitplan Hardware block of the serve sizing artifact.",
+      "distinction": "Collects hardware evidence for the report only: the snapshot never mutates the pool budget, and all pricing happens inside internal/fitplan against that snapshot.",
+      "distinct_from": [
+        "fitplan-planner",
+        "fitplan-host-pool-usable-bytes"
+      ],
+      "aliases": [],
+      "grounding": "serveFitPlanHardware",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "serve-native-context-load-arm",
+      "canonical": "resolveServeNativeContextLoadArm",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The serve resolver that picks which load arm (Q4K checkpoint vs full-precision) the native context budget sizes against, honoring the FAK_Q4K operator pin and the backend's offload posture.",
+      "distinction": "Chooses the ARM being sized, not the budget itself: resolveServeNativeContextBudget computes the token count for an already-chosen arm, while this decides which arm the operator pinned.",
+      "distinct_from": [
+        "serve-native-context-resolution-record",
+        "fitplan-planner"
+      ],
+      "aliases": [],
+      "grounding": "resolveServeNativeContextLoadArm",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

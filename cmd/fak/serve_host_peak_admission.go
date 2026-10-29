@@ -39,13 +39,23 @@ func (e *serveHostLoadPeakUnavailableError) Error() string {
 // The device fit checks cover device memory. This gate independently checks
 // the loader's predicted anonymous host peak before tensor payloads are read.
 func serveNativeHostLoadPeakAdmission(ggufPath string, mapped bool, opts []ggufload.Q4KLoadOption, getenv func(string) string) (gateway.StartupMessage, error) {
+	msg, _, _, err := serveNativeHostLoadPeakAdmissionPeak(ggufPath, mapped, opts, getenv)
+	return msg, err
+}
+
+// serveNativeHostLoadPeakAdmissionPeak also returns the admitted resident-route peak; peakOK is
+// false when admission is disabled, the estimate is missing, or the route is streamed (which
+// installs its own predicted-peak memory limit).
+func serveNativeHostLoadPeakAdmissionPeak(ggufPath string, mapped bool, opts []ggufload.Q4KLoadOption, getenv func(string) string) (gateway.StartupMessage, ggufload.HostLoadPeak, bool, error) {
 	if serveHostPeakAdmissionDisabled(getenv) {
 		return serveStartupMessage("host-peak-admission", "warning", fmt.Sprintf(
-			"native host-peak admission disabled by %s; the load is not checked against host RAM", ggufload.HostLoadPeakOverrideEnv)), nil
+			"native host-peak admission disabled by %s; the load is not checked against host RAM", ggufload.HostLoadPeakOverrideEnv)), ggufload.HostLoadPeak{}, false, nil
 	}
 	peak, estErr := estimateServeNativeHostLoadPeak(ggufPath, mapped, opts)
 	total, free, known := compute.HostSystemMemoryInfo()
-	return serveNativeHostLoadPeakDecision(peak, estErr, free, known && total > 0, getenv, opts...)
+	msg, err := serveNativeHostLoadPeakDecision(peak, estErr, free, known && total > 0, getenv, opts...)
+	peakOK := err == nil && estErr == nil && peak.PeakAnonBytes > 0 && !ggufload.ApplyQ4KLoadOptions(opts).StreamedExperts
+	return msg, peak, peakOK, err
 }
 
 // The mapped reader can fall back to owned storage when mapping is unavailable.

@@ -1,3 +1,4 @@
+#include "alloc_status.h"
 extern "C" int fcuda_init(char *name, int namelen, int *sm, size_t *total_mem) {
   int n = 0;
   if (cudaGetDeviceCount(&n) != cudaSuccess || n == 0) return 1;
@@ -21,7 +22,7 @@ extern "C" int fcuda_init(char *name, int namelen, int *sm, size_t *total_mem) {
   // 32 MiB is NVIDIA's recommended size for Hopper and is safe (a superset) on Ampere/Ada too.
   if (!g_blas_workspace) {
     const size_t ws = (size_t)32 * 1024 * 1024;
-    if (cudaMalloc(&g_blas_workspace, ws) == cudaSuccess)
+    if (fcuda_alloc_status(cudaMalloc(&g_blas_workspace, ws)) == cudaSuccess)
       cublasSetWorkspace(g_blas, g_blas_workspace, ws);
   }
   return 0;
@@ -73,7 +74,7 @@ extern "C" void *fcuda_malloc(size_t bytes) {
       fprintf(stderr, "fak-cuda: BUG #969: fcuda_malloc(%zu) on a pool miss while a CUDA graph capture is OPEN — pre-warm this scratch before BeginCapture\n", bytes);
       return nullptr;
     }
-    cudaError_t _e = cudaMalloc(&d, bytes);
+    cudaError_t _e = fcuda_alloc_status(cudaMalloc(&d, bytes));
     if (_e != cudaSuccess) {
       // Report the TRUE reason instead of letting CK swallow it and the Go caller panic with no
       // cause: an out-of-memory says "out of memory", a context poisoned by a prior asynchronous
@@ -89,7 +90,7 @@ extern "C" void *fcuda_malloc(size_t bytes) {
 extern "C" void *fcuda_malloc_managed(size_t bytes) {
   if (bytes == 0) bytes = 1;
   void *d = nullptr;
-  cudaError_t _e = cudaMallocManaged(&d, bytes, cudaMemAttachGlobal);
+  cudaError_t _e = fcuda_alloc_status(cudaMallocManaged(&d, bytes, cudaMemAttachGlobal));
   if (_e != cudaSuccess) {
     fprintf(stderr, "fak-cuda: cudaMallocManaged(%zu bytes) failed: %s\n", bytes, cudaGetErrorString(_e));
     return nullptr;
@@ -192,7 +193,7 @@ extern "C" void *fcuda_malloc_panel(size_t bytes) {
     it->second.pop_back();
     g_panel_cached_bytes -= bytes;
   } else {
-    cudaError_t e = cudaMalloc(&d, bytes);
+    cudaError_t e = fcuda_alloc_status(cudaMalloc(&d, bytes));
     if (e != cudaSuccess || !d) {
       fprintf(stderr, "fak-cuda: prompt panel cudaMalloc(%zu bytes) failed: %s\n", bytes, cudaGetErrorString(e));
       return nullptr;
@@ -260,7 +261,10 @@ extern "C" void fcuda_graph_prewarm(int extra) {
     auto &bucket = g_pool[bytes];
     while ((int)bucket.size() < extra) {
       void *d = nullptr;
-      if (cudaMalloc(&d, bytes) != cudaSuccess || !d) break; // best-effort; a real OOM still fails loud later
+      cudaError_t e = fcuda_alloc_status(cudaMalloc(&d, bytes));
+      if (e != cudaSuccess || !d) {
+        break; // best-effort; a real OOM still fails loud later
+      }
       bucket.push_back(d);
     }
   }

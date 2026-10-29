@@ -376,7 +376,7 @@ func TestServeNativeContextDeviceSizingMatchesWeightBudgetedLoadPlan(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	weights, fit, err := serveNativeContextSizingInputs(ws, be, false, false, 1)
+	weights, fit, err := serveNativeContextSizingInputs(ws, be, false, false, 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -56,7 +56,18 @@ extern "C" void fcuda_attention_f32(const float *dQ, const float *dK, const floa
   int need = nH * (maxPos > nPos ? maxPos : nPos);
   if (need > g_attn_scratch_cap) {
     if (g_attn_scratch) cudaFree(g_attn_scratch);
-    CK(cudaMalloc(&g_attn_scratch, (size_t)need * sizeof(float)));
+    g_attn_scratch = nullptr;
+    g_attn_scratch_cap = 0;
+    // Pending-status site: on a miss, never launch onto a null scratch (an illegal access would
+    // poison the context for good). The allocation status stays this thread's last error so the
+    // next status reader refuses this request typed instead of trusting unwritten output.
+    cudaError_t e = cudaMalloc(&g_attn_scratch, (size_t)need * sizeof(float));
+    if (e != cudaSuccess || !g_attn_scratch) {
+      fprintf(stderr, "fak-cuda: attention scratch cudaMalloc(%zu bytes) failed: %s\n",
+              (size_t)need * sizeof(float), cudaGetErrorString(e));
+      g_attn_scratch = nullptr;
+      return;
+    }
     g_attn_scratch_cap = need;
   }
   FCUDA_TS("k_attention", nH, k_attention<<<nH, 128, 0, g_stream>>>(dQ, dK, dV, dOut, g_attn_scratch, nPos, nH, nKV, hd, scale));

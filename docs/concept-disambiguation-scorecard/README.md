@@ -15,11 +15,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **686** (clarity 0 + coverage 686) |
-| **Crystal-clear concepts (and climbing)** | **1336** crystal of 3146 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3224 / 3910** (82.5% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **689** (clarity 0 + coverage 689) |
+| **Crystal-clear concepts (and climbing)** | **1348** crystal of 3159 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3238 / 3927** (82.5% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 228 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **89** of 4403 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **89** of 4418 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 88.6/100 (grade B) |
 
@@ -28,11 +28,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3146 concepts - score 88.6/100 (grade B) - disambiguation-debt 686
+concept-disambiguation chart - 3159 concepts - score 88.6/100 (grade B) - disambiguation-debt 689
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #####################....... 1336
-  o defined       ############################ 1810
+  * crystal       #####################....... 1348
+  o defined       ############################ 1811
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
@@ -40,8 +40,8 @@ clarity ladder (count of concepts, best -> fog):
 
 clarity mix by family (each cell = one concept):
   attention        ***********************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (175 concept(s); 71 crystal)
-  cache            *********************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (299 concept(s); 117 crystal)
-  context-ctx      ******************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (249 concept(s); 90 crystal)
+  cache            ************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (302 concept(s); 120 crystal)
+  context-ctx      ********************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (251 concept(s); 92 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         **********************************ooooooooooooooooooooo (55 concept(s); 34 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
@@ -50,9 +50,9 @@ clarity mix by family (each cell = one concept):
   guard-gate       *********************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (456 concept(s); 213 crystal)
   layout           ************ooooooooo (21 concept(s); 12 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
-  plan             ***********************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (424 concept(s); 179 crystal)
+  plan             **************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (427 concept(s); 182 crystal)
   policy-capability **********************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (213 concept(s); 106 crystal)
-  pool             ***************ooooooooooooooooooooooooooooooooo (48 concept(s); 15 crystal)
+  pool             *******************oooooooooooooooooooooooooooooooooo (53 concept(s); 19 crystal)
   render-materialize *******************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (200 concept(s); 43 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
   session-runtime  *************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (271 concept(s); 97 crystal)
@@ -62,16 +62,16 @@ clarity mix by family (each cell = one concept):
   witness-proof    ***********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (175 concept(s); 83 crystal)
 
 coverage by family (positioned / discovered):
-  plan             #######################..... 486/601
-  cache            #######################..... 342/412
+  plan             #######################..... 489/604
+  cache            #######################..... 345/415
   session-runtime  #######################..... 290/359
-  gateway-engine   #######################..... 250/311
+  gateway-engine   ######################...... 250/312
   guard-gate       ##########################.. 517/567
-  context-ctx      ########################.... 272/320
+  context-ctx      ########################.... 274/323
   attention        ######################...... 166/213
-  pool             ###############............. 49/90
+  pool             ################............ 55/96
   policy-capability ########################.... 231/271
-  support-maturity ####################........ 93/131
+  support-maturity ####################........ 93/132
   render-materialize ########################.... 217/251
   score-debt       #######################..... 114/139
   witness-proof    #########################... 173/197
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##########################......] 82.5%  (3224/3910 confusable tokens positioned)
+namespace coverage  [##########################......] 82.5%  (3238/3927 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 228
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 228/228
 
-name index: 4403 lookup name(s) -> 3146 concept(s), 89 ambiguous
+name index: 4418 lookup name(s) -> 3159 concept(s), 89 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **228 / 228** (228 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2582 / 5816 |
+| Boundaries drawn (mutual / total) | 2608 / 5859 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4403 over 3146 concepts |
+| Lookup names indexed | 4418 over 3159 concepts |
 | Lookup names landing on several concepts | 89 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3146 |
+| Concepts carrying a contrast set | 3159 |
 
 ## The concepts (best verdict first)
 
@@ -320,6 +320,9 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | cache | **PrepareForCache** - PrefixSnapshot cache-admission method that seals independently owned V4.1 publication rows into immutable shared prefix storage before publishing an admitted snapshot, retaining private mutable continuation fields. |
 | * | crystal | symbol | cache | **FAK_RESUME_CACHE_AFFINITY** - Env-var name carrying the transcript-UUID-derived relaunch cache-affinity route onto a resumed claude --resume child, so the warm provider cache route survives the OS relaunch (#4140/#5189). |
 | * | crystal | symbol | cache | **MedianCacheReadFraction** - Median share of post-compaction window input tokens served as provider cache reads (cached_input_tokens / input_tokens), rolled up per regrowth cohort in the #4768 compact-audit aggregate. |
+| * | crystal | symbol | cache | **GoCachePlacement** - GoCachePlacement is the point-in-time diagnostic report comparing an explicitly selected Go build-cache directory with a named filesystem growth allowance, including the exact input-plan digest when read from a plan. |
+| * | crystal | symbol | cache | **CheckGoCachePlacement** - CheckGoCachePlacement compares an explicit cache directory and filesystem directory and reports a zero-growth conflict when they identify the same filesystem with no declared growth budget. |
+| * | crystal | symbol | cache | **CheckGoCachePlan** - CheckGoCachePlan reads one exact bounded JSON plan, rejects ambiguous input and external cache programs, checks explicit GOCACHE against named filesystem growth allowances, and binds its placement report to the SHA-256 of the input bytes. |
 | * | crystal | symbol | cache | **cachedImmutableWeight (borrowed device weight staging)** - Session.cachedImmutableWeight reuses a session handle or borrows a model-owned immutable device weight and stages it only on a miss. |
 | * | crystal | symbol | cache | **v41IndexerKeyCache** - Session-owned resident F32 indexer-key matrices keyed by immutable publication ownership, source and geometry identity, with live handles charged across callback rebinding. Admission requires an explicit positive index-key byte allowance that defaults to zero; unchanged history reuses its exact buffer, append stages only new rows while copying the old device prefix, and invalidated identity reseeds. |
 | * | crystal | symbol | cache | **v41RoPETableCache** - Session-owned bounded exact F32 rotary sin/cos device tables. One query slot or two compressed-publication slots reuse only matching values, model, epoch, backend, geometry and live session handles; replacement retains one transient upload. |
@@ -393,6 +396,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | context-ctx | **claim_context_restore** - The internal/dojo file carrying the context-restore cell's one anchored ESTIMATE claim literal plus the pure restore-recall fold over ContextSpanLedger counts. |
 | * | crystal | symbol | context-ctx | **contextRestoreLever** - The cmd/fak lever type that adapts the workspace's durable context-span ledger and emits the context-restore cell's scored episodes for a dojo run. |
 | * | crystal | symbol | context-ctx | **ContextSpanLedger** - The reduced three-field view (dropped spans, restored spans, restore-recorded honesty bit) of fak's durable context-span drop/restore ledger that the restore-recall fold consumes. |
+| * | crystal | symbol | context-ctx | **OmitContextUnknown** - The typed omission fitplan reports (value context_unknown) when the model header carries no context_length, so neither Plan nor the T04 joint search can bound the requested context from facts. |
+| * | crystal | symbol | context-ctx | **resolveServeNativeContextLoadArm** - The serve resolver that picks which load arm (Q4K checkpoint vs full-precision) the native context budget sizes against, honoring the FAK_Q4K operator pin and the backend's offload posture. |
 | * | crystal | symbol | context-ctx | **serveNativeContextResolution** - cmd/fak record of how a serve resolved its native context: the operator's requested tokens, the model-declared window, the resolved tokens and the source (explicit or auto); the --plan-json fit_plan reads the request as the context pin and the resolved value as the current candidate. |
 | * | crystal | symbol | context-ctx | **ctxrestore_cas** - The durable content-addressed on-disk byte store backing the RAM-only ctxrestore stash, keyed by a dropped media turn's sha256 digest (#5163). |
 | * | crystal | symbol | context-ctx | **ctxRestoreCASEnvDir** - Const naming the FAK_CTXRESTORE_CAS_DIR environment variable that overrides or disables the durable media-restore CAS directory. |
@@ -911,6 +916,9 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | plan | **CachePlanningAvailable (device memory facts are sufficient)** - DeviceMemoryProfile.CachePlanningAvailable in internal/compute/device_memory_profile.go requires established positive cache capacity, allocation alignment, and subgroup width before ROCm QSA or Vulkan scratch policy can make a cache-bounded planning decision (#12440). |
 | * | crystal | concept | plan | **replanning** - The property/act of re-deriving a plan for the same turn (ctxplan PlanView, supervisoragent action) - a deterministic re-admission that reuses the existing admit receipt, not a new authority. |
 | * | crystal | symbol | plan | **PlanDeepSeekV41Placement** - Model V4.1 package function that admits exact official Flash-1017 metadata and computes a conservative single-GPU text weight/context/workspace placement with caller-bounded host cache and residual SSD demand. |
+| * | crystal | symbol | plan | **newPlanner** - The unexported constructor that binds a fitplan Input (hardware, weights, demand, calibration) to the internal planner struct shared by Plan's single-arm pricing and the T04 joint context x KV-dtype x slots search. |
+| * | crystal | symbol | plan | **serveFitPlanArch** - The cmd/fak glue that extracts the GGUF architecture string into the fitplan report so the --plan-json sizing artifact records which architecture the sizing ran under. |
+| * | crystal | symbol | plan | **serveFitPlanHardware** - The cmd/fak glue that snapshots the host hardware facts (backend, sizing-fit and host-fit budgets) into the fitplan Hardware block of the serve sizing artifact. |
 | * | crystal | symbol | plan | **fitplan** - Package internal/fitplan: the header-derived model-fit planner. Plan prices one selected serve arm's weights MemoryPlan against a pool budget over a KV-tier x context candidate table and returns a Report: fit status, one-stream max context, per-candidate max concurrency, nominal decode/prefill tok/s and TTFT with the binding bound and evidence tier, typed omissions for unknown inputs, and a typed refusal (weights_exceed_pool, context_exceeds_pool, concurrency_exceeds_pool, pin_unmatched). |
 | * | crystal | symbol | plan | **FitPlanModel** - ggufload.WeightSource method that derives fitplan.Model from GGUF tensor headers for the selected arm's embedding storage: loaded payload bytes, decode-swept bytes per token (row-gathered untied input embedding excluded, routed experts at the RoutedExpertActiveSet top-k share), active and LM-head parameters, expert counts and attention geometry. |
 | * | crystal | symbol | plan | **BuildCandidates** - fitplan function that expands KV storage tiers over ContextLadder (resolved context, pinned extras, 4K/32K/128K served windows, model max) into the Candidate table Plan prices; the first tier at the resolved context is marked Current, and a tier whose KV charge equals an earlier tier's is skipped. |
@@ -1131,6 +1139,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | pool | **FakExpertRingPoolFractionEnv (auto expert-ring host-memory fraction)** - FakExpertRingPoolFractionEnv names FAK_EXPERT_RING_POOL_FRACTION. For auto activated-expert ring sizing with known host MemTotal, the fraction contributes a sizing bound before the activated-layer minimum is applied. The default is 0.10, accepted values satisfy 0 < f <= 0.5, and invalid values are refused. Explicit byte sizes are unaffected; the activated-layer minimum can exceed the fraction-derived bound. |
 | * | crystal | symbol | pool | **MemoryPool** - A declared physical memory allocation pool with an identity and usable capacity for model placement accounting. |
 | * | crystal | symbol | pool | **pool_capacity_unknown** - A model placement omission indicating that the usable capacity of a referenced physical memory pool was not supplied. |
+| * | crystal | symbol | pool | **OmitHostPoolCapacityUnknown** - The typed omission fitplan reports (value host_pool_capacity_unknown) when a discrete topology's host DRAM pool size cannot be probed, so host-scoped weight and ring rows are priced without a host-side cap. |
+| * | crystal | symbol | pool | **OmitPoolCapacityUnknown** - The typed omission fitplan reports (value pool_capacity_unknown) when the usable pool budget for the selected arm cannot be determined, so candidate rows are priced with an unknown pool term. |
+| * | crystal | symbol | pool | **ReasonWeightsExceedPool** - The typed refusal reason fitplan returns (value weights_exceed_pool) when the selected arm's weights alone exceed the usable pool before any KV or slot term is added, so no candidate row can fit. |
+| * | crystal | symbol | pool | **HostPool** - The Refusal.HostPool bool flag (JSON host_pool) marking that a weights_exceed_pool refusal is short on a discrete topology's host DRAM pool rather than the device pool. |
 | * | crystal | symbol | pool | **PoolUsableBytes** - fitplan Hardware and Evidence field: the headroom-adjusted bytes of the pool the plan's KV store and pool-charged weights draw on: device memory on a discrete GPU, the one shared pool on a unified-memory APU (host-scoped rows charged once), host RAM on a host-only serve; <=0 means unknown and the plan fails open. |
 | * | crystal | symbol | pool | **HostPoolUsableBytes** - fitplan Hardware and Evidence field set only for a discrete topology: the headroom-adjusted host RAM that host-scoped weight rows (CPU-offloaded experts, streamed working sets) draw on; overflow refuses weights_exceed_pool with host_pool=true. |
 | * | crystal | symbol | pool | **DeviceTransientPoolStats** - Optional backend observation of request-transient buffers currently parked for reuse: backend name, current parked buffer count and bytes, and parked-byte high-water mark since backend start. Unsupported planners report absence; the counters do not grant memory capacity. |
@@ -2751,6 +2763,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | pool | **quotaNonPagedPoolUsage** - quotaNonPagedPoolUsage (internal/harnessres/sample_windows.go) is the PROCESS_MEMORY_COUNTERS field: current non-paged-pool bytes charged to the sampled process. |
 | o | defined | symbol | pool | **quotaPeakPagedPoolUsage** - quotaPeakPagedPoolUsage (internal/harnessres/sample_windows.go) is the PROCESS_MEMORY_COUNTERS field: peak paged-pool bytes the sampled process ever charged. |
 | o | defined | symbol | pool | **quotaPeakNonPagedPoolUsage** - quotaPeakNonPagedPoolUsage (internal/harnessres/sample_windows.go) is the PROCESS_MEMORY_COUNTERS field: peak non-paged-pool bytes the sampled process ever charged. |
+| o | defined | symbol | pool | **PagedRadixKVPool (radix prefix tree bound to paged KV blocks)** - radixkv.PagedRadixKVPool (internal/radixkv/paged_binding.go) binds a RadixAttention prefix tree to reference-counted physical page blocks in a ctxmmu.KVPool: a prefix hit binds the cached block chain into a stream's PagedBlockTable (refcount++) instead of cloning KV tensors; NewPagedRadixKVPoolWithTree wraps an existing tree. The in-kernel device planner's paged prefix ledger (internal/agent/inkernel_paged_prefix.go) is its production consumer. |
 | o | defined | symbol | pool | **byPool accumulator** - Local map[string]AccountRow / map[string]Account accumulator named byPool, paired with an order slice, built inside uniquePoolRows (internal/dispatchtick/accounts.go) and uniquePoolAccounts (internal/fleetaccounts/resolve.go): it keeps exactly one representative row per pool key, the best-ranked candidate under accountPoolRowLess / accountPoolLess, while the input rows are reduced down to one row per pool. |
 | o | defined | doc-term | pool | **credential_pool.py (Hermes reference)** - The external Hermes script agent/credential_pool.py, named in the package comment of internal/metrics/spend.go as the prior-art system that pools spend/credentials across accounts but relays the provider's own billed number without labeling who authored the figure. |
 | o | defined | symbol | pool | **leaseWorkersByPool** - Function with two independent implementations (internal/dispatchtick/accounts.go over AccountRow/SeatLease, internal/fleetaccounts/resolve.go over Account/Lease) that walks the live seat leases and returns a map from pool key to the list of worker ids currently holding a lease in that pool; leaseLoadByPool and wave/status/resolve callers use it to seed per-pool in-flight occupancy before granting new slots. |
@@ -3426,8 +3439,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 28 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3234/5816 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3146 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3251/5859 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3159 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3436,23 +3449,23 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4403 lookup name(s) resolves - 89 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4418 lookup name(s) resolves - 89 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| plan | 486 | 601 | 115 |
-| cache | 342 | 412 | 70 |
+| plan | 489 | 604 | 115 |
+| cache | 345 | 415 | 70 |
 | session-runtime | 290 | 359 | 69 |
-| gateway-engine | 250 | 311 | 61 |
+| gateway-engine | 250 | 312 | 62 |
 | guard-gate | 517 | 567 | 50 |
-| context-ctx | 272 | 320 | 48 |
+| context-ctx | 274 | 323 | 49 |
 | attention | 166 | 213 | 47 |
-| pool | 49 | 90 | 41 |
+| pool | 55 | 96 | 41 |
 | policy-capability | 231 | 271 | 40 |
-| support-maturity | 93 | 131 | 38 |
+| support-maturity | 93 | 132 | 39 |
 | render-materialize | 217 | 251 | 34 |
 | score-debt | 114 | 139 | 25 |
 | witness-proof | 173 | 197 | 24 |

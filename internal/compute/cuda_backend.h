@@ -170,6 +170,15 @@ void fcuda_hostxfer_reset(void);
 size_t fcuda_h2dxfer_bytes(void);
 void fcuda_h2dxfer_reset(void);
 
+/* Async H2D for compute.AsyncUploader (cuda/async_upload.cuh). fcuda_upload_async stages
+ * through a bounded pinned slot pool onto a non-blocking copy stream ordered after g_stream's
+ * position at issue: 0 = issued (slot/gen name the fence), 1 = not issued (slot pool exhausted,
+ * oversize, or capture open; caller copies synchronously), >=1000 = 1000 + cudaError_t.
+ * fcuda_upload_async_fence: 1 = landed, 0 = in flight (block=0 only), >=1000 = failure. */
+int fcuda_upload_async(void *d, const void *h, size_t bytes, int *slot, uint64_t *gen);
+int fcuda_upload_async_fence(int slot, uint64_t gen, int block);
+void fcuda_upload_async_stats(uint64_t *issued, uint64_t *fallback, size_t *pinned);
+
 /* Qwen3.5/3.6 Gated-DeltaNet decode, one complete recurrent token-mixer operation.
  * Every pointer is already resident f32 device memory. The operation launches, in order:
  * a single fused qkv/z/b/a GEMV, causal depthwise conv + in-place conv-state shift,
@@ -318,6 +327,12 @@ int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY, int ou
 void fcuda_set_q4k_prefill_arm(int arm);
 /* fcuda_q4k_mmq_launch_count counts completed mmq-arm launches (P-04 parity witness). */
 unsigned long long fcuda_q4k_mmq_launch_count(void);
+/* fcuda_set_q4k_decode_arm selects the P<4 Q4_K GEMV arm (fak#8635): 0 f32 (k_q4k_gemm), 1 mmvq
+ * (llama.cpp q8_1 DP4A, cuda/q4k_mmvq.cuh). The mmvq arm returns 80001 when its persistent q8_1
+ * scratch misses and 80006 for a shape it refuses; nothing is launched on either. */
+void fcuda_set_q4k_decode_arm(int arm);
+/* fcuda_q4k_mmvq_launch_count counts mmvq-arm GEMV launches (parity witness). */
+unsigned long long fcuda_q4k_mmvq_launch_count(void);
 /* Counts accepted fp8lt GEMM enqueues; a synchronized read is still required. */
 unsigned long long fcuda_q4k_fp8lt_launch_count(void);
 
@@ -378,6 +393,12 @@ void fcuda_q6k_matmul_f32(const uint8_t *dQ6K, const float *dX, float *dY, int o
 int fcuda_q2k_matmul_f32(const uint8_t *dQ2K, const float *dX, float *dY, int out, int in, int P);
 void fcuda_q2k_gemv(const uint8_t *dQ2K, const float *dX, float *dY, int out, int in, int P);
 void fcuda_q2k_gemm_panel(const uint8_t *dQ2K, const float *dX, float *dY, int out, int in, int P);
+
+/* fcuda_iq2xxs_gemv / fcuda_iq2xs_gemv: Y[P,out] = X[P,in] @ W[out,in]^T where W is the resident
+ * verbatim llama.cpp IQ2_XXS (66 B) / IQ2_XS (74 B) 256-element super-block stream; decode fused
+ * into a warp-per-row GEMV, f32 activations, F32 accumulate (cuda/iq_gemv.cuh, oss-index TICKET-01). */
+void fcuda_iq2xxs_gemv(const uint8_t *dW, const float *dX, float *dY, int out, int in, int P);
+void fcuda_iq2xs_gemv(const uint8_t *dW, const float *dX, float *dY, int out, int in, int P);
 
 /* per-row RMSNorm: y[r,:] = x[r,:] * rsqrt(mean(x[r,:]^2) + eps) * w[:]  (rows x n). */
 void fcuda_rmsnorm_f32(const float *dX, const float *dW, float *dY, int rows, int n, float eps);

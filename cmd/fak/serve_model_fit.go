@@ -21,6 +21,10 @@ func serveKVPrecision() compute.KVPrecision {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_UP_KV_PRECISION"))) {
 	case "q8", "q8_0", "8":
 		return compute.KVPrecisionQ8
+	case "fp16", "f16", "16":
+		return compute.KVPrecisionF16
+	case "bf16", "bfloat16":
+		return compute.KVPrecisionBF16
 	default:
 		return compute.KVPrecisionF32
 	}
@@ -82,6 +86,10 @@ const serveGGUFHostHeadroom = 0.15
 type serveFitBudget struct {
 	Base     int64
 	Headroom float64
+	// DenseGPULayers is the partial-offload placement (--gpu-layers N) the sizing arm planned
+	// under, carried on the one shared snapshot so the load-time admission re-scopes the same
+	// layers [N, NumLayers) to host. 0 = every layer device-charged (the historical plan).
+	DenseGPULayers int
 }
 
 type serveNativeContextResolution struct {
@@ -573,7 +581,7 @@ func applyDeviceWeightBudget(plan compute.MemoryPlan, be compute.Backend) comput
 	}
 	return out
 }
-func fitServeGGUFOnDevice(ws *ggufload.WeightSource, be compute.Backend, f32Resident bool, contextBudgetTokens int) error {
+func fitServeGGUFOnDevice(ws *ggufload.WeightSource, be compute.Backend, f32Resident bool, contextBudgetTokens, gpuLayers int) error {
 	if ws == nil || be == nil {
 		return nil
 	}
@@ -581,7 +589,7 @@ func fitServeGGUFOnDevice(ws *ggufload.WeightSource, be compute.Backend, f32Resi
 	if err != nil {
 		return err
 	}
-	plan = applyDeviceWeightBudget(plan, be)
+	plan = applyDeviceWeightBudget(applyDenseGPULayerSplit(plan, ws, gpuLayers), be)
 	return compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFDeviceHeadroom)
 }
 
@@ -647,7 +655,11 @@ func resolveDeviceServeLoadArm(ws *ggufload.WeightSource, be compute.Backend, f3
 // memory ceiling for the load arm this process will actually take. Production
 // callers pass the GGUF path so packed-embedding qualification matches loading;
 // callers without an artifact path retain default embedding storage.
-func serveNativeContextSizingInputs(ws *ggufload.WeightSource, be compute.Backend, cpuOffloadExperts, useMetal bool, ranks int, ggufPath ...string) (compute.MemoryPlan, serveFitBudget, error) {
+//
+// gpuLayers is the --gpu-layers partial-offload count; on the single-rank device arm it re-scopes
+// layers [gpuLayers, NumLayers) to host (applyDenseGPULayerSplit) and is stamped on the returned
+// fit so the load-time admission charges the same split. 0 keeps full device placement.
+func serveNativeContextSizingInputs(ws *ggufload.WeightSource, be compute.Backend, cpuOffloadExperts, useMetal bool, ranks, gpuLayers int, ggufPath ...string) (compute.MemoryPlan, serveFitBudget, error) {
 	if ws == nil {
 		return nil, serveFitBudget{}, nil
 	}
@@ -710,8 +722,9 @@ func serveNativeContextSizingInputs(ws *ggufload.WeightSource, be compute.Backen
 		// ONE fit snapshot: the same serveDeviceFitBudget(be) the caller receives is what the
 		// streamed-dense option list derives its bounded working set from (fak#13205).
 		fit := serveDeviceFitBudget(be)
+		fit.DenseGPULayers = gpuLayers
 		weights, err := serveGGUFWeightMemoryPlanForArm(ws, arm, serveQ4KFitOptions(path, ws, be, arm, fit)...)
-		return applyDeviceWeightBudget(weights, be), fit, err
+		return applyDeviceWeightBudget(applyDenseGPULayerSplit(weights, ws, gpuLayers), be), fit, err
 	}
 	// ONE fit snapshot: the same serveHostFitBudget() the caller receives (fak#13205).
 	fit := serveHostFitBudget()
@@ -1169,7 +1182,8 @@ func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Res
 		// ONE fit snapshot: the same device budget judges the plan and derives the
 		// streamed-dense working set (fak#13205).
 		fit := serveDeviceFitBudgetFromReported(be, override)
-		return serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, fit, serveQ4KFitOptions(ggufPath, ws, be, arm, fit)...)
+		plan, err := serveGGUFMemoryPlanForArm(ws, arm, contextBudgetTokens, fit, serveQ4KFitOptions(ggufPath, ws, be, arm, fit)...)
+		return applyDenseGPULayerSplit(plan, ws, fit.DenseGPULayers), err
 	})
 	if err == nil {
 		plan = applyDeviceWeightBudget(plan, be)

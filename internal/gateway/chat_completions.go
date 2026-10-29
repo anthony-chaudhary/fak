@@ -218,13 +218,15 @@ func shouldEnableMetalMTP(cfg Config) bool {
 }
 
 // shouldEnableVulkanMTP admits only the supported Qwen3.8 resident
-// draft/target envelope. The request-bound constructor repeats these checks and
-// produces a typed ordinary-decode downgrade if live session state is unsuitable.
+// draft/target envelope on Vulkan or CUDA. Either backend is admitted only when
+// it advertises every resident path checked below; the backend name alone admits
+// nothing. The request-bound constructor repeats these checks and produces a
+// typed ordinary-decode downgrade if live session state is unsuitable.
 func shouldEnableVulkanMTP(cfg Config) bool {
 	if cfg.InKernelModel == nil || cfg.Backend == nil || cfg.Metal || !cfg.InKernelQ4K || !vulkanMTPModeSelected(cfg) {
 		return false
 	}
-	if !isModelHybrid(cfg.InKernelModel) || !strings.EqualFold(strings.TrimSpace(cfg.Backend.Name()), "vulkan") {
+	if !isModelHybrid(cfg.InKernelModel) || !residentMTPBackendName(cfg.Backend.Name()) {
 		return false
 	}
 	mode, err := cfg.InKernelModel.Qwen35MTPMode(false)
@@ -252,12 +254,13 @@ func shouldEnableVulkanMTP(cfg Config) bool {
 }
 
 // shouldEnableNGramSpeculative reports whether the operator explicitly selected
-// prompt n-gram speculation for the supported resident Qwen Vulkan route.
+// prompt n-gram speculation for a supported resident Qwen route: Vulkan or CUDA,
+// each only when it advertises the all-row logits verification contract.
 func shouldEnableNGramSpeculative(cfg Config) bool {
 	if cfg.InKernelModel == nil || cfg.Backend == nil || cfg.Metal || !cfg.InKernelQ4K {
 		return false
 	}
-	if !isModelHybrid(cfg.InKernelModel) || !strings.EqualFold(strings.TrimSpace(cfg.Backend.Name()), "vulkan") {
+	if !isModelHybrid(cfg.InKernelModel) || !ngramSpeculativeBackendName(cfg.Backend.Name()) {
 		return false
 	}
 	backend, ok := cfg.Backend.(compute.Qwen35SequenceAllLogitsBackend)
@@ -265,6 +268,19 @@ func shouldEnableNGramSpeculative(cfg Config) bool {
 		return false
 	}
 	return speculativeModeSelected(cfg, "ngram")
+}
+
+// residentMTPBackendName names the backends whose resident MTP draft and
+// verify target may be admitted, subject to the capability checks in
+// shouldEnableVulkanMTP.
+func residentMTPBackendName(name string) bool {
+	name = strings.TrimSpace(name)
+	return strings.EqualFold(name, "vulkan") || strings.EqualFold(name, "cuda")
+}
+
+func ngramSpeculativeBackendName(name string) bool {
+	name = strings.TrimSpace(name)
+	return strings.EqualFold(name, "vulkan") || strings.EqualFold(name, "cuda")
 }
 
 // speculativeModeSelected reports whether the requested speculative mode is

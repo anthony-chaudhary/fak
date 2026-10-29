@@ -1,6 +1,11 @@
 package model
 
-import "unsafe"
+import (
+	"fmt"
+	"unsafe"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
+)
 
 // kvcache_q8.go — the Q8_0 KV-cache realization (#12981, epic #9430). This is the
 // ENGINE half that compute/kvprecision.go explicitly defers ("The denser KVStore
@@ -360,6 +365,31 @@ func (c Config) QuantizedKVUnsupportedReason() string {
 	default:
 		return ""
 	}
+}
+
+// DeviceKVRefusal names why backend's HAL KV store cannot realize prec
+// for this geometry, or "" when it can. f32 is always realizable.
+func (c Config) DeviceKVRefusal(backend string, prec KVPrecision) string {
+	dev, ok := DeviceKVPrecision(prec)
+	switch {
+	case !ok:
+		return fmt.Sprintf("%s is a host KV cache tier with no device KV store", prec)
+	case dev == compute.KVPrecisionF32:
+		return ""
+	case backend != cudaDeviceKVBackend:
+		return fmt.Sprintf("backend %q device KV store holds only f32 (16-bit KV is CUDA-only)", backend)
+	case pagedHALKVEnabled():
+		return "FAK_PAGED_KV block-paged HAL store holds only f32"
+	}
+	// Qwen3.5/3.8 hybrid on CUDA keeps its full-attention planes in the typed HAL
+	// store: the sequence prefill appends and attends by plane dtype, the fused f32
+	// postprocess declines narrowed planes, and decode uses AppendKV/Attention. The
+	// Gated-DeltaNet recurrent state is not KV and stays f32.
+	if c.IsQwen35Hybrid() {
+		return ""
+	}
+	// These forward paths keep KV outside the typed attention/append seam.
+	return c.QuantizedKVUnsupportedReason()
 }
 
 // ---- KVCache precision-aware accessors -------------------------------------
