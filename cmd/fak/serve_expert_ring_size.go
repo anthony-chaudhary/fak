@@ -16,14 +16,20 @@ import (
 // serve_expert_ring_size.go — the operator knob that sizes the activated-expert device ring
 // (--expert-ring-bytes / FAK_EXPERT_RING_BYTES).
 //
-//	token    the default: one token's activated experts, exactly the historical ring.
+//	token    one token's activated experts, exactly the historical ring.
 //	auto     the smaller of a device bound and a host bound, after the dense base, the transient
 //	         scratch and the KV for the target context are reserved, and never more than
 //	         FAK_EXPERT_RING_POOL_FRACTION of host MemTotal. The default is 0.50 when the ring
-//	         pages live in mapped GTT (integrated, known carve-out <= 4 GiB) and 0.10 otherwise,
-//	         where DEVICE_LOCAL pages can fill a small carve-out and hit the driver's BO_VA
-//	         ceiling mid-request. The routed band beyond the ring stays SSD-backed.
+//	         pages live in mapped GTT (integrated, known carve-out <= 4 GiB), 0.40 on a discrete
+//	         host (no shared pool, no carve-out reported), and 0.10 otherwise, where
+//	         DEVICE_LOCAL pages can fill a small carve-out and hit the driver's BO_VA ceiling
+//	         mid-request. The routed band beyond the ring stays SSD-backed.
 //	<bytes>  an explicit ring, admitted or refused at load.
+//
+// With neither the flag nor FAK_EXPERT_RING_BYTES set, a host with at least
+// serveExpertRingHighRAMHostMin of MemTotal defaults to auto and every other host to token.
+// OFF arm: --expert-ring-bytes token (or FAK_EXPERT_RING_BYTES=token) restores the historical
+// ring; FAK_EXPERT_RING_POOL_FRACTION=0.1 restores the old discrete-host cap.
 //
 // On a UMA box (shared host RAM, carve-out <= serveExpertRingUMACarveoutMax) the device ring,
 // the page cache and every other plan row draw on one pool, so auto and explicit sizes are
@@ -48,7 +54,14 @@ const (
 	serveExpertRingUMACarveoutMax     int64   = 4 << 30
 	serveExpertRingPoolFractionDef    float64 = 0.10
 	serveExpertRingPoolFractionGTT    float64 = 0.5
-	serveExpertRingPoolFractionMax    float64 = 0.5
+	// serveExpertRingPoolFractionDiscrete applies where ring pages never fill an integrated
+	// carve-out; the device and MemAvailable bounds still cap the ring below what fits.
+	serveExpertRingPoolFractionDiscrete float64 = 0.40
+	serveExpertRingPoolFractionMax      float64 = 0.5
+	// serveExpertRingHighRAMHostMin is the MemTotal at which an unset ring size defaults to auto:
+	// a host with this much RAM keeps tens of GiB of routed experts resident instead of
+	// re-streaming one token's experts per token.
+	serveExpertRingHighRAMHostMin int64 = 64 << 30
 )
 
 type serveExpertRingMode string
@@ -64,6 +77,18 @@ type serveExpertRingSize struct {
 	Bytes int64
 	// PoolFraction caps an auto ring at this fraction of host MemTotal; 0 means the default.
 	PoolFraction float64
+	// HostDefault: neither the flag nor the environment named a size, so the host's MemTotal
+	// picks token or auto (forHostTotal).
+	HostDefault bool
+}
+
+// forHostTotal resolves a host-defaulted size: auto on a high-RAM host, token otherwise.
+// An operator-named size is returned unchanged.
+func (s serveExpertRingSize) forHostTotal(total int64, known bool) serveExpertRingSize {
+	if s.HostDefault && s.Mode == serveExpertRingToken && known && total >= serveExpertRingHighRAMHostMin {
+		s.Mode = serveExpertRingAuto
+	}
+	return s
 }
 
 func (s serveExpertRingSize) String() string {
@@ -104,13 +129,17 @@ func parseServeExpertRingSize(raw string) (serveExpertRingSize, error) {
 }
 
 // resolveServeExpertRingSize lets a non-empty flag select the mode over the environment;
-// auto uses the pool fraction regardless of how it was selected.
+// auto uses the pool fraction regardless of how it was selected. With neither set the size is
+// token marked HostDefault, which forHostTotal turns into auto on a high-RAM host.
 func resolveServeExpertRingSize(flagValue string, getenv func(string) string) (serveExpertRingSize, error) {
 	if strings.TrimSpace(flagValue) == "" && getenv != nil {
 		flagValue = getenv(FakExpertRingBytesEnv)
 	}
 	size, err := parseServeExpertRingSize(flagValue)
-	if err != nil || size.Mode != serveExpertRingAuto || getenv == nil {
+	if err == nil && strings.TrimSpace(flagValue) == "" {
+		size.HostDefault = true
+	}
+	if err != nil || (size.Mode != serveExpertRingAuto && !size.HostDefault) || getenv == nil {
 		return size, err
 	}
 	size.PoolFraction, err = parseServeExpertRingPoolFraction(getenv(FakExpertRingPoolFractionEnv))
@@ -150,6 +179,10 @@ type serveExpertRingHost struct {
 func serveExpertRingDefaultPoolFraction(host serveExpertRingHost) float64 {
 	if host.SharedPool && host.CarveoutKnown && host.Carveout > 0 && host.Carveout <= serveExpertRingUMACarveoutMax {
 		return serveExpertRingPoolFractionGTT
+	}
+	if !host.SharedPool && !host.CarveoutKnown {
+		// Discrete GPU: no integrated carve-out for ring pages to fill.
+		return serveExpertRingPoolFractionDiscrete
 	}
 	return serveExpertRingPoolFractionDef
 }
@@ -198,6 +231,8 @@ type serveExpertRingSizing struct {
 	// PoolCapBytes = PoolFraction x host MemTotal bounds an auto ring; 0 when not applied.
 	PoolFraction float64
 	PoolCapBytes int64
+	// HostDefaultAuto: auto was chosen because no size was named and the host is high-RAM.
+	HostDefaultAuto bool
 }
 
 // sizeServeExpertRing picks the ring for a non-token mode from the plan the token ring was
@@ -209,7 +244,8 @@ func sizeServeExpertRing(size serveExpertRingSize, f ggufload.ActivatedExpertFit
 		DeviceAvail: deviceAvail, NonRingDevice: nonRing.DeviceTotal(), NonRingHost: nonRing.HostTotal(),
 		HostAvail: host.Avail, RSSAnonPeak: max(host.RSSAnonPeak, 0),
 		HostGatheredBytes: f.HostGatheredBytes, HostGatheredReserve: f.HostGatheredPageReserve(),
-		SharedPool: host.SharedPool,
+		SharedPool:      host.SharedPool,
+		HostDefaultAuto: size.HostDefault && size.Mode == serveExpertRingAuto,
 	}
 	if s.Mode == "" {
 		s.Mode = serveExpertRingToken
@@ -308,6 +344,9 @@ func (s serveExpertRingSizing) Text() string {
 	binding := s.Binding
 	if binding == "" {
 		binding = serveExpertRingBindingNone
+	}
+	if s.HostDefaultAuto {
+		mode += " default=auto (high-RAM host)"
 	}
 	return fmt.Sprintf("ring size mode=%s binding=%s chosen=%s token=%s floor=%s band=%s device_bound=%s (device_avail=%s non_ring_device=%s) host_bound=%s (mem_available=%s rss_anon_peak=%s margin=%s non_ring_host=%s shared_pool=%t) pool_cap=%s guard_trim=%s host_gathered=%s page_reserve=%s",
 		mode, binding, bytesText(uint64(max(s.RingBytes, 0))), bytesText(uint64(max(s.TokenBytes, 0))),

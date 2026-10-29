@@ -246,7 +246,7 @@ func TestSizeServeExpertRingTable(t *testing.T) {
 		}
 	})
 	t.Run("auto_pool_cap_below_floor_takes_floor", func(t *testing.T) {
-		small := serveExpertRingHost{Total: 512 << 20, Avail: 100 * ringGiB, Known: true}
+		small := serveExpertRingHost{Total: 512 << 20, Avail: 100 * ringGiB, Known: true, SharedPool: true}
 		s, err := sizeServeExpertRing(serveExpertRingSize{Mode: serveExpertRingAuto}, f, token, nonRing, 200*ringGiB, small)
 		if err != nil || s.PoolCapBytes >= f.ActivatedLayerBytes || s.RingBytes != f.ActivatedLayerBytes {
 			t.Fatalf("auto ring=%d cap=%d err=%v, want floor %d", s.RingBytes, s.PoolCapBytes, err, f.ActivatedLayerBytes)
@@ -284,7 +284,7 @@ func TestSizeServeExpertRingBinding(t *testing.T) {
 		// The same box with 43 GiB less MemAvailable at load binds on the live host reading.
 		{"host_bound", auto, f, 200 * ringGiB, gtt(75 * ringGiB), serveExpertRingBindingHost},
 		{"band", auto, ggufload.ActivatedExpertFit{DeviceBaseBytes: f.DeviceBaseBytes, RoutedBandBytes: 20 * ringGiB, ActivatedLayerBytes: f.ActivatedLayerBytes, ActivatedTokenBytes: f.ActivatedTokenBytes, HostGatheredBytes: f.HostGatheredBytes}, 200 * ringGiB, gtt(118 * ringGiB), serveExpertRingBindingBand},
-		{"floor", auto, f, 200 * ringGiB, serveExpertRingHost{Total: 512 << 20, Avail: 100 * ringGiB, Known: true}, serveExpertRingBindingFloor},
+		{"floor", auto, f, 200 * ringGiB, serveExpertRingHost{Total: 512 << 20, Avail: 100 * ringGiB, Known: true, SharedPool: true}, serveExpertRingBindingFloor},
 		{"auto_unmeasured", auto, f, compute.FreeUnknown, serveExpertRingHost{}, serveExpertRingBindingNone},
 		{"token", serveExpertRingSize{Mode: serveExpertRingToken}, f, 200 * ringGiB, gtt(118 * ringGiB), serveExpertRingBindingNone},
 		{"explicit", serveExpertRingSize{Mode: serveExpertRingExplicit, Bytes: 20 * ringGiB}, f, 200 * ringGiB, gtt(118 * ringGiB), serveExpertRingBindingNone},
