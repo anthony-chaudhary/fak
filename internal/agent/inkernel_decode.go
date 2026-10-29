@@ -170,6 +170,15 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	// retained copies (#13267, inkernel_host_budget.go) still reuses a cached prefix but
 	// leaves nothing new behind in the cache.
 	admit := reuse && !inKernelSkipPrefixAdmission(ctx)
+	if reuse {
+		// Lease this prompt's KV pages from the paged prefix pool for the request's
+		// lifetime: shared prefix pages are bound, only the divergent tail is allocated.
+		ns := ""
+		if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped {
+			ns = owner.Tenant
+		}
+		defer p.pagedPrefix.acquire(ns, ids).release()
+	}
 
 	// 1) Acquire a session, reusing the longest cached KV prefix when enabled. The clone
 	// (SessionFromPrefix) happens under the lock, so once we unlock our session owns an

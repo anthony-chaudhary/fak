@@ -166,6 +166,7 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 		}
 		p.tree.SetCPUCacheByteBudget(cpuBytes)
 		p.scopedTree = radixkv.WrapScopedWithLocker(p.tree, &p.mu)
+		p.pagedPrefix = inKernelPagedPrefixLedgerFor(m, backend, p.tree)
 	}
 	// The model-side KV-quarantine eviction bridge (#579) is OFF unless opted in, the same
 	// default-off / fail-open posture as the ctxplan seam (FAK_CTXPLAN_SEAM). It runs over a
