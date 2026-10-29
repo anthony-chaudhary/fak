@@ -55,6 +55,9 @@ type Options struct {
 	Remote              string
 	Branch              string
 	Fetch               bool
+	FetchDepth          int
+	FetchBase           string
+	FetchTarget         string
 	Runner              Runner           `json:"-"`
 	Now                 func() time.Time `json:"-"`
 	ApplyVelocityBudget time.Duration    `json:"-"`
@@ -168,6 +171,9 @@ func (e *GitError) Error() string {
 func Assess(ctx context.Context, opts Options) (Assessment, error) {
 	opts = normalizeOptions(opts)
 	run := opts.Runner
+	if !opts.Fetch && (opts.FetchDepth != 0 || opts.FetchBase != "" || opts.FetchTarget != "") {
+		return Assessment{}, fmt.Errorf("bounded fetch pins require fetch enabled")
+	}
 
 	branch := strings.TrimSpace(opts.Branch)
 	if branch == "" {
@@ -180,7 +186,7 @@ func Assess(ctx context.Context, opts Options) (Assessment, error) {
 	targetRef := opts.Remote + "/" + branch
 
 	if opts.Fetch {
-		if _, err := checked(ctx, run, opts.Repo, "fetch", opts.Remote, branch); err != nil {
+		if err := fetchWithDepth(ctx, run, opts.Repo, opts.Remote, branch, opts.FetchDepth, opts.FetchBase, opts.FetchTarget); err != nil {
 			return Assessment{}, err
 		}
 	}

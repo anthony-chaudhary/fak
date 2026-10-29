@@ -87,7 +87,8 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		return err
 	}
 	stages.enter(V41ColdStageQKV)
-	qkv, err := m.v41LayerProjectQKV(l, seq, preByPos, full, hd, nH, H, eps, scratch, trace)
+	sparse := m.v41PrepareSparsePrefill(st, scratch, full, l, seq, nH, hd, trace)
+	qkv, err := m.v41LayerProjectQKV(l, seq, preByPos, full, hd, nH, H, eps, scratch, trace, sparse != nil)
 	if err != nil {
 		return err
 	}
@@ -108,7 +109,12 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 		}
 	}
 	stages.enter(V41ColdStageAttention)
-	attnProjectionInput, err := m.v41LayerAttentionContract(l, seq, nH, hd, src, qkv, indexList, sink, st, scratch)
+	var attnProjectionInput [][]float32
+	if sparse != nil {
+		attnProjectionInput, err = m.v41SparsePrefillContract(sparse, l, seq, src, qkv, indexList, sink)
+	} else {
+		attnProjectionInput, err = m.v41LayerAttentionContract(l, seq, nH, hd, src, qkv, indexList, sink, st, scratch)
+	}
 	if err != nil {
 		return err
 	}
@@ -361,6 +367,7 @@ func (m *Model) v41LayerMHCPre(l int, x [][]float32, streams [][][]float32, full
 // v41LayerQKV is the per-position projected attention input: rotated query
 // heads [t][nH*hd], rotated single-head KV rows [t][hd], and q-lora latents.
 type v41LayerQKV struct {
+	preRoPE  []uint16
 	qHeads   [][]float32
 	kvRows   [][]float32
 	qLatRows [][]float32
@@ -373,7 +380,7 @@ type v41LayerQKV struct {
 // seq times (#13301). The per-token q_norm and RoPE glue stays scalar, so this
 // is byte-for-byte the per-token v41ProjMatRows path; seq==1 (decode) stays
 // entirely on that scalar path.
-func (m *Model) v41LayerProjectQKV(l, seq int, preByPos [][]float32, full bool, hd, nH, H int, eps float32, scratch *v41ProjScratch, trace *v41ActivationTraceState) (v41LayerQKV, error) {
+func (m *Model) v41LayerProjectQKV(l, seq int, preByPos [][]float32, full bool, hd, nH, H int, eps float32, scratch *v41ProjScratch, trace *v41ActivationTraceState, captureSparse ...bool) (v41LayerQKV, error) {
 	defer func() { scratch.attentionInputPanel = nil }()
 	cfg := m.Cfg
 	out := v41LayerQKV{
@@ -439,6 +446,9 @@ func (m *Model) v41LayerProjectQKV(l, seq int, preByPos [][]float32, full bool, 
 	qPanel, err := m.v41ProjPanelWithProjection(l, "attn.wq_b.weight", qLatPanel, nH*hd, cfg.QLoraRank, seq, scratch.denseProjection())
 	if err != nil {
 		return out, err
+	}
+	if len(captureSparse) != 0 && captureSparse[0] {
+		out.preRoPE = v41SparsePrefillBits(qPanel)
 	}
 	kvRank := hd
 	if full {

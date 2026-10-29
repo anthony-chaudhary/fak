@@ -25,6 +25,7 @@ import (
 const conceptTreeProfileEnv = "FAK_CONCEPT_TREE_PROFILE"
 const conceptTreeProfileV1 = "isolated-v1"
 const conceptTreeProfileV2 = "isolated-v2"
+const conceptTreeProfileV3 = "isolated-v3"
 const conceptScriptSHA = "f03ebadc6443c4f4a0533118ebb007930b0e70218f0bf3c9230f4fd77d786259"
 const conceptPythonSHA = "fa67443527ed9647f760d807e2a38f26340757123e643c4639cf273ed15d5ea7"
 const conceptLibPythonSHA = "7e177a680eabb11fcb7d3867f7a1b9c4b93a9bd5b18129ce1af51ec07977b024"
@@ -32,6 +33,7 @@ const conceptStdlibSHA = "bcd17fc66d37e32b97d12ceda5d089bf47e7ea6e1b494615c5c434
 const conceptStdlibV2SHA = "c8646082e9310ad2fa3cb8cd0038c87e63041f95444adba8bffa6163484bff14"
 const conceptToolsSHA = "62313b76d15080e1d912367e6a29170fc5dd71489522e446d10719331a65ddb2"
 const conceptToolsV2SHA = "4312ceeba9394b80c3f4145dc4afe413d3eb4b085513b9fc7ae93b0b80caeade"
+const conceptToolsV3SHA = "54a7277caa27eb516064e7d3a088dd68074b5ba45742c89efedb68c760e36e63"
 
 // A materialized tree carries its execution contract explicitly. Sparse roots
 // must never be handed to the ordinary generator without this descriptor.
@@ -194,6 +196,8 @@ func conceptProfilePins(profile string) (tools, stdlib string, selected bool) {
 		return conceptToolsSHA, conceptStdlibSHA, true
 	case conceptTreeProfileV2:
 		return conceptToolsV2SHA, conceptStdlibV2SHA, true
+	case conceptTreeProfileV3:
+		return conceptToolsV3SHA, conceptStdlibV2SHA, true
 	default:
 		return "", "", false
 	}

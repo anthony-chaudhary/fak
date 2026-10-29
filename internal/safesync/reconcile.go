@@ -50,6 +50,9 @@ type ReconcileOptions struct {
 	Goal              string           `json:"goal,omitempty"` // publish (default publish HEAD), publish <sha>, integrate (default integrate origin/main)
 	Apply             bool             `json:"apply,omitempty"`
 	Fetch             bool             `json:"fetch,omitempty"`
+	FetchDepth        int              `json:"fetch_depth,omitempty"`
+	FetchBase         string           `json:"fetch_base,omitempty"`
+	FetchTarget       string           `json:"fetch_target,omitempty"`
 	Runner            Runner           `json:"-"`
 	Now               func() time.Time `json:"-"`
 	WriterLeaseTTL    time.Duration    `json:"-"`
@@ -282,8 +285,11 @@ func (r *ReconcileRouter) routeInternal(ctx context.Context) (ReconcileAssessmen
 		return ReconcileAssessment{}, err
 	}
 
+	if !r.opts.Fetch && (r.opts.FetchDepth != 0 || r.opts.FetchBase != "" || r.opts.FetchTarget != "") {
+		return ReconcileAssessment{}, fmt.Errorf("bounded fetch pins require fetch enabled")
+	}
 	if r.opts.Fetch {
-		if _, err := checked(ctx, run, repo, "fetch", r.opts.Remote, branch); err != nil {
+		if err := fetchWithDepth(ctx, run, repo, r.opts.Remote, branch, r.opts.FetchDepth, r.opts.FetchBase, r.opts.FetchTarget); err != nil {
 			return ReconcileAssessment{}, fmt.Errorf("reconcile: fetch %s %s: %w", r.opts.Remote, branch, err)
 		}
 	}

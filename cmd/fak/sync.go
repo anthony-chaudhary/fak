@@ -63,6 +63,9 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	remote := fs.String("remote", "origin", "remote name")
 	branch := fs.String("branch", "", "branch to sync (default: current branch)")
 	fetch := fs.Bool("fetch", false, "git fetch <remote> <branch> before assessing")
+	fetchDepth := fs.Int("fetch-depth", 0, "check/apply/reconcile: bounded history depth, not a byte cap; requires fetch and base/target pins")
+	fetchBase := fs.String("fetch-base", "", "bounded fetch: required original full merge-base object ID")
+	fetchTarget := fs.String("fetch-target", "", "bounded fetch: planned immutable remote branch object ID")
 	retries := fs.Int("retries", 3, "push: total attempts before giving up on a moving trunk")
 	queueFile := fs.String("queue-file", "", "drain: stranded-commit queue file (default: <repo>/.fak/sync-drain-queue.json)")
 	budgetDefault := 60 * time.Second
@@ -96,6 +99,12 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	fs.Var(&recheckPaths, "recheck-path", "check: recheck PUBLIC_LEAK only for this repo-relative repair path (repeatable)")
 	if err := fs.Parse(argv); err != nil {
 		return syncExitUsage
+	}
+	if *fetchDepth != 0 || *fetchBase != "" || *fetchTarget != "" {
+		if !*fetch || *fetchDepth <= 0 || *fetchBase == "" || *fetchTarget == "" || (command != "check" && command != "apply" && command != "reconcile") {
+			fmt.Fprintln(stderr, "bounded fetch requires check/apply/reconcile, --fetch, positive --fetch-depth, --fetch-base and --fetch-target; admit disk lifetime separately")
+			return syncExitUsage
+		}
 	}
 	if command == "push" && *dryRun {
 		fmt.Fprintln(stderr, "fak sync push: --dry-run is not supported; no push was attempted")
@@ -196,6 +205,9 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			Apply:        *applyFlag,
 			Execute:      *executeFlag,
 			Fetch:        *fetch,
+			FetchDepth:   *fetchDepth,
+			FetchBase:    *fetchBase,
+			FetchTarget:  *fetchTarget,
 			SuspendPaths: suspendPaths,
 			Session:      sess,
 			EmitPacket:   *emitPacket || *executeFlag,
@@ -371,6 +383,9 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 		Remote:              *remote,
 		Branch:              *branch,
 		Fetch:               *fetch,
+		FetchDepth:          *fetchDepth,
+		FetchBase:           *fetchBase,
+		FetchTarget:         *fetchTarget,
 		ApplyVelocityBudget: *budget,
 		QuarantineScratch:   *quarantineScratch,
 	}

@@ -101,6 +101,16 @@ static void q4_coeff_cache_evict(const void *q);
 
 extern "C" void fcuda_free(void *d) {
   if (!d) return;
+#ifdef FAK_CUDA_DEEPGEMM_WKV
+  for (const void *held : g_deepgemm_wkv_quarantine) {
+    if (d == held) return;
+  }
+#endif
+#ifdef FAK_CUDA_FLASHMLA_PREFILL
+  for (const void *held : g_flashmla_quarantine) {
+    if (d == held) return;
+  }
+#endif
 #ifdef FAK_CUDA_V41_INDEXER
   for (const void *held : g_v41_indexer_quarantine) {
     if (d == held) return;
@@ -151,6 +161,14 @@ extern "C" void fcuda_free(void *d) {
 // record intact and unavailable to pool reuse; the caller must surface the fault.
 extern "C" int fcuda_discard_unsubmitted(void *d, size_t expected_bytes) {
   if (!d || g_capture_open) return (int)cudaErrorInvalidValue;
+#ifdef FAK_CUDA_DEEPGEMM_WKV
+  for (const void *held : g_deepgemm_wkv_quarantine)
+    if (d == held) return (int)cudaErrorInvalidValue;
+#endif
+#ifdef FAK_CUDA_FLASHMLA_PREFILL
+  for (const void *held : g_flashmla_quarantine)
+    if (d == held) return (int)cudaErrorInvalidValue;
+#endif
   auto it = g_live.find(d);
   if (it == g_live.end() || it->second != expected_bytes)
     return (int)cudaErrorInvalidValue;

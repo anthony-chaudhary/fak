@@ -92,11 +92,17 @@ func (m *Model) v41ProjPanelWithInput(l int, leaf string, panel []float32, out, 
 	if !present || wr != out || wc != in {
 		return nil, v41StageErr(v41StageAttention, l, fmt.Errorf("%w: invalid resident projection shape for %s", ErrV41ForwardStage, name))
 	}
+	chunkRows := v41ProjPanelRowChunk
+	// Only the explicitly attached packed WKV route uses native 128-row tiles.
+	// Existing borrowed input loans retain their exact 64-row ownership contract.
+	if loan == nil && leaf == "attn.wkv.weight" && m.v41PackedWKVPresent(name) {
+		chunkRows = 128
+	}
 	y := make([]float32, outputN)
 	for lo := 0; lo < seq; {
 		n := seq - lo
-		if n > v41ProjPanelRowChunk {
-			n = v41ProjPanelRowChunk
+		if n > chunkRows {
+			n = chunkRows
 		}
 		hi := lo + n
 		if n > 1 {

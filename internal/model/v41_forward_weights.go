@@ -1201,6 +1201,9 @@ func (s *Session) v41BindDenseProjection() v41BoundDenseProjection {
 		return v41BoundDenseProjection{}
 	}
 	core := func(l int, leaf string, panel []float32, out, in, rows int, continuation *v41ProjectionContinuation) (result []float32, outcome v41DenseProjectionOutcome, cause error) {
+		if y, outcome, err := s.v41PackedWKVProjection(l, leaf, panel, out, in, rows, continuation); outcome != v41ProjectionDeclined {
+			return y, outcome, err
+		}
 		head := l == -1 && leaf == s.M.headName()
 		compressor := v41CompressorProjectionLeaf(leaf)
 		indexer := v41IndexerProjectionLeaf(leaf)

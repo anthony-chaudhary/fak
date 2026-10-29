@@ -245,6 +245,25 @@ func AuditCUDAArchiveImages(ctx context.Context, tc *Toolchain, repoRoot, arch, 
 		wantSASS = append(wantSASS, plan.arches...)
 		sortCUDAImageArchitectures(wantSASS)
 	}
+	if _, ok := ctx.Value(cudaDeepGEMMKey{}).(*cudaDeepGEMMOptions); ok {
+		for _, arch := range []string{"sm_100f", "sm_103f"} {
+			found := false
+			for _, existing := range wantSASS {
+				if arch == existing {
+					found = true
+					break
+				}
+			}
+			if !found {
+				wantSASS = append(wantSASS, arch)
+			}
+		}
+		sortCUDAImageArchitectures(wantSASS)
+	}
+	return auditCUDAImages(ctx, tc, archive, wantSASS, wantPTX)
+}
+
+func auditCUDAImages(ctx context.Context, tc *Toolchain, archive string, wantSASS, wantPTX []string) (*CUDAArchiveImageAudit, error) {
 	tool, err := cudaImageAuditTool(tc)
 	if err != nil {
 		return nil, err

@@ -85,7 +85,16 @@ static bool g_v41_indexer_uncertain = false;
 static uint64_t g_v41_indexer_completed = 0;
 #endif
 
-#if defined(FAK_CUDA_V41_BF16_PUBLISH) || defined(FAK_CUDA_V41_TAIL_ROPE) || defined(FAK_CUDA_V41_INDEXER)
+#ifdef FAK_CUDA_FLASHMLA_PREFILL
+static const void *g_flashmla_quarantine[14] = {};
+static bool g_flashmla_uncertain = false;
+#endif
+
+#ifdef FAK_CUDA_DEEPGEMM_WKV
+#include "cuda/deepgemm_wkv_state.cuh"
+#endif
+
+#if defined(FAK_CUDA_V41_BF16_PUBLISH) || defined(FAK_CUDA_V41_TAIL_ROPE) || defined(FAK_CUDA_V41_INDEXER) || defined(FAK_CUDA_FLASHMLA_PREFILL) || defined(FAK_CUDA_DEEPGEMM_WKV)
 // Both candidates share g_stream. A successful peer call cannot rehabilitate
 // an uncertain operation, even when the Go backend has no fault latch.
 static bool v41_candidates_stream_uncertain(void) {
@@ -97,6 +106,12 @@ static bool v41_candidates_stream_uncertain(void) {
 #endif
 #ifdef FAK_CUDA_V41_INDEXER
   if (g_v41_indexer_uncertain) return true;
+#endif
+#ifdef FAK_CUDA_FLASHMLA_PREFILL
+  if (g_flashmla_uncertain) return true;
+#endif
+#ifdef FAK_CUDA_DEEPGEMM_WKV
+  if (g_deepgemm_wkv_uncertain) return true;
 #endif
   return false;
 }
@@ -124,6 +139,9 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/kernel_profile.cuh"
 #include "cuda/runtime_memory.cuh"
 #include "cuda/runtime_services.cuh"
+#ifdef FAK_CUDA_FLASHMLA_PREFILL
+#include "cuda_flashmla_sparse_prefill_bridge.cuh"
+#endif
 #include "cuda/model_candidates.cuh"
 #include "cuda_v41_indexer.cu"
 #include "cuda/qwen35_gdn.cuh"
@@ -139,4 +157,7 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/weight_formats.cuh"
 #include "cuda/q4k_fp8lt.cuh"
 #include "cuda/mxfp8_cast.cuh"
+#ifdef FAK_CUDA_DEEPGEMM_WKV
+#include "cuda/deepgemm_wkv_bridge.cuh"
+#endif
 #include "cuda/peer_handoff.cuh"
