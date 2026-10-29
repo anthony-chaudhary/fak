@@ -1073,3 +1073,36 @@ No upstream executable or inference runtime is used.
  * limitations under the License.
  */
 ```
+
+## vLLM paged attention v1/v2
+
+The opt-in CUDA paged KV store's decode attention, `internal/compute/cuda/paged_attention_vllm.cuh`,
+adapts `paged_attention_kernel`, `paged_attention_v1_kernel`, `paged_attention_v2_kernel`
+and `paged_attention_v2_reduce_kernel` from `csrc/attention/attention_kernels.cuh`, the
+float vector helpers of `attention_generic.cuh`, `attention_utils.cuh` and
+`dtype_float32.cuh`, the warp-shuffle macros of `csrc/cuda_compat.h`, the launcher
+v1/v2 selection rule of `paged_attention_v1.cu` / `paged_attention_v2.cu`, and
+`reshape_and_cache_kernel` from `csrc/cache_kernels.cu`, at vLLM tag `v0.11.0`
+(`b8b302cde434df8c9289a2b465406b47ebab1c2d`):
+https://github.com/vllm-project/vllm/tree/b8b302cde434df8c9289a2b465406b47ebab1c2d/csrc/attention
+The kernel is itself adapted by vLLM from NVIDIA FasterTransformer
+`decoder_masked_multihead_attention_template.hpp` (release/v5.3_tag), Apache-2.0.
+
+Changed for Fak: only the float / float / kAuto / non-block-sparse instantiation is kept,
+so its `if constexpr` arms are resolved (C++14) and the fp8/fp16/bf16 dtype headers,
+ALiBi and block-sparse parameters are dropped; torch launchers are replaced by extern "C"
+adapters; the cache write takes one contiguous in-page run instead of a slot-mapping
+tensor and optionally writes a second key-layout plane (pre-RoPE K); the namespace is
+`fak_vllm_pa`. The row gather out of the paged layout is Fak-native glue. No vLLM Python
+source or runtime is included.
+
+```text
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+```
+
+The full Apache License, Version 2.0 text is reproduced in the
+"TensorFold benchmark evidence" section above. Copyright (c) 2023, The vLLM team;
+Copyright (c) 2020-2023, NVIDIA CORPORATION. Licensed under the Apache License,
+Version 2.0.

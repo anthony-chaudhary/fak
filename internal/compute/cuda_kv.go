@@ -31,6 +31,13 @@ var graphKVFitWarned atomic.Bool
 // cudaMalloc) when it fits the free device memory; every other session stays growable and
 // runs uncaptured (GraphCaptureReady reports false).
 func (c *cudaBackend) NewKV(cfg KVConfig) KVStore {
+	if CUDAPagedKVEnabled() && CUDAPagedKVEligible(cfg) {
+		return c.newPagedKV(cfg)
+	}
+	return c.newContiguousKV(cfg)
+}
+
+func (c *cudaBackend) newContiguousKV(cfg KVConfig) *cudaKV {
 	dtype := F32
 	switch cfg.Precision {
 	case KVPrecisionF32:
@@ -420,13 +427,20 @@ func (k *cudaKV) SnapshotToHost() (KVHostSnapshot, error) {
 // RestoreKVFromHost bulk-copies a complete host image back into fresh CUDA KV
 // allocations. It is the inverse of SnapshotToHost; no per-token forward runs.
 func (c *cudaBackend) RestoreKVFromHost(state KVHostSnapshot) (out KVStore, err error) {
+	if CUDAPagedKVEnabled() && CUDAPagedKVEligible(state.Config) {
+		return c.restorePagedKVFromHost(state)
+	}
+	return c.restoreContiguousKVFromHost(state)
+}
+
+func (c *cudaBackend) restoreContiguousKVFromHost(state KVHostSnapshot) (out KVStore, err error) {
 	if err := state.Validate(); err != nil {
 		return nil, err
 	}
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	k, ok := c.NewKV(cloneKVConfig(state.Config)).(*cudaKV)
-	if !ok || k == nil {
+	k := c.newContiguousKV(cloneKVConfig(state.Config))
+	if k == nil {
 		return nil, fmt.Errorf("cuda: NewKV returned an incompatible store during host restore")
 	}
 	k.pos = append([]int(nil), state.Pos...)

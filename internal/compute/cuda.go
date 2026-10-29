@@ -1325,6 +1325,9 @@ func (c *cudaBackend) AddBias(dst, bias Tensor) {
 func (c *cudaBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, grp int, scale float32) Tensor {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	if pk, ok := kv.(*cudaPagedKV); ok {
+		return c.pagedAttentionLocked(q, pk, layer, grp, scale)
+	}
 	ck := kv.(*cudaKV)
 	hd, nKV := ck.cfg.HeadDim, ck.cfg.NumKVHeads
 	nH := grp * nKV

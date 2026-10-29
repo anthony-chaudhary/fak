@@ -201,6 +201,12 @@ func (c *cudaBackend) PromptPanelRoPE(x Tensor, tokens, start, nHeads, headDim i
 
 // PromptPanelAppendKV appends tokens contiguous rows to layer's raw-key, key and value caches.
 func (c *cudaBackend) PromptPanelAppendKV(kv KVStore, layer int, kRaw, kRoPE, v Tensor, start, tokens int) {
+	if pk, ok := kv.(*cudaPagedKV); ok && pk != nil && tokens > 0 {
+		cudaMu.Lock()
+		defer cudaMu.Unlock()
+		c.pagedPanelAppendLocked(pk, layer, kRaw, kRoPE, v, start, tokens)
+		return
+	}
 	ck, ok := kv.(*cudaKV)
 	if !ok || ck == nil {
 		cudaPromptPanelFail("prompt-panel-kv-store", "prompt panel KV append needs the CUDA KV store", 0)
@@ -237,6 +243,11 @@ func (c *cudaBackend) PromptPanelAppendKV(kv KVStore, layer int, kRaw, kRoPE, v 
 
 // PromptPanelAttention attends query row t of q [tokens, nH*hd] to cache positions [0, start+t].
 func (c *cudaBackend) PromptPanelAttention(q Tensor, kv KVStore, layer, tokens, start, grp int, scale float32) Tensor {
+	if pk, ok := kv.(*cudaPagedKV); ok && pk != nil && tokens > 0 && start >= 0 && grp > 0 {
+		cudaMu.Lock()
+		defer cudaMu.Unlock()
+		return c.pagedPanelAttentionLocked(q, pk, layer, tokens, start, grp, scale)
+	}
 	ck, ok := kv.(*cudaKV)
 	if !ok || ck == nil {
 		cudaPromptPanelFail("prompt-panel-attention-store", "prompt panel attention needs the CUDA KV store", 0)

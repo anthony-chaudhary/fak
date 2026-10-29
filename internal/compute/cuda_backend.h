@@ -482,6 +482,29 @@ void fcuda_attention_f32(const float *dQ, const float *dK, const float *dV, floa
 void fcuda_flash_attention_f32(const float *dQ, const float *dK, const float *dV, float *dOut,
                                int nPos, int maxPos, int nH, int nKV, int hd, float scale);
 
+/* Paged KV (opt-in FAK_CUDA_PAGED_KV; cuda/paged_attention_vllm.cuh, vLLM v0.11.0).
+ * Caches use vLLM's block layout: K [blocks, nKV, hd/4, block, 4], V [blocks, nKV, hd, block].
+ * fcuda_paged_attention_f32 is decode attention of q [num_seqs, nH*hd] through
+ * block_tables [num_seqs, max_blocks] and device seq_lens [num_seqs]; it picks upstream's
+ * v1 or partitioned v2 kernel and needs fcuda_paged_attention_scratch_floats() floats of
+ * scratch for v2. fcuda_paged_kv_write_f32 writes `tokens` rows into one page from
+ * block_offset (k2 / k2_cache: an optional second key-layout plane). fcuda_paged_kv_gather_f32
+ * unpacks rows [0, tokens) of one plane back to row-major. All return 0 or a refusal. */
+long long fcuda_paged_attention_scratch_floats(int num_seqs, int num_heads, int head_size,
+                                               int max_seq_len);
+int fcuda_paged_attention_f32(float *out, const float *q, const float *k_cache,
+                              const float *v_cache, const int *block_tables, const int *seq_lens,
+                              int num_seqs, int num_heads, int num_kv_heads, int head_size,
+                              int max_num_blocks_per_seq, int max_seq_len, float scale,
+                              float *scratch, long long scratch_floats);
+int fcuda_paged_attention_supported(int head_size, int block_size);
+int fcuda_paged_kv_write_f32(float *k_cache, float *v_cache, float *k2_cache, const float *k,
+                             const float *v, const float *k2, int block_idx, int block_offset,
+                             int tokens, int num_kv_heads, int head_size, int block_size);
+int fcuda_paged_kv_gather_f32(float *dst, const float *cache, const int *block_table, int tokens,
+                              int num_kv_heads, int head_size, int block_size, int key_layout);
+int fcuda_paged_store_int(int *dst, int value);
+
 /* Dense HAL prompt panel (model.promptPanelBackend). fcuda_rope_panel_f32 rotates row t of
  * dX [tokens, nHeads*headDim] at start+t into dY. fcuda_causal_attention_panel_f32 attends
  * query row t of dQ [tokens, nH*hd] to K/V rows [0, prefix+t]. Both return 0 or a refusal. */

@@ -16,6 +16,7 @@ and process-wide state, then includes these implementation fragments in dependen
 | `transformer_ops.cuh` | normalization, RoPE, gating, elementwise, and KV writes |
 | `fattn_mma_hd256.cuh` | Qwen3.8 hd256 tensor-core prompt attention adapted from llama.cpp (opt-in) |
 | `attention.cuh` | decode, flash, and prompt-panel attention |
+| `paged_attention_vllm.cuh` | block-table decode attention, paged KV write and row gather adapted from vLLM v0.11.0 (opt-in `FAK_CUDA_PAGED_KV`) |
 | `spec_graph.cuh` | speculative/DSA attention, argmax, and graph capture |
 | `weight_formats.cuh` | AWQ, GPTQ, and cuBLASLt NVFP4 paths |
 
