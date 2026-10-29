@@ -263,22 +263,26 @@ type Result struct {
 	Pushed    bool     `json:"pushed"`
 	// Evidence is the versioned completion contract. When present, Verified is its derived
 	// aggregate; when absent, Verified retains the legacy executor diff-witness contract.
-	Evidence         *CommitEvidence  `json:"evidence,omitempty"`
-	Value            float64          `json:"value"`
-	ValueUnit        string           `json:"value_unit,omitempty"`
-	Score            int              `json:"score"`
-	LegacyScore      int              `json:"legacy_score,omitempty"`
-	LegacyScoreScale int              `json:"legacy_score_scale,omitempty"`
-	Grade            string           `json:"grade"`
-	ScoreNotes       []string         `json:"score_notes,omitempty"`
-	Reason           string           `json:"reason,omitempty"`
-	Detail           string           `json:"detail,omitempty"`
-	RacedExtra       []string         `json:"raced_extra_paths,omitempty"`
-	HeadBefore       string           `json:"head_before,omitempty"`
-	LockHoldNS       int64            `json:"lock_hold_ns,omitempty"`
-	LockWait         *LockWaitReceipt `json:"lock_wait,omitempty"`
-	CoreLockPaths    []string         `json:"core_lock_paths,omitempty"`
-	CoreLockWitness  string           `json:"core_lock_witness,omitempty"`
+	Evidence         *CommitEvidence `json:"evidence,omitempty"`
+	Value            float64         `json:"value"`
+	ValueUnit        string          `json:"value_unit,omitempty"`
+	Score            int             `json:"score"`
+	LegacyScore      int             `json:"legacy_score,omitempty"`
+	LegacyScoreScale int             `json:"legacy_score_scale,omitempty"`
+	Grade            string          `json:"grade"`
+	ScoreNotes       []string        `json:"score_notes,omitempty"`
+	Reason           string          `json:"reason,omitempty"`
+	Detail           string          `json:"detail,omitempty"`
+	RacedExtra       []string        `json:"raced_extra_paths,omitempty"`
+	HeadBefore       string          `json:"head_before,omitempty"`
+	// IndexRestored lists the paths this commit staged and then unstaged again because the
+	// commit was refused or failed before HEAD moved (indexrestore.go), so a retry does not
+	// trip PRESTAGED_PATH_OVERLAP on the command's own earlier staging.
+	IndexRestored   []string         `json:"index_restored,omitempty"`
+	LockHoldNS      int64            `json:"lock_hold_ns,omitempty"`
+	LockWait        *LockWaitReceipt `json:"lock_wait,omitempty"`
+	CoreLockPaths   []string         `json:"core_lock_paths,omitempty"`
+	CoreLockWitness string           `json:"core_lock_witness,omitempty"`
 	// CoreLockWitnessCorrelation is whether CoreLockWitness actually named a path
 	// this commit changed ("correlated" / "uncorrelated" / "indeterminate", plus
 	// why). A CONFIRMED witness is not automatically a RELEVANT one; this is the
@@ -610,6 +614,21 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (r
 	// including a path already removed from the index by `git rm`, without touching any other
 	// dirty file. The post-commit assertion (step 7) remains the authority — a peer who raced
 	// between this add and the commit is caught there.
+	// Snapshot what is already staged under the pathspec, so a refusal after `git add` (a
+	// pre-commit hook's COMMITTED_RED / BUILD_CHECK_TIMEOUT, a stalled commit) unstages only
+	// what THIS command staged. Registered after the lock's defer, so it runs under the lock.
+	if preStaged, ok := stagedPathSet(postCtx, run, opts.Dir, paths); ok {
+		headBefore := res.HeadBefore
+		defer func() {
+			if res.Committed {
+				return
+			}
+			if restored := restoreIndexAfterRefusal(ctx, run, opts.Dir, headBefore, paths, preStaged); len(restored) > 0 {
+				res.IndexRestored = restored
+			}
+		}()
+	}
+
 	tracker.Start(PhaseStage)
 	addArgs := append([]string{"add", "--all", "--"}, paths...)
 	phaseCtx, phaseCancel = withPhaseTimeout(postCtx)
