@@ -385,6 +385,12 @@ int fcuda_q2k_matmul_f32(const uint8_t *dQ2K, const float *dX, float *dY, int ou
 void fcuda_q2k_gemv(const uint8_t *dQ2K, const float *dX, float *dY, int out, int in, int P);
 void fcuda_q2k_gemm_panel(const uint8_t *dQ2K, const float *dX, float *dY, int out, int in, int P);
 
+/* fcuda_iq2xxs_gemv / fcuda_iq2xs_gemv: Y[P,out] = X[P,in] @ W[out,in]^T where W is the resident
+ * verbatim llama.cpp IQ2_XXS (66 B) / IQ2_XS (74 B) 256-element super-block stream; decode fused
+ * into a warp-per-row GEMV, f32 activations, F32 accumulate (cuda/iq_gemv.cuh, oss-index TICKET-01). */
+void fcuda_iq2xxs_gemv(const uint8_t *dW, const float *dX, float *dY, int out, int in, int P);
+void fcuda_iq2xs_gemv(const uint8_t *dW, const float *dX, float *dY, int out, int in, int P);
+
 /* per-row RMSNorm: y[r,:] = x[r,:] * rsqrt(mean(x[r,:]^2) + eps) * w[:]  (rows x n). */
 void fcuda_rmsnorm_f32(const float *dX, const float *dW, float *dY, int rows, int n, float eps);
 /* shape-aware dispatched RMSNorm: selects warp-per-row for fitting widths or block-per-row for wide rows */

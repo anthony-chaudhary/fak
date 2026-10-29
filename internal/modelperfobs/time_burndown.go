@@ -28,6 +28,9 @@ type RequestPhaseReceipt struct {
 	Model     string                  `json:"model"`
 	Backend   string                  `json:"backend"`
 	Receipt   nativeperf.PhaseReceipt `json:"receipt"`
+	// UnattributedMS is producer-observed request wall outside Receipt.Wall that
+	// no measured phase covers. Nil is not reported, never zero.
+	UnattributedMS *float64 `json:"unattributed_ms,omitempty"`
 }
 
 // TimeBurndownPhase belongs to one accounting plane. API spans have no observed
@@ -117,6 +120,9 @@ func ReadRequestPhaseReceipts(r io.Reader) ([]RequestPhaseReceipt, error) {
 func validateRequestPhaseReceipt(row RequestPhaseReceipt) error {
 	if row.Schema != RequestPhaseSchema || strings.TrimSpace(row.RequestID) == "" || strings.TrimSpace(row.Model) == "" || strings.TrimSpace(row.Backend) == "" {
 		return fmt.Errorf("%w: native receipt requires schema and request/model/backend identities", ErrInvalidTimeBurndown)
+	}
+	if row.UnattributedMS != nil && !finiteNonnegative(*row.UnattributedMS) {
+		return fmt.Errorf("%w: native receipt %q has non-finite or negative unattributed time", ErrInvalidTimeBurndown, row.RequestID)
 	}
 	if err := row.Receipt.Validate(0); err != nil {
 		return fmt.Errorf("%w: native receipt %q: %v", ErrInvalidTimeBurndown, row.RequestID, err)

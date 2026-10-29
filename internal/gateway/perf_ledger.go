@@ -314,23 +314,27 @@ func (m *gatewayMetrics) recordPerf(loc servingLocality, promptTok, complTok, ca
 		rec.BenchEvidence = completionBenchEvidence(detail.completion)
 	}
 	detail.src.apply(&rec)
-	m.observeDecodeWindowReceipt(detail.src)
-	m.commitPerf(rec)
+	decode, decodeOK := m.observeDecodeWindowReceipt(detail.src)
+	committed := m.commitPerf(rec)
+	m.recordRequestPhases(committed, decode, decodeOK)
 }
 
-// observeDecodeWindowReceipt books one request's decode-window kernel/decode split
-// into the native phase counters, once per request, in memory only.
-func (m *gatewayMetrics) observeDecodeWindowReceipt(src perfSource) {
+// observeDecodeWindowReceipt claims one request's decode-window kernel/decode
+// split, once per request, books it into the native phase counters, and returns
+// it for the request's full phase receipt.
+func (m *gatewayMetrics) observeDecodeWindowReceipt(src perfSource) (nativeperf.PhaseReceipt, bool) {
 	o := src.observation
-	if m.nativePhases == nil || o == nil {
-		return
+	if o == nil {
+		return nativeperf.PhaseReceipt{}, false
 	}
 	o.mu.Lock()
 	ctx := o.phaseContext
 	o.mu.Unlock()
-	if receipt, ok := nativeperf.RequestDecodeHostWork(ctx).ClaimPhaseReceipt(); ok {
+	receipt, ok := nativeperf.RequestDecodeHostWork(ctx).ClaimPhaseReceipt()
+	if ok && m.nativePhases != nil {
 		m.nativePhases.ObservePhases(receipt, time.Now())
 	}
+	return receipt, ok
 }
 
 // recordPerfFailure emits the perf row for a turn that failed before completing.
@@ -350,7 +354,9 @@ func (m *gatewayMetrics) recordPerfFailure(src perfSource, loc servingLocality, 
 	m.commitPerf(rec)
 }
 
-func (m *gatewayMetrics) commitPerf(rec perfledger.Record) {
+// commitPerf stamps identity, appends the row to the ring and durable sink, and
+// returns the row as committed.
+func (m *gatewayMetrics) commitPerf(rec perfledger.Record) perfledger.Record {
 	if sb := m.perfServedBy.Load(); sb != nil {
 		rec.Identity = sb.Identity
 		if rec.Model == "" && rec.Error == "" {
@@ -366,6 +372,7 @@ func (m *gatewayMetrics) commitPerf(rec perfledger.Record) {
 	if sink := m.perfSink.Load(); sink != nil {
 		sink.Offer(rec)
 	}
+	return rec
 }
 
 // recordFailedTurn records the perf row for a served turn whose planner call

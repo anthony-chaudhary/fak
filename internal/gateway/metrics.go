@@ -495,6 +495,8 @@ type gatewayMetrics struct {
 	perfRecordsDropped bool
 	perfSink           atomic.Pointer[perfledger.Writer]
 	perfServedBy       atomic.Pointer[perfledger.ServedBy]
+	// requestPhases is the fak-request-phases/1 ring (request_phase_receipt.go).
+	requestPhases requestPhaseRing
 	// httpWriteTimeout is the serving http.Server's effective WriteTimeout (ns; 0 =
 	// none or not serving through Serve). A buffered turn that outlives it never
 	// reached the client, so its perf row is client_write_timeout.

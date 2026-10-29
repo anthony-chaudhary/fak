@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -48,6 +49,32 @@ func TestServeExpertRingHostDefault(t *testing.T) {
 	// The pool fraction environment still applies to a host-defaulted auto ring.
 	if size, err := resolveServeExpertRingSize("", ringEnv("", "0.1")); err != nil || size.PoolFraction != 0.1 || !size.HostDefault {
 		t.Fatalf("host default with fraction env: %+v err=%v", size, err)
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestServeExpertRingHostDefaultIgnoresInvalidFraction(t *testing.T) {
+	for _, raw := range []string{"lots", "0", "0.9", "-1"} {
+		size, err := resolveServeExpertRingSize("", ringEnv("", raw))
+		if err != nil || !size.HostDefault || size.PoolFraction != 0 {
+			t.Fatalf("host default with fraction %q: %+v err=%v, want launch with default fraction", raw, size, err)
+		}
+		// An operator who asked for auto is still refused over the same value.
+		if _, err := resolveServeExpertRingSize("auto", ringEnv("", raw)); !errors.Is(err, ErrServeExpertRingSize) {
+			t.Fatalf("explicit auto with fraction %q: err=%v, want ErrServeExpertRingSize", raw, err)
+		}
+	}
+	f := ringSizingFit()
+	const token = 3 * ringGiB
+	size, err := resolveServeExpertRingSize("", ringEnv("", "lots"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	total := 128 * ringGiB
+	discrete := serveExpertRingHost{Total: total, Avail: 120 * ringGiB, Known: true, RSSAnonPeak: 2 * ringGiB}
+	s, err := sizeServeExpertRing(size.forHostTotal(discrete.Total, discrete.Known), f, token, ringSizingNonRing(f, 2*ringGiB), 200*ringGiB, discrete)
+	if err != nil || s.Mode != serveExpertRingAuto || s.PoolFraction != serveExpertRingPoolFractionDiscrete {
+		t.Fatalf("host-default auto with invalid fraction: mode=%s fraction=%v err=%v, want auto at the 0.40 tier default", s.Mode, s.PoolFraction, err)
 	}
 }
 

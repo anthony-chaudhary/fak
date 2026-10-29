@@ -404,6 +404,14 @@ the backend graph node-comparison and sentinel process from
 https://github.com/ggml-org/llama.cpp/blob/fd55cb98fe29d3df0054d3f3e6e6f15958ea72ab/tests/test-backend-ops.cpp
 That upstream source uses the same MIT license below.
 
+The CUDA IQ2_XXS / IQ2_XS GEMV in `internal/compute/cuda/iq_gemv.cuh` ports the
+i-quant decode of `vec_dot_iq2_xxs_q8_1` and `vec_dot_iq2_xs_q8_1`
+(`ggml/src/ggml-cuda/vecdotq.cuh`) and the `iq2xxs_grid`, `iq2xs_grid` and
+`ksigns_iq2xs` tables (`ggml/src/ggml-common.h`) at llama.cpp revision
+`f7c01c5226cac1de1052c17920ff38cdefea0ae6`:
+https://github.com/ggml-org/llama.cpp/blob/f7c01c5226cac1de1052c17920ff38cdefea0ae6/ggml/src/ggml-cuda/vecdotq.cuh
+That upstream source uses the same MIT license below.
+
 `fak-dev kernel-oracle` (`cmd/fak-dev/kernel_oracle_parse.go`) runs no ggml code: it
 parses the console perf rows of an externally built `test-backend-ops` binary
 (`print_perf_console`, `test_generic_op` parameter strings and `--test-file`
