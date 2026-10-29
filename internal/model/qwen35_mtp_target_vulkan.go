@@ -103,30 +103,40 @@ func qwen35MTPPrepareTargetCapture(target *Session) error {
 	return nil
 }
 
+// qwen35MTPResidentTargetBackend names the resident backends whose sequence
+// operation may serve as the MTP verify target. Naming a backend here admits
+// nothing by itself: validateQwen35MTPVulkanTarget still requires every resident
+// capability below, so a backend that has not implemented raw-hidden capture
+// or prefix replay keeps refusing with a typed downgrade.
+func qwen35MTPResidentTargetBackend(name string) bool {
+	name = strings.TrimSpace(name)
+	return strings.EqualFold(name, "vulkan") || strings.EqualFold(name, "cuda")
+}
+
 func validateQwen35MTPVulkanTarget(target *Session) error {
-	if target.Backend == nil || !strings.EqualFold(target.Backend.Name(), "vulkan") {
-		return &Qwen35MTPSpecDecodeUnsupportedError{Reason: "resident MTP target capture currently requires the Vulkan backend"}
+	if target.Backend == nil || !qwen35MTPResidentTargetBackend(target.Backend.Name()) {
+		return &Qwen35MTPSpecDecodeUnsupportedError{Reason: "resident MTP target capture currently requires the Vulkan or CUDA backend"}
 	}
 	if (target.Quant && !target.Q4K) || target.Q4 || target.F16 || target.GPTQ || target.Metal || target.MetalQ4K || target.PrecisionPolicy != nil {
-		return &Qwen35MTPSpecDecodeUnsupportedError{Reason: "Vulkan MTP target supports the retained f32 or Q4_K model path only"}
+		return &Qwen35MTPSpecDecodeUnsupportedError{Reason: "resident MTP target supports the retained f32 or Q4_K model path only"}
 	}
 	if _, split := target.validateDenseGPULayers(); split {
-		return &Qwen35MTPSpecDecodeUnsupportedError{Reason: "Vulkan MTP target excludes split host/device layer placement"}
+		return &Qwen35MTPSpecDecodeUnsupportedError{Reason: "resident MTP target excludes split host/device layer placement"}
 	}
 	if _, advertised, err := qwen35SequencePrefillBackend(target.Backend); err != nil || !advertised {
 		if err != nil {
 			return err
 		}
-		return &Qwen35MTPSpecDecodeUnsupportedError{Reason: "Vulkan target lacks the resident Qwen3.8 sequence operation"}
+		return &Qwen35MTPSpecDecodeUnsupportedError{Reason: "resident target lacks the resident Qwen3.8 sequence operation"}
 	}
 	if cap, ok := target.Backend.(compute.Qwen35SequenceAllLogitsBackend); !ok || cap.Qwen35SequenceAllLogitsPath() != compute.Qwen35SequenceAllLogitsPath {
-		return &Qwen35MTPSpecDecodeUnsupportedError{Reason: "Vulkan target lacks all-row final projection"}
+		return &Qwen35MTPSpecDecodeUnsupportedError{Reason: "resident target lacks all-row final projection"}
 	}
 	if cap, ok := target.Backend.(compute.Qwen35SequenceRawHiddenBackend); !ok || cap.Qwen35SequenceRawHiddenPath() != compute.Qwen35SequenceRawHiddenPath {
-		return &Qwen35MTPSpecDecodeUnsupportedError{Reason: "Vulkan target lacks exact raw-hidden capture"}
+		return &Qwen35MTPSpecDecodeUnsupportedError{Reason: "resident target lacks exact raw-hidden capture"}
 	}
 	if cap, ok := target.Backend.(compute.Qwen35SequencePrefixReplayBackend); !ok || cap.Qwen35SequencePrefixReplayPath() != compute.Qwen35SequencePrefixReplayPath {
-		return &Qwen35MTPSpecDecodeUnsupportedError{Reason: "Vulkan target lacks retained prefix replay"}
+		return &Qwen35MTPSpecDecodeUnsupportedError{Reason: "resident target lacks retained prefix replay"}
 	}
 	return nil
 }

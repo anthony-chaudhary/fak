@@ -137,9 +137,9 @@ func newInKernelChatPlanner(cfg Config, modelID string, logf func(string, ...any
 	}
 	if shouldEnableVulkanMTP(cfg) {
 		if err := ikp.EnableVulkanMTP(model.Qwen35MTPMaxDraftDepth); err != nil {
-			logf("gateway: failed to enable resident Vulkan MTP: %v", err)
+			logf("gateway: failed to enable resident %s MTP: %v", cfg.Backend.Name(), err)
 		} else {
-			logf("gateway: enabled request-bound resident Vulkan MTP with resident target verification")
+			logf("gateway: enabled request-bound resident %s MTP with resident target verification", cfg.Backend.Name())
 		}
 	} else if shouldEnableNGramSpeculative(cfg) {
 		ikp.EnableSpeculativeDecoding(model.NewNGramProposalGenerator(model.NgramDrafter{
