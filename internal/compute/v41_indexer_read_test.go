@@ -72,3 +72,48 @@ func TestV41IndexerReadMalformedAndPanic(t *testing.T) {
 	}()
 	ReadV41IndexerScores(b, Tensor{}, 2)
 }
+
+// indexReadChecked models the sealed consumer contract without granting CUDA
+// qualification or claiming a physical readback witness.
+type indexReadChecked struct {
+	indexReadLegacy
+	checkedCalls int
+	err          error
+}
+
+func (b *indexReadChecked) v41ReadIndexerChecked(original Backend, _ Tensor, _ int) ([]float32, bool, error) {
+	if original != b {
+		return nil, false, nil
+	}
+	b.checkedCalls++
+	return b.values, true, b.err
+}
+
+type indexReadCheckedWrapper struct{ *indexReadChecked }
+
+func (b *indexReadCheckedWrapper) Read(t Tensor) []float32 { return b.indexReadLegacy.Read(t) }
+
+// fak-test:runtime fast est=5ms lane=default
+func TestV41IndexerCheckedReadIsTerminal(t *testing.T) {
+	b := &indexReadChecked{indexReadLegacy: indexReadLegacy{values: []float32{1, 2}}}
+	got, ok := ReadV41IndexerScores(b, Tensor{}, 2)
+	if !ok || &got[0] != &b.values[0] || b.checkedCalls != 1 || b.calls != 0 {
+		t.Fatal("checked read must transfer owned storage without generic retry")
+	}
+	if got, ok := ReadV41IndexerScores(b, Tensor{}, 1); ok || got != nil || b.checkedCalls != 2 || b.calls != 0 {
+		t.Fatal("malformed checked result must be terminal")
+	}
+	wrapped := &indexReadCheckedWrapper{b}
+	got, ok = ReadV41IndexerScores(wrapped, Tensor{}, 2)
+	if !ok || &got[0] == &b.values[0] || b.checkedCalls != 2 || b.calls != 1 {
+		t.Fatal("wrapper must retain generic Read and defensive copy")
+	}
+	failure := &BackendError{Backend: "cuda", Site: "V41IndexerReadback", Message: "checked failure"}
+	b.err = failure
+	defer func() {
+		if recover() != failure || b.checkedCalls != 3 || b.calls != 1 {
+			t.Fatal("checked transport error must retain identity without retry")
+		}
+	}()
+	ReadV41IndexerScores(b, Tensor{}, 2)
+}

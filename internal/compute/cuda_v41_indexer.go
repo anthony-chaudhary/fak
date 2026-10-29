@@ -144,6 +144,17 @@ func (c *cudaBackend) cudaV41IndexerScore(q, keys, weights Tensor, rows, heads, 
 	return makeTensor(c, F32, RowMajor, []int{rows}, nil, output), nil
 }
 
+// v41ReadIndexerChecked binds only canonical CUDA score consumers. A wrapper's
+// Read override must remain on the generic path, even if this method is promoted.
+func (c *cudaBackend) v41ReadIndexerChecked(original Backend, t Tensor, rows int) ([]float32, bool, error) {
+	canonical, ok := original.(*cudaBackend)
+	if !ok || canonical != c {
+		return nil, false, nil
+	}
+	values, err := c.cudaV41IndexerReadback(t, rows)
+	return values, true, err
+}
+
 func (c *cudaBackend) cudaV41IndexerReadback(t Tensor, rows int) ([]float32, error) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
@@ -166,6 +177,10 @@ func (c *cudaBackend) cudaV41IndexerReadback(t Tensor, rows int) ([]float32, err
 	if status != 0 {
 		return nil, c.cudaV41IndexerStatus("V41IndexerReadback", status)
 	}
+	// The checked device-0 read passed native same-stream completion checks.
+	// Failed or refused
+	// reads never certify completion of resident input staging.
+	atomic.AddUint64(&c.fenceGen, 1)
 	return values, nil
 }
 
