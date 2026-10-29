@@ -877,6 +877,7 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 	}
 	var planner agent.Planner
 	var native *turnkeyNativeResources
+	var nativeModelPath string
 	var capturedMetalDecision serveMetalDecision
 	// Declare the boot phase honestly: until the model/planner is constructed and
 	// the listener is about to bind, a readiness probe must not claim ready.
@@ -946,6 +947,7 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 			if err != nil {
 				return nil, err
 			}
+			nativeModelPath = ref
 			metalDecision := serveMetalDecision{live: native.Startup.MetalLive}
 			if !metalDecision.live && native.Startup.MetalCompiled {
 				metalDecision.skippedBecause = skipReasonNoDevice
@@ -972,7 +974,13 @@ func startTurnkeyServer(ctx context.Context, plan macfit.TurnkeyProfile, addr st
 	// readable instruction snapshot, a planner that cannot warm) leaves readiness
 	// unaffected — an explicit unconfigured/cold serve, never a fabricated warm.
 	agentWarm := &turnkeyAgentWarmGate{}
-	agentWarmArmed := installTurnkeyAgentWarmForPlanner(planner, agentWarm, resolveUpAgentWarmWorkspace(""), os.Stderr)
+	agentWarmWorkspace := resolveUpAgentWarmWorkspace("")
+	agentWarmArmed := installTurnkeyAgentWarmForPlanner(planner, agentWarm, agentWarmWorkspace, os.Stderr)
+	if agentWarmArmed && native != nil {
+		// umem TICKET-03: arm the bounded expert/Engram aux layers the background
+		// WarmPrefix runs after the KV prefix (FAK_SERVE_STARTUP_WARM=off disarms).
+		installServeAuxWarm(planner, serveAuxWarmFactsFor(native.Model, nativeModelPath, agentWarmWorkspace), os.Getenv, os.Stderr, "up")
+	}
 	// Boot work (model load + planner construction) is complete here; the server
 	// flips to ready immediately before binding the listener. A configured agent
 	// warm holds readiness until a live receipt is observed (agent_warm_pending).

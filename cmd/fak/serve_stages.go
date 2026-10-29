@@ -1246,6 +1246,11 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 		// gate unconfigured (readiness unaffected). Materialized on the background path
 		// below, and released once at shutdown/cancellation.
 		agentWarmArmed := installServeAgentWarm(rt.srv, *sf.nativeCodeWorkspace, os.Stderr)
+		if agentWarmArmed {
+			// umem TICKET-03: arm the bounded expert/Engram aux layers the background
+			// WarmPrefix runs after the KV prefix (FAK_SERVE_STARTUP_WARM=off disarms).
+			installServeAuxWarm(rt.srv.Planner(), serveAuxWarmFactsFor(rt.inKernelModel, *sf.ggufPath, *sf.nativeCodeWorkspace), os.Getenv, os.Stderr, "serve")
+		}
 		defer rt.releaseServeAgentWarm()
 		// Two-phase fit confirm (T03): record the warmup-time first-N-token decode
 		// confirm as a SILICON calibration row BEFORE the gate arms, so the probe
@@ -1377,7 +1382,8 @@ func runServeAgentWarmup(ctx context.Context, srv *gateway.Server) {
 	if srv == nil {
 		return
 	}
-	_, _ = srv.RunAgentWarmup(ctx)
+	receipt, _ := srv.RunAgentWarmup(ctx)
+	logServeAuxWarmReceipt(os.Stderr, "serve", receipt.Aux)
 }
 
 // releaseServeAgentWarmOnce is the release-once primitive: it fires the planner's

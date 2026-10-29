@@ -313,6 +313,7 @@ func (ts *turnkeyServer) runTurnkeyAgentWarmup(ctx context.Context) {
 	receipt, err := warmer.WarmPrefix(turnkeyRequestContext(ctx), spec)
 	unsupported := errors.Is(err, agent.ErrWarmPrefixUnsupported)
 	ts.agentWarm.observe(receipt, unsupported, err)
+	logServeAuxWarmReceipt(os.Stderr, "up", receipt.Aux)
 }
 
 // releaseTurnkeyAgentWarm releases the planner's startup warm ownership exactly
