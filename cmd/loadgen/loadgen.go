@@ -51,12 +51,14 @@ type chatResponse struct {
 
 // reqResult is one request's outcome.
 type reqResult struct {
-	latency          time.Duration
-	completionTokens int
-	err              error
-	streamed         bool            // completed via an SSE stream (vs plain-JSON fallback)
-	ttft             time.Duration   // start to first non-empty content chunk; 0 if none arrived
-	itls             []time.Duration // inter-content-chunk arrival deltas (decode-phase ITL samples)
+	latency           time.Duration
+	completionTokens  int
+	tokenUsageMissing bool
+	contentChunks     int
+	err               error
+	streamed          bool            // completed via an SSE stream (vs plain-JSON fallback)
+	ttft              time.Duration   // start to first non-empty content chunk; 0 if none arrived
+	chunkIntervals    []time.Duration // client inter-content-chunk arrival deltas; not token timings
 }
 
 // sseChunk is one `data:` payload of an OpenAI-compatible streaming
@@ -68,7 +70,7 @@ type sseChunk struct {
 		} `json:"delta"`
 	} `json:"choices"`
 	Usage struct {
-		CompletionTokens int `json:"completion_tokens"`
+		CompletionTokens *int `json:"completion_tokens"`
 	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
@@ -77,14 +79,15 @@ type sseChunk struct {
 
 // sseMeasure accumulates per-request stream timings while consuming SSE lines.
 type sseMeasure struct {
-	firstContent time.Time
-	lastContent  time.Time
-	itls         []time.Duration
-	nContent     int
-	usageTokens  int
-	sawData      bool
-	streamErr    error
-	done         bool
+	firstContent   time.Time
+	lastContent    time.Time
+	chunkIntervals []time.Duration
+	nContent       int
+	usageTokens    int
+	usageKnown     bool
+	sawData        bool
+	streamErr      error
+	done           bool
 }
 
 // feedSSELine folds one SSE line into m at arrival time now. Non-data lines
@@ -112,8 +115,9 @@ func (m *sseMeasure) feedSSELine(line string, now time.Time) {
 		m.streamErr = fmt.Errorf("stream error: %s", chunk.Error.Message)
 		return
 	}
-	if chunk.Usage.CompletionTokens > 0 {
-		m.usageTokens = chunk.Usage.CompletionTokens
+	if n := chunk.Usage.CompletionTokens; n != nil && *n >= 0 {
+		m.usageTokens = *n
+		m.usageKnown = true
 	}
 	for _, ch := range chunk.Choices {
 		if ch.Delta.Content == "" {
@@ -122,10 +126,11 @@ func (m *sseMeasure) feedSSELine(line string, now time.Time) {
 		if m.firstContent.IsZero() {
 			m.firstContent = now
 		} else {
-			m.itls = append(m.itls, now.Sub(m.lastContent))
+			m.chunkIntervals = append(m.chunkIntervals, now.Sub(m.lastContent))
 		}
 		m.lastContent = now
 		m.nContent++
+		break // count one content-bearing payload, not one arrival per choice
 	}
 }
 
@@ -160,27 +165,34 @@ func (f *clientInFlight) peakValue() int {
 
 // PointResult aggregates one concurrency level.
 type PointResult struct {
-	Concurrency      int     `json:"concurrency"`
-	PeakInFlight     int     `json:"peak_in_flight"` // observed concurrent client HTTP operations, not GPU batch execution
-	Requests         int     `json:"requests"`
-	Errors           int     `json:"errors"`
-	ErrorRate        float64 `json:"error_rate"`
-	WallSeconds      float64 `json:"wall_seconds"`
-	CompletionTokens int     `json:"completion_tokens"`
-	// TokensPerSecond is end-to-end output throughput (completion tokens / sweep
-	// wall; includes per-request prefill/TTFT). The phase-pure decode rate lives in
-	// DecodeTokensPerSecond.
-	TokensPerSecond float64 `json:"tokens_per_second"`
+	Concurrency               int     `json:"concurrency"`
+	PeakInFlight              int     `json:"peak_in_flight"` // observed concurrent client HTTP operations, not GPU batch execution
+	Requests                  int     `json:"requests"`
+	Errors                    int     `json:"errors"`
+	ErrorRate                 float64 `json:"error_rate"`
+	WallSeconds               float64 `json:"wall_seconds"`
+	CompletionTokens          int     `json:"completion_tokens"` // sum of reported usage only, never inferred from chunks
+	TokenUsageMissingRequests int     `json:"token_usage_missing_requests,omitempty"`
+	// TokensPerSecond is reported completion tokens / sweep wall (including
+	// prefill/TTFT). It stays zero/omitted when any successful stream lacks usage.
+	// A missing rate is not a measured zero; inspect TokenUsageMissingRequests.
+	TokensPerSecond float64 `json:"tokens_per_second,omitempty"`
 	P50LatencyMS    float64 `json:"p50_latency_ms"`
 	P95LatencyMS    float64 `json:"p95_latency_ms"`
 	MeanLatencyMS   float64 `json:"mean_latency_ms"`
-	// Phase-separated decode metrics, populated only when requests completed via an
-	// SSE stream (Streamed); all zero when the endpoint answered non-streaming.
-	Streamed              bool    `json:"streamed,omitempty"`
-	TTFTP50MS             float64 `json:"ttft_p50_ms,omitempty"`
-	TTFTP95MS             float64 `json:"ttft_p95_ms,omitempty"`
-	TPOTMS                float64 `json:"tpot_ms,omitempty"`                  // mean inter-token latency across the point's successful streamed requests
-	DecodeTokensPerSecond float64 `json:"decode_tokens_per_second,omitempty"` // 1000/TPOTMS when TPOTMS>0, else 0
+	// Client-observed first-content timing and content-chunk cadence, populated
+	// only from successful SSE streams. Buffering and multi-token chunks mean
+	// these are not server token/decode timings.
+	Streamed                     bool    `json:"streamed,omitempty"`
+	TTFTP50MS                    float64 `json:"ttft_p50_ms,omitempty"`
+	TTFTP95MS                    float64 `json:"ttft_p95_ms,omitempty"`
+	ContentChunks                int     `json:"content_chunks,omitempty"`
+	MeanInterContentChunkMS      float64 `json:"mean_inter_content_chunk_ms,omitempty"`
+	ContentChunkCadencePerSecond float64 `json:"content_chunk_cadence_per_second,omitempty"` // reciprocal mean interval, not aggregate throughput
+	// Deprecated: SSE content chunks do not establish token boundaries. These
+	// legacy fields remain zero/omitted; use the explicitly named chunk metrics.
+	TPOTMS                float64 `json:"tpot_ms,omitempty"`
+	DecodeTokensPerSecond float64 `json:"decode_tokens_per_second,omitempty"`
 }
 
 // MatrixResult is the full sweep, shaped to be a drop-in MATRIX.json.
@@ -245,7 +257,7 @@ func (c *Config) now() time.Time {
 }
 
 // oneRequest issues a single chat completion as a stream (stream:true) and measures
-// wall-clock, time-to-first-token, and inter-content-chunk arrivals. If the endpoint
+// wall-clock, time-to-first-content, and inter-content-chunk arrivals. If the endpoint
 // answers with a plain JSON body instead of an SSE stream, it falls back to the
 // non-streaming shape (streamed=false, no phase timing).
 func oneRequest(ctx context.Context, cfg *Config, inFlight *clientInFlight) reqResult {
@@ -287,7 +299,7 @@ func oneRequest(ctx context.Context, cfg *Config, inFlight *clientInFlight) reqR
 	// Classify by content type when declared; otherwise sniff the first line — an
 	// SSE stream opens with `data:` lines, a plain-JSON answer does not.
 	if isSSE || (!isJSON && strings.HasPrefix(strings.TrimLeft(firstLine, " \t\r"), "data:")) {
-		return measureStream(cfg, br, firstLine, start)
+		return measureStream(cfg, br, firstLine, firstErr, start)
 	}
 	return jsonFallback(cfg, br, firstLine, firstErr, start)
 }
@@ -298,39 +310,38 @@ var emptyStreamBody = errors.New("empty stream body")
 
 // measureStream consumes an SSE chat-completions body, sampling the arrival time of
 // each content chunk. A clean EOF (with or without [DONE]) completes the request;
-// malformed lines are skipped and never panic. Completion count prefers
-// usage.completion_tokens from the final chunk, falling back to the observed content
-// chunk count when the server omits usage.
-func measureStream(cfg *Config, br *bufio.Reader, firstLine string, start time.Time) reqResult {
+// malformed lines are skipped and never panic. Observed non-EOF read errors fail
+// the request, including errors accompanying partial data. Completion tokens come
+// only from usage.completion_tokens; chunk counts remain a separate observation.
+func measureStream(cfg *Config, br *bufio.Reader, firstLine string, firstErr error, start time.Time) reqResult {
 	var m sseMeasure
 	if firstLine != "" {
 		m.feedSSELine(firstLine, cfg.now())
 	}
-	for !m.done {
+	readErr := firstErr
+	for readErr == nil && !m.done {
 		line, err := br.ReadString('\n')
 		if line != "" {
 			m.feedSSELine(line, cfg.now())
 		}
-		if err != nil {
-			break // io.EOF ends the stream; transport errors surface below
-		}
+		readErr = err
 	}
 	lat := cfg.now().Sub(start)
+	if readErr != nil && !errors.Is(readErr, io.EOF) {
+		return reqResult{err: fmt.Errorf("read stream body: %w", readErr), latency: lat, streamed: true}
+	}
 	if m.streamErr != nil {
 		return reqResult{err: m.streamErr, latency: lat, streamed: true}
 	}
 	if !m.sawData {
 		return reqResult{err: emptyStreamBody, latency: lat, streamed: true}
 	}
-	tokens := m.usageTokens
-	if tokens == 0 {
-		tokens = m.nContent
-	}
-	rr := reqResult{latency: lat, completionTokens: tokens, streamed: true}
+	rr := reqResult{latency: lat, completionTokens: m.usageTokens, streamed: true,
+		tokenUsageMissing: !m.usageKnown, contentChunks: m.nContent}
 	if !m.firstContent.IsZero() {
 		rr.ttft = m.firstContent.Sub(start)
 	}
-	rr.itls = m.itls
+	rr.chunkIntervals = m.chunkIntervals
 	return rr
 }
 
@@ -389,14 +400,17 @@ func aggregate(concurrency, requests int, wall time.Duration, results []reqResul
 	var lats []float64
 	var latSum float64
 	var ttfts []float64
-	var itlSum float64
-	var itlN int
+	var chunkIntervalSum float64
+	var chunkIntervalN int
 	for _, r := range results {
 		if r.err != nil {
 			pr.Errors++
 			continue
 		}
 		pr.CompletionTokens += r.completionTokens
+		if r.tokenUsageMissing {
+			pr.TokenUsageMissingRequests++
+		}
 		// Nanoseconds()/1e6 keeps sub-microsecond loopback timings nonzero; Microseconds() truncates them to 0.
 		ms := float64(r.latency.Nanoseconds()) / 1e6
 		lats = append(lats, ms)
@@ -405,18 +419,19 @@ func aggregate(concurrency, requests int, wall time.Duration, results []reqResul
 			continue
 		}
 		pr.Streamed = true
+		pr.ContentChunks += r.contentChunks
 		if r.ttft > 0 {
 			ttfts = append(ttfts, float64(r.ttft.Nanoseconds())/1e6)
 		}
-		for _, d := range r.itls {
-			itlSum += float64(d.Nanoseconds()) / 1e6
-			itlN++
+		for _, d := range r.chunkIntervals {
+			chunkIntervalSum += float64(d.Nanoseconds()) / 1e6
+			chunkIntervalN++
 		}
 	}
 	if requests > 0 {
 		pr.ErrorRate = float64(pr.Errors) / float64(requests)
 	}
-	if wall.Seconds() > 0 {
+	if wall.Seconds() > 0 && pr.TokenUsageMissingRequests == 0 {
 		pr.TokensPerSecond = float64(pr.CompletionTokens) / wall.Seconds()
 	}
 	if n := len(lats); n > 0 {
@@ -430,10 +445,10 @@ func aggregate(concurrency, requests int, wall time.Duration, results []reqResul
 		pr.TTFTP50MS = percentile(ttfts, 50)
 		pr.TTFTP95MS = percentile(ttfts, 95)
 	}
-	if itlN > 0 {
-		pr.TPOTMS = itlSum / float64(itlN)
-		if pr.TPOTMS > 0 {
-			pr.DecodeTokensPerSecond = 1000 / pr.TPOTMS
+	if chunkIntervalN > 0 {
+		pr.MeanInterContentChunkMS = chunkIntervalSum / float64(chunkIntervalN)
+		if pr.MeanInterContentChunkMS > 0 {
+			pr.ContentChunkCadencePerSecond = 1000 / pr.MeanInterContentChunkMS
 		}
 	}
 	return pr

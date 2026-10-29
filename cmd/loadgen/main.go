@@ -1,9 +1,9 @@
 // Command loadgen is a pure-Go (stdlib-only) load generator for OpenAI-compatible
 // /v1/chat/completions endpoints. It runs a concurrency sweep against streaming
-// completions and writes a MATRIX.json with end-to-end output tok/s (wall includes
-// per-request prefill/TTFT), phase-separated decode metrics (TTFT p50/p95, mean ITL,
-// decode tok/s), and latency percentiles per concurrency point. It is the DGX
-// benchmark's load matrix and needs no Python.
+// completions and writes a MATRIX.json with usage-based end-to-end output tok/s
+// (wall includes per-request prefill/TTFT), client first-content timing, chunk
+// cadence, and latency percentiles per concurrency point. Chunk cadence is not
+// token/decode throughput; token throughput is unavailable when usage is missing.
 //
 //	go run ./cmd/loadgen -url http://127.0.0.1:8080/v1/chat/completions \
 //	  -model smollm2-135m -concurrency 1,4,16 -requests-per 32 -out MATRIX.json
@@ -75,8 +75,12 @@ func main() {
 	// Summary + error-rate gate to stderr so JSON stdout stays clean.
 	worst := 0.0
 	for _, p := range res.Points {
-		fmt.Fprintf(os.Stderr, "  c=%-4d tok/s=%-8.1f p50=%-7.1fms p95=%-7.1fms err=%.0f%%\n",
-			p.Concurrency, p.TokensPerSecond, p.P50LatencyMS, p.P95LatencyMS, p.ErrorRate*100)
+		tokenRate := fmt.Sprintf("%.1f", p.TokensPerSecond)
+		if p.TokenUsageMissingRequests > 0 || p.Requests == p.Errors {
+			tokenRate = "n/a"
+		}
+		fmt.Fprintf(os.Stderr, "  c=%-4d tok/s=%-8s p50=%-7.1fms p95=%-7.1fms err=%.0f%% missing-usage=%d\n",
+			p.Concurrency, tokenRate, p.P50LatencyMS, p.P95LatencyMS, p.ErrorRate*100, p.TokenUsageMissingRequests)
 		if p.ErrorRate > worst {
 			worst = p.ErrorRate
 		}
