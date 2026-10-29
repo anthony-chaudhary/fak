@@ -8,6 +8,7 @@
 using cudaError_t = int;
 using cudaStream_t = void *;
 static constexpr int cudaSuccess = 0;
+static constexpr int cudaErrorMemoryAllocation = 2;
 static constexpr int cudaMemcpyHostToDevice = 1;
 static constexpr int cudaMemcpyDeviceToHost = 2;
 static constexpr int cudaMemcpyDeviceToDevice = 3;
@@ -15,6 +16,7 @@ static cudaStream_t cudaStreamLegacy = reinterpret_cast<void *>(1);
 static cudaStream_t g_stream = reinterpret_cast<void *>(99);
 static int selected = 0, view = 0, get_error = 0, select_error = 0, op_error = 0;
 static int fence_error = 0;
+static int last_error = 0; // the runtime's per-thread last error, as the fake records it
 static int operations = 0, fences = 0, evictions = 0, untimed = 0;
 static size_t g_h2d_bytes = 0, g_host_bytes = 0;
 static std::unordered_map<void *, int> owners;
@@ -36,9 +38,14 @@ static cudaError_t cudaSetDevice(int device) {
   return 0;
 }
 static const char *cudaGetErrorString(cudaError_t) { return "injected runtime error"; }
+static cudaError_t cudaGetLastError() {
+  int e = last_error;
+  last_error = 0;
+  return e;
+}
 static cudaError_t cudaMalloc(void **out, size_t bytes) {
   ++operations;
-  if (op_error) return op_error;
+  if (op_error) return last_error = op_error;
   *out = malloc(bytes);
   owners[*out] = selected;
   return 0;
@@ -116,6 +123,20 @@ int main() {
   fcuda_free_on(1, b);
   restored();
   assert(owners.count(b) == 1 && fences == 2 && g_h2d_bytes == h2d_before && g_host_bytes == d2h_before);
+  op_error = 0;
+  last_error = 0;
+
+  // A capacity miss is consumed where it is raised, so the next status reader does not see a
+  // stale "out of memory"; any other allocator status stays pending for that reader.
+  op_error = cudaErrorMemoryAllocation;
+  assert(fcuda_malloc_on(1, 1) == nullptr);
+  restored();
+  assert(last_error == 0);
+  op_error = 7;
+  assert(fcuda_malloc_on(1, 1) == nullptr);
+  restored();
+  assert(last_error == 7);
+  last_error = 0;
   op_error = 0;
 
   const int before_selection = operations;

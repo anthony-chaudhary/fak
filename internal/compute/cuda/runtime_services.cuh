@@ -127,13 +127,14 @@ extern "C" int fcuda_set_device(int device) {
 }
 
 #include "device_scope.h"
+#include "alloc_status.h"
 
 extern "C" void *fcuda_malloc_on(int device, size_t bytes) {
   if (bytes == 0) bytes = 1;
   fcuda_device_scope scope(device);
   if (scope.status() != 0) return nullptr;
   void *d = nullptr;
-  cudaError_t e = cudaMalloc(&d, bytes);
+  cudaError_t e = fcuda_alloc_status(cudaMalloc(&d, bytes));
   if (e != cudaSuccess) {
     fprintf(stderr, "fak-cuda: cudaMalloc(%zu bytes) on device %d failed: %s\n", bytes, device, cudaGetErrorString(e));
     return nullptr;

@@ -215,7 +215,7 @@ static int fcuda_q4k_mmvq_matmul(const uint8_t *dQ4K, const float *dX, float *dY
         if (g_q4k_mmvq_y) cudaFree(g_q4k_mmvq_y);
         g_q4k_mmvq_y = nullptr;
         g_q4k_mmvq_y_cap = 0;
-        if (cudaMalloc(&g_q4k_mmvq_y, need) != cudaSuccess || !g_q4k_mmvq_y) {
+        if (fcuda_alloc_status(cudaMalloc(&g_q4k_mmvq_y, need)) != cudaSuccess || !g_q4k_mmvq_y) {
             g_q4k_mmvq_y = nullptr;
             return FCUDA_SCRATCH_ALLOC_FAILED;
         }

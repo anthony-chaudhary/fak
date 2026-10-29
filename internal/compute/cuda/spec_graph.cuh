@@ -511,13 +511,22 @@ extern "C" int fcuda_graph_end_launch(void) {
 // separate fcuda_graph_warm() entry point; warming is exactly these three pre-capture allocations,
 // and the #969 g_capture_open guard in fcuda_malloc fails loud if any scratch was missed.
 static int *g_argmax_idx = nullptr;
-static void ensure_argmax_idx(void) {
-  if (!g_argmax_idx) CK(cudaMalloc(&g_argmax_idx, sizeof(int)));
+// Pending-status site (see fcuda_attention_f32): a miss leaves g_argmax_idx null and the status
+// pending, and fcuda_argmax_f32 refuses with -1 instead of launching k_argmax onto a null index.
+static bool ensure_argmax_idx(void) {
+  if (g_argmax_idx) return true;
+  cudaError_t e = cudaMalloc(&g_argmax_idx, sizeof(int));
+  if (e != cudaSuccess || !g_argmax_idx) {
+    fprintf(stderr, "fak-cuda: argmax index cudaMalloc failed: %s\n", cudaGetErrorString(e));
+    g_argmax_idx = nullptr;
+    return false;
+  }
+  return true;
 }
 
 extern "C" int fcuda_argmax_f32(const float *dLogits, int n) {
   int hIdx = 0;
-  ensure_argmax_idx(); // no-op after the first call; never allocates inside a capture
+  if (!ensure_argmax_idx()) return -1; // no-op after the first call; never allocates inside a capture
   FCUDA_TS("k_argmax", 1, k_argmax<<<1, 256, 0, g_stream>>>(dLogits, n, g_argmax_idx));
   fcuda_ts_untimed_transfer();
   CK(cudaMemcpy(&hIdx, g_argmax_idx, sizeof(int), cudaMemcpyDeviceToHost));

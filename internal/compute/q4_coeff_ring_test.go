@@ -169,7 +169,7 @@ func TestQ4CoeffRingDecodeCycleFIFOLikeLRU(t *testing.T) {
 	const perTable = 10 // 4 x 10 = 40 <= 100: working set fits
 	r := &q4CoeffRing{cap: cap}
 	mint := func(layer int) {
-		phys, ok := r.mint("layer-"+itoa(layer), 1, 1, perTable)
+		phys, ok := r.mint("layer-"+ringItoa(layer), 1, 1, perTable)
 		if !ok {
 			t.Fatalf("layer %d: mint refused", layer)
 		}
@@ -269,17 +269,17 @@ func TestQ4CoeffRingWrapStress(t *testing.T) {
 	next := 0
 	for i := 0; i < 1500; i++ {
 		if i%7 == 3 {
-			r.evict("w-" + itoa(next-1)) // free the most recent weight sometimes
+			r.evict("w-" + ringItoa(next-1)) // free the most recent weight sometimes
 		}
 		next++
-		if _, ok := r.mint("w-"+itoa(next), i%5, i%3, 8); !ok {
+		if _, ok := r.mint("w-"+ringItoa(next), i%5, i%3, 8); !ok {
 			t.Fatalf("mint %d refused", i)
 		}
 		r.checkInvariants(t)
 	}
 }
 
-func itoa(v int) string {
+func ringItoa(v int) string {
 	if v == 0 {
 		return "0"
 	}

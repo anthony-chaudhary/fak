@@ -52,7 +52,7 @@ extern "C" void *fcuda_handoff_alloc(int device, size_t bytes) {
   fcuda_handoff_device_guard guard;
   void *d = nullptr;
   cudaError_t e = cudaSetDevice(device);
-  if (e == cudaSuccess) e = cudaMalloc(&d, bytes ? bytes : 1);
+  if (e == cudaSuccess) e = fcuda_alloc_status(cudaMalloc(&d, bytes ? bytes : 1));
   if (fcuda_handoff_status(e, "cudaMalloc") != 0) return nullptr;
   return d;
 }
