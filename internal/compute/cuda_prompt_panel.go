@@ -23,6 +23,8 @@ import "unsafe"
 const (
 	cudaScratchAllocFailed      = 80001
 	cudaSplitScratchAllocFailed = 80002
+	// 83000 + cudaError_t is a failed retirement of unpublished GEMM scratch.
+	cudaScratchRetireFailedBase = 83000
 )
 
 func cudaPromptPanelFail(site, msg string, code int) {
@@ -37,6 +39,9 @@ type cudaGEMMScratch struct{ main, split int }
 // is a DeviceAllocError for the allocation that missed, any other status a CUDAOpError. The
 // GEMM launched nothing, so its output holds no result.
 func cudaGEMMError(op string, rc int, s cudaGEMMScratch) error {
+	if rc > cudaScratchRetireFailedBase && rc < cudaScratchRetireFailedBase+1000 {
+		return &CUDAOpError{Op: op, Site: "gemm-scratch-retirement", Msg: "scratch retirement failed after allocation miss", Code: rc - cudaScratchRetireFailedBase, Class: MemoryScratchpad}
+	}
 	switch rc {
 	case cudaScratchAllocFailed:
 		return &DeviceAllocError{Bytes: s.main, Site: op + " gemm scratch", Class: MemoryScratchpad}

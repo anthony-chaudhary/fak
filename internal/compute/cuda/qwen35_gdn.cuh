@@ -44,6 +44,33 @@ static void *scratch_malloc(size_t bytes) {
   if (g_scratch_alloc_test_fault > 0 && --g_scratch_alloc_test_fault == 0) return nullptr;
   return fcuda_malloc(bytes);
 }
+// 83000 + cudaError_t distinguishes retirement failure from an allocation miss.
+// Keep cudaGEMMError's decoder in cuda_prompt_panel.go in sync.
+#define FCUDA_SCRATCH_RETIRE_FAILED_BASE 83000
+// Acquire the four prelaunch split buffers as one transaction (#14097).
+// Stop at the first miss, and physically retire only this operation's acquired,
+// still-unsubmitted owners. Returning them to g_pool would retain failed-prefill
+// scratch. Discard also drains prior stream work on a pool-borrowed allocation.
+// On cleanup failure the allocator keeps that owner live/non-reusable; surface
+// the first cleanup status and still attempt every other acquired owner.
+static int fp16_compensated_scratch(size_t wn, size_t xn, __half **scratch) {
+  const size_t bytes[4] = {wn * sizeof(__half), wn * sizeof(__half),
+                           xn * sizeof(__half), xn * sizeof(__half)};
+  for (int i = 0; i < 4; ++i) {
+    scratch[i] = (__half *)scratch_malloc(bytes[i]);
+    if (scratch[i]) continue;
+    int status = FCUDA_SPLIT_SCRATCH_ALLOC_FAILED;
+    for (int j = 0; j < i; ++j) {
+      const int cleanup = fcuda_discard_unsubmitted(scratch[j], bytes[j]);
+      scratch[j] = nullptr;
+      if (cleanup != 0 && status == FCUDA_SPLIT_SCRATCH_ALLOC_FAILED)
+        status = FCUDA_SCRATCH_RETIRE_FAILED_BASE + cleanup;
+    }
+    return status;
+  }
+  return 0;
+}
+
 // Same three ordered GEMMs for both already-split weight routes.
 static void fp16_compensated_gemm(const __half *wHi, const __half *wLo,
     const __half *xHi, const __half *xLo, float *Y, int out, int in, int tokens) {
@@ -61,14 +88,10 @@ static void fp16_compensated_gemm(const __half *wHi, const __half *wLo,
 static int fp16_compensated_matmul(const float *W, const float *X, float *Y,
                                    int out, int in, int tokens) {
   size_t wn = (size_t)out * in, xn = (size_t)tokens * in;
-  __half *wHi = (__half *)scratch_malloc(wn * sizeof(__half));
-  __half *wLo = (__half *)scratch_malloc(wn * sizeof(__half));
-  __half *xHi = (__half *)scratch_malloc(xn * sizeof(__half));
-  __half *xLo = (__half *)scratch_malloc(xn * sizeof(__half));
-  if (!wHi || !wLo || !xHi || !xLo) {
-    fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
-    return FCUDA_SPLIT_SCRATCH_ALLOC_FAILED;
-  }
+  __half *scratch[4] = {};
+  const int scratch_status = fp16_compensated_scratch(wn, xn, scratch);
+  if (scratch_status != 0) return scratch_status;
+  __half *wHi = scratch[0], *wLo = scratch[1], *xHi = scratch[2], *xLo = scratch[3];
   FCUDA_TS("k_fp16_split", (wn + 255) / 256, k_fp16_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(W, wHi, wLo, wn));
   FCUDA_TS("k_fp16_split", (xn + 255) / 256, k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(X, xHi, xLo, xn));
   fp16_compensated_gemm(wHi, wLo, xHi, xLo, Y, out, in, tokens);
@@ -102,14 +125,10 @@ __global__ void k_q8_dequant_split(const signed char *codes, const float *scales
 static int q8_dequant_sgemm(const void *codes, const float *scales,
                             const float *X, float *Y, int rows, int cols, int tokens, int block) {
   size_t wn = (size_t)rows * cols, xn = (size_t)tokens * cols;
-  __half *wHi = (__half *)scratch_malloc(wn * sizeof(__half));
-  __half *wLo = (__half *)scratch_malloc(wn * sizeof(__half));
-  __half *xHi = (__half *)scratch_malloc(xn * sizeof(__half));
-  __half *xLo = (__half *)scratch_malloc(xn * sizeof(__half));
-  if (!wHi || !wLo || !xHi || !xLo) {
-    fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
-    return FCUDA_SPLIT_SCRATCH_ALLOC_FAILED;
-  }
+  __half *scratch[4] = {};
+  const int scratch_status = fp16_compensated_scratch(wn, xn, scratch);
+  if (scratch_status != 0) return scratch_status;
+  __half *wHi = scratch[0], *wLo = scratch[1], *xHi = scratch[2], *xLo = scratch[3];
   FCUDA_TS("k_q8_dequant_split", (wn + 255) / 256, k_q8_dequant_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(
       (const signed char *)codes, scales, wHi, wLo, wn, cols, block));
   FCUDA_TS("k_fp16_split", (xn + 255) / 256, k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(X, xHi, xLo, xn));
