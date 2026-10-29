@@ -914,16 +914,14 @@ func (m *Model) v41LayerProjectAttentionOutput(l, seq int, full bool, nH, hd, H 
 	}
 	if seq > 1 && full && st != nil && st.callbackOwner != nil && st.callbackOwner.M == m {
 		totalIn, valid := checkedMulInt(nH, hd)
-		panelN, panelValid := checkedMulInt(seq, totalIn)
+		_, panelValid := checkedMulInt(seq, totalIn)
 		if valid && panelValid {
-			flat := make([]float32, panelN)
-			for t, row := range attnProjectionInput {
+			for _, row := range attnProjectionInput {
 				if len(row) != totalIn {
 					return nil, v41StageErr(v41StageAttention, l, errV41ProjectionResult)
 				}
-				copy(flat[t*totalIn:(t+1)*totalIn], row)
 			}
-			projected, outcome, cause := st.callbackOwner.v41GroupedOutputPanel(l, flat, seq, nH, hd, cfg.OGroups, cfg.OLoraRank, H)
+			projected, outcome, cause := st.callbackOwner.v41GroupedOutputPanelRows(l, attnProjectionInput, seq, nH, hd, cfg.OGroups, cfg.OLoraRank, H)
 			switch outcome {
 			case v41ProjectionHandled:
 				if cause != nil || len(projected) != seq {
