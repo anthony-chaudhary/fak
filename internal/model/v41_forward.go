@@ -1068,6 +1068,9 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.mhcDevice = s.v41MHCDeviceSeam()
 		if s.executionPolicy == ExecutionPolicyDeviceOnly {
 			s.v41BindDeviceOnlyDeclineRefusals(s.v41Forward)
+		} else if s.hostPathBypass != "" {
+			// An arbitrary observer wrapper must not inherit canonical borrowing.
+			s.v41Forward.setDenseProjection(s.v41ObserveDenseHost(s.v41Forward.denseProjection()))
 		}
 		s.v41Forward.cpuMiss = s.v41CPUMissArmFor(s.v41Forward)
 		s.v41Forward.callbackOwner = s

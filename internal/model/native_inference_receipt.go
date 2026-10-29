@@ -274,23 +274,27 @@ func (e *NativeCacheAccountingError) Unwrap() error { return ErrNativeCacheAccou
 // are log_softmax over the unmodified model logits, so receipt capture is supported
 // only for greedy sampling without bias or repetition penalties.
 type NativeInferenceReceipt struct {
-	TokenIDs              []int                   `json:"token_ids"`
-	TokenLogprobs         []float64               `json:"token_logprobs"`
-	PromptTokenIDs        []int                   `json:"prompt_token_ids,omitempty"`
-	TokenizerID           string                  `json:"tokenizer_id,omitempty"`
-	RendererID            string                  `json:"renderer_id,omitempty"`
-	RenderedSHA256        string                  `json:"rendered_sha256,omitempty"`
-	PrefillSeconds        float64                 `json:"prefill_seconds"`
-	TTFTSeconds           float64                 `json:"ttft_seconds"`
-	DecodeSeconds         float64                 `json:"decode_seconds"`
-	Model                 string                  `json:"model"`
-	Engine                string                  `json:"engine"`
-	Planner               string                  `json:"planner"`
-	Owner                 string                  `json:"owner"`
-	Backend               string                  `json:"backend"`
-	ForwardPath           string                  `json:"forward_path"`
-	Q4K                   bool                    `json:"q4k"`
-	FallbackActive        bool                    `json:"fallback_active"`
+	TokenIDs       []int     `json:"token_ids"`
+	TokenLogprobs  []float64 `json:"token_logprobs"`
+	PromptTokenIDs []int     `json:"prompt_token_ids,omitempty"`
+	TokenizerID    string    `json:"tokenizer_id,omitempty"`
+	RendererID     string    `json:"renderer_id,omitempty"`
+	RenderedSHA256 string    `json:"rendered_sha256,omitempty"`
+	PrefillSeconds float64   `json:"prefill_seconds"`
+	TTFTSeconds    float64   `json:"ttft_seconds"`
+	DecodeSeconds  float64   `json:"decode_seconds"`
+	Model          string    `json:"model"`
+	Engine         string    `json:"engine"`
+	Planner        string    `json:"planner"`
+	Owner          string    `json:"owner"`
+	Backend        string    `json:"backend"`
+	ForwardPath    string    `json:"forward_path"`
+	Q4K            bool      `json:"q4k"`
+	FallbackActive bool      `json:"fallback_active"`
+	// HostStages currently observes successful V4.1 dense host projections only.
+	// Absence is not proof that every other operation ran on device.
+	HostPathBypass        string                  `json:"host_path_bypass,omitempty"`
+	HostStages            []string                `json:"host_stages,omitempty"`
 	PrefillChunkTokens    int                     `json:"prefill_chunk_tokens"`
 	NativeSelection       NativeSelectionIdentity `json:"kernel_selection"`
 	NativeSelectionDigest string                  `json:"kernel_selection_digest"`
