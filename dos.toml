@@ -517,6 +517,7 @@ concurrent = [
   "supervise",
   "worktree",
   "sysproc",
+  "hwutil",
   "agentbench",
   # beam/parentwatch/radixpager/cachelayout/replayoracle are real committed
   # internal/ leaves, and moecache/turncost are real committed pkg/ leaves; all
@@ -1694,6 +1695,7 @@ storage = ["internal/storage/**"]
 supervise = ["internal/supervise/**"]
 worktree = ["internal/worktree/**"]
 sysproc = ["pkg/sysproc/**"]
+hwutil = ["pkg/hwutil/**"]
 agentbench = ["internal/agentbench/**"]
 hostgrant = ["internal/hostgrant/**"]
 runtimeobs = ["internal/runtimeobs/**"]
