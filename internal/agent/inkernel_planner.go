@@ -1758,6 +1758,7 @@ type VulkanMTPExecution struct {
 
 const (
 	vulkanMTPExecutionEngine             = "mtp-vulkan"
+	cudaMTPExecutionEngine               = "mtp-cuda"
 	vulkanMTPDowngradeConstructorRefused = "constructor-refused"
 	vulkanMTPDowngradeEmptyProposal      = "empty-proposal"
 	vulkanMTPDowngradeProposalError      = "proposal-error"
@@ -1765,6 +1766,16 @@ const (
 	vulkanMTPDowngradeAcceptanceFloor    = "acceptance-floor-fallback"
 	vulkanMTPDowngradeCancelled          = "cancelled"
 )
+
+// residentMTPExecutionEngine names the backend that admitted resident MTP so a
+// CUDA run is never reported as Vulkan. Every non-CUDA backend keeps the legacy
+// "mtp-vulkan" value byte-identical for existing receipts.
+func residentMTPExecutionEngine(backendName string) string {
+	if strings.EqualFold(strings.TrimSpace(backendName), "cuda") {
+		return cudaMTPExecutionEngine
+	}
+	return vulkanMTPExecutionEngine
+}
 
 func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, measurementOpt ...*nativeInferenceMeasurement) (res inKernelGenerateResult, err error) {
 	return recoverDeviceCall(func() (res inKernelGenerateResult, err error) {

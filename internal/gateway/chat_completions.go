@@ -18,6 +18,8 @@ const (
 	SpeculativeMTPMetal = "mtp-metal"
 	// SpeculativeMTPVulkan indicates observed execution by the request-bound resident Vulkan MTP route.
 	SpeculativeMTPVulkan = "mtp-vulkan"
+	// SpeculativeMTPCUDA indicates observed execution by the request-bound resident CUDA MTP route.
+	SpeculativeMTPCUDA = "mtp-cuda"
 	// HeaderSpeculativeDowngrade reports a typed ordinary-decode downgrade for a selected route.
 	HeaderSpeculativeDowngrade = "x-fak-speculative-downgrade"
 )
@@ -340,11 +342,16 @@ func applyChatCompletionSpeculativeHeaders(w http.ResponseWriter, s *Server, req
 }
 
 func applyVulkanMTPExecutionHeaders(w http.ResponseWriter, execution *agent.VulkanMTPExecution) {
-	if w == nil || execution == nil || execution.Engine != SpeculativeMTPVulkan {
+	if w == nil || execution == nil {
+		return
+	}
+	switch execution.Engine {
+	case SpeculativeMTPVulkan, SpeculativeMTPCUDA:
+	default:
 		return
 	}
 	if execution.Used {
-		w.Header().Set(HeaderSpeculative, SpeculativeMTPVulkan)
+		w.Header().Set(HeaderSpeculative, execution.Engine)
 	}
 	if execution.DowngradeReason != "" {
 		w.Header().Set(HeaderSpeculativeDowngrade, execution.DowngradeReason)

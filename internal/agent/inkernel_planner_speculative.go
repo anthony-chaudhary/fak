@@ -318,7 +318,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 			backendName = p.backend.Name()
 		}
 		mtpExecution = &VulkanMTPExecution{
-			Engine:         vulkanMTPExecutionEngine,
+			Engine:         residentMTPExecutionEngine(backendName),
 			Backend:        backendName,
 			RequestedDepth: p.specDraftDepth,
 		}
