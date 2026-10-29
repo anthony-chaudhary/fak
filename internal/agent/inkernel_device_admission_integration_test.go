@@ -45,7 +45,10 @@ func deviceAdmissionCompleteFixture(t *testing.T) (*InKernelPlanner, []Message, 
 		t.Fatalf("request device demand = %d, want positive", want)
 	}
 	free := want + want/2
-	p.backend = capacityProbeBackend{Backend: compute.Default(), total: 2 * free, free: free, known: true}
+	p.backend = &cohortCapabilityBackend{
+		capacityProbeBackend: capacityProbeBackend{Backend: compute.Default(), total: 2 * free, free: free, known: true},
+		path:                 compute.Qwen35IndependentDecodeBatchPath,
+	}
 	if want > ApplyByteHeadroom(free, inKernelRequestDeviceHeadroom) || 2*want <= ApplyByteHeadroom(free, inKernelRequestDeviceHeadroom) {
 		t.Fatalf("fixture want=%d free=%d does not admit one and refuse two", want, free)
 	}
