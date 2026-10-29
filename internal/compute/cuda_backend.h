@@ -170,6 +170,15 @@ void fcuda_hostxfer_reset(void);
 size_t fcuda_h2dxfer_bytes(void);
 void fcuda_h2dxfer_reset(void);
 
+/* Async H2D for compute.AsyncUploader (cuda/async_upload.cuh). fcuda_upload_async stages
+ * through a bounded pinned slot pool onto a non-blocking copy stream ordered after g_stream's
+ * position at issue: 0 = issued (slot/gen name the fence), 1 = not issued (slot pool exhausted,
+ * oversize, or capture open; caller copies synchronously), >=1000 = 1000 + cudaError_t.
+ * fcuda_upload_async_fence: 1 = landed, 0 = in flight (block=0 only), >=1000 = failure. */
+int fcuda_upload_async(void *d, const void *h, size_t bytes, int *slot, uint64_t *gen);
+int fcuda_upload_async_fence(int slot, uint64_t gen, int block);
+void fcuda_upload_async_stats(uint64_t *issued, uint64_t *fallback, size_t *pinned);
+
 /* Qwen3.5/3.6 Gated-DeltaNet decode, one complete recurrent token-mixer operation.
  * Every pointer is already resident f32 device memory. The operation launches, in order:
  * a single fused qkv/z/b/a GEMV, causal depthwise conv + in-place conv-state shift,

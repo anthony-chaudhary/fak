@@ -124,6 +124,7 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/kernel_profile.cuh"
 #include "cuda/runtime_memory.cuh"
 #include "cuda/runtime_services.cuh"
+#include "cuda/async_upload.cuh"
 #include "cuda/model_candidates.cuh"
 #include "cuda_v41_indexer.cu"
 #include "cuda/qwen35_gdn.cuh"

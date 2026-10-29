@@ -719,6 +719,7 @@ func (c *cudaBackend) Free(t Tensor) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	if db, ok := t.buf.(*cudaBuf); ok && db.ptr != nil {
+		awaitAsyncUploadLocked(db.ptr) // never pool a buffer the copy stream still writes
 		if db.host != 0 {
 			// evict the exact (ptr, dtype, layout) entry so a re-upload of the same host buffer re-stages
 			delete(uploadCache, ucKey{db.host, db.hostDt, db.hostLo})
