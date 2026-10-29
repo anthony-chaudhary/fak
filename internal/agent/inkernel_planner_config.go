@@ -138,6 +138,7 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 			fmt.Fprintln(os.Stderr, "fak inkernel:", p.kvPrecisionFallback)
 		}
 	}
+	p.kvPrecisionErr = plannerKVPrecisionError(m, p.kvPrecision, backend, metal)
 	if backend == nil && metal {
 		m.PrepareMetalResidency(q4k)
 	}

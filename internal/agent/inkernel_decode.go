@@ -61,14 +61,11 @@ func (p *InKernelPlanner) configureNativeSession(s *model.Session) {
 		}
 		s.KVPrecision = p.kvPrecision
 	} else if p.kvPrecision != "" && p.kvPrecision != model.KVPrecisionFP32 {
-		// Fail closed on a path this realization does not cover (device HAL, Metal
-		// resident, hybrid recurrent, GLM-DSA, MiniMax sparse, gemma4): those write
-		// c.K directly, so enabling q8 would silently mix f32 and packed rows.
-		if reason := p.m.Cfg.QuantizedKVUnsupportedReason(); reason != "" {
-			panic(fmt.Sprintf("model: --kv-precision=%s is not realized for this forward path (%s); use f32", p.kvPrecision, reason))
-		}
-		if p.backend != nil || p.metal {
-			panic(fmt.Sprintf("model: --kv-precision=%s is not realized on the device HAL/Metal path; use f32", p.kvPrecision))
+		// Fail closed on a path this realization does not cover (ValidateKVPrecision,
+		// checked at construction). Request entries refuse first; a direct caller gets
+		// the typed error as a panic payload that recoverDevicePanic converts.
+		if p.kvPrecisionErr != nil {
+			panic(p.kvPrecisionErr)
 		}
 		if s.Cache != nil {
 			s.Cache.ConvertToPrecision(p.kvPrecision)

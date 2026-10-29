@@ -990,6 +990,14 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableCon
 	nativePlannerConfig := serveNativePlannerConfigWithContext(sf, rt.nativeContext.ResolvedTokens)
 	nativePlannerConfig.RequireDeviceExecution = rt.requireDeviceExecution
 	nativePlannerConfig.DeviceOnlyBypass = rt.executionPolicy.sessionBypass()
+	// The backend tier check (resolveServeKVPrecision) does not see the architecture;
+	// refuse an arch-unrealized --kv-precision (e.g. q8_0 on a Qwen hybrid) before the
+	// listener binds, so the service fails admission instead of refusing every request.
+	if rt.inKernelModel != nil {
+		if err := agent.ValidateKVPrecision(rt.inKernelModel.Cfg, nativePlannerConfig.KVPrecision, rt.chatBackend, rt.useMetal); err != nil {
+			return nil, err
+		}
+	}
 	// Resolve the optional model-routing policy. Off by default: an empty --route-manifest
 	// leaves routeMan nil, so gateway.New gets a nil RouteManifest and Engine stays unset —
 	// byte-for-byte the pre-routing behavior. A malformed file fails loud here rather than

@@ -66,6 +66,9 @@ type InKernelPlanner struct {
 	// kvPrecisionFallback records why a requested 16-bit device tier fell back to f32
 	// at construction ("" when the request was realized as asked).
 	kvPrecisionFallback string
+	// kvPrecisionErr is ValidateKVPrecision's construction-time verdict for the
+	// resolved tier; non-nil refuses every request with a typed *KVPrecisionUnrealizedError.
+	kvPrecisionErr error
 	// expertSpill is the resolved graded expert placement (`--n-cpu-moe`, #5612) this planner
 	// installs on every session it builds: how many MoE layers spill to host and how many device
 	// bytes the routed-expert ring may hold. nil — the default and every planner that was never
@@ -1640,6 +1643,9 @@ func (e *InKernelCapacityError) Error() string {
 // a genuine bug (a nil deref, an unrelated validation panic).
 func recoverDevicePanic(r any) (err error, handled bool) {
 	if e, ok := r.(error); ok {
+		if errors.Is(e, ErrKVPrecisionUnrealized) {
+			return e, true
+		}
 		// Direct session APIs have no error return. Recover only the declared
 		// unsupported/malformed Flash schedule refusals, never arbitrary model
 		// validation errors or string panics, and preserve the original cause.
@@ -2232,6 +2238,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			return nil, domainErr
 		}
 		defer releaseDFlash2Domain()
+		if p.kvPrecisionErr != nil {
+			return nil, p.kvPrecisionErr
+		}
 		if p.qwenQ4KPrefillChunkTarget() && p.qwenQ4KPrefillChunkConfigErr != nil {
 			return nil, p.qwenQ4KPrefillChunkConfigErr
 		}
