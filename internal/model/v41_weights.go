@@ -269,15 +269,34 @@ func (s *V41PackedShard) ReadScale(t V41PackedTensor, bound int64) ([]byte, erro
 	if s == nil || s.file == nil {
 		return nil, fmt.Errorf("%w: nil shard", ErrV41PackedUnsupported)
 	}
-	if !t.HasScale() {
+	// A caller-held reference is not authority for the allocation bound or the
+	// scale identity. Resolve the pair again before any payload access: otherwise
+	// a shortened supplied span could admit a larger actual scale read.
+	resolved, err := s.Reference(t.Ref.Name)
+	if err != nil {
+		return nil, err
+	}
+	if !resolved.HasScale() {
 		return nil, fmt.Errorf("%w: %s has no scale sibling", ErrV41PackedUnsupported, t.Ref.Name)
 	}
+	if t.Shaper != resolved.Shaper || t.Start != resolved.Start || t.End != resolved.End ||
+		t.Ref.ScaleName != resolved.Ref.ScaleName || t.ScaleStart != resolved.ScaleStart || t.ScaleEnd != resolved.ScaleEnd {
+		return nil, fmt.Errorf("%w: %s scale reference does not match the resolved shard pair", ErrV41PackedUnsupported, t.Ref.Name)
+	}
+	t = resolved
 	if bound > 0 && t.ScaleEnd-t.ScaleStart > bound {
 		return nil, fmt.Errorf("%w: %s scale payload %d exceeds bound %d", ErrV41PackedUnsupported, t.Ref.ScaleName, t.ScaleEnd-t.ScaleStart, bound)
 	}
 	entry, ok := s.entries[t.Ref.ScaleName]
 	if !ok {
 		return nil, fmt.Errorf("%w: %s is not present in shard %s", ErrV41PackedUnsupported, t.Ref.ScaleName, s.path)
+	}
+	start, end, err := safetensorsDataBounds(s.file.dataBase, s.file.size, entry)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s: %v", ErrV41PackedUnsupported, t.Ref.ScaleName, err)
+	}
+	if start != t.ScaleStart || end != t.ScaleEnd {
+		return nil, fmt.Errorf("%w: %s scale span moved %d..%d -> %d..%d", ErrV41PackedUnsupported, t.Ref.ScaleName, t.ScaleStart, t.ScaleEnd, start, end)
 	}
 	payload, err := s.file.tensorBytes(entry)
 	if err != nil {
