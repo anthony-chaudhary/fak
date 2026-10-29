@@ -934,6 +934,7 @@ func TestPhysicalTrialFromRawDecodePhaseSeparation(t *testing.T) {
 			SessionSetupDuration: 50 * time.Millisecond, PrefillDuration: 100 * time.Millisecond,
 			FirstSampleDuration: 20 * time.Millisecond, DecodeDuration: 400 * time.Millisecond,
 			TeardownDuration: 30 * time.Millisecond, GeneratedTokens: make([]int, 10),
+			StepTokens:       make([]int, 9), // First generated token is the prefill sample.
 			BackendExecution: validRawBackendExecutionObservation(),
 		}},
 	}
@@ -947,8 +948,11 @@ func TestPhysicalTrialFromRawDecodePhaseSeparation(t *testing.T) {
 	if got, want := result.TokensPerSec, 10/0.6; math.Abs(got-want) > 1e-9 {
 		t.Fatalf("end-to-end TokensPerSec = %f, want %f (10 tokens over 600ms wall)", got, want)
 	}
-	if got, want := result.DecodeTokensPerSecond, 10/0.4; math.Abs(got-want) > 1e-9 {
-		t.Fatalf("phase-pure DecodeTokensPerSecond = %f, want %f (10 tokens over 400ms decode)", got, want)
+	if got, want := result.DecodeTokensPerSecond, 9/0.4; math.Abs(got-want) > 1e-9 {
+		t.Fatalf("phase-pure DecodeTokensPerSecond = %f, want %f (9 subsequent tokens over 400ms decode)", got, want)
+	}
+	if got := result.DecodeTokensPerSecond * result.TPOTMS; math.Abs(got-1000) > 1e-9 {
+		t.Fatalf("decode rate * TPOT = %f, want 1000", got)
 	}
 	if result.PhasesMS["decode"] != 400 {
 		t.Fatalf("PhasesMS[decode] = %f, want 400", result.PhasesMS["decode"])
@@ -958,7 +962,23 @@ func TestPhysicalTrialFromRawDecodePhaseSeparation(t *testing.T) {
 			result.DecodeTokensPerSecond, result.TokensPerSec)
 	}
 
+	// The prefill sample is emitted before the decode timer starts. EOS or a
+	// one-token limit can leave positive bookkeeping time but no decode steps.
+	firstSampleOnly := execution
+	firstSampleOnly.Runs = append([]rawdecode.Run(nil), execution.Runs...)
+	firstSampleOnly.Runs[0].GeneratedTokens = []int{7}
+	firstSampleOnly.Runs[0].PrefillOutputID = 7
+	firstSampleOnly.Runs[0].StepTokens = nil
+	single, err := physicalTrialFromRawDecode(PhysicalTrialRequest{RunIndex: 1, Scenario: ScenarioCold, Concurrency: 1}, firstSampleOnly)
+	if err != nil {
+		t.Fatalf("first-sample-only physicalTrialFromRawDecode: %v", err)
+	}
+	if single.DecodeTokensPerSecond != 0 || single.TPOTMS != 0 || single.UsefulTokens != 1 || single.TokensPerSec <= 0 {
+		t.Fatalf("first-sample-only result has incorrect phase accounting: %+v", single)
+	}
+
 	zeroDecode := execution
+	zeroDecode.Runs = append([]rawdecode.Run(nil), execution.Runs...)
 	zeroDecode.Runs[0].DecodeDuration = 0
 	got, err := physicalTrialFromRawDecode(PhysicalTrialRequest{RunIndex: 1, Scenario: ScenarioCold, Concurrency: 1}, zeroDecode)
 	if err != nil {

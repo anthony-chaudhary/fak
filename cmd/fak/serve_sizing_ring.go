@@ -112,7 +112,7 @@ func buildServeSizingRingForFlags(ws *ggufload.WeightSource, be compute.Backend,
 		r.Reason = err.Error()
 		return r
 	}
-	if err := policy.admit(validateServeHaloCPUOffload(halo, *sf.cpuOffloadExperts, *sf.nCPUMoE, os.Getenv(agent.ExpertSpillEnv))); err != nil || !policy.requireDeviceExecution(halo) {
+	if err := policy.admit(validateServeHaloCPUOffload(halo, *sf.cpuOffloadExperts, *sf.nCPUMoE, os.Getenv(agent.ExpertSpillEnv))); err != nil || !policy.requireDeviceExecution(halo, be) {
 		r.Reason = "device-only execution route not established"
 		return r
 	}

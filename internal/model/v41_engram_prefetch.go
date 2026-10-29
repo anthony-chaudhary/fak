@@ -134,6 +134,31 @@ func (c *V41EngramRowCache) gatherKnownRowsOwned(rows []uint32, contiguous bool)
 	if maxRows < 1 {
 		maxRows = 1
 	}
+	// One bounded source-read slab covers every coalesced miss span in this
+	// gather: size it to the largest planned span - the longest run of
+	// consecutive missing rows, capped at the coalescer ceiling. Residency can
+	// only shorten a span mid-gather, never extend one, so no read needs more
+	// than slabRows. Reusing the slab across the sequential reads drops one
+	// transient allocation per coalesced miss; served payloads copy out
+	// immediately, so nothing aliases the slab past its span.
+	slabRows := 0
+	for i, run := 0, 0; i < len(missing); i++ {
+		if i > 0 && missing[i] == missing[i-1]+1 {
+			run++
+		} else {
+			run = 1
+		}
+		if run > slabRows {
+			slabRows = run
+		}
+	}
+	if slabRows > maxRows {
+		slabRows = maxRows
+	}
+	var slab []byte
+	if slabRows > 0 {
+		slab = make([]byte, slabRows*c.opts.RowBytes)
+	}
 	for lo := 0; lo < len(missing); {
 		// Readahead from an earlier range may already hold this row.
 		resident, err := serveResident(missing[lo])
@@ -153,7 +178,7 @@ func (c *V41EngramRowCache) gatherKnownRowsOwned(rows []uint32, contiguous bool)
 		}
 		count := hi - lo
 		want := count * c.opts.RowBytes
-		buf := make([]byte, want)
+		buf := slab[:want]
 		c.stats.Misses += int64(count)
 		n, err := c.src.ReadRows(int(missing[lo]), count, buf)
 		if n < 0 || n > want {

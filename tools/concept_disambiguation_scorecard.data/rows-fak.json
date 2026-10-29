@@ -204,5 +204,24 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "plandeepseekv41placement",
+      "canonical": "PlanDeepSeekV41Placement",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Model V4.1 package function that admits exact official Flash-1017 metadata and computes a conservative single-GPU text weight/context/workspace placement with caller-bounded host cache and residual SSD demand.",
+      "distinction": "A pinned model-specific byte placement planner, not the generic classed MemoryPlan container or the Qwen3.8 MTP planner; it does not admit a model loader or establish measured hardware fit.",
+      "distinct_from": [
+        "x-plan-memoryplan"
+      ],
+      "aliases": [],
+      "grounding": "PlanDeepSeekV41Placement",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

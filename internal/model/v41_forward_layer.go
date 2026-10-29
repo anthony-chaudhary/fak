@@ -478,6 +478,18 @@ func (m *Model) v41LayerProjectQKV(l, seq int, preByPos [][]float32, full bool, 
 		if err != nil {
 			return out, err
 		}
+		if full && seq > 1 {
+			// The projection adapter owns fresh panels, and full RoPE publication
+			// owns its validated outputs even when callbacks alias their results.
+			// Reuse the projected rows only after both publications succeed: keeping
+			// separate published rows would retain a second prompt-sized Q/KV panel
+			// while the unprocessed projection rows are still live.
+			qRow := qPanel[t*nH*hd : (t+1)*nH*hd : (t+1)*nH*hd]
+			kvRow := kvPanel[t*kvRank : t*kvRank+hd : t*kvRank+hd]
+			copy(qRow, q)
+			copy(kvRow, kv)
+			q, kv = qRow, kvRow
+		}
 		out.qHeads[t] = q
 		out.kvRows[t] = kv
 		out.qLatRows[t] = qLat
@@ -739,7 +751,8 @@ func (m *Model) v41CandidateIndexList(l, seq, hd int, plan V41AttentionPlan, sco
 func (m *Model) v41LayerPublishAttentionState(l, seq, hd int, src v41LayerSources, qkv v41LayerQKV, preByPos [][]float32, indexList []int32, st *v41ForwardState) error {
 	cfg := m.Cfg
 	plan := src.plan
-	layerState, err := NewV41AttentionState(hd, 8)
+	// This private target cannot escape until the complete temporal seed below.
+	layerState, err := newV41TemporalSeedTarget(hd, 8)
 	if err != nil {
 		return v41StageErr(v41StageAttention, l, err)
 	}
@@ -914,16 +927,14 @@ func (m *Model) v41LayerProjectAttentionOutput(l, seq int, full bool, nH, hd, H 
 	}
 	if seq > 1 && full && st != nil && st.callbackOwner != nil && st.callbackOwner.M == m {
 		totalIn, valid := checkedMulInt(nH, hd)
-		panelN, panelValid := checkedMulInt(seq, totalIn)
+		_, panelValid := checkedMulInt(seq, totalIn)
 		if valid && panelValid {
-			flat := make([]float32, panelN)
-			for t, row := range attnProjectionInput {
+			for _, row := range attnProjectionInput {
 				if len(row) != totalIn {
 					return nil, v41StageErr(v41StageAttention, l, errV41ProjectionResult)
 				}
-				copy(flat[t*totalIn:(t+1)*totalIn], row)
 			}
-			projected, outcome, cause := st.callbackOwner.v41GroupedOutputPanel(l, flat, seq, nH, hd, cfg.OGroups, cfg.OLoraRank, H)
+			projected, outcome, cause := st.callbackOwner.v41GroupedOutputPanelRows(l, attnProjectionInput, seq, nH, hd, cfg.OGroups, cfg.OLoraRank, H)
 			switch outcome {
 			case v41ProjectionHandled:
 				if cause != nil || len(projected) != seq {

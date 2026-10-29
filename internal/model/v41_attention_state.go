@@ -188,27 +188,34 @@ func (s *V41AttentionState) indexWidth() int {
 // headDim is the KV latent width; ratioCap bounds any layer's compress ratio so
 // malformed updates are rejected before mutation.
 func NewV41AttentionState(headDim, ratioCap int) (*V41AttentionState, error) {
+	s, err := newV41TemporalSeedTarget(headDim, ratioCap)
+	if err != nil {
+		return nil, err
+	}
+	s.window = make([][]float32, v41WindowSize)
+	for i := range s.window {
+		s.window[i] = make([]float32, headDim)
+	}
+	s.kvPublications = make(map[v41AttentionPublicationKey][]float32)
+	s.indexPublications = make(map[v41AttentionPublicationKey][]float32)
+	s.kvPublishedEnd = make(map[int]int)
+	s.indexPublishedEnd = make(map[int]int)
+	return s, nil
+}
+
+// newV41TemporalSeedTarget is private to cold temporal construction. Its caller
+// must finish seedTemporalWithInputs before exposing the state or using the ring.
+// That seed validates every input and allocates the final ring/maps itself; an
+// empty constructor ring would be allocated only to be discarded immediately.
+// Public construction still returns a fully allocated empty state above.
+func newV41TemporalSeedTarget(headDim, ratioCap int) (*V41AttentionState, error) {
 	if headDim <= 0 {
 		return nil, fmt.Errorf("model: V41 attention state head dim %d must be positive", headDim)
 	}
 	if ratioCap < 1 {
 		return nil, fmt.Errorf("model: V41 attention state ratio cap %d must be positive", ratioCap)
 	}
-	s := &V41AttentionState{
-		windowSize:        v41WindowSize,
-		headDim:           headDim,
-		indexHeadDim:      headDim,
-		ratioCap:          ratioCap,
-		window:            make([][]float32, v41WindowSize),
-		kvPublications:    make(map[v41AttentionPublicationKey][]float32),
-		indexPublications: make(map[v41AttentionPublicationKey][]float32),
-		kvPublishedEnd:    make(map[int]int),
-		indexPublishedEnd: make(map[int]int),
-	}
-	for i := range s.window {
-		s.window[i] = make([]float32, headDim)
-	}
-	return s, nil
+	return &V41AttentionState{windowSize: v41WindowSize, headDim: headDim, indexHeadDim: headDim, ratioCap: ratioCap}, nil
 }
 
 // Prefill seeds the window ring from a projected KV chunk and publishes the

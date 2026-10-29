@@ -701,12 +701,12 @@ func physicalTrialFromRawDecode(req PhysicalTrialRequest, execution rawdecode.Ex
 		return PhysicalTrialResult{}, errors.New("qwen38campaign: observed fallback count overflows int")
 	}
 
-	// Phase-pure decode rate beside the end-to-end aggregate: useful tokens over
-	// the decode phase alone; 0 when the decode phase did not elapse.
-	decodeMS := float64(run.DecodeDuration.Nanoseconds()) / 1e6
+	// Rawdecode samples the first output from prefill logits, before the decode
+	// timer starts. Count only subsequent outputs, matching TPOT below.
+	decodeTokens := len(output) - 1
 	var decodeTokensPerSecond float64
-	if decodeMS > 0 {
-		decodeTokensPerSecond = float64(len(output)) / (decodeMS / 1000.0)
+	if decodeTokens > 0 && run.DecodeDuration > 0 {
+		decodeTokensPerSecond = float64(decodeTokens) / run.DecodeDuration.Seconds()
 	}
 
 	result := PhysicalTrialResult{

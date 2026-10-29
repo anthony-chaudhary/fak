@@ -1,25 +1,30 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
-// TestAggregate_PhaseSeparatedDecodeMetrics pins the closed contract on synthetic
-// per-request results: TTFT percentiles, mean ITL (TPOT), decode tok/s = 1000/TPOT,
+// TestAggregate_ClientContentChunkCadence pins the closed contract on synthetic
+// per-request results: first-content percentiles and reciprocal mean chunk cadence,
 // and the unchanged end-to-end completion/wall rate.
-func TestAggregate_PhaseSeparatedDecodeMetrics(t *testing.T) {
+func TestAggregate_ClientContentChunkCadence(t *testing.T) {
 	results := []reqResult{
 		{latency: 300 * time.Millisecond, completionTokens: 10, streamed: true,
-			ttft: 20 * time.Millisecond, itls: []time.Duration{10 * time.Millisecond, 10 * time.Millisecond}},
+			ttft: 20 * time.Millisecond, chunkIntervals: []time.Duration{10 * time.Millisecond, 10 * time.Millisecond}},
 		{latency: 500 * time.Millisecond, completionTokens: 10, streamed: true,
-			ttft: 40 * time.Millisecond, itls: []time.Duration{20 * time.Millisecond}},
+			ttft: 40 * time.Millisecond, chunkIntervals: []time.Duration{20 * time.Millisecond}},
 	}
 	pr := aggregate(1, 2, 2*time.Second, results)
 	if !pr.Streamed {
@@ -28,15 +33,15 @@ func TestAggregate_PhaseSeparatedDecodeMetrics(t *testing.T) {
 	if pr.TTFTP50MS != 20 || pr.TTFTP95MS != 40 {
 		t.Fatalf("ttft p50/p95=%v/%v want 20/40", pr.TTFTP50MS, pr.TTFTP95MS)
 	}
-	wantTPOT := 40.0 / 3.0 // mean of 10, 10, 20 ms
-	if math.Abs(pr.TPOTMS-wantTPOT) > 1e-9 {
-		t.Fatalf("tpot=%v want %v", pr.TPOTMS, wantTPOT)
+	wantInterval := 40.0 / 3.0 // mean of 10, 10, 20 ms
+	if math.Abs(pr.MeanInterContentChunkMS-wantInterval) > 1e-9 {
+		t.Fatalf("chunk_interval=%v want %v", pr.MeanInterContentChunkMS, wantInterval)
 	}
-	if pr.DecodeTokensPerSecond != 1000/pr.TPOTMS {
-		t.Fatalf("decode_tps=%v want 1000/tpot=%v", pr.DecodeTokensPerSecond, 1000/pr.TPOTMS)
+	if pr.ContentChunkCadencePerSecond != 1000/pr.MeanInterContentChunkMS {
+		t.Fatalf("chunk_cadence=%v want 1000/chunk_interval=%v", pr.ContentChunkCadencePerSecond, 1000/pr.MeanInterContentChunkMS)
 	}
-	if math.Abs(pr.DecodeTokensPerSecond-75) > 1e-9 {
-		t.Fatalf("decode_tps=%v want ~75", pr.DecodeTokensPerSecond)
+	if math.Abs(pr.ContentChunkCadencePerSecond-75) > 1e-9 {
+		t.Fatalf("chunk_cadence=%v want ~75", pr.ContentChunkCadencePerSecond)
 	}
 	if pr.TokensPerSecond != 10 { // 20 completion tokens / 2s sweep wall, formula unchanged
 		t.Fatalf("tok/s=%v want 10 (completion/wall)", pr.TokensPerSecond)
@@ -48,7 +53,7 @@ func TestAggregate_PhaseSeparatedDecodeMetrics(t *testing.T) {
 func TestAggregate_MixedStreamedAndFallback(t *testing.T) {
 	results := []reqResult{
 		{latency: 300 * time.Millisecond, completionTokens: 10, streamed: true,
-			ttft: 25 * time.Millisecond, itls: []time.Duration{5 * time.Millisecond}},
+			ttft: 25 * time.Millisecond, chunkIntervals: []time.Duration{5 * time.Millisecond}},
 		{latency: 400 * time.Millisecond, completionTokens: 10}, // plain-JSON fallback
 	}
 	pr := aggregate(1, 2, 2*time.Second, results)
@@ -58,8 +63,8 @@ func TestAggregate_MixedStreamedAndFallback(t *testing.T) {
 	if pr.TTFTP50MS != 25 || pr.TTFTP95MS != 25 {
 		t.Fatalf("ttft p50/p95=%v/%v want 25/25 (fallback contributes none)", pr.TTFTP50MS, pr.TTFTP95MS)
 	}
-	if pr.TPOTMS != 5 || pr.DecodeTokensPerSecond != 200 {
-		t.Fatalf("tpot/decode=%v/%v want 5/200", pr.TPOTMS, pr.DecodeTokensPerSecond)
+	if pr.MeanInterContentChunkMS != 5 || pr.ContentChunkCadencePerSecond != 200 {
+		t.Fatalf("chunk_interval/cadence=%v/%v want 5/200", pr.MeanInterContentChunkMS, pr.ContentChunkCadencePerSecond)
 	}
 	if pr.CompletionTokens != 20 || pr.TokensPerSecond != 10 {
 		t.Fatalf("tokens/tok-s=%d/%v want 20/10 (fallback tokens still end-to-end)", pr.CompletionTokens, pr.TokensPerSecond)
@@ -71,13 +76,13 @@ func TestAggregate_MixedStreamedAndFallback(t *testing.T) {
 func TestAggregate_AllErrorsLeavesPhaseFieldsZero(t *testing.T) {
 	results := []reqResult{{err: fmt.Errorf("boom")}, {err: fmt.Errorf("boom")}}
 	pr := aggregate(1, 2, time.Second, results)
-	if pr.Streamed || pr.TTFTP50MS != 0 || pr.TTFTP95MS != 0 || pr.TPOTMS != 0 || pr.DecodeTokensPerSecond != 0 {
+	if pr.Streamed || pr.TTFTP50MS != 0 || pr.TTFTP95MS != 0 || pr.MeanInterContentChunkMS != 0 || pr.ContentChunkCadencePerSecond != 0 {
 		t.Fatalf("phase fields nonzero on all-error point: %+v", pr)
 	}
 }
 
 // fak-test:runtime fast est=2s
-func TestRun_StreamingSSEMeasuresTTFTAndTPOT(t *testing.T) {
+func TestRun_StreamingSSEMeasuresTTFTAndChunkCadence(t *testing.T) {
 	const (
 		ttftDelay = 60 * time.Millisecond
 		itlDelay  = 40 * time.Millisecond
@@ -132,15 +137,15 @@ func TestRun_StreamingSSEMeasuresTTFTAndTPOT(t *testing.T) {
 	if p.TTFTP95MS > float64(ttftDelay.Milliseconds())*4+250 {
 		t.Fatalf("ttft p95=%vms far above the injected %vms", p.TTFTP95MS, ttftDelay)
 	}
-	// TPOT: mean inter-content-chunk arrival ~itlDelay.
-	if p.TPOTMS < float64(itlDelay.Milliseconds())/2 {
-		t.Fatalf("tpot=%vms below half the injected %vms", p.TPOTMS, itlDelay)
+	// Mean client inter-content-chunk arrival is approximately itlDelay.
+	if p.MeanInterContentChunkMS < float64(itlDelay.Milliseconds())/2 {
+		t.Fatalf("chunk_interval=%vms below half the injected %vms", p.MeanInterContentChunkMS, itlDelay)
 	}
-	if p.TPOTMS > float64(itlDelay.Milliseconds())*4+250 {
-		t.Fatalf("tpot=%vms far above the injected %vms", p.TPOTMS, itlDelay)
+	if p.MeanInterContentChunkMS > float64(itlDelay.Milliseconds())*4+250 {
+		t.Fatalf("chunk_interval=%vms far above the injected %vms", p.MeanInterContentChunkMS, itlDelay)
 	}
-	if p.DecodeTokensPerSecond != 1000/p.TPOTMS {
-		t.Fatalf("decode_tps=%v want 1000/tpot=%v", p.DecodeTokensPerSecond, 1000/p.TPOTMS)
+	if p.ContentChunkCadencePerSecond != 1000/p.MeanInterContentChunkMS {
+		t.Fatalf("chunk_cadence=%v want 1000/chunk_interval=%v", p.ContentChunkCadencePerSecond, 1000/p.MeanInterContentChunkMS)
 	}
 	// End-to-end rate keeps its MATRIX.json contract: completion tokens over sweep wall.
 	if p.TokensPerSecond != float64(p.CompletionTokens)/p.WallSeconds {
@@ -174,7 +179,7 @@ func TestRun_NonStreamingEndpointFallsBackWithoutPhaseFields(t *testing.T) {
 	if p.Streamed {
 		t.Fatal("streamed=true want false (endpoint answered plain JSON)")
 	}
-	if p.TTFTP50MS != 0 || p.TTFTP95MS != 0 || p.TPOTMS != 0 || p.DecodeTokensPerSecond != 0 {
+	if p.TTFTP50MS != 0 || p.TTFTP95MS != 0 || p.MeanInterContentChunkMS != 0 || p.ContentChunkCadencePerSecond != 0 {
 		t.Fatalf("phase fields nonzero on fallback: %+v", p)
 	}
 	if p.CompletionTokens != 14 {
@@ -226,13 +231,13 @@ func TestRun_MalformedSSENeverPanicsAndPrefersUsage(t *testing.T) {
 	if p.TTFTP50MS <= 0 {
 		t.Fatalf("ttft p50=%v want >0 (content chunks did arrive)", p.TTFTP50MS)
 	}
-	// Burst delivery can yield a zero mean ITL; pin the contract either way:
-	// decode = 1000/tpot when tpot > 0, else 0.
-	if p.TPOTMS > 0 && p.DecodeTokensPerSecond != 1000/p.TPOTMS {
-		t.Fatalf("decode_tps=%v want 1000/tpot=%v", p.DecodeTokensPerSecond, 1000/p.TPOTMS)
+	// Burst delivery can yield a zero mean chunk interval; its reciprocal is
+	// client chunk cadence, not token throughput.
+	if p.MeanInterContentChunkMS > 0 && p.ContentChunkCadencePerSecond != 1000/p.MeanInterContentChunkMS {
+		t.Fatalf("chunk_cadence=%v want 1000/chunk_interval=%v", p.ContentChunkCadencePerSecond, 1000/p.MeanInterContentChunkMS)
 	}
-	if p.TPOTMS == 0 && p.DecodeTokensPerSecond != 0 {
-		t.Fatalf("decode_tps=%v want 0 when tpot=0", p.DecodeTokensPerSecond)
+	if p.MeanInterContentChunkMS == 0 && p.ContentChunkCadencePerSecond != 0 {
+		t.Fatalf("chunk_cadence=%v want 0 when chunk_interval=0", p.ContentChunkCadencePerSecond)
 	}
 }
 
@@ -255,7 +260,97 @@ func TestRun_StreamErrorEventCountsAsError(t *testing.T) {
 	if p.Errors != 1 || p.ErrorRate != 1.0 {
 		t.Fatalf("errors/rate=%d/%v want 1/1.0", p.Errors, p.ErrorRate)
 	}
-	if p.Streamed || p.TTFTP50MS != 0 || p.TPOTMS != 0 || p.DecodeTokensPerSecond != 0 {
+	if p.Streamed || p.TTFTP50MS != 0 || p.MeanInterContentChunkMS != 0 || p.ContentChunkCadencePerSecond != 0 {
 		t.Fatalf("phase fields set on errored point: %+v", p)
+	}
+}
+
+// fak-test:runtime fast est=100ms
+func TestRun_SSETransportErrorCannotCountMetrics(t *testing.T) {
+	t.Parallel()
+	const content = "data: {\"choices\":[{\"delta\":{\"content\":\"multiple words\"}}]}"
+	const usage = "data: {\"usage\":{\"completion_tokens\":37}}"
+	for _, bodyText := range []string{"", content, content + "\n", content + "\n" + usage, "data: [DONE]"} {
+		t.Run(bodyText, func(t *testing.T) {
+			var closed atomic.Bool
+			cfg := &Config{
+				URL: "http://loadgen.test/v1/chat/completions",
+				HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": {"text/event-stream"}},
+						Body:       &validJSONThenErrorBody{data: []byte(bodyText), closed: &closed},
+					}, nil
+				})},
+			}
+			r := oneRequest(context.Background(), cfg, &clientInFlight{})
+			if !errors.Is(r.err, io.ErrUnexpectedEOF) {
+				t.Fatalf("stream error=%v, want io.ErrUnexpectedEOF", r.err)
+			}
+			p := aggregate(1, 1, time.Second, []reqResult{r})
+			if p.Errors != 1 || p.ErrorRate != 1 || p.CompletionTokens != 0 ||
+				p.ContentChunks != 0 || p.Streamed || p.TTFTP50MS != 0 ||
+				p.MeanInterContentChunkMS != 0 || p.ContentChunkCadencePerSecond != 0 {
+				t.Fatal("failed stream contributed successful metrics")
+			}
+			if !closed.Load() {
+				t.Fatal("response body was not closed")
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=100ms
+func TestRun_SSEUsageAndChunkCadenceStayDistinct(t *testing.T) {
+	t.Parallel()
+	const content = "data: {\"choices\":[{\"delta\":{\"content\":\"multiple words\"}},{\"delta\":{\"content\":\"another choice\"}}]}\n"
+	for _, tc := range []struct {
+		name    string
+		usage   string
+		tokens  int
+		missing int
+	}{
+		{name: "missing", missing: 1},
+		{name: "explicit zero", usage: "data: {\"usage\":{\"completion_tokens\":0}}\n"},
+		{name: "tokens differ from chunks", usage: "data: {\"usage\":{\"completion_tokens\":37}}\n", tokens: 37},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			start := time.Unix(1, 0)
+			now := start
+			cfg := &Config{Now: func() time.Time { now = now.Add(10 * time.Millisecond); return now }}
+			br := bufio.NewReader(strings.NewReader(content + content + tc.usage))
+			firstLine, firstErr := br.ReadString('\n')
+			r := measureStream(cfg, br, firstLine, firstErr, start)
+			if r.err != nil {
+				t.Fatal(r.err)
+			}
+			p := aggregate(1, 1, time.Second, []reqResult{r})
+			if p.CompletionTokens != tc.tokens || p.TokenUsageMissingRequests != tc.missing ||
+				p.TokensPerSecond != float64(tc.tokens) {
+				t.Fatalf("usage tokens/missing/rate=%d/%d/%v", p.CompletionTokens, p.TokenUsageMissingRequests, p.TokensPerSecond)
+			}
+			if p.ContentChunks != 2 || p.MeanInterContentChunkMS != 10 || p.ContentChunkCadencePerSecond != 100 {
+				t.Fatalf("chunks/interval/cadence=%d/%v/%v", p.ContentChunks, p.MeanInterContentChunkMS, p.ContentChunkCadencePerSecond)
+			}
+			if p.TPOTMS != 0 || p.DecodeTokensPerSecond != 0 {
+				t.Fatal("client chunk cadence reported as token timing")
+			}
+			data, err := json.Marshal(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(data, &fields); err != nil {
+				t.Fatal(err)
+			}
+			if _, exists := fields["tokens_per_second"]; tc.missing > 0 && exists {
+				t.Fatal("unavailable token throughput emitted as a measured rate")
+			}
+			for _, key := range []string{"tpot_ms", "decode_tokens_per_second"} {
+				if _, exists := fields[key]; exists {
+					t.Fatalf("unsupported token timing field %s emitted", key)
+				}
+			}
+		})
 	}
 }

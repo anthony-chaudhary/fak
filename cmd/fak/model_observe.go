@@ -50,33 +50,8 @@ func cmdModelObserve(args []string) {
 			os.Exit(1)
 		}
 	case "report":
-		fs := flag.NewFlagSet("model-observe report", flag.ExitOnError)
-		input := fs.String("input", "model-perf.jsonl", "observation JSONL")
-		format := fs.String("format", "md", "md or json")
-		_ = fs.Parse(args[1:])
-		f, err := os.Open(*input)
-		if err != nil {
+		if err := modelperfobs.RunReport(args[1:], os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "model-observe:", err)
-			os.Exit(1)
-		}
-		defer f.Close()
-		rows, err := modelperfobs.ReadObservations(f)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "model-observe:", err)
-			os.Exit(1)
-		}
-		s := modelperfobs.Summarize(rows)
-		if *format == "json" {
-			if err := json.NewEncoder(os.Stdout).Encode(s); err != nil {
-				os.Exit(1)
-			}
-			return
-		}
-		if *format != "md" {
-			fmt.Fprintln(os.Stderr, "model-observe: format must be md or json")
-			os.Exit(2)
-		}
-		if err := modelperfobs.WriteMarkdown(os.Stdout, s); err != nil {
 			os.Exit(1)
 		}
 	case "time-burndown":
@@ -646,7 +621,7 @@ func runModelObserveStateBench(args []string) error {
 
 func modelObserveUsage() string {
 	return "usage: fak model-observe proxy --backend URL [--listen ADDR --ledger FILE --cache-state cold|warm|steady|unknown --warmup]\n" +
-		"       fak model-observe report --input FILE [--format md|json]\n" +
+		"       fak model-observe report --input FILE [--goal FILE --format md|json]\n" +
 		"       fak model-observe time-burndown --input FILE [--phases FILE --format md|json|prom]\n" +
 		"       fak model-observe bandwidth --input FILE [--output FILE --pretty=true]\n" +
 		"       fak model-observe bandwidth collect --measure-host-roofline [--roofline-sweep --roofline-threads N --roofline-knee-threshold 0.9]\n" +

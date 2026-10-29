@@ -1891,6 +1891,13 @@ Terminal no-replay sentinel for affected peer or unstarted work in an aborted se
 **Distinct from:** The selected Qwen cohort's terminal no-replay marker, not retained request/lane state, the V4.1-specific abort marker, or permission to retry through scalar fallback.
 
 
+### PlanDeepSeekV41Placement
+
+Model V4.1 package function that admits exact official Flash-1017 metadata and computes a conservative single-GPU text weight/context/workspace placement with caller-bounded host cache and residual SSD demand.
+
+**Distinct from:** A pinned model-specific byte placement planner, not the generic classed MemoryPlan container or the Qwen3.8 MTP planner; it does not admit a model loader or establish measured hardware fit.
+
+
 ### newBackendSessionChecked (checked HAL construction core)
 
 Model.newBackendSessionChecked is the shared private implementation of checked HAL session construction: execution-scope allocation, weight holding, KV/weight setup, and optional Qwen3.5-hybrid zero conv/recurrent state materialization, with panic-safe rollback on construction failure.
@@ -1938,3 +1945,17 @@ A model placement omission indicating that the usable capacity of a referenced p
 The placement planner value declaring that the requested model placement lacks runtime support in the caller supplied execution envelope.
 
 **Distinct from:** A caller declaration that prevents eligibility even when memory fits; it is neither a hardware qualification result nor a capacity overflow.
+
+
+### ActivityCoverage
+
+Per-axis provenance for retained gateway activity observations.
+
+**Distinct from:** Describes which request outcomes are observed; it does not certify subprocess execution, external effects, or lifetime completeness.
+
+
+### ActivityCoverageNativeSyscallResults
+
+Coverage token for completed admitted syscall request results in the retained observation window.
+
+**Distinct from:** Supports tool-request and failed-result counts only; cached outcomes do not prove subprocess execution or file and network effects.

@@ -143,6 +143,11 @@ extern "C" void *fcuda_malloc_on(int device, size_t bytes) {
 
 extern "C" void fcuda_free_on(int device, void *d) {
   if (!d) return;
+#ifdef FAK_CUDA_V41_INDEXER
+  for (const void *held : g_v41_indexer_quarantine) {
+    if (d == held) return;
+  }
+#endif
 #ifdef FAK_CUDA_V41_BF16_PUBLISH
   for (const void *held : g_v41_bf16_quarantine) {
     if (d == held) return;

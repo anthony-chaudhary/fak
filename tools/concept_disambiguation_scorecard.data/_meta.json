@@ -11703,6 +11703,16 @@
           "category": "incidental",
           "reason": "Private CUDA KV helper checks native integer element-offset bounds on three tensor planes before mutation. This is numerical storage geometry validation, not an authorization capability, policy preflight, access grant, or security decision.",
           "token": "preflightTypedAppend"
+        },
+        {
+          "category": "incidental",
+          "reason": "Offline service-measurement warmup exclusion convention; not authorization or capability policy.",
+          "token": "WarmupPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Offline measurement eligibility convention for undefined one-token TPOT; not authorization or capability policy.",
+          "token": "SingleTokenTPOTPolicy"
         }
       ],
       "exclude": [
@@ -11799,6 +11809,7 @@
         "SIGNATURE_POLICY",
         "SessionCapabilityCorpusSchema",
         "SetPolicyRuntime",
+        "SingleTokenTPOTPolicy",
         "SinkPolicy",
         "SpawnPlacementPolicy",
         "StageAdjudicate",
@@ -11807,6 +11818,7 @@
         "V41EPOwnerBuildPinPolicy",
         "VerdictPolicyBlock",
         "VulkanQ6KSharedHeadQualificationPreflight",
+        "WarmupPolicy",
         "adjudicate",
         "adjudicated",
         "adjudicates",
@@ -14885,6 +14897,16 @@
           "category": "incidental",
           "reason": "Diagnostic marker for unattempted packages after a failed prepush build; not a support level, maturity tier, or readiness claim.",
           "token": "prepushIncompleteBuildCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Per-run marginal timing sample coverage data, not implementation or hardware support maturity.",
+          "token": "ServiceTimingCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Measured-request fraction of offered workload, not platform capability or support maturity.",
+          "token": "CoverageFraction"
         }
       ],
       "exclude": [
@@ -14911,6 +14933,7 @@
         "CorrectnessGate",
         "CorrectnessMargin",
         "CoverageDebtUnit",
+        "CoverageFraction",
         "CoveragePartial",
         "CoverageSkipped",
         "CoverageUnavailable",
@@ -15008,6 +15031,7 @@
         "SearchQuery",
         "SearchResult",
         "SecurityParityConfirmed",
+        "ServiceTimingCoverage",
         "SessionSupport",
         "SetupParityBlocks",
         "SetupParityReport",

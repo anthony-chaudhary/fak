@@ -30,18 +30,51 @@ func (s *Session) v41GroupedOutputPanel(layer int, panel []float32, rows, heads,
 }
 
 func (s *Session) v41GroupedOutputPanelOwned(owner *v41GroupedOutputCohort, layer int, panel []float32, rows, heads, headDim, groups, rank, dim int) ([][]float32, v41DenseProjectionOutcome, error) {
+	return s.v41GroupedOutputPanelInput(owner, layer, panel, nil, rows, heads, headDim, groups, rank, dim)
+}
+
+// v41GroupedOutputPanelRows borrows the forward's fresh inverse-output rows
+// only for this synchronous call. Every row is checked before backend work;
+// each admitted tile copies its group inputs into ordinary owned upload buffers.
+// No whole-prompt flattening or arithmetic change is needed.
+func (s *Session) v41GroupedOutputPanelRows(layer int, panelRows [][]float32, rows, heads, headDim, groups, rank, dim int) ([][]float32, v41DenseProjectionOutcome, error) {
+	return s.v41GroupedOutputPanelInput(nil, layer, nil, panelRows, rows, heads, headDim, groups, rank, dim)
+}
+
+func (s *Session) v41GroupedOutputPanelInput(owner *v41GroupedOutputCohort, layer int, panel []float32, panelRows [][]float32, rows, heads, headDim, groups, rank, dim int) ([][]float32, v41DenseProjectionOutcome, error) {
 	if s == nil || s.M == nil || s.Backend == nil || rows <= 1 || heads <= 0 || headDim <= 0 || groups <= 0 || rank <= 0 || dim <= 0 || heads%groups != 0 {
 		return nil, v41GroupedPanelDecline(layer, rows, "shape"), nil
 	}
 	totalIn, ok := checkedMulInt(heads, headDim)
 	panelN, panelOK := checkedMulInt(rows, totalIn)
 	joined, joinedOK := checkedMulInt(groups, rank)
-	if !ok || !panelOK || !joinedOK || len(panel) != panelN {
+	if !ok || !panelOK || !joinedOK {
 		return nil, v41GroupedPanelDecline(layer, rows, "panel_size"), nil
 	}
-	for _, v := range panel {
-		if !finite32(v) {
-			return nil, v41GroupedPanelDecline(layer, rows, "non_finite"), nil
+	if panelRows != nil {
+		if len(panelRows) != rows {
+			return nil, v41GroupedPanelDecline(layer, rows, "panel_size"), nil
+		}
+		for _, row := range panelRows {
+			if len(row) != totalIn {
+				return nil, v41GroupedPanelDecline(layer, rows, "panel_size"), nil
+			}
+		}
+		for _, row := range panelRows {
+			for _, v := range row {
+				if !finite32(v) {
+					return nil, v41GroupedPanelDecline(layer, rows, "non_finite"), nil
+				}
+			}
+		}
+	} else {
+		if len(panel) != panelN {
+			return nil, v41GroupedPanelDecline(layer, rows, "panel_size"), nil
+		}
+		for _, v := range panel {
+			if !finite32(v) {
+				return nil, v41GroupedPanelDecline(layer, rows, "non_finite"), nil
+			}
 		}
 	}
 	rowOps, rowOK := s.Backend.(compute.V41RowLogBackend)
@@ -153,7 +186,14 @@ func (s *Session) v41GroupedOutputPanelOwned(owner *v41GroupedOutputCohort, laye
 		out := make([][]float32, 0, rows)
 		at := 0
 		for _, n := range tiles {
-			part, cause := s.v41GroupedOutputTile(owner, rowOps, deferred, panel[at*totalIn:(at+n)*totalIn], n, groupIn, groups, rank, dim, weights, stage, &stats)
+			var flat []float32
+			var rowViews [][]float32
+			if panelRows != nil {
+				rowViews = panelRows[at : at+n : at+n]
+			} else {
+				flat = panel[at*totalIn : (at+n)*totalIn]
+			}
+			part, cause := s.v41GroupedOutputTile(owner, rowOps, deferred, flat, rowViews, n, groupIn, groups, rank, dim, weights, stage, &stats)
 			if cause != nil {
 				return nil, cause
 			}
@@ -239,7 +279,7 @@ func v41GroupedPanelWeightSupports(be compute.Backend, w compute.Tensor, rows in
 	}
 }
 
-func (s *Session) v41GroupedOutputTile(owner *v41GroupedOutputCohort, rows compute.V41RowLogBackend, deferred compute.V41DeferredStatusBackend, input []float32, count, groupIn, groups, rank, dim int, weights v41GroupedPanelWeights, stage *string, stats *v41GroupedResidentStats) (result [][]float32, err error) {
+func (s *Session) v41GroupedOutputTile(owner *v41GroupedOutputCohort, rows compute.V41RowLogBackend, deferred compute.V41DeferredStatusBackend, input []float32, inputRows [][]float32, count, groupIn, groups, rank, dim int, weights v41GroupedPanelWeights, stage *string, stats *v41GroupedResidentStats) (result [][]float32, err error) {
 	var owned []compute.Tensor
 	var pending []v41GroupedPanelStatus
 	borrowed := append([]compute.Tensor(nil), weights.a...)
@@ -388,7 +428,13 @@ func (s *Session) v41GroupedOutputTile(owner *v41GroupedOutputCohort, rows compu
 			for g := 0; g < groups; g++ {
 				grouped := make([]float32, count*groupIn)
 				for t := 0; t < count; t++ {
-					copy(grouped[t*groupIn:(t+1)*groupIn], input[t*groups*groupIn+g*groupIn:t*groups*groupIn+(g+1)*groupIn])
+					var row []float32
+					if inputRows != nil {
+						row = inputRows[t]
+					} else {
+						row = input[t*groups*groupIn : (t+1)*groups*groupIn]
+					}
+					copy(grouped[t*groupIn:(t+1)*groupIn], row[g*groupIn:(g+1)*groupIn])
 				}
 				*stage = "activation upload"
 				x := s.uploadHostF32([]int{count, groupIn}, grouped, compute.MemoryActivation, "V4.1 grouped output panel")

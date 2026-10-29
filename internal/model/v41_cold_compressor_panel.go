@@ -17,6 +17,9 @@ func (m *Model) v41ColdCompressedRows(l, ratio int, kvRows, inputs [][]float32, 
 	if !full || ratio != 2 || len(inputs) < 2 {
 		return legacy()
 	}
+	if rows, handled, err := m.v41ColdCompressorHostPairs(l, inputs, scratch); handled {
+		return rows, err
+	}
 	pair, err := m.v41PrepareColdCompressor(l, inputs, st, scratch)
 	if err != nil {
 		return nil, err

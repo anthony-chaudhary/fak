@@ -414,6 +414,8 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		// when the opt-in GDN route below replaced a declined restored session.
 		defer func() {
 			measurement.hostFallbackObserved = measurement.hostFallbackObserved || s.HostFallbackObserved()
+			measurement.hostPathBypass = s.HostPathBypass()
+			measurement.hostStages = s.HostStages()
 		}()
 	}
 	qwen35MetalStateIdentityEnabled := false
@@ -1045,6 +1047,8 @@ type nativeInferenceMeasurement struct {
 	cudaImmutableWeightUploadsBefore    model.NativeCUDAImmutableWeightUploadCounters
 	cudaImmutableWeightUploadsAvailable bool
 	hostFallbackObserved                bool
+	hostPathBypass                      string
+	hostStages                          []string
 }
 
 func (m *nativeInferenceMeasurement) reset() {
@@ -1062,6 +1066,8 @@ func (m *nativeInferenceMeasurement) reset() {
 	m.qwen35MetalStateIdentity = nil
 	m.qwen35SequencePrefillRoute = nil
 	m.hostFallbackObserved = false
+	m.hostPathBypass = ""
+	m.hostStages = nil
 }
 
 func (m *nativeInferenceMeasurement) record(logits []float32, token int) error {

@@ -176,6 +176,9 @@ type Session struct {
 	greedyLogits         compute.Tensor
 	executionPolicy      ExecutionPolicy
 	hostFallbackObserved bool
+	// Successful opt-in host observations are session-local, never refusal flags.
+	hostStagesMu sync.Mutex
+	hostStages   map[string]struct{}
 	// hostPathBypass is the admitted bring-up bypass this session holds; release
 	// returns that one-session grant on Close.
 	hostPathBypass        string

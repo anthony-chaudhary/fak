@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"unsafe"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 // Windows host collection without cgo: CPU utilization from kernel32
@@ -23,7 +25,9 @@ import (
 // Anything unreadable stays nil.
 
 var runPowerShell = func(ctx context.Context, command string) ([]byte, error) {
-	return exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command).Output()
+	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	return cmd.Output()
 }
 
 func collectFamilies(ctx context.Context, o Options) familyResults {

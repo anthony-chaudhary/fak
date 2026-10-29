@@ -196,7 +196,8 @@
         "plan-planner",
         "v41-ep-panel-plan",
         "fitplan-planner",
-        "fitplan-pool-usable-bytes"
+        "fitplan-pool-usable-bytes",
+        "plandeepseekv41placement"
       ],
       "aliases": [],
       "grounding": "memoryplan",
