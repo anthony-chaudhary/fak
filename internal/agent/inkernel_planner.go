@@ -133,6 +133,8 @@ type InKernelPlanner struct {
 	mu         sync.Mutex
 	tree       *radixkv.Tree
 	scopedTree *radixkv.ScopedTree
+	// radixHostL2 is the host-DRAM L2 KV reserve resolved for tree at construction.
+	radixHostL2 InKernelRadixHostL2
 	// pagedPrefix is the device planner's paged prefix page ledger
 	// (inkernel_paged_prefix.go); nil on a CPU planner or with FAK_INKERNEL_PAGED_PREFIX=off.
 	pagedPrefix *inKernelPagedPrefixLedger
