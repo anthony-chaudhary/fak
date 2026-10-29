@@ -42,3 +42,24 @@ This map positions the current `cache` coverage backlog. Each entry names the ex
 fak_gateway_inference_cached_prompt_hit_ratio is the gateway Prometheus gauge dividing provider prompt-cache-hit turns by all served model turns, reported as zero before the first turn.
 
 **Distinct from:** It measures the fraction of turns with any provider cache hit; it is not fak_gateway_inference_cached_prompt_tokens_total, which accumulates the number of cached prompt tokens.
+
+
+### GoCachePlacement
+
+GoCachePlacement is the point-in-time diagnostic report comparing an explicitly selected Go build-cache directory with a named filesystem growth allowance, including the exact input-plan digest when read from a plan.
+
+**Distinct from:** Unlike GoCacheReport, this reports placement and declared growth compatibility rather than inventory or reclaimable entries. Unlike SweepGoCache it neither removes entries nor authorizes a build; unlike GoCacheRootFromEnv it consumes explicit paths rather than resolving ambient settings. It is the report value, not CheckGoCachePlacement's directory-check operation or CheckGoCachePlan's JSON input reader.
+
+
+### CheckGoCachePlacement
+
+CheckGoCachePlacement compares an explicit cache directory and filesystem directory and reports a zero-growth conflict when they identify the same filesystem with no declared growth budget.
+
+**Distinct from:** Unlike GoCacheRootFromEnv this checks caller-supplied directories and allowance, not ambient environment resolution. Unlike SweepGoCache it neither scans nor deletes cache entries, and unlike GoCacheReport it is a diagnostic operation rather than an inventory report. It never grants resource admission. It returns GoCachePlacement and compares explicit directories; CheckGoCachePlan instead reads and validates the exact JSON input before delegating this comparison.
+
+
+### CheckGoCachePlan
+
+CheckGoCachePlan reads one exact bounded JSON plan, rejects ambiguous input and external cache programs, checks explicit GOCACHE against named filesystem growth allowances, and binds its placement report to the SHA-256 of the input bytes.
+
+**Distinct from:** Unlike GoCacheRootFromEnv it consumes an explicit data-only plan rather than the process environment; unlike SweepGoCache it does not inventory or remove entries; unlike GoCacheReport it performs a placement-plan diagnostic rather than representing lifecycle inventory. It does not reserve memory, authorize a build, or prove the later child environment. It delegates the directory comparison to CheckGoCachePlacement and returns GoCachePlacement; those are the lower-level operation and report value, not the JSON input reader.

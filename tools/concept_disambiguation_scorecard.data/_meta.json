@@ -1532,6 +1532,16 @@
           "category": "incidental",
           "reason": "Existing external CUDA runtime attribute enum selected by cudaDeviceGetAttribute; not a newly introduced FAK cache concept.",
           "token": "cudaDevAttrL2CacheSize"
+        },
+        {
+          "category": "incidental",
+          "reason": "A scalar GoCachePlacement report field carrying the caller-declared filesystem sampled growth allowance in bytes; it neither defines a cache policy nor allocates or reserves capacity.",
+          "token": "CacheGrowthBudgetBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "An external Go environment-setting key inspected only to reject nonempty external cache-program configuration in the input plan; this change does not introduce or implement a cache-program mechanism.",
+          "token": "GOCACHEPROG"
         }
       ],
       "exclude": [
@@ -1552,6 +1562,7 @@
         "CacheCreationTokensHeadOnly",
         "CacheCreationTokensMessagePrefix",
         "CacheCreationTokensTierObserved",
+        "CacheGrowthBudgetBytes",
         "CacheLever",
         "CacheLevers",
         "CacheLineage",
@@ -1590,6 +1601,7 @@
         "FAK_WORKER_COUPLING_CACHE_MAX",
         "FeatureProofInvalidCache",
         "FreshRuntimeConstants",
+        "GOCACHEPROG",
         "GoCacheHighBytes",
         "GoCacheLowBytes",
         "GoCacheMinAge",
@@ -17803,6 +17815,21 @@
           "category": "incidental",
           "reason": "Private GC inventory and exact-target validation helper for existing GCOptions; it introduces no plan data type, persistence format, or planning authority. Targets only narrow existing GC eligibility.",
           "token": "gcPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "A GoCachePlacement report field containing the SHA-256 digest of the exact input JSON bytes; this binds diagnostic evidence to an input artifact and is not a plan, planner, or admission decision.",
+          "token": "PlanSHA256"
+        },
+        {
+          "category": "incidental",
+          "reason": "A private file-opening helper for the placement diagnostic: it requires a regular file and prevents blocking or following a final symlink. The plan substring names its input, not a planning abstraction.",
+          "token": "openPlacementPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "This is the cache-placement diagnostic operation positioned in the cache family. Plan names the exact JSON input being checked, not a second scheduling, execution-plan, or resource-admission concept.",
+          "token": "CheckGoCachePlan"
         }
       ],
       "exclude": [
@@ -17835,6 +17862,7 @@
         "CandidateTaskAccuracy",
         "CandidateTopology",
         "Candidates",
+        "CheckGoCachePlan",
         "CleanupCandidate",
         "ContextLayerPlan",
         "ControlPlaneOwner",
@@ -17889,6 +17917,7 @@
         "PlanReconciliation",
         "PlanRemoteDrain",
         "PlanResolver",
+        "PlanSHA256",
         "PlanStepDecision",
         "PlanUnits",
         "PlanUnregisteredResidue",
@@ -18004,6 +18033,7 @@
         "newinventorywalkplan",
         "notplanned",
         "nplan",
+        "openPlacementPlan",
         "opsRunPlannerInferencePreflight",
         "orderLaneCandidatesAged",
         "overlayPlan",
