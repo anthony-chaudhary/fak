@@ -1176,10 +1176,9 @@ func (cb *ContinuousBatcher) finishPrefillLocked(slot *Slot, logits []float32) {
 // retainPrefixLocked stores the recurrent boundary a fully-consumed prompt
 // produced, so a later conversation turn can extend it. It is a no-op unless a
 // cache is enabled, a real model session exists, and the slot holds a non-empty
-// prompt. Ownership of the captured snapshot transfers to the cache; a refused
-// store is recovered by evicting the stale entry and re-capturing once, because
-// a stale held prefix (diverged prompt) would otherwise block all future
-// retention for this key and force every later turn to full-prefill.
+// prompt. Ownership of the captured complete snapshot transfers to the cache.
+// An incompatible old boundary is replaced atomically, without closing and
+// re-capturing the new snapshot (which would clone the full hybrid state twice).
 // Caller MUST hold cb.mu and slot.mu. The one eager-path call from initSlot runs
 // before the slot is published to cb.slots/sessionMap, so no other goroutine can
 // observe it.
@@ -1191,14 +1190,7 @@ func (cb *ContinuousBatcher) retainPrefixLocked(slot *Slot) {
 	if err != nil || snap == nil {
 		return
 	}
-	if err := cb.prefixCache.Store(slot.SessionID, slot.PromptTokens, snap); err != nil {
-		// Divergence liveness: the stale entry blocks retention for this key, so
-		// evict it and store a fresh boundary once more.
-		cb.prefixCache.Evict(slot.SessionID)
-		if fresh, ferr := slot.sess.PrefixSnapshot(); ferr == nil && fresh != nil {
-			_ = cb.prefixCache.Store(slot.SessionID, slot.PromptTokens, fresh)
-		}
-	}
+	_ = cb.prefixCache.storeBoundary(slot.SessionID, slot.PromptTokens, snap)
 }
 
 // OperationalIntensity calculates effective compute-tile operational intensity (FLOPs/byte)

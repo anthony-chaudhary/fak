@@ -204,6 +204,17 @@ func (c *RecurrentPrefixCache) Lookup(key string, prompt []int) (matched int, sn
 // stats.Puts increments; on any refusal stats.Refusals increments and snap is
 // closed so the caller never leaks ownership.
 func (c *RecurrentPrefixCache) Store(key string, tokens []int, snap *model.PrefixSnapshot) error {
+	return c.store(key, tokens, snap, false)
+}
+
+// storeBoundary adopts an independently captured complete boundary. The batcher
+// serializes retention with cb.mu and slot.mu; replacing an incompatible entry
+// discards that old fold, never rewinds or extends it. Public Store stays strict.
+func (c *RecurrentPrefixCache) storeBoundary(key string, tokens []int, snap *model.PrefixSnapshot) error {
+	return c.store(key, tokens, snap, true)
+}
+
+func (c *RecurrentPrefixCache) store(key string, tokens []int, snap *model.PrefixSnapshot, replace bool) error {
 	if key == "" {
 		c.mu.Lock()
 		c.stats.Refusals++
@@ -236,24 +247,31 @@ func (c *RecurrentPrefixCache) Store(key string, tokens []int, snap *model.Prefi
 			return nil
 		}
 
-		// Extend-only: refuse backward rewinds on an irreversible fold.
+		var incompatible error
 		if len(tokens) < len(held) {
-			c.stats.Refusals++
-			snap.Close()
-			return fmt.Errorf("%w: cannot rewind key %q from %d tokens to %d tokens",
+			incompatible = fmt.Errorf("%w: cannot rewind key %q from %d tokens to %d tokens",
 				ErrRecurrentPrefixBackwardRewind, key, len(held), len(tokens))
-		}
-		// Extend-only: refuse prefix divergence on an irreversible fold.
-		for i, tok := range held {
-			if tokens[i] != tok {
-				c.stats.Refusals++
-				snap.Close()
-				return fmt.Errorf("%w: token mismatch in key %q at position %d (held %d, got %d)",
-					ErrRecurrentPrefixDivergence, key, i, tok, tokens[i])
+		} else {
+			for i, tok := range held {
+				if tokens[i] != tok {
+					incompatible = fmt.Errorf("%w: token mismatch in key %q at position %d (held %d, got %d)",
+						ErrRecurrentPrefixDivergence, key, i, tok, tokens[i])
+					break
+				}
 			}
 		}
+		if incompatible != nil {
+			c.stats.Refusals++
+			if !replace {
+				snap.Close()
+				return incompatible
+			}
+			// Same accounting as the former Store refusal + Evict + Store,
+			// but retain the fresh snapshot instead of closing and cloning it.
+			c.stats.Evictions++
+		}
 
-		// Valid extension at the same or a longer prefix. The replaced snapshot
+		// Valid extension or independent replacement boundary. The old snapshot
 		// was owned by the cache, so close it before adopting the new owner.
 		entry.snap.Close()
 		entry.tokens = append([]int(nil), tokens...)
