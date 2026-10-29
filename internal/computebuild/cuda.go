@@ -125,6 +125,7 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 	if tc.IsWindows {
 		obj := filepath.Join(pkgDir, "cuda_kernels.obj")
 		nvccArgs := []string{"-O3", "-std=c++17"}
+		nvccArgs = cudaFlashMLAGenericFlags(ctx, nvccArgs)
 		nvccArgs = append(nvccArgs, gencodeArgs...)
 		nvccArgs = append(nvccArgs, "-Xcompiler", "/MD", "-c", "cuda_kernels.cu", "-o", obj)
 		if err := compileCUDAObject(ctx, tc, pkgDir, "cuda_kernels.cu", obj, nvccArgs, env, receipt, stdout); err != nil {
@@ -134,6 +135,7 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 	} else {
 		obj := filepath.Join(pkgDir, "cuda_kernels.o")
 		nvccArgs := []string{"-O3", "-std=c++17"}
+		nvccArgs = cudaFlashMLAGenericFlags(ctx, nvccArgs)
 		nvccArgs = append(nvccArgs, gencodeArgs...)
 		if tc.CXX != "" {
 			nvccArgs = append(nvccArgs, "-ccbin", tc.CXX)
@@ -173,6 +175,11 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 			return nil, fmt.Errorf("nvcc arch-specific probe: %w", err)
 		}
 		objs = append(objs, obj)
+	}
+	if object, err := compileCUDAFlashMLA(ctx, tc, repoRoot, env, receipt, stdout); err != nil {
+		return nil, err
+	} else if object != "" {
+		objs = append(objs, object)
 	}
 	return objs, nil
 }
@@ -335,6 +342,16 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 		}
 		ctx = context.WithValue(ctx, cudaArchSpecificKey{}, plan)
 	}
+	if cfg.DisableFlashMLALDRed && !cfg.EnableFlashMLAPrefill {
+		return fmt.Errorf("%w: disabling LD.RED requires the explicit FlashMLA candidate", ErrCUDAFlashMLAPrefill)
+	}
+	if cfg.EnableFlashMLAPrefill {
+		plan, err := prepareCUDAFlashMLA(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		ctx = context.WithValue(ctx, cudaFlashMLAKey{}, plan)
+	}
 	if cfg.ReceiptPath == "" {
 		cfg.ReceiptPath = filepath.Join(cfg.RepoRoot, DefaultCUDABuildReceiptPath)
 	} else if !filepath.IsAbs(cfg.ReceiptPath) {
@@ -386,6 +403,7 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 	if cfg.EnableArchSpecific {
 		goTags += ",cudaarchspecific"
 	}
+	goTags = cudaFlashMLAGoTags(cfg, goTags)
 
 	switch cfg.Command {
 	case "check":

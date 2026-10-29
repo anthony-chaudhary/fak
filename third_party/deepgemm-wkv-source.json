@@ -1,0 +1,892 @@
+{
+  "schema": "fak.deepgemm-wkv-source/v1",
+  "deepgemm": "1fc9c66975ee322d628b3288534ca0e9ce12a64d",
+  "cutlass": "f3fde58372d33e9a5650ba7b80fc48b3b49d40c8",
+  "files": [
+    {
+      "path": "third_party/deepgemm/LICENSE",
+      "size": 1065,
+      "sha256": "6c73a30c14a2938abaa6afe98ebb19e6d81dac5bd4ace0cb05c61c20afa37b85"
+    },
+    {
+      "path": "third_party/deepgemm/deep_gemm/include/deep_gemm/comm/barrier.cuh",
+      "size": 4235,
+      "sha256": "ef2906925dc5ab5178df4ba6a9a41da74270cebecd892d5a7a01dbdeab5dfd69"
+    },
+    {
+      "path": "third_party/deepgemm/deep_gemm/include/deep_gemm/common/compile.cuh",
+      "size": 591,
+      "sha256": "a13373053608b286c1ac39ce771cdd6ab133f44ec4f016bd6fcbc5032132a1a9"
+    },
+    {
+      "path": "third_party/deepgemm/deep_gemm/include/deep_gemm/common/exception.cuh",
+      "size": 915,
+      "sha256": "ab6b2bd75c06c054fbbe97d5897efa7909d380ad531620770c031b3debdf2123"
+    },
+    {
+      "path": "third_party/deepgemm/deep_gemm/include/deep_gemm/common/math.cuh",
+      "size": 11080,
+      "sha256": "65aef0dbff42f066d2715c33b632f452cb4e21503fe168be0dca55aed0af9262"
+    },
+    {
+      "path": "third_party/deepgemm/deep_gemm/include/deep_gemm/common/packing.cuh",
+      "size": 371,
+      "sha256": "7b216c4a4f94e6691e2f553b204f697257eac1312b71fd7d24e7b420815c67b8"
+    },
+    {
+      "path": "third_party/deepgemm/deep_gemm/include/deep_gemm/common/tma_copy.cuh",
+      "size": 5450,
+      "sha256": "fc70f7a6548720e9e3f04355f1c54184658685297a20270f3ff559fff9ece5d9"
+    },
+    {
+      "path": "third_party/deepgemm/deep_gemm/include/deep_gemm/common/types.cuh",
+      "size": 1785,
+      "sha256": "0382bf27efb6deea5dc21a4f8ae21296494e513166c2682c63e498c70cefa6b2"
+    },
+    {
+      "path": "third_party/deepgemm/deep_gemm/include/deep_gemm/common/utils.cuh",
+      "size": 1434,
+      "sha256": "9fd0fdb872bb1d037370cab53918535c5e049b2936dd5e8b8af51648dfb843f2"
+    },
+    {
+      "path": "third_party/deepgemm/deep_gemm/include/deep_gemm/epilogue/operators.cuh",
+      "size": 10790,
+      "sha256": "4e916eab753dcc06eee8fe8664a8f1ba412a4724119cdbb04de52e01c12f7bf3"
+    },
+    {
+      "path": "third_party/deepgemm/deep_gemm/include/deep_gemm/epilogue/sm100_store_cd.cuh",
+      "size": 11395,
+      "sha256": "f90b1baca0b88bad39cd84a3634447e2a4f24c249ab067bfa6afb7eed5979aea"
+    },
+    {
+      "path": "third_party/deepgemm/deep_gemm/include/deep_gemm/epilogue/sm100_store_cd_swap_ab.cuh",
+      "size": 12550,
+      "sha256": "23cf25fed0aa5bcc26465a88cb3b11144d236f9697458d072dbb9171ad1edd8d"
+    },
+    {
+      "path": "third_party/deepgemm/deep_gemm/include/deep_gemm/impls/sm100_fp8_fp4_gemm_1d1d.cuh",
+      "size": 35001,
+      "sha256": "f567031e4f6e2b86b0ee99560c3eaff0160623a82e01aff0559fbeb3c2ec17b4"
+    },
+    {
+      "path": "third_party/deepgemm/deep_gemm/include/deep_gemm/layout/gemm.cuh",
+      "size": 3127,
+      "sha256": "b692f024495a4160dc65a8094bb13eae65be4c902d10436fce6446e6919d2b57"
+    },
+    {
+      "path": "third_party/deepgemm/deep_gemm/include/deep_gemm/layout/mega_moe.cuh",
+      "size": 17692,
+      "sha256": "53008d96b7eeaeec35af54e1400a9a3149625bc39b385611fe544b08c5084b50"
+    },
+    {
+      "path": "third_party/deepgemm/deep_gemm/include/deep_gemm/layout/sym_buffer.cuh",
+      "size": 1258,
+      "sha256": "b157512fd62a20bf09a8fab489d4dc209751d0560c1343829e78374dbf6578cb"
+    },
+    {
+      "path": "third_party/deepgemm/deep_gemm/include/deep_gemm/mma/sm100.cuh",
+      "size": 7558,
+      "sha256": "439c57d8aa4914c01dcb55a874ace4fdaecec4682ea1099ba36e3cb8b23f41ab"
+    },
+    {
+      "path": "third_party/deepgemm/deep_gemm/include/deep_gemm/ptx/ld_st.cuh",
+      "size": 15972,
+      "sha256": "21ba6d6284af47edb713ee9e925665fc732704b763613c1ce0cb7300a70fd755"
+    },
+    {
+      "path": "third_party/deepgemm/deep_gemm/include/deep_gemm/ptx/tcgen05.cuh",
+      "size": 7750,
+      "sha256": "7760eef80c6a38ee424974f6f48f8923a56465326c159c8a795e6e8f4fa76b42"
+    },
+    {
+      "path": "third_party/deepgemm/deep_gemm/include/deep_gemm/ptx/utils.cuh",
+      "size": 3115,
+      "sha256": "8a9d5e03afdeb20f53b1027e9f6f3a2ef45bb33152dba2b61d778684e1716412"
+    },
+    {
+      "path": "third_party/deepgemm/deep_gemm/include/deep_gemm/scheduler/gemm.cuh",
+      "size": 15044,
+      "sha256": "f48dfef610affd81d1cae7798bdf602d0e2c3b9aa7cc2c0df0376370eea97ed6"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/LICENSE.txt",
+      "size": 1854,
+      "sha256": "80a7a18b73d41f64dd9ca881af35938f8de88b18c728703251f4c94d1299884d"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/algorithm/axpby.hpp",
+      "size": 3254,
+      "sha256": "2b11f2d6dc6d00c3374b68b0cfbd69c6e3529611a6e56b86e38d025f42c69a0b"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/algorithm/clear.hpp",
+      "size": 2418,
+      "sha256": "28f97f81b281fea7ccde08a6e1f082f63384e741943b64d304df2e00bc2e5965"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/algorithm/cooperative_copy.hpp",
+      "size": 14553,
+      "sha256": "e03e105882db8a5df784bfb08a817b8d90789b297fd0ad6e113314486c34965a"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/algorithm/cooperative_gemm.hpp",
+      "size": 24449,
+      "sha256": "d0de07433f3be215a196acc0cfc969db16ca6b162193634ee0eb502378aee029"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/algorithm/copy.hpp",
+      "size": 20355,
+      "sha256": "3b47a251bbfef136850e52000fe955d8341fe54b770e4814e32094ba72713417"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/algorithm/fill.hpp",
+      "size": 2911,
+      "sha256": "e06904e6b029b9a96f4806abd9d7a2006052bff8249fe54d010dc3f682580bce"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/algorithm/functional.hpp",
+      "size": 10955,
+      "sha256": "db90b96cc1e9b76f1dbbbda3f455367fe2e90cb60a95d91940dccffdb162680b"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/algorithm/gemm.hpp",
+      "size": 18280,
+      "sha256": "25272aefdc06ac7b90ac8b638b651730d9ffd0b9e89b6bc56440deef21e2e0ea"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/algorithm/prefer.hpp",
+      "size": 2124,
+      "sha256": "4faa5471b2712b90de71825644025212246a5cdd499fae27f4da6c1ec71e38d7"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/algorithm/prefetch.hpp",
+      "size": 5666,
+      "sha256": "d708f5dad04c2da8138d2e88e120c75ccab34b3da7702821b9db29b7f977ed55"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/algorithm/tensor_algorithms.hpp",
+      "size": 5501,
+      "sha256": "36d7105ddd3e1adf8fa2248b111efd93bda03855024c08bd3e1ec06869d97d28"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/algorithm/tuple_algorithms.hpp",
+      "size": 26041,
+      "sha256": "4e1e2fceff0dee3cb073aae9bb3b0073b357d30b2a5ec77f2b67fb65b86ce395"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/cluster_sm90.hpp",
+      "size": 7678,
+      "sha256": "d70030bec8a3ebb36949408c3ee0951124aa1d1d0b610ac5682c1bc3bda2d5d6"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/config.hpp",
+      "size": 9038,
+      "sha256": "80fe05a1d3911a14ecf888cd444d629c99be03d0d164f7db7f9d3385f1ea221a"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/copy.hpp",
+      "size": 3626,
+      "sha256": "ec31401d27eb23ace72211c1345178934c6a242a36adc8e2f7196bef08920eea"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/copy_sm100.hpp",
+      "size": 355764,
+      "sha256": "43f813e1e4541bc682112e7791a9e38d44cabbbd90875858d249b9c79df4c50e"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/copy_sm100_tma.hpp",
+      "size": 28765,
+      "sha256": "e205145d40d887c1aea5682de7f10c325fc752dee3cf1ca10a4aea1a58076f24"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/copy_sm50.hpp",
+      "size": 3449,
+      "sha256": "523dc2ea1257bb0efff64f626c3aadcfc623e02cbdef249ab8ab57d6475796a5"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/copy_sm75.hpp",
+      "size": 8804,
+      "sha256": "6a46942a2e85cbb2c542ccbcaffad76f85c4afde033437b290b9be32867b1155"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/copy_sm80.hpp",
+      "size": 6780,
+      "sha256": "f98ebf662eb95419bf2dfcbcbe9b9e54ba0fd965b8d65f5a850f56c71b158b94"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/copy_sm90.hpp",
+      "size": 7267,
+      "sha256": "7668c6f9304866f65655555c39f5e10fa6ffb02df964a8e7918ac877d41cc0db"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/copy_sm90_desc.hpp",
+      "size": 19914,
+      "sha256": "c45306bfa5b32d32d658d8f73b7dce1519a916b0253975965769c0d95c436474"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/copy_sm90_tma.hpp",
+      "size": 57107,
+      "sha256": "d31756a7105dc875751fdef875be1b9f2bc008111d0c45734fed39465c12c636"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/mma.hpp",
+      "size": 2492,
+      "sha256": "8f65943f681e16ed11df4bc7bcf6c97ebd808b6b2d950f6cc5ef29805a154029"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/mma_sm100.hpp",
+      "size": 3046,
+      "sha256": "68306540dfc897b8247e456a271479c66e15c74de9d204997d67daf48470f5a3"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/mma_sm100_desc.hpp",
+      "size": 26060,
+      "sha256": "762d488e441c4949fb2273d510ad629efaeaefbf0064025b4cb7a51cff27194a"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/mma_sm100_umma.hpp",
+      "size": 70401,
+      "sha256": "7ba0cef9f7fe47148851c8c259df4943f6b1ffa1ba5ef268878596a375a54b1e"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/mma_sm120.hpp",
+      "size": 112483,
+      "sha256": "4de2816faaf3176326eb9fea837f5ea06dbb21d2b49dacd8f9a8f33d89c98133"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/mma_sm120_sparse.hpp",
+      "size": 129088,
+      "sha256": "9926f677ef823178f653c9e6c6d810ccec16a6f34ab781901a57797c2388a724"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/mma_sm61.hpp",
+      "size": 3172,
+      "sha256": "33e3511cf8884660145c946cb75c05763bfafdcb2932b4763ceedf9b59bbcffa"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/mma_sm70.hpp",
+      "size": 12500,
+      "sha256": "c7ecaf1ab57557ed6c4baab62032b27d372b6f71138c5b2adf6da9f53402b302"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/mma_sm75.hpp",
+      "size": 4274,
+      "sha256": "68f7a26da6c89c3b219afc5f65a2e44da83c8f7bff8f9491799c27257dcafdd5"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/mma_sm80.hpp",
+      "size": 71897,
+      "sha256": "4d1315c12cccc6652a1dced6d6cb2d13a0390da5829978b5e01895571b677a60"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/mma_sm89.hpp",
+      "size": 10132,
+      "sha256": "fd7e5afd5b45bfbb33558d6b2e3718b8e4ffe370228460e91bf4a7ca7167b2ee"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/mma_sm90.hpp",
+      "size": 363677,
+      "sha256": "eede4c08af6c2d79a6a956072c91a902026dec8112fa8f43392fd11a2dab9de5"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/mma_sm90_desc.hpp",
+      "size": 6036,
+      "sha256": "4ae842109e111094fe5fd5276e46bb99f5446f97e806b50ecd55ac47dc9fa658"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/mma_sm90_gmma.hpp",
+      "size": 969217,
+      "sha256": "bbe378e69891013e93ae348850a80d39ea299249d0211758c5d849cd46b4c17a"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/mma_sm90_gmma_ext.hpp",
+      "size": 2785259,
+      "sha256": "af6c9ea73dce26b0e19e66d9d8596fea671f2a2b730d6b9a1579a513ccc647e1"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/mma_sm90_gmma_sparse.hpp",
+      "size": 1031952,
+      "sha256": "b933601f83fc8fa796f127f099fc0e23ff11051b6a2d8f9b2a5d8d87bd5329ed"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/mma_sm90_gmma_sparse_ext.hpp",
+      "size": 2932673,
+      "sha256": "d9208b9dfcfefe4a4bd26e343f5d6b164c4916b6673bf559767660764af951e0"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/simd_sm100.hpp",
+      "size": 3222,
+      "sha256": "b566b7e35f5237c9caacf7e8d8a99231c31cadb2f167eff1a1ab6fdee72d31cf"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/tmem_allocator_sm100.hpp",
+      "size": 7209,
+      "sha256": "2452d93263bfbdf2fe0523d57267fc2bb111148072b6752307894049737a52e4"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/arch/util.hpp",
+      "size": 9422,
+      "sha256": "6c4f78507adbfc43094eb1770d60c96ce3e02cc53c5d1b49edb0a8444c6ad7f2"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/copy_atom.hpp",
+      "size": 25775,
+      "sha256": "bfd81acd706b18e28d7bd7bf33dbd3d6d5d8589af902712ffadd2406661c32b7"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/copy_traits.hpp",
+      "size": 5956,
+      "sha256": "f1434137f94707650fba379eb53b8c307273917d33329e2688f556e5e5d162ca"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/copy_traits_sm100.hpp",
+      "size": 146519,
+      "sha256": "cd8afe8362df160458da38c2f4075773feb465bc69039bfff4deb6fbbb7bfc24"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/copy_traits_sm100_tma.hpp",
+      "size": 21402,
+      "sha256": "dc0febbca9f9c62be2e30ba1aacf978af6753e6ca7ec4f54842b29705e14dfa2"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/copy_traits_sm50.hpp",
+      "size": 3062,
+      "sha256": "312058966e3779166e8eb164cd9b5845b3a716f91fd5590c347b04b8c6a103b7"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/copy_traits_sm75.hpp",
+      "size": 5546,
+      "sha256": "58fee5b1eaaf0d19e4aa7b44600e8749ac54d34ffb2cfd82a46d547744f06eed"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/copy_traits_sm80.hpp",
+      "size": 6269,
+      "sha256": "9d768405d7ddcb1612572cb7439fb522fb96f3121337bfc0bc188e4d5ebd1e78"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/copy_traits_sm90.hpp",
+      "size": 4589,
+      "sha256": "843805a1b64a5c9c2d21871cb96e5b49f2c2a202bea17c3dd18812264fb22c9b"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/copy_traits_sm90_tma.hpp",
+      "size": 66416,
+      "sha256": "7be4c9e1e9d7d1468010940c9677b0c649b1413af8380e6ba6c2aeac9683c4b2"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/copy_traits_sm90_tma_swizzle.hpp",
+      "size": 4289,
+      "sha256": "f3c78286745e7e3151a5194852a9efd2742e4fa7cb0047b8b221451491b23474"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/mma_atom.hpp",
+      "size": 25689,
+      "sha256": "115be67d45771698fc1d7f833a1afa44897f45132537496620d5f2622d22fd7e"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/mma_traits.hpp",
+      "size": 7252,
+      "sha256": "624700113bb75fbd887cfd9c6d69c06073e8f4dd6d265564a00accd24ffc35e3"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/mma_traits_sm100.hpp",
+      "size": 188292,
+      "sha256": "06f6ac58f8e3672b9b41bcb47e2e47c78bb8ddb2a26c68d5fb584dfc64f12631"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/mma_traits_sm120.hpp",
+      "size": 11592,
+      "sha256": "084d939b07fd21651841edfeca3edfa679c2fd59279e769d65256d9a865c2bcb"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/mma_traits_sm120_sparse.hpp",
+      "size": 14353,
+      "sha256": "be6f0182446037c966eb98404580457b5434021e07e8044b4236b3034129e456"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/mma_traits_sm61.hpp",
+      "size": 2773,
+      "sha256": "9a9d01cbfea0a69525d073bc7b973740d5ba2e0929f76067d54858357d8ef057"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/mma_traits_sm70.hpp",
+      "size": 6092,
+      "sha256": "23c72c128f8d58cac840089bcf07b120a2f4f6cb1b1b95c3b055dae2c34df8eb"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/mma_traits_sm75.hpp",
+      "size": 3303,
+      "sha256": "6cc3179ea53ef83d2f12373c2c421fd94dad84afab477876f43f77d24c281b0f"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/mma_traits_sm80.hpp",
+      "size": 21919,
+      "sha256": "58b972a2ec119bb15db0605a2613cd39ca52e09f630095e35677f5a17770d084"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/mma_traits_sm89.hpp",
+      "size": 4577,
+      "sha256": "170bd190b81fda2cd6d3a055e84933e7718c36f958f2e7d25f278e0414f815bc"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/mma_traits_sm90.hpp",
+      "size": 5478,
+      "sha256": "10965f179974148f8febbe9cd771a5f5c742c4d2444d72cad22bc23b5693ec25"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/mma_traits_sm90_gmma.hpp",
+      "size": 284435,
+      "sha256": "956d254e25fbc5a0f400424bdfecb5a5857d258a0da3839bfa971f0fc56f19d3"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/mma_traits_sm90_gmma_ext.hpp",
+      "size": 634907,
+      "sha256": "d0e1e9736ad8eadda9ef36268a9e92d1488d37579566c4936f3a9ccdffdb0e42"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/mma_traits_sm90_gmma_sparse.hpp",
+      "size": 268085,
+      "sha256": "3e4fde935f2c1134dfb99de542358f0d5aa3b23f53473b97b8b102424fdb7205"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/mma_traits_sm90_gmma_sparse_ext.hpp",
+      "size": 603207,
+      "sha256": "6b5b3fd9c3a115bba3af79fb4c3525b4ad9340dcd4e5211a6bb8daf551f1b986"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/atom/partitioner.hpp",
+      "size": 3624,
+      "sha256": "e96b8b24c50ec888e805e95205f402a2216ec984a24bc2ddcb21bd8ed083fc02"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/config.hpp",
+      "size": 5323,
+      "sha256": "0abde1dda75c7f8e75f1661ba30815449590da23c7bf86f615d35de5ef86fc3d"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/container/alignment.hpp",
+      "size": 3164,
+      "sha256": "7b7944102b31e03d868548d44c2555baa7b167a9a42200361269860af0f06260"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/container/array.hpp",
+      "size": 9098,
+      "sha256": "20a453d936b6f849670d67ea9ce267052d96752a98f0aff70be4377fbc556efa"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/container/array_aligned.hpp",
+      "size": 2119,
+      "sha256": "def0627cc4c07ea19b41f2582c30832ba44daa1cab68ba26418c52c176a0f765"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/container/array_subbyte.hpp",
+      "size": 18563,
+      "sha256": "e7d8534728dc4039691a37b631d35c40d7422dd1e747090eff96290d1f9cf195"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/container/bit_field.hpp",
+      "size": 5587,
+      "sha256": "44c497437463c5b0e44289b4c0c7d9c69043c3095ab93132ce855ada7158ff8a"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/container/cuda_types.hpp",
+      "size": 4640,
+      "sha256": "2726a840e42e21c4840127fcb9c492ba99b5de2ee368034e837e0d4da2088443"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/container/tuple.hpp",
+      "size": 20904,
+      "sha256": "3fe2de09d1da2dd70a1fcfbbb74a49b844b40d4336f5131ef86b987c7231569c"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/container/type_list.hpp",
+      "size": 4141,
+      "sha256": "11ed2094e6a9bc28dc8a148ba943decb577d50dbe824be7bf761eba060251ee2"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/int_tuple.hpp",
+      "size": 26801,
+      "sha256": "c24e9f65815221a0c81ddd59dece334ad5169ebd3e82527181cc6859931df9b3"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/layout.hpp",
+      "size": 64700,
+      "sha256": "b2e9a96efed8cf78193435e1b72697ab8e2f908b396f5c2327a65fdd82bf2b98"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/layout_composed.hpp",
+      "size": 18748,
+      "sha256": "54f1fbd500c43c68755c018f8eb1706b43e463e5a35527714e7e9e7eef2d34f1"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/numeric/arithmetic_tuple.hpp",
+      "size": 14437,
+      "sha256": "4813066e24022cd27a2c30bc42c76ce10a8f947c23acdb7c65912407564813b4"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/numeric/complex.hpp",
+      "size": 2886,
+      "sha256": "2852d6ca5131305f3e6c9c40082a616afd1085b8c1420d31a7a22c5d91803223"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/numeric/int.hpp",
+      "size": 4179,
+      "sha256": "26853bc58995932ef47745c58bc8500101a16a1e49140a56b9cff99573e8566f"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/numeric/integer_sequence.hpp",
+      "size": 5143,
+      "sha256": "34dcf102cedc0bf4e30891fec07cffee5d2e7ad7f0998ca64dd981cc45fe69d3"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/numeric/integral_constant.hpp",
+      "size": 15270,
+      "sha256": "e7f31b04fc2d76e3f239c4df691bd4d394b3df2aab471c4276130a2ef94254c0"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/numeric/integral_ratio.hpp",
+      "size": 8454,
+      "sha256": "0181b139d610bbb5503d6c7a21b6b55392c3912505cca39c9e86ef2422458581"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/numeric/math.hpp",
+      "size": 9993,
+      "sha256": "bed15cfe8363236e8c7ac06cf94efeb086ed30309c61fa30716afc770b8c10ff"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/numeric/numeric_types.hpp",
+      "size": 5370,
+      "sha256": "6e69e574f97e0bd3480cc6547dfc642a5e7c5f5dabe6ae7f7a1e06c30b3161ff"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/numeric/real.hpp",
+      "size": 2538,
+      "sha256": "04d22a2a9a9f7d7a02b744de255a55df30ba12b2105ce0585b2f7f8a10724fa1"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/pointer.hpp",
+      "size": 12083,
+      "sha256": "5200e0be69bd7dd2fb4a214bd54100e66ae986aacaf69acb9f22ff788e1bc6d2"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/pointer_base.hpp",
+      "size": 11156,
+      "sha256": "b5abdc6ed02e90ea2098a7094b13ce06f98abf562b53b5f1acc9992131ff651f"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/pointer_flagged.hpp",
+      "size": 7428,
+      "sha256": "2320c0cecbbae3381e59c99cbb9f926c59bf7bbc9289dd725c9b88feeeb22efa"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/pointer_sparse.hpp",
+      "size": 7239,
+      "sha256": "21a60a84ded6bcb2243292ca5ec7a5e495928921071848935e99ebef8659cbca"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/pointer_swizzle.hpp",
+      "size": 6415,
+      "sha256": "5452d2cd15476b2d0e62fcb739b918f5b2dc1cc7fff1f9c3aaee068f30d51fa2"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/stride.hpp",
+      "size": 21477,
+      "sha256": "e77d5febafa814d8bc6150261e099f3b54dcbb74d653415fd6f4c8c4c68fbeb8"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/swizzle.hpp",
+      "size": 16120,
+      "sha256": "308f641a775688413cc2c0e2ba5a5b52670589b731e468acb8929dd6ff6c0a34"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/swizzle_layout.hpp",
+      "size": 22448,
+      "sha256": "ca1b8460d0f57d451459e9ae827aa24090b0b7bab0399c018543b0e19a692c1c"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/tensor.hpp",
+      "size": 2524,
+      "sha256": "165ce9484ddf256881662136a0d25004299d87e36986c1de33b27030a0955b5c"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/tensor_impl.hpp",
+      "size": 37715,
+      "sha256": "1a364eb5aa03b3a46d6cfcb0932414f7ed53d459cce4ffc6f4a0770342208489"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/tensor_zip.hpp",
+      "size": 8755,
+      "sha256": "aec4c5c59b3c603af1d4b91f2251f4ea2b253d9c4894a2112ed5fdd47c31d41f"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/underscore.hpp",
+      "size": 6282,
+      "sha256": "65edce496beb4b954cc64602ccb9b81a11635187b0626c9a95e327a68604f5f5"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/util/debug.hpp",
+      "size": 5115,
+      "sha256": "11960fcac4506a9ef06f25cc0cddc3a01c5a9f3a09b06e86fe837d6195093043"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/util/print.hpp",
+      "size": 5351,
+      "sha256": "de44a6e9bce60ba5e3ddc601bbb815d2248d65e6ce87fa94f134374dc0cb175f"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/util/print_latex.hpp",
+      "size": 14969,
+      "sha256": "7e5ed4dc823eae7df6d9b5009dadf550696491fca4580e6570d1fce8a6c1dbd9"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/util/print_tensor.hpp",
+      "size": 5881,
+      "sha256": "1d07ad75a942234b8d440719b9a67aeb239934fd0c68ecdd560c175b59fb6c6b"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cute/util/type_traits.hpp",
+      "size": 9772,
+      "sha256": "f45583785a90f150c0cf753f7f44c746e52124baaa2746774575a83ab8135212"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/arch/barrier.h",
+      "size": 31410,
+      "sha256": "90716cfd8e3300cac27e6d0bfeca63fd013406f47da0985835982c17c20da2cf"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/arch/config.h",
+      "size": 9833,
+      "sha256": "fa43ab70628f699518e446dd528a0b4a4606432def639342b744ab22eafe07ab"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/arch/memory_sm75.h",
+      "size": 8282,
+      "sha256": "205be5c3e8b2f9599eb9104ca7904d309d7c57c97abc60fffa8236ecbc53a647"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/arch/synclog.hpp",
+      "size": 47813,
+      "sha256": "1232c652366854f2bd7f8d8835ac5254ddb7a48680ee13855de9f1007c459a61"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/array.h",
+      "size": 74316,
+      "sha256": "038bdd0e14c8aca1ef163957175a02f7cdca5db37b330f9f494001d19b52527d"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/array_subbyte.h",
+      "size": 13537,
+      "sha256": "19496f601472bde0d7fb9f4a36b8c49ac357781be2b9180630ab03fb697c6287"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/bfloat16.h",
+      "size": 19170,
+      "sha256": "355024524c529f73ac8a8d7e406cad60e9cb1f4aac9ae5fa203216bf7a1dc86d"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/complex.h",
+      "size": 24045,
+      "sha256": "ee6b42d0da5e22ef5c3d4ad8cf396943608da0c9d935936246c181360457135f"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/conv/conv2d_problem_size.h",
+      "size": 23454,
+      "sha256": "a341c409c9ff1eeeb82b70fd20c0b23f61390086a16081f71b435cfd00e2fa15"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/conv/conv3d_problem_size.h",
+      "size": 18548,
+      "sha256": "17e17e6f572a8abe2da85c856a71a72191c6f52ed3c7a0eac902804b12af6738"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/conv/convolution.h",
+      "size": 7293,
+      "sha256": "bcd79d6d36415c0082fb1d16329d05ee25b27cab0d30c0f33df8fdd035c9d247"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/coord.h",
+      "size": 11830,
+      "sha256": "221601f0f502d7ace04c66c58cafeaf0b8b10e15c283e4ddfb284dbc8c61544d"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/core_io.h",
+      "size": 11901,
+      "sha256": "47649140f1df9d488a306dc2fed79aaae9e1f7982db9cc7bab25b5f0da81484b"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/cuda_host_adapter.hpp",
+      "size": 14902,
+      "sha256": "3dd7abd0bd4da92fc435ef6b0a8c04520aef903c1538da0a86b1bf56a138a685"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/cutlass.h",
+      "size": 6634,
+      "sha256": "b0983633d014d2d7955d6e4963fe3338e8f444ad3ae4ff7096041f4d87fcf82e"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/detail/dependent_false.hpp",
+      "size": 3710,
+      "sha256": "4bf38c035f080d1a0cd49722cd81990f0ae34368ada7efa304f76f7367231513"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/detail/helper_macros.hpp",
+      "size": 8169,
+      "sha256": "f59a5e9fc0f822ce6411d1f6d0979ded68efdb1bf6755d322b93163f31e3b01a"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/exmy_base.h",
+      "size": 45116,
+      "sha256": "49bdc92fd4e2f2264ab777358b7a2810d697ef7069b484a5eaa9715def8db859"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/fast_math.h",
+      "size": 29425,
+      "sha256": "f51dcb1972da008666c2a3bb24ddc20a192c3bb3bc3bc553b29d04fc621a1258"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/float8.h",
+      "size": 50239,
+      "sha256": "6963b577695eecfb9c0ad1d56fed071b268c16cc247c08a356a7292f3d5ef268"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/float_subbyte.h",
+      "size": 24837,
+      "sha256": "a55205c2c17e85651a049fc9825a08b92908ee52e82a5107b97a05b181f287e6"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/floating_point_nvrtc.h",
+      "size": 3365,
+      "sha256": "9e460f494422cc738a3d9c224df0ff89079002eec477b99cfcb475033d784c2c"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/functional.h",
+      "size": 30007,
+      "sha256": "440f47886e4677973e3552ca0af605f53476f8f3d722bbf8f47e9203f721bf7f"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/gemm/gemm_enumerated_types.h",
+      "size": 3174,
+      "sha256": "93833fb86b1a2bf87f0ec4b64d51d2d5f65399ea40ba84cdef2e8b3489a8c144"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/gemm_coord.h",
+      "size": 10599,
+      "sha256": "1b9d463105ef5a9f3b66b7ee4c589e3e9535241ec44d146fe4a12c5209f29ac9"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/half.h",
+      "size": 23872,
+      "sha256": "1da1a1eba18a9fa62e7d3eabd5977af312cb589213f2188a48234d61bb15ed4d"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/integer_subbyte.h",
+      "size": 9377,
+      "sha256": "0100c6f35ffda1419fc5f06c2b8db129f4e31f0229d57c14eac65ef7e9b2a467"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/layout/matrix.h",
+      "size": 34719,
+      "sha256": "f7ff90051e0b2c7ea6f1295e62a2550e89aec5f8385a26c38ad38890a670341d"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/layout/pitch_linear.h",
+      "size": 4697,
+      "sha256": "f3d01d0cafed30d817c41ec5c4acc8c89d405bce9854eb7f0cd68f8363ed146a"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/layout/tensor.h",
+      "size": 18670,
+      "sha256": "80a337895d3efc47d400ab573ca7a4763bd0f8c83ec949d47d88654f4b21361f"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/layout/vector.h",
+      "size": 3354,
+      "sha256": "4c08c6e7935d76ba92318c281abb803b3cf669a76ac87f15881fdc8ab526c90a"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/matrix.h",
+      "size": 363945,
+      "sha256": "1f49e26e9f35de517ffcbc26bd67199f62037ecde1e7404e3a2f329ae2a6a848"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/matrix_coord.h",
+      "size": 4991,
+      "sha256": "22b96274790f0f1dfd44aa476c1575c3ba44ac905353efc3325404530e39fe7e"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/matrix_shape.h",
+      "size": 2726,
+      "sha256": "a5aa67691c6391a462696556df9a50d84746005d52f5980ee57870165edc0722"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/numeric_size.h",
+      "size": 3504,
+      "sha256": "8b6948eb7e6e2675e95b57f3c32e90fbfcd53a1c05043305b34ccbec1642bf26"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/numeric_types.h",
+      "size": 4884,
+      "sha256": "d0caaa13b790351b7052aef6f0811fd11a06814b56389680c4d32955dd77aaeb"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/pitch_linear_coord.h",
+      "size": 5492,
+      "sha256": "5ae2681cc9098e616dafebe3386bdd5d56c7dce33754beb6f6485716d127c952"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/platform/platform.h",
+      "size": 28358,
+      "sha256": "bbd3f04c800d32ab68c95a146ebec55b2c2773271d89a200df12a22e2270380e"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/quaternion.h",
+      "size": 20891,
+      "sha256": "521209fca5d47f6a11fecbcbe03af5ad0e84375e63f44d2031614b3b4e1d4bd6"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/real.h",
+      "size": 2432,
+      "sha256": "6fd96474fd128d6ee44bfdc9274a9cabf805bd726ff7a1563b70fd3b41fbbf44"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/subbyte_reference.h",
+      "size": 40804,
+      "sha256": "e49ab0b69c5d1cff243946d4678dc3bf56e0835d2278235f49de6894feca276b"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/tensor_coord.h",
+      "size": 8964,
+      "sha256": "e97dbe66edce5c63d4207355163188fc50c10a86359f51e111478f51f7089214"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/tensor_ref.h",
+      "size": 12344,
+      "sha256": "734908cf9b867f28439ae59023fde6b1e36a71f7aacd8ee065146e8d3b23863e"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/tensor_view.h",
+      "size": 9509,
+      "sha256": "026cc5dd6c3352da4785365f1184ad17af34c77523df04d447d552bc3ed6bc68"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/tfloat32.h",
+      "size": 12912,
+      "sha256": "16a926b8caf6eef11d511f998fa51b922f6065a1fc4a5bde788dceaf241b2228"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/trace.h",
+      "size": 2581,
+      "sha256": "b124b4c1cb13a7877188f142a39fb88f652ac3ff0bf7a1d8af9faed29b805f96"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/uint128.h",
+      "size": 7862,
+      "sha256": "f7ad2b619b69be1ea9caa2280d856a5c4ad07f57334b5f737dd5332805fe3c00"
+    },
+    {
+      "path": "third_party/deepgemm_cutlass/include/cutlass/uint256.h",
+      "size": 3173,
+      "sha256": "c3ab76ecc5fff8cc57bef0d7c4406521e1aae480e65a22f70c7c8138cf075578"
+    }
+  ]
+}
