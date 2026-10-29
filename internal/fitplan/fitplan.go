@@ -104,6 +104,16 @@ func (r RefusalReason) Sentinel() error {
 		return ErrConcurrencyExceedsPool
 	case ReasonPinUnmatched:
 		return ErrPinUnmatched
+	case ReasonFitsOnlyAtCtxLT:
+		return ErrFitsOnlyAtCtxLT
+	case ReasonNeedsRing:
+		return ErrNeedsRing
+	case ReasonBelowSLO:
+		return ErrBelowSLO
+	case ReasonPinInfeasible:
+		return ErrPinInfeasible
+	case ReasonNoRankableCalibration:
+		return ErrNoRankableCalibration
 	default:
 		return ErrNoFit
 	}
@@ -212,6 +222,12 @@ type Refusal struct {
 	MaxConcurrency   int           `json:"max_concurrency,omitempty"`
 	ShortfallBytes   int64         `json:"shortfall_bytes,omitempty"`
 	HostPool         bool          `json:"host_pool,omitempty"` // a discrete topology's host pool, not the device pool, is short
+	// T04 joint-search detail (additive; zero values stay absent in JSON).
+	RequestedContext int     `json:"requested_context,omitempty"` // the context the ask wanted (fits_only_at_ctx_lt)
+	Pin              string  `json:"pin,omitempty"`               // the unsatisfiable pin, e.g. "context_tokens=32768+kv_precision=q8"
+	SLOBound         string  `json:"slo_bound,omitempty"`         // "tpot" | "ttft" (below_slo / pin_infeasible)
+	SLOLimitMS       float64 `json:"slo_limit_ms,omitempty"`
+	PredictedMS      float64 `json:"predicted_ms,omitempty"`
 }
 
 func (r *Refusal) Error() string   { return "fitplan: " + string(r.Reason) }
@@ -264,17 +280,7 @@ type planner struct {
 // Plan prices every candidate in input order and chooses one, or refuses with a typed reason.
 // It never overrides a pin, and an unknown pool fails open (StatusUnknown, no Refusal).
 func Plan(in Input) Report {
-	p := &planner{in: in, wl: in.Workload.normalized(), avail: in.Hardware.PoolUsableBytes}
-	p.weights = weightsInPool(in.Hardware.Topology, in.Weights)
-	discrete := !in.Hardware.Topology.sharesHostPool()
-	if discrete {
-		p.hostWeights = in.Weights.HostTotal()
-		hostAvail := in.Hardware.HostPoolUsableBytes
-		p.hostShort = p.hostWeights > 0 && hostAvail > 0 && p.hostWeights > hostAvail
-		p.hostUnknown = p.hostWeights > 0 && hostAvail <= 0
-	}
-	p.rho, p.rhoOK = residentScale(in.Model, in.Weights)
-	p.gate, p.gateBound = p.throughputGate()
+	p := newPlanner(in)
 
 	model := in.Model
 	rep := Report{
@@ -289,7 +295,7 @@ func Plan(in Input) Report {
 		Model:      &model,
 		Candidates: make([]Prediction, 0, len(in.Candidates)),
 	}
-	if discrete {
+	if !in.Hardware.Topology.sharesHostPool() {
 		rep.Evidence.HostPoolUsableBytes = max(in.Hardware.HostPoolUsableBytes, 0)
 	}
 	if p.rhoOK {
@@ -665,7 +671,7 @@ func (p *planner) priceThroughput(pr *Prediction, c Candidate) {
 	if flopsKnown && positiveFinite(peaks.FLOPsPerSec) {
 		peakF = peaks.FLOPsPerSec
 	}
-	bw, f := cal.effectiveBandwidth(peakBW), cal.ComputeEfficiency*peakF
+	bw, f := p.effectiveRates()
 
 	b := 1
 	if p.wl.BatchedDecode {
@@ -675,7 +681,7 @@ func (p *planner) priceThroughput(pr *Prediction, c Candidate) {
 		}
 	}
 	lkv := min(p.wl.PromptTokens, c.ContextTokens)
-	kvRead := addSat(attendedKVBytes(c.Context, lkv), c.Context.SessionState.Total())
+	kvRead := p.decodeKVRead(c, lkv)
 
 	r := p.decodeStep(b, lkv, kvRead)
 	step := finiteOrZero(withOverhead(r.RooflineTokPerSecCeiling(f, bw), cal.OverheadSeconds))

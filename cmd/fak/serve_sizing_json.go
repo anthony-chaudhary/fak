@@ -83,6 +83,10 @@ type serveSizingArtifact struct {
 	Pools                       []serveSizingPool      `json:"pools"`
 	Warnings                    []string               `json:"warnings"`
 	FitPlan                     *fitplan.Report        `json:"fit_plan,omitempty"`
+	// FitAuto is the T04 joint-search result, present only with --fit auto: the
+	// chosen ctx x KV-dtype x slots row (or the typed refusal) against the stated
+	// workload and SLO, priced on the same header-derived inputs as FitPlan.
+	FitAuto *fitplan.SearchReport `json:"fit_auto,omitempty"`
 }
 
 // serveSizingArm names the load arm loadServeInKernelModel's switch would select for
@@ -327,6 +331,16 @@ func runServeSizingJSON(sf *serveFlags) {
 		os.Exit(1)
 	}
 	art.ActivatedExpertRing = buildServeSizingRingForFlags(ws, be, sf)
+	if *sf.fit == "auto" {
+		autoRep, err := buildServeSizingFitAuto(ws, be, *sf.cpuOffloadExperts, *sf.nativeContextTokens, *sf.ggufPath,
+			serveFitAutoRequestFromFlags(*sf.fit, *sf.workloadPromptTokens, *sf.workloadOutputTokens, *sf.workloadConcurrency, *sf.sloTPOTMS, *sf.sloTTFTMS),
+			serveFitAutoPins(sf))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "fak serve: --plan-json --fit auto:", err)
+			os.Exit(1)
+		}
+		art.FitAuto = autoRep
+	}
 	// The #1062 slow-load-path advisory rides in warnings[] too: on NFS/CIFS weights the
 	// multi-minute load tax is exactly what a pre-load reader wants to know about.
 	if w := compute.WarnSlowLoadPath(compute.ProbeLoadPath(*sf.ggufPath)); w != "" {
