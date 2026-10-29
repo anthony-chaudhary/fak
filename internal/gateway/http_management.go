@@ -603,6 +603,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			health["resident_weights"] = wr
 		}
 	}
+	// Paged prefix page ledger (leases, shared pages, pool-full skips). Observability
+	// only; absent when the planner has no ledger wired.
+	if rep, ok := s.planner.(agent.PagedPrefixReporter); ok {
+		if pp, ok := rep.PagedPrefixTelemetry(); ok {
+			health["paged_prefix"] = pp
+		}
+	}
 	// #3051 readiness-vs-liveness: this endpoint answers "can the model serve
 	// NOW", not "is the process alive". A body that reports ok:false — warmup
 	// pending, a degenerate startup decode, a recent served-completion failure,

@@ -177,6 +177,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	// retained copies (#13267, inkernel_host_budget.go) still reuses a cached prefix but
 	// leaves nothing new behind in the cache.
 	admit := reuse && !inKernelSkipPrefixAdmission(ctx)
+	var pageLease *inKernelPagedPrefixLease
 	if reuse {
 		// Lease this prompt's KV pages from the paged prefix pool for the request's
 		// lifetime: shared prefix pages are bound, only the divergent tail is allocated.
@@ -184,7 +185,8 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped {
 			ns = owner.Tenant
 		}
-		defer p.pagedPrefix.acquire(ns, ids).release()
+		pageLease = p.pagedPrefix.acquire(ns, ids)
+		defer pageLease.release()
 	}
 
 	// 1) Acquire a session, reusing the longest cached KV prefix when enabled. The clone
@@ -736,6 +738,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		counts = make([]int32, len(logits))
 	}
 	ln := &decodeLane{
+		pages:       pageLease,
 		s:           s,
 		logits:      logits,
 		counts:      counts,
@@ -932,13 +935,15 @@ func (c *nativeThinkingConstraint) closingToken(vocab int) (int, bool, error) {
 type decodeLane struct {
 	// engramAttempt belongs to this generation, never to a cached Session.
 	engramAttempt *inKernelEngramAttempt
-	ctx           context.Context
-	s             *model.Session
-	logits        []float32
-	counts        []int32
-	rng           *rand.Rand
-	emit          func(int) bool
-	stops         map[int]bool
+	// pages is the request's paged prefix lease, grown as decode appends tokens.
+	pages  *inKernelPagedPrefixLease
+	ctx    context.Context
+	s      *model.Session
+	logits []float32
+	counts []int32
+	rng    *rand.Rand
+	emit   func(int) bool
+	stops  map[int]bool
 
 	temp        float64
 	topP        float64
@@ -1306,6 +1311,7 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 	}
 	emitStopped := ln.emit != nil && ln.emit(next)
 	ln.gen++ // this non-stop token was emitted/generated; trace only after this count.
+	ln.pages.grow(ln.gen)
 	if err := ln.measurement.recordDecodeTrace(ln.gen, next); err != nil {
 		ln.err, ln.done = err, true
 		return 0, false

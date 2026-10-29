@@ -91,3 +91,34 @@ func (s *Server) writeDeviceTransientPoolMetrics(b *strings.Builder) {
 	writeHelpType(b, "fak_gateway_device_transient_pool_buffers", "Buffers parked in the backend's request-transient reuse pool.", "gauge")
 	fmt.Fprintf(b, "fak_gateway_device_transient_pool_buffers{backend=\"%s\"} %d\n", backend, st.PooledBuffers)
 }
+
+// writePagedPrefixMetrics emits the device planner's paged prefix page ledger: request
+// leases, pages shared with a cached prefix versus freshly allocated, pool-full skips
+// (a request that ran without a lease), and the private pages leased for generated
+// tokens. A planner with no ledger emits nothing.
+func (s *Server) writePagedPrefixMetrics(b *strings.Builder) {
+	if s == nil || s.planner == nil {
+		return
+	}
+	reporter, ok := s.planner.(agent.PagedPrefixReporter)
+	if !ok {
+		return
+	}
+	st, ok := reporter.PagedPrefixTelemetry()
+	if !ok {
+		return
+	}
+	writeHelpType(b, "fak_gateway_paged_prefix_leases_total", "Page leases taken over request prompts.", "counter")
+	fmt.Fprintf(b, "fak_gateway_paged_prefix_leases_total %d\n", st.Leases)
+	writeHelpType(b, "fak_gateway_paged_prefix_active_leases", "Page leases currently held by in-flight requests.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_paged_prefix_active_leases %d\n", st.ActiveLeases)
+	writeHelpType(b, "fak_gateway_paged_prefix_pages_total", "Prompt pages bound by leases: kind=shared reused a cached prefix page, kind=allocated took a fresh page.", "counter")
+	fmt.Fprintf(b, "fak_gateway_paged_prefix_pages_total{kind=\"shared\"} %d\n", st.SharedPages)
+	fmt.Fprintf(b, "fak_gateway_paged_prefix_pages_total{kind=\"allocated\"} %d\n", st.AllocatedPages)
+	writeHelpType(b, "fak_gateway_paged_prefix_pool_full_skips_total", "Requests that ran without a page lease because the pool was full: scope=prompt at admission, scope=decode while growing over generated tokens.", "counter")
+	fmt.Fprintf(b, "fak_gateway_paged_prefix_pool_full_skips_total{scope=\"prompt\"} %d\n", st.FailOpen)
+	fmt.Fprintf(b, "fak_gateway_paged_prefix_pool_full_skips_total{scope=\"decode\"} %d\n", st.DecodeFailOpen)
+	writeHelpType(b, "fak_gateway_paged_prefix_decode_pages", "Private pages leased for generated tokens: kind=active held now, kind=total cumulative.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_paged_prefix_decode_pages{kind=\"active\"} %d\n", st.ActiveDecodePages)
+	fmt.Fprintf(b, "fak_gateway_paged_prefix_decode_pages{kind=\"total\"} %d\n", st.DecodePages)
+}

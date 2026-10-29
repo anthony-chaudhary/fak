@@ -41,6 +41,10 @@ type inKernelPagedPrefixLedger struct {
 	sharedPages    int64
 	allocatedPages int64
 	failOpen       int64
+
+	decodePages       int64
+	activeDecodePages int64
+	decodeFailOpen    int64
 }
 
 // InKernelPagedPrefixTelemetry is the paged prefix ledger's cumulative accounting.
@@ -50,10 +54,15 @@ type InKernelPagedPrefixTelemetry struct {
 	SharedPages    int64 `json:"shared_pages"`
 	AllocatedPages int64 `json:"allocated_pages"`
 	FailOpen       int64 `json:"fail_open"`
-	LivePages      int   `json:"live_pages"`
-	TokensPerPage  int   `json:"tokens_per_page"`
-	PageKVElems    int64 `json:"page_kv_elems"`
-	SharedKVElems  int64 `json:"shared_kv_elems"`
+	// DecodePages counts private pages leased for generated tokens; ActiveDecodePages is
+	// the subset still held (zero once every request has released).
+	DecodePages       int64 `json:"decode_pages"`
+	ActiveDecodePages int64 `json:"active_decode_pages"`
+	DecodeFailOpen    int64 `json:"decode_fail_open"`
+	LivePages         int   `json:"live_pages"`
+	TokensPerPage     int   `json:"tokens_per_page"`
+	PageKVElems       int64 `json:"page_kv_elems"`
+	SharedKVElems     int64 `json:"shared_kv_elems"`
 }
 
 func newInKernelPagedPrefixLedger(cfg model.Config, totalPages, tokensPerPage int) (*inKernelPagedPrefixLedger, error) {
@@ -112,6 +121,13 @@ type inKernelPagedPrefixLease struct {
 	sharedPages int
 	freshPages  int
 	released    bool
+
+	// promptTokens and decode extend the lease over generated tokens: decode holds the
+	// request-private pages grown as decode appends (never published to the tree, so a
+	// generation cannot leak across tenants), freed on release.
+	promptTokens int
+	decode       []int
+	decodeFailed bool
 }
 
 // acquire leases the page chain for ids under namespace ns. Full pages of the longest
@@ -178,7 +194,7 @@ func (l *inKernelPagedPrefixLedger) acquire(ns string, ids []int) *inKernelPaged
 	l.active++
 	l.sharedPages += int64(sharedPages)
 	l.allocatedPages += int64(len(fresh))
-	return &inKernelPagedPrefixLease{ledger: l, node: node, table: table, sharedPages: sharedPages, freshPages: len(fresh)}
+	return &inKernelPagedPrefixLease{ledger: l, node: node, table: table, sharedPages: sharedPages, freshPages: len(fresh), promptTokens: len(ids)}
 }
 
 // release drops the request's stream references and its tree lease. Idempotent.
@@ -193,9 +209,43 @@ func (lease *inKernelPagedPrefixLease) release() {
 		return
 	}
 	lease.released = true
+	alloc := l.pool.Pool().Allocator()
+	for _, id := range lease.decode {
+		alloc.Free(id)
+	}
+	l.activeDecodePages -= int64(len(lease.decode))
+	lease.decode = nil
 	_ = l.pool.ReleaseBlockTable(lease.table)
 	l.pool.Done(lease.node)
 	l.active--
+}
+
+// grow extends the lease so it covers the prompt plus generated tokens: whole
+// pages are allocated as decode crosses a page boundary. It fails open (the lease stops
+// growing, the request continues) on pool exhaustion. Nil-safe.
+func (lease *inKernelPagedPrefixLease) grow(generated int) {
+	if lease == nil || generated <= 0 {
+		return
+	}
+	l := lease.ledger
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if lease.released || lease.decodeFailed {
+		return
+	}
+	want := (lease.promptTokens+generated+l.tpp-1)/l.tpp - lease.table.BlockCount() - len(lease.decode)
+	if want <= 0 {
+		return
+	}
+	ids, ok := l.allocateLocked(want)
+	if !ok {
+		lease.decodeFailed = true
+		l.decodeFailOpen++
+		return
+	}
+	lease.decode = append(lease.decode, ids...)
+	l.decodePages += int64(len(ids))
+	l.activeDecodePages += int64(len(ids))
 }
 
 // telemetry returns the ledger's cumulative accounting.
@@ -211,10 +261,14 @@ func (l *inKernelPagedPrefixLedger) telemetry() InKernelPagedPrefixTelemetry {
 		SharedPages:    l.sharedPages,
 		AllocatedPages: l.allocatedPages,
 		FailOpen:       l.failOpen,
-		LivePages:      l.pool.Pool().PhysicalBlocksAllocated(),
-		TokensPerPage:  l.tpp,
-		PageKVElems:    l.pageElems,
-		SharedKVElems:  l.sharedPages * l.pageElems,
+
+		DecodePages:       l.decodePages,
+		ActiveDecodePages: l.activeDecodePages,
+		DecodeFailOpen:    l.decodeFailOpen,
+		LivePages:         l.pool.Pool().PhysicalBlocksAllocated(),
+		TokensPerPage:     l.tpp,
+		PageKVElems:       l.pageElems,
+		SharedKVElems:     l.sharedPages * l.pageElems,
 	}
 }
 
