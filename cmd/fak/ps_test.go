@@ -289,3 +289,47 @@ func TestPSTableRendersActivityColumns(t *testing.T) {
 		t.Fatalf("decoded json activity mismatch: %+v, want tools=5 execs=3 fail=1 effects=2", gotAct)
 	}
 }
+
+// fak-test:runtime fast est=10ms lane=default
+func TestPSActivityCoverage(t *testing.T) {
+	cases := []struct {
+		name     string
+		activity gateway.ActionCounts
+		want     string
+	}{
+		{"legacy", gateway.ActionCounts{Tools: 2, Execs: 3, Fail: 1, Effects: 4}, "2 3 1 4"},
+		{"observed", gateway.ActionCounts{Tools: 2, Fail: 1, Coverage: &gateway.ActivityCoverage{
+			Tools: gateway.ActivityCoverageNativeSyscallResults, Fail: gateway.ActivityCoverageNativeSyscallResults,
+			Execs: gateway.ActivityCoverageUnavailable, Effects: gateway.ActivityCoverageUnavailable,
+			SinceUnixNano: 1,
+		}}, "2 ? 1 ?"},
+		{"unavailable", gateway.ActionCounts{Coverage: &gateway.ActivityCoverage{
+			Tools: gateway.ActivityCoverageUnavailable, Fail: gateway.ActivityCoverageUnavailable,
+			Execs: gateway.ActivityCoverageUnavailable, Effects: gateway.ActivityCoverageUnavailable,
+		}}, "? ? ? ?"},
+		{"unknown-schema", gateway.ActionCounts{Tools: 99, Coverage: &gateway.ActivityCoverage{Tools: "future-scope"}}, "? ? ? ?"},
+		{"wrong-axis", gateway.ActionCounts{Tools: 2, Execs: 9, Fail: 1, Effects: 8, Coverage: &gateway.ActivityCoverage{
+			Tools: gateway.ActivityCoverageNativeSyscallResults, Fail: gateway.ActivityCoverageNativeSyscallResults,
+			Execs: gateway.ActivityCoverageNativeSyscallResults, Effects: gateway.ActivityCoverageNativeSyscallResults,
+		}}, "2 ? 1 ?"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			renderPSTable(&out, gateway.SessionListResponse{Count: 1, Sessions: []gateway.SessionState{{TraceID: "coverage", Run: "running", Activity: tc.activity}}})
+			if got := strings.Contains(out.String(), "not lifetime totals"); got != (tc.activity.Coverage != nil) {
+				t.Fatal("activity observation scope is missing or changed legacy output")
+			}
+			for _, line := range strings.Split(out.String(), "\n") {
+				fields := strings.Fields(line)
+				if len(fields) >= 12 && fields[0] == "coverage" {
+					if got := strings.Join(fields[7:11], " "); got != tc.want {
+						t.Fatalf("activity = %s; want %s", got, tc.want)
+					}
+					return
+				}
+			}
+			t.Fatal("missing activity row")
+		})
+	}
+}
