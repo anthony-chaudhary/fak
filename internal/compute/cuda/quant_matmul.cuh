@@ -597,10 +597,20 @@ static float2 *q4_coeffs_for(const uint8_t *q, int out, int in) {
   }
   while (g_q4_coeff_n == kQ4CoeffSlots || bytes > g_q4_coeff_cap - g_q4_coeff_span)
     q4_coeff_pop_front();
+  // Fail closed on any bookkeeping drift: a mint is one contiguous kernel write, so its physical
+  // offset plus length must stay inside the arena. The reservation above keeps this structurally
+  // true; the check turns a future accounting regression into a refused mint instead of an
+  // out-of-bounds device write. A refusal launches nothing, so the same-stream overwrite ordering
+  // of every already-enqueued reader is untouched.
+  const size_t phys = g_q4_coeff_cursor % g_q4_coeff_cap;
+  if (phys + bytes > g_q4_coeff_cap) {
+    fprintf(stderr, "fak-cuda: q4 coeff ring physical bound violated: offset=%zu bytes=%zu cap=%zu\n",
+            phys, bytes, g_q4_coeff_cap);
+    return nullptr;
+  }
   // All ring bookkeeping is in BYTES; the arena base is cudaMalloc-aligned (>= 256 B) and every
   // table length is a multiple of 64 B, so each region start stays float2-aligned.
-  float2 *coeff = reinterpret_cast<float2 *>(reinterpret_cast<char *>(g_q4_coeff_arena) +
-                                             (g_q4_coeff_cursor % g_q4_coeff_cap));
+  float2 *coeff = reinterpret_cast<float2 *>(reinterpret_cast<char *>(g_q4_coeff_arena) + phys);
   FCUDA_TS("k_q4k_coeffs", (n + 255) / 256, k_q4k_coeffs<<<(n + 255) / 256, 256, 0, g_stream>>>(q, coeff, out, in));
   int s = q4_coeff_slot(g_q4_coeff_n);
   g_q4_coeff_cache[s] = {q, coeff, out, in, device, bytes, true};

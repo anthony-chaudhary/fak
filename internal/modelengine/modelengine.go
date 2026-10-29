@@ -351,7 +351,7 @@ func (e *Engine) nativeScheduler() *NativeScheduler {
 			// (synchronous admission) instead of crashing a serving process.
 			_ = sched.SetQwenPrefillMaxTokensPerIteration(nativeServingPrefillTokensPerIteration)
 		}
-		p, kvEnvErr := nativePreemptionPolicyFromEnvChecked(nativeKVFreeBytesProbe, nativeKVBytesPerToken(e.model().Cfg))
+		p, kvEnvErr := nativePreemptionPolicyFromEnvChecked(nativeKVFreeBytesProbeFromEnv(), nativeKVBytesPerToken(e.model().Cfg))
 		if kvEnvErr != nil {
 			e.kvEnvErr = kvEnvErr
 			fmt.Fprintln(nativeEnvNotice, "[fak] "+NativeKVEnvNotice(kvEnvErr))
@@ -359,6 +359,8 @@ func (e *Engine) nativeScheduler() *NativeScheduler {
 		if p.MaxBlocks > 0 {
 			sched.SetKVPreemptionPolicy(p)
 		}
+		// Env-selected ports (fak-private#3630); all off unless explicitly set.
+		applyNativeServeKnobs(sched, p.BlockTokens)
 		if e.coupler != nil {
 			sched.SetWorkerCoupler(e.coupler)
 		}
@@ -593,6 +595,8 @@ func nativePreemptionPolicyFromEnvChecked(probe func() (uint64, bool), kvBytesPe
 		p.VictimRule = NativePreemptVictimMostRecent
 	case "cost-aware", "cost", "kvbm":
 		p.VictimRule = NativePreemptVictimCostAware
+	case "lowest-priority", "priority":
+		p.VictimRule = NativePreemptVictimLowestPriority
 	}
 	return p, errors.Join(blockErr, maxErr)
 }

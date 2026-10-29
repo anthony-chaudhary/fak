@@ -490,6 +490,7 @@ var verbTiers = map[string]VerbTier{
 	"learning-mesh":                 TierDev,
 	"performance-rsi-scorecard":     TierDev,
 	"runtime-capabilities":          TierDev,
+	"runtime-mem":                   TierDev,
 	"shellprov":                     TierDev,
 	"up":                            TierDev,
 	"watchdog-audit-health":         TierDev,

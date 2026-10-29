@@ -16,7 +16,10 @@ import "testing"
 //  3. kill-on-free - a freed weight stops being returned by lookup immediately, but its region
 //     stays reserved until the ring laps it (a later mint may not land inside it early);
 //  4. FIFO == LRU under the serve decode pattern - every tensor touched once per token in fixed
-//     order: when the working set fits, no table re-mints within a cycle.
+//     order: when the working set fits, no table re-mints within a cycle;
+//  5. physical extent - every reserved region (alive or dead, tail-padding included) fits
+//     contiguously inside the arena: offset plus length never crosses the cap, which is what
+//     keeps each mint one contiguous kernel write rather than a modulo-wrapped range (#14119).
 
 const q4CoeffMirrorSlots = 512 // mirrors kQ4CoeffSlots
 
@@ -103,6 +106,11 @@ func (r *q4CoeffRing) mint(key string, out, in int, bytes int64) (int64, bool) {
 		r.popFront()
 	}
 	phys := r.cursor % r.cap
+	if phys+bytes > r.cap {
+		// mirrors the .cuh fail-closed physical bound: a drifted mint is refused instead of
+		// returning an offset whose contiguous write would overrun the arena end
+		return 0, false
+	}
 	s := &r.slots[r.slotAt(r.n)]
 	*s = q4CoeffSlot{key: key, out: out, in: in, length: bytes, alive: true, start: r.cursor}
 	r.n++
@@ -139,23 +147,28 @@ func (r *q4CoeffRing) liveRegions() []struct {
 	return out
 }
 
-// checkInvariants asserts the byte bound and the no-aliasing invariant over a physical byte map.
+// checkInvariants asserts the byte bound, the contiguous physical bound, and the no-aliasing
+// invariant over EVERY reserved region (alive + dead) on a physical byte map. Dead regions carry
+// the tail-padding reservations, so they get the same physical-extent check as live tables: a
+// region whose offset plus length crossed the cap would be a wrapped kernel write (#14119).
 func (r *q4CoeffRing) checkInvariants(t *testing.T) {
 	t.Helper()
 	if r.span > r.cap {
 		t.Fatalf("live window %d exceeds arena cap %d", r.span, r.cap)
 	}
 	used := make([]string, r.cap)
-	for _, reg := range r.liveRegions() {
-		if reg.phys < 0 || reg.len > r.cap-reg.phys {
-			t.Fatalf("contiguous region %q at %d length %d crosses arena cap %d", reg.key, reg.phys, reg.len, r.cap)
+	for k := 0; k < r.n; k++ {
+		s := &r.slots[r.slotAt(k)]
+		phys := s.physStart(r)
+		if phys < 0 || s.length > r.cap-phys {
+			t.Fatalf("contiguous region %q at %d length %d crosses arena cap %d", s.key, phys, s.length, r.cap)
 		}
-		for i := int64(0); i < reg.len; i++ {
-			p := reg.phys + i
+		for i := int64(0); i < s.length; i++ {
+			p := phys + i
 			if used[p] != "" {
-				t.Fatalf("aliasing: physical byte %d held by both %q and %q", p, used[p], reg.key)
+				t.Fatalf("aliasing: physical byte %d held by both %q and %q", p, used[p], s.key)
 			}
-			used[p] = reg.key
+			used[p] = s.key
 		}
 	}
 }
@@ -303,6 +316,33 @@ func TestQ4CoeffRingContiguousEnd(t *testing.T) {
 	}
 	if r.span != 4 || r.n != 1 || r.lookup("A", 1, 1) {
 		t.Fatalf("padding/old owner retained after complete eviction: span=%d n=%d", r.span, r.n)
+	}
+	r.checkInvariants(t)
+}
+
+// TestQ4CoeffRingContiguousWrapCap256 pins the #14119 repro: with a 256-byte arena and two
+// distinct 192-byte tables, the second mint must NOT return offset 192 - a 192-byte contiguous
+// kernel write there would overrun the arena end. The wrap charges the tail to the oldest region
+// and lands the second table at zero. Red on the pre-reservation bookkeeping, which returned 192.
+func TestQ4CoeffRingContiguousWrapCap256(t *testing.T) {
+	const cap = 256
+	r := &q4CoeffRing{cap: cap}
+	p1, ok := r.mint("T1", 1, 1, 192)
+	if !ok || p1 != 0 {
+		t.Fatalf("first table = (%d, %v); want (0, true)", p1, ok)
+	}
+	p2, ok := r.mint("T2", 1, 1, 192)
+	if !ok {
+		t.Fatal("second table: mint refused")
+	}
+	if p2 != 0 {
+		t.Fatalf("second table landed at physical %d; a 192-byte contiguous write there overruns cap %d", p2, cap)
+	}
+	if r.lookup("T1", 1, 1) || !r.lookup("T2", 1, 1) {
+		t.Fatal("wrap must recycle the oldest table and keep the newest live")
+	}
+	if r.span != 192 || r.n != 1 {
+		t.Fatalf("window after wrap: span=%d n=%d; want span=192 n=1", r.span, r.n)
 	}
 	r.checkInvariants(t)
 }
