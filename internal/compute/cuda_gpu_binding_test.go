@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -546,4 +547,171 @@ func TestGPUBindingLinux_DriverSymlinkDecidesBinding(t *testing.T) {
 	smi := smiFixture("0, 00000000:01:00.0, GPU-1, NVIDIA GeForce RTX 5070 Ti\n", nil)
 	rep := diagnoseGPUBindingLinux(root, GPUBindingOptions{smiQuery: smi})
 	assertVerdicts(t, rep, GPUReady, GPUUnbound)
+}
+
+// ---- Payload floor (driver branch, module flavor, compute capability) ----
+
+func readyFloorRow(driverVersion, flavor string, cc int) GPUBindingDevice {
+	return GPUBindingDevice{
+		Enumerated: true, VendorDriver: GPULayerYes, DriverStarted: GPULayerYes,
+		CUDAVisible: GPULayerYes, DriverVersion: driverVersion, DriverFlavor: flavor,
+		ComputeCapability: cc,
+	}
+}
+
+// fak-test:runtime fast est=5ms lane=default
+func TestClassifyGPUBinding_DriverFloorDemotesReadyRows(t *testing.T) {
+	cases := []struct {
+		name  string
+		dev   GPUBindingDevice
+		floor GPUDriverFloor
+		want  GPUBindingVerdict
+	}{
+		{"below floor", readyFloorRow("610.43.02", DriverFlavorOpen, 120), BlackwellDriverFloor, GPUDriverBelowFloor},
+		{"at floor", readyFloorRow("615.71.09", DriverFlavorOpen, 120), BlackwellDriverFloor, GPUReady},
+		{"above floor", readyFloorRow("615.75.01", DriverFlavorOpen, 120), BlackwellDriverFloor, GPUReady},
+		{"proprietary flavor", readyFloorRow("615.71.09", DriverFlavorProprietary, 120), BlackwellDriverFloor, GPUModuleFlavorProprietary},
+		{"low compute capability", readyFloorRow("615.71.09", DriverFlavorOpen, 90), BlackwellDriverFloor, GPUComputeCapInsufficient},
+		{"zero floor keeps legacy behavior", readyFloorRow("610.43.02", DriverFlavorOpen, 90), GPUDriverFloor{}, GPUReady},
+		{"unparseable version is unknown not below", readyFloorRow("weird-build", DriverFlavorOpen, 120), BlackwellDriverFloor, GPUReady},
+		{"priority: version beats flavor and capability", readyFloorRow("610.43.02", DriverFlavorProprietary, 90), BlackwellDriverFloor, GPUDriverBelowFloor},
+		{"priority: flavor beats capability", readyFloorRow("615.71.09", DriverFlavorProprietary, 90), BlackwellDriverFloor, GPUModuleFlavorProprietary},
+		{"floor does not mask a binding failure", func() GPUBindingDevice {
+			d := readyFloorRow("610.43.02", DriverFlavorOpen, 120)
+			d.DriverStarted = GPULayerNo
+			return d
+		}(), BlackwellDriverFloor, GPUUnbound},
+	}
+	for _, c := range cases {
+		if got := ClassifyGPUBindingWithFloor(c.dev, c.floor); got != c.want {
+			t.Errorf("%s: verdict = %s, want %s", c.name, got, c.want)
+		}
+	}
+	// The base classifier is untouched by any floor.
+	if got := ClassifyGPUBinding(readyFloorRow("610.43.02", DriverFlavorOpen, 90)); got != GPUReady {
+		t.Errorf("base verdict = %s, want GPU_READY (no floor)", got)
+	}
+}
+
+// fak-test:runtime fast est=5ms lane=default
+func TestParseDriverVersionBranches(t *testing.T) {
+	for _, c := range []struct {
+		in    string
+		major int
+		minor int
+		patch int
+		ok    bool
+	}{
+		{"615.71.09", 615, 71, 9, true},
+		{"610.43.02", 610, 43, 2, true},
+		{" 615.71.09 ", 615, 71, 9, true},
+		{"615.71.09+cuda", 0, 0, 0, false},
+		{"615.71", 0, 0, 0, false},
+		{"", 0, 0, 0, false},
+		{"32.0.16.2101", 32, 0, 16, true},
+	} {
+		gotMajor, gotMinor, gotPatch, gotOK := ParseDriverVersion(c.in)
+		if gotMajor != c.major || gotMinor != c.minor || gotPatch != c.patch || gotOK != c.ok {
+			t.Errorf("ParseDriverVersion(%q) = %d.%d.%d ok=%v, want %d.%d.%d ok=%v", c.in, gotMajor, gotMinor, gotPatch, gotOK, c.major, c.minor, c.patch, c.ok)
+		}
+	}
+}
+
+// fak-test:runtime fast est=5ms lane=default
+func TestParseNvidiaSMIBusIDs_ComputeCapColumn(t *testing.T) {
+	devs, unparsed := ParseNvidiaSMIBusIDs("0, 00000000:01:00.0, GPU-1, NVIDIA GeForce RTX 5090, 12.0\n")
+	if len(unparsed) != 0 || len(devs) != 1 {
+		t.Fatalf("devs=%v unparsed=%v, want one parsed row", devs, unparsed)
+	}
+	if devs[0].Name != "NVIDIA GeForce RTX 5090" || devs[0].ComputeCapability != 120 {
+		t.Fatalf("row = %+v, want name + compute capability 120", devs[0])
+	}
+	// Legacy four-column rows keep parsing with an unobserved capability.
+	old, _ := ParseNvidiaSMIBusIDs(smiInternalOnly)
+	if len(old) != 1 || old[0].Name != "NVIDIA GeForce RTX 4070 Laptop GPU" || old[0].ComputeCapability != 0 {
+		t.Fatalf("legacy row = %+v, want name kept and capability 0", old)
+	}
+}
+
+// fak-test:runtime fast est=5ms lane=default
+func TestGPUBindingReport_FloorDemotesReadyRows(t *testing.T) {
+	base := func() GPUBindingInputs {
+		return GPUBindingInputs{
+			Method:     CUDASourceSysfs,
+			ExpectGPUs: 1,
+			CUDA: GPUCUDAView{State: GPULayerYes, Devices: []GPUCUDADevice{{
+				Index: 0, BusID: "0000:01:00.0", UUID: "GPU-1", Name: "NVIDIA GeForce RTX 5090",
+				ComputeCapability: 120,
+			}}},
+			Devices: []GPUBindingDevice{{
+				PCIAddress: "0000:01:00.0", Enumerated: true,
+				VendorDriver: GPULayerYes, DriverStarted: GPULayerYes, IDListed: GPULayerYes,
+				DriverVersion: "610.43.02", DriverFlavor: DriverFlavorOpen,
+			}},
+		}
+	}
+	rep := BuildGPUBindingReport(base())
+	assertVerdicts(t, rep, GPUReady)
+	if !rep.Ready {
+		t.Fatal("no floor: report must stay ready")
+	}
+	floored := base()
+	floored.Floor = BlackwellDriverFloor
+	rep = BuildGPUBindingReport(floored)
+	assertVerdicts(t, rep, GPUDriverBelowFloor)
+	if rep.Ready || rep.Verdicts[GPUDriverBelowFloor] != 1 {
+		t.Fatalf("ready=%v verdicts=%v, want not ready with one below-floor row", rep.Ready, rep.Verdicts)
+	}
+}
+
+// linkDirBestEffort creates a directory link; on Windows it falls back to a
+// junction (mklink /J), which needs no SeCreateSymbolicLinkPrivilege.
+func linkDirBestEffort(t *testing.T, target, link string) {
+	t.Helper()
+	err := os.Symlink(target, link)
+	if err == nil {
+		return
+	}
+	if runtime.GOOS == "windows" {
+		if out, jerr := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); jerr == nil {
+			return
+		} else {
+			t.Skipf("symlink/junction unavailable: %v (%s)", jerr, strings.TrimSpace(string(out)))
+		}
+	}
+	t.Skipf("directory symlinks need SeCreateSymbolicLinkPrivilege on Windows: %v", err)
+}
+
+// fak-test:runtime fast est=20ms lane=default
+func TestGPUBindingLinux_FloorUsesObservedDriverAndNVMLCapability(t *testing.T) {
+	root := t.TempDir()
+	nv := writeSysfsGPU(t, root, "0000:01:00.0", fixtureModalias)
+	drivers := filepath.Join(root, "bus", "pci", "drivers")
+	if err := os.MkdirAll(filepath.Join(drivers, "nvidia"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linkDirBestEffort(t, filepath.Join(drivers, "nvidia"), filepath.Join(nv, "driver"))
+	modDir := filepath.Join(root, "module", "nvidia")
+	if err := os.MkdirAll(modDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(modDir, "version"), []byte("610.43.02\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	linkDirBestEffort(t, modDir, filepath.Join(nv, "driver", "module"))
+	smi := smiFixture("0, 00000000:01:00.0, GPU-1, NVIDIA GeForce RTX 5090, 12.0\n", nil)
+
+	// Without a floor the observed 610.43.02 branch still reads ready.
+	rep := diagnoseGPUBindingLinux(root, GPUBindingOptions{smiQuery: smi})
+	assertVerdicts(t, rep, GPUReady)
+	if rep.Devices[0].DriverVersion != "610.43.02" || rep.Devices[0].ComputeCapability != 120 {
+		t.Fatalf("device = %+v, want observed driver version and NVML capability", rep.Devices[0])
+	}
+
+	// With the sm_120 floor the same host is demoted to the typed token.
+	rep = diagnoseGPUBindingLinux(root, GPUBindingOptions{smiQuery: smi, Floor: BlackwellDriverFloor})
+	assertVerdicts(t, rep, GPUDriverBelowFloor)
+	if rep.Ready {
+		t.Fatal("floored host must not be ready")
+	}
 }

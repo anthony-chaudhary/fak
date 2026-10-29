@@ -45,6 +45,75 @@ func TestSlotStreamPoolBudget(t *testing.T) {
 	}
 }
 
+// TestSlotStreamRtx5090CapLift pins the cap lift: a 32 GB card budgets its
+// full reported VRAM instead of the 24 GiB fallback on the expert-slot path,
+// while a 24 GB device and an unknown-VRAM device keep today's exact behavior.
+func TestSlotStreamRtx5090CapLift(t *testing.T) {
+	const gib = int64(1) << 30
+
+	// Budget derivation: unknown VRAM falls back to the 24 GiB cap; a known
+	// device budgets its full reported VRAM (the 24 GiB default implies zero
+	// headroom, so a 24 GB device is byte-identical to pre-lift behavior).
+	if got := VRAMBudgetForDevice(0); got != DefaultVRAMBudgetBytes {
+		t.Fatalf("VRAMBudgetForDevice(0) = %d, want fallback %d", got, DefaultVRAMBudgetBytes)
+	}
+	if got := VRAMBudgetForDevice(-1); got != DefaultVRAMBudgetBytes {
+		t.Fatalf("VRAMBudgetForDevice(-1) = %d, want fallback %d", got, DefaultVRAMBudgetBytes)
+	}
+	if got := VRAMBudgetForDevice(24 * gib); got != DefaultVRAMBudgetBytes {
+		t.Fatalf("VRAMBudgetForDevice(24 GiB) = %d, want %d (24 GB unchanged)", got, DefaultVRAMBudgetBytes)
+	}
+	if got := VRAMBudgetForDevice(32 * gib); got != 32*gib {
+		t.Fatalf("VRAMBudgetForDevice(32 GiB) = %d, want %d", got, 32*gib)
+	}
+
+	// Geometry that fits a 32 GB card but exceeded the old 24 GiB cap:
+	// 160 layers x 54 slots x ~2.76 MB + 3.8 GB trunk ~= 26.8 GiB.
+	const layers, slots = 160, 54
+
+	pool, err := NewMultiTensorSlotPoolForDevice(layers, slots, 32*gib)
+	if err != nil {
+		t.Fatalf("32 GB card must no longer be refused on the expert-slot path: %v", err)
+	}
+	if pool.TotalVRAMBytes > 32*gib {
+		t.Fatalf("pool total VRAM %d exceeds the 32 GiB device budget", pool.TotalVRAMBytes)
+	}
+
+	// The expert-slot path must actually run on the lifted pool.
+	engine := NewStreamEngine(pool)
+	hits, misses, _, err := engine.StreamPicks(0, []int{0, 1, 2}, 1)
+	if err != nil || hits != 0 || misses != 3 {
+		t.Fatalf("StreamPicks on 32 GB pool: hits=%d misses=%d err=%v, want 0/3/nil", hits, misses, err)
+	}
+
+	// Same geometry under the 24 GiB fallback (unknown VRAM): still refused.
+	if _, err := NewMultiTensorSlotPoolForDevice(layers, slots, 0); err == nil {
+		t.Fatalf("unknown-VRAM device must keep the 24 GiB fallback refusal")
+	}
+	// Same geometry on a 24 GB device: unchanged refusal.
+	if _, err := NewMultiTensorSlotPoolForDevice(layers, slots, 24*gib); err == nil {
+		t.Fatalf("24 GB device behavior changed: large geometry now accepted")
+	}
+	// Legacy constructor: unchanged 24 GiB cap.
+	if _, err := NewMultiTensorSlotPool(layers, slots); err == nil {
+		t.Fatalf("NewMultiTensorSlotPool cap changed: large geometry now accepted")
+	}
+
+	// A geometry that fit before the lift still fits on a 24 GB device with
+	// identical sizing (no behavior change for 24 GB devices).
+	small, err := NewMultiTensorSlotPool(40, 16)
+	if err != nil {
+		t.Fatalf("small geometry regressed on the fallback budget: %v", err)
+	}
+	smallDev, err := NewMultiTensorSlotPoolForDevice(40, 16, 24*gib)
+	if err != nil {
+		t.Fatalf("small geometry on explicit 24 GB device: %v", err)
+	}
+	if small.TotalVRAMBytes != smallDev.TotalVRAMBytes {
+		t.Fatalf("24 GB sizing drifted: legacy %d vs device-sized %d", small.TotalVRAMBytes, smallDev.TotalVRAMBytes)
+	}
+}
+
 func TestSlotStreamEngineHitAndEviction(t *testing.T) {
 	pool, err := NewMultiTensorSlotPool(2, 4)
 	if err != nil {

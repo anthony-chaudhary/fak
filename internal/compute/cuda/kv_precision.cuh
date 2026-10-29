@@ -25,12 +25,12 @@ __global__ void k_kv_load_typed(float *dst, const void *src, int n, int dtype) {
 }
 extern "C" int fcuda_kv_store_typed(void *dst, const float *src, int offset, int n, int dtype) {
   if (!dst || !src || offset < 0 || n <= 0 || dtype < 0 || dtype > 2 || (size_t)offset+(size_t)n > 2147483647ULL) return (int)cudaErrorInvalidValue;
-  k_kv_store_typed<<<((size_t)n+255)/256,256,0,g_stream>>>(dst,src,offset,n,dtype);
+  FCUDA_TS("k_kv_store_typed", ((size_t)n+255)/256, k_kv_store_typed<<<((size_t)n+255)/256,256,0,g_stream>>>(dst,src,offset,n,dtype));
   return (int)cudaGetLastError();
 }
 extern "C" int fcuda_kv_load_typed(float *dst, const void *src, int n, int dtype) {
   if (!dst || !src || n <= 0 || dtype < 0 || dtype > 2) return (int)cudaErrorInvalidValue;
-  k_kv_load_typed<<<((size_t)n+255)/256,256,0,g_stream>>>(dst,src,n,dtype);
+  FCUDA_TS("k_kv_load_typed", ((size_t)n+255)/256, k_kv_load_typed<<<((size_t)n+255)/256,256,0,g_stream>>>(dst,src,n,dtype));
   return (int)cudaGetLastError();
 }
 __global__ void k_kv_attention_typed(
@@ -163,9 +163,9 @@ extern "C" int fcuda_kv_attention_typed(const float *q, const void *k, const voi
   const char *prefill = getenv("FAK_CUDA_KV16_PREFILL");
   if (prefill && strcmp(prefill, "tile4") == 0 && dtype != 0 && tokens >= 4 && hd <= 256 && heads <= 65535) {
     const dim3 grid((unsigned)((tokens+3ULL)/4), (unsigned)heads);
-    k_kv_attention_prompt4_typed<<<grid,128,(size_t)16*hd*sizeof(float),g_stream>>>(q,k,v,out,tokens,prefix,heads,kvheads,hd,scale,dtype);
+    FCUDA_TS("k_kv_attention_prompt4_typed", grid, k_kv_attention_prompt4_typed<<<grid,128,(size_t)16*hd*sizeof(float),g_stream>>>(q,k,v,out,tokens,prefix,heads,kvheads,hd,scale,dtype));
     return (int)cudaGetLastError();
   }
-  k_kv_attention_typed<<<tokens*heads,FLASH_THREADS,((size_t)hd+FLASH_THREADS)*sizeof(float),g_stream>>>(q,k,v,out,tokens,prefix,heads,kvheads,hd,scale,dtype);
+  FCUDA_TS("k_kv_attention_typed", tokens*heads, k_kv_attention_typed<<<tokens*heads,FLASH_THREADS,((size_t)hd+FLASH_THREADS)*sizeof(float),g_stream>>>(q,k,v,out,tokens,prefix,heads,kvheads,hd,scale,dtype));
   return (int)cudaGetLastError();
 }

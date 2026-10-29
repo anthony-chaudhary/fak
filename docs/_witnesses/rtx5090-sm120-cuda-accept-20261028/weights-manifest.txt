@@ -1,0 +1,20 @@
+# /srv/models/Qwen2.5-1.5B-Instruct on raider-fak — stat -c "%n %s" (probed 2026-10-28T06:45Z)
+/srv/models/Qwen2.5-1.5B-Instruct/config.json 660
+/srv/models/Qwen2.5-1.5B-Instruct/generation_config.json 242
+/srv/models/Qwen2.5-1.5B-Instruct/merges.txt 1671839
+/srv/models/Qwen2.5-1.5B-Instruct/model.safetensors 3087467144
+/srv/models/Qwen2.5-1.5B-Instruct/tokenizer.json 7031645
+/srv/models/Qwen2.5-1.5B-Instruct/tokenizer_config.json 7305
+/srv/models/Qwen2.5-1.5B-Instruct/vocab.json 2776833
+
+# Expected sizes from HF CDN (curl -sIL .../resolve/main/<file>, content-length):
+model.safetensors expected=3087467144
+tokenizer.json expected=7031645
+config.json expected=660
+merges.txt expected=1671839
+vocab.json expected=2776833
+tokenizer_config.json expected=7305
+generation_config.json expected=242
+
+# All 7 files byte-exact. Download log tail: DOWNLOAD_DONE.
+# Source: https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct (direct curl, node-side).

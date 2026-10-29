@@ -1,0 +1,18 @@
+# GPU busy-wait polls, 2026-10-28 UTC (5-min cadence, cap 30 min; format: memory.used then compute-apps pid,used_memory)
+06:06:56 gpu_poll_1: 22858 MiB 813, /usr/local/bin/fak, 22848 MiB 
+06:12:01 gpu_poll_2: 22858 MiB 813, /usr/local/bin/fak, 22848 MiB 
+06:17:12 gpu_poll_3: 22858 MiB 813, /usr/local/bin/fak, 22848 MiB 
+06:22:18 gpu_poll_4: 22858 MiB 813, /usr/local/bin/fak, 22848 MiB 
+06:27:25 gpu_poll_5: 22858 MiB 813, /usr/local/bin/fak, 22848 MiB 
+06:32:29 gpu_poll_6: 22858 MiB 813, /usr/local/bin/fak, 22848 MiB 
+GPU_POLL_DONE
+
+# continued observation past cap (combined poller, gpu column):
+     1	gpu=[22858 MiB 813, 22848 MiB ]
+     2	gpu=[22858 MiB 813, 22848 MiB ]
+     3	gpu=[22858 MiB 813, 22848 MiB ]
+     4	gpu=[22858 MiB 813, 22848 MiB ]
+     5	gpu=[22858 MiB 813, 22848 MiB ]
+     6	gpu=[22858 MiB 813, 22848 MiB ]
+     7	gpu=[22858 MiB 813, 22848 MiB ]
+     8	gpu=[22858 MiB 813, 22848 MiB ]

@@ -320,7 +320,7 @@ var verbManifest = []Verb{
 	{Name: "milestone-scorecard", Synopsis: "native milestone-roadmap scorecard control-pane payload", Lane: "cmd"},
 	{Name: "mlp-score", Synopsis: "MLP (first-lovable-cut) grade: pure internal/mlpscore fold over a committed HEAD snapshot (--json/--markdown)", Lane: "cmd"},
 	{Name: "mode-debt-dispatch", Synopsis: "permission-regime fan-out: one deduped issue per HARD un-lifted dial from the mode-debt scorecard", Lane: "cmd"},
-	{Name: "model", Synopsis: "resolve an hf:// URI to a locally cached file path (Hub download + SHA256 verify)", Lane: "cmd"},
+	{Name: "model", Synopsis: "resolve model refs, inspect readiness, and model fit compose|plan|check|compare declared multi-device memory", Lane: "cmd"},
 	{Name: "model-default", Synopsis: "report the default model identity and fold dated Qwen3.8 evidence", Lane: "cmd"},
 	{Name: "model-observe", Synopsis: "proxy and summarize model performance observations or verify cache-state transitions", Lane: "cmd"},
 	{Name: "multisubmit", Synopsis: "multi-submission planner: lay out N profiles for a resolved issue, seat round-robin over the rotation pool", Lane: "cmd"},

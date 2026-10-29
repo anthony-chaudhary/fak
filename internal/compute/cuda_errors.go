@@ -91,6 +91,9 @@ func (e *CUDALaunchError) Unwrap() error {
 }
 
 func (e *CUDALaunchError) As(target any) bool {
+	if e == nil {
+		return false
+	}
 	if t, ok := target.(**CUDAOpError); ok {
 		*t = &e.CUDAOpError
 		return true
@@ -109,7 +112,7 @@ func AsCUDAError(r any) (*CUDAOpError, bool) {
 	}
 	switch v := r.(type) {
 	case *CUDAOpError:
-		return v, true
+		return v, v != nil
 	case *CUDALaunchError:
 		if v != nil {
 			return &v.CUDAOpError, true
@@ -117,11 +120,11 @@ func AsCUDAError(r any) (*CUDAOpError, bool) {
 		return nil, false
 	case error:
 		var opErr *CUDAOpError
-		if errors.As(v, &opErr) {
+		if errors.As(v, &opErr) && opErr != nil {
 			return opErr, true
 		}
 		var launchErr *CUDALaunchError
-		if errors.As(v, &launchErr) {
+		if errors.As(v, &launchErr) && launchErr != nil {
 			return &launchErr.CUDAOpError, true
 		}
 		var dae *DeviceAllocError

@@ -59,6 +59,10 @@ const (
 	TierSOL        Tier = "sol"
 	TierEmpirical  Tier = "empirical"
 	TierCalibrated Tier = "calibrated" // fit from this host's receipts, keyed by hardware epoch
+	// TierSilicon marks a row fitted from an on-silicon decode confirm (the first-N-token
+	// probe a serve runs after load): the measurement ran on this machine's own engine,
+	// not a foreign bench receipt ingested for calibration.
+	TierSilicon Tier = "silicon"
 )
 
 // Status is the planner's overall verdict.

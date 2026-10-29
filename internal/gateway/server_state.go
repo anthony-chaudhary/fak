@@ -492,6 +492,11 @@ type Server struct {
 	// unaffected. See readiness_warmup.go.
 	agentWarm agentWarmGate
 
+	// decodeConfirm holds the host sink for the first-N-token decode confirm the
+	// warmup path runs after the boot warmup succeeds (readiness_warmup.go).
+	// Zero value == no sink: the probe still measures, nothing is recorded.
+	decodeConfirm decodeConfirmState
+
 	// routeWatcher is the model-routing manifest hot-reload seam behind POST
 	// /v1/fak/route/reload (#4003) — the SIGHUP-style manual twin of the background
 	// Watcher.Run poll loop. It is an atomic pointer because the host installs the

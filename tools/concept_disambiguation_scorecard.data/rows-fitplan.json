@@ -69,7 +69,9 @@
       "distinction": "A CAPACITY, not a demand: MemoryPlan lists what must be resident, PoolUsableBytes is what it is judged against. Distinct from HostPoolUsableBytes, a discrete topology's separate host pool.",
       "distinct_from": [
         "x-plan-memoryplan",
-        "fitplan-host-pool-usable-bytes"
+        "fitplan-host-pool-usable-bytes",
+        "slotstream-multitensor-for-device",
+        "fitplan-memory-pool"
       ],
       "aliases": [],
       "grounding": "PoolUsableBytes",

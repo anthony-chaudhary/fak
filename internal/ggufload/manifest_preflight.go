@@ -101,11 +101,13 @@ func (p *ManifestPreflight) refuse(reason newmodel.RefusalReason, axis, format s
 	p.Refusals = append(p.Refusals, newmodel.HeaderRefusal(reason, axis, fmt.Sprintf(format, args...)))
 }
 
-// BuildManifestPreflight checks a GGUF header in one pass, never reading a tensor
-// byte: every <arch>.* key has a reader and agrees with the HF config, every
-// tensor the arch requests is present at its shape, every present tensor has a
-// consumer, and every tensor dtype has a host kernel. It aggregates instead of
-// stopping at the first problem, so one run names every seam.
+// BuildManifestPreflight checks GGUF metadata without materializing model weights.
+// Header-only callers cannot read tensor payloads; an already bound source may
+// let Config read bounded integer auxiliaries. Every <arch>.* key must have a
+// reader and agree with the HF config, every requested tensor must be present at
+// its shape, every present tensor must have a consumer, and every materialized
+// weight dtype must have a host kernel. It aggregates instead of stopping at the
+// first problem, so one run names every seam.
 func BuildManifestPreflight(in ManifestPreflightInput) ManifestPreflight {
 	out := ManifestPreflight{
 		Schema:   ManifestPreflightSchema,
@@ -142,7 +144,7 @@ func BuildManifestPreflight(in ManifestPreflightInput) ManifestPreflight {
 	if cfgErr == nil {
 		checkTensorCoverage(&out, &f, cfg)
 	}
-	checkDTypes(&out, &f, cfg)
+	checkDTypes(&out, &f, cfg, cfgErr == nil)
 	return out.finish()
 }
 
@@ -503,6 +505,10 @@ func checkTensorCoverage(out *ManifestPreflight, f *File, cfg model.Config) {
 	}
 	out.Tensors.Mode = TensorCoverageCanonicalMap
 	for _, info := range f.Tensors {
+		if manifestEngramAuxConsumed(f, cfg, info) {
+			out.Tensors.Consumed++
+			continue
+		}
 		switch tensorDisposition(cfg, info.Name) {
 		case tensorConsumed:
 			out.Tensors.Consumed++
@@ -642,12 +648,47 @@ func expertResidentSupported(t TensorType) bool {
 	return ok
 }
 
-func checkDTypes(out *ManifestPreflight, f *File, cfg model.Config) {
+// manifestEngramAuxConsumed recognizes configuration inputs, not float weights.
+// Call only after the current Config succeeds: an Engram pointer can be populated
+// before a later topology check fails. Exact shapes come from admitted arrays,
+// with division guards rather than products of untrusted dimensions.
+func manifestEngramAuxConsumed(f *File, cfg model.Config, info TensorInfo) bool {
+	eng := f.DeepSeek41Engram
+	if !cfg.IsDeepSeekV41() || eng == nil || len(eng.LayerIDs) == 0 {
+		return false
+	}
+	if info.Name == "engram_token_map.weight" {
+		return cfg.VocabSize > 0 && len(eng.TokenMap) == cfg.VocabSize &&
+			info.Type == TensorType(26) && dimsEqual(info.Dims, []uint64{uint64(len(eng.TokenMap))})
+	}
+	count := 0
+	switch info.Name {
+	case "engram_primes.weight":
+		count = len(eng.Primes)
+	case "engram_offsets.weight":
+		if len(eng.Offsets) != len(eng.Primes) {
+			return false
+		}
+		count = len(eng.Offsets)
+	case "engram_multipliers.weight":
+		count = len(eng.Multipliers)
+	default:
+		return false
+	}
+	layers := len(eng.LayerIDs)
+	return info.Type == TensorType(27) && count > 0 && count%layers == 0 &&
+		dimsEqual(info.Dims, []uint64{uint64(count / layers), uint64(layers)})
+}
+
+func checkDTypes(out *ManifestPreflight, f *File, cfg model.Config, configValid bool) {
 	type gap struct{ op, dtype string }
 	gaps := map[gap][]string{}
 	tiers := map[string]bool{}
 	for _, t := range f.Tensors {
 		out.DTypes[t.Type.String()]++
+		if configValid && manifestEngramAuxConsumed(f, cfg, t) {
+			continue
+		}
 		if !HostDequantSupported(t.Type) {
 			g := gap{OpHostDequant, t.Type.String()}
 			gaps[g] = append(gaps[g], t.Name)

@@ -23,8 +23,9 @@ package compute
 
 /*
 #cgo CFLAGS: -I${SRCDIR}
-#cgo LDFLAGS: -L${SRCDIR} -lfakcuda -lcudart -lcublas -lcublasLt -lstdc++ -lm
+#cgo LDFLAGS: -L${SRCDIR} -lfakcuda -lcudart -lcuda -lcublas -lcublasLt -lstdc++ -lm
 #include <stdlib.h>
+#include <cuda.h>
 #include "cuda_backend.h"
 #include "cuda_kv_precision.h"
 */
@@ -99,12 +100,24 @@ func init() {
 		return // no reachable CUDA device — leave cpu-ref as the only backend
 	}
 	graphEnabled = os.Getenv("FAK_CUDA_GRAPH") == "1"
+	// Typed device receipt (ticket rtx5090-sm120-detection-receipt): capture the raw init facts
+	// here, thin, and hand them to the pure mapper in cuda_device_receipt.go. The receipt keeps
+	// the device name fcuda_init used to discard, adds the driver version, wires in the
+	// native/JIT/uncovered coverage verdict, and records every tracked arm's admission — enabled
+	// or explicitly refused-with-reason, never silently downgraded.
 	cudaDev = &cudaBackend{
 		name:        "cuda",
 		tier:        "sm_" + itoaC(int(sm)),
 		totalMem:    int64(total), // KEEP the device VRAM total — it used to be read and discarded
 		budgetBytes: cudaBudgetBytes(int64(total)),
 		faultLatch:  NewDeviceFaultLatch("cuda", cudaFaultReconstructBudget),
+		receipt: BuildCUDADeviceReceipt(CUDADeviceInitFacts{
+			DeviceName:    C.GoString(&name[0]),
+			Major:         int(sm) / 10,
+			Minor:         int(sm) % 10,
+			TotalMemBytes: int64(total),
+			DriverVersion: captureCUDADriverVersion(),
+		}, CUDABuildArches{}),
 	}
 	Register(cudaDev)
 	initCUDAQ4KPrefillArm(int(sm))
@@ -117,6 +130,18 @@ func init() {
 	// via EnableCUDATF32().
 	tf32Enabled = os.Getenv("FAK_CUDA_TF32") == "1"
 	applyCUDATF32()
+}
+
+// captureCUDADriverVersion asks the CUDA driver for its own version via cuDriverGetVersion
+// and formats it as "major.minor[.patch]". It degrades to "" when the driver cannot answer, so
+// the receipt reports an unknown driver instead of failing init — the receipt is a surface,
+// never a gate. Safe to call here: fcuda_init already selected device 0 and loaded the driver.
+func captureCUDADriverVersion() string {
+	var ver C.int
+	if C.cuDriverGetVersion(&ver) != 0 {
+		return ""
+	}
+	return formatCUDADriverVersion(int(ver))
 }
 
 // installCUDAKernelProfile creates the event ring and registers the "cuda" kernel profile
@@ -485,7 +510,7 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 				Class: class,
 			})
 		}
-		return c.uploadRawKQuant(t, hb)
+		return c.uploadRawKQuantClass(t, hb, class, site)
 	}
 	if t.Dtype == Q2_0 {
 		// An ALREADY-packed ternary Q2_0 host weight (2-bit codes + per-block f32 scales), copied
@@ -599,15 +624,38 @@ func (c *cudaBackend) Host(t Tensor) ([]float32, bool) {
 	return hostF32(t)
 }
 
-// Read is a host fence (#482): it copies device -> host f32 and, because that synchronous d2h
-// drains g_stream, bumps the fence generation so every async buffer enqueued before it flips
-// to Ready. It also moves the FULL vector host-ward — the costly path greedy decode avoids by
-// using Argmax instead (the witness counts these bytes).
+// cudaReadOperations is scoped to ordinary Read. Read and nonparallel host
+// injection tests access it only under cudaMu; no other operation uses this seam.
+// The default operations retain the native allocation/conversion/free lifetime.
+type cudaReadOperations struct {
+	copy            func(device int, dst, src unsafe.Pointer, bytes uintptr) int
+	allocConversion func(c *cudaBackend, bytes int) unsafe.Pointer
+	convert         func(dst, src unsafe.Pointer, elements int, dtype Dtype)
+	freeConversion  func(ptr unsafe.Pointer)
+}
+
+var cudaReadNative = cudaReadOperations{
+	copy: func(device int, dst, src unsafe.Pointer, bytes uintptr) int {
+		return int(C.fcuda_d2h_on_checked(C.int(device), dst, src, C.size_t(bytes)))
+	},
+	allocConversion: func(c *cudaBackend, bytes int) unsafe.Pointer {
+		return c.dallocClass(bytes, MemoryScratchpad, "kv-read-conversion").ptr
+	},
+	convert: func(dst, src unsafe.Pointer, elements int, dtype Dtype) {
+		cudaKVCheck(C.fcuda_kv_load_typed((*C.float)(dst), src, cudaKVElements(elements), C.int(dtype)))
+	},
+	freeConversion: func(ptr unsafe.Pointer) { C.fcuda_free(ptr) },
+}
+
+// Read copies device -> host f32. A successful device-0 read is a host fence (#482):
+// synchronous D2H drains g_stream and advances the readiness generation. A copy
+// on another device cannot certify device-0 work. Failed copies publish neither
+// host data nor readiness. Read moves the FULL vector, which Argmax avoids.
 func (c *cudaBackend) Read(t Tensor) []float32 {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	if hb, ok := t.buf.(*hostBuf); ok {
-		return hb.f32 // host-resident: nothing crosses the bus and no device work is fenced
+		return hb.f32 // host-resident: no device work or fence
 	}
 	db := t.buf.(*cudaBuf)
 	if err := db.invalidStateError("buffer"); err != nil {
@@ -615,20 +663,29 @@ func (c *cudaBackend) Read(t Tensor) []float32 {
 	}
 	out := make([]float32, t.Numel())
 	if len(out) > 0 {
+		if err := AdmitDevice(c, "read-d2h"); err != nil {
+			panic(err)
+		}
+		src := db.ptr
 		if t.Dtype == F16 || t.Dtype == BF16 {
 			if db.device != 0 {
 				panic("cuda: narrowed KV read requires its owning device")
 			}
-			ptr := c.dallocClass(len(out)*4, MemoryScratchpad, "kv-read-conversion").ptr
-			defer C.fcuda_free(ptr)
-			cudaKVCheck(C.fcuda_kv_load_typed((*C.float)(ptr), db.ptr, cudaKVElements(len(out)), C.int(t.Dtype)))
-			C.fcuda_d2h(unsafe.Pointer(&out[0]), ptr, C.size_t(len(out)*4))
-		} else if db.device != 0 {
-			C.fcuda_d2h_on(C.int(db.device), unsafe.Pointer(&out[0]), db.ptr, C.size_t(len(out)*4))
-		} else {
-			C.fcuda_d2h(unsafe.Pointer(&out[0]), db.ptr, C.size_t(len(out)*4))
+			src = cudaReadNative.allocConversion(c, len(out)*4)
+			defer cudaReadNative.freeConversion(src)
+			cudaReadNative.convert(src, db.ptr, len(out), t.Dtype)
 		}
-		atomic.AddUint64(&c.fenceGen, 1) // stream drained: prior enqueued work is now materialized
+		status := cudaReadNative.copy(db.device, unsafe.Pointer(&out[0]), src, uintptr(len(out)*4))
+		if status != 0 {
+			// ObserveError does not classify CUDAOpError. Observe directly, then retain
+			// the typed operation/site/status even when this backend has no latch.
+			c.faultLatch.Observe(DeviceFaultExecution, "read-d2h", status)
+			panic(&CUDAOpError{Op: "Read", Site: "read-d2h", Code: status, Msg: "device-to-host copy failed"})
+		}
+		if db.device == 0 {
+			// Only this device-0 fence can certify work tracked by this generation.
+			atomic.AddUint64(&c.fenceGen, 1)
+		}
 	}
 	return out
 }

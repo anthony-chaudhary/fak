@@ -406,7 +406,13 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		}
 		cacheable = m
 		if matchedSnapshot != nil {
-			s = p.m.NewBackendSession(p.backend)
+			// The snapshot installs its own device recurrent state below, so skip the
+			// eager zero-state upload this constructor would otherwise discard (fak#13801).
+			s, err = p.m.NewBackendSessionCheckedDeferredState(p.backend)
+			if err != nil {
+				matchedSnapshot.Close()
+				return inKernelGenerateResult{}, err
+			}
 			if err = matchedSnapshot.Restore(s); err != nil {
 				matchedSnapshot.Close()
 				s.Close()

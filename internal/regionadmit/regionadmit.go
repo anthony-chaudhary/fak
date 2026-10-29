@@ -3,6 +3,7 @@ package regionadmit
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -176,6 +177,17 @@ func treeContainmentSpec(tree, laneTree []string) (int, bool) {
 				// therefore claims nothing — otherwise every lease would
 				// classify onto the exclusive global lane and block the world.
 				continue
+			}
+			// A terminal filename glob is not its parent directory. Prefix
+			// geometry alone would let accounts*.go claim unrelated siblings.
+			// For a concrete requested path, require the actual filename match;
+			// retain conservative prefix handling for non-concrete regions and
+			// recursive/directory globs whose containment is not established here.
+			if !strings.ContainsAny(g, "*?[") && !strings.Contains(c, "**") &&
+				strings.IndexAny(c, "*?[") > strings.LastIndexByte(c, '/') {
+				if matches, err := path.Match(c, g); err == nil && !matches {
+					continue
+				}
 			}
 			if (p == cp || strings.HasPrefix(p, cp+"/")) && len(cp) > best {
 				best = len(cp)

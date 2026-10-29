@@ -90,7 +90,7 @@ var (
 	prepushExtractTip           = prepushArchiveTip
 	prepushListGraph            = goListGraph
 	prepushListTestOnly         = listTestOnlyPackages
-	prepushBuild                = goBuildPackages
+	prepushBuild                = goBuildPackagesSerial
 	prepushNow                  = time.Now
 	prepushCommitPathsCoveredFn = prepushCommitPathsCovered
 	prepushTreeResolveFn        = prepushGitRevParse
@@ -994,7 +994,7 @@ func resolveTipBuildFailure(r, base string, res *trunkBuildResult) int {
 		return 1
 	}
 	tipFailures := failingPackagesFromBuild(res.Detail)
-	if !prepushBaselineTolerance || len(tipFailures) == 0 {
+	if strings.Contains(res.Detail, prepushIncompleteBuildCoverage) || !prepushBaselineTolerance || len(tipFailures) == 0 {
 		return block()
 	}
 	baseSha, err := prepushRevParse(r, base)
@@ -1411,6 +1411,46 @@ func goBuildPackages(dir string, pkgs []string) (string, bool) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return strings.TrimSpace(string(out)), false
+	}
+	return "", true
+}
+
+// A failed prefix is not proof for the unattempted suffix, even if the first
+// compiler failure also occurs at the base. Only the public pre-push route uses
+// this marker: the shared commit-admission helper above retains its wire contract.
+const prepushIncompleteBuildCoverage = "prepush-build: incomplete selected-package coverage"
+
+// goBuildPackagesSerial is the pre-push-only verification build. A bulk Go command
+// retains all linked main executables until its Builder closes. One command per
+// selected package releases that work before starting the next. Libraries are also
+// serialized intentionally, trading process/load overhead for a small, exact plan.
+// The existing outer admission/build slot surrounds the whole sequence.
+func goBuildPackagesSerial(dir string, pkgs []string) (string, bool) {
+	for i, pkg := range pkgs {
+		// Explicit null output prevents a single main from installing into the
+		// source root, but retains its real final linker action. All other flags,
+		// tags and the inherited environment match the existing verification build.
+		args := append(goBuildPackageArgs(nil), "-o", os.DevNull, pkg)
+		cmd := windowgate.Command("go", args...)
+		cmd.Dir = dir
+		windowgate.ConfigureBackgroundCommand(cmd)
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			continue
+		}
+		// Fail fast on every nonzero/start/interruption result; do not infer
+		// cancellation from an exit code or launch a suffix after any failure.
+		remaining := len(pkgs) - i - 1
+		detail := strings.TrimSpace(string(out))
+		if detail == "" {
+			detail = err.Error()
+		}
+		detail = fmt.Sprintf("prepush-build: failed selected package %d/%d %q; %d unattempted: %v\n%s",
+			i+1, len(pkgs), pkg, remaining, err, detail)
+		if remaining > 0 {
+			detail = prepushIncompleteBuildCoverage + "\n" + detail
+		}
+		return detail, false
 	}
 	return "", true
 }

@@ -917,21 +917,62 @@ func (b *QuantBuilder) residentQuantTarget(canon string, shape []int) (name stri
 	return name, true, nil
 }
 
+// LazyQ4KPayloadError describes a malformed checkpoint-backed Q4_K descriptor.
+// ExpectedBytesKnown is false when invalid or overflowing geometry prevents an
+// exact byte count; ActualBytes always preserves the caller's declared size.
+type LazyQ4KPayloadError struct {
+	Tensor             string
+	Shape              [2]int
+	ActualBytes        int
+	ExpectedBytes      int
+	ExpectedBytesKnown bool
+	Reason             string
+}
+
+func (e *LazyQ4KPayloadError) Error() string {
+	expected := "unavailable"
+	if e.ExpectedBytesKnown {
+		expected = fmt.Sprint(e.ExpectedBytes)
+	}
+	return fmt.Sprintf("model: tensor %s Q4_K shape %v: %s (payload bytes: expected %s, actual %d)",
+		e.Tensor, e.Shape, e.Reason, expected, e.ActualBytes)
+}
+
 // AddLazyQ4K stores a checkpoint-backed Q4_K descriptor without reading its payload.
+// Malformed eligible descriptors return a *LazyQ4KPayloadError before storage.
 func (b *QuantBuilder) AddLazyQ4K(canon string, shape []int, src LazyQ4KRange) error {
-	return b.addResidentQuant(canon, shape, func(name string) {
-		if b.m.q4kw == nil {
-			b.m.q4kw = map[string]*q4kTensor{}
-		}
-		if shape[1]%qkK != 0 {
-			panic("model: Q4_K reduction dim not a multiple of 256")
-		}
-		want := shape[0] * (shape[1] / qkK) * q4kBlockBytes
-		if src.Bytes != want {
-			panic("model: lazy Q4_K payload size mismatch")
-		}
-		b.m.q4kw[name] = &q4kTensor{out: shape[0], in: shape[1], nblk: shape[1] / qkK, lazy: &src}
-	})
+	name, ok, err := b.residentQuantTarget(canon, shape)
+	if !ok || err != nil {
+		return err
+	}
+	out, in := shape[0], shape[1]
+	invalid := &LazyQ4KPayloadError{Tensor: name, Shape: [2]int{out, in}, ActualBytes: src.Bytes}
+	if out <= 0 || in <= 0 {
+		invalid.Reason = "dimensions must be positive"
+		return invalid
+	}
+	if in%qkK != 0 {
+		invalid.Reason = "reduction dimension must be a multiple of 256"
+		return invalid
+	}
+	nblk := in / qkK
+	// Divide before multiplying: neither the intermediate block count nor the
+	// final payload size may wrap when dimensions originate in a checkpoint.
+	if out > int(^uint(0)>>1)/q4kBlockBytes/nblk {
+		invalid.Reason = "payload byte count overflows int"
+		return invalid
+	}
+	want := out * nblk * q4kBlockBytes
+	if src.Bytes != want {
+		invalid.ExpectedBytes, invalid.ExpectedBytesKnown = want, true
+		invalid.Reason = "payload size mismatch"
+		return invalid
+	}
+	if b.m.q4kw == nil {
+		b.m.q4kw = map[string]*q4kTensor{}
+	}
+	b.m.q4kw[name] = &q4kTensor{out: out, in: in, nblk: nblk, lazy: &src}
+	return nil
 }
 
 // AddResidentQ4K stores a raw Q4_K payload as a resident q4kTensor under the canonical name

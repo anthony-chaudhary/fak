@@ -337,7 +337,10 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 					}
 				})
 				if p.backend != nil {
-					candidate, restoreErr = p.m.NewBackendSessionChecked(p.backend)
+					// The snapshot installs its own device recurrent state below, so
+					// skip the eager zero-state upload this constructor would otherwise
+					// perform and immediately discard (fak#13801).
+					candidate, restoreErr = p.m.NewBackendSessionCheckedDeferredState(p.backend)
 					if restoreErr != nil {
 						return nil, restoreErr
 					}

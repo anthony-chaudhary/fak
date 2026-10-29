@@ -30,7 +30,11 @@ func init() {
 	}
 	for _, arg := range a {
 		if arg == "--version" || arg == "/Bv" || arg == "/?" {
+			// One banner serves both consumers: the host-compiler toolchain
+			// digest records the first line; the provenance observer parses
+			// the nvcc release line.
 			fmt.Println("synthetic CUDA host compiler 1")
+			fmt.Println("Cuda compilation tools, release 12.6, V12.6.85")
 			os.Exit(0)
 		}
 		if strings.HasPrefix(arg, "-print-prog-name=") {
@@ -123,7 +127,7 @@ func cudaIncrementalFixture(t *testing.T) (string, *Toolchain) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "internal", "compute")
 	sdk := filepath.Join(root, "toolkit")
-	for _, path := range []string{dir, filepath.Join(sdk, "bin"), filepath.Join(sdk, "nvvm", "libdevice")} {
+	for _, path := range []string{dir, filepath.Join(sdk, "bin"), filepath.Join(sdk, "include"), filepath.Join(sdk, "nvvm", "libdevice")} {
 		if err := os.MkdirAll(path, 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -152,6 +156,7 @@ func cudaIncrementalFixture(t *testing.T) (string, *Toolchain) {
 		filepath.Join(dir, "local.h"):                           "local\n",
 		filepath.Join(dir, "transitive header.h"):               "transitive\n",
 		filepath.Join(sdk, "sdk.h"):                             "SDK header\n",
+		filepath.Join(sdk, "include", "cublas_api.h"):           "#define CUBLASAPI_VERSION 120600\n",
 		filepath.Join(sdk, "nvvm", "libdevice", "libdevice.bc"): "device bitcode\n",
 	} {
 		if err := os.WriteFile(path, []byte(body), 0600); err != nil {

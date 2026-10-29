@@ -68,6 +68,17 @@ func (c *cudaBackend) uploadQ8(t Tensor, hb HostBuffer, f []float32, hp uintptr)
 	return res
 }
 
+// cudaQ8UploadSource retains both immutable host operands and their geometry.
+// A codes address alone does not identify independently supplied Q8 scales.
+// Embedding the original owner preserves HostBuffer; Free clears hostKeep.
+type cudaQ8UploadSource struct {
+	HostBuffer
+	scales []float32
+	rows   int
+	cols   int
+	block  int
+}
+
 // uploadQ8Resident copies an ALREADY-quantized Q8_0 host weight resident with NO re-quantization:
 // the int8 codes (HostBuffer.I8()) go to the buffer's ptr and the per-block(32) f32 scales
 // (QuantSpec.Scale) to its scale side-channel — the SAME resident layout uploadQ8 produces, so
@@ -92,11 +103,12 @@ func (c *cudaBackend) uploadQ8Resident(t Tensor, hb HostBuffer) Tensor {
 	}
 	out, in := t.Shape[0], t.Shape[1]
 	blk := t.Quant.Block
-	if blk <= 0 || in%blk != 0 {
+	// DP4A consumes four codes at a time; partial blocks would lose their tail.
+	if blk <= 0 || blk%4 != 0 || in%blk != 0 {
 		panic(&CUDAOpError{
 			Op:    "Upload",
 			Site:  "upload-q8-resident",
-			Msg:   "cuda Upload(Q8_0 host) needs in divisible by QuantSpec.Block (block=" + itoaC(blk) + ")",
+			Msg:   "cuda Upload(Q8_0 host) needs QuantSpec.Block divisible by 4 and exactly dividing in (block=" + itoaC(blk) + ")",
 			Class: MemoryWeights,
 		})
 	}
@@ -124,14 +136,24 @@ func (c *cudaBackend) uploadQ8Resident(t Tensor, hb HostBuffer) Tensor {
 		hp = uintptr(unsafe.Pointer(&codes[0]))
 		// element-count guard against host-address reuse (see uploadClass F32 path).
 		if cached, ok := uploadCache[ucKey{hp, Q8_0, t.Layout}]; ok && cached.Numel() == t.Numel() {
-			return cached
+			buf, ok := cached.buf.(*cudaBuf)
+			if ok && buf != nil && cached.Quant != nil && cached.Quant.Block == blk &&
+				len(cached.Shape) == 2 && cached.Shape[0] == out && cached.Shape[1] == in {
+				if source, ok := buf.hostKeep.(*cudaQ8UploadSource); ok && source != nil &&
+					source.rows == out && source.cols == in && source.block == blk &&
+					len(source.scales) == len(scales) && len(scales) > 0 && &source.scales[0] == &scales[0] {
+					return cached
+				}
+			}
 		}
 	}
 	res, buf := c.devQ8(t.Shape, blk, len(scales))
 	if len(codes) > 0 {
 		cudaUploadQuantPayload(buf, codes, scales)
 		c.accountImmutableWeightUpload(len(codes)+len(scales)*F32.Bytes(), buf)
-		buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, hb, Q8_0, t.Layout
+		buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, &cudaQ8UploadSource{
+			HostBuffer: hb, scales: scales, rows: out, cols: in, block: blk,
+		}, Q8_0, t.Layout
 		uploadCache[ucKey{hp, Q8_0, t.Layout}] = res
 	}
 	return res

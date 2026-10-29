@@ -791,9 +791,16 @@ func (t *ExpertCheckpointTier) Prefetch(names []string) int {
 // its own lifetime. The join is idempotent.
 func (t *ExpertCheckpointTier) prefetchJoined(names []string) (int, func()) {
 	loads := t.startPrefetch(names)
-	return len(loads), func() {
-		for _, load := range loads {
-			<-load.done
+	// Completion needs only notifications, not load records: retaining a
+	// completed record here would keep its payload alive after demand/cache
+	// ownership ends, for as long as the caller retains its join.
+	done := make([]<-chan struct{}, len(loads))
+	for i, load := range loads {
+		done[i] = load.done
+	}
+	return len(done), func() {
+		for _, settled := range done {
+			<-settled
 		}
 	}
 }

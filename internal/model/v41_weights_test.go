@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 )
 
@@ -107,19 +108,19 @@ func TestDeepSeekV41InventoryExactShapes(t *testing.T) {
 		scaleType string
 		scale     []int
 	}{
-		{"model.embed_tokens.weight", "BF16", []int{129280, 5120}, nil, false, "", "", nil},
+		{"embed.weight", "BF16", []int{129280, 5120}, nil, false, "", "", nil},
 		{"layers.0.attn.wq_a.weight", "F8_E4M3", []int{1280, 5120}, nil, false, "layers.0.attn.wq_a.scale", "F8_E8M0", []int{40, 160}},
 		{"layers.0.attn.wq_b.weight", "F8_E4M3", []int{32768, 1280}, nil, false, "layers.0.attn.wq_b.scale", "F8_E8M0", []int{1024, 40}},
 		{"layers.0.attn.wkv.weight", "F8_E4M3", []int{512, 5120}, nil, false, "layers.0.attn.wkv.scale", "F8_E8M0", []int{16, 160}},
-		{"layers.0.attn.wo_a.weight", "F8_E4M3", []int{8192, 5120}, nil, false, "layers.0.attn.wo_a.scale", "F8_E8M0", []int{256, 160}},
+		{"layers.0.attn.wo_a.weight", "F8_E4M3", []int{8192, 4096}, nil, false, "layers.0.attn.wo_a.scale", "F8_E8M0", []int{256, 128}},
 		{"layers.0.attn.wo_b.weight", "F8_E4M3", []int{5120, 8192}, nil, false, "layers.0.attn.wo_b.scale", "F8_E8M0", []int{160, 256}},
-		{"layers.0.ffn.gate.weight", "F8_E4M3", []int{384, 5120}, nil, false, "layers.0.ffn.gate.scale", "F8_E8M0", []int{12, 160}},
-		{"layers.0.ffn.gate.e_score_correction_bias", "F32", []int{384}, nil, false, "", "", nil},
+		{"layers.0.ffn.gate.weight", "BF16", []int{384, 5120}, nil, false, "", "", nil},
+		{"layers.0.ffn.gate.bias", "F32", []int{384}, nil, false, "", "", nil},
 		{"layers.0.ffn.shared_experts.w1.weight", "F8_E4M3", []int{2304, 5120}, nil, false, "layers.0.ffn.shared_experts.w1.scale", "F8_E8M0", []int{72, 160}},
 		{"layers.0.ffn.experts.0.w1.weight", "I8", []int{2304, 2560}, []int{2304, 5120}, true, "layers.0.ffn.experts.0.w1.scale", "F8_E8M0", []int{2304, 160}},
 		{"layers.0.ffn.experts.0.w2.weight", "I8", []int{5120, 1152}, []int{5120, 2304}, true, "layers.0.ffn.experts.0.w2.scale", "F8_E8M0", []int{5120, 72}},
-		{"model.norm.weight", "F32", []int{5120}, nil, false, "", "", nil},
-		{"lm_head.weight", "F8_E4M3", []int{129280, 5120}, nil, false, "lm_head.scale", "F8_E8M0", []int{4040, 160}},
+		{"norm.weight", "BF16", []int{5120}, nil, false, "", "", nil},
+		{"head.weight", "BF16", []int{129280, 5120}, nil, false, "", "", nil},
 	}
 	for _, s := range samples {
 		ref, ok := inv.Lookup(s.name)
@@ -151,6 +152,51 @@ func TestDeepSeekV41InventoryExactShapes(t *testing.T) {
 		byScale, ok := inv.Lookup(s.scaleName)
 		if !ok || byScale.Name != ref.Name {
 			t.Fatalf("Lookup(%q) did not resolve to %s (got %s, ok=%v)", s.scaleName, ref.Name, byScale.Name, ok)
+		}
+	}
+
+	// All-layer crosscheck: every decoder layer's text-tensor rows must agree
+	// with the pinned checkpoint headers — one layer alone is not an all-layer
+	// witness. Scale dtype/shape are pinned once above for each family; here
+	// every layer must carry the same names, dtypes, shapes and scale presence.
+	for layer := 0; layer < cfg.NumLayers; layer++ {
+		p := "layers." + strconv.Itoa(layer)
+		rows := []struct {
+			name, dtype string
+			shape       []int
+			scale       string
+		}{
+			{p + ".attn_norm.weight", "BF16", []int{5120}, ""},
+			{p + ".ffn_norm.weight", "BF16", []int{5120}, ""},
+			{p + ".attn.wq_a.weight", "F8_E4M3", []int{1280, 5120}, p + ".attn.wq_a.scale"},
+			{p + ".attn.wq_b.weight", "F8_E4M3", []int{32768, 1280}, p + ".attn.wq_b.scale"},
+			{p + ".attn.wkv.weight", "F8_E4M3", []int{512, 5120}, p + ".attn.wkv.scale"},
+			{p + ".attn.wo_a.weight", "F8_E4M3", []int{8192, 4096}, p + ".attn.wo_a.scale"},
+			{p + ".attn.wo_b.weight", "F8_E4M3", []int{5120, 8192}, p + ".attn.wo_b.scale"},
+			{p + ".ffn.gate.weight", "BF16", []int{384, 5120}, ""},
+			{p + ".ffn.gate.bias", "F32", []int{384}, ""},
+			{p + ".ffn.shared_experts.w1.weight", "F8_E4M3", []int{2304, 5120}, p + ".ffn.shared_experts.w1.scale"},
+			{p + ".ffn.shared_experts.w3.weight", "F8_E4M3", []int{2304, 5120}, p + ".ffn.shared_experts.w3.scale"},
+			{p + ".ffn.shared_experts.w2.weight", "F8_E4M3", []int{5120, 2304}, p + ".ffn.shared_experts.w2.scale"},
+		}
+		for _, w := range rows {
+			ref, ok := inv.Lookup(w.name)
+			if !ok {
+				t.Fatalf("layer %d: Lookup(%q) missing", layer, w.name)
+			}
+			if ref.Dtype != w.dtype {
+				t.Fatalf("layer %d: %s dtype = %q, want %q", layer, w.name, ref.Dtype, w.dtype)
+			}
+			v41TestShape(t, w.name, ref.Shape, w.shape)
+			if w.scale == "" {
+				if ref.HasScale() {
+					t.Fatalf("layer %d: %s unexpectedly has scale %q", layer, w.name, ref.ScaleName)
+				}
+				continue
+			}
+			if !ref.HasScale() || ref.ScaleName != w.scale {
+				t.Fatalf("layer %d: %s scale = %q, want %q", layer, w.name, ref.ScaleName, w.scale)
+			}
 		}
 	}
 
@@ -210,6 +256,108 @@ func TestDeepSeekV41InventoryRejectsNonV41(t *testing.T) {
 	incomplete.MoEIntermediateSize = 0
 	if _, err := DeepSeekV41Inventory(incomplete); !errors.Is(err, ErrV41Inventory) {
 		t.Fatalf("incomplete geometry error = %v, want ErrV41Inventory", err)
+	}
+}
+
+// TestDeepSeekV41RawBF16Head proves the head family stays plain BF16 end to
+// end: the packed shard reader passes raw BF16 bytes through unchanged (no FP8
+// pair, no scale sibling), and the existing plain BF16 reader widens them to
+// f32 exactly as the pinned checkpoint headers declare.
+func TestDeepSeekV41RawBF16Head(t *testing.T) {
+	cfg := v41TestReducedConfig(t, 1, 1)
+	inv, err := DeepSeekV41Inventory(cfg)
+	if err != nil {
+		t.Fatalf("inventory: %v", err)
+	}
+	head, ok := inv.Lookup("head.weight")
+	if !ok {
+		t.Fatal("Lookup(head.weight) missing")
+	}
+	if head.Dtype != "BF16" || head.HasScale() {
+		t.Fatalf("head.weight = %+v, want plain BF16 with no scale", head)
+	}
+	n, _ := checkedShapeProduct(head.Shape...)
+	// BF16 stores two bytes per element; widen the pattern to match.
+	raw := v41TestPattern(n*2, 7)
+	path := filepath.Join(t.TempDir(), "head.safetensors")
+	writeV4RawShard(t, path, map[string]tinySTTensor{
+		"head.weight": {dtype: "BF16", shape: head.Shape, data: raw},
+	})
+	s, err := OpenV41PackedShard(path, cfg)
+	if err != nil {
+		t.Fatalf("OpenV41PackedShard: %v", err)
+	}
+	defer s.Close()
+	ref, err := s.Reference("head.weight")
+	if err != nil {
+		t.Fatalf("Reference(head.weight): %v", err)
+	}
+	if ref.HasScale() {
+		t.Fatal("head.weight reference carries a scale span")
+	}
+	got, err := s.Read(ref, int64(len(raw)))
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if !bytes.Equal(got, raw) {
+		t.Fatalf("Read returned %d bytes not equal to the raw BF16 fixture", len(got))
+	}
+	decoded := decodeBF16(got)
+	if len(decoded) != n*4 {
+		t.Fatalf("decodeBF16 length = %d, want %d", len(decoded), n*4)
+	}
+	for i := 0; i < n; i++ {
+		wantBits := uint32(binary.LittleEndian.Uint16(raw[i*2:])) << 16
+		if gotBits := binary.LittleEndian.Uint32(decoded[i*4:]); gotBits != wantBits {
+			t.Fatalf("decoded[%d] bits = %08x, want %08x", i, gotBits, wantBits)
+		}
+	}
+}
+
+// TestV41FP8DenseGroupedWoA pins the grouped low-rank output-A geometry: the
+// on-disk artifact stores wo_a as [o_lora_rank*o_groups, num_heads*head_dim/
+// o_groups] — each group's heads, not the model hidden width — and both the
+// dense FP8 role map and the inventory fail closed when the grouped split is
+// not integral.
+func TestV41FP8DenseGroupedWoA(t *testing.T) {
+	_, cfg := readDeepSeekV41Config(t)
+	const weightName = "layers.0.attn.wo_a.weight"
+	const scaleName = "layers.0.attn.wo_a.scale"
+
+	role, ok, err := v41DenseFP8RoleForName(weightName, cfg)
+	if err != nil || !ok {
+		t.Fatalf("role(%s) ok=%v err=%v, want grouped role", weightName, ok, err)
+	}
+	if role.shape != [2]int{8192, 4096} {
+		t.Fatalf("%s shape = %v, want [8192,4096]", weightName, role.shape)
+	}
+	if role.weightName != weightName {
+		t.Fatalf("weightName = %q, want %q", role.weightName, weightName)
+	}
+	sib, ok, err := v41DenseFP8RoleForName(scaleName, cfg)
+	if err != nil || !ok || sib.weightName != weightName || sib.shape != role.shape {
+		t.Fatalf("scale sibling resolution = (%+v,%v,%v)", sib, ok, err)
+	}
+
+	hdr := func(shape []int) map[string]json.RawMessage {
+		w, _ := json.Marshal(stEntry{Dtype: "F8_E4M3", Shape: shape})
+		sc, _ := json.Marshal(stEntry{Dtype: "F8_E8M0", Shape: []int{256, 128}})
+		return map[string]json.RawMessage{weightName: w, scaleName: sc}
+	}
+	if _, _, err := v41DenseFP8PairEntries(weightName, scaleName, role.shape, hdr([]int{8192, 4096})); err != nil {
+		t.Fatalf("grouped pair refused: %v", err)
+	}
+	if _, _, err := v41DenseFP8PairEntries(weightName, scaleName, role.shape, hdr([]int{8192, 5120})); err == nil {
+		t.Fatal("old flat [8192,5120] geometry accepted, want refusal")
+	}
+
+	bad := cfg
+	bad.OGroups = 3 // 64 % 3 != 0: the grouped split is not integral
+	if _, _, err := v41DenseFP8RoleForName(weightName, bad); err == nil {
+		t.Fatal("non-divisible o_groups accepted for wo_a, want error")
+	}
+	if _, err := DeepSeekV41Inventory(bad); !errors.Is(err, ErrV41Inventory) {
+		t.Fatalf("inventory error = %v, want ErrV41Inventory", err)
 	}
 }
 
@@ -366,7 +514,7 @@ func TestDeepSeekV41PackedShardConfinement(t *testing.T) {
 		wa.Name:      {dtype: wa.Dtype, shape: wa.Shape, data: v41TestPattern(wn, 1)},
 		wa.ScaleName: {dtype: wa.ScaleDtype, shape: wa.ScaleShape, data: v41TestPattern(wsn, 2)},
 	})
-	norm, _ := inv.Lookup("model.norm.weight")
+	norm, _ := inv.Lookup("norm.weight")
 	nn, _ := checkedShapeProduct(norm.Shape...)
 	writeV4RawShard(t, pathB, map[string]tinySTTensor{
 		norm.Name: {dtype: norm.Dtype, shape: norm.Shape, data: v41TestPattern(nn, 3)},

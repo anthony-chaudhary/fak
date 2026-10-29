@@ -72,28 +72,34 @@ type QwenPagedSwapRequest struct {
 
 // QwenPagedSwapArm records the observed scheduler, execution, and memory metrics for one arm.
 type QwenPagedSwapArm struct {
-	Pressure                 string                                  `json:"pressure"`
-	Requests                 []QwenPagedSwapRequest                  `json:"requests"`
-	StateDigests             []string                                `json:"state_digests,omitempty"`
-	StateIdentities          []model.Qwen35MetalStateIdentityReceipt `json:"state_identities,omitempty"`
-	SwapUsage                []modelperfobs.QwenSwapWeeklyUsage      `json:"swap_usage,omitempty"`
-	SwapTotal                int64                                   `json:"swap_total"`
-	ReadmittedTotal          int64                                   `json:"readmitted_total"`
-	SwapBytes                int64                                   `json:"swap_bytes"`
-	RestoredBytes            int64                                   `json:"restored_bytes"`
-	RecomputeTotal           int64                                   `json:"recompute_total"`
-	FallbackTotal            int                                     `json:"fallback_total"`
-	ErrorTotal               int                                     `json:"error_total"`
-	PeakRunning              int                                     `json:"peak_running"`
-	PeakUsedBlocks           int                                     `json:"peak_used_blocks"`
-	PeakRSSBytes             uint64                                  `json:"peak_rss_bytes"`
-	TTFTP50Milliseconds      float64                                 `json:"ttft_p50_ms"`
-	TTFTP95Milliseconds      float64                                 `json:"ttft_p95_ms"`
-	ITLP50Milliseconds       float64                                 `json:"itl_p50_ms"`
-	ITLP95Milliseconds       float64                                 `json:"itl_p95_ms"`
-	AggregateTokensPerSecond float64                                 `json:"aggregate_tokens_per_second"`
-	TeardownMilliseconds     float64                                 `json:"teardown_ms"`
-	TeardownComplete         bool                                    `json:"teardown_complete"`
+	Pressure            string                                  `json:"pressure"`
+	Requests            []QwenPagedSwapRequest                  `json:"requests"`
+	StateDigests        []string                                `json:"state_digests,omitempty"`
+	StateIdentities     []model.Qwen35MetalStateIdentityReceipt `json:"state_identities,omitempty"`
+	SwapUsage           []modelperfobs.QwenSwapWeeklyUsage      `json:"swap_usage,omitempty"`
+	SwapTotal           int64                                   `json:"swap_total"`
+	ReadmittedTotal     int64                                   `json:"readmitted_total"`
+	SwapBytes           int64                                   `json:"swap_bytes"`
+	RestoredBytes       int64                                   `json:"restored_bytes"`
+	RecomputeTotal      int64                                   `json:"recompute_total"`
+	FallbackTotal       int                                     `json:"fallback_total"`
+	ErrorTotal          int                                     `json:"error_total"`
+	PeakRunning         int                                     `json:"peak_running"`
+	PeakUsedBlocks      int                                     `json:"peak_used_blocks"`
+	PeakRSSBytes        uint64                                  `json:"peak_rss_bytes"`
+	TTFTP50Milliseconds float64                                 `json:"ttft_p50_ms"`
+	TTFTP95Milliseconds float64                                 `json:"ttft_p95_ms"`
+	ITLP50Milliseconds  float64                                 `json:"itl_p50_ms"`
+	ITLP95Milliseconds  float64                                 `json:"itl_p95_ms"`
+	// AggregateTokensPerSecond is END-TO-END output throughput over the arm wall
+	// (admission wait + prefill + decode); it is NOT decode-only. See
+	// DecodeTokensPerSecond for the phase-pure decode rate.
+	AggregateTokensPerSecond float64 `json:"aggregate_tokens_per_second"`
+	// DecodeTokensPerSecond is the phase-pure decode rate: 1000 divided by the mean
+	// inter-token latency in milliseconds across all requests; 0 when no positive ITL was observed.
+	DecodeTokensPerSecond float64 `json:"decode_tokens_per_second,omitempty"`
+	TeardownMilliseconds  float64 `json:"teardown_ms"`
+	TeardownComplete      bool    `json:"teardown_complete"`
 }
 
 // Seal binds the receipt with an immutable SHA-256 digest over its contents.
@@ -377,7 +383,26 @@ func runQwenPagedSwapArm(m *model.Model, prompts [][]int, pressure bool, maxBloc
 	if arm.AggregateTokensPerSecond <= 0 {
 		arm.AggregateTokensPerSecond = 1.0
 	}
+	arm.DecodeTokensPerSecond = qwenPagedSwapDecodeTokensPerSecond(itl)
 	return arm, nil
+}
+
+// qwenPagedSwapDecodeTokensPerSecond returns the phase-pure decode rate:
+// 1000 divided by the mean inter-token latency in milliseconds. It returns 0
+// when no positive ITL was observed.
+func qwenPagedSwapDecodeTokensPerSecond(itl []float64) float64 {
+	if len(itl) == 0 {
+		return 0
+	}
+	var sum float64
+	for _, v := range itl {
+		sum += v
+	}
+	mean := sum / float64(len(itl))
+	if mean <= 0 {
+		return 0
+	}
+	return 1000 / mean
 }
 
 func computeQwenStateDigest(m *model.Model, prompt, gen []int) string {

@@ -2,6 +2,7 @@ package devcmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -72,6 +73,8 @@ func SetDefaultBuildSemaphoreDir(dir string) {
 type BuildSemaphore struct {
 	dir   string
 	limit int
+	// label names this holder in the shared wait ledger (waits.jsonl).
+	label string
 }
 
 // NewBuildSemaphore creates a semaphore with the specified base directory and limit.
@@ -89,6 +92,7 @@ func NewBuildSemaphore(dir string, limit int) *BuildSemaphore {
 	return &BuildSemaphore{
 		dir:   dir,
 		limit: limit,
+		label: "fak buildsem",
 	}
 }
 
@@ -110,12 +114,70 @@ func (s *BuildSemaphore) slotPath(i int) string {
 	return filepath.Join(s.dir, fmt.Sprintf("slot-%d.lock", i))
 }
 
+// buildSemLedgerName is the shared host build-lease wait ledger. These
+// ticket-less rows are counted by the private fold's legacy path, so public
+// holders become visible to true utilization without a reader change.
+const buildSemLedgerName = "waits.jsonl"
+
+// appendBuildSemLedger is best effort: the ledger is observability, never
+// admission. A failure here must not fail the build.
+func appendBuildSemLedger(dir string, row map[string]any) {
+	if dir == "" {
+		return
+	}
+	row["at"] = time.Now().UTC().Format(time.RFC3339Nano)
+	b, err := json.Marshal(row)
+	if err != nil {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(dir, buildSemLedgerName), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o666)
+	if err != nil {
+		return
+	}
+	_, _ = f.Write(append(b, '\n'))
+	_ = f.Close()
+}
+
+// buildSemToolKey folds a label to its tool verb for per-tool folds, mirroring
+// the private buildlease.ToolKey shape.
+func buildSemToolKey(label string) string {
+	var out []string
+	for _, tok := range strings.Fields(label) {
+		if strings.HasPrefix(tok, "-") || strings.ContainsAny(tok, `/\:`) {
+			break
+		}
+		out = append(out, tok)
+		if len(out) == 3 {
+			break
+		}
+	}
+	if len(out) == 0 {
+		return "?"
+	}
+	return strings.Join(out, " ")
+}
+
+func (s *BuildSemaphore) appendLedger(row map[string]any) {
+	row["label"] = s.label
+	row["tool"] = buildSemToolKey(s.label)
+	row["pid"] = os.Getpid()
+	row["slots"] = s.limit
+	appendBuildSemLedger(s.dir, row)
+}
+
 // Acquire attempts to acquire a build slot within timeout.
 // If a slot is acquired, returns a cleanup release function and nil error.
 // If slots are busy, waits/queues up to timeout before failing closed.
+// Every outcome appends a best-effort row to the shared wait ledger so the
+// host pool's occupancy accounting sees public holders too.
 func (s *BuildSemaphore) Acquire(ctx context.Context, timeout time.Duration) (func(), error) {
-	if err := ctx.Err(); err != nil {
+	start := time.Now()
+	refused := func(err error) (func(), error) {
+		s.appendLedger(map[string]any{"outcome": "timeout", "wait_ms": time.Since(start).Milliseconds()})
 		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return refused(err)
 	}
 
 	fi, err := os.Stat(s.dir)
@@ -133,13 +195,16 @@ func (s *BuildSemaphore) Acquire(ctx context.Context, timeout time.Duration) (fu
 				continue
 			}
 			if err := flock.TryLock(f); err == nil {
+				acquiredAt := time.Now()
 				_ = f.Truncate(0)
 				_, _ = f.Seek(0, io.SeekStart)
-				_, _ = fmt.Fprintf(f, "pid=%d slot=%d acquired=%s\n", os.Getpid(), i, time.Now().UTC().Format(time.RFC3339Nano))
+				_, _ = fmt.Fprintf(f, "pid=%d slot=%d acquired=%s\n", os.Getpid(), i, acquiredAt.UTC().Format(time.RFC3339Nano))
+				s.appendLedger(map[string]any{"outcome": "acquired", "wait_ms": acquiredAt.Sub(start).Milliseconds()})
 
 				var once sync.Once
 				release := func() {
 					once.Do(func() {
+						s.appendLedger(map[string]any{"outcome": "released", "held_ms": time.Since(acquiredAt).Milliseconds()})
 						_ = flock.Unlock(f)
 						_ = f.Close()
 					})
@@ -158,7 +223,7 @@ func (s *BuildSemaphore) Acquire(ctx context.Context, timeout time.Duration) (fu
 	}
 
 	if timeout == 0 {
-		return nil, ErrBuildSlotTimeout
+		return refused(ErrBuildSlotTimeout)
 	}
 
 	var deadline time.Time
@@ -185,17 +250,17 @@ func (s *BuildSemaphore) Acquire(ctx context.Context, timeout time.Duration) (fu
 
 	for {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return refused(err)
 		}
 		if hasDeadline && time.Now().After(deadline) {
-			return nil, ErrBuildSlotTimeout
+			return refused(ErrBuildSlotTimeout)
 		}
 
 		sleepDur := pollInterval
 		if hasDeadline {
 			rem := time.Until(deadline)
 			if rem <= 0 {
-				return nil, ErrBuildSlotTimeout
+				return refused(ErrBuildSlotTimeout)
 			}
 			if rem < sleepDur {
 				sleepDur = rem
@@ -205,7 +270,7 @@ func (s *BuildSemaphore) Acquire(ctx context.Context, timeout time.Duration) (fu
 		timer.Reset(sleepDur)
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return refused(ctx.Err())
 		case <-timer.C:
 		}
 
@@ -233,5 +298,20 @@ func AcquireBuildSlot(ctx context.Context, timeout time.Duration) (release func(
 	buildSemMu.RUnlock()
 
 	sem := NewBuildSemaphore(dir, limit)
+	return sem.Acquire(ctx, timeout)
+}
+
+// AcquireBuildSlotLabel is AcquireBuildSlot with a caller-named label recorded
+// in the shared wait ledger (e.g. "fak buildcheck").
+func AcquireBuildSlotLabel(ctx context.Context, timeout time.Duration, label string) (release func(), err error) {
+	buildSemMu.RLock()
+	dir := buildSemBaseDir()
+	limit := defaultBuildConcurrency
+	buildSemMu.RUnlock()
+
+	sem := NewBuildSemaphore(dir, limit)
+	if strings.TrimSpace(label) != "" {
+		sem.label = label
+	}
 	return sem.Acquire(ctx, timeout)
 }

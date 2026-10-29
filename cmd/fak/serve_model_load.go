@@ -96,6 +96,9 @@ func withServeGGUFMemoryProfile(p *gateway.ModelLoadProfile, plan compute.Memory
 			p.MemoryHeadroomRatio = serveGGUFDeviceHeadroom
 		}
 	}
+	// Two-phase fit confirm (T03): price the committed plan against the post-load
+	// capacity reading, attach the record, and emit the one startup log line.
+	attachServeFitConfirm(p, plan, be, p.Source)
 	return p
 }
 

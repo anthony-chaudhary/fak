@@ -2,6 +2,8 @@ package computebuild
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"os"
@@ -49,15 +51,34 @@ func TestCUDANativeReceiptSeparatesBuildWorkFromHardwareEvidence(t *testing.T) {
 	if err := os.WriteFile(archive, []byte("archive"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(main, []byte(`{"phases":[{"name":"compile_kernels","elapsed_ms":2},{"name":"archive","elapsed_ms":3},{"name":"build_or_test","elapsed_ms":4}]}`), 0600); err != nil {
+	mainJSON := `{"phases":[{"name":"compile_kernels","elapsed_ms":2},{"name":"archive","elapsed_ms":3},{"name":"build_or_test","elapsed_ms":4}]}`
+	if err := os.WriteFile(main, []byte(mainJSON), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := finishCUDANativeArchiveReceipt(root, main, nil); err != nil {
 		t.Fatal(err)
 	}
 	got = read()
-	if len(got.ArchiveSHA256) != 64 || len(got.ComputeReceiptSHA256) != 64 || len(got.ComputeReceiptCanonicalSHA256) != 64 || got.NativeElapsedMS != 5 {
+	digest := func(data string) string {
+		sum := sha256.Sum256([]byte(data))
+		return hex.EncodeToString(sum[:])
+	}
+	// The canonical object keys are sorted, unlike the source receipt bytes.
+	canonicalJSON := `{"phases":[{"elapsed_ms":2,"name":"compile_kernels"},{"elapsed_ms":3,"name":"archive"},{"elapsed_ms":4,"name":"build_or_test"}]}`
+	if got.ArchiveSHA256 != digest("archive") || got.ComputeReceiptSHA256 != digest(mainJSON) || got.ComputeReceiptCanonicalSHA256 != digest(canonicalJSON) || got.NativeElapsedMS != 5 {
 		t.Fatalf("unbound archive/main receipt: %+v", got)
+	}
+	// Formatting changes raw identity, but must preserve semantic identity.
+	formattedJSON := "\n " + canonicalJSON + "\n"
+	if err := os.WriteFile(main, []byte(formattedJSON), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := finishCUDANativeArchiveReceipt(root, main, nil); err != nil {
+		t.Fatal(err)
+	}
+	reformatted := read()
+	if reformatted.ComputeReceiptSHA256 != digest(formattedJSON) || reformatted.ComputeReceiptSHA256 == got.ComputeReceiptSHA256 || reformatted.ComputeReceiptCanonicalSHA256 != got.ComputeReceiptCanonicalSHA256 || reformatted.ArchiveSHA256 != got.ArchiveSHA256 {
+		t.Fatalf("receipt formatting changed semantic/archive identity or retained raw identity: %+v", reformatted)
 	}
 	if err := os.Remove(main); err != nil {
 		t.Fatal(err)

@@ -181,7 +181,8 @@ static int fcuda_q4k_fp8lt_matmul(const uint8_t *w, const float *x, float *y,
         status = FCUDA_Q4K_FP8LT_REFUSED;
         goto cleanup;
     }
-    Q4K_FP8LT_CUDA(cudaMemsetAsync(scales, 0, 2 * sizeof(float), g_stream));
+    FCUDA_TS("fill", dim3(0, 0), ce = cudaMemsetAsync(scales, 0, 2 * sizeof(float), g_stream));
+    Q4K_FP8LT_CUDA(ce);
     FCUDA_TS("q4k_fp8lt_weight_amax", grid(wn), amax<true><<<grid(wn), 256, 0, g_stream>>>(w, wn, scales));
     Q4K_FP8LT_CUDA(cudaPeekAtLastError());
     FCUDA_TS("q4k_fp8lt_activation_amax", grid(xn), amax<false><<<grid(xn), 256, 0, g_stream>>>(x, xn, scales + 1));
@@ -197,8 +198,10 @@ static int fcuda_q4k_fp8lt_matmul(const uint8_t *w, const float *x, float *y,
         &heuristic.algo, g_blas_workspace, workspace_bytes, g_stream));
     Q4K_FP8LT_CALL(cs);
     Q4K_FP8LT_CUDA(cudaPeekAtLastError());
-    if (trim_bytes)
-        Q4K_FP8LT_CUDA(cudaMemcpyAsync(y, result, (size_t)rows * out * sizeof(float), cudaMemcpyDeviceToDevice, g_stream));
+    if (trim_bytes) {
+        FCUDA_TS("d2d_copy", dim3(0, 0), ce = cudaMemcpyAsync(y, result, (size_t)rows * out * sizeof(float), cudaMemcpyDeviceToDevice, g_stream));
+        Q4K_FP8LT_CUDA(ce);
+    }
     ++g_q4k_fp8lt_launches; // Enqueue witness only; callers must synchronize/read for numerical evidence.
 
 cleanup:

@@ -48,6 +48,7 @@ func withRunBuildSeams(t *testing.T) {
 				GOCache: "/cache", CGOEnabled: "0", GoToolchain: "auto", GoFlags: "",
 			},
 			PackageCount: 699,
+			GitDirectory: filepath.Join(os.TempDir(), "fak-build-fixture.git"),
 		}, nil
 	}
 	buildInspectArtifact = func(path string) (buildArtifact, error) {
@@ -55,7 +56,7 @@ func withRunBuildSeams(t *testing.T) {
 	}
 	buildPrepareOutput = func(string) error { return nil }
 	buildSmoke = func(path string) buildSmokeResult {
-		return buildSmokeResult{Command: []string{path, "version", "--json"}, Outcome: "success", ExitCode: 0, Output: `{"version":"test"}`}
+		return buildSmokeResult{Command: []string{path, "version", "--json"}, Outcome: "success", ExitCode: 0, Output: `{"app_version":"test","go":"go1.26.10","os":"test","arch":"arch","commit":"0123456789abcdef","stamped":true}`}
 	}
 }
 
@@ -88,6 +89,11 @@ func TestRunBuildSuccessRendersOrderedTimingsAndReceipt(t *testing.T) {
 	}
 	if gotCommand.Environment["PGO"] != "off" || gotExecutionEnvironment["PGO"] != "off" {
 		t.Fatalf("default PGO was not recorded and executed as off: command=%q execution=%q", gotCommand.Environment["PGO"], gotExecutionEnvironment["PGO"])
+	}
+	for _, key := range []string{"GIT_DIR", "GIT_WORK_TREE"} {
+		if gotCommand.Environment[key] == "" || gotExecutionEnvironment[key] != gotCommand.Environment[key] {
+			t.Fatalf("Git context %s was not recorded and executed identically", key)
+		}
 	}
 	if gotCommand.Output != filepath.Join(repoRoot(), defaultBuildOutput()) || filepath.Dir(gotCommand.Output) != filepath.Join(repoRoot(), ".fak", "bin") {
 		t.Fatalf("output = %q, want non-self repository artifact path", gotCommand.Output)
@@ -437,6 +443,132 @@ func TestRunBuildRejectsPGOOutputOrReceiptCollisionBeforeMutation(t *testing.T) 
 	}
 }
 
+// fak-test:runtime fast est=50ms
+func TestRunBuildRuntimeSmokeFailureWritesReceipt(t *testing.T) {
+	withRunBuildSeams(t)
+	buildExecute = func(buildExecution, io.Writer) (int, error) { return 0, nil }
+	buildSmoke = func(path string) buildSmokeResult {
+		return buildSmokeResult{
+			Command: []string{path, "version", "--json"}, Output: `{"app_version":"test"}`,
+			Outcome: "failed", ExitCode: 9, Error: "runtime-capabilities refused", FailureCode: buildSmokeFailureProcess,
+			Runtime: &buildSmokeResult{Command: []string{path, "runtime-capabilities"},
+				Outcome: "failed", ExitCode: 9, Error: "runtime-capabilities refused", FailureCode: buildSmokeFailureProcess},
+		}
+	}
+	var persisted buildReceipt
+	buildWriteReceipt = func(_ string, receipt buildReceipt) error {
+		persisted = receipt
+		return nil
+	}
+	var stdout, stderr bytes.Buffer
+	if code := RunBuild(&stdout, &stderr, []string{"--json"}); code != 9 {
+		t.Fatalf("RunBuild exit=%d, want runtime child exit 9", code)
+	}
+	var emitted buildReceipt
+	if err := json.Unmarshal(stdout.Bytes(), &emitted); err != nil {
+		t.Fatal(err)
+	}
+	for _, receipt := range []buildReceipt{persisted, emitted} {
+		if receipt.Outcome != "failed" || receipt.ExitCode != 9 || receipt.Smoke == nil ||
+			receipt.Smoke.Runtime == nil || receipt.Smoke.Runtime.FailureCode != buildSmokeFailureProcess ||
+			receipt.Smoke.Output != `{"app_version":"test"}` {
+			t.Fatal("runtime failure receipt lost exit status, failure code, or version output")
+		}
+		if command := strings.Join(receipt.Smoke.Runtime.Command, " "); !strings.Contains(receipt.Error, command) {
+			t.Fatalf("remediation omitted the failing command %q", command)
+		}
+	}
+}
+
+// fak-test:runtime fast est=100ms
+func TestRunBuildRejectsUnboundArtifactSource(t *testing.T) {
+	for _, identity := range []string{
+		`{"commit":"another-commit","stamped":true}`,
+		`{"stamped":false}`,
+		`{"commit":"0123456789abcdef","stamped":false}`,
+	} {
+		t.Run(identity, func(t *testing.T) {
+			withRunBuildSeams(t)
+			buildExecute = func(buildExecution, io.Writer) (int, error) { return 0, nil }
+			buildSmoke = func(path string) buildSmokeResult {
+				return buildSmokeResult{Command: []string{path, "version", "--json"},
+					Output: identity, Outcome: "success", ExitCode: 0}
+			}
+			var persisted buildReceipt
+			buildWriteReceipt = func(_ string, receipt buildReceipt) error {
+				persisted = receipt
+				return nil
+			}
+			var stdout, stderr bytes.Buffer
+			if code := RunBuild(&stdout, &stderr, []string{"--json"}); code != 1 {
+				t.Fatalf("RunBuild exit=%d, want source mismatch exit 1", code)
+			}
+			var emitted buildReceipt
+			if err := json.Unmarshal(stdout.Bytes(), &emitted); err != nil {
+				t.Fatal(err)
+			}
+			for _, receipt := range []buildReceipt{persisted, emitted} {
+				if receipt.Outcome != "failed" || receipt.ExitCode != 1 || receipt.Smoke == nil ||
+					receipt.Smoke.FailureCode != buildSmokeFailureSource || receipt.Smoke.Output != identity ||
+					receipt.Source.Commit != "0123456789abcdef" {
+					t.Fatal("unbound artifact source was accepted or its evidence was lost")
+				}
+			}
+		})
+	}
+}
+
+// fak-test:runtime medium est=2s
+func TestRunBuildNestedWorktreeGitContext(t *testing.T) {
+	root := t.TempDir()
+	runGitTest(t, root, "init")
+	marker := "source.txt"
+	if err := os.WriteFile(filepath.Join(root, marker), []byte("parent"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, root, "add", marker)
+	commitArgs := []string{"-c", "user.name=Build Fixture", "-c", "user.email=build@example.invalid",
+		"-c", "commit.gpgsign=false", "-c", "core.hooksPath=" + t.TempDir(), "commit", "-m", "fixture"}
+	runGitTest(t, root, commitArgs...)
+	child := filepath.Join(root, ".worktrees", "child")
+	runGitTest(t, root, "worktree", "add", "--detach", child, "HEAD")
+	if err := os.WriteFile(filepath.Join(child, marker), []byte("child"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, child, "add", marker)
+	runGitTest(t, child, commitArgs...)
+	childCommit := runGitTest(t, child, "rev-parse", "HEAD")
+	if info, err := os.Stat(filepath.Join(child, ".git")); err != nil || !info.Mode().IsRegular() {
+		t.Fatal("fixture did not create a managed Git file")
+	}
+	for key, value := range map[string]string{
+		"GIT_DIR": filepath.Join(root, ".git"), "GIT_WORK_TREE": root,
+		"GIT_COMMON_DIR": filepath.Join(root, ".git"), "GIT_INDEX_FILE": filepath.Join(root, ".git", "index"),
+	} {
+		t.Setenv(key, value)
+	}
+	observed, err := buildCommandOutput(child, "git", "rev-parse", "HEAD")
+	if err != nil || strings.TrimSpace(string(observed)) != childCommit {
+		t.Fatalf("source query followed ambient Git context: commit=%s error=%v", observed, err)
+	}
+	gitDirectory, err := buildCommandOutput(child, "git", "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	code, err := executeCanonicalBuild(buildExecution{
+		command:     buildCommand{Argv: []string{"git", "rev-parse", "HEAD"}, Directory: root},
+		environment: map[string]string{"GIT_DIR": strings.TrimSpace(string(gitDirectory)), "GIT_WORK_TREE": child},
+	}, &output)
+	if err != nil || code != 0 || strings.TrimSpace(output.String()) != childCommit {
+		t.Fatalf("canonical child did not retain owning worktree: exit=%d commit=%s error=%v", code, output.String(), err)
+	}
+	filtered := buildGitEnv([]string{"Git_Dir=wrong", "GIT_NAMESPACE=wrong", "FAK_BUILD_FIXTURE=kept"})
+	if !reflect.DeepEqual(filtered, []string{"FAK_BUILD_FIXTURE=kept"}) {
+		t.Fatal("mixed-case Git routing survived environment isolation")
+	}
+}
+
 func TestRunBuildFailureWritesPartialTerminalReceipt(t *testing.T) {
 	withRunBuildSeams(t)
 	buildExecute = func(buildExecution, io.Writer) (int, error) { return 7, nil }
@@ -600,6 +732,8 @@ func TestRunBuildProvenanceHashesCommittedTreeAndExactDeltaOnly(t *testing.T) {
 		call := name + " " + strings.Join(args, " ")
 		calls = append(calls, call)
 		switch call {
+		case "git rev-parse --absolute-git-dir":
+			return []byte(filepath.Join(root, ".git") + "\n"), nil
 		case "git rev-parse HEAD":
 			return []byte("commit123\n"), nil
 		case "git rev-parse HEAD^{tree}":

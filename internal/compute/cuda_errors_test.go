@@ -223,3 +223,41 @@ func TestRunGuardedCUDA(t *testing.T) {
 		t.Fatalf("op = %s, want GraphEndLaunch", opErr.Op)
 	}
 }
+
+// A typed-nil panic is not a healthy return or a usable CUDA error object. The
+// recovery boundary may add operation context, but must not panic dereferencing it.
+// fak-test:runtime fast est=10ms lane=default
+func TestCUDATypedNilErrors(t *testing.T) {
+	var op *CUDAOpError
+	var launch *CUDALaunchError
+	for _, tc := range []struct {
+		name  string
+		value error
+	}{
+		{"op", op},
+		{"wrapped-op", fmt.Errorf("wrapped: %w", op)},
+		{"launch", launch},
+		{"wrapped-launch", fmt.Errorf("wrapped: %w", launch)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got, ok := AsCUDAError(tc.value); ok || got != nil {
+				t.Fatalf("typed nil classified as a usable CUDA error: (%v, %v)", got, ok)
+			}
+			if got, ok := ConvertCUDAPanic(tc.value, "", ""); ok || got != nil {
+				t.Fatalf("context-free typed nil acquired a classification: (%v, %v)", got, ok)
+			}
+			got := RunGuardedCUDA("Read", "read-d2h", func() { panic(tc.value) })
+			var typed *CUDAOpError
+			if got == nil || !errors.As(got, &typed) || typed == nil {
+				t.Fatalf("typed-nil panic did not become a contextual failure: %T (%v)", got, got)
+			}
+			if typed.Op != "Read" || typed.Site != "read-d2h" || typed.Code != 0 {
+				t.Fatalf("context lost or native status invented: %+v", typed)
+			}
+		})
+	}
+	var extracted *CUDAOpError
+	if errors.As(fmt.Errorf("wrapped: %w", launch), &extracted) || extracted != nil {
+		t.Fatalf("nil launch error exposed a CUDA operation: %v", extracted)
+	}
+}

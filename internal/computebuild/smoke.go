@@ -173,6 +173,12 @@ func (t *receiptTracker) fail(err error, exitCode int) {
 	// These fields are admissible only after every build and provenance phase
 	// succeeds. A compiler crash must not leave a partially authoritative receipt.
 	t.receipt.Artifact = nil
+	// A failed build carries no observed CUDA coverage: clear the block and fall
+	// back to the base schema so the receipt never claims an unobserved artifact.
+	t.receipt.CUDA = nil
+	if t.receipt.Schema == CUDABuildReceiptSchema {
+		t.receipt.Schema = ComputeBuildReceiptSchema
+	}
 	t.receipt.Vulkan = nil
 	t.receipt.VulkanRegistry = nil
 	t.receipt.VulkanNativeArchive = nil

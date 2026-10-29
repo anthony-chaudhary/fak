@@ -454,25 +454,34 @@ Features:
 
 ## 5. Onboarding
 
-### One-Time Machine Setup Script
+### One-Time Machine Setup (native Go verb)
+
+Onboarding is the native Go verb `fak bench local onboard` (`internal/localbench`) —
+there is no Python onboarding script.
 
 ```bash
 # On the new machine, from the repo root:
-python tools/bench_onboard.py --interactive
-
-# Or non-interactive:
-python tools/bench_onboard.py \
+fak bench local onboard \
   --machine-id new-node-01 \
-  --tags "gpu,a100,linux"
+  --gpu-model "NVIDIA A100-SXM4-40GB" \
+  --vram-gib 40 \
+  --arch sm_80
 ```
 
-The script:
-1. Detects hardware (CPU, GPU, RAM, storage)
-2. Detects OS/runtime versions
-3. Generates `specs.json`
-4. Runs a smoke benchmark
-5. Validates the harness works
-6. Updates the catalog
+Flags: `--machine-id` (required, `^[a-z0-9-]+$`), `--gpu-model`, `--vram-gib`,
+`--arch` (defaults to `sm_120` when `--gpu-model` matches an RTX 5090), and `--json`
+(machine-readable summary with both output paths).
+
+The verb:
+1. Validates the declared inputs (slug shape, VRAM ≥ 0, `sm_NNN` arch form)
+2. Detects host facts (CPU model/cores, RAM, OS, Go version)
+3. Writes `experiments/benchmark/machines/<machine-id>/specs.json`
+   (`benchmark/machine-specs.v1`; `registered_at` is preserved on re-runs)
+4. Writes a sealed smoke receipt into `onboard-receipts/` using the receipt v1
+   wrapper — each run version-stamps a NEW receipt file, so re-runs append history
+   instead of corrupting prior receipts; check one with
+   `fak bench local verify <receipt>`
+5. Catalog updates stay a separate step: `python tools/bench_catalog.py update`
 
 ### Machine Specs Template
 
@@ -546,7 +555,7 @@ Before a machine is considered "production" for benchmarking:
 
 ### Phase 2: Machine Migration (Week 2)
 
-1. Run `bench_onboard.py` on existing nodes
+1. Run `fak bench local onboard` on existing nodes
 2. Convert existing `fleet-nodes/` results to new format
 3. Import historical runs into catalog
 4. Validate conversion with comparison tables
@@ -582,7 +591,7 @@ Existing paths remain valid:
 
 2. **Medium Priority**
    - Visualization (`tools/bench_chart.py`)
-   - Onboarding script (`tools/bench_onboard.py`)
+   - Onboarding verb (`fak bench local onboard`, native Go in `internal/localbench`)
    - Regression detection
 
 3. **Low Priority**
@@ -612,8 +621,8 @@ tools/
   ├── bench_catalog.py        # Catalog maintenance
   ├── bench_cli.py            # Main CLI (list, show, compare, table)
   ├── bench_chart.py          # Visualization generator
-  ├── bench_onboard.py        # New machine setup
   ├── bench_migrate.py        # Migrate existing data
+  # (new-machine setup is the native Go verb `fak bench local onboard`, not a script)
   └── schemas/
       ├── machine-specs.v1.json
       ├── run-manifest.v1.json

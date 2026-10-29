@@ -1889,3 +1889,59 @@ Associates a Qwen coalesced request with its prepared decode lane and an unknown
 Terminal no-replay sentinel for affected peer or unstarted work in an aborted selected Qwen cohort; the originating unknown panic is retained separately for cleanup-ordered propagation.
 
 **Distinct from:** The selected Qwen cohort's terminal no-replay marker, not retained request/lane state, the V4.1-specific abort marker, or permission to retry through scalar fallback.
+
+
+### PlanDeepSeekV41Placement
+
+Model V4.1 package function that admits exact official Flash-1017 metadata and computes a conservative single-GPU text weight/context/workspace placement with caller-bounded host cache and residual SSD demand.
+
+**Distinct from:** A pinned model-specific byte placement planner, not the generic classed MemoryPlan container or the Qwen3.8 MTP planner; it does not admit a model loader or establish measured hardware fit.
+
+
+### newBackendSessionChecked (checked HAL construction core)
+
+Model.newBackendSessionChecked is the shared private implementation of checked HAL session construction: execution-scope allocation, weight holding, KV/weight setup, and optional Qwen3.5-hybrid zero conv/recurrent state materialization, with panic-safe rollback on construction failure.
+
+**Distinct from:** Not NewBackendSessionChecked (public entry point that always materializes the eager zero state) nor NewBackendSessionCheckedDeferredState (deferred variant that skips it): this is the private core both wrappers call, parameterized by whether the eager zero-state upload happens at construction time.
+
+
+### NewBackendSessionCheckedDeferredState (deferred-state HAL construction)
+
+Model.NewBackendSessionCheckedDeferredState constructs a checked HAL model.Session without the eager Qwen3.5-hybrid zero conv/recurrent upload; the caller must install snapshot device state through PrefixSnapshot.Restore before forward, otherwise the first forward fails closed with the missing-Qwen35-GDN-backend-state refusal.
+
+**Distinct from:** Not NewBackendSessionChecked or newBackendSessionChecked (eager zero-state construction): the deferred variant skips initQwen35HALState at construction because the warm prefix-restore path immediately replaces it with the snapshot's own device state, so the eager per-linear-layer zero pair would be uploaded and freed unread (fak#13801).
+
+
+### ComputeCapability
+
+NVML-reported CUDA compute capability of a bound GPU row, encoded as major*10+minor (120 = sm_120).
+
+**Distinct from:** Observed per-device property on gpubinding rows, not an admission threshold: MinComputeCapability is the floor this value must meet; capability-floor is the policy side.
+
+
+### NewMultiTensorSlotPoolForDevice
+
+Constructor that sizes a MultiTensorSlotPool against a device's reported total VRAM via VRAMBudgetForDevice instead of the 24 GiB fallback.
+
+**Distinct from:** A pool constructor entrypoint, not a pool or a budget value: it derives the budget from device VRAM, unlike PoolUsableBytes which reports a fit-plan pool's usable bytes.
+
+
+### MemoryPool
+
+A declared physical memory allocation pool with an identity and usable capacity for model placement accounting.
+
+**Distinct from:** Capacity input shared by ranks, unlike PoolDemand which reports summed allocations against that capacity.
+
+
+### pool_capacity_unknown
+
+A model placement omission indicating that the usable capacity of a referenced physical memory pool was not supplied.
+
+**Distinct from:** An unknown input yields no capacity approval; it differs from a known pool capacity being exceeded and from the capacity value itself.
+
+
+### SupportUnsupported
+
+The placement planner value declaring that the requested model placement lacks runtime support in the caller supplied execution envelope.
+
+**Distinct from:** A caller declaration that prevents eligibility even when memory fits; it is neither a hardware qualification result nor a capacity overflow.

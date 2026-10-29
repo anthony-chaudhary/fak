@@ -1,0 +1,15 @@
+# /opt/cuda/bin/nvcc --version  (probed 2026-10-28T07:25Z on raider-fak)
+nvcc: NVIDIA (R) Cuda compiler driver
+Copyright (c) 2005-2026 NVIDIA Corporation
+Built on Tue_Sep_01_08:45:21_PDT_2026
+Cuda compilation tools, release 13.4, V13.4.92
+Build cuda_13.4.r13.4/compiler.38855100_0
+
+# cuBLAS (ls /opt/cuda/lib64/):
+libcublas.so
+libcublas.so.13
+libcublas.so.13.8.0.4
+libcublasLt.so
+
+# go version: go1.27.3-X:nodwarf5 linux/amd64
+# kernel: 7.2.11-arch1-1

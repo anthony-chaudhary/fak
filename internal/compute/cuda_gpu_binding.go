@@ -45,12 +45,94 @@ const (
 	GPUDriverLacksDeviceID GPUBindingVerdict = "GPU_DRIVER_LACKS_DEVICE_ID"
 	// GPUBoundNotCUDAVisible means bound to the started NVIDIA driver but absent from NVML.
 	GPUBoundNotCUDAVisible GPUBindingVerdict = "GPU_BOUND_NOT_CUDA_VISIBLE"
+	// GPUDriverBelowFloor means a row that would be GPU_READY whose observed
+	// driver branch is below the payload floor's minimum; the floor demotes it.
+	GPUDriverBelowFloor GPUBindingVerdict = "GPU_DRIVER_BELOW_FLOOR"
+	// GPUModuleFlavorProprietary means a row that would be GPU_READY whose loaded
+	// kernel module is the proprietary flavor while the payload floor requires the
+	// open module.
+	GPUModuleFlavorProprietary GPUBindingVerdict = "GPU_MODULE_FLAVOR_PROPRIETARY"
+	// GPUComputeCapInsufficient means a row that would be GPU_READY whose observed
+	// compute capability is below the payload floor's minimum.
+	GPUComputeCapInsufficient GPUBindingVerdict = "GPU_COMPUTE_CAP_INSUFFICIENT"
 	// GPUTunnelUnauthorized means an expected GPU is absent while a Thunderbolt/USB4
 	// device on the host is not authorized (Linux sysfs authorized=0, as boltctl shows).
 	GPUTunnelUnauthorized GPUBindingVerdict = "GPU_TUNNEL_UNAUTHORIZED"
 	// GPUBindingUnknown means a layer the verdict depends on was not observed.
 	GPUBindingUnknown GPUBindingVerdict = "unknown"
 )
+
+// Kernel-module flavors a floor can require.
+const (
+	DriverFlavorOpen        = "open"
+	DriverFlavorProprietary = "proprietary"
+)
+
+// GPUDriverFloor is the admission floor a payload places on a bound GPU row:
+// the minimum driver branch, the required kernel-module flavor and the minimum
+// CUDA compute capability. A zero floor admits every bound row; each dimension
+// that is not observed (unparseable version, empty flavor, zero capability) is
+// unknown and never counts as a violation. MinDriverVersion is the Linux nvidia
+// branch form read from /sys/module/nvidia/version ("615.71.09"); Windows PnP
+// driver versions use a different scheme and are not comparable against it,
+// so consumers must not floor Windows rows with this field.
+type GPUDriverFloor struct {
+	// MinDriverVersion is the minimum nvidia driver branch, major.minor.patch.
+	MinDriverVersion [3]int
+	// RequireOpenModule demands the open-source kernel-module build.
+	RequireOpenModule bool
+	// MinComputeCapability is the minimum CUDA compute capability encoded as
+	// major*10+minor (120 == 12.0).
+	MinComputeCapability int
+}
+
+// Active reports whether the floor gates any dimension.
+func (f GPUDriverFloor) Active() bool {
+	return f.MinDriverVersion != [3]int{} || f.RequireOpenModule || f.MinComputeCapability > 0
+}
+
+// BlackwellDriverFloor is the sm_120 (Blackwell) payload floor: the documented
+// pacman spec nvidia-open>=615.71.09 plus compute capability 12.0.
+var BlackwellDriverFloor = GPUDriverFloor{
+	MinDriverVersion:     [3]int{615, 71, 9},
+	RequireOpenModule:    true,
+	MinComputeCapability: 120,
+}
+
+// ParseDriverVersion splits a leading "major.minor.patch" from a driver version
+// string such as "615.71.09". ok is false when the first three dotted
+// components are not all decimal.
+func ParseDriverVersion(v string) (major, minor, patch int, ok bool) {
+	parts := strings.Split(strings.TrimSpace(v), ".")
+	if len(parts) < 3 {
+		return 0, 0, 0, false
+	}
+	vals := make([]int, 3)
+	for i, p := range parts[:3] {
+		n, err := strconv.Atoi(strings.TrimSpace(p))
+		if err != nil || n < 0 {
+			return 0, 0, 0, false
+		}
+		vals[i] = n
+	}
+	return vals[0], vals[1], vals[2], true
+}
+
+// DriverBranchBelow reports whether an observed version is strictly below min;
+// an unparseable version is unknown, not below.
+func DriverBranchBelow(version string, min [3]int) bool {
+	major, minor, patch, ok := ParseDriverVersion(version)
+	if !ok {
+		return false
+	}
+	got := [3]int{major, minor, patch}
+	for i := range got {
+		if got[i] != min[i] {
+			return got[i] < min[i]
+		}
+	}
+	return false
+}
 
 // GPULayerState is a tri-state observation of one layer; unknown is never
 // collapsed into yes or no.
@@ -72,36 +154,42 @@ const (
 // GPUBindingDevice is one NVIDIA PCI display device (or one expected but absent
 // GPU) with every layer observation that decides its verdict.
 type GPUBindingDevice struct {
-	PCIAddress       string            `json:"pci_address,omitempty"`
-	InstanceID       string            `json:"instance_id,omitempty"`
-	VendorID         string            `json:"vendor_id,omitempty"`
-	DeviceID         string            `json:"device_id,omitempty"`
-	SubsystemID      string            `json:"subsystem_id,omitempty"`
-	Name             string            `json:"name,omitempty"`
-	Enumerated       bool              `json:"enumerated"`
-	Driver           string            `json:"driver,omitempty"`
-	DriverModule     string            `json:"driver_module,omitempty"`
-	DriverProvider   string            `json:"driver_provider,omitempty"`
-	DriverVersion    string            `json:"driver_version,omitempty"`
-	VendorDriver     GPULayerState     `json:"vendor_driver"`
-	DriverStarted    GPULayerState     `json:"driver_started"`
-	ProblemCode      *int              `json:"problem_code,omitempty"`
-	ProblemName      string            `json:"problem_name,omitempty"`
-	IDListed         GPULayerState     `json:"device_id_listed"`
-	IDListedBy       []string          `json:"device_id_listed_by,omitempty"`
-	IDCheckedIn      []string          `json:"device_id_checked_in,omitempty"`
-	CUDAVisible      GPULayerState     `json:"cuda_visible"`
-	CUDAIndex        *int              `json:"cuda_index,omitempty"`
-	CUDAUUID         string            `json:"cuda_uuid,omitempty"`
-	TunnelAuthorized GPULayerState     `json:"tunnel_authorized,omitempty"`
-	Tunnel           string            `json:"tunnel,omitempty"`
-	ParentChain      []GPUPnPHop       `json:"parent_chain,omitempty"`
-	RootPort         string            `json:"root_port,omitempty"`
-	USB4HostRouter   string            `json:"usb4_host_router,omitempty"`
-	USB4RouterBasis  string            `json:"usb4_router_basis,omitempty"`
-	Source           string            `json:"source,omitempty"`
-	Verdict          GPUBindingVerdict `json:"verdict"`
-	UnknownFields    []string          `json:"unknown_fields,omitempty"`
+	PCIAddress     string `json:"pci_address,omitempty"`
+	InstanceID     string `json:"instance_id,omitempty"`
+	VendorID       string `json:"vendor_id,omitempty"`
+	DeviceID       string `json:"device_id,omitempty"`
+	SubsystemID    string `json:"subsystem_id,omitempty"`
+	Name           string `json:"name,omitempty"`
+	Enumerated     bool   `json:"enumerated"`
+	Driver         string `json:"driver,omitempty"`
+	DriverModule   string `json:"driver_module,omitempty"`
+	DriverProvider string `json:"driver_provider,omitempty"`
+	DriverVersion  string `json:"driver_version,omitempty"`
+	// DriverFlavor is the loaded kernel-module build (DriverFlavorOpen or
+	// DriverFlavorProprietary); empty is unobserved.
+	DriverFlavor string `json:"driver_flavor,omitempty"`
+	// ComputeCapability is the CUDA compute capability NVML reported, encoded as
+	// major*10+minor (120 == 12.0); 0 is unobserved.
+	ComputeCapability int               `json:"compute_capability,omitempty"`
+	VendorDriver      GPULayerState     `json:"vendor_driver"`
+	DriverStarted     GPULayerState     `json:"driver_started"`
+	ProblemCode       *int              `json:"problem_code,omitempty"`
+	ProblemName       string            `json:"problem_name,omitempty"`
+	IDListed          GPULayerState     `json:"device_id_listed"`
+	IDListedBy        []string          `json:"device_id_listed_by,omitempty"`
+	IDCheckedIn       []string          `json:"device_id_checked_in,omitempty"`
+	CUDAVisible       GPULayerState     `json:"cuda_visible"`
+	CUDAIndex         *int              `json:"cuda_index,omitempty"`
+	CUDAUUID          string            `json:"cuda_uuid,omitempty"`
+	TunnelAuthorized  GPULayerState     `json:"tunnel_authorized,omitempty"`
+	Tunnel            string            `json:"tunnel,omitempty"`
+	ParentChain       []GPUPnPHop       `json:"parent_chain,omitempty"`
+	RootPort          string            `json:"root_port,omitempty"`
+	USB4HostRouter    string            `json:"usb4_host_router,omitempty"`
+	USB4RouterBasis   string            `json:"usb4_router_basis,omitempty"`
+	Source            string            `json:"source,omitempty"`
+	Verdict           GPUBindingVerdict `json:"verdict"`
+	UnknownFields     []string          `json:"unknown_fields,omitempty"`
 
 	// hardwareIDs are the upper-cased PnP hardware/compatible IDs that carry a
 	// device ID; an INF entry equal to one of them lists this device.
@@ -116,6 +204,9 @@ type GPUCUDADevice struct {
 	BusID string `json:"pci_bus_id"`
 	UUID  string `json:"uuid,omitempty"`
 	Name  string `json:"name,omitempty"`
+	// ComputeCapability is the compute_cap column, encoded as major*10+minor
+	// (120 == 12.0); 0 when the column was absent or unparseable.
+	ComputeCapability int `json:"compute_capability,omitempty"`
 }
 
 // GPUCUDAView is the NVML layer: State is yes when nvidia-smi listed devices
@@ -160,6 +251,7 @@ type GPUBindingInputs struct {
 	EnumerationIncomplete bool
 	USB4HostRouters       []GPUUSB4HostRouter
 	Package               *GPUDriverPackage
+	Floor                 GPUDriverFloor
 }
 
 // GPUBindingOptions tunes DiagnoseGPUBinding; zero values select host defaults.
@@ -179,6 +271,9 @@ type GPUBindingOptions struct {
 	// names the package INF that lists each present GPU and the pnputil plan
 	// (never run) that would bind them. Windows only.
 	PackageINFDir string
+	// Floor demotes rows that would read GPU_READY when they violate the
+	// payload's driver-branch / module-flavor / compute-capability floor.
+	Floor GPUDriverFloor
 
 	pnpQuery func(ctx context.Context) (string, error)
 	smiQuery func(ctx context.Context) (gpuQueryOutput, error)
@@ -202,6 +297,30 @@ const (
 
 // ClassifyGPUBinding folds one device's layer observations into its verdict.
 func ClassifyGPUBinding(dev GPUBindingDevice) GPUBindingVerdict {
+	return classifyGPUBindingBase(dev)
+}
+
+// ClassifyGPUBindingWithFloor applies the payload floor on top of the base
+// verdict: only a row that would read GPU_READY is demoted, and only on an
+// observed violation. Violation priority is driver branch, then module flavor,
+// then compute capability.
+func ClassifyGPUBindingWithFloor(dev GPUBindingDevice, floor GPUDriverFloor) GPUBindingVerdict {
+	v := classifyGPUBindingBase(dev)
+	if v != GPUReady || !floor.Active() {
+		return v
+	}
+	switch {
+	case DriverBranchBelow(dev.DriverVersion, floor.MinDriverVersion):
+		return GPUDriverBelowFloor
+	case floor.RequireOpenModule && dev.DriverFlavor == DriverFlavorProprietary:
+		return GPUModuleFlavorProprietary
+	case dev.ComputeCapability > 0 && dev.ComputeCapability < floor.MinComputeCapability:
+		return GPUComputeCapInsufficient
+	}
+	return GPUReady
+}
+
+func classifyGPUBindingBase(dev GPUBindingDevice) GPUBindingVerdict {
 	if !dev.Enumerated {
 		if dev.TunnelAuthorized == GPULayerNo {
 			return GPUTunnelUnauthorized
@@ -252,7 +371,7 @@ func BuildGPUBindingReport(in GPUBindingInputs) GPUBindingReport {
 	}
 	for _, dev := range in.Devices {
 		dev.Enumerated = true
-		dev.CUDAVisible, dev.CUDAIndex, dev.CUDAUUID = matchCUDAView(dev.PCIAddress, in.CUDA)
+		dev.CUDAVisible, dev.CUDAIndex, dev.CUDAUUID, dev.ComputeCapability = matchCUDAView(dev.PCIAddress, in.CUDA)
 		if dev.CUDAVisible == GPULayerUnknown {
 			dev.UnknownFields = appendUnique(dev.UnknownFields, "cuda_visible")
 		}
@@ -279,7 +398,7 @@ func BuildGPUBindingReport(in GPUBindingInputs) GPUBindingReport {
 	}
 	rep.Ready = len(rep.Devices) > 0 && enumerated >= in.ExpectGPUs
 	for i := range rep.Devices {
-		v := ClassifyGPUBinding(rep.Devices[i])
+		v := ClassifyGPUBindingWithFloor(rep.Devices[i], in.Floor)
 		rep.Devices[i].Verdict = v
 		rep.Verdicts[v]++
 		if v != GPUReady {
@@ -302,24 +421,24 @@ func BuildGPUBindingReport(in GPUBindingInputs) GPUBindingReport {
 	return rep
 }
 
-func matchCUDAView(addr string, cuda GPUCUDAView) (GPULayerState, *int, string) {
+func matchCUDAView(addr string, cuda GPUCUDAView) (GPULayerState, *int, string, int) {
 	switch cuda.State {
 	case GPULayerNo:
-		return GPULayerNo, nil, ""
+		return GPULayerNo, nil, "", 0
 	case GPULayerYes:
 	default:
-		return GPULayerUnknown, nil, ""
+		return GPULayerUnknown, nil, "", 0
 	}
 	if addr == "" {
-		return GPULayerUnknown, nil, ""
+		return GPULayerUnknown, nil, "", 0
 	}
 	for _, c := range cuda.Devices {
 		if samePCIDevice(addr, c.BusID) {
 			idx := c.Index
-			return GPULayerYes, &idx, c.UUID
+			return GPULayerYes, &idx, c.UUID, c.ComputeCapability
 		}
 	}
-	return GPULayerNo, nil, ""
+	return GPULayerNo, nil, "", 0
 }
 
 // pciBusKey splits a PCI address into its domain (leading zeros trimmed, "" when
@@ -372,15 +491,34 @@ func ParseNvidiaSMIBusIDs(out string) (devs []GPUCUDADevice, unparsed []string) 
 		}
 		d := GPUCUDADevice{Index: idx, BusID: strings.TrimSpace(f[1]), UUID: strings.TrimSpace(f[2])}
 		if len(f) > 3 {
-			d.Name = strings.TrimSpace(strings.Join(f[3:], ","))
+			d.Name = strings.TrimSpace(f[3])
+		}
+		if len(f) > 4 {
+			d.ComputeCapability = ParseComputeCapability(f[4])
 		}
 		devs = append(devs, d)
 	}
 	return devs, unparsed
 }
 
-// nvidiaSMIBindingArgs is the NVML query the doctor runs.
-var nvidiaSMIBindingArgs = []string{"--query-gpu=index,pci.bus_id,uuid,name", "--format=csv,noheader"}
+// ParseComputeCapability reads an NVML compute_cap field ("12.0") as
+// major*10+minor; an unparseable field stays 0 (unobserved).
+func ParseComputeCapability(s string) int {
+	parts := strings.SplitN(strings.TrimSpace(s), ".", 2)
+	major, err := strconv.Atoi(parts[0])
+	if err != nil || major < 0 {
+		return 0
+	}
+	minor := 0
+	if len(parts) == 2 {
+		minor, _ = strconv.Atoi(parts[1])
+	}
+	return major*10 + minor
+}
+
+// nvidiaSMIBindingArgs is the NVML query the doctor runs; compute_cap feeds
+// the payload floor's capability dimension.
+var nvidiaSMIBindingArgs = []string{"--query-gpu=index,pci.bus_id,uuid,name,compute_cap", "--format=csv,noheader"}
 
 func execNvidiaSMIBinding(ctx context.Context) (gpuQueryOutput, error) {
 	cmd := exec.CommandContext(ctx, "nvidia-smi", nvidiaSMIBindingArgs...)
@@ -1025,6 +1163,7 @@ func diagnoseGPUBindingWindows(opts GPUBindingOptions) GPUBindingReport {
 		Issues:          issues,
 		USB4HostRouters: routers,
 		Package:         pkg,
+		Floor:           opts.Floor,
 	})
 }
 
@@ -1251,6 +1390,7 @@ func diagnoseGPUBindingLinux(sysfsRoot string, opts GPUBindingOptions) GPUBindin
 		UnauthorizedTunnels:   linuxUnauthorizedTunnels(d, sysfsRoot),
 		Issues:                d.Issues,
 		EnumerationIncomplete: incomplete,
+		Floor:                 opts.Floor,
 	})
 }
 

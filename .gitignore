@@ -965,3 +965,8 @@ Microsoft/
 # Prometheus file-SD targets written at runtime by the observability stack
 # (prometheus.yml mounts them); host-specific and regenerated, never tracked.
 /tools/grafana/provisioning/*-targets.json
+
+# Machine-local harness qualification sidecars minted at runtime by cadence
+# self-heal tooling (private platform/cadence OpsHarnessQualificationPath);
+# per-host state regenerated on every qualify-harness run, never tracked.
+/ops/qualifications/

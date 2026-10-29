@@ -1,0 +1,61 @@
+{
+  "rows": [
+    {
+      "id": "fitplan-memory-pool",
+      "canonical": "MemoryPool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "A declared physical memory allocation pool with an identity and usable capacity for model placement accounting.",
+      "distinction": "Capacity input shared by ranks, unlike PoolDemand which reports summed allocations against that capacity.",
+      "distinct_from": [
+        "fitplan-pool-usable-bytes",
+        "fitplan-pool-capacity-unknown"
+      ],
+      "aliases": [],
+      "grounding": "MemoryPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "fitplan-pool-capacity-unknown",
+      "canonical": "pool_capacity_unknown",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "A model placement omission indicating that the usable capacity of a referenced physical memory pool was not supplied.",
+      "distinction": "An unknown input yields no capacity approval; it differs from a known pool capacity being exceeded and from the capacity value itself.",
+      "distinct_from": [
+        "fitplan-memory-pool"
+      ],
+      "aliases": [],
+      "grounding": "pool_capacity_unknown",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "fitplan-runtime-unsupported",
+      "canonical": "SupportUnsupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "The placement planner value declaring that the requested model placement lacks runtime support in the caller supplied execution envelope.",
+      "distinction": "A caller declaration that prevents eligibility even when memory fits; it is neither a hardware qualification result nor a capacity overflow.",
+      "distinct_from": [
+        "support"
+      ],
+      "aliases": [],
+      "grounding": "SupportUnsupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

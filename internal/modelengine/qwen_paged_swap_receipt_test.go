@@ -120,6 +120,14 @@ func TestQwenPagedSwapReceiptExecutionAndOutputEquality(t *testing.T) {
 		if arm.AggregateTokensPerSecond <= 0 {
 			t.Fatalf("%s arm.AggregateTokensPerSecond = %f, want > 0", arm.Pressure, arm.AggregateTokensPerSecond)
 		}
+		var itl []float64
+		for _, req := range arm.Requests {
+			itl = append(itl, req.ITLMilliseconds...)
+		}
+		wantDecode := qwenPagedSwapDecodeTokensPerSecond(itl)
+		if arm.DecodeTokensPerSecond != wantDecode {
+			t.Fatalf("%s arm.DecodeTokensPerSecond = %f, want %f (1000/mean ITL)", arm.Pressure, arm.DecodeTokensPerSecond, wantDecode)
+		}
 		if !arm.TeardownComplete {
 			t.Fatalf("%s arm.TeardownComplete = false", arm.Pressure)
 		}
@@ -127,6 +135,20 @@ func TestQwenPagedSwapReceiptExecutionAndOutputEquality(t *testing.T) {
 
 	if err := ValidateQwenPagedSwapReceipt(receipt); err != nil {
 		t.Fatalf("ValidateQwenPagedSwapReceipt rejected green receipt: %v", err)
+	}
+}
+
+// TestQwenPagedSwapDecodeTokensPerSecondIsPhasePure pins the known fixture:
+// the phase-pure decode rate is 1000 / mean(inter-token latency ms).
+func TestQwenPagedSwapDecodeTokensPerSecondIsPhasePure(t *testing.T) {
+	if got := qwenPagedSwapDecodeTokensPerSecond([]float64{2, 4, 6}); got != 250 {
+		t.Fatalf("ITL [2,4,6]ms -> DecodeTokensPerSecond = %f, want 250 (1000/mean ITL)", got)
+	}
+	if got := qwenPagedSwapDecodeTokensPerSecond(nil); got != 0 {
+		t.Fatalf("empty ITL list -> DecodeTokensPerSecond = %f, want 0", got)
+	}
+	if got := qwenPagedSwapDecodeTokensPerSecond([]float64{0, 0}); got != 0 {
+		t.Fatalf("zero ITL list -> DecodeTokensPerSecond = %f, want 0", got)
 	}
 }
 

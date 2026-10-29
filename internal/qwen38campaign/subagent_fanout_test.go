@@ -921,3 +921,50 @@ func validRawBackendExecutionObservation() *compute.BackendExecutionObservation 
 		DeviceMemoryObserved: true, DeviceMemoryTotalBytes: 64 << 30, DeviceMemoryFreeBytes: 48 << 30,
 	}
 }
+
+// TestPhysicalTrialFromRawDecodePhaseSeparation asserts that the end-to-end
+// aggregate and the phase-pure decode rate are reported separately from a
+// synthetic phase breakdown.
+func TestPhysicalTrialFromRawDecodePhaseSeparation(t *testing.T) {
+	execution := rawdecode.Execution{
+		Engine:         "fak-in-kernel via compute HAL backend \"vulkan\"",
+		Backend:        rawdecode.BackendObservation{Selected: "vulkan"},
+		PromptTokenIDs: []int{11, 12},
+		Runs: []rawdecode.Run{{
+			SessionSetupDuration: 50 * time.Millisecond, PrefillDuration: 100 * time.Millisecond,
+			FirstSampleDuration: 20 * time.Millisecond, DecodeDuration: 400 * time.Millisecond,
+			TeardownDuration: 30 * time.Millisecond, GeneratedTokens: make([]int, 10),
+			BackendExecution: validRawBackendExecutionObservation(),
+		}},
+	}
+	result, err := physicalTrialFromRawDecode(PhysicalTrialRequest{RunIndex: 1, Scenario: ScenarioCold, Concurrency: 1}, execution)
+	if err != nil {
+		t.Fatalf("physicalTrialFromRawDecode: %v", err)
+	}
+	if result.WallDurationMS != 600 || result.UsefulTokens != 10 {
+		t.Fatalf("wall=%f useful_tokens=%d, want 600/10", result.WallDurationMS, result.UsefulTokens)
+	}
+	if got, want := result.TokensPerSec, 10/0.6; math.Abs(got-want) > 1e-9 {
+		t.Fatalf("end-to-end TokensPerSec = %f, want %f (10 tokens over 600ms wall)", got, want)
+	}
+	if got, want := result.DecodeTokensPerSecond, 10/0.4; math.Abs(got-want) > 1e-9 {
+		t.Fatalf("phase-pure DecodeTokensPerSecond = %f, want %f (10 tokens over 400ms decode)", got, want)
+	}
+	if result.PhasesMS["decode"] != 400 {
+		t.Fatalf("PhasesMS[decode] = %f, want 400", result.PhasesMS["decode"])
+	}
+	if !(result.DecodeTokensPerSecond > result.TokensPerSec) {
+		t.Fatalf("DecodeTokensPerSecond %f must exceed end-to-end %f when non-decode phases exist",
+			result.DecodeTokensPerSecond, result.TokensPerSec)
+	}
+
+	zeroDecode := execution
+	zeroDecode.Runs[0].DecodeDuration = 0
+	got, err := physicalTrialFromRawDecode(PhysicalTrialRequest{RunIndex: 1, Scenario: ScenarioCold, Concurrency: 1}, zeroDecode)
+	if err != nil {
+		t.Fatalf("zero-decode physicalTrialFromRawDecode: %v", err)
+	}
+	if got.DecodeTokensPerSecond != 0 {
+		t.Fatalf("zero decode phase -> DecodeTokensPerSecond = %f, want 0", got.DecodeTokensPerSecond)
+	}
+}

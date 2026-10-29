@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "slotstream-multitensor-for-device",
+      "canonical": "NewMultiTensorSlotPoolForDevice",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Constructor that sizes a MultiTensorSlotPool against a device's reported total VRAM via VRAMBudgetForDevice instead of the 24 GiB fallback.",
+      "distinction": "A pool constructor entrypoint, not a pool or a budget value: it derives the budget from device VRAM, unlike PoolUsableBytes which reports a fit-plan pool's usable bytes.",
+      "distinct_from": [
+        "fitplan-pool-usable-bytes"
+      ],
+      "aliases": [],
+      "grounding": "NewMultiTensorSlotPoolForDevice",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

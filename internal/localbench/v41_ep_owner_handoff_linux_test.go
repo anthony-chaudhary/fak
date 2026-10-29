@@ -104,6 +104,38 @@ func TestV41EPOwnerLiveHandoffContract(t *testing.T) {
 	}
 }
 
+// fak-test:runtime medium est=1s lane=default
+func TestV41EPOwnerChallengeReadDiagnostics(t *testing.T) {
+	const helper = "FAK_TEST_V41_CHALLENGE_DIAGNOSTIC_HELPER"
+	if os.Getenv(helper) == "1" {
+		v41EPHTestExchange(t, "challenge-read-failure")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestV41EPOwnerChallengeReadDiagnostics$", "-test.v")
+	cmd.Env = []string{"LANG=C", "LC_ALL=C", "TZ=UTC", helper + "=1"}
+	cmd.WaitDelay = 100 * time.Millisecond
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("diagnostic helper exceeded deadline: %v; output=%s", ctx.Err(), output)
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+		t.Fatalf("expected test failure from challenge EOF, got %v; output=%s", err, output)
+	}
+	for _, want := range []string{
+		"handoff phase=challenge-read mode=challenge-read-failure:",
+		"read=EOF", "wait=<nil>", "process=exit status 0",
+		"read_context=<nil>", "wait_context=<nil>",
+		`stdout="CHALLENGE_STDOUT\n"`, `stderr="CHALLENGE_STDERR\n"`,
+	} {
+		if !strings.Contains(string(output), want) {
+			t.Errorf("joined challenge diagnostic missing %q; output=%s", want, output)
+		}
+	}
+}
+
 type v41EPHShortWriter struct{ bytes.Buffer }
 
 func (w *v41EPHShortWriter) Write(p []byte) (int, error) {
@@ -259,7 +291,12 @@ func v41EPHTestExchange(t *testing.T, mode string) {
 	}
 	challengeRaw, err := v41EPHRead(eventR, 3, v41EPHControlCap)
 	if err != nil {
-		t.Fatal(err)
+		readContextErr := ctx.Err()
+		// Join before inspecting output buffers; CommandContext and WaitDelay
+		// bound the wait even when the owner has not exited after the read fails.
+		waitErr := cmd.Wait()
+		joined = true
+		t.Fatalf("handoff phase=challenge-read mode=%s: read=%v wait=%v process=%v read_context=%v wait_context=%v stdout=%q stderr=%q", mode, err, waitErr, cmd.ProcessState, readContextErr, ctx.Err(), stdout.String(), stderr.String())
 	}
 	var challenge v41EPHChallenge
 	if err := v41EPHStrict(challengeRaw, &challenge); err != nil {
@@ -332,6 +369,11 @@ func v41EPHTestOwner(mode string) error {
 		return nil
 	}
 	defer h.Close()
+	if mode == "challenge-read-failure" {
+		fmt.Fprintln(os.Stdout, "CHALLENGE_STDOUT")
+		fmt.Fprintln(os.Stderr, "CHALLENGE_STDERR")
+		return nil
+	}
 	actual, err := h.ObserveProcess(h.Context)
 	if err != nil {
 		return err

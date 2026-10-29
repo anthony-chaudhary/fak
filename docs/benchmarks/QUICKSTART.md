@@ -9,16 +9,17 @@ This guide gets you started with the cross-machine benchmark infrastructure.
 ### 1. Onboard Your First Machine
 
 ```bash
-# Interactive mode (recommended for first machine)
-python tools/bench_onboard.py --interactive
-
-# Or non-interactive with explicit values
-python tools/bench_onboard.py \
+# On the new machine, from the repo root (native Go verb — no Python script):
+fak bench local onboard \
   --machine-id anthony-laptop \
-  --tags "gpu,rtx4070,windows,wsl2"
+  --gpu-model "NVIDIA GeForce RTX 4070" \
+  --vram-gib 12 \
+  --arch sm_89
 ```
 
-This creates `experiments/benchmark/machines/<machine-id>/specs.json`.
+This creates `experiments/benchmark/machines/<machine-id>/specs.json` plus a
+version-stamped smoke receipt in `onboard-receipts/` (re-runs append history,
+never corrupt prior receipts; check one with `fak bench local verify`).
 
 ### 2. Migrate Existing Data (Optional)
 
@@ -122,13 +123,14 @@ Charts are saved as interactive HTML files with Plotly.
 
 ### Step 1: Run Onboarding Script
 
-On the new machine:
+On the new machine, from the repo root:
 
 ```bash
-python tools/bench_onboard.py --interactive
+fak bench local onboard --machine-id <machine-id> [--gpu-model MODEL] [--vram-gib N] [--arch sm_NNN]
 ```
 
-This detects CPU, GPU, RAM, OS, and runtime versions.
+This detects CPU, RAM, OS, and runtime versions, and records the declared GPU /
+VRAM / arch (`--arch` defaults to `sm_120` when `--gpu-model` matches an RTX 5090).
 
 ### Step 2: Run a Smoke Benchmark
 

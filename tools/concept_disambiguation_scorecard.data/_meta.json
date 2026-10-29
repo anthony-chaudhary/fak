@@ -1517,6 +1517,21 @@
           "category": "incidental",
           "reason": "Private C ABI float output pointer naming the existing caller-owned rotated-key backing. This parameter creates no cache store, owner, reuse policy, index or eviction contract.",
           "token": "KCache"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local CUDA attribute-query return status used to validate a reported L2 property; not a new cache abstraction or policy.",
+          "token": "cacheStatus"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local boolean for validated L2 property availability; not a cache readiness, allocation or planning policy.",
+          "token": "cacheOK"
+        },
+        {
+          "category": "incidental",
+          "reason": "Existing external CUDA runtime attribute enum selected by cudaDeviceGetAttribute; not a newly introduced FAK cache concept.",
+          "token": "cudaDevAttrL2CacheSize"
         }
       ],
       "exclude": [
@@ -1649,6 +1664,7 @@
         "cacheLoadMaxWorkersFor",
         "cacheMissing",
         "cacheMu",
+        "cacheOK",
         "cacheOwned",
         "cachePrompt",
         "cacheRatio",
@@ -1660,6 +1676,7 @@
         "cacheScopeConsistent",
         "cacheSeatFlags",
         "cacheStats",
+        "cacheStatus",
         "cacheValueGateFactsFromReport",
         "cacheValueLedger",
         "cacheVocab",
@@ -1736,6 +1753,7 @@
         "collectObservedCacheLedger",
         "compactcachereads",
         "compactlastcacherd",
+        "cudaDevAttrL2CacheSize",
         "cuda_arch_matrix",
         "cuda_arch_matrix_test",
         "deadlineCacheCreditMaxColdOverrun",
@@ -14850,6 +14868,11 @@
           "category": "incidental",
           "reason": "Per-invocation geometry, doubled-input index and Vulkan grid eligibility, not release maturity, support tier or hardware certification. Its genuine attention eligibility contract is separately positioned.",
           "token": "fvk_qwen35_attention_qg_supported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Diagnostic marker for unattempted packages after a failed prepush build; not a support level, maturity tier, or readiness claim.",
+          "token": "prepushIncompleteBuildCoverage"
         }
       ],
       "exclude": [
@@ -15091,6 +15114,7 @@
         "partial_provider_coverage",
         "payloadCompatibilitySupported",
         "platform_unsupported",
+        "prepushIncompleteBuildCoverage",
         "provenance_correctness",
         "recurrentevictunsupportederror",
         "registrationCoverage",
@@ -16381,6 +16405,11 @@
           "category": "incidental",
           "reason": "Formats study inventory language counts for markdown output, not prompt rendering or materialization.",
           "token": "renderlanguages"
+        },
+        {
+          "category": "incidental",
+          "reason": "Boolean constructor parameter selecting eager vs deferred Qwen3.5 zero-state materialization; a local signature detail of newBackendSessionChecked/newBackendSessionOwned, not a reusable concept.",
+          "token": "materializeQwen35State"
         }
       ],
       "id": "render-materialize",
@@ -16427,6 +16456,7 @@
         "incumbentRenderSummary",
         "indexrenderhits",
         "materializePanelRows",
+        "materializeQwen35State",
         "materializeRows",
         "materializeSessionMoveCheckpoint",
         "materialized",

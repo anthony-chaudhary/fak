@@ -488,6 +488,21 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 				return err
 			}
 		}
+		provenanceArtifact, kind := filepath.Join(cfg.PkgDir, "libfakcuda.a"), CUDAProvenanceArtifactLibrary
+		if outBin != "" {
+			outBinPath := outBin
+			if !filepath.IsAbs(outBinPath) {
+				outBinPath = filepath.Join(cfg.RepoRoot, outBinPath)
+			}
+			if FileExists(outBinPath) {
+				provenanceArtifact, kind = outBinPath, CUDAProvenanceArtifactBinary
+			}
+		}
+		if err := tracker.recordPhase("provenance", func() error {
+			return attachCUDABuildProvenance(ctx, tracker.receipt, cfg.Toolchain, cfg.RepoRoot, cfg.Arch, provenanceArtifact, kind, cfg.Stdout)
+		}); err != nil {
+			return err
+		}
 		return nil
 
 	case "binary":
@@ -554,6 +569,15 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 			if err := tracker.recordSmoke(ctx, outBinPath); err != nil {
 				return err
 			}
+		}
+		provenanceArtifact, kind := outBinPath, CUDAProvenanceArtifactBinary
+		if !FileExists(outBinPath) {
+			provenanceArtifact, kind = filepath.Join(cfg.PkgDir, "libfakcuda.a"), CUDAProvenanceArtifactLibrary
+		}
+		if err := tracker.recordPhase("provenance", func() error {
+			return attachCUDABuildProvenance(ctx, tracker.receipt, cfg.Toolchain, cfg.RepoRoot, cfg.Arch, provenanceArtifact, kind, cfg.Stdout)
+		}); err != nil {
+			return err
 		}
 		return nil
 

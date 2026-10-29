@@ -181,35 +181,41 @@ type PhysicalTrialRequest struct {
 
 // PhysicalTrialResult captures real observed telemetry from a physical device execution trial.
 type PhysicalTrialResult struct {
-	RunIndex          int                       `json:"run_index"`
-	Concurrency       int                       `json:"concurrency"`
-	Scenario          string                    `json:"scenario"`
-	Backend           string                    `json:"backend"`
-	ExecutionPath     string                    `json:"execution_path"`
-	Identity          ExecutionIdentity         `json:"identity"`
-	WallDurationMS    float64                   `json:"wall_duration_ms"`
-	UsefulTokens      int                       `json:"useful_tokens"`
-	TokensPerSec      float64                   `json:"tokens_per_sec"`
-	QueueLatencyMS    float64                   `json:"queue_latency_ms"`
-	TTFTMS            float64                   `json:"ttft_ms,omitempty"`
-	TPOTMS            float64                   `json:"tpot_ms,omitempty"`
-	PrefixReuseRate   float64                   `json:"prefix_reuse_rate,omitempty"`
-	PeakMemoryBytes   uint64                    `json:"peak_memory_bytes,omitempty"`
-	CounterSource     string                    `json:"counter_source,omitempty"`
-	PhysicalDRAMBytes int64                     `json:"physical_dram_bytes,omitempty"`
-	DRAMBandwidthGBps float64                   `json:"dram_bandwidth_gbps,omitempty"`
-	MALLHitBytes      int64                     `json:"mall_hit_bytes,omitempty"`
-	MALLTotalBytes    int64                     `json:"mall_total_bytes,omitempty"`
-	MALLHitRate       float64                   `json:"mall_hit_rate,omitempty"`
-	PhasesMS          map[string]float64        `json:"phases_ms"`
-	PhasesUS          map[string]float64        `json:"phases_us,omitempty"`
-	LogitCosineParity float64                   `json:"logit_cosine_parity"`
-	ParityPassed      bool                      `json:"parity_passed"`
-	OutputTokenIDs    []int32                   `json:"output_token_ids,omitempty"`
-	OutputText        string                    `json:"output_text,omitempty"`
-	FallbackCount     int                       `json:"fallback_count"`
-	FailureCount      int                       `json:"failure_count"`
-	BackendExecution  *BackendExecutionEvidence `json:"backend_execution,omitempty"`
+	RunIndex       int               `json:"run_index"`
+	Concurrency    int               `json:"concurrency"`
+	Scenario       string            `json:"scenario"`
+	Backend        string            `json:"backend"`
+	ExecutionPath  string            `json:"execution_path"`
+	Identity       ExecutionIdentity `json:"identity"`
+	WallDurationMS float64           `json:"wall_duration_ms"`
+	UsefulTokens   int               `json:"useful_tokens"`
+	// TokensPerSec is END-TO-END output throughput over the full trial wall
+	// (session setup + prefill + first sample + decode + teardown); it is NOT
+	// decode-only. See DecodeTokensPerSecond for the phase-pure decode rate.
+	TokensPerSec float64 `json:"tokens_per_sec"`
+	// DecodeTokensPerSecond is the phase-pure decode rate: useful tokens divided by
+	// the decode phase duration in seconds; 0 when the decode phase is not positive.
+	DecodeTokensPerSecond float64                   `json:"decode_tokens_per_second,omitempty"`
+	QueueLatencyMS        float64                   `json:"queue_latency_ms"`
+	TTFTMS                float64                   `json:"ttft_ms,omitempty"`
+	TPOTMS                float64                   `json:"tpot_ms,omitempty"`
+	PrefixReuseRate       float64                   `json:"prefix_reuse_rate,omitempty"`
+	PeakMemoryBytes       uint64                    `json:"peak_memory_bytes,omitempty"`
+	CounterSource         string                    `json:"counter_source,omitempty"`
+	PhysicalDRAMBytes     int64                     `json:"physical_dram_bytes,omitempty"`
+	DRAMBandwidthGBps     float64                   `json:"dram_bandwidth_gbps,omitempty"`
+	MALLHitBytes          int64                     `json:"mall_hit_bytes,omitempty"`
+	MALLTotalBytes        int64                     `json:"mall_total_bytes,omitempty"`
+	MALLHitRate           float64                   `json:"mall_hit_rate,omitempty"`
+	PhasesMS              map[string]float64        `json:"phases_ms"`
+	PhasesUS              map[string]float64        `json:"phases_us,omitempty"`
+	LogitCosineParity     float64                   `json:"logit_cosine_parity"`
+	ParityPassed          bool                      `json:"parity_passed"`
+	OutputTokenIDs        []int32                   `json:"output_token_ids,omitempty"`
+	OutputText            string                    `json:"output_text,omitempty"`
+	FallbackCount         int                       `json:"fallback_count"`
+	FailureCount          int                       `json:"failure_count"`
+	BackendExecution      *BackendExecutionEvidence `json:"backend_execution,omitempty"`
 }
 
 // Validate ensures physical trial results satisfy acceptance contracts.

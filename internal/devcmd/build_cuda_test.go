@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -146,4 +147,99 @@ func TestCUDABuildBinaryPositionalArgs(t *testing.T) {
 	if res.Command != "binary" {
 		t.Fatalf("expected command binary, got %s", res.Command)
 	}
+}
+
+// fak-test:runtime fast est=10ms
+// fak-test:justify why=contract when=changed:internal/devcmd/**
+func TestCUDABuildJSONReportsReceiptSchemaAndProvenance(t *testing.T) {
+	provenance := &computebuild.CUDABuildProvenance{
+		ArtifactKind:   computebuild.CUDAProvenanceArtifactBinary,
+		ArtifactSHA256: strings.Repeat("a", 64),
+		RequestedArchs: []string{"sm_120"},
+		SASSArchs:      []string{"sm_120"},
+		PTXArchs:       []string{},
+		NVCC:           computebuild.CUDANVCCIdentity{Version: "12.6"},
+		CUBLASVersion:  "12.6.0",
+	}
+	for _, tc := range []struct {
+		name           string
+		sub            string
+		receipt        *computebuild.ComputeBuildReceipt
+		err            error
+		wantCode       int
+		wantSchema     string
+		wantProvenance bool
+	}{
+		{
+			name:           "binary success carries successor schema and observed arches",
+			sub:            "binary",
+			receipt:        &computebuild.ComputeBuildReceipt{Schema: computebuild.CUDABuildReceiptSchema, Outcome: "success", CUDA: provenance},
+			wantCode:       0,
+			wantSchema:     computebuild.CUDABuildReceiptSchema,
+			wantProvenance: true,
+		},
+		{
+			name:       "build failure keeps base schema without provenance",
+			sub:        "build",
+			receipt:    &computebuild.ComputeBuildReceipt{Schema: computebuild.ComputeBuildReceiptSchema, Outcome: "failed"},
+			err:        errors.New("fixture build failure"),
+			wantCode:   1,
+			wantSchema: computebuild.ComputeBuildReceiptSchema,
+		},
+		{
+			name:     "check success reports no receipt schema or provenance",
+			sub:      "check",
+			receipt:  &computebuild.ComputeBuildReceipt{Schema: computebuild.ComputeBuildReceiptSchema, Outcome: "success"},
+			wantCode: 0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module cuda-json-test\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			args := append([]string{tc.sub, "-json", "-repo-root", root}, positionalForSub(tc.sub)...)
+			var stdout, stderr bytes.Buffer
+			code := runBuildCUDA(&stdout, &stderr, args, func(ctx context.Context, cfg *computebuild.CUDAConfig) error {
+				cfg.Receipt = tc.receipt
+				return tc.err
+			})
+			if code != tc.wantCode {
+				t.Fatalf("exit=%d want=%d stderr=%s", code, tc.wantCode, stderr.String())
+			}
+			var res CUDABuildResult
+			if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+				t.Fatalf("decode JSON output: %v\n%s", err, stdout.String())
+			}
+			if res.ReceiptSchema != tc.wantSchema {
+				t.Fatalf("receipt_schema=%q want=%q", res.ReceiptSchema, tc.wantSchema)
+			}
+			if tc.wantProvenance {
+				if res.Provenance == nil || !slicesEqual(res.Provenance.SASSArchs, []string{"sm_120"}) || res.Provenance.NVCC.Version != "12.6" || res.Provenance.CUBLASVersion != "12.6.0" {
+					t.Fatalf("provenance=%+v", res.Provenance)
+				}
+			} else if res.Provenance != nil {
+				t.Fatalf("unexpected provenance block: %+v", res.Provenance)
+			}
+		})
+	}
+}
+
+func positionalForSub(sub string) []string {
+	if sub == "binary" {
+		return []string{"./cmd/fak", "bin/fak"}
+	}
+	return nil
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

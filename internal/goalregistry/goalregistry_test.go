@@ -1,6 +1,7 @@
 package goalregistry
 
 import (
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -59,7 +60,7 @@ func TestBindingCollisionRefusesSilentMerge(t *testing.T) {
 
 func TestRelationsAreNotExecutionParentageAndLifecycleIsExplicit(t *testing.T) {
 	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
-	s := Store{Path: filepath.Join(t.TempDir(), "goals.json"), Now: func() time.Time { return now }}
+	s := Store{Path: filepath.Join(t.TempDir(), "goals.json"), Now: func() time.Time { return now }, ResolveEvidence: func(string) (string, bool) { return "fixture commit", true }}
 	p := Provenance{Actor: "operator", Authority: "independent-witness", Witness: "sha256:abc"}
 	g, err := s.Create("Child intent", "", p, []Relation{{Kind: "derived_from", GoalID: "goal_parent"}})
 	if err != nil {
@@ -123,7 +124,7 @@ func TestResolveRequiresRevisionWhenBindingHistoryIsAmbiguous(t *testing.T) {
 
 func TestLifecycleRequiresTypedWitnessAndPreservesHistory(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
-	s := Store{Path: filepath.Join(t.TempDir(), "goals.json"), Now: func() time.Time { return now }}
+	s := Store{Path: filepath.Join(t.TempDir(), "goals.json"), Now: func() time.Time { return now }, ResolveEvidence: func(string) (string, bool) { return "fixture commit", true }}
 	g, err := s.Create("Retry succeeds", "", Provenance{Actor: "operator", Authority: "user"}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -378,5 +379,143 @@ func TestBindingCanonicalTuple(t *testing.T) {
 	}
 	if len(bindingsAfterUnbind) != 0 {
 		t.Fatalf("expected 0 bindings after unbind, got %d", len(bindingsAfterUnbind))
+	}
+}
+
+func TestTransitionRefusesUnresolvableCommitReference(t *testing.T) {
+	s := Store{Path: filepath.Join(t.TempDir(), "goals.json")}
+	g, err := s.Create("Witness gate", "", Provenance{Actor: "operator", Authority: "user"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{"commit:0000000", "commit:", "commit:nope-not-a-sha"} {
+		if _, err := s.Transition(g.GoalID, Achieved, OutcomeEvidence{Class: IndependentWitness, Author: "judge", Reference: ref}); err == nil || !strings.Contains(err.Error(), "does not resolve") {
+			t.Fatalf("ref %q: want refusal, got %v", ref, err)
+		}
+	}
+	cur, err := s.RequireGoal(g.GoalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cur.Lifecycle != Active {
+		t.Fatalf("lifecycle=%s", cur.Lifecycle)
+	}
+	evidence, err := s.OutcomeEvidence(g.GoalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evidence) != 0 {
+		t.Fatalf("evidence=%#v", evidence)
+	}
+}
+
+func TestTransitionAdmitsResolvableCommitReference(t *testing.T) {
+	out, err := exec.Command("git", "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Skipf("git unavailable: %v", err)
+	}
+	head := strings.TrimSpace(string(out))
+	s := Store{Path: filepath.Join(t.TempDir(), "goals.json")}
+	g, err := s.Create("Real witness", "", Provenance{Actor: "operator", Authority: "user"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := "commit:" + head
+	got, err := s.Transition(g.GoalID, Achieved, OutcomeEvidence{Class: IndependentWitness, Author: "judge", Reference: ref})
+	if err != nil {
+		t.Fatalf("admission failed: %v", err)
+	}
+	if got.Lifecycle != Achieved {
+		t.Fatalf("lifecycle=%s", got.Lifecycle)
+	}
+	evidence, err := s.OutcomeEvidence(g.GoalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evidence) != 1 || evidence[0].Reference != ref {
+		t.Fatalf("evidence=%#v", evidence)
+	}
+}
+
+func TestTransitionRefusesUnboundIssueReference(t *testing.T) {
+	s := Store{Path: filepath.Join(t.TempDir(), "goals.json")}
+	p := Provenance{Actor: "operator", Authority: "user"}
+	g, err := s.Create("Issue gate", "", p, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Bind(g.GoalID, "dos:unit", "999", "", p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Transition(g.GoalID, Achieved, OutcomeEvidence{Class: IndependentWitness, Author: "judge", Reference: "issue:999"}); err == nil || !strings.Contains(err.Error(), "does not resolve") {
+		t.Fatalf("want refusal, got %v", err)
+	}
+}
+
+func TestTransitionAdmitsBoundIssueReference(t *testing.T) {
+	s := Store{Path: filepath.Join(t.TempDir(), "goals.json")}
+	p := Provenance{Actor: "operator", Authority: "user"}
+	g1, err := s.Create("Shorthand issue", "", p, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g2, err := s.Create("Bare issue", "", p, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Bind(g1.GoalID, "github:issue", "anthony-chaudhary/fak#42", "", p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Bind(g2.GoalID, "github:issue", "77", "", p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Transition(g1.GoalID, Achieved, OutcomeEvidence{Class: IndependentWitness, Author: "judge", Reference: "issue:42"}); err != nil {
+		t.Fatalf("shorthand admission failed: %v", err)
+	}
+	if _, err := s.Transition(g2.GoalID, Achieved, OutcomeEvidence{Class: IndependentWitness, Author: "judge", Reference: "issue:77"}); err != nil {
+		t.Fatalf("bare admission failed: %v", err)
+	}
+}
+
+func TestTransitionQuarantinesUnknownSchemeReferences(t *testing.T) {
+	s := Store{Path: filepath.Join(t.TempDir(), "goals.json")}
+	p := Provenance{Actor: "operator", Authority: "user"}
+	for _, ref := range []string{"run:make test", "report:field-notes", "plain-text-without-scheme"} {
+		g, err := s.Create("Quarantine "+ref, "", p, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Transition(g.GoalID, Achieved, OutcomeEvidence{Class: IndependentWitness, Author: "judge", Reference: ref}); err != nil {
+			t.Fatalf("ref %q: want quarantine admission, got %v", ref, err)
+		}
+		evidence, err := s.OutcomeEvidence(g.GoalID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(evidence) != 1 || evidence[0].Reference != ref {
+			t.Fatalf("raw reference not preserved for %q: %#v", ref, evidence)
+		}
+	}
+}
+
+func TestTransitionHonorsInjectedEvidenceResolver(t *testing.T) {
+	s := Store{
+		Path:            filepath.Join(t.TempDir(), "goals.json"),
+		ResolveEvidence: func(reference string) (string, bool) { return "injected", reference == "commit:deadbeefcafe" },
+	}
+	p := Provenance{Actor: "operator", Authority: "user"}
+	ok, err := s.Create("Injected admit", "", p, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Transition(ok.GoalID, Achieved, OutcomeEvidence{Class: IndependentWitness, Author: "judge", Reference: "commit:deadbeefcafe"}); err != nil {
+		t.Fatalf("injected admission failed: %v", err)
+	}
+	no, err := s.Create("Injected refuse", "", p, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Transition(no.GoalID, Achieved, OutcomeEvidence{Class: IndependentWitness, Author: "judge", Reference: "commit:badf00d"}); err == nil || !strings.Contains(err.Error(), "does not resolve") {
+		t.Fatalf("want injected refusal, got %v", err)
 	}
 }

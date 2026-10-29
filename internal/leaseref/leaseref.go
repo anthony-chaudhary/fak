@@ -371,6 +371,27 @@ func (s *Store) List(ctx context.Context) ([]Record, error) {
 // valid empty view); ok == false signals the batch was unavailable/refused so List must degrade to the
 // per-ref reader instead of dropping refs.
 func (s *Store) batchReadRecords(ctx context.Context) ([]Record, bool) {
+	observed, ok := s.batchReadObservedRecords(ctx)
+	return recordsFromObserved(observed), ok
+}
+
+// observedRecord binds the decoded payload to the actual source ref and immutable
+// cat-file header OID. Destructive consumers must not reconstruct either from ID.
+type observedRecord struct {
+	ref    string
+	oid    string
+	record Record
+}
+
+func recordsFromObserved(observed []observedRecord) []Record {
+	var records []Record
+	for _, row := range observed {
+		records = append(records, row.record)
+	}
+	return records
+}
+
+func (s *Store) batchReadObservedRecords(ctx context.Context) ([]observedRecord, bool) {
 	out, code, err := s.run(ctx, s.dir, "for-each-ref", "--format=%(refname)", refPrefix)
 	if err != nil {
 		return nil, false // git not executable -> let the per-ref path surface the clean error
@@ -396,7 +417,7 @@ func (s *Store) batchReadRecords(ctx context.Context) ([]Record, bool) {
 	if err != nil || code != 0 {
 		return nil, false // git not executable or a refused/broken batch -> degrade to per-ref
 	}
-	return parseRecordBatch(stream, refs), true
+	return parseObservedRecordBatch(stream, refs), true
 }
 
 // parseRecordBatch parses a `git cat-file --batch` stream into lease Records, zipping each
@@ -409,8 +430,12 @@ func (s *Store) batchReadRecords(ctx context.Context) ([]Record, bool) {
 // "absence and corruption never blind the whole view" rule the per-ref path applies.
 // An id-less blob has its ID filled from the ref name (leaseIDFromRef).
 func parseRecordBatch(stream string, refs []string) []Record {
+	return recordsFromObserved(parseObservedRecordBatch(stream, refs))
+}
+
+func parseObservedRecordBatch(stream string, refs []string) []observedRecord {
 	data := []byte(stream)
-	var recs []Record
+	var recs []observedRecord
 	pos := 0
 	for _, ref := range refs {
 		nl := bytes.IndexByte(data[pos:], '\n')
@@ -442,7 +467,7 @@ func parseRecordBatch(stream string, refs []string) []Record {
 		if r.ID == "" {
 			r.ID = leaseIDFromRef(ref)
 		}
-		recs = append(recs, r)
+		recs = append(recs, observedRecord{ref: ref, oid: fields[0], record: r})
 	}
 	return recs
 }

@@ -486,7 +486,9 @@ func applyDeepSeek41Config(f *File, p string, cfg *model.Config, ropeDim int) er
 		eng.MaxNgramSize = max(eng.MaxNgramSize, len(eng.Multipliers)/len(eng.LayerIDs))
 	}
 	if len(eng.LayerIDs) > 0 && eng.MaxNgramSize > 1 {
-		eng.NHeads = max(eng.NHeads, len(eng.Primes)/(len(eng.LayerIDs)*(eng.MaxNgramSize-1)))
+		// Divide bounded array lengths in stages: multiplying untrusted metadata
+		// dimensions can wrap to zero before admission and panic.
+		eng.NHeads = max(eng.NHeads, len(eng.Primes)/len(eng.LayerIDs)/(eng.MaxNgramSize-1))
 	}
 	if err := validateDeepSeek41PublishedTokenizer(f, cfg, eng); err != nil {
 		return err
@@ -652,8 +654,13 @@ func validateDeepSeek41Engram(f *File, p string, cfg *model.Config, eng *DeepSee
 				return fmt.Errorf("gguf: deepseek41 declares %s but required converter key %s is missing or malformed", p+ds41KeyEngramLayerIDs, p+item.key)
 			}
 		}
-		if eng.MaxNgramSize < 2 || eng.NHeads <= 0 || len(eng.Primes) != len(eng.LayerIDs)*(eng.MaxNgramSize-1)*eng.NHeads {
-			return fmt.Errorf("gguf: deepseek41 %s/%s hash geometry is inconsistent", p+ds41KeyEngramPrimes, p+ds41KeyEngramMultipliers)
+		// Compare the exact cardinality without multiplying metadata dimensions.
+		// Remainders reject shapes that chained integer division would round down.
+		if eng.MaxNgramSize < 2 || eng.NHeads <= 0 ||
+			len(eng.Primes)%len(eng.LayerIDs) != 0 ||
+			len(eng.Primes)/len(eng.LayerIDs)%eng.NHeads != 0 ||
+			len(eng.Primes)/len(eng.LayerIDs)/eng.NHeads != eng.MaxNgramSize-1 {
+			return fmt.Errorf("gguf: deepseek41 %s/%s hash geometry is inconsistent: %w", p+ds41KeyEngramPrimes, p+ds41KeyEngramMultipliers, model.ErrV41ConfigAdmission)
 		}
 	}
 	if len(f.Tensors) > 0 && deepseek41HasEngramTable(f) {

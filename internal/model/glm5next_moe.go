@@ -25,10 +25,19 @@ type GLM5NextSlotStreamPlan struct {
 // (GLM-5.3-Flash has 42: layers 3..44). A non-positive count falls back to the
 // canonical 42-layer MoE cadence.
 func NewGLM5NextSlotStreamPlan(numMoELayers int) (*GLM5NextSlotStreamPlan, error) {
+	return NewGLM5NextSlotStreamPlanForDevice(numMoELayers, 0)
+}
+
+// NewGLM5NextSlotStreamPlanForDevice is NewGLM5NextSlotStreamPlan sized
+// against a device's reported total VRAM instead of the 24 GiB consumer
+// fallback, so the GLM5Next expert-slot path accepts geometries that fit a
+// larger card (e.g. the owned 32 GB RTX 5090). A non-positive
+// deviceVRAMBytes keeps the fallback budget.
+func NewGLM5NextSlotStreamPlanForDevice(numMoELayers int, deviceVRAMBytes int64) (*GLM5NextSlotStreamPlan, error) {
 	if numMoELayers <= 0 {
 		numMoELayers = 42
 	}
-	pool, err := slotstream.NewMultiTensorSlotPool(numMoELayers, slotstream.DefaultGLM5NextSlotsPerLayer)
+	pool, err := slotstream.NewMultiTensorSlotPoolForDevice(numMoELayers, slotstream.DefaultGLM5NextSlotsPerLayer, deviceVRAMBytes)
 	if err != nil {
 		return nil, fmt.Errorf("glm5next slotstream: %w", err)
 	}

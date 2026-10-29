@@ -100,6 +100,7 @@ func Execute(ctx context.Context, authorized AuthorizedRoute, bytes uint64, exec
 			return result, fmt.Errorf("witness hop %d link %q: %w", i, link.ID, err)
 		}
 		result.Hops = append(result.Hops, receipt)
+		observeHops(receipt)
 	}
 	result.State = ExecutionComplete
 	result.Recovery = RecoveryNone

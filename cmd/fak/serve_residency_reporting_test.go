@@ -33,6 +33,10 @@ func TestServeActivatedExpertRingPlanTextReportsPolicyNotResidency(t *testing.T)
 
 // fak-test:runtime fast est=10ms lane=default
 // Static reachability control, not a successful load or device execution witness.
+// The invariant lives on loadResidentQ4KDeviceErr: the two-phase fit commit
+// (T03) turned the historical fatal loadResidentQ4KDevice into a thin must()
+// wrapper over the error-returning core, so the reservation reader's place on
+// the successful-load tail is asserted against the core's body.
 func TestServePostLoadReservationReaderIsOnSuccessfulResidentLoadTail(t *testing.T) {
 	f, err := parser.ParseFile(token.NewFileSet(), "serve_load_helpers.go", nil, 0)
 	if err != nil {
@@ -40,7 +44,7 @@ func TestServePostLoadReservationReaderIsOnSuccessfulResidentLoadTail(t *testing
 	}
 	var owner *ast.FuncDecl
 	for _, d := range f.Decls {
-		if fn, ok := d.(*ast.FuncDecl); ok && fn.Name.Name == "loadResidentQ4KDevice" {
+		if fn, ok := d.(*ast.FuncDecl); ok && fn.Name.Name == "loadResidentQ4KDeviceErr" {
 			owner = fn
 		}
 	}
@@ -53,7 +57,7 @@ func TestServePostLoadReservationReaderIsOnSuccessfulResidentLoadTail(t *testing
 		if call, ok := n.(*ast.CallExpr); ok {
 			if name, ok := call.Fun.(*ast.Ident); ok {
 				switch name.Name {
-				case "loadResidentQ4KProfiledFor":
+				case "loadResidentQ4KProfiledForErr":
 					load = call.Pos()
 				case "serveVulkanPostLoadReservations":
 					report = call.Pos()

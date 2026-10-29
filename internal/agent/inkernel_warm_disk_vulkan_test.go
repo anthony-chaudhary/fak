@@ -145,11 +145,20 @@ func TestInKernelWarmPrefixDiskAcrossProcessesVulkan(t *testing.T) {
 	// captured snapshot's continuation logits.
 	expectedColdD2HBytes := expectedKVBytes + uint64(2*vulkanWarmDiskCfg().VocabSize*compute.F32.Bytes())
 	expectedColdD2HCount := expectedKVTransfers + 2
-	// Restore currently uploads every linear-attention conv+recurrent state twice;
-	// the exact count pins that cost so removing the duplicate is a visible change.
+	// Restore uploads exactly the continuation state the snapshot carries: three KV
+	// planes per full-attention layer plus one conv and one recurrent buffer per
+	// linear-attention layer. The session constructor no longer eagerly uploads a
+	// zero conv/recurrent pair that the restore immediately frees (fak#13801), so
+	// the warm H2D totals equal the state totals with no surplus.
+	expectedWarmH2DBytes := expectedKVBytes
+	expectedWarmH2DCount := expectedKVTransfers
+	// The linear share must be a real part of the state total, not a separate
+	// surplus: a regression that re-adds the duplicate upload would push the
+	// observed warm H2D above this bound.
 	linearBytes, linearTransfers := vulkanWarmDiskLinearStateTransfers(vulkanWarmDiskCfg())
-	expectedWarmH2DBytes := expectedKVBytes + linearBytes
-	expectedWarmH2DCount := expectedKVTransfers + linearTransfers
+	if linearBytes == 0 || linearTransfers == 0 || linearBytes >= expectedWarmH2DBytes || linearTransfers >= expectedWarmH2DCount {
+		t.Fatalf("linear state share is not inside the state total: linear=%d/%d state=%d/%d", linearBytes, linearTransfers, expectedWarmH2DBytes, expectedWarmH2DCount)
+	}
 
 	if cold.Schema != vulkanWarmDiskSchema || warm.Schema != vulkanWarmDiskSchema || cold.Phase != "cold" || warm.Phase != "warm" || cold.PID == warm.PID {
 		t.Fatalf("invalid child identity: cold_schema=%q cold_phase=%q cold_pid=%d warm_schema=%q warm_phase=%q warm_pid=%d", cold.Schema, cold.Phase, cold.PID, warm.Schema, warm.Phase, warm.PID)

@@ -1,0 +1,8 @@
+# nvidia-smi --query-gpu=name,uuid,pci.bus_id,driver_version,memory.total --format=csv
+# probed 2026-10-28T07:25Z on raider-fak (192.168.1.170), user fak
+name, uuid, pci.bus_id, driver_version, memory.total [MiB]
+NVIDIA GeForce RTX 5090 Laptop GPU, GPU-2a2a837f-c82d-0f22-4538-e3a063903380, 00000000:01:00.0, 615.78.08, 24463 MiB
+
+# compute apps at same instant (GPU holder):
+pid, process_name, used_gpu_memory [MiB]
+813, /usr/local/bin/fak, 22848 MiB

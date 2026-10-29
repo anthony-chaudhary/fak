@@ -83,6 +83,9 @@ type BuildArtifact struct {
 const (
 	// ComputeBuildReceiptSchema is the stable schema for compute build receipts.
 	ComputeBuildReceiptSchema = "fak.compute-build-receipt.v1"
+	// CUDABuildReceiptSchema binds successful CUDA build/binary receipts to the
+	// observed artifact images. Failed receipts keep the base schema.
+	CUDABuildReceiptSchema = "fak.cuda-build-receipt.v1"
 	// VulkanBuildReceiptSchema binds successful Vulkan binary receipts to source, tools, shaders, and output.
 	VulkanBuildReceiptSchema = "fak.vulkan-build-receipt.v2"
 	// VulkanBuildReceiptSchemaV3 binds the current trusted 60-module registry.
@@ -273,4 +276,7 @@ type ComputeBuildReceipt struct {
 	VulkanRegistry      *VulkanShaderRegistryIdentity `json:"-"`
 	VulkanNativeArchive *BuildArtifact                `json:"-"`
 	VulkanIndexerScore  *VulkanIndexerScoreContract   `json:"-"`
+	// CUDA provenance is attached only on a successful build/binary; the receipt
+	// switches to CUDABuildReceiptSchema exactly when this block is present.
+	CUDA *CUDABuildProvenance `json:"-"`
 }

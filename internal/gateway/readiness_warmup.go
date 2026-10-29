@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,20 +37,6 @@ import (
 // gate (proxy, mock, or a local model with no warmup step) is byte-for-byte
 // unaffected — readiness stays governed only by port-bind + the existing gates.
 // The POLICY lives here in the gateway; the host owns the warmup turn itself.
-
-// ErrWarmupTimeout is returned by RunWarmup when the backend's synthetic warmup
-// inference does not return its first token within the configured boot/warmup
-// ceiling. It is a TYPED, bounded failure — the fix for the strix1 hang where a
-// non-returning forward (a stale SPIR-V bundle makes the CPU-side q4k/q8 path spin
-// before any device dispatch, in a user-space tight loop that ignores ctx) held
-// readiness warmup_pending FOREVER with no journal line. RunWarmup calls
-// planner.Complete on a worker goroutine and waits with the ceiling, so a
-// non-returning backend is reported instead of holding readiness unbounded. The
-// gate stays PENDING on a timeout (a hung backend is not warm) exactly as it does
-// on an error/cancellation, so a failed boot never advertises readiness. The
-// synthetic turn may still be spinning on the leaked goroutine; this is the best a
-// bounded wait can do without cooperative cancellation from the backend.
-var ErrWarmupTimeout = errors.New("backend startup warmup timed out")
 
 // ErrWarmupPanic identifies a recovered Go panic from either boot-probe planner
 // call. The backend is not ready; a later successful warmup may clear the failure.
@@ -98,6 +85,136 @@ func warmupCeiling(getenv func(string) string) time.Duration {
 // DeepSeek V4.1 (strix3 ABBA, 2026-10-22): the turn's routed-expert page-in is
 // reused by the probe and the first request, not wasted.
 const warmupSeparateTurnEnv = "FAK_WARMUP_SEPARATE_TURN"
+
+// DefaultDecodeConfirmTokens is the first-N-token decode confirm's default N: after
+// the boot warmup turn succeeds, ONE tagged probe completion decodes N tokens and
+// its measured ms/step is the load's silicon reading against the fitplan nominal.
+const DefaultDecodeConfirmTokens = 32
+
+// decodeConfirmTokensEnv overrides the confirm's N; "0" (or unset-and-disabled) is
+// the opt-out. Unset keeps the default 32. A non-positive or unparseable value
+// disables the probe so a typo can never turn the confirm into an infinite decode.
+const decodeConfirmTokensEnv = "FAK_DECODE_CONFIRM_TOKENS"
+
+// decodeConfirmTokens resolves the effective N from the environment: unset keeps
+// DefaultDecodeConfirmTokens; a positive integer wins; anything else disables.
+func decodeConfirmTokens(getenv func(string) string) int {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	v := strings.TrimSpace(getenv(decodeConfirmTokensEnv))
+	if v == "" {
+		return DefaultDecodeConfirmTokens
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
+}
+
+// DecodeConfirmResult is what one tagged probe completion measured: the tokens it
+// produced, the wall it took, and the decode ms/step (the planner's own
+// prefill/decode split when it reports one, else wall over produced tokens).
+type DecodeConfirmResult struct {
+	Tokens    int
+	Elapsed   time.Duration
+	MsPerStep float64
+}
+
+// decodeConfirmState holds the host sink that records a successful decode confirm
+// (the calibration-store write and the startup log line live in the host, not the
+// gateway). Zero value == no sink: the probe does NOT run at all, so every
+// consumer that never installs a sink (mock/proxy serves, gateway unit tests)
+// stays byte-identical to the pre-confirm warmup.
+type decodeConfirmState struct {
+	lifecycle warmupProbeLifecycle
+	mu        sync.Mutex
+	sink      func(DecodeConfirmResult)
+}
+
+// SetDecodeConfirmSink installs the host sink invoked with the result of each
+// successful decode confirm. It is the seam that keeps the gateway free of any
+// calibration-store import: the gateway measures, the host records. Safe on a nil
+// Server; a nil sink clears the hook.
+func (s *Server) SetDecodeConfirmSink(sink func(DecodeConfirmResult)) {
+	if s == nil {
+		return
+	}
+	s.decodeConfirm.mu.Lock()
+	defer s.decodeConfirm.mu.Unlock()
+	s.decodeConfirm.sink = sink
+}
+
+// runDecodeConfirm issues the tagged first-N-token probe AFTER the boot warmup
+// succeeded and observes its result through the installed sink. It is MEASUREMENT,
+// never a quality gate: a completed failed or short probe is logged and swallowed.
+// An unfinished probe is different: readiness must stay held because requesting
+// cancellation is not proof that the backend stopped.
+// It runs ONLY when the host installed a sink (the serve host
+// does, before arming the warmup gate); without one the warmup stays
+// byte-identical to today. FAK_DECODE_CONFIRM_TOKENS=0 is the host-side opt-out.
+func (s *Server) runDecodeConfirm(ctx context.Context, ceiling time.Duration) error {
+	if s == nil || s.planner == nil {
+		return nil
+	}
+	s.decodeConfirm.mu.Lock()
+	hasSink := s.decodeConfirm.sink != nil
+	s.decodeConfirm.mu.Unlock()
+	if !hasSink {
+		return nil
+	}
+	n := decodeConfirmTokens(os.Getenv)
+	if n <= 0 {
+		return nil
+	}
+	start := time.Now()
+	type outcome struct {
+		comp *agent.Completion
+		err  error
+	}
+	var out outcome
+	if err := s.decodeConfirm.lifecycle.run(ctx, ceiling, func(probeCtx context.Context) {
+		out.comp, out.err = s.completeBootProbe(probeCtx, []agent.Message{{Role: agent.RoleUser, Content: "decode-confirm"}}, agent.WithMaxTokens(n))
+	}); err != nil {
+		if s.logf != nil {
+			if errors.Is(err, ErrWarmupTimeout) {
+				s.logf("[DECODE-CONFIRM] skipped: probe did not return within %s", ceiling)
+			} else {
+				s.logf("[DECODE-CONFIRM] skipped: %v", err)
+			}
+		}
+		return err
+	}
+	if out.err != nil {
+		if s.logf != nil {
+			s.logf("[DECODE-CONFIRM] probe failed (readiness unaffected): %v", out.err)
+		}
+		return nil
+	}
+	res := DecodeConfirmResult{Tokens: out.comp.Usage.CompletionTokens, Elapsed: time.Since(start)}
+	if t := out.comp.Timings; t != nil && t.PredictedN > 0 && t.PredictedPerTokenMS > 0 {
+		res.MsPerStep = t.PredictedPerTokenMS
+	} else if res.Tokens > 0 {
+		res.MsPerStep = res.Elapsed.Seconds() * 1000 / float64(res.Tokens)
+	}
+	if res.Tokens < 2 {
+		if s.logf != nil {
+			s.logf("[DECODE-CONFIRM] probe produced %d token(s); need >= 2 for a step rate (readiness unaffected)", res.Tokens)
+		}
+		return nil
+	}
+	if s.logf != nil {
+		s.logf("[DECODE-CONFIRM] %d tokens in %s (%.1f ms/step)", res.Tokens, res.Elapsed.Round(time.Millisecond), res.MsPerStep)
+	}
+	s.decodeConfirm.mu.Lock()
+	sink := s.decodeConfirm.sink
+	s.decodeConfirm.mu.Unlock()
+	if sink != nil {
+		sink(res)
+	}
+	return nil
+}
 
 // coherenceProbeIsFirstDecode reports whether the armed count probe replaces the
 // separate warmup turn as the boot's first decode: only on an explicit opt-in.
@@ -269,6 +386,16 @@ func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 	if s == nil {
 		return 0, nil
 	}
+	if err := s.decodeConfirm.lifecycle.begin(); err != nil {
+		// A rejected caller owns no reservation. Preserve the prior failure or
+		// active attempt's gate; a late worker may acknowledge before we return.
+		return 0, err
+	}
+	defer s.decodeConfirm.lifecycle.end()
+	// Readiness is already published; do not inject fresh synthetic traffic.
+	if d, ready := s.warmup.ready(); ready {
+		return d, nil
+	}
 	if s.planner == nil {
 		s.MarkWarmupComplete(0)
 		return 0, nil
@@ -285,6 +412,14 @@ func (s *Server) RunWarmup(ctx context.Context) (time.Duration, error) {
 	// no window in which a skewed binary/shader pair reports ready.
 	if err := s.runStartupCoherenceProbe(ctx, ceiling); err != nil {
 		return time.Since(start), s.failWarmup(err, probeFailure)
+	}
+	// First-N-token decode confirm: one tagged probe completion now that the warmup
+	// (and, when folded, the coherence probe) proved the backend decodes. It runs
+	// INSIDE the warmup window, so time_to_ready_ms includes it and the operator's
+	// first real turn never contends with the probe. Completed measurement failures
+	// are nonfatal, but an unacknowledged worker must not release readiness.
+	if err := s.runDecodeConfirm(ctx, ceiling); err != nil {
+		return time.Since(start), s.failWarmup(err, "")
 	}
 	d := time.Since(start)
 

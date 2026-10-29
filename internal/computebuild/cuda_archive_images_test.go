@@ -95,6 +95,9 @@ func main() {
   if os.Getenv("FAK_CUDA_IMAGE_TEST_MODE") == "oversized" { fmt.Print(strings.Repeat("x", 2<<20)); return }
   if a[0] == "--list-elf" { fmt.Print(os.Getenv("FAK_CUDA_IMAGE_TEST_ELF")) } else { fmt.Print(os.Getenv("FAK_CUDA_IMAGE_TEST_PTX")) }
   return
+ case "--version":
+  fmt.Print("Cuda compilation tools, release 12.6, V12.6.85\n")
+  return
  case "rcs":
   if err := os.WriteFile(a[1], []byte("archive-fixture"), 0644); err != nil { os.Exit(4) }; return
  }
@@ -124,11 +127,13 @@ func main() {
 	writeFixtureFile(t, filepath.Join(root, "go.mod"), "module example.test/cuda\n\ngo 1.26\n")
 	writeFixtureFile(t, filepath.Join(root, "internal", "compute", "cuda_arch.txt"), "sm_100\nsm_103\nsm_120\n")
 	writeFixtureFile(t, filepath.Join(root, "internal", "compute", "cuda_kernels.cu"), "fixture\n")
+	include := filepath.Join(root, "include")
+	writeFixtureFile(t, filepath.Join(include, "cublas_api.h"), "#define CUBLASAPI_VERSION 120600\n")
 	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("FAK_CUDA_IMAGE_TEST_MODE", "")
 	t.Setenv("FAK_CUDA_IMAGE_TEST_ELF", "")
 	t.Setenv("FAK_CUDA_IMAGE_TEST_PTX", "")
-	return root, &Toolchain{NVCC: tool, AR: tool}
+	return root, &Toolchain{NVCC: tool, AR: tool, CUDAInc: []string{include}}
 }
 
 // fak-test:justify why=regression when=changed:internal/computebuild/**
@@ -202,6 +207,16 @@ func TestCUDABuildRequiresArchiveImages(t *testing.T) {
 		if artifact.CUDAImages == nil || artifact.SHA256 != artifact.CUDAImages.ArchiveSHA256 {
 			t.Fatal("archive was returned without observed images")
 		}
+		// ArchiveCUDALib records the exact archived bytes: ar writes the
+		// rcs fixture payload, the nvcc --lib fallback writes the -o payload.
+		wantPayload := "archive-fixture"
+		if windows {
+			wantPayload = "compiled-fixture"
+		}
+		wantDigest := sha256.Sum256([]byte(wantPayload))
+		if artifact.SHA256 != hex.EncodeToString(wantDigest[:]) {
+			t.Fatalf("windows=%v archive digest=%s; want %s", windows, artifact.SHA256, hex.EncodeToString(wantDigest[:]))
+		}
 		requireCUDAArchiveStamp(t, root)
 	}
 	tc.IsWindows, tc.AR = false, tc.NVCC
@@ -219,6 +234,21 @@ func TestCUDABuildRequiresArchiveImages(t *testing.T) {
 	}
 	if receipt.Outcome != "success" || receipt.Artifact == nil || receipt.Artifact.CUDAImages == nil || !reflect.DeepEqual(receipt.Artifact.CUDAImages.SASS, []string{"sm_120"}) {
 		t.Fatal("native binary receipt lost the observed archive images")
+	}
+	// A successful binary build observes its own provenance: the receipt
+	// switches to the CUDA successor schema and carries the block on the wire.
+	if receipt.Schema != CUDABuildReceiptSchema {
+		t.Fatalf("binary receipt kept base schema %s", receipt.Schema)
+	}
+	strict, err := DecodeStrictCUDABuildReceipt(receiptBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strict.CUDA == nil || strict.CUDA.ArtifactKind != CUDAProvenanceArtifactBinary || !reflect.DeepEqual(strict.CUDA.SASSArchs, []string{"sm_120"}) || strict.CUDA.NVCC.Version != "12.6" || strict.CUDA.CUBLASVersion != "12.6.0" {
+		t.Fatalf("binary receipt missing provenance: %+v", strict.CUDA)
+	}
+	if strict.CUDA.ArtifactSHA256 != receipt.Artifact.SHA256 {
+		t.Fatalf("provenance digest %s does not match artifact identity %s", strict.CUDA.ArtifactSHA256, receipt.Artifact.SHA256)
 	}
 	t.Setenv("FAK_CUDA_IMAGE_TEST_ELF", "ELF file 1: stale.sm_100.cubin\n")
 	staleCUDAArchiveStamp(t, root)

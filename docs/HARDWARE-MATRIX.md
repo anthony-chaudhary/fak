@@ -9,7 +9,7 @@ description: "The hardware coverage matrix for fak: one pure-Go agent kernel pro
 > lucky box. The same pure-Go kernel — same bit-exact gates — has been run and
 > benchmarked across **four distinct hardware platforms** spanning **two CPU ISAs**
 > (arm64 + x86_64), **three CPU vendors** (Apple · AMD · Intel), **four GPU backends**
-> (Apple Metal · AMD Vulkan · NVIDIA CUDA Ada *and* Ampere), and **four OS targets**
+> (Apple Metal · AMD Vulkan · NVIDIA CUDA Ada, Ampere *and* Blackwell sm_120), and **four OS targets**
 > (macOS · Windows · WSL2 Linux · Linux). Portability across that spread *is* a result —
 > a kernel that owns the KV cache as its own object has to prove it stays correct on
 > every one.
@@ -33,13 +33,15 @@ appears here it carries a pointer to the doc + commit that owns it.
 | **Apple M3 Pro** *(primary bench node)* | Apple M3 Pro 6P+6E, arm64 | 18-core **Metal** + **NEON** Q8 | macOS | f32 · Q8_0 · Q4_K · Q2_K | Full model ladder, the agent-fleet value stack, the pure-kernel latency stack, Qwen3.6-27B end-to-end in fak's own engine |
 | **AMD Ryzen 9 9950X + Radeon RX 7600** | AMD Zen 5, 16C/32T, x86_64, AVX-512 | **Vulkan** Q8 (RX 7600) + CPU Q8 | Windows | f32 · Q8_0 · Q4_K | Q8-on-GPU throughput, the GPU/CPU crossover, 3/3 live agent surfaces on Qwen3.6-27B |
 | **Intel x86_64 + NVIDIA RTX 4070** | Intel, x86_64, AVX2/AVX-512 | **CUDA** (Ada, sm_89): f32 · F16 · Q8 · graph | Windows + WSL2 Linux | f32 · F16 · Q8_0 | In-kernel CUDA decode at llama.cpp parity, batched decode curve, cross-platform bit-exact determinism vs the Mac |
+| **NVIDIA RTX 5090 Laptop** *(owned-rtx5090-raider · dev)* | x86_64 mobile (Intel) | **CUDA** (Blackwell, **sm_120**), 24 GB GDDR7 | Linux (bring-up in progress) | f32 · Q8_0 (target) | **Dev lane, nothing measured yet** — the consumer-sm_120 rung; onboards via `fak bench local onboard`; HW witness pending a live node |
+| **NVIDIA RTX 5090 desktop** *(owned-rtx5090-g916 · pending reenroll)* | x86_64 | **CUDA** (Blackwell, **sm_120**), 32 GB GDDR7 | unprobed since registry removal | f32 · Q8_0 (target) | **Pending reenroll, nothing measured yet** — the 32 GB GDDR7 rung; onboards via `fak bench local onboard`; HW witness pending a live node |
 | **an 8-GPU datacenter server** *(serving lane)* | x86_64 host | **CUDA** (Ampere, sm_80), multi-GPU | Linux | Q4_K · (FP8/BF16 target) | The multi-GPU serving + GLM-5.2 readiness lane — big-iron, where single-box ceilings stop binding |
 | **Raspberry Pi 5 / Jetson Orin** *(arm64 edge — target, not yet witnessed)* | arm64 (Cortex-A76 / Arm Cortex-A78AE), small SBC | CPU NEON Q4 · (Jetson CUDA target) | Linux | Q4_K · Q2_K (target) | **Planned witness, nothing measured yet** — the arm64 small-SBC edge rung; closes the bottom of the deployment-substrate axis. No Pi 5 / Jetson Orin tok/s has been collected — this row is a pending future witness, not a result |
 
-> **Pending 5th row.** The arm64 small-SBC edge row above is a **target**, not a witnessed
-> platform — the four rows below it carry measured artifacts, this one is open work (the
-> issue is to go *witness* it). It is listed here so the coverage axis shows the rung that
-> still needs collecting; no number is claimed for it.
+> **Pending rows.** The two sm_120 RTX 5090 rows and the arm64 small-SBC edge row are
+> **targets/dev**, not witnessed platforms — the other rows carry measured artifacts, these
+> are open work (the issue is to go *witness* them). They are listed here so the coverage
+> axis shows the rungs that still need collecting; no number is claimed for any of them.
 
 **Reading the spread:** the deterministic results (token-count speedups, cache hit rate,
 bit-exact eviction) are *hardware-independent by construction* and reproduce byte-for-byte

@@ -60,5 +60,24 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "gpubinding-computecapability",
+      "canonical": "ComputeCapability",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "NVML-reported CUDA compute capability of a bound GPU row, encoded as major*10+minor (120 = sm_120).",
+      "distinction": "Observed per-device property on gpubinding rows, not an admission threshold: MinComputeCapability is the floor this value must meet; capability-floor is the policy side.",
+      "distinct_from": [
+        "capability-floor"
+      ],
+      "aliases": [],
+      "grounding": "ComputeCapability",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

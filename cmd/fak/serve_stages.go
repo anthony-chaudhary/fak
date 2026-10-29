@@ -62,7 +62,17 @@ type serveRuntime struct {
 	// reused by the load-time fit, so the context the auto-sizer derives and the admission that
 	// judges it are computed against the SAME probe. Nil means "not measured" (e.g. a
 	// SafeTensors directory) and the load re-probes as before.
-	fitBudget              *serveFitBudget
+	fitBudget *serveFitBudget
+
+	// Two-phase fit commit (serve_fit_commit.go): the sizing state captured in
+	// resolveNativeContext so the back-off driver can re-run the SAME auto-sizer against a
+	// shrunken believed-free budget, and the decode-confirm nominal's inputs. Zero values on
+	// arms that do not size natively keep the driver on its original layout.
+	contextCSC             compute.ContextSizeConfig
+	contextWeights         compute.MemoryPlan
+	sizingFit              serveFitBudget
+	contextPinned          bool
+	lastLoadProfile        *gateway.ModelLoadProfile
 	requireDeviceExecution bool
 	executionPolicy        *serveExecutionPolicy
 
@@ -657,6 +667,12 @@ func (rt *serveRuntime) resolveNativeContext(sf *serveFlags, ranks int) error {
 				logFit = serveSharedPoolSizingFit(rt.chatBackend, fit)
 			}
 			logServeAutoSizedContext(logCfg, weights, logFit, logFit.avail(), requested, resolution.ResolvedTokens)
+			// Two-phase fit commit: retain the exact sizing inputs so the back-off driver
+			// re-plans deterministically from these readings.
+			rt.contextCSC = logCfg
+			rt.contextWeights = weights
+			rt.sizingFit = logFit
+			rt.contextPinned = requested > 0
 		}
 	}
 	rt.nativeContext = resolution
@@ -804,7 +820,7 @@ func (rt *serveRuntime) loadModel(sf *serveFlags) {
 			os.Exit(2)
 		}
 	}
-	inKernelModel, inKernelQ4K, loadProfile, loadPhase := loadServeInKernelModelPlaced(*sf.ggufPath, rt.chatBackend, *sf.cpuOffloadExperts, rt.requireDeviceExecution, rt.nativeContext.ResolvedTokens, expertShard, expertRanks, rt.fitBudget)
+	inKernelModel, inKernelQ4K, loadProfile, loadPhase := rt.loadServeInKernelModelFitted(sf, expertShard, expertRanks)
 	if loadPhase.Name != "" {
 		rt.startupPhases = append(rt.startupPhases, loadPhase)
 	}
@@ -1231,6 +1247,10 @@ func (rt *serveRuntime) run(sf *serveFlags) {
 		// below, and released once at shutdown/cancellation.
 		agentWarmArmed := installServeAgentWarm(rt.srv, *sf.nativeCodeWorkspace, os.Stderr)
 		defer rt.releaseServeAgentWarm()
+		// Two-phase fit confirm (T03): record the warmup-time first-N-token decode
+		// confirm as a SILICON calibration row BEFORE the gate arms, so the probe
+		// inside RunWarmup finds its sink live.
+		rt.installServeDecodeConfirmSink(sf)
 		rt.srv.ArmWarmupGate()
 		// Known-answer coherence probe: a binary/SPIR-V skew decodes fluent noise at
 		// full speed with /healthz ok; RunWarmup now holds readiness until the model

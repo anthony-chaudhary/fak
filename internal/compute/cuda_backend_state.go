@@ -181,6 +181,10 @@ type cudaBackend struct {
 	// PromptPanelEnd (CUDADebugPromptPanelCounters). Guarded by cudaMu.
 	promptPanelBegins, promptPanelMatMuls uint64
 	promptPanelLastLive                   int64
+	// receipt is the typed device receipt built ONCE at init from the captured driver facts
+	// (name, VRAM, driver version, arch tier, coverage verdict, per-arm admissions). It is
+	// immutable after init, so CUDADeviceReceipt reads it without holding cudaMu.
+	receipt CUDADeviceReceipt
 }
 
 // cudaFaultReconstructBudget bounds how many context reconstructions a poisoned session may
@@ -248,6 +252,12 @@ func (c *cudaBackend) Name() string { return c.name }
 func (c *cudaBackend) SupportsRoutedExpertKQuant() bool { return true }
 func (c *cudaBackend) Tier() string                     { return c.tier }
 func (c *cudaBackend) Class() CorrectnessClass          { return Approx } // device GEMM != fdot order
+
+// CUDADeviceReceipt returns the typed device receipt built at init (device name, total VRAM,
+// driver version, arch tier, native/JIT/uncovered coverage verdict, and the per-arm
+// admissions with their refusal reasons). It satisfies CUDADeviceReceiptProvider so
+// consumers read it through CUDADeviceReceiptOf.
+func (c *cudaBackend) CUDADeviceReceipt() CUDADeviceReceipt { return c.receipt }
 func (c *cudaBackend) Caps() Caps {
 	// Async (#482): ops enqueue on g_stream and return unready Buffers; the SOLE host fences
 	// are Read and Argmax. DeviceMemory: resident tensors (incl. the KV cache) are not host-
