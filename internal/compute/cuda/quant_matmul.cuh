@@ -632,14 +632,10 @@ extern "C" int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float 
     if (g_q4k_prefill_arm == 2) return fcuda_q4k_fp8lt_matmul(dQ4K, dX, dY, out, in, P);
     if (g_q4k_prefill_arm != 0) return FCUDA_Q4K_PREFILL_ARM_REFUSED;
     size_t wn = (size_t)out * in, xn = (size_t)P * in;
-    __half *wHi = (__half *)scratch_malloc(wn * sizeof(__half));
-    __half *wLo = (__half *)scratch_malloc(wn * sizeof(__half));
-    __half *xHi = (__half *)scratch_malloc(xn * sizeof(__half));
-    __half *xLo = (__half *)scratch_malloc(xn * sizeof(__half));
-    if (!wHi || !wLo || !xHi || !xLo) {
-      fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
-      return FCUDA_SPLIT_SCRATCH_ALLOC_FAILED;
-    }
+    __half *scratch[4] = {};
+    const int scratch_status = fp16_compensated_scratch(wn, xn, scratch);
+    if (scratch_status != 0) return scratch_status;
+    __half *wHi = scratch[0], *wLo = scratch[1], *xHi = scratch[2], *xLo = scratch[3];
     FCUDA_TS("k_q4k_dequant_split", (wn + 255) / 256, k_q4k_dequant_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(
         (const unsigned char *)dQ4K, wHi, wLo, out, in));
     FCUDA_TS("k_fp16_split", (xn + 255) / 256, k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(dX, xHi, xLo, xn));
@@ -1097,14 +1093,10 @@ extern "C" int fcuda_q2k_matmul_f32(const uint8_t *dQ2K, const float *dX, float 
                                     int out, int in, int P) {
   if (P >= 128) {
     size_t wn = (size_t)out * in, xn = (size_t)P * in;
-    __half *wHi = (__half *)scratch_malloc(wn * sizeof(__half));
-    __half *wLo = (__half *)scratch_malloc(wn * sizeof(__half));
-    __half *xHi = (__half *)scratch_malloc(xn * sizeof(__half));
-    __half *xLo = (__half *)scratch_malloc(xn * sizeof(__half));
-    if (!wHi || !wLo || !xHi || !xLo) {
-      fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
-      return FCUDA_SPLIT_SCRATCH_ALLOC_FAILED;
-    }
+    __half *scratch[4] = {};
+    const int scratch_status = fp16_compensated_scratch(wn, xn, scratch);
+    if (scratch_status != 0) return scratch_status;
+    __half *wHi = scratch[0], *wLo = scratch[1], *xHi = scratch[2], *xLo = scratch[3];
     FCUDA_TS("k_q2k_dequant_split", (wn + 255) / 256, k_q2k_dequant_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(
         (const unsigned char *)dQ2K, wHi, wLo, out, in));
     FCUDA_TS("k_fp16_split", (xn + 255) / 256, k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(dX, xHi, xLo, xn));
