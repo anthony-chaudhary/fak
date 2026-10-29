@@ -307,7 +307,46 @@ func v41IndexerScoreObserved(q, keys, weights []float32, nHeads, headDim, compre
 		work *= nHeads
 	}
 	parForRange(compressLen, work, func(lo, hi int) {
-		for t := lo; t < hi; t++ {
+		// Tile independent key rows, not queries: reuse each query load while
+		// retaining every row's exact dimension/head reduction and rounding.
+		// Preparation, validation, observation and callback order stay outside
+		// this local arithmetic transformation. Scratch is eight scalar F32s.
+		t := lo
+		for ; hi-t >= 4; t += 4 {
+			k0, k1 := t*headDim, (t+1)*headDim
+			k2, k3 := (t+2)*headDim, (t+3)*headDim
+			var a0, a1, a2, a3 float32
+			for h := 0; h < nHeads; h++ {
+				queryBase := h * headDim
+				var d0, d1, d2, d3 float32
+				for d := 0; d < headDim; d++ {
+					qv := q[queryBase+d]
+					d0 = float32(d0 + float32(qv*keys[k0+d]))
+					d1 = float32(d1 + float32(qv*keys[k1+d]))
+					d2 = float32(d2 + float32(qv*keys[k2+d]))
+					d3 = float32(d3 + float32(qv*keys[k3+d]))
+				}
+				if d0 < 0 {
+					d0 = 0
+				}
+				if d1 < 0 {
+					d1 = 0
+				}
+				if d2 < 0 {
+					d2 = 0
+				}
+				if d3 < 0 {
+					d3 = 0
+				}
+				w := weights[h]
+				a0 = float32(a0 + float32(d0*w))
+				a1 = float32(a1 + float32(d1*w))
+				a2 = float32(a2 + float32(d2*w))
+				a3 = float32(a3 + float32(d3*w))
+			}
+			score[t], score[t+1], score[t+2], score[t+3] = a0, a1, a2, a3
+		}
+		for ; t < hi; t++ {
 			keyBase := t * headDim
 			var acc float32
 			for h := 0; h < nHeads; h++ {
