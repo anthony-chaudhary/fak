@@ -2,6 +2,7 @@ package nativeperf
 
 import (
 	"context"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -440,26 +441,59 @@ func (t DecodeHostWorkTotals) SyncSiteRates() ([]DecodeSyncSiteRate, bool) {
 }
 
 // DecodeWindowReceipt projects the decode windows into the bounded phase
-// receipt: Kernel is host-observed submit-to-fence wall, Decode is the rest of
-// the window. ok is false when kernel time was not measured for every window.
+// receipt: Kernel is host-observed submit-to-fence wall, Synchronization is
+// host wait on device completion beyond that fence wall, and Decode is the rest
+// of the window. ok is false when kernel time was not measured for every
+// window, or when the observed sync wait exceeds the window wall.
+//
+// Overlap is booked once. A backend books every synchronous submit-to-fence
+// wait into both the kernel counter and a sync site (vulkan_shim submitWait),
+// so the sync sites contain the kernel wall rather than add to it: kernel keeps
+// the fence wall and synchronization keeps only sync wait above it (pipeline
+// drains, batch flushes). Sync is booked only when SyncsObserved; otherwise the
+// receipt is the two-phase kernel/decode split. D2H bytes the waits delivered
+// go to HostDownloadBytes; no copy duration is derived from bytes.
 func (t DecodeHostWorkTotals) DecodeWindowReceipt() (PhaseReceipt, bool) {
 	if t.Kernel == nil || t.Wall <= 0 || *t.Kernel > t.Wall {
 		return PhaseReceipt{}, false
 	}
-	kernel, rest := *t.Kernel, t.Wall-*t.Kernel
-	r := PhaseReceipt{Engine: "inkernel", Backend: t.Backend, ForwardPath: "decode_window", Wall: t.Wall}
+	kernel := *t.Kernel
+	var sync time.Duration
+	var d2h uint64
+	if t.SyncsObserved {
+		var waitNS uint64
+		for _, s := range t.SyncSites {
+			if waitNS > math.MaxUint64-s.WaitNS || d2h > math.MaxUint64-s.D2HBytes {
+				return PhaseReceipt{}, false
+			}
+			waitNS += s.WaitNS
+			d2h += s.D2HBytes
+		}
+		if waitNS > uint64(t.Wall) {
+			return PhaseReceipt{}, false
+		}
+		if wait := time.Duration(waitNS); wait > kernel {
+			sync = wait - kernel
+		}
+	}
+	rest := t.Wall - kernel - sync
+	r := PhaseReceipt{Engine: "inkernel", Backend: t.Backend, ForwardPath: "decode_window", Wall: t.Wall, HostDownloadBytes: d2h}
 	for _, p := range phaseOrder {
 		a := PhaseAccounting{Phase: p}
 		switch p {
 		case PhaseDecode:
-			a.Inclusive = PhaseTiming{Wall: t.Wall, Active: t.Wall}
+			a.Inclusive = PhaseTiming{Wall: t.Wall, Active: t.Wall - sync, Wait: sync}
 			a.Exclusive = PhaseTiming{Wall: rest, Active: rest}
 		case PhaseKernel:
 			a.Parent = PhaseDecode
 			a.Inclusive = PhaseTiming{Wall: kernel, Active: kernel}
 			a.Exclusive = a.Inclusive
+		case PhaseSynchronization:
+			a.Parent = PhaseDecode
+			a.Inclusive = PhaseTiming{Wall: sync, Wait: sync}
+			a.Exclusive = a.Inclusive
 		default:
-			// The decode window observes only decode and kernel time; other phases stay zero.
+			// The decode window observes only decode, kernel and sync time; other phases stay zero.
 		}
 		r.Phases = append(r.Phases, a)
 	}
