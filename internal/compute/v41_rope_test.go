@@ -4,6 +4,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -66,6 +67,22 @@ func v41TailRoPEReference(input, table []float32, headDim, rotaryDim int) []floa
 	return out
 }
 
+// shimCaseRun returns the contiguous run of "case LABEL:" labels beginning at
+// the first occurrence of anchor (which must itself be a case label). The run
+// stops at the first text that does not continue it, so sibling kernels added
+// anywhere inside the shared case run cannot break membership witnesses. An
+// empty result means the anchor is absent. Test-only source-witness helper;
+// order-independence pattern from 07116aefba.
+var shimCaseLabelRun = regexp.MustCompile(`(?:\s*case\s+[A-Za-z0-9_]+\s*:)+`)
+
+func shimCaseRun(source, anchor string) string {
+	at := strings.Index(source, anchor)
+	if at < 0 {
+		return ""
+	}
+	return shimCaseLabelRun.FindString(source[at:])
+}
+
 // fak-test:runtime fast est=5ms lane=default
 // Source witness only: no compiler invocation, SPIR-V fabrication, or GPU proof.
 func TestV41TailRoPESourceContract(t *testing.T) {
@@ -98,7 +115,6 @@ func TestV41TailRoPESourceContract(t *testing.T) {
 	shim := string(vulkanAdmissionSource(t))
 	for _, token := range []string{
 		`ok &= buildKernel(g_kern[K_V41_TAIL_ROPE_QK], P("v41_tail_rope_qk.spv"), 5, 3 * sizeof(int));`,
-		"case K_ROPE: case K_QWEN35_PARTIAL_ROPE_PANEL: case K_V41_TAIL_ROPE_QK:",
 		"nbuf != 5 || pcsize != 12 || !v41TailRoPEABI(code)", "buffers.size() != 5", "seenBindings == 31",
 		"!decorated(id, noContraction, 0)", "!atOffset(pushStruct, m, m * 4)",
 		"if (i != out && aliases(bufs[out], bufs[i])) return 2;", "groups > g_maxComputeWorkGroupCountX",
@@ -109,6 +125,25 @@ func TestV41TailRoPESourceContract(t *testing.T) {
 		if !strings.Contains(shim, token) {
 			t.Errorf("missing native contract %q", token)
 		}
+	}
+	// Membership in the shared rope pre-dispatch case run must not depend on
+	// adjacent kernels; adding another kernel to the run must preserve this
+	// source witness (order-independence pattern from 07116aefba).
+	const ropeAnchor = "case K_ROPE:"
+	ropeRun := shimCaseRun(shim, ropeAnchor)
+	if ropeRun == "" {
+		t.Fatalf("missing shared rope pre-dispatch case run anchored at %q", ropeAnchor)
+	}
+	for _, label := range []string{"K_QWEN35_PARTIAL_ROPE_PANEL", "K_V41_TAIL_ROPE_QK"} {
+		if !strings.Contains(ropeRun, "case "+label+":") {
+			t.Errorf("shared rope pre-dispatch case run lost %s", label)
+		}
+	}
+	// Negative control: the witness must read the anchored run, not a coincident
+	// occurrence elsewhere in the shim.
+	broken := strings.Replace(shim, ropeRun, strings.ReplaceAll(ropeRun, "case K_V41_TAIL_ROPE_QK:", "case K_V41_TAIL_ROPE_EXACT:"), 1)
+	if strings.Contains(shimCaseRun(broken, ropeAnchor), "case K_V41_TAIL_ROPE_QK:") {
+		t.Error("source witness admitted tail-rope dispatch outside the anchored case run")
 	}
 	begin := strings.Index(shim, "VkCommandBuffer v41BeginCmdChecked()")
 	if begin < 0 {

@@ -76,7 +76,6 @@ func TestQwen35GDNQ8InputProjectionShimContract(t *testing.T) {
 	src := string(shim)
 	for _, token := range []string{
 		"K_QWEN35_GDN_Q8_IN_PROJ",
-		"case K_QWEN35_GDN_Q8_IN_PROJ: case K_QWEN35_GDN_CONV",
 		"static constexpr int MAX_DISPATCH_BUFS = 20;",
 		"P(\"qwen35_gdn_q8_in_proj.spv\"),",
 		"13, 5 * sizeof(int)) ? 1 : 0;",
@@ -86,6 +85,23 @@ func TestQwen35GDNQ8InputProjectionShimContract(t *testing.T) {
 		if !strings.Contains(src, token) {
 			t.Errorf("Vulkan shim missing fused Q8 GDN contract token %q", token)
 		}
+	}
+	// Membership in the shared GDN pre-dispatch case run must not depend on
+	// adjacent kernels; adding another kernel to the run must preserve this
+	// source witness (order-independence pattern from 07116aefba).
+	const gdnAnchor = "case K_QWEN35_GDN_Q8_IN_PROJ:"
+	gdnRun := shimCaseRun(src, gdnAnchor)
+	if gdnRun == "" {
+		t.Fatalf("missing shared GDN pre-dispatch case run anchored at %q", gdnAnchor)
+	}
+	if !strings.Contains(gdnRun, "case K_QWEN35_GDN_CONV:") {
+		t.Error("shared GDN pre-dispatch case run lost K_QWEN35_GDN_CONV")
+	}
+	// Negative control: the witness must read the anchored run, not a coincident
+	// occurrence elsewhere in the shim.
+	broken := strings.Replace(src, gdnRun, strings.ReplaceAll(gdnRun, "case K_QWEN35_GDN_CONV:", "case K_QWEN35_GDN_RECURRENT:"), 1)
+	if strings.Contains(shimCaseRun(broken, gdnAnchor), "case K_QWEN35_GDN_CONV:") {
+		t.Error("source witness admitted GDN conv dispatch outside the anchored case run")
 	}
 	_, build := qwen35GDNComputeFixture(t, "build_vulkan.ps1")
 	if !strings.Contains(string(build), `$shaders += "qwen35_gdn_q8_in_proj"`) {
