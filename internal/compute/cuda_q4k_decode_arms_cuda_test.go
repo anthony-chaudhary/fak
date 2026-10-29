@@ -5,17 +5,23 @@ package compute
 import (
 	"fmt"
 	"math"
+	"os"
 	"testing"
+	"time"
 )
 
 // q4kMMVQParityShapes are the mmvq decode parity shapes. 321 rows is odd, so the two-rows-per-
 // block P=2/P=3 kernels take the clamped last-row read; 1024x5120 is a Qwen hidden-width K.
+// q4kMMVQRelMaxAbs bounds the mmvq-vs-f32 error relative to max |y|.
+const q4kMMVQRelMaxAbs = 1e-2
+
 var q4kMMVQParityShapes = []struct{ out, in int }{{321, 256}, {1024, 5120}}
 
-// TestCUDAQ4KDecodeArmMMVQMatchesRef is the mmvq decode arm's keep/remove gate (fak#8635): the
-// strict Q4_K gate the f32 GEMV and the mmq prefill arm pass (cosine >= cudaQ4KCosineMin,
-// maxAbs <= 0.02, exact argmax) against the cpuref f32 GEMM over the dequant of the same bytes,
-// for MatMul (P=1) and BatchedMatMul (P=2, 3).
+// TestCUDAQ4KDecodeArmMMVQMatchesRef is the mmvq decode arm's keep/remove gate (fak#8635) against
+// the cpuref f32 GEMM over the dequant of the same bytes, for MatMul (P=1) and BatchedMatMul
+// (P=2, 3): cosine >= cudaQ4KCosineMin, exact per-row argmax, and maxAbs within
+// q4kMMVQRelMaxAbs of max |y|. The q8_1 activation error scales with |y|, so an absolute bound
+// does not fit; the int8-model test below pins the port itself.
 //
 // fak-test:runtime slow est=10s
 func TestCUDAQ4KDecodeArmMMVQMatchesRef(t *testing.T) {
@@ -33,16 +39,21 @@ func TestCUDAQ4KDecodeArmMMVQMatchesRef(t *testing.T) {
 				want := ref.Read(ref.BatchedMatMul(w, mkResident(ref, []int{P, shape.in}, X), P))
 				got := runQ4KMMVQ(t, cb, wQ4K, X, shape.in, P)
 				cos, maxAbs := cosine(want, got), maxAbsDelta(want, got)
-				if cos < cudaQ4KCosineMin || maxAbs > 0.02 {
-					t.Fatalf("mmvq Q4_K decode: cosine=%.8f maxAbs=%.3e (gate cosine>=%.4f maxAbs<=0.02)", cos, maxAbs, cudaQ4KCosineMin)
+				scale := 0.0
+				for _, v := range want {
+					scale = math.Max(scale, math.Abs(float64(v)))
+				}
+				if cos < cudaQ4KCosineMin || maxAbs > q4kMMVQRelMaxAbs*scale {
+					t.Fatalf("mmvq Q4_K decode: cosine=%.8f maxAbs=%.3e of max |y| %.3e (gate cosine>=%.4f maxAbs<=%.0e*max|y|)",
+						cos, maxAbs, scale, cudaQ4KCosineMin, q4kMMVQRelMaxAbs)
 				}
 				for r := 0; r < P; r++ {
 					if a, b := argmaxF32(got[r*shape.out:(r+1)*shape.out]), argmaxF32(want[r*shape.out:(r+1)*shape.out]); a != b {
 						t.Fatalf("mmvq Q4_K decode row %d argmax mismatch: got=%d want=%d", r, a, b)
 					}
 				}
-				t.Logf("mmvq Q4_K decode %dx%d P=%d cosine=%.8f maxAbs=%.3e argmax-exact (tier=%s)",
-					shape.out, shape.in, P, cos, maxAbs, cb.Tier())
+				t.Logf("mmvq Q4_K decode %dx%d P=%d cosine=%.8f maxAbs=%.3e of max |y| %.3e argmax-exact (tier=%s)",
+					shape.out, shape.in, P, cos, maxAbs, scale, cb.Tier())
 			})
 		}
 		cb.Free(wQ4K)
@@ -164,4 +175,53 @@ func q4kMMVQInt8Model(raw []byte, X []float32, out, in, P int) []float32 {
 		}
 	}
 	return y
+}
+
+// TestCUDAQ4KDecodeArmABBA times the P=1 Q4_K GEMV on both decode arms in A-B-B-A order at the
+// Qwen3.8-27B projection shapes. It is the per-kernel A/B for fak#8635 when the full model does
+// not fit the card; FAK_CUDA_Q4K_DECODE_ABBA=1 opts in.
+//
+// fak-test:runtime slow est=30s lane=optin
+func TestCUDAQ4KDecodeArmABBA(t *testing.T) {
+	if os.Getenv("FAK_CUDA_Q4K_DECODE_ABBA") != "1" {
+		t.Skip("FAK_CUDA_Q4K_DECODE_ABBA=1 runs the decode arm A/B")
+	}
+	cb := cudaOrSkip(t)
+	before := CUDAQ4KDecodeArmInUse()
+	t.Cleanup(func() {
+		if err := SetCUDAQ4KDecodeArm(before); err != nil {
+			t.Errorf("restore decode arm %q: %v", before, err)
+		}
+	})
+	const calls = 400
+	for _, shape := range []struct{ out, in int }{{5120, 5120}, {17408, 5120}, {5120, 17408}, {248320, 5120}} {
+		var seed lcg = 0x4d57
+		raw := randQ4KBytes(&seed, shape.out, shape.in)
+		w := cb.Upload(newQ4KHost(cb, []int{shape.out, shape.in}, raw), Q4_K)
+		x := mkResident(cb, []int{shape.in}, rscale(&seed, shape.in, 1.0))
+		perCall := map[CUDAQ4KDecodeArm][]float64{}
+		for _, arm := range []CUDAQ4KDecodeArm{CUDAQ4KDecodeF32, CUDAQ4KDecodeMMVQ, CUDAQ4KDecodeMMVQ, CUDAQ4KDecodeF32} {
+			if err := SetCUDAQ4KDecodeArm(arm); err != nil {
+				t.Fatal(err)
+			}
+			cb.Free(cb.MatMul(w, x)) // warm the arm's scratch outside the timed window
+			cb.Read(cb.MatMul(w, x))
+			start := time.Now()
+			y := cb.MatMul(w, x)
+			for i := 1; i < calls; i++ {
+				cb.Free(y)
+				y = cb.MatMul(w, x)
+			}
+			cb.Read(y)
+			perCall[arm] = append(perCall[arm], float64(time.Since(start).Microseconds())/calls)
+			cb.Free(y)
+		}
+		f, m := perCall[CUDAQ4KDecodeF32], perCall[CUDAQ4KDecodeMMVQ]
+		fa, ma := (f[0]+f[1])/2, (m[0]+m[1])/2
+		bytes := float64(shape.out*shape.in/256*144) / 1e3 // weight KB per call
+		t.Logf("q4k decode ABBA %dx%d: f32=%.2fus (%.2f,%.2f) mmvq=%.2fus (%.2f,%.2f) speedup=%.3fx mmvq_GBps=%.1f tier=%s",
+			shape.out, shape.in, fa, f[0], f[1], ma, m[0], m[1], fa/ma, bytes/ma, cb.Tier())
+		cb.Free(x)
+		cb.Free(w)
+	}
 }
