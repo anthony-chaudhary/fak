@@ -108,6 +108,25 @@ func (c Config) ContextSizeConfigWithPrecision(prec compute.KVPrecision) compute
 				Detail: "deepseek-v4-compressor-inflight-rows", DType: compute.F32.String(),
 			})
 		}
+		if c.IsDeepSeekV41() {
+			// DeepSeek-V4.1 keeps a per-layer sliding-window row mirror plus the
+			// shared compressed rows and indexer keys its source layers publish
+			// (#13914). The uniform product charges three f32 rows per layer per
+			// token while the kept KV is a bounded mirror plus ~8.4 KB/token of
+			// published rows; an owners-only charge would under-reserve because
+			// the mirror is per layer, so the charge folds each layer's mirror
+			// into its own entry and the compressor in-flight rows into
+			// SessionState. Anything the published-schedule check cannot prove
+			// keeps the uniform charge (fail closed, conservative over-
+			// reservation).
+			if layers, inflight, ok := c.v41CompressedKVCharge(); ok {
+				compressedKV = layers
+				sessionState = append(sessionState, compute.MemoryDemand{
+					Class: compute.MemoryKVCache, Bytes: inflight,
+					Detail: "deepseek-v41-compressor-inflight-rows", DType: compute.F32.String(),
+				})
+			}
+		}
 		// KVCacheShape already normalizes the loader's -1 full-attention sentinel to
 		// kvbudget's non-positive "no window" spelling, which is the spelling
 		// compute.KVConfig.WindowPerLayer reads — so the slice crosses verbatim. A
@@ -133,4 +152,83 @@ func (c Config) ContextSizeConfigWithPrecision(prec compute.KVPrecision) compute
 		},
 		MaxContext: c.MaxPositionEmbeddings,
 	}
+}
+
+// v41CompressedKVCharge projects the published DeepSeek-V4.1-Flash retention
+// schedule onto compute.CompressedKVLayer entries plus the compressor's
+// in-flight row demand (#13914).
+//
+// Every decoder layer keeps a v41WindowSize-row device row mirror of one f32
+// HeadDim row per kept position (ring-wrapped at the window edge); the KV
+// source layers publish one compressed HeadDim row per completed ratio group,
+// and the index source layers one IndexHeadDim key per published compressed
+// row. Each layer's entry folds its mirror into the window term
+// (WindowRows = v41WindowSize, RowBytes = HeadDim*4) so the kept rows are
+// charged per layer instead of dropped by an owners-only accounting, and the
+// owner's compressed rows ride the same entry's Ratio term. An index-only
+// source — a layer that publishes keys but no latents — gets a second
+// zero-width-base entry (WindowRows = 1 pins the base term at one 0-byte row)
+// whose ceil(tokens/Ratio) index keys are the whole charge. The compressor's
+// in-flight rows — at most ratio-1 pre-attention input carriers plus ratio-1
+// projected rows per compressing layer, the bound V41AttentionState's append
+// guards enforce — are returned separately for SessionState, mirroring the
+// V4 Flash in-flight demand.
+//
+// ok=false (uniform fallback) unless every axis the arithmetic trusts is the
+// published one: the 40-layer decoder schedule (which also pins the ratios),
+// the published source lists, and positive pinned widths.
+func (c Config) v41CompressedKVCharge() ([]compute.CompressedKVLayer, int64, bool) {
+	if !c.IsDeepSeekV41() || !v41PublishedDecoderSchedule(c) {
+		return nil, 0, false
+	}
+	m := c.DeepSeekV41
+	if m == nil || !v41EqualInts(m.KVSourceLayerIDs, v41PublishedKVSourceLayerIDs) ||
+		!v41EqualInts(m.IndexSourceLayerIDs, v41PublishedIndexSourceLayerIDs) {
+		return nil, 0, false
+	}
+	if c.HeadDim <= 0 || c.HiddenSize <= 0 || c.IndexHeadDim <= 0 {
+		return nil, 0, false
+	}
+	rowBytes, indexBytes := int64(c.HeadDim)*4, int64(c.IndexHeadDim)*4
+	kvSource := make(map[int]bool, len(v41PublishedKVSourceLayerIDs))
+	for _, l := range v41PublishedKVSourceLayerIDs {
+		kvSource[l] = true
+	}
+	indexOnly := make(map[int]bool, len(v41PublishedIndexSourceLayerIDs))
+	for _, l := range v41PublishedIndexSourceLayerIDs {
+		if !kvSource[l] {
+			indexOnly[l] = true
+		}
+	}
+	n := v41PublishedNumLayers
+	layers := make([]compute.CompressedKVLayer, 0, n+len(indexOnly))
+	var inflight int64
+	for l := 0; l < n; l++ {
+		ratio := c.CompressRatios[l]
+		entry := compute.CompressedKVLayer{WindowRows: v41WindowSize, RowBytes: rowBytes}
+		switch {
+		case kvSource[l]:
+			// All four published KV sources are also index sources: their
+			// compressed rows and index keys fold into the layer's own entry.
+			entry.Ratio = ratio
+			entry.IndexRowBytes = indexBytes
+		case indexOnly[l]:
+			// Keys without latents: a zero-width-base entry charges exactly
+			// its ceil(tokens/ratio) index keys.
+			layers = append(layers, entry, compute.CompressedKVLayer{
+				WindowRows:    1,
+				Ratio:         ratio,
+				IndexRowBytes: indexBytes,
+			})
+			if ratio > 1 {
+				inflight += int64(ratio-1) * int64(c.HiddenSize+c.HeadDim) * 4
+			}
+			continue
+		}
+		if ratio > 1 {
+			inflight += int64(ratio-1) * int64(c.HiddenSize+c.HeadDim) * 4
+		}
+		layers = append(layers, entry)
+	}
+	return layers, inflight, true
 }

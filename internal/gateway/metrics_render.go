@@ -336,6 +336,7 @@ func (s *Server) renderMetrics() string {
 	s.writeMoEResidencyMetrics(&b) // #5617: activated-expert residency for a serve that declared an expert budget
 	s.writeDeviceWeightMemoryMetrics(&b)
 	s.writeDeviceTransientPoolMetrics(&b)
+	s.writePagedPrefixMetrics(&b)
 	writeGoRuntimeMemoryMetrics(&b, goRuntimeMetricsSample())
 	m.writeCompactionMetrics(&b)
 	writeLlamaSoftSlotMetrics(&b)

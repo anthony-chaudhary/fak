@@ -127,9 +127,11 @@ func (p *PrefixSnapshot) v41BackendSnapshotSupported() bool {
 // refused until it is witnessed on its own. cpu-ref is witnessed by
 // TestV41BackendPrefixSnapshot; vulkan by TestV41BackendPrefixSnapshotVulkan on
 // the physical device, whose resident KV mirror and bindings rebuild from the
-// restored host continuation state (fak-private#3432).
+// restored host continuation state (fak-private#3432); cuda by
+// TestV41BackendPrefixSnapshotCUDA on the physical device, where the same
+// restored host continuation state rebuilds every per-session CUDA binding.
 func v41QualifiedBackend(name string) bool {
-	return name == "cpu-ref" || name == "vulkan"
+	return name == "cpu-ref" || name == "vulkan" || name == "cuda"
 }
 
 // v41ForwardSnapshot owns a session's writable V4.1 continuation state. It

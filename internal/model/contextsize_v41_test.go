@@ -22,22 +22,42 @@ func TestContextSizeV41RealizedPrecision(t *testing.T) {
 				for _, tokens := range []int{1, 256, 16384} {
 					// Preserve the existing conservative uniform tier. This is not
 					// a complete bound on V4.1 fixed rings or device-log capacities.
-					wantBytes := int64(tokens) * 40 * 512 * 3 * 4
-					if bytes := got.KVBytes(tokens); bytes != wantBytes {
-						t.Errorf("requested %s tokens=%d KV bytes=%d, want %d", requested, tokens, bytes, wantBytes)
-					}
+					uniform := int64(tokens) * 40 * 512 * 3 * 4
 					kvDemands := 0
 					for _, demand := range got.PerContextMemoryPlan(tokens) {
 						if demand.Class != compute.MemoryKVCache {
 							continue
 						}
 						kvDemands++
-						if demand.Bytes != wantBytes || demand.DType != compute.F32.String() {
-							t.Errorf("requested %s tokens=%d KV demand=%#v, want %d f32 bytes", requested, tokens, demand, wantBytes)
+						if demand.DType != compute.F32.String() {
+							t.Errorf("requested %s tokens=%d KV demand=%#v, want f32", requested, tokens, demand)
+						}
+						switch hybrid {
+						case "0":
+							if demand.Bytes != uniform {
+								t.Errorf("requested %s tokens=%d KV demand=%#v, want %d uniform f32 bytes", requested, tokens, demand, uniform)
+							}
+						default:
+							// #13914: gate-on sizes the plan from the kept KV — one
+							// compressed-rows demand strictly below the uniform store,
+							// plus the compressor in-flight rows in SessionState.
+							switch demand.Detail {
+							case "compressed-kv-rows":
+								if demand.Bytes != got.KVBytes(tokens) || demand.Bytes >= uniform {
+									t.Errorf("requested %s tokens=%d compressed demand=%#v, want %d B below the uniform %d", requested, tokens, demand, got.KVBytes(tokens), uniform)
+								}
+							case "deepseek-v41-compressor-inflight-rows":
+							default:
+								t.Errorf("requested %s tokens=%d unexpected KV demand detail %q", requested, tokens, demand.Detail)
+							}
 						}
 					}
-					if kvDemands != 1 {
-						t.Errorf("requested %s tokens=%d KV demands=%d, want one unchanged uniform demand", requested, tokens, kvDemands)
+					wantDemands := 1
+					if hybrid == "1" {
+						wantDemands = 2
+					}
+					if kvDemands != wantDemands {
+						t.Errorf("requested %s tokens=%d KV demands=%d, want %d", requested, tokens, kvDemands, wantDemands)
 					}
 				}
 			}

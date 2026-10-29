@@ -186,6 +186,12 @@ type TransientPoolBackend interface {
 	TransientPoolStats() (pooledBuffers, pooledBytes, peakPooledBytes int64)
 }
 
+// PagedPrefixReporter is implemented by local device planners whose paged prefix page
+// ledger is wired; ok is false when none is, which surfaces render as absent.
+type PagedPrefixReporter interface {
+	PagedPrefixTelemetry() (InKernelPagedPrefixTelemetry, bool)
+}
+
 // MoEResidencyReporter is implemented by local planners that can report activated-expert
 // residency across the requests they served (R6, #5617). Proxy planners do not implement it, so
 // the gateway emits no local MoE-residency series for upstream providers.
