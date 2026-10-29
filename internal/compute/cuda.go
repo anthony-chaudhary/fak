@@ -28,6 +28,11 @@ package compute
 #include <cuda.h>
 #include "cuda_backend.h"
 #include "cuda_kv_precision.h"
+#include <stdint.h>
+// Always-on device-work counters (cuda/kernel_profile.cuh; fold in cuda_device_work.go).
+extern void fcuda_dw_counters(uint64_t *out, int n);
+extern int fcuda_dw_site_rows(uint32_t *site, uint32_t *stage, uint64_t *syncs, uint64_t *wait_ns, uint64_t *d2h, int cap);
+extern const char *fcuda_dw_stage_name(uint32_t id);
 */
 import "C"
 
@@ -120,6 +125,7 @@ func init() {
 		}, CUDABuildArches{}),
 	}
 	Register(cudaDev)
+	RegisterDeviceWorkReader("cuda", readCUDADeviceWork)
 	initCUDAQ4KPrefillArm(int(sm))
 	initCUDAQ4KDecodeArm()
 	if C.fcuda_ts_enabled() != 0 {
@@ -176,6 +182,38 @@ func readCUDAKernelProfile() (KernelProfile, bool) {
 		UntimedCompute: uint64(tot.untimed_compute), UntimedTransfer: uint64(tot.untimed_transfer),
 		BarriersElided: uint64(tot.barriers_elided), GPUNS: float64(tot.gpu_ns), WallNS: float64(tot.wall_ns),
 	}, n, rows, func(kid uint32) string { return C.GoString(C.fcuda_ts_kernel_name(C.uint32_t(kid))) })
+}
+
+// readCUDADeviceWork reads the shim's always-on atomics without cudaMu, so a scrape or
+// decode-loop sample never waits behind an in-flight launch or sync. The cell table can grow
+// between the size and fill calls; the loop retries with room to spare.
+func readCUDADeviceWork() DeviceWork {
+	var counters [cudaDWCounterCount]C.uint64_t
+	C.fcuda_dw_counters(&counters[0], C.int(len(counters)))
+	var raw [cudaDWCounterCount]uint64
+	for i, v := range counters {
+		raw[i] = uint64(v)
+	}
+	n := int(C.fcuda_dw_site_rows(nil, nil, nil, nil, nil, 0))
+	for {
+		capRows := n + 8
+		ids := make([]C.uint32_t, 2*capRows)
+		vals := make([]C.uint64_t, 3*capRows)
+		n = int(C.fcuda_dw_site_rows(&ids[0], &ids[capRows], &vals[0], &vals[capRows], &vals[2*capRows], C.int(capRows)))
+		if n > capRows {
+			continue
+		}
+		cells := make([]cudaSyncCell, n)
+		for i := range cells {
+			cells[i] = cudaSyncCell{
+				Site: uint32(ids[i]), Stage: uint32(ids[capRows+i]),
+				Syncs: uint64(vals[i]), WaitNS: uint64(vals[capRows+i]), D2HBytes: uint64(vals[2*capRows+i]),
+			}
+		}
+		return cudaDeviceWorkFromShim(raw, n, cells, func(id uint32) string {
+			return C.GoString(C.fcuda_dw_stage_name(C.uint32_t(id)))
+		})
+	}
 }
 
 // Recycle returns every transient op-output buffer allocated since the last Recycle to the

@@ -108,7 +108,7 @@ func (t *Tree) EvictHotSnapshot(digest string) int {
 		return 0
 	}
 	n := t.findSnapshotByDigest(digest)
-	if n == nil || n.snapshot == nil || (n.hostSnapshot == nil && n.remoteSnapshot == nil) {
+	if n == nil || n.snapshot == nil || (n.hostSnapshot == nil && n.remoteSnapshot == nil && n.ssdSnapshot == nil) {
 		return 0
 	}
 	positions := n.plen
@@ -175,31 +175,37 @@ func (t *Tree) makeHostSnapshotRoom(delta int64, exclude *node) bool {
 		return true
 	}
 	for t.hostSnapshotBytes+delta > t.maxHostSnapshotBytes {
-		victim := t.hostSnapshotVictim(exclude)
+		victimNS, victim := t.hostSnapshotVictim(exclude)
 		if victim == nil {
 			return false
 		}
+		// Demote before dropping: an evicted L2 image that the local-SSD overflow tier can
+		// take is spilled there instead of lost to a cold prefill. Best-effort by design —
+		// any failure (budget full, serialization refused, disk error) just leaves the node
+		// without an SSD reference and the eviction proceeds exactly as before.
+		t.spillHostSnapshotToSSD(victimNS, victim)
 		t.releaseHostSnapshot(victim)
 		t.l2Evictions++
 	}
 	return true
 }
 
-func (t *Tree) hostSnapshotVictim(exclude *node) *node {
+func (t *Tree) hostSnapshotVictim(exclude *node) (string, *node) {
 	strat := t.evictionStrategy()
 	if prep, ok := strat.(TreePreparer); ok {
 		prep.PrepareTree(t)
 	}
+	var victimNS string
 	var victim *node
-	t.forEachNode(func(n *node) {
+	t.forEachNodeNS(func(ns string, n *node) {
 		if n == exclude || n.refs > 0 || n.hostSnapshot == nil {
 			return
 		}
 		if victim == nil || strat.Priority(n).less(strat.Priority(victim)) {
-			victim = n
+			victimNS, victim = ns, n
 		}
 	})
-	return victim
+	return victimNS, victim
 }
 
 func (t *Tree) releaseHostSnapshot(n *node) {
@@ -209,7 +215,7 @@ func (t *Tree) releaseHostSnapshot(n *node) {
 	t.hostSnapshotBytes -= hostSnapshotResidentBytes(n.hostSnapshot)
 	n.hostSnapshot.Close()
 	n.hostSnapshot = nil
-	if n.snapshot == nil && n.remoteSnapshot == nil {
+	if n.snapshot == nil && n.remoteSnapshot == nil && n.ssdSnapshot == nil {
 		n.cachedLogits = nil
 	}
 	t.invalidateRecordIfNoLocalCopy(n)
@@ -219,6 +225,7 @@ func (t *Tree) releaseSnapshotPayload(n *node) {
 	t.releaseHotSnapshot(n)
 	t.releaseHostSnapshot(n)
 	t.releaseRemoteSnapshot(n)
+	t.releaseSSDSnapshot(n)
 	// This aggregator is the last checkpoint of a full teardown: releaseHot and
 	// releaseHost each invalidate only after their own call, so a node whose sole
 	// surviving reference was remote L3 would still carry hasRecord=true once
@@ -240,7 +247,7 @@ func (t *Tree) findSnapshotByDigestNS(digest string) (string, *node) {
 	var foundNS string
 	var found *node
 	t.forEachNodeNS(func(ns string, n *node) {
-		if found != nil || (n.snapshot == nil && n.hostSnapshot == nil && n.remoteSnapshot == nil) {
+		if found != nil || (n.snapshot == nil && n.hostSnapshot == nil && n.remoteSnapshot == nil && n.ssdSnapshot == nil) {
 			return
 		}
 		if t.snapshotDigest(ns, n) == digest {

@@ -178,6 +178,7 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 			}
 		}
 		p.tree.SetCPUCacheByteBudget(cpuBytes)
+		p.armRadixLocalSSD(m, backend, modelID)
 		p.scopedTree = radixkv.WrapScopedWithLocker(p.tree, &p.mu)
 		p.pagedPrefix = inKernelPagedPrefixLedgerFor(m, backend, p.tree)
 	}

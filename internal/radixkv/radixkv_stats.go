@@ -54,6 +54,15 @@ type Stats struct {
 	L3BreakerProbeRecoveries   int          `json:"l3_breaker_probe_recoveries,omitempty"`
 	L3BreakerProbeFailures     int          `json:"l3_breaker_probe_failures,omitempty"`
 	L3BreakerOpenedAt          time.Time    `json:"l3_breaker_opened_at,omitempty"`
+	LocalL3Enabled             bool         `json:"local_l3_enabled"`
+	LocalL3BudgetBytes         int64        `json:"local_l3_budget_bytes"`
+	LocalL3ReferencedBytes     int64        `json:"local_l3_referenced_bytes"`
+	LocalL3Hits                int          `json:"local_l3_hits"`
+	LocalL3Misses              int          `json:"local_l3_misses"`
+	LocalL3Faults              int          `json:"local_l3_faults"`
+	LocalL3HitTokens           int          `json:"local_l3_hit_tokens"`
+	LocalL3StageBytes          int64        `json:"local_l3_stage_bytes"`
+	LocalL3RestoreBytes        int64        `json:"local_l3_restore_bytes"`
 	Leaves                     int          // leaf nodes
 	MaxDepthTokens             int          // longest cached prefix
 	Evictions                  int          // LRU leaf evictions performed
@@ -175,6 +184,15 @@ func (t *Tree) Stats() Stats {
 		L2StageBytes:               t.l2StageBytes,
 		L2RestoreBytes:             t.l2RestoreBytes,
 		L2Evictions:                t.l2Evictions,
+		LocalL3Enabled:             t.LocalSSDSnapshotEnabled(),
+		LocalL3BudgetBytes:         t.localSSDBudget,
+		LocalL3ReferencedBytes:     t.localSSDSnapshotBytes,
+		LocalL3Hits:                t.l3LocalHits,
+		LocalL3Misses:              t.l3LocalMisses,
+		LocalL3Faults:              t.l3LocalFaults,
+		LocalL3HitTokens:           t.l3LocalHitTokens,
+		LocalL3StageBytes:          t.l3LocalStageBytes,
+		LocalL3RestoreBytes:        t.l3LocalRestoreBytes,
 		L3Enabled:                  t.RemoteSnapshotEnabled(),
 		L3ReferencedBytes:          t.remoteSnapshotBytes,
 		L3Hits:                     t.l3Hits,

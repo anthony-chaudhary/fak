@@ -135,6 +135,9 @@ type InKernelPlanner struct {
 	scopedTree *radixkv.ScopedTree
 	// radixHostL2 is the host-DRAM L2 KV reserve resolved for tree at construction.
 	radixHostL2 InKernelRadixHostL2
+	// radixLocalSSD is the local-SSD KV overflow budget resolved for tree at construction;
+	// zero when the tier is off (CPU-only planner, unknown disk capacity, or operator 0).
+	radixLocalSSD InKernelRadixLocalSSD
 	// pagedPrefix is the device planner's paged prefix page ledger
 	// (inkernel_paged_prefix.go); nil on a CPU planner or with FAK_INKERNEL_PAGED_PREFIX=off.
 	pagedPrefix *inKernelPagedPrefixLedger
