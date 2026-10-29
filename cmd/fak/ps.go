@@ -221,21 +221,41 @@ func renderPSTable(w io.Writer, list gateway.SessionListResponse) {
 		return
 	}
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
+	boundedActivity := false
 	fmt.Fprintln(tw, "TRACE\tSTATE\tTURNS\tTOKENS\tCTX\tPRIO\tREV\tTOOLS\tEXECS\tFAIL\tEFFECTS\tREASON")
 	for _, st := range list.Sessions {
+		boundedActivity = boundedActivity || st.Activity.Coverage != nil
 		reason := st.Reason
 		if reason == "" {
 			reason = "-"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%s\n",
+		tools, execs, failures, effects := psActivityCounts(st.Activity)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\n",
 			st.TraceID, st.Run,
 			budgetAxis(st.Budget.TurnsLeft), budgetAxis(st.Budget.TokensLeft), contextBudgetAxis(st.Budget.ContextTokensLeft),
 			st.Priority, st.Rev,
-			st.Activity.Tools, st.Activity.Execs, st.Activity.Fail, st.Activity.Effects,
+			tools, execs, failures, effects,
 			reason)
 	}
 	_ = tw.Flush()
 	fmt.Fprintf(w, "%d session(s)\n", list.Count)
+	if boundedActivity {
+		fmt.Fprintln(w, "activity: native counts are retained observations, not lifetime totals; ? = unavailable")
+	}
+}
+
+func psActivityCounts(a gateway.ActionCounts) (string, string, string, string) {
+	render := func(value int, coverage string) string {
+		if a.Coverage != nil && coverage != gateway.ActivityCoverageNativeSyscallResults {
+			return "?"
+		}
+		return fmt.Sprint(value)
+	}
+	var c gateway.ActivityCoverage
+	if a.Coverage != nil {
+		c = *a.Coverage
+	}
+	return render(a.Tools, c.Tools), render(a.Execs, ""), render(a.Fail, c.Fail), render(a.Effects, "")
 }
 
 func psUsage(w io.Writer) {

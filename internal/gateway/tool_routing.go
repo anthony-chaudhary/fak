@@ -181,6 +181,7 @@ func (s *Server) syscall(ctx context.Context, tool, rawArgs string, readOnly boo
 		dur := time.Since(start)
 		s.metrics.observeOperation("syscall", wv, err, dur)
 		s.logGatewayOperation("syscall", opTrace, opTool, wv, err, dur)
+		s.activity.observeSyscallResult(opTrace, wv.Kind, env, time.Now())
 	}()
 	if nativeToolName(tool) == remoteMaintenanceTool {
 		readOnly = false

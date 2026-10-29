@@ -27,10 +27,50 @@ import (
 // a turn in flight has not yet been adjudicated — so a snapshot yields in-flight OR idle,
 // never both.
 type traceActivity struct {
-	lastTool          string
-	spawnCount        int
-	lastActivityUnix  int64
-	inflightSinceUnix int64
+	lastTool             string
+	spawnCount           int
+	lastActivityUnix     int64
+	inflightSinceUnix    int64
+	syscallTools         int
+	syscallFailures      int
+	syscallSinceUnixNano int64
+	syscallLastUnix      int64
+}
+
+func (a *sessionActivity) observeSyscallResult(trace, verdict string, result *ResultEnvelope, now time.Time) {
+	if a == nil || trace == "" || (verdict != "ALLOW" && verdict != "TRANSFORM") || result == nil ||
+		(result.Status != "OK" && result.Status != "ERROR") {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	r := a.getOrMakeLocked(trace, now)
+	if r.syscallSinceUnixNano == 0 {
+		r.syscallSinceUnixNano = now.UnixNano()
+	}
+	r.syscallTools++
+	if result.Status == "ERROR" {
+		r.syscallFailures++
+	}
+	r.syscallLastUnix = now.Unix()
+}
+
+func (a *sessionActivity) actionCounts(trace string) ActionCounts {
+	out := ActionCounts{Coverage: &ActivityCoverage{
+		Tools: ActivityCoverageUnavailable, Execs: ActivityCoverageUnavailable,
+		Fail: ActivityCoverageUnavailable, Effects: ActivityCoverageUnavailable,
+	}}
+	if a == nil {
+		return out
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if r := a.rec[trace]; r != nil && r.syscallSinceUnixNano != 0 {
+		out.Tools, out.Fail = r.syscallTools, r.syscallFailures
+		out.Coverage.Tools, out.Coverage.Fail = ActivityCoverageNativeSyscallResults, ActivityCoverageNativeSyscallResults
+		out.Coverage.SinceUnixNano = r.syscallSinceUnixNano
+	}
+	return out
 }
 
 // traceActivityView is the read projection debugSessions folds onto a session row. Every
@@ -88,6 +128,9 @@ func (a *sessionActivity) evictColdestLocked(now time.Time) {
 	nowU := now.Unix()
 	for id, r := range a.rec {
 		seen := r.lastActivityUnix
+		if r.syscallLastUnix > seen {
+			seen = r.syscallLastUnix
+		}
 		if r.inflightSinceUnix > 0 {
 			seen = nowU
 		}
