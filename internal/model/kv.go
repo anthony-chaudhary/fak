@@ -184,7 +184,6 @@ type Session struct {
 	hostPathBypass        string
 	hostPathBypassRelease func()
 	// Request observations stay on the session, outside arithmetic prefix state.
-	hostStages        map[string]struct{}
 	hostStageObserver func(string)
 
 	// glmDsaHeadNameLogged gates the one-time FAK_GLMDSA_DUMP head-resolution log (#996 LM-head probe).
