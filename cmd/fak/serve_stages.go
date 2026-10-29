@@ -470,7 +470,7 @@ func (rt *serveRuntime) resolveCompute(sf *serveFlags) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	rt.requireDeviceExecution = policy.requireDeviceExecution(halo)
+	rt.requireDeviceExecution = policy.requireDeviceExecution(halo, chatBackend)
 	// A PQ2-only Bonsai artifact has a resident CPU ternary kernel but no
 	// model-wired Metal or compute-HAL PQ2 kernel yet. Select its CPU forward
 	// before publishing a backend receipt or reserving the Metal device.

@@ -30,7 +30,7 @@ func TestServeExecutionPolicyProductionKeepsHaloCPUOffloadRefusal(t *testing.T) 
 		if _, err := resolveServeChatBackendForHostPolicy("cpu", "", "linux", cpuOnlyServeLookup, true, p); !errors.As(err, &halo) || halo.Reason != haloGPUReasonCPUBackend {
 			t.Fatalf("policy %q cpu backend: err=%v, want %s", name, err, haloGPUReasonCPUBackend)
 		}
-		if !p.requireDeviceExecution(true) || len(p.Bypassed) != 0 || p.report() != nil {
+		if !p.requireDeviceExecution(true, nil) || len(p.Bypassed) != 0 || p.report() != nil {
 			t.Fatalf("policy %q: production lifted a guard: %+v", name, p)
 		}
 	}
@@ -73,7 +73,7 @@ func TestServeExecutionPolicyBringupDedicatedAdmitsHaloCPUOffload(t *testing.T) 
 	if err := p.admit(validateServeHaloCPUOffload(true, false, "bogus", "")); err == nil {
 		t.Fatal("malformed n-cpu-moe grade must still refuse under bringup")
 	}
-	if p.requireDeviceExecution(true) {
+	if p.requireDeviceExecution(true, nil) {
 		t.Fatal("bringup must lift the device-only session policy on a halo")
 	}
 	want := []string{haloGPUReasonCPUBackend, haloGPUReasonCPUExpertOffload, executionPolicyBypassDeviceOnlySession}
@@ -100,19 +100,62 @@ func TestServeExecutionPolicyBringupDeviceBackendKeepsDeviceOnly(t *testing.T) {
 	if err := p.admit(validateServeHaloCPUOffload(true, false, "", "")); err != nil {
 		t.Fatal(err)
 	}
-	if !p.requireDeviceExecution(true) || len(p.Bypassed) != 0 {
+	if !p.requireDeviceExecution(true, nil) || len(p.Bypassed) != 0 {
 		t.Fatalf("bringup with nothing host-side lifted: bypassed=%v, want device-only kept (expert ring stays admissible)", p.Bypassed)
 	}
 }
 
 // fak-test:runtime fast est=1ms lane=default
-func TestServeExecutionPolicyBringupOffHaloBypassesNothing(t *testing.T) {
-	p, err := resolveServeExecutionPolicy("bringup", "m", "m", nil)
+func TestServeExecutionPolicyBringupOffHaloDeviceMemory(t *testing.T) {
+	device := haloGPUBackend{Backend: compute.Default(), name: "cuda", device: true}
+	host := haloGPUBackend{Backend: compute.Default(), name: "cuda", device: false}
+	for _, tc := range []struct {
+		name    string
+		backend compute.Backend
+		want    bool
+	}{{"nil", nil, false}, {"host", host, false}, {"device", device, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			var log bytes.Buffer
+			p, err := resolveServeExecutionPolicy("bringup", "m", "m", &log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := p.admit(validateServeHaloCPUOffload(false, true, "", "")); err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < 2; i++ {
+				if p.requireDeviceExecution(false, tc.backend) {
+					t.Fatal("off-Halo serve-wide device-only decision changed")
+				}
+			}
+			if !tc.want {
+				if len(p.Bypassed) != 0 || p.sessionBypass() != "" || log.Len() != 0 {
+					t.Fatalf("host-only/nil backend bypassed: %+v, log=%q", p, log.String())
+				}
+				return
+			}
+			want := []string{executionPolicyBypassDeviceOnlySession}
+			if !slices.Equal(p.Bypassed, want) || p.sessionBypass() != executionPolicyBypassDeviceOnlySession || !slices.Equal(p.report().Bypassed, want) {
+				t.Fatalf("device-memory bringup must record exactly one session token: %+v", p)
+			}
+			if strings.Count(log.String(), "target cuda:") != 1 || !strings.Contains(log.String(), agent.HostPathDegradedToken) {
+				t.Fatalf("missing target/degraded marker or repeated log: %q", log.String())
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestServeExecutionPolicyOffHaloProductionUnchanged(t *testing.T) {
+	device := haloGPUBackend{Backend: compute.Default(), name: "cuda", device: true}
+	production, err := resolveServeExecutionPolicy("production", "m", "m", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := p.admit(validateServeHaloCPUOffload(false, true, "", "")); err != nil || p.requireDeviceExecution(false) || len(p.Bypassed) != 0 {
-		t.Fatalf("off-halo bringup: err=%v bypassed=%v, want nothing to lift", err, p.Bypassed)
+	for _, p := range []*serveExecutionPolicy{nil, production, {Name: serveExecutionPolicyBringup}} {
+		if p.requireDeviceExecution(false, device) || p.sessionBypass() != "" || p.report() != nil {
+			t.Fatalf("nil/production/unadmitted policy changed: %+v", p)
+		}
 	}
 }
 
@@ -177,13 +220,13 @@ func TestServeExecutionPolicyBringupBypassIsSessionScoped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !p.requireDeviceExecution(true) || p.sessionBypass() != "" {
+	if !p.requireDeviceExecution(true, nil) || p.sessionBypass() != "" {
 		t.Fatalf("bringup with nothing lifted: bypass=%q, want device-only kept", p.sessionBypass())
 	}
 	if err := p.admit(validateServeHaloCPUOffload(true, true, "", "")); err != nil {
 		t.Fatal(err)
 	}
-	if p.requireDeviceExecution(true) {
+	if p.requireDeviceExecution(true, nil) {
 		t.Fatal("bringup must lift the serve-wide device-only load policy")
 	}
 	if got := p.sessionBypass(); got != executionPolicyBypassDeviceOnlySession {

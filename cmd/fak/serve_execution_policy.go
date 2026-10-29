@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 )
@@ -107,17 +108,22 @@ func (p *serveExecutionPolicy) bypass(token, detail string) {
 	}
 	p.Bypassed = append(p.Bypassed, token)
 	if p.log != nil {
-		fmt.Fprintf(p.log, "fak serve: --%s=%s bypassed GFX1151 device-only refusal %s for model %q (%s)\n", serveExecutionPolicyFlag, p.Name, token, p.Model, detail)
+		fmt.Fprintf(p.log, "fak serve: --%s=%s bypassed device-only policy %s for model %q (%s)\n", serveExecutionPolicyFlag, p.Name, token, p.Model, detail)
 	}
 }
 
-// requireDeviceExecution is the serve-wide device-only decision for a halo host.
+// requireDeviceExecution keeps the serve-wide device-only decision unchanged.
 // An admitted bringup policy lifts it only once it lifted a host or offload
 // refusal, so a device-backend bringup serve keeps the device-only path and
 // its activated-expert ring. The lift is not serve-wide for sessions:
-// sessionBypass hands it to one native session at a time.
-func (p *serveExecutionPolicy) requireDeviceExecution(halo bool) bool {
+// sessionBypass hands it to one native session at a time. Off-Halo, explicit
+// admitted bringup on a device-memory backend records that same session bypass;
+// production and host-only backends remain portable without a bypass token.
+func (p *serveExecutionPolicy) requireDeviceExecution(halo bool, backend compute.Backend) bool {
 	if !halo {
+		if p != nil && p.Admitted && backend != nil && backend.Caps().DeviceMemory {
+			p.bypass(executionPolicyBypassDeviceOnlySession, "target "+backend.Name()+": one native session at a time may execute on the host; perf lines carry "+agent.HostPathDegradedToken)
+		}
 		return false
 	}
 	if p == nil || !p.Admitted || len(p.Bypassed) == 0 {
