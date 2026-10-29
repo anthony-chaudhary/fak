@@ -95,6 +95,17 @@ type anthropicPassthrough struct {
 	promptTok, complTok, cacheRead, cacheCreate int
 	finishReason                                string
 
+	// servedModel is the model id the UPSTREAM itself reported in message_start
+	// (message.model) — the identity that actually ran this turn, which can differ
+	// from the requested id when a router or alias serves another checkpoint (#14110).
+	// "" until message_start arrives; the perf row falls back to the requested id only
+	// when the upstream named none.
+	servedModel string
+	// usageObserved is set once any upstream SSE usage block reports a nonzero token
+	// count. A turn that produced content while it stayed false got no counts at all,
+	// so its durable row marks usage_unreported instead of silently reading 0/0.
+	usageObserved bool
+
 	// firstTokenAt is the wall-clock of the FIRST content delta from the upstream —
 	// the prefill→decode boundary (time-to-first-token). Zero until the first delta
 	// arrives; streamAnthropicPassthroughLive turns it into the prefill/decode split
@@ -319,6 +330,12 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 		}
 		p.start()
 		p.promptTok, p.cacheRead, p.cacheCreate = anthropicStartUsage(ev.Data)
+		if m := anthropicStartModel(ev.Data); m != "" {
+			p.servedModel = m
+		}
+		if p.promptTok > 0 || p.cacheRead > 0 || p.cacheCreate > 0 {
+			p.usageObserved = true
+		}
 		p.send("message_start", ev.Data)
 		// The model is about to read kernel-originated diagnostics for inbound tool
 		// results before its prose: executor failures first, then quarantine stubs.
@@ -427,6 +444,9 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 		}
 		p.s.recordAdjudicationOutcome(signal, denyFP)
 		p.complTok, p.finishReason = relayMessageDelta(p.send, ev.Data, p.complTok, len(p.toolOrder) > 0, p.keptTools)
+		if p.complTok > 0 {
+			p.usageObserved = true
+		}
 
 	case "message_stop":
 		if p.started {
@@ -619,11 +639,18 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 		if !p.firstTokenAt.IsZero() {
 			ttft = p.firstTokenAt.Sub(began)
 		}
-		// The requested model id, which is what the planner routes on — so this relay's
-		// turns are attributed by the same rule as every other path, rather than being
-		// assumed vendor because the byte-preserving relay happens to talk to a vendor
-		// today.
-		s.metrics.observeInferenceServedTimedFrom(perfSourceFrom(r.Context()), s.servedLocality(p.reqModel()), p.reqModel(), p.promptTok, p.complTok, p.cacheRead, p.cacheCreate, p.finishReason, dur, ttft)
+		// Locality still classifies from the requested model id — what the planner
+		// routes on — so this relay's turns are attributed by the same rule as every
+		// other path, rather than being assumed vendor because the byte-preserving
+		// relay happens to talk to a vendor today. The row's MODEL field carries the
+		// upstream-reported served model when it named one (#14110): a router or alias
+		// can serve a different checkpoint than the id the client asked for, and the
+		// ledger must say which one actually ran.
+		detail := perfDetail{model: p.reqModel(), usageUnreported: p.usageUnreported()}
+		if p.servedModel != "" {
+			detail.model = p.servedModel
+		}
+		s.metrics.observeInferenceServedStreamDetail(perfSourceFrom(r.Context()), s.servedLocality(p.reqModel()), detail, p.promptTok, p.complTok, p.cacheRead, p.cacheCreate, p.finishReason, dur, ttft)
 		if compacted {
 			s.metrics.recordCompactionCacheRead(p.cacheRead) // OBSERVED provider cache_read on a compacted streamed turn
 			s.observeResetHealth(reqTrace, p.promptTok, p.cacheRead, p.cacheCreate)
@@ -723,6 +750,29 @@ func relayMessageDelta(send func(string, any), data json.RawMessage, complTok in
 	}
 	send("message_delta", m)
 	return complTok, finish
+}
+
+// usageUnreported reports whether this relayed turn produced assistant content yet
+// the upstream never reported a single nonzero token count: its 0/0 counts then mean
+// "unobserved", not "free", and the durable row says so instead of masquerading as a
+// zero-cost turn.
+func (p *anthropicPassthrough) usageUnreported() bool {
+	return !p.usageObserved && (p.asstText.Len() > 0 || p.keptTools > 0)
+}
+
+// anthropicStartModel extracts the upstream-reported served model (message.model)
+// from a message_start event, for the inference-metrics row's model field. "" when
+// the frame omits it — the caller keeps the requested id in that case.
+func anthropicStartModel(data json.RawMessage) string {
+	var ms struct {
+		Message struct {
+			Model string `json:"model"`
+		} `json:"message"`
+	}
+	if json.Unmarshal(data, &ms) != nil {
+		return ""
+	}
+	return strings.TrimSpace(ms.Message.Model)
 }
 
 // anthropicStartUsage extracts the input/cache token counts from a message_start

@@ -166,6 +166,14 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 			}
 		}
 	}
+	if plan, ok := ctx.Value(cudaArchSpecificKey{}).(*cudaArchSpecificOptions); ok {
+		obj := filepath.Join(pkgDir, "cuda_sm10x_probe.o")
+		args := cudaArchSpecificCompileArgs(tc, plan, obj)
+		if err := compileCUDAObject(ctx, tc, pkgDir, "cuda_sm10x_probe.cu", obj, args, env, receipt, stdout); err != nil {
+			return nil, fmt.Errorf("nvcc arch-specific probe: %w", err)
+		}
+		objs = append(objs, obj)
+	}
 	return objs, nil
 }
 
@@ -320,6 +328,13 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 		}
 		cfg.Toolchain = tc
 	}
+	if cfg.EnableArchSpecific {
+		plan, err := prepareCUDAArchSpecific(ctx, cfg.Toolchain, root)
+		if err != nil {
+			return err
+		}
+		ctx = context.WithValue(ctx, cudaArchSpecificKey{}, plan)
+	}
 	if cfg.ReceiptPath == "" {
 		cfg.ReceiptPath = filepath.Join(cfg.RepoRoot, DefaultCUDABuildReceiptPath)
 	} else if !filepath.IsAbs(cfg.ReceiptPath) {
@@ -366,7 +381,10 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 	}
 	goTags := "cuda"
 	if cfg.EnableNCCL {
-		goTags = "cuda,nccl"
+		goTags += ",nccl"
+	}
+	if cfg.EnableArchSpecific {
+		goTags += ",cudaarchspecific"
 	}
 
 	switch cfg.Command {

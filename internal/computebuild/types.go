@@ -51,6 +51,7 @@ type CUDAConfig struct {
 	RepoRoot           string               // Root of repository containing go.mod
 	PkgDir             string               // Directory of compute package (defaults to <RepoRoot>/internal/compute)
 	Arch               string               // Target arch (e.g. "sm_89", "89", or empty for all arches in cuda_arch.txt)
+	EnableArchSpecific bool                 // Compile declared CUDA 13 arch-specific TUs; never enabled implicitly
 	EnableNCCL         bool                 // Compile NCCL collectives and use -tags cuda,nccl
 	NCCLHome           string               // Optional user-space NCCL root directory
 	OutPkg             string               // Target Go package for "binary" command

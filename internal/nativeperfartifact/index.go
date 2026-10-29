@@ -16,11 +16,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/nativeperfcorrelation"
 )
 
-// Invariant: Native performance artifact indexing provides deterministic locator resolution by correlation key without cross-engine fallback.
-// Fail-Closed Guard: Unresolved, expired, private, or redacted locators return explicit typed errors and never disclose secret paths.
-// Precondition: Correlation keys must conform to the bounded 37-character npc1_ hex string format before admission.
-// Postcondition: Artifact records returned by index resolution contain only public-safe HTTPS endpoints with verified digests.
-
 const (
 	// Schema defines the canonical schema identifier string for native performance artifact payloads.
 	Schema = "fak-native-performance-artifacts/1"
@@ -197,7 +192,6 @@ type Record struct {
 	Artifacts      []Artifact `json:"artifacts"`
 }
 
-// Invariant: An Index retains at most capacity records, evicting the oldest record in FIFO order upon insertion overflow.
 // Index provides a bounded, concurrent, public-safe registry mapping correlation keys to records.
 type Index struct {
 	mu       sync.RWMutex
@@ -206,7 +200,6 @@ type Index struct {
 	order    []string
 }
 
-// Precondition: Capacity must be strictly positive or NewIndex returns an error.
 // NewIndex constructs a bounded artifact index holding at most capacity entries.
 func NewIndex(capacity int) (*Index, error) {
 	if capacity <= 0 {
@@ -215,7 +208,6 @@ func NewIndex(capacity int) (*Index, error) {
 	return &Index{capacity: capacity, records: make(map[string]Record, capacity)}, nil
 }
 
-// Postcondition: Add stores the scrubbed record or returns an error without mutating index state on validation failure.
 // Add inserts or updates a scrubbed record, evicting the oldest key when capacity is reached.
 func (i *Index) Add(record Record) error {
 	record, err := scrub(record)
@@ -239,7 +231,6 @@ func (i *Index) Add(record Record) error {
 	return nil
 }
 
-// Guard: Resolve returns ErrNotFound, ErrBroken, ErrRedacted, or ErrExpired without cross-engine redirection.
 // Resolve returns one exact artifact or an honest typed failure. It never
 // redirects to another engine, correlation key, or artifact kind.
 func (i *Index) Resolve(correlationKey string, kind Kind, now time.Time) (Artifact, error) {

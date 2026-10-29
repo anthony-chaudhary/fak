@@ -164,7 +164,7 @@ func allocateCacheGeometry(s *Session, g CacheGeometry) (out allocatedCacheGeome
 	out.cache = c
 	out.ring = newPagedRing(s.Backend, g.ExpertRingBytes)
 	if s.Backend != nil {
-		out.halKV = newHALKVStore(s.Backend, s.M.Cfg)
+		out.halKV = newHALKVStoreAt(s.Backend, s.M.Cfg, s.halKVPrecision)
 		if s.M.Cfg.IsQwen35Hybrid() {
 			staging := &Session{M: s.M, Backend: s.Backend}
 			staging.initQwen35HALState(s.Backend.(Qwen35GDNBackend))

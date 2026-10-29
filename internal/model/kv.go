@@ -42,7 +42,9 @@ type Session struct {
 	// gate/up output slab. The default remains off until the measured KEEP gate lands.
 	Q4KGateUpOutputSlab bool
 	halKV               compute.KVStore
-	halLineage          tokenLineage
+	// halKVPrecision is the device tier halKV was created at; f32 is the zero value.
+	halKVPrecision compute.KVPrecision
+	halLineage     tokenLineage
 	// halW memoizes weights staged onto Backend so a device session uploads each weight
 	// to VRAM exactly once, not once per token. (On cpu-ref, Upload is identity over the
 	// zero-copy host view, so caching changes nothing and the bit-equality gate holds.)
@@ -184,7 +186,6 @@ type Session struct {
 	hostPathBypass        string
 	hostPathBypassRelease func()
 	// Request observations stay on the session, outside arithmetic prefix state.
-	hostStages        map[string]struct{}
 	hostStageObserver func(string)
 
 	// glmDsaHeadNameLogged gates the one-time FAK_GLMDSA_DUMP head-resolution log (#996 LM-head probe).

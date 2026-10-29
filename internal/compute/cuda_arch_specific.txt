@@ -1,0 +1,4 @@
+# Target and opt-in lane nvcc floor. Generic cuda_arch.txt is unchanged.
+sm_100a 13.0
+sm_103a 13.0
+sm_100f 13.0

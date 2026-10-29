@@ -16,6 +16,10 @@ import (
 
 func (*cudaBackend) Qwen35SequencePrefillPath() string { return Qwen35SequencePrefillPath }
 
+// Qwen35SequenceAllLogitsPath advertises the all-row final projection: with
+// NeedAllLogits the result carries a device-resident [tokens, vocab] panel.
+func (*cudaBackend) Qwen35SequenceAllLogitsPath() string { return Qwen35SequenceAllLogitsPath }
+
 func (*cudaBackend) Qwen35SequenceEmbeddingRowsPath() string {
 	return Qwen35SequenceEmbeddingRowsPath
 }
@@ -537,7 +541,7 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 		C.fcuda_add_f32(c.cf(x), c.cf(delta), C.int(tokens*req.Hidden))
 		c.releaseTransientBuffers([]*cudaBuf{postNormBuf, gateBuf, upBuf, activatedBuf, deltaBuf})
 	}
-	_, finalPanelBuf, finalErr := c.qwen35SequenceRMSNormLocked(x, req.OutputNorm, tokens, req.RMSNormEpsilon, "output-norm")
+	finalPanel, finalPanelBuf, finalErr := c.qwen35SequenceRMSNormLocked(x, req.OutputNorm, tokens, req.RMSNormEpsilon, "output-norm")
 	if finalErr != nil {
 		return result, finalErr
 	}
@@ -546,6 +550,15 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 		return result, allocErr
 	}
 	C.fcuda_d2d(lastBuf.ptr, offsetF(finalPanelBuf.ptr, (tokens-1)*req.Hidden), C.size_t(req.Hidden*F32.Bytes()))
+	var logitsRows Tensor
+	var logitsRowsBuf *cudaBuf
+	if req.NeedAllLogits {
+		logitsRows, logitsRowsBuf, err = c.qwen35SequenceMatMulLocked(req.Output, finalPanel, tokens, "output-all-head")
+		if err != nil {
+			return result, err
+		}
+		logitsRows.Shape = []int{tokens, req.Output.Shape[0]}
+	}
 	c.releaseTransientBuffers([]*cudaBuf{xBuf, finalPanelBuf})
 	var logits Tensor
 	var logitsBuf *cudaBuf
@@ -561,6 +574,9 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 		if logitsBuf != nil {
 			atomic.StoreUint32(&logitsBuf.invalid, 1)
 		}
+		if logitsRowsBuf != nil {
+			atomic.StoreUint32(&logitsRowsBuf.invalid, 1)
+		}
 		c.qwen35SequencePoisonStates(req)
 		c.faultLatch.ObserveError(err, "qwen35-sequence-final-fence")
 		return result, err
@@ -574,8 +590,8 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 		c.qwen35SequencePoisonStates(req)
 		return result, qwen35SequenceFailure("transfer-witness", -1, fmt.Sprintf("activation traffic H2D=%d D2H=%d", transfers.ActivationH2DBytes, transfers.ActivationD2HBytes))
 	}
-	result = Qwen35SequencePrefillResult{LastHidden: last, Logits: logits, Tokens: tokens, Transfers: transfers}
-	c.qwen35SequenceReleaseSinceLocked(transientStart, lastBuf, logitsBuf)
+	result = Qwen35SequencePrefillResult{LastHidden: last, Logits: logits, LogitsRows: logitsRows, Tokens: tokens, Transfers: transfers}
+	c.qwen35SequenceReleaseSinceLocked(transientStart, lastBuf, logitsBuf, logitsRowsBuf)
 	failed = false
 	return result, nil
 }

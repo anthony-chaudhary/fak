@@ -342,7 +342,7 @@ func TestV41RouterInvalidInputsFailExplicitly(t *testing.T) {
 
 	cfgMutations := map[string]func(*v41RouterConfig){
 		"Experts":       func(c *v41RouterConfig) { c.Experts = 383 },
-		"TopK":          func(c *v41RouterConfig) { c.TopK = 5 },
+		"TopK":          func(c *v41RouterConfig) { c.TopK = V41RouterTopK + 1 },
 		"SharedCount":   func(c *v41RouterConfig) { c.SharedCount = 0 },
 		"RouteScale0":   func(c *v41RouterConfig) { c.RouteScale = 0 },
 		"RouteScaleNaN": func(c *v41RouterConfig) { c.RouteScale = float32(math.NaN()) },

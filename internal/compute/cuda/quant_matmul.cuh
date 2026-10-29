@@ -516,10 +516,17 @@ static float2 *q4_coeffs_for(const uint8_t *q, int out, int in) {
 
 // g_q4k_prefill_arm is the P>=128 Q4_K GEMM arm the Go side resolved from FAK_CUDA_Q4K_PREFILL
 // (cuda_backend.h): 0 compensated, 1 mmq, 2 experimental fp8lt. Any other arm returns
-// FCUDA_Q4K_PREFILL_ARM_REFUSED.
+// FCUDA_Q4K_PREFILL_ARM_REFUSED. The mmq arm also serves FCUDA_Q4K_MMQ_MIN_COLS <= P < 128.
 #define FCUDA_Q4K_PREFILL_ARM_REFUSED 80003
+// FCUDA_Q4K_MMQ_MIN_COLS is the smallest P below 128 the mmq arm takes (cudaQ4KMMQMinCols in Go);
+// smaller panels and decode keep k_q4k_gemm / k_q4k_gemm_panel.
+#define FCUDA_Q4K_MMQ_MIN_COLS 8
 static int g_q4k_prefill_arm = 0;
 extern "C" void fcuda_set_q4k_prefill_arm(int arm) { g_q4k_prefill_arm = arm; }
+// g_q4k_decode_arm is the P<4 Q4_K GEMV arm the Go side resolved from FAK_CUDA_Q4K_DECODE:
+// 0 f32 (k_q4k_gemm, f32 activation), 1 mmvq (llama.cpp q8_1 DP4A, cuda/q4k_mmvq.cuh).
+static int g_q4k_decode_arm = 0;
+extern "C" void fcuda_set_q4k_decode_arm(int arm) { g_q4k_decode_arm = arm; }
 static int fcuda_q4k_fp8lt_matmul(const uint8_t *, const float *, float *, int, int, int);
 
 extern "C" int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY,
@@ -544,7 +551,14 @@ extern "C" int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float 
     fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
     return 0;
   }
+  // Small panels on the mmq arm read each weight byte once instead of ceil(P/4) times on the
+  // token panel. Any mmq refusal or scratch miss falls back to the panel, never fails.
+  if (g_q4k_prefill_arm == 1 && P >= FCUDA_Q4K_MMQ_MIN_COLS &&
+      fcuda_q4k_mmq_matmul(dQ4K, dX, dY, out, in, P) == 0) {
+    return 0;
+  }
   if (P < 4) {
+    if (g_q4k_decode_arm == 1) return fcuda_q4k_mmvq_matmul(dQ4K, dX, dY, out, in, P);
     float2 *coeff = q4_coeffs_for(dQ4K, out, in);
     FCUDA_TS("k_q4k_gemm", dim3((out + 1) / 2, P), k_q4k_gemm<<<dim3((out + 1) / 2, P), 256, 0, g_stream>>>(
         (const unsigned char *)dQ4K, coeff, dX, dY, out, in, P));

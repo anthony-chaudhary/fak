@@ -11,8 +11,15 @@ import (
 // the block-paged allocator so the native path can prove paged gather/Evict without moving
 // the optimized direct []float32 session off its stable default.
 func newHALKVStore(be compute.Backend, cfg Config) compute.KVStore {
+	return newHALKVStoreAt(be, cfg, compute.KVPrecisionF32)
+}
+
+// newHALKVStoreAt is newHALKVStore at an explicit device KV tier. Only f32 reaches the
+// paged store; SetDeviceKVPrecision refuses a 16-bit tier under FAK_PAGED_KV.
+func newHALKVStoreAt(be compute.Backend, cfg Config, prec compute.KVPrecision) compute.KVStore {
 	if !pagedHALKVEnabled() {
 		kc := halKVConfig(cfg)
+		kc.Precision = prec
 		kc.GraphCapture, _ = cudaGraphCaptureEligible(cfg, be)
 		return be.NewKV(kc)
 	}

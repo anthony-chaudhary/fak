@@ -119,6 +119,7 @@ func buildServeSizingRingForFlags(ws *ggufload.WeightSource, be compute.Backend,
 	artifact := ggufload.ClassifyTensorQuant(ws.File.Tensors)
 	opts := serveResidentQ4KLoadOptions(be, *sf.ggufPath, true, artifact)
 	host := serveExpertRingHostProbe(*sf.ggufPath, be, opts, compute.HostSystemMemoryInfo)
+	size = size.forHostTotal(host.Total, host.Known)
 	return buildServeSizingRing(ws, be, *sf.ggufPath, *sf.nativeContextTokens, size, host, host.RSSAnonPeak > 0, opts)
 }
 

@@ -4,8 +4,8 @@ import (
 	"testing"
 )
 
-// Invariant: Wave fuel string parsing must reliably extract bounded substrings between declared delimiters.
-// Guard: between returns empty strings when either start or end delimiters are missing.
+// between extracts the substring between two declared delimiters; it returns "" when
+// either delimiter is missing, so callers can treat absent sections as empty.
 
 func TestWaveFuelLifecycle(t *testing.T) {
 	t.Parallel()

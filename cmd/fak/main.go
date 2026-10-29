@@ -985,6 +985,8 @@ func dispatchPrimaryVerb(name string, args []string, start time.Time, verb *stri
 		cmdFrontierswe(args)
 	case "sota":
 		cmdSota(args)
+	case "supervisor-seat":
+		cmdSupervisorSeat(args)
 	case "kvbm":
 		cmdKVBM(args)
 	case "sota-coverage-scorecard":

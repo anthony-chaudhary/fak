@@ -85,6 +85,9 @@ def post_json(url: str, api_key: str, payload: dict, timeout: float) -> dict:
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "Accept": "application/json",
+            # First-party probe declares itself so a fak gateway's durable perf
+            # ledger stamps these rows synthetic/probe, not real http_lib traffic (#14110).
+            "X-Fak-Probe": "1",
         },
     )
     try:

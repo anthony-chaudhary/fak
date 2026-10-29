@@ -252,12 +252,13 @@ func shouldEnableVulkanMTP(cfg Config) bool {
 }
 
 // shouldEnableNGramSpeculative reports whether the operator explicitly selected
-// prompt n-gram speculation for the supported resident Qwen Vulkan route.
+// prompt n-gram speculation for a supported resident Qwen route: Vulkan or CUDA,
+// each only when it advertises the all-row logits verification contract.
 func shouldEnableNGramSpeculative(cfg Config) bool {
 	if cfg.InKernelModel == nil || cfg.Backend == nil || cfg.Metal || !cfg.InKernelQ4K {
 		return false
 	}
-	if !isModelHybrid(cfg.InKernelModel) || !strings.EqualFold(strings.TrimSpace(cfg.Backend.Name()), "vulkan") {
+	if !isModelHybrid(cfg.InKernelModel) || !ngramSpeculativeBackendName(cfg.Backend.Name()) {
 		return false
 	}
 	backend, ok := cfg.Backend.(compute.Qwen35SequenceAllLogitsBackend)
@@ -265,6 +266,11 @@ func shouldEnableNGramSpeculative(cfg Config) bool {
 		return false
 	}
 	return speculativeModeSelected(cfg, "ngram")
+}
+
+func ngramSpeculativeBackendName(name string) bool {
+	name = strings.TrimSpace(name)
+	return strings.EqualFold(name, "vulkan") || strings.EqualFold(name, "cuda")
 }
 
 // speculativeModeSelected reports whether the requested speculative mode is

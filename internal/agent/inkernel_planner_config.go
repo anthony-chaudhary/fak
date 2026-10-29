@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -131,6 +132,12 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 	if cfg.IncrementalContext {
 		p.incrementalContext = EmptyIncrementalContext()
 	}
+	if m != nil {
+		p.kvPrecision, p.kvPrecisionFallback = pickDeviceKVTier(m.Cfg, backend, cfg.KVPrecision)
+		if p.kvPrecisionFallback != "" {
+			fmt.Fprintln(os.Stderr, "fak inkernel:", p.kvPrecisionFallback)
+		}
+	}
 	if backend == nil && metal {
 		m.PrepareMetalResidency(q4k)
 	}
@@ -148,10 +155,16 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 	// architectures whose PrefixSnapshot owns every continuation byte: GLM's
 	// host DSA state and Qwen3.5/3.6's attention plus recurrent backend state.
 	if os.Getenv("FAK_INKERNEL_RADIX") != "off" && inKernelPlannerPrefixReuseSupported(m, backend) {
+		hostL2 := resolveInKernelRadixHostL2Bytes(os.LookupEnv, compute.HostSystemMemoryInfo)
+		if hostL2.Err != nil {
+			fmt.Fprintln(os.Stderr, hostL2.Err)
+		}
+		fmt.Fprintf(os.Stderr, "fak inkernel: radix host-DRAM L2 KV reserve=%d bytes source=%s\n", hostL2.Bytes, hostL2.Source)
+		p.radixHostL2 = hostL2
 		p.tree = radixkv.NewWithTierBudgetsAndEvictionPolicy(
 			resolveInKernelRadixBudgetTokens(cfg, contextTokensForRadixBudget(cfg, m)),
 			envInt64("FAK_INKERNEL_RADIX_SNAPSHOT_BYTES", 0),
-			envInt64("FAK_INKERNEL_RADIX_HOST_L2_BYTES", 0),
+			hostL2.Bytes,
 			inKernelRadixEvictionPolicyFromEnv(),
 		)
 		cpuBytes := cfg.CPUCacheBytes
@@ -166,6 +179,7 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 		}
 		p.tree.SetCPUCacheByteBudget(cpuBytes)
 		p.scopedTree = radixkv.WrapScopedWithLocker(p.tree, &p.mu)
+		p.pagedPrefix = inKernelPagedPrefixLedgerFor(m, backend, p.tree)
 	}
 	// The model-side KV-quarantine eviction bridge (#579) is OFF unless opted in, the same
 	// default-off / fail-open posture as the ctxplan seam (FAK_CTXPLAN_SEAM). It runs over a
@@ -422,6 +436,92 @@ func resolveInKernelRadixBudgetTokens(cfg InKernelPlannerConfig, contextTokens i
 		return contextTokens
 	}
 	return 0
+}
+
+// Host-DRAM L2 KV reserve defaults (perf-parity-20261029 umem TICKET-02): with no operator
+// byte count, the radix tree may retain evicted prefixes in host DRAM up to this fraction of
+// MemAvailable at planner construction instead of dropping them for a cold prefill.
+const (
+	inKernelRadixHostL2BytesEnv    = "FAK_INKERNEL_RADIX_HOST_L2_BYTES"
+	inKernelRadixHostL2FractionEnv = "FAK_INKERNEL_RADIX_HOST_L2_FRACTION"
+	inKernelRadixHostL2FractionDef = 0.15
+	inKernelRadixHostL2FractionMin = 0.10
+	inKernelRadixHostL2FractionMax = 0.20
+	// inKernelRadixHostL2Margin is the MemAvailable the reserve never takes, matching serve's
+	// host-margin floor for the expert ring (serveExpertRingHostMarginFloor).
+	inKernelRadixHostL2Margin int64 = 6 << 30
+)
+
+// Sources of a resolved host L2 reserve, printed at planner construction.
+const (
+	InKernelRadixHostL2SourceEnv     = "env"
+	InKernelRadixHostL2SourceDefault = "default 15% MemAvailable"
+	InKernelRadixHostL2SourceUnknown = "unknown host memory"
+	InKernelRadixHostL2SourceRefused = "refused"
+)
+
+// ErrInKernelRadixHostL2Config marks a host L2 env value the resolver refused; the reserve then
+// fails closed to 0 (L2 off), today's behaviour.
+var ErrInKernelRadixHostL2Config = errors.New("fak inkernel: invalid radix host L2 KV reserve")
+
+// InKernelRadixHostL2 is the resolved host-DRAM L2 KV reserve and where it came from.
+type InKernelRadixHostL2 struct {
+	Bytes    int64
+	Source   string
+	Fraction float64
+	Err      error
+}
+
+// resolveInKernelRadixHostL2Bytes sizes the radix tree's host-DRAM L2 tier:
+//
+//  1. FAK_INKERNEL_RADIX_HOST_L2_BYTES set (any value, including 0 = the OFF arm) is honoured
+//     exactly; an unparseable or negative value refuses and fails closed to 0.
+//  2. Otherwise, with host memory known, FAK_INKERNEL_RADIX_HOST_L2_FRACTION (default 0.15, in
+//     [0.10, 0.20]; out of range refuses and fails closed to 0) x MemAvailable, clamped to
+//     MemAvailable - inKernelRadixHostL2Margin and rounded down to MiB.
+//  3. Unknown host memory: 0, today's default.
+//
+// The reserve is a ceiling, not an allocation: the tier holds bytes only for evicted prefixes.
+func resolveInKernelRadixHostL2Bytes(lookupEnv func(string) (string, bool), hostMemoryInfo func() (int64, int64, bool)) InKernelRadixHostL2 {
+	if lookupEnv != nil {
+		if v, ok := lookupEnv(inKernelRadixHostL2BytesEnv); ok {
+			n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+			if err != nil || n < 0 {
+				return InKernelRadixHostL2{Source: InKernelRadixHostL2SourceRefused, Err: fmt.Errorf("%w: %s=%q: want a non-negative byte count", ErrInKernelRadixHostL2Config, inKernelRadixHostL2BytesEnv, v)}
+			}
+			return InKernelRadixHostL2{Bytes: n, Source: InKernelRadixHostL2SourceEnv}
+		}
+	}
+	fraction := inKernelRadixHostL2FractionDef
+	if lookupEnv != nil {
+		if v, ok := lookupEnv(inKernelRadixHostL2FractionEnv); ok && strings.TrimSpace(v) != "" {
+			f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+			if err != nil || !(f >= inKernelRadixHostL2FractionMin && f <= inKernelRadixHostL2FractionMax) {
+				return InKernelRadixHostL2{Source: InKernelRadixHostL2SourceRefused, Err: fmt.Errorf("%w: %s=%q: want a fraction in [%g, %g]", ErrInKernelRadixHostL2Config, inKernelRadixHostL2FractionEnv, v, inKernelRadixHostL2FractionMin, inKernelRadixHostL2FractionMax)}
+			}
+			fraction = f
+		}
+	}
+	if hostMemoryInfo == nil {
+		return InKernelRadixHostL2{Source: InKernelRadixHostL2SourceUnknown}
+	}
+	_, avail, known := hostMemoryInfo()
+	if !known || avail <= 0 {
+		return InKernelRadixHostL2{Source: InKernelRadixHostL2SourceUnknown}
+	}
+	reserve := min(int64(fraction*float64(avail)), avail-inKernelRadixHostL2Margin)
+	reserve = max(reserve, 0) &^ (1<<20 - 1)
+	source := InKernelRadixHostL2SourceDefault
+	if fraction != inKernelRadixHostL2FractionDef {
+		source = fmt.Sprintf("%s=%g x MemAvailable", inKernelRadixHostL2FractionEnv, fraction)
+	}
+	return InKernelRadixHostL2{Bytes: reserve, Source: source, Fraction: fraction}
+}
+
+// RadixHostL2 reports the host-DRAM L2 KV reserve this planner resolved at construction; the
+// zero value when the radix tree is off.
+func (p *InKernelPlanner) RadixHostL2() InKernelRadixHostL2 {
+	return p.radixHostL2
 }
 
 func inKernelRadixEvictionPolicyFromEnv() radixkv.EvictionPolicy {

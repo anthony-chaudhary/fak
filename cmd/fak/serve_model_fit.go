@@ -21,6 +21,10 @@ func serveKVPrecision() compute.KVPrecision {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_UP_KV_PRECISION"))) {
 	case "q8", "q8_0", "8":
 		return compute.KVPrecisionQ8
+	case "fp16", "f16", "16":
+		return compute.KVPrecisionF16
+	case "bf16", "bfloat16":
+		return compute.KVPrecisionBF16
 	default:
 		return compute.KVPrecisionF32
 	}

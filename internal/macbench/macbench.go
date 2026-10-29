@@ -1277,6 +1277,9 @@ func doChat(ctx context.Context, opts Options, body []byte) (*http.Response, err
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// First-party benchmark probe declares itself so the gateway's durable perf
+	// ledger stamps these rows synthetic/probe instead of real http_lib traffic (#14110).
+	req.Header.Set("X-Fak-Probe", "1")
 	if strings.TrimSpace(opts.Key) != "" {
 		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(opts.Key))
 	}

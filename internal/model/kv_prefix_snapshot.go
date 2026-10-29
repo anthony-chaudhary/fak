@@ -41,16 +41,18 @@ func (m *Model) SessionFromPrefix(prefix *KVCache) *Session {
 // sessions Cache is sufficient. Device hybrid sessions additionally carry attention
 // KV and recurrent Qwen state; keeping all three in one owner prevents partial restores.
 type PrefixSnapshot struct {
-	mu         sync.Mutex
-	closed     bool // Protected by mu; ownership detached, cleanup may still be running.
-	owner      *Session
-	epoch      uint64
-	Cache      *KVCache
-	halKV      compute.KVStore
-	halLineage tokenLineage
-	qwen35     *qwen35HALState
-	Backend    compute.Backend
-	Tokens     int
+	mu     sync.Mutex
+	closed bool // Protected by mu; ownership detached, cleanup may still be running.
+	owner  *Session
+	epoch  uint64
+	Cache  *KVCache
+	halKV  compute.KVStore
+	// halKVPrecision is the device tier halKV holds, restored onto the session with it.
+	halKVPrecision compute.KVPrecision
+	halLineage     tokenLineage
+	qwen35         *qwen35HALState
+	Backend        compute.Backend
+	Tokens         int
 	// DenseGPULayers / GPULayers preserve layer placement across prefix snapshots.
 	DenseGPULayers  int
 	GPULayers       int
@@ -301,7 +303,7 @@ func (s *Session) prefixSnapshotOwned(scope *backendExecutionScope, readResident
 	if s.halKV == nil {
 		return nil, fmt.Errorf("model: backend session has no device KV store")
 	}
-	out.halKV = s.halKV.Clone()
+	out.halKV, out.halKVPrecision = s.halKV.Clone(), s.halKVPrecision
 	var err error
 	out.qwen35, err = cloneQwen35HALState(s.qwen35HAL, s.Backend)
 	if err != nil {
@@ -399,7 +401,7 @@ func (p *PrefixSnapshot) cloneOwnedWithPublications(scope *backendExecutionScope
 		if p.halKV == nil {
 			return fmt.Errorf("model: device prefix snapshot has no KV store")
 		}
-		out.halKV = p.halKV.Clone()
+		out.halKV, out.halKVPrecision = p.halKV.Clone(), p.halKVPrecision
 		var err error
 		out.qwen35, err = cloneQwen35HALState(p.qwen35, p.Backend)
 		if err != nil {
@@ -517,6 +519,7 @@ func (p *PrefixSnapshot) restoreOwned(scope *backendExecutionScope, s *Session) 
 		)
 		// The source still owns both replacements until all old cleanup returns.
 		s.halKV, s.halLineage, s.qwen35HAL = p.halKV, p.halLineage, p.qwen35
+		s.halKVPrecision = p.halKVPrecision
 		p.halKV, p.qwen35 = nil, nil
 		p.halLineage = tokenLineage{}
 		// A target built by NewBackendSessionCheckedDeferredState carries no eager

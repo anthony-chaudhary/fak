@@ -227,8 +227,10 @@ func indexOf(s, sub string) int {
 	return -1
 }
 
-// TestGodFileCeilingMaturityContractsAndDocs asserts that internal/godfileceiling maintains
-// substantive contract comments and full exported symbol documentation.
+// TestGodFileCeilingMaturityContractsAndDocs asserts that internal/godfileceiling's docs
+// stay substantive without formulaic headers: no Invariant:/Contract:/Precondition:/
+// Postcondition: gaming comments remain (the debt-lanes reader grades those as comment
+// bloat), enough multi-line why-comments survive, and every exported symbol stays documented.
 func TestGodFileCeilingMaturityContractsAndDocs(t *testing.T) {
 	fset := token.NewFileSet()
 	node, err := parser.ParseFile(fset, "godfileceiling.go", nil, parser.ParseComments)
@@ -236,14 +238,22 @@ func TestGodFileCeilingMaturityContractsAndDocs(t *testing.T) {
 		t.Fatalf("failed to parse godfileceiling.go: %v", err)
 	}
 
-	contractCount := 0
+	formulaic, substantive := 0, 0
 	for _, cg := range node.Comments {
-		if isSubstantiveContractComment(cg) {
-			contractCount++
+		text := strings.TrimSpace(cg.Text())
+		if isFormulaicHeaderComment(text) {
+			formulaic++
+			continue
+		}
+		if len(text) >= 80 && strings.Contains(text, "\n") {
+			substantive++
 		}
 	}
-	if contractCount == 0 {
-		t.Error("godfileceiling.go: expected at least one substantive contract comment")
+	if formulaic > 0 {
+		t.Errorf("godfileceiling.go: %d formulaic header comment(s) remain; strip them (the debt-lanes reader grades them as comment bloat)", formulaic)
+	}
+	if substantive < 3 {
+		t.Errorf("godfileceiling.go: only %d substantive doc comments remain; the why-comments must survive any header strip", substantive)
 	}
 
 	exported := 0
@@ -299,36 +309,27 @@ func TestGodFileCeilingMaturityContractsAndDocs(t *testing.T) {
 	}
 }
 
-func isSubstantiveContractComment(cg *ast.CommentGroup) bool {
-	if cg == nil {
-		return false
-	}
-	text := strings.TrimSpace(cg.Text())
-	if len(text) < 35 {
-		return false
-	}
+// isFormulaicHeaderComment mirrors the marker set the debt-lanes reader treats as
+// formulaic gaming noise: a comment group led by or stuffed with Invariant:/Contract:/
+// Precondition:/Postcondition:/guard:/fail-closed: headers instead of substance.
+func isFormulaicHeaderComment(text string) bool {
 	lower := strings.ToLower(text)
-
-	hasContractMarker := strings.Contains(lower, "invariant:") ||
+	hasMarker := strings.Contains(lower, "invariant:") ||
 		strings.Contains(lower, "invariants:") ||
-		strings.Contains(lower, "key invariant:") ||
 		strings.Contains(lower, "contract:") ||
-		strings.Contains(lower, "assumption:") ||
-		strings.Contains(lower, "assumptions:") ||
-		strings.Contains(lower, "fail-closed:") ||
-		strings.Contains(lower, "fail-closed guard:") ||
 		strings.Contains(lower, "precondition:") ||
 		strings.Contains(lower, "postcondition:") ||
-		strings.Contains(lower, "guard:")
-	if !hasContractMarker {
+		strings.Contains(lower, "fail-closed:") ||
+		strings.HasPrefix(lower, "invariant") ||
+		strings.HasPrefix(lower, "contract") ||
+		strings.HasPrefix(lower, "guard")
+	if !hasMarker {
 		return false
 	}
-
 	words := strings.Fields(lower)
-	if len(words) < 6 {
-		return false
+	if len(words) <= 3 {
+		return true
 	}
-
 	keywordCount := 0
 	for _, w := range words {
 		clean := strings.Trim(w, ":,.-*#")
@@ -338,8 +339,5 @@ func isSubstantiveContractComment(cg *ast.CommentGroup) bool {
 			keywordCount++
 		}
 	}
-	if float64(keywordCount)/float64(len(words)) > 0.4 {
-		return false
-	}
-	return true
+	return float64(keywordCount)/float64(len(words)) > 0.25 || keywordCount >= 3
 }

@@ -105,6 +105,10 @@ type Record struct {
 	// Both are absent on rows written before they existed.
 	Client    string `json:"client,omitempty"`
 	Synthetic bool   `json:"synthetic,omitempty"`
+	// UsageUnreported marks a content-bearing turn whose upstream reported no token
+	// counts at all: PromptTokens/CompletionTokens/CachedTokens are "unobserved", not
+	// zero-cost. Absent on every row where the counts were reported (#14110).
+	UsageUnreported bool `json:"usage_unreported,omitempty"`
 	// GPUBusyPercent is the device busy share when the row was committed; absent
 	// (never 0) when no busy counter was readable.
 	GPUBusyPercent *int `json:"gpu_busy_percent,omitempty"`

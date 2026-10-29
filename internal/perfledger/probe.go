@@ -26,6 +26,14 @@ func (r Record) IsProbe() bool {
 // Request headers a caller uses to name itself. ProbeHeader marks a synthetic
 // turn (readiness canary, health probe) with any non-empty value; ClientHeader
 // names the harness when its User-Agent does not.
+//
+// Probe/health traffic policy (#14110): first-party probe and benchmark HTTP
+// clients MUST declare themselves with ProbeHeader so their durable ledger rows
+// carry their true identity (client=probe, synthetic=true) instead of reading as
+// real http_lib turns. Rows stay in the ledger — consumers filter on the marker —
+// but the served-traffic statistics keep describing actual agent work. An
+// undeclared third-party probe cannot be stamped; that residual is why the marker
+// exists rather than server-side guesswork.
 const (
 	ProbeHeader  = "X-Fak-Probe"
 	ClientHeader = "X-Fak-Client"

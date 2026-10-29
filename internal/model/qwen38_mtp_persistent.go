@@ -220,7 +220,7 @@ func (s *Qwen38MTPPersistentSession) replayPromptOwned(prompt []int) {
 		if s.target.halKV != nil {
 			s.target.halKV.Free()
 		}
-		s.target.halKV = newHALKVStore(s.target.Backend, s.target.M.Cfg)
+		s.target.halKV = newHALKVStoreAt(s.target.Backend, s.target.M.Cfg, s.target.halKVPrecision)
 		s.target.halLineage = tokenLineage{}
 		s.target.halStep, s.target.halLogitsWarm = 0, false
 		if gr, ok := s.target.Backend.(interface{ GraphReset() }); ok {

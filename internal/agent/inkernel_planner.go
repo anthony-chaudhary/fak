@@ -63,6 +63,9 @@ type InKernelPlanner struct {
 	// builds (model.KVPrecisionFP32 default; Q8_0 for the dense mixed layout). Fixed at
 	// construction from InKernelPlannerConfig.KVPrecision.
 	kvPrecision model.KVPrecision
+	// kvPrecisionFallback records why a requested 16-bit device tier fell back to f32
+	// at construction ("" when the request was realized as asked).
+	kvPrecisionFallback string
 	// expertSpill is the resolved graded expert placement (`--n-cpu-moe`, #5612) this planner
 	// installs on every session it builds: how many MoE layers spill to host and how many device
 	// bytes the routed-expert ring may hold. nil — the default and every planner that was never
@@ -130,6 +133,11 @@ type InKernelPlanner struct {
 	mu         sync.Mutex
 	tree       *radixkv.Tree
 	scopedTree *radixkv.ScopedTree
+	// radixHostL2 is the host-DRAM L2 KV reserve resolved for tree at construction.
+	radixHostL2 InKernelRadixHostL2
+	// pagedPrefix is the device planner's paged prefix page ledger
+	// (inkernel_paged_prefix.go); nil on a CPU planner or with FAK_INKERNEL_PAGED_PREFIX=off.
+	pagedPrefix *inKernelPagedPrefixLedger
 	// prefixFlights bridges the cold lookup-to-admission gap for concurrent
 	// plain-CPU requests. Its zero value is ready for constructor and bare-test
 	// planners alike; persistent ownership remains in tree/scopedTree.
@@ -1134,9 +1142,38 @@ func computeKVPrecisionFor(prec model.KVPrecision) compute.KVPrecision {
 	switch prec {
 	case model.KVPrecisionQ8_0:
 		return compute.KVPrecisionQ8
+	case model.KVPrecisionFP16:
+		return compute.KVPrecisionF16
+	case model.KVPrecisionBF16:
+		return compute.KVPrecisionBF16
 	default:
 		return compute.KVPrecisionF32
 	}
+}
+
+func deviceKV16(prec model.KVPrecision) bool {
+	return prec == model.KVPrecisionFP16 || prec == model.KVPrecisionBF16
+}
+
+// pickDeviceKVTier admits a 16-bit device KV tier only where the backend's HAL
+// store and the model's forward path realize it; otherwise it falls back to f32 and names
+// why. Every other tier keeps the per-session host-cache checks.
+func pickDeviceKVTier(cfg model.Config, backend compute.Backend, want model.KVPrecision) (model.KVPrecision, string) {
+	if backend == nil || !deviceKV16(want) {
+		return want, ""
+	}
+	if reason := cfg.DeviceKVRefusal(backend.Name(), want); reason != "" {
+		return model.KVPrecisionFP32, fmt.Sprintf("kv precision %s -> fp32 (source=device-kv-fallback backend=%s): %s", want, backend.Name(), reason)
+	}
+	return want, ""
+}
+
+// KVPrecisionFallback reports why the requested device KV tier fell back to f32, or "".
+func (p *InKernelPlanner) KVPrecisionFallback() string {
+	if p == nil {
+		return ""
+	}
+	return p.kvPrecisionFallback
 }
 
 func (p *InKernelPlanner) KVMemoryStats() KVMemoryStats {
@@ -1782,6 +1819,7 @@ func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []
 		return res, err
 	}
 	if retry, retryGate := p.admitDeviceOOMRetry(ctx, err, len(ids), maxNew); !retry {
+		p.releaseFailedOOMRequest(ctx, err)
 		return res, retryGate
 	}
 	if onRetry != nil {
@@ -1789,6 +1827,9 @@ func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []
 	}
 	retryRes, retryErr := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
 	p.recordInKernelOOMRetry(err, retryErr == nil)
+	if retryErr != nil {
+		p.releaseFailedOOMRequest(ctx, retryErr)
+	}
 	return retryRes, retryErr
 }
 
@@ -1816,7 +1857,8 @@ func (p *InKernelPlanner) admitDeviceOOMRetry(ctx context.Context, err error, pr
 	}
 	if delivered, _ := ctx.Value(inKernelObserverDeliveryContextKey{}).(*atomic.Bool); delivered != nil && delivered.Load() {
 		// Observer state and external output cannot be rewound by onRetry. Keep
-		// the original failure and do not trim or book a retry after delivery.
+		// the original failure and do not prepare or book a retry after delivery;
+		// releaseFailedOOMRequest still drops the failed request's idle pools.
 		return false, err
 	}
 	if !p.prepareDeviceOOMRetry(err) {

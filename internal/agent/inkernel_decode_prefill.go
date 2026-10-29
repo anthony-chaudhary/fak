@@ -192,17 +192,142 @@ func (p *InKernelPlanner) effectiveQwenQ4KPrefillChunkTokens() int {
 	if p != nil && p.qwenQ4KPrefillChunkTokens > 0 {
 		configured = p.qwenQ4KPrefillChunkTokens
 	}
-	if p == nil || !p.qwenQ4KPrefillChunkExplicit {
+	if p == nil {
 		return configured
 	}
-	bounded, err := p.deviceBoundedQwenQ4KPrefillChunkTokens()
+	if p.qwenQ4KPrefillChunkExplicit {
+		bounded, err := p.deviceBoundedQwenQ4KPrefillChunkTokens()
+		if err != nil {
+			return 0
+		}
+		if bounded > 0 && configured > bounded {
+			configured = bounded
+		}
+	}
+	return p.headroomBoundedQwenQ4KPrefillChunkTokens(configured)
+}
+
+// Rows bounds for the headroom-derived Qwen Q4_K prompt panel (fak#14097). Below
+// qwenQ4KSplitScratchRows the Q4_K GEMM takes the scratch-free panel kernel, so a
+// derived chunk may drop under it to escape the P-independent fp16 weight split.
+const (
+	qwenQ4KPrefillHeadroomMinRows = 8
+	qwenQ4KSplitScratchRows       = 128
+)
+
+// headroomBoundedQwenQ4KPrefillChunkTokens lowers configured to the largest row
+// count in [qwenQ4KPrefillHeadroomMinRows, configured] whose priced sequence
+// prefill transient fits the live device headroom less the request admission
+// margin. The headroom is the backend's DeviceMemoryInfo reading, the same seam
+// request admission sizes against. Unknown headroom keeps configured.
+func (p *InKernelPlanner) headroomBoundedQwenQ4KPrefillChunkTokens(configured int) int {
+	if p == nil || p.backend == nil || p.m == nil || configured <= qwenQ4KPrefillHeadroomMinRows || !p.qwenQ4KPrefillChunkTarget() {
+		return configured
+	}
+	_, free, known := compute.DeviceMemoryInfo(p.backend)
+	if !known || free < 0 {
+		return configured
+	}
+	arm, err := compute.CUDAQ4KPrefillArmInUse()
 	if err != nil {
-		return 0
+		arm = compute.CUDAQ4KPrefillCompensated
 	}
-	if bounded > 0 && configured > bounded {
-		return bounded
+	return qwenSequencePrefillChunkForBudget(p.m.Cfg, configured, ApplyByteHeadroom(free, inKernelRequestDeviceHeadroom), arm)
+}
+
+// qwenSequencePrefillChunkForBudget returns the largest rows in
+// [qwenQ4KPrefillHeadroomMinRows, configured] with peak(rows) <= budget. The peak
+// is not monotonic (the split scratch appears at qwenQ4KSplitScratchRows), so the
+// search walks down from configured. When nothing fits, the smallest panel is the
+// least transient the planner can choose; admission still owns the refusal.
+func qwenSequencePrefillChunkForBudget(cfg model.Config, configured int, budget int64, arm compute.CUDAQ4KPrefillArm) int {
+	if configured <= qwenQ4KPrefillHeadroomMinRows {
+		return configured
 	}
-	return configured
+	for rows := configured; rows >= qwenQ4KPrefillHeadroomMinRows; rows-- {
+		peak, ok := qwenSequencePrefillPeakBytes(cfg, rows, arm)
+		if !ok {
+			return configured
+		}
+		if peak <= budget {
+			return rows
+		}
+	}
+	return qwenQ4KPrefillHeadroomMinRows
+}
+
+// qwenSequencePrefillPeakBytes prices the per-layer transient device peak of one
+// Qwen 3.5 hybrid sequence-prefill panel of rows tokens: the widest live f32
+// activation set of any layer stage plus the largest Q4_K GEMM scratch for arm
+// (cuda_qwen35_sequence.go, quant_matmul.cuh fcuda_q4k_matmul_f32, q4k_mmq.cuh).
+// Every projection is priced as Q4_K, the widest-scratch resident dtype on this
+// path. Rows in [qwenQ4KPrefillHeadroomMinRows, qwenQ4KSplitScratchRows) are priced
+// with MMQ activation scratch so the bound stays safe if small panels route to MMQ.
+// ok is false for invalid or overflowing dimensions.
+func qwenSequencePrefillPeakBytes(cfg model.Config, rows int, arm compute.CUDAQ4KPrefillArm) (int64, bool) {
+	if rows <= 0 || cfg.HiddenSize <= 0 || cfg.IntermediateSize <= 0 {
+		return 0, false
+	}
+	if _, ok := qwenPrefillMaxTokenPanelWidth(cfg); !ok {
+		return 0, false
+	}
+	hidden, inter := int64(cfg.HiddenSize), int64(cfg.IntermediateSize)
+	qWidth := int64(cfg.NumHeads) * int64(cfg.HeadDim)
+	kvWidth := int64(cfg.NumKVHeads) * int64(cfg.HeadDim)
+	keyDim := int64(cfg.LinearNumKeyHeads) * int64(cfg.LinearKeyHeadDim)
+	valueDim := int64(cfg.LinearNumValueHeads) * int64(cfg.LinearValueHeadDim)
+	convDim := 2*keyDim + valueDim
+
+	// Live f32 values per token at each stage's widest point.
+	ffn := 3*hidden + 3*inter                                                              // x, post-norm, delta + gate, up, swiglu
+	attention := 3*hidden + 4*qWidth + 2*kvWidth                                           // x, normed, projected + qg, q, gate, rope'd q + k, v
+	gdn := 3*hidden + 2*convDim + 2*valueDim + 2*keyDim + 2*int64(cfg.LinearNumValueHeads) // x, normed, output + gdn scratch set
+	width := max(ffn, attention, gdn)
+	r := int64(rows)
+	activation := hostDemandMul(hostDemandMul(r, width), 4)
+
+	type shape struct{ out, in int64 }
+	shapes := []shape{{inter, hidden}, {hidden, inter}, {2 * qWidth, hidden}, {kvWidth, hidden}, {hidden, qWidth}}
+	if convDim > 0 && valueDim > 0 {
+		shapes = append(shapes, shape{convDim, hidden}, shape{valueDim, hidden}, shape{hidden, valueDim})
+	}
+	var scratch int64
+	for _, s := range shapes {
+		if s.out <= 0 || s.in <= 0 {
+			continue
+		}
+		scratch = max(scratch, qwenQ4KGEMMScratchBytes(s.out, s.in, r, arm))
+	}
+	return hostDemandAdd(activation, scratch), true
+}
+
+// qwenQ4KGEMMScratchBytes mirrors compute.cudaQ4KScratch for one Q4_K GEMM call.
+func qwenQ4KGEMMScratchBytes(out, in, rows int64, arm compute.CUDAQ4KPrefillArm) int64 {
+	const q81Block, q81Values = 144, 128 // block_q8_1_mmq
+	mmq := func() int64 {
+		padded := (in + 511) / 512 * 512
+		return hostDemandAdd(hostDemandMul(hostDemandMul(rows, padded)/q81Values, q81Block), 128*q81Block)
+	}
+	if rows < qwenQ4KSplitScratchRows {
+		if rows < qwenQ4KPrefillHeadroomMinRows {
+			return 0
+		}
+		return mmq()
+	}
+	switch arm {
+	case compute.CUDAQ4KPrefillMMQ:
+		return mmq()
+	case compute.CUDAQ4KPrefillFP8LT:
+		padded := (rows + 15) / 16 * 16
+		bytes := hostDemandAdd(hostDemandAdd(hostDemandMul(out, in), hostDemandMul(padded, in)), 16)
+		if padded != rows {
+			bytes = hostDemandAdd(bytes, hostDemandMul(hostDemandMul(padded, out), 4))
+		}
+		return bytes
+	default:
+		// Compensated: fp16 hi/lo halves of the dequantized weight and of the activations.
+		return hostDemandAdd(hostDemandMul(hostDemandMul(out, in), 4), hostDemandMul(hostDemandMul(rows, in), 4))
+	}
 }
 
 func (p *InKernelPlanner) nativeInferencePrefillChunkTokens() int {

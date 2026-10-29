@@ -178,6 +178,10 @@ func (d *LoadDriver) Run(ctx context.Context) (*LoadDriverResult, error) {
 					break
 				}
 				req.Header.Set("Content-Type", "application/json")
+				// First-party benchmark load declares itself so the gateway's durable
+				// perf ledger stamps these rows synthetic/probe instead of letting them
+				// read as real http_lib traffic (#14110).
+				req.Header.Set("X-Fak-Probe", "1")
 				if strings.TrimSpace(opts.Key) != "" {
 					req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(opts.Key))
 				}

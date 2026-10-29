@@ -2,6 +2,9 @@ package compute
 
 import (
 	"errors"
+	"os"
+	"regexp"
+	"strconv"
 	"testing"
 )
 
@@ -86,5 +89,31 @@ func TestSetCUDAQ4KPrefillArmRefusalKeepsCurrentArm(t *testing.T) {
 		if got, err := CUDAQ4KPrefillArmInUse(); got != CUDAQ4KPrefillCompensated || err != nil {
 			t.Errorf("after refused %q: arm in use = %q, %v; want compensated", arm, got, err)
 		}
+	}
+}
+
+// TestCUDAQ4KMMQMinColsMatchesKernelSource holds the Go mirror of the small-panel mmq threshold
+// to the C dispatch, and the threshold to a column tile the vendored MMQ kernel instantiates.
+//
+// fak-test:runtime fast est=10ms
+func TestCUDAQ4KMMQMinColsMatchesKernelSource(t *testing.T) {
+	dispatch, err := os.ReadFile("cuda/quant_matmul.cuh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`(?m)^#define FCUDA_Q4K_MMQ_MIN_COLS (\d+)$`).FindSubmatch(dispatch)
+	if m == nil {
+		t.Fatal("FCUDA_Q4K_MMQ_MIN_COLS not defined in cuda/quant_matmul.cuh")
+	}
+	if got, _ := strconv.Atoi(string(m[1])); got != cudaQ4KMMQMinCols {
+		t.Fatalf("FCUDA_Q4K_MMQ_MIN_COLS = %d, Go cudaQ4KMMQMinCols = %d", got, cudaQ4KMMQMinCols)
+	}
+	mmq, err := os.ReadFile("cuda/q4k_mmq.cuh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tile := regexp.MustCompile(`case\s+` + strconv.Itoa(cudaQ4KMMQMinCols) + `: return launch_mul_mat_q<\s*` + strconv.Itoa(cudaQ4KMMQMinCols) + `,`)
+	if !tile.Match(mmq) {
+		t.Fatalf("q4k_mmq.cuh instantiates no %d-column MMQ tile", cudaQ4KMMQMinCols)
 	}
 }

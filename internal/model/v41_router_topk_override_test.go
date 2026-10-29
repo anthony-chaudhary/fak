@@ -1,0 +1,120 @@
+package model
+
+import (
+	"errors"
+	"math"
+	"math/rand"
+	"testing"
+)
+
+func v41RoutedTopKTestConfig() Config {
+	return Config{
+		NumExperts:          V41RouterExperts,
+		NumExpertsPerTok:    V41RouterTopK,
+		NSharedExperts:      V41RouterSharedCount,
+		RoutedScalingFactor: float64(V41RouterRouteScale),
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestV41RouterRoutedTopKOverrideAdmission(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want int
+		bad  bool
+	}{
+		{raw: "", want: V41RouterTopK},
+		{raw: " 5 ", want: 5},
+		{raw: "1", want: 1},
+		{raw: "6", want: 6},
+		{raw: "0", bad: true},
+		{raw: "7", bad: true},
+		{raw: "-1", bad: true},
+		{raw: "five", bad: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.raw, func(t *testing.T) {
+			t.Setenv(V41RoutedTopKEnv, tc.raw)
+			cfg, err := v41RouterConfigFromConfig(v41RoutedTopKTestConfig())
+			if tc.bad {
+				if !errors.Is(err, ErrV41RoutedTopK) {
+					t.Fatalf("err = %v, want ErrV41RoutedTopK", err)
+				}
+				if _, fullErr := v41RouterConfigFullGeometry(v41RoutedTopKTestConfig()); !errors.Is(fullErr, ErrV41RoutedTopK) || !errors.Is(fullErr, ErrV41ForwardStage) {
+					t.Fatalf("full geometry err = %v, want ErrV41RoutedTopK and ErrV41ForwardStage", fullErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("admission: %v", err)
+			}
+			if cfg.TopK != tc.want || cfg.Experts != V41RouterExperts || cfg.SharedCount != V41RouterSharedCount || cfg.RouteScale != V41RouterRouteScale {
+				t.Fatalf("cfg = %+v, want TopK %d over the published geometry", cfg, tc.want)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=20ms lane=default
+func TestV41RouterRoutedTopKTruncatesAndRenormalises(t *testing.T) {
+	rng := rand.New(rand.NewSource(4105))
+	for trial := 0; trial < 32; trial++ {
+		logits := make([]float32, V41RouterExperts)
+		bias := make([]float32, V41RouterExperts)
+		for i := range logits {
+			logits[i] = float32(rng.NormFloat64() * 2)
+			bias[i] = float32(rng.NormFloat64() * 0.1)
+		}
+		for _, full := range []bool{false, true} {
+			base := v41DefaultRouterConfig()
+			six, err := v41RouteForGeometry(logits, bias, base, full)
+			if err != nil {
+				t.Fatalf("top-6 route: %v", err)
+			}
+			for n := 1; n < V41RouterTopK; n++ {
+				cfg := base
+				cfg.TopK = n
+				got, err := v41RouteForGeometry(logits, bias, cfg, full)
+				if err != nil {
+					t.Fatalf("top-%d route: %v", n, err)
+				}
+				if len(got) != n {
+					t.Fatalf("top-%d returned %d picks", n, len(got))
+				}
+				var sixSum, gotSum float64
+				for i := 0; i < n; i++ {
+					sixSum += float64(six[i].weight)
+				}
+				for i, pick := range got {
+					if pick.expert != six[i].expert {
+						t.Fatalf("trial %d full=%v top-%d pick %d expert %d, want top-6 prefix expert %d", trial, full, n, i, pick.expert, six[i].expert)
+					}
+					gotSum += float64(pick.weight)
+					// Renormalised over the shorter list: each weight is the
+					// top-6 weight rescaled by the same prefix factor.
+					want := float64(six[i].weight) / sixSum * float64(V41RouterRouteScale)
+					if math.Abs(float64(pick.weight)-want) > 1e-5 {
+						t.Fatalf("trial %d full=%v top-%d pick %d weight %g, want %g", trial, full, n, i, pick.weight, want)
+					}
+				}
+				if math.Abs(gotSum-float64(V41RouterRouteScale)) > 1e-5 {
+					t.Fatalf("trial %d full=%v top-%d weight sum %g, want route scale %g", trial, full, n, gotSum, V41RouterRouteScale)
+				}
+			}
+		}
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestV41RouterRoutedTopKRefusesOutOfRangeConfig(t *testing.T) {
+	logits := make([]float32, V41RouterExperts)
+	for _, n := range []int{0, V41RouterTopK + 1} {
+		cfg := v41DefaultRouterConfig()
+		cfg.TopK = n
+		_, err := v41Route(logits, nil, cfg)
+		var routeErr *v4RouteError
+		if !errors.As(err, &routeErr) || routeErr.Field != "v41_topk" {
+			t.Fatalf("TopK=%d err = %v, want v41_topk route error", n, err)
+		}
+	}
+}

@@ -53,7 +53,14 @@ func (p *InKernelPlanner) configureNativeSession(s *model.Session) {
 	// default (model.KVPrecisionFP32) is a no-op, so every existing planner is
 	// byte-for-byte unchanged. ConvertToPrecision handles a session that already
 	// holds rows (a preserved/reused session) by re-encoding in place.
-	if p.kvPrecision != "" && p.kvPrecision != model.KVPrecisionFP32 {
+	if p.backend != nil && deviceKV16(p.kvPrecision) {
+		// Construction already resolved this tier against the backend and geometry
+		// (resolveInKernelKVPrecision), so a refusal here is a broken invariant.
+		if err := s.SetDeviceKVPrecision(p.kvPrecision); err != nil {
+			panic(fmt.Sprintf("model: --kv-precision=%s: %v", p.kvPrecision, err))
+		}
+		s.KVPrecision = p.kvPrecision
+	} else if p.kvPrecision != "" && p.kvPrecision != model.KVPrecisionFP32 {
 		// Fail closed on a path this realization does not cover (device HAL, Metal
 		// resident, hybrid recurrent, GLM-DSA, MiniMax sparse, gemma4): those write
 		// c.K directly, so enabling q8 would silently mix f32 and packed rows.
@@ -170,6 +177,15 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	// retained copies (#13267, inkernel_host_budget.go) still reuses a cached prefix but
 	// leaves nothing new behind in the cache.
 	admit := reuse && !inKernelSkipPrefixAdmission(ctx)
+	if reuse {
+		// Lease this prompt's KV pages from the paged prefix pool for the request's
+		// lifetime: shared prefix pages are bound, only the divergent tail is allocated.
+		ns := ""
+		if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped {
+			ns = owner.Tenant
+		}
+		defer p.pagedPrefix.acquire(ns, ids).release()
+	}
 
 	// 1) Acquire a session, reusing the longest cached KV prefix when enabled. The clone
 	// (SessionFromPrefix) happens under the lock, so once we unlock our session owns an

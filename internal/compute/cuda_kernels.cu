@@ -128,6 +128,7 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda_v41_indexer.cu"
 #include "cuda/qwen35_gdn.cuh"
 #include "cuda/q4k_mmq.cuh"
+#include "cuda/q4k_mmvq.cuh"
 #include "cuda/quant_matmul.cuh"
 #include "cuda/transformer_ops.cuh"
 #include "cuda/qwen35_attention_postprocess.cuh"

@@ -27,14 +27,19 @@ import (
 // its witnessed artifact. refused: the envelope held the verb below earned
 // width under enforce — it was proposed for confirmation and nothing ran.
 // escalated: the fail-closed path emitted the escalation packet. hold: the
-// deliberate no-op — nothing ran, nothing was left.
+// deliberate no-op — nothing ran, nothing was left. dry_run: the S3 preview
+// cycle — the verdict is journaled but no admission verb is bound or called.
+// verb_refused: the admission call itself refused (the gate had already
+// passed) — recorded once, never retried by the seat.
 type Outcome string
 
 const (
-	OutcomeLowered   Outcome = "lowered"
-	OutcomeRefused   Outcome = "refused"
-	OutcomeEscalated Outcome = "escalated"
-	OutcomeHold      Outcome = "hold"
+	OutcomeLowered     Outcome = "lowered"
+	OutcomeRefused     Outcome = "refused"
+	OutcomeEscalated   Outcome = "escalated"
+	OutcomeHold        Outcome = "hold"
+	OutcomeDryRun      Outcome = "dry_run"
+	OutcomeVerbRefused Outcome = "verb_refused"
 )
 
 // DecisionRecord is one wake's addressed, payload-free decision. Every field
@@ -52,7 +57,7 @@ type DecisionRecord struct {
 	ProposedVerb    ActionKind      // the SupervisorAction verb Decide proposed
 	ReasonToken     Reason          // the closed reason token Decide returned
 	EnvelopeVerdict EnvelopeVerdict // the envelope verdict on the proposed verb
-	Outcome         Outcome         // lowered | refused | escalated | hold
+	Outcome         Outcome         // lowered | refused | escalated | hold | dry_run | verb_refused
 	ArtifactRef     string          // witness ref of the lowered artifact; empty when none
 	DecidedAt       time.Time       // the wake-time stamp the caller passed in
 }
