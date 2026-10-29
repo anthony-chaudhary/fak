@@ -13,7 +13,17 @@ type Qwen38MTPBackend string
 
 const (
 	Qwen38MTPBackendMetal Qwen38MTPBackend = "metal"
+	// Qwen38MTPBackendCUDA names the resident CUDA draft/verify route. The caller
+	// sets MTPBackendReady only when the CUDA backend advertises every resident
+	// path (draft fuse, sequence prefill, all-row logits, raw hidden, prefix replay).
+	Qwen38MTPBackendCUDA Qwen38MTPBackend = "cuda"
 )
+
+// qwen38MTPQ4KBackend reports the backends whose resident route consumes the
+// packed Q4_K MTP matrices directly.
+func qwen38MTPQ4KBackend(backend Qwen38MTPBackend) bool {
+	return backend == Qwen38MTPBackendMetal || backend == Qwen38MTPBackendCUDA
+}
 
 // Qwen38MTPDowngradeReason is the closed reason vocabulary for declining MTP acceleration.
 type Qwen38MTPDowngradeReason string
@@ -79,7 +89,7 @@ func EvaluateQwen38MTPEligibility(in Qwen38MTPEligibilityInput) Qwen38MTPEligibi
 			reason = Qwen38MTPPrecisionUnsupported
 		} else {
 			format = layout.Format
-			if format == Qwen38MTPFormatQ4K && in.Backend != Qwen38MTPBackendMetal {
+			if format == Qwen38MTPFormatQ4K && !qwen38MTPQ4KBackend(in.Backend) {
 				reason = Qwen38MTPBackendUnsupported
 			}
 		}
