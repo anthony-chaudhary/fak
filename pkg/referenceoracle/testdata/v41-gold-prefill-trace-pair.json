@@ -1,0 +1,54 @@
+{
+  "schema": "fak.reference_trace_pair.v1",
+  "label": "v41-gold-prefill",
+  "model": "deepseek-v4.1-flash-q2_k",
+  "captured_utc": "2026-10-12",
+  "reference": {
+    "repo": "vcruz305/llama.cpp",
+    "branch": "runtime/deepseek41",
+    "commit": "5210c7c5ed61dddaee6ed476623abf4b63093d16",
+    "lib_sha256": "f619ee177c6d8cd7",
+    "tracer_sha256": "80a2cbf7e5346277"
+  },
+  "native": {
+    "repo": "anthony-chaudhary/fak",
+    "commit": "b98e317bb188d5c8370fe8e840885a5e959dea35",
+    "extra_commits": ["edcd285ae19"]
+  },
+  "fork_run": {
+    "lease_suffix": "01464bcf6ebd",
+    "run_name": "run-gold-20261012T052134Z",
+    "nodes": 769,
+    "duration_s": 74,
+    "exit_code": 0
+  },
+  "prompt": {
+    "text": "The chemical symbol for gold is",
+    "input_token_ids": [0, 671, 7658, 7380, 362, 8495, 344]
+  },
+  "coverage": {
+    "layers": 40,
+    "stages": 5,
+    "tokens": 7,
+    "samples_per_event": 8,
+    "events": 1400,
+    "samples": 11200,
+    "excluded_sample_indexes": [448],
+    "nonfinite_rows": 16
+  },
+  "digests": [
+    { "name": "index.jsonl", "role": "fork_dump", "sha256": "19700554d28f89ae" },
+    { "name": "fak-1_gold_prefill.json", "role": "native_probe", "sha256": "e525bffccb7074ff" },
+    { "name": "ref.json", "role": "converted_ref", "sha256": "dad90189af9bacf9" },
+    { "name": "profile.json", "role": "profile", "sha256": "767d93e793c8e2fa" }
+  ],
+  "adopted_digests": true,
+  "digest_provenance": "adopted_from_native_evidence_at_conversion",
+  "caveats": [
+    "All artifact digests were adopted from the native side's evidence at conversion time (fak compute-trace from-llamacpp --adopt-digests); none were recomputed independently.",
+    "KV-stage RoPE semantic mismatch: the fork taps kv-L after RoPE (last 64 of 512 dims rotate) and fak taps before it; the historical comparison table therefore excludes KV sample index 448.",
+    "16 nonfinite comparison rows (8 idx_score + 8 comp_top_k_mask); their semantic acceptability is UNQUALIFIED.",
+    "Historical native recorder coverage stopped at layer 6 (activation recorder budget, internal/model/v41_activation_trace_env.go:61-62); the retained comparison table covers layers 0-6 only.",
+    "The default-tolerance profile verdict on these files is DIVERGENT: default atol/rtol is tighter than the Q8_K vs BF16 publication drift."
+  ]
+}
