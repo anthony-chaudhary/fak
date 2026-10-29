@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -51,24 +50,7 @@ func runProxy(args []string) {
 }
 
 func runReport(args []string) {
-	fs := flag.NewFlagSet("report", flag.ExitOnError)
-	input := fs.String("input", "model-perf.jsonl", "observation JSONL")
-	format := fs.String("format", "md", "md or json")
-	_ = fs.Parse(args)
-	f, err := os.Open(*input)
-	fatalIf(err)
-	defer f.Close()
-	rows, err := modelperfobs.ReadObservations(f)
-	fatalIf(err)
-	s := modelperfobs.Summarize(rows)
-	if *format == "json" {
-		fatalIf(json.NewEncoder(os.Stdout).Encode(s))
-		return
-	}
-	if *format != "md" {
-		fatalIf(fmt.Errorf("format must be md or json"))
-	}
-	fatalIf(modelperfobs.WriteMarkdown(os.Stdout, s))
+	fatalIf(modelperfobs.RunReport(args, os.Stdout))
 }
 
 func runStateBench(args []string) {
@@ -109,5 +91,5 @@ func fatalIf(err error) {
 	}
 }
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: modelperfobs proxy --backend URL [--listen ADDR --ledger FILE --cache-state cold|warm|steady|unknown --warmup]\n       modelperfobs report --input FILE [--format md|json]\n       modelperfobs time-burndown --input FILE [--phases FILE --format md|json|prom]\n       modelperfobs cache-state-bench [--output FILE --pretty=true]\n       modelperfobs cache-state-bench --verify FILE")
+	fmt.Fprintln(os.Stderr, "usage: modelperfobs proxy --backend URL [--listen ADDR --ledger FILE --cache-state cold|warm|steady|unknown --warmup]\n       modelperfobs report --input FILE [--goal FILE --format md|json]\n       modelperfobs time-burndown --input FILE [--phases FILE --format md|json|prom]\n       modelperfobs cache-state-bench [--output FILE --pretty=true]\n       modelperfobs cache-state-bench --verify FILE")
 }
