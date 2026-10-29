@@ -821,7 +821,7 @@ static int fak_qwen38_fattn_mma_hd256_launch(
         if (g_qwen38_fattn_kv16) cudaFree(g_qwen38_fattn_kv16);
         g_qwen38_fattn_kv16 = nullptr;
         g_qwen38_fattn_kv16_bytes = 0;
-        cudaError_t grown = cudaMalloc(&g_qwen38_fattn_kv16, need);
+        cudaError_t grown = fcuda_alloc_status(cudaMalloc(&g_qwen38_fattn_kv16, need));
         if (grown != cudaSuccess) {
             g_qwen38_fattn_kv16 = nullptr;
             cudaGetLastError();

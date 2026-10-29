@@ -17,6 +17,9 @@ var cudaDeviceScopeServices []byte
 //go:embed cuda/device_scope.h
 var cudaDeviceScopeGuard []byte
 
+//go:embed cuda/alloc_status.h
+var cudaDeviceScopeAllocStatus []byte
+
 //go:embed testdata/cuda_device_scope_test.cpp
 var cudaDeviceScopeHarness []byte
 
@@ -37,6 +40,7 @@ func TestCUDADeviceScopeRestoresProductionOperations(t *testing.T) {
 	}{
 		{"runtime_services.cuh", cudaDeviceScopeServices},
 		{"device_scope.h", cudaDeviceScopeGuard},
+		{"alloc_status.h", cudaDeviceScopeAllocStatus},
 		{"device_scope_test.cpp", cudaDeviceScopeHarness},
 	} {
 		if err := os.WriteFile(filepath.Join(dir, source.name), source.data, 0600); err != nil {
