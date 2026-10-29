@@ -31,6 +31,10 @@ int fcuda_mem_info(size_t *free_mem, size_t *total_mem);
 void *fcuda_malloc(size_t bytes);
 void *fcuda_malloc_managed(size_t bytes);
 void fcuda_free(void *d);
+/* Retire exactly one unpublished g_live reservation after a checked stream drain.
+ * Caller holds allocator serialization and owns d exclusively. Zero means freed;
+ * on failure the live ownership record remains, never returned to a pool. */
+int fcuda_discard_unsubmitted(void *d, size_t expected_bytes);
 /* Number of pooled/managed allocations currently checked out by callers. This
  * is an additive diagnostic ABI used to prove failed whole operations retain
  * no transient allocations; pooled free buffers are deliberately excluded. */

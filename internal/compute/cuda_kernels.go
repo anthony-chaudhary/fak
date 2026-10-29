@@ -29,6 +29,7 @@ unsigned long long fak_qwen38_fattn_mma_launch_count(void);
 import "C"
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"sync/atomic"
@@ -232,7 +233,7 @@ type qwen35KVReservation struct {
 	cap  int
 }
 
-func (c *cudaBackend) qwen35SequenceReserveKVLocked(kv *cudaKV, compactLayers, needed int) error {
+func (c *cudaBackend) qwen35SequenceReserveKVLocked(kv *cudaKV, compactLayers, needed int) (err error) {
 	if kv == nil || kv.cfg.NumKVHeads != qwen38CausalAttentionPanelKVHeads ||
 		kv.cfg.HeadDim != qwen38CausalAttentionPanelHeadDim || needed < 0 ||
 		int64(needed) > qwen35GDNMaxCInt {
@@ -246,17 +247,29 @@ func (c *cudaBackend) qwen35SequenceReserveKVLocked(kv *cudaKV, compactLayers, n
 		return &Qwen35SequenceError{Stage: "kv-reserve", Layer: -1, Reason: fmt.Sprintf("fixed CUDA graph KV capacity %d is smaller than requested position %d", kv.maxPos, needed/kv.stride())}
 	}
 	reservations := make([]qwen35KVReservation, 0, compactLayers*3)
-	cleanup := func() {
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
 		for _, reservation := range reservations {
-			if reservation.next != nil {
-				C.fcuda_free(reservation.next)
+			if reservation.next == nil {
+				continue
+			}
+			// These exact new buffers have not reached the copy/publication
+			// loop below. Keep the original KV owner and every unrelated pool.
+			status := int(C.fcuda_discard_unsubmitted(reservation.next, C.size_t(reservation.cap*reservation.dst.dtype.Bytes())))
+			if status != 0 {
+				fault := &CUDAOpError{Op: "Qwen35SequencePrefill", Site: "kv-reserve-retire", Msg: "unpublished reservation retained after checked retirement failure", Code: status, Class: MemoryKVCache}
+				c.faultLatch.Observe(DeviceFaultExecution, "kv-reserve-retire", status)
+				err = errors.Join(err, fault)
 			}
 		}
-	}
+	}()
+
 	for layer := 0; layer < compactLayers; layer++ {
 		for _, dst := range []*dslice{&kv.Kraw[layer], &kv.K[layer], &kv.V[layer]} {
 			if dst.ptr != nil && C.fak_qwen35_pointer_is_device(dst.ptr) == 0 {
-				cleanup()
 				return &Qwen35SequenceError{Stage: "kv-reserve", Layer: layer, Reason: "existing KV storage is not strict device memory"}
 			}
 			if dst.cap >= needed {
@@ -264,17 +277,18 @@ func (c *cudaBackend) qwen35SequenceReserveKVLocked(kv *cudaKV, compactLayers, n
 			}
 			bytes, ok := qwen35GDNShapeBytes([]int{needed}, dst.dtype.Bytes())
 			if !ok {
-				cleanup()
 				return &Qwen35SequenceError{Stage: "kv-reserve", Layer: layer, Reason: "KV capacity byte size overflow"}
 			}
 			buf, err := c.dallocDeviceOnlyClass(bytes, MemoryKVCache, "qwen35-sequence-kv-reserve")
 			if err != nil {
-				cleanup()
 				return &Qwen35SequenceError{Stage: "kv-reserve", Layer: layer, Cause: err}
 			}
 			reservations = append(reservations, qwen35KVReservation{dst: dst, old: dst.ptr, next: buf.ptr, cap: needed})
 		}
 	}
+	// Ownership commits before any enqueue; retirement is only for the
+	// allocation-only phase above, never for a partly published cache.
+	committed = true
 	for _, reservation := range reservations {
 		if reservation.dst.len > 0 {
 			C.fcuda_d2d(reservation.next, reservation.old, C.size_t(reservation.dst.len*reservation.dst.dtype.Bytes()))

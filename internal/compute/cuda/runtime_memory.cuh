@@ -146,6 +146,36 @@ extern "C" void fcuda_free(void *d) {
   }
 }
 
+// Only for a caller-owned, unpublished reservation. Never sweep a pool or
+// release a pointer with an unknown owner. A failed drain/free leaves the live
+// record intact and unavailable to pool reuse; the caller must surface the fault.
+extern "C" int fcuda_discard_unsubmitted(void *d, size_t expected_bytes) {
+  if (!d || g_capture_open) return (int)cudaErrorInvalidValue;
+  auto it = g_live.find(d);
+  if (it == g_live.end() || it->second != expected_bytes)
+    return (int)cudaErrorInvalidValue;
+#ifdef FAK_CUDA_V41_INDEXER
+  for (const void *held : g_v41_indexer_quarantine)
+    if (d == held) return (int)cudaErrorInvalidValue;
+#endif
+#ifdef FAK_CUDA_V41_BF16_PUBLISH
+  for (const void *held : g_v41_bf16_quarantine)
+    if (d == held) return (int)cudaErrorInvalidValue;
+#endif
+#ifdef FAK_CUDA_V41_TAIL_ROPE
+  for (const void *held : g_v41_rope_quarantine)
+    if (d == held) return (int)cudaErrorInvalidValue;
+#endif
+  // A pool-borrowed reservation can still follow its previous owner's queued
+  // work on g_stream, despite this reservation not yet having submitted work.
+  cudaError_t status = cudaStreamSynchronize(g_stream);
+  if (status != cudaSuccess) return (int)status;
+  status = cudaFree(d);
+  if (status != cudaSuccess) return (int)status;
+  g_live.erase(it);
+  return 0;
+}
+
 extern "C" size_t fcuda_live_allocations(void) {
   return g_live.size() + g_managed_live.size() + g_panel_live.size();
 }
