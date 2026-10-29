@@ -104,7 +104,7 @@ func buildServeSizingFitAuto(ws *ggufload.WeightSource, be compute.Backend, cpuO
 			cpuOffloadActive = true
 		}
 	}
-	weights, fit, err := serveNativeContextSizingInputs(ws, be, cpuOffloadExperts, useMetal, 1, model)
+	weights, fit, err := serveNativeContextSizingInputs(ws, be, cpuOffloadExperts, useMetal, 1, 0, model)
 	if err != nil {
 		return nil, err
 	}

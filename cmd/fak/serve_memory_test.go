@@ -119,7 +119,7 @@ func TestFitServeGGUFOnDeviceUsesF32ResidentPlan(t *testing.T) {
 	ws := serveSynthWeightSource(t)
 	be := serveCapBackend{Backend: compute.Default(), total: 5 << 20, free: 5 << 20, known: true}
 
-	err := fitServeGGUFOnDevice(ws, be, true, 0)
+	err := fitServeGGUFOnDevice(ws, be, true, 0, 0)
 	if err == nil {
 		t.Fatal("f32-resident device load should be refused once serve headroom is reserved")
 	}
@@ -422,7 +422,7 @@ func TestServeQ4KStandardArchUsesDeviceResidentNotOffloadPlan(t *testing.T) {
 	// #949 unlocks): build a backend just large enough for the device side and assert it fits.
 	deviceWant := plan.DeviceTotal()
 	uploadFits := serveCapBackend{Backend: compute.Default(), total: deviceWant + deviceWant/4, free: compute.FreeUnknown, known: true, uploadDtype: true}
-	if err := fitServeGGUFOnDevice(ws, uploadFits, false, 8); err != nil {
+	if err := fitServeGGUFOnDevice(ws, uploadFits, false, 8, 0); err != nil {
 		t.Fatalf("device-resident Q4_K plan should fit a backend sized for it: %v", err)
 	}
 	// And the backend the new arm requires advertises quantized upload — the guard that keeps a
@@ -439,14 +439,14 @@ func TestFitServeGGUFOnDeviceRawPlanAndUnknownCapacityFailOpen(t *testing.T) {
 	// the estimator on the raw/lean payload admission this test pins.
 	ws := serveSynthConfiguredWeightSource(t)
 	fitsRaw := serveCapBackend{Backend: compute.Default(), total: 2 << 20, free: 2 << 20, known: true}
-	if err := fitServeGGUFOnDevice(ws, fitsRaw, false, 0); err != nil {
+	if err := fitServeGGUFOnDevice(ws, fitsRaw, false, 0, 0); err != nil {
 		t.Fatalf("raw/lean GGUF plan should fit the 2 MiB test backend, got %v", err)
 	}
 	unknown := serveCapBackend{Backend: compute.Default(), known: false}
-	if err := fitServeGGUFOnDevice(ws, unknown, true, 0); err != nil {
+	if err := fitServeGGUFOnDevice(ws, unknown, true, 0, 0); err != nil {
 		t.Fatalf("unknown-capacity backend must fail open, got %v", err)
 	}
-	if err := fitServeGGUFOnDevice(ws, nil, true, 0); err != nil {
+	if err := fitServeGGUFOnDevice(ws, nil, true, 0, 0); err != nil {
 		t.Fatalf("nil backend must be a no-op, got %v", err)
 	}
 }
@@ -508,7 +508,7 @@ func TestServeGGUFMemoryPlanAutoSizesContextToFitWhenNoBudget(t *testing.T) {
 	if kv >= fullWindowKV {
 		t.Fatalf("auto-sized KV = %d, must be below the full-window KV %d (sized down, not full window)", kv, fullWindowKV)
 	}
-	if err := fitServeGGUFOnDevice(ws, be, false, 0); err != nil {
+	if err := fitServeGGUFOnDevice(ws, be, false, 0, 0); err != nil {
 		t.Fatalf("the auto-sized plan must fit the box it was sized against, got %v", err)
 	}
 }
@@ -519,7 +519,7 @@ func TestServeGGUFMemoryPlanAutoSizesContextToFitWhenNoBudget(t *testing.T) {
 func TestFitServeGGUFOnDeviceAutoSizeStillRefusesWeightsOverflow(t *testing.T) {
 	ws := serveSynthConfiguredWeightSource(t) // ~1.56 MiB device weights
 	tooSmall := serveCapBackend{Backend: compute.Default(), total: 1 << 20, free: 1 << 20, known: true}
-	err := fitServeGGUFOnDevice(ws, tooSmall, false, 0 /* no budget -> auto-size */)
+	err := fitServeGGUFOnDevice(ws, tooSmall, false, 0 /* no budget -> auto-size */, 0)
 	if err == nil {
 		t.Fatal("auto-sized boot fit must still refuse a box too small for the weights alone")
 	}

@@ -150,7 +150,7 @@ func buildServeSizingArtifact(ws *ggufload.WeightSource, be compute.Backend, cpu
 			cpuOffloadActive = true
 		}
 	}
-	weights, fit, err := serveNativeContextSizingInputs(ws, be, cpuOffloadExperts, useMetal, 1, model)
+	weights, fit, err := serveNativeContextSizingInputs(ws, be, cpuOffloadExperts, useMetal, 1, 0, model)
 	if err != nil {
 		return serveSizingArtifact{}, err
 	}

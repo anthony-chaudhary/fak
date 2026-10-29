@@ -139,7 +139,7 @@ func buildServeSizingRing(ws *ggufload.WeightSource, be compute.Backend, path st
 	if budgeter, ok := be.(deviceWeightBudgetBackend); ok {
 		snapshot.weightBudget, snapshot.weightBudgetEnabled = budgeter.DeviceWeightBudget()
 	}
-	weights, fit, err := serveNativeContextSizingInputs(ws, snapshot, false, false, 1, path)
+	weights, fit, err := serveNativeContextSizingInputs(ws, snapshot, false, false, 1, 0, path)
 	if err != nil {
 		r.Reason = err.Error()
 		return r

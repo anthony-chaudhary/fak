@@ -41,6 +41,10 @@ func tensorOnDiskBytes(t TensorInfo) int64 {
 	return int64(n)
 }
 
+// OnDiskBytes is the exported form of tensorOnDiskBytes for header-only planners outside this
+// package (cmd/fak partial-offload admission); 0 means the tensor is not byte-sizable.
+func (t TensorInfo) OnDiskBytes() int64 { return tensorOnDiskBytes(t) }
+
 func tensorPayloadBytes(t TensorInfo) (uint64, error) {
 	elems, err := tensorElems(t)
 	if err != nil {
