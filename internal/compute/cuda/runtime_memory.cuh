@@ -80,6 +80,10 @@ extern "C" void *fcuda_malloc(size_t bytes) {
       // kernel/launch fault says e.g. "an illegal memory access was encountered". Returning nullptr
       // keeps a genuine OOM loud (dalloc still panics) — this EXPOSES the error, it does not mask it.
       fprintf(stderr, "fak-cuda: cudaMalloc(%zu bytes) failed: %s\n", bytes, cudaGetErrorString(_e));
+      // A capacity miss is not sticky, but it stays this thread's last error until consumed; a
+      // later preflight that reads cudaGetLastError would then report it as a stale fault
+      // (status 10002) and poison a healthy context. Consume it here, where it was raised.
+      if (_e == cudaErrorMemoryAllocation) (void)cudaGetLastError();
       return nullptr;
     }
   }
@@ -195,6 +199,7 @@ extern "C" void *fcuda_malloc_panel(size_t bytes) {
     cudaError_t e = cudaMalloc(&d, bytes);
     if (e != cudaSuccess || !d) {
       fprintf(stderr, "fak-cuda: prompt panel cudaMalloc(%zu bytes) failed: %s\n", bytes, cudaGetErrorString(e));
+      if (e == cudaErrorMemoryAllocation) (void)cudaGetLastError(); // see fcuda_malloc
       return nullptr;
     }
   }
@@ -260,7 +265,11 @@ extern "C" void fcuda_graph_prewarm(int extra) {
     auto &bucket = g_pool[bytes];
     while ((int)bucket.size() < extra) {
       void *d = nullptr;
-      if (cudaMalloc(&d, bytes) != cudaSuccess || !d) break; // best-effort; a real OOM still fails loud later
+      cudaError_t e = cudaMalloc(&d, bytes);
+      if (e != cudaSuccess || !d) {
+        if (e == cudaErrorMemoryAllocation) (void)cudaGetLastError(); // see fcuda_malloc
+        break; // best-effort; a real OOM still fails loud later
+      }
       bucket.push_back(d);
     }
   }

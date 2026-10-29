@@ -721,9 +721,9 @@ func TestNativeOOMRetryStopsAfterObserverDelivery(t *testing.T) {
 				wantCallbacks = 0
 			}
 			// Recycle and Trim also belong to ordinary HAL token/session cleanup.
-			// TrimLarge and retry rows witness retry preparation/replay without
-			// forbidding the failed attempt from releasing its resources.
-			if comp != nil || callbacks != wantCallbacks || internalEmits != 1 || be.trimLarge != 0 || len(p.InKernelOOMRetryStats().Rows) != 0 {
+			// Retry rows witness retry preparation/replay. One TrimLarge is the
+			// failed request's own post-failure pool release, not a retry.
+			if comp != nil || callbacks != wantCallbacks || internalEmits != 1 || be.trimLarge > 1 || len(p.InKernelOOMRetryStats().Rows) != 0 {
 				t.Fatalf("observed request replayed/trimmed: comp=%v callbacks=%d internal=%d trim=%d/%d/%d stats=%+v", comp, callbacks, internalEmits, be.recycled, be.trimmed, be.trimLarge, p.InKernelOOMRetryStats())
 			}
 		})

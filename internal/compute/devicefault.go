@@ -457,6 +457,62 @@ func (l *DeviceFaultLatch) Snapshot() DeviceFaultSnapshot {
 	}
 }
 
+// ClearAllocationSuspect reopens a session whose ONLY observations since it was last healthy
+// are allocation-class: a classified capacity miss, not a launch, execution, or context fault.
+// Such a poison exists because a nil allocation might hide a prior async fault; validate is the
+// evidence that it did not (for CUDA, a stream fence that a sticky fault would fail). Without
+// this, one capacity OOM refuses every later request until restart.
+//
+// It does not spend the Reconstruct budget, since no context was torn down. It refuses typed,
+// with the latch unchanged, when any fault since the last healthy edge was not allocation-class,
+// the session is unrecoverable, a reconstruction is in flight, validate is nil or fails, or a new
+// fault lands while validate runs. A healthy latch is a no-op.
+func (l *DeviceFaultLatch) ClearAllocationSuspect(site string, validate func() error) error {
+	if l == nil {
+		return nil
+	}
+	l.mu.Lock()
+	if !l.health.Refusing() {
+		l.mu.Unlock()
+		return nil
+	}
+	if validate == nil || l.health == DeviceUnrecoverable || l.recovery != nil || !l.allocationOnlyLocked() {
+		defer l.mu.Unlock()
+		return l.faultErrorLocked(site)
+	}
+	epoch := l.faultEpoch
+	l.mu.Unlock()
+
+	err := runDeviceRecoveryStep(validate)
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if err != nil || l.faultEpoch != epoch || l.health != DevicePoisoned || l.recovery != nil {
+		return l.faultErrorLocked(site)
+	}
+	l.health = DeviceHealthy
+	l.recoveries++
+	l.record(DevicePoisoned, DeviceHealthy, "", site, 0)
+	return nil
+}
+
+// allocationOnlyLocked reports whether every edge since the most recent healthy one was an
+// allocation-class observation. Caller holds l.mu.
+func (l *DeviceFaultLatch) allocationOnlyLocked() bool {
+	seen := false
+	for i := len(l.transitions) - 1; i >= 0; i-- {
+		edge := l.transitions[i]
+		if edge.To == DeviceHealthy {
+			break
+		}
+		if edge.Class != DeviceFaultAllocation {
+			return false
+		}
+		seen = true
+	}
+	return seen
+}
+
 // faultCount is Snapshot().Faults without copying the transition log, for a resident device
 // object that pins the count it was created at and is suspect once the count moves.
 func (l *DeviceFaultLatch) faultCount() int {
@@ -512,6 +568,13 @@ func (l *DeviceFaultLatch) record(from, to DeviceHealth, class DeviceFaultClass,
 type DeviceFaultReporter interface {
 	// DeviceFaultLatch returns the backend's session-scoped latch, or nil if it keeps none.
 	DeviceFaultLatch() *DeviceFaultLatch
+}
+
+// DeviceContextProber is the optional Backend capability that proves the device context still
+// computes without rebuilding it. ClearAllocationSuspect uses it as validate; a backend without
+// it cannot clear an allocation-only suspect state.
+type DeviceContextProber interface {
+	DeviceContextProbe() error
 }
 
 // AdmitDevice is the backend-neutral gate for a serving path that holds a Backend rather than a

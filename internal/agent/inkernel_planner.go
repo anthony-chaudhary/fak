@@ -1817,6 +1817,7 @@ func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []
 		return res, err
 	}
 	if retry, retryGate := p.admitDeviceOOMRetry(ctx, err, len(ids), maxNew); !retry {
+		p.releaseFailedOOMRequest(ctx, err)
 		return res, retryGate
 	}
 	if onRetry != nil {
@@ -1824,6 +1825,9 @@ func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []
 	}
 	retryRes, retryErr := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
 	p.recordInKernelOOMRetry(err, retryErr == nil)
+	if retryErr != nil {
+		p.releaseFailedOOMRequest(ctx, retryErr)
+	}
 	return retryRes, retryErr
 }
 
@@ -1851,7 +1855,8 @@ func (p *InKernelPlanner) admitDeviceOOMRetry(ctx context.Context, err error, pr
 	}
 	if delivered, _ := ctx.Value(inKernelObserverDeliveryContextKey{}).(*atomic.Bool); delivered != nil && delivered.Load() {
 		// Observer state and external output cannot be rewound by onRetry. Keep
-		// the original failure and do not trim or book a retry after delivery.
+		// the original failure and do not prepare or book a retry after delivery;
+		// releaseFailedOOMRequest still drops the failed request's idle pools.
 		return false, err
 	}
 	if !p.prepareDeviceOOMRetry(err) {
