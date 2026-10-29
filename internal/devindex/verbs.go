@@ -394,6 +394,7 @@ var verbManifest = []Verb{
 	{Name: "router", Synopsis: "one verb that starts the always-on routing gateway from the ~/.fak/router layout", Lane: "cmd"},
 	{Name: "run", Synopsis: "run an agent turn (or a recorded trace via --trace) through the kernel", Lane: "cmd"},
 	{Name: "runtime-capabilities", Synopsis: "report the capabilities exposed by the current runtime build", Lane: "cmd"},
+	{Name: "runtime-mem", Synopsis: "scrape a serve /debug/vars go_runtime receipt as a bounded RSS/GC table and delta", Lane: "cmd"},
 	{Name: "rungstats", Synopsis: "stats over the verification-ladder rungs", Lane: "cmd"},
 	{Name: "savings", Synopsis: "audit, gate, and lint the Track-2 OBSERVED-$ cache-savings ledger", Lane: "cmd"},
 	{Name: "savings-vector", Synopsis: "the savings-vector report: realized token/cost savings by lever", Lane: "cmd"},

@@ -132,6 +132,10 @@ type NativeScheduler struct {
 
 	coupler *WorkerCoupler
 
+	// elastic is the FAK_NATIVE_KV_ELASTIC_BLOCKS block ledger; nil (default) is off.
+	// Set once before the scheduler is published.
+	elastic *nativeElasticLedger
+
 	wake    chan struct{} // buffered(1): Admit/Close nudge an idle loop
 	started sync.Once
 	stopped chan struct{}
@@ -662,6 +666,7 @@ func (s *NativeScheduler) initializeLaneExecution(ln *schedLane) error {
 	ln.promptCursor = promptCursor
 	ln.promptLen = promptLen
 	ln.prefillChunkTokens = prefillChunkTokens
+	s.elastic.laneStarted(ln, len(ln.prompt))
 	return nil
 }
 
@@ -1688,6 +1693,9 @@ func (ln *schedLane) finish(res *abi.Result, err error) {
 			ln.sched.preemption.GPUDirectSwapper.FreeDescriptor(ln.gpuDirectKV)
 		}
 		ln.gpuDirectKV = nil
+	}
+	if ln.sched != nil {
+		ln.sched.elastic.laneFinished(ln)
 	}
 	ln.cancel() // release the derived context
 	close(ln.tokens)

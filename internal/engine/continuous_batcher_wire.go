@@ -60,6 +60,7 @@ type BatchingEngineConfig struct {
 func DefaultBatchingEngineConfig() BatchingEngineConfig {
 	batcher := DefaultContinuousBatcherConfig()
 	batcher.PrefillBudget = DefaultPrefillBudgetTokens
+	applyBatcherStarvationEnv(&batcher)
 	return BatchingEngineConfig{
 		Batcher:      batcher,
 		StepInterval: defaultBatchingStepInterval,
