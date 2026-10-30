@@ -58,6 +58,10 @@ void fcuda_alloc_ledger_reset_peak(void);
  * copy, 2..5 = the fp16 split halves); 0 disarms. */
 void fcuda_scratch_alloc_test_fault(int nth);
 size_t fcuda_panel_release(void);
+/* Same release, with live count in *live and zero only after checked cleanup.
+ * Nonzero is a sticky native cleanup error or an existing uncertainty refusal;
+ * failed fence/free retains the remaining pool entries and allocation ledger. */
+int fcuda_panel_release_checked(size_t *live);
 void fcuda_pool_stats(size_t *pooledBytes, size_t *buckets, size_t *largestBucket,
                       size_t *panelCachedBytes, size_t *panelLive, size_t *panelPeakBytes);
 /* fcuda_panel_peak_reset restarts the peak of panel bytes held plus cached. */

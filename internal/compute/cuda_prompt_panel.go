@@ -113,6 +113,18 @@ func (c *cudaBackend) PromptPanelBegin() {
 	C.fcuda_panel_peak_reset()
 }
 
+// Caller holds cudaMu; a cleanup fault must reach the same latch as execution
+// faults instead of being mistaken for a successful count-only release.
+func (c *cudaBackend) releasePromptPanelLocked() int64 {
+	var live C.size_t
+	if status := int(C.fcuda_panel_release_checked(&live)); status != 0 {
+		c.promptPanelLastLive = int64(live)
+		c.faultLatch.Observe(DeviceFaultExecution, "prompt-panel-release", status)
+		cudaPromptPanelFail("release", "panel allocations retained after cleanup failure", status)
+	}
+	return int64(live)
+}
+
 // PromptPanelChunk starts a chunk of rows rows. It drops freed transient handles, and when the
 // row count differs from the previous chunk's it first frees the cached buffers of that size,
 // so a tail chunk never holds full-chunk buffers beside its own.
@@ -121,7 +133,7 @@ func (c *cudaBackend) PromptPanelChunk(rows int) {
 	defer cudaMu.Unlock()
 	c.compactTransientLocked()
 	if c.promptPanelRows != 0 && rows != c.promptPanelRows {
-		C.fcuda_panel_release()
+		c.releasePromptPanelLocked()
 	}
 	c.promptPanelRows = rows
 }
@@ -132,7 +144,7 @@ func (c *cudaBackend) PromptPanelEnd() {
 	defer cudaMu.Unlock()
 	c.promptPanel = false
 	c.promptPanelRows = 0
-	c.promptPanelLastLive = int64(C.fcuda_panel_release())
+	c.promptPanelLastLive = c.releasePromptPanelLocked()
 	c.compactTransientLocked()
 }
 

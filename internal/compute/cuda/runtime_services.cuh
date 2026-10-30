@@ -130,6 +130,7 @@ extern "C" int fcuda_set_device(int device) {
 #include "alloc_status.h"
 
 extern "C" void *fcuda_malloc_on_tagged(int device, size_t bytes, int cls, int site) {
+  if (g_cuda_cleanup_status != 0) return nullptr;
   if (bytes == 0) bytes = 1;
   fcuda_device_scope scope(device);
   if (scope.status() != 0) return nullptr;
@@ -149,6 +150,7 @@ extern "C" void *fcuda_malloc_on(int device, size_t bytes) {
 
 extern "C" void fcuda_free_on(int device, void *d) {
   if (!d) return;
+  if (g_cuda_cleanup_status != 0) return;
   if (g_v41_router_uncertain) return;
 #ifdef FAK_CUDA_V41_BF16_PUBLISH
   if (g_v41_bf16_uncertain) return;

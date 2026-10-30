@@ -118,6 +118,10 @@ func (s *Session) prefillHALPanel(panel promptPanelBackend, ids []int, wantLogit
 	open := true
 	defer func() {
 		if open {
+			open = false
+			// Normal completion closes explicitly below. During body panic or
+			// Goexit, preserve that unwind even if checked cleanup also panics.
+			defer func() { _ = recover() }()
 			panel.PromptPanelEnd()
 		}
 	}()
@@ -132,8 +136,8 @@ func (s *Session) prefillHALPanel(panel promptPanelBackend, ids []int, wantLogit
 		}
 		be.Free(x)
 	}
-	panel.PromptPanelEnd()
 	open = false
+	panel.PromptPanelEnd()
 	s.halStep += len(ids)
 
 	if !wantLogits {

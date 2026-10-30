@@ -59,6 +59,7 @@ extern "C" int fcuda_mem_info(size_t *free_mem, size_t *total_mem) {
 }
 
 extern "C" void *fcuda_malloc_tagged(size_t bytes, int cls, int site) {
+  if (g_cuda_cleanup_status != 0) return nullptr;
   if (bytes == 0) bytes = 1;
   auto it = g_pool.find(bytes);
   void *d = nullptr;
@@ -96,6 +97,7 @@ extern "C" void *fcuda_malloc(size_t bytes) {
   return fcuda_malloc_tagged(bytes, FAK_ALLOC_OTHER, FAK_ALLOC_SITE("fcuda_malloc"));
 }
 extern "C" void *fcuda_malloc_managed_tagged(size_t bytes, int cls, int site) {
+  if (g_cuda_cleanup_status != 0) return nullptr;
   if (bytes == 0) bytes = 1;
   void *d = nullptr;
   cudaError_t _e = fcuda_alloc_status(cudaMallocManaged(&d, bytes, cudaMemAttachGlobal));
@@ -114,6 +116,7 @@ static void q4_coeff_cache_evict(const void *q);
 
 extern "C" void fcuda_free(void *d) {
   if (!d) return;
+  if (g_cuda_cleanup_status != 0) return;
   if (g_v41_router_uncertain) return;
 #ifdef FAK_CUDA_V41_BF16_PUBLISH
   // Publication drains prior stream work too; its three operands cannot name
@@ -210,6 +213,7 @@ extern "C" void fcuda_free(void *d) {
 // record intact and unavailable to pool reuse; the caller must surface the fault.
 extern "C" int fcuda_discard_unsubmitted(void *d, size_t expected_bytes) {
   if (!d || g_capture_open) return (int)cudaErrorInvalidValue;
+  if (g_cuda_cleanup_status != 0) return g_cuda_cleanup_status;
   if (g_v41_router_uncertain) return (int)cudaErrorInvalidValue;
 #ifdef FAK_CUDA_V41_BF16_PUBLISH
   if (g_v41_bf16_uncertain) return (int)cudaErrorInvalidValue;
@@ -278,6 +282,7 @@ extern "C" size_t fcuda_live_allocations(void) {
 // fcuda_malloc_panel serves prompt-panel scratch from g_panel_pool, never managed memory.
 // nullptr means the device allocation failed or a graph capture is open.
 extern "C" void *fcuda_malloc_panel_tagged(size_t bytes, int cls, int site) {
+  if (g_cuda_cleanup_status != 0) return nullptr;
   if (bytes == 0) bytes = 1;
   if (g_capture_open) return nullptr;
   void *d = nullptr;
@@ -312,19 +317,40 @@ extern "C" void fcuda_panel_peak_reset(void) {
 
 // fcuda_panel_release drains g_stream, then frees every pooled panel buffer. It returns how
 // many panel buffers callers still hold; those return to g_panel_pool when freed and leave at
-// the next release.
+// the next release. A failed fence/free retains the remaining cache and its
+// ledger records; the checked entry point reports the sticky native error.
 extern "C" size_t fcuda_panel_release(void) {
   if (v41_candidates_stream_uncertain()) return g_panel_live.size();
-  cudaStreamSynchronize(g_stream);
-  for (auto &kv : g_panel_pool) {
-    for (void *p : kv.second) {
-      fak_alloc_untrack(p);
-      cudaFree(p);
-    }
+  cudaError_t status = cudaStreamSynchronize(g_stream);
+  if (status != cudaSuccess) {
+    g_cuda_cleanup_status = (int)status;
+    CK(status);
+    return g_panel_live.size();
   }
-  g_panel_pool.clear();
-  g_panel_cached_bytes = 0;
+  for (auto it = g_panel_pool.begin(); it != g_panel_pool.end(); ) {
+    auto &bucket = it->second;
+    while (!bucket.empty()) {
+      void *p = bucket.back();
+      status = cudaFree(p);
+      if (status != cudaSuccess) {
+        g_cuda_cleanup_status = (int)status;
+        CK(status);
+        return g_panel_live.size();
+      }
+      fak_alloc_untrack(p);
+      bucket.pop_back();
+      g_panel_cached_bytes -= it->first;
+    }
+    it = g_panel_pool.erase(it);
+  }
   return g_panel_live.size();
+}
+
+extern "C" int fcuda_panel_release_checked(size_t *live) {
+  if (!live) return (int)cudaErrorInvalidValue;
+  *live = fcuda_panel_release();
+  if (g_cuda_cleanup_status != 0) return g_cuda_cleanup_status;
+  return v41_candidates_stream_uncertain() ? (int)cudaErrorNotReady : 0;
 }
 
 // fcuda_pool_stats reports the cached (free) bytes and non-empty bucket count of g_pool, its
@@ -355,6 +381,7 @@ extern "C" void fcuda_pool_stats(size_t *pooledBytes, size_t *buckets, size_t *l
 // guarantees headroom so the captured forward is served entirely from the free list. Idempotent
 // and cheap: it only tops each bucket up to `extra` spares (a few hundred bytes each).
 extern "C" void fcuda_graph_prewarm(int extra) {
+  if (g_cuda_cleanup_status != 0) return;
   if (extra <= 0) return;
   // Snapshot the sizes first: pushing into g_pool while iterating it would invalidate iterators.
   std::vector<size_t> sizes;

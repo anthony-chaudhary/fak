@@ -133,9 +133,14 @@ static uint64_t g_v41_compressor_completed = 0;
 // uncertainty must be visible before the allocation release fragments.
 static bool g_v41_router_uncertain = false;
 
+// Failed panel cleanup retains its first native error and all remaining
+// storage until process teardown; a later successful fence cannot clear it.
+static int g_cuda_cleanup_status = 0;
+
 // Both candidates share g_stream. A successful peer call cannot rehabilitate
 // an uncertain operation, even when the Go backend has no fault latch.
 static bool v41_candidates_stream_uncertain(void) {
+  if (g_cuda_cleanup_status != 0) return true;
   if (g_v41_router_uncertain) return true;
 #ifdef FAK_CUDA_V41_ROUTED_SWIGLU
   if (g_v41_routed_swiglu_uncertain) return true;

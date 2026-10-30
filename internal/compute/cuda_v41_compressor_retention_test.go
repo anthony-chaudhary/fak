@@ -58,6 +58,7 @@ const cudaV41CompressorRetentionHarness = `
 using cudaError_t = int;
 static constexpr int cudaSuccess = 0, cudaErrorInvalidValue = 1;
 static bool g_v41_compressor_uncertain = false, g_v41_router_uncertain = false, g_capture_open = false;
+static int g_cuda_cleanup_status = 0;
 static int g_stream = 1, sync_status = 0;
 static int frees = 0, untracks = 0, retags = 0, evictions = 0, scopes = 0, syncs = 0;
 static std::map<void *, size_t> g_live, g_managed_live, g_panel_live;
