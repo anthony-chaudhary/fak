@@ -71,6 +71,7 @@ type CUDANativeBuildReceipt struct {
 	V41RoutedSwiGLU    bool                        `json:"v41_routed_swiglu,omitempty"`    // Build selection, not hardware acceptance.
 	V41EngramGate      bool                        `json:"v41_engram_gate,omitempty"`      // Build selection, not hardware acceptance.
 	V41CompressorPool  bool                        `json:"v41_compressor_pool,omitempty"`  // Build selection, not hardware acceptance.
+	V41Compressor      bool                        `json:"v41_compressor,omitempty"`       // Build selection, not hardware acceptance.
 	V41MHC             bool                        `json:"v41_mhc,omitempty"`              // Witness build selection; public capability remains false.
 	V41SharedAttention bool                        `json:"v41_shared_attention,omitempty"` // Build selection, not hardware acceptance.
 	DeepGEMMWKV        *CUDADeepGEMMWKVReceipt     `json:"deepgemm_wkv,omitempty"`
@@ -91,6 +92,7 @@ func newCUDANativeReceipt(ctx context.Context, root, arch string, nccl bool) *CU
 	r.V41RoutedSwiGLU, _ = ctx.Value(cudaV41RoutedSwiGLUKey{}).(bool)
 	r.V41EngramGate, _ = ctx.Value(cudaV41EngramGateKey{}).(bool)
 	r.V41CompressorPool, _ = ctx.Value(cudaV41CompressorPoolKey{}).(bool)
+	r.V41Compressor, _ = ctx.Value(cudaV41CompressorKey{}).(bool)
 	r.V41MHC, _ = ctx.Value(cudaV41MHCKey{}).(bool)
 	r.V41SharedAttention, _ = ctx.Value(cudaV41SharedAttentionKey{}).(bool)
 	r.ReceiptPath, _ = ctx.Value(cudaReceiptPathContext{}).(string)
