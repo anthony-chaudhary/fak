@@ -24,7 +24,7 @@ import (
 // already-landed fence, so narrowing (F16, Q8_0, NVFP4, Q2_0) is identical to Upload by
 // construction.
 
-var _ AsyncUploader = (*cudaBackend)(nil)
+var _ ClassedAsyncUploader = (*cudaBackend)(nil)
 
 // cudaUploadFence is one in-flight copy. slot/gen name the pinned slot's event; a slot is reused
 // only after its event completed, so a stale generation reads as landed.
@@ -98,20 +98,49 @@ func (c *cudaBackend) UploadAsync(t Tensor, as Dtype) (Tensor, Fence) {
 	if !isHost {
 		return c.Upload(t, as), cudaLandedFence
 	}
-	switch {
-	case t.Dtype == F32 && as == F32 && len(t.Shape) > 0:
-		return c.uploadF32Async(t, hb)
-	case (t.Dtype == Q3_K || t.Dtype == Q4_K || t.Dtype == Q5_K || t.Dtype == Q6_K || t.Dtype == Q2_K) && as == t.Dtype:
-		return c.uploadRawKQuantAsync(t, hb)
+	if out, fence, ok := c.uploadAsyncShape(t, hb, as, MemoryOffload, "upload-async"); ok {
+		return out, fence
 	}
 	return c.Upload(t, as), cudaLandedFence
 }
 
-func (c *cudaBackend) uploadF32Async(t Tensor, hb HostBuffer) (Tensor, Fence) {
+// UploadAsyncClass is UploadAsync with every allocation booked under class at site
+// (compute.ClassedAsyncUploader). The async shapes go async only for MemoryOffload, the class
+// their independently Freed allocation already models; any other class, every shape the copy
+// stream does not take, and a full slot pool are synchronous and return a nil Fence, so a caller's
+// overlap meter never books a copy that never left the critical path.
+func (c *cudaBackend) UploadAsyncClass(t Tensor, as Dtype, class MemoryClass, site string) (Tensor, Fence) {
+	class, site = normalizeUploadClass(class, site, "upload-")
+	if hb, isHost := t.buf.(HostBuffer); isHost && class == MemoryOffload {
+		if out, fence, ok := c.uploadAsyncShape(t, hb, as, class, site); ok {
+			if fence == cudaLandedFence {
+				fence = nil
+			}
+			return out, fence
+		}
+	}
+	return c.UploadClass(t, as, class, site), nil
+}
+
+// uploadAsyncShape issues the copy-stream upload for the two byte-verbatim shapes and reports
+// ok=false for every other request.
+func (c *cudaBackend) uploadAsyncShape(t Tensor, hb HostBuffer, as Dtype, class MemoryClass, site string) (Tensor, Fence, bool) {
+	switch {
+	case t.Dtype == F32 && as == F32 && len(t.Shape) > 0:
+		out, fence := c.uploadF32Async(t, hb, class, site)
+		return out, fence, true
+	case (t.Dtype == Q3_K || t.Dtype == Q4_K || t.Dtype == Q5_K || t.Dtype == Q6_K || t.Dtype == Q2_K) && as == t.Dtype:
+		out, fence := c.uploadRawKQuantAsync(t, hb, class, site)
+		return out, fence, true
+	}
+	return Tensor{}, nil, false
+}
+
+func (c *cudaBackend) uploadF32Async(t Tensor, hb HostBuffer, class MemoryClass, site string) (Tensor, Fence) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	f := hb.F32()
-	buf := c.dallocClass(t.Numel()*F32.Bytes(), MemoryOffload, "upload-async")
+	buf := c.dallocClass(t.Numel()*F32.Bytes(), class, site)
 	out := makeF32TensorLike(c, t, buf)
 	if len(f) == 0 {
 		return out, cudaLandedFence
@@ -132,12 +161,12 @@ func (c *cudaBackend) uploadF32Async(t Tensor, hb HostBuffer) (Tensor, Fence) {
 	return out, fence
 }
 
-func (c *cudaBackend) uploadRawKQuantAsync(t Tensor, hb HostBuffer) (Tensor, Fence) {
+func (c *cudaBackend) uploadRawKQuantAsync(t Tensor, hb HostBuffer, class MemoryClass, site string) (Tensor, Fence) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	fence := cudaLandedFence
-	out := c.uploadRawKQuantClassWithOperations(t, hb, MemoryOffload, c.uploadRawKQuant,
-		func(nbytes int) *cudaBuf { return c.dallocClass(nbytes, MemoryOffload, "upload-async") },
+	out := c.uploadRawKQuantClassWithOperations(t, hb, class, c.uploadRawKQuant,
+		func(nbytes int) *cudaBuf { return c.dallocClass(nbytes, class, site) },
 		func(dst unsafe.Pointer, raw []int8) {
 			fence = c.issueAsyncLocked(dst, unsafe.Pointer(&raw[0]), len(raw))
 		},

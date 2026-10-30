@@ -1105,6 +1105,36 @@ persistent buffer, and the q8_1 quantizer is the one already ported for Q4_K. No
 is included. The upstream license is the MIT License reproduced under "llama.cpp Q4_K MMQ
 prompt-panel GEMM" above (Copyright (c) 2023-2026 The ggml authors).
 
+## llama.cpp MUL_MAT_ID MMVQ routed-expert GEMV
+
+The CUDA DeepSeek-V4.1 routed-expert kernels, `internal/compute/cuda_v41_routed_mmid.cu`
+(`mul_mat_vec_q_id`, `mul_mat_vec_q_down_sum`, `fak_v41_mmid_*`) with the Go binding
+`internal/compute/cuda_v41_routed_mmid.go`, port the ids path of `mul_mat_vec_q`
+(`channel_x = ids[channel_dst]`, grid Y the selected expert) and its fused gate + GLU epilogue
+(`fusion.gate`, `tmp_gate`) from `ggml/src/ggml-cuda/mmvq.cu`, plus `block_q2_K`
+(`ggml/src/ggml-common.h`) and `vec_dot_q2_K_q8_1_impl_mmvq` / `vec_dot_q2_K_q8_1`
+(`ggml/src/ggml-cuda/vecdotq.cuh`), at llama.cpp revision
+`571d0d540df04f25298d0e159e520d9fc62ed121`:
+https://github.com/ggml-org/llama.cpp/tree/571d0d540df04f25298d0e159e520d9fc62ed121/ggml/src/ggml-cuda
+
+Changed for Fak: one activation column per launch on the NVIDIA generic parameter row (4 warps,
+one row per CUDA block); Q2_K and Q3_K only (Q3_K reuses the dot already ported in
+`cuda/q3k_mmvq.cuh`); the ids are Fak's V4.1 routed-id word image and index a by-value table of
+up to eight ring-page pointers instead of a 3-D expert bank; the GLU epilogue is the V4.1
+checked clamp-SwiGLU with per-pick BF16 fault records; and a down kernel loops the picks in
+routed-sum order to fold the checked BF16 publication and the ordered F32 sum into its
+epilogue. No upstream runtime is included. The upstream license is the MIT License reproduced
+under "llama.cpp Q4_K MMQ prompt-panel GEMM" above (Copyright (c) 2023-2026 The ggml authors).
+
+The clamped SwiGLU lane (`routed_swiglu_lane` in `internal/compute/cuda_v41_routed_swiglu.cu`,
+shared by the CUDA routed SwiGLU candidate and these kernels) follows `swiglu_kernel` from
+antirez/ds4 `ds4_cuda.cu` at revision `80ebbc396aee40eedc1d829222f3362d10fa4c6c` (MIT, The
+ds4.c authors): `g = min(g, c)`, `u = clamp(u, -c, c)`, `silu(g) * u * weight`:
+https://github.com/antirez/ds4/blob/80ebbc396aee40eedc1d829222f3362d10fa4c6c/ds4_cuda.cu
+Fak adds the BF16 rounding of gate/up and of the weighted product and the two fault stages. The
+ds4 copyright and permission notice is reproduced under "antirez/ds4 (DwarfStar) V4 Flash CUDA
+kernels" above.
+
 ## NVIDIA cuBLASLt FP8 sample
 
 The experimental Q4_K FP8 arm in `internal/compute/cuda/q4k_fp8lt.cuh` adapts the

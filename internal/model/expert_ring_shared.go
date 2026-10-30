@@ -488,6 +488,7 @@ func (sh *SharedExpertRing) statsLocked() SharedExpertRingStats {
 // SESSION-level entry points lock, pagedRing methods NEVER do. Any new ring caller belongs on this
 // list, and any lock inside pagedRing would deadlock against it.
 func (s *Session) ringEnter(r *pagedRing) func() {
+	s.armRingDomainDrain(r)
 	if s == nil || r == nil || r.shared == nil {
 		return func() {}
 	}
@@ -517,6 +518,26 @@ func (s *Session) ringEnter(r *pagedRing) func() {
 			sh.mu.Unlock()
 		}
 	}
+}
+
+// armRingDomainDrain joins a PRIVATE ring's in-flight transfers to this session's live execution
+// scope: the scope settles every pending fence before it releases the recording domain, so an
+// undemanded prefetch can never outlive the forward that issued it. Only an armed ring may issue
+// async uploads on an owner-capable backend (uploadStagedAsync). A shared ring is serialized by its
+// own span lock rather than the domain lease, so it is never armed and stays synchronous there.
+func (s *Session) armRingDomainDrain(r *pagedRing) {
+	if s == nil || r == nil || r.shared != nil {
+		return
+	}
+	scope := s.backendExecutionScope
+	if scope == nil || !scope.live || r.drainScope == scope {
+		return
+	}
+	if owner := backendExecutionOwner(r.be); owner == nil || owner != scope.owner {
+		return
+	}
+	r.drainScope = scope
+	scope.beforeRelease(r.settlePendingTransfers)
 }
 
 // cancelRingSpan retires this session's nested spans before fail-closed teardown

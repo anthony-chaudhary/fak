@@ -151,3 +151,50 @@ func TestCUDAUploadAsyncNarrowingFallsBackToUpload(t *testing.T) {
 		t.Fatalf("UploadAsync(_, F16) produced %s, want f16 (same narrowing as Upload)", got.Dtype)
 	}
 }
+
+// UploadAsyncClass (compute.ClassedAsyncUploader, the expert ring's path on CUDA) issues on the
+// copy stream for MemoryOffload and books the allocation under that class AT the caller's site;
+// any other class is the synchronous UploadClass with a nil fence.
+// fak-test:runtime fast est=2s
+func TestCUDAUploadAsyncClassBooksOffloadAtSite(t *testing.T) {
+	cb := cudaOrSkip(t)
+	var seed lcg = 0x3c3c
+	const out, in = 128, 256
+	w := randVec(&seed, out*in)
+	const site = "ring-async-class-witness"
+
+	before, _, _ := cudaAsyncUploadStats()
+	got, fence := cb.UploadAsyncClass(NewF32(cb, []int{out, in}, append([]float32(nil), w...)), F32, MemoryOffload, site)
+	fence.Wait()
+	asyncUploadIssuedOrFatal(t, before)
+	want := DeviceAllocClassFor(MemoryOffload, site, false).String()
+	booked := false
+	for _, s := range cb.DeviceAllocLedger().Sites {
+		if s.Site == site && s.LiveCount > 0 {
+			if s.Class != want {
+				t.Fatalf("site %q booked as %q, want %q", site, s.Class, want)
+			}
+			booked = true
+		}
+	}
+	if !booked {
+		t.Fatalf("no live ledger row for site %q", site)
+	}
+	back := cb.Read(got)
+	for i := range w {
+		if math.Float32bits(back[i]) != math.Float32bits(w[i]) {
+			t.Fatalf("element %d: async=%08x host=%08x", i, math.Float32bits(back[i]), math.Float32bits(w[i]))
+		}
+	}
+	cb.Free(got)
+
+	issued, _, _ := cudaAsyncUploadStats()
+	sync, landed := cb.UploadAsyncClass(NewF32(cb, []int{out, in}, append([]float32(nil), w...)), F32, MemoryWeights, "")
+	if landed != nil {
+		t.Fatal("synchronous non-offload upload returned a fence; the ring would book it as overlap")
+	}
+	if after, _, _ := cudaAsyncUploadStats(); after != issued {
+		t.Fatalf("non-offload class went through the copy stream (issued %d -> %d)", issued, after)
+	}
+	cb.Free(sync)
+}

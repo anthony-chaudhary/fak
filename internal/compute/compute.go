@@ -514,6 +514,18 @@ type AsyncUploader interface {
 	UploadAsync(t Tensor, as Dtype) (Tensor, Fence)
 }
 
+// ClassedAsyncUploader is an OPTIONAL refinement of AsyncUploader for a backend that also honors
+// placement (UploadClass). UploadAsyncClass is UploadAsync whose every allocation, async or
+// synchronous fallback, is booked under class at site, exactly as UploadClass would book it. A
+// caller that sizes itself from per-class accounting (the expert ring stages under MemoryOffload)
+// may route a placement-aware backend through async only via this method: a plain UploadAsync
+// allocation carries no class and would corrupt that accounting. A nil Fence means the transfer
+// completed synchronously: there is nothing to await and nothing overlapped.
+type ClassedAsyncUploader interface {
+	AsyncUploader
+	UploadAsyncClass(t Tensor, as Dtype, class MemoryClass, site string) (Tensor, Fence)
+}
+
 // CollectiveInitializer is an OPTIONAL extension for backends whose collective capability needs
 // an explicit world-size bootstrap before Caps().Collective can honestly report true.
 type CollectiveInitializer interface {

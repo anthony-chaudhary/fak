@@ -489,7 +489,7 @@ func TestBackendExecutionOwnerAsyncAndConstructorFailure(t *testing.T) {
 	func() {
 		defer scope.finish()
 		src := compute.NewF32(compute.Default(), []int{4}, []float32{1, 2, 3, 4})
-		got, fence := uploadStagedAsync(b, src, compute.F32, "owner witness")
+		got, fence := uploadStagedAsync(b, src, compute.F32, "owner witness", false)
 		if fence != nil {
 			t.Fatal("owned ring retained a pending fence")
 		}

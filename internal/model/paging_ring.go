@@ -86,6 +86,9 @@ type pagedRing struct {
 	// counting them needs no clock, which is why it is trustworthy on a machine under load.
 	asyncOverlapped int
 	asyncWaited     int
+	// drainScope is the live execution scope this ring registered a pending-fence drain on
+	// (armRingDomainDrain). Only while it is live may an owner-capable backend issue async.
+	drainScope *backendExecutionScope
 
 	// peak is the high-water mark of pool.Used() — the largest device weight footprint the ring ever
 	// held. It is the boundedness WITNESS: peak <= budget across an arbitrary access sequence is what
@@ -211,22 +214,46 @@ func uploadStaged(be compute.Backend, src compute.Tensor, dtype compute.Dtype, s
 // the synchronous path and a nil Fence, which awaitStaged treats as already-landed — so cpu-ref
 // and every other synchronous backend keep the exact upload they had (#5627).
 //
-// The classed-upload path is preferred when BOTH are available only for the synchronous case: an
-// async upload cannot also carry the memory-class label today, and mislabelling the class would
-// corrupt the offload accounting that sizes the ring. Async is the newer, narrower capability, so
-// it yields.
-func uploadStagedAsync(be compute.Backend, src compute.Tensor, dtype compute.Dtype, site string) (compute.Tensor, compute.Fence) {
-	// An undemanded prefetch fence can outlive the enclosing forward. Keep
-	// transfers synchronous until async lifetime joins the domain lease.
-	if _, owned := be.(compute.ForwardExecutionOwnerBackend); owned {
+// Two guards keep an async transfer from escaping what owns it:
+//
+//   - CLASS. A placement-aware backend (UploadClass) goes async only through
+//     compute.ClassedAsyncUploader, which books the allocation under MemoryOffload exactly as the
+//     synchronous classed path does; a plain UploadAsync would leave it unlabelled and corrupt the
+//     offload accounting that sizes the ring.
+//   - DOMAIN. An undemanded prefetch fence can outlive the enclosing forward, so on a backend
+//     with a recording-domain owner (compute.ForwardExecutionOwnerBackend) the transfer goes async
+//     only when domainJoined: the ring has registered a drain on the live execution scope, which
+//     settles every pending fence before the domain mutex is released (armRingDomainDrain).
+func uploadStagedAsync(be compute.Backend, src compute.Tensor, dtype compute.Dtype, site string, domainJoined bool) (compute.Tensor, compute.Fence) {
+	if _, owned := be.(compute.ForwardExecutionOwnerBackend); owned && !domainJoined {
 		return uploadStaged(be, src, dtype, site), nil
 	}
-	if _, classed := be.(classedUploadBackend); !classed {
-		if ab, ok := be.(compute.AsyncUploader); ok {
-			return ab.UploadAsync(src, dtype)
+	if _, classed := be.(classedUploadBackend); classed {
+		if cb, ok := be.(compute.ClassedAsyncUploader); ok {
+			return cb.UploadAsyncClass(src, dtype, compute.MemoryOffload, site)
 		}
+		return uploadStaged(be, src, dtype, site), nil
+	}
+	if ab, ok := be.(compute.AsyncUploader); ok {
+		return ab.UploadAsync(src, dtype)
 	}
 	return uploadStaged(be, src, dtype, site), nil
+}
+
+// domainJoined reports whether a transfer issued now is covered by a drain registered on the
+// currently live execution scope. A released scope reads false, so a stale arming is inert.
+func (r *pagedRing) domainJoined() bool {
+	return r.drainScope != nil && r.drainScope.live
+}
+
+// settlePendingTransfers waits out every in-flight transfer without booking the overlap meter: a
+// prefetch still undemanded when its forward ends computed nothing, exactly like discardStaged's
+// evicted-before-demand case. The weights stay resident; the next demand is an ordinary hit.
+func (r *pagedRing) settlePendingTransfers() {
+	r.drainScope = nil
+	for id := range r.pending {
+		r.discardStaged(id)
+	}
 }
 
 // matMulStaged is the dtype-general ring core shared by the f32 matMul and the quantized matMulQ8 /
@@ -322,7 +349,7 @@ func (r *pagedRing) stageWithError(name string, mk func() compute.Tensor, dtype 
 	// error the pool is unchanged, so page the just-uploaded handle straight back out and defer.
 	// Under a non-default victim policy the ring makes room ITSELF first (evictForPolicy), so the
 	// Admit below fits and polymodel's own LRU choice never applies.
-	wt, fence := uploadStagedAsync(r.be, mk(), dtype, "paged-ring-weight")
+	wt, fence := uploadStagedAsync(r.be, mk(), dtype, "paged-ring-weight", r.domainJoined())
 	r.evictForPolicy(weightBytes)
 	evicted, err := r.pool.Admit(polymodel.Model{ID: id, WeightBytes: weightBytes, Pinned: pinned})
 	if err != nil {

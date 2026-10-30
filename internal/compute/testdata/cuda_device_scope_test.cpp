@@ -15,7 +15,7 @@ static constexpr int cudaMemcpyDeviceToDevice = 3;
 static cudaStream_t cudaStreamLegacy = reinterpret_cast<void *>(1);
 static cudaStream_t g_stream = reinterpret_cast<void *>(99);
 static int g_cuda_cleanup_status = 0;
-static bool g_v41_router_uncertain = false, g_v41_bf16_uncertain = false;
+static bool g_v41_router_uncertain = false, g_v41_mmid_uncertain = false, g_v41_bf16_uncertain = false;
 static int selected = 0, view = 0, get_error = 0, select_error = 0, op_error = 0;
 static int fence_error = 0;
 static int last_error = 0; // the runtime's per-thread last error, as the fake records it

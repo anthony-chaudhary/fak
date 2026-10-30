@@ -1,37 +1,42 @@
 // SPDX-License-Identifier: Apache-2.0
 // Direct port of shaders/v41_routed_swiglu.comp, blob
 // 782669d69e5ca477a3fc88f06527f4f451d6b16e. See PROVENANCE.md.
-#ifdef FAK_CUDA_V41_ROUTED_SWIGLU
+// The lane math is shared, outside the opt-in, with the routed id/fused
+// kernels in cuda_v41_routed_mmid.cu, so both paths publish the same bits.
 __device__ static unsigned routed_swiglu_bf16(unsigned u) {
  return (u + 0x7fffu + ((u >> 16) & 1u)) & 0xffff0000u;
 }
 __device__ static bool routed_swiglu_nonfinite(unsigned u) {
  return (u & 0x7f800000u) == 0x7f800000u;
 }
+// One lane: *out gets the published bits; the return is the fault stage
+// (0 none, 1 activation, 2 down operand) the caller records.
+__device__ static unsigned routed_swiglu_lane(float gate,float up,float limit,float weight,unsigned *out) {
+ unsigned gb=__float_as_uint(gate),ub=__float_as_uint(up);
+ unsigned gr=routed_swiglu_bf16(gb),ur=routed_swiglu_bf16(ub);
+ if(routed_swiglu_nonfinite(gb)||routed_swiglu_nonfinite(ub)||routed_swiglu_nonfinite(gr)||routed_swiglu_nonfinite(ur)){
+  *out=0x7fc00000u;return 1u;
+ }
+ float g=__uint_as_float(gr),u=__uint_as_float(ur);
+ if(limit>0.f){g=fminf(g,limit);u=fmaxf(-limit,fminf(u,limit));}
+ // Precise donor order: do not contract or substitute approximate division.
+ // expf is device precision, as permitted by V41RoutedSwiGLUBackend;
+ // qualification must bound it against the host oracle.
+ float t=__fadd_rn(1.f,expf(-g));
+ float f=__fmul_rn(__fdiv_rn(g,t),u);
+ if(routed_swiglu_nonfinite(__float_as_uint(f))){*out=0x7fc00000u;return 1u;}
+ float w=__fmul_rn(f,weight);unsigned wb=__float_as_uint(w),wr=routed_swiglu_bf16(wb);
+ if(routed_swiglu_nonfinite(wb)||routed_swiglu_nonfinite(wr)){*out=0x7fc00000u;return 2u;}
+ *out=wr;return 0u;
+}
+#ifdef FAK_CUDA_V41_ROUTED_SWIGLU
 __global__ static void k_v41_routed_swiglu(const float *gate,const float *up,float *out,unsigned *status,int count,float limit,float weight) {
  unsigned first=blockIdx.x*blockDim.x+threadIdx.x;
  if(first==0){status[0]=0x52535731u;status[1]=(unsigned)count;}
  for(unsigned i=first;i<(unsigned)count;i+=gridDim.x*blockDim.x){
-  unsigned gb=__float_as_uint(gate[i]),ub=__float_as_uint(up[i]);
-  unsigned gr=routed_swiglu_bf16(gb),ur=routed_swiglu_bf16(ub);
-  if(routed_swiglu_nonfinite(gb)||routed_swiglu_nonfinite(ub)||routed_swiglu_nonfinite(gr)||routed_swiglu_nonfinite(ur)){
-   atomicMin(status+2,i);out[i]=__uint_as_float(0x7fc00000u);continue;
-  }
-  float g=__uint_as_float(gr),u=__uint_as_float(ur);
-  if(limit>0.f){g=fminf(g,limit);u=fmaxf(-limit,fminf(u,limit));}
-  // Precise donor order: do not contract or substitute approximate division.
-  // expf is device precision, as permitted by V41RoutedSwiGLUBackend;
-  // qualification must bound it against the host oracle.
-  float t=__fadd_rn(1.f,expf(-g));
-  float f=__fmul_rn(__fdiv_rn(g,t),u);
-  if(routed_swiglu_nonfinite(__float_as_uint(f))){
-   atomicMin(status+2,i);out[i]=__uint_as_float(0x7fc00000u);continue;
-  }
-  float w=__fmul_rn(f,weight);unsigned wb=__float_as_uint(w),wr=routed_swiglu_bf16(wb);
-  if(routed_swiglu_nonfinite(wb)||routed_swiglu_nonfinite(wr)){
-   atomicMin(status+3,i);wr=0x7fc00000u;
-  }
-  out[i]=__uint_as_float(wr);
+  unsigned bits;unsigned stage=routed_swiglu_lane(gate[i],up[i],limit,weight,&bits);
+  if(stage)atomicMin(status+1+stage,i);
+  out[i]=__uint_as_float(bits);
  }
 }
 extern "C" int fak_v41_routed_swiglu_state(void) {
