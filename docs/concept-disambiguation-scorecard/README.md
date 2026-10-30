@@ -15,9 +15,9 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **715** (clarity 0 + coverage 715) |
+| **Disambiguation-debt (drive to 0)** | **716** (clarity 0 + coverage 716) |
 | **Crystal-clear concepts (and climbing)** | **1363** crystal of 3174 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3253 / 3968** (82.0% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **3253 / 3969** (82.0% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 229 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **95** of 4433 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
@@ -28,7 +28,7 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3174 concepts - score 88.3/100 (grade B) - disambiguation-debt 715
+concept-disambiguation chart - 3174 concepts - score 88.3/100 (grade B) - disambiguation-debt 716
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #####################....... 1363
@@ -62,7 +62,7 @@ clarity mix by family (each cell = one concept):
   witness-proof    *************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (177 concept(s); 85 crystal)
 
 coverage by family (positioned / discovered):
-  plan             ######################...... 491/618
+  plan             ######################...... 491/619
   cache            #######################..... 345/415
   session-runtime  #######################..... 290/359
   gateway-engine   ######################...... 251/315
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##########################......] 82.0%  (3253/3968 confusable tokens positioned)
+namespace coverage  [##########################......] 82.0%  (3253/3969 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 229
@@ -3471,7 +3471,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| plan | 491 | 618 | 127 |
+| plan | 491 | 619 | 128 |
 | cache | 345 | 415 | 70 |
 | session-runtime | 290 | 359 | 69 |
 | gateway-engine | 251 | 315 | 64 |
