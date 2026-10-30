@@ -6,8 +6,10 @@ package compute
 #include <stddef.h>
 #include <stdint.h>
 #include "cuda_backend.h"
-// Candidate-local ABI from cuda_v41_routed_mmid.cu (always compiled; this tag is the opt-in).
+// Candidate-local ABI from cuda_v41_routed_mmid.cu. The kernels compile in every
+// CUDA profile; this tag gates only the binding.
 int fak_v41_mmid_state(void);
+int fak_v41_mmid_uncertain(void);
 unsigned long long fak_v41_mmid_launch_count(void);
 int fak_v41_mmid_gemv(int, const void *const *, int, const float *, int, const unsigned *, float *, int, int, int);
 int fak_v41_mmid_gate_up_swiglu(int, const void *const *, const void *const *, int, const float *, int,
@@ -122,7 +124,9 @@ func (c *cudaBackend) cudaV41MMIDSlots(site, name string, weights []Tensor, rows
 }
 
 // cudaV41MMIDCall runs fn under cudaMu with the shared admission, panic and
-// cleanup discipline; outputs listed in owned are freed when fn fails.
+// cleanup discipline; outputs listed in owned are freed when fn fails, unless
+// the failure left the stream uncertain (a 5xxxx drain status): kernels may
+// still write them, so they stay retained until process teardown.
 func (c *cudaBackend) cudaV41MMIDCall(site string, fn func(alloc func(int, string) (*cudaBuf, error)) error) (err error) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
@@ -132,7 +136,7 @@ func (c *cudaBackend) cudaV41MMIDCall(site string, fn func(alloc func(int, strin
 			cause, _ := ConvertCUDAPanic(recovered, site, "routed mmid")
 			err = cudaV41MMIDError(site, "candidate panicked", -1, cause)
 		}
-		if err != nil {
+		if err != nil && C.fak_v41_mmid_uncertain() == 0 {
 			for _, b := range owned {
 				if b != nil && b.ptr != nil {
 					C.fcuda_free(b.ptr)

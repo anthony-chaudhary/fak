@@ -132,6 +132,10 @@ static uint64_t g_v41_compressor_completed = 0;
 // Router source is compiled in every CUDA profile; its terminal stream
 // uncertainty must be visible before the allocation release fragments.
 static bool g_v41_router_uncertain = false;
+// The routed-expert mmid kernels (cuda_v41_routed_mmid.cu) are compiled in every
+// CUDA profile too. Their failed drain can leave any earlier g_stream work in
+// flight, so it closes every peer and freezes every allocation release.
+static bool g_v41_mmid_uncertain = false;
 
 // Failed checked allocator cleanup retains its first native error and all remaining
 // storage until process teardown; a later successful fence cannot clear it.
@@ -142,6 +146,7 @@ static int g_cuda_cleanup_status = 0;
 static bool v41_candidates_stream_uncertain(void) {
   if (g_cuda_cleanup_status != 0) return true;
   if (g_v41_router_uncertain) return true;
+  if (g_v41_mmid_uncertain) return true;
 #ifdef FAK_CUDA_V41_ROUTED_SWIGLU
   if (g_v41_routed_swiglu_uncertain) return true;
 #endif

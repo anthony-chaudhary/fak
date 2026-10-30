@@ -36,7 +36,18 @@
 //     lowest lane, count) and the ordered F32 sum into the epilogue, as
 //     v41_routed_down_sum.comp does on Vulkan.
 //   * Activations are quantized to q8_1 into a transient scratch per call;
-//     no bias, NVFP4 scale, sample broadcast or ggml_cuda_pdl_*.
+//     no bias, NVFP4 scale, sample broadcast or ggml_cuda_pdl_*. The outputs are
+//     therefore within the q8_1 activation residual of the per-pick F32 GEMV,
+//     not bitwise it (cudaQ2KCosineMin / cudaQ3KCosineMin bound it).
+//   * The ids tensor is device data the host cannot re-check, and CUDA has no
+//     robust buffer access, so every slot word and order word is bounds-checked
+//     in the kernel. A slot outside the bound table publishes NaN and, where the
+//     stage has records, faults its pick's record at lane 0; an order word >= P
+//     skips that term and faults record 0 at lane 0. Vulkan clamps a bad slot
+//     to slot 7 instead; neither path reads or writes out of bounds.
+//   * The kernels are compiled in every CUDA profile (like the router); the
+//     fak_cuda_v41_routed_mmid tag gates only the Go binding. Their uncertainty
+//     flag is shared with every peer through v41_candidates_stream_uncertain.
 
 namespace fak_v41_mmid {
 
@@ -59,6 +70,7 @@ enum { type_q2_K = 0, type_q3_K = 1 };
 
 struct slot_table {
     const void *w[max_slots];
+    unsigned n; // bound slots; w[n..) are null
 };
 
 // ggml-common.h block_q2_K.
@@ -136,9 +148,12 @@ constexpr int vdr = 1;
 static_assert(QI2_K == qi && fak_q3k_mmvq::QI3_K == qi, "both routed types take qi 16");
 static_assert(VDR_Q2_K_Q8_1_MMVQ == vdr && fak_q3k_mmvq::VDR_Q3_K_Q8_1_MMVQ == vdr, "both routed types take vdr 1");
 
+// Null for a slot outside the bound table.
 static __device__ __forceinline__ const void *slot_weight(const slot_table &t, unsigned slot) {
-    return t.w[slot < (unsigned)max_slots ? slot : 0];
+    return slot < t.n ? t.w[slot] : nullptr;
 }
+
+constexpr unsigned poison_bits = 0x7fc00000u;
 
 // mmvq.cu mul_mat_vec_q at ncols_dst = 1 with ids. Grid (nrows_x, picks).
 // Without fusion dst[pick*nrows_x + row] = W[slot(pick)] . y_pick. With fusion
@@ -169,6 +184,14 @@ static __global__ void mul_mat_vec_q_id(
             status[4 * channel_dst + 0] = 0x52535731u;
             status[4 * channel_dst + 1] = (unsigned)nrows_x;
         }
+    }
+    // channel_x is block uniform, so the whole block leaves together.
+    if (!vx || (has_fusion && !vgate)) {
+        if (tid == 0) {
+            if constexpr (has_fusion) atomicMin(status + 4 * channel_dst + 2, 0u);
+            dst[(size_t)channel_dst * nrows_x + row0] = __uint_as_float(poison_bits);
+        }
+        return;
     }
 
     float tmp = 0.0f;
@@ -259,9 +282,19 @@ static __global__ void mul_mat_vec_q_down_sum(
     __shared__ float tmp_shared[nwarps - 1][warp_size];
     float acc = 0.0f;
     for (int j = 0; j < picks; ++j) {
+        // p and the slot are block uniform: a bad word skips the term for every
+        // thread, so no __syncthreads below is divergent.
         const unsigned p = ids[2 * picks + j];
+        if (p >= (unsigned)picks) {
+            if (tid == 0) atomicMin(status + 2, 0u);
+            continue;
+        }
         const void *vx = slot_weight(vx_slots, ids[p]);
-        const block_q8_1 *y = vy + p * stride_channel_y;
+        if (!vx) {
+            if (tid == 0) atomicMin(status + 4 * p + 2, 0u);
+            continue;
+        }
+        const block_q8_1 *y = vy + (size_t)p * stride_channel_y;
         float tmp = 0.0f;
         for (int kbx = tid / (qi / vdr); kbx < blocks_per_row_x; kbx += blocks_per_iter) {
             const int kby = kbx * (qk / QK8_1);
@@ -329,6 +362,10 @@ static __global__ void routed_publish_down_sum(const float *__restrict__ down, f
         float acc = 0.0f;
         for (int j = 0; j < picks; ++j) {
             const unsigned p = ids[2 * picks + j];
+            if (p >= (unsigned)picks) {
+                atomicMin(status + 2, 0u);
+                continue;
+            }
             acc = __fadd_rn(acc, __uint_as_float(routed_swiglu_bf16(__float_as_uint(down[(size_t)p * count + i]))));
         }
         sum[i] = acc;
@@ -337,13 +374,16 @@ static __global__ void routed_publish_down_sum(const float *__restrict__ down, f
 
 } // namespace fak_v41_mmid
 
-static bool g_v41_mmid_uncertain = false;
+// g_v41_mmid_uncertain is declared with its peers in cuda_kernels.cu.
 static unsigned long long g_v41_mmid_launches = 0;
 
 extern "C" unsigned long long fak_v41_mmid_launch_count(void) { return g_v41_mmid_launches; }
 
+extern "C" int fak_v41_mmid_uncertain(void) { return g_v41_mmid_uncertain ? 1 : 0; }
+
 extern "C" int fak_v41_mmid_state(void) {
-    if (!g_stream || g_capture_open || g_v41_mmid_uncertain) return -3;
+    // A peer's uncertain drain is not rehabilitated by this candidate's calls.
+    if (!g_stream || g_capture_open || v41_candidates_stream_uncertain()) return -3;
     cudaError_t error = cudaPeekAtLastError();
     if (error != cudaSuccess) return 10000 + (int)error;
     int device = -1;
@@ -369,14 +409,17 @@ static int v41_mmid_owned(const void *p, uint64_t bytes) {
 
 static int v41_mmid_slots(const void *const *src, int nslots, fak_v41_mmid::slot_table *dst) {
     if (!src || nslots <= 0 || nslots > fak_v41_mmid::max_slots) return 2;
-    for (int i = 0; i < fak_v41_mmid::max_slots; ++i) dst->w[i] = src[i < nslots ? i : 0];
+    for (int i = 0; i < fak_v41_mmid::max_slots; ++i) dst->w[i] = i < nslots ? src[i] : nullptr;
+    dst->n = (unsigned)nslots;
     for (int i = 0; i < nslots; ++i)
         if (!src[i]) return 2;
     return 0;
 }
 
 // An enqueue failure leaves earlier work unknown: drain, and close the
-// candidate if even the drain fails.
+// candidate if even the drain fails. Once uncertain, fcuda_free and every other
+// release entry keep all storage out of reuse (the kernels may still own it),
+// so callers never recycle the operation's x, ids, outputs, status or scratch.
 static int v41_mmid_drain(int status) {
     cudaError_t drained = cudaStreamSynchronize(g_stream);
     if (drained != cudaSuccess) {

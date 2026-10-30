@@ -144,40 +144,85 @@ func (l *v41MMIDLayer) free(cb *cudaBackend) {
 	}
 }
 
-// host returns the per-pick gate/up rows, the mid and the routed sum.
-func (l *v41MMIDLayer) host(picks, hidden, inter int) (gate, up [][]float64, mid []float32, sum []float32) {
-	mid = make([]float32, picks*inter)
+func v41MMIDF64(x []float32) []float64 {
+	out := make([]float64, len(x))
+	for i, v := range x {
+		out[i] = float64(v)
+	}
+	return out
+}
+
+// v41MMIDHost is the host model of one routed layer: the q8_1 replay of the
+// device arithmetic (gate, up, mid, sum) and the unquantized oracle (refMid,
+// refSum: F64 dots over the raw F32 activation and mid, no q8_1), which the
+// device is bounded against by the declared CUDA accuracy gates.
+type v41MMIDHost struct {
+	gate, up       [][]float64
+	mid, sum       []float32
+	refMid, refSum []float32
+}
+
+func (l *v41MMIDLayer) host(picks, hidden, inter int) v41MMIDHost {
+	var h v41MMIDHost
+	h.mid, h.refMid = make([]float32, picks*inter), make([]float32, picks*inter)
 	for p := 0; p < picks; p++ {
 		xs := l.x
 		if len(l.x) != hidden {
 			xs = l.x[p*hidden : (p+1)*hidden]
 		}
-		xq := v41MMIDQ8(xs)
+		xq, xr := v41MMIDQ8(xs), v41MMIDF64(xs)
 		s := l.slots[p]
 		gRows, uRows := v41MMIDRows(Q2_K, l.gateRaw[s], inter, hidden), v41MMIDRows(Q2_K, l.upRaw[s], inter, hidden)
 		g, u := make([]float64, inter), make([]float64, inter)
 		for o := 0; o < inter; o++ {
 			g[o], u[o] = v41MMIDDot(gRows[o], xq), v41MMIDDot(uRows[o], xq)
-			mid[p*inter+o] = v41MMIDSwiGLU(float32(g[o]), float32(u[o]), v41MMIDLimit, l.weights[p])
+			h.mid[p*inter+o] = v41MMIDSwiGLU(float32(g[o]), float32(u[o]), v41MMIDLimit, l.weights[p])
+			rg, ru := v41MMIDDot(gRows[o], xr), v41MMIDDot(uRows[o], xr)
+			h.refMid[p*inter+o] = v41MMIDSwiGLU(float32(rg), float32(ru), v41MMIDLimit, l.weights[p])
 		}
-		gate, up = append(gate, g), append(up, u)
+		h.gate, h.up = append(h.gate, g), append(h.up, u)
 	}
-	sum = make([]float32, hidden)
-	down := make([][]float32, picks)
+	h.sum, h.refSum = make([]float32, hidden), make([]float32, hidden)
+	down, refDown := make([][]float32, picks), make([][]float32, picks)
 	for p := 0; p < picks; p++ {
-		mq := v41MMIDQ8(mid[p*inter : (p+1)*inter])
+		mq, mr := v41MMIDQ8(h.mid[p*inter:(p+1)*inter]), v41MMIDF64(h.refMid[p*inter:(p+1)*inter])
 		dRows := v41MMIDRows(Q3_K, l.downRaw[l.slots[p]], hidden, inter)
-		down[p] = make([]float32, hidden)
+		down[p], refDown[p] = make([]float32, hidden), make([]float32, hidden)
 		for o := range down[p] {
 			down[p][o] = v41MMIDBF16(float32(v41MMIDDot(dRows[o], mq)))
+			refDown[p][o] = v41MMIDBF16(float32(v41MMIDDot(dRows[o], mr)))
 		}
 	}
 	for _, p := range l.order {
-		for o := range sum {
-			sum[o] += down[p][o]
+		for o := range h.sum {
+			h.sum[o] += down[p][o]
+			h.refSum[o] += refDown[p][o]
 		}
 	}
-	return gate, up, mid, sum
+	return h
+}
+
+// v41MMIDCosine checks got against the unquantized oracle at a declared
+// cuda_accuracy_gates.go floor and returns the realized cosine.
+func v41MMIDCosine(t *testing.T, what string, got, want []float32, floor float64) float64 {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("%s: len %d, want %d", what, len(got), len(want))
+	}
+	var dot, gg, ww float64
+	for i := range want {
+		if v41MMIDNonfinite(got[i]) {
+			t.Fatalf("%s: lane %d is non-finite", what, i)
+		}
+		dot += float64(got[i]) * float64(want[i])
+		gg += float64(got[i]) * float64(got[i])
+		ww += float64(want[i]) * float64(want[i])
+	}
+	cos := dot / math.Sqrt(gg*ww)
+	if !(cos >= floor) {
+		t.Fatalf("%s: cosine %.7f vs the unquantized oracle, below the recorded floor %g", what, cos, floor)
+	}
+	return cos
 }
 
 func v41MMIDMaxAbs(v []float32) float64 {
@@ -268,7 +313,8 @@ func TestCUDAV41RoutedMMIDParity(t *testing.T) {
 			H, I, P := tc.hidden, tc.inter, tc.picks
 			l := newV41MMIDLayer(t, cb, P, H, I, tc.perPickX, uint64(0x41d0+ci))
 			defer l.free(cb)
-			wantGate, wantUp, wantMid, wantSum := l.host(P, H, I)
+			want := l.host(P, H, I)
+			wantGate, wantUp, wantMid, wantSum := want.gate, want.up, want.mid, want.sum
 
 			ids, err := cb.V41RoutedIDs(l.slots, l.weights, l.order)
 			if err != nil {
@@ -332,6 +378,10 @@ func TestCUDAV41RoutedMMIDParity(t *testing.T) {
 			idMid, idSum := cb.Read(a), cb.Read(s)
 			v41MMIDCheckMid(t, "id mid", idMid, wantMid)
 			v41MMIDCheckClose(t, "id sum", idSum, wantSum, 1e-2)
+			// The q8_1 activation residual against the unquantized oracle: the
+			// gate/up GEMV is Q2_K, the down GEMV Q3_K (cuda_accuracy_gates.go).
+			midCos := v41MMIDCosine(t, "id mid vs unquantized oracle", idMid, want.refMid, cudaQ2KCosineMin)
+			sumCos := v41MMIDCosine(t, "id sum vs unquantized oracle", idSum, want.refSum, cudaQ3KCosineMin)
 
 			// Fused path.
 			launches = cudaV41MMIDLaunchesForTest()
@@ -365,7 +415,8 @@ func TestCUDAV41RoutedMMIDParity(t *testing.T) {
 			for _, o := range []Tensor{g, u, a, d, s, mid, sum} {
 				cb.Free(o)
 			}
-			t.Logf("H%d I%d P%d: |sum| max %.4g, mid/sum fused == id bitwise", H, I, P, v41MMIDMaxAbs(wantSum))
+			t.Logf("H%d I%d P%d: |sum| max %.4g, mid/sum fused == id bitwise, cosine vs unquantized oracle mid %.6f sum %.6f",
+				H, I, P, v41MMIDMaxAbs(wantSum), midCos, sumCos)
 		})
 	}
 }
@@ -469,22 +520,148 @@ func TestCUDAV41RoutedMMIDRefusals(t *testing.T) {
 	}
 	defer cb.Free(ids)
 	launches := cudaV41MMIDLaunchesForTest()
-	host := NewF32(Default(), []int{H}, make([]float32, H))
-	var be *BackendError
-	if _, err := cb.V41MatVecID([]Tensor{w}, ids, 1, host); !errors.As(err, &be) {
-		t.Fatalf("host activation: %v, want *BackendError", err)
+	// refused checks the closed refusal contract: this candidate's class at the
+	// named site, carrying the host validator's cause when one refused.
+	refused := func(what string, err error, site string, validator bool) {
+		t.Helper()
+		var be *BackendError
+		if !errors.As(err, &be) || be.Class != "cuda-v41-routed-mmid-failed" || be.Site != site {
+			t.Fatalf("%s: %v, want a cuda-v41-routed-mmid-failed BackendError at %s", what, err, site)
+		}
+		if validator && be.Err == nil {
+			t.Fatalf("%s: %v carries no host validator cause", what, err)
+		}
 	}
+	host := NewF32(Default(), []int{H}, make([]float32, H))
+	_, err = cb.V41MatVecID([]Tensor{w}, ids, 1, host)
+	refused("host activation", err, "V41MatVecID", false)
 	wf := mkResident(cb, []int{I, H}, make([]float32, I*H))
 	defer cb.Free(wf)
 	x := mkResident(cb, []int{H}, make([]float32, H))
 	defer cb.Free(x)
-	if _, err := cb.V41MatVecID([]Tensor{wf}, ids, 1, x); !errors.As(err, &be) {
-		t.Fatalf("F32 weights: %v, want *BackendError", err)
-	}
-	if _, err := cb.V41RoutedIDs([]int{1}, []float32{1}, []int{0}); !errors.As(err, &be) {
-		t.Fatalf("out-of-table slot: %v, want *BackendError", err)
-	}
+	_, err = cb.V41MatVecID([]Tensor{wf}, ids, 1, x)
+	refused("F32 weights", err, "V41MatVecID", true)
+	_, err = cb.V41RoutedIDs([]int{1}, []float32{1}, []int{0})
+	refused("out-of-table slot", err, "V41RoutedIDs", true)
 	if n := cudaV41MMIDLaunchesForTest() - launches; n != 0 {
 		t.Fatalf("refusals enqueued %d kernels", n)
+	}
+}
+
+// v41MMIDRawIDs uploads an ids image without V41RoutedIDs' host checks, as any
+// F32 [3P] tensor reaching the kernels could be.
+func v41MMIDRawIDs(cb *cudaBackend, words []uint32) Tensor {
+	f := make([]float32, len(words))
+	for i, w := range words {
+		f[i] = math.Float32frombits(w)
+	}
+	return mkResident(cb, []int{len(f)}, f)
+}
+
+// TestCUDAV41RoutedMMIDBadIDWords feeds the kernels device ids the host cannot
+// re-check: a slot word outside the bound table and an order word >= P. Each is
+// bounds-checked in the kernel (CUDA has no robust buffer access): the bad slot
+// poisons its pick's rows and faults its record at lane 0, the bad order word
+// skips that term and faults record 0 at lane 0, and the candidate stays open.
+//
+// fak-test:runtime slow est=2s lane=cuda
+func TestCUDAV41RoutedMMIDBadIDWords(t *testing.T) {
+	cb := q3kCUDAOrFail(t)
+	const H, I, P = 512, 256, 3
+	l := newV41MMIDLayer(t, cb, P, H, I, false, 0xbad1)
+	defer l.free(cb)
+	x := mkResident(cb, []int{H}, l.x)
+	defer cb.Free(x)
+	good, err := V41RoutedIDWords(l.slots, l.weights, l.order)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const badPick = 1
+	badSlot := append([]uint32(nil), good...)
+	badSlot[badPick] = P + 4 // inside the 8-entry table, outside the P bound slots
+	badOrder := append([]uint32(nil), good...)
+	badOrder[2*P] = P
+
+	slotIDs := v41MMIDRawIDs(cb, badSlot)
+	defer cb.Free(slotIDs)
+	g, err := cb.V41MatVecID(l.gate, slotIDs, P, x)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gr := cb.Read(g)
+	cb.Free(g)
+	for p := 0; p < P; p++ {
+		for o := 0; o < I; o++ {
+			if nan := math.IsNaN(float64(gr[p*I+o])); nan != (p == badPick) {
+				t.Fatalf("id GEMV pick %d row %d = %g with slot word %d", p, o, gr[p*I+o], badSlot[p])
+			}
+		}
+	}
+	mid, mst, err := cb.V41RoutedGateUpSwiGLUDeferred(l.gate, l.up, slotIDs, x, P, v41MMIDLimit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cb.Free(mid)
+	for p, v := range v41MMIDVerdicts(t, cb, mst) {
+		var fault *V41RoutedSwiGLUFault
+		if p != badPick {
+			if v != nil {
+				t.Fatalf("gate/up record %d: %v, want clean", p, v)
+			}
+			continue
+		}
+		if !errors.As(v, &fault) || fault.Stage != V41RoutedSwiGLUStageActivation || fault.Index != 0 {
+			t.Fatalf("gate/up record %d: %v, want activation fault at lane 0 for the out-of-table slot", p, v)
+		}
+	}
+
+	orderIDs := v41MMIDRawIDs(cb, badOrder)
+	defer cb.Free(orderIDs)
+	goodIDs := v41MMIDRawIDs(cb, good)
+	defer cb.Free(goodIDs)
+	cleanMid, cst, err := cb.V41RoutedGateUpSwiGLUDeferred(l.gate, l.up, goodIDs, x, P, v41MMIDLimit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cb.Free(cleanMid)
+	for p, v := range v41MMIDVerdicts(t, cb, cst) {
+		if v != nil {
+			t.Fatalf("clean gate/up record %d: %v", p, v)
+		}
+	}
+	checkOrder := func(what string, st V41DeferredStatus) {
+		t.Helper()
+		for p, v := range v41MMIDVerdicts(t, cb, st) {
+			var arith *V41BF16CheckedArithmeticError
+			if p != 0 {
+				if v != nil {
+					t.Fatalf("%s record %d: %v, want clean", what, p, v)
+				}
+				continue
+			}
+			if !errors.As(v, &arith) || arith.Index != 0 {
+				t.Fatalf("%s record 0: %v, want a fault at lane 0 for order word %d", what, v, badOrder[2*P])
+			}
+		}
+	}
+	sum, dst, err := cb.V41RoutedDownSumDeferred(l.down, cleanMid, orderIDs, P, V41BF16PublishRoutedDown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cb.Free(sum)
+	checkOrder("fused down-sum", dst)
+	d, err := cb.V41MatVecID(l.down, goodIDs, P, cleanMid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cb.Free(d)
+	psum, pst, err := cb.V41RoutedPublishSumDeferred(d, orderIDs, P, V41BF16PublishRoutedDown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cb.Free(psum)
+	checkOrder("publish-sum", pst)
+	if !cb.V41RoutedIDAvailable() {
+		t.Fatal("a recorded bad-ids fault closed the candidate; it must stay a per-record verdict")
 	}
 }

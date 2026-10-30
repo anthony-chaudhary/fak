@@ -17,9 +17,14 @@ const V41RoutedIDMaxPicks = 8
 // remapped through a per-layer slot map as llama_moe_cache does; here the slot
 // table is the layer's bound ring pages.
 //
-// Each stage is the per-pick kernel term for term, so every pick's output and
-// status record are bitwise the per-pick path's, and the routed sum is the
-// ordered F32 accumulation of v41DeviceAccumulate.
+// On Vulkan each stage is the per-pick kernel term for term, so every pick's
+// output and status record are bitwise the per-pick path's. A backend whose id
+// GEMV quantizes its activation (CUDA's mul_mat_vec_q reads a q8_1 image of x
+// and of the mid, while its per-pick GEMV reads F32) is instead bounded against
+// the unquantized host oracle by that backend's declared accuracy gate
+// (cudaQ2KCosineMin / cudaQ3KCosineMin); its status records still carry the
+// per-pick words. On every backend the routed sum is the ordered F32
+// accumulation of v41DeviceAccumulate over the published BF16 rows.
 type V41RoutedIDBackend interface {
 	V41RoutedIDAvailable() bool
 	// SupportsV41RoutedIDWeight reports a weight dtype V41MatVecID serves.

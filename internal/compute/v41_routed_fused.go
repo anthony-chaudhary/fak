@@ -14,7 +14,9 @@ import "fmt"
 // are the Q2_K id kernel term for term, the down row is the Q3_K id kernel term
 // for term, and each pick's 16-byte status record carries exactly the words the
 // per-stage id record carries. A fused layer's mid, sum and verdicts are
-// therefore bitwise the id path's, which the parity witness checks.
+// therefore bitwise the same backend's id path's, which the parity witness
+// checks (see V41RoutedIDBackend for how the id path relates to the per-pick
+// path on each backend).
 type V41RoutedFusedBackend interface {
 	V41RoutedFusedAvailable() bool
 	// SupportsV41RoutedFusedGateUp reports a (gate, up) dtype pair the fused

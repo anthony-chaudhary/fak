@@ -152,6 +152,7 @@ extern "C" void fcuda_free_on(int device, void *d) {
   if (!d) return;
   if (g_cuda_cleanup_status != 0) return;
   if (g_v41_router_uncertain) return;
+  if (g_v41_mmid_uncertain) return;
 #ifdef FAK_CUDA_V41_BF16_PUBLISH
   if (g_v41_bf16_uncertain) return;
 #endif
