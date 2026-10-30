@@ -187,11 +187,6 @@ func adjudicateShellCommandTool(tool string) bool {
 		strings.HasSuffix(tool, "_exec_command")
 }
 
-func adjudicateNormalizeWriteTargets(args map[string]any, targets []string, root string) ([]string, bool) {
-	normalized, failure := adjudicateNormalizeWriteTargetsDetailed(args, targets, root)
-	return normalized, failure == ""
-}
-
 func adjudicateNormalizeWriteTargetsDetailed(args map[string]any, targets []string, root string) ([]string, leaseAdmissionFailure) {
 	workdir, workdirFailure := adjudicateWorkdirDetailed(args, root)
 	if workdirFailure != "" {
@@ -306,11 +301,6 @@ func adjudicateCommandArgument(args map[string]any) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-func adjudicateWorkdir(args map[string]any, root string) (string, bool) {
-	workdir, failure := adjudicateWorkdirDetailed(args, root)
-	return workdir, failure == ""
 }
 
 func adjudicateWorkdirDetailed(args map[string]any, root string) (string, leaseAdmissionFailure) {
