@@ -10,6 +10,11 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/edgequal"
 )
 
+// subcommands are exercised by edgequal_test.go, but the dispatch-table wiring was never
+// landed at authoring (6c34106f9a added the sibling "queue" case, not this one). Follow-up:
+// add a main.go dispatch case plus a C3 verb-manifest row (internal/devindex).
+//
+//orphanscan:keep complete, tested CLI verb (`fak edgequal`, #8600): runEdgequal and its
 func cmdEdgequal(argv []string) {
 	os.Exit(runEdgequal(os.Stdout, os.Stderr, argv))
 }

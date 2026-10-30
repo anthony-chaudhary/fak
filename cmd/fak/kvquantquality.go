@@ -10,6 +10,11 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/kvquantquality"
 )
 
+// exercised by kvquantquality_test.go, but the dispatch-table wiring was never landed at
+// authoring (c88fdef7ab shipped the verb without its main.go case). Follow-up: add a
+// main.go dispatch case plus a C3 verb-manifest row (internal/devindex).
+//
+//orphanscan:keep complete, tested CLI verb (`fak kvquantquality`): runKVQuantQuality is
 func cmdKVQuantQuality(argv []string) {
 	os.Exit(runKVQuantQuality(os.Stdout, os.Stderr, argv))
 }

@@ -63,18 +63,6 @@ func applyFloorWithProfile(path string, profile string) {
 	}
 }
 
-func applyPolicyWithProfile(path string, profile string) {
-	if path == "" && profile == "" {
-		profile = string(policy.ProfileStandard)
-	}
-	policyReloadMu.Lock()
-	defer policyReloadMu.Unlock()
-	rt, floorSource, policyDigest, _ := loadGuardCapabilityFloor(path, "", profile)
-	_, err := applyPolicyRuntimeLocked(rt, floorSource, policyDigest, "", false)
-	must(err)
-	fmt.Fprintf(os.Stderr, "fak: loaded capability floor from %s (digest %s)\n", floorSource, policyDigest)
-}
-
 func reloadPolicy(path string) (policy.Runtime, string, error) {
 	policyReloadMu.Lock()
 	defer policyReloadMu.Unlock()

@@ -150,10 +150,6 @@ func readWorktreeWorkerOwner(path string) (workerworktree.OwnerStamp, error) {
 	return stamp, nil
 }
 
-func worktreeWorkerGitOutput(dir string, args ...string) (string, error) {
-	return worktreeWorkerGitOutputContext(context.Background(), dir, args...)
-}
-
 func worktreeWorkerGitOutputContext(ctx context.Context, dir string, args ...string) (string, error) {
 	cmdArgs := append([]string{"-C", dir}, args...)
 	cmd := windowgate.CommandContext(ctx, "git", cmdArgs...)
@@ -188,10 +184,6 @@ func worktreeWorkerDirtyPaths(status string) []string {
 	}
 	sort.Strings(paths)
 	return paths
-}
-
-func inspectWorktreeWorker(repoRoot, path string) (worktreeWorkerRevisionEvidence, error) {
-	return inspectWorktreeWorkerContext(context.Background(), repoRoot, path)
 }
 
 func inspectWorktreeWorkerContext(ctx context.Context, repoRoot, path string) (worktreeWorkerRevisionEvidence, error) {

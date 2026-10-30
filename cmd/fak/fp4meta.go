@@ -10,6 +10,11 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/fp4meta"
 )
 
+// fp4meta_test.go, but the dispatch-table wiring was never landed at authoring
+// (6c34106f9a shipped the verb without its main.go case). Follow-up: add a main.go
+// dispatch case plus a C3 verb-manifest row (internal/devindex).
+//
+//orphanscan:keep complete, tested CLI verb (`fak fp4meta`): runFp4meta is exercised by
 func cmdFp4meta(argv []string) {
 	os.Exit(runFp4meta(os.Stdout, os.Stderr, argv))
 }

@@ -173,19 +173,9 @@ func normalizeDenyAllThresholds(warnAt, finalAt, maxN int) (int, int, int) {
 	return stopgate.NormalizeDenyAllThresholds(warnAt, finalAt, maxN)
 }
 
-// guardStopHookStageFor maps a consecutive deny-all count onto its ladder rung.
-func guardStopHookStageFor(consecutive, warnAt, finalAt, maxN int) guardStopHookStage {
-	return toGuardStopHookStage(stopgate.StageForDenyAll(consecutive, warnAt, finalAt, maxN))
-}
-
 // normalizeSameStop clamps the same-issue give-up depth into a sane range and derives the warn/final rungs.
 func normalizeSameStop(stop int) (warnAt, finalAt, stopN int) {
 	return stopgate.NormalizeSameStop(stop)
-}
-
-// guardStopHookSameStageFor maps the same-issue consecutive count onto its ladder rung.
-func guardStopHookSameStageFor(sameConsecutive, stop int) guardStopHookStage {
-	return toGuardStopHookStage(stopgate.StageForSameIssue(sameConsecutive, stop))
 }
 
 // guardStopHookSameDecision is the same-issue twin of guardStopHookDecision.

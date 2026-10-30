@@ -3,22 +3,8 @@ package main
 import (
 	"fmt"
 	"io"
-	"strings"
 	"text/tabwriter"
 )
-
-// joinArgs renders CLI arguments while preserving arguments that require quoting.
-func joinArgs(args []string) string {
-	out := make([]string, len(args))
-	for i, arg := range args {
-		if strings.ContainsAny(arg, " \t\n\r\"") {
-			out[i] = fmt.Sprintf("%q", arg)
-		} else {
-			out[i] = arg
-		}
-	}
-	return strings.Join(out, " ")
-}
 
 func truncRunes(s string, n int) string {
 	r := []rune(s)
