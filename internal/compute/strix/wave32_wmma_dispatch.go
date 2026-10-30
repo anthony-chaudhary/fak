@@ -55,7 +55,9 @@ const (
 	// WMMAPrimitive16x16x16 is the standard 16x16x16 tile primitive (FP16, BF16).
 	WMMAPrimitive16x16x16 WMMAPrimitive = "16x16x16"
 
-	// WMMAPrimitive16x16x32 is the dual-issue 16x16x32 tile primitive (INT8, FP8, INT4).
+	// WMMAPrimitive16x16x32 is the generic 16x16x32 tile identifier used by simulators
+	// and seam code that model a software K accumulation chunk (two 16x16x16 hardware
+	// steps); it is NOT a native gfx11 WMMA instruction (#13542).
 	WMMAPrimitive16x16x32 WMMAPrimitive = "16x16x32"
 )
 

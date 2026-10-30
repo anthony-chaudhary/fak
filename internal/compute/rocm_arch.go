@@ -199,9 +199,17 @@ const (
 	// WMMAPrimitive16x16x16 is the standard 16x16x16 tile primitive (FP16, BF16).
 	WMMAPrimitive16x16x16 WMMAPrimitive = "16x16x16"
 
-	// WMMAPrimitive16x16x32 is the dual-issue 16x16x32 tile primitive (INT8, FP8, INT4).
+	// WMMAPrimitive16x16x32 is the generic 16x16x32 tile identifier used by simulators
+	// and seam code that model a software K accumulation chunk (two 16x16x16 hardware
+	// steps); it is NOT a native gfx11 WMMA instruction (see #13542).
 	WMMAPrimitive16x16x32 WMMAPrimitive = "16x16x32"
 )
+
+// ErrFP8WMMAUnsupported is returned when a GEMM precision requests an FP8 WMMA path on
+// gfx11 (RDNA 3 / 3.5): the gfx11 ISA has no FP8 WMMA instruction (only the f16/bf16 and
+// iu8/iu4 16x16x16 forms exist), so such a request fails closed instead of silently
+// retuning onto a nonexistent primitive (#13542).
+var ErrFP8WMMAUnsupported = errors.New("rocm: FP8 WMMA is not supported on gfx11 (no FP8 WMMA instruction in the gfx11 ISA)")
 
 // WMMATileGeometry specifies cooperative matrix tile geometry tuned for RDNA 3.5 dual-issue WMMA.
 type WMMATileGeometry struct {
@@ -241,6 +249,10 @@ func (a ROCmArch) HasNativeWave32WMMA() bool {
 }
 
 // SupportedWMMATiles returns the hardware-supported WMMA primitives on this architecture.
+// gfx11 (RDNA 3 / 3.5, incl. Strix Halo gfx1151) exposes exactly ONE WMMA tile shape:
+// 16x16x16, for f16/bf16 and iu8/iu4 operands. There is no 16x16x32 WMMA instruction on
+// gfx11 (v_wmma_i32_16x16x32_iu4 is gfx12/RDNA4 only), no FP4 form, and no FP8 form
+// (#13542); wider K is accumulated in software over 16-wide hardware steps.
 func (a ROCmArch) SupportedWMMATiles() []WMMATileGeometry {
 	if !a.HasNativeWave32WMMA() {
 		return nil
@@ -255,17 +267,7 @@ func (a ROCmArch) SupportedWMMATiles() []WMMATileGeometry {
 			SubgroupSize: 32,
 			Primitive:    WMMAPrimitive16x16x16,
 			DualIssue:    isRDNA3_5,
-			Precision:    "fp16/bf16",
-		},
-		{
-			M:            16,
-			N:            16,
-			K:            32,
-			Lanes:        32,
-			SubgroupSize: 32,
-			Primitive:    WMMAPrimitive16x16x32,
-			DualIssue:    isRDNA3_5,
-			Precision:    "int8/fp8/int4",
+			Precision:    "fp16/bf16/iu8/iu4",
 		},
 	}
 }
@@ -279,10 +281,11 @@ func (a ROCmArch) TuneCooperativeMatrixGEMM(m, n, k int, precision string) (Coop
 	primitive := WMMAPrimitive16x16x16
 	tileK := 16
 	lower := strings.ToLower(strings.TrimSpace(precision))
-	if strings.Contains(lower, "int8") || strings.Contains(lower, "fp8") || strings.Contains(lower, "int4") || strings.Contains(lower, "q8") || strings.Contains(lower, "q4") {
-		primitive = WMMAPrimitive16x16x32
-		tileK = 32
+	if strings.Contains(lower, "fp8") || strings.Contains(lower, "e4m3") || strings.Contains(lower, "e5m2") {
+		return CooperativeMatrixConfig{}, fmt.Errorf("rocm: precision %q requests an FP8 WMMA path that fails closed on gfx11: %w", precision, ErrFP8WMMAUnsupported)
 	}
+	// int8/int4/q8/q4 all tune to the single 16x16x16 primitive: gfx11 has no native
+	// 16x16x32 WMMA (#13542), so wider K is accumulated in software over 16-wide steps.
 
 	// Workgroup tile: 4 Wave32 waves (2x2 wave grid) -> 32x32 spatial tile
 	waveM, waveN := 16, 16
@@ -337,7 +340,7 @@ func ValidateCooperativeMatrixConfig(cfg CooperativeMatrixConfig) error {
 		return fmt.Errorf("rocm: invalid wave tile (%d x %d), want (16 x 16)", cfg.WaveM, cfg.WaveN)
 	}
 	if cfg.TileK != 16 && cfg.TileK != 32 {
-		return fmt.Errorf("rocm: unsupported TileK=%d (must be 16 for fp16 or 32 for int8)", cfg.TileK)
+		return fmt.Errorf("rocm: unsupported TileK=%d (16 is one gfx11 WMMA step; 32 remains valid as a software K accumulation chunk of two 16x16x16 steps)", cfg.TileK)
 	}
 	expectedPadded := LDSBankPad2Stride(cfg.UnpaddedStride)
 	if cfg.PaddedStride != expectedPadded {

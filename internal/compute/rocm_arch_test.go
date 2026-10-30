@@ -1,6 +1,7 @@
 package compute
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -359,9 +360,11 @@ func TestSparseRowGatherKV_ContiguousReconstruction(t *testing.T) {
 }
 
 // TestROCm_Ticket514_Wave32WMMAAndPad2 verifies Ticket #514 requirements:
-// - CompilerFlags() for gfx1151 enforces -mwavefrontsize32 and native Wave32 SIMD.
-// - Cooperative matrix tile geometry tuned for RDNA 3.5 dual-issue WMMA (16x16x16 and 16x16x32 primitives).
-// - LDS bank conflict Pad-2 alignment helper (+13% matmul speedup) with numerical bit-identity.
+//   - CompilerFlags() for gfx1151 enforces -mwavefrontsize32 and native Wave32 SIMD.
+//   - Cooperative matrix tile geometry tuned for RDNA 3.5 Wave32 WMMA: exactly one native
+//     16x16x16 primitive on gfx11 (f16/bf16/iu8/iu4); wider K is a software accumulation
+//     chunk and FP8 requests fail closed (#13542).
+//   - LDS bank conflict Pad-2 alignment helper (+13% matmul speedup) with numerical bit-identity.
 func TestROCm_Ticket514_Wave32WMMAAndPad2(t *testing.T) {
 	a, ok := LookupROCmArch("gfx1151")
 	if !ok {
@@ -383,32 +386,19 @@ func TestROCm_Ticket514_Wave32WMMAAndPad2(t *testing.T) {
 		t.Fatalf("gfx1151 HasNativeWave32WMMA() = false, want true")
 	}
 
-	// 2. Verify cooperative matrix tile geometry for dual-issue WMMA
+	// 2. Verify cooperative matrix tile geometry: gfx11 exposes exactly ONE native
+	// WMMA shape, 16x16x16, for f16/bf16/iu8/iu4 (#13542).
 	tiles := a.SupportedWMMATiles()
-	if len(tiles) != 2 {
-		t.Fatalf("SupportedWMMATiles() length = %d, want 2", len(tiles))
+	if len(tiles) != 1 {
+		t.Fatalf("SupportedWMMATiles() length = %d, want 1 (gfx11 has no 16x16x32/FP4/FP8 WMMA)", len(tiles))
 	}
-	has16x16x16 := false
-	has16x16x32 := false
-	for _, tile := range tiles {
-		if tile.SubgroupSize != 32 {
-			t.Errorf("tile.SubgroupSize = %d, want 32", tile.SubgroupSize)
-		}
-		if tile.Primitive == WMMAPrimitive16x16x16 {
-			has16x16x16 = true
-			if tile.M != 16 || tile.N != 16 || tile.K != 16 || tile.Lanes != 32 || tile.SubgroupSize != 32 || !tile.DualIssue {
-				t.Errorf("invalid 16x16x16 tile config: %+v", tile)
-			}
-		}
-		if tile.Primitive == WMMAPrimitive16x16x32 {
-			has16x16x32 = true
-			if tile.M != 16 || tile.N != 16 || tile.K != 32 || tile.Lanes != 32 || tile.SubgroupSize != 32 || !tile.DualIssue {
-				t.Errorf("invalid 16x16x32 tile config: %+v", tile)
-			}
-		}
+	tile := tiles[0]
+	if tile.Primitive != WMMAPrimitive16x16x16 || tile.M != 16 || tile.N != 16 || tile.K != 16 ||
+		tile.Lanes != 32 || tile.SubgroupSize != 32 || !tile.DualIssue {
+		t.Errorf("invalid 16x16x16 tile config: %+v", tile)
 	}
-	if !has16x16x16 || !has16x16x32 {
-		t.Fatalf("missing WMMA primitives: has16x16x16=%v has16x16x32=%v", has16x16x16, has16x16x32)
+	if tile.Precision != "fp16/bf16/iu8/iu4" {
+		t.Errorf("tile.Precision = %q, want fp16/bf16/iu8/iu4", tile.Precision)
 	}
 
 	// Verify GEMM tuning selects correct primitives
@@ -430,11 +420,18 @@ func TestROCm_Ticket514_Wave32WMMAAndPad2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TuneCooperativeMatrixGEMM(int8): %v", err)
 	}
-	if int8Cfg.Primitive != WMMAPrimitive16x16x32 || int8Cfg.TileK != 32 || !int8Cfg.DualIssue {
-		t.Errorf("int8Cfg = %+v, want 16x16x32 dual-issue", int8Cfg)
+	if int8Cfg.Primitive != WMMAPrimitive16x16x16 || int8Cfg.TileK != 16 || !int8Cfg.DualIssue {
+		t.Errorf("int8Cfg = %+v, want 16x16x16 TileK=16 (software K-chunk; no native 16x16x32 on gfx11)", int8Cfg)
 	}
 	if int8Cfg.SubgroupSize != 32 {
 		t.Errorf("int8Cfg.SubgroupSize = %d, want 32", int8Cfg.SubgroupSize)
+	}
+
+	// FP8 requests fail closed: the gfx11 ISA has no FP8 WMMA instruction (#13542).
+	for _, p := range []string{"fp8", "e4m3", "e5m2"} {
+		if _, err := a.TuneCooperativeMatrixGEMM(128, 128, 128, p); !errors.Is(err, ErrFP8WMMAUnsupported) {
+			t.Errorf("TuneCooperativeMatrixGEMM(%s) error = %v, want errors.Is(..., ErrFP8WMMAUnsupported)", p, err)
+		}
 	}
 
 	// 3. Verify LDS bank conflict Pad-2 alignment helper (+13% matmul speedup)
@@ -572,8 +569,8 @@ func TestROCm_Ticket12081_Wave32WMMA_ShaderAndPipeline(t *testing.T) {
 	if cfgINT8.SubgroupSize != 32 {
 		t.Errorf("cfgINT8.SubgroupSize = %d, want 32", cfgINT8.SubgroupSize)
 	}
-	if cfgINT8.TileK != 32 {
-		t.Errorf("cfgINT8.TileK = %d, want 32", cfgINT8.TileK)
+	if cfgINT8.TileK != 16 {
+		t.Errorf("cfgINT8.TileK = %d, want 16 (single gfx11 WMMA step; no native 16x16x32, #13542)", cfgINT8.TileK)
 	}
 
 	// 3. ValidateCooperativeMatrixConfig

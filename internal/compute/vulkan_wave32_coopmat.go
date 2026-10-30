@@ -100,9 +100,11 @@ func DefaultStrixHaloVulkanDeviceProperties() VulkanDeviceProperties {
 				Scope:                  VulkanScopeSubgroupKHR,
 			},
 			{
+				// gfx11 has no 16x16x32 cooperative matrix shape (#13542): the integer
+				// primitive is 16x16x16, and wider K accumulates in software.
 				MSize:                  16,
 				NSize:                  16,
-				KSize:                  32,
+				KSize:                  16,
 				AType:                  "int8_t",
 				BType:                  "int8_t",
 				CType:                  "int32_t",
@@ -135,13 +137,14 @@ func ComputeLDSAllocationWithPad2(rows, cols, bytesPerElement int) int {
 
 // ValidateVulkanWave32CoopMat validates that the provided Vulkan device properties and
 // cooperative matrix primitives satisfy AMD Strix Halo (gfx1151) Wave32 execution requirements:
-// 1. Target architecture is Strix Halo (gfx1151).
-// 2. Subgroup size is 32 (Wave32 mode) to eliminate dual-issue wrapping and halving of VGPRs.
-// 3. VK_KHR_cooperative_matrix extension is supported.
-// 4. Native 16x16x16 (FP16/BF16) and 16x16x32 (INT8/FP8 dual-issue) WMMA primitives are supported in subgroup scope.
-// 5. LDS Pad-2 row stride (unpadded + 2) is applied, expanding bank coverage from 8 to 16 of 32 banks.
-// 6. Numerical bit-identity is verified without degradation.
-// 7. Whole-sequence prefill throughput reaches >= 350.0 tok/s.
+//  1. Target architecture is Strix Halo (gfx1151).
+//  2. Subgroup size is 32 (Wave32 mode) to eliminate dual-issue wrapping and halving of VGPRs.
+//  3. VK_KHR_cooperative_matrix extension is supported.
+//  4. The native 16x16x16 WMMA primitive (f16/bf16/iu8/iu4) is supported in subgroup scope;
+//     gfx11 has no 16x16x32 WMMA shape, so a device advertising one is reported but never required.
+//  5. LDS Pad-2 row stride (unpadded + 2) is applied, expanding bank coverage from 8 to 16 of 32 banks.
+//  6. Numerical bit-identity is verified without degradation.
+//  7. Whole-sequence prefill throughput reaches >= 350.0 tok/s.
 func ValidateVulkanWave32CoopMat(props VulkanDeviceProperties) (*VulkanWave32CoopMatValidationReport, error) {
 	rep := &VulkanWave32CoopMatValidationReport{
 		Arch:                 props.Arch,
@@ -180,10 +183,9 @@ func ValidateVulkanWave32CoopMat(props VulkanDeviceProperties) (*VulkanWave32Coo
 		rep.Reason = "missing native 16x16x16 WMMA cooperative matrix primitive"
 		return rep, fmt.Errorf("vulkan: %s", rep.Reason)
 	}
-	if !rep.HasNative16x16x32 {
-		rep.Reason = "missing native 16x16x32 dual-issue WMMA cooperative matrix primitive"
-		return rep, fmt.Errorf("vulkan: %s", rep.Reason)
-	}
+	// HasNative16x16x32 stays in the report for detection (a device may advertise a
+	// 16x16x32 shape), but it is never REQUIRED: gfx11's ISA has no 16x16x32 WMMA
+	// instruction (#13542), so a 16x16x16-only device validates cleanly.
 
 	// 5. Pad-2 LDS stride validation
 	const unpaddedSpatialTile = 32

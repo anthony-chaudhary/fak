@@ -114,7 +114,9 @@ func TestWave32WMMA_NumericalAccuracy(t *testing.T) {
 		}
 	})
 
-	t.Run("FP32_16x16x32", func(t *testing.T) {
+	// Software K-chunk simulation: TileK=32 models two back-to-back 16x16x16 WMMA steps;
+	// gfx11 has no native 16x16x32 instruction (#13542).
+	t.Run("FP32_SoftwareKChunk32", func(t *testing.T) {
 		M, N, K := 64, 64, 64
 		A := make([]float32, M*K)
 		B := make([]float32, K*N)
@@ -130,7 +132,7 @@ func TestWave32WMMA_NumericalAccuracy(t *testing.T) {
 		simulator := NewWave32RetiledMatMul(Wave32WMMAConfig16x16x32())
 		gotC, telem, err := simulator.MatMul(M, N, K, A, B)
 		if err != nil {
-			t.Fatalf("MatMul 16x16x32 failed: %v", err)
+			t.Fatalf("MatMul software-K-chunk failed: %v", err)
 		}
 		if err := telem.Validate(); err != nil {
 			t.Fatalf("Telemetry validation failed: %v", err)

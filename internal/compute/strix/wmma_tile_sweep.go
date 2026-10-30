@@ -96,8 +96,9 @@ type WMMASweepOptions struct {
 	Simulate bool
 }
 
-// sweepGeometries returns the tile geometries swept by SweepWMMABFTiles: the 16x16x16 and
-// 16x16x32 WMMA primitives.
+// sweepGeometries returns the tile geometries swept by SweepWMMABFTiles: the native
+// 16x16x16 WMMA step and the 16x16x32 software K-chunk configuration (two back-to-back
+// 16x16x16 steps; gfx11 has no native 16x16x32 instruction, #13542).
 func sweepGeometries() []Wave32WMMAConfig {
 	return []Wave32WMMAConfig{
 		DefaultWave32WMMAConfig(),
@@ -105,8 +106,8 @@ func sweepGeometries() []Wave32WMMAConfig {
 	}
 }
 
-// SweepWMMABFTiles measures actual BF16 WMMA throughput across the 16x16x16 and 16x16x32
-// tile geometries for an M x N x K problem.
+// SweepWMMABFTiles measures actual BF16 WMMA throughput across the 16x16x16 native step
+// and the 16x16x32 software K-chunk tile geometries for an M x N x K problem.
 //
 // When opts supplies a device kernel it is timed and MeasuredTFLOPs is derived from the
 // real elapsed duration. When no device kernel is available (or ForceNoDevice is set) the

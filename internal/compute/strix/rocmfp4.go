@@ -34,8 +34,9 @@ var (
 )
 
 // fp4DeviceKernel is the device-path seam for the FP4 cooperative roofline entry point.
-// An implementation owns the real GFX1151 v_wmma_f32_16x16x16_fp4 dispatch (or its
-// device-backed reference). It is nil until a device host registers one.
+// An implementation owns the real GFX1151 FP4 dequant dispatch that feeds the f16 WMMA
+// tensor-core path (v_wmma_f32_16x16x16_f16; gfx11 has no native FP4 WMMA instruction).
+// It is nil until a device host registers one.
 type fp4DeviceKernel interface {
 	// CoopMatMulInto computes dst = tensor * vector through the FP4 device path.
 	CoopMatMulInto(tensor *ROCmFP4Tensor, vector []float32, dst []float32) error
@@ -48,7 +49,7 @@ var rocmFP4DeviceKernel fp4DeviceKernel
 
 // RegisterROCmFP4DeviceKernel installs the FP4 device-path implementation. Passing nil
 // clears it. It exists so a real gfx1151 host (or a device-backed test) can supply the
-// v_wmma_f32_16x16x16_fp4 dispatch without changing the fail-closed default.
+// FP4 dequant-to-f16-WMMA dispatch without changing the fail-closed default.
 func RegisterROCmFP4DeviceKernel(k fp4DeviceKernel) {
 	rocmFP4DeviceKernel = k
 }
@@ -391,8 +392,9 @@ func ROCmFP4CoopMatMul(tensor *ROCmFP4Tensor, vector []float32) ([]float32, erro
 // caller-provided destination slice through the FP4 DEVICE path.
 //
 // FAIL-CLOSED: this roofline entry point dispatches only to a registered FP4 device
-// kernel (the gfx1151 v_wmma_f32_16x16x16_fp4 path). When no device kernel is registered
-// it returns ErrNoFP4DeviceKernel instead of silently running a scalar CPU loop that
+// kernel (the gfx1151 FP4 dequant path feeding v_wmma_f32_16x16x16_f16). When no device
+// kernel is registered it returns ErrNoFP4DeviceKernel instead of silently running a
+// scalar CPU loop that
 // would report roofline-class numbers backed by non-device work. Callers that explicitly
 // want the scalar reference semantics (tests, offline parity checks) must call
 // ROCmFP4CoopMatMulScalarInto.

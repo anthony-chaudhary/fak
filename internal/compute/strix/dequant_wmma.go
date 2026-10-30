@@ -161,16 +161,19 @@ func NewDequantWMMAKernel(cfg DequantWMMAConfig) (*DequantWMMAKernel, error) {
 	return kernel, nil
 }
 
-// EmitsFP4WMMAOpcode reports whether the embedded GFX1151 assembly issues a real
-// v_wmma_f32_16x16x16_fp4 instruction driving on-the-fly in-register E2M1 dequant.
+// EmitsFP4WMMAOpcode reports whether the embedded GFX1151 assembly issues the WMMA
+// instruction the FP4 dequant path feeds. gfx11 has no native FP4 WMMA instruction
+// (#13542): the FP4 path dequantizes E2M1 in-register and issues the f16 WMMA, so this
+// reports emission of v_wmma_f32_16x16x16_f16.
 func (k *DequantWMMAKernel) EmitsFP4WMMAOpcode() bool {
-	return k.inspection.WMMAOpcode == "v_wmma_f32_16x16x16_fp4"
+	return k.inspection.WMMAOpcode == "v_wmma_f32_16x16x16_f16"
 }
 
-// FP4WMMAOpcode returns the FP4 WMMA opcode string when the embedded assembly emits it, else "".
+// FP4WMMAOpcode returns the WMMA opcode string the FP4 dequant path emits when the
+// embedded assembly carries it (the f16 WMMA on gfx11), else "".
 func (k *DequantWMMAKernel) FP4WMMAOpcode() string {
 	if k.EmitsFP4WMMAOpcode() {
-		return "v_wmma_f32_16x16x16_fp4"
+		return "v_wmma_f32_16x16x16_f16"
 	}
 	return ""
 }
@@ -189,15 +192,25 @@ func (k *DequantWMMAKernel) parseAssembly(source string) AssemblyInspection {
 		!strings.Contains(source, "ds_write") &&
 		!strings.Contains(source, "ds_read")
 
-	// Detect the emitted opcode against CODE lines only. A bare substring match would
-	// be fooled by the documentation comment that names the FP4 instruction, so an
-	// implementation that deleted the real instruction but kept the comment would
-	// still "detect" FP4. Strip line comments first, then require a code line whose
-	// first token is the opcode — analysis must reflect emission, not prose.
+	// Detect the emitted opcode against CODE lines only, restricted to the real gfx11
+	// WMMA ISA (#13542): no FP4, FP8 or 16x16x32 forms exist on gfx11, so a source
+	// naming one of those would report a phantom instruction. A bare substring match
+	// would also be fooled by documentation comments, so strip line comments first and
+	// require a code line whose first token is the opcode — analysis must reflect
+	// emission, not prose.
 	codeOnly := stripAsmComments(source)
-	wmmaOpcode := "v_wmma_f32_16x16x16_f16"
-	if lineEmitsOpcode(codeOnly, "v_wmma_f32_16x16x16_fp4") {
-		wmmaOpcode = "v_wmma_f32_16x16x16_fp4"
+	var wmmaOpcode string
+	for _, candidate := range []string{
+		"v_wmma_f32_16x16x16_f16",
+		"v_wmma_f16_16x16x16_f16",
+		"v_wmma_bf16_16x16x16_bf16",
+		"v_wmma_i32_16x16x16_iu8",
+		"v_wmma_i32_16x16x16_iu4",
+	} {
+		if lineEmitsOpcode(codeOnly, candidate) {
+			wmmaOpcode = candidate
+			break
+		}
 	}
 
 	return AssemblyInspection{

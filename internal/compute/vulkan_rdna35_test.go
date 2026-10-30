@@ -163,14 +163,15 @@ func executeWave32WMMAGEMM_FP16(A, B []float32, M, N, K int) []float32 {
 	return outC
 }
 
-// executeWave32WMMAGEMM_INT8 simulates coopmat_wave32_wmma.comp in 16x16x32 (INT8) dual-issue mode
-// with 4 Wave32 waves per workgroup, 32x32 spatial tiles, and Pad-2 LDS stride.
+// executeWave32WMMAGEMM_INT8 simulates coopmat_wave32_wmma.comp's iu8 path: a software
+// K-chunk of 32 (two back-to-back 16x16x16 iu8 WMMA steps; gfx11 has no native 16x16x32
+// shape, #13542), with 4 Wave32 waves per workgroup, 32x32 spatial tiles, and Pad-2 LDS stride.
 func executeWave32WMMAGEMM_INT8(A, B []int8, M, N, K int) []float32 {
 	outC := make([]float32, M*N)
 	const (
 		tileM      = 32
 		tileN      = 32
-		tileK      = 32 // 16x16x32 dual-issue primitive
+		tileK      = 32 // software K-chunk: two 16x16x16 iu8 WMMA steps (#13542)
 		pad2       = 2
 		strideN    = tileN + pad2 // 34
 		strideK    = tileK + pad2 // 34
@@ -191,7 +192,7 @@ func executeWave32WMMAGEMM_INT8(A, B []int8, M, N, K int) []float32 {
 				matC[w] = make([]int32, waveTileM*waveTileN)
 			}
 
-			// Iterate across K dimension in chunks of tileK (32)
+			// Iterate across K dimension in software chunks of tileK (32 = two 16x16x16 WMMA steps)
 			for kBlock := 0; kBlock < K; kBlock += tileK {
 				// Stage Tile A [32 x 32] into LDS with Pad-2 stride 34
 				for r := 0; r < tileM; r++ {
@@ -219,7 +220,7 @@ func executeWave32WMMAGEMM_INT8(A, B []int8, M, N, K int) []float32 {
 					}
 				}
 
-				// Wave32 16x16x32 dual-issue INT8 WMMA cooperative matrix multiply-accumulate
+				// Wave32 iu8 WMMA accumulate over the 32-wide software K-chunk (two 16x16x16 steps)
 				for waveID := 0; waveID < wavesPerWg; waveID++ {
 					waveRow := (waveID / 2) * waveTileM
 					waveCol := (waveID % 2) * waveTileN
@@ -404,7 +405,8 @@ func (a *rdna35TestAdvisor) MadviseWillneed(data []byte, off, length int) bool {
 // across all ported Nathanw1014 RDNA 3.5 (gfx1151) compute shaders and micro-architectures.
 func TestVulkanShadersParity(t *testing.T) {
 	// a) Wave32WMMA_CoopmatParity:
-	// Tests 16x16x16 (FP16) and 16x16x32 (INT8) WMMA cooperative matrix GEMM against CPU reference.
+	// Tests 16x16x16 (FP16) and iu8 (INT8, software K-chunk of two 16x16x16 steps; #13542)
+	// WMMA cooperative matrix GEMM against CPU reference.
 	// Asserts cosine similarity >= 0.999900.
 	t.Run("Wave32WMMA_CoopmatParity", func(t *testing.T) {
 		rng := rand.New(rand.NewSource(12081))
@@ -463,7 +465,7 @@ func TestVulkanShadersParity(t *testing.T) {
 			}
 		}
 
-		// 2. INT8 16x16x32 WMMA Dual-Issue Cooperative Matrix Parity
+		// 2. INT8 iu8 WMMA Cooperative Matrix Parity (software K-chunk; no native 16x16x32 on gfx11, #13542)
 		{
 			M, N, K := 64, 64, 64
 			A := make([]int8, M*K)
@@ -487,11 +489,11 @@ func TestVulkanShadersParity(t *testing.T) {
 				}
 			}
 
-			// Wave32 WMMA 16x16x32 Execution
+			// Wave32 iu8 WMMA Execution (software K-chunk)
 			wmmaC := executeWave32WMMAGEMM_INT8(A, B, M, N, K)
 			cosSimINT8 := CosineSimilarity(wmmaC, refC)
 			if cosSimINT8 < 0.999900 {
-				t.Errorf("INT8 16x16x32 WMMA cosine similarity = %.8f, want >= 0.999900", cosSimINT8)
+				t.Errorf("INT8 iu8 WMMA cosine similarity = %.8f, want >= 0.999900", cosSimINT8)
 			}
 
 			// Pipeline descriptor validation
@@ -502,8 +504,8 @@ func TestVulkanShadersParity(t *testing.T) {
 			if pipeINT8.SubgroupSize != 32 {
 				t.Errorf("pipeINT8.SubgroupSize = %d, want 32", pipeINT8.SubgroupSize)
 			}
-			if pipeINT8.TileK != 32 {
-				t.Errorf("pipeINT8.TileK = %d, want 32", pipeINT8.TileK)
+			if pipeINT8.TileK != 16 {
+				t.Errorf("pipeINT8.TileK = %d, want 16 (single gfx11 WMMA step; no native 16x16x32, #13542)", pipeINT8.TileK)
 			}
 		}
 	})
