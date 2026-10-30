@@ -73,7 +73,9 @@ func TestV41PackedWKVModelConsumer(t *testing.T) {
 		t.Fatal("empty named semantics admitted")
 	}
 	m.Cfg.DeepSeekV41.NumericalProfile.Semantics = "unqualified-test"
-	name, scale := layerName(0, "attn.wkv.weight"), layerName(0, "attn.wkv.scale")
+	// Fixture entries carry the exact on-disk names of the pinned checkpoint
+	// shard, which is what InstallV41DenseWKV reads through the inventory.
+	name, scale := v41DenseWKVNames(0)
 	data := make([]byte, V41DenseWKVPayloadBytes)
 	for i := 512 * 5120; i < len(data); i++ {
 		data[i] = 127

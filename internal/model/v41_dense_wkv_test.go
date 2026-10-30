@@ -41,7 +41,9 @@ func (b *denseWKVTestBackend) V41FP8WKV(w compute.V41FP8WKVWeights, x compute.Te
 
 func TestV41DenseWKVBoundAndLifetime(t *testing.T) {
 	_, cfg := readDeepSeekV41Config(t)
-	name, scale := layerName(0, "attn.wkv.weight"), layerName(0, "attn.wkv.scale")
+	// Fixture entries carry the exact on-disk names of the pinned checkpoint
+	// shard, which is what ReadV41DenseWKV references through the inventory.
+	name, scale := v41DenseWKVNames(0)
 	data := make([]byte, V41DenseWKVPayloadBytes)
 	for i := 512 * 5120; i < len(data); i++ {
 		data[i] = 127

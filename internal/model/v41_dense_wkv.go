@@ -16,6 +16,17 @@ const V41DenseWKVPayloadBytes = 512*5120 + 16*160
 // This explicit intake does not register a model or admit native1017 serving.
 type V41DenseWKV struct{ codes, scales []byte }
 
+// v41DenseWKVNames returns the exact on-disk weight/scale pair for one layer's
+// dense WKV projection. The pinned V4.1 checkpoint addresses text tensors in
+// its compact layers.<N> namespace (v41_inventory.go; #14028 read all 48 shard
+// headers directly), not through the model.layers.<N> alias that layerName
+// builds for host stores, so the packed shard must be referenced through the
+// inventory naming scheme or the reader refuses the pair as foreign.
+func v41DenseWKVNames(layer int) (weight, scale string) {
+	prefix := "layers." + itoa(layer) + ".attn.wkv."
+	return prefix + "weight", prefix + "scale"
+}
+
 // ReadV41DenseWKV reads one exact pair. The caller must serialize shard Close
 // against this method. A positive combined bound is mandatory, including when
 // the underlying generic reader permits a legacy unbounded call.
@@ -23,13 +34,13 @@ func (s *V41PackedShard) ReadV41DenseWKV(layer int, bound int64) (*V41DenseWKV, 
 	if s == nil || s.file == nil || layer < 0 || bound < V41DenseWKVPayloadBytes {
 		return nil, fmt.Errorf("%w: dense WKV requires live shard, layer and positive pair bound", ErrV41PackedUnsupported)
 	}
-	name := layerName(layer, "attn.wkv.weight")
+	name, scaleName := v41DenseWKVNames(layer)
 	t, err := s.Reference(name)
 	if err != nil {
 		return nil, err
 	}
 	r := t.Ref
-	if r.Dtype != "F8_E4M3" || r.PackedWeight || !sameShape(r.Shape, []int{512, 5120}) || !sameShape(r.LogicalShape, []int{512, 5120}) || r.ScaleName != layerName(layer, "attn.wkv.scale") || r.ScaleDtype != "F8_E8M0" || !sameShape(r.ScaleShape, []int{16, 160}) || t.ByteLen() != 512*5120 || t.ScaleEnd-t.ScaleStart != 16*160 {
+	if r.Dtype != "F8_E4M3" || r.PackedWeight || !sameShape(r.Shape, []int{512, 5120}) || !sameShape(r.LogicalShape, []int{512, 5120}) || r.ScaleName != scaleName || r.ScaleDtype != "F8_E8M0" || !sameShape(r.ScaleShape, []int{16, 160}) || t.ByteLen() != 512*5120 || t.ScaleEnd-t.ScaleStart != 16*160 {
 		return nil, fmt.Errorf("%w: incompatible dense WKV pair", ErrV41PackedUnsupported)
 	}
 	codes, err := s.Read(t, 512*5120)
