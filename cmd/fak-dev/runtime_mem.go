@@ -56,8 +56,14 @@ type runtimeMemDeps struct {
 	sleep  func(time.Duration)
 }
 
+// runtimeMemHTTPClient is the hard outer bound on a scrape: the per-request context
+// (--timeout, default 10s) stays authoritative for realistic use, while the client
+// deadline guarantees a stalled peer can never hold the reader open indefinitely no
+// matter how large --timeout is set.
+var runtimeMemHTTPClient = &http.Client{Timeout: 10 * time.Minute}
+
 func runRuntimeMem(stdout, stderr io.Writer, argv []string) int {
-	return runRuntimeMemWith(stdout, stderr, argv, runtimeMemDeps{client: http.DefaultClient, sleep: time.Sleep})
+	return runRuntimeMemWith(stdout, stderr, argv, runtimeMemDeps{client: runtimeMemHTTPClient, sleep: time.Sleep})
 }
 
 func runRuntimeMemWith(stdout, stderr io.Writer, argv []string, deps runtimeMemDeps) int {
