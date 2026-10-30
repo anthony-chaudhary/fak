@@ -69,7 +69,8 @@
         "matKernel (compute)",
         "kernel",
         "x-gateway-engine-inkernel",
-        "x-gateway-engine-q8kernel"
+        "x-gateway-engine-q8kernel",
+        "flashmla-loaded-kernel-identity"
       ],
       "aliases": [],
       "grounding": "q4kernel",

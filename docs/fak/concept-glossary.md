@@ -1959,3 +1959,94 @@ Per-axis provenance for retained gateway activity observations.
 Coverage token for completed admitted syscall request results in the retained observation window.
 
 **Distinct from:** Supports tool-request and failed-result counts only; cached outcomes do not prove subprocess execution or file and network effects.
+
+
+### SupportsV41SparsePrefill
+
+V41SparsePrefillBackend predicate admitting the ordinary whole-panel V4.1 sparse-prefill route only when the backend physical-acceptance contract is available; the CUDA implementation currently returns false independently of successful compilation or explicit private physical-witness execution.
+
+**Distinct from:** This per-backend ordinary-route admission decision is not generic implemented-path support, a numerical correctness verdict, or a maturity grade; a compiled candidate and private fixture execution cannot turn it on implicitly.
+
+
+### fak_flashmla_prefill_kernel_info
+
+Native FlashMLA ABI that observes the current CUDA device and attributes of the actual pinned fused sparse-prefill core function, returning device/driver/runtime and loaded binary/PTX identity or a typed target/observation error.
+
+**Distinct from:** It observes a GPU compute image, not abi.Kernel tool-call coordination and not the Q4 compute implementation itself; image identity does not prove numerical parity, performance, or physical acceptance.
+
+
+### cudaV41CompressorPool
+
+Checked V4.1 CUDA compressor pooling operator and its input/run/state/quarantine bridge lifecycle. It pools model inputs; uncertain device completion quarantines related pointers.
+
+**Distinct from:** Not a reusable session pool or cache capacity profile. Compilation is not numerical or hardware acceptance.
+
+
+### cudaV41EngramGate
+
+Checked CUDA Engram neural gating operation with explicit device status and quarantine handling.
+
+**Distinct from:** A numerical model gating kernel, not an authorization guard, safety policy gate or evidence-admission decision.
+
+
+### UploadForWitness
+
+Explicit Dense WKV fixture upload callback that supplies independently owned device buffers for a physical test.
+
+**Distinct from:** Fixture setup is not a proof, returned evidence, ordinary-route admission or successful hardware execution.
+
+
+### BindForWitness
+
+Explicit Dense WKV fixture binder that binds owned buffers for a controlled physical test.
+
+**Distinct from:** Binding a fixture neither validates hardware nor establishes a correctness or performance witness.
+
+
+### V41FP8WKVSupported
+
+Predicate for ordinary V4.1 FP8 Dense WKV backend admission, kept false until the hardware qualification contract is established.
+
+**Distinct from:** Candidate code and optional fixture availability do not imply ordinary support, numerical correctness or a maturity grade.
+
+
+### fak_v41_pool_state
+
+Native compressor-pooling state query that reports whether the CUDA operator is uncertain or quarantined.
+
+**Distinct from:** This is a specific compressor-pooling ABI, status or lifetime submechanism, not the whole pooling operator and not a reusable session resource pool. It grants no hardware or numerical acceptance.
+
+
+### fak_v41_pool_input
+
+Native compressor-pooling input preflight validating the explicit operator inputs before enqueue.
+
+**Distinct from:** This is a specific compressor-pooling ABI, status or lifetime submechanism, not the whole pooling operator and not a reusable session resource pool. It grants no hardware or numerical acceptance.
+
+
+### fak_v41_pool_run
+
+Native compressor-pooling execution bridge producing checked operator status; execution evidence remains external.
+
+**Distinct from:** This is a specific compressor-pooling ABI, status or lifetime submechanism, not the whole pooling operator and not a reusable session resource pool. It grants no hardware or numerical acceptance.
+
+
+### cudaV41PoolError
+
+Typed Go error mapping from the checked CUDA compressor-pooling status envelope.
+
+**Distinct from:** This is a specific compressor-pooling ABI, status or lifetime submechanism, not the whole pooling operator and not a reusable session resource pool. It grants no hardware or numerical acceptance.
+
+
+### g_v41_pool_uncertain
+
+Latched CUDA compressor-pooling completion uncertainty that blocks unsafe subsequent operations.
+
+**Distinct from:** This is a specific compressor-pooling ABI, status or lifetime submechanism, not the whole pooling operator and not a reusable session resource pool. It grants no hardware or numerical acceptance.
+
+
+### g_v41_pool_quarantine
+
+CUDA compressor-pooling pointer quarantine protecting buffers when asynchronous completion is uncertain.
+
+**Distinct from:** This is a specific compressor-pooling ABI, status or lifetime submechanism, not the whole pooling operator and not a reusable session resource pool. It grants no hardware or numerical acceptance.

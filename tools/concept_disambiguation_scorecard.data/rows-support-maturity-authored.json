@@ -18,5 +18,26 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "flashmla-sparse-prefill-admission",
+      "canonical": "SupportsV41SparsePrefill",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "V41SparsePrefillBackend predicate admitting the ordinary whole-panel V4.1 sparse-prefill route only when the backend physical-acceptance contract is available; the CUDA implementation currently returns false independently of successful compilation or explicit private physical-witness execution.",
+      "distinction": "This per-backend ordinary-route admission decision is not generic implemented-path support, a numerical correctness verdict, or a maturity grade; a compiled candidate and private fixture execution cannot turn it on implicitly.",
+      "distinct_from": [
+        "support",
+        "correctness",
+        "maturity"
+      ],
+      "aliases": [],
+      "grounding": "SupportsV41SparsePrefill",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

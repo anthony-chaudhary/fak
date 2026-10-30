@@ -67,11 +67,32 @@ type CUDANativeBuildReceipt struct {
 	Executed                      int                      `json:"executed"`
 	Reused                        int                      `json:"reused"`
 	Objects                       []CUDAObjectBuildReceipt `json:"objects"`
+
+	V41RoutedSwiGLU    bool                        `json:"v41_routed_swiglu,omitempty"`    // Build selection, not hardware acceptance.
+	V41EngramGate      bool                        `json:"v41_engram_gate,omitempty"`      // Build selection, not hardware acceptance.
+	V41CompressorPool  bool                        `json:"v41_compressor_pool,omitempty"`  // Build selection, not hardware acceptance.
+	V41MHC             bool                        `json:"v41_mhc,omitempty"`              // Witness build selection; public capability remains false.
+	V41SharedAttention bool                        `json:"v41_shared_attention,omitempty"` // Build selection, not hardware acceptance.
+	DeepGEMMWKV        *CUDADeepGEMMWKVReceipt     `json:"deepgemm_wkv,omitempty"`
+	FlashMLAPrefill    *CUDAFlashMLAPrefillReceipt `json:"flashmla_prefill,omitempty"`
 }
 
 func newCUDANativeReceipt(ctx context.Context, root, arch string, nccl bool) *CUDANativeBuildReceipt {
 	host, _ := os.Hostname()
 	r := &CUDANativeBuildReceipt{Schema: CUDANativeBuildReceiptSchema, Outcome: "failed", Mode: "not_started", Architecture: arch, NCCL: nccl, HostOS: runtime.GOOS, HostArch: runtime.GOARCH, Hostname: host, StartedAt: time.Now().UTC()}
+	if plan, ok := ctx.Value(cudaFlashMLAKey{}).(*cudaFlashMLAOptions); ok {
+		candidate := plan.receipt
+		r.FlashMLAPrefill = &candidate
+	}
+	if plan, ok := ctx.Value(cudaDeepGEMMKey{}).(*cudaDeepGEMMOptions); ok {
+		candidate := plan.receipt
+		r.DeepGEMMWKV = &candidate
+	}
+	r.V41RoutedSwiGLU, _ = ctx.Value(cudaV41RoutedSwiGLUKey{}).(bool)
+	r.V41EngramGate, _ = ctx.Value(cudaV41EngramGateKey{}).(bool)
+	r.V41CompressorPool, _ = ctx.Value(cudaV41CompressorPoolKey{}).(bool)
+	r.V41MHC, _ = ctx.Value(cudaV41MHCKey{}).(bool)
+	r.V41SharedAttention, _ = ctx.Value(cudaV41SharedAttentionKey{}).(bool)
 	r.ReceiptPath, _ = ctx.Value(cudaReceiptPathContext{}).(string)
 	if r.ReceiptPath == "" {
 		r.ReceiptPath = CUDANativeReceiptPath(root, "")

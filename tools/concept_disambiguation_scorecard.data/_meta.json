@@ -2304,6 +2304,36 @@
           "category": "incidental",
           "reason": "Private integer tile-boundary helper for existing sliding-window attention semantics; not a new attention algorithm or backend capability. Preserves retained softmax order and existing skip counters.",
           "token": "flashAttentionWindowTileStart"
+        },
+        {
+          "category": "incidental",
+          "reason": "Build configuration identifier in internal/computebuild/cuda_v41_shared_attention.go selecting flags, tags, cache identity or preparation for the already named CUDA candidate. It does not introduce a separate runtime pool, attention algorithm or authorization gate; hardware acceptance remains UNRUN.",
+          "token": "cudaV41SharedAttentionKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Build configuration identifier in internal/computebuild/cuda_v41_shared_attention.go selecting flags, tags, cache identity or preparation for the already named CUDA candidate. It does not introduce a separate runtime pool, attention algorithm or authorization gate; hardware acceptance remains UNRUN.",
+          "token": "prepareCUDAV41SharedAttention"
+        },
+        {
+          "category": "incidental",
+          "reason": "Build configuration identifier in internal/computebuild/cuda_v41_shared_attention.go selecting flags, tags, cache identity or preparation for the already named CUDA candidate. It does not introduce a separate runtime pool, attention algorithm or authorization gate; hardware acceptance remains UNRUN.",
+          "token": "cudaV41SharedAttentionFlags"
+        },
+        {
+          "category": "incidental",
+          "reason": "Build configuration identifier in internal/computebuild/cuda_v41_shared_attention.go selecting flags, tags, cache identity or preparation for the already named CUDA candidate. It does not introduce a separate runtime pool, attention algorithm or authorization gate; hardware acceptance remains UNRUN.",
+          "token": "cudaV41SharedAttentionTags"
+        },
+        {
+          "category": "incidental",
+          "reason": "Build configuration identifier in internal/computebuild/cuda_v41_shared_attention.go selecting flags, tags, cache identity or preparation for the already named CUDA candidate. It does not introduce a separate runtime pool, attention algorithm or authorization gate; hardware acceptance remains UNRUN.",
+          "token": "EnableV41SharedAttention"
+        },
+        {
+          "category": "incidental",
+          "reason": "Build configuration identifier in internal/devcmd/build_cuda.go selecting flags, tags, cache identity or preparation for the already named CUDA candidate. It does not introduce a separate runtime pool, attention algorithm or authorization gate; hardware acceptance remains UNRUN.",
+          "token": "sharedAttention"
         }
       ],
       "exclude": [
@@ -2313,6 +2343,7 @@
       "id": "attention",
       "ignore": [
         "BuildTreeAttentionMask",
+        "EnableV41SharedAttention",
         "EstimatedAttention",
         "EstimatedAttentionSeconds",
         "ExecutionPrefillAttention",
@@ -2346,6 +2377,9 @@
         "copySharedAttentionFrom",
         "cudaQwen35AttentionPostprocessEnabled",
         "cudaQwen35AttentionPostprocessLaunchesLocked",
+        "cudaV41SharedAttentionFlags",
+        "cudaV41SharedAttentionKey",
+        "cudaV41SharedAttentionTags",
         "estimated_attention_s",
         "executevulkanattentionwithdequantonce",
         "fak_qwen35_attention_postprocess_launch_count",
@@ -2362,10 +2396,12 @@
         "newV41SharedAttentionContinuation",
         "prefillAttnDeviceMinRows",
         "prefillAttnMu",
+        "prepareCUDAV41SharedAttention",
         "prepareV41PlainAttention",
         "qwenfullattentionlayers",
         "seenAttention",
         "setSharedAttention",
+        "sharedAttention",
         "sharedAttentionBinding",
         "sharedAttentionFunc",
         "tattn",
@@ -4842,6 +4878,41 @@
           "category": "incidental",
           "reason": "Numeric neural-network sigmoid gating multiplies attention output cells by sigmoid of corresponding gate activations using existing workers. The name denotes model arithmetic, not access control, policy gating, or lifecycle admission; malformed shape retains original scalar mutation and panic behavior.",
           "token": "qwen35PrefillGateDisjoint"
+        },
+        {
+          "category": "build-tag-only",
+          "reason": "Compile-time selector or preprocessor define for the explicitly named CUDA candidate, not an independent resource pool or policy gate; runtime qualification remains separate.",
+          "token": "fak_cuda_v41_engram_gate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Build configuration identifier in internal/computebuild/cuda.go selecting flags, tags, cache identity or preparation for the already named CUDA candidate. It does not introduce a separate runtime pool, attention algorithm or authorization gate; hardware acceptance remains UNRUN.",
+          "token": "cudaV41EngramGateFlags"
+        },
+        {
+          "category": "incidental",
+          "reason": "Build configuration identifier in internal/computebuild/cuda.go selecting flags, tags, cache identity or preparation for the already named CUDA candidate. It does not introduce a separate runtime pool, attention algorithm or authorization gate; hardware acceptance remains UNRUN.",
+          "token": "EnableV41EngramGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Build configuration identifier in internal/computebuild/cuda.go selecting flags, tags, cache identity or preparation for the already named CUDA candidate. It does not introduce a separate runtime pool, attention algorithm or authorization gate; hardware acceptance remains UNRUN.",
+          "token": "prepareCUDAV41EngramGate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Build configuration identifier in internal/computebuild/cuda.go selecting flags, tags, cache identity or preparation for the already named CUDA candidate. It does not introduce a separate runtime pool, attention algorithm or authorization gate; hardware acceptance remains UNRUN.",
+          "token": "cudaV41EngramGateKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Build configuration identifier in internal/computebuild/cuda.go selecting flags, tags, cache identity or preparation for the already named CUDA candidate. It does not introduce a separate runtime pool, attention algorithm or authorization gate; hardware acceptance remains UNRUN.",
+          "token": "cudaV41EngramGateTags"
+        },
+        {
+          "category": "build-tag-only",
+          "reason": "Compile-time selector or preprocessor define for the explicitly named CUDA candidate, not an independent resource pool or policy gate; runtime qualification remains separate.",
+          "token": "DFAK_CUDA_V41_ENGRAM_GATE"
         }
       ],
       "exclude": [
@@ -4886,8 +4957,10 @@
         "ConversionGate",
         "CorrectnessGate",
         "DELEGATE",
+        "DFAK_CUDA_V41_ENGRAM_GATE",
         "DryAdmitDelegatedRuntime",
         "EmptyUsageGuard",
+        "EnableV41EngramGate",
         "EnvGated",
         "ExitGate",
         "FAK_CHILD_ATTEMPT_ID",
@@ -4976,6 +5049,9 @@
         "commentQualityGate",
         "cooldownGateBlindWarning",
         "coreLockLandGate",
+        "cudaV41EngramGateFlags",
+        "cudaV41EngramGateKey",
+        "cudaV41EngramGateTags",
         "demoteReservedGuardBanner",
         "diagnoseRecentCodexLoopsForGate",
         "diagnostic_gate_session_sidecar_open_and_verification",
@@ -4988,6 +5064,7 @@
         "explicit_retirement_gate",
         "exposureGated",
         "extensionFixtureCells",
+        "fak_cuda_v41_engram_gate",
         "fak_gateway_device_paged_weight_page_ins_total",
         "fak_gateway_device_transient_pool_buffers",
         "fak_gateway_device_transient_pool_bytes",
@@ -5300,6 +5377,7 @@
         "parseGuardProviderSessionStart",
         "ple_gate",
         "ple_gated_value",
+        "prepareCUDAV41EngramGate",
         "prepareGuardChildRegistration",
         "prepushGateContract",
         "prepushLegacyGateContract",
@@ -9094,6 +9172,11 @@
           "category": "incidental",
           "reason": "Names the required real checkpoint-header evidence for the existing tensor-loader obligation; it does not create a proof artifact or claim that the header has been verified.",
           "token": "real_header_witness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Only the CUDAOpError.Op diagnostic label for stream/identity failures in cudaFlashMLAPhysicalState (Go lines 70/73); it introduces no witness artifact, acceptance verdict, proof type or execution authority. Actual physical fixture assertions and loaded-core observation remain explicit and are not waived.",
+          "token": "FlashMLAWitness"
         }
       ],
       "id": "witness-proof",
@@ -9112,6 +9195,7 @@
         "ExecutionModeWitness",
         "FAK_WITNESS_REF",
         "FairnessWitnessed",
+        "FlashMLAWitness",
         "GATED_UNWITNESSED",
         "GoldDigest",
         "GradedVerdictUnwitnessed",
@@ -17856,6 +17940,11 @@
           "category": "incidental",
           "reason": "This is the cache-placement diagnostic operation positioned in the cache family. Plan names the exact JSON input being checked, not a second scheduling, execution-plan, or resource-admission concept.",
           "token": "CheckGoCachePlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Function-local value returned by existing v41AttentionPlanFor and equality-compared after callbacks (model lines 43/52); captures existing V41AttentionPlan for mutation detection, introducing no new plan type, planner, reservation, scheduling policy or lifecycle.",
+          "token": "frozenPlan"
         }
       ],
       "exclude": [
@@ -18040,6 +18129,7 @@
         "fitsMemoryPlanByScopeWithDevice",
         "fixturePlanner",
         "foldCandidate",
+        "frozenPlan",
         "fullPlane",
         "gcPlan",
         "hostPlan",
@@ -18580,6 +18670,41 @@
           "category": "incidental",
           "reason": "Existing numeric bound on the V4.1 compressor pooling ratio, now also checked by the device compressor ring allocator; it bounds attention-compression arithmetic, not a resource, buffer, worker or KV pool.",
           "token": "v41compressorpoolmaxratio"
+        },
+        {
+          "category": "build-tag-only",
+          "reason": "Compile-time selector or preprocessor define for the explicitly named CUDA candidate, not an independent resource pool or policy gate; runtime qualification remains separate.",
+          "token": "fak_cuda_v41_compressor_pool"
+        },
+        {
+          "category": "incidental",
+          "reason": "Build configuration identifier in internal/computebuild/cuda.go selecting flags, tags, cache identity or preparation for the already named CUDA candidate. It does not introduce a separate runtime pool, attention algorithm or authorization gate; hardware acceptance remains UNRUN.",
+          "token": "cudaV41CompressorPoolFlags"
+        },
+        {
+          "category": "incidental",
+          "reason": "Build configuration identifier in internal/computebuild/cuda.go selecting flags, tags, cache identity or preparation for the already named CUDA candidate. It does not introduce a separate runtime pool, attention algorithm or authorization gate; hardware acceptance remains UNRUN.",
+          "token": "EnableV41CompressorPool"
+        },
+        {
+          "category": "incidental",
+          "reason": "Build configuration identifier in internal/computebuild/cuda.go selecting flags, tags, cache identity or preparation for the already named CUDA candidate. It does not introduce a separate runtime pool, attention algorithm or authorization gate; hardware acceptance remains UNRUN.",
+          "token": "prepareCUDAV41CompressorPool"
+        },
+        {
+          "category": "incidental",
+          "reason": "Build configuration identifier in internal/computebuild/cuda.go selecting flags, tags, cache identity or preparation for the already named CUDA candidate. It does not introduce a separate runtime pool, attention algorithm or authorization gate; hardware acceptance remains UNRUN.",
+          "token": "cudaV41CompressorPoolKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Build configuration identifier in internal/computebuild/cuda.go selecting flags, tags, cache identity or preparation for the already named CUDA candidate. It does not introduce a separate runtime pool, attention algorithm or authorization gate; hardware acceptance remains UNRUN.",
+          "token": "cudaV41CompressorPoolTags"
+        },
+        {
+          "category": "build-tag-only",
+          "reason": "Compile-time selector or preprocessor define for the explicitly named CUDA candidate, not an independent resource pool or policy gate; runtime qualification remains separate.",
+          "token": "DFAK_CUDA_V41_COMPRESSOR_POOL"
         }
       ],
       "exclude": [
@@ -18587,8 +18712,10 @@
       ],
       "id": "pool",
       "ignore": [
+        "DFAK_CUDA_V41_COMPRESSOR_POOL",
         "DeviceTransientPool",
         "DeviceTransientPoolReporter",
+        "EnableV41CompressorPool",
         "ErrNotPoolable",
         "FAK_EXPERT_RING_POOL_FRACTION",
         "FLEET_WORKER_WORKTREE_POOL",
@@ -18612,7 +18739,11 @@
         "TransientPoolBackend",
         "TransientPoolStats",
         "canonicalPoolLane",
+        "cudaV41CompressorPoolFlags",
+        "cudaV41CompressorPoolKey",
+        "cudaV41CompressorPoolTags",
         "defaultPoolCap",
+        "fak_cuda_v41_compressor_pool",
         "fak_gateway_device_transient_pool_buffers",
         "fak_gateway_device_transient_pool_bytes",
         "fvk_v41_try_pool_norm_panel",
@@ -18652,6 +18783,7 @@
         "pool_state_changed",
         "poolability",
         "poolspanscores",
+        "prepareCUDAV41CompressorPool",
         "readPoolMember",
         "recordPoolLease",
         "removePoolMemberState",

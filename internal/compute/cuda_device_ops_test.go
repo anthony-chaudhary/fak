@@ -14,6 +14,7 @@ func TestCUDADeviceOpDeclaration(t *testing.T) {
 		{"matmul", "q5_k"}:                            {},
 		{"matmul", "q6_k"}:                            {},
 		{"matmul", "q2_0"}:                            {},
+		{"matmul", "q3_k"}:                            {},
 		{"matmul", "q2_k"}:                            {},
 		{"matmul", "nvfp4"}:                           {},
 		{"routed-expert-gemv", "F8_E4M3+F8_E8M0"}:     {},
@@ -42,7 +43,7 @@ func TestCUDADeviceOpDeclaration(t *testing.T) {
 		dt := Dtype(value)
 		want := false
 		switch dt {
-		case F32, F16, Q8_0, Q4_K, Q5_K, Q6_K, Q2_0, Q2_K, NVFP4:
+		case F32, F16, Q8_0, Q4_K, Q5_K, Q6_K, Q2_0, Q2_K, Q3_K, NVFP4:
 			want = true
 		}
 		if got := cudaDeviceWeightDtypeSupported(dt); got != want {

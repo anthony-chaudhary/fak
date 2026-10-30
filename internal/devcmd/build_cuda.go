@@ -67,6 +67,15 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 	arch := fs.String("arch", os.Getenv("FAK_CUDA_ARCH"), "target CUDA architecture (defaults to FAK_CUDA_ARCH, empty for all)")
 	cudaHome := fs.String("cuda-home", "", "path to CUDA Toolkit root directory")
 	archSpecific := fs.Bool("arch-specific", false, "compile opt-in CUDA 13 arch-specific translation units")
+	deepGEMM := fs.Bool("deepgemm-wkv", false, "compile explicit Linux CUDA 13.1 SM100f/103f WKV candidate; requires --arch-specific and --deepgemm-wkv-sms")
+	deepGEMMSMs := fs.Int("deepgemm-wkv-sms", 0, "explicit physical SM count for the DeepGEMM persistent kernel")
+	flashMLA := fs.Bool("flashmla-prefill", false, "compile explicit Linux CUDA 13.1 SM100a/103a FlashMLA sparse-prefill candidate; requires --arch-specific")
+	flashMLADisableLDRed := fs.Bool("flashmla-disable-ld-red", false, "select pinned non-LD.RED FlashMLA specialization; requires --flashmla-prefill")
+	routedSwiGLU := fs.Bool("v41-routed-swiglu", false, "compile explicit SM120 V4.1 routed-SwiGLU candidate; public capability remains unqualified")
+	engramGate := fs.Bool("v41-engram-gate", false, "compile explicit SM120 V4.1 Engram-gate candidate; public capability remains unqualified")
+	compressorPool := fs.Bool("v41-compressor-pool", false, "compile explicit SM120 V4.1 compressor-pool candidate; public capability remains unqualified")
+	mhc := fs.Bool("v41-mhc", false, "compile explicit SM120 V4.1 mHC witness candidate; public capability remains unqualified")
+	sharedAttention := fs.Bool("v41-shared-attention", false, "compile explicit SM120 V4.1 shared-attention candidate (paired CUDA define and Go tag; not full-model qualification)")
 	nccl := fs.Bool("nccl", os.Getenv("FAK_CUDA_NCCL") == "1", "compile with NCCL collectives enabled (-tags cuda,nccl)")
 	ncclHome := fs.String("nccl-home", os.Getenv("NCCL_HOME"), "optional path to NCCL installation directory")
 	jsonOut := fs.Bool("json", false, "emit machine-readable JSON output")
@@ -164,6 +173,16 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 		TimestampURL:       *timestampURL,
 		Stdout:             stdout,
 		Stderr:             stderr,
+
+		EnableDeepGEMMWKV:        *deepGEMM,
+		DeepGEMMWKVSMs:           *deepGEMMSMs,
+		EnableFlashMLAPrefill:    *flashMLA,
+		DisableFlashMLALDRed:     *flashMLADisableLDRed,
+		EnableV41SharedAttention: *sharedAttention,
+		EnableV41RoutedSwiGLU:    *routedSwiGLU,
+		EnableV41EngramGate:      *engramGate,
+		EnableV41CompressorPool:  *compressorPool,
+		EnableV41MHC:             *mhc,
 	}
 
 	// For binary subcommand, allow trailing positional args: [pkg] [out]
@@ -395,6 +414,30 @@ func runCUDABuildAcceptance(stdout, stderr io.Writer, cfg *computebuild.CUDAConf
 	tags := "cuda"
 	if cfg.EnableNCCL {
 		tags += ",nccl"
+	}
+	if cfg.EnableArchSpecific {
+		tags += ",cudaarchspecific"
+	}
+	if cfg.EnableDeepGEMMWKV {
+		tags += ",fak_cuda_deepgemm_wkv"
+	}
+	if cfg.EnableFlashMLAPrefill {
+		tags += ",fak_cuda_flashmla_prefill"
+	}
+	if cfg.EnableV41SharedAttention {
+		tags += ",fak_cuda_v41_shared_attention"
+	}
+	if cfg.EnableV41RoutedSwiGLU {
+		tags += ",fak_cuda_v41_routed_swiglu"
+	}
+	if cfg.EnableV41EngramGate {
+		tags += ",fak_cuda_v41_engram_gate"
+	}
+	if cfg.EnableV41CompressorPool {
+		tags += ",fak_cuda_v41_compressor_pool"
+	}
+	if cfg.EnableV41MHC {
+		tags += ",fak_cuda_v41_mhc"
 	}
 	for i := range results {
 		family := &results[i]

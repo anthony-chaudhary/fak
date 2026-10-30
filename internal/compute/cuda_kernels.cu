@@ -80,6 +80,26 @@ static uint64_t g_v41_rope_test_free_attempts = 0;
 #endif
 #endif
 
+#ifdef FAK_CUDA_V41_MHC
+static const void *g_v41_mhc_quarantine[4] = {};
+static bool g_v41_mhc_uncertain = false;
+#endif
+
+#ifdef FAK_CUDA_V41_COMPRESSOR_POOL
+static const void *g_v41_pool_quarantine[3] = {};
+static bool g_v41_pool_uncertain = false;
+#endif
+
+#ifdef FAK_CUDA_V41_ROUTED_SWIGLU
+static const void *g_v41_routed_swiglu_quarantine[4] = {};
+static bool g_v41_routed_swiglu_uncertain = false;
+#endif
+
+#ifdef FAK_CUDA_V41_ENGRAM_GATE
+static const void *g_v41_engram_quarantine[5] = {};
+static bool g_v41_engram_uncertain = false;
+#endif
+
 #ifdef FAK_CUDA_V41_INDEXER
 // Terminal uncertain score operation retains its three inputs and one output.
 static const void *g_v41_indexer_quarantine[4] = {nullptr, nullptr, nullptr, nullptr};
@@ -87,16 +107,38 @@ static bool g_v41_indexer_uncertain = false;
 static uint64_t g_v41_indexer_completed = 0;
 #endif
 
+#ifdef FAK_CUDA_FLASHMLA_PREFILL
+static const void *g_flashmla_quarantine[14] = {};
+static bool g_flashmla_uncertain = false;
+#endif
+
+#ifdef FAK_CUDA_DEEPGEMM_WKV
+#include "cuda/deepgemm_wkv_state.cuh"
+#endif
+
 #ifdef FAK_CUDA_V41_SHARED_ATTENTION
 // An uncertain shared-attention drain closes this candidate and its peers.
+static const void *g_v41_sa_quarantine[4] = {};
 static bool g_v41_sa_uncertain = false;
 static uint64_t g_v41_sa_completed = 0;
 #endif
 
-#if defined(FAK_CUDA_V41_BF16_PUBLISH) || defined(FAK_CUDA_V41_TAIL_ROPE) || defined(FAK_CUDA_V41_INDEXER) || defined(FAK_CUDA_V41_SHARED_ATTENTION)
+#if defined(FAK_CUDA_V41_ROUTED_SWIGLU) || defined(FAK_CUDA_V41_ENGRAM_GATE) || defined(FAK_CUDA_V41_COMPRESSOR_POOL) || defined(FAK_CUDA_V41_MHC) || defined(FAK_CUDA_V41_BF16_PUBLISH) || defined(FAK_CUDA_V41_TAIL_ROPE) || defined(FAK_CUDA_V41_INDEXER) || defined(FAK_CUDA_FLASHMLA_PREFILL) || defined(FAK_CUDA_DEEPGEMM_WKV) || defined(FAK_CUDA_V41_SHARED_ATTENTION)
 // Both candidates share g_stream. A successful peer call cannot rehabilitate
 // an uncertain operation, even when the Go backend has no fault latch.
 static bool v41_candidates_stream_uncertain(void) {
+#ifdef FAK_CUDA_V41_ROUTED_SWIGLU
+  if (g_v41_routed_swiglu_uncertain) return true;
+#endif
+#ifdef FAK_CUDA_V41_ENGRAM_GATE
+  if (g_v41_engram_uncertain) return true;
+#endif
+#ifdef FAK_CUDA_V41_COMPRESSOR_POOL
+  if (g_v41_pool_uncertain) return true;
+#endif
+#ifdef FAK_CUDA_V41_MHC
+  if (g_v41_mhc_uncertain) return true;
+#endif
 #ifdef FAK_CUDA_V41_BF16_PUBLISH
   if (g_v41_bf16_uncertain) return true;
 #endif
@@ -105,6 +147,12 @@ static bool v41_candidates_stream_uncertain(void) {
 #endif
 #ifdef FAK_CUDA_V41_INDEXER
   if (g_v41_indexer_uncertain) return true;
+#endif
+#ifdef FAK_CUDA_FLASHMLA_PREFILL
+  if (g_flashmla_uncertain) return true;
+#endif
+#ifdef FAK_CUDA_DEEPGEMM_WKV
+  if (g_deepgemm_wkv_uncertain) return true;
 #endif
 #ifdef FAK_CUDA_V41_SHARED_ATTENTION
   if (g_v41_sa_uncertain) return true;
@@ -138,11 +186,16 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/async_upload.cuh"
 #include "cuda/model_candidates.cuh"
 #include "cuda_v41_indexer.cu"
+#include "cuda_v41_engram_gate.cu"
+#include "cuda_v41_routed_swiglu.cu"
 #include "cuda_v41_shared_attention.cu"
+#include "cuda_v41_mhc.cu"
+#include "cuda_v41_compressor_pool.cu"
 #include "cuda/qwen35_gdn.cuh"
 #include "cuda/q4k_mmq.cuh"
 #include "cuda/q4k_mmvq.cuh"
 #include "cuda/quant_matmul.cuh"
+#include "cuda/q3k_matmul.cuh"
 #include "cuda/iq_gemv.cuh"
 #include "cuda/transformer_ops.cuh"
 #include "cuda/qwen35_attention_postprocess.cuh"
@@ -155,4 +208,10 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/weight_formats.cuh"
 #include "cuda/q4k_fp8lt.cuh"
 #include "cuda/mxfp8_cast.cuh"
+#ifdef FAK_CUDA_DEEPGEMM_WKV
+#include "cuda/deepgemm_wkv_bridge.cuh"
+#endif
 #include "cuda/peer_handoff.cuh"
+#ifdef FAK_CUDA_FLASHMLA_PREFILL
+#include "cuda_flashmla_sparse_prefill_bridge.cuh"
+#endif

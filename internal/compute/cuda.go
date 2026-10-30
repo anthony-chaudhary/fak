@@ -543,7 +543,7 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 		}
 		return c.uploadNVFP4(t, hb)
 	}
-	if t.Dtype == Q4_K || t.Dtype == Q5_K || t.Dtype == Q6_K || t.Dtype == Q2_K || t.Dtype == IQ2_XXS || t.Dtype == IQ2_XS {
+	if t.Dtype == Q3_K || t.Dtype == Q4_K || t.Dtype == Q5_K || t.Dtype == Q6_K || t.Dtype == Q2_K || t.Dtype == IQ2_XXS || t.Dtype == IQ2_XS {
 		if as != t.Dtype {
 			panic(&CUDAOpError{
 				Op:    "Upload",
@@ -1046,6 +1046,9 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 		}
 		cudaMu.Unlock()
 	}()
+	if w.Dtype == Q3_K {
+		c.checkQ3KWeight(w)
+	}
 	var out, in int
 	var nvfp4Global float32
 	if w.Dtype == NVFP4 {
@@ -1085,6 +1088,11 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{out}, F32)
 		C.fcuda_q6k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)
+	case Q3_K:
+		c.checkQ3KOperands(w, x, out, in, 1, false)
+		wb := c.cudaBufForSubmit(w)
+		y, _ = c.devTr([]int{out}, F32)
+		cudaGEMMStatus("MatMul", int(C.fcuda_q3k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)), cudaGEMMScratch{})
 	case Q2_K:
 		// native Q2_K GEMV (#11945): dequant fused into the GEMV tile straight off the
 		// resident super-block bytes; the weight stays 2-bit (84 bytes / 256 elements) in VRAM.
@@ -1114,7 +1122,7 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 		panic(&CUDAOpError{
 			Op:    "MatMul",
 			Site:  "matmul-weight-dtype",
-			Msg:   "cuda MatMul supports F32/F16/Q8_0/Q4_K/Q5_K/Q6_K/Q2_0/Q2_K/IQ2_XXS/IQ2_XS/NVFP4 weights today (got " + w.Dtype.String() + "); other quantized device GEMM is a tracked follow-up",
+			Msg:   "cuda MatMul supports F32/F16/Q8_0/Q4_K/Q5_K/Q6_K/Q2_0/Q2_K/Q3_K/IQ2_XXS/IQ2_XS/NVFP4 weights today (got " + w.Dtype.String() + "); other quantized device GEMM is a tracked follow-up",
 			Class: MemoryActivation,
 		})
 	}
@@ -1137,6 +1145,9 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	if w.Dtype == Q3_K {
+		c.checkQ3KWeight(w)
+	}
 	var out, in int
 	var nvfp4Global float32
 	if w.Dtype == NVFP4 {
@@ -1174,6 +1185,11 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
 		C.fcuda_q6k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))
+	case Q3_K:
+		c.checkQ3KOperands(w, X, out, in, P, true)
+		wb := c.cudaBufForSubmit(w)
+		y, _ = c.devTr([]int{P, out}, F32)
+		cudaGEMMStatus("BatchedMatMul", int(C.fcuda_q3k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))), cudaGEMMScratch{})
 	case Q2_K:
 		// native Q2_K prefill GEMM (#11945): dequant fused into the tile off the resident super-block
 		// bytes, dotted with each of the P f32 activation rows, F32 accumulate.
@@ -1201,7 +1217,7 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		panic(&CUDAOpError{
 			Op:    "BatchedMatMul",
 			Site:  "batched-matmul-weight-dtype",
-			Msg:   "cuda BatchedMatMul supports F32/F16/Q8_0/Q4_K/Q5_K/Q6_K/Q2_0/Q2_K/IQ2_XXS/IQ2_XS/NVFP4 weights today (got " + w.Dtype.String() + ")",
+			Msg:   "cuda BatchedMatMul supports F32/F16/Q8_0/Q4_K/Q5_K/Q6_K/Q2_0/Q2_K/Q3_K/IQ2_XXS/IQ2_XS/NVFP4 weights today (got " + w.Dtype.String() + ")",
 			Class: MemoryActivation,
 		})
 	}

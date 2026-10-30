@@ -1,0 +1,229 @@
+{
+  "rows": [
+    {
+      "id": "raider-compressor-pool",
+      "canonical": "cudaV41CompressorPool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Checked V4.1 CUDA compressor pooling operator and its input/run/state/quarantine bridge lifecycle. It pools model inputs; uncertain device completion quarantines related pointers.",
+      "distinction": "Not a reusable session pool or cache capacity profile. Compilation is not numerical or hardware acceptance.",
+      "distinct_from": [
+        "pool-session",
+        "poolprofile-cachemeta",
+        "raider-fak-v41-pool-state",
+        "raider-fak-v41-pool-input",
+        "raider-fak-v41-pool-run",
+        "raider-cudav41poolerror",
+        "raider-g-v41-pool-uncertain",
+        "raider-g-v41-pool-quarantine"
+      ],
+      "aliases": [
+        "fak_v41_pool_state",
+        "fak_v41_pool_input",
+        "fak_v41_pool_run",
+        "cudaV41PoolError",
+        "g_v41_pool_uncertain",
+        "g_v41_pool_quarantine"
+      ],
+      "grounding": "cudaV41CompressorPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "raider-engram-gate",
+      "canonical": "cudaV41EngramGate",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Checked CUDA Engram neural gating operation with explicit device status and quarantine handling.",
+      "distinction": "A numerical model gating kernel, not an authorization guard, safety policy gate or evidence-admission decision.",
+      "distinct_from": [
+        "gate",
+        "guard-kernel"
+      ],
+      "aliases": [],
+      "grounding": "cudaV41EngramGate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "dense-wkv-witness-upload",
+      "canonical": "UploadForWitness",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "Explicit Dense WKV fixture upload callback that supplies independently owned device buffers for a physical test.",
+      "distinction": "Fixture setup is not a proof, returned evidence, ordinary-route admission or successful hardware execution.",
+      "distinct_from": [
+        "world-state-witness"
+      ],
+      "aliases": [],
+      "grounding": "UploadForWitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "dense-wkv-witness-bind",
+      "canonical": "BindForWitness",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "Explicit Dense WKV fixture binder that binds owned buffers for a controlled physical test.",
+      "distinction": "Binding a fixture neither validates hardware nor establishes a correctness or performance witness.",
+      "distinct_from": [
+        "world-state-witness"
+      ],
+      "aliases": [],
+      "grounding": "BindForWitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "dense-wkv-route-support",
+      "canonical": "V41FP8WKVSupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Predicate for ordinary V4.1 FP8 Dense WKV backend admission, kept false until the hardware qualification contract is established.",
+      "distinction": "Candidate code and optional fixture availability do not imply ordinary support, numerical correctness or a maturity grade.",
+      "distinct_from": [
+        "support",
+        "correctness",
+        "maturity"
+      ],
+      "aliases": [],
+      "grounding": "V41FP8WKVSupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "raider-fak-v41-pool-state",
+      "canonical": "fak_v41_pool_state",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Native compressor-pooling state query that reports whether the CUDA operator is uncertain or quarantined.",
+      "distinction": "This is a specific compressor-pooling ABI, status or lifetime submechanism, not the whole pooling operator and not a reusable session resource pool. It grants no hardware or numerical acceptance.",
+      "distinct_from": [
+        "raider-compressor-pool"
+      ],
+      "aliases": [],
+      "grounding": "fak_v41_pool_state",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "raider-fak-v41-pool-input",
+      "canonical": "fak_v41_pool_input",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Native compressor-pooling input preflight validating the explicit operator inputs before enqueue.",
+      "distinction": "This is a specific compressor-pooling ABI, status or lifetime submechanism, not the whole pooling operator and not a reusable session resource pool. It grants no hardware or numerical acceptance.",
+      "distinct_from": [
+        "raider-compressor-pool"
+      ],
+      "aliases": [],
+      "grounding": "fak_v41_pool_input",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "raider-fak-v41-pool-run",
+      "canonical": "fak_v41_pool_run",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Native compressor-pooling execution bridge producing checked operator status; execution evidence remains external.",
+      "distinction": "This is a specific compressor-pooling ABI, status or lifetime submechanism, not the whole pooling operator and not a reusable session resource pool. It grants no hardware or numerical acceptance.",
+      "distinct_from": [
+        "raider-compressor-pool"
+      ],
+      "aliases": [],
+      "grounding": "fak_v41_pool_run",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "raider-cudav41poolerror",
+      "canonical": "cudaV41PoolError",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Typed Go error mapping from the checked CUDA compressor-pooling status envelope.",
+      "distinction": "This is a specific compressor-pooling ABI, status or lifetime submechanism, not the whole pooling operator and not a reusable session resource pool. It grants no hardware or numerical acceptance.",
+      "distinct_from": [
+        "raider-compressor-pool"
+      ],
+      "aliases": [],
+      "grounding": "cudaV41PoolError",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "raider-g-v41-pool-uncertain",
+      "canonical": "g_v41_pool_uncertain",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Latched CUDA compressor-pooling completion uncertainty that blocks unsafe subsequent operations.",
+      "distinction": "This is a specific compressor-pooling ABI, status or lifetime submechanism, not the whole pooling operator and not a reusable session resource pool. It grants no hardware or numerical acceptance.",
+      "distinct_from": [
+        "raider-compressor-pool"
+      ],
+      "aliases": [],
+      "grounding": "g_v41_pool_uncertain",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "raider-g-v41-pool-quarantine",
+      "canonical": "g_v41_pool_quarantine",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "CUDA compressor-pooling pointer quarantine protecting buffers when asynchronous completion is uncertain.",
+      "distinction": "This is a specific compressor-pooling ABI, status or lifetime submechanism, not the whole pooling operator and not a reusable session resource pool. It grants no hardware or numerical acceptance.",
+      "distinct_from": [
+        "raider-compressor-pool"
+      ],
+      "aliases": [],
+      "grounding": "g_v41_pool_quarantine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

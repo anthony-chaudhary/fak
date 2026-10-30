@@ -235,10 +235,15 @@ static int v41_sa_grow(void **p, size_t *have, size_t need) {
   return 0;
 }
 
-static int v41_sa_drain(int status) {
+static int v41_sa_drain(int status, const float *q, const float *kv,
+    const float *sink, float *out) {
   cudaError_t drained = cudaStreamSynchronize(g_stream);
   if (drained != cudaSuccess) {
     // Admission closes permanently; scratch and caller buffers are never reused.
+    g_v41_sa_quarantine[0] = q;
+    g_v41_sa_quarantine[1] = kv;
+    g_v41_sa_quarantine[2] = sink;
+    g_v41_sa_quarantine[3] = out;
     g_v41_sa_uncertain = true;
     return 50000 + (int)drained;
   }
@@ -281,25 +286,25 @@ extern "C" int fak_v41_shared_attention_f32(const float *q, const float *kv,
   float *partLSE = g_v41_sa_part + (size_t)heads * splits * dim;
   const float scale2 = scale * 1.4426950408889634f; // one rounded product, as the reference
   FCUDA_TS("fill", 1, error = cudaMemsetAsync(g_v41_sa_status, 0, statusBytes, g_stream));
-  if (error != cudaSuccess) return v41_sa_drain(30000 + (int)error);
+  if (error != cudaSuccess) return v41_sa_drain(30000 + (int)error, q, kv, sink, out);
   cudaEventRecord(g_v41_sa_ev[0], g_stream);
   const dim3 grid((unsigned)splits, (unsigned)((heads + hpb - 1) / hpb));
   FCUDA_TS("k_v41_shared_attention_split", grid,
     k_v41_shared_attention_split<<<grid, V41SA_THREADS, smem, g_stream>>>(q, kv, partOut,
       partLSE, g_v41_sa_status, rows, heads, dim, hpb, tile, tiles, splits, scale2));
   error = cudaGetLastError();
-  if (error != cudaSuccess) return v41_sa_drain(30000 + (int)error);
+  if (error != cudaSuccess) return v41_sa_drain(30000 + (int)error, q, kv, sink, out);
   FCUDA_TS("k_v41_shared_attention_combine", heads,
     k_v41_shared_attention_combine<<<heads, V41SA_COMBINE_THREADS, 0, g_stream>>>(partOut,
       partLSE, sink, out, g_v41_sa_status, heads, dim, splits, has_sink));
   error = cudaGetLastError();
-  if (error != cudaSuccess) return v41_sa_drain(30000 + (int)error);
+  if (error != cudaSuccess) return v41_sa_drain(30000 + (int)error, q, kv, sink, out);
   cudaEventRecord(g_v41_sa_ev[1], g_stream);
   error = cudaStreamSynchronize(g_stream);
-  if (error != cudaSuccess) return v41_sa_drain(40000 + (int)error);
+  if (error != cudaSuccess) return v41_sa_drain(40000 + (int)error, q, kv, sink, out);
   // The shared checked D2H ABI owns copy completion and byte accounting.
   const int copied = fcuda_d2h_checked(host_status, g_v41_sa_status, statusBytes);
-  if (copied != 0) return v41_sa_drain(59000 + copied);
+  if (copied != 0) return v41_sa_drain(59000 + copied, q, kv, sink, out);
   if (kernel_ms) {
     float ms = 0.f;
     if (cudaEventElapsedTime(&ms, g_v41_sa_ev[0], g_v41_sa_ev[1]) == cudaSuccess) *kernel_ms = ms;

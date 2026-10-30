@@ -23,6 +23,7 @@ var cudaDeviceOps = [...]CUDADeviceOp{
 	{"matmul", "q6_k", "sm_80"},
 	{"matmul", "q2_0", "sm_80"},
 	{"matmul", "q2_k", "sm_80"},
+	{"matmul", "q3_k", "sm_80"},
 	{"matmul", "nvfp4", "sm_80"},
 	{"routed-expert-gemv", "F8_E4M3+F8_E8M0", "sm_80"},
 	{"routed-expert-gemv", "I8+F8_E8M0", "sm_80"},

@@ -125,6 +125,25 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 	if tc.IsWindows {
 		obj := filepath.Join(pkgDir, "cuda_kernels.obj")
 		nvccArgs := []string{"-O3", "-std=c++17"}
+		nvccArgs = cudaV41SharedAttentionFlags(ctx, nvccArgs)
+		nvccArgs = cudaFlashMLAGenericFlags(ctx, nvccArgs)
+		nvccArgs = cudaDeepGEMMGenericFlags(ctx, nvccArgs)
+		nvccArgs, err = cudaV41MHCFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
+		nvccArgs, err = cudaV41CompressorPoolFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
+		nvccArgs, err = cudaV41EngramGateFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
+		nvccArgs, err = cudaV41RoutedSwiGLUFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
 		nvccArgs = append(nvccArgs, gencodeArgs...)
 		nvccArgs = append(nvccArgs, "-Xcompiler", "/MD", "-c", "cuda_kernels.cu", "-o", obj)
 		if err := compileCUDAObject(ctx, tc, pkgDir, "cuda_kernels.cu", obj, nvccArgs, env, receipt, stdout); err != nil {
@@ -134,6 +153,25 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 	} else {
 		obj := filepath.Join(pkgDir, "cuda_kernels.o")
 		nvccArgs := []string{"-O3", "-std=c++17"}
+		nvccArgs = cudaV41SharedAttentionFlags(ctx, nvccArgs)
+		nvccArgs = cudaFlashMLAGenericFlags(ctx, nvccArgs)
+		nvccArgs = cudaDeepGEMMGenericFlags(ctx, nvccArgs)
+		nvccArgs, err = cudaV41MHCFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
+		nvccArgs, err = cudaV41CompressorPoolFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
+		nvccArgs, err = cudaV41EngramGateFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
+		nvccArgs, err = cudaV41RoutedSwiGLUFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
 		nvccArgs = append(nvccArgs, gencodeArgs...)
 		if tc.CXX != "" {
 			nvccArgs = append(nvccArgs, "-ccbin", tc.CXX)
@@ -173,6 +211,16 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 			return nil, fmt.Errorf("nvcc arch-specific probe: %w", err)
 		}
 		objs = append(objs, obj)
+	}
+	if object, err := compileCUDAFlashMLA(ctx, tc, repoRoot, env, receipt, stdout); err != nil {
+		return nil, err
+	} else if object != "" {
+		objs = append(objs, object)
+	}
+	if object, err := compileCUDADeepGEMM(ctx, tc, repoRoot, env, receipt, stdout); err != nil {
+		return nil, err
+	} else if object != "" {
+		objs = append(objs, object)
 	}
 	return objs, nil
 }
@@ -328,12 +376,62 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 		}
 		cfg.Toolchain = tc
 	}
+	if cfg.EnableV41RoutedSwiGLU {
+		if err := prepareCUDAV41RoutedSwiGLU(cfg); err != nil {
+			return err
+		}
+		ctx = context.WithValue(ctx, cudaV41RoutedSwiGLUKey{}, true)
+	}
+	if cfg.EnableV41EngramGate {
+		if err := prepareCUDAV41EngramGate(cfg); err != nil {
+			return err
+		}
+		ctx = context.WithValue(ctx, cudaV41EngramGateKey{}, true)
+	}
+	if cfg.EnableV41CompressorPool {
+		if err := prepareCUDAV41CompressorPool(cfg); err != nil {
+			return err
+		}
+		ctx = context.WithValue(ctx, cudaV41CompressorPoolKey{}, true)
+	}
+	if cfg.EnableV41MHC {
+		if err := prepareCUDAV41MHC(cfg); err != nil {
+			return err
+		}
+		ctx = context.WithValue(ctx, cudaV41MHCKey{}, true)
+	}
+	if cfg.EnableV41SharedAttention {
+		if err := prepareCUDAV41SharedAttention(cfg); err != nil {
+			return err
+		}
+		ctx = context.WithValue(ctx, cudaV41SharedAttentionKey{}, true)
+	}
 	if cfg.EnableArchSpecific {
 		plan, err := prepareCUDAArchSpecific(ctx, cfg.Toolchain, root)
 		if err != nil {
 			return err
 		}
 		ctx = context.WithValue(ctx, cudaArchSpecificKey{}, plan)
+	}
+	if cfg.DisableFlashMLALDRed && !cfg.EnableFlashMLAPrefill {
+		return fmt.Errorf("%w: disabling LD.RED requires the explicit FlashMLA candidate", ErrCUDAFlashMLAPrefill)
+	}
+	if cfg.EnableFlashMLAPrefill {
+		plan, err := prepareCUDAFlashMLA(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		ctx = context.WithValue(ctx, cudaFlashMLAKey{}, plan)
+	}
+	if cfg.DeepGEMMWKVSMs != 0 && !cfg.EnableDeepGEMMWKV {
+		return fmt.Errorf("%w: SM count requires explicit DeepGEMM WKV candidate", ErrCUDADeepGEMMWKV)
+	}
+	if cfg.EnableDeepGEMMWKV {
+		plan, err := prepareCUDADeepGEMM(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		ctx = context.WithValue(ctx, cudaDeepGEMMKey{}, plan)
 	}
 	if cfg.ReceiptPath == "" {
 		cfg.ReceiptPath = filepath.Join(cfg.RepoRoot, DefaultCUDABuildReceiptPath)
@@ -385,6 +483,15 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 	}
 	if cfg.EnableArchSpecific {
 		goTags += ",cudaarchspecific"
+	}
+	goTags = cudaV41RoutedSwiGLUTags(cfg, goTags)
+	goTags = cudaV41EngramGateTags(cfg, goTags)
+	goTags = cudaV41CompressorPoolTags(cfg, goTags)
+	goTags = cudaV41MHCTags(cfg, goTags)
+	goTags = cudaV41SharedAttentionTags(cfg, goTags)
+	goTags = cudaFlashMLAGoTags(cfg, goTags)
+	if cfg.EnableDeepGEMMWKV {
+		goTags += ",fak_cuda_deepgemm_wkv"
 	}
 
 	switch cfg.Command {

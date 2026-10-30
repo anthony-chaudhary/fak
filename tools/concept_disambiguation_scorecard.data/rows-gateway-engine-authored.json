@@ -161,5 +161,25 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "flashmla-loaded-kernel-identity",
+      "canonical": "fak_flashmla_prefill_kernel_info",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Native FlashMLA ABI that observes the current CUDA device and attributes of the actual pinned fused sparse-prefill core function, returning device/driver/runtime and loaded binary/PTX identity or a typed target/observation error.",
+      "distinction": "It observes a GPU compute image, not abi.Kernel tool-call coordination and not the Q4 compute implementation itself; image identity does not prove numerical parity, performance, or physical acceptance.",
+      "distinct_from": [
+        "kernel",
+        "x-gateway-engine-q4kernel"
+      ],
+      "aliases": [],
+      "grounding": "fak_flashmla_prefill_kernel_info",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

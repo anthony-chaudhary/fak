@@ -790,6 +790,9 @@ func (m *Model) residentShape(name string) (out, in int, ok bool) {
 	if qt := m.gptqw[name]; qt != nil {
 		return qt.out, qt.in, true
 	}
+	if m.v41PackedWKVPresent(name) {
+		return 512, 5120, true
+	}
 	return 0, 0, false
 }
 

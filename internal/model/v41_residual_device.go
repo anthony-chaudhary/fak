@@ -96,6 +96,7 @@ func (d *v41DeviceStreams) Free() {
 	if d == nil || d.t.Buf() == nil {
 		return
 	}
-	d.be.Free(d.t)
+	owned := d.t
 	d.t = compute.Tensor{}
+	d.be.Free(owned)
 }

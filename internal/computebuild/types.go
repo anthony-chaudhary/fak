@@ -70,6 +70,16 @@ type CUDAConfig struct {
 	Toolchain          *Toolchain           // Pre-discovered or custom toolchain
 	Stdout             io.Writer            // Standard output stream
 	Stderr             io.Writer            // Standard error stream
+
+	EnableV41RoutedSwiGLU    bool // Explicit SM120 candidate; public capability remains unqualified.
+	EnableV41EngramGate      bool // Explicit SM120 candidate; public capability remains unqualified.
+	EnableV41CompressorPool  bool // Explicit SM120 candidate; public capability remains unqualified.
+	EnableV41MHC             bool // Explicit witness candidate, not numerical qualification
+	EnableV41SharedAttention bool // Explicit SM120 SIMT candidate; paired library define and Go tag
+	EnableDeepGEMMWKV        bool // Explicit family-SASS WKV candidate, never automatic
+	DeepGEMMWKVSMs           int  // Positive physical SM count compiled into the persistent kernel
+	EnableFlashMLAPrefill    bool // Explicit SM100a/103a FlashMLA sparse-prefill candidate
+	DisableFlashMLALDRed     bool // Select the pinned donor's non-LD.RED specialization; requires FlashMLA
 }
 
 // BuildArtifact records metadata about a generated binary or static library.

@@ -101,7 +101,7 @@ func (c *cudaBackend) UploadAsync(t Tensor, as Dtype) (Tensor, Fence) {
 	switch {
 	case t.Dtype == F32 && as == F32 && len(t.Shape) > 0:
 		return c.uploadF32Async(t, hb)
-	case (t.Dtype == Q4_K || t.Dtype == Q5_K || t.Dtype == Q6_K || t.Dtype == Q2_K) && as == t.Dtype:
+	case (t.Dtype == Q3_K || t.Dtype == Q4_K || t.Dtype == Q5_K || t.Dtype == Q6_K || t.Dtype == Q2_K) && as == t.Dtype:
 		return c.uploadRawKQuantAsync(t, hb)
 	}
 	return c.Upload(t, as), cudaLandedFence

@@ -160,16 +160,16 @@ func (r *v41MHCResident) free() {
 	if r == nil {
 		return
 	}
-	r.abort()
-	r.streams.Free()
-	r.streams = nil
-	r.dropTensor(&r.carry)
+	streams, carry := r.streams, r.carry
+	r.streams, r.carry = nil, compute.Tensor{}
+	runBackendSiblingCleanup(r.abort, streams.Free, func() { r.dropTensor(&carry) })
 }
 
 func (r *v41MHCResident) dropTensor(t *compute.Tensor) {
 	if t != nil && t.Buf() != nil {
-		r.d.s.Backend.Free(*t)
+		owned := *t
 		*t = compute.Tensor{}
+		r.d.s.Backend.Free(owned)
 	}
 }
 
@@ -631,11 +631,13 @@ func (r *v41MHCResident) publish(layer int) error {
 		r.abort()
 		return r.d.fail(layer, "publish", "admission", errV41MHCResult)
 	}
-	if err := r.streams.Replace(r.layer.next); err != nil {
+	next := r.layer.next
+	r.layer.next = compute.Tensor{}
+	if err := r.streams.Replace(next); err != nil {
+		r.layer.next = next
 		r.abort()
 		return r.d.fail(layer, "publish", "result", err)
 	}
-	r.layer.next = compute.Tensor{}
 	r.dropTensor(&r.carry)
 	r.carry, r.layer.ffn = r.layer.ffn, compute.Tensor{}
 	r.abort()
@@ -646,11 +648,14 @@ func (r *v41MHCResident) abort() {
 	if r == nil {
 		return
 	}
-	r.dropTensor(&r.layer.attn)
-	r.dropTensor(&r.layer.ffn)
-	r.dropTensor(&r.layer.next)
-	r.layer.updated.Free()
-	r.layer.updated = nil
+	owned := r.layer
+	r.layer = v41MHCResidentLayer{}
+	runBackendSiblingCleanup(
+		func() { r.dropTensor(&owned.attn) },
+		func() { r.dropTensor(&owned.ffn) },
+		func() { r.dropTensor(&owned.next) },
+		owned.updated.Free,
+	)
 }
 
 // hiddenRows is the per-layer hidden row a host consumer reads: hc_pre of the

@@ -421,6 +421,8 @@ void fcuda_q6k_matmul_f32(const uint8_t *dQ6K, const float *dX, float *dY, int o
  * llama.cpp k-quant super-block bytes dQ2K, 256 elements per 84-byte super-block (16 scale bytes,
  * 64 quant bytes, f16 d, f16 dmin). Fused dequantization on device, F32 accumulate.
  * Eliminates A100 CPU decode offload on sm_80/sm_89/sm_90 (#11945). */
+// Packed GGUF Q3_K, no scratch; native CUDA status returned.
+int fcuda_q3k_matmul_f32(const uint8_t *W, const float *X, float *Y, int out, int in, int P);
 int fcuda_q2k_matmul_f32(const uint8_t *dQ2K, const float *dX, float *dY, int out, int in, int P);
 void fcuda_q2k_gemv(const uint8_t *dQ2K, const float *dX, float *dY, int out, int in, int P);
 void fcuda_q2k_gemm_panel(const uint8_t *dQ2K, const float *dX, float *dY, int out, int in, int P);

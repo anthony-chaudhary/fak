@@ -15,23 +15,23 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **689** (clarity 0 + coverage 689) |
-| **Crystal-clear concepts (and climbing)** | **1348** crystal of 3159 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3238 / 3927** (82.5% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **711** (clarity 0 + coverage 711) |
+| **Crystal-clear concepts (and climbing)** | **1361** crystal of 3172 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3251 / 3962** (82.1% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 228 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **89** of 4418 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **95** of 4431 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 88.6/100 (grade B) |
+| Legacy bounded score (saturates; not the driver) | 88.4/100 (grade B) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3159 concepts - score 88.6/100 (grade B) - disambiguation-debt 689
+concept-disambiguation chart - 3172 concepts - score 88.4/100 (grade B) - disambiguation-debt 711
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #####################....... 1348
+  * crystal       #####################....... 1361
   o defined       ############################ 1811
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -46,36 +46,36 @@ clarity mix by family (each cell = one concept):
   decision         **********************************ooooooooooooooooooooo (55 concept(s); 34 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ******************oooooooooooooooooooooooooooooooo (50 concept(s); 18 crystal)
-  gateway-engine   **********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (204 concept(s); 82 crystal)
-  guard-gate       *********************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (456 concept(s); 213 crystal)
+  gateway-engine   ***********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (205 concept(s); 83 crystal)
+  guard-gate       **********************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (457 concept(s); 214 crystal)
   layout           ************ooooooooo (21 concept(s); 12 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
   plan             **************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (427 concept(s); 182 crystal)
   policy-capability **********************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (213 concept(s); 106 crystal)
-  pool             *******************oooooooooooooooooooooooooooooooooo (53 concept(s); 19 crystal)
+  pool             **************************oooooooooooooooooooooooooooooooooo (60 concept(s); 26 crystal)
   render-materialize *******************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (200 concept(s); 43 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
   session-runtime  *************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (271 concept(s); 97 crystal)
-  support-maturity *************************************************************oooooooooooooooooooooooooooo (89 concept(s); 61 crystal)
+  support-maturity ***************************************************************oooooooooooooooooooooooooooo (91 concept(s); 63 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
-  witness-proof    ***********************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (175 concept(s); 83 crystal)
+  witness-proof    *************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (177 concept(s); 85 crystal)
 
 coverage by family (positioned / discovered):
-  plan             #######################..... 489/604
+  plan             ######################...... 489/614
   cache            #######################..... 345/415
   session-runtime  #######################..... 290/359
-  gateway-engine   ######################...... 250/312
-  guard-gate       ##########################.. 517/567
+  gateway-engine   ######################...... 251/315
+  guard-gate       #########################... 518/571
+  attention        ######################...... 166/216
   context-ctx      ########################.... 274/323
-  attention        ######################...... 166/213
-  pool             ################............ 55/96
+  pool             #################........... 62/104
   policy-capability ########################.... 231/271
-  support-maturity ####################........ 93/132
+  support-maturity ####################........ 95/135
   render-materialize ########################.... 217/251
   score-debt       #######################..... 114/139
-  witness-proof    #########################... 173/197
-  evict            ####################........ 57/79
+  evict            ####################........ 57/81
+  witness-proof    #########################... 175/199
   loop             ########################.... 100/117
   layout           #################........... 21/35
   decision         #########################... 60/66
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##########################......] 82.5%  (3238/3927 confusable tokens positioned)
+namespace coverage  [##########################......] 82.1%  (3251/3962 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 228
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 228/228
 
-name index: 4418 lookup name(s) -> 3159 concept(s), 89 ambiguous
+name index: 4431 lookup name(s) -> 3172 concept(s), 95 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **228 / 228** (228 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2608 / 5859 |
+| Boundaries drawn (mutual / total) | 2648 / 5899 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4418 over 3159 concepts |
-| Lookup names landing on several concepts | 89 |
+| Lookup names indexed | 4431 over 3172 concepts |
+| Lookup names landing on several concepts | 95 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3159 |
+| Concepts carrying a contrast set | 3172 |
 
 ## The concepts (best verdict first)
 
@@ -536,6 +536,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | gateway-engine | **fak_engine_kernel_*** - Prometheus family prefix for the sub-kernel seam: per-GEMM call counts, per-call durations, and the kernel presence and overflow bits, all rendered by internal/stepobs from computetrace events. |
 | * | crystal | symbol | gateway-engine | **fak_engine_planner_step_*** - Prometheus family prefix for the sub-planner step seam: per-leg durations and leg counts over the closed MicroSpanKind vocabulary, plus the planner presence bit, all rendered by internal/stepobs. |
 | * | crystal | symbol | gateway-engine | **kernelRegistry** - The bounded fold inside internal/stepobs that turns computetrace.Event values into per-(kernel, backend, timer_domain) call counters and histograms, capped at MaxKernelKeys with a single fixed overflow key. |
+| * | crystal | symbol | gateway-engine | **fak_flashmla_prefill_kernel_info** - Native FlashMLA ABI that observes the current CUDA device and attributes of the actual pinned fused sparse-prefill core function, returning device/driver/runtime and loaded binary/PTX identity or a typed target/observation error. |
 | * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for engineresult** - `engineResult` is the gateway-engine symbol declared or used at `internal/agent/readengine.go:65` as `return engineResult(ctx, c, body, out, isErr, FakReadEngineID), nil`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for enginespec** - `EngineSpec` is the gateway-engine symbol declared or used at `internal/quality/case.go:70` as `Engine EngineSpec `json:"engine"``. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for enginevllm** - `EngineVLLM` is the gateway-engine symbol declared or used at `internal/enginecache/compare.go:61` as `witnessed, err := (Client{Engine: EngineVLLM, BaseURL: server.URL}).Invalidate(context.Background(), dirs)`. This row positions that concrete implementation surface, not merely the family label. |
@@ -774,6 +775,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | guard-gate | **runtime_delegated** - The wire value of the runtime-delegated claim scope: the literal string a producer writes into an FP4 metadata document's claim_scope field to say that execution belongs to an external runtime. Being a wire value, it is part of the artifact's public contract and cannot be renamed without breaking documents already written. |
 | * | crystal | symbol | guard-gate | **v41BatchIndexerGuard** - Cohort fault-boundary adapter that invokes the serial selected-indexer panic guard for only the recorded failing Session and recovers the resulting primary value after cohort rollback. |
 | * | crystal | symbol | guard-gate | **AmendGatedWiden** - The amendment class meaning a GATED OPERATOR CHANNEL (overlay, reload, operator escalation) may widen this policy surface, and the agent may never widen it on its own. One of four closed classes alongside FROZEN, RATCHET and SELF_AMENDABLE. |
+| * | crystal | symbol | guard-gate | **cudaV41EngramGate** - Checked CUDA Engram neural gating operation with explicit device status and quarantine handling. |
 | * | crystal | symbol | guard-gate | **GatedAction** - GatedAction is the sessionctl payload of one call the adjudication gate refused with an ESCALATE disposition, parked on the out-of-band operator inbox (#2757): the tool name, the raw proposed args, the closed refusal reason, and the gate's preview — what an external operator reads to approve or deny the action. |
 | * | crystal | symbol | guard-gate | **ParkGatedAction** - ParkGatedAction is the sessionctl blocking park op of the out-of-band operator inbox (#2757): it publishes one GatedAction as an addressable pending action and blocks the calling loop until an operator verdict arrives, the park window elapses, or the context is cancelled, witnessing every outcome on the trace's park Next records at the consume point. |
 | * | crystal | symbol | guard-gate | **ResolveGatedAction** - ResolveGatedAction is the typed operator approve/deny op of the out-of-band inbox (#2757): it resolves the pending action addressed by id with a ParkVerdict (approve, optionally carrying modified args, or deny), waking the parked loop exactly once; malformed verdicts and unknown/already-resolved ids refuse with the closed PARK_MALFORMED / PARK_UNKNOWN_ACTION reasons. |
@@ -1151,6 +1153,13 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | pool | **TryV41PoolNormPanel** - Bounded canonical Vulkan FFN normalization operation that atomically borrows already-free exact-size native buffers and existing staging capacity, sharing scalar-required gain preparation and refusing before side effects when capacity is unavailable. |
 | * | crystal | symbol | pool | **Pool (session)** - Bounded-LRU session state container with a fixed ceiling on concurrent sessions |
 | * | crystal | symbol | pool | **PoolProfile** - Pooling character of a residency tier describing host count, coherence model, and shareability |
+| * | crystal | symbol | pool | **cudaV41CompressorPool** - Checked V4.1 CUDA compressor pooling operator and its input/run/state/quarantine bridge lifecycle. It pools model inputs; uncertain device completion quarantines related pointers. |
+| * | crystal | symbol | pool | **fak_v41_pool_state** - Native compressor-pooling state query that reports whether the CUDA operator is uncertain or quarantined. |
+| * | crystal | symbol | pool | **fak_v41_pool_input** - Native compressor-pooling input preflight validating the explicit operator inputs before enqueue. |
+| * | crystal | symbol | pool | **fak_v41_pool_run** - Native compressor-pooling execution bridge producing checked operator status; execution evidence remains external. |
+| * | crystal | symbol | pool | **cudaV41PoolError** - Typed Go error mapping from the checked CUDA compressor-pooling status envelope. |
+| * | crystal | symbol | pool | **g_v41_pool_uncertain** - Latched CUDA compressor-pooling completion uncertainty that blocks unsafe subsequent operations. |
+| * | crystal | symbol | pool | **g_v41_pool_quarantine** - CUDA compressor-pooling pointer quarantine protecting buffers when asynchronous completion is uncertain. |
 | * | crystal | symbol | pool | **mmrPoolFactor** - The multiple of the caller's k that bounds how many already-ranked recall candidates the MMR reranker considers (3x, the borrow's window). Greedy MMR is quadratic in similarity comparisons, so bounding the pool keeps the cost proportional to what the caller actually asked for; candidates past the window keep their baseline order and can only matter when the pool is the whole list. |
 | * | crystal | symbol | pool | **PoolCapEnv / FLEET_WORKER_WORKTREE_POOL (warm worktree-pool cap)** - The environment knob bounding the per-worker warm worktree pool: the maximum number of IDLE detached worktrees kept per LANE under the worktree root. Unset, unparsable or negative reads as the default; 0 disables the pool and reproduces the pre-pool create/reap behaviour byte for byte. |
 | * | crystal | symbol | pool | **PoolCap() (resolved worktree-pool cap)** - The resolver that reads PoolCapEnv and returns the effective per-lane idle-worktree cap, failing open to the default on anything unreadable so a typo'd knob can never mean unbounded. Both Prepare and Reap consult it, so the pool is on or off for the whole lifecycle rather than per call site. |
@@ -1368,6 +1377,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | support-maturity | **forwardCoverage (per-token native traversal observation)** - forwardCoverage is the internal request-local observation emitted only after a logits-producing native V4.1 forward commits, recording configured and executed layers, head dimension, completion, and full versus incremental logits source for one output token. |
 | * | crystal | symbol | support-maturity | **NativeForwardCoverage (serialized per-token traversal proof)** - NativeForwardCoverage is the versioned receipt row attached one-for-one to generated output tokens, projecting the native model type, configured and executed layer counts, head dimension, full-depth/completeness flags, and full or incremental logits source. |
 | * | crystal | symbol | support-maturity | **IsSupportedQwen35GDNPath (Qwen GDN execution identity allowlist)** - The model predicate accepts the closed set of implemented Qwen GDN execution path identifiers. Native agent receipts use it to preserve the selected backend marker without inventing a CUDA identity for other devices. |
+| * | crystal | symbol | support-maturity | **V41FP8WKVSupported** - Predicate for ordinary V4.1 FP8 Dense WKV backend admission, kept false until the hardware qualification contract is established. |
 | * | crystal | symbol | support-maturity | **ReasonUnsupportedPatch** - Go constant naming the shared-task patch-result reason UNSUPPORTED_PATCH: the op and path combination falls outside the contract's closed patch grammar. |
 | * | crystal | symbol | support-maturity | **UNSUPPORTED_PATCH** - Wire reason token in shared-task patch-result JSON: the fold denied a patch whose op or path is outside the supported contract grammar. |
 | * | crystal | symbol | support-maturity | **resultForUnsupported** - Fold helper building the denied patch result carrying UNSUPPORTED_PATCH at the record's current revision. |
@@ -1378,6 +1388,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | support-maturity | **support-maturity implementation surface for seatcoveragemaxagemin** - `SeatCoverageMaxAgeMin` is the support-maturity symbol declared or used at `internal/accountprobe/coverage.go:32` as `// SeatCoverageMaxAgeMin. This seat's health is measured, so its silence is a finding.`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | support-maturity | **support-maturity implementation surface for sotacoveragescorecard** - `sota_coverage_scorecard` is the support-maturity symbol declared or used at `cmd/fak/sota_coverage_scorecard.go:3` as `// sota_coverage_scorecard.go is the thin CLI shell over internal/sotacoverage: it resolves`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | support-maturity | **ErrNativeStructuredUnsupported** - ErrNativeStructuredUnsupported is the typed per-request refusal returned when a native structured-output request cannot be honored without violating its JSON-schema or execution-mode contract. |
+| * | crystal | symbol | support-maturity | **SupportsV41SparsePrefill** - V41SparsePrefillBackend predicate admitting the ordinary whole-panel V4.1 sparse-prefill route only when the backend physical-acceptance contract is available; the CUDA implementation currently returns false independently of successful compilation or explicit private physical-witness execution. |
 | * | crystal | symbol | support-maturity | **Qwen35 MTP spec-decode unsupported error** - Qwen35MTPSpecDecodeUnsupportedError is the typed model-layer admission refusal returned before native Qwen3.8 MTP depth-N decoding mutates an unsupported target session. |
 | * | crystal | concept | support-maturity | **support** - A capability is supported when fak has an implemented path that accepts the case without asserting how broadly it is exercised, whether every answer is right, how it compares to a peer, or whether it is production-mature. |
 | * | crystal | metric | support-maturity | **coverage** - Coverage is the measured fraction of a declared or discovered universe that has rows, tests, witnesses, or other positioned evidence. |
@@ -1430,6 +1441,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | witness-proof | **witnessedReservationEnvelope** - Unexported constructor returning the #4801 candidate reservation exactly as directly witnessed: the non-evicting reach read back from the lab GPU nodes, scrubbed to a node-class label. |
 | * | crystal | symbol | witness-proof | **WitnessedPlacement** - Exported accessor returning the current #4801 typed placement verdict, derived by AdmitPlacement from the witnessed envelope; the artifact #4788 gates its transfer on. |
 | * | crystal | symbol | witness-proof | **FindingHeldAxisUnwitnessed (a selected arm witnessed no value for a declared held axis)** - internal/quality/set_comparability.go: the typed finding that a selected campaign arm handed over no value (absent or blank) for an axis its campaign declared it holds constant, so that axis was never established as held across the complete arm set. |
+| * | crystal | symbol | witness-proof | **UploadForWitness** - Explicit Dense WKV fixture upload callback that supplies independently owned device buffers for a physical test. |
+| * | crystal | symbol | witness-proof | **BindForWitness** - Explicit Dense WKV fixture binder that binds owned buffers for a controlled physical test. |
 | * | crystal | symbol | witness-proof | **ReasonArtifactWitness** - Go constant naming the shared-task patch-result reason ARTIFACT_WITNESS_MISSING: a disaggregated artifact ref was removed without a digest-shaped deletion witness, so the fold quarantines the patch. |
 | * | crystal | symbol | witness-proof | **ARTIFACT_WITNESS_MISSING** - Wire reason token on a shared-task patch result: an artifact-ref deletion lacked the digest-shaped deletion witness the contract requires, so the write is held as quarantined. |
 | * | crystal | symbol | witness-proof | **ReasonBodyWitness** - Go constant naming the shared-task patch-result reason BODY_WITNESS_MISSING: a disaggregated note-body or task-body ref changed without a digest-shaped deletion witness. |
@@ -3439,8 +3452,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 28 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3251/5859 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3159 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3251/5899 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3172 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3449,27 +3462,27 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4418 lookup name(s) resolves - 89 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4431 lookup name(s) resolves - 95 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| plan | 489 | 604 | 115 |
+| plan | 489 | 614 | 125 |
 | cache | 345 | 415 | 70 |
 | session-runtime | 290 | 359 | 69 |
-| gateway-engine | 250 | 312 | 62 |
-| guard-gate | 517 | 567 | 50 |
+| gateway-engine | 251 | 315 | 64 |
+| guard-gate | 518 | 571 | 53 |
+| attention | 166 | 216 | 50 |
 | context-ctx | 274 | 323 | 49 |
-| attention | 166 | 213 | 47 |
-| pool | 55 | 96 | 41 |
+| pool | 62 | 104 | 42 |
 | policy-capability | 231 | 271 | 40 |
-| support-maturity | 93 | 132 | 39 |
+| support-maturity | 95 | 135 | 40 |
 | render-materialize | 217 | 251 | 34 |
 | score-debt | 114 | 139 | 25 |
-| witness-proof | 173 | 197 | 24 |
-| evict | 57 | 79 | 22 |
+| evict | 57 | 81 | 24 |
+| witness-proof | 175 | 199 | 24 |
 | loop | 100 | 117 | 17 |
 | layout | 21 | 35 | 14 |
 | decision | 60 | 66 | 6 |

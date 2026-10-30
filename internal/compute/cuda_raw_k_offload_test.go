@@ -25,7 +25,7 @@ func TestCUDARawKOffloadIndependentOwnership(t *testing.T) {
 		bits     uint8
 		makeHost func(Backend, []int, []byte) Tensor
 	}{
-		{Q2_K, 84, 2, NewQ2K}, {Q4_K, 144, 4, NewQ4K},
+		{Q2_K, 84, 2, NewQ2K}, {Q3_K, 110, 3, NewQ3K}, {Q4_K, 144, 4, NewQ4K},
 		{Q5_K, 176, 5, NewQ5K}, {Q6_K, 210, 6, NewQ6K},
 	} {
 		t.Run(tc.dt.String(), func(t *testing.T) {
