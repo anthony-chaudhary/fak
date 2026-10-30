@@ -224,7 +224,7 @@ static unsigned long long g_q3k_mmvq_launches = 0;
 
 extern "C" unsigned long long fcuda_q3k_mmvq_launch_count(void) { return g_q3k_mmvq_launches; }
 
-static void fcuda_q3k_mmvq_launch(const uint8_t *dQ3K, const fak_q4k_mmvq::block_q8_1 *y, float *dY,
+static int fcuda_q3k_mmvq_launch(const uint8_t *dQ3K, const fak_q4k_mmvq::block_q8_1 *y, float *dY,
                                   int out, int in, int cols) {
     using namespace fak_q3k_mmvq;
     switch (cols) {
@@ -244,7 +244,10 @@ static void fcuda_q3k_mmvq_launch(const uint8_t *dQ3K, const fak_q4k_mmvq::block
         break;
     }
     }
+    const cudaError_t launch_status = cudaGetLastError();
+    if (launch_status != cudaSuccess) return (int)launch_status;
     ++g_q3k_mmvq_launches;
+    return 0;
 }
 
 // fcuda_q3k_matmul_f32 (cuda_backend.h): Y[P,out] = X[P,in] @ W[out,in]^T over resident Q3_K.
@@ -280,6 +283,9 @@ extern "C" int fcuda_q3k_matmul_f32(const uint8_t *dQ3K, const float *dX, float 
     }
     dim3 qgrid((in + 255) / 256, P);
     FCUDA_TS("quantize_q8_1", qgrid, fak_q4k_mmvq::quantize_q8_1<<<qgrid, 256, 0, g_stream>>>(dX, g_q3k_mmvq_y, in));
-    fcuda_q3k_mmvq_launch(dQ3K, g_q3k_mmvq_y, dY, out, in, P);
-    return 0;
+    // Do not enqueue a dependent dot product after a rejected quantizer launch.
+    // These are immediate launch checks, not a stream completion fence.
+    const cudaError_t quantize_status = cudaGetLastError();
+    if (quantize_status != cudaSuccess) return (int)quantize_status;
+    return fcuda_q3k_mmvq_launch(dQ3K, g_q3k_mmvq_y, dY, out, in, P);
 }
