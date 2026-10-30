@@ -301,7 +301,13 @@ func (c *cudaBackend) TrimLarge(maxKeepBytes int) {
 	}
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	C.fcuda_trim_pool_large(C.size_t(maxKeepBytes))
+	if status := int(C.fcuda_trim_pool_large_checked(C.size_t(maxKeepBytes))); status != 0 {
+		var cause error
+		if fault := c.faultLatch.Observe(DeviceFaultExecution, "trim-pool", status); fault != nil {
+			cause = fault
+		}
+		panic(&CUDAOpError{Op: "TrimLarge", Site: "trim-pool", Msg: "cached allocations retained after cleanup failure", Code: status, Err: cause})
+	}
 }
 
 // GraphBegin/GraphEndLaunch capture one token's op stream into a CUDA graph and replay it

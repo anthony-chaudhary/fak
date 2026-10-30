@@ -133,7 +133,7 @@ static uint64_t g_v41_compressor_completed = 0;
 // uncertainty must be visible before the allocation release fragments.
 static bool g_v41_router_uncertain = false;
 
-// Failed panel cleanup retains its first native error and all remaining
+// Failed checked allocator cleanup retains its first native error and all remaining
 // storage until process teardown; a later successful fence cannot clear it.
 static int g_cuda_cleanup_status = 0;
 

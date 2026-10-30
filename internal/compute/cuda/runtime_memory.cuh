@@ -405,15 +405,28 @@ extern "C" void fcuda_trim_pool_large(size_t max_keep_bytes) {
   if (v41_candidates_stream_uncertain()) return;
   for (auto it = g_pool.begin(); it != g_pool.end(); ) {
     if (it->first > max_keep_bytes) {
-      for (void *p : it->second) {
+      auto &bucket = it->second;
+      while (!bucket.empty()) {
+        void *p = bucket.back();
+        cudaError_t status = cudaFree(p);
+        if (status != cudaSuccess) {
+          g_cuda_cleanup_status = (int)status;
+          CK(status);
+          return;
+        }
         fak_alloc_untrack(p);
-        cudaFree(p);
+        bucket.pop_back();
       }
       it = g_pool.erase(it);
     } else {
       ++it;
     }
   }
+}
+extern "C" int fcuda_trim_pool_large_checked(size_t max_keep_bytes) {
+  fcuda_trim_pool_large(max_keep_bytes);
+  if (g_cuda_cleanup_status != 0) return g_cuda_cleanup_status;
+  return v41_candidates_stream_uncertain() ? (int)cudaErrorNotReady : 0;
 }
 extern "C" void fcuda_h2d(void *d, const void *h, size_t n) {
   fcuda_ts_untimed_transfer();

@@ -40,6 +40,9 @@ int fcuda_discard_unsubmitted(void *d, size_t expected_bytes);
  * no transient allocations; pooled free buffers are deliberately excluded. */
 size_t fcuda_live_allocations(void);
 void fcuda_trim_pool_large(size_t max_keep_bytes);
+/* Checked trim retains failed/remaining cache entries and their ledger records.
+ * Zero means completed; nonzero is a sticky cleanup error or uncertainty refusal. */
+int fcuda_trim_pool_large_checked(size_t max_keep_bytes);
 /* Prompt-panel scratch: a separate exact-size free list that fcuda_panel_release empties, so
  * panel-sized buffers never reach the decode pool. fcuda_malloc_panel returns NULL on failure
  * (no managed fallback); fcuda_panel_release returns the panel buffers still held. */
