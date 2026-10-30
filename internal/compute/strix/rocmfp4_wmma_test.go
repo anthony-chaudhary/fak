@@ -5,11 +5,12 @@ import (
 	"testing"
 )
 
-// TestROCmFP4OnTheFlyDequantWMMAEmitsFP4Opcode is the witness for issue #13003 Lane B:
-// the on-the-fly in-register FP4 dequant WMMA path. It proves (a) the emitted GFX1151
-// source carries a real v_wmma_f32_16x16x16_fp4 opcode with an in-register nibble-extract
-// and a gfx1151 target, and (b) the roofline entry point ROCmFP4CoopMatMulInto fails closed
-// with ErrNoFP4DeviceKernel when no device kernel is registered — never silently
+// TestROCmFP4OnTheFlyDequantWMMAEmitsFP4Opcode is the witness for issue #13003 Lane B
+// (corrected by #13542): the on-the-fly in-register FP4 dequant path. It proves (a) the
+// emitted GFX1151 source carries the real v_wmma_f32_16x16x16_f16 opcode fed by an
+// in-register E2M1 nibble-extract dequant (gfx11 has no native FP4 WMMA instruction),
+// with a gfx1151 target, and (b) the roofline entry point ROCmFP4CoopMatMulInto fails
+// closed with ErrNoFP4DeviceKernel when no device kernel is registered — never silently
 // dequantizing on the CPU.
 func TestROCmFP4OnTheFlyDequantWMMAEmitsFP4Opcode(t *testing.T) {
 	t.Run("emits_real_fp4_wmma_with_in_register_dequant", func(t *testing.T) {

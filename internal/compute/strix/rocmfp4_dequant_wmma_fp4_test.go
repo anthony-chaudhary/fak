@@ -16,11 +16,13 @@ func (f dequantWMMAFP4TestKernelFunc) CoopMatMulInto(t *ROCmFP4Tensor, v []float
 }
 
 // TestROCmFP4InRegisterDequantWMMAWitness is the witness for issue #13003's
-// on-the-fly FP4 in-register dequant path. It proves the DequantWMMAKernel emits a
-// real v_wmma_f32_16x16x16_fp4 opcode, that the embedded GFX1151 source actually
-// carries the instruction, that E2M1 in-register decode matches UnpackFP4Block32Into,
-// that the roofline entry point fails closed with a typed error when the device kernel
-// is absent, and that the bandwidth telemetry is labelled a model constant.
+// on-the-fly FP4 in-register dequant path (corrected by #13542). It proves the
+// DequantWMMAKernel emits the real v_wmma_f32_16x16x16_f16 opcode fed by an in-register
+// E2M1 nibble-extract dequant (gfx11 has no native FP4 WMMA instruction), that the
+// embedded GFX1151 source actually carries the instruction, that E2M1 in-register
+// decode matches UnpackFP4Block32Into, that the roofline entry point fails closed with
+// a typed error when the device kernel is absent, and that the bandwidth telemetry is
+// labelled a model constant.
 //
 // NOTE: the function is named ...Witness rather than the issue's suggested
 // TestROCmFP4OnTheFlyDequantWMMAEmitsFP4Opcode because a peer lane already declares
@@ -28,9 +30,11 @@ func (f dequantWMMAFP4TestKernelFunc) CoopMatMulInto(t *ROCmFP4Tensor, v []float
 // test funcs cannot compile. This file carries the stronger, directly-reachable
 // assertions the issue asked for.
 func TestROCmFP4InRegisterDequantWMMAWitness(t *testing.T) {
-	const fp4Opcode = "v_wmma_f32_16x16x16_fp4"
+	// emittedWMMAOpcode is the WMMA instruction the FP4 dequant path issues on gfx11:
+	// the f16 WMMA (E2M1 values are dequantized in VGPRs first; no FP4 form exists).
+	const emittedWMMAOpcode = "v_wmma_f32_16x16x16_f16"
 
-	// 1. An FP4-configured kernel reports the FP4 opcode via the typed accessors.
+	// 1. An FP4-configured kernel reports the emitted f16 WMMA opcode via the typed accessors.
 	t.Run("accessor_reports_fp4_opcode", func(t *testing.T) {
 		cfg := DefaultDequantWMMAConfig()
 		cfg.QuantType = QuantTypeFP4
@@ -41,8 +45,8 @@ func TestROCmFP4InRegisterDequantWMMAWitness(t *testing.T) {
 		if !kernel.EmitsFP4WMMAOpcode() {
 			t.Fatalf("EmitsFP4WMMAOpcode() = false, want true for QuantTypeFP4")
 		}
-		if got := kernel.FP4WMMAOpcode(); got != fp4Opcode {
-			t.Fatalf("FP4WMMAOpcode() = %q, want %q", got, fp4Opcode)
+		if got := kernel.FP4WMMAOpcode(); got != emittedWMMAOpcode {
+			t.Fatalf("FP4WMMAOpcode() = %q, want %q", got, emittedWMMAOpcode)
 		}
 	})
 
@@ -54,16 +58,16 @@ func TestROCmFP4InRegisterDequantWMMAWitness(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewDequantWMMAKernel: %v", err)
 		}
-		if got := kernel.InspectAssembly().WMMAOpcode; got != fp4Opcode {
-			t.Fatalf("InspectAssembly().WMMAOpcode = %q, want %q", got, fp4Opcode)
+		if got := kernel.InspectAssembly().WMMAOpcode; got != emittedWMMAOpcode {
+			t.Fatalf("InspectAssembly().WMMAOpcode = %q, want %q", got, emittedWMMAOpcode)
 		}
 	})
 
 	// 3. The embedded source really contains the instruction (not only a comment
 	// declaring it): at least one line carries the opcode as the first token.
 	t.Run("embedded_source_contains_real_instruction", func(t *testing.T) {
-		if !strings.Contains(GFX1151AssemblySource, fp4Opcode) {
-			t.Fatalf("GFX1151AssemblySource does not contain %q", fp4Opcode)
+		if !strings.Contains(GFX1151AssemblySource, emittedWMMAOpcode) {
+			t.Fatalf("GFX1151AssemblySource does not contain %q", emittedWMMAOpcode)
 		}
 		foundInstruction := false
 		for _, line := range strings.Split(GFX1151AssemblySource, "\n") {
@@ -75,13 +79,13 @@ func TestROCmFP4InRegisterDequantWMMAWitness(t *testing.T) {
 			if idx := strings.Index(code, ";"); idx >= 0 {
 				code = strings.TrimSpace(code[:idx])
 			}
-			if strings.HasPrefix(code, fp4Opcode) {
+			if strings.HasPrefix(code, emittedWMMAOpcode) {
 				foundInstruction = true
 				break
 			}
 		}
 		if !foundInstruction {
-			t.Fatalf("no non-comment assembly line begins with the instruction %q", fp4Opcode)
+			t.Fatalf("no non-comment assembly line begins with the instruction %q", emittedWMMAOpcode)
 		}
 	})
 

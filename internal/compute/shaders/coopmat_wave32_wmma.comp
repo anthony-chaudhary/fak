@@ -1,6 +1,7 @@
 #version 450
 
-// coopmat_wave32_wmma.comp — Wave32 16x16x16 (FP16/BF16) and 16x16x32 (INT8/FP8) WMMA cooperative matrix compute shader.
+// coopmat_wave32_wmma.comp — Wave32 16x16x16 (FP16/BF16/INT8/INT4) WMMA cooperative matrix compute shader.
+// gfx11 exposes only the 16x16x16 WMMA shape; wider K is accumulated in software across 16x16x16 steps.
 //
 // MIT License
 // Ported and adapted from Nathanw1014/strix-halo-llamacpp@45bec945
@@ -10,8 +11,9 @@
 // Attribution & Micro-Architectural Explanation:
 // AMD RDNA 3.5 (gfx1151 / AMD Strix Halo / Ryzen AI MAX+ 395 APU) features native Wave32
 // SIMD execution with hardware Wave Matrix Multiply-Accumulate (WMMA) instructions:
-//   - 16x16x16 tile primitive for FP16 and BF16.
-//   - 16x16x32 tile primitive for INT8, FP8, and INT4 (dual-issue throughput).
+//   - 16x16x16 tile primitive for FP16, BF16, INT8 (iu8), and INT4 (iu4).
+//     No 16x16x32, FP8, or FP4 WMMA shape exists on gfx11; wider K is accumulated
+//     in software as successive 16x16x16 multiply-accumulate steps.
 //
 // Key Optimizations:
 // 1. Workgroup Geometry & Wave Retiling:
@@ -58,10 +60,11 @@ layout(push_constant) uniform PushConstants {
 } pc;
 
 // Precision selection:
-// Defining WMMA_INT8 configures 16x16x32 INT8/FP8 WMMA dual-issue mode.
+// Defining WMMA_INT8 configures the 16x16x16 iu8 WMMA path (software K-chunk
+// accumulation; gfx11 has no 16x16x32 shape).
 // By default, 16x16x16 FP16/BF16 WMMA is selected.
 #ifdef WMMA_INT8
-const uint TILE_K = 32u;
+const uint TILE_K = 16u;
 #define ELEM_TYPE_A int8_t
 #define ELEM_TYPE_B int8_t
 #define ELEM_TYPE_C int

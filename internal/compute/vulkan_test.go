@@ -3182,7 +3182,8 @@ func TestStrixCoreParityEmitterContract(t *testing.T) {
 // TestVulkanWave32CoopMatValidation exercises the software validation contract
 // using synthetic properties and observations (#12187). It does not query a
 // physical device or witness hardware throughput:
-//  1. Validates native Wave32 WMMA primitives (16x16x16 and 16x16x32) in subgroup scope.
+//  1. Validates the native Wave32 WMMA primitive (16x16x16) in subgroup scope; gfx11 has
+//     no 16x16x32 shape, which is detected but never required (#13542).
 //  2. Enforces Pad-2 LDS stride alignment (32 -> 34), expanding bank coverage from 8 to 16
 //     and eliminating 8-bank conflict stalls for a +13% compute speedup.
 //  3. Verifies numerical bit-identity against CPU reference.
@@ -3212,8 +3213,8 @@ func TestVulkanWave32CoopMatValidation(t *testing.T) {
 	if !report.HasNative16x16x16 {
 		t.Errorf("report.HasNative16x16x16 = false, want true (16x16x16 WMMA)")
 	}
-	if !report.HasNative16x16x32 {
-		t.Errorf("report.HasNative16x16x32 = false, want true (16x16x32 dual-issue WMMA)")
+	if report.HasNative16x16x32 {
+		t.Errorf("report.HasNative16x16x32 = true, want false (gfx11 has no 16x16x32 WMMA shape, #13542)")
 	}
 	if report.SubgroupSize != 32 {
 		t.Errorf("report.SubgroupSize = %d, want 32 (Wave32)", report.SubgroupSize)
@@ -3293,13 +3294,16 @@ func TestVulkanWave32CoopMatValidation(t *testing.T) {
 		t.Errorf("ValidateVulkanWave32CoopMat should fail when 16x16x16 WMMA is missing")
 	}
 
-	// Fail-closed rejection: missing 16x16x32 dual-issue primitive
-	no16x16x32Props := props
-	no16x16x32Props.SupportedMatrices = []VulkanCooperativeMatrixProperties{
+	// gfx11's ISA has no 16x16x32 WMMA shape (#13542): a device advertising ONLY the
+	// 16x16x16 primitive validates cleanly — 16x16x32 is detected but never required.
+	only16x16x16Props := props
+	only16x16x16Props.SupportedMatrices = []VulkanCooperativeMatrixProperties{
 		{MSize: 16, NSize: 16, KSize: 16, Scope: VulkanScopeSubgroupKHR},
 	}
-	if _, err := ValidateVulkanWave32CoopMat(no16x16x32Props); err == nil {
-		t.Errorf("ValidateVulkanWave32CoopMat should fail when 16x16x32 dual-issue WMMA is missing")
+	if rep, err := ValidateVulkanWave32CoopMat(only16x16x16Props); err != nil {
+		t.Errorf("ValidateVulkanWave32CoopMat should accept a 16x16x16-only device: %v", err)
+	} else if rep.HasNative16x16x32 {
+		t.Errorf("rep.HasNative16x16x32 = true on a 16x16x16-only device, want false")
 	}
 
 	// Fail-closed rejection: non-subgroup scope

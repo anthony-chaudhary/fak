@@ -7,19 +7,20 @@ import (
 	"strings"
 )
 
-// ROCmFP4WMMAOpcode is the exact GFX1151 RDNA 3.5 instruction that performs a 16x16x16
-// FP4 (E2M1) matrix multiply-accumulate into an FP32 accumulator. It is the opcode the
-// emitted on-the-fly-dequant device kernel must carry to be a real device path; a program
-// that only issues the f16/bf16 variant cannot claim FP4 tensor throughput.
-const ROCmFP4WMMAOpcode = "v_wmma_f32_16x16x16_fp4"
+// ROCmFP4WMMAOpcode is the GFX1151 WMMA instruction the emitted on-the-fly-dequant FP4
+// kernel issues. gfx11 has no native FP4 WMMA instruction (the complete gfx11 WMMA set is
+// v_wmma_{f32,f16,bf16}_16x16x16_{f16,bf16} + v_wmma_i32_16x16x16_{iu8,iu4}), so the FP4
+// path dequantizes E2M1 in-register to f16 and feeds the f16 WMMA (#13542).
+const ROCmFP4WMMAOpcode = "v_wmma_f32_16x16x16_f16"
 
 // rocmFP4WMMASourceTemplate is the canonical GFX1151 Wave32 FP4 WMMA kernel SOURCE.
 //
 // It models AMD Strix Halo (gfx1151) with wavefront_size32, a 128-bit packed FP4 weight
 // stream, and IN-REGISTER on-the-fly E2M1 dequant: packed nibbles are split with
 // v_and_b32 0x0f0f0f0f / v_lshrrev_b32 4, converted and scaled at the WMMA operand, and
-// fed straight into the FP4 tensor core. There is NO intermediate LDS staging and NO
-// full-tensor FP32 expansion pass; the per-block FP16 scale folds in at the operand.
+// fed into the f16 WMMA tensor-core path (gfx11 has no native FP4 WMMA). There is NO
+// intermediate LDS staging and NO full-tensor FP32 expansion pass; the per-block FP16
+// scale folds in at the operand.
 //
 // [SW-VERIFIED] emission only: this source is asserted structurally (opcode present,
 // nibble extract present, gfx1151 target). A physical [HW-WITNESSED] TOPS number for
@@ -41,7 +42,7 @@ rocmfp4_wmma_dequant_wave32:
 		.amdhsa_reserve_flat_scratch 1
 		.amdhsa_private_segment_fixed_size 0
 	.end_amdhsa_kernel
-; GFX1151 Wave32 FP4 WMMA with on-the-fly in-register E2M1 dequant.
+; GFX1151 Wave32 FP4 dequant feeding the f16 WMMA (no native FP4 WMMA on gfx11).
 ; kernarg: 0x00 = Matrix A pointer (activations), 0x08 = packed FP4 (E2M1) weight pointer,
 ;         0x10 = per-block FP16 scale pointer, 0x18 = K iteration count.
 	s_load_b128 s[0:3], s[0:1], 0x00
@@ -74,8 +75,8 @@ rocmfp4_wmma_loop:
 	v_mul_f32 v24, v24, v12
 	v_mul_f32 v25, v25, v12
 	v_pack_b32_f16 v28, v24, v25
-	; FP4 tensor-core matrix multiply-accumulate with the dequantized operands.
-	v_wmma_f32_16x16x16_fp4 v[16:23], v[8:11], v[28:29], v[16:23]
+	; f16 WMMA matrix multiply-accumulate with the dequantized operands.
+	v_wmma_f32_16x16x16_f16 v[16:23], v[8:11], v[28:29], v[16:23]
 	s_add_i32 s5, s5, 16
 	s_cmp_lt_i32 s5, s4
 	s_cbranch_scc1 rocmfp4_wmma_loop
@@ -90,13 +91,15 @@ rocmfp4_wmma_loop:
 // callers and tests assert what a source text actually contains without re-parsing it by
 // ad-hoc substring checks.
 type ROCmFP4WMMAKernelInfo struct {
-	// Opcode is the FP4 WMMA opcode the source carries (ROCmFP4WMMAOpcode when present).
+	// Opcode is the WMMA opcode the source carries (ROCmFP4WMMAOpcode when present: the
+	// f16 WMMA the in-register E2M1 dequant feeds on gfx11).
 	Opcode string `json:"opcode"`
 	// TargetArch is the gfx target the .amdgcn_target directive names.
 	TargetArch string `json:"target_arch"`
 	// WavefrontSize is the declared wavefront size (32 for gfx1151 Wave32).
 	WavefrontSize int `json:"wavefront_size"`
-	// HasFP4WMMA is true when the literal FP4 WMMA opcode is present.
+	// HasFP4WMMA is true when the literal WMMA opcode (ROCmFP4WMMAOpcode) is present —
+	// on gfx11 that is the f16 WMMA the dequantized FP4 operands feed.
 	HasFP4WMMA bool `json:"has_fp4_wmma"`
 	// HasNibbleExtract is true when an in-register nibble-extract instruction is present.
 	HasNibbleExtract bool `json:"has_nibble_extract"`

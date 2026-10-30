@@ -197,10 +197,9 @@ main_fp4_wmma_loop:
     v_pack_b32_f16 v28, v24, v25
     v_pack_b32_f16 v29, v26, v27
 
-    // Issue Wave32 RDNA 3.5 FP4 WMMA Matrix Instruction:
-    // v_wmma_f32_16x16x16_fp4 accumulates D = A * B + C directly in-register with the
-    // on-the-fly in-register dequantized E2M1 block-32 operands.
-    v_wmma_f32_16x16x16_fp4 v[16:23], v[8:11], v[28:29], v[16:23]
+    // gfx11 has no native FP4 WMMA instruction: the in-register E2M1->f16 dequant above
+    // feeds the real f16 WMMA, which accumulates D = A * B + C directly in-register.
+    v_wmma_f32_16x16x16_f16 v[16:23], v[8:11], v[28:29], v[16:23]
 
     // Advance K iteration pointer by 16 columns (128-byte block step)
     s_sub_i32 s12, s12, 16

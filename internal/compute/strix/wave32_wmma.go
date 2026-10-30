@@ -32,7 +32,8 @@ const (
 	// DefaultTileK16 is the 16x16x16 WMMA primitive dimension (16).
 	DefaultTileK16 = 16
 
-	// DefaultTileK32 is the 16x16x32 WMMA primitive dimension (32).
+	// DefaultTileK32 is the software K accumulation chunk dimension (32): two 16x16x16
+	// hardware WMMA steps. gfx11 has no native 16x16x32 WMMA instruction (#13542).
 	DefaultTileK32 = 32
 
 	// MinThroughputGainPercent is the minimum required prefill throughput gain (7.0%).
@@ -71,7 +72,9 @@ func DefaultWave32WMMAConfig() Wave32WMMAConfig {
 	}
 }
 
-// Wave32WMMAConfig16x16x32 returns the 16x16x32 Wave32 WMMA configuration for Strix Halo.
+// Wave32WMMAConfig16x16x32 returns the software K-chunk (TileK=32) Wave32 WMMA
+// configuration for Strix Halo: two 16x16x16 hardware WMMA steps accumulated in
+// software. gfx11 has no native 16x16x32 WMMA instruction (#13542).
 func Wave32WMMAConfig16x16x32() Wave32WMMAConfig {
 	cfg := DefaultWave32WMMAConfig()
 	cfg.TileK = DefaultTileK32

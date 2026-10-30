@@ -15,8 +15,8 @@ import (
 // Every expected value in TestDeepSeek41PublishedHeaderAdmission comes from this
 // oracle, never from a constant transcribed into the test.
 type v41HFOracle struct {
-	BOSTokenID int `json:"bos_token_id"`
-	EOSTokenID int `json:"eos_token_id"`
+	BOSTokenID   int `json:"bos_token_id"`
+	EOSTokenID   int `json:"eos_token_id"`
 	Quantization struct {
 		QuantMethod     string `json:"quant_method"`
 		Activation      string `json:"activation_scheme"`
@@ -97,7 +97,7 @@ func TestDeepSeek41PublishedHeaderAdmission(t *testing.T) {
 
 	// ---- decoder / MoE / MLA flat axes vs the published oracle ---------------
 	for _, ax := range []struct {
-		name string
+		name      string
 		got, want any
 	}{
 		{"num_hidden_layers", cfg.NumLayers, orcl.Text.NumHiddenLayers},
@@ -124,7 +124,7 @@ func TestDeepSeek41PublishedHeaderAdmission(t *testing.T) {
 		}
 	}
 	for _, ax := range []struct {
-		name string
+		name      string
 		got, want float64
 	}{
 		{"routed_scaling_factor", cfg.RoutedScalingFactor, orcl.Text.RoutedScalingFactor},
@@ -172,7 +172,7 @@ func TestDeepSeek41PublishedHeaderAdmission(t *testing.T) {
 		t.Fatalf("envelope compress_ratios=%v, published oracle %v", d41.CompressRatios[:n], orcl.Text.CompressRatios[:n])
 	}
 	for _, ax := range []struct {
-		name string
+		name      string
 		got, want int
 	}{
 		{"candidate_source_layer_id", d41.CandidateSourceLayerID, orcl.Text.CandidateSourceLayerID},
@@ -193,7 +193,7 @@ func TestDeepSeek41PublishedHeaderAdmission(t *testing.T) {
 		t.Fatalf("engram layer ids %v, published oracle %v", eng.LayerIDs, orcl.Text.EngramLayerIDs)
 	}
 	for _, ax := range []struct {
-		name string
+		name      string
 		got, want int
 	}{
 		{"engram_max_ngram_size", eng.MaxNgramSize, orcl.Text.EngramMaxNgramSize},
