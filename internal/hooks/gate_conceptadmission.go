@@ -173,7 +173,10 @@ type admissionMeta struct {
 	} `json:"families"`
 }
 type admissionRows struct {
-	Rows []struct{ ID, Family, Grounding string } `json:"rows"`
+	Rows []struct {
+		ID, Family, Grounding, Canonical string
+		Aliases                          []string
+	} `json:"rows"`
 }
 
 func admissionToken(s string) string {
@@ -250,7 +253,17 @@ func gateConceptAdmission(d *StagedDiff) ([]Finding, error) {
 			continue
 		}
 		for _, r := range doc.Rows {
-			positioned[admissionToken(r.Family)+"\x00"+admissionToken(r.Grounding)] = true
+			family := admissionToken(r.Family)
+			if family == "" || admissionToken(r.Grounding) == "" {
+				continue
+			}
+			// The corpus positions each exact spelling, not just the grounding.
+			// Semantic and freshness gates still validate the row and its grounding.
+			for _, name := range append([]string{r.Grounding, r.Canonical}, r.Aliases...) {
+				if token := admissionToken(name); token != "" {
+					positioned[family+"\x00"+token] = true
+				}
+			}
 		}
 	}
 	type family struct {

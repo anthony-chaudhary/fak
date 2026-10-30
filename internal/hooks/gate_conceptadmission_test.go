@@ -110,6 +110,80 @@ func TestConceptAdmissionTreatmentsPass(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=20ms lane=default
+func TestConceptAdmissionPositionedSpellings(t *testing.T) {
+	for _, tc := range []struct {
+		name, token, family, grounding, canonical string
+		aliases                                   []string
+		admitted                                  bool
+	}{
+		{"grounding", "CacheGround", "cache", "CacheGround", "CacheConcept", []string{"CacheView"}, true},
+		{"canonical", "CacheConcept", "cache", "CacheGround", "CacheConcept", []string{"CacheView"}, true},
+		{"alias", "CacheView", "cache", "CacheGround", "CacheConcept", []string{"CacheView"}, true},
+		{"normalized alias", "CacheView", "cache", "CacheGround", "CacheConcept", []string{"cache-view"}, true},
+		{"unknown", "CacheAbsent", "cache", "CacheGround", "CacheConcept", []string{"CacheView"}, false},
+		{"superstring", "CacheViewExtra", "cache", "CacheGround", "CacheConcept", []string{"CacheView"}, false},
+		{"wrong family", "CacheView", "other", "CacheGround", "CacheConcept", []string{"CacheView"}, false},
+		{"qualified is not bare", "CacheView", "cache", "CacheGround", "CacheConcept", []string{"pkg.CacheView"}, false},
+		{"missing grounding", "CacheView", "cache", "", "CacheConcept", []string{"CacheView"}, false},
+	} {
+		for _, view := range []string{"index", "range"} {
+			t.Run(tc.name+"/"+view, func(t *testing.T) {
+				d := conceptAdmissionFixture(t, "const "+tc.token+" = 1", "", false)
+				const data = "tools/concept_disambiguation_scorecard.data/"
+				const shard = data + "rows-cache.json"
+				row := map[string]any{
+					"id": "cache-concept", "family": tc.family, "grounding": tc.grounding,
+					"canonical": tc.canonical, "aliases": tc.aliases,
+				}
+				rows, err := json.Marshal(map[string]any{"rows": []map[string]any{row}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				// A dirty worktree row would admit even the negative cases. Only the
+				// selected index/range bytes below may decide the gate.
+				dirty, err := json.Marshal(map[string]any{"rows": []map[string]any{{"family": "cache", "grounding": tc.token}}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(d.Root, filepath.FromSlash(shard)), dirty, 0600); err != nil {
+					t.Fatal(err)
+				}
+				d.Treeish = ":"
+				if view == "range" {
+					d.Treeish, d.baseTree = "tip:", "base"
+				}
+				d.IndexPaths = []string{shard}
+				d.run = func(_ context.Context, _ string, args ...string) (string, int, error) {
+					if len(args) >= 2 && args[0] == "show" {
+						switch args[1] {
+						case d.Treeish + data + "_meta.json":
+							return `{"families":[{"id":"cache","roots":["cache"]}]}`, 0, nil
+						case d.Treeish + shard:
+							return string(rows), 0, nil
+						}
+					}
+					if len(args) >= 2 && args[0] == "grep" && args[1] == "--cached" {
+						return shard + "\x00" + string(rows) + "\n", 0, nil
+					}
+					return "", 1, nil // No pre-existing symbol in the selected base.
+				}
+				got, err := gateConceptAdmission(d)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if tc.admitted {
+					if len(got) != 0 {
+						t.Fatalf("registered spelling refused: %+v", got)
+					}
+				} else if len(got) != 1 || conceptFindingToken(got[0].Detail) != tc.token {
+					t.Fatalf("want exact refusal for %q, got %+v", tc.token, got)
+				}
+			})
+		}
+	}
+}
+
 func TestConceptAdmissionRenameOrExistingUseIsNotAddition(t *testing.T) {
 	got, err := gateConceptAdmission(conceptAdmissionFixture(t, "const CacheBurst = 1", "", true))
 	if err != nil || len(got) != 0 {
