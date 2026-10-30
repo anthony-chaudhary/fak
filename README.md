@@ -101,6 +101,23 @@ measurement exists.
 Read the status column before comparing rates. History: [benchmark index](docs/benchmarks/README.md);
 claim boundaries: [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md).
 
+## Models fak has actually run — exact Hugging Face pins
+
+Every result above measured a pinned artifact, not "latest". The URLs below are the
+sources behind those receipts; `fak ls` aliases resolve to the same pins
+(`internal/modelreg`). Where a receipt records only a filename, the official model card
+is linked instead of an unrecorded mirror.
+
+| Model (artifact) | Pinned Hugging Face source | Witnessed on |
+|---|---|---|
+| Qwen3.8-27B Q4_K_M (`qwen38`, default) | [unsloth/Qwen3.8-27B-GGUF@f1bfb127](https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/tree/f1bfb127c64f7072bdd2cad55f258b9c8b2910fe) · [official Qwen/Qwen3.8-27B](https://huggingface.co/Qwen/Qwen3.8-27B) | Apple M3 Pro, Metal |
+| Qwen3.6-27B Q4_K_M | [lmstudio-community/Qwen3.6-27B-GGUF](https://huggingface.co/lmstudio-community/Qwen3.6-27B-GGUF) | AMD RX 7600, Vulkan |
+| Qwen2.5-3B-Instruct Q8_0 | [Qwen/Qwen2.5-3B-Instruct](https://huggingface.co/Qwen/Qwen2.5-3B-Instruct) (receipt records the Q8_0 GGUF filename only) | NVIDIA H100, CUDA |
+| DeepSeek-V4.1-Flash Q2_K (7 shards, 264,515,279,456 B) | [vcruz305/DeepSeek-V4.1-Flash-GGUF@c4a08554](https://huggingface.co/vcruz305/DeepSeek-V4.1-Flash-GGUF/tree/c4a085541cb53f67ee5e57b63d255e80cef286e7) · [official deepseek-ai/DeepSeek-V4.1-Flash](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash) | Strix Halo, Vulkan |
+| Qwen3.5-0.8B Q4_K_M | [Qwen/Qwen3.5-0.8B](https://huggingface.co/Qwen/Qwen3.5-0.8B) | Apple M3 Pro, Metal keepalive |
+| Prism Bonsai-2-27B PQ2_0 | [prism-ml/Ternary-Bonsai-2-27B-gguf@b072e1d3](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/tree/b072e1d3b35a0a630cece372c2127528e0994386) | Apple M3 Pro, CPU |
+| SmolLM2-135M-Instruct Q8_0 | [bartowski/SmolLM2-135M-Instruct-GGUF](https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF) | in-kernel bit-exact HF oracle fixture |
+
 ## Going deeper
 
 | If you want to… | Start here |
@@ -116,4 +133,4 @@ claim boundaries: [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md).
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-10-03 vs VERSION 0.55.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-09 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
+<!-- readme-verified: 2026-10-30 vs VERSION 0.55.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-09 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
