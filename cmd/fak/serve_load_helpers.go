@@ -63,7 +63,14 @@ func serveDenseKQuantOptions(backend compute.Backend) []ggufload.Q4KLoadOption {
 	if backend.Caps().DeviceMemory && backend.Caps().UploadDtype {
 		supports := func(dt compute.Dtype) bool { return compute.BackendSupportsDeviceWeightDtype(backend, dt) }
 		if types := ggufload.NativeIQResidentTypes(supports); len(types) > 0 {
-			opts = append(opts, ggufload.WithDenseIQResident(types...))
+			// The qwen35 raw-i-quant row routes (tiled GDN out_proj, native q/k and in-proj
+			// rows) need a backend that tiles the GDN core; without it (CUDA) the i-quants stay
+			// packed only where the tensor is identity-ordered, and the model admits the pairing.
+			if _, tiles := backend.(compute.Qwen35GDNTiledOutBackend); tiles {
+				opts = append(opts, ggufload.WithDenseIQResident(types...))
+			} else {
+				opts = append(opts, ggufload.WithDenseIQPacked(types...))
+			}
 		}
 	}
 	return opts

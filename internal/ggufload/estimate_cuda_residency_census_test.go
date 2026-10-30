@@ -8,17 +8,21 @@ import (
 
 // cudaServeCensusOptions is the option set cmd/fak serveDenseKQuantOptions resolves for the CUDA
 // backend today: dense k-quant residency off, packed Q2_K, Q3_K, Q5_K and Q6_K kept (declared CUDA matmul
-// dtypes with execution probes), and no i-quant type kept by this fixture.
+// dtypes with execution probes), and IQ4_XS kept packed-only (the one i-quant the CUDA matmul table
+// declares; CUDA does not tile the GDN core, so the qwen35 raw-row routes stay off). The Q3_K arm
+// is last so the slice-trimmed case below drops only that arm.
 func cudaServeCensusOptions() []Q4KLoadOption {
-	return []Q4KLoadOption{WithDenseKQuantResident(false), WithDenseQ2KResident(true), WithDenseQ6KResident(true), WithDenseQ5KResident(true), WithDenseQ3KResident(true)}
+	return []Q4KLoadOption{WithDenseKQuantResident(false), WithDenseQ2KResident(true), WithDenseQ6KResident(true), WithDenseQ5KResident(true), WithDenseIQPacked(TensorIQ4_XS), WithDenseQ3KResident(true)}
 }
 
 // TestEstimateQ4KLoadMemoryPlanCUDAServeResidencyPerType pins the per-type device representation
 // behind the Qwen3.8-27B UD-Q4_K_M refusal (29.365 GiB planned for a 15.32 GiB payload): Q4_K
-// Q3_K and Q5_K matmuls stay packed, the Q4_K token table expands to f32, and IQ4_XS and Q8_0
-// matmuls are re-quantized to native Q8 at 1.125 B/weight. A change that keeps one more type packed
-// must update this table on purpose. Without the Q3_K arm the Q3_K FFN layer joins the Q8 row
-// (the real file's 7 Q3_K FFN tensors: 701,890,560 B as Q8 vs 268,083,200 B packed).
+// Q3_K and Q5_K matmuls stay packed, the Q4_K token table expands to f32, identity-ordered IQ4_XS
+// matmuls stay packed at 136 B per 256 weights (was native Q8: on the real file 10,080,092,160 ->
+// 5,563,187,200 B for IQ4_XS), and Q8_0 matmuls are re-quantized to native Q8 at 1.125 B/weight. A
+// change that keeps one more type packed must update this table on purpose. Without the Q3_K arm
+// the Q3_K FFN layer joins the Q8 row (the real file's 7 Q3_K FFN tensors: 701,890,560 B as Q8 vs
+// 268,083,200 B packed).
 // fak-test:runtime fast est=10ms lane=default
 func TestEstimateQ4KLoadMemoryPlanCUDAServeResidencyPerType(t *testing.T) {
 	f := &File{
@@ -56,6 +60,7 @@ func TestEstimateQ4KLoadMemoryPlanCUDAServeResidencyPerType(t *testing.T) {
 		q6Packed = 8 * 210
 		q3Packed = 256 * 110
 		q5Packed = 256 * 176
+		iq4XS    = 256 * 136
 	)
 	cases := []struct {
 		name string
@@ -64,15 +69,17 @@ func TestEstimateQ4KLoadMemoryPlanCUDAServeResidencyPerType(t *testing.T) {
 	}{
 		{name: "cuda-serve", opts: cudaServeCensusOptions(), want: map[string]int64{
 			compute.F32.String():   embedF32 + normsF32,
-			"native-q8-f32-scales": 2 * q8, // IQ4_XS + Q8_0
+			"native-q8-f32-scales": q8, // Q8_0 only; IQ4_XS stays packed
+			"iq4_xs":               iq4XS,
 			"q3_k":                 q3Packed,
 			"q4_k":                 q4Packed,
 			"q5_k":                 q5Packed,
 			"q6_k":                 q6Packed,
 		}},
-		{name: "no-q3k-arm", opts: cudaServeCensusOptions()[:4], want: map[string]int64{
+		{name: "no-q3k-arm", opts: cudaServeCensusOptions()[:5], want: map[string]int64{
 			compute.F32.String():   embedF32 + normsF32,
-			"native-q8-f32-scales": 3 * q8, // IQ4_XS + Q8_0 + Q3_K
+			"native-q8-f32-scales": 2 * q8, // Q8_0 + Q3_K
+			"iq4_xs":               iq4XS,
 			"q4_k":                 q4Packed,
 			"q5_k":                 q5Packed,
 			"q6_k":                 q6Packed,
@@ -105,5 +112,38 @@ func censusPlanByDType(t *testing.T, ws *WeightSource, opts []Q4KLoadOption, wan
 		if got[dtype] != bytes {
 			t.Errorf("%s = %d bytes, want %d", dtype, got[dtype], bytes)
 		}
+	}
+}
+
+// TestDenseIQPackedKeepsQwen35RawRowRoutesOff pins the packed-only i-quant arm the CUDA serve
+// path uses: it retains identity-ordered IQ4_XS exactly like WithDenseIQResident, but never
+// admits the tiled GDN out_proj or the native q/k / GDN in-proj rows, which need a backend that
+// tiles the GDN core (compute.Qwen35GDNTiledOutBackend); those tensors keep the Q8 route.
+// fak-test:runtime fast est=10ms lane=default
+func TestDenseIQPackedKeepsQwen35RawRowRoutesOff(t *testing.T) {
+	cfg := nativeRowsTestCfg(true)
+	shape := []int{256, 256}
+	packed := probeQ4KLoadOptions([]Q4KLoadOption{WithDenseKQuantResident(false), WithDenseIQPacked(TensorIQ4_XS)})
+	rows := probeQ4KLoadOptions([]Q4KLoadOption{WithDenseKQuantResident(false), WithDenseIQResident(TensorIQ4_XS)})
+	for _, tc := range []struct {
+		name string
+		o    q4kLoadOptions
+		want bool
+	}{{"packed-only", packed, false}, {"row-routes", rows, true}} {
+		if !denseKQuantRetained(tc.o, TensorIQ4_XS) || denseKQuantRetained(tc.o, TensorIQ4_NL) {
+			t.Errorf("%s: retained IQ4_XS=%v IQ4_NL=%v, want true/false", tc.name,
+				denseKQuantRetained(tc.o, TensorIQ4_XS), denseKQuantRetained(tc.o, TensorIQ4_NL))
+		}
+		out := "model.layers.0.linear_attn.out_proj.weight"
+		if got := qwen35TiledOutProjResident(cfg, out, TensorIQ4_XS, shape, tc.o); got != tc.want {
+			t.Errorf("%s: tiled out_proj = %v, want %v", tc.name, got, tc.want)
+		}
+		if got := qwen35TiledOutProjResident(cfg, out, TensorQ4_K, shape, tc.o); got != tc.want {
+			t.Errorf("%s: tiled Q4_K out_proj = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	effects := ApplyQ4KLoadOptions([]Q4KLoadOption{WithDenseIQPacked(TensorIQ4_XS)})
+	if effects.DenseIQRowRouteTypes != "" || effects.DenseIQPackedTypes != TensorIQ4_XS.String() {
+		t.Errorf("effects row-route=%q packed=%q, want \"\"/%q", effects.DenseIQRowRouteTypes, effects.DenseIQPackedTypes, TensorIQ4_XS.String())
 	}
 }

@@ -166,6 +166,14 @@ func (b serveGDNTestBackend) SupportsDeviceWeightDtype(dt compute.Dtype) bool {
 	return false
 }
 
+// gdnTiledTestBackend adds the whole-operation GDN decode capability that real Vulkan has, so the
+// non-CUDA control keeps the qwen35 raw-row routes the loader pairs with a tiling backend.
+type gdnTiledTestBackend struct{ serveGDNTestBackend }
+
+func (gdnTiledTestBackend) Qwen35GDNDecodeTiledOut(_, _, _, _, _, _, _, _, _, _, _, _ compute.Tensor, _, _, _, _, _ int, _ float32) (compute.Tensor, compute.Tensor, compute.Tensor, error) {
+	return compute.Tensor{}, compute.Tensor{}, compute.Tensor{}, nil
+}
+
 // fak-test:runtime fast est=100ms lane=default
 func TestServeCUDAGDNLoaderKeepsSupportedWeights(t *testing.T) {
 	for _, key := range []string{"FAK_QWEN35_NATIVE_QK_ROWS", "FAK_QWEN35_NATIVE_GDN_INPROJ_ROWS", "FAK_QWEN35_NATIVE_SSM_OUT"} {
@@ -220,7 +228,11 @@ func TestServeCUDAGDNLoaderKeepsSupportedWeights(t *testing.T) {
 	}
 	for _, name := range []string{"cuda", "vulkan"} {
 		t.Run(name, func(t *testing.T) {
-			backend := serveGDNTestBackend{Backend: compute.Default(), name: name}
+			base := serveGDNTestBackend{Backend: compute.Default(), name: name}
+			var backend compute.Backend = base
+			if name == "vulkan" {
+				backend = gdnTiledTestBackend{base}
+			}
 			ws, err := ggufload.NewWeightSource(file, bytes.NewReader(payload.Bytes()), int64(payload.Len()))
 			if err != nil {
 				t.Fatal(err)
@@ -246,7 +258,7 @@ func TestServeCUDAGDNLoaderKeepsSupportedWeights(t *testing.T) {
 				t.Errorf("tiled GDN out = %v, want %v", got, want)
 			}
 			const iq = "model.layers.0.mlp.gate_proj.weight"
-			if !m.HasKQuant(iq) || m.HasQ8(iq) || !backend.SupportsDeviceWeightDtype(compute.IQ2_XXS) {
+			if !m.HasKQuant(iq) || m.HasQ8(iq) || !base.SupportsDeviceWeightDtype(compute.IQ2_XXS) {
 				t.Error("independent IQ projection/capability must remain packed and enabled")
 			}
 		})
@@ -296,6 +308,42 @@ func TestServeDenseKQuantOptionsRetainQ3KOnlyWithDtypeAndProbe(t *testing.T) {
 			}
 			if effects.DenseKQuantResident || effects.DenseQ2KResident || effects.DenseQ6KResident {
 				t.Fatalf("Q3_K admission changed other residency: %+v", effects)
+			}
+		})
+	}
+}
+
+type iqCapBackend struct{ q6kCapBackend }
+
+func (b iqCapBackend) SupportsDeviceWeightDtype(dt compute.Dtype) bool { return dt == compute.IQ4_XS }
+
+type iqTilingCapBackend struct{ iqCapBackend }
+
+func (iqTilingCapBackend) Qwen35GDNDecodeTiledOut(_, _, _, _, _, _, _, _, _, _, _, _ compute.Tensor, _, _, _, _, _ int, _ float32) (compute.Tensor, compute.Tensor, compute.Tensor, error) {
+	return compute.Tensor{}, compute.Tensor{}, compute.Tensor{}, nil
+}
+
+// TestServeDenseKQuantOptionsIQPackedOnlyWithoutGDNTiling pins the i-quant arm choice: a device
+// backend that declares a native i-quant matmul keeps it packed, and only a backend that can
+// tile the GDN core (compute.Qwen35GDNTiledOutBackend, Vulkan) also gets the qwen35 raw-row
+// routes; CUDA, which cannot, must not, or the model refuses the tiled out_proj at admission.
+// fak-test:runtime fast est=10ms lane=default
+func TestServeDenseKQuantOptionsIQPackedOnlyWithoutGDNTiling(t *testing.T) {
+	base := q6kCapBackend{Backend: compute.Default(), deviceMemory: true, uploadDtype: true}
+	cases := []struct {
+		name            string
+		backend         compute.Backend
+		wantRows, wantP string
+	}{
+		{"no-tiling", iqCapBackend{base}, "", ggufload.TensorIQ4_XS.String()},
+		{"tiling", iqTilingCapBackend{iqCapBackend{base}}, ggufload.TensorIQ4_XS.String(), ""},
+		{"no-iq-kernel", base, "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			effects := ggufload.ApplyQ4KLoadOptions(serveDenseKQuantOptions(tc.backend))
+			if effects.DenseIQRowRouteTypes != tc.wantRows || effects.DenseIQPackedTypes != tc.wantP {
+				t.Fatalf("row-route=%q packed=%q, want %q/%q", effects.DenseIQRowRouteTypes, effects.DenseIQPackedTypes, tc.wantRows, tc.wantP)
 			}
 		})
 	}

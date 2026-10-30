@@ -1135,6 +1135,25 @@ Fak adds the BF16 rounding of gate/up and of the weighted product and the two fa
 ds4 copyright and permission notice is reproduced under "antirez/ds4 (DwarfStar) V4 Flash CUDA
 kernels" above.
 
+## llama.cpp IQ4_XS resident GEMV
+
+The resident CUDA IQ4_XS matrix multiply, `internal/compute/cuda/iq4xs_mmvq.cuh`, adapts the
+`block_iq4_xs` layout and `kvalues_iq4nl` table (`ggml/src/ggml-common.h`), the portable
+`get_int_from_table_16`, `VDR_IQ4_XS_Q8_1_MMVQ` and `vec_dot_iq4_xs_q8_1`
+(`ggml/src/ggml-cuda/vecdotq.cuh`), the IQ4_XS instantiation of `mul_mat_vec_q` with its NVIDIA
+generic parameter rows (`mmvq.cu`) and the per-thread split of `dequantize_block_iq4_xs`
+(`convert.cu`), at llama.cpp revision `571d0d540df04f25298d0e159e520d9fc62ed121`:
+https://github.com/ggml-org/llama.cpp/tree/571d0d540df04f25298d0e159e520d9fc62ed121/ggml/src/ggml-cuda
+
+Changed for Fak: only IQ4_XS; an f32-activation warp-per-row GEMV using the dequantize split;
+one to three activation columns per MMVQ launch (the opt-in decode arm); prompt panels of 32+
+rows decode into fp16 hi/lo halves for Fak's compensated tensor-core GEMM; no fusion, MoE ids,
+channel or sample broadcast; the second row of a two-row block clamps its weight read; the q8_1
+scratch is a persistent buffer, and the q8_1 quantizer is the one already ported for Q4_K. No
+upstream runtime is included. The upstream license is the MIT License reproduced under "llama.cpp
+Q4_K MMQ prompt-panel GEMM" above (Copyright (c) 2023-2026 The ggml authors).
+
+
 ## NVIDIA cuBLASLt FP8 sample
 
 The experimental Q4_K FP8 arm in `internal/compute/cuda/q4k_fp8lt.cuh` adapts the

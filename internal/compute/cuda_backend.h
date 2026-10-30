@@ -529,6 +529,16 @@ void fcuda_iq2xs_gemv(const uint8_t *dW, const float *dX, float *dY, int out, in
  * and IQ4_NL (eight 18 B / 32 blocks = 144 B / 256) weights (cuda/iq_gemv.cuh, llama.cpp @571d0d54). */
 void fcuda_iq1m_gemv(const uint8_t *dW, const float *dX, float *dY, int out, int in, int P);
 void fcuda_iq4nl_gemv(const uint8_t *dW, const float *dX, float *dY, int out, int in, int P);
+/* fcuda_iq4xs_matmul_f32: Y[P,out] = X[P,in] @ W[out,in]^T where W is resident verbatim llama.cpp
+ * IQ4_XS (136 B / 256: f16 d, u16 scales_h, scales_l[4], qs[128]). P < 32 runs the f32 warp-per-row
+ * GEMV, or for P <= 3 with the mmvq decode arm (fcuda_set_q4k_decode_arm(1)) llama.cpp's q8_1 DP4A
+ * MMVQ; P >= 32 decodes into fp16 hi/lo halves and runs the compensated fp16 GEMM
+ * (cuda/iq4xs_mmvq.cuh, llama.cpp @571d0d54). Returns 0, cudaErrorInvalidValue for refused operands,
+ * 80001 (scratch miss), or 80002/83000+ (fp16 split scratch); nothing is launched on a refusal. */
+int fcuda_iq4xs_matmul_f32(const uint8_t *dW, const float *dX, float *dY, int out, int in, int P);
+/* Launch counters for the IQ4_XS MMVQ and dequant-GEMM arms (parity witness). */
+unsigned long long fcuda_iq4xs_mmvq_launch_count(void);
+unsigned long long fcuda_iq4xs_dequant_gemm_launch_count(void);
 
 /* per-row RMSNorm: y[r,:] = x[r,:] * rsqrt(mean(x[r,:]^2) + eps) * w[:]  (rows x n). */
 void fcuda_rmsnorm_f32(const float *dX, const float *dW, float *dY, int rows, int n, float eps);
