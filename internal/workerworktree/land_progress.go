@@ -1,6 +1,7 @@
 package workerworktree
 
 import (
+	"runtime"
 	"strings"
 	"time"
 )
@@ -40,31 +41,50 @@ type PatchScopeFiles int
 type PatchScopeBytes int64
 
 // LandCostReceipt is the terminal cost attribution for one Land call.
-// ResourceState explains whether this platform exposed process CPU and peak RSS.
+// ResourceState describes the existing self metrics, independently of child
+// availability. Scopes distinguish interval CPU from process-lifetime peak RSS.
 type LandCostReceipt struct {
-	Schema          string          `json:"schema"`
-	WallTimeMS      int64           `json:"wall_time_ms"`
-	CPUTimeMS       *int64          `json:"cpu_time_ms,omitempty"`
-	PeakRSSBytes    *int64          `json:"peak_rss_bytes,omitempty"`
-	ResourceState   string          `json:"resource_state"`
-	ResourceReason  string          `json:"resource_reason,omitempty"`
-	PatchScopeFiles PatchScopeFiles `json:"patch_scope_files"`
-	PatchScopeBytes PatchScopeBytes `json:"patch_scope_bytes"`
-	CacheState      string          `json:"cache_state"`
-	Reused          bool            `json:"reused"`
-	SlowestPhase    string          `json:"slowest_phase,omitempty"`
-	SlowestPhaseMS  int64           `json:"slowest_phase_ms"`
-	PhaseTotalMS    int64           `json:"phase_total_ms"`
-	UnattributedMS  int64           `json:"unattributed_ms"`
-	Phases          []LandPhaseCost `json:"phases"`
+	Schema         string `json:"schema"`
+	WallTimeMS     int64  `json:"wall_time_ms"`
+	CPUTimeMS      *int64 `json:"cpu_time_ms,omitempty"`
+	PeakRSSBytes   *int64 `json:"peak_rss_bytes,omitempty"`
+	CPUTimeScope   string `json:"cpu_time_scope"`
+	PeakRSSScope   string `json:"peak_rss_scope"`
+	ResourceState  string `json:"resource_state"`
+	ResourceReason string `json:"resource_reason,omitempty"`
+	// Child CPU is process-wide accounting accrued by waits during Land. A
+	// child can have executed before Land began; only recursively waited
+	// descendants contribute. These are not lane-owned-family measurements.
+	ChildCPUTimeMS    *int64 `json:"child_cpu_time_ms,omitempty"`
+	ChildCPUTimeScope string `json:"child_cpu_time_scope"`
+	// Child RSS is the process-lifetime largest waited child, not a delta and
+	// never the simultaneous peak of the process tree.
+	ChildPeakRSSBytes   *int64          `json:"child_peak_rss_bytes,omitempty"`
+	ChildPeakRSSScope   string          `json:"child_peak_rss_scope"`
+	ChildResourceState  string          `json:"child_resource_state"`
+	ChildResourceReason string          `json:"child_resource_reason,omitempty"`
+	PatchScopeFiles     PatchScopeFiles `json:"patch_scope_files"`
+	PatchScopeBytes     PatchScopeBytes `json:"patch_scope_bytes"`
+	CacheState          string          `json:"cache_state"`
+	Reused              bool            `json:"reused"`
+	SlowestPhase        string          `json:"slowest_phase,omitempty"`
+	SlowestPhaseMS      int64           `json:"slowest_phase_ms"`
+	PhaseTotalMS        int64           `json:"phase_total_ms"`
+	UnattributedMS      int64           `json:"unattributed_ms"`
+	Phases              []LandPhaseCost `json:"phases"`
 }
 
 type landResourceSample struct {
-	cpuTime      time.Duration
-	peakRSSBytes int64
-	cpuAvailable bool
-	rssAvailable bool
-	reason       string
+	cpuTime           time.Duration
+	peakRSSBytes      int64
+	cpuAvailable      bool
+	rssAvailable      bool
+	reason            string
+	childCPUTime      time.Duration
+	childPeakRSSBytes int64
+	childCPUAvailable bool
+	childRSSAvailable bool
+	childReason       string
 }
 
 type landPhase struct {
@@ -149,6 +169,9 @@ func (t *landProgressTracker) receipt() *LandCostReceipt {
 	wall := elapsedMillis(t.started, finished)
 	receipt := &LandCostReceipt{
 		Schema: landCostSchema, WallTimeMS: wall,
+		CPUTimeScope: "process-self-execution-during-land", PeakRSSScope: "process-self-lifetime-maximum",
+		ChildCPUTimeScope: "process-waited-children-cpu-accrued-during-land",
+		ChildPeakRSSScope: "process-largest-waited-child-lifetime-maximum", ChildResourceState: "unavailable",
 		ResourceState: "unavailable", PatchScopeFiles: PatchScopeFiles(t.patchScopeFiles), PatchScopeBytes: PatchScopeBytes(t.patchScopeBytes),
 		CacheState: t.cacheState, Reused: t.reused, Phases: append([]LandPhaseCost(nil), t.phases...),
 	}
@@ -173,6 +196,35 @@ func (t *landProgressTracker) receipt() *LandCostReceipt {
 		receipt.ResourceReason = endResources.reason
 	} else if t.resourceStart.reason != "" {
 		receipt.ResourceReason = t.resourceStart.reason
+	}
+	childCPUAvailable := t.resourceStart.childCPUAvailable && endResources.childCPUAvailable
+	if childCPUAvailable {
+		childCPU := (endResources.childCPUTime - t.resourceStart.childCPUTime).Milliseconds()
+		receipt.ChildCPUTimeMS = &childCPU
+	}
+	if endResources.childRSSAvailable {
+		childPeakRSS := endResources.childPeakRSSBytes
+		receipt.ChildPeakRSSBytes = &childPeakRSS
+	}
+	switch {
+	case childCPUAvailable && endResources.childRSSAvailable:
+		receipt.ChildResourceState = "available"
+	case childCPUAvailable || endResources.childRSSAvailable:
+		receipt.ChildResourceState = "partial"
+	}
+	if receipt.ChildResourceState != "available" {
+		switch {
+		case endResources.childReason != "":
+			receipt.ChildResourceReason = endResources.childReason
+		case t.resourceStart.childReason != "":
+			receipt.ChildResourceReason = t.resourceStart.childReason
+		case runtime.GOOS != "linux":
+			receipt.ChildResourceReason = "waited-child resource sampling is unsupported on " + runtime.GOOS
+		case !endResources.childCPUAvailable || !endResources.childRSSAvailable:
+			receipt.ChildResourceReason = "waited-child resources were not observed at interval end"
+		default:
+			receipt.ChildResourceReason = "waited-child CPU was not observed at interval start"
+		}
 	}
 	for _, phase := range receipt.Phases {
 		receipt.PhaseTotalMS += phase.ElapsedMS
