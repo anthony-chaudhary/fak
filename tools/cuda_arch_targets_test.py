@@ -11,13 +11,15 @@ def _minor(version: str) -> tuple[int, int]:
 
 def test_blackwell_arches_are_first_class_single_arch_targets():
     arches = (ROOT / "internal/compute/cuda_arch.txt").read_text().split()
-    assert "sm_100" in arches
-    assert "sm_120" in arches
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-    assert "cuda-build-sm100:" in makefile
-    assert "FAK_CUDA_ARCH=sm_100 bash internal/compute/build_cuda.sh build" in makefile
-    assert "cuda-build-sm120:" in makefile
-    assert "FAK_CUDA_ARCH=sm_120 bash internal/compute/build_cuda.sh build" in makefile
+    assert "\nCUDA_BUILD ?= $(GO) run ./cmd/fak-dev build-cuda\n" in makefile
+    # Native dispatch must bind each explicit architecture to its own target;
+    # matching an option elsewhere in the Makefile would hide a wrong-arch build.
+    for arch in ("sm_100", "sm_103", "sm_120"):
+        assert arch in arches, f"{arch} missing from declared CUDA architectures"
+        target = f"cuda-build-{arch.replace('_', '')}"
+        recipe = f"\n{target}:\n\t$(CUDA_BUILD) build --arch={arch} $(CUDA_BUILD_FLAGS)\n"
+        assert recipe in makefile, f"{target} must dispatch --arch={arch} through CUDA_BUILD"
 
 
 def test_build_entry_points_validate_the_declared_arch_set():
