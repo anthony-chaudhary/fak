@@ -15,7 +15,10 @@ type backendExecutionScope struct {
 	owner    *sync.Mutex
 	sessions []*Session
 	after    []func()
-	live     bool
+	// drains run while the domain is still held, before any binding is invalidated; they settle
+	// device work issued under this lease that may not outlive it (in-flight ring transfers).
+	drains []func()
+	live   bool
 }
 
 func backendExecutionOwner(be compute.Backend) *sync.Mutex {
@@ -71,6 +74,15 @@ func (scope *backendExecutionScope) bind(s *Session) {
 	}
 	s.backendExecutionScope = scope
 	scope.sessions = append(scope.sessions, s)
+}
+
+// beforeRelease queues f to run inside this lease, ahead of release. A drain panic is collected
+// like a retirement panic and never replaces the primary failure; every drain is attempted.
+func (scope *backendExecutionScope) beforeRelease(f func()) {
+	if scope == nil || !scope.live {
+		panic("model: drain queued on expired execution scope")
+	}
+	scope.drains = append(scope.drains, f)
 }
 
 func (scope *backendExecutionScope) afterRelease(f func()) {
@@ -141,6 +153,11 @@ func (scope *backendExecutionScope) releaseCleanup(primary any) (cleanup backend
 		}
 		panic("model: execution scope released twice")
 	}
+	drains := scope.drains
+	scope.drains = nil
+	for _, f := range drains {
+		scope.runCleanup(&cleanup, f)
+	}
 	scope.live = false
 	for _, s := range scope.sessions {
 		s.backendExecutionScope = nil
@@ -150,26 +167,30 @@ func (scope *backendExecutionScope) releaseCleanup(primary any) (cleanup backend
 	scope.after = nil
 	scope.owner.Unlock()
 	for _, f := range after {
-		func() {
-			completed := false
-			defer func() {
-				r := recover()
-				if !completed && !cleanup.present {
-					cleanup.value, cleanup.present = r, true
-				}
-				if r != nil && cleanup.legacyValue == nil {
-					cleanup.legacyValue = r
-				}
-			}()
-			f()
-			completed = true
-		}()
+		scope.runCleanup(&cleanup, f)
 	}
 	if primary != nil {
 		panic(primary)
 	}
 	// Goexit does not return through the callback boundary or publish an outcome.
 	return cleanup
+}
+
+// runCleanup runs one drain or retirement, recording the first panic (including panic(nil)) and the
+// first nonnil payload into cleanup with the established precedence.
+func (*backendExecutionScope) runCleanup(cleanup *backendCleanupPanic, f func()) {
+	completed := false
+	defer func() {
+		r := recover()
+		if !completed && !cleanup.present {
+			cleanup.value, cleanup.present = r, true
+		}
+		if r != nil && cleanup.legacyValue == nil {
+			cleanup.legacyValue = r
+		}
+	}()
+	f()
+	completed = true
 }
 
 // closeBackendOwned is used only by selected-operation error paths inside an
