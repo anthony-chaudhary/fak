@@ -2,14 +2,13 @@ package gateway
 
 import (
 	"context"
-	"encoding/json"
 	"math"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/dosdecision"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/pkg/remotemaint"
 )
@@ -28,29 +27,25 @@ func maintenanceWorkspaceAdmission(ctx context.Context, grant remotemaint.Grant)
 	}
 	readCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(readCtx, "dos", "lease-lane", "live")
-	cmd.Dir = canonical
-	raw, err := cmd.Output()
+	// The live-plane subprocess lives in dosdecision so this Adjudicator
+	// package stays os/exec-free; any read fault maps to the same fail-closed
+	// refusal.
+	liveRows, err := dosdecision.ReadLiveRows(readCtx, canonical)
 	if err != nil {
 		return maintenanceWorkspaceReadRefusal()
 	}
-	var rows []struct {
-		Tree []string `json:"tree"`
-	}
-	if err := json.Unmarshal(raw, &rows); err != nil || rows == nil {
-		return maintenanceWorkspaceReadRefusal()
-	}
-	leases := make([]adjudicateClassifiedLease, 0, len(rows))
-	for _, row := range rows {
-		if len(row.Tree) == 0 {
+	leases := make([]adjudicateClassifiedLease, 0, len(liveRows))
+	for _, row := range liveRows {
+		trees := row.Tree
+		if len(trees) == 0 {
 			return maintenanceWorkspaceReadRefusal()
 		}
-		for _, tree := range row.Tree {
+		for _, tree := range trees {
 			if strings.TrimSpace(tree) == "" {
 				return maintenanceWorkspaceReadRefusal()
 			}
 		}
-		leases = append(leases, adjudicateClassifiedLease{TreeGlobs: row.Tree})
+		leases = append(leases, adjudicateClassifiedLease{TreeGlobs: trees})
 	}
 	// StrictSnapshot rejects missing/corrupt blobs rather than dropping unknown
 	// peers. Validate row semantics before expiry filtering: an invalid clock or
