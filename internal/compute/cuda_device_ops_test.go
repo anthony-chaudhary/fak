@@ -1,6 +1,11 @@
 package compute
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 // fak-test:runtime fast est=10ms lane=default
 func TestCUDADeviceOpDeclaration(t *testing.T) {
@@ -15,6 +20,10 @@ func TestCUDADeviceOpDeclaration(t *testing.T) {
 		{"matmul", "q6_k"}:                            {},
 		{"matmul", "q2_0"}:                            {},
 		{"matmul", "q3_k"}:                            {},
+		{"matmul", "iq2_xxs"}:                         {},
+		{"matmul", "iq2_xs"}:                          {},
+		{"matmul", "iq1_m"}:                           {},
+		{"matmul", "iq4_nl"}:                          {},
 		{"matmul", "q2_k"}:                            {},
 		{"matmul", "nvfp4"}:                           {},
 		{"routed-expert-gemv", "F8_E4M3+F8_E8M0"}:     {},
@@ -43,7 +52,7 @@ func TestCUDADeviceOpDeclaration(t *testing.T) {
 		dt := Dtype(value)
 		want := false
 		switch dt {
-		case F32, F16, Q8_0, Q4_K, Q5_K, Q6_K, Q2_0, Q2_K, Q3_K, NVFP4:
+		case F32, F16, Q8_0, Q4_K, Q5_K, Q6_K, Q2_0, Q2_K, Q3_K, IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL, NVFP4:
 			want = true
 		default:
 			// every other dtype, named or not, has no shared CUDA matmul declaration
@@ -103,5 +112,54 @@ func TestCUDADeviceOpDeclaration(t *testing.T) {
 	table[0].Format = "mutated"
 	if !CUDADeviceOpSupported(CUDADeviceOpTable(), "matmul", "f32", "sm_120") || !cudaDeviceWeightDtypeSupported(F32) {
 		t.Fatal("caller mutated the shared declaration")
+	}
+}
+
+// cudaDeclaredWeightProbe exercises the production consumer without fabricating
+// a device. The source binding below pins CUDA's method to this same predicate.
+type cudaDeclaredWeightProbe struct{ Backend }
+
+func (cudaDeclaredWeightProbe) SupportsDeviceWeightDtype(dt Dtype) bool {
+	return cudaDeviceWeightDtypeSupported(dt)
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestCUDAIQWeightCapability(t *testing.T) {
+	t.Parallel()
+	be := cudaDeclaredWeightProbe{Default()}
+	// The concrete CPU backend advertises its real packed kernels; hide optional
+	// interfaces to witness a backend that makes no dtype capability promise.
+	unadvertised := struct{ Backend }{Default()}
+	for _, dt := range []Dtype{IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL} {
+		if !BackendSupportsDeviceWeightDtype(be, dt) {
+			t.Errorf("existing CUDA dtype %s is hidden from the consumed weight probe", dt)
+		}
+		if BackendSupportsDeviceWeightDtype(unadvertised, dt) || BackendSupportsDeviceWeightDtype(nil, dt) {
+			t.Errorf("dtype %s admitted without a backend capability", dt)
+		}
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := findRepoRootForTest(t, wd)
+	data, err := os.ReadFile(filepath.Join(root, "internal", "compute", "cuda.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(data)
+	for _, binding := range []string{
+		"func (c *cudaBackend) SupportsDeviceWeightDtype(dt Dtype) bool {\n\treturn cudaDeviceWeightDtypeSupported(dt)\n}",
+		"|| t.Dtype == IQ2_XXS || t.Dtype == IQ2_XS || t.Dtype == IQ1_M || t.Dtype == IQ4_NL",
+		"return c.uploadRawKQuantClass(t, hb, class, site)",
+		"cudaIQGEMV(w.Dtype, wb, c.cf(x), c.cf(y), out, in, 1)",
+		"cudaIQGEMV(w.Dtype, wb, c.cf(X), c.cf(y), out, in, P)",
+	} {
+		if !strings.Contains(source, binding) {
+			t.Errorf("CUDA i-quant declaration lost its consumed source binding: %s", binding)
+		}
+	}
+	if strings.Count(source, "case IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL:") != 2 {
+		t.Fatal("CUDA i-quant declaration requires both single and batched matmul dispatch")
 	}
 }
