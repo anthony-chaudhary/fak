@@ -78,6 +78,49 @@ func TestGGUFTypeTraitsRejectInvalidPayloads(t *testing.T) {
 	}
 }
 
+// fak-test:justify why=contract when=changed:internal/ggufload/**
+// fak-test:runtime fast est=1ms
+func TestTypeTraitsMatchTensorPayloadBytes(t *testing.T) {
+	t.Parallel()
+	// Every named GGUF type constant must size its payload through the shared
+	// traits table as elements/BlockSize*TypeSize; any enum value without a
+	// table entry must refuse instead of guessing geometry.
+	witness := make(map[TensorType]ggufGeometryWitness, len(ggufGeometryWitnesses))
+	for _, w := range ggufGeometryWitnesses {
+		witness[w.typ] = w
+	}
+	all := []TensorType{
+		TensorF32, TensorF16, TensorQ4_0, TensorQ4_1, TensorQ5_0, TensorQ5_1,
+		TensorQ8_0, TensorQ2_K, TensorQ3_K, TensorQ4_K, TensorQ5_K, TensorQ6_K,
+		TensorIQ2_XXS, TensorIQ2_XS, TensorIQ3_XXS, TensorIQ1_S, TensorIQ4_NL,
+		TensorIQ3_S, TensorIQ2_S, TensorIQ4_XS, TensorIQ1_M, TensorBF16,
+		TensorMXFP4, TensorQ2_0, TensorPQ2_0, TensorQ1_0, TensorHQQ4,
+	}
+	if len(all) != len(witness) {
+		t.Fatalf("enum coverage drifted: %d named types vs %d witnesses", len(all), len(witness))
+	}
+	for _, typ := range all {
+		tr, ok := tensorTypeTraits(typ)
+		if !ok {
+			if got, err := tensorPayloadBytes(TensorInfo{Name: "payload", Type: typ, Dims: []uint64{256}}); err == nil || got != 0 {
+				t.Errorf("%s: unsupported enum value sized %d bytes without error", typ, got)
+			}
+			continue
+		}
+		w := witness[typ]
+		if tr.BlockSize != w.block || tr.TypeSize != w.size {
+			t.Errorf("%s: table block=%d size=%d want block=%d size=%d", typ, tr.BlockSize, tr.TypeSize, w.block, w.size)
+			continue
+		}
+		info := TensorInfo{Name: "payload", Type: typ, Dims: []uint64{tr.BlockSize, 2}}
+		got, err := tensorPayloadBytes(info)
+		want := w.size * 2 // (BlockSize*2)/BlockSize*TypeSize
+		if err != nil || got != want {
+			t.Errorf("%s: payload bytes=%d err=%v want=%d", typ, got, err, want)
+		}
+	}
+}
+
 // fak-test:justify why=integration when=changed:internal/ggufload/**
 // fak-test:runtime fast est=1ms
 func TestGGUFTypeTraitsWeightSourceTensorBytes(t *testing.T) {
