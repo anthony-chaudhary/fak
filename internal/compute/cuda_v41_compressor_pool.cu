@@ -87,4 +87,20 @@ extern "C" int fak_v41_pool_run(const float *kv,const float *sc,float *out,int r
  if(e!=cudaSuccess) return 60000+(int)e;
  return invalid?-4:0;
 }
+// Qualification-only checked readback; no ordinary Read/logging fallback.
+extern "C" int fak_v41_pool_readback(float *host, const float *device, uint64_t count) {
+ if(!host) return -2;
+ int status=fak_v41_pool_input(device,count); if(status) return status;
+ int copied=fcuda_d2h_checked(host,device,(size_t)count*sizeof(float));
+ if(copied) {
+  cudaError_t drained=cudaStreamSynchronize(g_stream);
+  if(drained!=cudaSuccess) {
+   g_v41_pool_quarantine[0]=device;
+   g_v41_pool_uncertain=true;
+   return 50000+(int)drained;
+  }
+  return 59000+copied;
+ }
+ return 0;
+}
 #endif

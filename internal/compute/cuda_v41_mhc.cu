@@ -102,4 +102,16 @@ extern "C" int fak_v41_mhc_run(int op,const float *a,const float *b,const float 
   }
   return 0;
 }
+// Checked witness readback; a failed drain pins the source, never certifies bytes.
+extern "C" int fak_v41_mhc_readback(float *host,const float *device,uint64_t count) {
+  if(!host) return -2;
+  int status=fak_v41_mhc_input(device,count); if(status) return status;
+  int copied=fcuda_d2h_checked(host,device,(size_t)count*sizeof(float));
+  if(copied) {
+    cudaError_t e=cudaStreamSynchronize(g_stream);
+    if(e!=cudaSuccess) { g_v41_mhc_quarantine[0]=device; g_v41_mhc_uncertain=true; return 50000+(int)e; }
+    return 59000+copied;
+  }
+  return 0;
+}
 #endif

@@ -6,6 +6,7 @@ package compute
 #include <stdint.h>
 #include "cuda_backend.h"
 int fak_v41_mhc_state(void);
+int fak_v41_mhc_readback(float *,const float *,uint64_t);
 int fak_v41_mhc_input(const float *, uint64_t);
 int fak_v41_mhc_run(int,const float *,const float *,const float *,float *,int,int,int,float,float);
 */
@@ -15,6 +16,7 @@ import (
 	"math"
 	"runtime"
 	"sync/atomic"
+	"unsafe"
 )
 
 var _ V41MHCBackend = (*cudaBackend)(nil)
@@ -109,4 +111,43 @@ func (c *cudaBackend) cudaV41MHC(op V41MHCOp, rows, hidden, iters int, eps, rmsE
 	}
 	atomic.AddUint64(&c.fenceGen, 1)
 	return makeTensor(c, F32, RowMajor, shape, nil, output), nil
+}
+
+// Qualification reads must not rely on ordinary Read's logging-only failure path.
+func (c *cudaBackend) cudaV41MHCReadback(t Tensor, count int) ([]float32, error) {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	site := "V41MHC readback"
+	if c == nil || c.capturing || count <= 0 || uint64(count) > math.MaxUint32 || count > int(^uint(0)>>1)/4 || t.be != c || t.Dtype != F32 || t.Layout != RowMajor || t.Quant != nil {
+		return nil, c.cudaV41MHCError(site, -2, nil)
+	}
+	total := uint64(1)
+	for _, dim := range t.Shape {
+		if dim <= 0 || uint64(dim) > uint64(count)/total {
+			return nil, c.cudaV41MHCError(site, -2, nil)
+		}
+		total *= uint64(dim)
+	}
+	if total != uint64(count) {
+		return nil, c.cudaV41MHCError(site, -2, nil)
+	}
+	if e := c.faultLatch.Admit(site); e != nil {
+		return nil, c.cudaV41MHCError(site, -3, e)
+	}
+	b, ok := t.buf.(*cudaBuf)
+	if !ok || b == nil || b.ptr == nil || b.n < count*4 || b.managed || b.device != 0 || b.scales != nil || b.scalesN != 0 || (b.be != nil && b.be != c) {
+		return nil, c.cudaV41MHCError(site, -2, nil)
+	}
+	if e := b.invalidStateError(site); e != nil {
+		return nil, c.cudaV41MHCError(site, -2, e)
+	}
+	host := make([]float32, count)
+	status := int(C.fak_v41_mhc_readback((*C.float)(unsafe.Pointer(&host[0])), (*C.float)(b.ptr), C.uint64_t(count)))
+	runtime.KeepAlive(t)
+	runtime.KeepAlive(host)
+	if status != 0 {
+		return nil, c.cudaV41MHCError(site, status, nil)
+	}
+	atomic.AddUint64(&c.fenceGen, 1)
+	return host, nil
 }
