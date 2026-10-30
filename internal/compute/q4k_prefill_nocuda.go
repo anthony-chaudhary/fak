@@ -14,4 +14,4 @@ func CUDAQ4KPrefillArmInUse() (CUDAQ4KPrefillArm, error) { return CUDAQ4KPrefill
 func SetCUDAQ4KDecodeArm(arm CUDAQ4KDecodeArm) error { return CheckCUDAQ4KDecodeArm(arm) }
 
 // CUDAQ4KDecodeArmInUse reports the default arm in the non-cuda build.
-func CUDAQ4KDecodeArmInUse() CUDAQ4KDecodeArm { return CUDAQ4KDecodeF32 }
+func CUDAQ4KDecodeArmInUse() CUDAQ4KDecodeArm { return CUDAQ4KDecodeDefault }

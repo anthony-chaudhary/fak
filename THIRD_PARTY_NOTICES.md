@@ -1075,7 +1075,7 @@ SOFTWARE.
 
 ## llama.cpp Q4_K MMVQ decode GEMV
 
-The opt-in `mmvq` arm of the CUDA Q4_K decode GEMV (`FAK_CUDA_Q4K_DECODE=mmvq`),
+The default `mmvq` arm of the CUDA Q4_K decode GEMV (`FAK_CUDA_Q4K_DECODE`, escape hatch `f32`),
 `internal/compute/cuda/q4k_mmvq.cuh`, adapts the Q4_K instantiation of `mul_mat_vec_q` with its
 NVIDIA generic parameter rows (`ggml/src/ggml-cuda/mmvq.cu`), the `vec_dot_q4_K_q8_1` DP4A dot
 product (`vecdotq.cuh`) and the `quantize_q8_1` activation quantizer (`quantize.cu`), at

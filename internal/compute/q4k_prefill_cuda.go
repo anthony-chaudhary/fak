@@ -134,10 +134,10 @@ func cudaQ4KScratch(out, in, rows int) cudaGEMMScratch {
 }
 
 // cudaQ4KDecodeArm mirrors the C P < 4 Q4_K GEMV arm (fak#8635); cudaQ4KPrefillArmMu guards it.
-var cudaQ4KDecodeArm = CUDAQ4KDecodeF32
+var cudaQ4KDecodeArm = CUDAQ4KDecodeDefault
 
-// initCUDAQ4KDecodeArm resolves FAK_CUDA_Q4K_DECODE once. An unknown value keeps the f32 arm and
-// says so on stderr: decode has no refusal path a whole serve could survive.
+// initCUDAQ4KDecodeArm resolves FAK_CUDA_Q4K_DECODE once. An unknown value falls back to the f32
+// arm and says so on stderr: decode has no refusal path a whole serve could survive.
 func initCUDAQ4KDecodeArm() {
 	arm, err := ParseCUDAQ4KDecodeArm(os.Getenv(CUDAQ4KDecodeEnv))
 	if err != nil {

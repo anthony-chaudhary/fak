@@ -12,7 +12,7 @@ and process-wide state, then includes these implementation fragments in dependen
 | `v41_compressor.cuh` | V4.1 compressor ring store and gated pool ported from antirez/ds4 (opt-in `FAK_CUDA_V41_COMPRESSOR`) |
 | `qwen35_gdn.cuh` | Qwen3.5/3.6 Gated-DeltaNet operations |
 | `q4k_mmq.cuh` | Q4_K int8 tensor-core MMQ for prompt panels adapted from llama.cpp (opt-in `mmq` arm) |
-| `q4k_mmvq.cuh` | Q4_K q8_1 DP4A decode GEMV adapted from llama.cpp MMVQ (opt-in `mmvq` decode arm) |
+| `q4k_mmvq.cuh` | Q4_K q8_1 DP4A decode GEMV adapted from llama.cpp MMVQ (default `mmvq` decode arm; `FAK_CUDA_Q4K_DECODE=f32` opts out) |
 | `quant_matmul.cuh` | cuBLAS and native quantized matrix operations |
 | `transformer_ops.cuh` | normalization, RoPE, gating, elementwise, and KV writes |
 | `fattn_mma_hd256.cuh` | Qwen3.8 hd256 tensor-core prompt attention adapted from llama.cpp (opt-in) |

@@ -658,8 +658,8 @@ static float2 *q4_coeffs_for(const uint8_t *q, int out, int in) {
 static int g_q4k_prefill_arm = 0;
 extern "C" void fcuda_set_q4k_prefill_arm(int arm) { g_q4k_prefill_arm = arm; }
 // g_q4k_decode_arm is the P<4 Q4_K GEMV arm the Go side resolved from FAK_CUDA_Q4K_DECODE:
-// 0 f32 (k_q4k_gemm, f32 activation), 1 mmvq (llama.cpp q8_1 DP4A, cuda/q4k_mmvq.cuh).
-static int g_q4k_decode_arm = 0;
+// 0 f32 (k_q4k_gemm, f32 activation), 1 mmvq (llama.cpp q8_1 DP4A, cuda/q4k_mmvq.cuh, default).
+static int g_q4k_decode_arm = 1;
 extern "C" void fcuda_set_q4k_decode_arm(int arm) { g_q4k_decode_arm = arm; }
 static int fcuda_q4k_fp8lt_matmul(const uint8_t *, const float *, float *, int, int, int);
 

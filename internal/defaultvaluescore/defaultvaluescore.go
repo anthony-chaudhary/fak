@@ -114,7 +114,7 @@ var offWithReason = map[string]reviewedDefaultDecision{
 		reviewBy: "2026-11-01",
 	},
 	"cuda-graph": {
-		reason:   "a measured no-win on small-model/L4 decode (launch overhead already small) -- requires a per-node tok/s witness before it pays",
+		reason:   "a measured no-win on small-model/L4 decode (launch overhead already small), and on raider (RTX 5090 Laptop, Qwen3.8-27B Q4_K_M, ctx 2048) graph Instantiate runs out of VRAM -- requires a per-node tok/s witness before it pays",
 		reviewBy: "2026-11-01",
 	},
 	"vdso-proxy-fill": {
