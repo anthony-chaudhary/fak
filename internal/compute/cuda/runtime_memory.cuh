@@ -114,6 +114,7 @@ static void q4_coeff_cache_evict(const void *q);
 
 extern "C" void fcuda_free(void *d) {
   if (!d) return;
+  if (g_v41_router_uncertain) return;
 #ifdef FAK_CUDA_V41_COMPRESSOR
   // A failed drain can cover earlier no-emit ring stores, not just the last
   // call's pointers. Keep every allocation out of reuse while it is uncertain.
@@ -204,6 +205,7 @@ extern "C" void fcuda_free(void *d) {
 // record intact and unavailable to pool reuse; the caller must surface the fault.
 extern "C" int fcuda_discard_unsubmitted(void *d, size_t expected_bytes) {
   if (!d || g_capture_open) return (int)cudaErrorInvalidValue;
+  if (g_v41_router_uncertain) return (int)cudaErrorInvalidValue;
 #ifdef FAK_CUDA_V41_COMPRESSOR
   if (g_v41_compressor_uncertain) return (int)cudaErrorInvalidValue;
 #endif

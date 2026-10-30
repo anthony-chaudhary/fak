@@ -265,3 +265,56 @@ func TestCUDAV41EmbeddingGatherBitExact(t *testing.T) {
 		t.Fatal("out-of-range id was admitted")
 	}
 }
+
+// fak-test:runtime slow est=1s lane=default
+func TestCUDAV41RouterFullSoftplusPublication(t *testing.T) {
+	cb := cudaV41RouterOrSkip(t)
+	const rows, experts, topK = 2, 384, 3
+	values := make([]float32, rows*experts)
+	for i := range values {
+		values[i] = -110
+	}
+	logits := mkResident(cb, []int{rows, experts}, values)
+	defer cb.Free(logits)
+	bias := mkResident(cb, []int{1}, []float32{0})
+	defer cb.Free(bias)
+	hash := []int32{7, 67, 131, 13, 87, 191}
+	for _, hashed := range []bool{false, true} {
+		var got V41RouterPicks
+		var err error
+		if hashed {
+			got, err = cb.V41RouterHash(logits, hash, rows, experts, topK, 1.5, true)
+		} else {
+			got, err = cb.V41RouterTopK(logits, bias, rows, experts, topK, 1.5, true, false)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got.Experts) != rows*topK || len(got.Weights) != rows*topK {
+			t.Fatal("publication extent")
+		}
+		for i := range got.Experts {
+			want := int32(i % topK)
+			if hashed {
+				want = hash[i]
+			}
+			if got.Experts[i] != want || math.Float32bits(got.Weights[i]) != 0 {
+				t.Fatalf("full=%v hash=%v slot%d: expert=%d weight=%g", true, hashed, i, got.Experts[i], got.Weights[i])
+			}
+		}
+	}
+	// Reduced geometry intentionally retains sqrt(softplus) across the F32
+	// publication boundary; the one-pick score/itself normalization is exact.
+	got, err := cb.V41RouterTopK(logits, bias, rows, experts, 1, 1.5, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Experts) != rows || len(got.Weights) != rows {
+		t.Fatal("reduced publication extent")
+	}
+	for i := range got.Experts {
+		if got.Experts[i] != 0 || got.Weights[i] != 1.5 {
+			t.Fatalf("reduced control: %+v", got)
+		}
+	}
+}

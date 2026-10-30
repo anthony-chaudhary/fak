@@ -33,8 +33,9 @@ __device__ __forceinline__ static float v41rt_log1p_unit(float e) {
 
 // Below -20, log1p(e^z) = e^z to F32 precision; sqrt(e^z) = e^(z/2) avoids
 // underflowing e^z before the root.
-__device__ __forceinline__ static float v41rt_score(float z) {
-  if (z < -20.0f) return expf(__fmul_rn(0.5f, z));
+__device__ __forceinline__ static float v41rt_score(float z, bool full) {
+  // Full model geometry publishes softplus as F32 before sqrt.
+  if (!full && z < -20.0f) return expf(__fmul_rn(0.5f, z));
   const float e = expf(-fabsf(z));
   return __fsqrt_rn(__fadd_rn(fmaxf(z, 0.0f), v41rt_log1p_unit(e)));
 }
@@ -78,7 +79,7 @@ __global__ void k_v41_router_argmax_topk(const float *logits, const float *bias,
   for (int e = lane; e < experts; e += V41RT_LANES) {
     const float v = z[e];
     if (!v41rt_finite(v)) { fault_expert = e; fault_stage = 1u; fault_value = v; break; }
-    const float s = v41rt_score(v);
+    const float s = v41rt_score(v, full != 0);
     if (!v41rt_finite(s)) { fault_expert = e; fault_stage = 2u; fault_value = s; break; }
     if (hash_mode) continue;  // hash rows select from the table, never from scores
     float c = s;
@@ -122,7 +123,7 @@ __global__ void k_v41_router_argmax_topk(const float *logits, const float *bias,
     for (int slot = 0; slot < top_k; ++slot) {
       const int e = hash[(size_t)row * top_k + slot];
       row_pick[slot] = e;
-      row_score[slot] = v41rt_score(z[e]);
+      row_score[slot] = v41rt_score(z[e], full != 0);
     }
   } else {
     // ds4 warp argmax round, over lane heads instead of per-lane registers.
@@ -160,7 +161,6 @@ __global__ void k_v41_router_argmax_topk(const float *logits, const float *bias,
 }
 
 static uint64_t g_v41_router_completed = 0;
-static bool g_v41_router_uncertain = false;
 
 static int v41_router_owned(const void *p, uint64_t bytes) {
   if (!p || bytes == 0) return -2;
@@ -173,7 +173,7 @@ static int v41_router_owned(const void *p, uint64_t bytes) {
 }
 
 extern "C" int fak_v41_router_state(void) {
-  if (!g_stream || g_capture_open || g_v41_router_uncertain) return -3;
+  if (!g_stream || g_capture_open || v41_candidates_stream_uncertain()) return -3;
   cudaError_t error = cudaPeekAtLastError();
   if (error != cudaSuccess) return 10000 + (int)error;
   int device = -1;
@@ -189,7 +189,8 @@ extern "C" int fak_v41_router_state(void) {
 static int v41_router_drain(int status) {
   cudaError_t drained = cudaStreamSynchronize(g_stream);
   if (drained != cudaSuccess) {
-    // The kernel may still own its outputs: admission closes permanently.
+    // The stream may still own inputs, outputs or prior queued work. Shared
+    // admission closes and all three release routes retain allocations.
     g_v41_router_uncertain = true;
     return 50000 + (int)drained;
   }

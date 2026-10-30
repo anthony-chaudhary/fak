@@ -129,10 +129,14 @@ static bool g_v41_compressor_uncertain = false;
 static uint64_t g_v41_compressor_completed = 0;
 #endif
 
-#if defined(FAK_CUDA_V41_ROUTED_SWIGLU) || defined(FAK_CUDA_V41_ENGRAM_GATE) || defined(FAK_CUDA_V41_COMPRESSOR_POOL) || defined(FAK_CUDA_V41_MHC) || defined(FAK_CUDA_V41_BF16_PUBLISH) || defined(FAK_CUDA_V41_TAIL_ROPE) || defined(FAK_CUDA_V41_INDEXER) || defined(FAK_CUDA_FLASHMLA_PREFILL) || defined(FAK_CUDA_DEEPGEMM_WKV) || defined(FAK_CUDA_V41_SHARED_ATTENTION) || defined(FAK_CUDA_V41_COMPRESSOR)
+// Router source is compiled in every CUDA profile; its terminal stream
+// uncertainty must be visible before the allocation release fragments.
+static bool g_v41_router_uncertain = false;
+
 // Both candidates share g_stream. A successful peer call cannot rehabilitate
 // an uncertain operation, even when the Go backend has no fault latch.
 static bool v41_candidates_stream_uncertain(void) {
+  if (g_v41_router_uncertain) return true;
 #ifdef FAK_CUDA_V41_ROUTED_SWIGLU
   if (g_v41_routed_swiglu_uncertain) return true;
 #endif
@@ -168,7 +172,6 @@ static bool v41_candidates_stream_uncertain(void) {
 #endif
   return false;
 }
-#endif
 
 // Host-transfer witnesses (#482/#4738): cumulative bytes in each direction. Every successful
 // h2d/d2h copy adds to its own counter so a whole-operation test can prove zero traffic in both
