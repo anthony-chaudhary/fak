@@ -229,6 +229,7 @@ static constexpr int cudaSuccess=0, cudaErrorInvalidValue=1, cudaErrorMemoryAllo
 static constexpr int cudaStreamCaptureStatusNone=0, cudaStreamCaptureStatusActive=1, cudaStreamCaptureStatusInvalidated=2;
 static bool g_capture_open=false;
 static bool g_v41_router_uncertain=false;
+static bool g_v41_mmid_uncertain=false;
 static int g_cuda_cleanup_status=0;
 static cudaStreamCaptureStatus runtime_capture=cudaStreamCaptureStatusNone;
 static int capture_queries=0, capture_query_error=0;
@@ -301,7 +302,7 @@ static void reset_context() {
   // Fake process teardown between cases; production has no quarantine reset API.
   attempts=alloc_fail_at=free_attempts=free_fail_at=sync_calls=sync_fail_at=retired=launches=pending_reads=0;
   next_slot=0; g_capture_open=false;
-  g_v41_router_uncertain=false; g_cuda_cleanup_status=0;
+  g_v41_router_uncertain=false; g_v41_mmid_uncertain=false; g_cuda_cleanup_status=0;
   runtime_capture=cudaStreamCaptureStatusNone; capture_queries=capture_query_error=0;
   alloc_error=cudaErrorMemoryAllocation;
   last_error=get_last_error_calls=0;
