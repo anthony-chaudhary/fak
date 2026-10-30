@@ -735,8 +735,16 @@ func MineMotifs(root string) (MotifReport, error) {
 		}
 		src, readErr := os.ReadFile(p)
 		if readErr != nil {
-			rep.Skipped = append(rep.Skipped, MotifSkip{Path: rel, Reason: "unreadable"})
-			return nil
+			// One immediate retry: a transient read hiccup (page-cache flush,
+			// momentary lock on a shared tree) must not demote a readable file
+			// to "unreadable" in only one of two consecutive runs and break the
+			// byte-identical-report contract. A genuinely unreadable file fails
+			// both attempts and is still skipped exactly once.
+			src, readErr = os.ReadFile(p)
+			if readErr != nil {
+				rep.Skipped = append(rep.Skipped, MotifSkip{Path: rel, Reason: "unreadable"})
+				return nil
+			}
 		}
 		if reason, ex := motifExcludedContent(src); ex {
 			rep.Skipped = append(rep.Skipped, MotifSkip{Path: rel, Reason: reason})
