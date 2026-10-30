@@ -413,5 +413,6 @@ extern "C" int fcuda_causal_attention_panel_f32(
 
 extern "C" int fak_qwen35_sequence_sync(void) {
   cudaError_t completed = cudaStreamSynchronize(g_stream);
+  sequence_split_note_failed_fence(completed);
   return completed == cudaSuccess ? 0 : 60000 + (int)completed;
 }

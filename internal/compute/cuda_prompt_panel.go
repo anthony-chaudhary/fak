@@ -27,6 +27,9 @@ const (
 	cudaScratchRetireFailedBase = 83000
 )
 
+// 92000 + cudaError_t is a failed retirement of persistent Q8 row scratch.
+const cudaQ8ScratchRetireFailedBase = 92000
+
 func cudaPromptPanelFail(site, msg string, code int) {
 	panic(&CUDAOpError{Op: "PromptPanel", Site: site, Msg: msg, Code: code, Class: MemoryActivation})
 }
@@ -39,6 +42,9 @@ type cudaGEMMScratch struct{ main, split int }
 // is a DeviceAllocError for the allocation that missed, any other status a CUDAOpError. The
 // GEMM launched nothing, so its output holds no result.
 func cudaGEMMError(op string, rc int, s cudaGEMMScratch) error {
+	if rc > cudaQ8ScratchRetireFailedBase && rc < cudaQ8ScratchRetireFailedBase+1000 {
+		return &CUDAOpError{Op: op, Site: "q8-scratch-retirement", Msg: "persistent Q8 scratch retirement failed", Code: rc - cudaQ8ScratchRetireFailedBase, Class: MemoryScratchpad}
+	}
 	if rc > cudaScratchRetireFailedBase && rc < cudaScratchRetireFailedBase+1000 {
 		return &CUDAOpError{Op: op, Site: "gemm-scratch-retirement", Msg: "scratch retirement failed after allocation miss", Code: rc - cudaScratchRetireFailedBase, Class: MemoryScratchpad}
 	}

@@ -265,16 +265,25 @@ static signed char *g_q8_qX = nullptr;
 static int g_q8_qX_cap = 0; // bytes
 static float *g_q8_xScale = nullptr;
 static int g_q8_xScale_cap = 0; // floats
+// A failed retirement leaves ownership uncertain. Preserve its pointer and
+// ledger entry, and refuse all later uses (including smaller shapes) until exit.
+#define FCUDA_Q8_SCRATCH_RETIRE_FAILED_BASE 92000
+static int g_q8_scratch_retire_status = 0;
 // q8_quant_rows grows the activation scratch, then quantizes every row of X on its own. Returns 0
-// or FCUDA_SCRATCH_ALLOC_FAILED before any launch.
+// or an allocation/retirement failure before any launch.
 static int q8_quant_rows(const float *dX, int in, int P, int block) {
+  if (g_q8_scratch_retire_status) return g_q8_scratch_retire_status;
   int nblk = in / block;
   int needQX = P * in;          // int8 activation codes
   int needScale = P * nblk;     // per-block act scales (floats)
   if (needQX > g_q8_qX_cap) {
     if (g_q8_qX) {
+      const cudaError_t retired = cudaFree(g_q8_qX);
+      if (retired != cudaSuccess) {
+        g_q8_scratch_retire_status = FCUDA_Q8_SCRATCH_RETIRE_FAILED_BASE + (int)retired;
+        return g_q8_scratch_retire_status;
+      }
       fak_alloc_untrack(g_q8_qX);
-      cudaFree(g_q8_qX);
     }
     g_q8_qX = nullptr;
     g_q8_qX_cap = 0;
@@ -288,8 +297,12 @@ static int q8_quant_rows(const float *dX, int in, int P, int block) {
   }
   if (needScale > g_q8_xScale_cap) {
     if (g_q8_xScale) {
+      const cudaError_t retired = cudaFree(g_q8_xScale);
+      if (retired != cudaSuccess) {
+        g_q8_scratch_retire_status = FCUDA_Q8_SCRATCH_RETIRE_FAILED_BASE + (int)retired;
+        return g_q8_scratch_retire_status;
+      }
       fak_alloc_untrack(g_q8_xScale);
-      cudaFree(g_q8_xScale);
     }
     g_q8_xScale = nullptr;
     g_q8_xScale_cap = 0;
@@ -306,7 +319,7 @@ static int q8_quant_rows(const float *dX, int in, int P, int block) {
 }
 // q8_rows_matmul is the per-row Q8_0 GEMM: each activation row is quantized on its own and
 // each (row, output) dot runs the same k_q8_gemm warp sum whatever P is, so a row's result is
-// bitwise the P=1 decode GEMV's. Returns 0 or FCUDA_SCRATCH_ALLOC_FAILED before any launch.
+// bitwise the P=1 decode GEMV's. Returns 0 or an allocation/retirement failure before any launch.
 static int q8_rows_matmul(const int8_t *dCodes, const float *dScales, const float *dX,
                           float *dY, int out, int in, int P, int block) {
   int rc = q8_quant_rows(dX, in, P, block);
@@ -657,16 +670,15 @@ extern "C" int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float 
     if (g_q4k_prefill_arm == 2) return fcuda_q4k_fp8lt_matmul(dQ4K, dX, dY, out, in, P);
     if (g_q4k_prefill_arm != 0) return FCUDA_Q4K_PREFILL_ARM_REFUSED;
     size_t wn = (size_t)out * in, xn = (size_t)P * in;
-    __half *scratch[4] = {};
-    const int scratch_status = fp16_compensated_scratch(wn, xn, scratch);
+    FP16CompensatedScratch scratch;
+    const int scratch_status = fp16_compensated_scratch(wn, xn, &scratch);
     if (scratch_status != 0) return scratch_status;
-    __half *wHi = scratch[0], *wLo = scratch[1], *xHi = scratch[2], *xLo = scratch[3];
+    __half *wHi = scratch.ptr[0], *wLo = scratch.ptr[1], *xHi = scratch.ptr[2], *xLo = scratch.ptr[3];
     FCUDA_TS("k_q4k_dequant_split", (wn + 255) / 256, k_q4k_dequant_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(
         (const unsigned char *)dQ4K, wHi, wLo, out, in));
     FCUDA_TS("k_fp16_split", (xn + 255) / 256, k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(dX, xHi, xLo, xn));
     fp16_compensated_gemm(wHi, wLo, xHi, xLo, dY, out, in, P);
-    fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
-    return 0;
+    return fp16_compensated_release(&scratch);
   }
   // Small panels on the mmq arm read each weight byte once instead of ceil(P/4) times on the
   // token panel. Any mmq refusal or scratch miss falls back to the panel, never fails.
@@ -1118,16 +1130,15 @@ extern "C" int fcuda_q2k_matmul_f32(const uint8_t *dQ2K, const float *dX, float 
                                     int out, int in, int P) {
   if (P >= 128) {
     size_t wn = (size_t)out * in, xn = (size_t)P * in;
-    __half *scratch[4] = {};
-    const int scratch_status = fp16_compensated_scratch(wn, xn, scratch);
+    FP16CompensatedScratch scratch;
+    const int scratch_status = fp16_compensated_scratch(wn, xn, &scratch);
     if (scratch_status != 0) return scratch_status;
-    __half *wHi = scratch[0], *wLo = scratch[1], *xHi = scratch[2], *xLo = scratch[3];
+    __half *wHi = scratch.ptr[0], *wLo = scratch.ptr[1], *xHi = scratch.ptr[2], *xLo = scratch.ptr[3];
     FCUDA_TS("k_q2k_dequant_split", (wn + 255) / 256, k_q2k_dequant_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(
         (const unsigned char *)dQ2K, wHi, wLo, out, in));
     FCUDA_TS("k_fp16_split", (xn + 255) / 256, k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(dX, xHi, xLo, xn));
     fp16_compensated_gemm(wHi, wLo, xHi, xLo, dY, out, in, P);
-    fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
-    return 0;
+    return fp16_compensated_release(&scratch);
   }
   if (P < 4) {
     fcuda_q2k_gemv(dQ2K, dX, dY, out, in, P);

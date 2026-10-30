@@ -8,6 +8,7 @@ package compute
 import "C"
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"sync/atomic"
@@ -390,12 +391,47 @@ func (c *cudaBackend) qwen35SequencePoisonStates(req Qwen35SequencePrefillReques
 	}
 }
 
+// cudaSequenceSplitStatusError keeps the exact CUDA status and allocation cause.
+// Generic ObserveError does not recognize CUDAOpError: callers explicitly latch
+// fence/retirement failures rather than silently permitting another submission.
+func cudaSequenceSplitStatusError(status C.fcuda_sequence_split_status) error {
+	stage := "contract"
+	switch status.phase {
+	case C.FCUDA_SEQUENCE_SPLIT_ALLOCATE:
+		stage = "allocate"
+	case C.FCUDA_SEQUENCE_SPLIT_ROLLBACK:
+		stage = "rollback-retirement"
+	case C.FCUDA_SEQUENCE_SPLIT_FENCE:
+		stage = "fence"
+	case C.FCUDA_SEQUENCE_SPLIT_FREE:
+		stage = "retirement"
+	case C.FCUDA_SEQUENCE_SPLIT_QUARANTINE:
+		stage = "quarantine"
+	case C.FCUDA_SEQUENCE_SPLIT_CAPTURE_QUERY:
+		stage = "capture-query"
+	}
+	var cause error = &CUDAOpError{Op: "Qwen35SequencePrefill", Site: "split-scratch-" + stage,
+		Msg: "private sequence split scratch " + stage + " failed", Code: int(status.code), Class: MemoryScratchpad}
+	if status.allocation_code != 0 {
+		allocation := &DeviceAllocError{Bytes: int(status.failed_bytes), Site: "qwen35-sequence split scratch", Class: MemoryScratchpad}
+		allocationStatus := &CUDAOpError{Op: "Qwen35SequencePrefill", Site: "split-scratch-allocate",
+			Msg: "private sequence split scratch allocation failed", Code: int(status.allocation_code), Class: MemoryScratchpad}
+		cause = errors.Join(allocation, allocationStatus, cause)
+	}
+	return &Qwen35SequenceError{Stage: "split-scratch-" + stage, Layer: -1, Cause: cause}
+}
+
 func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (result Qwen35SequencePrefillResult, err error) {
 	if admitErr := c.faultLatch.Admit("qwen35-sequence-prefill"); admitErr != nil {
 		return result, &Qwen35SequenceError{Stage: "device-admission", Layer: -1, Cause: admitErr}
 	}
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	// Admission and the C-global private owner must agree under the recording
+	// mutex; another backend instance may have failed while this caller waited.
+	if admitErr := c.faultLatch.Admit("qwen35-sequence-prefill"); admitErr != nil {
+		return result, &Qwen35SequenceError{Stage: "device-admission", Layer: -1, Cause: admitErr}
+	}
 	transientStart := len(c.transient)
 	failed := true
 	defer func() {
@@ -408,6 +444,54 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 		return result, err
 	}
 	tokens := len(req.TokenIDs)
+	arm, armErr := CUDAQ4KPrefillArmInUse()
+	plan, planErr := planCUDASequenceSplitScratch(req, arm, armErr)
+	if planErr != nil {
+		return result, planErr
+	}
+	var splitToken C.ulonglong
+	if plan.weightHalfBytes != 0 {
+		if c.promptPanel {
+			return result, qwen35SequenceFailure("split-scratch-scope", -1, "dense prompt panel scope is already open")
+		}
+		var status C.fcuda_sequence_split_status
+		if C.fcuda_sequence_split_begin(C.size_t(plan.weightHalfBytes), C.size_t(plan.activationHalfBytes), &splitToken, &status) != 0 {
+			// A clean preflight refusal has neither submitted work nor changed
+			// ownership. Do not poison an otherwise healthy captured stream.
+			if status.phase != C.FCUDA_SEQUENCE_SPLIT_CONTRACT &&
+				(status.phase != C.FCUDA_SEQUENCE_SPLIT_ALLOCATE || status.allocation_was_oom == 0) {
+				c.faultLatch.Observe(DeviceFaultExecution, "qwen35-sequence-split-begin", int(status.code))
+			}
+			return result, cudaSequenceSplitStatusError(status)
+		}
+	}
+	finishSplit := func() error {
+		if splitToken == 0 {
+			return nil
+		}
+		token := splitToken
+		splitToken = 0 // one retirement attempt, including panic/Goexit unwind
+		var status C.fcuda_sequence_split_status
+		if C.fcuda_sequence_split_end(token, &status) != 0 {
+			c.faultLatch.Observe(DeviceFaultExecution, "qwen35-sequence-split-end", int(status.code))
+			return cudaSequenceSplitStatusError(status)
+		}
+		atomic.AddUint64(&c.fenceGen, 1)
+		return nil
+	}
+	defer func() {
+		if cleanupErr := finishSplit(); cleanupErr != nil {
+			// Do not recover an outer panic/Goexit. Returned errors keep their
+			// original cause, and failed retirement never publishes outputs.
+			for i := transientStart; i < len(c.transient); i++ {
+				atomic.StoreUint32(&c.transient[i].invalid, 1)
+			}
+			c.qwen35SequencePoisonStates(req)
+			result = Qwen35SequencePrefillResult{}
+			failed = true
+			err = errors.Join(err, cleanupErr)
+		}
+	}()
 	if err := c.qwen35SequenceReserveKVLocked(kv, len(req.Layers)/4, (req.StartPos+tokens)*kv.stride()); err != nil {
 		return result, err
 	}
@@ -558,6 +642,18 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 	var logitsRows Tensor
 	var logitsRowsBuf *cudaBuf
 	if req.NeedAllLogits {
+		// The vocabulary projection keeps its ordinary scratch path. Retire
+		// layer split owners before this potentially much larger panel head.
+		if splitErr := finishSplit(); splitErr != nil {
+			// finishSplit consumed the token before its checked end call, so
+			// the deferred no-op cannot perform this invalidation for us.
+			for i := transientStart; i < len(c.transient); i++ {
+				atomic.StoreUint32(&c.transient[i].invalid, 1)
+			}
+			c.qwen35SequencePoisonStates(req)
+			result = Qwen35SequencePrefillResult{}
+			return result, splitErr
+		}
 		logitsRows, logitsRowsBuf, err = c.qwen35SequenceMatMulLocked(req.Output, finalPanel, tokens, "output-all-head")
 		if err != nil {
 			return result, err
@@ -574,7 +670,14 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 		}
 		logits.Shape = []int{req.Output.Shape[0]}
 	}
-	if err := c.qwen35SequenceSyncLocked(); err != nil {
+	// Active-loan retirement is also this sequence's checked final fence.
+	var finalFenceErr error
+	if splitToken != 0 {
+		finalFenceErr = finishSplit()
+	} else {
+		finalFenceErr = c.qwen35SequenceSyncLocked()
+	}
+	if err := finalFenceErr; err != nil {
 		atomic.StoreUint32(&lastBuf.invalid, 1)
 		if logitsBuf != nil {
 			atomic.StoreUint32(&logitsBuf.invalid, 1)

@@ -53,3 +53,17 @@ This map positions the current `plan` coverage backlog. Each entry names the exa
 - **`wiplandsubject`** — the exact `plan` symbol; distinct from the broader family label and sibling operations.
 - **`candidatetree`** — the speculative-decoding proposal TREE (`internal/model.CandidateTree`), a branch structure of candidate continuations verified against the target; distinct from the ctxplanner Candidate (a scored span) and from CandidateBlockedBy (dispatch prereq ordering).
 - **waveplan** — the debt-orchestrator multi-wave CAMPAIGN plan (debtlane.WavePlan, internal/debtlane/wave.go); distinct from the per-wave execution plan dispatchwaveexecutionplan and from the umbrella plan domain.
+
+
+### cudaSequenceSplitScratchPlan
+
+Immutable checked per-half byte capacities for a Qwen CUDA layer-sequence compensated split loan, with independent maximum weight-half and activation-half sizes. When a nonzero loan is active, capacity is reserved for two weight buffers and two activation buffers within one private loan.
+
+**Distinct from:** Unlike V41Q2KTokenPanelPlan, this result describes compensated split scratch half capacities, not token-panel launch geometry. It carries no device pointers, ownership, scheduling, or route policy and is not a total peak-VRAM bound; ordinary activations, KV, noncompensated arms, and vocabulary heads are outside this capacity pair.
+
+
+### planCUDASequenceSplitScratch
+
+Pure geometry preflight that computes the checked weight-half and activation-half capacities for an eligible Qwen CUDA compensated layer-sequence split loan from the existing P >= 128 dispatch predicates and locked Q4-arm snapshot. It validates dimensions and byte overflow, ignores irrelevant Q4 errors, and returns zero capacities when no eligible layer projection exists.
+
+**Distinct from:** Unlike PlanV41Q2KTokenPanel, this function computes compensated split scratch capacities, not token-panel launch geometry. Unlike cudaSequenceSplitScratchPlan, it is the pure constructor rather than the immutable result. It allocates no device memory, performs no fence, retirement or dispatch, and selects no new kernel policy. Vocabulary heads are excluded; the all-row head runs after checked loan retirement.

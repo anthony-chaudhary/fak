@@ -43,6 +43,29 @@ void fcuda_trim_pool_large(size_t max_keep_bytes);
 /* Checked trim retains failed/remaining cache entries and their ledger records.
  * Zero means completed; nonzero is a sticky cleanup error or uncertainty refusal. */
 int fcuda_trim_pool_large_checked(size_t max_keep_bytes);
+/* Sequence-owned compensated split scratch; never enters either reusable pool.
+ * Call under the CUDA recording mutex, outside capture. A failed retirement
+ * retains exact private owners until process teardown; there is no reset API. */
+enum {
+  FCUDA_SEQUENCE_SPLIT_CONTRACT = 1,
+  FCUDA_SEQUENCE_SPLIT_ALLOCATE = 2,
+  FCUDA_SEQUENCE_SPLIT_ROLLBACK = 3,
+  FCUDA_SEQUENCE_SPLIT_FENCE = 4,
+  FCUDA_SEQUENCE_SPLIT_FREE = 5,
+  FCUDA_SEQUENCE_SPLIT_QUARANTINE = 6,
+  FCUDA_SEQUENCE_SPLIT_CAPTURE_QUERY = 7
+};
+typedef struct {
+  int phase;
+  int code;
+  int allocation_code;
+  int allocation_was_oom;
+  size_t failed_bytes;
+} fcuda_sequence_split_status;
+int fcuda_sequence_split_begin(size_t weight_half_bytes, size_t activation_half_bytes,
+                               unsigned long long *token, fcuda_sequence_split_status *status);
+int fcuda_sequence_split_end(unsigned long long token, fcuda_sequence_split_status *status);
+/* End sequence-owned compensated split scratch ABI. */
 /* Prompt-panel scratch: a separate exact-size free list that fcuda_panel_release empties, so
  * panel-sized buffers never reach the decode pool. fcuda_malloc_panel returns NULL on failure
  * (no managed fallback); fcuda_panel_release returns the panel buffers still held. */

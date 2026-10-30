@@ -53,7 +53,7 @@ static void *scratch_malloc(size_t bytes) {
 // scratch. Discard also drains prior stream work on a pool-borrowed allocation.
 // On cleanup failure the allocator keeps that owner live/non-reusable; surface
 // the first cleanup status and still attempt every other acquired owner.
-static int fp16_compensated_scratch(size_t wn, size_t xn, __half **scratch) {
+static int fp16_compensated_owned_scratch(size_t wn, size_t xn, __half **scratch) {
   const size_t bytes[4] = {wn * sizeof(__half), wn * sizeof(__half),
                            xn * sizeof(__half), xn * sizeof(__half)};
   for (int i = 0; i < 4; ++i) {
@@ -68,6 +68,211 @@ static int fp16_compensated_scratch(size_t wn, size_t xn, __half **scratch) {
     }
     return status;
   }
+  return 0;
+}
+
+// A loan is private to one whole-sequence call under cudaMu. Its raw device
+// allocations never enter g_pool or g_panel_pool, including on successful exit.
+enum class SequenceSplitPhase { Idle, Reserving, Active, Ending, Quarantined };
+struct SequenceSplitOwner {
+  SequenceSplitPhase phase = SequenceSplitPhase::Idle;
+  unsigned long long token = 0;
+  void *ptr[4] = {};
+  size_t bytes[4] = {};
+  bool borrowed = false;
+  int failed_fence = 0;
+  int held_code = 0;
+  int allocation_code = 0;
+  size_t failed_bytes = 0;
+};
+static SequenceSplitOwner g_sequence_split;
+static unsigned long long g_sequence_split_generation = 0;
+
+static int sequence_split_status(fcuda_sequence_split_status *status, int phase, int code) {
+  if (status) *status = {phase, code, g_sequence_split.allocation_code,
+      g_sequence_split.allocation_code == (int)cudaErrorMemoryAllocation, g_sequence_split.failed_bytes};
+  return code;
+}
+
+// Every owner is detached only after its exact cudaFree succeeds. A failure
+// never skips another independent owner and never returns a pointer to a pool.
+static int sequence_split_free_owned() {
+  int first = 0;
+  for (int i = 0; i < 4; ++i) {
+    void *ptr = g_sequence_split.ptr[i];
+    if (!ptr) continue;
+    auto live = g_live.find(ptr);
+    int code = (live == g_live.end() || live->second != g_sequence_split.bytes[i])
+        ? (int)cudaErrorInvalidValue : (int)cudaFree(ptr);
+    if (code != 0) {
+      if (first == 0) first = code;
+      continue;
+    }
+    fak_alloc_untrack(ptr);
+    g_live.erase(live);
+    g_sequence_split.ptr[i] = nullptr;
+  }
+  return first;
+}
+
+static void sequence_split_note_failed_fence(cudaError_t status) {
+  if (status != cudaSuccess &&
+      (g_sequence_split.phase == SequenceSplitPhase::Active ||
+       g_sequence_split.phase == SequenceSplitPhase::Ending) &&
+      g_sequence_split.failed_fence == 0)
+    g_sequence_split.failed_fence = (int)status;
+}
+
+extern "C" int fcuda_sequence_split_begin(size_t weight_half_bytes, size_t activation_half_bytes,
+    unsigned long long *token, fcuda_sequence_split_status *status) {
+  if (!token || !status) return (int)cudaErrorInvalidValue;
+  *token = 0;
+  *status = {};
+  if (g_sequence_split.phase == SequenceSplitPhase::Quarantined)
+    return sequence_split_status(status, FCUDA_SEQUENCE_SPLIT_QUARANTINE, g_sequence_split.held_code);
+  const size_t max_bytes = (size_t)-1;
+  if (g_capture_open || g_sequence_split.phase != SequenceSplitPhase::Idle ||
+      !weight_half_bytes || !activation_half_bytes ||
+      weight_half_bytes % sizeof(__half) || activation_half_bytes % sizeof(__half) ||
+      weight_half_bytes > max_bytes / 2 ||
+      activation_half_bytes > (max_bytes - 2 * weight_half_bytes) / 2 ||
+      g_sequence_split_generation == (unsigned long long)-1)
+    return sequence_split_status(status, FCUDA_SEQUENCE_SPLIT_CONTRACT, (int)cudaErrorInvalidValue);
+  // The bookkeeping flag is not sufficient after a failed graph teardown.
+  // A captured stream is a clean refusal; an unreadable runtime state is not.
+  cudaStreamCaptureStatus capture = cudaStreamCaptureStatusNone;
+  const cudaError_t capture_query = cudaStreamIsCapturing(g_stream, &capture);
+  if (capture_query != cudaSuccess) {
+    g_sequence_split.phase = SequenceSplitPhase::Quarantined;
+    g_sequence_split.held_code = (int)capture_query;
+    return sequence_split_status(status, FCUDA_SEQUENCE_SPLIT_CAPTURE_QUERY, (int)capture_query);
+  }
+  if (capture != cudaStreamCaptureStatusNone)
+    return sequence_split_status(status, FCUDA_SEQUENCE_SPLIT_CONTRACT, (int)cudaErrorInvalidValue);
+  g_sequence_split = {};
+  g_sequence_split.phase = SequenceSplitPhase::Reserving;
+  g_sequence_split.token = ++g_sequence_split_generation;
+  for (int i = 0; i < 4; ++i) {
+    const size_t bytes = i < 2 ? weight_half_bytes : activation_half_bytes;
+    void *ptr = nullptr;
+    // Preserve the existing deterministic scratch fault seam, but do not
+    // borrow from the general pool: even its empty keys are graph-prewarmed.
+    cudaError_t code = cudaErrorMemoryAllocation;
+    if (!(g_scratch_alloc_test_fault > 0 && --g_scratch_alloc_test_fault == 0)) {
+      code = cudaMalloc(&ptr, bytes);
+      // Match fcuda_malloc: consume only this real allocation's capacity miss,
+      // not an injected miss or a prior sticky execution error.
+      if (code == cudaErrorMemoryAllocation) (void)cudaGetLastError();
+    }
+    if (code != cudaSuccess || !ptr) {
+      if (code == cudaSuccess) code = cudaErrorMemoryAllocation;
+      g_sequence_split.allocation_code = (int)code;
+      g_sequence_split.failed_bytes = bytes;
+      const int cleanup = sequence_split_free_owned();
+      if (cleanup != 0) {
+        g_sequence_split.phase = SequenceSplitPhase::Quarantined;
+        g_sequence_split.held_code = cleanup;
+        return sequence_split_status(status, FCUDA_SEQUENCE_SPLIT_ROLLBACK, cleanup);
+      }
+      if (code != cudaErrorMemoryAllocation) {
+        g_sequence_split.phase = SequenceSplitPhase::Quarantined;
+        g_sequence_split.held_code = (int)code;
+        return sequence_split_status(status, FCUDA_SEQUENCE_SPLIT_ALLOCATE, (int)code);
+      }
+      const int result = sequence_split_status(status, FCUDA_SEQUENCE_SPLIT_ALLOCATE, (int)code);
+      g_sequence_split = {};
+      return result;
+    }
+    // Record a partial owner immediately, before the next allocator callback.
+    g_sequence_split.ptr[i] = ptr;
+    g_sequence_split.bytes[i] = bytes;
+    g_live[ptr] = bytes;
+    fak_alloc_track(ptr, FAK_ALLOC_PREFILL_SCRATCH, FAK_ALLOC_DEVICE_LOCAL,
+        FAK_ALLOC_SITE("sequence-split-private"), bytes);
+  }
+  g_sequence_split.phase = SequenceSplitPhase::Active;
+  *token = g_sequence_split.token;
+  return 0;
+}
+
+extern "C" int fcuda_sequence_split_end(unsigned long long token, fcuda_sequence_split_status *status) {
+  if (!status) return (int)cudaErrorInvalidValue;
+  *status = {};
+  if (!token || token != g_sequence_split.token ||
+      g_sequence_split.phase != SequenceSplitPhase::Active)
+    return sequence_split_status(status, FCUDA_SEQUENCE_SPLIT_CONTRACT, (int)cudaErrorInvalidValue);
+  if (g_capture_open) {
+    g_sequence_split.phase = SequenceSplitPhase::Quarantined;
+    g_sequence_split.held_code = (int)cudaErrorInvalidValue;
+    return sequence_split_status(status, FCUDA_SEQUENCE_SPLIT_CONTRACT, g_sequence_split.held_code);
+  }
+  cudaStreamCaptureStatus capture = cudaStreamCaptureStatusNone;
+  const cudaError_t capture_query = cudaStreamIsCapturing(g_stream, &capture);
+  if (capture_query != cudaSuccess || capture != cudaStreamCaptureStatusNone) {
+    g_sequence_split.phase = SequenceSplitPhase::Quarantined;
+    g_sequence_split.held_code = capture_query != cudaSuccess
+        ? (int)capture_query : (int)cudaErrorInvalidValue;
+    return sequence_split_status(status, capture_query != cudaSuccess
+        ? FCUDA_SEQUENCE_SPLIT_CAPTURE_QUERY : FCUDA_SEQUENCE_SPLIT_CONTRACT,
+        g_sequence_split.held_code);
+  }
+  g_sequence_split.phase = SequenceSplitPhase::Ending;
+  // A previously observed failed drain cannot be laundered by a later success.
+  if (g_sequence_split.failed_fence == 0)
+    sequence_split_note_failed_fence(cudaStreamSynchronize(g_stream));
+  if (g_sequence_split.failed_fence != 0) {
+    g_sequence_split.phase = SequenceSplitPhase::Quarantined;
+    g_sequence_split.held_code = g_sequence_split.failed_fence;
+    return sequence_split_status(status, FCUDA_SEQUENCE_SPLIT_FENCE, g_sequence_split.failed_fence);
+  }
+  const int cleanup = sequence_split_free_owned();
+  if (cleanup != 0) {
+    g_sequence_split.phase = SequenceSplitPhase::Quarantined;
+    g_sequence_split.held_code = cleanup;
+    return sequence_split_status(status, FCUDA_SEQUENCE_SPLIT_FREE, cleanup);
+  }
+  g_sequence_split = {};
+  return 0;
+}
+
+struct FP16CompensatedScratch {
+  __half *ptr[4] = {};
+  unsigned long long loan = 0; // zero owns its per-operation allocations
+  bool acquired = false;
+};
+static int fp16_compensated_scratch(size_t wn, size_t xn, FP16CompensatedScratch *scratch) {
+  if (!scratch || scratch->acquired || !wn || !xn ||
+      wn > (size_t)-1 / sizeof(__half) || xn > (size_t)-1 / sizeof(__half)) return -1;
+  if (g_sequence_split.phase != SequenceSplitPhase::Idle) {
+    if (g_capture_open || g_sequence_split.phase != SequenceSplitPhase::Active ||
+        g_sequence_split.failed_fence || g_sequence_split.borrowed ||
+        wn * sizeof(__half) > g_sequence_split.bytes[0] ||
+        xn * sizeof(__half) > g_sequence_split.bytes[2]) return -1;
+    for (int i = 0; i < 4; ++i) scratch->ptr[i] = (__half *)g_sequence_split.ptr[i];
+    scratch->loan = g_sequence_split.token;
+    scratch->acquired = g_sequence_split.borrowed = true;
+    return 0;
+  }
+  const int status = fp16_compensated_owned_scratch(wn, xn, scratch->ptr);
+  if (status == 0) scratch->acquired = true;
+  return status;
+}
+static int fp16_compensated_release(FP16CompensatedScratch *scratch) {
+  if (!scratch || !scratch->acquired) return -1;
+  if (scratch->loan != 0) {
+    if (g_sequence_split.phase != SequenceSplitPhase::Active ||
+        scratch->loan != g_sequence_split.token || !g_sequence_split.borrowed) return -1;
+    for (int i = 0; i < 4; ++i)
+      if (scratch->ptr[i] != g_sequence_split.ptr[i]) return -1;
+    g_sequence_split.borrowed = false;
+  } else {
+    // An owned-operation tag must never authorize pooling a private loan.
+    for (int i = 0; i < 4; ++i)
+      for (int j = 0; j < 4; ++j)
+        if (scratch->ptr[i] && scratch->ptr[i] == g_sequence_split.ptr[j]) return -1;
+    for (int i = 0; i < 4; ++i) fcuda_free(scratch->ptr[i]);
+  }
+  scratch->acquired = false;
   return 0;
 }
 
@@ -88,15 +293,14 @@ static void fp16_compensated_gemm(const __half *wHi, const __half *wLo,
 static int fp16_compensated_matmul(const float *W, const float *X, float *Y,
                                    int out, int in, int tokens) {
   size_t wn = (size_t)out * in, xn = (size_t)tokens * in;
-  __half *scratch[4] = {};
-  const int scratch_status = fp16_compensated_scratch(wn, xn, scratch);
+  FP16CompensatedScratch scratch;
+  const int scratch_status = fp16_compensated_scratch(wn, xn, &scratch);
   if (scratch_status != 0) return scratch_status;
-  __half *wHi = scratch[0], *wLo = scratch[1], *xHi = scratch[2], *xLo = scratch[3];
+  __half *wHi = scratch.ptr[0], *wLo = scratch.ptr[1], *xHi = scratch.ptr[2], *xLo = scratch.ptr[3];
   FCUDA_TS("k_fp16_split", (wn + 255) / 256, k_fp16_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(W, wHi, wLo, wn));
   FCUDA_TS("k_fp16_split", (xn + 255) / 256, k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(X, xHi, xLo, xn));
   fp16_compensated_gemm(wHi, wLo, xHi, xLo, Y, out, in, tokens);
-  fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
-  return 0;
+  return fp16_compensated_release(&scratch);
 }
 
 __global__ void k_q8_dequant_transient(const signed char *codes, const float *scales,
@@ -125,16 +329,15 @@ __global__ void k_q8_dequant_split(const signed char *codes, const float *scales
 static int q8_dequant_sgemm(const void *codes, const float *scales,
                             const float *X, float *Y, int rows, int cols, int tokens, int block) {
   size_t wn = (size_t)rows * cols, xn = (size_t)tokens * cols;
-  __half *scratch[4] = {};
-  const int scratch_status = fp16_compensated_scratch(wn, xn, scratch);
+  FP16CompensatedScratch scratch;
+  const int scratch_status = fp16_compensated_scratch(wn, xn, &scratch);
   if (scratch_status != 0) return scratch_status;
-  __half *wHi = scratch[0], *wLo = scratch[1], *xHi = scratch[2], *xLo = scratch[3];
+  __half *wHi = scratch.ptr[0], *wLo = scratch.ptr[1], *xHi = scratch.ptr[2], *xLo = scratch.ptr[3];
   FCUDA_TS("k_q8_dequant_split", (wn + 255) / 256, k_q8_dequant_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(
       (const signed char *)codes, scales, wHi, wLo, wn, cols, block));
   FCUDA_TS("k_fp16_split", (xn + 255) / 256, k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(X, xHi, xLo, xn));
   fp16_compensated_gemm(wHi, wLo, xHi, xLo, Y, rows, cols, tokens);
-  fcuda_free(wHi); fcuda_free(wLo); fcuda_free(xHi); fcuda_free(xLo);
-  return 0;
+  return fp16_compensated_release(&scratch);
 }
 
 __global__ void k_qwen35_gdn_fused_in_proj(
@@ -734,7 +937,9 @@ static int qwen35_gdn_launch_status(int stage) {
 // work has executed and a synchronize would invalidate the capture, so it returns success;
 // the graph fence (fcuda_graph_end_launch) reports a replayed fault instead.
 static cudaError_t qwen35_gdn_fence(void) {
-  return g_capture_open ? cudaSuccess : cudaStreamSynchronize(g_stream);
+  cudaError_t status = g_capture_open ? cudaSuccess : cudaStreamSynchronize(g_stream);
+  sequence_split_note_failed_fence(status);
+  return status;
 }
 
 static int qwen35_gdn_drain_after_error(int status) {
@@ -1228,7 +1433,9 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
         dOutW, dOutWScale, outWQ8, dCore, dOut, hidden, nV * vHd));
   }
   status = qwen35_gdn_launch_status(6);
-  if (status != 0) return qwen35_gdn_drain_after_error(status);  cudaError_t sync = cudaStreamSynchronize(g_stream);
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
+  cudaError_t sync = cudaStreamSynchronize(g_stream);
+  sequence_split_note_failed_fence(sync);
   if (sync != cudaSuccess) return 70000 + (int) sync;
   g_qwen35_gdn_operations += (size_t) tokens;
   return 0;
