@@ -70,7 +70,7 @@ extern "C" int fak_v41_routed_swiglu_run(const float *g,const float *u,float *ou
  // A checked completion is required before examining status or publishing out.
  if(!x){e=cudaStreamSynchronize(g_stream);if(e!=cudaSuccess)x=40000+(int)e;}
  fcuda_ts_untimed_transfer();
- if(!x){e=cudaMemcpy(host,status,16,cudaMemcpyDeviceToHost);if(e!=cudaSuccess)x=45000+(int)e);}
+ if(!x){e=cudaMemcpy(host,status,16,cudaMemcpyDeviceToHost);if(e!=cudaSuccess)x=45000+(int)e;}
  if(x){e=cudaStreamSynchronize(g_stream);if(e!=cudaSuccess){
   for(int i=0;i<4;++i)g_v41_routed_swiglu_quarantine[i]=ptrs[i];
   g_v41_routed_swiglu_uncertain=true;return 50000+(int)e;
