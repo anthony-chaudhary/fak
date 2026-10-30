@@ -159,10 +159,7 @@ extern "C" int fcuda_sequence_split_begin(size_t weight_half_bytes, size_t activ
     // borrow from the general pool: even its empty keys are graph-prewarmed.
     cudaError_t code = cudaErrorMemoryAllocation;
     if (!(g_scratch_alloc_test_fault > 0 && --g_scratch_alloc_test_fault == 0)) {
-      code = cudaMalloc(&ptr, bytes);
-      // Match fcuda_malloc: consume only this real allocation's capacity miss,
-      // not an injected miss or a prior sticky execution error.
-      if (code == cudaErrorMemoryAllocation) (void)cudaGetLastError();
+      code = fcuda_alloc_status(cudaMalloc(&ptr, bytes));
     }
     if (code != cudaSuccess || !ptr) {
       if (code == cudaSuccess) code = cudaErrorMemoryAllocation;
