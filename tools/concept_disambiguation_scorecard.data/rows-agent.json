@@ -8,7 +8,8 @@
       "definition": "The OpenAI Responses-wire cross-shard cache-routing hint (prompt_cache_key): a stable key derived from the cacheable HEAD that pins requests sharing a prefix onto one upstream automatic-prefix-cache node (#5186).",
       "distinction": "A routing/affinity hint on the auto prefix cache (miss only costs latency), distinct from the Anthropic managed-cache TTL upgrade (c4681-cachettlupgrade) which extends explicit cache_control breakpoint lifetime.",
       "distinct_from": [
-        "c4681-cachettlupgrade"
+        "c4681-cachettlupgrade",
+        "expert-checkpoint-page-cache-stats"
       ],
       "aliases": [],
       "grounding": "PromptCacheKey",
@@ -498,6 +499,27 @@
       ],
       "aliases": [],
       "grounding": "errInKernelQwenCohortAborted",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "expert-checkpoint-page-cache-stats",
+      "canonical": "ExpertCheckpointPageCacheStats",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "The model-lifetime checkpoint expert page-cache accounting snapshot exposed through MoE residency: seven existing modeled source-read and mapping counters, aggregated once per checkpoint shard with mapped-source coverage.",
+      "distinction": "Unlike PromptCacheKey, which routes requests sharing a prompt prefix to an upstream cache node, this value snapshot reports checkpoint expert source-read accounting. It neither routes requests nor measures physical SSD traffic, kernel page residency, GPU execution, or transactional cross-tier totals.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [
+        "PageCache"
+      ],
+      "grounding": "ExpertCheckpointPageCacheStats",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

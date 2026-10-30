@@ -1174,6 +1174,8 @@ type ExpertCheckpointStats struct {
 
 	// Readahead records advisory outcomes separately from demand reads.
 	Readahead ExpertCheckpointReadaheadStats `json:"readahead"`
+	// PageCache exposes the source ledger, separately from logical expert bytes.
+	PageCache ExpertCheckpointPageCacheStats `json:"page_cache"`
 
 	Evictions int `json:"evictions"`
 	// OverlayRows/OverlayBytesRead are the per-rank sparse-overlay ledger (#13030): how many faults
@@ -1200,6 +1202,22 @@ type ExpertCheckpointStats struct {
 	LastError string `json:"last_error,omitempty"`
 }
 
+// ExpertCheckpointPageCacheStats qualifies the existing seven-field page-cache
+// ledger. BytesFromDevice counts aligned source ReadAt requests, NOT physical
+// SSD traffic; warm hits describe the source's modeled page set, not observed
+// kernel residency. FillPins are ledger events, not hardware/kernel pins.
+// ExpertsRead counts cold fills; warm hits are separate. AdvantageBytes is
+// alignment over-read, not a measured saving.
+// Sources/MappedSources distinguish disabled or partial shard coverage. Counters
+// are model-lifetime snapshots taken per source, not a transactionally consistent
+// reconciliation with checkpoint totals while faults are publishing.
+type ExpertCheckpointPageCacheStats struct {
+	ExpertPageCacheStats
+	Accounting    string `json:"accounting"`
+	Sources       int    `json:"sources"`
+	MappedSources int    `json:"mapped_sources"`
+}
+
 // Stats reports this tier's ledger. The nil tier reports the zero value (Enabled=false), which is
 // the honest reading for a model whose experts are fully resident: there is no checkpoint IO to
 // account because there is no checkpoint tier.
@@ -1220,6 +1238,10 @@ func (t *ExpertCheckpointTier) Stats() ExpertCheckpointStats {
 		PrefetchHits:  t.prefetchHits,
 		PrefetchStale: t.prefetchStale,
 		Readahead:     t.readahead,
+		PageCache: ExpertCheckpointPageCacheStats{
+			Accounting: "modeled_source_io",
+			Sources:    len(t.shards),
+		},
 		Evictions:     t.evictions,
 		BudgetBytes:   t.pool.Budget(),
 		ResidentBytes: t.pool.Used(),
@@ -1233,6 +1255,20 @@ func (t *ExpertCheckpointTier) Stats() ExpertCheckpointStats {
 	}
 	for _, o := range t.overlays {
 		st.OverlayPresent += o.PresentRows()
+	}
+	// A shard may index many experts/projections; sample its ledger exactly once.
+	for _, src := range t.shards {
+		pc, mapped := src.pageCacheSession()
+		if mapped {
+			st.PageCache.Enabled = true
+			st.PageCache.MappedSources++
+		}
+		st.PageCache.ExpertsRead += pc.ExpertsRead
+		st.PageCache.BytesFromDevice += pc.BytesFromDevice
+		st.PageCache.BytesFromMapping += pc.BytesFromMapping
+		st.PageCache.WarmHits += pc.WarmHits
+		st.PageCache.FillPins += pc.FillPins
+		st.PageCache.AdvantageBytes += pc.AdvantageBytes
 	}
 	if t.lastErr != nil {
 		st.LastError = t.lastErr.Error()

@@ -2050,3 +2050,10 @@ Latched CUDA compressor-pooling completion uncertainty that blocks unsafe subseq
 CUDA compressor-pooling pointer quarantine protecting buffers when asynchronous completion is uncertain.
 
 **Distinct from:** This is a specific compressor-pooling ABI, status or lifetime submechanism, not the whole pooling operator and not a reusable session resource pool. It grants no hardware or numerical acceptance.
+
+
+### ExpertCheckpointPageCacheStats
+
+The model-lifetime checkpoint expert page-cache accounting snapshot exposed through MoE residency: seven existing modeled source-read and mapping counters, aggregated once per checkpoint shard with mapped-source coverage.
+
+**Distinct from:** Unlike PromptCacheKey, which routes requests sharing a prompt prefix to an upstream cache node, this value snapshot reports checkpoint expert source-read accounting. It neither routes requests nor measures physical SSD traffic, kernel page residency, GPU execution, or transactional cross-tier totals.

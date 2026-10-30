@@ -108,6 +108,8 @@ type CheckpointResidencySnapshot struct {
 	ResidentCount    int    `json:"resident_count"`
 	OverlayRows      int    `json:"overlay_rows"`
 	OverlayBytesRead int64  `json:"overlay_bytes_read"`
+	// PageCache is a value snapshot of modeled/source I/O, never physical SSD I/O.
+	PageCache model.ExpertCheckpointPageCacheStats `json:"page_cache"`
 }
 
 // V41PhaseLifetimeSnapshot is the bounded model-lifetime view of V4.1 work.
@@ -542,6 +544,7 @@ func (p *InKernelPlanner) foldMoEResidencyLocked(rep model.MoEResidencyReport, t
 			ResidentCount:    ck.ResidentCount,
 			OverlayRows:      ck.OverlayRows,
 			OverlayBytesRead: ck.OverlayBytesRead,
+			PageCache:        ck.PageCache,
 		}
 	}
 	l.Last = rep
