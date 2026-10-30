@@ -774,7 +774,8 @@ extern "C" int fcuda_paged_kv_gather_f32(float* dst, const float* cache, const i
 }
 
 extern "C" int fcuda_paged_store_int(int* dst, int value) {
-  fak_vllm_pa::paged_store_int_kernel<<<1, 1, 0, g_stream>>>(dst, value);
+  FCUDA_TS("paged_store_int_kernel", 1,
+           fak_vllm_pa::paged_store_int_kernel<<<1, 1, 0, g_stream>>>(dst, value));
   return cudaGetLastError() == cudaSuccess ? 0 : 4;
 }
 

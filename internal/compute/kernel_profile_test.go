@@ -468,13 +468,25 @@ var (
 func cudaLaunchTimingName(path, launch, kernel string) string {
 	launch = strings.Join(strings.Fields(strings.TrimSuffix(launch, "<<<")), "")
 	aliases := map[string]string{
-		"cuda/quant_matmul.cuh:k_q5k_gemm<4>": "k_q5k_gemm_panel",
-		"cuda/quant_matmul.cuh:k_q6k_gemm<4>": "k_q6k_gemm_panel",
-		"cuda/q4k_fp8lt.cuh:amax<true>":       "q4k_fp8lt_weight_amax",
-		"cuda/q4k_fp8lt.cuh:amax<false>":      "q4k_fp8lt_activation_amax",
-		"cuda/q4k_fp8lt.cuh:finish_scales":    "q4k_fp8lt_scales",
-		"cuda/q4k_fp8lt.cuh:convert<true>":    "q4k_fp8lt_dequant",
-		"cuda/q4k_fp8lt.cuh:convert<false>":   "q4k_fp8lt_quantize",
+		"cuda/paged_attention_vllm.cuh:kern":  "fak_paged_attention_v1",
+		"cuda/paged_attention_vllm.cuh:kern2": "fak_paged_attention_v2",
+		"cuda/paged_attention_vllm.cuh:paged_attention_v2_reduce_kernel<float,HEAD_SIZE,NUM_THREADS,PARTITION_SIZE>": "fak_paged_attention_v2_reduce",
+		"cuda/paged_attention_vllm.cuh:fak_vllm_pa::reshape_and_cache_run_kernel":                                    "fak_paged_kv_write",
+		"cuda/paged_attention_vllm.cuh:fak_vllm_pa::paged_gather_rows_kernel":                                        "fak_paged_kv_gather",
+		"cuda/q3k_mmvq.cuh:fak_q3k_mmvq::mul_mat_vec_q<1>":                                                           "k_q3k_mmvq_gemv",
+		"cuda/q3k_mmvq.cuh:fak_q3k_mmvq::mul_mat_vec_q<2>":                                                           "k_q3k_mmvq_gemv",
+		"cuda/q3k_mmvq.cuh:fak_q3k_mmvq::mul_mat_vec_q<3>":                                                           "k_q3k_mmvq_gemv",
+		"cuda/q3k_mmvq.cuh:dequantize_block_q3_K":                                                                    "k_q3k_dequant",
+		"cuda/q4k_mmvq.cuh:mul_mat_vec_q<1>":                                                                         "k_q4k_mmvq_gemv",
+		"cuda/q4k_mmvq.cuh:mul_mat_vec_q<2>":                                                                         "k_q4k_mmvq_gemv",
+		"cuda/q4k_mmvq.cuh:mul_mat_vec_q<3>":                                                                         "k_q4k_mmvq_gemv",
+		"cuda/quant_matmul.cuh:k_q5k_gemm<4>":                                                                        "k_q5k_gemm_panel",
+		"cuda/quant_matmul.cuh:k_q6k_gemm<4>":                                                                        "k_q6k_gemm_panel",
+		"cuda/q4k_fp8lt.cuh:amax<true>":                                                                              "q4k_fp8lt_weight_amax",
+		"cuda/q4k_fp8lt.cuh:amax<false>":                                                                             "q4k_fp8lt_activation_amax",
+		"cuda/q4k_fp8lt.cuh:finish_scales":                                                                           "q4k_fp8lt_scales",
+		"cuda/q4k_fp8lt.cuh:convert<true>":                                                                           "q4k_fp8lt_dequant",
+		"cuda/q4k_fp8lt.cuh:convert<false>":                                                                          "q4k_fp8lt_quantize",
 	}
 	if name, ok := aliases[path+":"+launch]; ok {
 		return name
@@ -649,11 +661,13 @@ var cudaKernelOtherAllowlist = map[string]bool{
 	"q4k_fp8lt_weight_amax": true, "q4k_fp8lt_activation_amax": true, "q4k_fp8lt_scales": true,
 	"q4k_fp8lt_dequant": true, "q4k_fp8lt_quantize": true,
 	"k_add": true, "k_add_bias": true, "k_copyrow": true, "k_f32_to_f16": true, "k_f32_to_f16_T": true,
-	"k_fp16_split": true, "k_nvfp4_lt_swizzle_scales": true, "k_q2k_dequant_transient": true,
-	"k_q4k_coeffs": true, "k_q4k_dequant_transient": true, "k_q8_dequant_transient": true,
+	"k_fp16_split": true, "k_nvfp4_lt_swizzle_scales": true, "k_q2k_dequant_split": true,
+	"k_q4k_coeffs": true, "k_q4k_dequant_split": true, "k_q8_dequant_split": true,
 	"k_q8_quant_act": true, "k_qwen35_embedding_gather": true, "k_qwen35_split_qg_panel": true,
 	"k_qwen4exp_ple_hash_i64": true, "k_sigmoid_mul": true, "k_split_qwen35_qg": true,
 	"k_v41_bf16_publish": true, "k_v41_bf16_publish_status": true, "quantize_mmq_q8_1_ds4": true,
+	"k_v41_indexer_score_f32": true, "k_v41_indexer_score_tiled_f32": true,
+	"fak_paged_kv_write": true, "fak_paged_kv_gather": true, "paged_store_int_kernel": true,
 	"quantize_q8_1": true, "k_q3k_dequant": true,
 }
 
