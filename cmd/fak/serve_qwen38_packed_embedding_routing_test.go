@@ -276,3 +276,111 @@ func writeServePackedEmbeddingFixture(t *testing.T, base string, witnessedSize b
 	}
 	return path
 }
+
+// TestServeQwen38UDQ4KMPackedEmbeddingRouting pins the UD-Q4_K_M token-table lever: on the CUDA
+// embedding-row path the pinned artifact keeps token_embd.weight packed Q4_K (the CUDA serve plan
+// otherwise charged 4.736 GiB of F32 for the [248320,5120] table), while native Metal, a renamed
+// file and a size mismatch keep the prior F32 layout.
+// fak-test:runtime fast est=200ms lane=default
+func TestServeQwen38UDQ4KMPackedEmbeddingRouting(t *testing.T) {
+	originalMetalAvailable := serveMetalAvailable
+	t.Cleanup(func() { serveMetalAvailable = originalMetalAvailable })
+	serveMetalAvailable = func() bool { return true }
+	t.Setenv("FAK_Q4K", "1")
+	t.Setenv("FAK_STREAM_Q4K", "0")
+	t.Setenv("FAK_METAL_STREAM_Q4K", "0")
+	cuda := qwen38EmbeddingRowsBackend{
+		qwen38NamedBackend: qwen38NamedBackend{
+			serveCapBackend: serveCapBackend{Backend: compute.Default(), uploadDtype: true},
+			name:            "cuda",
+		},
+		path: compute.Qwen35SequenceEmbeddingRowsPath,
+	}
+	udFixture := func(t *testing.T, base string, size int64) string {
+		path := writeServePackedEmbeddingFixture(t, base, false)
+		if err := os.Truncate(path, size); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	cases := []struct {
+		name    string
+		base    string
+		size    int64
+		backend compute.Backend
+		packed  bool
+	}{
+		{"pinned UD artifact on CUDA rows", "Qwen3.8-27B-UD-Q4_K_M.gguf", qwen38UDQ4KMArtifactBytes, cuda, true},
+		{"pinned UD artifact on native Metal", "Qwen3.8-27B-UD-Q4_K_M.gguf", qwen38UDQ4KMArtifactBytes, nil, false},
+		{"UD size under another name", "Qwen3.8-27B-UD-Q4_K_M-copy.gguf", qwen38UDQ4KMArtifactBytes, cuda, false},
+		{"UD name with a truncated size", "Qwen3.8-27B-UD-Q4_K_M.gguf", qwen38UDQ4KMArtifactBytes - 1, cuda, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := udFixture(t, tc.base, tc.size)
+			m, residentQ4K, _, _ := loadServeInKernelModel(path, tc.backend, false, 0, nil, 1, nil)
+			if m == nil || !residentQ4K {
+				t.Fatalf("serve load = model %v residentQ4K=%v, want non-nil/true", m, residentQ4K)
+			}
+			if !tc.packed {
+				assertServeEmbeddingExpanded(t, m.Q2KEmbedding, m.HasF32("model.embed_tokens.weight"))
+				return
+			}
+			if m.Q2KEmbedding == nil || m.Q2KEmbedding.Format() != "Q4_K" {
+				t.Fatalf("token embedding = %v, want packed Q4_K", m.Q2KEmbedding)
+			}
+			if m.HasF32("model.embed_tokens.weight") {
+				t.Fatal("pinned UD artifact expanded token embedding to F32")
+			}
+		})
+	}
+}
+
+// TestServeQwen38UDQ4KMEmbeddingPlanChargesPackedBytes witnesses the fit planner half of the
+// lever: the serve option set for the pinned UD artifact on CUDA rows charges the token table at
+// its packed Q4_K bytes, where the same header under another name charges dim*vocab F32.
+// fak-test:runtime fast est=100ms lane=default
+func TestServeQwen38UDQ4KMEmbeddingPlanChargesPackedBytes(t *testing.T) {
+	t.Setenv("FAK_Q4K", "1")
+	cuda := qwen38EmbeddingRowsBackend{
+		qwen38NamedBackend: qwen38NamedBackend{
+			serveCapBackend: serveCapBackend{Backend: compute.Default(), uploadDtype: true},
+			name:            "cuda",
+		},
+		path: compute.Qwen35SequenceEmbeddingRowsPath,
+	}
+	const (
+		dim, vocab   = 256, 3
+		q4BlockBytes = 144
+	)
+	plan := func(base string) map[string]int64 {
+		t.Helper()
+		path := writeServePackedEmbeddingFixture(t, base, false)
+		if err := os.Truncate(path, qwen38UDQ4KMArtifactBytes); err != nil {
+			t.Fatal(err)
+		}
+		ws, err := ggufload.OpenWeights(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ws.Close()
+		opts := serveResidentQ4KLoadOptions(cuda, path, true, ggufload.ClassifyTensorQuant(ws.File.Tensors))
+		rows, err := ws.EstimateQ4KLoadMemoryPlan(opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]int64{}
+		for _, row := range rows {
+			got[row.DType] += row.Bytes
+		}
+		return got
+	}
+	packed, expanded := plan("Qwen3.8-27B-UD-Q4_K_M.gguf"), plan("Qwen3.8-27B-UD-Q4_K_M-copy.gguf")
+	f32 := compute.F32.String()
+	if d := expanded[f32] - packed[f32]; d != dim*vocab*4 {
+		t.Errorf("F32 plan delta = %d bytes, want %d (the expanded token table)", d, dim*vocab*4)
+	}
+	if d := packed["q4_k"] - expanded["q4_k"]; d != vocab*q4BlockBytes {
+		t.Errorf("q4_k plan delta = %d bytes, want %d (the packed token table)", d, vocab*q4BlockBytes)
+	}
+}

@@ -306,8 +306,8 @@ func serveLoadCPUOffloadArmFromWeightSource(ws *ggufload.WeightSource, cpuOffloa
 }
 
 // serveQwen38Q4KEmbeddingResident limits packed Q4_K embedding residency to the
-// exact Qwen3.8-27B artifact on a path that consumes bounded embedding rows. Metal
-// gathers rows on the host; CUDA's sequence path accepts the same host-gathered
+// pinned Qwen3.8-27B Q4_K_M (Metal, CUDA) and UD-Q4_K_M (CUDA) artifacts on a path
+// that consumes bounded embedding rows. Metal gathers rows on the host; CUDA's sequence path accepts the same host-gathered
 // [tokens,hidden] panel and decode uploads one row. Other artifacts and backends
 // retain the loader's default F32 embedding.
 func serveQwen38Q4KEmbeddingResident(backend compute.Backend, ggufPath string, residentQ4K bool) bool {
@@ -317,7 +317,9 @@ func serveQwen38Q4KEmbeddingResident(backend compute.Backend, ggufPath string, r
 		rows, ok := backend.(compute.Qwen35SequenceEmbeddingRowsBackend)
 		nativeCUDA = ok && rows.Qwen35SequenceEmbeddingRowsPath() == compute.Qwen35SequenceEmbeddingRowsPath
 	}
-	return residentQ4K && (nativeMetal || nativeCUDA) && isWitnessedQwen38Q4KM(ggufPath)
+	// The UD-Q4_K_M pin is admitted on the CUDA row path only; Metal keeps the Q4_K_M witness.
+	return residentQ4K && ((nativeMetal && isWitnessedQwen38Q4KM(ggufPath)) ||
+		(nativeCUDA && isWitnessedQwen38Q4KEmbeddingArtifact(ggufPath)))
 }
 
 // serveQwen38Q2KEmbeddingResident limits packed Q2_K embedding residency to the
