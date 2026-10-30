@@ -103,6 +103,10 @@ const (
 	// exactly that kind, so the settlement's premise no longer holds and the tier admits Q3_K the
 	// same way it admits Q2_K (fak#13144).
 	ExpertCheckpointQ3K
+	// Upstream mixed-quant expert formats; existing enum values stay unchanged.
+	ExpertCheckpointIQ2XXS
+	ExpertCheckpointIQ2XS
+	ExpertCheckpointIQ1M
 )
 
 // String names the representation for a report or an error.
@@ -118,6 +122,12 @@ func (q ExpertCheckpointQuant) String() string {
 		return "Q3_K"
 	case ExpertCheckpointQ4K:
 		return "Q4_K"
+	case ExpertCheckpointIQ2XXS:
+		return "IQ2_XXS"
+	case ExpertCheckpointIQ2XS:
+		return "IQ2_XS"
+	case ExpertCheckpointIQ1M:
+		return "IQ1_M"
 	}
 	return fmt.Sprintf("ExpertCheckpointQuant(%d)", int(q))
 }
@@ -137,6 +147,12 @@ func (q ExpertCheckpointQuant) blockGeometry() (weights, bytes int, ok bool) {
 		return qkK, q2kBlockBytes, true
 	case ExpertCheckpointQ3K:
 		return qkK, q3kBlockBytes, true
+	case ExpertCheckpointIQ2XXS:
+		return qkK, iq2xxsBlockBytes, true
+	case ExpertCheckpointIQ2XS:
+		return qkK, iq2xsBlockBytes, true
+	case ExpertCheckpointIQ1M:
+		return qkK, iq1mBlockBytes, true
 	}
 	return 0, 0, false
 }
@@ -205,6 +221,12 @@ func (e expertCheckpointEntry) dtype() compute.Dtype {
 		return compute.Q2_K
 	case ExpertCheckpointQ3K:
 		return compute.Q3_K
+	case ExpertCheckpointIQ2XXS:
+		return compute.IQ2_XXS
+	case ExpertCheckpointIQ2XS:
+		return compute.IQ2_XS
+	case ExpertCheckpointIQ1M:
+		return compute.IQ1_M
 	default:
 		return compute.Q4_K
 	}
@@ -224,6 +246,12 @@ func (e expertCheckpointEntry) weight(name string, raw []byte) expertWeight {
 		return expertWeight{name: name, kq: &kQuantTensor{out: e.rows, in: e.cols, nblk: e.nblk, kind: kindQ2K, raw: raw}}
 	case ExpertCheckpointQ3K:
 		return expertWeight{name: name, kq: &kQuantTensor{out: e.rows, in: e.cols, nblk: e.nblk, kind: kindQ3K, raw: raw}}
+	case ExpertCheckpointIQ2XXS:
+		return expertWeight{name: name, kq: &kQuantTensor{out: e.rows, in: e.cols, nblk: e.nblk, kind: kindIQ2XXS, raw: raw}}
+	case ExpertCheckpointIQ2XS:
+		return expertWeight{name: name, kq: &kQuantTensor{out: e.rows, in: e.cols, nblk: e.nblk, kind: kindIQ2XS, raw: raw}}
+	case ExpertCheckpointIQ1M:
+		return expertWeight{name: name, kq: &kQuantTensor{out: e.rows, in: e.cols, nblk: e.nblk, kind: kindIQ1M, raw: raw}}
 	default:
 		return expertWeight{name: name, q4: &q4kTensor{out: e.rows, in: e.cols, nblk: e.nblk, raw: raw}}
 	}
@@ -556,6 +584,11 @@ func (t *ExpertCheckpointTier) stagingForBackend(name string, be compute.Backend
 	if !indexed {
 		return nil, false
 	}
+	// The legacy routed-expert marker predates IQ support. New IQ descriptors
+	// need a per-dtype promise before entering a backend's staging path.
+	if be != nil && (entry.quant == ExpertCheckpointIQ2XXS || entry.quant == ExpertCheckpointIQ2XS || entry.quant == ExpertCheckpointIQ1M) && !compute.BackendSupportsDeviceWeightDtype(be, entry.dtype()) {
+		return nil, false
+	}
 	capability, capable := be.(borrowedExpertUploadBackend)
 	borrowSafe := capable && capability.SupportsBorrowedExpertUploads()
 	return &checkpointStaging{
@@ -588,6 +621,9 @@ func (t *ExpertCheckpointTier) stagingForBackend(name string, be compute.Backend
 			if w.kq.kind == kindQ3K {
 				// Verbatim, like every other admitted k-quant: no f32 expansion of the expert bulk.
 				return compute.NewQ3K(compute.Default(), []int{w.kq.out, w.kq.in}, w.kq.raw)
+			}
+			if w.kq.kind == kindIQ2XXS || w.kq.kind == kindIQ2XS || w.kq.kind == kindIQ1M {
+				return compute.NewRawIQ(compute.Default(), entry.dtype(), []int{w.kq.out, w.kq.in}, w.kq.raw)
 			}
 			return compute.NewQ5K(compute.Default(), []int{w.kq.out, w.kq.in}, w.kq.raw)
 		},
