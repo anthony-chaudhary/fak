@@ -31,13 +31,14 @@
 
 # --- release-unblock L5 (2026-10-30): transient deferrals ---
 #
-# These three deletions are authored but held out of the L5 commit because the two files
-# they live in are claimed by peer checkpoints (PEER_WIP_COLLISION). They are plain dead
-# weight (zero call sites); the follow-up commit deletes each func and prunes its line.
+# This deletion is authored but held out of the L5 commit because its file is claimed by a
+# peer checkpoint (PEER_WIP_COLLISION). It is plain dead weight (zero call sites); the
+# follow-up commit deletes the func and prunes this line. The two internal/gateway wrappers
+# (adjudicateNormalizeWriteTargets, adjudicateWorkdir) were deleted and their lines pruned
+# 2026-10-30 once refs/fak/wip/codex-admission-repair-01a16156/admission-atomic-guard-2164
+# was gone from the ref namespace.
 
 cmd/fak loadResidentQ4KDevice # L5 deferral: deletion held behind refs/fak/wip/l6-gateway-exec/park on serve_load_helpers.go; follow-up commit deletes it and prunes this line.
-internal/gateway adjudicateNormalizeWriteTargets # L5 deferral: deletion held behind refs/fak/wip/codex-admission-repair-01a16156/admission-atomic-guard-2164 on tool_routing_lease_admission.go; follow-up commit deletes it and prunes this line.
-internal/gateway adjudicateWorkdir # L5 deferral: deletion held behind refs/fak/wip/codex-admission-repair-01a16156/admission-atomic-guard-2164 on tool_routing_lease_admission.go; follow-up commit deletes it and prunes this line.
 
 # --- history ---
 #
