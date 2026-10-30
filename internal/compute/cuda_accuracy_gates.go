@@ -56,6 +56,10 @@ const (
 	// dequant-fused device GEMV / panel GEMM (#11945). The reference is the CPU dequant
 	// of the exact same super-block bytes.
 	cudaQ2KCosineMin = 0.995
+	// cudaQ3KCosineMin is the RECORDED Approx cosine floor for the Q3_K MMVQ / dequant GEMM
+	// (cuda/q3k_mmvq.cuh) against the CPU Q3_K oracle over the same super-block bytes; the
+	// MMVQ residual is the q8_1 activation quantization, like the Q4_K mmvq arm.
+	cudaQ3KCosineMin = 0.995
 	// cudaQ2CosineMin is the cuda backend's RECORDED Approx cosine floor for the packed-ternary
 	// Q2_0 device GEMV (#4872). UNLIKE the Q8/Q4_K floors, the Q2_0 witness compares the device
 	// GEMM against a cpuref f32 GEMV over an f32 dequant of the SAME packed ternary codes+scales

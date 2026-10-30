@@ -421,11 +421,20 @@ void fcuda_q6k_matmul_f32(const uint8_t *dQ6K, const float *dX, float *dY, int o
  * llama.cpp k-quant super-block bytes dQ2K, 256 elements per 84-byte super-block (16 scale bytes,
  * 64 quant bytes, f16 d, f16 dmin). Fused dequantization on device, F32 accumulate.
  * Eliminates A100 CPU decode offload on sm_80/sm_89/sm_90 (#11945). */
-// Packed GGUF Q3_K, no scratch; native CUDA status returned.
-int fcuda_q3k_matmul_f32(const uint8_t *W, const float *X, float *Y, int out, int in, int P);
 int fcuda_q2k_matmul_f32(const uint8_t *dQ2K, const float *dX, float *dY, int out, int in, int P);
 void fcuda_q2k_gemv(const uint8_t *dQ2K, const float *dX, float *dY, int out, int in, int P);
 void fcuda_q2k_gemm_panel(const uint8_t *dQ2K, const float *dX, float *dY, int out, int in, int P);
+
+/* fcuda_q3k_matmul_f32: Y[P,out] = X[P,in] @ W[out,in]^T where W is resident Q3_K — the verbatim
+ * llama.cpp 110-byte 256-element super-block stream (32 B hmask, 64 B low codes, 12 B 6-bit scales,
+ * f16 d). P < 128 runs the f32 dequant-fused panel (cuda/q3k_matmul.cuh), or for P <= 3 with the
+ * mmvq decode arm (fcuda_set_q4k_decode_arm(1), FAK_CUDA_Q4K_DECODE=mmvq) llama.cpp's q8_1 DP4A MMVQ
+ * (cuda/q3k_mmvq.cuh); P >= 128 dequantizes to a transient f32 image and runs the compensated fp16
+ * GEMM. Returns 0, a cudaError_t for refused operands or a launch error (panel arm), 80001 (scratch
+ * miss), or 80002/83000+ (fp16 split scratch); nothing is launched on a scratch miss. */
+int fcuda_q3k_matmul_f32(const uint8_t *dQ3K, const float *dX, float *dY, int out, int in, int P);
+/* fcuda_q3k_mmvq_launch_count counts Q3_K MMVQ kernel launches (parity witness). */
+unsigned long long fcuda_q3k_mmvq_launch_count(void);
 
 /* fcuda_iq2xxs_gemv / fcuda_iq2xs_gemv: Y[P,out] = X[P,in] @ W[out,in]^T where W is the resident
  * verbatim llama.cpp IQ2_XXS (66 B) / IQ2_XS (74 B) 256-element super-block stream; decode fused

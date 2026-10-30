@@ -1039,6 +1039,23 @@ is a persistent buffer. No upstream runtime is included. The upstream license is
 License reproduced under "llama.cpp Q4_K MMQ prompt-panel GEMM" above
 (Copyright (c) 2023-2026 The ggml authors).
 
+## llama.cpp Q3_K MMVQ decode GEMV
+
+The resident CUDA Q3_K matrix multiply, `internal/compute/cuda/q3k_mmvq.cuh`, adapts the
+`block_q3_K` layout (`ggml/src/ggml-common.h`), `get_int_b2` / `get_int_b4`,
+`vec_dot_q3_K_q8_1_impl_mmvq` and `vec_dot_q3_K_q8_1` (`ggml/src/ggml-cuda/vecdotq.cuh`), the
+Q3_K instantiation of `mul_mat_vec_q` with its NVIDIA generic parameter rows (`mmvq.cu`) and
+`dequantize_block_q3_K` with its 64-thread launcher (`convert.cu`), at llama.cpp revision
+`571d0d540df04f25298d0e159e520d9fc62ed121`:
+https://github.com/ggml-org/llama.cpp/tree/571d0d540df04f25298d0e159e520d9fc62ed121/ggml/src/ggml-cuda
+
+Changed for Fak: only Q3_K, f32 dequant output (prompt panels of 128+ rows) and one to three
+activation columns per MMVQ launch (the opt-in decode arm); no fusion, MoE ids, channel or
+sample broadcast; the second row of a two-row block clamps its weight read; the q8_1 scratch is a
+persistent buffer, and the q8_1 quantizer is the one already ported for Q4_K. No upstream runtime
+is included. The upstream license is the MIT License reproduced under "llama.cpp Q4_K MMQ
+prompt-panel GEMM" above (Copyright (c) 2023-2026 The ggml authors).
+
 ## NVIDIA cuBLASLt FP8 sample
 
 The experimental Q4_K FP8 arm in `internal/compute/cuda/q4k_fp8lt.cuh` adapts the

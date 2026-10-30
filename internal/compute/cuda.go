@@ -1189,7 +1189,7 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		c.checkQ3KOperands(w, X, out, in, P, true)
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
-		cudaGEMMStatus("BatchedMatMul", int(C.fcuda_q3k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))), cudaGEMMScratch{})
+		cudaGEMMStatus("BatchedMatMul", int(C.fcuda_q3k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))), cudaKQuantScratch(out, in, P))
 	case Q2_K:
 		// native Q2_K prefill GEMM (#11945): dequant fused into the tile off the resident super-block
 		// bytes, dotted with each of the P f32 activation rows, F32 accumulate.
