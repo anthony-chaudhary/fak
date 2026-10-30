@@ -328,3 +328,54 @@ func BenchmarkGuardTokenizeOncePerTree(b *testing.B) {
 		})
 	}
 }
+
+// TestQueryFilesEmptyCandidatesPreservesGuardContract binds the fast path to
+// real declaration-only additions and keeps nonempty-query read failures intact.
+// fak-test:runtime fast est=1ms lane=default
+func TestQueryFilesEmptyCandidatesPreservesGuardContract(t *testing.T) {
+	// Exact added Go-file lines from f7362ee. These are C++ fixture declarations
+	// inside a Go raw string, but dup guard evaluates only the added-line text.
+	const additions = "static bool g_v41_router_uncertain=false;\n" +
+		"static int g_cuda_cleanup_status=0;\n" +
+		"  g_v41_router_uncertain=false; g_cuda_cleanup_status=0;\n"
+	if tokens := len(goTokens(additions, false)); tokens != 20 || tokens >= WindowTokens {
+		t.Fatalf("fixture token count=%d, want 20 below %d", tokens, WindowTokens)
+	}
+	if keys := CandidateKeys(additions); len(keys) != 0 {
+		t.Fatalf("declaration-only fixture unexpectedly qualifies: %d keys", len(keys))
+	}
+	for _, candidates := range []map[string]string{
+		nil,
+		{"fixture_test.go": additions},
+		{"declarations.go": strings.Repeat(additions, 3)},
+	} {
+		cache := newSpyCache()
+		reads := 0
+		got := QueryFiles(candidates, []string{"corpus.go"}, func(string) (string, bool) {
+			reads++
+			return namedBlock("process"), true
+		}, 5, cache)
+		if !reflect.DeepEqual(got, map[string][]Match{}) || reads != 0 ||
+			cache.gets != 0 || cache.puts != 0 || cache.maintains != 1 {
+			t.Fatalf("empty query: result=%v reads=%d gets=%d puts=%d maintains=%d",
+				got, reads, cache.gets, cache.puts, cache.maintains)
+		}
+		for self, candidate := range candidates {
+			want := legacyQuery(candidate, map[string]string{"corpus.go": namedBlock("process")}, self, 5)
+			if !reflect.DeepEqual(got[self], want) {
+				t.Fatalf("empty query changed legacy result for %q", self)
+			}
+		}
+	}
+	// A real query still visits the full supplied corpus and preserves the
+	// existing unreadable-file result; the optimization is not a read-error hatch.
+	cache := newSpyCache()
+	reads := 0
+	got := QueryFiles(map[string]string{"new.go": namedBlock("process")}, []string{"missing.go"}, func(string) (string, bool) {
+		reads++
+		return "", false
+	}, 5, cache)
+	if !reflect.DeepEqual(got, map[string][]Match{}) || reads != 1 || cache.maintains != 1 {
+		t.Fatalf("nonempty unreadable query: result=%v reads=%d maintains=%d", got, reads, cache.maintains)
+	}
+}

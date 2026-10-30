@@ -188,7 +188,16 @@ func QueryFiles(candidates map[string]string, files []string, readFile func(stri
 	}
 	wants := make(map[string]map[string]bool, len(candidates))
 	for rel, candidate := range candidates {
-		wants[rel] = CandidateKeys(candidate)
+		if want := CandidateKeys(candidate); len(want) != 0 {
+			wants[rel] = want
+		}
+	}
+	matches := make(map[string][]Match, len(candidates))
+	if len(wants) == 0 {
+		// No corpus can intersect an empty query. Retain batch maintenance even
+		// when no file needs reading or indexing; cache retention is independent.
+		maintainWindowCache(wc)
+		return matches
 	}
 	unique := make(map[string]bool, len(files))
 	for _, rel := range files {
@@ -199,7 +208,6 @@ func QueryFiles(candidates map[string]string, files []string, readFile func(stri
 		ordered = append(ordered, rel)
 	}
 	sort.Strings(ordered)
-	matches := make(map[string][]Match, len(candidates))
 	for _, rel := range ordered {
 		src, ok := readFile(rel)
 		if !ok {
