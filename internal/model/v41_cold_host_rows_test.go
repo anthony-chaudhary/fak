@@ -418,6 +418,15 @@ func TestV41ColdAttentionRows(t *testing.T) {
 		f := newV41CombinedHostFixture()
 		var out []float32
 		var err error
+		// Allocation shape this assertion guards: the frozen 24344f57 oracle
+		// pays three allocations — the slot index schedule, the flat KV bank
+		// copy (the allocation the row-backed contraction exists to remove),
+		// and the output tensor. The live row-backed path pays the same index
+		// schedule plus the output tensor: below the pool threshold its
+		// score/exp scratch stays stack-local, and the parallel join state
+		// (mutex, selected failure, chunk closure) allocates only when the pool
+		// actually dispatches. The contraction must therefore still remove at
+		// least one heap allocation.
 		old := testing.AllocsPerRun(100, func() {
 			out, err = v41ColdAttentionCombinedOracle(0, 5, 2, f.heads, f.dim, f.q, f.sink, f.window, f.compressed, f.ids, .125, nil, nil, nil)
 		})
