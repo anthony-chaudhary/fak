@@ -192,7 +192,7 @@ func Apply(ctx context.Context, dir, target, message string, run Runner) (ApplyR
 		return ApplyResult{}, err
 	}
 	if message == "" {
-		message = "Merge " + target + " (superset already in HEAD)"
+		message = "Merge " + target + " (superset already in HEAD)\n\nMerge-Strategy: ours"
 	}
 	// `-s ours` keeps HEAD's tree exactly and records target as a second parent. It is safe here
 	// ONLY because Preview proved the real 3-way merge tree equals HEAD — so nothing target added

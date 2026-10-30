@@ -91,6 +91,70 @@ func TestExecutePacket_SuccessfulDisjointWithReadback(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=2s
+func TestSupersetMergeMessagesDeclareStrategy(t *testing.T) {
+	t.Parallel()
+	for _, route := range []string{"reconcile", "packet"} {
+		t.Run(route, func(t *testing.T) {
+			origin, clone := setupTestOriginAndClone(t)
+			for _, repo := range []string{origin, clone} {
+				// Packet admission hands overlapping committed paths to their owners.
+				// An empty peer commit exercises its textless route without bypassing that guard.
+				if route == "packet" && repo == origin {
+					git(t, repo, "commit", "--allow-empty", "-m", "peer metadata")
+					continue
+				}
+				writeFile(t, filepath.Join(repo, "same.txt"), "same\n")
+				git(t, repo, "add", "same.txt")
+				git(t, repo, "commit", "-m", "same change on "+filepath.Base(repo))
+			}
+			git(t, clone, "fetch", "origin")
+			ctx := context.Background()
+			treeBefore, err := rev(ctx, RealRunner, clone, "HEAD^{tree}")
+			if err != nil {
+				t.Fatal(err)
+			}
+			target, err := rev(ctx, RealRunner, clone, "origin/work")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if route == "reconcile" {
+				result, err := RouteReconciliation(ctx, ReconcileOptions{
+					Repo: clone, Remote: "origin", Branch: "work", Goal: "integrate origin/work", Apply: true,
+				})
+				if err != nil || result.Route != RouteSupersetMerge || result.Execution == nil || !result.Execution.Success {
+					t.Fatalf("superset reconcile: result=%+v err=%v", result, err)
+				}
+			} else {
+				packet, err := BuildReconciliationPacket(ctx, PacketOptions{Repo: clone, Remote: "origin", Branch: "work"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if packet.Disposition != DispositionTrivialSuperset {
+					t.Fatalf("disposition = %s, want trivial-superset", packet.Disposition)
+				}
+				receipt, err := ExecutePacket(ctx, packet, ExecuteOptions{Repo: clone, Remote: "origin", Branch: "work"})
+				if err != nil || receipt == nil || receipt.Status != ExecuteStatusExecuted {
+					t.Fatalf("superset execution: receipt=%+v err=%v", receipt, err)
+				}
+			}
+			if treeAfter, err := rev(ctx, RealRunner, clone, "HEAD^{tree}"); err != nil || treeAfter != treeBefore {
+				t.Fatalf("superset tree changed: before=%s after=%s err=%v", treeBefore, treeAfter, err)
+			}
+			if secondParent, err := rev(ctx, RealRunner, clone, "HEAD^2"); err != nil || secondParent != target {
+				t.Fatalf("peer parent = %s, want %s: %v", secondParent, target, err)
+			}
+			message := RealRunner(ctx, clone, "log", "-1", "--format=%B")
+			if message.Err != nil || message.Code != 0 {
+				t.Fatalf("read merge message: %+v", message)
+			}
+			if !strings.Contains(string(message.Stdout), "\n\nMerge-Strategy: ours\n") {
+				t.Fatalf("merge message does not declare the ours strategy: %q", message.Stdout)
+			}
+		})
+	}
+}
+
 func TestExecutePacket_StaleTargetRefRefusal(t *testing.T) {
 	origin, clone := setupTestOriginAndClone(t)
 

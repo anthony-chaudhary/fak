@@ -258,7 +258,7 @@ func (e *PacketExecutor) Execute(ctx context.Context, packet *ReconciliationPack
 				r := run(c, dir, args...)
 				return mergepreview.RunResult{Stdout: r.Stdout, Stderr: r.Stderr, Code: r.Code}, r.Err
 			}
-			msg := fmt.Sprintf("Merge %s (trivial superset)", targetRef)
+			msg := fmt.Sprintf("Merge %s (trivial superset)\n\nMerge-Strategy: ours", targetRef)
 			mpRes, mpErr := mergepreview.Apply(ctx, repo, packet.TargetSHA, msg, mpRunner)
 			if mpErr != nil {
 				return nil, fmt.Errorf("trivial-superset textless merge failed: %w", mpErr)
