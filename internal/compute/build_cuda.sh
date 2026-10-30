@@ -11,7 +11,10 @@
 #
 #   usage:  bash internal/compute/build_cuda.sh [check|build|test|bench]   (default: test)
 #           bash internal/compute/build_cuda.sh binary <pkg> <out-abs-path>
-#   env:    FAK_CUDA_ARCH=sm_89|sm_90|sm_100  (default sm_89; "89" also accepted)
+#   env:    FAK_CUDA_ARCH=sm_89|sm_90|sm_100|sm_120  (unset = fat build of every cuda_arch.txt line + PTX;
+#                                              "89" also accepted; sm_120 is the RTX 50xx form)
+#           FAK_CUDA_V41=0                     (sm_120 only: skip the default device-witnessed V4.1
+#                                              tags; see `fak-dev build-cuda -h` --v41-defaults)
 #           FAK_CUDA_NCCL=1                    (also compile cuda_nccl.cu; Go tags cuda,nccl)
 #           CUDA_HOME=/usr/local/cuda          (default ~/cudaenv, else system nvcc)
 #           NCCL_HOME=/tmp/nccl-root           (optional user-space nccl.h/libnccl.so root)

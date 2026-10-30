@@ -382,6 +382,33 @@ func SignArtifact(ctx context.Context, tc *Toolchain, cfg *CUDAConfig, artifactP
 	return RunCmd(ctx, tc.SignTool, signArgs, "", nil, cfg.Stdout, cfg.Stderr)
 }
 
+// CUDAGoTags composes the Go build tag list for cfg's selections. Call
+// ApplyCUDAV41Defaults first to include the default sm_120 V4.1 set (the
+// fak-dev build-cuda CLI does; library callers keep their explicit config).
+func CUDAGoTags(cfg *CUDAConfig) string {
+	goTags := "cuda"
+	if cfg.EnableNCCL {
+		goTags += ",nccl"
+	}
+	if cfg.EnableArchSpecific {
+		goTags += ",cudaarchspecific"
+	}
+	goTags = cudaV41RoutedSwiGLUTags(cfg, goTags)
+	goTags = cudaV41EngramGateTags(cfg, goTags)
+	goTags = cudaV41CompressorPoolTags(cfg, goTags)
+	goTags = cudaV41CompressorTags(cfg, goTags)
+	goTags = cudaV41RouterTags(cfg, goTags)
+	goTags = cudaV41TailRoPETags(cfg, goTags)
+	goTags = cudaV41BF16PublishTags(cfg, goTags)
+	goTags = cudaV41MHCTags(cfg, goTags)
+	goTags = cudaV41SharedAttentionTags(cfg, goTags)
+	goTags = cudaFlashMLAGoTags(cfg, goTags)
+	if cfg.EnableDeepGEMMWKV {
+		goTags += ",fak_cuda_deepgemm_wkv"
+	}
+	return goTags
+}
+
 // RunCUDA orchestrates CUDA build, test, and check actions.
 func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 	if cfg == nil {
@@ -401,6 +428,9 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 	}
 	defer unlock()
 	ctx = context.WithValue(ctx, cudaReceiptStartContext{}, time.Now().UTC())
+	if len(cfg.V41Defaults) > 0 {
+		ctx = context.WithValue(ctx, cudaV41DefaultsKey{}, append([]string(nil), cfg.V41Defaults...))
+	}
 	if cfg.PkgDir == "" {
 		cfg.PkgDir = filepath.Join(cfg.RepoRoot, "internal", "compute")
 	}
@@ -536,26 +566,7 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 			return err
 		}
 	}
-	goTags := "cuda"
-	if cfg.EnableNCCL {
-		goTags += ",nccl"
-	}
-	if cfg.EnableArchSpecific {
-		goTags += ",cudaarchspecific"
-	}
-	goTags = cudaV41RoutedSwiGLUTags(cfg, goTags)
-	goTags = cudaV41EngramGateTags(cfg, goTags)
-	goTags = cudaV41CompressorPoolTags(cfg, goTags)
-	goTags = cudaV41CompressorTags(cfg, goTags)
-	goTags = cudaV41RouterTags(cfg, goTags)
-	goTags = cudaV41TailRoPETags(cfg, goTags)
-	goTags = cudaV41BF16PublishTags(cfg, goTags)
-	goTags = cudaV41MHCTags(cfg, goTags)
-	goTags = cudaV41SharedAttentionTags(cfg, goTags)
-	goTags = cudaFlashMLAGoTags(cfg, goTags)
-	if cfg.EnableDeepGEMMWKV {
-		goTags += ",fak_cuda_deepgemm_wkv"
-	}
+	goTags := CUDAGoTags(cfg)
 
 	switch cfg.Command {
 	case "check":

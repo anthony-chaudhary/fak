@@ -80,6 +80,8 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 	bf16Publish := fs.Bool("v41-bf16-publish", false, "compile explicit SM120 ordinary V4.1 finite BF16 publication candidate; build selection is not hardware qualification")
 	mhc := fs.Bool("v41-mhc", false, "compile explicit SM120 V4.1 mHC witness candidate; public capability remains unqualified")
 	sharedAttention := fs.Bool("v41-shared-attention", false, "compile explicit SM120 V4.1 shared-attention candidate (paired CUDA define and Go tag; not full-model qualification)")
+	v41Defaults := fs.Bool("v41-defaults", !computebuild.CUDAV41DefaultsDisabledByEnv(), "on a single-arch sm_120 build, select the device-witnessed V4.1 set ("+strings.Join(computebuild.CUDAV41DefaultTags(), ",")+"); false or FAK_CUDA_V41=0 opts out")
+	requireDevice := fs.String("require-device", "", "coverage: comma-separated V4.1 op contracts (e.g. V41RouterTopKBackend) that must report device; exit 1 otherwise")
 	nccl := fs.Bool("nccl", os.Getenv("FAK_CUDA_NCCL") == "1", "compile with NCCL collectives enabled (-tags cuda,nccl)")
 	ncclHome := fs.String("nccl-home", os.Getenv("NCCL_HOME"), "optional path to NCCL installation directory")
 	jsonOut := fs.Bool("json", false, "emit machine-readable JSON output")
@@ -120,6 +122,7 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 		fmt.Fprintln(stderr, "  binary     build full binary with CUDA backend enabled")
 		fmt.Fprintln(stderr, "  accept-model build gpucheck and require native model parity")
 		fmt.Fprintln(stderr, "  accept     require model parity and all isolated CUDA family witnesses")
+		fmt.Fprintln(stderr, "  coverage   report which V4.1 ops run on the device vs host fallback for this tag set (needs a built libfakcuda.a)")
 		fmt.Fprintln(stderr, "flags:")
 		fs.PrintDefaults()
 	}
@@ -153,7 +156,7 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 	}
 
 	switch sub {
-	case "check", "build", "test", "bench", "binary", "accept-model", "accept":
+	case "check", "build", "test", "bench", "binary", "accept-model", "accept", "coverage":
 	default:
 		fmt.Fprintf(stderr, "build-cuda: unknown subcommand %q (expected check, build, test, bench, binary)\n", sub)
 		return 2
@@ -195,6 +198,12 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 		EnableV41TailRoPE:        *tailRoPE,
 		EnableV41BF16Publish:     *bf16Publish,
 		EnableV41MHC:             *mhc,
+		DisableV41Defaults:       !*v41Defaults,
+	}
+	if sub != "check" {
+		if applied := computebuild.ApplyCUDAV41Defaults(cfg); len(applied) > 0 {
+			fmt.Fprintf(stderr, "[cuda] sm_120 V4.1 default tags: %s (--v41-defaults=false or FAK_CUDA_V41=0 opts out)\n", strings.Join(applied, ","))
+		}
 	}
 
 	// For binary subcommand, allow trailing positional args: [pkg] [out]
@@ -245,6 +254,9 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 			tc.CUDALib = append(tc.CUDALib, existingCUDAPaths(*ncclHome, "lib64", "lib", "usr/lib/x86_64-linux-gnu", "usr/lib")...)
 		}
 		cfg.Toolchain = tc
+	}
+	if sub == "coverage" {
+		return runCUDAV41Coverage(stdout, stderr, cfg, *jsonOut, *requireDevice, command)
 	}
 	if sub == "accept-model" || sub == "accept" {
 		return runCUDABuildAcceptance(stdout, stderr, cfg, *hf, *tokens, sub == "accept", run, command)

@@ -77,6 +77,7 @@ type CUDANativeBuildReceipt struct {
 	V41BF16Publish     bool                        `json:"v41_bf16_publish,omitempty"`     // Build selection, not native/device qualification.
 	V41MHC             bool                        `json:"v41_mhc,omitempty"`              // Witness build selection; public capability remains false.
 	V41SharedAttention bool                        `json:"v41_shared_attention,omitempty"` // Build selection, not hardware acceptance.
+	V41Defaults        []string                    `json:"v41_defaults,omitempty"`         // Tags selected by the sm_120 default, not by an explicit flag.
 	DeepGEMMWKV        *CUDADeepGEMMWKVReceipt     `json:"deepgemm_wkv,omitempty"`
 	FlashMLAPrefill    *CUDAFlashMLAPrefillReceipt `json:"flashmla_prefill,omitempty"`
 }
@@ -101,6 +102,7 @@ func newCUDANativeReceipt(ctx context.Context, root, arch string, nccl bool) *CU
 	r.V41BF16Publish, _ = ctx.Value(cudaV41BF16PublishKey{}).(bool)
 	r.V41MHC, _ = ctx.Value(cudaV41MHCKey{}).(bool)
 	r.V41SharedAttention, _ = ctx.Value(cudaV41SharedAttentionKey{}).(bool)
+	r.V41Defaults = cudaV41DefaultsFromContext(ctx)
 	r.ReceiptPath, _ = ctx.Value(cudaReceiptPathContext{}).(string)
 	if r.ReceiptPath == "" {
 		r.ReceiptPath = CUDANativeReceiptPath(root, "")

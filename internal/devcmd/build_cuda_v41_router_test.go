@@ -25,7 +25,7 @@ func TestBuildCUDAV41RouterFlag(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var out, errout bytes.Buffer
 			called := false
-			args := append([]string{"build", "--arch", "sm_120"}, tc.args...)
+			args := append([]string{"build", "--arch", "sm_120", "--v41-defaults=false"}, tc.args...)
 			code := runBuildCUDA(&out, &errout, args, func(_ context.Context, cfg *computebuild.CUDAConfig) error {
 				called = true
 				if cfg.EnableV41Router != tc.router || cfg.EnableV41Compressor != tc.compressor || cfg.EnableV41CompressorPool != tc.pool {

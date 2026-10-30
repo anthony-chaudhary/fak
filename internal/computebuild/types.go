@@ -84,6 +84,9 @@ type CUDAConfig struct {
 	DeepGEMMWKVSMs           int  // Positive physical SM count compiled into the persistent kernel
 	EnableFlashMLAPrefill    bool // Explicit SM100a/103a FlashMLA sparse-prefill candidate
 	DisableFlashMLALDRed     bool // Select the pinned donor's non-LD.RED specialization; requires FlashMLA
+
+	DisableV41Defaults bool     // Skip the default device-witnessed V4.1 set on sm_120 (FAK_CUDA_V41=0)
+	V41Defaults        []string // Tags ApplyCUDAV41Defaults turned on (recorded in the receipt)
 }
 
 // BuildArtifact records metadata about a generated binary or static library.
