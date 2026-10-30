@@ -172,12 +172,95 @@ func (r v41SparseSinkRows) row(batch, index, count, width int) []float32 {
 	return r.compressed[index-len(r.window)]
 }
 
+// v41SparseSinkContractHead contracts one head over its valid slots into o,
+// reusing the caller's score/exp scratch. It owns no state of its own: every
+// input arrives as a parameter, so neither the serial loop nor a pool chunk
+// needs a capturing closure, and the small-work path pays no join allocation
+// for the heads it runs inline.
+func v41SparseSinkContractHead(o, q, sink []float32, idx []int32, opt V41SparseAttentionSinkOptions, rows v41SparseSinkRows, b, m, h, validCount int, terms []float32) error {
+	negInf := float32(math.Inf(-1))
+	qBase := ((b*opt.M+m)*opt.Heads + h) * opt.HeadDim
+	idxBase := (b*opt.M + m) * opt.TopK
+	// Stage 1: max over valid scaled scores, seeded with the sink.
+	maxScore := negInf
+	if sink != nil {
+		maxScore = sink[h]
+	}
+	for i := 0; i < validCount; i++ {
+		row := int(idx[idxBase+i])
+		if row < 0 {
+			continue
+		}
+		values := rows.row(b, row, opt.N, opt.HeadDim)
+		var dot float32
+		for d := 0; d < opt.HeadDim; d++ {
+			dot += float32(q[qBase+d] * values[d])
+		}
+		dot *= opt.Softmax
+		if !finite32(dot) {
+			return sparseSinkNonFinite(v41SinkStageScore, b, m, h, row, -1, dot)
+		}
+		terms[i] = dot
+		if dot > maxScore {
+			maxScore = dot
+		}
+	}
+	if maxScore == negInf {
+		// No valid row and no sink: the reference's finite bound
+		// yields an all-zero output row.
+		return nil
+	}
+	// Stage 2: softmax denominator with the sink included.
+	var sum float32
+	if sink != nil {
+		sum = exp32(sink[h] - maxScore)
+	}
+	for i := 0; i < validCount; i++ {
+		row := int(idx[idxBase+i])
+		if row < 0 {
+			continue
+		}
+		// Match the rounded float32 score used by the maximum pass.
+		// A finite score gap may round to -Inf; exp(-Inf)=0 is valid.
+		term := exp32(terms[i] - maxScore)
+		if !finite32(term) {
+			return sparseSinkNonFinite(v41SinkStageSoftmax, b, m, h, row, -1, term)
+		}
+		terms[i] = term
+		sum += term
+	}
+	if !finite32(sum) {
+		return sparseSinkNonFinite(v41SinkStageSoftmax, b, m, h, -1, -1, sum)
+	}
+	if sum == 0 {
+		return nil
+	}
+	// Stage 3: weighted value sum, normalized by the denominator.
+	oBase := qBase
+	for i := 0; i < validCount; i++ {
+		row := int(idx[idxBase+i])
+		if row < 0 {
+			continue
+		}
+		values := rows.row(b, row, opt.N, opt.HeadDim)
+		weight := terms[i] / sum
+		if !finite32(weight) {
+			return sparseSinkNonFinite(v41SinkStageValue, b, m, h, row, -1, weight)
+		}
+		for d := 0; d < opt.HeadDim; d++ {
+			o[oBase+d] += float32(weight * values[d])
+			if !finite32(o[oBase+d]) {
+				return sparseSinkNonFinite(v41SinkStageValue, b, m, h, row, d, o[oBase+d])
+			}
+		}
+	}
+	return nil
+}
+
 // v41SparseAttentionSinkChecked contains only the shared numerical contraction.
 // Callers must finish the full public or combined validation before constructing
 // its local row view. It is not an admission flag or a retained validation cache.
 func v41SparseAttentionSinkChecked(q, sink []float32, idx []int32, opt V41SparseAttentionSinkOptions, rows v41SparseSinkRows) ([]float32, error) {
-	negInf := float32(math.Inf(-1))
-	o := make([]float32, opt.B*opt.M*opt.Heads*opt.HeadDim)
 	// Independent heads share only immutable inputs. Saturate the scheduling
 	// estimate rather than adding a new geometry refusal to the public API.
 	work := opt.HeadDim
@@ -189,9 +272,53 @@ func v41SparseAttentionSinkChecked(q, sink []float32, idx []int32, opt V41Sparse
 			work *= factor
 		}
 	}
+	// Snapshot the worker budget once and mirror parForRangeWorkers' cutoff
+	// exactly: below it the pool buys nothing, so the heads run inline. The two
+	// arms live in separate functions on purpose — the pooled arm's chunk
+	// closure captures every input, which would leak all parameters to the
+	// heap even on calls that never dispatch a goroutine.
+	workers := currentWorkerCount()
+	if workers <= 1 || work < parThreshold {
+		return v41SparseAttentionSinkSerial(q, sink, idx, opt, rows)
+	}
+	return v41SparseAttentionSinkPooled(q, sink, idx, opt, rows, work, workers)
+}
+
+// v41SparseAttentionSinkSerial runs every head inline. It owns no closures, so
+// none of its parameters escape: the decode-hot small-work path pays exactly
+// the output tensor and one shared score/exp scratch.
+func v41SparseAttentionSinkSerial(q, sink []float32, idx []int32, opt V41SparseAttentionSinkOptions, rows v41SparseSinkRows) ([]float32, error) {
+	o := make([]float32, opt.B*opt.M*opt.Heads*opt.HeadDim)
 	for b := 0; b < opt.B; b++ {
 		for m := 0; m < opt.M; m++ {
-			idxBase := (b*opt.M + m) * opt.TopK
+			// validCount is the number of leading slots that count; slots at
+			// index >= validCount are padding and contribute nothing.
+			validCount := opt.TopK
+			if opt.TopKLength != nil {
+				validCount = int(opt.TopKLength[b*opt.M+m])
+			}
+			// One score/exp scratch per position, reused across its heads.
+			terms := make([]float32, min(opt.TopK, len(idx)))
+			for h := 0; h < opt.Heads; h++ {
+				if err := v41SparseSinkContractHead(o, q, sink, idx, opt, rows, b, m, h, validCount, terms); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	if err := v41SparseAttentionSinkInverse(o, opt); err != nil {
+		return nil, err
+	}
+	return o, nil
+}
+
+// v41SparseAttentionSinkPooled fans independent heads out over the worker pool.
+// Its chunk closure captures the inputs, so this path carries the join state
+// (mutex, selected failure, escaped parameters) the serial path avoids.
+func v41SparseAttentionSinkPooled(q, sink []float32, idx []int32, opt V41SparseAttentionSinkOptions, rows v41SparseSinkRows, work, workers int) ([]float32, error) {
+	o := make([]float32, opt.B*opt.M*opt.Heads*opt.HeadDim)
+	for b := 0; b < opt.B; b++ {
+		for m := 0; m < opt.M; m++ {
 			// validCount is the number of leading slots that count; slots at
 			// index >= validCount are padding and contribute nothing.
 			validCount := opt.TopK
@@ -201,88 +328,11 @@ func v41SparseAttentionSinkChecked(q, sink []float32, idx []int32, opt V41Sparse
 			var firstErr error
 			firstHead := opt.Heads
 			var errorMu sync.Mutex
-			parForRange(opt.Heads, work, func(lo, hi int) {
+			parForRangeWorkers(opt.Heads, work, workers, func(lo, hi int) {
 				// One score/exp scratch per active chunk, reused across its heads.
 				terms := make([]float32, min(opt.TopK, len(idx)))
-				contract := func(h int) error {
-					qBase := ((b*opt.M+m)*opt.Heads + h) * opt.HeadDim
-					// Stage 1: max over valid scaled scores, seeded with the sink.
-					maxScore := negInf
-					if sink != nil {
-						maxScore = sink[h]
-					}
-					for i := 0; i < validCount; i++ {
-						row := int(idx[idxBase+i])
-						if row < 0 {
-							continue
-						}
-						values := rows.row(b, row, opt.N, opt.HeadDim)
-						var dot float32
-						for d := 0; d < opt.HeadDim; d++ {
-							dot += float32(q[qBase+d] * values[d])
-						}
-						dot *= opt.Softmax
-						if !finite32(dot) {
-							return sparseSinkNonFinite(v41SinkStageScore, b, m, h, row, -1, dot)
-						}
-						terms[i] = dot
-						if dot > maxScore {
-							maxScore = dot
-						}
-					}
-					if maxScore == negInf {
-						// No valid row and no sink: the reference's finite bound
-						// yields an all-zero output row.
-						return nil
-					}
-					// Stage 2: softmax denominator with the sink included.
-					var sum float32
-					if sink != nil {
-						sum = exp32(sink[h] - maxScore)
-					}
-					for i := 0; i < validCount; i++ {
-						row := int(idx[idxBase+i])
-						if row < 0 {
-							continue
-						}
-						// Match the rounded float32 score used by the maximum pass.
-						// A finite score gap may round to -Inf; exp(-Inf)=0 is valid.
-						term := exp32(terms[i] - maxScore)
-						if !finite32(term) {
-							return sparseSinkNonFinite(v41SinkStageSoftmax, b, m, h, row, -1, term)
-						}
-						terms[i] = term
-						sum += term
-					}
-					if !finite32(sum) {
-						return sparseSinkNonFinite(v41SinkStageSoftmax, b, m, h, -1, -1, sum)
-					}
-					if sum == 0 {
-						return nil
-					}
-					// Stage 3: weighted value sum, normalized by the denominator.
-					oBase := qBase
-					for i := 0; i < validCount; i++ {
-						row := int(idx[idxBase+i])
-						if row < 0 {
-							continue
-						}
-						values := rows.row(b, row, opt.N, opt.HeadDim)
-						weight := terms[i] / sum
-						if !finite32(weight) {
-							return sparseSinkNonFinite(v41SinkStageValue, b, m, h, row, -1, weight)
-						}
-						for d := 0; d < opt.HeadDim; d++ {
-							o[oBase+d] += float32(weight * values[d])
-							if !finite32(o[oBase+d]) {
-								return sparseSinkNonFinite(v41SinkStageValue, b, m, h, row, d, o[oBase+d])
-							}
-						}
-					}
-					return nil
-				}
 				for h := lo; h < hi; h++ {
-					if err := contract(h); err != nil {
+					if err := v41SparseSinkContractHead(o, q, sink, idx, opt, rows, b, m, h, validCount, terms); err != nil {
 						errorMu.Lock()
 						if h < firstHead {
 							firstHead, firstErr = h, err
@@ -299,28 +349,38 @@ func v41SparseAttentionSinkChecked(q, sink []float32, idx []int32, opt V41Sparse
 			}
 		}
 	}
-	if opt.Inverse != nil {
-		for b := 0; b < opt.B; b++ {
-			for m := 0; m < opt.M; m++ {
-				for h := 0; h < opt.Heads; h++ {
-					headBase := ((b*opt.M+m)*opt.Heads + h) * opt.HeadDim
-					tail := o[headBase+opt.HeadDim-opt.RopeDim : headBase+opt.HeadDim]
-					if err := opt.Inverse(opt.RopeDim, tail); err != nil {
-						return nil, err
-					}
+	if err := v41SparseAttentionSinkInverse(o, opt); err != nil {
+		return nil, err
+	}
+	return o, nil
+}
+
+// v41SparseAttentionSinkInverse applies the optional inverse rotation to every
+// head tail in head order, then revalidates the finished tensor: a callback can
+// retain a previously supplied tail, so the final check covers more than the
+// latest tail.
+func v41SparseAttentionSinkInverse(o []float32, opt V41SparseAttentionSinkOptions) error {
+	if opt.Inverse == nil {
+		return nil
+	}
+	for b := 0; b < opt.B; b++ {
+		for m := 0; m < opt.M; m++ {
+			for h := 0; h < opt.Heads; h++ {
+				headBase := ((b*opt.M+m)*opt.Heads + h) * opt.HeadDim
+				tail := o[headBase+opt.HeadDim-opt.RopeDim : headBase+opt.HeadDim]
+				if err := opt.Inverse(opt.RopeDim, tail); err != nil {
+					return err
 				}
 			}
 		}
-		// A callback can retain a previously supplied tail. Validate the final
-		// tensor after every callback has returned, not only its latest tail.
-		for i, value := range o {
-			if !finite32(value) {
-				head := i / opt.HeadDim
-				return nil, sparseSinkNonFinite(v41SinkStageInverse, head/(opt.M*opt.Heads), head/opt.Heads%opt.M, head%opt.Heads, -1, i%opt.HeadDim, value)
-			}
+	}
+	for i, value := range o {
+		if !finite32(value) {
+			head := i / opt.HeadDim
+			return sparseSinkNonFinite(v41SinkStageInverse, head/(opt.M*opt.Heads), head/opt.Heads%opt.M, head%opt.Heads, -1, i%opt.HeadDim, value)
 		}
 	}
-	return o, nil
+	return nil
 }
 
 func sparseSinkNonFinite(stage v41SparseSinkStage, b, m, h, row, d int, value float32) error {
