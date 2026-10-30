@@ -555,3 +555,137 @@ func TestServeV41MixedQuantHostFallbackDenseQ3Charge(t *testing.T) {
 		t.Fatalf("estimate charged the Q3 conversion at %d bytes, want the expanded %d", q8Row, wantQ8Logical)
 	}
 }
+
+type v41CUDAFallbackBackend struct {
+	v41PackedBackend
+	free int64
+}
+
+func (b *v41CUDAFallbackBackend) Name() string                       { return "cuda" }
+func (b *v41CUDAFallbackBackend) Tier() string                       { return "discrete:cpu-contract" }
+func (b *v41CUDAFallbackBackend) DeviceMemory() (int64, int64, bool) { return b.free, b.free, true }
+func (b *v41CUDAFallbackBackend) Caps() compute.Caps {
+	c := b.v41PackedBackend.Caps()
+	c.CapacityProbe = true
+	return c
+}
+
+func newV41CUDAFallbackBackend(free int64) *v41CUDAFallbackBackend {
+	b := v41PackedNativeBackend()
+	b.q3 = false
+	b.dtypes[compute.Q3_K] = false
+	return &v41CUDAFallbackBackend{v41PackedBackend: b, free: free}
+}
+
+// A real bounded checkpoint exercises the production loader, not a 246 GiB
+// allocation. The expert slab ratio still distinguishes full residency from
+// the two-expert ring; this fixture is not a complete runnable V4.1 model.
+func writeV41CUDAFallbackFixture(t *testing.T, experts int) string {
+	t.Helper()
+	type tensor struct {
+		name string
+		dims []uint64
+		typ  ggufload.TensorType
+		raw  []byte
+	}
+	tensors := []tensor{
+		{"token_embd.weight", []uint64{256, 1}, ggufload.TensorQ2_K, make([]byte, 84)},
+		{"output.weight", []uint64{256, 1}, ggufload.TensorQ6_K, make([]byte, 210)},
+		{"output_norm.weight", []uint64{256}, ggufload.TensorF32, make([]byte, 1024)},
+		{"blk.0.ffn_down_shexp.weight", []uint64{256, 256}, ggufload.TensorQ3_K, bytes.Repeat(v41PackedQ3Block(), 256)},
+		{"blk.0.ffn_gate_exps.weight", []uint64{256, 256, uint64(experts)}, ggufload.TensorQ2_K, make([]byte, 256*experts*84)},
+		{"blk.0.ffn_up_exps.weight", []uint64{256, 256, uint64(experts)}, ggufload.TensorQ2_K, make([]byte, 256*experts*84)},
+		{"blk.0.ffn_down_exps.weight", []uint64{256, 256, uint64(experts)}, ggufload.TensorQ3_K, bytes.Repeat(v41PackedQ3Block(), 256*experts)},
+	}
+	keys := []struct {
+		key   string
+		value uint64
+	}{
+		{"embedding_length", 256}, {"block_count", 1}, {"attention.head_count", 1},
+		{"attention.head_count_kv", 1}, {"attention.key_length", 32}, {"feed_forward_length", 256},
+		{"context_length", 2048}, {"expert_count", uint64(experts)}, {"expert_used_count", 2},
+		{"expert_feed_forward_length", 256}, {"attention.q_lora_rank", 32}, {"attention.kv_lora_rank", 32},
+		{"attention.qk_nope_head_dim", 16}, {"attention.qk_rope_head_dim", 16}, {"attention.value_length_mla", 16},
+	}
+	var b bytes.Buffer
+	writeMinimalHeaderForTest(&b, uint64(len(tensors)), uint64(3+len(keys)))
+	writeKVStringForTest(&b, "general.architecture", "deepseek41")
+	writeKVUint32ForTest(&b, "general.alignment", 32)
+	writeKVFloat32ForTest(&b, "deepseek41.attention.layer_norm_rms_epsilon", 1e-6)
+	for _, key := range keys {
+		writeKVUint64ForTest(&b, "deepseek41."+key.key, key.value)
+	}
+	var offset uint64
+	for _, tensor := range tensors {
+		writeTensorInfoForTest(&b, tensor.name, tensor.dims, uint32(tensor.typ), offset)
+		offset = (offset + uint64(len(tensor.raw)) + 31) &^ 31
+	}
+	padToAlignmentForTest(&b, 32)
+	for _, tensor := range tensors {
+		b.Write(tensor.raw)
+		padToAlignmentForTest(&b, 32)
+	}
+	path := filepath.Join(t.TempDir(), "v41-mixed-cpu-contract.gguf")
+	if err := os.WriteFile(path, b.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// fak-test:runtime fast est=1s
+func TestServeV41MixedQuantCUDAHostFallbackLoadArm(t *testing.T) {
+	v41PackedTestEnv(t)
+	path := writeV41CUDAFallbackFixture(t, 4)
+	ws, err := ggufload.OpenWeights(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+	be := newV41CUDAFallbackBackend(1 << 30)
+	artifact := ggufload.ClassifyTensorQuant(ws.File.Tensors)
+	if serveArtifactNativeKQuant(be, artifact) || compute.BackendSupportsDeviceWeightDtype(be, compute.Q3_K) {
+		t.Fatal("host storage admission fabricated Q3 CUDA execution capability")
+	}
+	if resolveDeviceServeLoadArm(ws, be, false, false) != serveLoadArmResidentQ4K {
+		t.Fatal("ordinary sizing did not select the supported packed-storage arm")
+	}
+	fit := serveFitBudget{Base: 1 << 30}
+	m, packed, profile, _, _, err := loadServeInKernelModelPlacedErr(path, be, false, false, 16, nil, 1, &fit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.CloseWeights()
+	if !packed || profile == nil {
+		t.Fatal("ordinary production loader did not retain packed storage")
+	}
+	raw, ok := m.KQuantRaw("model.layers.0.ffn.shared_experts.w2.weight")
+	if !ok || !bytes.Equal(raw, bytes.Repeat(v41PackedQ3Block(), 256)) {
+		t.Fatal("Q3 shared projection was expanded or changed")
+	}
+	decoded := make([]float32, 256*256)
+	fakmodel.DequantQ3K(decoded, raw)
+	for _, value := range decoded {
+		if value != 128 {
+			t.Fatalf("packed host Q3 consumer value=%g want=128", value)
+		}
+	}
+	opts := serveResidentQ4KLoadOptions(be, path, true, artifact)
+	plan, err := serveGGUFWeightMemoryPlanForArm(ws, serveLoadArmResidentQ4K, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Total() != m.ResidentReport().TotalResidentBytes || m.ResidentReport().Q8Bytes != 0 {
+		t.Fatalf("packed estimate/live storage mismatch: plan=%d actual=%+v", plan.Total(), m.ResidentReport())
+	}
+	// Native-only admission stays strict; explicit rollback and missing native
+	// Q2 support must still decline this new storage-only route.
+	be.q2 = false
+	if resolveDeviceServeLoadArm(ws, be, false, false) == serveLoadArmResidentQ4K {
+		t.Fatal("missing Q2 native capability admitted")
+	}
+	be.q2 = true
+	t.Setenv("FAK_Q4K", "0")
+	if resolveDeviceServeLoadArm(ws, be, false, false) == serveLoadArmResidentQ4K {
+		t.Fatal("explicit legacy rollback ignored")
+	}
+}

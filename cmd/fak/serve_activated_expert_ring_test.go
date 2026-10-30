@@ -430,3 +430,91 @@ func TestServeNonHaloCUDARingOrdinaryContextAndLoad(t *testing.T) {
 		}
 	})
 }
+
+// fak-test:runtime fast est=1s
+func TestServeV41CUDAHostFallbackRingOrdinaryContextAndLoad(t *testing.T) {
+	v41PackedTestEnv(t)
+	t.Setenv("FAK_EXPERT_RING_BYTES", "token")
+	t.Setenv("FAK_HYBRID_KV", "0")
+	path := writeV41CUDAFallbackFixture(t, 128)
+	be := newV41CUDAFallbackBackend(2 << 20)
+	policy := &serveExecutionPolicy{}
+	if policy.requireDeviceExecution(false, be) {
+		t.Fatal("non-Halo session was forced device-only")
+	}
+	_, sf := newServeFlagSet()
+	*sf.ggufPath = path
+	*sf.nativeContextTokens = 1024
+	rt := &serveRuntime{chatBackend: be}
+	if err := rt.resolveNativeContext(sf, 1); err != nil {
+		t.Fatal(err)
+	}
+	if rt.nativeContext.ResolvedTokens != 1024 || rt.requireDeviceExecution {
+		t.Fatalf("ordinary ring context=%+v device-only=%v", rt.nativeContext, rt.requireDeviceExecution)
+	}
+	m, packed, profile, _, plan, err := loadServeInKernelModelPlacedErr(path, be, false, false, 1024, nil, 1, rt.fitBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.CloseWeights()
+	if !packed || plan.DeviceTotal() > rt.fitBudget.avail() {
+		t.Fatalf("bounded ordinary load packed=%v plan=%d cap=%d", packed, plan.DeviceTotal(), rt.fitBudget.avail())
+	}
+	if profile == nil {
+		t.Fatal("ordinary load omitted its startup policy")
+	}
+	foundPolicy := false
+	for _, message := range profile.Messages {
+		if message.Kind == "serving-expert-residency" {
+			foundPolicy = strings.Contains(message.Text, "bounded host Q3_K fallback permitted")
+			if strings.Contains(message.Text, "no host expert GEMMs") {
+				t.Fatal("host fallback was reported as all-device execution")
+			}
+		}
+	}
+	if !foundPolicy {
+		t.Fatal("ordinary ring policy did not disclose the host Q3 fallback")
+	}
+	st := m.ExpertCheckpointStats()
+	if !st.Enabled || st.Tensors != 128*3 || st.BudgetBytes != 0 || st.ResidentBytes != 0 {
+		t.Fatalf("ordinary load did not stream all three packed expert projections: %+v", st)
+	}
+	var ringBytes int64
+	for _, row := range plan {
+		if row.Detail == serveActivatedRingDetail {
+			ringBytes += row.Bytes
+		}
+	}
+	if ringBytes <= 0 {
+		t.Fatal("ordinary load omitted the bounded ring charge")
+	}
+	for _, control := range []struct {
+		name    string
+		offload bool
+		ranks   int
+	}{
+		{"cpu-offload", true, 1}, {"multi-rank", false, 2},
+	} {
+		t.Run(control.name, func(t *testing.T) {
+			_, flags := newServeFlagSet()
+			*flags.ggufPath, *flags.nativeContextTokens, *flags.cpuOffloadExperts = path, 1024, control.offload
+			other := &serveRuntime{chatBackend: be}
+			if err := other.resolveNativeContext(flags, control.ranks); err != nil {
+				t.Fatal(err)
+			}
+			for _, row := range other.contextWeights {
+				if row.Detail == serveActivatedRingDetail {
+					t.Fatal("offload or multi-rank request selected the device ring")
+				}
+			}
+		})
+	}
+	// The same real ordinary loader must refuse below the ring floor, not
+	// silently fall back to materializing the complete checkpoint.
+	tiny := serveFitBudget{Base: 4096}
+	refused, _, _, _, _, err := loadServeInKernelModelPlacedErr(path, be, false, false, 1024, nil, 1, &tiny)
+	var fitErr *compute.FitError
+	if refused != nil || !errors.As(err, &fitErr) || fitErr.Verdict != compute.FitTooBig {
+		t.Fatalf("below-floor ordinary load model=%v err=%v", refused, err)
+	}
+}

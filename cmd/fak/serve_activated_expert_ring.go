@@ -16,13 +16,14 @@ import (
 // refuses because it runs host expert GEMMs. This placement keeps the dense base device-resident,
 // leaves the routed band on disk behind the R5 checkpoint tier with zero host retention
 // (stream-through), and declares a bounded DEVICE ring on that tier, so a faulted expert is staged
-// into device memory and executed there. It is selected without --cpu-offload-experts, so
-// validateServeHaloCPUOffload is untouched.
+// into device memory where the backend supports their dtype; mixed Q3_K checkpoints may
+// use the separately admitted bounded host fallback. It is selected without
+// --cpu-offload-experts, so validateServeHaloCPUOffload is untouched.
 //
 // Eligibility is capability-gated per backend (serveExpertRingEligible), NOT tied to the
 // session-wide device-only policy: on a non-Halo CUDA host the session may still run host expert
 // GEMMs (--cpu-offload-experts stays admitted), while a FitTooBig full plan takes the ring anyway
-// because it is the only fitting route that keeps every matmul on the device.
+// while preserving the separately admitted execution policy for each projection.
 //
 // The ring is sized from ggufload.ActivatedExpertFit — the same header arithmetic
 // FitActivatedExpertsOnDevice admits on — but judged against the serve's own device fit snapshot.

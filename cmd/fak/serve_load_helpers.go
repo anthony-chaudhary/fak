@@ -140,12 +140,40 @@ func serveArtifactMixedQuantHostFallback(backend compute.Backend, artifact ggufl
 	return !q6 || serveNativeDenseQ6K(backend)
 }
 
+// serveV41CUDAHostQ3Fallback qualifies packed storage, not a Q3 CUDA kernel.
+// V4.1 projections already fall back to the bounded host quant consumer when
+// the backend declines Q3_K. Keeping their checkpoint bytes packed avoids an
+// eager Q8/F32 expansion before that consumer can run.
+func serveV41CUDAHostQ3Fallback(ws *ggufload.WeightSource, backend compute.Backend) bool {
+	if ws == nil || backend == nil || backend.Name() != "cuda" ||
+		!serveArtifactMixedQuantHostFallback(backend, ggufload.ClassifyTensorQuant(ws.File.Tensors)) {
+		return false
+	}
+	cfg, err := ws.File.Config()
+	if err != nil || !cfg.IsDeepSeekV41() {
+		return false
+	}
+	return true
+}
+
+func serveV41CUDAHostQ3FallbackPath(path string, backend compute.Backend) bool {
+	if backend == nil || backend.Name() != "cuda" {
+		return false
+	}
+	ws, err := ggufload.OpenWeights(path)
+	if err != nil {
+		return false
+	}
+	defer ws.Close()
+	return serveV41CUDAHostQ3Fallback(ws, backend)
+}
+
 // serveResidentQ4KLoadOptions keeps loader and admission storage selection on
 // the same backend/artifact predicates. Sharding and streaming remain explicit
 // additions owned by their respective load paths.
 func serveResidentQ4KLoadOptions(backend compute.Backend, ggufPath string, residentQ4K bool, artifact ggufload.ArtifactQuant) []ggufload.Q4KLoadOption {
 	opts := serveDenseKQuantOptions(backend)
-	if residentQ4K && serveArtifactNativeKQuant(backend, artifact) {
+	if residentQ4K && (serveArtifactNativeKQuant(backend, artifact) || serveV41CUDAHostQ3FallbackPath(ggufPath, backend)) {
 		opts = append(opts, ggufload.WithDenseKQuantResident(true))
 	}
 	if serveQwen38Q4KEmbeddingResident(backend, ggufPath, residentQ4K) {
@@ -400,6 +428,7 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 		return nil, false, nil, gateway.StartupPhase{}, nil, err
 	}
 	artifactQuant := ggufload.ClassifyTensorQuant(artifactSource.File.Tensors)
+	hostQ3Fallback := !cpuOffloadExperts && serveV41CUDAHostQ3Fallback(artifactSource, backend)
 	if err := artifactSource.Close(); err != nil {
 		fmt.Fprintln(os.Stderr, "fak serve: GGUF quant inventory close:", err)
 		return nil, false, nil, gateway.StartupPhase{}, nil, err
@@ -592,6 +621,8 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 			// f32 arms unchanged (the device Q4_K GEMM needs the quantized-upload seam).
 			if serveArtifactNativeKQuant(backend, artifactQuant) {
 				loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", fmt.Sprintf("GGUF device load -> resident %s on backend %q (eligible native packed weights; canonical conversion fallback retained)", artifactQuant.Name, backend.Name())))
+			} else if hostQ3Fallback {
+				loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", "GGUF V4.1 packed load on CUDA with bounded host Q3_K fallback (Q3_K CUDA execution unavailable; no whole-slab expansion)"))
 			} else if serveArtifactMixedQuantHostFallback(backend, artifactQuant) {
 				loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", fmt.Sprintf("GGUF device load -> resident %s on backend %q (packed Q2_K device-native; dense Q3_K converted to Q8 with charged bytes; routed experts retain raw source bytes)", artifactQuant.Name, backend.Name())))
 			} else {
@@ -608,7 +639,7 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 					memPlan = ring.Plan
 					q4kOpts = append(q4kOpts, serveActivatedExpertRingLoadOptions(ring)...)
 					q4kOpts = append(q4kOpts, serveActivatedExpertRingDenseOption(ggufPath, q4kOpts, hostFit, os.Getenv))
-					text := serveActivatedExpertRingPlanText(ring, ggufload.ApplyQ4KLoadOptions(q4kOpts))
+					text := serveActivatedExpertRingPlanText(ring, ggufload.ApplyQ4KLoadOptions(q4kOpts), serveArtifactMixedQuantHostFallback(backend, artifactQuant) && !serveArtifactNativeKQuant(backend, artifactQuant))
 					fmt.Fprintln(os.Stderr, "fak serve: activated-expert device ring:", text)
 					loadMessages = append(loadMessages, serveStartupMessage("serving-expert-residency", "info", text))
 				}
@@ -1158,9 +1189,13 @@ func serveMetalGGUFAdmissionWeights(path string, ws *ggufload.WeightSource) (com
 // serveActivatedExpertRingPlanText describes admission charges and loader policy,
 // never measured device placement. A bounded dense option is a HOST working-set
 // ceiling, not evidence that its bytes have been uploaded or are physically resident.
-func serveActivatedExpertRingPlanText(ring serveActivatedExpertRing, effects ggufload.Q4KLoadOptionEffects) string {
-	text := fmt.Sprintf("full device plan does not fit; planned dense device charge=%s; planned device expert-ring capacity=%s; device weights staged on demand, actual residency unmeasured; routed experts streamed from checkpoint (no host expert GEMMs); ring scope=model (shared by every request); %s",
-		bytesText(uint64(max(ring.Fit.DeviceBaseBytes, 0))), bytesText(uint64(max(ring.RingBytes, 0))), ring.Sizing.Text())
+func serveActivatedExpertRingPlanText(ring serveActivatedExpertRing, effects ggufload.Q4KLoadOptionEffects, hostQ3Fallback ...bool) string {
+	execution := "no host expert GEMMs"
+	if len(hostQ3Fallback) > 0 && hostQ3Fallback[0] {
+		execution = "bounded host Q3_K fallback permitted"
+	}
+	text := fmt.Sprintf("full device plan does not fit; planned dense device charge=%s; planned device expert-ring capacity=%s; device weights staged on demand, actual residency unmeasured; routed experts streamed from checkpoint (%s); ring scope=model (shared by every request); %s",
+		bytesText(uint64(max(ring.Fit.DeviceBaseBytes, 0))), bytesText(uint64(max(ring.RingBytes, 0))), execution, ring.Sizing.Text())
 	if effects.StreamedDenseBounded {
 		text += fmt.Sprintf("; bounded dense HOST working-set ceiling=%s", bytesText(uint64(max(effects.StreamedDenseBytes, 0))))
 	} else if effects.StreamedDenseQ4K {
