@@ -99,7 +99,7 @@ func buildServeSizingRingForFlags(ws *ggufload.WeightSource, be compute.Backend,
 	}
 	r.Mode = size.Mode
 	if be == nil || *sf.cpuOffloadExperts || *sf.expertParallel != 1 || *sf.tensorParallel != 1 || !serveDeviceResidentQ4K(be) {
-		r.Reason = "activated ring requires the device-only, single-rank resident quantized load route"
+		r.Reason = "activated ring requires a single-rank resident quantized load route without host expert offload"
 		return r
 	}
 	policy, err := resolveServeExecutionPolicy(derefString(sf.executionPolicy), derefString(sf.model), os.Getenv(ServeBringupDedicatedEnv), nil)
@@ -112,8 +112,8 @@ func buildServeSizingRingForFlags(ws *ggufload.WeightSource, be compute.Backend,
 		r.Reason = err.Error()
 		return r
 	}
-	if err := policy.admit(validateServeHaloCPUOffload(halo, *sf.cpuOffloadExperts, *sf.nCPUMoE, os.Getenv(agent.ExpertSpillEnv))); err != nil || !policy.requireDeviceExecution(halo, be) {
-		r.Reason = "device-only execution route not established"
+	if err := policy.admit(validateServeHaloCPUOffload(halo, *sf.cpuOffloadExperts, *sf.nCPUMoE, os.Getenv(agent.ExpertSpillEnv))); err != nil || !serveExpertRingEligible(be, policy.requireDeviceExecution(halo, be)) {
+		r.Reason = "activated ring route not eligible: needs a device-only serve or a discrete CUDA backend with probeable capacity"
 		return r
 	}
 	artifact := ggufload.ClassifyTensorQuant(ws.File.Tensors)
