@@ -63,7 +63,12 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	remote := fs.String("remote", "origin", "remote name")
 	branch := fs.String("branch", "", "branch to sync (default: current branch)")
 	fetch := fs.Bool("fetch", false, "git fetch <remote> <branch> before assessing")
+	fetchDepth := fs.Int("fetch-depth", 0, "check/apply/reconcile: bounded history depth, not a byte cap; requires fetch and base/target pins")
+	fetchBase := fs.String("fetch-base", "", "bounded fetch: required original full merge-base object ID")
+	fetchTarget := fs.String("fetch-target", "", "bounded fetch: planned immutable remote branch object ID")
+	fetchAfterBase := fs.String("fetch-after-base", "", "bounded fetch: optional exact post-fetch merge-base; requires proven advancement from fetch-base and ancestry of HEAD")
 	retries := fs.Int("retries", 3, "push: total attempts before giving up on a moving trunk")
+	noFetchOnFailure := fs.Bool("no-fetch-on-failure", false, "push: stop on failure without retry/fetch; reconcile exact remote effect separately")
 	queueFile := fs.String("queue-file", "", "drain: stranded-commit queue file (default: <repo>/.fak/sync-drain-queue.json)")
 	budgetDefault := 60 * time.Second
 	budgetHelp := "drain: trunk-green build budget for the window verdict"
@@ -97,6 +102,16 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	if err := fs.Parse(argv); err != nil {
 		return syncExitUsage
 	}
+	if *noFetchOnFailure && command != "push" {
+		fmt.Fprintln(stderr, "--no-fetch-on-failure requires push")
+		return syncExitUsage
+	}
+	if *fetchDepth != 0 || *fetchBase != "" || *fetchTarget != "" || *fetchAfterBase != "" {
+		if !*fetch || *fetchDepth <= 0 || *fetchBase == "" || *fetchTarget == "" || (command != "check" && command != "apply" && command != "reconcile") {
+			fmt.Fprintln(stderr, "bounded fetch requires check/apply/reconcile, --fetch, positive --fetch-depth, --fetch-base and --fetch-target; admit disk lifetime separately")
+			return syncExitUsage
+		}
+	}
 	if command == "push" && *dryRun {
 		fmt.Fprintln(stderr, "fak sync push: --dry-run is not supported; no push was attempted")
 		return syncExitUsage
@@ -128,13 +143,14 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 		}
 		syncDuplicateFixAdvisory(stderr, repoPath, *remote, *branch)
 		res, err := syncSafePush(context.Background(), safesync.PushOptions{
-			Repo:           repoPath,
-			Remote:         *remote,
-			Branch:         *branch,
-			SourceRef:      strings.TrimSpace(sourceSHA),
-			TargetRef:      syncTargetRef(*branch),
-			MaxRetries:     *retries,
-			VelocityBudget: *budget,
+			Repo:             repoPath,
+			Remote:           *remote,
+			Branch:           *branch,
+			SourceRef:        strings.TrimSpace(sourceSHA),
+			TargetRef:        syncTargetRef(*branch),
+			MaxRetries:       *retries,
+			NoFetchOnFailure: *noFetchOnFailure,
+			VelocityBudget:   *budget,
 		})
 		res = annotatePushWorktree(context.Background(), res, repoPath)
 		if err != nil {
@@ -189,16 +205,20 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			sess = firstNonEmpty(os.Getenv("CLAUDE_CODE_SESSION_ID"), os.Getenv("FAK_SESSION_ID"), "sync-reconcile")
 		}
 		opts := safesync.ReconcileOptions{
-			Repo:         repoPath,
-			Remote:       *remote,
-			Branch:       *branch,
-			Goal:         *goal,
-			Apply:        *applyFlag,
-			Execute:      *executeFlag,
-			Fetch:        *fetch,
-			SuspendPaths: suspendPaths,
-			Session:      sess,
-			EmitPacket:   *emitPacket || *executeFlag,
+			Repo:           repoPath,
+			Remote:         *remote,
+			Branch:         *branch,
+			Goal:           *goal,
+			Apply:          *applyFlag,
+			Execute:        *executeFlag,
+			Fetch:          *fetch,
+			FetchDepth:     *fetchDepth,
+			FetchBase:      *fetchBase,
+			FetchAfterBase: *fetchAfterBase,
+			FetchTarget:    *fetchTarget,
+			SuspendPaths:   suspendPaths,
+			Session:        sess,
+			EmitPacket:     *emitPacket || *executeFlag,
 		}
 		assessment, err := syncRouteReconciliation(context.Background(), opts)
 		if err != nil {
@@ -371,6 +391,10 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 		Remote:              *remote,
 		Branch:              *branch,
 		Fetch:               *fetch,
+		FetchDepth:          *fetchDepth,
+		FetchBase:           *fetchBase,
+		FetchAfterBase:      *fetchAfterBase,
+		FetchTarget:         *fetchTarget,
 		ApplyVelocityBudget: *budget,
 		QuarantineScratch:   *quarantineScratch,
 	}

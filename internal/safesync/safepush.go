@@ -58,15 +58,16 @@ func DecidePush(div PushDivergence) PushAction {
 
 // PushOptions configures SafePush.
 type PushOptions struct {
-	Repo           string
-	Remote         string
-	Branch         string // default: current branch
-	SourceRef      string // optional exact source to push, e.g. a verified commit SHA
-	TargetRef      string // optional destination ref when SourceRef is set; default refs/heads/<branch>
-	MaxRetries     int    // total push attempts; default 3
-	VelocityBudget time.Duration
-	Runner         Runner           `json:"-"`
-	Now            func() time.Time `json:"-"` // injectable end-to-end wall clock
+	Repo             string
+	Remote           string
+	Branch           string // default: current branch
+	SourceRef        string // optional exact source to push, e.g. a verified commit SHA
+	TargetRef        string // optional destination ref when SourceRef is set; default refs/heads/<branch>
+	MaxRetries       int    // total push attempts; default 3
+	NoFetchOnFailure bool   // terminal failure without retry/fetch; caller reconciles remote effect
+	VelocityBudget   time.Duration
+	Runner           Runner           `json:"-"`
+	Now              func() time.Time `json:"-"` // injectable end-to-end wall clock
 }
 
 // DefaultPushVelocityBudget is the declared responsiveness SLO used when a
@@ -78,13 +79,14 @@ const DefaultPushVelocityBudget = 5 * time.Second
 const (
 	// PushReasonBehind is a compatibility alias for ReasonBehindFastForwardable.
 	// Deprecated: use ReasonBehindFastForwardable or the matching typed divergence reason.
-	PushReasonBehind      = ReasonBehindFastForwardable // genuinely behind/diverged — integrate then re-push
-	PushReasonError       = "PUSH_ERROR"                // a rejection that is NOT non-fast-forward or transient network (hook/auth)
-	PushReasonExhausted   = "RETRIES_EXHAUSTED"         // still racing after MaxRetries — the trunk is moving fast
-	PushReasonGitMissing  = "GIT_UNAVAILABLE"           // git/fetch could not run
-	PushReasonUnreachable = "REMOTE_UNREACHABLE"        // a transient network failure persisted through every retry
-	PushReasonCancelled   = "CANCELLED"                 // the caller's ctx was cancelled mid-backoff; no further attempt was made
-	PushReasonInternal    = "INTERNAL_ERROR"            // a read-only Git classification/query failed; effect is indeterminate
+	PushReasonBehind        = ReasonBehindFastForwardable // genuinely behind/diverged — integrate then re-push
+	PushReasonError         = "PUSH_ERROR"                // a rejection that is NOT non-fast-forward or transient network (hook/auth)
+	PushReasonExhausted     = "RETRIES_EXHAUSTED"         // still racing after MaxRetries — the trunk is moving fast
+	PushReasonGitMissing    = "GIT_UNAVAILABLE"           // git/fetch could not run
+	PushReasonUnreachable   = "REMOTE_UNREACHABLE"        // a transient network failure persisted through every retry
+	PushReasonCancelled     = "CANCELLED"                 // the caller's ctx was cancelled mid-backoff; no further attempt was made
+	PushReasonInternal      = "INTERNAL_ERROR"            // a read-only Git classification/query failed; effect is indeterminate
+	PushReasonFetchDeferred = "FETCH_DEFERRED"            // non-ff requires separately admitted fetch/reconciliation
 )
 
 // PushResult is the structured outcome of SafePush.
@@ -205,6 +207,17 @@ func SafePush(ctx context.Context, opts PushOptions) (res PushResult, err error)
 			return res, nil
 		}
 		msg := runDetail(pr)
+		if opts.NoFetchOnFailure {
+			res.Reason = PushReasonError
+			if isNonFastForward(msg) {
+				res.Reason = PushReasonFetchDeferred
+			} else if isTransientPushNetwork(msg) {
+				res.Reason = PushReasonUnreachable
+			}
+			res.Detail = pushHeadline(msg) + "; automatic retry/fetch disabled; reconcile the exact remote ref before any retry (publication may be uncertain)"
+			res.Diagnostics = pushDiagnostics(pr)
+			return res, nil
+		}
 		if isTransientPushNetwork(msg) {
 			// A network blip (hung-up remote, timeout, DNS wobble, upstream 5xx) is as
 			// transient as the non-ff race — retry after a backoff. No fetch first: if

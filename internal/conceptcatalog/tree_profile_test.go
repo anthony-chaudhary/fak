@@ -152,7 +152,8 @@ func TestConceptProfileVersionedPins(t *testing.T) {
 	for _, tc := range []struct{ profile, digest, stdlib string }{
 		{conceptTreeProfileV1, "62313b76d15080e1d912367e6a29170fc5dd71489522e446d10719331a65ddb2", "bcd17fc66d37e32b97d12ceda5d089bf47e7ea6e1b494615c5c434ab17297fc8"},
 		{conceptTreeProfileV2, "4312ceeba9394b80c3f4145dc4afe413d3eb4b085513b9fc7ae93b0b80caeade", "c8646082e9310ad2fa3cb8cd0038c87e63041f95444adba8bffa6163484bff14"},
-		{"", "", ""}, {"isolated-v3", "", ""}, {"isolated-v2 ", "", ""},
+		{conceptTreeProfileV3, "54a7277caa27eb516064e7d3a088dd68074b5ba45742c89efedb68c760e36e63", "c8646082e9310ad2fa3cb8cd0038c87e63041f95444adba8bffa6163484bff14"},
+		{"", "", ""}, {"isolated-v4", "", ""}, {"isolated-v2 ", "", ""}, {"isolated-v3 ", "", ""},
 	} {
 		got, stdlib, selected := conceptProfilePins(tc.profile)
 		if got != tc.digest || stdlib != tc.stdlib || selected != (tc.digest != "") {
@@ -583,9 +584,18 @@ func TestConceptProfileReusedOracleRefusesDrift(t *testing.T) {
 // fak-test:runtime integration est=60s lane=default
 func TestConceptProfileInterruptedSparseContinuation(t *testing.T) {
 	root, tree := os.Getenv("FAK_TEST_CONCEPT_ROOT"), os.Getenv("FAK_TEST_CONCEPT_TREE")
+	oracle := os.Getenv("FAK_TEST_CONCEPT_ORACLE_ROOT")
+	priorWorkspace := root
+	if oracle != "" {
+		priorWorkspace = oracle
+	}
 	partial, prior := os.Getenv("FAK_TEST_CONCEPT_PARTIAL_TREE"), os.Getenv("FAK_TEST_CONCEPT_PRIOR_EVIDENCE")
 	manifest, evidence := os.Getenv("FAK_TEST_CONCEPT_PRIOR_MANIFEST"), os.Getenv("FAK_TEST_CONCEPT_EVIDENCE")
 	retire := os.Getenv("FAK_TEST_CONCEPT_RETIRE_PARTIAL_ROOT")
+	resumeRetirement := os.Getenv("FAK_TEST_CONCEPT_RESUME_RETIREMENT") == "1"
+	if resumeRetirement && retire == "" {
+		t.Fatal("retirement resume requires exact producer root")
+	}
 	if root == "" || tree == "" || partial == "" || prior == "" || manifest == "" || evidence == "" {
 		t.Skip("explicit interrupted-proof continuation only")
 	}
@@ -601,8 +611,12 @@ func TestConceptProfileInterruptedSparseContinuation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = os.Lstat(absolute); !os.IsNotExist(err) {
-		t.Fatal("new evidence path required", err)
+	if st, e := os.Lstat(absolute); resumeRetirement {
+		if e != nil || !st.IsDir() || st.Mode()&os.ModeSymlink != 0 {
+			t.Fatal("completed evidence directory required", e)
+		}
+	} else if !os.IsNotExist(e) {
+		t.Fatal("new evidence path required", e)
 	}
 	parent, err := filepath.EvalSymlinks(filepath.Dir(absolute))
 	if err != nil {
@@ -621,6 +635,9 @@ func TestConceptProfileInterruptedSparseContinuation(t *testing.T) {
 		return e == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 	}
 	inputs := []string{root, partial, prior, manifest}
+	if oracle != "" {
+		inputs = append(inputs, oracle)
+	}
 	var adopted os.FileInfo
 	if retire != "" {
 		adopted, err = conceptPartialOwner(retire, partial)
@@ -646,6 +663,11 @@ func TestConceptProfileInterruptedSparseContinuation(t *testing.T) {
 	p, err := qualifyConceptTreeProfile(root, tree)
 	if err != nil || p == nil {
 		t.Fatalf("profile qualification: %v %v", p, err)
+	}
+	if oracle != "" {
+		if err = extractGitTreeUsing(root, tree, oracle, compareConceptOracleTar); err != nil {
+			t.Fatal(err)
+		}
 	}
 	rawManifest, err := os.ReadFile(manifest)
 	if err != nil {
@@ -675,7 +697,7 @@ func TestConceptProfileInterruptedSparseContinuation(t *testing.T) {
 			t.Fatal("prior tree mismatch", err)
 		}
 		var payload map[string]any
-		if err = json.Unmarshal(read("stdout.json"), &payload); err != nil || payload["workspace"] != root {
+		if err = json.Unmarshal(read("stdout.json"), &payload); err != nil || payload["workspace"] != priorWorkspace {
 			t.Fatal("prior workspace", err)
 		}
 		delete(payload, "workspace")
@@ -693,27 +715,54 @@ func TestConceptProfileInterruptedSparseContinuation(t *testing.T) {
 	if err = extractGitTreeUsing(root, tree, partial, compare); err != nil {
 		t.Fatal(err)
 	}
-	out := t.TempDir()
-	cmd, err := p.command(partial, out, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd.Dir = partial
-	windowgate.ConfigureBackgroundCommand(cmd)
-	raw, runErr := cmd.Output()
+	out := evidence
+	var raw, record []byte
 	status := 0
-	if runErr != nil {
-		exit, ok := runErr.(*exec.ExitError)
-		if !ok {
-			t.Fatal(runErr)
+	if resumeRetirement {
+		record, err = os.ReadFile(filepath.Join(evidence, "continuation.json"))
+		var completed struct {
+			Tree    string            `json:"tree"`
+			Partial string            `json:"partial_tree"`
+			Pins    map[string]string `json:"prior_pins"`
+			Status  int               `json:"exit_code"`
+			Retired bool              `json:"retired"`
 		}
-		status = exit.ExitCode()
+		if err != nil || json.Unmarshal(record, &completed) != nil || completed.Tree != tree || completed.Partial != partial || completed.Retired || !reflect.DeepEqual(completed.Pins, pins) {
+			t.Fatal("completed continuation identity mismatch", err)
+		}
+		status = completed.Status
+		raw, err = os.ReadFile(filepath.Join(evidence, "stdout.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		out = t.TempDir()
+		cmd, e := p.command(partial, out, true)
+		if e != nil {
+			t.Fatal(e)
+		}
+		cmd.Dir = partial
+		windowgate.ConfigureBackgroundCommand(cmd)
+		var runErr error
+		raw, runErr = cmd.Output()
+		if runErr != nil {
+			exit, ok := runErr.(*exec.ExitError)
+			if !ok {
+				t.Fatal(runErr)
+			}
+			status = exit.ExitCode()
+		}
 	}
 	if err = p.verifyRuntime(); err != nil {
 		t.Fatal(err)
 	}
 	if err = extractGitTreeUsing(root, tree, partial, compare); err != nil {
 		t.Fatal(err)
+	}
+	if oracle != "" {
+		if err = extractGitTreeUsing(root, tree, oracle, compareConceptOracleTar); err != nil {
+			t.Fatal(err)
+		}
 	}
 	var payload map[string]any
 	if err = json.Unmarshal(raw, &payload); err != nil || payload["workspace"] != partial {
@@ -723,24 +772,33 @@ func TestConceptProfileInterruptedSparseContinuation(t *testing.T) {
 	if status != wantStatus || !reflect.DeepEqual(wantJSON, payload) {
 		t.Fatal("sparse snapshot differs from full oracles")
 	}
-	if err = os.Mkdir(evidence, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(filepath.Join(evidence, "stdout.json"), raw, 0600); err != nil {
-		t.Fatal(err)
+	if !resumeRetirement {
+		if err = os.Mkdir(evidence, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(filepath.Join(evidence, "stdout.json"), raw, 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for _, art := range generatedArtifacts {
 		b, e := os.ReadFile(filepath.Join(out, art.Name))
 		if e != nil || !bytes.Equal(b, wantArtifacts[art.Name]) {
 			t.Fatal("sparse artifact", art.Name, e)
 		}
-		if e = os.WriteFile(filepath.Join(evidence, art.Name), b, 0600); e != nil {
-			t.Fatal(e)
+		// The verified generated artifact becomes durable evidence without a
+		// second allocation. Cross-filesystem moves fail closed; never copy as
+		// an unbudgeted fallback or modify the adopted input tree.
+		if !resumeRetirement {
+			if e = os.Rename(filepath.Join(out, art.Name), filepath.Join(evidence, art.Name)); e != nil {
+				t.Fatal(e)
+			}
 		}
 	}
-	record, _ := json.Marshal(map[string]any{"tree": tree, "exit_code": status, "prior_pins": pins, "partial_tree": partial, "retired": false})
-	if err = os.WriteFile(filepath.Join(evidence, "continuation.json"), record, 0600); err != nil {
-		t.Fatal(err)
+	if !resumeRetirement {
+		record, _ = json.Marshal(map[string]any{"tree": tree, "exit_code": status, "prior_pins": pins, "partial_tree": partial, "retired": false})
+		if err = os.WriteFile(filepath.Join(evidence, "continuation.json"), record, 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if retire != "" {
 		preserved := map[string][]byte{"stdout.json": raw, "continuation.json": record}
@@ -787,7 +845,7 @@ func TestConceptProfileInterruptedSparseContinuation(t *testing.T) {
 		if _, e = os.Lstat(retire); !os.IsNotExist(e) {
 			t.Fatal("producer retirement not confirmed", e)
 		}
-		retired, _ := json.Marshal(map[string]any{"retired": true, "root": retire, "tree": tree, "prior_pins": pins})
+		retired, _ := json.Marshal(map[string]any{"retired": true, "Removed": true, "resumed_retirement": resumeRetirement, "root": retire, "tree": tree, "prior_pins": pins})
 		if e = syncConceptProofPath(filepath.Dir(retire)); e != nil {
 			t.Fatal(e)
 		}
