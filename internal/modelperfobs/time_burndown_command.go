@@ -15,7 +15,7 @@ import (
 func RunTimeBurndown(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("time-burndown", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	input := fs.String("input", "model-perf.jsonl", "observation JSONL")
+	input := fs.String("input", "model-perf.jsonl", "observation or native gateway perf-record JSONL")
 	phases := fs.String("phases", "", "optional request-correlated native phase JSONL")
 	format := fs.String("format", "md", "md, json, or prom")
 	buckets := fs.Bool("buckets", false, "emit fak-time-burndown/2 campaign buckets (implied by --baseline and --go-runtime-*)")
@@ -44,7 +44,7 @@ func RunTimeBurndown(args []string, out io.Writer) error {
 		return fmt.Errorf("open observations: %w", err)
 	}
 	defer f.Close()
-	rows, err := ReadObservations(f)
+	rows, err := readTimeBurndownObservations(f)
 	if err != nil {
 		return err
 	}
