@@ -117,6 +117,7 @@ func TestFitAutoRefusalsAreTyped(t *testing.T) {
 			Tiers:           testTiers(),
 			ResolvedContext: 4096,
 			Workload:        SearchWorkload{PromptTokens: 4096, OutputTokens: 512, Concurrency: 1},
+			Pins:            SearchPins{Placement: PlacementDeviceResident},
 		}
 		rep := Search(in)
 		if rep.Status != StatusRefused || !errors.Is(error(rep.Refusal), ErrNeedsRing) {

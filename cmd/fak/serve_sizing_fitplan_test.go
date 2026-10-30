@@ -107,7 +107,7 @@ func TestServeSizingFitPlanUnifiedPoolIsHostWindow(t *testing.T) {
 }
 
 // fak-test:runtime fast est=100ms lane=default
-func TestServeSizingFitPlanDeviceRefusalIsTyped(t *testing.T) {
+func TestServeSizingFitPlanDeviceOversizeIsTiered(t *testing.T) {
 	serveFitPlanTestEnv(t)
 	be := sizingNamedBackend{serveCapBackend{total: 1 << 19, free: 1 << 19, known: true, uploadDtype: true}}
 	art, err := buildServeSizingArtifact(serveSynthConfiguredWeightSource(t), be, false, 16, "synthetic.gguf", 0)
@@ -115,11 +115,11 @@ func TestServeSizingFitPlanDeviceRefusalIsTyped(t *testing.T) {
 		t.Fatal(err)
 	}
 	rep := art.FitPlan
-	if rep == nil || rep.Status != fitplan.StatusRefused {
-		t.Fatalf("fit plan = %+v, want refused", rep)
+	if rep == nil || rep.Status != fitplan.StatusTiered || rep.Refusal != nil {
+		t.Fatalf("fit plan = %+v, want a tiered placement and no refusal", rep)
 	}
-	if err := error(rep.Refusal); rep.Refusal == nil || !errors.Is(err, fitplan.ErrNoFit) || !errors.Is(err, fitplan.ErrWeightsExceedPool) || rep.Refusal.ShortfallBytes <= 0 || rep.Refusal.HostPool {
-		t.Fatalf("refusal %+v, want a device weights_exceed_pool", rep.Refusal)
+	if pl := rep.Placement; pl == nil || len(pl.Rows) == 0 || pl.Rows[0].Segment != fitplan.SegmentDenseCore || pl.Rows[0].Pool != fitplan.PlacementPoolDevice {
+		t.Fatalf("placement %+v, want the dense core first on device", rep.Placement)
 	}
 }
 
@@ -223,8 +223,15 @@ func TestServeSizingFitPlanDiscreteHostExpertsUseHostPool(t *testing.T) {
 		}
 		return
 	}
-	if rep.Status != fitplan.StatusRefused || rep.Refusal == nil || !rep.Refusal.HostPool || !errors.Is(rep.Refusal, fitplan.ErrWeightsExceedPool) {
-		t.Fatalf("status %s refusal %+v, want a host weights_exceed_pool", rep.Status, rep.Refusal)
+	if rep.Status != fitplan.StatusTiered || rep.Refusal != nil || rep.Placement == nil {
+		t.Fatalf("status %s refusal %+v, want a tiered placement for the host overflow", rep.Status, rep.Refusal)
+	}
+	var nvme bool
+	for _, r := range rep.Placement.Rows {
+		nvme = nvme || r.Pool == fitplan.PlacementPoolNVMe
+	}
+	if !nvme {
+		t.Fatalf("rows %+v, want the overflow spilled to nvme_mmap", rep.Placement.Rows)
 	}
 }
 

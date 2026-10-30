@@ -92,6 +92,7 @@ type SearchPins struct {
 	ContextTokens int    `json:"context_tokens,omitempty"`
 	KVPrecision   string `json:"kv_precision,omitempty"`
 	Slots         int    `json:"slots,omitempty"`
+	Placement     string `json:"placement,omitempty"` // PlacementDeviceResident refuses rather than offload
 }
 
 // SearchRow is one scored point of the ctx x KV-dtype x slots grid.
@@ -121,6 +122,8 @@ type SearchReport struct {
 	Evidence     Evidence       `json:"evidence"`
 	Omitted      []Omission     `json:"omitted,omitempty"`
 	Model        *Model         `json:"model,omitempty"`
+	// Placement is the dense-core-first offload candidate when the weights exceed the pool.
+	Placement *TieredPlacement `json:"placement,omitempty"`
 }
 
 // SearchInput is everything Search needs: the T01 plan inputs plus the stated
@@ -184,7 +187,11 @@ func Search(in SearchInput) SearchReport {
 	rep.Evidence = p.evidence()
 	rep.Model = &in.Model
 
-	// Hard memory facts first: they hold regardless of calibration quality.
+	// Hard memory facts first: they hold regardless of calibration quality. Oversize weights
+	// are a cost, not a refusal, unless the operator pinned the all-resident placement.
+	if searchTiered(p, &rep, in, isl) {
+		return rep
+	}
 	if p.hostShort {
 		refuseSearch(&rep, ReasonWeightsExceedPool, "", 0, 0, p.hostWeights-p.in.Hardware.HostPoolUsableBytes, true)
 		return rep
@@ -366,6 +373,35 @@ func Search(in SearchInput) SearchReport {
 		refuseSLO(&rep, rows, in.SLO, target)
 	}
 	return rep
+}
+
+// searchTiered answers an unpinned weights overflow with the tiered placement, priced on the
+// pinned (else first) KV tier at the pinned (else resolved) context.
+func searchTiered(p *planner, rep *SearchReport, in SearchInput, isl int) bool {
+	if !p.weightsOverflow() || pinnedResident(in.Pins.Placement) {
+		return false
+	}
+	var kv *Candidate
+	pin := strings.ToLower(strings.TrimSpace(in.Pins.KVPrecision))
+	for _, t := range dedupeTiers(in.Tiers) {
+		if pin == "" || strings.ToLower(t.Precision) == pin {
+			ctx := in.Pins.ContextTokens
+			if ctx <= 0 {
+				ctx = in.ResolvedContext
+			}
+			if ctx <= 0 {
+				ctx = isl
+			}
+			kv = &Candidate{KVPrecision: t.Precision, Context: t.Context, ContextTokens: ctx}
+			break
+		}
+	}
+	tp := p.placeTiered(kv)
+	if tp == nil {
+		return false
+	}
+	rep.Status, rep.Placement = StatusTiered, tp
+	return true
 }
 
 // aggregateAt is B x per-seq decode rate, 0 for B < 1.

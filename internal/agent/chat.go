@@ -524,6 +524,9 @@ type Completion struct {
 	// NativeDecodeTokenIDs is the lightweight token-ID companion to DecodeTrace.
 	// It is captured at the same commit seam without inspecting logits.
 	NativeDecodeTokenIDs *NativeDecodeTokenIDs
+	// NativeDecodeTopLogprobs is populated only when the caller asked for
+	// per-token top-k logprobs; rows are computed from the sampled logits.
+	NativeDecodeTopLogprobs *NativeDecodeTopLogprobs
 }
 
 const (
@@ -645,6 +648,9 @@ type SampleParams struct {
 	// NativeDecodeTokenIDs requests the lightweight token-ID companion to a decode
 	// trace. It is valid only when DecodeTrace is also requested.
 	NativeDecodeTokenIDs bool
+	// NativeDecodeTopLogprobs is the per-generated-token top-k candidate count
+	// (0 = off). Nonzero forces host logits so the receipt reads the sampled row.
+	NativeDecodeTopLogprobs int
 	// DecodeTokenObserver, when non-nil, binds the in-kernel decode loop's per-token
 	// emit seam: the observer fires on the caller's goroutine after decode with the
 	// full decoded text, and STREAMING observers requested through

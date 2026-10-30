@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -42,9 +43,13 @@ func TestExplicitKVPrecisionReachesRequestSession(t *testing.T) {
 func TestKVPrecisionRefusesUnsupportedArch(t *testing.T) {
 	cfg := model.Config{NumLayers: 2, NumHeads: 4, NumKVHeads: 2, HeadDim: 32, HiddenSize: 128, IntermediateSize: 256, ModelType: "deepseek2"}
 	p := NewInKernelPlannerWithConfig(&model.Model{Cfg: cfg}, nil, "kv-precision-refuse", true, nil, false, InKernelPlannerConfig{KVPrecision: model.KVPrecisionQ8_0})
+	if !errors.Is(p.KVPrecisionConfigError(), ErrKVPrecisionUnrealized) {
+		t.Fatalf("construction verdict = %v, want typed refusal", p.KVPrecisionConfigError())
+	}
 	defer func() {
-		if recover() == nil {
-			t.Fatal("configureNativeSession must panic (refuse) q8 on an unsupported architecture")
+		r := recover()
+		if e, ok := r.(error); !ok || !errors.Is(e, ErrKVPrecisionUnrealized) {
+			t.Fatalf("configureNativeSession must refuse q8 with the typed error, got %v", r)
 		}
 	}()
 	p.configureNativeSession(p.m.NewSession())

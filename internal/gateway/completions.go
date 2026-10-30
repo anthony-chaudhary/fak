@@ -94,6 +94,8 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, msg)
 		return
 	}
+	top5Requested := req.Fak != nil && req.Fak.NativeDecodeTop5
+	topLogprobsK := completionTopLogprobsK(req)
 	r, ok = s.prepareChatRoute(w, r, req.Model)
 	if !ok {
 		return
@@ -167,6 +169,7 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		agent.WithRawPrompt(),
 		agent.WithDecodeTrace(decodeTraceRequested),
 		agent.WithNativeDecodeTokenIDs(decodeTokenIDsRequested),
+		agent.WithNativeDecodeTopLogprobs(topLogprobsK),
 	)
 	finishOutcome(comp, err)
 	if err != nil {
@@ -199,6 +202,10 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, "fak-native planner did not produce native decode token IDs")
 		return
 	}
+	if top5Requested && comp.NativeDecodeTopLogprobs == nil {
+		writeErr(w, http.StatusBadGateway, "fak-native planner did not produce native decode top-5 logprobs")
+		return
+	}
 
 	finish := comp.FinishReason
 	if finish == "" {
@@ -220,6 +227,15 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		if decodeTokenIDsRequested {
 			resp.Fak.NativeDecodeTokenIDs = comp.NativeDecodeTokenIDs
 		}
+	}
+	if req.Logprobs != nil {
+		resp.Choices[0].Logprobs = completionLogprobs(comp.NativeDecodeTopLogprobs, *req.Logprobs)
+	}
+	if top5Requested {
+		if resp.Fak == nil {
+			resp.Fak = &FakExt{}
+		}
+		resp.Fak.NativeDecodeTop5 = truncateTopLogprobs(comp.NativeDecodeTopLogprobs, 5)
 	}
 	if stream != nil {
 		writeCompletionStream(stream, resp)
@@ -299,7 +315,69 @@ func validateCompletionDecodeTrace(req CompletionRequest) string {
 	if req.FakDecodeTrace && req.Stream {
 		return "fak_decode_trace requires a buffered fak-native request"
 	}
+	if req.Logprobs != nil && (*req.Logprobs < 0 || *req.Logprobs > agent.MaxNativeDecodeTopLogprobs) {
+		return "logprobs: must be an integer between 0 and 20"
+	}
+	if req.Fak != nil && req.Fak.NativeDecodeTop5 && req.Stream {
+		return "fak.native_decode_top5 requires a buffered fak-native request"
+	}
 	return ""
+}
+
+// completionTopLogprobsK is the candidate count native decode must record:
+// enough for both the OpenAI logprobs object and the fak top-5 extension. A
+// streamed legacy request keeps logprobs off (its frames carry none), so it
+// pays no logits scan. logprobs:0 still needs the chosen token's row.
+func completionTopLogprobsK(req CompletionRequest) int {
+	k := 0
+	if req.Logprobs != nil && !req.Stream {
+		k = max(*req.Logprobs, 1)
+	}
+	if req.Fak != nil && req.Fak.NativeDecodeTop5 {
+		k = max(k, 5)
+	}
+	return k
+}
+
+// completionLogprobs projects the native receipt onto the OpenAI legacy
+// logprobs object with at most n candidates per row; nil when the planner
+// produced no receipt (a non-native route).
+func completionLogprobs(r *agent.NativeDecodeTopLogprobs, n int) *CompletionLogprobs {
+	if r == nil {
+		return nil
+	}
+	out := &CompletionLogprobs{
+		Tokens:        make([]string, len(r.Chosen)),
+		TokenLogprobs: make([]float64, len(r.Chosen)),
+		TopLogprobs:   make([]map[string]float64, len(r.Chosen)),
+	}
+	for i, c := range r.Chosen {
+		out.Tokens[i] = c.Token
+		out.TokenLogprobs[i] = c.Logprob
+		top := map[string]float64{}
+		if i < len(r.Rows) {
+			for _, cand := range r.Rows[i][:min(n, len(r.Rows[i]))] {
+				if _, seen := top[cand.Token]; !seen {
+					top[cand.Token] = cand.Logprob
+				}
+			}
+		}
+		out.TopLogprobs[i] = top
+	}
+	return out
+}
+
+func truncateTopLogprobs(r *agent.NativeDecodeTopLogprobs, k int) *agent.NativeDecodeTopLogprobs {
+	if r == nil {
+		return nil
+	}
+	cp := *r
+	cp.K = min(cp.K, k)
+	cp.Rows = make([][]agent.NativeTokenLogprob, len(r.Rows))
+	for i, row := range r.Rows {
+		cp.Rows[i] = row[:min(k, len(row))]
+	}
+	return &cp
 }
 
 // normalizePrompt folds the legacy `prompt` field (a bare string, a one-element

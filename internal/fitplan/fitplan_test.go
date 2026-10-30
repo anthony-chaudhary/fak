@@ -194,7 +194,9 @@ func TestMaxStreamContextBelowFloorIsExact(t *testing.T) {
 // fak-test:runtime fast est=1ms lane=default
 func TestRefusalWeightsExceedPool(t *testing.T) {
 	tiers := testTiers()[:1]
-	rep := plan(t, baseInput(2*gib, BuildCandidates(tiers, 4096)...))
+	in := baseInput(2*gib, BuildCandidates(tiers, 4096)...)
+	in.Pins.Placement = PlacementDeviceResident
+	rep := plan(t, in)
 	if rep.Status != StatusRefused {
 		t.Fatalf("status = %s, want refused", rep.Status)
 	}
@@ -441,7 +443,9 @@ func discreteOffloadInput(hostAvail int64) Input {
 
 // fak-test:runtime fast est=1ms lane=default
 func TestDiscreteHostScopedWeightsAreChargedToHostPool(t *testing.T) {
-	short := plan(t, discreteOffloadInput(20*gib))
+	pinned := discreteOffloadInput(20 * gib)
+	pinned.Pins.Placement = PlacementDeviceResident
+	short := plan(t, pinned)
 	err := refusalErr(short)
 	if short.Status != StatusRefused || !errors.Is(err, ErrWeightsExceedPool) || !short.Refusal.HostPool {
 		t.Fatalf("status %s refusal %+v, want a host weights_exceed_pool", short.Status, short.Refusal)
