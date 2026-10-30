@@ -9,7 +9,8 @@ import (
 )
 
 // serve_activated_expert_ring.go — the guard-admitted device placement for a routed-MoE checkpoint
-// whose full device-resident plan is FitTooBig on a device-only (Strix Halo) serve (fak#13668).
+// whose full device-resident plan is FitTooBig on an eligible device serve: a device-only (Strix
+// Halo) serve (fak#13668) or a discrete CUDA backend on any host (fak#12640).
 //
 // The only fitting route used to be the streamed --cpu-offload-experts arm, which the Halo guard
 // refuses because it runs host expert GEMMs. This placement keeps the dense base device-resident,
@@ -17,6 +18,11 @@ import (
 // (stream-through), and declares a bounded DEVICE ring on that tier, so a faulted expert is staged
 // into device memory and executed there. It is selected without --cpu-offload-experts, so
 // validateServeHaloCPUOffload is untouched.
+//
+// Eligibility is capability-gated per backend (serveExpertRingEligible), NOT tied to the
+// session-wide device-only policy: on a non-Halo CUDA host the session may still run host expert
+// GEMMs (--cpu-offload-experts stays admitted), while a FitTooBig full plan takes the ring anyway
+// because it is the only fitting route that keeps every matmul on the device.
 //
 // The ring is sized from ggufload.ActivatedExpertFit — the same header arithmetic
 // FitActivatedExpertsOnDevice admits on — but judged against the serve's own device fit snapshot.
@@ -42,6 +48,26 @@ type serveActivatedExpertRing struct {
 func serveFullPlanFitTooBig(err error) bool {
 	var fe *compute.FitError
 	return errors.As(err, &fe) && fe.Verdict == compute.FitTooBig
+}
+
+// serveExpertRingEligible reports whether this backend may host the activated-expert device-ring
+// placement on its own capability, independent of the session-wide device-only policy
+// (requireDeviceExecution): a device-only serve always does, and so does a DISCRETE CUDA backend
+// whose resident tensors live in device memory and whose capacity is probeable — the two facts
+// the ring's fit charge and page staging rely on. An integrated tier shares one physical pool
+// with the OS, so its ring would be judged against host RAM and keeps the historical refusal;
+// every other backend (Vulkan-on-Halo, CPU, Metal) keeps it too. The FitTooBig precondition at
+// every call site still demands a MEASURED full-plan-over-budget verdict, so an unprobeable
+// backend never reaches the ring through this door either.
+func serveExpertRingEligible(be compute.Backend, requireDevice bool) bool {
+	if be == nil {
+		return false
+	}
+	if requireDevice {
+		return true
+	}
+	c := be.Caps()
+	return c.DeviceMemory && c.CapacityProbe && be.Name() == "cuda" && !ggufload.BackendSharesHostRAM(be)
 }
 
 // serveActivatedExpertRingWeightPlan sizes the ring to one whole token's activated experts when the
@@ -89,8 +115,9 @@ func serveActivatedExpertRingResize(plan compute.MemoryPlan, ring int64) compute
 }
 
 // serveActivatedExpertRingPlacement returns the ring placement when fullErr is the full device plan's
-// FitTooBig on a device-only serve. Any other case returns fullErr unchanged, so a non-Halo serve and
-// a fitting checkpoint keep their historical arm.
+// FitTooBig on an eligible serve (a device-only serve, or a discrete CUDA backend — see
+// serveExpertRingEligible). Any other case returns fullErr unchanged, so a non-eligible serve and a
+// fitting checkpoint keep their historical arm.
 func serveActivatedExpertRingPlacement(ws *ggufload.WeightSource, be compute.Backend, requireDevice bool, fullErr error, contextBudgetTokens int, fit serveFitBudget) (serveActivatedExpertRing, bool, error) {
 	return serveActivatedExpertRingPlacementSized(ws, be, requireDevice, fullErr, contextBudgetTokens, fit, serveExpertRingSize{Mode: serveExpertRingToken}, serveExpertRingHost{})
 }
@@ -99,7 +126,7 @@ func serveActivatedExpertRingPlacement(ws *ggufload.WeightSource, be compute.Bac
 // ring is admitted first, so KV for the target context is reserved before a larger ring takes the
 // remaining room; a non-token size is then judged against the device bound and the host bound.
 func serveActivatedExpertRingPlacementSized(ws *ggufload.WeightSource, be compute.Backend, requireDevice bool, fullErr error, contextBudgetTokens int, fit serveFitBudget, size serveExpertRingSize, host serveExpertRingHost) (serveActivatedExpertRing, bool, error) {
-	if !requireDevice || be == nil || ws == nil || !serveFullPlanFitTooBig(fullErr) {
+	if !serveExpertRingEligible(be, requireDevice) || ws == nil || !serveFullPlanFitTooBig(fullErr) {
 		return serveActivatedExpertRing{}, false, fullErr
 	}
 	if !serveStreamedExpertsCapable(ws) {
@@ -166,9 +193,15 @@ func serveAdmitActivatedExpertRing(plan compute.MemoryPlan, ring int64, sizing *
 }
 
 // serveActivatedExpertRingPathPlacement resolves the --expert-ring-bytes size from getenv only
-// once the ring route applies, so a serve that never takes it never reads the knob.
+// once the ring route applies, so a serve that never takes it never reads the knob. A sharded
+// expert-parallel rank never takes the ring: the placement's band arithmetic is unsharded, so a
+// WithExpertShard option list declines before any size is read (the caller's own expertShard veto
+// stays in force on top of this).
 func serveActivatedExpertRingPathPlacement(ggufPath string, be compute.Backend, requireDevice bool, fullErr error, contextBudgetTokens int, override *serveFitBudget, getenv func(string) string, baseOpts []ggufload.Q4KLoadOption) (serveActivatedExpertRing, bool, error) {
-	if !requireDevice || be == nil || !serveFullPlanFitTooBig(fullErr) {
+	if ggufload.ApplyQ4KLoadOptions(baseOpts).ExpertShard {
+		return serveActivatedExpertRing{}, false, fullErr
+	}
+	if !serveExpertRingEligible(be, requireDevice) || !serveFullPlanFitTooBig(fullErr) {
 		return serveActivatedExpertRing{}, false, fullErr
 	}
 	size, err := resolveServeExpertRingSize("", getenv)

@@ -219,11 +219,17 @@ func TestServeV41PackedSevenShardProductionArmUsesMergedInventory(t *testing.T) 
 	}
 	for _, tc := range []struct {
 		name, flag string
-		q3, packed bool
+		q3         bool
+		packed     bool // production arm selects resident packed storage
+		q3Retained bool // dense Q3_K down projection stays packed-resident (needs the qualified Q3 execution probe)
 	}{
-		{name: "default-all-native", q3: true, packed: true},
-		{name: "default-late-q3-shader-absent"},
-		{name: "explicit-opt-in", flag: "1", q3: true, packed: true},
+		{name: "default-all-native", q3: true, packed: true, q3Retained: true},
+		// Mixed host-fallback arm (fak#12640): without a qualified Q3_K matmul route the dense
+		// Q2_K/Q6_K sides stay packed device-resident and the dense Q3_K side takes the proven
+		// dequant-to-Q8 route. The native-Q3 negative control holds (no packed Q3 residency);
+		// the all-Q8 fallback no longer drags the Q2_K side down with it.
+		{name: "default-late-q3-shader-absent", packed: true},
+		{name: "explicit-opt-in", flag: "1", q3: true, packed: true, q3Retained: true},
 		{name: "rollback", flag: "0", q3: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -251,8 +257,8 @@ func TestServeV41PackedSevenShardProductionArmUsesMergedInventory(t *testing.T) 
 			if packed != tc.packed {
 				t.Fatalf("production packed arm=%t want=%t", packed, tc.packed)
 			}
-			if got := m.HasKQuant("model.layers.0.mlp.down_proj.weight"); got != tc.packed {
-				t.Fatalf("late-shard actual Q3 retention=%t want=%t", got, tc.packed)
+			if got := m.HasKQuant("model.layers.0.mlp.down_proj.weight"); got != tc.q3Retained {
+				t.Fatalf("late-shard actual Q3 retention=%t want=%t", got, tc.q3Retained)
 			}
 			if tc.packed {
 				for _, weight := range []struct {
@@ -261,16 +267,26 @@ func TestServeV41PackedSevenShardProductionArmUsesMergedInventory(t *testing.T) 
 				}{
 					{name: "model.layers.0.self_attn.v_proj.weight", payload: make([]byte, 84)},
 					{name: "lm_head.weight", payload: make([]byte, 210)},
-					{name: "model.layers.0.mlp.down_proj.weight", payload: v41PackedQ3Block()},
 				} {
 					raw, ok := m.KQuantRaw(weight.name)
 					if !ok || !bytes.Equal(raw, weight.payload) {
 						t.Fatalf("native weight %s packed=%t bytes=%d want=%d", weight.name, ok, len(raw), len(weight.payload))
 					}
 				}
+				downRaw, downOK := m.KQuantRaw("model.layers.0.mlp.down_proj.weight")
+				if downOK != tc.q3Retained {
+					t.Fatalf("dense Q3 down projection packed=%t want=%t (native-Q3 negative control)", downOK, tc.q3Retained)
+				}
+				if tc.q3Retained && !bytes.Equal(downRaw, v41PackedQ3Block()) {
+					t.Fatalf("dense Q3 down projection bytes=%d want=%d", len(downRaw), len(v41PackedQ3Block()))
+				}
 				report := m.ResidentReport()
-				if report.KQuantBytes != 404 || report.Q8Bytes != 0 || report.F32Bytes != 5120 || report.TotalResidentBytes != 5524 {
-					t.Fatalf("native storage K=%d Q8=%d F32=%d total=%d want 404/0/5120/5524", report.KQuantBytes, report.Q8Bytes, report.F32Bytes, report.TotalResidentBytes)
+				wantK, wantQ8, wantTotal := int64(404), int64(0), int64(5524)
+				if !tc.q3Retained {
+					wantK, wantQ8, wantTotal = 294, 288, 5702 // Q2_K+Q6_K packed; dense Q3_K converted to Q8_0
+				}
+				if report.KQuantBytes != wantK || report.Q8Bytes != wantQ8 || report.F32Bytes != 5120 || report.TotalResidentBytes != wantTotal {
+					t.Fatalf("native storage K=%d Q8=%d F32=%d total=%d want %d/%d/5120/%d", report.KQuantBytes, report.Q8Bytes, report.F32Bytes, report.TotalResidentBytes, wantK, wantQ8, wantTotal)
 				}
 				opts := serveResidentQ4KLoadOptions(backend, path, true, merged)
 				plan, err := serveGGUFWeightMemoryPlanForArm(ws, arm, opts...)
@@ -283,8 +299,8 @@ func TestServeV41PackedSevenShardProductionArmUsesMergedInventory(t *testing.T) 
 			}
 		})
 	}
-	// All dtypes stay present in the late-shader negative: the missing execution
-	// probe alone must defeat first-shard admission.
+	// All dtypes stay present in the late-shader negative: the missing EXECUTION probe demotes
+	// only the Q3 side to its dequant route; dtype presence alone never relabels it back.
 	if !compute.BackendSupportsDeviceWeightDtype(v41PackedNativeBackend(), compute.Q3_K) {
 		t.Fatal("fixture lost Q3 dtype capability")
 	}

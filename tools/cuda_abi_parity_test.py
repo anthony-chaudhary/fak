@@ -75,6 +75,65 @@ class TestSymbolExtraction(unittest.TestCase):
         self.assertEqual(m.binding_calls(go), {"fcuda_matmul_f32", "fcuda_argmax_f32"})
 
 
+class TestPreambleDecls(unittest.TestCase):
+    PREAMBLE = (
+        "/*\n"
+        "#cgo LDFLAGS: -lfakcuda\n"
+        '#include "cuda_backend.h"\n'
+        "// a preamble comment mentioning fcuda_not_a_decl must not count\n"
+        "extern void fcuda_dw_counters(uint64_t *out, int n);\n"
+        "extern int fcuda_dw_site_rows(uint32_t *site, int cap);\n"
+        "extern const char *fcuda_dw_stage_name(uint32_t id);\n"
+        "*/\n"
+        'import "C"\n'
+        "C.fcuda_dw_counters(o, 1)\n"
+    )
+
+    def test_preamble_prototypes_are_extracted(self):
+        self.assertEqual(m.binding_preamble_decls(self.PREAMBLE),
+                         {"fcuda_dw_counters", "fcuda_dw_site_rows", "fcuda_dw_stage_name"})
+
+    def test_comment_mention_inside_preamble_is_not_a_decl(self):
+        self.assertNotIn("fcuda_not_a_decl", m.binding_preamble_decls(self.PREAMBLE))
+
+    def test_file_without_cgo_preamble_has_no_preamble_decls(self):
+        self.assertEqual(m.binding_preamble_decls("C.fcuda_x(1)\n"), set())
+
+    def test_extern_c_declaration_is_not_a_preamble_decl(self):
+        # `extern "C"` marks a .cu definition / header export, not a cgo preamble prototype.
+        self.assertEqual(m.binding_preamble_decls('extern "C" void fcuda_x(int n);\n'), set())
+
+
+class TestPreambleParity(unittest.TestCase):
+    def test_preamble_prototype_satisfies_call_and_def_pairing(self):
+        p = m.parity({"fcuda_dw_counters"}, {"fcuda_dw_counters"}, {"fcuda_dw_counters"},
+                     preamble_decls={"fcuda_dw_counters"})
+        self.assertEqual(p["hard"], [])
+
+    def test_preamble_prototype_without_definition_is_hard(self):
+        p = m.parity({"fcuda_dw_ghost"}, set(), {"fcuda_dw_ghost"},
+                     preamble_decls={"fcuda_dw_ghost"})
+        self.assertEqual(p["undefined"], ["fcuda_dw_ghost"])
+        self.assertIn("cgo preamble", p["hard"][0])
+
+    def test_call_with_no_header_or_preamble_still_hard(self):
+        p = m.parity(set(), set(), {"fcuda_ghost"})
+        self.assertEqual(p["undeclared_calls"], ["fcuda_ghost"])
+        self.assertIn("nor any cgo preamble", p["hard"][0])
+
+    def test_undeclared_def_allowlist_marks_ok(self):
+        p = m.parity(set(), {"fcuda_dw_site_name"}, set())
+        self.assertEqual(p["hard"], [])
+        joined = "\n".join(p["soft"])
+        self.assertIn("fcuda_dw_site_name", joined)
+        self.assertIn("OK:", joined)
+
+    def test_unknown_undeclared_def_still_hard(self):
+        p = m.parity(set(), {"fcuda_orphan_export"}, set())
+        self.assertEqual(len(p["hard"]), 1)
+        self.assertIn("no prototype", p["hard"][0])
+
+
 class TestHeaderPortability(unittest.TestCase):
     def test_uint8_t_requires_direct_stdint_include(self):
         hdr = "#include <stddef.h>\nvoid fcuda_q4k(const uint8_t *p, size_t n);\n"
@@ -294,6 +353,32 @@ class TestCollectIncludes(unittest.TestCase):
         payload = m.collect(self.root)
         self.assertEqual(payload["verdict"], "AUDIT_ERROR", payload)
         self.assertIn("escapes repository", payload["reason"])
+
+    def test_preamble_prototype_flows_through_collect(self):
+        self.write(m.BINDINGS[0], (
+            '/*\n#include "cuda_backend.h"\n'
+            "extern void fcuda_preamble_only(int n);\n*/\n"
+            'import "C"\nC.fcuda_preamble_only(1)\n'
+        ))
+        self.write(m.KERNELS[0], (
+            'extern "C" int fcuda_test(void) { return 0; }\n'
+            'extern "C" void fcuda_preamble_only(int n) {}\n'
+        ))
+        payload = m.collect(self.root)
+        self.assertEqual(payload["verdict"], "OK", payload)
+        self.assertEqual(payload["corpus"]["preamble_decls"], ["fcuda_preamble_only"])
+
+    def test_preamble_prototype_without_kernel_definition_remains_hard(self):
+        self.write(m.BINDINGS[0], (
+            '/*\n#include "cuda_backend.h"\n'
+            "extern void fcuda_preamble_only(int n);\n*/\n"
+            'import "C"\nC.fcuda_preamble_only(1)\n'
+        ))
+        self.write(m.KERNELS[0], 'extern "C" int fcuda_test(void) { return 0; }\n')
+        payload = m.collect(self.root)
+        self.assertEqual(payload["verdict"], "ACTION", payload)
+        self.assertEqual(payload["corpus"]["undefined"], ["fcuda_preamble_only"])
+        self.assertIn("cgo preamble", payload["corpus"]["hard"][0])
 
     def test_missing_modular_root_is_an_audit_error(self):
         rel = "internal/compute/cuda_kv_precision.h"
