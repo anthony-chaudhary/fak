@@ -1060,6 +1060,9 @@ type nativeInferenceMeasurement struct {
 	traceEvents                         []NativeDecodeTraceEvent
 	decodeTokenIDsEnabled               bool
 	decodeTokenIDs                      []int
+	topLogprobsK                        int
+	topChosen                           []NativeTokenLogprob
+	topRows                             [][]NativeTokenLogprob
 	qwen35MetalForwardSequence          model.Qwen35MetalForwardSequenceReceipt
 	qwen35MetalStateIdentity            *model.Qwen35MetalStateIdentityReceipt
 	qwen35SequencePrefillRoute          *model.NativeSequencePrefillRouteReceipt
@@ -1081,6 +1084,8 @@ func (m *nativeInferenceMeasurement) reset() {
 	m.traceStartedAt = time.Time{}
 	m.traceEvents = m.traceEvents[:0]
 	m.decodeTokenIDs = m.decodeTokenIDs[:0]
+	m.topChosen = m.topChosen[:0]
+	m.topRows = m.topRows[:0]
 	m.qwen35MetalForwardSequence = model.Qwen35MetalForwardSequenceReceipt{}
 	m.qwen35MetalStateIdentity = nil
 	m.qwen35SequencePrefillRoute = nil
@@ -1090,7 +1095,18 @@ func (m *nativeInferenceMeasurement) reset() {
 }
 
 func (m *nativeInferenceMeasurement) record(logits []float32, token int) error {
-	if m == nil || m.inferenceDisabled {
+	if m == nil {
+		return nil
+	}
+	if m.topLogprobsK > 0 {
+		chosen, row, err := nativeTopLogprobs(logits, token, m.topLogprobsK)
+		if err != nil {
+			return err
+		}
+		m.topChosen = append(m.topChosen, chosen)
+		m.topRows = append(m.topRows, row)
+	}
+	if m.inferenceDisabled {
 		return nil
 	}
 	lp, err := chosenTokenLogprob(logits, token)
@@ -1345,7 +1361,7 @@ func (ln *decodeLane) vocabSize() int {
 // is chosen before sampling and composes unchanged.
 func (ln *decodeLane) deviceGreedy() bool {
 	return ln.structured == nil && ln.temp <= 0 && len(ln.logitBias) == 0 && ln.freqPenalty == 0 && ln.presPenalty == 0 &&
-		(ln.measurement == nil || ln.measurement.inferenceDisabled)
+		(ln.measurement == nil || (ln.measurement.inferenceDisabled && ln.measurement.topLogprobsK == 0))
 }
 
 // step is the serial forward. A greedy lane asks the session for the token only; a

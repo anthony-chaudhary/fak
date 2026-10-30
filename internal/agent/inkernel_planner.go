@@ -2473,11 +2473,12 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			}
 			defer releaseHostMemory()
 			var measurement *nativeInferenceMeasurement
-			if sp.NativeInferenceReceipt || (sp.DecodeTrace && sp.DecodeTokenObserver == nil) || sp.NativeDecodeTokenIDs {
+			if sp.NativeInferenceReceipt || (sp.DecodeTrace && sp.DecodeTokenObserver == nil) || sp.NativeDecodeTokenIDs || sp.NativeDecodeTopLogprobs > 0 {
 				measurement = &nativeInferenceMeasurement{
 					startedAt:             requestStarted,
 					inferenceDisabled:     !sp.NativeInferenceReceipt,
 					decodeTokenIDsEnabled: sp.NativeDecodeTokenIDs,
+					topLogprobsK:          sp.NativeDecodeTopLogprobs,
 				}
 				if sp.NativeDecodeTokenIDs {
 					measurement.decodeTokenIDs = make([]int, 0, maxNew)
@@ -2720,6 +2721,13 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 					Engine:   NativeDecodeTokenIDsEngine,
 					TokenIDs: append([]int(nil), measurement.decodeTokenIDs...),
 				}
+			}
+			if sp.NativeDecodeTopLogprobs > 0 && measurement != nil {
+				var decode func([]int) (string, error)
+				if p.tok != nil {
+					decode = p.tok.Decode
+				}
+				comp.NativeDecodeTopLogprobs = buildNativeDecodeTopLogprobs(measurement, decode)
 			}
 			// Lift the model's text-form <tool_call> emissions into structured Message.ToolCalls
 			// (Hermes dialect == Qwen2.5 native), set FinishReason="tool_calls", and flag a

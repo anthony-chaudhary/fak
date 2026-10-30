@@ -463,6 +463,9 @@ type ChatRequest struct {
 type FakRequestExt struct {
 	NativeInferenceReceipt bool `json:"native_inference_receipt,omitempty"`
 	NativeDecodeTokenIDs   bool `json:"native_decode_token_ids,omitempty"`
+	// NativeDecodeTop5 asks /v1/completions for per-generated-token top-5
+	// {token_id, logprob} rows computed from the native decode logits.
+	NativeDecodeTop5 bool `json:"native_decode_top5,omitempty"`
 	// MultimodalMode must be "quarantine" to admit image-bearing native input.
 	// Empty preserves the fail-closed model default.
 	MultimodalMode string `json:"multimodal_mode,omitempty"`
@@ -678,9 +681,13 @@ type CompletionRequest struct {
 	Stop        json.RawMessage `json:"stop,omitempty"`
 	Stream      bool            `json:"stream,omitempty"`
 	// FakDecodeTrace and Fak.NativeDecodeTokenIDs are the same opt-in pair the
-	// chat route honors; only native_decode_token_ids is read from Fak here.
+	// chat route honors; only native_decode_token_ids and native_decode_top5 are
+	// read from Fak here.
 	FakDecodeTrace bool           `json:"fak_decode_trace,omitempty"`
 	Fak            *FakRequestExt `json:"fak,omitempty"`
+	// Logprobs is the OpenAI legacy top-candidate count. nil keeps it off;
+	// a native route answers it from the decode logits on buffered requests.
+	Logprobs *int `json:"logprobs,omitempty"`
 }
 
 // CompletionResponse is the legacy `text_completion` object: choices carry a bare
@@ -697,9 +704,19 @@ type CompletionResponse struct {
 
 // CompletionChoice is one legacy completion choice (text, not a message).
 type CompletionChoice struct {
-	Index        int     `json:"index"`
-	Text         string  `json:"text"`
-	FinishReason *string `json:"finish_reason"`
+	Index        int                 `json:"index"`
+	Text         string              `json:"text"`
+	Logprobs     *CompletionLogprobs `json:"logprobs,omitempty"`
+	FinishReason *string             `json:"finish_reason"`
+}
+
+// CompletionLogprobs is the OpenAI legacy per-generated-token logprob object.
+// Rows align with the generated tokens; top_logprobs maps decoded pieces to
+// logprobs, so pieces that decode identically keep the most probable entry.
+type CompletionLogprobs struct {
+	Tokens        []string             `json:"tokens"`
+	TokenLogprobs []float64            `json:"token_logprobs"`
+	TopLogprobs   []map[string]float64 `json:"top_logprobs"`
 }
 
 // CompletionStreamResponse is the legacy SSE chunk shape for `stream: true` on
@@ -753,6 +770,9 @@ type FakExt struct {
 	// NativeDecodeTokenIDs is emitted only alongside an explicitly requested
 	// native decode trace and carries the ordered committed token IDs.
 	NativeDecodeTokenIDs *agent.NativeDecodeTokenIDs `json:"native_decode_token_ids,omitempty"`
+	// NativeDecodeTop5 is emitted only when fak.native_decode_top5 was requested:
+	// rows[i] is the top-5 {token_id, logprob} list for generated token i.
+	NativeDecodeTop5 *agent.NativeDecodeTopLogprobs `json:"native_decode_top5,omitempty"`
 	// DecodeTrace is emitted only for an explicitly requested buffered fak-native
 	// turn. Its schema and engine fields make the provenance self-describing.
 	DecodeTrace *agent.NativeDecodeTrace `json:"decode_trace,omitempty"`

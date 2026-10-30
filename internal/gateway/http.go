@@ -1054,6 +1054,10 @@ func validateChatRequestIngress(w http.ResponseWriter, req ChatRequest) bool {
 		writeErr(w, http.StatusBadRequest, "native decode token IDs require fak_decode_trace")
 		return false
 	}
+	if req.Fak != nil && req.Fak.NativeDecodeTop5 {
+		writeErr(w, http.StatusBadRequest, "fak.native_decode_top5 is served only on /v1/completions")
+		return false
+	}
 	if decodeTraceRequested && req.Stream {
 		writeErr(w, http.StatusBadRequest, "fak_decode_trace requires a buffered fak-native request")
 		return false

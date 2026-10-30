@@ -194,7 +194,7 @@ func (p *InKernelPlanner) validateDFlash2Request(sp SampleParams, temp, frequenc
 	if (sp.TopP != nil && *sp.TopP != 0) || (sp.TopK != nil && *sp.TopK > 0) || temp != 0 || frequency != 0 || presence != 0 || len(sp.LogitBias) != 0 ||
 		len(sp.ResponseFormat) != 0 || len(sp.ToolChoice) != 0 || sp.MinP != nil ||
 		len(sp.ChatTemplateKwargs) != 0 || sp.SpeculativeNMax != nil || sp.RawPrompt ||
-		sp.NativeInferenceReceipt || sp.NativeDecodeTokenIDs ||
+		sp.NativeInferenceReceipt || sp.NativeDecodeTokenIDs || sp.NativeDecodeTopLogprobs > 0 ||
 		(sp.DecodeTrace && sp.DecodeTokenObserver == nil) {
 		return errors.New("dflash2: selected diagnostic route requires unmodified greedy decoding without unsupported receipts or constraints")
 	}
