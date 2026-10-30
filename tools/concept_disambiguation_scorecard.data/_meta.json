@@ -14993,6 +14993,16 @@
           "category": "incidental",
           "reason": "Measured-request fraction of offered workload, not platform capability or support maturity.",
           "token": "CoverageFraction"
+        },
+        {
+          "category": "incidental",
+          "reason": "Effect-free optional backend capability predicate for one exact Engram row encoding; this is an operation-level dialect claim, not product support maturity, device qualification or an IQ4 serving guarantee.",
+          "token": "SupportsV41EngramRowEncoding"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pure operation-level admission helper combining known row stride, broad decoder availability and optional exact encoding capability while restricting legacy decoders to three existing dialects; it is not a product maturity assessment, execution witness or serving enablement.",
+          "token": "V41EngramRowDecodeSupportsEncoding"
         }
       ],
       "exclude": [
@@ -15131,6 +15141,7 @@
         "SupportsRoutedExpertKQuant",
         "SupportsV41DSparkMeanRange",
         "SupportsV41DeferredStatus",
+        "SupportsV41EngramRowEncoding",
         "SupportsV41F32Finite",
         "SupportsV41IndexScaleBF16",
         "SupportsV41RoutedDownPanelChunk",
@@ -15154,6 +15165,7 @@
         "UNSUPPORTED_PROOF_FEATURE",
         "UNSUPPORTED_SESSION_KIND",
         "UnsupportedFields",
+        "V41EngramRowDecodeSupportsEncoding",
         "V41WorkloadCoverageDefault",
         "VerdictParityOK",
         "VerdictPartialCoverage",

@@ -59,6 +59,7 @@ func (s *Session) v41EngramGateFuncWith(decoder compute.V41EngramRowDecodeBacken
 			return false, nil
 		}
 		encoding, decodable := gathered.encoding()
+		decodable = decodable && compute.V41EngramRowDecodeSupportsEncoding(decoder, encoding)
 		var stored []byte
 		if decodable && decoder != nil {
 			stored, decodable = gathered.stored()
