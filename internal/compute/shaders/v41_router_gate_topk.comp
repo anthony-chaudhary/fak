@@ -76,9 +76,9 @@ float log1pUnit(float e) {
 }
 
 float routerScore(float z) {
-    // Below -20, log1p(e^z) = e^z to F32 precision; sqrt(e^z) = e^(z/2) avoids
-    // underflowing e^z before the root.
-    if (z < -20.0) {
+    // Only reduced routing may avoid underflow before the root. Full routing
+    // publishes softplus as F32 first, so its underflow to zero is observable.
+    if (pc.full == 0 && z < -20.0) {
         precise float h = 0.5 * z;
         precise float r = exp(h);
         return r;

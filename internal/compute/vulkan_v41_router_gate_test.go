@@ -86,6 +86,68 @@ func routerGateUpload(v *vulkanBackend, shape []int, values []float32, class Mem
 	return v.UploadClass(NewF32(Default(), shape, values), F32, class, "router gate witness")
 }
 
+// Full routing publishes softplus as F32 before sqrt: softplus(-110) rounds to
+// +0, so all selected weights must be +0. Reduced routing retains the tiny
+// positive score, and one selected score normalizes to the exact route scale.
+// Check each path against those host-contract results, not only against its
+// twin shader: the same missing boundary in both modules would pass equality.
+// Qualification requires FAK_VULKAN_REQUIRE_DEVICE=1; a skip is no witness.
+// Runtime estimate only; unmeasured.
+// fak-test:runtime fast est=1s lane=default
+func TestVulkanV41RouterGateSoftplusPublication(t *testing.T) {
+	v := vkRouterGate(t)
+	const experts, hidden = 384, 64
+	const logit float32 = -110
+	w, x := make([]float32, experts*hidden), make([]float32, hidden)
+	x[0] = 1
+	for expert := 0; expert < experts; expert++ {
+		w[expert*hidden] = logit
+	}
+	wt := v.Upload(NewF32(Default(), []int{experts, hidden}, w), F32)
+	defer v.Free(wt)
+	xt := routerGateUpload(v, []int{hidden}, x, MemoryActivation)
+	defer v.Free(xt)
+	dummy := routerGateUpload(v, []int{1}, []float32{0}, MemoryActivation)
+	defer v.Free(dummy)
+	for _, tc := range []struct {
+		name   string
+		full   bool
+		topK   int
+		weight float32
+	}{
+		{"full_f32_zero", true, 3, 0},
+		{"reduced_preserves_tiny_score", false, 1, 1.5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ref := routerGateReference(t, v, wt, xt, dummy, experts, tc.topK, tc.full, false)
+			got := routerGateFused(v, wt, xt, dummy, experts, hidden, tc.topK, tc.full, false)
+			for _, path := range []struct {
+				name string
+				run  routerGateRun
+			}{{"split", ref}, {"fused", got}} {
+				if path.run.err != nil {
+					t.Fatalf("%s: route faulted: %v", path.name, path.run.err)
+				}
+				if len(path.run.logits) != experts || len(path.run.picks.Experts) != tc.topK || len(path.run.picks.Weights) != tc.topK {
+					t.Fatalf("%s: unexpected logit/pick extents %d/%d/%d", path.name, len(path.run.logits), len(path.run.picks.Experts), len(path.run.picks.Weights))
+				}
+				for expert, z := range path.run.logits {
+					if math.Float32bits(z) != math.Float32bits(logit) {
+						t.Fatalf("%s: expert %d logit = %g, want %g", path.name, expert, z, logit)
+					}
+				}
+				for slot := 0; slot < tc.topK; slot++ {
+					if path.run.picks.Experts[slot] != int32(slot) || math.Float32bits(path.run.picks.Weights[slot]) != math.Float32bits(tc.weight) {
+						t.Fatalf("%s: slot %d got (%d, %#08x), want (%d, %#08x)", path.name, slot,
+							path.run.picks.Experts[slot], math.Float32bits(path.run.picks.Weights[slot]), slot, math.Float32bits(tc.weight))
+					}
+				}
+			}
+			requireRouterGateEqual(t, tc.name, ref, got)
+		})
+	}
+}
+
 // The fused module must equal MatMul + router top-k bit for bit on the V4.1
 // geometry over randomized rows, every bias/full combination, and a row whose
 // leading twelve experts tie exactly.
