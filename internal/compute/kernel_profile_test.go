@@ -668,6 +668,9 @@ var cudaKernelOtherAllowlist = map[string]bool{
 	"k_v41_bf16_publish": true, "k_v41_bf16_publish_status": true, "quantize_mmq_q8_1_ds4": true,
 	"k_v41_indexer_score_f32": true, "k_v41_indexer_score_tiled_f32": true,
 	"fak_paged_kv_write": true, "fak_paged_kv_gather": true, "paged_store_int_kernel": true,
+	// V4.1 elementwise, pool-update and status-publish glue.
+	"k_mhc": true, "k_v41_engram": true, "k_v41_pool": true, "v41c_status_kernel": true,
+	"v41c_compressor_store_kernel": true, "v41c_compressor_update_pool_kernel": true,
 	"quantize_q8_1": true, "k_q3k_dequant": true,
 }
 

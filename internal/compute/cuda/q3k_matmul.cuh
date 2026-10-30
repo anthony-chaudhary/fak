@@ -87,9 +87,9 @@ static int fcuda_q3k_panel_f32(const uint8_t *W, const float *X, float *Y,
     const dim3 grid(((unsigned int)out + 7) / 8, gy);
     // No scratch allocation and no host fallback. Caller records native failures.
     if (tile == 4) {
-        FCUDA_TS("k_q3k_panel4", grid.x*grid.y, k_q3k_panel<4><<<grid,256,0,g_stream>>>(W,X,Y,out,in,P));
+        FCUDA_TS("k_q3k_panel", grid.x*grid.y, k_q3k_panel<4><<<grid,256,0,g_stream>>>(W,X,Y,out,in,P));
     } else {
-        FCUDA_TS("k_q3k_panel1", grid.x*grid.y, k_q3k_panel<1><<<grid,256,0,g_stream>>>(W,X,Y,out,in,P));
+        FCUDA_TS("k_q3k_panel", grid.x*grid.y, k_q3k_panel<1><<<grid,256,0,g_stream>>>(W,X,Y,out,in,P));
     }
     return (int)cudaGetLastError();
 }

@@ -17,6 +17,7 @@ static bool dg_wkv_extent(const void *p,size_t n,size_t alignment) {
 extern "C" int fcuda_deepgemm_wkv_upload(void *dst,const void *src,size_t n) {
  int rc=fcuda_deepgemm_wkv_state();if(rc)return rc;
  if(!src||!dg_wkv_extent(dst,n,16))return FAK_DG_WKV_BUFFER;
+ fcuda_ts_untimed_transfer();
  cudaError_t e=cudaMemcpy(dst,src,n,cudaMemcpyHostToDevice);
  if(e){cudaError_t drain=cudaStreamSynchronize(g_stream);if(drain){g_deepgemm_wkv_uncertain=true;g_deepgemm_wkv_quarantine[0]=dst;}return (int)e;}
  g_h2d_bytes+=n;return 0;

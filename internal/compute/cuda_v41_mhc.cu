@@ -92,7 +92,7 @@ extern "C" int fak_v41_mhc_run(int op,const float *a,const float *b,const float 
   for(int i=0;i<4;++i) if(counts[i]) { int s=fak_v41_mhc_input(p[i],counts[i]); if(s) return s; }
   uint64_t n=(op==1||op==4)?(uint64_t)rows:counts[3];
   unsigned blocks=(unsigned)((n+127)/128); if(blocks>65535) blocks=65535;
-  k_mhc<<<blocks,128,0,g_stream>>>(op,a,b,c,out,rows,hidden,iters,eps,rms_eps);
+  FCUDA_TS("k_mhc", blocks, k_mhc<<<blocks,128,0,g_stream>>>(op,a,b,c,out,rows,hidden,iters,eps,rms_eps));
   cudaError_t e=cudaGetLastError(); int status=e==cudaSuccess?0:30000+(int)e;
   if(!status) { e=cudaStreamSynchronize(g_stream); if(e!=cudaSuccess) status=40000+(int)e; }
   if(status) {

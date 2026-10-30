@@ -39,13 +39,18 @@ extern "C" int fak_flashmla_prefill_run(const fak_flashmla_input *xp,const fak_f
   // Synchronous host copies are intentional: no in-flight operation may retain
   // a Go pointer after a failed drain returns. The shared stream is blocking.
   submitted=true;
+  fcuda_ts_untimed_transfer();
   for(int i=0;i<7;i++){ce=cudaMemcpy(b[i],host[i],bytes[i],cudaMemcpyHostToDevice);if(ce)return finish((int)ce);g_h2d_bytes+=bytes[i];}
-  submitted=true;ce=cudaMemsetAsync(b[13],0,4,g_stream);if(ce)return finish((int)ce);
+  submitted=true;
+  FCUDA_TS("fill", dim3(0, 0), ce = cudaMemsetAsync(b[13], 0, 4, g_stream));
+  if(ce)return finish((int)ce);
   result=fak_flashmla_prefill_launch(x,b,(void*)g_stream);if(result)return finish(result);
   ce=cudaStreamSynchronize(g_stream);if(ce){retain();return (int)ce;}
+  fcuda_ts_untimed_transfer();
   int numerical=0;ce=cudaMemcpy(&numerical,b[13],4,cudaMemcpyDeviceToHost);if(ce)return finish((int)ce);g_host_bytes+=4;
   if(numerical)return finish(-5);
   void *dest[3]={o.values,o.max_logits,o.lse};int ids[3]={12,10,11};
+  fcuda_ts_untimed_transfer();
   for(int j=0;j<3;j++){int i=ids[j];ce=cudaMemcpy(dest[j],b[i],bytes[i],cudaMemcpyDeviceToHost);if(ce)return finish((int)ce);g_host_bytes+=bytes[i];}
   return finish(0);
  }catch(...){return finish(-6);}

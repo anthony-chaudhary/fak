@@ -234,8 +234,8 @@ var kernelTransferNames = map[string]bool{
 // gate_up or down_sum) before GDN and SwiGLU. A routed *_panel_* kernel is a
 // publication or activation over an already projected row, not a projection.
 // CUDA names spell the same ops gemv/gemm (cuBLAS rows cublas_*gemm*), mul_mat
-// (the llama.cpp MMQ port), and fattn/attend/spec_verify/dsa_index for the
-// attention family.
+// (the llama.cpp MMQ port), q3k_panel (the Q3_K panel product), and
+// fattn/attend/spec_verify/dsa_index for the attention family.
 func KernelOpClass(name string) string {
 	switch {
 	case kernelTransferNames[name]:
@@ -250,7 +250,8 @@ func KernelOpClass(name string) string {
 	case strings.Contains(name, "matvec"), strings.Contains(name, "gemv"):
 		return KernelOpMatvec
 	case strings.Contains(name, "matmul"), strings.Contains(name, "token_panel"), strings.Contains(name, "token_pair"),
-		strings.Contains(name, "gemm"), strings.Contains(name, "mul_mat"), strings.Contains(name, "w4a16"):
+		strings.Contains(name, "gemm"), strings.Contains(name, "mul_mat"), strings.Contains(name, "q3k_panel"),
+		strings.Contains(name, "w4a16"):
 		return KernelOpMatmul
 	case strings.Contains(name, "swiglu"):
 		return KernelOpSwiGLU

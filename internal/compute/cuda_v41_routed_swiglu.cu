@@ -59,15 +59,18 @@ extern "C" int fak_v41_routed_swiglu_run(const float *g,const float *u,float *ou
  for(int i=2;i<4;++i)for(int j=0;j<i;++j)if(ptrs[i]==ptrs[j])return -2;
  for(int i=0;i<4;++i){int x=fak_v41_routed_swiglu_input(ptrs[i],i==3?4:(uint64_t)count);if(x)return x;}
  // The freshly initialized record is ordered after both GEMMs on g_stream.
- cudaError_t e=cudaMemsetAsync(status,0xff,16,g_stream);int x=e==cudaSuccess?0:20000+(int)e;
+ cudaError_t e;
+ FCUDA_TS("fill", dim3(0, 0), e = cudaMemsetAsync(status, 0xff, 16, g_stream));
+ int x=e==cudaSuccess?0:20000+(int)e;
  if(!x){
   unsigned blocks=((unsigned)count+127)/128;if(blocks>65535)blocks=65535;
-  k_v41_routed_swiglu<<<blocks,128,0,g_stream>>>(g,u,out,status,count,limit,weight);
+  FCUDA_TS("k_v41_routed_swiglu", blocks, k_v41_routed_swiglu<<<blocks,128,0,g_stream>>>(g,u,out,status,count,limit,weight));
   e=cudaGetLastError();if(e!=cudaSuccess)x=30000+(int)e;
  }
  // A checked completion is required before examining status or publishing out.
  if(!x){e=cudaStreamSynchronize(g_stream);if(e!=cudaSuccess)x=40000+(int)e;}
- if(!x){e=cudaMemcpy(host,status,16,cudaMemcpyDeviceToHost);if(e!=cudaSuccess)x=45000+(int)e;}
+ fcuda_ts_untimed_transfer();
+ if(!x){e=cudaMemcpy(host,status,16,cudaMemcpyDeviceToHost);if(e!=cudaSuccess)x=45000+(int)e);}
  if(x){e=cudaStreamSynchronize(g_stream);if(e!=cudaSuccess){
   for(int i=0;i<4;++i)g_v41_routed_swiglu_quarantine[i]=ptrs[i];
   g_v41_routed_swiglu_uncertain=true;return 50000+(int)e;

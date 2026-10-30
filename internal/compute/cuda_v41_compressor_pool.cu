@@ -69,11 +69,12 @@ extern "C" int fak_v41_pool_run(const float *kv,const float *sc,float *out,int r
  const float *ptrs[3]={kv,sc,out};
  uint64_t counts[3]={(uint64_t)ratio*width,(uint64_t)ratio*width,(uint64_t)width+1};
  for(int i=0;i<3;++i) { int s=fak_v41_pool_input(ptrs[i],counts[i]); if(s) return s; }
- cudaError_t e=cudaMemsetAsync(out+width,0,sizeof(int),g_stream);
+ cudaError_t e;
+ FCUDA_TS("fill", dim3(0, 0), e = cudaMemsetAsync(out + width, 0, sizeof(int), g_stream));
  int status=e==cudaSuccess?0:20000+(int)e;
  if(!status) {
   unsigned blocks=((unsigned)width+127)/128; if(blocks>65535) blocks=65535;
-  k_v41_pool<<<blocks,128,0,g_stream>>>(kv,sc,out,ratio,width);
+  FCUDA_TS("k_v41_pool", blocks, k_v41_pool<<<blocks,128,0,g_stream>>>(kv,sc,out,ratio,width));
   e=cudaGetLastError(); if(e!=cudaSuccess) status=30000+(int)e;
  }
  if(!status) { e=cudaStreamSynchronize(g_stream); if(e!=cudaSuccess) status=40000+(int)e; }
@@ -83,6 +84,7 @@ extern "C" int fak_v41_pool_run(const float *kv,const float *sc,float *out,int r
   return status;
  }
  int invalid=0;
+ fcuda_ts_untimed_transfer();
  e=cudaMemcpy(&invalid,out+width,sizeof(int),cudaMemcpyDeviceToHost);
  if(e!=cudaSuccess) return 60000+(int)e;
  return invalid?-4:0;

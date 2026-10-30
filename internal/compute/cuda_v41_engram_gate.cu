@@ -83,7 +83,7 @@ extern "C" int fak_v41_engram_run(const float *s,const float *p,const float *n,f
  for(int i=3;i<5;++i)for(int j=0;j<i;++j)if(ptrs[i]==ptrs[j])return -2;
  for(int i=0;i<5;++i){int x=fak_v41_engram_input(ptrs[i],counts[i]);if(x)return x;}
  unsigned blocks=(unsigned)(((uint64_t)rows*4+127)/128);if(blocks>65535)blocks=65535;
- k_v41_engram<<<blocks,128,0,g_stream>>>(s,p,n,out,status,rows,h,eps);
+ FCUDA_TS("k_v41_engram", blocks, k_v41_engram<<<blocks,128,0,g_stream>>>(s,p,n,out,status,rows,h,eps));
  cudaError_t e=cudaGetLastError();int x=e==cudaSuccess?0:30000+(int)e;
  if(!x){e=cudaStreamSynchronize(g_stream);if(e!=cudaSuccess)x=40000+(int)e;}
  if(x){e=cudaStreamSynchronize(g_stream);if(e!=cudaSuccess){for(int i=0;i<5;++i)g_v41_engram_quarantine[i]=ptrs[i];g_v41_engram_uncertain=true;return 50000+(int)e;}return x;}
