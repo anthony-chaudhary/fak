@@ -818,4 +818,70 @@ var admittedPostFreeze = []string{
 	// Relocates to: WithQwen35NativeSSMOut(false) threaded from serve, then delete the env arm,
 	// as with FAK_DIRECT.
 	"FAK_QWEN35_NATIVE_SSM_OUT",
+
+	// SIXTH OCCURRENCE (2026-10-30 release-unblock): eleven opt-in experimental CUDA
+	// build/feature knobs landed while the ratchet was red and unwatched again — all eleven
+	// survived 331 trunk advances when TestRatchetIsStillGating refused with RATCHET_UNWATCHED.
+	// As in the earlier occurrences they are admitted by name, not absorbed into baseline.go,
+	// and none can relocate until the #2862 config surface exists. Each is an opt-in
+	// experimental knob on a build path or a hot path, not user-facing configuration surface;
+	// relocating them to a config surface is out of scope for this release-unblock. Admission
+	// resolves the current offenses; it does not erase that liveness failure or pay the
+	// #2862 relocation debt.
+
+	// internal/devcmd/build_cuda.go — default HuggingFace model directory for the native model
+	// acceptance run. An opt-in build-time input, not credentials.
+	// Relocates to: a typed devcmd build setting once #2862 lands.
+	"FAK_CUDA_ACCEPT_HF",
+
+	// internal/devcmd/build_cuda.go — acceptance token budget for the native model acceptance
+	// run. An opt-in build-time tuning number.
+	// Relocates to: a typed devcmd build setting once #2862 lands.
+	"FAK_CUDA_ACCEPT_TOKENS",
+
+	// internal/devcmd/build_cuda.go — target CUDA architecture selector for single-arch builds
+	// (defaults to empty = all archs). A build-target choice, not a runtime setting.
+	// Relocates to: a typed devcmd build setting once #2862 lands.
+	"FAK_CUDA_ARCH",
+
+	// internal/devcmd/build_cuda.go — compile-with-NCCL switch (-tags cuda,nccl) for device-
+	// collective builds. A build-tag selector, not a credential.
+	// Relocates to: a typed devcmd build setting once #2862 lands.
+	"FAK_CUDA_NCCL",
+
+	// internal/devcmd/build_cuda.go — C++ compiler executable override passed to nvcc -ccbin.
+	// A toolchain location, like the grandfathered CUDA_HOME sibling.
+	// Relocates to: a typed devcmd build setting once #2862 lands.
+	"FAK_NVCC_CCBIN",
+
+	// internal/computebuild/cuda.go and internal/devcmd/build_cuda.go — NCCL installation
+	// directory for device-collective builds. A toolchain location, not a credential.
+	// Relocates to: a typed computebuild toolchain field once #2862 lands.
+	"NCCL_HOME",
+
+	// internal/model/v41_host_shared_cohort.go — opt-in host-shared V4.1 cohort decode
+	// experiment (=1 arms it; default off). An experimental execution toggle, not a credential.
+	// Relocates to: a typed model session config once #2862 lands.
+	"FAK_V41_HOST_SHARED_COHORT",
+
+	// internal/compute/cuda_qwen35_attention_postprocess.go — opt-in fused attention
+	// postprocess on CUDA (=1 arms it; default off). An experimental kernel toggle.
+	// Relocates to: a typed compute capability config once #2862 lands.
+	"FAK_CUDA_QWEN35_ATTN_POSTPROCESS",
+
+	// internal/compute/cuda_qwen35_residual_norm.go — opt-in fused residual norm on CUDA
+	// (=1 arms it; default off). An experimental kernel toggle.
+	// Relocates to: a typed compute capability config once #2862 lands.
+	"FAK_CUDA_QWEN35_RESIDUAL_NORM",
+
+	// internal/agent/inkernel_paged_prefix.go — paged-prefix reuse toggle for the in-kernel
+	// planner (=off disables it; default on where supported). An experimental planner toggle,
+	// read through strings.ToLower so the scanner sees the literal call site.
+	// Relocates to: an InKernelPlannerConfig field once #2862 lands.
+	"FAK_INKERNEL_PAGED_PREFIX",
+
+	// internal/compute/cuda_paged_kv_blocks.go — page-granular CUDA KV store opt-in
+	// (=1 arms it; default off). An experimental KV-store toggle, not a credential.
+	// Relocates to: a typed compute KV config once #2862 lands.
+	"FAK_CUDA_PAGED_KV",
 }
