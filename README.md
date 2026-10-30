@@ -50,8 +50,8 @@ Install with `curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak
 ### Governance for external agents (`fak guard`)
 
 Already running Claude Code or Codex? Wrap the agent you already run with one command
-to add a default-deny capability floor: only allowed tools run, everything else is
-blocked. fak forwards your Codex subscription credentials (no API key required):
+to add a deny-first capability floor (default-deny): only allowed tools run,
+everything else is blocked. fak forwards your Codex subscription credentials (no API key required):
 
 ```bash
 fak guard -- codex
@@ -65,8 +65,17 @@ no key, no model, and no setup, run the offline agent or take the
 fak agent --offline   # -> task completed
 ```
 
-## What changed since v0.55.0 — 2026-10-03
+## What changed since 2026-09-09
 
+- **Fit planning:** `fak serve --fit` jointly picks context, KV dtype and slots against a
+  stated workload and SLO, and refuses live boots with typed reasons instead of guessing size.
+- **CUDA serving deepens:** concurrent Qwen lanes share one device decode step, an opt-in
+  paged KV store (`FAK_CUDA_PAGED_KV=1`) lets requests sharing a prefix share device pages,
+  and sampled MTP runs inside ordinary request serving.
+- **Guard escape hatch:** an attending operator can approve one exact refused call with
+  `fak guard allow --approve`; the agent cannot approve itself.
+- **Memory headroom:** evicted radix prefix snapshots demote to a local SSD tier instead of
+  dropping, and idle device pools release after OOM failures.
 - **`fak claude` routes through the live fak router by default** (`FAK_ROUTER_URL`,
   else `127.0.0.1:18101`); `--no-router` keeps the direct Mac setup. OpenCode and Pi
   default workers also route through it, so one paused provider no longer stops every worker.
@@ -74,19 +83,16 @@ fak agent --offline   # -> task completed
   with backpressure instead of timing out.
 - **Serving engine:** continuous batching is wired into decode, and concurrent cold
   requests share one prefill. Code-verified; no accepted throughput receipt yet.
-- **Mac GPU keepalive (off by default):** a 2026-10-03 point-in-time run on a busy
-  M3 Pro measured 19.7 vs 9.4 decode tok/s on the small Qwen3.5-0.8B model; prefill
-  did not improve and 27B was not tested ([receipt](docs/benchmarks/receipts/mac-keepalive/20261003/REPORT.md)).
 - **Guard hardening:** context changes, memory apply, and plugin writes are refused
   unless an act-bound lease fences them.
 
 ## DeepSeek V4.1 Flash on one Strix Halo — 2026-10-22
 
-`DeepSeek-V4.1-Flash-Q2_K` decodes at **4.61 tok/s** on one 128 GB AMD Strix Halo
+`DeepSeek-V4.1-Flash-Q2_K` decodes at 4.61 tok/s on one 128 GB AMD Strix Halo
 (warm, single stream, greedy output unchanged). The 30 tok/s decode target is not yet
 met. Details: [Strix Halo V4.1 Flash results](docs/benchmarks/STRIX-HALO-DEEPSEEK-V41-FLASH.md).
 
-## Latest hardware results — 2026-09-25
+## Latest hardware results — 2026-10-29
 
 One row per hardware family: the newest committed performance receipt for that platform,
 with its claim boundary and receipt link. A row stays historical until a newer quality-complete
@@ -95,7 +101,7 @@ measurement exists.
 | Platform | Latest witnessed result | Status & Details |
 |---|---|---|
 | Mac | Qwen3.8-27B Q4_K_M on Apple M3 Pro: forward-owned Metal sequence prefill was 43.8% faster, 10,284.5 vs 18,304.9 ms, and used 1 command buffer instead of 192; observed 2026-09-03. | Accepted component-path result with exact greedy continuation and zero fallbacks; it is not a full-run throughput comparison. [Qwen result index](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) |
-| AMD | Qwen3.6-27B on RX 7600: the pure-fak TG1 microbench measured 1.24 decode tok/s versus 0.99 for the local llama.cpp Vulkan baseline; observed 2026-06-19. | Narrow, older-model microbench. No accepted current Qwen3.8 AMD result exists. [AMD receipt](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) |
+| AMD | DeepSeek-V4.1-Flash-Q2_K on one 128 GB AMD Strix Halo (Ryzen AI MAX+ 395, Radeon 8060S gfx1151, Vulkan): warm single-stream decode reached 4.61 tok/s, +29% over the same-session 3.57 base, with greedy output parity in 32/32 requests; observed 2026-10-22. | Physical APU result; the 30 tok/s decode target is not yet met, so this row stands until a newer accepted AMD measurement exists. [Strix Halo V4.1 Flash results](docs/benchmarks/STRIX-HALO-DEEPSEEK-V41-FLASH.md) |
 | NVIDIA | Qwen2.5-3B Q8_0 on a physical Hopper H100: fak reached 111.9 decode tok/s, 17.4% above its f32 path; observed 2026-09-05. | Native CUDA result; llama.cpp Q8_0 was 3.24× as fast at 362.7 tok/s in the same run. [H100 receipt](docs/benchmarks/GCP-H100-RESULTS.md) |
 
 Read the status column before comparing rates. History: [benchmark index](docs/benchmarks/README.md);
@@ -133,4 +139,4 @@ is linked instead of an unrecorded mirror.
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-10-30 vs VERSION 0.55.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-09 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
+<!-- readme-verified: 2026-10-29 vs VERSION 0.57.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-09 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py + /refresh-readme -->

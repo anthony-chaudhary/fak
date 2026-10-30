@@ -1,6 +1,6 @@
 {
   "schema": "fak-hardware-latest/1",
-  "as_of": "2026-09-25",
+  "as_of": "2026-10-29",
   "platforms": {
     "Mac": {
       "observed": "2026-09-03",
@@ -8,9 +8,9 @@
       "row": "| Mac | Qwen3.8-27B Q4_K_M on Apple M3 Pro: forward-owned Metal sequence prefill was 43.8% faster, 10,284.5 vs 18,304.9 ms, and used 1 command buffer instead of 192; observed 2026-09-03. | Accepted component-path result with exact greedy continuation and zero fallbacks; it is not a full-run throughput comparison. [Qwen result index](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) |"
     },
     "AMD": {
-      "observed": "2026-06-19",
-      "detail": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md",
-      "row": "| AMD | Qwen3.6-27B on RX 7600: the pure-fak TG1 microbench measured 1.24 decode tok/s versus 0.99 for the local llama.cpp Vulkan baseline; observed 2026-06-19. | Narrow, older-model microbench. No accepted current Qwen3.8 AMD result exists. [AMD receipt](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) |"
+      "observed": "2026-10-22",
+      "detail": "docs/benchmarks/STRIX-HALO-DEEPSEEK-V41-FLASH.md",
+      "row": "| AMD | DeepSeek-V4.1-Flash-Q2_K on one 128 GB AMD Strix Halo (Ryzen AI MAX+ 395, Radeon 8060S gfx1151, Vulkan): warm single-stream decode reached 4.61 tok/s, +29% over the same-session 3.57 base, with greedy output parity in 32/32 requests; observed 2026-10-22. | Physical APU result; the 30 tok/s decode target is not yet met, so this row stands until a newer accepted AMD measurement exists. [Strix Halo V4.1 Flash results](docs/benchmarks/STRIX-HALO-DEEPSEEK-V41-FLASH.md) |"
     },
     "NVIDIA": {
       "observed": "2026-09-05",
