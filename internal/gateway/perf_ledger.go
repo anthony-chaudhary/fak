@@ -316,7 +316,7 @@ func (m *gatewayMetrics) recordPerf(loc servingLocality, promptTok, complTok, ca
 	detail.src.apply(&rec)
 	decode, decodeOK := m.observeDecodeWindowReceipt(detail.src)
 	committed := m.commitPerf(rec)
-	m.recordRequestPhases(committed, decode, decodeOK)
+	m.recordRequestPhases(committed, decode, decodeOK, requestPhaseMarksFrom(detail.src))
 }
 
 // observeDecodeWindowReceipt claims one request's decode-window kernel/decode

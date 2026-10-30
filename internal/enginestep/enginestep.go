@@ -459,6 +459,7 @@ type requestObservation struct {
 	phaseMu                       sync.Mutex
 	prefill, decode               RequestPhaseObservation
 	prefillInvalid, decodeInvalid bool
+	lastPhaseEnd                  time.Time
 }
 
 // WithRequestObservation carries gateway-owned request and model-load identity.
@@ -556,6 +557,23 @@ func recordRequestPhase(ctx context.Context, p Phase, d time.Duration) {
 	}
 	phase.DurationNS += d.Nanoseconds()
 	phase.Count++
+	identity.lastPhaseEnd = time.Now()
+}
+
+// RequestPhaseEndFromContext is the instant the request's last prefill or decode
+// observation was recorded: the engine-work end the gateway uses to measure the
+// post-engine output span on the same monotonic clock as its request start.
+func RequestPhaseEndFromContext(ctx context.Context) (time.Time, bool) {
+	if ctx == nil {
+		return time.Time{}, false
+	}
+	identity, _ := ctx.Value(requestObservationKey{}).(*requestObservation)
+	if identity == nil || identity.requestID == "" {
+		return time.Time{}, false
+	}
+	identity.phaseMu.Lock()
+	defer identity.phaseMu.Unlock()
+	return identity.lastPhaseEnd, !identity.lastPhaseEnd.IsZero()
 }
 
 // ObservePrefillChunk records one prefill forward over `tokens` prompt tokens.

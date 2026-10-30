@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/enginestep"
@@ -26,6 +27,7 @@ type requestObservation struct {
 	read, expected     int64
 	complete, failed   bool
 	admitted           bool
+	admittedAt         time.Time
 	lifecycle          modelLoadLifecycle
 	configSHA          string
 	phaseContext       context.Context
@@ -81,6 +83,20 @@ func (s *Server) admitRequestObservation(r *http.Request, trace string) {
 		sum := sha256.Sum256(config)
 		o.configSHA = hex.EncodeToString(sum[:])
 	}
+}
+
+// markRequestAdmitted stamps the admission verdict instant once: the end of the
+// request's queue_admission phase in its fak-request-phases/1 receipt.
+func markRequestAdmitted(r *http.Request) {
+	o := perfSourceFrom(r.Context()).observation
+	if o == nil {
+		return
+	}
+	o.mu.Lock()
+	if o.admittedAt.IsZero() {
+		o.admittedAt = time.Now()
+	}
+	o.mu.Unlock()
 }
 
 func requestObservationContext(r *http.Request) (string, string) {

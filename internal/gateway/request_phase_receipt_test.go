@@ -81,15 +81,20 @@ func TestRequestPhaseReceiptJoinsPerfRowAndReducesNative(t *testing.T) {
 	if env.RequestID != row.RequestID || env.Model != row.Model {
 		t.Fatalf("receipt identity %q/%q does not join row %q/%q", env.RequestID, env.Model, row.RequestID, row.Model)
 	}
-	if env.Receipt.Wall != 17*time.Millisecond {
-		t.Fatalf("receipt wall = %s, want prefill+decode 17ms", env.Receipt.Wall)
-	}
-	if env.UnattributedMS == nil || math.Abs(*env.UnattributedMS+17-row.E2EMS) > 1e-3 {
-		t.Fatalf("unattributed = %v, want e2e %g - 17", env.UnattributedMS, row.E2EMS)
-	}
 	exclusive := map[nativeperf.Phase]time.Duration{}
 	for _, p := range env.Receipt.Phases {
 		exclusive[p.Phase] = p.Exclusive.Wall
+	}
+	admit := exclusive[nativeperf.PhaseQueueAdmission]
+	if admit <= 0 {
+		t.Fatalf("queue_admission = %s, want the measured accept -> admission verdict span", admit)
+	}
+	if env.Receipt.Wall != admit+17*time.Millisecond {
+		t.Fatalf("receipt wall = %s, want queue_admission %s + prefill+decode 17ms", env.Receipt.Wall, admit)
+	}
+	wallMS := float64(env.Receipt.Wall) / float64(time.Millisecond)
+	if env.UnattributedMS == nil || math.Abs(*env.UnattributedMS+wallMS-row.E2EMS) > 1e-3 {
+		t.Fatalf("unattributed = %v, want e2e %g - receipt wall %g", env.UnattributedMS, row.E2EMS, wallMS)
 	}
 	if exclusive[nativeperf.PhasePrefill] != 8*time.Millisecond || exclusive[nativeperf.PhaseKernel] != 2*time.Millisecond || exclusive[nativeperf.PhaseDecode] != 7*time.Millisecond {
 		t.Fatalf("exclusive prefill/kernel/decode = %s/%s/%s, want 8ms/2ms/7ms", exclusive[nativeperf.PhasePrefill], exclusive[nativeperf.PhaseKernel], exclusive[nativeperf.PhaseDecode])
@@ -111,8 +116,8 @@ func TestRequestPhaseReceiptJoinsPerfRowAndReducesNative(t *testing.T) {
 	for _, p := range g.NativeRank {
 		sum += p.WallMS
 	}
-	if math.Abs(sum-g.NativeWallMS) > 1e-9 || g.NativeWallMS != 17 {
-		t.Fatalf("native phases sum %g, native wall %g, want 17", sum, g.NativeWallMS)
+	if math.Abs(sum-g.NativeWallMS) > 1e-9 || math.Abs(g.NativeWallMS-wallMS) > 1e-9 {
+		t.Fatalf("native phases sum %g, native wall %g, want %g", sum, g.NativeWallMS, wallMS)
 	}
 	if math.Abs(g.OutsideNativeMS-*env.UnattributedMS) > 1e-3 {
 		t.Fatalf("outside native %g != unattributed %g", g.OutsideNativeMS, *env.UnattributedMS)
@@ -122,7 +127,7 @@ func TestRequestPhaseReceiptJoinsPerfRowAndReducesNative(t *testing.T) {
 // fak-test:runtime fast est=5ms lane=default
 func TestRequestPhaseReceiptRefusesInvalidNativeRows(t *testing.T) {
 	base := perfledger.Record{RequestID: "r1", Model: "m", E2EMS: 30, Engine: &perfledger.Engine{}, NativeTiming: &perfledger.NativeTiming{PrefillMS: 10, DecodeMS: 10}}
-	if _, ok := buildRequestPhaseReceipt(base, nativeperf.PhaseReceipt{}, false); !ok {
+	if _, ok := buildRequestPhaseReceipt(base, nativeperf.PhaseReceipt{}, false, requestPhaseMarks{}); !ok {
 		t.Fatal("valid native row refused")
 	}
 	for _, tc := range []struct {
@@ -140,7 +145,7 @@ func TestRequestPhaseReceiptRefusesInvalidNativeRows(t *testing.T) {
 			rec.NativeTiming = &nt
 			tc.mutate(&rec)
 			m := &gatewayMetrics{}
-			m.recordRequestPhases(rec, nativeperf.PhaseReceipt{}, false)
+			m.recordRequestPhases(rec, nativeperf.PhaseReceipt{}, false, requestPhaseMarks{})
 			rows, _ := m.requestPhases.snapshot(0)
 			if len(rows) != 0 || m.requestPhases.refused.Load() != 1 {
 				t.Fatalf("rows=%d refused=%d, want omitted and counted", len(rows), m.requestPhases.refused.Load())
@@ -148,8 +153,101 @@ func TestRequestPhaseReceiptRefusesInvalidNativeRows(t *testing.T) {
 		})
 	}
 	m := &gatewayMetrics{}
-	m.recordRequestPhases(perfledger.Record{RequestID: "proxy", Model: "m", E2EMS: 10}, nativeperf.PhaseReceipt{}, false)
+	m.recordRequestPhases(perfledger.Record{RequestID: "proxy", Model: "m", E2EMS: 10}, nativeperf.PhaseReceipt{}, false, requestPhaseMarks{})
 	if rows, _ := m.requestPhases.snapshot(0); len(rows) != 0 || m.requestPhases.refused.Load() != 0 {
 		t.Fatal("non-native row produced or refused a receipt")
+	}
+}
+
+// fak-test:runtime fast est=5ms lane=default
+func TestRequestPhaseReceiptBooksAdmissionModelLoadAndOutput(t *testing.T) {
+	began := time.UnixMilli(1_700_000_000_000)
+	rec := perfledger.Record{RequestID: "r1", Model: "m", E2EMS: 40, Engine: &perfledger.Engine{}, NativeTiming: &perfledger.NativeTiming{PrefillMS: 10, DecodeMS: 10}}
+	marks := requestPhaseMarks{
+		began:     began,
+		admitted:  began.Add(5 * time.Millisecond),
+		engineEnd: began.Add(30 * time.Millisecond),
+		// The boot load finished 3 ms after arrival: the request waited on it.
+		load: modelLoadLifecycle{LoadID: "l1", RecordedUnixMS: began.Add(3 * time.Millisecond).UnixMilli(), LoadSeconds: 0.010},
+	}
+	env, ok := buildRequestPhaseReceipt(rec, nativeperf.PhaseReceipt{}, false, marks)
+	if !ok {
+		t.Fatal("measured marks refused")
+	}
+	if err := env.Receipt.Validate(0); err != nil {
+		t.Fatal(err)
+	}
+	exclusive := map[nativeperf.Phase]time.Duration{}
+	for _, p := range env.Receipt.Phases {
+		exclusive[p.Phase] = p.Exclusive.Wall
+	}
+	want := map[nativeperf.Phase]time.Duration{
+		nativeperf.PhaseQueueAdmission: 2 * time.Millisecond,
+		nativeperf.PhaseModelLoad:      3 * time.Millisecond,
+		nativeperf.PhasePrefill:        10 * time.Millisecond,
+		nativeperf.PhaseDecode:         10 * time.Millisecond,
+		nativeperf.PhaseOutput:         10 * time.Millisecond,
+	}
+	for phase, d := range want {
+		if exclusive[phase] != d {
+			t.Fatalf("exclusive %s = %s, want %s (all %v)", phase, exclusive[phase], d, exclusive)
+		}
+	}
+	if env.Receipt.Wall != 35*time.Millisecond || env.UnattributedMS == nil || *env.UnattributedMS != 5 {
+		t.Fatalf("wall = %s unattributed = %v, want 35ms booked + 5ms unattributed", env.Receipt.Wall, env.UnattributedMS)
+	}
+
+	// The burndown now explains admission, load and output: unexplained drops
+	// from API wall - engine (20 ms) to the 5 ms no mark could place, and the
+	// boot load lands in weight_load.
+	obs := modelperfobs.Observation{Schema: modelperfobs.Schema, RequestID: "r1", Model: "m", Backend: env.Backend, Status: http.StatusOK, DurationMS: 40}
+	bucketMS := func(env modelperfobs.RequestPhaseReceipt) map[string]float64 {
+		t.Helper()
+		rep, err := modelperfobs.ReduceTimeBurndownBuckets([]modelperfobs.Observation{obs}, []modelperfobs.RequestPhaseReceipt{env}, modelperfobs.BurndownTargets{PrefillMS: 4, DecodeMS: 20}, nil)
+		if err != nil || len(rep.BucketGroups) != 1 {
+			t.Fatalf("buckets err=%v groups=%d", err, len(rep.BucketGroups))
+		}
+		out := map[string]float64{}
+		for _, row := range rep.BucketGroups[0].Buckets {
+			out[row.Bucket] += row.TotalMS
+		}
+		return out
+	}
+	bare, ok := buildRequestPhaseReceipt(rec, nativeperf.PhaseReceipt{}, false, requestPhaseMarks{})
+	if !ok {
+		t.Fatal("bare receipt refused")
+	}
+	before, after := bucketMS(bare), bucketMS(env)
+	if math.Abs(before[modelperfobs.BucketUnexplained]-20) > 1e-6 || math.Abs(after[modelperfobs.BucketUnexplained]-5) > 1e-6 || math.Abs(after[modelperfobs.BucketWeightLoad]-3) > 1e-6 {
+		t.Fatalf("unexplained %g -> %g ms, weight_load %g ms; want 20 -> 5, 3", before[modelperfobs.BucketUnexplained], after[modelperfobs.BucketUnexplained], after[modelperfobs.BucketWeightLoad])
+	}
+
+	// Marks that disagree with the engine work are not booked: they fall back
+	// to unattributed instead of stretching or overlapping engine phases.
+	for _, tc := range []struct {
+		name          string
+		marks         requestPhaseMarks
+		wantWall      time.Duration
+		wantAdmission bool
+		wantOutput    bool
+	}{
+		{"no marks", requestPhaseMarks{}, 20 * time.Millisecond, false, false},
+		{"admission leaves no room for engine", requestPhaseMarks{began: began, admitted: began.Add(25 * time.Millisecond)}, 20 * time.Millisecond, false, false},
+		{"engine end before engine could finish", requestPhaseMarks{began: began, admitted: began.Add(5 * time.Millisecond), engineEnd: began.Add(15 * time.Millisecond)}, 25 * time.Millisecond, true, false},
+		{"engine end after commit", requestPhaseMarks{began: began, engineEnd: began.Add(50 * time.Millisecond)}, 20 * time.Millisecond, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env, ok := buildRequestPhaseReceipt(rec, nativeperf.PhaseReceipt{}, false, tc.marks)
+			if !ok {
+				t.Fatal("receipt refused")
+			}
+			got := map[nativeperf.Phase]time.Duration{}
+			for _, p := range env.Receipt.Phases {
+				got[p.Phase] = p.Exclusive.Wall
+			}
+			if env.Receipt.Wall != tc.wantWall || (got[nativeperf.PhaseQueueAdmission] > 0) != tc.wantAdmission || (got[nativeperf.PhaseOutput] > 0) != tc.wantOutput || got[nativeperf.PhaseModelLoad] != 0 {
+				t.Fatalf("wall=%s phases=%v, want wall %s admission=%v output=%v", env.Receipt.Wall, got, tc.wantWall, tc.wantAdmission, tc.wantOutput)
+			}
+		})
 	}
 }

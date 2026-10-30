@@ -114,6 +114,9 @@ func (s *Server) beginServedRequest(w http.ResponseWriter, r *http.Request) (con
 		}
 	}
 	turn, ok, canceled := s.beginServedSessionTurn(ctx, trace)
+	if ok && !canceled && r != nil {
+		markRequestAdmitted(r)
+	}
 	return ctx, trace, turn, ok, canceled
 }
 

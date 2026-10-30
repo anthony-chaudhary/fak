@@ -69,3 +69,26 @@ func TestRequestPhaseConcurrentSnapshot(t *testing.T) {
 		t.Fatalf("snapshot=%+v", got)
 	}
 }
+
+// fak-test:runtime fast est=5ms
+func TestRequestPhaseEndMarksLastObservation(t *testing.T) {
+	recorder := New(16)
+	ctx := WithRequestObservation(context.Background(), "request-end", "load-one")
+	if _, ok := RequestPhaseEndFromContext(ctx); ok {
+		t.Fatal("phase end measured before any phase")
+	}
+	if _, ok := RequestPhaseEndFromContext(nil); ok {
+		t.Fatal("nil context measured a phase end")
+	}
+	before := time.Now()
+	recorder.ObservePhaseContext(ctx, PhasePrefill, time.Millisecond)
+	first, ok := RequestPhaseEndFromContext(ctx)
+	if !ok || first.Before(before) {
+		t.Fatalf("prefill end = %v ok=%v, want at or after %v", first, ok, before)
+	}
+	recorder.ObservePhaseContext(ctx, PhaseDecode, time.Millisecond)
+	last, ok := RequestPhaseEndFromContext(ctx)
+	if !ok || last.Before(first) {
+		t.Fatalf("decode end = %v, want at or after prefill end %v", last, first)
+	}
+}
