@@ -115,6 +115,11 @@ static void q4_coeff_cache_evict(const void *q);
 extern "C" void fcuda_free(void *d) {
   if (!d) return;
   if (g_v41_router_uncertain) return;
+#ifdef FAK_CUDA_V41_BF16_PUBLISH
+  // Publication drains prior stream work too; its three operands cannot name
+  // every allocation still in use after an unsuccessful drain.
+  if (g_v41_bf16_uncertain) return;
+#endif
 #ifdef FAK_CUDA_V41_COMPRESSOR
   // A failed drain can cover earlier no-emit ring stores, not just the last
   // call's pointers. Keep every allocation out of reuse while it is uncertain.
@@ -206,6 +211,9 @@ extern "C" void fcuda_free(void *d) {
 extern "C" int fcuda_discard_unsubmitted(void *d, size_t expected_bytes) {
   if (!d || g_capture_open) return (int)cudaErrorInvalidValue;
   if (g_v41_router_uncertain) return (int)cudaErrorInvalidValue;
+#ifdef FAK_CUDA_V41_BF16_PUBLISH
+  if (g_v41_bf16_uncertain) return (int)cudaErrorInvalidValue;
+#endif
 #ifdef FAK_CUDA_V41_COMPRESSOR
   if (g_v41_compressor_uncertain) return (int)cudaErrorInvalidValue;
 #endif
@@ -306,6 +314,7 @@ extern "C" void fcuda_panel_peak_reset(void) {
 // many panel buffers callers still hold; those return to g_panel_pool when freed and leave at
 // the next release.
 extern "C" size_t fcuda_panel_release(void) {
+  if (v41_candidates_stream_uncertain()) return g_panel_live.size();
   cudaStreamSynchronize(g_stream);
   for (auto &kv : g_panel_pool) {
     for (void *p : kv.second) {
@@ -366,6 +375,7 @@ extern "C" void fcuda_graph_prewarm(int extra) {
 }
 
 extern "C" void fcuda_trim_pool_large(size_t max_keep_bytes) {
+  if (v41_candidates_stream_uncertain()) return;
   for (auto it = g_pool.begin(); it != g_pool.end(); ) {
     if (it->first > max_keep_bytes) {
       for (void *p : it->second) {

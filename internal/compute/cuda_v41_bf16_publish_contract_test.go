@@ -98,6 +98,41 @@ func TestCUDAV41BF16PublishContract(t *testing.T) {
 			}
 		}
 	})
+	t.Run("failed-drain-retains-preceding-work", func(t *testing.T) {
+		memory, services := read("cuda/runtime_memory.cuh"), read("cuda/runtime_services.cuh")
+		for _, check := range []struct {
+			source, function, guard, firstEffect string
+		}{
+			{memory, "fcuda_free", "#ifdef FAK_CUDA_V41_BF16_PUBLISH\n", "q4_coeff_cache_evict(d)"},
+			{memory, "fcuda_discard_unsubmitted", "#ifdef FAK_CUDA_V41_BF16_PUBLISH\n  if (g_v41_bf16_uncertain) return (int)cudaErrorInvalidValue;", "cudaStreamSynchronize(g_stream)"},
+			{services, "fcuda_free_on", "#ifdef FAK_CUDA_V41_BF16_PUBLISH\n  if (g_v41_bf16_uncertain) return;", "fcuda_device_scope scope(device)"},
+			{memory, "fcuda_panel_release", "if (v41_candidates_stream_uncertain()) return g_panel_live.size();", "cudaStreamSynchronize(g_stream)"},
+			{memory, "fcuda_trim_pool_large", "if (v41_candidates_stream_uncertain()) return;", "for (auto it = g_pool.begin()"},
+		} {
+			body := cudaFunctionBody(t, check.source, check.function)
+			guard, effect := strings.Index(body, check.guard), strings.Index(body, check.firstEffect)
+			if guard < 0 || effect < 0 || guard >= effect {
+				t.Errorf("%s must retain prior stream allocations before cleanup", check.function)
+				continue
+			}
+			if check.function == "fcuda_free" {
+				// Keep the explanation beside the first guard without allowing a
+				// per-pointer quarantine to substitute for the global refusal.
+				latch := strings.Index(body, "if (g_v41_bf16_uncertain) return;")
+				end := strings.Index(body[guard+len(check.guard):], "#endif") + guard + len(check.guard)
+				if guard < 0 || latch <= guard || latch >= end || latch >= effect {
+					t.Error("fcuda_free must gate every allocation on BF16 stream uncertainty")
+				}
+			}
+		}
+		state := cudaFunctionBody(t, native, "fak_v41_bf16_publish_state")
+		shared := cudaFunctionBody(t, native, "v41_candidates_stream_uncertain")
+		if strings.Contains(state, "cudaStreamQuery") ||
+			!strings.Contains(state, "v41_candidates_stream_uncertain()") ||
+			!strings.Contains(shared, "if (g_v41_bf16_uncertain) return true;") {
+			t.Error("publication must preserve FIFO producer admission and terminal shared uncertainty")
+		}
+	})
 	t.Run("fresh-status-envelope", func(t *testing.T) {
 		const count, site = 257, uint32(21)
 		success := [16]byte{0x43, 0x31, 0x46, 0x42, 21, 0, 0, 0, 0xff, 0xff, 0xff, 0xff, 1, 1, 0, 0}
