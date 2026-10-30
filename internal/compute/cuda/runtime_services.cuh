@@ -149,6 +149,9 @@ extern "C" void *fcuda_malloc_on(int device, size_t bytes) {
 
 extern "C" void fcuda_free_on(int device, void *d) {
   if (!d) return;
+#ifdef FAK_CUDA_V41_COMPRESSOR
+  if (g_v41_compressor_uncertain) return;
+#endif
 #ifdef FAK_CUDA_V41_ROUTED_SWIGLU
   for (const void *held : g_v41_routed_swiglu_quarantine)
     if (d == held) return;
