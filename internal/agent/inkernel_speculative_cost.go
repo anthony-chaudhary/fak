@@ -95,6 +95,9 @@ func (a *speculativeAttemptObservation) close(gen int, err, ctxErr error, now fu
 		bucket = &a.totals.Cancelled
 	} else {
 		switch a.outcome {
+		case speculativeAttemptIncomplete:
+			// No terminal outcome was recorded: stay in the Incomplete bucket
+			// set before the switch.
 		case speculativeAttemptCompleted:
 			if err == nil {
 				bucket = &a.totals.Completed

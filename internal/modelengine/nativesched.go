@@ -890,6 +890,8 @@ func (s *NativeScheduler) promoteWaitingLocked(maxRun int) {
 				capacityBlocked = true
 				kept = append(kept, ln)
 				continue
+			case nativeAllocationOK:
+				// ready now: fall through to the remaining capacity checks below
 			}
 		}
 		if maxRun > 0 && len(s.lanes) >= maxRun {
@@ -1081,6 +1083,8 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 				closed = s.closed
 				s.mu.Unlock()
 				return true, false, closed
+			case nativeAllocationOK:
+				// materializable now: proceed to lane initialization below
 			case nativeAllocationLater:
 				for i, ln := range s.lanes {
 					if ln == pendingMaterialization {

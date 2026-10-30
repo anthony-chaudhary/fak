@@ -106,6 +106,8 @@ func (c *cudaBackend) devRawKQuantWithAllocator(dt Dtype, shape []int, nbytes in
 		bits = 5
 	case Q6_K:
 		bits = 6
+	default:
+		// callers pass packed k-quants only; the unlisted q4 family keeps the 4-bit default
 	}
 	q := &QuantSpec{Block: 256, Axis: 2, Bits: uint8(bits), Symmetric: false}
 	return makeTensor(c, dt, RowMajor, append([]int(nil), shape...), q, buf), buf

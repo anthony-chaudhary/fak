@@ -182,6 +182,8 @@ func (s *WeightSource) inputEmbedGatherResident(cfg model.Config, embed EmbedSto
 	}
 	f32 := int64(elems) * 4
 	switch embed {
+	case EmbedPayload:
+		// raw GGUF payload arm: the shared tail below prices the whole table
 	case EmbedF32:
 		if tied {
 			return 0, nil

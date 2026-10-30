@@ -341,8 +341,11 @@ func classifyGPUBindingBase(dev GPUBindingDevice) GPUBindingVerdict {
 		return GPUReady
 	case GPULayerNo:
 		return GPUBoundNotCUDAVisible
+	case GPULayerUnknown:
+		// unknown visibility is never collapsed into ready or not-visible
+		return GPUBindingUnknown
 	}
-	return GPUBindingUnknown
+	return GPUBindingUnknown // unreachable for the closed tri-state; guard against foreign strings
 }
 
 // gpuDriverStarted reports whether a device has a started NVIDIA driver, the

@@ -153,6 +153,8 @@ func (s *Seat) RunWake(topic string, src Sources, at time.Time, dryRun bool) (De
 // empty ArtifactRef by construction.
 func artifactRef(eff ActionEffect) string {
 	switch eff.Verb {
+	case VerbNone:
+		// hold leaves no artifact; the empty ref below is the decision
 	case VerbArbitrate:
 		if eff.Lease != nil {
 			return "arbitrate:" + eff.Lease.Lane

@@ -102,6 +102,9 @@ func (p *planner) placementTiers() []placementTier {
 		return []placementTier{{pool: PlacementPoolHostRAM, cap: p.avail, bw: devBW}, nvme}
 	case TopologyUnified:
 		return []placementTier{{pool: PlacementPoolDevice, cap: p.avail, bw: devBW}, nvme}
+	case TopologyDiscrete:
+		// device pool and host RAM are separate pools; both can absorb segments,
+		// so use the shared three-tier list below
 	}
 	hostBW, hostGeneric := hw.HostBytesPerSec*p.in.Calibration.BandwidthEfficiency, false
 	if !positiveFinite(hostBW) {

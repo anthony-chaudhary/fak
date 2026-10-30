@@ -137,6 +137,8 @@ func BuildDeviceAllocSnapshot(raw []int64, untrackedFrees int64, sites []DeviceA
 			s.ManagedLiveBytes += cell.LiveBytes
 		case AllocPinnedHost:
 			s.PinnedHostLiveBytes += cell.LiveBytes
+		case deviceAllocKindCount:
+			// sentinel bound; i % deviceAllocKindCount never yields it, so no bucket
 		}
 	}
 	for _, site := range sites {

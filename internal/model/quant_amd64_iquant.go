@@ -121,6 +121,10 @@ func iq2DequantSuperBlockAVX2(dst []float32, blk []byte, kind kQuantKind) bool {
 				index := uint16(blk[2+group]) | (uint16(blk[2+qkK/4+ib32])<<uint(8-2*l))&0x300
 				grid = iq2SGrid[index]
 				signs = blk[2+qkK/8+group]
+			default:
+				// only the three IQ2 kinds above pass the outer guard; any other kind
+				// falls back to the scalar decoder instead of decoding with zeroed tables
+				return false
 			}
 			iq3xxsGroupAVX2(&dst[group*8], grid, &iq3xxsAVX2SignMasks[signs][0], db[l/2])
 		}

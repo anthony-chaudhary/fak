@@ -60,8 +60,10 @@ func v41MHCPrenormWeightServed(weight Tensor, hidden int) bool {
 		return weight.Quant == nil && (width+1023)/1024 <= v41MHCPrenormMaxF32Chunks
 	case Q2_K:
 		return width%q2kSuper == 0
+	default:
+		// the module serves exactly those two projection orders; every other dtype refuses here
+		return false
 	}
-	return false
 }
 
 // validateV41MHCPrenorm rejects malformed operands before any native call. It

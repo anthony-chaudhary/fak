@@ -69,8 +69,11 @@ func planCUDASequenceSplitScratch(req Qwen35SequencePrefillRequest, arm CUDAQ4KP
 			default:
 				return fmt.Errorf("unsupported CUDA Q4_K prefill arm %q", arm)
 			}
+		default:
+			// only Q8_0/Q2_K/Q4_K reach the compensated split dispatch; every other dtype
+			// contributes no split-half bytes
+			return nil
 		}
-		return nil
 	}
 	for index, layer := range req.Layers {
 		var err error

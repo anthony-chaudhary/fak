@@ -54,11 +54,12 @@ func mmCM1Weight(t *testing.T, dt Dtype, seed int64, out, in int) (Tensor, []flo
 			q4kDequantBlock(deq[b*q4kSuper:(b+1)*q4kSuper], blk)
 		}
 		return NewQ4K(Default(), []int{out, in}, raw), deq
+	default:
+		if isRawIQ(dt) {
+			return rawIQParityWeight(dt, seed, out, in)
+		}
+		t.Fatalf("no mm_cm1 fixture for %v", dt)
 	}
-	if isRawIQ(dt) {
-		return rawIQParityWeight(dt, seed, out, in)
-	}
-	t.Fatalf("no mm_cm1 fixture for %v", dt)
 	return Tensor{}, nil
 }
 

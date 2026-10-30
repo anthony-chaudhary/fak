@@ -45,6 +45,8 @@ func TestCUDADeviceOpDeclaration(t *testing.T) {
 		switch dt {
 		case F32, F16, Q8_0, Q4_K, Q5_K, Q6_K, Q2_0, Q2_K, Q3_K, NVFP4:
 			want = true
+		default:
+			// every other dtype, named or not, has no shared CUDA matmul declaration
 		}
 		if got := cudaDeviceWeightDtypeSupported(dt); got != want {
 			t.Errorf("dtype %d: shared predicate=%v, want %v", value, got, want)
