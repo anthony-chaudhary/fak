@@ -44,8 +44,14 @@ package model
 //  3. Concatenate the COLS*EngramHeadDim values and project through the F16
 //     engram_kv.weight of shape [COLS*DIM, (N_HC+1)*H] into N_HC key streams plus
 //     one shared value stream (stream N_HC).
-//  4. Per HC stream s: dot_s = sum_i h_s[i]*(qNorm[i,s]*kNorm[i,s])*bf16(key_s[i]),
-//     then dot_s *= rsqrt(mean(h_s^2)+eps)*rsqrt(mean(key_s^2)+eps)*rsqrt(W).
+//  4. Per HC stream s: dot_s = sum_i h_s[i]*coef[s,i]*bf16(key_s[i]). The per-cell
+//     coefficient is admitted in exactly ONE form per layer (#14121): either the
+//     runtime product qNorm[s,i]*kNorm[s,i] of the two unfolded F32 norm tensors
+//     (engram_q_norm.weight / engram_k_norm.weight), or one folded F32 tensor
+//     engram_folded_gate.weight carrying the pre-composed product (the upstream DS4.1
+//     reference keeps engram_q and engram_k apart but only ever uses their
+//     product). Both forms reach the same host equation; co-presence is refused.
+//     Then dot_s *= rsqrt(mean(h_s^2)+eps)*rsqrt(mean(key_s^2)+eps)*rsqrt(W).
 //  5. gate_s = sigmoid(copysign(sqrt(max(|dot_s|,1e-6)), dot_s)).
 //  6. Full reference: residual_s[i] = bf16(residual_s[i] + gate_s * bf16(value[i])).
 //     The reduced compatibility path retains its historical delta rounding.
@@ -351,6 +357,16 @@ func (m *Model) v41EngramLayerRows(l int, seq []int) (v41EngramGeometry, []uint3
 	return geometry, layerRows, nil
 }
 
+// v41EngramFoldedGateLeaf is the model-side leaf name of the folded Engram gate
+// coefficient tensor: one F32 cell per (HC stream, hidden index), carrying the
+// elementwise product q[s,i]*k[s,i] that the unfolded path recomputes at
+// runtime. The upstream DS4.1 converter may publish this product directly
+// instead of the two separate norm tensors; exactly one form per Engram layer
+// is admitted (v41EngramInjectionGeometry). Loader aliasing of the upstream
+// GGUF spelling is a follow-up leaf (ggufload); this constant pins the
+// model-side contract.
+const v41EngramFoldedGateLeaf = "engram_folded_gate.weight"
+
 // v41EngramGateParamsErr rejects non-finite gate parameters before retrieval
 // or publication. Finite zero/negative epsilon and gains stay admitted, as the
 // host equation accepts them.
@@ -368,6 +384,21 @@ func v41EngramGateParamsErr(l int, eps float32, qNorm, kNorm []float32) error {
 				return v41StageErr(v41StageEngram, l,
 					fmt.Errorf("%w: Engram %s value[%d] is non-finite", ErrV41NativeUnsupported, norm.leaf, i))
 			}
+		}
+	}
+	return nil
+}
+
+// v41EngramFoldedCoefErr rejects non-finite folded gate coefficients before
+// retrieval or publication, mirroring v41EngramGateParamsErr for the folded
+// form (#14121). Geometry resolution already enforces it; this is the
+// defense-in-depth recheck for geometries built outside
+// v41EngramInjectionGeometry. An empty slice (the unfolded form) passes.
+func v41EngramFoldedCoefErr(l int, coef []float32) error {
+	for i, value := range coef {
+		if !finite32(value) {
+			return v41StageErr(v41StageEngram, l,
+				fmt.Errorf("%w: Engram %s value[%d] is non-finite", ErrV41NativeUnsupported, v41EngramFoldedGateLeaf, i))
 		}
 	}
 	return nil
@@ -393,7 +424,11 @@ type v41EngramGeometry struct {
 	cacheIdx         int
 	H, dim, cols, hc int
 	qNorm, kNorm     []float32
-	project          v41EngramProjectionFunc
+	// coef holds the folded gate coefficients (one form per layer, #14121);
+	// it is non-nil exactly when the layer was admitted with engram_folded_gate.weight
+	// instead of the unfolded q/k norms, which are then empty.
+	coef    []float32
+	project v41EngramProjectionFunc
 }
 
 func (m *Model) v41EngramInjectionGeometry(l, positions int) (v41EngramGeometry, error) {
@@ -417,17 +452,45 @@ func (m *Model) v41EngramInjectionGeometry(l, positions int) (v41EngramGeometry,
 	if err != nil {
 		return v41EngramGeometry{}, err
 	}
-	qNorm := m.tensor(layerName(l, "engram_q_norm.weight"))
-	kNorm := m.tensor(layerName(l, "engram_k_norm.weight"))
-	if len(qNorm) != normCells || len(kNorm) != normCells {
-		return v41EngramGeometry{}, v41StageErr(v41StageEngram, l, fmt.Errorf("%w: Engram mixing norms are absent or mis-shaped at layer %d", ErrV41NativeUnsupported, l))
-	}
-
 	if _, ok := checkedMulInt(positions, cols); positions < 0 || !ok {
 		return v41EngramGeometry{}, v41StageErr(v41StageEngram, l,
 			fmt.Errorf("%w: Engram row identifiers %d positions x %d columns overflow", ErrV41NativeUnsupported, positions, cols))
 	}
-	return v41EngramGeometry{stage: stage, cacheIdx: cacheIdx, H: H, dim: dim, cols: cols, hc: hc, qNorm: qNorm, kNorm: kNorm}, nil
+	// Exactly ONE gate-coefficient form per layer (#14121): the two unfolded
+	// F32 norms whose product the gate recomputes, or one folded F32 tensor
+	// carrying that product pre-composed. Co-presence is ambiguous and refused;
+	// neither present falls through to the historical absence refusal.
+	unfolded := m.has(layerName(l, "engram_q_norm.weight")) && m.has(layerName(l, "engram_k_norm.weight"))
+	folded := m.has(layerName(l, v41EngramFoldedGateLeaf))
+	switch {
+	case folded && unfolded:
+		return v41EngramGeometry{}, v41StageErr(v41StageEngram, l, fmt.Errorf(
+			"%w: Engram gate coefficients are ambiguous at layer %d: %s coexists with the unfolded q/k norms; exactly one form is admitted",
+			ErrV41NativeUnsupported, l, layerName(l, v41EngramFoldedGateLeaf)))
+	case folded:
+		coef := m.tensor(layerName(l, v41EngramFoldedGateLeaf))
+		if len(coef) != normCells {
+			return v41EngramGeometry{}, v41StageErr(v41StageEngram, l,
+				fmt.Errorf("%w: Engram folded gate coefficients are mis-shaped at layer %d", ErrV41NativeUnsupported, l))
+		}
+		if err := v41EngramFoldedCoefErr(l, coef); err != nil {
+			return v41EngramGeometry{}, err
+		}
+		return v41EngramGeometry{stage: stage, cacheIdx: cacheIdx, H: H, dim: dim, cols: cols, hc: hc, coef: coef}, nil
+	default:
+		// Presence first: a declared Engram layer missing either unfolded norm is
+		// refused here as a typed error instead of the load-time panic inside
+		// tensor(), keeping the fail-closed contract uniform across both forms.
+		if !m.has(layerName(l, "engram_q_norm.weight")) || !m.has(layerName(l, "engram_k_norm.weight")) {
+			return v41EngramGeometry{}, v41StageErr(v41StageEngram, l, fmt.Errorf("%w: Engram mixing norms are absent or mis-shaped at layer %d", ErrV41NativeUnsupported, l))
+		}
+		qNorm := m.tensor(layerName(l, "engram_q_norm.weight"))
+		kNorm := m.tensor(layerName(l, "engram_k_norm.weight"))
+		if len(qNorm) != normCells || len(kNorm) != normCells {
+			return v41EngramGeometry{}, v41StageErr(v41StageEngram, l, fmt.Errorf("%w: Engram mixing norms are absent or mis-shaped at layer %d", ErrV41NativeUnsupported, l))
+		}
+		return v41EngramGeometry{stage: stage, cacheIdx: cacheIdx, H: H, dim: dim, cols: cols, hc: hc, qNorm: qNorm, kNorm: kNorm}, nil
+	}
 }
 
 func (m *Model) v41EngramInjectPrepared(l int, x [][]float32, streams [][][]float32, full bool, positions int, layerRows []uint32, eps float32, geometry v41EngramGeometry) (gatheredRows int, err error) {
@@ -449,6 +512,24 @@ func (m *Model) v41EngramInjectOwnedPrepared(l int, x [][]float32, streams [][][
 	// These shared gate parameters are consumed by every position.
 	if err := v41EngramGateParamsErr(l, eps, qNorm, kNorm); err != nil {
 		return gatheredRows, err
+	}
+	// Folded form (#14121): the coefficient cells replace the runtime q*k
+	// product. Geometry resolution already validated shape and finiteness; this
+	// recheck covers geometries built outside v41EngramInjectionGeometry.
+	coef := geometry.coef
+	if err := v41EngramFoldedCoefErr(l, coef); err != nil {
+		return gatheredRows, err
+	}
+	if coef == nil {
+		// Unfolded form: materialize the per-cell product once per call so the
+		// hot loop stays uniform. Each cell is the same f32 product the legacy
+		// inline expression computed, so publications stay bit-identical.
+		coef = make([]float32, hc*H)
+		for s := 0; s < hc; s++ {
+			for i := 0; i < H; i++ {
+				coef[s*H+i] = qNorm[s*H+i] * kNorm[s*H+i]
+			}
+		}
 	}
 	// Both paths use x[t]: reduced gates index its hidden row, while full gates
 	// publish stream 0 back into it. Validate every used row before gathering or
@@ -541,7 +622,7 @@ func (m *Model) v41EngramInjectOwnedPrepared(l int, x [][]float32, streams [][][
 				hi := hs[i]
 				h2 += float32(hi * hi)
 				k2 += float32(key * key)
-				dotSum += float32(float32(hi*(qNorm[s*H+i]*kNorm[s*H+i])) * key)
+				dotSum += float32(float32(hi*coef[s*H+i]) * key)
 			}
 			dot := dotSum * rsqrtf(h2/float32(H)+eps) * rsqrtf(k2/float32(H)+eps) * rsqrtf(float32(H))
 			gate := float32(1) / (1 + expf(-copysignf(sqrtf(maxf(absf(dot), 1e-6)), dot)))

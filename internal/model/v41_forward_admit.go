@@ -137,8 +137,11 @@ func v41RouterConfigFullGeometry(cfg Config) (v41RouterConfig, error) {
 // that lies WITHIN the model's decoder stack but the model's Engram stage is not
 // fully wired for it. As of #13007 the reduced text assembly DOES execute
 // packaged-row Engram retrieval (v41_forward_engram.go): a declared in-range
-// Engram layer is admitted only when it has a wired row source and the three
-// mixing tensors (engram_kv.weight, engram_q_norm.weight, engram_k_norm.weight).
+// Engram layer is admitted only when it has a wired row source, the projection
+// tensor (engram_kv.weight), and EXACTLY ONE gate-coefficient form (#14121):
+// either the two unfolded mixing tensors (engram_q_norm.weight,
+// engram_k_norm.weight) or the single folded tensor engram_folded_gate.weight carrying
+// their pre-composed product. Co-presence of both forms is refused as ambiguous.
 // Otherwise the assembly would emit logits for a model it did not fully run, so
 // the layer is refused with an error wrapping ErrV41NativeUnsupported — the same
 // native-forward-unavailable class the #12967 weightless fence uses, because the
@@ -169,11 +172,20 @@ func (m *Model) v41EngramForwardAdmitted() error {
 		if err != nil {
 			return err
 		}
-		if err := m.v41AdmitCells(layerName(layer, "engram_q_norm.weight"), v41StageEngram, layer, normCells); err != nil {
-			return err
-		}
-		if err := m.v41AdmitCells(layerName(layer, "engram_k_norm.weight"), v41StageEngram, layer, normCells); err != nil {
-			return err
+		unfolded := m.has(layerName(layer, "engram_q_norm.weight")) && m.has(layerName(layer, "engram_k_norm.weight"))
+		folded := m.has(layerName(layer, v41EngramFoldedGateLeaf))
+		switch {
+		case folded && unfolded:
+			return v41StageErr(v41StageEngram, layer, fmt.Errorf(
+				"%w: Engram gate coefficients are ambiguous at layer %d: %s coexists with the unfolded q/k norms; exactly one form is admitted",
+				ErrV41NativeUnsupported, layer, layerName(layer, v41EngramFoldedGateLeaf)))
+		case folded:
+			return m.v41AdmitCells(layerName(layer, v41EngramFoldedGateLeaf), v41StageEngram, layer, normCells)
+		default:
+			if err := m.v41AdmitCells(layerName(layer, "engram_q_norm.weight"), v41StageEngram, layer, normCells); err != nil {
+				return err
+			}
+			return m.v41AdmitCells(layerName(layer, "engram_k_norm.weight"), v41StageEngram, layer, normCells)
 		}
 	}
 	return nil
