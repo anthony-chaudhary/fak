@@ -1,0 +1,17 @@
+vLLM merge_attn_states (split-KV partial-state merge)
+
+Copyright contributors to the vLLM project
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Source: vllm-project/vllm, csrc/libtorch_stable/attention/merge_attn_states.cu
+Revision: b6ff8a2f509cc7ac9c58176f5115a836aa1e08bd
+https://github.com/vllm-project/vllm/blob/b6ff8a2f509cc7ac9c58176f5115a836aa1e08bd/csrc/libtorch_stable/attention/merge_attn_states.cu
+Method: section 2.2 of https://arxiv.org/abs/2501.01005
+
+Adaptation: internal/compute/cuda_v41_shared_attention.cu
+(k_v41_shared_attention_combine). The two-state prefix/suffix merge is
+generalized to N split-KV partials per head, rewritten to base-2 LSEs with
+explicitly rounded products and sums, and extended with a V4.1 attention sink
+folded after the merge as out *= 1/(1+exp2(sink*log2(e) - lse)), matching the
+fak host reference v41SparseMLADecodeReference. FP8 output, packed vector
+loads and the torch dispatch layer are not carried.
