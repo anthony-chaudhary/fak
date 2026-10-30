@@ -543,3 +543,73 @@ func TestV41EngramFoldedGate(t *testing.T) {
 		}
 	})
 }
+
+// Admission must inspect every declared Engram layer, whether the first layer
+// uses unfolded norms or the upstream folded coefficient. A valid first layer
+// must not hide a missing or malformed later layer before retrieval begins.
+// fak-test:justify why=regression when=changed:internal/model/**
+// fak-test:runtime medium est=1s lane=default
+func TestV41EngramAdmissionChecksEveryLayer(t *testing.T) {
+	t.Parallel()
+	for _, first := range []string{"unfolded", "folded"} {
+		for _, fault := range []string{"missing_q", "short_k"} {
+			t.Run(first+"/"+fault, func(t *testing.T) {
+				m, _ := v41IncrementalEngramFixture(t, false)
+				if first == "folded" {
+					v41SetGateForms(t, m, 0, true, v41FoldedTestCoefficients(4, m.Cfg.HiddenSize))
+				}
+				if err := m.v41EngramForwardAdmitted(); err != nil {
+					t.Fatalf("valid two-layer fixture refused: %v", err)
+				}
+				const later = 2
+				if fault == "missing_q" {
+					delete(m.manifest, layerName(later, "engram_q_norm.weight"))
+				} else {
+					name := layerName(later, "engram_k_norm.weight")
+					meta := m.manifest[name]
+					meta.Shape = []int{4*m.Cfg.HiddenSize - 1}
+					m.manifest[name] = meta
+				}
+				before := v41IncrementalEngramRequests(m)
+				err := m.v41EngramForwardAdmitted()
+				var attributed *V41ForwardError
+				if !errors.Is(err, ErrV41ForwardStage) || !errors.As(err, &attributed) || attributed.Stage != v41StageEngram || attributed.Layer != later {
+					t.Fatalf("later Engram layer was not refused at admission: %v", err)
+				}
+				if after := v41IncrementalEngramRequests(m); after != before {
+					t.Fatalf("admission read Engram rows: requests %d -> %d", before, after)
+				}
+			})
+		}
+	}
+}
+
+// A folded coefficient plus either legacy norm is ambiguous, not a complete
+// folded-only publication. Both admission and geometry must reject it before I/O.
+// fak-test:justify why=regression when=changed:internal/model/**
+// fak-test:runtime medium est=1s lane=default
+func TestV41EngramFoldedGateRejectsPartialNorms(t *testing.T) {
+	t.Parallel()
+	for _, remaining := range []string{"engram_q_norm.weight", "engram_k_norm.weight"} {
+		t.Run(remaining, func(t *testing.T) {
+			m, _ := v41FullEngramModel(t)
+			v41SetGateForms(t, m, 0, false, v41FoldedTestCoefficients(4, m.Cfg.HiddenSize))
+			for _, leaf := range []string{"engram_q_norm.weight", "engram_k_norm.weight"} {
+				if leaf != remaining {
+					delete(m.manifest, layerName(0, leaf))
+				}
+			}
+			before := v41IncrementalEngramRequests(m)
+			_, geometryErr := m.v41EngramInjectionGeometry(0, 1)
+			for _, err := range []error{m.v41EngramForwardAdmitted(), geometryErr} {
+				var attributed *V41ForwardError
+				if !errors.Is(err, ErrV41NativeUnsupported) || !errors.As(err, &attributed) || attributed.Stage != v41StageEngram || attributed.Layer != 0 {
+					t.Fatalf("folded coefficient plus %s was not refused: %v", remaining, err)
+				}
+			}
+			if after := v41IncrementalEngramRequests(m); after != before {
+				t.Fatalf("ambiguous mixture read Engram rows: requests %d -> %d", before, after)
+			}
+		})
+	}
+}

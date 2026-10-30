@@ -172,7 +172,7 @@ func (m *Model) v41EngramForwardAdmitted() error {
 		if err != nil {
 			return err
 		}
-		unfolded := m.has(layerName(layer, "engram_q_norm.weight")) && m.has(layerName(layer, "engram_k_norm.weight"))
+		unfolded := m.has(layerName(layer, "engram_q_norm.weight")) || m.has(layerName(layer, "engram_k_norm.weight"))
 		folded := m.has(layerName(layer, v41EngramFoldedGateLeaf))
 		switch {
 		case folded && unfolded:
@@ -180,12 +180,16 @@ func (m *Model) v41EngramForwardAdmitted() error {
 				"%w: Engram gate coefficients are ambiguous at layer %d: %s coexists with the unfolded q/k norms; exactly one form is admitted",
 				ErrV41NativeUnsupported, layer, layerName(layer, v41EngramFoldedGateLeaf)))
 		case folded:
-			return m.v41AdmitCells(layerName(layer, v41EngramFoldedGateLeaf), v41StageEngram, layer, normCells)
+			if err := m.v41AdmitCells(layerName(layer, v41EngramFoldedGateLeaf), v41StageEngram, layer, normCells); err != nil {
+				return err
+			}
 		default:
 			if err := m.v41AdmitCells(layerName(layer, "engram_q_norm.weight"), v41StageEngram, layer, normCells); err != nil {
 				return err
 			}
-			return m.v41AdmitCells(layerName(layer, "engram_k_norm.weight"), v41StageEngram, layer, normCells)
+			if err := m.v41AdmitCells(layerName(layer, "engram_k_norm.weight"), v41StageEngram, layer, normCells); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

@@ -460,7 +460,7 @@ func (m *Model) v41EngramInjectionGeometry(l, positions int) (v41EngramGeometry,
 	// F32 norms whose product the gate recomputes, or one folded F32 tensor
 	// carrying that product pre-composed. Co-presence is ambiguous and refused;
 	// neither present falls through to the historical absence refusal.
-	unfolded := m.has(layerName(l, "engram_q_norm.weight")) && m.has(layerName(l, "engram_k_norm.weight"))
+	unfolded := m.has(layerName(l, "engram_q_norm.weight")) || m.has(layerName(l, "engram_k_norm.weight"))
 	folded := m.has(layerName(l, v41EngramFoldedGateLeaf))
 	switch {
 	case folded && unfolded:
