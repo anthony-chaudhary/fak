@@ -149,6 +149,10 @@ type Hardware struct {
 	// on; <=0 unknown. Shared topologies already charge those rows to PoolUsableBytes.
 	HostPoolUsableBytes int64
 	Peaks               Peaks
+	// HostBytesPerSec and NVMeBytesPerSec are the peak read rates of the offload tiers a
+	// TieredPlacement spills to; <=0 prices them at the generic defaults, labelled empirical.
+	HostBytesPerSec float64
+	NVMeBytesPerSec float64
 }
 
 // DefaultPromptTokens is a typical chat/agent turn prefix.
@@ -182,6 +186,8 @@ func (w Workload) normalized() Workload {
 type Pins struct {
 	KVPrecision   string `json:"kv_precision,omitempty"`
 	ContextTokens int    `json:"context_tokens,omitempty"`
+	// Placement pins where the weights live; PlacementDeviceResident refuses rather than offload.
+	Placement string `json:"placement,omitempty"`
 }
 
 // Input is everything one Plan call prices.
@@ -246,16 +252,18 @@ type Evidence struct {
 
 // Report is the planner's answer.
 type Report struct {
-	Status           Status       `json:"status"`
-	MaxContextTokens int          `json:"max_context_tokens,omitempty"` // one stream, reference tier
-	Workload         Workload     `json:"workload"`
-	Pins             Pins         `json:"pins"`
-	Evidence         Evidence     `json:"evidence"`
-	Model            *Model       `json:"model,omitempty"`
-	Chosen           *Prediction  `json:"chosen,omitempty"`
-	Refusal          *Refusal     `json:"refusal,omitempty"`
-	Candidates       []Prediction `json:"candidates"`
-	Omitted          []Omission   `json:"omitted,omitempty"`
+	Status           Status      `json:"status"`
+	MaxContextTokens int         `json:"max_context_tokens,omitempty"` // one stream, reference tier
+	Workload         Workload    `json:"workload"`
+	Pins             Pins        `json:"pins"`
+	Evidence         Evidence    `json:"evidence"`
+	Model            *Model      `json:"model,omitempty"`
+	Chosen           *Prediction `json:"chosen,omitempty"`
+	Refusal          *Refusal    `json:"refusal,omitempty"`
+	// Placement is the dense-core-first offload candidate when the weights exceed the pool.
+	Placement  *TieredPlacement `json:"placement,omitempty"`
+	Candidates []Prediction     `json:"candidates"`
+	Omitted    []Omission       `json:"omitted,omitempty"`
 }
 
 // Unavailable is the report for a plan that could not be priced at all.
@@ -307,6 +315,11 @@ func Plan(in Input) Report {
 	if len(in.Candidates) == 0 {
 		rep.Status = StatusUnknown
 		rep.Omitted = []Omission{OmitContextUnknown}
+		if p.weightsOverflow() && !pinnedResident(in.Pins.Placement) {
+			if tp := p.placeTiered(nil); tp != nil {
+				rep.Status, rep.Placement = StatusTiered, tp
+			}
+		}
 		return rep
 	}
 	if p.hostUnknown {
@@ -321,7 +334,25 @@ func Plan(in Input) Report {
 		}
 	}
 	p.choose(&rep, ref)
+	p.offerTiered(&rep, ref)
 	return rep
+}
+
+// offerTiered replaces an unpinned weights_exceed_pool refusal with the tiered placement,
+// priced on the first candidate that honors the pins.
+func (p *planner) offerTiered(rep *Report, ref int) {
+	if rep.Status != StatusRefused || rep.Refusal == nil || rep.Refusal.Reason != ReasonWeightsExceedPool ||
+		pinnedResident(p.in.Pins.Placement) {
+		return
+	}
+	first := p.firstEligible(rep.Candidates, ref)
+	if first < 0 {
+		return
+	}
+	kv := p.in.Candidates[first]
+	if tp := p.placeTiered(&kv); tp != nil {
+		rep.Status, rep.Refusal, rep.Placement = StatusTiered, nil, tp
+	}
 }
 
 func referenceIndex(cs []Candidate) int {

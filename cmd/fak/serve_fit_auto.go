@@ -193,6 +193,14 @@ func printServeFitAutoSummary(w *os.File, rep *fitplan.SearchReport, req serveFi
 		}
 		return
 	}
+	if pl := rep.Placement; pl != nil {
+		fmt.Fprintf(w, "fak serve --fit auto: tiered %s ~%.2f tok/s ctx<=%d batch<=%d tier=%s (workload %d/%d x%d)\n",
+			pl.Strategy, pl.DecodeTokS, pl.MaxContextTokens, pl.MaxBatch, pl.Tier, wl.PromptTokens, wl.OutputTokens, wl.Concurrency)
+		for _, r := range pl.Rows {
+			fmt.Fprintf(w, "  %s on %s: %d bytes\n", r.Segment, r.Pool, r.Bytes)
+		}
+		return
+	}
 	if rep.Refusal != nil {
 		fmt.Fprintf(w, "fak serve --fit auto: REFUSED %s (workload %d/%d x%d)\n", rep.Refusal, wl.PromptTokens, wl.OutputTokens, wl.Concurrency)
 	} else {
@@ -245,6 +253,9 @@ func runServeFitAutoLive(sf *serveFlags) {
 		os.Exit(2)
 	case rep.Status == fitplan.StatusUnknown:
 		fmt.Fprintf(os.Stderr, "fak serve: --fit auto: pool unprobeable (%v); proceeding on today's sizing\n", rep.Omitted)
+	case rep.Status == fitplan.StatusTiered:
+		// Oversize weights are a cost, not a refusal: the boot proceeds and the loader offloads.
+		fmt.Fprintln(os.Stderr, "fak serve: --fit auto: weights exceed the device pool; proceeding on the tiered placement")
 	default:
 		applyServeFitAutoChoice(sf, rep, pins)
 	}
