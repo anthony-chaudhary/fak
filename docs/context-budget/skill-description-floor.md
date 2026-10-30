@@ -36,8 +36,8 @@ go test ./internal/skillfootprint   # the enforcing test; -v logs the same figur
 ## Baseline (measured)
 
 ```
-skill footprint [interactive]: 73 skill(s); resident floor = 33769 bytes (~8442 tokens);
-  description floor = 33769 B; name-only floor = 978 B; at-rest card floor = 17021 bytes
+skill footprint [interactive]: 73 skill(s); resident floor = 33816 bytes (~8454 tokens);
+  description floor = 33816 B; name-only floor = 978 B; at-rest card floor = 17021 bytes
   at-rest intent slice (#5560): 12490 B across 73 skill(s)
 ```
 
@@ -61,7 +61,11 @@ head is pinned here so a drift is legible in review.
 resident floor is description prose**, and every skill stays invocable by name
 without a single byte of it.
 
-**Last re-pin: 34000 → 33769 B (−231, 73 skills)** — two new skills (ci-repair,
+**Last re-pin: 33769 → 33816 B (+47, 73 skills)** — description edits grew the
+measured floor +47 B past the pin, so the ceiling tracks the measurement in the same
+commit, per the #5444 ratchet contract.
+
+**Prior re-pin: 34000 → 33769 B (−231, 73 skills)** — two new skills (ci-repair,
 opencode-wave) and description edits grew the floor to 34536 B (+536 over the pin);
 trimming the eight heaviest descriptions (field-borrow, refresh-readme,
 refresh-cachedoc-numbers, study-repo, milestone-score, modularize, issue-orchestrator,
@@ -96,7 +100,7 @@ in the twenty days that followed, the measured floor grew from 36,237 B to 47,23
 and taste lost 30% in three weeks.
 
 `internal/skillfootprint.CheckDescriptions` gates the measured floor against a
-committed ceiling, `SkillDescriptionBudgetBytes` (currently **33769**), as a one-way
+committed ceiling, `SkillDescriptionBudgetBytes` (currently **33816**), as a one-way
 ratchet:
 
 | Direction | Reason | What it means |

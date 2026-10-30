@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/constant"
 	"go/parser"
+	"go/printer"
 	"go/token"
 	"go/types"
 	"os"
@@ -340,11 +341,35 @@ func TestRegistryGeometryMatchesSource(t *testing.T) {
 		}
 		for _, el := range table.Elts {
 			kv := el.(*ast.KeyValueExpr)
-			name := kv.Key.(*ast.Ident).Name
-			id := pkg.Scope().Lookup(name).(*types.Const)
-			u, ok := constant.Uint64Val(id.Val())
-			if !ok {
-				t.Fatal(name)
+			var u uint64
+			switch key := registryUnparen(kv.Key).(type) {
+			case *ast.Ident:
+				id := pkg.Scope().Lookup(key.Name).(*types.Const)
+				v, ok := constant.Uint64Val(id.Val())
+				if !ok {
+					t.Fatal(key.Name)
+				}
+				u = v
+			case *ast.CallExpr:
+				// Constant dtype cast such as TensorType(26) for the auxiliary integer
+				// formats: re-evaluate the cast through the type checker instead of
+				// assuming the literal, so the key stays checked against the shared
+				// enum vocabulary including the underlying-type bounds.
+				var keySrc strings.Builder
+				if err := printer.Fprint(&keySrc, fs, key); err != nil {
+					t.Fatal(err)
+				}
+				ev, err := types.Eval(fs, pkg, token.NoPos, keySrc.String())
+				if err != nil {
+					t.Fatal(err)
+				}
+				v, ok := constant.Uint64Val(ev.Value)
+				if !ok {
+					t.Fatalf("trait key %s did not resolve to an unsigned integer constant", keySrc.String())
+				}
+				u = v
+			default:
+				t.Fatal("unsupported trait key expression; update explicit geometry witness")
 			}
 			fields := kv.Value.(*ast.CompositeLit).Elts
 			var pair [2]int
