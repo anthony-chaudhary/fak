@@ -29,14 +29,18 @@ package codelint
 // report CLI (#6213); this leaf owns the source-evidence detectors only.
 
 import (
+	"archive/tar"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/printer"
 	"go/token"
+	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -767,6 +771,162 @@ func MineMotifs(root string) (MotifReport, error) {
 		return rep.Skipped[i].Reason < rep.Skipped[j].Reason
 	})
 	return rep, err
+}
+
+// MineMotifsRevision mines a snapshot of the tree of a git revision instead of
+// the mutable working tree. The file set and every byte come from the object
+// store, so two runs over the same revision are byte-identical by construction
+// even while peers, tooling, or sibling test binaries churn the checkout
+// underneath; a walk of the live tree cannot make that guarantee because the
+// input itself moves between the two passes, and no amount of read retries
+// makes a moving target stationary. The revision's tree is streamed from
+// `git archive` into a private temp dir and then mined with the same
+// deterministic walk as MineMotifs.
+func MineMotifsRevision(repoRoot, revision string) (MotifReport, error) {
+	abs, err := filepath.Abs(repoRoot)
+	if err != nil {
+		return MotifReport{}, err
+	}
+	work, err := os.MkdirTemp("", "fak-motif-rev-*")
+	if err != nil {
+		return MotifReport{}, err
+	}
+	defer os.RemoveAll(work)
+	treeDir := filepath.Join(work, "tree")
+	if err := motifSnapshotTree(abs, revision, treeDir); err != nil {
+		return MotifReport{}, err
+	}
+	return MineMotifs(treeDir)
+}
+
+// motifSnapshotTree streams `git archive <revision>` into treeDir. The git dir
+// is resolved explicitly so linked worktrees whose .git file names a path in
+// the other OS's spelling (this workspace's standard Windows-root /
+// WSL-testing split) still resolve.
+func motifSnapshotTree(repoRoot, revision, treeDir string) error {
+	gitDir, workTree, ok := motifResolveGitDirs(repoRoot)
+	cmd := exec.Command("git", "archive", "--format=tar", revision)
+	cmd.Dir = repoRoot
+	if ok {
+		cmd.Env = append(os.Environ(), "GIT_DIR="+gitDir, "GIT_WORK_TREE="+workTree)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("git archive %s: %w", revision, err)
+	}
+	tr := tar.NewReader(stdout)
+	var extractErr error
+	for extractErr == nil {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			extractErr = err
+			break
+		}
+		extractErr = motifWriteTarEntry(treeDir, hdr, tr)
+	}
+	waitErr := cmd.Wait()
+	if extractErr != nil {
+		return fmt.Errorf("git archive %s: %v: %s", revision, extractErr, strings.TrimSpace(stderr.String()))
+	}
+	if waitErr != nil {
+		return fmt.Errorf("git archive %s: %v: %s", revision, waitErr, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+// motifWriteTarEntry lands one archive/tar entry under dest. Every entry's
+// payload is consumed (skipped ones included) so the reader stays aligned.
+func motifWriteTarEntry(dest string, hdr *tar.Header, r io.Reader) error {
+	name := strings.ReplaceAll(hdr.Name, "\\", "/")
+	target := filepath.Join(dest, filepath.FromSlash(name))
+	if target != dest && !strings.HasPrefix(target, dest+string(os.PathSeparator)) {
+		return fmt.Errorf("refusing unsafe tar path %q", hdr.Name)
+	}
+	switch hdr.Typeflag {
+	case tar.TypeDir:
+		return os.MkdirAll(target, 0o755)
+	case tar.TypeReg:
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		f, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(f, r); err != nil {
+			f.Close()
+			return err
+		}
+		return f.Close()
+	case tar.TypeSymlink:
+		os.MkdirAll(filepath.Dir(target), 0o755)
+		// Symlinks are not required for mining (WalkDir does not follow them);
+		// a failure here must not sink the whole snapshot.
+		_ = os.Symlink(hdr.Linkname, target)
+		return nil
+	default:
+		// pax/GNU header entries and other metadata carry no file to land.
+		_, _ = io.Copy(io.Discard, r)
+		return nil
+	}
+}
+
+// motifResolveGitDirs finds the git dir for repoRoot across OSes. A normal
+// checkout has a .git directory; a linked worktree has a .git FILE whose
+// "gitdir:" line names the real dir — which, when the worktree was created on
+// the other OS, may hold a path this OS cannot resolve (C:/... vs /mnt/c/...
+// and back). ok=false means nothing was found and plain `git -C repoRoot`
+// (which walks upward) should be trusted instead.
+func motifResolveGitDirs(repoRoot string) (gitDir, workTree string, ok bool) {
+	dotGit := filepath.Join(repoRoot, ".git")
+	info, err := os.Lstat(dotGit)
+	if err != nil {
+		return "", "", false
+	}
+	if info.IsDir() {
+		return dotGit, repoRoot, true
+	}
+	data, err := os.ReadFile(dotGit)
+	if err != nil {
+		return "", "", false
+	}
+	line := strings.TrimSpace(string(data))
+	const prefix = "gitdir:"
+	if !strings.HasPrefix(line, prefix) {
+		return "", "", false
+	}
+	p := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+	if _, err := os.Stat(p); err == nil {
+		return p, repoRoot, true
+	}
+	if alt := motifTranslateOSPath(p); alt != "" {
+		if _, err := os.Stat(alt); err == nil {
+			return alt, repoRoot, true
+		}
+	}
+	return p, repoRoot, true // let git produce its own diagnostic
+}
+
+// motifTranslateOSPath translates a git-dir path between the Windows and WSL
+// spellings of the same location ("C:/x/y" <-> "/mnt/c/x/y"); it returns ""
+// when the path carries no translatable drive/mount form.
+func motifTranslateOSPath(p string) string {
+	s := strings.ReplaceAll(p, "\\", "/")
+	if len(s) >= 3 && s[1] == ':' && s[2] == '/' && s[0] >= 'A' && s[0] <= 'Z' {
+		return "/mnt/" + strings.ToLower(s[:1]) + s[2:]
+	}
+	if len(s) >= 7 && s[:5] == "/mnt/" && s[5] >= 'a' && s[5] <= 'z' && s[6] == '/' {
+		return strings.ToUpper(s[5:6]) + ":" + s[5:]
+	}
+	return ""
 }
 
 // motifSortFindings imposes the total order that makes two runs byte-identical.

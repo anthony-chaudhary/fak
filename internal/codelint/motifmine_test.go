@@ -496,7 +496,8 @@ func motifSorted(t *testing.T, f []MotifFinding) {
 
 func TestMineMotifsIsByteIdenticalAcrossRuns(t *testing.T) {
 	// This test owns its unchanged input tree, including excluded paths that
-	// appear in Skipped. The live-tree smoke test cannot promise that stability.
+	// appear in Skipped. The live-tree test pins both runs to one committed
+	// snapshot instead, so neither depends on the checkout staying still.
 	root := motifFixtureTree(t)
 	first, err := MineMotifs(root)
 	if err != nil {
@@ -546,18 +547,23 @@ func TestMineMotifsOrdersFindingsByPathThenLine(t *testing.T) {
 	}
 }
 
-// TestMineMotifsOverLiveTree checks that the miner runs over the repository's own
-// source and finds motifs. Other tests may mutate this checkout, including paths
-// recorded in Skipped; byte-identical reports require an unchanged input tree
-// and are covered by TestMineMotifsIsByteIdenticalAcrossRuns.
+// TestMineMotifsOverLiveTree is the live-tree half of the issue's witness: the
+// miner must run over this repository's own committed source without erroring,
+// find something, and produce byte-identical JSON twice. Both runs mine a
+// snapshot of the SAME commit (HEAD), not the mutable working tree: peers,
+// tooling, and sibling test binaries can change the checkout between two
+// walks, and no amount of read retries makes a moving target stationary.
+// Pinning both runs to one committed snapshot makes the input identical by
+// construction, so any remaining difference is nondeterminism inside the
+// miner itself.
 func TestMineMotifsOverLiveTree(t *testing.T) {
 	if testing.Short() {
 		t.Skip("walks the whole repository")
 	}
 	root := filepath.Join("..", "..")
-	first, err := MineMotifs(root)
+	first, err := MineMotifsRevision(root, "HEAD")
 	if err != nil {
-		t.Fatalf("MineMotifs(live tree): %v", err)
+		t.Fatalf("MineMotifsRevision(live tree, HEAD): %v", err)
 	}
 	if first.Scanned < 100 {
 		t.Fatalf("scanned=%d — the live tree walk looks wrong", first.Scanned)
@@ -571,8 +577,20 @@ func TestMineMotifsOverLiveTree(t *testing.T) {
 			t.Fatalf("finding from excluded path %q (%s)", f.Path, reason)
 		}
 	}
-	if _, err := MotifReportJSON(first); err != nil {
+	second, err := MineMotifsRevision(root, "HEAD")
+	if err != nil {
 		t.Fatal(err)
+	}
+	a, err := MotifReportJSON(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := MotifReportJSON(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(a, b) {
+		t.Fatal("live-tree JSON differs across runs")
 	}
 	t.Logf("live tree: scanned=%d findings=%d skipped=%d", first.Scanned, len(first.Findings), len(first.Skipped))
 }
