@@ -56,6 +56,9 @@ func serveDenseKQuantOptions(backend compute.Backend) []ggufload.Q4KLoadOption {
 	if serveNativeDenseQ5K(backend) {
 		opts = append(opts, ggufload.WithDenseQ5KResident(true))
 	}
+	if serveNativeDenseQ3K(backend) {
+		opts = append(opts, ggufload.WithDenseQ3KResident(true))
+	}
 	// Native i-quant weights (05f) stay packed only for a device backend admitting the raw dtype.
 	if backend.Caps().DeviceMemory && backend.Caps().UploadDtype {
 		supports := func(dt compute.Dtype) bool { return compute.BackendSupportsDeviceWeightDtype(backend, dt) }
@@ -93,6 +96,18 @@ func serveNativeDenseQ5K(backend compute.Backend) bool {
 		return native.SupportsQ5KMatMul()
 	}
 	return true
+}
+
+// serveNativeDenseQ3K admits packed dense Q3_K (a mixed UD artifact's Q3_K FFN layers) only on a
+// device backend that uploads the Q3_K dtype AND passes the Q3_K execution probe, the same pair
+// serveArtifactNativeKQuant demands for a whole-Q3_K artifact.
+func serveNativeDenseQ3K(backend compute.Backend) bool {
+	if backend == nil || !backend.Caps().DeviceMemory || !backend.Caps().UploadDtype ||
+		!compute.BackendSupportsDeviceWeightDtype(backend, compute.Q3_K) {
+		return false
+	}
+	native, ok := backend.(interface{ SupportsQ3KMatMul() bool })
+	return ok && native.SupportsQ3KMatMul()
 }
 
 func serveArtifactNativeKQuant(backend compute.Backend, artifact ggufload.ArtifactQuant) bool {

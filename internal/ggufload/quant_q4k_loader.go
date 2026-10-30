@@ -69,6 +69,7 @@ type q4kLoadOptions struct {
 	residentDenseQ2K     bool
 	residentDenseQ6K     bool
 	residentDenseQ5K     bool
+	residentDenseQ3K     bool
 	residentDenseIQ      map[TensorType]bool // selective native i-quant arm (05f)
 	residentQ2KEmbedding bool
 	residentQ4KEmbedding bool
@@ -162,6 +163,13 @@ func WithDenseQ6KResident(enabled bool) Q4KLoadOption {
 // dense Q5_K weight is re-quantized to native Q8 (1.125 B/weight vs Q5_K's 0.6875).
 func WithDenseQ5KResident(enabled bool) Q4KLoadOption {
 	return func(o *q4kLoadOptions) { o.residentDenseQ5K = enabled }
+}
+
+// WithDenseQ3KResident retains eligible dense Q3_K tensors even when blanket dense k-quant
+// residency is disabled, for a backend with a qualified packed Q3_K matmul. Without it a mixed
+// UD artifact's Q3_K FFN layers expand to native Q8 (1.125 B/weight vs 0.43).
+func WithDenseQ3KResident(enabled bool) Q4KLoadOption {
+	return func(o *q4kLoadOptions) { o.residentDenseQ3K = enabled }
 }
 
 // WithDenseIQResident retains eligible dense tensors of the given i-quant types even when
@@ -261,6 +269,7 @@ type Q4KLoadOptionEffects struct {
 	DenseQ2KResident     bool
 	DenseQ6KResident     bool
 	DenseQ5KResident     bool
+	DenseQ3KResident     bool
 	Q2KEmbeddingResident bool
 	Q4KEmbeddingResident bool
 	MTPRetention         bool
@@ -297,6 +306,7 @@ func ApplyQ4KLoadOptions(opts []Q4KLoadOption) Q4KLoadOptionEffects {
 		DenseQ2KResident:         o.residentDenseQ2K,
 		DenseQ6KResident:         o.residentDenseQ6K,
 		DenseQ5KResident:         o.residentDenseQ5K,
+		DenseQ3KResident:         o.residentDenseQ3K,
 		Q2KEmbeddingResident:     o.residentQ2KEmbedding,
 		Q4KEmbeddingResident:     o.residentQ4KEmbedding,
 		MTPRetention:             o.retainMTP,
@@ -952,6 +962,7 @@ func denseKQuantRetained(o q4kLoadOptions, t TensorType) bool {
 		(o.residentDenseQ2K && t == TensorQ2_K) ||
 		(o.residentDenseQ6K && t == TensorQ6_K) ||
 		(o.residentDenseQ5K && t == TensorQ5_K) ||
+		(o.residentDenseQ3K && t == TensorQ3_K) ||
 		o.residentDenseIQ[t]
 }
 
