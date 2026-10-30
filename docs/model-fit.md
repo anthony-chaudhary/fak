@@ -74,9 +74,28 @@ Every alternative must use identical `weights`; changing encoding or model sizes
 Results preserve input order and select no optimum. Keep context, batch, KV precision and workload
 assumptions equivalent yourself; per-rank KV/workspace may differ with replication strategy.
 
+## Next tiers on refusal
+
+A refusal over declared pools is tiered, not absolute. When `capacity_status` is `refused`, the
+report carries `next_tiers`, a best-first list of the concrete lower tiers that would admit the
+placement; each step names the tier token, the `shortfall_bytes` that tier must absorb, and a
+fixed-wording note. `host_offload` appears only when declared-pool arithmetic proves it viable:
+enough sharded/KV/workspace bytes are movable (replicated bytes stay on-rank) and a declared host
+pool — a pool no rank draws from — has at least the shortfall in spare capacity. `multi_device`
+appears whenever the known pools fall short, naming the additional capacity to declare or the
+larger pools to re-shard onto; over fully known pools it is always arithmetically admissible, so a
+known-pool refusal always names at least one tier. When a used pool's capacity is unknown
+(`usable_bytes` zero), no tier can be proven: the report carries no `next_tiers` and the closed
+reason `pool_capacity_unknown` says why. Reports that are not capacity refusals omit the field
+entirely (`omitempty`). `streamed_dense` is a reserved tier token pointing at the unimplemented
+streamed-dense route (fak#13175); it is never emitted as an implemented placement. All of this
+stays `modeled_only: true` with `qualification: "unverified"`: the tiers are declared arithmetic,
+not hardware qualification.
+
 Pool IDs are physical accounting identities. Multiple ranks drawing from the same physical UMA
 memory must reference the same pool so their demands are summed. A host pool can model explicit
-host residency, but this command supplies no host-offload implementation. Shards are uniform byte
+host residency; a refusal may enumerate `host_offload` as a next tier, but this command enumerates
+tiers only and supplies no host-offload implementation. Shards are uniform byte
 accounting units, rounded upward per rank; they do not prove tensor or layer boundaries can split.
 Peer access, links, synchronization, heterogeneous backend compatibility, compute support and speed
 are not simulated. Do not infer a usable multi-GPU configuration from memory arithmetic alone.

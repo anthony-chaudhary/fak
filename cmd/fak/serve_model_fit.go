@@ -1141,7 +1141,7 @@ func refuseIfTooBigOnDevice(plan compute.MemoryPlan, err error, be compute.Backe
 		admitErr = compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFDeviceHeadroom)
 	}
 	if admitErr != nil {
-		return plan, admitErr
+		return plan, serveAttachSuggestedArms(admitErr, plan, be)
 	}
 	// #13172: on an INTEGRATED device (a Strix Halo APU Vulkan tier) the device-scoped weights
 	// and the host-resident expert/staging charge draw from ONE physical DRAM pool, but the
@@ -1156,9 +1156,119 @@ func refuseIfTooBigOnDevice(plan compute.MemoryPlan, err error, be compute.Backe
 	// staging transit; this bound is the loader-side total that covers the device arms that
 	// guard does not, on the shared-pool tier.
 	if unifiedErr := ggufload.RefuseUnifiedHostResidencyIfTooBig(plan, be, serveGGUFDeviceHeadroom); unifiedErr != nil {
-		return plan, unifiedErr
+		return plan, serveAttachSuggestedArms(unifiedErr, plan, be)
 	}
 	return plan, nil
+}
+
+// Closed vocabulary of offload arms a serve admission refusal may name as the next viable lower
+// tier (GOAL-model-fit-tiers-doctrine). A refusal either enumerates at least one concrete arm or
+// closes with none: serveSuggestedFitArms emits a token ONLY when the data in scope at the
+// preflight site proves the arm's premise, so an empty list is the proven-no-arm answer, not a
+// missing witness. The tokens are advisory - they never change which plan is refused or admitted
+// and no threshold or headroom constant moves because of them.
+const (
+	// serveFitSuggestedArmStreamedExperts names the bounded-resident NVMe-streamed expert policy
+	// (fak#13121/#13140): retain a declared fraction of the host-resident routed set and fault the
+	// remaining strides from the staged shards on demand. It is the arm that turns a full-charge
+	// host miss - the witnessed strix3 48.01-vs-47.99 GiB razor-thin refusal - into an admission.
+	serveFitSuggestedArmStreamedExperts = "streamed-experts"
+	// serveFitSuggestedArmHostPoolHeadroom names free host-pool capacity beyond what the refused
+	// plan already charges host: bytes can move device->host (the --cpu-offload-experts arm for a
+	// routed set, --gpu-layers partial offload for dense layers) instead of the device side staying
+	// over its window.
+	serveFitSuggestedArmHostPoolHeadroom = "host-pool-headroom"
+	// serveFitSuggestedArmStreamedDense is RESERVED for the streamed-dense route (open leaf
+	// fak#13175): the token keeps the vocabulary closed, but serveSuggestedFitArms NEVER emits it
+	// - the route is not built yet, and a refusal must not claim it works.
+	serveFitSuggestedArmStreamedDense = "streamed-dense"
+)
+
+// Plan-row Detail stamps the estimators stamp on host-resident routed-expert rows
+// (internal/ggufload estimate.go), read here only to recognize WHICH charge a refusal failed on.
+const (
+	servePlanDetailHostExpertOffload         = "gguf-host-expert-offload"
+	servePlanDetailHostExpertOffloadShard    = "gguf-host-expert-offload-shard"
+	servePlanDetailHostExpertOffloadStreamed = "gguf-host-expert-offload-streamed"
+)
+
+// planChargesHostResidentRoutedSet sums the plan's host-scoped FULL routed-expert charge (the
+// resident cpu-offload row and its sharded-band form). The bounded STREAMED row is excluded: a
+// plan that already carries it has taken the streamed arm, so naming it again would be noise.
+func planChargesHostResidentRoutedSet(plan compute.MemoryPlan) int64 {
+	var bytes int64
+	for _, d := range plan {
+		if d.Bytes <= 0 || d.ScopeOrDefault() != compute.MemoryScopeHost {
+			continue
+		}
+		if d.Detail == servePlanDetailHostExpertOffload || d.Detail == servePlanDetailHostExpertOffloadShard {
+			bytes += d.Bytes
+		}
+	}
+	return bytes
+}
+
+// serveSuggestedFitArms derives the closed-vocabulary offload arms a serve admission refusal
+// should name, from the data already in scope at the preflight site: the refused plan's classed
+// demands, the backend's windows, and the process host probe. It invents no numbers beyond those
+// probes - an arm is named only when its premise is provable here (a host-resident routed set
+// whose charge covers the shortfall; host headroom beyond the plan's own host charge) - and it
+// never emits serveFitSuggestedArmStreamedDense (reserved, fak#13175 open).
+func serveSuggestedFitArms(fe *compute.FitError, plan compute.MemoryPlan, be compute.Backend) []string {
+	if fe == nil || fe.Verdict != compute.FitTooBig {
+		return nil
+	}
+	switch fe.Scope {
+	case compute.MemoryScopeHost:
+		// The charged host demand exceeded the host budget. The one host-side lever left is to
+		// bound the residency of a host-resident routed-expert set: the streamed policy retains a
+		// declared fraction and faults the rest from the staged shards. Name it only when that set
+		// alone covers the shortfall - bounding a set smaller than the miss cannot admit the plan,
+		// and a refusal must not claim an arm that does not close the gap.
+		if shortfall := fe.Want - fe.Avail; shortfall > 0 && planChargesHostResidentRoutedSet(plan) >= shortfall {
+			return []string{serveFitSuggestedArmStreamedExperts}
+		}
+		return nil
+	case compute.MemoryScopeDevice:
+		// The device side overflowed its window. Name host-pool headroom only when a host window
+		// is known AND holds free capacity beyond what this plan already charges host - otherwise
+		// there is no provable lower tier and the refusal closes with no arm. The preference order
+		// mirrors RefuseUnifiedHostResidencyIfTooBig: the backend's own host probe when it
+		// advertises one, else the process host probe.
+		total, free, known := compute.HostMemoryInfo(be)
+		if !known {
+			total, free, known = compute.HostSystemMemoryInfo()
+		}
+		base := serveFitBudgetBase(total, free, known)
+		if base <= 0 {
+			return nil
+		}
+		if compute.BudgetAfterHeadroom(base, serveGGUFHostHeadroom) > plan.HostTotal() {
+			return []string{serveFitSuggestedArmHostPoolHeadroom}
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+// serveAttachSuggestedArms populates the structured SuggestedArms field on a serve admission
+// refusal from the data in scope at the preflight site, and returns err unchanged when it is not
+// a *compute.FitError. It is the ONLY population site for FitError.SuggestedArms: the field stays
+// empty everywhere else, so a non-empty slice proves the serve preflight named the arms. The
+// verdict itself is untouched - this never changes which plans are refused or admitted.
+func serveAttachSuggestedArms(err error, plan compute.MemoryPlan, be compute.Backend) error {
+	if err == nil {
+		return nil
+	}
+	var fe *compute.FitError
+	if !errors.As(err, &fe) {
+		return err
+	}
+	if fe.SuggestedArms == nil {
+		fe.SuggestedArms = serveSuggestedFitArms(fe, plan, be)
+	}
+	return err
 }
 
 // withGGUFWeights opens the GGUF weights at ggufPath (an empty path plans nothing) and runs

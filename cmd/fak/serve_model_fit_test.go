@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -186,6 +188,130 @@ func TestServeResidentDenseStandardArchitectureAdmissionMatchesLoader(t *testing
 				t.Fatalf("admission=%d actual stored=%d", plan.Total(), wantStored)
 			}
 		})
+	}
+}
+
+// TestServeRefusalNamesViableOffloadArms is the GOAL-model-fit-tiers-doctrine witness at the
+// serve admission seam: a refusal must name the viable offload arm(s) as STRUCTURED data
+// (compute.FitError.SuggestedArms, a closed vocabulary) without weakening admission. The fixture
+// is the documented physical-strix3 shape (the serveCPUOffloadStreamedResidentMargin comment,
+// fak#13140): the full host-resident routed-expert charge misses the host window by a razor-thin
+// 48.01-vs-47.99 GiB, and the bounded-resident streamed policy is the arm that admits it.
+// Assertions target the structured field, never exact prose.
+func TestServeRefusalNamesViableOffloadArms(t *testing.T) {
+	const gib = int64(1 << 30)
+	var gibF = float64(gib) // variable base keeps the 48.01/47.99 arithmetic out of constant folding
+	// The witnessed strix3 arithmetic as runtime floats: plan needs 48.01 GiB, host has 47.99 GiB.
+	want := int64(48.01 * gibF)
+	avail := int64(47.99 * gibF)
+
+	plan := compute.MemoryPlan{
+		{Class: compute.MemoryWeights, Scope: compute.MemoryScopeDevice, Bytes: 4 * gib, Detail: "gguf-device-dense-load"},
+		{Class: compute.MemoryOffload, Scope: compute.MemoryScopeHost, Bytes: want, Detail: servePlanDetailHostExpertOffload},
+	}
+
+	// A) The documented fixture: a host-scope FitTooBig on the full host-resident routed set.
+	// The structured field carries exactly the one arm whose premise the data proves.
+	fe := &compute.FitError{Verdict: compute.FitTooBig, Want: want, Avail: avail, Demands: plan, Scope: compute.MemoryScopeHost}
+	if got := serveSuggestedFitArms(fe, plan, nil); len(got) != 1 || got[0] != serveFitSuggestedArmStreamedExperts {
+		t.Fatalf("fixture SuggestedArms = %v, want [%s]", got, serveFitSuggestedArmStreamedExperts)
+	}
+	err := serveAttachSuggestedArms(error(fe), plan, nil)
+	var attached *compute.FitError
+	if !errors.As(err, &attached) {
+		t.Fatalf("attach lost the typed refusal: %T: %v", err, err)
+	}
+	if attached != fe {
+		t.Fatalf("attach must populate the SAME *compute.FitError the funnel returns")
+	}
+	if len(attached.SuggestedArms) != 1 || attached.SuggestedArms[0] != serveFitSuggestedArmStreamedExperts {
+		t.Fatalf("attached SuggestedArms = %v, want [%s]", attached.SuggestedArms, serveFitSuggestedArmStreamedExperts)
+	}
+	// Human-facing text: the original sentence stays intact; the arm names are appended after it.
+	msg := err.Error()
+	if !strings.Contains(msg, "(FitTooBig: request exceeds the reported host capacity") {
+		t.Fatalf("original refusal sentence missing or altered: %q", msg)
+	}
+	if !strings.HasSuffix(msg, "; viable offload arm(s): "+serveFitSuggestedArmStreamedExperts) {
+		t.Fatalf("arm names not appended after the original sentence: %q", msg)
+	}
+
+	// B) The production funnel: refuseIfTooBigOnDevice populates the same field on the typed
+	// refusal it returns. A split-aperture integrated backend (distinct device heap beside the
+	// system window, the strix3 shape) whose host window cannot hold the full routed set refuses
+	// host-scoped, and the named arm is the streamed policy - while the verdict itself is
+	// unchanged (still FitTooBig, still the same shortfall).
+	be := serveCapBackend{
+		Backend: compute.Default(), total: 60 * gib, free: 60 * gib, known: true,
+		hostTotal: 56 * gib, hostFree: 56 * gib, hostKnown: true,
+		tier: "integrated:test-apu",
+	}
+	_, funnelErr := refuseIfTooBigOnDevice(plan, nil, be, nil)
+	if funnelErr == nil {
+		t.Fatal("funnel admitted a plan whose host-resident routed set exceeds the host window")
+	}
+	var ffe *compute.FitError
+	if !errors.As(funnelErr, &ffe) {
+		t.Fatalf("funnel returned an untyped refusal: %T: %v", funnelErr, funnelErr)
+	}
+	if ffe.Verdict != compute.FitTooBig || ffe.Scope != compute.MemoryScopeHost {
+		t.Fatalf("funnel verdict changed: %+v", ffe)
+	}
+	if len(ffe.SuggestedArms) != 1 || ffe.SuggestedArms[0] != serveFitSuggestedArmStreamedExperts {
+		t.Fatalf("funnel SuggestedArms = %v, want [%s]", ffe.SuggestedArms, serveFitSuggestedArmStreamedExperts)
+	}
+
+	// C) Proven-no-arm cases: the list is EMPTY when no arm's premise is provable.
+	// C1: a host-scope refusal whose failing charge is NOT a host-resident routed set (a dense
+	// CPU plan) names no arm.
+	densePlan := compute.MemoryPlan{{Class: compute.MemoryWeights, Scope: compute.MemoryScopeHost, Bytes: want, Detail: "gguf-q8-load"}}
+	denseFe := &compute.FitError{Verdict: compute.FitTooBig, Want: want, Avail: avail, Demands: densePlan, Scope: compute.MemoryScopeHost}
+	if arms := serveSuggestedFitArms(denseFe, densePlan, nil); len(arms) != 0 {
+		t.Fatalf("dense host refusal SuggestedArms = %v, want empty (proven no arm)", arms)
+	}
+	// C2: a device-scope refusal whose host pool holds NO headroom beyond the plan's own host
+	// charge names no arm (the double's window is deterministic: 0.85*56 GiB < 50 GiB charged).
+	devPlan := compute.MemoryPlan{
+		{Class: compute.MemoryWeights, Scope: compute.MemoryScopeDevice, Bytes: 50 * gib, Detail: "gguf-device-dense-load"},
+		{Class: compute.MemoryKVCache, Scope: compute.MemoryScopeHost, Bytes: 50 * gib, Detail: "kv-cache"},
+	}
+	devBe := serveCapBackend{Backend: compute.Default(), total: 40 * gib, free: 40 * gib, known: true, hostTotal: 56 * gib, hostFree: 56 * gib, hostKnown: true}
+	devFe := &compute.FitError{Verdict: compute.FitTooBig, Want: 50 * gib, Avail: compute.BudgetAfterHeadroom(40*gib, serveGGUFHostHeadroom), Demands: devPlan, Scope: compute.MemoryScopeDevice}
+	if arms := serveSuggestedFitArms(devFe, devPlan, devBe); len(arms) != 0 {
+		t.Fatalf("device refusal with no host headroom SuggestedArms = %v, want empty (proven no arm)", arms)
+	}
+	// C3: a plan that ALREADY carries the bounded streamed row has taken the streamed arm; the
+	// refusal names it again nowhere.
+	streamedPlan := compute.MemoryPlan{
+		{Class: compute.MemoryWeights, Scope: compute.MemoryScopeDevice, Bytes: 4 * gib, Detail: "gguf-device-dense-load"},
+		{Class: compute.MemoryOffload, Scope: compute.MemoryScopeHost, Bytes: 40 * gib, Detail: servePlanDetailHostExpertOffloadStreamed},
+	}
+	streamedFe := &compute.FitError{Verdict: compute.FitTooBig, Want: 40 * gib, Avail: 30 * gib, Demands: streamedPlan, Scope: compute.MemoryScopeHost}
+	if arms := serveSuggestedFitArms(streamedFe, streamedPlan, nil); len(arms) != 0 {
+		t.Fatalf("already-streamed plan SuggestedArms = %v, want empty (arm in use)", arms)
+	}
+
+	// D) The device-scope positive: a device overflow with PROVABLE host headroom beyond the
+	// plan's own host charge names host-pool-headroom (deterministic via the double's window).
+	devPlan2 := compute.MemoryPlan{{Class: compute.MemoryWeights, Scope: compute.MemoryScopeDevice, Bytes: 50 * gib, Detail: "gguf-device-dense-load"}}
+	devFe2 := &compute.FitError{Verdict: compute.FitTooBig, Want: 50 * gib, Avail: compute.BudgetAfterHeadroom(40*gib, serveGGUFHostHeadroom), Demands: devPlan2, Scope: compute.MemoryScopeDevice}
+	if arms := serveSuggestedFitArms(devFe2, devPlan2, devBe); len(arms) != 1 || arms[0] != serveFitSuggestedArmHostPoolHeadroom {
+		t.Fatalf("device refusal with host headroom SuggestedArms = %v, want [%s]", arms, serveFitSuggestedArmHostPoolHeadroom)
+	}
+
+	// E) The reserved token is part of the closed vocabulary but NEVER emitted: no input shapes
+	// the streamed-dense route into a suggestion (fak#13175 open - a refusal must not claim it
+	// works). Assert the guard on every branch above by scanning the outputs.
+	for _, out := range [][]string{
+		serveSuggestedFitArms(fe, plan, nil),
+		serveSuggestedFitArms(devFe2, devPlan2, devBe),
+		serveSuggestedFitArms(denseFe, densePlan, nil),
+	} {
+		for _, tok := range out {
+			if tok == serveFitSuggestedArmStreamedDense {
+				t.Fatalf("reserved token %q was emitted; the streamed-dense route is not built (fak#13175)", tok)
+			}
+		}
 	}
 }
 

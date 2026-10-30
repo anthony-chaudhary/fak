@@ -1,0 +1,16 @@
+{
+  "pools": [
+    {"id": "gpu-small", "usable_bytes": 4294967296},
+    {"id": "gpu-large", "usable_bytes": 4294967296}
+  ],
+  "placement": {
+    "name": "asymmetric",
+    "support": "unknown",
+    "support_evidence": "",
+    "weights": {"replicated_bytes": 8589934592, "sharded_bytes": 25769803776, "shard_count": 8},
+    "ranks": [
+      {"rank": 0, "pool_id": "gpu-small", "shards": 2, "kv_bytes": 1073741824, "workspace_bytes": 1073741824, "extra_bytes": 0},
+      {"rank": 1, "pool_id": "gpu-large", "shards": 6, "kv_bytes": 1073741824, "workspace_bytes": 1073741824, "extra_bytes": 0}
+    ]
+  }
+}

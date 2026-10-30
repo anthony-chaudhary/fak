@@ -935,6 +935,13 @@ type FitError struct {
 	Demands     MemoryPlan // optional classed breakdown of Want
 	Scope       MemoryScope
 	EpochDigest string
+	// SuggestedArms is an optional closed-vocabulary list of offload arms that could admit this
+	// request at a lower tier. It is populated ONLY by the serve preflight admission funnel
+	// (cmd/fak refuseIfTooBigOnDevice), from data already in scope there; every other producer
+	// leaves it empty, so a non-empty slice proves the serve preflight named the arms. The names
+	// are advisory: they never change which plan is refused or admitted, and machine-facing code
+	// asserts this slice (or errors.Is on the sentinel), never the Error() prose.
+	SuggestedArms []string
 }
 
 func (e *FitError) Error() string {
@@ -946,8 +953,12 @@ func (e *FitError) Error() string {
 	if scope == "" {
 		scope = MemoryScopeDevice
 	}
-	return "compute: " + subject + " needs " + memSize(e.Want) + ", " + string(scope) + " has " + memSize(e.Avail) +
+	msg := "compute: " + subject + " needs " + memSize(e.Want) + ", " + string(scope) + " has " + memSize(e.Avail) +
 		" (FitTooBig: request exceeds the reported " + string(scope) + " capacity; capacity pre-check turned a would-be OOM into a typed refusal)"
+	if len(e.SuggestedArms) > 0 {
+		msg += "; viable offload arm(s): " + strings.Join(e.SuggestedArms, ", ")
+	}
+	return msg
 }
 
 func memoryPlanSummary(plan MemoryPlan) string {

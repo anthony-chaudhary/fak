@@ -97,6 +97,10 @@ type PlacementReport struct {
 	Reasons         []PlacementReason `json:"reasons"`
 	Ranks           []RankDemand      `json:"ranks"`
 	Pools           []PoolDemand      `json:"pools"`
+	// NextTiers lists the concrete lower tiers that would admit this
+	// placement, best-first, populated only for a capacity refusal over fully
+	// known pools; omitted otherwise.
+	NextTiers []NextTierStep `json:"next_tiers,omitempty"`
 }
 
 // EvaluatePlacement models declared residency, not backend execution. Eligible
@@ -173,6 +177,7 @@ func EvaluatePlacement(in DeploymentInput) (PlacementReport, error) {
 			r.Reasons = appendReason(r.Reasons, PlacementPoolExceeded)
 		}
 	}
+	r.NextTiers = nextTiersFor(r.CapacityStatus, r.Pools, r.Ranks)
 	r.Status = r.CapacityStatus
 	switch {
 	case p.Support == SupportUnsupported:

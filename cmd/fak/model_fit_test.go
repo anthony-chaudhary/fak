@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/fitplan"
 )
 
 const modelFitFixture = `{"pools":[{"id":"small","usable_bytes":16},{"id":"large","usable_bytes":32}],"placement":{"name":"unequal","support":"supported","support_evidence":"caller-declared backend and links","weights":{"replicated_bytes":8,"sharded_bytes":24,"shard_count":8},"ranks":[{"rank":0,"pool_id":"small","shards":2,"kv_bytes":1,"workspace_bytes":1,"extra_bytes":0},{"rank":1,"pool_id":"large","shards":6,"kv_bytes":1,"workspace_bytes":1,"extra_bytes":0}]}}`
@@ -87,6 +90,95 @@ func TestModelFitCLICompareFixedWeights(t *testing.T) {
 	input = `{"pools":` + string(base["pools"]) + `,"placements":[` + placement + `,` + second + `]}`
 	if code := runModelFit(strings.NewReader(input), io.Discard, io.Discard, []string{"compare", "--input", "-"}); code != 2 {
 		t.Fatalf("changed model code=%d", code)
+	}
+}
+
+func modelFitFixtureFile(t *testing.T, name string) string {
+	t.Helper()
+	raw, err := os.ReadFile("../../internal/fitplan/testdata/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+// fak-test:runtime fast est=10ms
+// fak-test:justify why=Pin the tiered-refusal artifact through the CLI: check refuses with byte-proven next_tiers, eligible reports omit the key, exit codes stay unchanged. when=changed:cmd/fak/model_fit*,internal/fitplan/next_tiers*
+func TestModelFitCLINextTiers(t *testing.T) {
+	t.Run("too-small-check-refuses-with-multi-device", func(t *testing.T) {
+		input := modelFitFixtureFile(t, "ex-too-small.json")
+		for _, tc := range []struct {
+			mode string
+			code int
+		}{
+			{"check", 1},
+			{"plan", 0},
+		} {
+			var out, errOut bytes.Buffer
+			if code := runModelFit(strings.NewReader(input), &out, &errOut, []string{tc.mode, "--input", "-"}); code != tc.code {
+				t.Fatalf("mode=%s code=%d want=%d stderr=%s", tc.mode, code, tc.code, errOut.String())
+			}
+			var artifact modelFitArtifact
+			if err := json.Unmarshal(out.Bytes(), &artifact); err != nil {
+				t.Fatal(err)
+			}
+			rep := artifact.Reports[0]
+			if rep.CapacityStatus != fitplan.StatusRefused || rep.Eligible {
+				t.Fatalf("report=%+v", rep)
+			}
+			if len(rep.NextTiers) != 1 || rep.NextTiers[0].Tier != fitplan.NextTierMultiDevice || rep.NextTiers[0].ShortfallBytes != 38654705664 {
+				t.Fatalf("next_tiers=%+v", rep.NextTiers)
+			}
+		}
+	})
+	t.Run("host-pool-names-host-offload-first", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		if code := runModelFit(strings.NewReader(modelFitFixtureFile(t, "ex-host-offload.json")), &out, &errOut, []string{"check", "--input", "-"}); code != 1 {
+			t.Fatalf("code=%d stderr=%s", code, errOut.String())
+		}
+		var artifact modelFitArtifact
+		if err := json.Unmarshal(out.Bytes(), &artifact); err != nil {
+			t.Fatal(err)
+		}
+		rep := artifact.Reports[0]
+		if len(rep.NextTiers) != 2 || rep.NextTiers[0].Tier != fitplan.NextTierHostOffload || rep.NextTiers[0].ShortfallBytes != 12884901888 || rep.NextTiers[1].Tier != fitplan.NextTierMultiDevice || rep.NextTiers[1].ShortfallBytes != 12884901888 {
+			t.Fatalf("next_tiers=%+v", rep.NextTiers)
+		}
+	})
+	t.Run("unknown-capacity-closes-with-reason-and-no-tiers", func(t *testing.T) {
+		var out, errOut bytes.Buffer
+		if code := runModelFit(strings.NewReader(modelFitFixtureFile(t, "ex-unknown-capacity.json")), &out, &errOut, []string{"check", "--input", "-"}); code != 1 {
+			t.Fatalf("code=%d stderr=%s", code, errOut.String())
+		}
+		var artifact modelFitArtifact
+		if err := json.Unmarshal(out.Bytes(), &artifact); err != nil {
+			t.Fatal(err)
+		}
+		rep := artifact.Reports[0]
+		closed := false
+		for _, reason := range rep.Reasons {
+			if reason == fitplan.PlacementPoolUnknown {
+				closed = true
+			}
+		}
+		if !closed || rep.NextTiers != nil || strings.Contains(out.String(), "next_tiers") {
+			t.Fatalf("report=%+v output=%s", rep, out.String())
+		}
+	})
+	for _, fixture := range []string{"dense-16g.json", "ex-asym-supported.json", "ex-asym.json"} {
+		t.Run("eligible-or-support-only-omits-next-tiers:"+fixture, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			want := 0
+			if fixture == "ex-asym.json" {
+				want = 1 // capacity fits, support unknown: check still refuses
+			}
+			if code := runModelFit(strings.NewReader(modelFitFixtureFile(t, fixture)), &out, &errOut, []string{"check", "--input", "-"}); code != want {
+				t.Fatalf("code=%d want=%d stderr=%s", code, want, errOut.String())
+			}
+			if strings.Contains(out.String(), "next_tiers") {
+				t.Fatalf("output=%s", out.String())
+			}
+		})
 	}
 }
 

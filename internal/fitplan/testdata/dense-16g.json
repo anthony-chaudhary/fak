@@ -1,0 +1,14 @@
+{
+  "pools": [
+    {"id": "gpu16", "usable_bytes": 17179869184}
+  ],
+  "placement": {
+    "name": "dense-on-16g",
+    "support": "supported",
+    "support_evidence": "fixture",
+    "weights": {"replicated_bytes": 12884901888, "sharded_bytes": 0, "shard_count": 1},
+    "ranks": [
+      {"rank": 0, "pool_id": "gpu16", "shards": 1, "kv_bytes": 2147483648, "workspace_bytes": 1073741824, "extra_bytes": 0}
+    ]
+  }
+}
