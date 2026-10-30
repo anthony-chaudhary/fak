@@ -5,9 +5,11 @@ The CUDA backend has three source sets that must agree on one flat C ABI:
 
     internal/compute/cuda_backend.h   the base prototypes (`fcuda_*`)
     internal/compute/cuda_kv_precision.h, cuda_mxfp8_cast.h  modular prototypes
+    internal/compute/cuda_deepgemm_wkv.h  optional Dense WKV prototypes
     internal/compute/cuda_kernels.cu  the base definitions (`extern "C" … fcuda_*`)
     internal/compute/cuda_nccl.cu     the NCCL definitions (`extern "C" … fcuda_*`)
     internal/compute/cuda_nccl_pg.cu  the multi-process NCCL PG definitions (`extern "C" … fcuda_*`)
+    internal/compute/cuda_deepgemm_wkv.cu  optional Dense WKV device facts definition
     internal/compute/cuda*.go         the cgo call sites (`C.fcuda_*`) — their `/* … */`
                                      preambles may also carry `extern … fcuda_*(…);`
                                      prototypes (the device-work shim declares its Go-facing
@@ -68,10 +70,14 @@ SCHEMA = "fak-cuda-abi-parity/1"
 
 HEADER = "internal/compute/cuda_backend.h"
 # Explicit ABI roots, not every header found under compute/. The typed KV header is
-# included by cgo consumers; MXFP8 is a standalone API included by its native source.
-HEADERS = (HEADER, "internal/compute/cuda_kv_precision.h", "internal/compute/cuda_mxfp8_cast.h")
+# included by cgo consumers; MXFP8 and optional Dense WKV have standalone APIs.
+# Dense WKV definitions span the generic bridge and a dedicated translation unit;
+# enroll its actual header, source and bindings rather than exempting its exports.
+HEADERS = (HEADER, "internal/compute/cuda_kv_precision.h", "internal/compute/cuda_mxfp8_cast.h",
+           "internal/compute/cuda_deepgemm_wkv.h")
 HEADERS_LABEL = ", ".join(HEADERS)
-KERNELS = ("internal/compute/cuda_kernels.cu", "internal/compute/cuda_nccl.cu", "internal/compute/cuda_nccl_pg.cu")
+KERNELS = ("internal/compute/cuda_kernels.cu", "internal/compute/cuda_nccl.cu",
+           "internal/compute/cuda_nccl_pg.cu", "internal/compute/cuda_deepgemm_wkv.cu")
 KERNELS_LABEL = ", ".join(KERNELS)
 BINDINGS = (
     "internal/compute/cuda.go",
@@ -79,6 +85,8 @@ BINDINGS = (
     "internal/compute/cuda_collective_pg.go",
     "internal/compute/cuda_qwen4exp_ple_hash_cuda.go",
     "internal/compute/cuda_routed_expert_gemv.go",
+    "internal/compute/cuda_deepgemm_wkv.go",
+    "internal/compute/cuda_deepgemm_wkv_witness.go",
 )
 BINDINGS_LABEL = ", ".join(BINDINGS)
 

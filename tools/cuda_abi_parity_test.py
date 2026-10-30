@@ -204,8 +204,8 @@ class TestCollectIncludes(unittest.TestCase):
         self.root = Path(tmp.name)
         for rel in (*m.KERNELS, *m.BINDINGS):
             self.write(rel, "// seam fixture\n")
-        for name in ("cuda_kv_precision.h", "cuda_mxfp8_cast.h"):
-            self.write(f"internal/compute/{name}", "// modular ABI fixture\n")
+        for rel in m.HEADERS[1:]:
+            self.write(rel, "// modular ABI fixture\n")
         self.write(m.HEADER, 'extern "C" int fcuda_test(void);\n')
         self.write(m.BINDINGS[0], "C.fcuda_test()\n")
 
@@ -379,6 +379,89 @@ class TestCollectIncludes(unittest.TestCase):
         self.assertEqual(payload["verdict"], "ACTION", payload)
         self.assertEqual(payload["corpus"]["undefined"], ["fcuda_preamble_only"])
         self.assertIn("cgo preamble", payload["corpus"]["hard"][0])
+
+    def write_deepgemm_seam(self):
+        header = "internal/compute/cuda_deepgemm_wkv.h"
+        source = "internal/compute/cuda_deepgemm_wkv.cu"
+        binding = "internal/compute/cuda_deepgemm_wkv.go"
+        witness = "internal/compute/cuda_deepgemm_wkv_witness.go"
+        names = {f"fcuda_deepgemm_wkv_{name}" for name in
+                 ("facts", "state", "upload", "release", "run")}
+        self.write(header, "#include <stddef.h>\n#include <stdint.h>\n" +
+                   "typedef uint8_t wkv_byte;\n" +
+                   "\n".join(f"int {name}(size_t n);" for name in sorted(names)))
+        self.write(m.KERNELS[0], '#include "cuda/deepgemm_wkv_bridge.cuh"\n' +
+                   'extern "C" int fcuda_test(void) { return 0; }\n')
+        self.write("internal/compute/cuda/deepgemm_wkv_bridge.cuh",
+                   '#include "../cuda_deepgemm_wkv.h"\n' +
+                   "\n".join(f'extern "C" int {name}(size_t n) {{ return 0; }}'
+                             for name in sorted(names - {"fcuda_deepgemm_wkv_facts"})))
+        self.write(source, '#include "cuda_deepgemm_wkv.h"\n' +
+                   'extern "C" int fcuda_deepgemm_wkv_facts(size_t n) { return 0; }\n')
+        self.write(binding, '/*\n#include "cuda_deepgemm_wkv.h"\n*/\nimport "C"\n' +
+                   "\n".join(f"C.{name}(0)" for name in sorted(names)))
+        self.write(witness, '/*\n#include "cuda_deepgemm_wkv.h"\n*/\nimport "C"\n' +
+                   "C.fcuda_deepgemm_wkv_facts(0)\n")
+        return header, source, binding, witness, names
+
+    # fak-test:runtime fast est=100ms lane=default
+    def test_deepgemm_roots_cover_both_translation_units_and_bindings(self):
+        header, source, binding, witness, names = self.write_deepgemm_seam()
+        self.assertIn(header, m.HEADERS)
+        self.assertIn(source, m.KERNELS)
+        self.assertIn(binding, m.BINDINGS)
+        self.assertIn(witness, m.BINDINGS)
+        self.assertFalse(names & m.UNDECLARED_DEF_OK.keys())
+        payload = m.collect(self.root)
+        self.assertEqual(payload["verdict"], "OK", payload)
+        self.assertEqual(payload["corpus"]["n_declared"], 6)
+        self.assertEqual(payload["corpus"]["n_defined"], 6)
+        self.assertEqual(payload["corpus"]["n_called"], 6)
+        self.assertEqual(payload, m.collect(self.root))
+
+    def test_deepgemm_real_omissions_remain_hard(self):
+        for mode in ("prototype", "definition", "call", "portability"):
+            with self.subTest(mode=mode):
+                header, source, binding, witness, _ = self.write_deepgemm_seam()
+                if mode == "prototype":
+                    path = self.root / header
+                    path.write_text(path.read_text().replace(
+                        "int fcuda_deepgemm_wkv_run(size_t n);", ""), encoding="utf-8")
+                    # An unrelated header must not hide the lost declaration.
+                    self.write("internal/compute/unreachable.h",
+                               "int fcuda_deepgemm_wkv_run(size_t n);\n")
+                elif mode == "definition":
+                    self.write(source, '#include "cuda_deepgemm_wkv.h"\n')
+                elif mode == "call":
+                    self.write(witness, "C.fcuda_deepgemm_wkv_undeclared(0)\n")
+                else:
+                    path = self.root / header
+                    path.write_text(path.read_text().replace("#include <stddef.h>\n", ""),
+                                    encoding="utf-8")
+                payload = m.collect(self.root)
+                self.assertEqual(payload["verdict"], "ACTION", payload)
+                corpus = payload["corpus"]
+                if mode == "prototype":
+                    self.assertEqual(corpus["undeclared_calls"], ["fcuda_deepgemm_wkv_run"])
+                    self.assertEqual(corpus["undeclared_defs"], ["fcuda_deepgemm_wkv_run"])
+                elif mode == "definition":
+                    self.assertEqual(corpus["undefined"], ["fcuda_deepgemm_wkv_facts"])
+                elif mode == "call":
+                    self.assertEqual(corpus["undeclared_calls"], ["fcuda_deepgemm_wkv_undeclared"])
+                else:
+                    self.assertTrue(any(header in error and "stddef.h" in error
+                                        for error in corpus["hard"]), corpus)
+
+    def test_deepgemm_absent_roots_fail_closed(self):
+        header, source, binding, witness, _ = self.write_deepgemm_seam()
+        for rel in (header, source, binding, witness):
+            with self.subTest(rel=rel):
+                self.write_deepgemm_seam()
+                (self.root / rel).unlink()
+                payload = m.collect(self.root)
+                self.assertEqual(payload["verdict"], "AUDIT_ERROR", payload)
+                self.assertFalse(payload["ok"])
+                self.assertIn(rel, payload["reason"])
 
     def test_missing_modular_root_is_an_audit_error(self):
         rel = "internal/compute/cuda_kv_precision.h"
