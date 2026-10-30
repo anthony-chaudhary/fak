@@ -53,6 +53,9 @@ func serveDenseKQuantOptions(backend compute.Backend) []ggufload.Q4KLoadOption {
 	if serveNativeDenseQ6K(backend) {
 		opts = append(opts, ggufload.WithDenseQ6KResident(true))
 	}
+	if serveNativeDenseQ5K(backend) {
+		opts = append(opts, ggufload.WithDenseQ5KResident(true))
+	}
 	// Native i-quant weights (05f) stay packed only for a device backend admitting the raw dtype.
 	if backend.Caps().DeviceMemory && backend.Caps().UploadDtype {
 		supports := func(dt compute.Dtype) bool { return compute.BackendSupportsDeviceWeightDtype(backend, dt) }
@@ -75,6 +78,19 @@ func serveNativeDenseQ6K(backend compute.Backend) bool {
 	}
 	if native, ok := backend.(compute.Qwen35MTPQ6KBackend); ok {
 		return native.SupportsQ6KMatMul()
+	}
+	return true
+}
+
+// serveNativeDenseQ5K is serveNativeDenseQ6K's Q5_K twin: exact dtype probe plus the optional
+// SupportsQ5KMatMul execution probe (a Vulkan bundle without its Q5_K shader stays on Q8).
+func serveNativeDenseQ5K(backend compute.Backend) bool {
+	if backend == nil || !backend.Caps().DeviceMemory || !backend.Caps().UploadDtype ||
+		!compute.BackendSupportsDeviceWeightDtype(backend, compute.Q5_K) {
+		return false
+	}
+	if native, ok := backend.(interface{ SupportsQ5KMatMul() bool }); ok {
+		return native.SupportsQ5KMatMul()
 	}
 	return true
 }

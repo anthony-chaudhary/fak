@@ -68,6 +68,7 @@ type q4kLoadOptions struct {
 	residentDenseKQuant  bool
 	residentDenseQ2K     bool
 	residentDenseQ6K     bool
+	residentDenseQ5K     bool
 	residentDenseIQ      map[TensorType]bool // selective native i-quant arm (05f)
 	residentQ2KEmbedding bool
 	residentQ4KEmbedding bool
@@ -154,6 +155,13 @@ func WithDenseQ2KResident(enabled bool) Q4KLoadOption {
 // dequant-to-Q8 round trip without stranding Q5_K/Q3_K/Q2_K/IQ formats on a dequant path.
 func WithDenseQ6KResident(enabled bool) Q4KLoadOption {
 	return func(o *q4kLoadOptions) { o.residentDenseQ6K = enabled }
+}
+
+// WithDenseQ5KResident retains eligible dense Q5_K tensors even when blanket dense
+// k-quant residency is disabled, for a backend with a native Q5_K device matmul. Without it a
+// dense Q5_K weight is re-quantized to native Q8 (1.125 B/weight vs Q5_K's 0.6875).
+func WithDenseQ5KResident(enabled bool) Q4KLoadOption {
+	return func(o *q4kLoadOptions) { o.residentDenseQ5K = enabled }
 }
 
 // WithDenseIQResident retains eligible dense tensors of the given i-quant types even when
@@ -252,6 +260,7 @@ type Q4KLoadOptionEffects struct {
 	DenseKQuantResident  bool
 	DenseQ2KResident     bool
 	DenseQ6KResident     bool
+	DenseQ5KResident     bool
 	Q2KEmbeddingResident bool
 	Q4KEmbeddingResident bool
 	MTPRetention         bool
@@ -287,6 +296,7 @@ func ApplyQ4KLoadOptions(opts []Q4KLoadOption) Q4KLoadOptionEffects {
 		DenseKQuantResident:      o.residentDenseKQuant,
 		DenseQ2KResident:         o.residentDenseQ2K,
 		DenseQ6KResident:         o.residentDenseQ6K,
+		DenseQ5KResident:         o.residentDenseQ5K,
 		Q2KEmbeddingResident:     o.residentQ2KEmbedding,
 		Q4KEmbeddingResident:     o.residentQ4KEmbedding,
 		MTPRetention:             o.retainMTP,
@@ -933,7 +943,7 @@ func lazyDenseKQuantBoundedEligible(cfg model.Config, t TensorType, canon string
 // denseKQuantRetained is the ONE residency predicate that decides whether a dense non-Q4_K
 // k-quant of type t keeps its source representation (resident or bounded-lazy) rather than
 // taking the dequant-to-Q8 path: blanket dense k-quant residency, the selective Q2_K arm, or the
-// selective Q6_K arm. The resident branch, the streamed-dense lazy branch and the estimate in
+// selective Q6_K or Q5_K arm. The resident branch, the streamed-dense lazy branch and the estimate in
 // estimate.go all consult it, so a backend that disabled dense k-quant residency (because it has
 // no kernel for the format) can never have the bounded-lazy route re-admit that tensor into the
 // raw k-quant store where its HAL cannot reach it.
@@ -941,6 +951,7 @@ func denseKQuantRetained(o q4kLoadOptions, t TensorType) bool {
 	return o.residentDenseKQuant ||
 		(o.residentDenseQ2K && t == TensorQ2_K) ||
 		(o.residentDenseQ6K && t == TensorQ6_K) ||
+		(o.residentDenseQ5K && t == TensorQ5_K) ||
 		o.residentDenseIQ[t]
 }
 

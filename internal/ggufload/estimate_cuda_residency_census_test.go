@@ -7,15 +7,15 @@ import (
 )
 
 // cudaServeCensusOptions is the option set cmd/fak serveDenseKQuantOptions resolves for the CUDA
-// backend today: dense k-quant residency off, packed Q2_K and Q6_K kept (both declared CUDA matmul
-// dtypes), and no i-quant type kept because the CUDA matmul table declares none of them.
+// backend today: dense k-quant residency off, packed Q2_K, Q5_K and Q6_K kept (all declared CUDA
+// matmul dtypes), and no i-quant type kept because the CUDA matmul table declares none of them.
 func cudaServeCensusOptions() []Q4KLoadOption {
-	return []Q4KLoadOption{WithDenseKQuantResident(false), WithDenseQ2KResident(true), WithDenseQ6KResident(true)}
+	return []Q4KLoadOption{WithDenseKQuantResident(false), WithDenseQ2KResident(true), WithDenseQ6KResident(true), WithDenseQ5KResident(true)}
 }
 
 // TestEstimateQ4KLoadMemoryPlanCUDAServeResidencyPerType pins the per-type device representation
 // behind the Qwen3.8-27B UD-Q4_K_M refusal (29.365 GiB planned for a 15.32 GiB payload): Q4_K
-// matmuls stay packed, the Q4_K token table expands to f32, and IQ4_XS, Q5_K and Q8_0 matmuls are
+// and Q5_K matmuls stay packed, the Q4_K token table expands to f32, and IQ4_XS and Q8_0 matmuls are
 // re-quantized to native Q8 at 1.125 B/weight. A change that keeps one more type packed must
 // update this table on purpose.
 // fak-test:runtime fast est=10ms lane=default
@@ -53,6 +53,7 @@ func TestEstimateQ4KLoadMemoryPlanCUDAServeResidencyPerType(t *testing.T) {
 		q8       = matrix + matrix/32*4 // int8 codes + one f32 scale per 32 weights
 		q4Packed = 256 * 144
 		q6Packed = 256*210 + 8*210
+		q5Packed = 256 * 176
 	)
 	plan, err := ws.EstimateQ4KLoadMemoryPlan(cudaServeCensusOptions()...)
 	if err != nil {
@@ -60,8 +61,9 @@ func TestEstimateQ4KLoadMemoryPlanCUDAServeResidencyPerType(t *testing.T) {
 	}
 	want := map[string]int64{
 		compute.F32.String():   embedF32 + normsF32,
-		"native-q8-f32-scales": 3 * q8, // IQ4_XS + Q5_K + Q8_0
+		"native-q8-f32-scales": 2 * q8, // IQ4_XS + Q8_0
 		"q4_k":                 q4Packed,
+		"q5_k":                 q5Packed,
 		"q6_k":                 q6Packed,
 	}
 	got := map[string]int64{}
