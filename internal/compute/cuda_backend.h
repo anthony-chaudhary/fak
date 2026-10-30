@@ -26,6 +26,14 @@ int fcuda_init(char *name, int namelen, int *sm, size_t *total_mem);
 /* Current CUDA device memory from cudaMemGetInfo. Returns 0 on success and fills free/total;
  * returns non-zero when the CUDA runtime cannot provide a fresh snapshot. */
 int fcuda_mem_info(size_t *free_mem, size_t *total_mem);
+/* Explicit-device property queries; each returns the cudaError_t as an int
+ * (0 on success). Output is usable only on success. Runtime queries may
+ * initialize internal state or report preceding asynchronous errors. */
+int fcuda_device_l2_cache_size(int *bytes, int device);
+int fcuda_device_warp_size(int *threads, int device);
+/* Driver version via cuDriverGetVersion; returns its CUresult as an int
+ * (0 on success). Output is usable only on success. */
+int fcuda_driver_get_version(int *version);
 
 /* device memory + transfers (the residency seam). */
 void *fcuda_malloc(size_t bytes);

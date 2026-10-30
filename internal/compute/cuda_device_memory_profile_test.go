@@ -16,6 +16,25 @@ import (
 )
 
 // fak-test:runtime fast est=1ms lane=default
+// This source guard catches both SDK-header dependencies on CPU-only hosts. The
+// actual no-toolkit cgo type-check remains go vet -tags cuda ./internal/compute/ ./internal/model/.
+func TestCUDADeviceMemoryProfileNoToolkitContract(t *testing.T) {
+	for _, path := range []string{"cuda_device_memory_profile.go", "cuda.go"} {
+		t.Run(path, func(t *testing.T) {
+			source, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			preamble, _, found := strings.Cut(string(source), `import "C"`)
+			if !found || !strings.Contains(preamble, `#include "cuda_backend.h"`) ||
+				strings.Contains(preamble, "#include <cuda") {
+				t.Fatal("CUDA cgo preamble must use the toolkit-free flat ABI header, not SDK headers")
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
 func TestCUDADeviceMemoryProfileFacts(t *testing.T) {
 	for _, tc := range []struct {
 		name  string

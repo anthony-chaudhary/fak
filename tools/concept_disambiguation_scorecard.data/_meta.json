@@ -1542,6 +1542,11 @@
           "category": "incidental",
           "reason": "An external Go environment-setting key inspected only to reject nonempty external cache-program configuration in the input plan; this change does not introduce or implement a cache-program mechanism.",
           "token": "GOCACHEPROG"
+        },
+        {
+          "category": "incidental",
+          "reason": "Flat C ABI getter for the existing CUDA device L2 byte-count attribute; not a new software cache mechanism.",
+          "token": "fcuda_device_l2_cache_size"
         }
       ],
       "exclude": [
@@ -1798,6 +1803,7 @@
         "fak_fleet_goal_cache_write_tokens_total",
         "fak_workflow_cache",
         "fakcachevalueinputpermtokusd",
+        "fcuda_device_l2_cache_size",
         "flushcache",
         "formatTurnCachePair",
         "formatTurnCacheSummary",

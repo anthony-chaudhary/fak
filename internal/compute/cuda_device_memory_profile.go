@@ -3,7 +3,7 @@
 package compute
 
 /*
-#include <cuda_runtime_api.h>
+#include "cuda_backend.h"
 */
 import "C"
 
@@ -31,10 +31,10 @@ func (c *cudaBackend) DeviceMemoryProfile() (DeviceMemoryProfile, bool) {
 // asynchronous error. Each failed query therefore leaves its fact unknown.
 func cudaQueryDeviceMemoryFacts(device int) cudaDeviceMemoryFacts {
 	var cache, warp C.int
-	cacheStatus := C.cudaDeviceGetAttribute(&cache, C.cudaDevAttrL2CacheSize, C.int(device))
-	warpStatus := C.cudaDeviceGetAttribute(&warp, C.cudaDevAttrWarpSize, C.int(device))
+	cacheStatus := C.fcuda_device_l2_cache_size(&cache, C.int(device))
+	warpStatus := C.fcuda_device_warp_size(&warp, C.int(device))
 	return cudaDeviceMemoryFacts{
-		cacheBytes: int64(cache), cacheOK: cacheStatus == C.cudaSuccess,
-		warpWidth: int64(warp), warpOK: warpStatus == C.cudaSuccess,
+		cacheBytes: int64(cache), cacheOK: cacheStatus == 0,
+		warpWidth: int64(warp), warpOK: warpStatus == 0,
 	}
 }

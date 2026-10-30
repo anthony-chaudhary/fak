@@ -1,3 +1,5 @@
+#include <cuda.h>
+
 #include "alloc_status.h"
 extern "C" int fcuda_init(char *name, int namelen, int *sm, size_t *total_mem) {
   int n = 0;
@@ -56,6 +58,18 @@ extern "C" int fcuda_mem_info(size_t *free_mem, size_t *total_mem) {
   if (free_mem) *free_mem = free_b;
   if (total_mem) *total_mem = total_b;
   return 0;
+}
+
+extern "C" int fcuda_device_l2_cache_size(int *bytes, int device) {
+  return (int)cudaDeviceGetAttribute(bytes, cudaDevAttrL2CacheSize, device);
+}
+
+extern "C" int fcuda_device_warp_size(int *threads, int device) {
+  return (int)cudaDeviceGetAttribute(threads, cudaDevAttrWarpSize, device);
+}
+
+extern "C" int fcuda_driver_get_version(int *version) {
+  return (int)cuDriverGetVersion(version);
 }
 
 extern "C" void *fcuda_malloc_tagged(size_t bytes, int cls, int site) {

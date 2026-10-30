@@ -25,7 +25,6 @@ package compute
 #cgo CFLAGS: -I${SRCDIR}
 #cgo LDFLAGS: -L${SRCDIR} -lfakcuda -lcudart -lcuda -lcublas -lcublasLt -lstdc++ -lm
 #include <stdlib.h>
-#include <cuda.h>
 #include "cuda_backend.h"
 #include "cuda_kv_precision.h"
 #include <stdint.h>
@@ -145,7 +144,7 @@ func init() {
 // never a gate. Safe to call here: fcuda_init already selected device 0 and loaded the driver.
 func captureCUDADriverVersion() string {
 	var ver C.int
-	if C.cuDriverGetVersion(&ver) != 0 {
+	if C.fcuda_driver_get_version(&ver) != 0 {
 		return ""
 	}
 	return formatCUDADriverVersion(int(ver))
