@@ -115,6 +115,12 @@ func SynthesizeCUDACgoEnv(tc *Toolchain, pkgDir string, enableNCCL bool, rpaths 
 			}
 		}
 	}
+	if tc != nil && !tc.IsWindows {
+		if dir := wslCUDALinkDir(); dir != "" {
+			ldflags = append(ldflags, QuoteFlag("-L", dir))
+			env["LIBRARY_PATH"] = prependPathList(dir, os.Getenv("LIBRARY_PATH"))
+		}
+	}
 	if enableNCCL {
 		ldflags = append(ldflags, "-lnccl")
 	}
@@ -131,7 +137,7 @@ func SynthesizeCUDACgoEnv(tc *Toolchain, pkgDir string, enableNCCL bool, rpaths 
 			}
 			return append(paths, path)
 		}
-		for _, path := range []string{"/usr/lib/wsl/lib", "/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu"} {
+		for _, path := range []string{wslCUDADriverDir, "/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu"} {
 			if matches, _ := filepath.Glob(filepath.Join(path, "libcuda.so*")); len(matches) > 0 {
 				loader = appendUnique(loader, path)
 			}
@@ -165,6 +171,29 @@ func SynthesizeCUDACgoEnv(tc *Toolchain, pkgDir string, enableNCCL bool, rpaths 
 	}
 
 	return env
+}
+
+// wslCUDADriverDir is where WSL2 mounts the host GPU driver's libcuda.so.
+// It is a variable so tests can point it at a fixture tree.
+var wslCUDADriverDir = "/usr/lib/wsl/lib"
+
+// wslCUDALinkDir returns the WSL driver directory when it holds the libcuda.so
+// linker name, so `-lcuda` resolves without a caller-set LIBRARY_PATH.
+func wslCUDALinkDir() string {
+	if info, err := os.Stat(filepath.Join(wslCUDADriverDir, "libcuda.so")); err == nil && !info.IsDir() {
+		return wslCUDADriverDir
+	}
+	return ""
+}
+
+func prependPathList(dir, list string) string {
+	parts := []string{dir}
+	for _, path := range filepath.SplitList(list) {
+		if path != "" && path != dir {
+			parts = append(parts, path)
+		}
+	}
+	return strings.Join(parts, string(os.PathListSeparator))
 }
 
 func cudaStubPath(path string) bool {
