@@ -154,6 +154,8 @@ func resetDefaultQuantDescriptors() {
 		{kindIQ2XXS, "IQ2_XXS", compute.IQ2_XXS},
 		{kindIQ2XS, "IQ2_XS", compute.IQ2_XS},
 		{kindIQ1S, "IQ1_S", compute.IQ1_S},
+		{kindIQ1M, "IQ1_M", compute.IQ1_M},
+		{kindIQ4NL, "IQ4_NL", compute.IQ4_NL},
 	} {
 		dt := item.dtype
 		registerDefaultLocked(BaseQuantDescriptor{
@@ -174,10 +176,8 @@ func resetDefaultQuantDescriptors() {
 		name  string
 		dtype compute.Dtype
 	}{
-		{kindIQ1M, "IQ1_M", 0},
 		{kindQ8_0, "Q8_0", compute.Q8_0},
 		{kindQ4_0, "Q4_0", 0},
-		{kindIQ4NL, "IQ4_NL", 0},
 	}
 	for _, item := range nonHAL {
 		registerDefaultLocked(BaseQuantDescriptor{
@@ -234,6 +234,16 @@ func rawIQDenseHALDtype(kind kQuantKind) (compute.Dtype, bool) {
 		return 0, false
 	}
 	return desc.Dtype(), true
+}
+
+// rawIQDenseHALDtypeFor is rawIQDenseHALDtype for one tensor: compute carries raw i-quants
+// as 256-weight super-blocks, so a 32-weight-block kind (IQ4_NL) whose row length is not a
+// multiple of 256 keeps its host path.
+func rawIQDenseHALDtypeFor(qt *kQuantTensor) (compute.Dtype, bool) {
+	if qt == nil || qt.in%256 != 0 {
+		return 0, false
+	}
+	return rawIQDenseHALDtype(qt.kind)
 }
 
 func SupportsHALKQuant(kind kQuantKind) bool {

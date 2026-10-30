@@ -441,6 +441,10 @@ unsigned long long fcuda_q3k_mmvq_launch_count(void);
  * into a warp-per-row GEMV, f32 activations, F32 accumulate (cuda/iq_gemv.cuh, oss-index TICKET-01). */
 void fcuda_iq2xxs_gemv(const uint8_t *dW, const float *dX, float *dY, int out, int in, int P);
 void fcuda_iq2xs_gemv(const uint8_t *dW, const float *dX, float *dY, int out, int in, int P);
+/* fcuda_iq1m_gemv / fcuda_iq4nl_gemv: the same contract over resident verbatim IQ1_M (56 B / 256)
+ * and IQ4_NL (eight 18 B / 32 blocks = 144 B / 256) weights (cuda/iq_gemv.cuh, llama.cpp @571d0d54). */
+void fcuda_iq1m_gemv(const uint8_t *dW, const float *dX, float *dY, int out, int in, int P);
+void fcuda_iq4nl_gemv(const uint8_t *dW, const float *dX, float *dY, int out, int in, int P);
 
 /* per-row RMSNorm: y[r,:] = x[r,:] * rsqrt(mean(x[r,:]^2) + eps) * w[:]  (rows x n). */
 void fcuda_rmsnorm_f32(const float *dX, const float *dW, float *dY, int rows, int n, float eps);

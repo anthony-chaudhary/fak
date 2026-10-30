@@ -33,6 +33,9 @@ var rawIQFormats = map[Dtype]rawIQFormat{
 	IQ2_XXS: {blockBytes: iq2xxsSuperBlock, dequant: iq2xxsDequantSuperBlock, vulkanID: 4},
 	IQ2_XS:  {blockBytes: iq2xsSuperBlock, dequant: iq2xsDequantSuperBlock, vulkanID: 5},
 	IQ1_S:   {blockBytes: iq1sSuperBlock, dequant: iq1sDequantSuperBlock, vulkanID: 6},
+	// No Vulkan kernel: vulkanID -1 reads unavailable, so Vulkan Upload expands to Q8_0.
+	IQ1_M:  {blockBytes: iq1mSuperBlock, dequant: iq1mDequantSuperBlock, vulkanID: -1},
+	IQ4_NL: {blockBytes: iq4nlSuperBlock, dequant: iq4nlDequantSuperBlock, vulkanID: -1},
 }
 
 // IsRawIQ reports whether dt is a registered native i-quant dtype.
@@ -294,6 +297,65 @@ func iq1sDequantSuperBlock(dst []float32, blk []byte) {
 			for j := 0; j < 8; j++ {
 				dst[ib32*32+l*8+j] = dl * (float32(int8(byte(grid>>uint(8*j)))) + delta)
 			}
+		}
+	}
+}
+
+// ---- IQ1_M --------------------------------------------------------------------------
+
+// iq1mSuperBlock: qs[32] + qh[16] + scales[8]; the f16 super-scale is spread over the top
+// nibble of each of the four u16 scale words (llama.cpp iq1m_scale_t).
+const iq1mSuperBlock = 32 + 16 + 8
+
+// iq1mDequantSuperBlock is llama.cpp dequantize_row_iq1_m for one super-block
+// (byte-for-byte model.DequantIQ1M).
+func iq1mDequantSuperBlock(dst []float32, blk []byte) {
+	qs := blk[0:32]
+	qh := blk[32:48]
+	var sc [4]uint16
+	for i := range sc {
+		sc[i] = binary.LittleEndian.Uint16(blk[48+2*i:])
+	}
+	scaleBits := (sc[0] >> 12) | ((sc[1] >> 8) & 0x00f0) | ((sc[2] >> 4) & 0x0f00) | (sc[3] & 0xf000)
+	d := math.Float32frombits(kquantbits.F16BitsToF32Bits(scaleBits))
+	for ib32 := 0; ib32 < 8; ib32++ {
+		shift := uint(6 * (ib32 % 2))
+		dl := [2]float32{
+			d * float32(2*((sc[ib32/2]>>shift)&7)+1),
+			d * float32(2*((sc[ib32/2]>>(shift+3))&7)+1),
+		}
+		for l := 0; l < 4; l++ {
+			h := qh[2*ib32+l/2] >> (4 * uint(l%2))
+			grid := iq1SGrid[uint16(qs[4*ib32+l])|uint16(h&7)<<8]
+			delta := float32(0.125)
+			if h&0x08 != 0 {
+				delta = -delta
+			}
+			for j := 0; j < 8; j++ {
+				dst[ib32*32+l*8+j] = dl[l/2] * (float32(int8(byte(grid>>uint(8*j)))) + delta)
+			}
+		}
+	}
+}
+
+// ---- IQ4_NL -------------------------------------------------------------------------
+
+// iq4nlBlockBytes is one 32-weight IQ4_NL block (f16 d + qs[16]); iq4nlSuperBlock carries
+// eight of them as one 256-weight unit so IQ4_NL shares the raw-IQ geometry (in % 256 == 0).
+const (
+	iq4nlBlockBytes = 2 + 16
+	iq4nlSuperBlock = 8 * iq4nlBlockBytes
+)
+
+// iq4nlDequantSuperBlock is llama.cpp dequantize_row_iq4_nl over eight consecutive blocks
+// (byte-for-byte ggufload.dequantIQ4NLScalar).
+func iq4nlDequantSuperBlock(dst []float32, blk []byte) {
+	for ib := 0; ib < 8; ib++ {
+		b := blk[ib*iq4nlBlockBytes : (ib+1)*iq4nlBlockBytes]
+		d := f16At(b)
+		for j := 0; j < 16; j++ {
+			dst[ib*32+j] = d * kvaluesIQ4NL[b[2+j]&0x0f]
+			dst[ib*32+j+16] = d * kvaluesIQ4NL[b[2+j]>>4]
 		}
 	}
 }

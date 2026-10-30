@@ -26,6 +26,8 @@ var rawIQGGUFType = map[string]ggufload.TensorType{
 	"iq2_s":   ggufload.TensorIQ2_S,
 	"iq2_xs":  ggufload.TensorIQ2_XS,
 	"iq1_s":   ggufload.TensorIQ1_S,
+	"iq1_m":   ggufload.TensorIQ1_M,
+	"iq4_nl":  ggufload.TensorIQ4_NL,
 }
 
 // registeredRawIQ lists every dtype compute registers as a native raw i-quant, so a
@@ -67,15 +69,30 @@ func f32ToF16Bits(f float32) uint16 {
 }
 
 // randomRawIQ builds out*(in/256) super-blocks of any raw i-quant format: random bytes,
-// then a small finite f16 d in [0.01, 0.05) at offset 0 (every i-quant keeps d there;
-// every other bit pattern is a valid encoding).
-func randomRawIQ(seed int64, blockBytes, out, in int) []byte {
+// then a small finite f16 scale in [0.01, 0.05) wherever dt keeps one (every other bit
+// pattern is a valid encoding): offset 0 for most i-quants, each 18-byte block's offset
+// 0 for IQ4_NL, and the top nibble of each of the four u16 scale words for IQ1_M.
+func randomRawIQ(seed int64, dt compute.Dtype, blockBytes, out, in int) []byte {
 	rng := rand.New(rand.NewSource(seed))
 	n := out * (in / rawIQSuperWeights)
 	raw := make([]byte, n*blockBytes)
 	rng.Read(raw)
 	for b := 0; b < n; b++ {
-		binary.LittleEndian.PutUint16(raw[b*blockBytes:], f32ToF16Bits(float32(0.01+rng.Float64()*0.04)))
+		blk := raw[b*blockBytes : (b+1)*blockBytes]
+		switch dt {
+		case compute.IQ4_NL:
+			for off := 0; off < blockBytes; off += 18 {
+				binary.LittleEndian.PutUint16(blk[off:], f32ToF16Bits(float32(0.01+rng.Float64()*0.04)))
+			}
+		case compute.IQ1_M:
+			d := f32ToF16Bits(float32(0.01 + rng.Float64()*0.04))
+			for i := 0; i < 4; i++ {
+				w := binary.LittleEndian.Uint16(blk[48+2*i:])&0x0fff | (d>>(4*uint(i))&0xf)<<12
+				binary.LittleEndian.PutUint16(blk[48+2*i:], w)
+			}
+		default:
+			binary.LittleEndian.PutUint16(blk, f32ToF16Bits(float32(0.01+rng.Float64()*0.04)))
+		}
 	}
 	return raw
 }
@@ -125,7 +142,7 @@ func TestDequantRawIQMatchesGGUFLoaderDequant(t *testing.T) {
 			{"9x2048", 9, 2048, 13},
 		} {
 			t.Run(dt.String()+"/"+tc.name, func(t *testing.T) {
-				raw := randomRawIQ(tc.seed, bb, tc.out, tc.in)
+				raw := randomRawIQ(tc.seed, dt, bb, tc.out, tc.in)
 				got := compute.DequantRawIQ(dt, tc.out, tc.in, raw)
 				want := ggufRawIQDequant(t, dt, tc.out, tc.in, raw)
 				if len(got) != tc.out*tc.in || len(want) != len(got) {
@@ -164,7 +181,7 @@ func TestDefaultMatMulRawIQMatchesDequantDot(t *testing.T) {
 		} {
 			t.Run(dt.String()+"/"+tc.name, func(t *testing.T) {
 				rng := rand.New(rand.NewSource(tc.seed))
-				raw := randomRawIQ(tc.seed, bb, tc.out, tc.in)
+				raw := randomRawIQ(tc.seed, dt, bb, tc.out, tc.in)
 				deq := compute.DequantRawIQ(dt, tc.out, tc.in, raw)
 				X := make([]float32, tc.P*tc.in)
 				for i := range X {
@@ -213,7 +230,7 @@ func TestDefaultMatMulRawIQMatchesDequantDot(t *testing.T) {
 // fak-test:runtime fast est=5s
 func TestNewRawIQRejectsMismatchedByteLength(t *testing.T) {
 	for _, dt := range registeredRawIQ(t) {
-		raw := randomRawIQ(31, rawIQBlockBytes(t, dt), 2, 256)
+		raw := randomRawIQ(31, dt, rawIQBlockBytes(t, dt), 2, 256)
 		for _, tc := range []struct {
 			name  string
 			shape []int

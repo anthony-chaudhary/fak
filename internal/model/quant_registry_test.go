@@ -16,7 +16,7 @@ func TestQuantRegistryBuiltinRegistration(t *testing.T) {
 	// native raw i-quant dtype (compute.IsRawIQ, ticket 05f) is instead held to the raw
 	// contract below, so the table stays green as further i-quants move over.
 	// mustBeRaw pins the kinds that have already moved.
-	mustBeRaw := map[kQuantKind]bool{kindIQ4XS: true, kindIQ3XXS: true}
+	mustBeRaw := map[kQuantKind]bool{kindIQ4XS: true, kindIQ3XXS: true, kindIQ1M: true, kindIQ4NL: true}
 	tests := []struct {
 		kind         kQuantKind
 		name         string
@@ -37,6 +37,7 @@ func TestQuantRegistryBuiltinRegistration(t *testing.T) {
 		{kindIQ1S, "IQ1_S", 0, false, iq1sBlockBytes, qkK},
 		{kindIQ2S, "IQ2_S", 0, false, iq2sBlockBytes, qkK},
 		{kindIQ1M, "IQ1_M", 0, false, iq1mBlockBytes, qkK},
+		{kindIQ4NL, "IQ4_NL", 0, false, iq4nlBlockBytes, iq4nlBlockWeights},
 		{kindQ3K, "Q3_K", compute.Q3_K, true, q3kBlockBytes, qkK},
 		{kindIQ3S, "IQ3_S", compute.IQ3_S, false, iq3sBlockBytes, qkK},
 	}
@@ -58,7 +59,7 @@ func TestQuantRegistryBuiltinRegistration(t *testing.T) {
 			t.Errorf("%s: got Dtype %v, want its native raw i-quant dtype", tc.name, desc.Dtype())
 		}
 		if raw {
-			assertRawIQDescriptor(t, tc.name, desc, tc.blockBytes)
+			assertRawIQDescriptor(t, tc.name, desc, tc.blockBytes, tc.blockWeights)
 		} else {
 			if desc.Dtype() != tc.dtype {
 				t.Errorf("%s: got Dtype %v, want %v", tc.name, desc.Dtype(), tc.dtype)
@@ -85,9 +86,11 @@ func TestQuantRegistryBuiltinRegistration(t *testing.T) {
 // assertRawIQDescriptor holds a native raw i-quant descriptor to the 05f contract: it
 // reports its own format's compute raw dtype, stays off the HAL k-quant staging path
 // (dense-seam-only admission), agrees with compute on the block size, and builds a host
-// tensor of that dtype.
-func assertRawIQDescriptor(t *testing.T, name string, desc QuantDescriptor, blockBytes int) {
+// tensor of that dtype. compute carries every raw i-quant as 256-weight super-blocks, so a
+// 32-weight-block kind (IQ4_NL) is compared at 256/blockWeights blocks per super-block.
+func assertRawIQDescriptor(t *testing.T, name string, desc QuantDescriptor, blockBytes, blockWeights int) {
 	t.Helper()
+	blockBytes *= 256 / blockWeights
 	dt := desc.Dtype()
 	if !strings.EqualFold(dt.String(), name) {
 		t.Errorf("%s: raw i-quant Dtype %v is not this kind's own format", name, dt)
@@ -277,10 +280,10 @@ func TestWeightHALKQuantRegistryRefusal(t *testing.T) {
 		halW:    map[string]compute.Tensor{},
 	}
 
-	// IQ1_M stays non-HAL and has no compute raw dtype, so weightHALKQuant must refuse
+	// Q4_0 stays non-HAL and has no compute raw dtype, so weightHALKQuant must refuse
 	// it before staging anything. Guard the precondition so a later format move fails
 	// here loudly rather than silently testing an admitted kind.
-	const unsupported = kindIQ1M
+	const unsupported = kindQ4_0
 	desc, ok := LookupQuantDescriptor(unsupported)
 	if !ok {
 		t.Fatalf("%s descriptor not registered", unsupported)

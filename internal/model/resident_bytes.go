@@ -84,7 +84,7 @@ func (m *Model) PlannedWeightRequants(be compute.Backend) []compute.WeightRequan
 	}
 	rows := map[string]*compute.WeightRequant{}
 	for name, qt := range m.kqw {
-		dt, raw := rawIQDenseHALDtype(qt.kind)
+		dt, raw := rawIQDenseHALDtypeFor(qt)
 		if !raw || isRoutedExpertWeight(name) {
 			continue
 		}

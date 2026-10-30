@@ -100,6 +100,8 @@ func (c *cudaBackend) devRawKQuantWithAllocator(dt Dtype, shape []int, nbytes in
 		bits = 2
 	case Q3_K:
 		bits = 3
+	case IQ1_M:
+		bits = 1
 	case Q5_K:
 		bits = 5
 	case Q6_K:

@@ -412,6 +412,15 @@ i-quant decode of `vec_dot_iq2_xxs_q8_1` and `vec_dot_iq2_xs_q8_1`
 https://github.com/ggml-org/llama.cpp/blob/f7c01c5226cac1de1052c17920ff38cdefea0ae6/ggml/src/ggml-cuda/vecdotq.cuh
 That upstream source uses the same MIT license below.
 
+The CUDA IQ1_M / IQ4_NL GEMV in the same file ports the per-thread decode of
+`dequantize_block_iq1_m` and `dequantize_block_iq4_nl` (`ggml/src/ggml-cuda/convert.cu`,
+decode-identical to `vec_dot_iq1_m_q8_1` / `vec_dot_iq4_nl_q8_1` in
+`ggml/src/ggml-cuda/vecdotq.cuh`), the `iq1m_scale_t` super-scale layout and `IQ1M_DELTA`,
+and the `iq1s_grid_gpu` and `kvalues_iq4nl` tables (`ggml/src/ggml-common.h`) at llama.cpp
+revision `571d0d540df04f25298d0e159e520d9fc62ed121`:
+https://github.com/ggml-org/llama.cpp/blob/571d0d540df04f25298d0e159e520d9fc62ed121/ggml/src/ggml-cuda/convert.cu
+That upstream source uses the same MIT license below.
+
 `fak-dev kernel-oracle` (`cmd/fak-dev/kernel_oracle_parse.go`) runs no ggml code: it
 parses the console perf rows of an externally built `test-backend-ops` binary
 (`print_perf_console`, `test_generic_op` parameter strings and `--test-file`
