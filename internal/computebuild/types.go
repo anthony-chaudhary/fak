@@ -75,6 +75,7 @@ type CUDAConfig struct {
 	EnableV41EngramGate      bool // Explicit SM120 candidate; public capability remains unqualified.
 	EnableV41CompressorPool  bool // Explicit SM120 candidate; public capability remains unqualified.
 	EnableV41Compressor      bool // Explicit SM120 ring/pool candidate; build selection is not qualification.
+	EnableV41Router          bool // Explicit SM120 router/gather selection; not hardware qualification.
 	EnableV41MHC             bool // Explicit witness candidate, not numerical qualification
 	EnableV41SharedAttention bool // Explicit SM120 SIMT candidate; paired library define and Go tag
 	EnableDeepGEMMWKV        bool // Explicit family-SASS WKV candidate, never automatic
