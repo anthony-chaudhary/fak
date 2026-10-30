@@ -28,10 +28,16 @@ func TestResponseFormatCapsUseExactWireKeys(t *testing.T) {
 			}
 		})
 	}
-	// Existing valid boolean and type-less schemas remain provider-owned.
-	for _, schema := range []string{`true`, `{}`} {
-		raw := json.RawMessage(`{"type":"json_schema","json_schema":{"schema":` + schema + `,"name":"answer"}}`)
-		if refusal := validateResponseFormatCarrier(raw, 8, defaultJSONSchemaMaxDepth); refusal != nil {
+	// Existing valid boolean and type-less object schemas remain provider-owned.
+	for _, tc := range []struct {
+		schema   string
+		maxBytes int
+	}{
+		{`true`, 8},
+		{`{"properties":{}}`, 32},
+	} {
+		raw := json.RawMessage(`{"type":"json_schema","json_schema":{"schema":` + tc.schema + `,"name":"answer"}}`)
+		if refusal := validateResponseFormatCarrier(raw, tc.maxBytes, defaultJSONSchemaMaxDepth); refusal != nil {
 			t.Fatalf("bounded exact wire schema refused: %+v", refusal)
 		}
 	}

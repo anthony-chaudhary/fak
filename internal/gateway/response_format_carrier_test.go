@@ -26,12 +26,17 @@ func TestChatResponseFormatCarrierRejectsBeforeDispatch(t *testing.T) {
 		return `{"type":"json_schema","json_schema":{"schema":` + schema + `}}`
 	}
 	sized := func(n int) string {
-		const base = `{"description":""}`
-		return `{"description":"` + strings.Repeat("a", n-len(base)) + `"}`
+		const base = `{"description":"","properties":{}}`
+		return `{"description":"` + strings.Repeat("a", n-len(base)) + `","properties":{}}`
 	}
 	nested := func(depth int) string {
 		// Data keywords count toward resource depth just like schema keywords do.
-		return `{"default":` + strings.Repeat("[", depth-1) + "null" + strings.Repeat("]", depth-1) + `}`
+		// The required properties member sits beside the data brackets without
+		// raising the maximum nesting level.
+		if depth < 2 {
+			return `{"properties":1}`
+		}
+		return `{"default":` + strings.Repeat("[", depth-1) + "null" + strings.Repeat("]", depth-1) + `,"properties":{}}`
 	}
 
 	for _, fanout := range []bool{false, true} {
@@ -89,7 +94,10 @@ func TestChatResponseFormatCarrierRejectsBeforeDispatch(t *testing.T) {
 				{name: "non_object_carrier", format: `{"type":"json_schema","json_schema":[]}`, code: "json_schema_not_object"},
 				{name: "missing_schema", format: `{"type":"json_schema","json_schema":{}}`, code: "json_schema_missing"},
 				{name: "array_schema_stream", format: `{"type":"json_schema","json_schema":{"schema":[]}}`, code: "json_schema_not_object", path: "#", stream: true},
-				{name: "open_object", format: `{"type":"json_schema","json_schema":{"schema":{"type":"object"}}}`},
+				{name: "object_without_properties", format: `{"type":"json_schema","json_schema":{"schema":{"type":"object"}}}`, code: "json_schema_missing_properties", path: "#"},
+				{name: "object_without_properties_stream", format: `{"type":"json_schema","json_schema":{"schema":{"type":"object"}}}`, code: "json_schema_missing_properties", path: "#", stream: true},
+				{name: "properties_case_alias", format: `{"type":"json_schema","json_schema":{"schema":{"type":"object","Properties":{}}}}`, code: "invalid_response_format", path: "#"},
+				{name: "object_with_properties", format: `{"type":"json_schema","json_schema":{"schema":{"type":"object","properties":{"a":{"type":"string"}}}}}`},
 				{name: "boolean_true", format: `{"type":"json_schema","json_schema":{"schema":true}}`},
 				{name: "boolean_false", format: `{"type":"json_schema","json_schema":{"schema":false}}`},
 				{name: "draft_three", format: `{"type":"json_schema","json_schema":{"schema":{"$schema":"http://json-schema.org/draft-03/schema#","properties":{"a":{"type":"string","required":true}}}}}`},
@@ -108,11 +116,11 @@ func TestChatResponseFormatCarrierRejectsBeforeDispatch(t *testing.T) {
 				{name: "override_depth_cap_exceeded", format: format(nested(4)), maxDepth: "3", code: "json_schema_too_deep"},
 				{name: "raised_byte_cap", format: format(sized(defaultJSONSchemaMaxBytes + 1)), maxBytes: strconv.Itoa(defaultJSONSchemaMaxBytes + 1)},
 				{name: "raised_depth_cap", format: format(nested(defaultJSONSchemaMaxDepth + 1)), maxDepth: strconv.Itoa(defaultJSONSchemaMaxDepth + 1)},
-				{name: "escaped_brackets", format: format(`{"description":"[{\\\"}]\\\\"}`), maxDepth: "1"},
+				{name: "escaped_brackets", format: format(`{"description":"[{\\\"}]\\\\","properties":{}}`), maxDepth: "2"},
 				{name: "utf8_bytes", format: format(`{"description":"é"}`), maxBytes: "19", code: "json_schema_too_large"},
 				{name: "invalid_byte_override", format: format(sized(defaultJSONSchemaMaxBytes + 1)), maxBytes: "0", code: "json_schema_too_large"},
 				{name: "invalid_depth_override", format: format(nested(defaultJSONSchemaMaxDepth + 1)), maxDepth: "-1", code: "json_schema_too_deep"},
-				{name: "tools_outside_caps", format: format(`{}`), maxBytes: "64", maxDepth: "3", tools: json.RawMessage(`[{"type":"function","function":{"name":"allow_read","description":"` + strings.Repeat("d", 128) + `","parameters":` + nested(10) + `}}]`)},
+				{name: "tools_outside_caps", format: format(`{"properties":{}}`), maxBytes: "64", maxDepth: "3", tools: json.RawMessage(`[{"type":"function","function":{"name":"allow_read","description":"` + strings.Repeat("d", 128) + `","parameters":` + nested(10) + `}}]`)},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					t.Setenv("FAK_GATEWAY_JSON_SCHEMA_MAX_BYTES", tc.maxBytes)

@@ -19,7 +19,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
-const completionsStructuredResponseFormat = `{"type":"json_schema","json_schema":{"name":"o","schema":{"type":"object"}}}`
+const completionsStructuredResponseFormat = `{"type":"json_schema","json_schema":{"name":"o","schema":{"type":"object","properties":{}}}}`
 
 var completionsStructuredGuided = map[string]string{
 	"guided_json":             `{"type":"object"}`,

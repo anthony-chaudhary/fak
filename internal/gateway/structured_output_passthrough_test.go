@@ -227,6 +227,114 @@ func TestChatProxyOmitsStructuredOutputFieldsWhenAbsent(t *testing.T) {
 	}
 }
 
+// TestChatRejectsMalformedJSONSchema422 pins the TGI front-door validation half
+// (router/src/validation.rs:341-406@b4adbf2, Apache-2.0): a chat request whose
+// response_format.type is json_schema must carry a usable schema or be refused
+// with HTTP 422 and a closed error code BEFORE any upstream call — missing
+// schema, non-object schema, and an object schema without properties all fail
+// closed, while a valid schema and type=json_object still pass through
+// unchanged.
+func TestChatRejectsMalformedJSONSchema422(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterAdjudicator(0, toolAdj{})
+
+	var gotResponseFormat json.RawMessage
+	upstreamHits := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHits++
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read upstream body: %v", err)
+		}
+		var req struct {
+			ResponseFormat json.RawMessage `json:"response_format"`
+		}
+		if err := json.Unmarshal(raw, &req); err != nil {
+			t.Fatalf("decode upstream request: %v\n%s", err, raw)
+		}
+		gotResponseFormat = req.ResponseFormat
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","created":1,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{}}`))
+	}))
+	defer upstream.Close()
+
+	srv, err := New(Config{
+		EngineID: "test",
+		Model:    "m",
+		BaseURL:  upstream.URL + "/v1",
+		Provider: "openai-compatible",
+		VDSO:     true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	validSchema := json.RawMessage(`{"type":"json_schema","json_schema":{"name":"answer","strict":true,"schema":{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}}}`)
+	jsonObjectFormat := json.RawMessage(`{"type":"json_object"}`)
+	for _, tc := range []struct {
+		name   string
+		format json.RawMessage
+		status int
+		code   string
+	}{
+		{name: "missing_schema", format: json.RawMessage(`{"type":"json_schema"}`), status: http.StatusUnprocessableEntity, code: "json_schema_missing"},
+		{name: "non_object_schema", format: json.RawMessage(`{"type":"json_schema","json_schema":{"schema":["a","b"]}}`), status: http.StatusUnprocessableEntity, code: "json_schema_not_object"},
+		{name: "object_without_properties", format: json.RawMessage(`{"type":"json_schema","json_schema":{"name":"answer","schema":{"type":"object"}}}`), status: http.StatusUnprocessableEntity, code: "json_schema_missing_properties"},
+		{name: "valid_schema_passes_through", format: validSchema, status: http.StatusOK},
+		{name: "json_object_passes_through", format: jsonObjectFormat, status: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			beforeHits := upstreamHits
+			body, err := json.Marshal(map[string]any{
+				"model":           "m",
+				"messages":        []map[string]any{{"role": "user", "content": "hi"}},
+				"response_format": tc.format,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			httpResp, err := http.Post(ts.URL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer httpResp.Body.Close()
+			respRaw, _ := io.ReadAll(httpResp.Body)
+			if httpResp.StatusCode != tc.status {
+				t.Fatalf("status = %d, want %d: %s", httpResp.StatusCode, tc.status, respRaw)
+			}
+			if tc.code != "" {
+				var envelope struct {
+					Error struct {
+						Type string `json:"type"`
+						Code string `json:"code"`
+					} `json:"error"`
+				}
+				if err := json.Unmarshal(respRaw, &envelope); err != nil {
+					t.Fatalf("decode refusal: %v: %s", err, respRaw)
+				}
+				if envelope.Error.Code != tc.code || envelope.Error.Type != "invalid_request_error" {
+					t.Fatalf("refusal = %s/%s, want %s/invalid_request_error", envelope.Error.Type, envelope.Error.Code, tc.code)
+				}
+				if upstreamHits != beforeHits {
+					t.Fatalf("malformed carrier dispatched to upstream: hits=%d", upstreamHits-beforeHits)
+				}
+				return
+			}
+			if upstreamHits != beforeHits+1 {
+				t.Fatalf("upstream hits = %d, want 1", upstreamHits-beforeHits)
+			}
+			if !jsonEqual(t, gotResponseFormat, tc.format) {
+				t.Fatalf("response_format forwarded to ride engine = %s\nwant (verbatim) = %s", gotResponseFormat, tc.format)
+			}
+		})
+	}
+}
+
 // jsonEqual reports whether two JSON documents are semantically equal (key order /
 // whitespace insensitive), so a verbatim-forwarding assertion does not pin a
 // re-marshal's incidental key ordering.

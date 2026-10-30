@@ -12,9 +12,10 @@ type responseFormatError struct {
 	code, message, path string
 }
 
-// validateResponseFormatCarrier checks the envelope and schema resource caps.
-// Schema keywords remain the upstream's contract: their meaning differs across
-// JSON Schema drafts. Admitted schemas pass through without rewriting.
+// validateResponseFormatCarrier checks the envelope, the TGI properties
+// precheck, and the schema resource caps. Schema keywords remain the
+// upstream's contract: their meaning differs across JSON Schema drafts.
+// Admitted schemas pass through without rewriting.
 func validateResponseFormatCarrier(raw json.RawMessage, maxBytes, maxDepth int) *responseFormatError {
 	reject := func(code, message, path string) *responseFormatError {
 		return &responseFormatError{code: code, message: message, path: path}
@@ -59,6 +60,19 @@ func validateResponseFormatCarrier(raw json.RawMessage, maxBytes, maxDepth int) 
 	}
 	if schema[0] != '{' && !bytes.Equal(schema, []byte("true")) && !bytes.Equal(schema, []byte("false")) {
 		return reject("json_schema_not_object", "schema must be a JSON object or boolean", "#")
+	}
+	if schema[0] == '{' {
+		// TGI front-door precheck: an object schema must declare properties so the
+		// upstream grammar compiler constrains at least one named member. Ambiguous
+		// spellings or duplicates of the key are refused like other carrier keys;
+		// the value shape stays provider-owned.
+		members, ok := responseFormatMembers(schema, "properties")
+		if !ok {
+			return reject("invalid_response_format", "response_format.json_schema.schema has invalid or ambiguous members", "#")
+		}
+		if _, present := members["properties"]; !present {
+			return reject("json_schema_missing_properties", "response_format.json_schema.schema must declare a 'properties' field when it is an object", "#")
+		}
 	}
 	return nil
 }
@@ -109,9 +123,11 @@ func responseFormatMembers(raw []byte, keys ...string) (map[string]json.RawMessa
 	return members, true
 }
 
-// Structured-output resource caps adapted from PR #13718's TGI-style grammar-input
-// guard (huggingface/text-generation-inference router/src/validation.rs:341-406
-// @b4adbf2, Apache-2.0). Only response_format.json_schema.schema is bounded: its
+// Structured-output resource caps and the object-schema properties precheck,
+// adapted from PR #13718's TGI-style grammar-input guard (huggingface/
+// text-generation-inference router/src/validation.rs:341-406 @b4adbf2,
+// Apache-2.0; validation half only, no grammar compilation). Only
+// response_format.json_schema.schema is bounded: its
 // whitespace-trimmed bytes and all object/array nesting, including data keywords.
 // Tool definitions and other fields keep their existing whole-request limit.
 const (

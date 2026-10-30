@@ -25,9 +25,9 @@ func (*responsesSchemaFanoutPlanner) Model() string { return "test-model" }
 
 // fak-test:runtime fast est=200ms lane=default
 func TestResponsesSchemaRejectedBeforeEPFanout(t *testing.T) {
-	const emptySchema = `{"description":""}`
+	const schemaBase = `{"description":"","properties":{}}`
 	schema := func(size int) string {
-		return `{"description":"` + strings.Repeat("x", size-len(emptySchema)) + `"}`
+		return `{"description":"` + strings.Repeat("x", size-len(schemaBase)) + `","properties":{}}`
 	}
 	for _, tc := range []struct {
 		name, text, code, previous, message string
