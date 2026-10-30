@@ -7660,6 +7660,16 @@
           "category": "incidental",
           "reason": "Existing InKernelBatchReceipt telemetry: cohort-cumulative request session-close accounting observed after joined request completion and captured for this receipt; not live cohort width, a process-global counter, a guaranteed final cohort total, or a distinct drive-session or scheduling concept.",
           "token": "SessionCloses"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private dispatch or optional-capability implementation of the positioned partial-prefill-context and partial-prefill-no-logits-context operations. It forwards the existing request context and preserves the same Session/backend owner; it creates no independent context, session identity, engine, cancellation policy, or scheduler.",
+          "token": "inKernelContextPrefillSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private dispatch or optional-capability implementation of the positioned partial-prefill-context and partial-prefill-no-logits-context operations. It forwards the existing request context and preserves the same Session/backend owner; it creates no independent context, session identity, engine, cancellation policy, or scheduler.",
+          "token": "prefillSessionContext"
         }
       ],
       "exclude": [
@@ -7900,6 +7910,7 @@
         "hasActiveSessions",
         "hashUnit",
         "hedge_loser_slot_released",
+        "inKernelContextPrefillSession",
         "installGuardCodexSessionStartHookAt",
         "kernelSession",
         "ledgerSettledSessions",
@@ -7933,6 +7944,7 @@
         "orderRecords",
         "parseGuardProviderSessionStart",
         "pathwithincodexsessions",
+        "prefillSessionContext",
         "procRmEndSession",
         "procRmStartSession",
         "provider_session_start",
@@ -10296,6 +10308,11 @@
           "category": "incidental",
           "reason": "Internal constructor that folds a phase performance-query observation into the per-kernel timing payload of a Vulkan computetrace record; not a gateway or engine concept.",
           "token": "vulkankerneltimingfrom"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private dispatch or optional-capability implementation of the positioned partial-prefill-context and partial-prefill-no-logits-context operations. It forwards the existing request context and preserves the same Session/backend owner; it creates no independent context, session identity, engine, cancellation policy, or scheduler.",
+          "token": "inKernelContextPrefillSession"
         }
       ],
       "exclude": [
@@ -10417,6 +10434,7 @@
         "inKernelCoalesceContextKey",
         "inKernelCoalesceRequest",
         "inKernelCoalesceResult",
+        "inKernelContextPrefillSession",
         "inKernelDecodeCohortMax",
         "inKernelDecodeIteration",
         "inKernelEngramAttempt",
@@ -13023,6 +13041,31 @@
           "category": "incidental",
           "reason": "Function-local standard-library timeout context for the before-inventory sub-budget; not a new domain context, ownership boundary, or lifecycle abstraction.",
           "token": "beforeCtx"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private dispatch or optional-capability implementation of the positioned partial-prefill-context and partial-prefill-no-logits-context operations. It forwards the existing request context and preserves the same Session/backend owner; it creates no independent context, session identity, engine, cancellation policy, or scheduler.",
+          "token": "inKernelContextPrefillSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private dispatch or optional-capability implementation of the positioned partial-prefill-context and partial-prefill-no-logits-context operations. It forwards the existing request context and preserves the same Session/backend owner; it creates no independent context, session identity, engine, cancellation policy, or scheduler.",
+          "token": "prefillSessionContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private dispatch or optional-capability implementation of the positioned partial-prefill-context and partial-prefill-no-logits-context operations. It forwards the existing request context and preserves the same Session/backend owner; it creates no independent context, session identity, engine, cancellation policy, or scheduler.",
+          "token": "prefillOwnedContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private dispatch or optional-capability implementation of the positioned partial-prefill-context and partial-prefill-no-logits-context operations. It forwards the existing request context and preserves the same Session/backend owner; it creates no independent context, session identity, engine, cancellation policy, or scheduler.",
+          "token": "prefillHALContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private dispatch or optional-capability implementation of the positioned partial-prefill-context and partial-prefill-no-logits-context operations. It forwards the existing request context and preserves the same Session/backend owner; it creates no independent context, session identity, engine, cancellation policy, or scheduler.",
+          "token": "prefillNoLogitsOwnedContext"
         }
       ],
       "exclude": [
@@ -13164,6 +13207,7 @@
         "guardSourceReadRecovery",
         "guardSourceReadRecoverySchema",
         "inKernelCoalesceContextKey",
+        "inKernelContextPrefillSession",
         "inKernelEngramAttemptContextKey",
         "inspectCodexHookProfileContext",
         "laneCtx",
@@ -13193,6 +13237,10 @@
         "postCompactionPrefix",
         "postCtx",
         "preCompactionPrefix",
+        "prefillHALContext",
+        "prefillNoLogitsOwnedContext",
+        "prefillOwnedContext",
+        "prefillSessionContext",
         "probeCtx",
         "providerContext",
         "providerSpanContext",

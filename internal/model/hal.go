@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"os"
@@ -1340,6 +1341,10 @@ func (s *Session) recycleHALToken() {
 }
 
 func (s *Session) prefillHAL(ids []int, wantLogits bool) []float32 {
+	return s.prefillHALContext(nil, ids, wantLogits)
+}
+
+func (s *Session) prefillHALContext(ctx context.Context, ids []int, wantLogits bool) []float32 {
 	s.ensureOpenBackendSession()
 	if len(ids) == 0 {
 		return nil
@@ -1360,8 +1365,17 @@ func (s *Session) prefillHAL(ids []int, wantLogits bool) []float32 {
 	if panel, ok := s.promptPanelFor(ids); ok {
 		return s.prefillHALPanel(panel, ids, wantLogits)
 	}
+	// Sequence/panel operations above keep their own atomic boundary. An EP
+	// frame must also finish on every rank: one caller's context cannot strand
+	// peers inside an announced collective. Only the existing local split-layer
+	// token loop can observe cancellation here, after prior token retirement.
+	_, split := s.validateDenseGPULayers()
+	interruptible := ctx != nil && split && s.M.epCoord == nil && s.M.epRanks <= 1 && !s.M.epRankSet
 	last := len(ids) - 1
 	for i, id := range ids {
+		if interruptible && ctx.Err() != nil {
+			return nil
+		}
 		if i == last && wantLogits {
 			return s.tokenHAL(id, s.halKV.Len())
 		}

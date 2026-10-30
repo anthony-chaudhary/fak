@@ -2057,3 +2057,17 @@ CUDA compressor-pooling pointer quarantine protecting buffers when asynchronous 
 The model-lifetime checkpoint expert page-cache accounting snapshot exposed through MoE residency: seven existing modeled source-read and mapping counters, aggregated once per checkpoint shard with mapped-source coverage.
 
 **Distinct from:** Unlike PromptCacheKey, which routes requests sharing a prompt prefix to an upstream cache node, this value snapshot reports checkpoint expert source-read accounting. It neither routes requests nor measures physical SSD traffic, kernel page residency, GPU execution, or transactional cross-tier totals.
+
+
+### PrefillContext
+
+model.Session.PrefillContext ingests a prompt under the existing request context and one backend execution owner, returning last-token logits only on successful completion. The local partial-offload scalar HAL fallback observes cancellation between completed tokens; other selected operations retain their established boundary.
+
+**Distinct from:** An inference operation consuming an existing context, not requestCtx (an agentbench per-request context value), a new context identity, or a kernel-abort primitive. A cancelled partial session must be retired rather than reused as a completed prompt.
+
+
+### PrefillNoLogitsContext
+
+model.Session.PrefillNoLogitsContext advances the prompt prefix without returning output logits, while preserving the same existing request-context and backend-owner cancellation contract as PrefillContext. Only the local partial-offload scalar HAL token loop may stop between completed tokens.
+
+**Distinct from:** The prefix-only operation, not PrefillContext (which returns the last token distribution). A cancelled prefix is not a completed prompt or reusable snapshot; sequence, panel and EP operations retain their existing atomic boundary.

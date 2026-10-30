@@ -7,7 +7,7 @@
       "kind": "symbol",
       "definition": "The cancellable context scoped to one agentbench inference request, used to stop that request without ending the enclosing benchmark run.",
       "distinction": "A per-request cancellation boundary, not the admitted gateway route binding retrieved from a request context.",
-      "distinct_from": ["gateway-chat-route-context-5633", "read-context-budget-14034"],
+      "distinct_from": ["gateway-chat-route-context-5633", "read-context-budget-14034", "partial-prefill-context"],
       "aliases": [],
       "grounding": "requestCtx",
       "grounding_kind": "symbol",

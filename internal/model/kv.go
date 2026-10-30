@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sync"
@@ -1064,7 +1065,35 @@ func (s *Session) Prefill(ids []int) []float32 {
 	return logits
 }
 
+// PrefillContext preserves Prefill's dispatch and ownership, but allows the
+// partial-offload scalar HAL fallback to stop between completed tokens. Other
+// selected operations finish at their existing boundary before observing ctx.
+// A cancelled call returns no logits; its caller must retire the partial session.
+func (s *Session) PrefillContext(ctx context.Context, ids []int) ([]float32, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	scope := s.beginBackendExecution()
+	complete := false
+	// A returned cancellation is primary over a secondary cleanup panic. Keep
+	// completion-aware unwind so panic(nil) and Goexit are never made successful.
+	defer scope.finishCompleted(&complete)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	logits := s.prefillOwnedContext(ctx, ids)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	complete = true
+	return logits, nil
+}
+
 func (s *Session) prefillOwned(ids []int) []float32 {
+	return s.prefillOwnedContext(nil, ids)
+}
+
+func (s *Session) prefillOwnedContext(ctx context.Context, ids []int) []float32 {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -1126,7 +1155,7 @@ func (s *Session) prefillOwned(ids []int) []float32 {
 		// resident-quant lanes below — else a Q4_K device session prefilled on the CPU cache
 		// (s.Cache) while decoding from the empty device cache (s.halKV) → garbage (#949).
 		s.requirePreNorm("HAL prefill")
-		return s.prefillHAL(ids, true)
+		return s.prefillHALContext(ctx, ids, true)
 	}
 	if s.Q4 {
 		// Resident int4 prefill: the batched Q8 GEMM has no int4 twin yet, so prefill runs
@@ -1212,7 +1241,31 @@ func (s *Session) PrefillNoLogits(ids []int) {
 	complete = true
 }
 
+// PrefillNoLogitsContext is the no-logits form of PrefillContext. Cancellation
+// leaves a completed-token prefix, not a completed prompt or reusable snapshot.
+func (s *Session) PrefillNoLogitsContext(ctx context.Context, ids []int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	scope := s.beginBackendExecution()
+	complete := false
+	defer scope.finishCompleted(&complete)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.prefillNoLogitsOwnedContext(ctx, ids)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	complete = true
+	return nil
+}
+
 func (s *Session) prefillNoLogitsOwned(ids []int) {
+	s.prefillNoLogitsOwnedContext(nil, ids)
+}
+
+func (s *Session) prefillNoLogitsOwnedContext(ctx context.Context, ids []int) {
 	if len(ids) == 0 {
 		return
 	}
@@ -1267,7 +1320,7 @@ func (s *Session) prefillNoLogitsOwned(ids []int) {
 	}
 	if s.Backend != nil {
 		s.requirePreNorm("HAL prefill")
-		s.prefillHAL(ids, false)
+		s.prefillHALContext(ctx, ids, false)
 		return
 	}
 	if s.Q4 {

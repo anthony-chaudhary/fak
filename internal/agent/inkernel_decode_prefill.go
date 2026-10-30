@@ -17,6 +17,27 @@ type inKernelPrefillSession interface {
 	Prefill([]int) []float32
 }
 
+// Context-aware Sessions preserve the selected operation's boundary; this does
+// not rechunk generic forwards or cancel another participant's shared runCtx.
+type inKernelContextPrefillSession interface {
+	PrefillContext(context.Context, []int) ([]float32, error)
+	PrefillNoLogitsContext(context.Context, []int) error
+}
+
+func prefillSessionContext(ctx context.Context, s inKernelPrefillSession, ids []int, wantLogits bool) ([]float32, error) {
+	if contextual, ok := s.(inKernelContextPrefillSession); ok {
+		if wantLogits {
+			return contextual.PrefillContext(ctx, ids)
+		}
+		return nil, contextual.PrefillNoLogitsContext(ctx, ids)
+	}
+	if wantLogits {
+		return s.Prefill(ids), nil
+	}
+	s.PrefillNoLogits(ids)
+	return nil, nil
+}
+
 // prefillDivergentSuffix bounds the temporary prompt panels used by the resident
 // Qwen hybrid Q4_K path and makes each completed panel a cancellation boundary.
 // #9066 proves the append equivalence for the resident CPU route; only the last
@@ -42,7 +63,10 @@ func (p *InKernelPlanner) prefillDivergentSuffix(ctx context.Context, s inKernel
 	chunkTokens := p.effectiveQwenQ4KPrefillChunkTokens()
 	if !p.qwenQ4KPrefillChunkTarget() || len(ids) <= chunkTokens {
 		chunkStart := time.Now()
-		logits := s.Prefill(ids)
+		logits, err := prefillSessionContext(ctx, s, ids, true)
+		if err != nil {
+			return nil, err
+		}
 		enginestep.Default.ObservePrefillChunkContext(ctx, len(ids), time.Since(chunkStart))
 		recordQwen35SequencePrefillRoute(measurement, s, len(ids))
 		if err := ctx.Err(); err != nil {
@@ -53,7 +77,9 @@ func (p *InKernelPlanner) prefillDivergentSuffix(ctx context.Context, s inKernel
 	for len(ids) > chunkTokens {
 		chunk := ids[:chunkTokens]
 		chunkStart := time.Now()
-		s.PrefillNoLogits(chunk)
+		if _, err := prefillSessionContext(ctx, s, chunk, false); err != nil {
+			return nil, err
+		}
 		enginestep.Default.ObservePrefillChunkContext(ctx, len(chunk), time.Since(chunkStart))
 		recordQwen35SequencePrefillRoute(measurement, s, len(chunk))
 		if err := ctx.Err(); err != nil {
@@ -62,7 +88,10 @@ func (p *InKernelPlanner) prefillDivergentSuffix(ctx context.Context, s inKernel
 		ids = ids[chunkTokens:]
 	}
 	chunkStart := time.Now()
-	logits := s.Prefill(ids)
+	logits, err := prefillSessionContext(ctx, s, ids, true)
+	if err != nil {
+		return nil, err
+	}
 	enginestep.Default.ObservePrefillChunkContext(ctx, len(ids), time.Since(chunkStart))
 	recordQwen35SequencePrefillRoute(measurement, s, len(ids))
 	if err := ctx.Err(); err != nil {
