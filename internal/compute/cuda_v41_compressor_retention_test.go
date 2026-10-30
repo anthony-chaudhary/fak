@@ -23,6 +23,9 @@ func TestCUDAV41CompressorFailedDrainRetainsAllocations(t *testing.T) {
 	compressor := readCUDASource(t, "cuda/v41_compressor.cuh")
 	program := cudaV41CompressorRetentionHarness +
 		"\nstatic int v41c_drain(int status) " + cudaFunctionBody(t, compressor, "v41c_drain") +
+		"\nstatic bool fcuda_pool_may_release(void) " + cudaFunctionBody(t, memory, "fcuda_pool_may_release") +
+		"\nstatic void fcuda_pool_evict_to_cap(void) " + cudaFunctionBody(t, memory, "fcuda_pool_evict_to_cap") +
+		"\nstatic void fcuda_pool_put(void *d, size_t bytes) " + cudaFunctionBody(t, memory, "fcuda_pool_put") +
 		"\nextern \"C\" void fcuda_free(void *d) " + cudaFunctionBody(t, memory, "fcuda_free") +
 		"\nextern \"C\" void fcuda_free_on(int device, void *d) " + cudaFunctionBody(t, services, "fcuda_free_on") +
 		"\nextern \"C\" int fcuda_discard_unsubmitted(void *d, size_t expected_bytes) " + cudaFunctionBody(t, memory, "fcuda_discard_unsubmitted") +
@@ -64,6 +67,11 @@ static int frees = 0, untracks = 0, retags = 0, evictions = 0, scopes = 0, syncs
 static std::map<void *, size_t> g_live, g_managed_live, g_panel_live;
 static std::map<size_t, std::vector<void *>> g_pool, g_panel_pool;
 static size_t g_panel_live_bytes = 0, g_panel_cached_bytes = 0;
+static size_t g_pool_bytes = 0, g_pool_peak_bytes = 0, g_pool_cap_bytes = (size_t)512 << 20;
+static unsigned long long g_pool_clock = 0, g_pool_evictions = 0;
+static std::map<size_t, unsigned long long> g_pool_touch;
+static bool g_pool_graph_deep = false;
+static bool v41_candidates_stream_uncertain(void) { return g_v41_compressor_uncertain || g_cuda_cleanup_status != 0; }
 static cudaError_t cudaStreamSynchronize(int) { ++syncs; return sync_status; }
 static cudaError_t cudaFree(void *) { ++frees; return cudaSuccess; }
 static void fak_alloc_untrack(void *) { ++untracks; }

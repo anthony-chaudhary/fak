@@ -98,6 +98,11 @@ size_t fcuda_panel_release(void);
 int fcuda_panel_release_checked(size_t *live);
 void fcuda_pool_stats(size_t *pooledBytes, size_t *buckets, size_t *largestBucket,
                       size_t *panelCachedBytes, size_t *panelLive, size_t *panelPeakBytes);
+/* Idle decode-pool byte cap: set it (evicting down to it when legal) and read the cap,
+ * pooled bytes, their peak, and hit/miss/eviction counts. */
+void fcuda_pool_set_cap(size_t cap_bytes);
+void fcuda_pool_cap_stats(size_t *cap, size_t *bytes, size_t *peak, unsigned long long *hits,
+                          unsigned long long *misses, unsigned long long *evictions);
 /* fcuda_panel_peak_reset restarts the peak of panel bytes held plus cached. */
 void fcuda_panel_peak_reset(void);
 void fcuda_h2d(void *d, const void *h, size_t bytes);

@@ -1,6 +1,13 @@
 #include <cuda.h>
 
 #include "alloc_status.h"
+// Idle device pool cap state; see fcuda_pool_evict_to_cap.
+static size_t g_pool_bytes = 0, g_pool_peak_bytes = 0;
+static size_t g_pool_cap_bytes = (size_t)512 << 20;
+static unsigned long long g_pool_clock = 0, g_pool_hits = 0, g_pool_misses = 0, g_pool_evictions = 0;
+static std::unordered_map<size_t, unsigned long long> g_pool_touch; // bucket -> last push/pop tick
+static bool g_pool_graph_deep = false;
+static size_t fcuda_pool_default_cap(size_t total_mem);
 extern "C" int fcuda_init(char *name, int namelen, int *sm, size_t *total_mem) {
   int n = 0;
   if (cudaGetDeviceCount(&n) != cudaSuccess || n == 0) return 1;
@@ -10,6 +17,7 @@ extern "C" int fcuda_init(char *name, int namelen, int *sm, size_t *total_mem) {
   if (name && namelen > 0) { strncpy(name, p.name, namelen - 1); name[namelen - 1] = 0; }
   if (sm) *sm = p.major * 10 + p.minor;
   if (total_mem) *total_mem = p.totalGlobalMem;
+  g_pool_cap_bytes = fcuda_pool_default_cap(p.totalGlobalMem);
   if (!g_blas) { if (cublasCreate(&g_blas) != CUBLAS_STATUS_SUCCESS) return 4; }
   cublasSetPointerMode(g_blas, CUBLAS_POINTER_MODE_HOST);
   if (!g_stream) CK(cudaStreamCreate(&g_stream));
@@ -72,6 +80,105 @@ extern "C" int fcuda_driver_get_version(int *version) {
   return (int)cuDriverGetVersion(version);
 }
 
+// Idle device pool byte cap. g_pool used to retain every freed exact-size buffer forever, so
+// one-off sizes (prefill transients, per-request KV) accumulated across requests (Raider
+// Qwen3.8-27B: 240.7 -> 1619.3 MiB idle_pool over three requests). g_pool_bytes is the sum
+// of every pooled buffer; a free that pushes it over g_pool_cap_bytes cudaFree's the
+// least-recently-touched buckets (oldest buffer first) until it fits. Eviction is skipped
+// while a capture is open (cudaFree is illegal there), once graph prewarm has deepened the
+// pool on purpose, and while the stream is uncertain (retain, as panel release does).
+// (State is declared at the top of this file, before fcuda_init sets the cap.)
+
+static bool fcuda_pool_may_release(void) {
+  return !g_capture_open && !g_pool_graph_deep && g_cuda_cleanup_status == 0 &&
+         !v41_candidates_stream_uncertain();
+}
+
+static void fcuda_pool_evict_to_cap(void) {
+  if (!fcuda_pool_may_release()) return;
+  while (g_pool_bytes > g_pool_cap_bytes) {
+    auto victim = g_pool.end();
+    unsigned long long oldest = ~0ULL;
+    for (auto it = g_pool.begin(); it != g_pool.end(); ++it) {
+      if (it->second.empty()) continue;
+      unsigned long long tick = g_pool_touch[it->first];
+      if (tick < oldest) { oldest = tick; victim = it; }
+    }
+    if (victim == g_pool.end()) return;
+    size_t bytes = victim->first;
+    auto &bucket = victim->second;
+    while (!bucket.empty() && g_pool_bytes > g_pool_cap_bytes) {
+      void *p = bucket.front(); // pushes append, hits pop the back: the front is the oldest
+      cudaError_t status = cudaFree(p);
+      if (status != cudaSuccess) {
+        g_cuda_cleanup_status = (int)status;
+        CK(status);
+        return;
+      }
+      fak_alloc_untrack(p);
+      bucket.erase(bucket.begin());
+      g_pool_bytes -= bytes;
+      ++g_pool_evictions;
+    }
+    if (bucket.empty()) {
+      g_pool_touch.erase(bytes);
+      g_pool.erase(victim);
+    }
+  }
+}
+
+// Return a released g_live buffer to the idle pool, then restore the cap. A buffer larger
+// than the whole cap is released at once instead of evicting every warm bucket for it.
+static void fcuda_pool_put(void *d, size_t bytes) {
+  if (bytes > g_pool_cap_bytes && fcuda_pool_may_release()) {
+    cudaError_t status = cudaFree(d);
+    if (status == cudaSuccess) {
+      fak_alloc_untrack(d);
+      ++g_pool_evictions;
+      return;
+    }
+    g_cuda_cleanup_status = (int)status;
+    CK(status);
+  }
+  fak_alloc_retag(d, FAK_ALLOC_IDLE_POOL, FAK_ALLOC_SITE("device-pool"));
+  g_pool[bytes].push_back(d); // return to the pool for reuse, don't cudaFree
+  g_pool_touch[bytes] = ++g_pool_clock;
+  g_pool_bytes += bytes;
+  fcuda_pool_evict_to_cap();
+  if (g_pool_bytes > g_pool_peak_bytes) g_pool_peak_bytes = g_pool_bytes; // after eviction: the held peak
+}
+
+// fcuda_pool_set_cap sets the idle-pool byte cap and evicts down to it now (when legal).
+extern "C" void fcuda_pool_set_cap(size_t cap_bytes) {
+  g_pool_cap_bytes = cap_bytes;
+  fcuda_pool_evict_to_cap();
+}
+
+// fcuda_pool_default_cap is min(512 MiB, 2% of device memory); FAK_CUDA_IDLE_POOL_CAP_MIB
+// (a non-negative integer, 0 = retain nothing) overrides it.
+static size_t fcuda_pool_default_cap(size_t total_mem) {
+  size_t cap = total_mem / 50;
+  if (cap == 0 || cap > ((size_t)512 << 20)) cap = (size_t)512 << 20;
+  const char *env = getenv("FAK_CUDA_IDLE_POOL_CAP_MIB");
+  if (env && *env) {
+    char *end = nullptr;
+    unsigned long long mib = strtoull(env, &end, 10);
+    if (end && *end == 0 && env[0] != '-') cap = (size_t)mib << 20;
+  }
+  return cap;
+}
+
+// fcuda_pool_cap_stats reports the cap, pooled bytes now, their peak, and hit/miss/eviction counts.
+extern "C" void fcuda_pool_cap_stats(size_t *cap, size_t *bytes, size_t *peak, unsigned long long *hits,
+                                     unsigned long long *misses, unsigned long long *evictions) {
+  if (cap) *cap = g_pool_cap_bytes;
+  if (bytes) *bytes = g_pool_bytes;
+  if (peak) *peak = g_pool_peak_bytes;
+  if (hits) *hits = g_pool_hits;
+  if (misses) *misses = g_pool_misses;
+  if (evictions) *evictions = g_pool_evictions;
+}
+
 extern "C" void *fcuda_malloc_tagged(size_t bytes, int cls, int site) {
 #ifdef FAK_CUDA_V41_CHECKED_STREAM
   if (v41_candidates_stream_uncertain()) return nullptr;
@@ -83,8 +190,12 @@ extern "C" void *fcuda_malloc_tagged(size_t bytes, int cls, int site) {
   if (it != g_pool.end() && !it->second.empty()) {
     d = it->second.back();
     it->second.pop_back();
+    g_pool_bytes -= bytes;
+    g_pool_touch[bytes] = ++g_pool_clock;
+    ++g_pool_hits;
     fak_alloc_retag(d, cls, site);
   } else {
+    ++g_pool_misses;
     if (g_capture_open) {
       // #969: a device alloc on the captured decode path is the exact bug this guard exists to
       // kill — CUDA forbids cudaMalloc between BeginCapture and EndCapture, so it would crash the
@@ -220,9 +331,9 @@ extern "C" void fcuda_free(void *d) {
   }
   auto it = g_live.find(d);
   if (it != g_live.end()) {
-    fak_alloc_retag(d, FAK_ALLOC_IDLE_POOL, FAK_ALLOC_SITE("device-pool"));
-    g_pool[it->second].push_back(d); // return to the pool for reuse, don't cudaFree
+    size_t bytes = it->second;
     g_live.erase(it);
+    fcuda_pool_put(d, bytes);
   } else {
 #if defined(FAK_CUDA_V41_TAIL_ROPE) && defined(FAK_CUDA_V41_TAIL_ROPE_TEST)
     ++g_v41_rope_test_free_attempts;
@@ -431,8 +542,12 @@ extern "C" void fcuda_graph_prewarm(int extra) {
       }
       fak_alloc_track(d, FAK_ALLOC_GRAPH_POOL, FAK_ALLOC_DEVICE_LOCAL, FAK_ALLOC_SITE("graph-prewarm"), bytes);
       bucket.push_back(d);
+      g_pool_bytes += bytes;
     }
   }
+  // The captured forward needs these spares; a cap eviction would turn them into capture misses.
+  g_pool_graph_deep = true;
+  if (g_pool_bytes > g_pool_peak_bytes) g_pool_peak_bytes = g_pool_bytes;
 }
 
 extern "C" void fcuda_trim_pool_large(size_t max_keep_bytes) {
@@ -450,7 +565,9 @@ extern "C" void fcuda_trim_pool_large(size_t max_keep_bytes) {
         }
         fak_alloc_untrack(p);
         bucket.pop_back();
+        g_pool_bytes -= it->first;
       }
+      g_pool_touch.erase(it->first);
       it = g_pool.erase(it);
     } else {
       ++it;
