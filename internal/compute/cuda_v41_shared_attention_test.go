@@ -56,6 +56,40 @@ func TestCUDAV41SharedAttentionMatchesFlashMLAReference(t *testing.T) {
 	}
 }
 
+// Prefill runs one shared-attention call per query position, so the prefill
+// shapes are long selected-row counts (R up to 8192) and a run of consecutive
+// positions whose row count grows by one, each pinned like the decode table.
+// fak-test:runtime integration est=30s lane=optin
+func TestCUDAV41SharedAttentionPrefillShapes(t *testing.T) {
+	be := cudaGDNBackend(t)
+	const bound = 4e-6
+	check := func(t *testing.T, rows, heads, dim int, seed int64) {
+		t.Helper()
+		qv, kvv, sinkv := v41SparseMLAInputs(seed, rows, heads, dim)
+		got, run := cudaV41SharedAttentionCase(t, be, qv, kvv, sinkv, rows, heads, dim, true, 0)
+		scale := float32(1 / math.Sqrt(float64(dim)))
+		ref, err := v41SparseMLADecodeReference(qv, kvv, sinkv, rows, heads, dim, scale, true,
+			v41SparseMLADecodeOptions{TileRows: run.Tile, Splits: run.Splits})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if diff := v41SparseMLAMaxDiff(got, ref.Out); diff > bound {
+			t.Fatalf("rows=%d tile=%d splits=%d max |cuda-reference| = %g, bound %g", rows, run.Tile, run.Splits, diff, bound)
+		}
+		if diff := v41SparseMLAMaxDiff(got, v41SharedAttentionFloat64Oracle(qv, kvv, sinkv, heads, dim, scale)); diff > bound {
+			t.Fatalf("rows=%d tile=%d splits=%d max |cuda-binary64| = %g, bound %g", rows, run.Tile, run.Splits, diff, bound)
+		}
+	}
+	for _, rows := range []int{2048, 4096, 8192} {
+		t.Run(fmt.Sprintf("r%d_h64_d512", rows), func(t *testing.T) { check(t, rows, 64, 512, int64(rows)) })
+	}
+	t.Run("positions_1_to_48_h8_d512", func(t *testing.T) {
+		for rows := 1; rows <= 48; rows++ {
+			check(t, rows, 8, 512, int64(9000+rows))
+		}
+	})
+}
+
 // A finite input whose scaled score overflows must surface the typed score
 // producer with its gathered slot, and publish no output.
 // fak-test:runtime integration est=1s lane=optin

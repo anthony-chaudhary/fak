@@ -412,6 +412,15 @@ i-quant decode of `vec_dot_iq2_xxs_q8_1` and `vec_dot_iq2_xs_q8_1`
 https://github.com/ggml-org/llama.cpp/blob/f7c01c5226cac1de1052c17920ff38cdefea0ae6/ggml/src/ggml-cuda/vecdotq.cuh
 That upstream source uses the same MIT license below.
 
+The CUDA IQ1_M / IQ4_NL GEMV in the same file ports the per-thread decode of
+`dequantize_block_iq1_m` and `dequantize_block_iq4_nl` (`ggml/src/ggml-cuda/convert.cu`,
+decode-identical to `vec_dot_iq1_m_q8_1` / `vec_dot_iq4_nl_q8_1` in
+`ggml/src/ggml-cuda/vecdotq.cuh`), the `iq1m_scale_t` super-scale layout and `IQ1M_DELTA`,
+and the `iq1s_grid_gpu` and `kvalues_iq4nl` tables (`ggml/src/ggml-common.h`) at llama.cpp
+revision `571d0d540df04f25298d0e159e520d9fc62ed121`:
+https://github.com/ggml-org/llama.cpp/blob/571d0d540df04f25298d0e159e520d9fc62ed121/ggml/src/ggml-cuda/convert.cu
+That upstream source uses the same MIT license below.
+
 `fak-dev kernel-oracle` (`cmd/fak-dev/kernel_oracle_parse.go`) runs no ggml code: it
 parses the console perf rows of an externally built `test-backend-ops` binary
 (`print_perf_console`, `test_generic_op` parameter strings and `--test-file`
@@ -552,7 +561,13 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## antirez/ds4 fused routed-FFN kernels
+## antirez/ds4 (DwarfStar) V4 Flash CUDA kernels
+
+Pinned revision: `80ebbc396aee40eedc1d829222f3362d10fa4c6c` (MIT); the license text below is the
+upstream `LICENSE` at that revision. The routed-FFN adaptation predates the pin and cites the
+revision it was read at.
+
+### Fused routed-FFN kernels
 
 The V4.1 fused routed-FFN kernels `internal/compute/shaders/v41_routed_gate_up_swiglu_id.comp`
 and `internal/compute/shaders/v41_routed_down_sum.comp`, the dispatch entrypoints in
@@ -573,12 +588,28 @@ per-row accumulation order are the project's own `v41_q2k_matvec_id.comp` / `v41
 term for term so the fused path is ULP- or bit-parity with the unfused id path rather than a
 new arithmetic contract. The fused gate/up kernel keeps the id kernel's per-superblock FMA
 association; the down/sum epilogue reproduces the id down + BF16 publication + sum chain
-bitwise. The ds4 MIT copyright and permission notice follows:
+bitwise.
+
+### Compressor ring and gated pool
+
+`internal/compute/cuda/v41_compressor.cuh` ports `compressor_store_kernel` (`ds4_cuda.cu:5784`) and
+`compressor_update_pool_kernel` (`ds4_cuda.cu:5904`) at the pinned revision; `internal/compute/cuda_v41_compressor.go`
+is the thin adapter behind `V41CompressorRingBackend` / `V41CompressorPoolBackend`.
+https://github.com/antirez/ds4/blob/80ebbc396aee40eedc1d829222f3362d10fa4c6c/ds4_cuda.cu
+
+Changed for Fak: one token per store into an explicit ring slot with the APE add and ratio-4
+overlap row offset left to the caller; only the generic pooling branch is kept, with ds4's
+128-entry local candidate arrays replaced by direct strided reads of the same values in the same
+order (no rounded operation changes); a separate per-dimension non-finite status post-pass.
+The pooling arithmetic (`expf`, `den += w`, `acc += kv * w`, `acc / den`) is upstream's.
+
+The ds4 MIT copyright and permission notice follows:
 
 ```text
 MIT License
 
-Copyright (c) 2025-2026 antirez
+Copyright (c) 2026 The ds4.c authors
+Copyright (c) 2023-2026 The ggml authors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -598,6 +629,24 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## antirez/ds4 V4.1 router top-k (CUDA)
+
+`internal/compute/cuda_v41_router.cu` (`k_v41_router_argmax_topk`, `fak_v41_router_topk_f32`) and
+its Go binding `internal/compute/cuda_v41_router.go` adapt `router_select_warp_topk_kernel` and
+`router_select_kernel` from `ds4_cuda.cu` at revision
+`80ebbc396aee40eedc1d829222f3362d10fa4c6c` (MIT, The ds4.c authors):
+https://github.com/antirez/ds4/blob/80ebbc396aee40eedc1d829222f3362d10fa4c6c/ds4_cuda.cu
+
+Kept from upstream: one warp per token row with four rows per block, k rounds of a
+`__shfl_xor_sync` argmax that prefers the lower expert on equal values, and the hash mode that
+takes a row's experts from the token-to-expert table instead of selecting them. Changed for Fak:
+expert count, k (up to 8) and route scale are parameters instead of 256/6/1.5; each lane keeps
+an insertion-ordered top-k over a strided expert subset so the shuffle rounds merge lane heads;
+the score is the project's `v41_router_topk.comp` sqrt(softplus) formula, normalization is the
+in-order F32 sum (+1e-20 on the full geometry) instead of a 2^-14 floor, and per-row fault
+records follow the existing `V41RouterTopKBackend` contract. The ds4 copyright and permission
+notice is reproduced in the section above.
 
 ## DeepSeek V4.1 DSpark residency port study
 
@@ -1038,6 +1087,23 @@ or sample broadcast; the second row of a two-row block clamps its weight read; t
 is a persistent buffer. No upstream runtime is included. The upstream license is the MIT
 License reproduced under "llama.cpp Q4_K MMQ prompt-panel GEMM" above
 (Copyright (c) 2023-2026 The ggml authors).
+
+## llama.cpp Q3_K MMVQ decode GEMV
+
+The resident CUDA Q3_K matrix multiply, `internal/compute/cuda/q3k_mmvq.cuh`, adapts the
+`block_q3_K` layout (`ggml/src/ggml-common.h`), `get_int_b2` / `get_int_b4`,
+`vec_dot_q3_K_q8_1_impl_mmvq` and `vec_dot_q3_K_q8_1` (`ggml/src/ggml-cuda/vecdotq.cuh`), the
+Q3_K instantiation of `mul_mat_vec_q` with its NVIDIA generic parameter rows (`mmvq.cu`) and
+`dequantize_block_q3_K` with its 64-thread launcher (`convert.cu`), at llama.cpp revision
+`571d0d540df04f25298d0e159e520d9fc62ed121`:
+https://github.com/ggml-org/llama.cpp/tree/571d0d540df04f25298d0e159e520d9fc62ed121/ggml/src/ggml-cuda
+
+Changed for Fak: only Q3_K, f32 dequant output (prompt panels of 128+ rows) and one to three
+activation columns per MMVQ launch (the opt-in decode arm); no fusion, MoE ids, channel or
+sample broadcast; the second row of a two-row block clamps its weight read; the q8_1 scratch is a
+persistent buffer, and the q8_1 quantizer is the one already ported for Q4_K. No upstream runtime
+is included. The upstream license is the MIT License reproduced under "llama.cpp Q4_K MMQ
+prompt-panel GEMM" above (Copyright (c) 2023-2026 The ggml authors).
 
 ## NVIDIA cuBLASLt FP8 sample
 

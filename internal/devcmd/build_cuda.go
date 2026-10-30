@@ -74,6 +74,8 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 	routedSwiGLU := fs.Bool("v41-routed-swiglu", false, "compile explicit SM120 V4.1 routed-SwiGLU candidate; public capability remains unqualified")
 	engramGate := fs.Bool("v41-engram-gate", false, "compile explicit SM120 V4.1 Engram-gate candidate; public capability remains unqualified")
 	compressorPool := fs.Bool("v41-compressor-pool", false, "compile explicit SM120 V4.1 compressor-pool candidate; public capability remains unqualified")
+	compressor := fs.Bool("v41-compressor", false, "compile explicit SM120 V4.1 compressor ring/pool candidate; excludes --v41-compressor-pool; build selection is not hardware qualification")
+	router := fs.Bool("v41-router", false, "select explicit SM120 V4.1 router/hash/gate/gather Go binding; native source always compiled; build selection is not hardware qualification")
 	mhc := fs.Bool("v41-mhc", false, "compile explicit SM120 V4.1 mHC witness candidate; public capability remains unqualified")
 	sharedAttention := fs.Bool("v41-shared-attention", false, "compile explicit SM120 V4.1 shared-attention candidate (paired CUDA define and Go tag; not full-model qualification)")
 	nccl := fs.Bool("nccl", os.Getenv("FAK_CUDA_NCCL") == "1", "compile with NCCL collectives enabled (-tags cuda,nccl)")
@@ -124,6 +126,10 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 		if err == flag.ErrHelp {
 			return 0
 		}
+		return 2
+	}
+	if *compressor && *compressorPool {
+		fmt.Fprintln(stderr, "build-cuda: --v41-compressor and --v41-compressor-pool are mutually exclusive")
 		return 2
 	}
 
@@ -182,6 +188,8 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 		EnableV41RoutedSwiGLU:    *routedSwiGLU,
 		EnableV41EngramGate:      *engramGate,
 		EnableV41CompressorPool:  *compressorPool,
+		EnableV41Compressor:      *compressor,
+		EnableV41Router:          *router,
 		EnableV41MHC:             *mhc,
 	}
 
@@ -435,6 +443,12 @@ func runCUDABuildAcceptance(stdout, stderr io.Writer, cfg *computebuild.CUDAConf
 	}
 	if cfg.EnableV41CompressorPool {
 		tags += ",fak_cuda_v41_compressor_pool"
+	}
+	if cfg.EnableV41Compressor {
+		tags += ",fak_cuda_v41_compressor"
+	}
+	if cfg.EnableV41Router {
+		tags += ",fak_cuda_v41_router"
 	}
 	if cfg.EnableV41MHC {
 		tags += ",fak_cuda_v41_mhc"

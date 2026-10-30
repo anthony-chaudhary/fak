@@ -113,7 +113,10 @@ func (m *Model) v41Layer(l int, tokens []int, x [][]float32, streams [][][]float
 	if sparse != nil {
 		attnProjectionInput, err = m.v41SparsePrefillContract(sparse, l, seq, src, qkv, indexList, sink)
 	} else {
-		attnProjectionInput, err = m.v41LayerAttentionContract(l, seq, nH, hd, src, qkv, indexList, sink, st, scratch)
+		// Full multi-row QKV publication owns cap-bounded query rows. No later
+		// stage reads those queries, so each completed contraction can reuse its
+		// row unless the selected attention callback may retain the input.
+		attnProjectionInput, err = m.v41LayerAttentionContractWithQueryScratch(l, seq, nH, hd, src, qkv, indexList, sink, st, scratch, full && seq > 1)
 	}
 	if err != nil {
 		return err
@@ -827,6 +830,13 @@ func (m *Model) v41LayerPublishAttentionState(l, seq, hd int, src v41LayerSource
 // v41LayerAttentionContract runs the sparse sink contraction per position and
 // returns the rotated attention output rows awaiting the output projection.
 func (m *Model) v41LayerAttentionContract(l, seq, nH, hd int, src v41LayerSources, qkv v41LayerQKV, indexList []int32, sink []float32, st *v41ForwardState, scratch *v41ProjScratch) ([][]float32, error) {
+	return m.v41LayerAttentionContractWithQueryScratch(l, seq, nH, hd, src, qkv, indexList, sink, st, scratch, false)
+}
+
+// ownedQueries is granted only by the full cold-layer composer after fresh QKV
+// publication. Direct callers keep the borrowed contract above. Reuse changes
+// host retention, not attention arithmetic, callback order or device admission.
+func (m *Model) v41LayerAttentionContractWithQueryScratch(l, seq, nH, hd int, src v41LayerSources, qkv v41LayerQKV, indexList []int32, sink []float32, st *v41ForwardState, scratch *v41ProjScratch, ownedQueries bool) ([][]float32, error) {
 	cfg := m.Cfg
 	plan := src.plan
 	sharedKV := src.sharedKV
@@ -870,8 +880,10 @@ func (m *Model) v41LayerAttentionContract(l, seq, nH, hd int, src v41LayerSource
 			}
 			proof := coldProof.at(t, cfg.windowForLayer(l))
 			attentionOpened := m.v41NowNanos()
+			binding := scratch.sharedAttentionBinding
+			reuseQuery := ownedQueries && v41ColdAttentionCopiesQuery(binding)
 			o, err := v41CombinedAttentionValidated(l, t, plan.kvGroupSize(cfg), nH, hd, qkv.qHeads[t], sink, window, sharedKV, ids, scale,
-				v41ColdAttentionResidentView(coldAttentionOwner, l, t, len(window), len(sharedKV)), scratch.sharedAttentionFunc(), proof, &validated)
+				v41ColdAttentionResidentView(coldAttentionOwner, l, t, len(window), len(sharedKV)), binding.attentionFunc(), proof, &validated)
 			m.v41NoteAttentionContraction(attentionOpened)
 			if proof != nil && !proof.used {
 				coldProof = nil
@@ -883,7 +895,7 @@ func (m *Model) v41LayerAttentionContract(l, seq, nH, hd int, src v41LayerSource
 			if err != nil {
 				return nil, err
 			}
-			attnProjectionInput[t] = o
+			attnProjectionInput[t] = v41ColdAttentionRetainOutput(qkv.qHeads[t], o, reuseQuery)
 			continue
 		}
 		// #13303: the plain layer's visible keys are its CONFIGURED causal
@@ -904,14 +916,18 @@ func (m *Model) v41LayerAttentionContract(l, seq, nH, hd int, src v41LayerSource
 		var attentionOpened int64
 		var err error
 		host := false
+		reuseQuery := false
 		if scratch.sharedAttentionFunc() == nil {
 			o, attentionOpened, host, err = m.v41ColdPlainHostAttention(qkv.qHeads[t], sink, qkv.kvRows, keys, idx, opt)
+			reuseQuery = ownedQueries && host
 		}
 		if !host {
 			flatKV, borrowedWindow := v41ColdPlainAttentionInput(qkv.qHeads[t], sink, qkv.kvRows, keys, idx, opt, coldAttentionOwner, scratch.sharedAttentionFunc())
 			attentionOpened = m.v41NowNanos()
+			binding := scratch.sharedAttentionBinding
+			reuseQuery = ownedQueries && v41ColdAttentionCopiesQuery(binding)
 			o, err = v41ColdPlainAttentionSink(l, qkv.qHeads[t], flatKV, sink, borrowedWindow, idx, opt,
-				v41ColdAttentionResidentView(coldAttentionOwner, l, t, rows, 0), scratch.sharedAttentionFunc())
+				v41ColdAttentionResidentView(coldAttentionOwner, l, t, rows, 0), binding.attentionFunc())
 		}
 		m.v41NoteAttentionContraction(attentionOpened)
 		if err != nil {
@@ -921,9 +937,30 @@ func (m *Model) v41LayerAttentionContract(l, seq, nH, hd int, src v41LayerSource
 		if err != nil {
 			return nil, err
 		}
-		attnProjectionInput[t] = o
+		attnProjectionInput[t] = v41ColdAttentionRetainOutput(qkv.qHeads[t], o, reuseQuery)
 	}
 	return attnProjectionInput, nil
+}
+
+// Capture the binding after the clock hook and before the actual dispatch. The
+// canonical core snapshots request.q in v41PrepareSharedAttentionRows before
+// backend calls; a nil binding uses the synchronous host contraction. Ordinary
+// callbacks may retain Q, even if they restore a canonical binding before return.
+// Immutable native provenance, not function identity or a post-call check,
+// distinguishes those routes. This grants no validation or device-status bypass.
+func v41ColdAttentionCopiesQuery(binding *v41SharedAttentionBinding) bool {
+	return binding.attentionFunc() == nil || binding.native.core != nil
+}
+
+// Only a successful inverse-RoPE publication reaches this point. Keep failed
+// and unvisited query rows intact; copy the already-published values without
+// modifying callback output or any later row in the packed query allocation.
+func v41ColdAttentionRetainOutput(query, output []float32, owned bool) []float32 {
+	if !owned || len(query) == 0 || len(query) != len(output) || cap(query) != len(query) {
+		return output
+	}
+	copy(query, output)
+	return query
 }
 
 // v41LayerProjectAttentionOutput applies the grouped output projection,

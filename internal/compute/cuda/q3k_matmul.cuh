@@ -76,8 +76,9 @@ __global__ void k_q3k_panel(const uint8_t *W, const float *X, float *Y,
     }
 }
 
-extern "C" int fcuda_q3k_matmul_f32(const uint8_t *W, const float *X, float *Y,
-                                   int out, int in, int P) {
+// The f32 arm of fcuda_q3k_matmul_f32 (cuda/q3k_mmvq.cuh dispatches): decode, panels below 128.
+static int fcuda_q3k_panel_f32(const uint8_t *W, const float *X, float *Y,
+                               int out, int in, int P) {
     if (!W || !X || !Y || out <= 0 || in <= 0 || P <= 0 || in % 256 != 0)
         return (int)cudaErrorInvalidValue;
     const unsigned int tile = P >= 4 ? 4u : 1u;

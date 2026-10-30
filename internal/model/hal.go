@@ -371,7 +371,7 @@ func (s *Session) useHALKQuantWeight(qt *kQuantTensor) bool {
 	if !s.useHALKQuantWeights() || qt == nil {
 		return false
 	}
-	if dt, ok := rawIQDenseHALDtype(qt.kind); ok {
+	if dt, ok := rawIQDenseHALDtypeFor(qt); ok {
 		// Native i-quants (05f) stage only on a device backend that admits the raw dtype.
 		return s.Backend.Caps().DeviceMemory && compute.BackendSupportsDeviceWeightDtype(s.Backend, dt)
 	}
@@ -750,7 +750,7 @@ func (s *Session) matWeightHAL(name string) compute.Tensor {
 		}
 	}
 	if qt, ok := s.M.kqw[name]; ok {
-		if _, raw := rawIQDenseHALDtype(qt.kind); raw {
+		if _, raw := rawIQDenseHALDtypeFor(qt); raw {
 			return s.weightHALRawIQExpanded(name, qt)
 		}
 	}
@@ -766,7 +766,7 @@ func (s *Session) matWeightHAL(name string) compute.Tensor {
 // expands it once at staging to Q8_0 (or F32 when the session does not stage Q8), the
 // representation the loader would otherwise have produced.
 func (s *Session) weightHALRawIQExpanded(name string, qt *kQuantTensor) compute.Tensor {
-	dt, _ := rawIQDenseHALDtype(qt.kind)
+	dt, _ := rawIQDenseHALDtypeFor(qt)
 	q8 := s.useHALQ8Weights()
 	key := "iqexp-f32:" + name
 	as := compute.F32

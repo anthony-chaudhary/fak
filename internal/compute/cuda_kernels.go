@@ -136,6 +136,11 @@ func (c *cudaBackend) qwen35SequenceMatMulLocked(w, x Tensor, tokens int, site s
 			c.releaseTransientBuffers([]*cudaBuf{b})
 			return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: cudaGEMMError("qwen35-sequence-"+site, rc, cudaKQuantScratch(out, in, tokens))}
 		}
+	case Q3_K:
+		if rc := int(C.fcuda_q3k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))); rc != 0 {
+			c.releaseTransientBuffers([]*cudaBuf{b})
+			return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: cudaGEMMError("qwen35-sequence-"+site, rc, cudaKQuantScratch(out, in, tokens))}
+		}
 	case Q2_0:
 		C.fcuda_q2_0_matmul_f32((*C.uint8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens), C.int(w.Quant.Block))
 	default:

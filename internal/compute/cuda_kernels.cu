@@ -123,10 +123,20 @@ static bool g_v41_sa_uncertain = false;
 static uint64_t g_v41_sa_completed = 0;
 #endif
 
-#if defined(FAK_CUDA_V41_ROUTED_SWIGLU) || defined(FAK_CUDA_V41_ENGRAM_GATE) || defined(FAK_CUDA_V41_COMPRESSOR_POOL) || defined(FAK_CUDA_V41_MHC) || defined(FAK_CUDA_V41_BF16_PUBLISH) || defined(FAK_CUDA_V41_TAIL_ROPE) || defined(FAK_CUDA_V41_INDEXER) || defined(FAK_CUDA_FLASHMLA_PREFILL) || defined(FAK_CUDA_DEEPGEMM_WKV) || defined(FAK_CUDA_V41_SHARED_ATTENTION)
+#ifdef FAK_CUDA_V41_COMPRESSOR
+// An uncertain compressor drain closes this candidate and its peers.
+static bool g_v41_compressor_uncertain = false;
+static uint64_t g_v41_compressor_completed = 0;
+#endif
+
+// Router source is compiled in every CUDA profile; its terminal stream
+// uncertainty must be visible before the allocation release fragments.
+static bool g_v41_router_uncertain = false;
+
 // Both candidates share g_stream. A successful peer call cannot rehabilitate
 // an uncertain operation, even when the Go backend has no fault latch.
 static bool v41_candidates_stream_uncertain(void) {
+  if (g_v41_router_uncertain) return true;
 #ifdef FAK_CUDA_V41_ROUTED_SWIGLU
   if (g_v41_routed_swiglu_uncertain) return true;
 #endif
@@ -157,9 +167,11 @@ static bool v41_candidates_stream_uncertain(void) {
 #ifdef FAK_CUDA_V41_SHARED_ATTENTION
   if (g_v41_sa_uncertain) return true;
 #endif
+#ifdef FAK_CUDA_V41_COMPRESSOR
+  if (g_v41_compressor_uncertain) return true;
+#endif
   return false;
 }
-#endif
 
 // Host-transfer witnesses (#482/#4738): cumulative bytes in each direction. Every successful
 // h2d/d2h copy adds to its own counter so a whole-operation test can prove zero traffic in both
@@ -191,11 +203,14 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda_v41_shared_attention.cu"
 #include "cuda_v41_mhc.cu"
 #include "cuda_v41_compressor_pool.cu"
+#include "cuda/v41_compressor.cuh"
+#include "cuda_v41_router.cu"
 #include "cuda/qwen35_gdn.cuh"
 #include "cuda/q4k_mmq.cuh"
 #include "cuda/q4k_mmvq.cuh"
 #include "cuda/quant_matmul.cuh"
 #include "cuda/q3k_matmul.cuh"
+#include "cuda/q3k_mmvq.cuh"
 #include "cuda/iq_gemv.cuh"
 #include "cuda/transformer_ops.cuh"
 #include "cuda/qwen35_attention_postprocess.cuh"

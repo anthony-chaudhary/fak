@@ -63,3 +63,61 @@ func TestDecodeV41CompressorRingStatus(t *testing.T) {
 		}
 	}
 }
+
+// v41CompressorPoolFloat64Oracle is the binary64 gated pool every device
+// class is pinned to: per dimension, a max-shifted softmax over the ratio rows
+// of scores gates kv.
+func v41CompressorPoolFloat64Oracle(kv, scores []float32, ratio, width int) []float64 {
+	out := make([]float64, width)
+	for d := 0; d < width; d++ {
+		maxS := math.Inf(-1)
+		for r := 0; r < ratio; r++ {
+			maxS = math.Max(maxS, float64(scores[r*width+d]))
+		}
+		var den, acc float64
+		for r := 0; r < ratio; r++ {
+			w := math.Exp(float64(scores[r*width+d]) - maxS)
+			den += w
+			acc += float64(kv[r*width+d]) * w
+		}
+		out[d] = acc / den
+	}
+	return out
+}
+
+// fak-test:runtime fast est=5ms
+func TestV41CompressorPoolFloat64OracleClosedForms(t *testing.T) {
+	const ratio, width = 4, 3
+	kv := []float32{1, -2, 8, 3, 4, 8, 5, -6, 8, 7, 8, 8}
+	equal := make([]float32, ratio*width)
+	got := v41CompressorPoolFloat64Oracle(kv, equal, ratio, width)
+	for d, want := range []float64{4, 1, 8} {
+		if math.Abs(got[d]-want) > 1e-12 {
+			t.Fatalf("equal scores dim %d = %g, want mean %g", d, got[d], want)
+		}
+	}
+	dominant := make([]float32, ratio*width)
+	for d := 0; d < width; d++ {
+		dominant[2*width+d] = 1000
+	}
+	got = v41CompressorPoolFloat64Oracle(kv, dominant, ratio, width)
+	for d := 0; d < width; d++ {
+		if got[d] != float64(kv[2*width+d]) {
+			t.Fatalf("dominant row dim %d = %g, want %g", d, got[d], kv[2*width+d])
+		}
+	}
+}
+
+// fak-test:runtime fast est=5ms
+func TestV41CompressorRingStatusRowRule(t *testing.T) {
+	if err := v41CompressorRingStatusErr([]float32{0, 0, 0}); err != nil {
+		t.Fatalf("clean status row refused: %v", err)
+	}
+	var typed *V41CompressorRingNonFiniteError
+	if err := v41CompressorRingStatusErr([]float32{0, 3, 1}); !errors.As(err, &typed) || typed.Dim != 1 || typed.Status != 3 {
+		t.Fatalf("first non-finite dimension: got %v", err)
+	}
+	if err := v41CompressorRingStatusErr([]float32{0, 4}); !errors.Is(err, ErrV41CompressorRingStatus) {
+		t.Fatalf("unknown status bit: got %v", err)
+	}
+}

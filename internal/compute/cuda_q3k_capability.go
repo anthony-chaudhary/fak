@@ -2,6 +2,11 @@
 
 package compute
 
+/*
+#include "cuda_backend.h"
+*/
+import "C"
+
 // SupportsQ3KMatMul exposes packed GGUF Q3_K GEMV and token-panel multiplication.
 // This is software capability, not hardware parity or throughput evidence.
 func (c *cudaBackend) SupportsQ3KMatMul() bool { return true }
@@ -36,4 +41,12 @@ func (c *cudaBackend) checkQ3KWeight(w Tensor) {
 	if len(w.Shape) != 2 || w.Quant == nil || w.Quant.Block != 256 || w.Quant.Bits != 3 || w.Quant.Axis != 2 || w.Layout != RowMajor {
 		panic(&CUDAOpError{Op: "Q3_K MatMul", Site: "q3k-weight-descriptor", Msg: "requires a rank-two row-major 256-element/3-bit Q3_K descriptor", Class: MemoryActivation})
 	}
+}
+
+// q3kMMVQLaunchesForTest reports Q3_K MMVQ kernel launches, so the parity witness can tell
+// which arm produced an output.
+func (c *cudaBackend) q3kMMVQLaunchesForTest() uint64 {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return uint64(C.fcuda_q3k_mmvq_launch_count())
 }

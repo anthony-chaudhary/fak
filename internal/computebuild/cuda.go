@@ -128,6 +128,14 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 		nvccArgs = cudaV41SharedAttentionFlags(ctx, nvccArgs)
 		nvccArgs = cudaFlashMLAGenericFlags(ctx, nvccArgs)
 		nvccArgs = cudaDeepGEMMGenericFlags(ctx, nvccArgs)
+		nvccArgs, err = cudaV41RouterFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
+		nvccArgs, err = cudaV41CompressorFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
 		nvccArgs, err = cudaV41MHCFlags(ctx, nvccArgs, env)
 		if err != nil {
 			return nil, err
@@ -156,6 +164,14 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 		nvccArgs = cudaV41SharedAttentionFlags(ctx, nvccArgs)
 		nvccArgs = cudaFlashMLAGenericFlags(ctx, nvccArgs)
 		nvccArgs = cudaDeepGEMMGenericFlags(ctx, nvccArgs)
+		nvccArgs, err = cudaV41RouterFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
+		nvccArgs, err = cudaV41CompressorFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
 		nvccArgs, err = cudaV41MHCFlags(ctx, nvccArgs, env)
 		if err != nil {
 			return nil, err
@@ -355,6 +371,9 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 	if cfg == nil {
 		return fmt.Errorf("nil CUDAConfig")
 	}
+	if cfg.EnableV41Compressor && cfg.EnableV41CompressorPool {
+		return fmt.Errorf("--v41-compressor and --v41-compressor-pool are mutually exclusive")
+	}
 	root, err := ResolveRepoRoot(cfg.RepoRoot)
 	if err != nil {
 		return err
@@ -393,6 +412,18 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 			return err
 		}
 		ctx = context.WithValue(ctx, cudaV41CompressorPoolKey{}, true)
+	}
+	if cfg.EnableV41Compressor {
+		if err := prepareCUDAV41Compressor(cfg); err != nil {
+			return err
+		}
+		ctx = context.WithValue(ctx, cudaV41CompressorKey{}, true)
+	}
+	if cfg.EnableV41Router {
+		if err := prepareCUDAV41Router(cfg); err != nil {
+			return err
+		}
+		ctx = context.WithValue(ctx, cudaV41RouterKey{}, true)
 	}
 	if cfg.EnableV41MHC {
 		if err := prepareCUDAV41MHC(cfg); err != nil {
@@ -487,6 +518,8 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 	goTags = cudaV41RoutedSwiGLUTags(cfg, goTags)
 	goTags = cudaV41EngramGateTags(cfg, goTags)
 	goTags = cudaV41CompressorPoolTags(cfg, goTags)
+	goTags = cudaV41CompressorTags(cfg, goTags)
+	goTags = cudaV41RouterTags(cfg, goTags)
 	goTags = cudaV41MHCTags(cfg, goTags)
 	goTags = cudaV41SharedAttentionTags(cfg, goTags)
 	goTags = cudaFlashMLAGoTags(cfg, goTags)
