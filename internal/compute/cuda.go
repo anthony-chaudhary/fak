@@ -1040,14 +1040,21 @@ func (c *cudaBackend) cudaNVFP4LtCallsForTest() uint64 {
 func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 	cudaMu.Lock()
 	trace := computetrace.Enabled()
-	started := time.Now()
+	var started time.Time
+	var y Tensor
+	completed := false
 	if trace {
+		started = time.Now()
 		C.fcuda_event_elapsed_ms_start()
 	}
 	defer func() {
 		if trace {
 			ms := float64(C.fcuda_event_elapsed_ms_end())
-			computetrace.Record(computetrace.Event{Operation: "matmul", Phase: "kernel", Backend: c.Name(), Device: "cuda:0", Kernel: w.Dtype.String() + "_matmul", StartedAt: started.UTC(), DurationNS: int64(ms * 1e6), TimerDomain: "cuda_event", Bytes: int64((w.Numel() + x.Numel()) * w.Dtype.Bytes()), Shapes: [][]int{w.Shape, x.Shape}, ProvenanceDigest: computetrace.Digest(c.Name(), w.Dtype.String(), "matmul")})
+			if completed {
+				if event, ok := w.cudaMatMulTraceEvent(c.Name(), x, y, 1, started, ms, false); ok {
+					computetrace.Record(event)
+				}
+			}
 		}
 		cudaMu.Unlock()
 	}()
@@ -1061,7 +1068,6 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 	} else {
 		out, in = w.Shape[0], w.Shape[1]
 	}
-	var y Tensor
 	switch w.Dtype {
 	case F32:
 		y, _ = c.devTr([]int{out}, F32)
@@ -1142,6 +1148,7 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 			Class: MemoryActivation,
 		})
 	}
+	completed = true
 	return y
 }
 
@@ -1149,7 +1156,25 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 // weight dtype to the SGEMM (F32), tensor-core HGEMM (F16), or native Q8_0/Q4_K device GEMM.
 func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	cudaMu.Lock()
-	defer cudaMu.Unlock()
+	trace := computetrace.Enabled()
+	var started time.Time
+	var y Tensor
+	completed := false
+	if trace {
+		started = time.Now()
+		C.fcuda_event_elapsed_ms_start()
+	}
+	defer func() {
+		if trace {
+			ms := float64(C.fcuda_event_elapsed_ms_end())
+			if completed {
+				if event, ok := w.cudaMatMulTraceEvent(c.Name(), X, y, P, started, ms, true); ok {
+					computetrace.Record(event)
+				}
+			}
+		}
+		cudaMu.Unlock()
+	}()
 	if w.Dtype == Q3_K {
 		c.checkQ3KWeight(w)
 	}
@@ -1160,7 +1185,6 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	} else {
 		out, in = w.Shape[0], w.Shape[1]
 	}
-	var y Tensor
 	switch w.Dtype {
 	case F32:
 		y, _ = c.devTr([]int{P, out}, F32)
@@ -1236,6 +1260,7 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 			Class: MemoryActivation,
 		})
 	}
+	completed = true
 	return y
 }
 
