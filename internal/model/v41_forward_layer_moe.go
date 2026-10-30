@@ -37,6 +37,9 @@ type v41LayerFFNPanel struct {
 	flat     []float32
 	residual [][][]float32
 	mixes    []v41MHCMix
+	// Only v41LayerFFNInputs can grant reuse of its allocating host producer.
+	// Direct/borrowed panels and any selected-device producer retain copies.
+	hostResidualOwned bool
 }
 
 // v41LayerMoE runs the router, the routed and shared experts, and the mHC
@@ -84,6 +87,7 @@ func (m *Model) v41LayerFFNInputs(in v41LayerMoEInput) (v41LayerFFNPanel, error)
 		if in.resident == nil {
 			panel.residual = make([][][]float32, seq)
 			panel.mixes = make([]v41MHCMix, seq)
+			panel.hostResidualOwned = seq > 1
 		}
 	}
 	var ffnCollapsed [][]float32
@@ -117,6 +121,10 @@ func (m *Model) v41LayerFFNInputs(in v41LayerMoEInput) (v41LayerFFNPanel, error)
 		if in.resident != nil {
 			xn, err = m.v41FFNNormWithPublish(l, ffnCollapsed[t], in.eps, scratch.ffnNorm.normFunc(), scratch.gatherOps.bf16PublishFunc())
 		} else if in.full {
+			// Match the producer's device snapshot before any projection/norm
+			// callback can rebind it. Its host post allocates independent rows;
+			// callbacks see only a flattened copy or a separate collapsed row.
+			panel.hostResidualOwned = panel.hostResidualOwned && (scratch.mhcCarry == nil || scratch.mhcCarry.device == nil)
 			panel.residual[t], panel.mixes[t], xn, err = m.v41FullFFNInput(l, in.streams[t], in.hcByPos[t], in.attnOut[t], projectFFN, scratch)
 		} else {
 			xn, err = m.v41FFNNormWithPublish(l, in.x[t], in.eps, scratch.ffnNorm.normFunc(), scratch.gatherOps.bf16PublishFunc())
@@ -431,7 +439,11 @@ func (m *Model) v41LayerSharedExpertAndPost(in v41LayerMoEInput, panel v41LayerF
 		if resident != nil {
 			moeRows[t] = moe
 		} else if in.full {
-			nextPanel[t], err = v41PrefillMHCPostBF16On(in.mhcDevice, l, moe, panel.residual[t], panel.mixes[t], seq)
+			post := v41PrefillMHCPostBF16On
+			if panel.hostResidualOwned {
+				post = v41PrefillMHCPostBF16Owned
+			}
+			nextPanel[t], err = post(in.mhcDevice, l, moe, panel.residual[t], panel.mixes[t], seq)
 			if err != nil {
 				return err
 			}
