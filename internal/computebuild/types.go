@@ -77,6 +77,7 @@ type CUDAConfig struct {
 	EnableV41Compressor      bool // Explicit SM120 ring/pool candidate; build selection is not qualification.
 	EnableV41Router          bool // Explicit SM120 router/gather selection; not hardware qualification.
 	EnableV41TailRoPE        bool // Explicit SM120 ordinary QK/Rows candidate; exact qualification remains false.
+	EnableV41BF16Publish     bool // Explicit SM120 ordinary checked publication; build selection is not qualification.
 	EnableV41MHC             bool // Explicit witness candidate, not numerical qualification
 	EnableV41SharedAttention bool // Explicit SM120 SIMT candidate; paired library define and Go tag
 	EnableDeepGEMMWKV        bool // Explicit family-SASS WKV candidate, never automatic

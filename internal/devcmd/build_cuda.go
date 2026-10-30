@@ -77,6 +77,7 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 	compressor := fs.Bool("v41-compressor", false, "compile explicit SM120 V4.1 compressor ring/pool candidate; excludes --v41-compressor-pool; build selection is not hardware qualification")
 	router := fs.Bool("v41-router", false, "select explicit SM120 V4.1 router/hash/gate/gather Go binding; native source always compiled; build selection is not hardware qualification")
 	tailRoPE := fs.Bool("v41-tail-rope", false, "compile explicit SM120 ordinary V4.1 supplied-table QK/Rows candidate; exact arithmetic remains unqualified")
+	bf16Publish := fs.Bool("v41-bf16-publish", false, "compile explicit SM120 ordinary V4.1 finite BF16 publication candidate; build selection is not hardware qualification")
 	mhc := fs.Bool("v41-mhc", false, "compile explicit SM120 V4.1 mHC witness candidate; public capability remains unqualified")
 	sharedAttention := fs.Bool("v41-shared-attention", false, "compile explicit SM120 V4.1 shared-attention candidate (paired CUDA define and Go tag; not full-model qualification)")
 	nccl := fs.Bool("nccl", os.Getenv("FAK_CUDA_NCCL") == "1", "compile with NCCL collectives enabled (-tags cuda,nccl)")
@@ -192,6 +193,7 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 		EnableV41Compressor:      *compressor,
 		EnableV41Router:          *router,
 		EnableV41TailRoPE:        *tailRoPE,
+		EnableV41BF16Publish:     *bf16Publish,
 		EnableV41MHC:             *mhc,
 	}
 
@@ -454,6 +456,9 @@ func runCUDABuildAcceptance(stdout, stderr io.Writer, cfg *computebuild.CUDAConf
 	}
 	if cfg.EnableV41TailRoPE {
 		tags += ",fak_cuda_v41_tail_rope"
+	}
+	if cfg.EnableV41BF16Publish {
+		tags += ",fak_cuda_v41_bf16_publish"
 	}
 	if cfg.EnableV41MHC {
 		tags += ",fak_cuda_v41_mhc"
