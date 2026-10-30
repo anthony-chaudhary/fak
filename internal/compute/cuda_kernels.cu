@@ -201,6 +201,7 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda_v41_mhc.cu"
 #include "cuda_v41_compressor_pool.cu"
 #include "cuda/v41_compressor.cuh"
+#include "cuda_v41_router.cu"
 #include "cuda/qwen35_gdn.cuh"
 #include "cuda/q4k_mmq.cuh"
 #include "cuda/q4k_mmvq.cuh"

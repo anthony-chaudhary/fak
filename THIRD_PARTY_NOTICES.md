@@ -630,6 +630,24 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## antirez/ds4 V4.1 router top-k (CUDA)
+
+`internal/compute/cuda_v41_router.cu` (`k_v41_router_argmax_topk`, `fak_v41_router_topk_f32`) and
+its Go binding `internal/compute/cuda_v41_router.go` adapt `router_select_warp_topk_kernel` and
+`router_select_kernel` from `ds4_cuda.cu` at revision
+`80ebbc396aee40eedc1d829222f3362d10fa4c6c` (MIT, The ds4.c authors):
+https://github.com/antirez/ds4/blob/80ebbc396aee40eedc1d829222f3362d10fa4c6c/ds4_cuda.cu
+
+Kept from upstream: one warp per token row with four rows per block, k rounds of a
+`__shfl_xor_sync` argmax that prefers the lower expert on equal values, and the hash mode that
+takes a row's experts from the token-to-expert table instead of selecting them. Changed for Fak:
+expert count, k (up to 8) and route scale are parameters instead of 256/6/1.5; each lane keeps
+an insertion-ordered top-k over a strided expert subset so the shuffle rounds merge lane heads;
+the score is the project's `v41_router_topk.comp` sqrt(softplus) formula, normalization is the
+in-order F32 sum (+1e-20 on the full geometry) instead of a 2^-14 floor, and per-row fault
+records follow the existing `V41RouterTopKBackend` contract. The ds4 copyright and permission
+notice is reproduced in the section above.
+
 ## DeepSeek V4.1 DSpark residency port study
 
 `internal/model/v41_dspark_residency.go` records a revision-anchored port STUDY of the DSpark
