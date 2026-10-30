@@ -561,7 +561,13 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## antirez/ds4 fused routed-FFN kernels
+## antirez/ds4 (DwarfStar) V4 Flash CUDA kernels
+
+Pinned revision: `80ebbc396aee40eedc1d829222f3362d10fa4c6c` (MIT); the license text below is the
+upstream `LICENSE` at that revision. The routed-FFN adaptation predates the pin and cites the
+revision it was read at.
+
+### Fused routed-FFN kernels
 
 The V4.1 fused routed-FFN kernels `internal/compute/shaders/v41_routed_gate_up_swiglu_id.comp`
 and `internal/compute/shaders/v41_routed_down_sum.comp`, the dispatch entrypoints in
@@ -582,12 +588,28 @@ per-row accumulation order are the project's own `v41_q2k_matvec_id.comp` / `v41
 term for term so the fused path is ULP- or bit-parity with the unfused id path rather than a
 new arithmetic contract. The fused gate/up kernel keeps the id kernel's per-superblock FMA
 association; the down/sum epilogue reproduces the id down + BF16 publication + sum chain
-bitwise. The ds4 MIT copyright and permission notice follows:
+bitwise.
+
+### Compressor ring and gated pool
+
+`internal/compute/cuda/v41_compressor.cuh` ports `compressor_store_kernel` (`ds4_cuda.cu:5784`) and
+`compressor_update_pool_kernel` (`ds4_cuda.cu:5904`) at the pinned revision; `internal/compute/cuda_v41_compressor.go`
+is the thin adapter behind `V41CompressorRingBackend` / `V41CompressorPoolBackend`.
+https://github.com/antirez/ds4/blob/80ebbc396aee40eedc1d829222f3362d10fa4c6c/ds4_cuda.cu
+
+Changed for Fak: one token per store into an explicit ring slot with the APE add and ratio-4
+overlap row offset left to the caller; only the generic pooling branch is kept, with ds4's
+128-entry local candidate arrays replaced by direct strided reads of the same values in the same
+order (no rounded operation changes); a separate per-dimension non-finite status post-pass.
+The pooling arithmetic (`expf`, `den += w`, `acc += kv * w`, `acc / den`) is upstream's.
+
+The ds4 MIT copyright and permission notice follows:
 
 ```text
 MIT License
 
-Copyright (c) 2025-2026 antirez
+Copyright (c) 2026 The ds4.c authors
+Copyright (c) 2023-2026 The ggml authors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

@@ -98,16 +98,25 @@ func DecodeV41CompressorRing(values []float32, width int) ([]float32, error) {
 	if width <= 0 || len(values) != 2*width {
 		return nil, fmt.Errorf("%w: emitted %d values for width %d", ErrV41CompressorRingStatus, len(values), width)
 	}
-	for d, word := range values[width:] {
+	if err := v41CompressorRingStatusErr(values[width:]); err != nil {
+		return nil, err
+	}
+	return append([]float32(nil), values[:width]...), nil
+}
+
+// v41CompressorRingStatusErr applies the closed status rule to a bare status
+// row, one word per latent dimension.
+func v41CompressorRingStatusErr(words []float32) error {
+	for d, word := range words {
 		switch word {
 		case 0:
 		case V41CompressorRingKVNonFinite, V41CompressorRingScoreNonFinite, V41CompressorRingKVNonFinite | V41CompressorRingScoreNonFinite:
-			return nil, &V41CompressorRingNonFiniteError{Dim: d, Status: int(word)}
+			return &V41CompressorRingNonFiniteError{Dim: d, Status: int(word)}
 		default:
-			return nil, fmt.Errorf("%w: dimension %d status bits %#08x", ErrV41CompressorRingStatus, d, math.Float32bits(word))
+			return fmt.Errorf("%w: dimension %d status bits %#08x", ErrV41CompressorRingStatus, d, math.Float32bits(word))
 		}
 	}
-	return append([]float32(nil), values[:width]...), nil
+	return nil
 }
 
 func vulkanV41CompressorRingStatusError(status int, reason string) *BackendError {

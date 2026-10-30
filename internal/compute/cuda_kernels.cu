@@ -123,7 +123,13 @@ static bool g_v41_sa_uncertain = false;
 static uint64_t g_v41_sa_completed = 0;
 #endif
 
-#if defined(FAK_CUDA_V41_ROUTED_SWIGLU) || defined(FAK_CUDA_V41_ENGRAM_GATE) || defined(FAK_CUDA_V41_COMPRESSOR_POOL) || defined(FAK_CUDA_V41_MHC) || defined(FAK_CUDA_V41_BF16_PUBLISH) || defined(FAK_CUDA_V41_TAIL_ROPE) || defined(FAK_CUDA_V41_INDEXER) || defined(FAK_CUDA_FLASHMLA_PREFILL) || defined(FAK_CUDA_DEEPGEMM_WKV) || defined(FAK_CUDA_V41_SHARED_ATTENTION)
+#ifdef FAK_CUDA_V41_COMPRESSOR
+// An uncertain compressor drain closes this candidate and its peers.
+static bool g_v41_compressor_uncertain = false;
+static uint64_t g_v41_compressor_completed = 0;
+#endif
+
+#if defined(FAK_CUDA_V41_ROUTED_SWIGLU) || defined(FAK_CUDA_V41_ENGRAM_GATE) || defined(FAK_CUDA_V41_COMPRESSOR_POOL) || defined(FAK_CUDA_V41_MHC) || defined(FAK_CUDA_V41_BF16_PUBLISH) || defined(FAK_CUDA_V41_TAIL_ROPE) || defined(FAK_CUDA_V41_INDEXER) || defined(FAK_CUDA_FLASHMLA_PREFILL) || defined(FAK_CUDA_DEEPGEMM_WKV) || defined(FAK_CUDA_V41_SHARED_ATTENTION) || defined(FAK_CUDA_V41_COMPRESSOR)
 // Both candidates share g_stream. A successful peer call cannot rehabilitate
 // an uncertain operation, even when the Go backend has no fault latch.
 static bool v41_candidates_stream_uncertain(void) {
@@ -156,6 +162,9 @@ static bool v41_candidates_stream_uncertain(void) {
 #endif
 #ifdef FAK_CUDA_V41_SHARED_ATTENTION
   if (g_v41_sa_uncertain) return true;
+#endif
+#ifdef FAK_CUDA_V41_COMPRESSOR
+  if (g_v41_compressor_uncertain) return true;
 #endif
   return false;
 }
@@ -191,6 +200,7 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda_v41_shared_attention.cu"
 #include "cuda_v41_mhc.cu"
 #include "cuda_v41_compressor_pool.cu"
+#include "cuda/v41_compressor.cuh"
 #include "cuda/qwen35_gdn.cuh"
 #include "cuda/q4k_mmq.cuh"
 #include "cuda/q4k_mmvq.cuh"

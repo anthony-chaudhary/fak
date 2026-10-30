@@ -9,6 +9,7 @@ and process-wide state, then includes these implementation fragments in dependen
 | `runtime_memory.cuh` | initialization, allocator pools, and transfers |
 | `runtime_services.cuh` | profiling, device services, and transfer witnesses |
 | `model_candidates.cuh` | embedding gather and conditional v4.1 candidates |
+| `v41_compressor.cuh` | V4.1 compressor ring store and gated pool ported from antirez/ds4 (opt-in `FAK_CUDA_V41_COMPRESSOR`) |
 | `qwen35_gdn.cuh` | Qwen3.5/3.6 Gated-DeltaNet operations |
 | `q4k_mmq.cuh` | Q4_K int8 tensor-core MMQ for prompt panels adapted from llama.cpp (opt-in `mmq` arm) |
 | `q4k_mmvq.cuh` | Q4_K q8_1 DP4A decode GEMV adapted from llama.cpp MMVQ (opt-in `mmvq` decode arm) |
