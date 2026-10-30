@@ -3,11 +3,16 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/logitoracle"
+	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 )
 
 type logitFixtureSession struct {
@@ -77,5 +82,30 @@ func TestComputeTraceLogitsCompareExitCodes(t *testing.T) {
 	}
 	if code := runComputeTrace(&out, &errOut, []string{"logits", "dump"}); code != 2 {
 		t.Fatalf("bare dump exit=%d", code)
+	}
+}
+
+// A host reference of a checkpoint larger than RAM (DeepSeek-V4.1 Flash Q2_K on
+// CPU) needs the serve --cpu-offload-experts arm and a bounded KV budget; the
+// dump must thread both to the serve loader instead of hard-coding false/0.
+func TestComputeTraceLogitsDumpThreadsOffloadAndContext(t *testing.T) {
+	dir := t.TempDir()
+	prompts := filepath.Join(dir, "p.json")
+	if err := os.WriteFile(prompts, []byte(`[{"name":"P1","ids":[3085],"positions":1}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var gotOffload bool
+	gotContext := -1
+	prev := logitDumpLoadModel
+	logitDumpLoadModel = func(_ string, _ compute.Backend, offload bool, ctx int, _ *ggufload.ExpertShard, _ int, _ *serveFitBudget) (*fakmodel.Model, bool, *gateway.ModelLoadProfile, gateway.StartupPhase) {
+		gotOffload, gotContext = offload, ctx
+		return nil, false, nil, gateway.StartupPhase{}
+	}
+	defer func() { logitDumpLoadModel = prev }()
+	var stdout, stderr bytes.Buffer
+	code := runComputeTraceLogitsDump(&stdout, &stderr, []string{"--gguf", filepath.Join(dir, "m.gguf"), "--prompts", prompts,
+		"--out", filepath.Join(dir, "out"), "--backend", "cpu", "--cpu-offload-experts", "--native-context-tokens", "512"})
+	if code != 1 || !gotOffload || gotContext != 512 {
+		t.Fatalf("code=%d offload=%v context=%d stderr=%s", code, gotOffload, gotContext, stderr.String())
 	}
 }

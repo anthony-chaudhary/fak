@@ -21,6 +21,9 @@ import (
 
 const computeTraceLogitsUsage = "usage: fak compute-trace logits dump --gguf <model.gguf> --prompts <prompts.json> --out <dir> [--teacher <ref-dump>] | compare --ref <dump> --cand <dump> [--json]"
 
+// logitDumpLoadModel is the serve loader the dump uses; tests replace it.
+var logitDumpLoadModel = loadServeInKernelModel
+
 func runComputeTraceLogits(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, computeTraceLogitsUsage)
@@ -52,6 +55,8 @@ func runComputeTraceLogitsDump(stdout, stderr io.Writer, args []string) int {
 	chunk := fs.Int("prefill-chunk", 512, "prefill panel size; earlier panels skip logits, as the native planner does")
 	teacher := fs.String("teacher", "", "reference dump whose prompt ids and fed tokens this run consumes")
 	topK := fs.Int("topk", 5, "ranked tokens recorded per position")
+	contextTokens := fs.Int("native-context-tokens", 0, "KV context budget in tokens (0 = serve auto sizing); a short dump needs only its prompt length")
+	cpuOffloadExperts := fs.Bool("cpu-offload-experts", false, "load routed experts through the serve --cpu-offload-experts arm (streamed from the checkpoint when they exceed host RAM); needed for a host reference of a checkpoint larger than RAM")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -77,7 +82,7 @@ func runComputeTraceLogitsDump(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	m, q4k, _, _ := loadServeInKernelModel(*gguf, backend, false, 0, nil, 1, nil)
+	m, q4k, _, _ := logitDumpLoadModel(*gguf, backend, *cpuOffloadExperts, *contextTokens, nil, 1, nil)
 	if m == nil {
 		fmt.Fprintf(stderr, "fak compute-trace logits: failed to load %q\n", *gguf)
 		return 1
