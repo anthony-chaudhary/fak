@@ -7,13 +7,13 @@ package compute
 #include "cuda_backend.h"
 // Candidate-local ABI; the native archive needs both
 // FAK_CUDA_V41_EMBED_GATHER and FAK_CUDA_V41_EMBED_IQ4NL.
-unsigned fak_v41_embed_abi(void);
-unsigned fak_v41_embed_iq4nl_rows_abi(void);
-int fak_v41_embed_state(void);
-int fak_v41_embed_finish(void);
-int fak_v41_embed_iq4nl_upload(void *,const void *,uint64_t);
-int fak_v41_embed_iq4nl_gather_rows(const void *,float *,uint32_t *,const intptr_t *,int,int,int);
-int fak_v41_embed_iq4nl_row_poison(float *,const uint32_t *,int,int,int);
+extern unsigned fak_v41_embed_abi(void);
+extern unsigned fak_v41_embed_rows_abi(void);
+extern int fak_v41_embed_state(void);
+extern int fak_v41_embed_finish(void);
+extern int fak_v41_embed_rows_upload(void *,const void *,uint64_t,int);
+extern int fak_v41_embed_rows_gather(const void *,float *,uint32_t *,int,int,int);
+extern int fak_v41_embed_iq4nl_row_poison(float *,const uint32_t *,int,int,int);
 */
 import "C"
 
@@ -35,7 +35,7 @@ var (
 // Compiling these tags alone never advertises a serving capability.
 func (c *cudaBackend) SupportsV41EngramRowDecode() bool { return false }
 func (c *cudaBackend) SupportsV41EngramRowEncoding(encoding V41EngramRowEncoding) bool {
-	return encoding == V41EngramRowIQ4NL && c.SupportsV41EngramRowDecode()
+	return V41EngramRowStride(encoding) != 0 && c.SupportsV41EngramRowDecode()
 }
 
 func (c *cudaBackend) cudaV41EngramRowError(site, detail string, code int, cause error) error {
@@ -56,8 +56,8 @@ func (c *cudaBackend) cudaV41EngramRowState(site string, witness bool) error {
 	if err := c.faultLatch.Admit(site); err != nil {
 		return c.cudaV41EngramRowError(site, "sticky CUDA fault", -3, err)
 	}
-	if uint32(C.fak_v41_embed_abi()) != 2 || uint32(C.fak_v41_embed_iq4nl_rows_abi()) != 1 {
-		return c.cudaV41EngramRowError(site, "exact IQ4_NL row ABI unavailable", -3, nil)
+	if uint32(C.fak_v41_embed_abi()) != 2 || uint32(C.fak_v41_embed_rows_abi()) != 1 {
+		return c.cudaV41EngramRowError(site, "exact checked-row family ABI unavailable", -3, nil)
 	}
 	if code := int(C.fak_v41_embed_state()); code != 0 {
 		return c.cudaV41EngramRowError(site, "native admission refused", code, nil)
@@ -70,14 +70,13 @@ func (c *cudaBackend) V41EngramRowDecode(encoded []byte, encoding V41EngramRowEn
 }
 
 // The caller supplies only already-gathered, authenticated rows, not a table or
-// global IDs. Local identity IDs preserve that order without whole-table upload.
+// global IDs. The native grid preserves that order without whole-table upload.
 // This adapter does no host arithmetic and never retries a selected error.
 func (c *cudaBackend) cudaV41EngramRowDecode(encoded []byte, encoding V41EngramRowEncoding, rows, dim int, witness bool) (panel, status Tensor, err error) {
 	const site = "V41EngramRowDecode"
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	var source, output, words *cudaBuf
-	var ids []C.intptr_t
 	admitted := false
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -113,11 +112,7 @@ func (c *cudaBackend) cudaV41EngramRowDecode(encoded []byte, encoding V41EngramR
 			panel, status = Tensor{}, Tensor{}
 		}
 		runtime.KeepAlive(encoded)
-		runtime.KeepAlive(ids)
 	}()
-	if encoding != V41EngramRowIQ4NL {
-		return Tensor{}, Tensor{}, c.cudaV41EngramRowError(site, "only IQ4_NL rows are supported", -1, nil)
-	}
 	if invalid := validateV41EngramRowDecode(encoded, encoding, rows, dim); invalid != nil {
 		return Tensor{}, Tensor{}, c.cudaV41EngramRowError(site, "invalid stored rows", -1, invalid)
 	}
@@ -129,23 +124,19 @@ func (c *cudaBackend) cudaV41EngramRowDecode(encoded []byte, encoding V41EngramR
 		return Tensor{}, Tensor{}, err
 	}
 	admitted = true
-	if source, err = c.dallocDeviceOnlyClass(len(encoded), MemoryActivation, "v41-engram-iq4nl-encoded"); err != nil {
+	if source, err = c.dallocDeviceOnlyClass(len(encoded), MemoryActivation, "v41-engram-row-encoded"); err != nil {
 		return Tensor{}, Tensor{}, err
 	}
-	if output, err = c.dallocDeviceOnlyClass(rows*dim*4, MemoryActivation, "v41-engram-iq4nl-panel"); err != nil {
+	if output, err = c.dallocDeviceOnlyClass(rows*dim*4, MemoryActivation, "v41-engram-row-panel"); err != nil {
 		return Tensor{}, Tensor{}, err
 	}
-	if words, err = c.dallocDeviceOnlyClass(rows*4, MemoryScratchpad, "v41-engram-iq4nl-status"); err != nil {
+	if words, err = c.dallocDeviceOnlyClass(rows*4, MemoryScratchpad, "v41-engram-row-status"); err != nil {
 		return Tensor{}, Tensor{}, err
 	}
-	ids = make([]C.intptr_t, rows)
-	for r := range ids {
-		ids[r] = C.intptr_t(r)
-	}
-	if code := int(C.fak_v41_embed_iq4nl_upload(source.ptr, unsafe.Pointer(&encoded[0]), C.uint64_t(len(encoded)))); code != 0 {
+	if code := int(C.fak_v41_embed_rows_upload(source.ptr, unsafe.Pointer(&encoded[0]), C.uint64_t(len(encoded)), C.int(encoding))); code != 0 {
 		return Tensor{}, Tensor{}, c.cudaV41EngramRowError(site, "checked encoded-row upload failed", code, nil)
 	}
-	code := int(C.fak_v41_embed_iq4nl_gather_rows(source.ptr, (*C.float)(output.ptr), (*C.uint32_t)(words.ptr), &ids[0], C.int(rows), C.int(dim), C.int(rows)))
+	code := int(C.fak_v41_embed_rows_gather(source.ptr, (*C.float)(output.ptr), (*C.uint32_t)(words.ptr), C.int(rows), C.int(dim), C.int(encoding)))
 	if code != 0 {
 		return Tensor{}, Tensor{}, c.cudaV41EngramRowError(site, "checked row decode failed", code, nil)
 	}

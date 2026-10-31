@@ -65,3 +65,72 @@ refusal through the actual Go witness; then checked failure/retention. The
 portable host fixtures separately cover bounded geometry and refused IDs. Native build
 and link checks, device execution, authenticated IQ4_NL model staging,
 selected-model first token, quality and throughput remain unverified.
+
+
+## Checked Engram row family (source candidate, not serving qualification)
+
+The existing CUDA row adapter also composes packed E4M3/E8M0, Q2_K and F32
+rows with IQ4_NL. It is still one registered-backend caller, one checked stream,
+one source-retirement policy and the same first-fault/poison contract. The new
+family ABI1 has its own encoding namespace: packed=0, Q2_K=1, F32=2, IQ4_NL=3.
+It does not extend embedding ABI2's modes or reinterpret Vulkan poison mode 3.
+The historical IQ4_NL build tag and both native defines remain required for this
+candidate family; a stale archive fails its exact ABI/link check.
+
+The row-parallel mapping is adapted from
+[Niko1221/Strata `ds4_kernels.cu`](https://github.com/Niko1221/Strata/blob/c62d5e3a15b40ea51c96aae9e8d36928965f53ab/src/dsv41/ds4_kernels.cu#L1521)
+at `c62d5e3a15b40ea51c96aae9e8d36928965f53ab` (SHA256
+`c96ba2b906ed54d3e9c7ac22b4a5d970783fe2246e4cfd01af4e8bf748aedf5a`),
+including its per-token row mapping at lines 1938–1959. Copyright belongs to
+Peasant Smith (mw00), the Project Maya contributors including needmorevram,
+and Niko1221 and the Strata contributors. The complete MIT license and Maya
+notice are retained in `THIRD_PARTY_NOTICES.md`; no second runtime is imported.
+
+Composition and exclusions are explicit:
+
+- Existing llama-derived Q2_K/IQ4_NL scalar maps and the canonical device
+  codebook are reused, not copied a second time. F32 copies every stored word.
+- Packed rows use the existing FAK Vulkan/host integer product and BF16 RNE
+  contract, not Strata's unrounded F32 output. This preserves subnormals,
+  signed zero, overflow, NaN-byte precedence and lowest-element status.
+- Strata Q6_K is not FAK Q2_K: its 210-byte layout is excluded. Strata's gate
+  reduction/rounding and zero-fill-on-read-error policy are not substituted.
+- Already-gathered immutable rows enter in demand order. One bounded grid
+  decodes the panel; no global table/ID ownership or whole-table upload is
+  added. Each output/status allocation is fresh and device-local.
+- Existing checked upload, default/private-stream fences, capture refusal,
+  sticky fault latch, quarantine and selected-error/no-host-replay behavior
+  remain authoritative. The former IQ4 upload shares that same checked copy.
+
+Both broad and exact public capabilities remain **false**. The actual FAK model
+consumer already selects `V41EngramRowDecodeBackend` by exact encoding, but this
+CUDA candidate is reachable only through the in-package device witness until
+module/device/model qualification is returned. Neither compilation nor this
+source import enables default serving, a new model format or a new policy knob.
+
+### Source-bound qualification pickup
+
+On a separately admitted CUDA machine, build the native archive with
+`FAK_CUDA_V41_EMBED_GATHER` and `FAK_CUDA_V41_EMBED_IQ4NL`, using the existing
+repository archive workflow, then run the actual checked caller:
+
+```sh
+CGO_ENABLED=1 go test -tags cuda,fak_cuda_v41_embed_gather,fak_cuda_v41_engram_iq4nl ./internal/compute -run '^TestCUDAV41EngramRows$' -count=1 -v
+```
+
+The explicit tags are required; `-tags cuda` alone excludes the test and is not
+acceptance. This witness fails rather than skips without registered CUDA. It
+checks all 65,536 packed byte/scale pairs, partial-row fault precedence,
+Q2_K scalar edges, exact F32 words, the retained IQ4_NL fixture, checked refusal,
+immutable input, completed fresh outputs and status/poison composition. It is
+not a fault-injection, model, allocator-peak or throughput witness.
+
+Record the source commit, native archive/build receipt, toolkit/driver, device
+UUID/architecture and test output. Hardware follow-up must additionally exercise
+capture/terminal-error retention and selected failure with no host replay, then
+an authenticated model/quantization artifact and ordinary native request. Measure
+cold/warm prefill, decode and batch throughput only with matched cache state and
+quality; separately report launches, transferred bytes, peak device/host memory,
+wall time and status/fence costs. No speedup or end-to-end memory reduction is
+claimed from the source-derived grid/copy counts. Compiler, linkage, tests,
+device/model parity and performance are **UNRUN** for this source candidate.

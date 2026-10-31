@@ -182,6 +182,42 @@ UNCALLED_OK: dict[str, str] = {
                         "from cudaNCCLWorld after fcuda_nccl_init succeeds",
 }
 
+# Enroll the checked Engram row family before any checker consumer. Keep the
+# established binding order and the exact explicit candidate symbol grammar.
+_ENGRAM_BINDING_AFTER = BINDINGS.index("internal/compute/cuda_v41_engram_gate.go") + 1
+BINDINGS = (BINDINGS[:_ENGRAM_BINDING_AFTER] +
+            ("internal/compute/cuda_v41_engram_row_decode.go",) +
+            BINDINGS[_ENGRAM_BINDING_AFTER:])
+BINDINGS_LABEL = ", ".join(BINDINGS)
+CANDIDATE_SYMBOLS = (
+    "fak_v41_embed_abi", "fak_v41_embed_rows_abi", "fak_v41_embed_state",
+    "fak_v41_embed_finish", "fak_v41_embed_rows_upload", "fak_v41_embed_rows_gather",
+    "fak_v41_embed_iq4nl_row_poison",
+) + CANDIDATE_SYMBOLS
+SYM = r"(?:fcuda_[A-Za-z0-9_]+|" + "|".join(CANDIDATE_SYMBOLS) + r")"
+# A header PROTOTYPE / call: a `fcuda_name(` (name immediately followed by `(`, modulo
+# whitespace). Comments are stripped first (see strip_comments), so this matches real
+# declarations, not prose mentions.
+_DECL_RE = re.compile(rf"\b({SYM})\s*\(")
+# A .cu DEFINITION: an `extern "C" … fcuda_name(` — the exported symbol with a body. The
+# return type/signature may wrap; the lead separates a definition from a call-site
+# (a bare `fcuda_free(x)` inside a function body has no `extern "C"`). DOTALL so a wrapped
+# `extern "C"\n void fcuda_x(` still pairs, while the `[^;{]*?` guard stops the non-greedy
+# run from leaping across a prior statement into an unrelated symbol. Requiring the
+# body also excludes prototypes in headers reached through quoted includes.
+_DEF_RE = re.compile(rf'extern\s+"C"\s+[^;{{}}]*?\b({SYM})\s*\([^;{{}}]*\)\s*\{{', re.DOTALL)
+# A cgo CALL: `C.fcuda_name(` in cuda.go.
+_CALL_RE = re.compile(rf"\bC\.({SYM})\b")
+# A cgo PREAMBLE PROTOTYPE: `extern <type> fcuda_name(…);` — a plain extern declaration
+# (NOT `extern "C"`, which marks a .cu definition) ending in `;` (not a `{` body). The
+# device-work shim (cuda/kernel_profile.cuh) declares its Go-facing prototypes in cuda.go's
+# preamble instead of an ABI header; cgo compiles that preamble as the declaration surface
+# for the translation unit, so these are real prototypes the linker sees.
+_PREAMBLE_DECL_RE = re.compile(rf"\bextern\s+(?:const\s+)?[A-Za-z_]\w*\s*\**\s*({SYM})\s*\([^;{{}}]*\)\s*;")
+_PLAIN_CANDIDATE_SYM = r"(?:fcuda_q4k_qkv_[A-Za-z0-9_]+|" + "|".join(CANDIDATE_SYMBOLS) + r")"
+_PLAIN_PREAMBLE_DECL_RE = re.compile(
+    rf"(?:^|(?<=;))\s*(?:int|unsigned\s+long\s+long)\s+({_PLAIN_CANDIDATE_SYM})\s*\([^;{{}}]*\)\s*;", re.MULTILINE)
+
 # Exported `extern "C"` definitions the seam intentionally does NOT bind from Go — each with
 # a reason, mirroring UNCALLED_OK. They stay visible in the advisory report; any NEW
 # unbound export still fails the gate until someone documents why it is unbound.

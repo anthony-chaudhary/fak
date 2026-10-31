@@ -128,8 +128,8 @@ extern "C" unsigned fak_v41_embed_iq4nl_rows_abi(void){return 1;}
 // retained. Fence this call's default stream explicitly before the private
 // stream: pageable H2D may return after staging, and per-thread default-stream
 // builds do not order that DMA against g_stream implicitly.
-extern "C" int fak_v41_embed_iq4nl_upload(void *device,const void *host,uint64_t bytes) {
-  if(!host||bytes==0||bytes>INT_MAX||bytes%144)return -1;
+static int v41_eg_upload_checked(void *device,const void *host,uint64_t bytes) {
+  if(!host||bytes==0||bytes>INT_MAX)return -1;
   int st=v41_checked_stream_state();if(st)return st;
   st=v41_checked_stream_owned_bytes(device,bytes);if(st)return st;
   fcuda_ts_untimed_transfer();
@@ -138,6 +138,10 @@ extern "C" int fak_v41_embed_iq4nl_upload(void *device,const void *host,uint64_t
   g_h2d_bytes+=(size_t)bytes;
   st=v41_checked_stream_error(40000,cudaStreamSynchronize(0));if(st)return st;
   return v41_checked_stream_finish();
+}
+extern "C" int fak_v41_embed_iq4nl_upload(void *device,const void *host,uint64_t bytes) {
+  if(bytes%144)return -1;
+  return v41_eg_upload_checked(device,host,bytes);
 }
 extern "C" int fak_v41_embed_iq4nl_gather_rows(const void *table,float *out,uint32_t *status,const intptr_t *ids,int rows,int dim,int vocab) {
   // The future cudaDev/cudaMu caller owns all three allocations and borrows
@@ -172,6 +176,77 @@ extern "C" int fak_v41_embed_iq4nl_row_poison(float *target,const uint32_t *stat
   cudaError_t launch_status;
   FCUDA_TS("v41_eg_iq4nl_poison", 1,
     v41_eg_iq4nl_poison<<<1,256,0,g_stream>>>(target,status,rows,index);
+    launch_status=cudaPeekAtLastError());
+  st=v41_checked_stream_error(20000,launch_status);if(st)return st;
+  return v41_checked_stream_finish();
+}
+
+// Row-parallel mapping adapted from Niko1221/Strata (MIT),
+// src/dsv41/ds4_kernels.cu:1521-1540,1938-1959 at
+// c62d5e3a15b40ea51c96aae9e8d36928965f53ab, source SHA256
+// c96ba2b906ed54d3e9c7ac22b4a5d970783fe2246e4cfd01af4e8bf748aedf5a.
+// Copyright (c) 2026 Peasant Smith (mw00), Project Maya contributors,
+// including needmorevram, and Niko1221 and the Strata contributors.
+// Full MIT license and Project Maya notice: THIRD_PARTY_NOTICES.md,
+// section "Strata / Project Maya Engram CLOCK replacement". Origin:
+// Project Maya v1.1.17, commit 8d9a9b5d; upstream port changes remain attributed.
+// Adaptations: FAK gathered-row layout, bounded grid stride, existing Q2/IQ4
+// math, exact packed BF16 bits, first-fault status and owned checked stream.
+// Q6_K and the donor's unrounded output/gate/error policy are NOT imported.
+#include "v41_engram_rows.h"
+static __global__ void v41_eg_rows(const uint8_t *src,float *dst,uint32_t *status,const int rows,const int dim,const int mode) {
+  __shared__ float decoded[256];
+  __shared__ unsigned int fault;
+  const unsigned int tid=threadIdx.x;
+  const int stride=v41_eg_rows_stride(mode);
+  for(uint64_t r=blockIdx.x;r<(uint64_t)rows;r+=gridDim.x) {
+    const uint8_t *row=src+r*(uint64_t)stride;
+    if(tid==0)fault=UINT32_MAX;
+    if(mode==1)v41_eg_q2_thread(row,decoded,(int)tid);
+    else if(mode==3&&tid<32)v41_eg_iq4nl_thread(row,decoded,(int)tid,fcuda_kvalues_iq4nl);
+    __syncthreads();
+    for(uint32_t j=tid;j<(uint32_t)dim;j+=blockDim.x) {
+      uint32_t bits,kind=2;
+      if(mode==0)bits=v41_eg_rows_packed(row,j,&kind);
+      else if(mode==2) {
+        bits=v41_eg_rows_word(row+4*j);
+        if((bits&0x7f800000u)==0x7f800000u)kind=1;
+      } else {
+        bits=__float_as_uint(decoded[j]);
+        if((bits&0x7f800000u)==0x7f800000u)kind=1;
+      }
+      ((uint32_t *)dst)[r*(uint64_t)dim+j]=bits;
+      if(kind!=2)atomicMin(&fault,(unsigned int)(2*j+kind));
+    }
+    __syncthreads();
+    if(tid==0)status[r]=v41_eg_row_fault_word(fault);
+    __syncthreads();
+  }
+}
+extern "C" unsigned fak_v41_embed_rows_abi(void){return 1;}
+extern "C" int fak_v41_embed_rows_upload(void *device,const void *host,uint64_t bytes,int mode) {
+  const int stride=v41_eg_rows_stride(mode);
+  if(!stride||bytes%(uint64_t)stride)return -1;
+  return v41_eg_upload_checked(device,host,bytes);
+}
+extern "C" int fak_v41_embed_rows_gather(const void *table,float *out,uint32_t *status,int rows,int dim,int mode) {
+  // Go has already gathered authenticated rows in demand order. No global
+  // table/IDs, borrowed mutable cache slots, or whole-model upload cross here.
+  const int stride=v41_eg_rows_stride(mode);
+  if(!stride||rows<=0||dim<=0||dim>256)return -1;
+  const uint64_t tablebytes=(uint64_t)rows*(uint64_t)stride;
+  const uint64_t outputbytes=(uint64_t)rows*(uint64_t)dim*4;
+  const uint64_t statusbytes=(uint64_t)rows*4;
+  if(tablebytes>INT_MAX||outputbytes>INT_MAX||statusbytes>INT_MAX)return -1;
+  if(table==(const void *)out||table==(const void *)status||(const void *)out==(const void *)status)return -2;
+  int st=v41_checked_stream_state();if(st)return st;
+  st=v41_checked_stream_owned_bytes(table,tablebytes);if(st)return st;
+  st=v41_checked_stream_owned_bytes(out,outputbytes);if(st)return st;
+  st=v41_checked_stream_owned_bytes(status,statusbytes);if(st)return st;
+  const int blocks=rows<65535?rows:65535;
+  cudaError_t launch_status;
+  FCUDA_TS("v41_eg_rows", blocks,
+    v41_eg_rows<<<blocks,64,0,g_stream>>>((const uint8_t *)table,out,status,rows,dim,mode);
     launch_status=cudaPeekAtLastError());
   st=v41_checked_stream_error(20000,launch_status);if(st)return st;
   return v41_checked_stream_finish();
