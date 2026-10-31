@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -50,6 +51,7 @@ func (p *PrefixSnapshot) ResidencyBytes() (host, device int64) {
 	host = p.Cache.residentBytes()
 	host += p.halLineage.metadataBytes()
 	host += p.v41ResidentBytes()
+	host = v41SatAdd(math.MaxInt64, host, p.gemma4ResidentBytes())
 	deviceBacked := p.Backend != nil && p.Backend.Caps().DeviceMemory
 	if p.halKV != nil {
 		bytes := p.halKV.ResidentBytes()
@@ -95,6 +97,9 @@ func (p *PrefixSnapshot) cloneToHostOwned() (out *HostPrefixSnapshot, err error)
 	defer func() { emitPrefixProfile(started, "stage_to_host", "complete", p, out) }()
 	if p == nil || p.Cache == nil || p.Backend == nil || p.halKV == nil {
 		return nil, errors.New("model: prefix snapshot has no complete backend state to stage")
+	}
+	if p.gemma4 != nil || p.Cache.cfg.isGemma4() {
+		return nil, fmt.Errorf("%w: host staging has no Gemma4 state format", ErrGemma4CachedContinuation)
 	}
 	// The host image has no V4.1 continuation or identity fields. Refuse both
 	// declared V4.1 models and inconsistent snapshots carrying any V4.1 marker.

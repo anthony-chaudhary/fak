@@ -83,9 +83,13 @@ func (m *Model) gemma4RopeFreqs() []float64 {
 // norm around the heterogeneous attention body and the GeGLU MLP, then a learned
 // per-layer output scale on the block result.
 func (m *Model) layerGemma4(l int, x [][]float32, ropeFreqs []float64) {
+	m.layerGemma4WithAttention(l, x, func(xn [][]float32) [][]float32 { return m.gemma4AttnSeq(l, xn, ropeFreqs) })
+}
+
+// Both the cacheless reference and selected continuation use the same block math.
+func (m *Model) layerGemma4WithAttention(l int, x [][]float32, attnSub seqSublayer) {
 	cfg := m.Cfg
 	eps := float32(cfg.RMSNormEps)
-	attnSub := func(xn [][]float32) [][]float32 { return m.gemma4AttnSeq(l, xn, ropeFreqs) }
 	mlpSub := func(xn [][]float32) [][]float32 { return m.mlpSeq(l, xn) }
 
 	composeSeqSublayer(SandwichNorm, x, m.attentionNorms(l), eps, cfg, attnSub)
@@ -110,6 +114,13 @@ func (m *Model) layerGemma4(l int, x [][]float32, ropeFreqs []float64) {
 // already-(pre)normalized inputs. It returns the per-position o_proj results (pre
 // residual); the sandwich post-norm + residual add are owned by the caller.
 func (m *Model) gemma4AttnSeq(l int, xn [][]float32, ropeFreqs []float64) [][]float32 {
+	q, k, v := m.gemma4ProjectQKV(l, xn, ropeFreqs, 0)
+	return m.gemma4AttentionRows(l, q, k, v, 0, nil)
+}
+
+// gemma4ProjectQKV preserves the reference projection/norm/rotate-half order.
+// positionBase makes the cached path use absolute, not ring-relative, RoPE.
+func (m *Model) gemma4ProjectQKV(l int, xn [][]float32, ropeFreqs []float64, positionBase int) (q, k, v [][]float32) {
 	cfg := m.Cfg
 	H := cfg.HiddenSize
 	hd := cfg.headDimForLayer(l)
@@ -118,7 +129,6 @@ func (m *Model) gemma4AttnSeq(l int, xn [][]float32, ropeFreqs []float64) [][]fl
 	if nKV <= 0 {
 		nKV = 1
 	}
-	grp := nH / nKV
 	ropeDim := cfg.ropeDimForLayer(l)
 	if ropeDim > hd {
 		ropeDim = hd
@@ -139,9 +149,9 @@ func (m *Model) gemma4AttnSeq(l int, xn [][]float32, ropeFreqs []float64) [][]fl
 	// the cached bytes are identical to this recompute.
 	inv := m.gemma4InvFreq(l, ropeDim, ropeFreqs)
 
-	q := make([][]float32, seq)
-	k := make([][]float32, seq)
-	v := make([][]float32, seq)
+	q = make([][]float32, seq)
+	k = make([][]float32, seq)
+	v = make([][]float32, seq)
 	for t := 0; t < seq; t++ {
 		xp := mat.prep(xn[t])
 		q[t] = mat.mul(p("self_attn.q_proj.weight"), xp, nH*hd, H)
@@ -166,7 +176,7 @@ func (m *Model) gemma4AttnSeq(l int, xn [][]float32, ropeFreqs []float64) [][]fl
 		gemma4NormVHeads(v[t], nKV, hd, eps)
 
 		// RoPE (rotate_half) on Q and K per head; V is left un-rotated.
-		cos, sin := ropeRowFromInvScaled(inv, t, 1)
+		cos, sin := ropeRowFromInvScaled(inv, positionBase+t, 1)
 		for h := 0; h < nH; h++ {
 			applyRopeRow(q[t][h*hd:h*hd+ropeDim], cos, sin)
 		}
@@ -175,6 +185,21 @@ func (m *Model) gemma4AttnSeq(l int, xn [][]float32, ropeFreqs []float64) [][]fl
 		}
 	}
 
+	return q, k, v
+}
+
+// gemma4AttentionRows is the shared causal equation. The continuation supplies
+// committed rows plus the separate current projection; neither arm writes KV.
+func (m *Model) gemma4AttentionRows(l int, q, k, v [][]float32, positionBase int, prior *attentionStateRows) [][]float32 {
+	cfg := m.Cfg
+	H, hd, nH := cfg.HiddenSize, cfg.headDimForLayer(l), cfg.NumHeads
+	nKV := cfg.numKVHeadsForLayer(l)
+	if nKV <= 0 {
+		nKV = 1
+	}
+	grp := nH / nKV
+	mat := residentKernel{m}
+
 	// Causal GQA attention with a per-layer window and a softmax scale of exactly 1.0
 	// (Gemma 4 sets self.scaling = 1.0; the QK-norm carries the temperature).
 	scale := float32(1.0)
@@ -182,8 +207,9 @@ func (m *Model) gemma4AttnSeq(l int, xn [][]float32, ropeFreqs []float64) [][]fl
 		scale = float32(1.0 / math.Sqrt(float64(hd)))
 	}
 	W := cfg.windowForLayer(l)
-	attnOut := make([][]float32, seq)
-	for t := 0; t < seq; t++ {
+	attnOut := make([][]float32, len(q))
+	for i := range q {
+		t := positionBase + i
 		out := make([]float32, nH*hd)
 		lo := 0
 		if W >= 0 {
@@ -193,21 +219,33 @@ func (m *Model) gemma4AttnSeq(l int, xn [][]float32, ropeFreqs []float64) [][]fl
 		}
 		for h := 0; h < nH; h++ {
 			kvh := h / grp
-			qh := q[t][h*hd : (h+1)*hd]
+			qh := q[i][h*hd : (h+1)*hd]
 			scores := make([]float32, t+1-lo)
 			for j := lo; j <= t; j++ {
-				kh := k[j][kvh*hd : (kvh+1)*hd]
+				var kj []float32
+				if j < positionBase {
+					kj, _ = prior.row(l, j)
+				} else {
+					kj = k[j-positionBase]
+				}
+				kh := kj[kvh*hd : (kvh+1)*hd]
 				scores[j-lo] = dot(qh, kh) * scale
 			}
 			softmaxInPlace(scores)
 			o := out[h*hd : (h+1)*hd]
 			for j := lo; j <= t; j++ {
-				vh := v[j][kvh*hd : (kvh+1)*hd]
+				var vj []float32
+				if j < positionBase {
+					_, vj = prior.row(l, j)
+				} else {
+					vj = v[j-positionBase]
+				}
+				vh := vj[kvh*hd : (kvh+1)*hd]
 				w := scores[j-lo]
 				saxpy(o, vh, w)
 			}
 		}
-		attnOut[t] = mat.mul(p("self_attn.o_proj.weight"), mat.prep(out), H, nH*hd)
+		attnOut[i] = mat.mul(layerName(l, "self_attn.o_proj.weight"), mat.prep(out), H, nH*hd)
 	}
 	return attnOut
 }

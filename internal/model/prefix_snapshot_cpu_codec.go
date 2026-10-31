@@ -31,6 +31,9 @@ func (p *PrefixSnapshot) HostDiskSerializable() bool {
 	if p == nil || p.Cache == nil || p.Tokens < 0 {
 		return false
 	}
+	if p.gemma4 != nil || p.Cache.cfg.isGemma4() {
+		return false
+	}
 	if p.v41 != nil || p.v41Tokens != 0 || p.hasV41Tokens || p.v41DeviceIdentity != nil || p.hasV41DeviceIdentity {
 		return false
 	}

@@ -25,6 +25,7 @@ func (p *PrefixSnapshot) ResidentBytes() int64 {
 			bytes += tensorResidentBytes(p.qwen35.layers[i].recurrent)
 		}
 	}
+	bytes = v41SatAdd(math.MaxInt64, bytes, p.gemma4ResidentBytes())
 	return v41SatAdd(math.MaxInt64, bytes, p.v41ResidentBytes())
 }
 
@@ -137,4 +138,12 @@ func NewHostPrefixSnapshotForTest(cache *KVCache) *PrefixSnapshot {
 		return nil
 	}
 	return &PrefixSnapshot{Cache: cache, Tokens: cache.Len()}
+}
+
+// gemma4ResidentBytes includes reserved (not merely filled) K/V and history.
+func (p *PrefixSnapshot) gemma4ResidentBytes() int64 {
+	if p == nil || p.gemma4 == nil || p.gemma4.rows == nil {
+		return 0
+	}
+	return p.gemma4.rows.payloadBytes
 }

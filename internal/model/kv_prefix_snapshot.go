@@ -69,6 +69,8 @@ type PrefixSnapshot struct {
 	// not carry it, so restoring a V4.1 prefix from Cache is incomplete; this
 	// field is what makes the clone a COMPLETE V4.1 prefix (fak#13342).
 	v41 *v41ForwardSnapshot
+	// Complete selected Gemma4 host owner; never reconstructed from bare Cache.
+	gemma4 *gemma4CachedContinuation
 	// coverage describes the logits saved beside this exact prefix.
 	// It is cache provenance, not arithmetic continuation or newly executed work.
 	// Capture and clone own this value independently of every live session.
@@ -230,6 +232,11 @@ func (s *Session) prefixSnapshotOwned(scope *backendExecutionScope, readResident
 	if s == nil || s.Cache == nil {
 		return nil, fmt.Errorf("model: cannot snapshot nil session cache")
 	}
+	if s.M != nil && s.M.Cfg.isGemma4() {
+		if err := s.gemma4Cached.validate(s); err != nil {
+			return nil, err // Recompute history or failed/closed state is not a complete snapshot.
+		}
+	}
 	tokens := s.Cache.Len()
 	if s.Backend != nil && s.halKV != nil {
 		// HAL attention KV is the physical position authority. Hybrid device paths
@@ -238,6 +245,10 @@ func (s *Session) prefixSnapshotOwned(scope *backendExecutionScope, readResident
 		tokens = s.halKV.Len()
 	}
 	out = &PrefixSnapshot{owner: s, epoch: s.cacheGeometryEpoch, Cache: s.Cache.Clone(), halLineage: s.halLineage.clone(0), Backend: s.Backend, Tokens: tokens, DenseGPULayers: s.DenseGPULayers, GPULayers: s.GPULayers, ExecutionPolicy: s.executionPolicy}
+	if s.gemma4Cached != nil {
+		out.gemma4 = s.gemma4Cached.clone()
+		out.Tokens = len(out.gemma4.rows.history)
+	}
 	s.targetHiddenMu.RLock()
 	out.captureTargetHidden = s.captureTargetHidden
 	out.targetHidden = cloneTargetHidden(s.targetHidden)
@@ -385,6 +396,7 @@ func (p *PrefixSnapshot) cloneOwnedWithPublications(scope *backendExecutionScope
 			targetHidden:        cloneTargetHidden(p.targetHidden),
 			targetHiddenTokens:  append([]int(nil), p.targetHiddenTokens...),
 			v41:                 p.v41.cloneWithPublications(shareSealed),
+			gemma4:              p.gemma4.clone(),
 			// A backend identity is copied by reference (it names the device the state
 			// belongs to, never device memory this snapshot owns), so a clone keeps the
 			// same backend-prefix contract as its source.
@@ -450,6 +462,14 @@ func (p *PrefixSnapshot) restoreOwned(scope *backendExecutionScope, s *Session) 
 	}
 	if p.Backend != s.Backend {
 		return fmt.Errorf("model: prefix snapshot backend mismatch")
+	}
+	if p.gemma4 != nil || p.Cache.cfg.isGemma4() || s.M != nil && s.M.Cfg.isGemma4() {
+		if p.Cache.Len() != 0 {
+			return fmt.Errorf("%w: snapshot has conflicting uniform KV positions", ErrGemma4CachedContinuation)
+		}
+		if err := p.gemma4.validateRestore(s, p.Tokens); err != nil {
+			return err
+		}
 	}
 	// State-only V4.1 prefill deliberately has no logits coverage receipt.
 	// Its retained attention state still belongs to the model that produced it;
@@ -541,6 +561,16 @@ func (p *PrefixSnapshot) restoreOwned(scope *backendExecutionScope, s *Session) 
 	if p.ExecutionPolicy == ExecutionPolicyDeviceOnly {
 		s.executionPolicy = p.ExecutionPolicy
 	}
+
+	if p.gemma4 != nil {
+		// Both owners remain intact until all validation and existing teardown
+		// above have completed. Source state is then transferred exactly once.
+		s.gemma4Cached.rows.close()
+		s.gemma4Cached = p.gemma4
+		s.gemma4Cached.epoch = s.cacheGeometryEpoch
+		s.gemma4Cached.computed = 0
+		p.gemma4 = nil
+	}
 	s.Cache = p.Cache
 	p.Cache = nil
 	p.halLineage = tokenLineage{}
@@ -602,6 +632,10 @@ func (p *PrefixSnapshot) closeOwned(scope *backendExecutionScope) {
 	p.Cache = nil
 	p.targetHidden, p.targetHiddenTokens = nil, nil
 	p.v41, p.coverage = nil, nil
+	if p.gemma4 != nil {
+		p.gemma4.rows.close()
+		p.gemma4 = nil
+	}
 	p.closed = true
 	p.mu.Unlock()
 	runBackendSiblingCleanup(
@@ -625,6 +659,9 @@ func (p *PrefixSnapshot) closeOwned(scope *backendExecutionScope) {
 func snapshotResidentPositions(s *Session) int {
 	if s == nil {
 		return 0
+	}
+	if s.gemma4Cached != nil && s.gemma4Cached.rows != nil {
+		return len(s.gemma4Cached.rows.history)
 	}
 	if s.Backend != nil && s.halKV != nil {
 		return s.halKV.Len()

@@ -381,6 +381,9 @@ type Session struct {
 	// on every other architecture, and a gemma4 session leaves Cache untouched — the cached
 	// per-layer-window KV path is #5496.
 	gemma4Hist []int
+	// Separate complete full/ring owner; the generic uniform KVCache stays empty.
+	gemma4Cached *gemma4CachedContinuation
+	gemma4Closed bool
 
 	// decodeScores reuses one attention-score buffer across heads AND decode steps. A
 	// single Session decodes serially and the per-step head loop is serial, so one buffer
@@ -1090,6 +1093,7 @@ func (s *Session) PrefillContext(ctx context.Context, ids []int) ([]float32, err
 	}
 	logits := s.prefillOwnedContext(ctx, ids)
 	if err := ctx.Err(); err != nil {
+		s.failGemma4CachedContinuation(err)
 		return nil, err
 	}
 	complete = true
@@ -1154,7 +1158,7 @@ func (s *Session) prefillOwnedContext(ctx context.Context, ids []int) []float32 
 		// (residentMatRows dispatches f32/Q8_0/Q4_K/int4/k-quant/GPTQ by name). It must precede
 		// every generic lane below — each of them assumes the scalar cfg.HeadDim, which is the
 		// wrong shape on this arch's local layers.
-		return s.prefillGemma4(ids)
+		return s.prefillGemma4Context(ctx, ids)
 	}
 	if s.Backend != nil {
 		// A device session executes the WHOLE forward through the HAL (matWeightHAL now
@@ -1262,6 +1266,7 @@ func (s *Session) PrefillNoLogitsContext(ctx context.Context, ids []int) error {
 	}
 	s.prefillNoLogitsOwnedContext(ctx, ids)
 	if err := ctx.Err(); err != nil {
+		s.failGemma4CachedContinuation(err)
 		return err
 	}
 	complete = true
@@ -1319,10 +1324,9 @@ func (s *Session) prefillNoLogitsOwnedContext(ctx context.Context, ids []int) {
 		return
 	}
 	if s.M.Cfg.isGemma4() {
-		// #5495. The dedicated gemma4 forward is cacheless, so advancing state IS appending to
-		// the history — there is no K/V to fill and nothing to discard. A later Prefill/Step
-		// recomputes over the full prefix, so this is exactly PrefillNoLogits's contract.
-		s.gemma4Ingest(ids)
+		// The default bridge only appends history. The explicitly selected cached
+		// route must run the stack and publish K/V even without a final LM head.
+		s.prefillNoLogitsGemma4Context(ctx, ids)
 		return
 	}
 	if s.Backend != nil {

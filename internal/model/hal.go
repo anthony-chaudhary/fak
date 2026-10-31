@@ -183,6 +183,7 @@ func (s *Session) closeOwned(scope *backendExecutionScope) {
 		return
 	}
 	s.closeOnce.Do(func() {
+		s.closeGemma4CachedContinuation()
 		retireBranchCache(s)
 		// Retire both rotary-table consumers before any close callback can
 		// interrupt teardown. Selected callers preserve their primary failure.

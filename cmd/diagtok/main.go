@@ -26,7 +26,12 @@ func main() {
 	cacheless := flag.Bool("cacheless", false, "greedy-decode via repeated cacheless Forward (for arches without a cached Session path yet, e.g. gemma4)")
 	promptFlag := flag.String("prompt", "", "override the decode prompt (raw text; no chat template applied)")
 	loadMode := flag.String("load", "q8", "weight residency: q8 | q4k (f32 activations) | f32")
+	gemma4Cached := bindGemma4CachedDiagnosticFlags(flag.CommandLine)
 	flag.Parse()
+	if gemma4Cached.enabled && *cacheless {
+		fmt.Fprintln(os.Stderr, "Gemma4 cached qualification cannot use --cacheless (its BOS policy differs)")
+		os.Exit(2)
+	}
 	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
 	*gguf = pathutil.ExpandTilde(*gguf)
 	if *gguf == "" {
@@ -116,7 +121,12 @@ func main() {
 	}
 
 	s := m.NewSession()
+	defer s.Close()
 	s.Quant = *quant
+	if err := gemma4Cached.configure(s, *cacheless, len(pids), *n); err != nil {
+		fmt.Fprintln(os.Stderr, "Gemma4 cached selection:", err)
+		os.Exit(2)
+	}
 	logits := s.Prefill(pids)
 	fmt.Printf("[forward] vocab=%d  argmax0=%d  (top via argmax each step):\n", len(logits), mathx.ArgmaxF32(logits))
 	var gen []int
@@ -129,6 +139,10 @@ func main() {
 	}
 	full, _ := tok.Decode(gen)
 	fmt.Printf("\n[greedy full] %q\n", full)
+	if ob := s.Gemma4CachedContinuationObservation(); ob.Selected {
+		fmt.Printf("[gemma4-cached] engine=fak-native tokens=%d computed_tokens=%d state_bytes=%d failed=%t closed=%t\n",
+			ob.Tokens, ob.ComputedTokens, ob.StateBytes, ob.Failed, ob.Closed)
+	}
 }
 
 func max(a, b int) int {
@@ -136,4 +150,31 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// This qualification selection is typed and bound to the actual GGUF-loaded
+// Session above. The normal Session (not --cacheless, which prepends BOS) is the
+// matched full-history recompute control for identical artifact and token IDs.
+type gemma4CachedDiagnosticFlags struct {
+	enabled    bool
+	stateBytes int64
+}
+
+func bindGemma4CachedDiagnosticFlags(fs *flag.FlagSet) *gemma4CachedDiagnosticFlags {
+	out := &gemma4CachedDiagnosticFlags{}
+	fs.BoolVar(&out.enabled, "gemma4-cached-qualification", false, "select bounded native Gemma4 host continuation; default keeps recompute")
+	fs.Int64Var(&out.stateBytes, "gemma4-state-bytes", 0, "required positive K/V+history reservation budget for Gemma4 cached qualification (not model/process RAM)")
+	return out
+}
+
+func (f *gemma4CachedDiagnosticFlags) configure(s *model.Session, cacheless bool, promptTokens, decodeTokens int) error {
+	if !f.enabled {
+		return nil
+	}
+	if cacheless || promptTokens <= 0 || decodeTokens < 0 || decodeTokens > int(^uint(0)>>1)-promptTokens {
+		return fmt.Errorf("cached qualification needs the unchanged Session token stream and a positive bounded prompt")
+	}
+	return s.ConfigureGemma4CachedContinuation(model.Gemma4CachedContinuationOptions{
+		MaxTokens: promptTokens + decodeTokens, MaxStateBytes: f.stateBytes,
+	})
 }
