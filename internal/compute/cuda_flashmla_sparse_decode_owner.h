@@ -1,4 +1,5 @@
 #pragma once
+#include <stdint.h>
 #include "cuda_flashmla_sparse_decode.h"
 #ifdef __cplusplus
 extern "C" {
