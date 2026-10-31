@@ -47,8 +47,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -56,6 +54,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/dormancy"
 	"github.com/anthony-chaudhary/fak/internal/refid"
+	"github.com/anthony-chaudhary/fak/internal/sessionref"
 )
 
 // refPrefix is the dedicated ref namespace every fak side ref lives under. Unlike
@@ -67,7 +66,7 @@ import (
 // refs/fak/locks/intent-<key> (intent.go, #2155), and a ticket execution contract at
 // refs/fak/locks/contract-<ticket_id> (contract.go, #11165); the readers on each side filter by
 // the basename marker so the views stay distinct.
-const refPrefix = "refs/fak/locks/"
+const refPrefix = sessionref.RefPrefix
 
 // Runner executes a git subcommand in dir and returns (stdout, exitCode, err). It is
 // the SAME contract as witness.Runner / safecommit.Runner: err is non-nil ONLY when
@@ -238,29 +237,7 @@ func (s *Store) Acquire(ctx context.Context, rec Record) (string, error) {
 // (never a branch/HEAD, never a force). Returns the written ref on success. Shared
 // by Acquire (lock leases) and PublishSession (session descriptors).
 func (s *Store) putBlobRef(ctx context.Context, ref string, v any) (string, error) {
-	if s.publishingDisabled(ctx) {
-		// No git object DB in s.dir (a serve running from a non-repo cwd): a blob write
-		// would fail with `hash-object -w` exit 128 on EVERY call. Disable the side-ref
-		// publisher CLEANLY — a best-effort caller (session_durable.publishBestEffort)
-		// sees success and stops logging a per-refresh error, and the cross-machine
-		// feature is simply off on a non-repo box, the honest post-state. Returns the ref
-		// the caller asked for (nothing was written) so the fail-open contract holds.
-		return ref, nil
-	}
-	blob, err := json.Marshal(v)
-	if err != nil {
-		return "", fmt.Errorf("leaseref: marshal record: %w", err)
-	}
-	sha, err := s.writeBlob(ctx, blob)
-	if err != nil {
-		return "", err
-	}
-	if _, code, err := s.run(ctx, s.dir, "update-ref", ref, sha); err != nil {
-		return "", fmt.Errorf("leaseref: git not executable: %w", err)
-	} else if code != 0 {
-		return "", fmt.Errorf("leaseref: update-ref %s exited %d", ref, code)
-	}
-	return ref, nil
+	return sessionref.PutBlobRef(ctx, sessionref.Runner(s.run), s.dir, ref, v, s.publishingDisabled(ctx))
 }
 
 // Release deletes refs/fak/locks/<id>. Idempotent at the package level: a missing ref is
@@ -588,23 +565,7 @@ func (s *Store) readRef(ctx context.Context, ref string) (Record, error) {
 // byte-for-byte unchanged. On the disabling transition it logs a SINGLE line, replacing
 // the per-refresh error spam with one setup-time notice.
 func (s *Store) publishingDisabled(ctx context.Context) bool {
-	if !s.realGit {
-		return false
-	}
-	s.probeOnce.Do(func() {
-		if s.hasObjectDB(ctx) {
-			return
-		}
-		s.publishOff = true
-		dir := s.dir
-		if dir == "" {
-			if wd, err := os.Getwd(); err == nil {
-				dir = wd
-			}
-		}
-		log.Printf("leaseref: no git object DB in %s; session side-ref publishing disabled", dir)
-	})
-	return s.publishOff
+	return sessionref.PublishingDisabled(ctx, sessionref.Runner(s.run), s.dir, s.realGit, &s.probeOnce, &s.publishOff)
 }
 
 // hasObjectDB reports whether s.dir resolves a git object database — i.e. `git rev-parse
@@ -614,36 +575,11 @@ func (s *Store) publishingDisabled(ctx context.Context) bool {
 // perfectly usable object DB. A non-executable git counts as "no object DB", so the
 // publisher disables cleanly rather than erroring on every refresh.
 func (s *Store) hasObjectDB(ctx context.Context) bool {
-	_, code, err := s.run(ctx, s.dir, "rev-parse", "--git-dir")
-	return err == nil && code == 0
+	return sessionref.HasObjectDB(ctx, sessionref.Runner(s.run), s.dir)
 }
 
 // writeBlob writes blob into the object store via `git hash-object -w <file>` (a temp
 // file, since the Runner seam carries no stdin) and returns the resulting object id.
 func (s *Store) writeBlob(ctx context.Context, blob []byte) (string, error) {
-	f, err := os.CreateTemp("", "fak-lease-*.json")
-	if err != nil {
-		return "", fmt.Errorf("leaseref: temp blob: %w", err)
-	}
-	tmp := f.Name()
-	defer os.Remove(tmp)
-	if _, err := f.Write(blob); err != nil {
-		f.Close()
-		return "", fmt.Errorf("leaseref: write blob: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return "", fmt.Errorf("leaseref: close blob: %w", err)
-	}
-	out, code, err := s.run(ctx, s.dir, "hash-object", "-w", tmp)
-	if err != nil {
-		return "", fmt.Errorf("leaseref: git not executable: %w", err)
-	}
-	if code != 0 {
-		return "", fmt.Errorf("leaseref: hash-object exited %d", code)
-	}
-	sha := strings.TrimSpace(out)
-	if !validObjectID(sha) {
-		return "", fmt.Errorf("leaseref: hash-object produced invalid object id %q", sha)
-	}
-	return sha, nil
+	return sessionref.WriteBlob(ctx, sessionref.Runner(s.run), s.dir, blob)
 }

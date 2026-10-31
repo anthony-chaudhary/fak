@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"github.com/anthony-chaudhary/fak/internal/sessionref"
 )
 
 // RunSessionPublish implements both fak leaseref session-publish and the standalone
@@ -41,7 +41,7 @@ func RunSessionPublish(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 	now := time.Now()
-	desc := leaseref.SessionDescriptor{
+	desc := sessionref.SessionDescriptor{
 		ID:        *session,
 		Host:      *host,
 		PCBState:  strings.TrimSpace(*state),
@@ -51,7 +51,7 @@ func RunSessionPublish(stdout, stderr io.Writer, argv []string) int {
 	if desc.PCBState == "" {
 		desc.PCBState = "RUNNING"
 	}
-	store := leaseref.NewInDir(*dir)
+	store := sessionref.NewInDir(*dir)
 	if _, err := store.PublishSession(context.Background(), desc); err != nil {
 		fmt.Fprintf(stderr, "fak leaseref session-publish: %v\n", err)
 		return 1

@@ -59,13 +59,8 @@ func TestStandaloneSessionPublishDependencyBoundary(t *testing.T) {
 	// inference, developer tools or the full command registry into this leaf.
 	allowed := map[string]bool{
 		"cmd/fak-leaseref": true, "internal/leaserefcli": true,
-		"internal/accountobs": true, "internal/bgloop": true, "internal/cacheprice": true,
-		"internal/ctxplan": true, "internal/dormancy": true, "internal/exclusivefile": true,
-		"internal/flock": true, "internal/jsonlledger": true, "internal/leaseref": true,
-		"internal/pathutil": true, "internal/refid": true, "internal/rehydrate": true,
-		"internal/resume": true, "internal/sessionaudit": true, "internal/sessionjournal": true,
-		"internal/strmatch": true, "internal/trajctl": true, "internal/windowgate": true,
-		"internal/wipref": true, "pkg/sysproc": true,
+		"internal/sessionref": true, "internal/pathutil": true, "internal/refid": true,
+		"internal/windowgate": true, "internal/strmatch": true, "pkg/sysproc": true,
 	}
 	queue := []string{"cmd/fak-leaseref"}
 	seen := map[string]bool{}
@@ -109,7 +104,7 @@ func TestStandaloneSessionPublishDependencyBoundary(t *testing.T) {
 	}
 	sort.Strings(pkgs)
 	t.Logf("all-platform repository dependency closure (%d): %v", len(pkgs), pkgs)
-	for _, unrelated := range []string{"internal/model", "internal/compute", "internal/devcmd", "internal/agent", "internal/gateway", "cmd/fak"} {
+	for _, unrelated := range []string{"internal/leaseref", "internal/rehydrate", "internal/resume", "internal/model", "internal/compute", "internal/devcmd", "internal/agent", "internal/gateway", "cmd/fak"} {
 		if seen[unrelated] {
 			t.Fatalf("unrelated source package %s invalidates standalone tool", unrelated)
 		}
