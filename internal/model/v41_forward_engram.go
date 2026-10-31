@@ -129,8 +129,8 @@ type v41EngramStage struct {
 	headDim       int
 	hc            int
 	layerIDs      []int
-	// rowBytes is the per-row width every cached row has (264 packed, 84 Q2_K
-	// blocks of a verified Q2_K source, or 1024 f32). The forward dispatches row
+	// rowBytes is the per-row width every cached row has (264 packed, verified
+	// 84-byte Q2_K or 144-byte IQ4_NL blocks, or 1024 f32). The forward dispatches row
 	// decode on it, so the dialects share one architecture-neutral stage.
 	rowBytes int
 	// bindings records the verified artifact binding each source was admitted
@@ -196,22 +196,25 @@ func (m *Model) wireV41Engram(layout V41EngramLayout, srcs []V41EngramRowSource,
 				ErrV41NativeUnsupported, ids[i], got, rowBytes)
 		}
 	}
-	// A verified Q2_K source is cached as its bound super-blocks: the decode
+	// A verified Q2_K or IQ4_NL source is cached as its bound blocks: the decode
 	// then runs where the row is consumed, on the device when the session binds
 	// one, instead of dequantizing every cache fill on the host.
 	cached := srcs
 	if rowBytes == V41EngramF32RowBytes {
 		encoded := make([]V41EngramRowSource, len(srcs))
+		var encoding string
 		for i, src := range srcs {
 			form, ok := v41EngramEncodedForm(src)
-			if !ok {
+			// A mixed/unsupported set keeps the existing served-F32 arm before
+			// device selection; equal byte width never establishes identity.
+			if !ok || (i > 0 && form.encoding != encoding) {
 				encoded = nil
 				break
 			}
-			encoded[i] = form
+			encoded[i], encoding = form, form.encoding
 		}
 		if encoded != nil {
-			cached, rowBytes = encoded, v41EngramQ2KEncodedRowBytes
+			cached, rowBytes = encoded, encoded[0].RowBytes()
 		}
 	}
 	caches := make([]*V41EngramRowCache, len(cached))
@@ -261,7 +264,8 @@ func (s *v41EngramStage) cacheIndex(l int) int {
 // decodeV41EngramRow decodes one cached row of the stage's dialect into dim f32
 // values on the host: the packed 264-byte dialect is dequantized (E4M3 weights *
 // E8M0 scales), a Q2_K block (84 bytes) is dequantized by the scalar super-block
-// reference, and the f32 dialect (1024 bytes) is read little-endian. Every
+// reference, IQ4_NL (144 bytes) reuses eight scalar blocks, and the f32 dialect
+// (1024 bytes) is read little-endian. Every
 // dialect fails closed on a width it does not own.
 func decodeV41EngramRow(row []byte, dim, rowBytes int) ([]float32, error) {
 	v41NoteHostEngramRowDecode()
@@ -270,6 +274,8 @@ func decodeV41EngramRow(row []byte, dim, rowBytes int) ([]float32, error) {
 		return dequantV41EngramRow(row, dim)
 	case v41EngramQ2KEncodedRowBytes:
 		return dequantV41EngramQ2KRow(row, dim)
+	case v41EngramIQ4NLEncodedRowBytes:
+		return dequantV41EngramIQ4NLRow(row, dim)
 	case V41EngramF32RowBytes:
 		if len(row) != V41EngramF32RowBytes {
 			return nil, fmt.Errorf("%w: Engram f32 row has %d bytes, want %d",

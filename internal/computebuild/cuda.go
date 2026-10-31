@@ -168,6 +168,10 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 		if err != nil {
 			return nil, err
 		}
+		nvccArgs, err = cudaAsyncQualificationFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
 		nvccArgs, err = cudaMMQPrefillFlags(ctx, nvccArgs, env)
 		if err != nil {
 			return nil, err
@@ -221,6 +225,10 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 			return nil, err
 		}
 		nvccArgs, err = cudaGraphOnceFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
+		nvccArgs, err = cudaAsyncQualificationFlags(ctx, nvccArgs, env)
 		if err != nil {
 			return nil, err
 		}
@@ -434,6 +442,7 @@ func CUDAGoTags(cfg *CUDAConfig) string {
 	goTags = cudaFlashMLAGoTags(cfg, goTags)
 	goTags = cudaFlashMLADecodeGoTags(cfg, goTags)
 	goTags = cudaGraphOnceTags(cfg, goTags)
+	goTags = cudaAsyncQualificationTags(cfg, goTags)
 	if cfg.EnableDeepGEMMWKV {
 		goTags += ",fak_cuda_deepgemm_wkv"
 	}
@@ -444,6 +453,9 @@ func CUDAGoTags(cfg *CUDAConfig) string {
 func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 	if cfg == nil {
 		return fmt.Errorf("nil CUDAConfig")
+	}
+	if err := ValidateCUDAAsyncQualifications(cfg); err != nil {
+		return err
 	}
 	if cfg.EnableV41Compressor && cfg.EnableV41CompressorPool {
 		return fmt.Errorf("--v41-compressor and --v41-compressor-pool are mutually exclusive")
@@ -465,6 +477,10 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 	if cfg.PkgDir == "" {
 		cfg.PkgDir = filepath.Join(cfg.RepoRoot, "internal", "compute")
 	}
+	if err := prepareCUDAAsyncQualifications(cfg); err != nil {
+		return err
+	}
+	ctx = context.WithValue(ctx, cudaAsyncQualificationKey{}, cudaAsyncQualificationSelection(cfg))
 	if selection := cudaMMQPrefillSelection(cfg); len(selection) > 0 {
 		if err := prepareCUDAMMQPrefill(cfg, selection); err != nil {
 			return err

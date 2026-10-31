@@ -225,6 +225,7 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/async_upload.cuh"
 #include "cuda/model_candidates.cuh"
 #include "cuda/v41_checked_stream.cuh"
+#include "cuda/v41_embed_gather.cuh"
 #include "cuda_v41_indexer.cu"
 #include "cuda_v41_engram_gate.cu"
 #include "cuda_v41_routed_swiglu.cu"
