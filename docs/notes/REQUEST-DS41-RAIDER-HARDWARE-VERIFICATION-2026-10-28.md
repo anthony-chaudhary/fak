@@ -1,6 +1,18 @@
 # Hardware-agent request: DS4.1 Flash on Raider 5090
 
-Request ID: `D41-HW-20261028-0310`. Prepared 2026-10-28 UTC. Status: **prepared; not assigned, run, or hardware-verified**.
+Request ID: `D41-HW-20261028-0310`. Prepared 2026-10-28 UTC. Status: **posted for pickup; unclaimed and unrun; not hardware-verified**.
+
+## Pickup refresh — 2026-10-31
+
+The existing request was [posted on issue #12640](https://github.com/anthony-chaudhary/fak/issues/12640#issuecomment-6538245444) for independently authorized hardware executors. The posted refresh is a delivery receipt, not an executor claim or execution result. Campaign target: 2026-10-31 10:43 UTC. It adds changed-path CUDA acceptance for published ports and retains the six-expert DS4.1 inventory/admission protocol below. Prepared, unpublished candidates must wait for verified public source and native build identities before execution.
+
+Use only existing authorized hardware and exclusive ownership. This refresh grants no new machine access, purchases, driver/security changes, foreign-lease takeover, or revival of withdrawn Mac/Halo operations. Record an explicit claim and target admission before running; report actual receipts rather than treating a posted request as progress on hardware.
+
+## Published CUDA source update — 2026-10-31
+
+The 63-path opt-in CUDA MMQ/checked-terminal/routed-MMID composition is now published at [5211e8d3c5dd030a20d3806fbbef2581fc51866f](https://github.com/anthony-chaudhary/fak/commit/5211e8d3c5dd030a20d3806fbbef2581fc51866f), independently read back on remote main. Defaults remain opt-in. Scoped host controls, including current-production routed-provider scope, passed. Genuine CUDA 13.1 SM80 ptxas/fatbinary/GCC stages produced object SHA256 `f25c5e269b5f0e23864f7fb219642d36eb469847239698dfc193a1769c32411b`; the original nvcc invocation was interrupted, so this is a recovered object-stage result, not a clean full build or hardware qualification.
+
+Executors must build and identify their complete target-compatible native archive/binary and run the published required-device witnesses. Archive/cgo linking, device lifetime/numerics, model parity, throughput, and native DS4.1 generation remain unverified by this update. At the 2026-10-31 03:59 UTC response check, no operator claim or run had been verified. The original posted request and all authority, ownership, resource, and stop limits above remain unchanged.
 
 ## Routing instruction — do not wait for the coordinator's connection
 
