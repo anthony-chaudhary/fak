@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
+	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // q2kCapBackend is a minimal backend stub whose two capability axes (native packed
@@ -136,6 +138,116 @@ func TestServeDenseKQuantOptionsDeclinesQ6KPartialCapability(t *testing.T) {
 			}
 			if effects.DenseKQuantResident || effects.DenseQ2KResident {
 				t.Fatalf("declined Q6_K changed other residency: %+v", effects)
+			}
+		})
+	}
+}
+
+// serveGDNTestBackend exposes the real CUDA source dtype declarations without
+// opening a device. The non-CUDA name is a control for the same loader inputs,
+// not a claim that either device has executed this fixture.
+type serveGDNTestBackend struct {
+	compute.Backend
+	name string
+}
+
+func (b serveGDNTestBackend) Name() string { return b.name }
+func (b serveGDNTestBackend) Caps() compute.Caps {
+	c := b.Backend.Caps()
+	c.DeviceMemory, c.UploadDtype = true, true
+	return c
+}
+func (b serveGDNTestBackend) SupportsDeviceWeightDtype(dt compute.Dtype) bool {
+	for _, op := range compute.CUDADeviceOpTable() {
+		if op.Operation == "matmul" && op.Format == dt.String() {
+			return true
+		}
+	}
+	return false
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestServeCUDAGDNLoaderKeepsSupportedWeights(t *testing.T) {
+	for _, key := range []string{"FAK_QWEN35_NATIVE_QK_ROWS", "FAK_QWEN35_NATIVE_GDN_INPROJ_ROWS", "FAK_QWEN35_NATIVE_SSM_OUT"} {
+		t.Setenv(key, "1")
+	}
+	t.Setenv("FAK_W3_MLP", "0")
+	// Only the relevant projection payloads are needed to witness real loader
+	// storage. The 64-layer hybrid topology is real, but this is not a complete
+	// inference model or an arithmetic/device parity fixture.
+	meta := map[string]ggufload.Value{
+		"general.architecture":                    {Type: ggufload.TypeString, Value: "qwen35"},
+		"qwen35.attention.layer_norm_rms_epsilon": {Type: ggufload.TypeFloat32, Value: float32(1e-5)},
+	}
+	for key, value := range map[string]uint64{
+		"context_length": 16, "embedding_length": 256, "block_count": 64,
+		"feed_forward_length": 256, "attention.head_count": 2,
+		"attention.head_count_kv": 1, "attention.key_length": 128,
+		"attention.value_length": 128, "full_attention_interval": 4,
+		"nextn_predict_layers": 0, "ssm.conv_kernel": 4, "ssm.state_size": 64,
+		"ssm.group_count": 2, "ssm.time_step_rank": 4, "ssm.inner_size": 256,
+	} {
+		meta["qwen35."+key] = ggufload.Value{Type: ggufload.TypeUint64, Value: value}
+	}
+	projections := []struct {
+		gguf, canonical  string
+		kind             ggufload.TensorType
+		rows, blockBytes int
+	}{
+		{"blk.0.attn_qkv.weight", "model.layers.0.linear_attn.in_proj_qkv.weight", ggufload.TensorQ4_K, 512, 144},
+		{"blk.1.attn_qkv.weight", "model.layers.1.linear_attn.in_proj_qkv.weight", ggufload.TensorQ6_K, 512, 210},
+		{"blk.0.attn_gate.weight", "model.layers.0.linear_attn.in_proj_z.weight", ggufload.TensorQ4_K, 256, 144},
+		{"blk.0.ssm_out.weight", "model.layers.0.linear_attn.out_proj.weight", ggufload.TensorQ4_K, 256, 144},
+		{"blk.3.attn_q.weight", "model.layers.3.self_attn.q_proj.weight", ggufload.TensorQ4_K, 512, 144},
+		{"blk.3.attn_k.weight", "model.layers.3.self_attn.k_proj.weight", ggufload.TensorQ4_K, 128, 144},
+	}
+	var payload bytes.Buffer
+	file := &ggufload.File{Metadata: meta}
+	for _, p := range projections {
+		file.Tensors = append(file.Tensors, ggufload.TensorInfo{
+			Name: p.gguf, Dims: []uint64{256, uint64(p.rows)}, Type: p.kind, FileOffset: int64(payload.Len()),
+		})
+		payload.Write(make([]byte, p.rows*p.blockBytes))
+	}
+	// An unrelated dense IQ projection must remain packed on both paths.
+	file.Tensors = append(file.Tensors, ggufload.TensorInfo{
+		Name: "blk.0.ffn_gate.weight", Dims: []uint64{256, 256}, Type: ggufload.TensorIQ2_XXS, FileOffset: int64(payload.Len()),
+	})
+	payload.Write(make([]byte, 256*66))
+	cfg, err := file.Config()
+	if err != nil || !fakmodel.Qwen38ExactMetalQ8Runtime(cfg) {
+		t.Fatalf("fixture must reach exact hybrid loader policy: cfg=%+v err=%v", cfg, err)
+	}
+	for _, name := range []string{"cuda", "vulkan"} {
+		t.Run(name, func(t *testing.T) {
+			backend := serveGDNTestBackend{Backend: compute.Default(), name: name}
+			ws, err := ggufload.NewWeightSource(file, bytes.NewReader(payload.Bytes()), int64(payload.Len()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ws.Close()
+			m, err := ws.QuantModelQ4KProfileOptions(nil, serveDenseKQuantOptions(backend)...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer m.CloseWeights()
+			for _, p := range projections {
+				q8, q4, kq := m.HasQ8(p.canonical), m.HasQ4K(p.canonical), m.HasKQuant(p.canonical)
+				t.Logf("%s: Q8=%v Q4_K=%v KQuant=%v", p.canonical, q8, q4, kq)
+				if name == "cuda" {
+					if !q8 || q4 || kq {
+						t.Errorf("CUDA whole-GDN compatibility requires prior Q8 storage: %s Q8=%v Q4_K=%v KQuant=%v", p.canonical, q8, q4, kq)
+					}
+				} else if q8 || q4 != (p.kind == ggufload.TensorQ4_K) || kq != (p.kind == ggufload.TensorQ6_K) {
+					t.Errorf("non-CUDA raw projection changed: %s Q8=%v Q4_K=%v KQuant=%v", p.canonical, q8, q4, kq)
+				}
+			}
+			if got, want := m.Qwen35OutProjTiled("model.layers.0.linear_attn.out_proj.weight"), name != "cuda"; got != want {
+				t.Errorf("tiled GDN out = %v, want %v", got, want)
+			}
+			const iq = "model.layers.0.mlp.gate_proj.weight"
+			if !m.HasKQuant(iq) || m.HasQ8(iq) || !backend.SupportsDeviceWeightDtype(compute.IQ2_XXS) {
+				t.Error("independent IQ projection/capability must remain packed and enabled")
 			}
 		})
 	}

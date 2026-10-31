@@ -39,6 +39,14 @@ func serveDenseKQuantOptions(backend compute.Backend) []ggufload.Q4KLoadOption {
 		return nil
 	}
 	opts := []ggufload.Q4KLoadOption{ggufload.WithDenseKQuantResident(false)}
+	if backend.Name() == "cuda" {
+		// CUDA's whole GDN operation consumes F32/Q8 projections and has no
+		// composed raw-quant or tiled-out fallback. Independent IQ matmul
+		// support must not admit those loader formats. This conservative option
+		// also keeps attention q/k in their prior Q8 storage; raw kernels and
+		// independent IQ residency remain enabled below.
+		opts = append(opts, ggufload.WithNativeLinearAttnRows(false), ggufload.WithQwen35NativeSSMOut(false))
+	}
 	if cap, ok := backend.(q2kCapableBackend); ok && cap.SupportsQ2K() && backend.Caps().UploadDtype {
 		opts = append(opts, ggufload.WithDenseQ2KResident(true))
 	}
