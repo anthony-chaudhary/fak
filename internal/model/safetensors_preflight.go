@@ -163,12 +163,12 @@ func BuildSafetensorsPreflight(in SafetensorsPreflightInput) (*SafetensorsPrefli
 		shards = []string{"model.safetensors"}
 	}
 
-	type shardHeader struct {
-		name string
-		hdr  map[string]json.RawMessage
-	}
-	headers := make([]shardHeader, 0, len(shards))
-	byShard := map[string]map[string]json.RawMessage{}
+	// Pairing is shard-local: quantizeFileInto cannot consume a companion from
+	// another shard. Keep membership even for duplicate names so the report cannot
+	// silently accept a checkpoint the indexed loader rejects.
+	byShard := map[string]map[string]stEntry{}
+	byName := map[string]stEntry{}
+	tensorShard := map[string]string{}
 	for _, shard := range shards {
 		sf, err := openSafetensorsFile(filepath.Join(in.Dir, shard))
 		if err != nil {
@@ -176,25 +176,22 @@ func BuildSafetensorsPreflight(in SafetensorsPreflightInput) (*SafetensorsPrefli
 		}
 		hdr := sf.hdr
 		_ = sf.Close()
-		headers = append(headers, shardHeader{name: shard, hdr: hdr})
-		byShard[shard] = hdr
-	}
-
-	byName := map[string]stEntry{}
-	seen := map[string]bool{}
-	for _, h := range headers {
-		for name, rawMsg := range h.hdr {
-			if seen[name] {
-				continue
-			}
+		entries := map[string]stEntry{}
+		for name, rawMsg := range hdr {
 			var e stEntry
 			if err := json.Unmarshal(rawMsg, &e); err != nil {
-				return nil, fmt.Errorf("safetensors: entry %s in %s: %w", name, h.name, err)
+				return nil, fmt.Errorf("safetensors: entry %s in %s: %w", name, shard, err)
 			}
-			seen[name] = true
+			entries[name] = e
+			if prior, duplicate := tensorShard[name]; duplicate {
+				rep.RoleErrors[name] = fmt.Sprintf("safetensors: tensor %s appears in both %s and %s", name, prior, shard)
+				continue
+			}
+			tensorShard[name] = shard
 			byName[name] = e
 			rep.DTypes[e.Dtype]++
 		}
+		byShard[shard] = entries
 	}
 
 	if weightMap != nil {
@@ -220,15 +217,85 @@ func BuildSafetensorsPreflight(in SafetensorsPreflightInput) (*SafetensorsPrefli
 	for _, name := range names {
 		e := byName[name]
 		t := SafetensorsPreflightTensor{Name: name, Dtype: e.Dtype}
-		t.Role, t.Representation = rep.routeRole(name, e, byName)
+		t.Role, t.Representation = rep.routeRole(name, e, byShard[tensorShard[name]])
 		rep.Tensors = append(rep.Tensors, t)
 	}
+	rep.checkFusedProjectionCollisions(shards, byShard)
 	return rep, nil
+}
+
+// checkFusedProjectionCollisions follows load order, not report order. A fused
+// split refuses existing output components; a later ordinary tensor overwrites
+// its own Q8 key instead, so an unordered duplicate-name rule would be wrong.
+func (rep *SafetensorsPreflight) checkFusedProjectionCollisions(shards []string, byShard map[string]map[string]stEntry) {
+	installed := map[string]bool{}
+	for _, shard := range shards {
+		entries := byShard[shard]
+		names := make([]string, 0, len(entries))
+		for name := range entries {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			e := entries[name]
+			switch e.Dtype {
+			case "BF16", "F16", "F32":
+			case "F8_E4M3":
+				if !strings.HasSuffix(name, ".weight") {
+					continue
+				}
+				scale, ok := entries[name+"_scale_inv"]
+				if !ok || (scale.Dtype != "BF16" && scale.Dtype != "F16" && scale.Dtype != "F32") {
+					continue
+				}
+			default:
+				continue
+			}
+			canonical, keep := quantSourceTensorNameWithRetention(rep.Config, name, false)
+			if !keep {
+				continue
+			}
+			layer, suffix, ok := parseLayerTensorSuffix(canonical)
+			if !ok {
+				continue
+			}
+			if fused, err := preflightFP8FusedProjection(rep.Config, canonical, e.Shape); fused {
+				if err != nil {
+					continue // The invalid source never installs output components.
+				}
+				outputs := []string{layerPrefix(layer) + suffixGateProj, layerPrefix(layer) + suffixUpProj}
+				if suffix == suffixQKVProj {
+					outputs = []string{layerPrefix(layer) + suffixQProj, layerPrefix(layer) + suffixKProj, layerPrefix(layer) + suffixVProj}
+				}
+				conflict := false
+				for _, output := range outputs {
+					if installed[output] {
+						rep.RoleErrors[name] = fmt.Sprintf("safetensors: cannot split %s: component %s already exists", name, output)
+						conflict = true
+						break
+					}
+				}
+				if !conflict {
+					for _, output := range outputs {
+						installed[output] = true
+					}
+				}
+				continue
+			}
+			if len(e.Shape) == 2 {
+				switch suffix {
+				case suffixQProj, suffixKProj, suffixVProj, suffixGateProj, suffixUpProj:
+					installed[canonical] = true
+				}
+			}
+		}
+	}
 }
 
 // routeRole assigns one tensor its loader role and load-time representation, walking the
 // same decision points quantizeNamedTensorsInto walks, in the same order. It records host
-// gaps, scale gaps and role errors on the receiver as it goes.
+// gaps, scale gaps and role errors on the receiver as it goes. byName contains only
+// the current shard, matching the loader's format-specific pairing scope.
 func (rep *SafetensorsPreflight) routeRole(name string, e stEntry, byName map[string]stEntry) (role, representation string) {
 	cfg := rep.Config
 	switch {
@@ -276,30 +343,51 @@ func (rep *SafetensorsPreflight) routeRole(name string, e stEntry, byName map[st
 		return SafetensorsRoleV4DenseFP8, SafetensorsRepQ8
 	}
 
-	if strings.HasSuffix(name, "_blocks") {
-		base := strings.TrimSuffix(name, "_blocks")
-		if _, ok := byName[base+"_scales"]; ok {
-			representation := SafetensorsRepF32Host
-			if DecodedFloatGoesToQ8(cfg, base, e.Shape) {
-				representation = SafetensorsRepQ8
+	// The loader consumes both names when it visits _blocks. Only an existing,
+	// valid same-shard pair can exempt a U8 _scales row from the plain decoder.
+	base, paired := strings.CutSuffix(name, "_blocks")
+	if !paired {
+		base, paired = strings.CutSuffix(name, "_scales")
+	}
+	if paired {
+		blocks, haveBlocks := byName[base+"_blocks"]
+		scales, haveScales := byName[base+"_scales"]
+		if haveBlocks && haveScales {
+			shape, err := preflightMXFP4Shape(base, blocks, scales)
+			if err != nil {
+				rep.RoleErrors[base+"_blocks"] = err.Error()
+				return SafetensorsRoleMXFP4, ""
+			}
+			canonical, keep := quantSourceTensorNameWithRetention(cfg, base, false)
+			if !keep {
+				return SafetensorsRoleDroppedSource, SafetensorsRepNone
+			}
+			representation, err := preflightMXFP4Representation(cfg, canonical, shape)
+			if err != nil {
+				rep.RoleErrors[base+"_blocks"] = err.Error()
+				return SafetensorsRoleMXFP4, ""
 			}
 			return SafetensorsRoleMXFP4, representation
 		}
-		// An unpaired _blocks falls through to the plain decoder, which rejects U8:
-		// record the host gap exactly as the load would surface it.
-		rep.addHostGap(name, e.Dtype)
-		return SafetensorsRolePlain, ""
+		// An unpaired name follows the ordinary dtype decoder, just as at load.
 	}
 
 	if strings.HasSuffix(name, ".weight") && e.Dtype == "F8_E4M3" {
 		scaleName := name + "_scale_inv"
 		if _, ok := byName[scaleName]; ok {
-			// The direct and decoded install paths differ only in speed, not in the
-			// installed representation: both land in q8w for a rank-2 matmul projection.
+			// The decoded fallback also splits fused projections into Q8 parts.
+			// Validate their source geometry before claiming that representation.
 			canonical, keep := quantSourceTensorName(cfg, name)
 			representation := SafetensorsRepF32Host
-			if keep && isQuantWeight(canonical) && len(e.Shape) == 2 {
-				representation = SafetensorsRepQ8
+			if keep {
+				fused, err := preflightFP8FusedProjection(cfg, canonical, e.Shape)
+				if err != nil {
+					rep.RoleErrors[name] = err.Error()
+					return SafetensorsRoleFP8BlockScale, ""
+				}
+				if fused || (isQuantWeight(canonical) && len(e.Shape) == 2) {
+					representation = SafetensorsRepQ8
+				}
 			}
 			return SafetensorsRoleFP8BlockScale, representation
 		}
@@ -329,6 +417,103 @@ func (rep *SafetensorsPreflight) routeRole(name string, e stEntry, byName map[st
 	}
 }
 
+// preflightFP8FusedProjection mirrors the two fused shape gates in
+// quantizeFusedProjectionTensorInto. It runs after source-name remapping, so
+// linear-attention remaps keep their existing ordinary projection route.
+func preflightFP8FusedProjection(cfg Config, name string, shape []int) (bool, error) {
+	layer, suffix, ok := parseLayerTensorSuffix(name)
+	if !ok || layer < 0 || layer >= cfg.NumLayers {
+		return false, nil
+	}
+	switch suffix {
+	case suffixQKVProj:
+		qRows := cfg.NumHeads * cfg.HeadDim
+		kRows, vRows := cfg.NumKVHeads*cfg.HeadDim, cfg.NumKVHeads*cfg.HeadDim
+		return true, requireSafetensorShape(name, shape, []int{qRows + kRows + vRows, cfg.HiddenSize})
+	case suffixGateUpProj:
+		return true, requireSafetensorShape(name, shape, []int{2 * cfg.IntermediateSize, cfg.HiddenSize})
+	default:
+		return false, nil
+	}
+}
+
+// preflightMXFP4Shape mirrors the metadata checks and [E,R,G,B] -> [E,C,R]
+// reshape in decodeMXFP4Blocks, without allocating or reading either payload.
+func preflightMXFP4Shape(name string, blocks, scales stEntry) ([]int, error) {
+	if blocks.Dtype != "U8" || scales.Dtype != "U8" {
+		return nil, fmt.Errorf("safetensors: MXFP4 pair %s dtypes %q/%q, want U8/U8", name, blocks.Dtype, scales.Dtype)
+	}
+	if len(blocks.Shape) != 4 {
+		return nil, fmt.Errorf("safetensors: MXFP4 blocks %s shape %v, want rank-4 [E,R,G,B]", name, blocks.Shape)
+	}
+	E, R, G, B := blocks.Shape[0], blocks.Shape[1], blocks.Shape[2], blocks.Shape[3]
+	if _, ok := checkedShapeProduct(E, R, G, B); !ok {
+		return nil, fmt.Errorf("safetensors: MXFP4 blocks %s shape %v has invalid or overflowing dimensions", name, blocks.Shape)
+	}
+	if !sameShape(scales.Shape, []int{E, R, G}) {
+		return nil, fmt.Errorf("safetensors: MXFP4 scales %s shape %v, want %v", name, scales.Shape, []int{E, R, G})
+	}
+	C, ok := checkedShapeProduct(G, B, 2)
+	if !ok {
+		return nil, fmt.Errorf("safetensors: MXFP4 blocks %s decoded shape column count overflows", name)
+	}
+	if _, ok := checkedShapeProduct(E, C, R); !ok {
+		return nil, fmt.Errorf("safetensors: MXFP4 blocks %s decoded shape [%d %d %d] overflows", name, E, C, R)
+	}
+	return []int{E, C, R}, nil
+}
+
+// preflightMXFP4Representation follows the decoded-float loader's fused/source-MoE
+// shape gates. MXFP4 always decodes to rank 3: only the batched GPT-OSS expert
+// weights can become Q8; rank-1/2 transform roles must still refuse that shape.
+func preflightMXFP4Representation(cfg Config, name string, shape []int) (string, error) {
+	representation := SafetensorsRepF32Host
+	layer, suffix, ok := parseLayerTensorSuffix(name)
+	if !ok || layer < 0 || layer >= cfg.NumLayers {
+		return representation, nil
+	}
+	var want []int
+	switch suffix {
+	case suffixQKVProj, suffixGateUpProj:
+		return "", fmt.Errorf("safetensors: MXFP4 tensor %s decoded shape %v, fused projection requires rank 2", name, shape)
+	}
+	if cfg.NumExperts > 0 {
+		E, I, H := cfg.NumExperts, cfg.IntermediateSize, cfg.HiddenSize
+		switch suffix {
+		case "mlp.experts.gate_up_proj", "mlp.experts.gate_up_proj.weight":
+			want, representation = []int{E, H, 2 * I}, SafetensorsRepQ8
+		case "mlp.experts.down_proj", "mlp.experts.down_proj.weight":
+			want, representation = []int{E, I, H}, SafetensorsRepQ8
+		case "mlp.router.weight", "block_sparse_moe.gate.weight":
+			want = []int{E, H}
+		case "mlp.router.bias":
+			want = []int{E}
+		case "mlp.experts.gate_up_proj_bias", "mlp.experts.gate_up_proj.bias":
+			want = []int{E, 2 * I}
+		case "mlp.experts.down_proj_bias", "mlp.experts.down_proj.bias":
+			want = []int{E, H}
+		}
+		if rest, cut := strings.CutPrefix(suffix, "block_sparse_moe.experts."); cut {
+			expertText, weightSuffix, dot := strings.Cut(rest, ".")
+			expert, err := strconv.Atoi(expertText)
+			if dot && err == nil && expert >= 0 && expert < E {
+				switch weightSuffix {
+				case "w1.weight", "w3.weight":
+					want = []int{I, H}
+				case "w2.weight":
+					want = []int{H, I}
+				}
+			}
+		}
+	}
+	if want != nil {
+		if err := requireSafetensorShape(name, shape, want); err != nil {
+			return "", err
+		}
+	}
+	return representation, nil
+}
+
 func (rep *SafetensorsPreflight) addHostGap(name, dtype string) {
 	key := "host_dequant(" + dtype + ")"
 	rep.HostGaps[key] = append(rep.HostGaps[key], name)
@@ -356,12 +541,19 @@ func (rep *SafetensorsPreflight) checkV41ExpertPair(weight, scaleName, projectio
 }
 
 // checkV41DensePair validates one V4.1 dense FP8 pair header-only. The weight visit pins the
-// published geometry and the F8_E8M0 .scale sibling; the scale visit only pins the sibling
-// dtype, since the owner weight's walk carries the shape check.
+// published geometry and the F8_E8M0 .scale sibling; the scale visit also pins its tile-grid
+// shape using the same block dimension as the loader.
 func (rep *SafetensorsPreflight) checkV41DensePair(name string, r v41DenseFP8Role, e stEntry, byName map[string]stEntry) {
 	if strings.HasSuffix(name, ".scale") {
+		// The loader visits the scale first and validates both same-shard entries.
+		if _, ok := byName[r.weightName]; !ok {
+			rep.RoleErrors[name] = fmt.Sprintf("V4.1 dense FP8 pair is missing %s", r.weightName)
+			return
+		}
 		if e.Dtype != "F8_E8M0" {
 			rep.RoleErrors[name] = fmt.Sprintf("V4.1 dense scale %s dtype %q, want F8_E8M0", name, e.Dtype)
+		} else if want := []int{(r.shape[0]-1)/v41FP8BlockDim + 1, (r.shape[1]-1)/v41FP8BlockDim + 1}; !sameShape(e.Shape, want) {
+			rep.RoleErrors[name] = fmt.Sprintf("V4.1 dense scale %s shape %v, want %v for weight shape %v", name, e.Shape, want, r.shape[:])
 		}
 		return
 	}
@@ -390,8 +582,15 @@ func (rep *SafetensorsPreflight) checkV41DensePair(name string, r v41DenseFP8Rol
 // checkV4DensePair is the DeepSeek-V4-Flash twin of checkV41DensePair.
 func (rep *SafetensorsPreflight) checkV4DensePair(name string, r v4DenseFP8Role, e stEntry, byName map[string]stEntry) {
 	if strings.HasSuffix(name, ".scale") {
+		// The loader visits the scale first and validates both same-shard entries.
+		if _, ok := byName[r.weightName]; !ok {
+			rep.RoleErrors[name] = fmt.Sprintf("V4 dense FP8 pair is missing %s", r.weightName)
+			return
+		}
 		if e.Dtype != "F8_E8M0" {
 			rep.RoleErrors[name] = fmt.Sprintf("V4 dense scale %s dtype %q, want F8_E8M0", name, e.Dtype)
+		} else if want := []int{(r.shape[0]-1)/fp8BlockDim + 1, (r.shape[1]-1)/fp8BlockDim + 1}; !sameShape(e.Shape, want) {
+			rep.RoleErrors[name] = fmt.Sprintf("V4 dense scale %s shape %v, want %v for weight shape %v", name, e.Shape, want, r.shape[:])
 		}
 		return
 	}

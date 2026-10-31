@@ -80,8 +80,11 @@ func classifyGGUFTensor(info ggufload.TensorInfo, cfg fakmodel.Config, table []c
 		for i, d := range info.Dims {
 			dims[i] = int(d)
 		}
-		if fakmodel.DecodedFloatGoesToQ8(cfg, canon, dims) && cudaMatmulNative(table, arch, "q8_0") {
-			return deviceExpandedPrefix + "Q8_0", ""
+		if fakmodel.DecodedFloatGoesToQ8(cfg, canon, dims) {
+			if cudaMatmulNative(table, arch, "q8_0") {
+				return deviceExpandedPrefix + "Q8_0", ""
+			}
+			return deviceClassAbsent, "cuda:matmul(q8_0)"
 		}
 		return deviceClassHost, ""
 	default:
