@@ -34,7 +34,7 @@ const hdComputeDir = "../compute"
 // hdProducerFiles are the internal/compute files that can mint a TimerDomain.
 // Every literal assignment (Event literal field or plain assignment) AND every
 // string constant whose name mentions TimerDomain is collected from these.
-var hdProducerFiles = []string{"cpuref.go", "cuda.go", "metal.go", "vulkan_kernel_obs.go"}
+var hdProducerFiles = []string{"cpuref.go", "cuda.go", "cuda_matmul_trace.go", "metal.go", "vulkan_kernel_obs.go"}
 
 // hdKnownDomains is the vocabulary the renderer documents. It is asserted to be a
 // SUBSET of what the producer source actually mints: the source is the truth about
