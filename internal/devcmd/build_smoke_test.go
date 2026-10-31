@@ -126,10 +126,17 @@ func TestSmokeBuildArtifactProcessContracts(t *testing.T) {
 	} {
 		t.Run(mode, func(t *testing.T) {
 			t.Setenv("FAK_BUILD_SMOKE_HELPER", mode)
-			if mode == "timeout" || mode == "runtime-timeout" {
+			// Tighten only the probe under test: the version probe must survive
+			// process startup, which a race-instrumented artifact exceeds at 500ms.
+			if mode == "timeout" {
 				timeout := buildSmokeTimeout
 				buildSmokeTimeout = 500 * time.Millisecond
 				t.Cleanup(func() { buildSmokeTimeout = timeout })
+			}
+			if mode == "runtime-timeout" {
+				timeout := buildSmokeRuntimeTimeout
+				buildSmokeRuntimeTimeout = 500 * time.Millisecond
+				t.Cleanup(func() { buildSmokeRuntimeTimeout = timeout })
 			}
 			start := time.Now()
 			got := smokeBuildArtifact(path)

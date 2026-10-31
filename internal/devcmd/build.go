@@ -124,15 +124,16 @@ type buildProvenance struct {
 }
 
 var (
-	buildNow              = time.Now
-	buildGatherProvenance = gatherBuildProvenance
-	buildPrepareOutput    = prepareBuildOutput
-	buildExecute          = executeCanonicalBuild
-	buildInspectArtifact  = inspectBuildArtifact
-	buildSmoke            = smokeBuildArtifact
-	buildWriteReceipt     = writeBuildReceiptAtomic
-	buildCaptureOutput    = buildCommandOutput
-	buildSmokeTimeout     = 10 * time.Second
+	buildNow                 = time.Now
+	buildGatherProvenance    = gatherBuildProvenance
+	buildPrepareOutput       = prepareBuildOutput
+	buildExecute             = executeCanonicalBuild
+	buildInspectArtifact     = inspectBuildArtifact
+	buildSmoke               = smokeBuildArtifact
+	buildWriteReceipt        = writeBuildReceiptAtomic
+	buildCaptureOutput       = buildCommandOutput
+	buildSmokeTimeout        = 10 * time.Second
+	buildSmokeRuntimeTimeout = 10 * time.Second
 )
 
 // RunBuild creates the runnable fak product through scripts/build.sh, the repository's
@@ -785,7 +786,7 @@ func (out *buildSmokeOutput) Write(p []byte) (int, error) {
 }
 
 func smokeBuildArtifact(path string) buildSmokeResult {
-	result := runBuildSmokeCommand(path, "version", "--json")
+	result := runBuildSmokeCommand(buildSmokeTimeout, path, "version", "--json")
 	if result.Outcome != "success" {
 		return result
 	}
@@ -806,7 +807,7 @@ func smokeBuildArtifact(path string) buildSmokeResult {
 		return result
 	}
 
-	runtime := runBuildSmokeCommand(path, "runtime-capabilities")
+	runtime := runBuildSmokeCommand(buildSmokeRuntimeTimeout, path, "runtime-capabilities")
 	result.Runtime = &runtime
 	if runtime.Outcome == "success" {
 		var report runtimecap.Report
@@ -832,9 +833,9 @@ func smokeBuildArtifact(path string) buildSmokeResult {
 	return result
 }
 
-func runBuildSmokeCommand(path string, args ...string) buildSmokeResult {
+func runBuildSmokeCommand(timeout time.Duration, path string, args ...string) buildSmokeResult {
 	result := buildSmokeResult{Command: append([]string{path}, args...), Outcome: "failed"}
-	ctx, cancel := context.WithTimeout(context.Background(), buildSmokeTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	stdout, stderr := buildSmokeOutput{cancel: cancel}, buildSmokeOutput{cancel: cancel}
 	cmd := windowgate.CommandContext(ctx, path, args...)
@@ -856,7 +857,7 @@ func runBuildSmokeCommand(path string, args ...string) buildSmokeResult {
 		result.Error = fmt.Sprintf("output exceeded %d bytes per stream", buildSmokeOutputLimit)
 	} else if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		result.FailureCode = buildSmokeFailureTimeout
-		result.Error = fmt.Sprintf("timed out after %s", buildSmokeTimeout)
+		result.Error = fmt.Sprintf("timed out after %s", timeout)
 	} else if err != nil {
 		result.FailureCode = buildSmokeFailureProcess
 		result.Error = err.Error()
