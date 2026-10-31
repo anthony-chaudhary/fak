@@ -192,6 +192,21 @@ func RecoveryEntries(root string, git GitRunner) ([]RecoveryEntry, error) {
 	for _, m := range mirrors {
 		bySHA[m.SHA] = append(bySHA[m.SHA], m)
 	}
+	// A remote has one freshness stamp, independent of its candidate count.
+	// Snapshot successful observations only for this listing; never reuse them
+	// across invocations or treat a failed/malformed probe as fresh evidence.
+	observedAt := time.Now().Unix()
+	ages := make(map[string]int64)
+	ageForRemote := func(remote string) int64 {
+		if age, ok := ages[remote]; ok {
+			return age
+		}
+		age, known := mirrorAge(root, remote, git, observedAt)
+		if known {
+			ages[remote] = age
+		}
+		return age
+	}
 	items := make([]RecoveryEntry, 0, len(rows)+len(mirrors))
 	localSHA := map[string]bool{}
 	for _, row := range rows {
@@ -202,7 +217,7 @@ func RecoveryEntries(root string, git GitRunner) ([]RecoveryEntry, error) {
 			item.Durability = DurabilityReplicated
 			item.MirrorRef = ms[0].Ref
 			item.Remote = mirrorRemote(ms[0].Ref)
-			item.MirrorAgeSec = mirrorAge(root, item.Remote, git)
+			item.MirrorAgeSec = ageForRemote(item.Remote)
 		}
 		if item.State == "LANDED" {
 			item.Durability = DurabilityLanded
@@ -218,7 +233,7 @@ func RecoveryEntries(root string, git GitRunner) ([]RecoveryEntry, error) {
 		item.Durability = DurabilityRemoteOnly
 		item.MirrorRef = row.Ref
 		item.Remote = mirrorRemote(row.Ref)
-		item.MirrorAgeSec = mirrorAge(root, item.Remote, git)
+		item.MirrorAgeSec = ageForRemote(item.Remote)
 		item.Action = "restore local ref with git update-ref " + ref + " " + row.SHA + "; then inspect/land"
 		if item.State == "LANDED" {
 			item.Durability = DurabilityLanded
@@ -284,24 +299,24 @@ func mirrorTail(ref string) string {
 	}
 	return ""
 }
-func mirrorAge(root, remote string, git GitRunner) int64 {
+func mirrorAge(root, remote string, git GitRunner, observedAt int64) (int64, bool) {
 	stamp, err := mirrorStampRef(remote)
 	if err != nil {
-		return 0
+		return 0, false
 	}
 	rc, out := run(git, root, []string{"reflog", "show", "--format=%ct", "-1", stamp})
 	if rc != 0 {
-		return 0
+		return 0, false
 	}
 	sec, err := strconv.ParseInt(strings.TrimSpace(out), 10, 64)
 	if err != nil {
-		return 0
+		return 0, false
 	}
-	age := time.Now().Unix() - sec
+	age := observedAt - sec
 	if age < 0 {
-		return 0
+		return 0, false
 	}
-	return age
+	return age, true
 }
 
 // RemoteCleanupReport is report-first: Apply=false performs no mutation. A remote
