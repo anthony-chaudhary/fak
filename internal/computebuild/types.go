@@ -75,6 +75,8 @@ type CUDAConfig struct {
 	EnableQ3KMMQPrefill bool // Requires separate runtime opt-in; build is not device qualification.
 	EnableQ8MMQPrefill  bool // Native flags are recorded by the existing object receipt/cache key.
 
+	EnableV41EngramIQ4NLQualification bool // Explicit row-decoder witness; public capability stays false.
+
 	EnableV41CompressorPending bool // Explicit pending-owner qualification; requires compressor, excludes pool.
 	EnableQ4KQKVQualification  bool // Explicit checked Q4 shared-input qualification; never a default.
 	EnableQ4KQKVAsync          bool // Explicit async owner; requires Q4 qualification.

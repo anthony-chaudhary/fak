@@ -68,6 +68,8 @@ type CUDANativeBuildReceipt struct {
 	Reused                        int                      `json:"reused"`
 	Objects                       []CUDAObjectBuildReceipt `json:"objects"`
 
+	V41EngramIQ4NLQualification bool `json:"v41_engram_iq4nl_qualification,omitempty"` // Build selection, not hardware qualification.
+
 	V41CompressorPending bool `json:"v41_compressor_pending,omitempty"` // Selection only, not device qualification.
 	Q4KQKVQualification  bool `json:"q4k_qkv_qualification,omitempty"`
 	Q4KQKVAsync          bool `json:"q4k_qkv_async,omitempty"`
@@ -102,6 +104,7 @@ func newCUDANativeReceipt(ctx context.Context, root, arch string, nccl bool) *CU
 		candidate := plan.receipt
 		r.DeepGEMMWKV = &candidate
 	}
+	r.V41EngramIQ4NLQualification, _ = ctx.Value(cudaEngramIQ4NLQualificationKey{}).(bool)
 	p, _ := ctx.Value(cudaAsyncQualificationKey{}).(cudaAsyncQualificationProfile)
 	r.V41CompressorPending, r.Q4KQKVQualification, r.Q4KQKVAsync = p.CompressorPending, p.Q4KQKV, p.Q4KQKVAsync
 	r.V41RoutedSwiGLU, _ = ctx.Value(cudaV41RoutedSwiGLUKey{}).(bool)

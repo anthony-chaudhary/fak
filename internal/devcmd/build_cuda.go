@@ -78,6 +78,7 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 	routedSwiGLU := fs.Bool("v41-routed-swiglu", false, "compile explicit SM120 V4.1 routed-SwiGLU candidate; public capability remains unqualified")
 	engramGate := fs.Bool("v41-engram-gate", false, "compile explicit SM120 V4.1 Engram-gate candidate; public capability remains unqualified")
 	compressorPool := fs.Bool("v41-compressor-pool", false, "compile explicit SM120 V4.1 compressor-pool candidate; public capability remains unqualified")
+	engramIQ4NL := fs.Bool("v41-engram-iq4nl-qualification", false, "compile explicit IQ4_NL Engram row-decoder witness with paired native and Go selections; public serving support remains false")
 	compressorPending := fs.Bool("v41-compressor-pending", false, "compile explicit pending-owner qualification; requires compressor profile, excludes pool; not device qualification")
 	q4Qualification := fs.Bool("q4k-qkv-qualification", false, "compile explicit checked Q4 shared-input qualification with its native stream prerequisite; not serving qualification")
 	q4Async := fs.Bool("q4k-qkv-async", false, "compile explicit asynchronous Q4 owner; requires --q4k-qkv-qualification; not device qualification")
@@ -192,27 +193,28 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 		Stdout:             stdout,
 		Stderr:             stderr,
 
-		EnableV41CompressorPending:     *compressorPending,
-		EnableQ4KQKVQualification:      *q4Qualification,
-		EnableQ4KQKVAsync:              *q4Async,
-		EnableQ2KMMQPrefill:            *q2MMQ,
-		EnableQ3KMMQPrefill:            *q3MMQ,
-		EnableQ8MMQPrefill:             *q8MMQ,
-		EnableCaptureOnceQualification: *captureOnce,
-		EnableDeepGEMMWKV:              *deepGEMM,
-		DeepGEMMWKVSMs:                 *deepGEMMSMs,
-		EnableFlashMLAPrefill:          *flashMLA,
-		DisableFlashMLALDRed:           *flashMLADisableLDRed,
-		EnableV41SharedAttention:       *sharedAttention,
-		EnableV41RoutedSwiGLU:          *routedSwiGLU,
-		EnableV41EngramGate:            *engramGate,
-		EnableV41CompressorPool:        *compressorPool,
-		EnableV41Compressor:            *compressor,
-		EnableV41Router:                *router,
-		EnableV41TailRoPE:              *tailRoPE,
-		EnableV41BF16Publish:           *bf16Publish,
-		EnableV41MHC:                   *mhc,
-		DisableV41Defaults:             !*v41Defaults,
+		EnableV41EngramIQ4NLQualification: *engramIQ4NL,
+		EnableV41CompressorPending:        *compressorPending,
+		EnableQ4KQKVQualification:         *q4Qualification,
+		EnableQ4KQKVAsync:                 *q4Async,
+		EnableQ2KMMQPrefill:               *q2MMQ,
+		EnableQ3KMMQPrefill:               *q3MMQ,
+		EnableQ8MMQPrefill:                *q8MMQ,
+		EnableCaptureOnceQualification:    *captureOnce,
+		EnableDeepGEMMWKV:                 *deepGEMM,
+		DeepGEMMWKVSMs:                    *deepGEMMSMs,
+		EnableFlashMLAPrefill:             *flashMLA,
+		DisableFlashMLALDRed:              *flashMLADisableLDRed,
+		EnableV41SharedAttention:          *sharedAttention,
+		EnableV41RoutedSwiGLU:             *routedSwiGLU,
+		EnableV41EngramGate:               *engramGate,
+		EnableV41CompressorPool:           *compressorPool,
+		EnableV41Compressor:               *compressor,
+		EnableV41Router:                   *router,
+		EnableV41TailRoPE:                 *tailRoPE,
+		EnableV41BF16Publish:              *bf16Publish,
+		EnableV41MHC:                      *mhc,
+		DisableV41Defaults:                !*v41Defaults,
 	}
 	if sub != "check" {
 		if applied := computebuild.ApplyCUDAV41Defaults(cfg); len(applied) > 0 {
@@ -454,49 +456,8 @@ func runCUDABuildAcceptance(stdout, stderr io.Writer, cfg *computebuild.CUDAConf
 	}
 	results := cudaAcceptanceFamilies()
 	code := 0
-	tags := "cuda"
-	if cfg.EnableCaptureOnceQualification {
-		tags += ",fak_cuda_capture_once_qualification"
-	}
-	if cfg.EnableNCCL {
-		tags += ",nccl"
-	}
-	if cfg.EnableArchSpecific {
-		tags += ",cudaarchspecific"
-	}
-	if cfg.EnableDeepGEMMWKV {
-		tags += ",fak_cuda_deepgemm_wkv"
-	}
-	if cfg.EnableFlashMLAPrefill {
-		tags += ",fak_cuda_flashmla_prefill"
-	}
-	if cfg.EnableV41SharedAttention {
-		tags += ",fak_cuda_v41_shared_attention"
-	}
-	if cfg.EnableV41RoutedSwiGLU {
-		tags += ",fak_cuda_v41_routed_swiglu"
-	}
-	if cfg.EnableV41EngramGate {
-		tags += ",fak_cuda_v41_engram_gate"
-	}
-	if cfg.EnableV41CompressorPool {
-		tags += ",fak_cuda_v41_compressor_pool"
-	}
-	if cfg.EnableV41Compressor {
-		tags += ",fak_cuda_v41_compressor"
-	}
-	if cfg.EnableV41Router {
-		tags += ",fak_cuda_v41_router"
-	}
-	if cfg.EnableV41TailRoPE {
-		tags += ",fak_cuda_v41_tail_rope"
-	}
-	if cfg.EnableV41BF16Publish {
-		tags += ",fak_cuda_v41_bf16_publish"
-	}
-	if cfg.EnableV41MHC {
-		tags += ",fak_cuda_v41_mhc"
-	}
+	// Acceptance must test exactly the Go profile used to build the binary.
+	tags := computebuild.CUDAGoTags(cfg)
 	for i := range results {
 		family := &results[i]
 		var output cudaFirstLightOutput

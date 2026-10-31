@@ -168,6 +168,10 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 		if err != nil {
 			return nil, err
 		}
+		nvccArgs, err = cudaEngramIQ4NLQualificationFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
 		nvccArgs, err = cudaAsyncQualificationFlags(ctx, nvccArgs, env)
 		if err != nil {
 			return nil, err
@@ -225,6 +229,10 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 			return nil, err
 		}
 		nvccArgs, err = cudaGraphOnceFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
+		nvccArgs, err = cudaEngramIQ4NLQualificationFlags(ctx, nvccArgs, env)
 		if err != nil {
 			return nil, err
 		}
@@ -443,6 +451,7 @@ func CUDAGoTags(cfg *CUDAConfig) string {
 	goTags = cudaFlashMLADecodeGoTags(cfg, goTags)
 	goTags = cudaGraphOnceTags(cfg, goTags)
 	goTags = cudaAsyncQualificationTags(cfg, goTags)
+	goTags = cudaEngramIQ4NLQualificationTags(cfg, goTags)
 	if cfg.EnableDeepGEMMWKV {
 		goTags += ",fak_cuda_deepgemm_wkv"
 	}
@@ -477,6 +486,10 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 	if cfg.PkgDir == "" {
 		cfg.PkgDir = filepath.Join(cfg.RepoRoot, "internal", "compute")
 	}
+	if err := prepareCUDAEngramIQ4NLQualification(cfg); err != nil {
+		return err
+	}
+	ctx = context.WithValue(ctx, cudaEngramIQ4NLQualificationKey{}, cfg.EnableV41EngramIQ4NLQualification)
 	if err := prepareCUDAAsyncQualifications(cfg); err != nil {
 		return err
 	}
