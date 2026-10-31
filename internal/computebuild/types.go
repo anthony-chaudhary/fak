@@ -88,6 +88,7 @@ type CUDAConfig struct {
 	EnableV41SharedAttention bool // Explicit SM120 SIMT candidate; paired library define and Go tag
 	EnableDeepGEMMWKV        bool // Explicit family-SASS WKV candidate, never automatic
 	DeepGEMMWKVSMs           int  // Positive physical SM count compiled into the persistent kernel
+	EnableFlashMLADecode     bool // Explicit SM100a/103a qualification only; never default admission.
 	EnableFlashMLAPrefill    bool // Explicit SM100a/103a FlashMLA sparse-prefill candidate
 	DisableFlashMLALDRed     bool // Select the pinned donor's non-LD.RED specialization; requires FlashMLA
 

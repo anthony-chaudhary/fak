@@ -79,12 +79,17 @@ type CUDANativeBuildReceipt struct {
 	V41SharedAttention bool                        `json:"v41_shared_attention,omitempty"` // Build selection, not hardware acceptance.
 	V41Defaults        []string                    `json:"v41_defaults,omitempty"`         // Tags selected by the sm_120 default, not by an explicit flag.
 	DeepGEMMWKV        *CUDADeepGEMMWKVReceipt     `json:"deepgemm_wkv,omitempty"`
+	FlashMLADecode     *CUDAFlashMLADecodeReceipt  `json:"flashmla_decode,omitempty"`
 	FlashMLAPrefill    *CUDAFlashMLAPrefillReceipt `json:"flashmla_prefill,omitempty"`
 }
 
 func newCUDANativeReceipt(ctx context.Context, root, arch string, nccl bool) *CUDANativeBuildReceipt {
 	host, _ := os.Hostname()
 	r := &CUDANativeBuildReceipt{Schema: CUDANativeBuildReceiptSchema, Outcome: "failed", Mode: "not_started", Architecture: arch, NCCL: nccl, HostOS: runtime.GOOS, HostArch: runtime.GOARCH, Hostname: host, StartedAt: time.Now().UTC()}
+	if plan, ok := ctx.Value(cudaFlashMLADecodeKey{}).(*cudaFlashMLAOptions); ok {
+		candidate := plan.receipt
+		r.FlashMLADecode = &candidate
+	}
 	if plan, ok := ctx.Value(cudaFlashMLAKey{}).(*cudaFlashMLAOptions); ok {
 		candidate := plan.receipt
 		r.FlashMLAPrefill = &candidate

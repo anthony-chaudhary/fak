@@ -127,6 +127,10 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 		nvccArgs := []string{"-O3", "-std=c++17"}
 		nvccArgs = cudaV41SharedAttentionFlags(ctx, nvccArgs)
 		nvccArgs = cudaFlashMLAGenericFlags(ctx, nvccArgs)
+		nvccArgs, err = cudaFlashMLADecodeGenericFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
 		nvccArgs = cudaDeepGEMMGenericFlags(ctx, nvccArgs)
 		nvccArgs, err = cudaV41BF16PublishFlags(ctx, nvccArgs, env)
 		if err != nil {
@@ -179,6 +183,10 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 		nvccArgs := []string{"-O3", "-std=c++17"}
 		nvccArgs = cudaV41SharedAttentionFlags(ctx, nvccArgs)
 		nvccArgs = cudaFlashMLAGenericFlags(ctx, nvccArgs)
+		nvccArgs, err = cudaFlashMLADecodeGenericFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
 		nvccArgs = cudaDeepGEMMGenericFlags(ctx, nvccArgs)
 		nvccArgs, err = cudaV41BF16PublishFlags(ctx, nvccArgs, env)
 		if err != nil {
@@ -261,6 +269,11 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 		objs = append(objs, obj)
 	}
 	if object, err := compileCUDAFlashMLA(ctx, tc, repoRoot, env, receipt, stdout); err != nil {
+		return nil, err
+	} else if object != "" {
+		objs = append(objs, object)
+	}
+	if object, err := compileCUDAFlashMLADecode(ctx, tc, repoRoot, env, receipt, stdout); err != nil {
 		return nil, err
 	} else if object != "" {
 		objs = append(objs, object)
@@ -419,6 +432,7 @@ func CUDAGoTags(cfg *CUDAConfig) string {
 	goTags = cudaV41MHCTags(cfg, goTags)
 	goTags = cudaV41SharedAttentionTags(cfg, goTags)
 	goTags = cudaFlashMLAGoTags(cfg, goTags)
+	goTags = cudaFlashMLADecodeGoTags(cfg, goTags)
 	goTags = cudaGraphOnceTags(cfg, goTags)
 	if cfg.EnableDeepGEMMWKV {
 		goTags += ",fak_cuda_deepgemm_wkv"
@@ -531,8 +545,15 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 		}
 		ctx = context.WithValue(ctx, cudaArchSpecificKey{}, plan)
 	}
-	if cfg.DisableFlashMLALDRed && !cfg.EnableFlashMLAPrefill {
+	if cfg.DisableFlashMLALDRed && !cfg.EnableFlashMLAPrefill && !cfg.EnableFlashMLADecode {
 		return fmt.Errorf("%w: disabling LD.RED requires the explicit FlashMLA candidate", ErrCUDAFlashMLAPrefill)
+	}
+	if cfg.EnableFlashMLADecode {
+		plan, err := prepareCUDAFlashMLADecode(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		ctx = context.WithValue(ctx, cudaFlashMLADecodeKey{}, plan)
 	}
 	if cfg.EnableFlashMLAPrefill {
 		plan, err := prepareCUDAFlashMLA(ctx, cfg)

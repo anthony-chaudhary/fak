@@ -24,7 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unordered_map>
-#if defined(FAK_CUDA_V41_EMBED_GATHER) || defined(FAK_CUDA_V41_INDEX_SELECT) || defined(FAK_CUDA_Q2K_MMQ_PREFILL) || defined(FAK_CUDA_Q3K_MMQ_PREFILL) || defined(FAK_CUDA_Q8_MMQ_PREFILL)
+#if defined(FAK_CUDA_FLASHMLA_DECODE) || defined(FAK_CUDA_V41_EMBED_GATHER) || defined(FAK_CUDA_V41_INDEX_SELECT) || defined(FAK_CUDA_Q2K_MMQ_PREFILL) || defined(FAK_CUDA_Q3K_MMQ_PREFILL) || defined(FAK_CUDA_Q8_MMQ_PREFILL)
 #include <atomic>
 #define FAK_CUDA_V41_CHECKED_STREAM 1
 static std::atomic<bool> g_v41_checked_stream_uncertain{false};
@@ -265,4 +265,8 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/peer_handoff.cuh"
 #ifdef FAK_CUDA_FLASHMLA_PREFILL
 #include "cuda_flashmla_sparse_prefill_bridge.cuh"
+#endif
+
+#ifdef FAK_CUDA_FLASHMLA_DECODE
+#include "cuda_flashmla_sparse_decode_owner.cuh"
 #endif
