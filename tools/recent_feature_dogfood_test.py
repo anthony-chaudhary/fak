@@ -83,6 +83,7 @@ def test_cmd_fak_probe_uses_owned_path_isolation() -> None:
     validate_index = probe.command.index("validate")
     assert probe.command[validate_index:validate_index + 3] == ["validate", "--test-only", "--wsl-tests"]
     assert probe.command[-1] == "--json"
+    assert "--progress" in probe.command
     assert probe.validator == "validate_ok"
     assert probe.json_source == "stdout"
     mine = [probe.command[i + 1] for i, arg in enumerate(probe.command[:-1]) if arg == "--mine"]
@@ -147,6 +148,32 @@ def test_run_probe_allows_expected_nonzero_when_payload_valid() -> None:
     )
     assert got["ok"] is True
     assert got["exit_code"] == 1
+
+
+def test_timeout_retains_bounded_output_without_accepting_partial_success() -> None:
+    # fak-test:runtime fast est=1s lane=default
+    mod = load()
+    probe = mod.Probe("timeout-output", "phase diagnostics", ["fake"],
+                      json_source="stdout", validator="validate_ok")
+    phase = "fak validate: phase=list_graph status=start\n"
+    cases = (
+        (b"x" * 1600 + b"\xff", b"y" * 1600 + phase.encode(),
+         "x" * 1499 + "\ufffd", "y" * (1500 - len(phase)) + phase),
+        ('{"ok":true}', phase, '{"ok":true}', phase),
+        (None, None, "", ""),
+    )
+    for stdout, stderr, want_stdout, want_stderr in cases:
+        def timeout_runner(command, root, timeout):
+            assert timeout == 120
+            raise subprocess.TimeoutExpired(command, timeout, output=stdout, stderr=stderr)
+
+        result = mod.run_probe(probe, ROOT, timeout=120, runner=timeout_runner)
+        assert result["ok"] is False and result["required"] is True
+        assert result["exit_code"] == 124
+        assert result["reason"] == "timed out after 120s"
+        assert result["stdout_tail"] == want_stdout
+        assert result["stderr_tail"] == want_stderr
+        json.dumps(result)  # bytes must not escape into the report contract
 
 
 def test_run_suite_fails_when_required_probe_fails() -> None:
@@ -220,6 +247,8 @@ def _assert_probe_timeout_reaps_descendant(mode: str) -> None:
             "from pathlib import Path\n"
             "child = subprocess.Popen([sys.executable, '-c', "
             "'import time; time.sleep(10)'])\n"
+            "print('timeout stdout fixture', flush=True)\n"
+            "print('timeout stderr fixture', file=sys.stderr, flush=True)\n"
             "Path(sys.argv[1]).write_text(json.dumps({'descendant': child.pid}))\n"
             "if sys.argv[2] == 'exited': os._exit(0)\n"
             "child.wait(timeout=10)\n"
@@ -269,6 +298,8 @@ def _assert_probe_timeout_reaps_descendant(mode: str) -> None:
             assert result["exit_code"] == 124 and not result["ok"]
             assert result["required"] is True
             assert result["reason"] == "timed out after 0.1s"
+            assert result["stdout_tail"] == "timeout stdout fixture\n"
+            assert result["stderr_tail"] == "timeout stderr fixture\n"
             assert len(launched) == 1 and launched[0].returncode is not None
             descendant = json.loads(identity.read_text())["descendant"]
             deadline = time.monotonic() + 1

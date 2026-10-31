@@ -307,6 +307,7 @@ def build_suite(root: Path, out_dir: Path, *, include_go_tests: bool = True) -> 
                     "cmd/fak/benchmarks.go",
                     "--mine",
                     "cmd/fak/benchmarks_test.go",
+                    "--progress",
                     "--json",
                 ],
                 json_source="stdout",
@@ -518,6 +519,13 @@ def summarize_payload(name: str, payload: Any) -> Any:
     return base
 
 
+def output_tail(output: str | bytes | None) -> str:
+    # TimeoutExpired may retain bytes even when the child runs in text mode.
+    if isinstance(output, bytes):
+        output = output.decode("utf-8", errors="replace")
+    return (output or "")[-1500:]
+
+
 def run_probe(
     probe: Probe,
     root: Path,
@@ -528,7 +536,7 @@ def run_probe(
     started = time.monotonic()
     try:
         proc = runner(probe.command, root, timeout)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         dur_ms = int((time.monotonic() - started) * 1000)
         return {
             "key": probe.key,
@@ -539,6 +547,8 @@ def run_probe(
             "duration_ms": dur_ms,
             "command": probe.command,
             "reason": f"timed out after {timeout}s",
+            "stdout_tail": output_tail(exc.stdout),
+            "stderr_tail": output_tail(exc.stderr),
         }
     except OSError as exc:
         dur_ms = int((time.monotonic() - started) * 1000)
