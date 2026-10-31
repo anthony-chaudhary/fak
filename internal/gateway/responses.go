@@ -435,7 +435,7 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	// the drop names a closed reason (#2088), render the typed error code so a client
 	// can branch; ReasonNone keeps the historical opaque 502 fail-closed.
 	if comp.ToolCallsDropped && len(asst.ToolCalls) == 0 {
-		s.logf("gateway: upstream announced tool_calls but none parsed (conformance fail-closed); model=%s reason=%s", s.model, toolCallDropReasonName(comp))
+		s.logf("gateway: upstream announced tool_calls but none parsed (conformance fail-closed); model=%s reason=%s finish_reason=%s completion_tokens=%d", s.model, toolCallDropReasonName(comp), toolCallLogFinishReason(comp.FinishReason), comp.Usage.CompletionTokens)
 		if msg, code, typed := toolCallDropRefusal(comp); typed {
 			writeErrCode(w, http.StatusBadGateway, code, msg)
 			return

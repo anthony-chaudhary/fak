@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+// Modified for Fak: Go transport budgets/error closure and ordered native SSE
+// barriers. The non-merging boundary rule adapts StreamingInputOutputCollector
+// in vllm/v1/engine/output_processor.py at e5196e2959a42908313510f55fa21f213a48802e.
+// See THIRD_PARTY_NOTICES.md, "vLLM native stream boundary collector".
 package gateway
 
 import (
@@ -10,9 +16,10 @@ import (
 
 // DeltaChunk represents a text chunk and associated token count emitted during generation.
 type DeltaChunk struct {
-	Text   string
-	Tokens int
-	held   bool
+	Text    string
+	Tokens  int
+	held    bool
+	barrier bool // serialized protocol event: never merge through this boundary
 }
 
 // These are per-request transport buffers, not model/context budgets. Even a
@@ -70,6 +77,12 @@ func (s *CoalescingSender) Send(text string, tokens int) error {
 
 func (s *CoalescingSender) activity() error { return s.send(DeltaChunk{held: true}) }
 
+// barrier queues an already-serialized protocol event in the same bounded order
+// as text. send clones its backing bytes; the caller retains no mutable loan.
+func (s *CoalescingSender) barrier(frame string) error {
+	return s.send(DeltaChunk{Text: frame, barrier: true})
+}
+
 func (s *CoalescingSender) send(chunk DeltaChunk) error {
 	if s == nil {
 		return nil
@@ -87,7 +100,7 @@ func (s *CoalescingSender) send(chunk DeltaChunk) error {
 		s.mu.Unlock()
 		return err
 	}
-	if !chunk.held && chunk.Text == "" && chunk.Tokens == 0 {
+	if !chunk.held && !chunk.barrier && chunk.Text == "" && chunk.Tokens == 0 {
 		s.mu.Unlock()
 		return nil
 	}
@@ -98,7 +111,7 @@ func (s *CoalescingSender) send(chunk DeltaChunk) error {
 		s.mu.Unlock()
 		return nil
 	}
-	merge := !s.preserveChunks && !chunk.held && last >= 0 && !s.pending[last].held
+	merge := !s.preserveChunks && !chunk.held && !chunk.barrier && last >= 0 && !s.pending[last].held && !s.pending[last].barrier
 	if len(chunk.Text) > streamPendingBytes-s.bufferedBytes || (!merge && s.bufferedEvents >= streamPendingEvents) {
 		s.mu.Unlock()
 		s.fail(errStreamBackpressure)

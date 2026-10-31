@@ -1,5 +1,19 @@
 # Third-party notices
 
+## vLLM native stream boundary collector
+
+`internal/gateway/delta_coalescer.go` adapts the non-merging boundary rule of
+`StreamingInputOutputCollector` in `vllm/v1/engine/output_processor.py` at
+`e5196e2959a42908313510f55fa21f213a48802e`:
+https://github.com/vllm-project/vllm/blob/e5196e2959a42908313510f55fa21f213a48802e/vllm/v1/engine/output_processor.py
+
+Copyright contributors to the vLLM project. SPDX-License-Identifier: Apache-2.0.
+Changed for Fak: Go synchronization, bounded pending/in-flight byte and event
+budgets, explicit failure/cancellation/join, and serialized native lifecycle SSE
+barriers instead of vLLM streaming-input completion boundaries. No Python runtime
+or model/backend implementation is included. The Apache-2.0 license reproduced
+below for the vLLM paged-attention adaptation also applies to this adaptation.
+
 ## JigSawPT expert cache ownership
 
 `internal/model/expert_checkpoint_tier.go` adapts loading-entry ownership,

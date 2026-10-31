@@ -172,6 +172,14 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	liveCtx, cancelLive := context.WithCancel(r.Context())
+	defer cancelLive()
+	streamWriter := &liveChatResponseWriter{syncResponseWriter: newSyncResponseWriter(w), cancel: cancelLive}
+	streamWriter.control = newLiveChatWriteControl(liveCtx, w)
+	// Join the cancellation watcher before net/http can reuse this response.
+	defer streamWriter.control.close()
+	w, flusher = streamWriter, streamWriter
+
 	began := time.Now()
 	id := "msg_fak_" + itoa(uint64(began.UnixNano()))
 	h := w.Header()
@@ -180,9 +188,8 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 	h.Set("Connection", "keep-alive")
 	h.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
-	streamWriter := &nativeStreamWriter{ResponseWriter: w}
 	send := anthropicSSESender(streamWriter, flusher)
-	sendProgress := func(ev agent.ProgressEvent) {
+	progressFrame := func(ev agent.ProgressEvent) string {
 		payload := map[string]any{"type": string(ev.Kind), "session": reqTrace, "turn": ev.Turn, "seq": ev.Seq}
 		for k, v := range map[string]string{"call_id": ev.CallID, "tool": ev.Tool, "verdict": ev.Verdict, "reason": ev.Reason, "taint": ev.Taint, "summary": ev.Summary} {
 			if v != "" {
@@ -190,9 +197,14 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 			}
 		}
 		b, _ := json.Marshal(payload)
-		_, _ = fmt.Fprintf(streamWriter, "id: %d\nevent: %s\ndata: %s\n\n", ev.Seq, ev.Kind, b)
-		flusher.Flush()
+		return fmt.Sprintf("id: %d\nevent: %s\ndata: %s\n\n", ev.Seq, ev.Kind, b)
 	}
+	sendFrame := func(frame string) error {
+		_, _ = io.WriteString(streamWriter, frame)
+		flusher.Flush()
+		return streamWriter.err()
+	}
+	sendProgress := func(ev agent.ProgressEvent) { _ = sendFrame(progressFrame(ev)) }
 	if cursorRaw != "" {
 		for _, ev := range replay {
 			sendProgress(ev)
@@ -207,6 +219,11 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 			"usage": map[string]int{"input_tokens": agent.EstimateAnthropicTokens(req), "output_tokens": 0},
 		},
 	})
+
+	if streamWriter.err() != nil {
+		s.metrics.recordPerfFailure(perfSourceFrom(r.Context()), s.chatServingLocality(r.Context(), req.Model), perfledger.ErrorClientWrite, http.StatusOK, time.Since(began), 0)
+		return
+	}
 
 	outIdx := 0
 	stopBuf := NewStopHoldbackBuffer(req.StopSequences)
@@ -230,7 +247,7 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 			"type": "content_block_delta", "index": textIdx,
 			"delta": map[string]any{"type": "text_delta", "text": text},
 		})
-		if ttft == 0 && streamWriter.err == nil {
+		if ttft == 0 && streamWriter.err() == nil {
 			ttft = time.Since(began)
 		}
 	}
@@ -245,21 +262,27 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 	}
 	emitText := func(text string) error {
 		emitSafeText(stopBuf.Append(text))
-		return streamWriter.err
+		return streamWriter.err()
 	}
 
-	// Typed loop-progress → structured native SSE (#5148). Each witnessed lifecycle
-	// transition of the OWNED loop becomes a custom SSE event named for its kind,
-	// interleaved with the text deltas above and tagged with this request's session
-	// trace + the originating call id. The observer runs on the same request goroutine
-	// as the text sink (the loop is synchronous within CompleteStream), so no
-	// cross-goroutine send race is introduced.
-	onProgress := func(ev agent.ProgressEvent) {
-		s.nativeProgress.append(reqTrace, ev)
-		sendProgress(ev)
+	// The real delivery lifecycle owns bounded queuing and the terminal join;
+	// wire rendering and ArmMetrics remain here on the unchanged native route.
+	var m agent.ArmMetrics
+	err, deliveryErr := runNativeStreamDelivery(liveCtx, streamWriter.control != nil, cancelLive,
+		func(text, progress func(string) error) error {
+			onProgress := func(ev agent.ProgressEvent) {
+				s.nativeProgress.append(reqTrace, ev)
+				_ = progress(progressFrame(ev))
+			}
+			var generationErr error
+			m, generationErr = s.runNativeArmStreamSeed(liveCtx, seed, reqTrace, text, onProgress)
+			return generationErr
+		}, emitText, sendFrame)
+	if deliveryErr != nil {
+		s.metrics.recordPerfFailure(perfSourceFrom(r.Context()), s.chatServingLocality(r.Context(), req.Model), perfledger.ErrorClientWrite, http.StatusOK, time.Since(began), ttft)
+		return
 	}
-	m, err := s.runNativeArmStreamSeed(r.Context(), seed, reqTrace, emitText, onProgress)
-	if streamWriter.err != nil {
+	if streamWriter.err() != nil {
 		s.metrics.recordPerfFailure(perfSourceFrom(r.Context()), s.chatServingLocality(r.Context(), req.Model), perfledger.ErrorClientWrite, http.StatusOK, time.Since(began), ttft)
 		return
 	}
@@ -270,7 +293,7 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	closeText()
-	if streamWriter.err != nil {
+	if streamWriter.err() != nil {
 		s.metrics.recordPerfFailure(perfSourceFrom(r.Context()), s.chatServingLocality(r.Context(), req.Model), perfledger.ErrorClientWrite, http.StatusOK, time.Since(began), ttft)
 		return
 	}
@@ -279,7 +302,7 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 	usage := anthropicUsage{InputTokens: m.PromptTokens, OutputTokens: m.CompletionTokens}
 	arm := m
 	sendAnthropicTerminalWithNativeArm(send, stop, usage, &arm)
-	if streamWriter.err != nil {
+	if streamWriter.err() != nil {
 		s.metrics.recordPerfFailure(perfSourceFrom(r.Context()), s.chatServingLocality(r.Context(), req.Model), perfledger.ErrorClientWrite, http.StatusOK, time.Since(began), ttft)
 		return
 	}

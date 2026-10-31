@@ -318,11 +318,11 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	// buffered mid-stream arm, which also cannot carry a status).
 	if comp.ToolCallsDropped && len(comp.Message.ToolCalls) == 0 {
 		if started {
-			s.logf("gateway: upstream announced tool_calls but none parsed mid-stream (responses stream); model=%s reason=%s", s.model, toolCallDropReasonName(comp))
+			s.logf("gateway: upstream announced tool_calls but none parsed mid-stream (responses stream); model=%s reason=%s finish_reason=%s completion_tokens=%d", s.model, toolCallDropReasonName(comp), toolCallLogFinishReason(comp.FinishReason), comp.Usage.CompletionTokens)
 			emitResponseFailed()
 			return true
 		}
-		s.logf("gateway: upstream announced tool_calls but none parsed (responses stream); model=%s reason=%s", s.model, toolCallDropReasonName(comp))
+		s.logf("gateway: upstream announced tool_calls but none parsed (responses stream); model=%s reason=%s finish_reason=%s completion_tokens=%d", s.model, toolCallDropReasonName(comp), toolCallLogFinishReason(comp.FinishReason), comp.Usage.CompletionTokens)
 		if msg, code, typed := toolCallDropRefusal(comp); typed {
 			writeErrCode(w, http.StatusBadGateway, code, msg)
 			return true
