@@ -41,6 +41,11 @@ type V41EngramAttachSpec struct {
 	// CachePolicy is constructor-only: empty/LRU preserves the ordinary default.
 	// CLOCK opts a newly attached model into experimental Engram replacement.
 	CachePolicy V41EngramCachePolicy
+	// ReadWorkers selects bounded parallel cold reads only for producers with
+	// the existing concurrent-read and retained-lifetime contracts. Zero/one
+	// is serial. Select 2..4 only on a fresh attachment; rollback reattaches
+	// with zero. This does not select a CLI mode or change row/cache arithmetic.
+	ReadWorkers int
 }
 
 // V41EngramDigestExtent returns the flat "sha256:<hex>" content address over
@@ -67,6 +72,9 @@ func (m *Model) AttachV41Engram(spec V41EngramAttachSpec, layout V41EngramLayout
 	}
 	// Refuse an unknown policy before changing model configuration or wiring.
 	if err := spec.CachePolicy.validate(); err != nil {
+		return fmt.Errorf("%w: %v", ErrV41NativeUnsupported, err)
+	}
+	if err := v41EngramValidateReadWorkers(spec.ReadWorkers); err != nil {
 		return fmt.Errorf("%w: %v", ErrV41NativeUnsupported, err)
 	}
 	if len(spec.LayerIDs) == 0 {
@@ -106,7 +114,7 @@ func (m *Model) AttachV41Engram(spec V41EngramAttachSpec, layout V41EngramLayout
 	d41.EngramPadTokenID = spec.PadTokenID
 	d41.EngramCompressedVocabSize = spec.CompressedVocabSize
 
-	if err := m.wireV41EngramWithPolicy(layout, srcs, budgetBytes, spec.CachePolicy); err != nil {
+	if err := m.wireV41EngramWithPolicy(layout, srcs, budgetBytes, spec.CachePolicy, spec.ReadWorkers); err != nil {
 		return fmt.Errorf("%w: %v", ErrV41NativeUnsupported, err)
 	}
 	return nil

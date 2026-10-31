@@ -28,6 +28,8 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"sync"
+	"sync/atomic"
 )
 
 const v41EngramBatchMaxBytes int64 = 64 << 10
@@ -134,6 +136,17 @@ func (c *V41EngramRowCache) gatherKnownRowsOwned(rows []uint32, contiguous bool)
 	if maxRows < 1 {
 		maxRows = 1
 	}
+	parallel, err := c.gatherParallelMissRows(missing, maxRows, func(row uint32, payload []byte) {
+		serve(row, payload, int64(len(positions[row])-1))
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	if parallel {
+		// Joined, owned outputs are ready. Both paths share the demand-order
+		// residency publication below; a failed parallel wave never reaches it.
+		missing = nil
+	}
 	// One bounded source-read slab covers every coalesced miss span in this
 	// gather: size it to the largest planned span - the longest run of
 	// consecutive missing rows, capped at the coalescer ceiling. Residency can
@@ -212,4 +225,176 @@ func (c *V41EngramRowCache) gatherKnownRowsOwned(rows []uint32, contiguous bool)
 		}
 	}
 	return out, panel, nil
+}
+
+// The bounded worker scheduling is adapted from Strata/Project Maya EgReader:
+// Niko1221/Strata src/dsv41/ds4_engram_io.hpp:129-203 at
+// c62d5e3a15b40ea51c96aae9e8d36928965f53ab (MIT; complete license and Maya
+// attribution in THIRD_PARTY_NOTICES.md). Unlike the donor's file-handle pool,
+// FAK reuses its explicit producer policy and source hold, exact coalesced spans,
+// immutable copied output and existing transaction/cache publication boundary.
+// One process-wide additional read group bounds total new workers to four.
+var v41EngramParallelReadBusy atomic.Bool
+
+const v41EngramParallelReadBudget int64 = 1 << 20
+const v41EngramParallelReadMetadata int64 = 64 << 10
+
+type v41EngramParallelSpan struct {
+	lo, hi     int
+	buf        []byte
+	n          int
+	err        error
+	panicValue any
+	returned   bool
+	done       *sync.WaitGroup
+}
+
+func v41EngramMissSpanEnd(missing []uint32, lo, maxRows int) int {
+	hi := lo + 1
+	for hi < len(missing) && hi-lo < maxRows && uint64(missing[hi]) == uint64(missing[hi-1])+1 {
+		hi++
+	}
+	return hi
+}
+
+// Called with c.mu held. Workers only fill disjoint read buffers/result slots;
+// this owner alone updates statistics and copies outputs. All workers are joined
+// before releasing the exact source hold, even on panic or a source's Goexit.
+// No ReaderAt interruption is promised: closing may wait for a read to return.
+// Failed waves publish no rows; earlier successful waves only filled the private
+// gather output. Cache residency is published by the caller only after success.
+func (c *V41EngramRowCache) gatherParallelMissRows(missing []uint32, maxRows int, serve func(uint32, []byte)) (bool, error) {
+	workers := c.opts.ReadWorkers
+	if workers < 2 || len(missing) < 2 || maxRows < 2 || c.opts.PrefetchRows > 0 ||
+		v41EngramMissSpanEnd(missing, 0, maxRows) == len(missing) {
+		return false, nil
+	}
+	staging, eligible := v41EngramForwardLookAheadPolicy(c.src, c.opts.RowBytes)
+	owner, owned := c.src.(v41EngramSourceReadOwner)
+	if !eligible || !owned {
+		return false, nil
+	}
+	if staging < 0 || workers > v41EngramMaxReadWorkers {
+		return true, &V41EngramStreamError{Kind: V41EngramStreamGeometry, Row: -1,
+			Err: fmt.Errorf("invalid parallel read producer/worker envelope")}
+	}
+	// One aggregate wave, not workers copies of the serial read budget. Its
+	// source inputs fit min(cache budget,64KiB). Producer staging plus a fixed
+	// worker/metadata allowance also fits one process-wide logical MiB; this
+	// is not a bound on Go RSS/GC or on the existing caller-owned output panel.
+	perRow := int64(c.opts.RowBytes) + int64(staging)
+	if perRow <= 0 || int64(maxRows) > (v41EngramParallelReadBudget-v41EngramParallelReadMetadata)/perRow {
+		return false, nil
+	}
+	if !v41EngramParallelReadBusy.CompareAndSwap(false, true) {
+		return false, nil
+	}
+	defer v41EngramParallelReadBusy.Store(false)
+	release, closing, held := owner.V41EngramHoldSourceReads()
+	if release != nil {
+		defer release()
+	}
+	if !held || release == nil || closing == nil {
+		return true, fmt.Errorf("model: V41 Engram parallel read source retention refused")
+	}
+	stopError := func() error {
+		select {
+		case <-closing:
+			return fmt.Errorf("model: V41 Engram parallel read source is closing")
+		default:
+			return nil
+		}
+	}
+	if err := stopError(); err != nil {
+		return true, err
+	}
+	wave := make([]byte, maxRows*c.opts.RowBytes)
+	jobs := make(chan *v41EngramParallelSpan, workers)
+	var pool sync.WaitGroup
+	pool.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer pool.Done()
+			for job := range jobs {
+				func() {
+					defer job.done.Done()
+					defer func() { job.panicValue = recover() }()
+					job.n, job.err = c.src.ReadRows(int(missing[job.lo]), job.hi-job.lo, job.buf)
+					job.returned = true
+				}()
+			}
+		}()
+	}
+	// Registered after the source release: pool drain runs first on every exit.
+	defer func() { close(jobs); pool.Wait() }()
+	for lo := 0; lo < len(missing); {
+		if err := stopError(); err != nil {
+			return true, err
+		}
+		var spans [v41EngramMaxReadWorkers]v41EngramParallelSpan
+		var done sync.WaitGroup
+		nspans, usedRows := 0, 0
+		for lo < len(missing) && nspans < workers {
+			hi := v41EngramMissSpanEnd(missing, lo, maxRows)
+			rows := hi - lo
+			if usedRows+rows > maxRows {
+				break // never split or amplify an already-coalesced span
+			}
+			start, end := usedRows*c.opts.RowBytes, (usedRows+rows)*c.opts.RowBytes
+			spans[nspans] = v41EngramParallelSpan{lo: lo, hi: hi, buf: wave[start:end:end], done: &done}
+			nspans++
+			usedRows += rows
+			lo = hi
+		}
+		done.Add(nspans)
+		for i := 0; i < nspans; i++ {
+			jobs <- &spans[i]
+		}
+		done.Wait()
+		// Count all actually started reads, including later reads in a failed
+		// wave. Unlike serial I/O, an earlier failure may have peers in flight.
+		c.stats.Misses += int64(usedRows)
+		for i := 0; i < nspans; i++ {
+			if n := spans[i].n; n >= 0 && n <= len(spans[i].buf) {
+				c.stats.BytesRead += int64(n)
+			}
+		}
+		// First failure is selected by the original sorted span order, not by
+		// completion order. No worker owns cache state or caller publication.
+		for i := 0; i < nspans; i++ {
+			job := &spans[i]
+			if job.panicValue != nil {
+				panic(job.panicValue)
+			}
+			if !job.returned {
+				return true, fmt.Errorf("model: V41 Engram parallel read exited without completion")
+			}
+			want := len(job.buf)
+			if job.n < 0 || job.n > want {
+				return true, &V41EngramStreamError{Kind: V41EngramStreamGeometry, Row: int(missing[job.lo]),
+					Err: fmt.Errorf("source returned invalid byte count %d for %d-byte range", job.n, want)}
+			}
+			if job.n != want {
+				err := job.err
+				if err == nil {
+					err = io.ErrUnexpectedEOF
+				}
+				return true, &V41EngramStreamError{Kind: V41EngramStreamShortRead, Row: int(missing[job.lo]),
+					Err: fmt.Errorf("source returned bytes=%d want=%d: %w", job.n, want, err)}
+			}
+			if job.err != nil {
+				return true, fmt.Errorf("model: V41 Engram row read: %w", job.err)
+			}
+		}
+		if err := stopError(); err != nil {
+			return true, err
+		}
+		for i := 0; i < nspans; i++ {
+			job := &spans[i]
+			for j, row := range missing[job.lo:job.hi] {
+				serve(row, job.buf[j*c.opts.RowBytes:(j+1)*c.opts.RowBytes])
+			}
+		}
+	}
+	return true, stopError()
 }

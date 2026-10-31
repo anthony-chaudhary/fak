@@ -167,12 +167,12 @@ func (m *Model) v41EngramStageFor() *v41EngramStage {
 // Engram layer, in declaration order, each with the layout's per-layer row count.
 // It is package-private: only the reduced forward and its test build the seam.
 func (m *Model) wireV41Engram(layout V41EngramLayout, srcs []V41EngramRowSource, budgetBytes int64) error {
-	return m.wireV41EngramWithPolicy(layout, srcs, budgetBytes, V41EngramCacheLRU)
+	return m.wireV41EngramWithPolicy(layout, srcs, budgetBytes, V41EngramCacheLRU, 0)
 }
 
 // wireV41EngramWithPolicy is the typed attachment arm; legacy internal callers
 // keep the wrapper's LRU default. Selection is fixed before stage publication.
-func (m *Model) wireV41EngramWithPolicy(layout V41EngramLayout, srcs []V41EngramRowSource, budgetBytes int64, policy V41EngramCachePolicy) error {
+func (m *Model) wireV41EngramWithPolicy(layout V41EngramLayout, srcs []V41EngramRowSource, budgetBytes int64, policy V41EngramCachePolicy, readWorkers int) error {
 	if m == nil || m.Cfg.DeepSeekV41 == nil {
 		return fmt.Errorf("%w: Engram stage needs a V4.1 config", ErrV41NativeUnsupported)
 	}
@@ -230,7 +230,7 @@ func (m *Model) wireV41EngramWithPolicy(layout V41EngramLayout, srcs []V41Engram
 			budget = int64(rowBytes)
 		}
 		cache, err := NewV41EngramRowCache(src, V41EngramRowCacheOptions{
-			TableRows: int(layout.Rows[i]), RowBytes: rowBytes, BudgetBytes: budget, CachePolicy: policy,
+			TableRows: int(layout.Rows[i]), RowBytes: rowBytes, BudgetBytes: budget, CachePolicy: policy, ReadWorkers: readWorkers,
 		})
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrV41NativeUnsupported, err)

@@ -256,6 +256,15 @@ func (p V41EngramCachePolicy) validate() error {
 	}
 }
 
+const v41EngramMaxReadWorkers = 4
+
+func v41EngramValidateReadWorkers(workers int) error {
+	if workers < 0 || workers > v41EngramMaxReadWorkers {
+		return fmt.Errorf("model: V41 Engram read workers %d outside [0,%d]", workers, v41EngramMaxReadWorkers)
+	}
+	return nil
+}
+
 // V41EngramRowCacheOptions configures the bounded Engram row cache + prefetch.
 type V41EngramRowCacheOptions struct {
 	TableRows      int                  // total rows in the table
@@ -264,6 +273,10 @@ type V41EngramRowCacheOptions struct {
 	PrefetchRows   int                  // rows to prefetch ahead on a miss; <=0 disables prefetch
 	PrefetchWindow int                  // max readahead window in rows (clamped >= PrefetchRows)
 	CachePolicy    V41EngramCachePolicy // empty/LRU by default; CLOCK is explicit opt-in
+	// ReadWorkers is constructor-only. Zero/one keeps serial reads; 2..4 opts
+	// eligible, retained sources into bounded parallel miss-span reads. Ordinary
+	// and unowned/custom readers remain serial; no extra row IDs are prefetched.
+	ReadWorkers int
 }
 
 // V41EngramRowCache is a bounded row cache over a V41EngramRowSource with eager,
@@ -310,6 +323,9 @@ func NewV41EngramRowCache(src V41EngramRowSource, opts V41EngramRowCacheOptions)
 		return nil, fmt.Errorf("model: V41 Engram row bytes %d does not match source row bytes %d", opts.RowBytes, src.RowBytes())
 	}
 	if err := opts.CachePolicy.validate(); err != nil {
+		return nil, err
+	}
+	if err := v41EngramValidateReadWorkers(opts.ReadWorkers); err != nil {
 		return nil, err
 	}
 	if opts.PrefetchWindow < opts.PrefetchRows {
