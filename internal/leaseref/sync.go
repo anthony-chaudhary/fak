@@ -41,6 +41,7 @@ package leaseref
 import (
 	"context"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/sessionref"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -355,19 +356,4 @@ func QuarantineMalformedLockRefsInDir(refDir, quarantineDir string) ([]string, e
 	return moved, err
 }
 
-func validObjectID(s string) bool {
-	if len(s) != 40 && len(s) != 64 {
-		return false
-	}
-	nonzero := false
-	for i := range len(s) {
-		c := s[i]
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
-			return false
-		}
-		if c != '0' {
-			nonzero = true
-		}
-	}
-	return nonzero
-}
+func validObjectID(s string) bool { return sessionref.ValidObjectID(s) }

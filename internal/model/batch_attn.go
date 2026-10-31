@@ -579,7 +579,20 @@ func attnDecodeSplitK(attnOut, q, scores []float32, rows decodeKVRows, a decodeA
 		}
 		for j := j0; j < j1; j++ {
 			vh := rows.head(j, kvh, false, vbuf)
-			for g := 0; g < grp; g++ {
+			// Reuse each immutable V row across three query heads. Each output
+			// still accumulates exactly one product per j in the original order.
+			g := 0
+			for ; g+3 <= grp; g += 3 {
+				saxpy3scalar(
+					sc.part[(u*grp+g)*hd:(u*grp+g+1)*hd],
+					sc.part[(u*grp+g+1)*hd:(u*grp+g+2)*hd],
+					sc.part[(u*grp+g+2)*hd:(u*grp+g+3)*hd],
+					vh,
+					scores[base+g*chunk+j-j0],
+					scores[base+(g+1)*chunk+j-j0],
+					scores[base+(g+2)*chunk+j-j0])
+			}
+			for ; g < grp; g++ {
 				saxpy(sc.part[(u*grp+g)*hd:(u*grp+g+1)*hd], vh, scores[base+g*chunk+j-j0])
 			}
 		}

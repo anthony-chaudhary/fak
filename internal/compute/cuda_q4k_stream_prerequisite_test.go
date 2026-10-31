@@ -58,6 +58,13 @@ func TestCUDAQ4KCheckedStreamPrerequisites(t *testing.T) {
 				t.Fatalf("missing function %s in %s", name, path)
 			}
 			head := strings.TrimSpace(s[loc[1]:])
+			// The hd256 retirement latch is a pure fail-closed return and preserves
+			// its first cleanup error. Accept only that exact prefix on that path;
+			// arbitrary calls or work before the checked-stream guard still fail.
+			if name == "fak_qwen38_fattn_mma_hd256_launch" {
+				const cleanupGuard = "// A failed retirement has unknown completion: retain ownership and never retry or reuse.\n    if (g_cuda_cleanup_status != 0) return 52000 + g_cuda_cleanup_status;"
+				head = strings.TrimSpace(strings.TrimPrefix(head, cleanupGuard))
+			}
 			if strings.HasPrefix(head, "if (!d) return 0;") {
 				head = strings.TrimSpace(strings.TrimPrefix(head, "if (!d) return 0;"))
 			}

@@ -3,6 +3,7 @@ package compute
 import (
 	"encoding/json"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"strings"
@@ -115,7 +116,8 @@ func assertCUDAMatMulTraceWiring(t *testing.T) {
 	if builderArity == 0 {
 		t.Fatal("cuda_matmul_trace.go lacks the cudaMatMulTraceEvent signature")
 	}
-	for _, name := range []string{"MatMul", "BatchedMatMul"} {
+	assertCUDAMatMulLockedWrapper(t)
+	for _, name := range []string{"cudaMatMulLocked", "BatchedMatMul"} {
 		var fn *ast.FuncDecl
 		for _, decl := range file.Decls {
 			if f, ok := decl.(*ast.FuncDecl); ok && f.Name.Name == name && f.Recv != nil {
@@ -229,4 +231,29 @@ func assertCUDAMatMulTraceWiring(t *testing.T) {
 			}
 		}
 	}
+}
+
+// Pin the public lock/forwarding boundary as well as the implementation body.
+func assertCUDAMatMulLockedWrapper(t *testing.T) {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), "cuda.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "MatMul" || fn.Recv == nil {
+			continue
+		}
+		var body strings.Builder
+		if err := format.Node(&body, token.NewFileSet(), fn.Body); err != nil {
+			t.Fatal(err)
+		}
+		const want = "{\n\tcudaMu.Lock()\n\tdefer cudaMu.Unlock()\n\treturn c.cudaMatMulLocked(w, x)\n}"
+		if body.String() != want {
+			t.Fatalf("MatMul lock/forward boundary changed: %s", body.String())
+		}
+		return
+	}
+	t.Fatal("missing public CUDA MatMul wrapper")
 }

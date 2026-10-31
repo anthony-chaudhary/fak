@@ -252,28 +252,28 @@ extern "C" int fcuda_blockscaled_wkv_run(const float *x, const uint8_t *w, const
     if (rc) return rc; // All capability/layout/heuristic checks precede mutation.
     auto finish = [&](int code) { return op.close(drain(code)); };
     cudaError_t e;
-    FCUDA_TS("blockscaled-wkv-status", dim3(0, 0), e = cudaMemsetAsync(status, 0, 4, g_stream));
+    FCUDA_TS("fill", dim3(0, 0), e = cudaMemsetAsync(status, 0, 4, g_stream));
     if (e != cudaSuccess) return finish((int)e);
     // Independent SM120 whole-operation contract. Reuse only the architecture-
     // neutral SIMT kernel, NOT the intentionally SM100/103-only exported API.
-    FCUDA_TS("blockscaled-wkv-cast", rows * 40,
+    FCUDA_TS("k_mxfp8_cast_f32", rows * 40,
         k_mxfp8_cast_f32<<<rows * 40, 128, 0, g_stream>>>(x, a, recipe, status, rows, 5120, rows));
     rc = drain((int)cudaGetLastError());
     if (rc) return op.close(rc);
     rc = read_status(status);
     if (rc) return op.close(rc);
-    FCUDA_TS("blockscaled-wkv-repack", (rows * 40 + 255) / 256,
+    FCUDA_TS("repack", (rows * 40 + 255) / 256,
         repack<<<(rows * 40 + 255) / 256, 256, 0, g_stream>>>(recipe, (uint32_t *)tiled, rows));
     e = cudaGetLastError();
     if (e != cudaSuccess) return finish((int)e);
     const float alpha = 1.0f, beta = 0.0f;
     cublasStatus_t cs;
-    FCUDA_TS("blockscaled-wkv-matmul", dim3(512, rows), cs = cublasLtMatmul(
+    FCUDA_TS("cublaslt_matmul", dim3(512, rows), cs = cublasLtMatmul(
         g_cublas_lt, op.op, &alpha, w, op.w, a, op.x, &beta, y, op.y,
         y, op.y, &op.heuristic.algo, g_blas_workspace, workspace_bytes, g_stream));
     // Even NOT_SUPPORTED here is an execution error: casting already happened.
     if (cs != CUBLAS_STATUS_SUCCESS) return finish(blas_error(cs));
-    FCUDA_TS("blockscaled-wkv-finite", (rows * 512 + 255) / 256,
+    FCUDA_TS("check_output", (rows * 512 + 255) / 256,
         check_output<<<(rows * 512 + 255) / 256, 256, 0, g_stream>>>(y, status, rows * 512));
     rc = drain((int)cudaGetLastError());
     if (!rc) rc = read_status(status);

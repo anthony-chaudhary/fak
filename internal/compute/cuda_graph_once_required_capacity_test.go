@@ -13,13 +13,13 @@ import (
 // A separate isolated process exercises a real final KV row, not fabricated metadata.
 // fak-test:runtime integration est=5s lane=cuda
 func TestCUDAGraphOnceRequiredLastCapacity(t *testing.T) {
-	for _, key := range []string{"FAK_CUDA_REQUIRE_DEVICE", "FAK_CUDA_GRAPH", "FAK_CUDA_CAPTURE_ONCE"} {
+	for _, key := range []string{"FAK_CUDA_REQUIRE_DEVICE", "FAK_CUDA_GRAPH"} {
 		if os.Getenv(key) != "1" {
 			t.Fatalf("%s=1 required; no skip/fallback", key)
 		}
 	}
 	// Setenv prevents this test or a parent from being marked parallel. Value unchanged.
-	t.Setenv("FAK_CUDA_CAPTURE_ONCE", "1")
+	t.Setenv("FAK_CUDA_GRAPH", "1")
 	be, ok := Lookup("cuda")
 	if !ok {
 		t.Fatal("real CUDA backend required")
@@ -31,6 +31,15 @@ func TestCUDAGraphOnceRequiredLastCapacity(t *testing.T) {
 	if cb.GraphOnceQualificationSnapshot().Owner != 0 {
 		t.Fatal("isolated process with no live graph owner required")
 	}
+	if err := ConfigureCUDACaptureOnce(be, true); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := ConfigureCUDACaptureOnce(be, false); err != nil {
+			t.Errorf("capture-once config cleanup: %v", err)
+		}
+	})
+
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	a, b, z := make([]float32, 64), make([]float32, 64), make([]float32, 64)
@@ -119,7 +128,7 @@ func TestCUDAGraphOnceRequiredLastCapacity(t *testing.T) {
 			return false
 		}
 		s := cb.graphOnce
-		if s == nil || s.kv != k || s.next != capacity || len(k.pos) != capacity || s.capturing || s.invalidated || s.output.buf == nil || cudaGraphOnceOwner != cb || !graphEnabled || cudaKernelProfileOn {
+		if s == nil || s.kv != k || s.next != capacity || len(k.pos) != capacity || s.capturing || s.invalidated || s.output.buf == nil || cudaGraphOnceOwner != cb || !graphEnabled || cudaKernelProfileOn || !cudaCaptureOnceMode.enabled {
 			return false
 		}
 		if fresh.Backend() != cb || fresh.Dtype != F32 || fresh.Numel() != s.input.Numel() {
@@ -153,6 +162,18 @@ func TestCUDAGraphOnceRequiredLastCapacity(t *testing.T) {
 	ready := cb.GraphOnceQualificationSnapshot()
 	if ready.Captures != before.Captures+1 || ready.Replays != before.Replays || ready.Next != capacity {
 		t.Fatal("last valid capture not actually completed exactly once")
+	}
+	// A completed capture-once owner must refuse even idempotent reconfiguration.
+	for _, enabled := range []bool{false, true} {
+		if err := ConfigureCUDACaptureOnce(be, enabled); err != ErrCUDACaptureOnceBusy {
+			t.Fatalf("live owner configuration refusal: %v", err)
+		}
+	}
+	cudaMu.Lock()
+	modeUnchanged := cudaCaptureOnceMode.enabled
+	cudaMu.Unlock()
+	if !modeUnchanged || !reflect.DeepEqual(ready, cb.GraphOnceQualificationSnapshot()) {
+		t.Fatal("refused configuration changed live capture-once state")
 	}
 	if _, used := cb.GraphOnceReplay(fresh, kv, capacity); used {
 		t.Fatal("one-past-capacity replay accepted")

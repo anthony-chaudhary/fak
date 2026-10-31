@@ -13,7 +13,7 @@ import (
 // fak-test:runtime integration est=5s lane=cuda
 // Real model + real CUDA only. Sequential sessions avoid claiming concurrency.
 func TestCUDAGraphOnceRequiredDenseModel(t *testing.T) {
-	for _, key := range []string{"FAK_CUDA_REQUIRE_DEVICE", "FAK_CUDA_GRAPH", "FAK_CUDA_CAPTURE_ONCE"} {
+	for _, key := range []string{"FAK_CUDA_REQUIRE_DEVICE", "FAK_CUDA_GRAPH"} {
 		if os.Getenv(key) != "1" {
 			t.Fatalf("%s=1 required; no skip/fallback", key)
 		}
@@ -106,7 +106,14 @@ func TestCUDAGraphOnceRequiredDenseModel(t *testing.T) {
 			t.Fatal("graph/eager Approx gate failed: argmax-exact and cosine >=0.999 required")
 		}
 	}
-	t.Setenv("FAK_CUDA_CAPTURE_ONCE", "0")
+	if err := compute.ConfigureCUDACaptureOnce(be, false); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := compute.ConfigureCUDACaptureOnce(be, false); err != nil {
+			t.Errorf("capture-once config cleanup: %v", err)
+		}
+	})
 	ref, err := m.NewBackendSessionChecked(be)
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +136,9 @@ func TestCUDAGraphOnceRequiredDenseModel(t *testing.T) {
 		t.Fatal("ordinary reference captured a graph")
 	}
 	ref.Close()
-	t.Setenv("FAK_CUDA_CAPTURE_ONCE", "1")
+	if err := compute.ConfigureCUDACaptureOnce(be, true); err != nil {
+		t.Fatal(err)
+	}
 	selected, err := m.NewBackendSessionChecked(be)
 	if err != nil {
 		t.Fatal(err)

@@ -5,6 +5,25 @@ No model downloads, fake backends, quantized/hybrid support, concurrent unrelate
 submissions, performance or full-serving-parity claim. Run only on an authorized
 CUDA node after claiming the hardware request, in isolated processes.
 
+## Explicit runtime configuration (environment migration)
+
+`FAK_CUDA_CAPTURE_ONCE` is retired as a runtime switch and is not read.
+The qualification build alone still leaves capture-once OFF. The named device
+witnesses explicitly call `compute.ConfigureCUDACaptureOnce(backend, enabled)`:
+the model witness selects OFF for eager reference, closes that session, then
+selects ON for capture. Cleanup disables it only after checked owner teardown.
+Keep the existing ordinary graph and required-device prerequisites below.
+
+Embedding callers must opt in through that typed API. It applies to the shared
+CUDA stream; configure before sessions or after checked abort/invalidation/close.
+A live capture-once owner, any active capture, foreign/nil backend, unsupported
+build or incompatible async profile refuses without changing the mode. Only the
+registered CUDA backend may configure its shared stream. Ordinary completed
+per-token graph execs are independent: this setting does not control, inspect or
+tear them down, and no absence of such cached execs is claimed. This replaces hot
+environment mutation with an explicit capture-once ownership contract. It does not add
+a serve flag/TOML setting, repurpose `--cuda-graph`, or enable an unavailable profile.
+
 ## Exact native and cgo profile
 
 Use the existing native builder, recorded flags/cache identity and local resource
@@ -37,21 +56,24 @@ export CC CXX CGO_CFLAGS CGO_LDFLAGS LD_LIBRARY_PATH LIBRARY_PATH
 export CGO_ENABLED=1 GOFLAGS=
 # Replace sm_XX with the authorized node's supported target.
 go run ./cmd/fak-dev build-cuda build --arch sm_XX --capture-once-qualification --v41-defaults=false
-export FAK_CUDA_REQUIRE_DEVICE=1 FAK_CUDA_GRAPH=1 FAK_CUDA_CAPTURE_ONCE=1
+export FAK_CUDA_REQUIRE_DEVICE=1 FAK_CUDA_GRAPH=1
 TAGS=cuda,fak_cuda_capture_once_qualification,fak_cuda_capture_once_device_witness
 go test -json -p 1 -parallel 1 -count=1 -tags "$TAGS" ./internal/compute -run '^TestCUDAGraphOnceRequiredBorrowedLifetime$' | tee graph-compute.jsonl
 go test -json -p 1 -parallel 1 -count=1 -tags "$TAGS" ./internal/model -run '^TestCUDAGraphOnceRequiredDenseModel$' | tee graph-model.jsonl
+CAPACITY_TAGS=cuda,fak_cuda_capture_once_qualification,fak_cuda_capture_once_capacity_witness
+go test -json -p 1 -parallel 1 -count=1 -tags "$CAPACITY_TAGS" ./internal/compute -run '^TestCUDAGraphOnceRequiredLastCapacity$' | tee graph-capacity.jsonl
 python3 - <<'CHECK'
 import json
 for path, name in [("graph-compute.jsonl", "TestCUDAGraphOnceRequiredBorrowedLifetime"),
-                   ("graph-model.jsonl", "TestCUDAGraphOnceRequiredDenseModel")]:
+                   ("graph-model.jsonl", "TestCUDAGraphOnceRequiredDenseModel"),
+                   ("graph-capacity.jsonl", "TestCUDAGraphOnceRequiredLastCapacity")]:
     with open(path, encoding="utf-8") as stream:
         events = [json.loads(line) for line in stream if line.strip()]
     selected = [event for event in events if event.get("Test") == name]
     assert sum(event.get("Action") == "run" for event in selected) == 1, (path, "required test did not run exactly once")
     assert sum(event.get("Action") == "pass" for event in selected) == 1, (path, "required test did not pass")
     assert not any(event.get("Action") in ("skip", "fail") for event in events), (path, "skip/failure is not qualification")
-print("Both named required-device witnesses ran and passed; retain their original evidence.")
+print("All three named required-device witnesses ran and passed; retain their original evidence.")
 CHECK
 ```
 

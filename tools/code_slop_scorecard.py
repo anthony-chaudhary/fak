@@ -807,6 +807,9 @@ def _is_sort_scaffold_only(key: tuple[str, ...]) -> bool:
     """True iff the token window contains a `sort.<verb>` call (one of _SORT_VERBS)
     but NONE of the real-logic tells (a _COMPARE_TOKENS operator or a _CONTROL_KEYWORDS
     keyword) — pure sort scaffolding, no comparator body and no copied loop."""
+    # Most windows contain no sort token; reject them without a Python index loop.
+    if "sort" not in key:
+        return False
     has_sort = False
     n = len(key)
     for i in range(n - 2):
