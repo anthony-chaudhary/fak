@@ -15,7 +15,7 @@ import (
 // SM100-only exported cast. On a separately admitted SM120 node with a qualified
 // native archive, run:
 //
-// FAK_CUDA_BLOCKSCALED_WKV_REQUIRED=1 FAK_CUDA_BLOCKSCALED_WKV=1 go test -tags cuda ./internal/compute -run '^TestCUDABlockScaledWKVSM120Witness$' -count=1 -v
+// FAK_CUDA_BLOCKSCALED_WKV_REQUIRED=1 go test -tags cuda ./internal/compute -run '^TestCUDABlockScaledWKVSM120Witness$' -count=1 -v
 //
 // Required mode never skips an absent device, unsupported profile or heuristic.
 // Run alone: transfer counters and the producer stream are backend-global. The
@@ -33,9 +33,6 @@ func TestCUDABlockScaledWKVSM120Witness(t *testing.T) {
 	if os.Getenv("FAK_CUDA_BLOCKSCALED_WKV_REQUIRED") != "1" {
 		t.Skip("set FAK_CUDA_BLOCKSCALED_WKV_REQUIRED=1 on an admitted SM120 acceptance node")
 	}
-	if os.Getenv("FAK_CUDA_BLOCKSCALED_WKV") != "1" {
-		t.Fatal("required witness needs explicit FAK_CUDA_BLOCKSCALED_WKV=1")
-	}
 	backend, ok := Lookup("cuda")
 	if !ok || backend == nil || backend.Name() != "cuda" {
 		t.Fatal("required witness: exact CUDA backend is not registered")
@@ -48,6 +45,14 @@ func TestCUDABlockScaledWKVSM120Witness(t *testing.T) {
 	if !ok {
 		t.Fatal("CUDA backend does not implement BlockScaledWKVBackend")
 	}
+	setEnabled := func(t *testing.T, enabled bool) {
+		t.Helper()
+		if err := ConfigureCUDABlockScaledWKV(backend, enabled); err != nil {
+			t.Fatalf("explicit blockscaled configuration: %v", err)
+		}
+	}
+	setEnabled(t, true)
+	t.Cleanup(func() { setEnabled(t, false) })
 	for _, rows := range []int{128, 512, 4096} {
 		capability, err := api.BlockScaledWKVSupported(rows)
 		if err != nil {
@@ -176,7 +181,8 @@ func TestCUDABlockScaledWKVSM120Witness(t *testing.T) {
 				refuseRun(t, "wrong input shape", weights, wrongShape, rows, false)
 				refuseUpload(t, "short codes", codes[:len(codes)-1], scales, false)
 				if !t.Run("off", func(t *testing.T) {
-					t.Setenv("FAK_CUDA_BLOCKSCALED_WKV", "0")
+					setEnabled(t, false)
+					t.Cleanup(func() { setEnabled(t, true) })
 					if _, err := api.BlockScaledWKVSupported(rows); !errors.Is(err, ErrBlockScaledGEMMUnsupported) {
 						t.Fatalf("off support accepted: %v", err)
 					}
@@ -236,7 +242,8 @@ func TestCUDABlockScaledWKVSM120Witness(t *testing.T) {
 			checkInput(t, x, xHost)
 			if rows == 4096 {
 				if !t.Run("release-while-off", func(t *testing.T) {
-					t.Setenv("FAK_CUDA_BLOCKSCALED_WKV", "0")
+					setEnabled(t, false)
+					t.Cleanup(func() { setEnabled(t, true) })
 					if err := weights.Release(); err != nil {
 						t.Fatalf("valid owner release while off: %v", err)
 					}

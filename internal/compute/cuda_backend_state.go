@@ -134,9 +134,11 @@ type ucKey struct {
 var uploadCache = map[ucKey]Tensor{}
 
 type cudaBackend struct {
-	graphOnce *cudaGraphOnceState
-	name      string
-	tier      string
+	// Explicit experimental consent is default-off and guarded by cudaMu.
+	blockScaledWKVConfig cudaBlockScaledWKVConfiguration
+	graphOnce            *cudaGraphOnceState
+	name                 string
+	tier                 string
 	// totalMem is the device's total VRAM in bytes (totalGlobalMem from fcuda_init), KEPT so
 	// the backend can satisfy DeviceCapacity — fak's one programmatic "does this fit on this
 	// device?" number, which init() previously read into a local and threw away.

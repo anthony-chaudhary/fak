@@ -14,7 +14,7 @@ func TestCUDABlockscaledWKVTimestampLabels(t *testing.T) {
 		t.Fatal(err)
 	}
 	src := string(raw)
-	start := strings.Index(src, `extern "C" int fcuda_blockscaled_wkv_run(`)
+	start := strings.Index(src, `extern "C" int fcuda_blockscaled_wkv_run_configured(`)
 	if start < 0 {
 		t.Fatal("missing blockscaled run entry point")
 	}
