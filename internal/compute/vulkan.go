@@ -756,20 +756,22 @@ func (v *vulkanBackend) bufferIdentity(t Tensor) int64 {
 
 // TeardownResources flushes in-flight work before releasing backend-owned
 // reusable resources. Repeated calls are valid; staging buffers can join this
-// lifecycle without adding per-operation queue fences.
+// lifecycle without adding per-operation queue fences. A sticky submission
+// failure returns an error without relinquishing Go ownership or accounting.
 func (v *vulkanBackend) TeardownResources() error {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	C.fvk_batch_flush()
-	v.freeHomesLocked()
-	if v.q4kStagePtr != nil {
-		C.fvk_free(v.q4kStagePtr)
-		v.dlUsed -= v.q4kStageBytes
-		v.q4kStagePtr = nil
-		v.q4kStageBytes = 0
-	}
-	C.fvk_trim_pool()
-	return nil
+	return vulkanTeardownAfterFlush(int(C.fvk_submission_status()), func() {
+		v.freeHomesLocked()
+		if v.q4kStagePtr != nil {
+			C.fvk_free(v.q4kStagePtr)
+			v.dlUsed -= v.q4kStageBytes
+			v.q4kStagePtr = nil
+			v.q4kStageBytes = 0
+		}
+		C.fvk_trim_pool()
+	})
 }
 
 func (v *vulkanBackend) checkResourceCap(nbytes int, what string) {
