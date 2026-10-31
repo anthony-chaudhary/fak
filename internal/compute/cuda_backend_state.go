@@ -233,6 +233,32 @@ func (c *cudaBackend) CUDAImmutableWeightUploadSnapshot() (calls, transferBytes,
 	return c.immutableWeightUploadCalls, c.immutableWeightUploadTransferBytes, c.immutableWeightUploadResidentBytes
 }
 
+// CUDAUploadHostRetentionSnapshot observes strong host owners still indexed by
+// the process-wide upload cache. It is an optional diagnostic for explicitly
+// requested native receipts, not per-token accounting or a request-local delta.
+// View lengths are summed per entry: aliases/overlaps are NOT deduplicated and a
+// view may pin a larger allocation or mapping. HostBuffer does not identify heap
+// versus mmap backing, so these are neither allocated bytes nor RSS. Owners no
+// longer indexed by uploadCache are outside this observation.
+func (c *cudaBackend) CUDAUploadHostRetentionSnapshot() (entries, payloadViewBytes, scaleViewBytes uint64) {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	for _, cached := range uploadCache {
+		buf, ok := cached.buf.(*cudaBuf)
+		if !ok || buf == nil || buf.hostKeep == nil {
+			continue
+		}
+		// Host ownership remains observable even if the device pointer is invalid.
+		// Inspect only view lengths; never copy payloads or alter cache ownership.
+		entries++
+		payloadViewBytes += uint64(len(buf.hostKeep.F32()))*4 + uint64(len(buf.hostKeep.I8()))
+		if source, ok := buf.hostKeep.(*cudaQ8UploadSource); ok {
+			scaleViewBytes += uint64(len(source.scales)) * 4
+		}
+	}
+	return
+}
+
 // accountImmutableWeightUpload runs only after the last H2D copy for one weight
 // upload succeeds. Runtime/activation UploadClass calls return before these sites;
 // immutable rank-one norms and biases still count even though pointer caching is

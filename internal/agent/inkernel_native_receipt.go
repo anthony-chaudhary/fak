@@ -84,6 +84,7 @@ func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferen
 		Qwen35MetalStateIdentity:   qwen35MetalStateIdentity,
 		Qwen35SequencePrefillRoute: cloneNativeSequencePrefillRouteReceipt(measurement.qwen35SequencePrefillRoute),
 		CUDAImmutableWeightUploads: cudaImmutableWeightUploads,
+		CUDAUploadHostRetention:    cudaUploadHostRetentionSnapshot(p.backend),
 		NativeCacheAccounting:      firstNativeCacheAccounting(accounting),
 	}
 }
@@ -277,4 +278,26 @@ func cudaImmutableWeightUploadSnapshot(be compute.Backend) (model.NativeCUDAImmu
 	}
 	calls, transferBytes, residentBytes := provider.CUDAImmutableWeightUploadSnapshot()
 	return model.NativeCUDAImmutableWeightUploadCounters{Calls: calls, TransferBytes: transferBytes, ResidentBytes: residentBytes}, true
+}
+
+type cudaUploadHostRetentionSnapshotter interface {
+	CUDAUploadHostRetentionSnapshot() (entries, payloadViewBytes, scaleViewBytes uint64)
+}
+
+// Only buildNativeInferenceReceipt calls this observer. Ordinary completions
+// neither walk the CUDA upload cache nor acquire its mutex for this diagnostic.
+func cudaUploadHostRetentionSnapshot(be compute.Backend) *model.NativeCUDAUploadHostRetention {
+	provider, ok := be.(cudaUploadHostRetentionSnapshotter)
+	if !ok {
+		return nil
+	}
+	entries, payload, scales := provider.CUDAUploadHostRetentionSnapshot()
+	return &model.NativeCUDAUploadHostRetention{
+		Scope:                "process_cuda_upload_cache",
+		Accounting:           "logical_views_per_cache_entry",
+		Backing:              "unknown",
+		EntriesWithHostOwner: entries,
+		PayloadViewBytes:     payload,
+		ScaleViewBytes:       scales,
+	}
 }

@@ -309,6 +309,7 @@ type NativeInferenceReceipt struct {
 	Qwen35MetalStateIdentity   *Qwen35MetalStateIdentityReceipt      `json:"qwen35_metal_state_identity,omitempty"`
 	Qwen35SequencePrefillRoute *NativeSequencePrefillRouteReceipt    `json:"qwen35_sequence_prefill_route,omitempty"`
 	CUDAImmutableWeightUploads *NativeCUDAImmutableWeightUploadDelta `json:"cuda_immutable_weight_uploads,omitempty"`
+	CUDAUploadHostRetention    *NativeCUDAUploadHostRetention        `json:"cuda_upload_host_retention,omitempty"`
 	// NativeCacheAccounting is present only when the producer recorded what the
 	// request did with the prepared native cache. Absent (nil) preserves the
 	// existing receipt shape for every producer that predates the field.
@@ -346,6 +347,23 @@ type NativeCUDAImmutableWeightUploadDelta struct {
 	Before NativeCUDAImmutableWeightUploadCounters `json:"before"`
 	After  NativeCUDAImmutableWeightUploadCounters `json:"after"`
 	Delta  NativeCUDAImmutableWeightUploadCounters `json:"delta"`
+}
+
+// NativeCUDAUploadHostRetention is an end-of-request observation of strong host
+// owners indexed by the process CUDA upload cache, not request-exclusive memory.
+// PayloadViewBytes sums F32/I8 view lengths; ScaleViewBytes covers separately
+// retained Q8 source scales. Each cache entry counts its views independently, so
+// shared/overlapping backing is counted repeatedly and larger backing allocations
+// are not measured. Heap versus mmap backing is unknown; these values are NOT RSS
+// or reclaimable bytes, and omit host owners outside the indexed cache. A nil
+// block means unsupported; a present zero count means no indexed host owners.
+type NativeCUDAUploadHostRetention struct {
+	Scope                string `json:"scope"`
+	Accounting           string `json:"accounting"`
+	Backing              string `json:"backing"`
+	EntriesWithHostOwner uint64 `json:"entries_with_host_owner"`
+	PayloadViewBytes     uint64 `json:"payload_view_bytes"`
+	ScaleViewBytes       uint64 `json:"scale_view_bytes"`
 }
 
 // NativeInferenceReceiptUnsupportedError is returned before model execution when
