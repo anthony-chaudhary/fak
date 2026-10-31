@@ -439,6 +439,11 @@ int fcuda_q4k_qkv_qualification_f32(
     const uint8_t *wQ, const uint8_t *wK, const uint8_t *wV,
     const float *x, float *yQ, float *yK, float *yV,
     int outQ, int outK, int outV, int in, void *workspace, size_t workspaceBytes);
+int fcuda_q4k_qkv_async_finish(void);
+int fcuda_q4k_qkv_async_f32(
+    const uint8_t *wQ, const uint8_t *wK, const uint8_t *wV,
+    const float *x, float *yQ, float *yK, float *yV,
+    int outQ, int outK, int outV, int in, void *workspace, size_t workspaceBytes);
 /* fcuda_q4k_mmvq_launch_count counts mmvq-arm GEMV launches (parity witness). */
 unsigned long long fcuda_q4k_mmvq_launch_count(void);
 /* Counts accepted fp8lt GEMM enqueues; a synchronized read is still required. */
