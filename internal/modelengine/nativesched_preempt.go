@@ -675,9 +675,9 @@ func (s *NativeScheduler) preemptLaneLocked(ln *schedLane) error {
 	default:
 		return fmt.Errorf("modelengine: unknown native preemption mode %d", s.preemption.Mode)
 	}
-	if ln.sess != nil {
-		ln.sess.Close()
-	}
+	// Snapshot/recompute state now owns readmission. Retire the old holder
+	// through the scheduler so its radix prefix lease is released as well.
+	s.closeLaneSession(ln.sess)
 	ln.sess = nil
 	s.preempted = append(s.preempted, ln)
 	return nil
