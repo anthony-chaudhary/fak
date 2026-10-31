@@ -19,7 +19,7 @@ func TestCUDAQ4KCheckedStreamPrerequisites(t *testing.T) {
 	}
 	kernel := read("cuda_kernels.cu")
 	for _, fragment := range []string{
-		"#if defined(FAK_CUDA_V41_EMBED_GATHER) || defined(FAK_CUDA_V41_INDEX_SELECT)",
+		"#if defined(FAK_CUDA_FLASHMLA_DECODE) || defined(FAK_CUDA_V41_EMBED_GATHER) || defined(FAK_CUDA_V41_INDEX_SELECT)",
 		"#define FAK_CUDA_V41_CHECKED_STREAM 1",
 		"static std::atomic<bool> g_v41_checked_stream_uncertain{false};",
 		"if (g_v41_checked_stream_uncertain.load()) return true;",

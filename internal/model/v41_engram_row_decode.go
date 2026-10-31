@@ -14,9 +14,11 @@ import (
 // rows are gathered on the host (a byte read, like a weight read), and the
 // decode to F32 runs where the row is consumed. A session with the device
 // decode hands the stored bytes to compute.V41EngramRowDecodeBackend; the host
-// arm decodes with decodeV41EngramRow. A verified Q2_K source is cached as its
-// bound 84-byte super-blocks, so neither arm dequantizes at cache fill (Ref
-// #13668).
+// arm decodes with decodeV41EngramRow. Verified Q2_K and IQ4_NL sources are
+// cached as their bound 84-byte and 144-byte rows, so neither arm dequantizes
+// at cache fill (Ref #13668).
+
+const v41EngramIQ4NLEncodedRowBytes = qkK / iq4nlBlockWeights * iq4nlBlockBytes
 
 // v41HostEngramRowDecodes counts host Engram row decodes while the BF16 witness
 // is on (enableV41BF16Witness), beside v41HostBF16Rounds.
@@ -29,44 +31,63 @@ func v41NoteHostEngramRowDecode() {
 }
 
 // v41EngramBoundEncoded returns reader's encoded-row seam when digest commits
-// to those encoded bytes (a tree over the Q2_K blocks), else nil.
+// to a supported exact encoded dialect, never merely a matching row width.
 func v41EngramBoundEncoded(reader io.ReaderAt, digest string) V41EngramEncodedRows {
 	_, scheme, err := v41EngramParseDigest(digest)
-	if err != nil || scheme != v41EngramDigestTreePrefix+V41EngramEncodingQ2K {
+	if err != nil || (scheme != v41EngramDigestTreePrefix+V41EngramEncodingQ2K &&
+		scheme != v41EngramDigestTreePrefix+V41EngramEncodingIQ4NL) {
 		return nil
 	}
 	enc, _ := reader.(V41EngramEncodedRows)
 	return enc
 }
 
-// v41EngramQ2KRowSource serves a verified Q2_K source's rows as the bound
-// 84-byte super-blocks they decode from.
+// v41EngramQ2KRowSource retains its historical name and original encoded
+// owner/lifetime forwarding. Its immutable encoding/width now also name IQ4_NL.
+// Q4_K's equal 144-byte width does not make it an IQ4_NL source.
 type v41EngramQ2KRowSource struct {
-	enc   V41EngramEncodedRows
-	shard string
-	base  int
-	rows  int
+	enc      V41EngramEncodedRows
+	shard    string
+	base     int
+	rows     int
+	encoding string
+	rowBytes int
 }
 
-// v41EngramEncodedForm returns the encoded row source behind a verified source
-// whose binding covers its Q2_K blocks.
-func v41EngramEncodedForm(src V41EngramRowSource) (V41EngramRowSource, bool) {
+// v41EngramEncodedForm returns only an authenticated, supported encoded source.
+// Binding offsets retain served-F32 units; source reads use encoded-row units.
+func v41EngramEncodedForm(src V41EngramRowSource) (*v41EngramQ2KRowSource, bool) {
 	v, ok := src.(*v41VerifiedEngramRowSource)
-	if !ok || v.encoded == nil || v.rowBytes != V41EngramF32RowBytes || v.binding.Offset%int64(v.rowBytes) != 0 {
+	if !ok || v == nil || v.encoded == nil || v.rowBytes != V41EngramF32RowBytes || v.binding.Offset%int64(v.rowBytes) != 0 {
 		return nil, false
 	}
-	return &v41EngramQ2KRowSource{enc: v.encoded, shard: v.binding.Shard, base: int(v.binding.Offset / int64(v.rowBytes)), rows: v.binding.Rows}, true
+	_, scheme, err := v41EngramParseDigest(v.binding.Digest)
+	var encoding string
+	switch scheme {
+	case v41EngramDigestTreePrefix + V41EngramEncodingQ2K:
+		encoding = V41EngramEncodingQ2K
+	case v41EngramDigestTreePrefix + V41EngramEncodingIQ4NL:
+		encoding = V41EngramEncodingIQ4NL
+	default:
+		return nil, false
+	}
+	base := v.binding.Offset / int64(v.rowBytes)
+	if err != nil || v.binding.Rows <= 0 || base < 0 || base > int64(math.MaxInt-v.binding.Rows) {
+		return nil, false
+	}
+	return &v41EngramQ2KRowSource{enc: v.encoded, shard: v.binding.Shard, base: int(base), rows: v.binding.Rows,
+		encoding: encoding, rowBytes: v41EngramEncodedRowBytes[encoding]}, true
 }
 
-func (s *v41EngramQ2KRowSource) RowBytes() int { return v41EngramQ2KEncodedRowBytes }
+func (s *v41EngramQ2KRowSource) RowBytes() int { return s.rowBytes }
 
 func (s *v41EngramQ2KRowSource) ReadRows(start, count int, dst []byte) (int, error) {
 	if start < 0 || count <= 0 || start > s.rows || count > s.rows-start {
 		return 0, &V41EngramStreamError{Kind: V41EngramStreamOutOfBounds, Row: start, Shard: s.shard,
 			Err: fmt.Errorf("row range [%d,%d) outside [0,%d)", start, start+count, s.rows)}
 	}
-	want := count * v41EngramQ2KEncodedRowBytes
-	if len(dst) < want {
+	want, ok := checkedMulInt(count, s.rowBytes)
+	if !ok || s.rowBytes <= 0 || len(dst) < want {
 		return 0, &V41EngramStreamError{Kind: V41EngramStreamGeometry, Row: start, Shard: s.shard,
 			Err: fmt.Errorf("destination bytes=%d want=%d", len(dst), want)}
 	}
@@ -74,9 +95,9 @@ func (s *v41EngramQ2KRowSource) ReadRows(start, count int, dst []byte) (int, err
 	if err != nil {
 		return 0, &V41EngramStreamError{Kind: V41EngramStreamOutOfBounds, Row: start, Shard: s.shard, Err: err}
 	}
-	if r == nil || encoding != V41EngramEncodingQ2K || offset < 0 || size != int64(want) {
+	if r == nil || encoding != s.encoding || offset < 0 || size != int64(want) || offset > math.MaxInt64-size {
 		return 0, &V41EngramStreamError{Kind: V41EngramStreamGeometry, Row: start, Shard: s.shard,
-			Err: fmt.Errorf("encoded rows name %q extent offset=%d size=%d, want %d q2_k bytes", encoding, offset, size, want)}
+			Err: fmt.Errorf("encoded rows name %q extent offset=%d size=%d, want %d %s bytes", encoding, offset, size, want, s.encoding)}
 	}
 	n, err := r.ReadAt(dst[:want], offset)
 	if n != want {
@@ -111,6 +132,27 @@ func dequantV41EngramQ2KRow(row []byte, dim int) ([]float32, error) {
 	return append([]float32(nil), block[:dim]...), nil
 }
 
+// dequantV41EngramIQ4NLRow reuses the existing split-half scalar block decoder.
+// This is the pre-selected host arm, never replay of a selected device failure.
+func dequantV41EngramIQ4NLRow(row []byte, dim int) ([]float32, error) {
+	if len(row) != v41EngramIQ4NLEncodedRowBytes {
+		return nil, fmt.Errorf("%w: Engram iq4_nl row has %d bytes, want %d", ErrV41NativeUnsupported, len(row), v41EngramIQ4NLEncodedRowBytes)
+	}
+	if dim <= 0 || dim > qkK {
+		return nil, fmt.Errorf("%w: Engram iq4_nl row dim %d outside [1,%d]", ErrV41NativeUnsupported, dim, qkK)
+	}
+	var block [qkK]float32
+	for b := 0; b < qkK/iq4nlBlockWeights; b++ {
+		iq4nlDequantBlock(block[b*iq4nlBlockWeights:], row[b*iq4nlBlockBytes:])
+	}
+	for j, value := range block[:dim] {
+		if !finite32(value) {
+			return nil, fmt.Errorf("%w: Engram iq4_nl row value %d is non-finite", ErrV41NativeUnsupported, j)
+		}
+	}
+	return append([]float32(nil), block[:dim]...), nil
+}
+
 // v41EngramGatheredRows is one Engram layer's gathered rows on the resident
 // path, position-major [positions*cols], still in the stage's stored dialect.
 type v41EngramGatheredRows struct {
@@ -134,6 +176,8 @@ func (g *v41EngramGatheredRows) encoding() (compute.V41EngramRowEncoding, bool) 
 		encoding = compute.V41EngramRowPacked
 	case v41EngramQ2KEncodedRowBytes:
 		encoding = compute.V41EngramRowQ2K
+	case v41EngramIQ4NLEncodedRowBytes:
+		encoding = compute.V41EngramRowIQ4NL
 	case V41EngramF32RowBytes:
 		encoding = compute.V41EngramRowF32
 	default:
@@ -206,6 +250,8 @@ func (g *v41EngramGatheredRows) deviceFault(words []float32) error {
 			err = fmt.Errorf("%w: Engram row decode status %#x names a NaN byte outside the packed dialect", ErrV41NativeUnsupported, bits)
 		case g.stage.rowBytes == V41EngramPackedRowBytes:
 			err = fmt.Errorf("%w: Engram row value %d is non-finite", ErrV41NativeUnsupported, j)
+		case g.stage.rowBytes == v41EngramIQ4NLEncodedRowBytes:
+			err = fmt.Errorf("%w: Engram iq4_nl row value %d is non-finite", ErrV41NativeUnsupported, j)
 		case g.stage.rowBytes == V41EngramF32RowBytes:
 			err = fmt.Errorf("%w: Engram f32 row value %d is non-finite", ErrV41NativeUnsupported, j)
 		default:

@@ -78,6 +78,9 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 	routedSwiGLU := fs.Bool("v41-routed-swiglu", false, "compile explicit SM120 V4.1 routed-SwiGLU candidate; public capability remains unqualified")
 	engramGate := fs.Bool("v41-engram-gate", false, "compile explicit SM120 V4.1 Engram-gate candidate; public capability remains unqualified")
 	compressorPool := fs.Bool("v41-compressor-pool", false, "compile explicit SM120 V4.1 compressor-pool candidate; public capability remains unqualified")
+	compressorPending := fs.Bool("v41-compressor-pending", false, "compile explicit pending-owner qualification; requires compressor profile, excludes pool; not device qualification")
+	q4Qualification := fs.Bool("q4k-qkv-qualification", false, "compile explicit checked Q4 shared-input qualification with its native stream prerequisite; not serving qualification")
+	q4Async := fs.Bool("q4k-qkv-async", false, "compile explicit asynchronous Q4 owner; requires --q4k-qkv-qualification; not device qualification")
 	compressor := fs.Bool("v41-compressor", false, "compile explicit SM120 V4.1 compressor ring/pool candidate; excludes --v41-compressor-pool; build selection is not hardware qualification")
 	router := fs.Bool("v41-router", false, "select explicit SM120 V4.1 router/hash/gate/gather Go binding; native source always compiled; build selection is not hardware qualification")
 	tailRoPE := fs.Bool("v41-tail-rope", false, "compile explicit SM120 ordinary V4.1 supplied-table QK/Rows candidate; exact arithmetic remains unqualified")
@@ -189,6 +192,9 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 		Stdout:             stdout,
 		Stderr:             stderr,
 
+		EnableV41CompressorPending:     *compressorPending,
+		EnableQ4KQKVQualification:      *q4Qualification,
+		EnableQ4KQKVAsync:              *q4Async,
 		EnableQ2KMMQPrefill:            *q2MMQ,
 		EnableQ3KMMQPrefill:            *q3MMQ,
 		EnableQ8MMQPrefill:             *q8MMQ,
@@ -212,6 +218,11 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 		if applied := computebuild.ApplyCUDAV41Defaults(cfg); len(applied) > 0 {
 			fmt.Fprintf(stderr, "[cuda] sm_120 V4.1 default tags: %s (--v41-defaults=false or FAK_CUDA_V41=0 opts out)\n", strings.Join(applied, ","))
 		}
+	}
+
+	if err := computebuild.ValidateCUDAAsyncQualifications(cfg); err != nil {
+		fmt.Fprintln(stderr, "build-cuda:", err)
+		return 2
 	}
 
 	// For binary subcommand, allow trailing positional args: [pkg] [out]

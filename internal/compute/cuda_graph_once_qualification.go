@@ -115,6 +115,7 @@ func (c *cudaBackend) GraphOnceReplay(input Tensor, kv KVStore, pos int) (Tensor
 	}
 	c.graphOnceCheck(C.fak_graph_once_copy_input(s.owner, dst.ptr, src.ptr, C.size_t(src.n)))
 	c.graphOnceCheck(C.fak_graph_once_replay(s.owner, C.int(pos)))
+	cudaGraphOnceWitnessReplays++
 	// No host KV mutation before successful completion. Every dense layer was
 	// captured exactly once and appends exactly one row on each replay.
 	w := k.stride()
@@ -199,6 +200,7 @@ func (c *cudaBackend) GraphOnceEnd() {
 	s.capturing = false
 	c.capturing = false
 	c.graphOnceCheck(C.fak_graph_once_end(s.owner))
+	cudaGraphOnceWitnessCaptures++
 	atomic.AddUint64(&c.fenceGen, 1)
 	cudaGraphReplays.Add(1)
 }
@@ -276,4 +278,53 @@ func (c *cudaBackend) graphOnceFreeDependencyLocked(b *cudaBuf) {
 		panic("cuda: freeing a captured borrowed weight during capture")
 	}
 	owner.graphOnceReleaseLocked()
+}
+
+// Qualification-only observability. Counters advance only after actual native
+// completion succeeds; this seam never enables capture or synchronizes a device.
+var cudaGraphOnceWitnessCaptures, cudaGraphOnceWitnessReplays uint64
+
+type CUDAGraphOnceQualificationSnapshot struct {
+	Captures, Replays                                            uint64
+	Owner, Input, Output                                         uintptr
+	Arena, KV                                                    []uintptr
+	Next, Borrowed                                               int
+	Capturing, Invalidated, ArenaPinned, DenseF32KV, SharedOwner bool
+}
+
+func (c *cudaBackend) GraphOnceQualificationSnapshot() CUDAGraphOnceQualificationSnapshot {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	out := CUDAGraphOnceQualificationSnapshot{Captures: cudaGraphOnceWitnessCaptures, Replays: cudaGraphOnceWitnessReplays}
+	s := c.graphOnce
+	if s == nil {
+		return out
+	}
+	out.Owner = uintptr(s.owner)
+	out.Next = s.next
+	out.Borrowed = len(s.borrowed)
+	out.Capturing = s.capturing
+	out.Invalidated = s.invalidated
+	out.SharedOwner = cudaGraphOnceOwner == c
+	if b, ok := s.input.buf.(*cudaBuf); ok && b != nil {
+		out.Input = uintptr(b.ptr)
+	}
+	if b, ok := s.output.buf.(*cudaBuf); ok && b != nil {
+		out.Output = uintptr(b.ptr)
+	}
+	out.ArenaPinned = len(s.buffers) > 0
+	for _, b := range s.buffers {
+		out.Arena = append(out.Arena, uintptr(b.ptr))
+		out.ArenaPinned = out.ArenaPinned && b.ptr != nil && b.graphOncePinned
+	}
+	out.DenseF32KV = s.kv != nil && len(s.kv.K) > 0
+	if s.kv != nil {
+		for l := range s.kv.K {
+			for _, b := range []dslice{s.kv.K[l], s.kv.Kraw[l], s.kv.V[l]} {
+				out.KV = append(out.KV, uintptr(b.ptr))
+				out.DenseF32KV = out.DenseF32KV && b.ptr != nil && b.dtype == F32
+			}
+		}
+	}
+	return out
 }

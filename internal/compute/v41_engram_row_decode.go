@@ -16,6 +16,10 @@ const (
 	V41EngramRowQ2K
 	// V41EngramRowF32 is 256 little-endian binary32 values.
 	V41EngramRowF32
+	// V41EngramRowIQ4NL is eight 18-byte IQ4_NL blocks (GGUF byte order).
+	// This dialect is not a native mode: Vulkan mode 3 is still poison.
+	// Device selection requires V41EngramRowDecodeSupportsEncoding.
+	V41EngramRowIQ4NL
 )
 
 // V41EngramRowDecodeMaxDim is the widest row prefix one decode returns: every
@@ -32,6 +36,8 @@ func V41EngramRowStride(encoding V41EngramRowEncoding) int {
 		return 84
 	case V41EngramRowF32:
 		return 1024
+	case V41EngramRowIQ4NL:
+		return 144
 	}
 	return 0
 }
@@ -43,6 +49,7 @@ func V41EngramRowStride(encoding V41EngramRowEncoding) int {
 //	packed: BF16(E4M3(code[j]) * 2^(scale[j/32]-127)), BF16 the host v41BF16 RNE
 //	q2_k:   the host scalar Q2_K super-block dequantization
 //	f32:    the stored binary32 word
+//	iq4_nl: eight split-half 32-value IQ4_NL blocks, each with an f16 scale
 //
 // panel is a fresh F32 [rows, dim] tensor. status is a fresh [rows] tensor of
 // uint32 words (F32 dtype, read as bits): 0 for a clean row, otherwise
