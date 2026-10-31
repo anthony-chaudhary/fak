@@ -5,12 +5,6 @@ package compute
 /*
 #include <stdint.h>
 #include "cuda_backend.h"
-unsigned long long fcuda_q4k_qkv_qualification_operations(void);
-int fcuda_q4k_qkv_qualification_state(void);
-int fcuda_q4k_qkv_qualification_finish(void);
-int fcuda_q4k_qkv_qualification_f32(
-    const uint8_t *, const uint8_t *, const uint8_t *, const float *,
-    float *, float *, float *, int, int, int, int, void *, size_t);
 */
 import "C"
 

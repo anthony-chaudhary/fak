@@ -85,6 +85,7 @@ BINDINGS = (
     "internal/compute/cuda_collective_pg.go",
     "internal/compute/cuda_qwen4exp_ple_hash_cuda.go",
     "internal/compute/cuda_routed_expert_gemv.go",
+    "internal/compute/cuda_q4k_qkv_qualification.go",
     "internal/compute/cuda_deepgemm_wkv.go",
     "internal/compute/cuda_deepgemm_wkv_witness.go",
 )

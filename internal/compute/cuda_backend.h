@@ -401,6 +401,10 @@ int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY, int ou
 void fcuda_set_q4k_prefill_arm(int arm);
 /* fcuda_q4k_mmq_launch_count counts completed mmq-arm launches (P-04 parity witness). */
 unsigned long long fcuda_q4k_mmq_launch_count(void);
+/* Successful MMQ enqueues, not completion fences. Caller serializes with CUDA submission. */
+unsigned long long fcuda_q2k_mmq_launch_count(void);
+unsigned long long fcuda_q3k_mmq_launch_count(void);
+unsigned long long fcuda_q8_mmq_launch_count(void);
 /* fcuda_set_q4k_decode_arm selects the P<4 Q4_K GEMV arm (fak#8635): 0 f32 (k_q4k_gemm), 1 mmvq
  * (llama.cpp q8_1 DP4A, cuda/q4k_mmvq.cuh). The mmvq arm returns 80001 when its persistent q8_1
  * scratch misses and 80006 for a shape it refuses; nothing is launched on either. */
@@ -422,6 +426,16 @@ int fak_v41_checked_stream_terminal(void);
  * establishes safe retirement. Zero means enqueued, not completed/Ready.
  * Each invocation quantizes X anew, even if its address matches a previous call. */
 int fcuda_q4k_qkv_shared_input_f32(
+    const uint8_t *wQ, const uint8_t *wK, const uint8_t *wV,
+    const float *x, float *yQ, float *yK, float *yV,
+    int outQ, int outK, int outV, int in, void *workspace, size_t workspaceBytes);
+/* Qualification-only checked adapter; the tagged Go binding remains opt-in.
+ * These declarations do not enable serving dispatch. Without the checked-stream
+ * build, state/f32 decline and finish fails; caller still owns submission serialization. */
+unsigned long long fcuda_q4k_qkv_qualification_operations(void);
+int fcuda_q4k_qkv_qualification_state(void);
+int fcuda_q4k_qkv_qualification_finish(void);
+int fcuda_q4k_qkv_qualification_f32(
     const uint8_t *wQ, const uint8_t *wK, const uint8_t *wV,
     const float *x, float *yQ, float *yK, float *yV,
     int outQ, int outK, int outV, int in, void *workspace, size_t workspaceBytes);
