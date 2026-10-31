@@ -37,6 +37,11 @@ type Phase string
 const (
 	// PhaseAdmissionWait is time between gateway admission enqueue and grant.
 	PhaseAdmissionWait Phase = "admission_wait"
+	// PhaseSchedulerWait is residence from a native scheduler's first WAITING
+	// enqueue to first promotion into RUNNING. It includes materialization while
+	// WAITING, but excludes pre-enqueue work, later requeues, and preemption.
+	// It is neither gateway admission_wait nor agent coalescer cohort_wait.
+	PhaseSchedulerWait Phase = "scheduler_wait"
 	// PhaseDeviceWait is time a request waits for the planner's device lock.
 	PhaseDeviceWait Phase = "device_wait"
 	// PhaseCohortWait is time a request waits in the decode coalescer before its
@@ -58,7 +63,7 @@ const (
 
 // Phases is the closed, ordered phase vocabulary (render and dashboard order).
 var Phases = []Phase{
-	PhaseAdmissionWait, PhaseDeviceWait, PhaseCohortWait, PhasePrefixLookup,
+	PhaseAdmissionWait, PhaseSchedulerWait, PhaseDeviceWait, PhaseCohortWait, PhasePrefixLookup,
 	PhasePrefill, PhasePrefixAdmit, PhaseDecode, PhaseSample, PhaseRequest,
 }
 
@@ -884,7 +889,7 @@ func (r *Recorder) WritePrometheus(w io.Writer) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	helpType(w, MetricPhaseSeconds, "Native serving loop phase durations (admission_wait, device_wait, cohort_wait, prefix_lookup, prefill, prefix_admit, decode, sample, request).", "histogram")
+	helpType(w, MetricPhaseSeconds, "Native serving loop phase durations (admission_wait, scheduler_wait, device_wait, cohort_wait, prefix_lookup, prefill, prefix_admit, decode, sample, request).", "histogram")
 	for _, p := range Phases {
 		r.phases[p].write(w, MetricPhaseSeconds, fmt.Sprintf("phase=%q", string(p)))
 	}

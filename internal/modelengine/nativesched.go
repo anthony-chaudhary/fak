@@ -484,7 +484,7 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 			}
 			s.seqNo++
 			ln.seqNo = s.seqNo
-			s.waiting = append(s.waiting, ln)
+			s.enqueueNewWaitingLocked(ln)
 			materializationPending := false
 			for _, waitingLane := range s.waiting {
 				if waitingLane.materializing {
@@ -507,7 +507,7 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 		ln.materializing = true
 		s.seqNo++
 		ln.seqNo = s.seqNo
-		s.waiting = append(s.waiting, ln)
+		s.enqueueNewWaitingLocked(ln)
 		s.mu.Unlock()
 
 		candidate := *ln
@@ -600,7 +600,7 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 	}
 	s.seqNo++
 	ln.seqNo = s.seqNo
-	s.waiting = append(s.waiting, ln)
+	s.enqueueNewWaitingLocked(ln)
 	s.mu.Unlock()
 
 	s.started.Do(func() {
@@ -611,6 +611,17 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 	})
 	s.signal()
 	return ln, nil
+}
+
+// enqueueNewWaitingLocked publishes a fresh lane's first queue entry. The
+// timestamp belongs to this transition, not request arrival or synchronous
+// prefill before enqueue. Caller holds mu; requeues must not call this helper.
+func (s *NativeScheduler) enqueueNewWaitingLocked(ln *schedLane) {
+	if s.recorder != nil {
+		ln.queueEnteredAt = s.now()
+		ln.queueWaitPending = true
+	}
+	s.waiting = append(s.waiting, ln)
 }
 
 func (s *NativeScheduler) initializeLaneExecution(ln *schedLane) error {
@@ -853,7 +864,7 @@ func laneStepTokens(ln *schedLane) int {
 // maxRun and, when set, within maxTokensPerStep (vLLM v1 scheduler token_budget,
 // vllm/v1/core/sched/scheduler.py:569@975dca5, Apache-2.0). An empty running set always
 // admits its first live candidate so an oversized first chunk cannot stall the loop.
-func (s *NativeScheduler) promoteWaitingLocked(maxRun int) {
+func (s *NativeScheduler) promoteWaitingLocked(maxRun int) (queueWaits []time.Duration) {
 	for _, ln := range s.waiting {
 		if ln.materializing {
 			return
@@ -907,8 +918,24 @@ func (s *NativeScheduler) promoteWaitingLocked(maxRun int) {
 			budget -= cost
 		}
 		s.lanes = append(s.lanes, ln)
+		// First scheduling only, following vLLM v1 metrics/stats.py at
+		// 0c63ce9f0e0b5b2782f0f30cb491069dac158bb2 (Apache-2.0).
+		// This is a Go concept adaptation, not copied upstream code. A later
+		// materialization requeue or preemption does not restart the interval.
+		if ln.queueWaitPending {
+			ln.queueWaitPending = false
+			if s.recorder != nil {
+				d := s.now().Sub(ln.queueEnteredAt)
+				// time.Sub saturates instead of wrapping; omit an unrepresentable
+				// interval or a regressing injected clock rather than invent zero.
+				if d >= 0 && d < time.Duration(1<<63-1) {
+					queueWaits = append(queueWaits, d)
+				}
+			}
+		}
 	}
 	s.waiting = kept
+	return queueWaits
 }
 
 // run is the single scheduler loop. Each iteration recomputes the running set: it
@@ -1067,7 +1094,15 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 		}
 		s.waiting = reordered
 	}
-	s.promoteWaitingLocked(maxRun)
+	queueWaits := s.promoteWaitingLocked(maxRun)
+	// Every return below releases mu. Record after this iteration so recorder
+	// callbacks never join the scheduler's mutex ordering, including the early
+	// materialization/error returns. Durations were fixed at promotion.
+	defer func() {
+		for _, d := range queueWaits {
+			s.recorder.ObservePhase(enginestep.PhaseSchedulerWait, d)
+		}
+	}()
 	var pendingMaterialization *schedLane
 	for _, ln := range s.lanes {
 		if !ln.terminal && ln.sess == nil {
@@ -1632,6 +1667,9 @@ type schedLane struct {
 	terminal           bool
 	hint               dispatchtick.WaveHint
 	seqNo              int64
+	// First WAITING residence only; both fields are guarded by sched.mu.
+	queueEnteredAt   time.Time
+	queueWaitPending bool
 	// Immutable submit metadata, also visible through nativeSchedulerEvent.Lane.
 	// Lower values are more important, following vLLM's request-priority convention
 	// (vllm/v1/core/sched/scheduler.py:735@975dca5, Apache-2.0).
