@@ -468,8 +468,12 @@ var (
 func cudaLaunchTimingName(path, launch, kernel string) string {
 	launch = strings.Join(strings.Fields(strings.TrimSuffix(launch, "<<<")), "")
 	aliases := map[string]string{
-		"cuda/paged_attention_vllm.cuh:kern":  "fak_paged_attention_v1",
-		"cuda/paged_attention_vllm.cuh:kern2": "fak_paged_attention_v2",
+		"cuda/quant_matmul.cuh:k_f32_to_f16_vec4":         "k_f32_to_f16",
+		"cuda/iq4xs_mmvq.cuh:fak_iq4xs::mul_mat_vec_q<1>": "k_iq4xs_mmvq_gemv",
+		"cuda/iq4xs_mmvq.cuh:fak_iq4xs::mul_mat_vec_q<2>": "k_iq4xs_mmvq_gemv",
+		"cuda/iq4xs_mmvq.cuh:fak_iq4xs::mul_mat_vec_q<3>": "k_iq4xs_mmvq_gemv",
+		"cuda/paged_attention_vllm.cuh:kern":              "fak_paged_attention_v1",
+		"cuda/paged_attention_vllm.cuh:kern2":             "fak_paged_attention_v2",
 		"cuda/paged_attention_vllm.cuh:paged_attention_v2_reduce_kernel<float,HEAD_SIZE,NUM_THREADS,PARTITION_SIZE>": "fak_paged_attention_v2_reduce",
 		"cuda/paged_attention_vllm.cuh:fak_vllm_pa::reshape_and_cache_run_kernel":                                    "fak_paged_kv_write",
 		"cuda/paged_attention_vllm.cuh:fak_vllm_pa::reshape_and_cache_pages_kernel":                                  "fak_paged_kv_write_pages",
@@ -531,6 +535,14 @@ func TestCUDATimestampSemanticAliases(t *testing.T) {
 		name, path, src string
 		want            bool
 	}{
+		{"f16 vector conversion", "cuda/quant_matmul.cuh", `FCUDA_TS("k_f32_to_f16", grid, k_f32_to_f16_vec4<<<grid, block>>>(x));`, true},
+		{"f16 vector wrong source", "cuda/other.cuh", `FCUDA_TS("k_f32_to_f16", grid, k_f32_to_f16_vec4<<<grid, block>>>(x));`, false},
+		{"iq4xs one column", "cuda/iq4xs_mmvq.cuh", `FCUDA_TS("k_iq4xs_mmvq_gemv", grid, fak_iq4xs::mul_mat_vec_q<1><<<grid, block>>>(x));`, true},
+		{"iq4xs two columns", "cuda/iq4xs_mmvq.cuh", `FCUDA_TS("k_iq4xs_mmvq_gemv", grid, fak_iq4xs::mul_mat_vec_q<2><<<grid, block>>>(x));`, true},
+		{"iq4xs three columns", "cuda/iq4xs_mmvq.cuh", `FCUDA_TS("k_iq4xs_mmvq_gemv", grid, fak_iq4xs::mul_mat_vec_q<3><<<grid, block>>>(x));`, true},
+		{"iq4xs wrong specialization", "cuda/iq4xs_mmvq.cuh", `FCUDA_TS("k_iq4xs_mmvq_gemv", grid, fak_iq4xs::mul_mat_vec_q<4><<<grid, block>>>(x));`, false},
+		{"iq4xs wrong row", "cuda/iq4xs_mmvq.cuh", `FCUDA_TS("k_q4k_mmvq_gemv", grid, fak_iq4xs::mul_mat_vec_q<1><<<grid, block>>>(x));`, false},
+		{"iq4xs untimed", "cuda/iq4xs_mmvq.cuh", `fak_iq4xs::mul_mat_vec_q<1><<<grid, block>>>(x);`, false},
 		{"paged multi-page writer", "cuda/paged_attention_vllm.cuh", `FCUDA_TS("fak_paged_kv_write_pages", tokens, fak_vllm_pa::reshape_and_cache_pages_kernel<<<tokens, threads>>>(x));`, true},
 		{"paged writer wrong path", "cuda/other.cuh", `FCUDA_TS("fak_paged_kv_write_pages", tokens, fak_vllm_pa::reshape_and_cache_pages_kernel<<<tokens, threads>>>(x));`, false},
 		{"paged writer wrong row", "cuda/paged_attention_vllm.cuh", `FCUDA_TS("fak_paged_kv_write", tokens, fak_vllm_pa::reshape_and_cache_pages_kernel<<<tokens, threads>>>(x));`, false},
