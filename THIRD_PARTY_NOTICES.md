@@ -1212,6 +1212,97 @@ No upstream executable or inference runtime is used.
  */
 ```
 
+
+## Strata owner-safe routed/shared expert overlap
+
+`internal/model/moe_shared_overlap.go` adapts the current-router-ID, separate-output,
+launch/join/combine control pattern from Niko1221/Strata at revision
+`c62d5e3a15b40ea51c96aae9e8d36928965f53ab`:
+- `include/strata/core/hit_hook.hpp`
+- `src/core/session.cpp` (hit launch, CPU work and combine ordering)
+- `src/core/expert_source.cpp` (current expert IDs and async input lifetime)
+
+https://github.com/Niko1221/Strata/tree/c62d5e3a15b40ea51c96aae9e8d36928965f53ab
+
+Copyright (c) 2026 Niko1221 and the Strata contributors.
+SPDX-License-Identifier: MIT
+The complete copyright, permission and warranty notice is retained in
+`internal/model/STRATA_LICENSE.txt`.
+
+Adapted for Fak's existing whole-layer GLM host spill: only a prepared CPU
+batch may run on the worker; Session/backend operations remain on their owning
+goroutine. Private outputs join before retirement and preserve current router
+IDs, weights, dtype and reduction order. The explicit host-payload budget is
+default off. This is a Go ownership adaptation, not a copied CUDA kernel,
+modified routing/quantization policy, device qualification or performance claim.
+## Strata / Project Maya Engram CLOCK replacement
+
+`internal/model/v41_cache.go` adapts `EgRowCache`'s hand/reference-bit replacement
+from `src/dsv41/ds4_engram_io.hpp:38-90` in Niko1221/Strata at
+`c62d5e3a15b40ea51c96aae9e8d36928965f53ab`:
+https://github.com/Niko1221/Strata/blob/c62d5e3a15b40ea51c96aae9e8d36928965f53ab/src/dsv41/ds4_engram_io.hpp
+
+Source SHA256: `21db12eb7f19613552e4bc6e55634672cf4e02f575d34adab100fbd9b26fb246`.
+The source originates in Project Maya v1.1.17 (upstream notice identifies commit
+`8d9a9b5d`, https://github.com/mw00/project-maya); Strata's port history records
+its later changes. Copyright (c) 2026 Peasant Smith (mw00) and the Project Maya
+contributors, including needmorevram, and Niko1221 and the Strata contributors.
+
+Changed for Fak: Go maps and existing caller mutex, typed default-off model
+attachment, a bounded reference-bit sweep, byte-budget/fixed-row admission,
+and immutable separately copied payloads instead of reusable mutable block
+slots. No upstream I/O thread pool, GPU code, model weights, or quantization is
+included. Default expert/Engram LRU and the ordinary loader budget are unchanged.
+
+The upstream `third_party/project-maya/NOTICE.md` is retained verbatim below;
+its paths and release history refer to the upstream repository.
+
+```text
+# Project Maya (maya-ds4), DeepSeek-V4.1 engine
+
+The files under `src/dsv41/`, `include/strata/dsv41/`, `tests/dsv41/` and `tools/dsv41/` come from
+https://github.com/mw00/project-maya (release v1.1.17, commit 8d9a9b5d), its DeepSeek engine `src/ds4`, `tests/ds4_*`,
+`tools/ds4` and the kernel sources it builds on (`exl3`, `sampler`). Project Maya is itself built on Strata.
+
+Copyright (c) 2026 Peasant Smith (mw00) and the Project Maya contributors, including needmorevram.
+MIT License, the full text is in `LICENSE` beside this file. The notice stays with every copy.
+
+Changes made while porting into Strata are listed in the git history of the `src/dsv41` directory
+(the first commit of each file is the unmodified upstream copy).
+
+Later changes taken from Project Maya releases v1.1.18 to v1.1.26 (the same approach re-written onto Strata's engine,
+for example the long-prompt layer skip, the thinking budget, conversation slots) are covered by the same copyright
+and permission notice, in `LICENSE` beside this file.
+```
+
+The full MIT license from `third_party/project-maya/LICENSE` at that revision
+follows (the upstream attribution/notice applies to this adaptation):
+
+```text
+MIT License
+
+Copyright (c) 2026 Peasant Smith and the Project Maya contributors
+Copyright (c) 2026 Niko1221 and the Strata contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## vLLM paged attention v1/v2
 
 The opt-in CUDA paged KV store's decode attention, `internal/compute/cuda/paged_attention_vllm.cuh`,
@@ -1310,72 +1401,3 @@ The complete Apache License, Version 2.0 is supplied in root `LICENSE` and
 reproduced in the TensorFold section above. No separate donor NOTICE exists
 at this revision. This experimental backend is unqualified; it is not evidence
 of B300 acceptance or an SM120 performance gain.
-
-## Strata / Project Maya Engram CLOCK replacement
-
-`internal/model/v41_cache.go` adapts `EgRowCache`'s hand/reference-bit replacement
-from `src/dsv41/ds4_engram_io.hpp:38-90` in Niko1221/Strata at
-`c62d5e3a15b40ea51c96aae9e8d36928965f53ab`:
-https://github.com/Niko1221/Strata/blob/c62d5e3a15b40ea51c96aae9e8d36928965f53ab/src/dsv41/ds4_engram_io.hpp
-
-Source SHA256: `21db12eb7f19613552e4bc6e55634672cf4e02f575d34adab100fbd9b26fb246`.
-The source originates in Project Maya v1.1.17 (upstream notice identifies commit
-`8d9a9b5d`, https://github.com/mw00/project-maya); Strata's port history records
-its later changes. Copyright (c) 2026 Peasant Smith (mw00) and the Project Maya
-contributors, including needmorevram, and Niko1221 and the Strata contributors.
-
-Changed for Fak: Go maps and existing caller mutex, typed default-off model
-attachment, a bounded reference-bit sweep, byte-budget/fixed-row admission,
-and immutable separately copied payloads instead of reusable mutable block
-slots. No upstream I/O thread pool, GPU code, model weights, or quantization is
-included. Default expert/Engram LRU and the ordinary loader budget are unchanged.
-
-The upstream `third_party/project-maya/NOTICE.md` is retained verbatim below;
-its paths and release history refer to the upstream repository.
-
-```text
-# Project Maya (maya-ds4), DeepSeek-V4.1 engine
-
-The files under `src/dsv41/`, `include/strata/dsv41/`, `tests/dsv41/` and `tools/dsv41/` come from
-https://github.com/mw00/project-maya (release v1.1.17, commit 8d9a9b5d), its DeepSeek engine `src/ds4`, `tests/ds4_*`,
-`tools/ds4` and the kernel sources it builds on (`exl3`, `sampler`). Project Maya is itself built on Strata.
-
-Copyright (c) 2026 Peasant Smith (mw00) and the Project Maya contributors, including needmorevram.
-MIT License, the full text is in `LICENSE` beside this file. The notice stays with every copy.
-
-Changes made while porting into Strata are listed in the git history of the `src/dsv41` directory
-(the first commit of each file is the unmodified upstream copy).
-
-Later changes taken from Project Maya releases v1.1.18 to v1.1.26 (the same approach re-written onto Strata's engine,
-for example the long-prompt layer skip, the thinking budget, conversation slots) are covered by the same copyright
-and permission notice, in `LICENSE` beside this file.
-```
-
-The full MIT license from `third_party/project-maya/LICENSE` at that revision
-follows (the upstream attribution/notice applies to this adaptation):
-
-```text
-MIT License
-
-Copyright (c) 2026 Peasant Smith and the Project Maya contributors
-Copyright (c) 2026 Niko1221 and the Strata contributors
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
