@@ -1,6 +1,10 @@
 package gateway
 
 import (
+	"context"
+	"errors"
+	"io"
+	"strings"
 	"sync"
 )
 
@@ -8,105 +12,198 @@ import (
 type DeltaChunk struct {
 	Text   string
 	Tokens int
+	held   bool
 }
 
-// CoalescingSender buffers and coalesces streamed deltas when the consumer experiences
-// network backpressure (#10725, borrowed from vLLM output_processor).
-// It decouples the model forward/generation iteration from client network I/O: when a client's
-// HTTP SSE connection cannot keep up with generation, pending text deltas and tokens are
-// coalesced in a bounded intermediate queue via in-place aggregation rather than stalling
-// the model generation loop or queueing unboundedly.
+// These are per-request transport buffers, not model/context budgets. Even a
+// tiny/empty-fragment producer has a finite event budget. There is no queue wait
+// on the generator path: a client exceeding either bound fails its own stream.
+const (
+	streamPendingBytes  = 1 << 20
+	streamPendingEvents = 1024
+)
+
+var (
+	errStreamBackpressure = errors.New("downstream stream pending output limit exceeded")
+	errStreamDelivery     = errors.New("downstream stream delivery failed")
+)
+
+// CoalescingSender decouples generation from delivery (#10725, inspired by vLLM
+// output_processor). Both budgets include the chunk currently being delivered;
+// a one-slot queue alone would not bound an ever-growing pending string.
+// Delivery must be interruptible by ctx (the live HTTP caller uses write deadlines).
+// Overflow and delivery failures terminate the stream explicitly, never as success.
 type CoalescingSender struct {
-	mu         sync.Mutex
-	pending    DeltaChunk
-	hasPending bool
-	closed     bool
-	notify     chan struct{}
-	done       chan struct{}
+	mu             sync.Mutex
+	pending        []DeltaChunk
+	bufferedBytes  int
+	bufferedEvents int
+	closed         bool
+	firstError     error
+	preserveChunks bool
+	ctx            context.Context
+	onError        func()
+	notify         chan struct{}
+	done           chan struct{}
 }
 
-// NewCoalescingSender creates a coalescing sender that drains deltas to deliverFn in a background consumer goroutine.
-func NewCoalescingSender(deliverFn func(chunk DeltaChunk) error) *CoalescingSender {
+// NewCoalescingSender merges adjacent pending text deltas. Callers that require
+// per-fragment wire boundaries use the request-local preserving mode instead.
+func NewCoalescingSender(deliverFn func(DeltaChunk) error) *CoalescingSender {
+	return newCoalescingSender(context.Background(), false, deliverFn, nil)
+}
+
+func newCoalescingSender(ctx context.Context, preserveChunks bool, deliverFn func(DeltaChunk) error, onError func()) *CoalescingSender {
 	s := &CoalescingSender{
-		notify: make(chan struct{}, 1),
-		done:   make(chan struct{}),
+		ctx: ctx, preserveChunks: preserveChunks, onError: onError,
+		notify: make(chan struct{}, 1), done: make(chan struct{}),
 	}
 	go s.drainConsumer(deliverFn)
 	return s
 }
 
-// Send submits a delta chunk from the fast generator loop.
-// If the consumer is busy delivering a previous chunk, consecutive incoming deltas are coalesced
-// in-place without blocking the generator loop.
-func (s *CoalescingSender) Send(text string, tokens int) {
-	if s == nil || (text == "" && tokens == 0) {
-		return
+// Send never waits for network I/O. An accepted fragment is delivered in order
+// unless this stream explicitly fails; no successful completion silently drops it.
+func (s *CoalescingSender) Send(text string, tokens int) error {
+	return s.send(DeltaChunk{Text: text, Tokens: tokens})
+}
+
+func (s *CoalescingSender) activity() error { return s.send(DeltaChunk{held: true}) }
+
+func (s *CoalescingSender) send(chunk DeltaChunk) error {
+	if s == nil {
+		return nil
+	}
+	if err := s.ctx.Err(); err != nil {
+		s.fail(err)
+		return err
 	}
 	s.mu.Lock()
 	if s.closed {
+		err := s.firstError
+		if err == nil {
+			err = io.ErrClosedPipe
+		}
 		s.mu.Unlock()
-		return
+		return err
 	}
-	if !s.hasPending {
-		s.pending = DeltaChunk{Text: text, Tokens: tokens}
-		s.hasPending = true
+	if !chunk.held && chunk.Text == "" && chunk.Tokens == 0 {
+		s.mu.Unlock()
+		return nil
+	}
+	last := len(s.pending) - 1
+	// Held progress has no payload. Adjacent notifications can be coalesced,
+	// but never across a content fragment or with a content fragment.
+	if chunk.held && last >= 0 && s.pending[last].held {
+		s.mu.Unlock()
+		return nil
+	}
+	merge := !s.preserveChunks && !chunk.held && last >= 0 && !s.pending[last].held
+	if len(chunk.Text) > streamPendingBytes-s.bufferedBytes || (!merge && s.bufferedEvents >= streamPendingEvents) {
+		s.mu.Unlock()
+		s.fail(errStreamBackpressure)
+		return errStreamBackpressure
+	}
+	s.bufferedBytes += len(chunk.Text)
+	if merge {
+		s.pending[last].Text += chunk.Text
+		s.pending[last].Tokens += chunk.Tokens
 	} else {
-		// Coalesce in-place
-		s.pending.Text += text
-		s.pending.Tokens += tokens
+		// Do not retain a larger producer backing string through a small slice.
+		chunk.Text = strings.Clone(chunk.Text)
+		s.pending = append(s.pending, chunk)
+		s.bufferedEvents++
 	}
 	s.mu.Unlock()
+	s.wake()
+	return nil
+}
 
-	// Notify drain loop without blocking
+func (s *CoalescingSender) wake() {
 	select {
 	case s.notify <- struct{}{}:
 	default:
 	}
 }
 
-// Close signals that generation is complete and waits for all pending coalesced deltas to be delivered.
-func (s *CoalescingSender) Close() {
-	if s == nil {
-		return
-	}
+func (s *CoalescingSender) fail(err error) {
 	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return
+	first := s.firstError == nil
+	if first {
+		s.firstError = err
 	}
 	s.closed = true
+	s.pending = nil
 	s.mu.Unlock()
-
-	select {
-	case s.notify <- struct{}{}:
-	default:
+	s.wake()
+	if first && s.onError != nil {
+		s.onError()
 	}
-	<-s.done
 }
 
-func (s *CoalescingSender) drainConsumer(deliverFn func(chunk DeltaChunk) error) {
-	defer close(s.done)
-	for {
-		<-s.notify
+// Close joins the consumer, including concurrent/repeated callers, and returns
+// its first error. The delivery callback's I/O bound also bounds a final drain.
+func (s *CoalescingSender) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
+	s.wake()
+	<-s.done
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.firstError
+}
 
+func (s *CoalescingSender) drainConsumer(deliverFn func(DeltaChunk) error) {
+	defer func() {
+		// The async boundary must not turn an ordinary HTTP writer panic into a
+		// process-wide panic, or expose arbitrary panic contents to the client.
+		if recover() != nil {
+			s.fail(errStreamDelivery)
+		}
+		close(s.done)
+	}()
+	for {
+		select {
+		case <-s.notify:
+		case <-s.ctx.Done():
+			s.fail(s.ctx.Err())
+			return
+		}
 		for {
+			if err := s.ctx.Err(); err != nil {
+				s.fail(err)
+				return
+			}
 			s.mu.Lock()
-			if !s.hasPending {
-				isClosed := s.closed
+			if s.firstError != nil || len(s.pending) == 0 {
+				closed := s.closed
 				s.mu.Unlock()
-				if isClosed {
+				if closed {
 					return
 				}
 				break
 			}
-			chunk := s.pending
-			s.pending = DeltaChunk{}
-			s.hasPending = false
-			s.mu.Unlock()
-
-			if deliverFn != nil {
-				_ = deliverFn(chunk)
+			chunk := s.pending[0]
+			s.pending[0] = DeltaChunk{}
+			s.pending = s.pending[1:]
+			if len(s.pending) == 0 {
+				s.pending = nil
 			}
+			s.mu.Unlock()
+			if deliverFn != nil {
+				if err := deliverFn(chunk); err != nil {
+					s.fail(err)
+					return
+				}
+			}
+			s.mu.Lock()
+			s.bufferedBytes -= len(chunk.Text)
+			s.bufferedEvents--
+			s.mu.Unlock()
 		}
 	}
 }
