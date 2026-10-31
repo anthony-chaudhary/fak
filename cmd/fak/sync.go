@@ -37,6 +37,17 @@ var (
 	syncCaptureSource             = func(repo string) (string, error) { return gitOut(repo, "rev-parse", "HEAD") }
 )
 
+// The failure envelope intentionally excludes raw errors and assessment details:
+// they can contain arbitrary Git output, paths or caller-supplied credentials.
+// Existing stderr diagnostics and exit codes remain the text-mode contract.
+type syncReconcileFailure struct {
+	Schema          string                           `json:"schema"`
+	Error           string                           `json:"error"`
+	AssessmentKnown bool                             `json:"assessment_known"`
+	Phase           string                           `json:"phase"`
+	PhaseEvidence   *safesync.ReconcilePhaseEvidence `json:"phase_evidence,omitempty"`
+}
+
 func runSync(stdout, stderr io.Writer, argv []string) int {
 	command := "check"
 	if len(argv) > 0 {
@@ -223,6 +234,20 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 		assessment, err := syncRouteReconciliation(context.Background(), opts)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak sync reconcile: %v\n", err)
+			if *asJSON {
+				report := syncReconcileFailure{
+					Schema: "fak.sync.reconcile.error.v1", Error: "RECONCILE_FAILED",
+					AssessmentKnown: assessment.Schema == safesync.ReconcileSchema,
+					Phase:           "unknown",
+				}
+				if evidence := assessment.PhaseEvidence; evidence != nil && len(evidence.Phases) > 0 {
+					report.PhaseEvidence = evidence
+					report.Phase = evidence.Phases[len(evidence.Phases)-1].Phase
+				}
+				if writeErr := writeIndentedJSON(stdout, report); writeErr != nil {
+					fmt.Fprintf(stderr, "fak sync: %v\n", writeErr)
+				}
+			}
 			return syncExitInternal
 		}
 		if *asJSON {

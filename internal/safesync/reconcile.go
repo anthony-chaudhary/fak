@@ -89,32 +89,118 @@ type ReconcileExecution struct {
 
 // ReconcileAssessment is the typed, evidence-backed reconciliation verdict.
 type ReconcileAssessment struct {
-	Schema         string                `json:"schema"`
-	Route          string                `json:"route"`
-	Primitive      string                `json:"primitive,omitempty"`
-	Goal           string                `json:"goal"`
-	State          string                `json:"state"`
-	OK             bool                  `json:"ok"`
-	Reason         string                `json:"reason,omitempty"`
-	Detail         string                `json:"detail,omitempty"`
-	Head           string                `json:"head"`
-	Target         string                `json:"target"`
-	TargetRef      string                `json:"target_ref"`
-	Branch         string                `json:"branch"`
-	Remote         string                `json:"remote"`
-	Dirty          bool                  `json:"dirty"`
-	DirtyPaths     []string              `json:"dirty_paths,omitempty"`
-	CollidingPaths []string              `json:"colliding_paths,omitempty"`
-	MergeActive    bool                  `json:"merge_active,omitempty"`
-	Contention     bool                  `json:"contention,omitempty"`
-	Applied        bool                  `json:"applied,omitempty"`
-	Status         string                `json:"status,omitempty"`
-	AppliedCommit  string                `json:"applied_commit,omitempty"`
-	Execution      *ReconcileExecution   `json:"execution,omitempty"`
-	Park           *ParkReceipt          `json:"park,omitempty"`
-	Packet         *ReconciliationPacket `json:"packet,omitempty"`
-	ExecuteReceipt *ExecutionReceipt     `json:"execute_receipt,omitempty"`
-	Quarantine     *QuarantineReceipt    `json:"quarantine,omitempty"`
+	Schema         string                  `json:"schema"`
+	Route          string                  `json:"route"`
+	Primitive      string                  `json:"primitive,omitempty"`
+	Goal           string                  `json:"goal"`
+	State          string                  `json:"state"`
+	OK             bool                    `json:"ok"`
+	Reason         string                  `json:"reason,omitempty"`
+	Detail         string                  `json:"detail,omitempty"`
+	Head           string                  `json:"head"`
+	Target         string                  `json:"target"`
+	TargetRef      string                  `json:"target_ref"`
+	Branch         string                  `json:"branch"`
+	Remote         string                  `json:"remote"`
+	Dirty          bool                    `json:"dirty"`
+	DirtyPaths     []string                `json:"dirty_paths,omitempty"`
+	CollidingPaths []string                `json:"colliding_paths,omitempty"`
+	MergeActive    bool                    `json:"merge_active,omitempty"`
+	Contention     bool                    `json:"contention,omitempty"`
+	Applied        bool                    `json:"applied,omitempty"`
+	Status         string                  `json:"status,omitempty"`
+	AppliedCommit  string                  `json:"applied_commit,omitempty"`
+	Execution      *ReconcileExecution     `json:"execution,omitempty"`
+	Park           *ParkReceipt            `json:"park,omitempty"`
+	Packet         *ReconciliationPacket   `json:"packet,omitempty"`
+	ExecuteReceipt *ExecutionReceipt       `json:"execute_receipt,omitempty"`
+	Quarantine     *QuarantineReceipt      `json:"quarantine,omitempty"`
+	PhaseEvidence  *ReconcilePhaseEvidence `json:"phase_evidence,omitempty"`
+}
+
+// ReconcilePhase records one entered native phase, not individual Git commands.
+// Completion describes the call boundary, not guard acceptance or rollback proof.
+type ReconcilePhase struct {
+	Phase     string `json:"phase"`
+	Status    string `json:"status"`
+	ElapsedNS int64  `json:"elapsed_ns"`
+}
+
+// ReconcilePhaseEvidence measures this Route invocation only. Fetch includes its
+// ancestry/pin checks, and primitive includes its guards and recovery; neither is
+// network-only or CPU time. A primitive may be a preview, not proof of mutation.
+// Unentered work has no entry, rather than a zero pass.
+type ReconcilePhaseEvidence struct {
+	Schema    string           `json:"schema"`
+	ElapsedNS int64            `json:"elapsed_ns"`
+	Phases    []ReconcilePhase `json:"phases"`
+	// Nil means fetch was unentered/unknown; false proves no fetch Runner call.
+	// True proves an attempt only, not process start, wire I/O or successful fetch.
+	FetchCallAttempted *bool `json:"fetch_call_attempted,omitempty"`
+}
+
+type reconcilePhaseTrace struct {
+	started, phaseStarted time.Time
+	phase                 string
+	phases                []ReconcilePhase
+	fetchCallAttempted    *bool
+}
+
+func newReconcilePhaseTrace() *reconcilePhaseTrace {
+	now := time.Now()
+	return &reconcilePhaseTrace{
+		started: now, phaseStarted: now, phase: "prepare",
+		phases: make([]ReconcilePhase, 0, 6),
+	}
+}
+
+// Only the six fixed call-site labels below enter this per-call trace. In
+// particular, no path, command, error text or lease clock becomes a label.
+func (p *reconcilePhaseTrace) begin(phase string) {
+	now := time.Now()
+	p.endAt(now, "completed")
+	p.phase, p.phaseStarted = phase, now
+}
+
+func (p *reconcilePhaseTrace) end(status string) {
+	p.endAt(time.Now(), status)
+}
+
+func (p *reconcilePhaseTrace) endAt(now time.Time, status string) {
+	if p.phase == "" {
+		return
+	}
+	p.phases = append(p.phases, ReconcilePhase{
+		Phase: p.phase, Status: status, ElapsedNS: now.Sub(p.phaseStarted).Nanoseconds(),
+	})
+	p.phase = ""
+}
+
+func (p *reconcilePhaseTrace) evidence() *ReconcilePhaseEvidence {
+	return &ReconcilePhaseEvidence{
+		Schema: "fak.sync.reconcile.phases.v1", ElapsedNS: time.Since(p.started).Nanoseconds(),
+		Phases: p.phases, FetchCallAttempted: p.fetchCallAttempted,
+	}
+}
+
+func reconcileCallStatus(err error, success bool) string {
+	if err != nil {
+		return "failed"
+	}
+	if !success {
+		return "refused"
+	}
+	return "completed"
+}
+
+func reconcileAssessmentStatus(a ReconcileAssessment, err error) string {
+	if err != nil || (a.Execution != nil && a.Execution.Error != "") {
+		return "failed"
+	}
+	if a.Execution != nil {
+		return reconcileCallStatus(nil, a.Execution.Success)
+	}
+	return reconcileCallStatus(nil, a.OK)
 }
 
 // ParseGoal decomposes a goal string into structured GoalInfo.
@@ -197,8 +283,16 @@ func RouteReconciliation(ctx context.Context, opts ReconcileOptions) (ReconcileA
 }
 
 // Route runs the state inspection pipeline and emits the ReconcileAssessment.
-func (r *ReconcileRouter) Route(ctx context.Context) (ReconcileAssessment, error) {
-	assessment, err := r.routeInternal(ctx)
+func (r *ReconcileRouter) Route(ctx context.Context) (assessment ReconcileAssessment, err error) {
+	// time.Now's monotonic component is independent of opts.Now, which is the
+	// existing lease/receipt clock and may deliberately be fixed in callers.
+	phases := newReconcilePhaseTrace()
+	defer func() {
+		phases.end(reconcileAssessmentStatus(assessment, err))
+		assessment.PhaseEvidence = phases.evidence()
+	}()
+	assessment, err = r.routeInternal(ctx, phases)
+	phases.end(reconcileAssessmentStatus(assessment, err))
 	if err != nil {
 		return assessment, err
 	}
@@ -219,7 +313,10 @@ func (r *ReconcileRouter) Route(ctx context.Context) (ReconcileAssessment, error
 			Runner:       r.opts.Runner,
 			Now:          r.opts.Now,
 		}
-		if pkt, pktErr := BuildReconciliationPacket(ctx, pktOpts); pktErr == nil {
+		phases.begin("packet_build")
+		pkt, pktErr := BuildReconciliationPacket(ctx, pktOpts)
+		phases.end(reconcileCallStatus(pktErr, true))
+		if pktErr == nil {
 			assessment.Packet = pkt
 		}
 	}
@@ -234,7 +331,9 @@ func (r *ReconcileRouter) Route(ctx context.Context) (ReconcileAssessment, error
 			Runner:         r.opts.Runner,
 			Now:            r.opts.Now,
 		}
+		phases.begin("packet_execute")
 		receipt, execErr := ExecutePacket(ctx, assessment.Packet, execOpts)
+		phases.end(reconcileCallStatus(execErr, receipt != nil && receipt.Status == ExecuteStatusExecuted))
 		assessment.ExecuteReceipt = receipt
 		if receipt != nil && receipt.Status == ExecuteStatusExecuted {
 			assessment.Applied = true
@@ -262,7 +361,7 @@ func (r *ReconcileRouter) Route(ctx context.Context) (ReconcileAssessment, error
 	return assessment, nil
 }
 
-func (r *ReconcileRouter) routeInternal(ctx context.Context) (ReconcileAssessment, error) {
+func (r *ReconcileRouter) routeInternal(ctx context.Context, phases *reconcilePhaseTrace) (ReconcileAssessment, error) {
 	run := r.opts.Runner
 	repo := r.opts.Repo
 
@@ -290,11 +389,21 @@ func (r *ReconcileRouter) routeInternal(ctx context.Context) (ReconcileAssessmen
 		return ReconcileAssessment{}, fmt.Errorf("bounded fetch pins require fetch enabled")
 	}
 	if r.opts.Fetch {
-		if err := fetchWithExpectedBase(ctx, run, repo, r.opts.Remote, branch, r.opts.FetchDepth, r.opts.FetchBase, r.opts.FetchTarget, r.opts.FetchAfterBase); err != nil {
+		phases.begin("fetch")
+		attempted := false
+		phases.fetchCallAttempted = &attempted
+		fetchRun := func(ctx context.Context, dir string, args ...string) RunResult {
+			if len(args) > 0 && args[0] == "fetch" {
+				attempted = true
+			}
+			return run(ctx, dir, args...)
+		}
+		if err := fetchWithExpectedBase(ctx, fetchRun, repo, r.opts.Remote, branch, r.opts.FetchDepth, r.opts.FetchBase, r.opts.FetchTarget, r.opts.FetchAfterBase); err != nil {
 			return ReconcileAssessment{}, fmt.Errorf("reconcile: fetch %s %s: %w", r.opts.Remote, branch, err)
 		}
 	}
 
+	phases.begin("inspect")
 	// 1. Observed local HEAD and target remote ref SHA (pinned across all subsequent checks).
 	sourceRef := goalInfo.Source
 	if sourceRef == "" {
@@ -439,7 +548,9 @@ func (r *ReconcileRouter) routeInternal(ctx context.Context) (ReconcileAssessmen
 				Now:            r.opts.Now,
 				VelocityBudget: DefaultPushVelocityBudget,
 			}
+			phases.begin("primitive")
 			pushRes, pushErr := SafePush(ctx, pushOpts)
+			phases.end(reconcileCallStatus(pushErr, pushRes.Pushed))
 			exec := &ReconcileExecution{
 				Primitive: primitive,
 				Pushed:    pushRes.Pushed,
@@ -518,7 +629,9 @@ func (r *ReconcileRouter) routeInternal(ctx context.Context) (ReconcileAssessmen
 						Now:            r.opts.Now,
 						WriterLeaseTTL: r.opts.WriterLeaseTTL,
 					}
+					phases.begin("primitive")
 					parkRec, parkErr := Park(ctx, parkOpts)
+					phases.end(reconcileCallStatus(parkErr, parkRec.OK && parkRec.Status != ParkStatusConflict))
 					assessment.Park = &parkRec
 					if parkErr != nil || !parkRec.OK || parkRec.Status == ParkStatusConflict {
 						assessment.Route = RouteHoldDirtyCollision
@@ -575,7 +688,9 @@ func (r *ReconcileRouter) routeInternal(ctx context.Context) (ReconcileAssessmen
 				WriterLeaseTTL:      r.opts.WriterLeaseTTL,
 				ApplyVelocityBudget: DefaultPushVelocityBudget,
 			}
+			phases.begin("primitive")
 			applyRes, applyErr := Apply(ctx, applyOpts)
+			phases.end(reconcileCallStatus(applyErr, applyRes.Applied))
 			exec := &ReconcileExecution{
 				Primitive: primitive,
 				Applied:   applyRes.Applied,
@@ -621,7 +736,9 @@ func (r *ReconcileRouter) routeInternal(ctx context.Context) (ReconcileAssessmen
 				res := run(ctx, dir, args...)
 				return mergepreview.RunResult{Stdout: res.Stdout, Stderr: res.Stderr, Code: res.Code}, res.Err
 			}
+			phases.begin("primitive")
 			mpRes, mpErr := mergepreview.Apply(ctx, repo, targetSHA, "", mpRunner)
+			phases.end(reconcileCallStatus(mpErr, mpRes.ApplyOutcome == mergepreview.ApplyResolvedSuperset))
 			exec := &ReconcileExecution{
 				Primitive: primitive,
 				Applied:   mpRes.ApplyOutcome == mergepreview.ApplyResolvedSuperset,
@@ -676,6 +793,7 @@ func (r *ReconcileRouter) routeInternal(ctx context.Context) (ReconcileAssessmen
 		}
 
 		if r.opts.Apply {
+			phases.begin("primitive")
 			targetBranch := strings.TrimSpace(r.opts.Branch)
 			if targetBranch == "" {
 				symRes := run(ctx, repo, "symbolic-ref", "--quiet", "HEAD")
@@ -744,6 +862,7 @@ func (r *ReconcileRouter) routeInternal(ctx context.Context) (ReconcileAssessmen
 				}
 				newHead, _ := rev(ctx, run, repo, "HEAD")
 				if syncErr != nil {
+					phases.end("failed")
 					assessment.OK = false
 					assessment.Reason = ReasonWorktreeUnsynced
 					assessment.Detail = syncErr.Error()
