@@ -14,8 +14,10 @@ import (
 
 // Compile the actual three-layer submission path, not a duplicate status policy.
 // This host witness covers immediate status/control flow, not CUDA syntax/ABI,
-// kernel math, allocator/device lifetime, graph capture or physical GPU execution.
-// fak-test:runtime medium est=1s lane=default
+// kernel MMA math, allocator/device lifetime, graph capture or physical GPU execution.
+// Geometry cases execute the actual host launcher, partition statements and one
+// representative host-simulated fixup thread, not a copied grid policy.
+// fak-test:runtime medium est=2s lane=default
 // fak-test:justify Compiles extracted MMQ submission functions with bounded host C++17 recording stubs.
 func TestCUDAQ4KMMQAttemptStatus(t *testing.T) {
 	compiler, err := exec.LookPath("c++")
@@ -64,7 +66,7 @@ func TestCUDAQ4KMMQAttemptStatus(t *testing.T) {
 		return matches[0]
 	}
 	var definitions []string
-	for _, name := range []string{"warp_size", "QK_K", "QK8_1", "QI8_1", "MATRIX_ROW_PADDING", "QK8_1_MMQ", "MMQ_TILE_NE_K", "nthreads", "I", "nwarps", "qk", "sram_stride", "CUDA_QUANTIZE_BLOCK_SIZE_MMQ"} {
+	for _, name := range []string{"warp_size", "QK_K", "QK8_1", "QI8_1", "MATRIX_ROW_PADDING", "MMQ_ITER_K", "QK8_1_MMQ", "MMQ_TILE_NE_K", "nthreads", "I", "nwarps", "qk", "ITER_K", "blocks_per_iter", "sram_stride", "CUDA_QUANTIZE_BLOCK_SIZE_MMQ"} {
 		definitions = append(definitions, declaration(mmq, `(?m)^constexpr int `+name+` = [^;]+;`))
 	}
 	definitions = append(definitions,
@@ -73,6 +75,9 @@ func TestCUDAQ4KMMQAttemptStatus(t *testing.T) {
 		extract(mmq, "struct device_info {")+";",
 		declaration(mmq, `(?m)^static device_info g_device_info[^;]+;`),
 		extract(mmq, "static uint3 init_fastdiv_values("),
+		extract(mmq, "static __device__ __forceinline__ uint32_t fastdiv("),
+		extract(mmq, "static __device__ __forceinline__ uint32_t fastmodulo("),
+		extract(mmq, "static __device__ __forceinline__ uint2 fast_div_modulo("),
 		extract(mmq, "static constexpr __host__ __device__ bool config_has_J("),
 		extract(mmq, "static size_t nbytes_shared("))
 	launch := extract(mmq, "template <int J, bool fallback>\nstatic int launch_mul_mat_q(")
@@ -86,9 +91,9 @@ func TestCUDAQ4KMMQAttemptStatus(t *testing.T) {
 		return strings.Replace(body, launch, replacement, 1)
 	}
 	launch = replaceLaunch(launch, `FCUDA_TS("mul_mat_q", block_nums_stream_k, mul_mat_q<J, fallback><<<block_nums_stream_k, block_dims, nbytes, stream>>>
-        (x, y, dst, tmp_fixup, blocks_per_ne00_fd, nrows_x, ncols_dst, stride_row_x, ncols_dst, nrows_x, ntx_fd));`, `mock_launch("main");`)
+        (x, y, dst, tmp_fixup, blocks_per_ne00_fd, nrows_x, ncols_dst, stride_row_x, ncols_dst, nrows_x, ntx_fd));`, `mock_launch("main", block_nums_stream_k);`)
 	launch = replaceLaunch(launch, `FCUDA_TS("mul_mat_q_stream_k_fixup", block_nums_fixup, mul_mat_q_stream_k_fixup<J, fallback><<<block_nums_fixup, block_dims_fixup, 0, stream>>>
-            (dst, tmp_fixup, blocks_per_ne00_fd, nrows_x, ncols_dst, nrows_x, ntx_fd));`, `mock_launch("fixup");`)
+            (dst, tmp_fixup, blocks_per_ne00_fd, nrows_x, ncols_dst, nrows_x, ntx_fd));`, `mock_launch("fixup", block_nums_fixup);`)
 	wrapper = replaceLaunch(wrapper, `FCUDA_TS("quantize_mmq_q8_1_ds4", num_blocks, quantize_mmq_q8_1_ds4<<<num_blocks, block_size, 0, g_stream>>>(dX, y, in, in, in_padded, P));`, `mock_launch("quantize");`)
 	outer = replaceLaunch(outer, `FCUDA_TS("k_q4k_dequant_split", (wn + 255) / 256, k_q4k_dequant_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(
         (const unsigned char *)dQ4K, wHi, wLo, out, in));`, `mock_launch("dequant");`)
@@ -97,7 +102,28 @@ func TestCUDAQ4KMMQAttemptStatus(t *testing.T) {
         (const unsigned char *)dQ4K, coeff, dX, dY, out, in, P));`, `mock_launch("decode");`)
 	outer = replaceLaunch(outer, `FCUDA_TS("k_q4k_gemm_panel", dim3(out, (P + token_tile - 1) / token_tile), k_q4k_gemm_panel<token_tile><<<dim3(out, (P + token_tile - 1) / token_tile), 32, 0, g_stream>>>(
       (const unsigned char *)dQ4K, dX, dY, out, in, P));`, `mock_launch("panel");`)
-	actual := strings.Join(definitions, "\n") + "\n" + launch + "\n" + dispatch
+	// Execute the unchanged production partition/fixup code with CPU coordinates.
+	partitionStart := strings.Index(mmq, "    int kbc      = int64_t(blockIdx.x)")
+	if partitionStart < 0 {
+		t.Fatal("production Stream-K partition changed")
+	}
+	partitionEnd := strings.Index(mmq[partitionStart:], "    // kb0 == k index")
+	if partitionEnd < 0 {
+		t.Fatal("production Stream-K partition changed")
+	}
+	partition := mmq[partitionStart : partitionStart+partitionEnd]
+	fixup := "template <int J, bool fallback>\n" + extract(mmq, "static __global__ void mul_mat_q_stream_k_fixup(")
+	interval := `
+static std::pair<int,int> stream_k_interval(int tiles, int kblocks, int grid, int block) {
+    const uint3 ntx = init_fastdiv_values(tiles);
+    const int nty = 1;
+    const uint3 blocks_per_ne00 = init_fastdiv_values(kblocks);
+    blockIdx.x = block; gridDim.x = grid;
+` + partition + `
+    return {kbc, kbc_stop};
+}
+`
+	actual := strings.Join(definitions, "\n") + "\n" + launch + "\n" + dispatch + "\n" + interval + "\n" + fixup
 	for _, unexpected := range []string{"<<<", "FCUDA_TS(", "cudaStreamSynchronize", "cudaDeviceSynchronize"} {
 		if strings.Contains(actual+wrapper+outer, unexpected) {
 			t.Fatalf("uncovered launch or synchronization in submission path: %s", unexpected)
@@ -111,7 +137,7 @@ func TestCUDAQ4KMMQAttemptStatus(t *testing.T) {
 		declaration(quant, `(?m)^static int g_q4k_prefill_arm[^;]+;`),
 		declaration(quant, `(?m)^static int g_q4k_decode_arm[^;]+;`),
 	}, "\n")
-	fixture := q4kMMQStatusPreamble + "\nnamespace fak_q4k_mmq {\n" + actual + "\n}\n" + globals + "\n" + wrapper + "\n" + outer + "\n" + q4kMMQStatusMain
+	fixture := q4kMMQStatusPreamble + "\nnamespace fak_q4k_mmq {\n" + actual + "\n}\n" + globals + "\n" + wrapper + "\n" + outer + "\n" + q4kMMQGeometryWitness + "\n" + q4kMMQStatusMain
 	t.Logf("extracted host fixture sha256=%x", sha256.Sum256([]byte(fixture)))
 	dir := t.TempDir()
 	cpp, binary := filepath.Join(dir, "q4k_mmq_status.cpp"), filepath.Join(dir, "q4k_mmq_status.exe")
@@ -129,7 +155,7 @@ func TestCUDAQ4KMMQAttemptStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MMQ attempted status: %v\n%s", err, out)
 	}
-	if string(out) != "PASS 26 actual-source MMQ attempted-status cases; CUDA/device unrun\n" {
+	if string(out) != "geometry source counts: one-unit/132SM main CTA 132->1, fixup bytes 540672->0; GPU timing unmeasured\nPASS 26 status + 12 geometry actual-source MMQ cases; CUDA/device unrun\n" {
 		t.Fatalf("incomplete host witness: %s", out)
 	}
 	t.Log(strings.TrimSpace(string(out)))
@@ -141,14 +167,23 @@ const q4kMMQStatusPreamble = `
 #include <climits>
 #include <cstdio>
 #include <cstring>
+#include <vector>
+#include <utility>
+#include <limits>
 #define __host__
 #define __device__
+#define __global__
+#define __forceinline__
 using cudaError_t=int;
 using cudaStream_t=int;
 using __half=uint16_t;
 struct half2 { uint16_t x,y; };
 struct float2 { float x,y; };
 struct dim3 { unsigned x,y,z; dim3(unsigned a=1,unsigned b=1,unsigned c=1):x(a),y(b),z(c){} };
+struct uint2 { unsigned x,y; };
+static uint2 make_uint2(unsigned x,unsigned y){return {x,y};}
+static uint32_t __umulhi(uint32_t a,uint32_t b){return (uint64_t(a)*b)>>32;}
+static dim3 blockIdx,threadIdx,gridDim;
 struct uint3 { unsigned x,y,z; };
 static uint3 make_uint3(unsigned x,unsigned y,unsigned z){return {x,y,z};}
 constexpr int cudaSuccess=0,FCUDA_SCRATCH_ALLOC_FAILED=92000;
@@ -161,6 +196,8 @@ static int quantize_error,main_error,fixup_error,cleanup_error,last_error;
 static int g_cuda_cleanup_status;
 static int quantize_calls,main_calls,fixup_calls,panel_calls,other_calls,checks;
 static int allocation_calls,fail_allocation,free_calls,device_calls,attribute_calls;
+static unsigned main_grid,fixup_grid;
+static size_t last_allocation_bytes;
 alignas(16) static unsigned char storage[64];
 static int cudaGetDevice(int *p){++device_calls;*p=device_id;return device_error;}
 static int cudaDeviceGetAttribute(int *p,int attribute,int){
@@ -174,13 +211,13 @@ static int cudaDeviceGetAttribute(int *p,int attribute,int){
 template<class T> static int cudaFuncGetAttributes(cudaFuncAttributes *p,T){p->ptxVersion=compiled_arch;return function_error;}
 template<class T> static int cudaFuncSetAttribute(T,int,int){return set_attribute_error;}
 static int cudaGetLastError(){++checks;int result=last_error;last_error=0;return result;}
-static void *scratch_malloc(size_t){++allocation_calls;return allocation_calls==fail_allocation?nullptr:storage;}
+static void *scratch_malloc(size_t n){last_allocation_bytes=n;++allocation_calls;return allocation_calls==fail_allocation?nullptr:storage;}
 static void fcuda_free(void*){++free_calls;last_error=cleanup_error;
  if(!g_cuda_cleanup_status && cleanup_error)g_cuda_cleanup_status=cleanup_error;}
-static void mock_launch(const char *name){
+static void mock_launch(const char *name, dim3 grid=dim3()){
  if(!std::strcmp(name,"quantize")){++quantize_calls;last_error=quantize_error;}
- else if(!std::strcmp(name,"main")){++main_calls;last_error=main_error;}
- else if(!std::strcmp(name,"fixup")){++fixup_calls;last_error=fixup_error;}
+ else if(!std::strcmp(name,"main")){main_grid=grid.x;++main_calls;last_error=main_error;}
+ else if(!std::strcmp(name,"fixup")){fixup_grid=grid.x;++fixup_calls;last_error=fixup_error;}
  else if(!std::strcmp(name,"panel")){++panel_calls;last_error=0;}
  else {++other_calls;last_error=0;}
 }
@@ -206,13 +243,15 @@ static void reset(const char *label){
  g_cuda_cleanup_status=0;
  quantize_calls=main_calls=fixup_calls=panel_calls=other_calls=checks=0;
  allocation_calls=fail_allocation=free_calls=device_calls=attribute_calls=0;
+ main_grid=fixup_grid=0;last_allocation_bytes=0;
  std::memset(fak_q4k_mmq::g_device_info,0,sizeof(fak_q4k_mmq::g_device_info));
  g_q4k_prefill_arm=1;g_q4k_decode_arm=1;g_q4k_mmq_launches=0;
 }
 static bool no_work(){return !quantize_calls&&!main_calls&&!fixup_calls&&!panel_calls&&!other_calls;}
 int main(){
  alignas(16) uint8_t w[16]={};alignas(16) float x[16]={},y[16]={};
- auto call=[&](int out=128,int in=256,int p=8){return fcuda_q4k_matmul_f32(w,x,y,out,in,p);};
+ // Keep >SM K work so existing injected fixup failures remain reachable.
+ auto call=[&](int out=128,int in=32768,int p=8){return fcuda_q4k_matmul_f32(w,x,y,out,in,p);};
  reset("device-api");device_error=17;
  REQUIRE(call()==17);REQUIRE(no_work()&&allocation_calls==0);
  for(int attribute=0;attribute<4;++attribute){
@@ -244,7 +283,7 @@ int main(){
  reset("fixup-failure");fixup_error=34;cleanup_error=94;
  REQUIRE(call()==34);REQUIRE(quantize_calls==1&&main_calls==1&&fixup_calls==1&&!panel_calls&&free_calls==2&&!g_q4k_mmq_launches);
  reset("P128-fixup-cleanup-failure");cleanup_error=95;
- REQUIRE(call(128,256,128)==95);REQUIRE(quantize_calls==1&&main_calls==1&&fixup_calls==1&&!panel_calls&&free_calls==2&&!g_q4k_mmq_launches);
+ REQUIRE(call(128,32768,128)==95);REQUIRE(quantize_calls==1&&main_calls==1&&fixup_calls==1&&!panel_calls&&free_calls==2&&!g_q4k_mmq_launches);
  reset("success-fixup");
  REQUIRE(call()==0);REQUIRE(quantize_calls==1&&main_calls==1&&fixup_calls==1&&!panel_calls&&g_q4k_mmq_launches==1);
  reset("final-activation-cleanup-failure-no-fixup");sm_count=1;cleanup_error=96;
@@ -262,6 +301,63 @@ int main(){
  reset("P128-fp8");g_q4k_prefill_arm=2;
  REQUIRE(call(128,256,128)==78);REQUIRE(no_work()&&!device_calls);
  REQUIRE(cases==26);
- std::printf("PASS %d actual-source MMQ attempted-status cases; CUDA/device unrun\n",cases);
+ if(q4k_geometry_cases())return 1;
+ std::printf("PASS 26 status + 12 geometry actual-source MMQ cases; CUDA/device unrun\n");
+}
+`
+
+// Compare production partition/fixup only in the changed one-unit-per-CTA regime.
+// Other grids remain unchanged; this does not emulate or qualify the MMA body.
+const q4kMMQGeometryWitness = `
+static std::vector<std::pair<int,int>> nonempty_ranges(int tiles,int kblocks,int grid) {
+ std::vector<std::pair<int,int>> out;
+ for(int b=0;b<grid;++b){auto r=fak_q4k_mmq::stream_k_interval(tiles,kblocks,grid,b);if(r.first!=r.second)out.push_back(r);}
+ return out;
+}
+static std::vector<float> fixup_values(int tiles,int kblocks,int grid) {
+ constexpr int J=8,I=fak_q4k_mmq::I;
+ std::vector<float> tmp(size_t(grid)*J*I,std::numeric_limits<float>::quiet_NaN());
+ std::vector<float> dst(size_t(tiles)*J*I,0.0f);
+ const float values[]={1.0e10f,1.0f,-1.0e10f,0.5f,-3.25f};
+ for(int b=0;b<grid;++b){
+  auto r=fak_q4k_mmq::stream_k_interval(tiles,kblocks,grid,b);
+  if(r.first==r.second)continue;
+  if(r.second!=r.first+1)return {};
+  float v=values[r.first%5];
+  float *slot=(r.second%kblocks==0)?dst.data()+size_t(r.first/kblocks)*J*I:tmp.data()+size_t(b)*J*I;
+  for(int z=0;z<J*I;++z)slot[z]=v;
+ }
+ if(tiles%grid){
+  gridDim=dim3(grid,1,1);threadIdx=dim3(0,0,0);
+  for(int b=0;b<grid;++b){
+   blockIdx=dim3(b,0,0);
+   fak_q4k_mmq::mul_mat_q_stream_k_fixup<J,false>(dst.data(),tmp.data(),fak_q4k_mmq::init_fastdiv_values(kblocks),I,tiles*J,I,fak_q4k_mmq::init_fastdiv_values(tiles));
+  }
+ }
+ return dst;
+}
+static int q4k_geometry_cases(){
+ struct C{int tiles,kblocks,sms;};
+ const C cases[]={{1,1,132},{1,2,132},{3,5,132},{4,16,80},{9,8,80},{10,8,80},{12,8,80},{72,1,80},{80,1,80},{81,1,80},{1,80,80},{1,81,80}};
+ for(const C c:cases){
+  main_calls=fixup_calls=allocation_calls=free_calls=0;main_grid=fixup_grid=0;last_allocation_bytes=0;
+  main_error=fixup_error=cleanup_error=set_attribute_error=last_error=fail_allocation=0;
+  fak_q4k_mmq::device_info info={};info.nsm=c.sms;info.smpbo=100000;
+  int rc=fak_q4k_mmq::launch_mul_mat_q<8,false>(nullptr,nullptr,nullptr,128,256*c.kblocks,8*c.tiles,info,0);
+  const int work=c.tiles*c.kblocks,waves=(c.tiles+c.sms-1)/c.sms;
+  const int old_grid=100*c.tiles/(c.sms*waves)>=90?c.tiles:c.sms;
+  const int want=old_grid==c.tiles?c.tiles:(work<c.sms?work:c.sms);
+  if(rc||main_calls!=1||main_grid!=(unsigned)want){std::fprintf(stderr,"geometry grid tiles=%d k=%d sms=%d got=%u want=%d rc=%d\n",c.tiles,c.kblocks,c.sms,main_grid,want,rc);return 1;}
+  bool fix=c.tiles%want!=0;
+  if(fixup_calls!=(int)fix||(fix&&fixup_grid!=main_grid)||allocation_calls!=(int)fix||free_calls!=(int)fix||(fix&&last_allocation_bytes!=size_t(want)*8*128*sizeof(float))){std::fprintf(stderr,"geometry fixup/storage mismatch\n");return 1;}
+  if(nonempty_ranges(c.tiles,c.kblocks,old_grid)!=nonempty_ranges(c.tiles,c.kblocks,want)){std::fprintf(stderr,"nonempty partition changed\n");return 1;}
+  if(want!=old_grid){
+   if(work>=c.sms||want!=work){std::fprintf(stderr,"cap changed nonempty-work regime\n");return 1;}
+   auto before=fixup_values(c.tiles,c.kblocks,old_grid),after=fixup_values(c.tiles,c.kblocks,want);
+   if(before.empty()||before.size()!=after.size()||std::memcmp(before.data(),after.data(),before.size()*sizeof(float))){std::fprintf(stderr,"actual fixup order/output changed\n");return 1;}
+  }
+ }
+ std::printf("geometry source counts: one-unit/132SM main CTA 132->1, fixup bytes 540672->0; GPU timing unmeasured\n");
+ return 0;
 }
 `

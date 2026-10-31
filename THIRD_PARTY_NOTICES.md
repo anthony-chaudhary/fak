@@ -1045,6 +1045,15 @@ primitives it uses (`mma.cuh`), the DS4 `quantize_mmq_q8_1` activation quantizer
 `0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd`:
 https://github.com/ggml-org/llama.cpp/tree/0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd/ggml/src/ggml-cuda
 
+The useful-work Stream-K grid cap additionally adapts upstream change
+`4c1004c49221b07c3b8108977e3d1991fc9f45cc`, retained in `mmq.cuh` at the current-source
+refresh `0ec4027a2a0183de87c007069adddc06e665f7de` (2026-10-31):
+https://github.com/ggml-org/llama.cpp/commit/4c1004c49221b07c3b8108977e3d1991fc9f45cc
+Fak limits this adaptation to Q4_K, whose 256-element K iteration is one quant block;
+it preserves the existing nonempty partition/fixup order and uses checked wide host
+arithmetic. Other formats and the existing opt-in arm selection are unchanged. This
+source port does not claim a measured GPU performance improvement.
+
 Changed for Fak: only the Q4_K instantiation on the NVIDIA MMA data layout (sm_80 and newer);
 no MoE ids, channel or sample broadcast, or NVFP4 scale plumbing; scratch comes from Fak's
 device pool. No upstream runtime is included. The upstream license follows.

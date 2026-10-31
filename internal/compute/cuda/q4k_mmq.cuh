@@ -11,6 +11,9 @@
 // and the same J lists with and without the out-of-bounds row fallback. Blackwell uses the
 // Ampere rows for Q4_K upstream (mmq-config-blackwell.cuh), so sm_100/sm_103/sm_120 run the
 // same int8 mma.sync path. The activation is quantized by quantize_mmq_q8_1 in its DS4 layout.
+// The Stream-K useful-work grid cap additionally follows upstream change
+// 4c1004c49221b07c3b8108977e3d1991fc9f45cc, retained at current revision
+// 0ec4027a2a0183de87c007069adddc06e665f7de (2026-10-31).
 // Other changes for Fak:
 //   * The ggml type, MoE (ids_dst, expert_bounds), channel/sample broadcast and NVFP4 y_scale
 //     plumbing is removed: one weight [out, in] times one activation [P, in], so write-back
@@ -104,6 +107,7 @@ constexpr int nwarps = nthreads / warp_size;
 constexpr int qk = QK_K;
 constexpr int ITER_K = MMQ_ITER_K;
 constexpr int blocks_per_iter = ITER_K / qk;
+static_assert(blocks_per_iter == 1, "Q4_K work cap requires one quant block per K iteration.");
 constexpr int sram_stride = 2*MMQ_TILE_NE_K + 2*MMQ_TILE_NE_K/QI8_1 + 4; // GGML_CUDA_MMQ_SRAM_LAYOUT_Q8_1
 static_assert(sram_stride % 8 == 4, "Wrong padding.");
 
@@ -683,13 +687,17 @@ static int launch_mul_mat_q(const char * x, const int * y, float * dst, int nrow
     // For the stream-k kernel it is possible to run it with tiling by setting the number of CUDA blocks equal to the number of tiles.
     // This is worthwhile if the efficiency of tiling is high and skipping the fixup kernel is more important.
     const int ntiles_dst = ntx * nty;
-    const int tiles_nwaves = (ntiles_dst + info.nsm - 1) / info.nsm;
-    const int tiles_efficiency_percent = 100 * ntiles_dst / (info.nsm*tiles_nwaves);
-    const dim3 block_nums_stream_k(tiles_efficiency_percent >= 90 ? ntiles_dst : info.nsm, 1, 1);
-
-    if ((int64_t) ntiles_dst * blocks_per_ne00_fd.z >= (1 << 30)) { // kbc would overflow.
+    const int64_t nwork = (int64_t) ntiles_dst * blocks_per_ne00_fd.z;
+    if (nwork >= (1 << 30)) { // kbc would overflow; check before narrowing the grid.
         return -1;
     }
+    const int64_t tiles_nwaves = ((int64_t) ntiles_dst + info.nsm - 1) / info.nsm;
+    const int tiles_efficiency_percent = (int) (100LL * ntiles_dst / (info.nsm*tiles_nwaves));
+    // Q4_K's qk == ITER_K, so each useful K iteration is exactly one quant block.
+    // When work < SMs, the old grid has only empty or one-unit intervals. Removing
+    // empty CTAs preserves every nonempty interval and the fixup contribution order.
+    const int stream_k_blocks = nwork < info.nsm ? (int) nwork : info.nsm;
+    const dim3 block_nums_stream_k(tiles_efficiency_percent >= 90 ? ntiles_dst : stream_k_blocks, 1, 1);
 
     const bool fixup_needed = ntiles_dst % block_nums_stream_k.x != 0;
 
