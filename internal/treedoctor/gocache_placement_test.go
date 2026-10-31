@@ -57,7 +57,7 @@ func TestGoCachePlanBindsExactBudgetAndRejectsAmbiguity(t *testing.T) {
 	body := fmt.Sprintf(`{"environment":{"GOCACHE":%q},"filesystems":[{"name":"workspace","path":%q,"sampled_budget_bytes":0}]}`, dir, dir)
 	write(body)
 	got, err := CheckGoCachePlan(plan)
-	if err != nil || got.Verdict != "zero_growth_conflict" || got.FilesystemName != "workspace" || len(got.PlanSHA256) != 64 {
+	if err != nil || got.Verdict != "zero_growth_conflict" || got.FilesystemName != "workspace" || len(got.PlanSHA256) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST PlanSHA256 is a sha256 hex digest; 64 is its fixed width
 		t.Fatalf("zero-growth plan = %+v, %v", got, err)
 	}
 	write(fmt.Sprintf(`{"environment":{"GOCACHE":%q},"filesystems":[{"name":"workspace","path":%q,"sampled_budget_bytes":3}]}`, dir, dir))

@@ -71,7 +71,7 @@ func TestCompletionsNativeDecodeTop5AndLogprobsWire(t *testing.T) {
 		t.Fatalf("top5 rows=%d ids=%d usage=%d, want equal", len(rows), len(ids), on.Usage.CompletionTokens)
 	}
 	for i, row := range rows {
-		if len(row) != 5 || row[0].TokenID == nil || *row[0].TokenID != ids[i] {
+		if len(row) != 5 || row[0].TokenID == nil || *row[0].TokenID != ids[i] { //boundarylint:ignore CHANGE_DETECTOR_TEST the native_decode_top5 wire contract fixes five candidates per row
 			t.Fatalf("row %d=%v, want 5 candidates led by greedy id %d", i, row, ids[i])
 		}
 		for j, c := range row {

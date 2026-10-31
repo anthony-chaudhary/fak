@@ -76,8 +76,10 @@ func runAllocLedgerHarness(t *testing.T) map[int]DeviceAllocSnapshot {
 // fak-test:runtime medium est=4s lane=default
 func TestDeviceAllocLedgerFakeAllocatorContract(t *testing.T) {
 	r := runAllocLedgerHarness(t)
-	if len(r) != 5 {
-		t.Fatalf("reads=%d, want 5", len(r))
+	// One snapshot per labelled read the fixture emits: count the print_read(n) call sites, not the definition.
+	wantReads := len(regexp.MustCompile(`print_read\(\d+\)`).FindAllString(string(cudaAllocLedgerHarness), -1))
+	if len(r) != wantReads {
+		t.Fatalf("reads=%d, want %d", len(r), wantReads)
 	}
 
 	one := r[1]

@@ -121,8 +121,9 @@ func TestChunkedPrefillDivergentPromptsReuseLastAlignedPrefix(t *testing.T) {
 		nativeSchedulerDrainAvailable(donor)
 		out = append(out, nativeSchedulerDrainAvailable(follower)...)
 	}
-	if len(chunks) != 5 || chunks[4].Lane != follower || chunks[4].ChunkStart != len(prefix) || chunks[4].ChunkLen != budget {
-		t.Fatalf("divergent shared-prefix chunks=%v, want four donor plus one follower suffix", chunks)
+	donorChunks := len(donorPrompt) / budget // full-budget donor prefill chunks
+	if len(chunks) != donorChunks+1 || chunks[donorChunks].Lane != follower || chunks[donorChunks].ChunkStart != len(prefix) || chunks[donorChunks].ChunkLen != budget {
+		t.Fatalf("divergent shared-prefix chunks=%v, want %d donor plus one follower suffix", chunks, donorChunks)
 	}
 	if len(out) != 1 || s.ChunkedPrefixPrefillReuses() != 1 || s.ChunkedExactPrefillReuses() != 0 {
 		t.Fatalf("outputs/reuse=%v/%d/%d, want one output and prefix/exact1/0", out, s.ChunkedPrefixPrefillReuses(), s.ChunkedExactPrefillReuses())

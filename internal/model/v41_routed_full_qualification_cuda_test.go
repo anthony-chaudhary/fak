@@ -54,8 +54,8 @@ func TestV41RoutedFullQualificationCUDA(t *testing.T) {
 		t.Fatal("routed model binding unavailable or tensor owner replaced")
 	}
 	out, outcome, err := fn(0, picks, x)
-	if err != nil || outcome != v41RoutedExpertHandled || len(out) != 256 {
-		t.Fatalf("ordinary deferred decode: outcome=%v extent=%d err=%v", outcome, len(out), err)
+	if err != nil || outcome != v41RoutedExpertHandled || len(out) != m.Cfg.HiddenSize {
+		t.Fatalf("ordinary deferred decode: outcome=%v extent=%d want=%d err=%v", outcome, len(out), m.Cfg.HiddenSize, err)
 	}
 	for _, value := range out {
 		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
@@ -71,8 +71,8 @@ func TestV41RoutedFullQualificationCUDA(t *testing.T) {
 		t.Fatalf("routed panel: outcome=%v rows=%d err=%v", outcome, len(panel), err)
 	}
 	for _, row := range panel {
-		if len(row) != 256 {
-			t.Fatal("routed panel width changed")
+		if len(row) != m.Cfg.HiddenSize {
+			t.Fatalf("routed panel width %d != hidden size %d", len(row), m.Cfg.HiddenSize)
 		}
 		for _, value := range row {
 			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
