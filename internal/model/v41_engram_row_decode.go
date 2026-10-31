@@ -116,41 +116,13 @@ func (s *v41EngramQ2KRowSource) ReadRows(start, count int, dst []byte) (int, err
 // dequantV41EngramQ2KRow decodes one 84-byte Q2_K row with the host scalar
 // super-block dequantization and returns its first dim values.
 func dequantV41EngramQ2KRow(row []byte, dim int) ([]float32, error) {
-	if len(row) != v41EngramQ2KEncodedRowBytes {
-		return nil, fmt.Errorf("%w: Engram q2_k row has %d bytes, want %d", ErrV41NativeUnsupported, len(row), v41EngramQ2KEncodedRowBytes)
-	}
-	if dim <= 0 || dim > qkK {
-		return nil, fmt.Errorf("%w: Engram q2_k row dim %d outside [1,%d]", ErrV41NativeUnsupported, dim, qkK)
-	}
-	var block [qkK]float32
-	q2kDequantSuperBlockScalar(block[:], row)
-	for j, value := range block[:dim] {
-		if !finite32(value) {
-			return nil, fmt.Errorf("%w: Engram q2_k row value %d is non-finite", ErrV41NativeUnsupported, j)
-		}
-	}
-	return append([]float32(nil), block[:dim]...), nil
+	return allocateV41EngramRow(row, dim, v41EngramQ2KEncodedRowBytes)
 }
 
 // dequantV41EngramIQ4NLRow reuses the existing split-half scalar block decoder.
 // This is the pre-selected host arm, never replay of a selected device failure.
 func dequantV41EngramIQ4NLRow(row []byte, dim int) ([]float32, error) {
-	if len(row) != v41EngramIQ4NLEncodedRowBytes {
-		return nil, fmt.Errorf("%w: Engram iq4_nl row has %d bytes, want %d", ErrV41NativeUnsupported, len(row), v41EngramIQ4NLEncodedRowBytes)
-	}
-	if dim <= 0 || dim > qkK {
-		return nil, fmt.Errorf("%w: Engram iq4_nl row dim %d outside [1,%d]", ErrV41NativeUnsupported, dim, qkK)
-	}
-	var block [qkK]float32
-	for b := 0; b < qkK/iq4nlBlockWeights; b++ {
-		iq4nlDequantBlock(block[b*iq4nlBlockWeights:], row[b*iq4nlBlockBytes:])
-	}
-	for j, value := range block[:dim] {
-		if !finite32(value) {
-			return nil, fmt.Errorf("%w: Engram iq4_nl row value %d is non-finite", ErrV41NativeUnsupported, j)
-		}
-	}
-	return append([]float32(nil), block[:dim]...), nil
+	return allocateV41EngramRow(row, dim, v41EngramIQ4NLEncodedRowBytes)
 }
 
 // v41EngramGatheredRows is one Engram layer's gathered rows on the resident
@@ -221,12 +193,10 @@ func (g *v41EngramGatheredRows) stored() ([]byte, bool) {
 func (g *v41EngramGatheredRows) decodeHost() ([]float32, error) {
 	panel := make([]float32, len(g.rows)*g.dim)
 	for i, row := range g.rows {
-		values, err := decodeV41EngramRow(row, g.dim, g.stage.rowBytes)
-		if err != nil {
+		if err := decodeV41EngramRowInto(panel, i*g.dim, row, g.dim, g.stage.rowBytes); err != nil {
 			g.stage.caches[g.cacheIdx].invalidateRows()
 			return nil, v41StageErr(v41StageEngram, g.layer, err)
 		}
-		copy(panel[i*g.dim:], values)
 	}
 	return panel, nil
 }

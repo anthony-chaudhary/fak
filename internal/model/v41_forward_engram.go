@@ -275,32 +275,115 @@ func (s *v41EngramStage) cacheIndex(l int) int {
 // dialect fails closed on a width it does not own.
 func decodeV41EngramRow(row []byte, dim, rowBytes int) ([]float32, error) {
 	v41NoteHostEngramRowDecode()
+	return allocateV41EngramRow(row, dim, rowBytes)
+}
+
+// decodeV41EngramRowInto shares the allocating decoder's exact validation and
+// equations, but uses bounded call-local scratch before publishing into an owned
+// destination. A refusal leaves dst unchanged. Like the former copy(dst, row)
+// consumers, a short destination copies only its prefix after validating all dim
+// values. The offset slice is also evaluated only after validation, preserving
+// the former error-before-bounds ordering. Encoded/cache borrowers are untouched.
+func decodeV41EngramRowInto(dst []float32, offset int, row []byte, dim, rowBytes int) error {
+	v41NoteHostEngramRowDecode()
+	var block [qkK]float32
+	if err := decodeV41EngramRowValues(&block, row, dim, rowBytes); err != nil {
+		return err
+	}
+	copy(dst[offset:], block[:dim])
+	return nil
+}
+
+// allocateV41EngramRow retains independently owned results for compatibility
+// callers. Neither it nor the scalar wrappers adds another host-decode witness.
+func allocateV41EngramRow(row []byte, dim, rowBytes int) ([]float32, error) {
+	var block [qkK]float32
+	if err := decodeV41EngramRowValues(&block, row, dim, rowBytes); err != nil {
+		return nil, err
+	}
+	if rowBytes == v41EngramQ2KEncodedRowBytes || rowBytes == v41EngramIQ4NLEncodedRowBytes {
+		return append([]float32(nil), block[:dim]...), nil
+	}
+	out := make([]float32, dim)
+	copy(out, block[:dim])
+	return out, nil
+}
+
+// decodeV41EngramRowValues is the single host equation/validation source for all
+// four stored dialects. Only its private scratch may change before an error.
+// Q2_K/IQ4_NL still decode whole scalar blocks and check only the requested
+// prefix; packed/F32 do not inspect values after dim.
+func decodeV41EngramRowValues(block *[qkK]float32, row []byte, dim, rowBytes int) error {
 	switch rowBytes {
 	case V41EngramPackedRowBytes:
-		return dequantV41EngramRow(row, dim)
+		if len(row) != V41EngramPackedRowBytes {
+			return fmt.Errorf("%w: Engram packed row has %d bytes, want %d",
+				ErrV41NativeUnsupported, len(row), V41EngramPackedRowBytes)
+		}
+		if dim <= 0 || dim > 256 {
+			return fmt.Errorf("%w: Engram row dim %d outside [1,256]", ErrV41NativeUnsupported, dim)
+		}
+		for j := 0; j < dim; j++ {
+			code := row[j]
+			scale := row[256+j/32]
+			if code&127 == 127 || scale == 255 {
+				return fmt.Errorf("%w: Engram row has a NaN code/scale byte at %d", ErrV41NativeUnsupported, j)
+			}
+			value := v41BF16(fp8E4M3ToF32(code) * float32(math.Ldexp(1, int(scale)-127)))
+			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+				return fmt.Errorf("%w: Engram row value %d is non-finite", ErrV41NativeUnsupported, j)
+			}
+			block[j] = value
+		}
+		return nil
 	case v41EngramQ2KEncodedRowBytes:
-		return dequantV41EngramQ2KRow(row, dim)
+		if len(row) != v41EngramQ2KEncodedRowBytes {
+			return fmt.Errorf("%w: Engram q2_k row has %d bytes, want %d", ErrV41NativeUnsupported, len(row), v41EngramQ2KEncodedRowBytes)
+		}
+		if dim <= 0 || dim > qkK {
+			return fmt.Errorf("%w: Engram q2_k row dim %d outside [1,%d]", ErrV41NativeUnsupported, dim, qkK)
+		}
+		q2kDequantSuperBlockScalar(block[:], row)
+		for j, value := range block[:dim] {
+			if !finite32(value) {
+				return fmt.Errorf("%w: Engram q2_k row value %d is non-finite", ErrV41NativeUnsupported, j)
+			}
+		}
+		return nil
 	case v41EngramIQ4NLEncodedRowBytes:
-		return dequantV41EngramIQ4NLRow(row, dim)
+		if len(row) != v41EngramIQ4NLEncodedRowBytes {
+			return fmt.Errorf("%w: Engram iq4_nl row has %d bytes, want %d", ErrV41NativeUnsupported, len(row), v41EngramIQ4NLEncodedRowBytes)
+		}
+		if dim <= 0 || dim > qkK {
+			return fmt.Errorf("%w: Engram iq4_nl row dim %d outside [1,%d]", ErrV41NativeUnsupported, dim, qkK)
+		}
+		for b := 0; b < qkK/iq4nlBlockWeights; b++ {
+			iq4nlDequantBlock(block[b*iq4nlBlockWeights:], row[b*iq4nlBlockBytes:])
+		}
+		for j, value := range block[:dim] {
+			if !finite32(value) {
+				return fmt.Errorf("%w: Engram iq4_nl row value %d is non-finite", ErrV41NativeUnsupported, j)
+			}
+		}
+		return nil
 	case V41EngramF32RowBytes:
 		if len(row) != V41EngramF32RowBytes {
-			return nil, fmt.Errorf("%w: Engram f32 row has %d bytes, want %d",
+			return fmt.Errorf("%w: Engram f32 row has %d bytes, want %d",
 				ErrV41NativeUnsupported, len(row), V41EngramF32RowBytes)
 		}
 		if dim <= 0 || dim > qkK {
-			return nil, fmt.Errorf("%w: Engram f32 row dim %d outside [1,%d]", ErrV41NativeUnsupported, dim, qkK)
+			return fmt.Errorf("%w: Engram f32 row dim %d outside [1,%d]", ErrV41NativeUnsupported, dim, qkK)
 		}
-		out := make([]float32, dim)
 		for j := 0; j < dim; j++ {
 			value := math.Float32frombits(binary.LittleEndian.Uint32(row[j*4:]))
 			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
-				return nil, fmt.Errorf("%w: Engram f32 row value %d is non-finite", ErrV41NativeUnsupported, j)
+				return fmt.Errorf("%w: Engram f32 row value %d is non-finite", ErrV41NativeUnsupported, j)
 			}
-			out[j] = value
+			block[j] = value
 		}
-		return out, nil
+		return nil
 	default:
-		return nil, fmt.Errorf("%w: unsupported Engram row width %d", ErrV41NativeUnsupported, rowBytes)
+		return fmt.Errorf("%w: unsupported Engram row width %d", ErrV41NativeUnsupported, rowBytes)
 	}
 }
 
@@ -310,27 +393,7 @@ func decodeV41EngramRow(row []byte, dim, rowBytes int) ([]float32, error) {
 // rejected, each value is scaled by 2^(scale-127) and bf16-rounded, and a
 // non-finite result fails closed.
 func dequantV41EngramRow(row []byte, dim int) ([]float32, error) {
-	if len(row) != V41EngramPackedRowBytes {
-		return nil, fmt.Errorf("%w: Engram packed row has %d bytes, want %d",
-			ErrV41NativeUnsupported, len(row), V41EngramPackedRowBytes)
-	}
-	if dim <= 0 || dim > 256 {
-		return nil, fmt.Errorf("%w: Engram row dim %d outside [1,256]", ErrV41NativeUnsupported, dim)
-	}
-	out := make([]float32, dim)
-	for j := 0; j < dim; j++ {
-		code := row[j]
-		scale := row[256+j/32]
-		if code&127 == 127 || scale == 255 {
-			return nil, fmt.Errorf("%w: Engram row has a NaN code/scale byte at %d", ErrV41NativeUnsupported, j)
-		}
-		value := v41BF16(fp8E4M3ToF32(code) * float32(math.Ldexp(1, int(scale)-127)))
-		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
-			return nil, fmt.Errorf("%w: Engram row value %d is non-finite", ErrV41NativeUnsupported, j)
-		}
-		out[j] = value
-	}
-	return out, nil
+	return allocateV41EngramRow(row, dim, V41EngramPackedRowBytes)
 }
 
 // v41EngramInject retrieves, dequantizes, projects, gates, and mixes the Engram
@@ -420,13 +483,11 @@ func v41EngramFoldedCoefErr(l int, coef []float32) error {
 // [cols*dim], the projection input of that position.
 func v41EngramDecodePosition(l int, stage *v41EngramStage, cacheIdx int, gathered [][]byte, t, cols, dim int, dst []float32) error {
 	for c := 0; c < cols; c++ {
-		values, err := decodeV41EngramRow(gathered[t*cols+c], dim, stage.rowBytes)
-		if err != nil {
+		if err := decodeV41EngramRowInto(dst, c*dim, gathered[t*cols+c], dim, stage.rowBytes); err != nil {
 			// A successful source read can poison other cached rows in this layer.
 			stage.caches[cacheIdx].invalidateRows()
 			return v41StageErr(v41StageEngram, l, err)
 		}
-		copy(dst[c*dim:], values)
 	}
 	return nil
 }
