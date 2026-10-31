@@ -60,9 +60,8 @@ static int state() {
     return device == 0 ? 0 : BSW_UNSUPPORTED;
 }
 
-static int capability(int *runtime_version, size_t *blas_version) {
-    const char *opt = getenv("FAK_CUDA_BLOCKSCALED_WKV");
-    if (!opt || strcmp(opt, "1")) return BSW_UNSUPPORTED;
+static int capability(int enabled, int *runtime_version, size_t *blas_version) {
+    if (enabled != 1) return BSW_UNSUPPORTED;
     int rc = state();
     if (rc) return rc;
     int runtime = 0;
@@ -185,10 +184,12 @@ static int read_status(const uint32_t *status) {
 }
 } // namespace fak_blockscaled_wkv
 
-extern "C" int fcuda_blockscaled_wkv_support(int rows, int *runtime_version, size_t *blas_version) {
+// Distinct configured symbols intentionally reject linkage to an old archive
+// whose ambient-consent entry points have a different C ABI.
+extern "C" int fcuda_blockscaled_wkv_support_configured(int enabled, int rows, int *runtime_version, size_t *blas_version) {
     using namespace fak_blockscaled_wkv;
     if (!shape(rows)) return BSW_SHAPE;
-    int rc = capability(runtime_version, blas_version);
+    int rc = capability(enabled, runtime_version, blas_version);
     if (rc) return rc;
     Operation op;
     // Heuristic query only: these aligned dummy scale pointers are never read
@@ -197,9 +198,9 @@ extern "C" int fcuda_blockscaled_wkv_support(int rows, int *runtime_version, siz
     return op.close(rc);
 }
 
-extern "C" int fcuda_blockscaled_wkv_upload(void *dst, const void *src, size_t bytes) {
+extern "C" int fcuda_blockscaled_wkv_upload_configured(int enabled, void *dst, const void *src, size_t bytes) {
     using namespace fak_blockscaled_wkv;
-    int rc = capability(nullptr, nullptr);
+    int rc = capability(enabled, nullptr, nullptr);
     if (rc) return rc;
     if (!src || (bytes != 512 * 5120 && bytes != 512 * 160)) return BSW_BUFFER;
     rc = extent(dst, bytes, 16);
@@ -231,11 +232,11 @@ extern "C" int fcuda_blockscaled_wkv_release(void *ptr, size_t bytes) {
     return 0;
 }
 
-extern "C" int fcuda_blockscaled_wkv_run(const float *x, const uint8_t *w, const uint8_t *ws,
+extern "C" int fcuda_blockscaled_wkv_run_configured(int enabled, const float *x, const uint8_t *w, const uint8_t *ws,
     uint8_t *a, uint32_t *recipe, uint8_t *tiled, uint32_t *status, float *y, int rows) {
     using namespace fak_blockscaled_wkv;
     if (!shape(rows)) return BSW_SHAPE;
-    int rc = capability(nullptr, nullptr);
+    int rc = capability(enabled, nullptr, nullptr);
     if (rc) return rc;
     const void *ptr[8] = {x, w, ws, a, recipe, tiled, status, y};
     const size_t sizes[8] = {(size_t)rows * 5120 * 4, 512 * 5120, 512 * 160,
@@ -282,9 +283,9 @@ extern "C" int fcuda_blockscaled_wkv_run(const float *x, const uint8_t *w, const
 #else
 // Keep ordinary cuda && cgo builds linkable with older toolkits. These stubs
 // reference no FP8 scale enum, new library type, or SM120 device instruction.
-extern "C" int fcuda_blockscaled_wkv_support(int, int *, size_t *) { return BSW_UNSUPPORTED; }
-extern "C" int fcuda_blockscaled_wkv_upload(void *, const void *, size_t) { return BSW_UNSUPPORTED; }
+extern "C" int fcuda_blockscaled_wkv_support_configured(int, int, int *, size_t *) { return BSW_UNSUPPORTED; }
+extern "C" int fcuda_blockscaled_wkv_upload_configured(int, void *, const void *, size_t) { return BSW_UNSUPPORTED; }
 extern "C" int fcuda_blockscaled_wkv_release(void *, size_t) { return BSW_UNSUPPORTED; }
-extern "C" int fcuda_blockscaled_wkv_run(const float *, const uint8_t *, const uint8_t *,
+extern "C" int fcuda_blockscaled_wkv_run_configured(int, const float *, const uint8_t *, const uint8_t *,
     uint8_t *, uint32_t *, uint8_t *, uint32_t *, float *, int) { return BSW_UNSUPPORTED; }
 #endif

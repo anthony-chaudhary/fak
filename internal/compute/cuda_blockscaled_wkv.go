@@ -4,10 +4,10 @@ package compute
 
 /*
 #include "cuda_backend.h"
-extern int fcuda_blockscaled_wkv_support(int rows, int *runtime_version, size_t *blas_version);
-extern int fcuda_blockscaled_wkv_upload(void *dst, const void *src, size_t bytes);
+extern int fcuda_blockscaled_wkv_support_configured(int enabled, int rows, int *runtime_version, size_t *blas_version);
+extern int fcuda_blockscaled_wkv_upload_configured(int enabled, void *dst, const void *src, size_t bytes);
 extern int fcuda_blockscaled_wkv_release(void *ptr, size_t bytes);
-extern int fcuda_blockscaled_wkv_run(const float *x, const uint8_t *w, const uint8_t *ws,
+extern int fcuda_blockscaled_wkv_run_configured(int enabled, const float *x, const uint8_t *w, const uint8_t *ws,
     uint8_t *a, uint32_t *recipe, uint8_t *tiled, uint32_t *status, float *y, int rows);
 */
 import "C"
@@ -15,15 +15,10 @@ import "C"
 import (
 	"errors"
 	"fmt"
-	"os"
 	"runtime"
 	"sync/atomic"
 	"unsafe"
 )
-
-// ErrBlockScaledGEMMUnsupported is a capability refusal, not a request to silently
-// fall back after execution. No serving caller selects this experimental route.
-var ErrBlockScaledGEMMUnsupported = errors.New("experimental SM120 blockscaled WKV GEMM unsupported")
 
 // BlockScaledWKVCapability describes an admitted vendor heuristic, not numerical
 // qualification. Qualified stays false until exact physical evidence is returned.
@@ -38,8 +33,8 @@ type BlockScaledWKVCapability struct {
 type BlockScaledWKVWeights interface{ Release() error }
 
 // BlockScaledWKVBackend is the explicit, default-off cuBLASLt baseline for the
-// V4.1 dense wkv_b shape, separate from the SM100 DeepGEMM/BF16 bridge. Enable
-// FAK_CUDA_BLOCKSCALED_WKV=1 before probing/uploading/running. Only SM120,
+// V4.1 dense wkv_b shape, separate from the SM100 DeepGEMM/BF16 bridge. Call
+// ConfigureCUDABlockScaledWKV with true before probing/uploading/running. Only SM120,
 // CUDA >=12.9 and cuBLAS >=12.9.1 with a matching heuristic are admitted.
 //
 // Weights are row-major E4M3[512,5120] and E8M0[16,160] (one scale per 32x32
@@ -64,11 +59,28 @@ type cudaBlockScaledWKVWeights struct {
 	faults        int
 }
 
-func blockScaledWKVOptIn(rows int) error {
-	if os.Getenv("FAK_CUDA_BLOCKSCALED_WKV") != "1" || (rows != 128 && rows != 512 && rows != 4096) {
-		return fmt.Errorf("%w: require FAK_CUDA_BLOCKSCALED_WKV=1 and P=128,512,4096", ErrBlockScaledGEMMUnsupported)
+// Configuration belongs to the registered backend lifetime, not process ambient
+// state. The mutex also excludes changes during an in-flight operation.
+func (c *cudaBackend) configureCUDABlockScaledWKV(enabled bool) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	if c == nil || c != cudaDev {
+		return ErrBlockScaledGEMMUnsupported
 	}
+	if c.capturing {
+		return fmt.Errorf("%w: capture is not supported", ErrBlockScaledGEMMUnsupported)
+	}
+	c.blockScaledWKVConfig.enabled = enabled
 	return nil
+}
+
+// Caller holds cudaMu through the native call, so consent cannot change between
+// Go admission and the independently guarded native boundary.
+func (c *cudaBackend) blockScaledWKVConsent() C.int {
+	if c.blockScaledWKVConfig.enabled {
+		return 1
+	}
+	return 0
 }
 
 // Status values match cuda/blockscaled_wkv.cuh; positive values are execution
@@ -101,10 +113,10 @@ func (c *cudaBackend) blockScaledWKVStatus(site string, rc C.int) error {
 // device reservations or operand mutation; no stale capability result is cached.
 func (c *cudaBackend) blockScaledWKVSupport(rows int) (BlockScaledWKVCapability, error) {
 	var zero BlockScaledWKVCapability
-	if c == nil {
+	if c == nil || c != cudaDev {
 		return zero, ErrBlockScaledGEMMUnsupported
 	}
-	if err := blockScaledWKVOptIn(rows); err != nil {
+	if err := c.blockScaledWKVConfig.admit(rows); err != nil {
 		return zero, err
 	}
 	if c.capturing {
@@ -118,7 +130,7 @@ func (c *cudaBackend) blockScaledWKVSupport(rows int) (BlockScaledWKVCapability,
 	}
 	var rt C.int
 	var lt C.size_t
-	if err := c.blockScaledWKVStatus("support", C.fcuda_blockscaled_wkv_support(C.int(rows), &rt, &lt)); err != nil {
+	if err := c.blockScaledWKVStatus("support", C.fcuda_blockscaled_wkv_support_configured(c.blockScaledWKVConsent(), C.int(rows), &rt, &lt)); err != nil {
 		return zero, err
 	}
 	return BlockScaledWKVCapability{Rows: rows, ComputeMajor: 12, ComputeMinor: 0,
@@ -199,9 +211,9 @@ func (c *cudaBackend) UploadBlockScaledWKV(codes, tileScales []byte) (BlockScale
 	if err != nil {
 		return nil, errors.Join(err, c.blockScaledWKVRelease(w.codes))
 	}
-	err = c.blockScaledWKVStatus("codes-upload", C.fcuda_blockscaled_wkv_upload(w.codes.ptr, unsafe.Pointer(&codes[0]), C.size_t(len(codes))))
+	err = c.blockScaledWKVStatus("codes-upload", C.fcuda_blockscaled_wkv_upload_configured(c.blockScaledWKVConsent(), w.codes.ptr, unsafe.Pointer(&codes[0]), C.size_t(len(codes))))
 	if err == nil {
-		err = c.blockScaledWKVStatus("scales-upload", C.fcuda_blockscaled_wkv_upload(w.scales.ptr, unsafe.Pointer(&packed[0]), C.size_t(len(packed))))
+		err = c.blockScaledWKVStatus("scales-upload", C.fcuda_blockscaled_wkv_upload_configured(c.blockScaledWKVConsent(), w.scales.ptr, unsafe.Pointer(&packed[0]), C.size_t(len(packed))))
 	}
 	runtime.KeepAlive(codes)
 	runtime.KeepAlive(packed)
@@ -248,7 +260,7 @@ func (c *cudaBackend) BlockScaledWKV(weights BlockScaledWKVWeights, input Tensor
 		}
 		bufs[i] = b
 	}
-	rc := C.fcuda_blockscaled_wkv_run((*C.float)(x.ptr), (*C.uint8_t)(w.codes.ptr), (*C.uint8_t)(w.scales.ptr),
+	rc := C.fcuda_blockscaled_wkv_run_configured(c.blockScaledWKVConsent(), (*C.float)(x.ptr), (*C.uint8_t)(w.codes.ptr), (*C.uint8_t)(w.scales.ptr),
 		(*C.uint8_t)(bufs[0].ptr), (*C.uint32_t)(bufs[1].ptr), (*C.uint8_t)(bufs[2].ptr), (*C.uint32_t)(bufs[3].ptr), (*C.float)(bufs[4].ptr), C.int(rows))
 	runtime.KeepAlive(input)
 	runtime.KeepAlive(weights)
