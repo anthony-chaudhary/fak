@@ -71,7 +71,8 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 	deepGEMM := fs.Bool("deepgemm-wkv", false, "compile explicit Linux CUDA 13.1 SM100f/103f WKV candidate; requires --arch-specific and --deepgemm-wkv-sms")
 	deepGEMMSMs := fs.Int("deepgemm-wkv-sms", 0, "explicit physical SM count for the DeepGEMM persistent kernel")
 	flashMLA := fs.Bool("flashmla-prefill", false, "compile explicit Linux CUDA 13.1 SM100a/103a FlashMLA sparse-prefill candidate; requires --arch-specific")
-	flashMLADisableLDRed := fs.Bool("flashmla-disable-ld-red", false, "select pinned non-LD.RED FlashMLA specialization; requires --flashmla-prefill")
+	flashMLADecode := fs.Bool("flashmla-decode", false, "compile explicit Linux CUDA 13.1 SM100a/103a FlashMLA sparse-decode qualification; requires --arch-specific and --arch sm_100 or sm_103; not device qualification")
+	flashMLADisableLDRed := fs.Bool("flashmla-disable-ld-red", false, "select pinned non-LD.RED FlashMLA specialization; requires --flashmla-prefill or --flashmla-decode")
 	q2MMQ := fs.Bool("q2k-mmq-prefill", false, "compile qualification-only Q2_K MMQ; runtime FAK_CUDA_Q2K_PREFILL=mmq still required")
 	q3MMQ := fs.Bool("q3k-mmq-prefill", false, "compile qualification-only Q3_K MMQ; runtime FAK_CUDA_Q3K_PREFILL=mmq still required")
 	q8MMQ := fs.Bool("q8-mmq-prefill", false, "compile qualification-only Q8 MMQ; runtime FAK_CUDA_Q8_PREFILL=mmq still required")
@@ -203,6 +204,7 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 		EnableCaptureOnceQualification:    *captureOnce,
 		EnableDeepGEMMWKV:                 *deepGEMM,
 		DeepGEMMWKVSMs:                    *deepGEMMSMs,
+		EnableFlashMLADecode:              *flashMLADecode,
 		EnableFlashMLAPrefill:             *flashMLA,
 		DisableFlashMLALDRed:              *flashMLADisableLDRed,
 		EnableV41SharedAttention:          *sharedAttention,
