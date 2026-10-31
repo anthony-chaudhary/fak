@@ -84,7 +84,9 @@ extern "C" void fcuda_rmsnorm_fused_residual_add_f32(
 }
 
 // ---- RoPE (HF non-interleaved rotate_half) at one absolute position -------------
-__global__ void k_rope(float *X, int pos, int nHeads, int headDim, double theta) {
+template <bool device_position = false>
+__global__ void k_rope(float *X, int pos, int nHeads, int headDim, double theta, const int *position = nullptr) {
+  if (device_position) pos = position[0];
   int half = headDim / 2;
   int t = blockIdx.x * blockDim.x + threadIdx.x; // one (head, j) pair
   if (t >= nHeads * half) return;
@@ -99,7 +101,7 @@ __global__ void k_rope(float *X, int pos, int nHeads, int headDim, double theta)
 }
 extern "C" void fcuda_rope_f32(float *dX, int pos, int nHeads, int headDim, double theta) {
   int total = nHeads * (headDim / 2);
-  FCUDA_TS("k_rope", (total + 127) / 128, k_rope<<<(total + 127) / 128, 128, 0, g_stream>>>(dX, pos, nHeads, headDim, theta));
+  FCUDA_TS("k_rope", (total + 127) / 128, k_rope<false><<<(total + 127) / 128, 128, 0, g_stream>>>(dX, pos, nHeads, headDim, theta));
 }
 
 // Prompt-panel RoPE for the dense HAL prefill: row t of X [tokens, nHeads*headDim] is

@@ -1034,8 +1034,48 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 	// fixed KV prealloc; cudaGraphCaptureReady adds the per-session conditions.
 	gpuLayers, isSplit := s.validateDenseGPULayers()
 	canGraph = canGraph && s.cudaGraphCaptureReady(isSplit)
-	capturing := false
-	if canGraph && mode != halNoLogits && s.halLogitsWarm {
+	once, hasOnce := be.(captureOnceBackend)
+	onceEligible := hasOnce && canGraph && (mode == halFullLogits || mode == halArgmax) && s.halLogitsWarm &&
+		!cfg.IsQwen35Hybrid() && !cfg.IsDeepSeekV4() && !useQ8Weights && m.Q2KEmbedding == nil &&
+		!s.captureTargetHidden && s.qwen35TargetFeatureTxn == nil && s.qwen35TargetLayerCapture == nil && s.captureOnceF32Weights()
+	if hasOnce && !onceEligible {
+		once.GraphOnceInvalidate()
+	}
+	if onceEligible {
+		runtime.LockOSThread()
+		logits, used := func() (compute.Tensor, bool) {
+			defer runtime.UnlockOSThread()
+			return once.GraphOnceReplay(x, s.halKV, pos)
+		}()
+		if used {
+			be.Free(x)
+			featureResidualReleased = true
+			s.halStep++
+			s.halLogitsWarm = true
+			if mode == halArgmax {
+				return compute.Tensor{}, be.Argmax(logits)
+			}
+			if mode == halRetainedArgmax {
+				return logits, be.Argmax(logits)
+			}
+			return logits, 0
+		}
+	}
+	capturing, onceCapturing, onceCaptured := false, false, false
+	if onceEligible {
+		runtime.LockOSThread()
+		started := false
+		func() {
+			defer func() {
+				if !started {
+					runtime.UnlockOSThread()
+				}
+			}()
+			started = once.GraphOnceBegin(x, s.halKV, pos)
+		}()
+		capturing, onceCapturing = started, started
+	}
+	if !capturing && canGraph && mode != halNoLogits && s.halLogitsWarm {
 		runtime.LockOSThread()
 		if gr.GraphBegin() {
 			capturing = true
@@ -1049,14 +1089,23 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 	// request. finishGraph clears `capturing` on the normal path, making this a no-op then.
 	defer func() {
 		if capturing {
-			gr.GraphAbort()
-			runtime.UnlockOSThread()
+			defer runtime.UnlockOSThread()
 			capturing = false
+			if onceCapturing {
+				once.GraphOnceAbort()
+			} else {
+				gr.GraphAbort()
+			}
 		}
 	}()
 	finishGraph := func() {
 		if capturing {
-			gr.GraphEndLaunch() // end capture, instantiate, launch, fence
+			if onceCapturing {
+				once.GraphOnceEnd()
+				onceCaptured = true
+			} else {
+				gr.GraphEndLaunch()
+			}
 			s.graphCaptured = true
 			runtime.UnlockOSThread()
 			capturing = false
@@ -1242,7 +1291,18 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 		s.rememberTargetHidden(pos, id, rawHidden)
 	}
 
-	return s.halFinalLogits(x, mode, capturing, useQ8Weights, finishGraph)
+	finalMode := mode
+	if onceCapturing && mode == halArgmax {
+		finalMode = halRetainedArgmax
+	}
+	logits, next := s.halFinalLogits(x, finalMode, capturing, useQ8Weights, finishGraph)
+	if onceCaptured {
+		once.GraphOnceSave(logits)
+	}
+	if mode == halArgmax {
+		return compute.Tensor{}, next
+	}
+	return logits, next
 }
 
 // halFinalLogits runs the post-layer final RMSNorm + lm_head and finishes the CUDA-graph

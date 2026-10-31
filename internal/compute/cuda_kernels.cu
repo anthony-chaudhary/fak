@@ -253,6 +253,9 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/paged_attention_vllm.cuh"
 #include "cuda/kv_precision.cuh"
 #include "cuda/spec_graph.cuh"
+#ifdef FAK_CUDA_CAPTURE_ONCE_QUALIFICATION
+#include "cuda/graph_capture_once.cuh"
+#endif
 #include "cuda/weight_formats.cuh"
 #include "cuda/q4k_fp8lt.cuh"
 #include "cuda/mxfp8_cast.cuh"

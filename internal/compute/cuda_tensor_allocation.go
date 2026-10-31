@@ -49,6 +49,7 @@ func (c *cudaBackend) devTr(shape []int, dt Dtype) (Tensor, *cudaBuf) {
 	b.be = c
 	b.bornGen = atomic.LoadUint64(&c.fenceGen)
 	c.transient = append(c.transient, b)
+	c.graphOncePinLocked(b)
 	return t, b
 }
 
@@ -68,6 +69,7 @@ func (c *cudaBackend) devTrDeviceOnly(shape []int, dt Dtype, site string) (Tenso
 	b.be = c
 	b.bornGen = atomic.LoadUint64(&c.fenceGen)
 	c.transient = append(c.transient, b)
+	c.graphOncePinLocked(b)
 	return t, b, nil
 }
 

@@ -111,8 +111,10 @@ extern "C" void fcuda_attention_f32(const float *dQ, const float *dK, const floa
 // hd ≤ 1024 (every real attention head dim is ≤ 256), so the per-thread acc lives in
 // registers/local memory, never a global scores row.
 #define FLASH_ACC_MAX 8
+template <bool device_position = false>
 __global__ void k_flash_attention(const float *Q, const float *K, const float *V, float *Out,
-                                  int nPos, int nH, int nKV, int hd, float scale) {
+                                  int nPos, int nH, int nKV, int hd, float scale, const int *position = nullptr) {
+  if (device_position) nPos = position[1];
   int h = blockIdx.x;
   if (h >= nH) return;
   int grp = nH / nKV;       // query heads per KV head (GQA/MQA group)
@@ -168,7 +170,7 @@ extern "C" void fcuda_flash_attention_f32(const float *dQ, const float *dK, cons
                                           int nPos, int maxPos, int nH, int nKV, int hd, float scale) {
   (void)maxPos;
   size_t shmem = ((size_t)hd + FLASH_THREADS) * sizeof(float);
-  FCUDA_TS("k_flash_attention", nH, k_flash_attention<<<nH, FLASH_THREADS, shmem, g_stream>>>(dQ, dK, dV, dOut, nPos, nH, nKV, hd, scale));
+  FCUDA_TS("k_flash_attention", nH, k_flash_attention<false><<<nH, FLASH_THREADS, shmem, g_stream>>>(dQ, dK, dV, dOut, nPos, nH, nKV, hd, scale));
 }
 
 // Prompt-panel counterpart of k_flash_attention. K/V already contain the

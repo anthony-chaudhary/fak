@@ -32,17 +32,18 @@ var cudaDev *cudaBackend
 // synchronous on return (weights, whose Upload H2D is a blocking cudaMemcpy; KV views; the
 // argmax scalar) carry be==nil and are always Ready.
 type cudaBuf struct {
-	ptr      unsafe.Pointer // device pointer (cudaMalloc); int8 codes for Q8_0, raw bytes for Q4_K
-	n        int            // bytes at ptr
-	class    MemoryClass    // allocation purpose retained for strict mutable-state validation
-	device   int            // CUDA device this buffer is resident on (0 for the single-device path; set by the NCCL collective seam so a multi-GPU all-reduce knows each rank's home — #971)
-	host     uintptr        // source host pointer if this came from a cached Upload (0 otherwise)
-	hostKeep HostBuffer     // strong owner: prevents Go from recycling host while pointer-keyed cache entry is live
-	hostDt   Dtype          // narrowed dtype this upload was cached under (so Free evicts the right key)
-	hostLo   Layout         // layout this upload was cached under (ditto — same host buffer, two layouts)
-	be       *cudaBackend   // non-nil => async op output; Ready() tracks be.fenceGen vs bornGen
-	bornGen  uint64         // fence generation in which this async buffer was enqueued
-	managed  bool           // ptr came from cudaMallocManaged, not pooled cudaMalloc
+	graphOncePinned bool           // retained until checked graph-owner release
+	ptr             unsafe.Pointer // device pointer (cudaMalloc); int8 codes for Q8_0, raw bytes for Q4_K
+	n               int            // bytes at ptr
+	class           MemoryClass    // allocation purpose retained for strict mutable-state validation
+	device          int            // CUDA device this buffer is resident on (0 for the single-device path; set by the NCCL collective seam so a multi-GPU all-reduce knows each rank's home — #971)
+	host            uintptr        // source host pointer if this came from a cached Upload (0 otherwise)
+	hostKeep        HostBuffer     // strong owner: prevents Go from recycling host while pointer-keyed cache entry is live
+	hostDt          Dtype          // narrowed dtype this upload was cached under (so Free evicts the right key)
+	hostLo          Layout         // layout this upload was cached under (ditto — same host buffer, two layouts)
+	be              *cudaBackend   // non-nil => async op output; Ready() tracks be.fenceGen vs bornGen
+	bornGen         uint64         // fence generation in which this async buffer was enqueued
+	managed         bool           // ptr came from cudaMallocManaged, not pooled cudaMalloc
 	// invalid is set when an in-place Qwen GDN operation reports a launch or
 	// asynchronous execution failure. Such a buffer may be freed, but never read
 	// or submitted again as a usable state/output.
@@ -88,6 +89,7 @@ func (c *cudaBackend) cudaBufForSubmit(t Tensor) *cudaBuf {
 	if err := b.invalidStateError("buffer"); err != nil {
 		panic(err)
 	}
+	c.graphOnceObserveLocked(b)
 	return b
 }
 
@@ -131,8 +133,9 @@ type ucKey struct {
 var uploadCache = map[ucKey]Tensor{}
 
 type cudaBackend struct {
-	name string
-	tier string
+	graphOnce *cudaGraphOnceState
+	name      string
+	tier      string
 	// totalMem is the device's total VRAM in bytes (totalGlobalMem from fcuda_init), KEPT so
 	// the backend can satisfy DeviceCapacity — fak's one programmatic "does this fit on this
 	// device?" number, which init() previously read into a local and threw away.

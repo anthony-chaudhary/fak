@@ -166,7 +166,9 @@ func (c *cudaBackend) growAppend(d *dslice, srcPtr unsafe.Pointer, nFloats int, 
 	// kernel-form append (scalar offset) instead of a cudaMemcpy to a moving pointer, so a
 	// captured decode graph stays reusable via cudaGraphExecUpdate as the cache grows.
 	if d.dtype == F32 {
-		C.fcuda_kv_write((*C.float)(d.ptr), (*C.float)(srcPtr), C.int(d.len), C.int(nFloats))
+		if !c.graphOnceKVWriteLocked(d, srcPtr, nFloats) {
+			C.fcuda_kv_write((*C.float)(d.ptr), (*C.float)(srcPtr), C.int(d.len), C.int(nFloats))
+		}
 	} else {
 		cudaKVCheck(C.fcuda_kv_store_typed(d.ptr, (*C.float)(srcPtr), C.int(d.len), C.int(nFloats), C.int(d.dtype)))
 	}
@@ -247,6 +249,7 @@ func (k *cudaKV) ValuesView(layer int) Tensor {
 func (k *cudaKV) Evict(from, n int) int {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	k.be.graphOnceInvalidateKVLocked(k)
 	if from < 0 || n <= 0 || from >= len(k.pos) {
 		return 0
 	}
@@ -499,6 +502,7 @@ func (c *cudaBackend) restoreContiguousKVFromHost(state KVHostSnapshot) (out KVS
 func (k *cudaKV) Free() {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	k.be.graphOnceInvalidateKVLocked(k)
 	releaseKVDeviceSlices(k.K, k.Kraw, k.V, &k.pos, func(d *dslice) {
 		releaseDeviceSlice(&d.ptr, &d.len, &d.cap, func(pointer unsafe.Pointer) { C.fcuda_free(pointer) })
 	})
