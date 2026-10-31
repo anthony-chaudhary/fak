@@ -813,8 +813,13 @@ func (c *cudaBackend) cudaFreeStorageLocked(t Tensor) {
 	if db, ok := t.buf.(*cudaBuf); ok && db.ptr != nil {
 		awaitAsyncUploadLocked(db.ptr) // never pool a buffer the copy stream still writes
 		if db.host != 0 {
-			// evict the exact (ptr, dtype, layout) entry so a re-upload of the same host buffer re-stages
-			delete(uploadCache, ucKey{db.host, db.hostDt, db.hostLo})
+			// A later upload may have replaced this key with another resident.
+			// Only the current owner may evict it; freeing an older buffer must
+			// not discard the newer resident's zero-copy cache hit.
+			key := ucKey{db.host, db.hostDt, db.hostLo}
+			if cached, ok := uploadCache[key]; ok && cached.buf == db {
+				delete(uploadCache, key)
+			}
 		}
 		if db.scales != nil { // Q8_0 scale side-channel (#485)
 			C.fcuda_free(db.scales)
