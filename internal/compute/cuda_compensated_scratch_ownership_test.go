@@ -72,6 +72,16 @@ func TestCUDACompensatedScratchFailureOwnership(t *testing.T) {
 	// Compile the actual ledger, including its pointer table and atomic counters.
 	// Only the header-only pragma is omitted in this generated translation unit.
 	program := strings.TrimPrefix(read("cuda/alloc_ledger.h"), "#pragma once\n") + "\n" + cudaCompensatedScratchHarness
+	// Keep the allocator's real pool accounting and pending-membership dependency.
+	program += "\n" + between(memory, "static size_t g_pool_bytes", "static size_t fcuda_pool_default_cap")
+	program += "\n" + read("cuda/v41_compressor_pending.cuh")
+	for _, signature := range []string{
+		"static bool fcuda_pool_may_release(void)",
+		"static void fcuda_pool_evict_to_cap(void)",
+		"static void fcuda_pool_put(void *d, size_t bytes)",
+	} {
+		program += "\n" + function(memory, signature) + "\n"
+	}
 	// Current allocation entrypoints consume capacity misses through this exact
 	// production helper. Keep older pre-helper baselines executable as well.
 	if strings.Contains(memory, "fcuda_alloc_status(") {
@@ -317,6 +327,10 @@ static int cudaStreamSynchronize(int) {
   return 0;
 }
 static void q4_coeff_cache_evict(const void *) {}
+static bool v41_candidates_stream_uncertain(void) {
+  return g_v41_router_uncertain || g_v41_mmid_uncertain || g_cuda_cleanup_status != 0;
+}
+#define CK(value) do { (void)(value); } while (0)
 static size_t pooled() {
   size_t count=0;
   for (const auto &bucket : g_pool) count+=bucket.second.size();
@@ -346,6 +360,8 @@ static void reset_context() {
   physical.clear(); g_live.clear(); g_managed_live.clear(); g_panel_live.clear();
   allocated.clear();
   g_pool.clear(); g_panel_pool.clear();
+  g_pool_bytes=g_pool_peak_bytes=g_pool_clock=g_pool_hits=g_pool_misses=g_pool_evictions=0;
+  g_pool_cap_bytes=(size_t)512 << 20; g_pool_graph_deep=false; g_pool_touch.clear();
   g_panel_live_bytes=g_panel_cached_bytes=0;
   g_scratch_alloc_test_fault=0;
 #ifdef TEST_SEQUENCE_LOAN
