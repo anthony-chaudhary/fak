@@ -263,6 +263,7 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/weight_formats.cuh"
 #include "cuda/q4k_fp8lt.cuh"
 #include "cuda/mxfp8_cast.cuh"
+#include "cuda/blockscaled_wkv.cuh"
 #ifdef FAK_CUDA_DEEPGEMM_WKV
 #include "cuda/deepgemm_wkv_bridge.cuh"
 #endif

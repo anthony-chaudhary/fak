@@ -1263,3 +1263,27 @@ earliest occurrence, stop at the first maximum-length match, and use a small
 local prefix table for default settings. The existing copied-proposal,
 configuration, default-off, and target-verification contracts are unchanged.
 The full Apache License, Version 2.0 is supplied in the root `LICENSE`.
+
+## NVIDIA cuBLASLt experimental SM120 MXFP8 WKV baseline
+
+`internal/compute/cuda/blockscaled_wkv.cuh` adapts the descriptor/heuristic
+flow from `cuBLASLt/LtMxfp8Matmul/sample_cublasLt_LtMxfp8Matmul.cu` in
+NVIDIA/CUDALibrarySamples at revision
+`9b347f161cce5cd2a51a0406b140f2a2d81df024`:
+https://github.com/NVIDIA/CUDALibrarySamples/blob/9b347f161cce5cd2a51a0406b140f2a2d81df024/cuBLASLt/LtMxfp8Matmul/sample_cublasLt_LtMxfp8Matmul.cu
+
+SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+
+Modified for Fak: exact V4.1 wkv_b TN geometry, E4M3/UE8M0 inputs with F32
+output, SM120-only runtime opt-in and toolkit/version refusal, one bounded
+vendor heuristic, owned buffers and checked stream/capture/cleanup boundaries.
+The activation cast is the existing Fak SIMT kernel; recipe32-to-vendor scale
+repacking is a byte permutation, not an upstream GEMM kernel. The weight scale
+adapter reuses the existing attributed TensorRT-LLM byte-layout helper.
+No NVIDIA sample build system, model loader, or new serving policy is included.
+The donor copyright and Apache-2.0 header are retained in the adapted source.
+The complete Apache License, Version 2.0 is supplied in root `LICENSE` and
+reproduced in the TensorFold section above. No separate donor NOTICE exists
+at this revision. This experimental backend is unqualified; it is not evidence
+of B300 acceptance or an SM120 performance gain.

@@ -193,6 +193,11 @@ UNDECLARED_DEF_OK: dict[str, str] = {
 }
 
 
+# Experimental SM120 WKV has a separate CGo ABI, even while its opt-in is off.
+BINDINGS += ("internal/compute/cuda_blockscaled_wkv.go",)
+BINDINGS_LABEL = ", ".join(BINDINGS)
+
+
 # ---------------------------------------------------------------------------
 # Pure core (the testable part): given the three file texts, compute the verdict.
 # ---------------------------------------------------------------------------
