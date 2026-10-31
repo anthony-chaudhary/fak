@@ -39,6 +39,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -640,7 +641,8 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 		// upload, which overwrites the stale entry at this key below. Without this, a witness that
 		// uploads both weights and 1-D activation vectors through this cache panicked in MatMul with
 		// "index out of range [1] with length 1" when a 2-D weight aliased a stale 1-D entry.
-		if cached, ok := uploadCache[ucKey{hp, store, t.Layout}]; ok && cached.Numel() == t.Numel() {
+		// Equal element counts do not identify the geometry used for F16 repacking.
+		if cached, ok := uploadCache[ucKey{hp, store, t.Layout}]; ok && cached.Numel() == t.Numel() && slices.Equal(cached.Shape, t.Shape) {
 			return cached // same host buffer already resident at this dtype/layout; share it
 		}
 	}

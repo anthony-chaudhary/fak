@@ -10,7 +10,10 @@ package compute
 */
 import "C"
 
-import "unsafe"
+import (
+	"slices"
+	"unsafe"
+)
 
 // uploadQ8 narrows an f32 host weight [out,in] to a resident Q8_0 weight at H2D (#485): the f32 is
 // quantized to per-block(32) int8 codes + f32 scales using the EXACT cpuref QuantizeQ8 scheme
@@ -221,8 +224,8 @@ func (c *cudaBackend) uploadQ2Resident(t Tensor, hb HostBuffer) Tensor {
 	var hp uintptr
 	if len(codes) > 0 {
 		hp = uintptr(unsafe.Pointer(&codes[0]))
-		// element-count guard against host-address reuse (see uploadClass F32 path).
-		if cached, ok := uploadCache[ucKey{hp, Q2_0, t.Layout}]; ok && cached.Numel() == t.Numel() {
+		// Reuse only the same tensor geometry (see uploadClass F32 path).
+		if cached, ok := uploadCache[ucKey{hp, Q2_0, t.Layout}]; ok && cached.Numel() == t.Numel() && slices.Equal(cached.Shape, t.Shape) {
 			return cached
 		}
 	}
@@ -305,8 +308,8 @@ func (c *cudaBackend) uploadRawKQuant(t Tensor, hb HostBuffer) Tensor {
 	var hp uintptr
 	if len(raw) > 0 {
 		hp = uintptr(unsafe.Pointer(&raw[0]))
-		// element-count guard against host-address reuse (see uploadClass F32 path).
-		if cached, ok := uploadCache[ucKey{hp, t.Dtype, t.Layout}]; ok && cached.Numel() == t.Numel() {
+		// Reuse only the same tensor geometry (see uploadClass F32 path).
+		if cached, ok := uploadCache[ucKey{hp, t.Dtype, t.Layout}]; ok && cached.Numel() == t.Numel() && slices.Equal(cached.Shape, t.Shape) {
 			return cached
 		}
 	}
