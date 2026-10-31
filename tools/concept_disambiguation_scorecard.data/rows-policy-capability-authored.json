@@ -79,5 +79,24 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "safetensors-preflight-tensor",
+      "canonical": "SafetensorsPreflightTensor (header plan)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "One tensor entry of the header-only safetensors preflight plan: name, dtype, shape, shard, routed loader role, and load-time representation, read from index and shard headers without touching tensor bytes.",
+      "distinction": "Not the GGUF ManifestPreflight report (gguf-manifest-header-preflight), which covers .gguf manifests; this is the safetensors-side per-tensor census row that feeds the same fak.model-manifest-preflight/1 report under format=safetensors.",
+      "distinct_from": [
+        "gguf-manifest-header-preflight"
+      ],
+      "aliases": [],
+      "grounding": "SafetensorsPreflightTensor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

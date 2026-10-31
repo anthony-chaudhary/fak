@@ -106,3 +106,15 @@ func cudaDeviceOpArch(arch string) (cudaCC, bool) {
 	}
 	return cudaCC{Major: value / 10, Minor: value % 10}, true
 }
+
+// ParseCUDADeviceOpArch parses a generic full-build target such as "sm_103" into its
+// (major, minor) components. It accepts only the canonical sm_<major*10+minor> spelling
+// the device-op table floors use; dotted spellings such as "sm_10.3" are rejected so the
+// preflight CLI cannot drift from the table's own arch grammar.
+func ParseCUDADeviceOpArch(arch string) (major, minor int, ok bool) {
+	dev, ok := cudaDeviceOpArch(arch)
+	if !ok {
+		return 0, 0, false
+	}
+	return dev.Major, dev.Minor, true
+}

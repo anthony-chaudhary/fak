@@ -2071,3 +2071,17 @@ model.Session.PrefillContext ingests a prompt under the existing request context
 model.Session.PrefillNoLogitsContext advances the prompt prefix without returning output logits, while preserving the same existing request-context and backend-owner cancellation contract as PrefillContext. Only the local partial-offload scalar HAL token loop may stop between completed tokens.
 
 **Distinct from:** The prefix-only operation, not PrefillContext (which returns the last token distribution). A cancelled prefix is not a completed prompt or reusable snapshot; sequence, panel and EP operations retain their existing atomic boundary.
+
+
+### cudaStaticKQuantDecision (model preflight)
+
+The static dense k-quant residency decision fak model preflight derives from the declared CUDA device-op table and target arch - which dense quant types stay resident on-device instead of re-quantizing to Q8_0 - feeding the same options function serve uses.
+
+**Distinct from:** Not the live-backend probe behind serveDenseKQuantOptions (which reads a real compute.Backend at serve time), and not ggufload q4kLoadOptions (the loader-side option struct); it is a frozen capability description shared by preflight classification and serve option emission.
+
+
+### SafetensorsPreflightTensor (header plan)
+
+One tensor entry of the header-only safetensors preflight plan: name, dtype, shape, shard, routed loader role, and load-time representation, read from index and shard headers without touching tensor bytes.
+
+**Distinct from:** Not the GGUF ManifestPreflight report (gguf-manifest-header-preflight), which covers .gguf manifests; this is the safetensors-side per-tensor census row that feeds the same fak.model-manifest-preflight/1 report under format=safetensors.
