@@ -20,5 +20,24 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "model-preflight-cuda-static-kquant-decision",
+      "canonical": "cudaStaticKQuantDecision (model preflight)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "The static dense k-quant residency decision fak model preflight derives from the declared CUDA device-op table and target arch - which dense quant types stay resident on-device instead of re-quantizing to Q8_0 - feeding the same options function serve uses.",
+      "distinction": "Not the live-backend probe behind serveDenseKQuantOptions (which reads a real compute.Backend at serve time), and not ggufload q4kLoadOptions (the loader-side option struct); it is a frozen capability description shared by preflight classification and serve option emission.",
+      "distinct_from": [
+        "context-ctx-quantmodelq4kprofileoptionscontext"
+      ],
+      "aliases": [],
+      "grounding": "cudaStaticKQuantDecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

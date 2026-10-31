@@ -26,20 +26,62 @@ type q2kCapableBackend interface {
 	SupportsQ2K() bool
 }
 
-// serveDenseKQuantOptions keeps a dense Q2_K artifact packed on a backend that advertises BOTH a
-// native packed Q2_K matmul path AND quantized upload. Otherwise it preserves the historical
-// behavior byte-for-byte: blanket dense k-quant residency stays off (those tensors take the proven
-// dequant-to-Q8 route), and a nil backend yields no options.
-//
-// #12757: without this, a 246 GiB UD-Q2_K_XL artifact was expanded from packed Q2_K to Q8/F32 at
-// load on exactly the backends whose kernels can consume Q2_K directly, and that expansion is what
-// made a 128 GB Halo refuse the model.
-func serveDenseKQuantOptions(backend compute.Backend) []ggufload.Q4KLoadOption {
-	if backend == nil {
-		return nil
+// denseKQuantDecision is the static capability description of a backend's dense k-quant
+// execution: which packed formats the device runs natively and which native i-quant types it
+// admits raw-resident. It is the single source both legs read — serve derives it from the live
+// backend (denseKQuantDecisionOf), preflight derives it from the declared CUDA device-op table
+// at a target arch (cudaStaticKQuantDecision) — so the two call one options function
+// (denseKQuantOptions) and cannot drift apart.
+type denseKQuantDecision struct {
+	// IsCUDA marks the CUDA backend, whose whole GDN operation consumes F32/Q8 projections and
+	// has no composed raw-quant or tiled-out fallback.
+	IsCUDA bool
+	// DenseQ2K/DenseQ3K/DenseQ5K/DenseQ6K mark the selective packed-retention arms.
+	DenseQ2K bool
+	DenseQ3K bool
+	DenseQ5K bool
+	DenseQ6K bool
+	// IQResident lists the native i-quant types admitted raw-resident (backends that tile the
+	// GDN core).
+	IQResident []ggufload.TensorType
+	// IQPacked lists the native i-quant types kept packed where identity-ordered but not
+	// raw-resident (no GDN tiling: CUDA).
+	IQPacked []ggufload.TensorType
+}
+
+// retained is the loader's dense k-quant retention rule (ggufload.denseKQuantRetained) over this
+// decision: true when the format keeps its source representation instead of taking the
+// dequant-to-Q8 path. Blanket dense k-quant residency is never set here (it stays off by
+// default; the caller adds WithDenseKQuantResident(true) itself when the artifact qualifies).
+func (d denseKQuantDecision) retained(t ggufload.TensorType) bool {
+	switch t {
+	case ggufload.TensorQ2_K:
+		return d.DenseQ2K
+	case ggufload.TensorQ3_K:
+		return d.DenseQ3K
+	case ggufload.TensorQ5_K:
+		return d.DenseQ5K
+	case ggufload.TensorQ6_K:
+		return d.DenseQ6K
 	}
+	for _, u := range d.IQResident {
+		if u == t {
+			return true
+		}
+	}
+	return false
+}
+
+// denseKQuantOptions renders one decision into the loader's option list. It preserves the
+// historical behavior byte-for-byte: blanket dense k-quant residency stays off (those tensors
+// take the proven dequant-to-Q8 route).
+//
+// #12757: without the selective arms, a 246 GiB UD-Q2_K_XL artifact was expanded from packed
+// Q2_K to Q8/F32 at load on exactly the backends whose kernels can consume Q2_K directly, and
+// that expansion is what made a 128 GB Halo refuse the model.
+func denseKQuantOptions(d denseKQuantDecision) []ggufload.Q4KLoadOption {
 	opts := []ggufload.Q4KLoadOption{ggufload.WithDenseKQuantResident(false)}
-	if backend.Name() == "cuda" {
+	if d.IsCUDA {
 		// CUDA's whole GDN operation consumes F32/Q8 projections and has no
 		// composed raw-quant or tiled-out fallback. Independent IQ matmul
 		// support must not admit those loader formats. This conservative option
@@ -47,18 +89,41 @@ func serveDenseKQuantOptions(backend compute.Backend) []ggufload.Q4KLoadOption {
 		// independent IQ residency remain enabled below.
 		opts = append(opts, ggufload.WithNativeLinearAttnRows(false), ggufload.WithQwen35NativeSSMOut(false))
 	}
-	if cap, ok := backend.(q2kCapableBackend); ok && cap.SupportsQ2K() && backend.Caps().UploadDtype {
+	if d.DenseQ2K {
 		opts = append(opts, ggufload.WithDenseQ2KResident(true))
 	}
-	if serveNativeDenseQ6K(backend) {
+	if d.DenseQ6K {
 		opts = append(opts, ggufload.WithDenseQ6KResident(true))
 	}
-	if serveNativeDenseQ5K(backend) {
+	if d.DenseQ5K {
 		opts = append(opts, ggufload.WithDenseQ5KResident(true))
 	}
-	if serveNativeDenseQ3K(backend) {
+	if d.DenseQ3K {
 		opts = append(opts, ggufload.WithDenseQ3KResident(true))
 	}
+	if len(d.IQResident) > 0 {
+		opts = append(opts, ggufload.WithDenseIQResident(d.IQResident...))
+	}
+	if len(d.IQPacked) > 0 {
+		opts = append(opts, ggufload.WithDenseIQPacked(d.IQPacked...))
+	}
+	return opts
+}
+
+// denseKQuantDecisionOf derives the decision from a live backend: a packed format is retained
+// only when the backend advertises BOTH a native packed matmul path AND quantized upload.
+func denseKQuantDecisionOf(backend compute.Backend) denseKQuantDecision {
+	var d denseKQuantDecision
+	if backend == nil {
+		return d
+	}
+	d.IsCUDA = backend.Name() == "cuda"
+	if cap, ok := backend.(q2kCapableBackend); ok && cap.SupportsQ2K() && backend.Caps().UploadDtype {
+		d.DenseQ2K = true
+	}
+	d.DenseQ6K = serveNativeDenseQ6K(backend)
+	d.DenseQ5K = serveNativeDenseQ5K(backend)
+	d.DenseQ3K = serveNativeDenseQ3K(backend)
 	// Native i-quant weights (05f) stay packed only for a device backend admitting the raw dtype.
 	if backend.Caps().DeviceMemory && backend.Caps().UploadDtype {
 		supports := func(dt compute.Dtype) bool { return compute.BackendSupportsDeviceWeightDtype(backend, dt) }
@@ -67,13 +132,24 @@ func serveDenseKQuantOptions(backend compute.Backend) []ggufload.Q4KLoadOption {
 			// rows) need a backend that tiles the GDN core; without it (CUDA) the i-quants stay
 			// packed only where the tensor is identity-ordered, and the model admits the pairing.
 			if _, tiles := backend.(compute.Qwen35GDNTiledOutBackend); tiles {
-				opts = append(opts, ggufload.WithDenseIQResident(types...))
+				d.IQResident = types
 			} else {
-				opts = append(opts, ggufload.WithDenseIQPacked(types...))
+				d.IQPacked = types
 			}
 		}
 	}
-	return opts
+	return d
+}
+
+// serveDenseKQuantOptions keeps a dense Q2_K artifact packed on a backend that advertises BOTH a
+// native packed Q2_K matmul path AND quantized upload. Otherwise it preserves the historical
+// behavior byte-for-byte: blanket dense k-quant residency stays off (those tensors take the proven
+// dequant-to-Q8 route), and a nil backend yields no options.
+func serveDenseKQuantOptions(backend compute.Backend) []ggufload.Q4KLoadOption {
+	if backend == nil {
+		return nil
+	}
+	return denseKQuantOptions(denseKQuantDecisionOf(backend))
 }
 
 // serveNativeDenseQ6K admits packed Q6_K only when the selected device can

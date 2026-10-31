@@ -38,7 +38,7 @@ type denseWKVPhysicalFixture struct {
 // Hash-only shard/executable verification streams the file, not a shard buffer.
 func denseWKVReadArtifact(t *testing.T, root string, a denseWKVArtifact, max int64, materialize bool) []byte {
 	t.Helper()
-	if a.Path == "" || a.Bytes <= 0 || a.Bytes > max || len(a.SHA256) != 64 {
+	if a.Path == "" || a.Bytes <= 0 || a.Bytes > max || len(a.SHA256) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST sha256 hex width is an algorithm invariant
 		t.Fatal("missing or oversized physical artifact")
 	}
 	if _, err := hex.DecodeString(a.SHA256); err != nil {
@@ -105,7 +105,7 @@ func TestV41DenseWKVPhysical(t *testing.T) {
 	if m.Schema != "fak.wkv-physical-fixture/v1" || m.ModelRevision != DeepSeekV41FlashRevision || m.DeepInfer != "774ce244b87cc0eb8d4b94ab9f5de2ab22049f01" || m.DeepGEMM != "1fc9c66975ee322d628b3288534ca0e9ce12a64d" || m.Cutlass != "f3fde58372d33e9a5650ba7b80fc48b3b49d40c8" {
 		t.Fatal("physical fixture source/model pin mismatch")
 	}
-	if len(m.SourceCommit) != 40 || m.SourceCommit != os.Getenv("FAK_WKV_SOURCE_COMMIT") || m.ToleranceApproval == "" || m.ReferenceCommand == "" {
+	if len(m.SourceCommit) != 40 || m.SourceCommit != os.Getenv("FAK_WKV_SOURCE_COMMIT") || m.ToleranceApproval == "" || m.ReferenceCommand == "" { //boundarylint:ignore CHANGE_DETECTOR_TEST a git source commit is a fixed-width 40-hex SHA-1 object ID
 		t.Fatal("missing source binding or external reference/tolerance approval")
 	}
 	if _, err := hex.DecodeString(m.SourceCommit); err != nil {

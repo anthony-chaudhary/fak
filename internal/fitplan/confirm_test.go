@@ -77,11 +77,11 @@ func TestFitConfirmSchemaGolden(t *testing.T) {
 	if dev["unaccounted_bytes"].(float64) != float64(wantUnaccountedDev) {
 		t.Fatalf("device unaccounted = %v, want %d", dev["unaccounted_bytes"], wantUnaccountedDev)
 	}
-	classes := dev["classes"].([]any)
-	if len(classes) != 5 {
-		t.Fatalf("device classes = %d rows, want 5", len(classes))
-	}
 	wantOrder := []string{"weights", "kv", "compute/staging", "ring", "transient"}
+	classes := dev["classes"].([]any)
+	if len(classes) != len(wantOrder) {
+		t.Fatalf("device classes = %d rows, want %d in canonical order", len(classes), len(wantOrder))
+	}
 	for i, c := range classes {
 		row := c.(map[string]any)
 		if row["class"] != wantOrder[i] {

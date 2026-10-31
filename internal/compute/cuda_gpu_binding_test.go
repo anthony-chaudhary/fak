@@ -695,16 +695,17 @@ func TestGPUBindingLinux_FloorUsesObservedDriverAndNVMLCapability(t *testing.T) 
 	if err := os.MkdirAll(modDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(modDir, "version"), []byte("610.43.02\n"), 0o644); err != nil {
+	observedDriver := "610.43.02" // fixture fact the binding report must echo back
+	if err := os.WriteFile(filepath.Join(modDir, "version"), []byte(observedDriver+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	linkDirBestEffort(t, modDir, filepath.Join(nv, "driver", "module"))
 	smi := smiFixture("0, 00000000:01:00.0, GPU-1, NVIDIA GeForce RTX 5090, 12.0\n", nil)
 
-	// Without a floor the observed 610.43.02 branch still reads ready.
+	// Without a floor the observed driver branch still reads ready.
 	rep := diagnoseGPUBindingLinux(root, GPUBindingOptions{smiQuery: smi})
 	assertVerdicts(t, rep, GPUReady)
-	if rep.Devices[0].DriverVersion != "610.43.02" || rep.Devices[0].ComputeCapability != 120 {
+	if rep.Devices[0].DriverVersion != observedDriver || rep.Devices[0].ComputeCapability != 120 {
 		t.Fatalf("device = %+v, want observed driver version and NVML capability", rep.Devices[0])
 	}
 

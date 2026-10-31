@@ -244,7 +244,7 @@ func TestCUDABuildRequiresArchiveImages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strict.CUDA == nil || strict.CUDA.ArtifactKind != CUDAProvenanceArtifactBinary || !reflect.DeepEqual(strict.CUDA.SASSArchs, []string{"sm_120"}) || strict.CUDA.NVCC.Version != "12.6" || strict.CUDA.CUBLASVersion != "12.6.0" {
+	if strict.CUDA == nil || strict.CUDA.ArtifactKind != CUDAProvenanceArtifactBinary || !reflect.DeepEqual(strict.CUDA.SASSArchs, []string{"sm_120"}) || strict.CUDA.NVCC.Version != "12.6" || strict.CUDA.CUBLASVersion != "12.6.0" { //boundarylint:ignore CHANGE_DETECTOR_TEST fixture echo: the receipt must carry the nvcc/cublas versions the fixture toolchain declares verbatim
 		t.Fatalf("binary receipt missing provenance: %+v", strict.CUDA)
 	}
 	if strict.CUDA.ArtifactSHA256 != receipt.Artifact.SHA256 {

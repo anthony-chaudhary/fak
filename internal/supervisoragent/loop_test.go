@@ -85,7 +85,7 @@ func TestOutcomeVocabularyClosed(t *testing.T) {
 		OutcomeDryRun:      "dry_run",
 		OutcomeVerbRefused: "verb_refused",
 	}
-	if len(wantTokens) != 6 {
+	if len(wantTokens) != 6 { //boundarylint:ignore CHANGE_DETECTOR_TEST closed outcome vocabulary: six pinned tokens are the fixture's identity; a duplicate key or drift must fail closed
 		t.Fatalf("vocabulary has %d tokens; want 6", len(wantTokens))
 	}
 	for o, tok := range wantTokens {

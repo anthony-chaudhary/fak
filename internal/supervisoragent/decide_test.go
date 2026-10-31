@@ -19,7 +19,7 @@ func TestDecideReasonVocabularyClosed(t *testing.T) {
 		ReasonWidenCapacity:     "widen_capacity",
 		ReasonEscalateResidual:  "escalate_residual",
 	}
-	if len(wantTokens) != 8 {
+	if len(wantTokens) != 8 { //boundarylint:ignore CHANGE_DETECTOR_TEST closed reason vocabulary: eight pinned tokens are the fixture's identity; a duplicate key or drift must fail closed
 		t.Fatalf("vocabulary has %d tokens; want 8", len(wantTokens))
 	}
 	for r, tok := range wantTokens {

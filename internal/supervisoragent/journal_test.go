@@ -147,7 +147,8 @@ func TestMemoryJournalGoldenBehavior(t *testing.T) {
 
 	base := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
 	digest := DigestInput(presentInput())
-	for i := 0; i < 5; i++ {
+	const appended = 5 // golden journal depth: one record per append iteration
+	for i := 0; i < appended; i++ {
 		err := j.Append(DecisionRecord{
 			Seq:          999, // caller-set Seq must be ignored: the journal owns the sequence
 			Topic:        "wake://fleet/cmd",
@@ -167,8 +168,8 @@ func TestMemoryJournalGoldenBehavior(t *testing.T) {
 	if err != nil {
 		t.Fatalf("replay: %v", err)
 	}
-	if len(all) != 5 {
-		t.Fatalf("Replay(0) returned %d records; want 5", len(all))
+	if len(all) != appended {
+		t.Fatalf("Replay(0) returned %d records; want %d", len(all), appended)
 	}
 	for i, r := range all {
 		if r.Seq != uint64(i+1) {
@@ -232,7 +233,7 @@ func TestDigestInputDeterministicAndSensitive(t *testing.T) {
 	}
 
 	d := DigestInput(a)
-	if len(d) != 64 {
+	if len(d) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST DigestInput is a hex SHA-256 digest; 64 is its fixed width
 		t.Fatalf("digest %q is not 64 hex chars", d)
 	}
 	for i := 0; i < len(d); i++ {

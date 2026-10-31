@@ -175,7 +175,7 @@ func TestSupervisorSeatLoop(t *testing.T) {
 			if r.Topic != "wake://fleet/cmd" {
 				t.Errorf("record %d topic = %q; want the wake address", i, r.Topic)
 			}
-			if len(r.InputDigest) != 64 {
+			if len(r.InputDigest) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST SHA-256 digests are exactly 64 hexadecimal characters
 				t.Errorf("record %d input digest = %q; want a 64-hex-char digest, never contents", i, r.InputDigest)
 			}
 		}

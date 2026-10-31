@@ -43,7 +43,7 @@ func TestParseAllocationSidecarGoldenExcerpt(t *testing.T) {
 	if sc.GGUFShard != shard {
 		t.Errorf("gguf shard = %q", sc.GGUFShard)
 	}
-	if len(sc.Sources) != 6 { // five IQ2_XXS shards + the shared Engram shard
+	if len(sc.Sources) != 6 { //boundarylint:ignore CHANGE_DETECTOR_TEST golden fixture pinned by the SHA-256 check above; six sources (five IQ2_XXS shards + the shared Engram shard) is its frozen content
 		t.Errorf("sources = %d, want 6", len(sc.Sources))
 	}
 	if sc.TargetBPW != 2.00 || !strings.Contains(sc.TargetScope, "bpw over the backbone") {
@@ -69,7 +69,7 @@ func TestParseAllocationSidecarGoldenExcerpt(t *testing.T) {
 	if fmt.Sprint(sc.Histogram) != fmt.Sprint(wantHistogram) {
 		t.Errorf("histogram = %v, want %v", sc.Histogram, wantHistogram)
 	}
-	if len(sc.Tensors) != 20 {
+	if len(sc.Tensors) != 20 { //boundarylint:ignore CHANGE_DETECTOR_TEST golden fixture pinned by the SHA-256 check above; the excerpt carries exactly the first 20 tensor rows
 		t.Fatalf("rows = %d, want 20 (fixture is an excerpt of the 1043-row manifest)", len(sc.Tensors))
 	}
 	if sc.Tensors[0] != (AllocationTensor{Name: "output.weight", Type: TensorQ5_K}) {
