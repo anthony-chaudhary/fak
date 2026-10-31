@@ -96,6 +96,17 @@ func (c *cudaBackend) cudaV41EngramRowDecode(encoded []byte, encoding V41EngramR
 				atomic.StoreUint32(&b.invalid, 1)
 				C.fcuda_free(b.ptr)
 				b.ptr, b.n = nil, 0
+				// Retirement may surface a pool eviction failure after the checked
+				// gather fence. Keep that fence generation, but publish no outputs.
+				if err == nil {
+					if code := int(C.fak_v41_embed_state()); code != 0 {
+						var cause error
+						if code < 0 {
+							cause = c.faultLatch.Observe(DeviceFaultExecution, site, code)
+						}
+						err = c.cudaV41EngramRowError(site, "source retirement failed; native allocations retained", code, cause)
+					}
+				}
 			}
 		}
 		if err != nil {

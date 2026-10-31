@@ -65,12 +65,7 @@ func TestCUDAAcceptanceUsesCanonicalProfileTags(t *testing.T) {
 					t.Fatalf("unexpected command %s %v", name, args)
 				}
 				value := func(flag string) string {
-					for i := 0; i+1 < len(args); i++ {
-						if args[i] == flag {
-							return args[i+1]
-						}
-					}
-					return ""
+					return cudaAcceptanceFlagValue(args, flag)
 				}
 				if got := value("-tags"); got != wantTags {
 					t.Fatalf("acceptance profile=%q built=%q args=%v", got, wantTags, args)
@@ -100,6 +95,46 @@ func TestCUDAAcceptanceUsesCanonicalProfileTags(t *testing.T) {
 			code := runCUDABuildAcceptance(&out, &stderr, cfg, "weights", 2, true, build, command)
 			if code != 0 || tests != len(cudaAcceptanceFamilies()) || benches == 0 {
 				t.Fatalf("code=%d tests=%d benches=%d stderr=%s", code, tests, benches, stderr.String())
+			}
+		})
+	}
+}
+
+// cudaAcceptanceFlagValue reads the two value forms emitted by the real
+// acceptance command without matching longer flags that share a prefix.
+func cudaAcceptanceFlagValue(args []string, flag string) string {
+	for i, arg := range args {
+		if arg == flag && i+1 < len(args) {
+			return args[i+1]
+		}
+		if value, ok := strings.CutPrefix(arg, flag+"="); ok {
+			return value
+		}
+	}
+	return ""
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestCUDAAcceptanceFlagValue(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		flag string
+		want string
+	}{
+		{"split-count", []string{"test", "-count", "1"}, "-count", "1"},
+		{"joined-count-at-end", []string{"test", "-count=1"}, "-count", "1"},
+		{"split-benchtime", []string{"-benchtime", "2s"}, "-benchtime", "2s"},
+		{"joined-benchtime", []string{"-benchtime=2s"}, "-benchtime", "2s"},
+		{"longer-prefix", []string{"-counter=9", "-countdown", "8", "-count=1"}, "-count", "1"},
+		{"bench-not-benchtime", []string{"-benchtime=2s"}, "-bench", ""},
+		{"value-with-equals", []string{"-run=^a=b$"}, "-run", "^a=b$"},
+		{"missing", []string{"test"}, "-count", ""},
+		{"trailing-bare", []string{"test", "-count"}, "-count", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := cudaAcceptanceFlagValue(tc.args, tc.flag); got != tc.want {
+				t.Fatalf("value(%v, %q) = %q; want %q", tc.args, tc.flag, got, tc.want)
 			}
 		})
 	}

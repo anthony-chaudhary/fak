@@ -129,7 +129,7 @@ func TestCUDAQ4KMMQAttemptStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MMQ attempted status: %v\n%s", err, out)
 	}
-	if string(out) != "PASS 25 actual-source MMQ attempted-status cases; CUDA/device unrun\n" {
+	if string(out) != "PASS 26 actual-source MMQ attempted-status cases; CUDA/device unrun\n" {
 		t.Fatalf("incomplete host witness: %s", out)
 	}
 	t.Log(strings.TrimSpace(string(out)))
@@ -158,6 +158,7 @@ static int g_stream=0;
 static int device_error,device_id,attribute_error,attribute_at,function_error,set_attribute_error;
 static int major_version,compiled_arch,sm_count,shared_bytes;
 static int quantize_error,main_error,fixup_error,cleanup_error,last_error;
+static int g_cuda_cleanup_status;
 static int quantize_calls,main_calls,fixup_calls,panel_calls,other_calls,checks;
 static int allocation_calls,fail_allocation,free_calls,device_calls,attribute_calls;
 alignas(16) static unsigned char storage[64];
@@ -174,7 +175,8 @@ template<class T> static int cudaFuncGetAttributes(cudaFuncAttributes *p,T){p->p
 template<class T> static int cudaFuncSetAttribute(T,int,int){return set_attribute_error;}
 static int cudaGetLastError(){++checks;int result=last_error;last_error=0;return result;}
 static void *scratch_malloc(size_t){++allocation_calls;return allocation_calls==fail_allocation?nullptr:storage;}
-static void fcuda_free(void*){++free_calls;last_error=cleanup_error;}
+static void fcuda_free(void*){++free_calls;last_error=cleanup_error;
+ if(!g_cuda_cleanup_status && cleanup_error)g_cuda_cleanup_status=cleanup_error;}
 static void mock_launch(const char *name){
  if(!std::strcmp(name,"quantize")){++quantize_calls;last_error=quantize_error;}
  else if(!std::strcmp(name,"main")){++main_calls;last_error=main_error;}
@@ -201,6 +203,7 @@ static void reset(const char *label){
  device_error=device_id=attribute_error=function_error=set_attribute_error=0;attribute_at=-1;
  major_version=8;compiled_arch=80;sm_count=80;shared_bytes=100000;
  quantize_error=main_error=fixup_error=cleanup_error=last_error=0;
+ g_cuda_cleanup_status=0;
  quantize_calls=main_calls=fixup_calls=panel_calls=other_calls=checks=0;
  allocation_calls=fail_allocation=free_calls=device_calls=attribute_calls=0;
  std::memset(fak_q4k_mmq::g_device_info,0,sizeof(fak_q4k_mmq::g_device_info));
@@ -244,6 +247,8 @@ int main(){
  REQUIRE(call(128,256,128)==95);REQUIRE(quantize_calls==1&&main_calls==1&&fixup_calls==1&&!panel_calls&&free_calls==2&&!g_q4k_mmq_launches);
  reset("success-fixup");
  REQUIRE(call()==0);REQUIRE(quantize_calls==1&&main_calls==1&&fixup_calls==1&&!panel_calls&&g_q4k_mmq_launches==1);
+ reset("final-activation-cleanup-failure-no-fixup");sm_count=1;cleanup_error=96;
+ REQUIRE(call()==96);REQUIRE(quantize_calls==1&&main_calls==1&&!fixup_calls&&!panel_calls&&free_calls==1&&!g_q4k_mmq_launches);
  reset("success-no-fixup");sm_count=1;
  REQUIRE(call()==0);REQUIRE(quantize_calls==1&&main_calls==1&&!fixup_calls&&!panel_calls&&g_q4k_mmq_launches==1);
  reset("below-threshold");
@@ -256,7 +261,7 @@ int main(){
  REQUIRE(call(128,256,128)==77);REQUIRE(no_work()&&!device_calls);
  reset("P128-fp8");g_q4k_prefill_arm=2;
  REQUIRE(call(128,256,128)==78);REQUIRE(no_work()&&!device_calls);
- REQUIRE(cases==25);
+ REQUIRE(cases==26);
  std::printf("PASS %d actual-source MMQ attempted-status cases; CUDA/device unrun\n",cases);
 }
 `
