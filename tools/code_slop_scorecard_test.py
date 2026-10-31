@@ -25,6 +25,31 @@ import code_slop_scorecard as cs
 
 # --- duplication ----------------------------------------------------------
 
+def test_code_only_identity_lines_avoid_character_scan_preserving_states():
+    class NoIndexLine(str):
+        def __getitem__(self, index):
+            raise AssertionError("identity line entered the Python character loop")
+
+    for line in ("", "total += value * 2", "Δ := 値 + 1", "\\", "\r\n"):
+        assert cs._code_only(NoIndexLine(line), False, False) == (line, False, False)
+
+    cases = [
+        ("x/* hidden */y", False, False, ("xy", False, False)),
+        ("x // hidden", False, False, ("x ", False, False)),
+        ('"hidden" + \'x\'', False, False, (" + ", False, False)),
+        ("`hidden`tail", False, False, ("tail", False, False)),
+        ("plain", True, False, ("", True, False)),
+        ("plain", False, True, ("", False, True)),
+        ("plain", True, True, ("", True, True)),
+        ("hidden`tail", True, False, ("tail", False, False)),
+        ("hidden*/tail", False, True, ("tail", False, False)),
+        ("*/`tail", True, True, ("tail", False, False)),
+        ("", True, True, ("", True, True)),
+    ]
+    for line, in_raw, in_block, expected in cases:
+        assert cs._code_only(line, in_raw, in_block) == expected
+
+
 def _dup_block(name: str) -> str:
     # an 8-line function body that is identical across files -> a real clone
     return (f"func {name}(xs []int) int {{\n"
