@@ -389,7 +389,9 @@ int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY, int ou
  * 80002 (fp16 split scratch) when a P>=128 scratch allocation fails (nothing launched).
  * fcuda_q4k_matmul_f32 also returns 80003 for P>=128 when the selected prefill arm is refused, and
  * on the mmq arm 80004 when the device or its loaded MMQ image is below sm_80, the activation is
- * not 16-byte aligned, P*out overflows int, or the MMQ launch fails.
+ * not 16-byte aligned, or the panel geometry is unsupported before any submission.
+ * Only that certified 80004 decline permits small-panel fallback. CUDA API/launch errors retain
+ * their status; scratch and post-submission failures are terminal, never panel success.
  * fp8lt returns 80005 for unsupported toolkit/device/geometry/capture/heuristic;
  * 81000+cudaError or 82000+cublasStatus preserve runtime failures. It admits only
  * sm_89/sm_90, in%256==0, out%16==0, aligned pointers and int-bounded panels.
