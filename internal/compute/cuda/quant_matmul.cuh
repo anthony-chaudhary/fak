@@ -40,8 +40,41 @@ __global__ void k_f32_to_f16(const float *src, __half *dst, int n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < n) dst[i] = __float2half(src[i]);
 }
+// Contiguous vec4 loads/stores adapted from llama.cpp ggml/src/ggml-cuda/convert.cu,
+// change f4e276a2066a40cd200db17c1131826d6c0c7a94, retained at
+// 0ec4027a2a0183de87c007069adddc06e665f7de (MIT).
+// Copyright (c) 2023-2026 The ggml authors. The complete MIT permission notice is
+// reproduced in THIRD_PARTY_NOTICES.md under "llama.cpp Q4_K MMQ prompt-panel GEMM".
+// Fak specializes the conversion to F32 -> F16 and keeps the existing intrinsic,
+// stream and profiler label. The transpose and compensated hi/lo paths are separate.
+#include <stdint.h>
+template <typename T> struct alignas(sizeof(T)*4) fak_f16_cvt_vec4 { T v[4]; };
+
+__global__ void k_f32_to_f16_vec4(const float *src, __half *dst, int n4) {
+  const int64_t i = int64_t(blockDim.x) * blockIdx.x + threadIdx.x;
+  if (i >= n4) return;
+  const fak_f16_cvt_vec4<float> x = reinterpret_cast<const fak_f16_cvt_vec4<float> *>(src)[i];
+  fak_f16_cvt_vec4<__half> y;
+#pragma unroll
+  for (int j = 0; j < 4; ++j) y.v[j] = __float2half(x.v[j]);
+  reinterpret_cast<fak_f16_cvt_vec4<__half> *>(dst)[i] = y;
+}
+
+static void launch_f32_to_f16(const float *src, __half *dst, int n) {
+  // Both consumers own separate input/output allocations. Leave irregular counts
+  // or unaligned views on the original scalar path; no vector read crosses a tail.
+  if (n > 0 && n % 4 == 0 &&
+      reinterpret_cast<uintptr_t>(src) % alignof(fak_f16_cvt_vec4<float>) == 0 &&
+      reinterpret_cast<uintptr_t>(dst) % alignof(fak_f16_cvt_vec4<__half>) == 0) {
+    const int n4 = n / 4;
+    FCUDA_TS("k_f32_to_f16", (n4 + 255) / 256, k_f32_to_f16_vec4<<<(n4 + 255) / 256, 256, 0, g_stream>>>(src, dst, n4));
+    return;
+  }
+  FCUDA_TS("k_f32_to_f16", (n + 255) / 256, k_f32_to_f16<<<(n + 255) / 256, 256, 0, g_stream>>>(src, dst, n));
+}
+
 extern "C" void fcuda_f32_to_f16(void *dDstHalf, const float *dSrc, int n) {
-  FCUDA_TS("k_f32_to_f16", (n + 255) / 256, k_f32_to_f16<<<(n + 255) / 256, 256, 0, g_stream>>>(dSrc, (__half *)dDstHalf, n));
+  launch_f32_to_f16(dSrc, (__half *)dDstHalf, n);
 }
 
 // k_f32_to_f16_T narrows AND transpose-repacks a row-major f32 weight [out,in] into a
@@ -69,7 +102,7 @@ extern "C" void fcuda_matmul_f16(const void *dWhalf, const float *dX, float *dY,
                                  int out, int in, int P, int colMajor) {
   const __half *A = (const __half *)dWhalf;
   __half *dXh = (__half *)fcuda_malloc((size_t)P * in * sizeof(__half));
-  FCUDA_TS("k_f32_to_f16", (P * in + 255) / 256, k_f32_to_f16<<<(P * in + 255) / 256, 256, 0, g_stream>>>(dX, dXh, P * in));
+  launch_f32_to_f16(dX, dXh, P * in);
   const float alpha = 1.0f, beta = 0.0f;
   cublasStatus_t st;
   if (colMajor) {
