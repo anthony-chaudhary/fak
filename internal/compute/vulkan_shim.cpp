@@ -1412,6 +1412,7 @@ Buffer* partialRoPETable(float theta, int rotary, size_t requiredPositions) {
 Buffer* gdnConvOutScratch(size_t bytes) {
     if (bytes == 0) bytes = 4;
     if (g_gdn_conv_out && g_gdn_conv_out->bytes >= bytes) return g_gdn_conv_out;
+    const bool resumeBatch = g_batching;
 
     if (g_gdn_conv_out) {
         if (g_batching) batchFlush();
@@ -1425,6 +1426,8 @@ Buffer* gdnConvOutScratch(size_t bytes) {
     if (!g_gdn_conv_out && cap != bytes) {
         g_gdn_conv_out = allocBuffer(bytes, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, STORAGE_USAGE);
     }
+    // Growth must preserve the caller's batch for the following GDN dispatches.
+    if (resumeBatch && !g_batching) batchBegin();
     if (!g_gdn_conv_out) {
         fprintf(stderr, "fak-vulkan: GDN conv_out scratch allocation failed (%zu bytes)\n", bytes);
         return nullptr;
