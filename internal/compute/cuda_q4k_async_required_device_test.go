@@ -160,8 +160,11 @@ func TestCUDAQ4KAsyncOwnedPhysical(t *testing.T) {
 				t.Fatal("Q4 result extent changed")
 			}
 			for row, value := range got {
-				if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) || math.Abs(float64(value-wants[matrix][row])) > 0.02 {
-					t.Fatalf("Q4 output[%d,%d]=%g reference=%g", matrix, row, value, wants[matrix][row])
+				// q8_1 activation error scales with |y|; gate by the arm's established
+				// relative contract (q4kMMVQRelMaxAbs, cuda_q4k_decode_arms_cuda_test.go).
+				ref := float64(wants[matrix][row])
+				if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) || math.Abs(float64(value)-ref) > q4kMMVQRelMaxAbs*math.Abs(ref) {
+					t.Fatalf("Q4 output[%d,%d]=%g reference=%g (bound %.3e)", matrix, row, value, ref, q4kMMVQRelMaxAbs*math.Abs(ref))
 				}
 			}
 		}
