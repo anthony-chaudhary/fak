@@ -251,9 +251,11 @@ extern "C" int fcuda_iq4xs_matmul_f32(const uint8_t *dW, const float *dX, float 
         const int nb = (int)(wn / QK_K);
         FCUDA_TS("k_iq4xs_dequant_split", nb, k_iq4xs_dequant_split<<<nb, 32, 0, g_stream>>>(dW, wHi, wLo));
         FCUDA_TS("k_fp16_split", (xn + 255) / 256, k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(dX, xHi, xLo, xn));
-        fp16_compensated_gemm(wHi, wLo, xHi, xLo, dY, out, in, P);
+        const int gemm_status = fp16_compensated_gemm(wHi, wLo, xHi, xLo, dY, out, in, P);
+        // Count attempted route engagement, not successful GEMM completion.
         ++g_iq4xs_dequant_gemm_launches;
-        return fp16_compensated_release(&scratch);
+        const int release_status = fp16_compensated_release(&scratch);
+        return gemm_status != 0 ? gemm_status : release_status;
     }
     if (P > max_cols || g_q4k_decode_arm != 1) {
         dim3 grid((out + 7) / 8, P);

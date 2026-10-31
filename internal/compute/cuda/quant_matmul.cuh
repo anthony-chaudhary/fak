@@ -688,8 +688,9 @@ extern "C" int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float 
     FCUDA_TS("k_q4k_dequant_split", (wn + 255) / 256, k_q4k_dequant_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(
         (const unsigned char *)dQ4K, wHi, wLo, out, in));
     FCUDA_TS("k_fp16_split", (xn + 255) / 256, k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(dX, xHi, xLo, xn));
-    fp16_compensated_gemm(wHi, wLo, xHi, xLo, dY, out, in, P);
-    return fp16_compensated_release(&scratch);
+    const int gemm_status = fp16_compensated_gemm(wHi, wLo, xHi, xLo, dY, out, in, P);
+    const int release_status = fp16_compensated_release(&scratch);
+    return gemm_status != 0 ? gemm_status : release_status;
   }
   // Small panels may use the panel kernel only after a certified pre-attempt decline.
   // Preserve attempted CUDA and scratch failures; never overwrite them with panel success.
@@ -1156,8 +1157,9 @@ extern "C" int fcuda_q2k_matmul_f32(const uint8_t *dQ2K, const float *dX, float 
     FCUDA_TS("k_q2k_dequant_split", (wn + 255) / 256, k_q2k_dequant_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(
         (const unsigned char *)dQ2K, wHi, wLo, out, in));
     FCUDA_TS("k_fp16_split", (xn + 255) / 256, k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(dX, xHi, xLo, xn));
-    fp16_compensated_gemm(wHi, wLo, xHi, xLo, dY, out, in, P);
-    return fp16_compensated_release(&scratch);
+    const int gemm_status = fp16_compensated_gemm(wHi, wLo, xHi, xLo, dY, out, in, P);
+    const int release_status = fp16_compensated_release(&scratch);
+    return gemm_status != 0 ? gemm_status : release_status;
   }
   if (P < 4) {
     fcuda_q2k_gemv(dQ2K, dX, dY, out, in, P);

@@ -30,6 +30,9 @@ const (
 // 92000 + cudaError_t is a failed retirement of persistent Q8 row scratch.
 const cudaQ8ScratchRetireFailedBase = 92000
 
+// 93000 + cublasStatus_t identifies a failed compensated GEMM, not a CUDA runtime code.
+const cudaCompensatedGEMMFailedBase = 93000
+
 func cudaPromptPanelFail(site, msg string, code int) {
 	panic(&CUDAOpError{Op: "PromptPanel", Site: site, Msg: msg, Code: code, Class: MemoryActivation})
 }
@@ -40,8 +43,11 @@ type cudaGEMMScratch struct{ main, split int }
 
 // cudaGEMMError maps a non-zero fcuda GEMM status to a typed error: a scratch allocation miss
 // is a DeviceAllocError for the allocation that missed, any other status a CUDAOpError. The
-// GEMM launched nothing, so its output holds no result.
+// output is not publishable: a later compensated GEMM can fail after earlier contributions ran.
 func cudaGEMMError(op string, rc int, s cudaGEMMScratch) error {
+	if rc > cudaCompensatedGEMMFailedBase && rc < cudaCompensatedGEMMFailedBase+1000 {
+		return &CUDAOpError{Op: op, Site: "gemm-cublas", Msg: "compensated cuBLAS GEMM submission failed", Code: rc, Class: MemoryActivation}
+	}
 	if rc > cudaQ8ScratchRetireFailedBase && rc < cudaQ8ScratchRetireFailedBase+1000 {
 		return &CUDAOpError{Op: op, Site: "q8-scratch-retirement", Msg: "persistent Q8 scratch retirement failed", Code: rc - cudaQ8ScratchRetireFailedBase, Class: MemoryScratchpad}
 	}

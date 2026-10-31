@@ -47,6 +47,9 @@ static void *scratch_malloc(size_t bytes) {
 // 83000 + cudaError_t distinguishes retirement failure from an allocation miss.
 // Keep cudaGEMMError's decoder in cuda_prompt_panel.go in sync.
 #define FCUDA_SCRATCH_RETIRE_FAILED_BASE 83000
+// 93000 + cublasStatus_t is a synchronous compensated GEMM failure.
+// Keep the encoded family distinct from CUDA runtime and FP8Lt statuses.
+#define FCUDA_COMPENSATED_GEMM_FAILED_BASE 93000
 // Acquire the four prelaunch split buffers as one transaction (#14097).
 // Stop at the first miss, and physically retire only this operation's acquired,
 // still-unsubmitted owners. Returning them to g_pool would retain failed-prefill
@@ -273,19 +276,26 @@ static int fp16_compensated_release(FP16CompensatedScratch *scratch) {
   return 0;
 }
 
-// Same three ordered GEMMs for both already-split weight routes.
-static void fp16_compensated_gemm(const __half *wHi, const __half *wLo,
+// Same three ordered GEMMs for every compensated weight route.
+static int fp16_compensated_gemm(const __half *wHi, const __half *wLo,
     const __half *xHi, const __half *xLo, float *Y, int out, int in, int tokens) {
   const float one = 1.0f, zero = 0.0f;
-  FCUDA_TS("cublas_gemm_ex", dim3(out, tokens), cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
+  // Test status after FCUDA_TS closes its event, never from inside the macro.
+  // A failed contribution must stop the remaining GEMMs, not report partial output.
+  cublasStatus_t status = CUBLAS_STATUS_SUCCESS;
+  FCUDA_TS("cublas_gemm_ex", dim3(out, tokens), status = cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
       wHi, CUDA_R_16F, in, xHi, CUDA_R_16F, in, &zero, Y, CUDA_R_32F, out,
       CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
-  FCUDA_TS("cublas_gemm_ex", dim3(out, tokens), cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
+  if (status != CUBLAS_STATUS_SUCCESS) return FCUDA_COMPENSATED_GEMM_FAILED_BASE + (int)status;
+  FCUDA_TS("cublas_gemm_ex", dim3(out, tokens), status = cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
       wLo, CUDA_R_16F, in, xHi, CUDA_R_16F, in, &one, Y, CUDA_R_32F, out,
       CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
-  FCUDA_TS("cublas_gemm_ex", dim3(out, tokens), cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
+  if (status != CUBLAS_STATUS_SUCCESS) return FCUDA_COMPENSATED_GEMM_FAILED_BASE + (int)status;
+  FCUDA_TS("cublas_gemm_ex", dim3(out, tokens), status = cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, tokens, in, &one,
       wHi, CUDA_R_16F, in, xLo, CUDA_R_16F, in, &one, Y, CUDA_R_32F, out,
       CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+  if (status != CUBLAS_STATUS_SUCCESS) return FCUDA_COMPENSATED_GEMM_FAILED_BASE + (int)status;
+  return 0;
 }
 static int fp16_compensated_matmul(const float *W, const float *X, float *Y,
                                    int out, int in, int tokens) {
@@ -296,8 +306,9 @@ static int fp16_compensated_matmul(const float *W, const float *X, float *Y,
   __half *wHi = scratch.ptr[0], *wLo = scratch.ptr[1], *xHi = scratch.ptr[2], *xLo = scratch.ptr[3];
   FCUDA_TS("k_fp16_split", (wn + 255) / 256, k_fp16_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(W, wHi, wLo, wn));
   FCUDA_TS("k_fp16_split", (xn + 255) / 256, k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(X, xHi, xLo, xn));
-  fp16_compensated_gemm(wHi, wLo, xHi, xLo, Y, out, in, tokens);
-  return fp16_compensated_release(&scratch);
+  const int gemm_status = fp16_compensated_gemm(wHi, wLo, xHi, xLo, Y, out, in, tokens);
+  const int release_status = fp16_compensated_release(&scratch);
+  return gemm_status != 0 ? gemm_status : release_status;
 }
 
 __global__ void k_q8_dequant_transient(const signed char *codes, const float *scales,
@@ -333,8 +344,9 @@ static int q8_dequant_sgemm(const void *codes, const float *scales,
   FCUDA_TS("k_q8_dequant_split", (wn + 255) / 256, k_q8_dequant_split<<<(wn + 255) / 256, 256, 0, g_stream>>>(
       (const signed char *)codes, scales, wHi, wLo, wn, cols, block));
   FCUDA_TS("k_fp16_split", (xn + 255) / 256, k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(X, xHi, xLo, xn));
-  fp16_compensated_gemm(wHi, wLo, xHi, xLo, Y, rows, cols, tokens);
-  return fp16_compensated_release(&scratch);
+  const int gemm_status = fp16_compensated_gemm(wHi, wLo, xHi, xLo, Y, rows, cols, tokens);
+  const int release_status = fp16_compensated_release(&scratch);
+  return gemm_status != 0 ? gemm_status : release_status;
 }
 
 __global__ void k_qwen35_gdn_fused_in_proj(

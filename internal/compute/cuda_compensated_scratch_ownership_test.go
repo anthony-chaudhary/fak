@@ -66,6 +66,7 @@ func TestCUDACompensatedScratchFailureOwnership(t *testing.T) {
 		return ""
 	}
 	gdn, quant := read("cuda/qwen35_gdn.cuh"), read("cuda/quant_matmul.cuh")
+	iq4xs := read("cuda/iq4xs_mmvq.cuh")
 	memory, header := read("cuda/runtime_memory.cuh"), read("cuda_backend.h")
 	loan := strings.Contains(gdn, "struct SequenceSplitOwner")
 	// Compile the actual ledger, including its pointer table and atomic counters.
@@ -90,19 +91,29 @@ func TestCUDACompensatedScratchFailureOwnership(t *testing.T) {
 		program += "\n" + function(memory, signature) + "\n"
 	}
 	program += between(gdn, "#define FCUDA_SCRATCH_ALLOC_FAILED ", "// Same three ordered GEMMs")
-	for i, tc := range []struct{ source, signature string }{
-		{gdn, "static int fp16_compensated_matmul("},
-		{gdn, "static int q8_dequant_sgemm("},
-		{quant, "extern \"C\" int fcuda_q4k_matmul_f32("},
-		{quant, "extern \"C\" int fcuda_q2k_matmul_f32("},
+	// Execute the actual helper, including status capture and timing-event exit.
+	// The old void helper remains extractable so the new failure witness is RED
+	// on swallowed statuses rather than merely a missing-signature assertion.
+	gemmSignature := "static int fp16_compensated_gemm("
+	if !strings.Contains(gdn, gemmSignature) {
+		gemmSignature = "static void fp16_compensated_gemm("
+	}
+	program += "\n" + function(gdn, gemmSignature) + "\n"
+	for i, tc := range []struct{ source, signature, branch, sizeDecl string }{
+		{gdn, "static int fp16_compensated_matmul(", "", "size_t wn ="},
+		{gdn, "static int q8_dequant_sgemm(", "", "size_t wn ="},
+		{quant, "extern \"C\" int fcuda_q4k_matmul_f32(", "if (P >= 128)", "size_t wn ="},
+		{quant, "extern \"C\" int fcuda_q2k_matmul_f32(", "if (P >= 128)", "size_t wn ="},
+		{iq4xs, "extern \"C\" int fcuda_iq4xs_matmul_f32(", "if (P >= FCUDA_IQ4XS_DEQUANT_MIN_P)", "const size_t wn ="},
 	} {
 		body := function(tc.source, tc.signature)
-		if i >= 2 {
-			body = function(body, "if (P >= 128)")
+		if tc.branch != "" {
+			body = function(body, tc.branch)
 		}
-		block := between(body, "size_t wn =", "FCUDA_TS(")
-		// Only the two kernel launches and GEMM are represented by fake
-		// pending reads. Never silently omit ownership effects in that span.
+		block := between(body, tc.sizeDecl, "FCUDA_TS(")
+		// Only the two kernel launches are represented by fake pending reads.
+		// The production GEMM helper executes against fake cuBLAS below. Never
+		// silently omit ownership effects in the replaced kernel-launch span.
 		launches := between(body, "FCUDA_TS(", "fp16_compensated_gemm(")
 		for _, forbidden := range []string{"malloc", "Malloc", "free", "Free", "discard", "release", "g_pool", "g_live"} {
 			if strings.Contains(launches, forbidden) {
@@ -114,12 +125,15 @@ func TestCUDACompensatedScratchFailureOwnership(t *testing.T) {
 		if semicolon < 0 {
 			t.Fatalf("production GEMM statement is incomplete: %s", tc.signature)
 		}
-		// Execute the exact post-GEMM suffix through its containing branch
-		// close, including any future cleanup, rather than a modeled release.
+		// Execute the exact GEMM statement (including its result binding) and
+		// post-GEMM suffix through the containing branch close. Cleanup is the
+		// production release, not a modeled call.
+		statementStart := strings.LastIndex(body[:gemm], "\n") + 1
+		statement := body[statementStart : gemm+semicolon+1]
 		release := body[gemm+semicolon+1 : len(body)-1]
 		program += fmt.Sprintf("\nstatic int route%d(int out=320, int in=256, int tokens=128) {\n", i) +
-			"const int rows=out, cols=in, P=tokens;\n" + block +
-			"\n++launches; ++pending_reads;\n" + release + "\n}\n"
+			"const int rows=out, cols=in, P=tokens;\nfloat output=0; float *Y=&output, *dY=&output;\n" + block +
+			"\n++launches; ++pending_reads;\n" + statement + release + "\n}\n"
 	}
 	if loan {
 		program += "\n" + function(gdn, "static cudaError_t qwen35_gdn_fence(")
@@ -150,6 +164,9 @@ func TestCUDACompensatedScratchFailureOwnership(t *testing.T) {
 	// These tagged Go adapter checks are source contracts only, not execution.
 	mapping := read("cuda_prompt_panel.go")
 	for _, want := range []string{
+		"cudaCompensatedGEMMFailedBase = 93000",
+		"rc > cudaCompensatedGEMMFailedBase && rc < cudaCompensatedGEMMFailedBase+1000",
+		`Site: "gemm-cublas", Msg: "compensated cuBLAS GEMM submission failed", Code: rc, Class: MemoryActivation`,
 		"cudaScratchRetireFailedBase = 83000",
 		"rc > cudaScratchRetireFailedBase && rc < cudaScratchRetireFailedBase+1000",
 		`Site: "gemm-scratch-retirement", Msg: "scratch retirement failed after allocation miss", Code: rc - cudaScratchRetireFailedBase, Class: MemoryScratchpad`,
@@ -223,6 +240,23 @@ const cudaCompensatedScratchHarness = `
 #include <utility>
 #include <vector>
 using __half = unsigned short;
+using cublasStatus_t = int;
+static constexpr int CUBLAS_STATUS_SUCCESS=0, CUBLAS_OP_T=1, CUBLAS_OP_N=0;
+static constexpr int CUDA_R_16F=2, CUDA_R_32F=3, CUBLAS_COMPUTE_32F=4, CUBLAS_GEMM_DEFAULT_TENSOR_OP=5;
+static int g_blas=0, cublas_calls=0, cublas_fail_at=0, cublas_error=13;
+static constexpr int QK_K=256;
+static unsigned long long g_iq4xs_dequant_gemm_launches=0;
+static int timing_begins=0, timing_ends=0;
+static std::vector<const void *> cublas_weights, cublas_inputs;
+static std::vector<float> cublas_betas;
+#define FCUDA_TS(name, grid, ...) do { ++timing_begins; __VA_ARGS__; ++timing_ends; } while (0)
+static cublasStatus_t cublasGemmEx(int, int, int, int, int, int, const float *,
+    const void *weight, int, int, const void *input, int, int, const float *beta,
+    void *, int, int, int, int) {
+  ++cublas_calls;
+  cublas_weights.push_back(weight); cublas_inputs.push_back(input); cublas_betas.push_back(*beta);
+  return cublas_calls==cublas_fail_at ? cublas_error : CUBLAS_STATUS_SUCCESS;
+}
 using cudaError_t = int;
 using cudaStreamCaptureStatus = int;
 static constexpr int cudaSuccess=0, cudaErrorInvalidValue=1, cudaErrorMemoryAllocation=2;
@@ -306,6 +340,9 @@ static void reset_context() {
   runtime_capture=cudaStreamCaptureStatusNone; capture_queries=capture_query_error=0;
   alloc_error=cudaErrorMemoryAllocation;
   last_error=get_last_error_calls=0;
+  cublas_calls=cublas_fail_at=timing_begins=timing_ends=0; cublas_error=13;
+  g_iq4xs_dequant_gemm_launches=0;
+  cublas_weights.clear(); cublas_inputs.clear(); cublas_betas.clear();
   physical.clear(); g_live.clear(); g_managed_live.clear(); g_panel_live.clear();
   allocated.clear();
   g_pool.clear(); g_panel_pool.clear();
@@ -337,7 +374,7 @@ static bool private_ledger_matches() {
 #endif
 int main() {
   using Route=int (*)(int,int,int);
-  const Route routes[]={route0, route1, route2, route3};
+  const Route routes[]={route0, route1, route2, route3, route4};
   // The shared allocator consumes a real capacity miss exactly once, while
   // leaving a non-OOM execution fault pending for the next status reader.
   reset_context(); alloc_fail_at=1;
@@ -346,6 +383,33 @@ int main() {
   reset_context(); alloc_fail_at=1; alloc_error=700;
   CHECK(fcuda_malloc(1024)==nullptr);
   CHECK(last_error==700 && get_last_error_calls==0 && g_live.empty());
+  // Synchronous cuBLAS errors cannot become scratch-release success. Test the
+  // exact helper and all five actual caller suffixes; these are synthetic
+  // statuses, not a CUDA numerical, device, or asynchronous-error witness.
+  for (Route route : routes) {
+    for (int fail=1; fail<=3; ++fail) {
+      reset_context(); cublas_fail_at=fail;
+      CHECK(route(320,256,128)==93000+cublas_error);
+      CHECK(cublas_calls==fail && timing_begins==fail && timing_ends==fail);
+      CHECK(g_iq4xs_dequant_gemm_launches==(route==route4 ? 1u : 0u));
+      CHECK(attempts==4 && pooled()==4 && g_live.empty() && retired==0);
+    }
+    reset_context();
+    CHECK(route(320,256,128)==0);
+    CHECK(cublas_calls==3 && timing_begins==3 && timing_ends==3);
+    CHECK(g_iq4xs_dequant_gemm_launches==(route==route4 ? 1u : 0u));
+    CHECK(cublas_weights[0]==allocated[0].first && cublas_weights[1]==allocated[1].first && cublas_weights[2]==allocated[0].first);
+    CHECK(cublas_inputs[0]==allocated[2].first && cublas_inputs[1]==allocated[2].first && cublas_inputs[2]==allocated[3].first);
+    CHECK(cublas_betas[0]==0.0f && cublas_betas[1]==1.0f && cublas_betas[2]==1.0f);
+  }
+  // IQ4_XS enters this same production branch at 32 rows, not 128. Its
+  // existing counter is an attempted-route witness even when cuBLAS refuses.
+  for (int fail=1; fail<=3; ++fail) {
+    reset_context(); cublas_fail_at=fail;
+    CHECK(route4(320,256,32)==93000+cublas_error);
+    CHECK(cublas_calls==fail && g_iq4xs_dequant_gemm_launches==1);
+    CHECK(pooled()==4 && g_live.empty() && retired==0);
+  }
   // Preserve the original no-scope allocation-failure and success contracts.
   for (Route route : routes) {
     for (int miss=1; miss<=4; ++miss) {
@@ -381,6 +445,20 @@ int main() {
   const size_t wbytes=640*256*sizeof(__half), xbytes=128*512*sizeof(__half);
   unsigned long long token=0;
   fcuda_sequence_split_status status{};
+  for (Route route : routes) {
+    for (int fail=1; fail<=3; ++fail) {
+      reset_context();
+      CHECK(fcuda_sequence_split_begin(wbytes,xbytes,&token,&status)==0);
+      cublas_fail_at=fail;
+      CHECK(route(320,256,128)==93000+cublas_error);
+      CHECK(cublas_calls==fail && timing_begins==fail && timing_ends==fail);
+      CHECK(g_iq4xs_dequant_gemm_launches==(route==route4 ? 1u : 0u));
+      CHECK(!g_sequence_split.borrowed && g_live.size()==4 && pooled()==0 && retired==0);
+      CHECK(private_ledger_matches());
+      CHECK(fcuda_sequence_split_end(token,&status)==0);
+      CHECK(g_live.empty() && physical.empty() && retired==4 && private_ledger_matches());
+    }
+  }
   reset_context();
   CHECK(fcuda_sequence_split_begin(wbytes,xbytes,&token,&status)==0);
   CHECK(private_ledger_matches());

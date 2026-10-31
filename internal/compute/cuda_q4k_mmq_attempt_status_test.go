@@ -187,7 +187,7 @@ static void mock_launch(const char *name){
 namespace fak_q4k_mmq { template<int J,bool fallback> static void mul_mat_q(){} }
 struct FP16CompensatedScratch { __half *ptr[4]; };
 static int fp16_compensated_scratch(size_t,size_t,FP16CompensatedScratch*){return 77;}
-static void fp16_compensated_gemm(__half*,__half*,__half*,__half*,float*,int,int,int){}
+static int fp16_compensated_gemm(__half*,__half*,__half*,__half*,float*,int,int,int){return 0;}
 static int fp16_compensated_release(FP16CompensatedScratch*){return 0;}
 static int fcuda_q4k_fp8lt_matmul(const uint8_t*,const float*,float*,int,int,int){return 78;}
 static int fcuda_q4k_mmvq_matmul(const uint8_t*,const float*,float*,int,int,int){return 79;}
