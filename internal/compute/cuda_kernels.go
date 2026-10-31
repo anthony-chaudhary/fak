@@ -106,6 +106,11 @@ func (c *cudaBackend) qwen35SequenceAllocLocked(shape []int, site string) (Tenso
 }
 
 func (c *cudaBackend) qwen35SequenceMatMulLocked(w, x Tensor, tokens int, site string) (Tensor, *cudaBuf, error) {
+	if w.Dtype == Q2_K {
+		if err := c.validateQ2KOperands(w, x, tokens, tokens != 1 || len(x.Shape) != 1); err != nil {
+			return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: err}
+		}
+	}
 	y, b, err := c.qwen35SequenceAllocLocked([]int{tokens, w.Shape[0]}, site)
 	if err != nil {
 		return Tensor{}, nil, err

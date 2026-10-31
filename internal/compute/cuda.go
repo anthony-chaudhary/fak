@@ -1039,14 +1039,10 @@ func (c *cudaBackend) cudaNVFP4LtCallsForTest() uint64 {
 // SGEMM (F32), tensor-core HGEMM (F16), or native Q8_0/Q4_K device GEMV; output is F32-resident.
 func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 	cudaMu.Lock()
-	trace := computetrace.Enabled()
+	trace := false
 	var started time.Time
 	var y Tensor
 	completed := false
-	if trace {
-		started = time.Now()
-		C.fcuda_event_elapsed_ms_start()
-	}
 	defer func() {
 		if trace {
 			ms := float64(C.fcuda_event_elapsed_ms_end())
@@ -1058,6 +1054,14 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 		}
 		cudaMu.Unlock()
 	}()
+	if w.Dtype == Q2_K {
+		c.checkQ2KOperands(w, x, 1, false)
+	}
+	trace = computetrace.Enabled()
+	if trace {
+		started = time.Now()
+		C.fcuda_event_elapsed_ms_start()
+	}
 	if w.Dtype == Q3_K {
 		c.checkQ3KWeight(w)
 	}
@@ -1156,14 +1160,10 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 // weight dtype to the SGEMM (F32), tensor-core HGEMM (F16), or native Q8_0/Q4_K device GEMM.
 func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	cudaMu.Lock()
-	trace := computetrace.Enabled()
+	trace := false
 	var started time.Time
 	var y Tensor
 	completed := false
-	if trace {
-		started = time.Now()
-		C.fcuda_event_elapsed_ms_start()
-	}
 	defer func() {
 		if trace {
 			ms := float64(C.fcuda_event_elapsed_ms_end())
@@ -1175,6 +1175,14 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		}
 		cudaMu.Unlock()
 	}()
+	if w.Dtype == Q2_K {
+		c.checkQ2KOperands(w, X, P, true)
+	}
+	trace = computetrace.Enabled()
+	if trace {
+		started = time.Now()
+		C.fcuda_event_elapsed_ms_start()
+	}
 	if w.Dtype == Q3_K {
 		c.checkQ3KWeight(w)
 	}
