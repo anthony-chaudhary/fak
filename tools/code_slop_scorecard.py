@@ -277,6 +277,10 @@ def grade_letter(score: float) -> str:
 # ---------------------------------------------------------------------------
 
 def _code_only(line: str, in_raw: bool, in_block: bool) -> tuple[str, bool, bool]:
+    # Without carried state or a lexical opener, the loop only copies characters.
+    if (not in_raw and not in_block and "/" not in line and "`" not in line
+            and '"' not in line and "'" not in line):
+        return line, False, False
     out: list[str] = []
     i, n = 0, len(line)
     while i < n:
