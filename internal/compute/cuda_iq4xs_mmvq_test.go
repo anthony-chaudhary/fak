@@ -140,7 +140,10 @@ func TestIQ4XSCUDASourceContract(t *testing.T) {
 			t.Errorf("cuda/iq4xs_mmvq.cuh lost %q", sym)
 		}
 	}
-	if !strings.Contains(read("cuda_kernels.cu"), "#include \"cuda/iq_gemv.cuh\"\n#include \"cuda/iq4xs_mmvq.cuh\"") {
+	kernels := read("cuda_kernels.cu")
+	iqGEMV := strings.Index(kernels, `#include "cuda/iq_gemv.cuh"`)
+	iq4XS := strings.Index(kernels, `#include "cuda/iq4xs_mmvq.cuh"`)
+	if iqGEMV < 0 || iq4XS < 0 || iq4XS <= iqGEMV {
 		t.Error("cuda_kernels.cu must include cuda/iq4xs_mmvq.cuh after cuda/iq_gemv.cuh (fcuda_kvalues_iq4nl)")
 	}
 	hdr := read("cuda_backend.h")

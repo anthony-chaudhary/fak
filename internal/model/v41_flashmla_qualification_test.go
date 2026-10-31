@@ -31,7 +31,7 @@ func TestV41FlashQualificationCompactSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if x.Blocks != 2 || x.PageSize != 1 || x.Length != 4 || len(x.Indices) != 64 || x.Query[0] != 0x3f80 {
+	if x.Blocks != 2 || x.PageSize != 1 || x.Length != 4 || len(x.Indices) != 64 || x.Query[0] != 0x3f80 { //boundarylint:ignore CHANGE_DETECTOR_TEST fixed FlashMLA sparse-index ABI requires 64-slot tiles; this four-slot fixture occupies one
 		t.Fatal("geometry/query")
 	}
 	wantIDs := []int32{0, -1, 0, 1}
@@ -70,7 +70,7 @@ func TestV41FlashQualificationAllInvalidAndPadding(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if x.Blocks != 1 || len(x.KV) != 528 || len(x.Query) != 32768 || len(x.Sink) != 64 || x.Length != int32(slots) || len(x.Indices) != max(64, (slots+63)/64*64) {
+		if x.Blocks != 1 || len(x.KV) != 528 || len(x.Query) != 32768 || len(x.Sink) != 64 || x.Length != int32(slots) || len(x.Indices) != max(64, (slots+63)/64*64) { //boundarylint:ignore CHANGE_DETECTOR_TEST fixed FlashMLA V4.1 ABI retains one 528-byte row, a 64x512 query, and 64 sinks
 			t.Fatal("empty request lost real operands")
 		}
 		for _, id := range x.Indices {

@@ -259,6 +259,7 @@ func TestPrepushFocusedReportCannotBecomeBuildEvidence(t *testing.T) {
 
 type focusedFixture struct {
 	root, bin, path, executable, base, introduced, badConcept, good, badImport string
+	timeoutGitTrace                                                            string
 }
 
 func newFocusedFixture(t *testing.T) focusedFixture {
@@ -357,6 +358,7 @@ func (f focusedFixture) git(t *testing.T, args ...string) string {
 func (f focusedFixture) run(t *testing.T, executable string, args []string, input string) (string, int, [][]string) {
 	t.Helper()
 	trace := filepath.Join(t.TempDir(), "calls.jsonl")
+	started := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	cmd := windowgate.CommandContext(ctx, executable, args...)
@@ -401,6 +403,12 @@ func (f focusedFixture) run(t *testing.T, executable string, args []string, inpu
 		"FLEET_BUILD_GUARD="+buildMode, "FLEET_WORKFLOW_GUARD="+workflowMode, "FLEET_TIER_GUARD="+tierMode,
 		"FLEET_POPUP_GUARD="+popupMode, "FLEET_REVIEW_GUARD="+reviewMode, "FLEET_REFPRUNE_GUARD="+refpruneMode)
 	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil && f.timeoutGitTrace != "" {
+		// These are bounded snapshots of calls started, not proof of completion
+		// or per-command duration. Never dump argv, paths, environment, or output.
+		t.Logf("focused timeout stage=command-returned elapsed_ms=%d helper={%s} git={%s}", time.Since(started).Milliseconds(), focusedTimeoutTrace(trace, false), focusedTimeoutTrace(f.timeoutGitTrace, true))
+		t.Fatalf("focused path performed forbidden work or did not terminate: %v", ctx.Err())
+	}
 	code := 0
 	if err != nil {
 		if exit, ok := err.(*exec.ExitError); ok {
@@ -437,6 +445,115 @@ func (f focusedFixture) run(t *testing.T, executable string, args []string, inpu
 		calls = append(calls, call)
 	}
 	return string(out), code, calls
+}
+
+const focusedTimeoutTraceBytes = 16 * 1024
+const focusedTimeoutTraceRecords = 64
+
+// focusedTimeoutTrace reports only closed categories from bounded fixture traces.
+// A missing or incomplete trace is evidence unavailable, never a successful stage.
+func focusedTimeoutTrace(path string, git bool) string {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return "state=missing"
+	}
+	if err != nil || !info.Mode().IsRegular() {
+		return "state=unavailable"
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "state=unavailable"
+	}
+	defer file.Close()
+	if info, err := file.Stat(); err != nil || !info.Mode().IsRegular() {
+		return "state=unavailable"
+	}
+	data, err := io.ReadAll(io.LimitReader(file, focusedTimeoutTraceBytes+1))
+	if err != nil {
+		return "state=read-error"
+	}
+	state, last, calls := "snapshot", "none", 0
+	if len(data) > focusedTimeoutTraceBytes {
+		data, state = data[:focusedTimeoutTraceBytes], "byte-limit"
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	for calls < focusedTimeoutTraceRecords {
+		var args []string
+		if err := dec.Decode(&args); err == io.EOF {
+			break
+		} else if err != nil {
+			if state != "byte-limit" {
+				state = "malformed"
+			}
+			break
+		}
+		calls++
+		last = focusedTimeoutOperation(args, git)
+	}
+	if calls == focusedTimeoutTraceRecords {
+		state = "record-limit"
+	}
+	return fmt.Sprintf("state=%s calls=%d last_started=%s", state, calls, last)
+}
+
+func focusedTimeoutOperation(args []string, git bool) string {
+	if !git {
+		if len(args) >= 2 && args[0] == "hooks" {
+			switch args[1] {
+			case "import-witness", "pre-push":
+				return args[1]
+			}
+		}
+		return "other"
+	}
+	for len(args) > 0 {
+		switch args[0] {
+		case "--no-lazy-fetch", "--no-replace-objects":
+			args = args[1:]
+		case "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env":
+			if len(args) < 2 {
+				return "other"
+			}
+			args = args[2:]
+		case "version", "config", "rev-parse", "cat-file", "ls-tree", "grep", "diff", "show", "log", "rev-list", "fetch":
+			return args[0]
+		default:
+			return "other"
+		}
+	}
+	return "other"
+}
+
+// fak-test:runtime fast est=10ms
+func TestFocusedTimeoutTraceIsBoundedAndSanitized(t *testing.T) {
+	const secret = "private-fixture-token"
+	for _, tc := range []struct {
+		name, data, want string
+		git              bool
+	}{
+		{"helper", `["hooks","pre-push","https://` + secret + `@example.invalid"]`, "state=snapshot calls=1 last_started=pre-push", false},
+		{"git", `["-c","` + secret + `","--no-lazy-fetch","--no-replace-objects","cat-file","` + secret + `"]`, "state=snapshot calls=1 last_started=cat-file", true},
+		{"unknown", `["` + secret + `","fetch"]`, "state=snapshot calls=1 last_started=other", true},
+		{"malformed", `["` + secret, "state=malformed calls=0 last_started=none", true},
+		{"bytes", `["version"]` + strings.Repeat(" ", focusedTimeoutTraceBytes) + secret, "state=byte-limit calls=1 last_started=version", true},
+		{"records", strings.Repeat(`["version"]`+"\n", focusedTimeoutTraceRecords+1), "state=record-limit calls=64 last_started=version", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "trace.jsonl")
+			if err := os.WriteFile(path, []byte(tc.data), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if got := focusedTimeoutTrace(path, tc.git); got != tc.want || strings.Contains(got, secret) || len(got) > 128 {
+				t.Fatal("timeout trace lost its bounded sanitized summary contract")
+			}
+		})
+	}
+	if got := focusedTimeoutTrace(filepath.Join(t.TempDir(), "missing"), true); got != "state=missing" {
+		t.Fatal("missing trace was not classified without raw errors")
+	}
+	if got := focusedTimeoutTrace(t.TempDir(), true); got != "state=unavailable" {
+		t.Fatal("non-regular trace was not rejected")
+	}
 }
 
 func focusedCallCount(calls [][]string, command string, flagValues ...string) int {
@@ -708,6 +825,7 @@ func TestPrepushWithoutLazyFetchOption(t *testing.T) {
 			t.Setenv(focusedGitShimRealEnv, realGit)
 			t.Setenv(focusedGitShimOptionEnv, tc.optionExit)
 			t.Setenv(focusedGitShimTraceEnv, trace)
+			f.timeoutGitTrace = trace
 			var out string
 			var code int
 			var calls [][]string

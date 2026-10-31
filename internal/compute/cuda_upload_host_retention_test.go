@@ -21,6 +21,20 @@ func TestCUDAUploadHostRetentionCountsIndexedLogicalViews(t *testing.T) {
 		{5, F32, RowMajor}:  {buf: f32},        // not a CUDA cache owner
 		{6, F32, RowMajor}:  {buf: (*cudaBuf)(nil)},
 	}
+	// Capture identities in a separate map before observation: cache itself is
+	// installed by reference, so comparing its later length would be circular.
+	type owners struct {
+		buffer Buffer
+		host   HostBuffer
+	}
+	wantOwners := make(map[ucKey]owners, len(cache))
+	for key, cached := range cache {
+		want := owners{buffer: cached.buf}
+		if buf, ok := cached.buf.(*cudaBuf); ok && buf != nil {
+			want.host = buf.hostKeep
+		}
+		wantOwners[key] = want
+	}
 	cudaMu.Lock()
 	saved := uploadCache
 	uploadCache = cache
@@ -37,9 +51,20 @@ func TestCUDAUploadHostRetentionCountsIndexedLogicalViews(t *testing.T) {
 		t.Fatalf("indexed logical views = (%d, %d, %d), want (4, 464, 32)", entries, payload, scales)
 	}
 	cudaMu.Lock()
-	if len(uploadCache) != 7 || rawOwner.hostKeep != raw || rawOwner.ptr != nil {
+	if len(uploadCache) != len(wantOwners) || rawOwner.hostKeep != raw || rawOwner.ptr != nil {
 		cudaMu.Unlock()
 		t.Fatal("observation changed source or cache ownership")
+	}
+	for key, want := range wantOwners {
+		cached, ok := uploadCache[key]
+		if !ok || cached.buf != want.buffer {
+			cudaMu.Unlock()
+			t.Fatal("observation changed a cache key or buffer owner")
+		}
+		if buf, ok := cached.buf.(*cudaBuf); ok && buf != nil && buf.hostKeep != want.host {
+			cudaMu.Unlock()
+			t.Fatal("observation changed a cached host owner")
+		}
 	}
 	delete(uploadCache, ucKey{2, Q4_K, RowMajor})
 	cudaMu.Unlock()

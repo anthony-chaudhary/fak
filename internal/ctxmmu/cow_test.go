@@ -693,7 +693,7 @@ func TestCOWTreeSpeculation_ForkAndSquashLatency(t *testing.T) {
 
 	// Sub-20µs requirement per branch on average
 	if avgLatency >= 20*time.Microsecond {
-		t.Fatalf("average branch latency %v exceeded 20µs threshold", avgLatency)
+		t.Errorf("average branch latency %v exceeded 20µs threshold", avgLatency)
 	}
 
 	// Verify 0 duplicate physical pages allocated

@@ -150,7 +150,9 @@ process.exit(response.status===200?(process.env.FAK_TEST_PI_FAIL==='1'?23:0):24)
 			dir := t.TempDir()
 			models := filepath.Join(dir, "models.json")
 			settings := filepath.Join(dir, "settings.json")
-			args := []string{"--check-backend=false", "--base-url", server.URL + "/v1", "--model", "independent-pi-model", "--window", "8192", "--config-path", models, "--settings-path", settings, "--probe", "test"}
+			// Keep this auth witness on a viable 64Ki context so it reaches the
+			// credential/provider boundary rather than the context-admission refusal.
+			args := []string{"--check-backend=false", "--base-url", server.URL + "/v1", "--model", "independent-pi-model", "--window", "65536", "--config-path", models, "--settings-path", settings, "--probe", "test"}
 			var stdout, stderr bytes.Buffer
 			rc := runPi(&stdout, &stderr, args)
 			mu.Lock()
