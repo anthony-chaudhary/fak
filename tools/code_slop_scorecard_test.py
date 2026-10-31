@@ -1331,6 +1331,32 @@ def test_fix4_dispatch_arm_with_loop_stays_debt():
     assert len(cs.kpi_duplication({"a.go": sw})["defects"]) >= 1
 
 
+def test_sort_scaffold_no_sort_fast_rejection_preserves_predicate():
+    def original(key):
+        has_sort = any(key[i] == "sort" and key[i + 1] == "."
+                       and key[i + 2] in cs._SORT_VERBS
+                       for i in range(len(key) - 2))
+        return (has_sort and not any(t in cs._COMPARE_TOKENS for t in key)
+                and not any(t in cs._CONTROL_KEYWORDS for t in key))
+
+    class NoIndexTuple(tuple):
+        def __getitem__(self, index):
+            raise AssertionError("no-sort window entered the Python index loop")
+
+    assert cs._is_sort_scaffold_only(NoIndexTuple(["name"] * cs.CLONE_WINDOW_TOKENS)) is False
+    cases = [(), ("sort",), ("sort", "."), ("sort", ".", "Unknown"),
+             ("sort", "not-dot", "Slice"), ("sort", "sort", ".", "Sort")]
+    for pos in range(cs.CLONE_WINDOW_TOKENS):
+        for verb in cs._SORT_VERBS:
+            key = ["name"] * cs.CLONE_WINDOW_TOKENS
+            key[pos:pos + 3] = ["sort", ".", verb][:len(key) - pos]
+            cases.append(tuple(key))
+            for guard in cs._COMPARE_TOKENS | cs._CONTROL_KEYWORDS:
+                cases.append(tuple(key) + (guard,))
+    for key in cases:
+        assert cs._is_sort_scaffold_only(key) == original(key), key
+
+
 def test_fix5_sort_scaffold_only_window_skipped():
     # FP: a shared sort.Slice scaffold with NO comparison operator in the window.
     blk = ("package {p}\nfunc sort{n}(rows []Row) {{\n"
