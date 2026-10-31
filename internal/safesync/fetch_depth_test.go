@@ -18,6 +18,8 @@ func TestFetchDepthPinnedTransportAndRefusals(t *testing.T) {
 				out := ""
 				switch args[0] {
 				case "check-ref-format":
+				case "for-each-ref":
+					out = "refs/remotes/origin/main\n"
 				case "merge-base":
 					bases++
 					out = base
@@ -100,6 +102,8 @@ func TestFetchDepthExplicitPostBaseAdvancement(t *testing.T) {
 				out := ""
 				switch args[0] {
 				case "check-ref-format":
+				case "for-each-ref":
+					out = "refs/remotes/origin/main\n"
 				case "merge-base":
 					if args[1] == "--is-ancestor" {
 						ancestry = append(ancestry, append([]string(nil), args...))
@@ -199,5 +203,150 @@ func TestFetchDepthInvalidPostBaseRefusesBeforeTransport(t *testing.T) {
 	}
 	if calls != 0 {
 		t.Fatalf("invalid post-base invoked %d commands", calls)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestFetchDepthMissingTrackingBootstrapPreservesVisibleGraph(t *testing.T) {
+	base, target := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	side, parent, older := strings.Repeat("c", 40), strings.Repeat("d", 40), strings.Repeat("e", 40)
+	tracking := "refs/remotes/origin/main"
+	for _, fail := range []string{
+		"", "missing-base", "missing-target", "missing-depth", "ref-error", "ref-start-error", "ref-warning", "ref-present", "ref-descendant", "ref-race",
+		"head-error", "wrong-base", "head-race", "pre-remote", "pre-graph-error", "pre-graph-empty", "pre-graph-invalid", "pre-graph-duplicate", "pre-graph-missing-head", "pre-graph-missing-parent",
+		"fetch", "tracking", "post-base", "post-remote", "post-head", "post-graph-error", "lost-node", "lost-edge",
+	} {
+		t.Run(fail, func(t *testing.T) {
+			fetches, bases, refs, heads, remotes, graphs := 0, 0, 0, 0, 0, 0
+			run := func(_ context.Context, _ string, args ...string) RunResult {
+				out := ""
+				switch args[0] {
+				case "check-ref-format":
+				case "merge-base":
+					if !reflect.DeepEqual(args, []string{"merge-base", "--all", "HEAD", tracking}) {
+						t.Fatalf("unexpected ancestry probe %q", args)
+					}
+					bases++
+					if bases == 1 || fail == "post-base" {
+						return RunResult{Code: 128}
+					}
+					out = base
+				case "for-each-ref":
+					if !reflect.DeepEqual(args, []string{"for-each-ref", "--format=%(refname)", "--", tracking}) {
+						t.Fatalf("unexpected absence probe %q", args)
+					}
+					refs++
+					switch fail {
+					case "ref-error":
+						return RunResult{Code: 1}
+					case "ref-start-error":
+						return RunResult{Err: context.Canceled}
+					case "ref-warning":
+						return RunResult{Stderr: []byte("warning: broken ref")}
+					case "ref-present":
+						out = tracking
+					case "ref-descendant":
+						out = tracking + "/child"
+					case "ref-race":
+						if refs == 2 {
+							out = tracking
+						}
+					}
+				case "rev-parse":
+					switch args[len(args)-1] {
+					case "HEAD":
+						heads++
+						if fail == "head-error" {
+							return RunResult{Code: 1}
+						}
+						out = base
+						if fail == "wrong-base" || (fail == "head-race" && heads == 2) || (fail == "post-head" && fetches > 0) {
+							out = side
+						}
+					case tracking:
+						out = target
+						if fail == "tracking" {
+							out = side
+						}
+					default:
+						t.Fatalf("unexpected revision probe %q", args)
+					}
+				case "ls-remote":
+					remotes++
+					out = target + "\trefs/heads/main\n"
+					if fail == "pre-remote" || (fail == "post-remote" && remotes == 2) {
+						out = side + "\trefs/heads/main\n"
+					}
+				case "rev-list":
+					if !reflect.DeepEqual(args, []string{"rev-list", "--parents", "--all", "HEAD"}) {
+						t.Fatalf("incomplete graph scope %q", args)
+					}
+					graphs++
+					out = base + "\n" + side + " " + parent + "\n" + parent + "\n"
+					if graphs == 1 {
+						switch fail {
+						case "pre-graph-error":
+							return RunResult{Code: 1}
+						case "pre-graph-empty":
+							out = ""
+						case "pre-graph-invalid":
+							out = base + " short\n"
+						case "pre-graph-duplicate":
+							out += base + "\n"
+						case "pre-graph-missing-head":
+							out = side + "\n"
+						case "pre-graph-missing-parent":
+							out = base + " " + parent + "\n"
+						}
+					} else {
+						out = target + " " + base + "\n" + base + " " + older + "\n" + older + "\n" + side + " " + parent + "\n" + parent + "\n"
+						switch fail {
+						case "post-graph-error":
+							return RunResult{Code: 1}
+						case "lost-node":
+							out = target + " " + base + "\n" + base + "\n"
+						case "lost-edge":
+							out = target + " " + base + "\n" + base + "\n" + side + "\n" + parent + "\n"
+						}
+					}
+				case "fetch":
+					fetches++
+					want := []string{"fetch", "--no-tags", "--no-recurse-submodules", "--depth=30", "--", "origin", target + ":" + tracking}
+					if !reflect.DeepEqual(args, want) {
+						t.Fatalf("transport args %q, want %q", args, want)
+					}
+					if fail == "fetch" {
+						return RunResult{Code: 1}
+					}
+				default:
+					t.Fatalf("unexpected command %q", args)
+				}
+				return RunResult{Stdout: []byte(out)}
+			}
+			depth, basePin, targetPin := 30, base, target
+			switch fail {
+			case "missing-base":
+				basePin = ""
+			case "missing-target":
+				targetPin = ""
+			case "missing-depth":
+				depth = 0
+			}
+			err := fetchWithDepth(context.Background(), run, ".", "origin", "main", depth, basePin, targetPin)
+			wantFetch := fail == "" || fail == "fetch" || fail == "tracking" || strings.HasPrefix(fail, "post-") || strings.HasPrefix(fail, "lost-")
+			if (err != nil) != (fail != "") || fetches > 1 || (fetches == 1) != wantFetch {
+				t.Fatalf("failure=%q err=%v fetches=%d wantFetch=%v", fail, err, fetches, wantFetch)
+			}
+			if fail == "" && (refs != 2 || heads != 3 || graphs != 2 || remotes != 2 || bases != 2) {
+				t.Fatalf("missing proof: refs=%d heads=%d graphs=%d remotes=%d bases=%d", refs, heads, graphs, remotes, bases)
+			}
+			if fail == "fetch" {
+				if !strings.Contains(err.Error(), "effects may be partial; reconcile before retry") || strings.Contains(err.Error(), "fetch completed") {
+					t.Fatalf("transport effects not distinguished: %v", err)
+				}
+			} else if err != nil && (strings.Contains(err.Error(), "fetch completed; postcondition failed") != wantFetch) {
+				t.Fatalf("fetch effects misreported: %v", err)
+			}
+		})
 	}
 }
