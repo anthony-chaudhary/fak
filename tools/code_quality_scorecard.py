@@ -199,7 +199,7 @@ KPI_WEIGHTS: dict[str, float] = {
 # fixtures (intentionally odd); vendored/generated trees are not ours to grade.
 GO_EXCLUDE_DIRS = {".git", ".claude", ".fak", ".dos", ".tmp", ".head_build_check",
                    ".tmp_overlay", "_scratch", "node_modules", "testdata", "vendor",
-                   "__pycache__"}
+                   "__pycache__", "artifacts", "_wip-preservation"}
 # A directory-*name* whose whole subtree is an overlay/scratch COPY, matched by prefix
 # in _excluded_go (not by exact name) because its name carries a per-session suffix.
 GO_EXCLUDE_DIR_PREFIXES = (".ov",)  # `.ovl` + `.ov<pid>` — `go build -overlay` scratch
@@ -229,6 +229,12 @@ GO_EXCLUDE_DIR_PREFIXES = (".ov",)  # `.ovl` + `.ov<pid>` — `go build -overlay
 # A single `_scratch/quarantine` copy of cmd/fak inflated the architecture work-list by
 # 17 phantom god-file/god-function rows here. code-slop's git-ls-files walk already drops
 # them (untracked); this scorecard walks the filesystem, so it must exclude them by name.
+# `artifacts/` and `_wip-preservation/` are the tracked variants of the same construction:
+# frozen snapshots (e.g. `artifacts/strix-migration-backup/raw`, byte-pinned by the
+# cmd/fak-strix-backup integrity tests) and preserved WIP, not first-party source under
+# development; walking them grades every pinned copy a second time as phantom debt
+# (witnessed 2026-10-29: fak-private slop-debt 894 with 712 duplication units dominated
+# by artifacts/strix-migration-backup pairs).
 
 _MARKER_RE = re.compile(r"\b(TODO|FIXME|HACK|XXX)\b")
 # A real Go test entry point — used to confirm a _test.go is not just a bare

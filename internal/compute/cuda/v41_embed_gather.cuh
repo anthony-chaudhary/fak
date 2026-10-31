@@ -1,5 +1,5 @@
 // MIT-derived selected-row kernels. See v41_embed_gather.LICENSE.
-// Included after v41_checked_stream.cuh, never a stand-alone runtime.
+// Included after v41_checked_stream.cuh and iq_gemv.cuh; never stand-alone.
 #ifdef FAK_CUDA_V41_EMBED_GATHER
 #include "v41_embed_gather_math.h"
 #include "v41_embed_gather_geometry.h"
@@ -54,9 +54,8 @@ extern "C" int fak_v41_embed_gather(const void *table,float *out,const intptr_t 
 // v41_embed_iq4nl.h. No upstream context, stream, cache or scheduler is imported.
 #ifdef FAK_CUDA_V41_EMBED_IQ4NL
 #include "v41_embed_iq4nl.h"
-// The exact existing definition is included later from iq_gemv.cuh in the
-// canonical CUDA TU. Keep one production codebook rather than copy it again.
-extern __device__ const signed char fcuda_kvalues_iq4nl[16];
+// iq_gemv.cuh is included first by the canonical CUDA TU. Use its single
+// device codebook definition directly, without a host-pass const declaration.
 static __global__ void v41_eg_iq4nl(const uint8_t *src,float *dst,int blocks) {
   for(int64_t ib=blockIdx.x;ib<blocks;ib+=gridDim.x)
     v41_eg_iq4nl_thread(src+ib*144,dst+ib*256,threadIdx.x,fcuda_kvalues_iq4nl);
