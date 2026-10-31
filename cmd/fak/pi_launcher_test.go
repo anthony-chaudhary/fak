@@ -1037,3 +1037,96 @@ func TestRunPiDryRunReportsGuardModeWithoutWrites(t *testing.T) {
 		})
 	}
 }
+
+// TestRunPiRejectsNonviableContextBeforeLaunch exercises the existing served-model
+// budget through the real launcher, not a new token estimator. The parent launches
+// the 2048-window child and writes both config files despite its non-viable envelope.
+// fak-test:runtime fast est=100ms
+func TestRunPiRejectsNonviableContextBeforeLaunch(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		window int
+		viable bool
+	}{
+		{name: "nonviable_2048", window: 2048},
+		{name: "viable_80000", window: 80000, viable: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolatePiHome(t)
+			tmp := t.TempDir()
+			t.Setenv("TMPDIR", tmp)
+			t.Setenv("TMP", tmp)
+			t.Setenv("TEMP", tmp)
+			t.Setenv("FAK_GATEWAY_KEY", "")
+			const model = "local-context-fixture"
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/healthz":
+					fmt.Fprintf(w, `{"ok":true,"model":%q}`, model)
+				case "/v1/models":
+					fmt.Fprintf(w, `{"data":[{"id":%q,"context_length":%d}]}`, model, tc.window)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			modelsPath := filepath.Join(tmp, "models.json")
+			settingsPath := filepath.Join(tmp, "settings.json")
+			budget := projectassets.PiModelContextBudget(model, tc.window)
+			if budget.Viable != tc.viable {
+				t.Fatalf("fixture envelope = %+v, want viable=%t", budget, tc.viable)
+			}
+			originalRun := piLaunchRun
+			t.Cleanup(func() { piLaunchRun = originalRun })
+			launches := 0
+			var providerPath string
+			piLaunchRun = func(stdout, stderr io.Writer, argv, env []string) int {
+				launches++
+				for i := 1; i+1 < len(argv); i++ {
+					if argv[i] == "-e" {
+						providerPath = argv[i+1]
+						break
+					}
+				}
+				if providerPath == "" {
+					t.Error("viable launch omitted the existing session provider")
+				} else if _, err := os.Stat(providerPath); err != nil {
+					t.Errorf("session provider was not present during launch: %v", err)
+				}
+				return 0
+			}
+			var stdout, stderr bytes.Buffer
+			code := runPi(&stdout, &stderr, []string{
+				"--base-url", server.URL + "/v1", "--model", model,
+				"--config-path", modelsPath, "--settings-path", settingsPath,
+				"--write-config", "--safe-settings",
+			})
+			if !tc.viable {
+				if code == 0 || launches != 0 || providerPath != "" {
+					t.Errorf("nonviable launch: code=%d launches=%d provider=%q, want refusal before side effects", code, launches, providerPath)
+				}
+				if !strings.Contains(stderr.String(), budget.Reason) || !strings.Contains(stderr.String(), budget.Provenance) {
+					t.Errorf("missing existing modeled-budget diagnostic: %s", stderr.String())
+				}
+				for _, path := range []string{modelsPath, settingsPath} {
+					if _, err := os.Stat(path); !os.IsNotExist(err) {
+						t.Errorf("nonviable launch created config %s: %v", path, err)
+					}
+				}
+				return
+			}
+			if code != 0 || launches != 1 {
+				t.Fatalf("viable launch: code=%d launches=%d stderr=%s", code, launches, stderr.String())
+			}
+			for _, path := range []string{modelsPath, settingsPath} {
+				if _, err := os.Stat(path); err != nil {
+					t.Errorf("viable launch did not preserve explicit config write %s: %v", path, err)
+				}
+			}
+			if _, err := os.Stat(providerPath); !os.IsNotExist(err) {
+				t.Errorf("session provider was not cleaned up: %v", err)
+			}
+		})
+	}
+}

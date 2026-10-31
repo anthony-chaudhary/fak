@@ -218,6 +218,15 @@ func runPi(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 
+	// A diagnostic may describe a non-viable envelope, but an actual launch must
+	// stop before persistent settings, a session provider, or a child is created.
+	// Reuse the modeled envelope; this is not a tokenizer or hardware witness.
+	if !*dryRun && !budget.Viable {
+		fmt.Fprintf(stderr, "fak pi: %s: refusing launch for model %q (served window %d, contextWindow %d, maxTokens %d; %s)\n", budget.Reason, targetModel, budget.ServedWindow, budget.ResidentTarget, budget.MaxOutputTokens, budget.Provenance)
+		fmt.Fprintln(stderr, "  Use --dry-run to inspect the envelope; select a model with a qualified viable served window before launching.")
+		return 1
+	}
+
 	launch := piLaunchOptions{
 		dryRun:       *dryRun,
 		guarded:      *guarded && !*noGuard,
