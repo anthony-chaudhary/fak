@@ -335,6 +335,9 @@ func land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 
 func landPrepared(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, prospectiveVerify ProspectiveVerifyHook, prepared landCandidateCapture, git GitRunner, opts ...LandOption) (res Result) {
 	cfg := newLandConfig(opts)
+	if _, refusal := landSourceSnapshot(root, cfg, git); refusal != nil {
+		return *refusal
+	}
 	tracker := newLandProgressTracker(cfg)
 	cfg.tracker = tracker
 	finishAdmission := beginLandPhase(tracker, "admission", 0)
@@ -563,6 +566,9 @@ func landPrepared(root, wtPath, baseSHA, commitMsgFile string, paths []string, v
 			return r
 		}
 
+		if cfg.sourceLease != nil {
+			return sourceFenceRefusal("fenced landing requires the isolated atomic-ref path", "")
+		}
 		tracker.setCache("shared-index-fallback", false)
 		finishApply := beginLandPhase(tracker, "trunk-apply", 0)
 		applied := gitApply(root, diff, git)
@@ -1149,8 +1155,13 @@ func landIsolatedProspectivePrepared(root, wtPath, diff, msgFile string, paths [
 		// in the gap fails this → retry on the peer's new HEAD (#3570); the throwaway
 		// commit built on the stale base is simply abandoned, unreferenced.
 		finishCAS := beginLandPhase(tracker, "trunk-cas", attempt)
-		rc, _ = run(git, root, []string{"update-ref", branch, newCommit, oldHEAD})
+		var fenceRefusal *Result
+		rc, _, fenceRefusal = landCompareAndSwap(root, branch, newCommit, oldHEAD, cfg, git)
 		finishCAS()
+		if fenceRefusal != nil {
+			fenceRefusal.RecoveryRef = recoveryRef
+			return *fenceRefusal, true
+		}
 		if rc != 0 {
 			continue
 		}

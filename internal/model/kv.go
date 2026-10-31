@@ -326,6 +326,13 @@ type Session struct {
 	// time.Now calls.
 	PhaseProfiler *PhaseProfiler
 
+	// GLMSharedExpertOverlapWorkspaceBytes explicitly opts into routed-host/shared-device
+	// GLM overlap when its conservative host payload bound fits. Zero disables it.
+	// Set before exclusive inference; this is not a process/device memory ceiling.
+	GLMSharedExpertOverlapWorkspaceBytes int64
+	// Owner-only successful overlap witness; never written by the CPU branch.
+	glmSharedExpertOverlapCount uint64
+
 	// qwen35DecodeGraph is an opt-in per-session production-orchestrator trace.
 	qwen35DecodeGraph *qwen35DecodeGraphRecorder
 

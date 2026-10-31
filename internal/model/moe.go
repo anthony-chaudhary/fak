@@ -692,6 +692,9 @@ func (glmMoeFFN) apply(m *Model, layer int, xn any, mat matKernel) []float32 {
 	// R3/#5614: same-step activated-set prefetch — see moeFFN.apply. Inert without a ring.
 	prefetchActivatedExperts(m, layer, picks, mat)
 	crossLayerGatePrefetch(m, layer, picks, xn, mat)
+	if shared, ok := m.overlapGLMSharedExpert(layer, xn, picks, mat); ok {
+		return shared
+	}
 	// Lever 2: on the pure-CPU resident path, batch the routed experts' GEMVs into ONE parFor
 	// per projection instead of ~3 per expert (moe_host_batch.go) — bit-identical to the loop
 	// below (TestBatchedExpertDeltaMatchesLoop). Any config the fast path does not model

@@ -1401,3 +1401,42 @@ The complete Apache License, Version 2.0 is supplied in root `LICENSE` and
 reproduced in the TensorFold section above. No separate donor NOTICE exists
 at this revision. This experimental backend is unqualified; it is not evidence
 of B300 acceptance or an SM120 performance gain.
+
+## Strata owner-safe routed/shared expert overlap
+
+`internal/model/moe_shared_overlap.go` adapts the current-router-ID, separate-output,
+launch/join/combine control pattern from Niko1221/Strata at revision
+`c62d5e3a15b40ea51c96aae9e8d36928965f53ab`:
+- `include/strata/core/hit_hook.hpp`
+- `src/core/session.cpp` (hit launch, CPU work and combine ordering)
+- `src/core/expert_source.cpp` (current expert IDs and async input lifetime)
+
+https://github.com/Niko1221/Strata/tree/c62d5e3a15b40ea51c96aae9e8d36928965f53ab
+
+Copyright (c) 2026 Niko1221 and the Strata contributors.
+SPDX-License-Identifier: MIT
+The complete copyright, permission and warranty notice is retained in
+`internal/model/STRATA_LICENSE.txt`.
+
+Adapted for Fak's existing whole-layer GLM host spill: only a prepared CPU
+batch may run on the worker; Session/backend operations remain on their owning
+goroutine. Private outputs join before retirement and preserve current router
+IDs, weights, dtype and reduction order. The explicit host-payload budget is
+default off. This is a Go ownership adaptation, not a copied CUDA kernel,
+modified routing/quantization policy, device qualification or performance claim.
+
+### vLLM multi-page CUDA KV append addressing (2026-10-31)
+
+`internal/compute/cuda/paged_kv_write_map.h` and the multi-page writer in
+`internal/compute/cuda/paged_attention_vllm.cuh` adapt the per-token slot resolution
+and K/V cache address arithmetic of `reshape_and_cache_kernel` in
+[vLLM `csrc/cache_kernels.cu`](https://github.com/vllm-project/vllm/blob/e5196e2959a42908313510f55fa21f213a48802e/csrc/cache_kernels.cu),
+commit `e5196e2959a42908313510f55fa21f213a48802e` (Apache License 2.0).
+Copyright (c) 2023, The vLLM team.
+
+Fak replaces the device slot-mapping tensor with at most 64 physical page IDs
+passed by value, keeps F32 storage and its optional pre-RoPE K plane, and retains
+its existing single-page writer and page/COW ownership. Host admission and Go
+batch preparation/order control are Fak-specific. This does not reattribute the
+older v0.11.0 paged attention implementation or claim a measured speedup.
+The upstream Apache-2.0 license text is reproduced in the existing vLLM notice.

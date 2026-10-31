@@ -610,6 +610,14 @@ int fcuda_paged_attention_supported(int head_size, int block_size);
 int fcuda_paged_kv_write_f32(float *k_cache, float *v_cache, float *k2_cache, const float *k,
                              const float *v, const float *k2, int block_idx, int block_offset,
                              int tokens, int num_kv_heads, int head_size, int block_size);
+/* Multi-page append: copies 1..64 distinct host block IDs into a by-value kernel
+ * argument before returning. No host pointer is retained. Caller holds cudaMu,
+ * prepares all pages, and preserves source/arena lifetimes on g_stream as above. */
+int fcuda_paged_kv_write_pages_f32(float *k_cache, float *v_cache, float *k2_cache,
+                                   const float *k, const float *v, const float *k2,
+                                   const int *block_ids, int num_blocks, int capacity_blocks,
+                                   int block_offset, int tokens, int num_kv_heads,
+                                   int head_size, int block_size);
 int fcuda_paged_kv_gather_f32(float *dst, const float *cache, const int *block_table, int tokens,
                               int num_kv_heads, int head_size, int block_size, int key_layout);
 int fcuda_paged_store_int(int *dst, int value);

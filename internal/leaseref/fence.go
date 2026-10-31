@@ -105,11 +105,15 @@ func (s *Store) Fence(ctx context.Context, presented Record, now time.Time) (Fen
 	if err != nil {
 		return FenceVerdict{}, err
 	}
+	return fenceRecord(presented, cur, ok, now), nil
+}
+
+func fenceRecord(presented, cur Record, ok bool, now time.Time) FenceVerdict {
 	v := FenceVerdict{Presented: presented.Generation}
 	if !ok || cur.Expired(now) {
 		v.Reason = ReasonNoLease
 		v.Detail = "no live lease for id " + presented.ID + "; reacquire before writing"
-		return v, nil
+		return v
 	}
 	v.Current = cur.Generation
 	v.Holder = cur.Holder
@@ -121,10 +125,10 @@ func (s *Store) Fence(ctx context.Context, presented Record, now time.Time) (Fen
 			if presented.Holder != "" && cur.Holder != "" && cur.Holder != presented.Holder {
 				v.Reason = ReasonStaleLease
 				v.Detail = fmt.Sprintf("generation 0 is held by %q, not %q — halt and reacquire", cur.Holder, presented.Holder)
-				return v, nil
+				return v
 			}
 			v.OK = true
-			return v, nil
+			return v
 		}
 
 		// Positive generation: every positive generation denotes an acquired holder epoch.
@@ -133,10 +137,10 @@ func (s *Store) Fence(ctx context.Context, presented Record, now time.Time) (Fen
 		if presented.Holder == "" || cur.Holder == "" || cur.Holder != presented.Holder {
 			v.Reason = ReasonStaleLease
 			v.Detail = fmt.Sprintf("generation %d is held by %q, not %q — halt and reacquire", cur.Generation, cur.Holder, presented.Holder)
-			return v, nil
+			return v
 		}
 		v.OK = true
-		return v, nil
+		return v
 	}
 
 	// Generations differ: stale either way (a newer holder advanced it, or the caller
@@ -147,7 +151,44 @@ func (s *Store) Fence(ctx context.Context, presented Record, now time.Time) (Fen
 	} else {
 		v.Detail = fmt.Sprintf("presented generation %d exceeds the live generation %d — never issued; refused", presented.Generation, cur.Generation)
 	}
-	return v, nil
+	return v
+}
+
+// FenceSnapshot returns the exact source-lease object validated by Fence's policy.
+// The caller MUST atomically verify this OID with its mutation; this read alone is
+// not a fence. Reading the blob by OID prevents a ref advance from changing the
+// record between identity resolution and validation. No ref is written here.
+func (s *Store) FenceSnapshot(ctx context.Context, presented Record, now time.Time) (FenceVerdict, string, error) {
+	ref, oid, exists, err := s.resolveLeaseRef(ctx, presented.ID)
+	if err != nil {
+		return FenceVerdict{}, "", err
+	}
+	if !isLeaseRef(ref) {
+		return FenceVerdict{}, "", fmt.Errorf("leaseref: not a source lease ref: %s", ref)
+	}
+	if !exists {
+		return fenceRecord(presented, Record{}, false, now), "", nil
+	}
+	// A source fence binds a direct ref, never a mutable symbolic alias.
+	if _, code, err := s.run(ctx, s.dir, "symbolic-ref", "--quiet", ref); err != nil || code != 1 {
+		return FenceVerdict{}, "", fmt.Errorf("leaseref: source lease ref must be direct: %s", ref)
+	}
+	out, code, err := s.run(ctx, s.dir, "cat-file", "blob", oid)
+	if err != nil || code != 0 {
+		return FenceVerdict{}, "", fmt.Errorf("leaseref: source lease object unavailable: %s", oid)
+	}
+	var cur Record
+	if err := json.Unmarshal([]byte(out), &cur); err != nil {
+		return FenceVerdict{}, "", fmt.Errorf("leaseref: invalid source lease object: %w", err)
+	}
+	if cur.ID != presented.ID {
+		return FenceVerdict{}, "", fmt.Errorf("leaseref: source lease object ID mismatch")
+	}
+	v := fenceRecord(presented, cur, true, now)
+	if !v.OK {
+		return v, "", nil
+	}
+	return v, oid, nil
 }
 
 // PublishFenced verifies presented at the externally-visible write boundary and invokes

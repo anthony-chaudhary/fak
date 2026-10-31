@@ -472,6 +472,7 @@ func cudaLaunchTimingName(path, launch, kernel string) string {
 		"cuda/paged_attention_vllm.cuh:kern2": "fak_paged_attention_v2",
 		"cuda/paged_attention_vllm.cuh:paged_attention_v2_reduce_kernel<float,HEAD_SIZE,NUM_THREADS,PARTITION_SIZE>": "fak_paged_attention_v2_reduce",
 		"cuda/paged_attention_vllm.cuh:fak_vllm_pa::reshape_and_cache_run_kernel":                                    "fak_paged_kv_write",
+		"cuda/paged_attention_vllm.cuh:fak_vllm_pa::reshape_and_cache_pages_kernel":                                  "fak_paged_kv_write_pages",
 		"cuda/paged_attention_vllm.cuh:fak_vllm_pa::paged_gather_rows_kernel":                                        "fak_paged_kv_gather",
 		"cuda/q3k_mmvq.cuh:fak_q3k_mmvq::mul_mat_vec_q<1>":                                                           "k_q3k_mmvq_gemv",
 		"cuda/q3k_mmvq.cuh:fak_q3k_mmvq::mul_mat_vec_q<2>":                                                           "k_q3k_mmvq_gemv",
@@ -527,6 +528,9 @@ func TestCUDATimestampSemanticAliases(t *testing.T) {
 		name, path, src string
 		want            bool
 	}{
+		{"paged multi-page writer", "cuda/paged_attention_vllm.cuh", `FCUDA_TS("fak_paged_kv_write_pages", tokens, fak_vllm_pa::reshape_and_cache_pages_kernel<<<tokens, threads>>>(x));`, true},
+		{"paged writer wrong path", "cuda/other.cuh", `FCUDA_TS("fak_paged_kv_write_pages", tokens, fak_vllm_pa::reshape_and_cache_pages_kernel<<<tokens, threads>>>(x));`, false},
+		{"paged writer wrong row", "cuda/paged_attention_vllm.cuh", `FCUDA_TS("fak_paged_kv_write", tokens, fak_vllm_pa::reshape_and_cache_pages_kernel<<<tokens, threads>>>(x));`, false},
 		{"q8 mul_mat_q", "cuda/q8_mmq.cuh", `FCUDA_TS("q8_mul_mat_q", grid, mul_mat_q<J, fallback><<<grid, block>>>(x));`, true},
 		{"q8 mul_mat_q_stream_k_fixup", "cuda/q8_mmq.cuh", `FCUDA_TS("q8_mul_mat_q_stream_k_fixup", grid, mul_mat_q_stream_k_fixup<J, fallback><<<grid, block>>>(x));`, true},
 		{"q8 wrong source", "cuda/other.cuh", `FCUDA_TS("q8_mul_mat_q", grid, mul_mat_q<J, fallback><<<grid, block>>>(x));`, false},
@@ -793,7 +797,7 @@ var cudaKernelOtherAllowlist = map[string]bool{
 	"k_qwen4exp_ple_hash_i64": true, "k_sigmoid_mul": true, "k_split_qwen35_qg": true,
 	"k_v41_bf16_publish": true, "k_v41_bf16_publish_status": true, "quantize_mmq_q8_1_ds4": true,
 	"k_v41_indexer_score_f32": true, "k_v41_indexer_score_tiled_f32": true,
-	"fak_paged_kv_write": true, "fak_paged_kv_gather": true, "paged_store_int_kernel": true,
+	"fak_paged_kv_write": true, "fak_paged_kv_write_pages": true, "fak_paged_kv_gather": true, "paged_store_int_kernel": true,
 	// V4.1 elementwise, pool-update and status-publish glue.
 	"k_mhc": true, "k_v41_engram": true, "k_v41_pool": true, "v41c_status_kernel": true,
 	"v41c_compressor_store_kernel": true, "v41c_compressor_update_pool_kernel": true,
