@@ -219,6 +219,7 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 // Implementation fragments remain in this single translation unit so they share the stream,
 // allocators, library handles, capture state, and counters. Preserve this dependency order.
 #include "cuda/kernel_profile.cuh"
+#include "cuda/v41_compressor_pending.cuh"
 #include "cuda/runtime_memory.cuh"
 #include "cuda/runtime_services.cuh"
 #include "cuda/async_upload.cuh"

@@ -196,4 +196,28 @@ extern "C" int fak_v41_compressor_pool_f32(const float *kv, const float *scores,
 }
 
 extern "C" uint64_t fak_v41_compressor_completed(void) { return g_v41_compressor_completed; }
+
+// Explicit connected pending qualification ABI; legacy Store above is unchanged.
+extern "C" int fak_v41_compressor_ring_store_pending_f32(const float *kv_row, const float *score_row,
+    float *ring_kv, float *ring_score, float *out, int ratio, int width, int slot, int emit) {
+  if (slot < 0 || slot >= ratio) return -1;
+  const uint64_t ringCount = (uint64_t)ratio * width;
+  const void *pointers[] = {kv_row, score_row, ring_kv, ring_score, out};
+  const uint64_t counts[] = {(uint64_t)width, (uint64_t)width, ringCount, ringCount, 2ull * width};
+  int admitted = v41c_admit(ratio, width, pointers, counts, emit ? 5 : 4);
+  if (admitted != 0) return admitted;
+  for (int i=0;i<(emit?5:4);++i) if (!v41c_pending_contains(pointers[i])) return -2;
+  const unsigned blocks = (unsigned)((width + V41C_THREADS - 1) / V41C_THREADS);
+  FCUDA_TS("v41c_compressor_store_kernel", blocks,
+    v41c_compressor_store_kernel<<<blocks, V41C_THREADS, 0, g_stream>>>(kv_row, score_row,
+      ring_kv, ring_score, (uint32_t)width, (uint32_t)slot));
+  cudaError_t error = cudaGetLastError();
+  if (error != cudaSuccess) { fak_v41_compressor_pending_fail(); return 30000 + (int)error; }
+  if (!emit) return 0;
+  int launched = v41c_launch_pool(out, out + width, ring_kv, ring_score, ratio, width);
+  if (launched != 0) return launched;
+  ++g_v41c_pending_emits; // counted only after checked Read/teardown commit
+  return 0;
+}
+
 #endif

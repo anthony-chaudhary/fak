@@ -93,7 +93,7 @@ func (c *cudaBackend) GraphOnceReplay(input Tensor, kv KVStore, pos int) (Tensor
 		panic("cuda capture-once invalid replay owner")
 	}
 	k, ok := kv.(*cudaKV)
-	if !ok || k != s.kv || !graphOnceSameKV(s, pos) || s.capturing || s.output.buf == nil ||
+	if !cudaAsyncGraphOnceAllowed() || !ok || k != s.kv || !graphOnceSameKV(s, pos) || s.capturing || s.output.buf == nil ||
 		input.Backend() != c || input.Dtype != F32 || input.Numel() != s.input.Numel() || !graphEnabled || os.Getenv("FAK_CUDA_CAPTURE_ONCE") != "1" {
 		c.graphOnceReleaseLocked()
 		return Tensor{}, false
@@ -133,7 +133,7 @@ func (c *cudaBackend) GraphOnceReplay(input Tensor, kv KVStore, pos int) (Tensor
 func (c *cudaBackend) GraphOnceBegin(input Tensor, kv KVStore, pos int) bool {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	if !graphEnabled || cudaKernelProfileOn || os.Getenv("FAK_CUDA_CAPTURE_ONCE") != "1" {
+	if !cudaAsyncGraphOnceAllowed() || !graphEnabled || cudaKernelProfileOn || os.Getenv("FAK_CUDA_CAPTURE_ONCE") != "1" {
 		return false
 	}
 	if cudaGraphOnceOwner != nil && cudaGraphOnceOwner != c {

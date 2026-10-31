@@ -55,3 +55,48 @@ extern "C" int fcuda_q4k_qkv_qualification_f32(
     return FCUDA_Q4K_MMVQ_REFUSED;
 #endif
 }
+
+// Explicit async qualification only. All calls serialized by cudaMu.
+static unsigned long long g_q4k_qkv_async_pending = 0;
+extern "C" int fcuda_q4k_qkv_async_finish(void) {
+    const int status = fcuda_q4k_qkv_qualification_finish();
+    if (status == 0) {
+        g_q4k_qkv_qualification_operations += g_q4k_qkv_async_pending;
+        g_q4k_qkv_async_pending = 0;
+    }
+    return status;
+}
+extern "C" int fcuda_q4k_qkv_async_f32(
+    const uint8_t *wQ, const uint8_t *wK, const uint8_t *wV,
+    const float *x, float *yQ, float *yK, float *yV,
+    int outQ, int outK, int outV, int in, void *workspace, size_t workspaceBytes) {
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+    if (g_q4k_qkv_async_pending >= 64) return FCUDA_Q4K_MMVQ_REFUSED;
+    int status = fcuda_q4k_qkv_qualification_state();
+    if (status != 0) return status;
+    const uint8_t *weights[3] = {wQ, wK, wV};
+    float *outputs[3] = {yQ, yK, yV};
+    const int widths[3] = {outQ, outK, outV};
+    if (!fak_q4k_shared_input::valid_ranges(weights, x, outputs, widths, in, workspace, workspaceBytes))
+        return FCUDA_Q4K_MMVQ_REFUSED;
+    // Exact live allocation bases only: no foreign device, managed memory or
+    // interior alias can be smuggled through a forged Go tensor descriptor.
+    status = v41_checked_stream_owned_bytes(x, (uint64_t)in * sizeof(float));
+    if (status != 0) return status;
+    status = v41_checked_stream_owned_bytes(workspace, (uint64_t)(in / 32) * 36);
+    if (status != 0) return status;
+    for (int i = 0; i < 3; ++i) {
+        status = v41_checked_stream_owned_bytes(weights[i], (uint64_t)widths[i] * (in / 256) * 144);
+        if (status != 0) return status;
+        status = v41_checked_stream_owned_bytes(outputs[i], (uint64_t)widths[i] * sizeof(float));
+        if (status != 0) return status;
+    }
+    status = fcuda_q4k_qkv_shared_input_f32(wQ, wK, wV, x, yQ, yK, yV,
+                                         outQ, outK, outV, in, workspace, workspaceBytes);
+    if (status == 0) ++g_q4k_qkv_async_pending;
+    return status; // Go owner must checked-drain on any selected failure.
+
+#else
+    return FCUDA_Q4K_MMVQ_REFUSED;
+#endif
+}

@@ -265,23 +265,37 @@ func (st *v41CompressorRingStep) project(lr *v41CompressorRingLayer, slot int, i
 	}
 	x := s.uploadHostF32([]int{st.hidden}, input, compute.MemoryActivation, "V4.1 compressor ring activation")
 	defer s.Backend.Free(x)
-	var projected [2]compute.Tensor
-	for i := range weights {
-		projected[i] = s.Backend.MatMul(weights[i], x)
-		defer s.Backend.Free(projected[i])
-		if y := projected[i]; y.Buf() == nil || y.Buf() == x.Buf() || y.Dtype != compute.F32 || y.Layout != compute.RowMajor || y.Quant != nil || y.Numel() != st.width {
+	if producer, ok := st.ring.ops.(compute.V41CompressorRingProducerBackend); ok {
+		out, err = producer.V41CompressorRingProjectStore(lr.kv, lr.scores, weights[0], weights[1], x, slot, st.ratio, st.width, emit)
+		if err != nil {
+			return compute.Tensor{}, err
+		}
+		if emit && !v41MHCFreshOutput(s, out, []int{2, st.width}, lr.kv, lr.scores, x, weights[0], weights[1]) {
+			if out.Buf() != nil {
+				s.Backend.Free(out)
+			}
 			return compute.Tensor{}, errV41CompressorRingResult
 		}
-	}
-	out, err = st.ring.ops.V41CompressorRingStore(lr.kv, lr.scores, projected[0], projected[1], slot, st.ratio, st.width, emit)
-	if err != nil {
-		return compute.Tensor{}, err
-	}
-	if emit && !v41MHCFreshOutput(s, out, []int{2, st.width}, lr.kv, lr.scores, projected[0], projected[1], x) {
-		if out.Buf() != nil {
-			s.Backend.Free(out)
+	} else {
+		var projected [2]compute.Tensor
+		for i := range weights {
+			projected[i] = s.Backend.MatMul(weights[i], x)
+			defer s.Backend.Free(projected[i])
+			if y := projected[i]; y.Buf() == nil || y.Buf() == x.Buf() || y.Dtype != compute.F32 || y.Layout != compute.RowMajor || y.Quant != nil || y.Numel() != st.width {
+				return compute.Tensor{}, errV41CompressorRingResult
+			}
 		}
-		return compute.Tensor{}, errV41CompressorRingResult
+		out, err = st.ring.ops.V41CompressorRingStore(lr.kv, lr.scores, projected[0], projected[1], slot, st.ratio, st.width, emit)
+		if err != nil {
+			return compute.Tensor{}, err
+		}
+		if emit && !v41MHCFreshOutput(s, out, []int{2, st.width}, lr.kv, lr.scores, projected[0], projected[1], x) {
+			if out.Buf() != nil {
+				s.Backend.Free(out)
+			}
+			return compute.Tensor{}, errV41CompressorRingResult
+		}
+
 	}
 	rows = 2
 	st.ring.stats.Stores++

@@ -1,4 +1,4 @@
-//go:build cuda && cgo && fak_cuda_v41_compressor && !fak_cuda_v41_compressor_pool
+//go:build cuda && cgo && fak_cuda_v41_compressor && !fak_cuda_v41_compressor_pool && !fak_cuda_v41_compressor_pending
 
 package compute
 
