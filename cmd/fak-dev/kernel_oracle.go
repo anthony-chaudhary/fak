@@ -217,9 +217,19 @@ func runKernelOracleShapes(stdout, stderr io.Writer, argv []string) error {
 	var meta ggufload.Metadata
 	model := *ggufPath
 	if *ggufPath != "" {
-		f, err := ggufload.Open(*ggufPath)
+		// On well-formed split checkpoints, a selected shard alone can omit
+		// entire matrix families. Reuse the header reader without loading any
+		// tensor payload; this census does not certify artifact-set integrity.
+		f, err := ggufload.OpenHeaders(*ggufPath)
 		if err != nil {
 			return err
+		}
+		seen := make(map[string]bool, len(f.Tensors))
+		for _, tensor := range f.Tensors {
+			if seen[tensor.Name] {
+				return fmt.Errorf("duplicate tensor %q in checkpoint headers", tensor.Name)
+			}
+			seen[tensor.Name] = true
 		}
 		meta = f.ExportMetadata()
 	} else {

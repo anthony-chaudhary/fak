@@ -663,3 +663,96 @@ func TestKernelOracleStructuredLedgerAcceptsCUDAEventPairs(t *testing.T) {
 		})
 	}
 }
+
+// fak-test:runtime fast est=20ms lane=default
+func TestKernelOracleShapesReadsEverySplitHeader(t *testing.T) {
+	// Each shard has one different matrix family and no tensor payload. The
+	// denominator is exactly these two synthetic headers, not a model witness.
+	dir := t.TempDir()
+	first := filepath.Join(dir, "model-00001-of-00002.gguf")
+	second := filepath.Join(dir, "model-00002-of-00002.gguf")
+	writeHeader := func(path, name string, shard, total uint64) {
+		t.Helper()
+		var b bytes.Buffer
+		write := func(v any) {
+			t.Helper()
+			if err := binary.Write(&b, binary.LittleEndian, v); err != nil {
+				t.Fatal(err)
+			}
+		}
+		str := func(s string) { write(uint64(len(s))); b.WriteString(s) }
+		b.WriteString("GGUF")
+		write(uint32(3))
+		write(uint64(1)) // One tensor in each header.
+		keys := uint64(3)
+		if shard == 0 {
+			keys++
+		}
+		write(keys)
+		if shard == 0 {
+			str("general.architecture")
+			write(uint32(8)) // GGUF string.
+			str("qwen3")
+		}
+		for _, kv := range []struct {
+			key   string
+			value uint64
+		}{
+			{"split.no", shard}, {"split.count", 2}, {"split.tensors.count", total},
+		} {
+			str(kv.key)
+			write(uint32(10)) // GGUF uint64.
+			write(kv.value)
+		}
+		str(name)
+		write(uint32(2))
+		write(uint64(32))
+		write(shard + 1) // Distinct M=1 and M=2 families.
+		write(uint32(1)) // F16.
+		write(uint64(0))
+		for b.Len()%32 != 0 {
+			b.WriteByte(0)
+		}
+		if err := os.WriteFile(path, b.Bytes(), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeHeader(first, "blk.0.attn_q.weight", 0, 2)
+	writeHeader(second, "blk.1.attn_k.weight", 1, 2)
+	for _, path := range []string{first, second} {
+		var out, stderr bytes.Buffer
+		if err := runKernelOracleShapes(&out, &stderr, []string{"--gguf", path, "--n", "1"}); err != nil {
+			t.Fatalf("entry %s: %v; stderr=%s", path, err, stderr.String())
+		}
+		var list oracleShapeList
+		if err := json.Unmarshal(out.Bytes(), &list); err != nil {
+			t.Fatal(err)
+		}
+		if list.Arch != "qwen3" || len(list.Shapes) != 2 {
+			t.Fatalf("entry %s: arch=%q shapes=%+v; want both header families", path, list.Arch, list.Shapes)
+		}
+		for i, shape := range list.Shapes {
+			if shape.M != int64(i+1) || shape.K != 32 || shape.N != 1 || shape.Dtype != "f16" || shape.Count != 1 {
+				t.Fatalf("shape[%d]=%+v", i, shape)
+			}
+		}
+	}
+	assertRefused := func(want string) {
+		t.Helper()
+		var out, stderr bytes.Buffer
+		err := runKernelOracleShapes(&out, &stderr, []string{"--gguf", first, "--n", "1"})
+		if err == nil || !strings.Contains(err.Error(), want) || out.Len() != 0 {
+			t.Fatalf("err=%v stdout=%s; want refusal containing %q and no partial census", err, out.String(), want)
+		}
+	}
+	writeHeader(second, "blk.0.attn_q.weight", 1, 2)
+	assertRefused("duplicate tensor")
+	writeHeader(second, "blk.1.attn_k.weight", 1, 2)
+	writeHeader(first, "blk.0.attn_q.weight", 0, 3)
+	assertRefused("split.tensors.count")
+	writeHeader(first, "blk.0.attn_q.weight", 0, 2)
+	if err := os.Remove(second); err != nil {
+		t.Fatal(err)
+	}
+	assertRefused("shard 2/2")
+}
