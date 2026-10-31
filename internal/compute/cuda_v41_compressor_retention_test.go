@@ -21,7 +21,7 @@ func TestCUDAV41CompressorFailedDrainRetainsAllocations(t *testing.T) {
 	memory := readCUDASource(t, "cuda/runtime_memory.cuh")
 	services := readCUDASource(t, "cuda/runtime_services.cuh")
 	compressor := readCUDASource(t, "cuda/v41_compressor.cuh")
-	program := cudaV41CompressorRetentionHarness +
+	program := cudaV41CompressorRetentionHarness + "\n" + readCUDASource(t, "cuda/v41_compressor_pending.cuh") +
 		"\nstatic int v41c_drain(int status) " + cudaFunctionBody(t, compressor, "v41c_drain") +
 		"\nstatic bool fcuda_pool_may_release(void) " + cudaFunctionBody(t, memory, "fcuda_pool_may_release") +
 		"\nstatic void fcuda_pool_evict_to_cap(void) " + cudaFunctionBody(t, memory, "fcuda_pool_evict_to_cap") +
@@ -50,6 +50,7 @@ func TestCUDAV41CompressorFailedDrainRetainsAllocations(t *testing.T) {
 
 const cudaV41CompressorRetentionHarness = `
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -63,6 +64,7 @@ static constexpr int cudaSuccess = 0, cudaErrorInvalidValue = 1;
 static bool g_v41_compressor_uncertain = false, g_v41_router_uncertain = false, g_v41_mmid_uncertain = false, g_capture_open = false;
 static int g_cuda_cleanup_status = 0;
 static int g_stream = 1, sync_status = 0;
+static uint64_t g_v41_compressor_completed = 0;
 static int frees = 0, untracks = 0, retags = 0, evictions = 0, scopes = 0, syncs = 0;
 static std::map<void *, size_t> g_live, g_managed_live, g_panel_live;
 static std::map<size_t, std::vector<void *>> g_pool, g_panel_pool;
@@ -105,6 +107,17 @@ int main() {
     return fcuda_discard_unsubmitted(unsubmitted, sizeof(int));
   };
   allocate();
+  // Retained producers cannot be freed or recycled even before uncertainty.
+  require(fak_v41_compressor_pending_retain(pooled, sizeof(int)) == 0 &&
+          fak_v41_compressor_pending_retain(unsubmitted, sizeof(int)) == 0,
+          "production pending retain refused live allocation");
+  fcuda_free(pooled); fcuda_free_on(0, pooled);
+  require(fcuda_discard_unsubmitted(unsubmitted, sizeof(int)) == cudaErrorInvalidValue &&
+          g_live.size() == 2 && g_pool.empty() && frees == 0 && scopes == 0,
+          "pending producer escaped through release");
+  require(fak_v41_compressor_pending_finish() == 0 &&
+          fak_v41_compressor_pending_commit() == 0,
+          "completed producer ownership did not retire");
   require(v41c_drain(30007) == 30007 && !g_v41_compressor_uncertain,
           "successful drain changed the launch error or latched uncertainty");
   require(release() == 0, "completed work refused ordinary cleanup");
