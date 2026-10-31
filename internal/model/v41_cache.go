@@ -29,6 +29,11 @@ type V41ExpertCache struct {
 	budgetBytes int64
 	maxEntries  int
 
+	// clockRowBytes > 0 selects the fixed-width Engram CLOCK arm only.
+	// cached then holds reference bits; generic expert caches retain LRU clocks.
+	clockRowBytes int
+	clockHand     int
+
 	clock    uint64
 	order    []v41ExpertKey
 	entries  map[v41ExpertKey][]byte
@@ -71,8 +76,12 @@ func (c *V41ExpertCache) Get(layer, expert int) ([]byte, bool) {
 		return nil, false
 	}
 	c.stats.Hits++
-	c.clock++
-	c.cached[key] = c.clock
+	if c.clockRowBytes > 0 {
+		c.cached[key] = 1
+	} else {
+		c.clock++
+		c.cached[key] = c.clock
+	}
 	return payload, true
 }
 
@@ -86,6 +95,10 @@ func (c *V41ExpertCache) Put(layer, expert int, payload []byte) error {
 	}
 	if c.maxEntries > 0 && c.maxEntries < 1 {
 		return fmt.Errorf("model: V41 expert cache max entries %d cannot hold one payload", c.maxEntries)
+	}
+
+	if c.clockRowBytes > 0 {
+		return c.putClockRow(key, payload)
 	}
 
 	if old, ok := c.entries[key]; ok {
@@ -105,6 +118,57 @@ func (c *V41ExpertCache) Put(layer, expert int, payload []byte) error {
 	c.clock++
 	c.cached[key] = c.clock
 	c.order = append(c.order, key)
+	c.resident += int64(len(stored))
+	c.stats.BytesRead += int64(len(stored))
+	return nil
+}
+
+// putClockRow adapts EgRowCache from Niko1221/Strata at
+// c62d5e3a15b40ea51c96aae9e8d36928965f53ab, src/dsv41/ds4_engram_io.hpp:38-90.
+// Copyright (c) 2026 Peasant Smith and the Project Maya contributors.
+// Copyright (c) 2026 Niko1221 and the Strata contributors.
+// MIT license and Maya lineage: THIRD_PARTY_NOTICES.md.
+//
+// The caller holds the Engram mutex. Unlike upstream's mutable block slots,
+// payloads remain separate owned copies: an evicted row may still be borrowed
+// by Row's caller. Full-cache insertion replaces one order slot without a
+// slice shift. A sweep clears at most N reference bits, then selects a victim
+// (N+1 actions in the all-referenced case); this is amortized, not worst-case O(1).
+func (c *V41ExpertCache) putClockRow(key v41ExpertKey, payload []byte) error {
+	if len(payload) != c.clockRowBytes || c.maxEntries <= 0 {
+		return fmt.Errorf("model: V41 Engram CLOCK requires %d-byte rows and positive capacity", c.clockRowBytes)
+	}
+	if _, ok := c.entries[key]; ok {
+		stored := append([]byte(nil), payload...)
+		c.entries[key] = stored
+		c.stats.BytesRead += int64(len(stored))
+		return nil
+	}
+	if len(c.order) < c.maxEntries {
+		c.order = append(c.order, key)
+	} else {
+		victim := c.clockHand
+		for scanned := 0; scanned < len(c.order); scanned++ {
+			old := c.order[victim]
+			if c.cached[old] == 0 {
+				break
+			}
+			c.cached[old] = 0
+			victim = (victim + 1) % len(c.order)
+		}
+		// If every slot was referenced, one whole turn cleared them and
+		// returned to the initial slot, which is now an eligible victim.
+		old := c.order[victim]
+		c.resident -= int64(len(c.entries[old]))
+		delete(c.entries, old)
+		delete(c.cached, old)
+		c.order[victim] = key
+		c.clockHand = (victim + 1) % len(c.order)
+		c.stats.Evictions++
+	}
+	stored := append([]byte(nil), payload...)
+	c.entries[key] = stored
+	c.cached[key] = 0
 	c.resident += int64(len(stored))
 	c.stats.BytesRead += int64(len(stored))
 	return nil
@@ -169,13 +233,37 @@ type V41EngramRowSource interface {
 	ReadRows(start, count int, dst []byte) (int, error)
 }
 
+// V41EngramCachePolicy selects an immutable row-cache replacement policy.
+// Empty and LRU preserve the default. CLOCK is an experimental Strata adaptation;
+// it changes residency/hit ratio, never row bytes or model arithmetic. Select it
+// through V41EngramAttachSpec when attaching a fresh model. Roll back by attaching
+// a fresh model with LRU, not by changing an already-live cache's policy.
+// The ordinary loader's four-row LRU default is unchanged and has no demonstrated
+// CLOCK performance benefit. No environment or device setting selects this arm.
+type V41EngramCachePolicy string
+
+const (
+	V41EngramCacheLRU   V41EngramCachePolicy = "lru"
+	V41EngramCacheCLOCK V41EngramCachePolicy = "clock"
+)
+
+func (p V41EngramCachePolicy) validate() error {
+	switch p {
+	case "", V41EngramCacheLRU, V41EngramCacheCLOCK:
+		return nil
+	default:
+		return fmt.Errorf("model: unsupported V41 Engram cache policy %q", p)
+	}
+}
+
 // V41EngramRowCacheOptions configures the bounded Engram row cache + prefetch.
 type V41EngramRowCacheOptions struct {
-	TableRows      int   // total rows in the table
-	RowBytes       int   // bytes per row
-	BudgetBytes    int64 // resident cache budget
-	PrefetchRows   int   // rows to prefetch ahead on a miss; <=0 disables prefetch
-	PrefetchWindow int   // max readahead window in rows (clamped >= PrefetchRows)
+	TableRows      int                  // total rows in the table
+	RowBytes       int                  // bytes per row
+	BudgetBytes    int64                // resident cache budget
+	PrefetchRows   int                  // rows to prefetch ahead on a miss; <=0 disables prefetch
+	PrefetchWindow int                  // max readahead window in rows (clamped >= PrefetchRows)
+	CachePolicy    V41EngramCachePolicy // empty/LRU by default; CLOCK is explicit opt-in
 }
 
 // V41EngramRowCache is a bounded row cache over a V41EngramRowSource with eager,
@@ -221,11 +309,20 @@ func NewV41EngramRowCache(src V41EngramRowSource, opts V41EngramRowCacheOptions)
 	if src.RowBytes() != opts.RowBytes {
 		return nil, fmt.Errorf("model: V41 Engram row bytes %d does not match source row bytes %d", opts.RowBytes, src.RowBytes())
 	}
+	if err := opts.CachePolicy.validate(); err != nil {
+		return nil, err
+	}
 	if opts.PrefetchWindow < opts.PrefetchRows {
 		opts.PrefetchWindow = opts.PrefetchRows
 	}
 	c := &V41EngramRowCache{src: src, opts: opts}
 	c.inner = NewV41ExpertCache(V41ExpertCacheOptions{BudgetBytes: opts.BudgetBytes})
+	if opts.CachePolicy == V41EngramCacheCLOCK {
+		// Cap before converting to int; no eager allocation of this capacity.
+		rows := min(int64(opts.TableRows), opts.BudgetBytes/int64(opts.RowBytes))
+		c.inner.maxEntries = int(rows)
+		c.inner.clockRowBytes = opts.RowBytes
+	}
 	return c, nil
 }
 
@@ -289,6 +386,7 @@ func (c *V41EngramRowCache) invalidateRows() {
 	clear(c.inner.cached)
 	c.inner.order = nil
 	c.inner.resident = 0
+	c.inner.clockHand = 0
 }
 
 // Stats returns hit/miss, bytes read from source, bytes served, useful bytes, and the

@@ -38,6 +38,9 @@ type V41EngramAttachSpec struct {
 	HeadDim             int
 	PadTokenID          int
 	CompressedVocabSize int
+	// CachePolicy is constructor-only: empty/LRU preserves the ordinary default.
+	// CLOCK opts a newly attached model into experimental Engram replacement.
+	CachePolicy V41EngramCachePolicy
 }
 
 // V41EngramDigestExtent returns the flat "sha256:<hex>" content address over
@@ -61,6 +64,10 @@ func V41EngramDigestExtent(reader io.ReaderAt, offset, size int64) (string, erro
 func (m *Model) AttachV41Engram(spec V41EngramAttachSpec, layout V41EngramLayout, srcs []V41EngramRowSource, budgetBytes int64) error {
 	if m == nil {
 		return fmt.Errorf("%w: Engram attach needs a model", ErrV41NativeUnsupported)
+	}
+	// Refuse an unknown policy before changing model configuration or wiring.
+	if err := spec.CachePolicy.validate(); err != nil {
+		return fmt.Errorf("%w: %v", ErrV41NativeUnsupported, err)
 	}
 	if len(spec.LayerIDs) == 0 {
 		return fmt.Errorf("%w: Engram attach declares no layers", ErrV41NativeUnsupported)
@@ -99,7 +106,7 @@ func (m *Model) AttachV41Engram(spec V41EngramAttachSpec, layout V41EngramLayout
 	d41.EngramPadTokenID = spec.PadTokenID
 	d41.EngramCompressedVocabSize = spec.CompressedVocabSize
 
-	if err := m.wireV41Engram(layout, srcs, budgetBytes); err != nil {
+	if err := m.wireV41EngramWithPolicy(layout, srcs, budgetBytes, spec.CachePolicy); err != nil {
 		return fmt.Errorf("%w: %v", ErrV41NativeUnsupported, err)
 	}
 	return nil
