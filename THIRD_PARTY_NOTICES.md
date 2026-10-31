@@ -1202,3 +1202,27 @@ The full Apache License, Version 2.0 text is reproduced in the
 "TensorFold benchmark evidence" section above. Copyright (c) 2023, The vLLM team;
 Copyright (c) 2020-2023, NVIDIA CORPORATION. Licensed under the Apache License,
 Version 2.0.
+
+## vLLM token-weighted prefix cache telemetry
+
+`internal/gateway/serving_metrics.go` adapts the token-unit numerator/denominator
+telemetry model from vLLM at revision
+`a20280f30e3169d33a7e21d1d117e9719bace00b`:
+- `vllm/v1/metrics/loggers.py` (local prefix-cache query/hit counters and distinct external counters)
+- `vllm/v1/metrics/stats.py` (`PrefixCacheStats` and token-weighted `CachingMetrics.hit_rate`)
+
+https://github.com/vllm-project/vllm/tree/a20280f30e3169d33a7e21d1d117e9719bace00b
+
+Copyright contributors to the vLLM project.
+SPDX-License-Identifier: Apache-2.0
+
+Changed for Fak: optional counter presence in the existing Go serving schema;
+direct-gauge precedence; finite/nonnegative aggregate validation; local/external
+tier separation; atomic prefix source replacement; omission rather than deriving
+a native token rate from provider request-cache events. No vLLM execution engine,
+Python dependencies, sliding request window, cache reset operation, or inference
+policy is included. This is an ADAPT of the licensed schema/ratio model, not a
+literal translation of the upstream logger or scheduler.
+The upstream root LICENSE is Apache-2.0 and matches this repository's LICENSE.
+Both studied source files carry the SPDX contributor notices above. No root
+NOTICE exists at this exact revision (GitHub contents API returned 404).

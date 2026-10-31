@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -78,12 +79,23 @@ type ServingMetricRow struct {
 	Waiting            ServingGauge
 	KVUtilization      ServingGauge
 	PrefixCacheHitRate ServingGauge
+	// Token counters retain independently witnessed presence, including zero. Native
+	// process-global cacheobs totals are not relabeled as worker/model counters here.
+	// Adapted from vLLM v1 metrics/loggers.py and stats.py at
+	// a20280f30e3169d33a7e21d1d117e9719bace00b (Apache-2.0).
+	// Copyright contributors to the vLLM project.
+	PrefixCacheQueries ServingGauge
+	PrefixCacheHits    ServingGauge
 }
 
 func (r ServingMetricRow) present() bool {
 	return r.TTFT.Present() || r.TPOT.Present() || r.ITL.Present() ||
 		r.Goodput.Set || r.Running.Set || r.Waiting.Set ||
-		r.KVUtilization.Set || r.PrefixCacheHitRate.Set
+		r.KVUtilization.Set || r.hasPrefixTelemetry()
+}
+
+func (r ServingMetricRow) hasPrefixTelemetry() bool {
+	return r.PrefixCacheHitRate.Set || r.PrefixCacheQueries.Set || r.PrefixCacheHits.Set
 }
 
 // SetServingMetricsEmitters replaces the extra serving-metric emitters rendered
@@ -204,6 +216,12 @@ func (s *Server) writeServingMetricsWithStats(b *strings.Builder, inf inferenceS
 	writeServingGaugeFamily(b, "fak_serving_prefix_cache_hit_rate",
 		"Prefix-cache hit rate for the serving worker. Scrape emitters derive this from vLLM prefix_cache_hits / prefix_cache_queries counters when a direct hit-rate gauge is absent.",
 		rows, func(r ServingMetricRow) ServingGauge { return r.PrefixCacheHitRate })
+	writeServingCounterFamily(b, "fak_serving_prefix_cache_queries_total",
+		"Observed prefix-cache queried tokens, not request events. Omitted without a token counter witness.",
+		rows, func(r ServingMetricRow) ServingGauge { return r.PrefixCacheQueries })
+	writeServingCounterFamily(b, "fak_serving_prefix_cache_hits_total",
+		"Observed prefix-cache hit tokens, not request events. Omitted without a token counter witness.",
+		rows, func(r ServingMetricRow) ServingGauge { return r.PrefixCacheHits })
 }
 
 func (s *Server) nativeServingMetricRow(inf inferenceSnapshot, kvStats agent.KVMemoryStats, kvOK bool) (ServingMetricRow, bool) {
@@ -249,8 +267,6 @@ func (s *Server) nativeServingMetricRow(inf inferenceSnapshot, kvStats agent.KVM
 	if ok {
 		if kv := cacheobs.Default.Snapshot(); kv.Turns > 0 {
 			row.PrefixCacheHitRate = ServingGaugeValue(kv.ReuseRatio)
-		} else if turns > 0 {
-			row.PrefixCacheHitRate = ServingGaugeValue(float64(inf.cachedHits) / float64(turns))
 		}
 	}
 	return row, ok && row.present()
@@ -337,8 +353,12 @@ func mergeServingMetricRow(dst *ServingMetricRow, src ServingMetricRow) {
 	if src.KVUtilization.Set {
 		dst.KVUtilization = src.KVUtilization
 	}
-	if src.PrefixCacheHitRate.Set {
+	// Keep all prefix signals from one source; never manufacture a counter pair
+	// (or retain a stale ratio) by combining two emitters' partial observations.
+	if src.hasPrefixTelemetry() {
 		dst.PrefixCacheHitRate = src.PrefixCacheHitRate
+		dst.PrefixCacheQueries = src.PrefixCacheQueries
+		dst.PrefixCacheHits = src.PrefixCacheHits
 	}
 }
 
@@ -370,6 +390,16 @@ func writeServingGaugeFamily(b *strings.Builder, name, help string, rows []Servi
 			continue
 		}
 		fmt.Fprintf(b, "%s{%s} %s\n", name, servingLabels(row.Labels), promFloat(g.Value))
+	}
+}
+
+func writeServingCounterFamily(b *strings.Builder, name, help string, rows []ServingMetricRow, pick func(ServingMetricRow) ServingGauge) {
+	writeHelpType(b, name, help, "counter")
+	for _, row := range rows {
+		value := pick(row)
+		if value.Set {
+			fmt.Fprintf(b, "%s{%s} %s\n", name, servingLabels(row.Labels), promFloat(value.Value))
+		}
 	}
 }
 
@@ -548,8 +578,17 @@ func (e *ServingScrapeEmitter) IngestPrometheusAt(text string, at time.Time) err
 		return err
 	}
 	for key, counter := range counters {
-		if counter.prefixQueries > 0 {
-			rows[key].PrefixCacheHitRate = ServingGaugeValue(counter.prefixHits / counter.prefixQueries)
+		row := rows[key]
+		if counter.havePrefixQueries && !counter.invalidPrefixQueries {
+			row.PrefixCacheQueries = ServingGaugeValue(counter.prefixQueries)
+		}
+		if counter.havePrefixHits && !counter.invalidPrefixHits {
+			row.PrefixCacheHits = ServingGaugeValue(counter.prefixHits)
+		}
+		// A direct gauge may describe a different observation window. Preserve it;
+		// derive a lifetime token ratio only when BOTH counters were observed.
+		if !row.PrefixCacheHitRate.Set && row.PrefixCacheQueries.Set && row.PrefixCacheHits.Set && counter.prefixQueries > 0 {
+			row.PrefixCacheHitRate = ServingGaugeValue(counter.prefixHits / counter.prefixQueries)
 		}
 	}
 
@@ -682,10 +721,14 @@ type promSample struct {
 }
 
 type servingScrapeCounters struct {
-	successTotal  float64
-	haveSuccess   bool
-	prefixHits    float64
-	prefixQueries float64
+	successTotal         float64
+	haveSuccess          bool
+	prefixHits           float64
+	prefixQueries        float64
+	havePrefixHits       bool
+	havePrefixQueries    bool
+	invalidPrefixHits    bool
+	invalidPrefixQueries bool
 }
 
 type servingScrapeSuccess struct {
@@ -782,8 +825,10 @@ func fillServingMetricRowGaps(dst *ServingMetricRow, src ServingMetricRow) {
 	if !dst.KVUtilization.Set && src.KVUtilization.Set {
 		dst.KVUtilization = src.KVUtilization
 	}
-	if !dst.PrefixCacheHitRate.Set && src.PrefixCacheHitRate.Set {
+	if !dst.hasPrefixTelemetry() && src.hasPrefixTelemetry() {
 		dst.PrefixCacheHitRate = src.PrefixCacheHitRate
+		dst.PrefixCacheQueries = src.PrefixCacheQueries
+		dst.PrefixCacheHits = src.PrefixCacheHits
 	}
 }
 
@@ -871,9 +916,19 @@ func applyServingPromSample(row *ServingMetricRow, sample promSample, counters *
 		counters.successTotal += sample.value
 		counters.haveSuccess = true
 	case "prefix_hits":
-		counters.prefixHits += sample.value
+		if sample.value < 0 || math.IsNaN(sample.value) || math.IsInf(sample.value, 0) || math.IsInf(counters.prefixHits+sample.value, 0) {
+			counters.invalidPrefixHits = true
+		} else {
+			counters.prefixHits += sample.value
+			counters.havePrefixHits = true
+		}
 	case "prefix_queries":
-		counters.prefixQueries += sample.value
+		if sample.value < 0 || math.IsNaN(sample.value) || math.IsInf(sample.value, 0) || math.IsInf(counters.prefixQueries+sample.value, 0) {
+			counters.invalidPrefixQueries = true
+		} else {
+			counters.prefixQueries += sample.value
+			counters.havePrefixQueries = true
+		}
 	}
 }
 
@@ -901,6 +956,9 @@ func promMetricBase(name string) (base, suffix string) {
 }
 
 func servingPromMetricKind(base string) string {
+	// External/connector counters describe different cache tiers. A suffix match
+	// would add those populations into the local pair emitted by vLLM v1.
+	metric := base[strings.LastIndex(base, ":")+1:]
 	switch {
 	case strings.HasSuffix(base, "time_to_first_token_seconds"):
 		return "ttft"
@@ -932,11 +990,9 @@ func servingPromMetricKind(base string) string {
 	case strings.HasSuffix(base, "request_success_total") ||
 		strings.HasSuffix(base, "requests_success_total"):
 		return "success_total"
-	case strings.HasSuffix(base, "prefix_cache_hits") ||
-		strings.HasSuffix(base, "prefix_cache_hits_total"):
+	case metric == "prefix_cache_hits" || metric == "prefix_cache_hits_total" || metric == "fak_serving_prefix_cache_hits_total":
 		return "prefix_hits"
-	case strings.HasSuffix(base, "prefix_cache_queries") ||
-		strings.HasSuffix(base, "prefix_cache_queries_total"):
+	case metric == "prefix_cache_queries" || metric == "prefix_cache_queries_total" || metric == "fak_serving_prefix_cache_queries_total":
 		return "prefix_queries"
 	}
 	return ""

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 )
 
 func TestServingScrapeEmitterRelabelsVLLMIntoFakSchema(t *testing.T) {
@@ -203,6 +205,7 @@ func TestNativeServingEmitterWritesSameSchema(t *testing.T) {
 }
 
 func TestGatewayNativeInferenceFeedsServingSchema(t *testing.T) {
+	t.Cleanup(swapCacheObserver(cacheobs.New()))
 	srv := newTestServer(t)
 	ctl := NewAdmissionController(AdmissionPolicy{MaxNumSeqs: 1, TokenBudget: 1000, MaxWaiting: 10})
 	if got := ctl.Offer(SeqRequest{TraceID: "run", Tokens: 10}); got != VerdictAdmitted {
@@ -222,11 +225,13 @@ func TestGatewayNativeInferenceFeedsServingSchema(t *testing.T) {
 		`fak_serving_goodput_requests_per_second{` + labels + `} 1`,
 		`fak_serving_num_requests_running{` + labels + `} 1`,
 		`fak_serving_num_requests_waiting{` + labels + `} 1`,
-		`fak_serving_prefix_cache_hit_rate{` + labels + `} 0`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("gateway native serving schema missing %q\n--- metrics ---\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "fak_serving_prefix_cache_hit_rate{"+labels+"}") {
+		t.Fatal("native token hit-rate fabricated from request counters without a cache token witness")
 	}
 }
 
