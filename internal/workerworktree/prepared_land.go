@@ -29,6 +29,7 @@ type ProspectiveVerificationBinding struct {
 }
 
 type PreparedLandReceipt struct {
+	SourceLease         *SourceLeaseFence              `json:"source_lease,omitempty"`
 	Schema              string                         `json:"schema"`
 	GateContract        string                         `json:"gate_contract"`
 	ReceiptID           string                         `json:"receipt_id"`
@@ -71,9 +72,10 @@ type PreparedLandExpectation struct {
 }
 
 type preparedLandCapture struct {
-	binding ProspectiveVerificationBinding
-	paths   []string
-	receipt PreparedLandReceipt
+	sourceLease *SourceLeaseFence
+	binding     ProspectiveVerificationBinding
+	paths       []string
+	receipt     PreparedLandReceipt
 }
 
 func PrepareProspectiveLand(root, wtPath, baseSHA, msgFile string, paths []string, binding ProspectiveVerificationBinding, verify VerifyHook, prospectiveVerify ProspectiveVerifyHook, git GitRunner, opts ...LandOption) (PreparedLandReceipt, Result) {
@@ -88,7 +90,7 @@ func PrepareProspectiveLand(root, wtPath, baseSHA, msgFile string, paths []strin
 	if err != nil {
 		return PreparedLandReceipt{}, Result{OK: false, Code: LandResultPreparedMismatch, Preserved: true, Reason: "invalid prospective verification binding", Detail: err.Error()}
 	}
-	capture := &preparedLandCapture{binding: normalizedBinding, paths: normalizedPaths}
+	capture := &preparedLandCapture{binding: normalizedBinding, paths: normalizedPaths, sourceLease: newLandConfig(opts).sourceLease}
 	res := landPrepared(root, wtPath, baseSHA, msgFile, paths, verify, prospectiveVerify, capture, git, opts...)
 	return capture.receipt, res
 }
@@ -126,6 +128,12 @@ func AcceptPreparedLand(root, wtPath string, expected PreparedLandExpectation, g
 	canonicalID, err := preparedReceiptID(receipt)
 	if err != nil || canonicalID != expectedID {
 		return preparedMismatch("prepared landing receipt integrity mismatch", errorDetail(err))
+	}
+	if !sameSourceLease(receipt.SourceLease, cfg.sourceLease) {
+		return sourceFenceRefusal("prepared source lease does not match presented source tuple", "")
+	}
+	if _, refusal := landSourceSnapshot(root, cfg, git); refusal != nil {
+		return *refusal
 	}
 	if receipt.PathsDigest != digestStrings(expectedPaths) ||
 		receipt.VerifyCommandDigest != digestStrings([]string{expectedBinding.Command}) ||
@@ -184,7 +192,11 @@ func AcceptPreparedLand(root, wtPath string, expected PreparedLandExpectation, g
 	if refusal := revalidatePreparedLand(root, wtPath, receipt, cfg, git); !refusal.OK {
 		return refusal
 	}
-	if rc, out := run(git, root, []string{"update-ref", receipt.TargetRef, receipt.CandidateSHA, receipt.ParentSHA}); rc != 0 {
+	rc, out, fenceRefusal := landCompareAndSwap(root, receipt.TargetRef, receipt.CandidateSHA, receipt.ParentSHA, cfg, git)
+	if fenceRefusal != nil {
+		return *fenceRefusal
+	}
+	if rc != 0 {
 		return preparedReprepare("prepared target changed during acceptance; prepare again", tail(out, 200))
 	}
 	sync := syncSharedCheckout(git, root, receipt.ParentSHA, receipt.CandidateSHA, receipt.CandidatePaths)
@@ -596,7 +608,8 @@ func persistPreparedLand(root, wtPath, targetRef, parentSHA, treeSHA, candidateS
 		return PreparedLandReceipt{}, err
 	}
 	receipt := PreparedLandReceipt{
-		Schema: PreparedLandSchema, GateContract: PreparedLandGateContract,
+		SourceLease: capture.sourceLease,
+		Schema:      PreparedLandSchema, GateContract: PreparedLandGateContract,
 		TargetRef: strings.TrimSpace(targetRef), ParentSHA: strings.TrimSpace(parentSHA),
 		TreeSHA: strings.TrimSpace(treeSHA), CandidateSHA: strings.TrimSpace(candidateSHA),
 		PathsDigest:         digestStrings(capture.paths),

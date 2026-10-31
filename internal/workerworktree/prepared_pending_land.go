@@ -75,6 +75,9 @@ func (c *preparedLandCapture) persistCandidateLand(root, wtPath, targetRef, pare
 // PreparePendingLand constructs and anchors an exact candidate, then persists
 // its pending identity. It does not run or represent a verification verdict.
 func PreparePendingLand(root, wtPath, baseSHA, msgFile string, paths []string, context pendingadmission.ProofContext, git GitRunner, opts ...LandOption) (PendingLandReceipt, Result) {
+	if newLandConfig(opts).sourceLease != nil {
+		return PendingLandReceipt{}, sourceFenceRefusal("source-fenced pending landing is unsupported; use verified prepare/accept", "")
+	}
 	if err := context.Validate(); err != nil {
 		return PendingLandReceipt{}, pendingLandMismatch("invalid pending proof context", err.Error())
 	}
@@ -106,6 +109,9 @@ func (c *pendingLandCapture) persistCandidateLand(root, wtPath, targetRef, paren
 // used by verified prepared landing.
 func AcceptPendingLand(root, wtPath string, expected PendingLandExpectation, git GitRunner, opts ...LandOption) Result {
 	cfg := newLandConfig(opts)
+	if cfg.sourceLease != nil {
+		return sourceFenceRefusal("source-fenced pending landing is unsupported; use verified prepare/accept", "")
+	}
 	expectedID := expected.ReceiptID
 	if !validPendingDigest(expectedID) {
 		return pendingLandMismatch("invalid pending landing receipt ID", "")

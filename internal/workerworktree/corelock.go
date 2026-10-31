@@ -73,6 +73,9 @@ const coreLockLandRemedy = "Re-land with `fak worktree worker land --core-lock-m
 type LandOption func(*landConfig)
 
 type landConfig struct {
+	sourceLease *SourceLeaseFence
+	// Test seam for the same real Git ref transaction used in production.
+	sourceCAS func(root, input string, beforeCommit func(context.Context) error) (int, string)
 	// coreLockWitness is the claim supplied out-of-band (the CLI flag). It wins
 	// over the commit-message trailer when both are present.
 	coreLockWitness string

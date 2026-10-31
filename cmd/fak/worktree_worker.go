@@ -1075,6 +1075,9 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 	fs.SetOutput(stderr)
 	worktree := fs.String("worktree", "", "the worker's worktree dir to land from (required)")
 	baseSHA := fs.String("base-sha", "", "the sha the worktree was pinned at — the diff ref (default: HEAD); must match the prepared worktree intent base")
+	sourceID := fs.String("source-lease-id", "", "Source lease ID in target repo, atomically fenced with final trunk CAS (requires holder and positive generation)")
+	sourceHolder := fs.String("source-lease-holder", "", "immutable granted Source lease holder")
+	sourceGeneration := fs.Int64("source-lease-generation", 0, "immutable positive granted Source lease generation")
 	msgFile := fs.String("msg-file", "", "commit message file for `git commit -s -F` (default: derive from the worktree tip)")
 	verifyDefault := "go-build"
 	if mode == "prepare-pending" || mode == "accept-pending" {
@@ -1115,6 +1118,15 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 		return returnEarly(workerworktree.Result{OK: false, Code: "LAND_STRAY_ARGS",
 			Reason: "unexpected positional arguments; pass one --paths flag per path",
 			Detail: strings.Join(fs.Args(), " ")}, 2)
+	}
+	sourceRequested := false
+	fs.Visit(func(f *flag.Flag) {
+		if strings.HasPrefix(f.Name, "source-lease-") {
+			sourceRequested = true
+		}
+	})
+	if sourceRequested && (strings.TrimSpace(*sourceID) == "" || strings.TrimSpace(*sourceHolder) == "" || *sourceGeneration <= 0) {
+		return returnEarly(workerworktree.Result{OK: false, Code: workerworktree.LandResultSourceFence, Preserved: true, Reason: "source lease requires ID, holder and positive generation together"}, 2)
 	}
 	selectedSymptomTests := normalizeWorkerLandStrings([]string(symptomTests))
 	if len(symptomTests) > 0 && len(selectedSymptomTests) == 0 {
@@ -1188,6 +1200,9 @@ func runWorktreeWorkerLand(stdout, stderr io.Writer, argv []string) (workerworkt
 	opts := []workerworktree.LandOption{
 		workerworktree.WithCoreLockWitness(*coreLockWitness),
 		workerworktree.WithLandProgress(worktreeWorkerProgressEmitter(stderr)),
+	}
+	if sourceRequested {
+		opts = append(opts, workerworktree.WithSourceLeaseFence(workerworktree.SourceLeaseFence{ID: *sourceID, Holder: *sourceHolder, Generation: *sourceGeneration}))
 	}
 	if strings.TrimSpace(*branch) != "" {
 		opts = append(opts, workerworktree.WithLandBranch(strings.TrimSpace(*branch)))

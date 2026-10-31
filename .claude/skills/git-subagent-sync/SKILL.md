@@ -209,6 +209,24 @@ For each verified lane:
      --msg-file "<prepared-msg-file>"
    ```
 
+   For a recovery-capable local attempt, carry the **original granted** Source
+   tuple on direct land and on **both** verified `land prepare` / `land accept`:
+   `--source-lease-id <id> --source-lease-holder <holder> --source-lease-generation <positive-generation>`.
+   The Source ref must be in the **target repository's Git common store**. The
+   worker validates the live tuple and verifies its current ref OID in the same
+   Git transaction as final trunk CAS. Direct-ref type and live tuple are rechecked
+   while Git's prepared ref locks are held, before the commit decision; TTL is a
+   decision-time check, not a zero-duration wall-clock expiry guarantee.
+   A heartbeat changes OID, not the immutable
+   presented tuple. Prepared receipts bind `source_lease`; omission or relabeling
+   at accept refuses. Missing/expired/superseded leases refuse. Transaction
+   contention requires actual ref readback before retry; it is not proof of an
+   observed no-mutation terminal. Fenced requests never use shared-index legacy
+   or pending-debt modes. Existing no-tuple calls remain unfenced compatibility;
+   installing this code does **not** fence any already-running older binary or
+   prove that an unknown historical process drained. No cross-clone arbitration
+   or atomic sibling-repository lease/target transaction is claimed.
+
 5. **Verify commit claim shape & leaf stamp immediately**:
    ```bash
    dos commit-audit HEAD
