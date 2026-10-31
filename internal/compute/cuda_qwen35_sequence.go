@@ -12,8 +12,48 @@ import (
 	"fmt"
 	"math"
 	"sync/atomic"
+	"time"
 	"unsafe"
 )
+
+// Only completed Qwen35SequencePrefill critical sections contribute. These
+// process-wide counters share cudaMu; they do not observe other CUDA entries.
+// The existing immutable timestamp-profiler gate is the only enablement.
+type cudaQwen35SequenceLockCounters struct {
+	completed, waitNS, holdNS uint64
+	invalid                   bool
+}
+
+func (p *cudaQwen35SequenceLockCounters) observe(wait, hold time.Duration) {
+	if p.invalid {
+		return
+	}
+	if wait < 0 || hold < 0 || p.completed == ^uint64(0) ||
+		uint64(wait) > ^uint64(0)-p.waitNS || uint64(hold) > ^uint64(0)-p.holdNS {
+		p.invalid = true
+		return
+	}
+	p.completed++
+	p.waitNS += uint64(wait)
+	p.holdNS += uint64(hold)
+}
+
+var cudaQwen35SequenceLocks cudaQwen35SequenceLockCounters
+
+// CUDAQwen35SequenceLockProfileSnapshot reports cumulative process sequence
+// entries, not a request delta or all CUDA lock activity. This reader is not
+// itself a measured sequence entry. Off/invalid means unknown, not zero.
+func (*cudaBackend) CUDAQwen35SequenceLockProfileSnapshot() (completed, waitNS, holdNS uint64, available bool) {
+	if !cudaKernelProfileOn {
+		return 0, 0, 0, false
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	if cudaQwen35SequenceLocks.invalid {
+		return 0, 0, 0, false
+	}
+	return cudaQwen35SequenceLocks.completed, cudaQwen35SequenceLocks.waitNS, cudaQwen35SequenceLocks.holdNS, true
+}
 
 func (*cudaBackend) Qwen35SequencePrefillPath() string { return Qwen35SequencePrefillPath }
 
@@ -425,8 +465,19 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 	if admitErr := c.faultLatch.Admit("qwen35-sequence-prefill"); admitErr != nil {
 		return result, &Qwen35SequenceError{Stage: "device-admission", Layer: -1, Cause: admitErr}
 	}
+	var waitStarted time.Time
+	if cudaKernelProfileOn {
+		waitStarted = time.Now()
+	}
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	if !waitStarted.IsZero() {
+		acquired := time.Now()
+		wait := acquired.Sub(waitStarted)
+		// Registered before cleanup defers: observe after their work, immediately
+		// before the existing unlock. Counter-update/unlock overhead is excluded.
+		defer func() { cudaQwen35SequenceLocks.observe(wait, time.Since(acquired)) }()
+	}
 	// Admission and the C-global private owner must agree under the recording
 	// mutex; another backend instance may have failed while this caller waited.
 	if admitErr := c.faultLatch.Admit("qwen35-sequence-prefill"); admitErr != nil {

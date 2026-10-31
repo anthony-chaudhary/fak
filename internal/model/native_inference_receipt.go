@@ -310,6 +310,7 @@ type NativeInferenceReceipt struct {
 	Qwen35SequencePrefillRoute *NativeSequencePrefillRouteReceipt    `json:"qwen35_sequence_prefill_route,omitempty"`
 	CUDAImmutableWeightUploads *NativeCUDAImmutableWeightUploadDelta `json:"cuda_immutable_weight_uploads,omitempty"`
 	CUDAUploadHostRetention    *NativeCUDAUploadHostRetention        `json:"cuda_upload_host_retention,omitempty"`
+	CUDASequenceLockProfile    *NativeCUDASequenceLockProfile        `json:"cuda_qwen35_sequence_lock_profile,omitempty"`
 	// NativeCacheAccounting is present only when the producer recorded what the
 	// request did with the prepared native cache. Absent (nil) preserves the
 	// existing receipt shape for every producer that predates the field.
@@ -364,6 +365,25 @@ type NativeCUDAUploadHostRetention struct {
 	EntriesWithHostOwner uint64 `json:"entries_with_host_owner"`
 	PayloadViewBytes     uint64 `json:"payload_view_bytes"`
 	ScaleViewBytes       uint64 `json:"scale_view_bytes"`
+}
+
+// NativeCUDASequenceLockProfile is a cumulative process observation of completed
+// Qwen35SequencePrefill mutex acquisitions while the existing CUDA timestamp
+// profiler is enabled. It excludes all other CUDA entries and pre-lock refusals,
+// but includes acquired calls that return errors and their deferred cleanup.
+// WaitNS includes host scheduling; HoldNS includes device fences and cleanup,
+// excluding the final counter-update/unlock tail. Neither measures GPU time.
+// Snapshots from concurrent requests can overlap and include other process users;
+// this is not a request delta, utilization, or concurrency/speedup evidence.
+// The existing profiler perturbs execution and graph eligibility. A nil block
+// means unsupported, disabled or invalid; a present zero is an observed zero.
+type NativeCUDASequenceLockProfile struct {
+	Scope                 string `json:"scope"`
+	Accounting            string `json:"accounting"`
+	Gate                  string `json:"gate"`
+	CompletedAcquisitions uint64 `json:"completed_acquisitions"`
+	WaitNS                uint64 `json:"wait_ns"`
+	HoldNS                uint64 `json:"hold_ns"`
 }
 
 // NativeInferenceReceiptUnsupportedError is returned before model execution when

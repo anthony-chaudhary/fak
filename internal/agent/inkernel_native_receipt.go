@@ -85,6 +85,7 @@ func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferen
 		Qwen35SequencePrefillRoute: cloneNativeSequencePrefillRouteReceipt(measurement.qwen35SequencePrefillRoute),
 		CUDAImmutableWeightUploads: cudaImmutableWeightUploads,
 		CUDAUploadHostRetention:    cudaUploadHostRetentionSnapshot(p.backend),
+		CUDASequenceLockProfile:    cudaSequenceLockProfileSnapshot(p.backend),
 		NativeCacheAccounting:      firstNativeCacheAccounting(accounting),
 	}
 }
@@ -299,5 +300,31 @@ func cudaUploadHostRetentionSnapshot(be compute.Backend) *model.NativeCUDAUpload
 		EntriesWithHostOwner: entries,
 		PayloadViewBytes:     payload,
 		ScaleViewBytes:       scales,
+	}
+}
+
+type cudaSequenceLockProfileSnapshotter interface {
+	CUDAQwen35SequenceLockProfileSnapshot() (completed, waitNS, holdNS uint64, available bool)
+}
+
+// Only the requested native receipt builder reads this optional observer.
+// The backend's existing timestamp profiler must already be enabled; this
+// consumer never enables profiling or changes CUDA execution policy.
+func cudaSequenceLockProfileSnapshot(be compute.Backend) *model.NativeCUDASequenceLockProfile {
+	provider, ok := be.(cudaSequenceLockProfileSnapshotter)
+	if !ok {
+		return nil
+	}
+	completed, waitNS, holdNS, available := provider.CUDAQwen35SequenceLockProfileSnapshot()
+	if !available {
+		return nil
+	}
+	return &model.NativeCUDASequenceLockProfile{
+		Scope:                 "process_cuda_qwen35_sequence_prefill",
+		Accounting:            "cumulative_completed_acquisitions",
+		Gate:                  "cuda_timestamp_profile",
+		CompletedAcquisitions: completed,
+		WaitNS:                waitNS,
+		HoldNS:                holdNS,
 	}
 }
