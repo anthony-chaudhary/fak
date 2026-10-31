@@ -6,10 +6,10 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1327<br>
-rows: 1301<br>
-unverified rows: 0 / 1301<br>
-source-only rows absent from help: 1065
+parsed files: 1337<br>
+rows: 1311<br>
+unverified rows: 0 / 1311<br>
+source-only rows absent from help: 1075
 
 ## Surface table
 
@@ -244,6 +244,8 @@ source-only rows absent from help: 1065
 | `fak compute-trace capture` |  | eventDuration | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
 | `fak compute-trace first-divergence` | reports the first (layer, stage) where an actual trace leaves the reference, with the full per-layer x stage profile. | runComputeTraceFirstDivergence / internal/computetrace | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
 | `fak compute-trace from-llamacpp` | converts a llama.cpp tensor dump directory into a reference activation trace, optionally adopting a fak trace's digests. | runComputeTraceFromLlamaCpp / internal/computetrace | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
+| `fak compute-trace from-sglang` |  | runComputeTraceFromTorch / internal/computetrace | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
+| `fak compute-trace from-vllm` |  | runComputeTraceFromTorch / internal/computetrace | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
 | `fak compute-trace logits` |  | runComputeTraceLogits | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
 | `fak compute-trace logits compare` |  | runComputeTraceLogitsCompare / internal/logitoracle | `case` arm of the dispatch switch in runComputeTraceLogits() | NONE | — | **SOURCE ONLY** |
 | `fak compute-trace logits dump` | loads the model once through the serve loader and records full logit vectors for raw-token prompts | runComputeTraceLogitsDump / internal/compute, internal/compute/strix, internal/gateway, internal/ggufload, internal/logitoracle, internal/model, internal/modelengine, internal/pathutil, internal/policy, internal/tokenizer | `case` arm of the dispatch switch in runComputeTraceLogits() | NONE | — | **SOURCE ONLY** |
@@ -730,13 +732,18 @@ source-only rows absent from help: 1065
 | `fak milestone-scorecard` | native milestone-roadmap scorecard control-pane payload | cmdMilestoneScorecard / internal/milestonereport | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak mlp-score` | MLP (first-lovable-cut) grade: pure internal/mlpscore fold over a committed HEAD snapshot (--json/--markdown) | cmdMLPScore / internal/mlpscore | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak mode-debt-dispatch` | permission-regime fan-out: one deduped issue per HARD un-lifted dial from the mode-debt scorecard | cmdModeDebtDispatch / internal/dogfoodissues, internal/modedebt | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | yes |
-| `fak model` | resolve an hf:// URI to a locally cached file path (Hub download + SHA256 verify) | cmdModel | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
+| `fak model` | resolve model refs, inspect readiness, and model fit compose\|plan\|check\|compare declared multi-device memory | cmdModel | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
 | `fak model acceptance-fixture` |  | runModelAcceptanceFixture | `case` arm of the dispatch switch in cmdModel() | STRUCTURAL | `POLICY_DENY` | **SOURCE ONLY** |
 | `fak model acceptance-gate` |  | runModelAcceptanceGate / internal/modelaccept | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model acceptance-refold` |  | runModelAcceptanceRefold / internal/modelaccept | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model acceptance-run` |  | runModelAcceptanceRun / internal/modelaccept | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model canary-gate` |  | runModelCanaryGate / internal/modelops | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model canary-run` |  | runModelCanaryRun | `case` arm of the dispatch switch in cmdModel() | RUNTIME | — | **SOURCE ONLY** |
+| `fak model fit` |  | runModelFit / internal/fitplan | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
+| `fak model fit check` |  |  | `if` arm of the dispatch in runModelFit() | N/A | — | **SOURCE ONLY** |
+| `fak model fit compare` |  | decodeModelFitInput | `if` arm of the dispatch in runModelFit() | NONE | — | **SOURCE ONLY** |
+| `fak model fit compose` |  | decodeModelFitInput | `if` arm of the dispatch in runModelFit() | NONE | — | **SOURCE ONLY** |
+| `fak model fit help` | prints the error-path help: the compact overview, to stderr | usage / internal/appversion | `if` arm of the dispatch in runModelFit() | NONE | — | **SOURCE ONLY** |
 | `fak model help` |  |  | `case` arm of the dispatch switch in cmdModel() | N/A | — | **SOURCE ONLY** |
 | `fak model incumbent` |  | cmdModelIncumbent | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model incumbent help` |  |  | `case` arm of the dispatch switch in cmdModelIncumbent() | N/A | — | **SOURCE ONLY** |
@@ -745,7 +752,7 @@ source-only rows absent from help: 1065
 | `fak model incumbent render` |  | runModelIncumbentRender | `case` arm of the dispatch switch in cmdModelIncumbent() | NONE | — | **SOURCE ONLY** |
 | `fak model load` | downloads (or cache-hits) the file a model ref names and prints its local path | cmdModelLoad / internal/hfhub, internal/modelreg | `case` arm of the dispatch switch in cmdModel() | NONE | — | yes |
 | `fak model ls` | `fak ls` / `fak model ls`: list the merged alias registry (embedded catalog + the user's registry.json) with each alias's target and whether it is already downloaded locally | cmdModelLs / internal/modelreg | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
-| `fak model plan` |  | runModelPlan / internal/compute, internal/modelloadplan | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
+| `fak model plan` |  | runModelPlan / internal/compute, internal/model/v41, internal/modelloadplan | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model preflight` | checks a GGUF header (every shard, no tensor bytes) for unread keys, HF-config mismatches, missing/orphan tensors and dtypes without a host kernel, all in one pass | runModelPreflight / internal/ggufload, internal/pathutil | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model provider-contracts` |  | runModelProviderContracts / internal/modelroute | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model pull` | `fak pull <ref>` / `fak model pull <ref>`: resolve an alias to its target (a bare hf:// URI or path passes through), download it into the local cache (cache-hit if already present), and print the loca… | cmdModelPull / internal/hfhub, internal/modelreg | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
@@ -760,6 +767,8 @@ source-only rows absent from help: 1065
 | `fak model-observe bandwidth numa-import` |  | runModelObserveNUMAImport / internal/modelperfobs | `case` arm of the dispatch switch in runModelObserveBandwidth() | NONE | — | **SOURCE ONLY** |
 | `fak model-observe bandwidth numa-topology` |  | runModelObserveNUMATopology / internal/modelperfobs | `case` arm of the dispatch switch in runModelObserveBandwidth() | NONE | — | **SOURCE ONLY** |
 | `fak model-observe cache-state-bench` |  | runModelObserveStateBench / internal/modelperfobs | `case` arm of the dispatch switch in cmdModelObserve() | NONE | — | **SOURCE ONLY** |
+| `fak model-observe hwutil` | serves the hardware-usage telemetry plane next to the bandwidth surface: one bounded sample of host/device/link/tier counters in the frozen fak.hwutil.v1 shape. | runModelObserveHWUtil | `case` arm of the dispatch switch in cmdModelObserve() | NONE | — | **SOURCE ONLY** |
+| `fak model-observe hwutil collect` |  | runModelObserveHWUtilCollect | `if` arm of the dispatch in runModelObserveHWUtil() | NONE | — | **SOURCE ONLY** |
 | `fak model-observe proxy` |  |  | `case` arm of the dispatch switch in cmdModelObserve() | N/A | — | **SOURCE ONLY** |
 | `fak model-observe report` |  |  | `case` arm of the dispatch switch in cmdModelObserve() | N/A | — | **SOURCE ONLY** |
 | `fak model-observe time-burndown` |  |  | `case` arm of the dispatch switch in cmdModelObserve() | N/A | — | **SOURCE ONLY** |
@@ -862,7 +871,7 @@ source-only rows absent from help: 1065
 | `fak provider-cost import` |  | fatalProviderCost | `case` arm of the dispatch switch in runProviderCost() | NONE | — | **SOURCE ONLY** |
 | `fak provider-cost reconcile` |  | fatalProviderCost | `case` arm of the dispatch switch in runProviderCost() | NONE | — | **SOURCE ONLY** |
 | `fak provider-cost report` |  | fatalProviderCost | `case` arm of the dispatch switch in runProviderCost() | NONE | — | **SOURCE ONLY** |
-| `fak ps` | the read-only process table: one aligned row per live served session | cmdPS / internal/secretload | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | yes |
+| `fak ps` | the read-only process table: one aligned row per live served session | cmdPS / internal/gateway, internal/secretload | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | yes |
 | `fak public-scrub` | public-release safety audit over staged/range/tree/message content (the PUBLIC_LEAK gate family) | cmdPublicScrub | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
 | `fak public-scrub audit-message` |  | runPublicScrubMessage / internal/hooks, internal/windowgate | `case` arm of the dispatch switch in runPublicScrub() | RUNTIME | — | yes |
 | `fak public-scrub audit-range` |  | runPublicScrubRange / internal/hooks, internal/windowgate | `case` arm of the dispatch switch in runPublicScrub() | RUNTIME | — | yes |
@@ -1091,6 +1100,7 @@ source-only rows absent from help: 1065
 | `fak superstream plan` |  | runSuperstreamPlan / internal/superstream | `case` arm of the dispatch switch in runSuperstream() | NONE | — | **SOURCE ONLY** |
 | `fak superstream status` |  | runSuperstreamStatus / internal/superstream | `case` arm of the dispatch switch in runSuperstream() | NONE | — | **SOURCE ONLY** |
 | `fak superstream step` |  | runSuperstreamStep / internal/laneadmit, internal/superstream | `case` arm of the dispatch switch in runSuperstream() | NONE | — | **SOURCE ONLY** |
+| `fak supervisor-seat` | one dry-run supervisor-seat wake: assemble-decide-gate-journal over typed witnesses, zero admission calls | cmdSupervisorSeat / internal/fleetmon, internal/supervisoragent | `case` arm of the dispatch switch in dispatchPrimaryVerb() | STRUCTURAL | `SUPERVISOR_SEAT_ENVELOPE_INVALID`, `SUPERVISOR_SEAT_LIVE_LOWER_NOT_SHIPPED`, `SUPERVISOR_SEAT_PAYLOAD_INVALID`, `SUPERVISOR_SEAT_WAKE_FAILED` | **SOURCE ONLY** |
 | `fak support` | per-cell support read-out: one line per model x backend cell (rung.regime.target.next-action) | cmdSupport / internal/supportmaturityscore | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
 | `fak support-maturity-scorecard` | native support-maturity payload: fold the model x backend coverage matrix into a grade | cmdSupportMaturityScorecard / internal/supportmaturityscore | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak swebench` | SWE-bench Verified benchmarking (describe/eval/compare) | cmdSwebench | `case` arm of the dispatch switch in dispatchExtendedVerbA() | NONE | — | yes |
@@ -1139,7 +1149,7 @@ source-only rows absent from help: 1065
 | `fak toolproc repeats` |  | runToolprocRepeats / internal/toolproc | `case` arm of the dispatch switch in runToolproc() | NONE | — | **SOURCE ONLY** |
 | `fak toolproc replay` |  | runToolprocReplay / internal/toolcallcontrol | `case` arm of the dispatch switch in runToolproc() | NONE | — | **SOURCE ONLY** |
 | `fak toolproc sample` |  | runToolprocSample / internal/toolproc | `case` arm of the dispatch switch in runToolproc() | NONE | — | **SOURCE ONLY** |
-| `fak top` | = fak ps --watch (the live process-table top mode) | cmdTop / internal/secretload | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | yes |
+| `fak top` | = fak ps --watch (the live process-table top mode) | cmdTop / internal/gateway, internal/secretload | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | yes |
 | `fak traj` | the trajectory-corpus toolkit (similar/cluster/score/gc/export) over recorded turns | cmdTraj | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | yes |
 | `fak traj cluster` | groups near-duplicate queries (cosine >= threshold) into clusters by single-link agglomeration — a coarse map of "the same work, done N times" a skill uses to find redundancy. | cmdTrajCluster / internal/simhash, internal/trajectory, internal/trajhook | `case` arm of the dispatch switch in cmdTraj() | NONE | — | yes |
 | `fak traj concepts` | surfaces recurring, explainable workflow families between aggregate dashboards and individual tool calls | cmdTrajConcepts / internal/toolseq, internal/trajectory, internal/trajhook | `case` arm of the dispatch switch in cmdTraj() | NONE | — | **SOURCE ONLY** |
