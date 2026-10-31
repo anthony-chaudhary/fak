@@ -227,7 +227,8 @@ func (c *cudaBackend) Recycle() {
 		C.fcuda_ts_boundary() // token boundary: resolve this token's event pairs
 	}
 	for _, b := range c.transient {
-		if b.ptr != nil {
+		if b.ptr != nil && !b.graphOncePinned {
+			c.graphOnceFreeDependencyLocked(b)
 			C.fcuda_free(b.ptr)
 			b.ptr = nil
 		}
@@ -258,7 +259,8 @@ func (c *cudaBackend) releaseTransientBuffers(buffers []*cudaBuf) {
 		return
 	}
 	for _, target := range buffers {
-		if target != nil && target.ptr != nil {
+		if target != nil && target.ptr != nil && !target.graphOncePinned {
+			c.graphOnceFreeDependencyLocked(target)
 			C.fcuda_free(target.ptr)
 			target.ptr = nil
 		}
@@ -372,6 +374,7 @@ func (c *cudaBackend) Qwen35GDNCaptureLegal() bool { return true }
 // GraphReset drops the kept exec graph so a new session captures fresh (the exec is bound
 // to one session's buffer addresses). The HAL calls it at NewBackendSession.
 func (c *cudaBackend) GraphReset() {
+	c.GraphOnceInvalidate()
 	if !graphEnabled {
 		return
 	}
@@ -765,6 +768,10 @@ func (c *cudaBackend) Free(t Tensor) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	if db, ok := t.buf.(*cudaBuf); ok && db.ptr != nil {
+		if db.graphOncePinned {
+			return
+		}
+		c.graphOnceFreeDependencyLocked(db)
 		awaitAsyncUploadLocked(db.ptr) // never pool a buffer the copy stream still writes
 		if db.host != 0 {
 			// evict the exact (ptr, dtype, layout) entry so a re-upload of the same host buffer re-stages
@@ -1291,7 +1298,9 @@ func (c *cudaBackend) RoPE(x Tensor, pos, nHeads, headDim int, theta float64) Te
 	xbuf := c.cudaBufForSubmit(x)
 	y, ybuf := c.devTr(append([]int(nil), x.Shape...), F32)
 	C.fcuda_d2d(ybuf.ptr, xbuf.ptr, C.size_t(x.Numel()*4))
-	C.fcuda_rope_f32(c.cf(y), C.int(pos), C.int(nHeads), C.int(headDim), C.double(theta))
+	if !c.graphOnceRoPELocked(y, nHeads, headDim, theta) {
+		C.fcuda_rope_f32(c.cf(y), C.int(pos), C.int(nHeads), C.int(headDim), C.double(theta))
+	}
 	return y
 }
 
@@ -1399,9 +1408,11 @@ func (c *cudaBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, gr
 		cudaKVCheck(C.fcuda_kv_attention_typed(c.cf(q), ck.K[layer].ptr, ck.V[layer].ptr, c.cf(out), 1, C.int(nPos-1), cudaKVElements(nH), cudaKVElements(nKV), cudaKVElements(hd), C.float(scale), C.int(ck.K[layer].dtype)))
 		return out
 	}
-	C.fcuda_flash_attention_f32(c.cf(q),
-		(*C.float)(ck.K[layer].ptr), (*C.float)(ck.V[layer].ptr),
-		c.cf(out), C.int(nPos), C.int(ck.maxPos), C.int(nH), C.int(nKV), C.int(hd), C.float(scale))
+	if !c.graphOnceAttentionLocked(q, out, ck, layer, nH, nKV, hd, scale) {
+		C.fcuda_flash_attention_f32(c.cf(q),
+			(*C.float)(ck.K[layer].ptr), (*C.float)(ck.V[layer].ptr),
+			c.cf(out), C.int(nPos), C.int(ck.maxPos), C.int(nH), C.int(nKV), C.int(hd), C.float(scale))
+	}
 	return out
 }
 

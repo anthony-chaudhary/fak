@@ -160,6 +160,10 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 		if err != nil {
 			return nil, err
 		}
+		nvccArgs, err = cudaGraphOnceFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
 		nvccArgs, err = cudaMMQPrefillFlags(ctx, nvccArgs, env)
 		if err != nil {
 			return nil, err
@@ -205,6 +209,10 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 			return nil, err
 		}
 		nvccArgs, err = cudaV41RoutedSwiGLUFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
+		nvccArgs, err = cudaGraphOnceFlags(ctx, nvccArgs, env)
 		if err != nil {
 			return nil, err
 		}
@@ -411,6 +419,7 @@ func CUDAGoTags(cfg *CUDAConfig) string {
 	goTags = cudaV41MHCTags(cfg, goTags)
 	goTags = cudaV41SharedAttentionTags(cfg, goTags)
 	goTags = cudaFlashMLAGoTags(cfg, goTags)
+	goTags = cudaGraphOnceTags(cfg, goTags)
 	if cfg.EnableDeepGEMMWKV {
 		goTags += ",fak_cuda_deepgemm_wkv"
 	}
@@ -447,6 +456,12 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 			return err
 		}
 		ctx = context.WithValue(ctx, cudaMMQPrefillKey{}, selection)
+	}
+	if cfg.EnableCaptureOnceQualification {
+		if err := prepareCUDAGraphOnce(cfg); err != nil {
+			return err
+		}
+		ctx = context.WithValue(ctx, cudaGraphOnceKey{}, true)
 	}
 	if cfg.Toolchain == nil {
 		tc, err := DiscoverToolchain()

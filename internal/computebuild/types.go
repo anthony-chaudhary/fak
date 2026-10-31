@@ -75,6 +75,8 @@ type CUDAConfig struct {
 	EnableQ3KMMQPrefill bool // Requires separate runtime opt-in; build is not device qualification.
 	EnableQ8MMQPrefill  bool // Native flags are recorded by the existing object receipt/cache key.
 
+	EnableCaptureOnceQualification bool // Explicit dense-F32 graph qualification only; never defaulted.
+
 	EnableV41RoutedSwiGLU    bool // Explicit SM120 candidate; public capability remains unqualified.
 	EnableV41EngramGate      bool // Explicit SM120 candidate; public capability remains unqualified.
 	EnableV41CompressorPool  bool // Explicit SM120 candidate; public capability remains unqualified.

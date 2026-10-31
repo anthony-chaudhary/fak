@@ -661,6 +661,30 @@ void fcuda_gptq_gemv(const uint32_t *dW, const uint32_t *dZeros, const float *dS
  * instantiates, launches, fences, and frees the graph. Both return 0 on success. The
  * caller guarantees: no cudaMalloc happens during capture (the pool is pre-warmed and the
  * KV is fixed-capacity), and the host stays pinned to one OS thread across the token. */
+/* Qualification-only capture-once #10945, native build macro
+ * FAK_CUDA_CAPTURE_ONCE_QUALIFICATION. No ordinary HAL/default activation.
+ * Caller serializes with cudaMu, pins device 0, and retains every captured buffer
+ * (including pooled scratch) at a stable address until release returns 0.
+ * Owner != NULL after a failed create must still be released. A nonzero release
+ * retains owner and caller storage. Never retry an uncertain execution eagerly.
+ * Input contents may change only outside capture, on g_stream before replay;
+ * addresses and geometry never change. Position must increase by exactly one.
+ * At each replay refill any in-place RoPE inputs before launching. Dense F32
+ * flash attention only; these entrypoints do not admit hybrid/typed-KV routes.
+ * Codes: 1 admission, 2 allocation/free, 3 capture/native, 4 launch, 5 drain.
+ * After a begin succeeds, end is mandatory even when a capture operator fails. */
+int fak_graph_once_create(int capacity, void **owner);
+int fak_graph_once_begin(void *owner, int pos);
+int fak_graph_once_rope(void *owner, float *x, int heads, int hd, double theta);
+int fak_graph_once_kv_write(void *owner, float *dst, const float *src, int width);
+int fak_graph_once_attention(void *owner, const float *q, const float *k,
+    const float *v, float *out, int heads, int kvHeads, int hd, float scale);
+int fak_graph_once_end(void *owner);
+int fak_graph_once_replay(void *owner, int pos);
+int fak_graph_once_release(void **owner);
+int fak_graph_once_copy_input(void *owner, void *dst, const void *src, size_t bytes);
+int fak_graph_once_abort(void *owner);
+
 int fcuda_graph_begin(void);
 /* fcuda_graph_end_launch returns 0, or the first failing step: end capture, instantiate,
  * launch, or the fence synchronize where a fault inside the replayed graph appears.
