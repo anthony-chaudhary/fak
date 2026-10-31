@@ -3,6 +3,7 @@ package safesync
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
+	"github.com/anthony-chaudhary/fak/internal/wipref"
 )
 
 // ParkSchema is the schema identifier for path-scoped suspend and reapply receipts (#10076).
@@ -75,7 +77,7 @@ type ParkReceipt struct {
 	UnrelatedPathsPreserved []string     `json:"unrelated_paths_preserved,omitempty"`
 	Status                  string       `json:"status"`
 	Effects                 []PathEffect `json:"effects,omitempty"`
-	CheckpointRef           string       `json:"checkpoint_ref"`
+	CheckpointRef           string       `json:"checkpoint_ref"` // Empty until an immutable checkpoint ref exists.
 	OK                      bool         `json:"ok"`
 	Reason                  string       `json:"reason,omitempty"`
 	Detail                  string       `json:"detail,omitempty"`
@@ -98,15 +100,14 @@ func Park(ctx context.Context, opts ParkOptions) (ParkReceipt, error) {
 		repo = "."
 	}
 	session := strings.TrimSpace(opts.Session)
-	if session == "" {
-		session = "default"
-	}
-	checkpointRef := fmt.Sprintf("refs/fak/wip/%s/park", session)
-
 	receipt := ParkReceipt{
-		Schema:        ParkSchema,
-		Session:       session,
-		CheckpointRef: checkpointRef,
+		Schema:  ParkSchema,
+		Session: session,
+	}
+	if !wipref.ValidSession(session) || session != opts.Session {
+		receipt.Status = ParkStatusConflict
+		receipt.Reason = "invalid session id"
+		return receipt, errors.New("invalid session id")
 	}
 
 	if len(opts.Paths) == 0 {
@@ -360,11 +361,20 @@ func Park(ctx context.Context, opts ParkOptions) (ParkReceipt, error) {
 		return receipt, fmt.Errorf("commit-tree: %v %s", cTree.Err, string(cTree.Stderr))
 	}
 	checkpointSHA := strings.TrimSpace(string(cTree.Stdout))
-
-	uRef := envRun(ctx, repo, nil, "update-ref", checkpointRef, checkpointSHA)
-	if uRef.Err != nil || uRef.Code != 0 {
-		return receipt, fmt.Errorf("update-ref %s: %v %s", checkpointRef, uRef.Err, string(uRef.Stderr))
+	if _, err := hex.DecodeString(checkpointSHA); err != nil || (len(checkpointSHA) != 40 && len(checkpointSHA) != 64) || checkpointSHA != strings.ToLower(checkpointSHA) || checkpointSHA == strings.Repeat("0", len(checkpointSHA)) {
+		return receipt, errors.New("commit-tree returned invalid checkpoint object id")
 	}
+	// Keep the actual session namespace while retaining every recovery point.
+	// Compare-and-create must never overwrite an older checkpoint or a symref.
+	checkpointRef := fmt.Sprintf("refs/fak/wip/%s/park-%s", session, checkpointSHA)
+	uRef := envRun(ctx, repo, nil, "update-ref", "--no-deref", checkpointRef, checkpointSHA, strings.Repeat("0", len(checkpointSHA)))
+	if uRef.Err != nil || uRef.Code != 0 {
+		existing := run(ctx, repo, "for-each-ref", "--format=%(refname)%00%(objectname)%00%(symref)", checkpointRef)
+		if existing.Err != nil || existing.Code != 0 || string(existing.Stdout) != checkpointRef+"\x00"+checkpointSHA+"\x00\n" {
+			return receipt, fmt.Errorf("create immutable checkpoint %s: %v %s", checkpointRef, uRef.Err, string(uRef.Stderr))
+		}
+	}
+	receipt.CheckpointRef = checkpointRef
 
 	// 5. Clear selected paths in the working tree to pinned BaseHEAD
 	for _, p := range selectedPaths {

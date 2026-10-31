@@ -9,6 +9,131 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
+func immutableParkFixture(t *testing.T) (string, string, ParkOptions) {
+	t.Helper()
+	repo := t.TempDir()
+	git(t, repo, "init", "-b", "main")
+	git(t, repo, "config", "user.name", "Park Fixture")
+	git(t, repo, "config", "user.email", "park@example.invalid")
+	writeFile(t, filepath.Join(repo, "owned.txt"), "base\n")
+	writeFile(t, filepath.Join(repo, "peer.txt"), "peer base\n")
+	git(t, repo, "add", "--", "owned.txt", "peer.txt")
+	git(t, repo, "commit", "-m", "base")
+	base := revString(t, repo, "HEAD")
+	writeFile(t, filepath.Join(repo, "owned.txt"), "first local edit\n")
+	writeFile(t, filepath.Join(repo, "peer.txt"), "peer dirty bytes\n")
+	return repo, base, ParkOptions{Repo: repo, Session: "real-session", Paths: []string{"owned.txt"}, TargetRef: base, Apply: true}
+}
+
+// fak-test:runtime medium est=5s lane=default
+func TestParkImmutableCheckpointLifecycle(t *testing.T) {
+	// An exact repeated checkpoint is idempotent even when commit-tree produces
+	// the same object, rather than relying on a clock tick for uniqueness.
+	t.Setenv("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z")
+	t.Setenv("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z")
+	repo, base, opts := immutableParkFixture(t)
+	legacy := "refs/fak/wip/real-session/park"
+	git(t, repo, "update-ref", legacy, base)
+	index := gitOutput(t, repo, "write-tree")
+	preview := opts
+	preview.Apply = false
+	rec, err := Park(context.Background(), preview)
+	if err != nil || !rec.OK || rec.CheckpointRef != "" || rec.Session != opts.Session {
+		t.Fatalf("dry run must not invent an artifact: err=%v ref=%q session=%q", err, rec.CheckpointRef, rec.Session)
+	}
+	first, err := Park(context.Background(), opts)
+	if err != nil || !first.OK || first.Session != opts.Session {
+		t.Fatalf("first Park: err=%v status=%s session=%q", err, first.Status, first.Session)
+	}
+	firstOID := revString(t, repo, first.CheckpointRef)
+	if first.CheckpointRef != "refs/fak/wip/"+opts.Session+"/park-"+firstOID {
+		t.Fatalf("checkpoint is not object-addressed: %q", first.CheckpointRef)
+	}
+	again, err := Park(context.Background(), opts)
+	if err != nil || !again.OK || again.CheckpointRef != first.CheckpointRef {
+		t.Fatalf("exact object reuse failed: err=%v ref=%q", err, again.CheckpointRef)
+	}
+	writeFile(t, filepath.Join(repo, "owned.txt"), "second local edit\n")
+	second, err := Park(context.Background(), opts)
+	if err != nil || !second.OK || second.Session != opts.Session || second.CheckpointRef == first.CheckpointRef {
+		t.Fatalf("second Park: err=%v ref=%q session=%q", err, second.CheckpointRef, second.Session)
+	}
+	if revString(t, repo, legacy) != base || revString(t, repo, first.CheckpointRef) != firstOID {
+		t.Fatal("an older checkpoint was overwritten")
+	}
+	if revString(t, repo, "HEAD") != base || gitOutput(t, repo, "write-tree") != index {
+		t.Fatal("same-base Park changed HEAD or index")
+	}
+	if readFile(t, filepath.Join(repo, "owned.txt")) != "second local edit\n" || readFile(t, filepath.Join(repo, "peer.txt")) != "peer dirty bytes\n" {
+		t.Fatal("Park lost owned or unrelated dirty bytes")
+	}
+}
+
+// fak-test:runtime medium est=5s lane=default
+func TestParkImmutableCheckpointRefusal(t *testing.T) {
+	for _, conflict := range []string{"different-object", "symbolic-ref", "primary-session-ref"} {
+		t.Run(conflict, func(t *testing.T) {
+			repo, base, opts := immutableParkFixture(t)
+			legacy := "refs/fak/wip/real-session/park"
+			if conflict == "primary-session-ref" {
+				git(t, repo, "update-ref", "refs/fak/wip/real-session", base)
+			} else {
+				git(t, repo, "update-ref", legacy, base)
+			}
+			index := gitOutput(t, repo, "write-tree")
+			var occupied string
+			occupiedOID := base
+			opts.Runner = func(ctx context.Context, dir string, args ...string) RunResult {
+				result := RealRunner(ctx, dir, args...)
+				if args[0] == "commit-tree" && result.Err == nil && result.Code == 0 && conflict != "primary-session-ref" {
+					occupied = "refs/fak/wip/real-session/park-" + strings.TrimSpace(string(result.Stdout))
+					if conflict == "symbolic-ref" {
+						occupiedOID = strings.TrimSpace(string(result.Stdout))
+						git(t, repo, "update-ref", legacy, occupiedOID)
+						git(t, repo, "symbolic-ref", occupied, legacy)
+					} else {
+						git(t, repo, "update-ref", occupied, base)
+					}
+				}
+				return result
+			}
+			rec, err := Park(context.Background(), opts)
+			if err == nil || rec.OK || rec.CheckpointRef != "" {
+				t.Fatalf("unsafe checkpoint accepted: err=%v ok=%v ref=%q", err, rec.OK, rec.CheckpointRef)
+			}
+			if occupied != "" && revString(t, repo, occupied) != occupiedOID {
+				t.Fatal("occupied checkpoint was overwritten")
+			}
+			if conflict == "primary-session-ref" && revString(t, repo, "refs/fak/wip/real-session") != base {
+				t.Fatal("primary session checkpoint was changed")
+			}
+			if revString(t, repo, "HEAD") != base || gitOutput(t, repo, "write-tree") != index {
+				t.Fatal("refusal changed HEAD or index")
+			}
+			if readFile(t, filepath.Join(repo, "owned.txt")) != "first local edit\n" || readFile(t, filepath.Join(repo, "peer.txt")) != "peer dirty bytes\n" {
+				t.Fatal("refusal changed dirty bytes")
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestParkRejectsInvalidSessionBeforeMutation(t *testing.T) {
+	for _, session := range []string{"", " ", "real/session", "-session", " real-session "} {
+		calls := 0
+		rec, err := Park(context.Background(), ParkOptions{
+			Repo: t.TempDir(), Session: session, Paths: []string{"owned.txt"}, Apply: true,
+			Runner: func(context.Context, string, ...string) RunResult {
+				calls++
+				return RunResult{}
+			},
+		})
+		if err == nil || rec.OK || rec.CheckpointRef != "" || calls != 0 {
+			t.Fatalf("invalid session accepted: session=%q err=%v calls=%d", session, err, calls)
+		}
+	}
+}
+
 // fak-test:runtime medium est=12s lane=default
 func TestParkNestedGitPathsPreserveDirtyBytes(t *testing.T) {
 	repo := t.TempDir()
@@ -213,13 +338,15 @@ func TestParkAheadBehindUniqueRetainedIdenticalSuppressed(t *testing.T) {
 	if applyRec.Status != ParkStatusRestored {
 		t.Fatalf("apply status = %q, want %q", applyRec.Status, ParkStatusRestored)
 	}
-	if applyRec.CheckpointRef != "refs/fak/wip/sess-test-1/park" {
-		t.Fatalf("checkpoint ref = %q, want refs/fak/wip/sess-test-1/park", applyRec.CheckpointRef)
+	// Checkpoint ref must resolve to its immutable object address.
+	checkpointOID := revString(t, clone, applyRec.CheckpointRef)
+	if checkpointOID == "" || applyRec.CheckpointRef != "refs/fak/wip/sess-test-1/park-"+checkpointOID {
+		t.Fatalf("checkpoint ref = %q, object = %q", applyRec.CheckpointRef, checkpointOID)
 	}
-
-	// Checkpoint ref must exist and be valid commit
-	if got := revString(t, clone, "refs/fak/wip/sess-test-1/park"); got == "" {
-		t.Fatal("checkpoint ref was not created in git")
+	// The recovery artifact must be a commit with exactly the original HEAD as
+	// its sole parent, not the integrated target or an unrelated checkpoint.
+	if got := strings.TrimSpace(gitOutput(t, clone, "rev-list", "--parents", "-n", "1", applyRec.CheckpointRef)); got != checkpointOID+" "+baseHead {
+		t.Fatalf("checkpoint ancestry = %q, want %s %s", got, checkpointOID, baseHead)
 	}
 
 	// Verify a.txt content: unique effect retained, upstream-identical hunk suppressed

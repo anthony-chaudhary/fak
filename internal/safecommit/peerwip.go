@@ -429,6 +429,8 @@ type peerWIPCheckpoint struct {
 	stamp       wipref.Stamp
 	stampValid  bool
 	represented bool
+	parkScope   []string
+	selfPark    bool
 }
 
 // A ref at a blob/tree (git emits an empty contents:size for those) or a tag
@@ -505,6 +507,7 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 		}
 		checkpoints = append(checkpoints, peerWIPCheckpoint{
 			peer: peer, oid: oid, scope: stamp.Scope, stamp: stamp, stampValid: stampValid,
+			parkScope: nativeSelfParkScope(peer, oid, msg, selfSession),
 		})
 		if !seen[oid] {
 			seen[oid] = true
@@ -613,7 +616,7 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 	headPinned := false
 	for i := range checkpoints {
 		checkpoint := &checkpoints[i]
-		if !peerWIPCheckpointRelevant(*checkpoint, deltas[checkpoint.oid], targetPaths) || !peerWIPStampEligible(*checkpoint) {
+		if !peerWIPCheckpointRelevant(*checkpoint, deltas[checkpoint.oid], targetPaths) || (len(checkpoint.parkScope) == 0 && !peerWIPStampEligible(*checkpoint)) {
 			continue
 		}
 		if !headPinned {
@@ -624,13 +627,18 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 			}
 		}
 		if head != "" {
-			checkpoint.represented = peerWIPCheckpointRepresented(ctx, run, dir, *checkpoint, head)
+			if len(checkpoint.parkScope) != 0 {
+				checkpoint.selfPark = peerWIPNativeParkProven(ctx, run, dir, *checkpoint, head)
+			}
+			if !checkpoint.selfPark && peerWIPStampEligible(*checkpoint) {
+				checkpoint.represented = peerWIPCheckpointRepresented(ctx, run, dir, *checkpoint, head)
+			}
 		}
 	}
 
 	ownerDetails := make(map[string]gitPeerOwnerInfo)
 	for _, checkpoint := range checkpoints {
-		if checkpoint.represented {
+		if checkpoint.represented || checkpoint.selfPark {
 			continue
 		}
 		for _, path := range targetPaths {
@@ -655,6 +663,8 @@ func resolveGitPeerOwnerDetails(ctx context.Context, run Runner, dir string, tar
 const (
 	peerWIPStampPrefix           = "fak-wip: "
 	peerWIPHistoryCandidateLimit = 128
+	// This bounds self-recognition only; unsupported Park shapes stay peer claims.
+	peerWIPParkPathLimit = 128
 )
 
 type peerWIPTreeEntry struct {
@@ -662,8 +672,92 @@ type peerWIPTreeEntry struct {
 }
 
 type peerWIPDeltaEntry struct {
-	oldOID string
-	new    peerWIPTreeEntry
+	oldOID, oldMode, status string
+	new                     peerWIPTreeEntry
+}
+
+func nativeSelfParkScope(peer, oid, msg, self string) []string {
+	if !wipref.ValidSession(self) || !peerWIPObjectID(oid) || (peer != self+"/park" && peer != self+"/park-"+oid) || len(msg) > 64*1024 {
+		return nil
+	}
+	prefix := "fak: park " + self + "\n\nPaths: "
+	if !strings.HasPrefix(msg, prefix) || !strings.HasSuffix(msg, "\n") {
+		return nil
+	}
+	paths := strings.Split(strings.TrimSuffix(strings.TrimPrefix(msg, prefix), "\n"), ", ")
+	if len(paths) == 0 || len(paths) > peerWIPParkPathLimit {
+		return nil
+	}
+	for i, path := range paths {
+		clean, ok := gitgate.CleanRepoPath(path)
+		if !ok || clean != path || strings.ContainsAny(path, ",\r\n\x00") || (i > 0 && paths[i-1] >= path) {
+			return nil
+		}
+	}
+	return paths
+}
+
+// A native Park is self-owned only after proving its complete, bounded regular
+// file delta. Message/ref resemblance alone never clears an ownership claim.
+func peerWIPNativeParkProven(ctx context.Context, run Runner, dir string, checkpoint peerWIPCheckpoint, head string) bool {
+	if len(checkpoint.parkScope) == 0 || len(checkpoint.parkScope) > peerWIPParkPathLimit {
+		return false
+	}
+	parents, err := runPeerWIPLookup(ctx, run, dir, "rev-list", "--parents", "--max-count=1", checkpoint.oid, "--")
+	fields := strings.Fields(parents)
+	if err != nil || len(fields) != 2 || fields[0] != checkpoint.oid || !peerWIPObjectID(fields[1]) {
+		return false
+	}
+	base := fields[1]
+	if ancestor, valid := peerWIPIsAncestor(ctx, run, dir, base, head); !valid || !ancestor {
+		return false
+	}
+	delta, ok := peerWIPCompleteDelta(ctx, run, dir, base, checkpoint.oid)
+	if !ok || len(delta) > len(checkpoint.parkScope) {
+		return false
+	}
+	want, ok := peerWIPExactTreeEntries(ctx, run, dir, checkpoint.oid, checkpoint.parkScope)
+	if !ok {
+		return false
+	}
+	before, ok := peerWIPTreeEntries(ctx, run, dir, base, checkpoint.parkScope, true)
+	if !ok {
+		return false
+	}
+	changed := 0
+	for _, path := range checkpoint.parkScope {
+		old, exists := before[path]
+		entry := want[path]
+		d, hasDelta := delta[path]
+		if exists && old == entry {
+			if hasDelta {
+				return false
+			}
+			continue
+		}
+		changed++
+		if !hasDelta || d.new != entry {
+			return false
+		}
+		if exists {
+			if d.status != "M" || d.oldOID != old.oid || d.oldMode != old.mode {
+				return false
+			}
+		} else if d.status != "A" || d.oldMode != "000000" || d.oldOID != strings.Repeat("0", len(checkpoint.oid)) {
+			return false
+		}
+	}
+	if changed == 0 || changed != len(delta) {
+		return false
+	}
+	// A truncated raw delta must not hide an out-of-scope change. This independent
+	// exit-code proof covers the full tree; selected entries above prove the rest.
+	args := []string{"diff", "--quiet", "--no-relative", "--no-ext-diff", "--no-textconv", "--no-renames", "--ignore-submodules=none", base, checkpoint.oid, "--", ":(top)**"}
+	for _, path := range checkpoint.parkScope {
+		args = append(args, ":(top,exclude,literal)"+path)
+	}
+	_, err = runPeerWIPLookup(ctx, run, dir, args...)
+	return err == nil
 }
 
 // decodeUnambiguousPeerWIPStamp tightens DecodeStamp only for the historical
@@ -858,20 +952,24 @@ func peerWIPCompleteDelta(ctx context.Context, run Runner, dir, base, checkpoint
 			return nil, false
 		}
 		entries[path] = peerWIPDeltaEntry{
-			oldOID: fields[2],
-			new:    peerWIPTreeEntry{mode: fields[1], kind: "blob", oid: fields[3]},
+			oldOID: fields[2], oldMode: fields[0][1:], status: fields[4],
+			new: peerWIPTreeEntry{mode: fields[1], kind: "blob", oid: fields[3]},
 		}
 	}
 	return entries, true
 }
 
 func peerWIPExactTreeEntries(ctx context.Context, run Runner, dir, commit string, paths []string) (map[string]peerWIPTreeEntry, bool) {
+	return peerWIPTreeEntries(ctx, run, dir, commit, paths, false)
+}
+
+func peerWIPTreeEntries(ctx context.Context, run Runner, dir, commit string, paths []string, allowMissing bool) (map[string]peerWIPTreeEntry, bool) {
 	args := []string{"ls-tree", "-z", "--full-tree", commit, "--"}
 	for _, path := range paths {
 		args = append(args, ":(top,literal)"+path)
 	}
 	out, err := runPeerWIPLookup(ctx, run, dir, args...)
-	if err != nil || out == "" || !strings.HasSuffix(out, "\x00") {
+	if err != nil || (out == "" && !allowMissing) || (out != "" && !strings.HasSuffix(out, "\x00")) {
 		return nil, false
 	}
 	wanted := make(map[string]bool, len(paths))
@@ -879,6 +977,9 @@ func peerWIPExactTreeEntries(ctx context.Context, run Runner, dir, commit string
 		wanted[path] = true
 	}
 	entries := make(map[string]peerWIPTreeEntry, len(paths))
+	if out == "" {
+		return entries, allowMissing
+	}
 	for _, record := range strings.Split(strings.TrimSuffix(out, "\x00"), "\x00") {
 		meta, path, ok := strings.Cut(record, "\t")
 		fields := strings.Fields(meta)
@@ -887,7 +988,7 @@ func peerWIPExactTreeEntries(ctx context.Context, run Runner, dir, commit string
 		}
 		entries[path] = peerWIPTreeEntry{mode: fields[0], kind: fields[1], oid: fields[2]}
 	}
-	if len(entries) != len(paths) {
+	if !allowMissing && len(entries) != len(paths) {
 		return nil, false
 	}
 	return entries, true
