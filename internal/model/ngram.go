@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+// Modified for Fak: bounded reverse-KMP prompt lookup in NgramDrafter.Draft;
+// preserve the most-recent match and use Go token slices without a reverse copy.
+
 package model
 
 // NgramDrafter is the model-free native speculative baseline. It finds the longest
@@ -193,25 +198,54 @@ func (d NgramDrafter) Draft(committed []int) []int {
 		return nil
 	}
 
-	// Exclude the final token from the search haystack. A match must end before the
-	// current history ends so at least one already-observed continuation token exists.
-	haystack := committed[:len(committed)-1]
-	for n := maxMatch; n >= minMatch; n-- {
-		pattern := committed[len(committed)-n:]
-		start := lastTokenSubsequence(haystack, pattern)
-		if start < 0 {
-			continue
-		}
-		continuation := committed[start+n:]
-		if len(continuation) > maxDraft {
-			continuation = continuation[:maxDraft]
-		}
-		if len(continuation) == 0 {
-			continue
-		}
-		return append([]int(nil), continuation...)
+	start, n := longestRecentTokenSuffix(committed, maxMatch)
+	if n < minMatch {
+		return nil
 	}
-	return nil
+	continuation := committed[start+n:]
+	if len(continuation) > maxDraft {
+		continuation = continuation[:maxDraft]
+	}
+	return append([]int(nil), continuation...)
+}
+
+// longestRecentTokenSuffix adapts the bounded reverse-KMP scan from
+// vllm/v1/spec_decode/ngram_proposer.py at
+// 85591000403fc3bc3b4d0303e3a97bedab007763 (Apache-2.0).
+// It scans all candidate suffix lengths together, keeping only maxMatch LPS
+// entries. Strictly longer updates retain Fak's most-recent tie, unlike vLLM's
+// earliest-occurrence tie. Starting at reverse index one excludes the current
+// suffix itself, so every match has an observed continuation, including overlaps.
+func longestRecentTokenSuffix(tokens []int, maxMatch int) (start, length int) {
+	var local [defaultNgramMaxMatch]int
+	lps := local[:]
+	if maxMatch > len(local) {
+		lps = make([]int, maxMatch)
+	}
+	last := len(tokens) - 1
+	position := 0
+	for i, matched := 1, 0; i < len(tokens); {
+		if tokens[last-matched] == tokens[last-i] {
+			matched++
+			if matched > length {
+				length = matched
+				position = i
+			}
+			if i < maxMatch {
+				lps[i] = matched
+			}
+			if matched == maxMatch {
+				// No longer match is permitted; this first one is most recent.
+				break
+			}
+			i++
+		} else if matched > 0 {
+			matched = lps[matched-1]
+		} else {
+			i++
+		}
+	}
+	return last - position, length
 }
 
 func (d NgramDrafter) limits(historyLen int) (minMatch, maxMatch, maxDraft int) {
@@ -360,37 +394,6 @@ func findContinuationBranchesScalar(haystack, pattern []int, maxDraft, maxBranch
 		start = matchIdx + 1
 	}
 	return branches
-}
-
-// lastTokenSubsequence returns the index of the last (most recent) occurrence of
-// pattern in tokens, or -1 if not found. It scans backward from recent context tokens
-// to prioritize local continuation over distant prefix matches.
-func lastTokenSubsequence(tokens, pattern []int) int {
-	m := len(pattern)
-	n := len(tokens)
-	if m == 0 {
-		return 0
-	}
-	if m > n {
-		return -1
-	}
-	target := pattern[0]
-	for i := n - m; i >= 0; i-- {
-		if tokens[i] != target {
-			continue
-		}
-		matched := true
-		for j := 1; j < m; j++ {
-			if tokens[i+j] != pattern[j] {
-				matched = false
-				break
-			}
-		}
-		if matched {
-			return i
-		}
-	}
-	return -1
 }
 
 // firstTokenSubsequence returns the first occurrence of pattern in tokens.

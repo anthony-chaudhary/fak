@@ -1226,3 +1226,21 @@ literal translation of the upstream logger or scheduler.
 The upstream root LICENSE is Apache-2.0 and matches this repository's LICENSE.
 Both studied source files carry the SPDX contributor notices above. No root
 NOTICE exists at this exact revision (GitHub contents API returned 404).
+
+## vLLM bounded reverse-KMP prompt lookup
+
+`internal/model/ngram.go`, `longestRecentTokenSuffix`, adapts
+`_find_longest_matched_ngram_and_propose_tokens` from
+`vllm/v1/spec_decode/ngram_proposer.py` at revision
+`85591000403fc3bc3b4d0303e3a97bedab007763`:
+https://github.com/vllm-project/vllm/blob/85591000403fc3bc3b4d0303e3a97bedab007763/vllm/v1/spec_decode/ngram_proposer.py
+
+SPDX-License-Identifier: Apache-2.0
+SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
+Modified for Fak: translate the bounded reverse-KMP scan to Go slice indexing,
+keep the most-recent occurrence on equal-length matches rather than vLLM's
+earliest occurrence, stop at the first maximum-length match, and use a small
+local prefix table for default settings. The existing copied-proposal,
+configuration, default-off, and target-verification contracts are unchanged.
+The full Apache License, Version 2.0 is supplied in the root `LICENSE`.
