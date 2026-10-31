@@ -211,9 +211,15 @@ type SessionMoveError struct {
 	Message     string
 	Status      int
 	Transitions []SessionMoveTransition
+	// CauseCode identifies the original failure when destination cleanup needs recovery.
+	CauseCode string
+	cause     error
 }
 
 func (e *SessionMoveError) Error() string { return e.Message }
+
+// Unwrap retains callback failures for trusted callers without exposing them over HTTP.
+func (e *SessionMoveError) Unwrap() error { return e.cause }
 
 // SessionMoveJournalHooks persists every movement transition through the
 // crash-safe work-session journal. The destination carries references and
@@ -315,24 +321,25 @@ func (s *Server) MoveSession(ctx context.Context, sessionID string, req SessionM
 	if err := hooks.AdmitDestination(ctx, sessionID, checkpoint, req); err != nil {
 		return SessionMoveResponse{}, moveError(http.StatusUnprocessableEntity, "DESTINATION_REJECTED", err.Error(), transitions)
 	}
+	failAdmitted := func(status int, code string, cause error) (SessionMoveResponse, error) {
+		failure := moveError(status, code, cause.Error(), transitions)
+		return SessionMoveResponse{}, rollbackMove(ctx, hooks, checkpoint, failure, cause)
+	}
 	if err := record(SessionMoveDestinationAdmitted, checkpoint.Digest); err != nil {
-		return SessionMoveResponse{}, moveError(http.StatusServiceUnavailable, "MOVE_JOURNAL_FAILED", err.Error(), transitions)
+		return failAdmitted(http.StatusServiceUnavailable, "MOVE_JOURNAL_FAILED", err)
 	}
 	if hooks.RestoreDestination == nil {
-		return SessionMoveResponse{}, moveError(http.StatusNotImplemented, "DESTINATION_RESTORE_UNAVAILABLE", "destination restore is not configured", transitions)
+		return failAdmitted(http.StatusNotImplemented, "DESTINATION_RESTORE_UNAVAILABLE", errors.New("destination restore is not configured"))
 	}
 	if err := hooks.RestoreDestination(ctx, checkpoint); err != nil {
-		rollbackMove(ctx, hooks, checkpoint)
-		return SessionMoveResponse{}, moveError(http.StatusBadGateway, "DESTINATION_RESTORE_FAILED", err.Error(), transitions)
+		return failAdmitted(http.StatusBadGateway, "DESTINATION_RESTORE_FAILED", err)
 	}
 	if err := record(SessionMoveRestored, checkpoint.Digest); err != nil {
-		rollbackMove(ctx, hooks, checkpoint)
-		return SessionMoveResponse{}, moveError(http.StatusServiceUnavailable, "MOVE_JOURNAL_FAILED", err.Error(), transitions)
+		return failAdmitted(http.StatusServiceUnavailable, "MOVE_JOURNAL_FAILED", err)
 	}
 	if hooks.CommitDestination != nil {
 		if err := hooks.CommitDestination(ctx, checkpoint); err != nil {
-			rollbackMove(ctx, hooks, checkpoint)
-			return SessionMoveResponse{}, moveError(http.StatusBadGateway, "CUTOVER_FAILED", err.Error(), transitions)
+			return failAdmitted(http.StatusBadGateway, "CUTOVER_FAILED", err)
 		}
 	}
 
@@ -341,8 +348,7 @@ func (s *Server) MoveSession(ctx context.Context, sessionID string, req SessionM
 	sess = rt.sessions[sessionID]
 	if sess == nil || sess.executionEpoch != sourceEpoch || !sess.moving {
 		rt.mu.Unlock()
-		rollbackMove(ctx, hooks, checkpoint)
-		return SessionMoveResponse{}, moveError(http.StatusConflict, "STALE_EPOCH", "source epoch changed before cutover", transitions)
+		return failAdmitted(http.StatusConflict, "STALE_EPOCH", errors.New("source epoch changed before cutover"))
 	}
 	sess.executionEpoch = newEpoch
 	rotateSessionDiscoveryEpoch(sess, newEpoch)
@@ -369,10 +375,30 @@ func (s *Server) MoveSession(ctx context.Context, sessionID string, req SessionM
 	return SessionMoveResponse{Schema: sessionMoveSchema, Descriptor: desc, Source: publicPlacement(source), Destination: publicPlacement(req.Destination), Transitions: transitions, Delta: placementDelta(source, req.Destination)}, nil
 }
 
-func rollbackMove(ctx context.Context, hooks SessionMoveHooks, checkpoint SessionMoveCheckpoint) {
-	if hooks.RollbackDestination != nil {
-		_ = hooks.RollbackDestination(ctx, checkpoint)
+const sessionMoveRollbackTimeout = 30 * time.Second
+
+// rollbackMove compensates a successfully admitted destination before local cutover.
+// The deadline is cooperative: hooks must honor it. A failed or missing hook does
+// not prove cleanup, quarantine the session, or authorize an automatic retry.
+func rollbackMove(ctx context.Context, hooks SessionMoveHooks, checkpoint SessionMoveCheckpoint, failure *SessionMoveError, cause error) *SessionMoveError {
+	failure.cause = cause
+	var rollbackErr error
+	if hooks.RollbackDestination == nil {
+		rollbackErr = errors.New("destination rollback is not configured")
+	} else {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionMoveRollbackTimeout)
+		defer cancel()
+		rollbackErr = hooks.RollbackDestination(cleanupCtx, checkpoint)
 	}
+	if rollbackErr == nil {
+		return failure
+	}
+	failure.CauseCode = failure.Code
+	failure.Code = "DESTINATION_ROLLBACK_RECOVERY_REQUIRED"
+	failure.Status = http.StatusServiceUnavailable
+	failure.Message = "destination rollback was not confirmed after " + failure.CauseCode + "; recovery is required before retrying"
+	failure.cause = errors.Join(cause, fmt.Errorf("destination rollback: %w", rollbackErr))
+	return failure
 }
 
 func moveError(status int, code, message string, transitions []SessionMoveTransition) *SessionMoveError {
@@ -487,7 +513,11 @@ func (s *Server) handleSessionMove(w http.ResponseWriter, r *http.Request, sessi
 		if errors.As(err, &me) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(me.Status)
-			_ = json.NewEncoder(w).Encode(map[string]any{"error": me.Code, "message": me.Message, "transitions": me.Transitions})
+			body := map[string]any{"error": me.Code, "message": me.Message, "transitions": me.Transitions}
+			if me.CauseCode != "" {
+				body["cause_code"] = me.CauseCode
+			}
+			_ = json.NewEncoder(w).Encode(body)
 			return true
 		}
 		writeErrCode(w, http.StatusInternalServerError, "MOVE_FAILED", err.Error())
