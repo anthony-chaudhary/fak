@@ -545,6 +545,11 @@ func (rep *SafetensorsPreflight) checkV41ExpertPair(weight, scaleName, projectio
 // shape using the same block dimension as the loader.
 func (rep *SafetensorsPreflight) checkV41DensePair(name string, r v41DenseFP8Role, e stEntry, byName map[string]stEntry) {
 	if strings.HasSuffix(name, ".scale") {
+		// The loader visits the scale first and validates both same-shard entries.
+		if _, ok := byName[r.weightName]; !ok {
+			rep.RoleErrors[name] = fmt.Sprintf("V4.1 dense FP8 pair is missing %s", r.weightName)
+			return
+		}
 		if e.Dtype != "F8_E8M0" {
 			rep.RoleErrors[name] = fmt.Sprintf("V4.1 dense scale %s dtype %q, want F8_E8M0", name, e.Dtype)
 		} else if want := []int{(r.shape[0]-1)/v41FP8BlockDim + 1, (r.shape[1]-1)/v41FP8BlockDim + 1}; !sameShape(e.Shape, want) {
@@ -577,6 +582,11 @@ func (rep *SafetensorsPreflight) checkV41DensePair(name string, r v41DenseFP8Rol
 // checkV4DensePair is the DeepSeek-V4-Flash twin of checkV41DensePair.
 func (rep *SafetensorsPreflight) checkV4DensePair(name string, r v4DenseFP8Role, e stEntry, byName map[string]stEntry) {
 	if strings.HasSuffix(name, ".scale") {
+		// The loader visits the scale first and validates both same-shard entries.
+		if _, ok := byName[r.weightName]; !ok {
+			rep.RoleErrors[name] = fmt.Sprintf("V4 dense FP8 pair is missing %s", r.weightName)
+			return
+		}
 		if e.Dtype != "F8_E8M0" {
 			rep.RoleErrors[name] = fmt.Sprintf("V4 dense scale %s dtype %q, want F8_E8M0", name, e.Dtype)
 		} else if want := []int{(r.shape[0]-1)/fp8BlockDim + 1, (r.shape[1]-1)/fp8BlockDim + 1}; !sameShape(e.Shape, want) {
