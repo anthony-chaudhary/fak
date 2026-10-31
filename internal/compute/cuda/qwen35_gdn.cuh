@@ -381,6 +381,9 @@ __global__ void k_qwen35_gdn_fused_in_proj(
       }
     }
   }
+  // Packed QKV/Z rows were filled by the preceding native matmul. This is
+  // uniform across the block, before any shared-memory barrier.
+  if (q8 >= 2) return;
   float sum = 0.0f;
   size_t base = (size_t)row * hidden;
   if (q8) {
@@ -960,6 +963,50 @@ static int qwen35_gdn_drain_after_error(int status) {
   return 70000 + (int)e;
 }
 
+// Keep the legacy 0/1 ABI; only QKV/Z admit raw block-256 kinds 2/3.
+static int qwen35_gdn_projection_preflight(
+    int qkv, const float *qkvScale, int z, const float *zScale,
+    int b, const float *bScale, int a, const float *aScale,
+    int out, const float *outScale, int hidden, int convDim, int valueDim, int tokens) {
+  if (qkv < 0 || qkv > 3 || z < 0 || z > 3 ||
+      b < 0 || b > 1 || a < 0 || a > 1 || out < 0 || out > 1) return -1;
+  if ((qkv == 1 && (!qkvScale || hidden % 32)) ||
+      (z == 1 && (!zScale || hidden % 32)) ||
+      (b == 1 && (!bScale || hidden % 32)) ||
+      (a == 1 && (!aScale || hidden % 32)) ||
+      (out == 1 && (!outScale || valueDim % 32))) return -1;
+  if (qkv < 2 && z < 2) return 0;
+  if (!g_stream || g_capture_open || hidden % 256 || hidden > 2147483647 / 8 ||
+      tokens < 1 || tokens > 65535 ||
+      (long long)hidden * convDim > 2147483647LL ||
+      (long long)hidden * valueDim > 2147483647LL ||
+      (long long)tokens * hidden > 2147483647LL ||
+      (long long)tokens * convDim > 2147483647LL ||
+      (long long)tokens * valueDim > 2147483647LL ||
+      (qkv >= 2 && qkvScale) || (z >= 2 && zScale)) return -1;
+  // Packed decode may grow persistent activation scratch. Do not infer capture
+  // safety merely from a warm pool or from the Go bookkeeping flag.
+  cudaStreamCaptureStatus capture = cudaStreamCaptureStatusNone;
+  const cudaError_t query = cudaStreamIsCapturing(g_stream, &capture);
+  if (query != cudaSuccess) return 10000 + (int)query;
+  return capture == cudaStreamCaptureStatusNone ? 0 : -1;
+}
+
+static int qwen35_gdn_packed_projection(
+    const void *weight, int kind, const float *x, float *y, int out, int in, int tokens) {
+  int status = 0;
+  if (kind == 2) {
+    status = fcuda_q4k_matmul_f32((const uint8_t *)weight, x, y, out, in, tokens);
+  } else if (kind == 3) {
+    fcuda_q6k_matmul_f32((const uint8_t *)weight, x, y, out, in, tokens);
+  } else {
+    return 0;
+  }
+  // Preserve the first native refusal/failure. No later projection or fallback
+  // may overwrite partial work; the caller uses the existing GDN error drain.
+  return status != 0 ? status : qwen35_gdn_launch_status(2);
+}
+
 extern "C" void fcuda_qwen35_gdn_test_fault(int stage) {
   g_qwen35_gdn_test_fault_stage = stage;
 }
@@ -1002,6 +1049,10 @@ extern "C" int fcuda_qwen35_gdn_decode_f32(
       convDim64 > 2147483647LL || fusedRows64 > 2147483647LL) return -1;
   int valueDim = (int)valueDim64;
   int convDim = (int)convDim64;
+  int status = qwen35_gdn_projection_preflight(inQKVQ8, dInQKVScale, inZQ8, dInZScale,
+      inBQ8, dInBScale, inAQ8, dInAScale, outWQ8, dOutWScale,
+      hidden, convDim, valueDim, 1);
+  if (status != 0) return status;
 
   // Clear and surface stale launch state before adding any new work. If the
   // prior stream is still busy, synchronize it before returning the refusal.
@@ -1010,6 +1061,9 @@ extern "C" int fcuda_qwen35_gdn_decode_f32(
     fprintf(stderr, "fak-cuda: Qwen3.5 GDN preflight found stale CUDA status: %s\n", cudaGetErrorString(stale));
     return qwen35_gdn_drain_after_error(10000 + (int)stale);
   }
+  status = qwen35_gdn_packed_projection(dInQKV, inQKVQ8, dX, dMixed, convDim, hidden, 1);
+  if (status == 0) status = qwen35_gdn_packed_projection(dInZ, inZQ8, dX, dZ, valueDim, hidden, 1);
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
   FCUDA_TS("k_qwen35_gdn_fused_in_proj", (int)fusedRows64, k_qwen35_gdn_fused_in_proj<<<(int)fusedRows64, 256, 0, g_stream>>>(
       dX,
       dInQKV, dInQKVScale, inQKVQ8,
@@ -1017,7 +1071,7 @@ extern "C" int fcuda_qwen35_gdn_decode_f32(
       dInB, dInBScale, inBQ8,
       dInA, dInAScale, inAQ8,
       dMixed, dZ, dB, dA, hidden, convDim, valueDim, nV));
-  int status = qwen35_gdn_launch_status(2);
+  status = qwen35_gdn_launch_status(2);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
 
   unsigned int convBlocks = (unsigned int)(((unsigned long long)convDim + 255ULL) / 256ULL);
@@ -1109,6 +1163,8 @@ __global__ void k_qwen35_gdn_fused_in_proj_lanes(
       }
     }
   }
+  // Packed rows are already complete; all threads in this block agree.
+  if (q8 >= 2) return;
   float sum[kQwen35GDNMaxLanes];
 #pragma unroll
   for (int l = 0; l < kQwen35GDNMaxLanes; ++l) sum[l] = 0.0f;
@@ -1304,6 +1360,10 @@ extern "C" int fcuda_qwen35_gdn_decode_lanes_f32(
   if (fusedRows64 > 2147483647LL) return -1;
   if (outWQ8 && valueDim64 % 32 != 0) return -1;
   int valueDim = (int)valueDim64, convDim = (int)convDim64;
+  int status = qwen35_gdn_projection_preflight(inQKVQ8, dInQKVScale, inZQ8, dInZScale,
+      inBQ8, dInBScale, inAQ8, dInAScale, outWQ8, dOutWScale,
+      hidden, convDim, valueDim, lanes);
+  if (status != 0) return status;
   Qwen35GDNLaneStates states = {};
   for (int l = 0; l < lanes; ++l) {
     if (!convStates[l] || !recurrentStates[l]) return -1;
@@ -1315,11 +1375,14 @@ extern "C" int fcuda_qwen35_gdn_decode_lanes_f32(
     fprintf(stderr, "fak-cuda: Qwen3.5 GDN lane panel preflight found stale CUDA status: %s\n", cudaGetErrorString(stale));
     return qwen35_gdn_drain_after_error(10000 + (int)stale);
   }
+  status = qwen35_gdn_packed_projection(dInQKV, inQKVQ8, dX, dMixed, convDim, hidden, lanes);
+  if (status == 0) status = qwen35_gdn_packed_projection(dInZ, inZQ8, dX, dZ, valueDim, hidden, lanes);
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
   FCUDA_TS("k_qwen35_gdn_fused_in_proj_lanes", (int)fusedRows64, k_qwen35_gdn_fused_in_proj_lanes<<<(int)fusedRows64, 256, 0, g_stream>>>(
       dX, lanes, dInQKV, dInQKVScale, inQKVQ8, dInZ, dInZScale, inZQ8,
       dInB, dInBScale, inBQ8, dInA, dInAScale, inAQ8,
       dMixed, dZ, dB, dA, hidden, convDim, valueDim, nV));
-  int status = qwen35_gdn_launch_status(2);
+  status = qwen35_gdn_launch_status(2);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
   dim3 convGrid((unsigned)((convDim + 255) / 256), (unsigned)lanes);
   FCUDA_TS("k_qwen35_gdn_conv_state_lanes", convGrid, k_qwen35_gdn_conv_state_lanes<<<convGrid, 256, 0, g_stream>>>(
@@ -1388,18 +1451,30 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
     float *dQNorm, float *dKNorm, float *dCore,
     int hidden, int nK, int nV, int kHd, int vHd, int convKernel, float rmsEps) {
   if (tokens <= 0 || !dX || !dOut) return -1;
-  const int convDim = 2 * nK * kHd + nV * vHd;
-  const int fusedRows = convDim + nV * vHd + 2 * nV;
   if (hidden <= 0 || nK <= 0 || nV <= 0 || kHd <= 0 || vHd <= 0 || convKernel <= 0 ||
       !dInQKV || !dInZ || !dInB || !dInA || !dConvW || !dALog || !dDtBias || !dNorm ||
       !dOutW || !dConvState || !dRecurrentState || !dMixed || !dZ || !dB || !dA ||
       !dConvOut || !dQNorm || !dKNorm || !dCore) return -1;
   // The panel keeps one key-dimension column of state in registers and the q/k rows in
   // fixed shared arrays; a wider key head is refused, never truncated.
-  if (kHd > kQwen35GDNPanelMaxKeyHeadDim || nV % nK != 0) return -1;
-  cudaGetLastError();
+  if (kHd > kQwen35GDNPanelMaxKeyHeadDim || vHd > 1024 || nV % nK != 0 ||
+      !(rmsEps > 0.0f) || !isfinite(rmsEps)) return -1;
+  const long long valueDim64 = (long long)nV * vHd;
+  const long long convDim64 = 2LL * nK * kHd + valueDim64;
+  const long long fusedRows64 = convDim64 + valueDim64 + 2LL * nV;
+  if (convDim64 > 2147483647LL || fusedRows64 > 2147483647LL) return -1;
+  const int convDim = (int)convDim64, valueDim = (int)valueDim64, fusedRows = (int)fusedRows64;
+  int status = qwen35_gdn_projection_preflight(inQKVQ8, dInQKVScale, inZQ8, dInZScale,
+      inBQ8, dInBScale, inAQ8, dInAScale, outWQ8, dOutWScale,
+      hidden, convDim, valueDim, tokens);
+  if (status != 0) return status;
+  cudaError_t stale = cudaGetLastError();
+  if (stale != cudaSuccess) return qwen35_gdn_drain_after_error(10000 + (int)stale);
+  status = qwen35_gdn_packed_projection(dInQKV, inQKVQ8, dX, dMixed, convDim, hidden, tokens);
+  if (status == 0) status = qwen35_gdn_packed_projection(dInZ, inZQ8, dX, dZ, valueDim, hidden, tokens);
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
   const char *projectionMode = getenv("FAK_CUDA_GDN_INPUT_PROJECTION");
-  if (tokens >= 128 && inQKVQ8 && inZQ8 && inBQ8 && inAQ8) {
+  if (tokens >= 128 && inQKVQ8 == 1 && inZQ8 == 1 && inBQ8 == 1 && inAQ8 == 1) {
     int dq = qwen35_gdn_q8_prefill(dInQKV, dInQKVScale, dX, dMixed, convDim, hidden, tokens, 32);
     if (dq == 0) dq = qwen35_gdn_q8_prefill(dInZ, dInZScale, dX, dZ, nV * vHd, hidden, tokens, 32);
     if (dq == 0) dq = qwen35_gdn_q8_prefill(dInB, dInBScale, dX, dB, nV, hidden, tokens, 32);
@@ -1407,7 +1482,7 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
     if (dq != 0) return qwen35_gdn_drain_after_error(dq);
   } else if (tokens == 4 && hidden == 5120 && nK == 16 && nV == 48 &&
              kHd == 128 && vHd == 128 && convKernel == 4 &&
-             inQKVQ8 && inZQ8 && inBQ8 && inAQ8 &&
+             inQKVQ8 == 1 && inZQ8 == 1 && inBQ8 == 1 && inAQ8 == 1 &&
              projectionMode && strcmp(projectionMode, "lanes4") == 0) {
     // Only the stateless projections share weights across consecutive rows.
     // Causal convolution, recurrent state and the sequence fence stay unchanged.
@@ -1422,7 +1497,7 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
       dInB, dInBScale, inBQ8, dInA, dInAScale, inAQ8,
       dMixed, dZ, dB, dA, hidden, convDim, nV * vHd, nV));
   }
-  int status = qwen35_gdn_launch_status(2);
+  status = qwen35_gdn_launch_status(2);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
   int convBlocks = (convDim + 255) / 256;
   int convTiles = (tokens + kQwen35GDNConvTile - 1) / kQwen35GDNConvTile;

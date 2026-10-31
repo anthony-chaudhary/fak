@@ -31,6 +31,58 @@ func qwen35GDNInjectedAllocationFailure(site string, nbytes int) error {
 	return nil
 }
 
+// Packed input kinds reuse the existing native matmul families. Only QKV/Z
+// are canonical-row inputs; this does not advertise tiled-output capability.
+func qwen35GDNPackedInput(t Tensor) bool { return t.Dtype == Q4_K || t.Dtype == Q6_K }
+
+func qwen35GDNPackedInputBytes(t Tensor) (int, bool) {
+	if !qwen35GDNPackedInput(t) || len(t.Shape) != 2 || t.Shape[0] <= 0 || t.Shape[1] <= 0 ||
+		t.Shape[1]%256 != 0 || t.Quant == nil || t.Quant.Block != 256 {
+		return 0, false
+	}
+	n, ok := qwen35GDNCheckedMul(qwen35GDNMaxCInt, int64(t.Shape[0]), int64(t.Shape[1]))
+	if !ok {
+		return 0, false
+	}
+	blockBytes := 144
+	if t.Dtype == Q6_K {
+		blockBytes = 210
+	}
+	return int(n/256) * blockBytes, true
+}
+
+func (c *cudaBackend) validateQwen35GDNPackedInput(name string, t Tensor, tokens int) error {
+	if !qwen35GDNPackedInput(t) {
+		return nil
+	}
+	if name != "in_proj_qkv" && name != "in_proj_z" && name != "gdn_in_qkv" && name != "gdn_in_z" {
+		return &Qwen35GDNResidencyError{Operand: name, Reason: "packed GDN weights are supported only for canonical-row QKV/Z inputs"}
+	}
+	if c.capturing {
+		return &Qwen35GDNResidencyError{Operand: name, Reason: "packed GDN inputs are unsupported during capture; existing packed matmul scratch may grow"}
+	}
+	if _, ok := qwen35GDNPackedInputBytes(t); !ok {
+		return &Qwen35GDNGeometryError{Operand: name, Reason: "packed GDN inputs require positive block-256 rows and a CUDA-int-safe element count"}
+	}
+	// The same admission is used by independent decode batches of up to eight
+	// lanes. Bound that panel too, even when each lane is preflighted separately.
+	rows := max(tokens, 8)
+	if tokens <= 0 || tokens > 65535 {
+		return &Qwen35GDNGeometryError{Operand: name, Reason: "packed GDN token panel must fit CUDA grid.y (1..65535)"}
+	}
+	for _, width := range t.Shape {
+		if _, ok := qwen35GDNCheckedMul(qwen35GDNMaxCInt, int64(rows), int64(width)); !ok {
+			return &Qwen35GDNGeometryError{Operand: name, Reason: "packed GDN panel exceeds CUDA indexing capacity"}
+		}
+	}
+	if t.Dtype == Q4_K && tokens >= 128 {
+		if _, err := CUDAQ4KPrefillArmInUse(); err != nil {
+			return &Qwen35GDNResidencyError{Operand: name, Reason: "configured Q4_K prefill arm is unavailable", Err: err}
+		}
+	}
+	return nil
+}
+
 func (c *cudaBackend) validateQwen35GDNTensor(name string, t Tensor) error {
 	if t.Backend() != c {
 		return &Qwen35GDNResidencyError{Operand: name, Reason: "tensor is not owned by this CUDA backend"}
@@ -41,8 +93,11 @@ func (c *cudaBackend) validateQwen35GDNTensor(name string, t Tensor) error {
 		if t.Dtype != F16 && t.Dtype != F32 {
 			return &Qwen35GDNResidencyError{Operand: name, Reason: "dtype " + t.Dtype.String() + " is unsupported; state buffers require resident f16 or f32"}
 		}
-	} else if t.Dtype != F32 && !(matrix && t.Dtype == Q8_0) {
+	} else if t.Dtype != F32 && !(matrix && t.Dtype == Q8_0) && !qwen35GDNPackedInput(t) {
 		return &Qwen35GDNResidencyError{Operand: name, Reason: "dtype " + t.Dtype.String() + " is unsupported; whole-operation kernel requires resident f32 or q8_0 projection weights"}
+	}
+	if err := c.validateQwen35GDNPackedInput(name, t, 1); err != nil {
+		return err
 	}
 	if t.Layout != RowMajor {
 		return &Qwen35GDNResidencyError{Operand: name, Reason: "layout is not row-major"}
@@ -60,8 +115,10 @@ func (c *cudaBackend) validateQwen35GDNTensor(name string, t Tensor) error {
 	if buf.managed {
 		return &Qwen35GDNResidencyError{Operand: name, Reason: "managed memory is forbidden; strict whole-operation operands must be device-only"}
 	}
-	elemBytes := t.Dtype.Bytes()
-	required, ok := qwen35GDNShapeBytes(t.Shape, elemBytes)
+	required, ok := qwen35GDNShapeBytes(t.Shape, t.Dtype.Bytes())
+	if qwen35GDNPackedInput(t) {
+		required, ok = qwen35GDNPackedInputBytes(t)
+	}
 	if !ok {
 		return &Qwen35GDNGeometryError{Operand: name, Reason: "shape byte size overflows host allocation capacity"}
 	}
@@ -75,8 +132,15 @@ func (c *cudaBackend) validateQwen35GDNTensor(name string, t Tensor) error {
 }
 
 func (c *cudaBackend) validateQwen35GDNOperands(operands []qwen35GDNOperand, convState, recurrentState Tensor) error {
+	tokens := 1
+	if len(operands) > 0 && len(operands[0].t.Shape) == 2 {
+		tokens = operands[0].t.Shape[0]
+	}
 	for _, operand := range operands {
 		if err := c.validateQwen35GDNTensor(operand.name, operand.t); err != nil {
+			return err
+		}
+		if err := c.validateQwen35GDNPackedInput(operand.name, operand.t, tokens); err != nil {
 			return err
 		}
 	}

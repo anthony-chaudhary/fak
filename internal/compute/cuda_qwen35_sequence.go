@@ -305,8 +305,11 @@ func (c *cudaBackend) validateQwen35SequenceRequestLocked(req Qwen35SequencePref
 				return nil, err
 			}
 			for name, tensor := range map[string]Tensor{"gdn_in_qkv": layer.GDNInQKV, "gdn_in_z": layer.GDNInZ, "gdn_in_b": layer.GDNInB, "gdn_in_a": layer.GDNInA, "gdn_out": layer.GDNOut} {
-				if tensor.Dtype != F32 && tensor.Dtype != Q8_0 {
-					return nil, qwen35SequenceFailure("tensor-preflight", index, name+" must be resident f32 or q8_0 for the existing GDN sequence primitive")
+				if tensor.Dtype != F32 && tensor.Dtype != Q8_0 && !qwen35GDNPackedInput(tensor) {
+					return nil, qwen35SequenceFailure("tensor-preflight", index, name+" has an unsupported GDN projection dtype")
+				}
+				if err := c.validateQwen35GDNPackedInput(name, tensor, len(req.TokenIDs)); err != nil {
+					return nil, &Qwen35SequenceError{Stage: "tensor-preflight", Layer: index, Cause: err}
 				}
 			}
 			convShapeOK := qwen35SequenceSameShape(layer.GDNConv, convDim*req.ConvKernel) || qwen35SequenceSameShape(layer.GDNConv, convDim, req.ConvKernel) || qwen35SequenceSameShape(layer.GDNConv, convDim, 1, req.ConvKernel)

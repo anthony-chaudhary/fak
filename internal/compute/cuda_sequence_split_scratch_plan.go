@@ -94,6 +94,16 @@ func planCUDASequenceSplitScratch(req Qwen35SequencePrefillRequest, arm CUDAQ4KP
 						break
 					}
 				}
+			} else {
+				// Packed QKV/Z dispatch separately even in a mixed quartet.
+				// Q4 follows the existing arm; Q6 needs no split halves.
+				for _, weight := range quartet[:2] {
+					if weight.Dtype == Q4_K {
+						if err = generic(weight); err != nil {
+							break
+						}
+					}
+				}
 			}
 			if err == nil && layer.GDNOut.Dtype == Q8_0 {
 				err = add(layer.GDNOut)

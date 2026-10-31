@@ -211,10 +211,17 @@ func (c *cudaBackend) allocateQwen35GDN(allocations []qwen35GDNAllocation, siteP
 	return tensors, buffers, nil
 }
 
+// The legacy name is shared by all GDN callers. Kind 0/1 is unchanged;
+// 2/3 are raw Q4_K/Q6_K, admitted only for QKV/Z by shared preflight.
 func (c *cudaBackend) qwen35GDNQ8Args(t Tensor) (unsafe.Pointer, *C.float, C.int) {
 	buf := c.cudaBufForSubmit(t)
-	if t.Dtype == Q8_0 {
+	switch t.Dtype {
+	case Q8_0:
 		return buf.ptr, (*C.float)(buf.scales), 1
+	case Q4_K:
+		return buf.ptr, nil, 2
+	case Q6_K:
+		return buf.ptr, nil, 3
 	}
 	return buf.ptr, nil, 0
 }

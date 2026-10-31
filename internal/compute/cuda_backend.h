@@ -233,8 +233,15 @@ int fcuda_upload_async_fence(int slot, uint64_t gen, int block);
 void fcuda_upload_async_stats(uint64_t *issued, uint64_t *fallback, size_t *pinned);
 
 /* Qwen3.5/3.6 Gated-DeltaNet decode, one complete recurrent token-mixer operation.
- * Every pointer is already resident f32 device memory. The operation launches, in order:
- * a single fused qkv/z/b/a GEMV, causal depthwise conv + in-place conv-state shift,
+ * All pointers are already resident device memory. Projection kind 0 is F32 and
+ * kind 1 is Q8_0 with separate block-32 float scales. Only inQKVQ8/inZQ8 additionally
+ * accept kind 2=raw Q4_K (144 bytes/256) and kind 3=raw Q6_K (210 bytes/256),
+ * canonical row-major [out,hidden], hidden divisible by 256, no separate scales.
+ * Packed inputs use the existing configured packed-matmul precision/dispatch,
+ * refuse graph capture before submission, and require int-safe panels, tokens
+ * <=65535 and capacity for the eight-lane admission envelope. B/A/out stay 0/1.
+ * The operation launches packed QKV/Z projections where selected, then the
+ * remaining fused input projections, causal depthwise conv + in-place conv-state shift,
  * per-key-head q/k L2 normalization, per-value-head decay/beta delta-rule recurrence
  * fused with gated RMSNorm, and the output GEMV. conv_state [(K-1),convDim] and
  * recurrent_state [nV,kHd,vHd] are updated in place; out [hidden] remains resident.
