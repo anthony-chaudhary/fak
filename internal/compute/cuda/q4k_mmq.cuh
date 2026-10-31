@@ -668,10 +668,8 @@ static int launch_mul_mat_q(const char * x, const int * y, float * dst, int nrow
                             int ncols_dst, device_info & info, cudaStream_t stream) {
     const int nbytes = (int) nbytes_shared(J);
     if (!info.smem_raised[fallback][J]) {
-        if (cudaFuncSetAttribute(mul_mat_q<J, fallback>, cudaFuncAttributeMaxDynamicSharedMemorySize, nbytes) != cudaSuccess) {
-            (void) cudaGetLastError(); // the refusal is reported by status, not left for the next caller
-            return -1;
-        }
+        const cudaError_t status = cudaFuncSetAttribute(mul_mat_q<J, fallback>, cudaFuncAttributeMaxDynamicSharedMemorySize, nbytes);
+        if (status != cudaSuccess) return (int) status;
         info.smem_raised[fallback][J] = true;
     }
 
@@ -708,12 +706,23 @@ static int launch_mul_mat_q(const char * x, const int * y, float * dst, int nrow
     FCUDA_TS("mul_mat_q", block_nums_stream_k, mul_mat_q<J, fallback><<<block_nums_stream_k, block_dims, nbytes, stream>>>
         (x, y, dst, tmp_fixup, blocks_per_ne00_fd, nrows_x, ncols_dst, stride_row_x, ncols_dst, nrows_x, ntx_fd));
 
+    // The fixup must not run after a failed main launch. Save the first status before
+    // cleanup, whose CUDA calls must not replace the failure being returned.
+    cudaError_t status = cudaGetLastError();
+    if (status != cudaSuccess) {
+        if (tmp_fixup) fcuda_free(tmp_fixup);
+        return (int) status;
+    }
     if (fixup_needed) {
         FCUDA_TS("mul_mat_q_stream_k_fixup", block_nums_fixup, mul_mat_q_stream_k_fixup<J, fallback><<<block_nums_fixup, block_dims_fixup, 0, stream>>>
             (dst, tmp_fixup, blocks_per_ne00_fd, nrows_x, ncols_dst, nrows_x, ntx_fd));
+        status = cudaGetLastError();
         fcuda_free(tmp_fixup);
+        // Preserve a cleanup error when submission succeeded, without replacing
+        // an earlier launch error with the cleanup's last-error state.
+        if (status == cudaSuccess) status = cudaGetLastError();
     }
-    return cudaGetLastError() == cudaSuccess ? 0 : -1;
+    return (int) status;
 }
 
 template <bool fallback>
@@ -767,9 +776,9 @@ extern "C" unsigned long long fcuda_q4k_mmq_launch_count(void) {
 
 // fcuda_q4k_mmq_matmul is the mmq arm of fcuda_q4k_matmul_f32 (cuda_backend.h): it quantizes
 // X to q8_1 in the MMQ layout and runs the Q4_K MMQ kernel straight off the resident weight.
-// Returns 0, FCUDA_SCRATCH_ALLOC_FAILED (the q8_1 activation or the stream-k fixup buffer), or
-// FCUDA_Q4K_MMQ_REFUSED: a device or loaded kernel image below sm_80, an unaligned activation, a
-// panel whose output index would overflow the kernel's int offsets, or a launch error.
+// FCUDA_Q4K_MMQ_REFUSED certifies a pre-attempt capability/geometry decline only.
+// CUDA API/launch errors and scratch failures retain their status. After activation
+// quantization has been submitted, every failure is terminal rather than panel-fallback eligible.
 #define FCUDA_Q4K_MMQ_REFUSED 80004
 static int fcuda_q4k_mmq_matmul(const uint8_t *dQ4K, const float *dX, float *dY, int out, int in, int P) {
   using namespace fak_q4k_mmq;
@@ -778,23 +787,25 @@ static int fcuda_q4k_mmq_matmul(const uint8_t *dQ4K, const float *dX, float *dY,
     return FCUDA_Q4K_MMQ_REFUSED;
   }
   int device = 0;
-  if (cudaGetDevice(&device) != cudaSuccess || device < 0 || device >= 16) return FCUDA_Q4K_MMQ_REFUSED;
+  cudaError_t cuda_status = cudaGetDevice(&device);
+  if (cuda_status != cudaSuccess) return (int) cuda_status;
+  if (device < 0 || device >= 16) return FCUDA_Q4K_MMQ_REFUSED;
   device_info &info = g_device_info[device];
   if (!info.known) {
     int major = 0, minor = 0, nsm = 0, smpbo = 0;
-    if (cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, device) != cudaSuccess ||
-        cudaDeviceGetAttribute(&minor, cudaDevAttrComputeCapabilityMinor, device) != cudaSuccess ||
-        cudaDeviceGetAttribute(&nsm, cudaDevAttrMultiProcessorCount, device) != cudaSuccess ||
-        cudaDeviceGetAttribute(&smpbo, cudaDevAttrMaxSharedMemoryPerBlockOptin, device) != cudaSuccess) {
-      return FCUDA_Q4K_MMQ_REFUSED;
-    }
+    cuda_status = cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, device);
+    if (cuda_status != cudaSuccess) return (int) cuda_status;
+    cuda_status = cudaDeviceGetAttribute(&minor, cudaDevAttrComputeCapabilityMinor, device);
+    if (cuda_status != cudaSuccess) return (int) cuda_status;
+    cuda_status = cudaDeviceGetAttribute(&nsm, cudaDevAttrMultiProcessorCount, device);
+    if (cuda_status != cudaSuccess) return (int) cuda_status;
+    cuda_status = cudaDeviceGetAttribute(&smpbo, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
+    if (cuda_status != cudaSuccess) return (int) cuda_status;
     // The device code is compiled out below sm_80 (FAK_Q4K_MMQ_AVAILABLE), so a build whose image
     // for this device targets an older virtual arch would trap rather than refuse.
     cudaFuncAttributes fa;
-    if (cudaFuncGetAttributes(&fa, mul_mat_q<128, false>) != cudaSuccess) {
-      (void) cudaGetLastError();
-      return FCUDA_Q4K_MMQ_REFUSED;
-    }
+    cuda_status = cudaFuncGetAttributes(&fa, mul_mat_q<128, false>);
+    if (cuda_status != cudaSuccess) return (int) cuda_status;
     info.cc = 10*major + minor;
     info.compiled_arch = fa.ptxVersion;
     info.nsm = nsm;
@@ -815,6 +826,11 @@ static int fcuda_q4k_mmq_matmul(const uint8_t *dQ4K, const float *dX, float *dY,
   const dim3 num_blocks(P, block_num_y, 1);
   const dim3 block_size(CUDA_QUANTIZE_BLOCK_SIZE_MMQ, 1, 1);
   FCUDA_TS("quantize_mmq_q8_1_ds4", num_blocks, quantize_mmq_q8_1_ds4<<<num_blocks, block_size, 0, g_stream>>>(dX, y, in, in, in_padded, P));
+  cuda_status = cudaGetLastError();
+  if (cuda_status != cudaSuccess) {
+    fcuda_free(y);
+    return (int) cuda_status;
+  }
 
   const bool fallback = out % 128 != 0;
   int status = fallback
@@ -825,5 +841,5 @@ static int fcuda_q4k_mmq_matmul(const uint8_t *dQ4K, const float *dX, float *dY,
     g_q4k_mmq_launches++;
     return 0;
   }
-  return status == FCUDA_SCRATCH_ALLOC_FAILED ? status : FCUDA_Q4K_MMQ_REFUSED;
+  return status;
 }

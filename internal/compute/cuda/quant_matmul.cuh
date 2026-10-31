@@ -691,11 +691,11 @@ extern "C" int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float 
     fp16_compensated_gemm(wHi, wLo, xHi, xLo, dY, out, in, P);
     return fp16_compensated_release(&scratch);
   }
-  // Small panels on the mmq arm read each weight byte once instead of ceil(P/4) times on the
-  // token panel. Any mmq refusal or scratch miss falls back to the panel, never fails.
-  if (g_q4k_prefill_arm == 1 && P >= FCUDA_Q4K_MMQ_MIN_COLS &&
-      fcuda_q4k_mmq_matmul(dQ4K, dX, dY, out, in, P) == 0) {
-    return 0;
+  // Small panels may use the panel kernel only after a certified pre-attempt decline.
+  // Preserve attempted CUDA and scratch failures; never overwrite them with panel success.
+  if (g_q4k_prefill_arm == 1 && P >= FCUDA_Q4K_MMQ_MIN_COLS) {
+    const int status = fcuda_q4k_mmq_matmul(dQ4K, dX, dY, out, in, P);
+    if (status != FCUDA_Q4K_MMQ_REFUSED) return status;
   }
   if (P < 4) {
     if (g_q4k_decode_arm == 1) return fcuda_q4k_mmvq_matmul(dQ4K, dX, dY, out, in, P);
