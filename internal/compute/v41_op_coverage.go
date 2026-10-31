@@ -87,6 +87,14 @@ var v41OpProbes = []v41OpProbe{
 	{"V41EmbeddingGatherBackend", v41Avail(func(b V41EmbeddingGatherBackend) bool { return b.V41EmbeddingGatherAvailable() })},
 	{"V41EngramGateBackend", v41Avail(func(b V41EngramGateBackend) bool { return b.SupportsV41EngramGate() })},
 	{"V41EngramRowDecodeBackend", v41Avail(func(b V41EngramRowDecodeBackend) bool { return b.SupportsV41EngramRowDecode() })},
+	// Encoding refinement alone is not device decode support. Probe only known
+	// dialects and preserve the broad decode kill switch; this is not a witness.
+	{"V41EngramRowEncodingBackend", v41Avail(func(b V41EngramRowEncodingBackend) bool {
+		decode, ok := b.(V41EngramRowDecodeBackend)
+		return ok && (V41EngramRowDecodeSupportsEncoding(decode, V41EngramRowPacked) ||
+			V41EngramRowDecodeSupportsEncoding(decode, V41EngramRowQ2K) ||
+			V41EngramRowDecodeSupportsEncoding(decode, V41EngramRowF32))
+	})},
 	{"V41ExactRMSNormBackend", v41Avail(func(b V41ExactRMSNormBackend) bool { return b.SupportsV41ExactRMSNorm(4096, 1e-6) })},
 	{"V41F32FiniteBackend", v41Avail(func(b V41F32FiniteBackend) bool { return b.SupportsV41F32Finite(1) })},
 	{"V41FP8WKVBackend", v41Avail(func(b V41FP8WKVBackend) bool { return b.V41FP8WKVSupported() })},
