@@ -1407,13 +1407,34 @@ func (m *Model) metalWeightsQwen35Hybrid() map[string]*metalgemm.Weight {
 		return w
 	}
 	cfg := m.Cfg
-	w := make(map[string]*metalgemm.Weight, 8*cfg.NumLayers)
+	if cfg.NumLayers < 0 || cfg.NumLayers > int(^uint(0)>>1)/8 {
+		panic("model: invalid metal hybrid layer count")
+	}
+	slots := 8 * cfg.NumLayers // maximum: three MLP plus five mixer projections
+	w := make(map[string]*metalgemm.Weight, slots)
+	// Upload returns a fresh, current-attempt handle; none is borrowed from a
+	// published table. Register every possible rollback slot before the first
+	// native allocation, so recording a successful Upload cannot itself allocate.
+	owned := make([]*metalgemm.Weight, slots)
+	published := false
+	for i := range owned {
+		defer func() {
+			if !published && owned[i] != nil {
+				// Keep the original construction unwind. All sibling defers still
+				// run if a cleanup panics or exits; no success is published here.
+				suppressBackendCleanupPanic(owned[i].Free)
+			}
+		}()
+	}
+	nOwned := 0
 	upload := func(name string) {
 		qt := m.q8(name)
 		h := metalgemm.Upload(dequantQ8(qt), qt.out, qt.in)
 		if h == nil {
 			panic("model: metal hybrid weight upload failed for " + name)
 		}
+		owned[nOwned] = h
+		nOwned++
 		w[name] = h
 	}
 	for l := 0; l < cfg.NumLayers; l++ {
@@ -1434,6 +1455,7 @@ func (m *Model) metalWeightsQwen35Hybrid() map[string]*metalgemm.Weight {
 		}
 	}
 	metalHybridWt[m] = w
+	published = true // ownership transfers only after the cache entry exists
 	return w
 }
 
