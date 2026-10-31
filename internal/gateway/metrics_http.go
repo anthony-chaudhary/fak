@@ -79,7 +79,12 @@ type statusRecorder struct {
 	http.ResponseWriter
 	status int
 	bytes  int64
+	// Set before any live-stream writer goroutine starts, and only after the
+	// request-local per-I/O deadline controller has qualified actual support.
+	liveWriteDeadlineOwned bool
 }
+
+func (r *statusRecorder) ownLiveWriteDeadline() { r.liveWriteDeadlineOwned = true }
 
 // WriteHeader forwards informational responses without committing request metrics;
 // the first final response determines the recorded status.
@@ -92,7 +97,9 @@ func (r *statusRecorder) WriteHeader(status int) {
 		return
 	}
 	r.status = status
-	clearStreamWriteDeadline(r.ResponseWriter, status)
+	if !r.liveWriteDeadlineOwned {
+		clearStreamWriteDeadline(r.ResponseWriter, status)
+	}
 	r.ResponseWriter.WriteHeader(status)
 }
 

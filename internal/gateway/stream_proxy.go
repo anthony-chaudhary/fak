@@ -418,6 +418,135 @@ func startPrefillKeepalive(ctx context.Context, w io.Writer, flusher http.Flushe
 	}
 }
 
+// This bounds one downstream I/O, not prefill, generation, or the whole turn.
+// Deadlines are cleared between operations so a healthy slow model remains valid.
+const liveChatWriteIdle = 30 * time.Second
+
+type liveChatWriteControl struct {
+	mu       sync.Mutex // never held while waiting for a body Write/Flush
+	ctx      context.Context
+	target   interface{ SetWriteDeadline(time.Time) error }
+	flush    *http.ResponseController
+	aborted  bool
+	deadline time.Time
+	stop     func() bool
+	done     chan struct{}
+}
+
+func newLiveChatWriteControl(ctx context.Context, raw http.ResponseWriter) *liveChatWriteControl {
+	// Resolve before any writer goroutine starts. In particular, never traverse
+	// syncResponseWriter.Unwrap while its Write holds the serializer mutex.
+	var owners []interface{ ownLiveWriteDeadline() }
+	for w, depth := raw, 0; w != nil && depth < 32; depth++ {
+		if owner, ok := w.(interface{ ownLiveWriteDeadline() }); ok {
+			owners = append(owners, owner)
+		}
+		if target, ok := w.(interface{ SetWriteDeadline(time.Time) error }); ok {
+			// Method presence alone is not support (custom wrappers may return
+			// ErrNotSupported). Only a qualified SSE writer adopts the new owner.
+			if err := target.SetWriteDeadline(time.Time{}); err != nil {
+				return nil
+			}
+			// The normal SSE whole-turn clear must not erase a later cancellation
+			// deadline. This is per-request ownership, not a global timeout bypass.
+			for _, owner := range owners {
+				owner.ownLiveWriteDeadline()
+			}
+			c := &liveChatWriteControl{ctx: ctx, target: target, flush: http.NewResponseController(raw), done: make(chan struct{})}
+			c.stop = context.AfterFunc(ctx, func() {
+				c.interrupt()
+				close(c.done)
+			})
+			return c
+		}
+		unwrap, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			break
+		}
+		w = unwrap.Unwrap()
+	}
+	// A custom writer without deadline support keeps the synchronous path.
+	// It cannot honestly promise interruptible I/O or a joinable async owner.
+	return nil
+}
+
+func (c *liveChatWriteControl) arm() error {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.ctx.Err(); err != nil {
+		return err
+	}
+	if c.aborted {
+		return context.Canceled
+	}
+	deadline := time.Now().Add(liveChatWriteIdle)
+	if err := c.target.SetWriteDeadline(deadline); err != nil {
+		return err
+	}
+	c.deadline = deadline
+	return nil
+}
+
+func (c *liveChatWriteControl) interrupt() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.aborted = true
+	_ = c.target.SetWriteDeadline(time.Now())
+}
+
+func (c *liveChatWriteControl) clear() error {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.ctx.Err(); err != nil {
+		return err
+	}
+	if c.aborted {
+		return context.Canceled
+	}
+	// WriteHeader and legacy Flush have no error return. Do not turn an expired
+	// I/O into apparent success by clearing its deadline before the next Write.
+	if !c.deadline.IsZero() && !time.Now().Before(c.deadline) {
+		c.aborted = true
+		_ = c.target.SetWriteDeadline(time.Now())
+		return context.DeadlineExceeded
+	}
+	if err := c.target.SetWriteDeadline(time.Time{}); err != nil {
+		return err
+	}
+	c.deadline = time.Time{}
+	return nil
+}
+
+func (c *liveChatWriteControl) header(write func()) error {
+	if err := c.arm(); err != nil {
+		return err
+	}
+	// The initial statusRecorder no longer clears this owner's deadline. Thus
+	// headers that flush are bounded just like Write, without competing timers.
+	write()
+	if err := c.ctx.Err(); err != nil {
+		c.interrupt()
+		return err
+	}
+	return c.clear()
+}
+
+func (c *liveChatWriteControl) close() {
+	if c == nil {
+		return
+	}
+	if !c.stop() {
+		<-c.done
+	}
+	_ = c.clear()
+}
+
 // liveChatResponseWriter adds request-local failure closure only to selected
 // live Chat streaming. It shares the existing serializer mutex; Header retains
 // its existing returned-map contract. Flusher cannot report failures.
@@ -425,24 +554,34 @@ type liveChatResponseWriter struct {
 	*syncResponseWriter
 	firstError error
 	cancel     context.CancelFunc
+	control    *liveChatWriteControl
 }
 
 func (w *liveChatResponseWriter) Write(p []byte) (int, error) {
-	w.mu.Lock()
-	if w.firstError != nil {
-		err := w.firstError
-		w.mu.Unlock()
-		return 0, err
-	}
-	n, err := w.w.Write(p)
-	if err == nil && n != len(p) {
-		err = io.ErrShortWrite
-	}
-	if err != nil {
-		w.firstError = err
-	}
-	w.mu.Unlock()
-	if err != nil {
+	failed := false
+	n, err := func() (int, error) {
+		w.mu.Lock()
+		defer w.mu.Unlock() // also release before the consumer catches a writer panic
+		if w.firstError != nil {
+			return 0, w.firstError
+		}
+		var n int
+		err := w.control.arm()
+		if err == nil {
+			n, err = w.w.Write(p)
+			if err == nil {
+				err = w.control.clear()
+			}
+		}
+		if err == nil && n != len(p) {
+			err = io.ErrShortWrite
+		}
+		if err != nil {
+			w.firstError, failed = err, true
+		}
+		return n, err
+	}()
+	if failed {
 		// Cancellation can run callbacks; never invoke it under the writer lock.
 		w.cancel()
 	}
@@ -450,18 +589,54 @@ func (w *liveChatResponseWriter) Write(p []byte) (int, error) {
 }
 
 func (w *liveChatResponseWriter) WriteHeader(status int) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.firstError == nil {
-		w.w.WriteHeader(status)
+	failed := func() bool {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		if w.firstError != nil {
+			return false
+		}
+		if w.control == nil {
+			w.w.WriteHeader(status)
+			return false
+		}
+		if err := w.control.header(func() { w.w.WriteHeader(status) }); err != nil {
+			w.firstError = err
+			return true
+		}
+		return false
+	}()
+	if failed {
+		w.cancel()
 	}
 }
 
 func (w *liveChatResponseWriter) Flush() {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.firstError == nil && w.flusher != nil {
-		w.flusher.Flush()
+	failed := func() bool {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		if w.firstError != nil {
+			return false
+		}
+		var err error
+		if w.control != nil {
+			err = w.control.arm()
+			if err == nil {
+				err = w.control.flush.Flush()
+				if err == nil {
+					err = w.control.clear()
+				}
+			}
+		} else if w.flusher != nil {
+			w.flusher.Flush()
+		}
+		if err != nil {
+			w.firstError = err
+			return true
+		}
+		return false
+	}()
+	if failed {
+		w.cancel()
 	}
 }
 
@@ -534,6 +709,10 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	liveCtx, cancelLive := context.WithCancel(ctx)
 	defer cancelLive()
 	sw := &liveChatResponseWriter{syncResponseWriter: newSyncResponseWriter(w), cancel: cancelLive}
+	sw.control = newLiveChatWriteControl(liveCtx, sw.w)
+	// Stop/join the cancellation watcher before cancelLive's deferred cleanup,
+	// and before net/http may reuse the underlying writer after this handler.
+	defer sw.control.close()
 	w = sw
 	flusher := sw
 	id := "chatcmpl-fak-" + itoa(uint64(time.Now().UnixNano()))
@@ -663,7 +842,6 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		flusher.Flush()
 		return nil
 	}
-	heldCtx := agent.WithStreamHeldActivity(liveCtx, func() { _ = heldActivity() })
 	// The sink streams prose through the lift-guard so a text-form tool-call dialect a
 	// model buries in content never reaches the wire before adjudication. Whatever the
 	// guard withheld is reconciled against the buffered post-lift content below.
@@ -727,15 +905,46 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	defer stopPrefill()
 
 	began := time.Now()
+	sink := utf8Fragments.write
+	held := func() { _ = heldActivity() }
+	var sender *CoalescingSender
+	senderJoined := false
+	if sw.control != nil {
+		// Text and held activity share one ordered owner of start/UTF8/lift state.
+		// Preserve logical fragment boundaries even if the producer outruns a fast
+		// consumer for a scheduling quantum; only the physical delivery is deferred.
+		sender = newCoalescingSender(liveCtx, true, func(chunk DeltaChunk) error {
+			if chunk.held {
+				return heldActivity()
+			}
+			return utf8Fragments.write(chunk.Text)
+		}, cancelLive)
+		defer func() {
+			// Also join on a planner panic, before any ResponseWriter can escape.
+			if !senderJoined {
+				cancelLive()
+				_ = sender.Close()
+			}
+		}()
+		sink = func(text string) error { return sender.Send(text, 0) }
+		held = func() { _ = sender.activity() }
+	}
+	heldCtx := agent.WithStreamHeldActivity(liveCtx, held)
 	turnCtx := plannerTurnContext(heldCtx, nil, req.Messages, s.contextEpoch)
 	var firstDelta firstDeltaClock
 	turnCtx = withTextToolOffer(turnCtx, req.Tools)
-	comp, err := sp.CompleteStream(turnCtx, firstDelta.wrap(utf8Fragments.write), req.Messages, req.Tools, chatRouteOpts(ctx, opts)...)
+	comp, err := sp.CompleteStream(turnCtx, firstDelta.wrap(sink), req.Messages, req.Tools, chatRouteOpts(ctx, opts)...)
+	completed := err == nil && comp != nil
+	if sender != nil {
+		if deliveryErr := sender.Close(); err == nil {
+			err = deliveryErr
+		}
+		senderJoined = true
+	}
 	stopHB()
 	stopPrefill()
 	// Joining the heartbeat establishes that no concurrent write can change the
 	// failure latch before completion accounting or trailer/header mutation.
-	completed := err == nil && comp != nil
 	writeErr := sw.err()
 	err = liveChatCompletionError(ctx, err, writeErr)
 	if completed {

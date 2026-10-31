@@ -803,6 +803,8 @@ extern "C" unsigned long long fak_qwen38_fattn_mma_launch_count(void) {
 static int fak_qwen38_fattn_mma_hd256_launch(
         const float *dQ, const float *dK, const float *dV, float *dOut,
         int tokens, int prefix, int nH, int nKV, float scale) {
+    // A failed retirement has unknown completion: retain ownership and never retry or reuse.
+    if (g_cuda_cleanup_status != 0) return 52000 + g_cuda_cleanup_status;
 #ifdef FAK_CUDA_V41_CHECKED_STREAM
     if (v41_candidates_stream_uncertain()) return 52000 + (int)cudaErrorNotReady;
 #endif
@@ -822,8 +824,12 @@ static int fak_qwen38_fattn_mma_hd256_launch(
     if (need > g_qwen38_fattn_kv16_bytes) {
         if (g_capture_open) return -2;
         if (g_qwen38_fattn_kv16) {
+            cudaError_t retired = cudaFree(g_qwen38_fattn_kv16);
+            if (retired != cudaSuccess) {
+                if (g_cuda_cleanup_status == 0) g_cuda_cleanup_status = (int) retired;
+                return 52000 + g_cuda_cleanup_status;
+            }
             fak_alloc_untrack(g_qwen38_fattn_kv16);
-            cudaFree(g_qwen38_fattn_kv16);
         }
         g_qwen38_fattn_kv16 = nullptr;
         g_qwen38_fattn_kv16_bytes = 0;

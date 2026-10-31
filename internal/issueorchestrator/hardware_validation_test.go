@@ -26,15 +26,23 @@ func TestFormatOpencodePromptHardwareValidation(t *testing.T) {
 			if got := strings.Contains(prompt, "Physical hardware validation:"); got != tc.want {
 				t.Fatalf("hardware guidance=%v, want %v", got, tc.want)
 			}
+			for _, retired := range []string{"fak-dev amd-strix-probe", "fak validate --strix", "docs/fleet-compute-nodes.md", "flock -w 30 -x"} {
+				if strings.Contains(prompt, retired) {
+					t.Errorf("retired direct-hardware instruction %q remains", retired)
+				}
+			}
 			if !tc.want {
 				return
 			}
 			for _, required := range []string{
 				"During investigation",
-				"fak-dev amd-strix-probe",
+				"existing request/results",
+				"REQUEST-DS41-RAIDER-HARDWARE-VERIFICATION",
+				"Halo targets are retired",
+				"desktop quota is not a prerequisite",
+				"request only missing changed-path qualification",
 				"shared lease",
 				"exclusive lease",
-				"flock -w 30 -x",
 				"do not nest locks",
 				"source-bound receipt",
 				"dirty patch digest",
