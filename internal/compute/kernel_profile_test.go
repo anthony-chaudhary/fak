@@ -807,7 +807,7 @@ var cudaKernelOtherAllowlist = map[string]bool{
 	"quantize_q8_1": true, "k_q3k_dequant": true, "k_iq4xs_dequant_split": true,
 	"quantize_mmq_q8_1_d2s6": true, "quantize_mmq_q8_1_d4": true,
 	// Engram row gathers/dequantization and poisoned-output status publication.
-	"v41_eg_q5": true, "v41_eg_q2": true, "v41_eg_f32": true,
+	"v41_eg_q5": true, "v41_eg_q2": true, "v41_eg_f32": true, "v41_eg_rows": true,
 	"v41_eg_iq4nl": true, "v41_eg_iq4nl_row": true, "v41_eg_iq4nl_poison": true,
 }
 
