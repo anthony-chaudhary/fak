@@ -1127,7 +1127,7 @@ func hasElidedToolResult(messages []agent.Message) bool {
 
 func (s *Server) validateChatCompletionConformance(w http.ResponseWriter, stream *chatStreamWriter, comp *agent.Completion, asst agent.Message, receiptRequested, decodeTraceRequested, decodeTokenIDsRequested bool, inputTriggerRoute *InputTriggerRouteReceipt) bool {
 	if comp.ToolCallsDropped && len(asst.ToolCalls) == 0 {
-		s.logf("gateway: upstream announced tool_calls but none parsed (conformance fail-closed); model=%s reason=%s", s.model, toolCallDropReasonName(comp))
+		s.logf("gateway: upstream announced tool_calls but none parsed (conformance fail-closed); model=%s reason=%s finish_reason=%s completion_tokens=%d", s.model, toolCallDropReasonName(comp), toolCallLogFinishReason(comp.FinishReason), comp.Usage.CompletionTokens)
 		if msg, code, typed := toolCallDropRefusal(comp); typed {
 			if stream != nil {
 				stream.fail(http.StatusBadGateway, code, msg)

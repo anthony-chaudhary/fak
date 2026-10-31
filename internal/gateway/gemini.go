@@ -241,7 +241,7 @@ func (s *Server) completeGeminiTurn(ctx context.Context, req *agent.GeminiGenera
 	// adjudication on a call the model intended to make — the exact silent no-op a
 	// non-OpenAI-shaped emitter causes. Fail closed (parity with the OpenAI path).
 	if comp.ToolCallsDropped && len(asst.ToolCalls) == 0 {
-		s.logf("gateway: upstream announced tool_calls but none parsed (conformance fail-closed); model=%s", model)
+		s.logf("gateway: upstream announced tool_calls but none parsed (conformance fail-closed); model=%s reason=%s finish_reason=%s completion_tokens=%d", model, toolCallDropReasonName(comp), toolCallLogFinishReason(comp.FinishReason), comp.Usage.CompletionTokens)
 		return nil, errGeminiToolCallConformance
 	}
 

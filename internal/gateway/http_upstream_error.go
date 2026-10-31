@@ -157,7 +157,7 @@ func (s *Server) failClosedOnUnparsedToolCalls(w http.ResponseWriter, comp *agen
 		return false
 	}
 	if !started {
-		s.logf("gateway: upstream announced tool_calls but none parsed (%s); model=%s reason=%s", preTag, s.model, toolCallDropReasonName(comp))
+		s.logf("gateway: upstream announced tool_calls but none parsed (%s); model=%s reason=%s finish_reason=%s completion_tokens=%d", preTag, s.model, toolCallDropReasonName(comp), toolCallLogFinishReason(comp.FinishReason), comp.Usage.CompletionTokens)
 		if msg, code, typed := toolCallDropRefusal(comp); typed {
 			writeErrCode(w, http.StatusBadGateway, code, msg)
 			return true
@@ -165,7 +165,7 @@ func (s *Server) failClosedOnUnparsedToolCalls(w http.ResponseWriter, comp *agen
 		writeErr(w, http.StatusBadGateway, "upstream tool-call format not recognized; refusing to skip adjudication")
 		return true
 	}
-	s.logf("gateway: upstream announced tool_calls but none parsed mid-stream (%s); model=%s", midTag, s.model)
+	s.logf("gateway: upstream announced tool_calls but none parsed mid-stream (%s); model=%s reason=%s finish_reason=%s completion_tokens=%d", midTag, s.model, toolCallDropReasonName(comp), toolCallLogFinishReason(comp.FinishReason), comp.Usage.CompletionTokens)
 	terminal()
 	return true
 }
