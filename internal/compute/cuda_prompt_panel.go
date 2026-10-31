@@ -319,6 +319,10 @@ func (c *cudaBackend) PromptPanelRow(x Tensor, row, width int) Tensor {
 // the last panel scope's peak of panel bytes held plus cached.
 type CUDAPoolStats struct {
 	PooledBytes, Buckets, LargestBucket, PanelCachedBytes, PanelLive, PanelPeakBytes int64
+	// Idle decode-pool cap witness: the byte cap, pooled bytes now and their peak, and
+	// the pool's reuse hits, misses and cap evictions since process start.
+	IdleCapBytes, IdleBytes, IdlePeakBytes int64
+	IdleHits, IdleMisses, IdleEvictions    uint64
 }
 
 // CUDADebugPoolStats reads CUDAPoolStats under the allocator lock.
@@ -327,6 +331,21 @@ func (c *cudaBackend) CUDADebugPoolStats() CUDAPoolStats {
 	defer cudaMu.Unlock()
 	var pooled, buckets, largest, panel, live, peak C.size_t
 	C.fcuda_pool_stats(&pooled, &buckets, &largest, &panel, &live, &peak)
+	var capBytes, idle, idlePeak C.size_t
+	var hits, misses, evictions C.ulonglong
+	C.fcuda_pool_cap_stats(&capBytes, &idle, &idlePeak, &hits, &misses, &evictions)
 	return CUDAPoolStats{PooledBytes: int64(pooled), Buckets: int64(buckets), LargestBucket: int64(largest),
-		PanelCachedBytes: int64(panel), PanelLive: int64(live), PanelPeakBytes: int64(peak)}
+		PanelCachedBytes: int64(panel), PanelLive: int64(live), PanelPeakBytes: int64(peak),
+		IdleCapBytes: int64(capBytes), IdleBytes: int64(idle), IdlePeakBytes: int64(idlePeak),
+		IdleHits: uint64(hits), IdleMisses: uint64(misses), IdleEvictions: uint64(evictions)}
+}
+
+// SetCUDAIdlePoolCap sets the idle decode-pool byte cap and evicts down to it when legal.
+func (c *cudaBackend) SetCUDAIdlePoolCap(capBytes int64) {
+	if capBytes < 0 {
+		capBytes = 0
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	C.fcuda_pool_set_cap(C.size_t(capBytes))
 }

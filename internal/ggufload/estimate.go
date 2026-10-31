@@ -435,7 +435,7 @@ func (s *WeightSource) EstimateQ4KLoadExpandedMemoryPlan(opts ...Q4KLoadOption) 
 		return nil, fmt.Errorf("gguf: Q4K expanded estimate requires a weight source")
 	}
 	forced := append(append([]Q4KLoadOption(nil), opts...),
-		WithDenseKQuantResident(false), WithDenseQ2KResident(false), WithDenseQ6KResident(false))
+		WithDenseKQuantResident(false), WithDenseQ2KResident(false), WithDenseQ6KResident(false), WithDenseQ5KResident(false))
 	plan, err := s.EstimateQ4KLoadMemoryPlan(forced...)
 	if errors.Is(err, ErrQ4KLoadEstimateUnsupported) {
 		cfg, cerr := s.File.Config()

@@ -256,6 +256,7 @@ func (c *cudaBackend) qwen35SequenceReserveKVLocked(kv *cudaKV, compactLayers, n
 	if graphEnabled && kv.maxPos > 0 && needed/kv.stride() > kv.maxPos {
 		return &Qwen35SequenceError{Stage: "kv-reserve", Layer: -1, Reason: fmt.Sprintf("fixed CUDA graph KV capacity %d is smaller than requested position %d", kv.maxPos, needed/kv.stride())}
 	}
+	target := qwen35KVReserveTarget(needed, kv.stride(), kv.maxPos)
 	reservations := make([]qwen35KVReservation, 0, compactLayers*3)
 	committed := false
 	defer func() {
@@ -285,7 +286,7 @@ func (c *cudaBackend) qwen35SequenceReserveKVLocked(kv *cudaKV, compactLayers, n
 			if dst.cap >= needed {
 				continue
 			}
-			bytes, ok := qwen35GDNShapeBytes([]int{needed}, dst.dtype.Bytes())
+			bytes, ok := qwen35GDNShapeBytes([]int{target}, dst.dtype.Bytes())
 			if !ok {
 				return &Qwen35SequenceError{Stage: "kv-reserve", Layer: layer, Reason: "KV capacity byte size overflow"}
 			}
@@ -293,7 +294,7 @@ func (c *cudaBackend) qwen35SequenceReserveKVLocked(kv *cudaKV, compactLayers, n
 			if err != nil {
 				return &Qwen35SequenceError{Stage: "kv-reserve", Layer: layer, Cause: err}
 			}
-			reservations = append(reservations, qwen35KVReservation{dst: dst, old: dst.ptr, next: buf.ptr, cap: needed})
+			reservations = append(reservations, qwen35KVReservation{dst: dst, old: dst.ptr, next: buf.ptr, cap: target})
 		}
 	}
 	// Ownership commits before any enqueue; retirement is only for the

@@ -252,3 +252,51 @@ func TestServeCUDAGDNLoaderKeepsSupportedWeights(t *testing.T) {
 		})
 	}
 }
+
+type q3kCapBackend struct {
+	compute.Backend
+	deviceMemory, uploadDtype, q3kDtype, q3kProbe, hasProbe bool
+}
+
+func (b q3kCapBackend) Caps() compute.Caps {
+	c := b.Backend.Caps()
+	c.DeviceMemory, c.UploadDtype = b.deviceMemory, b.uploadDtype
+	return c
+}
+func (b q3kCapBackend) SupportsDeviceWeightDtype(dt compute.Dtype) bool {
+	return dt == compute.Q3_K && b.q3kDtype
+}
+
+type probedQ3KCapBackend struct{ q3kCapBackend }
+
+func (b probedQ3KCapBackend) SupportsQ3KMatMul() bool { return b.q3kProbe }
+
+// Dense Q3_K stays packed only when the device uploads the Q3_K dtype AND passes the Q3_K
+// execution probe; any partial capability keeps the Q8 route and leaves every other arm alone.
+func TestServeDenseKQuantOptionsRetainQ3KOnlyWithDtypeAndProbe(t *testing.T) {
+	full := q3kCapBackend{Backend: compute.Default(), deviceMemory: true, uploadDtype: true, q3kDtype: true, q3kProbe: true}
+	cases := []struct {
+		name    string
+		backend compute.Backend
+		want    bool
+	}{
+		{name: "dtype+probe", backend: probedQ3KCapBackend{full}, want: true},
+		{name: "cpu", backend: compute.Default(), want: false},
+		{name: "no-probe-method", backend: full, want: false},
+		{name: "probe-false", backend: probedQ3KCapBackend{q3kCapBackend{Backend: compute.Default(), deviceMemory: true, uploadDtype: true, q3kDtype: true}}, want: false},
+		{name: "no-dtype", backend: probedQ3KCapBackend{q3kCapBackend{Backend: compute.Default(), deviceMemory: true, uploadDtype: true, q3kProbe: true}}, want: false},
+		{name: "no-upload", backend: probedQ3KCapBackend{q3kCapBackend{Backend: compute.Default(), deviceMemory: true, q3kDtype: true, q3kProbe: true}}, want: false},
+		{name: "host-memory", backend: probedQ3KCapBackend{q3kCapBackend{Backend: compute.Default(), uploadDtype: true, q3kDtype: true, q3kProbe: true}}, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			effects := ggufload.ApplyQ4KLoadOptions(serveDenseKQuantOptions(tc.backend))
+			if effects.DenseQ3KResident != tc.want {
+				t.Fatalf("DenseQ3KResident = %v, want %v", effects.DenseQ3KResident, tc.want)
+			}
+			if effects.DenseKQuantResident || effects.DenseQ2KResident || effects.DenseQ6KResident {
+				t.Fatalf("Q3_K admission changed other residency: %+v", effects)
+			}
+		})
+	}
+}

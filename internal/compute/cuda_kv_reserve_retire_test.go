@@ -30,7 +30,8 @@ func TestCUDAFailedKVReservationDoesNotGrowPool(t *testing.T) {
 		defer cudaMu.Unlock()
 		qwen35GDNStrictAllocFailAfter = 1 // One unpublished allocation, then refusal.
 		defer func() { qwen35GDNStrictAllocFailAfter = -1 }()
-		err = cb.qwen35SequenceReserveKVLocked(kv, 1, 4096)
+		// Past the first reservation's 256-position chunk, so a new allocation is required.
+		err = cb.qwen35SequenceReserveKVLocked(kv, 1, (qwen35KVReserveChunkPositions+4)*kv.stride())
 	}()
 	var allocation *Qwen35GDNAllocationError
 	if !errors.As(err, &allocation) {

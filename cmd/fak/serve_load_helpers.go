@@ -53,6 +53,12 @@ func serveDenseKQuantOptions(backend compute.Backend) []ggufload.Q4KLoadOption {
 	if serveNativeDenseQ6K(backend) {
 		opts = append(opts, ggufload.WithDenseQ6KResident(true))
 	}
+	if serveNativeDenseQ5K(backend) {
+		opts = append(opts, ggufload.WithDenseQ5KResident(true))
+	}
+	if serveNativeDenseQ3K(backend) {
+		opts = append(opts, ggufload.WithDenseQ3KResident(true))
+	}
 	// Native i-quant weights (05f) stay packed only for a device backend admitting the raw dtype.
 	if backend.Caps().DeviceMemory && backend.Caps().UploadDtype {
 		supports := func(dt compute.Dtype) bool { return compute.BackendSupportsDeviceWeightDtype(backend, dt) }
@@ -77,6 +83,31 @@ func serveNativeDenseQ6K(backend compute.Backend) bool {
 		return native.SupportsQ6KMatMul()
 	}
 	return true
+}
+
+// serveNativeDenseQ5K is serveNativeDenseQ6K's Q5_K twin: exact dtype probe plus the optional
+// SupportsQ5KMatMul execution probe (a Vulkan bundle without its Q5_K shader stays on Q8).
+func serveNativeDenseQ5K(backend compute.Backend) bool {
+	if backend == nil || !backend.Caps().DeviceMemory || !backend.Caps().UploadDtype ||
+		!compute.BackendSupportsDeviceWeightDtype(backend, compute.Q5_K) {
+		return false
+	}
+	if native, ok := backend.(interface{ SupportsQ5KMatMul() bool }); ok {
+		return native.SupportsQ5KMatMul()
+	}
+	return true
+}
+
+// serveNativeDenseQ3K admits packed dense Q3_K (a mixed UD artifact's Q3_K FFN layers) only on a
+// device backend that uploads the Q3_K dtype AND passes the Q3_K execution probe, the same pair
+// serveArtifactNativeKQuant demands for a whole-Q3_K artifact.
+func serveNativeDenseQ3K(backend compute.Backend) bool {
+	if backend == nil || !backend.Caps().DeviceMemory || !backend.Caps().UploadDtype ||
+		!compute.BackendSupportsDeviceWeightDtype(backend, compute.Q3_K) {
+		return false
+	}
+	native, ok := backend.(interface{ SupportsQ3KMatMul() bool })
+	return ok && native.SupportsQ3KMatMul()
 }
 
 func serveArtifactNativeKQuant(backend compute.Backend, artifact ggufload.ArtifactQuant) bool {
@@ -306,8 +337,8 @@ func serveLoadCPUOffloadArmFromWeightSource(ws *ggufload.WeightSource, cpuOffloa
 }
 
 // serveQwen38Q4KEmbeddingResident limits packed Q4_K embedding residency to the
-// exact Qwen3.8-27B artifact on a path that consumes bounded embedding rows. Metal
-// gathers rows on the host; CUDA's sequence path accepts the same host-gathered
+// pinned Qwen3.8-27B Q4_K_M (Metal, CUDA) and UD-Q4_K_M (CUDA) artifacts on a path
+// that consumes bounded embedding rows. Metal gathers rows on the host; CUDA's sequence path accepts the same host-gathered
 // [tokens,hidden] panel and decode uploads one row. Other artifacts and backends
 // retain the loader's default F32 embedding.
 func serveQwen38Q4KEmbeddingResident(backend compute.Backend, ggufPath string, residentQ4K bool) bool {
@@ -317,7 +348,9 @@ func serveQwen38Q4KEmbeddingResident(backend compute.Backend, ggufPath string, r
 		rows, ok := backend.(compute.Qwen35SequenceEmbeddingRowsBackend)
 		nativeCUDA = ok && rows.Qwen35SequenceEmbeddingRowsPath() == compute.Qwen35SequenceEmbeddingRowsPath
 	}
-	return residentQ4K && (nativeMetal || nativeCUDA) && isWitnessedQwen38Q4KM(ggufPath)
+	// The UD-Q4_K_M pin is admitted on the CUDA row path only; Metal keeps the Q4_K_M witness.
+	return residentQ4K && ((nativeMetal && isWitnessedQwen38Q4KM(ggufPath)) ||
+		(nativeCUDA && isWitnessedQwen38Q4KEmbeddingArtifact(ggufPath)))
 }
 
 // serveQwen38Q2KEmbeddingResident limits packed Q2_K embedding residency to the

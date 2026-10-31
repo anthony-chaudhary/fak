@@ -294,6 +294,11 @@ func observeCUDANVCC(ctx context.Context, tc *Toolchain, run cudaCommandRunner) 
 	if err != nil {
 		return CUDANVCCIdentity{}, fmt.Errorf("%w: %v", ErrCUDAProvenanceInvalid, err)
 	}
+	// A distro toolkit often reaches nvcc through a symlink (/usr/bin/nvcc);
+	// digest the resolved driver, since the stable-file hash refuses links.
+	if absNVCC, err = filepath.EvalSymlinks(absNVCC); err != nil {
+		return CUDANVCCIdentity{}, fmt.Errorf("%w: resolve nvcc symlink: %v", ErrCUDAProvenanceInvalid, err)
+	}
 	sha, _, err := stableRegularFileSHA256(absNVCC, "nvcc executable")
 	if err != nil {
 		return CUDANVCCIdentity{}, fmt.Errorf("%w: %v", ErrCUDAProvenanceInvalid, err)

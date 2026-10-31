@@ -159,6 +159,25 @@ func isWitnessedQwen38Q4KM(path string) bool {
 		strings.EqualFold(filepath.Base(path), "Qwen3.8-27B-Q4_K_M.gguf")
 }
 
+// qwen38UDQ4KMArtifactBytes is the exact byte size of the Unsloth Qwen3.8-27B-UD-Q4_K_M.gguf
+// artifact (sha256 322e194f...3482, 866 tensors) whose CUDA serve plan expanded the Q4_K
+// token_embd [248320,5120] to 4.736 GiB of F32. Paired with the exact filename like the other
+// pins, so a renamed or truncated file is never admitted by coincidence.
+const qwen38UDQ4KMArtifactBytes int64 = 16464440224
+
+func isWitnessedQwen38UDQ4KM(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Size() == qwen38UDQ4KMArtifactBytes &&
+		strings.EqualFold(filepath.Base(path), "Qwen3.8-27B-UD-Q4_K_M.gguf")
+}
+
+// isWitnessedQwen38Q4KEmbeddingArtifact names the pinned Qwen3.8-27B artifacts whose
+// token_embd.weight is Q4_K and may stay packed for bounded row gathers. The loader's
+// validateResidentQ4KEmbedding still refuses a table that is not Q4_K.
+func isWitnessedQwen38Q4KEmbeddingArtifact(path string) bool {
+	return isWitnessedQwen38Q4KM(path) || isWitnessedQwen38UDQ4KM(path)
+}
+
 // qwen38UDQ2KXLArtifactBytes is the exact byte size of the canonical upstream
 // Qwen3.8-27B-UD-Q2_K_XL.gguf artifact (9,828,981,664 bytes) pinned in #11961.
 // The gate pairs the size with the exact filename so a renamed or truncated file
