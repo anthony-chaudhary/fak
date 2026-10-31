@@ -483,16 +483,23 @@ func (s *Session) supportsRoutedExpertKQuant() bool {
 // staged as, or ok=false when no device representation exists. It mirrors the tier dispatch in
 // expertSwiGLUHAL's resident() closure: a resident Q4_K tensor is compute.Q4_K, a resident
 // k-quant is the dtype its registered HAL descriptor names, and a checkpoint-served projection
-// carries its own device dtype. A k-quant whose kind is unregistered (or not HAL-capable) has
-// no device representation and reports ok=false so admission fails closed rather than panic.
+// carries its own device dtype. IQ2's registered raw representation is admitted only through
+// supportsExpertWeight's explicit backend probe, without changing the generic registry.
+// Other unregistered/non-HAL k-quants report ok=false rather than panicking inside staging.
 func (w expertWeight) deviceDtype() (compute.Dtype, bool) {
 	switch {
 	case w.q4 != nil:
 		return compute.Q4_K, true
 	case w.kq != nil:
 		desc, ok := LookupQuantDescriptor(w.kq.kind)
-		if !ok || !desc.SupportsHAL() || desc.Dtype() == 0 {
+		if !ok || desc.Dtype() == 0 {
 			return 0, false
+		}
+		if !desc.SupportsHAL() {
+			dt, raw := rawIQDenseHALDtypeFor(w.kq)
+			if !raw || (dt != compute.IQ2_XXS && dt != compute.IQ2_XS) {
+				return 0, false
+			}
 		}
 		return desc.Dtype(), true
 	case w.ck != nil:
@@ -527,6 +534,11 @@ func (s *Session) supportsExpertWeight(w expertWeight) bool {
 	dt, ok := w.deviceDtype()
 	if !ok {
 		return false
+	}
+	// Newly admitted native IQ2 experts require a concrete per-dtype promise;
+	// the legacy marker cannot establish raw storage/kernel compatibility.
+	if dt == compute.IQ2_XXS || dt == compute.IQ2_XS {
+		return compute.BackendSupportsDeviceWeightDtype(s.Backend, dt)
 	}
 	if _, typed := s.Backend.(compute.KQuantDeviceKernel); typed {
 		return compute.BackendSupportsDeviceWeightDtype(s.Backend, dt)
@@ -594,10 +606,11 @@ func (s *Session) resolveExpertWeight(name string) (expertWeight, bool) {
 	if qt := s.M.kqw[name]; qt != nil {
 		// Demand and prefetch may stage only the formats weightHALKQuant supports.
 		// Other packed residents execute through the native host path.
-		if !SupportsHALKQuant(qt.kind) {
+		w := expertWeight{name: name, kq: qt}
+		if _, ok := w.deviceDtype(); !ok {
 			return expertWeight{}, false
 		}
-		return expertWeight{name: name, kq: qt}, true
+		return w, true
 	}
 	ck, ok := s.M.expertCheckpoint.stagingForBackend(name, s.Backend)
 	if !ok {
