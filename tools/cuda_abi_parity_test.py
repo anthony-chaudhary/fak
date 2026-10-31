@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import cuda_abi_parity as m
@@ -202,7 +203,7 @@ class TestCollectIncludes(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
-        for rel in (*m.KERNELS, *m.BINDINGS):
+        for rel in (*m.KERNELS, *m.KERNEL_LEAVES, *m.BINDINGS):
             self.write(rel, "// seam fixture\n")
         for rel in m.HEADERS[1:]:
             self.write(rel, "// modular ABI fixture\n")
@@ -484,6 +485,84 @@ class TestAgainstRealTree(unittest.TestCase):
                          msg=f"CUDA ABI drifted: {payload.get('corpus', {}).get('hard')}")
         self.assertEqual(payload["corpus"]["hard_mismatches"], 0)
         self.assertGreaterEqual(payload["corpus"]["n_declared"], 31)
+
+
+class CandidateABI(unittest.TestCase):
+    def test_existing_fcuda_behavior(self):
+        self.assertEqual(m.header_decls('int fcuda_old(void);'), {'fcuda_old'})
+        self.assertEqual(m.kernel_defs('extern "C" int fcuda_old(void) {return 0;}'), {'fcuda_old'})
+        self.assertEqual(m.binding_calls('C.fcuda_old()'), {'fcuda_old'})
+        self.assertEqual(m.binding_preamble_decls('/* extern int fcuda_old(void); */\nimport "C"'), {'fcuda_old'})
+
+    def test_explicit_symbols_and_plain_preamble(self):
+        for sym in m.CANDIDATE_SYMBOLS:
+            with self.subTest(sym=sym):
+                h = f'int {sym}(void);'
+                k = f'extern "C" int {sym}(void) {{return 0;}}'
+                g = f'/* {h} */\nimport "C"\nfunc f() {{ C.{sym}() }}'
+                self.assertEqual(m.header_decls(h), {sym})
+                self.assertEqual(m.kernel_defs(k), {sym})
+                self.assertEqual(m.binding_preamble_decls(g), {sym})
+                self.assertFalse(m.parity({sym}, {sym}, {sym})['hard'])
+                self.assertFalse(m.candidate_arity_errors('', k, {'binding.go': g}))
+        self.assertFalse(m.header_decls('int fak_unrelated(void);'))
+        self.assertFalse(m.header_decls('int fak_flashmla_prefill_launch(int);'))
+
+    def test_symbol_mismatches_fail(self):
+        sym = 'fak_v41_engram_run'
+        for d, k, c in [({sym}, set(), set()), (set(), {sym}, set()), (set(), set(), {sym})]:
+            self.assertTrue(m.parity(d, k, c)['hard'])
+
+    def test_arity_and_nested_go_casts(self):
+        sym = 'fak_v41_engram_input'
+        h = f'int {sym}(const float *, uint64_t);'
+        k = f'extern "C" int {sym}(const float *p, uint64_t n) {{return 0;}}'
+        g = f'/* {h} */\nimport "C"\nfunc f() {{ C.{sym}((*C.float)(p), C.uint64_t(n)) }}'
+        self.assertFalse(m.candidate_arity_errors(h, k, {'binding.go': g}))
+        self.assertTrue(m.candidate_arity_errors(h, k.replace(', uint64_t n', ''), {}))
+        self.assertTrue(m.candidate_arity_errors(h, k, {'binding.go': g.replace(', C.uint64_t(n)', '')}))
+
+    def test_async_local_prototype(self):
+        sym = 'fcuda_q4k_qkv_async_f32'
+        k = f'extern "C" int {sym}(const float *x, size_t n) {{return 0;}}'
+        g = f'/* int {sym}(const float *, size_t); */\nimport "C"\nfunc f() {{ C.{sym}((*C.float)(x), C.size_t(n)) }}'
+        self.assertEqual(m.binding_preamble_decls(g), {sym})
+        self.assertFalse(m.candidate_arity_errors('', k, {'async.go': g}))
+        self.assertIn('internal/compute/cuda_q4k_qkv_async.go', m.BINDINGS)
+        self.assertIn('internal/compute/cuda_q4k_async_owner.go', m.BINDINGS)
+
+    def test_argument_delimiters_and_trailing_comma(self):
+        sym = 'fak_v41_engram_input'
+        h = f'int {sym}(const float *, uint64_t);'
+        for args in ('(([x)), y', '((x), y'):
+            with self.subTest(args=args):
+                errors = m.candidate_arity_errors(h, '', {'x.go': f'C.{sym}({args})'})
+                self.assertTrue(any('unsupported' in e for e in errors))
+        self.assertFalse(m.candidate_arity_errors(h, '', {'x.go': f'C.{sym}(\n(*C.float)(x),\nC.uint64_t(n),\n)'}))
+
+    def test_body_call_is_not_a_plain_prototype(self):
+        text = '/* static int helper(void) { return fcuda_q4k_qkv_async_finish(); } */\nimport "C"'
+        self.assertFalse(m.binding_preamble_decls(text))
+
+    def test_incomplete_source_is_audit_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            payload = m.collect(Path(d))
+            self.assertFalse(payload['ok'])
+            self.assertEqual(payload['verdict'], 'AUDIT_ERROR')
+            self.assertIn('cuda_flashmla_sparse_prefill.cu', payload['reason'])
+            self.assertIn('cuda_q4k_qkv_async.go', payload['reason'])
+
+    def test_leaf_scope_and_missing_leaf(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / 'leaf.cu').write_text('#include "donor/absent.cuh"\nextern "C" int fak_v41_engram_state(void) {return 0;}')
+            with patch.object(m, 'KERNELS', ()), patch.object(m, 'KERNEL_LEAVES', ('leaf.cu',)):
+                text, errors = m._read_kernel_sources(root)
+                self.assertFalse(errors)
+                self.assertIn('fak_v41_engram_state', m.kernel_defs(text))
+                (root / 'leaf.cu').unlink()
+                self.assertEqual(m._read_kernel_sources(root)[1], ['leaf.cu'])
+
 
 
 if __name__ == "__main__":

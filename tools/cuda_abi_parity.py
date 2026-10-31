@@ -35,7 +35,13 @@ portable fixed-width / size types must bring their own standard header in
 each ABI header, not arrive accidentally through nvcc or a platform-specific transitive
 include. That is the cheap sentinel for the uint8_t-class CUDA portability bug.
 
-This is global symbol-set parity, not a C/C++ parser: signature compatibility,
+Explicit ring, FlashMLA and Engram C APIs and Q4 async bindings are also enrolled.
+The original kernel roots retain recursive quoted-include discovery. Dedicated
+FlashMLA translation units are mandatory direct ABI leaves: their compiler-root
+donor includes are NOT audited or compiled. Missing roots/leaves fail the audit.
+Candidate parameter/call arity is checked, not C/C++ type compatibility.
+
+This is enrolled symbol-set parity, not a C/C++ parser: signature compatibility,
 duplicate definitions, and each cgo preamble's visibility still require compilation.
 
 Defect classes:
@@ -74,11 +80,19 @@ HEADER = "internal/compute/cuda_backend.h"
 # Dense WKV definitions span the generic bridge and a dedicated translation unit;
 # enroll its actual header, source and bindings rather than exempting its exports.
 HEADERS = (HEADER, "internal/compute/cuda_kv_precision.h", "internal/compute/cuda_mxfp8_cast.h",
-           "internal/compute/cuda_deepgemm_wkv.h")
+           "internal/compute/cuda_deepgemm_wkv.h",
+           "internal/compute/cuda_flashmla_sparse_decode.h",
+           "internal/compute/cuda_flashmla_sparse_decode_owner.h",
+           "internal/compute/cuda_flashmla_sparse_prefill.h")
 HEADERS_LABEL = ", ".join(HEADERS)
 KERNELS = ("internal/compute/cuda_kernels.cu", "internal/compute/cuda_nccl.cu",
            "internal/compute/cuda_nccl_pg.cu", "internal/compute/cuda_deepgemm_wkv.cu")
-KERNELS_LABEL = ", ".join(KERNELS)
+# Dedicated donor TUs define their C seam directly. Their quoted donor includes
+# use compiler include roots, not repository-relative paths. Read these exact
+# files as ABI leaves; this is not a donor compilation/include-closure audit.
+KERNEL_LEAVES = ("internal/compute/cuda_flashmla_sparse_decode.cu",
+                 "internal/compute/cuda_flashmla_sparse_prefill.cu")
+KERNELS_LABEL = ", ".join(KERNELS + KERNEL_LEAVES)
 BINDINGS = (
     "internal/compute/cuda.go",
     "internal/compute/cuda_collective.go",
@@ -88,13 +102,31 @@ BINDINGS = (
     "internal/compute/cuda_q4k_qkv_qualification.go",
     "internal/compute/cuda_deepgemm_wkv.go",
     "internal/compute/cuda_deepgemm_wkv_witness.go",
+    "internal/compute/cuda_q4k_qkv_async.go",
+    "internal/compute/cuda_q4k_async_owner.go",
+    "internal/compute/cuda_v41_compressor.go",
+    "internal/compute/cuda_v41_compressor_pending_binding.go",
+    "internal/compute/cuda_v41_engram_gate.go",
+    "internal/compute/cuda_flashmla_decode_qualification.go",
+    "internal/compute/cuda_flashmla_sparse_prefill.go",
 )
 BINDINGS_LABEL = ", ".join(BINDINGS)
 
 # A CUDA-seam symbol: the `fcuda_` prefix plus a tail that MAY carry an uppercase
 # suffix (fcuda_f32_to_f16_T). A prefix-only `[a-z0-9_]+` class silently truncates the
 # `_T` and would mis-pair the symbol — the first correctness trap of this checker.
-SYM = r"fcuda_[A-Za-z0-9_]+"
+# Explicit candidate ABI only: do not sweep every fak_* helper into this gate.
+# The C++-only prefill_launch helper is deliberately outside the C/CGo seam.
+CANDIDATE_SYMBOLS = (
+    "fak_v41_compressor_ring_store_f32", "fak_v41_compressor_ring_store_pending_f32",
+    "fak_v41_engram_state", "fak_v41_engram_input", "fak_v41_engram_run",
+    "fak_v41_engram_readback", "fak_flashmla_decode_host",
+    "fak_flashmla_decode_launch", "fak_flashmla_decode_nosplit_launch",
+    "fak_flashmla_decode_workspace_query", "fak_flashmla_prefill_host",
+    "fak_flashmla_prefill_run", "fak_flashmla_prefill_observe",
+    "fak_flashmla_prefill_kernel_info",
+)
+SYM = r"(?:fcuda_[A-Za-z0-9_]+|" + "|".join(CANDIDATE_SYMBOLS) + r")"
 # A header PROTOTYPE / call: a `fcuda_name(` (name immediately followed by `(`, modulo
 # whitespace). Comments are stripped first (see strip_comments), so this matches real
 # declarations, not prose mentions.
@@ -114,6 +146,9 @@ _CALL_RE = re.compile(rf"\bC\.({SYM})\b")
 # preamble instead of an ABI header; cgo compiles that preamble as the declaration surface
 # for the translation unit, so these are real prototypes the linker sees.
 _PREAMBLE_DECL_RE = re.compile(rf"\bextern\s+(?:const\s+)?[A-Za-z_]\w*\s*\**\s*({SYM})\s*\([^;{{}}]*\)\s*;")
+_PLAIN_CANDIDATE_SYM = r"(?:fcuda_q4k_qkv_[A-Za-z0-9_]+|" + "|".join(CANDIDATE_SYMBOLS) + r")"
+_PLAIN_PREAMBLE_DECL_RE = re.compile(
+    rf"(?:^|(?<=;))\s*(?:int|unsigned\s+long\s+long)\s+({_PLAIN_CANDIDATE_SYM})\s*\([^;{{}}]*\)\s*;", re.MULTILINE)
 # The cgo preamble itself: the /* … */ block directly preceding import "C". Go treats it as
 # a comment, so it must be recovered from the RAW text before comment stripping.
 _CGO_PREAMBLE_RE = re.compile(r'/\*(.*)\*/\s*import\s+"C"', re.DOTALL)
@@ -236,7 +271,75 @@ def binding_preamble_decls(text: str) -> set[str]:
     for m in _CGO_PREAMBLE_RE.finditer(text):
         body = strip_comments(m.group(1))
         decls.update(x.group(1) for x in _PREAMBLE_DECL_RE.finditer(body))
+        decls.update(x.group(1) for x in _PLAIN_PREAMBLE_DECL_RE.finditer(body))
     return decls
+
+
+def candidate_arity_errors(headers: str, kernels: str, bindings: dict[str, str]) -> list[str]:
+    """Count only flat candidate ABI parameters and balanced Go call arguments.
+
+    This does not compare types, evaluate build tags, or prove per-preamble header
+    visibility. It catches dropped arguments without pretending to be a compiler.
+    Unsupported/unbalanced candidate syntax fails closed rather than disappearing.
+    """
+    selected = set(CANDIDATE_SYMBOLS)
+    selected.update(re.findall(r"\bfcuda_q4k_qkv_[A-Za-z0-9_]+", headers + kernels))
+    expected: dict[str, set[int]] = {}
+    errors: list[str] = []
+
+    def count(text: str, start: int, call: bool) -> int | None:
+        stack: list[str] = []
+        closes = {"(": ")", "[": "]", "{": "}"}
+        commas = 0
+        for i in range(start, len(text)):
+            c = text[i]
+            if c in "([{":
+                stack.append(closes[c])
+            elif c in ")]}":
+                if c == ")" and not stack:
+                    body = text[start:i].strip()
+                    if body in ("", "void"):
+                        return 0
+                    if body.endswith(","):
+                        return commas if call else None
+                    return commas + 1
+                if not stack or stack.pop() != c:
+                    return None
+            elif c == "," and not stack:
+                commas += 1
+            elif c in "\"'`":
+                # No selected ABI uses literals as parameters/arguments today.
+                return None
+        return None
+
+    def record(text: str, regex: re.Pattern[str], label: str, call: bool = False) -> None:
+        for m in regex.finditer(text):
+            sym = m.group(1)
+            if sym not in selected:
+                continue
+            opening = text.find("(", m.start(1) + len(sym))
+            n = count(text, opening + 1, call) if opening >= 0 else None
+            if n is None:
+                errors.append(f"unsupported candidate argument syntax: {sym} in {label}")
+            elif call:
+                if sym in expected and expected[sym] != {n}:
+                    errors.append(f"candidate arity mismatch: {sym} call in {label} has {n}, declarations/definitions have {sorted(expected[sym])}")
+            else:
+                expected.setdefault(sym, set()).add(n)
+
+    record(strip_comments(headers), _DECL_RE, "headers")
+    record(strip_comments(kernels), _DEF_RE, "kernels")
+    for rel, text in bindings.items():
+        for m in _CGO_PREAMBLE_RE.finditer(text):
+            record(strip_comments(m.group(1)), _PREAMBLE_DECL_RE, rel)
+            record(strip_comments(m.group(1)), _PLAIN_PREAMBLE_DECL_RE, rel)
+    for sym, counts in sorted(expected.items()):
+        if len(counts) > 1:
+            errors.append(f"candidate arity mismatch: {sym} declarations/definitions have {sorted(counts)}")
+    call_re = re.compile(rf"\bC\.({SYM})\s*\(")
+    for rel, text in bindings.items():
+        record(strip_comments(text), call_re, rel, call=True)
+    return errors
 
 
 def header_includes(text: str) -> set[str]:
@@ -332,6 +435,7 @@ def parity(decls: set[str], defs: set[str], calls: set[str],
 def build_payload(*, workspace: str, decls: set[str], defs: set[str], calls: set[str],
                   header_text: str | None = None, header_texts: dict[str, str] | None = None,
                   preamble_decls: set[str] | None = None,
+                  arity_errors: list[str] | None = None,
                   error: str | None = None) -> dict[str, Any]:
     if error:
         return {"schema": SCHEMA, "ok": False, "verdict": "AUDIT_ERROR",
@@ -346,9 +450,14 @@ def build_payload(*, workspace: str, decls: set[str], defs: set[str], calls: set
                for rel, text in (header_texts or {}).items()}
     hard = list(p["hard"]) + (list(h for report in headers.values() for h in report["hard"])
                               if headers else list(hp["hard"]))
+    hard.extend(arity_errors or [])
     n_hard = len(hard)
     n_soft = len([s for s in p["soft"] if " — OK: " not in s])  # documented-OK don't count as advisory
     corpus = {
+        "scope": {"headers": list(HEADERS), "recursive_kernel_roots": list(KERNELS),
+                  "direct_abi_leaves": list(KERNEL_LEAVES), "bindings": list(BINDINGS),
+                  "candidate_symbols": list(CANDIDATE_SYMBOLS),
+                  "donor_include_closure_checked": False},
         "n_symbols": len(all_decls | defs | calls),
         "n_declared": len(all_decls),
         "preamble_decls": sorted(preamble_decls),
@@ -448,6 +557,17 @@ def _read_sources(root: Path, rels: tuple[str, ...], *, headers_only: bool = Fal
 
 def _read_kernel_sources(root: Path) -> tuple[str, list[str]]:
     texts, errors = _read_sources(root, KERNELS)
+    for rel in KERNEL_LEAVES:
+        path = root / rel
+        try:
+            if not path.resolve(strict=True).is_relative_to(root):
+                raise ValueError("ABI leaf escapes repository")
+            text = path.read_text(encoding="utf-8")
+            if not text:
+                raise ValueError("empty ABI leaf")
+            texts[rel] = text
+        except (OSError, UnicodeError, RuntimeError, ValueError):
+            errors.append(rel)
     return "\n".join(texts.values()), errors
 
 
@@ -471,6 +591,7 @@ def collect(root: Path) -> dict[str, Any]:
     return build_payload(workspace=str(root), decls=header_decls("\n".join(htexts.values())),
                          defs=kernel_defs(ktext), calls=binding_calls(gtext),
                          preamble_decls={s for text in gtexts.values() for s in binding_preamble_decls(text)},
+                         arity_errors=candidate_arity_errors("\n".join(htexts.values()), ktext, gtexts),
                          header_text=htexts.get(HEADER), header_texts=htexts)
 
 
@@ -496,7 +617,8 @@ def render(payload: dict[str, Any]) -> str:
             lines.append(f"  . {s}")
     if not c.get("hard"):
         lines.append("")
-        lines.append("OK - header <-> kernels <-> cgo binding agree on every fcuda_* symbol.")
+        lines.append("OK - enrolled header/kernel/CGo symbols agree; candidate arity checked.")
+    lines.append("Scope: dedicated FlashMLA TUs are direct ABI leaves; donor include closure and compilation are not checked.")
     return "\n".join(lines)
 
 
