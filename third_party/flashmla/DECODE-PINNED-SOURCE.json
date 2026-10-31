@@ -1,0 +1,57 @@
+{
+  "schema": "fak.flashmla.vendor.reconstruction.v1",
+  "flashmla_commit": "2e5429fc5653bab6e081f09477126f731882a6a9",
+  "cutlass_commit": "4faf1a1568cf1e4ad8ff71846a13e16f2a6a6f6b",
+  "files": [
+    {
+      "path": "third_party/flashmla/csrc/cuda_kernels/sm100/decode/sparse/head64/kernel.h",
+      "bytes": 383,
+      "sha256": "ca15c04f7faced779d89408bde272a99573cb5b50f8847c6a01749a97e1429c3"
+    },
+    {
+      "path": "third_party/flashmla/csrc/cuda_kernels/sm100/decode/sparse/head64/config.h",
+      "bytes": 7607,
+      "sha256": "cfe2ed62bfcaeb2d49bb46804fb787e9d1ad89abf550966d880aa1f53f267f6c"
+    },
+    {
+      "path": "third_party/flashmla/csrc/cuda_kernels/sm100/decode/sparse/head64/kernel.cuh",
+      "bytes": 37759,
+      "sha256": "26af7d06f4b16c54b36452c0456dd557bb3b0ee48a8b89930dd446e5864bf137"
+    },
+    {
+      "path": "third_party/flashmla/csrc/cuda_kernels/sm100/dequant_utils.cuh",
+      "bytes": 7338,
+      "sha256": "bbaa14e6b9e99c1ace8cc53546f26354e9f94546944518b790696518521047c7"
+    },
+    {
+      "path": "third_party/flashmla/LICENSE",
+      "bytes": 1065,
+      "sha256": "6c73a30c14a2938abaa6afe98ebb19e6d81dac5bd4ace0cb05c61c20afa37b85"
+    },
+    {
+      "path": "third_party/cutlass/include/cutlass/barrier.h",
+      "bytes": 12432,
+      "sha256": "b4851b644e78dac6089d5300704ffb6cbad15c4ddad4f5bf820a904e1f5ae648"
+    },
+    {
+      "path": "third_party/flashmla/csrc/cuda_kernels/smxx/decode/combine/combine.cu",
+      "bytes": 10554,
+      "sha256": "26588ddb482bcd3636088b2615b17ed1b1d4838766f495a1f7abedcbb12866af"
+    },
+    {
+      "path": "third_party/flashmla/csrc/cuda_kernels/smxx/decode/combine/combine.h",
+      "bytes": 171,
+      "sha256": "2989cf879d3ccb22585869a3a1927657a08e29cae993bb9bb6d40d0261ca6a24"
+    },
+    {
+      "path": "third_party/flashmla/csrc/cuda_kernels/smxx/decode/get_decoding_sched_meta/get_decoding_sched_meta.cu",
+      "bytes": 6990,
+      "sha256": "3f1486182d65781dd351d24e402285f961055dd0674f5ada37dd23d5a0cd9287"
+    },
+    {
+      "path": "third_party/flashmla/csrc/cuda_kernels/smxx/decode/get_decoding_sched_meta/get_decoding_sched_meta.h",
+      "bytes": 179,
+      "sha256": "8cda7a2ae5f7ba72774d7a38367ab4a51b68331806f6914d4fc29ffa0ca9f528"
+    }
+  ]
+}
