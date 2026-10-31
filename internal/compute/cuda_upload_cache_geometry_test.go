@@ -27,6 +27,8 @@ func TestCUDAUploadCacheGeometryHost(t *testing.T) {
 	}
 	var program strings.Builder
 	program.WriteString(cudaUploadGeometryHostFixture)
+	program.Write(cudaUploadGeometryType(t, "cuda_upload.go", "cudaQ8UploadSource"))
+	program.WriteByte('\n')
 	src, fn, fs := cudaUploadGeometryMethod(t, "compute.go", "Tensor", "Numel")
 	program.Write(src[fs.Position(fn.Pos()).Offset:fs.Position(fn.End()).Offset])
 	program.WriteByte('\n')
@@ -60,20 +62,36 @@ func TestCUDAUploadCacheGeometryHost(t *testing.T) {
 			branch = stmt
 			return true
 		})
-		if branch == nil || branch.Else != nil || len(branch.Body.List) != 1 {
+		if branch == nil || branch.Else != nil {
 			t.Fatalf("%s cache-hit boundary changed", route.method)
 		}
-		ret, ok := branch.Body.List[0].(*ast.ReturnStmt)
-		if !ok || len(ret.Results) != 1 {
-			t.Fatalf("%s cache hit is not an immediate return", route.method)
-		}
-		cached, ok := ret.Results[0].(*ast.Ident)
-		if !ok || cached.Name != "cached" {
-			t.Fatalf("%s cache hit no longer returns cached", route.method)
+		returns := 0
+		ast.Inspect(branch.Body, func(node ast.Node) bool {
+			ret, ok := node.(*ast.ReturnStmt)
+			if !ok {
+				return true
+			}
+			returns++
+			if len(ret.Results) != 1 {
+				t.Fatalf("%s cache return changed", route.method)
+			}
+			cached, ok := ret.Results[0].(*ast.Ident)
+			if !ok || cached.Name != "cached" {
+				t.Fatalf("%s cache no longer returns cached", route.method)
+			}
+			return true
+		})
+		if returns != 1 || (route.method != "uploadQ2Resident" && len(branch.Body.List) != 1) {
+			t.Fatalf("%s cache-return boundary changed", route.method)
 		}
 		body := src[fs.Position(branch.Pos()).Offset:fs.Position(branch.End()).Offset]
 		t.Logf("%s/%s cache branch SHA256=%x", route.file, route.method, sha256.Sum256(body))
-		fmt.Fprintf(&program, "func probe%s(t Tensor, store Dtype, hp uintptr) Tensor {\n%s\nreturn Tensor{}\n}\n", route.method, body)
+		prelude := ""
+		if route.method == "uploadQ2Resident" {
+			// Outer admission already validated these immutable descriptor fields.
+			prelude = "out, in := t.Shape[0], t.Shape[1]\nblk, scales := t.Quant.Block, t.Quant.Scale\n"
+		}
+		fmt.Fprintf(&program, "func probe%s(t Tensor, store Dtype, hp uintptr) Tensor {\n%s%s\nreturn Tensor{}\n}\n", route.method, prelude, body)
 	}
 	dir := t.TempDir()
 	probe := filepath.Join(dir, "cache_geometry_test.go")
@@ -154,6 +172,40 @@ func cudaUploadGeometryMethod(t *testing.T, path, receiver, name string) ([]byte
 	return src, found, fs
 }
 
+func cudaUploadGeometryType(t *testing.T, path, name string) []byte {
+	t.Helper()
+	src, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs := token.NewFileSet()
+	file, err := parser.ParseFile(fs, path, src, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found []byte
+	for _, decl := range file.Decls {
+		group, ok := decl.(*ast.GenDecl)
+		if !ok || group.Tok != token.TYPE {
+			continue
+		}
+		for _, spec := range group.Specs {
+			typ, ok := spec.(*ast.TypeSpec)
+			if !ok || typ.Name.Name != name {
+				continue
+			}
+			if found != nil {
+				t.Fatalf("duplicate %s in %s", name, path)
+			}
+			found = append([]byte("type "), src[fs.Position(typ.Pos()).Offset:fs.Position(typ.End()).Offset]...)
+		}
+	}
+	if found == nil {
+		t.Fatalf("missing %s in %s", name, path)
+	}
+	return found
+}
+
 const cudaUploadGeometryHostFixture = `package compute
 
 import (
@@ -169,7 +221,16 @@ type Dtype uint8
 const (F32 Dtype = iota; F16; Q8_0; Q2_0; Q4_K)
 type Layout uint8
 const (RowMajor Layout = iota; ColMajor)
-type Tensor struct { Dtype Dtype; Layout Layout; Shape []int; owner int }
+type QuantSpec struct { Block int; Scale []float32 }
+type Buffer interface { Ready() bool }
+type HostBuffer interface { Buffer; F32() []float32; I8() []int8 }
+type geometryHostBuffer struct { codes []int8 }
+func (*geometryHostBuffer) Ready() bool { return true }
+func (*geometryHostBuffer) F32() []float32 { return nil }
+func (h *geometryHostBuffer) I8() []int8 { return h.codes }
+type cudaBuf struct { hostKeep HostBuffer }
+func (*cudaBuf) Ready() bool { return true }
+type Tensor struct { Dtype Dtype; Layout Layout; Shape []int; Quant *QuantSpec; buf Buffer; owner int }
 type ucKey struct { hp uintptr; dt Dtype; lo Layout }
 var uploadCache map[ucKey]Tensor
 
@@ -190,11 +251,20 @@ func TestCacheGeometry(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// Retain actual host storage; no host pointer is submitted to CUDA.
-			storage := make([]byte, 4096)
+			storage := make([]int8, 4096)
 			hp := uintptr(unsafe.Pointer(&storage[0]))
 			defer runtime.KeepAlive(storage)
 			input := Tensor{Dtype:tc.source, Layout:tc.layout, Shape:slices.Clone(tc.first)}
 			resident := Tensor{Dtype:tc.stored, Layout:tc.layout, Shape:slices.Clone(tc.first), owner:7}
+			if tc.stored == Q2_0 {
+				scales := []float32{1,1,1,1}
+				input.Quant = &QuantSpec{Block:32,Scale:scales}
+				resident.Quant = &QuantSpec{Block:32}
+				resident.buf = &cudaBuf{hostKeep:&cudaQ8UploadSource{
+					HostBuffer:&geometryHostBuffer{codes:storage[:32]}, scales:scales,
+					rows:tc.first[0], cols:tc.first[1], block:32,
+				}}
+			}
 			key := ucKey{hp,tc.stored,tc.layout}
 			uploadCache = map[ucKey]Tensor{key:resident}
 			if got := tc.probe(input,tc.stored,hp); got.owner != resident.owner || !slices.Equal(got.Shape,input.Shape) {

@@ -72,7 +72,8 @@ func (c *cudaBackend) uploadQ8(t Tensor, hb HostBuffer, f []float32, hp uintptr)
 }
 
 // cudaQ8UploadSource retains both immutable host operands and their geometry.
-// A codes address alone does not identify independently supplied Q8 scales.
+// The same retained-source representation also serves packed Q2 uploads.
+// A codes address alone does not identify independently supplied quant scales.
 // Embedding the original owner preserves HostBuffer; Free clears hostKeep.
 type cudaQ8UploadSource struct {
 	HostBuffer
@@ -226,14 +227,23 @@ func (c *cudaBackend) uploadQ2Resident(t Tensor, hb HostBuffer) Tensor {
 		hp = uintptr(unsafe.Pointer(&codes[0]))
 		// Reuse only the same tensor geometry (see uploadClass F32 path).
 		if cached, ok := uploadCache[ucKey{hp, Q2_0, t.Layout}]; ok && cached.Numel() == t.Numel() && slices.Equal(cached.Shape, t.Shape) {
-			return cached
+			buf, ok := cached.buf.(*cudaBuf)
+			if ok && buf != nil && cached.Quant != nil && cached.Quant.Block == blk {
+				if source, ok := buf.hostKeep.(*cudaQ8UploadSource); ok && source != nil &&
+					source.rows == out && source.cols == in && source.block == blk &&
+					len(source.scales) == len(scales) && len(scales) > 0 && &source.scales[0] == &scales[0] {
+					return cached
+				}
+			}
 		}
 	}
 	res, buf := c.devQ2(t.Shape, blk, len(scales))
 	if len(codes) > 0 {
 		cudaUploadQuantPayload(buf, codes, scales)
 		c.accountImmutableWeightUpload(len(codes)+len(scales)*F32.Bytes(), buf)
-		buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, hb, Q2_0, t.Layout
+		buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, &cudaQ8UploadSource{
+			HostBuffer: hb, scales: scales, rows: out, cols: in, block: blk,
+		}, Q2_0, t.Layout
 		uploadCache[ucKey{hp, Q2_0, t.Layout}] = res
 	}
 	return res

@@ -31,8 +31,11 @@ func TestCUDAImmutableWeightUploadReceiptCountsActualCacheMisses(t *testing.T) {
 	residentQ2Host := NewQ2(Default(), []int{1, 32}, make([]byte, 8), []float32{1}, 32)
 	residentQ2 := cb.Upload(residentQ2Host, Q2_0)
 	assertCacheHit("resident Q2", residentQ2, cb.Upload(residentQ2Host, Q2_0))
-	if buf := residentQ2.buf.(*cudaBuf); buf.hostKeep != residentQ2Host.buf {
-		t.Fatalf("resident Q2 upload cache did not retain host owner: got %T, want source HostBuffer", buf.hostKeep)
+	q2Source, ok := residentQ2.buf.(*cudaBuf).hostKeep.(*cudaQ8UploadSource)
+	if !ok || q2Source == nil || q2Source.HostBuffer != residentQ2Host.buf ||
+		q2Source.block != residentQ2Host.Quant.Block || len(q2Source.scales) != len(residentQ2Host.Quant.Scale) ||
+		len(q2Source.scales) == 0 || &q2Source.scales[0] != &residentQ2Host.Quant.Scale[0] {
+		t.Fatal("resident Q2 upload cache did not retain its exact code and scale owners")
 	}
 
 	rawQ4Host := NewQ4K(Default(), []int{1, 256}, make([]byte, 144))
