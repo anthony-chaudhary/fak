@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -18,19 +19,23 @@ func TestCUDACgoEnvLinksWSLDriverLibcuda(t *testing.T) {
 	old := wslCUDADriverDir
 	wslCUDADriverDir = wsl
 	t.Cleanup(func() { wslCUDADriverDir = old })
-	t.Setenv("LIBRARY_PATH", "")
+	t.Setenv("LIBRARY_PATH", "/ambient-must-not-leak")
+	baseEnv := []string{"LIBRARY_PATH=/opt/existing"}
 
 	// No libcuda.so linker name: not WSL, no link search path added.
-	env := SynthesizeCUDACgoEnv(&Toolchain{}, "", false, nil)
+	env := SynthesizeCUDACgoEnv(baseEnv, &Toolchain{}, "", false, nil)
 	if _, ok := env["LIBRARY_PATH"]; ok || strings.Contains(env["CGO_LDFLAGS"], QuoteFlag("-L", wsl)) {
 		t.Fatalf("non-WSL env gained WSL link path: %v", env)
+	}
+
+	if got := cgoBaseEnvValue(MergeEnviron(baseEnv, env), "LIBRARY_PATH"); got != "/opt/existing" {
+		t.Fatalf("non-WSL inheritance=%q", got)
 	}
 
 	if err := os.WriteFile(filepath.Join(wsl, "libcuda.so"), []byte("fixture"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("LIBRARY_PATH", "/opt/existing")
-	env = SynthesizeCUDACgoEnv(&Toolchain{}, "", false, nil)
+	env = SynthesizeCUDACgoEnv(baseEnv, &Toolchain{}, "", false, nil)
 	if !strings.Contains(env["CGO_LDFLAGS"], QuoteFlag("-L", wsl)) {
 		t.Fatalf("CGO_LDFLAGS=%q lacks WSL driver dir", env["CGO_LDFLAGS"])
 	}
@@ -39,9 +44,38 @@ func TestCUDACgoEnvLinksWSLDriverLibcuda(t *testing.T) {
 		t.Fatalf("LIBRARY_PATH=%q want %q", env["LIBRARY_PATH"], want)
 	}
 
-	win := SynthesizeCUDACgoEnv(&Toolchain{IsWindows: true}, "", false, nil)
+	sep := string(os.PathListSeparator)
+	for _, tc := range []struct {
+		name string
+		base []string
+		want string
+	}{
+		{"nil", nil, wsl},
+		{"empty", []string{}, wsl},
+		{"empty-value", []string{"LIBRARY_PATH="}, wsl},
+		{"ordered", []string{"LIBRARY_PATH=" + strings.Join([]string{"", "/first", wsl, "/first", "/last", wsl, ""}, sep)}, wsl + sep + "/first" + sep + "/first" + sep + "/last"},
+		{"last-key", []string{"LIBRARY_PATH=/discard", "malformed", "=ignored", "library_path=/wrong-case", "LIBRARY_PATH=/explicit=equals"}, wsl + sep + "/explicit=equals"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := append([]string(nil), tc.base...)
+			first := SynthesizeCUDACgoEnv(tc.base, &Toolchain{}, "", false, nil)
+			t.Setenv("LIBRARY_PATH", "/different-ambient")
+			second := SynthesizeCUDACgoEnv(tc.base, &Toolchain{}, "", false, nil)
+			if first["LIBRARY_PATH"] != tc.want || second["LIBRARY_PATH"] != tc.want {
+				t.Fatalf("explicit path: first=%q second=%q want=%q", first["LIBRARY_PATH"], second["LIBRARY_PATH"], tc.want)
+			}
+			if len(tc.base) != len(before) || len(before) > 0 && !reflect.DeepEqual(tc.base, before) {
+				t.Fatal("base environment mutated")
+			}
+		})
+	}
+
+	win := SynthesizeCUDACgoEnv(baseEnv, &Toolchain{IsWindows: true}, "", false, nil)
 	if _, ok := win["LIBRARY_PATH"]; ok {
 		t.Fatal("Windows env gained LIBRARY_PATH")
+	}
+	if got := cgoBaseEnvValue(MergeEnviron(baseEnv, win), "LIBRARY_PATH"); got != "/opt/existing" {
+		t.Fatalf("Windows inheritance=%q", got)
 	}
 }
 

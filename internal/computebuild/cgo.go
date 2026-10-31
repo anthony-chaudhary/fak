@@ -78,8 +78,12 @@ func SynthesizeVulkanCgoEnv(tc *Toolchain, pkgDir string) map[string]string {
 	return env
 }
 
-// SynthesizeCUDACgoEnv constructs the environment map required for `go build -tags cuda`.
-func SynthesizeCUDACgoEnv(tc *Toolchain, pkgDir string, enableNCCL bool, rpaths []string) map[string]string {
+// SynthesizeCUDACgoEnv constructs the overlay required for `go build -tags cuda`.
+// baseEnv is the caller-owned child-environment snapshot, also supplied to
+// MergeEnviron. Nil means empty; inheritance never falls back to process state.
+// Exact duplicate keys use the last value, matching MergeEnviron. The snapshot
+// is not modified or included wholesale in the returned overlay.
+func SynthesizeCUDACgoEnv(baseEnv []string, tc *Toolchain, pkgDir string, enableNCCL bool, rpaths []string) map[string]string {
 	env := make(map[string]string)
 	env["CGO_ENABLED"] = "1"
 
@@ -118,7 +122,7 @@ func SynthesizeCUDACgoEnv(tc *Toolchain, pkgDir string, enableNCCL bool, rpaths 
 	if tc != nil && !tc.IsWindows {
 		if dir := wslCUDALinkDir(); dir != "" {
 			ldflags = append(ldflags, QuoteFlag("-L", dir))
-			env["LIBRARY_PATH"] = prependPathList(dir, os.Getenv("LIBRARY_PATH"))
+			env["LIBRARY_PATH"] = prependPathList(dir, cgoBaseEnvValue(baseEnv, "LIBRARY_PATH"))
 		}
 	}
 	if enableNCCL {
@@ -156,7 +160,7 @@ func SynthesizeCUDACgoEnv(tc *Toolchain, pkgDir string, enableNCCL bool, rpaths 
 		for _, path := range toolkit {
 			loader = appendUnique(loader, path)
 		}
-		for _, path := range filepath.SplitList(os.Getenv("LD_LIBRARY_PATH")) {
+		for _, path := range filepath.SplitList(cgoBaseEnvValue(baseEnv, "LD_LIBRARY_PATH")) {
 			loader = appendUnique(loader, path)
 		}
 		env["LD_LIBRARY_PATH"] = strings.Join(loader, string(os.PathListSeparator))
@@ -171,6 +175,17 @@ func SynthesizeCUDACgoEnv(tc *Toolchain, pkgDir string, enableNCCL bool, rpaths 
 	}
 
 	return env
+}
+
+// cgoBaseEnvValue reads only the supplied child-environment snapshot.
+func cgoBaseEnvValue(baseEnv []string, name string) string {
+	for i := len(baseEnv) - 1; i >= 0; i-- {
+		key, value, ok := strings.Cut(baseEnv[i], "=")
+		if ok && key != "" && key == name {
+			return value
+		}
+	}
+	return ""
 }
 
 // wslCUDADriverDir is where WSL2 mounts the host GPU driver's libcuda.so.

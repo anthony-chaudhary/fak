@@ -16,7 +16,7 @@ import (
 // seam, not a replacement parser, native build, or hardware execution.
 // fak-test:runtime fast est=20ms lane=default
 func TestCUDAAcceptanceUsesCanonicalProfileTags(t *testing.T) {
-	for _, profile := range []string{"default", "async", "flash-decode"} {
+	for _, profile := range []string{"default", "async", "flash-decode", "bf16-publish", "compressor", "router", "tail-rope", "v41-composed", "compressor-pool"} {
 		t.Run(profile, func(t *testing.T) {
 			root, _ := cudaFirstLightFixture(t)
 			cfg := &computebuild.CUDAConfig{RepoRoot: root, PkgDir: filepath.Join(root, "internal", "compute"), Arch: "sm_120", ReceiptPath: ".fak/accept-profile.json"}
@@ -27,6 +27,21 @@ func TestCUDAAcceptanceUsesCanonicalProfileTags(t *testing.T) {
 				cfg.EnableQ4KQKVQualification = true
 				cfg.EnableQ4KQKVAsync = true
 				cfg.EnableCaptureOnceQualification = true
+			case "bf16-publish":
+				cfg.EnableV41BF16Publish = true
+			case "compressor":
+				cfg.EnableV41Compressor = true
+			case "router":
+				cfg.EnableV41Router = true
+			case "tail-rope":
+				cfg.EnableV41TailRoPE = true
+			case "v41-composed":
+				cfg.EnableV41BF16Publish = true
+				cfg.EnableV41Compressor = true
+				cfg.EnableV41Router = true
+				cfg.EnableV41TailRoPE = true
+			case "compressor-pool":
+				cfg.EnableV41CompressorPool = true
 			case "flash-decode":
 				cfg.Arch = "sm_100"
 				cfg.EnableArchSpecific = true
@@ -69,6 +84,19 @@ func TestCUDAAcceptanceUsesCanonicalProfileTags(t *testing.T) {
 				}
 				if got := value("-tags"); got != wantTags {
 					t.Fatalf("acceptance profile=%q built=%q args=%v", got, wantTags, args)
+				}
+				// Independent literal-tag checks prevent a matching canonical-builder
+				// regression from silently dropping the same selection on both sides.
+				for tag, selected := range map[string]bool{
+					"fak_cuda_v41_bf16_publish":    cfg.EnableV41BF16Publish,
+					"fak_cuda_v41_compressor":      cfg.EnableV41Compressor,
+					"fak_cuda_v41_compressor_pool": cfg.EnableV41CompressorPool,
+					"fak_cuda_v41_router":          cfg.EnableV41Router,
+					"fak_cuda_v41_tail_rope":       cfg.EnableV41TailRoPE,
+				} {
+					if got := strings.Contains(","+value("-tags")+",", ","+tag+","); got != selected {
+						t.Fatalf("profile=%s emitted %s=%t; want %t", profile, tag, got, selected)
+					}
 				}
 				if value("-count") != "1" {
 					t.Fatal("lost uncached acceptance")

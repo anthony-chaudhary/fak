@@ -710,8 +710,9 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 		}
 		tracker.receipt.Artifact = artifact
 
-		cgoEnv := SynthesizeCUDACgoEnv(cfg.Toolchain, cfg.PkgDir, cfg.EnableNCCL, nil)
-		env := MergeEnviron(os.Environ(), cgoEnv)
+		baseEnv := os.Environ()
+		cgoEnv := SynthesizeCUDACgoEnv(baseEnv, cfg.Toolchain, cfg.PkgDir, cfg.EnableNCCL, nil)
+		env := MergeEnviron(baseEnv, cgoEnv)
 		if len(cfg.Toolchain.VsDevEnv) > 0 {
 			env = MergeEnviron(env, cfg.Toolchain.VsDevEnv)
 		}
@@ -807,8 +808,9 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 		}); err != nil {
 			return err
 		}
-		cgoEnv := SynthesizeCUDACgoEnv(cfg.Toolchain, cfg.PkgDir, cfg.EnableNCCL, nil)
-		env := MergeEnviron(os.Environ(), cgoEnv)
+		baseEnv := os.Environ()
+		cgoEnv := SynthesizeCUDACgoEnv(baseEnv, cfg.Toolchain, cfg.PkgDir, cfg.EnableNCCL, nil)
+		env := MergeEnviron(baseEnv, cgoEnv)
 		if len(cfg.Toolchain.VsDevEnv) > 0 {
 			env = MergeEnviron(env, cfg.Toolchain.VsDevEnv)
 		}
@@ -875,8 +877,9 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 		}); err != nil {
 			return err
 		}
-		cgoEnv := SynthesizeCUDACgoEnv(cfg.Toolchain, cfg.PkgDir, cfg.EnableNCCL, nil)
-		env := MergeEnviron(os.Environ(), cgoEnv)
+		baseEnv := os.Environ()
+		cgoEnv := SynthesizeCUDACgoEnv(baseEnv, cfg.Toolchain, cfg.PkgDir, cfg.EnableNCCL, nil)
+		env := MergeEnviron(baseEnv, cgoEnv)
 		if len(cfg.Toolchain.VsDevEnv) > 0 {
 			env = MergeEnviron(env, cfg.Toolchain.VsDevEnv)
 		}
@@ -906,8 +909,9 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 		}); err != nil {
 			return err
 		}
-		cgoEnv := SynthesizeCUDACgoEnv(cfg.Toolchain, cfg.PkgDir, cfg.EnableNCCL, nil)
-		env := MergeEnviron(os.Environ(), cgoEnv)
+		baseEnv := os.Environ()
+		cgoEnv := SynthesizeCUDACgoEnv(baseEnv, cfg.Toolchain, cfg.PkgDir, cfg.EnableNCCL, nil)
+		env := MergeEnviron(baseEnv, cgoEnv)
 		if len(cfg.Toolchain.VsDevEnv) > 0 {
 			env = MergeEnviron(env, cfg.Toolchain.VsDevEnv)
 		}

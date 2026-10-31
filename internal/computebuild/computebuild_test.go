@@ -235,7 +235,7 @@ func TestCgoEnvFormatting(t *testing.T) {
 		CUDALib:   []string{`C:\Program Files\CUDA\lib\x64`},
 		IsWindows: true,
 	}
-	cudaEnv := SynthesizeCUDACgoEnv(tcCuda, `C:\work\fak\internal\compute`, true, []string{"/usr/lib/wsl/lib"})
+	cudaEnv := SynthesizeCUDACgoEnv(nil, tcCuda, `C:\work\fak\internal\compute`, true, []string{"/usr/lib/wsl/lib"})
 	if cudaEnv["CGO_ENABLED"] != "1" {
 		t.Errorf("expected CGO_ENABLED=1, got %q", cudaEnv["CGO_ENABLED"])
 	}

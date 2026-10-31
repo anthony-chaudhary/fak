@@ -480,6 +480,13 @@ func cudaLaunchTimingName(path, launch, kernel string) string {
 		"cuda/q4k_mmvq.cuh:mul_mat_vec_q<1>":                                                                         "k_q4k_mmvq_gemv",
 		"cuda/q4k_mmvq.cuh:mul_mat_vec_q<2>":                                                                         "k_q4k_mmvq_gemv",
 		"cuda/q4k_mmvq.cuh:mul_mat_vec_q<3>":                                                                         "k_q4k_mmvq_gemv",
+		"cuda/q8_mmq.cuh:mul_mat_q<J,fallback>":                                                                      "q8_mul_mat_q",
+		"cuda/q8_mmq.cuh:mul_mat_q_stream_k_fixup<J,fallback>":                                                       "q8_mul_mat_q_stream_k_fixup",
+		"cuda/q4k_shared_input.cuh:mul_mat_vec_q<1>":                                                                 "k_q4k_mmvq_gemv",
+		"cuda/q2k_mmq.cuh:mul_mat_q<J,fallback>":                                                                     "q2_mul_mat_q",
+		"cuda/q2k_mmq.cuh:mul_mat_q_stream_k_fixup<J,fallback>":                                                      "q2_mul_mat_q_stream_k_fixup",
+		"cuda/q3k_mmq.cuh:mul_mat_q<J,fallback>":                                                                     "q3_mul_mat_q",
+		"cuda/q3k_mmq.cuh:mul_mat_q_stream_k_fixup<J,fallback>":                                                      "q3_mul_mat_q_stream_k_fixup",
 		"cuda/quant_matmul.cuh:k_q5k_gemm<4>":                                                                        "k_q5k_gemm_panel",
 		"cuda/quant_matmul.cuh:k_q6k_gemm<4>":                                                                        "k_q6k_gemm_panel",
 		"cuda/q4k_fp8lt.cuh:amax<true>":                                                                              "q4k_fp8lt_weight_amax",
@@ -520,6 +527,19 @@ func TestCUDATimestampSemanticAliases(t *testing.T) {
 		name, path, src string
 		want            bool
 	}{
+		{"q8 mul_mat_q", "cuda/q8_mmq.cuh", `FCUDA_TS("q8_mul_mat_q", grid, mul_mat_q<J, fallback><<<grid, block>>>(x));`, true},
+		{"q8 mul_mat_q_stream_k_fixup", "cuda/q8_mmq.cuh", `FCUDA_TS("q8_mul_mat_q_stream_k_fixup", grid, mul_mat_q_stream_k_fixup<J, fallback><<<grid, block>>>(x));`, true},
+		{"q8 wrong source", "cuda/other.cuh", `FCUDA_TS("q8_mul_mat_q", grid, mul_mat_q<J, fallback><<<grid, block>>>(x));`, false},
+		{"shared q4", "cuda/q4k_shared_input.cuh", `FCUDA_TS("k_q4k_mmvq_gemv", grid, mul_mat_vec_q<1><<<grid, block>>>(x));`, true},
+		{"shared q4 wrong specialization", "cuda/q4k_shared_input.cuh", `FCUDA_TS("k_q4k_mmvq_gemv", grid, mul_mat_vec_q<2><<<grid, block>>>(x));`, false},
+		{"q2 mul_mat_q", "cuda/q2k_mmq.cuh", `FCUDA_TS("q2_mul_mat_q", grid, mul_mat_q<J, fallback><<<grid, block>>>(x));`, true},
+		{"q2 mul_mat_q_stream_k_fixup", "cuda/q2k_mmq.cuh", `FCUDA_TS("q2_mul_mat_q_stream_k_fixup", grid, mul_mat_q_stream_k_fixup<J, fallback><<<grid, block>>>(x));`, true},
+		{"q2 wrong source", "cuda/other.cuh", `FCUDA_TS("q2_mul_mat_q", grid, mul_mat_q<J, fallback><<<grid, block>>>(x));`, false},
+		{"q2 wrong specialization", "cuda/q2k_mmq.cuh", `FCUDA_TS("q2_mul_mat_q", grid, mul_mat_q<1, fallback><<<grid, block>>>(x));`, false},
+		{"q3 mul_mat_q", "cuda/q3k_mmq.cuh", `FCUDA_TS("q3_mul_mat_q", grid, mul_mat_q<J, fallback><<<grid, block>>>(x));`, true},
+		{"q3 mul_mat_q_stream_k_fixup", "cuda/q3k_mmq.cuh", `FCUDA_TS("q3_mul_mat_q_stream_k_fixup", grid, mul_mat_q_stream_k_fixup<J, fallback><<<grid, block>>>(x));`, true},
+		{"q3 wrong source", "cuda/other.cuh", `FCUDA_TS("q3_mul_mat_q", grid, mul_mat_q<J, fallback><<<grid, block>>>(x));`, false},
+		{"q3 wrong specialization", "cuda/q3k_mmq.cuh", `FCUDA_TS("q3_mul_mat_q", grid, mul_mat_q<1, fallback><<<grid, block>>>(x));`, false},
 		{"panel", "cuda/quant_matmul.cuh", `FCUDA_TS("k_q5k_gemm_panel", grid, k_q5k_gemm<4><<<grid, block>>>(x));`, true},
 		{"panel whitespace", "cuda/quant_matmul.cuh", `FCUDA_TS("k_q6k_gemm_panel", grid, k_q6k_gemm < 4 > <<<grid, block>>>(x));`, true},
 		{"ordinary template", "cuda/quant_matmul.cuh", `FCUDA_TS("k_q5k_gemm", grid, k_q5k_gemm<1><<<grid, block>>>(x));`, true},
@@ -567,6 +587,108 @@ func cudaEnclosingFunc(src string, at int) string {
 	return fn
 }
 
+// cudaAsyncTimingName reads the actual transfer direction, not the enclosing
+// filename. Unknown directions and unsupported argument syntax fail closed.
+// Input starts after the call's opening parenthesis; source comments are stripped.
+func cudaAsyncTimingName(call, src string) (string, bool) {
+	var args []string
+	var stack []rune
+	start := 0
+	appendArg := func(end int) bool {
+		arg := strings.TrimSpace(src[start:end])
+		if arg == "" {
+			return false
+		}
+		args = append(args, arg)
+		return true
+	}
+	for i, ch := range src {
+		switch ch {
+		case '\'', '"', ';':
+			return "", false
+		case '(', '[', '{':
+			stack = append(stack, ch)
+		case ')', ']', '}':
+			if len(stack) > 0 {
+				open := stack[len(stack)-1]
+				if !(open == '(' && ch == ')' || open == '[' && ch == ']' || open == '{' && ch == '}') {
+					return "", false
+				}
+				stack = stack[:len(stack)-1]
+				continue
+			}
+			if ch != ')' || !appendArg(i) {
+				return "", false
+			}
+			if call == "cudaMemsetAsync" {
+				return "fill", len(args) == 4
+			}
+			if call != "cudaMemcpyAsync" || len(args) != 5 {
+				return "", false
+			}
+			name, ok := map[string]string{
+				"cudaMemcpyDeviceToDevice": "d2d_copy",
+				"cudaMemcpyHostToDevice":   "h2d_upload",
+				"cudaMemcpyDeviceToHost":   "readback",
+			}[args[3]]
+			return name, ok
+		case ',':
+			if len(stack) == 0 {
+				if !appendArg(i) {
+					return "", false
+				}
+				start = i + 1
+			}
+		}
+	}
+	return "", false
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestCUDAAsyncTimestampDirections(t *testing.T) {
+	for _, tc := range []struct {
+		call, src, want string
+		valid           bool
+	}{
+		{"cudaMemcpyAsync", "dst, src, bytes, cudaMemcpyDeviceToDevice, stream)", "d2d_copy", true},
+		{"cudaMemcpyAsync", "(char *)dst + offsets[i], src[i], sizes[i], cudaMemcpyDeviceToHost, stream)", "readback", true},
+		{"cudaMemcpyAsync", "dst, src, size(a, b), cudaMemcpyHostToDevice, stream)", "h2d_upload", true},
+		{"cudaMemsetAsync", "dst, 0, bytes, stream)", "fill", true},
+		{"cudaMemcpyAsync", "dst[), src, bytes, cudaMemcpyDeviceToHost, stream)", "", false},
+		{"cudaMemcpyAsync", "dst, src, size(a, bytes, cudaMemcpyDeviceToHost, stream)", "", false},
+		{"cudaMemcpyAsync", "dst,,bytes,cudaMemcpyDeviceToHost,stream)", "", false},
+		{"cudaMemcpyAsync", "dst, src, bytes, cudaMemcpyDefault, stream)", "", false},
+		{"cudaMemcpyAsync", "dst, src, bytes, direction, stream)", "", false},
+		{"cudaMemcpyAsync", "dst, src, bytes, cudaMemcpyDeviceToHost)", "", false},
+		{"cudaMemcpyAsync", "dst, src, bytes, cudaMemcpyHostToDevice, stream", "", false},
+	} {
+		got, valid := cudaAsyncTimingName(tc.call, tc.src)
+		if got != tc.want || valid != tc.valid {
+			t.Fatalf("%s(%s: got %q/%v, want %q/%v", tc.call, tc.src, got, valid, tc.want, tc.valid)
+		}
+	}
+	for _, tc := range []struct {
+		src  string
+		want bool
+	}{
+		{`FCUDA_TS("h2d_upload", grid, cudaMemcpyAsync(dst, src, bytes, cudaMemcpyHostToDevice, stream));`, true},
+		{`FCUDA_TS("readback", grid, cudaMemcpyAsync(dst, src, bytes, cudaMemcpyDeviceToHost, stream));`, true},
+		{`FCUDA_TS("d2d_copy", grid, cudaMemcpyAsync(dst, src, bytes, cudaMemcpyDeviceToHost, stream));`, false},
+		{`cudaMemcpyAsync(dst, src, bytes, cudaMemcpyHostToDevice, stream);`, false},
+		{`FCUDA_TS("h2d_upload", grid, noop()); cudaMemcpyAsync(dst, src, bytes, cudaMemcpyHostToDevice, stream);`, false},
+	} {
+		m := cudaAsyncCopy.FindStringSubmatchIndex(tc.src)
+		if m == nil {
+			t.Fatal("missing fixture transfer")
+		}
+		name, valid := cudaAsyncTimingName(tc.src[m[2]:m[3]], tc.src[m[1]:])
+		if got := valid && cudaTSEnclosing(tc.src, m[0]) == name; got != tc.want {
+			t.Fatalf("transfer timing accepted=%v want=%v: %s", got, tc.want, tc.src)
+		}
+	}
+
+}
+
 // cudaUntimedTransferSites lists the async copies that run outside the event
 // ring: a peer device's copy on the multi-GPU path (the profile keeps one device).
 var cudaUntimedTransferSites = map[string]bool{
@@ -609,7 +731,11 @@ func TestCUDATimestampSourceCoversEveryLaunch(t *testing.T) {
 		for _, m := range cudaAsyncCopy.FindAllStringSubmatchIndex(src, -1) {
 			async++
 			call, got := src[m[2]:m[3]], cudaTSEnclosing(src, m[0])
-			want := map[string]string{"cudaMemcpyAsync": "d2d_copy", "cudaMemsetAsync": "fill"}[call]
+			want, valid := cudaAsyncTimingName(call, src[m[1]:])
+			if !valid {
+				t.Errorf("%s:%d %s has no supported timestamp transfer direction", path, at(src, m[0]), call)
+				continue
+			}
 			if got == want {
 				continue
 			}
@@ -672,6 +798,10 @@ var cudaKernelOtherAllowlist = map[string]bool{
 	"k_mhc": true, "k_v41_engram": true, "k_v41_pool": true, "v41c_status_kernel": true,
 	"v41c_compressor_store_kernel": true, "v41c_compressor_update_pool_kernel": true,
 	"quantize_q8_1": true, "k_q3k_dequant": true, "k_iq4xs_dequant_split": true,
+	"quantize_mmq_q8_1_d2s6": true, "quantize_mmq_q8_1_d4": true,
+	// Engram row gathers/dequantization and poisoned-output status publication.
+	"v41_eg_q5": true, "v41_eg_q2": true, "v41_eg_f32": true,
+	"v41_eg_iq4nl": true, "v41_eg_iq4nl_row": true, "v41_eg_iq4nl_poison": true,
 }
 
 // fak-test:runtime fast est=20ms lane=default
@@ -704,6 +834,9 @@ func TestKernelOpClassCUDANames(t *testing.T) {
 		"k_q4k_gemm": KernelOpMatmul, "k_q8_gemm_rowtile": KernelOpMatmul, "k_q2k_gemv": KernelOpMatvec, "k_q4k_mmvq_gemv": KernelOpMatvec, "k_q3k_mmvq_gemv": KernelOpMatvec,
 		"k_iq4xs_gemv": KernelOpMatvec, "k_iq4xs_mmvq_gemv": KernelOpMatvec,
 		"k_awq_gemv": KernelOpMatvec, "k_rex_gemv_mxfp4_e8m0": KernelOpMatvec, "k_rex_gemv_fp8_block32_e8m0": KernelOpMatvec,
+		"q8_mul_mat_q": KernelOpMatmul, "q8_mul_mat_q_stream_k_fixup": KernelOpMatmul,
+		"q2_mul_mat_q": KernelOpMatmul, "q2_mul_mat_q_stream_k_fixup": KernelOpMatmul,
+		"q3_mul_mat_q": KernelOpMatmul, "q3_mul_mat_q_stream_k_fixup": KernelOpMatmul,
 		"mul_mat_q": KernelOpMatmul, "mul_mat_q_stream_k_fixup": KernelOpMatmul, "k_nvfp4_w4a16_f32": KernelOpMatmul,
 		"cublas_sgemm": KernelOpMatmul, "cublas_gemm_ex": KernelOpMatmul, "cublaslt_matmul": KernelOpMatmul,
 		"k_qwen38_fattn_mma_hd256": KernelOpAttention, "k_qwen38_fattn_stage_kv_f16": KernelOpAttention,

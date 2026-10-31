@@ -3,7 +3,6 @@ package devcmd
 import (
 	"bytes"
 	"context"
-	"os"
 	"strings"
 	"testing"
 
@@ -31,18 +30,16 @@ func TestBuildCUDAV41BF16PublishFlag(t *testing.T) {
 				if cfg.EnableV41BF16Publish != tc.bf16Publish || cfg.EnableV41TailRoPE != tc.tailRoPE || cfg.EnableV41Router != tc.router || cfg.EnableV41Compressor != tc.compressor || cfg.EnableV41CompressorPool != tc.pool {
 					t.Fatalf("incorrect selection config: %+v", cfg)
 				}
+				// Check the canonical emitted tag, not a duplicate source-text implementation.
+				tags := "," + computebuild.CUDAGoTags(cfg) + ","
+				if got := strings.Contains(tags, ",fak_cuda_v41_bf16_publish,"); got != tc.bf16Publish {
+					t.Fatalf("canonical tags %q lost %s selection=%t", tags, "bf16_publish", tc.bf16Publish)
+				}
 				return nil
 			})
 			if code != 0 || !called {
 				t.Fatalf("code=%d called=%v stderr=%s", code, called, errout.String())
 			}
 		})
-	}
-	data, err := os.ReadFile("build_cuda.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "if cfg.EnableV41BF16Publish {\n\t\ttags += \",fak_cuda_v41_bf16_publish\"\n\t}") {
-		t.Fatal("acceptance family tags lost bf16Publish selection")
 	}
 }

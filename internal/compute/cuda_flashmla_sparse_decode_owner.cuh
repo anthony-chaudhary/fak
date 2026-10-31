@@ -41,8 +41,7 @@ extern "C" int fak_flashmla_decode_host(const uint16_t *q,const uint8_t *kv,cons
   for(int i=0;i<10;i++)if(bytes[i]){host[i]=malloc(bytes[i]);if(!host[i])return finish(-4);if(i<8)memcpy(host[i],source[i],bytes[i]);}
   for(int i=0;i<14;i++)if(bytes[i]){cudaError_t e=cudaMalloc(&device[i],bytes[i]);if(e)return finish((int)e);g_live.emplace(device[i],bytes[i]);}
   for(int i=0;i<14;i++)if(bytes[i]){status=v41_checked_stream_owned_bytes(device[i],bytes[i]);if(status)return finish(status);}
-  fcuda_ts_untimed_transfer();
-  for(int i=0;i<8;i++)if(bytes[i]){cudaError_t e=cudaMemcpyAsync(device[i],host[i],bytes[i],cudaMemcpyHostToDevice,g_stream);if(e)return finish((int)e);g_h2d_bytes+=bytes[i];}
+  for(int i=0;i<8;i++)if(bytes[i]){cudaError_t e;FCUDA_TS("h2d_upload", dim3(0, 0), e=cudaMemcpyAsync(device[i],host[i],bytes[i],cudaMemcpyHostToDevice,g_stream));if(e)return finish((int)e);g_h2d_bytes+=bytes[i];}
   fak_flashmla_decode_input d=x;
   d.query_bf16=(uint16_t*)device[0];d.kv=(uint8_t*)device[1];d.indices=(int32_t*)device[2];d.length=(int32_t*)device[3];d.sink=(float*)device[4];
   d.extra_kv=(uint8_t*)device[5];d.extra_indices=(int32_t*)device[6];d.extra_length=(int32_t*)device[7];d.output_bf16=(uint16_t*)device[8];d.lse=(float*)device[9];
@@ -50,9 +49,9 @@ extern "C" int fak_flashmla_decode_host(const uint16_t *q,const uint8_t *kv,cons
   status=fak_flashmla_decode_launch(&d,&w,invariant,(void*)g_stream);if(status)return finish(status);
   // Device results target C-owned staging on the same stream; no Go pointer
   // participates in an operation whose completion can become unknown.
-  fcuda_ts_untimed_transfer();
-  cudaError_t e=cudaMemcpyAsync(host[8],device[8],bytes[8],cudaMemcpyDeviceToHost,g_stream);if(e)return finish((int)e);g_host_bytes+=bytes[8];
-  e=cudaMemcpyAsync(host[9],device[9],bytes[9],cudaMemcpyDeviceToHost,g_stream);if(e)return finish((int)e);g_host_bytes+=bytes[9];
+  cudaError_t e;
+  FCUDA_TS("readback", dim3(0, 0), e=cudaMemcpyAsync(host[8],device[8],bytes[8],cudaMemcpyDeviceToHost,g_stream));if(e)return finish((int)e);g_host_bytes+=bytes[8];
+  FCUDA_TS("readback", dim3(0, 0), e=cudaMemcpyAsync(host[9],device[9],bytes[9],cudaMemcpyDeviceToHost,g_stream));if(e)return finish((int)e);g_host_bytes+=bytes[9];
   status=v41_checked_stream_finish();if(status){retain();return status;}completed=true;
   memcpy(x.output_bf16,host[8],bytes[8]);memcpy(x.lse,host[9],bytes[9]);
   return finish(0);
