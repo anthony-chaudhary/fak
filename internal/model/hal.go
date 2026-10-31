@@ -483,7 +483,7 @@ func (s *Session) supportsRoutedExpertKQuant() bool {
 // staged as, or ok=false when no device representation exists. It mirrors the tier dispatch in
 // expertSwiGLUHAL's resident() closure: a resident Q4_K tensor is compute.Q4_K, a resident
 // k-quant is the dtype its registered HAL descriptor names, and a checkpoint-served projection
-// carries its own device dtype. IQ2's registered raw representation is admitted only through
+// carries its own device dtype. IQ2/IQ1_M registered raw representations are admitted only through
 // supportsExpertWeight's explicit backend probe, without changing the generic registry.
 // Other unregistered/non-HAL k-quants report ok=false rather than panicking inside staging.
 func (w expertWeight) deviceDtype() (compute.Dtype, bool) {
@@ -497,7 +497,7 @@ func (w expertWeight) deviceDtype() (compute.Dtype, bool) {
 		}
 		if !desc.SupportsHAL() {
 			dt, raw := rawIQDenseHALDtypeFor(w.kq)
-			if !raw || (dt != compute.IQ2_XXS && dt != compute.IQ2_XS) {
+			if !raw || (dt != compute.IQ2_XXS && dt != compute.IQ2_XS && dt != compute.IQ1_M) {
 				return 0, false
 			}
 		}
@@ -535,9 +535,9 @@ func (s *Session) supportsExpertWeight(w expertWeight) bool {
 	if !ok {
 		return false
 	}
-	// Newly admitted native IQ2 experts require a concrete per-dtype promise;
+	// Newly admitted native IQ2/IQ1_M experts require a concrete per-dtype promise;
 	// the legacy marker cannot establish raw storage/kernel compatibility.
-	if dt == compute.IQ2_XXS || dt == compute.IQ2_XS {
+	if dt == compute.IQ2_XXS || dt == compute.IQ2_XS || dt == compute.IQ1_M {
 		return compute.BackendSupportsDeviceWeightDtype(s.Backend, dt)
 	}
 	if _, typed := s.Backend.(compute.KQuantDeviceKernel); typed {
