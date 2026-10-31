@@ -71,7 +71,7 @@ func TestLlamaCppQwen4ExpCoversEveryCbName(t *testing.T) {
 			}
 		}
 	}
-	if got := LlamaCppStageMapArches(); !slices.Equal(got, []string{"deepseek41", "minimax-m3-core", "qwen4exp"}) {
+	if got := LlamaCppStageMapArches(); !slices.Equal(got, []string{"deepseek41", "minimax-m3-core", "qwen35", "qwen4exp"}) {
 		t.Fatalf("arches=%v", got)
 	}
 }
@@ -387,5 +387,193 @@ func TestLlamaCppQwen4ExpSkipsEmptyGatheredUbatch(t *testing.T) {
 	})
 	if _, err := ConvertLlamaCppDumpArch(clash, LlamaCppArchQwen4Exp); err != nil {
 		t.Fatalf("an undumped superseding name must not suppress attn_output: %v", err)
+	}
+}
+
+const (
+	qwen35FixtureLayers = 64
+	qwen35FixtureEmbd   = 16
+)
+
+// qwen35CbNames is every cb() name in ggml-org/llama.cpp@6c84c7d5
+// src/models/qwen35.cpp plus the GDN base class it calls,
+// src/models/delta-net-base.cpp (chunked and autoregressive paths).
+var qwen35CbNames = []string{
+	"model.input_embed", "attn_norm", "attn_residual", "attn_post_norm", "ffn_out",
+	"post_ffn", "l_out", "h_nextn", "result_norm", "result_output",
+	"linear_attn_qkv_mixed", "z", "Qcur_full", "Qcur_reshaped", "Qcur_normed",
+	"Kcur", "Vcur", "Kcur_normed", "gate_reshaped", "Qcur", "attn_pregate",
+	"gate_sigmoid", "attn_gated", "attn_output", "beta", "beta_sigmoid", "alpha",
+	"a_softplus", "gate", "state_predelta", "conv_output_raw", "conv_output_silu",
+	"q_conv", "k_conv", "v_conv", "q_conv_predelta", "k_conv_predelta",
+	"v_conv_predelta", "final_output", "linear_attn_out",
+	"mtp_tok_embd", "mtp_hnorm", "mtp_enorm", "mtp_concat", "mtp_eh_proj",
+	"mtp_attn_norm", "mtp_Qcur_full", "mtp_Qcur_normed", "mtp_gate",
+	"mtp_Kcur_normed", "mtp_Vcur", "mtp_attn_pregate", "mtp_attn_out",
+	"mtp_attn_residual", "mtp_attn_post_norm", "mtp_ffn_out", "mtp_post_ffn",
+	"mtp_shared_head_norm",
+	"q_in", "k_in", "v_in", "b_in", "g_in", "v_b", "k_b", "g_cs",
+	"decay_mask", "kq", "attn", "dnet_add_ch_lhs", "attn_pre_solve",
+	"dnet_add_ch_attn_solved", "k_beta_g_exp", "k_cumdecay", "g_last",
+	"g_last_exp_t", "g_diff", "key_gdiff", "key_gdiff_t", "dnet_add_ch_state",
+	"v_prime", "v_t_new", "v_attn", "attn_inter", "dnet_add_ch_attn_out",
+	"output_state", "dnet_add_ar_state", "conv_states", "conv_states_reshaped",
+	"qkv_mixed_transposed", "conv_input", "conv_state_last", "conv_state_update",
+	"new_state",
+}
+
+func TestLlamaCppQwen35CoversEveryCbName(t *testing.T) {
+	m, ok := LlamaCppStageMapFor(LlamaCppArchQwen35)
+	if !ok {
+		t.Fatal("qwen35 stage map missing")
+	}
+	want := slices.Clone(qwen35CbNames)
+	slices.Sort(want)
+	want = slices.Compact(want)
+	if got := m.Names(); !slices.Equal(got, want) {
+		t.Fatalf("stage map names differ from 6c84c7d5 cb() names:\n got %v\nwant %v", got, want)
+	}
+	for _, t2 := range []map[string]LlamaCppStage{m.Layered, m.Pre, m.Post} {
+		for n := range t2 {
+			if _, dup := m.Unmapped[n]; dup {
+				t.Fatalf("%s is both mapped and unmapped", n)
+			}
+		}
+	}
+	if got := LlamaCppStageMapArches(); !slices.Contains(got, LlamaCppArchQwen35) {
+		t.Fatalf("arches=%v missing qwen35", got)
+	}
+}
+
+// writeQwen35Dump writes a 6c84c7d5-shaped dump: 64 layers on the 3 GDN : 1
+// full-attention cadence, dense FFN, both the raw attn_output core and the
+// projected linear_attn_out on GDN layers, and the post-stack outputs gathered
+// down to the final token. It returns each dumped name's seq so a test can
+// prove which tensor fed a stage.
+func writeQwen35Dump(t *testing.T, tokens []int) (string, map[string]int) {
+	t.Helper()
+	nt := int64(len(tokens))
+	H := int64(qwen35FixtureEmbd)
+	var ts []dumpTensor
+	seqOf := map[string]int{}
+	add := func(name string, ne ...int64) {
+		for len(ne) < 4 {
+			ne = append(ne, 1)
+		}
+		seqOf[name] = len(ts)
+		ts = append(ts, dumpTensor{name: name, ne: [4]int64{ne[0], ne[1], ne[2], ne[3]}, dumped: true})
+	}
+	add("model.input_embed", H, nt)
+	for il := 0; il < qwen35FixtureLayers; il++ {
+		n := func(base string) string { return fmt.Sprintf("%s-%d", base, il) }
+		add(n("attn_norm"), H, nt)
+		add(n("attn_residual"), H, nt)
+		if il%4 == 3 {
+			add(n("Qcur_full"), 2*8*2, nt)
+			add(n("Qcur_normed"), 8, 2, nt)
+			add(n("Kcur_normed"), 8, 1, nt)
+			add(n("gate_reshaped"), 8*2, nt)
+			add(n("attn_pregate"), 8*2, nt)
+			add(n("gate_sigmoid"), 8*2, nt)
+			add(n("attn_gated"), 8*2, nt)
+			add(n("attn_output"), H, nt)
+		} else {
+			add(n("linear_attn_qkv_mixed"), 12, nt, 1)
+			add(n("z"), 8, nt)
+			add(n("attn_output"), 4, 2, nt, 1) // delta-net-base: the raw GDN core, superseded by linear_attn_out
+			add(n("final_output"), 8, nt, 1)
+			add(n("linear_attn_out"), H, nt, 1)
+		}
+		add(n("attn_post_norm"), H, nt)
+		add(n("ffn_out"), H, nt)
+		add(n("l_out"), H, nt)
+	}
+	add("result_norm", H, 1)
+	add("result_output", 32, 1)
+	return writeDump(t, tokens, ts), seqOf
+}
+
+// fak-test:runtime fast est=100ms
+func TestLlamaCppQwen35MapsAll64Layers(t *testing.T) {
+	tokens := []int{11, 12, 13}
+	dir, seqOf := writeQwen35Dump(t, tokens)
+	a, err := ConvertLlamaCppDumpArch(dir, LlamaCppArchQwen35)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type key struct {
+		layer int
+		stage string
+		token int
+	}
+	got := map[key]Event{}
+	stagesByLayer := map[int]map[string]bool{}
+	for _, e := range a.Events {
+		k := key{e.Layer, e.Phase, e.Token}
+		if _, dup := got[k]; dup {
+			t.Fatalf("duplicate identity %+v", k)
+		}
+		got[k] = e
+		if stagesByLayer[e.Layer] == nil {
+			stagesByLayer[e.Layer] = map[string]bool{}
+		}
+		stagesByLayer[e.Layer][e.Phase] = true
+	}
+	common := []string{"residual_streams", "moe_sum", "attn_norm", "attn_post_norm", "attn_residual"}
+	for il := 0; il < qwen35FixtureLayers; il++ {
+		want := append([]string{}, common...)
+		if il%4 == 3 {
+			want = append(want, "attn_q_full", "attn_q_normed", "attn_k_normed", "attn_gate", "attn_core", "attn_gate_sigmoid", "attn_gated", "attention_projected")
+		} else {
+			want = append(want, "gdn_qkv_mixed", "gdn_z", "gdn_core_normed", "attention_projected")
+		}
+		for _, stage := range want {
+			if !stagesByLayer[il][stage] {
+				t.Fatalf("layer %d has no %s", il, stage)
+			}
+		}
+		for tok := range tokens {
+			if _, ok := got[key{il, "residual_streams", tok}]; !ok {
+				t.Fatalf("layer %d residual_streams token %d missing", il, tok)
+			}
+		}
+	}
+	if len(stagesByLayer) != qwen35FixtureLayers+2 {
+		t.Fatalf("layers=%d, want 64 plus the pre and post rows", len(stagesByLayer))
+	}
+	if _, ok := got[key{-1, "embedding", 0}]; !ok {
+		t.Fatal("embedding missing")
+	}
+	// The post-stack rows are one past the last layer and tail-aligned to the
+	// final token.
+	post := qwen35FixtureLayers
+	for _, k := range []key{{post, "final_norm", 2}, {post, "logits", 2}} {
+		if _, ok := got[k]; !ok {
+			t.Fatalf("tail-aligned row %+v missing", k)
+		}
+	}
+	if _, ok := got[key{post, "logits", 0}]; ok {
+		t.Fatal("post-stack logits numbered from token 0")
+	}
+	// On GDN layers the raw attn_output core is superseded: attention_projected
+	// must carry linear_attn_out's samples, not the core's.
+	if e, ok := got[key{0, "attention_projected", 0}]; !ok {
+		t.Fatal("layer 0 attention_projected missing")
+	} else {
+		for i, j := range e.SampleIndices {
+			if want := float32(seqOf["linear_attn_out-0"]*10000 + j); e.SampleValues[i] != want {
+				t.Fatalf("layer 0 attention_projected sample %d=%v, want linear_attn_out offset %v", i, e.SampleValues[i], want)
+			}
+		}
+	}
+	// On full-attention layers attn_output alone feeds attention_projected.
+	if e, ok := got[key{3, "attention_projected", 0}]; !ok {
+		t.Fatal("layer 3 attention_projected missing")
+	} else {
+		for i, j := range e.SampleIndices {
+			if want := float32(seqOf["attn_output-3"]*10000 + j); e.SampleValues[i] != want {
+				t.Fatalf("layer 3 attention_projected sample %d=%v, want attn_output offset %v", i, e.SampleValues[i], want)
+			}
+		}
 	}
 }

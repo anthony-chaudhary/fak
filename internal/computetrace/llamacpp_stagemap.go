@@ -24,6 +24,7 @@ const (
 	LlamaCppArchDeepSeek41    = "deepseek41"
 	LlamaCppArchQwen4Exp      = "qwen4exp"
 	LlamaCppArchMiniMaxM3Core = "minimax-m3-core"
+	LlamaCppArchQwen35        = "qwen35"
 )
 
 // ErrUnknownStageMap is returned for an arch with no registered stage map.
@@ -265,6 +266,131 @@ var llamaCppStageMaps = map[string]LlamaCppStageMap{
 			"mtp_enorm":    "MTP draft head; the pinned GGUF has no MTP layers",
 			"mtp_eh_proj":  "MTP draft head; the pinned GGUF has no MTP layers",
 			"mtp_ffn_out":  "MTP draft head; the pinned GGUF has no MTP layers",
+		},
+	},
+
+	// qwen35: Qwen3.8-27B at ggml-org/llama.cpp@6c84c7d5. 64 decoder layers:
+	// gated full attention where (il+1)%full_attention_interval==0 with interval
+	// 4 (il%4==3), Gated-DeltaNet elsewhere; dense SiLU FFN, no MoE. The
+	// optional cvec applied to the layer output is absent in the pinned GGUF,
+	// so l_out is the plain per-layer residual stream. The MTP draft head
+	// (block 65) builds only under LLM_GRAPH_TYPE_DECODER_MTP and never runs in
+	// the main pass, so its names are unmapped. CPU prefill takes the chunked
+	// GDN path (the fused op probe fails without a GPU backend), so chunked
+	// internals appear in dumps but are unmapped by design.
+	LlamaCppArchQwen35: {
+		Arch:      LlamaCppArchQwen35,
+		Reference: "ggml-org/llama.cpp@6c84c7d5d8833c6e0df69628f75a0f599797934e src/models/qwen35.cpp, src/models/delta-net-base.cpp; 64 layers, gated full attention at il%4==3 else GDN, dense SiLU FFN, cvec absent in the pinned GGUF; CPU prefill runs the chunked GDN path, whose chunked internals appear in dumps but are unmapped by design",
+		Pre: map[string]LlamaCppStage{
+			"model.input_embed": {Stage: "embedding", WidthDims: 1, RowRank: 2},
+		},
+		Layered: map[string]LlamaCppStage{
+			"attn_norm":      {Stage: "attn_norm", WidthDims: 1, RowRank: 2},
+			"attn_residual":  {Stage: "attn_residual", WidthDims: 1, RowRank: 2},
+			"attn_post_norm": {Stage: "attn_post_norm", WidthDims: 1, RowRank: 2},
+			"ffn_out":        {Stage: "moe_sum", WidthDims: 1, RowRank: 2, Note: "qwen35 FFN is dense SiLU, not MoE; moe_sum kept for cross-arch consistency as the full FFN output"},
+			"l_out":          {Stage: "residual_streams", WidthDims: 1, RowRank: 2, Note: "layer output after cvec (identity when cvec is absent); the per-layer residual stream"},
+
+			"linear_attn_qkv_mixed": {Stage: "gdn_qkv_mixed", WidthDims: 1},
+			"z":                     {Stage: "gdn_z", WidthDims: 1},
+			"final_output":          {Stage: "gdn_core_normed", WidthDims: 1},
+			"linear_attn_out":       {Stage: "attention_projected", WidthDims: 1},
+
+			"Qcur_full":     {Stage: "attn_q_full", WidthDims: 1},
+			"Qcur_normed":   {Stage: "attn_q_normed", WidthDims: 2, RowRank: 3},
+			"Kcur_normed":   {Stage: "attn_k_normed", WidthDims: 2, RowRank: 3},
+			"gate_reshaped": {Stage: "attn_gate", WidthDims: 1},
+			"attn_pregate":  {Stage: "attn_core", WidthDims: 1},
+			"gate_sigmoid":  {Stage: "attn_gate_sigmoid", WidthDims: 1},
+			"attn_gated":    {Stage: "attn_gated", WidthDims: 1},
+			"attn_output":   {Stage: "attention_projected", WidthDims: 1, SupersededBy: "linear_attn_out"},
+		},
+		Post: map[string]LlamaCppStage{
+			"result_norm":   {Stage: "final_norm", WidthDims: 1, RowRank: 2, TailAligned: true},
+			"result_output": {Stage: "logits", WidthDims: 1, RowRank: 2, TailAligned: true},
+		},
+		Unmapped: map[string]string{
+			"h_nextn":  "NextN/MTP draft-head input; R0 scope excludes the MTP draft head",
+			"post_ffn": "FFN residual add; numerically identical to l_out when cvec is absent, and l_out carries residual_streams",
+
+			"Qcur_reshaped": "head-split view of Qcur_full; non-contiguous, no stable per-token row",
+			"Kcur":          "emitted both pre-QK-norm and post-RoPE under one name; RoPE span is section-dependent",
+			"Vcur":          "emitted both pre-reshape and post-reshape under one name",
+			"Qcur":          "post-RoPE query; no stable pre-RoPE alias at this pin",
+
+			"beta":         "GDN gate tensor with head-axis layout, not a per-token row",
+			"beta_sigmoid": "GDN gate tensor with head-axis layout, not a per-token row",
+			"alpha":        "GDN gate tensor with head-axis layout, not a per-token row",
+			"a_softplus":   "GDN gate intermediate",
+			"gate":         "GDN gate intermediate",
+
+			"state_predelta": "GDN recurrent-state snapshot, not a per-token row",
+			"new_state":      "GDN recurrent-state update, not a per-token row",
+			"output_state":   "GDN recurrent-state snapshot, not a per-token row",
+
+			"conv_states":          "GDN conv rolling state",
+			"conv_states_reshaped": "GDN conv rolling state view",
+			"conv_state_last":      "GDN conv rolling state view",
+			"conv_state_update":    "GDN conv rolling state view",
+			"qkv_mixed_transposed": "transposed view of linear_attn_qkv_mixed",
+			"conv_input":           "concat of conv state prefix and qkv rows; includes state, not a pure per-token activation",
+			"conv_output_raw":      "GDN short-conv internal",
+			"conv_output_silu":     "GDN short-conv internal",
+			"q_conv":               "view splitting the conv output",
+			"k_conv":               "view splitting the conv output",
+			"v_conv":               "view splitting the conv output",
+			"q_conv_predelta":      "post-l2norm/repeat conv split, head-axis layout",
+			"k_conv_predelta":      "post-l2norm/repeat conv split, head-axis layout",
+			"v_conv_predelta":      "post-l2norm/repeat conv split, head-axis layout",
+
+			"q_in":         "chunked-GDN input after scale; head/chunk axes, not fixed per-token rows",
+			"k_in":         "chunked-GDN input after scale; head/chunk axes, not fixed per-token rows",
+			"v_in":         "chunked-GDN input after scale; head/chunk axes, not fixed per-token rows",
+			"b_in":         "chunked-GDN input after scale; head/chunk axes, not fixed per-token rows",
+			"g_in":         "chunked-GDN input after scale; head/chunk axes, not fixed per-token rows",
+			"v_b":          "chunked-GDN solve intermediate",
+			"k_b":          "chunked-GDN solve intermediate",
+			"k_beta_g_exp": "chunked-GDN solve intermediate",
+			"k_cumdecay":   "chunked-GDN solve intermediate",
+			"g_cs":         "chunked-GDN solve intermediate",
+
+			"decay_mask":              "chunk x chunk matrix, not a per-token row",
+			"kq":                      "chunk x chunk matrix, not a per-token row",
+			"attn":                    "chunk x chunk matrix, not a per-token row",
+			"dnet_add_ch_lhs":         "chunk x chunk matrix, not a per-token row",
+			"attn_pre_solve":          "chunk x chunk matrix, not a per-token row",
+			"dnet_add_ch_attn_solved": "chunk x chunk matrix, not a per-token row",
+			"g_last":                  "chunk-boundary decay/state-update term",
+			"g_last_exp_t":            "chunk-boundary decay/state-update term",
+			"g_diff":                  "chunk-boundary decay/state-update term",
+			"key_gdiff":               "chunk-boundary decay/state-update term",
+			"key_gdiff_t":             "chunk-boundary decay/state-update term",
+			"dnet_add_ch_state":       "per-chunk recurrent-state snapshot (one emission per chunk iteration)",
+			"v_prime":                 "per-chunk value-path slice",
+			"v_t_new":                 "per-chunk value-path slice",
+			"v_attn":                  "per-chunk value-path slice",
+			"attn_inter":              "per-chunk value-path slice",
+			"dnet_add_ch_attn_out":    "per-chunk value-path slice",
+			"dnet_add_ar_state":       "autoregressive GDN state update; decode-only path",
+
+			"mtp_tok_embd":         "MTP draft head (graph_mtp / LLM_GRAPH_TYPE_DECODER_MTP); not executed in the main-pass R0 capture",
+			"mtp_hnorm":            "MTP draft head (graph_mtp / LLM_GRAPH_TYPE_DECODER_MTP); not executed in the main-pass R0 capture",
+			"mtp_enorm":            "MTP draft head (graph_mtp / LLM_GRAPH_TYPE_DECODER_MTP); not executed in the main-pass R0 capture",
+			"mtp_concat":           "MTP draft head (graph_mtp / LLM_GRAPH_TYPE_DECODER_MTP); not executed in the main-pass R0 capture",
+			"mtp_eh_proj":          "MTP draft head (graph_mtp / LLM_GRAPH_TYPE_DECODER_MTP); not executed in the main-pass R0 capture",
+			"mtp_attn_norm":        "MTP draft head (graph_mtp / LLM_GRAPH_TYPE_DECODER_MTP); not executed in the main-pass R0 capture",
+			"mtp_Qcur_full":        "MTP draft head (graph_mtp / LLM_GRAPH_TYPE_DECODER_MTP); not executed in the main-pass R0 capture",
+			"mtp_Qcur_normed":      "MTP draft head (graph_mtp / LLM_GRAPH_TYPE_DECODER_MTP); not executed in the main-pass R0 capture",
+			"mtp_gate":             "MTP draft head (graph_mtp / LLM_GRAPH_TYPE_DECODER_MTP); not executed in the main-pass R0 capture",
+			"mtp_Kcur_normed":      "MTP draft head (graph_mtp / LLM_GRAPH_TYPE_DECODER_MTP); not executed in the main-pass R0 capture",
+			"mtp_Vcur":             "MTP draft head (graph_mtp / LLM_GRAPH_TYPE_DECODER_MTP); not executed in the main-pass R0 capture",
+			"mtp_attn_pregate":     "MTP draft head (graph_mtp / LLM_GRAPH_TYPE_DECODER_MTP); not executed in the main-pass R0 capture",
+			"mtp_attn_out":         "MTP draft head (graph_mtp / LLM_GRAPH_TYPE_DECODER_MTP); not executed in the main-pass R0 capture",
+			"mtp_attn_residual":    "MTP draft head (graph_mtp / LLM_GRAPH_TYPE_DECODER_MTP); not executed in the main-pass R0 capture",
+			"mtp_attn_post_norm":   "MTP draft head (graph_mtp / LLM_GRAPH_TYPE_DECODER_MTP); not executed in the main-pass R0 capture",
+			"mtp_ffn_out":          "MTP draft head (graph_mtp / LLM_GRAPH_TYPE_DECODER_MTP); not executed in the main-pass R0 capture",
+			"mtp_post_ffn":         "MTP draft head (graph_mtp / LLM_GRAPH_TYPE_DECODER_MTP); not executed in the main-pass R0 capture",
+			"mtp_shared_head_norm": "MTP draft head (graph_mtp / LLM_GRAPH_TYPE_DECODER_MTP); not executed in the main-pass R0 capture",
 		},
 	},
 }
