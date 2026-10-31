@@ -375,6 +375,20 @@ func (rep *SafetensorsPreflight) routeRole(name string, e stEntry, byName map[st
 	if strings.HasSuffix(name, ".weight") && e.Dtype == "F8_E4M3" {
 		scaleName := name + "_scale_inv"
 		if _, ok := byName[scaleName]; ok {
+			// Both FP8 decode paths require a positive rank-2 source. Only the
+			// direct Q8 path additionally requires an aligned reduction axis.
+			if len(e.Shape) != 2 || e.Shape[0] <= 0 || e.Shape[1] <= 0 {
+				rep.RoleErrors[name] = fmt.Sprintf("fp8 block-scale %s: shape %v, want positive rank-2 [O,I]", name, e.Shape)
+				return SafetensorsRoleFP8BlockScale, ""
+			}
+			if _, ok := checkedShapeProduct(e.Shape...); !ok {
+				rep.RoleErrors[name] = fmt.Sprintf("fp8 block-scale %s: shape %v overflows element count", name, e.Shape)
+				return SafetensorsRoleFP8BlockScale, ""
+			}
+			if _, direct := fp8DirectQ8Name(cfg, name, e.Shape); direct && e.Shape[1]%qBlk != 0 {
+				rep.RoleErrors[name] = fmt.Sprintf("fp8 block-scale %s: Q8_0 reduction dim %d is not a multiple of %d", name, e.Shape[1], qBlk)
+				return SafetensorsRoleFP8BlockScale, ""
+			}
 			// The decoded fallback also splits fused projections into Q8 parts.
 			// Validate their source geometry before claiming that representation.
 			canonical, keep := quantSourceTensorName(cfg, name)
