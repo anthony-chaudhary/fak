@@ -35,6 +35,9 @@ func newSessionMoveRollbackFixture(t *testing.T) *sessionMoveRollbackFixture {
 		attachment:  sessionClientAttachment{SessionID: state.TraceID, WorkspaceID: "original-workspace", Kind: "human"},
 		effect:      SessionEffect{ID: "effect-1", Command: "fixture-only", Verdict: SessionEffectKnownNotRun},
 	}
+	// Match the stored placement contract before any movement or failure occurs.
+	f.source = normalizedPlacement(f.source)
+	f.destination = normalizedPlacement(f.destination)
 	f.configure(t, SessionMoveHooks{})
 	f.runtime.mu.Lock()
 	sess := f.runtime.sessionLocked(f.id)
@@ -390,4 +393,46 @@ func TestSessionMoveHTTPReportsRollbackRecoveryWithoutCallbackDetails(t *testing
 		t.Fatalf("HTTP recovery lost confirmed transitions: %+v", body.Transitions)
 	}
 	f.assertSource(t, f.epoch, f.source)
+}
+
+func TestSessionMoveRollbackPlacementCanonicalization(t *testing.T) {
+	for _, input := range []SessionPlacement{
+		{Provider: "source", AccountRef: "source-ref", Model: "source-model", Compute: "source-compute", Capabilities: []string{"tools"}},
+		{Provider: "destination", AccountRef: "destination-ref", Model: "destination-model", Compute: "destination-compute", Capabilities: []string{"tools"}},
+	} {
+		want := input
+		want.SemanticDegradations = []string{}
+		got := normalizedPlacement(input)
+		if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(normalizedPlacement(got), want) {
+			t.Fatalf("placement is not canonical and idempotent: got=%#v want=%#v", got, want)
+		}
+		if input.SemanticDegradations != nil {
+			t.Fatal("normalization mutated the original placement")
+		}
+		if reflect.DeepEqual(got, input) {
+			t.Fatal("raw nil-list fixture unexpectedly equals canonical stored placement")
+		}
+	}
+}
+
+func TestSessionMoveRollbackPlacementCanonicalFields(t *testing.T) {
+	input := SessionPlacement{
+		Provider: " provider ", AccountRef: " account ", Model: " model ", Compute: " compute ",
+		Capabilities: []string{" tools ", "chat", "tools", ""},
+		ContextLimit: 123, BudgetAvailable: 456, ComputeAvailable: true, CacheLineage: "lineage",
+		SemanticDegradations: []string{" second ", "first", "second"},
+	}
+	want := SessionPlacement{
+		Provider: "provider", AccountRef: "account", Model: "model", Compute: "compute",
+		Capabilities: []string{"chat", "tools"},
+		ContextLimit: 123, BudgetAvailable: 456, ComputeAvailable: true, CacheLineage: "lineage",
+		SemanticDegradations: []string{"first", "second"},
+	}
+	got := normalizedPlacement(input)
+	if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(normalizedPlacement(got), want) {
+		t.Fatalf("canonical placement changed fields: got=%#v want=%#v", got, want)
+	}
+	if input.Capabilities[0] != " tools " || input.SemanticDegradations[0] != " second " {
+		t.Fatal("normalization mutated input lists")
+	}
 }
