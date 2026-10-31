@@ -417,7 +417,8 @@ func runCUDABuildAcceptance(stdout, stderr io.Writer, cfg *computebuild.CUDAConf
 		fmt.Fprintln(stderr, "CUDA acceptance build did not resolve its toolchain")
 		return 1
 	}
-	env := computebuild.MergeEnviron(os.Environ(), computebuild.SynthesizeCUDACgoEnv(cfg.Toolchain, cfg.PkgDir, cfg.EnableNCCL, nil))
+	baseEnv := os.Environ()
+	env := computebuild.MergeEnviron(baseEnv, computebuild.SynthesizeCUDACgoEnv(baseEnv, cfg.Toolchain, cfg.PkgDir, cfg.EnableNCCL, nil))
 	env = computebuild.MergeEnviron(env, cfg.Toolchain.VsDevEnv)
 	var parity cudaFirstLightOutput
 	if err := command(context.Background(), cfg.OutBin, []string{"-hf", hf, "-backend", "cuda", "-n", strconv.Itoa(tokens), "-json", "-require-native"}, root, env, &parity, stderr); err != nil {

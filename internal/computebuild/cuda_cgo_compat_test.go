@@ -3,6 +3,7 @@ package computebuild
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -20,9 +21,10 @@ func TestCUDACgoLoaderCompatibility(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(driver, "libcuda.so.1"), []byte("fixture"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("LD_LIBRARY_PATH", strings.Join([]string{stub, existing, toolkit}, string(os.PathListSeparator)))
-	env := SynthesizeCUDACgoEnv(&Toolchain{CUDALib: []string{driver, toolkit, stub}}, root, false, nil)
-	if strings.Contains(env["LD_LIBRARY_PATH"], stub) || !strings.Contains(env["LD_LIBRARY_PATH"], existing) || !strings.Contains(env["LD_LIBRARY_PATH"], toolkit) {
+	t.Setenv("LD_LIBRARY_PATH", filepath.Join(root, "ambient-must-not-leak"))
+	baseEnv := []string{"LD_LIBRARY_PATH=" + strings.Join([]string{stub, existing, toolkit}, string(os.PathListSeparator))}
+	env := SynthesizeCUDACgoEnv(baseEnv, &Toolchain{CUDALib: []string{driver, toolkit, stub}}, root, false, nil)
+	if strings.Contains(env["LD_LIBRARY_PATH"], "ambient-must-not-leak") || strings.Contains(env["LD_LIBRARY_PATH"], stub) || !strings.Contains(env["LD_LIBRARY_PATH"], existing) || !strings.Contains(env["LD_LIBRARY_PATH"], toolkit) {
 		t.Fatalf("loader=%q", env["LD_LIBRARY_PATH"])
 	}
 	if strings.Index(env["LD_LIBRARY_PATH"], driver) > strings.Index(env["LD_LIBRARY_PATH"], toolkit) {
@@ -31,7 +33,19 @@ func TestCUDACgoLoaderCompatibility(t *testing.T) {
 	if !strings.Contains(env["CGO_LDFLAGS"], "-Wl,-rpath,"+QuoteArg(toolkit)) || strings.Contains(env["CGO_LDFLAGS"], "-Wl,-rpath,"+QuoteArg(driver)) || strings.Contains(env["CGO_LDFLAGS"], "-Wl,-rpath,"+QuoteArg(stub)) {
 		t.Fatalf("linker=%q", env["CGO_LDFLAGS"])
 	}
-	win := SynthesizeCUDACgoEnv(&Toolchain{IsWindows: true, CUDALib: []string{toolkit}}, root, false, nil)
+	before := append([]string(nil), baseEnv...)
+	t.Setenv("LD_LIBRARY_PATH", filepath.Join(root, "changed-ambient"))
+	again := SynthesizeCUDACgoEnv(baseEnv, &Toolchain{CUDALib: []string{driver, toolkit, stub}}, root, false, nil)
+	if !reflect.DeepEqual(env, again) || !reflect.DeepEqual(baseEnv, before) {
+		t.Fatal("loader inherited ambient changes or mutated the input snapshot")
+	}
+	for _, empty := range [][]string{nil, {}, {"LD_LIBRARY_PATH="}} {
+		got := SynthesizeCUDACgoEnv(empty, &Toolchain{CUDALib: []string{driver, toolkit, stub}}, root, false, nil)
+		if strings.Contains(got["LD_LIBRARY_PATH"], existing) || strings.Contains(got["LD_LIBRARY_PATH"], "changed-ambient") {
+			t.Fatal("empty snapshot inherited an absent library path")
+		}
+	}
+	win := SynthesizeCUDACgoEnv(baseEnv, &Toolchain{IsWindows: true, CUDALib: []string{toolkit}}, root, false, nil)
 	if _, ok := win["LD_LIBRARY_PATH"]; ok {
 		t.Fatal("Windows loader changed")
 	}

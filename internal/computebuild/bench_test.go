@@ -1,6 +1,7 @@
 package computebuild
 
 import (
+	"os"
 	"testing"
 )
 
@@ -86,11 +87,12 @@ func BenchmarkToolchainDiscovery(b *testing.B) {
 		b.Fatalf("setup DiscoverToolchain failed: %v", err)
 	}
 
+	baseEnv := os.Environ()
 	b.Run("SynthesizeCgoEnv", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			vkEnv := SynthesizeVulkanCgoEnv(tc, ".")
-			cudaEnv := SynthesizeCUDACgoEnv(tc, ".", false, nil)
+			cudaEnv := SynthesizeCUDACgoEnv(baseEnv, tc, ".", false, nil)
 			benchEnvSink = vkEnv
 			if cudaEnv != nil {
 				benchEnvSink = cudaEnv

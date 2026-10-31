@@ -54,7 +54,8 @@ func runCUDAV41Coverage(stdout, stderr io.Writer, cfg *computebuild.CUDAConfig, 
 	outPath := out.Name()
 	_ = out.Close()
 	defer os.Remove(outPath)
-	env := computebuild.MergeEnviron(os.Environ(), computebuild.SynthesizeCUDACgoEnv(tc, pkgDir, cfg.EnableNCCL, nil))
+	baseEnv := os.Environ()
+	env := computebuild.MergeEnviron(baseEnv, computebuild.SynthesizeCUDACgoEnv(baseEnv, tc, pkgDir, cfg.EnableNCCL, nil))
 	if len(tc.VsDevEnv) > 0 {
 		env = computebuild.MergeEnviron(env, tc.VsDevEnv)
 	}

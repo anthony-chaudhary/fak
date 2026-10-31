@@ -480,6 +480,13 @@ func cudaLaunchTimingName(path, launch, kernel string) string {
 		"cuda/q4k_mmvq.cuh:mul_mat_vec_q<1>":                                                                         "k_q4k_mmvq_gemv",
 		"cuda/q4k_mmvq.cuh:mul_mat_vec_q<2>":                                                                         "k_q4k_mmvq_gemv",
 		"cuda/q4k_mmvq.cuh:mul_mat_vec_q<3>":                                                                         "k_q4k_mmvq_gemv",
+		"cuda/q8_mmq.cuh:mul_mat_q<J,fallback>":                                                                      "q8_mul_mat_q",
+		"cuda/q8_mmq.cuh:mul_mat_q_stream_k_fixup<J,fallback>":                                                       "q8_mul_mat_q_stream_k_fixup",
+		"cuda/q4k_shared_input.cuh:mul_mat_vec_q<1>":                                                                 "k_q4k_mmvq_gemv",
+		"cuda/q2k_mmq.cuh:mul_mat_q<J,fallback>":                                                                     "q2_mul_mat_q",
+		"cuda/q2k_mmq.cuh:mul_mat_q_stream_k_fixup<J,fallback>":                                                      "q2_mul_mat_q_stream_k_fixup",
+		"cuda/q3k_mmq.cuh:mul_mat_q<J,fallback>":                                                                     "q3_mul_mat_q",
+		"cuda/q3k_mmq.cuh:mul_mat_q_stream_k_fixup<J,fallback>":                                                      "q3_mul_mat_q_stream_k_fixup",
 		"cuda/quant_matmul.cuh:k_q5k_gemm<4>":                                                                        "k_q5k_gemm_panel",
 		"cuda/quant_matmul.cuh:k_q6k_gemm<4>":                                                                        "k_q6k_gemm_panel",
 		"cuda/q4k_fp8lt.cuh:amax<true>":                                                                              "q4k_fp8lt_weight_amax",
@@ -520,6 +527,19 @@ func TestCUDATimestampSemanticAliases(t *testing.T) {
 		name, path, src string
 		want            bool
 	}{
+		{"q8 mul_mat_q", "cuda/q8_mmq.cuh", `FCUDA_TS("q8_mul_mat_q", grid, mul_mat_q<J, fallback><<<grid, block>>>(x));`, true},
+		{"q8 mul_mat_q_stream_k_fixup", "cuda/q8_mmq.cuh", `FCUDA_TS("q8_mul_mat_q_stream_k_fixup", grid, mul_mat_q_stream_k_fixup<J, fallback><<<grid, block>>>(x));`, true},
+		{"q8 wrong source", "cuda/other.cuh", `FCUDA_TS("q8_mul_mat_q", grid, mul_mat_q<J, fallback><<<grid, block>>>(x));`, false},
+		{"shared q4", "cuda/q4k_shared_input.cuh", `FCUDA_TS("k_q4k_mmvq_gemv", grid, mul_mat_vec_q<1><<<grid, block>>>(x));`, true},
+		{"shared q4 wrong specialization", "cuda/q4k_shared_input.cuh", `FCUDA_TS("k_q4k_mmvq_gemv", grid, mul_mat_vec_q<2><<<grid, block>>>(x));`, false},
+		{"q2 mul_mat_q", "cuda/q2k_mmq.cuh", `FCUDA_TS("q2_mul_mat_q", grid, mul_mat_q<J, fallback><<<grid, block>>>(x));`, true},
+		{"q2 mul_mat_q_stream_k_fixup", "cuda/q2k_mmq.cuh", `FCUDA_TS("q2_mul_mat_q_stream_k_fixup", grid, mul_mat_q_stream_k_fixup<J, fallback><<<grid, block>>>(x));`, true},
+		{"q2 wrong source", "cuda/other.cuh", `FCUDA_TS("q2_mul_mat_q", grid, mul_mat_q<J, fallback><<<grid, block>>>(x));`, false},
+		{"q2 wrong specialization", "cuda/q2k_mmq.cuh", `FCUDA_TS("q2_mul_mat_q", grid, mul_mat_q<1, fallback><<<grid, block>>>(x));`, false},
+		{"q3 mul_mat_q", "cuda/q3k_mmq.cuh", `FCUDA_TS("q3_mul_mat_q", grid, mul_mat_q<J, fallback><<<grid, block>>>(x));`, true},
+		{"q3 mul_mat_q_stream_k_fixup", "cuda/q3k_mmq.cuh", `FCUDA_TS("q3_mul_mat_q_stream_k_fixup", grid, mul_mat_q_stream_k_fixup<J, fallback><<<grid, block>>>(x));`, true},
+		{"q3 wrong source", "cuda/other.cuh", `FCUDA_TS("q3_mul_mat_q", grid, mul_mat_q<J, fallback><<<grid, block>>>(x));`, false},
+		{"q3 wrong specialization", "cuda/q3k_mmq.cuh", `FCUDA_TS("q3_mul_mat_q", grid, mul_mat_q<1, fallback><<<grid, block>>>(x));`, false},
 		{"panel", "cuda/quant_matmul.cuh", `FCUDA_TS("k_q5k_gemm_panel", grid, k_q5k_gemm<4><<<grid, block>>>(x));`, true},
 		{"panel whitespace", "cuda/quant_matmul.cuh", `FCUDA_TS("k_q6k_gemm_panel", grid, k_q6k_gemm < 4 > <<<grid, block>>>(x));`, true},
 		{"ordinary template", "cuda/quant_matmul.cuh", `FCUDA_TS("k_q5k_gemm", grid, k_q5k_gemm<1><<<grid, block>>>(x));`, true},
@@ -672,6 +692,7 @@ var cudaKernelOtherAllowlist = map[string]bool{
 	"k_mhc": true, "k_v41_engram": true, "k_v41_pool": true, "v41c_status_kernel": true,
 	"v41c_compressor_store_kernel": true, "v41c_compressor_update_pool_kernel": true,
 	"quantize_q8_1": true, "k_q3k_dequant": true, "k_iq4xs_dequant_split": true,
+	"quantize_mmq_q8_1_d2s6": true, "quantize_mmq_q8_1_d4": true,
 }
 
 // fak-test:runtime fast est=20ms lane=default
@@ -704,6 +725,9 @@ func TestKernelOpClassCUDANames(t *testing.T) {
 		"k_q4k_gemm": KernelOpMatmul, "k_q8_gemm_rowtile": KernelOpMatmul, "k_q2k_gemv": KernelOpMatvec, "k_q4k_mmvq_gemv": KernelOpMatvec, "k_q3k_mmvq_gemv": KernelOpMatvec,
 		"k_iq4xs_gemv": KernelOpMatvec, "k_iq4xs_mmvq_gemv": KernelOpMatvec,
 		"k_awq_gemv": KernelOpMatvec, "k_rex_gemv_mxfp4_e8m0": KernelOpMatvec, "k_rex_gemv_fp8_block32_e8m0": KernelOpMatvec,
+		"q8_mul_mat_q": KernelOpMatmul, "q8_mul_mat_q_stream_k_fixup": KernelOpMatmul,
+		"q2_mul_mat_q": KernelOpMatmul, "q2_mul_mat_q_stream_k_fixup": KernelOpMatmul,
+		"q3_mul_mat_q": KernelOpMatmul, "q3_mul_mat_q_stream_k_fixup": KernelOpMatmul,
 		"mul_mat_q": KernelOpMatmul, "mul_mat_q_stream_k_fixup": KernelOpMatmul, "k_nvfp4_w4a16_f32": KernelOpMatmul,
 		"cublas_sgemm": KernelOpMatmul, "cublas_gemm_ex": KernelOpMatmul, "cublaslt_matmul": KernelOpMatmul,
 		"k_qwen38_fattn_mma_hd256": KernelOpAttention, "k_qwen38_fattn_stage_kv_f16": KernelOpAttention,

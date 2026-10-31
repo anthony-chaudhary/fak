@@ -83,6 +83,11 @@ var v41OpProbes = []v41OpProbe{
 	{"V41BF16PublishBackend", v41Avail(func(b V41BF16PublishBackend) bool { return b.SupportsV41BF16Publish(1) })},
 	{"V41CompressorPoolBackend", v41Avail(func(b V41CompressorPoolBackend) bool { return b.SupportsV41CompressorPool() })},
 	{"V41CompressorRingBackend", v41Avail(func(b V41CompressorRingBackend) bool { return b.SupportsV41CompressorRing() })},
+	// Connected producers are selectable only through an admitted compressor ring.
+	{"V41CompressorRingProducerBackend", v41Avail(func(b V41CompressorRingProducerBackend) bool {
+		ring, ok := b.(V41CompressorRingBackend)
+		return ok && ring.SupportsV41CompressorRing()
+	})},
 	{"V41DeferredStatusBackend", v41Avail(func(b V41DeferredStatusBackend) bool { return b.SupportsV41DeferredStatus(1) })},
 	{"V41EmbeddingGatherBackend", v41Avail(func(b V41EmbeddingGatherBackend) bool { return b.V41EmbeddingGatherAvailable() })},
 	{"V41EngramGateBackend", v41Avail(func(b V41EngramGateBackend) bool { return b.SupportsV41EngramGate() })},
