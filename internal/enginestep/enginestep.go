@@ -55,6 +55,10 @@ const (
 	PhasePrefixAdmit Phase = "prefix_admit"
 	// PhaseDecode is one request's whole decode loop (all of its steps).
 	PhaseDecode Phase = "decode"
+	// PhaseTokenPublish is a completed native scheduler token send/cancel
+	// select's wall time. It includes ready sends and cancellation winners,
+	// excludes accounting/cleanup, and is not a model-compute interval.
+	PhaseTokenPublish Phase = "token_publish"
 	// PhaseSample is one token's sampling (logits -> token id).
 	PhaseSample Phase = "sample"
 	// PhaseRequest is one request end to end inside the planner.
@@ -64,7 +68,7 @@ const (
 // Phases is the closed, ordered phase vocabulary (render and dashboard order).
 var Phases = []Phase{
 	PhaseAdmissionWait, PhaseSchedulerWait, PhaseDeviceWait, PhaseCohortWait, PhasePrefixLookup,
-	PhasePrefill, PhasePrefixAdmit, PhaseDecode, PhaseSample, PhaseRequest,
+	PhasePrefill, PhasePrefixAdmit, PhaseDecode, PhaseTokenPublish, PhaseSample, PhaseRequest,
 }
 
 // Decode step paths.
@@ -347,8 +351,8 @@ func (r *Recorder) appendLocked(rec StepRecord) {
 }
 
 // ObservePhase records one completed phase. Unknown phases are ignored (closed
-// vocabulary keeps the series set bounded). Sample phases are histogram-only:
-// they fire per token and would flush the ring of the decode steps they explain.
+// vocabulary keeps the series set bounded). Sample and token-publication phases
+// are histogram-only: per-token records would flush the decode steps they explain.
 func (r *Recorder) ObservePhase(p Phase, d time.Duration) {
 	if r == nil {
 		return
@@ -366,7 +370,7 @@ func (r *Recorder) ObservePhase(p Phase, d time.Duration) {
 		return
 	}
 	h.observe(d.Seconds())
-	if p == PhaseSample {
+	if p == PhaseSample || p == PhaseTokenPublish {
 		return
 	}
 	r.appendLocked(StepRecord{Kind: KindPhase, Phase: string(p), DurationNS: d.Nanoseconds()})

@@ -1315,9 +1315,25 @@ func (ln *schedLane) retireDeferredToken(iteration uint64) bool {
 	ln.deferredToken = nil
 	s.mu.Unlock()
 
+	var publishStarted time.Time
+	if s.recorder != nil {
+		publishStarted = s.now()
+	}
+	publishCanceled := false
 	select {
 	case ln.tokens <- abi.EngineToken{ID: pending.id}:
 	case <-ln.ctx.Done():
+		publishCanceled = true
+	}
+	// This is the completed select's wall time, including already-ready sends
+	// and cancellation winners, not model compute or pure blocked time.
+	if s.recorder != nil {
+		elapsed := s.now().Sub(publishStarted)
+		if elapsed >= 0 && elapsed < time.Duration(1<<63-1) {
+			s.recorder.ObservePhase(enginestep.PhaseTokenPublish, elapsed)
+		}
+	}
+	if publishCanceled {
 		s.mu.Lock()
 		ln.finish(nil, ln.ctx.Err())
 		s.mu.Unlock()
