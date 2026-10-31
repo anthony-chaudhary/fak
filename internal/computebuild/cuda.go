@@ -77,12 +77,16 @@ type cudaTokenomosStagingKey struct{}
 // Ambient nvcc options must neither secretly select nor override this profile.
 func cudaTokenomosStagingFlags(ctx context.Context, args, env []string) ([]string, error) {
 	enabled, _ := ctx.Value(cudaTokenomosStagingKey{}).(bool)
-	const macro = "FAK_CUDA_TOKENOMOS_STAGING_QUALIFICATION"
+	return cudaTypedQualificationFlags(args, env, enabled, "FAK_CUDA_TOKENOMOS_STAGING_QUALIFICATION", "Tokenomos staging")
+}
+
+// Shared typed selection policy for compatible qualification families. Flags
+// enter existing EffectiveFlags/InputSHA provenance; no ambient opt-in/override.
+func cudaTypedQualificationFlags(args, env []string, enabled bool, macro, profile string) ([]string, error) {
 	for _, item := range env {
 		key, value, ok := strings.Cut(item, "=")
-		if ok && (strings.EqualFold(key, "NVCC_PREPEND_FLAGS") || strings.EqualFold(key, "NVCC_APPEND_FLAGS")) &&
-			strings.TrimSpace(value) != "" && (enabled || strings.Contains(value, macro)) {
-			return nil, fmt.Errorf("Tokenomos staging qualification requires recorded typed flags; unset %s", key)
+		if ok && (strings.EqualFold(key, "NVCC_PREPEND_FLAGS") || strings.EqualFold(key, "NVCC_APPEND_FLAGS")) && strings.TrimSpace(value) != "" && (enabled || strings.Contains(value, macro)) {
+			return nil, fmt.Errorf("%s qualification requires recorded typed flags; unset %s", profile, key)
 		}
 	}
 	if !enabled {
@@ -90,6 +94,40 @@ func cudaTokenomosStagingFlags(ctx context.Context, args, env []string) ([]strin
 	}
 	out := append([]string(nil), args...)
 	return append(out, "-D"+macro), nil
+}
+
+type cudaQ56KMMVQKey struct{}
+
+func cudaQ56KMMVQFlags(ctx context.Context, args, env []string) ([]string, error) {
+	enabled, _ := ctx.Value(cudaQ56KMMVQKey{}).(bool)
+	return cudaTypedQualificationFlags(args, env, enabled, "FAK_CUDA_Q56K_MMVQ_QUALIFICATION", "Q5_K/Q6_K MMVQ")
+}
+
+// Source-presence prerequisite only, not a compilation or numerical witness.
+func prepareCUDAQ56KMMVQ(cfg *CUDAConfig) error {
+	if !cfg.EnableQ56KMMVQQualification {
+		return nil
+	}
+	pkg := filepath.Join(cfg.RepoRoot, "internal", "compute")
+	if cfg.PkgDir != "" && filepath.Clean(cfg.PkgDir) != filepath.Clean(pkg) {
+		return fmt.Errorf("Q56 MMVQ qualification requires the canonical compute package directory")
+	}
+	for _, c := range []struct{ path, marker string }{
+		{"cuda_kernels.cu", "#include \"cuda/q4k_mmvq.cuh\""},
+		{"cuda/q4k_mmvq.cuh", "struct dot_q5"}, {"cuda/q4k_mmvq.cuh", "struct dot_q6"},
+		{"cuda/quant_matmul.cuh", "fcuda_q56k_mmvq_preflight"},
+		{"cuda_backend.h", "fcuda_q6k_matmul_checked_f32"},
+		{"cuda.go", "validateQ56KMMVQOperands"},
+	} {
+		data, err := os.ReadFile(filepath.Join(pkg, c.path))
+		if err != nil {
+			return fmt.Errorf("Q56 MMVQ prerequisite %s: %w", c.path, err)
+		}
+		if !strings.Contains(string(data), c.marker) {
+			return fmt.Errorf("Q56 MMVQ prerequisite %s lacks %q", c.path, c.marker)
+		}
+	}
+	return nil
 }
 
 // Presence/admission only, not compilation, CUDA correctness or performance.
@@ -222,6 +260,10 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 		if err != nil {
 			return nil, err
 		}
+		nvccArgs, err = cudaQ56KMMVQFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
 		nvccArgs, err = cudaTokenomosStagingFlags(ctx, nvccArgs, env)
 		if err != nil {
 			return nil, err
@@ -287,6 +329,10 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 			return nil, err
 		}
 		nvccArgs, err = cudaGraphOnceFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
+		nvccArgs, err = cudaQ56KMMVQFlags(ctx, nvccArgs, env)
 		if err != nil {
 			return nil, err
 		}
@@ -562,6 +608,10 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 		}
 		ctx = context.WithValue(ctx, cudaMMQPrefillKey{}, selection)
 	}
+	if err := prepareCUDAQ56KMMVQ(cfg); err != nil {
+		return err
+	}
+	ctx = context.WithValue(ctx, cudaQ56KMMVQKey{}, cfg.EnableQ56KMMVQQualification)
 	if err := prepareCUDATokenomosStaging(cfg); err != nil {
 		return err
 	}

@@ -6,7 +6,7 @@
 // Copyright (c) 2023-2026 The ggml authors. The MIT permission notice is reproduced in
 // THIRD_PARTY_NOTICES.md ("llama.cpp Q4_K MMVQ decode GEMV").
 //
-// Only the Q4_K instantiation on the NVIDIA GENERIC parameter table is kept (Ampere and newer,
+// The default Q4_K instantiation uses the NVIDIA GENERIC parameter table (Ampere and newer,
 // so sm_80/sm_86/sm_89/sm_90/sm_100/sm_120 all take it): 4 warps for 1..4 activation columns,
 // one output row per CUDA block at one column and two rows otherwise, vdr 2. Other changes for
 // Fak:
@@ -131,18 +131,182 @@ static __device__ __forceinline__ float vec_dot_q4_K_q8_1(
     return vec_dot_q4_K_q8_1_impl_vmmq(v, u, sc, m, bq4_K->dm, d8);
 }
 
+
+// Additional Q5_K/Q6_K dots from vecdotq.cuh at the same immutable llama.cpp
+// pin above (MIT, Copyright (c) 2023-2026 The ggml authors; full license in
+// THIRD_PARTY_NOTICES.md). Modified only for local intrinsics/load names.
+// Selection is qualification-only: q8_1 changes F32-activation precision.
+#ifdef FAK_CUDA_Q56K_MMVQ_QUALIFICATION
+constexpr int QR5_K = 2, QR6_K = 2, QI6_K = 32;
+struct block_q5_K { half2 dm; uint8_t scales[12], qh[32], qs[128]; };
+struct block_q6_K { uint8_t ql[128], qh[64]; int8_t scales[16]; half d; };
+static_assert(sizeof(block_q5_K) == 176, "canonical Q5_K");
+static_assert(sizeof(block_q6_K) == 210, "canonical Q6_K");
+// A Q6_K block is only two-byte aligned. Preserve the donor's two-word load,
+// never turn its 210-byte stride into an unaligned int dereference.
+static __device__ __forceinline__ int q56_get_int_b2(const void *p, int i) {
+    const uint16_t *v = (const uint16_t *)p;
+    return (int)((uint32_t)v[2*i] | ((uint32_t)v[2*i+1] << 16));
+}
+static __device__ __forceinline__ int q56_get_int_b4(const void *p, int i) {
+    return ((const int *)p)[i];
+}
+static __device__ __forceinline__ float vec_dot_q5_K_q8_1_impl_vmmq(
+    const int * __restrict__ vl, const int * __restrict__ vh, const int * __restrict__ u, const uint8_t * __restrict__ sc,
+    const uint8_t * __restrict__ m, const half2 & dm5, const float * __restrict__ d8) {
+
+    float sumf_d = 0.0f;
+    float sumf_m = 0.0f;
+
+#pragma unroll
+    for (int i = 0; i < QR5_K; ++i) {
+        const int vl0i = (vl[0] >> (4*i)) & 0x0F0F0F0F;
+        const int vl1i = (vl[1] >> (4*i)) & 0x0F0F0F0F;
+
+        const int vh0i = ((vh[0] >> i) << 4) & 0x10101010;
+        const int vh1i = ((vh[1] >> i) << 4) & 0x10101010;
+
+        const int v0i = vl0i | vh0i;
+        const int v1i = vl1i | vh1i;
+
+        const int dot1 = __dp4a(v0i, u[2*i+0], __dp4a(v1i, u[2*i+1], 0)); // SIMD dot product
+        const int dot2 = __dp4a(0x01010101, u[2*i+0], __dp4a(0x01010101, u[2*i+1], 0)); // sum of u
+
+        sumf_d += d8[i] * (dot1 * sc[i]);
+        sumf_m += d8[i] * (dot2 * m[i]);
+
+    }
+
+    const float2 dm5f = __half22float2(dm5);
+
+    return dm5f.x*sumf_d - dm5f.y*sumf_m;
+}
+
+static __device__ __forceinline__ float vec_dot_q5_K_q8_1(
+    const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {
+
+    const block_q5_K * bq5_K = (const block_q5_K *) vbq + kbx;
+
+    int   vl[2];
+    int   vh[2];
+    int    u[2*QR5_K];
+    float d8[QR5_K];
+
+    const int bq8_offset = QR5_K * ((iqs/2) / (QI8_1/2));
+    const int * ql = (const int *)(bq5_K->qs + 16 * bq8_offset + 4 * ((iqs/2)%4));
+    const int * qh = (const int *)(bq5_K->qh + 4 * ((iqs/2)%4));
+
+    vl[0] = ql[0];
+    vl[1] = ql[4];
+
+    vh[0] = qh[0] >> bq8_offset;
+    vh[1] = qh[4] >> bq8_offset;
+
+    const uint16_t * scales = (const uint16_t *)bq5_K->scales;
+    uint16_t aux[2];
+    const int j = bq8_offset/2;
+    if (j < 2) {
+        aux[0] = scales[j+0] & 0x3f3f;
+        aux[1] = scales[j+2] & 0x3f3f;
+    } else {
+        aux[0] = ((scales[j+2] >> 0) & 0x0f0f) | ((scales[j-2] & 0xc0c0) >> 2);
+        aux[1] = ((scales[j+2] >> 4) & 0x0f0f) | ((scales[j-0] & 0xc0c0) >> 2);
+    }
+    const uint8_t * sc = (const uint8_t *)aux;
+    const uint8_t * m  = sc + 2;
+
+#pragma unroll
+    for (int i = 0; i < QR5_K; ++i) {
+        const block_q8_1 * bq8i = bq8_1 + bq8_offset + i;
+        d8[i] = __low2float(bq8i->ds);
+
+        const int * q8 = (const int *)bq8i->qs + ((iqs/2)%4);
+        u[2*i+0] = q8[0];
+        u[2*i+1] = q8[4];
+    }
+
+    return vec_dot_q5_K_q8_1_impl_vmmq(vl, vh, u, sc, m, bq5_K->dm, d8);
+}
+
+static __device__ __forceinline__ float vec_dot_q6_K_q8_1_impl_mmvq(
+    const int & vl, const int & vh, const int * __restrict__ u, const int8_t * __restrict__ scales,
+    const float & d, const float * __restrict__ d8) {
+
+    float sumf = 0.0f;
+
+#pragma unroll
+    for (int i = 0; i < QR6_K; ++i) {
+        const int sc = scales[4*i];
+
+        const int vil = (vl >> (4*i)) & 0x0F0F0F0F;
+
+        const int vih = ((vh >> (4*i)) << 4) & 0x30303030;
+
+        const int vi = __vsubss4((vil | vih), 0x20202020); // vi = (vil | vih) - 32
+
+        sumf += d8[i] * (__dp4a(vi, u[i], 0) * sc); // SIMD dot product
+    }
+
+    return d*sumf;
+}
+
+static __device__ __forceinline__ float vec_dot_q6_K_q8_1(
+    const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {
+
+    const block_q6_K * bq6_K = (const block_q6_K *) vbq + kbx;
+
+    const int bq8_offset = 2 * QR6_K * (iqs / (QI6_K/2)) + (iqs % (QI6_K/2)) / (QI6_K/4);
+    const int scale_offset = (QI6_K/4) * (iqs / (QI6_K/2)) + (iqs % (QI6_K/2)) / (QI6_K/8);
+    const int vh_shift = 2 * ((iqs % (QI6_K/2)) / (QI6_K/4));
+
+    const int vl = q56_get_int_b2(bq6_K->ql, iqs);
+    const int vh = q56_get_int_b2(bq6_K->qh, (QI6_K/4) * (iqs / (QI6_K/2)) + iqs % (QI6_K/4)) >> vh_shift;
+
+    const int8_t * scales = bq6_K->scales + scale_offset;
+
+    int    u[QR6_K];
+    float d8[QR6_K];
+
+#pragma unroll
+    for (int i = 0; i < QR6_K; ++i) {
+        u[i]  = q56_get_int_b4(bq8_1[bq8_offset + 2*i].qs, iqs % QI8_1);
+        d8[i] = __low2float(bq8_1[bq8_offset + 2*i].ds);
+    }
+
+    return vec_dot_q6_K_q8_1_impl_mmvq(vl, vh, u, scales, bq6_K->d, d8);
+}
+struct dot_q5 {
+    static constexpr int qi = 32, vdr = 2;
+    static __device__ __forceinline__ float run(const void *w, const block_q8_1 *x, int b, int q) {
+        return vec_dot_q5_K_q8_1(w, x, b, q);
+    }
+};
+struct dot_q6 {
+    static constexpr int qi = 32, vdr = 1;
+    static __device__ __forceinline__ float run(const void *w, const block_q8_1 *x, int b, int q) {
+        return vec_dot_q6_K_q8_1(w, x, b, q);
+    }
+};
+#endif
+struct dot_q4 {
+    static constexpr int qi = QI4_K, vdr = VDR_Q4_K_Q8_1_MMVQ;
+    static __device__ __forceinline__ float run(const void *w, const block_q8_1 *x, int b, int q) {
+        return vec_dot_q4_K_q8_1(w, x, b, q);
+    }
+};
+
 // mmvq.cu calc_nwarps / calc_rows_per_block, MMVQ_PARAMETERS_GENERIC rows for ncols_dst 1..4.
 static constexpr __host__ __device__ int calc_nwarps(int ncols_dst) { return ncols_dst <= 4 ? 4 : 2; }
 static constexpr __host__ __device__ int calc_rows_per_block(int ncols_dst) { return ncols_dst == 1 ? 1 : 2; }
 
 // mmvq.cu mul_mat_vec_q, Q4_K, no fusion, one channel and sample.
-template <int ncols_dst>
+template <int ncols_dst, typename Dot = dot_q4>
 __launch_bounds__(calc_nwarps(ncols_dst) * warp_size, 1)
 static __global__ void mul_mat_vec_q(const void *__restrict__ vx, const block_q8_1 *__restrict__ y,
                                      float *__restrict__ dst, const int ncols_x, const int nrows_x) {
     constexpr int qk = QK_K;
-    constexpr int qi = QI4_K;
-    constexpr int vdr = VDR_Q4_K_Q8_1_MMVQ;
+    constexpr int qi = Dot::qi;
+    constexpr int vdr = Dot::vdr;
     constexpr int nwarps = calc_nwarps(ncols_dst);
     constexpr int rows_per_cuda_block = calc_rows_per_block(ncols_dst);
 
@@ -163,7 +327,7 @@ static __global__ void mul_mat_vec_q(const void *__restrict__ vx, const block_q8
 #pragma unroll
             for (int i = 0; i < rows_per_cuda_block; ++i) {
                 const int row = min(row0 + i, nrows_x - 1);
-                tmp[j][i] += vec_dot_q4_K_q8_1(vx, &y[j * stride_col_y + kby], row * stride_row_x + kbx, kqs);
+                tmp[j][i] += Dot::run(vx, &y[j * stride_col_y + kby], row * stride_row_x + kbx, kqs);
             }
         }
     }

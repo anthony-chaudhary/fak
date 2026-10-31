@@ -503,6 +503,13 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 		return result, err
 	}
 	tokens := len(req.TokenIDs)
+	headRows := 0
+	if req.NeedLogits {
+		headRows = 1
+	}
+	if err := c.validateQ56KOperation(req, tokens, headRows); err != nil {
+		return result, &Qwen35SequenceError{Stage: "q56-operation-admission", Layer: -1, Cause: err}
+	}
 	arm, armErr := CUDAQ4KPrefillArmInUse()
 	plan, planErr := planCUDASequenceSplitScratch(req, arm, armErr)
 	if planErr != nil {
@@ -761,4 +768,37 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 	c.qwen35SequenceReleaseSinceLocked(transientStart, lastBuf, logitsBuf, logitsRowsBuf)
 	failed = false
 	return result, nil
+}
+
+// Admit only weights that will actually select the new P1..3 arm, before KV,
+// state or scratch work. A batch passes its true lanes for the always-run head;
+// ordinary prefill may request a separate P1 head after a large panel.
+// Future intermediate activations are still checked before each projection.
+func (c *cudaBackend) validateQ56KOperation(req Qwen35SequencePrefillRequest, panelRows, headRows int) error {
+	check := func(w Tensor) error { return c.validateQ56KMMVQWeight(w, panelRows) }
+	for _, layer := range req.Layers {
+		for _, w := range []Tensor{layer.Gate, layer.Up, layer.Down} {
+			if err := check(w); err != nil {
+				return err
+			}
+		}
+		weights := []Tensor{layer.Q, layer.K, layer.V, layer.O}
+		if layer.Linear {
+			weights = []Tensor{layer.GDNInQKV, layer.GDNInZ, layer.GDNInB, layer.GDNInA, layer.GDNOut}
+		}
+		for _, w := range weights {
+			if err := check(w); err != nil {
+				return err
+			}
+		}
+	}
+	if req.NeedAllLogits {
+		if err := check(req.Output); err != nil {
+			return err
+		}
+	}
+	if headRows > 0 {
+		return c.validateQ56KMMVQWeight(req.Output, headRows)
+	}
+	return nil
 }

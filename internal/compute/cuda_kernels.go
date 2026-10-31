@@ -106,6 +106,9 @@ func (c *cudaBackend) qwen35SequenceAllocLocked(shape []int, site string) (Tenso
 }
 
 func (c *cudaBackend) qwen35SequenceMatMulLocked(w, x Tensor, tokens int, site string) (Tensor, *cudaBuf, error) {
+	if err := c.validateQ56KMMVQOperands(w, x, tokens); err != nil {
+		return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: err}
+	}
 	if w.Dtype == Q2_K {
 		if err := c.validateQ2KOperands(w, x, tokens, tokens != 1 || len(x.Shape) != 1); err != nil {
 			return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: err}
@@ -133,9 +136,13 @@ func (c *cudaBackend) qwen35SequenceMatMulLocked(w, x Tensor, tokens int, site s
 			return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: cudaGEMMError("qwen35-sequence-"+site, rc, cudaQ4KScratch(out, in, tokens))}
 		}
 	case Q5_K:
-		C.fcuda_q5k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))
+		if err := c.q56KMMVQFailure(y, int(C.fcuda_q5k_matmul_checked_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))), in, tokens); err != nil {
+			return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: err}
+		}
 	case Q6_K:
-		C.fcuda_q6k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))
+		if err := c.q56KMMVQFailure(y, int(C.fcuda_q6k_matmul_checked_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))), in, tokens); err != nil {
+			return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: err}
+		}
 	case Q2_K:
 		if rc := int(C.fcuda_q2k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))); rc != 0 {
 			c.releaseTransientBuffers([]*cudaBuf{b})

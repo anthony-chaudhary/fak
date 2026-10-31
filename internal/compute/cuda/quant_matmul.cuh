@@ -1008,6 +1008,160 @@ extern "C" void fcuda_q6k_matmul_f32(const uint8_t *w, const float *x, float *y,
   FCUDA_TS("k_q6k_gemm", dim3((o + 7) / 8, p), k_q6k_gemm<1><<<dim3((o + 7) / 8, p), 256, 0, g_stream>>>(w, x, y, o, i, p));
 }
 
+
+// Checked Q5/Q6 qualification adapter. The old void functions above remain the
+// exact default/P>=4 ABI. One shared owner serves both new formats and never
+// borrows the independent Q4 split-scratch loan.
+static unsigned long long g_q56k_mmvq_launches[2] = {};
+extern "C" int fcuda_q56k_mmvq_enabled(void) {
+#ifdef FAK_CUDA_Q56K_MMVQ_QUALIFICATION
+    return 1;
+#else
+    return 0;
+#endif
+}
+extern "C" unsigned long long fcuda_q56k_mmvq_launch_count(int kind) {
+    return kind == 5 || kind == 6 ? g_q56k_mmvq_launches[kind-5] : 0;
+}
+extern "C" int fcuda_q56k_mmvq_terminal(void) { return v41_candidates_stream_uncertain() ? 1 : 0; }
+#ifdef FAK_CUDA_Q56K_MMVQ_QUALIFICATION
+static fak_q4k_mmvq::block_q8_1 *g_q56k_mmvq_y = nullptr;
+static void *g_q56k_mmvq_retained = nullptr; // terminal failed growth; never reused/reset
+static size_t g_q56k_mmvq_capacity = 0;
+static int q56k_mmvq_drain(int first) {
+    const cudaError_t e = cudaStreamSynchronize(g_stream);
+    if (e != cudaSuccess && !g_cuda_cleanup_status) g_cuda_cleanup_status = (int)e;
+    return first != 0 ? first : (int)e;
+}
+static int q56k_mmvq_state(void) {
+    if (!g_stream || v41_candidates_stream_uncertain()) return -75604;
+    if (g_capture_open || g_q4k_qkv_async_pending != 0) return -75602;
+    cudaStreamCaptureStatus capture = cudaStreamCaptureStatusNone;
+    cudaError_t e = cudaStreamIsCapturing(g_stream, &capture);
+    if (e != cudaSuccess) return (int)e;
+    if (capture != cudaStreamCaptureStatusNone) return -75602;
+    int device = -1;
+    e = cudaGetDevice(&device);
+    if (e != cudaSuccess) return (int)e;
+    if (device != 0) return -75605;
+    cudaDeviceProp prop{};
+    e = cudaGetDeviceProperties(&prop, device);
+    if (e != cudaSuccess) return (int)e;
+    if (prop.major < 8) return -75605;
+    return (int)cudaPeekAtLastError(); // preserve, never consume another launch's error
+}
+static int q56k_mmvq_extent(const void *p, size_t n, size_t align) {
+    if (!p || (uintptr_t)p % align || n > UINTPTR_MAX-(uintptr_t)p || v41c_pending_contains(p)) return -75603;
+    auto it = g_live.find((void *)p);
+    auto panel = g_panel_live.find((void *)p);
+    if ((it == g_live.end() || it->second < n) && (panel == g_panel_live.end() || panel->second < n)) return -75603;
+    cudaPointerAttributes a{};
+    cudaError_t e = cudaPointerGetAttributes(&a, p);
+    if (e != cudaSuccess) return (int)e;
+    return a.type == cudaMemoryTypeDevice && a.device == 0 ? 0 : -75603;
+}
+static bool q56k_mmvq_overlap(const void *a, size_t an, const void *b, size_t bn) {
+    return (uintptr_t)a < (uintptr_t)b+bn && (uintptr_t)b < (uintptr_t)a+an;
+}
+#endif
+// x==nullptr admits a weight/native state before a whole operation's future
+// activations exist. Per-projection admission later supplies x and repeats it.
+extern "C" int fcuda_q56k_mmvq_preflight(const uint8_t *w, const float *x, int out, int in, int p, int kind) {
+#ifdef FAK_CUDA_Q56K_MMVQ_QUALIFICATION
+    if (p >= 4) return 0;
+    if (p < 1 || out <= 0 || in <= 0 || in % 256 || (kind != 5 && kind != 6) ||
+        (int64_t)out*in > INT_MAX || (int64_t)p*in > INT_MAX || (int64_t)p*out > INT_MAX) return -75601;
+    int rc = q56k_mmvq_state(); if (rc) return rc;
+    const size_t wb = (size_t)out*(in/256)*(kind == 5 ? 176 : 210);
+    rc = q56k_mmvq_extent(w, wb, kind == 5 ? 4 : 2); if (rc || !x) return rc;
+    const size_t xb = (size_t)p*in*sizeof(float);
+    rc = q56k_mmvq_extent(x, xb, alignof(float)); if (rc) return rc;
+    return q56k_mmvq_overlap(w, wb, x, xb) ? -75603 : 0;
+#else
+    (void)w; (void)x; (void)out; (void)in; (void)p; (void)kind;
+    return 0;
+#endif
+}
+#ifdef FAK_CUDA_Q56K_MMVQ_QUALIFICATION
+template <typename Dot>
+static int q56k_mmvq_run(const uint8_t *w, const float *x, float *y, int out, int in, int p, int kind) {
+    // The weight-only preflight API permits null future activations; execution
+    // never does, even when called directly rather than through the Go gate.
+    if (!x) return -75603;
+    int rc = fcuda_q56k_mmvq_preflight(w, x, out, in, p, kind); if (rc) return rc;
+    const size_t yb = (size_t)p*out*sizeof(float), xb = (size_t)p*in*sizeof(float);
+    const size_t wb = (size_t)out*(in/256)*(kind == 5 ? 176 : 210);
+    rc = q56k_mmvq_extent(y, yb, alignof(float)); if (rc) return rc;
+    if (q56k_mmvq_overlap(y, yb, x, xb) || q56k_mmvq_overlap(y, yb, w, wb)) return -75603;
+    const size_t need = (size_t)p*(in/32)*sizeof(fak_q4k_mmvq::block_q8_1);
+    if (need > g_q56k_mmvq_capacity) {
+        void *next = nullptr;
+        const cudaError_t allocated = fcuda_alloc_status(cudaMalloc(&next, need));
+        if (allocated != cudaSuccess || !next) {
+            if (next) { g_q56k_mmvq_retained = next; if (!g_cuda_cleanup_status) g_cuda_cleanup_status = (int)allocated ? (int)allocated : (int)cudaErrorUnknown; }
+            return allocated == cudaErrorMemoryAllocation || allocated == cudaSuccess ? FCUDA_SCRATCH_ALLOC_FAILED : (int)allocated;
+        }
+        fak_alloc_track(next, FAK_ALLOC_ACTIVATIONS_SCRATCH, FAK_ALLOC_DEVICE_LOCAL, FAK_ALLOC_SITE("q56k-mmvq-q8_1-activations"), need);
+        if (g_q56k_mmvq_y) {
+            const cudaError_t drained = cudaStreamSynchronize(g_stream);
+            if (drained != cudaSuccess) {
+                if (!g_cuda_cleanup_status) g_cuda_cleanup_status = (int)drained;
+                g_q56k_mmvq_retained = next; return (int)drained;
+            }
+            const cudaError_t freed = cudaFree(g_q56k_mmvq_y);
+            if (freed != cudaSuccess) {
+                if (!g_cuda_cleanup_status) g_cuda_cleanup_status = (int)freed;
+                g_q56k_mmvq_retained = next; return (int)freed;
+            }
+            fak_alloc_untrack(g_q56k_mmvq_y);
+        }
+        g_q56k_mmvq_y = (fak_q4k_mmvq::block_q8_1 *)next;
+        g_q56k_mmvq_capacity = need;
+    }
+    dim3 qgrid(in/256, p);
+    FCUDA_TS("quantize_q8_1", qgrid, {
+        fak_q4k_mmvq::quantize_q8_1<<<qgrid,256,0,g_stream>>>(x,g_q56k_mmvq_y,in);
+        rc = (int)cudaGetLastError();
+    });
+    if (rc) return q56k_mmvq_drain(rc);
+    dim3 block(32,4), grid(out);
+    switch (p) {
+    case 1:
+        FCUDA_TS("k_q56k_mmvq_gemv", grid, {
+            fak_q4k_mmvq::mul_mat_vec_q<1,Dot><<<grid,block,0,g_stream>>>(w,g_q56k_mmvq_y,y,in,out);
+            rc = (int)cudaGetLastError();
+        }); break;
+    case 2:
+        grid.x = out/2 + out%2;
+        FCUDA_TS("k_q56k_mmvq_gemv", grid, {
+            fak_q4k_mmvq::mul_mat_vec_q<2,Dot><<<grid,block,0,g_stream>>>(w,g_q56k_mmvq_y,y,in,out);
+            rc = (int)cudaGetLastError();
+        }); break;
+    default:
+        grid.x = out/2 + out%2;
+        FCUDA_TS("k_q56k_mmvq_gemv", grid, {
+            fak_q4k_mmvq::mul_mat_vec_q<3,Dot><<<grid,block,0,g_stream>>>(w,g_q56k_mmvq_y,y,in,out);
+            rc = (int)cudaGetLastError();
+        }); break;
+    }
+    if (rc) return q56k_mmvq_drain(rc);
+    ++g_q56k_mmvq_launches[kind-5]; // submitted, not a completion/quality claim
+    return 0;
+}
+#endif
+extern "C" int fcuda_q5k_matmul_checked_f32(const uint8_t *w, const float *x, float *y, int out, int in, int p) {
+#ifdef FAK_CUDA_Q56K_MMVQ_QUALIFICATION
+    if (p < 4) return q56k_mmvq_run<fak_q4k_mmvq::dot_q5>(w,x,y,out,in,p,5);
+#endif
+    fcuda_q5k_matmul_f32(w,x,y,out,in,p); return 0;
+}
+extern "C" int fcuda_q6k_matmul_checked_f32(const uint8_t *w, const float *x, float *y, int out, int in, int p) {
+#ifdef FAK_CUDA_Q56K_MMVQ_QUALIFICATION
+    if (p < 4) return q56k_mmvq_run<fak_q4k_mmvq::dot_q6>(w,x,y,out,in,p,6);
+#endif
+    fcuda_q6k_matmul_f32(w,x,y,out,in,p); return 0;
+}
+
 // =================================================================================
 // Q2_K Resident Dequant-Fused GEMV & Panel GEMM (sm_80/sm_89/sm_90, issue #11945)
 // Super-block: 256 weights, 84 bytes (16 scales, 64 quants, 2 d, 2 dmin)

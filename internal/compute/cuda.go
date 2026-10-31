@@ -224,6 +224,9 @@ func readCUDADeviceWork() DeviceWork {
 func (c *cudaBackend) Recycle() {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	if cudaQ56KMMVQReleaseBlocked() {
+		return
+	}
 	if cudaQ4KAsyncReleaseBlockedLocked() {
 		return
 	} // preserve primary failure
@@ -261,6 +264,10 @@ func (c *cudaBackend) compactTransientLocked() {
 // The caller holds cudaMu and has already fenced/drained any kernel that may
 // still reference the buffers.
 func (c *cudaBackend) releaseTransientBuffers(buffers []*cudaBuf) {
+	// A selected Q56 failed drain retains both native storage and Go owners.
+	if cudaQ56KMMVQReleaseBlocked() {
+		return
+	}
 	if len(buffers) == 0 {
 		return
 	}
@@ -792,6 +799,9 @@ func (c *cudaBackend) Free(t Tensor) {
 }
 
 func (c *cudaBackend) cudaFreeLocked(t Tensor) {
+	if cudaQ56KMMVQReleaseBlocked() {
+		return
+	}
 	// Cleanup retains handles rather than replacing an already selected error.
 	if cudaQ4KAsyncReleaseBlockedLocked() {
 		return
@@ -810,6 +820,9 @@ func (c *cudaBackend) cudaFreeLocked(t Tensor) {
 }
 
 func (c *cudaBackend) cudaFreeStorageLocked(t Tensor) {
+	if cudaQ56KMMVQReleaseBlocked() {
+		return
+	}
 	if db, ok := t.buf.(*cudaBuf); ok && db.ptr != nil {
 		awaitAsyncUploadLocked(db.ptr) // never pool a buffer the copy stream still writes
 		if db.host != 0 {
@@ -1086,6 +1099,140 @@ func (c *cudaBackend) cudaNVFP4LtCallsForTest() uint64 {
 	return uint64(C.fcuda_nvfp4_w4a4_lt_calls())
 }
 
+// Qualification is typed into the native archive; no request/environment switch.
+// Raw metadata admission must precede cudaBufForSubmit (which can submit a peer
+// compressor), tracing, and allocations. Default/P>=4 behavior is untouched.
+var cudaQ56KMMVQQualification = C.fcuda_q56k_mmvq_enabled() != 0 // immutable native archive selection
+
+func cudaQ56KMMVQReleaseBlocked() bool {
+	return cudaQ56KMMVQQualification && C.fcuda_q56k_mmvq_terminal() != 0
+}
+
+func cudaQ56KMMVQSelected(w Tensor, p int) bool {
+	return (w.Dtype == Q5_K || w.Dtype == Q6_K) && p < 4 && cudaQ56KMMVQQualification
+}
+func cudaQ56KMMVQRefusal(reason string) error {
+	return &CUDAOpError{Op: "Q56KMMVQ", Site: "preflight", Msg: reason, Code: -75603, Class: MemoryActivation}
+}
+func (c *cudaBackend) cudaQ56KMMVQBuffer(t Tensor, n int) (*cudaBuf, error) {
+	b, ok := t.buf.(*cudaBuf)
+	if t.Backend() != c || !ok || b == nil || b.ptr == nil || b.device != 0 || b.managed || b.scales != nil || b.n < n || b.invalidForSubmit() {
+		return nil, cudaQ56KMMVQRefusal("require live owned device-0 storage, sufficient extent and no auxiliary scales")
+	}
+	if _, pending := cudaAsyncPending[b.ptr]; pending {
+		return nil, cudaQ56KMMVQRefusal("upload owner has not retired")
+	}
+	if cudaV41CompressorPendingIndex(b) >= 0 {
+		return nil, cudaQ56KMMVQRefusal("pending compressor owner is not adopted")
+	}
+	return b, nil
+}
+func (c *cudaBackend) validateQ56KMMVQWeight(w Tensor, p int) error {
+	if !cudaQ56KMMVQSelected(w, p) {
+		return nil
+	}
+	if err := c.faultLatch.Admit("q56k-mmvq"); err != nil {
+		return err
+	}
+	if c.capturing || cudaQ4KAsyncReleaseBlockedLocked() {
+		return cudaQ56KMMVQRefusal("capture or pending asynchronous peer owner is unsupported")
+	}
+	if p < 1 || len(w.Shape) != 2 || w.Shape[0] <= 0 || w.Shape[1] <= 0 || w.Shape[1]%256 != 0 || w.Layout != RowMajor || w.Quant == nil || w.Quant.Block != 256 {
+		return cudaQ56KMMVQRefusal("require canonical positive block-256 row-major Q5_K/Q6_K and P=1..3")
+	}
+	if _, ok := qwen35GDNCheckedMul(qwen35GDNMaxCInt, int64(w.Shape[0]), int64(w.Shape[1])); !ok {
+		return cudaQ56KMMVQRefusal("weight indexing exceeds the CUDA int ABI")
+	}
+	for _, width := range w.Shape {
+		if _, ok := qwen35GDNCheckedMul(qwen35GDNMaxCInt, int64(p), int64(width)); !ok {
+			return cudaQ56KMMVQRefusal("panel indexing exceeds the CUDA int ABI")
+		}
+	}
+	bytes, kind := 176, 5
+	if w.Dtype == Q6_K {
+		bytes, kind = 210, 6
+	}
+	b, err := c.cudaQ56KMMVQBuffer(w, w.Shape[0]*(w.Shape[1]/256)*bytes)
+	if err != nil {
+		return err
+	}
+	rc := int(C.fcuda_q56k_mmvq_preflight((*C.uint8_t)(b.ptr), nil, C.int(w.Shape[0]), C.int(w.Shape[1]), C.int(p), C.int(kind)))
+	if rc != 0 {
+		return cudaGEMMError("q56k-mmvq-weight-admission", rc, cudaGEMMScratch{})
+	}
+	return nil
+}
+func (c *cudaBackend) validateQ56KMMVQOperands(w, x Tensor, p int) error {
+	if !cudaQ56KMMVQSelected(w, p) {
+		return nil
+	}
+	if err := c.validateQ56KMMVQWeight(w, p); err != nil {
+		return err
+	}
+	in := w.Shape[1]
+	shape := len(x.Shape) == 2 && x.Shape[0] == p && x.Shape[1] == in || p == 1 && len(x.Shape) == 1 && x.Shape[0] == in
+	if !shape || x.Dtype != F32 || x.Layout != RowMajor || x.Quant != nil {
+		return cudaQ56KMMVQRefusal("activation must be F32 row-major [P,in] (or a P1 vector)")
+	}
+	b, err := c.cudaQ56KMMVQBuffer(x, p*in*4)
+	if err != nil {
+		return err
+	}
+	kind := 5
+	if w.Dtype == Q6_K {
+		kind = 6
+	}
+	wb := w.buf.(*cudaBuf)
+	rc := int(C.fcuda_q56k_mmvq_preflight((*C.uint8_t)(wb.ptr), (*C.float)(b.ptr), C.int(w.Shape[0]), C.int(in), C.int(p), C.int(kind)))
+	if rc != 0 {
+		return cudaGEMMError("q56k-mmvq-operand-admission", rc, cudaGEMMScratch{})
+	}
+	return nil
+}
+
+// The checked native selected arm drains submitted work on immediate failure.
+// A failed drain sets the shared terminal latch; neither this helper nor outer
+// sequence/GDN cleanup may detach or recycle the now-uncertain owners.
+func (c *cudaBackend) q56KMMVQFailure(y Tensor, rc, in, p int) error {
+	if rc == 0 {
+		return nil
+	}
+	if b, ok := y.buf.(*cudaBuf); ok {
+		atomic.StoreUint32(&b.invalid, 1)
+		if C.fcuda_q56k_mmvq_terminal() == 0 {
+			c.releaseTransientBuffers([]*cudaBuf{b})
+		}
+	}
+	if C.fcuda_q56k_mmvq_terminal() != 0 {
+		c.faultLatch.Observe(DeviceFaultExecution, "q56k-mmvq-terminal", rc)
+	}
+	return cudaGEMMError("q56k-mmvq", rc, cudaGEMMScratch{main: p * (in / 32) * 36})
+}
+func (c *cudaBackend) cudaQ56KMMVQForTest() (bool, uint64, uint64, uint64) {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return C.fcuda_q56k_mmvq_enabled() != 0, uint64(C.fcuda_q56k_mmvq_launch_count(5)), uint64(C.fcuda_q56k_mmvq_launch_count(6)), atomic.LoadUint64(&c.fenceGen)
+}
+
+// Required-device negative seam: use real owned weight/output storage and the
+// checked native ABI. Only the activation pointer is deliberately absent.
+func (c *cudaBackend) cudaQ56KMMVQNullInputForTest(w, y Tensor) int {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	if !cudaQ56KMMVQSelected(w, 1) || c.validateQ56KMMVQWeight(w, 1) != nil {
+		return -75601
+	}
+	b, err := c.cudaQ56KMMVQBuffer(y, w.Shape[0]*4)
+	if err != nil {
+		return -75603
+	}
+	wb := w.buf.(*cudaBuf)
+	if w.Dtype == Q5_K {
+		return int(C.fcuda_q5k_matmul_checked_f32((*C.uint8_t)(wb.ptr), nil, (*C.float)(b.ptr), C.int(w.Shape[0]), C.int(w.Shape[1]), 1))
+	}
+	return int(C.fcuda_q6k_matmul_checked_f32((*C.uint8_t)(wb.ptr), nil, (*C.float)(b.ptr), C.int(w.Shape[0]), C.int(w.Shape[1]), 1))
+}
+
 // MatMul computes y = x @ Wᵀ as a decode GEMV (P=1), dispatching on the weight dtype to the
 // SGEMM (F32), tensor-core HGEMM (F16), or native Q8_0/Q4_K device GEMV; output is F32-resident.
 func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
@@ -1096,6 +1243,9 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 
 // Caller holds cudaMu; reused by the bounded compressor producer scope.
 func (c *cudaBackend) cudaMatMulLocked(w, x Tensor) Tensor {
+	if err := c.validateQ56KMMVQOperands(w, x, 1); err != nil {
+		panic(err)
+	}
 	trace := false
 	var started time.Time
 	var y Tensor
@@ -1154,11 +1304,15 @@ func (c *cudaBackend) cudaMatMulLocked(w, x Tensor) Tensor {
 	case Q5_K:
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{out}, F32)
-		C.fcuda_q5k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)
+		if err := c.q56KMMVQFailure(y, int(C.fcuda_q5k_matmul_checked_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)), in, 1); err != nil {
+			panic(err)
+		}
 	case Q6_K:
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{out}, F32)
-		C.fcuda_q6k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)
+		if err := c.q56KMMVQFailure(y, int(C.fcuda_q6k_matmul_checked_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)), in, 1); err != nil {
+			panic(err)
+		}
 	case Q3_K:
 		c.checkQ3KOperands(w, x, out, in, 1, false)
 		wb := c.cudaBufForSubmit(w)
@@ -1237,6 +1391,9 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		}
 		cudaMu.Unlock()
 	}()
+	if err := c.validateQ56KMMVQOperands(w, X, P); err != nil {
+		panic(err)
+	}
 	if w.Dtype == Q2_K {
 		c.checkQ2KOperands(w, X, P, true)
 	}
@@ -1279,11 +1436,15 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	case Q5_K:
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
-		C.fcuda_q5k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))
+		if err := c.q56KMMVQFailure(y, int(C.fcuda_q5k_matmul_checked_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))), in, P); err != nil {
+			panic(err)
+		}
 	case Q6_K:
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
-		C.fcuda_q6k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))
+		if err := c.q56KMMVQFailure(y, int(C.fcuda_q6k_matmul_checked_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))), in, P); err != nil {
+			panic(err)
+		}
 	case Q3_K:
 		c.checkQ3KOperands(w, X, out, in, P, true)
 		wb := c.cudaBufForSubmit(w)

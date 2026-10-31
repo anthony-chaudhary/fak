@@ -998,7 +998,7 @@ static int qwen35_gdn_packed_projection(
   if (kind == 2) {
     status = fcuda_q4k_matmul_f32((const uint8_t *)weight, x, y, out, in, tokens);
   } else if (kind == 3) {
-    fcuda_q6k_matmul_f32((const uint8_t *)weight, x, y, out, in, tokens);
+    status = fcuda_q6k_matmul_checked_f32((const uint8_t *)weight, x, y, out, in, tokens);
   } else {
     return 0;
   }

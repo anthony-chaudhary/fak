@@ -143,6 +143,9 @@ func (c *cudaBackend) validateQwen35GDNOperands(operands []qwen35GDNOperand, con
 		if err := c.validateQwen35GDNPackedInput(operand.name, operand.t, tokens); err != nil {
 			return err
 		}
+		if err := c.validateQ56KMMVQWeight(operand.t, tokens); err != nil {
+			return &Qwen35GDNResidencyError{Operand: operand.name, Reason: "Q56 qualification admission", Err: err}
+		}
 	}
 	return c.validateQwen35GDNStateOperands(operands, convState, recurrentState)
 }

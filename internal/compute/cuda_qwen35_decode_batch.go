@@ -99,6 +99,9 @@ func (c *cudaBackend) Qwen35IndependentDecodeBatch(req Qwen35IndependentDecodeBa
 		}
 		kvs[i] = kv
 	}
+	if err := c.validateQ56KOperation(first, lanes, lanes); err != nil {
+		return result, fail(err)
+	}
 	compactLayers := len(first.Layers) / 4
 	stage = "kv-reserve"
 	for i, lane := range req.Lanes {
