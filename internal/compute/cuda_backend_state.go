@@ -86,6 +86,7 @@ func (b *cudaBuf) invalidStateError(operand string) error {
 func (c *cudaBackend) cudaBufForSubmit(t Tensor) *cudaBuf {
 	cudaV41CheckedSubmit()
 	b := t.buf.(*cudaBuf)
+	cudaV41CompressorSubmitLocked(b)
 	if err := b.invalidStateError("buffer"); err != nil {
 		panic(err)
 	}

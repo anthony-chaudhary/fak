@@ -50,6 +50,7 @@ func (c *cudaBackend) devTr(shape []int, dt Dtype) (Tensor, *cudaBuf) {
 	b.bornGen = atomic.LoadUint64(&c.fenceGen)
 	c.transient = append(c.transient, b)
 	c.graphOncePinLocked(b)
+	cudaV41CompressorProducedLocked(c, b)
 	return t, b
 }
 

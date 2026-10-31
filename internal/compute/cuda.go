@@ -223,6 +223,11 @@ func readCUDADeviceWork() DeviceWork {
 func (c *cudaBackend) Recycle() {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	if cudaQ4KAsyncReleaseBlockedLocked() {
+		return
+	} // preserve primary failure
+	cudaV41CompressorDrainLocked(c)
+	cudaQ4KAsyncRequireDrainLocked(c)
 	if cudaKernelProfileOn {
 		C.fcuda_ts_boundary() // token boundary: resolve this token's event pairs
 	}
@@ -258,8 +263,15 @@ func (c *cudaBackend) releaseTransientBuffers(buffers []*cudaBuf) {
 	if len(buffers) == 0 {
 		return
 	}
+	if cudaQ4KAsyncReleaseBlockedLocked() {
+		return
+	}
+	cudaQ4KAsyncRequireDrainLocked(c)
 	for _, target := range buffers {
 		if target != nil && target.ptr != nil && !target.graphOncePinned {
+			if cudaV41CompressorDeferFreeLocked(c, target) {
+				continue
+			}
 			c.graphOnceFreeDependencyLocked(target)
 			C.fcuda_free(target.ptr)
 			target.ptr = nil
@@ -269,7 +281,7 @@ func (c *cudaBackend) releaseTransientBuffers(buffers []*cudaBuf) {
 	for _, live := range c.transient {
 		release := false
 		for _, target := range buffers {
-			if live == target {
+			if live == target && cudaV41CompressorPendingIndex(target) < 0 {
 				release = true
 				break
 			}
@@ -326,6 +338,8 @@ func (c *cudaBackend) GraphBegin() bool {
 	}
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	cudaV41CompressorDrainLocked(c)
+	cudaQ4KAsyncRequireDrainLocked(c)
 	// #969: deepen every pool bucket BEFORE opening capture. The warm forward pools one set of
 	// each transient size, but a single captured decodeChain holds several same-size transients
 	// (the per-layer RMSNorm outputs, etc.) live at once, so the pool can drain mid-forward and a
@@ -711,6 +725,10 @@ func (c *cudaBackend) Read(t Tensor) []float32 {
 	if err := db.invalidStateError("buffer"); err != nil {
 		panic(err)
 	}
+	cudaV41CompressorSubmitLocked(db)
+	pending := cudaV41CompressorReadBeginLocked(c)
+	readOK := false
+	defer func() { cudaV41CompressorReadEndLocked(c, pending, readOK) }()
 	out := make([]float32, t.Numel())
 	if len(out) > 0 {
 		if err := AdmitDevice(c, "read-d2h"); err != nil {
@@ -737,6 +755,7 @@ func (c *cudaBackend) Read(t Tensor) []float32 {
 			atomic.AddUint64(&c.fenceGen, 1)
 		}
 	}
+	readOK = true
 	return out
 }
 
@@ -767,11 +786,29 @@ func (c *cudaBackend) CloneTensor(t Tensor) (Tensor, error) {
 func (c *cudaBackend) Free(t Tensor) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	c.cudaFreeLocked(t)
+}
+
+func (c *cudaBackend) cudaFreeLocked(t Tensor) {
+	// Cleanup retains handles rather than replacing an already selected error.
+	if cudaQ4KAsyncReleaseBlockedLocked() {
+		return
+	}
 	if db, ok := t.buf.(*cudaBuf); ok && db.ptr != nil {
 		if db.graphOncePinned {
 			return
 		}
 		c.graphOnceFreeDependencyLocked(db)
+		if cudaV41CompressorDeferFreeLocked(c, db) {
+			return
+		}
+	}
+	cudaQ4KAsyncRequireDrainLocked(c)
+	c.cudaFreeStorageLocked(t)
+}
+
+func (c *cudaBackend) cudaFreeStorageLocked(t Tensor) {
+	if db, ok := t.buf.(*cudaBuf); ok && db.ptr != nil {
 		awaitAsyncUploadLocked(db.ptr) // never pool a buffer the copy stream still writes
 		if db.host != 0 {
 			// evict the exact (ptr, dtype, layout) entry so a re-upload of the same host buffer re-stages
@@ -1046,6 +1083,12 @@ func (c *cudaBackend) cudaNVFP4LtCallsForTest() uint64 {
 // SGEMM (F32), tensor-core HGEMM (F16), or native Q8_0/Q4_K device GEMV; output is F32-resident.
 func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return c.cudaMatMulLocked(w, x)
+}
+
+// Caller holds cudaMu; reused by the bounded compressor producer scope.
+func (c *cudaBackend) cudaMatMulLocked(w, x Tensor) Tensor {
 	trace := false
 	var started time.Time
 	var y Tensor
@@ -1059,7 +1102,6 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 				}
 			}
 		}
-		cudaMu.Unlock()
 	}()
 	if w.Dtype == Q2_K {
 		c.checkQ2KOperands(w, x, 1, false)

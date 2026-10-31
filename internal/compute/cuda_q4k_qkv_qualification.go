@@ -1,4 +1,4 @@
-//go:build cuda && cgo && fak_cuda_q4k_qkv_qualification && fak_cuda_v41_index_select
+//go:build cuda && cgo && fak_cuda_q4k_qkv_qualification && fak_cuda_v41_index_select && !fak_cuda_q4k_qkv_async
 
 package compute
 

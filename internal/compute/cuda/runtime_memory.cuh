@@ -249,6 +249,7 @@ extern "C" void fcuda_free(void *d) {
 #ifdef FAK_CUDA_V41_CHECKED_STREAM
   if (v41_candidates_stream_uncertain()) return;
 #endif
+  if (v41c_pending_contains(d)) return;
   if (!d) return;
   if (g_cuda_cleanup_status != 0) return;
   if (g_v41_router_uncertain) return;
@@ -350,6 +351,7 @@ extern "C" int fcuda_discard_unsubmitted(void *d, size_t expected_bytes) {
 #ifdef FAK_CUDA_V41_CHECKED_STREAM
   if (v41_candidates_stream_uncertain()) return (int)cudaErrorInvalidValue;
 #endif
+  if (v41c_pending_contains(d)) return (int)cudaErrorInvalidValue;
   if (!d || g_capture_open) return (int)cudaErrorInvalidValue;
   if (g_cuda_cleanup_status != 0) return g_cuda_cleanup_status;
   if (g_v41_router_uncertain) return (int)cudaErrorInvalidValue;

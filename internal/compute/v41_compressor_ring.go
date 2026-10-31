@@ -27,6 +27,12 @@ type V41CompressorRingBackend interface {
 	V41CompressorRingStore(kv, scores, kvRow, scoreRow Tensor, slot, ratio, width int, emit bool) (Tensor, error)
 }
 
+// V41CompressorRingProducerBackend owns the connected same-stream producers
+// before enqueue; selected failures must not fall back to separate MatMuls.
+type V41CompressorRingProducerBackend interface {
+	V41CompressorRingProjectStore(kv, scores, wkv, wscore, x Tensor, slot, ratio, width int, emit bool) (Tensor, error)
+}
+
 var (
 	// ErrV41CompressorRingGeometry marks a ring request refused before any
 	// device work.

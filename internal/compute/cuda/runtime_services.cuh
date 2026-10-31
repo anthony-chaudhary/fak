@@ -155,6 +155,7 @@ extern "C" void fcuda_free_on(int device, void *d) {
 #ifdef FAK_CUDA_V41_CHECKED_STREAM
   if (v41_candidates_stream_uncertain()) return;
 #endif
+  if (v41c_pending_contains(d)) return;
   if (!d) return;
   if (g_cuda_cleanup_status != 0) return;
   if (g_v41_router_uncertain) return;
