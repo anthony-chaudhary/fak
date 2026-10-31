@@ -587,6 +587,108 @@ func cudaEnclosingFunc(src string, at int) string {
 	return fn
 }
 
+// cudaAsyncTimingName reads the actual transfer direction, not the enclosing
+// filename. Unknown directions and unsupported argument syntax fail closed.
+// Input starts after the call's opening parenthesis; source comments are stripped.
+func cudaAsyncTimingName(call, src string) (string, bool) {
+	var args []string
+	var stack []rune
+	start := 0
+	appendArg := func(end int) bool {
+		arg := strings.TrimSpace(src[start:end])
+		if arg == "" {
+			return false
+		}
+		args = append(args, arg)
+		return true
+	}
+	for i, ch := range src {
+		switch ch {
+		case '\'', '"', ';':
+			return "", false
+		case '(', '[', '{':
+			stack = append(stack, ch)
+		case ')', ']', '}':
+			if len(stack) > 0 {
+				open := stack[len(stack)-1]
+				if !(open == '(' && ch == ')' || open == '[' && ch == ']' || open == '{' && ch == '}') {
+					return "", false
+				}
+				stack = stack[:len(stack)-1]
+				continue
+			}
+			if ch != ')' || !appendArg(i) {
+				return "", false
+			}
+			if call == "cudaMemsetAsync" {
+				return "fill", len(args) == 4
+			}
+			if call != "cudaMemcpyAsync" || len(args) != 5 {
+				return "", false
+			}
+			name, ok := map[string]string{
+				"cudaMemcpyDeviceToDevice": "d2d_copy",
+				"cudaMemcpyHostToDevice":   "h2d_upload",
+				"cudaMemcpyDeviceToHost":   "readback",
+			}[args[3]]
+			return name, ok
+		case ',':
+			if len(stack) == 0 {
+				if !appendArg(i) {
+					return "", false
+				}
+				start = i + 1
+			}
+		}
+	}
+	return "", false
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestCUDAAsyncTimestampDirections(t *testing.T) {
+	for _, tc := range []struct {
+		call, src, want string
+		valid           bool
+	}{
+		{"cudaMemcpyAsync", "dst, src, bytes, cudaMemcpyDeviceToDevice, stream)", "d2d_copy", true},
+		{"cudaMemcpyAsync", "(char *)dst + offsets[i], src[i], sizes[i], cudaMemcpyDeviceToHost, stream)", "readback", true},
+		{"cudaMemcpyAsync", "dst, src, size(a, b), cudaMemcpyHostToDevice, stream)", "h2d_upload", true},
+		{"cudaMemsetAsync", "dst, 0, bytes, stream)", "fill", true},
+		{"cudaMemcpyAsync", "dst[), src, bytes, cudaMemcpyDeviceToHost, stream)", "", false},
+		{"cudaMemcpyAsync", "dst, src, size(a, bytes, cudaMemcpyDeviceToHost, stream)", "", false},
+		{"cudaMemcpyAsync", "dst,,bytes,cudaMemcpyDeviceToHost,stream)", "", false},
+		{"cudaMemcpyAsync", "dst, src, bytes, cudaMemcpyDefault, stream)", "", false},
+		{"cudaMemcpyAsync", "dst, src, bytes, direction, stream)", "", false},
+		{"cudaMemcpyAsync", "dst, src, bytes, cudaMemcpyDeviceToHost)", "", false},
+		{"cudaMemcpyAsync", "dst, src, bytes, cudaMemcpyHostToDevice, stream", "", false},
+	} {
+		got, valid := cudaAsyncTimingName(tc.call, tc.src)
+		if got != tc.want || valid != tc.valid {
+			t.Fatalf("%s(%s: got %q/%v, want %q/%v", tc.call, tc.src, got, valid, tc.want, tc.valid)
+		}
+	}
+	for _, tc := range []struct {
+		src  string
+		want bool
+	}{
+		{`FCUDA_TS("h2d_upload", grid, cudaMemcpyAsync(dst, src, bytes, cudaMemcpyHostToDevice, stream));`, true},
+		{`FCUDA_TS("readback", grid, cudaMemcpyAsync(dst, src, bytes, cudaMemcpyDeviceToHost, stream));`, true},
+		{`FCUDA_TS("d2d_copy", grid, cudaMemcpyAsync(dst, src, bytes, cudaMemcpyDeviceToHost, stream));`, false},
+		{`cudaMemcpyAsync(dst, src, bytes, cudaMemcpyHostToDevice, stream);`, false},
+		{`FCUDA_TS("h2d_upload", grid, noop()); cudaMemcpyAsync(dst, src, bytes, cudaMemcpyHostToDevice, stream);`, false},
+	} {
+		m := cudaAsyncCopy.FindStringSubmatchIndex(tc.src)
+		if m == nil {
+			t.Fatal("missing fixture transfer")
+		}
+		name, valid := cudaAsyncTimingName(tc.src[m[2]:m[3]], tc.src[m[1]:])
+		if got := valid && cudaTSEnclosing(tc.src, m[0]) == name; got != tc.want {
+			t.Fatalf("transfer timing accepted=%v want=%v: %s", got, tc.want, tc.src)
+		}
+	}
+
+}
+
 // cudaUntimedTransferSites lists the async copies that run outside the event
 // ring: a peer device's copy on the multi-GPU path (the profile keeps one device).
 var cudaUntimedTransferSites = map[string]bool{
@@ -629,7 +731,11 @@ func TestCUDATimestampSourceCoversEveryLaunch(t *testing.T) {
 		for _, m := range cudaAsyncCopy.FindAllStringSubmatchIndex(src, -1) {
 			async++
 			call, got := src[m[2]:m[3]], cudaTSEnclosing(src, m[0])
-			want := map[string]string{"cudaMemcpyAsync": "d2d_copy", "cudaMemsetAsync": "fill"}[call]
+			want, valid := cudaAsyncTimingName(call, src[m[1]:])
+			if !valid {
+				t.Errorf("%s:%d %s has no supported timestamp transfer direction", path, at(src, m[0]), call)
+				continue
+			}
 			if got == want {
 				continue
 			}
@@ -693,6 +799,9 @@ var cudaKernelOtherAllowlist = map[string]bool{
 	"v41c_compressor_store_kernel": true, "v41c_compressor_update_pool_kernel": true,
 	"quantize_q8_1": true, "k_q3k_dequant": true, "k_iq4xs_dequant_split": true,
 	"quantize_mmq_q8_1_d2s6": true, "quantize_mmq_q8_1_d4": true,
+	// Engram row gathers/dequantization and poisoned-output status publication.
+	"v41_eg_q5": true, "v41_eg_q2": true, "v41_eg_f32": true,
+	"v41_eg_iq4nl": true, "v41_eg_iq4nl_row": true, "v41_eg_iq4nl_poison": true,
 }
 
 // fak-test:runtime fast est=20ms lane=default

@@ -820,8 +820,9 @@ static int fcuda_q8_mmq_matmul(const int8_t *dCodes, const float *dScales, const
   const dim3 num_blocks(P, block_num_y, 1);
   const dim3 block_size(CUDA_QUANTIZE_BLOCK_SIZE_MMQ, 1, 1);
   // Defined extra token-tail blocks for the final shared-memory tile.
-  cudaError_t init_status = cudaMemsetAsync((char *)y + y_bytes - 128*sizeof(block_q8_1_mmq), 0,
-                                          128*sizeof(block_q8_1_mmq), g_stream);
+  cudaError_t init_status;
+  FCUDA_TS("fill", dim3(0, 0), init_status = cudaMemsetAsync((char *)y + y_bytes - 128*sizeof(block_q8_1_mmq), 0,
+                                          128*sizeof(block_q8_1_mmq), g_stream));
   if (init_status != cudaSuccess) {
     const int status = v41_checked_stream_error(54000, init_status);
     fcuda_free(y);

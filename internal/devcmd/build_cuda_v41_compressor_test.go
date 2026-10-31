@@ -3,7 +3,6 @@ package devcmd
 import (
 	"bytes"
 	"context"
-	"os"
 	"strings"
 	"testing"
 
@@ -31,6 +30,14 @@ func TestBuildCUDAV41CompressorFlags(t *testing.T) {
 				if cfg.EnableV41Compressor != tc.compressor || cfg.EnableV41CompressorPool != tc.pool {
 					t.Fatalf("incorrect candidate config: %+v", cfg)
 				}
+				// Check the canonical emitted tag, not a duplicate source-text implementation.
+				tags := "," + computebuild.CUDAGoTags(cfg) + ","
+				if got := strings.Contains(tags, ",fak_cuda_v41_compressor,"); got != tc.compressor {
+					t.Fatalf("canonical tags %q lost %s selection=%t", tags, "compressor", tc.compressor)
+				}
+				if got := strings.Contains(tags, ",fak_cuda_v41_compressor_pool,"); got != tc.pool {
+					t.Fatalf("canonical tags %q lost pool selection=%t", tags, tc.pool)
+				}
 				return nil
 			})
 			if tc.conflict {
@@ -41,12 +48,5 @@ func TestBuildCUDAV41CompressorFlags(t *testing.T) {
 				t.Fatalf("code=%d called=%v stderr=%s", code, called, errout.String())
 			}
 		})
-	}
-	data, err := os.ReadFile("build_cuda.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "if cfg.EnableV41Compressor {\n\t\ttags += \",fak_cuda_v41_compressor\"\n\t}") {
-		t.Fatal("acceptance family tags lost compressor pairing")
 	}
 }

@@ -32,17 +32,24 @@ extern "C" int fak_v41_embed_gather(const void *table,float *out,const intptr_t 
   for(int r=0;r<rows;++r) {
     const uint8_t *src=(const uint8_t *)table+(uint64_t)ids[r]*rowbytes;
     float *dst=out+(uint64_t)r*hidden;
+    cudaError_t launch_status;
     if(mode==2) {
       const int blocks=hidden/256;
-      v41_eg_q5<<<blocks<65535?blocks:65535,64,0,g_stream>>>(src,dst,blocks);
+      FCUDA_TS("v41_eg_q5", blocks<65535?blocks:65535,
+        v41_eg_q5<<<blocks<65535?blocks:65535,64,0,g_stream>>>(src,dst,blocks);
+        launch_status=cudaPeekAtLastError());
     } else if(mode==1) {
       const int blocks=hidden/256;
-      v41_eg_q2<<<blocks<65535?blocks:65535,64,0,g_stream>>>(src,dst,blocks);
+      FCUDA_TS("v41_eg_q2", blocks<65535?blocks:65535,
+        v41_eg_q2<<<blocks<65535?blocks:65535,64,0,g_stream>>>(src,dst,blocks);
+        launch_status=cudaPeekAtLastError());
     } else {
       const int blocks=(hidden-1)/256+1;
-      v41_eg_f32<<<blocks<65535?blocks:65535,256,0,g_stream>>>((const uint32_t *)src,(uint32_t *)dst,hidden);
+      FCUDA_TS("v41_eg_f32", blocks<65535?blocks:65535,
+        v41_eg_f32<<<blocks<65535?blocks:65535,256,0,g_stream>>>((const uint32_t *)src,(uint32_t *)dst,hidden);
+        launch_status=cudaPeekAtLastError());
     }
-    st=v41_checked_stream_error(20000,cudaPeekAtLastError());if(st)return st;
+    st=v41_checked_stream_error(20000,launch_status);if(st)return st;
   }
   return v41_checked_stream_finish();
 }
@@ -75,8 +82,11 @@ extern "C" int fak_v41_embed_iq4nl_gather(const void *table,float *out,const int
   for(int r=0;r<rows;++r) {
     const uint8_t *src=(const uint8_t *)table+(uint64_t)ids[r]*rowbytes;
     float *dst=out+(uint64_t)r*hidden;
-    v41_eg_iq4nl<<<blocks<65535?blocks:65535,32,0,g_stream>>>(src,dst,blocks);
-    st=v41_checked_stream_error(20000,cudaPeekAtLastError());if(st)return st;
+    cudaError_t launch_status;
+    FCUDA_TS("v41_eg_iq4nl", blocks<65535?blocks:65535,
+      v41_eg_iq4nl<<<blocks<65535?blocks:65535,32,0,g_stream>>>(src,dst,blocks);
+      launch_status=cudaPeekAtLastError());
+    st=v41_checked_stream_error(20000,launch_status);if(st)return st;
   }
   return v41_checked_stream_finish();
 }
@@ -143,8 +153,11 @@ extern "C" int fak_v41_embed_iq4nl_gather_rows(const void *table,float *out,uint
   st=v41_checked_stream_owned_bytes(status,statusbytes);if(st)return st;
   for(int r=0;r<rows;++r) {
     const uint8_t *src=(const uint8_t *)table+(uint64_t)ids[r]*144;
-    v41_eg_iq4nl_row<<<1,32,0,g_stream>>>(src,out+(uint64_t)r*dim,status+r,dim);
-    st=v41_checked_stream_error(20000,cudaPeekAtLastError());if(st)return st;
+    cudaError_t launch_status;
+    FCUDA_TS("v41_eg_iq4nl_row", 1,
+      v41_eg_iq4nl_row<<<1,32,0,g_stream>>>(src,out+(uint64_t)r*dim,status+r,dim);
+      launch_status=cudaPeekAtLastError());
+    st=v41_checked_stream_error(20000,launch_status);if(st)return st;
   }
   // Arithmetic faults only set row status; uncertain CUDA completion uses
   // the shared terminal/quarantine path and never masquerades as row data.
@@ -156,8 +169,11 @@ extern "C" int fak_v41_embed_iq4nl_row_poison(float *target,const uint32_t *stat
   int st=v41_checked_stream_state();if(st)return st;
   st=v41_checked_stream_owned_bytes(target,(uint64_t)targetCount*4);if(st)return st;
   st=v41_checked_stream_owned_bytes(status,(uint64_t)rows*4);if(st)return st;
-  v41_eg_iq4nl_poison<<<1,256,0,g_stream>>>(target,status,rows,index);
-  st=v41_checked_stream_error(20000,cudaPeekAtLastError());if(st)return st;
+  cudaError_t launch_status;
+  FCUDA_TS("v41_eg_iq4nl_poison", 1,
+    v41_eg_iq4nl_poison<<<1,256,0,g_stream>>>(target,status,rows,index);
+    launch_status=cudaPeekAtLastError());
+  st=v41_checked_stream_error(20000,launch_status);if(st)return st;
   return v41_checked_stream_finish();
 }
 #endif

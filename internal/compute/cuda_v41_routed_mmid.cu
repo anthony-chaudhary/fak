@@ -694,9 +694,9 @@ extern "C" int fak_v41_mmid_read_batch(void *host, size_t bytes,
     }
     size_t submitted = 0;
     for (int i = 0; i < count; ++i) {
-        fcuda_ts_untimed_transfer();
-        e = cudaMemcpyAsync((char *)image + offsets[i], sources[i], sizes[i],
-                            cudaMemcpyDeviceToHost, g_stream);
+        FCUDA_TS("readback", dim3(0, 0),
+            e = cudaMemcpyAsync((char *)image + offsets[i], sources[i], sizes[i],
+                                cudaMemcpyDeviceToHost, g_stream));
         if (e != cudaSuccess) {
             first = 20000 + (int)e;
             break;
