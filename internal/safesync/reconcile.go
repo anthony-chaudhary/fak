@@ -679,8 +679,21 @@ func (r *ReconcileRouter) routeInternal(ctx context.Context) (ReconcileAssessmen
 			targetBranch := strings.TrimSpace(r.opts.Branch)
 			if targetBranch == "" {
 				symRes := run(ctx, repo, "symbolic-ref", "--quiet", "HEAD")
-				if symRes.Err == nil && symRes.Code == 0 {
+				if symRes.Err != nil || (symRes.Code != 0 && symRes.Code != 1) {
+					return ReconcileAssessment{}, fmt.Errorf("reconcile: resolve local integration target: %s", runDetail(symRes))
+				}
+				if symRes.Code == 0 {
 					targetBranch = strings.TrimSpace(string(symRes.Stdout))
+					if targetBranch == "" {
+						return ReconcileAssessment{}, fmt.Errorf("reconcile: resolve local integration target: empty symbolic ref")
+					}
+				} else if len(bytes.TrimSpace(symRes.Stdout)) != 0 {
+					return ReconcileAssessment{}, fmt.Errorf("reconcile: resolve local integration target: ambiguous detached ref")
+				} else if isSanctionedWorkerWorktree(repo) {
+					// The remote branch still selects the fetch/goal. An omitted
+					// local branch in a detached worker must CAS its pinned HEAD,
+					// not an absent (or separately checked-out) local trunk ref.
+					targetBranch = "HEAD"
 				}
 			}
 			if targetBranch == "" {
