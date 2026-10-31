@@ -193,7 +193,8 @@ KPI_WEIGHTS: dict[str, float] = {
 # Directories whose .go is NOT first-party shipped kernel code (same exclusion the
 # code-quality scorecard uses): fixtures, vendored/generated trees.
 GO_EXCLUDE_DIRS = {".git", ".claude", ".fak", ".dos", ".tmp", ".head_build_check",
-                   "_scratch", "node_modules", "testdata", "vendor", "__pycache__"}
+                   "_scratch", "node_modules", "testdata", "vendor", "__pycache__",
+                   "artifacts", "_wip-preservation"}
 # `.claude`, `.fak`, `.dos`, and `.tmp` all hold full repo CHECKOUTS / source copies created
 # by the agent machinery: `.claude/worktrees/<wt>/` (the worktree-isolation feature),
 # `.tmp/pin-check/` + `.tmp/prplan-check/` (the release pin/prplan verification checkouts),
@@ -206,6 +207,12 @@ GO_EXCLUDE_DIRS = {".git", ".claude", ".fak", ".dos", ".tmp", ".head_build_check
 # which would make the committed snapshot + the #779 gate flap on a transient checkout.
 # A worktree/iso-build copy is identical to its source by construction, never kernel slop — so the
 # gather drops the whole `.claude`/`.fak`/`.dos` subtrees, exactly as it drops `.git`/`vendor`.
+# `artifacts/` and `_wip-preservation/` are the tracked variants of the same construction:
+# frozen snapshots (e.g. `artifacts/strix-migration-backup/raw`, byte-pinned by the
+# cmd/fak-strix-backup integrity tests) and preserved WIP, not first-party source under
+# development. Walking them counts every pinned copy as a phantom clone of the live tree it
+# mirrors (witnessed 2026-10-29: fak-private slop-debt 894 with 712 duplication units
+# dominated by artifacts/strix-migration-backup pairs).
 
 _TESTFUNC_RE = re.compile(r"^func\s+(Test|Benchmark|Fuzz)(\w*)\s*\(\s*(\w+)\s+\*?", re.MULTILINE)
 # A top-level declaration. Captures kind + name so we can find unexported symbols.
