@@ -6,6 +6,7 @@ import (
 	"os"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelperfobs"
@@ -642,7 +643,8 @@ func (s *NativeScheduler) advanceQwenPrefill(ln *schedLane, iteration uint64) {
 	} else {
 		sess.PrefillNoLogits(chunk)
 	}
-	s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhasePrefill, s.now().Sub(prefillStarted))
+	prefillElapsed := s.now().Sub(prefillStarted)
+	s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhasePrefill, prefillElapsed)
 
 	s.mu.Lock()
 	if !s.livePrefillLaneLocked(ln) || !ln.restoreSessionFromModelLocked(sess) {
@@ -676,6 +678,15 @@ func (s *NativeScheduler) advanceQwenPrefill(ln *schedLane, iteration uint64) {
 	}
 	s.reuseQwenPrefillExtensionsLocked(ln)
 	s.mu.Unlock()
+
+	// Count only this successfully computed and published chunk, never a cursor
+	// delta that includes cached prefix/twin reuse. This is model-call wall time,
+	// not GPU completion or the aggregate PhasePrefill recorded by runIteration.
+	// Keep recorder callbacks outside mu. Sub saturates on overflow; omit an
+	// invalid injected interval instead of inventing a valid duration.
+	if prefillElapsed >= 0 && prefillElapsed < time.Duration(1<<63-1) {
+		s.recorder.ObservePrefillChunk(len(chunk), prefillElapsed)
+	}
 
 	s.observeEvent(nativeSchedulerEvent{
 		Iteration:  iteration,
