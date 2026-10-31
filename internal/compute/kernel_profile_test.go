@@ -671,7 +671,7 @@ var cudaKernelOtherAllowlist = map[string]bool{
 	// V4.1 elementwise, pool-update and status-publish glue.
 	"k_mhc": true, "k_v41_engram": true, "k_v41_pool": true, "v41c_status_kernel": true,
 	"v41c_compressor_store_kernel": true, "v41c_compressor_update_pool_kernel": true,
-	"quantize_q8_1": true, "k_q3k_dequant": true,
+	"quantize_q8_1": true, "k_q3k_dequant": true, "k_iq4xs_dequant_split": true,
 }
 
 // fak-test:runtime fast est=20ms lane=default
@@ -702,6 +702,7 @@ func TestKernelOpClassCUDANames(t *testing.T) {
 	for name, want := range map[string]string{
 		"k_q5k_gemm_panel": KernelOpMatmul, "k_q6k_gemm_panel": KernelOpMatmul, "q4k_fp8lt_matmul": KernelOpMatmul,
 		"k_q4k_gemm": KernelOpMatmul, "k_q8_gemm_rowtile": KernelOpMatmul, "k_q2k_gemv": KernelOpMatvec, "k_q4k_mmvq_gemv": KernelOpMatvec, "k_q3k_mmvq_gemv": KernelOpMatvec,
+		"k_iq4xs_gemv": KernelOpMatvec, "k_iq4xs_mmvq_gemv": KernelOpMatvec,
 		"k_awq_gemv": KernelOpMatvec, "k_rex_gemv_mxfp4_e8m0": KernelOpMatvec, "k_rex_gemv_fp8_block32_e8m0": KernelOpMatvec,
 		"mul_mat_q": KernelOpMatmul, "mul_mat_q_stream_k_fixup": KernelOpMatmul, "k_nvfp4_w4a16_f32": KernelOpMatmul,
 		"cublas_sgemm": KernelOpMatmul, "cublas_gemm_ex": KernelOpMatmul, "cublaslt_matmul": KernelOpMatmul,

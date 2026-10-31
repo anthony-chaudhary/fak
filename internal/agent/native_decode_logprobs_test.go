@@ -70,8 +70,8 @@ func TestNativeDecodeTopLogprobsGreedyTop1IsChosenAndOutputUnchanged(t *testing.
 		t.Fatalf("receipt=%+v, want schema/k=5 and one row per generated id %v", receipt, on)
 	}
 	for i, row := range receipt.Rows {
-		if len(row) != 5 || row[0].TokenID != on[i] || receipt.Chosen[i].Logprob != row[0].Logprob {
-			t.Fatalf("row %d=%+v chosen=%+v, want 5 candidates led by greedy id %d", i, row, receipt.Chosen[i], on[i])
+		if len(row) != receipt.K || row[0].TokenID != on[i] || receipt.Chosen[i].Logprob != row[0].Logprob {
+			t.Fatalf("row %d=%+v chosen=%+v, want one candidate per requested K=%d led by greedy id %d", i, row, receipt.Chosen[i], receipt.K, on[i])
 		}
 		seen := map[int]bool{}
 		for j, c := range row {

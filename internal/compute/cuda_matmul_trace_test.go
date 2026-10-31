@@ -26,15 +26,16 @@ func TestCUDAMatMulTracePayloadContract(t *testing.T) {
 	y := Tensor{Dtype: F32, Shape: []int{2}}
 	recorder, stop := computetrace.Enable(20, "cpu-payload-micro", "simulated-not-gpu")
 	t.Cleanup(stop)
-	var last computetrace.Event
-	for _, tc := range []struct {
+	cases := []struct {
 		dtype Dtype
 		bytes int64
 	}{
 		{F32, 2048}, {F16, 1024}, {Q8_0, 576}, {Q2_0, 192},
 		{Q2_K, 168}, {Q3_K, 220}, {Q4_K, 288}, {Q5_K, 352}, {Q6_K, 420},
 		{IQ2_XXS, 132}, {IQ2_XS, 148}, {IQ1_M, 112}, {IQ4_NL, 288}, {NVFP4, 288},
-	} {
+	}
+	var last computetrace.Event
+	for _, tc := range cases {
 		w := Tensor{Dtype: tc.dtype, Shape: []int{2, 256}}
 		if tc.dtype == Q8_0 || tc.dtype == Q2_0 {
 			w.Quant = &QuantSpec{Block: 32}
@@ -76,16 +77,18 @@ func TestCUDAMatMulTracePayloadContract(t *testing.T) {
 		}
 	}
 	artifact := recorder.Artifact()
-	if len(artifact.Events) != 15 || artifact.Dropped != 0 {
+	wantEvents := len(cases) + 1 // one modeled event per dtype case, plus the batched event
+	if len(artifact.Events) != wantEvents || artifact.Dropped != 0 {
 		t.Fatalf("real trace sink lost modeled events: %+v", artifact)
 	}
 	wire, err := json.Marshal(artifact)
 	if err != nil || !strings.Contains(string(wire), `"bytes_read":1156`) || !strings.Contains(string(wire), `"weight_dtype":"iq1_m"`) {
 		t.Fatalf("typed payload missing from actual trace wire: err=%v wire=%s", err, wire)
 	}
+	kept := len(recorder.Artifact().Events)
 	stop()
 	computetrace.Record(last)
-	if len(recorder.Artifact().Events) != 15 {
+	if len(recorder.Artifact().Events) != kept {
 		t.Fatal("disabled recorder retained an event")
 	}
 	assertCUDAMatMulTraceWiring(t)
@@ -96,6 +99,21 @@ func assertCUDAMatMulTraceWiring(t *testing.T) {
 	file, err := parser.ParseFile(token.NewFileSet(), "cuda.go", nil, 0)
 	if err != nil {
 		t.Fatal(err)
+	}
+	declFile, err := parser.ParseFile(token.NewFileSet(), "cuda_matmul_trace.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var builderArity int
+	for _, decl := range declFile.Decls {
+		if f, ok := decl.(*ast.FuncDecl); ok && f.Name.Name == "cudaMatMulTraceEvent" {
+			for _, param := range f.Type.Params.List {
+				builderArity += len(param.Names) // shared-type groups like "x, y Tensor" carry several names
+			}
+		}
+	}
+	if builderArity == 0 {
+		t.Fatal("cuda_matmul_trace.go lacks the cudaMatMulTraceEvent signature")
 	}
 	for _, name := range []string{"MatMul", "BatchedMatMul"} {
 		var fn *ast.FuncDecl
@@ -143,7 +161,7 @@ func assertCUDAMatMulTraceWiring(t *testing.T) {
 				if name == "BatchedMatMul" {
 					wantInput, wantBatch = "X", "true"
 				}
-				if len(call.Args) != 7 {
+				if len(call.Args) != builderArity {
 					t.Fatalf("%s builder lost actual operand/row arguments", name)
 				}
 				for index, want := range map[int]string{2: "y", 4: "started", 5: "ms"} {
@@ -191,7 +209,7 @@ func assertCUDAMatMulTraceWiring(t *testing.T) {
 					continue
 				}
 				method, ok := builder.Fun.(*ast.SelectorExpr)
-				if !ok || method.Sel.Name != "cudaMatMulTraceEvent" || len(builder.Args) != 7 {
+				if !ok || method.Sel.Name != "cudaMatMulTraceEvent" || len(builder.Args) != builderArity {
 					continue
 				}
 				produced, pOK := assignment.Lhs[0].(*ast.Ident)

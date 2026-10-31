@@ -599,7 +599,7 @@ func TestConceptProfileInterruptedSparseContinuation(t *testing.T) {
 	if root == "" || tree == "" || partial == "" || prior == "" || manifest == "" || evidence == "" {
 		t.Skip("explicit interrupted-proof continuation only")
 	}
-	if len(tree) != 40 && len(tree) != 64 {
+	if len(tree) != 40 && len(tree) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST git object IDs are fixed-width: 40-hex SHA-1 or 64-hex SHA-256
 		t.Fatal("immutable tree object ID required")
 	}
 	if _, err := hex.DecodeString(tree); err != nil {
@@ -673,18 +673,21 @@ func TestConceptProfileInterruptedSparseContinuation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	modes := []string{"full-ordinary", "full-isolated"}
+	// One pin per evidence file per full arm: storage.json + stdout.json + the generated artifacts.
+	wantPins := len(modes) * (2 + len(generatedArtifacts))
 	var pins map[string]string
-	if err = json.Unmarshal(rawManifest, &pins); err != nil || len(pins) != 8 {
+	if err = json.Unmarshal(rawManifest, &pins); err != nil || len(pins) != wantPins {
 		t.Fatal("exact prior evidence pins required", err)
 	}
 	var wantJSON map[string]any
 	var wantArtifacts map[string][]byte
 	var wantStatus int
-	for _, mode := range []string{"full-ordinary", "full-isolated"} {
+	for _, mode := range modes {
 		read := func(name string) []byte {
 			key := mode + "/" + name
 			b, e := os.ReadFile(filepath.Join(prior, mode, name))
-			if e != nil || len(pins[key]) != 64 || conceptDigest(b) != pins[key] {
+			if e != nil || len(pins[key]) != 64 || conceptDigest(b) != pins[key] { //boundarylint:ignore CHANGE_DETECTOR_TEST conceptDigest is sha256 hex; 64 is its fixed width
 				t.Fatalf("prior evidence %s: %v", key, e)
 			}
 			return b

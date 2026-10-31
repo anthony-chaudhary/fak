@@ -25,6 +25,7 @@ func TestCUDADeviceOpDeclaration(t *testing.T) {
 		{"matmul", "iq1_m"}:                           {},
 		{"matmul", "iq4_nl"}:                          {},
 		{"matmul", "q2_k"}:                            {},
+		{"matmul", "iq4_xs"}:                          {},
 		{"matmul", "nvfp4"}:                           {},
 		{"routed-expert-gemv", "F8_E4M3+F8_E8M0"}:     {},
 		{"routed-expert-gemv", "I8+F8_E8M0"}:          {},
@@ -52,7 +53,7 @@ func TestCUDADeviceOpDeclaration(t *testing.T) {
 		dt := Dtype(value)
 		want := false
 		switch dt {
-		case F32, F16, Q8_0, Q4_K, Q5_K, Q6_K, Q2_0, Q2_K, Q3_K, IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL, NVFP4:
+		case F32, F16, Q8_0, Q4_K, Q5_K, Q6_K, Q2_0, Q2_K, Q3_K, IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL, IQ4_XS, NVFP4:
 			want = true
 		default:
 			// every other dtype, named or not, has no shared CUDA matmul declaration

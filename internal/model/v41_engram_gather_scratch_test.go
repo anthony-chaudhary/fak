@@ -71,8 +71,8 @@ func TestV41EngramGatherScratchReusedAcrossSpans(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gatherKnownRows: %v", err)
 	}
-	if len(out) != 5 {
-		t.Fatalf("len(out)=%d want 5", len(out))
+	if len(out) != len(rows) { // one output row per requested missing row
+		t.Fatalf("len(out)=%d want %d", len(out), len(rows))
 	}
 	wantStarts := []int{0, 3, 5}
 	wantCounts := []int{2, 1, 2}

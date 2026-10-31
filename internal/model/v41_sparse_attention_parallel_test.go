@@ -98,7 +98,7 @@ func TestV41SparseSinkParallelInverseOrderAndFinalValidation(t *testing.T) {
 		return nil
 	}
 	got, err := V41SparseAttentionSink(q, kv, nil, idx, opt)
-	if err != nil || len(tails) != 8 {
+	if err != nil || len(tails) != opt.Heads { // one inverse-rotation tail callback per head
 		t.Fatal(err, len(tails))
 	}
 	for h := 0; h < 8; h++ {
@@ -109,7 +109,7 @@ func TestV41SparseSinkParallelInverseOrderAndFinalValidation(t *testing.T) {
 	tails = nil
 	opt.Inverse = func(_ int, tail []float32) error {
 		tails = append(tails, tail)
-		if len(tails) == 8 {
+		if len(tails) == opt.Heads {
 			tails[0][0] = float32(math.NaN())
 		}
 		return nil

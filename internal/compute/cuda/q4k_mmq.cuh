@@ -837,6 +837,9 @@ static int fcuda_q4k_mmq_matmul(const uint8_t *dQ4K, const float *dX, float *dY,
       ? mul_mat_q_switch_J<true>((const char *) dQ4K, (const int *) y, dY, out, in, P, info, g_stream)
       : mul_mat_q_switch_J<false>((const char *) dQ4K, (const int *) y, dY, out, in, P, info, g_stream);
   fcuda_free(y);
+  // Allocator retirement failures are sticky even when CUDA last-error state
+  // does not expose an API return. Never replace an earlier submission error.
+  if (status == 0 && g_cuda_cleanup_status != 0) status = g_cuda_cleanup_status;
   if (status == 0) {
     g_q4k_mmq_launches++;
     return 0;

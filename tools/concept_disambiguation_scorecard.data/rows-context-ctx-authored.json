@@ -95,7 +95,8 @@
       "distinction": "Names the cancellable, option-carrying Q4_K model constructor, not the parallel tensor scheduler it drives or the generic command context.",
       "distinct_from": [
         "context-ctx-parallelquantloadcontextbudget",
-        "x2-context-ctx-commandcontext"
+        "x2-context-ctx-commandcontext",
+        "model-preflight-cuda-static-kquant-decision"
       ],
       "aliases": [],
       "grounding": "QuantModelQ4KProfileOptionsContext",

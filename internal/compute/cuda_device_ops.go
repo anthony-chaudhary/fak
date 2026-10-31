@@ -28,6 +28,7 @@ var cudaDeviceOps = [...]CUDADeviceOp{
 	{"matmul", "iq2_xs", "sm_80"},
 	{"matmul", "iq1_m", "sm_80"},
 	{"matmul", "iq4_nl", "sm_80"},
+	{"matmul", "iq4_xs", "sm_80"},
 	{"matmul", "nvfp4", "sm_80"},
 	{"routed-expert-gemv", "F8_E4M3+F8_E8M0", "sm_80"},
 	{"routed-expert-gemv", "I8+F8_E8M0", "sm_80"},
@@ -104,4 +105,16 @@ func cudaDeviceOpArch(arch string) (cudaCC, bool) {
 		return cudaCC{}, false
 	}
 	return cudaCC{Major: value / 10, Minor: value % 10}, true
+}
+
+// ParseCUDADeviceOpArch parses a generic full-build target such as "sm_103" into its
+// (major, minor) components. It accepts only the canonical sm_<major*10+minor> spelling
+// the device-op table floors use; dotted spellings such as "sm_10.3" are rejected so the
+// preflight CLI cannot drift from the table's own arch grammar.
+func ParseCUDADeviceOpArch(arch string) (major, minor int, ok bool) {
+	dev, ok := cudaDeviceOpArch(arch)
+	if !ok {
+		return 0, 0, false
+	}
+	return dev.Major, dev.Minor, true
 }

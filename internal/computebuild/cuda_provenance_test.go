@@ -179,7 +179,7 @@ func TestCUBLASHeaderVersionSearch(t *testing.T) {
 
 	tc := &Toolchain{NVCC: "nvcc-not-on-path-but-unused", CUDAInc: []string{incDir}}
 	version, err := cublasHeaderVersion(tc)
-	if err != nil || version != "12.9.1" {
+	if err != nil || version != "12.9.1" { //boundarylint:ignore CHANGE_DETECTOR_TEST decode contract: CUBLASAPI_VERSION macro 120901 decodes to major.minor.patch; fixed encoding, not a growable total
 		t.Fatalf("explicit include dir: (%q,%v)", version, err)
 	}
 
@@ -187,7 +187,7 @@ func TestCUBLASHeaderVersionSearch(t *testing.T) {
 	writeFixtureFile(t, filepath.Join(homeDir, "include", "cublas_api.h"), "#define CUBLASAPI_VERSION 120600\n")
 	fallback := &Toolchain{NVCC: "nvcc-not-on-path-but-unused", CUDAHome: homeDir}
 	version, err = cublasHeaderVersion(fallback)
-	if err != nil || version != "12.6.0" {
+	if err != nil || version != "12.6.0" { //boundarylint:ignore CHANGE_DETECTOR_TEST decode contract: CUBLASAPI_VERSION macro 120600 decodes to major.minor.patch; fixed encoding, not a growable total
 		t.Fatalf("CUDAHome fallback: (%q,%v)", version, err)
 	}
 
@@ -240,7 +240,7 @@ func TestDecodeStrictCUDABuildReceipt(t *testing.T) {
 	if decoded.Schema != CUDABuildReceiptSchema || decoded.CUDA == nil ||
 		decoded.CUDA.ArtifactKind != CUDAProvenanceArtifactBinary ||
 		!slices.Equal(decoded.CUDA.RequestedArchs, []string{"sm_120"}) ||
-		decoded.CUDA.NVCC.Version != "12.6" || decoded.CUDA.CUBLASVersion != "12.6.0" {
+		decoded.CUDA.NVCC.Version != "12.6" || decoded.CUDA.CUBLASVersion != "12.6.0" { //boundarylint:ignore CHANGE_DETECTOR_TEST round-trip echo: the strict decoder must return the fixture receipt's nvcc/cublas versions verbatim
 		t.Fatalf("round trip: %+v", decoded)
 	}
 
@@ -394,13 +394,13 @@ func TestObserveCUDABuildProvenanceStubbed(t *testing.T) {
 	if !slices.Equal(prov.SASSArchs, []string{"sm_80", "sm_90", "sm_120"}) || !slices.Equal(prov.PTXArchs, []string{"compute_120"}) {
 		t.Fatalf("observed: SASS=%v PTX=%v", prov.SASSArchs, prov.PTXArchs)
 	}
-	if prov.NVCC.Version != "12.6" || prov.NVCC.Role != "nvcc" || prov.NVCC.Executable != "nvcc"+execSuffix() || len(prov.NVCC.SHA256) != 64 {
+	if prov.NVCC.Version != "12.6" || prov.NVCC.Role != "nvcc" || prov.NVCC.Executable != "nvcc"+execSuffix() || len(prov.NVCC.SHA256) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST fixture echo of the observed toolchain version + SHA-256 digests are exactly 64 hexadecimal characters
 		t.Fatalf("nvcc identity: %+v", prov.NVCC)
 	}
 	if strings.Contains(prov.NVCC.Executable, string(filepath.Separator)) {
 		t.Fatalf("nvcc executable carries a host path: %+v", prov.NVCC)
 	}
-	if prov.CUBLASVersion != "12.6.0" {
+	if prov.CUBLASVersion != "12.6.0" { //boundarylint:ignore CHANGE_DETECTOR_TEST fixture echo of the observed cublas header version
 		t.Fatalf("cublas=%q", prov.CUBLASVersion)
 	}
 }

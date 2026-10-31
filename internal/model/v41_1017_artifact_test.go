@@ -23,7 +23,7 @@ func TestV41Flash1017ArtifactProfilePinned(t *testing.T) {
 	if p.TargetRepository != DeepSeekV41Flash1017ModelID || p.TargetRevision != DeepSeekV41Flash1017Revision {
 		t.Fatalf("target identity drifted: %s@%s", p.TargetRepository, p.TargetRevision)
 	}
-	if len(p.WeightShards) != 48 {
+	if len(p.WeightShards) != 48 { //boundarylint:ignore CHANGE_DETECTOR_TEST the pinned 1017 release ships a fixed 48-shard manifest; every shard is identity-pinned by name, content ID and size
 		t.Fatalf("manifest carries %d shards, want 48", len(p.WeightShards))
 	}
 	if !reflect.DeepEqual(p.EngramShardNames, []string{"model-00047-of-00048.safetensors", "model-00048-of-00048.safetensors"}) {

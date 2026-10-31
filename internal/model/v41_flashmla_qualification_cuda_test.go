@@ -68,7 +68,7 @@ func TestV41FlashQualificationOwnedPhysical(t *testing.T) {
 		if err != nil {
 			t.Fatal("selected actual model/FlashMLA binding:", err)
 		}
-		if len(got) != 32768 || len(want) != len(got) {
+		if len(got) != 32768 || len(want) != len(got) { //boundarylint:ignore CHANGE_DETECTOR_TEST fixed FlashMLA head64 ABI returns 64 heads of 512 values for one query
 			t.Fatal("component output shape")
 		}
 		analytic := float32(1.25) // (2+2+1)/(three selected rows + sink).
@@ -96,7 +96,7 @@ func TestV41FlashQualificationOwnedPhysical(t *testing.T) {
 				Path: "v41-flashmla-qualification", Layer: 0, Stage: "direct-owner-witness", Cause: err}
 			t.Fatal("selected direct owner:", s.halFailure)
 		}
-		if len(output.ValuesBF16) != 32768 || len(output.LSE) != 64 {
+		if len(output.ValuesBF16) != 32768 || len(output.LSE) != 64 { //boundarylint:ignore CHANGE_DETECTOR_TEST fixed FlashMLA head64 donor ABI returns 64x512 BF16 values and 64 sink-excluded LSE values
 			t.Fatal("donor output shape")
 		}
 		for i, bits := range output.ValuesBF16 {

@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -71,6 +72,7 @@ type q4kLoadOptions struct {
 	residentDenseQ5K     bool
 	residentDenseQ3K     bool
 	residentDenseIQ      map[TensorType]bool // selective native i-quant arm (05f)
+	residentDenseIQPack  map[TensorType]bool // packed-only i-quant arm: no qwen35 raw-row routes
 	residentQ2KEmbedding bool
 	residentQ4KEmbedding bool
 	residentPQ2Embedding bool // enabled by Prism PQ2 metadata
@@ -186,6 +188,22 @@ func WithDenseIQResident(types ...TensorType) Q4KLoadOption {
 	}
 }
 
+// WithDenseIQPacked retains eligible dense tensors of the given i-quant types packed, exactly
+// as WithDenseIQResident does for identity-ordered weights, but does not admit the qwen35
+// raw-i-quant row routes (native q/k and GDN in-proj rows, tiled GDN out_proj) that
+// WithDenseIQResident enables: those need a backend that tiles the GDN core
+// (compute.Qwen35GDNTiledOutBackend). Tensors those routes would take keep the Q8 path.
+func WithDenseIQPacked(types ...TensorType) Q4KLoadOption {
+	return func(o *q4kLoadOptions) {
+		if o.residentDenseIQPack == nil {
+			o.residentDenseIQPack = map[TensorType]bool{}
+		}
+		for _, t := range types {
+			o.residentDenseIQPack[t] = true
+		}
+	}
+}
+
 // WithExpertShard keeps only routed experts in [lo,hi) when splitting batched MoE expert GGUF
 // tensors. Use this for expert-parallel per-rank loads; omit it for the historical full load.
 func WithExpertShard(lo, hi int) Q4KLoadOption {
@@ -273,6 +291,12 @@ type Q4KLoadOptionEffects struct {
 	Q2KEmbeddingResident bool
 	Q4KEmbeddingResident bool
 	MTPRetention         bool
+	// DenseIQRowRouteTypes are the i-quant types kept packed with the qwen35 raw-row routes
+	// (WithDenseIQResident); DenseIQPackedTypes are kept packed without them (WithDenseIQPacked).
+	// Each is the comma-joined type names in ascending TensorType order ("" for none), so the
+	// effects struct stays comparable.
+	DenseIQRowRouteTypes string
+	DenseIQPackedTypes   string
 	// StreamedExperts reports that the option list requests the R5 streamed-expert tier, and
 	// StreamedExpertBytes is its host retention budget. A caller that must pick a loader ENTRY
 	// POINT from the same option list it will thread (serve's loadResidentQ4KProfiled) reads these
@@ -310,6 +334,8 @@ func ApplyQ4KLoadOptions(opts []Q4KLoadOption) Q4KLoadOptionEffects {
 		Q2KEmbeddingResident:     o.residentQ2KEmbedding,
 		Q4KEmbeddingResident:     o.residentQ4KEmbedding,
 		MTPRetention:             o.retainMTP,
+		DenseIQRowRouteTypes:     sortedTensorTypeSet(o.residentDenseIQ),
+		DenseIQPackedTypes:       sortedTensorTypeSet(o.residentDenseIQPack),
 		StreamedExperts:          o.streamedExperts,
 		StreamedExpertBytes:      o.streamedExpertBytes,
 		StreamedExpertDeviceRing: o.streamedExpertDeviceRing,
@@ -318,6 +344,21 @@ func ApplyQ4KLoadOptions(opts []Q4KLoadOption) Q4KLoadOptionEffects {
 		StreamedDenseBounded:     o.streamedDenseBounded,
 		ExpertShard:              o.expertShardSet,
 	}
+}
+
+func sortedTensorTypeSet(set map[TensorType]bool) string {
+	var types []TensorType
+	for t, on := range set {
+		if on {
+			types = append(types, t)
+		}
+	}
+	slices.Sort(types)
+	names := make([]string, len(types))
+	for i, t := range types {
+		names[i] = t.String()
+	}
+	return strings.Join(names, ",")
 }
 
 func resolveQ4KLoadOptions(cfg model.Config, opts []Q4KLoadOption) (q4kLoadOptions, error) {
@@ -963,7 +1004,8 @@ func denseKQuantRetained(o q4kLoadOptions, t TensorType) bool {
 		(o.residentDenseQ6K && t == TensorQ6_K) ||
 		(o.residentDenseQ5K && t == TensorQ5_K) ||
 		(o.residentDenseQ3K && t == TensorQ3_K) ||
-		o.residentDenseIQ[t]
+		o.residentDenseIQ[t] ||
+		o.residentDenseIQPack[t]
 }
 
 // applyLazyKQuantByType routes a lazyKQuant pending tensor to the matching per-type lazy builder

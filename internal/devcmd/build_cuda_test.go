@@ -215,8 +215,9 @@ func TestCUDABuildJSONReportsReceiptSchemaAndProvenance(t *testing.T) {
 				t.Fatalf("receipt_schema=%q want=%q", res.ReceiptSchema, tc.wantSchema)
 			}
 			if tc.wantProvenance {
-				if res.Provenance == nil || !slicesEqual(res.Provenance.SASSArchs, []string{"sm_120"}) || res.Provenance.NVCC.Version != "12.6" || res.Provenance.CUBLASVersion != "12.6.0" {
-					t.Fatalf("provenance=%+v", res.Provenance)
+				// The receipt must echo the observed provenance fixture verbatim.
+				if res.Provenance == nil || !slicesEqual(res.Provenance.SASSArchs, provenance.SASSArchs) || res.Provenance.NVCC.Version != provenance.NVCC.Version || res.Provenance.CUBLASVersion != provenance.CUBLASVersion {
+					t.Fatalf("provenance=%+v want fixture %+v", res.Provenance, provenance)
 				}
 			} else if res.Provenance != nil {
 				t.Fatalf("unexpected provenance block: %+v", res.Provenance)

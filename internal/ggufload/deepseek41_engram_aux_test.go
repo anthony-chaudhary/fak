@@ -202,7 +202,7 @@ func TestDeepSeek41TensorEngramAuxExactArtifact(t *testing.T) {
 	if got := fmt.Sprintf("%x", sha256.Sum256(aux)); got != "bac33e1bfb24da289dc4d60247a03019614856f4f8249c1e168bb3cdda2dcc90" {
 		t.Fatalf("auxiliary capture identity=%s", got)
 	}
-	if len(aux) != 517952 {
+	if len(aux) != 517952 { //boundarylint:ignore CHANGE_DETECTOR_TEST the auxiliary capture is pinned by the SHA-256 check above; 517952 bytes is that capture's frozen width
 		t.Fatalf("unexpected auxiliary capture length %d", len(aux))
 	}
 	reader := &tensorEngramAuxCaptureReader{start: f.TensorDataOffset, raw: aux}

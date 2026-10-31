@@ -68,7 +68,7 @@ func TestCUDAV41MMIDBatchLifecycle(t *testing.T) {
 					}
 					if len(ptrs) != 3 || ptrs[0] != ap || ptrs[1] != bp || ptrs[2] != rowPtr ||
 						len(sizes) != 3 || sizes[0] != 32 || sizes[1] != 32 || sizes[2] != 12 ||
-						offsets[0] != 0 || offsets[1] != 32 || offsets[2] != 64 || len(host) != 76 {
+						offsets[0] != 0 || offsets[1] != 32 || offsets[2] != 64 || len(host) != sizes[0]+sizes[1]+sizes[2] {
 						t.Fatal("descriptor/record/row ordering or bounded image layout changed")
 					}
 					if mode == "transfer-failed" || mode == "drain-failed" {

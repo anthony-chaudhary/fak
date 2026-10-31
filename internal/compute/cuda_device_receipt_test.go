@@ -13,12 +13,13 @@ import (
 // per-arm admissions reported as EXPLICIT refusals with reasons, never silent downgrades.
 func TestCUDADeviceReceipt(t *testing.T) {
 	const vram32GiB = int64(32) << 30
+	const capturedDriver = "12.9" // fixture fact the receipt must echo verbatim
 	r := BuildCUDADeviceReceipt(CUDADeviceInitFacts{
 		DeviceName:    "NVIDIA GeForce RTX 5090",
 		Major:         12,
 		Minor:         0,
 		TotalMemBytes: vram32GiB,
-		DriverVersion: "12.9",
+		DriverVersion: capturedDriver,
 	}, CUDABuildArches{})
 
 	if r.Backend != "cuda" {
@@ -30,8 +31,8 @@ func TestCUDADeviceReceipt(t *testing.T) {
 	if r.TotalMemBytes != vram32GiB {
 		t.Errorf("receipt total_mem_bytes = %d, want %d", r.TotalMemBytes, vram32GiB)
 	}
-	if r.DriverVersion != "12.9" {
-		t.Errorf("receipt driver_version = %q, want \"12.9\"", r.DriverVersion)
+	if r.DriverVersion != capturedDriver {
+		t.Errorf("receipt driver_version = %q, want the captured fixture fact %q", r.DriverVersion, capturedDriver)
 	}
 	if r.Tier != "sm_120" {
 		t.Errorf("receipt tier = %q, want sm_120", r.Tier)
