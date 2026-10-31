@@ -212,6 +212,29 @@ demo and benchmark command. Use the explicit `make build-all` target when the qu
 whether the complete package tree builds. `make ci` names both targets as direct
 prerequisites, so separating the fast artifact build does not narrow the green-bar gate.
 
+### Isolated session descriptor tool
+
+For repeated repository lifecycle work that only publishes a local session descriptor,
+`go build -trimpath -buildvcs=false -o <external-path>/fak-leaseref ./cmd/fak-leaseref`
+builds the narrow disposable tool. Keep its exact source/toolchain qualification
+receipt: `-buildvcs=false` omits the automatic VCS stamp so an unrelated commit
+does not relink the tool solely for that stamp, and `-trimpath` permits the existing
+cross-root cache contract. These flags do not change shipping/debug build defaults.
+Run `<external-path>/fak-leaseref session-publish --dir <checkout> --session <id>
+--state RUNNING --ttl 600`; use the same spelling with `--state STOPPED --ttl 0`
+when the owned session ends. The existing `fak leaseref session-publish` spelling
+calls the same implementation, with identical flags, diagnostics, JSON and exit codes.
+A session ID must be one safe ref segment and must not already start with `session-`.
+
+This operation updates only the local `refs/fak/locks/session-<id>` descriptor.
+It does not acquire or release a tree lease, arbitrate ownership, publish remote refs,
+commit code or replace any mandatory guard. Other lease operations still require
+`fak leaseref`; unsupported standalone commands refuse rather than fall back.
+The standalone source graph excludes inference and developer tooling, so unrelated
+model/kernel edits do not require rebuilding this tool. Reuse an already qualified
+binary when appropriate: this source isolation is not a measured runtime speedup,
+a complete replacement for the control CLI, or evidence of the build-100x target.
+
 ### Runtime, developer tooling, and local outputs
 
 `fak` and `fak-dev` are two executables from the same Go module, not two
