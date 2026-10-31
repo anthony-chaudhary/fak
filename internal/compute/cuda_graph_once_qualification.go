@@ -9,10 +9,23 @@ import "C"
 
 import (
 	"fmt"
-	"os"
 	"sync/atomic"
 	"unsafe"
 )
+
+// Shared-stream runtime consent is explicit and defaults OFF. Access, including
+// both per-token reads below, is serialized by the existing cudaMu.
+var cudaCaptureOnceMode cudaCaptureOnceConfiguration
+
+func (c *cudaBackend) configureCUDACaptureOnce(enabled bool) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	if c == nil || c != cudaDev {
+		return ErrCUDACaptureOnceUnsupported
+	}
+	ownerLive := cudaGraphOnceOwner != nil || c.graphOnce != nil || c.capturing
+	return cudaCaptureOnceMode.set(enabled, cudaAsyncGraphOnceAllowed(), graphEnabled, cudaKernelProfileOn, ownerLive)
+}
 
 func (c *cudaBackend) graphOnceCheck(code C.int) {
 	if code == 0 {
@@ -94,7 +107,7 @@ func (c *cudaBackend) GraphOnceReplay(input Tensor, kv KVStore, pos int) (Tensor
 	}
 	k, ok := kv.(*cudaKV)
 	if !cudaAsyncGraphOnceAllowed() || !ok || k != s.kv || !graphOnceSameKV(s, pos) || s.capturing || s.output.buf == nil ||
-		input.Backend() != c || input.Dtype != F32 || input.Numel() != s.input.Numel() || !graphEnabled || os.Getenv("FAK_CUDA_CAPTURE_ONCE") != "1" {
+		input.Backend() != c || input.Dtype != F32 || input.Numel() != s.input.Numel() || !graphEnabled || !cudaCaptureOnceMode.enabled {
 		c.graphOnceReleaseLocked()
 		return Tensor{}, false
 	}
@@ -134,7 +147,7 @@ func (c *cudaBackend) GraphOnceReplay(input Tensor, kv KVStore, pos int) (Tensor
 func (c *cudaBackend) GraphOnceBegin(input Tensor, kv KVStore, pos int) bool {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	if !cudaAsyncGraphOnceAllowed() || !graphEnabled || cudaKernelProfileOn || os.Getenv("FAK_CUDA_CAPTURE_ONCE") != "1" {
+	if !cudaAsyncGraphOnceAllowed() || !graphEnabled || cudaKernelProfileOn || !cudaCaptureOnceMode.enabled {
 		return false
 	}
 	if cudaGraphOnceOwner != nil && cudaGraphOnceOwner != c {

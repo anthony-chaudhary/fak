@@ -13,7 +13,7 @@ import (
 // fak-test:runtime integration est=3s lane=cuda
 // Uses actual native CUDA capture/MatMul/abort, not the host recording fixtures.
 func TestCUDAGraphOnceRequiredBorrowedLifetime(t *testing.T) {
-	for _, key := range []string{"FAK_CUDA_REQUIRE_DEVICE", "FAK_CUDA_GRAPH", "FAK_CUDA_CAPTURE_ONCE"} {
+	for _, key := range []string{"FAK_CUDA_REQUIRE_DEVICE", "FAK_CUDA_GRAPH"} {
 		if os.Getenv(key) != "1" {
 			t.Fatalf("%s=1 required; no skip/fallback", key)
 		}
@@ -29,6 +29,23 @@ func TestCUDAGraphOnceRequiredBorrowedLifetime(t *testing.T) {
 	if cb.GraphOnceQualificationSnapshot().Owner != 0 {
 		t.Fatal("another graph owner is live")
 	}
+	var typedNil *cudaBackend
+	for _, unsupported := range []Backend{typedNil, &cudaBackend{}} {
+		for _, enabled := range []bool{false, true} {
+			if err := ConfigureCUDACaptureOnce(unsupported, enabled); err != ErrCUDACaptureOnceUnsupported {
+				t.Fatalf("nil/foreign CUDA configuration accepted: %v", err)
+			}
+		}
+	}
+	if err := ConfigureCUDACaptureOnce(be, true); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := ConfigureCUDACaptureOnce(be, false); err != nil {
+			t.Errorf("capture-once config cleanup: %v", err)
+		}
+	})
+
 	wdata := make([]float32, 64*64)
 	for i := 0; i < 64; i++ {
 		wdata[i*64+i] = 1
@@ -68,6 +85,17 @@ func TestCUDAGraphOnceRequiredBorrowedLifetime(t *testing.T) {
 		t.Fatal("real CUDA capture did not start")
 	}
 	active = true
+	for _, enabled := range []bool{false, true} {
+		if err := ConfigureCUDACaptureOnce(be, enabled); err != ErrCUDACaptureOnceBusy {
+			t.Fatalf("active capture configuration refusal: %v", err)
+		}
+	}
+	cudaMu.Lock()
+	modeUnchanged := cudaCaptureOnceMode.enabled
+	cudaMu.Unlock()
+	if !modeUnchanged {
+		t.Fatal("refused configuration changed capture-once mode")
+	}
 	cb.MatMul(w, x)           // Records w as an actual borrowed kernel operand.
 	foreign := &cudaBackend{} // A second real backend receiver; never a mock or a device allocator.
 	recoverPanic := func(f func()) (v any) { defer func() { v = recover() }(); f(); return }
