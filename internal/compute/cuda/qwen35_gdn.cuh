@@ -1386,12 +1386,24 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
   // fixed shared arrays; a wider key head is refused, never truncated.
   if (kHd > kQwen35GDNPanelMaxKeyHeadDim || nV % nK != 0) return -1;
   cudaGetLastError();
+  const char *projectionMode = getenv("FAK_CUDA_GDN_INPUT_PROJECTION");
   if (tokens >= 128 && inQKVQ8 && inZQ8 && inBQ8 && inAQ8) {
     int dq = qwen35_gdn_q8_prefill(dInQKV, dInQKVScale, dX, dMixed, convDim, hidden, tokens, 32);
     if (dq == 0) dq = qwen35_gdn_q8_prefill(dInZ, dInZScale, dX, dZ, nV * vHd, hidden, tokens, 32);
     if (dq == 0) dq = qwen35_gdn_q8_prefill(dInB, dInBScale, dX, dB, nV, hidden, tokens, 32);
     if (dq == 0) dq = qwen35_gdn_q8_prefill(dInA, dInAScale, dX, dA, nV, hidden, tokens, 32);
     if (dq != 0) return qwen35_gdn_drain_after_error(dq);
+  } else if (tokens == 4 && hidden == 5120 && nK == 16 && nV == 48 &&
+             kHd == 128 && vHd == 128 && convKernel == 4 &&
+             inQKVQ8 && inZQ8 && inBQ8 && inAQ8 &&
+             projectionMode && strcmp(projectionMode, "lanes4") == 0) {
+    // Only the stateless projections share weights across consecutive rows.
+    // Causal convolution, recurrent state and the sequence fence stay unchanged.
+    // Default-off until device parity and full-verification time are qualified.
+    FCUDA_TS("k_qwen35_gdn_fused_in_proj_lanes", fusedRows, k_qwen35_gdn_fused_in_proj_lanes<<<fusedRows, 256, 0, g_stream>>>(
+      dX, tokens, dInQKV, dInQKVScale, inQKVQ8, dInZ, dInZScale, inZQ8,
+      dInB, dInBScale, inBQ8, dInA, dInAScale, inAQ8,
+      dMixed, dZ, dB, dA, hidden, convDim, nV * vHd, nV));
   } else {
     FCUDA_TS("k_qwen35_gdn_fused_in_proj", dim3(fusedRows, tokens), k_qwen35_gdn_fused_in_proj<<<dim3(fusedRows, tokens), 256, 0, g_stream>>>(
       dX, dInQKV, dInQKVScale, inQKVQ8, dInZ, dInZScale, inZQ8,
