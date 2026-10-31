@@ -1333,3 +1333,19 @@ goroutine. Private outputs join before retirement and preserve current router
 IDs, weights, dtype and reduction order. The explicit host-payload budget is
 default off. This is a Go ownership adaptation, not a copied CUDA kernel,
 modified routing/quantization policy, device qualification or performance claim.
+
+### vLLM multi-page CUDA KV append addressing (2026-10-31)
+
+`internal/compute/cuda/paged_kv_write_map.h` and the multi-page writer in
+`internal/compute/cuda/paged_attention_vllm.cuh` adapt the per-token slot resolution
+and K/V cache address arithmetic of `reshape_and_cache_kernel` in
+[vLLM `csrc/cache_kernels.cu`](https://github.com/vllm-project/vllm/blob/e5196e2959a42908313510f55fa21f213a48802e/csrc/cache_kernels.cu),
+commit `e5196e2959a42908313510f55fa21f213a48802e` (Apache License 2.0).
+Copyright (c) 2023, The vLLM team.
+
+Fak replaces the device slot-mapping tensor with at most 64 physical page IDs
+passed by value, keeps F32 storage and its optional pre-RoPE K plane, and retains
+its existing single-page writer and page/COW ownership. Host admission and Go
+batch preparation/order control are Fak-specific. This does not reattribute the
+older v0.11.0 paged attention implementation or claim a measured speedup.
+The upstream Apache-2.0 license text is reproduced in the existing vLLM notice.

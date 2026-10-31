@@ -210,15 +210,39 @@ func (k *cudaPagedKV) appendRowsLocked(layer int, kRaw, kRoPE, v unsafe.Pointer,
 		panic("cuda: paged KV append layer or row count out of range")
 	}
 	w := k.stride()
-	for _, run := range pagedKVRuns(k.lens[layer], n, k.pool.blockTokens) {
-		id := k.writablePageLocked(run.blk)
-		off := run.src * w * 4
-		if rc := C.fcuda_paged_kv_write_f32((*C.float)(k.pool.K[layer]), (*C.float)(k.pool.V[layer]), (*C.float)(k.pool.Kraw[layer]),
-			(*C.float)(unsafe.Add(kRoPE, off)), (*C.float)(unsafe.Add(v, off)), (*C.float)(unsafe.Add(kRaw, off)),
-			C.int(id), C.int(run.off), C.int(run.n), C.int(k.cfg.NumKVHeads), C.int(k.cfg.HeadDim), C.int(k.pool.blockTokens)); rc != 0 {
-			panic(fmt.Sprintf("cuda: paged KV write failed (%d)", int(rc)))
-		}
-	}
+	pagedKVAppendBatches(k.lens[layer], n, k.pool.blockTokens,
+		func(blk int) bool {
+			// Preserve the old submission order before preparation can grow/retire
+			// arenas or copy a shared page. Free-list allocation/private pages do
+			// neither; their writes can share a launch.
+			if blk == len(k.table) {
+				return len(k.pool.blocks.free) == 0
+			}
+			if blk < len(k.table) {
+				return k.pool.blocks.shared(k.table[blk])
+			}
+			return true // flush before the existing skipped-page refusal
+		}, k.writablePageLocked, func(ids []int32, src, firstOffset, rows int) {
+			off := src * w * 4
+			var rc C.int
+			if len(ids) == 1 {
+				// Keep the existing single-page/decode primitive unchanged.
+				rc = C.fcuda_paged_kv_write_f32((*C.float)(k.pool.K[layer]), (*C.float)(k.pool.V[layer]), (*C.float)(k.pool.Kraw[layer]),
+					(*C.float)(unsafe.Add(kRoPE, off)), (*C.float)(unsafe.Add(v, off)), (*C.float)(unsafe.Add(kRaw, off)),
+					C.int(ids[0]), C.int(firstOffset), C.int(rows), C.int(k.cfg.NumKVHeads), C.int(k.cfg.HeadDim), C.int(k.pool.blockTokens))
+			} else {
+				// The C adapter copies ids synchronously into the kernel argument.
+				// Only the existing device planes survive the call, not this Go pointer.
+				rc = C.fcuda_paged_kv_write_pages_f32((*C.float)(k.pool.K[layer]), (*C.float)(k.pool.V[layer]), (*C.float)(k.pool.Kraw[layer]),
+					(*C.float)(unsafe.Add(kRoPE, off)), (*C.float)(unsafe.Add(v, off)), (*C.float)(unsafe.Add(kRaw, off)),
+					(*C.int)(unsafe.Pointer(&ids[0])), C.int(len(ids)), C.int(k.pool.capBlocks), C.int(firstOffset), C.int(rows),
+					C.int(k.cfg.NumKVHeads), C.int(k.cfg.HeadDim), C.int(k.pool.blockTokens))
+			}
+			if rc != 0 {
+				// Never retry: a failed launch may follow already submitted groups.
+				panic(fmt.Sprintf("cuda: paged KV write failed (%d)", int(rc)))
+			}
+		})
 	k.lens[layer] += n
 }
 

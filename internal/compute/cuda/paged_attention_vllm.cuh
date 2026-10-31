@@ -26,6 +26,10 @@
 // V [num_blocks, nKV, hd, block]. One physical block id addresses the same block in every
 // layer's arena, so a block table is per-session, not per-layer.
 
+// Multi-page append uses current vLLM e5196e2959a42908313510f55fa21f213a48802e
+// per-token slot addressing, adapted to a bounded by-value map; see its header.
+#include "paged_kv_write_map.h"
+
 namespace fak_vllm_pa {
 
 #define FAK_PA_WARP_SIZE 32
@@ -591,6 +595,27 @@ __global__ void reshape_and_cache_run_kernel(
   }
 }
 
+// Current vLLM reshape_and_cache_kernel resolves each token's physical slot in
+// one grid. Fak supplies up to 64 page IDs by value instead of a device slot tensor,
+// retaining the F32 scalar loop and optional pre-RoPE plane of its existing writer.
+__global__ void reshape_and_cache_pages_kernel(
+    const float* __restrict__ key, const float* __restrict__ value,
+    const float* __restrict__ key2_src, float* __restrict__ key_cache,
+    float* __restrict__ value_cache, float* __restrict__ key2_cache,
+    const PagedKVWriteMap pages, int num_heads, int head_size, int block_size) {
+  const int token = blockIdx.x;
+  const int n = num_heads * head_size;
+  for (int64_t i = threadIdx.x; i < n; i += blockDim.x) {
+    int64_t key_offset, value_offset;
+    paged_kv_write_offsets(pages, token, i, num_heads, head_size, block_size,
+                           &key_offset, &value_offset);
+    const int64_t src = int64_t(token) * n + i;
+    key_cache[key_offset] = key[src];
+    value_cache[value_offset] = value[src];
+    if (key2_cache != nullptr) key2_cache[key_offset] = key2_src[src];
+  }
+}
+
 // ---- Fak-native glue (no upstream counterpart) ----
 // Gathers logical rows [0, tokens) of one paged plane back into row-major
 // dst[tokens, num_heads*head_size]. key_layout selects the K ([.., hd/x, block, x]) or the
@@ -758,6 +783,27 @@ extern "C" int fcuda_paged_kv_write_f32(float* k_cache, float* v_cache, float* k
                k, v, k2, k_cache, v_cache, k2_cache, block_idx, block_offset, num_kv_heads,
                head_size, block_size, 4)));
   return cudaGetLastError() == cudaSuccess ? 0 : 4;
+}
+
+extern "C" int fcuda_paged_kv_write_pages_f32(
+    float* k_cache, float* v_cache, float* k2_cache, const float* k,
+    const float* v, const float* k2, const int* block_ids, int num_blocks,
+    int capacity_blocks, int block_offset, int tokens, int num_kv_heads,
+    int head_size, int block_size) {
+  if (!k_cache || !v_cache || !k || !v || (k2_cache && !k2) ||
+      !fak_vllm_pa::paged_kv_write_map_valid(block_ids, num_blocks, capacity_blocks,
+          block_offset, tokens, num_kv_heads, head_size, block_size)) return 1;
+  fak_vllm_pa::PagedKVWriteMap pages = {};
+  pages.first_offset = block_offset;
+  for (int i = 0; i < num_blocks; ++i) pages.blocks[i] = block_ids[i];
+  const int threads = FAK_PA_MIN(512, num_kv_heads * head_size);
+  cudaError_t launch_status = cudaSuccess;
+  FCUDA_TS("fak_paged_kv_write_pages", tokens,
+           (fak_vllm_pa::reshape_and_cache_pages_kernel<<<tokens, threads, 0, g_stream>>>(
+               k, v, k2, k_cache, v_cache, k2_cache, pages, num_kv_heads,
+               head_size, block_size));
+           launch_status = cudaGetLastError());
+  return launch_status == cudaSuccess ? 0 : 4;
 }
 
 extern "C" int fcuda_paged_kv_gather_f32(float* dst, const float* cache, const int* block_table,
