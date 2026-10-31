@@ -220,7 +220,76 @@ func BuildSafetensorsPreflight(in SafetensorsPreflightInput) (*SafetensorsPrefli
 		t.Role, t.Representation = rep.routeRole(name, e, byShard[tensorShard[name]])
 		rep.Tensors = append(rep.Tensors, t)
 	}
+	rep.checkFusedProjectionCollisions(shards, byShard)
 	return rep, nil
+}
+
+// checkFusedProjectionCollisions follows load order, not report order. A fused
+// split refuses existing output components; a later ordinary tensor overwrites
+// its own Q8 key instead, so an unordered duplicate-name rule would be wrong.
+func (rep *SafetensorsPreflight) checkFusedProjectionCollisions(shards []string, byShard map[string]map[string]stEntry) {
+	installed := map[string]bool{}
+	for _, shard := range shards {
+		entries := byShard[shard]
+		names := make([]string, 0, len(entries))
+		for name := range entries {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			e := entries[name]
+			switch e.Dtype {
+			case "BF16", "F16", "F32":
+			case "F8_E4M3":
+				if !strings.HasSuffix(name, ".weight") {
+					continue
+				}
+				scale, ok := entries[name+"_scale_inv"]
+				if !ok || (scale.Dtype != "BF16" && scale.Dtype != "F16" && scale.Dtype != "F32") {
+					continue
+				}
+			default:
+				continue
+			}
+			canonical, keep := quantSourceTensorNameWithRetention(rep.Config, name, false)
+			if !keep {
+				continue
+			}
+			layer, suffix, ok := parseLayerTensorSuffix(canonical)
+			if !ok {
+				continue
+			}
+			if fused, err := preflightFP8FusedProjection(rep.Config, canonical, e.Shape); fused {
+				if err != nil {
+					continue // The invalid source never installs output components.
+				}
+				outputs := []string{layerPrefix(layer) + suffixGateProj, layerPrefix(layer) + suffixUpProj}
+				if suffix == suffixQKVProj {
+					outputs = []string{layerPrefix(layer) + suffixQProj, layerPrefix(layer) + suffixKProj, layerPrefix(layer) + suffixVProj}
+				}
+				conflict := false
+				for _, output := range outputs {
+					if installed[output] {
+						rep.RoleErrors[name] = fmt.Sprintf("safetensors: cannot split %s: component %s already exists", name, output)
+						conflict = true
+						break
+					}
+				}
+				if !conflict {
+					for _, output := range outputs {
+						installed[output] = true
+					}
+				}
+				continue
+			}
+			if len(e.Shape) == 2 {
+				switch suffix {
+				case suffixQProj, suffixKProj, suffixVProj, suffixGateProj, suffixUpProj:
+					installed[canonical] = true
+				}
+			}
+		}
+	}
 }
 
 // routeRole assigns one tensor its loader role and load-time representation, walking the
