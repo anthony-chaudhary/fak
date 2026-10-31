@@ -19,7 +19,8 @@ func TestCUDAIdlePoolCapBoundsReusesAndEvicts(t *testing.T) {
 		t.Skip("host C++ compiler unavailable")
 	}
 	memory := readCUDASource(t, "cuda/runtime_memory.cuh")
-	program := cudaIdlePoolCapHarness +
+	// Include the actual disabled-feature branch, not a local membership stub.
+	program := cudaIdlePoolCapHarness + "\n" + readCUDASource(t, "cuda/v41_compressor_pending.cuh") +
 		"\nstatic bool fcuda_pool_may_release(void) " + cudaFunctionBody(t, memory, "fcuda_pool_may_release") +
 		"\nstatic void fcuda_pool_evict_to_cap(void) " + cudaFunctionBody(t, memory, "fcuda_pool_evict_to_cap") +
 		"\nstatic void fcuda_pool_put(void *d, size_t bytes) " + cudaFunctionBody(t, memory, "fcuda_pool_put") +

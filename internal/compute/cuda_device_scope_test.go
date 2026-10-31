@@ -20,6 +20,9 @@ var cudaDeviceScopeGuard []byte
 //go:embed cuda/alloc_status.h
 var cudaDeviceScopeAllocStatus []byte
 
+//go:embed cuda/v41_compressor_pending.cuh
+var cudaDeviceScopeCompressorPending []byte
+
 //go:embed cuda/alloc_ledger.h
 var cudaAllocLedgerHeader []byte
 
@@ -45,6 +48,7 @@ func TestCUDADeviceScopeRestoresProductionOperations(t *testing.T) {
 		{"device_scope.h", cudaDeviceScopeGuard},
 		{"alloc_status.h", cudaDeviceScopeAllocStatus},
 		{"alloc_ledger.h", cudaAllocLedgerHeader},
+		{"v41_compressor_pending.cuh", cudaDeviceScopeCompressorPending},
 		{"device_scope_test.cpp", cudaDeviceScopeHarness},
 	} {
 		if err := os.WriteFile(filepath.Join(dir, source.name), source.data, 0600); err != nil {

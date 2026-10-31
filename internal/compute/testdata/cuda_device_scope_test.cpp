@@ -86,6 +86,7 @@ static void fcuda_ts_untimed_transfer() { ++untimed; }
 #define CK(call) do { (void)(call); } while (0)
 #define FAK_CUDA_DEVICE_SCOPE_HOST_TEST
 #include "alloc_ledger.h"
+#include "v41_compressor_pending.cuh"
 #include "runtime_services.cuh"
 
 static void restored() { assert(selected == 0 && view == 0); }

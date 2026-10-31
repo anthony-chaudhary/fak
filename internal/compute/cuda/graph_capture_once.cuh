@@ -54,7 +54,7 @@ extern "C" int fak_graph_once_create(int capacity, void **owner) {
   // Publish the owner before native allocation so every partial failure remains
   // explicitly releasable, never silently leaked or mistaken for an empty owner.
   *owner = s;
-  if (cudaMalloc((void **)&s->position, 2 * sizeof(int)) != cudaSuccess) {
+  if (fcuda_alloc_status(cudaMalloc((void **)&s->position, 2 * sizeof(int))) != cudaSuccess) {
     s->terminal = true;
     return 2;
   }
