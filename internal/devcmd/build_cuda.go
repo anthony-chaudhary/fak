@@ -67,6 +67,7 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 	arch := fs.String("arch", os.Getenv("FAK_CUDA_ARCH"), "target CUDA architecture (defaults to FAK_CUDA_ARCH, empty for all)")
 	cudaHome := fs.String("cuda-home", "", "path to CUDA Toolkit root directory")
 	captureOnce := fs.Bool("capture-once-qualification", false, "compile dense-F32 single-session graph qualification; runtime FAK_CUDA_CAPTURE_ONCE=1 and graph enable still required; not device qualification")
+	tokenomosStaging := fs.Bool("tokenomos-staging-qualification", false, "select bounded event-protected pinned IDs for non-captured native gathers; not device or performance qualification")
 	archSpecific := fs.Bool("arch-specific", false, "compile opt-in CUDA 13 arch-specific translation units")
 	deepGEMM := fs.Bool("deepgemm-wkv", false, "compile explicit Linux CUDA 13.1 SM100f/103f WKV candidate; requires --arch-specific and --deepgemm-wkv-sms")
 	deepGEMMSMs := fs.Int("deepgemm-wkv-sms", 0, "explicit physical SM count for the DeepGEMM persistent kernel")
@@ -194,29 +195,30 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 		Stdout:             stdout,
 		Stderr:             stderr,
 
-		EnableV41EngramIQ4NLQualification: *engramIQ4NL,
-		EnableV41CompressorPending:        *compressorPending,
-		EnableQ4KQKVQualification:         *q4Qualification,
-		EnableQ4KQKVAsync:                 *q4Async,
-		EnableQ2KMMQPrefill:               *q2MMQ,
-		EnableQ3KMMQPrefill:               *q3MMQ,
-		EnableQ8MMQPrefill:                *q8MMQ,
-		EnableCaptureOnceQualification:    *captureOnce,
-		EnableDeepGEMMWKV:                 *deepGEMM,
-		DeepGEMMWKVSMs:                    *deepGEMMSMs,
-		EnableFlashMLADecode:              *flashMLADecode,
-		EnableFlashMLAPrefill:             *flashMLA,
-		DisableFlashMLALDRed:              *flashMLADisableLDRed,
-		EnableV41SharedAttention:          *sharedAttention,
-		EnableV41RoutedSwiGLU:             *routedSwiGLU,
-		EnableV41EngramGate:               *engramGate,
-		EnableV41CompressorPool:           *compressorPool,
-		EnableV41Compressor:               *compressor,
-		EnableV41Router:                   *router,
-		EnableV41TailRoPE:                 *tailRoPE,
-		EnableV41BF16Publish:              *bf16Publish,
-		EnableV41MHC:                      *mhc,
-		DisableV41Defaults:                !*v41Defaults,
+		EnableV41EngramIQ4NLQualification:   *engramIQ4NL,
+		EnableV41CompressorPending:          *compressorPending,
+		EnableQ4KQKVQualification:           *q4Qualification,
+		EnableQ4KQKVAsync:                   *q4Async,
+		EnableQ2KMMQPrefill:                 *q2MMQ,
+		EnableQ3KMMQPrefill:                 *q3MMQ,
+		EnableQ8MMQPrefill:                  *q8MMQ,
+		EnableCaptureOnceQualification:      *captureOnce,
+		EnableTokenomosStagingQualification: *tokenomosStaging,
+		EnableDeepGEMMWKV:                   *deepGEMM,
+		DeepGEMMWKVSMs:                      *deepGEMMSMs,
+		EnableFlashMLADecode:                *flashMLADecode,
+		EnableFlashMLAPrefill:               *flashMLA,
+		DisableFlashMLALDRed:                *flashMLADisableLDRed,
+		EnableV41SharedAttention:            *sharedAttention,
+		EnableV41RoutedSwiGLU:               *routedSwiGLU,
+		EnableV41EngramGate:                 *engramGate,
+		EnableV41CompressorPool:             *compressorPool,
+		EnableV41Compressor:                 *compressor,
+		EnableV41Router:                     *router,
+		EnableV41TailRoPE:                   *tailRoPE,
+		EnableV41BF16Publish:                *bf16Publish,
+		EnableV41MHC:                        *mhc,
+		DisableV41Defaults:                  !*v41Defaults,
 	}
 	if sub != "check" {
 		if applied := computebuild.ApplyCUDAV41Defaults(cfg); len(applied) > 0 {

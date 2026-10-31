@@ -71,6 +71,60 @@ func LoadCUDAArchMatrix(repoRoot string, targetArch string) ([]string, string, e
 	return ParseCUDAArchMatrix(string(content), targetArch)
 }
 
+type cudaTokenomosStagingKey struct{}
+
+// Selection is part of the existing native EffectiveFlags and InputSHA256.
+// Ambient nvcc options must neither secretly select nor override this profile.
+func cudaTokenomosStagingFlags(ctx context.Context, args, env []string) ([]string, error) {
+	enabled, _ := ctx.Value(cudaTokenomosStagingKey{}).(bool)
+	const macro = "FAK_CUDA_TOKENOMOS_STAGING_QUALIFICATION"
+	for _, item := range env {
+		key, value, ok := strings.Cut(item, "=")
+		if ok && (strings.EqualFold(key, "NVCC_PREPEND_FLAGS") || strings.EqualFold(key, "NVCC_APPEND_FLAGS")) &&
+			strings.TrimSpace(value) != "" && (enabled || strings.Contains(value, macro)) {
+			return nil, fmt.Errorf("Tokenomos staging qualification requires recorded typed flags; unset %s", key)
+		}
+	}
+	if !enabled {
+		return args, nil
+	}
+	out := append([]string(nil), args...)
+	return append(out, "-D"+macro), nil
+}
+
+// Presence/admission only, not compilation, CUDA correctness or performance.
+// CompileCUDAKernels compiles RepoRoot/internal/compute, so do not qualify a
+// different PkgDir merely because it happens to contain the expected markers.
+func prepareCUDATokenomosStaging(cfg *CUDAConfig) error {
+	if !cfg.EnableTokenomosStagingQualification {
+		return nil
+	}
+	pkgDir := filepath.Join(cfg.RepoRoot, "internal", "compute")
+	if cfg.PkgDir != "" && filepath.Clean(cfg.PkgDir) != filepath.Clean(pkgDir) {
+		return fmt.Errorf("Tokenomos staging qualification requires the canonical compute package directory")
+	}
+	checks := []struct{ path, marker string }{
+		{"cuda_kernels.cu", "#include \"cuda/model_candidates.cuh\""},
+		{"cuda/model_candidates.cuh", "#ifdef FAK_CUDA_TOKENOMOS_STAGING_QUALIFICATION"},
+		{"cuda/model_candidates.cuh", "#include \"tokenomos_staging.h\""},
+		{"cuda/model_candidates.cuh", "fak_tokenomos_staging_copy(dIDs, hIDs, idsBytes)"},
+		{"cuda/model_candidates.cuh", "fak_tokenomos_staging_error(launch)"},
+		{"cuda/tokenomos_staging.h", "struct fak_tokenomos_staging_pool"},
+		{"cuda/tokenomos_staging.h", "cudaEventSynchronize(a.done)"},
+		{"cuda/tokenomos_staging.h", "g_cuda_cleanup_status"},
+	}
+	for _, check := range checks {
+		data, err := os.ReadFile(filepath.Join(pkgDir, check.path))
+		if err != nil {
+			return fmt.Errorf("Tokenomos staging prerequisite %s: %w", check.path, err)
+		}
+		if !strings.Contains(string(data), check.marker) {
+			return fmt.Errorf("Tokenomos staging prerequisite %s lacks %q", check.path, check.marker)
+		}
+	}
+	return nil
+}
+
 // CompileCUDAKernels compiles cuda_kernels.cu (and optional NCCL files) into object files.
 func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arch string, enableNCCL bool, stdout io.Writer) (objects []string, result error) {
 	pkgDir := filepath.Join(repoRoot, "internal", "compute")
@@ -168,6 +222,10 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 		if err != nil {
 			return nil, err
 		}
+		nvccArgs, err = cudaTokenomosStagingFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
 		nvccArgs, err = cudaEngramIQ4NLQualificationFlags(ctx, nvccArgs, env)
 		if err != nil {
 			return nil, err
@@ -229,6 +287,10 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 			return nil, err
 		}
 		nvccArgs, err = cudaGraphOnceFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
+		nvccArgs, err = cudaTokenomosStagingFlags(ctx, nvccArgs, env)
 		if err != nil {
 			return nil, err
 		}
@@ -500,6 +562,10 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 		}
 		ctx = context.WithValue(ctx, cudaMMQPrefillKey{}, selection)
 	}
+	if err := prepareCUDATokenomosStaging(cfg); err != nil {
+		return err
+	}
+	ctx = context.WithValue(ctx, cudaTokenomosStagingKey{}, cfg.EnableTokenomosStagingQualification)
 	if cfg.EnableCaptureOnceQualification {
 		if err := prepareCUDAGraphOnce(cfg); err != nil {
 			return err

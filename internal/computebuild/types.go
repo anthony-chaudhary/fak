@@ -83,6 +83,8 @@ type CUDAConfig struct {
 
 	EnableCaptureOnceQualification bool // Explicit dense-F32 graph qualification only; never defaulted.
 
+	EnableTokenomosStagingQualification bool // Explicit non-capture pinned-ID staging; never defaulted or device-qualified.
+
 	EnableV41RoutedSwiGLU    bool // Explicit SM120 candidate; public capability remains unqualified.
 	EnableV41EngramGate      bool // Explicit SM120 candidate; public capability remains unqualified.
 	EnableV41CompressorPool  bool // Explicit SM120 candidate; public capability remains unqualified.

@@ -1,3 +1,7 @@
+#ifdef FAK_CUDA_TOKENOMOS_STAGING_QUALIFICATION
+#include "tokenomos_staging.h"
+#endif
+
 // Private whole-sequence bindings. They deliberately do not extend cuda_backend.h:
 // the public flat ABI remains the stable primitive surface, while cuda_kernels.go
 // owns these cgo-local entry points and the complete resident-sequence contract.
@@ -15,16 +19,28 @@ extern "C" int fak_qwen35_embedding_gather_f32(
     const float *dEmbedding, const int *hIDs, int *dIDs, float *dOut,
     int tokens, int hidden) {
   if (!dEmbedding || !hIDs || !dIDs || !dOut || tokens <= 0 || hidden <= 0) return -1;
-  cudaGetLastError();
   size_t idsBytes = (size_t)tokens * sizeof(int);
+#ifdef FAK_CUDA_TOKENOMOS_STAGING_QUALIFICATION
+  fcuda_ts_untimed_transfer();
+  int staged = fak_tokenomos_staging_copy(dIDs, hIDs, idsBytes);
+  if (staged != 0) return staged;
+#else
+  cudaGetLastError();
   fcuda_ts_untimed_transfer();
   cudaError_t copy = cudaMemcpy(dIDs, hIDs, idsBytes, cudaMemcpyHostToDevice);
   if (copy != cudaSuccess) return 10000 + (int)copy;
+#endif
   g_h2d_bytes += idsBytes;
   size_t n = (size_t)tokens * hidden;
   FCUDA_TS("k_qwen35_embedding_gather", (n + 255) / 256, k_qwen35_embedding_gather<<<(n + 255) / 256, 256, 0, g_stream>>>(
       dEmbedding, dIDs, dOut, tokens, hidden));
   cudaError_t launch = cudaGetLastError();
+#ifdef FAK_CUDA_TOKENOMOS_STAGING_QUALIFICATION
+  // Both current Go callers retire their device ID buffer immediately. Pool
+  // reuse is ordered on g_stream; failed drains must close its cleanup latch
+  // before that retirement, never leave a queued copy with a reusable source.
+  if (launch != cudaSuccess) return fak_tokenomos_staging_error(launch);
+#endif
   return launch == cudaSuccess ? 0 : 20000 + (int)launch;
 }
 
