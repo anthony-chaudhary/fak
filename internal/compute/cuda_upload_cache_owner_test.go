@@ -18,9 +18,11 @@ import (
 // fak-test:runtime slow est=60s lane=optin
 // The estimate is the subprocess deadline, not a measured duration. This host
 // witness executes the real constructor/copy helpers and complete public Upload
-// and Free chains, including cache eviction. Allocation, transfer, driver calls,
-// accounting, and inactive async/graph dependencies are host fixtures. CUDA
-// fences, device numerics, and serving-model behavior are not exercised.
+// and Free chains, including cache eviction, plus complete Recycle and targeted
+// transient release. Allocation, transfer, driver calls, accounting, and the
+// named Q56 terminal guard are explicit host fixtures. Retention cases exercise
+// real cleanup control flow, not CUDA fault injection, fences or poison recovery.
+// Device numerics and serving-model behavior are not exercised.
 func TestCUDAUploadCacheOwnerHost(t *testing.T) {
 	if os.Getenv("FAK_TEST_CUDA_UPLOAD_CACHE_OWNER_HOST") != "1" {
 		t.Skip("set FAK_TEST_CUDA_UPLOAD_CACHE_OWNER_HOST=1 for the host upload-cache owner witness")
@@ -34,6 +36,7 @@ func TestCUDAUploadCacheOwnerHost(t *testing.T) {
 		"*cudaBackend.Upload": false, "*cudaBackend.uploadClass": false,
 		"*cudaBackend.Free": false, "*cudaBackend.cudaFreeLocked": false,
 		"*cudaBackend.cudaFreeStorageLocked": false,
+		"*cudaBackend.Recycle":               false, "*cudaBackend.releaseTransientBuffers": false,
 	}
 	for _, path := range []string{"compute.go", "quant_q2.go", "cuda_upload.go", "cuda.go"} {
 		src, err := os.ReadFile(path)
@@ -150,7 +153,9 @@ import (
 )
 
 // Only host/driver dependencies are fixtures. The public Upload and Free
-// methods, all intermediate branches, and cache deletion are extracted intact.
+// methods, all intermediate branches, cache deletion and both transient cleanup
+// methods are extracted intact. The named terminal predicate below is a fake
+// boundary; no production statement is rewritten or conditionally omitted.
 type Dtype uint8
 
 const (
@@ -217,6 +222,8 @@ type cudaBackend struct {
 	uploadCounts
 	dlUsed, managedN     int
 	dependencies, drains int
+	compressorDrains     int
+	transient            []*cudaBuf
 }
 type cudaBuf struct {
 	owner                          *cudaBackend
@@ -282,7 +289,20 @@ func makeF32TensorLike(*cudaBackend, Tensor, *cudaBuf) Tensor   { panic("unexpec
 func finishF32Upload(Tensor, []float32, func([]float32)) Tensor { panic("unexpected F32 transfer") }
 
 // These inactive dependencies are explicit fixture boundaries, not evidence of
-// capture, graph-pin, pending-owner, or asynchronous error-path correctness.
+// capture, graph-pin, pending-owner, or native asynchronous error correctness.
+// Q56 is an explicit simulated predicate for the actual extracted release entry
+// points, not a fallback for a missing method and not a production reset API.
+var q56ReleaseBlocked bool
+var q56ReleaseChecks int
+var cudaKernelProfileOn = true
+var profileBoundaries int
+
+func cudaQ56KMMVQReleaseBlocked() bool {
+	q56ReleaseChecks++
+	return q56ReleaseBlocked
+}
+func cudaV41CompressorDrainLocked(c *cudaBackend)                  { c.compressorDrains++ }
+func cudaV41CompressorPendingIndex(*cudaBuf) int                   { return -1 }
 func cudaQ4KAsyncReleaseBlockedLocked() bool                       { return false }
 func (c *cudaBackend) graphOnceFreeDependencyLocked(*cudaBuf)      { c.dependencies++ }
 func cudaV41CompressorDeferFreeLocked(*cudaBackend, *cudaBuf) bool { return false }
@@ -302,19 +322,22 @@ func fakeFree(p unsafe.Pointer) {
 }
 
 var C = struct {
-	fcuda_free    func(unsafe.Pointer)
-	fcuda_free_on func(int, unsafe.Pointer)
-	fcuda_h2d     func(unsafe.Pointer, unsafe.Pointer, int)
-	int           func(int) int
-	size_t        func(int) int
+	fcuda_ts_boundary func()
+	fcuda_free        func(unsafe.Pointer)
+	fcuda_free_on     func(int, unsafe.Pointer)
+	fcuda_h2d         func(unsafe.Pointer, unsafe.Pointer, int)
+	int               func(int) int
+	size_t            func(int) int
 }{
-	fcuda_free:    fakeFree,
-	fcuda_free_on: func(int, unsafe.Pointer) { panic("unexpected cross-device free") },
-	fcuda_h2d:     func(unsafe.Pointer, unsafe.Pointer, int) { panic("unexpected F32 H2D") },
-	int:           func(n int) int { return n }, size_t: func(n int) int { return n },
+	fcuda_ts_boundary: func() { profileBoundaries++ },
+	fcuda_free:        fakeFree,
+	fcuda_free_on:     func(int, unsafe.Pointer) { panic("unexpected cross-device free") },
+	fcuda_h2d:         func(unsafe.Pointer, unsafe.Pointer, int) { panic("unexpected F32 H2D") },
+	int:               func(n int) int { return n }, size_t: func(n int) int { return n },
 }
 
 func TestUploadCacheOwner(t *testing.T) {
+	q56ReleaseBlocked, q56ReleaseChecks, profileBoundaries = false, 0, 0
 	c := &cudaBackend{}
 	uploadCache = make(map[ucKey]Tensor)
 	freed = make(map[unsafe.Pointer]int)
@@ -388,6 +411,96 @@ func TestUploadCacheOwner(t *testing.T) {
 	c.Free(again)
 	if len(uploadCache) != 0 || c.dlUsed != 0 {
 		t.Fatal("final current-owner cleanup failed")
+	}
+	t.Run("Q56TerminalRetention", testUploadOwnerTerminalRetention)
+}
+
+// Every state below is a fresh HOST fixture. The healthy controls do not reset
+// a failed native stream or assert that production quarantine can be recovered.
+func testUploadOwnerTerminalRetention(t *testing.T) {
+	for _, name := range []string{"Free", "Storage", "Recycle", "Transient"} {
+		for _, blocked := range []bool{false, true} {
+			t.Run(name+"/blocked="+strconv.FormatBool(blocked), func(t *testing.T) {
+				c := &cudaBackend{}
+				uploadCache = make(map[ucKey]Tensor)
+				freed = make(map[unsafe.Pointer]int)
+				awaited = nil
+				q56ReleaseBlocked, q56ReleaseChecks, profileBoundaries = false, 0, 0
+				defer func() { q56ReleaseBlocked = false }() // fake isolation, not native recovery
+				codes := []byte{0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa}
+				host := NewQ2(c, []int{1, 32}, codes, []float32{2}, 32)
+				w := c.Upload(host, Q2_0)
+				wb := w.buf.(*cudaBuf)
+				// Exercise the existing positive accounting fields at the fixture
+				// boundary; this is not a claim that Q2 upload selects managed RAM.
+				wb.managedWeight, c.managedN = true, 1
+				wp, ws, keep := wb.ptr, wb.scales, wb.hostKeep.(cudaQ8UploadSource)
+				key := ucKey{wb.host, wb.hostDt, wb.hostLo}
+				tb := &cudaBuf{owner: c, codes: []int8{1, 2, 3, 4}}
+				tb.ptr = unsafe.Pointer(&tb.codes[0])
+				tp := tb.ptr
+				c.transient = []*cudaBuf{tb}
+				counts := c.uploadCounts
+				q56ReleaseBlocked = blocked
+				act := func() {
+					switch name {
+					case "Free":
+						c.Free(w)
+					case "Recycle":
+						c.Recycle()
+					default:
+						cudaMu.Lock()
+						defer cudaMu.Unlock()
+						if name == "Storage" {
+							c.cudaFreeStorageLocked(w)
+						} else {
+							c.releaseTransientBuffers([]*cudaBuf{tb})
+						}
+					}
+				}
+				weightRetained := func() bool {
+					got, ok := wb.hostKeep.(cudaQ8UploadSource)
+					return ok && got.HostBuffer == keep.HostBuffer && len(got.scales) == len(keep.scales) && &got.scales[0] == &keep.scales[0] && got.rows == keep.rows && got.cols == keep.cols && got.block == keep.block && wb.ptr == wp && wb.scales == ws && wb.budgetedWeightBytes == 12 && wb.managedWeight && c.dlUsed == 12 && c.managedN == 1 && len(uploadCache) == 1 && uploadCache[key].buf == wb
+				}
+				act()
+				if blocked {
+					act() // a repeated release must keep every possible owner reachable
+					if q56ReleaseChecks != 2 || !weightRetained() || tb.ptr != tp || len(c.transient) != 1 || c.transient[0] != tb || tb.owner != c {
+						t.Fatal("terminal release lost a live pointer, source, cache, transient or accounting owner")
+					}
+					if len(freed) != 0 || len(awaited) != 0 || c.dependencies != 0 || c.drains != 0 || c.compressorDrains != 0 || profileBoundaries != 0 || c.uploadCounts != counts {
+						t.Fatal("terminal release reached a drain, driver call, dependency or accounting effect")
+					}
+					return
+				}
+				if name == "Free" || name == "Storage" {
+					if wb.ptr != nil || wb.scales != nil || wb.hostKeep != nil || wb.budgetedWeightBytes != 0 || wb.managedWeight || c.dlUsed != 0 || c.managedN != 0 || len(uploadCache) != 0 || freed[wp] != 1 || freed[ws] != 1 || len(freed) != 2 || !slices.Equal(awaited, []unsafe.Pointer{wp}) {
+						t.Fatal("healthy weight release did not retain its existing storage/cache/accounting behavior")
+					}
+					want := 0
+					if name == "Free" {
+						want = 1
+					}
+					if c.dependencies != want || c.drains != want || c.compressorDrains != 0 || profileBoundaries != 0 || tb.ptr != tp || len(c.transient) != 1 || c.transient[0] != tb {
+						t.Fatal("healthy weight release changed unrelated transient or drain behavior")
+					}
+				} else {
+					if tb.ptr != nil || len(c.transient) != 0 || freed[tp] != 1 || len(freed) != 1 || len(awaited) != 0 || !weightRetained() || c.dependencies != 1 || c.drains != 1 {
+						t.Fatal("healthy transient release changed cache owners or failed to release its target")
+					}
+					want := 0
+					if name == "Recycle" {
+						want = 1
+					}
+					if c.compressorDrains != want || profileBoundaries != want {
+						t.Fatal("healthy transient release changed compressor/profile boundaries")
+					}
+				}
+				if c.uploadCounts != counts {
+					t.Fatal("cleanup changed upload work counters")
+				}
+			})
+		}
 	}
 }
 `
