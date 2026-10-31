@@ -37,7 +37,7 @@ func (o *v41RoutedOutputOwner) sumReadbackEnabled() bool {
 	if o == nil || !v41PrefillSumReadback.Load() || !o.live() {
 		return false
 	}
-	b, ok := o.backend.(compute.V41DeferredStatusBackend)
+	b, ok := compute.ResolveV41DeferredStatus(o.backend)
 	return ok && b.SupportsV41DeferredStatus(o.width)
 }
 
@@ -180,7 +180,12 @@ func (o *v41RoutedOutputOwner) sumReadbackCohort(first int, picks [][]routePick,
 			var values [][]float32
 			var err error
 			p := v41CaptureSumReadback(func() {
-				verdicts, values, err = o.backend.(compute.V41DeferredStatusBackend).V41ReadDeferred(nil, accs)
+				reader, ok := compute.ResolveV41DeferredStatus(o.backend)
+				if !ok {
+					err = errors.New("V4.1 deferred readback provider declined selected read")
+					return
+				}
+				verdicts, values, err = reader.V41ReadDeferred(nil, accs)
 			})
 			if p != nil {
 				failed(0, nil, p)

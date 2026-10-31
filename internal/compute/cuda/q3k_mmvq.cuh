@@ -252,8 +252,19 @@ static int fcuda_q3k_mmvq_launch(const uint8_t *dQ3K, const fak_q4k_mmvq::block_
 
 // fcuda_q3k_matmul_f32 (cuda_backend.h): Y[P,out] = X[P,in] @ W[out,in]^T over resident Q3_K.
 extern "C" int fcuda_q3k_matmul_f32(const uint8_t *dQ3K, const float *dX, float *dY, int out, int in, int P) {
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return 90003;
+#endif
     using namespace fak_q3k_mmvq;
     const bool valid = dQ3K && dX && dY && out > 0 && in > 0 && in % QK_K == 0 && P > 0;
+#ifdef FAK_CUDA_Q3K_MMQ_PREFILL
+    // Qualification-only opt-in. Default and pre-enqueue refusal keep the old path.
+    const char *prefill_arm = getenv("FAK_CUDA_Q3K_PREFILL");
+    if (valid && P >= 128 && prefill_arm && strcmp(prefill_arm, "mmq") == 0) {
+        const int status = fcuda_q3k_mmq_matmul(dQ3K, dX, dY, out, in, P);
+        if (status != FCUDA_Q3K_MMQ_REFUSED) return status;
+    }
+#endif
     if (valid && P >= 128) {
         const size_t wn = (size_t)out * in;
         float *w = (float *)scratch_malloc(wn * sizeof(float));

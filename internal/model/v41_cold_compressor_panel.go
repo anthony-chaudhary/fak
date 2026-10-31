@@ -135,7 +135,7 @@ func (m *Model) v41PrepareColdCompressor(l int, inputs [][]float32, st *v41Forwa
 	if !valid() {
 		return nil, nil
 	}
-	read, haveRead := backend.(compute.V41DeferredStatusBackend)
+	read, haveRead := compute.ResolveV41DeferredStatus(backend)
 	provider, haveOwner := backend.(compute.ForwardExecutionOwnerBackend)
 	if !haveRead || !haveOwner {
 		return nil, nil

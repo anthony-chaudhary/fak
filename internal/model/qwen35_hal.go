@@ -1055,10 +1055,17 @@ func (s *Session) qwen35FullAttentionHAL(layer, pos int, residual compute.Tensor
 	p := func(suffix string) string { return layerName(layer, suffix) }
 	xn := be.RMSNorm(residual, s.normWeightHAL(p("input_layernorm.weight")), eps)
 
+	qProjection, kRaw, v, sharedQKV, qkvErr := s.qwen35QKVQualification(layer, xn)
+	if qkvErr != nil {
+		s.failBackendForward(layer, "qualified Q4_K shared-input QKV", qkvErr)
+	}
 	var q, gate compute.Tensor
 	if cfg.AttnOutputGate {
 		if splitter, ok := be.(qwen35QueryGateSplitBackend); ok {
-			qg := be.MatMul(s.matWeightHAL(p("self_attn.q_proj.weight")), xn)
+			qg := qProjection
+			if !sharedQKV {
+				qg = be.MatMul(s.matWeightHAL(p("self_attn.q_proj.weight")), xn)
+			}
 			if cfg.AttentionBias {
 				be.AddBias(qg, s.weightHAL(p("self_attn.q_proj.bias")))
 			}
@@ -1073,13 +1080,18 @@ func (s *Session) qwen35FullAttentionHAL(layer, pos int, residual compute.Tensor
 			}
 		}
 	} else {
-		q = be.MatMul(s.matWeightHAL(p("self_attn.q_proj.weight")), xn)
+		q = qProjection
+		if !sharedQKV {
+			q = be.MatMul(s.matWeightHAL(p("self_attn.q_proj.weight")), xn)
+		}
 		if cfg.AttentionBias {
 			be.AddBias(q, s.weightHAL(p("self_attn.q_proj.bias")))
 		}
 	}
-	kRaw := be.MatMul(s.matWeightHAL(p("self_attn.k_proj.weight")), xn)
-	v := be.MatMul(s.matWeightHAL(p("self_attn.v_proj.weight")), xn)
+	if !sharedQKV {
+		kRaw = be.MatMul(s.matWeightHAL(p("self_attn.k_proj.weight")), xn)
+		v = be.MatMul(s.matWeightHAL(p("self_attn.v_proj.weight")), xn)
+	}
 	if cfg.AttentionBias {
 		be.AddBias(kRaw, s.weightHAL(p("self_attn.k_proj.bias")))
 		be.AddBias(v, s.weightHAL(p("self_attn.v_proj.bias")))

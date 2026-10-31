@@ -71,6 +71,9 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 	deepGEMMSMs := fs.Int("deepgemm-wkv-sms", 0, "explicit physical SM count for the DeepGEMM persistent kernel")
 	flashMLA := fs.Bool("flashmla-prefill", false, "compile explicit Linux CUDA 13.1 SM100a/103a FlashMLA sparse-prefill candidate; requires --arch-specific")
 	flashMLADisableLDRed := fs.Bool("flashmla-disable-ld-red", false, "select pinned non-LD.RED FlashMLA specialization; requires --flashmla-prefill")
+	q2MMQ := fs.Bool("q2k-mmq-prefill", false, "compile qualification-only Q2_K MMQ; runtime FAK_CUDA_Q2K_PREFILL=mmq still required")
+	q3MMQ := fs.Bool("q3k-mmq-prefill", false, "compile qualification-only Q3_K MMQ; runtime FAK_CUDA_Q3K_PREFILL=mmq still required")
+	q8MMQ := fs.Bool("q8-mmq-prefill", false, "compile qualification-only Q8 MMQ; runtime FAK_CUDA_Q8_PREFILL=mmq still required")
 	routedSwiGLU := fs.Bool("v41-routed-swiglu", false, "compile explicit SM120 V4.1 routed-SwiGLU candidate; public capability remains unqualified")
 	engramGate := fs.Bool("v41-engram-gate", false, "compile explicit SM120 V4.1 Engram-gate candidate; public capability remains unqualified")
 	compressorPool := fs.Bool("v41-compressor-pool", false, "compile explicit SM120 V4.1 compressor-pool candidate; public capability remains unqualified")
@@ -185,6 +188,9 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 		Stdout:             stdout,
 		Stderr:             stderr,
 
+		EnableQ2KMMQPrefill:      *q2MMQ,
+		EnableQ3KMMQPrefill:      *q3MMQ,
+		EnableQ8MMQPrefill:       *q8MMQ,
 		EnableDeepGEMMWKV:        *deepGEMM,
 		DeepGEMMWKVSMs:           *deepGEMMSMs,
 		EnableFlashMLAPrefill:    *flashMLA,

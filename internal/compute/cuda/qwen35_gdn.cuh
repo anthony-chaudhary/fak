@@ -1340,6 +1340,24 @@ extern "C" int fcuda_qwen35_gdn_decode_lanes_f32(
   return 0;
 }
 
+// Qualification-only sequence routing reuses the ordinary Q8 entry's admission,
+// scratch ownership and pre-enqueue-only fallback. Keep separate from its opt-in:
+// sequence state/logit parity must be measured independently of isolated MatMul.
+static int qwen35_gdn_q8_prefill(
+    const void *codes, const float *scales, const float *x, float *y,
+    int out, int in, int tokens, int block) {
+#ifdef FAK_CUDA_Q8_MMQ_PREFILL
+  const char *sequence_arm = getenv("FAK_CUDA_Q8_SEQUENCE_PREFILL");
+  if (sequence_arm && strcmp(sequence_arm, "mmq") == 0) {
+    // Do not retry here: the ordinary entry alone handles pre-enqueue refusal.
+    // Any launch/runtime error is propagated to the sequence's existing drain.
+    return fcuda_q8_matmul_f32((const int8_t *)codes, scales, x, y,
+                                out, in, tokens, block);
+  }
+#endif
+  return q8_dequant_sgemm(codes, scales, x, y, out, in, tokens, block);
+}
+
 /* Sequence spine adapted from llama.cpp gated_delta_net.cu at
  * 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd (MIT). Unlike calling the public
  * decode ABI from Go, this loop preserves every panel row and recurrent state on
@@ -1369,10 +1387,10 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
   if (kHd > kQwen35GDNPanelMaxKeyHeadDim || nV % nK != 0) return -1;
   cudaGetLastError();
   if (tokens >= 128 && inQKVQ8 && inZQ8 && inBQ8 && inAQ8) {
-    int dq = q8_dequant_sgemm(dInQKV, dInQKVScale, dX, dMixed, convDim, hidden, tokens, 32);
-    if (dq == 0) dq = q8_dequant_sgemm(dInZ, dInZScale, dX, dZ, nV * vHd, hidden, tokens, 32);
-    if (dq == 0) dq = q8_dequant_sgemm(dInB, dInBScale, dX, dB, nV, hidden, tokens, 32);
-    if (dq == 0) dq = q8_dequant_sgemm(dInA, dInAScale, dX, dA, nV, hidden, tokens, 32);
+    int dq = qwen35_gdn_q8_prefill(dInQKV, dInQKVScale, dX, dMixed, convDim, hidden, tokens, 32);
+    if (dq == 0) dq = qwen35_gdn_q8_prefill(dInZ, dInZScale, dX, dZ, nV * vHd, hidden, tokens, 32);
+    if (dq == 0) dq = qwen35_gdn_q8_prefill(dInB, dInBScale, dX, dB, nV, hidden, tokens, 32);
+    if (dq == 0) dq = qwen35_gdn_q8_prefill(dInA, dInAScale, dX, dA, nV, hidden, tokens, 32);
     if (dq != 0) return qwen35_gdn_drain_after_error(dq);
   } else {
     FCUDA_TS("k_qwen35_gdn_fused_in_proj", dim3(fusedRows, tokens), k_qwen35_gdn_fused_in_proj<<<dim3(fusedRows, tokens), 256, 0, g_stream>>>(
@@ -1423,7 +1441,7 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
   status = qwen35_gdn_launch_status(5);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
   if (tokens >= 128 && outWQ8) {
-    int dq = q8_dequant_sgemm(dOutW, dOutWScale, dCore, dOut, hidden, nV * vHd, tokens, 32);
+    int dq = qwen35_gdn_q8_prefill(dOutW, dOutWScale, dCore, dOut, hidden, nV * vHd, tokens, 32);
     if (dq != 0) return qwen35_gdn_drain_after_error(dq);
   } else {
     FCUDA_TS("k_qwen35_gdn_out_proj", dim3(hidden, tokens), k_qwen35_gdn_out_proj<<<dim3(hidden, tokens), 256, 0, g_stream>>>(

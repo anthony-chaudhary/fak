@@ -616,3 +616,217 @@ extern "C" int fak_v41_mmid_read(void *host, const void *dev, size_t n) {
     int copied = fcuda_d2h_checked(host, dev, n);
     return copied == 0 ? 0 : 59000 + copied;
 }
+
+// One failed batch can retain pinned staging: the shared uncertainty latch
+// prevents any subsequent batch from allocating another image. This is native
+// ownership until process teardown, never a pointer into the Go heap.
+static void *g_v41_mmid_retained_read_image = nullptr;
+
+// Preserve the first submission/validation failure. completed is an ownership
+// fact, not a numeric verdict: even a failed submission can drain successfully.
+static int v41_mmid_batch_finish(int first, int *completed) {
+    *completed = 0;
+    if (!g_stream || g_capture_open || v41_candidates_stream_uncertain()) {
+        g_v41_mmid_uncertain = true;
+        return first != 0 ? first : -3;
+    }
+    int device = -1;
+    cudaError_t e = cudaGetDevice(&device);
+    cudaStreamCaptureStatus capture = cudaStreamCaptureStatusNone;
+    if (e == cudaSuccess && device == 0) e = cudaStreamIsCapturing(g_stream, &capture);
+    if (e != cudaSuccess || device != 0 || capture != cudaStreamCaptureStatusNone) {
+        g_v41_mmid_uncertain = true;
+        return first != 0 ? first : (e != cudaSuccess ? 10000 + (int)e : -3);
+    }
+    e = cudaStreamSynchronize(g_stream);
+    if (e != cudaSuccess) {
+        g_v41_mmid_uncertain = true;
+        return first != 0 ? first : 40000 + (int)e;
+    }
+    *completed = 1;
+    return first;
+}
+
+// Private transport only; Go binds status issuance and owns unique retirement.
+// Sources are allocation bases in descriptor order, followed by caller rows.
+// The caller destination is touched synchronously only after the final fence.
+// count==0 is the cleanup-only completion after Go-side validation failure.
+extern "C" int fak_v41_mmid_read_batch(void *host, size_t bytes,
+        const void *const *sources, const size_t *sizes, const size_t *offsets,
+        int count, int *completed) {
+    if (!completed) return 2;
+    *completed = 0;
+    if (count == 0 && !host && bytes == 0)
+        return v41_mmid_batch_finish(0, completed);
+    int first = fak_v41_mmid_state();
+    if (first != 0) return v41_mmid_batch_finish(first, completed);
+    if (!host || !sources || !sizes || !offsets || count <= 0 || count > 96 || bytes == 0)
+        return v41_mmid_batch_finish(2, completed);
+    size_t end = 0;
+    for (int i = 0; i < count; ++i) {
+        if (sizes[i] == 0 || offsets[i] % 16 != 0 || offsets[i] < end ||
+                offsets[i] > bytes || sizes[i] > bytes - offsets[i])
+            return v41_mmid_batch_finish(2, completed);
+        end = offsets[i] + sizes[i];
+        first = v41_mmid_owned(sources[i], sizes[i]);
+        if (first != 0) return v41_mmid_batch_finish(first, completed);
+        // g_live contains whole allocation bases, so distinct accepted bases
+        // cannot overlap. Reject duplicate status/status or status/row aliases.
+        for (int j = 0; j < i; ++j)
+            if (sources[i] == sources[j]) return v41_mmid_batch_finish(2, completed);
+    }
+    if (end != bytes) return v41_mmid_batch_finish(2, completed);
+    void *image = nullptr;
+    cudaError_t e = cudaMallocHost(&image, bytes);
+    if (e != cudaSuccess) return v41_mmid_batch_finish(12000 + (int)e, completed);
+    try {
+        fak_alloc_track(image, FAK_ALLOC_ACTIVATIONS_SCRATCH, FAK_ALLOC_PINNED_HOST,
+                        FAK_ALLOC_SITE("v41-mmid-read-image"), bytes);
+    } catch (...) {
+        // Ledger insertion can allocate. No image copy has been submitted,
+        // and no C++ exception may unwind through this C entry point.
+        first = v41_mmid_batch_finish(-4, completed);
+        if (cudaFreeHost(image) != cudaSuccess) {
+            g_v41_mmid_retained_read_image = image;
+            g_v41_mmid_uncertain = true;
+        }
+        return first;
+    }
+    size_t submitted = 0;
+    for (int i = 0; i < count; ++i) {
+        fcuda_ts_untimed_transfer();
+        e = cudaMemcpyAsync((char *)image + offsets[i], sources[i], sizes[i],
+                            cudaMemcpyDeviceToHost, g_stream);
+        if (e != cudaSuccess) {
+            first = 20000 + (int)e;
+            break;
+        }
+        submitted += sizes[i]; // bounded by the disjoint image above
+    }
+    first = v41_mmid_batch_finish(first, completed);
+    if (!*completed) {
+        g_v41_mmid_retained_read_image = image;
+        return first; // CUDA may still write image; never free or expose it.
+    }
+    g_host_bytes += submitted;
+    if (first == 0)
+        for (int i = 0; i < count; ++i)
+            memcpy((char *)host + offsets[i], (char *)image + offsets[i], sizes[i]);
+    e = cudaFreeHost(image);
+    if (e != cudaSuccess) {
+        // Retain its identity and close future allocations even though the
+        // successful fence established that no transfer can still write it.
+        g_v41_mmid_retained_read_image = image;
+        g_v41_mmid_uncertain = true;
+        if (first == 0) first = 13000 + (int)e;
+    } else {
+        fak_alloc_untrack(image);
+    }
+    return first;
+}
+
+// A Go-side unwind that cannot establish completion must close all peer reuse
+// too. This hook does not recover a previously failed stream.
+extern "C" void fak_v41_mmid_hold_uncertain(void) { g_v41_mmid_uncertain = true; }
+
+// Called only for a successfully completed, freshly issued status owner.
+// 0 = released, 1 = retained by a shared lifetime guard, negative = failure.
+extern "C" int fak_v41_mmid_retire_status(void *record) {
+    if (!record || g_live.find(record) == g_live.end()) return -2;
+    if (v41_candidates_stream_uncertain()) return 1;
+    try {
+        fcuda_free(record);
+    } catch (...) {
+        g_v41_mmid_uncertain = true;
+        return -4;
+    }
+    return g_live.find(record) == g_live.end() ? 0 : 1;
+}
+
+// Compile presence only, NOT model availability or numerical qualification.
+// Existing kernels stay in their original feature guards and source files.
+extern "C" int fak_v41_mmid_ordinary_compiled(int kind) {
+    switch (kind) {
+#ifdef FAK_CUDA_V41_ROUTED_SWIGLU
+    case 1: return 0;
+#endif
+#ifdef FAK_CUDA_V41_BF16_PUBLISH
+    case 2: return 0;
+#endif
+    default: return -8;
+    }
+}
+
+// Failure-only completion: successful ordinary submission never fences here.
+// Use the batch owner's first-error/terminal-retention convention, not the
+// legacy single-status synchronous wrappers or a second numerical decoder.
+static int v41_mmid_ordinary_failure(int first) {
+    int completed = 0;
+    return v41_mmid_batch_finish(first, &completed);
+}
+
+extern "C" int fak_v41_mmid_ordinary_swiglu(const float *gate, const float *up,
+        float *output, unsigned *record, int count, float limit, float weight) {
+#ifdef FAK_CUDA_V41_ROUTED_SWIGLU
+    if (count <= 0 || (uint64_t)count > SIZE_MAX / sizeof(float) ||
+            !isfinite(limit) || !isfinite(weight)) return 2;
+    int state = fak_v41_mmid_state();
+    if (state != 0) return state;
+    const void *ptrs[4] = {gate, up, output, record};
+    for (int i = 2; i < 4; ++i)
+        for (int j = 0; j < i; ++j)
+            if (ptrs[i] == ptrs[j]) return -2;
+    for (int i = 0; i < 4; ++i) {
+        int owned = v41_mmid_owned(ptrs[i], i == 3 ? 16u : (uint64_t)count * 4u);
+        if (owned != 0) return owned;
+    }
+    cudaError_t e = cudaSuccess;
+    FCUDA_TS("fill", dim3(0, 0), e = cudaMemsetAsync(record, 0xff, 16, g_stream));
+    if (e != cudaSuccess) return v41_mmid_ordinary_failure(20000 + (int)e);
+    unsigned blocks = ((unsigned)count + 127u) / 128u;
+    if (blocks > 65535u) blocks = 65535u;
+    // Exact existing checked kernel: no copied/reimplemented lane arithmetic.
+    FCUDA_TS("k_v41_routed_swiglu", blocks,
+        k_v41_routed_swiglu<<<blocks, 128, 0, g_stream>>>(gate, up, output, record, count, limit, weight));
+    e = cudaGetLastError();
+    if (e != cudaSuccess) return v41_mmid_ordinary_failure(30000 + (int)e);
+    ++g_v41_mmid_launches;
+    return 0;
+#else
+    return -8;
+#endif
+}
+
+extern "C" int fak_v41_mmid_ordinary_bf16(const uint32_t *input, uint32_t *output,
+        uint32_t *record, int count, uint32_t site) {
+#ifdef FAK_CUDA_V41_BF16_PUBLISH
+    if (count <= 0 || (uint64_t)count > SIZE_MAX / sizeof(uint32_t) ||
+            !v41_bf16_publish_site(site)) return 2;
+    int state = fak_v41_mmid_state();
+    if (state != 0) return state;
+    if (input == output || input == record || output == record) return -2;
+    const void *ptrs[3] = {input, output, record};
+    for (int i = 0; i < 3; ++i) {
+        int owned = v41_mmid_owned(ptrs[i], i == 2 ? 16u : (uint64_t)count * 4u);
+        if (owned != 0) return owned;
+    }
+    cudaError_t e = cudaSuccess;
+    FCUDA_TS("fill", dim3(0, 0), e = cudaMemsetAsync(record, 0xff, 16, g_stream));
+    if (e != cudaSuccess) return v41_mmid_ordinary_failure(20000 + (int)e);
+    FCUDA_TS("k_v41_bf16_publish_status", 1,
+        k_v41_bf16_publish_status<<<1, 1, 0, g_stream>>>(record, (uint32_t)count, site));
+    e = cudaGetLastError();
+    if (e != cudaSuccess) return v41_mmid_ordinary_failure(30000 + (int)e);
+    ++g_v41_mmid_launches;
+    unsigned blocks = ((unsigned)count + 255u) / 256u;
+    if (blocks > 65535u) blocks = 65535u;
+    FCUDA_TS("k_v41_bf16_publish", blocks,
+        k_v41_bf16_publish<<<blocks, 256, 0, g_stream>>>(input, output, record, (uint32_t)count));
+    e = cudaGetLastError();
+    if (e != cudaSuccess) return v41_mmid_ordinary_failure(40000 + (int)e);
+    ++g_v41_mmid_launches;
+    return 0;
+#else
+    return -8;
+#endif
+}

@@ -79,7 +79,7 @@ func (s *Session) v41GroupedOutputPanelInput(owner *v41GroupedOutputCohort, laye
 	}
 	rowOps, rowOK := s.Backend.(compute.V41RowLogBackend)
 	pub, pubOK := s.Backend.(compute.V41BF16PublishBackend)
-	deferred, deferredOK := s.Backend.(compute.V41DeferredStatusBackend)
+	deferred, deferredOK := compute.ResolveV41DeferredStatus(s.Backend)
 	if !rowOK || !rowOps.V41RowLogAvailable() || !pubOK || !deferredOK {
 		return nil, v41GroupedPanelDecline(layer, rows, "backend_caps"), nil
 	}

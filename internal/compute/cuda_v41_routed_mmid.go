@@ -18,14 +18,19 @@ int fak_v41_mmid_down_sum(int, const void *const *, int, const float *, const un
     int, int, int, unsigned);
 int fak_v41_mmid_swiglu_id(const float *, const float *, float *, const unsigned *, unsigned *, int, int, float);
 int fak_v41_mmid_publish_sum(const float *, float *, const unsigned *, unsigned *, int, int, unsigned);
-int fak_v41_mmid_read(void *, const void *, size_t);
+int fak_v41_mmid_read_batch(void *, size_t, const void *const *, const size_t *, const size_t *, int, int *);
+int fak_v41_mmid_retire_status(void *);
+void fak_v41_mmid_hold_uncertain(void);
 */
 import "C"
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"runtime"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -271,6 +276,7 @@ func (c *cudaBackend) V41RoutedSwiGLUIDDeferred(gate, up, ids Tensor, picks int,
 		out = makeTensor(c, F32, RowMajor, []int{picks * count}, nil, output)
 		st = V41DeferredStatus{Kind: V41DeferredRoutedSwiGLU, Count: count, Records: picks,
 			Record: makeTensor(c, F32, RowMajor, []int{picks * v41RoutedSwiGLUStatusBytes / 4}, nil, record)}
+		c.cudaV41MMIDIssue(st)
 		return nil
 	})
 	return out, st, err
@@ -313,6 +319,7 @@ func (c *cudaBackend) V41RoutedPublishSumDeferred(down, ids Tensor, picks int, p
 		out = makeTensor(c, F32, RowMajor, []int{count}, nil, output)
 		st = V41DeferredStatus{Kind: V41DeferredBF16Publish, Count: count, Site: publishSite, Records: picks,
 			Record: makeTensor(c, F32, RowMajor, []int{picks * v41BF16CheckedStatusBytes / 4}, nil, record)}
+		c.cudaV41MMIDIssue(st)
 		return nil
 	})
 	return out, st, err
@@ -378,6 +385,7 @@ func (c *cudaBackend) V41RoutedGateUpSwiGLUDeferred(gates, ups []Tensor, ids Ten
 		out = makeTensor(c, F32, RowMajor, []int{picks * rows}, nil, output)
 		st = V41DeferredStatus{Kind: V41DeferredRoutedSwiGLU, Count: rows, Records: picks,
 			Record: makeTensor(c, F32, RowMajor, []int{picks * v41RoutedSwiGLUStatusBytes / 4}, nil, record)}
+		c.cudaV41MMIDIssue(st)
 		return nil
 	})
 	return out, st, err
@@ -430,40 +438,395 @@ func (c *cudaBackend) V41RoutedDownSumDeferred(downs []Tensor, mid, ids Tensor, 
 		out = makeTensor(c, F32, RowMajor, []int{rows}, nil, output)
 		st = V41DeferredStatus{Kind: V41DeferredBF16Publish, Count: rows, Site: publishSite, Records: picks,
 			Record: makeTensor(c, F32, RowMajor, []int{picks * v41BF16CheckedStatusBytes / 4}, nil, record)}
+		c.cudaV41MMIDIssue(st)
 		return nil
 	})
 	return out, st, err
 }
 
-// cudaV41MMIDVerdicts reads one deferred status behind a checked completion,
-// frees its record, and returns one verdict per pick record. This is the
-// reader the CUDA V41DeferredStatusBackend (not implemented yet) would share.
-func (c *cudaBackend) cudaV41MMIDVerdicts(st V41DeferredStatus) (verdicts []error, err error) {
-	const site = "V41ReadDeferred"
-	records := V41DeferredRecords(st)
-	raw := make([]byte, records*16)
-	err = c.cudaV41MMIDCall(site, func(func(int, string) (*cudaBuf, error)) error {
-		b, err := c.cudaV41MMIDOperand(site, "status", st.Record, len(raw))
-		if err != nil {
-			return err
-		}
-		status := int(C.fak_v41_mmid_read(unsafe.Pointer(&raw[0]), b.ptr, C.size_t(len(raw))))
-		if err := c.cudaV41MMIDStatus(site, status); err != nil {
-			return err
-		}
-		C.fcuda_free(b.ptr)
-		b.ptr, b.n = nil, 0
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	verdicts = make([]error, records)
-	for r := range verdicts {
-		verdicts[r] = decodeV41DeferredStatus(st, raw[16*r:16*r+16])
-	}
-	return verdicts, nil
+// cudaV41MMIDVerdicts preserves the component-test entry point while sharing
+// the owned batched reader; it is not a public deferred capability grant.
+func (c *cudaBackend) cudaV41MMIDVerdicts(st V41DeferredStatus) ([]error, error) {
+	verdicts, _, err := c.cudaV41MMIDReadBatch([]V41DeferredStatus{st}, nil)
+	return verdicts, err
 }
 
 // cudaV41MMIDLaunchesForTest counts successful candidate kernel enqueues.
 func cudaV41MMIDLaunchesForTest() uint64 { return uint64(C.fak_v41_mmid_launch_count()) }
+
+// Issuance is bound to the opaque Go buffer lifetime, not just a recyclable
+// device address. Free invalidates that same cudaBuf by clearing ptr. The map
+// holds only outstanding status metadata; issue/read sweep entries freed by the
+// caller. All access, including the producer calls above, holds cudaMu.
+type cudaV41MMIDIssued struct {
+	owner   *cudaBackend
+	ptr     unsafe.Pointer
+	kind    V41DeferredStatusKind
+	count   int
+	site    uint32
+	records int
+}
+
+var cudaV41MMIDIssuedStatuses = make(map[*cudaBuf]cudaV41MMIDIssued)
+
+func cudaV41MMIDSweepIssued() {
+	for b, issued := range cudaV41MMIDIssuedStatuses {
+		if b.ptr == nil || b.ptr != issued.ptr {
+			delete(cudaV41MMIDIssuedStatuses, b)
+		}
+	}
+}
+
+func (c *cudaBackend) cudaV41MMIDIssue(st V41DeferredStatus) {
+	cudaV41MMIDSweepIssued()
+	b := st.Record.buf.(*cudaBuf)
+	cudaV41MMIDIssuedStatuses[b] = cudaV41MMIDIssued{
+		owner: c, ptr: b.ptr, kind: st.Kind, count: st.Count, site: st.Site, records: st.Records,
+	}
+}
+
+// A narrow actual-source test seam, not a backend extension. Native owns all
+// asynchronous staging; read never lets CUDA retain host or Go slice pointers.
+type cudaV41MMIDBatchOperations struct {
+	admit  func(*cudaBackend) error
+	read   func([]byte, []unsafe.Pointer, []int, []int) (int, bool)
+	retire func(unsafe.Pointer) int
+	hold   func()
+}
+
+var cudaV41MMIDBatchNative = cudaV41MMIDBatchOperations{
+	admit: func(c *cudaBackend) error { return c.cudaV41MMIDState("V41ReadDeferred") },
+	read: func(host []byte, ptrs []unsafe.Pointer, sizes, offsets []int) (int, bool) {
+		var complete C.int
+		if len(ptrs) == 0 {
+			status := C.fak_v41_mmid_read_batch(nil, 0, nil, nil, nil, 0, &complete)
+			return int(status), complete != 0
+		}
+		ns, no := make([]C.size_t, len(sizes)), make([]C.size_t, len(offsets))
+		for i := range sizes {
+			ns[i], no[i] = C.size_t(sizes[i]), C.size_t(offsets[i])
+		}
+		status := C.fak_v41_mmid_read_batch(unsafe.Pointer(&host[0]), C.size_t(len(host)),
+			(*unsafe.Pointer)(unsafe.Pointer(&ptrs[0])), &ns[0], &no[0], C.int(len(ptrs)), &complete)
+		runtime.KeepAlive(host)
+		runtime.KeepAlive(ptrs)
+		return int(status), complete != 0
+	},
+	retire: func(ptr unsafe.Pointer) int { return int(C.fak_v41_mmid_retire_status(ptr)) },
+	hold:   func() { C.fak_v41_mmid_hold_uncertain() },
+}
+
+type cudaV41MMIDAccepted struct {
+	buf    *cudaBuf
+	issued cudaV41MMIDIssued
+	retain bool // malformed row aliases must not pool caller-visible storage
+}
+
+func cudaV41MMIDRangesOverlap(a unsafe.Pointer, an int, b unsafe.Pointer, bn int) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	x, y := uintptr(a), uintptr(b)
+	// An invalid extent has no proven disjointness: conservatively retain.
+	if an <= 0 || bn <= 0 || uintptr(an) > ^uintptr(0)-x || uintptr(bn) > ^uintptr(0)-y {
+		return true
+	}
+	return x < y+uintptr(bn) && y < x+uintptr(an)
+}
+
+func cudaV41MMIDStatusDomain(st V41DeferredStatus) bool {
+	if st.Count <= 0 || st.Count > math.MaxInt32 || st.Count > math.MaxInt/4 ||
+		st.Records < 0 || st.Records > V41RoutedIDMaxPicks {
+		return false
+	}
+	switch st.Kind {
+	case V41DeferredRoutedSwiGLU:
+		return st.Site == 0
+	case V41DeferredBF16Publish:
+		return V41BF16PublishSite(st.Site)
+	case V41DeferredF32Finite:
+		return st.Records <= 1 && v41F32FiniteSite(st.Site)
+	}
+	return false
+}
+
+// Private qualification reader only. Neither this method nor issuing status
+// metadata implements V41DeferredStatusBackend or changes model selection.
+func (c *cudaBackend) cudaV41MMIDReadBatch(statuses []V41DeferredStatus, rows []Tensor) (verdicts []error, values [][]float32, err error) {
+	return c.cudaV41MMIDConsume(statuses, rows, false, nil)
+}
+
+// cudaV41MMIDCancel settles previously issued statuses after an early abort,
+// including a sticky admission/runtime error in a later producer. It does not
+// submit a read, decode status, free caller outputs or turn the original error
+// into success. Only descriptors issued by this backend are accepted; foreign,
+// unissued and already-consumed handles are ignored, so cleanup is idempotent.
+// The first error is preserved; cleanup failures also poison/retain through the
+// same native terminal owner as the reader. No public cancellation ABI is added.
+func (c *cudaBackend) cudaV41MMIDCancel(statuses []V41DeferredStatus, primary error) error {
+	_, _, err := c.cudaV41MMIDConsume(statuses, nil, true, primary)
+	return err
+}
+
+// One ownership core for reading and aborting; cancellation differs only in
+// skipping admission/copies/decoding after collecting every issued owner.
+func (c *cudaBackend) cudaV41MMIDConsume(statuses []V41DeferredStatus, rows []Tensor, cancel bool, primary error) ([]error, [][]float32, error) {
+	verdicts, values, _, err := c.cudaV41MMIDConsumeChecked(statuses, rows, cancel, false, primary)
+	return verdicts, values, err
+}
+
+// cudaV41MMIDCancelCompletion additionally establishes a checked stream drain
+// when no status was issued: caller outputs can precede the first status. The
+// old cancellation wrapper keeps its original no-owner/idempotence behavior.
+func (c *cudaBackend) cudaV41MMIDCancelCompletion(statuses []V41DeferredStatus, primary error) (bool, error) {
+	_, _, completed, err := c.cudaV41MMIDConsumeChecked(statuses, nil, true, true, primary)
+	return completed, err
+}
+
+func (c *cudaBackend) cudaV41MMIDConsumeChecked(statuses []V41DeferredStatus, rows []Tensor, cancel, forceDrain bool, primary error) (verdicts []error, values [][]float32, completed bool, err error) {
+	const site = "V41ReadDeferred"
+	err = primary
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	ops := cudaV41MMIDBatchNative
+	var accepted []cudaV41MMIDAccepted
+	fenced, complete := false, false
+	cleanupOK := true
+	fail := func(message string) error { return cudaV41MMIDError(site, message, 2, nil) }
+	setStatus := func(status int) {
+		if status != 0 {
+			cleanupOK = false
+			failure := c.cudaV41MMIDStatus(site, status)
+			if err == nil {
+				err = failure
+			}
+		}
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			cleanupOK = false
+			if err == nil {
+				cause, _ := ConvertCUDAPanic(p, site, "batched mmid read")
+				err = cudaV41MMIDError(site, "batched reader panicked", -1, cause)
+			}
+		}
+		// Even a late metadata rejection follows producer work. Establish a
+		// completion disposition before returning any accepted owner to a pool.
+		if (len(accepted) != 0 || (forceDrain && c != nil)) && !fenced {
+			func() {
+				defer func() {
+					if p := recover(); p != nil {
+						cleanupOK = false
+						if err == nil {
+							err = fail("cleanup completion panicked; records retained")
+						}
+					}
+				}()
+				status, done := ops.read(nil, nil, nil, nil)
+				fenced, complete = true, done
+				setStatus(status)
+			}()
+		}
+		if !complete && (len(accepted) != 0 || fenced || (forceDrain && c != nil)) {
+			ops.hold()
+		}
+		for _, a := range accepted {
+			// Logical consumption occurs once, including unknown completion.
+			// Native g_live and the shared uncertainty latch retain physical
+			// allocations that cannot safely re-enter the pool.
+			delete(cudaV41MMIDIssuedStatuses, a.buf)
+			a.buf.ptr, a.buf.n = nil, 0
+			if !complete || a.retain {
+				continue
+			}
+			func() {
+				defer func() {
+					if p := recover(); p != nil {
+						cleanupOK = false
+						if err == nil {
+							err = fail("status retirement panicked")
+						}
+					}
+				}()
+				// Native 1 means retained by a shared lifetime guard, not a
+				// second ownership grant. Negative values are transport errors.
+				if code := ops.retire(a.issued.ptr); code < 0 {
+					setStatus(code)
+				}
+			}()
+		}
+		if err != nil {
+			verdicts, values = nil, nil
+		} else if fenced && complete {
+			atomic.AddUint64(&c.fenceGen, 1)
+		}
+		completed = complete && cleanupOK
+		runtime.KeepAlive(statuses)
+		runtime.KeepAlive(rows)
+	}()
+	cudaV41MMIDSweepIssued()
+	// Collect ALL issued owners before checking any descriptor or later row.
+	// A forged foreign/non-issued tensor never enters this retirement list.
+	for _, st := range statuses {
+		b, ok := st.Record.buf.(*cudaBuf)
+		if !ok || b == nil || st.Record.be != c || c == nil {
+			continue
+		}
+		issued, ok := cudaV41MMIDIssuedStatuses[b]
+		if !ok || issued.owner != c || b.ptr == nil || b.ptr != issued.ptr {
+			continue
+		}
+		duplicate := false
+		for _, a := range accepted {
+			if a.buf == b || a.issued.ptr == issued.ptr {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			accepted = append(accepted, cudaV41MMIDAccepted{buf: b, issued: issued})
+		}
+	}
+	if cancel {
+		// No metadata/shape/capability gate can strand an already accepted
+		// owner. In particular, do not call ops.admit: the fault which caused
+		// this abort may have poisoned the Go latch. Deferred cleanup performs
+		// checked native completion independently and applies its disposition.
+		if c == nil && err == nil {
+			err = fail("nil backend cannot cancel deferred statuses")
+		}
+		return nil, nil, false, err
+	}
+	// Account aliases even when the row itself later fails dtype/owner/extent
+	// admission. No malformed row can make its storage a status pool return.
+	for i := range accepted {
+		for _, row := range rows {
+			if b, ok := row.buf.(*cudaBuf); ok && b != nil &&
+				cudaV41MMIDRangesOverlap(accepted[i].issued.ptr, accepted[i].buf.n, b.ptr, b.n) {
+				accepted[i].retain = true
+			}
+		}
+	}
+	if c == nil || len(statuses)+len(rows) == 0 || len(statuses) > 64 || len(rows) > 32 || len(accepted) != len(statuses) {
+		return nil, nil, false, fail("unissued, duplicate or oversized deferred batch")
+	}
+	if err = ops.admit(c); err != nil {
+		return nil, nil, false, err
+	}
+	ptrs := make([]unsafe.Pointer, 0, len(statuses)+len(rows))
+	sizes := make([]int, 0, cap(ptrs))
+	offsets := make([]int, 0, cap(ptrs))
+	total, verdictCount := 0, 0
+	appendRegion := func(b *cudaBuf, size int) bool {
+		if size <= 0 || total > math.MaxInt-15 {
+			return false
+		}
+		offset := (total + 15) &^ 15
+		if size > math.MaxInt-offset {
+			return false
+		}
+		for _, p := range ptrs {
+			if p == b.ptr {
+				return false
+			}
+		}
+		ptrs, sizes, offsets = append(ptrs, b.ptr), append(sizes, size), append(offsets, offset)
+		total = offset + size
+		return true
+	}
+	for i, st := range statuses {
+		a := accepted[i]
+		issued := a.issued
+		if a.retain || !cudaV41MMIDStatusDomain(st) || st.Kind != issued.kind || st.Count != issued.count ||
+			st.Site != issued.site || st.Records != issued.records || st.Record.Dtype != F32 ||
+			st.Record.Layout != RowMajor || st.Record.Quant != nil || len(st.Record.Shape) != 1 {
+			return nil, nil, false, fail("deferred status does not match its fresh issuance")
+		}
+		n := V41DeferredRecords(st)
+		if st.Record.Shape[0] != n*4 {
+			return nil, nil, false, fail("deferred status shape does not match its records")
+		}
+		b, invalid := c.cudaV41MMIDOperand(site, "status", st.Record, n*16)
+		if invalid != nil {
+			return nil, nil, false, invalid
+		}
+		if !appendRegion(b, n*16) {
+			return nil, nil, false, fail("deferred status image extent or alias")
+		}
+		verdictCount += n // at most 64 descriptors * 8 records
+	}
+	for _, row := range rows {
+		elements, ok := cudaV41MMIDReadElements(row)
+		if !ok {
+			return nil, nil, false, fail("deferred row must be a bounded contiguous F32 row or panel")
+		}
+		n := elements * 4
+		b, invalid := c.cudaV41MMIDOperand(site, "row", row, n)
+		if invalid != nil {
+			return nil, nil, false, invalid
+		}
+		if !appendRegion(b, n) {
+			return nil, nil, false, fail("deferred row image extent or alias")
+		}
+	}
+	raw := make([]byte, total)
+	status, done := ops.read(raw, ptrs, sizes, offsets)
+	fenced, complete = true, done
+	setStatus(status)
+	if err != nil || !complete {
+		if err == nil {
+			err = fail("native batch returned without known completion")
+		}
+		return nil, nil, false, err
+	}
+	verdicts = make([]error, 0, verdictCount)
+	for i, st := range statuses {
+		for r := 0; r < V41DeferredRecords(st); r++ {
+			at := offsets[i] + r*16
+			cause := decodeV41DeferredStatus(st, raw[at:at+16])
+			var routed *V41RoutedSwiGLUFault
+			if cause != nil && !errors.As(cause, &routed) {
+				op := "V41RoutedSwiGLU"
+				if st.Kind == V41DeferredBF16Publish {
+					op = "V41BF16Publish"
+				} else if st.Kind == V41DeferredF32Finite {
+					op = "V41F32Finite"
+				}
+				cause = &BackendError{Backend: "cuda", Site: op, Class: "cuda-v41-deferred-status-failed", Err: cause, Recovered: cause, Message: cause.Error()}
+			}
+			verdicts = append(verdicts, cause)
+		}
+	}
+	values = make([][]float32, len(rows))
+	for i := range rows {
+		// Return one flattened host slice per input tensor, not per panel row.
+		values[i] = make([]float32, sizes[len(statuses)+i]/4)
+		at := offsets[len(statuses)+i]
+		for j := range values[i] {
+			values[i][j] = math.Float32frombits(binary.LittleEndian.Uint32(raw[at+j*4:]))
+		}
+	}
+	return verdicts, values, false, nil
+}
+
+// cudaV41MMIDReadElements admits only the contiguous row-major domains used
+// by paired RoPE vectors and target-feature [tokens, hidden] panels. Tensor has
+// no stride metadata; arbitrary ranks/layouts are deliberately not admitted.
+// Bound multiplication before evaluating it; Numel may overflow for forged
+// metadata. Storage ownership/capacity and status aliases remain the reader's
+// responsibility, after collecting every issued status for safe settlement.
+func cudaV41MMIDReadElements(row Tensor) (int, bool) {
+	if row.Dtype != F32 || row.Layout != RowMajor || row.Quant != nil ||
+		(len(row.Shape) != 1 && len(row.Shape) != 2) {
+		return 0, false
+	}
+	limit := min(math.MaxInt32, math.MaxInt/4)
+	elements := 1
+	for _, dim := range row.Shape {
+		if dim <= 0 || dim > limit/elements {
+			return 0, false
+		}
+		elements *= dim
+	}
+	return elements, true
+}

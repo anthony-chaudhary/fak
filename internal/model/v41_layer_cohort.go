@@ -407,7 +407,7 @@ func (m *Model) v41GroupedDecodeEnabled(lanes []v41StepCohortLane, txs []*v41Ste
 		if _, ok := s.Backend.(compute.V41BF16PublishBackend); !ok {
 			return false
 		}
-		if _, ok := s.Backend.(compute.V41DeferredStatusBackend); !ok {
+		if _, ok := compute.ResolveV41DeferredStatus(s.Backend); !ok {
 			return false
 		}
 		active++

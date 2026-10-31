@@ -207,6 +207,9 @@ extern "C" unsigned long long fcuda_q4k_mmvq_launch_count(void) { return g_q4k_m
 // FCUDA_Q4K_MMVQ_REFUSED for a shape this arm does not take (nothing launched on either).
 #define FCUDA_Q4K_MMVQ_REFUSED 80006
 static int fcuda_q4k_mmvq_matmul(const uint8_t *dQ4K, const float *dX, float *dY, int out, int in, int P) {
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return FCUDA_Q4K_MMVQ_REFUSED;
+#endif
     using namespace fak_q4k_mmvq;
     if (!dQ4K || !dX || !dY || out <= 0 || in <= 0 || in % QK_K != 0 || P < 1 || P > max_cols)
         return FCUDA_Q4K_MMVQ_REFUSED;

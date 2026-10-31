@@ -272,6 +272,9 @@ static int g_q8_scratch_retire_status = 0;
 // q8_quant_rows grows the activation scratch, then quantizes every row of X on its own. Returns 0
 // or an allocation/retirement failure before any launch.
 static int q8_quant_rows(const float *dX, int in, int P, int block) {
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return 90003;
+#endif
   if (g_q8_scratch_retire_status) return g_q8_scratch_retire_status;
   int nblk = in / block;
   int needQX = P * in;          // int8 activation codes
@@ -330,6 +333,14 @@ static int q8_rows_matmul(const int8_t *dCodes, const float *dScales, const floa
 }
 extern "C" int fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float *dX,
                                    float *dY, int out, int in, int P, int block) {
+#ifdef FAK_CUDA_Q8_MMQ_PREFILL
+  // Qualification only: never touches the BitExact rows entry point.
+  const char *prefill_arm = getenv("FAK_CUDA_Q8_PREFILL");
+  if (prefill_arm && strcmp(prefill_arm, "mmq") == 0) {
+    const int status = fcuda_q8_mmq_matmul(dCodes, dScales, dX, dY, out, in, P, block);
+    if (status != FCUDA_Q8_MMQ_REFUSED) return status;
+  }
+#endif
   if (P >= 128) return q8_dequant_sgemm(dCodes, dScales, dX, dY, out, in, P, block);
   return q8_rows_matmul(dCodes, dScales, dX, dY, out, in, P, block);
 }
@@ -1128,6 +1139,14 @@ extern "C" void fcuda_q2k_gemm_panel(const uint8_t *dQ2K, const float *dX, float
 
 extern "C" int fcuda_q2k_matmul_f32(const uint8_t *dQ2K, const float *dX, float *dY,
                                     int out, int in, int P) {
+#ifdef FAK_CUDA_Q2K_MMQ_PREFILL
+  // Qualification-only opt-in; only pre-enqueue admission refusal can fall back.
+  const char *prefill_arm = getenv("FAK_CUDA_Q2K_PREFILL");
+  if (P >= 128 && prefill_arm && strcmp(prefill_arm, "mmq") == 0) {
+    const int status = fcuda_q2k_mmq_matmul(dQ2K, dX, dY, out, in, P);
+    if (status != FCUDA_Q2K_MMQ_REFUSED) return status;
+  }
+#endif
   if (P >= 128) {
     size_t wn = (size_t)out * in, xn = (size_t)P * in;
     FP16CompensatedScratch scratch;

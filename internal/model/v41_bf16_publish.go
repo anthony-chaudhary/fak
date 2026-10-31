@@ -362,7 +362,7 @@ func (s *Session) v41BindBF16Publication() *v41BF16PublicationBinding {
 // v41DeferredBF16Publisher returns the backend's deferred-status publication
 // for a count-element row, unless FAK_V41_DEFERRED_BF16_PUBLISH=0.
 func v41DeferredBF16Publisher(backend compute.Backend, count int) (compute.V41DeferredStatusBackend, bool) {
-	deferred, ok := backend.(compute.V41DeferredStatusBackend)
+	deferred, ok := compute.ResolveV41DeferredStatus(backend)
 	if !ok || os.Getenv(v41DeferredBF16PublishEnv) == "0" || !deferred.SupportsV41DeferredStatus(count) {
 		return nil, false
 	}
@@ -440,7 +440,7 @@ func (s *Session) v41PublishResidentBF16Deferred(t compute.Tensor, site uint32) 
 
 // v41ReadResidentBF16 is v41ReadDeferredBF16 for a resident publication.
 func (s *Session) v41ReadResidentBF16(out compute.Tensor, status compute.V41DeferredStatus) (row []float32, verdict, err error) {
-	deferred, ok := s.Backend.(compute.V41DeferredStatusBackend)
+	deferred, ok := compute.ResolveV41DeferredStatus(s.Backend)
 	if !ok {
 		s.Backend.Free(status.Record)
 		return nil, nil, errV41BF16BoundaryResult

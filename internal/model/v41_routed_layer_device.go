@@ -53,16 +53,34 @@ func v41PrefillExpertPanelOptedIn() bool {
 	return os.Getenv(v41PrefillExpertPanelEnv) == "1"
 }
 
+// v41RoutedLayerQualified separates method-set availability from qualification
+// for serving. Existing backends retain their admission contract; CUDA must
+// explicitly qualify this complete model path, not merely acquire deferred
+// methods during private reader/producer development. No environment override
+// can substitute for that qualification. Backends may explicitly decline too.
+func v41RoutedLayerQualified(backend compute.Backend) bool {
+	if backend == nil {
+		return false
+	}
+	if qualified, ok := backend.(interface{ V41RoutedLayerQualified() bool }); ok {
+		return qualified.V41RoutedLayerQualified()
+	}
+	return backend.Name() != "cuda"
+}
+
 // v41RoutedLayerFunc binds the batched routed layer, or nil when the fused
 // per-pick seam is unbound or the backend cannot defer its status records.
 func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
+	if s == nil || !v41RoutedLayerQualified(s.Backend) {
+		return nil
+	}
 	if os.Getenv(v41LayerExpertBatchEnv) == "0" || s.v41RoutedExpertFunc() == nil {
 		return nil
 	}
 	cfg := s.M.Cfg
 	H, I := cfg.HiddenSize, cfg.MoEIntermediateSize
 	limit := float32(cfg.SwigluLimit)
-	deferred, ok := s.Backend.(compute.V41DeferredStatusBackend)
+	deferred, ok := compute.ResolveV41RoutedDeferredStatus(s.Backend)
 	if !ok || H <= 0 || I <= 0 || !deferred.SupportsV41DeferredStatus(H) {
 		return nil
 	}
@@ -102,10 +120,12 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 		s.ensureOpenBackendSession()
 		path, stage := "v41-routed-expert", "gate/up"
 		joinPrefetch := func() {}
+		cancelPending := func(error) {}
 		closeFailure := func(err error) error {
 			joinPrefetch()
 			closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: path, Layer: layer, Stage: stage, Cause: err}
 			s.halFailure = closed
+			cancelPending(closed)
 			s.closeBackendOwned()
 			return closed
 		}
@@ -224,14 +244,30 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 		}
 
 		var owned []compute.Tensor
+		retainOwned := false
 		defer func() {
+			if retainOwned {
+				return
+			}
 			for i := len(owned) - 1; i >= 0; i-- {
 				s.Backend.Free(owned[i])
 			}
 		}()
 		var statuses []compute.V41DeferredStatus
 		consumed := false
+		if canceler, ok := deferred.(compute.V41DeferredStatusCanceler); ok {
+			cancelPending = func(primary error) {
+				if consumed || (len(statuses) == 0 && len(owned) == 0) {
+					return
+				}
+				// Transfer before calling: a failing cancel must never fall back
+				// to raw Free or repeat cleanup. Completion of outputs is unknown.
+				consumed, retainOwned = true, true
+				retainOwned = !v41CancelRoutedStatus(canceler, statuses, primary)
+			}
+		}
 		defer func() {
+			cancelPending(cause)
 			if consumed {
 				return
 			}
@@ -438,11 +474,11 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 // to slot zero; activations and route weights remain distinct per row. Decline
 // is possible only before any selected device operation.
 func (s *Session) v41RoutedExpertPanel(layer int, stem string, inputs [][]float32, routeWeights []float32, publish v41BF16BoundaryFunc) (result [][]float32, outcome v41RoutedExpertOutcome, cause error) {
-	if s == nil || s.M == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory || !v41PrefillExpertPanelOptedIn() {
+	if s == nil || s.M == nil || !v41RoutedLayerQualified(s.Backend) || !s.Backend.Caps().DeviceMemory || !v41PrefillExpertPanelOptedIn() {
 		return nil, v41RoutedExpertDeclined, nil
 	}
 	idBackend, idOK := s.Backend.(compute.V41RoutedIDBackend)
-	deferred, deferredOK := s.Backend.(compute.V41DeferredStatusBackend)
+	deferred, deferredOK := compute.ResolveV41RoutedDeferredStatus(s.Backend)
 	if !idOK || !deferredOK || !idBackend.V41RoutedIDAvailable() {
 		return nil, v41RoutedExpertDeclined, nil
 	}
@@ -466,9 +502,11 @@ func (s *Session) v41RoutedExpertPanel(layer int, stem string, inputs [][]float3
 	}
 	s.ensureOpenBackendSession()
 	stage := "gate/up"
+	cancelPending := func(error) {}
 	closeFailure := func(err error) error {
 		closed := &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardPathKind("deepseek41"), Path: "v41-routed-expert-panel", Layer: layer, Stage: stage, Cause: err}
 		s.halFailure = closed
+		cancelPending(closed)
 		s.closeBackendOwned()
 		return closed
 	}
@@ -528,14 +566,30 @@ func (s *Session) v41RoutedExpertPanel(layer int, stem string, inputs [][]float3
 		flatInput = append(flatInput, row...)
 	}
 	var owned []compute.Tensor
+	retainOwned := false
 	defer func() {
+		if retainOwned {
+			return
+		}
 		for i := len(owned) - 1; i >= 0; i-- {
 			s.Backend.Free(owned[i])
 		}
 	}()
 	var statuses []compute.V41DeferredStatus
 	consumed := false
+	if canceler, ok := deferred.(compute.V41DeferredStatusCanceler); ok {
+		cancelPending = func(primary error) {
+			if consumed || (len(statuses) == 0 && len(owned) == 0) {
+				return
+			}
+			// Transfer before calling: a failing cancel must never fall back
+			// to raw Free or repeat cleanup. Completion of outputs is unknown.
+			consumed, retainOwned = true, true
+			retainOwned = !v41CancelRoutedStatus(canceler, statuses, primary)
+		}
+	}
 	defer func() {
+		cancelPending(cause)
 		if !consumed {
 			for _, status := range statuses {
 				s.Backend.Free(status.Record)
@@ -810,4 +864,20 @@ func v41RoutedLayerResult(l, H int, sum []float32, outcome v41RoutedExpertOutcom
 	default:
 		return nil, true, v41ExpertOperationErr(l, "gate/up", errV41ExpertResult)
 	}
+}
+
+// v41CancelRoutedStatus transfers cleanup without recovering an outer operation
+// panic. Cleanup panic/failure means no positive disposition; the original
+// error or unwind remains authoritative. Completion never means output validity.
+func v41CancelRoutedStatus(canceler compute.V41DeferredStatusCanceler, statuses []compute.V41DeferredStatus, primary error) (completed bool) {
+	if primary == nil {
+		primary = errV41ExpertResult
+	}
+	defer func() {
+		if recover() != nil {
+			completed = false
+		}
+	}()
+	complete, err := canceler.V41CancelDeferred(statuses, primary)
+	return complete && (err == nil || err == primary)
 }

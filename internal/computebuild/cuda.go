@@ -160,6 +160,10 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 		if err != nil {
 			return nil, err
 		}
+		nvccArgs, err = cudaMMQPrefillFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
 		nvccArgs = append(nvccArgs, gencodeArgs...)
 		nvccArgs = append(nvccArgs, "-Xcompiler", "/MD", "-c", "cuda_kernels.cu", "-o", obj)
 		if err := compileCUDAObject(ctx, tc, pkgDir, "cuda_kernels.cu", obj, nvccArgs, env, receipt, stdout); err != nil {
@@ -201,6 +205,10 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 			return nil, err
 		}
 		nvccArgs, err = cudaV41RoutedSwiGLUFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
+		nvccArgs, err = cudaMMQPrefillFlags(ctx, nvccArgs, env)
 		if err != nil {
 			return nil, err
 		}
@@ -433,6 +441,12 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 	}
 	if cfg.PkgDir == "" {
 		cfg.PkgDir = filepath.Join(cfg.RepoRoot, "internal", "compute")
+	}
+	if selection := cudaMMQPrefillSelection(cfg); len(selection) > 0 {
+		if err := prepareCUDAMMQPrefill(cfg, selection); err != nil {
+			return err
+		}
+		ctx = context.WithValue(ctx, cudaMMQPrefillKey{}, selection)
 	}
 	if cfg.Toolchain == nil {
 		tc, err := DiscoverToolchain()

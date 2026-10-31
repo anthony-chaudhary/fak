@@ -400,6 +400,26 @@ unsigned long long fcuda_q4k_mmq_launch_count(void);
  * (llama.cpp q8_1 DP4A, cuda/q4k_mmvq.cuh). The mmvq arm returns 80001 when its persistent q8_1
  * scratch misses and 80006 for a shape it refuses; nothing is launched on either. */
 void fcuda_set_q4k_decode_arm(int arm);
+/* Shared private-stream terminal state, present in every native build profile.
+ * Caller holds cudaMu; this is not a lock-free Ready/telemetry query. Nonzero
+ * refuses further operand submission until process teardown. Feature macros
+ * only select contributing native states, never availability of this bridge. */
+int fak_v41_checked_stream_terminal(void);
+
+/* Dormant candidate: P=1 Q/K/V projections share one freshly quantized F32 input.
+ * No automatic model dispatch or capture support. Caller holds backend submission
+ * serialization, validates device/allocation provenance, and owns immutable X/W
+ * and distinct writable outputs/workspace until a successful stream fence.
+ * Workspace needs (in/32)*36 bytes with 4-byte alignment; no allocation/cache here.
+ * 80006 declines before any launch (including capture); ordinary separate GEMVs
+ * may be selected then. Any 70000+CUDA status is a fault, NEVER a fallback signal:
+ * retain all operands/workspace and invalidate all outputs until checked drain
+ * establishes safe retirement. Zero means enqueued, not completed/Ready.
+ * Each invocation quantizes X anew, even if its address matches a previous call. */
+int fcuda_q4k_qkv_shared_input_f32(
+    const uint8_t *wQ, const uint8_t *wK, const uint8_t *wV,
+    const float *x, float *yQ, float *yK, float *yV,
+    int outQ, int outK, int outV, int in, void *workspace, size_t workspaceBytes);
 /* fcuda_q4k_mmvq_launch_count counts mmvq-arm GEMV launches (parity witness). */
 unsigned long long fcuda_q4k_mmvq_launch_count(void);
 /* Counts accepted fp8lt GEMM enqueues; a synchronized read is still required. */

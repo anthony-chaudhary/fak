@@ -53,6 +53,9 @@ static float *g_attn_scratch = nullptr;
 static int g_attn_scratch_cap = 0; // floats
 extern "C" void fcuda_attention_f32(const float *dQ, const float *dK, const float *dV, float *dOut,
                                     int nPos, int maxPos, int nH, int nKV, int hd, float scale) {
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return;
+#endif
   int need = nH * (maxPos > nPos ? maxPos : nPos);
   if (need > g_attn_scratch_cap) {
     if (g_attn_scratch) {

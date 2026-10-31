@@ -49,6 +49,9 @@ extern "C" int fcuda_handoff_peer_enable(int src, int dst) {
 }
 
 extern "C" void *fcuda_handoff_alloc(int device, size_t bytes) {
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return nullptr;
+#endif
   fcuda_handoff_device_guard guard;
   void *d = nullptr;
   cudaError_t e = cudaSetDevice(device);
@@ -60,6 +63,9 @@ extern "C" void *fcuda_handoff_alloc(int device, size_t bytes) {
 
 extern "C" int fcuda_handoff_free(int device, void *d) {
   if (!d) return 0;
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return 1000 + (int)cudaErrorNotReady;
+#endif
   fcuda_handoff_device_guard guard;
   cudaError_t e = cudaSetDevice(device);
   if (e == cudaSuccess) e = cudaFree(d);
@@ -68,6 +74,9 @@ extern "C" int fcuda_handoff_free(int device, void *d) {
 }
 
 extern "C" void *fcuda_handoff_pinned_alloc(size_t bytes) {
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return nullptr;
+#endif
   void *h = nullptr;
   if (fcuda_handoff_status(cudaHostAlloc(&h, bytes ? bytes : 1, cudaHostAllocPortable), "cudaHostAlloc") != 0)
     return nullptr;
@@ -77,6 +86,9 @@ extern "C" void *fcuda_handoff_pinned_alloc(size_t bytes) {
 
 extern "C" int fcuda_handoff_pinned_free(void *h) {
   if (!h) return 0;
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return 1000 + (int)cudaErrorNotReady;
+#endif
   cudaError_t e = cudaFreeHost(h);
   if (e == cudaSuccess) fak_alloc_untrack(h);
   return fcuda_handoff_status(e, "cudaFreeHost");

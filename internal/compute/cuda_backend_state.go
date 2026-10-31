@@ -83,6 +83,7 @@ func (b *cudaBuf) invalidStateError(operand string) error {
 // tensors, but converts the poison bit into the typed invalid-state panic before
 // any device pointer is submitted.
 func (c *cudaBackend) cudaBufForSubmit(t Tensor) *cudaBuf {
+	cudaV41CheckedSubmit()
 	b := t.buf.(*cudaBuf)
 	if err := b.invalidStateError("buffer"); err != nil {
 		panic(err)

@@ -415,7 +415,7 @@ func (f *qwen35TargetFeatureTransaction) readPanelFeatures(tokens []int, base in
 	}
 	hidden, backend := f.tx.target.M.Cfg.HiddenSize, f.tx.target.Backend
 	var grouped [][]float32
-	if reader, ok := backend.(compute.V41DeferredStatusBackend); ok && len(panels) > 1 {
+	if reader, ok := compute.ResolveV41DeferredStatus(backend); ok && len(panels) > 1 {
 		// The existing reader accepts any owned F32 shape. With no status
 		// records it borrows every tap tensor and returns one flat host row
 		// per tensor behind a single checked host fence.

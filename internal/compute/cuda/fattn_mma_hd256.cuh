@@ -803,6 +803,9 @@ extern "C" unsigned long long fak_qwen38_fattn_mma_launch_count(void) {
 static int fak_qwen38_fattn_mma_hd256_launch(
         const float *dQ, const float *dK, const float *dV, float *dOut,
         int tokens, int prefix, int nH, int nKV, float scale) {
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+    if (v41_candidates_stream_uncertain()) return 52000 + (int)cudaErrorNotReady;
+#endif
     int device = 0, major = 0;
     if (cudaGetDevice(&device) != cudaSuccess ||
         cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, device) != cudaSuccess) {

@@ -73,6 +73,9 @@ extern "C" int fcuda_driver_get_version(int *version) {
 }
 
 extern "C" void *fcuda_malloc_tagged(size_t bytes, int cls, int site) {
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return nullptr;
+#endif
   if (g_cuda_cleanup_status != 0) return nullptr;
   if (bytes == 0) bytes = 1;
   auto it = g_pool.find(bytes);
@@ -111,6 +114,9 @@ extern "C" void *fcuda_malloc(size_t bytes) {
   return fcuda_malloc_tagged(bytes, FAK_ALLOC_OTHER, FAK_ALLOC_SITE("fcuda_malloc"));
 }
 extern "C" void *fcuda_malloc_managed_tagged(size_t bytes, int cls, int site) {
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return nullptr;
+#endif
   if (g_cuda_cleanup_status != 0) return nullptr;
   if (bytes == 0) bytes = 1;
   void *d = nullptr;
@@ -129,6 +135,9 @@ extern "C" void *fcuda_malloc_managed(size_t bytes) {
 static void q4_coeff_cache_evict(const void *q);
 
 extern "C" void fcuda_free(void *d) {
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return;
+#endif
   if (!d) return;
   if (g_cuda_cleanup_status != 0) return;
   if (g_v41_router_uncertain) return;
@@ -227,6 +236,9 @@ extern "C" void fcuda_free(void *d) {
 // release a pointer with an unknown owner. A failed drain/free leaves the live
 // record intact and unavailable to pool reuse; the caller must surface the fault.
 extern "C" int fcuda_discard_unsubmitted(void *d, size_t expected_bytes) {
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return (int)cudaErrorInvalidValue;
+#endif
   if (!d || g_capture_open) return (int)cudaErrorInvalidValue;
   if (g_cuda_cleanup_status != 0) return g_cuda_cleanup_status;
   if (g_v41_router_uncertain) return (int)cudaErrorInvalidValue;
@@ -298,6 +310,9 @@ extern "C" size_t fcuda_live_allocations(void) {
 // fcuda_malloc_panel serves prompt-panel scratch from g_panel_pool, never managed memory.
 // nullptr means the device allocation failed or a graph capture is open.
 extern "C" void *fcuda_malloc_panel_tagged(size_t bytes, int cls, int site) {
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return nullptr;
+#endif
   if (g_cuda_cleanup_status != 0) return nullptr;
   if (bytes == 0) bytes = 1;
   if (g_capture_open) return nullptr;
@@ -397,6 +412,9 @@ extern "C" void fcuda_pool_stats(size_t *pooledBytes, size_t *buckets, size_t *l
 // guarantees headroom so the captured forward is served entirely from the free list. Idempotent
 // and cheap: it only tops each bucket up to `extra` spares (a few hundred bytes each).
 extern "C" void fcuda_graph_prewarm(int extra) {
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return;
+#endif
   if (g_cuda_cleanup_status != 0) return;
   if (extra <= 0) return;
   // Snapshot the sizes first: pushing into g_pool while iterating it would invalidate iterators.

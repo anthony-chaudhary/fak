@@ -230,7 +230,7 @@ func (s *Session) v41TailRoPEFunc() v41TailRoPEFunc {
 				}
 				return append([]float32(nil), values...), nil
 			}
-			if grouped, ok := s.Backend.(compute.V41DeferredStatusBackend); ok {
+			if grouped, ok := compute.ResolveV41DeferredStatus(s.Backend); ok {
 				// A zero-status read needs no SwiGLU/BF16 module, so the
 				// unrelated SupportsV41DeferredStatus probe does not gate it.
 				// Both outputs share one checked host fence. A transport error

@@ -24,6 +24,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unordered_map>
+#if defined(FAK_CUDA_V41_EMBED_GATHER) || defined(FAK_CUDA_V41_INDEX_SELECT) || defined(FAK_CUDA_Q2K_MMQ_PREFILL) || defined(FAK_CUDA_Q3K_MMQ_PREFILL) || defined(FAK_CUDA_Q8_MMQ_PREFILL)
+#include <atomic>
+#define FAK_CUDA_V41_CHECKED_STREAM 1
+static std::atomic<bool> g_v41_checked_stream_uncertain{false};
+#endif
 #include <vector>
 
 #include "cuda/alloc_ledger.h"
@@ -144,6 +149,9 @@ static int g_cuda_cleanup_status = 0;
 // Both candidates share g_stream. A successful peer call cannot rehabilitate
 // an uncertain operation, even when the Go backend has no fault latch.
 static bool v41_candidates_stream_uncertain(void) {
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (g_v41_checked_stream_uncertain.load()) return true;
+#endif
   if (g_cuda_cleanup_status != 0) return true;
   if (g_v41_router_uncertain) return true;
   if (g_v41_mmid_uncertain) return true;
@@ -183,6 +191,14 @@ static bool v41_candidates_stream_uncertain(void) {
   return false;
 }
 
+// Always linked: native MMQ options do not select Go build tags. Keep every
+// CUDA Go profile connected to the native terminal state, including MMQ-only.
+// Caller holds cudaMu, as do writers of existing non-atomic peer flags.
+// Not a lock-free readiness/telemetry API; no thread-safety widening.
+extern "C" int fak_v41_checked_stream_terminal(void) {
+  return v41_candidates_stream_uncertain() ? 1 : 0;
+}
+
 // Host-transfer witnesses (#482/#4738): cumulative bytes in each direction. Every successful
 // h2d/d2h copy adds to its own counter so a whole-operation test can prove zero traffic in both
 // directions after initial upload. Monotonic; tests reset them around each measured step.
@@ -207,6 +223,7 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/runtime_services.cuh"
 #include "cuda/async_upload.cuh"
 #include "cuda/model_candidates.cuh"
+#include "cuda/v41_checked_stream.cuh"
 #include "cuda_v41_indexer.cu"
 #include "cuda_v41_engram_gate.cu"
 #include "cuda_v41_routed_swiglu.cu"
@@ -217,7 +234,12 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda_v41_router.cu"
 #include "cuda/qwen35_gdn.cuh"
 #include "cuda/q4k_mmq.cuh"
+#include "cuda/q2k_mmq.cuh"
+#include "cuda/q3k_mmq.cuh"
+#include "cuda/q8_mmq.cuh"
 #include "cuda/q4k_mmvq.cuh"
+#include "cuda/q4k_shared_input.cuh"
+#include "cuda/q4k_shared_input_qualification.cuh"
 #include "cuda/quant_matmul.cuh"
 #include "cuda/q3k_matmul.cuh"
 #include "cuda/q3k_mmvq.cuh"

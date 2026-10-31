@@ -130,6 +130,9 @@ extern "C" int fcuda_set_device(int device) {
 #include "alloc_status.h"
 
 extern "C" void *fcuda_malloc_on_tagged(int device, size_t bytes, int cls, int site) {
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return nullptr;
+#endif
   if (g_cuda_cleanup_status != 0) return nullptr;
   if (bytes == 0) bytes = 1;
   fcuda_device_scope scope(device);
@@ -149,6 +152,9 @@ extern "C" void *fcuda_malloc_on(int device, size_t bytes) {
 }
 
 extern "C" void fcuda_free_on(int device, void *d) {
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return;
+#endif
   if (!d) return;
   if (g_cuda_cleanup_status != 0) return;
   if (g_v41_router_uncertain) return;
