@@ -142,15 +142,42 @@ __device__ signed char q8round_dev(float x) {
   return (signed char)t;
 }
 
+// The block-32 maximum follows warp_reduce_max<32> in llama.cpp
+// ggml/src/ggml-cuda/common.cuh, used by quantize_q8_1 in quantize.cu, at
+// f3586e66bc916d672773d4a6505513ba91a3595c (MIT).
+// Copyright (c) 2023-2026 The ggml authors. The full permission notice is
+// retained in THIRD_PARTY_NOTICES.md ("llama.cpp Q4_K MMQ prompt-panel GEMM").
+// Only the max reduction is borrowed: Fak's float scales and q8round_dev stay.
+static __device__ __forceinline__ float q8_activation_warp_max(float x) {
+#pragma unroll
+  for (int offset = 16; offset > 0; offset >>= 1) {
+    x = fmaxf(x, __shfl_xor_sync(0xffffffff, x, offset, 32));
+  }
+  return x;
+}
+
 // k_q8_quant_act quantizes the f32 activation X[P,in] to Q8_0 ON DEVICE: per block of `block`
 // elements, d = amax/127 and code = q8round(x/d) — exactly cpuref quantizeVecQ8. One block per
-// (row t, block b); 64 power-of-two threads stride the (=32) block elements for the amax reduce.
+// (row t, block b). Block-32 uses one full warp; other widths retain the shared reduction.
 __global__ void k_q8_quant_act(const float *X, signed char *qX, float *xScale,
                                int P, int in, int block) {
   int b = blockIdx.x, t = blockIdx.y;
   int nblk = in / block;
   if (t >= P || b >= nblk) return;
   const float *xb = X + (size_t)t * in + (size_t)b * block;
+  if (block == 32 && blockDim.x == 32) {
+    // Retain the old neutral-zero input treatment, including all-NaN -> amax 0.
+    // The old second warp contributed only zero; every lane here participates.
+    float a = 0.f;
+    a = fmaxf(a, fabsf(xb[threadIdx.x]));
+    a = q8_activation_warp_max(a);
+    float d = a / 127.f;
+    if (threadIdx.x == 0) xScale[(size_t)t * nblk + b] = d;
+    float inv = d > 0.f ? 1.f / d : 0.f;
+    signed char *qb = qX + (size_t)t * in + (size_t)b * block;
+    qb[threadIdx.x] = d > 0.f ? q8round_dev(xb[threadIdx.x] * inv) : (signed char)0;
+    return;
+  }
   __shared__ float red[64];
   float a = 0.f;
   for (int i = threadIdx.x; i < block; i += blockDim.x) a = fmaxf(a, fabsf(xb[i]));
@@ -350,7 +377,8 @@ static int q8_quant_rows(const float *dX, int in, int P, int block) {
                     FAK_ALLOC_SITE("q8-activation-scales"), (size_t)needScale * sizeof(float));
     g_q8_xScale_cap = needScale;
   }
-  FCUDA_TS("k_q8_quant_act", dim3(nblk, P), k_q8_quant_act<<<dim3(nblk, P), 64, 0, g_stream>>>(dX, g_q8_qX, g_q8_xScale, P, in, block));
+  const int quant_threads = block == 32 ? 32 : 64;
+  FCUDA_TS("k_q8_quant_act", dim3(nblk, P), k_q8_quant_act<<<dim3(nblk, P), quant_threads, 0, g_stream>>>(dX, g_q8_qX, g_q8_xScale, P, in, block));
   return 0;
 }
 // q8_rows_matmul is the per-row Q8_0 GEMM: each activation row is quantized on its own and
