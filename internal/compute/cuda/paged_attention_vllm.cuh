@@ -705,11 +705,16 @@ static int fak_paged_attention_launch(float* out, const float* q, const float* k
   dim3 grid(num_heads, num_seqs, max_num_partitions);
   dim3 block(NUM_THREADS);
   auto kern2 = paged_attention_v2_kernel<float, float, HEAD_SIZE, BLOCK_SIZE, NUM_THREADS, PARTITION_SIZE>;
+  cudaError_t producer_status = cudaSuccess;
   FCUDA_TS("fak_paged_attention_v2", num_heads,
            (kern2<<<grid, block, shared_mem_size, g_stream>>>(
                exp_sums, max_logits, tmp_out, q, k_cache, v_cache, num_kv_heads, scale,
                block_tables, seq_lens, max_num_blocks_per_seq, q_stride, kv_block_stride,
-               kv_head_stride)));
+               kv_head_stride));
+           producer_status = cudaGetLastError());
+  // The macro has completed profiler cleanup. A rejected producer did not
+  // populate scratch, so never submit its dependent reduction. No fence added.
+  if (producer_status != cudaSuccess) return 4;
   const int reduce_shared_mem_size = 2 * max_num_partitions * (int)sizeof(float);
   dim3 reduce_grid(num_heads, num_seqs);
   FCUDA_TS("fak_paged_attention_v2_reduce", num_heads,
