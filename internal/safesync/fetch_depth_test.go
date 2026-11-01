@@ -2,6 +2,7 @@ package safesync
 
 import (
 	"context"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -9,10 +10,11 @@ import (
 
 func TestFetchDepthPinnedTransportAndRefusals(t *testing.T) {
 	base, target := strings.Repeat("a", 40), strings.Repeat("b", 40)
-	for _, fail := range []string{"", "pre-base", "pre-remote", "fetch", "tracking", "post-base", "post-remote"} {
+	head, parent := strings.Repeat("c", 40), strings.Repeat("d", 40)
+	for _, fail := range []string{"", "pre-base", "pre-remote", "pre-head-error", "pre-head-race", "pre-graph-error", "pre-graph-warning", "fetch", "tracking", "post-base", "post-remote", "post-head", "post-head-error", "post-graph-error", "lost-node", "lost-edge"} {
 		t.Run(fail, func(t *testing.T) {
 			var calls [][]string
-			bases, remotes, fetches := 0, 0, 0
+			bases, remotes, fetches, heads, graphs := 0, 0, 0, 0, 0
 			run := func(_ context.Context, _ string, args ...string) RunResult {
 				calls = append(calls, append([]string(nil), args...))
 				out := ""
@@ -44,7 +46,39 @@ func TestFetchDepthPinnedTransportAndRefusals(t *testing.T) {
 					if fail == "fetch" {
 						return RunResult{Code: 1}
 					}
+				case "rev-list":
+					if !reflect.DeepEqual(args, []string{"rev-list", "--parents", "--all", "HEAD"}) {
+						t.Fatalf("incomplete graph scope %q", args)
+					}
+					graphs++
+					if (graphs == 1 && fail == "pre-graph-error") || (graphs == 2 && fail == "post-graph-error") {
+						return RunResult{Code: 1}
+					}
+					if graphs == 1 && fail == "pre-graph-warning" {
+						return RunResult{Stderr: []byte("warning: graph incomplete")}
+					}
+					out = head + " " + base + "\n" + base + " " + parent + "\n" + parent + "\n"
+					if graphs == 2 {
+						out += target + " " + base + "\n"
+						if fail == "lost-node" {
+							out = head + " " + base + "\n" + base + "\n" + target + " " + base + "\n"
+						}
+						if fail == "lost-edge" {
+							out = head + " " + base + "\n" + base + "\n" + parent + "\n" + target + " " + base + "\n"
+						}
+					}
 				case "rev-parse":
+					if args[len(args)-1] == "HEAD" {
+						heads++
+						if fail == "pre-head-error" || (fetches > 0 && fail == "post-head-error") {
+							return RunResult{Code: 1}
+						}
+						out = head
+						if (heads == 2 && fail == "pre-head-race") || (fetches > 0 && fail == "post-head") {
+							out = target
+						}
+						break
+					}
 					if fail == "tracking-error" {
 						return RunResult{Code: 1}
 					}
@@ -67,6 +101,13 @@ func TestFetchDepthPinnedTransportAndRefusals(t *testing.T) {
 			}
 			if fetches != wantFetches {
 				t.Fatalf("fetches=%d want %d; no fallback allowed", fetches, wantFetches)
+			}
+			if err != nil && wantFetches == 1 && fail != "fetch" &&
+				!strings.Contains(err.Error(), "fetch completed; postcondition failed") {
+				t.Fatalf("completed transport effects not distinguished: %v", err)
+			}
+			if fail == "" && (graphs != 2 || heads != 3) {
+				t.Fatalf("missing existing-tracking preservation proof: graphs=%d heads=%d", graphs, heads)
 			}
 		})
 	}
@@ -143,7 +184,16 @@ func TestFetchDepthExplicitPostBaseAdvancement(t *testing.T) {
 					if fail == "fetch" {
 						return RunResult{Code: 1}
 					}
+				case "rev-list":
+					out = after + " " + base + "\n" + base + "\n"
+					if fetches > 0 {
+						out += target + " " + after + "\n"
+					}
 				case "rev-parse":
+					if args[len(args)-1] == "HEAD" {
+						out = after
+						break
+					}
 					if fail == "tracking-error" {
 						return RunResult{Code: 1}
 					}
@@ -347,6 +397,79 @@ func TestFetchDepthMissingTrackingBootstrapPreservesVisibleGraph(t *testing.T) {
 			} else if err != nil && (strings.Contains(err.Error(), "fetch completed; postcondition failed") != wantFetch) {
 				t.Fatalf("fetch effects misreported: %v", err)
 			}
+		})
+	}
+}
+
+// An unchanged merge-base is insufficient: depth two cuts the old base's
+// parent edge even though both local and remote tips still reach that base.
+// fak-test:runtime fast est=2s lane=default
+func TestFetchDepthExistingTrackingRealGitHistory(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		depth    int
+		wantLoss bool
+	}{
+		{"cuts-old-parent", 2, true},
+		{"preserves-old-parent", 3, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			origin := t.TempDir()
+			git(t, origin, "init", "-b", "main")
+			git(t, origin, "config", "user.name", "test")
+			git(t, origin, "config", "user.email", "test@example.com")
+			writeFile(t, filepath.Join(origin, "history.txt"), "old root\n")
+			git(t, origin, "add", "history.txt")
+			git(t, origin, "commit", "-m", "old root")
+			older := revString(t, origin, "HEAD")
+			writeFile(t, filepath.Join(origin, "history.txt"), "common base\n")
+			git(t, origin, "commit", "-am", "common base")
+			base := revString(t, origin, "HEAD")
+			cloneRoot := t.TempDir()
+			clone := filepath.Join(cloneRoot, "clone")
+			git(t, cloneRoot, "clone", "--no-local", "--branch", "main", origin, clone)
+			git(t, clone, "config", "user.name", "test")
+			git(t, clone, "config", "user.email", "test@example.com")
+			writeFile(t, filepath.Join(clone, "local.txt"), "local branch\n")
+			git(t, clone, "add", "local.txt")
+			git(t, clone, "commit", "-m", "local branch")
+			head := revString(t, clone, "HEAD")
+			writeFile(t, filepath.Join(origin, "remote.txt"), "remote advance\n")
+			git(t, origin, "add", "remote.txt")
+			git(t, origin, "commit", "-m", "remote advance")
+			target := revString(t, origin, "HEAD")
+			if got := strings.TrimSpace(gitOutput(t, clone, "merge-base", "--all", "HEAD", "origin/main")); got != base {
+				t.Fatalf("fixture pre-base=%s want %s", got, base)
+			}
+			before := gitOutput(t, clone, "rev-list", "--parents", "--all", "HEAD")
+			if !strings.Contains(before, base+" "+older+"\n") {
+				t.Fatalf("fixture old edge absent: %s", before)
+			}
+			fetches := 0
+			runner := func(ctx context.Context, repo string, args ...string) RunResult {
+				if len(args) > 0 && args[0] == "fetch" {
+					fetches++
+				}
+				return RealRunner(ctx, repo, args...)
+			}
+			err := fetchWithDepth(context.Background(), runner, clone, "origin", "main", tc.depth, base, target)
+			if fetches != 1 || revString(t, clone, "HEAD") != head || revString(t, clone, "origin/main") != target {
+				t.Fatalf("actual transport/readback changed: fetches=%d err=%v", fetches, err)
+			}
+			if got := strings.TrimSpace(gitOutput(t, clone, "merge-base", "--all", "HEAD", "origin/main")); got != base {
+				t.Fatalf("post-base=%s want unchanged %s", got, base)
+			}
+			after := gitOutput(t, clone, "rev-list", "--parents", "--all", "HEAD")
+			lost := !strings.Contains(after, base+" "+older+"\n")
+			if lost != tc.wantLoss || (err != nil) != tc.wantLoss {
+				t.Fatalf("loss=%v want=%v err=%v graph=%s", lost, tc.wantLoss, err, after)
+			}
+			if tc.wantLoss && (!strings.Contains(err.Error(), "fetch completed; postcondition failed") ||
+				!strings.Contains(err.Error(), "effects require reconciliation; do not retry blindly")) {
+				t.Fatalf("partial-effect recovery contract missing: %v", err)
+			}
+			// The failure deliberately leaves the actual fetch effects visible.
+			// No rollback, deeper fetch, retry or destructive shallow-file edit.
 		})
 	}
 }

@@ -17,8 +17,10 @@ func fetchWithDepth(ctx context.Context, run Runner, repo, remote, branch string
 // fetchWithExpectedBase permits an explicitly pinned advancement of the common
 // ancestor when a previously published local commit is first observed remotely.
 // It never permits an unrelated or unpinned post-fetch merge-base.
-// An absent tracking ref may be seeded only from pinned HEAD while preserving
-// every previously visible commit and parent edge.
+// Every bounded fetch must preserve all previously visible commits and parent
+// edges, even when an existing tracking ref keeps the same merge-base. An absent
+// tracking ref may be seeded only from pinned HEAD. This is a postcondition, not
+// an atomic rollback: a failed proof after transport requires reconciliation.
 func fetchWithExpectedBase(ctx context.Context, run Runner, repo, remote, branch string, depth int, base, target, afterBase string) error {
 	if depth == 0 && base == "" && target == "" && afterBase == "" {
 		_, err := checked(ctx, run, repo, "fetch", remote, branch)
@@ -74,6 +76,17 @@ func fetchWithExpectedBase(ctx context.Context, run Runner, repo, remote, branch
 		}
 		return checkPinnedHead()
 	}
+	headBefore := base // Bootstrap has already proved HEAD equals base.
+	checkUnchangedHead := func() error {
+		head, err := rev(ctx, run, repo, "HEAD")
+		if err != nil {
+			return err
+		}
+		if head != headBefore {
+			return fmt.Errorf("bounded fetch HEAD changed from pinned pre-fetch HEAD")
+		}
+		return nil
+	}
 	readVisibleGraph := func() (map[string]map[string]bool, error) {
 		res := run(ctx, repo, "rev-list", "--parents", "--all", "HEAD")
 		if res.Err != nil {
@@ -103,6 +116,9 @@ func fetchWithExpectedBase(ctx context.Context, run Runner, repo, remote, branch
 			graph[fields[0]] = parents
 		}
 		if _, exists := graph[base]; !exists {
+			return nil, fmt.Errorf("bounded fetch visible commit graph omits pinned base")
+		}
+		if _, exists := graph[headBefore]; !exists {
 			return nil, fmt.Errorf("bounded fetch visible commit graph omits pinned HEAD")
 		}
 		for _, parents := range graph {
@@ -146,16 +162,26 @@ func fetchWithExpectedBase(ctx context.Context, run Runner, repo, remote, branch
 	if err := checkRemote(); err != nil {
 		return err
 	}
-	var before map[string]map[string]bool
-	if bootstrap {
+	if !bootstrap {
 		var err error
-		before, err = readVisibleGraph()
+		headBefore, err = rev(ctx, run, repo, "HEAD")
 		if err != nil {
 			return err
 		}
+		if !validOID(headBefore) {
+			return fmt.Errorf("bounded fetch pre-fetch HEAD is not a full object ID")
+		}
+	}
+	before, err := readVisibleGraph()
+	if err != nil {
+		return err
+	}
+	if bootstrap {
 		if err := checkBootstrap(); err != nil {
 			return err
 		}
+	} else if err := checkUnchangedHead(); err != nil {
+		return err
 	}
 	// Fetch the immutable advertised target, not the moving branch. A server
 	// refusal is terminal; never fall back to an unbounded fetch.
@@ -165,27 +191,29 @@ func fetchWithExpectedBase(ctx context.Context, run Runner, repo, remote, branch
 	postconditionError := func(err error) error {
 		return fmt.Errorf("bounded fetch completed; postcondition failed; tracking/shallow/object effects require reconciliation; do not retry blindly: %w", err)
 	}
+	after, err := readVisibleGraph()
+	if err != nil {
+		return postconditionError(err)
+	}
+	// A depth boundary can hide old history without changing merge-base.
+	// New ancestry is allowed; every previously visible node/edge stays.
+	for commit, parents := range before {
+		gotParents, exists := after[commit]
+		if !exists {
+			return postconditionError(fmt.Errorf("bounded fetch hid previously visible commit %s", commit))
+		}
+		for parent := range parents {
+			if !gotParents[parent] {
+				return postconditionError(fmt.Errorf("bounded fetch hid previously visible parent edge %s %s", commit, parent))
+			}
+		}
+	}
 	if bootstrap {
-		after, err := readVisibleGraph()
-		if err != nil {
-			return postconditionError(err)
-		}
-		// A depth boundary can hide old history without changing merge-base.
-		// New ancestry is allowed; every previously visible node/edge stays.
-		for commit, parents := range before {
-			gotParents, exists := after[commit]
-			if !exists {
-				return postconditionError(fmt.Errorf("bounded fetch hid previously visible commit %s", commit))
-			}
-			for parent := range parents {
-				if !gotParents[parent] {
-					return postconditionError(fmt.Errorf("bounded fetch hid previously visible parent edge %s %s", commit, parent))
-				}
-			}
-		}
 		if err := checkPinnedHead(); err != nil {
 			return postconditionError(err)
 		}
+	} else if err := checkUnchangedHead(); err != nil {
+		return postconditionError(err)
 	}
 	got, err := rev(ctx, run, repo, tracking)
 	if err != nil {
