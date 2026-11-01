@@ -999,6 +999,12 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	asst.Role = agent.RoleAssistant
 
 	if !s.validateChatCompletionConformance(w, stream, comp, asst, receiptRequested, decodeTraceRequested, decodeTokenIDsRequested, inputTriggerRoute) {
+		// #13562: the refused turn still spent a full decode, so it keeps its
+		// per-turn inference log row — finish reason and token usage included —
+		// instead of vanishing behind the typed 502 / in-band SSE error. The
+		// refusal response itself is unchanged; the finish reason uses the same
+		// closed vocabulary as the sibling refusal log line.
+		s.logInferenceTurn(reqTrace, "openai_chat_completions", req.Stream, comp.Usage, toolCallLogFinishReason(comp.FinishReason), time.Since(began), false)
 		return
 	}
 
