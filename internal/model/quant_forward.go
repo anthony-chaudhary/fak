@@ -420,6 +420,17 @@ func (s *Session) tokenHiddenQ(id, pos int) (out []float32) {
 			db.scores = s.attnDecodeQSA(attnOut, q, s.Cache, db, l, nH, hd, w, grp, scale, fdot, scoreDot3)
 		} else if currentWorkerCount() <= 1 {
 			db.scores = attnDecodeOne(attnOut, q, s.Cache, l, nH, hd, w, grp, scale, fdot, scoreDot3, db.scores)
+		} else if q8PackedDecodeExperimental && s.Cache.quantized() && s.q8PackedBoundaryEligible(l, pos) {
+			// False is read-only admission decline. Once work starts, faults
+			// propagate through the Session operation; never recover and replay.
+			var handled bool
+			db.scores, handled = attnDecodeQ8Packed(attnOut, q, s.Cache, l, nH, hd, w, grp, cfg.windowForLayer(l), scale, db.scores, s.M.attnObs)
+			if !handled {
+				caches := growCaches(db.caches, 1)
+				db.caches = caches
+				caches[0] = s.Cache
+				db.scores = attnDecodeBatch(attnOut, q, caches, l, 1, nH, hd, w, grp, cfg.windowForLayer(l), scale, fdot, scoreDot3, db.scores, s.M.attnObs)
+			}
 		} else {
 			caches := growCaches(db.caches, 1)
 			db.caches = caches
@@ -942,4 +953,39 @@ func (s *Session) AttachTreeMaskCacheHint(numNodes ...int) CachePolicyHint {
 // streaming bypass beyond) to attach to KV cache block loads.
 func (s *Session) AttachKVCacheHint(blockID ...int) CachePolicyHint {
 	return ClassifyKVBlockCacheHint(blockID...)
+}
+
+// q8PackedDecodeExperimental is default OFF. Only the literal "1", present
+// before process initialization, opts in. It does not override QSA, serial,
+// non-Q8, device, or unsupported-policy dispatch. There is no runtime mutation.
+var q8PackedDecodeExperimental = os.Getenv("FAK_QATTN_Q8_PACKED") == "1"
+
+// q8PackedBoundaryEligible is read-only admission at tokenHiddenQ's attention
+// seam. The Session operation already owns cache geometry through worker join.
+// Current layer K/V has been appended, but appendPosition commits the new logical
+// position only after every layer, hence rows == len(pos)+1 here. This scan is an
+// explicit opt-in cost and is not paid by the default-off or F32 hot paths.
+func (s *Session) q8PackedBoundaryEligible(layer, position int) bool {
+	if s == nil || s.M == nil || s.Cache == nil || !s.Quant || s.Backend != nil ||
+		s.Metal || s.MetalQ4K || s.Q4 || s.Q4K || s.F16 || s.GPTQ ||
+		s.PrecisionPolicy != nil || s.GPULayers != 0 || s.DenseGPULayers != 0 ||
+		!s.Cache.quantized() || currentWorkerCount() <= 1 {
+		return false
+	}
+	cfg := s.M.Cfg
+	if layer < 0 || layer >= cfg.NumLayers || cfg.NumKVHeads <= 1 ||
+		!q8FastPreNormOK(cfg) || cfg.ShouldUseQSASparseGather(layer, len(s.Cache.pos)+1, 1) ||
+		s.M.hasWeight(layerName(layer, "self_attn.sinks")) || position != len(s.Cache.pos) {
+		return false
+	}
+	if layer >= len(s.Cache.kQ8) || layer >= len(s.Cache.vQ8) ||
+		s.Cache.kvLen(layer) != len(s.Cache.pos)+1 {
+		return false
+	}
+	for i, p := range s.Cache.pos {
+		if p != i {
+			return false
+		}
+	}
+	return true
 }

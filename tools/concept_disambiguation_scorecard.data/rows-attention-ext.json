@@ -11,7 +11,8 @@
         "linear-attn-cache",
         "linear attention (Gated-DeltaNet)",
         "x-attention-v41attentionrolereader",
-        "cuda-kv16-prefill-gqa4-kernel"
+        "cuda-kv16-prefill-gqa4-kernel",
+        "host-q8-packed-decode-tile"
       ],
       "aliases": [
         "attn"
@@ -333,7 +334,8 @@
       "definition": "attnDecodeBatch \u2014 computes per-user causal attention for ONE batched decode step across B users, bit-identical to serial Step.",
       "distinction": "It is the single-step decode analogue, NOT the prefill-panel kernel attnPrefillInto.",
       "distinct_from": [
-        "attnPrefillInto (prefill attention kernel)"
+        "attnPrefillInto (prefill attention kernel)",
+        "host-q8-packed-decode-tile"
       ],
       "aliases": [],
       "grounding": "attndecodebatch",

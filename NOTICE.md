@@ -30,3 +30,42 @@ Licensed under the Apache License, Version 2.0 (upstream `LICENSE`); the upstrea
 repository has no NOTICE file. License text:
 https://www.apache.org/licenses/LICENSE-2.0
 
+## ggml Q8 block reconstruction in packed KV attention
+
+`internal/model/quant_attn_q8_packed.go` adapts the blockwise reconstruction
+traversal of `dequantize_row_q8_0` from official ggml-org/llama.cpp revision
+`83078fec0db82d6b5a00d9599062c38c39145755`:
+https://github.com/ggml-org/llama.cpp/blob/83078fec0db82d6b5a00d9599062c38c39145755/ggml/src/ggml-quants.c
+
+Changed for Fak: signed code times block scale reconstructs one bounded F32
+head-row tile per worker, reused across sharing query heads and then values.
+There is no full-layer F32 K/V materialization; this is not zero F32 scratch.
+Fak's cache scales are already F32, unlike the donor's F16 scales. Queries
+remain F32; existing native dot/value kernels, worker scheduling, cache
+ownership, softmax and observer copies remain Fak-owned.
+This is a block-reconstruction adaptation, not a wholesale upstream attention
+kernel, SIMD port or Q8-query conversion. Different scalar/SIMD reduction orders
+require numerical qualification; this notice makes no bit-parity, model-quality
+or throughput claim.
+
+MIT License
+
+Copyright (c) 2023-2026 The ggml authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
