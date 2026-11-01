@@ -67,7 +67,15 @@ func (p *InKernelPlanner) runV41DecodeCohort(cohort []*inKernelCoalesceRequest, 
 
 func (p *InKernelPlanner) runV41DecodeCohortCore(cohort []*inKernelCoalesceRequest, decode func(context.Context, []*decodeLane, *model.Model) (inKernelV41DecodeReceipt, error)) *inKernelV41Fatal {
 	deviceWait := time.Now()
-	p.devMu.Lock()
+	if err := p.devMu.LockCohort(cohort); err != nil {
+		enginestep.Default.ObservePhase(enginestep.PhaseDeviceWait, time.Since(deviceWait))
+		for _, req := range cohort {
+			req.result <- inKernelCoalesceResult{err: req.ctx.Err()}
+			close(req.done)
+			req.publishReceipt()
+		}
+		return nil
+	}
 	gateHeld := true
 	defer func() {
 		if gateHeld {
