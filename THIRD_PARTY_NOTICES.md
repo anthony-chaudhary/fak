@@ -533,6 +533,42 @@ The full Apache License, Version 2.0 text is reproduced in the
 license body shared by both Apache-2.0 notices). Copyright: the vLLM project
 contributors, Licensed under the Apache License, Version 2.0.
 
+## llama.cpp bounded mapped expert prefetch
+
+The sorted range-union control flow in
+`internal/model/expert_checkpoint_readahead.go` is adapted from
+`llama_prefetch` in `src/llama-mmap.cpp`, ggml-org/llama.cpp revision
+`74bca3950054eed1795f525cb9cf06bfe796492d` (b11870):
+https://github.com/ggml-org/llama.cpp/blob/74bca3950054eed1795f525cb9cf06bfe796492d/src/llama-mmap.cpp
+
+FAK groups by checkpoint shard and unions exact selected payload ranges before
+the existing mapped reader performs platform page alignment. It does not copy
+the donor's page-rounded gap merging or change packed weight bytes. New formats
+and coalescing require `fak_expert_readahead_qualification`; backend qualification
+and ordinary demand-error/ownership contracts remain separate.
+
+MIT License
+
+Copyright (c) 2023-2026 The ggml authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 ## llama.cpp mul_mat_vec_id and llama_moe_cache slot map
 
 The V4.1 routed-expert id kernels `internal/compute/shaders/v41_q2k_matvec_id.comp`
