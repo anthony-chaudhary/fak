@@ -304,11 +304,18 @@ func mirrorAge(root, remote string, git GitRunner, observedAt int64) (int64, boo
 	if err != nil {
 		return 0, false
 	}
-	rc, out := run(git, root, []string{"reflog", "show", "--format=%ct", "-1", stamp})
+	// Commit time describes the mirrored object, not when we witnessed it.
+	// The dated reflog selector binds freshness to the actual ref update.
+	rc, out := run(git, root, []string{"reflog", "show", "--format=%gD", "--date=unix", "-1", stamp})
 	if rc != 0 {
 		return 0, false
 	}
-	sec, err := strconv.ParseInt(strings.TrimSpace(out), 10, 64)
+	selector := strings.TrimSpace(out)
+	prefix := stamp + "@{"
+	if !strings.HasPrefix(selector, prefix) || !strings.HasSuffix(selector, "}") {
+		return 0, false
+	}
+	sec, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(selector, prefix), "}"), 10, 64)
 	if err != nil {
 		return 0, false
 	}

@@ -48,7 +48,7 @@ func TestRecoveryEntriesBoundsRemoteFreshnessProbes(t *testing.T) {
 			if args[len(args)-1] != RecoveryMirrorStampPrefix+"origin" {
 				t.Fatalf("wrong stamp %v", args)
 			}
-			return 0, stamp
+			return 0, args[len(args)-1] + "@{" + stamp + "}"
 		default:
 			t.Fatalf("unexpected mutation or command %v", args)
 			return 1, ""
@@ -91,7 +91,7 @@ func TestRecoveryFreshnessCacheIsPerRemoteAndInvocation(t *testing.T) {
 			if key == RecoveryMirrorStampPrefix+"backup" {
 				offset = 100
 			}
-			return 0, strconv.FormatInt(stamp-offset, 10)
+			return 0, key + "@{" + strconv.FormatInt(stamp-offset, 10) + "}"
 		default:
 			t.Fatalf("unexpected command %v", args)
 			return 1, ""
@@ -148,7 +148,7 @@ func TestRecoveryFreshnessFailuresAreNotMemoizedAsKnown(t *testing.T) {
 						}
 						return 1, "probe failed"
 					}
-					return 0, strconv.FormatInt(time.Now().Add(-time.Hour).Unix(), 10)
+					return 0, args[len(args)-1] + "@{" + strconv.FormatInt(time.Now().Add(-time.Hour).Unix(), 10) + "}"
 				default:
 					t.Fatalf("unexpected command %v", args)
 					return 1, ""
@@ -197,7 +197,7 @@ func TestRecoveryMirrorAgeZeroAndFuture(t *testing.T) {
 				if args[0] != "reflog" {
 					t.Fatalf("unexpected command %v", args)
 				}
-				return 0, tc.stamp
+				return 0, args[len(args)-1] + "@{" + tc.stamp + "}"
 			}
 			age, known := probe("/repo", "origin", g, now)
 			if age != 0 || known != tc.known || calls != 1 {

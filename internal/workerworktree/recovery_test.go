@@ -5,6 +5,29 @@ import (
 	"testing"
 )
 
+// fak-test:runtime fast est=100ms lane=default
+func TestRecoveryMirrorAgeUsesReflogTimeNotCommitTime(t *testing.T) {
+	root := t.TempDir()
+	mustGit(t, root, "init", "-q")
+	t.Setenv("GIT_AUTHOR_NAME", "Recovery Test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "recovery@example.invalid")
+	t.Setenv("GIT_COMMITTER_NAME", "Recovery Test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "recovery@example.invalid")
+	t.Setenv("GIT_AUTHOR_DATE", "1000000000 +0000")
+	t.Setenv("GIT_COMMITTER_DATE", "1000000000 +0000")
+	mustGit(t, root, "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "old commit")
+	t.Setenv("GIT_COMMITTER_DATE", "1000100000 +0000")
+	stamp, err := mirrorStampRef("origin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, root, "update-ref", "--create-reflog", "-m", "fresh mirror", stamp, "HEAD")
+	age, known := mirrorAge(root, "origin", nil, 1000100007)
+	if !known || age != 7 {
+		t.Fatalf("fresh reflog on old commit: age=%d known=%v; want 7, true", age, known)
+	}
+}
+
 func TestRecoveryRefValidatesWorkerAndSHA(t *testing.T) {
 	got, err := RecoveryRef(`/tmp/fak-worker-wt-tools-abc`, "abcdef1234567")
 	if err != nil || got != RecoveryRefPrefix+"fak-worker-wt-tools-abc/abcdef1234567" {
@@ -106,7 +129,7 @@ func TestRecoveryEntriesReportsRemoteOnlyHostLossCandidate(t *testing.T) {
 	g.replyOnce("for-each-ref", 0, "").
 		replyOnce("for-each-ref", 0, RecoveryMirrorPrefix+"origin/fak-worker-wt-a/abc1234"+string(rune(0))+"abc1234\n").
 		reply("merge-base", 1, "").
-		reply("reflog", 0, "0\n")
+		reply("reflog", 0, RecoveryMirrorStampPrefix+"origin@{0}\n")
 	items, err := RecoveryEntries("/repo", g.run)
 	if err != nil {
 		t.Fatal(err)
