@@ -142,6 +142,8 @@ type LoadProfiler struct {
 	memWarned   bool // the headroom-collapse warning fired (emit once per load)
 	alerts      []LoadAlert
 
+	quantFallbackWarned bool
+
 	// loadPaths tallies the per-quant-type resident-vs-dequant breakdown. Written only by
 	// the serial load collector (one goroutine), so it needs no lock even under the parallel
 	// load pipeline.
@@ -298,6 +300,32 @@ func (p *LoadProfiler) recordAlert(kind, level, text string) {
 		return
 	}
 	p.alerts = append(p.alerts, LoadAlert{Kind: kind, Level: level, Text: text})
+}
+
+func (p *LoadProfiler) emitQuantDequantFallbackAlerts() {
+	if p == nil || p.quantFallbackWarned {
+		return
+	}
+	p.quantFallbackWarned = true
+	for _, row := range p.loadPathRows() {
+		if row.DequantTensors <= 0 {
+			continue
+		}
+		switch row.QuantType {
+		case "F32", "F16", "BF16":
+			continue
+		}
+		class := "dense"
+		if row.Expert {
+			class = "expert"
+		}
+		text := fmt.Sprintf("quantized load conversion: source_quant=%s class=%s dequant_tensors=%d source_bytes=%d converted through temporary F32 during loading",
+			row.QuantType, class, row.DequantTensors, row.DequantBytes)
+		p.recordAlert("quant-dequant-fallback", "warning", text)
+		if w := p.alertWriter(); w != nil {
+			fmt.Fprintln(w, "fak: WARNING: "+text)
+		}
+	}
 }
 
 // emitMemPreflight prints a one-time confinement notice before the first progress line.

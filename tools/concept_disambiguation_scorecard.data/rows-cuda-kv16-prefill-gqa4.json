@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "cuda-kv16-prefill-gqa4-kernel",
+      "canonical": "k_kv_attention_prompt4_gqa4_typed",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "A compile-time opt-in CUDA causal prefill kernel that tiles up to four query positions and up to four sibling query heads within one KV head, sharing widened narrowed-format K/V tiles and accumulating online softmax attention. The typed dispatcher selects it only for admitted narrowed-KV geometry under FAK_CUDA_KV16_PREFILL_GQA4_QUALIFICATION.",
+      "distinction": "This is a specific default-off CUDA kernel, not the general Attention softmax token-mixer or the host attnPrefillGQA3FDotInto kernel. It uses up to four sibling heads and four query positions per block rather than the host three-head traversal; the existing explicit tile4 branch has priority. Source and host build-selection checks do not establish native numerical correctness, device execution or speedup.",
+      "distinct_from": [
+        "x-attention-attention",
+        "attnprefillgqa3fdotinto"
+      ],
+      "aliases": [],
+      "grounding": "k_kv_attention_prompt4_gqa4_typed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

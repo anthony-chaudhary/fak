@@ -187,16 +187,43 @@ type SkippedRow struct {
 	Review          issuepolicy.Review `json:"review,omitempty"`
 }
 
+// SyncFailureStage identifies the producer branch, not the external root cause.
+type SyncFailureStage string
+
+// SyncFailureReason is a closed, non-sensitive diagnostic category.
+type SyncFailureReason string
+
+const (
+	SyncStagePreflight     SyncFailureStage = "preflight"
+	SyncStagePrepare       SyncFailureStage = "prepare"
+	SyncStageWrite         SyncFailureStage = "write"
+	SyncStageWriteResponse SyncFailureStage = "write_response"
+	SyncStageReadback      SyncFailureStage = "readback"
+)
+
+const (
+	SyncReasonMissingIssueNumber     SyncFailureReason = "missing_issue_number"
+	SyncReasonPolicyRejected         SyncFailureReason = "policy_rejected"
+	SyncReasonCommandFailed          SyncFailureReason = "command_failed"
+	SyncReasonCreatedIssueURLMissing SyncFailureReason = "created_issue_url_missing"
+	SyncReasonInvalidJSON            SyncFailureReason = "invalid_json"
+	SyncReasonNumberMismatch         SyncFailureReason = "number_mismatch"
+	SyncReasonMarkerMismatch         SyncFailureReason = "marker_mismatch"
+	SyncReasonMilestoneMismatch      SyncFailureReason = "milestone_mismatch"
+)
+
 // SyncRow is one gh create/edit outcome on a --live run.
 type SyncRow struct {
-	Key      string `json:"key"`
-	Action   string `json:"action"`
-	OK       bool   `json:"ok"`
-	Number   *int   `json:"number,omitempty"`
-	URL      string `json:"url,omitempty"`
-	Verified bool   `json:"verified"`
-	Stdout   string `json:"stdout"`
-	Stderr   string `json:"stderr"`
+	Key           string            `json:"key"`
+	Action        string            `json:"action"`
+	OK            bool              `json:"ok"`
+	Number        *int              `json:"number,omitempty"`
+	URL           string            `json:"url,omitempty"`
+	Verified      bool              `json:"verified"`
+	Stdout        string            `json:"stdout"`
+	Stderr        string            `json:"stderr"`
+	FailureStage  SyncFailureStage  `json:"failure_stage,omitempty"`
+	FailureReason SyncFailureReason `json:"failure_reason,omitempty"`
 }
 
 // Result is the machine-readable plan/result fold.
@@ -904,6 +931,11 @@ func SyncWithOptions(plan []PlanRow, repo string, labels []string, runner Runner
 	if run == nil {
 		run = defaultRunner
 	}
+	return syncWithRunner(plan, repo, labels, run, opt)
+}
+
+// syncWithRunner runs the producer loop with the non-nil Runner selected above.
+func syncWithRunner(plan []PlanRow, repo string, labels []string, run Runner, opt SyncOptions) []SyncRow {
 	timeout := opt.Timeout
 	if timeout <= 0 {
 		timeout = DefaultGhTimeout
@@ -917,10 +949,12 @@ func SyncWithOptions(plan []PlanRow, repo string, labels []string, runner Runner
 		if row.Action == "update" {
 			if row.Number == nil {
 				results = append(results, SyncRow{
-					Key:    row.Key,
-					Action: row.Action,
-					OK:     false,
-					Stderr: "cannot update issue: missing issue number",
+					Key:           row.Key,
+					Action:        row.Action,
+					OK:            false,
+					Stderr:        "cannot update issue: missing issue number",
+					FailureStage:  SyncStagePreflight,
+					FailureReason: SyncReasonMissingIssueNumber,
 				})
 				continue
 			}
@@ -929,7 +963,7 @@ func SyncWithOptions(plan []PlanRow, repo string, labels []string, runner Runner
 		} else {
 			body, causeLabel, err := issuepolicy.TagGeneratedIssue(row.Body, "none")
 			if err != nil {
-				results = append(results, SyncRow{Key: row.Key, Action: row.Action, OK: false, Stderr: err.Error()})
+				results = append(results, SyncRow{Key: row.Key, Action: row.Action, OK: false, Stderr: err.Error(), FailureStage: SyncStagePrepare, FailureReason: SyncReasonPolicyRejected})
 				continue
 			}
 			args = []string{"issue", "create", "--title", row.Title, "--body", body}
@@ -948,6 +982,11 @@ func SyncWithOptions(plan []PlanRow, repo string, labels []string, runner Runner
 			args = append(args, "--repo", repo)
 		}
 		stdout, stderr, ok := call(args)
+		var failureStage SyncFailureStage
+		var failureReason SyncFailureReason
+		if !ok {
+			failureStage, failureReason = SyncStageWrite, SyncReasonCommandFailed
+		}
 		number := row.Number
 		url := ""
 		verified := false
@@ -960,6 +999,7 @@ func SyncWithOptions(plan []PlanRow, repo string, labels []string, runner Runner
 				if !parsedOK {
 					ok = false
 					stderr = appendSyncStderr(stderr, "gh issue create succeeded but stdout did not contain a created issue URL")
+					failureStage, failureReason = SyncStageWriteResponse, SyncReasonCreatedIssueURLMissing
 				} else {
 					number = &parsed
 					url = parsedURL
@@ -969,24 +1009,27 @@ func SyncWithOptions(plan []PlanRow, repo string, labels []string, runner Runner
 		if ok && number != nil {
 			var verifyErr string
 			var verifiedURL string
-			verifiedURL, verifyErr, verified = verifySyncedIssue(call, repo, row, *number)
+			verifiedURL, verifyErr, verified, failureReason = verifySyncedIssue(call, repo, row, *number)
 			if verifiedURL != "" {
 				url = verifiedURL
 			}
 			if !verified {
 				ok = false
 				stderr = appendSyncStderr(stderr, verifyErr)
+				failureStage = SyncStageReadback
 			}
 		}
 		results = append(results, SyncRow{
-			Key:      row.Key,
-			Action:   row.Action,
-			OK:       ok,
-			Number:   number,
-			URL:      url,
-			Verified: verified,
-			Stdout:   strings.TrimSpace(stdout),
-			Stderr:   strings.TrimSpace(stderr),
+			Key:           row.Key,
+			Action:        row.Action,
+			OK:            ok,
+			Number:        number,
+			URL:           url,
+			Verified:      verified,
+			Stdout:        strings.TrimSpace(stdout),
+			Stderr:        strings.TrimSpace(stderr),
+			FailureStage:  failureStage,
+			FailureReason: failureReason,
 		})
 	}
 	return results
@@ -1028,7 +1071,7 @@ func CreatedIssue(stdout string) (number int, url string, ok bool) {
 	return n, match[0], true
 }
 
-func verifySyncedIssue(run Runner, repo string, row PlanRow, number int) (url, stderr string, ok bool) {
+func verifySyncedIssue(run Runner, repo string, row PlanRow, number int) (url, stderr string, ok bool, reason SyncFailureReason) {
 	fields := "number,title,body,state,url"
 	if strings.TrimSpace(row.Milestone) != "" {
 		fields += ",milestone"
@@ -1039,17 +1082,17 @@ func verifySyncedIssue(run Runner, repo string, row PlanRow, number int) (url, s
 	}
 	stdout, stderr, runOK := run(args)
 	if !runOK {
-		return "", strings.TrimSpace(stderr), false
+		return "", strings.TrimSpace(stderr), false, SyncReasonCommandFailed
 	}
 	var issue Issue
 	if err := json.Unmarshal([]byte(stdout), &issue); err != nil {
-		return "", fmt.Sprintf("verify issue #%d: parse gh issue view JSON: %v", number, err), false
+		return "", fmt.Sprintf("verify issue #%d: parse gh issue view JSON: %v", number, err), false, SyncReasonInvalidJSON
 	}
 	if issue.Number != 0 && issue.Number != number {
-		return issue.URL, fmt.Sprintf("verify issue #%d: gh returned issue #%d", number, issue.Number), false
+		return issue.URL, fmt.Sprintf("verify issue #%d: gh returned issue #%d", number, issue.Number), false, SyncReasonNumberMismatch
 	}
 	if got := MarkerKey(issue.Body); got != row.Key {
-		return issue.URL, fmt.Sprintf("verify issue #%d: marker key %q != planned key %q", number, got, row.Key), false
+		return issue.URL, fmt.Sprintf("verify issue #%d: marker key %q != planned key %q", number, got, row.Key), false, SyncReasonMarkerMismatch
 	}
 	if want := strings.TrimSpace(row.Milestone); want != "" {
 		if issue.Milestone == nil || strings.TrimSpace(issue.Milestone.Title) != want {
@@ -1057,10 +1100,10 @@ func verifySyncedIssue(run Runner, repo string, row PlanRow, number int) (url, s
 			if issue.Milestone != nil {
 				got = issue.Milestone.Title
 			}
-			return issue.URL, fmt.Sprintf("verify issue #%d: milestone %q != planned milestone %q", number, got, want), false
+			return issue.URL, fmt.Sprintf("verify issue #%d: milestone %q != planned milestone %q", number, got, want), false, SyncReasonMilestoneMismatch
 		}
 	}
-	return issue.URL, "", true
+	return issue.URL, "", true, ""
 }
 
 func appendSyncStderr(stderr, msg string) string {
@@ -1120,6 +1163,7 @@ func Render(r Result) string {
 		}
 		return strings.Join(lines, "\n")
 	}
+	lines = append(lines, syncedFailureLines(r.Synced)...)
 	if len(r.Skipped) > 0 {
 		lines = append(lines, fmt.Sprintf("  skipped-contract: %d item(s)", len(r.Skipped)))
 		for _, row := range r.Skipped {
@@ -1155,4 +1199,89 @@ func Render(r Result) string {
 		lines = append(lines, "  receipt: "+r.Receipt)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// safeSyncFailure accepts only known stage/reason pairs. Never render raw error
+// text or an unrecognized enum supplied by an older/external producer.
+func safeSyncFailure(row SyncRow) (string, string) {
+	switch row.FailureStage {
+	case SyncStagePreflight:
+		if row.FailureReason == SyncReasonMissingIssueNumber {
+			return "preflight", "missing_issue_number"
+		}
+	case SyncStagePrepare:
+		if row.FailureReason == SyncReasonPolicyRejected {
+			return "prepare", "policy_rejected"
+		}
+	case SyncStageWrite:
+		if row.FailureReason == SyncReasonCommandFailed {
+			return "write", "command_failed"
+		}
+	case SyncStageWriteResponse:
+		if row.FailureReason == SyncReasonCreatedIssueURLMissing {
+			return "write_response", "created_issue_url_missing"
+		}
+	case SyncStageReadback:
+		switch row.FailureReason {
+		case SyncReasonCommandFailed:
+			return "readback", "command_failed"
+		case SyncReasonInvalidJSON:
+			return "readback", "invalid_json"
+		case SyncReasonNumberMismatch:
+			return "readback", "number_mismatch"
+		case SyncReasonMarkerMismatch:
+			return "readback", "marker_mismatch"
+		case SyncReasonMilestoneMismatch:
+			return "readback", "milestone_mismatch"
+		}
+	}
+	return "unknown", "unspecified"
+}
+
+// syncedFailureLines bounds only the added diagnostic section, not the existing
+// plan/report output. Arbitrary stderr/stdout/keys/URLs are deliberately omitted.
+func syncedFailureLines(rows []SyncRow) []string {
+	const maxRows = 20
+	const maxBytes = 4096
+	const footerReserve = 96
+	failed := 0
+	for _, row := range rows {
+		if !row.OK {
+			failed++
+		}
+	}
+	if failed == 0 {
+		return nil
+	}
+	header := fmt.Sprintf("  sync failed: %d row(s); writes may have occurred; verify before retry", failed)
+	lines := []string{header}
+	used, shown := len(header), 0
+	for i, row := range rows {
+		if row.OK {
+			continue
+		}
+		if shown == maxRows {
+			break
+		}
+		action := "unknown"
+		if row.Action == "create" || row.Action == "update" {
+			action = row.Action
+		}
+		target := "unknown"
+		if row.Number != nil && *row.Number > 0 {
+			target = "#" + strconv.Itoa(*row.Number)
+		}
+		stage, reason := safeSyncFailure(row)
+		line := fmt.Sprintf("    row=%d action=%s issue=%s stage=%s reason=%s verified=%t", i+1, action, target, stage, reason, row.Verified)
+		if used+1+len(line)+footerReserve > maxBytes {
+			break
+		}
+		lines = append(lines, line)
+		used += 1 + len(line)
+		shown++
+	}
+	if omitted := failed - shown; omitted > 0 {
+		lines = append(lines, fmt.Sprintf("    ... %d more failed row(s) omitted", omitted))
+	}
+	return lines
 }

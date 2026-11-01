@@ -10,7 +10,8 @@
       "distinct_from": [
         "linear-attn-cache",
         "linear attention (Gated-DeltaNet)",
-        "x-attention-v41attentionrolereader"
+        "x-attention-v41attentionrolereader",
+        "cuda-kv16-prefill-gqa4-kernel"
       ],
       "aliases": [
         "attn"

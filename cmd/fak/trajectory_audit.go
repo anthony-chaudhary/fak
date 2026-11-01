@@ -107,6 +107,7 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 	claudeRoot := flags.String("claude-root", "", "override Claude projects root")
 	codexRoot := flags.String("codex-root", "", "override Codex sessions root")
 	opencodeRoot := flags.String("opencode-root", "", "override the opencode storage root")
+	piRoot := flags.String("pi-root", "", "include Pi session JSONL transcripts under this root")
 	snapshotOut := flags.String("snapshot-out", "", "capture selected private inputs into a new replayable snapshot directory")
 	snapshot := flags.String("snapshot", "", "verify and replay a private audit snapshot without reading live roots")
 	snapshotUsageLedger := flags.String("snapshot-usage-ledger", "", "append privacy-safe capture/replay outcomes to this explicit JSONL file")
@@ -178,7 +179,7 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 		return finish(trajectoryAuditSnapshotFlagRefusal(stderr, "--snapshot-out and --snapshot are mutually exclusive"), "refused", "SNAPSHOT_FLAGS_INCOMPATIBLE")
 	}
 	if strings.TrimSpace(*snapshot) != "" {
-		for _, name := range []string{"since", "user-contains", "claude-root", "codex-root", "opencode-root", "baseline"} {
+		for _, name := range []string{"since", "user-contains", "claude-root", "codex-root", "opencode-root", "pi-root", "baseline"} {
 			if explicit[name] {
 				return finish(trajectoryAuditSnapshotFlagRefusal(stderr, "--snapshot rejects live selection flag --"+name), "refused", "SNAPSHOT_FLAGS_INCOMPATIBLE")
 			}
@@ -217,6 +218,13 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 			Name:      trajectory.AuditSourceOpencode,
 			Root:      *opencodeRoot,
 			RootLabel: "opencode/storage",
+		})
+	}
+	if strings.TrimSpace(*piRoot) != "" {
+		sources = append(sources, trajectory.AuditSource{
+			Name:      trajectory.AuditSourcePi,
+			Root:      *piRoot,
+			RootLabel: "pi/sessions",
 		})
 	}
 	var baseline *trajectory.AuditSummaryRow
@@ -391,5 +399,5 @@ func printTrajectoryUsage(w io.Writer) {
 	fmt.Fprintln(w, "  nightly    run the bounded attribution audit and append a scrubbed receipt")
 	fmt.Fprintln(w, "  assurance  read typed evidence JSON on stdin and emit a shadow health receipt")
 	fmt.Fprintln(w, "")
-	fmt.Fprintln(w, "Audit exact Claude and Codex transcript usage, source denominators, behavior, and baseline regressions.")
+	fmt.Fprintln(w, "Audit exact Claude, Codex, and Pi transcript usage, source denominators, behavior, and baseline regressions.")
 }

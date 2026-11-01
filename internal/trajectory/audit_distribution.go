@@ -126,7 +126,7 @@ func (d *auditDistribution) observe(source string, line []byte) {
 	}
 	typ := rawString(root["type"])
 	payload := root["payload"]
-	if source == "claude" {
+	if source == "claude" || source == AuditSourcePi {
 		payload = root["message"]
 	}
 	d.observeToolResult(source, typ, payload)
@@ -161,7 +161,7 @@ func (d *auditDistribution) observe(source string, line []byte) {
 
 func auditUnknownSourceLabel(source string) string {
 	switch source {
-	case AuditSourceClaude, AuditSourceCodex:
+	case AuditSourceClaude, AuditSourceCodex, AuditSourcePi:
 		return source
 	default:
 		return "source/" + auditUnknownDiscriminatorSuffix([]string{"source\x00" + source})
@@ -266,6 +266,35 @@ func auditOpaqueUnknownSubtype(source, typ, rawSubtype string) string {
 // Codex payload.call_id and Claude tool_use.id/tool_result.tool_use_id. Generic
 // response item IDs and mirrored event records are not correlation evidence.
 func (d *auditDistribution) observeToolResult(source, typ string, payload json.RawMessage) {
+	if source == AuditSourcePi {
+		if typ != "message" {
+			return
+		}
+		var message map[string]json.RawMessage
+		if json.Unmarshal(payload, &message) != nil {
+			return
+		}
+		role := rawString(message["role"])
+		var blocks []map[string]json.RawMessage
+		if json.Unmarshal(message["content"], &blocks) != nil {
+			return
+		}
+		switch role {
+		case "assistant":
+			for _, block := range blocks {
+				if rawString(block["type"]) != "toolCall" {
+					continue
+				}
+				d.observeResultCall(rawString(block["id"]), rawString(block["name"]), auditToolSubtype("tool_use", rawString(block["name"])))
+			}
+		case "toolResult":
+			content, present := message["content"]
+			_, errorPresent := message["isError"]
+			explicitError := rawBool(message["isError"])
+			d.observeResult(rawString(message["toolCallId"]), auditToolResultProjection(content, present, explicitError, errorPresent && !explicitError))
+		}
+		return
+	}
 	if source == AuditSourceCodex {
 		if typ != "response_item" {
 			return
@@ -712,6 +741,9 @@ func classifyDistributionEvents(source, typ string, payload json.RawMessage, roo
 		}
 		return []auditClassifiedEvent{auditStorageEvent(typ, "explicit_storage_only", "known_row_envelope")}
 	}
+	if source == AuditSourcePi {
+		return classifyPiDistributionEvents(typ, payload, root)
+	}
 	if typ == "user" || typ == "assistant" {
 		base := "assistant_message"
 		if typ == "user" {
@@ -787,6 +819,105 @@ func classifyCodexMessageContent(category, subtype string, content json.RawMessa
 		events = append(events, auditVisibleEvent(category, "", "", joinRaw(block["text"]), blockSubtype, "inferred_model_visible", "known_message_block"))
 	}
 	return events
+}
+
+// classifyPiDistributionEvents classifies one Pi JSONL record. Pi envelopes
+// (session/model_change/thinking_level_change/compaction/custom) are storage
+// plane; message records split by role into visible user/assistant/tool
+// content, with synthetic harness-injected user lines kept storage-only.
+func classifyPiDistributionEvents(typ string, payload json.RawMessage, root map[string]json.RawMessage) []auditClassifiedEvent {
+	switch typ {
+	case "session", "model_change", "thinking_level_change":
+		return []auditClassifiedEvent{auditStorageEvent(typ, "explicit_storage_only", "known_pi_envelope")}
+	case "compaction":
+		return []auditClassifiedEvent{auditStorageEvent("compaction", "explicit_storage_only", "known_compaction_boundary")}
+	case "custom":
+		customType := rawString(root["customType"])
+		if customType == "" {
+			return []auditClassifiedEvent{auditStorageEvent("custom/unknown", "unresolved", "missing_custom_type")}
+		}
+		return []auditClassifiedEvent{auditStorageEvent("custom/"+customType, "explicit_storage_only", "known_custom_envelope")}
+	case "message":
+		var msg map[string]json.RawMessage
+		if json.Unmarshal(payload, &msg) != nil {
+			return []auditClassifiedEvent{auditVisibleEvent("visible_unknown", "", "", nil, "message/malformed", "unresolved", "malformed_message")}
+		}
+		switch role := rawString(msg["role"]); role {
+		case "user":
+			text := string(piRawContentText(msg["content"]))
+			if auditPiSyntheticUserText(text) {
+				return []auditClassifiedEvent{auditStorageEvent("message/user_synthetic", "explicit_storage_only", "synthetic_user_marker")}
+			}
+			if text == "" {
+				return []auditClassifiedEvent{auditVisibleEvent("user_message", "", "", nil, "message/user/empty", "inferred_model_visible", "empty_message_content")}
+			}
+			return []auditClassifiedEvent{auditVisibleEvent("user_message", "", "", []byte(text), "message/user", "inferred_model_visible", "known_message_content")}
+		case "assistant":
+			return classifyPiAssistantContent(msg)
+		case "toolResult":
+			return []auditClassifiedEvent{auditVisibleEvent("tool_result", "", rawString(msg["toolCallId"]), piRawContentText(msg["content"]), "message/tool_result", "inferred_model_visible", "known_tool_result")}
+		case "system":
+			return []auditClassifiedEvent{auditStorageEvent("message/system", "explicit_storage_only", "harness_system_preamble")}
+		default:
+			return []auditClassifiedEvent{auditVisibleEvent("visible_unknown", "", "", nil, "message/role/"+firstNonempty(role, "unknown"), "unresolved", "unknown_message_role")}
+		}
+	}
+	return []auditClassifiedEvent{auditStorageEvent(firstNonempty(typ, "unknown"), "unresolved", "unknown_row_subtype")}
+}
+
+func classifyPiAssistantContent(msg map[string]json.RawMessage) []auditClassifiedEvent {
+	var blocks []map[string]json.RawMessage
+	if json.Unmarshal(msg["content"], &blocks) != nil {
+		return []auditClassifiedEvent{auditVisibleEvent("assistant_message", "", "", joinRaw(msg["content"]), "message/assistant/scalar", "inferred_model_visible", "known_message_content")}
+	}
+	if len(blocks) == 0 {
+		return []auditClassifiedEvent{auditVisibleEvent("assistant_message", "", "", nil, "message/assistant/empty", "inferred_model_visible", "empty_message_content")}
+	}
+	events := make([]auditClassifiedEvent, 0, len(blocks))
+	for _, block := range blocks {
+		blockType := rawString(block["type"])
+		subtype := "message/assistant/" + firstNonempty(blockType, "unknown")
+		switch blockType {
+		case "text":
+			events = append(events, auditVisibleEvent("assistant_message", "", "", joinRaw(block["text"]), subtype, "inferred_model_visible", "known_content_block"))
+		case "thinking":
+			events = append(events, auditVisibleEvent("reasoning", "", "", joinRaw(block["thinking"]), subtype, "inferred_model_visible", "known_content_block"))
+		case "toolCall":
+			events = append(events, auditVisibleEvent("tool_call", rawString(block["name"]), rawString(block["id"]), joinRaw(block["arguments"]), subtype, "inferred_model_visible", "known_content_block"))
+		default:
+			events = append(events, auditVisibleEvent("visible_unknown", "", "", joinRaw(json.RawMessage(mustJSON(block))), subtype, "unresolved", "unknown_content_block_subtype"))
+		}
+	}
+	return events
+}
+
+// piRawContentText joins the text blocks of a RawMessage content value without
+// allocating an intermediate any tree; non-text or malformed values yield the
+// empty slice.
+func piRawContentText(content json.RawMessage) []byte {
+	var scalar string
+	if json.Unmarshal(content, &scalar) == nil {
+		return []byte(scalar)
+	}
+	var blocks []map[string]json.RawMessage
+	if json.Unmarshal(content, &blocks) != nil {
+		return nil
+	}
+	var builder strings.Builder
+	for _, block := range blocks {
+		if rawString(block["type"]) != "text" {
+			continue
+		}
+		text := rawString(block["text"])
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		if builder.Len() > 0 {
+			builder.WriteByte('\n')
+		}
+		builder.WriteString(text)
+	}
+	return []byte(builder.String())
 }
 
 func auditVisibleEvent(category, tool, id string, content []byte, subtype, visibility, reason string) auditClassifiedEvent {

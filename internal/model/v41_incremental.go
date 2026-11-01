@@ -188,3 +188,36 @@ func (u v41StepRegistryUndo) restore() {
 	u.state.topk, u.state.topkRatio, u.state.topkSet = u.topk, u.topkRatio, u.topkSet
 	u.state.candidates, u.state.candidateRatio, u.state.candidatesSet = u.candidates, u.candidateRatio, u.candidatesSet
 }
+
+// v41StepRegistryView is the immutable per-query publication view. Layer-major
+// execution shares source banks, not another query's top-k/candidate selection.
+type v41StepRegistryView struct {
+	topk           [][]int32
+	topkRatio      int
+	topkSet        bool
+	candidates     []bool
+	candidateRatio int
+	candidatesSet  bool
+}
+
+func captureV41StepRegistryView(s *V41AttentionState) v41StepRegistryView {
+	if s == nil {
+		return v41StepRegistryView{}
+	}
+	return v41StepRegistryView{s.topk, s.topkRatio, s.topkSet, s.candidates, s.candidateRatio, s.candidatesSet}
+}
+
+func (v v41StepRegistryView) restore(s *V41AttentionState) {
+	if s == nil {
+		return
+	}
+	s.topk, s.topkRatio, s.topkSet = v.topk, v.topkRatio, v.topkSet
+	s.candidates, s.candidateRatio, s.candidatesSet = v.candidates, v.candidateRatio, v.candidatesSet
+}
+
+// stageLayer is called at the actual source mutation, not when all speculative
+// transactions are constructed against the same base publication cursor.
+func (u *v41StepRegistryUndo) stageLayer(layer int) {
+	u.kv[layer] = stageV41StepPublication(u.state.kvPublications, u.state.kvPublishedEnd, layer)
+	u.index[layer] = stageV41StepPublication(u.state.indexPublications, u.state.indexPublishedEnd, layer)
+}

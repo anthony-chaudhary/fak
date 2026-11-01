@@ -268,3 +268,123 @@ func TestCoalescedSelectedCancellationWaitsForResultAndCleanupReceipt(t *testing
 		t.Fatal("selected request did not return after both publication barriers")
 	}
 }
+
+// fak-test:runtime fast est=100ms lane=default
+func TestCoalescedDeviceGateCancellation(t *testing.T) {
+	for _, kind := range []inKernelCoalesceKind{inKernelCoalesceQwen, inKernelCoalesceV41} {
+		for _, allCanceled := range []bool{true, false} {
+			name := "qwen"
+			if kind == inKernelCoalesceV41 {
+				name = "v41"
+			}
+			if allCanceled {
+				name += "/all-canceled"
+			} else {
+				name += "/live-sibling"
+			}
+			t.Run(name, func(t *testing.T) {
+				p := &InKernelPlanner{coalesceRunning: true}
+				p.devMu.Lock()
+				var releaseOnce sync.Once
+				release := func() { releaseOnce.Do(p.devMu.Unlock) }
+				defer release()
+				var runs, liveRuns atomic.Int32
+				contexts := make([]context.Context, 2)
+				cancels := make([]context.CancelFunc, 2)
+				requests := make([]*inKernelCoalesceRequest, 2)
+				for i := range requests {
+					contexts[i], cancels[i] = context.WithCancel(context.Background())
+					defer cancels[i]()
+					requests[i] = &inKernelCoalesceRequest{
+						kind: kind, ctx: contexts[i],
+						prepared: make(chan *decodeLane, 1), proceed: make(chan error, 1),
+						result: make(chan inKernelCoalesceResult, 1), done: make(chan struct{}),
+						drain: make(chan struct{}, 1), receiptReady: make(chan struct{}),
+						run: func(ctx context.Context) (inKernelGenerateResult, error) {
+							runs.Add(1)
+							if err := ctx.Err(); err != nil {
+								return inKernelGenerateResult{}, err
+							}
+							liveRuns.Add(1)
+							return inKernelGenerateResult{}, nil
+						},
+					}
+				}
+				p.coalesceReady = append([]*inKernelCoalesceRequest(nil), requests...)
+				drained := make(chan struct{})
+				go func() { p.drainCoalescedGenerates(); close(drained) }()
+				defer func() {
+					release()
+					select {
+					case <-drained:
+					case <-time.After(time.Second):
+						t.Error("drainer did not join after cleanup")
+					}
+				}()
+				awaitCoalescedQueue(t, p, 0) // Selected, but the device owner still holds its slot.
+				cancels[0]()
+				if allCanceled {
+					cancels[1]()
+					select {
+					case <-drained:
+					case <-time.After(time.Second):
+						t.Fatal("canceled selected cohort waited for unrelated device owner")
+					}
+					if runs.Load() != 0 {
+						t.Fatal("all-canceled cohort invoked a run closure")
+					}
+					// A canceled cohort must never unlock the unrelated owner's slot.
+					if len(p.devMu.slot) != 1 {
+						t.Fatal("canceled cohort released unrelated device owner")
+					}
+				} else {
+					select {
+					case <-drained:
+						t.Fatal("one canceled participant aborted its live sibling")
+					case <-time.After(10 * time.Millisecond):
+					}
+					release()
+					select {
+					case <-drained:
+					case <-time.After(time.Second):
+						t.Fatal("live sibling did not finish after device release")
+					}
+					if liveRuns.Load() != 1 {
+						t.Fatalf("live runs = %d, want 1", liveRuns.Load())
+					}
+				}
+				for i, req := range requests {
+					select {
+					case <-req.done:
+					default:
+						t.Fatal("drainer returned before participant cleanup")
+					}
+					select {
+					case <-req.receiptReady:
+					default:
+						t.Fatal("drainer returned before cleanup receipt publication")
+					}
+					out := <-req.result
+					_, err := finishCoalescedRequest(req, out)
+					if want := contexts[i].Err(); !errors.Is(err, want) {
+						t.Fatalf("participant %d error = %v, want %v", i, err, want)
+					}
+					if req.closes.Load() != 0 {
+						t.Fatal("sessionless waiter reported a close")
+					}
+				}
+				p.coalesceMu.Lock()
+				running, pending := p.coalesceRunning, len(p.coalesceReady)
+				p.coalesceMu.Unlock()
+				if running || pending != 0 {
+					t.Fatal("completed cohort retained drainer ownership")
+				}
+				release()
+				if err := p.devMu.LockContext(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				p.devMu.Unlock()
+			})
+		}
+	}
+}

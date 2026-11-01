@@ -13,12 +13,84 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/committedbuildwitness"
 )
+
+func TestParseGitNULPaths(t *testing.T) {
+	want := []string{" leading.go", "trailing.go ", "line\nbreak.go", "tab\tname.py", "back\\slash.ps1", "雪.go", " \n\t", "raw\xff.go"}
+	got, err := parseGitNULPaths(strings.Join(want, "\x00") + "\x00")
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("paths = %q, %v; want %q", got, err, want)
+	}
+	if got, err := parseGitNULPaths(""); err != nil || len(got) != 0 {
+		t.Fatalf("empty output = %q, %v", got, err)
+	}
+	for _, malformed := range []string{"file.go", "\x00", "file.go\x00\x00", "\x00file.go\x00"} {
+		if got, err := parseGitNULPaths(malformed); err == nil || got != nil {
+			t.Errorf("malformed output %q = %q, %v", malformed, got, err)
+		}
+	}
+}
+
+// One real Git fixture exercises both callers and the zero-base ls-tree transport.
+// It does not run builds, expand archives, or claim non-Go build-input coverage.
+func TestGitChangedFilesRangeLossless(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses filenames Windows cannot represent; parser coverage remains portable")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	repo := t.TempDir()
+	gitFixture(t, repo, "init", "-q")
+	gitFixture(t, repo, "config", "user.name", "test")
+	gitFixture(t, repo, "config", "user.email", "test@example.invalid")
+	gitFixture(t, repo, "config", "commit.gpgsign", "false")
+	gitFixture(t, repo, "config", "core.hooksPath", t.TempDir())
+	gitFixture(t, repo, "config", "core.quotePath", "true")
+	writeFile(t, repo, "README.md", "unchanged\n")
+	gitFixture(t, repo, "add", "--", "README.md")
+	gitFixture(t, repo, "commit", "-q", "-m", "base")
+	base := strings.TrimSpace(mustGitOut(t, repo, "rev-parse", "HEAD"))
+	want := []string{" leading.go", "trailing.go ", "line\nbreak.go", "tab\tname.py", "back\\slash.ps1", "雪.go", " \n\t"}
+	for _, path := range want {
+		writeFile(t, repo, path, "fixture\n")
+		gitFixture(t, repo, "add", "--", path)
+	}
+	gitFixture(t, repo, "commit", "-q", "-m", "odd paths")
+	tip := strings.TrimSpace(mustGitOut(t, repo, "rev-parse", "HEAD"))
+	writeFile(t, repo, "untracked.go", "package ignored\n")
+	assertPaths := func(label string, got []string, err error, want []string) {
+		t.Helper()
+		want = append([]string(nil), want...)
+		sort.Strings(want)
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s = %q, %v; want %q", label, got, err, want)
+		}
+	}
+	got, err := gitChangedFilesRange(repo, base, tip)
+	assertPaths("all paths", got, err, want)
+	got, err = gitChangedGoFilesRange(repo, base, tip)
+	assertPaths("prepush .go", got, err, []string{" leading.go", "line\nbreak.go", "雪.go"})
+	got, err = popupPushRangeFiles(repo, base)
+	assertPaths("popup suffixes", got, err, []string{" leading.go", "line\nbreak.go", "雪.go", "tab\tname.py", "back\\slash.ps1"})
+	for _, width := range []int{40, 64} {
+		got, err = gitChangedFilesRange(repo, strings.Repeat("0", width), tip)
+		assertPaths("new ref", got, err, append(append([]string(nil), want...), "README.md"))
+	}
+	got, err = gitChangedFilesRange(repo, tip, tip)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("empty range = %q, %v", got, err)
+	}
+}
 
 // --- seam-injected unit tests (no git/go needed) ---------------------------------------
 

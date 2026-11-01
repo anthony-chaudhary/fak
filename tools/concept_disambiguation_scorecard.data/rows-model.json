@@ -737,7 +737,8 @@
       "distinction": "Unlike attnPrefillDispatch this computes host grouped attention rather than selecting a backend. Unlike ordinary host attention it requires observer-free eligible grouped geometry and enough supplied score scratch for the unchanged worker count, and returns false before writes if those conditions fail.",
       "distinct_from": [
         "attnprefilldispatch",
-        "prefillqwen35fullattnlayerq4kownedqf"
+        "prefillqwen35fullattnlayerq4kownedqf",
+        "cuda-kv16-prefill-gqa4-kernel"
       ],
       "aliases": [],
       "grounding": "attnPrefillGQA3FDotInto",

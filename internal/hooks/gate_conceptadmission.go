@@ -337,7 +337,12 @@ func gateConceptAdmission(d *StagedDiff) ([]Finding, error) {
 							baseTree = strings.TrimSpace(out)
 						}
 					}
-					grep, code, _ := d.run(d.ctx, d.Root, "grep", "-I", "-w", "-e", raw, baseTree, "--", "internal", "cmd")
+					grep, code, grepErr := d.run(d.ctx, d.Root, "grep", "-I", "-w", "-e", raw, baseTree, "--", "internal", "cmd")
+					// Only exit 1 proves absence. An unreadable committed base must
+					// not manufacture a new-token finding (including cancellation).
+					if d.baseTree != "" && (grepErr != nil || (code != 0 && code != 1) || (d.ctx != nil && d.ctx.Err() != nil)) {
+						return nil, fmt.Errorf("%w: committed concept base search failed (exit %d)", ErrCouldNotRun, code)
+					}
 					if code == 0 && strings.TrimSpace(grep) != "" {
 						continue
 					}

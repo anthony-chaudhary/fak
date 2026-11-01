@@ -31,6 +31,7 @@ const (
 	AuditSourceClaude   = "claude"
 	AuditSourceCodex    = "codex"
 	AuditSourceOpencode = "opencode"
+	AuditSourcePi       = "pi"
 )
 
 // AuditSource is one supported harness transcript root. RootLabel is safe to
@@ -159,6 +160,7 @@ type AuditTranscriptRow struct {
 	CompactionEvents             []AuditCompactionEvent        `json:"compaction_events,omitempty"`
 	ToolCalls                    int                           `json:"tool_calls"`
 	ToolErrors                   int                           `json:"tool_errors"`
+	ToolErrorsBenignNegative     int                           `json:"tool_errors_benign_negative"`
 	Distribution                 []AuditDistributionRow        `json:"distribution,omitempty"`
 	ToolDistribution             []AuditDistributionRow        `json:"tool_distribution,omitempty"`
 	ToolResults                  []AuditToolResultRow          `json:"tool_results,omitempty"`
@@ -227,6 +229,7 @@ type AuditSummaryRow struct {
 	EmptyUsageFiles                     int                           `json:"empty_usage_files"`
 	ToolCalls                           int                           `json:"tool_calls"`
 	ToolErrors                          int                           `json:"tool_errors"`
+	ToolErrorsBenignNegative            int                           `json:"tool_errors_benign_negative"`
 	DistributionUnit                    string                        `json:"distribution_unit"`
 	DistributionProvenance              string                        `json:"distribution_provenance"`
 	Distribution                        []AuditDistributionRow        `json:"distribution,omitempty"`
@@ -732,6 +735,8 @@ func doAuditSource(ctx context.Context, source AuditSource, opts AuditOptions, f
 			Detail: "OpenCode corpus coverage is unsupported; source was not scanned",
 		}}
 		return res, nil
+	case AuditSourcePi:
+		res.denominator.TokenSemantics = "per-assistant-turn usage buckets are disjoint (input excludes cacheRead/cacheWrite); duplicate message ids are counted once"
 	default:
 		return res, fmt.Errorf("trajectory audit: source %q has no parser", source.Name)
 	}
@@ -917,6 +922,15 @@ func auditUserText(record map[string]any) string {
 				return auditCodexUserText(payload["content"])
 			}
 		}
+	case "message": // Pi transcript row.
+		message, _ := record["message"].(map[string]any)
+		if role, _ := message["role"].(string); role == "user" {
+			text := piContentText(message["content"])
+			if auditPiSyntheticUserText(text) {
+				return ""
+			}
+			return text
+		}
 	}
 	return ""
 }
@@ -984,6 +998,7 @@ func summarizeAudit(denominators []AuditDenominatorRow, transcripts []AuditTrans
 		summary.MutationChurn += transcript.MutationChurn
 		summary.ToolCalls += transcript.ToolCalls
 		summary.ToolErrors += transcript.ToolErrors
+		summary.ToolErrorsBenignNegative += transcript.ToolErrorsBenignNegative
 		summary.TerminalFailures += transcript.TerminalFailures
 		for k, v := range transcript.TerminalFailureClasses {
 			if summary.TerminalFailureClasses == nil {

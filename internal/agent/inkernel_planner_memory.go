@@ -34,13 +34,36 @@ func (p *InKernelPlanner) admitCoalescedDeviceMemory(promptTokens, maxNew int) (
 	defer p.deviceBudgetMu.Unlock()
 	p.recordRequestMemoryPlan(promptTokens, maxNew, plan)
 
+	// Reservations track request-local bytes; resident weights are shared by all lanes.
+	incrementalPlan := make(compute.MemoryPlan, 0, len(plan))
+	var residentWeights int64
+	residentWeightsKnown := false
+	for _, demand := range plan {
+		if demand.DeviceScoped() && demand.Class == compute.MemoryWeights && demand.Detail == "resident-weights" {
+			residentWeights, residentWeightsKnown = demand.Bytes, true
+			continue
+		}
+		incrementalPlan = append(incrementalPlan, demand)
+	}
 	deviceCapacityKnown := false
 	check := func() (compute.MemoryPlan, error) {
 		total, free, known := compute.DeviceMemoryInfo(p.backend)
-		deviceCapacityKnown = known && total > 0 && free >= 0
-		fitPlan := plan
+		deviceCapacityKnown = known && total > 0
+		fitPlan := append(compute.MemoryPlan(nil), incrementalPlan...)
+		// Unknown free space uses the total ceiling, which must include shared weights once.
+		if free < 0 {
+			if !residentWeightsKnown {
+				if report := p.m.ResidentReport(); report != nil {
+					residentWeights = report.TotalResidentBytes
+				}
+				residentWeightsKnown = true
+			}
+			if residentWeights > 0 {
+				fitPlan = append(fitPlan, compute.MemoryDemand{Class: compute.MemoryWeights, Bytes: residentWeights, Detail: "resident-weights", DType: "mixed"})
+			}
+		}
 		if p.deviceReservedBytes > 0 {
-			want := plan.DeviceTotal()
+			want := fitPlan.DeviceTotal()
 			if want > math.MaxInt64-p.deviceReservedBytes {
 				return fitPlan, &InKernelCapacityError{
 					Want:  want,
@@ -50,7 +73,6 @@ func (p *InKernelPlanner) admitCoalescedDeviceMemory(promptTokens, maxNew int) (
 					Site:  inKernelCoalescedDeviceReservationSite,
 				}
 			}
-			fitPlan = append(compute.MemoryPlan(nil), plan...)
 			fitPlan = append(fitPlan, compute.MemoryDemand{
 				Class:  compute.MemoryUnknown,
 				Scope:  compute.MemoryScopeDevice,
@@ -59,7 +81,7 @@ func (p *InKernelPlanner) admitCoalescedDeviceMemory(promptTokens, maxNew int) (
 			})
 		}
 		// The fixed snapshot retains the original margin: request + held must fit
-		// inside headroom(free), rather than applying headroom after subtracting held.
+		// inside headroom(free or total), rather than applying headroom after subtracting held.
 		// A live probe may already reflect an admitted lane's allocation, so counting
 		// its held reservation too is conservative; this is not a global allocator.
 		return fitPlan, compute.RefuseMemoryPlanIfTooBigForReportedDevice(
@@ -79,12 +101,12 @@ func (p *InKernelPlanner) admitCoalescedDeviceMemory(promptTokens, maxNew int) (
 			if retryErr == nil {
 				p.recordRequestPressureTrimResolved(retryPlan, "capacity_precheck")
 			} else if errors.As(retryErr, &fe) {
-				return noop, p.coalescedDeviceCapacityError(fe, plan)
+				return noop, p.coalescedDeviceCapacityError(fe, incrementalPlan)
 			} else {
 				return noop, retryErr
 			}
 		} else {
-			return noop, p.coalescedDeviceCapacityError(fe, plan)
+			return noop, p.coalescedDeviceCapacityError(fe, incrementalPlan)
 		}
 	} else if p.maybeTrimRequestPressure(fitPlan, "low_margin") {
 		p.recordRequestMemoryPlan(promptTokens, maxNew, plan)
@@ -93,7 +115,7 @@ func (p *InKernelPlanner) admitCoalescedDeviceMemory(promptTokens, maxNew int) (
 		return noop, nil
 	}
 
-	want := plan.DeviceTotal()
+	want := incrementalPlan.DeviceTotal()
 	if want <= 0 {
 		return noop, nil
 	}
