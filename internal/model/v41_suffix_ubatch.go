@@ -1,6 +1,8 @@
 package model
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -119,29 +121,8 @@ func (s *Session) v41SuffixUbatchBody(ids []int, wantLogits bool) (logits []floa
 		}
 		txs = append(txs, tx)
 	}
-	scratch := &v41ProjScratch{}
-	scratch.bindLayerSessionBindings(st)
-	defer scratch.clearLayerSessionBindings()
-	works := make([]*v41LayerStepWork, len(txs))
-	for l := 0; l < m.Cfg.NumLayers; l++ {
-		for k, tx := range txs {
-			if err = tx.prepareLayer(); err != nil {
-				return nil, err
-			}
-			if err = tx.publishPendingKV(); err != nil {
-				return nil, err
-			}
-			works[k] = tx.pendingLayer
-		}
-		routed, rerr := m.v41SuffixUbatchRouted(l, works, st, scratch)
-		if rerr != nil {
-			return nil, rerr
-		}
-		for k, tx := range txs {
-			if err = tx.finishLayer(routed[k]); err != nil {
-				return nil, err
-			}
-		}
+	if err = s.v41RunSuffixLayers(context.Background(), txs); err != nil {
+		return nil, err
 	}
 	if v41SuffixUbatchProbe != nil {
 		v41SuffixUbatchProbe(len(txs))
@@ -179,4 +160,95 @@ func (m *Model) v41SuffixUbatchRouted(l int, works []*v41LayerStepWork, st *v41F
 		return nil, err
 	}
 	return routed, nil
+}
+
+// v41RunSuffixLayers is shared by ordinary suffix prefill and owned verification.
+// The latter supplies panel journals; the arithmetic/grouped expert work is the
+// existing real implementation, not K token-major forwards behind a new name.
+func (s *Session) v41RunSuffixLayers(ctx context.Context, txs []*v41StepTransaction) (err error) {
+	m, st := s.M, s.v41State()
+	scratch := &v41ProjScratch{}
+	scratch.bindLayerSessionBindings(st)
+	defer scratch.clearLayerSessionBindings()
+	works := make([]*v41LayerStepWork, len(txs))
+	for l := 0; l < m.Cfg.NumLayers; l++ {
+		if err = ctx.Err(); err != nil {
+			return err
+		}
+		for k, tx := range txs {
+			if err = ctx.Err(); err != nil {
+				return err
+			}
+			if err = tx.prepareLayer(); err != nil {
+				return err
+			}
+			if err = tx.publishPendingKV(); err != nil {
+				return err
+			}
+			works[k] = tx.pendingLayer
+		}
+		routed, rerr := m.v41SuffixUbatchRouted(l, works, st, scratch)
+		if rerr == nil && len(txs) > 0 && txs[0].roundEntry != nil && txs[0].roundEntry.round.panel {
+			txs[0].roundEntry.round.panelWork.LayerPanels++
+		}
+		if rerr != nil {
+			return rerr
+		}
+		for k, tx := range txs {
+			if err = tx.finishLayer(routed[k]); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// parallelVerifyV41Panel owns one layer recording window and keeps every row's
+// journal alive until its caller declares the emitted prefix.
+func (s *Session) parallelVerifyV41Panel(ctx context.Context, round *v41StepRound, ids []int) (rows [][]float32, err error) {
+	s.M.v41SetExpertFaultPhase(V41PhaseDecode)
+	defer s.M.v41SetExpertFaultPhase(V41PhaseUnknown)
+	s.v41IndexerScoreRecovering(func() []float32 {
+		callbackComplete := false
+		defer func() {
+			if !callbackComplete {
+				primary := recover()
+				if primary != nil {
+					defer func() { _ = recover(); panic(primary) }()
+				}
+				_ = round.abort()
+			}
+		}()
+		txs, cause := round.beginPanel(ids)
+		if cause != nil {
+			err = cause
+			return nil
+		}
+		err = func() (cause error) {
+			endBatch := s.v41BeginStepBatch()
+			complete := false
+			defer func() { v41FinishStepBatch(endBatch, &cause, complete) }()
+			cause = s.v41RunSuffixLayers(ctx, txs)
+			complete = true
+			return cause
+		}()
+		if err == nil {
+			rows, err = s.M.v41FinishVerificationHeads(ctx, s, txs)
+		}
+		callbackComplete = true
+		return nil
+	})
+	if err != nil {
+		var selected *V41IndexerScoreOperationError
+		if errors.As(err, &selected) {
+			s.v41IndexerScoreRecovering(func() []float32 {
+				func() { defer round.abort(); panic(err) }()
+				return nil
+			})
+		}
+		return nil, err
+	}
+	s.M.v41NoteWorkload(v41WorkloadDecode, len(ids), len(ids))
+	s.M.v41NoteExpertFaultToken(len(ids))
+	return rows, nil
 }

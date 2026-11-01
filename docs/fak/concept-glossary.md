@@ -2085,3 +2085,10 @@ The static dense k-quant residency decision fak model preflight derives from the
 One tensor entry of the header-only safetensors preflight plan: name, dtype, shape, shard, routed loader role, and load-time representation, read from index and shard headers without touching tensor bytes.
 
 **Distinct from:** Not the GGUF ManifestPreflight report (gguf-manifest-header-preflight), which covers .gguf manifests; this is the safetensors-side per-tensor census row that feeds the same fak.model-manifest-preflight/1 report under format=safetensors.
+
+
+### ParallelVerifyKernelOwned
+
+ParallelVerifyKernelOwned starts target-model speculative verification and returns a SpeculativeVerificationRound that owns provisional target continuation state until Finish retains the number of accepted draft tokens actually emitted or Abort retires the round.
+
+**Distinct from:** This is one verification-round ownership boundary, not InKernelPlanner request orchestration or the model weights/execution object. Finish counts accepted draft tokens only; callers advance an emitted correction or bonus separately. It does not itself establish device coverage or throughput.

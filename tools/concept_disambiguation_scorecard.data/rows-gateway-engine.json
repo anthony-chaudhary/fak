@@ -71,7 +71,7 @@
       "kind": "subsystem",
       "definition": "The in-kernel inference core: a pure-Go forward pass that runs chat token decode over a loaded GGUF checkpoint across several architectures and quant schemes.",
       "distinction": "The decode ALGORITHM - NOT the engine (the dispatch interface) and NOT modelengine (the registration that exposes the model as an engine).",
-      "distinct_from": ["engine", "modelengine"],
+      "distinct_from": ["engine", "modelengine", "speculative-verification-owned-round"],
       "aliases": ["in-kernel model", "forward pass"],
       "grounding": "model",
       "grounding_kind": "path",

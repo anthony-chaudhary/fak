@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "speculative-verification-owned-round",
+      "canonical": "ParallelVerifyKernelOwned",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "ParallelVerifyKernelOwned starts target-model speculative verification and returns a SpeculativeVerificationRound that owns provisional target continuation state until Finish retains the number of accepted draft tokens actually emitted or Abort retires the round.",
+      "distinction": "This is one verification-round ownership boundary, not InKernelPlanner request orchestration or the model weights/execution object. Finish counts accepted draft tokens only; callers advance an emitted correction or bonus separately. It does not itself establish device coverage or throughput.",
+      "distinct_from": [
+        "x-gateway-engine-inkernelplanner",
+        "model"
+      ],
+      "aliases": [],
+      "grounding": "ParallelVerifyKernelOwned",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

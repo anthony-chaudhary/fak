@@ -122,6 +122,7 @@ type v41StepJournal struct {
 	registry         v41StepRegistryUndo
 	layers           []v41StepLayerUndo
 	rolledBack       bool
+	panel            *v41StepRound
 }
 
 // Keep per-layer undo data together so each token allocates one ledger rather
@@ -148,6 +149,9 @@ func newV41StepJournal(st *v41ForwardState, stats *v41StepStats, previousRegistr
 }
 
 func (j *v41StepJournal) stage(l int, state *V41AttentionState) {
+	if j.panel != nil {
+		j.registry.stageLayer(l)
+	}
 	// The compressor appends a fresh owned input or releases a completed group;
 	// append only writes beyond the old lengths, even with spare capacity, so the
 	// headers suffice for this exclusively owned transaction. External snapshots
@@ -173,6 +177,16 @@ func (j *v41StepJournal) stage(l int, state *V41AttentionState) {
 }
 
 func (j *v41StepJournal) rollback() {
+	if j.panel != nil {
+		// A row-local failure cannot unwind shared layer-major state out of order.
+		// The panel owner closes every continuation, then drains rejected rows.
+		j.panel.failed = true
+		return
+	}
+	j.restore()
+}
+
+func (j *v41StepJournal) restore() {
 	if j.rolledBack {
 		return
 	}
@@ -199,8 +213,17 @@ func (j *v41StepJournal) rollback() {
 			}
 		}
 	}
-	j.registry.restore()
-	j.st.attn = j.previousRegistry
+	if j.panel == nil {
+		j.registry.restore()
+		j.st.attn = j.previousRegistry
+	} else {
+		// Only stepped layers have staged source entries. Query views are restored
+		// once by the panel owner to the final kept query, never by a rejected row.
+		for l := len(j.layers) - 1; l >= 0; l-- {
+			j.registry.kv[l].restore()
+			j.registry.index[l].restore()
+		}
+	}
 	j.stats.LayersRolledBack = len(j.layers)
 	j.rolledBack = true
 }

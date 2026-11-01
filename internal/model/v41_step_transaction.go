@@ -8,13 +8,18 @@ import (
 var errV41StepRoundState = errors.New("model: invalid V4.1 step round state")
 
 type v41StepRound struct {
-	model                    *Model
-	state                    *v41ForwardState
-	layers                   []*V41AttentionState
-	entries                  []*v41StepRoundEntry
-	pending                  *v41StepRoundEntry
-	baseHistoryLen, capacity int
-	failed, closed, poisoned bool
+	model                                *Model
+	state                                *v41ForwardState
+	layers                               []*V41AttentionState
+	entries                              []*v41StepRoundEntry
+	pending                              *v41StepRoundEntry
+	baseHistoryLen, capacity             int
+	failed, closed, poisoned             bool
+	panel                                bool
+	panelRegistry, panelPreviousRegistry *V41AttentionState
+	panelBaseView                        v41StepRegistryView
+	panelCoverage                        *NativeForwardCoverage
+	panelWork                            SpeculativePanelWork
 }
 
 type v41StepRoundEntry struct {
@@ -24,6 +29,9 @@ type v41StepRoundEntry struct {
 	coverage                     *NativeForwardCoverage
 	undo                         func()
 	committed, closed, cleanupOK bool
+	journal                      *v41StepJournal
+	registryView                 v41StepRegistryView
+	finalCoverage                *NativeForwardCoverage
 }
 
 func (m *Model) beginV41StepRound(st *v41ForwardState, capacity int) (*v41StepRound, error) {
@@ -144,6 +152,9 @@ func (r *v41StepRound) abort() (err error) {
 }
 
 func (r *v41StepRound) drain(keep int) (err error) {
+	if r.panel {
+		return r.drainPanel(keep)
+	}
 	st, entries, pending := r.state, r.entries, r.pending
 	poisoned, incomplete := r.poisoned, false
 	r.closed, r.poisoned = true, true
@@ -348,6 +359,11 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 		return tx, v41StageErr(v41StageAttention, -1, err)
 	}
 	journal := newV41StepJournal(st, stats, previousRegistry, registry, cfg.NumLayers)
+	if entry != nil && entry.round.panel {
+		journal.panel = entry.round
+		entry.journal = journal
+		entry.round.panelRegistry = registry
+	}
 	rollback := journal.rollback
 	tx.rollback = rollback
 	if entry != nil {
@@ -480,6 +496,9 @@ func (m *Model) beginV41StepCore(id int, st *v41ForwardState, scratch *v41ProjSc
 		if withLogits {
 			st.forwardCoverage = newNativeV41ForwardCoverage(cfg, stats.LayerCalls, NativeForwardLogitsSourceV41Incremental)
 		}
+		if entry != nil {
+			entry.finalCoverage = st.forwardCoverage
+		}
 	}
 	ready = true
 	return tx, nil
@@ -503,7 +522,20 @@ func (tx *v41StepTransaction) prepareLayer() (err error) {
 	complete := false
 	defer func() { tx.abortIncomplete(complete) }()
 	err = func() error {
-		tx.pendingLayer, err = tx.layer(tx.nextLayer)
+		if e := tx.roundEntry; e != nil && e.round.panel {
+			e.registryView.restore(e.round.panelRegistry)
+			restore, cause := e.round.causalRegistryView(e, tx.nextLayer)
+			if cause != nil {
+				return cause
+			}
+			func() {
+				defer restore()
+				tx.pendingLayer, err = tx.layer(tx.nextLayer)
+				e.registryView = captureV41StepRegistryView(e.round.panelRegistry)
+			}()
+		} else {
+			tx.pendingLayer, err = tx.layer(tx.nextLayer)
+		}
 		if err != nil {
 			return tx.abortLayerError(err)
 		}
@@ -872,4 +904,172 @@ func (a *v41LayerAttentionSuspension) plainScratch() *v41ProjScratch {
 		return nil
 	}
 	return a.plain.st.scratch
+}
+
+// beginPanel creates bounded same-session rows without publishing history. The
+// temporary history view supplies absolute positions and Engram inputs only.
+func (r *v41StepRound) beginPanel(ids []int) (txs []*v41StepTransaction, err error) {
+	if !r.ownsState() || r.failed || len(r.entries) != 0 || len(ids) != r.capacity || !r.atCommittedBoundary() {
+		return nil, errV41StepRoundState
+	}
+	if err := v41CandidatePoolCovers(r.model.Cfg, len(r.state.history)+len(ids)); err != nil {
+		return nil, err
+	}
+	r.panel = true
+	st := r.state
+	base := st.history
+	r.panelPreviousRegistry = st.attn
+	r.panelBaseView = captureV41StepRegistryView(st.attn)
+	r.panelCoverage = st.forwardCoverage
+	view := append(base[:len(base):len(base)], ids...)
+	defer func() { st.history = base }()
+	for k, id := range ids {
+		st.history = view[:len(base)+k]
+		e := &v41StepRoundEntry{round: r, ordinal: k, token: id, historyLen: len(st.history), coverage: r.panelCoverage, registryView: r.panelBaseView}
+		r.entries = append(r.entries, e)
+		r.pending = e
+		tx, cause := r.model.beginV41StepCore(id, st, &v41ProjScratch{}, false, e)
+		txs = append(txs, tx)
+		if cause != nil {
+			return txs, cause
+		}
+	}
+	r.pending = nil
+	return txs, nil
+}
+
+// drainPanel owns all row cleanup and restores each layer's rejected suffix
+// newest-first. Shared source-bank entries are staged at the mutation boundary;
+// immutable query views are selected explicitly for the final emitted position.
+func (r *v41StepRound) drainPanel(keep int) (err error) {
+	st, entries := r.state, r.entries
+	poisoned := r.poisoned
+	r.closed, r.poisoned = true, true
+	defer func() {
+		if st.activeStepRound != r {
+			poisoned = true
+		}
+		for _, e := range entries {
+			if !e.closed || !e.cleanupOK {
+				poisoned = true
+			}
+			*e = v41StepRoundEntry{}
+		}
+		r.entries, r.layers, r.pending = nil, nil, nil
+		r.model, r.state = nil, nil
+		r.panelRegistry, r.panelPreviousRegistry = nil, nil
+		r.panelBaseView = v41StepRegistryView{}
+		r.panelCoverage = nil
+		r.poisoned = poisoned
+		if poisoned {
+			err = errV41StepRoundState
+		} else {
+			st.activeStepRound = nil
+		}
+	}()
+	// Defers attempt every undo even when one cleanup panics or calls Goexit.
+	complete := false
+	defer func() {
+		if !complete {
+			poisoned = true
+		}
+	}()
+	defer func() {
+		if len(st.history) < r.baseHistoryLen+keep {
+			poisoned = true
+		} else {
+			clear(st.history[r.baseHistoryLen+keep:])
+			st.history = st.history[:r.baseHistoryLen+keep]
+		}
+		if keep == 0 {
+			r.panelBaseView.restore(r.panelRegistry)
+			st.attn, st.forwardCoverage = r.panelPreviousRegistry, r.panelCoverage
+		} else {
+			entries[keep-1].registryView.restore(r.panelRegistry)
+			st.forwardCoverage = entries[keep-1].finalCoverage
+		}
+		for _, layer := range r.layers {
+			if layer.nextWindowPos != r.baseHistoryLen+keep {
+				poisoned = true
+			}
+		}
+	}()
+	incomplete := false
+	attempt := func(fn func()) {
+		done := false
+		defer func() {
+			if !done {
+				incomplete, poisoned = true, true
+			}
+		}()
+		if incomplete {
+			func() { defer func() { _ = recover() }(); fn() }()
+		} else {
+			fn()
+		}
+		done = true
+	}
+	for i := keep; i < len(entries); i++ {
+		e := entries[i]
+		defer attempt(func() {
+			if e.journal != nil {
+				e.journal.restore()
+			}
+		})
+	}
+	// Register ALL closes before any can panic/Goexit. These defers run before
+	// journal restoration and preserve the first cleanup failure.
+	for _, entry := range entries {
+		e := entry
+		defer attempt(func() {
+			if e.tx != nil && !e.tx.closed {
+				e.tx.abort()
+			}
+		})
+	}
+
+	complete = true
+	return nil
+}
+
+// causalRegistryView exposes only publications completed at this query's
+// absolute position. Source banks remain immutable/shared; only end headers
+// change for the duration of the existing reader. The current source layer is
+// append-ordered already and must retain its newly published end.
+func (r *v41StepRound) causalRegistryView(e *v41StepRoundEntry, layer int) (func(), error) {
+	registry := r.panelRegistry
+	type savedEnd struct {
+		ends        map[int]int
+		source, end int
+	}
+	var saved []savedEnd
+	restore := func() {
+		for _, v := range saved {
+			v.ends[v.source] = v.end
+		}
+	}
+	roles := r.model.v41AttentionRolesCached()
+	for _, ends := range []map[int]int{registry.kvPublishedEnd, registry.indexPublishedEnd} {
+		for source, end := range ends {
+			if source == layer {
+				continue
+			}
+			plan, err := v41AttentionPlanFor(r.model.Cfg, source, roles)
+			if err != nil {
+				restore()
+				return nil, err
+			}
+			ratio := plan.kvGroupSize(r.model.Cfg)
+			if ratio <= 0 {
+				restore()
+				return nil, errV41StepRoundState
+			}
+			visible := (e.historyLen + 1) / ratio
+			if end > visible {
+				saved = append(saved, savedEnd{ends, source, end})
+				ends[source] = visible
+			}
+		}
+	}
+	return restore, nil
 }

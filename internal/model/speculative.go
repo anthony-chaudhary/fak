@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"time"
 )
 
 // Standard error definitions for the speculative decoding engine.
@@ -432,8 +433,134 @@ func TripwireVerify(draft []int, targetArgmax []int, lastLogits []float32, targe
 	return acceptedTokens, bonusToken, nil
 }
 
+// SpeculativeVerificationRound owns provisional target state through emission.
+// Finish counts accepted draft tokens only; callers advance an emitted
+// correction/bonus exactly once after Finish. Result is immutable and Receipt
+// remains at a stable address. No other target operation may overlap this owner.
+// SpeculativePanelWork reports physical composition separately from one logical
+// target pass. A target panel can contain scalar heads or several admitted tiles.
+type SpeculativePanelWork struct {
+	LayerPanels     int
+	HeadProjections int
+	SharedHeadTiles int
+	HeadRows        int
+}
+
+type SpeculativeVerificationRound struct {
+	PanelWork   *SpeculativePanelWork
+	Result      VerificationResult
+	Receipt     *TargetVerificationReceipt
+	finish      func(int, bool) error
+	closed      bool
+	retain      bool
+	kept        int
+	aborted     bool
+	terminalErr error
+}
+
+func (r *SpeculativeVerificationRound) Finish(emitted int) (err error) {
+	if r == nil || emitted < 0 || emitted > r.Result.NumAccepted {
+		return errV41StepRoundState
+	}
+	if r.closed {
+		if r.aborted || emitted != r.kept {
+			return errV41StepRoundState
+		}
+		return r.terminalErr
+	}
+	r.closed, r.kept, r.terminalErr = true, emitted, errV41StepRoundState
+	defer func() { r.finish = nil }()
+	start := time.Now()
+	defer func() {
+		if r.Receipt != nil {
+			r.Receipt.Accounting.Rollback = SpeculativeCostComponent{Nanoseconds: time.Since(start).Nanoseconds(), Measured: true}
+		}
+	}()
+	if r.finish != nil {
+		err = r.finish(emitted, false)
+	}
+	r.terminalErr = err
+	return err
+}
+
+// Abort is safe as a direct defer: rollback/retirement cannot replace an active
+// primary panic. It is idempotent after either successful or failed completion.
+func (r *SpeculativeVerificationRound) Abort() (err error) {
+	primary := recover()
+	if primary != nil {
+		defer func() { _ = recover(); panic(primary) }()
+	}
+	if r == nil || r.closed {
+		return nil
+	}
+	r.closed, r.aborted, r.terminalErr = true, true, errV41StepRoundState
+	defer func() { r.finish = nil }()
+	if r.finish != nil {
+		err = r.finish(0, true)
+	}
+	r.terminalErr = err
+	return err
+}
+
+func ParallelVerifyKernelOwned(ctx context.Context, target *Session, committed []int, proposal DraftProposal, lastLogits []float32, sanitizer *RepetitionPenaltySanitizer, counts []int32) (*SpeculativeVerificationRound, error) {
+	return startParallelVerify(ctx, target, committed, proposal, lastLogits, sanitizer, counts, true)
+}
+
+func startParallelVerify(ctx context.Context, target *Session, committed []int, proposal DraftProposal, lastLogits []float32, sanitizer *RepetitionPenaltySanitizer, counts []int32, retain bool) (round *SpeculativeVerificationRound, err error) {
+	round = &SpeculativeVerificationRound{retain: retain}
+	ready := false
+	defer func() {
+		if !ready {
+			primary := recover()
+			if primary != nil {
+				defer func() { _ = recover(); panic(primary) }()
+			}
+			_ = round.Abort()
+		}
+	}()
+	start := time.Now()
+	result, cause := parallelVerifyKernelOwned(ctx, target, committed, proposal, lastLogits, sanitizer, counts, round)
+	if cause != nil {
+		return round, cause
+	}
+	round.Result = result
+	if round.Receipt == nil {
+		steps := len(result.TargetLogits)
+		round.Receipt = &TargetVerificationReceipt{Schema: "fak.target-verification.v1", Engine: "fak-native", Path: "ordinary-target-decode", DraftTokens: len(proposal.Tokens), TargetDecodeSteps: steps, DowngradeReason: "V4.1 panel not selected"}
+	}
+	round.Receipt.AcceptedTokens = result.NumAccepted
+	round.Receipt.RejectedTokens = len(proposal.Tokens) - result.NumAccepted
+	round.Receipt.Accounting.TargetVerification = SpeculativeCostComponent{Nanoseconds: time.Since(start).Nanoseconds(), Measured: true}
+	if round.finish == nil {
+		round.finish = func(emitted int, abort bool) error {
+			if abort {
+				emitted = 0
+			}
+			if target != nil && result.NumAccepted > emitted {
+				target.RollbackResidentSuffix(result.NumAccepted - emitted)
+			}
+			return nil
+		}
+	}
+	ready = true
+	return round, nil
+}
+
+// ParallelVerifyKernel preserves the legacy immediate accepted-prefix commit.
+func ParallelVerifyKernel(ctx context.Context, target *Session, committed []int, proposal DraftProposal, lastLogits []float32, sanitizer *RepetitionPenaltySanitizer, counts []int32) (VerificationResult, error) {
+	round, err := startParallelVerify(ctx, target, committed, proposal, lastLogits, sanitizer, counts, false)
+	if err != nil {
+		return VerificationResult{}, err
+	}
+	defer round.Abort()
+	if err = round.Finish(round.Result.NumAccepted); err != nil {
+		return VerificationResult{}, err
+	}
+	return round.Result, nil
+}
+
 // ParallelVerifyKernel evaluates K speculative candidate tokens in a single target model forward pass.
-func ParallelVerifyKernel(
+func parallelVerifyKernelOwned(
 	ctx context.Context,
 	target *Session,
 	committed []int,
@@ -441,6 +568,7 @@ func ParallelVerifyKernel(
 	lastLogits []float32,
 	sanitizer *RepetitionPenaltySanitizer,
 	counts []int32,
+	owned *SpeculativeVerificationRound,
 ) (VerificationResult, error) {
 	if err := ctx.Err(); err != nil {
 		return VerificationResult{}, err
@@ -507,20 +635,43 @@ func ParallelVerifyKernel(
 	// Single target forward pass for all K draft tokens (cloning row buffers to avoid aliasing in quantized modes)
 	var rows [][]float32
 	var v41Round *v41StepRound
-	var v41OwnedComplete bool
 	v41Transactional := target.M.Cfg.IsDeepSeekV41() && !target.M.v41EPRequested() &&
 		target.v41IncrementalEligible() && len(draft) <= 32 && v41ActivationTraceEnvPath() == ""
+	if owned.retain && target.M.Cfg.IsDeepSeekV41() && !v41Transactional {
+		for _, tok := range draft {
+			if tok < 0 || tok >= target.M.Cfg.VocabSize {
+				return VerificationResult{}, errV41StepRoundState
+			}
+		}
+		target.admitSpeculativeBoundaryReject()
+		owned.Receipt = &TargetVerificationReceipt{Schema: "fak.target-verification.v1", Engine: "fak-native", Path: "ordinary-target-decode", DraftTokens: len(draft), DowngradeReason: "V4.1 panel envelope unsupported; ordinary correction step required"}
+		return VerificationResult{CorrectionToken: boundaryArgmax}, nil
+	}
 	tBase := 0
 	if !v41Transactional {
 		tBase = target.Cache.Len()
 	}
 	if v41Transactional {
 		scope := target.beginBackendExecution()
-		defer scope.finishCompleted(&v41OwnedComplete)
+		complete := false
+		keepAlive := func() {}
+		owned.finish = func(keep int, abort bool) (cause error) {
+			defer scope.finishCompleted(&complete)
+			defer keepAlive()
+			if v41Round != nil {
+				if abort {
+					cause = v41Round.abort()
+				} else {
+					cause = v41Round.finish(keep)
+				}
+			}
+			complete = cause == nil && !abort
+			return cause
+		}
 		if err := target.refuseUnimplementedV4FlashAttention(); err != nil {
 			return VerificationResult{}, err
 		}
-		defer target.BeginGPUKeepAlive()()
+		keepAlive = target.BeginGPUKeepAlive()
 		target.validateDeviceOnlyExecution("decode")
 		target.ensureOpenBackendSession()
 		var err error
@@ -528,18 +679,12 @@ func ParallelVerifyKernel(
 		if err != nil {
 			return VerificationResult{}, err
 		}
-		defer v41Round.abort()
-		rows = make([][]float32, len(draft))
-		for i, tok := range draft {
-			if err := ctx.Err(); err != nil {
-				return VerificationResult{}, err
-			}
-			row, err := target.parallelVerifyV41Step(v41Round, tok)
-			if err != nil {
-				return VerificationResult{}, err
-			}
-			rows[i] = append([]float32(nil), row...)
+		rows, err = target.parallelVerifyV41Panel(ctx, v41Round, draft)
+		if err != nil {
+			return VerificationResult{}, err
 		}
+		owned.PanelWork = &v41Round.panelWork
+		owned.Receipt = &TargetVerificationReceipt{Schema: "fak.target-verification.v1", Engine: "fak-native", Path: "v41-layer-major", DraftTokens: len(draft), TargetVerificationOperations: 1, OneOperation: true}
 	} else if verifyForwardBatchedOK(target) {
 		rawRows := target.VerifyForward(draft, nil, nil)
 		rows = make([][]float32, len(rawRows))
@@ -584,12 +729,7 @@ func ParallelVerifyKernel(
 
 	numAccepted := len(acceptedTokens)
 	rollbackCount := len(draft) - numAccepted
-	if v41Round != nil {
-		if err := v41Round.finish(numAccepted); err != nil {
-			return VerificationResult{}, err
-		}
-		v41OwnedComplete = true
-	} else if rollbackCount > 0 {
+	if v41Round == nil && rollbackCount > 0 {
 		target.evictKV(tBase+numAccepted, rollbackCount)
 	}
 
@@ -1104,11 +1244,16 @@ func (e *SpeculativeEngine) SetLastLogits(logits []float32) {
 }
 
 // Step runs a single speculative generation and verification round.
-func (e *SpeculativeEngine) Step(
+func (e *SpeculativeEngine) Step(ctx context.Context, committed []int, lastLogits []float32, counts []int32) ([]int, int, []float32, error) {
+	return e.stepOwned(ctx, committed, lastLogits, counts, nil)
+}
+
+func (e *SpeculativeEngine) stepOwned(
 	ctx context.Context,
 	committed []int,
 	lastLogits []float32,
 	counts []int32,
+	owner **SpeculativeVerificationRound,
 ) (acceptedTokens []int, bonusToken int, nextLogits []float32, err error) {
 	if e == nil {
 		return nil, 0, nil, errors.New("model: nil speculative engine")
@@ -1140,7 +1285,16 @@ func (e *SpeculativeEngine) Step(
 	// 2. Perform parallel verification
 	var res VerificationResult
 	if e.target != nil {
-		res, err = ParallelVerifyKernel(ctx, e.target, committed, proposal, lastLogits, e.sanitizer, counts)
+		if owner != nil {
+			var round *SpeculativeVerificationRound
+			round, err = ParallelVerifyKernelOwned(ctx, e.target, committed, proposal, lastLogits, e.sanitizer, counts)
+			if err == nil {
+				*owner = round
+				res = round.Result
+			}
+		} else {
+			res, err = ParallelVerifyKernel(ctx, e.target, committed, proposal, lastLogits, e.sanitizer, counts)
+		}
 	} else if e.verifier != nil {
 		res, err = e.verifier.Verify(ctx, committed, proposal)
 	} else {
@@ -1212,7 +1366,12 @@ func (e *SpeculativeEngine) Generate(ctx context.Context, prompt []int, maxNew i
 			return generated, err
 		}
 
-		accepted, bonus, _, err := e.Step(ctx, committed, logits, counts)
+		var round *SpeculativeVerificationRound
+		accepted, bonus, _, err := e.stepOwned(ctx, committed, logits, counts, &round)
+		if round != nil {
+			defer abortSpeculativeRoundSlot(&round)
+		}
+		emittedBase := len(generated)
 		if err != nil {
 			e.reconcileCommittedState(target, len(prompt)+len(generated))
 			return generated, err
@@ -1229,6 +1388,18 @@ func (e *SpeculativeEngine) Generate(ctx context.Context, prompt []int, maxNew i
 			}
 		}
 
+		if round != nil {
+			emitted := len(generated) - emittedBase
+			if err := round.Finish(emitted); err != nil {
+				return generated, err
+			}
+			if emitted > 0 && len(round.Result.TargetLogits) >= emitted {
+				e.SetLastLogits(round.Result.TargetLogits[emitted-1])
+			} else {
+				e.SetLastLogits(logits)
+			}
+			round = nil // release K-row results before the next generation round
+		}
 		if len(generated) < maxNew {
 			generated = append(generated, bonus)
 			committed = append(committed, bonus)
@@ -1515,4 +1686,15 @@ func (e *SpeculativeEngine) Reset() {
 // ArgmaxF32 returns the index of the maximum float32 value in v.
 func ArgmaxF32(v []float32) int {
 	return argmaxF32(v)
+}
+
+// A deferred slot, rather than receiver, releases a finished panel immediately.
+func abortSpeculativeRoundSlot(slot **SpeculativeVerificationRound) {
+	primary := recover()
+	if primary != nil {
+		defer func() { _ = recover(); panic(primary) }()
+	}
+	if slot != nil && *slot != nil {
+		_ = (*slot).Abort()
+	}
 }

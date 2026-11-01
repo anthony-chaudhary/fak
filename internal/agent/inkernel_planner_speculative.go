@@ -449,6 +449,24 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		}
 		s.Close()
 	}()
+	var emissionOwner *model.SpeculativeVerificationRound
+	defer func() {
+		// Registered after session close so rollback runs before retirement.
+		// One request-local slot, not one deferred receiver per round: completed
+		// logits panels must not remain reachable until request completion.
+		primary := recover()
+		if primary != nil {
+			defer func() {
+				_ = recover()
+				panic(primary)
+			}()
+		}
+		if emissionOwner != nil {
+			if abortErr := emissionOwner.Abort(); err == nil {
+				err = abortErr
+			}
+		}
+	}()
 	p.configureNativeSession(s)
 
 	// Choose the request stream once, before constructing the draft. The host
@@ -888,11 +906,15 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		}
 		draftElapsed := diagnosticNow().Sub(diagnosticStart)
 		roundStart := time.Now()
-		vRes, deviceReceipt, vErr := verifyGreedySpeculativeRoundObserved(ctx, s, committed, proposal, curLogits, eng.Sanitizer(), counts)
+		vRes, deviceReceipt, emissionRound, vErr := verifyGreedySpeculativeRoundForEmission(ctx, s, committed, proposal, curLogits, eng.Sanitizer(), counts)
 		if vErr != nil {
 			attempt.verificationFailed(vErr)
 			err = vErr
 			break
+		}
+		if emissionRound != nil {
+			// Keep only the active V4.1 journal reachable through actual emission.
+			emissionOwner = emissionRound
 		}
 		attempt.outcome = speculativeAttemptCompleted
 		round.open(roundStart, speculativeProposalSize(proposal), vRes.NumAccepted, gen)
@@ -1005,7 +1027,18 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		// releases its HAL store too — RollbackSpeculative would touch only the
 		// host Cache and leave the device phantom suffix resident. This is a no-op
 		// on the normal path, where every accepted token was emitted.
-		if unemitted := len(vRes.AcceptedTokens) - emittedThisRound; unemitted > 0 {
+		if emissionRound != nil {
+			// Host/HAL eviction does not own V4.1 temporal history, compressor
+			// publications or ring rows. Finalize the actual emitted prefix while
+			// the verifier still owns their undo; Finish updates its receipt.
+			if finishErr := emissionRound.Finish(emittedThisRound); finishErr != nil {
+				if err == nil {
+					err = finishErr
+				}
+				break
+			}
+			emissionOwner = nil
+		} else if unemitted := len(vRes.AcceptedTokens) - emittedThisRound; unemitted > 0 {
 			s.RollbackResidentSuffix(unemitted)
 		}
 
@@ -1041,6 +1074,11 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		if round.diagnostic != nil {
 			round.diagnostic.BonusEmitted = true
 		}
+		if emissionRound != nil {
+			// The correction is emitted even when this callback or the output
+			// budget stops the request. Commit it exactly once before any exit.
+			curLogits = s.Step(bonus)
+		}
 		if err = measurement.recordDecodeTrace(gen, bonus); err != nil {
 			eng.RecordVerificationOutcome(len(proposal.Tokens), vRes.NumAccepted, vRes.RollbackKVCount, true)
 			break
@@ -1057,7 +1095,9 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		}
 
 		// Advance target session with bonus token
-		curLogits = s.Step(bonus)
+		if emissionRound == nil {
+			curLogits = s.Step(bonus)
+		}
 	}
 
 	round.close(gen)
@@ -1182,6 +1222,29 @@ func verifyGreedySpeculativeRound(
 ) (model.VerificationResult, error) {
 	result, _, err := verifyGreedySpeculativeRoundObserved(ctx, target, committed, proposal, lastLogits, sanitizer, counts)
 	return result, err
+}
+
+// verifyGreedySpeculativeRoundForEmission retains V4.1 transaction ownership
+// until the serving consumer knows how many accepted tokens it actually emitted.
+// Other architectures retain their existing device/fallback verification path.
+func verifyGreedySpeculativeRoundForEmission(
+	ctx context.Context,
+	target *model.Session,
+	committed []int,
+	proposal model.DraftProposal,
+	lastLogits []float32,
+	sanitizer *model.RepetitionPenaltySanitizer,
+	counts []int32,
+) (model.VerificationResult, *model.TargetVerificationReceipt, *model.SpeculativeVerificationRound, error) {
+	if target != nil && target.M != nil && target.M.Cfg.IsDeepSeekV41() && proposal.Tree == nil {
+		owned, err := model.ParallelVerifyKernelOwned(ctx, target, committed, proposal, lastLogits, sanitizer, counts)
+		if err != nil {
+			return model.VerificationResult{}, nil, nil, err
+		}
+		return owned.Result, owned.Receipt, owned, nil
+	}
+	result, receipt, err := verifyGreedySpeculativeRoundObserved(ctx, target, committed, proposal, lastLogits, sanitizer, counts)
+	return result, receipt, nil, err
 }
 
 func verifyGreedySpeculativeRoundObserved(

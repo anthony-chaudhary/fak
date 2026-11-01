@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -152,4 +153,75 @@ func (m *Model) v41ProjectSharedHead(lanes []v41StepCohortLane, txs []*v41StepTr
 		return y, outcome, cause
 	}
 	return m.v41ProjectHeadInput(panel, selected, len(indices))
+}
+
+// v41FinishVerificationHeads projects every query row. A shared tile requires
+// the same explicit capability as cohorts; otherwise ordinary scalar HEADS
+// retain their exact arithmetic. Neither route reruns a model layer.
+func (m *Model) v41FinishVerificationHeads(ctx context.Context, s *Session, txs []*v41StepTransaction) ([][]float32, error) {
+	rows := make([][]float32, len(txs))
+	for first := 0; first < len(txs); {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		n := min(v41SharedHeadMaxLanes, len(txs)-first)
+		lanes := make([]v41StepCohortLane, n)
+		for i := range lanes {
+			lanes[i] = v41StepCohortLane{session: s, ctx: ctx}
+		}
+		if n < 2 || m.v41SharedHeadAdmit(lanes) != nil {
+			row, err := txs[first].finalize()
+			if err != nil {
+				return nil, err
+			}
+			s.v41State().activeStepRound.panelWork.HeadProjections++
+			s.v41State().activeStepRound.panelWork.HeadRows++
+			rows[first] = append([]float32(nil), row...)
+			first++
+			continue
+		}
+		panel := make([]float32, 0, n*m.Cfg.HiddenSize)
+		for i := 0; i < n; i++ {
+			row, err := txs[first+i].prepareHead()
+			if err != nil {
+				return nil, err
+			}
+			panel = append(panel, row...)
+		}
+		// The enclosing one-session round, not independent cohort lanes, owns all
+		// rollback. The execution scope defers selected retirement until unwinding.
+		project := s.v41DenseProjectionFunc()
+		selected := func(l int, leaf string, x []float32, out, in, count int) ([]float32, v41DenseProjectionOutcome, error) {
+			if project == nil {
+				return nil, v41ProjectionError, errV41ProjectionResult
+			}
+			y, outcome, err := project(l, leaf, x, out, in, count)
+			if outcome != v41ProjectionHandled {
+				if err == nil {
+					err = errV41ProjectionResult
+				}
+				return nil, v41ProjectionError, err
+			}
+			return y, outcome, err
+		}
+		projected, err := m.v41ProjectHeadInput(panel, selected, n)
+		if err == nil {
+			s.v41State().activeStepRound.panelWork.HeadProjections++
+			s.v41State().activeStepRound.panelWork.SharedHeadTiles++
+			s.v41State().activeStepRound.panelWork.HeadRows += n
+		}
+		if err != nil {
+			return nil, err
+		}
+		for i := 0; i < n; i++ {
+			lo, hi := i*m.Cfg.VocabSize, (i+1)*m.Cfg.VocabSize
+			row, err := txs[first+i].finishHead(projected[lo:hi:hi], ctx.Err)
+			if err != nil {
+				return nil, err
+			}
+			rows[first+i] = append([]float32(nil), row...)
+		}
+		first += n
+	}
+	return rows, nil
 }

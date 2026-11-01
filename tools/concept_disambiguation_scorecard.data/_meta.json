@@ -7670,6 +7670,11 @@
           "category": "incidental",
           "reason": "Private dispatch or optional-capability implementation of the positioned partial-prefill-context and partial-prefill-no-logits-context operations. It forwards the existing request context and preserves the same Session/backend owner; it creates no independent context, session identity, engine, cancellation policy, or scheduler.",
           "token": "prefillSessionContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private deferred-slot cleanup helper forwarding to the owned speculative round Abort operation while preserving an active panic; not a separate session type, runtime, or ownership protocol.",
+          "token": "abortSpeculativeRoundSlot"
         }
       ],
       "exclude": [
@@ -7821,6 +7826,7 @@
         "WithAffinity",
         "WorkSessionOpened",
         "WorkSessionView",
+        "abortSpeculativeRoundSlot",
         "adaptive-selective-hedge",
         "ambiguous_count",
         "ambiguous_session_root",
@@ -15075,6 +15081,16 @@
           "category": "incidental",
           "reason": "Pure operation-level admission helper combining known row stride, broad decoder availability and optional exact encoding capability while restricting legacy decoders to three existing dialects; it is not a product maturity assessment, execution witness or serving enablement.",
           "token": "V41EngramRowDecodeSupportsEncoding"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private round field retaining the existing NativeForwardCoverage observation for provisional panel rollback; not a new support level, coverage metric, or qualification claim.",
+          "token": "panelCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private round-entry field retaining the existing NativeForwardCoverage observation restored for the kept accepted prefix; not a new support level, coverage metric, or qualification claim.",
+          "token": "finalCoverage"
         }
       ],
       "exclude": [
@@ -15281,6 +15297,7 @@
         "fak_fleet_goal_efficiency_ready",
         "fak_parity_ratio",
         "fak_parity_value",
+        "finalCoverage",
         "formatParityValue",
         "forward_coverage_not_single_lane",
         "fvk_q5k_matmul_panel_supported",
@@ -15312,6 +15329,7 @@
         "normalizeCoverage",
         "numareplicapolicyunsupported",
         "observeFaultDomain",
+        "panelCoverage",
         "parityPanelHeader",
         "parity_layers",
         "paritybench",
