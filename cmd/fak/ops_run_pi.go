@@ -43,13 +43,10 @@ import (
 // via Pi's `@<file>` inclusion — a short `-p` directive plus `@<abs path>` — and
 // never inline.
 //
-// Pi json grammar assumption. `--mode json` streams newline-delimited JSON
-// objects each carrying a `type` field. This arm treats a run as a clean success
-// only when: the child exit code is 0, at least one assistant/result event was
-// observed, and no `"type":"error"` event appeared. Anything else is non-success.
-// The assumed type vocabulary is recorded here so a future reader can re-verify
-// it against the installed Pi contract; a real installed-Pi qualification is the
-// mission's separate live canary (fak-private#2249), not this software contract.
+// Pi 1.4.0 JSON completion requires an assistant message_end with stopReason
+// stop. A later assistant start or incomplete end clears completion; errors,
+// truncation and aborted settlement fail closed. Legacy terminal aliases remain
+// supported. Process exit and deadline checks still apply independently.
 
 const (
 	opsPiHarness = "pi"
@@ -261,6 +258,8 @@ func (w *opsPiEvents) finishLine() {
 		switch opsPiClassify(w.pending) {
 		case "assistant":
 			w.assistant = true
+		case "reset":
+			w.assistant = false
 		case "error":
 			w.failed = true
 		}
@@ -278,19 +277,54 @@ func opsPiClassify(line []byte) string {
 		return ""
 	}
 	var envelope struct {
-		Type string `json:"type"`
+		Type    string `json:"type"`
+		Aborted bool   `json:"aborted"`
+		Message struct {
+			Role       string `json:"role"`
+			StopReason string `json:"stopReason"`
+		} `json:"message"`
 	}
 	if json.Unmarshal(trimmed, &envelope) != nil {
+		var eventType struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(trimmed, &eventType) == nil {
+			switch eventType.Type {
+			case "error", "run_error", "message_start", "message_end", "agent_settled":
+				return "error"
+			case "assistant", "message", "result", "run_result", "finish":
+				return "assistant"
+			}
+		}
 		return ""
 	}
 	switch envelope.Type {
 	case "error", "run_error":
 		return "error"
+	case "message_start":
+		if envelope.Message.Role == "assistant" {
+			return "reset"
+		}
+	case "message_end":
+		if envelope.Message.Role != "assistant" {
+			return ""
+		}
+		switch envelope.Message.StopReason {
+		case "stop":
+			return "assistant"
+		case "error", "aborted", "length":
+			return "error"
+		default:
+			return "reset"
+		}
+	case "agent_settled":
+		if envelope.Aborted {
+			return "error"
+		}
 	case "assistant", "message", "result", "run_result", "finish":
 		return "assistant"
-	default:
-		return ""
 	}
+	return ""
 }
 
 // opsPiComplete reports whether the observed stream is a clean completed turn.
