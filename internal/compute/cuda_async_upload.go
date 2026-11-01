@@ -17,7 +17,7 @@ import (
 // (cuda/async_upload.cuh), so ops enqueued on g_stream after the issue run underneath it.
 //
 // Two shapes go async, both byte-verbatim copies: F32 host data uploaded as F32, and raw
-// Q4_K/Q5_K/Q6_K/Q2_K bytes uploaded as their own dtype. Each lands in its OWN MemoryOffload
+// K-quant/IQ bytes uploaded as their own dtype. Each lands in its OWN MemoryOffload
 // allocation, never the host-pointer uploadCache, so an expert ring can Free it independently
 // (the same ownership UploadClass(..., MemoryOffload, ...) gives the raw k-quant path). Every
 // other request, and any request the slot pool cannot take, is the synchronous Upload with an
@@ -129,7 +129,7 @@ func (c *cudaBackend) uploadAsyncShape(t Tensor, hb HostBuffer, as Dtype, class 
 	case t.Dtype == F32 && as == F32 && len(t.Shape) > 0:
 		out, fence := c.uploadF32Async(t, hb, class, site)
 		return out, fence, true
-	case (t.Dtype == Q3_K || t.Dtype == Q4_K || t.Dtype == Q5_K || t.Dtype == Q6_K || t.Dtype == Q2_K) && as == t.Dtype:
+	case cudaRawUploadIsVerbatim(t.Dtype) && as == t.Dtype:
 		out, fence := c.uploadRawKQuantAsync(t, hb, class, site)
 		return out, fence, true
 	}

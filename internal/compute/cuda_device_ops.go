@@ -5,6 +5,18 @@ import (
 	"strings"
 )
 
+// cudaRawUploadIsVerbatim identifies byte-verbatim packed uploads shared by
+// the synchronous and copy-stream paths. Other CUDA weight types need conversion
+// or separate scale storage and must retain their existing upload routes.
+func cudaRawUploadIsVerbatim(dt Dtype) bool {
+	switch dt {
+	case Q2_K, Q3_K, Q4_K, Q5_K, Q6_K, IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL, IQ4_XS:
+		return true
+	default:
+		return false
+	}
+}
+
 // CUDADeviceOp describes one source-declared CUDA weight operation and its
 // generic full-build architecture floor. Format is an exact storage/scale pair,
 // not permission to use every host-decodable tensor of that dtype.
