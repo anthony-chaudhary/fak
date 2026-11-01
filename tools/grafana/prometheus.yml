@@ -149,23 +149,23 @@ scrape_configs:
       - targets: ["host.docker.internal:9094"]
         labels:
           service: fak-ops-workers
-  - job_name: strix_halo
-    # Per-node telemetry for the AMD Strix Halo appliances on the LAN.
+  - job_name: fleet_node
+    # Per-node telemetry for the fleet nodes on the LAN.
     #
-    # Each appliance's fak-node-exporter.service binds 127.0.0.1:9100 only, so
+    # Each node's fak-node-exporter.service binds 127.0.0.1:9100 only, so
     # the scrape does not reach the node directly: the host builds ONE pinned
     # ssh -L forward per node onto a loopback port and Prometheus scrapes that
     # through the Docker host bridge. No inbound firewall rule is opened on the
-    # appliance and no appliance exporter is exposed to the LAN.
+    # node and no node exporter is exposed to the LAN.
     #
     # The forwards are supervised by `fak-obs-stack` (private repo,
     # platform/obs/stack) exactly like the local exporters. The target list is
     # written there rather than tracked here, because a node's LAN identity and
     # loopback port are deployment facts, not repo facts. Generate it with:
-    #   fak-obs-stack halo targets --out provisioning/strix-halo-targets.json
+    #   fak-obs-stack node --out provisioning/fleet-node-targets.json
     # and mount that filename beside this config.
     metrics_path: /metrics
     scrape_interval: 30s
     file_sd_configs:
       - files:
-          - /etc/prometheus/provisioning/strix-halo-targets.json
+          - /etc/prometheus/provisioning/fleet-node-targets.json
