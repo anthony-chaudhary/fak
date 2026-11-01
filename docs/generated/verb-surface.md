@@ -6,7 +6,7 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1337<br>
+parsed files: 1338<br>
 rows: 1311<br>
 unverified rows: 0 / 1311<br>
 source-only rows absent from help: 1075
@@ -644,7 +644,7 @@ source-only rows absent from help: 1075
 | `fak leaseref reap` |  | runLeaserefReap / internal/leaseref, internal/pathutil | `case` arm of the dispatch switch in runLeaseref() | NONE | — | yes |
 | `fak leaseref release` |  | runLeaserefRelease / internal/gateway, internal/hooks, internal/leaseref, internal/loopdrive, internal/pathutil | `case` arm of the dispatch switch in runLeaseref() | RUNTIME | — | **SOURCE ONLY** |
 | `fak leaseref renew` |  | runLeaserefRenew / internal/gateway, internal/hooks, internal/leaseref, internal/loopdrive, internal/pathutil | `case` arm of the dispatch switch in runLeaseref() | RUNTIME | — | **SOURCE ONLY** |
-| `fak leaseref session-publish` |  | runLeaserefSessionPublish / internal/leaseref, internal/pathutil | `case` arm of the dispatch switch in runLeaseref() | NONE | — | **SOURCE ONLY** |
+| `fak leaseref session-publish` |  | runLeaserefSessionPublish / internal/leaserefcli | `case` arm of the dispatch switch in runLeaseref() | NONE | — | **SOURCE ONLY** |
 | `fak leaseref sync` | convergence verb: move the refs/fak/locks/* namespace between this clone and a remote so every node's arbiter sees every node's leases | runLeaserefSync / internal/leaseref, internal/pathutil | `case` arm of the dispatch switch in runLeaseref() | NONE | — | **SOURCE ONLY** |
 | `fak lifecycle` | inspect and control phase-aware capability lifecycle state | cmdLifecycle / internal/lifecycle | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak lint` | the static tool linter: the definition-time dual of the kernel's call-time re-checks | cmdLint / internal/agent, internal/toollint | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | yes |
@@ -753,7 +753,7 @@ source-only rows absent from help: 1075
 | `fak model load` | downloads (or cache-hits) the file a model ref names and prints its local path | cmdModelLoad / internal/hfhub, internal/modelreg | `case` arm of the dispatch switch in cmdModel() | NONE | — | yes |
 | `fak model ls` | `fak ls` / `fak model ls`: list the merged alias registry (embedded catalog + the user's registry.json) with each alias's target and whether it is already downloaded locally | cmdModelLs / internal/modelreg | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model plan` |  | runModelPlan / internal/compute, internal/model/v41, internal/modelloadplan | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
-| `fak model preflight` | checks a GGUF header (every shard, no tensor bytes) for unread keys, HF-config mismatches, missing/orphan tensors and dtypes without a host kernel, all in one pass | runModelPreflight / internal/ggufload, internal/pathutil | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
+| `fak model preflight` | checks a checkpoint header (every shard, no tensor bytes) for unread keys, HF-config mismatches, missing/orphan tensors, dtypes without a host kernel, and — with --device cuda --arch — weight ops… | runModelPreflight / internal/compute, internal/ggufload, internal/model, internal/newmodel, internal/pathutil | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model provider-contracts` |  | runModelProviderContracts / internal/modelroute | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model pull` | `fak pull <ref>` / `fak model pull <ref>`: resolve an alias to its target (a bare hf:// URI or path passes through), download it into the local cache (cache-hit if already present), and print the loca… | cmdModelPull / internal/hfhub, internal/modelreg | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model qwen38-ladder` |  | runModelQwen38Ladder / internal/qwen38ladder | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
