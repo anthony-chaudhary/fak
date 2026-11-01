@@ -1441,10 +1441,10 @@ func (s *Session) prefillHALContext(ctx context.Context, ids []int, wantLogits b
 	}
 	// Sequence/panel operations above keep their own atomic boundary. An EP
 	// frame must also finish on every rank: one caller's context cannot strand
-	// peers inside an announced collective. Only the existing local split-layer
+	// peers inside an announced collective. The existing local scalar
 	// token loop can observe cancellation here, after prior token retirement.
-	_, split := s.validateDenseGPULayers()
-	interruptible := ctx != nil && split && s.M.epCoord == nil && s.M.epRanks <= 1 && !s.M.epRankSet
+	s.validateDenseGPULayers()
+	interruptible := ctx != nil && s.M.epCoord == nil && s.M.epRanks <= 1 && !s.M.epRankSet
 	last := len(ids) - 1
 	for i, id := range ids {
 		if interruptible && ctx.Err() != nil {
