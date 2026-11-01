@@ -1,0 +1,102 @@
+{
+  "schema": "fak.hw-witness-receipt.v1",
+  "request_id": "MOE-CM-HW-20261031-1856Z",
+  "ticket": "moe-colmajor-hw-witness-20261031",
+  "lane": "nvidia-test-leasing",
+  "executor": "pi-hitl-moe-colmajor-hw-witness (lane nvidia-test-leasing)",
+  "utc_start": "2026-10-31T18:56Z",
+  "utc_end": "2026-10-31T19:22Z",
+  "target": {
+    "node": "aegis-fak",
+    "sku": "MSI Aegis ZS2 desktop, RTX 5080 16 GiB",
+    "gpu_uuid": "GPU-3e9fda0a-061a-6eb7-26c3-541bf8489090",
+    "compute_capability": "12.0 (sm_120)",
+    "driver": "615.78.08",
+    "os": "Arch Linux, x86_64",
+    "cuda_toolkit": "13.4 at /opt/cuda",
+    "vram_total_mib": 16303,
+    "vram_free_mib_prerun": 12692,
+    "existing_consumer": "/usr/local/bin/fak serving service (~3.2 GiB) pre-existing; untouched by this run"
+  },
+  "lease": {
+    "id": "hwl-4d3ce83e299a4a4a",
+    "class": "owned-rtx5080-aegis",
+    "kind": "share",
+    "holder": "01a19349-04d3-755d-bd27-41cc54431ffa",
+    "epoch": 120,
+    "acquired_at": "2026-10-31T11:51:32-07:00",
+    "released": "2026-10-31T19:21:46Z verdict ok (journal event verified via nvlease history)"
+  },
+  "source": {
+    "repo": "github.com/meta-pytorch/applied-ai",
+    "sha": "2391954b19988bd76cf3c2ea84c1ce74b68d568b",
+    "subtree": "kernels/triton/inference/col_major_moe_gemm",
+    "transferred_files_sha256": {
+      "v0_moe_fused.py": "9c86cc16c13c8392fe489767e3eb01e6899e8795c637d394f3346e3395a242ec",
+      "v1_moe_fused.py": "d8d8d1fd06438c6c1e260d31e17589c716638ccd18396a7175b34ebcee0ab3ed",
+      "v2_moe_fused.py": "bb14ebf3df3bb50463b2b726ca73e99b03f99ccc50edd6fd206f62b27213325f"
+    },
+    "derived_variants_sha256": {
+      "v2b_moe_fused.py (blog-order fix)": "9fc0a14d8f1d77e3d2a3097e6514019f8338e108a5ab52edd4ccbb68b359b390",
+      "v2rm_moe_fused.py (row-major baseline)": "94d7d12b0955da94cf944cb4375c9a957e7744e4e912bc7afa8b6edb3d2dfc76",
+      "v1cm_moe_fused.py (SplitK + col-major)": "494812413dfbd9128637203427a06ca084cf3686ab35f809df52fc87e7456da3",
+      "v1rm_moe_fused.py (SplitK + row-major)": "49480ed8701aceb7a6a05e0258f5bbd6f68646dabe1c3994b059e33ab4ca3995",
+      "run_check.py (runner + aligner + reference)": "f33e34553507ecf911d92e7b0f32827ee4e207b3def5051339c13487b07207db"
+    }
+  },
+  "environment": {
+    "python": "3.13.18",
+    "torch": "2.15.0+cu132",
+    "triton": "3.9.0",
+    "cuda_runtime": "13.2",
+    "venv": "~/moe-cm-venv on aegis-fak",
+    "seed": 1234,
+    "geometry": {"E": 8, "K": 4096, "N": 14336, "topk": 1, "dtype": "float16"},
+    "input_scale": 8.0,
+    "tolerance": {"atol": 0.01, "rtol": 0.0},
+    "v2_cfg": {"block_m": 64, "block_n": 64, "block_k": 32},
+    "test_b_cfg": {"block_m": 32, "block_n": 64, "block_k": 64, "split_k": 2, "group_m": 8, "num_warps": 8},
+    "reference": "dense per-expert torch GEMM gathered back to token order",
+    "moment_in_time": true
+  },
+  "witnesses": [
+    {
+      "n": 1,
+      "name": "aligner_selftest",
+      "result": "PASS",
+      "detail": "pure-torch moe_align_block_size matches the pinned source docstring example ordering",
+      "raw": "raw/selftest.jsonl",
+      "json_sha256": "11669da96dd63c032d378e90378c5a92f5b529cd9406d388ba35960091eb7250"
+    },
+    {
+      "n": 2,
+      "name": "testA_correctness_P_published_vs_B_blogfix",
+      "result": "DEFECT_CONFIRMED_AND_FIX_VERIFIED",
+      "detail": "P_published elem_cov 0.0523 / 0.1231 / 0.3623 at EM=124/1144/4600 (unwritten elements stay exactly zero; max_abs_err 5.21/5.31/5.82 = max|ref|); B_blogfix elem_cov = tile_cov = 1.0 at all three EMs; SplitK-on + col-major spot check full coverage at all three EMs",
+      "raw": "raw/testA.jsonl",
+      "json_sha256": "196c7146657c39cf7df6d3a3b2e668a03fbe77b1a55146649ecc2684ae5a9b20"
+    },
+    {
+      "n": 3,
+      "name": "testB_perf_moment_in_time",
+      "result": "COLLECTED",
+      "detail": "8 arms (row-major/col-major x SplitK off/on at EM=124 and 4600), single-launch kernel time, warmup 3 + reps 11; see RESULTS.md table",
+      "raw": "raw/testB.jsonl",
+      "json_sha256": "f1d4774728f269bacd75762f73ae84125fcae90ba4584ab5639ee11e1a639ed6"
+    },
+    {
+      "n": 4,
+      "name": "mechanism_probe_write_set",
+      "result": "VERIFIED",
+      "detail": "TTGIR inspection + on-device prologue probe: EM_arg = len(sorted_token_ids) = M + E*(block_m-1); grid_m_kernel = cdiv(EM_arg, block_m); proceed count 598 = 23 x 26 distinct (pid_m, pid_n) pairs at EM=1144; per-band written-column fraction grid_m_kernel/grid_n predicts measured elem_cov (4.5%->5.2%, 11.6%->12.3%, 35.7%->36.2%); reproduced with clean Triton cache dir",
+      "raw": "raw/diag_write_set.json",
+      "json_sha256": "c722d998e4a34490273b2d8ad4c00e7afab0b23dfb72057dc17431eed8bea217"
+    }
+  ],
+  "teardown": {
+    "owned_gpu_processes_remaining": 0,
+    "gpu_memory_post_mib": {"used": 3234, "free": 12692},
+    "pre_run_baseline_mib": {"used": 3234, "free": 12692},
+    "note": "post-run memory identical to pre-run baseline (0% drift, within +/-2% gate); only the pre-existing peer serving process remains; lease hwl-4d3ce83e299a4a4a released verdict ok"
+  }
+}

@@ -1,0 +1,77 @@
+{
+ "schema": "fak.toolperf.battery/1",
+ "host": "windows/anthony",
+ "revision": "ac406e15a0198f2c8cb500e82e26aa325fd497ad",
+ "built_at": "2026-10-31T17:18:13.4406851Z",
+ "battery": [
+  {
+   "verb": "wip",
+   "tool": "fak-flow",
+   "args": null,
+   "reps": [
+    81.0881981,
+    77.5778874,
+    81.8856153
+   ],
+   "median": 81.0881981,
+   "rc": 0
+  },
+  {
+   "verb": "handoff",
+   "tool": "fak-flow",
+   "args": [
+    "list"
+   ],
+   "reps": [
+    1.0784637,
+    0.3481926,
+    0.0938911
+   ],
+   "median": 0.3481926,
+   "rc": 0
+  },
+  {
+   "verb": "check",
+   "tool": "fak-boundary",
+   "args": [
+    "--all"
+   ],
+   "reps": [
+    14.8790985,
+    6.686663,
+    18.3918042
+   ],
+   "median": 14.8790985,
+   "rc": 0
+  },
+  {
+   "verb": "index",
+   "tool": "fak-sync",
+   "args": [
+    "adaptation"
+   ],
+   "reps": [
+    86.8562506,
+    84.723108,
+    123.6344864
+   ],
+   "median": 86.8562506,
+   "rc": 0
+  },
+  {
+   "verb": "index",
+   "tool": "fak-dev",
+   "args": [
+    "verbs",
+    "commit"
+   ],
+   "reps": [
+    1.7545109,
+    0.5096833,
+    0.5083509
+   ],
+   "median": 0.5096833,
+   "rc": 0
+  }
+ ]
+}
