@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 )
 
 // inKernelDeviceGate owns the single forward slot shared by ordinary requests
@@ -18,7 +19,7 @@ func (g *inKernelDeviceGate) init() {
 	g.once.Do(func() { g.slot = make(chan struct{}, 1) })
 }
 
-// Lock retains the cohort owner's existing non-cancelable ownership boundary.
+// Lock acquires an unconditional device owner.
 func (g *inKernelDeviceGate) Lock() {
 	g.init()
 	g.slot <- struct{}{}
@@ -41,6 +42,41 @@ func (g *inKernelDeviceGate) LockContext(ctx context.Context) error {
 		}
 		return nil
 	}
+}
+
+// LockCohort abandons a not-yet-started cohort only when every participant is
+// canceled. After acquisition, the coordinator retains its usual cleanup boundary.
+// The drainer supplies a nonempty selection with each request's original context.
+func (g *inKernelDeviceGate) LockCohort(cohort []*inKernelCoalesceRequest) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var remaining atomic.Int32
+	remaining.Store(int32(len(cohort)))
+	stops := make([]func() bool, 0, len(cohort))
+	defer func() {
+		for _, stop := range stops {
+			stop()
+		}
+	}()
+	for _, req := range cohort {
+		stops = append(stops, context.AfterFunc(req.ctx, func() {
+			if remaining.Add(-1) == 0 {
+				cancel()
+			}
+		}))
+	}
+	if err := g.LockContext(ctx); err != nil {
+		return err
+	}
+	// AfterFunc callbacks may still be scheduled when the slot becomes free.
+	// Check the participant contexts before admitting any run closure.
+	for _, req := range cohort {
+		if req.ctx.Err() == nil {
+			return nil
+		}
+	}
+	g.Unlock()
+	return context.Canceled
 }
 
 func (g *inKernelDeviceGate) Unlock() {
