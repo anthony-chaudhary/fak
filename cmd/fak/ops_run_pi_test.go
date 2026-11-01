@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -297,6 +299,162 @@ func TestOpsRunPi(t *testing.T) {
 		}
 		if childSawGateway != gateway.URL {
 			t.Fatalf("fake Pi did not consume the injected gateway configuration: got %q want %q", childSawGateway, gateway.URL)
+		}
+	})
+
+	t.Run("file_auth_is_scoped_authenticated_and_redacted", func(t *testing.T) {
+		const keyEnv = "FAK_OPS_PI_FILE_AUTH_TEST_KEY"
+		const secret = "fixture-file-credential-7bf9"
+		t.Setenv(keyEnv, "")
+		t.Setenv("AWS_SECRET_ACCESS_KEY", "unselected-fixture-credential")
+		dir := t.TempDir()
+		prompt := writeOpsPiPrompt(t, dir)
+		keyPath := filepath.Join(dir, "gateway.key")
+		if err := os.WriteFile(keyPath, []byte(secret+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		qualified := newOpsRunQualifiedGateway(t)
+		probes := 0
+		gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			probes++
+			if r.Header.Get("Authorization") != "Bearer "+secret {
+				t.Error("file credential did not authenticate preflight")
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			qualified.Config.Handler.ServeHTTP(w, r)
+		}))
+		defer gateway.Close()
+		old := opsPiRunExecute
+		t.Cleanup(func() { opsPiRunExecute = old })
+		launches := 0
+		opsPiRunExecute = func(_ context.Context, stdout, stderr io.Writer, argv, env []string, _ []byte) (int, bool, bool, []opsRunLifecycleRecord) {
+			launches++
+			values := map[string]string{}
+			for _, kv := range env {
+				if k, v, ok := strings.Cut(kv, "="); ok {
+					values[k] = v
+				}
+			}
+			if values[keyEnv] != secret || values["AWS_SECRET_ACCESS_KEY"] != "" {
+				t.Error("child credential environment was not isolated")
+			}
+			if strings.Contains(strings.Join(argv, " "), secret) || strings.Contains(values["OPENCODE_CONFIG_CONTENT"], secret) {
+				t.Error("credential leaked into argv or generated config")
+			}
+			_, _ = io.WriteString(stdout, secret[:9])
+			_, _ = io.WriteString(stdout, secret[9:]+"\n")
+			_, _ = io.WriteString(stderr, secret+"\n")
+			return 0, true, false, nil
+		}
+		receipt := filepath.Join(dir, "receipt.json")
+		var stdout, stderr bytes.Buffer
+		code := runOpsPi(&stdout, &stderr, []string{"--harness", "pi", "--provider", "fak", "--model", "file-auth-model", "--prompt-file", prompt, "--workspace", dir, "--receipt", receipt, "--base-url", gateway.URL + "/v1", "--pi-bin", os.Args[0], "--api-key-file", keyPath, "--api-key-env", keyEnv, "--timeout", "30s"})
+		if code != 0 || probes != 1 || launches != 1 {
+			t.Fatalf("file-auth code=%d probes=%d launches=%d; stderr=%s", code, probes, launches, stderr.String())
+		}
+		data, err := os.ReadFile(receipt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, output := range []string{stdout.String(), stderr.String(), string(data)} {
+			if strings.Contains(output, secret) {
+				t.Error("selected credential leaked into output or receipt")
+			}
+		}
+		if os.Getenv(keyEnv) != "" {
+			t.Error("file credential mutated the parent environment")
+		}
+	})
+
+	t.Run("unsafe_file_auth_never_probes_or_launches", func(t *testing.T) {
+		const keyEnv = "FAK_OPS_PI_FILE_INVALID_TEST_KEY"
+		dir := t.TempDir()
+		prompt := writeOpsPiPrompt(t, dir)
+		old := opsPiRunExecute
+		t.Cleanup(func() { opsPiRunExecute = old })
+		opsPiRunExecute = func(context.Context, io.Writer, io.Writer, []string, []string, []byte) (int, bool, bool, []opsRunLifecycleRecord) {
+			t.Error("invalid credential launched a child")
+			return 0, true, false, nil
+		}
+		gateway := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			t.Error("invalid credential reached preflight")
+		}))
+		defer gateway.Close()
+		for _, tc := range []struct{ name, content, ambient, env string }{
+			{name: "missing_pair", content: "valid-key"},
+			{name: "unsafe_env", content: "valid-key", env: "PATH"},
+			{name: "ambient_conflict", content: "valid-key", ambient: "ambient-key", env: keyEnv},
+			{name: "empty", env: keyEnv},
+			{name: "whitespace", content: " \t\n", env: keyEnv},
+			{name: "multiline", content: "one-key\ntwo-key", env: keyEnv},
+			{name: "oversized", content: strings.Repeat("k", 4097), env: keyEnv},
+			{name: "relative", content: "valid-key", env: keyEnv},
+			{name: "directory", env: keyEnv},
+			{name: "symlink", content: "valid-key", env: keyEnv},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Setenv(keyEnv, tc.ambient)
+				keyPath := filepath.Join(t.TempDir(), "gateway.key")
+				if err := os.WriteFile(keyPath, []byte(tc.content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				switch tc.name {
+				case "relative":
+					keyPath = "gateway.key"
+				case "directory":
+					keyPath = filepath.Dir(keyPath)
+				case "symlink":
+					link := filepath.Join(filepath.Dir(keyPath), "link.key")
+					if err := os.Symlink(keyPath, link); err != nil {
+						t.Skipf("symlink unsupported: %v", err)
+					}
+					keyPath = link
+				}
+				args := []string{"--harness", "pi", "--provider", "fak", "--model", "fixture", "--prompt-file", prompt, "--workspace", dir, "--receipt", filepath.Join(t.TempDir(), "receipt.json"), "--base-url", gateway.URL + "/v1", "--pi-bin", os.Args[0], "--api-key-file", keyPath}
+				if tc.env != "" {
+					args = append(args, "--api-key-env", tc.env)
+				}
+				var stdout, stderr bytes.Buffer
+				if code := runOpsPi(&stdout, &stderr, args); code == 0 {
+					t.Fatal("unsafe credential configuration was admitted")
+				}
+				if os.Getenv(keyEnv) != tc.ambient {
+					t.Error("credential refusal mutated parent environment")
+				}
+			})
+		}
+	})
+
+	t.Run("credential_path_replaced_during_preflight_refuses_child", func(t *testing.T) {
+		const keyEnv = "FAK_OPS_PI_FILE_REPLACEMENT_TEST_KEY"
+		t.Setenv(keyEnv, "")
+		dir := t.TempDir()
+		prompt := writeOpsPiPrompt(t, dir)
+		keyPath := filepath.Join(dir, "gateway.key")
+		if err := os.WriteFile(keyPath, []byte("original-key"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		qualified := newOpsRunQualifiedGateway(t)
+		gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if err := os.Rename(keyPath, keyPath+".original"); err != nil {
+				t.Error(err)
+			}
+			if err := os.WriteFile(keyPath, []byte("replacement-key"), 0o600); err != nil {
+				t.Error(err)
+			}
+			qualified.Config.Handler.ServeHTTP(w, r)
+		}))
+		defer gateway.Close()
+		old := opsPiRunExecute
+		t.Cleanup(func() { opsPiRunExecute = old })
+		opsPiRunExecute = func(context.Context, io.Writer, io.Writer, []string, []string, []byte) (int, bool, bool, []opsRunLifecycleRecord) {
+			t.Error("replaced credential path launched child")
+			return 0, true, false, nil
+		}
+		var stdout, stderr bytes.Buffer
+		if code := runOpsPi(&stdout, &stderr, []string{"--harness", "pi", "--provider", "fak", "--model", "replacement-model", "--prompt-file", prompt, "--workspace", dir, "--receipt", filepath.Join(dir, "receipt.json"), "--base-url", gateway.URL + "/v1", "--pi-bin", os.Args[0], "--api-key-file", keyPath, "--api-key-env", keyEnv}); code == 0 {
+			t.Fatal("replaced credential path was admitted")
 		}
 	})
 

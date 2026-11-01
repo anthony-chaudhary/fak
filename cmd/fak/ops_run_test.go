@@ -359,9 +359,10 @@ func TestOpsRunInferencePreflight(t *testing.T) {
 					t.Errorf("probe = %s %s, want POST /v1/chat/completions", r.Method, r.URL.Path)
 				}
 				var req struct {
-					Model  string `json:"model"`
-					Stream bool   `json:"stream"`
-					Tools  []struct {
+					Model     string `json:"model"`
+					Stream    bool   `json:"stream"`
+					MaxTokens int    `json:"max_tokens"`
+					Tools     []struct {
 						Type     string `json:"type"`
 						Function struct {
 							Name string `json:"name"`
@@ -373,6 +374,9 @@ func TestOpsRunInferencePreflight(t *testing.T) {
 				}
 				if req.Model != "fixture" || !req.Stream || len(req.Tools) != 1 || req.Tools[0].Type != "function" || req.Tools[0].Function.Name == "" {
 					t.Errorf("probe request did not bind intended model + streamed tool-call witness: %+v", req)
+				}
+				if req.MaxTokens != 1024 {
+					t.Errorf("generic preflight max_tokens = %d, want 1024", req.MaxTokens)
 				}
 				if tc.statusCode != http.StatusOK {
 					http.Error(w, "unavailable", tc.statusCode)
