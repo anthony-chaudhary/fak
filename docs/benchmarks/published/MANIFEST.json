@@ -1,0 +1,86 @@
+{
+  "schema": "fak.benchpub.manifest.v1",
+  "generated_at": "2026-11-01T17:08:04Z",
+  "entries": [
+    {
+      "campaign": "aegis-5080-d41hw",
+      "date": "2026-10-31",
+      "source_dir": "docs/benchmarks/aegis-5080-d41hw",
+      "files": [
+        {
+          "name": "RESULTS-v2.md",
+          "sha256": "6a7fdcdf77f052aa59863c824ad783e63337f88cae7b7ddec71ea549c97a316a",
+          "bytes": 1474
+        },
+        {
+          "name": "RESULTS.md",
+          "sha256": "f079c52c8e6ea6575c489e03ef1f2814e28c67f8fb2d5f6fd70cf6834616dcaa",
+          "bytes": 5892
+        }
+      ]
+    },
+    {
+      "campaign": "nvidia-cuda-perf-gap",
+      "date": "2026-10-31",
+      "source_dir": "docs/benchmarks/nvidia-cuda-perf-gap",
+      "files": [
+        {
+          "name": "ATTRIBUTION.md",
+          "sha256": "41adffa0566cd99af219eaf85dba0d8cc679c480d13dc7b8c865c7fbce4e4d54",
+          "bytes": 22064
+        },
+        {
+          "name": "RESULTS.md",
+          "sha256": "b79ae015c2d1f67dcb2192f8e75a8bd3561913b1b7b260d696611816a31dddfb",
+          "bytes": 7043
+        }
+      ]
+    },
+    {
+      "campaign": "aegis-moe-colmajor",
+      "date": "2026-10-31",
+      "source_dir": "docs/benchmarks/aegis-moe-colmajor",
+      "files": [
+        {
+          "name": "RESULTS.md",
+          "sha256": "6503ee6a0d6a69542a0e6271abe035883ee8480164067e273334a645bf094344",
+          "bytes": 8051
+        },
+        {
+          "name": "manifest.json",
+          "sha256": "b03d5635cee06a6a121e6d72689a4a13a0327c5adf9dc6efc806df51e07639ca",
+          "bytes": 5075
+        }
+      ]
+    },
+    {
+      "campaign": "maya-strat-hw",
+      "date": "2026-10-30",
+      "source_dir": "docs/benchmarks/maya-strat-hw",
+      "files": [
+        {
+          "name": "README.md",
+          "sha256": "a0e8b49205064dd51d7b713b68e42d63e0c45e927f70649d2a448f2fa2b3444c",
+          "bytes": 6575
+        },
+        {
+          "name": "RESULTS.md",
+          "sha256": "1300f4045d000990b30e04acd69f30e80f2bc6271087adf8d160ae94fe86d744",
+          "bytes": 17051
+        }
+      ]
+    },
+    {
+      "campaign": "tool-latency",
+      "date": "2026-10-31",
+      "source_dir": "docs/benchmarks/tool-latency",
+      "files": [
+        {
+          "name": "baseline.json",
+          "sha256": "8980ee84e72b9b743804261ea88747be415b854292cd0f673e4acd64ac0066ff",
+          "bytes": 1109
+        }
+      ]
+    }
+  ]
+}
