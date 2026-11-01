@@ -3,6 +3,7 @@ package hooks
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -681,5 +682,49 @@ func TestConceptAdmissionReadPathsDiff(t *testing.T) {
 	got, err := CheckConceptAdmission(d)
 	if err != nil || len(got) != 1 {
 		t.Fatalf("ReadPathsDiff got=%+v err=%v", got, err)
+	}
+}
+
+// fak-test:runtime fast est=10ms
+func TestConceptAdmissionRangeBaseSearchFailureIsNotAbsence(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		canceled bool
+		output   string
+		code     int
+		err      error
+		wantErr  bool
+		findings int
+	}{
+		{name: "canceled", output: "base:internal/demo/demo.go:CacheBurst", err: context.Canceled, wantErr: true},
+		{name: "git-failure", code: 128, wantErr: true},
+		{name: "canceled-context", canceled: true, code: 1, wantErr: true},
+		{name: "absent", code: 1, findings: 1},
+		{name: "present", output: "base:internal/demo/demo.go:CacheBurst"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := diffOf(t.TempDir(), map[string][]string{"internal/demo/demo.go": {"const CacheBurst = 1"}})
+			d.ctx, d.Treeish, d.baseTree = context.Background(), "tip:", "base"
+			if tc.canceled {
+				ctx, cancel := context.WithCancel(d.ctx)
+				cancel()
+				d.ctx = ctx
+			}
+			d.fileCache["tools/concept_disambiguation_scorecard.data/_meta.json"] = fileEntry{
+				data: []byte(`{"families":[{"id":"cache","roots":["cache"]}]}`), exists: true,
+			}
+			calls := 0
+			d.run = func(_ context.Context, _ string, args ...string) (string, int, error) {
+				calls++
+				if strings.Join(args, " ") != "grep -I -w -e CacheBurst base -- internal cmd" {
+					t.Fatalf("unexpected committed-base search: %v", args)
+				}
+				return tc.output, tc.code, tc.err
+			}
+			got, err := CheckConceptAdmission(d)
+			if calls != 1 || errors.Is(err, ErrCouldNotRun) != tc.wantErr || (!tc.wantErr && err != nil) || len(got) != tc.findings {
+				t.Fatalf("calls=%d findings=%+v err=%v; want one search, %d findings, could-not-run=%v", calls, got, err, tc.findings, tc.wantErr)
+			}
+		})
 	}
 }
