@@ -824,6 +824,7 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 		return nil, err
 	}
 	if p != nil {
+		p.emitQuantDequantFallbackAlerts()
 		p.EmitLoadPathSummary(p.Progress)
 	}
 	if s.authenticatedArtifact != nil {

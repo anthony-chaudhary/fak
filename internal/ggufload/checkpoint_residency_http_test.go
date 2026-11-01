@@ -10,16 +10,18 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
+	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
 type checkpointResidencyWire struct {
 	Checkpoint struct {
-		Scope     string `json:"scope"`
-		Reads     int    `json:"reads"`
-		Hits      int    `json:"hits"`
-		Coalesced int    `json:"coalesced"`
-		BytesRead int64  `json:"bytes_read"`
+		Scope     string                               `json:"scope"`
+		Reads     int                                  `json:"reads"`
+		Hits      int                                  `json:"hits"`
+		Coalesced int                                  `json:"coalesced"`
+		BytesRead int64                                `json:"bytes_read"`
+		PageCache model.ExpertCheckpointPageCacheStats `json:"page_cache"`
 	} `json:"checkpoint"`
 	V41Phases *checkpointV41Wire `json:"v41_phases"`
 }
@@ -116,10 +118,48 @@ func TestCheckpointResidencyHTTPReportsRealFileBackedCumulativeIO(t *testing.T) 
 			"evictions": true, "failures": true, "budget_bytes": true,
 			"resident_bytes": true, "peak_bytes": true, "resident_count": true,
 			"overlay_rows": true, "overlay_bytes_read": true,
+			"page_cache": true,
 		}
 		for key, value := range bounded.Checkpoint {
 			if !allowed[key] {
 				t.Fatalf("checkpoint reader exposed unexpected field %q", key)
+			}
+			if key == "page_cache" {
+				var fields map[string]json.RawMessage
+				if err := json.Unmarshal(value, &fields); err != nil {
+					t.Fatalf("checkpoint page_cache is not an object: %v", err)
+				}
+				allowedPageCache := map[string]bool{
+					"enabled": true, "accounting": true, "sources": true, "mapped_sources": true,
+					"experts_read": true, "bytes_from_device": true, "bytes_from_mapping": true,
+					"warm_hits": true, "fill_pins": true, "advantage_bytes": true,
+				}
+				if len(fields) != len(allowedPageCache) {
+					t.Fatalf("checkpoint page_cache field count = %d, want %d", len(fields), len(allowedPageCache))
+				}
+				for field, raw := range fields {
+					if !allowedPageCache[field] {
+						t.Fatalf("checkpoint page_cache exposed unexpected field %q", field)
+					}
+					switch field {
+					case "enabled":
+						var enabled *bool
+						if err := json.Unmarshal(raw, &enabled); err != nil || enabled == nil {
+							t.Fatal("checkpoint page_cache.enabled must be boolean")
+						}
+					case "accounting":
+						var accounting *string
+						if err := json.Unmarshal(raw, &accounting); err != nil || accounting == nil || *accounting != "modeled_source_io" {
+							t.Fatal("checkpoint page_cache.accounting must qualify modeled_source_io")
+						}
+					default:
+						var number *int64
+						if err := json.Unmarshal(raw, &number); err != nil || number == nil {
+							t.Fatalf("checkpoint page_cache.%s must be an integer", field)
+						}
+					}
+				}
+				continue
 			}
 			if key != "scope" {
 				var number float64
@@ -209,6 +249,9 @@ func TestCheckpointResidencyHTTPReportsRealFileBackedCumulativeIO(t *testing.T) 
 	secondRead := read()
 	second := secondRead.Checkpoint
 	source := m.ExpertCheckpointStats()
+	if second.PageCache != source.PageCache {
+		t.Fatal("served page-cache snapshot differs from the model-lifetime source")
+	}
 	if second.Hits <= first.Hits {
 		t.Fatalf("second request did not reuse retained file rows: hits %d->%d", first.Hits, second.Hits)
 	}
