@@ -11823,6 +11823,21 @@
           "category": "incidental",
           "reason": "Offline measurement eligibility convention for undefined one-token TPOT; not authorization or capability policy.",
           "token": "SingleTokenTPOTPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Dogfood sync diagnostic stage for the existing missing-issue-number early return; does not define a new policy, capability, or admission mechanism.",
+          "token": "SyncStagePreflight"
+        },
+        {
+          "category": "incidental",
+          "reason": "Dogfood sync diagnostic enum identifying rejection by the existing issuepolicy.TagGeneratedIssue check; does not change policy enforcement or confer authority.",
+          "token": "SyncReasonPolicyRejected"
+        },
+        {
+          "category": "incidental",
+          "reason": "Closed serialized diagnostic value for the existing issuepolicy.TagGeneratedIssue rejection; not a new policy or capability concept.",
+          "token": "policy_rejected"
         }
       ],
       "exclude": [
@@ -11924,6 +11939,8 @@
         "SpawnPlacementPolicy",
         "StageAdjudicate",
         "StrengthToolPolicyGrammar",
+        "SyncReasonPolicyRejected",
+        "SyncStagePreflight",
         "ToolPolicyVersion",
         "V41EPOwnerBuildPinPolicy",
         "VerdictPolicyBlock",
@@ -12023,6 +12040,7 @@
         "policy_admission",
         "policy_changed",
         "policy_or_capability_refusal",
+        "policy_rejected",
         "policyblocks",
         "policylabel",
         "policysourceresolution",
