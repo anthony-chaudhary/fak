@@ -2,6 +2,7 @@ package nativeperf
 
 import (
 	"encoding/json"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
@@ -23,6 +24,103 @@ func loadProfileFixture(t *testing.T, name string) ProfileBundle {
 		t.Fatalf("decode %s: %v", name, err)
 	}
 	return profile
+}
+
+// fak-test:runtime fast est=1s
+func TestProfileCounterScopePrevention(t *testing.T) {
+	graph := ActiveGraph()
+	loadLegacy := func(t *testing.T, name string) ProfileBundle {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(profileFixtureDir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatal(err)
+		}
+		delete(raw, "counter_window")
+		data, err = json.Marshal(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, err := DecodeProfile(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	tests := []struct {
+		name, fixture string
+		edit          func(*ProfileBundle)
+	}{
+		{
+			name: "cuda-high-count-bandwidth", fixture: "synthetic-cuda-bandwidth-bound.json",
+			edit: func(p *ProfileBundle) { p.CUDA.Launches = 640 },
+		},
+		{
+			name: "cuda-high-count-compute", fixture: "synthetic-cuda-bandwidth-bound.json",
+			edit: func(p *ProfileBundle) {
+				p.CUDA.Launches = 640
+				p.CUDA.AchievedBandwidthGBS = 500
+				p.CUDA.AchievedComputeTFLOPS = 80
+			},
+		},
+		{
+			name: "metal-high-count-device-active", fixture: "synthetic-metal-launch-bound.json",
+			edit: func(p *ProfileBundle) {
+				p.Metal.CommandBuffers, p.Metal.Encoders = 640, 640
+				p.Metal.DispatchMilliseconds, p.Metal.WaitMilliseconds = 36, 1
+			},
+		},
+		{
+			name: "metal-lifecycle-wait-issue-9020", fixture: "synthetic-metal-launch-bound.json",
+			edit: func(p *ProfileBundle) {
+				// Replay phase/counter numbers from docs/_witnesses/issue-9020-metal-profile.json.
+				p.Phases = []ProfilePhase{
+					{Name: "load-setup", StartMilliseconds: 0, DurationMilliseconds: 24329.352542},
+					{Name: "prefill", StartMilliseconds: 24329.352542, DurationMilliseconds: 32971.988708},
+					{Name: "first-token", StartMilliseconds: 57301.34125, DurationMilliseconds: 2523.281666},
+					{Name: "steady-decode", StartMilliseconds: 59824.622916, DurationMilliseconds: 16973.805959},
+					{Name: "verification", StartMilliseconds: 76798.428875, DurationMilliseconds: 25.327459},
+					{Name: "teardown", StartMilliseconds: 76823.75633399999, DurationMilliseconds: 0.15925},
+				}
+				p.Metal = &MetalCounters{
+					CommandBuffers: 14833, Encoders: 23025,
+					DispatchMilliseconds: 15322.027541660646, WaitMilliseconds: 39772.66442775726,
+					ResidentBytes: 24595492864, WorkingSetBytes: 18288771072,
+				}
+				p.Attributions = nil
+				p.AttributionUnavailable = &AttributionUnavailable{
+					Reason: AttributionUnavailableCapture,
+					Detail: "fak-native session lifecycle capture does not export per-lever dispatch attribution",
+				}
+			},
+		},
+	}
+	falseLaunch, falseSync, prevented := 0, 0, 0
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			p := loadLegacy(t, test.fixture)
+			test.edit(&p)
+			got, err := ClassifyProfile(graph, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Class == "launch-bound" {
+				falseLaunch++
+			}
+			if got.Class == "synchronization-bound" {
+				falseSync++
+			}
+			if got.Class == "insufficient-evidence" && got.RecommendedLeverID == "" {
+				prevented++
+			} else {
+				t.Errorf("unscoped counters produced class=%q lever=%q, want insufficient-evidence with no recommendation", got.Class, got.RecommendedLeverID)
+			}
+		})
+	}
+	t.Logf("fixed negative families=%d false_launch=%d false_sync=%d prevented=%d", len(tests), falseLaunch, falseSync, prevented)
 }
 
 func TestSyntheticProfileFixturesClassifyDeterministically(t *testing.T) {
@@ -356,5 +454,382 @@ func TestDecodeProfileRejectsUnknownFieldsAndTrailingDocuments(t *testing.T) {
 	}
 	if _, err := DecodeProfile(append(valid, valid...)); err == nil || !strings.Contains(err.Error(), "multiple JSON values") {
 		t.Fatalf("trailing document err=%v", err)
+	}
+}
+
+func profileCounterWindowControl(t *testing.T, backend, kind string) ProfileBundle {
+	t.Helper()
+	fixture := "synthetic-metal-launch-bound.json"
+	if backend == "cuda" {
+		fixture = "synthetic-cuda-bandwidth-bound.json"
+	}
+	p := loadProfileFixture(t, fixture)
+	w := p.CounterWindow
+	w.HostLaunchMilliseconds, w.HostSetupMilliseconds, w.HostTimingSource = nil, nil, ""
+	if p.Metal != nil {
+		p.Metal.DispatchMilliseconds, p.Metal.WaitMilliseconds = 20, 1
+	} else {
+		p.CUDA.AchievedBandwidthGBS, p.CUDA.AchievedComputeTFLOPS = 100, 10
+		p.CUDA.SynchronizationMilliseconds = 1
+	}
+	measured := 12.0
+	switch kind {
+	case "launch":
+		w.HostLaunchMilliseconds, w.HostTimingSource = &measured, "host-monotonic-exclusive"
+	case "setup":
+		w.HostSetupMilliseconds, w.HostTimingSource = &measured, "host-monotonic-exclusive"
+	case "sync":
+		if p.Metal != nil {
+			p.Metal.WaitMilliseconds = measured
+		} else {
+			p.CUDA.SynchronizationMilliseconds = measured
+		}
+	default:
+		t.Fatalf("unknown test control %q", kind)
+	}
+	return p
+}
+
+// fak-test:runtime fast est=1s
+func TestProfileCounterWindowPositiveControls(t *testing.T) {
+	graph := ActiveGraph()
+	correct, population := 0, 0
+	for _, backend := range []string{"metal", "cuda"} {
+		for _, control := range []struct{ kind, class string }{
+			{"launch", "launch-bound"}, {"setup", "cpu-orchestration-bound"}, {"sync", "synchronization-bound"},
+		} {
+			population++
+			t.Run(backend+"/"+control.kind, func(t *testing.T) {
+				p := profileCounterWindowControl(t, backend, control.kind)
+				got, err := ClassifyProfile(graph, p)
+				if err != nil {
+					t.Fatal(err)
+				}
+				lever := "metal.command-buffer-amortization"
+				if backend == "cuda" {
+					lever = "cuda.default-decode-routing"
+				}
+				if got.Class != control.class || got.RecommendedLeverID != lever {
+					t.Fatalf("matching measured %s => class=%q lever=%q, want %q/%q", control.kind, got.Class, got.RecommendedLeverID, control.class, lever)
+				}
+				correct++
+			})
+		}
+	}
+	t.Logf("fixed positive controls=%d correctly_classified=%d", population, correct)
+}
+
+// fak-test:runtime fast est=1s
+func TestProfileMatchingWindowCountsDoNotOverrideDeviceEvidence(t *testing.T) {
+	graph := ActiveGraph()
+	for _, tc := range []struct {
+		name, fixture, class string
+		edit                 func(*ProfileBundle)
+	}{
+		{"cuda-bandwidth", "synthetic-cuda-bandwidth-bound.json", "bandwidth-bound", func(p *ProfileBundle) { p.CUDA.Launches = 640 }},
+		{"cuda-compute", "synthetic-cuda-bandwidth-bound.json", "compute-bound", func(p *ProfileBundle) {
+			p.CUDA.Launches, p.CUDA.AchievedBandwidthGBS, p.CUDA.AchievedComputeTFLOPS = 640, 500, 80
+		}},
+		{"metal-device-active", "synthetic-metal-launch-bound.json", "compute-bound", func(p *ProfileBundle) {
+			p.Metal.CommandBuffers, p.Metal.Encoders = 640, 640
+			p.Metal.DispatchMilliseconds, p.Metal.WaitMilliseconds = 36, 1
+			p.CounterWindow.HostLaunchMilliseconds, p.CounterWindow.HostTimingSource = nil, ""
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := loadProfileFixture(t, tc.fixture)
+			tc.edit(&p)
+			got, err := ClassifyProfile(graph, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Class != tc.class {
+				t.Errorf("high count class=%q, want measured %q", got.Class, tc.class)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=1s
+func TestProfileCounterWindowExposureInvariance(t *testing.T) {
+	graph := ActiveGraph()
+	for _, backend := range []string{"metal", "cuda"} {
+		for _, kind := range []string{"launch", "setup", "sync"} {
+			baseline, err := ClassifyProfile(graph, profileCounterWindowControl(t, backend, kind))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, scale := range []float64{1, 2, 100} {
+				for _, count := range []int{1, 640} {
+					p := profileCounterWindowControl(t, backend, kind)
+					for i := range p.Phases {
+						p.Phases[i].StartMilliseconds *= scale
+						p.Phases[i].DurationMilliseconds *= scale
+					}
+					p.CounterWindow.StartMilliseconds *= scale
+					p.CounterWindow.DurationMilliseconds *= scale
+					if p.CounterWindow.HostLaunchMilliseconds != nil {
+						*p.CounterWindow.HostLaunchMilliseconds *= scale
+					}
+					if p.CounterWindow.HostSetupMilliseconds != nil {
+						*p.CounterWindow.HostSetupMilliseconds *= scale
+					}
+					if p.Metal != nil {
+						p.Metal.CommandBuffers, p.Metal.Encoders = count, count
+						p.Metal.DispatchMilliseconds *= scale
+						p.Metal.WaitMilliseconds *= scale
+					} else {
+						p.CUDA.Launches = count
+						p.CUDA.SynchronizationMilliseconds *= scale
+					}
+					got, err := ClassifyProfile(graph, p)
+					if err != nil {
+						t.Fatalf("%s/%s scale=%v count=%d: %v", backend, kind, scale, count, err)
+					}
+					if got.Class != baseline.Class || got.RecommendedLeverID != baseline.RecommendedLeverID {
+						t.Errorf("%s/%s same 63 steps scale=%v count=%d changed class %q->%q", backend, kind, scale, count, baseline.Class, got.Class)
+					}
+				}
+			}
+		}
+	}
+}
+
+// fak-test:runtime fast est=1s
+func TestProfileCounterWindowRejectsInvalidEvidence(t *testing.T) {
+	graph := ActiveGraph()
+	ptr := func(v float64) *float64 { return &v }
+	for _, tc := range []struct {
+		name string
+		edit func(*ProfileBundle)
+	}{
+		{"backend mismatch", func(p *ProfileBundle) { p.CounterWindow.Backend = "cuda" }},
+		{"phase mismatch", func(p *ProfileBundle) { p.CounterWindow.Phase = "prefill" }},
+		{"start mismatch", func(p *ProfileBundle) { p.CounterWindow.StartMilliseconds++ }},
+		{"duration mismatch", func(p *ProfileBundle) { p.CounterWindow.DurationMilliseconds++ }},
+		{"zero steps", func(p *ProfileBundle) { p.CounterWindow.DecodeSteps = 0 }},
+		{"wrong steps", func(p *ProfileBundle) { p.CounterWindow.DecodeSteps = 62 }},
+		{"nonfinite start", func(p *ProfileBundle) { p.CounterWindow.StartMilliseconds = math.NaN() }},
+		{"negative start", func(p *ProfileBundle) { p.CounterWindow.StartMilliseconds = -1 }},
+		{"nonfinite duration", func(p *ProfileBundle) { p.CounterWindow.DurationMilliseconds = math.Inf(1) }},
+		{"zero duration", func(p *ProfileBundle) { p.CounterWindow.DurationMilliseconds = 0 }},
+		{"negative launch", func(p *ProfileBundle) { p.CounterWindow.HostLaunchMilliseconds = ptr(-1) }},
+		{"nan launch", func(p *ProfileBundle) { p.CounterWindow.HostLaunchMilliseconds = ptr(math.NaN()) }},
+		{"infinite launch", func(p *ProfileBundle) { p.CounterWindow.HostLaunchMilliseconds = ptr(math.Inf(1)) }},
+		{"negative setup", func(p *ProfileBundle) { p.CounterWindow.HostSetupMilliseconds = ptr(-1) }},
+		{"nan setup", func(p *ProfileBundle) { p.CounterWindow.HostSetupMilliseconds = ptr(math.NaN()) }},
+		{"infinite setup", func(p *ProfileBundle) { p.CounterWindow.HostSetupMilliseconds = ptr(math.Inf(1)) }},
+		{"exclusive sum over wall", func(p *ProfileBundle) {
+			p.CounterWindow.HostLaunchMilliseconds, p.CounterWindow.HostSetupMilliseconds = ptr(25), ptr(20)
+		}},
+		{"launch over wall", func(p *ProfileBundle) { p.CounterWindow.HostLaunchMilliseconds = ptr(41) }},
+		{"wait over wall", func(p *ProfileBundle) { p.Metal.WaitMilliseconds = 41 }},
+		{"unknown source", func(p *ProfileBundle) { p.CounterWindow.HostTimingSource = "wall-minus-device" }},
+		{"missing source", func(p *ProfileBundle) { p.CounterWindow.HostTimingSource = "" }},
+		{"source without timing", func(p *ProfileBundle) { p.CounterWindow.HostLaunchMilliseconds = nil }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := loadProfileFixture(t, "synthetic-metal-launch-bound.json")
+			tc.edit(&p)
+			if err := ValidateProfile(graph, p); !errors.Is(err, ErrProfileWindowInvalid) {
+				t.Errorf("invalid window error=%v, want ErrProfileWindowInvalid", err)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=1s
+func TestDecodeProfileCounterWindowPresenceAndTypes(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(profileFixtureDir, "synthetic-metal-launch-bound.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	object := func() map[string]json.RawMessage {
+		t.Helper()
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	decode := func(raw map[string]json.RawMessage) (ProfileBundle, error) {
+		t.Helper()
+		b, err := json.Marshal(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return DecodeProfile(b)
+	}
+	for _, required := range []string{"backend", "phase", "start_milliseconds", "duration_milliseconds", "decode_steps"} {
+		for _, absent := range []bool{false, true} {
+			t.Run(required+map[bool]string{false: "/null", true: "/missing"}[absent], func(t *testing.T) {
+				raw := object()
+				var window map[string]json.RawMessage
+				if err := json.Unmarshal(raw["counter_window"], &window); err != nil {
+					t.Fatal(err)
+				}
+				if absent {
+					delete(window, required)
+				} else {
+					window[required] = json.RawMessage("null")
+				}
+				b, err := json.Marshal(window)
+				if err != nil {
+					t.Fatal(err)
+				}
+				raw["counter_window"] = b
+				if _, err := decode(raw); !errors.Is(err, ErrProfileWindowInvalid) {
+					t.Errorf("decode error=%v, want ErrProfileWindowInvalid", err)
+				}
+			})
+		}
+	}
+	for _, bad := range []string{`"unknown"`, `[]`, `{"backend":"metal"}`} {
+		raw := object()
+		raw["counter_window"] = json.RawMessage(bad)
+		if _, err := decode(raw); !errors.Is(err, ErrProfileWindowInvalid) {
+			t.Errorf("malformed window %s: error=%v, want ErrProfileWindowInvalid", bad, err)
+		}
+	}
+	for _, bad := range []string{`"unknown"`, `1e309`} {
+		raw := object()
+		var window map[string]json.RawMessage
+		if err := json.Unmarshal(raw["counter_window"], &window); err != nil {
+			t.Fatal(err)
+		}
+		window["host_launch_milliseconds"] = json.RawMessage(bad)
+		b, err := json.Marshal(window)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw["counter_window"] = b
+		if _, err := decode(raw); !errors.Is(err, ErrProfileWindowInvalid) {
+			t.Errorf("malformed host timing %s: error=%v, want ErrProfileWindowInvalid", bad, err)
+		}
+	}
+	for _, absent := range []bool{false, true} {
+		raw := object()
+		if absent {
+			delete(raw, "counter_window")
+		} else {
+			raw["counter_window"] = json.RawMessage("null")
+		}
+		p, err := decode(raw)
+		if err != nil || p.CounterWindow != nil {
+			t.Fatalf("legacy window: err=%v window=%v", err, p.CounterWindow)
+		}
+		p.Override = &SelectionOverride{IssueNumber: 9020, Reason: "Explicit selection cannot substitute for measured counter scope."}
+		lever, classification, err := NextLeverFromProfile(ActiveGraph(), p)
+		if !errors.Is(err, ErrProfileEvidenceUnavailable) || lever != nil || classification.Class != "insufficient-evidence" {
+			t.Errorf("legacy next returned lever=%v class=%q err=%v", lever, classification.Class, err)
+		}
+	}
+	for _, timing := range []string{"null", "0"} {
+		raw := object()
+		var window map[string]json.RawMessage
+		if err := json.Unmarshal(raw["counter_window"], &window); err != nil {
+			t.Fatal(err)
+		}
+		window["host_launch_milliseconds"] = json.RawMessage(timing)
+		if timing == "null" {
+			delete(window, "host_timing_source")
+		}
+		b, err := json.Marshal(window)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw["counter_window"] = b
+		p, err := decode(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := ValidateProfile(ActiveGraph(), p); err != nil {
+			t.Fatal(err)
+		}
+		if timing == "null" && p.CounterWindow.HostLaunchMilliseconds != nil {
+			t.Error("null host timing became measured")
+		}
+		if timing == "0" && (p.CounterWindow.HostLaunchMilliseconds == nil || *p.CounterWindow.HostLaunchMilliseconds != 0) {
+			t.Error("measured-zero host timing lost its presence")
+		}
+	}
+}
+
+// fak-test:runtime fast est=1s
+func TestDecodeProfileCounterWindowRejectsDuplicateKeys(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(profileFixtureDir, "synthetic-metal-launch-bound.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var profile map[string]json.RawMessage
+	if err := json.Unmarshal(data, &profile); err != nil {
+		t.Fatal(err)
+	}
+	var matchingWindow map[string]json.RawMessage
+	if err := json.Unmarshal(profile["counter_window"], &matchingWindow); err != nil {
+		t.Fatal(err)
+	}
+	delete(profile, "counter_window")
+	outer, err := json.Marshal(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendPair := func(object []byte, firstKey, firstValue, secondKey, secondValue string) []byte {
+		t.Helper()
+		trimmed := strings.TrimSpace(string(object))
+		return []byte(trimmed[:len(trimmed)-1] + `,"` + firstKey + `":` + firstValue + `,"` + secondKey + `":` + secondValue + `}`)
+	}
+	assertRejected := func(t *testing.T, raw []byte) {
+		t.Helper()
+		if _, err := DecodeProfile(raw); !errors.Is(err, ErrProfileWindowInvalid) {
+			t.Errorf("duplicate counter-window key error=%v, want ErrProfileWindowInvalid", err)
+		}
+	}
+	prefill := `{"backend":"metal","phase":"prefill","start_milliseconds":12,"duration_milliseconds":10,"decode_steps":1,"host_launch_milliseconds":12,"host_timing_source":"host-monotonic-exclusive"}`
+	steady := `{"backend":"metal","phase":"steady-decode","start_milliseconds":28,"duration_milliseconds":40,"decode_steps":63}`
+	for _, tc := range []struct{ name, first, second string }{
+		{"exact", "counter_window", "counter_window"},
+		{"casefold second", "counter_window", "COUNTER_WINDOW"},
+		{"casefold first", "COUNTER_WINDOW", "counter_window"},
+	} {
+		t.Run("root/"+tc.name, func(t *testing.T) {
+			assertRejected(t, appendPair(outer, tc.first, prefill, tc.second, steady))
+		})
+	}
+	for _, member := range []struct{ key, firstValue, secondValue string }{
+		{"phase", `"prefill"`, `"steady-decode"`},
+		{"start_milliseconds", `12`, `28`},
+		{"host_launch_milliseconds", `12`, `0`},
+		{"host_timing_source", `"unknown"`, `"host-monotonic-exclusive"`},
+	} {
+		for _, spelling := range []struct{ name, first, second string }{
+			{"exact", member.key, member.key},
+			{"casefold second", member.key, strings.ToUpper(member.key)},
+			{"casefold first", strings.ToUpper(member.key), member.key},
+		} {
+			t.Run("member/"+member.key+"/"+spelling.name, func(t *testing.T) {
+				window := make(map[string]json.RawMessage, len(matchingWindow))
+				for key, value := range matchingWindow {
+					if key != member.key {
+						window[key] = value
+					}
+				}
+				windowBytes, err := json.Marshal(window)
+				if err != nil {
+					t.Fatal(err)
+				}
+				duplicate := appendPair(windowBytes, spelling.first, member.firstValue, spelling.second, member.secondValue)
+				root := make(map[string]json.RawMessage, len(profile)+1)
+				for key, value := range profile {
+					root[key] = value
+				}
+				root["counter_window"] = duplicate
+				raw, err := json.Marshal(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertRejected(t, raw)
+			})
+		}
 	}
 }
