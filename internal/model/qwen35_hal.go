@@ -517,7 +517,10 @@ func (s *Session) initQwen35HALState(gdn Qwen35GDNBackend) {
 		return
 	}
 	cfg := s.M.Cfg
-	_, nV, kHd, vHd, _, _, convDim := cfg.linearAttnDims()
+	layout, err := ComputeQwen35StateLayout(cfg, "f32")
+	if err != nil {
+		panic(err)
+	}
 	state := &qwen35HALState{backend: gdn, layers: make([]qwen35HALLayerState, cfg.NumLayers)}
 	published := false
 	defer func() {
@@ -532,8 +535,8 @@ func (s *Session) initQwen35HALState(gdn Qwen35GDNBackend) {
 			continue
 		}
 		conv := s.uploadHostF32(
-			[]int{cfg.LinearConvKernelDim - 1, convDim},
-			make([]float32, (cfg.LinearConvKernelDim-1)*convDim),
+			[]int{layout.ConvRows, layout.ConvDim},
+			make([]float32, layout.ConvElements),
 			compute.MemoryKVCache,
 			"qwen35-gdn-conv-state layer "+itoa(l),
 		)
@@ -541,8 +544,8 @@ func (s *Session) initQwen35HALState(gdn Qwen35GDNBackend) {
 		// free adopts the convolution-only owner on the rollback path.
 		state.layers[l].conv = conv
 		recurrent := s.uploadHostF32(
-			[]int{nV, kHd, vHd},
-			make([]float32, nV*kHd*vHd),
+			[]int{layout.RecurrentHeads, layout.KeyHeadDim, layout.ValueHeadDim},
+			make([]float32, layout.RecurrentElements),
 			compute.MemoryKVCache,
 			"qwen35-gdn-recurrent-state layer "+itoa(l),
 		)

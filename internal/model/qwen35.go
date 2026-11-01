@@ -183,12 +183,15 @@ func newLinearAttnCache(cfg Config) *linearAttnCache {
 }
 
 func newLinearAttnLayerState(cfg Config) linearAttnLayerState {
-	nV := cfg.LinearNumValueHeads
-	kHd := cfg.LinearKeyHeadDim
-	vHd := cfg.LinearValueHeadDim
-	st := linearAttnLayerState{recurrent: make([][]float32, nV)}
+	layout, err := ComputeQwen35StateLayout(cfg, "f32")
+	if err != nil {
+		// This constructor already propagates allocation failures as panics;
+		// reject invalid geometry before allocating any partial state.
+		panic(err)
+	}
+	st := linearAttnLayerState{recurrent: make([][]float32, layout.RecurrentHeads)}
 	for h := range st.recurrent {
-		st.recurrent[h] = make([]float32, kHd*vHd)
+		st.recurrent[h] = make([]float32, layout.RecurrentRowElements)
 	}
 	return st
 }
