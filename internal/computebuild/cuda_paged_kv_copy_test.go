@@ -116,30 +116,49 @@ func TestCUDAPagedKVCopyBothCompilerBranches(t *testing.T) {
 func TestCUDAPagedKVCopyReceiptCache(t *testing.T) {
 	t.Setenv("NVCC_PREPEND_FLAGS", "")
 	t.Setenv("NVCC_APPEND_FLAGS", "")
-	root, tc := cudaIncrementalFixture(t)
-	compile := func(enabled bool, action string) string {
-		t.Helper()
-		ctx := context.WithValue(context.Background(), cudaPagedKVCopyKey{}, enabled)
-		if _, err := CompileCUDAKernels(ctx, tc, root, "sm_120", false, io.Discard); err != nil {
-			t.Fatal(err)
-		}
-		receipt := cudaReadNativeReceipt(t, root)
-		if len(receipt.Objects) != 1 || receipt.Objects[0].Action != action {
-			t.Fatalf("wrong native action: %+v", receipt.Objects)
-		}
-		object := receipt.Objects[0]
-		selected := slices.Contains(object.EffectiveFlags, "-DFAK_CUDA_PAGED_KV_COPY_QUALIFICATION")
-		if selected != enabled || object.InputSHA256 == "" {
-			t.Fatalf("receipt lost typed selection: %+v", object)
-		}
-		return object.InputSHA256
-	}
-	baseline := compile(false, "executed")
-	selected := compile(true, "executed")
-	if selected == baseline || compile(true, "reused") != selected {
-		t.Fatal("qualification did not change and then preserve the cache identity")
-	}
-	if compile(false, "executed") != baseline {
-		t.Fatal("default build did not recover its original key")
+	for _, target := range []struct {
+		name     string
+		windows  bool
+		object   string
+		hostFlag string
+	}{
+		{"unix", false, "cuda_kernels.o", "-fPIC"},
+		{"windows", true, "cuda_kernels.obj", "/MD"},
+	} {
+		t.Run(target.name, func(t *testing.T) {
+			// Serial subtests retain the existing helper and clean its copied
+			// executable before the next target; no real CUDA compiler runs.
+			root, tc := cudaIncrementalFixture(t)
+			tc.IsWindows = target.windows
+			t.Setenv("NVCC_CCBIN", tc.CXX)
+			compile := func(enabled bool, action string) string {
+				t.Helper()
+				ctx := context.WithValue(context.Background(), cudaPagedKVCopyKey{}, enabled)
+				if _, err := CompileCUDAKernels(ctx, tc, root, "sm_120", false, io.Discard); err != nil {
+					t.Fatal(err)
+				}
+				receipt := cudaReadNativeReceipt(t, root)
+				if len(receipt.Objects) != 1 || receipt.Objects[0].Action != action {
+					t.Fatalf("wrong native action: %+v", receipt.Objects)
+				}
+				object := receipt.Objects[0]
+				if filepath.Base(object.Object) != target.object || !slices.Contains(object.EffectiveFlags, target.hostFlag) {
+					t.Fatalf("wrong compiler branch: %+v", object)
+				}
+				selected := slices.Contains(object.EffectiveFlags, "-DFAK_CUDA_PAGED_KV_COPY_QUALIFICATION")
+				if selected != enabled || object.InputSHA256 == "" {
+					t.Fatalf("receipt lost typed selection: %+v", object)
+				}
+				return object.InputSHA256
+			}
+			baseline := compile(false, "executed")
+			selected := compile(true, "executed")
+			if selected == baseline || compile(true, "reused") != selected {
+				t.Fatal("qualification did not change and then preserve the cache identity")
+			}
+			if compile(false, "executed") != baseline {
+				t.Fatal("default build did not recover its original key")
+			}
+		})
 	}
 }
