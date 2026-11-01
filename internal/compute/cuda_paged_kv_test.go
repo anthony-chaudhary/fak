@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"math"
 	"os"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -97,8 +98,33 @@ func TestCUDAPagedAttentionMatchesContiguous(t *testing.T) {
 // TestCUDAPagedKVCloneSharesPagesCopyOnWrite proves the prefix-reuse payoff: Clone maps the
 // source's pages (no new device page), the first divergent append copies only the shared
 // tail page, and both branches still attend exactly like independent contiguous caches.
+func init() {
+	cudaPagedCopyDeviceWitness = TestCUDAPagedKVCloneSharesPagesCopyOnWrite
+}
+
+// The required wrapper reuses this existing partial-tail append/attention gate,
+// not the aligned shared-prefix benchmark. Keep its assertions in the original
+// test, with additional checked all-plane completion and actual enqueue evidence.
 func TestCUDAPagedKVCloneSharesPagesCopyOnWrite(t *testing.T) {
-	cb := cudaOrSkip(t)
+	required := *cudaPagedCopyRequired
+	var cb *cudaBackend
+	if required {
+		raw, ok := Lookup("cuda")
+		if !ok {
+			t.Fatal("required CUDA backend absent; no CPU fallback")
+		}
+		cb, ok = raw.(*cudaBackend)
+		if !ok {
+			t.Fatalf("required native CUDA backend absent: %T", raw)
+		}
+		if !cudaPagedKVCopyQualification {
+			t.Fatal("required typed paged-copy archive is disabled")
+		}
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+	} else {
+		cb = cudaOrSkip(t)
+	}
 	cfg := KVConfig{NumLayers: 3, NumKVHeads: 2, HeadDim: 128, RopeTheta: 10000}
 	var keep [][]float32
 	a := newPagedForTest(t, cb, cfg)
@@ -115,8 +141,12 @@ func TestCUDAPagedKVCloneSharesPagesCopyOnWrite(t *testing.T) {
 	if b.SharedBytes() == 0 || a.ResidentBytes() > int64(len(a.Pos()))*8 {
 		t.Fatalf("clone must share every page: shared=%d resident=%d", b.SharedBytes(), a.ResidentBytes())
 	}
+	beforeCopy := a.PageStats().CopySubmissions
 	pagedKVFill(t, cb, a, cfg, 40, 1, 2, &keep)
 	pagedKVFill(t, cb, b, cfg, 40, 1, 3, &keep)
+	if required && (a.PageStats().CopySubmissions-beforeCopy != 1 || a.PageStats().CopyTerminalStatus != 0) {
+		t.Fatalf("required all-plane copy not selected once: before=%d after=%+v", beforeCopy, a.PageStats())
+	}
 	if got := a.PageStats().LiveBlocks; got != live0+1 {
 		t.Fatalf("divergent append must copy exactly the shared tail page: live %d -> %d", live0, got)
 	}
@@ -130,11 +160,31 @@ func TestCUDAPagedKVCloneSharesPagesCopyOnWrite(t *testing.T) {
 	pagedKVFill(t, cb, refB, cfg, 40, 1, 3, &keep)
 	s := lcg(5)
 	q := mkResident(cb, []int{4 * 2 * 128}, randVec(&s, 4*2*128))
-	for _, pair := range []struct{ p, r KVStore }{{a, refA}, {b, refB}} {
+	for _, pair := range []struct {
+		p *cudaPagedKV
+		r *cudaKV
+	}{{a, refA}, {b, refB}} {
 		for l := 0; l < cfg.NumLayers; l++ {
-			d, cos := pagedMaxAbs(cb.Read(cb.Attention(q, pair.r, l, true, 4, 0.088)), cb.Read(cb.Attention(q, pair.p, l, true, 4, 0.088)))
+			want := cb.Read(cb.Attention(q, pair.r, l, true, 4, 0.088))
+			got := cb.Read(cb.Attention(q, pair.p, l, true, 4, 0.088))
+			pagedCopyFinite(t, got, want, false)
+			d, cos := pagedMaxAbs(want, got)
 			if d > 1e-4 || cos < 0.99999 {
 				t.Fatalf("branch attention diverged from its contiguous twin at layer %d: max|d|=%g cos=%f", l, d, cos)
+			}
+			if required {
+				pagedCopyFinite(t, cb.Read(pair.p.KeysView(l)), cb.Read(pair.r.KeysView(l)), true)
+				pagedCopyFinite(t, cb.Read(pair.p.ValuesView(l)), cb.Read(pair.r.ValuesView(l)), true)
+				// Reuse the store-owned gather buffer; Read is the checked completion
+				// boundary, unlike the legacy void snapshot D2H helper.
+				cudaMu.Lock()
+				rawView := pair.p.viewLocked(&pair.p.gK, &pair.p.gKF, pair.p.pool.Kraw[l], l, true, "kv-paged-cow-raw-witness")
+				cudaMu.Unlock()
+				raw := pair.r.Kraw[l]
+				w := cfg.NumKVHeads * cfg.HeadDim
+				rawReference := makeTensor(cb, F32, RowMajor, []int{raw.len / w, w}, nil,
+					&cudaBuf{ptr: raw.ptr, n: raw.len * 4, class: MemoryKVCache})
+				pagedCopyFinite(t, cb.Read(rawView), cb.Read(rawReference), true)
 			}
 		}
 	}
@@ -298,4 +348,21 @@ func TestCUDAPagedKVSharedPrefixWitness(t *testing.T) {
 	}
 	a.Free()
 	b.Free()
+}
+
+func pagedCopyFinite(t *testing.T, got, want []float32, exact bool) {
+	t.Helper()
+	if len(got) == 0 || len(got) != len(want) {
+		t.Fatalf("copy parity extent %d/%d", len(got), len(want))
+	}
+	for i, x := range got {
+		y := want[i]
+		if math.IsNaN(float64(x)) || math.IsNaN(float64(y)) ||
+			math.IsInf(float64(x), 0) || math.IsInf(float64(y), 0) {
+			t.Fatalf("nonfinite copy/attention value at %d: %g/%g", i, x, y)
+		}
+		if exact && math.Float32bits(x) != math.Float32bits(y) {
+			t.Fatalf("page plane changed bits at %d: %g/%g", i, x, y)
+		}
+	}
 }

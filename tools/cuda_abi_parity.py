@@ -285,6 +285,10 @@ def strip_comments(text: str) -> str:
             i += 1
     return "".join(out)
 
+# Enroll the qualified paged-copy CGo contract without changing symbol parsing.
+BINDINGS += ("internal/compute/cuda_paged_kv.go",)
+BINDINGS_LABEL = ", ".join(BINDINGS)
+
 
 def header_decls(text: str) -> set[str]:
     """The `fcuda_*` prototypes the header declares (name + `(`), comments stripped."""

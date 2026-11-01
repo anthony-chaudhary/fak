@@ -238,7 +238,7 @@ var kernelTransferNames = map[string]bool{
 // fattn/attend/spec_verify/dsa_index for the attention family.
 func KernelOpClass(name string) string {
 	switch {
-	case kernelTransferNames[name]:
+	case kernelTransferNames[name], name == "fak_paged_kv_copy_blocks":
 		return KernelOpCopy
 	case strings.Contains(name, "attention"), strings.Contains(name, "fattn"), strings.Contains(name, "attend"),
 		strings.Contains(name, "spec_verify"), strings.Contains(name, "dsa_index"):

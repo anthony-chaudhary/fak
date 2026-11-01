@@ -68,6 +68,7 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 	cudaHome := fs.String("cuda-home", "", "path to CUDA Toolkit root directory")
 	captureOnce := fs.Bool("capture-once-qualification", false, "compile dense-F32 single-session graph qualification; runtime FAK_CUDA_CAPTURE_ONCE=1 and graph enable still required; not device qualification")
 	tokenomosStaging := fs.Bool("tokenomos-staging-qualification", false, "select bounded event-protected pinned IDs for non-captured native gathers; not device or performance qualification")
+	pagedKVCopyQualification := fs.Bool("paged-kv-copy-qualification", false, "select bounded all-plane paged-KV COW copy; default off, not device qualification")
 	q56MMVQQualification := fs.Bool("q56k-mmvq-qualification", false, "qualify approximate Q5_K/Q6_K q8_1 MMVQ at P=1..3; default off")
 	archSpecific := fs.Bool("arch-specific", false, "compile opt-in CUDA 13 arch-specific translation units")
 	deepGEMM := fs.Bool("deepgemm-wkv", false, "compile explicit Linux CUDA 13.1 SM100f/103f WKV candidate; requires --arch-specific and --deepgemm-wkv-sms")
@@ -206,6 +207,7 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 		EnableCaptureOnceQualification:      *captureOnce,
 		EnableTokenomosStagingQualification: *tokenomosStaging,
 		EnableQ56KMMVQQualification:         *q56MMVQQualification,
+		EnablePagedKVCopyQualification:      *pagedKVCopyQualification,
 		EnableDeepGEMMWKV:                   *deepGEMM,
 		DeepGEMMWKVSMs:                      *deepGEMMSMs,
 		EnableFlashMLADecode:                *flashMLADecode,

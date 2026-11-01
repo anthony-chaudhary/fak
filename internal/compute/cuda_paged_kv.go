@@ -5,12 +5,17 @@ package compute
 /*
 #include <stdlib.h>
 #include "cuda_backend.h"
+extern int fcuda_paged_kv_copy_enabled(void);
+extern int fcuda_paged_kv_copy_terminal(void);
+extern int fcuda_paged_kv_copy_blocks_f32(const void* host_arenas, int planes,
+    int capacity_blocks, int block_floats, int dst, int src);
 */
 import "C"
 
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -20,14 +25,17 @@ import (
 // store maps its source's pages instead of copying them. Arenas only grow; freed pages
 // return to the free list and are reused, never to the device allocator.
 type cudaKVPagePool struct {
-	be          *cudaBackend
-	layers      int
-	nKV, hd     int
-	blockTokens int
-	blockFloats int // floats per page per plane per layer
-	capBlocks   int
-	blocks      pagedKVBlocks
-	K, Kraw, V  []unsafe.Pointer
+	be              *cudaBackend
+	layers          int
+	nKV, hd         int
+	blockTokens     int
+	blockFloats     int // floats per page per plane per layer
+	capBlocks       int
+	blocks          pagedKVBlocks
+	K, Kraw, V      []unsafe.Pointer
+	copyFailure     atomic.Int32 // first error: pool is retained, never reused in this process
+	copySubmissions uint64       // successful enqueue only, NOT completion
+	copyOwners      *cudaPagedKV // intrusive owner retention on terminal refusal
 }
 
 type cudaPagedPoolKey struct {
@@ -43,6 +51,12 @@ var (
 // pagedPool returns the backend's shared pool for cfg's geometry. It takes no cudaMu
 // (NewKV runs under it during host restore) and allocates nothing until the first page.
 func (c *cudaBackend) pagedPool(cfg KVConfig) *cudaKVPagePool {
+	if cudaPagedKVCopyQualification && cfg.NumLayers > 0 && cfg.NumLayers <= 64 {
+		const maxCInt = int(^uint32(0) >> 1)
+		if cfg.HeadDim <= 0 || cfg.NumKVHeads <= 0 || cfg.NumKVHeads > maxCInt/CUDAPagedKVBlockTokens/cfg.HeadDim {
+			panic("cuda: qualified paged-KV page extent exceeds native bounds")
+		}
+	}
 	key := cudaPagedPoolKey{be: c, layers: cfg.NumLayers, nKV: cfg.NumKVHeads, hd: cfg.HeadDim}
 	cudaPagedPoolsMu.Lock()
 	defer cudaPagedPoolsMu.Unlock()
@@ -58,11 +72,13 @@ func (c *cudaBackend) pagedPool(cfg KVConfig) *cudaKVPagePool {
 
 // CUDAPagedKVPageStats is the device-side accounting of one paged KV pool.
 type CUDAPagedKVPageStats struct {
-	LiveBlocks     int   `json:"live_blocks"`
-	CapacityBlocks int   `json:"capacity_blocks"`
-	BlockTokens    int   `json:"block_tokens"`
-	LiveBytes      int64 `json:"live_bytes"`
-	ArenaBytes     int64 `json:"arena_bytes"`
+	LiveBlocks         int    `json:"live_blocks"`
+	CapacityBlocks     int    `json:"capacity_blocks"`
+	BlockTokens        int    `json:"block_tokens"`
+	LiveBytes          int64  `json:"live_bytes"`
+	ArenaBytes         int64  `json:"arena_bytes"`
+	CopySubmissions    uint64 `json:"copy_submissions"`
+	CopyTerminalStatus int32  `json:"copy_terminal_status"`
 }
 
 func (p *cudaKVPagePool) bytesPerBlock() int64 {
@@ -71,13 +87,21 @@ func (p *cudaKVPagePool) bytesPerBlock() int64 {
 
 func (p *cudaKVPagePool) stats() CUDAPagedKVPageStats {
 	return CUDAPagedKVPageStats{LiveBlocks: p.blocks.live, CapacityBlocks: p.capBlocks, BlockTokens: p.blockTokens,
-		LiveBytes: int64(p.blocks.live) * p.bytesPerBlock(), ArenaBytes: int64(p.capBlocks) * p.bytesPerBlock()}
+		LiveBytes: int64(p.blocks.live) * p.bytesPerBlock(), ArenaBytes: int64(p.capBlocks) * p.bytesPerBlock(),
+		CopySubmissions: p.copySubmissions, CopyTerminalStatus: p.copyFailure.Load()}
 }
 
 // growLocked raises every arena to hold need pages. Existing page ids keep their data.
 // Caller holds cudaMu; a paged store is never graph-captured, so allocating is legal.
 func (p *cudaKVPagePool) growLocked(need int) {
+	if err := p.copyErrorLocked(nil); err != nil {
+		panic(err)
+	}
 	n := pagedKVGrowBlocks(p.capBlocks, need)
+	if cudaPagedKVCopyQualification && p.layers <= 64 &&
+		(n <= 0 || n > int(^uint32(0)>>1) || p.blockFloats <= 0 || p.blockFloats > int(^uint(0)>>1)/4/n) {
+		panic(p.stopCopyLocked(-75702, nil))
+	}
 	bytes := n * p.blockFloats * 4
 	oldBytes := p.capBlocks * p.blockFloats * 4
 	move := func(arena []unsafe.Pointer, site string) {
@@ -102,6 +126,9 @@ func (p *cudaKVPagePool) growLocked(need int) {
 }
 
 func (p *cudaKVPagePool) allocLocked() int32 {
+	if err := p.copyErrorLocked(nil); err != nil {
+		panic(err)
+	}
 	id, ok := p.blocks.alloc()
 	if !ok {
 		p.growLocked(p.capBlocks + 1)
@@ -111,13 +138,41 @@ func (p *cudaKVPagePool) allocLocked() int32 {
 }
 
 // copyBlockLocked duplicates page src into dst in every arena (copy-on-write).
-func (p *cudaKVPagePool) copyBlockLocked(dst, src int32) {
+func (p *cudaKVPagePool) copyBlockLocked(dst, src int32) error {
+	if err := p.copyErrorLocked(nil); err != nil {
+		return err
+	}
+	const maxCInt = int(^uint32(0) >> 1)
+	if cudaPagedKVCopyQualification && p.layers > 0 && p.layers <= 64 &&
+		p.blockFloats > 0 && p.blockFloats <= maxCInt && p.capBlocks <= maxCInt {
+		var arenas [192]unsafe.Pointer
+		if len(p.K) != p.layers || len(p.Kraw) != p.layers || len(p.V) != p.layers {
+			return p.stopCopyLocked(-75702, nil)
+		}
+		n := 0
+		for _, plane := range [][]unsafe.Pointer{p.K, p.Kraw, p.V} {
+			for _, ptr := range plane {
+				arenas[n] = ptr
+				n++
+			}
+		}
+		status := int32(C.fcuda_paged_kv_copy_blocks_f32(unsafe.Pointer(&arenas[0]),
+			C.int(n), C.int(p.capBlocks), C.int(p.blockFloats), C.int(dst), C.int(src)))
+		if status != 0 {
+			return p.stopCopyLocked(status, nil) // no post-submit fallback or release
+		}
+		if p.copySubmissions != ^uint64(0) {
+			p.copySubmissions++
+		} // saturating enqueue count
+		return nil // enqueue only; existing g_stream consumers/fences own completion
+	}
 	bytes := C.size_t(p.blockFloats * 4)
 	for _, arena := range [][]unsafe.Pointer{p.K, p.Kraw, p.V} {
 		for l := range arena {
 			C.fcuda_d2d(unsafe.Add(arena[l], int(dst)*p.blockFloats*4), unsafe.Add(arena[l], int(src)*p.blockFloats*4), bytes)
 		}
 	}
+	return nil
 }
 
 // cudaPagedKV is the page-granular CUDA KV store (FAK_CUDA_PAGED_KV=1). Attention reads
@@ -131,19 +186,78 @@ type cudaPagedKV struct {
 	lens  []int // positions written per layer
 	pos   []int
 
-	dTable    unsafe.Pointer // device copy of table
-	dTableCap int
-	dirty     bool
-	dSeqLen   unsafe.Pointer // device int read by the kernel as seq_lens[0]
-	seqLenDev int
-	scratch   unsafe.Pointer // v2 partition scratch
-	scratchF  int64
-	gK, gV    unsafe.Pointer // KeysView / ValuesView gather buffers
-	gKF, gVF  int
+	dTable       unsafe.Pointer // device copy of table
+	dTableCap    int
+	dirty        bool
+	dSeqLen      unsafe.Pointer // device int read by the kernel as seq_lens[0]
+	seqLenDev    int
+	scratch      unsafe.Pointer // v2 partition scratch
+	scratchF     int64
+	gK, gV       unsafe.Pointer // KeysView / ValuesView gather buffers
+	gKF, gVF     int
+	copyRetained bool
+	copyNext     *cudaPagedKV
+}
+
+// The immutable archive query is wired only by the typed build qualification.
+// It adds no ambient runtime switch and leaves ordinary archives on legacy D2D.
+var cudaPagedKVCopyQualification = C.fcuda_paged_kv_copy_enabled() != 0
+
+type cudaPagedKVCopyFailure struct{ Status int32 }
+
+func (e *cudaPagedKVCopyFailure) Error() string {
+	return fmt.Sprintf("cuda: qualified paged-KV pool is terminal (%d)", e.Status)
+}
+
+// No allocation on this failure path: retain each existing store once through
+// an intrusive list anchored in the globally retained pool. Caller may already
+// have detached its handle before Free; refusing must not lose private owners.
+func (p *cudaKVPagePool) retainCopyOwnerLocked(k *cudaPagedKV) {
+	if k == nil || k.copyRetained || len(k.table) == 0 &&
+		k.dTable == nil && k.dSeqLen == nil && k.scratch == nil && k.gK == nil && k.gV == nil {
+		return
+	}
+	k.copyRetained = true
+	k.copyNext, p.copyOwners = p.copyOwners, k
+}
+
+func (p *cudaKVPagePool) stopCopyLocked(status int32, k *cudaPagedKV) error {
+	p.copyFailure.CompareAndSwap(0, status)
+	p.retainCopyOwnerLocked(k)
+	return &cudaPagedKVCopyFailure{Status: p.copyFailure.Load()}
+}
+
+// cudaMu protects native state and all retained owners. The atomic first status
+// also lets NewKV refuse before allocating a descriptor without taking cudaMu
+// recursively (host restoration already holds it).
+func (p *cudaKVPagePool) copyErrorLocked(k *cudaPagedKV) error {
+	if status := p.copyFailure.Load(); status != 0 {
+		p.retainCopyOwnerLocked(k)
+		return &cudaPagedKVCopyFailure{Status: status}
+	}
+	if cudaPagedKVCopyQualification {
+		if err := AdmitDevice(p.be, "paged-kv-copy"); err != nil {
+			return p.stopCopyLocked(-75706, k)
+		}
+		if C.fcuda_paged_kv_copy_terminal() != 0 {
+			return p.stopCopyLocked(-75701, k)
+		}
+	}
+	return nil
+}
+
+func (k *cudaPagedKV) requireCopyHealthyLocked() {
+	if err := k.pool.copyErrorLocked(k); err != nil {
+		panic(err)
+	}
 }
 
 func (c *cudaBackend) newPagedKV(cfg KVConfig) *cudaPagedKV {
-	return &cudaPagedKV{pool: c.pagedPool(cfg), cfg: cloneKVConfig(cfg), lens: make([]int, cfg.NumLayers), seqLenDev: -1}
+	p := c.pagedPool(cfg)
+	if status := p.copyFailure.Load(); status != 0 {
+		panic(&cudaPagedKVCopyFailure{Status: status})
+	}
+	return &cudaPagedKV{pool: p, cfg: cloneKVConfig(cfg), lens: make([]int, cfg.NumLayers), seqLenDev: -1}
 }
 
 func (k *cudaPagedKV) KVConfig() KVConfig      { return cloneKVConfig(k.cfg) }
@@ -188,6 +302,19 @@ func (k *cudaPagedKV) SharedBytes() int64 {
 // writablePageLocked returns logical page blk ready for a write: allocated if new, or a
 // private copy if it is still shared with a clone.
 func (k *cudaPagedKV) writablePageLocked(blk int) int32 {
+	k.requireCopyHealthyLocked()
+	if cudaPagedKVCopyQualification {
+		defer func() {
+			if r := recover(); r != nil {
+				// A terminal refusal can arise while reserving/growing the
+				// fresh page, before the explicit copy-status branch below.
+				if k.pool.copyFailure.Load() != 0 {
+					k.pool.retainCopyOwnerLocked(k)
+				}
+				panic(r)
+			}
+		}()
+	}
 	switch {
 	case blk == len(k.table):
 		k.table = append(k.table, k.pool.allocLocked())
@@ -196,7 +323,12 @@ func (k *cudaPagedKV) writablePageLocked(blk int) int32 {
 		panic("cuda: paged KV append skipped a page")
 	case k.pool.blocks.shared(k.table[blk]):
 		fresh := k.pool.allocLocked()
-		k.pool.copyBlockLocked(fresh, k.table[blk])
+		if err := k.pool.copyBlockLocked(fresh, k.table[blk]); err != nil {
+			// The fresh destination remains live but unpublished. Neither possible
+			// owner is released or reused after a failed/uncertain enqueue.
+			k.pool.retainCopyOwnerLocked(k)
+			panic(err)
+		}
 		k.pool.blocks.release(k.table[blk])
 		k.table[blk] = fresh
 		k.dirty = true
@@ -206,6 +338,7 @@ func (k *cudaPagedKV) writablePageLocked(blk int) int32 {
 
 // appendRowsLocked writes n rows [n, nKV*hd] of each plane at the layer's next positions.
 func (k *cudaPagedKV) appendRowsLocked(layer int, kRaw, kRoPE, v unsafe.Pointer, n int) {
+	k.requireCopyHealthyLocked()
 	if layer < 0 || layer >= len(k.lens) || n <= 0 {
 		panic("cuda: paged KV append layer or row count out of range")
 	}
@@ -249,6 +382,7 @@ func (k *cudaPagedKV) appendRowsLocked(layer int, kRaw, kRoPE, v unsafe.Pointer,
 func (k *cudaPagedKV) AppendKV(layer int, kRaw, kRoPE, v Tensor, pos int) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	k.requireCopyHealthyLocked()
 	if kRaw.Dtype != F32 || kRoPE.Dtype != F32 || v.Dtype != F32 {
 		panic("cuda: KV append requires F32 source rows")
 	}
@@ -264,6 +398,7 @@ func (k *cudaPagedKV) AppendKV(layer int, kRaw, kRoPE, v Tensor, pos int) {
 // sequence length the kernel reads. g_stream is a blocking stream, so the synchronous
 // table upload is ordered after every kernel already reading the old table.
 func (k *cudaPagedKV) syncDeviceTableLocked(seqLen int) {
+	k.requireCopyHealthyLocked()
 	if k.dirty || k.dTable == nil {
 		if len(k.table) > k.dTableCap || k.dTable == nil {
 			if k.dTable != nil {
@@ -292,6 +427,7 @@ func (k *cudaPagedKV) syncDeviceTableLocked(seqLen int) {
 
 // attentionLocked is decode attention of q [nH*hd] over the layer's pages.
 func (c *cudaBackend) pagedAttentionLocked(q Tensor, k *cudaPagedKV, layer, grp int, scale float32) Tensor {
+	k.requireCopyHealthyLocked()
 	hd, nKV := k.cfg.HeadDim, k.cfg.NumKVHeads
 	nH := grp * nKV
 	seqLen := k.lens[layer]
@@ -319,6 +455,7 @@ func (c *cudaBackend) pagedAttentionLocked(q Tensor, k *cudaPagedKV, layer, grp 
 
 // gatherLocked unpacks the layer's first n rows of one plane into dst (row-major).
 func (k *cudaPagedKV) gatherLocked(dst unsafe.Pointer, arena unsafe.Pointer, layer, n int, keyLayout bool) {
+	k.requireCopyHealthyLocked()
 	if n <= 0 {
 		return
 	}
@@ -334,6 +471,7 @@ func (k *cudaPagedKV) gatherLocked(dst unsafe.Pointer, arena unsafe.Pointer, lay
 }
 
 func (k *cudaPagedKV) viewLocked(buf *unsafe.Pointer, bufF *int, arena unsafe.Pointer, layer int, keyLayout bool, site string) Tensor {
+	k.requireCopyHealthyLocked()
 	w := k.stride()
 	n := k.lens[layer]
 	if n*w > *bufF {
@@ -353,6 +491,7 @@ func (k *cudaPagedKV) viewLocked(buf *unsafe.Pointer, bufF *int, arena unsafe.Po
 func (k *cudaPagedKV) KeysView(layer int) Tensor {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	k.requireCopyHealthyLocked()
 	return k.viewLocked(&k.gK, &k.gKF, k.pool.K[layer], layer, true, "kv-paged-keys-view")
 }
 
@@ -360,6 +499,7 @@ func (k *cudaPagedKV) KeysView(layer int) Tensor {
 func (k *cudaPagedKV) ValuesView(layer int) Tensor {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	k.requireCopyHealthyLocked()
 	return k.viewLocked(&k.gV, &k.gVF, k.pool.V[layer], layer, false, "kv-paged-values-view")
 }
 
@@ -369,6 +509,7 @@ func (k *cudaPagedKV) ValuesView(layer int) Tensor {
 func (k *cudaPagedKV) Clone() KVStore {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	k.requireCopyHealthyLocked()
 	n := &cudaPagedKV{pool: k.pool, cfg: cloneKVConfig(k.cfg), table: append([]int32(nil), k.table...),
 		lens: append([]int(nil), k.lens...), pos: append([]int(nil), k.pos...), dirty: true, seqLenDev: -1}
 	for _, id := range n.table {
@@ -379,6 +520,7 @@ func (k *cudaPagedKV) Clone() KVStore {
 
 // releaseLocked drops this store's page references and its private device buffers.
 func (k *cudaPagedKV) releaseLocked() {
+	k.requireCopyHealthyLocked()
 	for _, id := range k.table {
 		k.pool.blocks.release(id)
 	}
@@ -409,6 +551,9 @@ func (k *cudaPagedKV) SnapshotToHost() (KVHostSnapshot, error) {
 	}
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	if err := k.pool.copyErrorLocked(k); err != nil {
+		return KVHostSnapshot{}, err
+	}
 	w := k.stride()
 	out := KVHostSnapshot{Config: cloneKVConfig(k.cfg), Pos: append([]int(nil), k.pos...),
 		K: make([][]float32, k.cfg.NumLayers), KRaw: make([][]float32, k.cfg.NumLayers), V: make([][]float32, k.cfg.NumLayers)}
@@ -440,6 +585,7 @@ func (k *cudaPagedKV) SnapshotToHost() (KVHostSnapshot, error) {
 
 // loadFromHostLocked replaces the store's contents with a host image. Caller holds cudaMu.
 func (k *cudaPagedKV) loadFromHostLocked(state KVHostSnapshot) {
+	k.requireCopyHealthyLocked()
 	k.releaseLocked()
 	w := k.stride()
 	maxN := 0
@@ -468,15 +614,18 @@ func (c *cudaBackend) restorePagedKVFromHost(state KVHostSnapshot) (out KVStore,
 	if err := state.Validate(); err != nil {
 		return nil, err
 	}
-	k := c.newPagedKV(cloneKVConfig(state.Config))
+	var k *cudaPagedKV
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	defer func() {
 		if r := recover(); r != nil {
-			k.releaseLocked()
+			if k != nil && k.pool.copyErrorLocked(k) == nil {
+				k.releaseLocked()
+			}
 			out, err = nil, fmt.Errorf("cuda: restore paged KV from host: %v", r)
 		}
 	}()
+	k = c.newPagedKV(cloneKVConfig(state.Config))
 	k.loadFromHostLocked(state)
 	return k, nil
 }
@@ -520,6 +669,7 @@ func CUDAPagedKVPageStatsFor(kv KVStore) (CUDAPagedKVPageStats, bool) {
 
 // pagedPanelAppendLocked is the prompt panel's multi-row append into pages.
 func (c *cudaBackend) pagedPanelAppendLocked(k *cudaPagedKV, layer int, kRaw, kRoPE, v Tensor, start, tokens int) {
+	k.requireCopyHealthyLocked()
 	w := k.stride()
 	n := tokens * w
 	if kRaw.Dtype != F32 || kRoPE.Dtype != F32 || v.Dtype != F32 {
@@ -543,6 +693,7 @@ func (c *cudaBackend) pagedPanelAppendLocked(k *cudaPagedKV, layer int, kRaw, kR
 // pagedPanelAttentionLocked gathers the layer's rows into contiguous scratch and runs the
 // existing causal panel kernel over them (prefill is not the paged kernel's job).
 func (c *cudaBackend) pagedPanelAttentionLocked(q Tensor, k *cudaPagedKV, layer, tokens, start, grp int, scale float32) Tensor {
+	k.requireCopyHealthyLocked()
 	hd, nKV := k.cfg.HeadDim, k.cfg.NumKVHeads
 	nH := grp * nKV
 	w := nKV * hd

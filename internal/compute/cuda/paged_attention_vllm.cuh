@@ -28,6 +28,7 @@
 
 // Multi-page append uses current vLLM e5196e2959a42908313510f55fa21f213a48802e
 // per-token slot addressing, adapted to a bounded by-value map; see its header.
+#include <stdint.h>
 #include "paged_kv_write_map.h"
 
 namespace fak_vllm_pa {
@@ -833,3 +834,88 @@ extern "C" int fcuda_paged_store_int(int* dst, int value) {
 #undef FAK_PA_PARTITION_SIZE
 #undef FAK_PA_NUM_THREADS
 #undef FAK_PA_BLOCK_SIZE
+
+// Qualified one-page COW adaptation of vLLM copy_blocks_kernel in
+// csrc/cache_kernels.cu at b8b302cde434df8c9289a2b465406b47ebab1c2d.
+// Copyright (c) 2023, The vLLM team. Apache-2.0; existing family notice above.
+// Modified: bounded by-value arena map, one distinct page pair, all three F32
+// planes per layer; no torch, device metadata allocation or new driver API.
+extern "C" int fcuda_paged_kv_copy_enabled(void) {
+#ifdef FAK_CUDA_PAGED_KV_COPY_QUALIFICATION
+  return 1;
+#else
+  return 0;
+#endif
+}
+extern "C" int fcuda_paged_kv_copy_terminal(void) {
+  return v41_candidates_stream_uncertain() ? 1 : 0;
+}
+#ifdef FAK_CUDA_PAGED_KV_COPY_QUALIFICATION
+struct FakPagedCopyArenas { uint32_t* planes[192]; };
+static_assert(sizeof(FakPagedCopyArenas) + 32 <= 4096, "legacy kernel argument budget");
+__global__ static void fak_paged_kv_copy_blocks_kernel(
+    FakPagedCopyArenas arenas, int block_floats, int dst, int src) {
+  uint32_t* arena = arenas.planes[blockIdx.x];
+  const int64_t from = (int64_t)src * block_floats;
+  const int64_t to = (int64_t)dst * block_floats;
+  for (int64_t i = threadIdx.x; i < block_floats; i += blockDim.x)
+    arena[to+i] = arena[from+i]; // opaque bits: K, raw K and V share page extent
+}
+#endif
+extern "C" int fcuda_paged_kv_copy_blocks_f32(
+    const void* host_arenas, int planes, int capacity_blocks,
+    int block_floats, int dst, int src) {
+#ifdef FAK_CUDA_PAGED_KV_COPY_QUALIFICATION
+  if (!host_arenas || planes < 3 || planes > 192 || planes % 3 ||
+      capacity_blocks <= 0 || block_floats <= 0 || dst < 0 || src < 0 ||
+      dst >= capacity_blocks || src >= capacity_blocks || dst == src) return -75702;
+  if (!g_stream || v41_candidates_stream_uncertain()) return -75701;
+  if (g_capture_open || g_q4k_qkv_async_pending != 0) return -75703;
+  cudaStreamCaptureStatus capture = cudaStreamCaptureStatusNone;
+  cudaError_t status = cudaStreamIsCapturing(g_stream, &capture);
+  if (status != cudaSuccess) return (int)status;
+  if (capture != cudaStreamCaptureStatusNone) return -75703;
+  int device = -1;
+  status = cudaGetDevice(&device);
+  if (status != cudaSuccess) return (int)status;
+  if (device != 0) return -75704;
+  status = cudaPeekAtLastError(); // never consume a prior operation's error
+  if (status != cudaSuccess) return (int)status;
+  if ((size_t)block_floats > SIZE_MAX / sizeof(uint32_t)) return -75702;
+  const size_t page_bytes = (size_t)block_floats * sizeof(uint32_t);
+  if ((size_t)capacity_blocks > SIZE_MAX / page_bytes) return -75702;
+  const size_t arena_bytes = (size_t)capacity_blocks * page_bytes;
+  const void* const* bases = (const void* const*)host_arenas;
+  FakPagedCopyArenas args = {};
+  for (int i = 0; i < planes; ++i) {
+    const void* base = bases[i];
+    if (!base || (uintptr_t)base % alignof(uint32_t) ||
+        arena_bytes > UINTPTR_MAX-(uintptr_t)base || v41c_pending_contains(base)) return -75705;
+    auto ordinary = g_live.find((void*)base);
+    auto managed = g_managed_live.find((void*)base);
+    if ((ordinary == g_live.end() || ordinary->second < arena_bytes) &&
+        (managed == g_managed_live.end() || managed->second < arena_bytes)) return -75705;
+    cudaPointerAttributes attr{};
+    status = cudaPointerGetAttributes(&attr, base);
+    if (status != cudaSuccess) return (int)status;
+    if (attr.device != device ||
+        (attr.type != cudaMemoryTypeDevice && attr.type != cudaMemoryTypeManaged)) return -75705;
+    for (int j = 0; j < i; ++j) {
+      const uintptr_t a = (uintptr_t)base, b = (uintptr_t)bases[j];
+      if (a < b+arena_bytes && b < a+arena_bytes) return -75705;
+    }
+    args.planes[i] = (uint32_t*)base;
+  }
+  // Kernel arguments are copied by value before return; no Go host address is
+  // retained. Success means enqueue, NOT completion; existing stream fences own it.
+  FCUDA_TS("fak_paged_kv_copy_blocks", planes,
+      (fak_paged_kv_copy_blocks_kernel<<<planes, 256, 0, g_stream>>>(
+          args, block_floats, dst, src));
+      status = cudaGetLastError());
+  return (int)status;
+#else
+  (void)host_arenas; (void)planes; (void)capacity_blocks;
+  (void)block_floats; (void)dst; (void)src;
+  return -75700; // Go must not select an archive whose typed profile is absent
+#endif
+}

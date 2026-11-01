@@ -86,7 +86,8 @@ type CUDAConfig struct {
 	EnableTokenomosStagingQualification bool // default-off non-capture pinned-ID staging
 	// EnableQ56KMMVQQualification selects approximate q8_1 activation math only
 	// for canonical Q5_K/Q6_K P=1..3. Default false; not hardware qualification.
-	EnableQ56KMMVQQualification bool
+	EnableQ56KMMVQQualification    bool
+	EnablePagedKVCopyQualification bool // default-off partial-tail COW kernel; not device qualification
 
 	EnableV41RoutedSwiGLU    bool // Explicit SM120 candidate; public capability remains unqualified.
 	EnableV41EngramGate      bool // Explicit SM120 candidate; public capability remains unqualified.
