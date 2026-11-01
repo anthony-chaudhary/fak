@@ -155,6 +155,80 @@ __global__ void k_kv_attention_prompt4_typed(
   }
 }
 
+#if defined(FAK_CUDA_KV16_PREFILL_GQA4_QUALIFICATION)
+// Native adaptation of the existing prompt4 tile above: four query rows AND up
+// to four sibling query heads share each widened KV tile. A block never spans
+// KV heads. Non-four GQA ratios (Qwen GQA6: groups 4+2) and query tails leave
+// entire warps inactive, but every thread still loads and reaches both barriers.
+// No allocation/stream/precision change; promotion needs physical qualification.
+__global__ void k_kv_attention_prompt4_gqa4_typed(
+    const float *Q, const void *K, const void *V, float *Out,
+    int tokens, int prefix, int nH, int nKV, int hd, float scale, int dtype) {
+  const int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
+  const int first = (int)blockIdx.x * 4, token = first + (warp >> 2);
+  const int gqa = nH / nKV, groups = (gqa + 3) / 4;
+  const int kvh = (int)blockIdx.y / groups;
+  const int sibling = ((int)blockIdx.y % groups) * 4 + (warp & 3);
+  const int h = kvh * gqa + sibling, width = nKV * hd;
+  const bool active = token < tokens && sibling < gqa;
+  const int end = prefix + (tokens - first < 4 ? tokens : first + 4);
+  const int limit = active ? prefix + token + 1 : 0;
+  float q[8], acc[8];
+#pragma unroll
+  for (int d = 0; d < 8; ++d) {
+    const int col = lane + d * 32;
+    q[d] = active && col < hd ? Q[((size_t)token*nH+h)*hd+col] : 0.f;
+    acc[d] = 0.f;
+  }
+  extern __shared__ float tile[];
+  float *keys = tile, *values = tile + 8*hd;
+  float m = 0.f, l = 0.f;
+  for (int begin = 0; begin < end;) {
+    const int rows = end - begin < 8 ? end - begin : 8;
+    for (int i = threadIdx.x; i < rows*hd; i += 512) {
+      const size_t src = (size_t)(begin+i/hd)*width+(size_t)kvh*hd+i%hd;
+      keys[i] = kv_load(K, src, dtype);
+      values[i] = kv_load(V, src, dtype);
+    }
+    __syncthreads();
+    if (active) {
+      for (int row = 0; row < rows && begin+row < limit; ++row) {
+        float score = 0.f;
+#pragma unroll
+        for (int d = 0; d < 8; ++d) {
+          const int col = lane + d*32;
+          if (col < hd) score += q[d]*keys[row*hd+col];
+        }
+#pragma unroll
+        for (int stride = 16; stride > 0; stride >>= 1)
+          score += __shfl_down_sync(0xffffffffU, score, stride);
+        score = __shfl_sync(0xffffffffU, score, 0)*scale;
+        const float nextM = l == 0.f ? score : fmaxf(m, score);
+        const float correction = l == 0.f ? 0.f : expf(m-nextM);
+        const float probability = expf(score-nextM);
+        l = l*correction+probability;
+#pragma unroll
+        for (int d = 0; d < 8; ++d) {
+          const int col = lane + d*32;
+          if (col < hd) acc[d] = acc[d]*correction+probability*values[row*hd+col];
+        }
+        m = nextM;
+      }
+    }
+    __syncthreads();
+    begin += rows;
+  }
+  if (active) {
+    const float invL = l > 0.f ? 1.f/l : 0.f;
+#pragma unroll
+    for (int d = 0; d < 8; ++d) {
+      const int col = lane + d*32;
+      if (col < hd) Out[((size_t)token*nH+h)*hd+col] = acc[d]*invL;
+    }
+  }
+}
+#endif
+
 extern "C" int fcuda_kv_attention_typed(const float *q, const void *k, const void *v, float *out, int tokens, int prefix, int heads, int kvheads, int hd, float scale, int dtype) {
   if (!q || !k || !v || !out || tokens <= 0 || (prefix < 0 && !(prefix == -1 && tokens == 1)) || heads <= 0 || kvheads <= 0 || heads % kvheads || hd <= 0 || hd > FLASH_THREADS*FLASH_ACC_MAX || dtype < 0 || dtype > 2 || (size_t)tokens*(size_t)heads > 2147483647ULL || (long long)prefix+tokens > 2147483647LL || (size_t)kvheads*(size_t)hd > 2147483647ULL) return (int)cudaErrorInvalidValue;
   // The different dot reduction needs physical qualification before promotion.
@@ -166,6 +240,17 @@ extern "C" int fcuda_kv_attention_typed(const float *q, const void *k, const voi
     FCUDA_TS("k_kv_attention_prompt4_typed", grid, k_kv_attention_prompt4_typed<<<grid,128,(size_t)16*hd*sizeof(float),g_stream>>>(q,k,v,out,tokens,prefix,heads,kvheads,hd,scale,dtype));
     return (int)cudaGetLastError();
   }
+#if defined(FAK_CUDA_KV16_PREFILL_GQA4_QUALIFICATION)
+  // Bound grid.y independently: partial sibling groups stay within one KV head.
+  // Compute in size_t before narrowing; the old explicit tile4 branch above wins.
+  const size_t head_groups = ((size_t)(heads / kvheads) + 3) / 4;
+  const size_t kv_groups = (size_t)kvheads * head_groups;
+  if (dtype != 0 && tokens >= 4 && heads / kvheads >= 4 && hd <= 256 && kv_groups <= 65535) {
+    const dim3 grid((unsigned)((tokens+3ULL)/4), (unsigned)kv_groups);
+    FCUDA_TS("k_kv_attention_prompt4_gqa4_typed", grid, k_kv_attention_prompt4_gqa4_typed<<<grid,512,(size_t)16*hd*sizeof(float),g_stream>>>(q,k,v,out,tokens,prefix,heads,kvheads,hd,scale,dtype));
+    return (int)cudaGetLastError();
+  }
+#endif
   FCUDA_TS("k_kv_attention_typed", tokens*heads, k_kv_attention_typed<<<tokens*heads,FLASH_THREADS,((size_t)hd+FLASH_THREADS)*sizeof(float),g_stream>>>(q,k,v,out,tokens,prefix,heads,kvheads,hd,scale,dtype));
   return (int)cudaGetLastError();
 }
