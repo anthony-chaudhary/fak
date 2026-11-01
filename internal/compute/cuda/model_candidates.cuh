@@ -21,8 +21,8 @@ extern "C" int fak_qwen35_embedding_gather_f32(
   if (!dEmbedding || !hIDs || !dIDs || !dOut || tokens <= 0 || hidden <= 0) return -1;
   size_t idsBytes = (size_t)tokens * sizeof(int);
 #ifdef FAK_CUDA_TOKENOMOS_STAGING_QUALIFICATION
-  fcuda_ts_untimed_transfer();
-  int staged = fak_tokenomos_staging_copy(dIDs, hIDs, idsBytes);
+  // Serialized by cudaMu; count actual copy API attempts, not pre-admission calls.
+  int staged = fak_tokenomos_staging_copy(dIDs, hIDs, idsBytes, fcuda_ts_untimed_transfer);
   if (staged != 0) return staged;
 #else
   cudaGetLastError();

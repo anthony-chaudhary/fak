@@ -175,7 +175,7 @@ func TestCUDATokenomosStagingCallerWiring(t *testing.T) {
 	for _, marker := range []string{
 		"#ifdef FAK_CUDA_TOKENOMOS_STAGING_QUALIFICATION",
 		"#include \"tokenomos_staging.h\"",
-		"fak_tokenomos_staging_copy(dIDs, hIDs, idsBytes)",
+		"fak_tokenomos_staging_copy(dIDs, hIDs, idsBytes, fcuda_ts_untimed_transfer)",
 		"if (staged != 0) return staged;",
 		"cudaMemcpy(dIDs, hIDs, idsBytes, cudaMemcpyHostToDevice)",
 		"fak_tokenomos_staging_error(launch)",
@@ -458,5 +458,149 @@ int main(int argc, char **argv) {
   assert(g_alloc_untracked_frees.load() == 0);
   std::cout << "PASS " << mode << " (fake driver; CUDA/model/performance UNRUN)\n";
   return 0;
+}
+`
+
+// fak-test:runtime fast est=2s lane=default
+func TestCUDATokenomosStagingTransferAccounting(t *testing.T) {
+	compiler, err := exec.LookPath("c++")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	for _, name := range []string{"tokenomos_staging.h", "alloc_ledger.h"} {
+		body, err := os.ReadFile(filepath.Join("cuda", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), body, 0600); err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("production %s sha256=%x", name, sha256.Sum256(body))
+	}
+	profile, err := os.ReadFile("cuda/kernel_profile.cuh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Extract exact real declarations and helper, never substitute a fake counter.
+	// This qualifies these production declarations, NOT the entire profiler/CUDA.
+	extract := func(begin, end string) string {
+		t.Helper()
+		s := string(profile)
+		if strings.Count(s, begin) != 1 {
+			t.Fatalf("ambiguous profile start %q", begin)
+		}
+		i := strings.Index(s, begin)
+		j := strings.Index(s[i:], end)
+		if j < 0 {
+			t.Fatalf("missing profile end %q", end)
+		}
+		return s[i : i+j]
+	}
+	real := extract("static const bool g_ts_on =", "\nstatic const uint64_t g_ts_every") + "\n" +
+		extract("static uint64_t g_ts_batches =", "\n") + "\n" +
+		extract("static inline void fcuda_ts_untimed_transfer(void)", "\n// FCUDA_TS")
+	t.Logf("real profile source sha256=%x extracted declarations sha256=%x", sha256.Sum256(profile), sha256.Sum256([]byte(real)))
+	program := strings.Replace(cudaTokenomosStagingHarness, "#include \"tokenomos_staging.h\"", real+"\n#include \"tokenomos_staging.h\"", 1)
+	// Existing mocks still assert exact stream; make the expected owner selectable
+	// independently of g_stream, rather than weakening the assertion.
+	program = strings.Replace(program, "static bool g_capture_open", "static cudaStream_t expected_owner = g_stream;\nstatic bool g_capture_open", 1)
+	program = strings.ReplaceAll(program, "stream == g_stream", "stream == expected_owner")
+	program = strings.Replace(program, "enum api {", "static bool expect_accounting = true;\nstatic void check_accounting_at_api();\nenum api {", 1)
+	program = strings.Replace(program, "// Even an error may leave a queued operation:", "check_accounting_at_api();\n  // Even an error may leave a queued operation:", 1)
+	program = strings.Replace(program, "if (int error = inject(SyncCopy))", "check_accounting_at_api();\n  if (int error = inject(SyncCopy))", 1)
+	program += cudaTokenomosAccountingCases
+	source := filepath.Join(dir, "accounting.cpp")
+	binary := filepath.Join(dir, "accounting")
+	if err := os.WriteFile(source, []byte(program), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	// Existing shared harness helpers and extracted profiler counters are unused
+	// in this targeted translation unit; retain warnings without treating those
+	// known unreferenced declarations as errors.
+	if out, err := exec.CommandContext(ctx, compiler, "-std=c++17", "-Os", "-Wall", "-Wextra", "-Werror", "-Wno-unused-function", "-Wno-unused-variable", source, "-o", binary).CombinedOutput(); err != nil {
+		t.Fatalf("compile production accounting: %v\n%s", err, out)
+	}
+	for _, profileOn := range []string{"0", "1"} {
+		for _, mode := range []string{"async", "async-error", "sync", "sync-error", "admission", "allocation", "null-foreign", "callback-foreign", "invalid", "seal-error"} {
+			t.Run(profileOn+"/"+mode, func(t *testing.T) {
+				t.Setenv("FAK_CUDA_TIMESTAMP_PROFILE", profileOn)
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if out, err := exec.CommandContext(ctx, binary, mode).CombinedOutput(); err != nil {
+					t.Fatalf("production accounting %s: %v\n%s", mode, err, out)
+				}
+			})
+		}
+	}
+}
+
+const cudaTokenomosAccountingCases = `
+static void check_accounting_at_api() {
+  const uint64_t want = g_ts_on && expect_accounting ? uint64_t(calls[Copy] + calls[SyncCopy] + 1) : 0;
+  assert(g_ts_untimed_transfer == want); // already counted at API entry, even error
+}
+int main(int argc, char **argv) {
+ assert(argc == 2);
+ const std::string mode = argv[1];
+ expect_accounting = mode != "null-foreign";
+ int ids[4] = {1,2,3,4}, device[4] = {};
+ const uint64_t one = g_ts_on ? 1 : 0;
+ auto count = fcuda_ts_untimed_transfer;
+ if (mode == "null-foreign" || mode == "callback-foreign") {
+   expected_owner = reinterpret_cast<void *>(uintptr_t(37));
+   assert(expected_owner != g_stream);
+   fak_tokenomos_staging_pool pool;
+   assert(pool.begin(expected_owner) == 0);
+   assert(pool.put(device, ids, sizeof(ids), mode == "null-foreign" ? nullptr : count) == 0);
+   assert(g_ts_untimed_transfer == (mode == "null-foreign" ? 0 : one));
+   assert(pool.seal() == 0 && cudaStreamSynchronize(expected_owner) == 0);
+   assert(std::memcmp(ids,device,sizeof(ids)) == 0);
+   assert(calls[EventCreate] == 2 && calls[Record] == 1); // ownership events only
+ } else if (mode == "admission") {
+   g_capture_open = true;
+   assert(fak_tokenomos_staging_copy(device,ids,sizeof(ids),count) == -3);
+   g_capture_open = false; capture_status = cudaStreamCaptureStatusActive;
+   assert(fak_tokenomos_staging_copy(device,ids,sizeof(ids),count) == -3);
+   capture_status = cudaStreamCaptureStatusNone; device_ordinal = 1;
+   assert(fak_tokenomos_staging_copy(device,ids,sizeof(ids),count) == -3);
+   assert(g_ts_untimed_transfer == 0 && calls[Copy] == 0 && calls[SyncCopy] == 0 && calls[Host] == 0);
+ } else if (mode == "allocation") {
+   primary_api = Host;
+   assert(fak_tokenomos_staging_copy(device,ids,sizeof(ids),count) == 20000+primary_error);
+   assert(g_ts_untimed_transfer == 0 && calls[Copy] == 0);
+   assert(fak_tokenomos_staging_copy(device,ids,sizeof(ids),count) == 20000+primary_error);
+   assert(g_ts_untimed_transfer == 0);
+ } else if (mode == "invalid") {
+   assert(fak_tokenomos_staging_copy(nullptr,ids,sizeof(ids),count) == -1);
+   assert(g_tokenomos_staging.begin(g_stream) == 0);
+   assert(g_tokenomos_staging.put(device,ids,0,count) == cudaErrorInvalidValue);
+   assert(g_ts_untimed_transfer == 0 && calls[Copy] == 0 && calls[SyncCopy] == 0);
+ } else if (mode == "sync" || mode == "sync-error") {
+   std::vector<unsigned char> source(fak_tokenomos_staging_pool::capacity+1,31), dest(source.size());
+   if (mode == "sync-error") primary_api = SyncCopy;
+   int result = fak_tokenomos_staging_copy(dest.data(),source.data(),source.size(),count);
+   assert(result == (mode == "sync-error" ? 20000+primary_error : 0));
+   assert(g_ts_untimed_transfer == one && calls[SyncCopy] == 1 && calls[Host] == 0);
+   if (result == 0) assert(source == dest);
+ } else {
+   if (mode == "async-error") primary_api = Copy;
+   else if (mode == "seal-error") primary_api = Record;
+   else assert(mode == "async");
+   int result = fak_tokenomos_staging_copy(device,ids,sizeof(ids),count);
+   assert(result == (primary_api < 0 ? 0 : 20000+primary_error));
+   assert(g_ts_untimed_transfer == one && calls[Copy] == 1 && calls[SyncCopy] == 0);
+   if (result == 0) {
+     assert(fak_tokenomos_staging_copy(device,ids,sizeof(ids),count) == 0);
+     assert(g_ts_untimed_transfer == 2*one && calls[Copy] == 2);
+   } else {
+     assert(g_tokenomos_staging.terminal && g_tokenomos_staging.drained);
+     assert(fak_tokenomos_staging_copy(device,ids,sizeof(ids),count) == result);
+     assert(g_ts_untimed_transfer == one && calls[Copy] == 1);
+   }
+ }
+ return 0;
 }
 `
