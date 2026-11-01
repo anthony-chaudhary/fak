@@ -840,6 +840,13 @@ func runPiConfig(stdout, stderr io.Writer, argv []string) int {
 	// PiSafeContextBudget(*window) reports/writes the wrong envelope for a named model
 	// (e.g. DeepSeek's 500k resident target would print as the Qwen 65536).
 	budget := projectassets.PiModelContextBudget(*model, *window)
+	// Best-effort catalog probe: when the gateway answers and the selected model is
+	// Halo-served, cap the compaction trigger at what the Halo admits cold — the same
+	// authority as the launcher and --from-router routes. An unreachable gateway keeps
+	// the ordinary budget so offline config writes still work.
+	if _, _, _, _, _, _, advertisedHalo := probePiBackendWithCatalog(baseURL, 1500*time.Millisecond); piAdvertisedModelUsesHalo(*model, advertisedHalo) {
+		budget = projectassets.PiContextBudgetFor(budget.ServedWindow, projectassets.HaloPiColdAdmission.MaxTrigger())
+	}
 	if *write {
 		resolvedPath, modified, err := projectassets.EnsurePiProviderConfigForWindow(*path, baseURL, *model, *window)
 		if err != nil {
