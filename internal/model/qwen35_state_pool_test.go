@@ -85,3 +85,36 @@ func TestQwen35PreallocatedStateBankWitness(t *testing.T) {
 		t.Fatalf("runtime allocations after warmup = %d, want 0", finalReceipt.RuntimeAllocations)
 	}
 }
+
+// fak-test:runtime fast est=10ms lane=default
+func TestQwen35StateConsumersCanonicalLayout(t *testing.T) {
+	cfg := Config{ModelType: "qwen3_5_text", NumLayers: 2, LayerTypes: []string{"linear_attention", "linear_attention"}, LinearNumKeyHeads: 2, LinearNumValueHeads: 4, LinearKeyHeadDim: 8, LinearValueHeadDim: 8, LinearConvKernelDim: 1}
+	layout, err := ComputeQwen35StateLayout(cfg, "f32")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bank, err := NewQwen35PreallocatedStateBank(cfg, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, layers, err := bank.Acquire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(layers[0].ConvBuffer) != layout.ConvElements || len(layers[0].RecurrentBuffer) != layout.RecurrentElements || bank.Receipt().TotalStateBytes != layout.BytesPerLayer*4 {
+		t.Fatalf("bank differs from canonical width-one layout: receipt=%+v conv=%d recurrent=%d", bank.Receipt(), len(layers[0].ConvBuffer), len(layers[0].RecurrentBuffer))
+	}
+	for _, dtype := range []string{"", "f32", "f16", "bf16"} {
+		want, err := ComputeQwen35StateLayout(cfg, dtype)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := ComputeQwen35RecurrentPricingWithDtype(cfg, 2, dtype)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.ConvBytesPerLayer != want.ConvBytes || got.RecurrentBytesPerLayer != want.RecurrentBytes || got.TotalCapacityBytes != want.BytesPerLayer*4 || got.StateDtype != want.StateDtype {
+			t.Fatalf("%q pricing differs from layout: %+v", dtype, got)
+		}
+	}
+}

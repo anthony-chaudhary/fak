@@ -2,7 +2,6 @@ package model
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 )
 
@@ -33,19 +32,9 @@ func ComputeQwen35RecurrentPricingWithDtype(cfg Config, maxUnits int, stateDtype
 		return Qwen35RecurrentPricing{}, fmt.Errorf("maxUnits must be positive, got %d", maxUnits)
 	}
 
-	normalized := strings.ToLower(strings.TrimSpace(stateDtype))
-	if normalized == "" {
-		normalized = "f32"
-	}
-
-	var elemBytes int
-	switch normalized {
-	case "f32":
-		elemBytes = 4
-	case "f16", "bf16":
-		elemBytes = 2
-	default:
-		return Qwen35RecurrentPricing{}, fmt.Errorf("unsupported state dtype %q: must be f32, f16, or bf16", stateDtype)
+	layout, err := ComputeQwen35StateLayout(cfg, stateDtype)
+	if err != nil {
+		return Qwen35RecurrentPricing{}, err
 	}
 
 	linearLayers := 0
@@ -62,34 +51,30 @@ func ComputeQwen35RecurrentPricingWithDtype(cfg Config, maxUnits int, stateDtype
 		}
 	}
 
-	nK, nV, kHd, vHd, _, _, convDim := cfg.linearAttnDims()
-	kernel := cfg.LinearConvKernelDim
-	if kernel <= 1 {
-		kernel = 4
+	if linearLayers <= 0 {
+		return Qwen35RecurrentPricing{}, fmt.Errorf("linear layer count must be positive, got %d", linearLayers)
 	}
-
-	convElements := (kernel - 1) * convDim
-	convBytesPerLayer := int64(convElements * elemBytes)
-
-	recurrentElements := nV * kHd * vHd
-	if recurrentElements == 0 && nK > 0 {
-		recurrentElements = nK * kHd * vHd
+	// The canonical plan checks one layer; consumers must also check their
+	// capacity multipliers before admission or allocation.
+	const maxBytes = int64(^uint64(0) >> 1)
+	if layout.BytesPerLayer > maxBytes/int64(linearLayers) {
+		return Qwen35RecurrentPricing{}, fmt.Errorf("recurrent bytes per unit overflow")
 	}
-	recurrentBytesPerLayer := int64(recurrentElements * elemBytes)
-
-	bytesPerLayer := convBytesPerLayer + recurrentBytesPerLayer
-	bytesPerUnit := bytesPerLayer * int64(linearLayers)
+	bytesPerUnit := layout.BytesPerLayer * int64(linearLayers)
+	if bytesPerUnit > maxBytes/int64(maxUnits) {
+		return Qwen35RecurrentPricing{}, fmt.Errorf("recurrent total capacity overflow")
+	}
 	totalCapacity := bytesPerUnit * int64(maxUnits)
 
 	return Qwen35RecurrentPricing{
-		StateDtype:             normalized,
-		ElementBytes:           elemBytes,
+		StateDtype:             layout.StateDtype,
+		ElementBytes:           layout.ElementBytes,
 		NumLinearLayers:        linearLayers,
-		ConvDim:                convDim,
-		ConvKernel:             kernel,
-		ConvBytesPerLayer:      convBytesPerLayer,
-		RecurrentBytesPerLayer: recurrentBytesPerLayer,
-		BytesPerLayer:          bytesPerLayer,
+		ConvDim:                layout.ConvDim,
+		ConvKernel:             layout.ConvRows + 1,
+		ConvBytesPerLayer:      layout.ConvBytes,
+		RecurrentBytesPerLayer: layout.RecurrentBytes,
+		BytesPerLayer:          layout.BytesPerLayer,
 		BytesPerUnit:           bytesPerUnit,
 		MaxUnits:               maxUnits,
 		TotalCapacityBytes:     totalCapacity,

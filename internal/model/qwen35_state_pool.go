@@ -38,38 +38,21 @@ type Qwen35PreallocatedStateBank struct {
 
 // NewQwen35PreallocatedStateBank preallocates all layer conv and recurrent state buffers for maxUnits.
 func NewQwen35PreallocatedStateBank(cfg Config, maxUnits int) (*Qwen35PreallocatedStateBank, error) {
-	if maxUnits <= 0 {
-		return nil, fmt.Errorf("maxUnits must be positive, got %d", maxUnits)
+	pricing, err := ComputeQwen35RecurrentPricing(cfg, maxUnits)
+	if err != nil {
+		return nil, err
 	}
-
-	linearLayers := 0
-	for l := 0; l < cfg.NumLayers; l++ {
-		if cfg.isLinearAttnLayer(l) {
-			linearLayers++
-		}
+	linearLayers := pricing.NumLinearLayers
+	maxInt := int(^uint(0) >> 1)
+	if linearLayers > maxInt/2 || maxUnits > maxInt/(2*linearLayers) {
+		return nil, fmt.Errorf("state bank allocation count overflow")
 	}
-	if linearLayers == 0 {
-		if cfg.IsQwen35Hybrid() {
-			linearLayers = cfg.NumLayers
-		} else {
-			linearLayers = 1
-		}
-	}
-
-	nK, nV, kHd, vHd, _, _, convDim := cfg.linearAttnDims()
-	kernel := cfg.LinearConvKernelDim
-	if kernel <= 1 {
-		kernel = 4
-	}
-
-	convElements := (kernel - 1) * convDim
-	recurrentElements := nV * kHd * vHd
-	if recurrentElements == 0 && nK > 0 {
-		recurrentElements = nK * kHd * vHd
-	}
-
-	allocCount := 0
-	var totalBytes int64
+	// This bank realizes F32 storage, regardless of accounting-only dtypes
+	// supported by other consumers of the canonical layout.
+	convElements := int(pricing.ConvBytesPerLayer / 4)
+	recurrentElements := int(pricing.RecurrentBytesPerLayer / 4)
+	allocCount := 2 * linearLayers * maxUnits
+	totalBytes := pricing.TotalCapacityBytes
 
 	units := make([][]Qwen35LayerStateUnit, maxUnits)
 	for u := 0; u < maxUnits; u++ {
@@ -77,8 +60,6 @@ func NewQwen35PreallocatedStateBank(cfg Config, maxUnits int) (*Qwen35Preallocat
 		for l := 0; l < linearLayers; l++ {
 			cBuf := make([]float32, convElements)
 			rBuf := make([]float32, recurrentElements)
-			allocCount += 2
-			totalBytes += int64((convElements + recurrentElements) * 4)
 
 			units[u][l] = Qwen35LayerStateUnit{
 				UnitID:          u,

@@ -249,3 +249,44 @@ func TestQwen35Recurrent16BitPricingAndCapacityWitness(t *testing.T) {
 		}
 	})
 }
+
+// fak-test:runtime fast est=10ms lane=default
+func TestQwen35StateConsumersRejectInvalidGeometry(t *testing.T) {
+	cfg := Config{ModelType: "qwen3_5_text", NumLayers: 1, LayerTypes: []string{"linear_attention"}, LinearNumKeyHeads: 1, LinearNumValueHeads: 1, LinearKeyHeadDim: 1, LinearValueHeadDim: 1, LinearConvKernelDim: 1}
+	for _, field := range []string{"kernel", "heads"} {
+		bad := cfg
+		if field == "kernel" {
+			bad.LinearConvKernelDim = 0
+		} else {
+			bad.LinearNumValueHeads = 0
+		}
+		if _, err := ComputeQwen35RecurrentPricing(bad, 1); err == nil {
+			t.Errorf("pricing accepted invalid %s", field)
+		}
+		if _, err := NewQwen35PreallocatedStateBank(bad, 1); err == nil {
+			t.Errorf("bank accepted invalid %s", field)
+		}
+	}
+	badLayers := cfg
+	badLayers.NumLayers = 0
+	if _, err := ComputeQwen35RecurrentPricing(badLayers, 1); err == nil {
+		t.Error("pricing accepted zero hybrid layers")
+	}
+	if _, err := NewQwen35PreallocatedStateBank(badLayers, 1); err == nil {
+		t.Error("bank accepted zero hybrid layers")
+	}
+	// Both consumers must reject aggregate overflow before allocating state.
+	// Use geometry that exceeds int64 total bytes on both 32- and 64-bit hosts.
+	cfg.LinearKeyHeadDim = int(^uint(0)>>1) / 8
+	cfg.NumLayers = 32
+	cfg.LayerTypes = make([]string, cfg.NumLayers)
+	for i := range cfg.LayerTypes {
+		cfg.LayerTypes[i] = "linear_attention"
+	}
+	if _, err := ComputeQwen35RecurrentPricing(cfg, int(^uint(0)>>1)); err == nil {
+		t.Fatal("pricing accepted aggregate overflow; refusing unsafe bank allocation")
+	}
+	if _, err := NewQwen35PreallocatedStateBank(cfg, int(^uint(0)>>1)); err == nil {
+		t.Error("bank accepted aggregate overflow")
+	}
+}
