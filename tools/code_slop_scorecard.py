@@ -612,9 +612,28 @@ def _function_spans(text: str) -> list[tuple[int, int, str, str]]:
     return out
 
 
+# Bound retained source characters and offset counts, not claimed process RSS.
+_OWNER_LINE_CACHE_ENTRIES = 32
+_OWNER_LINE_CACHE_MAX_CHARS = 8192
+
+
+@lru_cache(maxsize=_OWNER_LINE_CACHE_ENTRIES)
+def _cached_owner_line_starts(text: str) -> tuple[int, ...]:
+    return tuple([0] + [m.end() for m in re.finditer("\n", text)])
+
+
+def _owner_line_starts(text: str) -> list[int]:
+    # Admit only ordinary immutable strings before entering the cache. Preserve
+    # the original path for oversized inputs and nonstandard caller objects.
+    if type(text) is str and len(text) <= _OWNER_LINE_CACHE_MAX_CHARS:
+        # A fresh list preserves indexing exceptions and cannot mutate the cache.
+        return list(_cached_owner_line_starts(text))
+    return [0] + [m.end() for m in re.finditer("\n", text)]
+
+
 @lru_cache(maxsize=512)
 def _owning_function(text: str, start_line: int, end_line: int):
-    starts = [0] + [m.end() for m in re.finditer("\n", text)]
+    starts = _owner_line_starts(text)
     start = starts[max(0, start_line - 1)]
     for fstart, fend, signature, body in _function_spans(text):
         if fstart <= start and start < fend:

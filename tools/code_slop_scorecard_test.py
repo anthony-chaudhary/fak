@@ -1659,6 +1659,104 @@ def test_git_tracked_source_paths_discovers_untracked_and_excludes_scratch():
         assert s_rels == ["internal/model/arch.s", "internal/model/new.s"]
 
 
+def test_owner_line_index_reuses_one_file_without_changing_survivors():
+    source = "package fixture\n" + "".join(_dup_block(n) for n in ("one", "two", "three"))
+    sites = [("fixture.go", source.count("\n", 0, start) + 2,
+              source.count("\n", 0, end))
+             for start, end, _, _ in cs._function_spans.__wrapped__(source)]
+    original = cs.re.finditer
+    calls = []
+    line_cache = getattr(cs, "_cached_owner_line_starts", None)
+
+    def counted(pattern, text, *args, **kwargs):
+        if pattern == "\n" and text == source:
+            calls.append(text)
+        return original(pattern, text, *args, **kwargs)
+
+    cs._function_spans.cache_clear()
+    cs._owning_function.cache_clear()
+    if line_cache is not None:
+        line_cache.cache_clear()
+    cs.re.finditer = counted
+    try:
+        assert cs._dup_survivor_groups({"fixture.go": source}, [sites]) == ([], [sites])
+        assert cs._owning_function.cache_info().misses == 3
+        assert cs._owning_function.cache_info().hits == 3
+        assert cs._function_spans.cache_info().misses == 1
+        assert cs._function_spans.cache_info().hits == 2
+        assert len(calls) == 1, f"newline index rebuilt {len(calls)} times for one source"
+    finally:
+        cs.re.finditer = original
+        cs._function_spans.cache_clear()
+        cs._owning_function.cache_clear()
+        if line_cache is not None:
+            line_cache.cache_clear()
+
+
+def test_owner_line_index_admission_eviction_and_mutation_isolation():
+    assert cs._OWNER_LINE_CACHE_ENTRIES == 32
+    assert cs._OWNER_LINE_CACHE_MAX_CHARS == 8192
+    cache = cs._cached_owner_line_starts
+    original = cs.re.finditer
+    calls = []
+
+    def counted(pattern, text, *args, **kwargs):
+        if pattern == "\n":
+            calls.append(text)
+        return original(pattern, text, *args, **kwargs)
+
+    cache.cache_clear()
+    cs.re.finditer = counted
+    try:
+        text = "\n" * 8192
+        first = cs._owner_line_starts(text)
+        second = cs._owner_line_starts(text)
+        assert first == second == list(range(8193)) and first is not second
+        assert len(calls) == 1
+        assert isinstance(cache(text), tuple)
+        first[0] = 99
+        assert cs._owner_line_starts(text)[0] == 0
+
+        # Admission counts characters, not encoded bytes.
+        wide = chr(0x1f600) * 8192
+        assert cs._owner_line_starts(wide) == [0]
+        assert cs._owner_line_starts(wide) == [0]
+        assert calls.count(wide) == 1
+
+        before = cache.cache_info()
+        oversized = "\n" * 8193
+        assert cs._owner_line_starts(oversized) == list(range(8194))
+        assert cs._owner_line_starts(oversized) == list(range(8194))
+        assert calls.count(oversized) == 2 and cache.cache_info() == before
+
+        # Content, not path or object identity, governs reuse and invalidation.
+        assert cs._owner_line_starts("a\nb") == [0, 2]
+        assert cs._owner_line_starts("ab\n") == [0, 3]
+        assert cs._owner_line_starts("".join(("a", "\n", "b"))) == [0, 2]
+        assert calls.count("a\nb") == calls.count("ab\n") == 1
+
+        class Source(str):
+            pass
+
+        before = cache.cache_info()
+        subclass = Source("sub\nclass")
+        assert cs._owner_line_starts(subclass) == [0, 4]
+        assert cs._owner_line_starts(subclass) == [0, 4]
+        assert calls.count(subclass) == 2 and cache.cache_info() == before
+
+        cache.cache_clear()
+        calls.clear()
+        for i in range(33):
+            value = f"{i}\n"
+            assert cs._owner_line_starts(value) == [0, len(value)]
+        assert cache.cache_info().currsize == cache.cache_info().maxsize == 32
+        assert cs._owner_line_starts("0\n") == [0, 2]
+        assert len(calls) == cache.cache_info().misses == 34
+    finally:
+        cs.re.finditer = original
+        cache.cache_clear()
+
+
 def test_duplication_owner_caches_preserve_outputs_and_bound_work():
     # In-memory performance regression: no wall-clock threshold or corpus scan.
     cached_spans, cached_owner = cs._function_spans, cs._owning_function
