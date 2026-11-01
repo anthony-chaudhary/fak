@@ -2,7 +2,10 @@ package safesync
 
 import (
 	"context"
+	"errors"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -764,5 +767,171 @@ func TestParkDetached_BranchRole(t *testing.T) {
 	}
 	if !rec.OK {
 		t.Fatalf("expected OK=true, got reason: %s", rec.Reason)
+	}
+}
+
+// fak-test:runtime medium est=12s lane=default
+func TestParkIncomingDeletionsPreserveCheckpoint(t *testing.T) {
+	for _, tc := range []struct {
+		name, deleted, fault string
+		posixOnly            bool
+	}{
+		{"portable-deletion", "incoming removed.txt", "", false},
+		{"literal-glob", ":(glob)incoming*.txt", "", true},
+		{"whitespace", " incoming [1]*.txt ", "", true},
+		{"checkout-exit", "incoming removed.txt", "checkout-exit", false},
+		{"checkout-error", "incoming removed.txt", "checkout-error", false},
+		{"dirty-literal", " incoming [1]*.txt ", "dirty", true},
+		{"diff-exit", "incoming removed.txt", "diff-exit", false},
+		{"diff-framing", "incoming removed.txt", "diff-framing", false},
+		{"final-diff-exit", "incoming removed.txt", "final-diff-exit", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.posixOnly && runtime.GOOS == "windows" {
+				t.Skip("POSIX literal filenames are not representable on Windows")
+			}
+			repo := t.TempDir()
+			git(t, repo, "init", "-b", "main")
+			git(t, repo, "config", "user.name", "Park Fixture")
+			git(t, repo, "config", "user.email", "park@example.invalid")
+			git(t, repo, "config", "core.autocrlf", "false")
+			const baseline = "top\nmiddle\nbottom\n"
+			const incoming = "top\nincoming\nmiddle\nbottom\n"
+			const owned = incoming + "unique\n"
+			const peer = "peer staged bytes\n"
+			const decoy = "decoy staged bytes\n"
+			writeFile(t, filepath.Join(repo, "owned.txt"), baseline)
+			writeFile(t, filepath.Join(repo, tc.deleted), "delete me\n")
+			writeFile(t, filepath.Join(repo, "peer.txt"), "peer base\n")
+			writeFile(t, filepath.Join(repo, "incoming1decoy.txt"), "decoy base\n")
+			git(t, repo, "add", "--all")
+			git(t, repo, "commit", "-m", "base")
+			common := revString(t, repo, "HEAD")
+			if err := os.Remove(filepath.Join(repo, tc.deleted)); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(repo, "owned.txt"), incoming)
+			git(t, repo, "add", "-u")
+			git(t, repo, "commit", "-m", "incoming deletion")
+			target := revString(t, repo, "HEAD")
+			git(t, repo, "checkout", "--detach", common)
+			writeFile(t, filepath.Join(repo, "local.txt"), "local committed\n")
+			git(t, repo, "add", "local.txt")
+			git(t, repo, "commit", "-m", "local ahead")
+			base := revString(t, repo, "HEAD")
+			writeFile(t, filepath.Join(repo, "owned.txt"), owned)
+			writeFile(t, filepath.Join(repo, "peer.txt"), peer)
+			writeFile(t, filepath.Join(repo, "incoming1decoy.txt"), decoy)
+			git(t, repo, "add", "peer.txt", "incoming1decoy.txt")
+			deletedBytes := "delete me\n"
+			if tc.fault == "dirty" {
+				deletedBytes = "unowned dirty incoming bytes\n"
+				writeFile(t, filepath.Join(repo, tc.deleted), deletedBytes)
+			}
+			beforeIndex := gitOutput(t, repo, "write-tree")
+			checkoutCalls, diffCalls, injected := 0, 0, 0
+			rec, err := Park(context.Background(), ParkOptions{
+				Repo: repo, Session: "incoming-deletions", Paths: []string{"owned.txt"},
+				TargetRef: target, Apply: true,
+				Runner: func(ctx context.Context, dir string, args ...string) RunResult {
+					if len(args) > 1 && args[0] == "diff" && args[1] == "--no-ext-diff" {
+						diffCalls++
+						if tc.fault == "diff-exit" || (tc.fault == "final-diff-exit" && diffCalls == 2) {
+							injected++
+							return RunResult{Code: 23}
+						}
+						if tc.fault == "diff-framing" {
+							injected++
+							return RunResult{Stdout: []byte(tc.deleted)}
+						}
+					}
+					if len(args) == 6 && args[0] == "--literal-pathspecs" && args[1] == "checkout" && args[2] == "--no-overlay" && args[4] == "--" && args[5] == tc.deleted {
+						checkoutCalls++
+						switch tc.fault {
+						case "checkout-exit":
+							injected++
+							return RunResult{Code: 23}
+						case "checkout-error":
+							injected++
+							return RunResult{Err: errors.New("injected checked checkout refusal")}
+						}
+					}
+					return RealRunner(ctx, dir, args...)
+				},
+			})
+			if readFile(t, filepath.Join(repo, "peer.txt")) != peer ||
+				readFile(t, filepath.Join(repo, "incoming1decoy.txt")) != decoy ||
+				gitOutput(t, repo, "show", ":peer.txt") != peer ||
+				gitOutput(t, repo, "show", ":incoming1decoy.txt") != decoy {
+				t.Fatal("unrelated staged/index/worktree bytes changed")
+			}
+			if revString(t, repo, "main") != target {
+				t.Fatal("detached Park changed the shared branch")
+			}
+			preflightRefusal := tc.fault == "dirty" || tc.fault == "diff-exit" || tc.fault == "diff-framing"
+			if preflightRefusal {
+				if rec.OK || rec.Status != ParkStatusConflict || rec.CheckpointRef != "" ||
+					revString(t, repo, "HEAD") != base || gitOutput(t, repo, "write-tree") != beforeIndex ||
+					readFile(t, filepath.Join(repo, "owned.txt")) != owned ||
+					readFile(t, filepath.Join(repo, tc.deleted)) != deletedBytes || checkoutCalls != 0 {
+					t.Fatalf("preflight refusal mutated state: %+v err=%v", rec, err)
+				}
+				if tc.fault == "dirty" {
+					if err != nil || rec.Reason != ReasonDirtyWriteOverlap || injected != 0 {
+						t.Fatalf("literal dirty collision missed: %+v err=%v", rec, err)
+					}
+				} else if err == nil || injected != 1 {
+					t.Fatalf("failed path enumeration accepted: %+v err=%v", rec, err)
+				}
+				return
+			}
+			if rec.CheckpointRef == "" {
+				t.Fatalf("missing immutable recovery checkpoint: %+v err=%v", rec, err)
+			}
+			checkpoint := revString(t, repo, rec.CheckpointRef)
+			if rec.CheckpointRef != "refs/fak/wip/incoming-deletions/park-"+checkpoint ||
+				strings.TrimSpace(gitOutput(t, repo, "rev-list", "--parents", "-n", "1", checkpoint)) != checkpoint+" "+base ||
+				gitOutput(t, repo, "show", checkpoint+":owned.txt") != owned ||
+				gitOutput(t, repo, "show", checkpoint+":peer.txt") != "peer base\n" {
+				t.Fatal("checkpoint lost selected WIP, included a staged peer, or changed ancestry")
+			}
+			if tc.fault == "final-diff-exit" {
+				if err == nil || rec.OK || rec.Status != ParkStatusConflict || rec.NewHEAD != base ||
+					revString(t, repo, "HEAD") != base || injected != 1 || checkoutCalls != 0 {
+					t.Fatalf("final diff failure advanced HEAD: %+v err=%v", rec, err)
+				}
+				return
+			}
+			head := revString(t, repo, "HEAD")
+			if rec.NewHEAD != head || head == base ||
+				strings.TrimSpace(gitOutput(t, repo, "rev-list", "--parents", "-n", "1", head)) != head+" "+base+" "+target {
+				t.Fatalf("receipt/actual integration ancestry differs: %+v HEAD=%s", rec, head)
+			}
+			if tc.fault != "" {
+				if err == nil || rec.OK || rec.Status != ParkStatusConflict || injected != 1 || checkoutCalls != 1 {
+					t.Fatalf("partial integration was reported as success: %+v err=%v", rec, err)
+				}
+				// A post-CAS failure does not pretend to undo HEAD. The old
+				// incoming file/index and the immutable owned checkpoint remain.
+				if readFile(t, filepath.Join(repo, tc.deleted)) != deletedBytes ||
+					gitOutput(t, repo, "--literal-pathspecs", "ls-files", "-z", "--", tc.deleted) == "" {
+					t.Fatal("failed checkout unexpectedly changed the incoming path")
+				}
+				return
+			}
+			if err != nil || !rec.OK || rec.Status != ParkStatusRestored || checkoutCalls != 1 || injected != 0 {
+				t.Fatalf("deletion integration failed: %+v err=%v", rec, err)
+			}
+			if _, err := os.Stat(filepath.Join(repo, tc.deleted)); !os.IsNotExist(err) {
+				t.Fatalf("incoming deletion remains in worktree: %v", err)
+			}
+			if gitOutput(t, repo, "--literal-pathspecs", "ls-files", "-z", "--", tc.deleted) != "" ||
+				gitOutput(t, repo, "--literal-pathspecs", "diff", "--cached", "--name-only", "-z", "--", tc.deleted, "owned.txt") != "" {
+				t.Fatal("incoming deletion or selected upstream hunk was staged backwards")
+			}
+			if readFile(t, filepath.Join(repo, "owned.txt")) != owned || gitOutput(t, repo, "show", ":owned.txt") != incoming {
+				t.Fatal("selected local effect or integrated index baseline was lost")
+			}
+		})
 	}
 }

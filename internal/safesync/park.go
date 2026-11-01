@@ -212,7 +212,7 @@ func Park(ctx context.Context, opts ParkOptions) (ParkReceipt, error) {
 	receipt.TargetSHA = targetSHA
 
 	// 2. Verify selected paths & dirty paths
-	dirtyPaths, err := workingTreeDirtyPaths(ctx, run, repo)
+	dirtyPaths, err := parkDirtyPaths(ctx, run, repo)
 	if err != nil {
 		receipt.Status = ParkStatusConflict
 		receipt.Reason = fmt.Sprintf("inspect working tree: %v", err)
@@ -235,14 +235,15 @@ func Park(ctx context.Context, opts ParkOptions) (ParkReceipt, error) {
 		mergeBase = baseHEAD
 	}
 
-	diffRes := run(ctx, repo, "diff", "--name-only", mergeBase, targetSHA)
-	incomingLines := strings.Fields(string(diffRes.Stdout))
-	incomingMap := make(map[string]bool, len(incomingLines))
-	for _, line := range incomingLines {
-		line = path.Clean(filepath.ToSlash(strings.TrimSpace(line)))
-		if line != "" {
-			incomingMap[line] = true
-		}
+	incomingPaths, err := parkChangedPaths(ctx, run, repo, mergeBase, targetSHA)
+	if err != nil {
+		receipt.Status = ParkStatusConflict
+		receipt.Reason = "cannot inspect incoming integration paths"
+		return receipt, err
+	}
+	incomingMap := make(map[string]bool, len(incomingPaths))
+	for _, p := range incomingPaths {
+		incomingMap[p] = true
 	}
 
 	// Check for unowned colliding dirty paths and collect unrelated paths preserved
@@ -424,6 +425,16 @@ func Park(ctx context.Context, opts ParkOptions) (ParkReceipt, error) {
 			newCommit = strings.TrimSpace(string(cTree.Stdout))
 		}
 
+		// Resolve the complete literal write set before advancing HEAD. A failed
+		// read must not turn into a successful but incomplete integration.
+		changedPaths, err := parkChangedPaths(ctx, run, repo, baseHEAD, newCommit)
+		if err != nil {
+			receipt.NewHEAD = baseHEAD
+			receipt.Status = ParkStatusConflict
+			receipt.Reason = "cannot enumerate integration paths; checkpoint retained"
+			return receipt, err
+		}
+
 		// HEAD follows the actual checkout: its branch when attached, or the
 		// worktree-local ref when detached. currentBranch's logical sync-target
 		// fallback must never select a shared branch for a detached worker write.
@@ -438,14 +449,23 @@ func Park(ctx context.Context, opts ParkOptions) (ParkReceipt, error) {
 			return receipt, nil
 		}
 
-		// Update working tree for paths that changed between baseHEAD and newCommit (excluding selectedPaths)
-		diffRes := run(ctx, repo, "diff", "--name-only", baseHEAD, newCommit)
-		for _, line := range strings.Fields(string(diffRes.Stdout)) {
-			norm := path.Clean(filepath.ToSlash(strings.TrimSpace(line)))
-			if norm == "" || selectedMap[norm] {
+		// The CAS is already durable: report its actual result even if a later
+		// path update fails. The immutable checkpoint remains the recovery root;
+		// this is not an atomic rollback or permission to retry blindly.
+		receipt.NewHEAD = newCommit
+		for _, p := range changedPaths {
+			if selectedMap[p] {
 				continue
 			}
-			_ = run(ctx, repo, "checkout", newCommit, "--", norm)
+			// Overlay checkout cannot remove an incoming deletion. Literal
+			// pathspecs also prevent a tracked filename from becoming a glob.
+			co := run(ctx, repo, "--literal-pathspecs", "checkout", "--no-overlay", newCommit, "--", p)
+			if co.Err != nil || co.Code != 0 {
+				receipt.Status = ParkStatusConflict
+				receipt.Reason = "incoming path update failed; integration is incomplete"
+				receipt.Detail = fmt.Sprintf("HEAD advanced to %s; checkpoint %s retained", newCommit, checkpointRef)
+				return receipt, fmt.Errorf("checkout incoming path %q: code=%d err=%v %s", p, co.Code, co.Err, string(co.Stderr))
+			}
 		}
 	}
 
@@ -518,6 +538,82 @@ func Park(ctx context.Context, opts ParkOptions) (ParkReceipt, error) {
 	}
 
 	return receipt, nil
+}
+
+// parkChangedPaths preserves Git's path bytes, including whitespace and pathspec
+// metacharacters. No rename pairing or line-oriented unquoting is involved.
+func parkChangedPaths(ctx context.Context, run Runner, repo, base, target string) ([]string, error) {
+	res := run(ctx, repo, "diff", "--no-ext-diff", "--no-renames", "--name-only", "-z", base, target, "--")
+	if res.Err != nil || res.Code != 0 {
+		return nil, fmt.Errorf("enumerate Park paths: code=%d err=%v %s", res.Code, res.Err, string(res.Stderr))
+	}
+	if len(res.Stdout) == 0 {
+		return nil, nil
+	}
+	if res.Stdout[len(res.Stdout)-1] != 0 {
+		return nil, errors.New("unterminated Park changed-path record")
+	}
+	var paths []string
+	for _, raw := range bytes.Split(res.Stdout[:len(res.Stdout)-1], []byte{0}) {
+		p := string(raw)
+		if !parkLiteralPath(repo, p) {
+			return nil, fmt.Errorf("unsafe Park changed path %q", p)
+		}
+		paths = append(paths, p)
+	}
+	return paths, nil
+}
+
+func parkLiteralPath(repo, p string) bool {
+	_, safe := safeWorktreePath(repo, p)
+	return safe && path.Clean(p) == p
+}
+
+// The shared dirty-path reader trims pathname whitespace. Park must retain it:
+// otherwise a dirty incoming literal could evade the unowned-collision guard.
+// Porcelain -z emits a rename/copy's destination followed by its source.
+func parkDirtyPaths(ctx context.Context, run Runner, repo string) ([]string, error) {
+	res := run(ctx, repo, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	if res.Err != nil || res.Code != 0 {
+		return nil, fmt.Errorf("Park status: code=%d err=%v", res.Code, res.Err)
+	}
+	raw := res.Stdout
+	seen := make(map[string]bool)
+	var paths []string
+	add := func(b []byte) error {
+		p := string(b)
+		if !parkLiteralPath(repo, p) {
+			return fmt.Errorf("unsafe Park dirty path %q", p)
+		}
+		if !seen[p] {
+			seen[p] = true
+			paths = append(paths, p)
+		}
+		return nil
+	}
+	for len(raw) > 0 {
+		end := bytes.IndexByte(raw, 0)
+		if end < 4 || raw[2] != ' ' {
+			return nil, errors.New("invalid Park status record")
+		}
+		entry := raw[:end]
+		raw = raw[end+1:]
+		if err := add(entry[3:]); err != nil {
+			return nil, err
+		}
+		if entry[0] == 'R' || entry[0] == 'C' || entry[1] == 'R' || entry[1] == 'C' {
+			end = bytes.IndexByte(raw, 0)
+			if end < 1 {
+				return nil, errors.New("invalid Park rename source record")
+			}
+			if err := add(raw[:end]); err != nil {
+				return nil, err
+			}
+			raw = raw[end+1:]
+		}
+	}
+	sort.Strings(paths)
+	return paths, nil
 }
 
 // readParkGitBlob distinguishes proven absence from a failed content lookup.
