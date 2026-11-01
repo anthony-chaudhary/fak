@@ -314,7 +314,7 @@ func opsRunInferencePreflight(ctx context.Context, baseURL, model string, apiKey
 	if len(apiKeyEnv) > 0 {
 		keyEnv = apiKeyEnv[0]
 	}
-	return opsRunConfiguredInferencePreflight(ctx, baseURL, model, keyEnv, "", "", 32)
+	return opsRunConfiguredInferencePreflight(ctx, baseURL, model, keyEnv, "", "", 1024)
 }
 
 func opsRunConfiguredInferencePreflight(ctx context.Context, baseURL, model, keyEnv, effort, tokenField string, maxTokens int) (opsRunInferencePreflightReceipt, error) {
@@ -326,6 +326,14 @@ func opsRunConfiguredInferencePreflight(ctx context.Context, baseURL, model, key
 			return receipt, errors.New(receipt.Reason)
 		}
 	}
+	return opsRunConfiguredInferencePreflightValue(ctx, baseURL, model, apiKey, effort, tokenField, maxTokens)
+}
+
+func opsRunInferencePreflightBearer(ctx context.Context, baseURL, model, bearer string) (opsRunInferencePreflightReceipt, error) {
+	return opsRunConfiguredInferencePreflightValue(ctx, baseURL, model, bearer, "", "", 1024)
+}
+
+func opsRunConfiguredInferencePreflightValue(ctx context.Context, baseURL, model, apiKey, effort, tokenField string, maxTokens int) (opsRunInferencePreflightReceipt, error) {
 	p := agent.NewHTTPPlanner(strings.TrimRight(strings.TrimSpace(baseURL), "/"), model, apiKey)
 	p.MaxTokens = maxTokens
 	p.CompletionTokenField = tokenField
@@ -449,6 +457,7 @@ func opsRunInferenceProbeInput() ([]agent.Message, []agent.ToolDef, json.RawMess
 
 func opsRunProbeInferenceRequest(req *http.Request, model string) opsRunProbeEvidence {
 	client := &http.Client{Timeout: opsRunInferenceProbeTimeout}
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := client.Do(req)
 	if err != nil {
 		reason := "transport"
@@ -825,6 +834,10 @@ func runOpsRun(stdout, stderr io.Writer, args []string) int {
 }
 
 func opsRunChildEnvironment(configContent, apiKeyEnv string, forwardJournalOverride ...bool) ([]string, func(), error) {
+	return opsRunChildEnvironmentValue(configContent, apiKeyEnv, os.Getenv(strings.TrimSpace(apiKeyEnv)), forwardJournalOverride...)
+}
+
+func opsRunChildEnvironmentValue(configContent, apiKeyEnv, apiKeyValue string, forwardJournalOverride ...bool) ([]string, func(), error) {
 	runRoot, err := os.MkdirTemp("", "fak-ops-run-")
 	if err != nil {
 		return nil, func() {}, err
@@ -859,8 +872,8 @@ func opsRunChildEnvironment(configContent, apiKeyEnv string, forwardJournalOverr
 			cleanup()
 			return nil, func() {}, fmt.Errorf("unsafe --api-key-env name %q", apiKeyEnv)
 		}
-		if value, ok := os.LookupEnv(apiKeyEnv); ok {
-			out = append(out, apiKeyEnv+"="+value)
+		if apiKeyValue != "" {
+			out = append(out, apiKeyEnv+"="+apiKeyValue)
 		}
 	}
 	out = append(out,
@@ -871,6 +884,101 @@ func opsRunChildEnvironment(configContent, apiKeyEnv string, forwardJournalOverr
 		"USERPROFILE="+home,
 	)
 	return out, cleanup, nil
+}
+
+// opsRunSecretRedactor removes one exact selected credential from a stream,
+// retaining only a bounded possible-prefix tail so split writes cannot evade it.
+type opsRunSecretRedactor struct {
+	dst      io.Writer
+	patterns [][]byte
+	pending  []byte
+	err      error
+}
+
+func newOpsRunSecretRedactor(dst io.Writer, secret string) *opsRunSecretRedactor {
+	w := &opsRunSecretRedactor{dst: dst}
+	if secret == "" {
+		return w
+	}
+	addPattern := func(pattern []byte) {
+		for _, existing := range w.patterns {
+			if bytes.Equal(existing, pattern) {
+				return
+			}
+		}
+		w.patterns = append(w.patterns, append([]byte(nil), pattern...))
+	}
+	addPattern([]byte(secret))
+	if encoded, err := json.Marshal(secret); err == nil && len(encoded) >= 2 {
+		addPattern(encoded[1 : len(encoded)-1])
+	}
+	var encoded bytes.Buffer
+	encoder := json.NewEncoder(&encoded)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(secret); err == nil {
+		raw := bytes.TrimSpace(encoded.Bytes())
+		if len(raw) >= 2 {
+			addPattern(raw[1 : len(raw)-1])
+		}
+	}
+	return w
+}
+
+func (w *opsRunSecretRedactor) Write(p []byte) (int, error) {
+	if w.err != nil {
+		return 0, w.err
+	}
+	if len(w.patterns) == 0 {
+		_, w.err = w.dst.Write(p)
+		if w.err != nil {
+			return 0, w.err
+		}
+		return len(p), nil
+	}
+	for _, b := range p {
+		w.pending = append(w.pending, b)
+		if err := w.drain(false); err != nil {
+			return 0, err
+		}
+	}
+	return len(p), nil
+}
+
+func (w *opsRunSecretRedactor) Flush() error {
+	if w.err == nil {
+		w.err = w.drain(true)
+	}
+	return w.err
+}
+
+func (w *opsRunSecretRedactor) drain(flush bool) error {
+	for len(w.pending) > 0 {
+		canGrow := false
+		var match []byte
+		for _, pattern := range w.patterns {
+			if len(pattern) > len(w.pending) && bytes.HasPrefix(pattern, w.pending) {
+				canGrow = true
+			}
+			if len(pattern) <= len(w.pending) && bytes.HasPrefix(w.pending, pattern) && len(pattern) > len(match) {
+				match = pattern
+			}
+		}
+		if canGrow && !flush {
+			return nil
+		}
+		if len(match) > 0 {
+			if _, err := io.WriteString(w.dst, "[REDACTED]"); err != nil {
+				return err
+			}
+			w.pending = w.pending[len(match):]
+			continue
+		}
+		if _, err := w.dst.Write(w.pending[:1]); err != nil {
+			return err
+		}
+		w.pending = w.pending[1:]
+	}
+	return nil
 }
 
 func opsRunAllowedPlatformEnv(name string) bool {

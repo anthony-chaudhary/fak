@@ -60,6 +60,114 @@ const (
 	opsPiDirective = "Complete the attached task. Follow it exactly; it is your only task."
 )
 
+const opsPiAPIKeyMaxBytes = 4096
+
+// opsPiAPIKeyFile holds the admitted descriptor and its directory root. Reads
+// verify that the pathname still names the same regular file before and after
+// consuming the descriptor, so a replaced path is refused without reopening it.
+type opsPiAPIKeyFile struct {
+	path string
+	base string
+	root *os.Root
+	file *os.File
+	info os.FileInfo
+}
+
+func openOpsPiAPIKeyFile(path string) (*opsPiAPIKeyFile, error) {
+	if !filepath.IsAbs(path) {
+		return nil, fmt.Errorf("--api-key-file must be an absolute path")
+	}
+	clean := filepath.Clean(path)
+	root, err := os.OpenRoot(filepath.Dir(clean))
+	if err != nil {
+		return nil, fmt.Errorf("open credential directory: %w", err)
+	}
+	base := filepath.Base(clean)
+	info, err := root.Lstat(base)
+	if err != nil {
+		root.Close()
+		return nil, fmt.Errorf("inspect credential file: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		root.Close()
+		return nil, fmt.Errorf("credential file must be a regular non-symlink file")
+	}
+	if info.Size() < 1 || info.Size() > opsPiAPIKeyMaxBytes {
+		root.Close()
+		return nil, fmt.Errorf("credential file size must be 1..%d bytes", opsPiAPIKeyMaxBytes)
+	}
+	f, err := root.Open(base)
+	if err != nil {
+		root.Close()
+		return nil, fmt.Errorf("open credential file: %w", err)
+	}
+	opened, err := f.Stat()
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
+		f.Close()
+		root.Close()
+		return nil, fmt.Errorf("credential path changed during admission")
+	}
+	k := &opsPiAPIKeyFile{path: clean, base: base, root: root, file: f, info: opened}
+	if err := k.verifyCurrent(); err != nil {
+		k.Close()
+		return nil, err
+	}
+	return k, nil
+}
+
+func (k *opsPiAPIKeyFile) verifyCurrent() error {
+	current, err := k.root.Lstat(k.base)
+	if err != nil || current.Mode()&os.ModeSymlink != 0 || !current.Mode().IsRegular() || !os.SameFile(k.info, current) {
+		return fmt.Errorf("credential path changed after admission")
+	}
+	return nil
+}
+
+func (k *opsPiAPIKeyFile) Read() (string, error) {
+	if err := k.verifyCurrent(); err != nil {
+		return "", err
+	}
+	if _, err := k.file.Seek(0, io.SeekStart); err != nil {
+		return "", fmt.Errorf("read credential file")
+	}
+	raw, err := io.ReadAll(io.LimitReader(k.file, opsPiAPIKeyMaxBytes+1))
+	if err != nil || len(raw) == 0 || len(raw) > opsPiAPIKeyMaxBytes {
+		return "", fmt.Errorf("credential file must contain 1..%d bytes", opsPiAPIKeyMaxBytes)
+	}
+	if err := k.verifyCurrent(); err != nil {
+		return "", err
+	}
+	if bytes.HasSuffix(raw, []byte("\r\n")) {
+		raw = raw[:len(raw)-2]
+	} else if bytes.HasSuffix(raw, []byte("\n")) {
+		raw = raw[:len(raw)-1]
+	}
+	if len(raw) == 0 {
+		return "", fmt.Errorf("credential token must be nonempty")
+	}
+	for _, b := range raw {
+		if b < 0x21 || b > 0x7e {
+			return "", fmt.Errorf("credential token must be one visible ASCII token")
+		}
+	}
+	return string(raw), nil
+}
+
+func (k *opsPiAPIKeyFile) Close() error {
+	var first error
+	if k.file != nil {
+		first = k.file.Close()
+		k.file = nil
+	}
+	if k.root != nil {
+		if err := k.root.Close(); first == nil {
+			first = err
+		}
+		k.root = nil
+	}
+	return first
+}
+
 // opsPiProviderWire maps an accepted Pi provider id to the guard wire it speaks.
 // The `fak` provider is the OpenAI-completions route to the Fak Router; a bare
 // `anthropic` selection keeps Pi's native Messages wire through the gateway.
@@ -280,6 +388,7 @@ func runOpsPi(stdout, stderr io.Writer, args []string) int {
 	model := fs.String("model", "", "served model identifier (required)")
 	baseURL := fs.String("base-url", "", "Fak Router / gateway endpoint (required except dry-run)")
 	apiKeyEnv := fs.String("api-key-env", "", "environment variable holding the upstream key")
+	apiKeyFile := fs.String("api-key-file", "", "absolute regular file holding the upstream key (requires --api-key-env)")
 	promptFile := fs.String("prompt-file", "", "UTF-8 task file, delivered via Pi's @file inclusion")
 	workspace := fs.String("workspace", "", "existing workspace directory for the child process (required except dry-run)")
 	timeout := fs.Duration("timeout", 5*time.Minute, "positive wall-clock deadline")
@@ -300,6 +409,45 @@ func runOpsPi(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, "ops run pi: require --harness pi, --provider fak|anthropic, --model, --prompt-file, --workspace, --receipt and a positive --timeout; no positional arguments (--workspace and --receipt may be omitted only for --dry-run)")
 		return 2
 	}
+	*apiKeyEnv = strings.TrimSpace(*apiKeyEnv)
+	*apiKeyFile = strings.TrimSpace(*apiKeyFile)
+	fileMode := *apiKeyFile != ""
+	if fileMode && strings.TrimSpace(*apiKeyEnv) == "" {
+		fmt.Fprintln(stderr, "ops run pi: --api-key-file requires --api-key-env")
+		return 2
+	}
+	if fileMode {
+		name := strings.TrimSpace(*apiKeyEnv)
+		canonical := strings.ToUpper(name)
+		if !opsRunValidEnvName(name) || opsRunControlledEnv(canonical) || opsRunAllowedPlatformEnv(canonical) {
+			fmt.Fprintln(stderr, "ops run pi: --api-key-env name is unsafe")
+			return 2
+		}
+	}
+	if fileMode {
+		if ambient, ok := os.LookupEnv(strings.TrimSpace(*apiKeyEnv)); ok && ambient != "" {
+			fmt.Fprintln(stderr, "ops run pi: --api-key-file refuses a nonempty ambient value for --api-key-env")
+			return 2
+		}
+	}
+	var keyFile *opsPiAPIKeyFile
+	selectedBearer := ""
+	if fileMode {
+		var err error
+		keyFile, err = openOpsPiAPIKeyFile(strings.TrimSpace(*apiKeyFile))
+		if err != nil {
+			fmt.Fprintf(stderr, "ops run pi: credential file refused: %v\n", err)
+			return 2
+		}
+		defer keyFile.Close()
+		selectedBearer, err = keyFile.Read()
+		if err != nil {
+			fmt.Fprintf(stderr, "ops run pi: credential file refused: %v\n", err)
+			return 2
+		}
+	} else if strings.TrimSpace(*apiKeyEnv) != "" {
+		selectedBearer = os.Getenv(strings.TrimSpace(*apiKeyEnv))
+	}
 	wire, ok := opsPiProviderWire(strings.ToLower(strings.TrimSpace(*provider)))
 	if !ok {
 		fmt.Fprintln(stderr, "ops run pi: unsupported --provider; want fak (Fak Router) or anthropic")
@@ -314,13 +462,21 @@ func runOpsPi(stdout, stderr io.Writer, args []string) int {
 			return 2
 		}
 	}
+	if fileMode {
+		for _, other := range []string{*promptFile, *policy, *audit, *receiptPath} {
+			if other != "" && opsRunSamePath(*apiKeyFile, other) {
+				fmt.Fprintln(stderr, "ops run pi: credential file must be distinct from prompt, policy, audit and receipt files")
+				return 2
+			}
+		}
+	}
 	prompt, err := os.ReadFile(*promptFile)
 	if err != nil || len(bytes.TrimSpace(prompt)) == 0 {
 		fmt.Fprintln(stderr, "ops run pi: prompt file must be readable and nonempty")
 		return 2
 	}
 	if !*dryRun {
-		for _, input := range []string{*promptFile, *policy, *audit} {
+		for _, input := range []string{*promptFile, *policy, *audit, *apiKeyFile} {
 			if input != "" && opsRunSamePath(*receiptPath, input) {
 				fmt.Fprintln(stderr, "ops run pi: receipt must be distinct from prompt, policy and audit files")
 				return 2
@@ -395,7 +551,14 @@ func runOpsPi(stdout, stderr io.Writer, args []string) int {
 		return 1
 	}
 
-	env, cleanupEnv, err := opsRunChildEnvironment("{}", *apiKeyEnv)
+	if keyFile != nil {
+		selectedBearer, err = keyFile.Read()
+		if err != nil {
+			fmt.Fprintln(stderr, "ops run pi: credential path changed before launch")
+			return 1
+		}
+	}
+	env, cleanupEnv, err := opsRunChildEnvironmentValue("{}", *apiKeyEnv, selectedBearer)
 	if err != nil {
 		fmt.Fprintf(stderr, "ops run pi: create isolated child environment: %v\n", err)
 		return 1
@@ -425,7 +588,15 @@ func runOpsPi(stdout, stderr io.Writer, args []string) int {
 		preflight := opsRunInferenceRefusalWithStatus(wire, *baseURL, *model, "missing_explicit_base_url", "refused")
 		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)
 	}
-	preflight, err := opsRunInferencePreflight(ctx, guardProbeBaseURLForPi(gatewayProbeURL), *model, *apiKeyEnv)
+	var preflight opsRunInferencePreflightReceipt
+	if fileMode {
+		preflight, err = opsRunInferencePreflightBearer(ctx, guardProbeBaseURLForPi(gatewayProbeURL), *model, selectedBearer)
+	} else {
+		preflight, err = opsRunInferencePreflight(ctx, guardProbeBaseURLForPi(gatewayProbeURL), *model, *apiKeyEnv)
+	}
+	if selectedBearer != "" {
+		preflight.ObservedModel = strings.ReplaceAll(preflight.ObservedModel, selectedBearer, "[REDACTED]")
+	}
 	receipt.InferencePreflight = &preflight
 	if err != nil {
 		return failOpsRunInferencePreflight(stderr, *receiptPath, receipt, preflight)
@@ -438,7 +609,30 @@ func runOpsPi(stdout, stderr io.Writer, args []string) int {
 		return 1
 	}
 
-	code, complete, eventError, lifecycle := opsPiRunExecute(ctx, stdout, stderr, argv, env, prompt)
+	if keyFile != nil {
+		verifiedBearer, readErr := keyFile.Read()
+		if readErr != nil || verifiedBearer != selectedBearer {
+			fmt.Fprintln(stderr, "ops run pi: credential changed before child launch")
+			receipt.Status, receipt.ExitCode, receipt.Finished = "failed", 1, time.Now().UTC()
+			if writeErr := writeOpsRunReceipt(*receiptPath, receipt); writeErr != nil {
+				fmt.Fprintf(stderr, "ops run pi: write receipt: %v\n", writeErr)
+			}
+			return 1
+		}
+	}
+	redactedStdout := newOpsRunSecretRedactor(stdout, selectedBearer)
+	redactedStderr := newOpsRunSecretRedactor(stderr, selectedBearer)
+	code, complete, eventError, lifecycle := opsPiRunExecute(ctx, redactedStdout, redactedStderr, argv, env, prompt)
+	stdoutErr, stderrErr := redactedStdout.Flush(), redactedStderr.Flush()
+	if stdoutErr != nil || stderrErr != nil {
+		eventError = true
+	}
+	if selectedBearer != "" {
+		for i := range lifecycle {
+			lifecycle[i].Error = strings.ReplaceAll(lifecycle[i].Error, selectedBearer, "[REDACTED]")
+			lifecycle[i].OSError = strings.ReplaceAll(lifecycle[i].OSError, selectedBearer, "[REDACTED]")
+		}
+	}
 	if len(lifecycle) > 0 {
 		receipt.Lifecycle = append(receipt.Lifecycle, lifecycle...)
 	}
