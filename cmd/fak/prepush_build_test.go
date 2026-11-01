@@ -120,15 +120,18 @@ func TestEvaluatePrePushBuildNoChangeIsNoop(t *testing.T) {
 	}
 }
 
-func TestEvaluatePrePushBuildEmptySelectionIsNoop(t *testing.T) {
+func TestEvaluatePrePushBuildUnmappedBuildInputIsDeferred(t *testing.T) {
 	setupHappyPrepushSeams(t)
-	// A changed .go file that maps to no package in the pushed tip (e.g. only-deletion).
+	// A changed .go file absent from the tip map cannot be certified by an empty cone.
 	prepushListGraph = func(string) (map[string]string, map[string][]string, int, error) {
 		return map[string]string{}, map[string][]string{}, 1, nil
 	}
 	res, code := evaluatePrePushBuild("/repo", "", time.Minute, false)
-	if code != 0 || res.Verdict != "NOOP" {
-		t.Fatalf("want NOOP/exit0 for empty selection, got verdict=%s code=%d", res.Verdict, code)
+	if code != 2 || res.Verdict != "COULD_NOT_RUN" || res.OK || !strings.Contains(res.Detail, "incomplete affected-input coverage") {
+		t.Fatalf("want explicit deferral for unmapped build input, got verdict=%s code=%d ok=%v detail=%q", res.Verdict, code, res.OK, res.Detail)
+	}
+	if reusablePrepushBuild(res) {
+		t.Fatal("unknown input coverage must not create a successful build receipt")
 	}
 }
 
@@ -1239,7 +1242,10 @@ func newPrepushReceiptTruthFixture(t *testing.T, treatment string) *prepushRecei
 	})
 	t.Setenv("FAK_TRUNK_RED_MODE", "off")
 	prepushRevParse = prepushGitRevParse
-	prepushChangedFiles = gitChangedGoFilesRange
+	prepushChangedFiles = func(root, base, tip string) ([]string, error) {
+		return gitChangedFilesRange(root, base, tip)
+	}
+	prepushExtractTip = prepushArchiveTip
 	prepushResolveBase = func(string) string { return f.base }
 	prepushSuccessCommonDir = func(string) string { return filepath.Join(f.root, ".git") }
 	prepushTreeResolveFn = prepushGitRevParse
@@ -1794,5 +1800,114 @@ func TestGoBuildPackagesRealCgoFinalLinkFailure(t *testing.T) {
 	detail, ok := prepushBuild(root, []string{"example.test/retention/a", "example.test/retention/broken", "example.test/retention/b"})
 	if ok || !strings.Contains(detail, "retention_missing_symbol") || !strings.Contains(detail, "link") {
 		t.Fatalf("missing final C symbol was not rejected by linker: ok=%v detail=%q", ok, detail)
+	}
+}
+
+// fak-test:runtime medium est=20s lane=default
+// The range and archive are real immutable Git inputs; goListGraph is the same
+// graph consumer as production. Only compilation is injected, so this is a
+// selection witness, not a claim that the fixture or repository compiled.
+func TestPrepushInputCompleteSelection(t *testing.T) {
+	readInputs := prepushChangedFiles
+	module := "example.com/prepushinput"
+	tests := []struct {
+		name, path, data string
+		remove           bool
+		want             []string
+		code             int
+		verdict          string
+	}{
+		{name: "embed", path: "lib/payload.txt", data: "candidate\n", want: []string{module + "/app", module + "/lib"}, verdict: "OK"},
+		{name: "native C", path: "native/value.c", data: "#include \"value.h\"\nint value(void) { return 2; }\n", want: []string{module + "/app", module + "/native"}, verdict: "OK"},
+		{name: "header", path: "native/value.h", data: "/* candidate */\nint value(void);\n", want: []string{module + "/app", module + "/native"}, verdict: "OK"},
+		{name: "assembly", path: "asm/value.s", data: "// candidate assembly input\n", want: []string{module + "/app", module + "/asm"}, verdict: "OK"},
+		{name: "module", path: "go.mod", data: "module example.com/prepushinput\n\ngo 1.26.1\n", code: 2, verdict: "COULD_NOT_RUN"},
+		{name: "module sums", path: "go.sum", data: "\n", code: 2, verdict: "COULD_NOT_RUN"},
+		{name: "workspace", path: "go.work", data: "go 1.26.0\nuse .\n", code: 2, verdict: "COULD_NOT_RUN"},
+		{name: "vendor metadata", path: "vendor/modules.txt", data: "# changed resolution\n", code: 2, verdict: "COULD_NOT_RUN"},
+		{name: "deleted embed", path: "lib/payload.txt", remove: true, code: 2, verdict: "COULD_NOT_RUN"},
+		{name: "unmapped native", path: "tools/orphan.c", data: "int unrelated(void) { return 0; }\n", code: 2, verdict: "COULD_NOT_RUN"},
+		{name: "docs", path: "README.md", data: "candidate documentation\n", verdict: "NOOP"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupHappyPrepushSeams(t)
+			t.Setenv("CGO_ENABLED", "1")
+			t.Setenv("GOTOOLCHAIN", "local")
+			root := t.TempDir()
+			gitFixture(t, root, "init", "-q")
+			gitFixture(t, root, "config", "user.name", "Fixture")
+			gitFixture(t, root, "config", "user.email", "fixture@example.com")
+			gitFixture(t, root, "config", "commit.gpgsign", "false")
+			gitFixture(t, root, "config", "core.hooksPath", t.TempDir())
+			for path, data := range map[string]string{
+				"go.mod":           "module " + module + "\n\ngo 1.26.0\n",
+				"lib/lib.go":       "package lib\nimport _ \"embed\"\n//go:embed payload.txt\nvar Payload string\n",
+				"lib/payload.txt":  "parent\n",
+				"native/native.go": "package native\n/*\n#include \"value.h\"\n*/\nimport \"C\"\nfunc Value() int { return int(C.value()) }\n",
+				"native/value.h":   "int value(void);\n",
+				"native/value.c":   "#include \"value.h\"\nint value(void) { return 1; }\n",
+				"asm/asm.go":       "package asm\nconst Value = 1\n",
+				"asm/value.s":      "// parent assembly input\n",
+				"app/app.go":       "package app\nimport (\n\"" + module + "/lib\"\n\"" + module + "/native\"\n\"" + module + "/asm\"\n)\nfunc Value() int { return len(lib.Payload)+native.Value()+asm.Value }\n",
+				"README.md":        "parent documentation\n",
+			} {
+				writeFile(t, root, path, data)
+			}
+			commit := func(message string) string {
+				gitFixture(t, root, "add", ".")
+				gitFixture(t, root, "commit", "-q", "-m", message)
+				return strings.TrimSpace(mustGitOut(t, root, "rev-parse", "HEAD"))
+			}
+			base := commit("base")
+			if tt.remove {
+				if err := os.Remove(filepath.Join(root, tt.path)); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				writeFile(t, root, tt.path, tt.data)
+			}
+			tip := commit("candidate")
+			// Peer-dirty bytes must not replace the captured committed input.
+			writeFile(t, root, "README.md", "uncommitted peer documentation\n")
+			legacy, err := gitChangedGoFilesRange(root, base, tip)
+			if err != nil || len(legacy) != 0 {
+				t.Fatalf("parent .go-only reader control=%q err=%v, want the reproduced empty input set", legacy, err)
+			}
+			prepushRevParse = prepushGitRevParse
+			prepushChangedFiles = readInputs
+			prepushExtractTip = prepushArchiveTip
+			prepushListGraph = goListGraph
+			prepushListTestOnly = listTestOnlyPackages
+			builds := 0
+			prepushBuild = func(dir string, packages []string) (string, bool) {
+				builds++
+				if dir == root || !reflect.DeepEqual(packages, tt.want) {
+					t.Fatalf("build must use immutable archive and exact cone: dir=%q packages=%v want=%v", dir, packages, tt.want)
+				}
+				b, err := os.ReadFile(filepath.Join(dir, "README.md"))
+				if err != nil || string(b) != "parent documentation\n" {
+					t.Fatalf("archive was contaminated by peer WIP: %q err=%v", b, err)
+				}
+				return "", true
+			}
+			res, code := evaluatePrePushBuildAt(root, base, tip, time.Minute, false)
+			if code != tt.code || res.Verdict != tt.verdict || res.OK != (tt.code == 0) {
+				t.Fatalf("result=%+v code=%d want=%s/%d", res, code, tt.verdict, tt.code)
+			}
+			if res.Ref != tip || res.BaseSha != base {
+				t.Fatalf("immutable range lost: got %s...%s want %s...%s", res.BaseSha, res.Ref, base, tip)
+			}
+			if tt.want != nil {
+				if builds != 1 || !reflect.DeepEqual(res.SelectedPackages, tt.want) {
+					t.Fatalf("selected=%v builds=%d want=%v/1", res.SelectedPackages, builds, tt.want)
+				}
+			} else if builds != 0 || len(res.SelectedPackages) != 0 || reusablePrepushBuild(res) {
+				t.Fatalf("NOOP/deferred result launched or certified compilation: result=%+v builds=%d", res, builds)
+			}
+			if tt.code != 0 && res.Detail == "" {
+				t.Fatal("deferred coverage must explain the missing evidence")
+			}
+		})
 	}
 }

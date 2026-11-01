@@ -48,7 +48,7 @@ import (
 //
 // How (reuses the ci-preflight / affected machinery, nothing new invented):
 //   - resolve the range this push adds (origin/<branch> → origin/main → origin/master), take
-//     its committed changed .go files via `git diff --name-only <base>...HEAD` (three-dot:
+//     all committed changed paths via `git diff --name-only <base>...HEAD` (three-dot:
 //     the merge-base range = "commits this push adds", NEVER the dirty working tree);
 //   - materialize the committed tip in a throwaway checkout (`git archive HEAD` untarred
 //     IN-PROCESS via extractArchive), immune to peer WIP, under a hard deadline so a stalled
@@ -67,10 +67,11 @@ import (
 // GATE_LATENCY_REGRESSION but still exits 0 (penalizing a push for touching a popular leaf
 // would be worse than the latency).
 //
-// Honest limit: this gates a single clone's push and covers mutation/addition breaks (the
-// #1338 shape). A change that ONLY deletes a file with no other edit in its package, or two
-// clones racing the same trunk, is narrowed but not fully closed — `make ci` on the merged
-// tree stays the authoritative oracle.
+// Honest limit: this gates one clone's current-platform Go build graph. Module/workspace
+// metadata and unmapped removed/compiler inputs are explicitly deferred, never certified
+// by an empty selection. Other build configurations and clones racing the same trunk still
+// require their own evidence; CI on the merged tree remains the broader oracle.
+//
 //
 //	fak hooks pre-push               # human summary; exit 1 iff the pushed tip would not build
 //	fak hooks pre-push --json        # machine result (schema fak.trunk_build.v1)
@@ -86,7 +87,7 @@ import (
 var (
 	prepushRevParse             = prepushGitRevParse
 	prepushResolveBase          = resolvePrepushBase
-	prepushChangedFiles         = gitChangedGoFilesRange
+	prepushChangedFiles         = gitChangedBuildFilesRange
 	prepushExtractTip           = prepushArchiveTip
 	prepushListGraph            = goListGraph
 	prepushListTestOnly         = listTestOnlyPackages
@@ -359,7 +360,7 @@ type trunkBuildResult struct {
 const (
 	prepushSuccessReuseTTL    = 24 * time.Hour
 	prepushSuccessMaxFiles    = 64
-	prepushGateContract       = "immutable-range-affected-importer-build/v2"
+	prepushGateContract       = "immutable-range-input-complete-affected-importer-build/v3"
 	prepushLegacyGateContract = "unqualified-legacy-build/v1"
 )
 
@@ -851,12 +852,26 @@ func evaluatePrePushBuildAt(r, baseOverride, tipOverride string, budget time.Dur
 		return res, 2
 	}
 	if len(changed) == 0 {
-		// No committed .go delta in the range → nothing this push can break at build time.
+		// No committed path delta in the range: no input changed.
 		res.OK, res.Verdict = true, "NOOP"
 		return res, 0
 	}
 
-	// A real Go delta needs the EXPENSIVE steps below (archive tip + go list + importer-cone
+	// A dependency/workspace edit can change every package's resolution, even when no
+	// package source changed. The bounded importer cone cannot certify that contract.
+	for _, path := range changed {
+		switch filepath.Base(path) {
+		case "go.mod", "go.sum", "go.work", "go.work.sum":
+			res.Verdict, res.Detail = "COULD_NOT_RUN", fmt.Sprintf("module/workspace input %q changed; full dependency coverage is deferred", path)
+			return res, 2
+		}
+		if filepath.ToSlash(path) == "vendor/modules.txt" {
+			res.Verdict, res.Detail = "COULD_NOT_RUN", "vendor module metadata changed; full dependency coverage is deferred"
+			return res, 2
+		}
+	}
+
+	// A nonempty input delta needs the existing EXPENSIVE steps (archive + go list + cone
 	// build). In advisory mode, single-flight them: if a peer's build is already running on this
 	// host, skip rather than pile a redundant concurrent full build onto the contention. Skip ==
 	// warn's own outcome (exit 0, push allowed), so no verdict warn would have enforced is lost.
@@ -886,13 +901,17 @@ func evaluatePrePushBuildAt(r, baseOverride, tipOverride string, budget time.Dur
 	}
 
 	res.ChangedPackages = affectedtests.ChangedPackages(fileToPkg, changed)
+	if err := prepushInputCoverage(dir, changed, fileToPkg); err != nil {
+		res.Verdict, res.Detail = "COULD_NOT_RUN", "incomplete affected-input coverage: "+err.Error()
+		return res, 2
+	}
 	res.SelectedPackages = affectedtests.Select(edges, res.ChangedPackages)
 	res.SelectedPackages = packagesWithProductionFiles(res.SelectedPackages, prepushListTestOnly(dir, res.SelectedPackages))
 	if len(res.SelectedPackages) == 0 {
-		// Changed .go files map to no buildable production package in the pushed tip (e.g. an
-		// only-deletion, a non-package file, or a package made entirely of tests) → nothing to
-		// build. Test-only packages remain valid `go test` targets, but `go build` rejects them
-		// before it reaches any real compile admission.
+		// Existing non-input files (such as documentation), or positively proven test-only
+		// packages without a production importer, need no compiler. Missing/unmapped build
+		// inputs were deferred above; an empty cone must not certify those unknowns.
+		// Test-only packages remain valid go-test targets, not go-build targets.
 		res.OK, res.Verdict = true, "NOOP"
 		return res, 0
 	}
@@ -918,6 +937,28 @@ func evaluatePrePushBuildAt(r, baseOverride, tipOverride string, budget time.Dur
 	}
 	res.Verdict = "OK"
 	return res, 0
+}
+
+// prepushInputCoverage checks only paths absent from the existing authoritative
+// go-list file map. In particular, an arbitrary embed suffix must not be filtered
+// before that map can claim it. Missing paths may be deleted source or embedded
+// payloads; without a base graph their relevance is unknown, not a successful NOOP.
+func prepushInputCoverage(root string, changed []string, fileToPkg map[string]string) error {
+	for _, path := range changed {
+		if _, mapped := fileToPkg[path]; mapped {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(path))); err != nil {
+			return fmt.Errorf("unmapped path %q is unavailable in the committed tip: %w", path, err)
+		}
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".go", ".c", ".cc", ".cpp", ".cxx", ".m", ".mm",
+			".h", ".hh", ".hpp", ".hxx", ".f", ".for", ".f90", ".s",
+			".swig", ".swigcxx", ".syso", ".cu", ".cuh", ".a", ".so", ".dylib", ".dll":
+			return fmt.Errorf("compiler/linker input %q has no owner in the committed-tip graph", path)
+		}
+	}
+	return nil
 }
 
 // listTestOnlyPackages positively identifies selected packages that have tests but no
@@ -1051,6 +1092,12 @@ func resolvePrepushBase(r string) string {
 	return "HEAD~20"
 }
 
+// gitChangedBuildFilesRange retains every committed path until the existing
+// package-input graph can distinguish embedded/native inputs from documentation.
+func gitChangedBuildFilesRange(r, base, tip string) ([]string, error) {
+	return gitChangedFilesRange(r, base, tip)
+}
+
 // gitChangedGoFilesRange returns the repo-relative, slash-separated .go files the commits in
 // base..HEAD add or change, via three-dot `git diff` (merge-base range = exactly what the
 // push adds), reading COMMITTED bytes only — never the peer-dirty working tree.
@@ -1062,7 +1109,7 @@ func gitChangedGoFilesRange(r, base, tip string) ([]string, error) {
 // repo-relative, slash-separated files the commits in base...tip add or change whose name
 // ends in ANY of suffixes, via three-dot `git diff` (merge-base range = exactly what the
 // push adds), reading COMMITTED bytes only — never the peer-dirty working tree. Passing no
-// suffixes returns every changed path. Shared by the .go-only prepush build gate and the
+// suffixes returns every changed path. Shared by the input-complete prepush build gate and the
 // .ps1/.py/.go pre-push popup gate (#5145) so the range walk lives in exactly one place.
 func prepushNewRefBase(base string) bool {
 	return (len(base) == 40 || len(base) == 64) && strings.Trim(base, "0") == ""
