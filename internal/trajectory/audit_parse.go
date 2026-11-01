@@ -40,6 +40,7 @@ type auditParseState struct {
 	mutationHypothesis           string
 	mutationAccountedFor         int64
 	hookDurations                []int64
+	repeatedFailuresAccumulated  int
 	claudeUsageByID              map[string]AuditTokens
 	codexPrimaryMetaSeen         bool
 	codexRawTotal                *auditCodexRawTokens
@@ -135,6 +136,8 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 			parseClaudeAuditRecord(record, lineNumber, rel, &state, &refusals)
 		case AuditSourceCodex:
 			parseCodexAuditRecord(record, lineNumber, rel, &state, &refusals)
+		case AuditSourcePi:
+			parsePiAuditRecord(record, lineNumber, rel, &state, &refusals)
 		}
 		if len(refusals) > before {
 			denominator.RefusedRecords += len(refusals) - before
@@ -164,6 +167,7 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 		state.row.Models = append(state.row.Models, model)
 	}
 	sort.Strings(state.row.Models)
+	state.row.RepeatedFailures = state.repeatedFailuresAccumulated + auditRepeatedFailureCount(state.failureCounts)
 	state.row.BuildIdentities = make([]AuditBuildIdentity, 0, len(state.buildIdentities))
 	for identity := range state.buildIdentities {
 		state.row.BuildIdentities = append(state.row.BuildIdentities, identity)
@@ -171,7 +175,6 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 	state.row.BuildIdentities = appendAuditBuilds(nil, state.row.BuildIdentities...)
 	state.row.schemaShapes = state.schemaShapes
 	state.row.failureCounts = cloneAuditFailureCounts(state.failureCounts)
-	state.row.RepeatedFailures = auditRepeatedFailureCount(state.failureCounts)
 	state.row.MutationChurnEvents = DetectQwenMutationChurn(state.mutationEvents)
 	for _, churn := range state.row.MutationChurnEvents {
 		state.row.MutationChurn += churn.Count - 1
@@ -885,6 +888,283 @@ func newAuditRefusal(source, rel string, line int, code, detail string) AuditRef
 		Schema: AuditSchema, Kind: "refusal", Source: source, SourcePath: rel,
 		Line: line, Code: code, Detail: auditNormalizedHead(detail, 240),
 	}
+}
+
+// auditPiSyntheticUserMarkers identifies harness-injected user lines that must
+// never count as operator-authored prompt text. Markers are matched as a
+// case-insensitive prefix of the trimmed message.
+var auditPiSyntheticUserMarkers = []string{
+	"[fak-router:auto-continue]",
+	"[fak-router-autocontinue]",
+	"[fak-loop-breaker]",
+	"[fak-loopbreaker]",
+}
+
+func auditPiSyntheticUserText(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	for _, marker := range auditPiSyntheticUserMarkers {
+		if len(trimmed) >= len(marker) && strings.EqualFold(trimmed[:len(marker)], marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// piContentText joins the text blocks of a Pi message content value. Pi stores
+// content as a list of typed blocks ({type:"text",text:...}); a scalar string
+// passes through unchanged.
+func piContentText(content any) string {
+	if scalar, ok := content.(string); ok {
+		return scalar
+	}
+	blocks, _ := content.([]any)
+	var builder strings.Builder
+	for _, raw := range blocks {
+		block, _ := raw.(map[string]any)
+		if block["type"] != "text" {
+			continue
+		}
+		text, _ := block["text"].(string)
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		if builder.Len() > 0 {
+			builder.WriteByte('\n')
+		}
+		builder.WriteString(text)
+	}
+	return builder.String()
+}
+
+func parsePiAuditRecord(record map[string]any, line int, rel string, state *auditParseState, refusals *[]AuditRefusalRow) {
+	recordType, _ := record["type"].(string)
+	switch recordType {
+	case "session":
+		if id, ok := record["id"].(string); ok && strings.TrimSpace(id) != "" {
+			state.row.TranscriptID = id
+		}
+		if version, present := record["version"]; present {
+			number, err := auditAnyInt(version)
+			if err == nil && number != supportedPiSessionVersion {
+				*refusals = append(*refusals, newAuditRefusal(AuditSourcePi, rel, line, "pi_session_version_unsupported", fmt.Sprintf("session declares version %d; the parser pins %d", number, supportedPiSessionVersion)))
+			}
+		}
+	case "model_change":
+		if model, ok := record["modelId"].(string); ok && model != "" {
+			state.models[model] = struct{}{}
+		}
+	case "compaction":
+		observePiCompaction(record, line, state)
+		if usage, present := record["usage"]; present {
+			parsePiAuditUsage(usage, record["id"], line, rel, state, refusals)
+		}
+	case "message":
+		message, _ := record["message"].(map[string]any)
+		if message == nil {
+			*refusals = append(*refusals, newAuditRefusal(AuditSourcePi, rel, line, "pi_message_missing", "record type message has no message object"))
+			return
+		}
+		role, _ := message["role"].(string)
+		switch role {
+		case "user":
+			// Operator-authored prompts only; synthetic harness injections and
+			// system-role preambles stay storage-plane data.
+		case "assistant":
+			if usage, present := message["usage"]; present {
+				parsePiAuditUsage(usage, record["id"], line, rel, state, refusals)
+			}
+			state.mutationHypothesis = auditMutationHypothesis(message["content"])
+			parsePiToolCalls(message["content"], record["id"], line, state)
+		case "toolResult":
+			parsePiToolResult(message, line, state)
+		default:
+			// system or unknown roles: storage-plane only.
+		}
+	}
+}
+
+// observePiCompaction records a Pi compaction boundary. Compaction restarts
+// the visible context, so failures before the boundary cannot be repeats of
+// failures after it: settle the current segment's repeat family into the
+// accumulated total and start a fresh one.
+func observePiCompaction(record map[string]any, line int, state *auditParseState) {
+	state.repeatedFailuresAccumulated += auditRepeatedFailureCount(state.failureCounts)
+	state.failureCounts = map[string]int{}
+	event := AuditCompactionEvent{Line: line, Unit: "pi_compaction_record_utf8_bytes", Origin: "pi_compaction_record", Coverage: "summary_only"}
+	if summary, ok := record["summary"].(string); ok {
+		n := int64(len(summary))
+		event.SummaryBytes = &n
+	}
+	state.row.CompactionEvents = append(state.row.CompactionEvents, event)
+}
+
+func parsePiToolCalls(content any, envelopeID any, line int, state *auditParseState) {
+	blocks, _ := content.([]any)
+	for i, raw := range blocks {
+		block, _ := raw.(map[string]any)
+		if block["type"] != "toolCall" {
+			continue
+		}
+		id, _ := block["id"].(string)
+		if id == "" {
+			envelope, _ := envelopeID.(string)
+			id = fmt.Sprintf("%s:%d", firstNonempty(envelope, "line:"+strconv.Itoa(line)), i)
+		}
+		if _, seen := state.seenCalls[id]; seen {
+			continue
+		}
+		state.seenCalls[id] = struct{}{}
+		name, _ := block["name"].(string)
+		call := auditToolCall{name: name, args: auditCanonicalArgs(block["arguments"]), target: auditMutationTarget(name, block["arguments"])}
+		state.calls[id] = call
+		state.row.ToolCalls++
+		if call.target != "" {
+			state.mutationCounts[call.target]++
+			auditAppendMutationEvent(state, call.target, QwenMutationWrite)
+		}
+	}
+}
+
+func parsePiToolResult(message map[string]any, line int, state *auditParseState) {
+	callID, _ := message["toolCallId"].(string)
+	toolName, _ := message["toolName"].(string)
+	isError, _ := message["isError"].(bool)
+	content := piContentText(message["content"])
+	call := state.calls[callID]
+	if call.name == "" && toolName != "" {
+		call.name = toolName
+	}
+	if isError {
+		if auditPiBenignNegative(call, content) {
+			state.row.ToolErrorsBenignNegative++
+			return
+		}
+		auditRecordToolFailure(state, call, content, line)
+		return
+	}
+	if call.target == "" {
+		auditAppendMutationEvent(state, "", QwenMutationWitness)
+	}
+}
+
+var auditPiTimeoutWarning = regexp.MustCompile(`command timed out after [0-9]+ seconds`)
+
+// auditPiNonzeroExit recognizes Pi's bash result exit trailers with a
+// non-zero status: "Command exited with code N", "process exited with code N",
+// or "exit code/status N".
+var auditPiNonzeroExit = regexp.MustCompile(`(?i)(?:process exited with code|command exited with code|exit (?:code|status)[:= ]+)\s*[1-9][0-9]*`)
+
+var auditPiExitMarker = regexp.MustCompile(`(?i)(?:process exited with code|command exited with code|exit (?:code|status)[:= ]+)\s*[0-9]+`)
+
+// auditPiNoMatchBody strips the trailing exit-code trailer from a Pi bash
+// result, leaving the captured stdout/stderr body.
+func auditPiNoMatchBody(content string) string {
+	parts := auditPiExitMarker.Split(content, -1)
+	return parts[0]
+}
+
+// auditPiShellCommand returns the lowercased base name of the first token of
+// the shell command carried by a Pi call's arguments, or "" when the call
+// carries no recognizable shell command.
+func auditPiShellCommand(call auditToolCall) string {
+	var decoded map[string]any
+	if json.Unmarshal([]byte(call.args), &decoded) != nil {
+		return ""
+	}
+	for _, key := range []string{"command", "script", "cmd"} {
+		command, _ := decoded[key].(string)
+		fields := strings.Fields(strings.ToLower(strings.TrimSpace(command)))
+		if len(fields) == 0 {
+			continue
+		}
+		return filepath.Base(fields[0])
+	}
+	return ""
+}
+
+// auditPiSearchProbe reports whether the failing call was a read-only search
+// probe (grep/rg semantics): either a direct grep/rg tool, or a shell command
+// whose first token is rg/grep.
+func auditPiSearchProbe(call auditToolCall) bool {
+	name := strings.ToLower(strings.TrimSpace(call.name))
+	if name == "grep" || name == "rg" {
+		return true
+	}
+	base := auditPiShellCommand(call)
+	return base == "rg" || base == "rg.exe" || base == "grep" || base == "grep.exe"
+}
+
+// auditPiBenignNegative recognizes read-only probes that fail harmlessly: a
+// search command exiting 1 with no match output, a harness timeout warning, or
+// a transient git lock notice. Everything else with isError stays a real
+// failure.
+func auditPiBenignNegative(call auditToolCall, content string) bool {
+	normalized := strings.ToLower(strings.Join(strings.Fields(content), " "))
+	if normalized == "" {
+		return false
+	}
+	if auditPiTimeoutWarning.MatchString(normalized) {
+		return true
+	}
+	if strings.Contains(normalized, ".lock") && (strings.Contains(normalized, "another git process seems to be running") || strings.Contains(normalized, "file exists")) {
+		base := auditPiShellCommand(call)
+		return base == "git" || base == "git.exe"
+	}
+	if !auditPiNonzeroExit.MatchString(content) {
+		return false
+	}
+	body := strings.TrimSpace(auditPiNoMatchBody(content))
+	if body != "" && body != "(no output)" {
+		return false
+	}
+	return auditPiSearchProbe(call)
+}
+
+func parsePiAuditUsage(value any, idRaw any, line int, rel string, state *auditParseState, refusals *[]AuditRefusalRow) {
+	state.usageSeen++
+	usage, ok := value.(map[string]any)
+	if !ok {
+		*refusals = append(*refusals, newAuditRefusal(AuditSourcePi, rel, line, "pi_usage_not_object", "message.usage must be an object"))
+		return
+	}
+	input, err := auditRequiredInt(usage, "input")
+	if err != nil {
+		*refusals = append(*refusals, newAuditRefusal(AuditSourcePi, rel, line, "pi_usage_input_invalid", err.Error()))
+		return
+	}
+	output, err := auditRequiredInt(usage, "output")
+	if err != nil {
+		*refusals = append(*refusals, newAuditRefusal(AuditSourcePi, rel, line, "pi_usage_output_invalid", err.Error()))
+		return
+	}
+	cacheRead, err := auditOptionalInt(usage, "cacheRead")
+	if err != nil {
+		*refusals = append(*refusals, newAuditRefusal(AuditSourcePi, rel, line, "pi_usage_cache_read_invalid", err.Error()))
+		return
+	}
+	cacheWrite, err := auditOptionalInt(usage, "cacheWrite")
+	if err != nil {
+		*refusals = append(*refusals, newAuditRefusal(AuditSourcePi, rel, line, "pi_usage_cache_write_invalid", err.Error()))
+		return
+	}
+	tokens := AuditTokens{InputTokens: input, OutputTokens: output, CacheReadTokens: cacheRead, CacheCreateTokens: cacheWrite}
+	id, _ := idRaw.(string)
+	if id == "" {
+		id = "line:" + strconv.Itoa(line)
+	}
+	if previous, seen := state.claudeUsageByID[id]; seen {
+		state.usageDuplicates++
+		if previous != tokens {
+			*refusals = append(*refusals, newAuditRefusal(AuditSourcePi, rel, line, "pi_duplicate_usage_mismatch", "duplicate message id carries different usage"))
+			return
+		}
+		state.usageExact++
+		return
+	}
+	state.claudeUsageByID[id] = tokens
+	state.usageExact++
+	state.row.Tokens.add(tokens)
+	state.row.UsageRecords++
 }
 
 func auditRequiredInt(object map[string]any, key string) (int64, error) {
