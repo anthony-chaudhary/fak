@@ -134,12 +134,14 @@ struct fak_tokenomos_staging_pool {
     return cudaSuccess;
   }
 
-  cudaError_t put(void *device, const void *host, size_t bytes) {
+  cudaError_t put(void *device, const void *host, size_t bytes, void (*before_copy)() = nullptr) {
     if (terminal) return first_error;
     if (!open || !device || !host || bytes == 0 || bytes > capacity - at)
       return cudaErrorInvalidValue;
     auto *source = static_cast<unsigned char *>(arenas[current].host) + at;
     std::memcpy(source, host, bytes);
+    // The caller owns callback serialization; generic pools default to no accounting.
+    if (before_copy) before_copy();
     cudaError_t error = cudaMemcpyAsync(device, source, bytes, cudaMemcpyHostToDevice, stream);
     if (error != cudaSuccess) return fail(error);
     // at and capacity are multiples of alignment; checked room above makes
@@ -173,18 +175,19 @@ static int fak_tokenomos_staging_admit() {
   return error == cudaSuccess ? 0 : fak_tokenomos_staging_error(error);
 }
 
-static int fak_tokenomos_staging_copy(void *device, const void *host, size_t bytes) {
+static int fak_tokenomos_staging_copy(void *device, const void *host, size_t bytes, void (*before_copy)() = nullptr) {
   int admitted = fak_tokenomos_staging_admit();
   if (admitted != 0) return admitted;
   if (!device || !host || bytes == 0) return -1;
   if (bytes > fak_tokenomos_staging_pool::capacity) {
     // Oversize is decided before arena allocation/mutation. Keep the existing
     // synchronous route; this is not recovery from a selected-path failure.
+    if (before_copy) before_copy();
     cudaError_t error = cudaMemcpy(device, host, bytes, cudaMemcpyHostToDevice);
     return error == cudaSuccess ? 0 : fak_tokenomos_staging_error(error);
   }
   cudaError_t error = g_tokenomos_staging.begin(g_stream);
-  if (error == cudaSuccess) error = g_tokenomos_staging.put(device, host, bytes);
+  if (error == cudaSuccess) error = g_tokenomos_staging.put(device, host, bytes, before_copy);
   if (error == cudaSuccess) error = g_tokenomos_staging.seal();
   return error == cudaSuccess ? 0 : fak_tokenomos_staging_error(error);
 }

@@ -719,6 +719,147 @@ var cudaUntimedTransferSites = map[string]bool{
 	"cuda/async_upload.cuh:fcuda_upload_async": true,
 }
 
+// These exact bodies are deliberately closed source contracts, not a general
+// callback/dataflow exemption. Any changed control flow must be reviewed again.
+func cudaTokenomosAccountingSite(srcs map[string]string, path string, off int, sync bool) bool {
+	if path != "cuda/tokenomos_staging.h" {
+		return false
+	}
+	normalize := func(s string) string { return strings.Join(strings.Fields(s), " ") }
+	region := func(s, begin, end string) string {
+		i := strings.Index(s, begin)
+		if i < 0 || strings.Count(s, begin) != 1 {
+			return ""
+		}
+		s = s[i:]
+		if end != "" {
+			j := strings.Index(s, end)
+			if j < 0 {
+				return ""
+			}
+			s = s[:j]
+		}
+		return normalize(s)
+	}
+	staging := srcs[path]
+	if region(staging, "  cudaError_t put(", "\n};") != normalize(tokenomosPutAccountingContract) ||
+		region(staging, "static int fak_tokenomos_staging_copy(", "") != normalize(tokenomosCopyAccountingContract) ||
+		region(srcs["cuda/model_candidates.cuh"], `extern "C" int fak_qwen35_embedding_gather_f32(`, `extern "C" int fak_qwen35_pointer_is_device`) != normalize(tokenomosCallerAccountingContract) {
+		return false
+	}
+	call := "cudaMemcpyAsync("
+	if sync {
+		call = "cudaMemcpy("
+	}
+	return strings.Count(staging, call) == 1 && strings.Index(staging, call) == off
+}
+
+const tokenomosPutAccountingContract = `  cudaError_t put(void *device, const void *host, size_t bytes, void (*before_copy)() = nullptr) {
+    if (terminal) return first_error;
+    if (!open || !device || !host || bytes == 0 || bytes > capacity - at)
+      return cudaErrorInvalidValue;
+    auto *source = static_cast<unsigned char *>(arenas[current].host) + at;
+    std::memcpy(source, host, bytes);
+
+    if (before_copy) before_copy();
+    cudaError_t error = cudaMemcpyAsync(device, source, bytes, cudaMemcpyHostToDevice, stream);
+    if (error != cudaSuccess) return fail(error);
+
+
+    at += ((bytes + alignment - 1) / alignment) * alignment;
+    dirty = true;
+    return cudaSuccess;
+  }`
+
+const tokenomosCopyAccountingContract = `static int fak_tokenomos_staging_copy(void *device, const void *host, size_t bytes, void (*before_copy)() = nullptr) {
+  int admitted = fak_tokenomos_staging_admit();
+  if (admitted != 0) return admitted;
+  if (!device || !host || bytes == 0) return -1;
+  if (bytes > fak_tokenomos_staging_pool::capacity) {
+
+
+    if (before_copy) before_copy();
+    cudaError_t error = cudaMemcpy(device, host, bytes, cudaMemcpyHostToDevice);
+    return error == cudaSuccess ? 0 : fak_tokenomos_staging_error(error);
+  }
+  cudaError_t error = g_tokenomos_staging.begin(g_stream);
+  if (error == cudaSuccess) error = g_tokenomos_staging.put(device, host, bytes, before_copy);
+  if (error == cudaSuccess) error = g_tokenomos_staging.seal();
+  return error == cudaSuccess ? 0 : fak_tokenomos_staging_error(error);
+}
+`
+
+const tokenomosCallerAccountingContract = `extern "C" int fak_qwen35_embedding_gather_f32(
+    const float *dEmbedding, const int *hIDs, int *dIDs, float *dOut,
+    int tokens, int hidden) {
+  if (!dEmbedding || !hIDs || !dIDs || !dOut || tokens <= 0 || hidden <= 0) return -1;
+  size_t idsBytes = (size_t)tokens * sizeof(int);
+#ifdef FAK_CUDA_TOKENOMOS_STAGING_QUALIFICATION
+
+  int staged = fak_tokenomos_staging_copy(dIDs, hIDs, idsBytes, fcuda_ts_untimed_transfer);
+  if (staged != 0) return staged;
+#else
+  cudaGetLastError();
+  fcuda_ts_untimed_transfer();
+  cudaError_t copy = cudaMemcpy(dIDs, hIDs, idsBytes, cudaMemcpyHostToDevice);
+  if (copy != cudaSuccess) return 10000 + (int)copy;
+#endif
+  g_h2d_bytes += idsBytes;
+  size_t n = (size_t)tokens * hidden;
+  FCUDA_TS("k_qwen35_embedding_gather", (n + 255) / 256, k_qwen35_embedding_gather<<<(n + 255) / 256, 256, 0, g_stream>>>(
+      dEmbedding, dIDs, dOut, tokens, hidden));
+  cudaError_t launch = cudaGetLastError();
+#ifdef FAK_CUDA_TOKENOMOS_STAGING_QUALIFICATION
+
+
+
+  if (launch != cudaSuccess) return fak_tokenomos_staging_error(launch);
+#endif
+  return launch == cudaSuccess ? 0 : 20000 + (int)launch;
+}
+
+`
+
+// fak-test:runtime fast est=10ms lane=default
+func TestCUDATokenomosAccountingSourceContract(t *testing.T) {
+	srcs := cudaProfileSources(t)
+	path := "cuda/tokenomos_staging.h"
+	check := func(m map[string]string, want bool) {
+		t.Helper()
+		for _, call := range []string{"cudaMemcpyAsync(", "cudaMemcpy("} {
+			off := strings.Index(m[path], call)
+			if got := cudaTokenomosAccountingSite(m, path, off, call == "cudaMemcpy("); got != want {
+				t.Fatalf("%s accepted=%v want=%v", call, got, want)
+			}
+		}
+	}
+	check(srcs, true)
+	for _, mutation := range []struct{ path, old, new string }{
+		{path, "void (*before_copy)() = nullptr", "void (*before_copy)()"},
+		{path, "if (before_copy) before_copy();", ""},
+		{path, "if (before_copy) before_copy();", "if (before_copy) { before_copy(); before_copy(); }"},
+		{path, "if (terminal) return first_error;", "if (before_copy) before_copy(); if (terminal) return first_error;"},
+		{path, "cudaMemcpyHostToDevice, stream)", "cudaMemcpyHostToDevice, g_stream)"},
+		{path, "bytes, before_copy)", "bytes)"},
+		{"cuda/model_candidates.cuh", "idsBytes, fcuda_ts_untimed_transfer)", "idsBytes)"},
+		{"cuda/model_candidates.cuh", "int staged =", "fcuda_ts_untimed_transfer(); int staged ="},
+	} {
+		m := make(map[string]string, len(srcs))
+		for p, s := range srcs {
+			m[p] = s
+		}
+		// ReplaceAll deliberately detects any extra callback, including an early one.
+		if !strings.Contains(m[mutation.path], mutation.old) {
+			t.Fatalf("mutation absent: %q", mutation.old)
+		}
+		m[mutation.path] = strings.ReplaceAll(m[mutation.path], mutation.old, mutation.new)
+		check(m, false)
+	}
+	if cudaTokenomosAccountingSite(srcs, "cuda/other.h", 0, false) || cudaTokenomosAccountingSite(srcs, path, 0, false) {
+		t.Fatal("foreign path/offset accepted")
+	}
+}
+
 // fak-test:runtime fast est=30ms lane=default
 func TestCUDATimestampSourceCoversEveryLaunch(t *testing.T) {
 	srcs := cudaProfileSources(t)
@@ -759,7 +900,7 @@ func TestCUDATimestampSourceCoversEveryLaunch(t *testing.T) {
 				t.Errorf("%s:%d %s has no supported timestamp transfer direction", path, at(src, m[0]), call)
 				continue
 			}
-			if got == want {
+			if got == want || cudaTokenomosAccountingSite(srcs, path, m[0], false) {
 				continue
 			}
 			line := src[:strings.LastIndex(src[:m[0]], "\n")+1]
@@ -770,7 +911,7 @@ func TestCUDATimestampSourceCoversEveryLaunch(t *testing.T) {
 		}
 		for _, m := range cudaSyncCopy.FindAllStringIndex(src, -1) {
 			sync++
-			if !cudaUntimedNote.MatchString(src[:strings.LastIndex(src[:m[0]], "\n")+1]) {
+			if !cudaUntimedNote.MatchString(src[:strings.LastIndex(src[:m[0]], "\n")+1]) && !cudaTokenomosAccountingSite(srcs, path, m[0], true) {
 				t.Errorf("%s:%d synchronous %s is not counted by fcuda_ts_untimed_transfer()", path, at(src, m[0]), src[m[0]:m[1]-1])
 			}
 		}
