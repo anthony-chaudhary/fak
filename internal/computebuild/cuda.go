@@ -96,6 +96,38 @@ func cudaTypedQualificationFlags(args, env []string, enabled bool, macro, profil
 	return append(out, "-D"+macro), nil
 }
 
+type cudaKV16PrefillGQA4Key struct{}
+
+func cudaKV16PrefillGQA4Flags(ctx context.Context, args, env []string) ([]string, error) {
+	enabled, _ := ctx.Value(cudaKV16PrefillGQA4Key{}).(bool)
+	return cudaTypedQualificationFlags(args, env, enabled, "FAK_CUDA_KV16_PREFILL_GQA4_QUALIFICATION", "KV16 prefill GQA4")
+}
+
+// Source prerequisites only; marker presence is not archive/device qualification.
+func prepareCUDAKV16PrefillGQA4(cfg *CUDAConfig) error {
+	if !cfg.EnableKV16PrefillGQA4Qualification {
+		return nil
+	}
+	pkg := filepath.Join(cfg.RepoRoot, "internal", "compute")
+	if cfg.PkgDir != "" && filepath.Clean(cfg.PkgDir) != filepath.Clean(pkg) {
+		return fmt.Errorf("KV16 prefill GQA4 qualification requires the canonical compute package directory")
+	}
+	for _, c := range []struct{ path, marker string }{
+		{"cuda_kernels.cu", "#include \"cuda/kv_precision.cuh\""},
+		{"cuda/kv_precision.cuh", "k_kv_attention_prompt4_gqa4_typed"},
+		{"cuda_prompt_panel.go", "C.fcuda_kv_attention_typed"},
+	} {
+		data, err := os.ReadFile(filepath.Join(pkg, c.path))
+		if err != nil {
+			return fmt.Errorf("KV16 prefill GQA4 prerequisite %s: %w", c.path, err)
+		}
+		if !strings.Contains(string(data), c.marker) {
+			return fmt.Errorf("KV16 prefill GQA4 prerequisite %s lacks %q", c.path, c.marker)
+		}
+	}
+	return nil
+}
+
 type cudaPagedKVCopyKey struct{}
 
 func cudaPagedKVCopyFlags(ctx context.Context, args, env []string) ([]string, error) {
@@ -300,6 +332,10 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 		if err != nil {
 			return nil, err
 		}
+		nvccArgs, err = cudaKV16PrefillGQA4Flags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
 		nvccArgs, err = cudaTokenomosStagingFlags(ctx, nvccArgs, env)
 		if err != nil {
 			return nil, err
@@ -373,6 +409,10 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 			return nil, err
 		}
 		nvccArgs, err = cudaPagedKVCopyFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
+		nvccArgs, err = cudaKV16PrefillGQA4Flags(ctx, nvccArgs, env)
 		if err != nil {
 			return nil, err
 		}
@@ -656,6 +696,10 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 		return err
 	}
 	ctx = context.WithValue(ctx, cudaPagedKVCopyKey{}, cfg.EnablePagedKVCopyQualification)
+	if err := prepareCUDAKV16PrefillGQA4(cfg); err != nil {
+		return err
+	}
+	ctx = context.WithValue(ctx, cudaKV16PrefillGQA4Key{}, cfg.EnableKV16PrefillGQA4Qualification)
 	if err := prepareCUDATokenomosStaging(cfg); err != nil {
 		return err
 	}

@@ -2092,3 +2092,10 @@ One tensor entry of the header-only safetensors preflight plan: name, dtype, sha
 ParallelVerifyKernelOwned starts target-model speculative verification and returns a SpeculativeVerificationRound that owns provisional target continuation state until Finish retains the number of accepted draft tokens actually emitted or Abort retires the round.
 
 **Distinct from:** This is one verification-round ownership boundary, not InKernelPlanner request orchestration or the model weights/execution object. Finish counts accepted draft tokens only; callers advance an emitted correction or bonus separately. It does not itself establish device coverage or throughput.
+
+
+### k_kv_attention_prompt4_gqa4_typed
+
+A compile-time opt-in CUDA causal prefill kernel that tiles up to four query positions and up to four sibling query heads within one KV head, sharing widened narrowed-format K/V tiles and accumulating online softmax attention. The typed dispatcher selects it only for admitted narrowed-KV geometry under FAK_CUDA_KV16_PREFILL_GQA4_QUALIFICATION.
+
+**Distinct from:** This is a specific default-off CUDA kernel, not the general Attention softmax token-mixer or the host attnPrefillGQA3FDotInto kernel. It uses up to four sibling heads and four query positions per block rather than the host three-head traversal; the existing explicit tile4 branch has priority. Source and host build-selection checks do not establish native numerical correctness, device execution or speedup.
