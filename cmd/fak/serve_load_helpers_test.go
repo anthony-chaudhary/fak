@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
+	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 )
 
 func TestServeArtifactResidentQ4KUsesArtifactNotArmLabel(t *testing.T) {
@@ -336,5 +338,136 @@ func padToAlignmentForTest(b *bytes.Buffer, alignment int) {
 	rem := b.Len() % alignment
 	if rem != 0 {
 		b.Write(bytes.Repeat([]byte{0}, alignment-rem))
+	}
+}
+
+// createMixedQuantGGUF writes the #12983 fixture shape: a Q4_K dense side (attn_v/attn_q/output)
+// with one ffn_down tensor of the named expert type. The resident loader holds an eligible
+// non-Q4_K ffn_down raw in the k-quant store exactly like the mixed-quant checkpoints that
+// reached READY and then wedged in unbounded CPU dequant on the first turn.
+func createMixedQuantGGUF(t *testing.T, expertType ggufload.TensorType) string {
+	t.Helper()
+	const dim = 256
+	q4kBytes := uint64(36864) // 256 super-blocks x 144 B
+	var expertBytes uint64
+	switch expertType {
+	case ggufload.TensorQ4_K:
+		expertBytes = 36864 // 256 x 144
+	case ggufload.TensorIQ3_XXS:
+		expertBytes = 256 * 98 // 256 x blockIQ3XXSBytes
+	case ggufload.TensorQ6_K:
+		expertBytes = 256 * 210 // 256 x blockQ6KBytes
+	default:
+		t.Fatalf("unsupported fixture expert type %s", expertType)
+	}
+
+	var b bytes.Buffer
+	writeMinimalHeaderForTest(&b, 4, 9)
+	writeKVStringForTest(&b, "general.architecture", "llama")
+	writeKVUint32ForTest(&b, "general.alignment", 32)
+	writeKVUint32ForTest(&b, "llama.embedding_length", dim)
+	writeKVUint32ForTest(&b, "llama.block_count", 1)
+	writeKVUint32ForTest(&b, "llama.attention.head_count", 1)
+	writeKVUint32ForTest(&b, "llama.attention.key_length", dim)
+	writeKVUint32ForTest(&b, "llama.feed_forward_length", dim)
+	writeKVUint32ForTest(&b, "llama.context_length", 16)
+	writeKVFloat32ForTest(&b, "llama.attention.layer_norm_rms_epsilon", 1e-6)
+
+	writeTensorInfoForTest(&b, "blk.0.attn_v.weight", []uint64{dim, dim}, uint32(ggufload.TensorQ4_K), 0)
+	writeTensorInfoForTest(&b, "blk.0.attn_q.weight", []uint64{dim, dim}, uint32(ggufload.TensorQ4_K), q4kBytes)
+	writeTensorInfoForTest(&b, "blk.0.ffn_down.weight", []uint64{dim, dim}, uint32(expertType), 2*q4kBytes)
+	writeTensorInfoForTest(&b, "output.weight", []uint64{dim, dim}, uint32(ggufload.TensorQ4_K), 2*q4kBytes+expertBytes)
+	padToAlignmentForTest(&b, 32)
+	b.Write(make([]byte, 3*q4kBytes+expertBytes))
+
+	path := filepath.Join(t.TempDir(), "mixed-quant.gguf")
+	if err := os.WriteFile(path, b.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// fak-test:runtime fast est=1ms
+func TestServeQuantBackendNameMapsMetalNativeArm(t *testing.T) {
+	if got := serveQuantBackendName(nil); got != "metal" {
+		t.Fatalf("serveQuantBackendName(nil) = %q, want metal (the Metal-native load arm)", got)
+	}
+	if be := compute.Default(); be == nil {
+		t.Skip("no reference backend registered; device mapping not exercisable")
+	}
+	if got := serveQuantBackendName(compute.Default()); got != "cpu" {
+		t.Fatalf("serveQuantBackendName(device) = %q, want cpu (bounded host routes)", got)
+	}
+}
+
+// fak-test:runtime fast est=10ms
+func TestServeRefuseUnsupportedQuantsNilOnBoundedCPU(t *testing.T) {
+	// A nil model is a no-op: arms that never load retain the historical contract.
+	if err := serveRefuseUnsupportedQuants(nil, nil); err != nil {
+		t.Fatalf("nil model produced %v, want nil", err)
+	}
+	// A pure-Q4_K artifact retains no k-quant bulk: every arm's census must pass, and the
+	// helper must return a literal nil error (not a wrapped concrete refusal pointer).
+	path := createMixedQuantGGUF(t, ggufload.TensorQ4_K)
+	mm, err := ggufload.LoadModelQ4KProfileOptions(path, ggufload.NewLoadProfiler())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, be := range []compute.Backend{nil, compute.Default()} {
+		if err := serveRefuseUnsupportedQuants(mm, be); err != nil {
+			t.Fatalf("bounded Q4_K load refused on backend %v: %v", be, err)
+		}
+	}
+}
+
+// TestServeQuantCapabilityRefusalGatesEveryLoadArm is the #12983 fails-before/passes-after
+// witness: a mixed-quant checkpoint whose retained expert bulk has no Metal kernel and no
+// bounded host route must be refused at LOAD TIME (before READY) by the typed post-load census,
+// naming the offending kind, instead of reaching READY and hanging in unbounded CPU dequant on
+// the first turn. Before the gate this call returned a loaded model (err == nil).
+//
+// fak-test:runtime fast est=50ms
+func TestServeQuantCapabilityRefusalGatesEveryLoadArm(t *testing.T) {
+	orig := serveMetalAvailable
+	t.Cleanup(func() { serveMetalAvailable = orig })
+	serveMetalAvailable = func() bool { return true }
+	t.Setenv("FAK_Q4K", "")
+
+	path := createMixedQuantGGUF(t, ggufload.TensorIQ3_XXS)
+	_, _, _, _, _, err := loadServeInKernelModelPlacedErr(path, nil, false, false, 2048, nil, 1, nil)
+	if err == nil {
+		t.Fatal("mixed IQ3_XXS checkpoint reached READY on the Metal-native arm, want typed quant-capability refusal before readiness")
+	}
+	var refusal *fakmodel.LoadQuantCapabilityRefusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("load error type = %T (%v), want *model.LoadQuantCapabilityRefusal", err, err)
+	}
+	if !strings.Contains(refusal.Error(), "IQ3_XXS") {
+		t.Errorf("refusal %q does not name the unsupported IQ3_XXS band", refusal.Error())
+	}
+}
+
+// TestServeQuantCapabilityBoundedTurnOnSupportedBands pins the other side of the gate: a mixed
+// checkpoint whose retained expert bulk dispatches to a resident Metal device kernel (Q6_K) or a
+// bounded host route must LOAD through the census unchanged — the GLM-5.2-style Q5_K/Q6_K expert
+// checkpoint the gate exists to keep serving.
+//
+// fak-test:runtime fast est=50ms
+func TestServeQuantCapabilityBoundedTurnOnSupportedBands(t *testing.T) {
+	orig := serveMetalAvailable
+	t.Cleanup(func() { serveMetalAvailable = orig })
+	serveMetalAvailable = func() bool { return true }
+	t.Setenv("FAK_Q4K", "")
+
+	path := createMixedQuantGGUF(t, ggufload.TensorQ6_K)
+	mm, q4k, _, _, _, err := loadServeInKernelModelPlacedErr(path, nil, false, false, 2048, nil, 1, nil)
+	if err != nil {
+		t.Fatalf("supported-bands mixed checkpoint refused at load: %v", err)
+	}
+	if mm == nil || !q4k {
+		t.Fatalf("load returned model=%v q4k=%v, want the resident Q4_K arm", mm, q4k)
+	}
+	if ref := mm.RefuseUnsupportedQuants("metal"); ref != nil {
+		t.Fatalf("retained Q6_K expert bulk refused on metal: %v", ref)
 	}
 }

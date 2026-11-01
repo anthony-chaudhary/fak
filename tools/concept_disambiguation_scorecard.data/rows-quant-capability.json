@@ -1,0 +1,40 @@
+{
+  "rows": [
+    {
+      "id": "quant-capability-census",
+      "canonical": "QuantCapabilityCensus",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The pre-load, band-based quant capability census: given a serve backend and the GGUF header's declared weight bands, it decides which quant types that backend can dispatch (resident device kernel or bounded host dequant) and returns one per-band dispatch verdict before any tensor bytes are read.",
+      "distinction": "It inspects the checkpoint HEADER on the Metal admission path only, before load; it is not the post-load retained-tensor gate LoadQuantCapabilityRefusal, which re-checks the k-quant tensors the loader actually kept after routing.",
+      "distinct_from": [
+        "load-quant-capability-refusal"
+      ],
+      "aliases": [],
+      "grounding": "QuantCapabilityCensus",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "load-quant-capability-refusal",
+      "canonical": "LoadQuantCapabilityRefusal",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The post-load quant capability refusal: after a checkpoint has been loaded, it censuses the k-quant tensors the loader retained and refuses the load when a kind has neither a resident device kernel nor a bounded host dequant path, naming every offending kind with its tensor count and byte share.",
+      "distinction": "It runs on the RETAINED tensor set after load-time routing, on every serve load arm; it is not the pre-load header-band census QuantCapabilityCensus, which gates only the Metal admission path before bytes are read.",
+      "distinct_from": [
+        "quant-capability-census"
+      ],
+      "aliases": [],
+      "grounding": "LoadQuantCapabilityRefusal",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
