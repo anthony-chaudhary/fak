@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -254,5 +256,109 @@ func TestPerfEvidenceCompleteStreamReachesHTTPAndDurableLedger(t *testing.T) {
 	records, _ := perfledger.ReadTail(path)
 	if len(records) != 1 || records[0].BenchEvidence == nil || records[0].BenchEvidence.OutputSHA256 != perfEvidenceFingerprint("héllo", "think!") {
 		t.Fatalf("actual gateway receipt did not persist output identity: %+v", records)
+	}
+}
+
+// fak-test:justify why=integration when=changed:internal/gateway/**
+// fak-test:runtime fast est=500ms lane=default
+func TestPerfEvidenceFullTokenDigestUsesLastExplicitValue(t *testing.T) {
+	full := "abcdef123456" + strings.Repeat("a", 52)
+	valid := `{"token_sha":"abcdef123456","token_sha256":"` + full + `"}`
+	for _, tc := range []struct{ name, object, want string }{
+		{"valid", valid, full},
+		{"full-alone", `{"token_sha256":"` + full + `"}`, full},
+		{"legacy-only", `{"token_sha":"abcdef123456"}`, ""},
+		{"null", `{"token_sha256":null}`, ""},
+		{"boolean", `{"token_sha256":true}`, ""},
+		{"number", `{"token_sha256":7}`, ""},
+		{"object", `{"token_sha256":{}}`, ""},
+		{"array", `{"token_sha256":[]}`, ""},
+		{"duplicate-null", `{"token_sha256":"` + full + `","token_sha256":null}`, ""},
+		{"duplicate-bool", `{"token_sha256":"` + full + `","token_sha256":false}`, ""},
+		{"mismatch", `{"token_sha":"123456abcdef","token_sha256":"` + full + `"}`, ""},
+		{"empty", `{}`, ""},
+	} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/stream=%t", tc.name, stream), func(t *testing.T) {
+				raw := strings.TrimSuffix(string(perfEvidenceBuffered()), "}") + `,"tensorfold":` + tc.object + `}`
+				if stream {
+					frames := `data: {"tensorfold":` + valid + "}\n\n" + `data: {"tensorfold":` + tc.object + "}\n\n" + "data: [DONE]"
+					raw = strings.Replace(string(perfEvidenceSSE(true)), "data: [DONE]", frames, 1)
+				}
+				got := perfEvidenceObserve(t, perfEvidenceCompletion([]byte(raw))).BenchEvidence
+				if got == nil || !got.Complete || got.TokenSHA256 != tc.want || got.OutputSHA256 != perfEvidenceFingerprint("héllo", "think!") {
+					t.Fatalf("raw runtime field did not preserve last explicit identity: %+v", got)
+				}
+			})
+		}
+	}
+	for _, raw := range []string{
+		strings.Replace(string(perfEvidenceSSE(true)), "data: [DONE]", `data: {"tensorfold":`+valid+"}\n\n", 1),
+		strings.Replace(string(perfEvidenceSSE(true)), "data: [DONE]", `data: {"tensorfold":`+valid+"}\n\n"+`data: {"error":{"message":"fixture failure"}}`+"\n\ndata: [DONE]", 1),
+	} {
+		got := perfEvidenceObserve(t, perfEvidenceCompletion([]byte(raw))).BenchEvidence
+		if got == nil || got.Complete || got.TokenSHA256 != "" {
+			t.Fatal("incomplete/error stream retained full token proof")
+		}
+	}
+}
+
+// fak-test:justify why=integration when=changed:internal/gateway/**
+// fak-test:runtime fast est=1s lane=default
+func TestPerfEvidenceFullTokenDigestReachesHTTPAndDurableLedger(t *testing.T) {
+	prefix := "abcdef123456"
+	for _, tc := range []struct {
+		name, full, want string
+		complete         bool
+	}{
+		{"first", prefix + strings.Repeat("a", 52), prefix + strings.Repeat("a", 52), true},
+		{"same-prefix-different-full", prefix + strings.Repeat("b", 52), prefix + strings.Repeat("b", 52), true},
+		{"short-is-not-full", prefix, "", true},
+		{"incomplete", prefix + strings.Repeat("a", 52), "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := newTestServer(t)
+			metadata := `data: {"tensorfold":{"token_sha":"` + prefix + `","token_sha256":"` + tc.full + "\"}}\n\n"
+			raw := strings.Replace(string(perfEvidenceSSE(true)), "data: [DONE]", metadata+"data: [DONE]", 1)
+			if !tc.complete {
+				raw = strings.Replace(raw, "data: [DONE]", "", 1)
+			}
+			server.planner = &perfEvidencePlanner{completion: *perfEvidenceCompletion([]byte(raw))}
+			path := filepath.Join(t.TempDir(), "perf.jsonl")
+			writer := perfledger.OpenWriter(path, perfledger.DefaultMaxBytes)
+			t.Cleanup(func() { _ = writer.Close() })
+			server.SetPerfLedger(writer, nil, false)
+			httpServer := httptest.NewServer(server.Handler())
+			t.Cleanup(httpServer.Close)
+			var response ChatResponse
+			postJSON(t, httpServer.URL+"/v1/chat/completions", ChatRequest{Model: "test-model", Messages: []agent.Message{{Role: "user", Content: "fixture prompt"}}}, &response)
+			report := decodePerfReport(t, getPerfRecent(t, server, ""))
+			if len(report.Records) != 1 {
+				t.Fatal("ordinary HTTP path did not record request")
+			}
+			if err := writer.Close(); err != nil {
+				t.Fatal(err)
+			}
+			persisted, _ := perfledger.ReadTail(path)
+			if len(persisted) != 1 {
+				t.Fatal("ordinary HTTP evidence did not reach durable ledger")
+			}
+			for _, record := range []perfledger.Record{report.Records[0], persisted[0]} {
+				if record.BenchEvidence == nil || record.BenchEvidence.TokenSHA256 != tc.want || record.BenchEvidence.Complete != tc.complete {
+					t.Fatalf("ordinary caller changed token identity: %+v", record.BenchEvidence)
+				}
+				encoded, err := json.Marshal(record.BenchEvidence)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var fields map[string]json.RawMessage
+				if json.Unmarshal(encoded, &fields) != nil {
+					t.Fatal("invalid serialized evidence")
+				}
+				if (len(fields["token_sha256"]) > 0) != (tc.want != "") {
+					t.Fatal("serialization manufactured or dropped full token proof")
+				}
+			}
+		})
 	}
 }

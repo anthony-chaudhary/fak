@@ -220,15 +220,19 @@ func completionBenchEvidence(comp *agent.Completion) *perfledger.BenchEvidence {
 		}
 	}
 	var runtime struct {
-		TokenSHA json.RawMessage `json:"token_sha"`
+		TokenSHA    json.RawMessage `json:"token_sha"`
+		TokenSHA256 json.RawMessage `json:"token_sha256"`
 	}
-	tokenSHA := ""
+	tokenSHA, tokenSHA256 := "", ""
 	if json.Unmarshal(runtimeRaw, &runtime) == nil {
 		if json.Unmarshal(runtime.TokenSHA, &tokenSHA) != nil {
 			tokenSHA = ""
 		}
+		if json.Unmarshal(runtime.TokenSHA256, &tokenSHA256) != nil {
+			tokenSHA256 = ""
+		}
 	}
-	return perfledger.NewBenchEvidence(usage, comp.Message.Content, comp.Message.ReasoningContent, tokenSHA, complete)
+	return perfledger.NewBenchEvidenceWithTokenSHA256(usage, comp.Message.Content, comp.Message.ReasoningContent, tokenSHA, tokenSHA256, complete)
 }
 
 func completionBenchPayload(raw []byte) (json.RawMessage, json.RawMessage, bool) {

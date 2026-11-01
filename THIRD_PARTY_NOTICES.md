@@ -58,7 +58,12 @@ SOFTWARE.
 TensorFold at revision `a6aa4782bf4ffe87ccee4a0a5cbf2efb2dd01cba`:
 https://github.com/ashhart/TensorFold/blob/a6aa4782bf4ffe87ccee4a0a5cbf2efb2dd01cba/tools/bench_evidence.py
 
-Changed for Fak: Go receipt types, strict JSON count parsing, and integration into
+Full token SHA-256 validation and short-prefix consistency are updated from
+revision `9e8c368b0b4c2c7892a0c9f0f302d7c164016209` of the same source:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/tools/bench_evidence.py
+
+Changed for Fak: Go receipt types, strict JSON count parsing, full token digest
+validation with a compatible legacy constructor, and integration into
 the existing gateway performance ledger. No original Python benchmark client or
 third-party kernel/model code is included.
 

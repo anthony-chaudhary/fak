@@ -181,3 +181,68 @@ func TestBenchEvidenceOutputBoundPreservesCountsAndRevokesProof(t *testing.T) {
 		})
 	}
 }
+
+// fak-test:justify why=contract when=changed:internal/perfledger/**
+// fak-test:runtime fast est=200ms lane=default
+func TestBenchEvidenceFullTokenDigest(t *testing.T) {
+	const prefix = "abcdef123456"
+	full := prefix + strings.Repeat("a", 52)
+	usage := benchEvidenceUsage("10", "4", "3")
+	for _, tc := range []struct {
+		name, legacy, digest, wantLegacy, wantFull string
+		complete                                   bool
+	}{
+		{"full-alone", "", full, "", full, true},
+		{"matching-short", prefix, full, prefix, full, true},
+		{"matching-full", full, full, full, full, true},
+		{"legacy-only", prefix, "", prefix, "", true},
+		{"invalid-legacy-independent-full", "invalid", full, "", full, true},
+		{"mismatch", "123456abcdef", full, "123456abcdef", "", true},
+		{"donor-prefix-only-rule", prefix + strings.Repeat("b", 52), full, prefix + strings.Repeat("b", 52), full, true},
+		{"incomplete", prefix, full, "", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := NewBenchEvidenceWithTokenSHA256(usage, "answer", "reason", tc.legacy, tc.digest, tc.complete)
+			if got.TokenSHA != tc.wantLegacy || got.TokenSHA256 != tc.wantFull || got.Complete != tc.complete {
+				t.Fatalf("token identity mismatch: %+v", got)
+			}
+			if got.PromptTokens == nil || *got.PromptTokens != 10 || got.CachedTokens == nil || *got.CachedTokens != 4 {
+				t.Fatal("token validation erased known usage")
+			}
+			if tc.complete && got.OutputSHA256 != benchEvidenceFingerprint("answer", "reason") {
+				t.Fatal("full-token validation changed output fingerprint")
+			}
+		})
+	}
+	for _, bad := range []string{"", prefix, strings.Repeat("a", 63), strings.Repeat("a", 65), strings.Repeat("A", 64), strings.Repeat("g", 64), "sha256:" + full} {
+		got := NewBenchEvidenceWithTokenSHA256(usage, "answer", "", prefix, bad, true)
+		if got.TokenSHA256 != "" || got.TokenSHA != prefix {
+			t.Fatal("invalid full digest became proof or erased legacy diagnostic")
+		}
+		raw, err := json.Marshal(got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(raw, &fields) != nil {
+			t.Fatal("invalid evidence encoding")
+		}
+		if _, present := fields["token_sha256"]; present {
+			t.Fatal("unknown full digest must remain omitted")
+		}
+	}
+	other := prefix + strings.Repeat("b", 52)
+	a := NewBenchEvidenceWithTokenSHA256(nil, "same", "", prefix, full, true)
+	b := NewBenchEvidenceWithTokenSHA256(nil, "same", "", prefix, other, true)
+	if a.TokenSHA != b.TokenSHA || a.TokenSHA256 == b.TokenSHA256 || a.TokenSHA256 != full || b.TokenSHA256 != other {
+		t.Fatal("shared short prefix collapsed distinct token identities")
+	}
+	legacy := NewBenchEvidence(usage, "answer", "reason", full, true)
+	if legacy.TokenSHA256 != "" || legacy.TokenSHA != full {
+		t.Fatal("legacy constructor fabricated full proof")
+	}
+	bounded := NewBenchEvidenceWithTokenSHA256(usage, strings.Repeat("x", MaxBenchEvidenceOutputBytes+1), "", prefix, full, true)
+	if bounded.Complete || bounded.TokenSHA256 != "" || bounded.TokenSHA != "" {
+		t.Fatal("over-bound output retained token proof")
+	}
+}
