@@ -441,7 +441,7 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 		kvReuseHits: kvReuseHits,
 		kvPinned:    kvPinned,
 		kvPinUntil:  kvPinUntil,
-		tokens:      make(chan abi.EngineToken, 1),
+		tokens:      newNativeRequestOutbox(),
 		done:        make(chan struct{}),
 		hint:        hint,
 		priority:    priority,

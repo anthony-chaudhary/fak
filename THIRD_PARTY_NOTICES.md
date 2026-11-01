@@ -496,6 +496,22 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+## vLLM native request outbox
+
+`internal/modelengine/nativesched_output.go` adapts the request-local,
+nonblocking publication principle of `RequestOutputCollector` in
+`vllm/v1/engine/output_processor.py` at
+`975dca5bb5db302077674cfa9afe851ee700ad73`:
+https://github.com/vllm-project/vllm/blob/975dca5bb5db302077674cfa9afe851ee700ad73/vllm/v1/engine/output_processor.py
+
+Copyright contributors to the vLLM project. SPDX-License-Identifier: Apache-2.0.
+Changed for Fak: individual token IDs retained in the native request's existing
+finite generation budget, rather than Python output aggregation; the existing
+scheduler owns cancellation, terminal channel close and session/KV release.
+This is distinct from the gateway SSE boundary collector. The Apache-2.0
+license reproduced below for the vLLM paged-attention adaptation also applies.
+
+
 ## vLLM offloader pinned-buffer identity and dependency ordering
 
 The checkpoint expert-ring fill in `internal/model/expert_checkpoint_tier.go`
