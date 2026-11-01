@@ -27,9 +27,10 @@ operator interface and reconnects every result to a receipt.
 ## Editorial rules
 
 - Keep the montage under 13 seconds and show the numeric result immediately.
-- Put the operating envelope on screen whenever the 3,378→376 ms result appears.
+- Put the full historical operating envelope on screen whenever the 3,378→376 ms p95 time-to-first-correct-answer result appears: Qwen/Qwen3.8-27B via vLLM on NVIDIA A100-SXM4-40GB, one prompt, three trials per arm, historical no-thinking campaign. This is not a general model-speed claim or evidence of fak-native/Metal execution.
+- Label the 10,000-logical-context / 64-worker selfcheck as deterministic orchestration evidence, not real-model throughput.
 - Label the scripted install terminal `RECREATED WALKTHROUGH`.
-- Do not publish the preproduction master as proof of the Mac run.
+- The committed claim manifest still marks the native Mac capture `missing`. Keep the `CAPTURE REQUIRED` chapter and preproduction labeling until the receipt and clip satisfy `CAPTURE-MACBOOK.md`; do not publish the preproduction master as proof of the Mac run.
 - Preserve chapter metadata so evaluators can jump directly to every claim.
 - Music may add momentum but cannot obscure spoken caveats or terminal audio.
 

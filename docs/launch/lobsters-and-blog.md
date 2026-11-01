@@ -13,7 +13,7 @@ Cutting a poisoned tool result out of the middle of a live model's KV cache, bit
 
 **Authored-by-me note** (the "you are the author" box Lobsters expects):
 
-> Author here. fak is a single static Go binary that sits between an AI agent and its tools. This writeup is about one specific mechanism: addressable mid-run KV-cache eviction. You can reach into the middle of a kept model run, cut a span (e.g. a poisoned tool result), and the resulting cache is bit-for-bit identical to a run that never saw the span — checked at max|Δ|=0 against a run that never saw it, and non-vacuously different from one that kept it. That bit-exact eviction property is proven structurally on the kernel's KV-cache code path; separately, the same forward pass is proven numerically against a HuggingFace oracle (per-layer cos=1.000000, final-logits max|Δ|≈4.4e-5). Shipped engines (vLLM, SGLang, OpenAI/Anthropic prompt caches) reuse from the *front* only; none do mid-run eviction. The deletion certificate is ed25519-signed but I want to be upfront that it's self-signed v1 and the evicted-span count is self-reported — the load-bearing proof is the eviction parity you can reproduce offline, not the receipt. The repo also does default-deny capability gating on the tool-call path; happy to argue that part in the comments but the post stays on the cache mechanism. Apache-2.0, two golang.org/x deps in a 4-line go.sum. Not a faster token engine — vLLM/SGLang win raw throughput; the claim here is a capability those engines don't expose, not a speed record.
+> Author here. fak is a single static Go binary that sits between an AI agent and its tools. This writeup is about one specific mechanism: addressable mid-run KV-cache eviction. You can reach into the middle of a kept model run, cut a span (e.g. a poisoned tool result), and the resulting cache is bit-for-bit identical to a run that never saw the span — checked at max|Δ|=0 against a run that never saw it, and non-vacuously different from one that kept it. That bit-exact eviction property is checked on a tiny in-memory synthetic model through the kernel's KV-cache code path; separately, the SmolLM2 forward pass is checked numerically against a HuggingFace oracle (per-layer cos=1.000000, final-logits max|Δ|≈4.4e-5). These witnesses do not establish which eviction capabilities other engines currently expose. The deletion certificate is ed25519-signed but I want to be upfront that it's self-signed v1 and the evicted-span count is self-reported — the load-bearing proof is the eviction parity you can reproduce offline, not the receipt. The repo also does default-deny capability gating on the tool-call path; happy to argue that part in the comments but the post stays on the cache mechanism. Apache-2.0, two golang.org/x deps in a 4-line go.sum. The claim here is the demonstrated synthetic-model eviction property, not a speed record or a current competitive-capability comparison.
 
 ---
 *Lobsters note for the submitter: this needs an aged/invited account and you must be transparent about authorship — the note above is written to satisfy that. If the account is too new, hold and cross-post the dev.to version to HN/Reddit first.*
@@ -45,16 +45,16 @@ The rest of this post is the *why* and the *how honest is this, really*.
 
 ---
 
-## Section 1 — The thing nobody's KV cache does: delete from the middle
+## Section 1 — Checking mid-run eviction on a synthetic model
 
-Every prefix-cache you've used — vLLM, SGLang, OpenAI/Anthropic prompt caching — reuses tokens **from the front**. Append-only. If turn 3 of a 12-turn agent run contained a poisoned tool result, you cannot surgically remove turn 3 and keep turns 1–2 and 4–12 warm. You re-prefill.
+Prefix reuse and mid-run eviction answer different questions. Here the question is whether removing a span leaves the retained state identical to a run that never saw it. The offline synthetic-model demonstration below tests that property; it is not a current capability survey of vLLM, SGLang, or hosted prompt caches.
 
 fak's cache is *addressable*: you name a span and evict it, and the kept run is left identical to one where the span never existed.
 
 **Runnable:** `go run ./cmd/deletioncert -selfcheck`
 **Claim:** mid-run eviction leaves the cache bit-for-bit identical to a never-saw-it run, **max|Δ|=0**, against a non-vacuous control (a run that kept the span differs). [shipped]
-**How it's proven (two separate witnesses, stated plainly):** the bit-exact eviction property is *structural* and is proven on the kernel's KV-cache code path (the `-selfcheck` demo exercises it on a tiny in-memory synthetic model — no weights, no torch). The numerics of that same forward pass are proven *separately* against a HuggingFace oracle (Section 4). I keep these two apart on purpose: one proves "evicted == never-saw, byte for byte," the other proves "the math matches PyTorch."
-**Fence:** "No shipped engine does this" is specifically about *mid-run* eviction. It is **not** a claim about being a faster cache — append-from-front reuse is a different, well-solved problem.
+**How it's proven (two separate witnesses, stated plainly):** the bit-exact eviction property is *structural* and is proven on the kernel's KV-cache code path (the `-selfcheck` demo exercises it on a tiny in-memory synthetic model — no weights, no torch). The SmolLM2 forward-pass numerics are checked *separately* against a HuggingFace oracle (Section 4). I keep these two apart on purpose: one proves "evicted == never-saw, byte for byte," the other proves "the math matches PyTorch."
+**Fence:** The eviction witness is synthetic-model evidence. It does not establish real-model eviction parity, a speed advantage, or the absence of equivalent capabilities in other engines. The separate HuggingFace witness checks forward-pass numerics, not this eviction property.
 
 ---
 
