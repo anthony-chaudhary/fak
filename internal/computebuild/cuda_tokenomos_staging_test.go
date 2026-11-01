@@ -59,7 +59,7 @@ func TestCUDATokenomosStagingPrerequisites(t *testing.T) {
 	}
 	files := map[string]string{
 		"cuda_kernels.cu":           "#include \"cuda/model_candidates.cuh\"",
-		"cuda/model_candidates.cuh": "#ifdef FAK_CUDA_TOKENOMOS_STAGING_QUALIFICATION\n#include \"tokenomos_staging.h\"\nfak_tokenomos_staging_copy(dIDs, hIDs, idsBytes)\nfak_tokenomos_staging_error(launch)",
+		"cuda/model_candidates.cuh": "#ifdef FAK_CUDA_TOKENOMOS_STAGING_QUALIFICATION\n#include \"tokenomos_staging.h\"\nfak_tokenomos_staging_copy(dIDs, hIDs, idsBytes, fcuda_ts_untimed_transfer)\nfak_tokenomos_staging_error(launch)",
 		"cuda/tokenomos_staging.h":  "struct fak_tokenomos_staging_pool\ncudaEventSynchronize(a.done)\ng_cuda_cleanup_status",
 	}
 	write := func(name, body string) {
@@ -77,6 +77,20 @@ func TestCUDATokenomosStagingPrerequisites(t *testing.T) {
 	}
 	if err := prepareCUDATokenomosStaging(cfg); err != nil {
 		t.Fatal(err)
+	}
+	// Reject the stale call and callbacks that do not preserve caller accounting.
+	for _, call := range []string{
+		"fak_tokenomos_staging_copy(dIDs, hIDs, idsBytes)",
+		"fak_tokenomos_staging_copy(dIDs, hIDs, idsBytes, nullptr)",
+		"fak_tokenomos_staging_copy(dIDs, hIDs, idsBytes, wrong_callback)",
+	} {
+		const path = "cuda/model_candidates.cuh"
+		body := strings.Replace(files[path], "fak_tokenomos_staging_copy(dIDs, hIDs, idsBytes, fcuda_ts_untimed_transfer)", call, 1)
+		write(path, body)
+		if err := prepareCUDATokenomosStaging(cfg); err == nil {
+			t.Fatalf("unaccounted staging callback admitted: %s", call)
+		}
+		write(path, files[path])
 	}
 	// Marker presence is only admission plumbing, not compilation or correctness.
 	for name, body := range files {
@@ -141,5 +155,23 @@ func TestCUDATokenomosStagingReceiptCache(t *testing.T) {
 	}
 	if compile(false, "executed") != baseline {
 		t.Fatal("default build did not recover its original key")
+	}
+}
+
+// Read the actual caller and pool so stale synthetic markers cannot hide drift.
+// This is admission plumbing only: no CUDA compiler or device is invoked.
+// fak-test:runtime fast est=10ms lane=default
+func TestCUDATokenomosStagingCurrentSources(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &CUDAConfig{
+		RepoRoot:                            root,
+		PkgDir:                              filepath.Join(root, "internal", "compute"),
+		EnableTokenomosStagingQualification: true,
+	}
+	if err := prepareCUDATokenomosStaging(cfg); err != nil {
+		t.Fatalf("current Tokenomos caller/pool admission: %v", err)
 	}
 }

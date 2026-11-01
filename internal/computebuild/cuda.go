@@ -177,7 +177,7 @@ func prepareCUDATokenomosStaging(cfg *CUDAConfig) error {
 		{"cuda_kernels.cu", "#include \"cuda/model_candidates.cuh\""},
 		{"cuda/model_candidates.cuh", "#ifdef FAK_CUDA_TOKENOMOS_STAGING_QUALIFICATION"},
 		{"cuda/model_candidates.cuh", "#include \"tokenomos_staging.h\""},
-		{"cuda/model_candidates.cuh", "fak_tokenomos_staging_copy(dIDs, hIDs, idsBytes)"},
+		{"cuda/model_candidates.cuh", "fak_tokenomos_staging_copy(dIDs, hIDs, idsBytes, fcuda_ts_untimed_transfer)"},
 		{"cuda/model_candidates.cuh", "fak_tokenomos_staging_error(launch)"},
 		{"cuda/tokenomos_staging.h", "struct fak_tokenomos_staging_pool"},
 		{"cuda/tokenomos_staging.h", "cudaEventSynchronize(a.done)"},
