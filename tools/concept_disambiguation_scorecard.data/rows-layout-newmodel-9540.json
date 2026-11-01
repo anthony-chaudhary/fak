@@ -34,7 +34,8 @@
         "kvlayout-interface",
         "newmodel-native-weight-layout",
         "x-layout-datelayout",
-        "nvfp4-scale-layout-geometry"
+        "nvfp4-scale-layout-geometry",
+        "qwen35-state-layout"
       ],
       "aliases": [],
       "grounding": "StateLayout",

@@ -2085,3 +2085,17 @@ The static dense k-quant residency decision fak model preflight derives from the
 One tensor entry of the header-only safetensors preflight plan: name, dtype, shape, shard, routed loader role, and load-time representation, read from index and shard headers without touching tensor bytes.
 
 **Distinct from:** Not the GGUF ManifestPreflight report (gguf-manifest-header-preflight), which covers .gguf manifests; this is the safetensors-side per-tensor census row that feeds the same fak.model-manifest-preflight/1 report under format=safetensors.
+
+
+### Qwen35StateLayout
+
+Checked per-layer convolution-history and recurrent-state element and payload byte dimensions for explicit Qwen state dtype before allocation.
+
+**Distinct from:** State payload dimensions only, not tensor element ordering, weight packing, allocator ownership, pool capacity, memory-fit admission, or device execution; host and HAL consumers explicitly retain F32.
+
+
+### ComputeQwen35StateLayout
+
+Pure checked constructor of Qwen35StateLayout from model geometry and explicit state dtype, returning invalid-shape or arithmetic-overflow errors before allocation.
+
+**Distinct from:** Computes and validates a state payload plan; unlike Qwen35StateLayout, it is the fallible planning operation, not the resulting immutable dimension record. It does not allocate state or choose pool capacity.
