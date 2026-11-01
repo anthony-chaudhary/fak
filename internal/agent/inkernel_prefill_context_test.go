@@ -67,6 +67,15 @@ func (b *partialPrefillBackend) Recycle() {
 
 // fak-test:runtime fast est=100ms lane=default
 func TestInKernelPartialOffloadPrefillCancellation(t *testing.T) {
+	testInKernelScalarPrefillCancellation(t, 1)
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestInKernelFullResidentPrefillCancellation(t *testing.T) {
+	testInKernelScalarPrefillCancellation(t, 0)
+}
+
+func testInKernelScalarPrefillCancellation(t *testing.T, gpuLayers int) {
 	cfg := tinyCfg()
 	cfg.EOSTokenID = -1
 	ids := synthIDs(cfg.VocabSize, 8, 311)
@@ -76,7 +85,7 @@ func TestInKernelPartialOffloadPrefillCancellation(t *testing.T) {
 		return m, &partialPrefillBackend{Backend: compute.Default()}
 	}
 	planner := func(m *model.Model, b *partialPrefillBackend) *InKernelPlanner {
-		return &InKernelPlanner{m: m, modelID: "partial-prefill-cpu-witness", backend: b, denseGPULayers: 1, tree: radixkv.New(0)}
+		return &InKernelPlanner{m: m, modelID: "scalar-prefill-cpu-witness", backend: b, denseGPULayers: gpuLayers, tree: radixkv.New(0)}
 	}
 	session := func(t *testing.T, m *model.Model, b *partialPrefillBackend) *model.Session {
 		t.Helper()
@@ -84,9 +93,9 @@ func TestInKernelPartialOffloadPrefillCancellation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s.DenseGPULayers = 1
-		if s.Backend != b || s.DenseGPULayers >= m.Cfg.NumLayers {
-			t.Fatal("fixture must execute the partial-placement HAL token loop")
+		s.DenseGPULayers = gpuLayers
+		if s.Backend != b || gpuLayers > 0 && gpuLayers >= m.Cfg.NumLayers {
+			t.Fatal("fixture must execute the selected scalar HAL placement")
 		}
 		t.Cleanup(s.Close)
 		return s
@@ -151,10 +160,15 @@ func TestInKernelPartialOffloadPrefillCancellation(t *testing.T) {
 		legacy := session(t, m, b)
 		want := append([]float32(nil), legacy.Prefill(ids)...)
 		wantLen := legacy.Cache.Len()
+		wantDeviceLen := b.stores[len(b.stores)-1].Len()
+		expectedHostLen := 0
+		if gpuLayers > 0 {
+			expectedHostLen = len(ids)
+		}
 		legacy.Close()
 		s := session(t, m, b)
 		got, err := planner(m, b).prefillDivergentSuffix(context.Background(), s, ids)
-		if err != nil || !reflect.DeepEqual(got, want) || s.Cache.Len() != wantLen || wantLen != len(ids) {
+		if err != nil || !reflect.DeepEqual(got, want) || s.Cache.Len() != wantLen || wantLen != expectedHostLen || b.stores[len(b.stores)-1].Len() != wantDeviceLen || wantDeviceLen != len(ids) {
 			t.Errorf("uncancelled parity: err=%v logits_equal=%t cache=%d legacy=%d", err, reflect.DeepEqual(got, want), s.Cache.Len(), wantLen)
 		}
 		s.Close()
@@ -178,8 +192,13 @@ func TestInKernelPartialOffloadPrefillCancellation(t *testing.T) {
 			s.PrefillNoLogits(ids)
 			err = ctx.Err()
 		}
-		t.Logf("no_logits_post_cancel_tokens=%d cache_tokens=%d", b.postCancelWork, s.Cache.Len())
-		if !errors.Is(err, context.Canceled) || !b.cancelled || b.postCancelWork != 0 || s.Cache.Len() != 1 {
+		deviceTokens := b.stores[len(b.stores)-1].Len()
+		hostTokens := 0
+		if gpuLayers > 0 {
+			hostTokens = 1
+		}
+		t.Logf("no_logits_post_cancel_tokens=%d device_cache_tokens=%d", b.postCancelWork, deviceTokens)
+		if !errors.Is(err, context.Canceled) || !b.cancelled || b.postCancelWork != 0 || deviceTokens != 1 || s.Cache.Len() != hostTokens {
 			t.Errorf("no-logits cancellation: err=%v observed=%t extra=%d cache=%d", err, b.cancelled, b.postCancelWork, s.Cache.Len())
 		}
 		s.Close()

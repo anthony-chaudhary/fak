@@ -2340,6 +2340,11 @@
           "category": "incidental",
           "reason": "Build configuration identifier in internal/devcmd/build_cuda.go selecting flags, tags, cache identity or preparation for the already named CUDA candidate. It does not introduce a separate runtime pool, attention algorithm or authorization gate; hardware acceptance remains UNRUN.",
           "token": "sharedAttention"
+        },
+        {
+          "category": "incidental",
+          "reason": "Initialization-time environment-key spelling for the default-off experimental selector of the separately positioned attnDecodeQ8Packed consumer (host-q8-packed-decode-tile). It controls opt-in selection but defines no independent attention computation, cache ownership or authorization contract; the consumer position documents selection restrictions, fallback and unresolved performance promotion. This classification does not declare the feature incidental or permit default enablement.",
+          "token": "FAK_QATTN_Q8_PACKED"
         }
       ],
       "exclude": [
@@ -2354,6 +2359,7 @@
         "EstimatedAttentionSeconds",
         "ExecutionPrefillAttention",
         "FAK_CUDA_QWEN35_ATTN_POSTPROCESS",
+        "FAK_QATTN_Q8_PACKED",
         "MetalFallbackPrefillAttentionCPU",
         "PrefillAttentionSupported",
         "PrefillAttentionTiming",

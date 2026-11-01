@@ -2113,3 +2113,10 @@ ParallelVerifyKernelOwned starts target-model speculative verification and retur
 A compile-time opt-in CUDA causal prefill kernel that tiles up to four query positions and up to four sibling query heads within one KV head, sharing widened narrowed-format K/V tiles and accumulating online softmax attention. The typed dispatcher selects it only for admitted narrowed-KV geometry under FAK_CUDA_KV16_PREFILL_GQA4_QUALIFICATION.
 
 **Distinct from:** This is a specific default-off CUDA kernel, not the general Attention softmax token-mixer or the host attnPrefillGQA3FDotInto kernel. It uses up to four sibling heads and four query positions per block rather than the host three-head traversal; the existing explicit tile4 branch has priority. Source and host build-selection checks do not establish native numerical correctness, device execution or speedup.
+
+
+### attnDecodeQ8Packed
+
+Experimental default-off host B=1 Q8-KV attention consumer. It reconstructs one bounded F32 head-row tile per worker from packed codes and block scales, shares that tile across grouped query heads, and uses existing native dot, softmax and value kernels without expanding full-layer K/V panels. The separately guarded tokenHiddenQ branch selects it only for admitted contiguous host Q8 cache geometry.
+
+**Distinct from:** Unlike attnDecodeBatch, this consumer serves one eligible host Q8 sequence and decodes bounded per-worker head tiles instead of reading reconstructed full-layer K/V. It is a concrete implementation of scaled-dot-product attention, not the general Attention token-mixer, a CUDA kernel, query quantization or the held materialization-once candidate. FAK_QATTN_Q8_PACKED=1 is an initialization-time experimental opt-in; QSA and serial precedence and original fallback remain. Scoped parity and allocation observations do not establish unaffected-path latency neutrality, performance promotion or default enablement.
