@@ -14,6 +14,13 @@
     {"name": "verification", "start_milliseconds": 68, "duration_milliseconds": 5},
     {"name": "teardown", "start_milliseconds": 73, "duration_milliseconds": 3}
   ],
+  "counter_window": {
+    "backend": "metal",
+    "phase": "steady-decode",
+    "start_milliseconds": 28,
+    "duration_milliseconds": 40,
+    "decode_steps": 63
+  },
   "metal": {
     "command_buffers": 12,
     "encoders": 16,

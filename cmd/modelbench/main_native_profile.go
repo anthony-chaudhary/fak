@@ -93,6 +93,7 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 		return err
 	}
 
+	// Lifecycle counters span several phases, so this capture cannot assert a steady-decode counter window.
 	profile := nativeperf.ProfileBundle{
 		Schema:                 nativeperf.ProfileSchema,
 		EnvelopeID:             identity.envelope.ID,

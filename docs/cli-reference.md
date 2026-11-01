@@ -205,6 +205,34 @@ elapsed or achieved values may be zero only where zero is semantically meaningfu
 occupancy stays in `[0,100]`, peaks are positive, and achieved values cannot exceed their
 matching peaks.
 
+The optional `counter_window` declares which interval the backend counters describe.
+Its required non-null fields are `backend`, `phase`, `start_milliseconds`,
+`duration_milliseconds`, and `decode_steps`. The backend must match the selected
+envelope, the phase must be `steady-decode`, and both time bounds must exactly match
+that phase. `decode_steps` must equal the envelope's decode-token count minus its
+separately measured first token (63 for a 64-token decode). Malformed or mismatched
+windows fail validation. An omitted or `null` window preserves a legacy profile's
+counters but yields `insufficient-evidence`, low confidence, and no recommended lever;
+`--profile-next` exits 1 without writing JSON. Older strict readers reject profiles
+containing the new field; use a compatible reader for scoped captures.
+
+Optional `host_launch_milliseconds` and `host_setup_milliseconds` inside the window
+are independently measured, exclusive host durations, including explicit zero.
+When either is present, `host_timing_source` must be `host-monotonic-exclusive`;
+otherwise the source must be empty. Each duration is finite and non-negative, and
+their sum cannot exceed the window wall time. Backend wait or synchronization time
+also cannot exceed that wall time, but is checked separately rather than added to
+host durations. GPU time is never subtracted from wall time to infer CPU time.
+
+Only matching windows authorize bottleneck inference. A measured launch or setup
+component at least 30% of wall time can select launch-bound or CPU-orchestration-bound
+(launch wins a tie), followed by synchronization at 30%, then backend bandwidth or
+compute evidence. Raw launch or command-buffer counts do not establish launch cost
+or override measured device evidence. Weak device evidence without measured host
+timing remains insufficient. The current modelbench lifecycle capture leaves the
+window absent because its counters span multiple phases; it retains its full
+execution and fallback receipts without asserting steady-decode timing.
+
 Metal and CUDA counter blocks remain separate and are never normalized into a synthetic
 cross-backend score. Manifest-declared `counter_comparisons` are unsupported in v1 and
 fail closed. Dispatch attribution must either contain nonempty, single-lever records for
