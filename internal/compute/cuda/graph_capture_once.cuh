@@ -41,7 +41,7 @@ static int graph_once_fail(fak_graph_once *s, int code) {
   return drain ? drain : code;
 }
 static int graph_once_set_position(fak_graph_once *s, int pos) {
-  k_graph_once_position<<<1, 1, 0, g_stream>>>(s->position, pos);
+  FCUDA_TS("k_graph_once_position", 1, k_graph_once_position<<<1, 1, 0, g_stream>>>(s->position, pos));
   return cudaGetLastError() == cudaSuccess ? 0 : graph_once_fail(s, 3);
 }
 
@@ -88,7 +88,7 @@ extern "C" int fak_graph_once_rope(void *owner, float *x, int heads, int hd, dou
   if (!x || heads <= 0 || hd <= 0 || (hd & 1) || heads > INT_MAX / hd ||
       !(theta > 0.0) || !isfinite(theta)) { s->terminal = true; return 1; }
   unsigned total = (unsigned)heads * (hd / 2);
-  k_rope<true><<<total / 128 + (total % 128 != 0), 128, 0, g_stream>>>(x, 0, heads, hd, theta, s->position);
+  FCUDA_TS("k_rope", total / 128 + (total % 128 != 0), k_rope<true><<<total / 128 + (total % 128 != 0), 128, 0, g_stream>>>(x, 0, heads, hd, theta, s->position));
   if (cudaGetLastError() != cudaSuccess) { s->terminal = true; return 3; }
   return 0;
 }
@@ -98,7 +98,7 @@ extern "C" int fak_graph_once_kv_write(void *owner, float *dst, const float *src
   if (!dst || !src || width <= 0 || (size_t)s->capacity > SIZE_MAX / sizeof(float) / (size_t)width) {
     s->terminal = true; return 1;
   }
-  k_graph_once_copyrow<<<(unsigned)width / 256 + (width % 256 != 0), 256, 0, g_stream>>>(dst, src, s->position, width);
+  FCUDA_TS("k_graph_once_copyrow", (unsigned)width / 256 + (width % 256 != 0), k_graph_once_copyrow<<<(unsigned)width / 256 + (width % 256 != 0), 256, 0, g_stream>>>(dst, src, s->position, width));
   if (cudaGetLastError() != cudaSuccess) { s->terminal = true; return 3; }
   return 0;
 }
@@ -112,7 +112,7 @@ extern "C" int fak_graph_once_attention(void *owner, const float *q, const float
     s->terminal = true; return 1;
   }
   size_t shmem = ((size_t)hd + FLASH_THREADS) * sizeof(float);
-  k_flash_attention<true><<<heads, FLASH_THREADS, shmem, g_stream>>>(q, k, v, out, 0, heads, kvHeads, hd, scale, s->position);
+  FCUDA_TS("k_flash_attention", heads, k_flash_attention<true><<<heads, FLASH_THREADS, shmem, g_stream>>>(q, k, v, out, 0, heads, kvHeads, hd, scale, s->position));
   if (cudaGetLastError() != cudaSuccess) { s->terminal = true; return 3; }
   return 0;
 }
@@ -171,7 +171,8 @@ extern "C" int fak_graph_once_copy_input(void *owner, void *dst, const void *src
   fak_graph_once *s = (fak_graph_once *)owner;
   if (!s || s->terminal || !s->exec || !dst || !src || !bytes || g_capture_open ||
       v41_candidates_stream_uncertain()) return 1;
-  cudaError_t e = cudaMemcpyAsync(dst, src, bytes, cudaMemcpyDeviceToDevice, g_stream);
+  cudaError_t e;
+  FCUDA_TS("d2d_copy", dim3(0, 0), e = cudaMemcpyAsync(dst, src, bytes, cudaMemcpyDeviceToDevice, g_stream));
   return e == cudaSuccess ? 0 : graph_once_fail(s, 3);
 }
 extern "C" int fak_graph_once_abort(void *owner) {

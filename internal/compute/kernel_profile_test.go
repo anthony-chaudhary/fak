@@ -478,6 +478,7 @@ func cudaLaunchTimingName(path, launch, kernel string) string {
 		"cuda/paged_attention_vllm.cuh:fak_vllm_pa::reshape_and_cache_run_kernel":                                    "fak_paged_kv_write",
 		"cuda/paged_attention_vllm.cuh:fak_vllm_pa::reshape_and_cache_pages_kernel":                                  "fak_paged_kv_write_pages",
 		"cuda/paged_attention_vllm.cuh:fak_vllm_pa::paged_gather_rows_kernel":                                        "fak_paged_kv_gather",
+		"cuda/paged_attention_vllm.cuh:fak_paged_kv_copy_blocks_kernel":                                              "fak_paged_kv_copy_blocks",
 		"cuda/q3k_mmvq.cuh:fak_q3k_mmvq::mul_mat_vec_q<1>":                                                           "k_q3k_mmvq_gemv",
 		"cuda/q3k_mmvq.cuh:fak_q3k_mmvq::mul_mat_vec_q<2>":                                                           "k_q3k_mmvq_gemv",
 		"cuda/q3k_mmvq.cuh:fak_q3k_mmvq::mul_mat_vec_q<3>":                                                           "k_q3k_mmvq_gemv",
@@ -544,6 +545,9 @@ func TestCUDATimestampSemanticAliases(t *testing.T) {
 		{"iq4xs wrong row", "cuda/iq4xs_mmvq.cuh", `FCUDA_TS("k_q4k_mmvq_gemv", grid, fak_iq4xs::mul_mat_vec_q<1><<<grid, block>>>(x));`, false},
 		{"iq4xs untimed", "cuda/iq4xs_mmvq.cuh", `fak_iq4xs::mul_mat_vec_q<1><<<grid, block>>>(x);`, false},
 		{"paged multi-page writer", "cuda/paged_attention_vllm.cuh", `FCUDA_TS("fak_paged_kv_write_pages", tokens, fak_vllm_pa::reshape_and_cache_pages_kernel<<<tokens, threads>>>(x));`, true},
+		{"paged COW copy", "cuda/paged_attention_vllm.cuh", `FCUDA_TS("fak_paged_kv_copy_blocks", planes, fak_paged_kv_copy_blocks_kernel<<<planes, 256, 0, g_stream>>>(x));`, true},
+		{"paged COW copy wrong source", "cuda/other.cuh", `FCUDA_TS("fak_paged_kv_copy_blocks", planes, fak_paged_kv_copy_blocks_kernel<<<planes, 256, 0, g_stream>>>(x));`, false},
+		{"paged COW copy wrong row", "cuda/paged_attention_vllm.cuh", `FCUDA_TS("fak_paged_kv_write", planes, fak_paged_kv_copy_blocks_kernel<<<planes, 256, 0, g_stream>>>(x));`, false},
 		{"paged writer wrong path", "cuda/other.cuh", `FCUDA_TS("fak_paged_kv_write_pages", tokens, fak_vllm_pa::reshape_and_cache_pages_kernel<<<tokens, threads>>>(x));`, false},
 		{"paged writer wrong row", "cuda/paged_attention_vllm.cuh", `FCUDA_TS("fak_paged_kv_write", tokens, fak_vllm_pa::reshape_and_cache_pages_kernel<<<tokens, threads>>>(x));`, false},
 		{"q8 mul_mat_q", "cuda/q8_mmq.cuh", `FCUDA_TS("q8_mul_mat_q", grid, mul_mat_q<J, fallback><<<grid, block>>>(x));`, true},
@@ -802,6 +806,8 @@ func TestCUDATimestampSourceCoversEveryLaunch(t *testing.T) {
 // dtype conversions, dequantization and activation quantization, elementwise
 // glue, gathers and status publication.
 var cudaKernelOtherAllowlist = map[string]bool{
+	// Graph position publication and indexed row copies match existing glue rows.
+	"k_graph_once_position": true, "k_graph_once_copyrow": true,
 	"k_kv_store_typed": true, "k_kv_load_typed": true, "k_mxfp8_cast_f32": true,
 	// Blockscaled WKV scale-layout repack and finite-output status publication.
 	"repack": true, "check_output": true,
@@ -870,6 +876,39 @@ func TestKernelOpClassCUDANames(t *testing.T) {
 		}
 		if got := KernelOpClass(name); got != want {
 			t.Errorf("KernelOpClass(%q) = %s, want %s", name, got, want)
+		}
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestKernelOpClassGraphOnceNames(t *testing.T) {
+	source, err := os.ReadFile("cuda/graph_capture_once.cuh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := map[string]int{}
+	for _, match := range cudaTSWrap.FindAllStringSubmatch(string(source), -1) {
+		rows[match[1]]++
+	}
+	want := map[string]string{
+		"k_graph_once_position": KernelOpOther,
+		"k_graph_once_copyrow":  KernelOpOther,
+		"k_rope":                KernelOpRope,
+		"k_flash_attention":     KernelOpAttention,
+		"d2d_copy":              KernelOpCopy,
+	}
+	if len(rows) != len(want) {
+		t.Fatalf("graph timestamp rows = %v, want exactly five named operations", rows)
+	}
+	for name, class := range want {
+		if rows[name] != 1 {
+			t.Errorf("graph row %s occurs %d times, want one", name, rows[name])
+		}
+		if got := KernelOpClass(name); got != class {
+			t.Errorf("KernelOpClass(%q) = %s, want %s", name, got, class)
+		}
+		if cudaKernelOtherAllowlist[name] != (class == KernelOpOther) {
+			t.Errorf("graph row %s has inconsistent Other registration", name)
 		}
 	}
 }
