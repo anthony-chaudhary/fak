@@ -161,6 +161,11 @@ func classifyUpstream(status int, body []byte, h http.Header) UpstreamRemedy {
 			// target — surface it terminally with the actionable message.
 			return RemedyTerminal
 		default:
+			// An otherwise-unclassified 402 is a standing payment wall, not a
+			// transient flap. Preserve the specific remedies and usage caps above.
+			if status == http.StatusPaymentRequired {
+				return RemedyFailoverAccount
+			}
 			// An unlabeled 403 may be a server-side abuse/capacity flap (the gem8 storm) —
 			// exactly as recoverable as a 529. Let the bounded transient arm ride it out.
 			return RemedyBackoff
