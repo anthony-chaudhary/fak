@@ -573,7 +573,7 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 		}
 		return c.uploadNVFP4(t, hb)
 	}
-	if t.Dtype == Q3_K || t.Dtype == Q4_K || t.Dtype == Q5_K || t.Dtype == Q6_K || t.Dtype == Q2_K || t.Dtype == IQ2_XXS || t.Dtype == IQ2_XS || t.Dtype == IQ1_M || t.Dtype == IQ4_NL || t.Dtype == IQ4_XS {
+	if cudaRawUploadIsVerbatim(t.Dtype) {
 		if as != t.Dtype {
 			panic(&CUDAOpError{
 				Op:    "Upload",

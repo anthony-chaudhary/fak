@@ -151,7 +151,7 @@ func TestCUDAIQWeightCapability(t *testing.T) {
 	source := string(data)
 	for _, binding := range []string{
 		"func (c *cudaBackend) SupportsDeviceWeightDtype(dt Dtype) bool {\n\treturn cudaDeviceWeightDtypeSupported(dt)\n}",
-		"|| t.Dtype == IQ2_XXS || t.Dtype == IQ2_XS || t.Dtype == IQ1_M || t.Dtype == IQ4_NL",
+		"if cudaRawUploadIsVerbatim(t.Dtype) {\n\t\tif as != t.Dtype {",
 		"return c.uploadRawKQuantClass(t, hb, class, site)",
 		"cudaIQGEMV(w.Dtype, wb, c.cf(x), c.cf(y), out, in, 1)",
 		"cudaIQGEMV(w.Dtype, wb, c.cf(X), c.cf(y), out, in, P)",
@@ -159,6 +159,13 @@ func TestCUDAIQWeightCapability(t *testing.T) {
 		if !strings.Contains(source, binding) {
 			t.Errorf("CUDA i-quant declaration lost its consumed source binding: %s", binding)
 		}
+	}
+	asyncData, err := os.ReadFile(filepath.Join(root, "internal", "compute", "cuda_async_upload.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(asyncData), "case cudaRawUploadIsVerbatim(t.Dtype) && as == t.Dtype:\n\t\tout, fence := c.uploadRawKQuantAsync(t, hb, class, site)") {
+		t.Error("CUDA async packed-upload eligibility lost its shared predicate or matching-dtype guard")
 	}
 	if strings.Count(source, "case IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL:") != 2 {
 		t.Fatal("CUDA i-quant declaration requires both single and batched matmul dispatch")
