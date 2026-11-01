@@ -209,7 +209,7 @@ func prepareCUDATokenomosStaging(cfg *CUDAConfig) error {
 		{"cuda_kernels.cu", "#include \"cuda/model_candidates.cuh\""},
 		{"cuda/model_candidates.cuh", "#ifdef FAK_CUDA_TOKENOMOS_STAGING_QUALIFICATION"},
 		{"cuda/model_candidates.cuh", "#include \"tokenomos_staging.h\""},
-		{"cuda/model_candidates.cuh", "fak_tokenomos_staging_copy(dIDs, hIDs, idsBytes)"},
+		{"cuda/model_candidates.cuh", "fak_tokenomos_staging_copy(dIDs, hIDs, idsBytes, fcuda_ts_untimed_transfer)"},
 		{"cuda/model_candidates.cuh", "fak_tokenomos_staging_error(launch)"},
 		{"cuda/tokenomos_staging.h", "struct fak_tokenomos_staging_pool"},
 		{"cuda/tokenomos_staging.h", "cudaEventSynchronize(a.done)"},
@@ -640,6 +640,12 @@ func CUDAGoTags(cfg *CUDAConfig) string {
 	goTags = cudaGraphOnceTags(cfg, goTags)
 	goTags = cudaAsyncQualificationTags(cfg, goTags)
 	goTags = cudaEngramIQ4NLQualificationTags(cfg, goTags)
+	if cfg.EnableQwen35IQ2SequenceQualification {
+		// Dispatch selection only: checked IQ entries share the ordinary archive.
+		// Record the exact build command and resulting Go binary build info
+		// for qualification; native archive receipts do not record Go tags.
+		goTags += ",fak_cuda_qwen35_iq2_sequence_qualification"
+	}
 	if cfg.EnableDeepGEMMWKV {
 		goTags += ",fak_cuda_deepgemm_wkv"
 	}

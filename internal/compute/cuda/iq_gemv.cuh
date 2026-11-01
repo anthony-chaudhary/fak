@@ -1,3 +1,4 @@
+#include <limits.h>
 // iq_gemv.cuh — resident IQ2_XXS / IQ2_XS / IQ1_M / IQ4_NL dequant-fused GEMV.
 //
 // Ported from llama.cpp (MIT, Copyright (c) 2023-2026 The ggml authors) at
@@ -307,6 +308,58 @@ extern "C" void fcuda_iq2xxs_gemv(const uint8_t *dW, const float *dX, float *dY,
 extern "C" void fcuda_iq2xs_gemv(const uint8_t *dW, const float *dX, float *dY, int out, int in, int P) {
   FCUDA_TS("k_iq2xs_gemv", dim3((out + 7) / 8, P), k_iq2xs_gemv<<<dim3((out + 7) / 8, P), 256, 0, g_stream>>>(
       (const unsigned char *)dW, dX, dY, out, in, P));
+}
+
+// The selected whole-sequence route needs an immediate, same-host-thread
+// launch verdict before a later operation can clear CUDA's last-error state.
+// Preserve both legacy void ABIs above for their existing generic/decode callers.
+// Caller serializes g_stream and validates owned device-0 packed weights/F32
+// panels. There is no scratch allocation, weight conversion or successful sync.
+static int qwen35_iq2_sequence_drain_error(cudaError_t first) {
+  const cudaError_t drained = cudaStreamSynchronize(g_stream);
+  sequence_split_note_failed_fence(drained);
+  if (drained != cudaSuccess && !g_cuda_cleanup_status)
+    g_cuda_cleanup_status = (int)drained;
+  return (int)first;
+}
+
+extern "C" int fcuda_qwen35_iq2_sequence_checked_f32(
+    const uint8_t *w, const float *x, float *y,
+    int out, int in, int tokens, int xs) {
+  if (v41_candidates_stream_uncertain()) return (int)cudaErrorNotReady;
+  if (!g_stream) return (int)cudaErrorInitializationError;
+  cudaError_t first = cudaPeekAtLastError(); // never erase a preceding failure
+  if (first != cudaSuccess) return qwen35_iq2_sequence_drain_error(first);
+  if (!w || !x || !y || out <= 0 || out > INT_MAX - 7 || in <= 0 ||
+      in % 256 != 0 || tokens <= 0 || tokens > 65535 || (xs != 0 && xs != 1))
+    return qwen35_iq2_sequence_drain_error(cudaErrorInvalidValue);
+  if (xs) fcuda_iq2xs_gemv(w, x, y, out, in, tokens);
+  else fcuda_iq2xxs_gemv(w, x, y, out, in, tokens);
+  first = cudaPeekAtLastError();
+  return first == cudaSuccess ? 0 : qwen35_iq2_sequence_drain_error(first);
+}
+
+// Async execution failures surface at the ordinary final fence. An uncertain
+// completion closes the same shared terminal bridge as an immediate failed
+// drain; a later successful fence must not rehabilitate these allocations.
+extern "C" int fcuda_qwen35_iq2_sequence_fence(void) {
+  if (v41_candidates_stream_uncertain()) return (int)cudaErrorNotReady;
+  if (!g_stream) return (int)cudaErrorInitializationError;
+  const cudaError_t first = cudaPeekAtLastError();
+  const cudaError_t drained = cudaStreamSynchronize(g_stream);
+  sequence_split_note_failed_fence(drained);
+  if (drained != cudaSuccess && !g_cuda_cleanup_status)
+    g_cuda_cleanup_status = (int)drained;
+  return (int)(first != cudaSuccess ? first : drained);
+}
+
+// A mixed Q4/IQ2 sequence retires its private loan INSTEAD of the plain final
+// fence. Bridge that exact retirement result to the shared terminal guard too:
+// no second retirement, retry, successful-fence laundering or lost status.
+// Caller still holds cudaMu between the existing retirement and this notification;
+// this is shared stream state, not CUDA's host-thread-local last-error slot.
+extern "C" void fcuda_qwen35_iq2_sequence_retirement_failed(int first) {
+  if (first != 0 && !g_cuda_cleanup_status) g_cuda_cleanup_status = first;
 }
 
 // ---- IQ1_M / IQ4_NL (llama.cpp @571d0d54) ------------------------------------------
