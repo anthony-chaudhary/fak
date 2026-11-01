@@ -644,26 +644,33 @@ def _behavior_fingerprint(text: str) -> tuple[tuple[str, ...], tuple[tuple[str, 
     return structure, tuple(returns)
 
 
-def _is_pure_builder_preamble(files: dict[str, str], sites: list[tuple[str, int, int]]) -> bool:
+def _is_pure_builder_body(body: str) -> bool:
+    """Check one complete owning body with the unchanged builder predicate."""
+    code = "\n".join(code_lines_of(body))
+    if not all(token in code for token in ("make(", "for ", "range ", "append(")):
+        return False
+    if re.search(r"\b(if|switch|select|go|defer|panic)\b", code):
+        return False
+    if re.search(r"[+*/%]|(?:==|!=|<=|>=|&&|\|\|)", code):
+        return False
+    calls = re.findall(r"\b([A-Za-z_]\w*)\s*\(", code)
+    if any(call not in {"make", "append", "len"} for call in calls):
+        return False
+    return True
+
+
+def _is_pure_builder_preamble(files: dict[str, str], sites: list[tuple[str, int, int]],
+                              *, body_predicate=None) -> bool:
     """True for constructor loops that only project fields and append rows."""
+    if body_predicate is None:
+        body_predicate = _is_pure_builder_body
     blobs = []
     for path, start, end in sites:
         owner = _owning_function(files[path], start, end)
         if owner is None:
             return False
         blobs.append(owner[1])
-    for body in blobs:
-        code = "\n".join(code_lines_of(body))
-        if not all(token in code for token in ("make(", "for ", "range ", "append(")):
-            return False
-        if re.search(r"\b(if|switch|select|go|defer|panic)\b", code):
-            return False
-        if re.search(r"[+*/%]|(?:==|!=|<=|>=|&&|\|\|)", code):
-            return False
-        calls = re.findall(r"\b([A-Za-z_]\w*)\s*\(", code)
-        if any(call not in {"make", "append", "len"} for call in calls):
-            return False
-    return True
+    return all(body_predicate(body) for body in blobs)
 
 
 def _behavior_equivalent_group(files: dict[str, str], sites: list[tuple[str, int, int]],
@@ -1104,6 +1111,16 @@ def _dup_survivor_groups(
     cached_fingerprint = lru_cache(maxsize=_DUP_BEHAVIOR_CACHE_ENTRIES)(
         _behavior_fingerprint)
 
+    # The builder decision uses the complete immutable body and no site state.
+    # Reuse only within this scan; oversized bodies keep the original full path.
+    cached_builder_body = lru_cache(maxsize=_DUP_BEHAVIOR_CACHE_ENTRIES)(
+        _is_pure_builder_body)
+
+    def _builder_body(body: str) -> bool:
+        if len(body) <= _DUP_BEHAVIOR_CACHE_MAX_CHARS:
+            return cached_builder_body(body)
+        return _is_pure_builder_body(body)
+
     def _fingerprint(text: str):
         if len(text) <= _DUP_BEHAVIOR_CACHE_MAX_CHARS:
             return cached_fingerprint(text)
@@ -1151,7 +1168,7 @@ def _dup_survivor_groups(
         # Pure-entry-point group -> advisory, not debt. Every site is a cmd/*/main.go
         # command skeleton; de-duplicating across independent binaries worsens
         # readability. One internal/ site keeps the group HARD (see _is_entry_point_only).
-        if _is_pure_builder_preamble(files, sites):
+        if _is_pure_builder_preamble(files, sites, body_predicate=_builder_body):
             soft.append(
                 "builder/loop preamble (projection only): "
                 + ", ".join(f"{f}:{start}" for f, start, _ in sites))

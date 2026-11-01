@@ -1762,7 +1762,9 @@ def test_duplication_behavior_memo_is_run_local_bounded_and_exact():
 
             def observe(fn):
                 cached = decorate(fn)
-                caches.append(cached)
+                # Observe this fingerprint cache, not independent scan caches.
+                if fn is counted:
+                    caches.append(cached)
                 return cached
             return observe
 
@@ -2094,6 +2096,65 @@ def test_dead_code_lexes_each_corpus_entry_once():
     assert result["defects"] == expected
     assert result["soft"] == [
         f"dead-code capped at {cs.DEAD_CAP_PER_FILE}/file across {file_count} file(s)"]
+
+
+def test_builder_body_reuse_is_run_local_bounded_and_payload_preserving():
+    builder = ("func build(items []Item) []Row {\n"
+               " rows := make([]Row, 0, len(items))\n"
+               " for _, item := range items {\n"
+               "  row := Row{Name: item.Name}\n"
+               "  rows = append(rows, row)\n"
+               " }\n return rows\n}\n")
+    files = {"a.go": builder, "b.go": builder}
+    sites = [("a.go", 2, 7), ("b.go", 2, 7)]
+    groups = [sites] * 16
+    body = cs._owning_function(builder, 2, 7)[1]
+    original = cs.code_lines_of
+    calls = []
+
+    def counted(text):
+        if text == body:
+            calls.append(text)
+        return original(text)
+
+    cs.code_lines_of = counted
+    try:
+        first = cs._dup_survivor_groups(files, groups)
+        assert first == (["builder/loop preamble (projection only): a.go:2, b.go:2"] * 16, [])
+        assert len(calls) == 1, ("repeated builder body scan", len(calls))
+        assert cs._dup_survivor_groups(files, groups) == first
+        assert len(calls) == 2, "cache must not survive the invocation"
+        limit = cs._DUP_BEHAVIOR_CACHE_MAX_CHARS
+        cs._DUP_BEHAVIOR_CACHE_MAX_CHARS = 0
+        try:
+            before = len(calls)
+            assert cs._dup_survivor_groups(files, groups) == first
+            assert len(calls) - before == 32, "oversized bodies must use uncached path"
+        finally:
+            cs._DUP_BEHAVIOR_CACHE_MAX_CHARS = limit
+    finally:
+        cs.code_lines_of = original
+
+    # Negative decisions are reusable without dropping genuine clone survivors.
+    real = {name + ".go": _dup_block(name) for name in ("one", "two")}
+    real_sites = [(name, 2, 8) for name in real]
+    cap = cs._DUP_BEHAVIOR_CACHE_ENTRIES
+    try:
+        cs._DUP_BEHAVIOR_CACHE_ENTRIES = 0
+        oracle = cs._dup_survivor_groups(real, [real_sites] * 16)
+        cs._DUP_BEHAVIOR_CACHE_ENTRIES = cap
+        assert cs._dup_survivor_groups(real, [real_sites] * 16) == oracle == ([], [real_sites] * 16)
+        # Capacity-one eviction preserves results when distinct bodies alternate.
+        cs._DUP_BEHAVIOR_CACHE_ENTRIES = 1
+        changed = builder.replace("item.Name", "item.Kind")
+        mixed = dict(files, **{"c.go": changed, "d.go": changed})
+        mixed_sites = [[("a.go", 2, 7), ("b.go", 2, 7)],
+                       [("c.go", 2, 7), ("d.go", 2, 7)], sites]
+        cached = cs._dup_survivor_groups(mixed, mixed_sites)
+        cs._DUP_BEHAVIOR_CACHE_ENTRIES = 0
+        assert cs._dup_survivor_groups(mixed, mixed_sites) == cached
+    finally:
+        cs._DUP_BEHAVIOR_CACHE_ENTRIES = cap
 
 if __name__ == "__main__":
     raise SystemExit(main())
