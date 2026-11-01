@@ -471,6 +471,130 @@ func TestNativePerformanceProfileFixturesClassifyAndSelectNext(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=30ms
+func TestNativePerformanceProfileLegacyCounterWindow(t *testing.T) {
+	data, err := os.ReadFile(nativePerformanceProfileFixture("synthetic-cuda-bandwidth-bound.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var profile map[string]json.RawMessage
+	if err := json.Unmarshal(data, &profile); err != nil {
+		t.Fatal(err)
+	}
+	delete(profile, "counter_window")
+	data, err = json.Marshal(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "legacy-profile.json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runNativePerformance(&stdout, &stderr, []string{"--profile", path}); code != 0 || stderr.Len() != 0 {
+		t.Fatalf("legacy profile exit=%d stderr=%s", code, stderr.String())
+	}
+	var classification nativeperf.BottleneckClassification
+	if err := json.Unmarshal(stdout.Bytes(), &classification); err != nil {
+		t.Fatal(err)
+	}
+	if classification.Class != "insufficient-evidence" || classification.Confidence != "low" || classification.RecommendedLeverID != "" {
+		t.Errorf("legacy class=%q confidence=%q lever=%q; want insufficient-evidence, low, empty", classification.Class, classification.Confidence, classification.RecommendedLeverID)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := runNativePerformance(&stdout, &stderr, []string{"--profile-next", path}); code != 1 || stdout.Len() != 0 || stderr.Len() == 0 {
+		t.Errorf("legacy profile-next exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+// fak-test:runtime fast est=30ms
+func TestNativePerformanceProfileCounterWindowContract(t *testing.T) {
+	tests := []struct {
+		name       string
+		fixture    string
+		window     string
+		class      string
+		confidence string
+		lever      string
+	}{
+		{name: "legacy null window", fixture: "synthetic-cuda-bandwidth-bound.json", window: "null", class: "insufficient-evidence", confidence: "low"},
+		{name: "high launch count preserves measured bandwidth", fixture: "synthetic-cuda-bandwidth-bound.json", window: "matched", class: "bandwidth-bound", confidence: "high", lever: "cuda.q8_1-activation-quant"},
+		{name: "high command count without host timing stays unknown", fixture: "synthetic-metal-launch-bound.json", window: "matched", class: "insufficient-evidence", confidence: "low"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			data, err := os.ReadFile(nativePerformanceProfileFixture(test.fixture))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var profile map[string]any
+			if err := json.Unmarshal(data, &profile); err != nil {
+				t.Fatal(err)
+			}
+			switch test.window {
+			case "null":
+				profile["counter_window"] = nil
+			case "matched":
+				window, ok := profile["counter_window"].(map[string]any)
+				if !ok {
+					t.Fatal("positive fixture must declare its counter window")
+				}
+				delete(window, "host_launch_milliseconds")
+				delete(window, "host_setup_milliseconds")
+				delete(window, "host_timing_source")
+				if counters, ok := profile["cuda"].(map[string]any); ok {
+					counters["launches"] = 1000000
+				}
+				if counters, ok := profile["metal"].(map[string]any); ok {
+					counters["command_buffers"] = 1000000
+					counters["dispatch_milliseconds"] = 10
+				}
+			}
+			data, err = json.Marshal(profile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), "profile.json")
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			if code := runNativePerformance(&stdout, &stderr, []string{"--profile", path}); code != 0 || stderr.Len() != 0 {
+				t.Fatalf("profile exit=%d stderr=%s", code, stderr.String())
+			}
+			var classification nativeperf.BottleneckClassification
+			if err := json.Unmarshal(stdout.Bytes(), &classification); err != nil {
+				t.Fatal(err)
+			}
+			if classification.Class != test.class || classification.Confidence != test.confidence || classification.RecommendedLeverID != test.lever {
+				t.Fatalf("class=%q confidence=%q lever=%q; want %q %q %q", classification.Class, classification.Confidence, classification.RecommendedLeverID, test.class, test.confidence, test.lever)
+			}
+			stdout.Reset()
+			stderr.Reset()
+			code := runNativePerformance(&stdout, &stderr, []string{"--profile-next", path})
+			if test.lever == "" {
+				if code != 1 || stdout.Len() != 0 || stderr.Len() == 0 {
+					t.Fatalf("insufficient profile-next exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+				}
+				return
+			}
+			if code != 0 || stderr.Len() != 0 {
+				t.Fatalf("profile-next exit=%d stderr=%s", code, stderr.String())
+			}
+			var next struct {
+				Lever nativeperf.Lever `json:"lever"`
+			}
+			if err := json.Unmarshal(stdout.Bytes(), &next); err != nil {
+				t.Fatal(err)
+			}
+			if next.Lever.ID != test.lever {
+				t.Fatalf("profile-next lever=%q, want %q", next.Lever.ID, test.lever)
+			}
+		})
+	}
+}
+
 func TestNativePerformanceProfileRejectionFixtures(t *testing.T) {
 	tests := []struct {
 		name string

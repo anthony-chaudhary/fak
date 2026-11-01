@@ -3,6 +3,7 @@ package nativeperf
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -17,6 +18,11 @@ const (
 
 var requiredProfilePhases = [...]string{"load-setup", "prefill", "first-token", "steady-decode", "verification", "teardown"}
 
+var (
+	ErrProfileWindowInvalid       = errors.New("native-performance profile counter window invalid")
+	ErrProfileEvidenceUnavailable = errors.New("native-performance profile evidence unavailable")
+)
+
 type AttributionUnavailableReason string
 
 const (
@@ -29,6 +35,7 @@ type ProfileBundle struct {
 	EnvelopeID             string                  `json:"envelope_id"`
 	Execution              ExecutionIdentity       `json:"execution"`
 	Phases                 []ProfilePhase          `json:"phases"`
+	CounterWindow          *ProfileCounterWindow   `json:"counter_window,omitempty"`
 	Metal                  *MetalCounters          `json:"metal,omitempty"`
 	CUDA                   *CUDACounters           `json:"cuda,omitempty"`
 	Attributions           []DispatchAttribution   `json:"attributions,omitempty"`
@@ -41,6 +48,17 @@ type ProfilePhase struct {
 	Name                 string  `json:"name"`
 	StartMilliseconds    float64 `json:"start_milliseconds"`
 	DurationMilliseconds float64 `json:"duration_milliseconds"`
+}
+
+type ProfileCounterWindow struct {
+	Backend                string   `json:"backend"`
+	Phase                  string   `json:"phase"`
+	StartMilliseconds      float64  `json:"start_milliseconds"`
+	DurationMilliseconds   float64  `json:"duration_milliseconds"`
+	DecodeSteps            int      `json:"decode_steps"`
+	HostLaunchMilliseconds *float64 `json:"host_launch_milliseconds,omitempty"`
+	HostSetupMilliseconds  *float64 `json:"host_setup_milliseconds,omitempty"`
+	HostTimingSource       string   `json:"host_timing_source,omitempty"`
 }
 
 type MetalCounters struct {
@@ -123,6 +141,9 @@ func DecodeProfile(data []byte) (ProfileBundle, error) {
 }
 
 func validateProfileFieldPresence(data []byte) error {
+	if err := validateCounterWindowJSONKeys(data); err != nil {
+		return err
+	}
 	var root map[string]json.RawMessage
 	if err := json.Unmarshal(data, &root); err != nil {
 		return err
@@ -146,6 +167,21 @@ func validateProfileFieldPresence(data []byte) error {
 	for i, phase := range phases {
 		if err := requireJSONFields(fmt.Sprintf("phases[%d]", i), phase, "name", "start_milliseconds", "duration_milliseconds"); err != nil {
 			return err
+		}
+	}
+	if raw, ok := root["counter_window"]; ok && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		var window map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &window); err != nil {
+			return fmt.Errorf("%w: counter_window must be an object: %v", ErrProfileWindowInvalid, err)
+		}
+		if err := requireJSONFields("counter_window", window, "backend", "phase", "start_milliseconds", "duration_milliseconds", "decode_steps"); err != nil {
+			return fmt.Errorf("%w: %v", ErrProfileWindowInvalid, err)
+		}
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.DisallowUnknownFields()
+		var typedWindow ProfileCounterWindow
+		if err := dec.Decode(&typedWindow); err != nil {
+			return fmt.Errorf("%w: %v", ErrProfileWindowInvalid, err)
 		}
 	}
 
@@ -199,6 +235,75 @@ func validateProfileFieldPresence(data []byte) error {
 	return nil
 }
 
+func validateCounterWindowJSONKeys(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	opening, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if opening != json.Delim('{') {
+		return nil
+	}
+	seen := false
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return err
+		}
+		name, _ := key.(string)
+		if !strings.EqualFold(name, "counter_window") {
+			continue
+		}
+		if name != "counter_window" || seen {
+			return fmt.Errorf("%w: counter_window must occur once with its canonical spelling", ErrProfileWindowInvalid)
+		}
+		seen = true
+		if err := validateCounterWindowJSONMembers(raw); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateCounterWindowJSONMembers(data []byte) error {
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		return nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	opening, err := dec.Token()
+	if err != nil || opening != json.Delim('{') {
+		return fmt.Errorf("%w: counter_window must be an object", ErrProfileWindowInvalid)
+	}
+	seen := make(map[string]bool, 8)
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrProfileWindowInvalid, err)
+		}
+		name, _ := key.(string)
+		canonical := ""
+		for _, field := range [...]string{"backend", "phase", "start_milliseconds", "duration_milliseconds", "decode_steps", "host_launch_milliseconds", "host_setup_milliseconds", "host_timing_source"} {
+			if strings.EqualFold(name, field) {
+				canonical = field
+				break
+			}
+		}
+		if canonical == "" || name != canonical || seen[canonical] {
+			return fmt.Errorf("%w: counter_window member %q must be known, unique and canonically spelled", ErrProfileWindowInvalid, name)
+		}
+		seen[canonical] = true
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return fmt.Errorf("%w: %v", ErrProfileWindowInvalid, err)
+		}
+	}
+	return nil
+}
+
 func requireJSONFields(label string, object map[string]json.RawMessage, fields ...string) error {
 	for _, field := range fields {
 		raw, ok := object[field]
@@ -234,6 +339,8 @@ func ValidateProfile(graph Graph, p ProfileBundle) error {
 	}
 
 	findings = append(findings, validateProfilePhases(p.Phases)...)
+	windowFindings := validateProfileCounterWindow(env, p)
+	findings = append(findings, windowFindings...)
 	if env != nil {
 		findings = append(findings, validateBackendCounters(*env, p)...)
 	}
@@ -248,9 +355,61 @@ func ValidateProfile(graph Graph, p ProfileBundle) error {
 
 	if len(findings) > 0 {
 		sort.Strings(findings)
+		if len(windowFindings) > 0 {
+			return fmt.Errorf("%w: invalid native-performance profile: %s", ErrProfileWindowInvalid, strings.Join(findings, "; "))
+		}
 		return fmt.Errorf("invalid native-performance profile: %s", strings.Join(findings, "; "))
 	}
 	return nil
+}
+
+func validateProfileCounterWindow(env *Envelope, p ProfileBundle) []string {
+	w := p.CounterWindow
+	if w == nil {
+		return nil
+	}
+	var findings []string
+	if env == nil || w.Backend != env.Backend {
+		findings = append(findings, "counter_window backend must match the selected envelope")
+	}
+	if env == nil || w.DecodeSteps <= 0 || w.DecodeSteps != env.DecodeTokens-1 {
+		findings = append(findings, "counter_window decode_steps must match the selected envelope's steady decode steps")
+	}
+	var phase *ProfilePhase
+	for i := range p.Phases {
+		if p.Phases[i].Name == "steady-decode" {
+			phase = &p.Phases[i]
+			break
+		}
+	}
+	if w.Phase != "steady-decode" || phase == nil || !nonnegativeFinite(w.StartMilliseconds) || !positiveFinite(w.DurationMilliseconds) ||
+		w.StartMilliseconds != phase.StartMilliseconds || w.DurationMilliseconds != phase.DurationMilliseconds {
+		findings = append(findings, "counter_window must exactly match the steady-decode phase boundaries")
+	}
+	observedHost := w.HostLaunchMilliseconds != nil || w.HostSetupMilliseconds != nil
+	if observedHost && w.HostTimingSource != "host-monotonic-exclusive" || !observedHost && w.HostTimingSource != "" {
+		findings = append(findings, "counter_window observed host timing requires host-monotonic-exclusive and no source without observations")
+	}
+	hostMilliseconds := 0.0
+	for _, measured := range []*float64{w.HostLaunchMilliseconds, w.HostSetupMilliseconds} {
+		if measured == nil {
+			continue
+		}
+		if !nonnegativeFinite(*measured) {
+			findings = append(findings, "counter_window host timing must be finite and non-negative")
+		}
+		hostMilliseconds += *measured
+	}
+	if !nonnegativeFinite(hostMilliseconds) || hostMilliseconds > w.DurationMilliseconds {
+		findings = append(findings, "counter_window exclusive launch and setup timing must not exceed steady decode")
+	}
+	if p.Metal != nil && (!nonnegativeFinite(p.Metal.WaitMilliseconds) || p.Metal.WaitMilliseconds > w.DurationMilliseconds) {
+		findings = append(findings, "counter_window Metal wait time must fit within steady decode")
+	}
+	if p.CUDA != nil && (!nonnegativeFinite(p.CUDA.SynchronizationMilliseconds) || p.CUDA.SynchronizationMilliseconds > w.DurationMilliseconds) {
+		findings = append(findings, "counter_window CUDA synchronization time must fit within steady decode")
+	}
+	return findings
 }
 
 func validateProfilePhases(phases []ProfilePhase) []string {
@@ -417,48 +576,62 @@ func ClassifyProfile(graph Graph, p ProfileBundle) (BottleneckClassification, er
 	classification := BottleneckClassification{
 		Schema:     ClassificationSchema,
 		EnvelopeID: p.EnvelopeID,
-		Confidence: "medium",
+		Class:      "insufficient-evidence",
+		Confidence: "low",
+		Evidence:   []string{"backend counters lack matching steady-decode-window evidence"},
 	}
-	decode := profilePhaseDuration(p.Phases, "steady-decode")
+	w := p.CounterWindow
+	if w == nil {
+		return classification, nil
+	}
+	decode := w.DurationMilliseconds
+	classification.Evidence = []string{"matching steady-decode counters do not establish a bottleneck; exclusive host launch or setup timing remains below threshold or unobserved"}
+	orchestrationLever := "cuda.default-decode-routing"
 	if p.Metal != nil {
+		orchestrationLever = "metal.command-buffer-amortization"
+	}
+	switch {
+	case w.HostLaunchMilliseconds != nil && *w.HostLaunchMilliseconds/decode >= 0.30 &&
+		(w.HostSetupMilliseconds == nil || *w.HostLaunchMilliseconds >= *w.HostSetupMilliseconds):
+		classification.Class = "launch-bound"
+		classification.Confidence = "medium"
+		classification.Evidence = []string{"measured exclusive host launch time is at least 30% of matching steady decode"}
+		classification.RecommendedLeverID = orchestrationLever
+	case w.HostSetupMilliseconds != nil && *w.HostSetupMilliseconds/decode >= 0.30:
+		classification.Class = "cpu-orchestration-bound"
+		classification.Confidence = "medium"
+		classification.Evidence = []string{"measured exclusive host setup time is at least 30% of matching steady decode"}
+		classification.RecommendedLeverID = orchestrationLever
+	}
+	if p.Metal != nil && classification.RecommendedLeverID == "" {
 		c := p.Metal
 		switch {
 		case c.WaitMilliseconds/decode >= 0.30:
 			classification.Class = "synchronization-bound"
-			classification.Evidence = []string{"Metal wait time is at least 30% of steady decode"}
-			classification.RecommendedLeverID = "metal.command-buffer-amortization"
-		case c.CommandBuffers >= 32:
-			classification.Class = "launch-bound"
-			classification.Evidence = []string{"Metal command-buffer count is high for one decode sample"}
+			classification.Confidence = "medium"
+			classification.Evidence = []string{"Metal wait time is at least 30% of matching steady decode"}
 			classification.RecommendedLeverID = "metal.command-buffer-amortization"
 		case c.WorkingSetBytes > c.ResidentBytes:
 			classification.Class = "bandwidth-bound"
+			classification.Confidence = "medium"
 			classification.Evidence = []string{"Metal working set exceeds resident bytes"}
 			classification.RecommendedLeverID = "metal.paged-kv"
 		case c.DispatchMilliseconds/decode >= 0.70:
 			classification.Class = "compute-bound"
 			classification.Confidence = "low"
-			classification.Evidence = []string{"Metal dispatch time dominates steady decode without launch, wait, or residency pressure"}
+			classification.Evidence = []string{"Metal dispatch time dominates matching steady decode without measured host or residency pressure"}
 			classification.RecommendedLeverID = "metal.fused-hybrid-graph-coverage"
-		default:
-			classification.Class = "cpu-orchestration-bound"
-			classification.Confidence = "low"
-			classification.Evidence = []string{"Metal device and synchronization thresholds are low while steady-decode wall time remains"}
-			classification.RecommendedLeverID = "metal.command-buffer-amortization"
 		}
 	}
-	if p.CUDA != nil {
+	if p.CUDA != nil && classification.RecommendedLeverID == "" {
 		c := p.CUDA
 		bandwidthRatio := c.AchievedBandwidthGBS / c.PeakBandwidthGBS
 		computeRatio := c.AchievedComputeTFLOPS / c.PeakComputeTFLOPS
 		switch {
 		case c.SynchronizationMilliseconds/decode >= 0.30:
 			classification.Class = "synchronization-bound"
-			classification.Evidence = []string{"CUDA synchronization is at least 30% of steady decode"}
-			classification.RecommendedLeverID = "cuda.default-decode-routing"
-		case c.Launches >= 64:
-			classification.Class = "launch-bound"
-			classification.Evidence = []string{"CUDA launch count is high for one decode sample"}
+			classification.Confidence = "medium"
+			classification.Evidence = []string{"CUDA synchronization is at least 30% of matching steady decode"}
 			classification.RecommendedLeverID = "cuda.default-decode-routing"
 		case bandwidthRatio >= 0.70 && computeRatio < 0.60:
 			classification.Class = "bandwidth-bound"
@@ -470,12 +643,10 @@ func ClassifyProfile(graph Graph, p ProfileBundle) (BottleneckClassification, er
 			classification.Confidence = "high"
 			classification.Evidence = []string{"CUDA achieved compute is at least 70% of backend peak"}
 			classification.RecommendedLeverID = "cuda.dp4a-q4k-mmvq"
-		default:
-			classification.Class = "cpu-orchestration-bound"
-			classification.Confidence = "low"
-			classification.Evidence = []string{"CUDA device utilization thresholds are low without dominant synchronization"}
-			classification.RecommendedLeverID = "cuda.default-decode-routing"
 		}
+	}
+	if classification.RecommendedLeverID == "" {
+		return classification, nil
 	}
 
 	lever := profileLever(graph, classification.RecommendedLeverID)
@@ -489,6 +660,9 @@ func NextLeverFromProfile(graph Graph, p ProfileBundle) (*Lever, BottleneckClass
 	classification, err := ClassifyProfile(graph, p)
 	if err != nil {
 		return nil, classification, err
+	}
+	if classification.Class == "insufficient-evidence" {
+		return nil, classification, ErrProfileEvidenceUnavailable
 	}
 	chosen := profileLever(graph, classification.RecommendedLeverID)
 	if chosen == nil {
