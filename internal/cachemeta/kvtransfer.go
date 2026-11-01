@@ -57,6 +57,7 @@ type KVTransfer struct {
 	Outcome             KVTransferOutcome
 	FaultReason         string // free-text when Outcome == fault
 	BytesMoved          int64
+	Fabric              *KVFabricReceipt `json:",omitempty"` // optional consumer-ready route evidence; nil preserves one-hop semantics
 }
 
 // FromKVTransfer normalizes a live-engine KV residency event into a cache entry on
@@ -79,6 +80,14 @@ func FromKVTransfer(t KVTransfer, opts ...Option) Entry {
 	outcome := t.Outcome
 	if outcome == "" {
 		outcome = KVTransferOK
+	}
+	if t.Fabric != nil {
+		if err := t.Fabric.Validate(t, t.Fabric.ReadyAt); err != nil {
+			outcome = KVTransferFault
+			if t.FaultReason == "" {
+				t.FaultReason = err.Error()
+			}
+		}
 	}
 	digest := t.SpanDigest
 	if digest == "" {
@@ -148,6 +157,7 @@ func FromKVTransfer(t KVTransfer, opts ...Option) Entry {
 	if t.FaultReason != "" {
 		e.Labels["fault_reason"] = t.FaultReason
 	}
+	putKVFabricLabels(e.Labels, t.Fabric)
 	putDeletionCertificateLabels(e.Labels, t.DeletionCertificate)
 	apply(&e, opts)
 	return e

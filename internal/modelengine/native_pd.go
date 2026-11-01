@@ -260,6 +260,7 @@ type NativePDCluster struct {
 	localityHits      int64
 	coldRoutes        int64
 	lastDecodeName    string
+	fabric            *nativePDFabricState
 }
 
 func NewNativePDCluster(m *model.Model, decodeWorkers int) *NativePDCluster {
@@ -312,6 +313,12 @@ func (c *NativePDCluster) Close() {
 	if c == nil {
 		return
 	}
+	if c.fabric != nil {
+		// Admission, import ownership registration and shutdown are one
+		// selected receiver transaction; no pages may be installed after Close.
+		c.fabric.mu.Lock()
+		defer c.fabric.mu.Unlock()
+	}
 	if c.prefill != nil {
 		c.prefill.close()
 	}
@@ -344,6 +351,14 @@ func (c *NativePDCluster) Admit(ctx context.Context, req NativePDRequest) (Nativ
 	if c == nil || c.m == nil || c.prefill == nil || len(c.decode) == 0 {
 		return NativePDAdmission{}, errors.New("modelengine: native P/D cluster is not initialized")
 	}
+	var timing *nativePDFabricTiming
+	admitted := false
+	if c.fabric != nil {
+		timing = c.fabric.beginTiming()
+		// Registered before all resource defers so the denominator includes
+		// transport/source/receiver cleanup and transaction unlock.
+		defer func() { timing.finish(admitted) }()
+	}
 	prompt := c.promptFor(ctx, req)
 	if len(prompt) == 0 {
 		return NativePDAdmission{}, errors.New("modelengine: native P/D request has empty prompt")
@@ -366,6 +381,16 @@ func (c *NativePDCluster) Admit(ctx context.Context, req NativePDRequest) (Nativ
 	defer src.Free()
 
 	backend := c.transferBackendFor(req)
+	if c.fabric != nil {
+		timing.next(nativePDFabricWait)
+		c.fabric.mu.Lock()
+		defer c.fabric.mu.Unlock()
+		timing.next(nativePDFabricPrepare)
+		backend, err = c.fabric.backend(decode.name, req.TransferBackend)
+		if err != nil {
+			return NativePDAdmission{}, err
+		}
+	}
 	transport, err := model.OpenKVTransferBackend(model.KVTransportOpenRequest{Backend: backend, Pool: decode.pool})
 	if err != nil {
 		return NativePDAdmission{}, err
@@ -374,19 +399,49 @@ func (c *NativePDCluster) Admit(ctx context.Context, req NativePDRequest) (Nativ
 		defer transport.Close()
 	}
 	transfer := c.transferDescriptor(req, decode.name, len(prompt))
-	receipt, err := transport.Transport.Send(src, transfer, 0, len(prompt))
+	var receipt model.PagedKVTransferReceipt
+	var cache *model.KVCache
+	imported := false
+	if c.fabric != nil {
+		receipt, cache, err = c.fabric.transfer(ctx, decode.name, c.m.Cfg, src, transfer, transport.Transport, timing)
+		timing.next(nativePDFabricFinalize)
+		// A transport may return owned partial pages together with an error.
+		// Keep cleanup armed through readiness validation AND scheduler admission.
+		defer func() {
+			if !imported && receipt.KV != nil {
+				receipt.KV.Free()
+			}
+		}()
+	} else {
+		receipt, err = transport.Transport.Send(src, transfer, 0, len(prompt))
+		if err == nil {
+			cache = receipt.KV.ToKVCache(c.m.Cfg)
+		}
+	}
 	if err != nil {
+		if c.fabric != nil {
+			return NativePDAdmission{Transfer: receipt}, err
+		}
 		return NativePDAdmission{}, err
 	}
 	c.observeTransferBackend(receipt.Transfer.Backend)
 	c.prefill.addPrefill(receipt.Transfer.BytesMoved)
-	cache := receipt.KV.ToKVCache(c.m.Cfg)
 	importedSnapshot := cache.Clone()
-	decode.addImport(receipt)
+	if c.fabric == nil {
+		decode.addImport(receipt)
+	}
 
 	call := req.Call
 	if call == nil {
 		call = &abi.ToolCall{Tool: "native_pd"}
+	}
+	if c.fabric != nil {
+		if err := c.fabric.admitReady(ctx, receipt.Transfer); err != nil {
+			receipt.Transfer.Outcome = cachemeta.KVTransferFault
+			receipt.Transfer.FaultReason = "consumer plan is no longer ready"
+			receipt.Entry = cachemeta.FromKVTransfer(receipt.Transfer)
+			return NativePDAdmission{Transfer: receipt}, err
+		}
 	}
 	r, err := decode.sched.AdmitImported(ctx, call, ImportedSequence{
 		Session:   &model.Session{M: c.m, Cache: cache},
@@ -396,13 +451,24 @@ func (c *NativePDCluster) Admit(ctx context.Context, req NativePDRequest) (Nativ
 		Tool:      call.Tool,
 	})
 	if err != nil {
+		if c.fabric != nil {
+			receipt.Transfer.Outcome = cachemeta.KVTransferFault
+			receipt.Transfer.FaultReason = "decode scheduler refused imported KV"
+			receipt.Entry = cachemeta.FromKVTransfer(receipt.Transfer)
+			return NativePDAdmission{Transfer: receipt}, err
+		}
 		return NativePDAdmission{}, err
+	}
+	if c.fabric != nil {
+		decode.addImport(receipt)
+		imported = true
 	}
 	c.mu.Lock()
 	c.residency.Observe(decode.name, prefixSegments)
 	c.lastDecodeName = decode.name
 	c.mu.Unlock()
 
+	admitted = true
 	return NativePDAdmission{
 		Request:       r,
 		PrefillWorker: c.prefill.name,
@@ -617,6 +683,9 @@ func (c *NativePDCluster) Metrics() string {
 	sort.Strings(backends)
 	for _, backend := range backends {
 		fmt.Fprintf(&b, "fak_native_pd_transfer_backend_total{backend=%s} %d\n", promQuote(backend), byBackend[backend])
+	}
+	if c.fabric != nil {
+		c.fabric.writeMetrics(&b)
 	}
 	return b.String()
 }
