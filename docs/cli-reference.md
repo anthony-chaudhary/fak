@@ -57,6 +57,36 @@ zero and a fresh `succeeded` receipt before running its own artifact checks.
 or writing a receipt. It does not verify credentials, provider reachability or
 OpenCode availability.
 
+### Guarded Pi tasks
+
+```text
+fak ops run --harness pi --provider fak --workspace CHECKOUT --prompt-file task.txt --model MODEL --base-url URL --receipt run.json --api-key-file ABSOLUTE_KEY_FILE --api-key-env SAFE_ENV [--timeout 5m] [--policy policy.json] [--audit audit.jsonl] [--pi-bin PATH]
+```
+
+Runs an installed Pi CLI through enforcing `fak guard`. Execution requires an
+existing workspace, a readable nonempty prompt, model, explicit router base URL
+and receipt; the timeout must be positive. The prompt travels through Pi's file
+inclusion. `--provider fak` selects the OpenAI-compatible route.
+
+`--api-key-file` requires a paired safe environment variable name and an absolute
+path to a regular non-symlink file of 1–4096 bytes. The file must contain one
+nonempty visible ASCII token, optionally followed by one LF or CRLF; empty,
+multiline, oversized or replaced files are refused. A nonempty ambient value for
+the named variable conflicts with file mode. The credential file must differ
+from the prompt, policy, audit and receipt files. Alternatively, omit
+`--api-key-file` and use the existing `--api-key-env` form to select an upstream
+key already in the environment.
+
+File credentials enter only the isolated guard child environment and the
+authenticated readiness request, without changing the parent environment or
+putting key bytes in arguments. The runner redacts the selected key from child
+output and receipt error fields. Before launch, a bounded 1024-token streaming
+probe requires matching model identity and a complete valid tool call; truncated
+responses still fail closed. The file is checked again before child launch.
+
+Require exit zero and a fresh `succeeded` receipt, then independently check task
+artifacts. Harness completion alone does not establish artifact acceptance.
+
 ## `compute-trace`: inspect a committed V4.1 Step
 
 Set `FAK_V41_ACTIVATION_TRACE=<path>` in the native V4.1 process to capture
