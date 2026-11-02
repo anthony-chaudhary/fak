@@ -1547,6 +1547,16 @@
           "category": "incidental",
           "reason": "Flat C ABI getter for the existing CUDA device L2 byte-count attribute; not a new software cache mechanism.",
           "token": "fcuda_device_l2_cache_size"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private GBNFMask field storing one copied generated-token prefix used solely to validate reuse of its paired parser cursor; not a separately selectable cache, pool, or storage subsystem.",
+          "token": "cachedHistory"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private paired pushdown cursor and partial-UTF8 state for single-history memoization, replayed from root on divergent history; not another named cache architecture.",
+          "token": "cachedState"
         }
       ],
       "exclude": [
@@ -1728,7 +1738,9 @@
         "cachecreationtokensupgraded",
         "cached",
         "cachedContents",
+        "cachedHistory",
         "cachedPrice",
+        "cachedState",
         "cachedWeight",
         "cachedecay",
         "cachedhits",
@@ -4931,6 +4943,11 @@
           "category": "build-tag-only",
           "reason": "Compile-time selector or preprocessor define for the explicitly named CUDA candidate, not an independent resource pool or policy gate; runtime qualification remains separate.",
           "token": "DFAK_CUDA_V41_ENGRAM_GATE"
+        },
+        {
+          "category": "incidental",
+          "reason": "Incidental comment vocabulary: surrogate describes Unicode encodings in gbnfUTF8Prefix, Unicode pairs in jsonUnescapeASCII, and a surrogate-key analogy for hierarchical cache invalidation. These three production-comment uses do not name a guard or gate concept. Classify only this exact normalized word; preserve plural and future compound discovery, UTF-8 rejection, cache invalidation, and admission checks.",
+          "token": "surrogate"
         }
       ],
       "exclude": [
@@ -5446,6 +5463,7 @@
         "startGuardResourceSampler",
         "summarizeGates",
         "summarizeguardstops",
+        "surrogate",
         "sysToolGate",
         "sysToolGateOnce",
         "tailAggregate",
@@ -15119,13 +15137,25 @@
           "category": "incidental",
           "reason": "Typed compute input-layout capability refusal; the storage-layout error identity is positioned in the layout family, and does not classify model/route support state, maturity or qualification.",
           "token": "ErrUnsupportedLayout"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Fixed redacted parser error reason for an unrecognized backslash escape, not implementation maturity or support status.",
+          "token": "unsupported_escape"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Fixed redacted syntax-refusal reason where no supported atom or rule-name begins, not a product support level.",
+          "token": "unsupported_or_missing_atom"
         }
       ],
       "exclude": [
         "SupportsV41Q2KTokenPanel",
         "SupportsV41Q3KTokenPanel",
         "broadefficiencysupported",
-        "factual_correctness"
+        "factual_correctness",
+        "unsupported_escape",
+        "unsupported_or_missing_atom"
       ],
       "id": "support-maturity",
       "ignore": [
