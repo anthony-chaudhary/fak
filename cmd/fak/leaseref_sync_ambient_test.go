@@ -150,8 +150,8 @@ func TestLeaserefAcquirePreservesGenerationAfterExpiredRemoteSync(t *testing.T) 
 		t.Fatalf("publication OIDs differ: local=%s remote=%s", localOID, remoteOID)
 	}
 
-	// Release shares the same after-write boundary. Its local absence must survive
-	// that invocation, while remote deletion still follows the existing TTL contract.
+	// Explicit fenced release now converges deletion. The unrelated acquire
+	// boundary checks above stay intact; a later fetch must not resurrect it.
 	out.Reset()
 	errOut.Reset()
 	code = runLeaseref(&out, &errOut, []string{"release", "--dir", dir, "--id", want.ID,
@@ -162,8 +162,16 @@ func TestLeaserefAcquirePreservesGenerationAfterExpiredRemoteSync(t *testing.T) 
 	if _, present, err := store.Get(ctx, want.ID); err != nil || present {
 		t.Fatalf("release restored the local lease: present=%v err=%v", present, err)
 	}
-	if remoteOID := git(remote, "rev-parse", want.Ref()); remoteOID != localOID {
-		t.Fatalf("boundary repair changed remote deletion semantics: before=%s after=%s", localOID, remoteOID)
+	probe := exec.Command("git", "rev-parse", "--verify", "--quiet", want.Ref())
+	probe.Dir = remote
+	if out, err := probe.CombinedOutput(); err == nil || len(out) != 0 {
+		t.Fatalf("remote release is not absent: output=%q err=%v", out, err)
+	}
+	if _, err := store.Sync(ctx, "origin", false, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, present, err := store.Get(ctx, want.ID); err != nil || present {
+		t.Fatalf("later fetch resurrected lease: present=%v err=%v", present, err)
 	}
 }
 
@@ -612,8 +620,8 @@ func TestIntentClaimAndReleaseAmbientSync(t *testing.T) {
 }
 
 // TestLeaserefAcquireReleaseRenewAmbientSync verifies that fak leaseref acquire, renew,
-// and release invoke the ambient sync boundary (fetch before decide, push after write)
-// and preserve nonfatal degradation when the remote transport is degraded (#10849).
+// use the ambient visibility boundary; explicit release instead owns a fenced
+// convergence operation and must not invoke advisory namespace sync.
 func TestLeaserefAcquireReleaseRenewAmbientSync(t *testing.T) {
 	dir := initRegionTestRepo(t)
 
@@ -668,7 +676,9 @@ func TestLeaserefAcquireReleaseRenewAmbientSync(t *testing.T) {
 		t.Errorf("renew second sync = %+v, want surface leaseref_renew and written=true", got[1])
 	}
 
-	// 3. fak leaseref release (fenced)
+	// 3. Explicit offline release retains local-only behavior. Remote release
+	// has its own expected-OID transport; advisory sync must not pretend to do it.
+	t.Setenv("FAK_LEASEREF_SYNC", "off")
 	got = nil
 	stdout.Reset()
 	stderr.Reset()
@@ -676,14 +686,11 @@ func TestLeaserefAcquireReleaseRenewAmbientSync(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("leaseref release failed with code %d: %s", code, stderr.String())
 	}
-	if len(got) != 2 {
-		t.Fatalf("expected 2 sync calls for release (fetch then push), got %d: %+v", len(got), got)
+	if len(got) != 0 {
+		t.Fatalf("explicit release must not invoke advisory namespace sync: %+v", got)
 	}
-	if got[0].surface != loopdrive.LeaseRefSyncSurfaceLeaserefRelease || got[0].written {
-		t.Errorf("release first sync = %+v, want surface leaseref_release and written=false", got[0])
-	}
-	if got[1].surface != loopdrive.LeaseRefSyncSurfaceLeaserefRelease || !got[1].written {
-		t.Errorf("release second sync = %+v, want surface leaseref_release and written=true", got[1])
+	if !strings.Contains(stdout.String(), "local-only") {
+		t.Fatalf("offline release claimed remote convergence: %s", stdout.String())
 	}
 }
 

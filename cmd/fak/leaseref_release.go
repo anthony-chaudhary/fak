@@ -17,7 +17,6 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
-	"github.com/anthony-chaudhary/fak/internal/loopdrive"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
@@ -73,7 +72,8 @@ func runLeaserefRelease(stdout, stderr io.Writer, argv []string) int {
 		return emitLeaserefOutcome(stdout, stderr, coordinatorFenceVerdict(result, *gen), result.OK, "release")
 	}
 	store := leaseref.NewInDir(*dir)
-	ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceLeaserefRelease, store, "", false)
+	// Explicit release freezes local evidence before any remote operation. A
+	// namespace pre-fetch could overwrite a newer unpublished local lease.
 	// Capture the public-safe projection inputs before deletion. Get failures are ignored
 	// here because release remains authoritative and announcement is only advisory.
 	announceRec := leaseref.Record{ID: *id, Holder: *holder, Generation: *gen}
@@ -88,16 +88,29 @@ func runLeaserefRelease(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak leaseref release: %v\n", err)
 			return 1
 		}
-		ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceLeaserefRelease, store, "", true)
+		// Force is deliberately local-only: it supplies no remote expected-OID fence.
 		ambientLeaserefAnnounce(stderr, *dir, leaseref.AnnounceRelease, announceRec, resolveAmbientLeaserefConfig(*announce, *announceIssue, *announceRepo))
 		return emitLeaserefJSON(stdout, stderr, leaseref.FenceVerdict{
 			OK:     true,
-			Detail: "lease " + *id + " force-released (holder check skipped)",
+			Detail: "lease " + *id + " force-released locally (holder check skipped; remote release not attempted)",
 		}, "release")
 	}
-	v, err := store.ReleaseFenced(context.Background(), *id, *holder, *gen, time.Now())
+	var v leaseref.FenceVerdict
+	var err error
+	if ambientLeaseRefSyncEnabled() {
+		// Unlike advisory visibility sync, explicit release may claim convergence
+		// only after the exact remote and local deletes are confirmed. Preserve the
+		// existing bounded transport budget and do not fetch after this operation.
+		ctx, cancel := context.WithTimeout(context.Background(), ambientLeaseRefSyncBudget)
+		defer cancel()
+		v, err = store.ReleaseFencedRemote(ctx, *id, *holder, *gen, time.Now(), ambientLeaseRefSyncRemote())
+	} else {
+		v, err = store.ReleaseFenced(context.Background(), *id, *holder, *gen, time.Now())
+		if err == nil && v.OK {
+			v.Detail += " (local-only; remote release not attempted)"
+		}
+	}
 	if err == nil && v.OK {
-		ambientLeaseRefSync(loopdrive.LeaseRefSyncSurfaceLeaserefRelease, store, "", true)
 		ambientLeaserefAnnounce(stderr, *dir, leaseref.AnnounceRelease, announceRec, resolveAmbientLeaserefConfig(*announce, *announceIssue, *announceRepo))
 	}
 	return emitLeaserefResult(stdout, stderr, v, err, "fak leaseref release", "release", func(v leaseref.FenceVerdict) bool { return v.OK })

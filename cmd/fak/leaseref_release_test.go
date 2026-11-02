@@ -33,6 +33,7 @@ func TestLeaserefReleaseUsage(t *testing.T) {
 // survives; the right holder releases it (exit 0); releasing again is an idempotent OK;
 // --force deletes without the holder check.
 func TestLeaserefReleaseEndToEnd(t *testing.T) {
+	t.Setenv("FAK_LEASEREF_SYNC", "off") // This fixture deliberately has no remote.
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
 	}
@@ -135,5 +136,72 @@ func TestLeaserefReleaseRejectsStaleSameHolderGeneration(t *testing.T) {
 		if got, ok, err := store.Get(ctx, first.ID); err != nil || !ok || got.Generation != second.Generation {
 			t.Fatalf("release generation %d changed replacement: got=%+v ok=%v err=%v", generation, got, ok, err)
 		}
+	}
+}
+
+// fak-test:runtime integration est=2s lane=default
+func TestLeaserefReleaseDoesNotPrefetch(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	t.Setenv("FAK_LEASEREF_SYNC", "on")
+	t.Setenv("FAK_LEASEREF_REMOTE", "origin")
+	t.Setenv("FAK_LEASE_COORDINATOR_URL", "")
+	t.Setenv("FAK_LEASE_COORDINATOR_KEY_FILE", "")
+	for _, force := range []bool{false, true} {
+		t.Run(strconv.FormatBool(force), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			dir, remote := t.TempDir(), t.TempDir()
+			git := func(cwd string, args ...string) string {
+				t.Helper()
+				cmd := exec.CommandContext(ctx, "git", args...)
+				cmd.Dir = cwd
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("fixture %v: %v %s", args, err, out)
+				}
+				return strings.TrimSpace(string(out))
+			}
+			git(dir, "init", "-q")
+			git(remote, "init", "-q", "--bare")
+			git(dir, "remote", "add", "origin", remote)
+			store := leaseref.NewInDir(dir)
+			old, verdict, err := store.AcquireFenced(ctx, leaseref.Record{ID: "release-cli-frozen", Holder: "old", TTLSeconds: 3600}, time.Now())
+			if err != nil || !verdict.OK {
+				t.Fatalf("seed: %+v %v", verdict, err)
+			}
+			oldOID := git(dir, "rev-parse", old.Ref())
+			git(dir, "push", "-q", "origin", old.Ref())
+			newer := old
+			newer.Holder = "new"
+			newer.Generation++
+			if _, err := store.Acquire(ctx, newer); err != nil {
+				t.Fatal(err)
+			}
+			newOID := git(dir, "rev-parse", old.Ref())
+			var out, errb bytes.Buffer
+			args := []string{"release", "--dir", dir, "--id", old.ID, "--holder", newer.Holder,
+				"--generation", strconv.FormatInt(newer.Generation, 10), "--announce", "off"}
+			if force {
+				args = append(args, "--force")
+			}
+			code := runLeaseref(&out, &errb, args)
+			if force {
+				if code != 0 || !strings.Contains(out.String(), "remote release not attempted") {
+					t.Fatalf("force must be local-only: %d %s %s", code, &out, &errb)
+				}
+				if _, exists, err := store.Get(ctx, old.ID); err != nil || exists {
+					t.Fatalf("force local absence: %v %v", exists, err)
+				}
+			} else {
+				if code != leaserefRefused || git(dir, "rev-parse", old.Ref()) != newOID {
+					t.Fatalf("newer local snapshot was not retained: %d %s %s", code, &out, &errb)
+				}
+			}
+			if git(remote, "rev-parse", old.Ref()) != oldOID {
+				t.Fatal("release changed unmatched remote snapshot")
+			}
+		})
 	}
 }
