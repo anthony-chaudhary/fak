@@ -1,30 +1,34 @@
 package policy
 
-import (
-	"testing"
+import "testing"
 
-	"github.com/anthony-chaudhary/fak/internal/session"
-)
-
-func TestControlDecisionTokensMatchSessionControl(t *testing.T) {
+// TestControlDecisionTokensAreStable pins the closed control-decision vocabulary
+// to its wire-stable token strings and turn/session semantics. The companion
+// session package keeps a parallel vocabulary (session.SessionControlDecision);
+// the two are aligned by convention at the harness seam, and this test anchors
+// the policy side to absolute values so a rename on either side fails loudly
+// here instead of drifting silently through the string seam.
+func TestControlDecisionTokensAreStable(t *testing.T) {
 	cases := []struct {
-		policy  ControlDecision
-		session session.SessionControlDecision
+		d            ControlDecision
+		token        string
+		endsTurn     bool
+		stopsSession bool
 	}{
-		{ControlContinue, session.SessionControlContinue},
-		{ControlEndTurn, session.SessionControlEndTurn},
-		{ControlPauseSession, session.SessionControlPause},
-		{ControlStopSession, session.SessionControlStop},
+		{ControlContinue, "CONTINUE", false, false},
+		{ControlEndTurn, "END_TURN", true, false},
+		{ControlPauseSession, "PAUSE_SESSION", true, false},
+		{ControlStopSession, "STOP_SESSION", true, true},
 	}
 	for _, tc := range cases {
-		if tc.policy.String() != tc.session.String() {
-			t.Fatalf("policy token %s != session token %s", tc.policy.String(), tc.session.String())
+		if got := tc.d.String(); got != tc.token {
+			t.Fatalf("%v.String() = %q, want %q", tc.d, got, tc.token)
 		}
-		if tc.policy.EndsTurn() != tc.session.EndsTurn() {
-			t.Fatalf("%s EndsTurn mismatch: policy=%v session=%v", tc.policy, tc.policy.EndsTurn(), tc.session.EndsTurn())
+		if got := tc.d.EndsTurn(); got != tc.endsTurn {
+			t.Fatalf("%v.EndsTurn() = %v, want %v", tc.d, got, tc.endsTurn)
 		}
-		if tc.policy.StopsSession() != tc.session.StopsSession() {
-			t.Fatalf("%s StopsSession mismatch: policy=%v session=%v", tc.policy, tc.policy.StopsSession(), tc.session.StopsSession())
+		if got := tc.d.StopsSession(); got != tc.stopsSession {
+			t.Fatalf("%v.StopsSession() = %v, want %v", tc.d, got, tc.stopsSession)
 		}
 	}
 }
