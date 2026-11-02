@@ -136,6 +136,9 @@ func readHeader(r io.Reader, mapped int64) (*File, error) {
 // GGUF keys (embedding_length, block_count, head counts, feed_forward_length, ...) and erroring
 // when a required key is missing.
 func (f *File) Config() (model.Config, error) {
+	if f.isV41DSparkGGUF() {
+		return f.configV41DSparkGGUF()
+	}
 	arch, ok := f.String("general.architecture")
 	if !ok || arch == "" {
 		return model.Config{}, fmt.Errorf("gguf: missing general.architecture")

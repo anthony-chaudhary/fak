@@ -12,7 +12,8 @@
         "linear attention (Gated-DeltaNet)",
         "x-attention-v41attentionrolereader",
         "cuda-kv16-prefill-gqa4-kernel",
-        "host-q8-packed-decode-tile"
+        "host-q8-packed-decode-tile",
+        "dspark-gguf-attention-tensor-roles"
       ],
       "aliases": [
         "attn"

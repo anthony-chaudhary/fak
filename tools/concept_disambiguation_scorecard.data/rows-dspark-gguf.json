@@ -1,0 +1,27 @@
+{
+  "rows": [
+    {
+      "id": "dspark-gguf-attention-tensor-roles",
+      "canonical": "DSpark GGUF attention tensor roles",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Serialized attention projection and normalization tensor names in the DSpark support GGUF header, validated against the pinned original model geometry.",
+      "distinction": "Storage-role names and dimensions only; not an executable attention kernel, runtime support, or proof of lossless weight conversion.",
+      "distinct_from": [
+        "x-attention-attention"
+      ],
+      "aliases": [
+        "attn_kv",
+        "attn_output_a",
+        "attn_q_a",
+        "attn_q_a_norm"
+      ],
+      "grounding": "dsparkGGUFSpecs",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
