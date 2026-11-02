@@ -48,19 +48,24 @@ func KVCacheToPaged(pool *PagedKVPool, c *KVCache) (*PagedKV, error) {
 	}
 	nL, w := pool.nLayers, c.kvStride()
 	seq := pool.NewSequence()
+	if c.Len() == 0 {
+		return seq, nil
+	}
+	// AppendRaw copies each row synchronously into owned pages and retains no
+	// input slices. Reuse these views rather than copying payloads twice.
+	k := make([][]float32, nL)
+	kraw := make([][]float32, nL)
+	v := make([][]float32, nL)
 	for pos := 0; pos < c.Len(); pos++ {
-		k := make([][]float32, nL)
-		kraw := make([][]float32, nL)
-		v := make([][]float32, nL)
 		for l := 0; l < nL; l++ {
 			start, end := pos*w, (pos+1)*w
 			if len(c.K[l]) < end || len(c.Kraw[l]) < end || len(c.V[l]) < end {
 				seq.Free()
 				return nil, fmt.Errorf("model: KVCacheToPaged layer %d has short KV rows for position %d", l, pos)
 			}
-			k[l] = append([]float32(nil), c.K[l][start:end]...)
-			kraw[l] = append([]float32(nil), c.Kraw[l][start:end]...)
-			v[l] = append([]float32(nil), c.V[l][start:end]...)
+			k[l] = c.K[l][start:end:end]
+			kraw[l] = c.Kraw[l][start:end:end]
+			v[l] = c.V[l][start:end:end]
 		}
 		seq.AppendRaw(k, kraw, v)
 	}
