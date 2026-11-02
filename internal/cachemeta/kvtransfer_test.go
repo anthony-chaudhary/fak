@@ -112,9 +112,11 @@ func TestKVRouteAndMigrateDirectionsSupported(t *testing.T) {
 }
 
 // fak-test:runtime fast est=1ms lane=default
-// TestFromKVTransferDigestStableAndDistinguishesSpans binds the descriptor-only
-// fallback: token counts and field boundaries participate, but caller-provided
-// content identity is authoritative.
+// TestFromKVTransferDigestStableAndDistinguishesSpans binds the borrowed
+// cross-node content-address rule (llm-d/llm-d kv-offloader.md:197-205@6e41fef,
+// ADAPT): the descriptor fallback is process-stable, and transfers that differ
+// in span extent, field partition, or direction never share a key, while
+// caller-provided content identity stays authoritative.
 func TestFromKVTransferDigestStableAndDistinguishesSpans(t *testing.T) {
 	t.Parallel()
 	transfer := KVTransfer{Direction: KVRestore, ModelID: "m\x00n", TokenizerID: "tok", Tokens: 128}
@@ -134,6 +136,13 @@ func TestFromKVTransferDigestStableAndDistinguishesSpans(t *testing.T) {
 	differentFields.TokenizerID = "n\x00tok"
 	if FromKVTransfer(differentFields).ID.Digest == got {
 		t.Fatal("different model/tokenizer field boundaries collided")
+	}
+	// Different directions of the same span are different residency events and
+	// must not share the descriptor key.
+	differentDirection := transfer
+	differentDirection.Direction = KVOffload
+	if FromKVTransfer(differentDirection).ID.Digest == got {
+		t.Fatal("different directions of the same span collided")
 	}
 	// Versioned domain, length-prefixed UTF-8 bytes, and big-endian int64 count.
 	const want = "c6f20004ce7b130c8a8a801eecd6beeef5bc462ae8fa6bc7695000b8d1df2ff2"

@@ -82,9 +82,16 @@ func FromKVTransfer(t KVTransfer, opts ...Option) Entry {
 	}
 	digest := t.SpanDigest
 	if digest == "" {
-		// This is descriptor identity, not a content digest: equal-length spans
-		// with different KV contents still require the caller's SpanDigest.
-		// Length prefixes preserve field boundaries even when IDs contain NUL.
+		// Borrowed cross-node content-address rule (ADAPT, no copied code):
+		// llm-d/llm-d docs/architecture/advanced/kv-management/kv-offloader.md:
+		// 197-205@6e41fef75fd12fd767d409ad0755cb863a38a802e8 (Apache-2.0) —
+		// identical content hashes identically on every node, and different
+		// content never shares a key. This is descriptor identity, not a
+		// content digest: equal-length spans with different KV contents still
+		// require the caller's SpanDigest. The versioned domain tag,
+		// length-prefixed UTF-8 fields, and big-endian token count keep the
+		// digest process-stable and boundary-unambiguous even when IDs
+		// contain NUL.
 		key := []byte("fak.kv-transfer-descriptor/v1\x00")
 		for _, field := range []string{string(t.Direction), t.ModelID, t.TokenizerID} {
 			key = binary.BigEndian.AppendUint64(key, uint64(len(field)))
