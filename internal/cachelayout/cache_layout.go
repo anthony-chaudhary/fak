@@ -1,23 +1,11 @@
 package cachelayout
 
-// cache_layout.go - the per-layer hybrid cache-type registry (#942).
-//
-// fak serves hybrid token-mixer families whose decoder layers do NOT all hold the
-// same kind of attention state: a Qwen3.5/3.6 Gated-DeltaNet checkpoint (and the
-// next non-qwen35 hybrid family) interleaves gated FULL-attention layers (a
-// token-indexed, block-sliceable K/V span) with linear-attention layers (an
-// accumulated recurrent state plus a short causal-conv window - O(1) per sequence,
-// not token-indexed at all). Before this file the classification was bespoke inside
-// each consumer: qwen35_paged_swap.go:21-23 hard-coded the layout and
-// checkpoint.go:38-41 bound DeltaNet geometry to compile-time constants, so a
-// non-conforming hybrid could only fail as a typed UnsupportedArchError rather than
-// degrade storage granularity per layer.
-//
-// ModelCacheLayout is the ONE query that answers, for a loaded config layer_types,
-// which layers produce token-indexed block-sliceable state vs boundary-only state,
-// and what storage axes that state rides. It is a pure derivation from the layer-type
-// strings (no dependency on internal/model), so it can be built once at load and
-// consulted from the swap/checkpoint/block-store seams without an import cycle.
+// Per-layer hybrid cache-type registry (#942). Hybrid token-mixer checkpoints
+// (Qwen3.5/3.6 Gated-DeltaNet and later families) interleave full-attention layers
+// (token-indexed, block-sliceable K/V) with linear-attention layers (an O(1)-per-
+// sequence recurrent state). Consumers previously hard-coded this layout
+// (qwen35_paged_swap.go, checkpoint.go); this registry derives it once at load from
+// layer_types, dependency-free, avoiding an import cycle with internal/model.
 
 // LayerKind names the token-mixer storage class of one decoder layer. It is the
 // storage-granularity axis, orthogonal to which decode kernel the layer runs.
@@ -25,21 +13,18 @@ type LayerKind uint8
 
 const (
 	// LayerKindFullAttention is a full-causal-attention layer: token-indexed K/Kraw/V,
-	// one row per position, resident footprint growing linearly with context. It is the
-	// block-SLICEABLE class - a span of its state can be paged, evicted and swapped by
-	// token index.
+	// one row per position; block-sliceable, paged/evicted by token index.
 	LayerKindFullAttention LayerKind = iota
 	// LayerKindLinearAttention is a recurrent state-space layer (Gated-DeltaNet / Mamba):
-	// an accumulated recurrent state plus a short causal-conv window, O(1) per sequence.
-	// It is boundary-only - carried whole, never sliced by token index.
+	// an accumulated recurrent state plus a short causal-conv window, O(1) per sequence;
+	// boundary-only, carried whole, never sliced by token index.
 	LayerKindLinearAttention
-	// LayerKindSlidingAttention is a sliding-window-attention layer: token-indexed K/Kraw/V
-	// like full attention, but only the trailing window is attendable. It is sliceable
-	// with a resident window cap.
+	// LayerKindSlidingAttention is a sliding-window-attention layer: token-indexed like
+	// full attention, but only the trailing window is attendable; sliceable with a
+	// resident window cap.
 	LayerKindSlidingAttention
-	// LayerKindUnknown is an unclassified/absent layer-type entry. It is treated
-	// conservatively as boundary-only so an unrecognised hybrid cannot be sliced
-	// incorrectly.
+	// LayerKindUnknown is an unclassified/absent layer-type entry, treated conservatively
+	// as boundary-only so an unrecognised hybrid cannot be sliced incorrectly.
 	LayerKindUnknown
 )
 
@@ -57,26 +42,23 @@ func (k LayerKind) String() string {
 	}
 }
 
-// SequenceAxis describes the token-indexed axis of a layer state, if it has one. A
-// linear-attention layer has none (Sliceable=false, Stride=0).
+// SequenceAxis describes the token-indexed axis of a layer state, if it has one
+// (a linear-attention layer has none).
 type SequenceAxis struct {
 	// TokenIndexed is true when this layer holds one state row per absolute position.
 	TokenIndexed bool
-	// Planes is the number of per-position planes (K, Kraw, V => 3) for a token-indexed
-	// layer, 0 otherwise.
+	// Planes is the per-position plane count (K, Kraw, V => 3) for a token-indexed layer, 0 otherwise.
 	Planes int
 	// Stride is the per-position width in float32 for a token-indexed layer, else 0.
 	Stride int
 }
 
-// StateAxis describes the recurrent/boundary-only state of a layer, if it has one. A
-// full/sliding-attention layer has none (Present=false).
+// StateAxis describes the recurrent/boundary-only state of a layer, if it has one
+// (a full/sliding-attention layer has none).
 type StateAxis struct {
-	// Present is true when this layer carries an O(1) accumulated recurrent state
-	// rather than (or in addition to) a token-indexed span.
+	// Present is true when this layer carries an O(1) accumulated recurrent state.
 	Present bool
-	// ValueHeads, KeyHeadDim, ValueHeadDim, ConvKernel are the recurrent geometry; zero
-	// when absent.
+	// ValueHeads, KeyHeadDim, ValueHeadDim, ConvKernel are the recurrent geometry; zero when absent.
 	ValueHeads   int
 	KeyHeadDim   int
 	ValueHeadDim int
@@ -89,8 +71,7 @@ type LayerCacheDescriptor struct {
 	LayerIndex int       `json:"layer_index"`
 	LayerType  string    `json:"layer_type"`
 	Kind       LayerKind `json:"kind"`
-	// Sliceable is true iff a token span of this layer state can be paged/evicted/swapped
-	// by token index (the full and sliding-window classes).
+	// Sliceable is true iff a token span of this layer state can be paged/evicted/swapped by token index.
 	Sliceable bool `json:"sliceable"`
 	// Sequence is the token-indexed axis metadata (empty for the linear class).
 	Sequence SequenceAxis `json:"sequence"`
@@ -99,22 +80,19 @@ type LayerCacheDescriptor struct {
 }
 
 // ModelCacheLayout is the per-layer cache-type registry derived once at load from a
-// config layer_types, plus the recurrent geometry the linear layers share. Its
-// LayerKind/Sliceable/axis fields are the single source of truth the swap and
-// checkpoint seams route their classification through.
+// config layer_types, plus the shared recurrent geometry; its Kind/Sliceable/axis
+// fields are the single source of truth the swap and checkpoint seams route through.
 type ModelCacheLayout struct {
 	// Layers is indexed by decoder layer; Layers[l].LayerIndex == l.
 	Layers []LayerCacheDescriptor
-	// Recurrent is the shared linear-attention geometry (StateAxis present on every
-	// LayerKindLinearAttention layer). Zero when the model has no linear layers.
+	// Recurrent is the shared linear-attention geometry; zero when the model has no linear layers.
 	Recurrent StateAxis
 	// Stride is the token-indexed per-position width (NumKVHeads*HeadDim); 0 if unknown.
 	Stride int
 }
 
-// CacheLayoutGeometry is the model geometry the registry needs to fill in the
-// per-layer storage axes. It is a plain struct (not a model.Config) so the registry
-// stays dependency-free; callers adapt their config into it once.
+// CacheLayoutGeometry is the model geometry the registry needs; a plain struct (not a
+// model.Config) so the registry stays dependency-free; callers adapt their config into it.
 type CacheLayoutGeometry struct {
 	NumKVHeads          int
 	HeadDim             int
@@ -125,9 +103,8 @@ type CacheLayoutGeometry struct {
 }
 
 // NewModelCacheLayout derives the per-layer registry from a config layer_types and
-// geometry. Unknown/empty layer-type entries classify as LayerKindUnknown (boundary-only,
-// not sliceable) so an unrecognised hybrid degrades per layer rather than being sliced
-// incorrectly. Deriving twice from the same inputs yields an identical layout.
+// geometry. Unknown/empty entries classify as LayerKindUnknown (boundary-only, not
+// sliceable), so an unrecognised hybrid degrades per layer; same inputs yield an identical layout.
 func NewModelCacheLayout(layerTypes []string, geom CacheLayoutGeometry) ModelCacheLayout {
 	recurrent := StateAxis{
 		Present:      false,
@@ -172,8 +149,8 @@ func NewModelCacheLayout(layerTypes []string, geom CacheLayoutGeometry) ModelCac
 }
 
 // Descriptor returns the storage descriptor for decoder layer l, or a zero-value
-// boundary-only descriptor when l is out of range (fail-closed: an unknown layer is
-// never reported sliceable).
+// boundary-only descriptor when l is out of range; an unknown layer is never
+// reported sliceable.
 func (m ModelCacheLayout) Descriptor(l int) LayerCacheDescriptor {
 	if l < 0 || l >= len(m.Layers) {
 		return LayerCacheDescriptor{LayerIndex: l, Kind: LayerKindUnknown, Sliceable: false}
@@ -192,9 +169,8 @@ func (m ModelCacheLayout) KindOf(l int) LayerKind {
 }
 
 // FullAttentionLayers returns the indices of the token-indexed full-attention layers, in
-// order - the layers whose K/Kraw/V rows occupy token-indexed pages. Sliding-window layers
-// are NOT included (they are sliceable but window-capped); callers that need every
-// sliceable layer use SliceableLayers.
+// order. Sliding-window layers are NOT included (they are sliceable but window-capped);
+// callers that need every sliceable layer use SliceableLayers.
 func (m ModelCacheLayout) FullAttentionLayers() []int {
 	var out []int
 	for _, d := range m.Layers {
