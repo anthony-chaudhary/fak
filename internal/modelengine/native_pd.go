@@ -138,13 +138,14 @@ type NativePDRequest struct {
 
 // NativePDAdmission records where the request ran and the imported decode state.
 type NativePDAdmission struct {
-	Request       abi.EngineRequest
-	PrefillWorker string
-	DecodeWorker  string
-	PrefixKey     string
-	LocalityHit   bool
-	Transfer      model.PagedKVTransferReceipt
-	ImportedCache *model.KVCache
+	Request        abi.EngineRequest
+	PrefillWorker  string
+	DecodeWorker   string
+	PrefixKey      string
+	LocalityHit    bool
+	Transfer       model.PagedKVTransferReceipt
+	ImportedCache  *model.KVCache
+	ReceiverFabric *NativePDReceiverReceipt
 }
 
 // NativePDWorkerStats is a point-in-time per-role serving counter set.
@@ -261,6 +262,15 @@ type NativePDCluster struct {
 	coldRoutes        int64
 	lastDecodeName    string
 	fabric            *nativePDFabricState
+	receiverFabric    map[string]*NativePDReceiverFabric
+
+	// selectedMu fences admission registration against selected Close. It is
+	// never held across a provider, adapter, residency callback or blocking wait.
+	selectedMu       sync.Mutex
+	selectedActive   map[*nativePDAdmissionOwner]struct{}
+	selectedClosing  bool
+	selectedDraining bool
+	selectedDrained  chan struct{}
 }
 
 func NewNativePDCluster(m *model.Model, decodeWorkers int) *NativePDCluster {
@@ -309,22 +319,186 @@ func NewNativePDClusterWithResidency(m *model.Model, decodeWorkers int, residenc
 	return c
 }
 
+// ErrNativePDModeConflict refuses ambiguous receiver authority before prefill.
+var ErrNativePDModeConflict = errors.New("modelengine: choose frame or logical NativePD fabric, not both")
+
+// ErrNativePDClosing means the selected cluster no longer accepts admissions.
+var ErrNativePDClosing = errors.New("modelengine: selected native P/D cluster is closing")
+
+// ErrNativePDWaitDeadline prevents an unbounded selected self-wait from a
+// receiver or residency callback. Close itself is safe from those callbacks.
+var ErrNativePDWaitDeadline = errors.New("modelengine: selected native P/D WaitClosed requires a deadline")
+
+type nativePDAdmissionOwner struct {
+	cancel context.CancelFunc
+}
+
+func (c *NativePDCluster) selectedReceiver() bool {
+	return c.fabric != nil || c.receiverFabric != nil
+}
+
+// beginSelectedAdmission owns only the admission context. The scheduler receives
+// the original caller context: ending admission must not cancel successful decode.
+func (c *NativePDCluster) beginSelectedAdmission(ctx context.Context) (context.Context, *nativePDAdmissionOwner, error) {
+	// A caller-supplied Context may implement its own methods. Derive outside
+	// the fence; only the resulting standard cancel context is inspected inside.
+	admitCtx, cancel := context.WithCancel(ctx)
+	owner := &nativePDAdmissionOwner{cancel: cancel}
+	c.selectedMu.Lock()
+	if c.selectedClosing {
+		c.selectedMu.Unlock()
+		cancel()
+		return nil, nil, ErrNativePDClosing
+	}
+	if err := admitCtx.Err(); err != nil {
+		c.selectedMu.Unlock()
+		cancel()
+		return nil, nil, err
+	}
+	if c.selectedActive == nil {
+		c.selectedActive = make(map[*nativePDAdmissionOwner]struct{})
+	}
+	c.selectedActive[owner] = struct{}{}
+	c.selectedMu.Unlock()
+	return admitCtx, owner, nil
+}
+
+// endSelectedAdmission is deferred before every resource/timing defer, so it runs
+// last. The final owner performs page cleanup without a detached drain goroutine;
+// callers need not call WaitClosed for eventual cleanup.
+func (c *NativePDCluster) endSelectedAdmission(owner *nativePDAdmissionOwner) {
+	owner.cancel()
+	c.selectedMu.Lock()
+	delete(c.selectedActive, owner)
+	drain := c.selectedClosing && len(c.selectedActive) == 0 && !c.selectedDraining
+	if drain {
+		c.selectedDraining = true
+	}
+	c.selectedMu.Unlock()
+	if drain {
+		c.finishSelectedClose()
+	}
+}
+
+// commitSelectedImport linearizes receiver ownership after scheduler admission.
+// A losing request stays scheduler-owned until retirement; only its separate
+// received PagedKV remains subject to the caller's refusal cleanup.
+func (c *NativePDCluster) commitSelectedImport(ctx context.Context, decode *NativePDWorker, receipt model.PagedKVTransferReceipt, request abi.EngineRequest) error {
+	c.selectedMu.Lock()
+	err := ctx.Err()
+	if c.selectedClosing {
+		err = ErrNativePDClosing
+	}
+	if err == nil {
+		decode.addImport(receipt)
+	}
+	c.selectedMu.Unlock()
+	if err != nil {
+		request.Cancel()
+	}
+	return err
+}
+
+// Close preserves the legacy direct-mode behavior. For either selected fabric
+// mode it initiates cancellation and fences new admissions, but does not wait for
+// in-flight receiver/provider/residency callbacks. It is safe from those callbacks.
+// An admission registered before Close may finish its already-committed callbacks
+// and return an admitted (possibly canceled) request until WaitClosed completes.
+// Admissions registered after Close are refused before prefill. Use WaitClosed with a deadline
+// when completion, rather than initiation, is required.
 func (c *NativePDCluster) Close() {
 	if c == nil {
 		return
 	}
-	if c.fabric != nil {
-		// Admission, import ownership registration and shutdown are one
-		// selected receiver transaction; no pages may be installed after Close.
-		c.fabric.mu.Lock()
-		defer c.fabric.mu.Unlock()
+	if !c.selectedReceiver() {
+		c.closeWorkers()
+		return
 	}
+	c.selectedMu.Lock()
+	c.selectedClosing = true
+	if c.selectedDrained == nil {
+		c.selectedDrained = make(chan struct{})
+	}
+	cancels := make([]context.CancelFunc, 0, len(c.selectedActive))
+	for owner := range c.selectedActive {
+		cancels = append(cancels, owner.cancel)
+	}
+	drain := len(c.selectedActive) == 0 && !c.selectedDraining
+	if drain {
+		c.selectedDraining = true
+	}
+	c.selectedMu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+	for _, w := range c.decode {
+		if w.sched != nil {
+			w.sched.Close()
+		}
+	}
+	if drain {
+		c.finishSelectedClose()
+	}
+}
+
+func (c *NativePDCluster) closeWorkers() {
 	if c.prefill != nil {
 		c.prefill.close()
 	}
 	for _, w := range c.decode {
 		w.close()
 	}
+}
+
+func (c *NativePDCluster) finishSelectedClose() {
+	c.closeWorkers()
+	close(c.selectedDrained)
+}
+
+// WaitClosed initiates Close. For selected fabrics it joins admission/source/
+// transport/timing cleanup, all selected callbacks, receiver page retirement and
+// every decode scheduler run loop. It does not delete external residency records:
+// the supplied index has no removal API. Completion means no later selected Observe.
+//
+// Direct mode retains closeWorkers and scheduler CloseAndWait, without a new
+// admission registration fence. Direct-mode callers must serialize admissions
+// with shutdown; this method does not fix concurrent legacy Close/Admit races.
+//
+// Selected callers MUST supply a finite deadline, including callback callers.
+// An already-expired selected context returns its error even if pages are idle;
+// a nil cluster is already complete and returns nil without requiring a deadline.
+// A callback cannot join its own admission; its bounded wait may time out, after
+// which it must return so the last admission can finish cleanup. Close alone
+// never waits for that admission. Legacy nil-mode Close semantics are unchanged.
+func (c *NativePDCluster) WaitClosed(ctx context.Context) error {
+	if c == nil {
+		return nil
+	}
+	c.Close()
+	if c.selectedReceiver() {
+		if _, ok := ctx.Deadline(); !ok {
+			return ErrNativePDWaitDeadline
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		c.selectedMu.Lock()
+		drained := c.selectedDrained
+		c.selectedMu.Unlock()
+		select {
+		case <-drained:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	for _, w := range c.decode {
+		if w.sched != nil {
+			if err := w.sched.CloseAndWait(ctx); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (c *NativePDCluster) PrefillWorker() *NativePDWorker { return c.prefill }
@@ -351,12 +525,30 @@ func (c *NativePDCluster) Admit(ctx context.Context, req NativePDRequest) (Nativ
 	if c == nil || c.m == nil || c.prefill == nil || len(c.decode) == 0 {
 		return NativePDAdmission{}, errors.New("modelengine: native P/D cluster is not initialized")
 	}
+	if c.fabric != nil && c.receiverFabric != nil {
+		return NativePDAdmission{}, ErrNativePDModeConflict
+	}
+	selected := c.selectedReceiver()
+	receiverSelected := c.receiverFabric != nil
+	schedulerCtx := ctx
+	if selected {
+		admitCtx, owner, err := c.beginSelectedAdmission(ctx)
+		if err != nil {
+			if receiverSelected {
+				err = fmt.Errorf("%w: %w", ErrNativePDReceiver, err)
+			}
+			return NativePDAdmission{}, err
+		}
+		ctx = admitCtx
+		// This is registered before timing/resource defers and therefore runs last.
+		defer c.endSelectedAdmission(owner)
+	}
 	var timing *nativePDFabricTiming
 	admitted := false
 	if c.fabric != nil {
 		timing = c.fabric.beginTiming()
-		// Registered before all resource defers so the denominator includes
-		// transport/source/receiver cleanup and transaction unlock.
+		// Includes transport/source/receiver cleanup and transaction unlock.
+		// Calls refused by the closing registration fence never start an attempt.
 		defer func() { timing.finish(admitted) }()
 	}
 	prompt := c.promptFor(ctx, req)
@@ -369,6 +561,14 @@ func (c *NativePDCluster) Admit(ctx context.Context, req NativePDRequest) (Nativ
 	}
 	prefixSegments := c.prefixSegments(req, prefixKey)
 	decode, _, hit := c.routeDecode(prefixSegments)
+	if selected {
+		if err := ctx.Err(); err != nil {
+			if receiverSelected {
+				err = fmt.Errorf("%w: %w", ErrNativePDReceiver, err)
+			}
+			return NativePDAdmission{}, err
+		}
+	}
 
 	prefillSess := c.m.NewSession()
 	logits := prefillSess.Prefill(prompt)
@@ -380,70 +580,97 @@ func (c *NativePDCluster) Admit(ctx context.Context, req NativePDRequest) (Nativ
 	}
 	defer src.Free()
 
-	backend := c.transferBackendFor(req)
-	if c.fabric != nil {
-		timing.next(nativePDFabricWait)
-		c.fabric.mu.Lock()
-		defer c.fabric.mu.Unlock()
-		timing.next(nativePDFabricPrepare)
-		backend, err = c.fabric.backend(decode.name, req.TransferBackend)
+	var receipt model.PagedKVTransferReceipt
+	var receiverReceipt *NativePDReceiverReceipt
+	var cache *model.KVCache
+	imported := false
+	if receiverSelected {
+		var release func()
+		receipt, receiverReceipt, release, err = c.receiverTransfer(ctx, req, decode, src, len(prompt))
 		if err != nil {
 			return NativePDAdmission{}, err
 		}
-	}
-	transport, err := model.OpenKVTransferBackend(model.KVTransportOpenRequest{Backend: backend, Pool: decode.pool})
-	if err != nil {
-		return NativePDAdmission{}, err
-	}
-	if transport.Close != nil {
-		defer transport.Close()
-	}
-	transfer := c.transferDescriptor(req, decode.name, len(prompt))
-	var receipt model.PagedKVTransferReceipt
-	var cache *model.KVCache
-	imported := false
-	if c.fabric != nil {
-		receipt, cache, err = c.fabric.transfer(ctx, decode.name, c.m.Cfg, src, transfer, transport.Transport, timing)
-		timing.next(nativePDFabricFinalize)
-		// A transport may return owned partial pages together with an error.
-		// Keep cleanup armed through readiness validation AND scheduler admission.
+		defer release()
 		defer func() {
 			if !imported && receipt.KV != nil {
 				receipt.KV.Free()
 			}
 		}()
+		cache = receipt.KV.ToKVCache(c.m.Cfg)
 	} else {
-		receipt, err = transport.Transport.Send(src, transfer, 0, len(prompt))
-		if err == nil {
-			cache = receipt.KV.ToKVCache(c.m.Cfg)
-		}
-	}
-	if err != nil {
+		backend := c.transferBackendFor(req)
 		if c.fabric != nil {
-			return NativePDAdmission{Transfer: receipt}, err
+			timing.next(nativePDFabricWait)
+			c.fabric.mu.Lock()
+			defer c.fabric.mu.Unlock()
+			timing.next(nativePDFabricPrepare)
+			backend, err = c.fabric.backend(decode.name, req.TransferBackend)
+			if err != nil {
+				return NativePDAdmission{}, err
+			}
 		}
-		return NativePDAdmission{}, err
+		transport, openErr := model.OpenKVTransferBackend(model.KVTransportOpenRequest{Backend: backend, Pool: decode.pool})
+		if openErr != nil {
+			return NativePDAdmission{}, openErr
+		}
+		if transport.Close != nil {
+			defer transport.Close()
+		}
+		transfer := c.transferDescriptor(req, decode.name, len(prompt))
+		if c.fabric != nil {
+			receipt, cache, err = c.fabric.transfer(ctx, decode.name, c.m.Cfg, src, transfer, transport.Transport, timing)
+			timing.next(nativePDFabricFinalize)
+			// Partial Send receipts own pages even when Send also returns an error.
+			defer func() {
+				if !imported && receipt.KV != nil {
+					receipt.KV.Free()
+				}
+			}()
+		} else {
+			receipt, err = transport.Transport.Send(src, transfer, 0, len(prompt))
+			if err == nil {
+				cache = receipt.KV.ToKVCache(c.m.Cfg)
+			}
+		}
+		if err != nil {
+			if c.fabric != nil {
+				return NativePDAdmission{Transfer: receipt}, err
+			}
+			return NativePDAdmission{}, err
+		}
+		// Preserve the logical/direct transport counters, distinct from successful
+		// scheduler admission. Frame-mode counters remain after committed import.
+		c.observeTransferBackend(receipt.Transfer.Backend)
+		c.prefill.addPrefill(receipt.Transfer.BytesMoved)
 	}
-	c.observeTransferBackend(receipt.Transfer.Backend)
-	c.prefill.addPrefill(receipt.Transfer.BytesMoved)
 	importedSnapshot := cache.Clone()
-	if c.fabric == nil {
+	if !selected {
 		decode.addImport(receipt)
+	}
+	failSelected := func(err error, reason string) (NativePDAdmission, error) {
+		if receiverSelected {
+			return NativePDAdmission{}, fmt.Errorf("%w: %w", ErrNativePDReceiver, err)
+		}
+		receipt.Transfer.Outcome = cachemeta.KVTransferFault
+		receipt.Transfer.FaultReason = reason
+		receipt.Entry = cachemeta.FromKVTransfer(receipt.Transfer)
+		return NativePDAdmission{Transfer: receipt}, err
 	}
 
 	call := req.Call
 	if call == nil {
 		call = &abi.ToolCall{Tool: "native_pd"}
 	}
-	if c.fabric != nil {
+	if receiverSelected {
+		if err := c.receiverFabric[decode.name].validateAdmission(ctx, receiverReceipt); err != nil {
+			return failSelected(err, "")
+		}
+	} else if c.fabric != nil {
 		if err := c.fabric.admitReady(ctx, receipt.Transfer); err != nil {
-			receipt.Transfer.Outcome = cachemeta.KVTransferFault
-			receipt.Transfer.FaultReason = "consumer plan is no longer ready"
-			receipt.Entry = cachemeta.FromKVTransfer(receipt.Transfer)
-			return NativePDAdmission{Transfer: receipt}, err
+			return failSelected(err, "consumer plan is no longer ready")
 		}
 	}
-	r, err := decode.sched.AdmitImported(ctx, call, ImportedSequence{
+	r, err := decode.sched.AdmitImported(schedulerCtx, call, ImportedSequence{
 		Session:   &model.Session{M: c.m, Cache: cache},
 		Logits:    logits,
 		Prompt:    prompt,
@@ -451,17 +678,20 @@ func (c *NativePDCluster) Admit(ctx context.Context, req NativePDRequest) (Nativ
 		Tool:      call.Tool,
 	})
 	if err != nil {
-		if c.fabric != nil {
-			receipt.Transfer.Outcome = cachemeta.KVTransferFault
-			receipt.Transfer.FaultReason = "decode scheduler refused imported KV"
-			receipt.Entry = cachemeta.FromKVTransfer(receipt.Transfer)
-			return NativePDAdmission{Transfer: receipt}, err
+		if selected {
+			return failSelected(err, "decode scheduler refused imported KV")
 		}
 		return NativePDAdmission{}, err
 	}
-	if c.fabric != nil {
-		decode.addImport(receipt)
+	if selected {
+		if err := c.commitSelectedImport(ctx, decode, receipt, r); err != nil {
+			return failSelected(err, "cluster closed before imported KV registration")
+		}
 		imported = true
+		if receiverSelected {
+			c.observeTransferBackend(receipt.Transfer.Backend)
+			c.prefill.addPrefill(receipt.Transfer.BytesMoved)
+		}
 	}
 	c.mu.Lock()
 	c.residency.Observe(decode.name, prefixSegments)
@@ -470,13 +700,14 @@ func (c *NativePDCluster) Admit(ctx context.Context, req NativePDRequest) (Nativ
 
 	admitted = true
 	return NativePDAdmission{
-		Request:       r,
-		PrefillWorker: c.prefill.name,
-		DecodeWorker:  decode.name,
-		PrefixKey:     prefixKey,
-		LocalityHit:   hit,
-		Transfer:      receipt,
-		ImportedCache: importedSnapshot,
+		Request:        r,
+		PrefillWorker:  c.prefill.name,
+		DecodeWorker:   decode.name,
+		PrefixKey:      prefixKey,
+		LocalityHit:    hit,
+		Transfer:       receipt,
+		ImportedCache:  importedSnapshot,
+		ReceiverFabric: receiverReceipt,
 	}, nil
 }
 

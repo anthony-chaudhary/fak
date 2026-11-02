@@ -51,10 +51,10 @@ func (t nativePDFabricTestTransport) Send(src *model.PagedKV, descriptor cacheme
 }
 
 // fak-test:runtime fast est=2s
-func TestNativePDReceiverReadyAdmission(t *testing.T) {
+func TestNativePDLogicalReadyAdmission(t *testing.T) {
 	for _, name := range []string{
 		"complete", "wait-observed", "legacy", "landing-only", "expired", "generation-changed",
-		"unauthorized", "partial-send", "corrupt-landing", "scheduler-closed", "close-serialized",
+		"unauthorized", "partial-send", "corrupt-landing", "scheduler-closed", "close-joined",
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := SyntheticConfig()
@@ -103,31 +103,26 @@ func TestNativePDReceiverReadyAdmission(t *testing.T) {
 			if name == "legacy" {
 				config = nil
 			}
-			cluster := NewNativePDClusterWithResidency(m, 1, nil, WithNativePDReceiverFabric(config))
-			t.Cleanup(cluster.Close)
+			cluster := NewNativePDClusterWithResidency(m, 1, nil, WithNativePDLogicalFabric(config))
+			t.Cleanup(func() { waitNativePDClusterClosed(t, cluster) })
 			decode := cluster.decode[0]
-			if name == "close-serialized" {
-				// Hold the same transaction boundary as selected admission.
-				// Close must wait for registration, then retire those owned pages.
-				cluster.fabric.mu.Lock()
-				locked := true
-				defer func() {
-					if locked {
-						cluster.fabric.mu.Unlock()
-					}
-				}()
-				started, closed := make(chan struct{}), make(chan struct{})
-				go func() {
-					close(started)
-					cluster.Close()
-					close(closed)
-				}()
-				<-started
-				select {
-				case <-closed:
-					t.Fatal("Close bypassed the receiver admission transaction")
-				case <-time.After(20 * time.Millisecond):
+			if name == "close-joined" {
+				// An already-registered logical transaction owns the drain. Close
+				// must return even while its receiver mutex is held by a callback.
+				_, owner, err := cluster.beginSelectedAdmission(context.Background())
+				if err != nil {
+					t.Fatal(err)
 				}
+				cluster.fabric.mu.Lock()
+				active := true
+				finish := func() {
+					if active {
+						cluster.fabric.mu.Unlock()
+						cluster.endSelectedAdmission(owner)
+						active = false
+					}
+				}
+				defer finish()
 				rows := make([][]float32, cfg.NumLayers)
 				for layer := range rows {
 					rows[layer] = make([]float32, cfg.NumKVHeads*cfg.HeadDim)
@@ -135,15 +130,25 @@ func TestNativePDReceiverReadyAdmission(t *testing.T) {
 				span := decode.pool.NewSequence()
 				span.AppendRaw(rows, rows, rows)
 				decode.addImport(model.PagedKVTransferReceipt{KV: span, Transfer: cachemeta.KVTransfer{SpanDigest: "held-import"}})
-				cluster.fabric.mu.Unlock()
-				locked = false
-				select {
-				case <-closed:
-				case <-time.After(time.Second):
-					t.Fatal("Close did not finish after receiver transaction")
+				cluster.Close()
+				waitCtx, cancelWait := context.WithTimeout(context.Background(), 20*time.Millisecond)
+				defer cancelWait()
+				if err := cluster.WaitClosed(waitCtx); !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("WaitClosed bypassed the active receiver: %v", err)
 				}
+				if len(decode.spans) != 1 {
+					t.Fatal("initiation freed a still-owned receiver span")
+				}
+				finish()
+				// Last-owner cleanup must happen even before anyone waits.
+				select {
+				case <-cluster.selectedDrained:
+				default:
+					t.Fatal("last admission did not complete page cleanup")
+				}
+				waitNativePDClusterClosed(t, cluster)
 				if len(decode.spans) != 0 || decode.pool.FreeBlocks() != decode.pool.TotalBlocks() {
-					t.Fatal("Close left receiver pages registered after shutdown")
+					t.Fatal("completion left receiver pages registered after shutdown")
 				}
 				return
 			}

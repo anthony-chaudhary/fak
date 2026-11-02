@@ -54,10 +54,13 @@ type nativePDFabricState struct {
 	timings  nativePDFabricMetricValues
 }
 
-// WithNativePDReceiverFabric enables receiver-ready admission for this cluster.
+// WithNativePDLogicalFabric enables receiver-ready admission for this cluster.
 // Nil leaves the legacy same-layout path unchanged. Invalid non-nil configuration
 // fails closed at Admit; it never silently falls back to a one-hop transfer.
-func WithNativePDReceiverFabric(config *NativePDFabricConfig) NativePDOption {
+// This logical dense-KV proof mode is distinct from WithNativePDReceiverFabric's
+// wire-frame adapter mode. Selecting both non-nil modes refuses before prefill.
+// Selected Close initiates shutdown; WaitClosed with a deadline joins completion.
+func WithNativePDLogicalFabric(config *NativePDFabricConfig) NativePDOption {
 	return func(c *NativePDCluster) {
 		if config == nil {
 			c.fabric = nil
@@ -344,7 +347,7 @@ func nativePDFabricCacheDigest(cache *model.KVCache, cfg model.Config) (string, 
 	})
 }
 
-// Receiver telemetry is opt-in with WithNativePDReceiverFabric, not enabled on
+// Receiver telemetry is opt-in with WithNativePDLogicalFabric, not enabled on
 // the legacy nil-config path. The five bins partition initialized selected Admit
 // calls: preparation (including prefill, source witness and plan work), receiver
 // mutex wait, landing (Send plus received-content validation), materialization
