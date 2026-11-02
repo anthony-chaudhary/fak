@@ -107,12 +107,31 @@ type SelectionOverride struct {
 }
 
 type BottleneckClassification struct {
-	Schema             string   `json:"schema"`
-	EnvelopeID         string   `json:"envelope_id"`
-	Class              string   `json:"class"`
-	Confidence         string   `json:"confidence"`
-	Evidence           []string `json:"evidence"`
-	RecommendedLeverID string   `json:"recommended_lever_id"`
+	Schema             string             `json:"schema"`
+	EnvelopeID         string             `json:"envelope_id"`
+	Class              string             `json:"class"`
+	Confidence         string             `json:"confidence"`
+	Evidence           []string           `json:"evidence"`
+	RecommendedLeverID string             `json:"recommended_lever_id"`
+	HostTimingCoverage HostTimingCoverage `json:"host_timing_coverage"`
+}
+
+type HostTimingObservation struct {
+	Availability MetricAvailability `json:"availability"`
+	Milliseconds *float64           `json:"milliseconds"`
+}
+
+type HostTimingCoverage struct {
+	Launch HostTimingObservation `json:"launch"`
+	Setup  HostTimingObservation `json:"setup"`
+}
+
+func hostTimingObservation(milliseconds *float64) HostTimingObservation {
+	if milliseconds == nil {
+		return HostTimingObservation{Availability: MetricUnknown}
+	}
+	value := *milliseconds
+	return HostTimingObservation{Availability: MetricMeasured, Milliseconds: &value}
 }
 
 func DecodeProfile(data []byte) (ProfileBundle, error) {
@@ -579,10 +598,17 @@ func ClassifyProfile(graph Graph, p ProfileBundle) (BottleneckClassification, er
 		Class:      "insufficient-evidence",
 		Confidence: "low",
 		Evidence:   []string{"backend counters lack matching steady-decode-window evidence"},
+		HostTimingCoverage: HostTimingCoverage{
+			Launch: hostTimingObservation(nil), Setup: hostTimingObservation(nil),
+		},
 	}
 	w := p.CounterWindow
 	if w == nil {
 		return classification, nil
+	}
+	classification.HostTimingCoverage = HostTimingCoverage{
+		Launch: hostTimingObservation(w.HostLaunchMilliseconds),
+		Setup:  hostTimingObservation(w.HostSetupMilliseconds),
 	}
 	decode := w.DurationMilliseconds
 	classification.Evidence = []string{"matching steady-decode counters do not establish a bottleneck; exclusive host launch or setup timing remains below threshold or unobserved"}

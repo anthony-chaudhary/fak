@@ -490,6 +490,141 @@ func profileCounterWindowControl(t *testing.T, backend, kind string) ProfileBund
 	return p
 }
 
+// fak-test:runtime fast est=100ms
+func TestProfileHostTimingCoverage(t *testing.T) {
+	type observation struct {
+		Availability MetricAvailability `json:"availability"`
+		Milliseconds *float64           `json:"milliseconds"`
+	}
+	graph := ActiveGraph()
+	zero, measured := 0.0, 12.0
+	missing, population := 0, 0
+	for _, tc := range []struct {
+		name, class   string
+		launch, setup *float64
+	}{
+		{"no-window", "insufficient-evidence", nil, nil},
+		{"unobserved", "insufficient-evidence", nil, nil},
+		{"explicit-null", "insufficient-evidence", nil, nil},
+		{"bandwidth", "bandwidth-bound", nil, nil},
+		{"compute", "compute-bound", nil, nil},
+		{"sync", "synchronization-bound", nil, nil},
+		{"launch", "launch-bound", &measured, nil},
+		{"setup", "cpu-orchestration-bound", nil, &measured},
+		{"observed-zero", "insufficient-evidence", &zero, &zero},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := profileCounterWindowControl(t, "cuda", "launch")
+			p.CounterWindow.HostLaunchMilliseconds, p.CounterWindow.HostSetupMilliseconds = tc.launch, tc.setup
+			p.CounterWindow.HostTimingSource = ""
+			if tc.launch != nil || tc.setup != nil {
+				p.CounterWindow.HostTimingSource = "host-monotonic-exclusive"
+			}
+			switch tc.name {
+			case "no-window":
+				p.CounterWindow = nil
+			case "bandwidth":
+				p.CUDA.AchievedBandwidthGBS = p.CUDA.PeakBandwidthGBS
+			case "compute":
+				p.CUDA.AchievedComputeTFLOPS = p.CUDA.PeakComputeTFLOPS
+			case "sync":
+				p.CUDA.SynchronizationMilliseconds = measured
+			case "explicit-null":
+				raw, err := json.Marshal(p)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var object map[string]any
+				if err := json.Unmarshal(raw, &object); err != nil {
+					t.Fatal(err)
+				}
+				window := object["counter_window"].(map[string]any)
+				window["host_launch_milliseconds"], window["host_setup_milliseconds"] = nil, nil
+				raw, err = json.Marshal(object)
+				if err != nil {
+					t.Fatal(err)
+				}
+				p, err = DecodeProfile(raw)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := ClassifyProfile(graph, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Class != tc.class {
+				t.Fatalf("class=%s want %s", got.Class, tc.class)
+			}
+			raw, err := json.Marshal(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var output struct {
+				Coverage *struct{ Launch, Setup observation } `json:"host_timing_coverage"`
+			}
+			if err := json.Unmarshal(raw, &output); err != nil {
+				t.Fatal(err)
+			}
+			population += 2
+			if output.Coverage == nil {
+				missing += 2
+				t.Error("classification hides both host timing coverage fields")
+				return
+			}
+			for _, metric := range []struct {
+				got  observation
+				want *float64
+			}{
+				{output.Coverage.Launch, tc.launch}, {output.Coverage.Setup, tc.setup},
+			} {
+				availability := MetricUnknown
+				if metric.want != nil {
+					availability = MetricMeasured
+				}
+				if metric.got.Availability != availability || !reflect.DeepEqual(metric.got.Milliseconds, metric.want) {
+					missing++
+					t.Errorf("observation=%+v want availability=%s milliseconds=%v", metric.got, availability, metric.want)
+				}
+			}
+			if p.CounterWindow != nil && p.CounterWindow.HostLaunchMilliseconds != nil {
+				*p.CounterWindow.HostLaunchMilliseconds++
+				after, err := json.Marshal(got)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(raw) != string(after) {
+					t.Error("input mutation changed classification snapshot")
+				}
+				*p.CounterWindow.HostLaunchMilliseconds--
+			}
+		})
+	}
+	t.Logf("fixed host timing coverage fields=%d hidden=%d", population, missing)
+	p := profileCounterWindowControl(t, "cuda", "launch")
+	*p.CounterWindow.HostLaunchMilliseconds = -1
+	if got, err := ClassifyProfile(graph, p); err == nil || !reflect.DeepEqual(got, BottleneckClassification{}) {
+		t.Fatalf("invalid profile yielded classification=%+v err=%v", got, err)
+	}
+}
+
+// fak-test:runtime fast est=1ms
+func TestProfileHostTimingBelowThreshold(t *testing.T) {
+	p := profileCounterWindowControl(t, "cuda", "launch")
+	*p.CounterWindow.HostLaunchMilliseconds = 1
+	got, err := ClassifyProfile(ActiveGraph(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Class != "insufficient-evidence" || got.RecommendedLeverID != "" {
+		t.Fatalf("below-threshold observation changed class: %+v", got)
+	}
+	launch := got.HostTimingCoverage.Launch
+	if launch.Availability != MetricMeasured || launch.Milliseconds == nil || *launch.Milliseconds != 1 {
+		t.Fatalf("below-threshold timing lost its observation: %+v", launch)
+	}
+}
+
 // fak-test:runtime fast est=1s
 func TestProfileCounterWindowPositiveControls(t *testing.T) {
 	graph := ActiveGraph()
