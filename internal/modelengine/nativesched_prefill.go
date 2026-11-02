@@ -487,9 +487,12 @@ func (s *NativeScheduler) applyPrefixHitsLocked() {
 		}
 		depth := installPrefixHitLocked(ln, info)
 		if info.fullHit && depth == len(ln.prompt) {
+			if err := s.setLaneStateLocked(ln, schedLaneDecode); err != nil {
+				ln.finish(nil, err)
+				continue
+			}
 			ln.promptCursor = len(ln.prompt)
 			ln.promptLen = len(ln.prompt)
-			ln.state = schedLaneDecode
 			ln.prefillChunkTokens = 0
 			if info.boundary != nil && len(info.boundary.Logits()) > 0 {
 				ln.logits = copyF32(info.boundary.Logits())
@@ -590,9 +593,13 @@ func (s *NativeScheduler) advanceQwenPrefill(ln *schedLane, iteration uint64) {
 		if info != nil && !info.applied {
 			depth := installPrefixHitLocked(ln, info)
 			if info.fullHit && depth == len(ln.prompt) {
+				if err := s.setLaneStateLocked(ln, schedLaneDecode); err != nil {
+					ln.finish(nil, err)
+					s.mu.Unlock()
+					return
+				}
 				ln.promptCursor = len(ln.prompt)
 				ln.promptLen = len(ln.prompt)
-				ln.state = schedLaneDecode
 				ln.prefillChunkTokens = 0
 				if info.boundary != nil && len(info.boundary.Logits()) > 0 {
 					ln.logits = copyF32(info.boundary.Logits())
@@ -671,8 +678,12 @@ func (s *NativeScheduler) advanceQwenPrefill(ln *schedLane, iteration uint64) {
 	ln.promptLen = end
 	var exactTwins []*schedLane
 	if final {
+		if err := s.setLaneStateLocked(ln, schedLaneDecode); err != nil {
+			ln.finish(nil, err)
+			s.mu.Unlock()
+			return
+		}
 		ln.logits = logits
-		ln.state = schedLaneDecode
 		s.maybeInsertRadixKV(ln.prompt, ln.sess, logits)
 		exactTwins = s.reuseExactQwenPrefillLocked(ln)
 	}
@@ -775,11 +786,14 @@ func (s *NativeScheduler) reuseExactQwenPrefillLocked(donor *schedLane) []*sched
 		if s.preemption.MaxBlocks > 0 && (added > s.preemption.MaxBlocks || used > s.preemption.MaxBlocks-added) {
 			continue
 		}
+		if err := s.setLaneStateLocked(twin, schedLaneDecode); err != nil {
+			twin.finish(nil, err)
+			continue
+		}
 		twin.sess.Cache = donor.sess.Cache.Clone()
 		twin.logits = copyF32(donor.logits)
 		twin.promptCursor = len(twin.prompt)
 		twin.promptLen = len(twin.prompt)
-		twin.state = schedLaneDecode
 		copied = append(copied, twin)
 		if used+added > s.maxObservedKVBlocks {
 			s.maxObservedKVBlocks = used + added

@@ -1361,3 +1361,133 @@ func TestPrefixHitApplyClampsToSnapshottedDepth(t *testing.T) {
 		}
 	})
 }
+
+// TestSchedLaneTransitionRejectsIllegal pins the native scheduler lane FSM: every
+// declared legal edge is accepted, and terminal->decode plus decode->prefilling
+// (without passing through preemption) are refused with the typed error and leave
+// the lane unchanged.
+// fak-test:runtime fast est=1ms
+func TestSchedLaneTransitionRejectsIllegal(t *testing.T) {
+	phases := []schedLanePhase{schedPhaseWaiting, schedPhasePrefilling, schedPhaseDecode, schedPhasePreempted, schedPhaseTerminal}
+	legal := map[[2]schedLanePhase]bool{}
+	for from, tos := range schedLaneTransitions {
+		for to := range tos {
+			legal[[2]schedLanePhase{from, to}] = true
+		}
+	}
+	for _, edge := range [][2]schedLanePhase{
+		{schedPhaseWaiting, schedPhasePrefilling},
+		{schedPhaseWaiting, schedPhaseDecode},
+		{schedPhasePrefilling, schedPhaseDecode},
+		{schedPhasePrefilling, schedPhasePreempted},
+		{schedPhaseDecode, schedPhasePreempted},
+		{schedPhasePreempted, schedPhaseDecode},
+		{schedPhasePreempted, schedPhasePrefilling},
+		{schedPhaseDecode, schedPhaseTerminal},
+		{schedPhasePrefilling, schedPhaseTerminal},
+		{schedPhaseWaiting, schedPhaseTerminal},
+		{schedPhasePreempted, schedPhaseTerminal},
+	} {
+		if !legal[edge] {
+			t.Fatalf("edge %s->%s missing from transition table", edge[0], edge[1])
+		}
+	}
+	for _, from := range phases {
+		for _, to := range phases {
+			err := checkSchedLaneTransition(from, to)
+			if legal[[2]schedLanePhase{from, to}] {
+				if err != nil {
+					t.Fatalf("legal edge %s->%s rejected: %v", from, to, err)
+				}
+				continue
+			}
+			var typed *errSchedLaneIllegalTransition
+			if !errors.As(err, &typed) || typed.From != from || typed.To != to {
+				t.Fatalf("illegal edge %s->%s err=%v, want typed refusal", from, to, err)
+			}
+		}
+	}
+	for _, edge := range [][2]schedLanePhase{
+		{schedPhaseTerminal, schedPhaseDecode},
+		{schedPhaseDecode, schedPhasePrefilling},
+	} {
+		if legal[edge] {
+			t.Fatalf("edge %s->%s must be illegal", edge[0], edge[1])
+		}
+	}
+
+	s := &NativeScheduler{}
+	term := &schedLane{state: schedLanePrefilling, terminal: true}
+	if err := s.setLaneStateLocked(term, schedLaneDecode); err == nil || term.state != schedLanePrefilling {
+		t.Fatalf("terminal->decode err=%v state=%d, want refusal and unchanged", err, term.state)
+	}
+	dec := &schedLane{state: schedLaneDecode}
+	if err := s.setLaneStateLocked(dec, schedLanePrefilling); err == nil || dec.state != schedLaneDecode {
+		t.Fatalf("decode->prefilling err=%v state=%d, want refusal and unchanged", err, dec.state)
+	}
+	pre := &schedLane{state: schedLaneDecode}
+	s.preempted = []*schedLane{pre}
+	if err := s.setLaneStateLocked(pre, schedLanePrefilling); err != nil || pre.state != schedLanePrefilling {
+		t.Fatalf("preempted->prefilling err=%v state=%d, want accepted", err, pre.state)
+	}
+	pf := &schedLane{state: schedLanePrefilling}
+	if err := s.setLaneStateLocked(pf, schedLaneDecode); err != nil || pf.state != schedLaneDecode {
+		t.Fatalf("prefilling->decode err=%v state=%d, want accepted", err, pf.state)
+	}
+}
+
+// fak-test:runtime fast est=1s
+func TestSchedLaneTransitionCachedPrefillCancellation(t *testing.T) {
+	for _, cancelBeforePublish := range []bool{false, true} {
+		t.Run(fmt.Sprintf("canceled_%t", cancelBeforePublish), func(t *testing.T) {
+			m := nativeSchedulerPrefillModel(t)
+			prompt := nativeSchedulerQwenPrompt(2 * nativeQwenPrefillMinChunkTokens)
+			s := newNativeScheduler(m, nativeSchedulerPrefillPrepare(map[string][]int{"cached": prompt}))
+			if err := s.SetQwenPrefillMaxTokensPerIteration(nativeQwenPrefillMinChunkTokens); err != nil {
+				t.Fatal(err)
+			}
+			nativeSchedulerBeginManualDrain(t, s)
+			defer finishExactScheduler(t, s)
+			ln := nativeSchedulerAdmitLane(t, s, "cached")
+			s.executor.Lock()
+			defer s.executor.Unlock()
+			s.mu.Lock()
+			s.promoteWaitingLocked(0)
+			s.mu.Unlock()
+			if ln.state != schedLanePrefilling || ln.sess == nil {
+				t.Fatal("admission did not produce a live prefilling lane")
+			}
+			oracle := m.NewSession()
+			oracle.Q4K = true
+			defer oracle.Close()
+			logits := oracle.Prefill(prompt)
+			tree := radixkv.New(0)
+			root, _ := tree.Lookup(prompt)
+			tree.Done(tree.InsertWithLogits(root, prompt, oracle.Cache, logits))
+			boundary, depth := tree.Lookup(prompt)
+			defer tree.Done(boundary)
+			info := &prefixHitInfo{matched: depth, boundary: boundary, fullHit: true}
+			s.getOrCreatePrefixState().laneLookups[ln] = info
+			if cancelBeforePublish {
+				ln.Cancel()
+			}
+			s.advanceQwenPrefill(ln, 1)
+			if cancelBeforePublish {
+				if !ln.terminal || !ln.reclaimed || !errors.Is(ln.err, context.Canceled) ||
+					ln.state != schedLanePrefilling || ln.sess != nil || info.applied {
+					t.Fatalf("canceled cached prefill published or retained ownership: state=%d terminal=%t err=%v", ln.state, ln.terminal, ln.err)
+				}
+				// The real caller must not revive a terminal lane on another iteration.
+				s.advanceQwenPrefill(ln, 2)
+				if ln.state != schedLanePrefilling || !ln.terminal || info.applied {
+					t.Fatal("terminal lane resumed cached prefill")
+				}
+				return
+			}
+			if ln.terminal || ln.state != schedLaneDecode || ln.promptCursor != len(prompt) ||
+				!reflect.DeepEqual(ln.logits, logits) || !info.applied {
+				t.Fatalf("live cached prefill did not publish decode: state=%d terminal=%t err=%v", ln.state, ln.terminal, ln.err)
+			}
+		})
+	}
+}
