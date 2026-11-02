@@ -394,15 +394,18 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 		res.Failures = append(res.Failures, ciPreflightFailure{Step: "test-select", Detail: graphErr.Error()})
 	} else {
 		vetTargets, buildTargets := selectValidatePackages(&res, &recorder, dir, paths, fileToPkg, edges, baseFileToPkg, baseEdges)
+		var vetted *validateVetCoverage
 		if !*testOnly {
-			if code, timedOut := runValidateBuildAndVet(ctx, stdout, &res, &recorder, dir, wslWorkspace, *asJSON, vetTargets, buildTargets); timedOut {
+			code, timedOut, coverage := runValidateBuildAndVet(ctx, stdout, &res, &recorder, dir, wslWorkspace, *asJSON, vetTargets, buildTargets)
+			if timedOut {
 				return code
 			}
+			vetted = coverage
 			if code, timedOut := runValidatePlatformPhases(ctx, stdout, &res, &recorder, r, dir, paths, fileToPkg, wslWorkspace, *asJSON); timedOut {
 				return code
 			}
 		}
-		selectedObservation, code, timedOut := runValidateTestsPhase(ctx, stdout, &res, &recorder, r, dir, tip, effectiveTestRun, fileToPkg, *wslTests, wslWorkspace, *auditSelection, *asJSON)
+		selectedObservation, code, timedOut := runValidateTestsPhase(ctx, stdout, &res, &recorder, r, dir, tip, effectiveTestRun, fileToPkg, *wslTests, wslWorkspace, *auditSelection, *asJSON, vetted)
 		if timedOut {
 			return code
 		}
@@ -450,11 +453,11 @@ func runValidateGofmtPhase(ctx context.Context, stdout io.Writer, res *validateR
 	return 0, false
 }
 
-func runValidateBuildAndVet(ctx context.Context, stdout io.Writer, res *validateResult, recorder *validateRecorder, dir string, wslWorkspace, asJSON bool, vetTargets, buildTargets []string) (int, bool) {
+func runValidateBuildAndVet(ctx context.Context, stdout io.Writer, res *validateResult, recorder *validateRecorder, dir string, wslWorkspace, asJSON bool, vetTargets, buildTargets []string) (int, bool, *validateVetCoverage) {
 	if len(vetTargets) == 0 {
 		recorder.skip("build", "no affected package")
 		recorder.skip("vet", "no affected package")
-		return 0, false
+		return 0, false, nil
 	}
 	// The base is a committed tip; only changed packages and their importer closure
 	// can become newly red. Rebuilding ./... made two-file checks scale with the
@@ -466,21 +469,27 @@ func runValidateBuildAndVet(ctx context.Context, stdout io.Writer, res *validate
 		if code, timedOut := runValidateCheckPhase(stdout, res, recorder, phase, "build", errors.New("affected package build failed"), asJSON, func() (string, bool) {
 			return validateBuildImportersWithin(ctx, dir, wslWorkspace, buildTargets)
 		}); timedOut {
-			return code, true
+			return code, true, nil
 		}
 	}
 
 	phase := recorder.start("vet")
+	vetPassed := false
 	if code, timedOut := runValidateCheckPhase(stdout, res, recorder, phase, "vet", errors.New("affected package vet failed"), asJSON, func() (string, bool) {
 		args, err := validateGoVetArgsWithin(ctx, dir, wslWorkspace, vetTargets)
 		if err != nil {
 			return "select cgo-safe vet cache identity: " + err.Error(), false
 		}
-		return validateRunGoCheckWithin(ctx, dir, wslWorkspace, args...)
+		detail, ok := validateRunGoCheckWithin(ctx, dir, wslWorkspace, args...)
+		vetPassed = ok
+		return detail, ok
 	}); timedOut {
-		return code, true
+		return code, true, nil
 	}
-	return 0, false
+	if vetPassed {
+		return 0, false, &validateVetCoverage{dir: dir, wsl: wslWorkspace, targets: append([]string(nil), vetTargets...)}
+	}
+	return 0, false, nil
 }
 
 func validateGoVetArgsWithin(ctx context.Context, dir string, wsl bool, targets []string) ([]string, error) {
@@ -501,7 +510,7 @@ func validateGoVetArgsWithin(ctx context.Context, dir string, wsl bool, targets 
 	return validateGoCheckArgs("vet", targets), nil
 }
 
-func runValidateTestsPhase(ctx context.Context, stdout io.Writer, res *validateResult, recorder *validateRecorder, r, dir, tip, effectiveTestRun string, fileToPkg map[string]string, wslTests, wslWorkspace, auditSelection, asJSON bool) (affectedtests.TestObservation, int, bool) {
+func runValidateTestsPhase(ctx context.Context, stdout io.Writer, res *validateResult, recorder *validateRecorder, r, dir, tip, effectiveTestRun string, fileToPkg map[string]string, wslTests, wslWorkspace, auditSelection, asJSON bool, vetted *validateVetCoverage) (affectedtests.TestObservation, int, bool) {
 	if res.retainTestEvents {
 		return runValidateEventTestsPhase(ctx, stdout, res, recorder, dir, tip, effectiveTestRun, fileToPkg, asJSON)
 	}
@@ -512,6 +521,10 @@ func runValidateTestsPhase(ctx context.Context, stdout io.Writer, res *validateR
 	res.Runner = validateTestRunner(runtime.GOOS, wslTests)
 	testTargets := packagePatternsForRoot(dir, res.Tested, fileToPkg)
 	args := validateTestArgs(effectiveTestRun, validateGoTestTimeout(ctx, validateNow()), testTargets)
+	reuseVet := vetted.coversCompileTests(effectiveTestRun, dir, runtime.GOOS, wslTests, wslWorkspace, testTargets)
+	if reuseVet {
+		args = append([]string{args[0], "-vet=off"}, args[1:]...)
+	}
 	if auditSelection {
 		args = validateJSONTestArgs(args)
 	}
@@ -524,7 +537,9 @@ func runValidateTestsPhase(ctx context.Context, stdout io.Writer, res *validateR
 	if code, timedOut := finishValidateContextPhase(stdout, res, recorder, phase, "test", asJSON); timedOut {
 		return obs, code, true
 	}
-	if ok {
+	if ok && reuseVet {
+		phase.finishAs("ok", "default test vet reused from successful explicit vet in the same workspace and runner")
+	} else if ok {
 		phase.finish(nil)
 	} else {
 		recordValidateFailure(res, phase, "test", detail, errors.New("affected tests failed"))
