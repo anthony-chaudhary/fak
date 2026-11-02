@@ -138,13 +138,14 @@ type NativePDRequest struct {
 
 // NativePDAdmission records where the request ran and the imported decode state.
 type NativePDAdmission struct {
-	Request       abi.EngineRequest
-	PrefillWorker string
-	DecodeWorker  string
-	PrefixKey     string
-	LocalityHit   bool
-	Transfer      model.PagedKVTransferReceipt
-	ImportedCache *model.KVCache
+	ReceiverFabric *NativePDReceiverReceipt
+	Request        abi.EngineRequest
+	PrefillWorker  string
+	DecodeWorker   string
+	PrefixKey      string
+	LocalityHit    bool
+	Transfer       model.PagedKVTransferReceipt
+	ImportedCache  *model.KVCache
 }
 
 // NativePDWorkerStats is a point-in-time per-role serving counter set.
@@ -249,9 +250,10 @@ func (w *NativePDWorker) addImport(receipt model.PagedKVTransferReceipt) {
 // composes NativeScheduler and model.KVTransport instead of inventing a second
 // decode loop.
 type NativePDCluster struct {
-	m       *model.Model
-	prefill *NativePDWorker
-	decode  []*NativePDWorker
+	receiverFabric map[string]*NativePDReceiverFabric
+	m              *model.Model
+	prefill        *NativePDWorker
+	decode         []*NativePDWorker
 
 	mu                sync.Mutex
 	residency         NativePDResidencyIndex
@@ -365,28 +367,53 @@ func (c *NativePDCluster) Admit(ctx context.Context, req NativePDRequest) (Nativ
 	}
 	defer src.Free()
 
-	backend := c.transferBackendFor(req)
-	transport, err := model.OpenKVTransferBackend(model.KVTransportOpenRequest{Backend: backend, Pool: decode.pool})
-	if err != nil {
-		return NativePDAdmission{}, err
+	receiverSelected := c.receiverFabric != nil
+	var receipt model.PagedKVTransferReceipt
+	var receiverReceipt *NativePDReceiverReceipt
+	receiverCommitted := false
+	if receiverSelected {
+		var release func()
+		receipt, receiverReceipt, release, err = c.receiverTransfer(ctx, req, decode, src, len(prompt))
+		if err != nil {
+			return NativePDAdmission{}, err
+		}
+		defer release()
+		defer func() {
+			if !receiverCommitted {
+				receipt.KV.Free()
+			}
+		}()
+	} else {
+		backend := c.transferBackendFor(req)
+		transport, openErr := model.OpenKVTransferBackend(model.KVTransportOpenRequest{Backend: backend, Pool: decode.pool})
+		if openErr != nil {
+			return NativePDAdmission{}, openErr
+		}
+		if transport.Close != nil {
+			defer transport.Close()
+		}
+		transfer := c.transferDescriptor(req, decode.name, len(prompt))
+		receipt, err = transport.Transport.Send(src, transfer, 0, len(prompt))
+		if err != nil {
+			return NativePDAdmission{}, err
+		}
+		c.observeTransferBackend(receipt.Transfer.Backend)
+		c.prefill.addPrefill(receipt.Transfer.BytesMoved)
 	}
-	if transport.Close != nil {
-		defer transport.Close()
-	}
-	transfer := c.transferDescriptor(req, decode.name, len(prompt))
-	receipt, err := transport.Transport.Send(src, transfer, 0, len(prompt))
-	if err != nil {
-		return NativePDAdmission{}, err
-	}
-	c.observeTransferBackend(receipt.Transfer.Backend)
-	c.prefill.addPrefill(receipt.Transfer.BytesMoved)
 	cache := receipt.KV.ToKVCache(c.m.Cfg)
 	importedSnapshot := cache.Clone()
-	decode.addImport(receipt)
+	if !receiverSelected {
+		decode.addImport(receipt)
+	}
 
 	call := req.Call
 	if call == nil {
 		call = &abi.ToolCall{Tool: "native_pd"}
+	}
+	if receiverSelected {
+		if err := c.receiverFabric[decode.name].validateAdmission(ctx, receiverReceipt); err != nil {
+			return NativePDAdmission{}, fmt.Errorf("%w: %w", ErrNativePDReceiver, err)
+		}
 	}
 	r, err := decode.sched.AdmitImported(ctx, call, ImportedSequence{
 		Session:   &model.Session{M: c.m, Cache: cache},
@@ -396,7 +423,16 @@ func (c *NativePDCluster) Admit(ctx context.Context, req NativePDRequest) (Nativ
 		Tool:      call.Tool,
 	})
 	if err != nil {
+		if receiverSelected {
+			return NativePDAdmission{}, fmt.Errorf("%w: %w", ErrNativePDReceiver, err)
+		}
 		return NativePDAdmission{}, err
+	}
+	if receiverSelected {
+		c.observeTransferBackend(receipt.Transfer.Backend)
+		c.prefill.addPrefill(receipt.Transfer.BytesMoved)
+		decode.addImport(receipt)
+		receiverCommitted = true
 	}
 	c.mu.Lock()
 	c.residency.Observe(decode.name, prefixSegments)
@@ -404,13 +440,14 @@ func (c *NativePDCluster) Admit(ctx context.Context, req NativePDRequest) (Nativ
 	c.mu.Unlock()
 
 	return NativePDAdmission{
-		Request:       r,
-		PrefillWorker: c.prefill.name,
-		DecodeWorker:  decode.name,
-		PrefixKey:     prefixKey,
-		LocalityHit:   hit,
-		Transfer:      receipt,
-		ImportedCache: importedSnapshot,
+		ReceiverFabric: receiverReceipt,
+		Request:        r,
+		PrefillWorker:  c.prefill.name,
+		DecodeWorker:   decode.name,
+		PrefixKey:      prefixKey,
+		LocalityHit:    hit,
+		Transfer:       receipt,
+		ImportedCache:  importedSnapshot,
 	}, nil
 }
 
