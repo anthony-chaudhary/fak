@@ -15,6 +15,11 @@ func kvPrecisionDenseCfg() model.Config {
 func kvPrecisionHybridCfg() model.Config {
 	cfg := kvPrecisionDenseCfg()
 	cfg.LayerTypes = []string{"linear_attention", "full_attention"}
+	cfg.LinearNumKeyHeads = 1
+	cfg.LinearNumValueHeads = 1
+	cfg.LinearKeyHeadDim = 1
+	cfg.LinearValueHeadDim = 1
+	cfg.LinearConvKernelDim = 2
 	return cfg
 }
 
