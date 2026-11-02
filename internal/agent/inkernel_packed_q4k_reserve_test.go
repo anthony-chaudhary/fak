@@ -17,6 +17,12 @@ func TestPackedQ4KRequestReserve(t *testing.T) {
 		ModelType: "qwen3_5_text", VocabSize: 1, HiddenSize: 256,
 		NumLayers: 4, NumHeads: 2, NumKVHeads: 1, HeadDim: 8,
 		LayerTypes: []string{"linear_attention", "linear_attention", "linear_attention", "full_attention"},
+
+		LinearNumKeyHeads:   1,
+		LinearNumValueHeads: 1,
+		LinearKeyHeadDim:    1,
+		LinearValueHeadDim:  1,
+		LinearConvKernelDim: 2,
 	}
 	m := &model.Model{Cfg: cfg, Q2KEmbedding: embed}
 	planner := &InKernelPlanner{m: m, quant: true, q4k: true, metal: true}
