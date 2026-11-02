@@ -13102,6 +13102,11 @@
           "category": "incidental",
           "reason": "Private dispatch or optional-capability implementation of the positioned partial-prefill-context and partial-prefill-no-logits-context operations. It forwards the existing request context and preserves the same Session/backend owner; it creates no independent context, session identity, engine, cancellation policy, or scheduler.",
           "token": "prefillNoLogitsOwnedContext"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private io.Reader adapter checking Go context.Context cancellation before bounded payload copy reads. It is request lifecycle plumbing, not LLM prompt context, context-window planning, compaction or memory ownership.",
+          "token": "conversionContextReader"
         }
       ],
       "exclude": [
@@ -13215,6 +13220,7 @@
         "context_reduction",
         "context_shedding_only",
         "contexts",
+        "conversionContextReader",
         "ctx",
         "ctxAdviceNote",
         "ctxAdviceNoteOnce",
@@ -19048,6 +19054,21 @@
           "category": "incidental",
           "reason": "Private pure validation helper for the existing F32 RowMajor grouped-output panel and scalar deferred-status descriptors. It checks row, width, count and extent bounds and returns logical row count; it defines no new tensor layout, byte ordering or storage representation.",
           "token": "v41GroupedDeferredPanelLayout"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private reader operation over the existing GGUFv3 header, optionally recording raw metadata byte spans for local conversion. It introduces no alternative file format, tensor element ordering, ctxplan region profile or KV-cache layout authority.",
+          "token": "readHeaderLayout"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private per-conversion descriptor of raw metadata record byte spans and header boundary in the existing GGUFv3 format. It owns no tensor payload, model placement, persistent storage policy or competing tensor/ctxplan/KV layout abstraction.",
+          "token": "ggufHeaderLayout"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private pure validation of already parsed GGUF tensor names, byte extents, overlap and supported geometry before output. It neither transforms tensor element ordering nor selects a model or cache layout.",
+          "token": "validateConversionLayout"
         }
       ],
       "id": "layout",
@@ -19063,9 +19084,11 @@
         "ValidateROCmFP4Layout",
         "archusesmlamoelayout",
         "defaultlayout",
+        "ggufHeaderLayout",
         "gitDailyDayLayout",
         "imageLayoutVersion",
         "layouts",
+        "readHeaderLayout",
         "readLayout",
         "scale_layouts",
         "usesmlamoelayout",
@@ -19075,7 +19098,8 @@
         "v41HeadLayoutSnapshot",
         "v41HeadLayoutSupported",
         "v41ReadDeferredLayout",
-        "v41TypedReadbackLayout"
+        "v41TypedReadbackLayout",
+        "validateConversionLayout"
       ],
       "known_tokens": [],
       "min_files": 2,

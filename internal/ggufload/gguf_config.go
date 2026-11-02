@@ -31,9 +31,30 @@ func ReadSize(r io.Reader, mapped int64) (*File, error) {
 }
 
 func readHeader(r io.Reader, mapped int64) (*File, error) {
+	return readHeaderLayout(r, mapped, nil)
+}
+
+// ggufHeaderLayout captures raw metadata spans only for bounded artifact conversion.
+// Raw records preserve empty-array element types, duplicate keys and float bits.
+// It is deliberately not a metadata serializer or a change to ordinary parsing.
+type ggufHeaderLayout struct {
+	metadata    []ggufMetadataSpan
+	metadataEnd int64
+}
+type ggufMetadataSpan struct {
+	key               string
+	typ               ValueType
+	start, value, end int64
+}
+
+func readHeaderLayout(r io.Reader, mapped int64, layout *ggufHeaderLayout) (*File, error) {
 	// Keep countingReader outside the buffer: rr.n is the exact number of header bytes
 	// consumed by the parser, independent of any source bytes prefetched by bufio.
 	rr := &countingReader{r: bufio.NewReaderSize(r, ggufHeaderBufferSize), mapped: mapped}
+	if layout != nil {
+		budget := uint64(1 << 20)
+		rr.valueBudget = &budget
+	}
 	magic := make([]byte, 4)
 	if err := rr.readFull(magic); err != nil {
 		return nil, err
@@ -57,8 +78,12 @@ func readHeader(r io.Reader, mapped int64) (*File, error) {
 		return nil, err
 	}
 
+	if layout != nil && (kvCount > 65536 || tensorCount > 65536) {
+		return nil, fmt.Errorf("gguf: conversion header exceeds 65536 metadata records or tensors")
+	}
 	meta := make(map[string]Value, kvCount)
 	for i := uint64(0); i < kvCount; i++ {
+		start := rr.n
 		key, err := rr.str()
 		if err != nil {
 			return nil, fmt.Errorf("gguf: metadata key %d: %w", i, err)
@@ -67,11 +92,18 @@ func readHeader(r io.Reader, mapped int64) (*File, error) {
 		if err != nil {
 			return nil, fmt.Errorf("gguf: metadata %s type: %w", key, err)
 		}
+		valueOffset := rr.n
 		v, err := rr.value(typ)
 		if err != nil {
 			return nil, fmt.Errorf("gguf: metadata %s: %w", key, err)
 		}
 		meta[key] = v
+		if layout != nil {
+			layout.metadata = append(layout.metadata, ggufMetadataSpan{key, typ, start, valueOffset, rr.n})
+		}
+	}
+	if layout != nil {
+		layout.metadataEnd = rr.n
 	}
 
 	tensors := make([]TensorInfo, 0, tensorCount)

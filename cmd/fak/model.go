@@ -12,11 +12,12 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 )
 
-const modelUsage = "usage: fak model <fit|plan|load|pull|ls|provider-contracts|qwen38-ladder|canary-gate|canary-run|acceptance-gate|acceptance-run|acceptance-refold|readiness-inventory|preflight|trace-stub> ...\n" +
+const modelUsage = "usage: fak model <fit|plan|load|pull|quantize|ls|provider-contracts|qwen38-ladder|canary-gate|canary-run|acceptance-gate|acceptance-run|acceptance-refold|readiness-inventory|preflight|trace-stub> ...\n" +
 	"  fak model fit compose|plan|check|compare declared multi-device memory fit; no deployment\n" +
 	"  fak model plan         choose a Qwen3.8-27B load from goals and declared capacity without downloading\n" +
 	"  fak model load <ref>   resolve a model ref (alias | hf://… | path) to a cached file path\n" +
 	"  fak model pull <ref>   download a model ref into the local cache (alias-aware)\n" +
+	"  fak model quantize     convert local F32 GGUF matrices to q4_k/q5_k/q6_k; new output only\n" +
 	"  fak model ls           list known model aliases and which are cached locally\n" +
 	"  fak model provider-contracts inspect canonical provider behavior and provenance (--json for complete records)\n" +
 	"  fak model qwen38-ladder prove concepts cheaply, then promote to exact Qwen3.8-27B evidence\n" +
@@ -46,6 +47,8 @@ func cmdModel(args []string) {
 		os.Exit(runModelFit(os.Stdin, os.Stdout, os.Stderr, args[1:]))
 	case "plan":
 		os.Exit(runModelPlan(os.Stdout, os.Stderr, args[1:]))
+	case "quantize":
+		os.Exit(runModelQuantize(os.Stdout, os.Stderr, args[1:]))
 	case "load":
 		cmdModelLoad(args[1:])
 	case "pull":

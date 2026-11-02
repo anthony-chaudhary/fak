@@ -962,8 +962,11 @@ func f16At(raw []byte, off int) float32 {
 }
 
 type countingReader struct {
-	r io.Reader
-	n int64
+	// Optional aggregate conversion-only budget. Nil preserves ordinary reader
+	// behavior; the bounded producer refuses metadata allocation before make.
+	valueBudget *uint64
+	r           io.Reader
+	n           int64
 	// mapped is the byte extent of the underlying source, when known. A zero value
 	// means "unbounded/unknown" (the historical Read(io.Reader) contract), so every
 	// existing caller stays byte-identical; a positive value makes str() and the
@@ -1060,6 +1063,12 @@ func (r *countingReader) valueType() (ValueType, error) {
 }
 
 func (r *countingReader) value(typ ValueType) (Value, error) {
+	if r.valueBudget != nil {
+		if *r.valueBudget == 0 {
+			return Value{}, fmt.Errorf("gguf: conversion metadata value budget exhausted")
+		}
+		*r.valueBudget--
+	}
 	switch typ {
 	case TypeUint8:
 		var b [1]byte
@@ -1132,6 +1141,12 @@ func (r *countingReader) value(typ ValueType) (Value, error) {
 			}
 			if err := checkMappedExtent(r.n, int64(n)*int64(width), r.mapped); err != nil {
 				return Value{}, err
+			}
+		}
+		if r.valueBudget != nil {
+			_, scalar := valueTypeFixedWidth(elem)
+			if (!scalar && elem != TypeString) || n > *r.valueBudget {
+				return Value{}, fmt.Errorf("gguf: conversion refuses nested, unsupported or over-budget metadata array")
 			}
 		}
 		items := make([]Value, int(n))
