@@ -26,6 +26,17 @@ func TestClassifyUpstream(t *testing.T) {
 			`{"error":{"type":"unsupported_region","message":"this region is not supported"}}`, RemedyFailoverAccount},
 		{"credit exhausted (403)", http.StatusForbidden,
 			`{"error":{"message":"Your credit balance is too low"}}`, RemedyFailoverAccount},
+		{"bare 402", http.StatusPaymentRequired, "", RemedyFailoverAccount},
+		{"unrecognized 402", http.StatusPaymentRequired,
+			`{"error":{"message":"billing unavailable"}}`, RemedyFailoverAccount},
+		{"stream required (402)", http.StatusPaymentRequired,
+			`{"error":{"message":"stream required"}}`, RemedyStreamRequired},
+		{"template rejected (402)", http.StatusPaymentRequired,
+			`{"error":{"message":"Jinja Exception"}}`, RemedyTerminal},
+		{"model not entitled (402)", http.StatusPaymentRequired,
+			`{"error":{"message":"your account does not have access to model X"}}`, RemedySwitchModel},
+		{"permanent denial (402)", http.StatusPaymentRequired,
+			`{"error":{"type":"permission_error","message":"forbidden"}}`, RemedyTerminal},
 		{"credit exhausted (402)", http.StatusPaymentRequired,
 			`{"error":{"message":"credit balance is too low"}}`, RemedyFailoverAccount},
 		{"nebius exhausted-budget 402 (live body)", http.StatusPaymentRequired,
@@ -73,6 +84,19 @@ func TestClassifyUpstream(t *testing.T) {
 // account's bucket.
 func TestClassifyUpstreamUsageVsOrgWall(t *testing.T) {
 	orgBody := []byte(liveOrgOAuthDisabledBody)
+
+	t.Run("bare 402 with usage or overage rejection stays backoff", func(t *testing.T) {
+		for _, header := range []string{
+			"Anthropic-Ratelimit-Unified-Overage-Status",
+			"Anthropic-Ratelimit-Unified-5h-Status",
+		} {
+			h := http.Header{}
+			h.Set(header, "rejected")
+			if got := classifyUpstream(http.StatusPaymentRequired, nil, h); got != RemedyBackoff {
+				t.Errorf("bare 402 with %s rejected = %v, want backoff", header, got)
+			}
+		}
+	})
 
 	t.Run("org-disable body with NO rate-limit headers => failover (true org wall)", func(t *testing.T) {
 		if got := classifyUpstream(http.StatusForbidden, orgBody, http.Header{}); got != RemedyFailoverAccount {

@@ -8,9 +8,8 @@ package agent
 // SCOPE, and what this file deliberately does NOT claim. This is the agent
 // plane's severity authority, not the system's. The compiled router has its own
 // closed failure taxonomy (a 403 there is AUTH_REJECTED, a bare 402 is
-// CREDIT_EXHAUSTED), and the two are known to disagree: on a bare 402 the agent
-// BACKS OFF (treating it as transient) while the router fails over and tombstones
-// the credential. classifyUpstream is strictly FINER than the router's taxonomy
+// CREDIT_EXHAUSTED), and both planes fail over on a bare
+// 402. classifyUpstream is strictly FINER than the router's taxonomy
 // (it splits the 403 population four ways where the router splits it once), so
 // where a distinction is needed the correct direction is to add a class to the
 // router and read it here — not to keep a second, coarser-or-finer taxonomy
@@ -161,6 +160,11 @@ func classifyUpstream(status int, body []byte, h http.Header) UpstreamRemedy {
 			// target — surface it terminally with the actionable message.
 			return RemedyTerminal
 		default:
+			// A bare 402 is a standing credit wall, not a transient flap. Keep this
+			// fallback after the more specific body and usage/overage remedies.
+			if status == http.StatusPaymentRequired {
+				return RemedyFailoverAccount
+			}
 			// An unlabeled 403 may be a server-side abuse/capacity flap (the gem8 storm) —
 			// exactly as recoverable as a 529. Let the bounded transient arm ride it out.
 			return RemedyBackoff
