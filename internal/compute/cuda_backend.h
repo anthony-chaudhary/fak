@@ -392,6 +392,9 @@ int fcuda_q8_matmul_rows_f32(const int8_t *dCodes, const float *dScales, const f
  * activation semantics, MMQ quantizes activation to Q8_1, and experimental fp8lt
  * rounds both operands to per-tensor E4M3 with F32 accumulation/output. */
 int fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY, int out, int in, int P);
+/* Row-exact prompt panels use the selected P=1 decode arm independently for each row. */
+int fcuda_q4k_matmul_rows_f32(const uint8_t *w, const float *x, float *y, int out, int in, int rows);
+int fcuda_q6k_matmul_rows_f32(const uint8_t *w, const float *x, float *y, int out, int in, int rows);
 /* fcuda_q4k_matmul_f32 and fcuda_q2k_matmul_f32 return 0, or 80001 (f32 dequant scratch) or
  * 80002 (fp16 split scratch) when a P>=128 scratch allocation fails (nothing launched).
  * fcuda_q4k_matmul_f32 also returns 80003 for P>=128 when the selected prefill arm is refused, and
