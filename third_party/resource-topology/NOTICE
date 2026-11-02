@@ -1,0 +1,41 @@
+Observed topology concurrency search
+
+This Go implementation adapts the following Apache-2.0 sources, inspected at
+their immutable revisions on 2026-11-02:
+
+DistServe — Copyright 2024 DistServe Authors
+https://github.com/LLMServe/DistServe
+simdistserve/benchmarks/search_configs.py:7-54
+at 82831f1604cc6b10bebd360f6c437a07790dde9f
+Adapted finite Cartesian configuration enumeration and capacity pruning.
+Upstream is a simulator, not proof of a live deployment controller.
+
+Dynamo — Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES.
+All rights reserved.
+https://github.com/ai-dynamo/dynamo
+components/src/dynamo/planner/core/perf_model/agg.py:189-294
+at 1ecc8702a413fb22b37079d6ff53bca677259464
+Adapted bounded concurrency evaluation and latency-SLA filtering. The unknown
+capacity fallback and SLO-violating batch-one fallback are deliberately omitted.
+No regression, deployment stack or model test data is copied.
+
+DeepInfer
+https://github.com/deepseek-ai/DeepInfer
+deepinfer/worker/decode_perf_cache.py:24-153
+at 9bd9cf243fc53ef9afbf8f04d391d989117d6ab9
+Adapted measured-curve identity and expiry checking. The identity is extended
+with model revision, backend, kernel, rank/device incarnations, complete layout,
+observed links, observation epoch and workload. No vendor kernel is copied.
+
+Modifications by fak contributors: translated the search contracts to Go over
+RuntimeTopology and existing fitplan workload/SLO/calibration receipts; added
+per-rank peak-memory and reservation checks, strict observation matching,
+deterministic ordering and pins, incumbent retention, explicit unknown reasons,
+bounded command input and CPU-only owned fixtures. Measurements are supplied
+inputs, not independently verified hardware qualifications. Link changes require
+matching measurements; missing curves are never filled with guessed rates.
+
+The applicable Apache License 2.0 is reproduced in LICENSE. Selected source
+files and exact root licenses were inspected; root NOTICE requests returned
+not found at each pin. No unrelated vendored assets or transitive source are
+included. This attribution does not imply endorsement by the source projects.

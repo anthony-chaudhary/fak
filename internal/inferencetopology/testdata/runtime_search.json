@@ -1,0 +1,534 @@
+{
+  "schema": "fak-runtime-topology-search/1",
+  "model_revision": "owned-fixture-model@1",
+  "backend": "fixture-cpu",
+  "kernel": "fixture-step-v1",
+  "workload": {
+    "prompt_tokens": 256,
+    "output_tokens": 64,
+    "concurrency": 1
+  },
+  "slo": {
+    "tpot_ms": 30,
+    "ttft_ms": 300
+  },
+  "options": [
+    {
+      "topology": {
+        "schema": "fak-runtime-topology/1",
+        "id": "colocated",
+        "configured": {
+          "groups": [
+            {
+              "id": "g0",
+              "role": "both",
+              "tp": 1,
+              "pp": 1,
+              "ep": 1,
+              "layers": 4,
+              "kv_format": "paged-v1",
+              "rank_ids": [
+                "r0"
+              ]
+            }
+          ],
+          "ranks": [
+            {
+              "id": "r0",
+              "incarnation": "rank-1",
+              "group_id": "g0",
+              "role": "both",
+              "device_id": "d0",
+              "device_incarnation": "device-1",
+              "tp_rank": 0,
+              "pp_stage": 0,
+              "ep_rank": 0,
+              "layer_start": 0,
+              "layer_end": 4,
+              "kv_ownership": [
+                "kv0"
+              ],
+              "commitment": {
+                "resident_weight_bytes": 40,
+                "weight_stream_bytes_per_step": 20,
+                "kv_resident_bytes": 5,
+                "kv_read_bytes_per_step": 2,
+                "kv_write_bytes_per_step": 1,
+                "activation_traffic_bytes_per_step": 0,
+                "flops_per_step": 1
+              }
+            }
+          ]
+        },
+        "observed": {
+          "at": "2026-11-02T05:00:00Z",
+          "ttl_seconds": 60,
+          "epoch": 7,
+          "provenance": "synthetic-owned-cpu-fixture-not-hardware",
+          "visibility": [
+            "d0"
+          ],
+          "devices": [
+            {
+              "id": "d0",
+              "incarnation": "device-1",
+              "lifecycle": "active",
+              "health": "healthy",
+              "capacity_bytes": 200,
+              "free_bytes": 150,
+              "free_bytes_known": true
+            }
+          ],
+          "links": []
+        },
+        "supported": [
+          {
+            "device_id": "d0",
+            "incarnation": "device-1",
+            "state": "supported"
+          }
+        ],
+        "available": [
+          {
+            "device_id": "d0",
+            "incarnation": "device-1",
+            "state": "available"
+          }
+        ]
+      },
+      "batches": [
+        1,
+        4
+      ],
+      "chunks": [
+        128
+      ],
+      "slots": [
+        1,
+        4
+      ],
+      "reservations": {
+        "r0": 0
+      }
+    },
+    {
+      "topology": {
+        "schema": "fak-runtime-topology/1",
+        "id": "pd-1p2d",
+        "configured": {
+          "groups": [
+            {
+              "id": "g0",
+              "role": "prefill",
+              "tp": 1,
+              "pp": 1,
+              "ep": 1,
+              "layers": 4,
+              "kv_format": "paged-v1",
+              "rank_ids": [
+                "r0"
+              ]
+            },
+            {
+              "id": "g1",
+              "role": "decode",
+              "tp": 1,
+              "pp": 1,
+              "ep": 1,
+              "layers": 4,
+              "kv_format": "paged-v1",
+              "rank_ids": [
+                "r1"
+              ]
+            },
+            {
+              "id": "g2",
+              "role": "decode",
+              "tp": 1,
+              "pp": 1,
+              "ep": 1,
+              "layers": 4,
+              "kv_format": "paged-v1",
+              "rank_ids": [
+                "r2"
+              ]
+            }
+          ],
+          "ranks": [
+            {
+              "id": "r0",
+              "incarnation": "rank-1",
+              "group_id": "g0",
+              "role": "prefill",
+              "device_id": "d0",
+              "device_incarnation": "device-1",
+              "tp_rank": 0,
+              "pp_stage": 0,
+              "ep_rank": 0,
+              "layer_start": 0,
+              "layer_end": 4,
+              "kv_ownership": [
+                "kv0"
+              ],
+              "commitment": {
+                "resident_weight_bytes": 40,
+                "weight_stream_bytes_per_step": 20,
+                "kv_resident_bytes": 5,
+                "kv_read_bytes_per_step": 2,
+                "kv_write_bytes_per_step": 1,
+                "activation_traffic_bytes_per_step": 0,
+                "flops_per_step": 1
+              }
+            },
+            {
+              "id": "r1",
+              "incarnation": "rank-1",
+              "group_id": "g1",
+              "role": "decode",
+              "device_id": "d1",
+              "device_incarnation": "device-1",
+              "tp_rank": 0,
+              "pp_stage": 0,
+              "ep_rank": 0,
+              "layer_start": 0,
+              "layer_end": 4,
+              "kv_ownership": [
+                "kv1"
+              ],
+              "commitment": {
+                "resident_weight_bytes": 40,
+                "weight_stream_bytes_per_step": 20,
+                "kv_resident_bytes": 5,
+                "kv_read_bytes_per_step": 2,
+                "kv_write_bytes_per_step": 1,
+                "activation_traffic_bytes_per_step": 0,
+                "flops_per_step": 1
+              }
+            },
+            {
+              "id": "r2",
+              "incarnation": "rank-1",
+              "group_id": "g2",
+              "role": "decode",
+              "device_id": "d2",
+              "device_incarnation": "device-1",
+              "tp_rank": 0,
+              "pp_stage": 0,
+              "ep_rank": 0,
+              "layer_start": 0,
+              "layer_end": 4,
+              "kv_ownership": [
+                "kv2"
+              ],
+              "commitment": {
+                "resident_weight_bytes": 40,
+                "weight_stream_bytes_per_step": 20,
+                "kv_resident_bytes": 5,
+                "kv_read_bytes_per_step": 2,
+                "kv_write_bytes_per_step": 1,
+                "activation_traffic_bytes_per_step": 0,
+                "flops_per_step": 1
+              }
+            }
+          ]
+        },
+        "observed": {
+          "at": "2026-11-02T05:00:00Z",
+          "ttl_seconds": 60,
+          "epoch": 7,
+          "provenance": "synthetic-owned-cpu-fixture-not-hardware",
+          "visibility": [
+            "d0",
+            "d1",
+            "d2"
+          ],
+          "devices": [
+            {
+              "id": "d0",
+              "incarnation": "device-1",
+              "lifecycle": "active",
+              "health": "healthy",
+              "capacity_bytes": 200,
+              "free_bytes": 150,
+              "free_bytes_known": true
+            },
+            {
+              "id": "d1",
+              "incarnation": "device-1",
+              "lifecycle": "active",
+              "health": "healthy",
+              "capacity_bytes": 200,
+              "free_bytes": 150,
+              "free_bytes_known": true
+            },
+            {
+              "id": "d2",
+              "incarnation": "device-1",
+              "lifecycle": "active",
+              "health": "healthy",
+              "capacity_bytes": 200,
+              "free_bytes": 150,
+              "free_bytes_known": true
+            }
+          ],
+          "links": [
+            {
+              "from_device_id": "d0",
+              "from_device_incarnation": "device-1",
+              "to_device_id": "d1",
+              "to_device_incarnation": "device-1",
+              "kind": "fixture-link",
+              "state": "available",
+              "bytes_per_second": 1000000000
+            },
+            {
+              "from_device_id": "d0",
+              "from_device_incarnation": "device-1",
+              "to_device_id": "d2",
+              "to_device_incarnation": "device-1",
+              "kind": "fixture-link",
+              "state": "available",
+              "bytes_per_second": 1000000000
+            }
+          ]
+        },
+        "supported": [
+          {
+            "device_id": "d0",
+            "incarnation": "device-1",
+            "state": "supported"
+          },
+          {
+            "device_id": "d1",
+            "incarnation": "device-1",
+            "state": "supported"
+          },
+          {
+            "device_id": "d2",
+            "incarnation": "device-1",
+            "state": "supported"
+          }
+        ],
+        "available": [
+          {
+            "device_id": "d0",
+            "incarnation": "device-1",
+            "state": "available"
+          },
+          {
+            "device_id": "d1",
+            "incarnation": "device-1",
+            "state": "available"
+          },
+          {
+            "device_id": "d2",
+            "incarnation": "device-1",
+            "state": "available"
+          }
+        ]
+      },
+      "batches": [
+        1,
+        4
+      ],
+      "chunks": [
+        128
+      ],
+      "slots": [
+        1,
+        4
+      ],
+      "reservations": {
+        "r0": 0,
+        "r1": 0,
+        "r2": 0
+      }
+    }
+  ],
+  "observations": [
+    {
+      "config": {
+        "topology_id": "colocated",
+        "batch": 1,
+        "chunk": 128,
+        "slots": 1
+      },
+      "model_revision": "owned-fixture-model@1",
+      "backend": "fixture-cpu",
+      "kernel": "fixture-step-v1",
+      "layout_digest": "60a368605a7c3757565b161f81f30bad9601c736baee00730cfe4443701c9e1a",
+      "link_digest": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "observation_epoch": 7,
+      "workload": {
+        "prompt_tokens": 256,
+        "output_tokens": 64,
+        "concurrency": 1
+      },
+      "expires_at": "2026-11-02T05:01:00Z",
+      "decode": {
+        "key": {
+          "epoch": "7",
+          "backend": "fixture-cpu",
+          "kernel_path": "fixture-step-v1",
+          "batch_bucket": "1"
+        },
+        "kind": "decode",
+        "label": "synthetic-owned-cpu-fixture",
+        "bytes_per_step": 20,
+        "step_s": 0.01,
+        "measured_at": "2026-11-02T05:00:00Z",
+        "provenance": {
+          "path": "owned-fixture/not-a-physical-receipt",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "ttft_seconds": 0.1,
+      "useful_tokens_per_second": 70,
+      "transfer_critical_path_seconds": 0,
+      "peak_bytes": {
+        "r0": 80
+      }
+    },
+    {
+      "config": {
+        "topology_id": "colocated",
+        "batch": 4,
+        "chunk": 128,
+        "slots": 4
+      },
+      "model_revision": "owned-fixture-model@1",
+      "backend": "fixture-cpu",
+      "kernel": "fixture-step-v1",
+      "layout_digest": "60a368605a7c3757565b161f81f30bad9601c736baee00730cfe4443701c9e1a",
+      "link_digest": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
+      "observation_epoch": 7,
+      "workload": {
+        "prompt_tokens": 256,
+        "output_tokens": 64,
+        "concurrency": 4
+      },
+      "expires_at": "2026-11-02T05:01:00Z",
+      "decode": {
+        "key": {
+          "epoch": "7",
+          "backend": "fixture-cpu",
+          "kernel_path": "fixture-step-v1",
+          "batch_bucket": "4"
+        },
+        "kind": "decode",
+        "label": "synthetic-owned-cpu-fixture",
+        "bytes_per_step": 20,
+        "step_s": 0.01,
+        "measured_at": "2026-11-02T05:00:00Z",
+        "provenance": {
+          "path": "owned-fixture/not-a-physical-receipt",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "ttft_seconds": 0.1,
+      "useful_tokens_per_second": 90,
+      "transfer_critical_path_seconds": 0,
+      "peak_bytes": {
+        "r0": 80
+      }
+    },
+    {
+      "config": {
+        "topology_id": "pd-1p2d",
+        "batch": 1,
+        "chunk": 128,
+        "slots": 1
+      },
+      "model_revision": "owned-fixture-model@1",
+      "backend": "fixture-cpu",
+      "kernel": "fixture-step-v1",
+      "layout_digest": "a5a584ab9e16343d9807d34bb12896557d0ab9dbaab10143d63c34e9af533ab2",
+      "link_digest": "a8985d55e5077265b20f51ce16c2b419af14e3c1b3c0dcd0b11402b2f9b21381",
+      "observation_epoch": 7,
+      "workload": {
+        "prompt_tokens": 256,
+        "output_tokens": 64,
+        "concurrency": 1
+      },
+      "expires_at": "2026-11-02T05:01:00Z",
+      "decode": {
+        "key": {
+          "epoch": "7",
+          "backend": "fixture-cpu",
+          "kernel_path": "fixture-step-v1",
+          "batch_bucket": "1"
+        },
+        "kind": "decode",
+        "label": "synthetic-owned-cpu-fixture",
+        "bytes_per_step": 20,
+        "step_s": 0.02,
+        "measured_at": "2026-11-02T05:00:00Z",
+        "provenance": {
+          "path": "owned-fixture/not-a-physical-receipt",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "ttft_seconds": 0.2,
+      "useful_tokens_per_second": 40,
+      "transfer_critical_path_seconds": 0.01,
+      "peak_bytes": {
+        "r0": 80,
+        "r1": 80,
+        "r2": 80
+      }
+    },
+    {
+      "config": {
+        "topology_id": "pd-1p2d",
+        "batch": 4,
+        "chunk": 128,
+        "slots": 4
+      },
+      "model_revision": "owned-fixture-model@1",
+      "backend": "fixture-cpu",
+      "kernel": "fixture-step-v1",
+      "layout_digest": "a5a584ab9e16343d9807d34bb12896557d0ab9dbaab10143d63c34e9af533ab2",
+      "link_digest": "a8985d55e5077265b20f51ce16c2b419af14e3c1b3c0dcd0b11402b2f9b21381",
+      "observation_epoch": 7,
+      "workload": {
+        "prompt_tokens": 256,
+        "output_tokens": 64,
+        "concurrency": 4
+      },
+      "expires_at": "2026-11-02T05:01:00Z",
+      "decode": {
+        "key": {
+          "epoch": "7",
+          "backend": "fixture-cpu",
+          "kernel_path": "fixture-step-v1",
+          "batch_bucket": "4"
+        },
+        "kind": "decode",
+        "label": "synthetic-owned-cpu-fixture",
+        "bytes_per_step": 20,
+        "step_s": 0.02,
+        "measured_at": "2026-11-02T05:00:00Z",
+        "provenance": {
+          "path": "owned-fixture/not-a-physical-receipt",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "ttft_seconds": 0.2,
+      "useful_tokens_per_second": 140,
+      "transfer_critical_path_seconds": 0.01,
+      "peak_bytes": {
+        "r0": 80,
+        "r1": 80,
+        "r2": 80
+      }
+    }
+  ],
+  "pins": {
+    "topology_id": "",
+    "batch": 0,
+    "chunk": 0,
+    "slots": 0
+  },
+  "max_candidates": 64,
+  "max_duration_ms": 2000
+}

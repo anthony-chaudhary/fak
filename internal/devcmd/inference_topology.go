@@ -2,18 +2,23 @@ package devcmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/inferencetopology"
 )
 
 func RunInferenceTopology(stdout, stderr io.Writer, args []string) int {
+	if len(args) > 0 && args[0] == "search" {
+		return runInferenceTopologySearch(stdout, stderr, args[1:])
+	}
 	usage := func() {
-		fmt.Fprintln(stderr, "usage: fak-dev inference-topology <validate|analyze|inventory|render> --manifest PATH [--at YYYY-MM-DD] [--prose PATH] [--out PATH] [--json]")
+		fmt.Fprintln(stderr, "usage: fak-dev inference-topology <validate|analyze|inventory|render> --manifest PATH [--at YYYY-MM-DD] [--prose PATH] [--out PATH] [--json]; search --manifest PATH --at RFC3339 [--json]")
 	}
 	if len(args) == 0 {
 		usage()
@@ -88,6 +93,48 @@ func RunInferenceTopology(stdout, stderr io.Writer, args []string) int {
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "inference-topology: write: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runInferenceTopologySearch(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("inference-topology search", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	manifest := fs.String("manifest", "", "bounded observed topology search input (required)")
+	at := fs.String("at", "", "explicit RFC3339 observation evaluation time (required; not a hardware qualification)")
+	fs.Bool("json", false, "emit JSON (always enabled for search)")
+	if fs.Parse(args) != nil {
+		return 2
+	}
+	now, err := time.Parse(time.RFC3339Nano, *at)
+	if *manifest == "" || err != nil || fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "usage: fak-dev inference-topology search --manifest PATH --at RFC3339 [--json]")
+		return 2
+	}
+	f, err := os.Open(*manifest)
+	if err != nil {
+		fmt.Fprintf(stderr, "inference-topology: %v\n", err)
+		return 1
+	}
+	defer f.Close()
+	in, err := inferencetopology.DecodeRuntimeSearch(f)
+	if err != nil {
+		fmt.Fprintf(stderr, "inference-topology: %v\n", err)
+		return 1
+	}
+	report, err := inferencetopology.SearchRuntimeTopology(context.Background(), in, now)
+	if err != nil {
+		fmt.Fprintf(stderr, "inference-topology: %v\n", err)
+		return 1
+	}
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	if err = enc.Encode(report); err != nil {
+		fmt.Fprintf(stderr, "inference-topology: encode: %v\n", err)
+		return 1
+	}
+	if report.Chosen == nil {
 		return 1
 	}
 	return 0
