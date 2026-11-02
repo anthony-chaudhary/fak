@@ -30,6 +30,7 @@ type debugRetainedReleaseVars struct {
 }
 
 type debugVarsResponse struct {
+	RuntimeSnapshot  *debugRuntimeSnapshot      `json:"runtime_snapshot,omitempty"`
 	RetainedRelease  *debugRetainedReleaseVars  `json:"retained_release,omitempty"`
 	Gateway          debugGatewayVars           `json:"gateway"`
 	Runtime          debugRuntimeVars           `json:"runtime"`
@@ -725,6 +726,7 @@ func debugWatchdogVars() *resumemetrics.Snapshot {
 }
 
 func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsResponse {
+	capture := s.beginRuntimeSnapshot()
 	m := s.metrics
 	if m == nil {
 		m = newGatewayMetrics(now)
@@ -756,12 +758,12 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 
 	upstream := m.debugUpstreamVars()
 	upstream.ProviderExtraBodySet, upstream.ProviderExtraBodyKeys = debugProviderExtraBody(s.planner)
-	modelLoad := debugModelLoadProfile(s.modelLoadProfile())
+	modelLoad := debugModelLoadProfile(capture.profile)
 	startupReport := s.startupReportText()
 	adjudication := m.adjudicationSummary()
 	observation := s.buildObservationSnapshot(ctx, now, adjudication, c.VDSOHits, m.servedInlineSnapshot())
 
-	return debugVarsResponse{
+	response := debugVarsResponse{
 		Gateway: debugGatewayVars{
 			Up:               true,
 			Version:          s.version,
@@ -849,6 +851,8 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 			InKernelPressureTrim: debugInKernelPressureTrimRows(s.planner),
 		},
 	}
+	response.RuntimeSnapshot = s.finishRuntimeSnapshot(capture, &response)
+	return response
 }
 
 func debugProviderExtraBody(planner agent.Planner) (bool, []string) {
