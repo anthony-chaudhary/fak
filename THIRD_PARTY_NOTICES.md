@@ -1631,6 +1631,31 @@ The full Apache License, Version 2.0 text is reproduced in the
 Copyright (c) 2020-2023, NVIDIA CORPORATION. Licensed under the Apache License,
 Version 2.0.
 
+## vLLM bounded native CPU beam search
+
+`internal/beam/search.go` and its ordinary native CPU chat adapter in
+`internal/agent/inkernel_beam.go` adapt the live/completed beam lifecycle,
+top-2B expansion and generated-length score from vLLM revision
+`5c8ae7c74aaa99d1f7fbeea942fd7282e3413810`:
+
+- `vllm/entrypoints/generate/beam_search/offline.py`
+  (Git `e458ba99282ff683593e7ddbedf726d0c8612857`)
+- `vllm/entrypoints/generate/beam_search/utils.py`
+  (Git `d009008cb5a060939b26535b419ccfeea09d1673`)
+
+https://github.com/vllm-project/vllm/tree/5c8ae7c74aaa99d1f7fbeea942fd7282e3413810/vllm/entrypoints/generate/beam_search
+
+Copyright contributors to the vLLM project. SPDX-License-Identifier: Apache-2.0.
+Modified for FAK: native Go float64 finite log-softmax, stable deterministic
+ties, fixed request/work bounds, typed nonstreaming CPU selection, fresh
+owned Session replay and all-or-error ranked publication. No vLLM device
+execution, KV-sharing efficiency or model qualification is claimed.
+
+The pinned repository has no root NOTICE. Its root Apache-2.0 LICENSE
+(Git `261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64`) is reproduced byte-exactly
+in the existing TensorFold license section of this file and also applies here.
+See `internal/beam/README.md` for the consumer, adaptations and execution debt.
+
 ## vLLM token-weighted prefix cache telemetry
 
 `internal/gateway/serving_metrics.go` adapts the token-unit numerator/denominator

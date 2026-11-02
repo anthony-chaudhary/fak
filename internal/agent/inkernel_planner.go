@@ -466,6 +466,9 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 		return nil, err
 	}
 	sp := applySampleOpts(opts...)
+	if sp.NativeBeamSearch != nil {
+		return nil, fmt.Errorf("%w: streaming is not supported", ErrNativeBeamSearchUnsupported)
+	}
 	if err := p.ValidateSamplingSeed(sp.Seed); err != nil {
 		return nil, err
 	}
@@ -2196,6 +2199,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	offered := offeredToolsFor(ctx, tools)
 	defer func() { err = p.executionDeadlineError(ctx, err) }()
 	sp := applySampleOpts(opts...)
+	if sp.NativeBeamSearch != nil {
+		return p.completeNativeBeamSearch(ctx, messages, tools, sp, opts...)
+	}
 	if err := p.ValidateSamplingSeed(sp.Seed); err != nil {
 		return nil, err
 	}

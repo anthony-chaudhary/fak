@@ -461,6 +461,9 @@ type ChatRequest struct {
 
 // FakRequestExt is the opt-in request half of fak's response extension.
 type FakRequestExt struct {
+	// BeamSearch selects bounded, nonstreaming native CPU search on the chat route.
+	BeamSearch *agent.NativeBeamSearchParams `json:"beam_search,omitempty"`
+
 	NativeInferenceReceipt bool `json:"native_inference_receipt,omitempty"`
 	NativeDecodeTokenIDs   bool `json:"native_decode_token_ids,omitempty"`
 	// NativeDecodeTop5 asks /v1/completions for per-generated-token top-5
@@ -743,6 +746,8 @@ type CompletionStreamChoice struct {
 // admissions plus the adjudication of every tool_call the model proposed,
 // including the dropped ones.
 type FakExt struct {
+	BeamSearch *NativeBeamSearchWireReceipt `json:"beam_search,omitempty"`
+
 	Adjudications    []ToolAdjudication `json:"adjudications,omitempty"`
 	ResultAdmissions []ResultAdmission  `json:"result_admissions,omitempty"`
 	// Redactions are the OUTBOUND span-redactions the rung-5 wire point applied to
