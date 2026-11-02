@@ -30,14 +30,26 @@ func runPerf(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("perf", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	n := fs.Int("n", perfledger.DefaultRecent, "fold the last N served turns (max 1024)")
-	asJSON := fs.Bool("json", false, "emit the full fak.gateway.perf-report.v1 JSON (summary + records) instead of the one-line summary")
+	asJSON := fs.Bool("json", false, "emit fak.gateway.perf-report.v1 JSON (summary + records), or fak.bench-token-comparison.v1 with comparison flags")
 	ledger := fs.String("ledger", "", "perf ledger path (default: .fak/nightrun/gateway-perf.jsonl under the nightrun ledger root)")
 	baseURL := fs.String("url", "", "read a live server's /v1/fak/perf/recent instead of the ledger, e.g. http://127.0.0.1:8080")
+	compareLeft := fs.String("compare-left", "", "compare complete token digests for this request ID and --compare-right within the selected window")
+	compareRight := fs.String("compare-right", "", "second request ID for explicit token digest comparison")
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
 	if *n <= 0 {
 		fmt.Fprintln(stderr, "fak perf: --n must be positive")
+		return 2
+	}
+	compare := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "compare-left" || f.Name == "compare-right" {
+			compare = true
+		}
+	})
+	if compare && (strings.TrimSpace(*compareLeft) == "" || strings.TrimSpace(*compareRight) == "" || *compareLeft == *compareRight || fs.NArg() != 0) {
+		fmt.Fprintln(stderr, "fak perf: comparison requires two distinct nonempty request IDs and no positional arguments")
 		return 2
 	}
 
@@ -62,6 +74,36 @@ func runPerf(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
+	if compare {
+		if strings.TrimSpace(*baseURL) != "" {
+			sourceURL, err := url.Parse(strings.TrimSpace(*baseURL))
+			if err != nil {
+				fmt.Fprintf(stderr, "fak perf: %v\n", err)
+				return 1
+			}
+			sourceURL.User, sourceURL.RawQuery, sourceURL.Fragment = nil, "", ""
+			sourceURL.Path = strings.TrimRight(sourceURL.Path, "/") + "/v1/fak/perf/recent"
+			rep.Source = sourceURL.String()
+		}
+		source := rep.Source
+		rep = perfledger.BuildReport(rep.Records, *n, rep.Window.Capped, rep.Window.DroppedWrites)
+		rep.Source = source
+		result := perfledger.CompareBenchTokens(rep, *compareLeft, *compareRight)
+		if *asJSON {
+			enc := json.NewEncoder(stdout)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(result); err != nil {
+				fmt.Fprintf(stderr, "fak perf: %v\n", err)
+				return 1
+			}
+		} else {
+			fmt.Fprintf(stdout, "token_identity=%s reason=%s left=%q right=%q source=%q window=%d capped=%t\n", result.Outcome, result.Reason, result.LeftRequestID, result.RightRequestID, result.Source, result.Window.Requests, result.Window.Capped)
+		}
+		if result.Outcome != perfledger.BenchTokensEqual {
+			return 1
+		}
+		return 0
+	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")

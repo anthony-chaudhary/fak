@@ -15,6 +15,7 @@ import (
 func TestCUDAKV16PrefillGQA4TypedSelection(t *testing.T) {
 	const macro = "-DFAK_CUDA_KV16_PREFILL_GQA4_QUALIFICATION"
 	args := []string{"-O3", "-DFAK_CUDA_Q2K_MMQ_PREFILL", "-DFAK_CUDA_Q56K_MMVQ_QUALIFICATION", "-DFAK_CUDA_TOKENOMOS_STAGING_QUALIFICATION", "-DFAK_CUDA_PAGED_KV_COPY_QUALIFICATION"}
+	originalArgs := slices.Clone(args)
 	for _, enabled := range []bool{false, true} {
 		ctx := context.WithValue(context.Background(), cudaKV16PrefillGQA4Key{}, enabled)
 		got, err := cudaKV16PrefillGQA4Flags(ctx, args, nil)
@@ -25,7 +26,7 @@ func TestCUDAKV16PrefillGQA4TypedSelection(t *testing.T) {
 		if err != nil || !reflect.DeepEqual(got, want) {
 			t.Fatalf("enabled=%v flags=%v err=%v", enabled, got, err)
 		}
-		if len(args) != 5 || args[1] != "-DFAK_CUDA_Q2K_MMQ_PREFILL" || args[2] != "-DFAK_CUDA_Q56K_MMVQ_QUALIFICATION" || args[3] != "-DFAK_CUDA_TOKENOMOS_STAGING_QUALIFICATION" || args[4] != "-DFAK_CUDA_PAGED_KV_COPY_QUALIFICATION" {
+		if !slices.Equal(args, originalArgs) {
 			t.Fatal("mutated peer flags")
 		}
 		for _, key := range []string{"NVCC_PREPEND_FLAGS", "NVCC_APPEND_FLAGS", "Nvcc_Append_Flags"} {

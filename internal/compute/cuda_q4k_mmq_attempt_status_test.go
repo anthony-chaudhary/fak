@@ -155,7 +155,7 @@ static std::pair<int,int> stream_k_interval(int tiles, int kblocks, int grid, in
 	if err != nil {
 		t.Fatalf("MMQ attempted status: %v\n%s", err, out)
 	}
-	if string(out) != "geometry source counts: one-unit/132SM main CTA 132->1, fixup bytes 540672->0; GPU timing unmeasured\nPASS 26 status + 12 geometry actual-source MMQ cases; CUDA/device unrun\n" {
+	if strings.ReplaceAll(string(out), "\r\n", "\n") != "geometry source counts: one-unit/132SM main CTA 132->1, fixup bytes 540672->0; GPU timing unmeasured\nPASS 26 status + 12 geometry actual-source MMQ cases; CUDA/device unrun\n" {
 		t.Fatalf("incomplete host witness: %s", out)
 	}
 	t.Log(strings.TrimSpace(string(out)))

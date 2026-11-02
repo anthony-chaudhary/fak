@@ -106,6 +106,32 @@ func validateGoTestTimeout(ctx context.Context, now time.Time) time.Duration {
 	return max((remaining - margin).Truncate(time.Second), time.Second)
 }
 
+type validateVetCoverage struct {
+	dir     string
+	wsl     bool
+	targets []string
+}
+
+func (v *validateVetCoverage) coversCompileTests(testRun, dir, goos string, wslTests, wslWorkspace bool, targets []string) bool {
+	if v == nil || testRun != "^$" || dir == "" || dir != v.dir || len(targets) == 0 {
+		return false
+	}
+	// Native vet cannot cover a test workspace later rematerialized in WSL.
+	if !wslWorkspace && goos == "windows" && wslTests || v.wsl != wslWorkspace {
+		return false
+	}
+	covered := make(map[string]bool, len(v.targets))
+	for _, target := range v.targets {
+		covered[target] = true
+	}
+	for _, target := range targets {
+		if target == "" || !covered[target] {
+			return false
+		}
+	}
+	return true
+}
+
 // validateTestArgs builds the isolated go test argv; timeout 0 omits -timeout.
 func validateTestArgs(testRun string, timeout time.Duration, targets []string) []string {
 	// Tests require filesystem-valid source paths from runtime.Caller(0) (e.g. for

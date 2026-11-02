@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -73,6 +74,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	repo := fs.String("repo", ".", "repo path (default: cwd)")
 	remote := fs.String("remote", "origin", "remote name")
 	branch := fs.String("branch", "", "branch to sync (default: current branch)")
+	sourceCommit := fs.String("source-commit", "", "push: exact ancestor commit for an explicit handoff/... branch; never grants publication authority")
 	fetch := fs.Bool("fetch", false, "git fetch <remote> <branch> before assessing")
 	fetchDepth := fs.Int("fetch-depth", 0, "check/apply/reconcile: bounded history depth, not a byte cap; requires fetch and base/target pins")
 	fetchBase := fs.String("fetch-base", "", "bounded fetch: required original full merge-base object ID")
@@ -113,6 +115,22 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	if err := fs.Parse(argv); err != nil {
 		return syncExitUsage
 	}
+	sourceSpecified := false
+	fs.Visit(func(f *flag.Flag) { sourceSpecified = sourceSpecified || f.Name == "source-commit" })
+	selectedBranch := ""
+	if sourceSpecified {
+		if command != "push" {
+			return refuseSyncPushSelection(stdout, stderr, *asJSON, "SOURCE_COMMIT_UNSUPPORTED", "--source-commit is push-only")
+		}
+		var err error
+		selectedBranch, err = syncHandoffBranch(*branch)
+		if err != nil {
+			return refuseSyncPushSelection(stdout, stderr, *asJSON, "SOURCE_COMMIT_UNSUPPORTED", err.Error())
+		}
+		if !syncFullCommitID(*sourceCommit) {
+			return refuseSyncPushSelection(stdout, stderr, *asJSON, "SOURCE_COMMIT_INVALID", "source must be one complete lowercase Git object ID, not a ref or revision expression")
+		}
+	}
 	if *noFetchOnFailure && command != "push" {
 		fmt.Fprintln(stderr, "--no-fetch-on-failure requires push")
 		return syncExitUsage
@@ -152,13 +170,20 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak sync: capture push source: %v\n", err)
 			return syncExitInternal
 		}
-		syncDuplicateFixAdvisory(stderr, repoPath, *remote, *branch)
+		pushBranch := *branch
+		if sourceSpecified {
+			if reason, err := validateSyncPushSource(repoPath, *sourceCommit, strings.TrimSpace(sourceSHA), selectedBranch); err != nil {
+				return refuseSyncPushSelection(stdout, stderr, *asJSON, reason, err.Error())
+			}
+			sourceSHA, pushBranch = *sourceCommit, selectedBranch
+		}
+		syncDuplicateFixAdvisory(stderr, repoPath, *remote, pushBranch)
 		res, err := syncSafePush(context.Background(), safesync.PushOptions{
 			Repo:             repoPath,
 			Remote:           *remote,
-			Branch:           *branch,
+			Branch:           pushBranch,
 			SourceRef:        strings.TrimSpace(sourceSHA),
-			TargetRef:        syncTargetRef(*branch),
+			TargetRef:        syncTargetRef(pushBranch),
 			MaxRetries:       *retries,
 			NoFetchOnFailure: *noFetchOnFailure,
 			VelocityBudget:   *budget,
@@ -508,6 +533,80 @@ func outputSyncResult(stdout, stderr io.Writer, command string, asJSON bool, inf
 	return syncExitRefused
 }
 
+// syncHandoffBranch confines the optional source selector to topic handoffs.
+// Trunk hooks still have HEAD-based rungs; selected-source trunk publication is
+// deliberately unsupported until every such guard is independently source-bound.
+func syncHandoffBranch(raw string) (string, error) {
+	if raw == "" || raw != strings.TrimSpace(raw) {
+		return "", fmt.Errorf("source selection requires an explicit handoff/... branch")
+	}
+	branch := strings.TrimPrefix(raw, "refs/heads/")
+	if !strings.HasPrefix(branch, "handoff/") || len(branch) == len("handoff/") {
+		return "", fmt.Errorf("source selection supports only handoff/... branches, not trunk or other destinations")
+	}
+	return branch, nil
+}
+
+func syncFullCommitID(value string) bool {
+	if len(value) != 40 && len(value) != 64 {
+		return false
+	}
+	for _, c := range value {
+		if !(c >= '0' && c <= '9') && !(c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// validateSyncPushSource is read-only. No fetch, replacement-object view,
+// checkout or fallback may turn an unproved source into a publication request.
+func validateSyncPushSource(repo, source, capturedHead, branch string) (string, error) {
+	if !syncFullCommitID(capturedHead) {
+		return "SOURCE_COMMIT_UNAVAILABLE", fmt.Errorf("captured HEAD is not a complete object ID")
+	}
+	if _, err := gitOut(repo, "check-ref-format", "refs/heads/"+branch); err != nil {
+		return "SOURCE_COMMIT_INVALID", fmt.Errorf("handoff branch is not a valid literal Git branch")
+	}
+	globals := []string{"--no-lazy-fetch", "--no-replace-objects"}
+	read := func(_ bool, args ...string) (string, error) {
+		out, err := gitOut(repo, append(append([]string(nil), globals...), args...)...)
+		return strings.TrimSpace(out), err
+	}
+	if _, err := read(false, "version"); err != nil {
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 129 {
+			return "SOURCE_COMMIT_UNAVAILABLE", fmt.Errorf("read-only object validation is unavailable")
+		}
+		// Older Git lacks --no-lazy-fetch. Reuse the existing native proof:
+		// no promisor config/pack means these object reads cannot hydrate.
+		globals = globals[1:]
+		if !prepushCannotLazyFetch(read, repo) {
+			return "SOURCE_COMMIT_UNAVAILABLE", fmt.Errorf("Git cannot disable lazy fetch for this repository; no publication attempted")
+		}
+	}
+	kind, err := read(true, "cat-file", "-t", source)
+	if err != nil || strings.TrimSpace(kind) != "commit" {
+		return "SOURCE_COMMIT_UNAVAILABLE", fmt.Errorf("selected source is not a readable commit object")
+	}
+	if _, err := read(false, "merge-base", "--is-ancestor", source, capturedHead); err != nil {
+		return "SOURCE_COMMIT_NOT_ANCESTOR", fmt.Errorf("selected source is not proved an ancestor of captured HEAD; no publication attempted")
+	}
+	return "", nil
+}
+
+func refuseSyncPushSelection(stdout, stderr io.Writer, asJSON bool, reason, detail string) int {
+	if asJSON {
+		if err := writeIndentedJSON(stdout, safesync.PushResult{Reason: reason, Detail: detail}); err != nil {
+			fmt.Fprintf(stderr, "fak sync: %v\n", err)
+			return syncExitInternal
+		}
+	} else {
+		fmt.Fprintf(stderr, "fak sync: %s: %s\n", reason, detail)
+	}
+	return syncExitRefused
+}
+
 func syncTargetRef(branch string) string {
 	branch = strings.TrimSpace(branch)
 	if branch == "" {
@@ -522,6 +621,7 @@ func syncUsage(w io.Writer) {
                         [--recheck-path PATH ...] [--resume-token TOKEN]
   fak sync apply     [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
   fak sync push      [--repo DIR] [--remote origin] [--branch B] [--retries N] [--budget 5s] [--json]
+                        [--source-commit FULL_OID --branch handoff/NAME]
   fak sync drain     [--repo DIR] [--remote origin] [--branch B] [--queue-file F] [--budget D] [--json]
   fak sync reconcile [--repo DIR] [--remote origin] [--branch B] [--goal G] [--apply] [--fetch] [--json] [--emit-packet] [--execute]
   fak sync packet    [--repo DIR] [--remote origin] [--branch B] [--fetch] [--json]
@@ -538,6 +638,12 @@ and retries a TRANSIENT non-fast-forward race (a peer landed between fetch and p
 but HEAD already contains origin); on a genuine behind/diverged state it stops with a
 clear integrate-then-push next step. Its velocity evidence scores only a published
 safe push against the declared --budget; refusals/errors retain timing but are UNSCORED.
+The optional --source-commit pins a readable full commit that is already an ancestor
+of the captured HEAD, and requires an explicit handoff/... destination (the fully
+qualified refs/heads/handoff/... spelling is also accepted). It does not change HEAD,
+ownership, hook settings or authorization. Non-HEAD trunk publication is unsupported;
+omitting the selector keeps the existing captured-HEAD behavior. Refusals never fall
+back to HEAD, and an existing publication denial still requires its original approval.
 apply uses only git merge --ff-only
 --no-autostash --no-overwrite-ignore against the immutable SHA that check assessed;
 a last-moment worktree change is a refusal, never pre-cleaned. drain is the release valve for commits stranded by

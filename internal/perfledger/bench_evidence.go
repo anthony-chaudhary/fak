@@ -1,4 +1,4 @@
-// Adapted from TensorFold tools/bench_evidence.py at a6aa4782bf4ffe87ccee4a0a5cbf2efb2dd01cba.
+// Adapted from TensorFold tools/bench_evidence.py at 9e8c368b0b4c2c7892a0c9f0f302d7c164016209.
 // Copyright 2026 TensorFold contributors. Apache-2.0; see THIRD_PARTY_NOTICES.md.
 // Changed: Go receipt types and strict JSON count parsing.
 package perfledger
@@ -19,10 +19,15 @@ type BenchEvidence struct {
 	CacheState   string `json:"cache_state"`
 	Complete     bool   `json:"complete"`
 	TokenSHA     string `json:"token_sha,omitempty"`
+	TokenSHA256  string `json:"token_sha256,omitempty"`
 	OutputSHA256 string `json:"output_sha256,omitempty"`
 }
 
 func NewBenchEvidence(usageRaw []byte, content, reasoning, tokenSHA string, complete bool) *BenchEvidence {
+	return NewBenchEvidenceWithTokenSHA256(usageRaw, content, reasoning, tokenSHA, "", complete)
+}
+
+func NewBenchEvidenceWithTokenSHA256(usageRaw []byte, content, reasoning, tokenSHA, tokenSHA256 string, complete bool) *BenchEvidence {
 	complete = complete && len(content) <= MaxBenchEvidenceOutputBytes && len(reasoning) <= MaxBenchEvidenceOutputBytes-len(content)
 	e := &BenchEvidence{CacheState: "unverified", Complete: complete}
 	var usage struct {
@@ -51,6 +56,9 @@ func NewBenchEvidence(usageRaw []byte, content, reasoning, tokenSHA string, comp
 	}
 	if validBenchTokenSHA(tokenSHA) {
 		e.TokenSHA = tokenSHA
+	}
+	if len(tokenSHA256) == 64 && validBenchTokenSHA(tokenSHA256) && (e.TokenSHA == "" || tokenSHA256[:12] == e.TokenSHA[:12]) {
+		e.TokenSHA256 = tokenSHA256
 	}
 	contentDigest := sha256.Sum256([]byte(content))
 	reasoningDigest := sha256.Sum256([]byte(reasoning))

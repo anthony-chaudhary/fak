@@ -212,7 +212,7 @@ func TestQuantKindHasResidentKernelMetalSet(t *testing.T) {
 //
 // fak-test:runtime fast est=1ms
 func TestQuantCapabilityBoundedTurnOnMetalSupportedBands(t *testing.T) {
-	m := quantFixture(t, []struct {
+	kinds := []struct {
 		kind  kQuantKind
 		n     int
 		bytes int
@@ -222,7 +222,8 @@ func TestQuantCapabilityBoundedTurnOnMetalSupportedBands(t *testing.T) {
 		{kindQ5K, 4, 4096},
 		{kindQ8_0, 1, 1024},
 		{kindQ4_0, 1, 512},
-	})
+	}
+	m := quantFixture(t, kinds)
 	if ref := m.RefuseUnsupportedQuants("metal"); ref != nil {
 		t.Fatalf("RefuseUnsupportedQuants(metal) = %v, want nil (every retained kind is device-resident or bounded host)", ref)
 	}
@@ -230,7 +231,7 @@ func TestQuantCapabilityBoundedTurnOnMetalSupportedBands(t *testing.T) {
 	if !receipt.Bounded {
 		t.Fatalf("metal receipt Bounded = false, want true; unsupported=%+v", receipt.Unsupported)
 	}
-	if len(receipt.Rows) != 5 {
-		t.Fatalf("receipt has %d rows, want 5: %+v", len(receipt.Rows), receipt.Rows)
+	if len(receipt.Rows) != len(kinds) {
+		t.Fatalf("receipt has %d rows, want one per fixture kind (%d): %+v", len(receipt.Rows), len(kinds), receipt.Rows)
 	}
 }

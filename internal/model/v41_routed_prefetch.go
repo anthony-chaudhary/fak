@@ -56,12 +56,25 @@ func (s *Session) readAheadV41RoutedPicks(r *pagedRing, names [][3]string) {
 	for _, triple := range names {
 		for _, name := range triple {
 			w, ok := s.resolveExpertWeight(name)
-			if !ok || w.ck == nil || (w.ck.dt != compute.Q2_K && w.ck.dt != compute.Q3_K) ||
+			if !ok || w.ck == nil || !expertReadAheadDtypeEnabled(w.ck.dt) ||
 				!compute.BackendSupportsDeviceWeightDtype(s.Backend, w.ck.dt) ||
 				s.M.has(name[:len(name)-len("weight")]+"bias") {
 				return
 			}
 		}
+	}
+	if expertMappedReadaheadQualification {
+		var misses []string
+		for _, triple := range names {
+			for _, name := range triple {
+				w, _ := s.resolveExpertWeight(name)
+				if !r.isResident(w.ck.key) {
+					misses = append(misses, name)
+				}
+			}
+		}
+		s.M.expertCheckpoint.readAheadCoalesced(misses)
+		return
 	}
 	seen := make(map[string]bool, 3*len(names))
 	for _, triple := range names {

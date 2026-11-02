@@ -103,7 +103,7 @@ func TestCUDAQ8ActivationWarpReduction(t *testing.T) {
 		t.Fatalf("actual Q8 reduction/dispatch: %v\n%s", err, out)
 	}
 	const want = "PASS actual Q8 block32 warp max/dispatch and retained shared fallback; CUDA/device/performance unrun\n"
-	if string(out) != want {
+	if strings.ReplaceAll(string(out), "\r\n", "\n") != want {
 		t.Fatalf("incomplete witness: %s", out)
 	}
 	t.Log(strings.TrimSpace(string(out)))

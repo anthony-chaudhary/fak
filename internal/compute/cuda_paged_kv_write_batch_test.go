@@ -61,22 +61,25 @@ func TestPagedKVAppendBatchesMappingAndFailureOrder(t *testing.T) {
 		}
 	})
 	t.Run("ragged noncontiguous and 64-page cap", func(t *testing.T) {
+		const startRow, totalRows, pageRows = 14, 1050, 16
+		firstRows := cudaPagedKVWriteMaxPages*pageRows - startRow
+		remainingRows := totalRows - firstRows
 		var got []submission
-		pagedKVAppendBatches(14, 1050, 16, func(int) bool { return false },
+		pagedKVAppendBatches(startRow, totalRows, pageRows, func(int) bool { return false },
 			func(blk int) int32 { return int32(200 - blk) },
 			func(ids []int32, src, off, rows int) {
 				got = append(got, submission{append([]int32(nil), ids...), src, off, rows})
 			})
-		if len(got) != 2 || len(got[0].ids) != 64 || len(got[1].ids) != 3 ||
-			got[0].src != 0 || got[0].off != 14 || got[0].rows != 1010 ||
-			got[1].src != 1010 || got[1].off != 0 || got[1].rows != 40 {
+		if len(got) != 2 || len(got[0].ids) != cudaPagedKVWriteMaxPages || len(got[1].ids) != (remainingRows+pageRows-1)/pageRows ||
+			got[0].src != 0 || got[0].off != startRow || got[0].rows != firstRows ||
+			got[1].src != firstRows || got[1].off != 0 || got[1].rows != remainingRows {
 			t.Fatalf("unexpected groups: %+v", got)
 		}
 		for _, g := range got {
 			for row := 0; row < g.rows; row++ {
-				logical := 14 + g.src + row
-				physical := g.ids[(g.off+row)/16]
-				if physical != int32(200-logical/16) || (g.off+row)%16 != logical%16 {
+				logical := startRow + g.src + row
+				physical := g.ids[(g.off+row)/pageRows]
+				if physical != int32(200-logical/pageRows) || (g.off+row)%pageRows != logical%pageRows {
 					t.Fatalf("row %d mapped to page %d", logical, physical)
 				}
 			}

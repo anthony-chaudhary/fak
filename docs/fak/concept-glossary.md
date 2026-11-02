@@ -2119,8 +2119,7 @@ A compile-time opt-in CUDA causal prefill kernel that tiles up to four query pos
 
 Experimental default-off host B=1 Q8-KV attention consumer. It reconstructs one bounded F32 head-row tile per worker from packed codes and block scales, shares that tile across grouped query heads, and uses existing native dot, softmax and value kernels without expanding full-layer K/V panels. The separately guarded tokenHiddenQ branch selects it only for admitted contiguous host Q8 cache geometry.
 
-**Distinct from:** Unlike attnDecodeBatch, this consumer serves one eligible host Q8 sequence and decodes bounded per-worker head tiles instead of reading reconstructed full-layer K/V. It is a concrete implementation of scaled-dot-product attention, not the general Attention token-mixer, a CUDA kernel, query quantization or the held materialization-once candidate. FAK_QATTN_Q8_PACKED=1 is an initialization-time experimental opt-in; QSA and serial precedence and original fallback remain. Scoped parity and allocation observations do not establish unaffected-path latency neutrality, performance promotion or default enablement.
-
+**Distinct from:** Unlike attnDecodeBatch, this consumer serves one eligible host Q8 sequence and decodes bounded per-worker head tiles instead of reading reconstructed full-layer K/V. It is a concrete implementation of scaled-dot-product attention, not the general Attention token-mixer, a CUDA kernel, query quantization or the held materialization-once candidate. The fak_qattn_q8_packed_qualification build tag is the only experimental opt-in; the retired FAK_QATTN_Q8_PACKED environment variable has no effect. Ordinary builds remain off; QSA and serial precedence and original fallback remain. Scoped parity and allocation observations do not establish unaffected-path latency neutrality, performance promotion or default enablement.
 
 ### DSpark GGUF attention tensor roles
 

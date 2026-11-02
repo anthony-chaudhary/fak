@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -41,7 +42,12 @@ func TestExpertCheckpointReadAheadEligibilityAndFailureAccounting(t *testing.T) 
 	}{
 		{name: "q2", quant: ExpertCheckpointQ2K, supported: true, hint: true},
 		{name: "q3", quant: ExpertCheckpointQ3K, supported: true, hint: true},
-		{name: "q4", quant: ExpertCheckpointQ4K, supported: true},
+		{name: "q4", quant: ExpertCheckpointQ4K, supported: true, hint: expertMappedReadaheadQualification},
+		{name: "q5", quant: ExpertCheckpointQ5K, supported: true, hint: expertMappedReadaheadQualification},
+		{name: "q6", quant: ExpertCheckpointQ6K, supported: true, hint: expertMappedReadaheadQualification},
+		{name: "iq2_xxs", quant: ExpertCheckpointIQ2XXS, supported: true, hint: expertMappedReadaheadQualification},
+		{name: "iq2_xs", quant: ExpertCheckpointIQ2XS, supported: true, hint: expertMappedReadaheadQualification},
+		{name: "iq1_m", quant: ExpertCheckpointIQ1M, supported: true, hint: expertMappedReadaheadQualification},
 		{name: "retained", quant: ExpertCheckpointQ2K, budget: 4096, supported: true},
 		{name: "pagecache", quant: ExpertCheckpointQ3K, page: true, supported: true},
 		{name: "overlay", quant: ExpertCheckpointQ2K, overlay: true, supported: true},
@@ -223,7 +229,17 @@ func TestV41RoutedLayerReadAheadSelectedPayloads(t *testing.T) {
 					t.Fatal("hint changed routed arithmetic")
 				}
 			}
-			if len(events) < wantHints || (wantHints > 0 && !reflect.DeepEqual(events[:wantHints], expected)) {
+			if expertMappedReadaheadQualification && len(events) >= wantHints {
+				// The selected collector sorts by shard/offset; all selected hints
+				// must still precede the first demand, with the same payload set.
+				got := append([]string(nil), events[:wantHints]...)
+				want := append([]string(nil), expected...)
+				slices.Sort(got)
+				slices.Sort(want)
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("selected hint set differs: got=%v want=%v", got, want)
+				}
+			} else if len(events) < wantHints || (wantHints > 0 && !reflect.DeepEqual(events[:wantHints], expected)) {
 				t.Fatalf("hints did not precede demand reads: events=%v want prefix=%v", events, expected)
 			}
 			st := tier.Stats()

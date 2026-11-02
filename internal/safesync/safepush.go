@@ -95,6 +95,8 @@ type PushResult struct {
 	Attempts    int              `json:"attempts"`
 	Branch      string           `json:"branch,omitempty"`
 	Remote      string           `json:"remote,omitempty"`
+	SourceRef   string           `json:"source_ref,omitempty"` // exact request, not a qualification receipt
+	TargetRef   string           `json:"target_ref,omitempty"`
 	Reason      string           `json:"reason,omitempty"`     // "" | one of the PushReason* constants
 	Divergence  string           `json:"divergence,omitempty"` // last classified divergence on a non-ff
 	Detail      string           `json:"detail,omitempty"`
@@ -187,7 +189,13 @@ func SafePush(ctx context.Context, opts PushOptions) (res PushResult, err error)
 	if max <= 0 {
 		max = 3
 	}
-	res = PushResult{Branch: branch, Remote: remote}
+	res = PushResult{Branch: branch, Remote: remote, SourceRef: strings.TrimSpace(opts.SourceRef)}
+	if res.SourceRef != "" {
+		res.TargetRef = strings.TrimSpace(opts.TargetRef)
+		if res.TargetRef == "" {
+			res.TargetRef = "refs/heads/" + branch
+		}
+	}
 	remoteRef := remote + "/" + branch
 	pushArgs := safePushArgs(remote, branch, opts.SourceRef, opts.TargetRef)
 	compareRef := safePushCompareRef(opts.SourceRef)

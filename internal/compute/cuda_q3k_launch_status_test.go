@@ -94,7 +94,7 @@ func TestCUDAQ3KImmediateLaunchStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("immediate-launch status: %v\n%s", err, out)
 	}
-	if string(out) != "PASS 10 actual-source immediate-launch status cases; CUDA/device unrun\n" {
+	if strings.ReplaceAll(string(out), "\r\n", "\n") != "PASS 10 actual-source immediate-launch status cases; CUDA/device unrun\n" {
 		t.Fatalf("incomplete host witness: %s", out)
 	}
 	t.Log(strings.TrimSpace(string(out)))

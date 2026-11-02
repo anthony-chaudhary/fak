@@ -906,6 +906,30 @@ All destructive or administrative operations fail open and default to dry-run or
   - `--worktree-name <name>`: Local worktree name for ownership verification.
   - `--root <dir>`: Repository root.
 
+## `fak perf`
+
+Read the latest serving performance records from the local ledger or a live server:
+
+```text
+fak perf [--ledger PATH | --url URL] [--n 50] [--json]
+fak perf --compare-left REQUEST_ID --compare-right REQUEST_ID [--ledger PATH | --url URL] [--n 50] [--json]
+```
+
+The ordinary report remains unchanged. Explicit comparison selects two distinct,
+unique request IDs within the selected recent window (at most 1024 records).
+Both records must report successful HTTP status, no error, complete evidence, and
+valid full token SHA-256 digests. Any supplied legacy digest must agree with the
+full digest. Missing or duplicate IDs, failed or incomplete requests, missing or
+invalid hashes, and conflicting evidence produce `unverified`; valid unequal
+full hashes produce `different`. Short diagnostic prefixes and output text
+fingerprints never establish token identity.
+
+Comparison exits 0 only for `equal`, 1 for `different` or `unverified`, and 2 for
+invalid selection flags. JSON uses `fak.bench-token-comparison.v1` and retains
+the source, selected window, request IDs, outcome, and reason. Uniqueness applies
+only inside that window. Equality describes recorded token digests; it does not
+establish matching tokenizers, models, workloads, output quality, or performance.
+
 ## `fak performance-rsi-scorecard`
 
 Scores and composes versioned empirical evidence for the Performance Recursive Self-Improvement (RSI) loop toward the unsaturated 100x target multiplier.
