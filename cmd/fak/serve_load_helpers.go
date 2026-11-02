@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -518,6 +519,32 @@ func loadServeInKernelModelPlaced(modelPath string, backend compute.Backend, cpu
 	return m, q4k, prof, ph
 }
 
+// serveQuantBackendName maps the resolved serve backend onto the post-load quant-capability
+// census axis (#12983): a nil backend is the Apple-Silicon Metal-native load arm, any registered
+// device backend serves its k-quant bulk through the bounded host routes.
+func serveQuantBackendName(backend compute.Backend) string {
+	if backend == nil {
+		return "metal"
+	}
+	return "cpu"
+}
+
+// serveRefuseUnsupportedQuants runs the post-load quant-capability census on a freshly loaded
+// model and returns the typed refusal when the artifact retains a quant kind with no active
+// backend kernel and no bounded host route. It returns a literal nil (not the concrete
+// *fakmodel.LoadQuantCapabilityRefusal pointer) so a bounded load never surfaces a non-nil error
+// interface wrapping a nil pointer.
+func serveRefuseUnsupportedQuants(mm *fakmodel.Model, backend compute.Backend) error {
+	if mm == nil {
+		return nil
+	}
+	refusal := mm.RefuseUnsupportedQuants(serveQuantBackendName(backend))
+	if refusal == nil {
+		return nil
+	}
+	return refusal
+}
+
 // loadServeInKernelModelPlacedErr is loadServeInKernelModelPlaced with the fatal must() contract
 // replaced by returned errors, for the fit-commit back-off driver. Plan carries the memory plan
 // the attempt planned against (the last computed one on failure) so the driver can fingerprint
@@ -673,6 +700,9 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 		if err != nil {
 			return nil, false, nil, gateway.StartupPhase{}, nil, err
 		}
+		if err := serveRefuseUnsupportedQuants(mm, compute.Default()); err != nil { // #12983 post-load census
+			return nil, false, nil, gateway.StartupPhase{}, nil, err
+		}
 		loadMessages = append(loadMessages, serveStartupMessage("resident-layout", "info", fakmodel.FormatResidentReport(mm.ResidentReport())))
 		profile := withServeStartupMessages(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k-host", ggufPath, loadNanos)), loadMessages...)
 		return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}, nil, nil
@@ -803,6 +833,9 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 		if err != nil {
 			return nil, false, nil, gateway.StartupPhase{}, nil, err
 		}
+		if err := serveRefuseUnsupportedQuants(mm, nil); err != nil { // #12983 post-load census (Metal-native arm)
+			return nil, false, nil, gateway.StartupPhase{}, nil, err
+		}
 		loadMessages = append(loadMessages, serveStartupMessage("resident-layout", "info", fakmodel.FormatResidentReport(mm.ResidentReport())))
 		profile := withServeStartupMessages(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k", ggufPath, loadNanos)), loadMessages...)
 		return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}, nil, nil
@@ -822,6 +855,9 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 			if err != nil {
 				return nil, false, nil, gateway.StartupPhase{}, memPlan, err
 			}
+			if err := serveRefuseUnsupportedQuants(mm, backend); err != nil { // #12983 post-load census
+				return nil, false, nil, gateway.StartupPhase{}, memPlan, err
+			}
 			modelengine.Preload(mm)
 			loadNanos := time.Since(tLoad).Nanoseconds()
 			profile := withServeStartupMessages(withServeGGUFMemoryProfile(toGatewayLoadProfile(prof.Snapshot("gguf-lean-q8-device", ggufPath, loadNanos)), memPlan, backend), loadMessages...)
@@ -836,6 +872,9 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 		}
 		mm, err := ggufload.LoadModel(ggufPath)
 		if err != nil {
+			return nil, false, nil, gateway.StartupPhase{}, memPlan, err
+		}
+		if err := serveRefuseUnsupportedQuants(mm, backend); err != nil { // #12983 post-load census
 			return nil, false, nil, gateway.StartupPhase{}, memPlan, err
 		}
 		modelengine.Preload(mm)
@@ -871,6 +910,9 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 		if err != nil {
 			return nil, false, nil, gateway.StartupPhase{}, nil, err
 		}
+		if err := serveRefuseUnsupportedQuants(mm, compute.Default()); err != nil { // #12983 post-load census
+			return nil, false, nil, gateway.StartupPhase{}, nil, err
+		}
 		if servePQ2Artifact(artifactQuant) {
 			loadMessages = append(loadMessages, serveStartupMessage("load-mode", "info", "GGUF PQ2_0 load -> packed CPU ternary matmul; Metal PQ2 execution is not yet wired"))
 		}
@@ -886,6 +928,9 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 		prof := newServeLoadProfiler()
 		mm, err := ggufload.LoadModelQuantProfile(ggufPath, prof)
 		if err != nil {
+			return nil, false, nil, gateway.StartupPhase{}, nil, err
+		}
+		if err := serveRefuseUnsupportedQuants(mm, compute.Default()); err != nil { // #12983 post-load census
 			return nil, false, nil, gateway.StartupPhase{}, nil, err
 		}
 		modelengine.Preload(mm)
@@ -1040,6 +1085,9 @@ func loadResidentQ4KDeviceErr(ggufPath string, tLoad time.Time, memPlan compute.
 	if err != nil {
 		return nil, false, nil, gateway.StartupPhase{}, memPlan, err
 	}
+	if err := serveRefuseUnsupportedQuants(mm, backend); err != nil { // #12983 post-load census (device arms)
+		return nil, false, nil, gateway.StartupPhase{}, memPlan, err
+	}
 	messages = append(messages, serveStartupMessage("resident-layout", "info", fakmodel.FormatResidentReport(mm.ResidentReport())))
 	if text, ok := serveVulkanPostLoadReservations(mm, backend, memPlan); ok {
 		fmt.Fprintln(os.Stderr, "fak serve: post-load Vulkan reservations:", text)
@@ -1074,19 +1122,18 @@ func resolveServeTokenizer(tokPath, ggufPath string, sinks ...func(gateway.Start
 		}
 	}
 	if tokPath != "" {
-		tokFile := tokPath
-		if info, err := os.Stat(tokFile); err == nil && info.IsDir() {
-			tokFile = filepath.Join(tokFile, "tokenizer.json")
-		}
-		tok, err := tokenizer.LoadJSON(tokFile)
+		tok, err := loadExplicitServeTokenizer(tokPath)
 		must(err)
 		modelengine.SetTokenizer(tok)
 		return tok, true
 	}
 	if ggufPath != "" {
 		if info, err := os.Stat(ggufPath); err == nil && info.IsDir() {
-			tok, err := tokenizer.LoadJSON(filepath.Join(ggufPath, "tokenizer.json"))
+			tok, err := loadAutomaticServeDirectoryTokenizer(ggufPath)
 			if err != nil {
+				if errors.Is(err, tokenizer.ErrNativeSPMProfile) {
+					must(err)
+				}
 				emit(serveStartupMessage("tokenizer-fallback", "warning",
 					fmt.Sprintf("safetensors directory has no usable tokenizer.json (%v); chat uses the offline mock planner", err)))
 				return nil, false

@@ -532,6 +532,9 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 		return comp, err
 	}
 	rendered := inKernelRenderPrompt(messages, tools, p.m.Cfg, sp)
+	if raw, selected := p.spmRawStreamPrompt(messages, sp); selected {
+		rendered = raw
+	}
 	startsInReasoning := strings.HasSuffix(rendered, qwenThinkAssistantSeed)
 	projector := newInKernelStreamProjector(sink, sp.Stop, startsInReasoning)
 	projector.spans.deferTools = true

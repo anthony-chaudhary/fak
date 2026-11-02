@@ -391,6 +391,37 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+
+## llama.cpp score-based SPM tokenizer
+
+Adapted from ggml-org/llama.cpp at cd8427d018c07eefab6c110f7f115c31ec4c6157,
+src/llama-vocab.cpp (score-priority UTF-8 symbol merging and byte fallback).
+FAK wires an explicit llama-spm-v1 JSON profile through its immutable tokenizer,
+trusted-fragment and raw-completion contracts. This does not add embedded GGUF,
+.model or generic Unigram interchange. Legacy BPE remains unchanged. Generic
+FAK encoding leaves BOS/EOS to the selected raw prompt caller.
+
+MIT License
+
+Copyright (c) 2023-2026 The ggml authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ## Expert route identity normalization
 
 `internal/model/expert_route_trace_analyze.go` adapts the grouped distinct-expert
