@@ -14,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
+	"github.com/anthony-chaudhary/fak/internal/worktreereapcli"
 	"github.com/anthony-chaudhary/fak/pkg/worktreecheck"
 )
 
@@ -46,41 +47,7 @@ func worktreeWorkerReap(argv []string) {
 		fmt.Fprintln(os.Stderr, "fak worktree worker reap: --worktree is required (or pass --all-cold for the bulk cold sweep)")
 		os.Exit(2)
 	}
-	if *maxWait <= 0 {
-		worktreeWorkerEmit(workerworktree.Result{
-			OK: false, Code: workerworktree.ReapCodeTimeout, Path: strings.TrimSpace(*worktree), Preserved: true,
-			Reason: "--max-wait must be positive",
-		})
-		os.Exit(2)
-	}
-	fmt.Fprintf(os.Stderr, "REAP_PROGRESS code=REAP_STARTED max_wait=%s\n", maxWait.String())
-	ctx, cancel := context.WithTimeout(context.Background(), *maxWait)
-	defer cancel()
-	git := workerworktree.BoundedGitRunner(ctx)
-	finishLifecycle, receipt, err := beginWorkerReapLifecycle(ctx, repoRoot, strings.TrimSpace(*worktree), *maxWait, os.Stderr)
-	defer finishLifecycle()
-	if err != nil || !receipt.Before.Known {
-		detail := ""
-		if err != nil {
-			detail = err.Error()
-		} else if receipt.Before.Error != "" {
-			detail = receipt.Before.Error
-		}
-		worktreeWorkerEmit(workerworktree.Result{
-			OK:        false,
-			Code:      ReapCodePrestateUnknown,
-			Path:      strings.TrimSpace(*worktree),
-			Preserved: true,
-			Reason:    "target before lifecycle inventory could not be captured completely",
-			Detail:    detail,
-		})
-		os.Exit(1)
-	}
-	res := workerworktree.ReapChecked(repoRoot, strings.TrimSpace(*worktree), strings.TrimSpace(*supersededBy), git)
-	worktreeWorkerEmit(res)
-	if !res.OK {
-		os.Exit(1)
-	}
+	os.Exit(worktreereapcli.RunSingle(os.Stdout, os.Stderr, repoRoot, strings.TrimSpace(*worktree), strings.TrimSpace(*supersededBy), *maxWait))
 }
 
 func worktreeWorkerGC(argv []string) {

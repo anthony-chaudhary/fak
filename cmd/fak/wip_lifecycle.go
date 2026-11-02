@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -112,16 +111,6 @@ func beginAutomaticWIPLifecycle(root, kind string, stderr io.Writer) func() {
 
 func beginAutomaticWIPLifecycleWithRunner(root, kind string, stderr io.Writer, runner wipinventory.Runner) (func(), wiplifecycle.Receipt, error) {
 	return beginAutomaticWIPLifecycleWithRunners(root, kind, stderr, runner, runner)
-}
-
-func beginWorkerReapLifecycle(ctx context.Context, root, focus string, maxWait time.Duration, stderr io.Writer) (func(), wiplifecycle.Receipt, error) {
-	// Reserve at least half the total budget for the independent safety probe and
-	// removal. Fleet-wide capture remains useful evidence, not target admission.
-	beforeCtx, cancel := context.WithTimeout(ctx, maxWait/2)
-	defer cancel()
-	return beginAutomaticWIPLifecycleWithRunners(root, "worker-reap", stderr,
-		wipinventory.DeadlineRunner{Context: beforeCtx}, wipinventory.DeadlineRunner{Context: ctx},
-		wipinventory.Options{Focus: focus})
 }
 
 func beginAutomaticWIPLifecycleWithRunners(root, kind string, stderr io.Writer, beforeRunner, afterRunner wipinventory.Runner, opts ...wipinventory.Options) (func(), wiplifecycle.Receipt, error) {

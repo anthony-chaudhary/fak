@@ -280,6 +280,8 @@ mode and bulk cold sweeps:
 
 ```bash
 fak worktree worker reap --worktree <dir> [--superseded-by <sha>] [--max-wait <duration>]
+# Inference-free native build of the same single-target command:
+fak-worktree-reap --root <canonical-repo> --worktree <dir> [--superseded-by <sha>] [--max-wait <duration>]
 fak worktree worker reap --all-cold [--apply] [--age-floor-min <min>] [--even-if-unlanded]
 ```
 
@@ -618,3 +620,26 @@ fresh TMPDIR namespace before the launcher, with TMP/TEMP bound to the same
 namespace, because committed-tree extraction may reap stale trees in os.TempDir.
 These environment changes apply to fixture/qualification isolation; production
 Git policy and the existing peer fsmonitor safeguard remain unchanged.
+
+### Small native retirement executable
+
+Build `./cmd/fak-worktree-reap` from an accepted commit when compiling the full
+inference CLI would exceed available storage. Its single-target route and
+`fak worktree worker reap` call the same `internal/worktreereapcli` implementation:
+explicit canonical repository and registered same-repository worker checks,
+shared bounded deadline, focused known before-inventory, exact supersession
+proof, and after-lifecycle capture. Unknown or foreign registration, aliases,
+locked/prunable targets and incomplete before-inventory refuse deletion. The
+standalone command requires `--root`; it does not discover a different checkout.
+Inherited Git repository selectors (including hook index/worktree selectors and
+inline config overrides) refuse admission; neither route rewrites process-global
+environment. Effective Git working-tree and common-directory identity must match
+the explicit paths.
+
+This is the existing inherently applying single-target operation, **not a dry
+run**. No `--force`, bulk, `--all-cold`, or `--even-if-unlanded` option is exposed.
+Establish owner completion, no active consumer and verified recoverable backups
+before invocation. Focused inventory is observation, not ownership permission.
+Qualify the accepted executable, retain its source pin and hash, and run the
+bounded command tests before using it to retire a real directory. A completed
+lifecycle receipt is not remote publication or an atomic filesystem lock.
