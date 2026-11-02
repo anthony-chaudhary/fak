@@ -1001,9 +1001,8 @@ func ReapChecked(root, wtPath, supersededBy string, git GitRunner) Result {
 	if rc != 0 {
 		return gitFailure("cannot inspect untracked worktree paths", rc, untracked)
 	}
-	if len(untracked) != 0 {
-		return refuse(ReapCodeProofRefused,
-			"untracked work cannot be proven byte-equivalent to a supersession commit", "")
+	if rc, detail := proveReapUntracked(root, wtPath, resolved, untracked, git); rc != 0 {
+		return gitFailure("untracked supersession proof refused", rc, detail)
 	}
 	// Compare only paths changed from this worker's pinned HEAD. The rest of its
 	// checkout is intentionally stale and may differ from newer, unrelated trunk
@@ -1016,7 +1015,7 @@ func ReapChecked(root, wtPath, supersededBy string, git GitRunner) Result {
 		return gitFailure("cannot identify tracked dirty worktree paths", rc, dirtyOutput)
 	}
 	dirtyPaths := splitNULPaths(dirtyOutput)
-	if len(dirtyPaths) == 0 {
+	if len(dirtyPaths) == 0 && len(untracked) == 0 {
 		return refuse(ReapCodeProofRefused,
 			"dirty worktree has no provable tracked path set", "")
 	}
@@ -1026,7 +1025,10 @@ func ReapChecked(root, wtPath, supersededBy string, git GitRunner) Result {
 		// name literal so a hostile filename cannot exclude another dirty path.
 		compareArgs = append(compareArgs, ":(literal)"+path)
 	}
-	rc, detail = run(git, wtPath, compareArgs)
+	rc, detail = 0, ""
+	if len(dirtyPaths) != 0 {
+		rc, detail = run(git, wtPath, compareArgs)
+	}
 	if rc != 0 {
 		if rc == ReapTimeoutExitCode {
 			return gitFailure("supersession content check timed out", rc, detail)
@@ -1037,6 +1039,26 @@ func ReapChecked(root, wtPath, supersededBy string, git GitRunner) Result {
 		}
 		return refuse(ReapCodeProofRefused,
 			"cannot compare worktree bytes to the supersession commit", detail)
+	}
+
+	// Repeat the path inventories and raw-content proof immediately before removal.
+	// This is a point-in-time check, not an atomic filesystem lock: ownership must
+	// already be quiescent under the caller's lifecycle admission.
+	rc, again := run(git, wtPath, []string{"ls-files", "--others", "--exclude-standard", "-z"})
+	if rc != 0 || again != untracked {
+		return gitFailure("untracked inventory changed during proof", rcOrRefusal(rc), again)
+	}
+	if rc, detail := proveReapUntracked(root, wtPath, resolved, again, git); rc != 0 {
+		return gitFailure("untracked supersession recheck refused", rc, detail)
+	}
+	rc, again = run(git, wtPath, []string{"diff", "--no-ext-diff", "--no-renames", "--name-only", "-z", "HEAD", "--"})
+	if rc != 0 || again != dirtyOutput {
+		return gitFailure("tracked inventory changed during proof", rcOrRefusal(rc), again)
+	}
+	if len(dirtyPaths) != 0 {
+		if rc, detail := run(git, wtPath, compareArgs); rc != 0 {
+			return gitFailure("tracked supersession recheck refused", rc, detail)
+		}
 	}
 
 	res := ForceReap(root, wtPath, git)
@@ -1050,6 +1072,75 @@ func ReapChecked(root, wtPath, supersededBy string, git GitRunner) Result {
 	res.Code = ReapCodeVerifiedWorktreeReaped
 	res.SupersededBy = resolved
 	return res
+}
+
+func rcOrRefusal(rc int) int {
+	if rc == 0 {
+		return 1
+	}
+	return rc
+}
+
+// proveReapUntracked never stages files or applies clean filters. Only raw regular
+// file bytes and their Git executable mode may be covered by the accepted commit.
+func proveReapUntracked(root, wtPath, commit, inventory string, git GitRunner) (int, string) {
+	rc, ignored := run(git, wtPath, []string{"ls-files", "--others", "--ignored", "--exclude-standard", "-z"})
+	if rc != 0 {
+		return rc, ignored
+	}
+	for _, path := range splitNULPaths(ignored) {
+		if path != WorkerLeaseFileName {
+			return 1, "unproven ignored path: " + path
+		}
+	}
+	for _, path := range splitNULPaths(inventory) {
+		if path == "" || filepath.IsAbs(path) || filepath.ToSlash(filepath.Clean(path)) != path || path == ".." || strings.HasPrefix(path, "../") || strings.Contains(path, "\\") {
+			return 1, "unsafe untracked path"
+		}
+		full := wtPath
+		parts := strings.Split(path, "/")
+		var info os.FileInfo
+		for i, part := range parts {
+			full = filepath.Join(full, part)
+			var err error
+			info, err = os.Lstat(full)
+			if err != nil || info.Mode()&os.ModeSymlink != 0 || (i < len(parts)-1 && !info.IsDir()) {
+				return 1, "untracked path is missing or has a non-directory/symlink ancestor: " + path
+			}
+		}
+		if !info.Mode().IsRegular() {
+			return 1, "untracked path is not a regular file: " + path
+		}
+		mode := "100644"
+		if info.Mode().Perm()&0o100 != 0 {
+			mode = "100755"
+		}
+		rc, tree := run(git, root, []string{"ls-tree", "--full-tree", "-z", commit, "--", ":(literal)" + path})
+		if rc != 0 {
+			return rc, tree
+		}
+		entries := splitNULPaths(tree)
+		if len(entries) != 1 {
+			return 1, "untracked path absent or ambiguous in supersession: " + path
+		}
+		header, name, ok := strings.Cut(entries[0], "\t")
+		fields := strings.Fields(header)
+		if !ok || name != path || len(fields) != 3 || fields[0] != mode || fields[1] != "blob" {
+			return 1, "untracked path type/mode differs from supersession: " + path
+		}
+		rc, hash := run(git, wtPath, []string{"hash-object", "--no-filters", "--", path})
+		if rc != 0 {
+			return rc, hash
+		}
+		if strings.TrimSpace(hash) != fields[2] {
+			return 1, "untracked bytes differ from supersession: " + path
+		}
+		after, err := os.Lstat(full)
+		if err != nil || !os.SameFile(info, after) || after.Mode() != info.Mode() || after.Size() != info.Size() || !after.ModTime().Equal(info.ModTime()) {
+			return 1, "untracked file changed during proof: " + path
+		}
+	}
+	return 0, ""
 }
 
 func splitNULPaths(output string) []string {

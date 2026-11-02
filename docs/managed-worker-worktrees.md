@@ -287,6 +287,27 @@ fak worktree worker reap --all-cold [--apply] [--age-floor-min <min>] [--even-if
 
 - `--worktree <dir>`: Target worktree directory (single-worktree mode).
 - `--superseded-by <sha>`: Authorizes dirty worktree cleanup only if `<sha>` is on trunk and matches bytes.
+
+A supersession proof also covers untracked **regular files** when every literal
+path, raw Git blob hash (without clean filters), and executable mode matches the
+named commit. Missing paths, extra source, symlink leaves or ancestors, mode or
+byte mismatches, and ignored artifacts other than the root lifecycle lease file
+refuse cleanup. No staging or intent-to-add is performed to manufacture proof.
+Tracked and untracked inventories and content are checked again before removal.
+This remains a point-in-time proof under an already-quiescent owner, not an
+atomic filesystem lock or permission to remove a live worker. Existing source
+backup, ownership, accepted-ancestry and native lifecycle requirements remain.
+
+For low-disk operation, preserve source variants and terminal receipts outside
+the disposable worker, retire eligible completed generations through the native
+lifecycle, then measure actual free space before new preparation. Use the
+explicit shared-cache option above rather than duplicating caches or clearing
+an active shared cache. Keep compiler temporaries private. An explicit native
+`--wt-root` on tmpfs consumes available memory as well as filesystem capacity;
+account for both the checkout and compiler working set, with operator-selected
+headroom. Do not relocate worktrees manually or skip parent/candidate checks to
+fit. Prepared proof reuse remains subject to exact native input/closure checks.
+
 - `--max-wait <duration>`: Timeout deadline for inspection and removal (default `10s`).
 - `--all-cold`: Bulk mode: enumerates all worktrees and selects cold candidates.
 - `--apply`: Actually delete selected worktrees (**dry-run by default**; reports plan without deleting).

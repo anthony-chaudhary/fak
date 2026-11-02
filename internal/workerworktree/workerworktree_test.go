@@ -633,12 +633,129 @@ func TestReapCheckedAcceptsOnlyByteEquivalentDirtyPaths(t *testing.T) {
 		assertReapProofRefused(t, f, commitReapProofTrunk(t, f))
 	})
 
-	t.Run("untracked path", func(t *testing.T) {
+	t.Run("equivalent untracked path", func(t *testing.T) {
 		f := newReapProofFixture(t)
 		writeReapProofFile(t, f.wt, "new.txt", "landed\n")
 		writeReapProofFile(t, f.repo, "new.txt", "landed\n")
-		assertReapProofRefused(t, f, commitReapProofTrunk(t, f))
+		res := ReapChecked(f.repo, f.wt, commitReapProofTrunk(t, f), nil)
+		if !res.OK || !res.Removed || res.Code != ReapCodeVerifiedWorktreeReaped {
+			t.Fatalf("equivalent new source should reap: %+v", res)
+		}
 	})
+
+	for _, tc := range []string{"missing", "different", "executable mismatch", "symlink", "extra", "ignored", "mixed tracked", "literal name"} {
+		t.Run("untracked "+tc, func(t *testing.T) {
+			f := newReapProofFixture(t)
+			name := "new.txt"
+			if tc == "literal name" {
+				if runtime.GOOS == "windows" {
+					t.Skip("Windows filenames cannot contain colon pathspec magic")
+				}
+				name = ":(exclude)peer.txt"
+			}
+			writeReapProofFile(t, f.wt, name, "landed\n")
+			writeReapProofFile(t, f.repo, name, "landed\n")
+			if tc == "missing" {
+				_ = os.Remove(filepath.Join(f.repo, name))
+				writeReapProofFile(t, f.repo, "peer.txt", "advance\n")
+			}
+			if tc == "different" {
+				writeReapProofFile(t, f.wt, name, "unique work\n")
+			}
+
+			if tc == "symlink" {
+				if err := os.Remove(filepath.Join(f.wt, name)); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink("target.txt", filepath.Join(f.wt, name)); err != nil {
+					t.Skipf("symlink unavailable: %v", err)
+				}
+			}
+			if tc == "extra" {
+				writeReapProofFile(t, f.wt, "unique.txt", "do not lose\n")
+			}
+			if tc == "ignored" {
+				writeReapProofFile(t, f.wt, ".gitignore", "private-artifact\n")
+				writeReapProofFile(t, f.repo, ".gitignore", "private-artifact\n")
+				writeReapProofFile(t, f.wt, "private-artifact", "do not lose\n")
+			}
+			if tc == "mixed tracked" {
+				writeReapProofFile(t, f.wt, "target.txt", "landed\n")
+				writeReapProofFile(t, f.repo, "target.txt", "landed\n")
+			}
+			var commit string
+			if tc == "executable mismatch" {
+				reapProofGit(t, f.repo, "add", "-A")
+				reapProofGit(t, f.repo, "update-index", "--chmod=+x", "--", name)
+				reapProofGit(t, f.repo, "commit", "-q", "-m", "supersession executable mode")
+				commit = strings.TrimSpace(reapProofGit(t, f.repo, "rev-parse", "HEAD"))
+			} else {
+				commit = commitReapProofTrunk(t, f)
+			}
+			if tc == "mixed tracked" || tc == "literal name" {
+				res := ReapChecked(f.repo, f.wt, commit, nil)
+				if !res.OK || !res.Removed {
+					t.Fatalf("fully proven state refused: %+v", res)
+				}
+			} else {
+				assertReapProofRefused(t, f, commit)
+			}
+		})
+	}
+	for _, mutation := range []string{"new path", "deleted path", "changed bytes", "symlink ancestor"} {
+		t.Run("during proof "+mutation, func(t *testing.T) {
+			f := newReapProofFixture(t)
+			if err := os.Mkdir(filepath.Join(f.wt, "nested"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(filepath.Join(f.repo, "nested"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeReapProofFile(t, f.wt, "nested/new.txt", "landed\n")
+			writeReapProofFile(t, f.repo, "nested/new.txt", "landed\n")
+			commit := commitReapProofTrunk(t, f)
+			changed := false
+			runner := func(dir string, args []string) (int, string) {
+				cmd := exec.Command("git", args...)
+				cmd.Dir = dir
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					if e, ok := err.(*exec.ExitError); ok {
+						return e.ExitCode(), string(out)
+					}
+					return 1, string(out)
+				}
+				if !changed && len(args) > 0 && args[0] == "hash-object" {
+					changed = true
+					switch mutation {
+					case "new path":
+						writeReapProofFile(t, f.wt, "late.txt", "unique\n")
+					case "deleted path":
+						if err := os.Remove(filepath.Join(f.wt, "nested/new.txt")); err != nil {
+							t.Fatal(err)
+						}
+					case "changed bytes":
+						writeReapProofFile(t, f.wt, "nested/new.txt", "unique\n")
+					case "symlink ancestor":
+						if err := os.Rename(filepath.Join(f.wt, "nested"), filepath.Join(f.wt, "moved")); err != nil {
+							t.Fatal(err)
+						}
+						if err := os.Symlink("moved", filepath.Join(f.wt, "nested")); err != nil {
+							t.Skipf("symlink unavailable: %v", err)
+						}
+					}
+				}
+				return 0, string(out)
+			}
+			res := ReapChecked(f.repo, f.wt, commit, runner)
+			if !changed || res.OK || !res.Preserved || res.Code != ReapCodeProofRefused {
+				t.Fatalf("changed proof must preserve: mutated=%v result=%+v", changed, res)
+			}
+			if _, err := os.Stat(f.wt); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 
 	t.Run("missing commit", func(t *testing.T) {
 		f := newReapProofFixture(t)
