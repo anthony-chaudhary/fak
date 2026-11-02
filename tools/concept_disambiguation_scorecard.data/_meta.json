@@ -15097,6 +15097,11 @@
           "category": "incidental",
           "reason": "Private round-entry field retaining the existing NativeForwardCoverage observation restored for the kept accepted prefix; not a new support level, coverage metric, or qualification claim.",
           "token": "finalCoverage"
+        },
+        {
+          "category": "incidental",
+          "reason": "CLI refusal code for a --source-commit request outside its supported verb or explicit handoff destination; an invocation-validation outcome, not a feature maturity level or support qualification claim.",
+          "token": "SOURCE_COMMIT_UNSUPPORTED"
         }
       ],
       "exclude": [
@@ -15214,6 +15219,7 @@
         "RequireCoverage",
         "ResultUnsupported",
         "RunCommitSubjectCoverage",
+        "SOURCE_COMMIT_UNSUPPORTED",
         "SUPPORTED_COMBINATION",
         "SearchCoverage",
         "SearchFacet",
