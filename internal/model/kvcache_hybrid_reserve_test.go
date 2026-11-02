@@ -9,6 +9,12 @@ func TestKVCacheHybridReserveSkipsRecurrentKVPlanes(t *testing.T) {
 		NumKVHeads: 1,
 		HeadDim:    2,
 		LayerTypes: []string{"linear_attention", "full_attention", "linear_attention", "full_attention"},
+
+		LinearNumKeyHeads:   1,
+		LinearNumValueHeads: 1,
+		LinearKeyHeadDim:    1,
+		LinearValueHeadDim:  1,
+		LinearConvKernelDim: 2,
 	}
 	cache := NewKVCache(hybrid)
 	cache.K[0], cache.Kraw[0], cache.V[0] = []float32{1, 2}, []float32{3, 4}, []float32{5, 6}
