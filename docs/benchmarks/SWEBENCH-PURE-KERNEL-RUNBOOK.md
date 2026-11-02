@@ -46,10 +46,16 @@ until step 5 below returns a resolve-rate > 0 with `--engine inkernel` and no pr
 1. A CUDA toolkit + a reachable GPU. Build for the card's arch via `FAK_CUDA_ARCH`
    (e.g. `sm_90`); the build fails loud if `--backend cuda` is named but no GPU is reachable,
    so a typo never silently runs on CPU.
-2. A coding model as a **Q4_K GGUF** with an embedded tokenizer. Qwen2.5-Coder-7B-Instruct
-   at `q4_k_m` is the obvious pick — the GGUF loader + the Qwen BPE tokenizer are oracle-proven
-   (`internal/tokenizer/oracle_qwen_test.go`), and the Q4_K weight is ≈4.7 GB resident, well
-   inside a single datacenter GPU.
+2. A coding model as a **Q4_K GGUF** with an embedded tokenizer. Pick by tier:
+   - **≥24 GB card (first pick): a 27B-class Q4_K GGUF (e.g. `Qwen3.8-27B` at `q4_k_m`).**
+     The kernel-proof steps (§3) are size-independent, and resolve-rate acceptance is
+     "> 0", not a task count — so the larger model costs nothing on the proof path and
+     raises the ceiling on what the pure kernel can resolve.
+   - **Floor: `Qwen2.5-Coder-7B-Instruct` at `q4_k_m`** (≈4.7 GB resident) when task-set
+     scale makes wall-clock the binding constraint, or when the card is <24 GB.
+   Either way the GGUF loader + the Qwen BPE tokenizer are oracle-proven
+   (`internal/tokenizer/oracle_qwen_test.go`), and both weights sit well inside a single
+   datacenter GPU.
 3. Docker + the `swebench` Python module on the grading box (for step 5).
 
 ## 3. First, prove the device kernels (a skip is not a pass)
