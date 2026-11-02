@@ -227,15 +227,16 @@ type ServingHonestyContract struct {
 }
 
 type ServingTrackResult struct {
-	Track      ServingTrack    `json:"track"`
-	Status     string          `json:"status"`
-	Reason     string          `json:"reason,omitempty"`
-	BaseURL    string          `json:"base_url,omitempty"`
-	MetricsURL string          `json:"metrics_url,omitempty"`
-	ProjectArm string          `json:"project_arm,omitempty"`
-	PlanScript string          `json:"plan_script,omitempty"`
-	Samples    []ServingSample `json:"samples,omitempty"`
-	Stats      ServingStats    `json:"stats"`
+	dispatchQPS float64
+	Track       ServingTrack    `json:"track"`
+	Status      string          `json:"status"`
+	Reason      string          `json:"reason,omitempty"`
+	BaseURL     string          `json:"base_url,omitempty"`
+	MetricsURL  string          `json:"metrics_url,omitempty"`
+	ProjectArm  string          `json:"project_arm,omitempty"`
+	PlanScript  string          `json:"plan_script,omitempty"`
+	Samples     []ServingSample `json:"samples,omitempty"`
+	Stats       ServingStats    `json:"stats"`
 }
 
 // ServingUsage retains only token counts observed on this request's response.
@@ -436,6 +437,11 @@ func emptyServingStats(reason string) ServingStats {
 }
 
 func runSamples(ctx context.Context, client *http.Client, tc ServingTrackConfig, model string, workload []ServingRequest, concurrency int, timeout time.Duration) ([]ServingSample, *int) {
+	samples, overlap, _ := runSamplesAtRate(ctx, client, tc, model, workload, concurrency, timeout, 0)
+	return samples, overlap
+}
+
+func runSamplesAtRate(ctx context.Context, client *http.Client, tc ServingTrackConfig, model string, workload []ServingRequest, concurrency int, timeout time.Duration, qps float64) ([]ServingSample, *int, float64) {
 	type job struct {
 		index int
 		req   ServingRequest
@@ -459,13 +465,41 @@ func runSamples(ctx context.Context, client *http.Client, tc ServingTrackConfig,
 			}
 		}()
 	}
+	var first, last time.Time
+	sent := 0
+dispatch:
 	for i, req := range workload {
-		jobs <- job{index: i, req: req}
+		if qps > 0 && sent > 0 {
+			timer := time.NewTimer(time.Duration(math.Ceil(float64(time.Second) / qps)))
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				break dispatch
+			case <-timer.C:
+			}
+		}
+		select {
+		case <-ctx.Done():
+			break dispatch
+		case jobs <- job{index: i, req: req}:
+		}
+		last = time.Now()
+		if sent == 0 {
+			first = last
+		}
+		sent++
+	}
+	for i := sent; i < len(out); i++ {
+		out[i] = ServingSample{ID: workload[i].ID, Status: "fail", Error: "dispatch cancelled", ErrorClass: "cancelled"}
 	}
 	close(jobs)
 	wg.Wait()
 	max := overlap.maxObserved()
-	return out, &max
+	var rate float64
+	if sent > 1 && last.After(first) {
+		rate = float64(sent-1) / last.Sub(first).Seconds()
+	}
+	return out, &max, rate
 }
 
 func MeasureSSERequest(ctx context.Context, client *http.Client, tc ServingTrackConfig, model string, req ServingRequest, timeout time.Duration) ServingSample {

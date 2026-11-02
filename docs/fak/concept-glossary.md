@@ -2147,3 +2147,10 @@ SHA-256 identity of canonical configured runtime topology groups and ranks, incl
 Serialized StopReason literal emitted when unvisited runtime topology configurations remain and the number evaluated has reached MaxCandidates, truncating finite observed-only search.
 
 **Distinct from:** A search-stop reason indicating the evaluated-configuration cap, not ctxplan CandidateBound spans scored per turn, model memory capacity, token generation or the separate time_budget deadline. It does not claim an exhaustive optimum.
+
+
+### EngineReceiptDigest (declared serving engine identity)
+
+A sha256 digest declaration binding a serving sweep or bounded QPS probe to the same operator-supplied engine receipt identity.
+
+**Distinct from:** Identity provenance only: not the engine dispatch implementation, proof of actual engine execution, or evidence of hardware throughput or performance.

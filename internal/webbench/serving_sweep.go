@@ -33,32 +33,35 @@ type ServingSweepTrackContract struct {
 }
 
 type ServingSweepConfig struct {
-	GeneratedAt   string
-	MachineID     string
-	Model         string
-	Tracks        []ServingTrackConfig
-	Contracts     map[ServingTrack]ServingSweepTrackContract
-	Workload      []ServingRequest
-	Concurrencies []int
-	GoodputSLO    time.Duration
-	TTFTP99Budget time.Duration
-	ITLP99Budget  time.Duration
-	Timeout       time.Duration
-	Client        *http.Client
+	CapacitySearch *ServingCapacitySearchConfig
+	requestQPS     float64
+	GeneratedAt    string
+	MachineID      string
+	Model          string
+	Tracks         []ServingTrackConfig
+	Contracts      map[ServingTrack]ServingSweepTrackContract
+	Workload       []ServingRequest
+	Concurrencies  []int
+	GoodputSLO     time.Duration
+	TTFTP99Budget  time.Duration
+	ITLP99Budget   time.Duration
+	Timeout        time.Duration
+	Client         *http.Client
 }
 
 type ServingSweepReport struct {
-	Schema      string                      `json:"schema"`
-	GeneratedAt string                      `json:"generated_at"`
-	MachineID   string                      `json:"machine_id"`
-	Model       string                      `json:"model"`
-	Workload    ServingSweepWorkload        `json:"workload"`
-	Contracts   []ServingSweepTrackContract `json:"contracts"`
-	SLA         ServingSweepSLA             `json:"sla"`
-	Points      []ServingSweepPoint         `json:"points"`
-	Tracks      []ServingSweepTrackSummary  `json:"tracks"`
-	Honesty     ServingSweepHonestyContract `json:"honesty"`
-	Artifact    string                      `json:"artifact,omitempty"`
+	CapacitySearch *ServingCapacityResult      `json:"capacity_search,omitempty"`
+	Schema         string                      `json:"schema"`
+	GeneratedAt    string                      `json:"generated_at"`
+	MachineID      string                      `json:"machine_id"`
+	Model          string                      `json:"model"`
+	Workload       ServingSweepWorkload        `json:"workload"`
+	Contracts      []ServingSweepTrackContract `json:"contracts"`
+	SLA            ServingSweepSLA             `json:"sla"`
+	Points         []ServingSweepPoint         `json:"points"`
+	Tracks         []ServingSweepTrackSummary  `json:"tracks"`
+	Honesty        ServingSweepHonestyContract `json:"honesty"`
+	Artifact       string                      `json:"artifact,omitempty"`
 }
 
 type ServingSweepWorkload struct {
@@ -161,9 +164,18 @@ func normalizeServingConcurrencies(values []int) ([]int, error) {
 // RunServingSweep repeats the existing parity measurement with one immutable
 // workload and folds the point reports through the capacity/identity gate.
 func RunServingSweep(ctx context.Context, cfg ServingSweepConfig) (*ServingSweepReport, error) {
-	concurrencies, err := normalizeServingConcurrencies(cfg.Concurrencies)
-	if err != nil {
+	if err := validateServingCapacity(cfg); err != nil {
 		return nil, err
+	}
+	var concurrencies []int
+	var err error
+	if cfg.CapacitySearch != nil {
+		concurrencies = []int{cfg.CapacitySearch.Concurrency}
+	} else {
+		concurrencies, err = normalizeServingConcurrencies(cfg.Concurrencies)
+		if err != nil {
+			return nil, err
+		}
 	}
 	digest, err := ServingWorkloadDigest(cfg.Workload)
 	if err != nil {
@@ -232,6 +244,9 @@ func RunServingSweep(ctx context.Context, cfg ServingSweepConfig) (*ServingSweep
 		report.Contracts = append(report.Contracts, contract)
 	}
 
+	if cfg.CapacitySearch != nil {
+		return runServingCapacity(ctx, cfg, report)
+	}
 	for _, concurrency := range concurrencies {
 		point := ServingSweepPoint{Concurrency: concurrency, WorkloadDigest: digest}
 		for _, trackCfg := range tracks {
@@ -286,12 +301,17 @@ func measureServingSweepTrack(ctx context.Context, cfg ServingSweepConfig, track
 		return result, nil
 	}
 	start := time.Now()
-	samples, observedMaxInFlight := runSamples(ctx, cfg.Client, trackCfg, model, cfg.Workload, concurrency, cfg.Timeout)
+	samples, observedMaxInFlight, dispatchQPS := runSamplesAtRate(ctx, cfg.Client, trackCfg, model, cfg.Workload, concurrency, cfg.Timeout, cfg.requestQPS)
+	result.dispatchQPS = dispatchQPS
 	result.Samples = samples
 	result.Status = "measured"
 	result.Stats = FoldServingSamples(samples, time.Since(start).Seconds(), cfg.GoodputSLO)
 	setServingOverlapEvidence(&result.Stats, observedMaxInFlight)
-	result.Stats.PrefixCacheHitRate = FetchPrefixCacheHitRate(ctx, cfg.Client, trackCfg.MetricsURL)
+	if cfg.CapacitySearch == nil {
+		result.Stats.PrefixCacheHitRate = FetchPrefixCacheHitRate(ctx, cfg.Client, trackCfg.MetricsURL)
+	} else {
+		result.Stats.PrefixCacheHitRate = notMeasuredScalar("ratio", "capacity search does not issue metrics requests")
+	}
 	return result, nil
 }
 

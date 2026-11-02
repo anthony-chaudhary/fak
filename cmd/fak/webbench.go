@@ -93,6 +93,11 @@ usage:
         configured; missing endpoints are emitted as "not_measured". Supplying
         --concurrencies emits one capacity-valid sweep receipt and derives peak
         plus an optional p99-SLA knee without changing the single-point schema.
+        Opt-in bounded QPS search (one track, --concurrency, no --concurrencies):
+        --capacity-min-qps N --capacity-max-qps N --capacity-tolerance-qps N
+        --capacity-max-probes N --capacity-max-requests N --capacity-max-duration 30s
+        requires exact engine/capacity contracts and at least one p99 budget.
+        Reports bounded client probes, not a certified physical capacity maximum.
 
   fak webbench parity-gate --claim-file FILE --artifact FILE
         Reject parity claims without measured vllm, sglang, and fak-fronts-fleet
@@ -353,6 +358,12 @@ func cmdWebbenchServing(argv []string) {
 	agents := fs.Int("agents", 100, "number of agent requests to replay; repeats dataset tasks if needed")
 	concurrency := fs.Int("concurrency", 16, "parallel request workers")
 	concurrenciesArg := fs.String("concurrencies", "", "comma-separated concurrency points; when set, emit a capacity-valid serving sweep receipt")
+	capacityMin := fs.Float64("capacity-min-qps", 0, "opt-in search lower QPS (requires all capacity bounds)")
+	capacityMax := fs.Float64("capacity-max-qps", 0, "opt-in search upper QPS; never expanded")
+	capacityTolerance := fs.Float64("capacity-tolerance-qps", 0, "positive absolute QPS search tolerance")
+	capacityProbes := fs.Int("capacity-max-probes", 0, "total attempted probes including endpoints")
+	capacityRequests := fs.Int("capacity-max-requests", 0, "total request budget across all probes")
+	capacityDuration := fs.Duration("capacity-max-duration", 0, "whole search deadline, e.g. 30s")
 	batchCapacitiesArg := fs.String("batch-capacities", "", "comma-separated track=positive-capacity declarations required for sweep peak/knee claims")
 	capacitySourcesArg := fs.String("capacity-sources", "", "comma-separated track=provenance labels for the declared batch capacities")
 	enginesArg := fs.String("engines", "", "comma-separated track=engine identities used by a serving sweep")
@@ -371,6 +382,20 @@ func cmdWebbenchServing(argv []string) {
 	outDir := fs.String("out-dir", "", "artifact root (default: experiments/benchmark/runs/by-machine)")
 	_ = fs.Parse(argv)
 
+	capacityEnabled := false
+	fs.Visit(func(f *flag.Flag) {
+		if strings.HasPrefix(f.Name, "capacity-") && f.Name != "capacity-sources" {
+			capacityEnabled = true
+		}
+	})
+
+	if capacityEnabled && (*ttftP99BudgetMS < 0 || *itlP99BudgetMS < 0 || int64(*ttftP99BudgetMS) > int64((1<<63-1)/time.Millisecond) || int64(*itlP99BudgetMS) > int64((1<<63-1)/time.Millisecond)) {
+		must(webbench.ErrCapacityInvalid)
+	}
+	if capacityEnabled && (*capacityProbes < 2 || *capacityRequests <= 0 || *agents < 2 || *agents > *capacityRequests / *capacityProbes) {
+		must(webbench.ErrCapacityInvalid)
+	}
+
 	if *dataset == "" {
 		fmt.Fprintln(os.Stderr, "fak webbench serving: --dataset is required")
 		os.Exit(2)
@@ -379,25 +404,8 @@ func cmdWebbenchServing(argv []string) {
 	must(err)
 	endpoints, err := parseServingTrackMap(*endpointsArg)
 	must(err)
-	// An endpoint may name lab GPU hardware as @lab/<model>: resolve each through the same
-	// readiness+latency-gated seam `fak guard --remote-serve` uses, so a live serving-parity
-	// run can't start against a box the lab-readiness gate has not cleared. A plain /v1 URL is
-	// returned unchanged (passthrough).
-	for tr, base := range endpoints {
-		resolved, rerr := resolveBenchBaseURL(base)
-		must(rerr)
-		endpoints[tr] = resolved
-	}
 	metrics, err := parseServingTrackMap(*metricsArg)
 	must(err)
-
-	d, err := webbench.LoadDataset(*dataset)
-	must(err)
-	workload := webbench.BuildServingWorkload(d, webbench.DefaultGeometryModel(), *limit, *agents, *maxOutput, *sharedPrefix)
-	if len(workload) == 0 {
-		fmt.Fprintln(os.Stderr, "fak webbench serving: workload is empty")
-		os.Exit(2)
-	}
 
 	machineID := *machine
 	if machineID == "" {
@@ -419,9 +427,39 @@ func cmdWebbenchServing(argv []string) {
 			Replicas:   *replicas,
 		})
 	}
-	if strings.TrimSpace(*concurrenciesArg) != "" {
-		concurrencies, parseErr := parsePositiveIntList(*concurrenciesArg)
-		must(parseErr)
+	// Resolve lab aliases only after capacity bounds and identities are admitted.
+	resolveTracks := func() {
+		for i := range cfgTracks {
+			resolved, e := resolveBenchBaseURL(cfgTracks[i].BaseURL)
+			must(e)
+			cfgTracks[i].BaseURL = resolved
+		}
+	}
+	loadWorkload := func() []webbench.ServingRequest {
+		d, err := webbench.LoadDataset(*dataset)
+		must(err)
+		workload := webbench.BuildServingWorkload(d, webbench.DefaultGeometryModel(), *limit, *agents, *maxOutput, *sharedPrefix)
+		if len(workload) == 0 {
+			fmt.Fprintln(os.Stderr, "fak webbench serving: workload is empty")
+			os.Exit(2)
+		}
+
+		return workload
+	}
+
+	if capacityEnabled && strings.TrimSpace(*concurrenciesArg) != "" {
+		must(errors.New("capacity search uses --concurrency, not --concurrencies"))
+	}
+	if strings.TrimSpace(*concurrenciesArg) != "" || capacityEnabled {
+		var concurrencies []int
+		var parseErr error
+		var capacitySearch *webbench.ServingCapacitySearchConfig
+		if capacityEnabled {
+			capacitySearch = &webbench.ServingCapacitySearchConfig{MinQPS: *capacityMin, MaxQPS: *capacityMax, ToleranceQPS: *capacityTolerance, MaxProbes: *capacityProbes, MaxRequests: *capacityRequests, MaxDuration: *capacityDuration, Concurrency: *concurrency}
+		} else {
+			concurrencies, parseErr = parsePositiveIntList(*concurrenciesArg)
+			must(parseErr)
+		}
 		batchCapacities, parseErr := parseServingTrackIntMap(*batchCapacitiesArg)
 		must(parseErr)
 		capacitySources, parseErr := parseServingTrackMap(*capacitySourcesArg)
@@ -441,19 +479,23 @@ func cmdWebbenchServing(argv []string) {
 				CapacitySource:      capacitySources[tr],
 			}
 		}
-		rep, runErr := webbench.RunServingSweep(ctx(), webbench.ServingSweepConfig{
-			GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
-			MachineID:     machineID,
-			Model:         *model,
-			Tracks:        cfgTracks,
-			Contracts:     contracts,
-			Workload:      workload,
-			Concurrencies: concurrencies,
-			GoodputSLO:    time.Duration(*sloMS) * time.Millisecond,
-			TTFTP99Budget: time.Duration(*ttftP99BudgetMS) * time.Millisecond,
-			ITLP99Budget:  time.Duration(*itlP99BudgetMS) * time.Millisecond,
-			Timeout:       time.Duration(*timeoutSec) * time.Second,
-		})
+		sweepCfg := webbench.ServingSweepConfig{
+			CapacitySearch: capacitySearch,
+			GeneratedAt:    time.Now().UTC().Format(time.RFC3339),
+			MachineID:      machineID,
+			Model:          *model,
+			Tracks:         cfgTracks,
+			Contracts:      contracts,
+			Concurrencies:  concurrencies,
+			GoodputSLO:     time.Duration(*sloMS) * time.Millisecond,
+			TTFTP99Budget:  time.Duration(*ttftP99BudgetMS) * time.Millisecond,
+			ITLP99Budget:   time.Duration(*itlP99BudgetMS) * time.Millisecond,
+			Timeout:        time.Duration(*timeoutSec) * time.Second,
+		}
+		must(webbench.ValidateServingCapacitySearch(sweepCfg, *agents))
+		resolveTracks()
+		sweepCfg.Workload = loadWorkload()
+		rep, runErr := webbench.RunServingSweep(ctx(), sweepCfg)
 		must(runErr)
 		outPath := *out
 		if outPath == "" {
@@ -464,6 +506,8 @@ func cmdWebbenchServing(argv []string) {
 		return
 	}
 
+	resolveTracks()
+	workload := loadWorkload()
 	rep, err := webbench.RunServingParity(ctx(), webbench.ServingParityConfig{
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 		MachineID:   machineID,
@@ -629,6 +673,12 @@ func printServingSweepSummary(w *os.File, rep *webbench.ServingSweepReport, out 
 	fmt.Fprintf(w, "\n== fak webbench serving sweep ==\n")
 	fmt.Fprintf(w, "artifact      : %s\n", out)
 	fmt.Fprintf(w, "workload      : %s  requests: %d  points: %v\n", rep.Workload.Digest, rep.Workload.Requests, rep.Workload.Concurrencies)
+	if c := rep.CapacitySearch; c != nil {
+		fmt.Fprintf(w, "capacity      : %s (%s), probes: %d; %s\n", c.Status, c.ReasonCode, c.Probes, c.Qualification)
+		if c.BestPassingQPS != nil {
+			fmt.Fprintf(w, "passing QPS   : %.6g (bounded client observation only)\n", *c.BestPassingQPS)
+		}
+	}
 	for _, track := range rep.Tracks {
 		fmt.Fprintf(w, "  %-16s %-12s valid=%d", track.Track, track.Status, track.ValidPoints)
 		if track.Peak != nil {
