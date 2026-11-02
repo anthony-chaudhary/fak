@@ -1087,6 +1087,13 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	if err := start(); err != nil {
 		return true
 	}
+	// Reasoning remains held until the finalized turn passes conformance and tool
+	// adjudication. It does not count as live content for TTFT or heartbeat metrics.
+	for _, seg := range segmentContent(comp.Message.ReasoningContent) {
+		if err := writeSSEData(w, chunk(ChatDelta{ReasoningContent: seg}, nil, nil)); err != nil {
+			return true
+		}
+	}
 	// Flush the content the guard withheld: the buffered post-lift content beyond the
 	// prose already streamed. Concatenated with the live bytes this reproduces the
 	// buffered path's content exactly (modulo leading whitespace lift trims).

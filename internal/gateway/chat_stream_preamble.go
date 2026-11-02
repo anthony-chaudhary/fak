@@ -125,6 +125,11 @@ func writeChatCompletionStream(p *chatStreamWriter, resp ChatResponse) {
 		return
 	}
 	choice := resp.Choices[0]
+	for _, seg := range segmentContent(choice.Message.ReasoningContent) {
+		if err := writeSSEData(p.w, p.chunk(ChatDelta{ReasoningContent: seg}, nil, nil)); err != nil {
+			return
+		}
+	}
 
 	// Content chunks: stream the adjudicated content as incremental fragments, one
 	// SSE event per fragment, the way a real OpenAI stream delivers tokens — rather

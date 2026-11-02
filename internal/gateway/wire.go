@@ -644,9 +644,10 @@ type ChatStreamChoice struct {
 
 // ChatDelta is the incremental assistant payload in an SSE chunk.
 type ChatDelta struct {
-	Role      string              `json:"role,omitempty"`
-	Content   string              `json:"content,omitempty"`
-	ToolCalls []ChatDeltaToolCall `json:"tool_calls,omitempty"`
+	Role             string              `json:"role,omitempty"`
+	Content          string              `json:"content,omitempty"`
+	ReasoningContent string              `json:"reasoning_content,omitempty"`
+	ToolCalls        []ChatDeltaToolCall `json:"tool_calls,omitempty"`
 }
 
 // ChatDeltaToolCall mirrors OpenAI's streaming tool-call delta entries.
