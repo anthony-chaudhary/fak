@@ -457,6 +457,9 @@ func dispatchCoreVerbB(name string, args []string) bool {
 	case "up":
 		cmdUp(args)
 	case "serve":
+		if len(args) > 0 && args[0] == "proof" {
+			os.Exit(runServeProof(os.Stdout, os.Stderr, args[1:]))
+		}
 		cmdServe(args)
 	case "serve-wiring":
 		cmdServeWiring(args)

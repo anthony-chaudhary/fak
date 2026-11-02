@@ -371,10 +371,14 @@ const usageCoreText = `usage:
                  quarantine it?), then RECOMMEND what to do about each finding. Exit 1
                  on any finding. The fak analogue of 'dos doctor')
   fak doctor serve [--model-bytes N] [--headroom 0.15] [--json]
+                [--verify-features --addr URL --feature-timeout 5s --feature-token-env VAR]
                 (the SERVE-READINESS pre-flight: a green/yellow/red table of the CPU
                  SIMD decode tier (AVX-512/AMX>AVX2>scalar, NEON on arm64), whether the
                  target model fits free VRAM/RAM with headroom, and the NUMA layout -
-                 each row with a remediation hint. Exit 1 on any Unready row)
+                 each row with a remediation hint. Feature inspection is opt-in:
+                 reads retained gateway receipts without restarting it; older servers
+                 report FEATURE_PROOF_UNSUPPORTED and retain the hardware checks.
+                 Exit 1 on feature verification failure or an Unready text row)
   fak doctor trust [--probe=false] [--host HOST:PORT] [--timeout 4s] [--json]
                 (the MANAGED-HOST TLS check: which trust store fak validates with, the
                  CA subjects a declared FAK_CA_BUNDLE carries, whether each upstream's
@@ -624,6 +628,12 @@ const usageOpsText = `  fak issues-solved [--hours N] [--since D] [--repo R] [--
   fak token-profile [--input N --cached-input N --max-output N] [--json|--halo]
       Shift token economics and scheduler load left into a typed preflight forecast.
 
+  fak serve proof [--addr http://127.0.0.1:8080] [--timeout 5s] [--token-env VAR] [--json]
+                (read the live feature catalog and bounded retained execution receipts;
+                 VERIFIED_ACTIVE / ENABLED_IDLE / DISABLED / DEGRADED_OR_BLOCKED.
+                 Reports server-observed receipts, not independent re-execution or
+                 current activity. No restart, redirects, or inference request.
+                 Exit 1 on degraded evidence or unavailable proof; idle is not failure)
   fak serve     [--addr 127.0.0.1:8080 | --stdio]
                 [--provider openai|anthropic|gemini|xai --base-url URL [--replica-base-url URL ...] --model M --api-key-env VAR]
                 [--engine inkernel] [--gguf FILE] [--policy FILE] [--policy-check] [--plan-json] [--require-key-env VAR] [--vdso=true]

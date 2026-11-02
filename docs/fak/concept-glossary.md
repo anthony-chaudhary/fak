@@ -2127,3 +2127,10 @@ Experimental default-off host B=1 Q8-KV attention consumer. It reconstructs one 
 Serialized attention projection and normalization tensor names in the DSpark support GGUF header, validated against the pinned original model geometry.
 
 **Distinct from:** Storage-role names and dimensions only; not an executable attention kernel, runtime support, or proof of lossless weight conversion.
+
+
+### FEATURE_PROOF_UNSUPPORTED
+
+A feature observation diagnostic emitted when a running gateway returns HTTP 404 for its feature catalog or retained proof endpoint.
+
+**Distinct from:** Describes missing endpoint support on the observed server, not a disabled optimization, failed execution proof, correctness verdict, or product maturity grade.

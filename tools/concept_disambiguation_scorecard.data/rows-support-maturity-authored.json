@@ -39,5 +39,24 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "feature-proof-endpoint-unsupported",
+      "canonical": "FEATURE_PROOF_UNSUPPORTED",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "A feature observation diagnostic emitted when a running gateway returns HTTP 404 for its feature catalog or retained proof endpoint.",
+      "distinction": "Describes missing endpoint support on the observed server, not a disabled optimization, failed execution proof, correctness verdict, or product maturity grade.",
+      "distinct_from": [
+        "maturity"
+      ],
+      "aliases": [],
+      "grounding": "FEATURE_PROOF_UNSUPPORTED",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

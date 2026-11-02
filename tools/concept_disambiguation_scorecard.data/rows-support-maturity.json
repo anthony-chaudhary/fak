@@ -71,7 +71,7 @@
       "kind": "concept",
       "definition": "Maturity is the readiness level of a supported capability after considering implementation completeness, evidence breadth, correctness witnesses, parity results, guardrails, and operating posture.",
       "distinction": "Maturity is the ladder over time; it is not mere support, a coverage percentage, a single correctness proof, or one parity result.",
-      "distinct_from": ["support", "coverage", "correctness", "parity", "flashmla-sparse-prefill-admission", "dense-wkv-route-support"],
+      "distinct_from": ["support", "coverage", "correctness", "parity", "flashmla-sparse-prefill-admission", "dense-wkv-route-support", "feature-proof-endpoint-unsupported"],
       "aliases": [],
       "grounding": "maturity",
       "grounding_kind": "doc",

@@ -111,11 +111,12 @@ type serveReadinessRow struct {
 // serveReadinessReport is the whole table plus the rolled-up worst tier and a
 // count of non-green rows.
 type serveReadinessReport struct {
-	Facts      serveHostFacts          `json:"facts"`
-	Rows       []serveReadinessRow     `json:"rows"`
-	Durability *serveDurabilityPosture `json:"durability,omitempty"`
-	Rollup     string                  `json:"rollup"` // "Ready" | "Marginal" | "Unready"
-	Findings   int                     `json:"findings"`
+	Facts        serveHostFacts          `json:"facts"`
+	Rows         []serveReadinessRow     `json:"rows"`
+	Durability   *serveDurabilityPosture `json:"durability,omitempty"`
+	FeatureProof *serveProofReport       `json:"feature_proof,omitempty"`
+	Rollup       string                  `json:"rollup"` // "Ready" | "Marginal" | "Unready"
+	Findings     int                     `json:"findings"`
 }
 
 // serveStatusRank orders the three rungs so the report can roll up the worst one.
@@ -670,6 +671,10 @@ func runServeDoctor(stdout, stderr io.Writer, argv []string) int {
 	modelBytes := fs.Int64("model-bytes", 0, "resident weight bytes of the target model, to check it fits free memory (0 = skip the fit check)")
 	headroom := fs.Float64("headroom", 0.15, "fraction of free memory reserved for KV + activations in the model-fit check (0..1)")
 	asJSON := fs.Bool("json", false, "emit the readiness report as JSON")
+	verifyFeatures := fs.Bool("verify-features", false, "observe the running gateway feature receipts (no restart)")
+	proofAddr := fs.String("addr", "http://127.0.0.1:8080", "gateway address used only with --verify-features")
+	proofTimeout := fs.Duration("feature-timeout", 5*time.Second, "total feature observation deadline (0 < duration <= 1m)")
+	proofTokenEnv := fs.String("feature-token-env", "", "optional environment variable containing the gateway read bearer")
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
@@ -693,10 +698,36 @@ func runServeDoctor(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 	rep := withServeDurabilityRow(buildServeReadiness(facts), resolveServeSessionState("", os.Getenv))
+	featureExit := 0
+	if *verifyFeatures {
+		proof := observeServeProof(*proofAddr, *proofTimeout, *proofTokenEnv)
+		rep.FeatureProof = &proof
+		status := sevOK
+		if proof.Code == "FEATURE_PROOF_UNSUPPORTED" {
+			status = sevWarn // Old servers retain the ordinary hardware doctor.
+		} else if featureExit = serveProofExit(proof); featureExit != 0 {
+			status = sevFail
+		}
+		rep.Rows = append(rep.Rows, serveReadinessRow{Check: "feature-proof", Status: status, Tier: serveTierLabel(status), Finding: proof.Code, Remediation: "Inspect retained feature receipts with fak serve proof; enablement alone is not execution evidence."})
+		if status != sevOK {
+			rep.Findings++
+		}
+		if status == sevFail {
+			rep.Rollup = "Unready"
+		} else if status == sevWarn && rep.Rollup == "Ready" {
+			rep.Rollup = "Marginal"
+		}
+	}
 	if *asJSON {
-		return encodeJSONOrFail(stdout, stderr, rep, "fak doctor serve")
+		if rc := encodeJSONOrFail(stdout, stderr, rep, "fak doctor serve"); rc != 0 {
+			return rc
+		}
+		return featureExit
 	}
 	writeServeReadinessHuman(stdout, rep)
+	if rep.FeatureProof != nil {
+		writeServeProofHuman(stdout, *rep.FeatureProof)
+	}
 	for _, r := range rep.Rows {
 		if r.Status == sevFail {
 			return 1

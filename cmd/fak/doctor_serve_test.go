@@ -3,15 +3,99 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/localadmission"
 )
 
 const testGiB = int64(1) << 30
+
+// fak-test:justify why=regression when=changed:cmd/fak/doctor_serve.go,cmd/fak/serve_proof.go
+// fak-test:runtime fast est=250ms lane=default
+func TestDoctorServe_FeatureVerification(t *testing.T) {
+	collector, err := gateway.NewFeatureProofCollector(4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := collector.RecordRewrite(gateway.FeatureCompactHistory, []byte("prefix-cut-suffix"), []byte("prefix-suffix"), gateway.FeatureRewriteWitness{PrefixBytes: 7, SuffixBytes: 6, ShedBytes: 4}); err != nil {
+		t.Fatal(err)
+	}
+	catalog := gateway.FeatureCatalog{Schema: gateway.FeatureSchema, Features: []gateway.FeatureStatus{
+		{Feature: gateway.FeatureCompactHistory, State: gateway.FeatureConfiguredActive},
+		{Feature: gateway.FeatureElideResults, State: gateway.FeatureConfiguredStandby},
+		{Feature: gateway.FeatureVDSO, State: gateway.FeatureDisabled},
+		{Feature: gateway.FeatureNativeModel, State: gateway.FeatureRefusedUnavailable},
+	}}
+	var requests atomic.Int32
+	var unsupported atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.Method != http.MethodGet {
+			t.Errorf("unexpected method %s", r.Method)
+			w.WriteHeader(405)
+			return
+		}
+		switch r.URL.Path {
+		case "/v1/fak/features":
+			_ = json.NewEncoder(w).Encode(catalog)
+		case "/v1/fak/features/proof":
+			if unsupported.Load() {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(collector.Snapshot())
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+	var out, errOut bytes.Buffer
+	rc := runServeDoctor(&out, &errOut, []string{"--json", "--verify-features", "--addr", srv.URL})
+	if rc != 1 {
+		t.Fatalf("degraded feature must fail verification: rc=%d stderr=%s output=%s", rc, errOut.String(), out.String())
+	}
+	var report struct {
+		FeatureProof struct {
+			Rows []struct {
+				Feature string `json:"feature"`
+				Verdict string `json:"verdict"`
+			} `json:"rows"`
+		} `json:"feature_proof"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"compact_history": "VERIFIED_ACTIVE", "elide_results": "ENABLED_IDLE", "vdso": "DISABLED", "native_model": "DEGRADED_OR_BLOCKED"}
+	for _, row := range report.FeatureProof.Rows {
+		if want[row.Feature] != row.Verdict {
+			t.Errorf("%s=%s want %s", row.Feature, row.Verdict, want[row.Feature])
+		}
+		delete(want, row.Feature)
+	}
+	if len(want) != 0 || requests.Load() != 2 {
+		t.Fatalf("missing verdicts %v; requests=%d", want, requests.Load())
+	}
+	unsupported.Store(true)
+	out.Reset()
+	errOut.Reset()
+	if rc := runServeDoctor(&out, &errOut, []string{"--json", "--verify-features", "--addr", srv.URL}); rc != 0 || !strings.Contains(out.String(), "FEATURE_PROOF_UNSUPPORTED") || !strings.Contains(out.String(), "cpu-isa") {
+		t.Fatalf("old server must preserve hardware doctor and label unknown proof: rc=%d out=%s err=%s", rc, out.String(), errOut.String())
+	}
+	before := requests.Load()
+	out.Reset()
+	errOut.Reset()
+	if rc := runServeDoctor(&out, &errOut, []string{"--json", "--addr", srv.URL}); rc != 0 || requests.Load() != before {
+		t.Fatalf("default doctor made network request: rc=%d requests=%d", rc, requests.Load()-before)
+	}
+}
 
 // TestServeReadinessISATiers pins the CPU-ISA row classification across the tiers:
 // AVX-512/AMX green, AVX2 yellow with an upgrade hint, sub-AVX2 red with a hint,
