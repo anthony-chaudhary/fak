@@ -1030,7 +1030,7 @@ func applyLazyKQuantByType(builder *model.QuantBuilder, name string, shape []int
 
 func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builder *model.QuantBuilder, kvbHalf map[int]glmKVBHalf, w3Requested bool) error {
 	p.Tick(tw.tickBytes)
-	p.recordLoadPath(tw.acctType, tw.acctExpert, tw.acctResident, tw.acctBytes, tw.acctTensors)
+	p.recordLoadPath(tw.acctType, tw.acctExpert, tw.acctResident, tw.acctBytes, tw.acctTensors, tw.pending)
 	for _, pt := range tw.pending {
 		switch {
 		case pt.canonicalMTPQ4K:

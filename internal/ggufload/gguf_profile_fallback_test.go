@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -75,6 +76,20 @@ func TestLoadQuantFallbackAlerts(t *testing.T) {
 					if !ok || row.Expert || row.DequantTensors != 1 || row.DequantBytes != sourceBytes {
 						t.Fatalf("%s fixture conversion = %+v, want one dense tensor from %d source bytes", quant, row, sourceBytes)
 					}
+					encoded, err := json.Marshal(row)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var measured struct {
+						Bytes   *int64 `json:"conversion_f32_bytes"`
+						Tensors int    `json:"conversion_f32_tensors"`
+					}
+					if err := json.Unmarshal(encoded, &measured); err != nil {
+						t.Fatal(err)
+					}
+					if measured.Bytes == nil || *measured.Bytes != int64(dim*vocab*4) || measured.Tensors != 1 {
+						t.Errorf("%s emitted F32 payload: bytes=%v observed_tensors=%d want bytes=%d tensors=1", quant, measured.Bytes, measured.Tensors, dim*vocab*4)
+					}
 				}
 			}
 			alerts := map[string]LoadAlert{}
@@ -95,7 +110,7 @@ func TestLoadQuantFallbackAlerts(t *testing.T) {
 					if alert.Level != "warning" {
 						t.Errorf("%s fallback level = %q, want warning", quant, alert.Level)
 					}
-					for _, fact := range []string{"dense", "F32", "dequant_tensors=1", fmt.Sprintf("source_bytes=%d", row.DequantBytes)} {
+					for _, fact := range []string{"dense", "F32", "dequant_tensors=1", fmt.Sprintf("source_bytes=%d", row.DequantBytes), fmt.Sprintf("emitted_f32_bytes=%d", dim*vocab*4), "observed_conversion_tensors=1/1"} {
 						if !strings.Contains(alert.Text, fact) {
 							t.Errorf("%s fallback alert omits %q: %q", quant, fact, alert.Text)
 						}
@@ -130,5 +145,40 @@ func TestLoadQuantFallbackAlerts(t *testing.T) {
 				t.Fatal("profile JSON lost fallback evidence")
 			}
 		})
+	}
+}
+
+// fak-test:runtime fast est=1ms
+func TestLoadPathConversionCoverage(t *testing.T) {
+	p := NewLoadProfiler()
+	p.recordLoadPath("Q4_K", false, true, 144, 1, nil)
+	resident := p.loadPathRows()[0]
+	if resident.ConversionF32Bytes == nil || *resident.ConversionF32Bytes != 0 {
+		t.Fatal("resident-only path must observe zero conversion")
+	}
+	p.recordLoadPath("Q4_K", false, false, 144, 1, []pendingTensor{{}})
+	unknown := p.loadPathRows()[0]
+	if unknown.ConversionF32Bytes != nil || unknown.ConversionF32Tensors != 0 {
+		t.Fatal("missing payload must remain unobserved")
+	}
+	p.recordLoadPath("Q4_K", false, false, 144, 1, []pendingTensor{{f32: make([]float32, 256)}})
+	partial := p.Snapshot("test", "fixture.gguf", 1).LoadPaths[0]
+	if partial.ConversionF32Bytes == nil || *partial.ConversionF32Bytes != 1024 || partial.ConversionF32Tensors != 1 || partial.DequantTensors != 2 {
+		t.Fatalf("partial observation lost its coverage: %+v", partial)
+	}
+	p.recordLoadPath("Q4_K", false, false, 144, 1, []pendingTensor{{f32: make([]float32, 256)}})
+	if *partial.ConversionF32Bytes != 1024 || *resident.ConversionF32Bytes != 0 || unknown.ConversionF32Bytes != nil {
+		t.Fatal("later collection changed earlier snapshots")
+	}
+	*partial.ConversionF32Bytes = 99
+	if current := p.loadPathRows()[0]; current.ConversionF32Bytes == nil || *current.ConversionF32Bytes != 2048 {
+		t.Fatal("snapshot mutation changed profiler accounting")
+	}
+	maxBytes := int64(math.MaxInt64)
+	p.loadPaths[loadPathKey{quantType: "Q4_K"}].ConversionF32Bytes = &maxBytes
+	p.recordLoadPath("Q4_K", false, false, 144, 1, []pendingTensor{{f32: []float32{1}}})
+	overflow := p.loadPathRows()[0]
+	if *overflow.ConversionF32Bytes != math.MaxInt64 || overflow.ConversionF32Tensors != 2 || overflow.DequantTensors != 4 {
+		t.Fatalf("overflow must stay outside observation coverage: %+v", overflow)
 	}
 }

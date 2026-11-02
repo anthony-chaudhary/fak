@@ -3,6 +3,7 @@ package ggufload
 import (
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"time"
 
@@ -54,6 +55,11 @@ type LoadPathStat struct {
 	ResidentBytes   int64  `json:"resident_bytes,omitempty"`
 	DequantTensors  int    `json:"dequant_tensors,omitempty"`
 	DequantBytes    int64  `json:"dequant_bytes,omitempty"`
+	// ConversionF32Bytes counts emitted intermediate payloads, not peak allocation
+	// or final residency. Nil means unobserved; coverage is ConversionF32Tensors
+	// out of DequantTensors. Resident-only rows observe zero without conversions.
+	ConversionF32Bytes   *int64 `json:"conversion_f32_bytes"`
+	ConversionF32Tensors int    `json:"conversion_f32_tensors"`
 }
 
 // LoadMemorySample is one point-in-time host-memory observation taken at an
@@ -167,7 +173,7 @@ func NewLoadProfiler() *LoadProfiler {
 // (resident=true) or the f32 dequant round-trip (resident=false). tensors is the number of
 // model tensors the GGUF tensor produced (E for a batched expert blob); bytes is its on-disk
 // payload. Called ONLY from the serial load collector, so it is lock-free. Safe on nil.
-func (p *LoadProfiler) recordLoadPath(quantType string, expert, resident bool, bytes int64, tensors int) {
+func (p *LoadProfiler) recordLoadPath(quantType string, expert, resident bool, bytes int64, tensors int, pending []pendingTensor) {
 	if p == nil || quantType == "" {
 		return
 	}
@@ -183,9 +189,30 @@ func (p *LoadProfiler) recordLoadPath(quantType string, expert, resident bool, b
 	if resident {
 		st.ResidentTensors += tensors
 		st.ResidentBytes += bytes
+		if st.DequantTensors == 0 {
+			zero := int64(0)
+			st.ConversionF32Bytes = &zero
+		}
 	} else {
 		st.DequantTensors += tensors
 		st.DequantBytes += bytes
+		if st.ConversionF32Tensors == 0 {
+			st.ConversionF32Bytes = nil
+		}
+		for _, tensor := range pending {
+			if len(tensor.f32) == 0 || int64(len(tensor.f32)) > math.MaxInt64/4 {
+				continue
+			}
+			materialized := int64(len(tensor.f32)) * 4
+			if st.ConversionF32Bytes != nil {
+				if *st.ConversionF32Bytes > math.MaxInt64-materialized {
+					continue
+				}
+				materialized += *st.ConversionF32Bytes
+			}
+			st.ConversionF32Bytes = &materialized
+			st.ConversionF32Tensors++
+		}
 	}
 }
 
@@ -321,6 +348,9 @@ func (p *LoadProfiler) emitQuantDequantFallbackAlerts() {
 		}
 		text := fmt.Sprintf("quantized load conversion: source_quant=%s class=%s dequant_tensors=%d source_bytes=%d converted through temporary F32 during loading",
 			row.QuantType, class, row.DequantTensors, row.DequantBytes)
+		if row.ConversionF32Bytes != nil {
+			text += fmt.Sprintf(" emitted_f32_bytes=%d observed_conversion_tensors=%d/%d (payload, not peak or final residency)", *row.ConversionF32Bytes, row.ConversionF32Tensors, row.DequantTensors)
+		}
 		p.recordAlert("quant-dequant-fallback", "warning", text)
 		if w := p.alertWriter(); w != nil {
 			fmt.Fprintln(w, "fak: WARNING: "+text)
@@ -506,7 +536,12 @@ func (p *LoadProfiler) loadPathRows() []LoadPathStat {
 	}
 	rows := make([]LoadPathStat, 0, len(p.loadPaths))
 	for _, st := range p.loadPaths {
-		rows = append(rows, *st)
+		row := *st
+		if st.ConversionF32Bytes != nil {
+			bytes := *st.ConversionF32Bytes
+			row.ConversionF32Bytes = &bytes
+		}
+		rows = append(rows, row)
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].Expert != rows[j].Expert {
