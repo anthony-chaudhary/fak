@@ -916,11 +916,12 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 	s.phaseEnd("embed", t)
 
 	s.prefillQwen35HybridQ4KMetalUpload()
+	ropeRows := s.newQwen35PrefillRopeRows(base, P)
 
 	for l := 0; l < cfg.NumLayers; l++ {
 		// These local builtin producers return fresh, separately owned outputs.
 		// The generic callback entry below never grants a disposable qf loan.
-		s.prefillQwen35HybridQ4KLayerOwnedQF(l, X, P, base, eps, proj, pgroup, qz, !s.MetalQ4K && s.Backend == nil)
+		s.prefillQwen35HybridQ4KLayerWithRopeRows(l, X, P, base, eps, proj, pgroup, qz, !s.MetalQ4K && s.Backend == nil, ropeRows)
 	}
 
 	t = s.phaseStart()
@@ -954,6 +955,10 @@ func (s *Session) prefillQwen35HybridQ4KLayer(l int, X []float32, P, base int, e
 // Only the local builtin proj/pgroup closures in prefillQwen35HybridQ4KHidden
 // grant it. Arbitrary callback callers must use the non-owning wrapper above.
 func (s *Session) prefillQwen35HybridQ4KLayerOwnedQF(l int, X []float32, P, base int, eps float32, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz hybridQ4KQuantize, ownsQF bool) {
+	s.prefillQwen35HybridQ4KLayerWithRopeRows(l, X, P, base, eps, proj, pgroup, qz, ownsQF, nil)
+}
+
+func (s *Session) prefillQwen35HybridQ4KLayerWithRopeRows(l int, X []float32, P, base int, eps float32, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz hybridQ4KQuantize, ownsQF bool, ropeRows *qwen35PrefillRopeRows) {
 	dispatchWorkers := currentWorkerCount()
 	m, cfg := s.M, s.M.Cfg
 	H := cfg.HiddenSize
@@ -976,7 +981,7 @@ func (s *Session) prefillQwen35HybridQ4KLayerOwnedQF(l int, X []float32, P, base
 	if cfg.isLinearAttnLayer(l) {
 		o = s.prefillQwen35LinearLayerQ4K(l, Xn, P, proj, pgroup, qz)
 	} else {
-		o = s.prefillQwen35FullAttnLayerQ4KOwnedQF(l, Xn, P, base, proj, pgroup, qz, ownsQF)
+		o = s.prefillQwen35FullAttnLayerQ4KWithRopeRows(l, Xn, P, base, proj, pgroup, qz, ownsQF, ropeRows)
 	}
 	t = s.phaseStart()
 	parFor(len(X), dispatchWorkers, func(lo, hi int) {
@@ -1285,6 +1290,10 @@ func (s *Session) prefillQwen35FullAttnLayerQ4K(l int, Xn []float32, P, base int
 
 // See prefillQwen35HybridQ4KLayerOwnedQF for the only production loan authority.
 func (s *Session) prefillQwen35FullAttnLayerQ4KOwnedQF(l int, Xn []float32, P, base int, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz hybridQ4KQuantize, ownsQF bool) []float32 {
+	return s.prefillQwen35FullAttnLayerQ4KWithRopeRows(l, Xn, P, base, proj, pgroup, qz, ownsQF, nil)
+}
+
+func (s *Session) prefillQwen35FullAttnLayerQ4KWithRopeRows(l int, Xn []float32, P, base int, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz hybridQ4KQuantize, ownsQF bool, ropeRows *qwen35PrefillRopeRows) []float32 {
 	dispatchWorkers := currentWorkerCount()
 	m, cfg := s.M, s.M.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim
@@ -1323,9 +1332,15 @@ func (s *Session) prefillQwen35FullAttnLayerQ4KOwnedQF(l int, Xn []float32, P, b
 		}
 	})
 	s.Cache.Kraw[l] = append(s.Cache.Kraw[l], Kp...)
+	reuseRope := ropeRows.prepare(cfg, l, base, P)
 	parFor(P, dispatchWorkers, func(lo, hi int) {
 		for t := lo; t < hi; t++ {
-			cos, sin := ropeRowForLayer(cfg, l, base+t)
+			var cos, sin []float32
+			if reuseRope {
+				cos, sin = ropeRows.row(t)
+			} else {
+				cos, sin = ropeRowForLayer(cfg, l, base+t)
+			}
 			ropeRowQKInto(Q[t*qWidth:(t+1)*qWidth], Kp[t*w:(t+1)*w], cos, sin, hd, nH, nKV)
 		}
 	})

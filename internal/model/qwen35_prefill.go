@@ -93,6 +93,7 @@ func (s *Session) prefillQwen35HybridQHidden(ids []int) []float32 {
 		}
 	}
 	s.phaseEnd("embed", t)
+	ropeRows := s.newQwen35PrefillRopeRows(base, P)
 
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(str string) string { return layerName(l, str) }
@@ -114,7 +115,7 @@ func (s *Session) prefillQwen35HybridQHidden(ids []int) []float32 {
 		if cfg.isLinearAttnLayer(l) {
 			o = s.prefillQwen35LinearLayerQ(l, Xn, P, qz)
 		} else {
-			o = s.prefillQwen35FullAttnLayerQ(l, Xn, P, base, qz)
+			o = s.prefillQwen35FullAttnLayerQWithRopeRows(l, Xn, P, base, qz, ropeRows)
 		}
 		t = s.phaseStart()
 		parFor(len(X), dispatchWorkers, func(lo, hi int) {
@@ -365,6 +366,10 @@ func (s *Session) prefillQwen35LinearLayerQ(l int, Xn []float32, P int, qz func(
 }
 
 func (s *Session) prefillQwen35FullAttnLayerQ(l int, Xn []float32, P, base int, qz func([]float32, int, int) *q8Panel) []float32 {
+	return s.prefillQwen35FullAttnLayerQWithRopeRows(l, Xn, P, base, qz, nil)
+}
+
+func (s *Session) prefillQwen35FullAttnLayerQWithRopeRows(l int, Xn []float32, P, base int, qz func([]float32, int, int) *q8Panel, ropeRows *qwen35PrefillRopeRows) []float32 {
 	dispatchWorkers := currentWorkerCount()
 	m, cfg := s.M, s.M.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim
@@ -407,9 +412,15 @@ func (s *Session) prefillQwen35FullAttnLayerQ(l int, Xn []float32, P, base int, 
 		}
 	})
 	s.Cache.Kraw[l] = append(s.Cache.Kraw[l], K...)
+	reuseRope := ropeRows.prepare(cfg, l, base, P)
 	parFor(P, dispatchWorkers, func(lo, hi int) {
 		for t := lo; t < hi; t++ {
-			cos, sin := ropeRowForLayer(cfg, l, base+t)
+			var cos, sin []float32
+			if reuseRope {
+				cos, sin = ropeRows.row(t)
+			} else {
+				cos, sin = ropeRowForLayer(cfg, l, base+t)
+			}
 			ropeRowQKInto(Q[t*qWidth:(t+1)*qWidth], K[t*w:(t+1)*w], cos, sin, hd, nH, nKV)
 		}
 	})
