@@ -277,7 +277,9 @@ func nativePDFabricDigest(cfg model.Config, tokens int, row func(layer, plane in
 	for position := 0; position < tokens; position++ {
 		nativePDFabricHashUint(h, uint64(position))
 	}
-	var bits [4]byte
+	// Preserve the canonical byte stream while amortizing hash writes. This
+	// bounded scratch is local to one witness and is flushed before each frame.
+	var encoded [4096]byte
 	for layer := 0; layer < cfg.NumLayers; layer++ {
 		for plane := 0; plane < 3; plane++ {
 			values := row(layer, plane)
@@ -287,9 +289,17 @@ func nativePDFabricDigest(cfg model.Config, tokens int, row func(layer, plane in
 			nativePDFabricHashUint(h, uint64(layer))
 			nativePDFabricHashUint(h, uint64(plane))
 			nativePDFabricHashUint(h, uint64(len(values)))
+			buffered := 0
 			for _, value := range values {
-				binary.LittleEndian.PutUint32(bits[:], math.Float32bits(value))
-				_, _ = h.Write(bits[:])
+				binary.LittleEndian.PutUint32(encoded[buffered:], math.Float32bits(value))
+				buffered += 4
+				if buffered == len(encoded) {
+					_, _ = h.Write(encoded[:])
+					buffered = 0
+				}
+			}
+			if buffered != 0 {
+				_, _ = h.Write(encoded[:buffered])
 			}
 		}
 	}
