@@ -481,6 +481,7 @@ var tier = map[string]int{
 	"workflowaudit":       2, // classifies every branch/tag ref in .github/workflows/*.yml against the branch-role contract (#1697/#1701): development/release-front-door/tag/legacy/unclassified, with an embedded allowlist + a committed audit report; imports only branchrole(1)+stdlib, off the hot path.
 	"fleetmetrics":        1, // pure worker-session duration percentiles (p50/p95) over a ledger; stdlib-only, off the hot path.
 	"fusedturn":           1, // executable "one turn spawns both": classifies each abi.ToolCall into its concept-family (classical / weight-based) + folds a FusedTurn (fused iff it spans both) whose Adjudicate proves both families cross ONE floor via an injected Decider (*kernel.Kernel.BatchDecide); imports only abi(0), off the hot path.
+	"worktreereapcli":     2, // bounded single-worker retirement CLI over wipinventory(1), wiplifecycle(2), and workerworktree(2); preserves their ownership and recovery guards.
 	"workerworktree":      2, // native port of tools/worker_worktree.py (#3168): per-worker git worktree isolation (prepare detached-at-SHA / land diff onto trunk / reap) that the Go dispatch spawn wires in behind a default-off flag; imports windowgate(1) for the no-window git runner + stdlib, off the hot path.
 	"speedab":             1, // pure pinned fast-vs-standard manifest grader; stdlib-only, off the hot path.
 	"issuecost":           2, // per-issue worker elapsed/attempts/outcome ledger → median+p95 (reuses fleetmetrics); stdlib-only, off the hot path.
@@ -788,6 +789,8 @@ var tier = map[string]int{
 	"h2hbench":       1, // off-path engine head-to-head benchmark; stdlib-only, imports nothing internal.
 	"worktreeprune":  1, // stdlib-only broad `git worktree prune` refusal on foreign-OS registrations plus own-registration cleanup.
 	"fitplan":        2,
+
+	"inferencetopology": 2, // declarative topology and observed-only finite search composed from fitplan(2); no execution or inferred performance authority.
 
 	"reasoneval": 1, // Pure AIME/GPQA rule scoring and normalization; stdlib-only, off the hot path.
 
