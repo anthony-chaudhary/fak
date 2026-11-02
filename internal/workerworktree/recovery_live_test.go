@@ -58,6 +58,74 @@ func TestRemoteRecoveryBareRemoteSurvivesFreshClone(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=1s lane=default
+func TestRecoveryRepeatedWitnessRefreshesUnchangedHead(t *testing.T) {
+	for _, publish := range []bool{false, true} {
+		name := "fetch"
+		if publish {
+			name = "publish"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			remote := filepath.Join(root, "remote.git")
+			repo := filepath.Join(root, "repo")
+			runGitTest(t, root, "init", "--bare", remote)
+			runGitTest(t, root, "init", repo)
+			t.Setenv("GIT_AUTHOR_NAME", "Recovery Test")
+			t.Setenv("GIT_AUTHOR_EMAIL", "recovery@example.invalid")
+			t.Setenv("GIT_COMMITTER_NAME", "Recovery Test")
+			t.Setenv("GIT_COMMITTER_EMAIL", "recovery@example.invalid")
+			t.Setenv("GIT_AUTHOR_DATE", "1000000000 +0000")
+			t.Setenv("GIT_COMMITTER_DATE", "1000000000 +0000")
+			runGitTest(t, repo, "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "seed")
+			head := strings.TrimSpace(runGitTest(t, repo, "rev-parse", "HEAD"))
+			runGitTest(t, repo, "remote", "add", "origin", remote)
+			ref := RecoveryRefPrefix + "repeat/" + head
+			runGitTest(t, repo, "update-ref", ref, head)
+			stamp, _ := mirrorStampRef("origin")
+			peerStamp, _ := mirrorStampRef("unrelated")
+			runGitTest(t, repo, "update-ref", "--create-reflog", peerStamp, head)
+			witness := func(date string) {
+				t.Setenv("GIT_COMMITTER_DATE", date)
+				if publish {
+					if got := PublishRecoveryRef(repo, "origin", ref, head, nil); !got.Witnessed {
+						t.Fatalf("publish: %+v", got)
+					}
+				} else if err := FetchRecoveryMirror(repo, "origin", nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			witness("1000100000 +0000")
+			first := strings.TrimSpace(runGitTest(t, repo, "rev-parse", stamp))
+			witness("1000200000 +0000")
+			age, known := mirrorAge(repo, "origin", nil, 1000200007)
+			if !known || age != 7 {
+				t.Fatalf("repeat same HEAD: age=%d known=%v; want 7,true", age, known)
+			}
+			second := strings.TrimSpace(runGitTest(t, repo, "rev-parse", stamp))
+			if second == first {
+				t.Fatal("repeat witness did not advance event")
+			}
+			if got := strings.TrimSpace(runGitTest(t, repo, "show", "-s", "--format=%ct", stamp)); got != "1000200000" {
+				t.Fatalf("old reader timestamp=%s", got)
+			}
+			witness("1000200000 +0000")
+			if got := strings.TrimSpace(runGitTest(t, repo, "rev-parse", stamp)); got == second {
+				t.Fatal("same-second witness reused event")
+			}
+			if got := strings.TrimSpace(runGitTest(t, repo, "show", "-s", "--format=%P", stamp)); got != "" {
+				t.Fatalf("event retained permanent parent chain: %s", got)
+			}
+			if got := strings.TrimSpace(runGitTest(t, repo, "rev-parse", "HEAD")); got != head {
+				t.Fatal("HEAD changed")
+			}
+			if got := strings.TrimSpace(runGitTest(t, repo, "rev-parse", peerStamp)); got != head {
+				t.Fatal("unrelated remote stamp changed")
+			}
+		})
+	}
+}
+
 func runGitTest(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	c := exec.Command("git", args...)

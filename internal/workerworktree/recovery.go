@@ -1,6 +1,7 @@
 package workerworktree
 
 import (
+	"crypto/rand"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -147,8 +148,8 @@ func PublishRecoveryRef(root, remote, ref, sha string, git GitRunner) RemoteRead
 		return receipt
 	}
 	stamp, _ := mirrorStampRef(remote)
-	if rc, out := run(git, root, []string{"update-ref", "--create-reflog", "-m", mirrorReflogMessage, stamp, receipt.SHA}); rc != 0 {
-		receipt.Reason = "remote matched but freshness stamp failed: " + strings.TrimSpace(out)
+	if err := writeMirrorStamp(root, remote, stamp, receipt.SHA, git); err != nil {
+		receipt.Reason = "remote matched but freshness stamp failed: " + err.Error()
 		return receipt
 	}
 	receipt.Witnessed = true
@@ -167,14 +168,58 @@ func FetchRecoveryMirror(root, remote string, git GitRunner) error {
 		return fmt.Errorf("worker-land mirror fetch failed: %s", strings.TrimSpace(out))
 	}
 	// A successful empty fetch still needs a freshness receipt. Point the stamp at
-	// HEAD: the reflog time is the evidence; it does not claim a candidate exists.
+	// a fresh event at HEAD's tree: this is evidence, not a code candidate.
 	rc, head := run(git, root, []string{"rev-parse", "HEAD"})
 	if rc != 0 || strings.TrimSpace(head) == "" {
 		return fmt.Errorf("mirror fetched but HEAD could not seed freshness stamp")
 	}
 	stamp, _ := mirrorStampRef(remote)
-	if rc, out := run(git, root, []string{"update-ref", "--create-reflog", "-m", mirrorReflogMessage, stamp, strings.TrimSpace(head)}); rc != 0 {
-		return fmt.Errorf("mirror fetched but freshness stamp failed: %s", strings.TrimSpace(out))
+	if err := writeMirrorStamp(root, remote, stamp, strings.TrimSpace(head), git); err != nil {
+		return fmt.Errorf("mirror fetched but freshness stamp failed: %w", err)
+	}
+	return nil
+}
+
+// writeMirrorStamp records a new non-code witness even when the mirrored object
+// did not change. Parentless commits preserve old commit-shaped readers without
+// permanently retaining a chain of events; normal reflog retention still applies.
+func writeMirrorStamp(root, remote, stamp, witnessed string, git GitRunner) error {
+	rc, old := run(git, root, []string{"rev-parse", "--verify", "--quiet", stamp})
+	old = strings.TrimSpace(old)
+	if rc != 0 && rc != 1 {
+		return fmt.Errorf("read prior stamp: %s", old)
+	}
+	if rc == 1 {
+		old = ""
+	} else if old == "" {
+		return fmt.Errorf("empty prior stamp")
+	}
+	message := strings.Join([]string{mirrorReflogMessage, "remote: " + remote, "witnessed: " + witnessed, "event: " + rand.Text()}, "\n")
+	// Explicit synthetic identity also works in a fresh clone without user config.
+	rc, event := run(git, root, []string{"-c", "user.name=FAK recovery", "-c", "user.email=fak-recovery@example.invalid", "-c", "commit.gpgsign=false", "commit-tree", witnessed + "^{tree}", "-m", message})
+	if rc != 0 {
+		return fmt.Errorf("create stamp event: %s", strings.TrimSpace(event))
+	}
+	event = strings.TrimSpace(event)
+	if event == "" || !isRefObjectToken(event) {
+		return fmt.Errorf("invalid stamp event object")
+	}
+	rc, date := run(git, root, []string{"show", "-s", "--format=%ct", event})
+	sec, err := strconv.ParseInt(strings.TrimSpace(date), 10, 64)
+	if rc != 0 || err != nil || sec < 0 {
+		return fmt.Errorf("invalid stamp event time: %s", strings.TrimSpace(date))
+	}
+	// Reject known backwards event clocks. CAS below rejects intervening writers;
+	// neither promises a monotonic system clock. Future reader ages remain unknown.
+	if old != "" {
+		if _, known := mirrorAge(root, remote, git, sec); !known {
+			return fmt.Errorf("prior stamp time unavailable or newer than event")
+		}
+	}
+	// Empty expected-old requires absence; never delete/recreate or overwrite a
+	// concurrent successful witness. A failed CAS leaves the prior ref intact.
+	if rc, out := run(git, root, []string{"update-ref", "--create-reflog", "-m", mirrorReflogMessage, stamp, event, old}); rc != 0 {
+		return fmt.Errorf("compare-and-swap stamp: %s", strings.TrimSpace(out))
 	}
 	return nil
 }

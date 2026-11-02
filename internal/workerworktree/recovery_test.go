@@ -107,6 +107,9 @@ func TestPublishRecoveryRefRequiresExactRemoteReadback(t *testing.T) {
 	g := newFakeGit().
 		reply("push", 0, "").
 		reply("ls-remote", 0, "abc1234\trefs/fak/worker-land/wt/abc1234\n").
+		reply("rev-parse", 1, "").
+		reply("commit-tree", 0, "event1234\n").
+		reply("show", 0, "1000200000\n").
 		reply("update-ref", 0, "")
 	ref := RecoveryRefPrefix + "wt/abc1234"
 	r := PublishRecoveryRef("/repo", "origin", ref, "abc1234", g.run)
@@ -175,5 +178,61 @@ func TestRemoteCleanupIsReportFirstAndRequiresRemoteAncestry(t *testing.T) {
 	peer := CleanupRemoteRecoveryRef("/repo", "origin", RecoveryRefPrefix+"peer/abc1234", "mine", false, true, g.run)
 	if peer.Applied || !strings.Contains(peer.Reason, "allow-peer") {
 		t.Fatalf("peer guard = %+v", peer)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestRecoveryMirrorStampFailurePreservesPrior(t *testing.T) {
+	for _, failure := range []string{"read", "create", "time", "unavailable", "future", "cas"} {
+		t.Run(failure, func(t *testing.T) {
+			stamp, _ := mirrorStampRef("origin")
+			updates := 0
+			g := func(_ string, args []string) (int, string) {
+				switch gitVerb(args) {
+				case "rev-parse":
+					if failure == "read" {
+						return 128, "read failed"
+					}
+					return 0, "old1234"
+				case "commit-tree":
+					if failure == "create" {
+						return 1, "creation failed"
+					}
+					return 0, "event1234"
+				case "show":
+					if failure == "time" {
+						return 0, "invalid"
+					}
+					return 0, "1000200000"
+				case "reflog":
+					if failure == "unavailable" {
+						return 1, "reflog unavailable"
+					}
+					if failure == "future" {
+						return 0, stamp + "@{1000200001}"
+					}
+					return 0, stamp + "@{1000100000}"
+				case "update-ref":
+					updates++
+					if len(args) != 7 || args[4] != stamp || args[5] != "event1234" || args[6] != "old1234" {
+						t.Fatalf("not expected-old CAS: %v", args)
+					}
+					return 1, "concurrent writer changed stamp"
+				default:
+					t.Fatalf("unexpected command: %v", args)
+					return 1, "unexpected"
+				}
+			}
+			if err := writeMirrorStamp("/repo", "origin", stamp, "witness1234", g); err == nil {
+				t.Fatal("failure became successful freshness")
+			}
+			want := 0
+			if failure == "cas" {
+				want = 1
+			}
+			if updates != want {
+				t.Fatalf("updates=%d want=%d", updates, want)
+			}
+		})
 	}
 }
