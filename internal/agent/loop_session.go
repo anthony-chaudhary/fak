@@ -238,6 +238,7 @@ type runConfig struct {
 	contextControl bool
 	systemPrompt   string
 	memoryDigest   string
+	repoMap        *RepoMapPreload
 	// modelRequestObserver runs synchronously after directive splicing and the
 	// one context-planning pass, immediately before the Planner call.
 	modelRequestObserver    ModelRequestObserver

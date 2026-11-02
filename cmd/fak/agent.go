@@ -52,6 +52,8 @@ type agentFlags struct {
 	policyPath            *string
 	codeTools             *bool
 	codeWorkspace         *string
+	repoMapFiles          repoMapFileList
+	repoMapTokens         *int
 	allowBashCommands     exactBashCommandList
 	bashCommandTimeout    *time.Duration
 	bashCommandTimeoutSet bool
@@ -102,6 +104,8 @@ func newAgentFlagSet() (*flag.FlagSet, *agentFlags) {
 	af.policyPath = fs.String("policy", "", "load the capability floor from a manifest (default: the built-in floor plus bounded repository code tools when enabled; see `fak policy --dump`)")
 	af.codeTools = fs.Bool("code-tools", true, "arm bounded kernel Read/Write/Edit/Bash/Grep/Glob in the current repository; use --code-tools=false to disable")
 	af.codeWorkspace = fs.String("code-workspace", "", "override the workspace root for default-on bounded repository code tools")
+	fs.Var(&af.repoMapFiles, "repo-map-file", "opt in to upfront native Read of this exact relative Go file and a ranked map (repeatable, max8; fresh --native arm only; no discovery)")
+	af.repoMapTokens = fs.Int("repo-map-tokens", 0, "estimated map token budget (UTF-8 bytes/4), 256..4096; 0 uses2048 with --repo-map-file; native read policy unchanged")
 	fs.Var(&af.allowBashCommands, "allow-bash-command", "grant one byte-exact command to the bounded native Bash tool (repeatable; focused defaults and all other safety gates remain active)")
 	af.bashCommandTimeout = fs.Duration("bash-command-timeout", 2*time.Minute, "hard timeout for each bounded native Bash command (positive, maximum 10m)")
 	af.sysTools = fs.Bool("sys-tools", true, "arm safe read-only system and web utility tools (get_time, fetch_web, web_search); use --sys-tools=false to disable")
@@ -433,6 +437,9 @@ func runAgent(argv []string) {
 		!offlineExplicit && !workflowExplicit && !resumeExplicit && !outExplicit && !logExplicit &&
 		strings.TrimSpace(*af.resume) == "" && strings.TrimSpace(*af.workflow) == ""
 
+	repoMapOpt, err := resolveAgentRepoMapOption(af, isNative, interactive)
+	must(err)
+
 	if af.reasoningProfile != nil && *af.reasoningProfile != "" {
 		if err := validateReasoningProfile(*af.reasoningProfile); err != nil {
 			fmt.Fprintf(os.Stderr, "fak agent: %v\n", err)
@@ -503,6 +510,9 @@ func runAgent(argv []string) {
 	loadedRoute, loadedAccounts, runOpts, err := loadAgentRouteOptionsWithAccounts(*af.routeManifest, *af.routeAccounts)
 	must(err)
 	runOpts = append(runOpts, agent.WithResponseProfileSource(preference.Source))
+	if repoMapOpt != nil {
+		runOpts = append(runOpts, repoMapOpt)
+	}
 	if loadedRoute != nil && !isRaw {
 		fmt.Fprintf(os.Stderr, "fak agent: loaded model-routing policy from %s\n", *af.routeManifest)
 	}

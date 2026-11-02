@@ -103,6 +103,8 @@ type armRunner struct {
 	envelopeMu              sync.Mutex
 	streamingFSM            *StreamingToolFSM
 	codeReads               *codeReadObservations
+	repoMapPrepared         bool
+	repoMapPreload          *repoMapPreloadState
 	// The recoverable-infrastructure-reprompt budget (infra_reprompt.go): a positive
 	// repromptRemaining means a classified recoverable Complete failure may re-prompt
 	// instead of hard-stopping. Zero is the historical behavior (the loop never reprompts).
@@ -279,6 +281,12 @@ func (r *armRunner) runTurn(ctx context.Context, turn int) (bool, error) {
 	perTurnCap, stop, err := r.beginTurn(ctx, turn)
 	if err != nil || stop {
 		return stop, err
+	}
+
+	if err := r.prepareRepoMap(ctx, turn); err != nil {
+		r.finalizeFak()
+		r.saveCheckpoint(turn, "active")
+		return false, err
 	}
 
 	asst, action, err := r.requestModel(ctx, turn, perTurnCap)
@@ -948,11 +956,13 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 			r.metrics.ToolErrors++
 		}
 		isDenied := ev.Verdict == "DENY" || ev.Verdict == "DENIED" || ev.Verdict == "BARRED" || ev.Verdict == "DROPPED" || ev.Verdict == "route-error" || (res.verdict != nil && res.verdict.Kind == abi.VerdictDeny)
+		messageContent, repoMapErr := r.compactRepoMapRead(tool, rawArgs, content, res.abiRes,
+			isToolResultFailure(res.isErr, ev.Verdict, content), isDenied)
 		r.metrics.recordNativeGoEdit(tool, rawArgs, content, res.abiRes, isDenied)
 		if tool == toolDelete && !isDenied {
 			r.metrics.DestructiveExecuted = true
 		}
-		if strings.Contains(strings.ToLower(content), "ignore previous instructions") {
+		if strings.Contains(strings.ToLower(messageContent), "ignore previous instructions") {
 			r.metrics.InjectionInContext = true
 		}
 		if tool == toolBook && strings.Contains(content, "confirmation") && !strings.Contains(content, `"error"`) {
@@ -971,10 +981,10 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 		if recordRepeatedFailure(&r.repeatedFailures, tool, rawArgs, content) {
 			return fmt.Errorf("REPEATED_IDENTICAL_TOOL_FAILURE: tool %s failed three consecutive times", tool)
 		}
-		r.messages = append(r.messages, Message{Role: RoleTool, ToolCallID: tc.ID, Name: tool, Content: content})
+		r.messages = append(r.messages, Message{Role: RoleTool, ToolCallID: tc.ID, Name: tool, Content: messageContent})
 		r.cfg.emitProgress(ProgressEvent{
 			Kind: ProgressResultAdmitted, Turn: turn + 1, CallID: tc.ID, Tool: tool,
-			Taint: admittedTaint(ev, content), Summary: progressResultSummary(tool, content),
+			Taint: admittedTaint(ev, messageContent), Summary: progressResultSummary(tool, messageContent),
 		})
 		if r.envelopeSink != nil {
 			callID := tc.ID
@@ -991,7 +1001,7 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 				CallID:  callID,
 				Name:    tool,
 				Status:  status,
-				Summary: progressResultSummary(tool, content),
+				Summary: progressResultSummary(tool, messageContent),
 			})
 		}
 		if r.speculation != nil {
@@ -1001,7 +1011,7 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 				Status:  abi.StatusOK,
 			})
 		}
-		return nil
+		return repoMapErr
 	}
 
 	var allResults []toolExecResult
@@ -1096,6 +1106,12 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 	if stopped {
 		r.finalizeFak()
 		return true, nil
+	}
+
+	if r.repoMapPreload != nil {
+		// Preload results use the ordinary admission path, not a completed model
+		// turn. Do not launch speculative reads beyond the explicit selection.
+		return false, nil
 	}
 
 	if len(allResults) > 0 {
