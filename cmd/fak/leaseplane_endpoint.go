@@ -54,6 +54,10 @@ func serveWorkspaceLeaseAdmission(ctx context.Context) (gateway.WorkspaceLeaseAd
 	dosReadDeadline, cancel := context.WithTimeout(ctx, workspaceLeaseAdmissionTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(dosReadDeadline, "dos", "lease-lane", "live")
+	cmd.Env, err = dosLeaseAuthorityEnvironment(os.Environ())
+	if err != nil {
+		return gateway.WorkspaceLeaseAdmissionView{}, fmt.Errorf("prepare DOS authority runtime: %w", err)
+	}
 	// DOS workspace discovery is cwd based. Passing an explicit workspace path
 	// can select a different .dos store than the repository-local authority.
 	cmd.Dir = absRoot
