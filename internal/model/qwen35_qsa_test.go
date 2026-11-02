@@ -120,6 +120,12 @@ func TestQSA_SparseRowGatherDecodeEquivalence(t *testing.T) {
 		NumKVHeads: nKV,
 		NumLayers:  2,
 		LayerTypes: []string{"linear_attention", "qsa"},
+
+		LinearNumKeyHeads:   1,
+		LinearNumValueHeads: 1,
+		LinearKeyHeadDim:    1,
+		LinearValueHeadDim:  1,
+		LinearConvKernelDim: 2,
 	}
 
 	totalTokens := 16384

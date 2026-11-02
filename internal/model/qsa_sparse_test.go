@@ -107,6 +107,12 @@ func TestQSASparseRowGather_ParityAndNumericalEquivalence(t *testing.T) {
 		NumKVHeads: numKVHeads,
 		NumLayers:  2,
 		LayerTypes: []string{"linear_attention", "full_attention"},
+
+		LinearNumKeyHeads:   1,
+		LinearNumValueHeads: 1,
+		LinearKeyHeadDim:    1,
+		LinearValueHeadDim:  1,
+		LinearConvKernelDim: 2,
 	}
 
 	targetLayer := 1
@@ -346,6 +352,12 @@ func TestQSADecodeSessionBufferReservation(t *testing.T) {
 			"linear_attention",
 			"full_attention",
 		},
+
+		LinearNumKeyHeads:   1,
+		LinearNumValueHeads: 1,
+		LinearKeyHeadDim:    1,
+		LinearValueHeadDim:  1,
+		LinearConvKernelDim: 2,
 	}
 
 	m := &Model{Cfg: cfg}
@@ -386,6 +398,12 @@ func TestQSADecodeSessionBufferReservation(t *testing.T) {
 		VocabSize:        1000,
 		NumLayers:        2,
 		LayerTypes:       []string{"linear_attention", "linear_attention"},
+
+		LinearNumKeyHeads:   1,
+		LinearNumValueHeads: 1,
+		LinearKeyHeadDim:    1,
+		LinearValueHeadDim:  1,
+		LinearConvKernelDim: 2,
 	}
 	sNonQSA := &Session{
 		M:     &Model{Cfg: nonQSACfg},
