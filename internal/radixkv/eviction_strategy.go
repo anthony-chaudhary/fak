@@ -71,6 +71,21 @@ type lruStrategy struct{}
 func (lruStrategy) Name() string               { return "lru" }
 func (lruStrategy) Priority(n *node) victimKey { return victimKey{age: n.lastUsed} }
 
+// MRU priority rule ported from SGLang, Copyright 2023-2024 SGLang Team.
+// SPDX-License-Identifier: Apache-2.0
+// Source: python/sglang/srt/mem_cache/evict_policy.py:10-65 (MRUStrategy)
+// at 00a9a81b67774e8374172646c092e14999472703.
+// License: https://www.apache.org/licenses/LICENSE-2.0
+// Modified for Fak: SGLang's -node.last_access_time becomes the complement of the
+// unsigned logical clock (^lastUsed), which reverses recency without signed overflow;
+// untouched warm leaves keep the prewarm admission fence through insertionOrderKey.
+type mruStrategy struct{}
+
+func (mruStrategy) Name() string { return "mru" }
+func (mruStrategy) Priority(n *node) victimKey {
+	return insertionOrderKey(n, ^n.lastUsed)
+}
+
 // FIFO/FILO priority rules ported from SGLang, Copyright 2023-2024 SGLang Team.
 // SPDX-License-Identifier: Apache-2.0
 // Source: python/sglang/srt/mem_cache/evict_policy.py:24-35
@@ -190,6 +205,7 @@ func nodeEvictionSeg(n *node, clock uint64) int {
 // first policy the open seam adds. RegisterVictimStrategy extends it in-package.
 var victimStrategies = map[string]func() VictimStrategy{
 	"lru":                func() VictimStrategy { return lruStrategy{} },
+	"mru":                func() VictimStrategy { return mruStrategy{} },
 	"fifo":               func() VictimStrategy { return fifoStrategy{} },
 	"filo":               func() VictimStrategy { return filoStrategy{} },
 	"cost-aware":         func() VictimStrategy { return costAwareStrategy{} },

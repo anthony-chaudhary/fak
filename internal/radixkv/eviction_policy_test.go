@@ -401,6 +401,76 @@ func TestEvictionStrategyFIFOFILOVictimOrder(t *testing.T) {
 	}
 }
 
+// TestEvictionStrategyMRUVictimOrder pins the borrowed SGLang MRU rule: among
+// unleased leaves the NEWEST lastUsed is the victim, a leased leaf is never
+// selected even when it is the newest touch, and the bare-tree default stays LRU.
+// fak-test:runtime fast est=10ms lane=default
+func TestEvictionStrategyMRUVictimOrder(t *testing.T) {
+	t.Run("newest_touch_first", func(t *testing.T) {
+		tree, err := NewWithEvictionStrategy(30, "mru")
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, b, c := distinctReq(0, 10), distinctReq(1, 10), distinctReq(2, 10)
+		touchPure(tree, a)
+		touchPure(tree, b)
+		touchPure(tree, c) // newest touch
+
+		_, d := servePure(tree, distinctReq(3, 10))
+		defer tree.Done(d)
+
+		if got := tree.MatchLen(c); got != 0 {
+			t.Fatalf("mru must evict the newest-touched unleased leaf c, matched %d", got)
+		}
+		if got := tree.MatchLen(a); got != len(a) {
+			t.Fatalf("oldest touch a must survive, matched %d/%d", got, len(a))
+		}
+		if got := tree.MatchLen(b); got != len(b) {
+			t.Fatalf("middle touch b must survive, matched %d/%d", got, len(b))
+		}
+		if st := tree.Stats(); st.Evictions != 1 || st.LastEvictPolicy != "mru" {
+			t.Fatalf("evictions/policy = %d/%s, want 1/mru", st.Evictions, st.LastEvictPolicy)
+		}
+	})
+
+	t.Run("leased_never_selected", func(t *testing.T) {
+		tree, err := NewWithEvictionStrategy(30, "mru")
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, b, c := distinctReq(0, 10), distinctReq(1, 10), distinctReq(2, 10)
+		touchPure(tree, a)
+		touchPure(tree, b)
+		touchPure(tree, c) // newest touch, now leased below
+
+		lease, _ := tree.Lookup(c)
+		defer tree.Done(lease)
+
+		_, d := servePure(tree, distinctReq(3, 10))
+		defer tree.Done(d)
+
+		if got := tree.MatchLen(c); got != len(c) {
+			t.Fatalf("leased newest leaf c must survive, matched %d/%d", got, len(c))
+		}
+		if got := tree.MatchLen(b); got != 0 {
+			t.Fatalf("newest UNLEASSED leaf b must be the victim, matched %d", got)
+		}
+		if got := tree.MatchLen(a); got != len(a) {
+			t.Fatalf("oldest touch a must survive, matched %d/%d", got, len(a))
+		}
+		if st := tree.Stats(); st.LastEvictLocked != 2 {
+			t.Fatalf("last eviction locked=%d, want 2 (leased c and in-flight d)", st.LastEvictLocked)
+		}
+	})
+
+	t.Run("default_stays_lru", func(t *testing.T) {
+		tree := New(30)
+		if st := tree.Stats(); st.EvictionPolicy != "lru" {
+			t.Fatalf("bare New() EvictionPolicy = %q, want lru", st.EvictionPolicy)
+		}
+	})
+}
+
 // heapRescanLRU uses the existing per-victim selector as the parity oracle. Its
 // concrete type deliberately differs from the pure-LRU optimized strategy.
 type heapRescanLRU struct{}
