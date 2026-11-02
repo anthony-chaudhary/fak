@@ -139,7 +139,8 @@
       "distinct_from": [
         "policy-loaded",
         "adjudicator",
-        "verdict"
+        "verdict",
+        "policyexceedsmeasuredcapacity"
       ],
       "aliases": [
         "AdmissionPolicy",

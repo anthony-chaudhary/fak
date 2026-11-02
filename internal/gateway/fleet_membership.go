@@ -134,6 +134,8 @@ type MembershipEvent struct {
 }
 
 type memberWorker struct {
+	incarnation        uint64
+	legacyInflight     int
 	spec               WorkerSpec
 	health             WorkerHealth
 	draining           bool
@@ -195,10 +197,12 @@ type FleetMembership struct {
 	unhealthyAfter int // consecutive failed probes to evict a healthy worker (hysteresis)
 	probe          Probe
 
-	mu      sync.Mutex
-	workers map[string]*memberWorker
-	order   []string // stable registration order, for deterministic keyed ties
-	events  []MembershipEvent
+	mu              sync.Mutex
+	workers         map[string]*memberWorker
+	retired         map[string]*memberWorker // ID-only legacy bookings fence replacement until released
+	nextIncarnation uint64
+	order           []string // stable registration order, for deterministic keyed ties
+	events          []MembershipEvent
 }
 
 // fleetReservation is one logical request's occupancy booking. A retry retargets
@@ -206,6 +210,7 @@ type FleetMembership struct {
 // the membership lock, so there is never a selected-but-unbooked fallback. Release
 // is idempotent and never lets occupancy become negative.
 type fleetReservation struct {
+	worker             *memberWorker // captured incarnation; never charge a replacement
 	mu                 sync.Mutex
 	fleet              *FleetMembership
 	workerID           string
@@ -270,10 +275,11 @@ func (m *FleetMembership) Add(spec WorkerSpec) error {
 	spec.Models = normalizeModels(spec.Models)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.workers[spec.ID]; ok {
+	if _, ok := m.workers[spec.ID]; ok || m.retired[spec.ID] != nil {
 		return fmt.Errorf("%w: %q", ErrWorkerExists, spec.ID)
 	}
-	m.workers[spec.ID] = &memberWorker{spec: spec, health: HealthUnknown}
+	m.nextIncarnation++
+	m.workers[spec.ID] = &memberWorker{spec: spec, health: HealthUnknown, incarnation: m.nextIncarnation}
 	m.order = append(m.order, spec.ID)
 	m.emit(MembershipEvent{Kind: EventAdded, WorkerID: spec.ID, To: HealthUnknown})
 	return nil
@@ -290,6 +296,12 @@ func (m *FleetMembership) Remove(id string) error {
 func (m *FleetMembership) removeLocked(id string) error {
 	if _, ok := m.workers[id]; !ok {
 		return fmt.Errorf("%w: %q", ErrWorkerUnknown, id)
+	}
+	if w := m.workers[id]; w.legacyInflight > 0 {
+		if m.retired == nil {
+			m.retired = make(map[string]*memberWorker)
+		}
+		m.retired[id] = w
 	}
 	delete(m.workers, id)
 	for i, wid := range m.order {
@@ -339,6 +351,7 @@ func (m *FleetMembership) Admissible() []WorkerSpec {
 // WorkerStatus is the per-worker membership/health row the observability surface
 // publishes (labeled by ID) — the live replacement for a static endpoint row.
 type WorkerStatus struct {
+	Incarnation        uint64
 	Spec               WorkerSpec
 	Health             WorkerHealth
 	Draining           bool
@@ -353,7 +366,7 @@ func (m *FleetMembership) Snapshot() []WorkerStatus {
 	out := make([]WorkerStatus, 0, len(m.order))
 	for _, id := range m.order {
 		if w := m.workers[id]; w != nil {
-			out = append(out, WorkerStatus{Spec: w.spec, Health: w.health, Draining: w.draining, Inflight: w.inflight, BookedOutputBlocks: w.bookedOutputBlocks})
+			out = append(out, WorkerStatus{Incarnation: w.incarnation, Spec: w.spec, Health: w.health, Draining: w.draining, Inflight: w.inflight, BookedOutputBlocks: w.bookedOutputBlocks})
 		}
 	}
 	return out
@@ -376,6 +389,7 @@ func (m *FleetMembership) reserveForModel(model string, engine EngineKind, allow
 	}
 	return &fleetReservation{
 		fleet:              m,
+		worker:             m.workers[decision.workerID],
 		workerID:           decision.workerID,
 		engine:             m.workers[decision.workerID].spec.Engine,
 		bookedOutputBlocks: decision.bookedOutputBlocks,
@@ -407,6 +421,7 @@ func (m *FleetMembership) reserveForModelLocked(model string, engine EngineKind,
 			continue
 		}
 		statuses = append(statuses, WorkerStatus{
+			Incarnation:        w.incarnation,
 			Spec:               w.spec,
 			Health:             w.health,
 			Draining:           w.draining,
@@ -483,8 +498,10 @@ func (r *fleetReservation) Retarget(model string, allowed, skip map[string]struc
 	defer m.mu.Unlock()
 
 	failed := r.workerID
-	m.releaseReservationLocked(failed, r.bookedOutputBlocks)
-	m.markDispatchFailureLocked(failed)
+	if m.workers[failed] == r.worker {
+		m.releaseReservationLocked(failed, r.bookedOutputBlocks)
+		m.markDispatchFailureLocked(failed)
+	}
 
 	decision, err := m.reserveForModelLocked(model, r.engine, allowed, skip, pick)
 	if err != nil {
@@ -492,6 +509,7 @@ func (r *fleetReservation) Retarget(model string, allowed, skip map[string]struc
 		r.released = true
 		return "", err
 	}
+	r.worker = m.workers[decision.workerID]
 	r.workerID = decision.workerID
 	r.bookedOutputBlocks = decision.bookedOutputBlocks
 	return decision.workerID, nil
@@ -508,7 +526,9 @@ func (r *fleetReservation) Release() {
 		return
 	}
 	r.fleet.mu.Lock()
-	r.fleet.releaseReservationLocked(r.workerID, r.bookedOutputBlocks)
+	if r.fleet.workers[r.workerID] == r.worker {
+		r.fleet.releaseReservationLocked(r.workerID, r.bookedOutputBlocks)
+	}
 	r.fleet.mu.Unlock()
 	r.workerID = ""
 	r.released = true
@@ -526,9 +546,11 @@ func (m *FleetMembership) ProbeOnce(ctx context.Context) {
 	}
 	m.mu.Lock()
 	specs := make([]WorkerSpec, 0, len(m.order))
+	incarnations := make(map[string]*memberWorker, len(m.order))
 	for _, id := range m.order {
 		if w := m.workers[id]; w != nil {
 			specs = append(specs, w.spec)
+			incarnations[id] = w
 		}
 	}
 	m.mu.Unlock()
@@ -541,7 +563,7 @@ func (m *FleetMembership) ProbeOnce(ctx context.Context) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, spec := range specs {
-		if w := m.workers[spec.ID]; w != nil { // skip workers removed mid-probe
+		if w := m.workers[spec.ID]; w != nil && w == incarnations[spec.ID] { // fence replaced workers
 			m.applyProbeLocked(w, results[spec.ID])
 		}
 	}
@@ -646,16 +668,38 @@ func (m *FleetMembership) Acquire(id string) error {
 			return ErrNoHealthyWorker
 		}
 		w.inflight++
+		w.legacyInflight++
 		return nil
 	})
 }
 
+// Release is the legacy ID-only API: callers MUST balance each successful
+// Acquire with exactly one Release. It cannot identify a duplicate after ID reuse;
+// request-owned reservation guards are the idempotent completion API.
+// Replacement is blocked while removed legacy acquisitions remain outstanding.
 // Release marks an in-flight request done. If the worker was draining and this was
 // its last in-flight request, the worker is removed (drain-before-remove complete).
 func (m *FleetMembership) Release(id string) {
-	m.withWorkerLockVoid(id, func(w *memberWorker) {
-		m.releaseWorkerLocked(id, w)
-	})
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	w := m.workers[id]
+	retired := false
+	if old := m.retired[id]; old != nil {
+		w = old
+		retired = true
+	}
+	if w == nil || w.legacyInflight == 0 {
+		return
+	}
+	w.legacyInflight--
+	if retired {
+		w.inflight--
+		if w.legacyInflight == 0 {
+			delete(m.retired, id)
+		}
+		return
+	}
+	m.releaseWorkerLocked(id, w)
 }
 
 func (m *FleetMembership) releaseLocked(id string) {
@@ -780,6 +824,10 @@ func (m *FleetMembership) classifyForModelLocked(model string) ([]string, error)
 func (m *FleetMembership) pickKeyedForModel(model string, skip map[string]struct{}, key string) (WorkerSpec, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.pickKeyedForModelLocked(model, skip, key)
+}
+
+func (m *FleetMembership) pickKeyedForModelLocked(model string, skip map[string]struct{}, key string) (WorkerSpec, error) {
 	adm, err := m.classifyForModelLocked(model)
 	if err != nil {
 		return WorkerSpec{}, err
@@ -827,7 +875,14 @@ func (m *FleetMembership) DispatchForModel(ctx context.Context, model string, se
 	tried := make(map[string]struct{})
 	var lastErr error
 	for {
-		spec, pickErr := m.pickKeyedForModel(model, tried, "")
+		m.mu.Lock()
+		spec, pickErr := m.pickKeyedForModelLocked(model, tried, "")
+		var member *memberWorker
+		if pickErr == nil {
+			member = m.workers[spec.ID]
+			member.inflight++
+		}
+		m.mu.Unlock()
 		if pickErr != nil {
 			// A model nobody holds is a configuration verdict, never an outage —
 			// it is not wrapped in ErrNoHealthyWorker even mid-failover.
@@ -839,19 +894,20 @@ func (m *FleetMembership) DispatchForModel(ctx context.Context, model string, se
 			}
 			return WorkerSpec{}, ErrNoHealthyWorker
 		}
-		if err := m.Acquire(spec.ID); err != nil {
-			// Worker went non-admissible between pick and acquire — skip it.
-			tried[spec.ID] = struct{}{}
-			continue
-		}
 		err := send(ctx, spec)
-		m.Release(spec.ID)
+		m.mu.Lock()
+		if m.workers[spec.ID] == member {
+			m.releaseWorkerLocked(spec.ID, member)
+			if err != nil && m.workers[spec.ID] == member {
+				m.markDispatchFailureWorkerLocked(spec.ID, member)
+			}
+		}
+		m.mu.Unlock()
 		if err == nil {
 			return spec, nil
 		}
 		lastErr = err
 		tried[spec.ID] = struct{}{}
-		m.markDispatchFailure(spec.ID)
 	}
 }
 

@@ -109,6 +109,7 @@ func configureServeToolEngines() {
 // definition order, so the boot stages consume them without threading four dozen
 // locals through every call.
 type serveFlags struct {
+	topologyShadowInput          *string
 	workspaceAdmissionPermissive *bool
 	configPath                   *string
 	printEffectiveConfig         *bool
@@ -277,6 +278,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.provider = fs.String("provider", "openai", "upstream provider transcript wire: openai, anthropic, gemini, or xai")
 	sf.armLeaseStore = fs.String("arm-lease-store", "", "private durable research-arm lease snapshot (Linux/Darwin; fresh store requires initial exclusive lease before inference)")
 	sf.baseURL = fs.String("base-url", "", "upstream provider base URL for the /v1/chat/completions proxy (empty = offline mock planner)")
+	sf.topologyShadowInput = fs.String("topology-shadow-input", "", "bounded supplied topology observations for SHADOW-only decisions on the existing replica fleet; no live collector, routing change or capacity action")
 	fs.Var(&sf.replicaBaseURLs, "replica-base-url", "additional upstream provider base URL for a static round-robin replica fleet; repeat for N replicas. If --base-url is set, it is replica 1. Each replica's identity defaults to a stable endpoint-derived id (replica-<digest>) so the same upstream keeps its metric/residency labels regardless of flag order or a dropped peer; pass name=URL to pin an operator-chosen id.")
 	sf.model = fs.String("model", "mock", "model id (advertised by /v1/models; used for the upstream call)")
 	sf.mock = fs.Bool("mock", false, "run with deterministic offline mock planner (scripted responses, no model execution)")
@@ -844,6 +846,10 @@ func cmdServe(argv []string) {
 				fmt.Fprintf(os.Stderr, "fak serve: close control ingress: %v\n", err)
 			}
 		}()
+	}
+	if err := configureServeTopologyShadow(rt.srv, sf.topologyShadowInput); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: topology shadow: %v\n", err)
+		os.Exit(2)
 	}
 	rt.wireGateway(sf)
 	catalog, err := evaluateServeFeatures(sf, manifest, featureExplicit, os.Getenv, rt)

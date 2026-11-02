@@ -335,5 +335,83 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "shadowdecision",
+      "canonical": "shadowDecision",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "Dedicated calculation-only desired replica-count and hysteresis result over complete healthy groups and supplied epoch-bound observations; no capacity action is performed.",
+      "distinction": "Unlike ResetDecision session KV reset advice, shadowDecision only models a fleet topology count. Unlike active ServingAutoscaler reconciliation, its separate state cannot prime live scaling or invoke an actuator or drain. Supplied curves are not physical capacity qualification.",
+      "distinct_from": [
+        "x-decision-resetdecision",
+        "poolsignals"
+      ],
+      "aliases": [],
+      "grounding": "shadowDecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "policyexceedsmeasuredcapacity",
+      "canonical": "policy_exceeds_measured_capacity",
+      "family": "policy-capability",
+      "kind": "concept",
+      "definition": "Typed shadow HOLD reason when explicit queue or group safety policy exceeds the slots or group count of an accepted supplied measured-search candidate.",
+      "distinction": "Unlike gateway admissionpolicy, this reason does not enforce request admission or change routing. It refuses shadow planning outside the supplied measured envelope; it is not search candidate memory/SLO infeasibility, a live collector result or a capacity-launch claim.",
+      "distinct_from": [
+        "admissionpolicy"
+      ],
+      "aliases": [],
+      "grounding": "policy_exceeds_measured_capacity",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "poolsignals",
+      "canonical": "PoolSignals",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Observed aggregate serving measurements for one role pool: queue depth, KV utilization, goodput and TTFT/TPOT; the supplied-observation shadow adapter uses the validated queue/KV subset.",
+      "distinction": "Unlike shadowDecision desired replica-count output, PoolSignals is measurement input; unlike PoolObjective configured replica bounds and high-low/SLO targets, it describes observed load. Neither the type nor supplied fixture values qualify physical capacity or perform scaling.",
+      "distinct_from": [
+        "shadowdecision",
+        "poolobjective"
+      ],
+      "aliases": [],
+      "grounding": "PoolSignals",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "poolobjective",
+      "canonical": "PoolObjective",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Configured bounded serving targets for one role pool: replica minimum/maximum and step, queue/KV high-low bands, goodput and TTFT/TPOT SLOs, and survivor scale-down sensitivity.",
+      "distinction": "Unlike PoolSignals observed measurements, PoolObjective is operator policy input. The supplied-observation shadow adapter supports only its bounded replica and queue/KV subset and rejects unsupported objectives; these targets neither certify measured physical capacity nor perform scaling.",
+      "distinct_from": [
+        "poolsignals"
+      ],
+      "aliases": [],
+      "grounding": "PoolObjective",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

@@ -85,7 +85,8 @@
       "distinction": "It decides cut-vs-reset on the gateway's own cache-health signal, NOT provider prefix warming (GovernorDecision) nor cross-tier byte movement (PlacementDecision).",
       "distinct_from": [
         "GovernorDecision (vcachegov)",
-        "PlacementDecision (cachemeta)"
+        "PlacementDecision (cachemeta)",
+        "shadowdecision"
       ],
       "aliases": [],
       "grounding": "resetdecision",

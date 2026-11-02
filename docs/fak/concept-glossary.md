@@ -2161,3 +2161,31 @@ A sha256 digest declaration binding a serving sweep or bounded QPS probe to the 
 Planner predicate admitting structured speculative transactions only within the ordinary CPU transformer envelope where host KV suffix rollback represents the complete mutable target state. It is a necessary architecture and execution-path fence; greedy, seed, vision, reasoning and top-logprob request fences and runtime cache eviction checks remain separate.
 
 **Distinct from:** KVPrefixReuseSupported establishes whether a cache is a complete reusable prefix; ExecutionDeadlineAdmissionSupported establishes eligibility for deadline credit. This predicate gates request-local grammar transactions in linear speculative verification, not general structured-output availability, model quality, hardware qualification or a product maturity rating.
+
+
+### shadowDecision
+
+Dedicated calculation-only desired replica-count and hysteresis result over complete healthy groups and supplied epoch-bound observations; no capacity action is performed.
+
+**Distinct from:** Unlike ResetDecision session KV reset advice, shadowDecision only models a fleet topology count. Unlike active ServingAutoscaler reconciliation, its separate state cannot prime live scaling or invoke an actuator or drain. Supplied curves are not physical capacity qualification.
+
+
+### policy_exceeds_measured_capacity
+
+Typed shadow HOLD reason when explicit queue or group safety policy exceeds the slots or group count of an accepted supplied measured-search candidate.
+
+**Distinct from:** Unlike gateway admissionpolicy, this reason does not enforce request admission or change routing. It refuses shadow planning outside the supplied measured envelope; it is not search candidate memory/SLO infeasibility, a live collector result or a capacity-launch claim.
+
+
+### PoolSignals
+
+Observed aggregate serving measurements for one role pool: queue depth, KV utilization, goodput and TTFT/TPOT; the supplied-observation shadow adapter uses the validated queue/KV subset.
+
+**Distinct from:** Unlike shadowDecision desired replica-count output, PoolSignals is measurement input; unlike PoolObjective configured replica bounds and high-low/SLO targets, it describes observed load. Neither the type nor supplied fixture values qualify physical capacity or perform scaling.
+
+
+### PoolObjective
+
+Configured bounded serving targets for one role pool: replica minimum/maximum and step, queue/KV high-low bands, goodput and TTFT/TPOT SLOs, and survivor scale-down sensitivity.
+
+**Distinct from:** Unlike PoolSignals observed measurements, PoolObjective is operator policy input. The supplied-observation shadow adapter supports only its bounded replica and queue/KV subset and rejects unsupported objectives; these targets neither certify measured physical capacity nor perform scaling.

@@ -1105,9 +1105,10 @@ type Server struct {
 	// family — a host attaches a loop via SetFleetMembership once it has built the fleet
 	// view, the same inject-after-New posture as the KV seams. fleetMu guards both fields:
 	// SetFleetMembership may install the loop concurrently with a scrape that publishes it.
-	fleetMu      sync.Mutex
-	fleet        *FleetMembership
-	fleetMetrics *FleetMembershipMetrics
+	fleetMu        sync.Mutex
+	fleet          *FleetMembership
+	topologyShadow *topologyShadowController
+	fleetMetrics   *FleetMembershipMetrics
 
 	// fleetRouter is the ReplicaDispatch the fleet loop arms at Serve (issue
 	// fak-private#2417): newProxyPlanner stashes the built-but-unarmed membership on it,

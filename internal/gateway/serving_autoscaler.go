@@ -722,3 +722,36 @@ func appendReason(base, extra string) string {
 	}
 	return base + "," + extra
 }
+
+// shadowDecision is calculation-only and can only run on a dedicated shadow
+// controller. It never enters Reconcile, scaleUp, scaleDown, Drain, or an actuator.
+// The separate instance owns its own hysteresis; shadow ticks cannot prime a
+// live controller. Current is the caller's complete healthy group count.
+func (a *ServingAutoscaler) shadowDecision(now time.Time, current, incumbent int, known bool, sig PoolSignals, obj PoolObjective) ScaleDecision {
+	d := ScaleDecision{At: now, Mode: ScaleMode("shadow"), Role: RoleUnified, Action: ScaleActionHold, CurrentReplicas: current, DesiredReplicas: incumbent, AppliedReplicas: current, Signals: sig, MinReplicas: obj.MinReplicas, MaxReplicas: obj.MaxReplicas}
+	if a.cfg.Mode != ScaleMode("shadow") {
+		d.Reason = "shadow_controller_required"
+		return d
+	}
+	if !known || current == 0 {
+		a.resetPending(RoleUnified)
+		d.Reason = "unknown_or_no_ready_capacity_hold_incumbent"
+		return d
+	}
+	target, reason := obj.target(current, sig)
+	d.Reason = reason
+	dir := direction(target, incumbent)
+	if dir == 0 {
+		a.resetPending(RoleUnified)
+		return d
+	}
+	if ok, gate := a.readyToAct(RoleUnified, now, dir); !ok {
+		d.Reason = appendReason(reason, gate)
+		return d
+	}
+	d.DesiredReplicas = target
+	// This timestamp is shadow-intent cooldown only; AppliedReplicas stays the
+	// observed count and Action remains hold. No action is advertised as applied.
+	a.noteAction(RoleUnified, now)
+	return d
+}

@@ -118,6 +118,23 @@ func (s *Server) runFleetHealthLoop(ctx context.Context) error {
 	if s.fleetRouter != nil {
 		s.fleetRouter.WithMembership(fm)
 	}
-	fm.RunHealthLoop(ctx, fleetHealthInterval)
-	return nil
+	s.fleetMu.Lock()
+	shadow := s.topologyShadow != nil
+	s.fleetMu.Unlock()
+	if !shadow {
+		fm.RunHealthLoop(ctx, fleetHealthInterval)
+		return nil
+	}
+	s.observeTopologyShadow(ctx, time.Now())
+	ticker := time.NewTicker(fleetHealthInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			fm.ProbeOnce(ctx)
+			s.observeTopologyShadow(ctx, time.Now())
+		}
+	}
 }

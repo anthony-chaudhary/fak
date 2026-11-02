@@ -39,3 +39,33 @@ The applicable Apache License 2.0 is reproduced in LICENSE. Selected source
 files and exact root licenses were inspected; root NOTICE requests returned
 not found at each pin. No unrelated vendored assets or transitive source are
 included. This attribution does not imply endorsement by the source projects.
+
+Observed topology pressure and shadow reconciliation
+
+llm-d Router (formerly llm-d-inference-scheduler)
+Copyright 2025 The Kubernetes Authors.
+Copyright 2026 The llm-d Authors.
+https://github.com/llm-d/llm-d-router
+pkg/epp/framework/plugins/flowcontrol/saturationdetector/utilization/detector.go:137-288
+pkg/epp/framework/plugins/flowcontrol/saturationdetector/concurrency/detector.go:139-229
+at 2aec505958475769f47b8d594aa783f42392ce0f
+Adapted the queueDepth expression waiting + max(0, booked - waiting - running),
+with explicit source, freshness, finite counters and incarnation validation.
+The existing Fak reservation owner supplies bookings; no second dispatch ledger
+was copied. The upstream empty-filter fail-open fallback is intentionally omitted.
+
+Dynamo
+Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+lib/runtime/src/routing_policy/occupancy.rs:109-233
+at 1ecc8702a413fb22b37079d6ff53bca677259464
+Adapted guard-owned occupancy identity, atomic selection/reservation and
+replacement-incarnation fencing into the existing membership owner. No Rust
+runtime, deployment stack or separately licensed DeepSeek test data was copied.
+
+Modifications by fak contributors: bounded supplied-observation input, complete
+healthy-group accounting, measured-search identity, calculation-only dedicated
+shadow hysteresis and ordinary serve lifecycle readback. These software fixtures
+are not live resource collection, capacity launches or hardware qualifications.
+Exact selected source headers and Apache-2.0 root licenses were inspected on
+2026-11-02; root NOTICE returned 404 for both repositories at the cited pins.
+The existing LICENSE contains the applicable Apache License 2.0.
