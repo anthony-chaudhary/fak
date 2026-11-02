@@ -614,6 +614,7 @@ func cudaEnclosingFunc(src string, at int) string {
 // filename. Unknown directions and unsupported argument syntax fail closed.
 // Input starts after the call's opening parenthesis; source comments are stripped.
 func cudaAsyncTimingName(call, src string) (string, bool) {
+	const cudaMemsetAsyncArity, cudaMemcpyAsyncArity = 4, 5
 	var args []string
 	var stack []rune
 	start := 0
@@ -644,9 +645,9 @@ func cudaAsyncTimingName(call, src string) (string, bool) {
 				return "", false
 			}
 			if call == "cudaMemsetAsync" {
-				return "fill", len(args) == 4
+				return "fill", len(args) == cudaMemsetAsyncArity
 			}
-			if call != "cudaMemcpyAsync" || len(args) != 5 {
+			if call != "cudaMemcpyAsync" || len(args) != cudaMemcpyAsyncArity {
 				return "", false
 			}
 			name, ok := map[string]string{

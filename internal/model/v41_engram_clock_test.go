@@ -91,7 +91,7 @@ func TestV41EngramClockPolicy(t *testing.T) {
 			t.Fatal("invalidation did not clear CLOCK residency/hand while retaining policy")
 		}
 		reads := src.reads
-		if row, err := c.Row(7); err != nil || len(row) != 8 || src.reads != reads+1 {
+		if row, err := c.Row(7); err != nil || len(row) != src.rowBytes || src.reads != reads+1 {
 			t.Fatal("invalidated CLOCK row did not re-fault")
 		}
 	})
