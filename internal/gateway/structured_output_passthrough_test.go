@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -322,6 +323,155 @@ func TestChatRejectsMalformedJSONSchema422(t *testing.T) {
 				}
 				if upstreamHits != beforeHits {
 					t.Fatalf("malformed carrier dispatched to upstream: hits=%d", upstreamHits-beforeHits)
+				}
+				return
+			}
+			if upstreamHits != beforeHits+1 {
+				t.Fatalf("upstream hits = %d, want 1", upstreamHits-beforeHits)
+			}
+			if !jsonEqual(t, gotResponseFormat, tc.format) {
+				t.Fatalf("response_format forwarded to ride engine = %s\nwant (verbatim) = %s", gotResponseFormat, tc.format)
+			}
+		})
+	}
+}
+
+// TestChatRejectsOversizedJSONSchema422 pins the TGI grammar-input resource
+// guard (router/src/validation.rs:341-406@b4adbf2, Apache-2.0; adapted, no
+// grammar compilation): a chat response_format json_schema schema is bounded to
+// 64 KiB trimmed bytes and nesting depth 32 by default, both configurable via
+// FAK_GATEWAY_JSON_SCHEMA_MAX_BYTES / _MAX_DEPTH. At cap+1 the request is
+// refused with HTTP 422 and a closed error code BEFORE any upstream call; at
+// exactly the caps the schema passes through verbatim. Tool definitions stay
+// outside the schema-only caps.
+//
+// fak-test:runtime fast est=1s lane=default
+func TestChatRejectsOversizedJSONSchema422(t *testing.T) {
+	if defaultJSONSchemaMaxBytes != 64<<10 || defaultJSONSchemaMaxDepth != 32 {
+		t.Fatalf("default caps = %d bytes / %d depth, want 65536 / 32", defaultJSONSchemaMaxBytes, defaultJSONSchemaMaxDepth)
+	}
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterAdjudicator(0, toolAdj{})
+
+	var gotResponseFormat json.RawMessage
+	upstreamHits := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHits++
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read upstream body: %v", err)
+		}
+		var req struct {
+			ResponseFormat json.RawMessage `json:"response_format"`
+		}
+		if err := json.Unmarshal(raw, &req); err != nil {
+			t.Fatalf("decode upstream request: %v\n%s", err, raw)
+		}
+		gotResponseFormat = req.ResponseFormat
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","created":1,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{}}`))
+	}))
+	defer upstream.Close()
+
+	srv, err := New(Config{
+		EngineID: "test",
+		Model:    "m",
+		BaseURL:  upstream.URL + "/v1",
+		Provider: "openai-compatible",
+		VDSO:     true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// sized(n) is a valid object schema whose trimmed bytes are exactly n.
+	sized := func(n int) string {
+		const base = `{"description":"","properties":{}}`
+		return `{"description":"` + strings.Repeat("a", n-len(base)) + `","properties":{}}`
+	}
+	// nested(d) is a valid object schema at maximum nesting depth d; the data
+	// brackets sit beside the required properties member without raising it.
+	nested := func(d int) string {
+		if d < 2 {
+			return `{"properties":{}}`
+		}
+		return `{"default":` + strings.Repeat("[", d-1) + "null" + strings.Repeat("]", d-1) + `,"properties":{}}`
+	}
+	format := func(schema string) json.RawMessage {
+		return json.RawMessage(`{"type":"json_schema","json_schema":{"schema":` + schema + `}}`)
+	}
+	// Far beyond any schema cap, yet legal as a tool definition: the caps bind
+	// response_format.json_schema.schema only, never tools or other fields.
+	bigTool := json.RawMessage(`[{"type":"function","function":{"name":"allow_read","description":"` + strings.Repeat("d", 4096) + `","parameters":{"type":"object"}}}]`)
+
+	for _, tc := range []struct {
+		name     string
+		format   json.RawMessage
+		tools    json.RawMessage
+		maxBytes string
+		maxDepth string
+		status   int
+		code     string
+	}{
+		{name: "default_byte_cap_accepted", format: format(sized(defaultJSONSchemaMaxBytes)), status: http.StatusOK},
+		{name: "default_byte_cap_plus_one_rejected", format: format(sized(defaultJSONSchemaMaxBytes + 1)), status: http.StatusUnprocessableEntity, code: "json_schema_too_large"},
+		{name: "default_depth_cap_accepted", format: format(nested(defaultJSONSchemaMaxDepth)), status: http.StatusOK},
+		{name: "default_depth_cap_plus_one_rejected", format: format(nested(defaultJSONSchemaMaxDepth + 1)), status: http.StatusUnprocessableEntity, code: "json_schema_too_deep"},
+		{name: "configured_byte_cap_accepted", format: format(sized(64)), maxBytes: "64", status: http.StatusOK},
+		{name: "configured_byte_cap_plus_one_rejected", format: format(sized(65)), maxBytes: "64", status: http.StatusUnprocessableEntity, code: "json_schema_too_large"},
+		{name: "configured_depth_cap_accepted", format: format(nested(3)), maxDepth: "3", status: http.StatusOK},
+		{name: "configured_depth_cap_plus_one_rejected", format: format(nested(4)), maxDepth: "3", status: http.StatusUnprocessableEntity, code: "json_schema_too_deep"},
+		{name: "tools_outside_schema_caps", format: format(sized(34)), tools: bigTool, maxBytes: "64", maxDepth: "2", status: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.maxBytes != "" {
+				t.Setenv("FAK_GATEWAY_JSON_SCHEMA_MAX_BYTES", tc.maxBytes)
+			}
+			if tc.maxDepth != "" {
+				t.Setenv("FAK_GATEWAY_JSON_SCHEMA_MAX_DEPTH", tc.maxDepth)
+			}
+			beforeHits := upstreamHits
+			request := map[string]any{
+				"model":           "m",
+				"messages":        []map[string]any{{"role": "user", "content": "hi"}},
+				"response_format": json.RawMessage(tc.format),
+			}
+			if tc.tools != nil {
+				request["tools"] = tc.tools
+			}
+			body, err := json.Marshal(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			httpResp, err := http.Post(ts.URL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer httpResp.Body.Close()
+			respRaw, _ := io.ReadAll(httpResp.Body)
+			if httpResp.StatusCode != tc.status {
+				t.Fatalf("status = %d, want %d: %s", httpResp.StatusCode, tc.status, respRaw)
+			}
+			if tc.code != "" {
+				var envelope struct {
+					Error struct {
+						Type string `json:"type"`
+						Code string `json:"code"`
+					} `json:"error"`
+				}
+				if err := json.Unmarshal(respRaw, &envelope); err != nil {
+					t.Fatalf("decode refusal: %v: %s", err, respRaw)
+				}
+				if envelope.Error.Code != tc.code || envelope.Error.Type != "invalid_request_error" {
+					t.Fatalf("refusal = %s/%s, want %s/invalid_request_error", envelope.Error.Type, envelope.Error.Code, tc.code)
+				}
+				if upstreamHits != beforeHits {
+					t.Fatalf("oversized carrier dispatched to upstream: hits=%d", upstreamHits-beforeHits)
 				}
 				return
 			}
