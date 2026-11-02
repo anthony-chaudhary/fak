@@ -1032,7 +1032,43 @@ func (s *NativeScheduler) drainWithDonation(tokens <-chan abi.EngineToken) {
 // donated limits the solo fast path to one token so the donating caller can return
 // to draining its bounded token channel before executing another iteration.
 func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool) {
+	// Partition only the initial state-mutex boundary, not model execution or
+	// later lock acquisitions. Use the real monotonic clock independently of
+	// s.now, whose request clock also supplies admission/retirement hooks.
+	// Nil recording adds no clock reads. The enabled path adds at most seven
+	// reads and four fixed histogram observations; their overhead is unmeasured.
+	recorder := s.recorder
+	var waitingAt, acquiredAt time.Time
+	if recorder != nil {
+		waitingAt = time.Now()
+	}
 	s.mu.Lock()
+	if recorder != nil {
+		acquiredAt = time.Now()
+	}
+	var readmitTime, preemptTime time.Duration
+	var readmitVisited, preemptVisited bool
+	unlockInitialState := func() {
+		if recorder == nil {
+			s.mu.Unlock()
+			return
+		}
+		// These disjoint intervals sum to before-Lock -> before-first-Unlock.
+		// Clock/boundary work is included; Unlock and recorder work are not.
+		// Publish immediately after unlock so later model/output stalls do not
+		// hide this completed boundary. No observer joins scheduler.mu ordering.
+		held := time.Since(acquiredAt)
+		other := held - readmitTime - preemptTime
+		s.mu.Unlock()
+		recorder.ObservePhase(enginestep.PhaseSchedulerStateWait, acquiredAt.Sub(waitingAt))
+		if readmitVisited {
+			recorder.ObservePhase(enginestep.PhaseSchedulerReadmit, readmitTime)
+		}
+		if preemptVisited {
+			recorder.ObservePhase(enginestep.PhaseSchedulerPreempt, preemptTime)
+		}
+		recorder.ObservePhase(enginestep.PhaseSchedulerStateOther, other)
+	}
 	// 1. Drop finished/cancelled lanes from the running set, freeing their slots.
 	live := s.lanes[:0]
 	for _, ln := range s.lanes {
@@ -1058,7 +1094,15 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 		}
 	}
 	if !waitingReservation {
+		var started time.Time
+		if recorder != nil {
+			started = time.Now()
+		}
 		s.readmitPreemptedLocked()
+		if recorder != nil {
+			readmitTime = time.Since(started)
+			readmitVisited = true
+		}
 	}
 	// 3. Promote waiting lanes by deadline (FIFO without deadlines), up to maxRunning. A lane
 	// cancelled while it was still waiting is retired here rather than promoted.
@@ -1116,7 +1160,7 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 			case nativeAllocationNever:
 				pendingMaterialization.finish(nil, ErrNativePromptExceedsKVCapacity)
 				closed = s.closed
-				s.mu.Unlock()
+				unlockInitialState()
 				return true, false, closed
 			case nativeAllocationOK:
 				// materializable now: proceed to lane initialization below
@@ -1129,12 +1173,12 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 				}
 				s.waiting = append([]*schedLane{pendingMaterialization}, s.waiting...)
 				closed = s.closed
-				s.mu.Unlock()
+				unlockInitialState()
 				return true, false, closed
 			}
 		}
 		closed = s.closed
-		s.mu.Unlock()
+		unlockInitialState()
 		if err := pendingMaterialization.ctx.Err(); err != nil {
 			s.mu.Lock()
 			pendingMaterialization.finish(nil, err)
@@ -1175,7 +1219,15 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 	// Keep enforcing the live KV-block budget while protecting partially-prefilled
 	// lanes, whose prompt cursor and recurrent state cannot yet use decode's
 	// swap/recompute restore contract.
+	var preemptStarted time.Time
+	if recorder != nil {
+		preemptStarted = time.Now()
+	}
 	s.enforcePreemptionPreservingPrefillLocked()
+	if recorder != nil {
+		preemptTime = time.Since(preemptStarted)
+		preemptVisited = true
+	}
 	running := len(s.lanes)
 	var solo *schedLane
 	var prefill *schedLane
@@ -1204,7 +1256,7 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 	closed = s.closed
 	waitingDepth := len(s.waiting)
 	idle = len(s.lanes) == 0 && len(s.waiting) == 0 && len(s.preempted) == 0
-	s.mu.Unlock()
+	unlockInitialState()
 
 	s.recorder.SetQueueDepth(waitingDepth)
 

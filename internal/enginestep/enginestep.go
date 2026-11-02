@@ -42,6 +42,25 @@ const (
 	// WAITING, but excludes pre-enqueue work, later requeues, and preemption.
 	// It is neither gateway admission_wait nor agent coalescer cohort_wait.
 	PhaseSchedulerWait Phase = "scheduler_wait"
+	// PhaseSchedulerStateWait is one runIteration's initial state-mutex
+	// acquisition, from before Lock to after Lock. It is not request queue
+	// residence, executor wait, all mutex contention, or an in-flight gauge.
+	PhaseSchedulerStateWait Phase = "scheduler_state_wait"
+	// PhaseSchedulerReadmit is one visited initial-state readmission pass,
+	// including no-op/capacity checks, restore errors and their cleanup.
+	// Its count is passes, not successful restores or requests.
+	PhaseSchedulerReadmit Phase = "scheduler_readmit"
+	// PhaseSchedulerPreempt is one visited initial-state pressure pass,
+	// including no-op checks, victim selection, swap/recompute and retirement.
+	// Its count is passes, not successful preemptions or requests.
+	PhaseSchedulerPreempt Phase = "scheduler_preempt"
+	// PhaseSchedulerStateOther is the remaining initial lock-held interval,
+	// excluding the two passes above. StateWait and StateOther count every
+	// completed initial boundary; skipped passes emit no sample. Their four
+	// sums partition before-Lock -> before-first-Unlock at a quiescent boundary,
+	// not a later model/materialization/stream interval. Recorder observations
+	// are sequential, not an atomic four-series scrape transaction.
+	PhaseSchedulerStateOther Phase = "scheduler_state_other"
 	// PhaseDeviceWait is time a request waits for the planner's device lock.
 	PhaseDeviceWait Phase = "device_wait"
 	// PhaseCohortWait is time a request waits in the decode coalescer before its
@@ -67,7 +86,9 @@ const (
 
 // Phases is the closed, ordered phase vocabulary (render and dashboard order).
 var Phases = []Phase{
-	PhaseAdmissionWait, PhaseSchedulerWait, PhaseDeviceWait, PhaseCohortWait, PhasePrefixLookup,
+	PhaseAdmissionWait, PhaseSchedulerWait,
+	PhaseSchedulerStateWait, PhaseSchedulerReadmit, PhaseSchedulerPreempt, PhaseSchedulerStateOther,
+	PhaseDeviceWait, PhaseCohortWait, PhasePrefixLookup,
 	PhasePrefill, PhasePrefixAdmit, PhaseDecode, PhaseTokenPublish, PhaseSample, PhaseRequest,
 }
 
@@ -351,8 +372,9 @@ func (r *Recorder) appendLocked(rec StepRecord) {
 }
 
 // ObservePhase records one completed phase. Unknown phases are ignored (closed
-// vocabulary keeps the series set bounded). Sample and token-publication phases
-// are histogram-only: per-token records would flush the decode steps they explain.
+// vocabulary keeps the series set bounded). Sample, token-publication and initial
+// scheduler-state phases are histogram-only: per-token/iteration records would
+// flush the decode steps they explain.
 func (r *Recorder) ObservePhase(p Phase, d time.Duration) {
 	if r == nil {
 		return
@@ -370,7 +392,9 @@ func (r *Recorder) ObservePhase(p Phase, d time.Duration) {
 		return
 	}
 	h.observe(d.Seconds())
-	if p == PhaseSample || p == PhaseTokenPublish {
+	if p == PhaseSample || p == PhaseTokenPublish ||
+		p == PhaseSchedulerStateWait || p == PhaseSchedulerReadmit ||
+		p == PhaseSchedulerPreempt || p == PhaseSchedulerStateOther {
 		return
 	}
 	r.appendLocked(StepRecord{Kind: KindPhase, Phase: string(p), DurationNS: d.Nanoseconds()})
@@ -893,7 +917,7 @@ func (r *Recorder) WritePrometheus(w io.Writer) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	helpType(w, MetricPhaseSeconds, "Native serving loop phase durations (admission_wait, scheduler_wait, device_wait, cohort_wait, prefix_lookup, prefill, prefix_admit, decode, sample, request).", "histogram")
+	helpType(w, MetricPhaseSeconds, "Native serving loop phase durations (admission_wait, scheduler_wait, scheduler_state_wait, scheduler_readmit, scheduler_preempt, scheduler_state_other, device_wait, cohort_wait, prefix_lookup, prefill, prefix_admit, decode, token_publish, sample, request).", "histogram")
 	for _, p := range Phases {
 		r.phases[p].write(w, MetricPhaseSeconds, fmt.Sprintf("phase=%q", string(p)))
 	}
