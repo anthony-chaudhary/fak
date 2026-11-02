@@ -164,7 +164,7 @@ func TestCUDAIQWeightCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(asyncData), "case cudaRawUploadIsVerbatim(t.Dtype) && as == t.Dtype:\n\t\tout, fence := c.uploadRawKQuantAsync(t, hb, class, site)") {
+	if !strings.Contains(string(asyncData), "case cudaRawUploadIsVerbatim(t.Dtype) && as == t.Dtype:\n\t\trequireCUDAUploadLayout(\"cuda UploadAsync\", t, as, class, site)\n\t\tout, fence := c.uploadRawKQuantAsync(t, hb, class, site)") {
 		t.Error("CUDA async packed-upload eligibility lost its shared predicate or matching-dtype guard")
 	}
 	if strings.Count(source, "case IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL:") != 2 {
