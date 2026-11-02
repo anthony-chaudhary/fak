@@ -301,6 +301,23 @@ command stream gets no event calls, and no kernel-profile reader is registered.
   profile-off rows. The overhead has not been measured yet. The pending CUDA-host rung
   records profile-on against profile-off decode tok/s on the same card.
 
+## Observe completed graph replays
+
+`GET /debug/vars` exposes `kernel.cuda_graph_replays`, a process-wide cumulative
+count from `compute.CUDAGraphReplays()`. It increments after a captured decode
+graph replays and its fence completes successfully. The numeric field remains
+present at zero, including in a non-CUDA build. It is an execution observation;
+the serve feature catalog separately reports whether graph capture was requested.
+
+For a single-flight graph comparison, record the count immediately before and
+after the same bounded requests in each process. A positive delta witnesses
+completed graph replay in that process; a zero delta does not prove capture was
+eligible. The counter is shared across requests and sessions, so concurrent work
+cannot be attributed to one request from this value alone. Keep timestamp
+profiling off for this witness: `FAK_CUDA_TIMESTAMP_PROFILE=1` disables graph
+capture even when `FAK_CUDA_GRAPH=1`. Collect kernel attribution in a separate
+profile-on run. This counter does not measure latency or establish output parity.
+
 ## CI — what's automatic and what isn't
 
 - [`.github/workflows/cuda-build.yml`](https://github.com/anthony-chaudhary/fak/blob/main/.github/workflows/cuda-build.yml) runs

@@ -307,16 +307,19 @@ func (m *memoryWatermarks) observe(ms *runtime.MemStats) (perSec, peakSys, peakA
 }
 
 type debugKernelVars struct {
-	Submits      int64   `json:"submits"`
-	VDSOHits     int64   `json:"vdso_hits"`
-	EngineCalls  int64   `json:"engine_calls"`
-	Denies       int64   `json:"denies"`
-	Transforms   int64   `json:"transforms"`
-	Quarantines  int64   `json:"quarantines"`
-	ResultDenies int64   `json:"result_denies"`
-	Admitted     int64   `json:"admitted"`
-	VDSOHitRatio float64 `json:"vdso_hit_ratio"`
+	CUDAGraphReplays uint64  `json:"cuda_graph_replays"`
+	Submits          int64   `json:"submits"`
+	VDSOHits         int64   `json:"vdso_hits"`
+	EngineCalls      int64   `json:"engine_calls"`
+	Denies           int64   `json:"denies"`
+	Transforms       int64   `json:"transforms"`
+	Quarantines      int64   `json:"quarantines"`
+	ResultDenies     int64   `json:"result_denies"`
+	Admitted         int64   `json:"admitted"`
+	VDSOHitRatio     float64 `json:"vdso_hit_ratio"`
 }
+
+var debugCUDAGraphReplays = compute.CUDAGraphReplays
 
 type debugMetricsVars struct {
 	HTTP                 []debugHTTPMetricVars           `json:"http"`
@@ -781,15 +784,16 @@ func (s *Server) debugVarsContext(ctx context.Context, now time.Time) debugVarsR
 			GoRuntime:    goRuntimeCollector().Sample(),
 		},
 		Kernel: debugKernelVars{
-			Submits:      c.Submits,
-			VDSOHits:     c.VDSOHits,
-			EngineCalls:  c.EngineCalls,
-			Denies:       c.Denies,
-			Transforms:   c.Transforms,
-			Quarantines:  c.Quarantines,
-			ResultDenies: c.ResultDenies,
-			Admitted:     c.Admitted,
-			VDSOHitRatio: ratio,
+			CUDAGraphReplays: debugCUDAGraphReplays(),
+			Submits:          c.Submits,
+			VDSOHits:         c.VDSOHits,
+			EngineCalls:      c.EngineCalls,
+			Denies:           c.Denies,
+			Transforms:       c.Transforms,
+			Quarantines:      c.Quarantines,
+			ResultDenies:     c.ResultDenies,
+			Admitted:         c.Admitted,
+			VDSOHitRatio:     ratio,
 		},
 		Inference:        inferenceVarsFromSnapshot(infer, inflightMaxAge),
 		Upstream:         upstream,
