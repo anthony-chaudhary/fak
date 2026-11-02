@@ -16,6 +16,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -25,7 +26,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
-	"github.com/anthony-chaudhary/fak/internal/qwen38quantrun"
+	// promptpacket aliases the quantized-run package that owns strict GGUF prompt-packet identity extraction for its model family; rawdecode only opportunistically records the derived tokenizer/template digests when an artifact carries them, so usage sites stay model-name-free.
+	promptpacket "github.com/anthony-chaudhary/fak/internal/qwen38quantrun"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
@@ -318,20 +320,23 @@ func modelConfigDigest(config model.Config) ([sha256.Size]byte, bool) {
 		return [sha256.Size]byte{}, false
 	}
 	// Config's JSON form is content-canonical for its string-keyed maps and
-	// dereferences nested pointers. Include the five intentionally JSON-hidden
-	// model-identity fields explicitly so the seal covers the complete config.
+	// dereferences nested pointers. Fields hidden from JSON are enumerated from
+	// the config type itself rather than named here, so the seal tracks the
+	// complete config as new identity fields are added.
+	hidden := make(map[string]any, 8)
+	configType := reflect.TypeOf(config)
+	configValue := reflect.ValueOf(config)
+	for i := range configType.NumField() {
+		field := configType.Field(i)
+		if !field.IsExported() || field.Tag.Get("json") != "-" {
+			continue
+		}
+		hidden[field.Name] = configValue.Field(i).Interface()
+	}
 	canonical, err := json.Marshal(struct {
-		Config        model.Config        `json:"config"`
-		GLM5Next      bool                `json:"glm5_next"`
-		Name          string              `json:"name"`
-		EOSTokenID    int                 `json:"eos_token_id"`
-		EOSTokenIDs   []int               `json:"eos_token_ids"`
-		BlockTopology model.BlockTopology `json:"block_topology"`
-	}{
-		Config: config, GLM5Next: config.GLM5Next, Name: config.Name,
-		EOSTokenID: config.EOSTokenID, EOSTokenIDs: config.EOSTokenIDs,
-		BlockTopology: config.BlockTopology,
-	})
+		Config model.Config   `json:"config"`
+		Hidden map[string]any `json:"json_hidden"`
+	}{Config: config, Hidden: hidden})
 	if err != nil {
 		return [sha256.Size]byte{}, false
 	}
@@ -488,87 +493,54 @@ func completeBackendExecutionObservation(observed compute.BackendExecutionObserv
 		observed.DeviceMemoryTotalBytes > 0 && observed.DeviceMemoryFreeBytes <= observed.DeviceMemoryTotalBytes
 }
 
-// BindQwen38VulkanSelectedTokenLogprobsV3 binds runner-owned selected-token
-// logprobs to an otherwise caller-populated raw Vulkan result. The binding is
-// only an integrity-preserving data transfer: it grants no physical,
-// comparator, candidate/reference-pair, or performance authority.
-//
-// Every error returns a zero raw result. The compute receipt builder owns the
-// serialized digest and must derive it from the bound observations.
-func BindQwen38VulkanSelectedTokenLogprobsV3(execution Execution, raw compute.Qwen38VulkanRawDecodeResult) (compute.Qwen38VulkanRawDecodeResult, error) {
-	fail := func(format string, args ...any) (compute.Qwen38VulkanRawDecodeResult, error) {
-		return compute.Qwen38VulkanRawDecodeResult{}, fmt.Errorf("raw decode selected-token logprobs: "+format, args...)
+// SealedSelectedTokenLogprobs releases runner-owned selected-token logprobs,
+// one slice per observed repetition, only after the public runs match the
+// sealed evidence exactly. It grants no physical, comparator, candidate/
+// reference-pair, or performance authority: callers copy the slices into
+// their own receipt carriers and derive any digests there. Every error
+// returns nil so partial evidence cannot be mistaken for a complete set.
+func (execution Execution) SealedSelectedTokenLogprobs() ([][]float64, error) {
+	fail := func(format string, args ...any) error {
+		return fmt.Errorf("raw decode selected-token logprobs: "+format, args...)
 	}
 	evidence := execution.selectedTokenLogprobs
 	if evidence == nil {
-		return fail("runner evidence is unavailable")
+		return nil, fail("runner evidence is unavailable")
 	}
 	if !slices.Equal(execution.PromptTokenIDs, evidence.promptTokenIDs) ||
 		execution.GeneratedLimit != evidence.generatedLimit {
-		return fail("execution request fields do not match runner evidence")
-	}
-	if !equalInt32TokenIDs(raw.PromptTokenIDs, evidence.promptTokenIDs) ||
-		raw.GeneratedTokenLimit != evidence.generatedLimit {
-		return fail("raw request fields do not match runner evidence")
+		return nil, fail("execution request fields do not match runner evidence")
 	}
 	if evidence.repetitions < 1 || len(evidence.runs) != evidence.repetitions ||
-		len(execution.Runs) != evidence.repetitions || len(raw.Runs) != evidence.repetitions {
-		return fail("repetition count does not match runner evidence")
+		len(execution.Runs) != evidence.repetitions {
+		return nil, fail("repetition count does not match runner evidence")
 	}
-	if raw.ReportedRuns != 0 && raw.ReportedRuns != evidence.repetitions {
-		return fail("reported repetition count does not match runner evidence")
-	}
-
-	boundRuns := slices.Clone(raw.Runs)
+	released := make([][]float64, len(evidence.runs))
 	for i, sealedRun := range evidence.runs {
 		publicRun := execution.Runs[i]
-		rawRun := raw.Runs[i]
 		if len(sealedRun.generatedTokenIDs) == 0 || len(sealedRun.logprobs) != len(sealedRun.generatedTokenIDs) {
-			return fail("sealed repetition %d is incomplete", i+1)
+			return nil, fail("sealed repetition %d is incomplete", i+1)
 		}
 		if !slices.Equal(publicRun.GeneratedTokens, sealedRun.generatedTokenIDs) ||
 			!slices.Equal(publicRun.Steps, sealedRun.steps) ||
 			len(publicRun.Steps) != len(sealedRun.generatedTokenIDs) ||
 			publicRun.PrefillOutputID != sealedRun.generatedTokenIDs[0] ||
 			!slices.Equal(publicRun.StepTokens, sealedRun.generatedTokenIDs[1:]) {
-			return fail("public repetition %d does not match runner evidence", i+1)
+			return nil, fail("public repetition %d does not match runner evidence", i+1)
 		}
 		for stepIndex, step := range publicRun.Steps {
 			if step.Step != stepIndex || step.TokenID != sealedRun.generatedTokenIDs[stepIndex] {
-				return fail("public repetition %d step %d does not match runner evidence", i+1, stepIndex)
+				return nil, fail("public repetition %d step %d does not match runner evidence", i+1, stepIndex)
 			}
 		}
-		if rawRun.Repetition != i+1 || rawRun.GeneratedTokenLimit != evidence.generatedLimit ||
-			rawRun.ActualGeneratedTokens != len(sealedRun.generatedTokenIDs) ||
-			!equalInt32TokenIDs(rawRun.OutputTokenIDs, sealedRun.generatedTokenIDs) ||
-			!equalInt32TokenIDs(raw.OutputTokenIDs, sealedRun.generatedTokenIDs) {
-			return fail("raw repetition %d does not match runner evidence", i+1)
-		}
-		if len(rawRun.SelectedTokenLogprobs) != 0 || rawRun.SelectedTokenLogprobsSHA256 != "" {
-			return fail("raw repetition %d already contains selected-token evidence", i+1)
-		}
-		for stepIndex, logprob := range sealedRun.logprobs {
+		for _, logprob := range sealedRun.logprobs {
 			if math.IsNaN(logprob) || math.IsInf(logprob, 0) || logprob > 0 {
-				return fail("sealed repetition %d logprob %d is invalid", i+1, stepIndex)
+				return nil, fail("sealed repetition %d logprob is invalid", i+1)
 			}
 		}
-		boundRuns[i].SelectedTokenLogprobs = slices.Clone(sealedRun.logprobs)
-		boundRuns[i].SelectedTokenLogprobsSHA256 = ""
+		released[i] = slices.Clone(sealedRun.logprobs)
 	}
-	raw.Runs = boundRuns
-	return raw, nil
-}
-
-func equalInt32TokenIDs(got []int32, want []int) bool {
-	if len(got) != len(want) {
-		return false
-	}
-	for i := range got {
-		if int(got[i]) != want[i] {
-			return false
-		}
-	}
-	return true
+	return released, nil
 }
 
 type session interface {
@@ -864,7 +836,7 @@ func inspectGGUFArtifact(path string, open func(string) (io.ReadCloser, error)) 
 func observeGGUFArtifact(observed artifactObservation, gg *ggufload.File) (artifactObservation, error) {
 	quant := ggufload.ClassifyTensorQuant(gg.Tensors)
 	observed.TensorInventorySHA256 = gg.CanonicalManifestDigest()
-	if identity, err := qwen38quantrun.DerivePromptPacketGGUFIdentityFromFile(gg); err == nil {
+	if identity, err := promptpacket.DerivePromptPacketGGUFIdentityFromFile(gg); err == nil {
 		observed.TokenizerSHA256 = identity.TokenizerDigest
 		observed.TemplateSHA256 = identity.TemplateDigest
 	}
@@ -1105,7 +1077,7 @@ func openVerifiedProductionWeights(ctx context.Context, req Request) (*ggufload.
 
 func q2kEmbeddingEligible(parsed *ggufload.File) bool {
 	cfg, err := parsed.Config()
-	if err != nil || !cfg.IsQwen35Hybrid() || cfg.IsMoE() || cfg.TieWordEmbeddings {
+	if err != nil || !cfg.IsHybrid() || cfg.IsMoE() || cfg.TieWordEmbeddings {
 		return false
 	}
 	var embedding, output bool
