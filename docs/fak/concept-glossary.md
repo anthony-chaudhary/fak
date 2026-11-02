@@ -2189,3 +2189,10 @@ Observed aggregate serving measurements for one role pool: queue depth, KV utili
 Configured bounded serving targets for one role pool: replica minimum/maximum and step, queue/KV high-low bands, goodput and TTFT/TPOT SLOs, and survivor scale-down sensitivity.
 
 **Distinct from:** Unlike PoolSignals observed measurements, PoolObjective is operator policy input. The supplied-observation shadow adapter supports only its bounded replica and queue/KV subset and rejects unsupported objectives; these targets neither certify measured physical capacity nor perform scaling.
+
+
+### PlanDensePrefixCapture
+
+PlanDensePrefixCapture validates a dense-FP32 cache and optional bit-identical retained prefix, computes an upper bound on additional retained numeric backing, and returns a synchronous one-shot DensePrefixCapture for later Capture under the same external tree lock; unsupported/malformed layouts refuse before page allocation or reference changes.
+
+**Distinct from:** Unlike v41PlanHostRawGateUp, which selects deferred host raw-weight projection, this plans immutable prefix-page ownership and byte-budget admission; unlike compute MemoryPlan's classed demands, it binds an actual source/prefix and must not outlive their locked stability. It may allocate plan/pool metadata and inspect existing numeric bytes, but acquires no page references until Capture.

@@ -241,7 +241,7 @@ func (s *StartupCache) AcquireStartup(cfg StartupClaimConfig, tokens []int, kv *
 		s.refusedClaims++
 		return StartupClaim{}, ErrStartupClaimQuota
 	}
-	if leaf.kv == nil && kv != nil {
+	if !leaf.HasKV() && kv != nil {
 		// The matched node is a structural intermediate that owns no reusable prefix
 		// payload (the token sequence ended mid-edge). Leasing it would pin nothing a
 		// request could actually reuse, so refuse honestly instead of claiming a warm

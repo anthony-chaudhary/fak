@@ -294,9 +294,9 @@ func (s *ScopedTree) Lookup(owner CacheIdentity, tokens []int) (*model.KVCache, 
 		}
 		node, matched := s.tree.LookupNS(ns, tokens)
 		if node != nil {
-			if matched > bestMatched && node.KV() != nil {
+			if matched > bestMatched && node.HasKV() {
 				bestMatched, bestScope = matched, scope
-				bestKV, bestLogits = cloneKV(node.KV()), node.Logits()
+				bestKV, bestLogits = node.CloneKV(), node.Logits()
 			}
 			s.tree.Done(node)
 		}
@@ -391,9 +391,9 @@ func (s *ScopedTree) LookupRegime(regime Regime, owner CacheIdentity, tokens []i
 		ns := regimeNamespace(baseNS, regime)
 		node, matched := s.tree.LookupNS(ns, tokens)
 		if node != nil {
-			if matched > bestMatched && node.KV() != nil {
+			if matched > bestMatched && node.HasKV() {
 				bestMatched, bestScope = matched, scope
-				bestKV, bestLogits = cloneKV(node.KV()), node.Logits()
+				bestKV, bestLogits = node.CloneKV(), node.Logits()
 			}
 			s.tree.Done(node)
 		}
@@ -704,7 +704,7 @@ func nodeHasReusablePayload(n *node) bool {
 	if n == nil {
 		return false
 	}
-	return n.kv != nil || n.snapshot != nil || n.hostSnapshot != nil || n.remoteSnapshot != nil
+	return n.HasKV() || n.snapshot != nil || n.hostSnapshot != nil || n.remoteSnapshot != nil
 }
 
 // continuationSuperseded reports whether the handle's bound node no longer

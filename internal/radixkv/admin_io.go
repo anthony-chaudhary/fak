@@ -94,7 +94,7 @@ func walkNS(root *node, s *AdminSnapshot) {
 			if n.snapshot != nil || n.hostSnapshot != nil || n.remoteSnapshot != nil || n.ssdSnapshot != nil {
 				s.SnapshotHold++
 			}
-			if n.kv != nil {
+			if n.HasKV() {
 				s.ResidentKV++
 				s.Tokens += int64(n.plen)
 			}

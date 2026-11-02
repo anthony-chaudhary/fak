@@ -61,6 +61,10 @@ type PagedKVPool struct {
 	loweredMaxBlocks int
 	maxBlocksLowered bool // distinguishes an explicit zero ceiling from no lowering
 
+	// Only immutable retained-prefix stores detach free backing. Legacy pools
+	// keep their warm free-list allocation semantics unchanged.
+	reclaimFreeBacking bool
+
 	misuseReleases int
 }
 
@@ -112,7 +116,8 @@ func (p *PagedKVPool) FreeBlocks() int {
 	return len(p.free)
 }
 
-// TotalBlocks returns the total allocated physical blocks (live + free).
+// TotalBlocks returns the number of physical block slots (live + free).
+// Store-owned reclaiming pools may have detached backing in free slots.
 func (p *PagedKVPool) TotalBlocks() int {
 	return len(p.blocks)
 }
@@ -153,7 +158,11 @@ func (p *PagedKVPool) alloc() int {
 		id := p.free[n-1]
 		p.free = p.free[:n-1]
 		p.ref[id] = 1
-		clear(p.blocks[id])
+		if p.reclaimFreeBacking && p.blocks[id] == nil {
+			p.blocks[id] = make([]float32, p.blockFloats())
+		} else {
+			clear(p.blocks[id])
+		}
 		return id
 	}
 	id := len(p.blocks)
@@ -180,6 +189,9 @@ func (p *PagedKVPool) release(id int) {
 	}
 	p.ref[id]--
 	if p.ref[id] == 0 {
+		if p.reclaimFreeBacking {
+			p.blocks[id] = nil
+		}
 		p.free = append(p.free, id)
 	}
 }

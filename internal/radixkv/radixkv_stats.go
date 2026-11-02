@@ -266,7 +266,7 @@ func (t *Tree) Stats() Stats {
 		if n.parent != nil { // skip every namespace root (parent==nil); count real nodes once
 			s.Nodes++
 			s.Tokens += len(n.key)
-			if n.kv != nil {
+			if n.HasKV() {
 				s.PrefixTokens += n.plen
 			}
 			if n.snapshot != nil {

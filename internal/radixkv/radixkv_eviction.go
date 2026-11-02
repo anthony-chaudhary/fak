@@ -545,6 +545,7 @@ func (t *Tree) removeLeaf(v *node) {
 	delete(v.parent.children, v.key[0])
 	t.tokens -= len(v.key)
 	t.releaseSnapshotPayload(v)
+	v.releaseDensePrefix()
 	v.kv = nil
 }
 
@@ -623,6 +624,7 @@ func (t *Tree) closeSubtreeSnapshots(n *node) {
 		return
 	}
 	t.releaseSnapshotPayload(n)
+	n.releaseDensePrefix()
 	for _, child := range n.children {
 		t.closeSubtreeSnapshots(child)
 	}

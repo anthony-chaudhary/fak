@@ -723,6 +723,7 @@ func (t *Tree) attachComputingLeaf(boundary *node, suffix []int, ready chan stru
 		refs:      1, // leased while computing
 		regimeKey: boundary.regimeKey,
 	}
+
 	boundary.children[s[0]] = leaf
 	t.tokens += len(s)
 	return leaf
@@ -737,6 +738,7 @@ func (t *Tree) removeComputingNode(n *node) {
 	if len(n.key) > 0 {
 		first := n.key[0]
 		if n.parent.children[first] == n {
+			releaseDenseSubtree(n)
 			delete(n.parent.children, first)
 			t.tokens -= len(n.key)
 			if t.tokens < 0 {
@@ -781,6 +783,7 @@ func (t *Tree) CommitFlight(n *node, kv *model.KVCache, logits []float32) {
 	if n == nil {
 		return
 	}
+	n.releaseDensePrefix()
 	n.kv = kv
 	n.logits = copyCPULogits(logits)
 	n.SetState(NodeWarm)
