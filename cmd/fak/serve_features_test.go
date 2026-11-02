@@ -394,3 +394,22 @@ func knownServeFeatureCount(t *testing.T) int {
 	}
 	return n
 }
+
+func TestServeGPUDirectOverflowRequiresImplementation(t *testing.T) {
+	for _, args := range [][]string{nil, {"--gpudirect-overflow=true"}} {
+		flags, sf := newServeFlagSet()
+		if err := flags.Parse(args); err != nil {
+			t.Fatal(err)
+		}
+		if len(args) == 0 && *sf.gpudirectOverflow {
+			t.Fatal("unimplemented overflow must default disabled")
+		}
+		catalog, err := evaluateServeFeatures(sf, deploymanifest.Defaults(), explicitFlagNames(flags), func(string) string { return "" }, &serveRuntime{srv: &gateway.Server{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := featureStatusByID(t, catalog)[gateway.FeatureGPUDirectOverflow].State; got == gateway.FeatureConfiguredActive {
+			t.Fatalf("unimplemented overflow reported active for %v", args)
+		}
+	}
+}

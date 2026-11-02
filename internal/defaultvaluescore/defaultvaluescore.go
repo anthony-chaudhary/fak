@@ -109,45 +109,46 @@ type reviewedDefaultDecision struct {
 // default-OFF. A reason alone is not permanent absolution: reviewBy makes omission harm
 // observable as the agentic default window moves. Dates are UTC YYYY-MM-DD.
 var offWithReason = map[string]reviewedDefaultDecision{
+	"gpudirect-overflow": {reason: "compatibility flag has no guard or serve overflow consumer; keep disabled until a wired implementation and hardware witness justify exposure", reviewBy: "2026-11-16"},
 	"context-budget-tokens": {
-		reason:   "seeds a hard context budget that returns reset directives -- an operator policy, not a silent default (0 = off keeps today's path)",
-		reviewBy: "2026-11-01",
+		reason:   "hard reset directives require an operator context policy; zero preserves the unbounded policy instead of guessing a model window",
+		reviewBy: "2026-11-16",
 	},
 	"cuda-graph": {
-		reason:   "a measured no-win on small-model/L4 decode (launch overhead already small), and on raider (RTX 5090 Laptop, Qwen3.8-27B Q4_K_M, ctx 2048) graph Instantiate runs out of VRAM -- requires a per-node tok/s witness before it pays",
-		reviewBy: "2026-11-01",
+		reason:   "capture needs model/node VRAM headroom and a per-node token-time witness; the serve catalog treats a request as standby, not proven capture or a speedup",
+		reviewBy: "2026-11-16",
 	},
 	"vdso-proxy-fill": {
-		reason:   "changes cross-turn cache residency and requires a named principal plus writes routed through fak",
-		reviewBy: "2026-11-01",
+		reason:   "cross-turn cache fill requires a named principal and write invalidation through fak; leave opt-in while those deployment prerequisites are unknown",
+		reviewBy: "2026-11-16",
 	},
 	"compact-solvency-floor": {
-		reason:   "only the launcher knows model window minus output reserve; a gateway guess is harmful in both directions",
-		reviewBy: "2026-11-01",
+		reason:   "only the launcher knows model window minus output reserve; zero retains the cache-economics gate rather than guessing when to override it",
+		reviewBy: "2026-11-16",
 	},
 	"native-compact-history-budget": {
-		reason:   "0 is the derive sentinel, not off: the native wire compacts to (resolved --native-context-tokens window - 32000 output reserve) * 60%, and an explicit value overrides it (docs/long-context-defaults.md); distinct from the passthrough-only --compact-history-budget",
-		reviewBy: "2026-11-01",
+		reason:   "zero derives the native budget from the resolved context window and output reserve; an explicit value overrides it, and an unresolved window stays inert (docs/long-context-defaults.md)",
+		reviewBy: "2026-11-16",
 	},
 	"engine-cache-engine": {
-		reason:   "needs a configured self-hosted serving engine and admin credential",
-		reviewBy: "2026-11-01",
+		reason:   "remote reset requires an explicitly configured self-hosted engine; do not send control requests to an inferred engine",
+		reviewBy: "2026-11-16",
 	},
 	"engine-cache-base-url": {
-		reason:   "the serving-engine control URL is undefined until an engine is configured",
-		reviewBy: "2026-11-01",
+		reason:   "remote cache control needs an operator-supplied engine endpoint; there is no safe universal URL",
+		reviewBy: "2026-11-16",
 	},
 	"engine-cache-admin-key-env": {
-		reason:   "a deployment credential is meaningless until an engine is configured",
-		reviewBy: "2026-11-01",
+		reason:   "remote administrative credentials must be selected by the deployment, not inferred from ambient secrets",
+		reviewBy: "2026-11-16",
 	},
 	"engine-cache-idle-timeout": {
-		reason:   "a per-engine tuning knob paired with engine configuration",
-		reviewBy: "2026-11-01",
+		reason:   "SGLang-specific wait: zero omits the timeout parameter; opting into a positive wait requires a deployment latency budget",
+		reviewBy: "2026-11-16",
 	},
 	"engine-cache-require-exact-span": {
-		reason:   "deployment fail-closed policy paired with engine configuration",
-		reviewBy: "2026-11-01",
+		reason:   "exact-span enforcement is deployment policy; enabling it universally would refuse engines that only support whole-cache reset",
+		reviewBy: "2026-11-16",
 	},
 }
 
@@ -157,14 +158,13 @@ var offWithReason = map[string]reviewedDefaultDecision{
 // still a product decision: each entry records why automatic exposure is net-beneficial
 // and when that conclusion must be revisited. Shared guard/serve flags use one rationale.
 var onWithReason = map[string]reviewedDefaultDecision{
-	"precompact-hook":        {reason: "shadow-mode lifecycle handoff preserves provider-cache continuity without changing the user task", reviewBy: "2026-11-01"},
-	"ctx-view-budget":        {reason: "bounded context views reduce repeated prompt tokens while retaining the configured working set", reviewBy: "2026-11-01"},
-	"compact-history-budget": {reason: "bounded history compaction reduces stale context cost while preserving recent turns and anchors", reviewBy: "2026-11-01"},
-	"compact-anchor-head":    {reason: "retaining the stable head protects provider-cache reuse across compacted turns", reviewBy: "2026-11-01"},
-	"elide-result-bytes":     {reason: "result elision removes repeated payload bytes while preserving references needed for recall", reviewBy: "2026-11-01"},
-	"elide-stale-reads":      {reason: "stale-read elision suppresses superseded observations while preserving the latest value", reviewBy: "2026-11-01"},
-	"vdso":                   {reason: "the in-process fast path avoids redundant engine calls and retains the policy checkpoint", reviewBy: "2026-11-01"},
-	"gpudirect-overflow":     {reason: "direct P2P DMA NVMe/host overflow bypasses CPU bounce buffering on VRAM saturation", reviewBy: "2026-11-01"},
+	"precompact-hook":        {reason: "shadow mode records lifecycle posture and allows the task; enforcement remains explicit and unavailable posture fails open", reviewBy: "2026-11-16"},
+	"ctx-view-budget":        {reason: "buffered views only shorten history, retain the Anthropic cached prefix, and fall back to full history on uncertainty; streaming is not claimed to use this path", reviewBy: "2026-11-16"},
+	"compact-history-budget": {reason: "eligible Anthropic passthrough history compacts above its budget while retaining recent context; short sessions and non-passthrough traffic remain unchanged", reviewBy: "2026-11-16"},
+	"compact-anchor-head":    {reason: "the compaction economics gate retains a stable head for prefix reuse; the separate operator solvency floor controls when occupancy may override that gate", reviewBy: "2026-11-16"},
+	"elide-result-bytes":     {reason: "bounded result elision preserves the recent working band and recall references; restore paths recover oversized original tool results", reviewBy: "2026-11-16"},
+	"elide-stale-reads":      {reason: "eligible passthrough elision replaces superseded reads while retaining the latest observation; disabled and non-passthrough paths remain identities", reviewBy: "2026-11-16"},
+	"vdso":                   {reason: "eligible tool calls use the local fast path behind policy checks; feature proof requires an accepted real cache hit rather than inferring benefit from registration", reviewBy: "2026-11-16"},
 }
 
 // registryOverlap returns the flag names present in BOTH reviewed registries, sorted.
