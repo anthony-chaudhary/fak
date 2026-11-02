@@ -67,7 +67,7 @@ func TestCUDAV41IQ4NLRowFiniteStatus(t *testing.T) {
 	run, cancelRun := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancelRun()
 	output, err := exec.CommandContext(run, executable).CombinedOutput()
-	if err != nil || string(output) != "PASS IQ4_NL row finite/status/poison contract; CUDA execution unrun\n" {
+	if err != nil || strings.ReplaceAll(string(output), "\r\n", "\n") != "PASS IQ4_NL row finite/status/poison contract; CUDA execution unrun\n" {
 		t.Fatalf("IQ4_NL finite/status witness: %v\n%s", err, output)
 	}
 	t.Log(strings.TrimSpace(string(output)))

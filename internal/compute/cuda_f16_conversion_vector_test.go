@@ -90,7 +90,7 @@ func TestCUDAF16ContiguousConversionVector(t *testing.T) {
 	if err != nil {
 		t.Fatalf("F16 conversion source witness: %v\n%s", err, out)
 	}
-	if string(out) != "PASS actual F16 conversion dispatch/indexing at upload and HGEMM; CUDA rounding/device unrun\n" {
+	if strings.ReplaceAll(string(out), "\r\n", "\n") != "PASS actual F16 conversion dispatch/indexing at upload and HGEMM; CUDA rounding/device unrun\n" {
 		t.Fatalf("incomplete F16 witness: %s", out)
 	}
 	t.Log(strings.TrimSpace(string(out)))
