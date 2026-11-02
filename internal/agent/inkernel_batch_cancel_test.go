@@ -388,3 +388,116 @@ func TestCoalescedDeviceGateCancellation(t *testing.T) {
 		}
 	}
 }
+
+// fak-test:runtime fast est=100ms lane=default
+func TestCoalescedMixedCancellationReturnsBeforeOwner(t *testing.T) {
+	for _, kind := range []inKernelCoalesceKind{inKernelCoalesceQwen, inKernelCoalesceV41} {
+		name := "qwen"
+		if kind == inKernelCoalesceV41 {
+			name = "v41"
+		}
+		t.Run(name, func(t *testing.T) {
+			p := &InKernelPlanner{coalesceRunning: true}
+			p.devMu.Lock()
+			var once sync.Once
+			release := func() { once.Do(p.devMu.Unlock) }
+			defer release()
+			canceled, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			order := make(chan int, 3)
+			requests := make([]*inKernelCoalesceRequest, 3)
+			for i := range requests {
+				ctx := context.Background()
+				if i == 1 {
+					ctx = canceled
+				}
+				id := i
+				requests[i] = &inKernelCoalesceRequest{kind: kind, ctx: ctx, prepared: make(chan *decodeLane, 1), proceed: make(chan error, 1), result: make(chan inKernelCoalesceResult, 1), done: make(chan struct{}), drain: make(chan struct{}, 1), receiptReady: make(chan struct{}), enqueued: time.Now(), run: func(ctx context.Context) (inKernelGenerateResult, error) {
+					order <- id
+					return inKernelGenerateResult{}, ctx.Err()
+				}}
+			}
+			p.coalesceReady = append([]*inKernelCoalesceRequest(nil), requests...)
+			drained := make(chan struct{})
+			go func() { p.drainCoalescedGenerates(); close(drained) }()
+			defer func() {
+				release()
+				select {
+				case <-drained:
+				case <-time.After(time.Second):
+					t.Error("drainer did not join")
+				}
+			}()
+			awaitCoalescedQueue(t, p, 0)
+			cancel()
+			select {
+			case <-requests[1].receiptReady:
+			case <-time.After(time.Second):
+				t.Fatal("canceled selected member waited behind unrelated owner despite live siblings")
+			}
+			select {
+			case <-requests[1].done:
+			default:
+				t.Fatal("receipt preceded canceled completion")
+			}
+			out := <-requests[1].result
+			if !errors.Is(out.err, context.Canceled) {
+				t.Fatalf("canceled member error: %v", out.err)
+			}
+			if requests[1].receipt != (InKernelBatchReceipt{}) || requests[1].closes.Load() != 0 {
+				t.Fatal("pre-start cancellation claimed execution or cleanup")
+			}
+			if len(p.devMu.slot) != 1 {
+				t.Fatal("cancellation released foreign owner")
+			}
+			select {
+			case id := <-order:
+				t.Fatalf("request %d ran under foreign owner", id)
+			default:
+			}
+			select {
+			case <-drained:
+				t.Fatal("cancellation abandoned live siblings")
+			default:
+			}
+			release()
+			select {
+			case <-drained:
+			case <-time.After(time.Second):
+				t.Fatal("live siblings did not finish")
+			}
+			for _, want := range []int{0, 2} {
+				select {
+				case got := <-order:
+					if got != want {
+						t.Fatalf("survivor order %d want %d", got, want)
+					}
+				default:
+					t.Fatal("missing live sibling")
+				}
+			}
+			select {
+			case id := <-order:
+				t.Fatalf("canceled or duplicate run %d", id)
+			default:
+			}
+			for _, i := range []int{0, 2} {
+				select {
+				case <-requests[i].receiptReady:
+				default:
+					t.Fatal("survivor receipt missing")
+				}
+			}
+			p.coalesceMu.Lock()
+			running, pending := p.coalesceRunning, len(p.coalesceReady)
+			p.coalesceMu.Unlock()
+			if running || pending != 0 {
+				t.Fatal("cohort retained leadership")
+			}
+			if err := p.devMu.LockContext(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			p.devMu.Unlock()
+		})
+	}
+}

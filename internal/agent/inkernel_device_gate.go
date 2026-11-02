@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 )
 
 // inKernelDeviceGate owns the single forward slot shared by ordinary requests
@@ -44,39 +43,63 @@ func (g *inKernelDeviceGate) LockContext(ctx context.Context) error {
 	}
 }
 
-// LockCohort abandons a not-yet-started cohort only when every participant is
-// canceled. After acquisition, the coordinator retains its usual cleanup boundary.
-// The drainer supplies a nonempty selection with each request's original context.
-func (g *inKernelDeviceGate) LockCohort(cohort []*inKernelCoalesceRequest) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	var remaining atomic.Int32
-	remaining.Store(int32(len(cohort)))
-	stops := make([]func() bool, 0, len(cohort))
-	defer func() {
-		for _, stop := range stops {
-			stop()
-		}
-	}()
-	for _, req := range cohort {
-		stops = append(stops, context.AfterFunc(req.ctx, func() {
-			if remaining.Add(-1) == 0 {
-				cancel()
+// LockCohort retires canceled selected requests before their run closures start,
+// while preserving the ordered live subset. A nonempty return owns the gate;
+// an empty return owns nothing. Started requests retain the coordinator's usual
+// session-cleanup boundary. The drainer supplies a bounded selection.
+func (g *inKernelDeviceGate) LockCohort(cohort []*inKernelCoalesceRequest) []*inKernelCoalesceRequest {
+	pending := append([]*inKernelCoalesceRequest(nil), cohort...)
+	prune := func() {
+		kept := pending[:0]
+		for _, req := range pending {
+			if err := req.ctx.Err(); err != nil {
+				// No run closure owns this request yet. Complete its cancellation
+				// without claiming a device operation or a session-close receipt.
+				req.result <- inKernelCoalesceResult{err: err}
+				close(req.done)
+				req.publishReceipt()
+				continue
 			}
-		}))
+			kept = append(kept, req)
+		}
+		clear(pending[len(kept):])
+		pending = kept
 	}
-	if err := g.LockContext(ctx); err != nil {
-		return err
-	}
-	// AfterFunc callbacks may still be scheduled when the slot becomes free.
-	// Check the participant contexts before admitting any run closure.
-	for _, req := range cohort {
-		if req.ctx.Err() == nil {
+	for {
+		prune()
+		if len(pending) == 0 {
 			return nil
 		}
+		acquired := func() bool {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			stops := make([]func() bool, 0, len(pending))
+			defer func() {
+				for _, stop := range stops {
+					stop()
+				}
+			}()
+			for _, req := range pending {
+				if req.ctx.Done() != nil {
+					// Every callback captures this attempt's cancel function only.
+					// Even a callback racing stop cannot affect a later attempt,
+					// publish a request, or release somebody else's device owner.
+					stops = append(stops, context.AfterFunc(req.ctx, cancel))
+				}
+			}
+			return g.LockContext(ctx) == nil
+		}()
+		if !acquired {
+			continue
+		}
+		// A context may be canceled before its callback runs. Recheck after
+		// grant; only successful acquisition permits releasing this slot.
+		prune()
+		if len(pending) == 0 {
+			g.Unlock()
+		}
+		return pending
 	}
-	g.Unlock()
-	return context.Canceled
 }
 
 func (g *inKernelDeviceGate) Unlock() {

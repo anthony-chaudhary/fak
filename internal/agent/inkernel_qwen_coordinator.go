@@ -28,13 +28,10 @@ type inKernelQwenRequestState struct {
 // and baton handoff, so an idle completion cannot leave ownership behind it.
 func (p *InKernelPlanner) runDecodeCohort(cohort []*inKernelCoalesceRequest) (final []*inKernelCoalesceRequest) {
 	deviceWait := time.Now()
-	if err := p.devMu.LockCohort(cohort); err != nil {
+	cohort = p.devMu.LockCohort(cohort)
+	if len(cohort) == 0 {
 		enginestep.Default.ObservePhase(enginestep.PhaseDeviceWait, time.Since(deviceWait))
-		for _, req := range cohort {
-			req.result <- inKernelCoalesceResult{err: req.ctx.Err()}
-			close(req.done)
-		}
-		return cohort
+		return nil
 	}
 	defer p.devMu.Unlock()
 	enginestep.Default.ObservePhase(enginestep.PhaseDeviceWait, time.Since(deviceWait))
