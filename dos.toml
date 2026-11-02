@@ -195,6 +195,9 @@ concurrent = [
   # and the arbiter could not detect a same-tree collision on it. Declared here so the
   # referee binds the stamp and the arbiter protects internal/leaseref/** edits.
   "leaseref",
+  "leaserefcli",
+  "sessionref",
+  "worktreereapcli",
   "windowgate", # internal/windowgate leaf (the no-desktop-popup gate); declared so the referee binds a `(fak windowgate)` stamp and the arbiter protects internal/windowgate/** edits.
   "worktype",   # internal/worktype leaf (the work-class taxonomy: ongoing PROGRAM vs DISCRETE epic) the milestone roadmap + `fak program` report sort by; declared so the referee binds `(fak worktype)` and the arbiter protects internal/worktype/** edits.
   "choicetriage", # internal/choicetriage leaf (the surfaced-choice disposition taxonomy that decenters the human: TAKE_OBVIOUS / FRESH_CONTEXT / FILE_TICKET / HUMAN_RESIDUAL, the decision-side dual of waiting) the operator brief folds each choice through; declared so the referee binds `(fak choicetriage)` and the arbiter protects internal/choicetriage/** edits.
@@ -613,6 +616,9 @@ autopick = [
   "loopmgr", # #763: internal/loopmgr leaf, see [lanes].concurrent note
   "vcacheobserve",
   "leaseref", # #825: internal/leaseref leaf, see [lanes].concurrent note
+  "leaserefcli",
+  "sessionref",
+  "worktreereapcli",
   "dojo", # #951: internal/dojo leaf (the prediction-vs-reality gym), see [lanes].concurrent note
   "windowgate", # internal/windowgate leaf (the no-desktop-popup gate), see [lanes].concurrent note
   "worktype", # internal/worktype leaf (the work-class taxonomy), see [lanes].concurrent note
@@ -976,6 +982,9 @@ session = ["internal/session/**"] # #756 (Pillar 2 / #748): per-session DRIVE st
 loopmgr = ["internal/loopmgr/**"] # #763 (#749 `fak cron` / #748): loop ledger + governor + recurring-job schedule
 vcacheobserve = ["internal/vcacheobserve/**"]
 leaseref = ["internal/leaseref/**"] # #825: cross-machine lease VISIBILITY substrate (refs/fak/locks/*)
+leaserefcli = ["internal/leaserefcli/**"]
+sessionref = ["internal/sessionref/**"]
+worktreereapcli = ["internal/worktreereapcli/**"]
 dojo = ["internal/dojo/**"] # #951: prediction-vs-reality gym (predict -> run -> measure -> eval -> calibrate)
 scoreboard = ["internal/scoreboard/**"] # #1000: fak scoreboard Slack scorecard publisher (cmd/fak/scoreboard.go shim stays in the `cmd` lane to keep leaf trees pairwise-disjoint)
 marketing = ["internal/marketing/**"] # completion-driven marketing subsystem (any cmd/fak shim lives in the `cmd` lane to keep leaf trees pairwise-disjoint)
