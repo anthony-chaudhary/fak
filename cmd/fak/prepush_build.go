@@ -1093,24 +1093,6 @@ func gitChangedFilesRange(r, base, tip string, suffixes ...string) ([]string, er
 	return files, nil
 }
 
-// parseGitNULPaths preserves Git's repository-relative path bytes, including whitespace
-// and literal backslashes. Git already uses slash separators; no normalization is needed.
-func parseGitNULPaths(out string) ([]string, error) {
-	if out == "" {
-		return nil, nil
-	}
-	if !strings.HasSuffix(out, "\x00") {
-		return nil, fmt.Errorf("git path output is not NUL-terminated")
-	}
-	paths := strings.Split(strings.TrimSuffix(out, "\x00"), "\x00")
-	for _, path := range paths {
-		if path == "" {
-			return nil, fmt.Errorf("git path output contains an empty path")
-		}
-	}
-	return paths, nil
-}
-
 // hasAnySuffix reports whether s ends in any of the given suffixes.
 func hasAnySuffix(s string, suffixes []string) bool {
 	for _, suf := range suffixes {
