@@ -564,6 +564,38 @@ https://github.com/vllm-project/vllm/tree/f47792af7fba76eb8e8f6a564b35cfad316d39
   copy it guards).
 - `vllm/model_executor/offloader/uva.py` (pinned staging storage).
 
+### Split-phase remote snapshot transfer ownership
+
+The remote snapshot transaction in `internal/radixkv/remote_transfer.go`,
+`remote_l3.go`, the scoped tree, and the ordinary InKernelPlanner tiered lookup
+and pressure paths adapts prepare/pin, submitted-job ownership, validated
+completion, and failed-writer lifetime retention from the vLLM tiering manager:
+https://github.com/vllm-project/vllm/blob/5c8ae7c74aaa99d1f7fbeea942fd7282e3413810/vllm/v1/kv_offload/tiering/manager.py
+
+SPDX-License-Identifier: Apache-2.0
+SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
+Changed for Fak: a single synchronous transfer job, not an asynchronous Python
+worker pipeline. Explicit held-lock APIs prepare immutable store/configuration,
+record, namespace and snapshot-reference identity under the existing planner
+mutex, release that mutex for remote transport and independently owned restore,
+then reacquire it to validate publication. Configuration generations invalidate
+late results even when model and namespace strings are unchanged. Cancellation
+does not release the charged job until the actual store callback retires; busy
+work cannot consume a breaker probe or authorize source eviction. Stale restored
+owners are closed exactly once. A stale successful Put may leave an external
+orphan because the existing SnapshotStore has no Delete; no remote rollback is
+claimed. Local snapshot capture/serialization and local/SSD work remain locked.
+No new endpoint, credential, tenant permission, background queue or device path
+is introduced. This is distinct from retained host-swap capacity and dense
+prefix payload sharing. Runtime, race and performance qualification remain
+separate from source publication.
+
+The full Apache License, Version 2.0 reproduced in the "TensorFold benchmark
+evidence" section above applies to this adaptation.
+
+### Checkpoint expert-ring adaptation
+
 Changed for Fak: the port is expressed over a synchronous `io.ReaderAt` ring fill
 rather than a CUDA copy stream. Identity becomes the absolute checkpoint byte
 range derived from GGUF directory geometry, which also supplies the dispatch

@@ -326,12 +326,14 @@ type Tree struct {
 	l2RestoreBytes int64
 	l2Evictions    int
 
-	remoteSnapshotStore SnapshotStore
-	remoteModelID       string
-	remoteBackend       compute.Backend
-	remoteConfig        model.Config
-	remoteSnapshotBytes int64
-	remoteBreaker       *RemoteL3Breaker
+	remoteSnapshotStore    SnapshotStore
+	remoteConfigGeneration uint64               // changes on every store/backend/config attach or detach
+	remoteTransfers        *remoteTransferState // serialized pending ownership; no background worker
+	remoteModelID          string
+	remoteBackend          compute.Backend
+	remoteConfig           model.Config
+	remoteSnapshotBytes    int64
+	remoteBreaker          *RemoteL3Breaker
 
 	localSSDStore         SnapshotStore
 	localSSDModelID       string
@@ -822,6 +824,10 @@ func acquireSnapshotForRequest(ctx context.Context, acquire func() (*model.Prefi
 
 // LookupSnapshotTieredContext is the request-cancellable L1→L2→L3 lookup.
 func (t *Tree) LookupSnapshotTieredContext(ctx context.Context, tokens []int) (*node, *model.PrefixSnapshot, int, SnapshotTier, error) {
+	return t.lookupSnapshotTieredContext(ctx, tokens, nil)
+}
+
+func (t *Tree) lookupSnapshotTieredContext(ctx context.Context, tokens []int, lock *remoteTransferLock) (*node, *model.PrefixSnapshot, int, SnapshotTier, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, 0, SnapshotTierMiss, err
 	}
@@ -883,12 +889,31 @@ func (t *Tree) LookupSnapshotTieredContext(ctx context.Context, tokens []int) (*
 			if candidate.remoteSnapshot == nil {
 				continue
 			}
-			snap, found, err := t.restoreSnapshotFromRemote(ctx, "", candidate)
+			matched := candidate.plen
+			snap, found, err := t.restoreSnapshotFromRemoteWithLock(ctx, "", candidate, lock)
+			if lock != nil && lock.released {
+				// The transfer may have kept an ancestor record valid while an
+				// administrator detached or replaced our original lookup boundary.
+				// Drop only our lookup lease and reacquire a current structural
+				// boundary. Never walk the old ancestry after an unlocked callback.
+				t.Done(n)
+				n, _ = t.Lookup(tokens)
+				if err != nil {
+					return n, nil, matched, SnapshotTierRemoteL3, err
+				}
+				if found {
+					// The independently owned snapshot still matches the captured
+					// prefix; job validation proved its record and token count.
+					return n, snap, matched, SnapshotTierRemoteL3, nil
+				}
+				t.l3Misses++
+				return n, nil, 0, SnapshotTierMiss, nil
+			}
 			if err != nil {
-				return n, nil, candidate.plen, SnapshotTierRemoteL3, err
+				return n, nil, matched, SnapshotTierRemoteL3, err
 			}
 			if found {
-				return n, snap, candidate.plen, SnapshotTierRemoteL3, nil
+				return n, snap, matched, SnapshotTierRemoteL3, nil
 			}
 		}
 		t.l3Misses++

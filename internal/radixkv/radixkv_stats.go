@@ -6,71 +6,72 @@ import (
 
 // Stats is a snapshot of the cache's structural state for reporting.
 type Stats struct {
-	CPUCacheBytes              int64        `json:"cpu_cache_bytes"`
-	MaxCPUCacheBytes           int64        `json:"max_cpu_cache_bytes"`
-	CPUCacheBypasses           int64        `json:"cpu_cache_bypasses"`
-	CPUCacheLastBypass         string       `json:"cpu_cache_last_bypass,omitempty"`
-	Tokens                     int          // total cached tokens (Σ edge lengths) — the LRU-budget metric
-	PrefixTokens               int          // Σ node.plen over nodes holding a kv — TRUE resident KV positions
-	Nodes                      int          // non-root nodes
-	ProtectedTokens            int          `json:"protected_tokens"` // Σ edge tokens on the root path of every leased node
-	EvictableTokens            int          `json:"evictable_tokens"` // Tokens - ProtectedTokens
-	SnapshotBytes              int64        `json:"snapshot_bytes"`
-	MaxSnapshotBytes           int64        `json:"max_snapshot_bytes"`
-	HostSnapshotBytes          int64        `json:"host_snapshot_bytes"`
-	MaxHostSnapshotBytes       int64        `json:"max_host_snapshot_bytes"`
-	DeviceSnapshotBytes        int64        `json:"device_snapshot_bytes"`
-	DeviceSnapshotHostBytes    int64        `json:"device_snapshot_host_bytes"`
-	DeviceSnapshotTokens       int          `json:"device_snapshot_tokens"`
-	L1Hits                     int          `json:"l1_hits"`
-	L1Misses                   int          `json:"l1_misses"`
-	L1Faults                   int          `json:"l1_faults"`
-	L1HitTokens                int          `json:"l1_hit_tokens"`
-	L2Hits                     int          `json:"l2_hits"`
-	L2Misses                   int          `json:"l2_misses"`
-	L2Faults                   int          `json:"l2_faults"`
-	L2HitTokens                int          `json:"l2_hit_tokens"`
-	L2StageBytes               int64        `json:"l2_stage_bytes"`
-	L2RestoreBytes             int64        `json:"l2_restore_bytes"`
-	L2Evictions                int          `json:"l2_evictions"`
-	L3Enabled                  bool         `json:"l3_enabled"`
-	L3ReferencedBytes          int64        `json:"l3_referenced_bytes"`
-	L3Hits                     int          `json:"l3_hits"`
-	L3Misses                   int          `json:"l3_misses"`
-	L3Faults                   int          `json:"l3_faults"`
-	L3HitTokens                int          `json:"l3_hit_tokens"`
-	L3StageBytes               int64        `json:"l3_stage_bytes"`
-	L3RestoreBytes             int64        `json:"l3_restore_bytes"`
-	L3StageNanos               int64        `json:"l3_stage_nanos"`
-	L3RestoreNanos             int64        `json:"l3_restore_nanos"`
-	L3StageFaults              int          `json:"l3_stage_faults"`
-	L3RestoreFaults            int          `json:"l3_restore_faults"`
-	L3Breaker                  BreakerStats `json:"l3_breaker"`
-	L3BreakerState             BreakerState `json:"l3_breaker_state,omitempty"`
-	L3BreakerConsecutiveFaults int          `json:"l3_breaker_consecutive_faults,omitempty"`
-	L3BreakerTotalFaults       int          `json:"l3_breaker_total_faults,omitempty"`
-	L3BreakerOpenSkips         int          `json:"l3_breaker_open_skips,omitempty"`
-	L3BreakerProbesAttempted   int          `json:"l3_breaker_probes_attempted,omitempty"`
-	L3BreakerProbeRecoveries   int          `json:"l3_breaker_probe_recoveries,omitempty"`
-	L3BreakerProbeFailures     int          `json:"l3_breaker_probe_failures,omitempty"`
-	L3BreakerOpenedAt          time.Time    `json:"l3_breaker_opened_at,omitempty"`
-	LocalL3Enabled             bool         `json:"local_l3_enabled"`
-	LocalL3BudgetBytes         int64        `json:"local_l3_budget_bytes"`
-	LocalL3ReferencedBytes     int64        `json:"local_l3_referenced_bytes"`
-	LocalL3Hits                int          `json:"local_l3_hits"`
-	LocalL3Misses              int          `json:"local_l3_misses"`
-	LocalL3Faults              int          `json:"local_l3_faults"`
-	LocalL3HitTokens           int          `json:"local_l3_hit_tokens"`
-	LocalL3StageBytes          int64        `json:"local_l3_stage_bytes"`
-	LocalL3RestoreBytes        int64        `json:"local_l3_restore_bytes"`
-	Leaves                     int          // leaf nodes
-	MaxDepthTokens             int          // longest cached prefix
-	Evictions                  int          // LRU leaf evictions performed
-	CostEvictions              int          // cost-aware leaf evictions performed
-	PageEvictions              int          `json:"page_evictions,omitempty"` // page-aware leaf evictions performed
-	PolicyEvictions            int          // EvictNode calls
-	Splits                     int          // edge splits performed
-	MaxTokens                  int          // configured LRU budget (0 = unbounded)
+	CPUCacheBytes              int64                       `json:"cpu_cache_bytes"`
+	MaxCPUCacheBytes           int64                       `json:"max_cpu_cache_bytes"`
+	CPUCacheBypasses           int64                       `json:"cpu_cache_bypasses"`
+	CPUCacheLastBypass         string                      `json:"cpu_cache_last_bypass,omitempty"`
+	Tokens                     int                         // total cached tokens (Σ edge lengths) — the LRU-budget metric
+	PrefixTokens               int                         // Σ node.plen over nodes holding a kv — TRUE resident KV positions
+	Nodes                      int                         // non-root nodes
+	ProtectedTokens            int                         `json:"protected_tokens"` // Σ edge tokens on the root path of every leased node
+	EvictableTokens            int                         `json:"evictable_tokens"` // Tokens - ProtectedTokens
+	SnapshotBytes              int64                       `json:"snapshot_bytes"`
+	MaxSnapshotBytes           int64                       `json:"max_snapshot_bytes"`
+	HostSnapshotBytes          int64                       `json:"host_snapshot_bytes"`
+	MaxHostSnapshotBytes       int64                       `json:"max_host_snapshot_bytes"`
+	DeviceSnapshotBytes        int64                       `json:"device_snapshot_bytes"`
+	DeviceSnapshotHostBytes    int64                       `json:"device_snapshot_host_bytes"`
+	DeviceSnapshotTokens       int                         `json:"device_snapshot_tokens"`
+	L1Hits                     int                         `json:"l1_hits"`
+	L1Misses                   int                         `json:"l1_misses"`
+	L1Faults                   int                         `json:"l1_faults"`
+	L1HitTokens                int                         `json:"l1_hit_tokens"`
+	L2Hits                     int                         `json:"l2_hits"`
+	L2Misses                   int                         `json:"l2_misses"`
+	L2Faults                   int                         `json:"l2_faults"`
+	L2HitTokens                int                         `json:"l2_hit_tokens"`
+	L2StageBytes               int64                       `json:"l2_stage_bytes"`
+	L2RestoreBytes             int64                       `json:"l2_restore_bytes"`
+	L2Evictions                int                         `json:"l2_evictions"`
+	L3Enabled                  bool                        `json:"l3_enabled"`
+	L3Transfers                RemoteSnapshotTransferStats `json:"l3_transfers"`
+	L3ReferencedBytes          int64                       `json:"l3_referenced_bytes"`
+	L3Hits                     int                         `json:"l3_hits"`
+	L3Misses                   int                         `json:"l3_misses"`
+	L3Faults                   int                         `json:"l3_faults"`
+	L3HitTokens                int                         `json:"l3_hit_tokens"`
+	L3StageBytes               int64                       `json:"l3_stage_bytes"`
+	L3RestoreBytes             int64                       `json:"l3_restore_bytes"`
+	L3StageNanos               int64                       `json:"l3_stage_nanos"`
+	L3RestoreNanos             int64                       `json:"l3_restore_nanos"`
+	L3StageFaults              int                         `json:"l3_stage_faults"`
+	L3RestoreFaults            int                         `json:"l3_restore_faults"`
+	L3Breaker                  BreakerStats                `json:"l3_breaker"`
+	L3BreakerState             BreakerState                `json:"l3_breaker_state,omitempty"`
+	L3BreakerConsecutiveFaults int                         `json:"l3_breaker_consecutive_faults,omitempty"`
+	L3BreakerTotalFaults       int                         `json:"l3_breaker_total_faults,omitempty"`
+	L3BreakerOpenSkips         int                         `json:"l3_breaker_open_skips,omitempty"`
+	L3BreakerProbesAttempted   int                         `json:"l3_breaker_probes_attempted,omitempty"`
+	L3BreakerProbeRecoveries   int                         `json:"l3_breaker_probe_recoveries,omitempty"`
+	L3BreakerProbeFailures     int                         `json:"l3_breaker_probe_failures,omitempty"`
+	L3BreakerOpenedAt          time.Time                   `json:"l3_breaker_opened_at,omitempty"`
+	LocalL3Enabled             bool                        `json:"local_l3_enabled"`
+	LocalL3BudgetBytes         int64                       `json:"local_l3_budget_bytes"`
+	LocalL3ReferencedBytes     int64                       `json:"local_l3_referenced_bytes"`
+	LocalL3Hits                int                         `json:"local_l3_hits"`
+	LocalL3Misses              int                         `json:"local_l3_misses"`
+	LocalL3Faults              int                         `json:"local_l3_faults"`
+	LocalL3HitTokens           int                         `json:"local_l3_hit_tokens"`
+	LocalL3StageBytes          int64                       `json:"local_l3_stage_bytes"`
+	LocalL3RestoreBytes        int64                       `json:"local_l3_restore_bytes"`
+	Leaves                     int                         // leaf nodes
+	MaxDepthTokens             int                         // longest cached prefix
+	Evictions                  int                         // LRU leaf evictions performed
+	CostEvictions              int                         // cost-aware leaf evictions performed
+	PageEvictions              int                         `json:"page_evictions,omitempty"` // page-aware leaf evictions performed
+	PolicyEvictions            int                         // EvictNode calls
+	Splits                     int                         // edge splits performed
+	MaxTokens                  int                         // configured LRU budget (0 = unbounded)
 	EvictionPolicy             string
 	ReuseHits                  int
 
@@ -194,6 +195,7 @@ func (t *Tree) Stats() Stats {
 		LocalL3StageBytes:          t.l3LocalStageBytes,
 		LocalL3RestoreBytes:        t.l3LocalRestoreBytes,
 		L3Enabled:                  t.RemoteSnapshotEnabled(),
+		L3Transfers:                t.RemoteSnapshotTransfers(),
 		L3ReferencedBytes:          t.remoteSnapshotBytes,
 		L3Hits:                     t.l3Hits,
 		L3Misses:                   t.l3Misses,
