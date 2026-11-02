@@ -59,6 +59,10 @@ func (s *Session) prefillQwen35HybridQNoLogits(ids []int) {
 }
 
 func (s *Session) prefillQwen35HybridQHidden(ids []int) []float32 {
+	return s.prefillQwen35HybridQHiddenWithNormWorkspace(ids, s.newQwen35PrefillNormWorkspace(len(ids)))
+}
+
+func (s *Session) prefillQwen35HybridQHiddenWithNormWorkspace(ids []int, normWorkspace *qwen35PrefillNormWorkspace) []float32 {
 	dispatchWorkers := currentWorkerCount()
 	m, cfg := s.M, s.M.Cfg
 	H := cfg.HiddenSize
@@ -97,7 +101,7 @@ func (s *Session) prefillQwen35HybridQHidden(ids []int) []float32 {
 
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(str string) string { return layerName(l, str) }
-		Xn := make([]float32, P*H)
+		Xn := normWorkspace.panel(P, H)
 		wIn := m.tensor(lp("input_layernorm.weight"))
 		t = s.phaseStart()
 		parFor(P, dispatchWorkers, func(lo, hi int) {
@@ -125,7 +129,7 @@ func (s *Session) prefillQwen35HybridQHidden(ids []int) []float32 {
 		})
 		s.phaseEnd("attn_residual", t)
 
-		Xn2 := make([]float32, P*H)
+		Xn2 := normWorkspace.panel(P, H)
 		wPost := m.tensor(lp("post_attention_layernorm.weight"))
 		t = s.phaseStart()
 		parFor(P, dispatchWorkers, func(lo, hi int) {
