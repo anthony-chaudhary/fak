@@ -1037,6 +1037,7 @@ func (v *vulkanBackend) UploadClass(t Tensor, as Dtype, class MemoryClass, what 
 }
 
 func (v *vulkanBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, what string) Tensor {
+	requireRowMajor("vulkan Upload", t)
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	if vulkanUploadAttribution.enabled {

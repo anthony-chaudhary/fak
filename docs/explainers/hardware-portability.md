@@ -110,8 +110,23 @@ implements already assumes none of them.
   `Attention`), never "split these rows across workers", so a device expresses its own
   intra-kernel parallelism; the reference's fork-join stays private. *(lifts #5)*
 - **Layout is a descriptor** (`Layout` on every `Tensor`). The CPU reference honors only
-  `RowMajor`; a tensor-core backend declares `Tiled`/`ColMajor` and repacks at `Upload`
-  without the loop seeing it. *(lifts #6)*
+  `RowMajor`. CPU upload, generic matrix operations and plan preparation reject other
+  layouts with `ErrUnsupportedLayout`. Existing format-specific matrix validators
+  retain their established error identities; NVFP4 rejects weight and activation
+  layout errors with `ErrNVFP4Shape` and `ErrNVFP4Input`. CUDA, Metal and Vulkan reject unsupported
+  host upload layouts before allocation, cache lookup or copying, including CUDA
+  async and rank uploads. CUDA retains its explicit F32-to-F16 weight conversion:
+  a rank-two `ColMajor` upload requests the existing load-time transpose and the
+  resident F16 tensor preserves that layout. Backend-owned device packing remains
+  private to the backend. *(lifts #6)*
+
+  Host matrix storage is contiguous: a weight `[out,in]` has logical element
+  offset `row*in+column`; a batched input `[tokens,in]` uses the same row stride.
+  Quantized rows contain complete format-defined blocks, codes and matching scales.
+  `Tensor` has no arbitrary stride field, and `Tiled` alone does not identify a
+  tile permutation or scale layout. A kernel port must bring its exact loader
+  packing and validate that contract before upload; unsupported layouts fail
+  rather than being reinterpreted or repacked on every matrix operation.
 - **Residency is pluggable.** `WeightSource.Weight(name, want)` lets a backend stream or
   pre-stage weights instead of slurping one host blob, and `Upload(t, as)` narrows dtype at
   H2D. *(lifts #7, at the type level)*
@@ -305,3 +320,24 @@ evidence. The existing R2/R14/oracle tests in `internal/model` remain the equiva
 for the reference path — they must stay max|Δ|=0, argmax-exact. Run the suite via WSL
 (`.\fak\test.ps1`) for full verification on Windows when native WDAC policy flakes unsigned test
 binaries on this host.
+
+
+### checkCUDAUploadLayout (compute)
+
+Internal compute admission function that checks a host tensor's declared storage layout for CUDA upload. It accepts RowMajor or the existing rank-two ColMajor F32-to-F16 MemoryWeights transpose request and returns an error for other layouts.
+
+**Distinct from:** Returns a layout-admission error; requireCUDAUploadLayout converts rejection to a panic, ErrUnsupportedLayout identifies that error, and Layout describes physical element arrangement. This metadata check neither transposes bytes nor detects mispacked bytes marked RowMajor.
+
+
+### requireCUDAUploadLayout (compute)
+
+Internal compute CUDA-upload guard that calls checkCUDAUploadLayout and panics on rejection with operation and upload-site context.
+
+**Distinct from:** Enforces checker rejection at upload call sites; checkCUDAUploadLayout returns an error, ErrUnsupportedLayout is its matching sentinel, and Layout is the storage descriptor. The wrapper does not repack tensor bytes.
+
+
+### ErrUnsupportedLayout (compute)
+
+Sentinel error identifying generic compute layout-admission rejection of a tensor's declared storage layout, preserved through error wrapping for errors.Is matching.
+
+**Distinct from:** An error identity, rather than Layout's physical element arrangement, checkCUDAUploadLayout's metadata decision or requireCUDAUploadLayout's panic. It conveys input-layout capability refusal, not model/route support state, maturity or qualification. Format-specific validators retain domain errors such as ErrNVFP4Shape and ErrNVFP4Input.

@@ -86,8 +86,11 @@ func QuantizeQ8(be Backend, shape []int, w []float32, block int) Tensor {
 }
 
 // Upload is identity for the CPU reference: host data is already resident, so it ignores `as` and returns t unchanged.
-func (c *cpuBackend) Upload(t Tensor, as Dtype) Tensor { return t } // identity: host data already resident
-func (c *cpuBackend) Free(Tensor)                      {}           // host GC owns it
+func (c *cpuBackend) Upload(t Tensor, as Dtype) Tensor {
+	requireRowMajor("cpu-ref Upload", t)
+	return t
+}
+func (c *cpuBackend) Free(Tensor) {} // host GC owns it
 func (c *cpuBackend) CloneTensor(t Tensor) (Tensor, error) {
 	out := t
 	out.Shape = append([]int(nil), t.Shape...)
@@ -187,10 +190,14 @@ func (c *cpuBackend) SupportsDeviceWeightDtype(dt Dtype) bool {
 }
 
 func (c *cpuBackend) MatMul(w, x Tensor) Tensor {
+	nvfp4 := nvfp4Tensor(w)
+	if !nvfp4 {
+		requireRowMajor("cpu-ref MatMul", w, x)
+	}
 	if computetrace.Emitting() {
 		defer c.traceMatMul(w, x, time.Now())
 	}
-	if nvfp4Tensor(w) {
+	if nvfp4 {
 		return c.nvfp4MatMul(w, x, 1, false)
 	}
 	out, in := w.Shape[0], w.Shape[1]
@@ -279,6 +286,7 @@ func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	if nvfp4Tensor(w) {
 		return c.nvfp4MatMul(w, X, P, true)
 	}
+	requireRowMajor("cpu-ref BatchedMatMul", w, X)
 	out, in := w.Shape[0], w.Shape[1]
 	Xf := c.f32(X)
 	Y := make([]float32, P*out)
@@ -861,6 +869,9 @@ func qgemm8cell(qw []int8, dw []float32, qx []int8, dx []float32, nblk, block in
 // PrepareMatMul freezes the Q8_0 matrix-vector compatibility envelope and workspace
 // requirement. Other dtypes retain Backend.MatMul as their direct path.
 func (c *cpuBackend) PrepareMatMul(w, x Tensor) (*MatMulPlan, error) {
+	if err := checkRowMajor("cpu-ref PrepareMatMul", w, x); err != nil {
+		return nil, err
+	}
 	started := time.Now()
 	if w.Backend() != c || x.Backend() != c {
 		return nil, errors.New("compute: prepare matmul requires tensors owned by cpu-ref; upload them first")

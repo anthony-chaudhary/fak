@@ -31,6 +31,8 @@ func TestCUDAUploadCacheOwnerHost(t *testing.T) {
 	program.WriteString(cudaUploadCacheOwnerHostFixture)
 	wanted := map[string]bool{
 		"QuantSpec": false, "Buffer": false, "HostBuffer": false, "Tensor": false,
+		"ErrUnsupportedLayout": false, "checkRowMajor": false, "requireRowMajor": false,
+		"checkCUDAUploadLayout": false, "requireCUDAUploadLayout": false,
 		"cudaQ8UploadSource": false, "makeTensor": false, "Tensor.Numel": false,
 		"NewQ2": false, "bytesAsI8": false, "*cudaBackend.uploadQ2Resident": false,
 		"*cudaBackend.Upload": false, "*cudaBackend.uploadClass": false,
@@ -38,7 +40,7 @@ func TestCUDAUploadCacheOwnerHost(t *testing.T) {
 		"*cudaBackend.cudaFreeStorageLocked": false,
 		"*cudaBackend.Recycle":               false, "*cudaBackend.releaseTransientBuffers": false,
 	}
-	for _, path := range []string{"compute.go", "quant_q2.go", "cuda_upload.go", "cuda.go"} {
+	for _, path := range []string{"compute.go", "tensor_layout.go", "quant_q2.go", "cuda_upload.go", "cuda.go"} {
 		src, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -66,6 +68,13 @@ func TestCUDAUploadCacheOwnerHost(t *testing.T) {
 		for _, decl := range file.Decls {
 			switch node := decl.(type) {
 			case *ast.GenDecl:
+				if node.Tok == token.VAR {
+					for _, spec := range node.Specs {
+						if value, ok := spec.(*ast.ValueSpec); ok && len(value.Names) == 1 {
+							emit(value.Names[0].Name, value, "var ")
+						}
+					}
+				}
 				if node.Tok != token.TYPE {
 					continue
 				}
@@ -145,6 +154,8 @@ func TestCUDAUploadCacheOwnerHost(t *testing.T) {
 const cudaUploadCacheOwnerHostFixture = `package compute
 
 import (
+	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"sync"
@@ -186,7 +197,7 @@ func (d Dtype) String() string { return strconv.Itoa(int(d)) }
 
 type Layout uint8
 
-const RowMajor Layout = 0
+const (RowMajor Layout = iota; ColMajor; Tiled)
 
 type Backend interface{}
 type hostBuf struct{ i8 []int8 }
@@ -342,6 +353,31 @@ func TestUploadCacheOwner(t *testing.T) {
 	uploadCache = make(map[ucKey]Tensor)
 	freed = make(map[unsafe.Pointer]int)
 	awaited = nil
+	t.Run("LayoutAdmission", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			dtype Dtype
+			layout Layout
+		}{
+			{"quantized-colmajor", Q2_0, ColMajor},
+			{"tiled", F32, Tiled},
+			{"unknown", F32, Layout(255)},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				var got error
+				func() {
+					defer func() { got, _ = recover().(error) }()
+					c.Upload(Tensor{Dtype: tc.dtype, Layout: tc.layout, Shape: []int{1,32}}, tc.dtype)
+				}()
+				if !errors.Is(got, ErrUnsupportedLayout) {
+					t.Fatalf("layout admission = %v, want ErrUnsupportedLayout before host access", got)
+				}
+				if c.uploadCounts != (uploadCounts{}) || c.dlUsed != 0 || len(uploadCache) != 0 {
+					t.Fatal("rejected layout changed allocation, transfer, accounting or cache state")
+				}
+			})
+		}
+	})
 	packed := []byte{0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa}
 	first := NewQ2(c, []int{1, 32}, packed, []float32{1}, 32)
 	independent := NewQ2(c, []int{1, 32}, packed, first.Quant.Scale, 32)
@@ -434,7 +470,11 @@ func testUploadOwnerTerminalRetention(t *testing.T) {
 				// Exercise the existing positive accounting fields at the fixture
 				// boundary; this is not a claim that Q2 upload selects managed RAM.
 				wb.managedWeight, c.managedN = true, 1
-				wp, ws, keep := wb.ptr, wb.scales, wb.hostKeep.(cudaQ8UploadSource)
+				owner, ok := wb.hostKeep.(*cudaQ8UploadSource)
+				if !ok || owner == nil {
+					t.Fatal("upload did not retain its host source owner")
+				}
+				wp, ws, keep := wb.ptr, wb.scales, *owner
 				key := ucKey{wb.host, wb.hostDt, wb.hostLo}
 				tb := &cudaBuf{owner: c, codes: []int8{1, 2, 3, 4}}
 				tb.ptr = unsafe.Pointer(&tb.codes[0])
@@ -459,8 +499,8 @@ func testUploadOwnerTerminalRetention(t *testing.T) {
 					}
 				}
 				weightRetained := func() bool {
-					got, ok := wb.hostKeep.(cudaQ8UploadSource)
-					return ok && got.HostBuffer == keep.HostBuffer && len(got.scales) == len(keep.scales) && &got.scales[0] == &keep.scales[0] && got.rows == keep.rows && got.cols == keep.cols && got.block == keep.block && wb.ptr == wp && wb.scales == ws && wb.budgetedWeightBytes == 12 && wb.managedWeight && c.dlUsed == 12 && c.managedN == 1 && len(uploadCache) == 1 && uploadCache[key].buf == wb
+					got, ok := wb.hostKeep.(*cudaQ8UploadSource)
+					return ok && got == owner && got.HostBuffer == keep.HostBuffer && len(got.scales) == len(keep.scales) && &got.scales[0] == &keep.scales[0] && got.rows == keep.rows && got.cols == keep.cols && got.block == keep.block && wb.ptr == wp && wb.scales == ws && wb.budgetedWeightBytes == 12 && wb.managedWeight && c.dlUsed == 12 && c.managedN == 1 && len(uploadCache) == 1 && uploadCache[key].buf == wb
 				}
 				act()
 				if blocked {
