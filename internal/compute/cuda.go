@@ -551,6 +551,7 @@ func (c *cudaBackend) UploadClass(t Tensor, as Dtype, class MemoryClass, site st
 }
 
 func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site string) Tensor {
+	requireCUDAUploadLayout("cuda Upload", t, as, class, site)
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	hb, ok := t.buf.(HostBuffer)

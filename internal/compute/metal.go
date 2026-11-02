@@ -218,6 +218,7 @@ func (c *metalBackend) UploadClass(t Tensor, as Dtype, class MemoryClass, site s
 }
 
 func (c *metalBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site string) Tensor {
+	requireRowMajor("metal Upload", t)
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	hb, ok := t.buf.(HostBuffer)

@@ -15108,6 +15108,11 @@
           "category": "incidental",
           "reason": "CLI refusal code for a --source-commit request outside its supported verb or explicit handoff destination; an invocation-validation outcome, not a feature maturity level or support qualification claim.",
           "token": "SOURCE_COMMIT_UNSUPPORTED"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed compute input-layout capability refusal; the storage-layout error identity is positioned in the layout family, and does not classify model/route support state, maturity or qualification.",
+          "token": "ErrUnsupportedLayout"
         }
       ],
       "exclude": [
@@ -15152,6 +15157,7 @@
         "ErrUnsupported",
         "ErrUnsupportedColdStart",
         "ErrUnsupportedFormat",
+        "ErrUnsupportedLayout",
         "ErrUnsupportedSchema",
         "ExactTokenParity",
         "ExcludedUnsupportedProvider",

@@ -127,9 +127,11 @@ func (c *cudaBackend) UploadAsyncClass(t Tensor, as Dtype, class MemoryClass, si
 func (c *cudaBackend) uploadAsyncShape(t Tensor, hb HostBuffer, as Dtype, class MemoryClass, site string) (Tensor, Fence, bool) {
 	switch {
 	case t.Dtype == F32 && as == F32 && len(t.Shape) > 0:
+		requireCUDAUploadLayout("cuda UploadAsync", t, as, class, site)
 		out, fence := c.uploadF32Async(t, hb, class, site)
 		return out, fence, true
 	case (t.Dtype == Q3_K || t.Dtype == Q4_K || t.Dtype == Q5_K || t.Dtype == Q6_K || t.Dtype == Q2_K) && as == t.Dtype:
+		requireCUDAUploadLayout("cuda UploadAsync", t, as, class, site)
 		out, fence := c.uploadRawKQuantAsync(t, hb, class, site)
 		return out, fence, true
 	}

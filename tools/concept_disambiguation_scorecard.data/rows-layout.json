@@ -7,7 +7,7 @@
       "kind": "symbol",
       "definition": "Tensor element physical arrangement: RowMajor, ColMajor, or other ordering",
       "distinction": "Tensor element ordering - NOT Layout (ctxplan) (planning profile)",
-      "distinct_from": ["layout-ctxplan", "mla-kv-layout-seam", "kvlayout", "newmodel-native-weight-layout", "newmodel-native-state-layout", "v41-ep-panel-layout", "nvfp4-scale-layout-geometry"],
+      "distinct_from": ["layout-ctxplan", "mla-kv-layout-seam", "kvlayout", "newmodel-native-weight-layout", "newmodel-native-state-layout", "v41-ep-panel-layout", "nvfp4-scale-layout-geometry", "checkcudauploadlayout", "requirecudauploadlayout", "errunsupportedlayout"],
       "aliases": [],
       "grounding": "Layout",
       "grounding_kind": "symbol",
@@ -44,6 +44,69 @@
       "grounding": "kvLayout",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "checkcudauploadlayout",
+      "canonical": "checkCUDAUploadLayout (compute)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "Internal compute admission function that checks a host tensor's declared storage layout for CUDA upload. It accepts RowMajor or the existing rank-two ColMajor F32-to-F16 MemoryWeights transpose request and returns an error for other layouts.",
+      "distinction": "Returns a layout-admission error; requireCUDAUploadLayout converts rejection to a panic, ErrUnsupportedLayout identifies that error, and Layout describes physical element arrangement. This metadata check neither transposes bytes nor detects mispacked bytes marked RowMajor.",
+      "distinct_from": [
+        "layout-tensor",
+        "requirecudauploadlayout",
+        "errunsupportedlayout"
+      ],
+      "aliases": [],
+      "grounding": "checkCUDAUploadLayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/explainers/hardware-portability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "requirecudauploadlayout",
+      "canonical": "requireCUDAUploadLayout (compute)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "Internal compute CUDA-upload guard that calls checkCUDAUploadLayout and panics on rejection with operation and upload-site context.",
+      "distinction": "Enforces checker rejection at upload call sites; checkCUDAUploadLayout returns an error, ErrUnsupportedLayout is its matching sentinel, and Layout is the storage descriptor. The wrapper does not repack tensor bytes.",
+      "distinct_from": [
+        "layout-tensor",
+        "checkcudauploadlayout",
+        "errunsupportedlayout"
+      ],
+      "aliases": [],
+      "grounding": "requireCUDAUploadLayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/explainers/hardware-portability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "errunsupportedlayout",
+      "canonical": "ErrUnsupportedLayout (compute)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "Sentinel error identifying generic compute layout-admission rejection of a tensor's declared storage layout, preserved through error wrapping for errors.Is matching.",
+      "distinction": "An error identity, rather than Layout's physical element arrangement, checkCUDAUploadLayout's metadata decision or requireCUDAUploadLayout's panic. It conveys input-layout capability refusal, not model/route support state, maturity or qualification. Format-specific validators retain domain errors such as ErrNVFP4Shape and ErrNVFP4Input.",
+      "distinct_from": [
+        "layout-tensor",
+        "checkcudauploadlayout",
+        "requirecudauploadlayout"
+      ],
+      "aliases": [],
+      "grounding": "ErrUnsupportedLayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/explainers/hardware-portability.md",
       "parent": "",
       "verdict": "crystal",
       "gaps": []

@@ -50,6 +50,9 @@ var ncclInitOnce sync.Mutex
 // BackendCollective uses this optional seam so rank r's part is truly resident on GPU r before
 // an NCCL collective sees it.
 func (c *cudaBackend) UploadRank(t Tensor, as Dtype, rank int) (Tensor, error) {
+	if err := checkRowMajor("cuda UploadRank", t); err != nil {
+		return Tensor{}, err
+	}
 	if rank < 0 {
 		return Tensor{}, fmt.Errorf("compute: UploadRank got negative rank %d", rank)
 	}
