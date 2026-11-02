@@ -245,7 +245,11 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak opencode: session config: %v\n", err)
 			return 1
 		}
-		launchEnv = append(launchEnv, "OPENCODE_CONFIG_CONTENT="+string(config))
+		launchEnv, err = openCodeDirectConfigEnvironment(launchEnv, config)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak opencode: session config: %v\n", err)
+			return 1
+		}
 	}
 
 	if launch.dryRun {
