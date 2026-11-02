@@ -487,3 +487,63 @@ func decodeUIDOrderLane(t *testing.T, s *NativeScheduler, prompt []int) *schedLa
 		putCtx: ctx,
 	}
 }
+
+// fak-test:runtime fast est=1s lane=default
+// TestDecodeBatchPadsToSmallestCapturedBucket pins the borrowed
+// pad-to-captured-size rule: a live decode batch of n rows replays through the
+// smallest captured bucket >= n, and pad rows append after the live rows so the
+// stable-UID order of the live batch is preserved.
+func TestDecodeBatchPadsToSmallestCapturedBucket(t *testing.T) {
+	buckets := []int{1, 2, 4, 8, 16}
+	cases := []struct {
+		n    int
+		want int
+		ok   bool
+	}{
+		{n: 1, want: 1, ok: true},
+		{n: 2, want: 2, ok: true},
+		{n: 3, want: 4, ok: true},
+		{n: 5, want: 8, ok: true},
+		{n: 8, want: 8, ok: true},
+		{n: 9, want: 16, ok: true},
+		{n: 16, want: 16, ok: true},
+		{n: 17, ok: false},
+		{n: 0, ok: false},
+		{n: -1, ok: false},
+	}
+	for _, tc := range cases {
+		got, ok := decodeBatchBucket(tc.n, buckets)
+		if ok != tc.ok || (tc.ok && got != tc.want) {
+			t.Errorf("decodeBatchBucket(%d, %v) = (%d, %v), want (%d, %v)", tc.n, buckets, got, ok, tc.want, tc.ok)
+		}
+	}
+	// Invalid bucket sets refuse rather than mis-select a shape.
+	for name, bad := range map[string][]int{
+		"empty":       {},
+		"unsorted":    {2, 1, 4},
+		"duplicate":   {1, 2, 2, 4},
+		"nonpositive": {0, 2, 4},
+	} {
+		if got, ok := decodeBatchBucket(1, bad); ok {
+			t.Errorf("decodeBatchBucket(1, %s=%v) = (%d, true), want refusal", name, bad, got)
+		}
+	}
+	// Pad rows append after live rows; the live order (stable-UID order) is
+	// preserved and the input slice is not mutated.
+	live := []string{"uid-7", "uid-3", "uid-1"}
+	padded, ok := padDecodeRows(live, 4, "pad")
+	if !ok {
+		t.Fatalf("padDecodeRows(live=3, padded=4): ok = false, want true")
+	}
+	want := []string{"uid-7", "uid-3", "uid-1", "pad"}
+	if !reflect.DeepEqual(padded, want) {
+		t.Errorf("padDecodeRows = %v, want %v", padded, want)
+	}
+	if !reflect.DeepEqual(live, []string{"uid-7", "uid-3", "uid-1"}) {
+		t.Errorf("padDecodeRows mutated its input: %v", live)
+	}
+	// A target below the live count cannot shrink a fixed-shape replay.
+	if got, ok := padDecodeRows(live, 2, "pad"); ok {
+		t.Errorf("padDecodeRows(live=3, padded=2) = (%v, true), want refusal", got)
+	}
+}

@@ -1505,6 +1505,49 @@ func (s *NativeScheduler) stepOnce(active []*schedLane, iteration uint64) {
 	}
 }
 
+// decodeBatchBucket selects the fixed-shape decode graph bucket that a live
+// batch of n rows replays through: the smallest captured bucket >= n, the
+// pad-to-captured-size rule from sgl-project/mini-sglang at pinned revision
+// 9a91cfafe754aa85daee49998176275667eb58f2 (MIT), referenced at
+// python/minisgl/engine/graph.py:16-156; the upstream file is not vendored.
+// Buckets must be sorted unique positive sizes (strictly increasing); any
+// other set, n < 1, or n above the largest captured size refuses with ok=false
+// rather than mis-selecting a shape.
+func decodeBatchBucket(n int, buckets []int) (int, bool) {
+	if n < 1 || len(buckets) == 0 {
+		return 0, false
+	}
+	for i, b := range buckets {
+		if b < 1 || (i > 0 && b <= buckets[i-1]) {
+			return 0, false
+		}
+	}
+	for _, b := range buckets {
+		if b >= n {
+			return b, true
+		}
+	}
+	return 0, false
+}
+
+// padDecodeRows extends a live decode batch row list to a fixed captured bucket
+// shape by appending pad rows AFTER every live row, mirroring mini-sglang's
+// dummy-request padding (same pin as decodeBatchBucket). Live rows keep their
+// original order — the stable-UID order stepOnce establishes — and are never
+// truncated or reordered; paddedSize below the live count refuses instead of
+// shrinking a fixed-shape replay.
+func padDecodeRows[T any](live []T, paddedSize int, pad T) ([]T, bool) {
+	if paddedSize < len(live) {
+		return nil, false
+	}
+	out := make([]T, paddedSize)
+	copy(out, live)
+	for i := len(live); i < paddedSize; i++ {
+		out[i] = pad
+	}
+	return out, true
+}
+
 // takeDecodeSession replaces the live model session with a non-nil immutable
 // stats shell while Step/StepBatch mutates Cache outside s.mu. Preemption runs
 // only on executor boundaries, so it can never select the shell as a victim.
