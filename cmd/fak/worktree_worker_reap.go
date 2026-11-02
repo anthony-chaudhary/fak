@@ -47,7 +47,9 @@ func worktreeWorkerReap(argv []string) {
 		fmt.Fprintln(os.Stderr, "fak worktree worker reap: --worktree is required (or pass --all-cold for the bulk cold sweep)")
 		os.Exit(2)
 	}
-	os.Exit(worktreereapcli.RunSingle(os.Stdout, os.Stderr, repoRoot, strings.TrimSpace(*worktree), strings.TrimSpace(*supersededBy), *maxWait))
+	if code := worktreereapcli.RunSingle(os.Stdout, os.Stderr, repoRoot, strings.TrimSpace(*worktree), strings.TrimSpace(*supersededBy), *maxWait); code != 0 {
+		os.Exit(code)
+	}
 }
 
 func worktreeWorkerGC(argv []string) {

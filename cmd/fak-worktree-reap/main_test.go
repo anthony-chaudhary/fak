@@ -34,6 +34,13 @@ func TestNativeReapRoutesShareBoundedImplementation(t *testing.T) {
 					return true
 				}
 				x, ok := s.X.(*ast.Ident)
+				if tc.fn == "worktreeWorkerReap" && ok && x.Name == "os" && s.Sel.Name == "Exit" && len(c.Args) == 1 {
+					if call, ok := c.Args[0].(*ast.CallExpr); ok {
+						if method, ok := call.Fun.(*ast.SelectorExpr); ok && method.Sel.Name == "RunSingle" {
+							t.Error("full CLI must return on successful shared reap, preserving outer defers")
+						}
+					}
+				}
 				if ok && x.Name == "worktreereapcli" && s.Sel.Name == tc.call {
 					found = true
 				}
