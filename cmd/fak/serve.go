@@ -143,6 +143,10 @@ type serveFlags struct {
 	remoteKVTimeout              *time.Duration
 	engineID                     *string
 	nativeHostSwapBytes          *int64
+	nativeChatTemplateFile       *string
+	nativeChatTemplateSHA256     *string
+	nativeChatTemplateModel      *string
+	nativeChatTemplate           *agent.NativeChatTemplate
 	backendName                  *string
 	qwen38Runtime                *string
 	llamaServer                  *string
@@ -315,6 +319,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.engineID = fs.String("engine", "mock", "registered engine id that fak_syscall dispatches an allowed call to: mock, inkernel, vllm, sglang, llm-d, dynamo, or another registered driver (default: mock; select inkernel explicitly for fak-native model execution)")
 	sf.backendName = fs.String("backend", "", "compute backend for the in-kernel chat decode (with --gguf, no --base-url): --backend overrides FAK_BACKEND; use 'auto', 'cpu', or a registered name. Omitted/auto selects usable Vulkan on Linux/Windows, preserves Metal auto-selection on Darwin, and otherwise uses CPU. Vulkan requires -tags vulkan plus FAK_VULKAN_SPIRV; an unavailable named backend fails loud.")
 	sf.nativeHostSwapBytes = fs.Int64("native-kv-host-swap-bytes", 0, "bound retained serialized host-KV bytes in the native syscall scheduler (0 = unlimited). Requires a positive native KV block budget; full capacity ends the selected request, never silently recomputes. Excludes logits, staging, devices and process RSS")
+	registerServeNativeChatTemplateFlags(fs, sf)
 	nativeControls := registerNativeControlFlags(fs)
 	sf.nativeQwenQ4KPrefillChunk = nativeControls.prefillChunk
 	sf.nativeQwen35MetalGDNSequence = nativeControls.qwen35GDNSequence
@@ -565,6 +570,10 @@ func cmdServe(argv []string) {
 		os.Exit(2)
 	}
 	*sf.qwen38Runtime = qwen38Runtime
+	if err := validateServeNativeChatTemplateFlags(sf); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
 	keepAwakeMode, err := validateKeepAwake(*sf.keepAwake)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
@@ -743,6 +752,10 @@ func cmdServe(argv []string) {
 		os.Exit(1)
 	}
 	*sf.nativeCodeWorkspace = resolvedCodeWorkspace
+	if err := prepareServeNativeChatTemplate(sf); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
 
 	// Install the capability floor fail-loud: a bad manifest aborts startup rather
 	// than silently falling back to a more permissive default. Time it as the first
@@ -1002,6 +1015,9 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableCon
 	nativePlannerConfig := serveNativePlannerConfigWithContext(sf, rt.nativeContext.ResolvedTokens)
 	nativePlannerConfig.RequireDeviceExecution = rt.requireDeviceExecution
 	nativePlannerConfig.DeviceOnlyBypass = rt.executionPolicy.sessionBypass()
+	if err := applyServeNativeChatTemplate(sf, &nativePlannerConfig, rt.inKernelModel != nil && rt.inKernelTok != nil); err != nil {
+		return nil, err
+	}
 	// The backend tier check (resolveServeKVPrecision) does not see the architecture;
 	// refuse an arch-unrealized --kv-precision (e.g. q8_0 on a Qwen hybrid) before the
 	// listener binds, so the service fails admission instead of refusing every request.

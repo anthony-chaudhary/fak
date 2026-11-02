@@ -507,6 +507,24 @@ Block layout definitions are in `ggml/src/ggml-common.h` at the same revision.
 The translation omits function pointers and retains the loader's existing local
 format geometry, including its 128-element Q2_0 layout.
 
+
+## llama.cpp bounded native Jinja chat-template interpreter
+
+- Upstream: ggml-org/llama.cpp, commit
+  `cd8427d018c07eefab6c110f7f115c31ec4c6157` (MIT).
+- Source: `common/jinja/lexer.cpp`, `parser.cpp`, `runtime.cpp`,
+  `string.cpp`, `string.h` and `value.cpp`; full license retained at
+  `internal/agent/JINJA-LICENSE.txt`.
+- Adaptation: bounded tag/expression/statement parsing, request-local
+  scope/macro/namespace execution and input-marked string composition, wired to
+  the ordinary native prompt preparation and segmented tokenizer consumer.
+- FAK-specific changes: independent source/model digest binding, explicit
+  construction-time opt-in, closed builtin/profile admission, finite resource
+  limits, redacted refusal, and conservative special-token provenance.
+  No Python runtime, model, tokenizer, executable or network behavior is imported.
+
+## ggml GGUF type traits (continued)
+
 The V4.1 activation comparison and deliberate-divergence controls also adapt
 the backend graph node-comparison and sentinel process from
 `tests/test-backend-ops.cpp` at revision
