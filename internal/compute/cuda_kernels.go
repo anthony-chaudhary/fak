@@ -109,7 +109,7 @@ func (c *cudaBackend) qwen35SequenceMatMulLocked(w, x Tensor, tokens int, site s
 	if err := validateQwen35SequenceIQ2(w, tokens, qwen35SequenceIQ2Qualification); err != nil {
 		return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: err}
 	}
-	if err := c.validateQ56KMMVQOperands(w, x, tokens); err != nil {
+	if err := c.validateQ56KProjectionOperands(w, x, tokens); err != nil {
 		return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: err}
 	}
 	if w.Dtype == Q2_K {
@@ -139,11 +139,11 @@ func (c *cudaBackend) qwen35SequenceMatMulLocked(w, x Tensor, tokens int, site s
 			return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: cudaGEMMError("qwen35-sequence-"+site, rc, cudaQ4KScratch(out, in, tokens))}
 		}
 	case Q5_K:
-		if err := c.q56KMMVQFailure(y, int(C.fcuda_q5k_matmul_checked_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))), in, tokens); err != nil {
+		if err := c.q56KMMVQFailure(y, c.q56KProjectionStatus(w, wb, x, y, tokens), in, tokens); err != nil {
 			return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: err}
 		}
 	case Q6_K:
-		if err := c.q56KMMVQFailure(y, int(C.fcuda_q6k_matmul_checked_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))), in, tokens); err != nil {
+		if err := c.q56KMMVQFailure(y, c.q56KProjectionStatus(w, wb, x, y, tokens), in, tokens); err != nil {
 			return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: err}
 		}
 	case Q2_K:
@@ -510,6 +510,8 @@ func (c *cudaBackend) qwen35SequenceSyncLocked() error {
 	var status int
 	if qwen35SequenceIQ2Qualification {
 		status = c.qwen35SequenceIQ2FenceLocked()
+	} else if cudaQ56KMMQQualification {
+		status = c.qwen35Q56KMMQFenceLocked()
 	} else {
 		status = int(C.fak_qwen35_sequence_sync())
 	}

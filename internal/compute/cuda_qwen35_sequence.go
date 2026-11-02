@@ -511,9 +511,9 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 	defer func() {
 		if failed {
 			var launch *CUDAOpError
-			if errors.As(err, &launch) && launch.Op == cudaQwen35IQ2SequenceOp {
+			if errors.As(err, &launch) && (launch.Op == cudaQwen35IQ2SequenceOp || launch.Op == cudaQ56KMMQOp) {
 				// Earlier layers may already have advanced GDN/KV state. A
-				// rejected IQ2 output is never replayed as a healthy session.
+				// rejected retained-quant output is never replayed as a healthy session.
 				c.qwen35SequencePoisonStates(req)
 			}
 			c.qwen35SequenceReleaseSinceLocked(transientStart)
@@ -560,7 +560,7 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 		splitToken = 0 // one retirement attempt, including panic/Goexit unwind
 		var status C.fcuda_sequence_split_status
 		if code := int(C.fcuda_sequence_split_end(token, &status)); code != 0 {
-			if qwen35SequenceIQ2Qualification {
+			if qwen35SequenceIQ2Qualification || cudaQ56KMMQQualification {
 				// cudaMu still excludes all cleanup/submission. Preserve the
 				// exact retirement failure before any outer owner can recycle.
 				cudaQwen35IQ2SequenceRetirementFailedLocked(code)
@@ -801,7 +801,7 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 // ordinary prefill may request a separate P1 head after a large panel.
 // Future intermediate activations are still checked before each projection.
 func (c *cudaBackend) validateQ56KOperation(req Qwen35SequencePrefillRequest, panelRows, headRows int) error {
-	check := func(w Tensor) error { return c.validateQ56KMMVQWeight(w, panelRows) }
+	check := func(w Tensor) error { return c.validateQ56KProjectionWeight(w, panelRows) }
 	for _, layer := range req.Layers {
 		for _, w := range []Tensor{layer.Gate, layer.Up, layer.Down} {
 			if err := check(w); err != nil {
@@ -810,7 +810,14 @@ func (c *cudaBackend) validateQ56KOperation(req Qwen35SequencePrefillRequest, pa
 		}
 		weights := []Tensor{layer.Q, layer.K, layer.V, layer.O}
 		if layer.Linear {
-			weights = []Tensor{layer.GDNInQKV, layer.GDNInZ, layer.GDNInB, layer.GDNInA, layer.GDNOut}
+			// Packed GDN owns a separate native projection/fence contract. Do not
+			// widen its legacy ABI into this ordinary projection qualification.
+			for _, w := range []Tensor{layer.GDNInQKV, layer.GDNInZ, layer.GDNInB, layer.GDNInA, layer.GDNOut} {
+				if err := c.validateQ56KMMVQWeight(w, panelRows); err != nil {
+					return err
+				}
+			}
+			continue
 		}
 		for _, w := range weights {
 			if err := check(w); err != nil {
@@ -824,7 +831,7 @@ func (c *cudaBackend) validateQ56KOperation(req Qwen35SequencePrefillRequest, pa
 		}
 	}
 	if headRows > 0 {
-		return c.validateQ56KMMVQWeight(req.Output, headRows)
+		return c.validateQ56KProjectionWeight(req.Output, headRows)
 	}
 	return nil
 }

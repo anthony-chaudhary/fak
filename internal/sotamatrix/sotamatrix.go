@@ -381,6 +381,17 @@ var matrix = []Op{
 		Note: "Borrow the pinned state order and GPU recurrence techniques only after measuring the current recurrence; FLA is a technique reference, never a runtime dependency. Default to the smallest parity-preserving adaptation and permit no runtime or backend fallback.",
 	},
 	{
+		Slug:        "retained-q56-prompt-mmq",
+		Title:       "Retained Q5_K/Q6_K ordinary CUDA prompt MMQ family",
+		FileGlobs:   []string{"internal/compute/cuda/q56k_mmq.cuh", "internal/compute/cuda_q56k_mmq*.go", "internal/computebuild/cuda_q56k_mmq_test.go", "cmd/fak/serve_qwen35_q56k_mmq_cuda_test.go"},
+		FakPath:     "cmd/fak/serve.go -> existing raw K-quant loader -> Qwen sequence projections -> explicit checked MMQ ABI -> cuda/q56k_mmq.cuh",
+		SOTA:        "ggml-org/llama.cpp@0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd Q5 DS4 / Q6 D4 Ampere MMQ (MIT)",
+		PrimaryLink: "https://github.com/ggml-org/llama.cpp/blob/0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd/ggml/src/ggml-cuda/mmq.cuh",
+		Route:       RouteBorrow,
+		Oracle:      "required selected/default native archives; independent packed CPU decoder plus exact Q8_1 fixture oracle, real retained GGUF -> SessionPrefill -> two continuing decodes; matched uncached-prefill wall time and first/subsequent decode parity with all activation packing, allocation and retirement included",
+		Note:        "One default-off P>=128 format family, not two kernel credits. Stored/loaded Q5_K or Q6_K stays packed; temporary Q8_1 activation is deliberate and non-bit-exact. Require actual compiled SM80+ integer MMA image and capable device; no SM100 tcgen dependency or SM120 execution claim. Default, packed-GDN native projections and P<128 retain prior math. All compiler/device/model/performance acceptance remains UNRUN until returned source-bound evidence.",
+	},
+	{
 		Slug:        "qwen-host-tiled-attention",
 		Title:       "Qwen ordinary host prefill multi-query tiled attention",
 		FileGlobs:   []string{"internal/model/qwen35_prefill_tiled_attention*.go"},

@@ -1212,6 +1212,51 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## llama.cpp retained Q5_K/Q6_K MMQ prompt family
+
+The default-off typed Q5_K/Q6_K prompt family in
+`internal/compute/cuda/q56k_mmq.cuh` adapts
+`ggml/src/ggml-cuda/{mmq.cuh,mmq-load-tiles.cuh,mmq-vec-dot.cuh,mmq-config-ampere.cuh,mma.cuh,quantize.cu,vecdotq.cuh,common.cuh}`
+and `ggml/src/ggml-common.h` from
+[ggml-org/llama.cpp at 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd](https://github.com/ggml-org/llama.cpp/tree/0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd).
+Copyright (c) 2023-2026 The ggml authors. License: MIT.
+
+Modified for FAK: one retained block-256 Q5_K/Q6_K family for ordinary P>=128
+sequence/batched projections, using the Ampere integer-MMA layout rather than
+SM100 tcgen instructions. Q5 preserves DS4 half scale/original-sum metadata;
+Q6 preserves D4 float scales, signed six-bit values and signed 16-value
+subscales. Weights remain canonical packed bytes. F32 activations become an
+owned temporary Q8_1 panel; this deliberate numerical change is qualification
+only. Zero activation blocks are explicit. FAK reuses its retained Q4 Stream-K
+useful-work cap, bounds padded tiles and all operand extents, and composes
+first-error capture, shared/private failed-drain retention, typed native-build
+selection and the ordinary final sequence fence. No upstream runtime, managed
+spill, persistent global workspace, capture support or measured gain is claimed.
+Selection is explicit in ordinary Go projection dispatch; packed GDN's separate
+native path, both previous checked/void ABIs and short-panel/MMVQ math remain unchanged.
+
+MIT License
+
+Copyright (c) 2023-2026 The ggml authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 ## llama.cpp Q4_K MMVQ decode GEMV
 
 The default `mmvq` arm of the CUDA Q4_K decode GEMV (`FAK_CUDA_Q4K_DECODE`, escape hatch `f32`),

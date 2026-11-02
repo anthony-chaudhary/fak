@@ -18,6 +18,13 @@ import (
 //
 // fak-test:runtime integration est=5s lane=optin
 func TestCUDAKQuantPanelMatchesDecode(t *testing.T) {
+	if CUDAQ56KMMQQualificationEnabled() {
+		const why = "the unchanged bitwise SIMT-panel witness requires a default MMQ archive; selected MMQ deliberately quantizes activations and requires TestCUDAQ56KMMQ with -fak-cuda-q56k-mmq-required=1"
+		if os.Getenv("FAK_REQUIRE_CUDA_KQUANT_PANEL") == "1" {
+			t.Fatal(why)
+		}
+		t.Skip(why)
+	}
 	cb, ok := Pick("cuda").(*cudaBackend)
 	if !ok {
 		if os.Getenv("FAK_REQUIRE_CUDA_KQUANT_PANEL") == "1" {

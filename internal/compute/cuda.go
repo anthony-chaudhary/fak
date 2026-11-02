@@ -760,6 +760,11 @@ func (c *cudaBackend) Read(t Tensor) []float32 {
 		}
 		status := cudaReadNative.copy(db.device, unsafe.Pointer(&out[0]), src, uintptr(len(out)*4))
 		if status != 0 {
+			if cudaQ56KMMQQualification && db.device == 0 {
+				// Preserve the actual failed completion before deferred Go cleanup;
+				// no retry or additional successful-path fence is introduced.
+				cudaQ56KMMQRetirementFailedLocked(status)
+			}
 			// ObserveError does not classify CUDAOpError. Observe directly, then retain
 			// the typed operation/site/status even when this backend has no latch.
 			c.faultLatch.Observe(DeviceFaultExecution, "read-d2h", status)
@@ -1238,6 +1243,9 @@ func (c *cudaBackend) validateQ56KMMVQOperands(w, x Tensor, p int) error {
 // A failed drain sets the shared terminal latch; neither this helper nor outer
 // sequence/GDN cleanup may detach or recycle the now-uncertain owners.
 func (c *cudaBackend) q56KMMVQFailure(y Tensor, rc, in, p int) error {
+	if cudaQ56KMMQQualification && p >= 128 {
+		return c.q56KMMQFailure(y, rc)
+	}
 	if rc == 0 {
 		return nil
 	}
@@ -1435,7 +1443,7 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		}
 		cudaMu.Unlock()
 	}()
-	if err := c.validateQ56KMMVQOperands(w, X, P); err != nil {
+	if err := c.validateQ56KProjectionOperands(w, X, P); err != nil {
 		panic(err)
 	}
 	if w.Dtype == Q2_K {
@@ -1480,13 +1488,13 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	case Q5_K:
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
-		if err := c.q56KMMVQFailure(y, int(C.fcuda_q5k_matmul_checked_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))), in, P); err != nil {
+		if err := c.q56KMMVQFailure(y, c.q56KProjectionStatus(w, wb, X, y, P), in, P); err != nil {
 			panic(err)
 		}
 	case Q6_K:
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
-		if err := c.q56KMMVQFailure(y, int(C.fcuda_q6k_matmul_checked_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))), in, P); err != nil {
+		if err := c.q56KMMVQFailure(y, c.q56KProjectionStatus(w, wb, X, y, P), in, P); err != nil {
 			panic(err)
 		}
 	case Q3_K:

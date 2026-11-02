@@ -242,6 +242,10 @@ func serveIQSequenceFixture(t *testing.T, be compute.Backend, kind ggufload.Tens
 				block = 136
 			case ggufload.TensorQ8_0:
 				block, values = 34, 32
+			case ggufload.TensorQ5_K:
+				block = 176
+			case ggufload.TensorQ6_K:
+				block = 210
 			default:
 				t.Fatalf("unexpected fixture dtype %s", typ)
 			}
@@ -253,8 +257,15 @@ func serveIQSequenceFixture(t *testing.T, be compute.Backend, kind ggufload.Tens
 				raw[i] = byte(rng.Intn(256))
 			}
 			for i := 0; i < len(raw); i += block {
-				binary.LittleEndian.PutUint16(raw[i:], 0x0800)
-			} // small finite nonzero f16 scale
+				if typ == ggufload.TensorQ6_K {
+					binary.LittleEndian.PutUint16(raw[i+208:], 0x0800)
+				} else {
+					binary.LittleEndian.PutUint16(raw[i:], 0x0800)
+					if typ == ggufload.TensorQ5_K {
+						binary.LittleEndian.PutUint16(raw[i+2:], 0x0800)
+					}
+				}
+			} // small finite nonzero f16 scales; old fixture formats unchanged
 			if typ != ggufload.TensorQ8_0 {
 				retained[canonical] = append([]byte(nil), raw...)
 			}
