@@ -1061,6 +1061,40 @@ The split kernel also retains its original Apache-2.0 TIRx-author attribution.
 Source: https://github.com/NVlabs/kda/tree/260927-kda-for-kda
 ```
 
+## llama.cpp tiled CPU attention for ordinary Qwen prefill
+
+Adapted from ggml-org/llama.cpp commit `74bca3950054eed1795f525cb9cf06bfe796492d`,
+`ggml/src/ggml-cpu/ops.cpp`, `ggml_compute_forward_flash_attn_ext_tiled`:
+https://github.com/ggml-org/llama.cpp/blob/74bca3950054eed1795f525cb9cf06bfe796492d/ggml/src/ggml-cpu/ops.cpp
+
+FAK borrows the multi-query/KV tile, packed K/V reuse and running maximum/sum/output
+rescale. Its adaptation retains FAK's F32 fdot/saxpy, causal/window and softcap
+semantics, uses an invocation-owned dead projection loan, and is default-off.
+It does not import donor SIMD GEMM, quantized KV, sinks, ALiBi or a runtime dependency.
+Changed online rounding and all performance claims require separate qualification.
+
+MIT License
+
+Copyright (c) 2023-2026 The ggml authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 ## llama.cpp fattn-mma-f16 hd256 prompt attention
 
 The Qwen3.8 prompt-attention kernel `internal/compute/cuda/fattn_mma_hd256.cuh` adapts

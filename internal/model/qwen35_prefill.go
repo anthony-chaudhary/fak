@@ -438,7 +438,12 @@ func (s *Session) prefillQwen35FullAttnLayerQWithRopeRows(l int, Xn []float32, P
 	// projection kernels retain no target, and phase profiling records only time.
 	// Loan it as bounded score scratch only for unobserved builtin attention.
 	W := cfg.windowForLayer(l)
-	if !attnPrefillGQA3FDotInto(attnOut, Q, s.Cache.K[l], s.Cache.V[l], qf, P, base, nH, hd, w, grp, W, scale, attnCap, s.M.attnObs) {
+	// Qualified host-only tiled KV reuse takes the same dead loan. Every
+	// refusal precedes writes, so the original GQA3/score-row oracle is intact.
+	tiled := qwen35PrefillTiledAttentionQualification && !s.Metal && !s.MetalQ4K && s.Backend == nil && m.prism == nil &&
+		!cfg.Alibi && !m.hasWeight(p("self_attn.sinks")) &&
+		qwen35PrefillTiledAttentionInto(attnOut, Q, s.Cache.K[l], s.Cache.V[l], qf, P, base, nH, hd, w, grp, W, scale, attnCap, s.M.attnObs)
+	if !tiled && !attnPrefillGQA3FDotInto(attnOut, Q, s.Cache.K[l], s.Cache.V[l], qf, P, base, nH, hd, w, grp, W, scale, attnCap, s.M.attnObs) {
 		attnPrefillInto(attnOut, Q, s.Cache.K[l], s.Cache.V[l], P, base, nH, hd, w, grp, W, l, scale, attnCap, fdot, s.M.attnObs)
 	}
 	s.phaseEnd("qwen35_full_attn", t)
