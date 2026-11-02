@@ -1162,6 +1162,32 @@ extern "C" int fcuda_q6k_matmul_checked_f32(const uint8_t *w, const float *x, fl
     fcuda_q6k_matmul_f32(w,x,y,out,in,p); return 0;
 }
 
+static bool kquant_prompt_rows_valid(const uint8_t *w, const float *x, float *y,
+                                     int out, int in, int rows) {
+    return w && x && y && out > 0 && in > 0 && in % 256 == 0 && rows > 0 &&
+           out <= INT_MAX / in && rows <= INT_MAX / in && rows <= INT_MAX / out;
+}
+
+extern "C" int fcuda_q4k_matmul_rows_f32(const uint8_t *w, const float *x, float *y,
+                                        int out, int in, int rows) {
+    if (!kquant_prompt_rows_valid(w,x,y,out,in,rows)) return (int)cudaErrorInvalidValue;
+    for (int row = 0; row < rows; ++row) {
+        const int status = fcuda_q4k_matmul_f32(w,x+(size_t)row*in,y+(size_t)row*out,out,in,1);
+        if (status != 0) return status;
+    }
+    return 0;
+}
+
+extern "C" int fcuda_q6k_matmul_rows_f32(const uint8_t *w, const float *x, float *y,
+                                        int out, int in, int rows) {
+    if (!kquant_prompt_rows_valid(w,x,y,out,in,rows)) return (int)cudaErrorInvalidValue;
+    for (int row = 0; row < rows; ++row) {
+        const int status = fcuda_q6k_matmul_checked_f32(w,x+(size_t)row*in,y+(size_t)row*out,out,in,1);
+        if (status != 0) return status;
+    }
+    return 0;
+}
+
 // =================================================================================
 // Q2_K Resident Dequant-Fused GEMV & Panel GEMM (sm_80/sm_89/sm_90, issue #11945)
 // Super-block: 256 weights, 84 bytes (16 scales, 64 quants, 2 d, 2 dmin)

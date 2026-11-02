@@ -3,6 +3,8 @@
 package model
 
 import (
+	"encoding/binary"
+	"os"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -99,7 +101,7 @@ func promptPanelGEMMs(m *Model, P, chunk int) uint64 {
 }
 
 // TestCUDAPromptPanelBackendAdmitsQ8 pins the seam the panel tests rely on: the registered CUDA
-// backend is a promptPanelBackend whose only per-row exact weight dtype is Q8_0.
+// backend admits only the qualified per-row exact weight dtypes.
 func TestCUDAPromptPanelBackendAdmitsQ8(t *testing.T) {
 	be := promptPanelCUDA(t)
 	panel, ok := be.(promptPanelBackend)
@@ -107,12 +109,89 @@ func TestCUDAPromptPanelBackendAdmitsQ8(t *testing.T) {
 		t.Fatal("cuda backend does not implement promptPanelBackend")
 	}
 	if !panel.PromptPanelRowExact(compute.Q8_0) {
-		t.Fatal("cuda PromptPanelRowExact(Q8_0) = false")
+		t.Fatal("Q8_0 row-exact capability lost")
 	}
-	for _, dt := range []compute.Dtype{compute.F32, compute.F16, compute.Q4_K, compute.Q2_K} {
-		if panel.PromptPanelRowExact(dt) {
-			t.Fatalf("cuda PromptPanelRowExact(%s) = true, want only Q8_0", dt)
+	for _, dt := range []compute.Dtype{compute.Q4_K, compute.Q6_K} {
+		if got, want := panel.PromptPanelRowExact(dt), os.Getenv(compute.CUDAKQuantPromptPanelEnv) == "1"; got != want {
+			t.Fatalf("%s row-exact capability=%v want opt-in=%v", dt, got, want)
 		}
+	}
+	for _, dt := range []compute.Dtype{compute.F32, compute.F16, compute.Q5_K, compute.Q2_K} {
+		if panel.PromptPanelRowExact(dt) {
+			t.Fatalf("cuda PromptPanelRowExact(%s) = true for an unsupported dtype", dt)
+		}
+	}
+}
+
+// fak-test:runtime integration est=20s
+func TestCUDAPromptPanelMixedKQuantCallerExact(t *testing.T) {
+	if os.Getenv(compute.CUDAKQuantPromptPanelEnv) != "1" {
+		t.Skip("select K-quant prompt-panel qualification")
+	}
+	be := promptPanelCUDA(t)
+	cfg := Config{HiddenSize: 256, NumLayers: 2, NumHeads: 4, NumKVHeads: 2, HeadDim: 64, IntermediateSize: 512, VocabSize: 96, RMSNormEps: 1e-5, RopeTheta: 10000, TieWordEmbeddings: true, EOSTokenID: -1}
+	m := NewSynthetic(cfg)
+	m.q4kw, m.kqw = map[string]*q4kTensor{}, map[string]*kQuantTensor{}
+	for layer := 0; layer < cfg.NumLayers; layer++ {
+		for projection, suffix := range promptPanelProjections {
+			name := layerName(layer, suffix)
+			shape := m.manifest[name].Shape
+			out, in := shape[0], shape[1]
+			block := 144
+			if projection%3 == 0 {
+				block = 210
+			}
+			raw := make([]byte, out*(in/256)*block)
+			for i := range raw {
+				raw[i] = byte((i*37 + projection*11 + layer*3) % 251)
+			}
+			for offset := 0; offset < len(raw); offset += block {
+				if block == 144 {
+					binary.LittleEndian.PutUint16(raw[offset:], 0x0400)
+					binary.LittleEndian.PutUint16(raw[offset+2:], 0x0200)
+				} else {
+					binary.LittleEndian.PutUint16(raw[offset+208:], 0x0400)
+				}
+			}
+			if block == 144 {
+				m.q4kw[name] = quantizeQ4KFromRaw(raw, out, in)
+			} else {
+				m.kqw[name] = quantizeKQuantFromRaw(raw, out, in, kindQ6K)
+			}
+		}
+	}
+	setPromptPanelChunk(t, 37)
+	newSession := func() *Session { s := m.NewBackendSession(be); s.Q4K = true; return s }
+	ids := promptPanelIDs(129, cfg.VocabSize)
+	ref, panel := newSession(), newSession()
+	defer ref.Close()
+	defer panel.Close()
+	for layer := 0; layer < cfg.NumLayers; layer++ {
+		for projection, suffix := range promptPanelProjections {
+			want := compute.Q4_K
+			if projection%3 == 0 {
+				want = compute.Q6_K
+			}
+			if got := panel.matWeightHAL(layerName(layer, suffix)).Dtype; got != want {
+				t.Fatalf("projection changed dtype: got%s want%s", got, want)
+			}
+		}
+	}
+	var want, got []float32
+	expectPromptPanel(t, be, "mixed K-quant token loop", 0, 0, func() { want = promptPanelTokenLoop(ref, ids) })
+	expectPromptPanel(t, be, "mixed K-quant ordinary prefill", 1, promptPanelGEMMs(m, len(ids), 37), func() { got = append([]float32(nil), panel.Prefill(ids)...) })
+	assertSameBits(t, "mixed K-quant caller logits", got, want)
+	assertSameHALKV(t, "mixed K-quant caller", panel, ref)
+	for step := 0; step < 3; step++ {
+		token := 0
+		for i := range want {
+			if want[i] > want[token] {
+				token = i
+			}
+		}
+		got = append([]float32(nil), panel.Step(token)...)
+		want = append([]float32(nil), ref.Step(token)...)
+		assertSameBits(t, "mixed K-quant greedy continuation", got, want)
 	}
 }
 

@@ -8,7 +8,15 @@ package compute
 */
 import "C"
 
-import "unsafe"
+import (
+	"os"
+	"unsafe"
+)
+
+// CUDAKQuantPromptPanelEnv opts into row-exact K-quant panels pending device qualification.
+const CUDAKQuantPromptPanelEnv = "FAK_CUDA_KQUANT_PROMPT_PANEL"
+
+var cudaKQuantPromptPanelEnabled = os.Getenv(CUDAKQuantPromptPanelEnv) == "1"
 
 // cuda_prompt_panel.go is the CUDA half of the dense HAL prompt panel (model.promptPanelBackend).
 // Every panel op is the per-row form of the op a decode step issues, so a row's bits never
@@ -112,8 +120,10 @@ func (c *cudaBackend) dallocPromptPanel(nbytes int, class MemoryClass, site stri
 }
 
 // PromptPanelRowExact reports the weight dtypes whose panel GEMM is bitwise the decode GEMV
-// per row. Only Q8_0 has that per-row kernel today; every other dtype keeps the token loop.
-func (c *cudaBackend) PromptPanelRowExact(dt Dtype) bool { return dt == Q8_0 }
+// per row. K-quants retain the selected P=1 arithmetic instead of the generic prefill arm.
+func (c *cudaBackend) PromptPanelRowExact(dt Dtype) bool {
+	return dt == Q8_0 || cudaKQuantPromptPanelEnabled && (dt == Q4_K || dt == Q6_K)
+}
 
 // PromptPanelBegin routes scratch and activation allocations to the panel free list.
 func (c *cudaBackend) PromptPanelBegin() {
@@ -193,19 +203,50 @@ func cudaArmScratchAllocFaultForTest(nth int) {
 	C.fcuda_scratch_alloc_test_fault(C.int(nth))
 }
 
-// PromptPanelMatMul is the BitExact panel GEMM: X [tokens, in] -> Y [tokens, out] for a Q8_0
-// weight, every row through the per-row path whatever tokens is.
+// PromptPanelMatMul keeps every row on the selected decode arithmetic, independent of tokens.
 func (c *cudaBackend) PromptPanelMatMul(w, x Tensor, tokens int) Tensor {
-	if w.Dtype != Q8_0 || len(w.Shape) != 2 || tokens <= 0 || x.Numel() != tokens*w.Shape[1] {
-		cudaPromptPanelFail("prompt-panel-matmul-geometry", "panel GEMM needs a Q8_0 [out,in] weight and a [tokens,in] panel", 0)
+	if !c.PromptPanelRowExact(w.Dtype) || len(w.Shape) != 2 || tokens <= 0 || w.Shape[0] <= 0 || w.Shape[1] <= 0 {
+		cudaPromptPanelFail("prompt-panel-matmul-geometry", "panel GEMM needs a row-exact [out,in] weight and a positive token count", 0)
+	}
+	out, in := w.Shape[0], w.Shape[1]
+	for _, dimensions := range [][2]int{{tokens, in}, {tokens, out}, {out, in}} {
+		if _, ok := qwen35GDNCheckedMul(qwen35GDNMaxCInt, int64(dimensions[0]), int64(dimensions[1])); !ok {
+			cudaPromptPanelFail("prompt-panel-matmul-geometry", "panel indexing exceeds the CUDA int ABI", 0)
+		}
+	}
+	if x.Numel() != tokens*in || x.Dtype != F32 || x.Layout != RowMajor {
+		cudaPromptPanelFail("prompt-panel-matmul-geometry", "activation must be F32 row-major [tokens,in]", 0)
+	}
+	if w.Dtype != Q8_0 && (w.Layout != RowMajor || in%256 != 0 || w.Quant == nil || w.Quant.Block != 256) {
+		cudaPromptPanelFail("prompt-panel-matmul-geometry", "K-quant panel requires canonical block-256 row-major weights", 0)
 	}
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	out, in := w.Shape[0], w.Shape[1]
+	if w.Dtype == Q6_K {
+		first := x
+		first.Shape = []int{in}
+		if err := c.validateQ56KMMVQOperands(w, first, 1); err != nil {
+			panic(err)
+		}
+		if cudaQ56KMMVQSelected(w, 1) {
+			if _, err := c.cudaQ56KMMVQBuffer(x, tokens*in*F32.Bytes()); err != nil {
+				panic(err)
+			}
+		}
+	}
 	wb := c.cudaBufForSubmit(w)
 	y, _ := c.devTr([]int{tokens, out}, F32)
-	cudaGEMMStatus("PromptPanelMatMul", int(C.fcuda_q8_matmul_rows_f32((*C.int8_t)(wb.ptr), (*C.float)(wb.scales),
-		c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens), C.int(w.Quant.Block))), cudaQ8RowsScratch(tokens, in, w.Quant.Block))
+	switch w.Dtype {
+	case Q8_0:
+		cudaGEMMStatus("PromptPanelMatMul", int(C.fcuda_q8_matmul_rows_f32((*C.int8_t)(wb.ptr), (*C.float)(wb.scales),
+			c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens), C.int(w.Quant.Block))), cudaQ8RowsScratch(tokens, in, w.Quant.Block))
+	case Q4_K:
+		cudaGEMMStatus("PromptPanelMatMul", int(C.fcuda_q4k_matmul_rows_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))), cudaQ4KScratch(out, in, 1))
+	case Q6_K:
+		if err := c.q56KMMVQFailure(y, int(C.fcuda_q6k_matmul_rows_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))), in, 1); err != nil {
+			panic(err)
+		}
+	}
 	c.promptPanelMatMuls++
 	return y
 }
