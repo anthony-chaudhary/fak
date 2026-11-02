@@ -2345,6 +2345,11 @@
           "category": "incidental",
           "reason": "Initialization-time environment-key spelling for the default-off experimental selector of the separately positioned attnDecodeQ8Packed consumer (host-q8-packed-decode-tile). It controls opt-in selection but defines no independent attention computation, cache ownership or authorization contract; the consumer position documents selection restrictions, fallback and unresolved performance promotion. This classification does not declare the feature incidental or permit default enablement.",
           "token": "FAK_QATTN_Q8_PACKED"
+        },
+        {
+          "category": "incidental",
+          "reason": "Build-tag spelling for the immutable qualification-only admission gate of the separately positioned attnDecodeQ8Packed consumer (host-q8-packed-decode-tile). Ordinary builds keep the gate false; the tag changes that gate, not attention arithmetic, cache ownership, eligibility, precedence or fallback. It is not a distinct attention operator, a maturity assertion, performance promotion or permission for default enablement.",
+          "token": "fak_qattn_q8_packed_qualification"
         }
       ],
       "exclude": [
@@ -2394,6 +2399,7 @@
         "cudaV41SharedAttentionTags",
         "estimated_attention_s",
         "executevulkanattentionwithdequantonce",
+        "fak_qattn_q8_packed_qualification",
         "fak_qwen35_attention_postprocess_launch_count",
         "flashAttentionWindowTileStart",
         "fvk_have_qwen35_attention_postprocess",

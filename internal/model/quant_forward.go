@@ -955,11 +955,6 @@ func (s *Session) AttachKVCacheHint(blockID ...int) CachePolicyHint {
 	return ClassifyKVBlockCacheHint(blockID...)
 }
 
-// q8PackedDecodeExperimental is default OFF. Only the literal "1", present
-// before process initialization, opts in. It does not override QSA, serial,
-// non-Q8, device, or unsupported-policy dispatch. There is no runtime mutation.
-var q8PackedDecodeExperimental = os.Getenv("FAK_QATTN_Q8_PACKED") == "1"
-
 // q8PackedBoundaryEligible is read-only admission at tokenHiddenQ's attention
 // seam. The Session operation already owns cache geometry through worker join.
 // Current layer K/V has been appended, but appendPosition commits the new logical
