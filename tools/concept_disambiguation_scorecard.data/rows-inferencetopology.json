@@ -1,0 +1,41 @@
+{
+  "rows": [
+    {
+      "id": "layoutdigest",
+      "canonical": "LayoutDigest (runtime topology search)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "SHA-256 identity of canonical configured runtime topology groups and ranks, including device incarnations, KV ownership and configured resource commitments, binding measured observations to their exact placement.",
+      "distinction": "Configured distributed placement identity, not tensor element ordering. LinkDigest, current free capacity and observation epoch are separate checks; a matching digest is not performance evidence.",
+      "distinct_from": [
+        "layout-tensor"
+      ],
+      "aliases": [],
+      "grounding": "LayoutDigest",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "candidatebudget",
+      "canonical": "candidate_budget (runtime topology search)",
+      "family": "plan",
+      "kind": "concept",
+      "definition": "Serialized StopReason literal emitted when unvisited runtime topology configurations remain and the number evaluated has reached MaxCandidates, truncating finite observed-only search.",
+      "distinction": "A search-stop reason indicating the evaluated-configuration cap, not ctxplan CandidateBound spans scored per turn, model memory capacity, token generation or the separate time_budget deadline. It does not claim an exhaustive optimum.",
+      "distinct_from": [
+        "x2-plan-candidatebound"
+      ],
+      "aliases": [],
+      "grounding": "candidate_budget",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

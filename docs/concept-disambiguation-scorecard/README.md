@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **742** (clarity 0 + coverage 742) |
-| **Crystal-clear concepts (and climbing)** | **1380** crystal of 3191 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3273 / 4015** (81.5% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **1382** crystal of 3193 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3275 / 4017** (81.5% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 229 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **95** of 4456 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **95** of 4458 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 88.0/100 (grade B) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3191 concepts - score 88.0/100 (grade B) - disambiguation-debt 742
+concept-disambiguation chart - 3193 concepts - score 88.0/100 (grade B) - disambiguation-debt 742
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #####################....... 1380
+  * crystal       #####################....... 1382
   o defined       ############################ 1811
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -48,9 +48,9 @@ clarity mix by family (each cell = one concept):
   evict            ******************oooooooooooooooooooooooooooooooo (50 concept(s); 18 crystal)
   gateway-engine   ************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (206 concept(s); 84 crystal)
   guard-gate       **********************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (457 concept(s); 214 crystal)
-  layout           *****************ooooooooo (26 concept(s); 17 crystal)
+  layout           ******************ooooooooo (27 concept(s); 18 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
-  plan             ****************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (429 concept(s); 184 crystal)
+  plan             *****************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (430 concept(s); 185 crystal)
   policy-capability *************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (216 concept(s); 109 crystal)
   pool             **************************oooooooooooooooooooooooooooooooooo (60 concept(s); 26 crystal)
   render-materialize *******************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (200 concept(s); 43 crystal)
@@ -62,7 +62,7 @@ clarity mix by family (each cell = one concept):
   witness-proof    *************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (177 concept(s); 85 crystal)
 
 coverage by family (positioned / discovered):
-  plan             ######################...... 491/619
+  plan             ######################...... 492/620
   cache            #######################..... 347/423
   session-runtime  ######################...... 290/362
   gateway-engine   ######################...... 252/318
@@ -76,7 +76,7 @@ coverage by family (positioned / discovered):
   evict            ##################.......... 57/88
   score-debt       #######################..... 114/139
   witness-proof    #########################... 175/199
-  layout           #################........... 26/44
+  layout           #################........... 27/45
   loop             ########################.... 100/117
   decision         #########################... 61/67
   cross-cluster    ............................ 0/0
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##########################......] 81.5%  (3273/4015 confusable tokens positioned)
+namespace coverage  [##########################......] 81.5%  (3275/4017 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 229
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 229/229
 
-name index: 4456 lookup name(s) -> 3191 concept(s), 95 ambiguous
+name index: 4458 lookup name(s) -> 3193 concept(s), 95 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **229 / 229** (229 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2700 / 5951 |
+| Boundaries drawn (mutual / total) | 2704 / 5955 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4456 over 3191 concepts |
+| Lookup names indexed | 4458 over 3193 concepts |
 | Lookup names landing on several concepts | 95 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3191 |
+| Concepts carrying a contrast set | 3193 |
 
 ## The concepts (best verdict first)
 
@@ -798,6 +798,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | layout | **layout implementation surface for inputlayout** - `inputlayout` is a concrete tree symbol classified in the `layout` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | layout | **layout implementation surface for refusalunknownnativelayout** - `refusalunknownnativelayout` is a concrete tree symbol classified in the `layout` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | subsystem | layout | **guard_format_layout** - The guard exit-summary block LAYOUT (guard_format_layout.go) - the pure text layout of the guard summary onto which color is layered at print time (guardColorizeSummary). |
+| * | crystal | symbol | layout | **LayoutDigest (runtime topology search)** - SHA-256 identity of canonical configured runtime topology groups and ranks, including device incarnations, KV ownership and configured resource commitments, binding measured observations to their exact placement. |
 | * | crystal | symbol | layout | **layout implementation surface for daylayout** - `DayLayout` is the layout symbol declared or used at `cmd/fak/git_daily.go:347` as `// LOCAL date, matching gitdaily.DayLayout — the ledger's day keys are local, so a`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | layout | **WeightLayout (newmodel native envelope)** - newmodel.NativeHardwareEnvelope.WeightLayout names the checkpoint weight packing/storage contract that native obligation compilation must match before allocation, such as gguf-q4-k. |
 | * | crystal | symbol | layout | **StateLayout (newmodel native envelope)** - newmodel.NativeHardwareEnvelope.StateLayout names the physical organization of recurrent/KV state admitted by obligation compilation, such as contiguous, independent of state kind and residency. |
@@ -939,6 +940,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | plan | **fitplan** - Package internal/fitplan: the header-derived model-fit planner. Plan prices one selected serve arm's weights MemoryPlan against a pool budget over a KV-tier x context candidate table and returns a Report: fit status, one-stream max context, per-candidate max concurrency, nominal decode/prefill tok/s and TTFT with the binding bound and evidence tier, typed omissions for unknown inputs, and a typed refusal (weights_exceed_pool, context_exceeds_pool, concurrency_exceeds_pool, pin_unmatched). |
 | * | crystal | symbol | plan | **FitPlanModel** - ggufload.WeightSource method that derives fitplan.Model from GGUF tensor headers for the selected arm's embedding storage: loaded payload bytes, decode-swept bytes per token (row-gathered untied input embedding excluded, routed experts at the RoutedExpertActiveSet top-k share), active and LM-head parameters, expert counts and attention geometry. |
 | * | crystal | symbol | plan | **BuildCandidates** - fitplan function that expands KV storage tiers over ContextLadder (resolved context, pinned extras, 4K/32K/128K served windows, model max) into the Candidate table Plan prices; the first tier at the resolved context is marked Current, and a tier whose KV charge equals an earlier tier's is skipped. |
+| * | crystal | concept | plan | **candidate_budget (runtime topology search)** - Serialized StopReason literal emitted when unvisited runtime topology configurations remain and the number evaluated has reached MaxCandidates, truncating finite observed-only search. |
 | * | crystal | symbol | plan | **validateCandidate (study-adjacency candidate receipt validator)** - internal/studyadjacency.validateCandidate validates one recorded study candidate: required identity and rationale, a vLLM mechanism link or frontier-changing contrast, nonempty repository links, declared repositories, duplicate-link rejection, and inclusion of the owning study member. |
 | * | crystal | symbol | plan | **validateCandidate (placement-tax plan feasibility validator)** - internal/placementtax.validateCandidate validates one PlanCandidate against its topology contract: nonblank identity and rationales, fak-native engine ownership, valid parallelism strategy, nonempty hierarchy, measured or estimated provenance, SLO validity, and consistent cross-domain provenance. |
 | * | crystal | symbol | plan | **v41CandidateSource** - The identity of one V4.1 sparse-attention candidate-mask producer: producer layer, compressed-key source layer, compression ratio, and absolute query interval. |
@@ -3471,8 +3473,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 28 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3251/5951 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3191 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3251/5955 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3193 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3481,14 +3483,14 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4456 lookup name(s) resolves - 95 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4458 lookup name(s) resolves - 95 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| plan | 491 | 619 | 128 |
+| plan | 492 | 620 | 128 |
 | cache | 347 | 423 | 76 |
 | session-runtime | 290 | 362 | 72 |
 | gateway-engine | 252 | 318 | 66 |
@@ -3502,7 +3504,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | evict | 57 | 88 | 31 |
 | score-debt | 114 | 139 | 25 |
 | witness-proof | 175 | 199 | 24 |
-| layout | 26 | 44 | 18 |
+| layout | 27 | 45 | 18 |
 | loop | 100 | 117 | 17 |
 | decision | 61 | 67 | 6 |
 | cross-cluster | 0 | 0 | 0 |

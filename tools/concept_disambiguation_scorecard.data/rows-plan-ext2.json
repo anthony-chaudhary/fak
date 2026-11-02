@@ -446,7 +446,8 @@
       "distinction": "It bounds how many Candidate spans the planner scores per turn, NOT the Candidate input itself nor the MaxCandidates probe knob.",
       "distinct_from": [
         "MaxCandidates (ctxplan probe)",
-        "x-plan-candidatecount"
+        "x-plan-candidatecount",
+        "candidatebudget"
       ],
       "aliases": [],
       "grounding": "candidatebound",

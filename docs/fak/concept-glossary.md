@@ -2133,3 +2133,17 @@ Serialized attention projection and normalization tensor names in the DSpark sup
 A feature observation diagnostic emitted when a running gateway returns HTTP 404 for its feature catalog or retained proof endpoint.
 
 **Distinct from:** Describes missing endpoint support on the observed server, not a disabled optimization, failed execution proof, correctness verdict, or product maturity grade.
+
+
+### LayoutDigest (runtime topology search)
+
+SHA-256 identity of canonical configured runtime topology groups and ranks, including device incarnations, KV ownership and configured resource commitments, binding measured observations to their exact placement.
+
+**Distinct from:** Configured distributed placement identity, not tensor element ordering. LinkDigest, current free capacity and observation epoch are separate checks; a matching digest is not performance evidence.
+
+
+### candidate_budget (runtime topology search)
+
+Serialized StopReason literal emitted when unvisited runtime topology configurations remain and the number evaluated has reached MaxCandidates, truncating finite observed-only search.
+
+**Distinct from:** A search-stop reason indicating the evaluated-configuration cap, not ctxplan CandidateBound spans scored per turn, model memory capacity, token generation or the separate time_budget deadline. It does not claim an exhaustive optimum.
