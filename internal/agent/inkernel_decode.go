@@ -288,8 +288,8 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 				if b != nil {
 					cacheable = b.Plen()
 				}
-				if k := b.KV(); k != nil {
-					matchedKV = k.Clone()
+				if k := b.CloneKV(); k != nil {
+					matchedKV = k
 					if m >= len(ids) {
 						cachedLogits = b.Logits()
 					}

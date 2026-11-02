@@ -51,9 +51,11 @@ func cpuNodeBytes(n *node) int64 {
 }
 func (t *Tree) cpuCacheBytes() int64 {
 	var total int64
+	var shared model.DensePrefixAccounting
 	var walk func(*node)
 	walk = func(n *node) {
 		total = cacheByteSum(total, cpuNodeBytes(n))
+		total = cacheByteSum(total, shared.Add(n.densePrefix))
 		for _, c := range n.children {
 			walk(c)
 		}
@@ -82,7 +84,7 @@ func (t *Tree) cpuCacheVictim(exclude *node) *node {
 				pinned = true
 			}
 		}
-		if !pinned && cpuNodeBytes(n) > 0 && (victim == nil || n.lastUsed < victim.lastUsed) {
+		if !pinned && (cpuNodeBytes(n) > 0 || n.densePrefix != nil) && (victim == nil || n.lastUsed < victim.lastUsed) {
 			victim = n
 		}
 		return pinned
@@ -110,6 +112,7 @@ func (t *Tree) makeCPUCacheRoom(incoming, replaced int64, exclude *node) bool {
 		if victim == nil {
 			return reject("pinned")
 		}
+		victim.releaseDensePrefix()
 		victim.kv = nil
 		victim.logits = nil
 	}
@@ -121,7 +124,12 @@ func (t *Tree) InsertCloneWithLogits(boundary *node, suffix []int, kv *model.KVC
 	if boundary == nil {
 		return nil
 	}
-	if len(suffix) == 0 && boundary.kv != nil {
+	if t.sharedDensePrefixes {
+		if leaf, handled := t.insertSharedDenseClone(boundary, suffix, kv, logits); handled {
+			return leaf
+		}
+	}
+	if len(suffix) == 0 && boundary.HasKV() {
 		return t.InsertWithLogits(boundary, suffix, nil, logits)
 	}
 	if t.maxCPUCacheBytes > 0 && !t.makeCPUCacheRoom(cacheByteSum(kv.ClonePayloadBytes(), cpuLogitsBytes(len(logits))), 0, boundary) {

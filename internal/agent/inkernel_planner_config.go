@@ -179,6 +179,12 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 			}
 		}
 		p.tree.SetCPUCacheByteBudget(cpuBytes)
+		// Qualification builds select the real host planner's clone-owning
+		// store. Unsupported cache layouts still take the legacy clone path.
+		if sharedDensePrefixQualification && m != nil && backend == nil && !metal &&
+			(p.kvPrecision == "" || p.kvPrecision == model.KVPrecisionFP32) {
+			p.tree.EnableSharedDensePrefixes()
+		}
 		p.armRadixLocalSSD(m, backend, modelID)
 		p.scopedTree = radixkv.WrapScopedWithLocker(p.tree, &p.mu)
 		p.pagedPrefix = inKernelPagedPrefixLedgerFor(m, backend, p.tree)

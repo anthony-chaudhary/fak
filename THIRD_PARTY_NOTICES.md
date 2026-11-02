@@ -791,6 +791,32 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## SGLang immutable retained dense prefix pages
+
+`internal/model/dense_prefix_snapshot.go` and
+`internal/radixkv/shared_dense_prefix.go` adapt shared pool-index ownership,
+page-aligned duplicate-prefix release, protected ancestor lifetime and a
+request-private partial tail from `python/sglang/srt/mem_cache/radix_cache.py`
+in sgl-project/sglang at revision
+`181380682b50f4606d1a09df3cbbbfc21de931e3`:
+https://github.com/sgl-project/sglang/blob/181380682b50f4606d1a09df3cbbbfc21de931e3/python/sglang/srt/mem_cache/radix_cache.py
+
+Copyright 2023-2024 SGLang Team. SPDX-License-Identifier: Apache-2.0.
+The pinned repository has no root NOTICE file. Its Apache-2.0 license is:
+https://github.com/sgl-project/sglang/blob/181380682b50f4606d1a09df3cbbbfc21de931e3/LICENSE
+
+Changed for Fak: immutable dense-FP32 snapshots use the existing Go PagedKV
+Fork/COW/Free allocator, preserve exact K/V/Kraw bits, positions and lineage,
+and account unique retained numeric backing in the existing CPU-cache budget.
+The clone-owning ordinary host planner route is selected only by the explicit
+`fak_radix_dense_sharing_qualification` build tag. A request still materializes
+a private contiguous Session cache; this is not zero-copy decode or a GPU
+allocator. Legacy live-pointer insertion and unsupported cache layouts remain
+unchanged. No Python runtime or SGLang serving scheduler is included.
+
+The complete Apache License, Version 2.0 text reproduced in the TensorFold
+section above also applies to this adaptation.
+
 ## freetoken-mlx adaptive segmented LRU replay
 
 The optional offline `slru` replay arm in `internal/deepseekv4moe/cache_policy_slru.go`

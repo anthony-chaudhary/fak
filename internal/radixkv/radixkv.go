@@ -42,14 +42,17 @@
 //     span bit-identically to never-having-seen it. Same primitive (prefix-addressable KV),
 //     opposite governance — measured, not asserted.
 //
-// Faithfulness note (honest, per the repo's "labeled, not faked" rule): each node stores
-// the FULL-prefix KVCache for its root→node path (length == path length), not SGLang's
+// Faithfulness note (honest, per the repo's "labeled, not faked" rule): default and
+// live-pointer nodes store the FULL-prefix KVCache for their root→node path, not SGLang's
 // per-segment slabs in a paged pool. That costs more memory, but the metric this package
 // exists to compare — cache hit rate / prefill-tokens-saved — is layout-independent, and
 // storing full-prefix caches lets every reuse and every edge-split go through the *proven*
 // Clone/Evict primitives unchanged (a split truncates a child's cache to the boundary via
 // Evict-of-the-tail, which has no survivor to re-RoPE, so it is an exact prefix). We trade
 // memory for the guarantee that not one bit of the verified KV core is re-derived here.
+// Explicit clone-owned dense-FP32 selection instead shares immutable paged payloads;
+// request boundaries still materialize private full-prefix Session caches. Unsupported
+// layouts and the live-pointer InsertWithLogits contract retain the legacy path.
 package radixkv
 
 import (
@@ -79,8 +82,9 @@ type node struct {
 	// kv is the kernel-owned KV cache for the FULL prefix root→node (every token on the
 	// path, post-prefill). nil in pure-accounting mode (no model attached); set by Insert
 	// to the cache the caller built, and by split to a truncated clone of a child's cache.
-	kv       *model.KVCache
-	snapshot *model.PrefixSnapshot // optional full device/hybrid prefix owner
+	densePrefix *model.DensePrefixSnapshot // immutable clone-owned dense payload; nil on legacy insertion
+	kv          *model.KVCache
+	snapshot    *model.PrefixSnapshot // optional full device/hybrid prefix owner
 	// hostSnapshot is an independently owned complete PrefixSnapshot image in
 	// process-local host DRAM. It is not provider accounting: the image owns the
 	// attention K/Kraw/V rows, positions, and hybrid recurrent state needed to
@@ -226,7 +230,13 @@ func (n *node) IsWarm() bool {
 
 // CloneKV returns an independently cloneable handle to the node's full-prefix KV cache.
 func (n *node) CloneKV() *model.KVCache {
-	if n == nil || n.kv == nil {
+	if n == nil {
+		return nil
+	}
+	if n.densePrefix != nil {
+		return n.densePrefix.Materialize()
+	}
+	if n.kv == nil {
 		return nil
 	}
 	return n.kv.Clone()
@@ -279,10 +289,11 @@ type EvictionHaltPredicate func() bool
 // Tree is a RadixAttention prefix cache: a radix tree of token sequences with
 // longest-prefix matching, an LRU token budget, and reference counting.
 type Tree struct {
-	maxCPUCacheBytes   int64
-	cpuCacheBypasses   int64
-	cpuCacheLastBypass string
-	root               *node
+	maxCPUCacheBytes    int64
+	sharedDensePrefixes bool // construction-time opt-in; live-pointer insertion unchanged
+	cpuCacheBypasses    int64
+	cpuCacheLastBypass  string
+	root                *node
 	// nsRoots holds the VIRTUAL PER-NAMESPACE ROOTS that give node identity the
 	// (tokens, nsKey) shape SGLang's RadixKey does (#3889): a Lookup/Insert under
 	// namespace ns walks from nsRoots[ns] (root itself for the default "" namespace),
@@ -666,8 +677,11 @@ func (t *Tree) split(parent, child *node, oi int) *node {
 		retCopy := *child.retention
 		mid.retention = &retCopy
 	}
-	if child.kv != nil && child.kv.CanEvict() == nil &&
-		t.cpuCacheCanClone(child.kv) {
+	if child.densePrefix != nil {
+		if bytes, ok := child.densePrefix.PrefixMetadataBytes(mid.plen); ok && t.cpuCacheRoomWithoutEviction(bytes) {
+			mid.densePrefix = child.densePrefix.ForkPrefix(mid.plen)
+		}
+	} else if child.kv != nil && child.kv.CanEvict() == nil && t.cpuCacheCanClone(child.kv) {
 		mid.kv = truncatePrefix(child.kv, mid.plen)
 	}
 	if child.IsComputing() {
@@ -1120,6 +1134,12 @@ func (t *Tree) insertWithLogitsAndChunk(boundary *node, suffix []int, kv *model.
 	if boundary == nil {
 		return nil, false
 	}
+	// A still-leased Lookup boundary can become stale while another request
+	// inserts this edge. Keep any immutable dense owner reachable/accounted,
+	// and preserve every lease on refusal. Legacy-only collisions are unchanged.
+	if len(suffix) > 0 && hasDenseSubtree(boundary.children[suffix[0]]) {
+		return boundary, false
+	}
 	keyHash := t.admissionKeyHash(boundary, suffix)
 	if t.admissionEnabled {
 		comparisons = append(comparisons, t.tokenAdmissionComparisons(boundary, suffix)...)
@@ -1134,7 +1154,7 @@ func (t *Tree) insertWithLogitsAndChunk(boundary *node, suffix []int, kv *model.
 		return boundary, false
 	}
 	if len(suffix) == 0 {
-		if logits != nil && boundary.kv != nil {
+		if logits != nil && boundary.HasKV() {
 			if !t.makeCPUCacheRoom(cpuLogitsBytes(len(logits)), cpuLogitsBytes(cap(boundary.logits)), boundary) {
 				return boundary, false
 			}
@@ -1207,6 +1227,7 @@ func (t *Tree) attachLeafWithChunk(boundary *node, suffix []int, kv *model.KVCac
 			leaf.chunkID = id
 		}
 	}
+
 	boundary.children[s[0]] = leaf
 	t.tokens += len(s)
 	return leaf
@@ -1220,9 +1241,15 @@ func (t *Tree) Done(n *node) {
 	t.pruneEmptyNamespaceRoot(n)
 }
 
-// KV is the reusable kernel-owned cache for this node's full prefix (nil if none). Clone
-// it (model.SessionFromPrefix does) before prefilling a suffix; never mutate it in place.
-func (n *node) KV() *model.KVCache { return n.kv }
+// KV preserves the live-pointer contract of InsertWithLogits. An explicitly
+// clone-owned dense snapshot instead materializes a private cache. Use HasKV
+// for presence and CloneKV for one private materialization at a request boundary.
+func (n *node) KV() *model.KVCache {
+	if n.densePrefix != nil {
+		return n.densePrefix.Materialize()
+	}
+	return n.kv
+}
 
 // Logits returns a copy of the final-token logits for this exact full prefix, or nil when
 // the caller did not cache them. The copy keeps request-local sampling penalties/biases
@@ -1778,6 +1805,7 @@ func (t *Tree) removeLeaf(v *node) {
 	delete(v.parent.children, v.key[0])
 	t.tokens -= len(v.key)
 	t.releaseSnapshotPayload(v)
+	v.releaseDensePrefix()
 	v.kv = nil
 }
 
@@ -1856,6 +1884,7 @@ func (t *Tree) closeSubtreeSnapshots(n *node) {
 		return
 	}
 	t.releaseSnapshotPayload(n)
+	n.releaseDensePrefix()
 	for _, child := range n.children {
 		t.closeSubtreeSnapshots(child)
 	}
