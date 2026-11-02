@@ -541,9 +541,27 @@ func Build(root string, write bool) (Receipt, error) {
 	sort.Strings(codexImports)
 	r.Harnesses["codex"] = HarnessReceipt{all, codexImports, ex, dup, stale}
 	r.Harnesses["opencode"] = HarnessReceipt{all, codexImports, ex, dup, stale}
-	// Pi consumes the generated .agents/skills adapters the same way codex/opencode do;
-	// it differs only in that cmd/fak's launcher passes them explicitly via --skill.
-	r.Harnesses["pi"] = HarnessReceipt{all, codexImports, ex, dup, stale}
+	// Explicit sync installs the generated search-cost extension. Pi itself owns
+	// project trust and loading; file parity is not evidence that a Pi session loaded it.
+	if write {
+		if err := syncPiGrep(root); err != nil {
+			return r, err
+		}
+	}
+	// Preserve absent-Pi read-only adapter parity. Existing .pi projects must also
+	// account for the canonical extension, including a missing/stale asset.
+	piReceipt := HarnessReceipt{all, codexImports, ex, dup, append([]string(nil), stale...)}
+	hasPi, piErr := piGrepProject(root)
+	if piErr != nil {
+		return r, piErr
+	}
+	if hasPi {
+		piReceipt.Imported = append(append([]string{}, codexImports...), PiGrepPath)
+		if err := verifyPiGrep(root); err != nil {
+			piReceipt.Stale = append(piReceipt.Stale, PiGrepPath)
+		}
+	}
+	r.Harnesses["pi"] = piReceipt
 	nativeImports := append(append([]string{}, canon...), prompts...)
 	nativeImports = append(nativeImports, m.Memories.StartupCommand)
 	sort.Strings(nativeImports)
@@ -597,7 +615,9 @@ func EnsureSync(root string) (Receipt, bool, error) {
 		}
 	}
 
-	if err == nil && r.ZeroUnexplainedGaps && !pluginNeedsSync {
+	// EnsureSync is an explicit sync request even for a project without .pi yet.
+	piNeedsSync := verifyPiGrep(root) != nil
+	if err == nil && r.ZeroUnexplainedGaps && !pluginNeedsSync && !piNeedsSync {
 		return r, false, nil
 	}
 
