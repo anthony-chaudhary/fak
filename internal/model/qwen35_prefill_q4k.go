@@ -726,6 +726,10 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 }
 
 func (s *Session) prefillQwen35HybridQ4KHiddenWithNormWorkspace(ids []int, normWorkspace *qwen35PrefillNormWorkspace) []float32 {
+	return s.prefillQwen35HybridQ4KHiddenWithGDNMode(ids, normWorkspace, qwen35GDNHostBuildSelected)
+}
+
+func (s *Session) prefillQwen35HybridQ4KHiddenWithGDNMode(ids []int, normWorkspace *qwen35PrefillNormWorkspace, gdnMode qwen35GDNHostMode) []float32 {
 	m, cfg := s.M, s.M.Cfg
 	H := cfg.HiddenSize
 	P := len(ids)
@@ -925,7 +929,7 @@ func (s *Session) prefillQwen35HybridQ4KHiddenWithNormWorkspace(ids []int, normW
 	for l := 0; l < cfg.NumLayers; l++ {
 		// These local builtin producers return fresh, separately owned outputs.
 		// The generic callback entry below never grants a disposable qf loan.
-		s.prefillQwen35HybridQ4KLayerWithScratch(l, X, P, base, eps, proj, pgroup, qz, !s.MetalQ4K && s.Backend == nil, ropeRows, normWorkspace)
+		s.prefillQwen35HybridQ4KLayerWithGDNMode(l, X, P, base, eps, proj, pgroup, qz, !s.MetalQ4K && s.Backend == nil, ropeRows, normWorkspace, gdnMode)
 	}
 
 	t = s.phaseStart()
@@ -968,6 +972,10 @@ func (s *Session) prefillQwen35HybridQ4KLayerWithRopeRows(l int, X []float32, P,
 }
 
 func (s *Session) prefillQwen35HybridQ4KLayerWithScratch(l int, X []float32, P, base int, eps float32, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz hybridQ4KQuantize, ownsQF bool, ropeRows *qwen35PrefillRopeRows, normWorkspace *qwen35PrefillNormWorkspace) {
+	s.prefillQwen35HybridQ4KLayerWithGDNMode(l, X, P, base, eps, proj, pgroup, qz, ownsQF, ropeRows, normWorkspace, qwen35GDNHostBuildSelected)
+}
+
+func (s *Session) prefillQwen35HybridQ4KLayerWithGDNMode(l int, X []float32, P, base int, eps float32, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz hybridQ4KQuantize, ownsQF bool, ropeRows *qwen35PrefillRopeRows, normWorkspace *qwen35PrefillNormWorkspace, gdnMode qwen35GDNHostMode) {
 	dispatchWorkers := currentWorkerCount()
 	m, cfg := s.M, s.M.Cfg
 	H := cfg.HiddenSize
@@ -988,7 +996,7 @@ func (s *Session) prefillQwen35HybridQ4KLayerWithScratch(l int, X []float32, P, 
 
 	var o []float32
 	if cfg.isLinearAttnLayer(l) {
-		o = s.prefillQwen35LinearLayerQ4K(l, Xn, P, proj, pgroup, qz)
+		o = s.prefillQwen35LinearLayerQ4KWithHostChunks(l, Xn, P, proj, pgroup, qz, ownsQF && qwen35GDNHostModeAllows(gdnMode))
 	} else {
 		o = s.prefillQwen35FullAttnLayerQ4KWithRopeRows(l, Xn, P, base, proj, pgroup, qz, ownsQF, ropeRows)
 	}
@@ -1107,6 +1115,12 @@ func (s *Session) profileQwen35HybridQ4KPrefill(P int, start time.Time, gemmTime
 }
 
 func (s *Session) prefillQwen35LinearLayerQ4K(l int, Xn []float32, P int, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz hybridQ4KQuantize) []float32 {
+	return s.prefillQwen35LinearLayerQ4KWithHostChunks(l, Xn, P, proj, pgroup, qz, false)
+}
+
+// ordinaryHost is only granted by the builtin producer; custom callbacks keep
+// the original recurrence even in a chunked-host qualification build.
+func (s *Session) prefillQwen35LinearLayerQ4KWithHostChunks(l int, Xn []float32, P int, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz hybridQ4KQuantize, ordinaryHost bool) []float32 {
 	dispatchWorkers := currentWorkerCount()
 	m, cfg := s.M, s.M.Cfg
 	H := cfg.HiddenSize
@@ -1218,60 +1232,79 @@ func (s *Session) prefillQwen35LinearLayerQ4K(l int, Xn []float32, P int, proj h
 	// explicit operator opt-in. Scalar/hardware numeric qualification is still
 	// required even for finite operands; this does not promote a default.
 	vectorized := os.Getenv("FAK_VECTORIZED_DELTANET") == "1" && HasVectorizedDeltaNetFor(kHd, vHd)
-	parFor(nV, dispatchWorkers, func(lo, hi int) {
-		for h := lo; h < hi; h++ {
-			kh := h / repeat
-			st := lst.recurrent[h]
-			a := aExp[h]
-			dtB := dtBias[h]
-			kvmem := make([]float32, vHd)
-			delta := make([]float32, vHd)
-			for t := 0; t < P; t++ {
-				row := convOut[t*convDim : (t+1)*convDim]
-				qn := qNormAll[t*keyDim+kh*kHd : t*keyDim+(kh+1)*kHd]
-				kn := kNormAll[t*keyDim+kh*kHd : t*keyDim+(kh+1)*kHd]
-				vh := row[2*keyDim+h*vHd : 2*keyDim+(h+1)*vHd]
-				bt := sigmoidf(bvec[t*nV+h])
-				dt := softplus(avec[t*nV+h] + dtB)
-				g := float32(math.Exp(float64(-a * dt)))
-				if vectorized && qwen35PrefillVectorizedStep(st, qn, kn, vh, core, kvmem, delta, bt, g, t, valDim, h) {
-					continue
-				}
-				// Private per-head state/scratch and the joined normalized key
-				// panel satisfy the same decay/read loan as the Q8 consumer.
-				// Refused geometry retains the entire original mutation/panic order.
-				if !qwen35PrefillDecayRead(st, kn, kvmem, g, kHd, vHd) {
-					for i := range st {
-						st[i] *= g
+	recurrentPhase := "qwen35_linear_recurrent"
+	chunked := false
+	if s.qwen35GDNHostSelected(ordinaryHost, vectorized, P) {
+		result, ok := qwen35GDNHostCompute(qwen35GDNHostInput{
+			tokens: P, keyHeads: nK, valueHeads: nV, keyWidth: kHd, valueWidth: vHd,
+			q: qNormAll, k: kNormAll, conv: convOut, a: avec, b: bvec,
+			aExp: aExp, dtBias: dtBias, state: lst.recurrent,
+		}, dispatchWorkers)
+		if ok {
+			core = result.core
+			for h := range lst.recurrent {
+				copy(lst.recurrent[h], result.state[h])
+			}
+			chunked = true
+			recurrentPhase = "qwen35_linear_chunked_host"
+		}
+	}
+	if !chunked {
+		parFor(nV, dispatchWorkers, func(lo, hi int) {
+			for h := lo; h < hi; h++ {
+				kh := h / repeat
+				st := lst.recurrent[h]
+				a := aExp[h]
+				dtB := dtBias[h]
+				kvmem := make([]float32, vHd)
+				delta := make([]float32, vHd)
+				for t := 0; t < P; t++ {
+					row := convOut[t*convDim : (t+1)*convDim]
+					qn := qNormAll[t*keyDim+kh*kHd : t*keyDim+(kh+1)*kHd]
+					kn := kNormAll[t*keyDim+kh*kHd : t*keyDim+(kh+1)*kHd]
+					vh := row[2*keyDim+h*vHd : 2*keyDim+(h+1)*vHd]
+					bt := sigmoidf(bvec[t*nV+h])
+					dt := softplus(avec[t*nV+h] + dtB)
+					g := float32(math.Exp(float64(-a * dt)))
+					if vectorized && qwen35PrefillVectorizedStep(st, qn, kn, vh, core, kvmem, delta, bt, g, t, valDim, h) {
+						continue
 					}
-					for d := range kvmem {
-						kvmem[d] = 0
+					// Private per-head state/scratch and the joined normalized key
+					// panel satisfy the same decay/read loan as the Q8 consumer.
+					// Refused geometry retains the entire original mutation/panic order.
+					if !qwen35PrefillDecayRead(st, kn, kvmem, g, kHd, vHd) {
+						for i := range st {
+							st[i] *= g
+						}
+						for d := range kvmem {
+							kvmem[d] = 0
+						}
+						for i := 0; i < kHd; i++ {
+							ki := kn[i]
+							base := i * vHd
+							for d := 0; d < vHd; d++ {
+								kvmem[d] = gdnFMA32(st[base+d], ki, kvmem[d])
+							}
+						}
 					}
+					for d := 0; d < vHd; d++ {
+						delta[d] = (vh[d] - kvmem[d]) * bt
+					}
+					od := core[t*valDim+h*vHd : t*valDim+(h+1)*vHd]
 					for i := 0; i < kHd; i++ {
 						ki := kn[i]
+						qi := qn[i]
 						base := i * vHd
 						for d := 0; d < vHd; d++ {
-							kvmem[d] = gdnFMA32(st[base+d], ki, kvmem[d])
+							st[base+d] = gdnFMA32(ki, delta[d], st[base+d])
+							od[d] = gdnFMA32(st[base+d], qi, od[d])
 						}
 					}
 				}
-				for d := 0; d < vHd; d++ {
-					delta[d] = (vh[d] - kvmem[d]) * bt
-				}
-				od := core[t*valDim+h*vHd : t*valDim+(h+1)*vHd]
-				for i := 0; i < kHd; i++ {
-					ki := kn[i]
-					qi := qn[i]
-					base := i * vHd
-					for d := 0; d < vHd; d++ {
-						st[base+d] = gdnFMA32(ki, delta[d], st[base+d])
-						od[d] = gdnFMA32(st[base+d], qi, od[d])
-					}
-				}
 			}
-		}
-	})
-	s.phaseEnd("qwen35_linear_recurrent", t)
+		})
+	}
+	s.phaseEnd(recurrentPhase, t)
 	t = s.phaseStart()
 	parFor(P*nV, dispatchWorkers, func(lo, hi int) {
 		for idx := lo; idx < hi; idx++ {

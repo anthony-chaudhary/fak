@@ -288,6 +288,35 @@ The full upstream LICENSE at the pinned revision follows:
 ```
 
 
+## vLLM chunkwise Qwen host Gated-DeltaNet
+
+`internal/model/qwen35_gdn_chunked_host.go` adapts the chunk-64 causal
+triangular solve, initial/final recurrent-state schedule and distinct query
+readout from vLLM at revision
+`5c8ae7c74aaa99d1f7fbeea942fd7282e3413810`:
+
+- `csrc/cpu/sgl-kernels/fla.cpp`, intra-chunk solve/recompute and inter-chunk
+  state/readout kernels, and `chunk_gated_delta_rule_cpu`.
+  https://github.com/vllm-project/vllm/blob/5c8ae7c74aaa99d1f7fbeea942fd7282e3413810/csrc/cpu/sgl-kernels/fla.cpp
+  The pinned source header credits its adaptation from SGLang's CPU kernels.
+- `vllm/model_executor/layers/mamba/ops/cpu/gdn_attention.py`, the ordinary
+  causal-convolution / initial-state / final-state consumer.
+  https://github.com/vllm-project/vllm/blob/5c8ae7c74aaa99d1f7fbeea942fd7282e3413810/vllm/model_executor/layers/mamba/ops/cpu/gdn_attention.py
+
+Copyright contributors to the vLLM project. SPDX-License-Identifier: Apache-2.0.
+Modified for FAK: native Go/F32 rectangular key/value state, fused application
+of the unit-lower-triangular inverse, products of existing rounded scalar decay
+(including exact-zero resets), bounded private candidate output/state with
+all-head publication only after success, and ordinary Q8/mixed-Q4K host-prefill
+consumers. The default-off qualification path changes reduction order. No
+Torch, BLAS, BF16/AMX kernel, global workspace or device acceleration is copied
+or claimed. Existing causal convolution, decode and fallback remain FAK's.
+
+The pinned repository has no root NOTICE file. Its root Apache-2.0 LICENSE
+(Git `261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64`) is reproduced byte-exactly
+in the existing TensorFold license section of this file and also applies here.
+Source and adaptation details are in `qwen35_gdn_chunked_host.README.md`.
+
 ## Score-aware expert-cache eviction policies
 
 `internal/deepseekv4moe/cache_policy_bench.go` `CachePolicyLFRU` (`replayOnlineLFRU`,
