@@ -14,6 +14,7 @@ import (
 //              must NEVER be shed or modified (PrefixAnchorPreserved = true).
 // Invariant 2: Recent Suffix Turns (the last K >= 2 conversation turns) must be kept intact so immediate context is preserved.
 // Invariant 3: Goal Invariant: messages containing goal markers like [fak:goal] or Goal: must NEVER be dropped.
+// Invariant 4: Tool calls and results retain their full protocol metadata.
 //
 // Middle-turn shedding:
 // Drops older intermediate conversation turns from the middle until total tokens <= tokenBudget.
@@ -86,7 +87,12 @@ func CompactResponsesMessages(messages []Message, tokenBudget int, casPut func([
 		if currentTokens <= tokenBudget {
 			break
 		}
-		if isResponsesGoalMessage(compacted[i]) {
+		m := compacted[i]
+		// Content-only restore stubs cannot reconstruct tool protocol metadata.
+		if len(m.ToolCalls) > 0 || m.FunctionCall != nil || m.ToolCallID != "" || m.Role == RoleTool || m.Role == "function" {
+			continue
+		}
+		if isResponsesGoalMessage(m) {
 			// Invariant 3: Goal Invariant — messages containing goal markers must NEVER be dropped.
 			continue
 		}

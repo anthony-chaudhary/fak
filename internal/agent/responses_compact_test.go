@@ -3,9 +3,118 @@ package agent
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+// fak-test:runtime fast est=1s
+func TestResponsesCompactPreservesMiddleToolProtocol(t *testing.T) {
+	t.Parallel()
+	call := ToolCall{ID: "call_middle", Type: "function", Function: Func{Name: "read", Arguments: `{"path":"` + strings.Repeat("a", 2048) + `"}`}}
+	for _, test := range []struct {
+		name          string
+		calls         []ToolCall
+		goalResult    bool
+		budgetAtSplit bool
+		legacy        bool
+		missingID     bool
+		resultRole    string
+	}{
+		{name: "goal result", calls: []ToolCall{call}, goalResult: true},
+		{name: "budget between call and result", calls: []ToolCall{call}, budgetAtSplit: true},
+		{name: "parallel calls with goal result", calls: []ToolCall{call, {ID: "call_parallel", Type: "function", Function: Func{Name: "stat", Arguments: `{"path":"b"}`}}}, goalResult: true},
+		{name: "legacy function exchange", calls: []ToolCall{call}, legacy: true},
+		{name: "tool result without ID", calls: []ToolCall{call}, missingID: true},
+		{name: "ID-bearing result", calls: []ToolCall{call}, resultRole: RoleAssistant},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			messages := []Message{
+				{Role: RoleUser, Content: "Original task."},
+				{Role: RoleAssistant, ToolCalls: test.calls},
+			}
+			if test.legacy {
+				function := call.Function
+				messages[1].ToolCalls = nil
+				messages[1].FunctionCall = &function
+			}
+			for i, tc := range test.calls {
+				content := "retained tool result"
+				if test.goalResult && i == 0 {
+					content = "Goal: retain this result"
+				}
+				result := Message{Role: RoleTool, ToolCallID: tc.ID, Name: tc.Function.Name, Content: content, ToolResultIsError: true, Witness: "version:1"}
+				if test.legacy {
+					result.Role, result.ToolCallID = "function", ""
+				}
+				if test.missingID {
+					result.ToolCallID = ""
+				}
+				if test.resultRole != "" {
+					result.Role = test.resultRole
+				}
+				messages = append(messages, result)
+			}
+			protocolEnd := len(messages)
+			messages = append(messages,
+				Message{Role: RoleAssistant, Content: strings.Repeat("ordinary middle context ", 200)},
+				Message{Role: RoleAssistant, Content: "Recent assistant."},
+				Message{Role: RoleUser, Content: "Recent user."},
+			)
+			budget := 1
+			if test.budgetAtSplit {
+				emptyDigest := sha256.Sum256(nil)
+				stub := Message{Role: RoleAssistant, Content: "[fak:compacted id=" + hex.EncodeToString(emptyDigest[:]) + ` size=0 turns=1 hint="fak_context_restore"]`}
+				budget = EstimateResponsesMessagesTokens(messages) - EstimateResponsesMessageTokens(messages[1]) + EstimateResponsesMessageTokens(stub)
+			}
+			original, err := json.Marshal(messages)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var saved [][]byte
+			compacted, outcome, err := CompactResponsesMessages(messages, budget, func(body []byte) string {
+				saved = append(saved, append([]byte(nil), body...))
+				digest := sha256.Sum256(body)
+				return hex.EncodeToString(digest[:])
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(compacted) != len(messages) {
+				t.Fatalf("compaction changed message count: got %d want %d", len(compacted), len(messages))
+			}
+			for i := 1; i < protocolEnd; i++ {
+				if !reflect.DeepEqual(compacted[i], messages[i]) {
+					t.Errorf("tool protocol message %d metadata changed (role=%q call_id=%q)", i, messages[i].Role, messages[i].ToolCallID)
+				}
+			}
+			if outcome.ShedTurns == 0 || len(saved) == 0 || compacted[protocolEnd].Content == messages[protocolEnd].Content {
+				t.Error("ordinary middle text was not compacted")
+			}
+			for _, body := range saved {
+				if string(body) != messages[protocolEnd].Content {
+					t.Errorf("content-only restore received non-plain payload (%d bytes)", len(body))
+				}
+			}
+			if !reflect.DeepEqual(compacted[0], messages[0]) || !reflect.DeepEqual(compacted[len(compacted)-2:], messages[len(messages)-2:]) {
+				t.Error("prefix or recent suffix changed")
+			}
+			after, err := json.Marshal(messages)
+			if err != nil || string(after) != string(original) {
+				t.Error("compaction mutated caller input")
+			}
+			actualTokens := EstimateResponsesMessagesTokens(compacted)
+			if outcome.OriginalTokens != EstimateResponsesMessagesTokens(messages) || outcome.CompactedTokens != actualTokens || outcome.ShedTokens != outcome.OriginalTokens-actualTokens {
+				t.Error("reported token accounting differs from retained messages")
+			}
+			if !test.budgetAtSplit && actualTokens <= budget {
+				t.Error("protected protocol should retain explicit over-budget fallback")
+			}
+		})
+	}
+}
 
 func TestResponsesCompact_PrefixAnchorPreserved(t *testing.T) {
 	messages := []Message{
