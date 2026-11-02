@@ -1,6 +1,16 @@
 # Hardware-agent request: DS4.1 Flash on Raider 5090
 
-Request ID: `D41-HW-20261028-0310`. Prepared 2026-10-28 UTC. Status: **posted for pickup; unclaimed and unrun; not hardware-verified**.
+Request ID: `D41-HW-20261028-0310`. Prepared 2026-10-28 UTC. Status: **later operator-reported component results exist; reconcile the existing receipts before requesting repeated work**.
+
+## Receipt clarification — 2026-11-02 UTC
+
+The dated October 31 index and protocol below are preserved as historical request context, including their original source pins and acceptance requirements. Statements there about pickup, execution and admission describe that snapshot, not current availability or a new instruction to execute.
+
+- The [October 31 v1 operator report](https://github.com/anthony-chaudhary/fak/issues/12640#issuecomment-6547541544) records Raider admission blocked and Aegis RTX 5080 admission, with three component passes and one Q4 witness failure at source `42d81609391aaf274783e70f3b107507b8180a8c`. Preserve that failure and its original bound.
+- The [v2 operator report](https://github.com/anthony-chaudhary/fak/issues/12640#issuecomment-6548896240) records four component passes after a test-bound-only change, with the kernel unchanged. It identifies tested parent `6600f3d1c0a906912f7c656d0f611f187af2b462` plus patch SHA-256 `d035512c8584b0c43bde51b1b3bc5921570ca21d069ed65f12eca43553b16765`, subsequently landed as `df410106a54075e9557446aa33bfb4fd7ebf2caa`. A parent-plus-patch result is not automatically qualification of the entire landed commit or current main.
+- Reconcile the [existing provenance follow-up](https://github.com/anthony-chaudhary/fak/issues/12640#issuecomment-6548791501) with retained receipts before identifying any remaining evidence gap. It records receipt-locator/raw-stream review and requests already-produced binary, invocation and postimage binding; this clarification neither independently verifies private artifacts nor determines whether retained artifacts already answer those requests.
+
+These public component reports do not establish full-model execution, model parity, throughput, current hardware availability or direct FlashMLA SM100a/SM103a execution. All original protocol and acceptance requirements remain unchanged. This clarification is for evidence reuse and duplicate-request prevention only: it authorizes no rerun, new job, access, allocation or execution.
 
 ## Current request index — 2026-10-31 15:52 UTC
 
