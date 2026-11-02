@@ -654,6 +654,24 @@ func gitChangedFiles(root, base string) ([]string, error) {
 	return out, nil
 }
 
+// parseGitNULPaths preserves Git's repository-relative path bytes, including whitespace
+// and literal backslashes. Git already uses slash separators; no normalization is needed.
+func parseGitNULPaths(out string) ([]string, error) {
+	if out == "" {
+		return nil, nil
+	}
+	if !strings.HasSuffix(out, "\x00") {
+		return nil, fmt.Errorf("git path output is not NUL-terminated")
+	}
+	paths := strings.Split(strings.TrimSuffix(out, "\x00"), "\x00")
+	for _, path := range paths {
+		if path == "" {
+			return nil, fmt.Errorf("git path output contains an empty path")
+		}
+	}
+	return paths, nil
+}
+
 func gitOut(root string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
