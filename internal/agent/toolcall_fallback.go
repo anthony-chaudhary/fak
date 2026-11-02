@@ -622,7 +622,9 @@ func normalizeCompletionToolCalls(comp *Completion, offered OfferedTools) *Compl
 	comp.Message, rejected = liftTextToolCallsObserved(comp.Message, offered)
 	normalizeToolCallFields(&comp.Message)
 	if len(comp.Message.ToolCalls) > 0 {
-		comp.FinishReason = "tool_calls"
+		if comp.FinishReason != "length" && comp.FinishReason != "content_filter" {
+			comp.FinishReason = "tool_calls"
+		}
 	} else if rawClaimedToolCalls {
 		comp.ToolCallsDropped = true
 		if rejected {
@@ -637,7 +639,7 @@ func normalizeCompletionFields(comp *Completion) *Completion {
 		return nil
 	}
 	normalizeToolCallFields(&comp.Message)
-	if len(comp.Message.ToolCalls) > 0 {
+	if len(comp.Message.ToolCalls) > 0 && comp.FinishReason != "length" && comp.FinishReason != "content_filter" {
 		comp.FinishReason = "tool_calls"
 	}
 	return comp

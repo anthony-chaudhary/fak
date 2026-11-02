@@ -360,32 +360,56 @@ func TestLiftTextToolCalls_NewDialectsRespectStructuredClobber(t *testing.T) {
 }
 
 func TestNormalizeCompletionToolCallsMintsUsableIDsAndTypes(t *testing.T) {
-	comp := normalizeCompletionToolCalls(&Completion{
-		Message: Message{Role: RoleAssistant, ToolCalls: []ToolCall{
-			{Function: Func{Name: "a", Arguments: `{}`}},
-			{ID: "given", Function: Func{Name: "b", Arguments: `{}`}},
-			{ID: "given", Type: "function", Function: Func{Name: "c", Arguments: `{}`}},
-		}},
-		FinishReason: "stop",
-	}, fixtureOfferedTools())
-	if comp.FinishReason != "tool_calls" {
-		t.Fatalf("finish_reason = %q, want tool_calls", comp.FinishReason)
-	}
-	seen := map[string]bool{}
-	for i, tc := range comp.Message.ToolCalls {
-		if tc.ID == "" {
-			t.Fatalf("tool call %d has empty id: %+v", i, tc)
+	for _, normalizer := range []struct {
+		name      string
+		normalize func(*Completion) *Completion
+	}{
+		{"tool_calls", func(c *Completion) *Completion { return normalizeCompletionToolCalls(c, fixtureOfferedTools()) }},
+		{"fields", normalizeCompletionFields},
+	} {
+		for _, finish := range []string{"length", "content_filter", "stop", "tool_calls", ""} {
+			name := finish
+			if name == "" {
+				name = "empty"
+			}
+			t.Run(normalizer.name+"/"+name, func(t *testing.T) {
+				args := []string{`{"probe":"a"}`, `{"probe":"b"}`, `{"probe":"c"}`}
+				comp := normalizer.normalize(&Completion{Message: Message{Role: RoleAssistant, ToolCalls: []ToolCall{
+					{Function: Func{Name: "a", Arguments: args[0]}},
+					{ID: "given", Function: Func{Name: "b", Arguments: args[1]}},
+					{ID: "given", Type: "function", Function: Func{Name: "c", Arguments: args[2]}},
+				}}, FinishReason: finish})
+				want := "tool_calls"
+				if finish == "length" || finish == "content_filter" {
+					want = finish
+				}
+				if comp.FinishReason != want {
+					t.Errorf("finish_reason=%q want %q", comp.FinishReason, want)
+				}
+				if comp.ToolCallsDropped {
+					t.Errorf("retained valid calls marked dropped for finish %q", finish)
+				}
+				if len(comp.Message.ToolCalls) != 3 {
+					t.Fatalf("normalized calls=%d want3", len(comp.Message.ToolCalls))
+				}
+				seen := map[string]bool{}
+				for i, tc := range comp.Message.ToolCalls {
+					if tc.ID == "" || seen[tc.ID] {
+						t.Errorf("call%d has empty/duplicate ID %q", i, tc.ID)
+					}
+					seen[tc.ID] = true
+					if tc.Type != "function" {
+						t.Errorf("call%d type=%q wantfunction", i, tc.Type)
+					}
+					if tc.Function.Arguments != args[i] {
+						t.Errorf("call%d arguments=%q want%q", i, tc.Function.Arguments, args[i])
+					}
+				}
+				if comp.Message.ToolCalls[1].ID != "given" {
+					t.Errorf("provider ID changed: %q", comp.Message.ToolCalls[1].ID)
+				}
+			})
 		}
-		if seen[tc.ID] {
-			t.Fatalf("duplicate id %q in %+v", tc.ID, comp.Message.ToolCalls)
-		}
-		seen[tc.ID] = true
-		if tc.Type != "function" {
-			t.Fatalf("tool call %d type = %q, want function", i, tc.Type)
-		}
-	}
-	if comp.Message.ToolCalls[1].ID != "given" {
-		t.Fatalf("first non-empty provider id was not preserved: %+v", comp.Message.ToolCalls)
 	}
 }
 
