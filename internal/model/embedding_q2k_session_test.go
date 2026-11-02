@@ -17,11 +17,16 @@ func TestQ2KEmbeddingQwen35MetalSessionGuard(t *testing.T) {
 	}
 	m := &Model{
 		Cfg: Config{
-			ModelType:  "qwen3_5_text",
-			VocabSize:  vocab,
-			HiddenSize: hidden,
-			NumLayers:  1,
-			LayerTypes: []string{"linear_attention"},
+			ModelType:           "qwen3_5_text",
+			VocabSize:           vocab,
+			HiddenSize:          hidden,
+			NumLayers:           1,
+			LayerTypes:          []string{"linear_attention"},
+			LinearNumKeyHeads:   1,
+			LinearNumValueHeads: 1,
+			LinearKeyHeadDim:    1,
+			LinearValueHeadDim:  1,
+			LinearConvKernelDim: 2,
 		},
 		Q2KEmbedding: embed,
 	}
