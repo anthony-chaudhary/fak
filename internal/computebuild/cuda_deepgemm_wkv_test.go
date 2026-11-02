@@ -3,6 +3,7 @@ package computebuild
 import (
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -32,7 +33,7 @@ func TestCUDADeepGEMMWKVBuildContract(t *testing.T) {
 		t.Fatal(images)
 	}
 	joined := " " + strings.Join(args, " ") + " "
-	for _, flag := range []string{"-std=c++20", "--compiler-options=-O3", "--compiler-options=-fPIC", "--compiler-options=-fconcepts", "--expt-relaxed-constexpr", "--expt-extended-lambda", "--ptxas-options=--register-usage-level=10", "--diag-suppress=39,161,174,177,186,940", "--compiler-options=-Wno-deprecated-declarations,-Wno-abi", "-DFAK_DEEPGEMM_WKV_SMS=148", "-I/repo/third_party/deepgemm/deep_gemm/include", "-I/repo/third_party/deepgemm_cutlass/include"} {
+	for _, flag := range []string{"-std=c++20", "--compiler-options=-O3", "--compiler-options=-fPIC", "--compiler-options=-fconcepts", "--expt-relaxed-constexpr", "--expt-extended-lambda", "--ptxas-options=--register-usage-level=10", "--diag-suppress=39,161,174,177,186,940", "--compiler-options=-Wno-deprecated-declarations,-Wno-abi", "-DFAK_DEEPGEMM_WKV_SMS=148", "-I" + filepath.Join("/repo", "third_party", "deepgemm", "deep_gemm", "include"), "-I" + filepath.Join("/repo", "third_party", "deepgemm_cutlass", "include")} {
 		if !strings.Contains(joined, " "+flag+" ") {
 			t.Errorf("missing %s", flag)
 		}

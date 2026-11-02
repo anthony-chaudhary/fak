@@ -41,8 +41,10 @@ func TestCUDAFlashMLAPrefillBuildContract(t *testing.T) {
 	if strings.Contains(joined, "code=compute_") || strings.Contains(joined, "sm_100f") {
 		t.Fatal("FlashMLA must have no PTX or family-specific fallback")
 	}
-	if !strings.Contains(joined, "-I/repo/third_party/flashmla/csrc ") || !strings.Contains(joined, "-I/repo/third_party/cutlass/include ") {
-		t.Fatal("vendor include roots missing")
+	for _, include := range []string{filepath.Join("/repo", "third_party", "flashmla", "csrc"), filepath.Join("/repo", "third_party", "cutlass", "include")} {
+		if !strings.Contains(joined, " -I"+include+" ") {
+			t.Fatalf("vendor include root missing: %s", include)
+		}
 	}
 }
 
