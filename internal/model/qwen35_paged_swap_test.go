@@ -5,12 +5,15 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 )
 
 var qwenSwapRestoreSink *KVCache
 
+// fak-test:runtime fast est=5s
+// Runtime allowance is an unmeasured estimate.
 func TestQwenHybridPagedSwapRoundTripDeterminism(t *testing.T) {
 	cfg := qwen35HybridTestCfg()
 	m := NewSynthetic(cfg)
@@ -77,6 +80,8 @@ func TestQwenHybridPagedSwapRoundTripDeterminism(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=5s
+// Runtime allowance is an unmeasured estimate.
 func TestQwenHybridPagedSwapRejectsTrailingAndInvalidGeometry(t *testing.T) {
 	cfg := qwen35HybridTestCfg()
 	cache := NewSynthetic(cfg).NewSession()
@@ -85,7 +90,7 @@ func TestQwenHybridPagedSwapRejectsTrailingAndInvalidGeometry(t *testing.T) {
 	body := blob[:len(blob)-sha256.Size]
 
 	trailingBody := append(append([]byte(nil), body...), 0xa5)
-	if _, err := QwenHybridKVCacheFromHost(cfg, qwenSwapTestResign(trailingBody)); err == nil || !strings.Contains(err.Error(), "trailing") {
+	if restored, err := QwenHybridKVCacheFromHost(cfg, qwenSwapTestResign(trailingBody)); restored != nil || err == nil || !strings.Contains(err.Error(), "trailing") {
 		t.Fatalf("valid-checksum trailing byte error=%v, want trailing-byte refusal", err)
 	}
 
@@ -97,7 +102,7 @@ func TestQwenHybridPagedSwapRejectsTrailingAndInvalidGeometry(t *testing.T) {
 		t.Fatalf("locate geometry field: %v", err)
 	}
 	binary.LittleEndian.PutUint64(badGeometry[d.off:], 0) // blockTokens must be positive.
-	if _, err := QwenHybridKVCacheFromHost(cfg, qwenSwapTestResign(badGeometry)); err == nil || !strings.Contains(err.Error(), "geometry") {
+	if restored, err := QwenHybridKVCacheFromHost(cfg, qwenSwapTestResign(badGeometry)); restored != nil || err == nil || !strings.Contains(err.Error(), "geometry") {
 		t.Fatalf("zero block geometry error=%v, want geometry refusal", err)
 	}
 
@@ -248,6 +253,8 @@ func TestQwenHybridPagedSwapV1WireCompatibility(t *testing.T) {
 	}
 }
 
+// fak-test:runtime medium est=15s
+// Runtime allowance is an unmeasured estimate.
 func TestQwenHybridPagedSwapRestoreDoesNotMaterializePadding(t *testing.T) {
 	cfg := qwen35HybridTestCfg()
 	session := NewSynthetic(cfg).NewSession()
@@ -282,7 +289,19 @@ func TestQwenHybridPagedSwapRestoreDoesNotMaterializePadding(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=500ms
+// Runtime allowance is an unmeasured estimate.
 func TestNewQwenHybridSwapCachePreservesAuxiliaryInitialization(t *testing.T) {
+	t.Run("invalid_original_geometry", func(t *testing.T) {
+		cfg := qwen35HybridTestCfg()
+		cfg.LinearNumValueHeads = 0
+		if _, err := ComputeQwen35StateLayout(cfg, "f32"); err == nil {
+			t.Fatal("invalid geometry fixture was accepted")
+		}
+		if got, err := QwenHybridKVCacheFromHost(cfg, nil); got != nil || err == nil || !strings.Contains(err.Error(), "state layout") {
+			t.Fatalf("invalid original geometry: cache=%v err=%v", got, err)
+		}
+	})
 	for _, tc := range []struct {
 		name string
 		cfg  Config
@@ -306,6 +325,35 @@ func TestNewQwenHybridSwapCachePreservesAuxiliaryInitialization(t *testing.T) {
 			}
 			want := NewKVCache(tc.cfg)
 			got := newQwenHybridSwapCache(tc.cfg)
+			if got.Precision() != want.Precision() || got.Precision() != KVPrecisionFP32 {
+				t.Fatal("restore precision differs from canonical FP32 constructor")
+			}
+			if !reflect.DeepEqual(got.cfg, tc.cfg) {
+				t.Fatal("restore constructor changed original config")
+			}
+			if got.linear == nil || len(got.linear.layers) != tc.cfg.NumLayers {
+				t.Fatal("restore constructor omitted linear layer skeleton")
+			}
+			// Compare every auxiliary row set, not merely selected outer lengths.
+			// These mixed predicates exercise construction only, not auxiliary wire transport.
+			if !reflect.DeepEqual(got.glm, want.glm) || !reflect.DeepEqual(got.msa, want.msa) {
+				t.Fatal("restore constructor differs from canonical GLM/MSA empty state")
+			}
+			for name, rows := range map[string][][]float32{"K": got.K, "Kraw": got.Kraw, "V": got.V} {
+				if len(rows) != tc.cfg.NumLayers {
+					t.Fatalf("%s layer skeleton=%d, want %d", name, len(rows), tc.cfg.NumLayers)
+				}
+				for l, row := range rows {
+					if len(row) != 0 || cap(row) != 0 {
+						t.Fatalf("%s layer %d eagerly reserved token payload: len=%d cap=%d", name, l, len(row), cap(row))
+					}
+				}
+			}
+			for l, layer := range got.linear.layers {
+				if len(layer.conv) != 0 || cap(layer.conv) != 0 || len(layer.recurrent) != 0 || cap(layer.recurrent) != 0 {
+					t.Fatalf("layer %d eagerly reserved linear state: conv=%d/%d recurrent=%d/%d", l, len(layer.conv), cap(layer.conv), len(layer.recurrent), cap(layer.recurrent))
+				}
+			}
 			if (got.glm == nil) != (want.glm == nil) || (got.msa == nil) != (want.msa == nil) {
 				t.Fatalf("auxiliary constructors differ: got glm=%t msa=%t want glm=%t msa=%t", got.glm != nil, got.msa != nil, want.glm != nil, want.msa != nil)
 			}
@@ -324,6 +372,8 @@ func TestNewQwenHybridSwapCachePreservesAuxiliaryInitialization(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=5s
+// Runtime allowance is an unmeasured estimate.
 func TestQwenSwapDecoderDirectRowsAllocateNoPaddedBlock(t *testing.T) {
 	const (
 		liveFloats   = 3

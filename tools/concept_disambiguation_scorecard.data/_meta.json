@@ -1557,6 +1557,11 @@
           "category": "incidental",
           "reason": "Private paired pushdown cursor and partial-UTF8 state for single-history memoization, replayed from root on divergent history; not another named cache architecture.",
           "token": "cachedState"
+        },
+        {
+          "category": "incidental",
+          "reason": "Unexported construction helper for the existing model KVCache. It preserves precision and auxiliary-cache initialization order while allowing validated hybrid host restore to supply the linear-state initializer; it introduces no distinct cache representation, residency policy, or admission authority.",
+          "token": "newKVCacheWithLinearInitializer"
         }
       ],
       "exclude": [
@@ -1853,6 +1858,7 @@
         "ncache",
         "newCache",
         "newDeadlineCacheTicket",
+        "newKVCacheWithLinearInitializer",
         "no_cache_state_delta",
         "non_cache_fingerprint",
         "normalizedSchemaCacheCap",

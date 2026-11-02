@@ -69,6 +69,13 @@ func NewKVCache(cfg Config) *KVCache {
 // layout the compute.KVPrecisionQ8 planner tier charges: Kraw stays f32, post-RoPE K
 // and V are packed q8_0. See kvcache_q8.go for why.
 func NewKVCacheWithPrecision(cfg Config, prec KVPrecision) *KVCache {
+	return newKVCacheWithLinearInitializer(cfg, prec, newLinearAttnCache)
+}
+
+// newKVCacheWithLinearInitializer keeps precision and auxiliary cache construction
+// canonical while allowing validated host restore to defer recurrent payloads.
+// The initializer receives the unchanged model geometry at the original field order.
+func newKVCacheWithLinearInitializer(cfg Config, prec KVPrecision, initLinear func(Config) *linearAttnCache) *KVCache {
 	if prec == "" {
 		prec = KVPrecisionFP32
 	}
@@ -78,7 +85,7 @@ func NewKVCacheWithPrecision(cfg Config, prec KVPrecision) *KVCache {
 		Kraw:   make([][]float32, cfg.NumLayers),
 		V:      make([][]float32, cfg.NumLayers),
 		prec:   prec,
-		linear: newLinearAttnCache(cfg),
+		linear: initLinear(cfg),
 		glm:    newGLMDsaKVCache(cfg),
 		msa:    newMinimaxKVCache(cfg),
 	}
