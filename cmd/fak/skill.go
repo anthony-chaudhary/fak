@@ -42,6 +42,8 @@ func cmdSkill(args []string) {
 	}
 	var code int
 	switch args[0] {
+	case "pull":
+		code = runSkillPull(os.Stdout, os.Stderr, args[1:])
 	case "query":
 		code = runSkillQuery(os.Stdout, os.Stderr, args[1:])
 	case "residency":
@@ -86,6 +88,11 @@ The queried skill loader — 0 cost for ∞ skills, paged on demand (epic #1103,
       hot-swap a skill's active version and print the pre-flip blast radius.
       --from guards the remap (refuses if the pinned version differs); the flip
       is persisted to .claude/skill-page-table.json so residency reads it back.
+
+  fak skill pull --source HTTPS_URL --index-sha256 TRUSTED_SHA256 --cache-root EXISTING_DIR [--json]
+      cache a bounded, digest-pinned remote skill catalog as immutable data.
+      No activation or policy change; explicitly select its receipt root with
+      agent/chat --skills-dir only after reviewing the pinned content.
 
   fak skill compile <SKILL.md> [--source NAME] [--expose NAME ...] [--dialect NAME] [--json]
       compile only an explicit versioned fak-program block; registration and
