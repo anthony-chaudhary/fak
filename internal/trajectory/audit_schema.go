@@ -373,6 +373,8 @@ func auditSchemaOwner(source string) (string, string) {
 	switch source {
 	case AuditSourceCodex:
 		return "internal/trajectory/audit_parse.go:parseCodexAuditRecord", "internal/trajectory/testdata/audit/codex/sessions"
+	case AuditSourcePi:
+		return "internal/trajectory/audit_parse.go:parsePiAuditRecord", "internal/trajectory/testdata/audit/pi/sessions"
 	default:
 		return "internal/trajectory/audit_parse.go:parseClaudeAuditRecord", "internal/trajectory/testdata/audit/claude/projects"
 	}

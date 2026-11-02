@@ -31,6 +31,7 @@ const (
 	AuditSourceClaude   = "claude"
 	AuditSourceCodex    = "codex"
 	AuditSourceOpencode = "opencode"
+	AuditSourcePi       = "pi"
 )
 
 // AuditSource is one supported harness transcript root. RootLabel is safe to
@@ -39,6 +40,9 @@ type AuditSource struct {
 	Name      string
 	Root      string
 	RootLabel string
+	// Explicit immutable OpenCode image only; empty leaves live-source behavior unchanged.
+	OpenCodeSnapshotSHA256  string `json:"opencode_snapshot_sha256,omitempty"`
+	OpenCodeSnapshotProfile string `json:"opencode_snapshot_profile,omitempty"`
 }
 
 // ProgressReporter receives progress updates during transcript discovery and scanning.
@@ -126,23 +130,25 @@ type AuditCodexCacheObservation struct {
 // schema drift observable without treating harmless metadata records as usage;
 // FixtureFilesExcluded makes narrowly classified fixture exclusions observable.
 type AuditDenominatorRow struct {
-	Schema                string         `json:"schema"`
-	Kind                  string         `json:"kind"`
-	Source                string         `json:"source"`
-	Root                  string         `json:"root"`
-	RootPresent           bool           `json:"root_present"`
-	FilesDiscovered       int            `json:"files_discovered"`
-	FilesScanned          int            `json:"files_scanned"`
-	FilesMatched          int            `json:"files_matched,omitempty"`
-	FixtureFilesExcluded  int            `json:"fixture_files_excluded"`
-	Records               int            `json:"records"`
-	UsageRecordsSeen      int            `json:"usage_records_seen"`
-	UsageRecordsExact     int            `json:"usage_records_exact"`
-	UsageRecordsApplied   int            `json:"usage_records_applied"`
-	DuplicateUsageRecords int            `json:"duplicate_usage_records"`
-	RefusedRecords        int            `json:"refused_records"`
-	RecordTypes           map[string]int `json:"record_types"`
-	TokenSemantics        string         `json:"token_semantics"`
+	Schema                  string         `json:"schema"`
+	Kind                    string         `json:"kind"`
+	Source                  string         `json:"source"`
+	Root                    string         `json:"root"`
+	RootPresent             bool           `json:"root_present"`
+	FilesDiscovered         int            `json:"files_discovered"`
+	FilesScanned            int            `json:"files_scanned"`
+	FilesMatched            int            `json:"files_matched,omitempty"`
+	FixtureFilesExcluded    int            `json:"fixture_files_excluded"`
+	Records                 int            `json:"records"`
+	UsageRecordsSeen        int            `json:"usage_records_seen"`
+	UsageRecordsExact       int            `json:"usage_records_exact"`
+	UsageRecordsApplied     int            `json:"usage_records_applied"`
+	DuplicateUsageRecords   int            `json:"duplicate_usage_records"`
+	RefusedRecords          int            `json:"refused_records"`
+	RecordTypes             map[string]int `json:"record_types"`
+	TokenSemantics          string         `json:"token_semantics"`
+	OpenCodeSnapshotProfile string         `json:"opencode_snapshot_profile,omitempty"`
+	OpenCodeSnapshotSHA256  string         `json:"opencode_snapshot_sha256,omitempty"`
 }
 
 // AuditTranscriptRow is one queryable, content-free transcript rollup.
@@ -155,10 +161,12 @@ type AuditTranscriptRow struct {
 	Models                       []string                      `json:"models"`
 	BuildIdentities              []AuditBuildIdentity          `json:"build_identities"`
 	Tokens                       AuditTokens                   `json:"tokens"`
+	OpenCodeSnapshot             *OpenCodeSnapshotEvidence     `json:"opencode_snapshot,omitempty"`
 	CodexCache                   *AuditCodexCacheObservation   `json:"codex_cache,omitempty"`
 	CompactionEvents             []AuditCompactionEvent        `json:"compaction_events,omitempty"`
 	ToolCalls                    int                           `json:"tool_calls"`
 	ToolErrors                   int                           `json:"tool_errors"`
+	ToolErrorsBenignNegative     int                           `json:"tool_errors_benign_negative"`
 	Distribution                 []AuditDistributionRow        `json:"distribution,omitempty"`
 	ToolDistribution             []AuditDistributionRow        `json:"tool_distribution,omitempty"`
 	ToolResults                  []AuditToolResultRow          `json:"tool_results,omitempty"`
@@ -199,6 +207,9 @@ type AuditBottleneckRow struct {
 
 // AuditSummaryRow is the machine-wide exact rollup and baseline input.
 type AuditSummaryRow struct {
+	// Nonempty means only this explicit source projection is covered, not a
+	// general efficiency or baseline-comparison sample.
+	OpenCodeSnapshotCoverage            string                        `json:"opencode_snapshot_coverage,omitempty"`
 	Schema                              string                        `json:"schema"`
 	Kind                                string                        `json:"kind"`
 	Sources                             int                           `json:"sources"`
@@ -227,6 +238,7 @@ type AuditSummaryRow struct {
 	EmptyUsageFiles                     int                           `json:"empty_usage_files"`
 	ToolCalls                           int                           `json:"tool_calls"`
 	ToolErrors                          int                           `json:"tool_errors"`
+	ToolErrorsBenignNegative            int                           `json:"tool_errors_benign_negative"`
 	DistributionUnit                    string                        `json:"distribution_unit"`
 	DistributionProvenance              string                        `json:"distribution_provenance"`
 	Distribution                        []AuditDistributionRow        `json:"distribution,omitempty"`
@@ -350,6 +362,21 @@ func RunAudit(opts AuditOptions) (AuditResult, error) {
 	if len(opts.Sources) == 0 {
 		opts.Sources = DefaultAuditSources()
 	}
+	snapshotSources := 0
+	for _, source := range opts.Sources {
+		if source.OpenCodeSnapshotSHA256 != "" || source.OpenCodeSnapshotProfile != "" {
+			snapshotSources++
+		}
+	}
+	if snapshotSources > 1 {
+		return AuditResult{}, errors.New("OPENCODE_SNAPSHOT_MULTIPLE_IMAGES_UNSUPPORTED")
+	}
+	if snapshotSources > 0 && len(opts.Sources) != 1 {
+		return AuditResult{}, errors.New("OPENCODE_SNAPSHOT_MIXED_SOURCES_UNSUPPORTED")
+	}
+	if opts.Baseline != nil && (snapshotSources > 0 || opts.Baseline.OpenCodeSnapshotCoverage != "") {
+		return AuditResult{}, errors.New("OPENCODE_SNAPSHOT_BASELINE_UNSUPPORTED")
+	}
 	if opts.Now.IsZero() {
 		opts.Now = time.Now()
 	}
@@ -431,6 +458,12 @@ func RunAudit(opts AuditOptions) (AuditResult, error) {
 	})
 	addAuditCanonicalRefusalDenominators(result.Denominators, canonicalRefusals)
 	result.Summary = summarizeAudit(result.Denominators, canonical, allHookDurations)
+	if snapshotSources > 0 {
+		result.Summary.OpenCodeSnapshotCoverage = "exact_usage_and_tool_status_only"
+		result.Summary.RepeatedFailuresPerSession = nil
+		result.Summary.RepeatedFailureSemantics = "unknown"
+		result.Summary.RepeatedFailureNormalization = "unknown"
+	}
 	result.Summary.RefusedRecords = len(result.Refusals)
 	result.Summary.RawFragments = len(result.Transcripts)
 	result.Summary.CanonicalTranscripts = len(canonical)
@@ -459,7 +492,9 @@ func RunAudit(opts AuditOptions) (AuditResult, error) {
 		}
 	}
 	result.ConclusionStatus = AuditConclusionStatus{
-		BroadEfficiencySupported: len(result.Refusals) == 0,
+		// Snapshot usage/tool status is exact only inside the bound image; model,
+		// latency and repeated-failure coverage are not a broad efficiency audit.
+		BroadEfficiencySupported: len(result.Refusals) == 0 && snapshotSources == 0,
 		RefusalCount:             len(result.Refusals),
 		SchemaDriftCount:         len(result.SchemaDrift),
 		BreakingSchemaDrift:      breakingSchemaDrift,
@@ -529,6 +564,17 @@ func (r auditSourceResult) clone() auditSourceResult {
 
 func (t AuditTranscriptRow) clone() AuditTranscriptRow {
 	c := t
+	if t.OpenCodeSnapshot != nil {
+		v := *t.OpenCodeSnapshot
+		v.Tools = append([]OpenCodeSnapshotTool(nil), t.OpenCodeSnapshot.Tools...)
+		for i := range v.Tools {
+			if v.Tools[i].Executed != nil {
+				b := *v.Tools[i].Executed
+				v.Tools[i].Executed = &b
+			}
+		}
+		c.OpenCodeSnapshot = &v
+	}
 	c.Models = append([]string(nil), t.Models...)
 	c.BuildIdentities = append([]AuditBuildIdentity(nil), t.BuildIdentities...)
 	if t.Distribution != nil {
@@ -642,8 +688,12 @@ func auditSourceKey(source AuditSource, opts AuditOptions) string {
 	if abs, err := filepath.Abs(cleanRoot); err == nil {
 		cleanRoot = abs
 	}
-	return fmt.Sprintf("%s\x00%s\x00%d\x00%d\x00%s",
+	key := fmt.Sprintf("%s\x00%s\x00%d\x00%d\x00%s",
 		source.Name, cleanRoot, opts.Since, cutoff, strings.ToLower(opts.UserContains))
+	if source.OpenCodeSnapshotSHA256 != "" || source.OpenCodeSnapshotProfile != "" {
+		key += fmt.Sprintf("\x00%s\x00%s\x00%d", source.OpenCodeSnapshotProfile, source.OpenCodeSnapshotSHA256, opts.Now.UnixMilli())
+	}
+	return key
 }
 
 func auditSource(source AuditSource, opts AuditOptions, baseOffset int) (AuditDenominatorRow, []AuditTranscriptRow, []AuditRefusalRow, []int64, []QwenToolErrorEvent, error) {
@@ -704,6 +754,9 @@ func doAuditSource(ctx context.Context, source AuditSource, opts AuditOptions, f
 			Root: source.RootLabel, RecordTypes: map[string]int{},
 		},
 	}
+	if source.OpenCodeSnapshotSHA256 != "" || source.OpenCodeSnapshotProfile != "" {
+		return auditOpenCodeSnapshot(ctx, source, opts, res)
+	}
 	switch source.Name {
 	case AuditSourceClaude:
 		res.denominator.TokenSemantics = "message usage buckets are disjoint; duplicate message ids are counted once"
@@ -732,6 +785,8 @@ func doAuditSource(ctx context.Context, source AuditSource, opts AuditOptions, f
 			Detail: "OpenCode corpus coverage is unsupported; source was not scanned",
 		}}
 		return res, nil
+	case AuditSourcePi:
+		res.denominator.TokenSemantics = "per-assistant-turn usage buckets are disjoint (input excludes cacheRead/cacheWrite); duplicate message ids are counted once"
 	default:
 		return res, fmt.Errorf("trajectory audit: source %q has no parser", source.Name)
 	}
@@ -917,6 +972,15 @@ func auditUserText(record map[string]any) string {
 				return auditCodexUserText(payload["content"])
 			}
 		}
+	case "message": // Pi transcript row.
+		message, _ := record["message"].(map[string]any)
+		if role, _ := message["role"].(string); role == "user" {
+			text := piContentText(message["content"])
+			if auditPiSyntheticUserText(text) {
+				return ""
+			}
+			return text
+		}
 	}
 	return ""
 }
@@ -984,6 +1048,7 @@ func summarizeAudit(denominators []AuditDenominatorRow, transcripts []AuditTrans
 		summary.MutationChurn += transcript.MutationChurn
 		summary.ToolCalls += transcript.ToolCalls
 		summary.ToolErrors += transcript.ToolErrors
+		summary.ToolErrorsBenignNegative += transcript.ToolErrorsBenignNegative
 		summary.TerminalFailures += transcript.TerminalFailures
 		for k, v := range transcript.TerminalFailureClasses {
 			if summary.TerminalFailureClasses == nil {
@@ -1187,6 +1252,10 @@ func newAuditDelta(metric string, current, baseline *float64) AuditDeltaRow {
 }
 
 func newAuditRepeatedFailureDelta(current, baseline AuditSummaryRow) AuditDeltaRow {
+	if current.OpenCodeSnapshotCoverage != "" || baseline.OpenCodeSnapshotCoverage != "" {
+		no := false
+		return AuditDeltaRow{Schema: AuditSchema, Kind: "baseline_delta", Metric: "repeated_failures", RawComparable: &no, NormalizedComparable: &no, NormalizedRegression: &no, ComparabilityStatus: "unsupported_coverage", ComparabilityReason: "snapshot usage/tool status does not observe repeated-failure behavior"}
+	}
 	rawCurrent, rawBaseline := current.RepeatedFailures, baseline.RepeatedFailures
 	currentExposure, baselineExposure := current.Transcripts, baseline.Transcripts
 	rawComparable := false
@@ -1273,6 +1342,9 @@ func ReadAuditBaseline(path string) (*AuditSummaryRow, error) {
 		var summary AuditSummaryRow
 		if err := json.Unmarshal(scanner.Bytes(), &summary); err != nil {
 			return nil, fmt.Errorf("trajectory audit: decode baseline summary: %w", err)
+		}
+		if summary.OpenCodeSnapshotCoverage != "" {
+			return nil, errors.New("OPENCODE_SNAPSHOT_BASELINE_UNSUPPORTED")
 		}
 		return &summary, nil
 	}

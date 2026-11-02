@@ -107,6 +107,10 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 	claudeRoot := flags.String("claude-root", "", "override Claude projects root")
 	codexRoot := flags.String("codex-root", "", "override Codex sessions root")
 	opencodeRoot := flags.String("opencode-root", "", "override the opencode storage root")
+	piRoot := flags.String("pi-root", "", "include Pi session JSONL transcripts under this root")
+	opencodeImage := flags.String("opencode-snapshot", "", "audit only this explicit standalone immutable OpenCode SQLite image")
+	opencodeImageSHA := flags.String("opencode-snapshot-sha256", "", "required lowercase SHA-256 binding the selected image")
+	opencodeProfile := flags.String("opencode-snapshot-profile", "", "required supported OpenCode image schema profile")
 	snapshotOut := flags.String("snapshot-out", "", "capture selected private inputs into a new replayable snapshot directory")
 	snapshot := flags.String("snapshot", "", "verify and replay a private audit snapshot without reading live roots")
 	snapshotUsageLedger := flags.String("snapshot-usage-ledger", "", "append privacy-safe capture/replay outcomes to this explicit JSONL file")
@@ -117,6 +121,39 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 	}
 	explicit := map[string]bool{}
 	flags.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+	opencodeImageMode := explicit["opencode-snapshot"] || explicit["opencode-snapshot-sha256"] || explicit["opencode-snapshot-profile"]
+	var imageSource trajectory.AuditSource
+	if opencodeImageMode {
+		var imageErr error
+		imageSource, imageErr = trajectory.NewOpenCodeSnapshotSource(*opencodeImage, *opencodeImageSHA, *opencodeProfile)
+		if imageErr != nil {
+			fmt.Fprintln(stderr, imageErr)
+			return 2
+		}
+		for _, name := range []string{"user-contains", "claude-root", "codex-root", "opencode-root", "pi-root", "snapshot-out", "snapshot", "snapshot-usage-ledger", "snapshot-usage-fold", "baseline"} {
+			if explicit[name] {
+				fmt.Fprintln(stderr, "OPENCODE_SNAPSHOT_FLAGS_INCOMPATIBLE")
+				return 2
+			}
+		}
+		if !explicit["since"] {
+			*sinceText = "0"
+		}
+		// Output requests must not replace the pinned input, including hardlink aliases.
+		inputAbs, inputErr := filepath.Abs(*opencodeImage)
+		inputInfo, _ := os.Stat(*opencodeImage)
+		for _, output := range []string{*jsonlPath, *markdownPath} {
+			if output == "" {
+				continue
+			}
+			outputAbs, outputErr := filepath.Abs(output)
+			outputInfo, _ := os.Stat(output)
+			if inputErr != nil || outputErr != nil || inputAbs == outputAbs || (inputInfo != nil && outputInfo != nil && os.SameFile(inputInfo, outputInfo)) {
+				fmt.Fprintln(stderr, "OPENCODE_SNAPSHOT_OUTPUT_CONFLICT")
+				return 2
+			}
+		}
+	}
 	if strings.TrimSpace(*snapshotUsageFold) != "" {
 		for name := range explicit {
 			if name != "snapshot-usage-fold" {
@@ -178,7 +215,7 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 		return finish(trajectoryAuditSnapshotFlagRefusal(stderr, "--snapshot-out and --snapshot are mutually exclusive"), "refused", "SNAPSHOT_FLAGS_INCOMPATIBLE")
 	}
 	if strings.TrimSpace(*snapshot) != "" {
-		for _, name := range []string{"since", "user-contains", "claude-root", "codex-root", "opencode-root", "baseline"} {
+		for _, name := range []string{"since", "user-contains", "claude-root", "codex-root", "opencode-root", "pi-root", "baseline"} {
 			if explicit[name] {
 				return finish(trajectoryAuditSnapshotFlagRefusal(stderr, "--snapshot rejects live selection flag --"+name), "refused", "SNAPSHOT_FLAGS_INCOMPATIBLE")
 			}
@@ -218,6 +255,16 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 			Root:      *opencodeRoot,
 			RootLabel: "opencode/storage",
 		})
+	}
+	if strings.TrimSpace(*piRoot) != "" {
+		sources = append(sources, trajectory.AuditSource{
+			Name:      trajectory.AuditSourcePi,
+			Root:      *piRoot,
+			RootLabel: "pi/sessions",
+		})
+	}
+	if opencodeImageMode {
+		sources = []trajectory.AuditSource{imageSource}
 	}
 	var baseline *trajectory.AuditSummaryRow
 	if strings.TrimSpace(*baselinePath) != "" {
@@ -391,5 +438,5 @@ func printTrajectoryUsage(w io.Writer) {
 	fmt.Fprintln(w, "  nightly    run the bounded attribution audit and append a scrubbed receipt")
 	fmt.Fprintln(w, "  assurance  read typed evidence JSON on stdin and emit a shadow health receipt")
 	fmt.Fprintln(w, "")
-	fmt.Fprintln(w, "Audit exact Claude and Codex transcript usage, source denominators, behavior, and baseline regressions.")
+	fmt.Fprintln(w, "Audit exact Claude, Codex, and Pi transcript usage, source denominators, behavior, and baseline regressions.")
 }
