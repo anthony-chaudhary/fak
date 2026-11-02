@@ -2154,3 +2154,10 @@ Serialized StopReason literal emitted when unvisited runtime topology configurat
 A sha256 digest declaration binding a serving sweep or bounded QPS probe to the same operator-supplied engine receipt identity.
 
 **Distinct from:** Identity provenance only: not the engine dispatch implementation, proof of actual engine execution, or evidence of hardware throughput or performance.
+
+
+### structuredSpeculationSupported
+
+Planner predicate admitting structured speculative transactions only within the ordinary CPU transformer envelope where host KV suffix rollback represents the complete mutable target state. It is a necessary architecture and execution-path fence; greedy, seed, vision, reasoning and top-logprob request fences and runtime cache eviction checks remain separate.
+
+**Distinct from:** KVPrefixReuseSupported establishes whether a cache is a complete reusable prefix; ExecutionDeadlineAdmissionSupported establishes eligibility for deadline credit. This predicate gates request-local grammar transactions in linear speculative verification, not general structured-output availability, model quality, hardware qualification or a product maturity rating.

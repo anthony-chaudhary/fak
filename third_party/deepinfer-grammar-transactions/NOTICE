@@ -1,0 +1,25 @@
+DeepInfer structured-output verification transactions
+
+Copyright DeepSeek-AI / DeepInfer authors.
+Sampler lineage: Derived from vLLM; modified by DeepSeek.
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Repository: https://github.com/deepseek-ai/DeepInfer
+Revision: 774ce244b87cc0eb8d4b94ab9f5de2ab22049f01
+Source units:
+- deepinfer/structure_output/matcher.py:115-224
+- deepinfer/model_executor/layers/sampler.py:433-437
+
+Changed for Fak: adapted the per-position mask-before-verification ordering and
+accepted-progress/rollback contract into a request-local Go constraint fork and
+the ordinary host linear greedy verifier. No Python source is copied. Fak owns
+its grammar implementations, target arithmetic and suffix eviction. Unlike
+DeepInfer copy_without_status, the fork preserves the current grammar position.
+The parent advances only through actually emitted tokens, including correction,
+not the verifier's proposed or accepted-but-unemitted suffix. No XGrammar code,
+CUDA sampler, stochastic verification or device-specific runtime is imported.
+
+The pinned matcher has no separate per-file copyright header. The pinned sampler
+declares SPDX-License-Identifier: Apache-2.0 and the vLLM/DeepSeek lineage above.
+The pinned repository LICENSE is Apache-2.0; its root NOTICE lookup returned
+GitHub API 404 (NOT_FOUND) on 2026-11-02.

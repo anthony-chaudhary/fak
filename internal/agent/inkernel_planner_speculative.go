@@ -627,6 +627,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 
 	stopped := false
 	curLogits := logits
+	structured := nativeStructuredConstraintFromContext(ctx)
 	// A single workspace for the whole speculative run keeps the serial fallback draw
 	// (#13873) allocation-free across every token.
 	var samplingWS samplerWorkspace
@@ -854,6 +855,12 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 			break
 		}
 
+		// A tree cannot borrow the linear grammar transaction. Keep the remainder
+		// on masked target decode rather than interpreting tree nodes as a chain.
+		if structured != nil && proposal.Tree != nil {
+			proposal, proposalGenerator = model.DraftProposal{}, nil
+		}
+
 		// If proposal has no tokens and no tree, fall back to single-step autoregressive
 		if len(proposal.Tokens) == 0 && proposal.Tree == nil {
 			attempt.emptyProposal()
@@ -861,7 +868,14 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 				mtpExecution.DowngradeReason = vulkanMTPDowngradeEmptyProposal
 				proposalGenerator = nil
 			}
-			next := sampleLogitsWithPenaltyCoreWS(curLogits, temp, topP, topK, minP, logitBias, freqPenalty, presPenalty, counts, rng, 0, false, &samplingWS)
+			effective := curLogits
+			if structured != nil {
+				effective, err = structured.maskLogits(curLogits, stops)
+				if err != nil {
+					break
+				}
+			}
+			next := sampleLogitsWithPenaltyCoreWS(effective, temp, topP, topK, minP, logitBias, freqPenalty, presPenalty, counts, rng, 0, false, &samplingWS)
 			observeHostSampledToken(p.backend)
 			if samplingWS.nonFinite {
 				err = ErrNonFiniteLogits
@@ -876,6 +890,16 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 			}
 			if counts != nil && next < len(counts) {
 				counts[next]++
+			}
+			if structured != nil {
+				// Retain the actual output even when the callback or budget stops us.
+				stepStart := time.Now()
+				curLogits = s.Step(next)
+				enginestep.Default.ObserveDecodeStep(enginestep.PathSerial, 1, time.Since(stepStart))
+				if err = structured.acceptEmitted(next, p.m.Cfg.VocabSize, stops); err != nil {
+					s.RollbackResidentSuffix(1)
+					break
+				}
 			}
 			emitStopped := emit != nil && emit(next)
 			gen++
@@ -892,9 +916,11 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 					break
 				}
 			}
-			stepStart := time.Now()
-			curLogits = s.Step(next)
-			enginestep.Default.ObserveDecodeStep(enginestep.PathSerial, 1, time.Since(stepStart))
+			if structured == nil {
+				stepStart := time.Now()
+				curLogits = s.Step(next)
+				enginestep.Default.ObserveDecodeStep(enginestep.PathSerial, 1, time.Since(stepStart))
+			}
 			continue
 		}
 
@@ -906,7 +932,15 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		}
 		draftElapsed := diagnosticNow().Sub(diagnosticStart)
 		roundStart := time.Now()
-		vRes, deviceReceipt, emissionRound, vErr := verifyGreedySpeculativeRoundForEmission(ctx, s, committed, proposal, curLogits, eng.Sanitizer(), counts)
+		var vRes model.VerificationResult
+		var deviceReceipt *model.TargetVerificationReceipt
+		var emissionRound *model.SpeculativeVerificationRound
+		var vErr error
+		if structured != nil {
+			vRes, vErr = verifyStructuredSpeculativeRound(ctx, s, proposal, curLogits, structured, stops)
+		} else {
+			vRes, deviceReceipt, emissionRound, vErr = verifyGreedySpeculativeRoundForEmission(ctx, s, committed, proposal, curLogits, eng.Sanitizer(), counts)
+		}
 		if vErr != nil {
 			attempt.verificationFailed(vErr)
 			err = vErr
@@ -994,6 +1028,12 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 			if counts != nil && tok < len(counts) {
 				counts[tok]++
 			}
+			if structured != nil {
+				if err = structured.acceptEmitted(tok, p.m.Cfg.VocabSize, stops); err != nil {
+					roundStopped = true
+					break
+				}
+			}
 			emitStopped := emit != nil && emit(tok)
 			gen++
 			committed = append(committed, tok)
@@ -1067,6 +1107,13 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		if counts != nil && bonus < len(counts) {
 			counts[bonus]++
 		}
+		if structured != nil {
+			curLogits = s.Step(bonus)
+			if err = structured.acceptEmitted(bonus, p.m.Cfg.VocabSize, stops); err != nil {
+				s.RollbackResidentSuffix(1)
+				break
+			}
+		}
 		emitStopped := emit != nil && emit(bonus)
 		gen++
 		committed = append(committed, bonus)
@@ -1095,7 +1142,7 @@ func (p *InKernelPlanner) generateReusedSpeculative(
 		}
 
 		// Advance target session with bonus token
-		if emissionRound == nil {
+		if emissionRound == nil && structured == nil {
 			curLogits = s.Step(bonus)
 		}
 	}

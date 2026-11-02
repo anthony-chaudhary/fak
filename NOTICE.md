@@ -3,6 +3,18 @@
 This notice supplements [existing third-party notices](THIRD_PARTY_NOTICES.md).
 See [LICENSE](LICENSE) for the project license.
 
+## DeepInfer structured-output verification transactions
+
+`internal/agent/inkernel_structured_speculative.go` and the native planner
+integration adapt per-position grammar masking and accepted-progress rollback
+from DeepInfer revision `774ce244b87cc0eb8d4b94ab9f5de2ab22049f01` (Apache-2.0;
+sampler derived from vLLM and modified by DeepSeek). Changed for Fak: request-local
+current-position forks, ordinary CPU linear greedy verification and commitment
+of actually emitted tokens. No upstream Python or XGrammar implementation is
+copied. Full source anchors, changes and license are retained in
+[`third_party/deepinfer-grammar-transactions/NOTICE`](third_party/deepinfer-grammar-transactions/NOTICE)
+and [`LICENSE`](third_party/deepinfer-grammar-transactions/LICENSE).
+
 ## DeepInfer causal multi-position verification schedule
 
 The native V4.1 speculative target panel in `internal/model/speculative.go`,

@@ -1791,7 +1791,14 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 		// Speculative acceptance and rollback must share request-local constraints and seeds.
 		_, seeded := nativeTargetSampleSeedFromContext(ctx)
 		visionPrefill, _ := ctx.Value(visionPrefillKey{}).(*nativeVisionPrefill)
-		targetOnly := seeded || nativeThinkingConstraintFromContext(ctx) != nil || nativeStructuredConstraintFromContext(ctx) != nil || visionPrefill != nil
+		structured := nativeStructuredConstraintFromContext(ctx)
+		structuredSerial := structured != nil && (!p.structuredSpeculationSupported() || structured.reasoningArmed() || !p.greedySpeculativeRequestEligible(temp, logitBias, freqPenalty, presPenalty))
+		if structured != nil && len(measurementOpt) > 0 && measurementOpt[0] != nil && measurementOpt[0].topLogprobsK > 0 {
+			// Speculative diagnostic rows are raw model logits, not the masked
+			// distribution required by a structured top-logprob response.
+			structuredSerial = true
+		}
+		targetOnly := seeded || nativeThinkingConstraintFromContext(ctx) != nil || structuredSerial || visionPrefill != nil
 		if coord := p.MetalMTPCoordinator(); !targetOnly && coord != nil && p.qwen38MTPCanaryAllowsExecution() {
 			if err := p.checkExecutionDeadline(ctx, len(ids), 0, maxNew); err != nil {
 				return inKernelGenerateResult{}, err

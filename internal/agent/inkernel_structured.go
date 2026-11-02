@@ -567,6 +567,18 @@ func (p *InKernelPlanner) nativeStructuredReasoningDelimiter(marker string, stop
 	return id, nil
 }
 
+// fork preserves the current position, unlike DeepInfer's initial-state
+// copy_without_status. Compiled masks share synchronized caches, not history.
+func (c *nativeStructuredConstraint) fork() *nativeStructuredConstraint {
+	if c == nil {
+		return nil
+	}
+	fork := *c
+	fork.history = append([]int(nil), c.history...)
+	fork.maskBuffer = nil
+	return &fork
+}
+
 func (c *nativeStructuredConstraint) reset() {
 	c.history = c.history[:0]
 	c.phase = c.initial

@@ -129,7 +129,8 @@
       "distinction": "ExactSpanSupported asks whether an engine can EVICT an exact span from a cache it already holds; this asks whether the cache IS the state at all. A recompute architecture answers yes to neither, but for different reasons: eviction is inert because there are no rows, while prefix reuse is unsound because the rows were never where the prefix lived.",
       "distinct_from": [
         "x2-support-maturity-exactspansupported",
-        "executiondeadlineadmissionsupported"
+        "executiondeadlineadmissionsupported",
+        "structuredspeculationsupported"
       ],
       "aliases": [],
       "grounding": "KVPrefixReuseSupported",
@@ -149,7 +150,8 @@
       "distinction": "KVPrefixReuseSupported concerns whether a KV cache contains complete reusable session state; this predicate concerns whether this planner route has the owned-prefix execution boundary required to grant deadline credit.",
       "distinct_from": [
         "kvprefixreusesupported",
-        "inkerneldevicegate"
+        "inkerneldevicegate",
+        "structuredspeculationsupported"
       ],
       "aliases": [],
       "grounding": "ExecutionDeadlineAdmissionSupported",
@@ -520,6 +522,26 @@
         "PageCache"
       ],
       "grounding": "ExpertCheckpointPageCacheStats",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "structuredspeculationsupported",
+      "canonical": "structuredSpeculationSupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Planner predicate admitting structured speculative transactions only within the ordinary CPU transformer envelope where host KV suffix rollback represents the complete mutable target state. It is a necessary architecture and execution-path fence; greedy, seed, vision, reasoning and top-logprob request fences and runtime cache eviction checks remain separate.",
+      "distinction": "KVPrefixReuseSupported establishes whether a cache is a complete reusable prefix; ExecutionDeadlineAdmissionSupported establishes eligibility for deadline credit. This predicate gates request-local grammar transactions in linear speculative verification, not general structured-output availability, model quality, hardware qualification or a product maturity rating.",
+      "distinct_from": [
+        "kvprefixreusesupported",
+        "executiondeadlineadmissionsupported"
+      ],
+      "aliases": [],
+      "grounding": "structuredSpeculationSupported",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",
