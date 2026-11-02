@@ -59,6 +59,31 @@ Why: a spine is a witness; a plan is a claim. The repo refuses unproven claims
 (`not yet` discipline) â€” the spine is what converts "we will" into "it does".
 It is also the cheapest moment to discover the design is wrong.
 
+### Recovering an unavailable issue-create privacy guard
+
+`fak-dev issue create` requires the real companion `tools/issue_scrub.py`, including
+for `--dry-run`; `--raw-body` does not bypass this privacy check. Point the command
+at a reviewed companion checkout with `--private-root <absolute-companion-root>`.
+The issue-specific locator chooses the first existing directory in this order:
+explicit `--private-root`, `FAK_PRIVATE_DIR`, `FAK_PRIVATE_ROOT`, then `fak-private`
+beside the compiled-in Fak module root. If that directory lacks the script, creation
+refuses; it does not continue to lower-priority roots. This gate does not inspect
+`go.work` or use the generic companion harness's graceful standalone fallback.
+
+If the companion is unavailable, obtain an authorized current checkout or private
+source archive, its repository/commit/hash provenance, and the script's actual
+imported modules, private data/configuration and dependency requirements. Review
+those inputs before execution; the public wrapper does not establish a Python
+version or a self-contained script. Do not publish private guard data, substitute
+a stub or a public redactor, or change credentials to work around missing access.
+The wrapper invokes `python <root>/tools/issue_scrub.py --check`, feeds title and
+body on stdin, and accepts only its consistent clean value-free verdict within
+20 seconds. Missing dependencies remain a refusal, not a clean result. Other issue
+contract and publication-authorization checks still apply after recovery.
+
+Source contract: [locator and verdict](https://github.com/anthony-chaudhary/fak/blob/45ab5fb90e322e3bb42fe07a3220c642fcbe2b05/internal/devcmd/issue_scrubgate.go#L67-L309),
+[mandatory create gate](https://github.com/anthony-chaudhary/fak/blob/45ab5fb90e322e3bb42fe07a3220c642fcbe2b05/internal/devcmd/issue_create.go#L205-L212).
+
 ### The order of operations: applied implementation, then exhaustive proof
 
 "Spine first" also orders work *inside* an issue. When scope permits, use this
