@@ -497,6 +497,22 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+
+## llama.cpp GBNF character-rule grammar and native token masking
+
+- Upstream: ggml-org/llama.cpp, commit
+  `cd8427d018c07eefab6c110f7f115c31ec4c6157` (MIT).
+- Source: `src/llama-grammar.cpp`, `src/llama-grammar.h` and
+  `grammars/README.md`; full license retained at
+  `internal/grammar/LLAMA-GBNF-LICENSE.txt`.
+- Adaptation: `internal/grammar/gbnf_parse.go` and `gbnf_mask.go` port the
+  character-rule parsing/repetition, alternative pushdown-stack and partial
+  UTF-8 admission mechanisms into Go. The ordinary native guided carrier/mask
+  consumer is wired in `internal/agent/inkernel_structured.go`.
+- FAK-specific changes: strict finite source/state/work/byte budgets,
+  history-derived synchronized fork/rollback behavior and redacted fail-closed
+  errors. Direct token-ID/lazy extensions and other grammar dialects are not
+  claimed. No upstream model, tests, binaries or network behavior are imported.
 ## DeepSeek-V3 / JoyAI pre-tokenizer and Unicode classification
 
 The DeepSeek-V3 / JoyAI regex sequence in

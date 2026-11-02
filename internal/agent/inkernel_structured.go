@@ -31,7 +31,7 @@ func (e *nativeGuidedCarrierError) Error() string {
 func (e *nativeGuidedCarrierError) Unwrap() error { return ErrNativeStructuredUnsupported }
 
 // nativeGuidedCarriers are every guided field the native route enforces.
-var nativeGuidedCarriers = [...]string{"guided_choice", "guided_json", "guided_regex", "json_schema", "regex", "structured_outputs"}
+var nativeGuidedCarriers = [...]string{"guided_choice", "guided_grammar", "guided_json", "guided_regex", "json_schema", "regex", "structured_outputs"}
 
 // guided_choice compiles to a regex alternation; these bounds keep its escaped
 // pattern and automaton inside the regex mask's caps.
@@ -41,11 +41,12 @@ const (
 )
 
 // nativeGuided is the one guided constraint a request carries: a regex pattern
-// (guided_regex, regex, guided_choice) or a JSON schema (guided_json,
-// json_schema), possibly sent as the matching structured_outputs member.
+// (guided_regex, regex, guided_choice), a character-rule GBNF grammar, or a JSON
+// schema (guided_json, json_schema), possibly sent as a structured_outputs member.
 type nativeGuided struct {
 	carrier string
 	pattern string
+	gbnf    string
 	schema  json.RawMessage
 }
 
@@ -67,6 +68,8 @@ func nativeGuidedKind(carrier string) string {
 		return "regex"
 	case "guided_choice":
 		return "choice"
+	case "guided_grammar":
+		return "grammar"
 	}
 	return ""
 }
@@ -113,7 +116,16 @@ func parseNativeGuided(guided map[string]json.RawMessage) (nativeGuided, error) 
 	}
 	for _, m := range members[1:] {
 		if m.kind != members[0].kind {
-			return nativeGuided{}, &nativeGuidedCarrierError{Carrier: keys[0]}
+			// Retain the existing mixed-grammar refusal identity; accepting
+			// GBNF does not authorize composing independent constraints.
+			carrier := keys[0]
+			for _, candidate := range members {
+				if candidate.kind == "grammar" {
+					carrier = candidate.carrier
+					break
+				}
+			}
+			return nativeGuided{}, &nativeGuidedCarrierError{Carrier: carrier}
 		}
 	}
 	var spec nativeGuided
@@ -125,6 +137,10 @@ func parseNativeGuided(guided map[string]json.RawMessage) (nativeGuided, error) 
 			next.schema, err = nativeGuidedJSONSchema(m.carrier, m.raw)
 		case "choice":
 			next.pattern, err = nativeGuidedChoicePattern(m.carrier, m.raw)
+		case "grammar":
+			if json.Unmarshal(m.raw, &next.gbnf) != nil || next.gbnf == "" {
+				err = &nativeGuidedCarrierError{Carrier: m.carrier}
+			}
 		default:
 			if json.Unmarshal(m.raw, &next.pattern) != nil {
 				err = &nativeGuidedCarrierError{Carrier: m.carrier}
@@ -137,7 +153,7 @@ func parseNativeGuided(guided map[string]json.RawMessage) (nativeGuided, error) 
 			spec = next
 			continue
 		}
-		if next.pattern != spec.pattern || (spec.schema != nil && !nativeGuidedSameSchema(spec.schema, next.schema)) {
+		if next.pattern != spec.pattern || next.gbnf != spec.gbnf || (spec.schema != nil && !nativeGuidedSameSchema(spec.schema, next.schema)) {
 			return nativeGuided{}, &nativeGuidedCarrierError{Carrier: m.carrier}
 		}
 	}
@@ -146,8 +162,8 @@ func parseNativeGuided(guided map[string]json.RawMessage) (nativeGuided, error) 
 
 // nativeStructuredOutputsMember returns the one constraint member of a vLLM
 // structured_outputs object. Of StructuredOutputsParams' options, only the two
-// booleans are accepted: the schema, regex and choice masks emit no free
-// whitespace and no undeclared property, which satisfies either value. A whitespace_pattern,
+// booleans are accepted for schema/regex/choice. Arbitrary GBNF does not promise
+// either restriction, so a true option with grammar is refused. A whitespace_pattern,
 // unknown key or other member is refused rather than ignored. A member or
 // option sent as null counts as absent.
 func nativeStructuredOutputsMember(raw json.RawMessage) (string, json.RawMessage, error) {
@@ -161,7 +177,7 @@ func nativeStructuredOutputsMember(raw json.RawMessage) (string, json.RawMessage
 			continue
 		}
 		switch key {
-		case "json", "regex", "choice":
+		case "json", "regex", "choice", "grammar":
 			kinds = append(kinds, key)
 			continue
 		case "disable_any_whitespace", "disable_additional_properties":
@@ -178,7 +194,19 @@ func nativeStructuredOutputsMember(raw json.RawMessage) (string, json.RawMessage
 		return "", nil, &nativeGuidedCarrierError{Carrier: "structured_outputs." + refused}
 	}
 	if len(kinds) != 1 {
-		return "", nil, &nativeGuidedCarrierError{Carrier: "structured_outputs"}
+		carrier := "structured_outputs"
+		if slices.Contains(kinds, "grammar") {
+			carrier += ".grammar"
+		}
+		return "", nil, &nativeGuidedCarrierError{Carrier: carrier}
+	}
+	if kinds[0] == "grammar" {
+		for _, key := range []string{"disable_additional_properties", "disable_any_whitespace"} {
+			var flag bool
+			if !nativeGuidedAbsent(fields[key]) && json.Unmarshal(fields[key], &flag) == nil && flag {
+				return "", nil, &nativeGuidedCarrierError{Carrier: "structured_outputs." + key}
+			}
+		}
 	}
 	return kinds[0], fields[kinds[0]], nil
 }
@@ -273,8 +301,8 @@ func nativeStructuredRunePrefix(text string) (complete, tail string) {
 	return text, ""
 }
 
-// nativeRegexTokenDecoder hides special tokens from a regex or JSON object
-// mask: TokenBytes spells them literally, so a permissive pattern or a free
+// nativeRegexTokenDecoder hides special tokens from regex, JSON and GBNF
+// masks: TokenBytes spells them literally, so a permissive pattern or a free
 // JSON string would otherwise admit control tokens as text. The mask admits
 // the stop token by id alone.
 type nativeRegexTokenDecoder struct {
@@ -326,6 +354,13 @@ func (p *InKernelPlanner) newNativeRequestConstraint(sp SampleParams, stops map[
 	stopID, err := p.nativeStructuredStopID(stops)
 	if err != nil {
 		return nil, err
+	}
+	if guided.gbnf != "" {
+		mask, err := grammar.CompileGBNF(guided.gbnf, nativeRegexTokenDecoder{tok: p.tok, special: p.tok.SpecialTokens()}, grammar.CompileOptions{EOS: stopID})
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", &nativeGuidedCarrierError{Carrier: guided.carrier}, err)
+		}
+		return &nativeStructuredConstraint{mask: mask, stopID: stopID, openID: -1, closeID: -1}, nil
 	}
 	mask, err := grammar.CompileRegex(guided.pattern, nativeRegexTokenDecoder{tok: p.tok, special: p.tok.SpecialTokens()}, grammar.CompileOptions{EOS: stopID})
 	if err != nil {
@@ -567,6 +602,18 @@ func (p *InKernelPlanner) nativeStructuredReasoningDelimiter(marker string, stop
 	return id, nil
 }
 
+// fork preserves the current position, unlike DeepInfer's initial-state
+// copy_without_status. Compiled masks share synchronized caches, not history.
+func (c *nativeStructuredConstraint) fork() *nativeStructuredConstraint {
+	if c == nil {
+		return nil
+	}
+	fork := *c
+	fork.history = append([]int(nil), c.history...)
+	fork.maskBuffer = nil
+	return &fork
+}
+
 func (c *nativeStructuredConstraint) reset() {
 	c.history = c.history[:0]
 	c.phase = c.initial
@@ -640,10 +687,14 @@ func (c *nativeStructuredConstraint) maskLogits(logits []float32, stops map[int]
 			return nil, ErrNativeStructuredNoToken
 		}
 		open := c.maskBuffer[c.openID]
-		c.mask.MaskLogits(c.history, c.maskBuffer)
+		if err := c.applyMask(); err != nil {
+			return nil, err
+		}
 		c.maskBuffer[c.openID] = open
 	default:
-		c.mask.MaskLogits(c.history, c.maskBuffer)
+		if err := c.applyMask(); err != nil {
+			return nil, err
+		}
 	}
 	for _, logit := range c.maskBuffer {
 		if math.IsNaN(float64(logit)) || math.IsInf(float64(logit), 1) {
@@ -669,6 +720,19 @@ func (c *nativeStructuredConstraint) maskLogits(logits []float32, stops map[int]
 		return c.maskBuffer, nil
 	}
 	return nil, ErrNativeStructuredNoToken
+}
+
+// applyMask keeps resource-aware masks fail-closed before native selection.
+// Existing masks retain their original LogitMask behavior.
+func (c *nativeStructuredConstraint) applyMask() error {
+	if checked, ok := c.mask.(interface{ MaskLogitsChecked([]int, []float32) error }); ok {
+		if err := checked.MaskLogitsChecked(c.history, c.maskBuffer); err != nil {
+			return fmt.Errorf("%w: %w", ErrNativeStructuredNoToken, err)
+		}
+		return nil
+	}
+	c.mask.MaskLogits(c.history, c.maskBuffer)
+	return nil
 }
 
 func (c *nativeStructuredConstraint) accept(token int, effective []float32) error {

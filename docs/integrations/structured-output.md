@@ -174,25 +174,27 @@ object exactly as it precedes a schema object (below).
 On `/v1/chat/completions`, the native route enforces these constraint carriers:
 `response_format` with type `json_schema` or `json_object`; a guided regex sent as
 `guided_regex` or its SGLang alias `regex`; a vLLM `guided_json` schema or its
-SGLang alias `json_schema`; a vLLM `guided_choice` list; and vLLM's
-`structured_outputs` object with a `json`, `regex` or `choice` member. Every
+SGLang alias `json_schema`; a vLLM `guided_choice` list; a character-rule
+GBNF string in `guided_grammar`; and vLLM's `structured_outputs` object with a
+`json`, `regex`, `choice` or bounded GBNF `grammar` member. Every
 other carrier on that route is refused before prefill instead of being ignored:
 other `response_format` types (`regex`, `grammar`), the
-remaining provider-native guided fields (`guided_grammar`,
-`guided_decoding_backend`, `ebnf`), and the `structured_outputs` members
-`json_object`, `grammar` and `structural_tag`. This applies to buffered and
+remaining provider-native guided fields (`guided_decoding_backend`, `ebnf`),
+and the `structured_outputs` members `json_object` and `structural_tag`. This applies to buffered and
 streamed requests, including when such a field accompanies a supported carrier.
-A request may carry only one guided kind: a JSON schema, a regex or a choice
-list. Carriers of the same kind may be sent together only when they carry the
+A request may carry only one guided kind: a JSON schema, a regex, a choice
+list or bounded GBNF. Carriers of the same kind may be sent together only when they carry the
 same constraint, so `guided_regex`, `regex` and `structured_outputs.regex` must
 hold the same pattern; `guided_json`, `json_schema` and `structured_outputs.json`
 the same schema (compared as described for `guided_json` below); and
 `guided_choice` and `structured_outputs.choice` the same list once duplicates
-are removed, in the same order. Carriers of different kinds are refused, and `json_object` combines with no
+are removed, in the same order. `guided_grammar` and `structured_outputs.grammar`
+must contain the identical grammar string. Carriers of different kinds are refused, and `json_object` combines with no
 guided carrier. A
 `guided_decoding_backend` alone is refused too, since the native route has no
-selectable backend. A guided field sent as `null` counts as absent. EBNF and
-other grammars therefore need an upstream engine in ride mode.
+selectable backend. A guided field sent as `null` counts as absent. Other grammar
+dialects and GBNF extensions outside the bounded subset still need an upstream
+engine in ride mode; the native route never silently changes dialect.
 
 On `/v1/responses`, the structured-output control is `text.format`. fak maps it
 onto the chat route's `response_format` before planning, so both routes apply
@@ -266,15 +268,17 @@ exactly as it precedes a schema object.
 
 vLLM's `structured_outputs` object is enforced by mapping its one constraint
 member onto the carrier with the same meaning: `json` (a schema object or a JSON
-string holding one) onto `guided_json`, `regex` onto `guided_regex`, and
-`choice` onto `guided_choice`. Each member then accepts the same values and
+string holding one) onto `guided_json`, `regex` onto `guided_regex`,
+`choice` onto `guided_choice`, and `grammar` onto `guided_grammar`. Each member then accepts the same values and
 compiles to the same mask as that carrier, so the caps, refusals and pairing
 with `response_format` above apply unchanged. Like vLLM, the object must carry
 exactly one constraint member; an empty object, one whose members are all
-`null`, or one with two members is refused. The members `json_object`,
-`grammar` and `structural_tag` are refused. Of the options in vLLM's
+`null`, or one with two members is refused. The members `json_object` and
+`structural_tag` are refused. Of the options in vLLM's
 `StructuredOutputsParams`, `disable_any_whitespace` and
-`disable_additional_properties` are accepted with either boolean value. Native
+`disable_additional_properties` are accepted with either boolean value for
+JSON/regex/choice. For an arbitrary GBNF grammar, either option set to `true` is
+refused; the grammar alone defines whitespace and object structure. Native
 JSON schema masks never emit free whitespace or an undeclared property, which satisfies
 both values, and neither option affects regex or choice output. In vLLM,
 `disable_any_whitespace: true` means compact JSON without whitespace, the layout
@@ -285,12 +289,50 @@ native masks emit, and
 cannot follow a custom whitespace pattern. Any other key is refused rather than
 ignored, including `disable_fallback`, which current vLLM does not define, and
 the internal `_backend` field. A refusal names the offending member, for
-example `structured_outputs.grammar`. Source: `StructuredOutputsParams` in
+example `structured_outputs.structural_tag`. Source: `StructuredOutputsParams` in
 `vllm/sampling_params.py` and the xgrammar and guidance backends under
 `vllm/v1/structured_output/`, vLLM `main` as of 2026-10-21. There, the
 per-request option fields are declared, but the backends read the server-wide
 `StructuredOutputsConfig` values instead; with `disable_any_whitespace` set, the
 xgrammar backend compiles JSON with separators `(",", ":")`.
+
+### Native bounded GBNF
+
+`guided_grammar` and `structured_outputs.grammar` now feed the ordinary native
+request constraint, not an external validator or a prompt instruction. This
+character-rule implementation adapts llama.cpp's rule parser, repetition
+lowering, pushdown alternatives and partial-UTF-8 admission at immutable
+`cd8427d018c07eefab6c110f7f115c31ec4c6157` (MIT). See
+[`internal/grammar/gbnf.README.md`](../../internal/grammar/gbnf.README.md) for
+the exact subset, limits, attribution and source-only qualification debt.
+
+A required `root` rule can use references, literals, character ranges and
+negation, dot, groups, alternatives and bounded/unbounded repetition. For example:
+
+```json
+{"guided_grammar":"root ::= pair (\";\" pair)*\npair ::= [a-z]+ \"=\" [0-9]{1,4}"}
+```
+
+The mask covers the whole generated response. EOS is admitted only at an
+accepting stack with no incomplete UTF-8 codepoint. Token pieces may split a
+codepoint; special tokens remain excluded by the existing native token decoder.
+The shared mask derives state from the complete supplied token history and
+synchronizes its bounded cache, preserving native speculative fork/rollback
+semantics rather than advancing an implicit cross-fork cursor.
+
+Undefined/duplicate rules, unproductive rules, nullable-prefix recursion,
+unsupported token-ID/lazy grammar extensions and resource exhaustion are typed
+refusals, never unconstrained fallbacks. Runtime stack/work/output limits can
+refuse a syntactically valid but expensive grammar. The native consumer returns
+`ErrNativeStructuredNoToken` before selection on a checked mask failure.
+This does not add arbitrary Lark/EBNF or `response_format.type=grammar`
+support, a new backend, an automatic reasoning trigger, or a schema-to-GBNF
+converter. Existing JSON/regex/choice masks and ride-mode forwarding retain
+their contracts.
+
+Compiler, synthetic fixtures, installed controller, model/tokenizer execution
+and performance qualification for this new path are pending; no measured gain,
+universal grammar compatibility or hardware acceptance is claimed.
 
 The legacy `/v1/completions` route carries the same carriers as chat:
 `response_format`, every guided field and `structured_outputs` reach the native

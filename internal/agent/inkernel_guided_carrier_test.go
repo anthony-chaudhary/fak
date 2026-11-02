@@ -65,7 +65,9 @@ func TestNativeGuidedCarrierRefusedBeforeSampling(t *testing.T) {
 		refusal{"regex_alias_with_json_schema", []SampleOpt{WithResponseFormat(nativeStructuredTestFormat), WithGuidedDecode(map[string]json.RawMessage{"regex": nativeGuidedTestCarriers["regex"]})}, "regex"},
 		refusal{"regex_with_guided_json", []SampleOpt{WithGuidedDecode(map[string]json.RawMessage{"guided_regex": nativeGuidedTestCarriers["guided_regex"], "guided_json": nativeGuidedTestCarriers["guided_json"]})}, "guided_json"},
 		refusal{"regex_with_backend", []SampleOpt{WithGuidedDecode(map[string]json.RawMessage{"regex": nativeGuidedTestCarriers["regex"], "guided_decoding_backend": nativeGuidedTestCarriers["guided_decoding_backend"]})}, "guided_decoding_backend"},
-		refusal{"guided_with_text", []SampleOpt{WithResponseFormat(json.RawMessage(`{"type":"text"}`)), WithGuidedDecode(map[string]json.RawMessage{"guided_grammar": nativeGuidedTestCarriers["guided_grammar"]})}, "guided_grammar"},
+		// Valid guided_grammar + text is now exercised through all real entries
+		// by TestNativeGBNFCompletion; invalid grammars remain pre-decode refusals.
+		refusal{"invalid_grammar_with_text", []SampleOpt{WithResponseFormat(json.RawMessage(`{"type":"text"}`)), WithGuidedDecode(map[string]json.RawMessage{"guided_grammar": json.RawMessage(`"root ::= missing"`)})}, "guided_grammar"},
 		refusal{"several_carriers", []SampleOpt{WithGuidedDecode(map[string]json.RawMessage{"regex": nativeGuidedTestCarriers["regex"], "guided_regex": nativeGuidedTestCarriers["guided_regex"], "ebnf": nativeGuidedTestCarriers["ebnf"]})}, "ebnf"},
 		refusal{"response_format_json_object_with_schema", []SampleOpt{WithResponseFormat(json.RawMessage(`{"type":"json_object","schema":{"type":"object"}}`))}, ""},
 		refusal{"guided_regex_with_json_object", []SampleOpt{WithResponseFormat(json.RawMessage(`{"type":"json_object"}`)), WithGuidedDecode(map[string]json.RawMessage{"guided_regex": nativeGuidedTestCarriers["guided_regex"]})}, "guided_regex"},
