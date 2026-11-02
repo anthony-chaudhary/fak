@@ -58,7 +58,12 @@ SOFTWARE.
 TensorFold at revision `a6aa4782bf4ffe87ccee4a0a5cbf2efb2dd01cba`:
 https://github.com/ashhart/TensorFold/blob/a6aa4782bf4ffe87ccee4a0a5cbf2efb2dd01cba/tools/bench_evidence.py
 
-Changed for Fak: Go receipt types, strict JSON count parsing, and integration into
+Full token SHA-256 validation and short-prefix consistency are updated from
+revision `9e8c368b0b4c2c7892a0c9f0f302d7c164016209` of the same source:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/tools/bench_evidence.py
+
+Changed for Fak: Go receipt types, strict JSON count parsing, full token digest
+validation with a compatible legacy constructor, and integration into
 the existing gateway performance ledger. No original Python benchmark client or
 third-party kernel/model code is included.
 
@@ -537,6 +542,31 @@ order; the dependency edge is the existing one-shot in-flight `expertCheckpointL
 handoff a demand fault joins; and a fixed 8-worker pool bounds the fan-out a
 layer's misses may have instead of one goroutine per miss. No vLLM Python source,
 CUDA kernel, or runtime scheduling code is included.
+
+
+### Finite host-offload admission and ownership
+
+The host-swap admission in `internal/modelengine/nativesched_preempt.go`
+adapts the finite-capacity, capacity-before-allocation and completion-owned
+release contracts of `CPUOffloadingManager.prepare_store/complete_store` from
+vLLM at revision `bd5bbce6e45e09dbd07ac3e8c394626c059078f7`:
+https://github.com/vllm-project/vllm/blob/bd5bbce6e45e09dbd07ac3e8c394626c059078f7/vllm/v1/kv_offload/cpu/manager.py
+
+SPDX-License-Identifier: Apache-2.0
+SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
+Changed for Fak: synchronous native scheduler mutex ownership instead of an
+asynchronous chunk cache; codec-derived exact serialized extents before staging;
+owned lane blobs with an explicit byte limit; existing request-error retirement
+on a refused store; no implicit recompute. Readmit, error and cancellation release
+the same backing owner. The limit excludes logits (separately reported), staging,
+resident KV, allocator/RSS overhead and GPU Direct descriptors. No upstream
+eviction/replacement algorithm, Python runtime, GPU transfer or routing policy is
+ported. Existing radix snapshot budgets remain separate.
+The shared Apache License reference immediately below also applies to this
+adaptation. No upstream root NOTICE exists at this pinned revision. This is
+source-only until qualified; no hardware or measured performance improvement
+is implied.
 
 ```text
                                  Apache License

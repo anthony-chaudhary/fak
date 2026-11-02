@@ -107,11 +107,12 @@ type NativeScheduler struct {
 	// preemption is disabled until MaxBlocks is set. When enabled it treats MaxBlocks as
 	// the live paged-KV block budget and preempts running lanes at scheduler boundaries
 	// when the running set exceeds that budget.
-	preemption   NativePreemptionPolicy
-	preempted    []*schedLane
-	seqNo        int64
-	preemptRound int64
-	preemptStats NativePreemptionStats
+	preemption         NativePreemptionPolicy
+	hostSwapLimitBytes int64 // protected by mu; zero retains legacy unbounded host swap
+	preempted          []*schedLane
+	seqNo              int64
+	preemptRound       int64
+	preemptStats       NativePreemptionStats
 
 	// In-batch cold-prefix dedup (fak#1914). prefixFlights coalesces concurrent cold
 	// admissions whose prompts share a prefix so only one prefill leader runs the shared
@@ -1791,6 +1792,8 @@ func (ln *schedLane) finish(res *abi.Result, err error) {
 		return
 	}
 	ln.res, ln.err, ln.reclaimed = res, err, true
+	ln.hostKV = nil
+	ln.savedLogits = nil
 	ln.terminal = true
 	published, inflight, shell := ln.sess, ln.inflightSess, ln.statsSess
 	ln.sess, ln.inflightSess, ln.statsSess = nil, nil, nil

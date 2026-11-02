@@ -141,6 +141,7 @@ type serveFlags struct {
 	remoteKVToken                *string
 	remoteKVTimeout              *time.Duration
 	engineID                     *string
+	nativeHostSwapBytes          *int64
 	backendName                  *string
 	qwen38Runtime                *string
 	llamaServer                  *string
@@ -312,6 +313,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.remoteKVTimeout = fs.Duration("remote-kv-timeout", l3kv.DefaultRemoteKVTimeout, "remote KV connectivity probe timeout")
 	sf.engineID = fs.String("engine", "mock", "registered engine id that fak_syscall dispatches an allowed call to: mock, inkernel, vllm, sglang, llm-d, dynamo, or another registered driver (default: mock; select inkernel explicitly for fak-native model execution)")
 	sf.backendName = fs.String("backend", "", "compute backend for the in-kernel chat decode (with --gguf, no --base-url): --backend overrides FAK_BACKEND; use 'auto', 'cpu', or a registered name. Omitted/auto selects usable Vulkan on Linux/Windows, preserves Metal auto-selection on Darwin, and otherwise uses CPU. Vulkan requires -tags vulkan plus FAK_VULKAN_SPIRV; an unavailable named backend fails loud.")
+	sf.nativeHostSwapBytes = fs.Int64("native-kv-host-swap-bytes", 0, "bound retained serialized host-KV bytes in the native syscall scheduler (0 = unlimited). Requires a positive native KV block budget; full capacity ends the selected request, never silently recomputes. Excludes logits, staging, devices and process RSS")
 	nativeControls := registerNativeControlFlags(fs)
 	sf.nativeQwenQ4KPrefillChunk = nativeControls.prefillChunk
 	sf.nativeQwen35MetalGDNSequence = nativeControls.qwen35GDNSequence
@@ -505,6 +507,10 @@ func cmdServe(argv []string) {
 		os.Exit(2)
 	}
 	parseDur := time.Since(tParse)
+	if err := validateServeHostSwapByteLimit(*sf.nativeHostSwapBytes); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
 	if err := validateServeExpertCPUMiss(os.Getenv); err != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
 		os.Exit(2)
@@ -986,6 +992,10 @@ func loadServeRouteFile[T any](flagName, path, want string, load func(string) (T
 // in-kernel serve.
 func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableControlIngress, buildErr error) {
 	resolveServeEngine(sf, rt.explicitFlags, rt.inKernelModel != nil)
+	native, _ := abi.Engine(*sf.engineID).(*modelengine.Engine)
+	if err := configureServeHostSwapBudget(sf, native); err != nil {
+		return nil, err
+	}
 	startupMessages := append([]gateway.StartupMessage(nil), rt.startupMessages...)
 	nativePlannerConfig := serveNativePlannerConfigWithContext(sf, rt.nativeContext.ResolvedTokens)
 	nativePlannerConfig.RequireDeviceExecution = rt.requireDeviceExecution
@@ -1516,4 +1526,34 @@ func startGatewayUsageSnapshotLoop(ctx context.Context, srv *gateway.Server, int
 		}
 	}()
 	return cancel
+}
+
+func validateServeHostSwapByteLimit(limit int64) error {
+	if limit < 0 {
+		return fmt.Errorf("--native-kv-host-swap-bytes must be nonnegative")
+	}
+	return nil
+}
+
+// The explicit flag reaches the selected ordinary syscall engine before
+// gateway construction/listener bind. It does not configure chat planners or
+// remote providers and does not implicitly arm KV pressure or recompute.
+func configureServeHostSwapBudget(sf *serveFlags, native *modelengine.Engine) error {
+	if sf == nil || sf.nativeHostSwapBytes == nil {
+		return nil
+	}
+	limit := *sf.nativeHostSwapBytes
+	if err := validateServeHostSwapByteLimit(limit); err != nil {
+		return err
+	}
+	if limit == 0 {
+		return nil
+	}
+	if native == nil {
+		return fmt.Errorf("--native-kv-host-swap-bytes requires the selected native engine")
+	}
+	if native.KVPreemptionStats().MaxBlocks <= 0 {
+		return fmt.Errorf("--native-kv-host-swap-bytes requires a positive native KV block budget")
+	}
+	return native.SetKVHostSwapByteLimit(limit)
 }
