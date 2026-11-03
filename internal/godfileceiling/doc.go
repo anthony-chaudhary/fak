@@ -19,6 +19,9 @@
 // # Regenerating the baseline
 //
 // Baseline is regenerated only to tighten caps after a file shrinks via MeasureTree and Repin.
+// Re-pinning the live tree after a sanctioned wave of landed growth (raising grown pins, adding
+// new ones) is an operator reconciliation act documented in its commit; precedents: b25dccc712,
+// 4cde98f586, 1f87350036.
 //
 // Tier: foundation (1) — see internal/architest. Stdlib-only; off the request path.
 package godfileceiling
