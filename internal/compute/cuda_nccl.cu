@@ -132,3 +132,51 @@ extern "C" int fcuda_nccl_reducescatter_f32(void **dsend, void **drecv, int n, i
   }
   return 0;
 }
+
+// ---- Lifecycle: abort-once + ordered teardown ----------------------------------------
+//
+// The TP-group lifecycle discipline adapted from ashhart/TensorFold's zig/src/cuda/
+// tp_group.zig Group (pin 9e8c368b0b4c2c7892a0c9f0f302d7c164016209, Apache-2.0; ADAPT —
+// re-expressed in this C++ layer, no upstream code copied): Group.abort() latches and runs
+// ncclCommAbort exactly ONCE; Group.destroyComm() REFUSES to run ncclCommDestroy after an
+// abort (abort-then-destroy is a no-op — an already-aborted communicator must never be
+// torn down a second time); close() tears down in order (side wires -> comm -> library).
+// The pure-Go reference model that pins this closed contract on a CPU host lives in
+// nccl_group_lifecycle_test.go (TestNCCLOpGroupAbortOnceNoDestroy).
+static int g_sp_aborted = 0;
+
+// fcuda_nccl_abort: give up every pending device wait on the local comm set — NCCL's
+// documented way to unblock a rank wedged inside a collective. Abort-ONCE: the first call
+// latches g_sp_aborted and runs ncclCommAbort on every comm; later calls are no-ops (0) so
+// no path can double-abort. A mid-loop failure keeps the latch set (no retry — the process
+// is wedged either way). -1 when no group is active.
+extern "C" int fcuda_nccl_abort(void) {
+  if (g_world == 0) return -1;
+  if (g_sp_aborted) return 0;
+  g_sp_aborted = 1;
+  for (int r = 0; r < g_world; r++) {
+    CKR(cudaSetDevice(r));
+    NK(ncclCommAbort(g_comms[r]));
+  }
+  return 0;
+}
+
+// fcuda_nccl_destroy: ordered teardown of the local comm set (comms first, state reset
+// last — the close() leg). After an abort it REFUSES the per-comm ncclCommDestroy
+// (abort-then-destroy is a no-op: the aborted comms are already dead, and a second destroy
+// of one is the double-teardown hazard this lifecycle exists to prevent) and only resets
+// the globals. Idempotent when no group is active. Returns 0 on success, an NCCL/CUDA error
+// code otherwise.
+extern "C" int fcuda_nccl_destroy(void) {
+  if (g_world == 0) return 0;
+  if (!g_sp_aborted) {
+    for (int r = 0; r < g_world; r++) {
+      CKR(cudaSetDevice(r));
+      NK(ncclCommDestroy(g_comms[r]));
+    }
+  }
+  g_comms.clear();
+  g_world = 0;
+  g_sp_aborted = 0;
+  return 0;
+}
