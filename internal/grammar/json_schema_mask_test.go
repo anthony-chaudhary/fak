@@ -7,11 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
-
-	"github.com/anthony-chaudhary/fak/internal/model"
 )
-
-var _ model.LogitMask = (*JSONSchemaMask)(nil)
 
 type jsonSchemaTokenDecoder [][]byte
 
