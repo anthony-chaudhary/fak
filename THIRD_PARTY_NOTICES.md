@@ -1722,3 +1722,23 @@ physical serving.
 
 The pinned repository's Apache-2.0 LICENSE is reproduced in the existing TensorFold
 license section of this file and also applies here.
+
+## TensorFold NVFP4 host reference interpretation
+
+`internal/compute/nvfp4.go` (`DecodeNVFP4Stacks`, stacked multi-expert input to the
+NVFP4 CPU reference) adapts the host dequantization semantics from
+`zig/src/core/quant/nvfp4.zig` in TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209` (Apache-2.0):
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/quant/nvfp4.zig
+
+Per-expert global scales follow the Qwen4 device-weight loading in
+`zig/src/families/qwen4/device_weights.zig` at the same revision:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/families/qwen4/device_weights.zig
+
+Contiguous expert stacks, e2m1 low-nibble-first packing, one e4m3 scale per 16
+inputs, per-stack global scaling, exact subnormal-scale decoding, and
+shape/stack mismatch refusals are re-expressed in idiomatic Go over fak's
+existing E2M1/E4M3 tables. No upstream Zig code blocks are copied.
+
+The pinned repository's Apache-2.0 LICENSE is reproduced in the existing TensorFold
+license section of this file and also applies here.
