@@ -287,6 +287,33 @@ The full upstream LICENSE at the pinned revision follows:
    limitations under the License.
 ```
 
+## TensorFold decode/prefill wall-time share
+
+`internal/agent/inkernel_qwen_coordinator.go` and
+`internal/agent/inkernel_v41_coordinator.go` adapt the lane-host fill
+scheduling idea from TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/lane_host_fill.zig
+plus its operator knobs documented at
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/docs/api.md#prefill-lane-host-fill-scheduling
+
+The adapted contract: while decoders are live, a prompt step taking `t`
+nanoseconds owes them `t*(1-p)/p` of decode time (`p` is the prompt's wall-time
+share, floored at 0.01); decode rounds pay the debt down; a decode share outside
+(0,1) — including 0 — keeps whole-prompt arrival ordering; and an optional row
+budget caps the rows a visit fills beside live decoders. In this codebase that
+lands as the `inKernelDecodeShare` type plus two operator knobs,
+`FAK_INKERNEL_DECODE_SHARE` and `FAK_INKERNEL_PROMPT_ROW_BUDGET`, wired into the
+coalescer admission paths of both in-kernel decode cohorts.
+
+Changed for Fak: idiomatic Go re-expression of the scheduling contract over
+fak's prepare/decode visits instead of Zig lane-host fill rounds, int64 debt
+saturation instead of unbounded floats, and env-var configuration instead of
+process-global flags. No upstream source code is copied; the adaptation is
+witnessed by `TestDecodeShareDebtOwedAndZeroKeepsWholePromptOrder` in
+`internal/agent/inkernel_decode_share_test.go`. The upstream Apache-2.0 license
+is reproduced in the TensorFold benchmark evidence section above.
+
 
 ## vLLM chunkwise Qwen host Gated-DeltaNet
 

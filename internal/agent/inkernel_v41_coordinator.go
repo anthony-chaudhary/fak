@@ -269,8 +269,22 @@ func (p *InKernelPlanner) runV41DecodeCohortCore(cohort []*inKernelCoalesceReque
 		membership: membership,
 		retire:     retire,
 	}
+	// The share accounts prompt steps against live decode rounds: each visit
+	// owes its preparation time times (1-p)/p while decoders are live, and the
+	// wall time spent decoding between visits pays the debt down. Default p=1
+	// owes nothing, preserving whole-prompt arrival ordering.
+	share := inKernelDecodeShareFromEnv()
+	var shareVisit time.Time
 	lifecycle.admit = func(freeSlots int) ([]*decodeLane, error) {
-		freeSlots = min(freeSlots, 4-len(active))
+		now := time.Now()
+		if !shareVisit.IsZero() {
+			share.rounded(now.Sub(shareVisit).Nanoseconds())
+		}
+		shareVisit = now
+		if !share.due(true) {
+			return nil, nil // Owed decode time outranks new prompt steps this visit.
+		}
+		freeSlots = share.visitLimit(min(freeSlots, 4-len(active)))
 		admitted := make([]*decodeLane, 0, freeSlots)
 		attempts := 0
 		for len(admitted) < freeSlots && attempts < 4 && primary == nil {
@@ -280,7 +294,9 @@ func (p *InKernelPlanner) runV41DecodeCohortCore(cohort []*inKernelCoalesceReque
 				break
 			}
 			attempts += len(requests)
+			prepStart := time.Now()
 			admitted = append(admitted, prepare(requests)...)
+			share.stepped(time.Since(prepStart).Nanoseconds(), true)
 		}
 		if primary != nil {
 			return admitted, errInKernelV41CohortAborted

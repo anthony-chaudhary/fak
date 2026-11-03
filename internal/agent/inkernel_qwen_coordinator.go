@@ -3,12 +3,111 @@ package agent
 import (
 	"context"
 	"errors"
+	"math"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/enginestep"
 )
 
 var errInKernelQwenCohortAborted = errors.New("agent: Qwen cohort aborted; no request replay permitted")
+
+// inKernelDecodeShare adapts TensorFold's wall-time split between prompt steps
+// and live decode rounds to the in-kernel coalescer's prepare/decode visits.
+// A prompt step taking ns while decoders are live owes them ns*(1-p)/p of
+// decode time (p is the prompt's share of wall time, floored at
+// inKernelDecodeShareMinPrompt); decode rounds pay the debt down. A decode
+// share outside (0,1) keeps p=1: nothing is ever owed and whole-prompt arrival
+// ordering is preserved. An optional row budget caps the rows a visit may fill
+// beside live decoders; 0 means no cap. In this seam a row is one prepared
+// prompt-fill pass alongside the running lanes.
+//
+// Source: ashhart/TensorFold zig/src/core/lane_host_fill.zig @9e8c368b0b4c2c7892a0c9f0f302d7c164016209
+// plus docs/api.md:236 (Apache-2.0; idea adapted into idiomatic Go, no code
+// copied). See THIRD_PARTY_NOTICES.md.
+const inKernelDecodeShareMinPrompt = 0.01 // below it a step's debt is minutes of decoding, and is no share
+
+// FAK_INKERNEL_DECODE_SHARE gives live decode rounds a wall-time share in
+// (0,1); unset or anything outside (0,1) keeps whole-prompt arrival ordering.
+const inKernelDecodeShareEnv = "FAK_INKERNEL_DECODE_SHARE"
+
+// FAK_INKERNEL_PROMPT_ROW_BUDGET caps the prompt rows a visit fills beside
+// live decoders; unset or non-positive means no cap.
+const inKernelPromptRowBudgetEnv = "FAK_INKERNEL_PROMPT_ROW_BUDGET"
+
+type inKernelDecodeShare struct {
+	promptShare float64 // p: the prompt's share of wall time beside decoders; 1 owes nothing
+	debtNs      int64   // decode time owed to live decoders before the next prompt step
+	rowBudget   int     // prompt rows a visit may fill beside live decoders; 0: none
+}
+
+// newInKernelDecodeShare maps a decode-share fraction onto the prompt's
+// complement, floored at inKernelDecodeShareMinPrompt. A fraction outside
+// (0,1) keeps the default p=1, so decode-share 0 preserves whole-prompt
+// arrival ordering.
+func newInKernelDecodeShare(decodeShare float64, rowBudget int) inKernelDecodeShare {
+	share := inKernelDecodeShare{promptShare: 1, rowBudget: rowBudget}
+	if decodeShare > 0 && decodeShare < 1 {
+		share.promptShare = max(1-decodeShare, inKernelDecodeShareMinPrompt)
+	}
+	return share
+}
+
+// inKernelDecodeShareFromEnv reads the operator knobs once per cohort episode;
+// every parse failure falls back to the default (no debt, no cap).
+func inKernelDecodeShareFromEnv() inKernelDecodeShare {
+	fraction := 0.0
+	if raw := os.Getenv(inKernelDecodeShareEnv); raw != "" {
+		if value, err := strconv.ParseFloat(raw, 64); err == nil {
+			fraction = value
+		}
+	}
+	budget := 0
+	if raw := os.Getenv(inKernelPromptRowBudgetEnv); raw != "" {
+		if value, err := strconv.Atoi(raw); err == nil {
+			budget = value
+		}
+	}
+	return newInKernelDecodeShare(fraction, budget)
+}
+
+// stepped charges a prompt step of ns taken while decoders were live. The debt
+// saturates instead of overflowing.
+func (s *inKernelDecodeShare) stepped(ns int64, decoding bool) {
+	if s.promptShare >= 1 || !decoding || ns <= 0 {
+		return
+	}
+	owed := float64(ns) * (1 - s.promptShare) / s.promptShare
+	if owed > math.MaxInt64/2 {
+		owed = math.MaxInt64 / 2
+	}
+	charge := int64(owed)
+	if s.debtNs > math.MaxInt64-charge {
+		s.debtNs = math.MaxInt64
+		return
+	}
+	s.debtNs += charge
+}
+
+// rounded pays a decode round of ns back against the owed debt, floored at zero.
+func (s *inKernelDecodeShare) rounded(ns int64) {
+	s.debtNs = max(0, s.debtNs-ns)
+}
+
+// due reports whether a prompt step may run now: none owed, or nothing decoding.
+func (s *inKernelDecodeShare) due(decoding bool) bool {
+	return s.debtNs <= 0 || !decoding
+}
+
+// visitLimit caps a visit's planned prompt rows by the row budget; no budget
+// leaves the visit uncapped.
+func (s inKernelDecodeShare) visitLimit(planned int) int {
+	if s.rowBudget <= 0 || s.rowBudget >= planned {
+		return planned
+	}
+	return s.rowBudget
+}
 
 type inKernelQwenRequestState struct {
 	req   *inKernelCoalesceRequest
@@ -158,6 +257,7 @@ func (p *InKernelPlanner) runDecodeCohort(cohort []*inKernelCoalesceRequest) (fi
 			p.coalesceBatchHook(len(active))
 		}
 		var iteration *inKernelDecodeIteration
+		share := inKernelDecodeShareFromEnv()
 		for len(active) > 0 && primary == nil {
 			if iteration == nil {
 				lanes := make([]*decodeLane, len(active))
@@ -169,7 +269,9 @@ func (p *InKernelPlanner) runDecodeCohort(cohort []*inKernelCoalesceRequest) (fi
 				iteration = newInKernelDecodeIteration(lanes, p.m, p.quant)
 			}
 			beforePanels, beforeMACs := iteration.sharedPanels, iteration.sharedMACs
+			stepStart := time.Now()
 			iteration.step(context.Background())
+			share.rounded(time.Since(stepStart).Nanoseconds()) // Decode rounds pay owed debt down.
 			stepPanels := iteration.sharedPanels - beforePanels
 			stepMACs := iteration.sharedMACs - beforeMACs
 			panels, macs = panels+stepPanels, macs+stepMACs
@@ -185,11 +287,19 @@ func (p *InKernelPlanner) runDecodeCohort(cohort []*inKernelCoalesceRequest) (fi
 			if primary != nil || len(active) == 0 {
 				break // An empty episode yields to the ordinary next-cohort handoff.
 			}
+			// Owed decode time outranks new prompt steps this visit; the
+			// still-running decode lanes keep stepping until the debt clears.
+			if !share.due(len(active) > 0) {
+				continue
+			}
 			// One bounded queue selection per completed step prevents repeated
 			// failed preparations from starving the still-running decode lanes.
-			requests := p.dequeueCoalescedRequests(inKernelCoalesceQwen, inKernelDecodeCohortMax-len(active))
+			limit := share.visitLimit(inKernelDecodeCohortMax - len(active))
+			requests := p.dequeueCoalescedRequests(inKernelCoalesceQwen, limit)
 			if len(requests) > 0 {
+				prepStart := time.Now()
 				prepare(requests)
+				share.stepped(time.Since(prepStart).Nanoseconds(), len(active) > 0)
 				changed = true
 			}
 			if changed {
