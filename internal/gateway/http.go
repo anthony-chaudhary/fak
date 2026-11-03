@@ -115,6 +115,12 @@ func (s *Server) routeTable() []gatewayRoute {
 		{"/v1/responses", s.handleResponses},
 		{"/v1/embeddings", s.handleEmbeddings},
 		{"/v1/moderations", s.handleModerations},
+		// /v1/decisions is the single-choice decision-probability surface: one
+		// validated option set (unique ids, A-Z labels, temperature > 0), engine-
+		// scored logits through the installed scoring hook, stable softmax out.
+		// Inert (404 decisions_hook_unwired) until a host installs the hook via
+		// InstallDecisionsScorer. See decisions.go.
+		{"/v1/decisions", s.handleDecisions},
 		// Anthropic Messages surface.
 		{"/v1/messages", s.handleAnthropicMessages},
 		{"/v1/messages/count_tokens", s.handleAnthropicCountTokens},

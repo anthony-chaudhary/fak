@@ -60,6 +60,8 @@ security:
 tags:
   - name: OpenAI
     description: OpenAI-compatible surface (`/v1/chat/completions`, `/v1/embeddings`, `/v1/moderations`, `/v1/models`).
+  - name: Decisions
+    description: Single-choice decision probabilities (`/v1/decisions`) — engine-scored stable softmax over positional A-Z option labels.
   - name: Anthropic
     description: Native Anthropic Messages surface — the wire Claude Code uses.
   - name: Gemini
@@ -391,6 +393,62 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /v1/decisions:
+    post:
+      tags: [Decisions]
+      summary: Score one multiple-choice decision
+      description: |
+        Single-choice decision probabilities. The client posts a prompt, a
+        temperature (finite, strictly positive), and 1-26 options with unique
+        non-empty ids; the gateway assigns each option its positional A-Z label
+        (first option is A), asks the installed engine scoring hook for one logit
+        per option, and answers the stable-softmax probabilities at the requested
+        temperature. The response carries `object: "decisions"`, one result per
+        option in request order (label, id, logit, probability), and `label_mass`
+        — the probability mass per label. Each label owns exactly one option, so
+        its mass equals that option's probability; all probabilities sum to 1
+        within floating-point rounding.
+
+        Closed refusal set: unsupported `prompt_format_version` (only 1 is
+        served), a non-positive or non-finite `temperature`, zero options, more
+        than 26 options, a repeated or empty option id, an empty prompt, and a
+        non-finite (overflowed) engine logit each answer 400 with their typed
+        `code`. A gateway with no engine scoring hook installed answers 404
+        `decisions_hook_unwired` (route inert); a hook that errors or returns a
+        mismatched logit count answers 503 `decisions_scoring_failed`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecisionsRequest' }
+            example:
+              prompt_format_version: 1
+              temperature: 0.7
+              prompt: "Should we ship the feature today?"
+              options:
+                - { id: ship, text: "Ship it now" }
+                - { id: hold, text: "Hold for another cycle" }
+      responses:
+        '200':
+          description: One result per option, in request order; probabilities sum to 1.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DecisionsResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: No engine scoring hook is installed on this gateway (route inert).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example: { error: { message: "gateway: decisions scoring hook not installed", type: "invalid_request_error", code: "decisions_hook_unwired", param: null } }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '503':
+          description: The engine scoring hook failed or returned a mismatched logit count.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   /v1/models:
     get:
@@ -4110,6 +4168,76 @@ components:
           type: object
           additionalProperties: { type: number }
           description: The full OpenAI category vocabulary ([0,1]).
+
+    # ----- Decisions ----------------------------------------------------------
+    DecisionsRequest:
+      type: object
+      required: [prompt_format_version, temperature, prompt, options]
+      properties:
+        prompt_format_version:
+          type: integer
+          enum: [1]
+          description: Only version 1 is served; anything else is refused 400 `decisions_bad_prompt_format`.
+        temperature:
+          type: number
+          exclusiveMinimum: 0
+          description: Finite and strictly positive; divides the logits before the stable softmax.
+        prompt:
+          type: string
+          minLength: 1
+          description: The decision context the engine scores the options against.
+        model:
+          type: string
+          description: Optional; echoed back, selects nothing (a gateway serves one resident model).
+        options:
+          type: array
+          minItems: 1
+          maxItems: 26
+          description: Candidate choices; the i-th option (0-based) carries the positional label 'A'+i.
+          items:
+            type: object
+            required: [id]
+            properties:
+              id:
+                type: string
+                minLength: 1
+                description: Unique across the request; an empty or repeated id is refused 400.
+              text:
+                type: string
+                description: Optional free-text option description handed to the engine scoring hook.
+
+    DecisionsResponse:
+      type: object
+      required: [object, prompt_format_version, temperature, results, label_mass]
+      properties:
+        object: { type: string, enum: [decisions] }
+        prompt_format_version: { type: integer, example: 1 }
+        temperature: { type: number, description: Echoed from the request. }
+        model: { type: string, description: Echoed when the request supplied one. }
+        results:
+          type: array
+          description: One scored outcome per option, in request order; probabilities sum to 1 within rounding.
+          items: { $ref: '#/components/schemas/DecisionsResult' }
+        label_mass:
+          type: object
+          additionalProperties: { type: number }
+          description: Probability mass per A-Z label; each label owns exactly one option, so its mass equals that option's probability.
+
+    DecisionsResult:
+      type: object
+      required: [label, id, logit, probability]
+      properties:
+        label:
+          type: string
+          pattern: '^[A-Z]$'
+          description: Positional A-Z label of the option (first option is A).
+        id: { type: string, description: Echoed option id. }
+        logit: { type: number, description: The engine hook's raw logit for this option. }
+        probability:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Stable-softmax probability at the request temperature.
 
     # ----- Operational -------------------------------------------------------
     HealthResponse:
