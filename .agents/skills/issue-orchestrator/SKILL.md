@@ -1,18 +1,293 @@
 ---
 name: issue-orchestrator
-description: Plan, partition, and coordinate multi-wave parallel subagent campaigns to resolve and close GitHub issues. Uses `fak issue-orchestrator --plan-waves` (or `fak issue-lanes`) to partition the backlog into...
+description: Plan, partition, and coordinate multi-wave parallel subagent campaigns to resolve and close GitHub issues. Uses `fak issue-orchestrator --plan-waves` (or `fak issue-lanes`) to partition the backlog into tree-disjoint cohorts, arbitrates lane and tree leases via `dos arbitrate`, dispatches isolated worker subagents per wave, independently witnesses landed fixes, commits with explicit paths and issue citations, and drives burndowns. Use when running bulk issue resolution, feature wave burndowns, or multi-agent issue campaigns.
+disable-model-invocation: false
+user-invocable: true
+allowed-tools: Read, Bash, Write, Edit, Grep, Glob, Task
+argument-hint: "[--top 10] [--target-issues 5] [--wave-size 4] [--max-waves 2] [--spawn-opencode] [--dry-run] [--worktree] [--model <model>] [--interactive] [--from-issues issues.json]"
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/issue-orchestrator/SKILL.md
-  canonical-description-hash: 48698ce85debd151860dd41d680003f19baba35ab9d8317a701da66cc690f84b
 ---
 
-# Canonical project skill adapter
+# /issue-orchestrator — campaign-scale multi-wave issue resolution
 
-Load and follow [`../../../.claude/skills/issue-orchestrator/SKILL.md`](../../../.claude/skills/issue-orchestrator/SKILL.md). This generated discovery adapter contains no maintained workflow body.
+> **The Campaign Coordinator for General Issue Work.** While atomic issue resolution targets 1–3
+> issues in isolation via [`/issue-queue`](../issue-queue/SKILL.md) (the issue counterpart of [`/debt-clean`](../debt-clean/SKILL.md)),
+> `/issue-orchestrator` coordinates **large volumes of general issue work**
+> across multiple concurrent subagent waves. It partitions the active issue backlog into
+> **pairwise tree-disjoint, concurrent-safe cohorts**, verifies or acquires lane leases via
+> `dos arbitrate`, dispatches parallel workers (via in-harness subagents or fresh OpenCode chat sessions),
+> independently witnesses each worker's effects, commits explicit paths with issue citations `(#N)`, and
+> tracks campaign burndown velocity against a baseline.
 
-## Portability contract
+The shape: **baseline campaign (`fak issue-orchestrator --json`) → automated safe wave planning (`fak issue-orchestrator --plan-waves`) → pre-dispatch arbitration (`dos arbitrate`) → parallel dispatch (in-harness `task` or `fak issue-orchestrator --spawn-opencode`) → harvest & independently witness → commit leaf-by-leaf with `(#N)` → compare burndown → loop.**
 
-- The linked canonical `SKILL.md` is the single semantic workflow body for Claude, Codex, and fak-native loaders.
-- This adapter changes discovery only; it must not fork, summarize, or translate the workflow.
-- Harness-native invocation, permissions, hooks, model routing, and worker launch remain typed adapters outside the semantic body.
+---
+
+## Dual Dispatch Execution Modes
+
+`/issue-orchestrator` supports two first-class dispatch execution modes depending on the execution context:
+
+- **Mode A: In-Harness Subagents (`task` tool calls with `subagent_type="worker"`)**
+  - Best when running inside an interactive harness session that supports nested subagent orchestration.
+  - Workers run as child tasks within the coordinator harness, returning receipts directly into the coordinator turn.
+- **Mode B: Spawning Fresh OpenCode Chats of Their Own (`fak issue-orchestrator --spawn-opencode`)**
+  - Best when running headless, batch, or multi-session campaigns where each issue needs an independent, isolated agent process.
+  - Spawns fresh OpenCode chat processes (`opencode run` or interactive `opencode run -i`) with distinct session titles (`Issue #<N>: <title>`), independent database sessions (`ses_...`), dedicated output logs, and optional detached worker worktrees.
+
+---
+
+## Defaults and Operational Boundaries
+
+When invoked without explicit arguments or under underspecified requests, apply these reasonable defaults:
+
+- **Bounded Evaluation (`--top 10`)**: ALWAYS bound backlog evaluation to the top 10–15 candidate issues (e.g. `fak issue-orchestrator --top 10`). Never run unbounded sweeps across hundreds of backlog tickets, which wastes tokens evaluating irrelevant triage queues.
+- **Action-First Velocity**: Prioritize immediate wave execution over prolonged baseline analysis. Plan Wave 1, arbitrate, dispatch workers, and land code.
+- **Target Issues**: Default to resolving a focused cohort of **3–5 issues** per session.
+- **Wave Concurrency (`--wave-size`)**: Default to **4–8 concurrent workers** per wave (scaling up to 16 with adaptive concurrency on capable multi-core hosts). Concurrency is safely gated by pairwise tree-disjointness (`dos.toml` declares 894 concurrent leaves).
+- **Max Waves per Run (`--max-waves`)**: Default to **1–2 waves** per run. Avoid unbounded multi-wave loops without checkpoints.
+- **Scratch & State Hygiene**: Baseline snapshots belong in allocated scratch or temporary JSON files (`fak tree-doctor --scratch-path issue-orchestrator/baseline.json`), never untracked root dumps. Clean them up on completion.
+- **Worker Isolation**: Each subagent gets exactly one issue and one package lane (`internal/<lane>`), touches only declared files, runs only package-scoped tests (`go test -v ./internal/<lane>`, `go vet ./internal/<lane>`), and returns a 3-line receipt.
+- **Witness & Commit Cadence**: Coordinator independently verifies (`go vet`, `go test`) and commits each successful worker leaf individually with DCO sign-off, Conventional Commits, issue number citation `(#N)`, and lane ship-stamp `(fak <lane>)` before proceeding to the next wave.
+
+---
+
+## Architectural Invariants (The Orchestration Laws)
+
+1. **Automated Tree-Disjoint Concurrency**:
+   Never allow concurrent subagents to touch overlapping directories or packages. Two workers
+   editing the same Go package break compilation for each other. Use `fak issue-orchestrator --plan-waves --wave-size N`
+   to partition candidate issues into verified pairwise tree-disjoint waves with zero cross-package
+   import contention.
+2. **Live Lease Arbitration & Exclusion**:
+   Before dispatching any subagent, the coordinator must verify or acquire the lane lease via
+   `dos arbitrate --workspace . --lane <lane> --kind keyword --mode exclusive` (or the `dos_arbitrate` MCP tool).
+   `fak issue-orchestrator --plan-waves` automatically discovers and excludes any active leases held in
+   `.dos/lane-journal.jsonl`. If an issue's lane is held by another agent, the orchestrator skips it and advances
+   the next candidate from the wave plan without colliding.
+3. **Multi-Orchestrator Concurrency**:
+   Multiple orchestrator loops or independent agents can operate concurrently on the repository:
+   each agent respects the shared lane taxonomy and lease journal. When two agents seek work simultaneously,
+   `dos arbitrate` grants mutually disjoint lanes to each, preventing collision by construction.
+4. **Serial Core Gates**:
+   High-blast-radius core leaves (`internal/abi`, `internal/kernel`, `internal/adjudicator`,
+   `internal/policy`, `internal/gateway`, `internal/vdso`, `internal/shipgate`, `internal/architest`) touch root types imported across the repository.
+   They must NEVER run concurrently with peer workers—the planner automatically isolates them into
+   dedicated, single-worker serial waves (`serial_singleton`).
+5. **Strict Subagent Fences & Scoped Verification**:
+   Subagents must edit ONLY within their assigned package directory. They must NEVER touch root
+   files, `go.mod`, `go.sum`, `dos.toml`, or sibling packages. Subagents must run ONLY package-scoped
+   tests (`go test -v ./internal/<lane>`, `go vet ./internal/<lane>`), NEVER broad `go test ./...` which
+   could fail on unrelated in-flight peer edits.
+6. **Subdivide Epics, Triage Unclear Scope**:
+   Oversized issues (>15 expected steps or touching 3+ subsystems) are routed to the `Subdivide` queue
+   to be broken into atomic leaves before dispatch. Issues with unclear scope or missing acceptance
+   criteria are routed to `Triage`. The orchestrator dispatches only concrete leaf units.
+7. **Coordinator Stays Clean**:
+   The coordinator dispatches, adjudicates conflicts, witnesses proofs, and tracks the campaign burndown.
+   Substantive implementation and test runs happen inside isolated subagent tasks (`subagent_type="general"`
+   using Gemini 3.8 Flash high `variant: high`).
+8. **Witness Before Close**:
+   An issue is resolved only when its reproduction or contract test passes green on disk. The commit message
+   must cite the issue number `(#N)` and carry the `(fak <lane>)` trailer.
+
+---
+
+## Phase 1 — Quick Bounded Planning & Target Selection
+
+Plan the immediate actionable wave bounded to top candidate issues:
+
+```bash
+# Fast path: plan immediate actionable wave bounded to top candidate issues:
+fak issue-orchestrator --top 10 --max-waves 1
+
+# If tracking a formal burndown comparison, capture baseline bounded to cohort:
+fak issue-orchestrator --top 15 --max-waves 2 --json > campaign-baseline.json
+```
+
+From the output, determine:
+- **Starting Scope**: e.g., `10 total issue(s) evaluated · 2 dispatchable · 0 subdivide · 8 triage`.
+- **Campaign Target**:
+  - *Default Focused Target*: Resolve **2–4 issues** in Wave 1 immediately.
+  - *Alternative Point Target*: Retire a fixed step budget (e.g. `--target-points 15`).
+- **Wave Capacity**: Standard reasonable wave size is **4–8 parallel subagents** (`--wave-size 8`, up to 16 on high-capacity hosts).
+- **Campaign Horizon**: Standard execution batch is **1–2 waves** (`--max-waves 1` or `2`).
+
+---
+
+## Phase 2 — Automated Concurrent-Safe Wave Planning
+
+Generate provably collision-free, concurrent-safe waves using `fak issue-orchestrator`:
+
+```bash
+# Plan campaign waves bounded to top candidate issues (wave size 4, max 2 waves):
+fak issue-orchestrator --top 15 --wave-size 4 --max-waves 2
+
+# Or plan from a specific issue source (e.g. local snapshot or gh export):
+fak issue-orchestrator --from-issues issues.json --wave-size 4 --max-waves 2
+
+# Include ready-to-run OpenCode spawn commands in JSON/Markdown wave plan:
+fak issue-orchestrator --top 15 --wave-size 4 --max-waves 2 --opencode-commands
+
+# Or emit machine-readable wave plan JSON (includes opencode_command per issue and opencode_chats per wave):
+fak issue-orchestrator --top 15 --wave-size 4 --max-waves 2 --opencode-commands --json > wave-plan.json
+```
+
+The planner automatically:
+1. **Discovers and Excludes Held Leases**: Scans `.dos/lane-journal.jsonl` and excludes all active held leases in the workspace.
+2. **Enforces Pairwise Tree-Disjointness**: Proves that no two issues in a wave share directory paths or parent/child containment.
+3. **Decouples Package Import Contention**: Checks the Go internal import graph to ensure workers in the same wave do not contend on shared internal package APIs.
+4. **Isolates Serial Singletons**: Identifies critical core leaves and schedules them into dedicated `serial_singleton` single-worker waves.
+5. **Extracts Subdivide & Triage Queues**: Pulls oversized epics into `Subdivide` with a child-issue budget and unready tickets into `Triage`.
+6. **Renders OpenCode Commands (`--opencode-commands`)**: Emits structured, copy-pasteable or machine-readable `opencode run` CLI invocations for each planned wave issue with appropriate titles, boundary path instructions, and verification commands.
+
+---
+
+## Phase 3 — Pre-Dispatch Arbitration & Parallel Worker Dispatch
+
+For each wave in the plan:
+
+### 1. Pre-Dispatch Lane Arbitration
+
+Before launching workers, verify each lane in the wave is free to acquire:
+
+```bash
+dos arbitrate --workspace . --lane <lane> --kind keyword --mode exclusive
+```
+*(Or invoke the `dos_arbitrate` tool).*
+
+- **Admitted (`outcome: acquire`)**: Proceed to dispatch worker on `<lane>`.
+- **Refused (`outcome: refuse`)**: Another peer agent took the lane. Log refusal, skip this lane, and advance the next candidate issue from the wave plan.
+
+### 2. Dispatch Workers (Option A or Option B)
+
+Choose between in-harness subagents (Option A) or spawning fresh OpenCode chat sessions (Option B):
+
+#### Option A: In-Harness Subagents (`task` tool)
+
+Launch all admitted workers in parallel in a single turn using multiple `task` tool calls with `subagent_type="worker"` under strict fences (using Gemini 3.8 Flash high `variant: high` for hard work):
+
+```json
+[
+  {
+    "tool": "task",
+    "parameters": {
+      "subagent_type": "worker",
+      "description": "Resolve #1024 gateway streaming timeout",
+      "prompt": "You are an isolated worker for issue #1024: Fix gateway streaming timeout.\nLane: gateway\nBoundaries: Edit ONLY files under internal/gateway/. NEVER touch go.mod, go.sum, dos.toml, or root files.\nVerification: Run ONLY package-scoped tests: `go test -v ./internal/gateway` and `go vet ./internal/gateway`. NEVER run `go test ./...`.\nDeliverable: Fix the timeout issue and add a reproduction unit test.\nReturn: Return a compact 3-line receipt: (1) files created/edited, (2) package test result, (3) confirmation of defect fix."
+    }
+  },
+  {
+    "tool": "task",
+    "parameters": {
+      "subagent_type": "worker",
+      "description": "Resolve #1035 model kv cache recycling",
+      "prompt": "You are an isolated worker for issue #1035: Add model KV cache recycling.\nLane: model\nBoundaries: Edit ONLY files under internal/model/. NEVER touch go.mod, go.sum, dos.toml, or root files.\nVerification: Run ONLY package-scoped tests: `go test -v ./internal/model` and `go vet ./internal/model`. NEVER run `go test ./...`.\nDeliverable: Implement the KV cache recycling path with reproduction unit tests.\nReturn: Return a compact 3-line receipt: (1) files created/edited, (2) package test result, (3) confirmation of defect fix."
+    }
+  }
+]
+```
+
+#### Option B: Spawn Fresh OpenCode Chats of Their Own (`fak issue-orchestrator --spawn-opencode`)
+
+Spawn fresh OpenCode chat processes directly from the CLI to resolve the planned wave:
+
+```bash
+# Standard batch headless spawn for Wave 1 (top 10 candidates):
+fak issue-orchestrator --spawn-opencode --top 10
+
+# Spawn with isolated detached worker worktrees:
+fak issue-orchestrator --spawn-opencode --top 10 --worktree
+
+# Preview spawn commands, titles, and prompts without launching processes:
+fak issue-orchestrator --spawn-opencode --top 10 --dry-run
+
+# Specify a target model or launch interactively:
+fak issue-orchestrator --spawn-opencode --top 10 --model "anthropic/claude-3-7-sonnet"
+fak issue-orchestrator --spawn-opencode --top 10 --interactive
+```
+
+**What happens during `--spawn-opencode`**:
+- **Fresh Process Execution**: Spawns fresh OpenCode chat processes (headless `opencode run` with `--print-logs --dangerously-skip-permissions` or interactive `opencode run -i`) titled explicitly with `Issue #<N>: <title>`.
+- **Database Isolation**: OpenCode automatically registers a brand-new session ID (`ses_...`) in its storage database for each issue, guaranteeing zero cross-session state or context pollution.
+- **Process Supervision & Logs**: Redirects stdout/stderr to `.dispatch-runs/resolve-<issue>-<stamp>.log` and writes the child process PID to `.dispatch-runs/resolve-<issue>-<stamp>.pid` for reliable status inspection and reaping.
+- **Detached Worker Worktrees (`--worktree`)**: When `--worktree` is specified, prepares an isolated Git worktree per worker using `fak worktree worker prepare`, hands off process ownership, and scopes changes away from the root working tree.
+- **Dry-Run Preview (`--dry-run`)**: Simulates planning and displays full command lines and session parameters without executing child processes.
+
+---
+
+## Phase 4 — Wave Harvest, Cross-Validation & Independent Witnessing
+
+When the parallel workers or spawned OpenCode chats finish:
+
+### 1. Harvest & Audit Results
+
+- **For Option A (In-Harness Subagents)**:
+  - Verify each subagent returned green test receipts strictly within its declared package lane.
+- **For Option B (Spawned OpenCode Chats)**:
+  - **List Active & Completed Sessions**: Check registered OpenCode sessions and status:
+    ```bash
+    opencode session list
+    ```
+  - **Inspect Execution Logs**: Read the background run logs in `.dispatch-runs/`:
+    ```bash
+    # Tail or grep recent run logs
+    Get-Content .dispatch-runs\resolve-<issue>-*.log -Tail 50
+    ```
+  - **Inspect Session Transcripts**: Export or inspect the exact turn history and tool calls:
+    ```bash
+    opencode export <sessionID>
+    ```
+
+### 2. Parallel Adversarial Verification & Gap Audit
+
+Launch parallel `cross-validator` and `issue-auditor` subagents (or run verification checks) to independently evaluate the changes:
+- `cross-validator`: Independently verifies git diff boundaries, executes on-device package tests, and produces DOS-style proof verdicts.
+- `issue-auditor`: Inspects diffs for unhandled edge cases, failure modes, and QA gaps, filing or drafting structured follow-on tickets.
+
+### 3. Independent Verification
+
+Coordinator independently executes package-scoped checks on the trunk or worker worktrees:
+```bash
+go vet ./internal/<laneA> ./internal/<laneB>
+go test -v ./internal/<laneA> ./internal/<laneB>
+```
+
+### 4. Commit by Explicit Path
+
+Commit each finished leaf independently on the trunk with the issue citation and ship-stamp trailer:
+```bash
+fak sync reconcile --apply
+fak commit --path internal/<laneA> -m "fix(<laneA>): resolve gateway streaming timeout (#1024) (fak <laneA>)"
+fak commit --path internal/<laneB> -m "feat(<laneB>): add model KV cache recycling (#1035) (fak <laneB>)"
+fak sync push
+```
+*(If changes were developed in detached worktrees via `--worktree`, land them with `fak worktree worker land` or merge the verified commits).*
+
+### 5. Release Lane Leases
+
+Release the acquired lane leases so peer agents can work on the lanes:
+```bash
+dos lease-lane release --lane <laneA>
+dos lease-lane release --lane <laneB>
+```
+
+---
+
+## Phase 5 — Burndown Check & Loop Progression
+
+Compare against the campaign baseline to measure velocity and progress:
+
+```bash
+fak issue-orchestrator --compare campaign-baseline.json
+```
+
+Check the delta:
+- How many issues closed in this wave?
+- What is the total campaign progress percentage?
+- How many waves remain in the current horizon?
+
+**Decision Gate**:
+- If the campaign target is achieved: emit the final campaign summary report.
+- If more progress is needed: generate Wave N+1 from `fak issue-orchestrator --plan-waves` and continue the loop.
