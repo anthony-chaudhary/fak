@@ -48,6 +48,8 @@ func TestCurrentBranchRefClassifications(t *testing.T) {
 		{"tools/release_cut.py", "merge remote-tracking origin/main", RefClassHistorical},
 		{"tools/release_next.py", "sync trunk with origin/main", RefClassHistorical},
 		{"internal/worktree/WIRING-AUDIT.md", "local as of 2026-11-03, not yet on origin/main", RefClassDevelopmentSource},
+		{"internal/beam/WIRING-AUDIT.md", "on origin/main since 2026-11-03", RefClassDevelopmentSource},
+		{"pkg/gpubinding/WIRING-AUDIT.md", "re-confirmed at landing base on origin/main", RefClassDevelopmentSource},
 	}
 	for _, tc := range cases {
 		if got := ClassifyHardcodedRef(tc.path, tc.line); got != tc.want {
