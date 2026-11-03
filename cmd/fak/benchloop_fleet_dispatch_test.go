@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -16,10 +15,11 @@ import (
 )
 
 func TestBenchFleetDispatchClaimsOnceAndWritesWitness(t *testing.T) {
+	t.Setenv("FAK_BENCH_MAC_HOST", "lan-node.example")
 	dir := t.TempDir()
 	q := filepath.Join(dir, "requests")
 	os.MkdirAll(q, 0755)
-	req := benchFleetRequest{Schema: "fak.bench-fleet.request.v1", ID: "abc", Machine: "gcp-g2-l4", Command: "echo ok", State: "queued"}
+	req := benchFleetRequest{Schema: "fak.bench-fleet.request.v1", ID: "abc", Machine: "node-macos-a", Command: "echo ok", State: "queued"}
 	if err := writeBenchFleetRequest(filepath.Join(q, "gcp-abc.json"), req); err != nil {
 		t.Fatal(err)
 	}
@@ -48,12 +48,13 @@ func TestBenchFleetDispatchClaimsOnceAndWritesWitness(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "witnesses", "abc.json")); err != nil {
 		t.Fatal(err)
 	}
-	if m, _ := filepath.Glob(filepath.Join(dir, "experiments", "benchmark", "runs", "by-machine", "gcp-g2-l4", "*-bench-fleet-abc", "manifest.json")); len(m) != 1 {
+	if m, _ := filepath.Glob(filepath.Join(dir, "experiments", "benchmark", "runs", "by-machine", "node-macos-a", "*-bench-fleet-abc", "manifest.json")); len(m) != 1 {
 		t.Fatalf("run artifact not ingested under the test workspace: %q", m)
 	}
 }
 
 func TestBenchFleetStaleRunningClaimIsReconciledAndMeasured(t *testing.T) {
+	t.Setenv("FAK_BENCH_MAC_HOST", "lan-node.example")
 	// A dispatcher killed mid-run left its row marked "running" forever: no later
 	// tick would claim it, and the queue reported a cell that nothing was executing
 	// (#6503). The lock read-back returns it to the queue instead.
@@ -64,7 +65,7 @@ func TestBenchFleetStaleRunningClaimIsReconciledAndMeasured(t *testing.T) {
 	}
 	path := filepath.Join(q, "stuck.json")
 	req := benchFleetRequest{
-		Schema: "fak.bench-fleet.request.v1", ID: "stuck", Machine: "gcp-g2-l4",
+		Schema: "fak.bench-fleet.request.v1", ID: "stuck", Machine: "node-macos-a",
 		Command: "echo ok", State: "running", Attempts: 1,
 		LastAttemptAt: time.Now().UTC().Add(-time.Hour).Format(time.RFC3339),
 	}
@@ -147,47 +148,6 @@ func TestBenchFleetRemoteCommandProvisionsLabNodes(t *testing.T) {
 			}
 			if strings.Contains(got, "cd ~/fak") {
 				t.Fatalf("lab command assumes an unprovisioned checkout: %q", got)
-			}
-		})
-	}
-}
-
-func TestBenchFleetRouteUsesMachineSpecificBridgeChannels(t *testing.T) {
-	root := t.TempDir()
-	bridgeDir := filepath.Clean(filepath.Join(root, "..", "fak-private", ".dgxbridge-verify"))
-	if err := os.MkdirAll(bridgeDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	bridgeName := "dgxbridge-fresh"
-	if runtime.GOOS == "windows" {
-		bridgeName += ".exe"
-	}
-	bridge := filepath.Join(bridgeDir, bridgeName)
-	if err := os.WriteFile(bridge, []byte("bridge"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	configDir := filepath.Join(root, ".fak", "bench-fleet")
-	if err := os.MkdirAll(configDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(configDir, "routes.json"), []byte(`{"a100_channel":"gpu-channel","cpu_server_channel":"cpu-channel"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	for _, tc := range []struct {
-		machine string
-		channel string
-	}{
-		{machine: "a100", channel: "gpu-channel"},
-		{machine: "cpu-server-a", channel: "cpu-channel"},
-	} {
-		t.Run(tc.machine, func(t *testing.T) {
-			name, args, route, state, err := benchFleetRoute(root, benchFleetRequest{ID: "req-123", Machine: tc.machine, Command: "hostname"})
-			if err != nil || name != bridge || route != "dgxbridge" || state != "running" {
-				t.Fatalf("route=(%q %v %q %q %v), want configured dgxbridge", name, args, route, state, err)
-			}
-			if len(args) < 8 || args[0] != "-channel" || args[1] != tc.channel || args[2] != "-timeout" || args[3] != "4m" || args[4] != "-remote-out" || args[5] != "/tmp/fak-bench-results/req-123.bridge.out" || args[6] != "run" {
-				t.Fatalf("args=%v, want machine-specific channel and remote-file readback before run", args)
 			}
 		})
 	}
@@ -298,12 +258,13 @@ func TestBenchFleetWorkstationConnectionFailureWaitsForSession(t *testing.T) {
 }
 
 func TestBenchFleetFailedExecutionRemainsWitnessedAndNotReclaimed(t *testing.T) {
+	t.Setenv("FAK_BENCH_MAC_HOST", "lan-node.example")
 	dir := t.TempDir()
 	q := filepath.Join(dir, "requests")
 	if err := os.MkdirAll(q, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	req := benchFleetRequest{Schema: "fak.bench-fleet.request.v1", ID: "bad", Machine: "gcp-g2-l4", Command: "false", State: "queued"}
+	req := benchFleetRequest{Schema: "fak.bench-fleet.request.v1", ID: "bad", Machine: "node-macos-a", Command: "false", State: "queued"}
 	if err := writeBenchFleetRequest(filepath.Join(q, "bad.json"), req); err != nil {
 		t.Fatal(err)
 	}
@@ -339,12 +300,13 @@ func TestBenchFleetFailedExecutionRemainsWitnessedAndNotReclaimed(t *testing.T) 
 }
 
 func TestBenchFleetSuccessfulWitnessIsIngestedAsRunArtifact(t *testing.T) {
+	t.Setenv("FAK_BENCH_MAC_HOST", "lan-node.example")
 	root := t.TempDir()
 	q := filepath.Join(root, ".fak", "bench-fleet", "requests")
 	if err := os.MkdirAll(q, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	req := benchFleetRequest{Schema: "fak.bench-fleet.request.v1", ID: "abc", Machine: "gcp-g2-l4", NodeClass: "gpu", Benchmark: "gpu-benchmark", Model: "qwen", Precision: "q8", Command: "echo ok", State: "queued"}
+	req := benchFleetRequest{Schema: "fak.bench-fleet.request.v1", ID: "abc", Machine: "node-macos-a", NodeClass: "gpu", Benchmark: "gpu-benchmark", Model: "qwen", Precision: "q8", Command: "echo ok", State: "queued"}
 	if err := writeBenchFleetRequest(filepath.Join(q, "gcp-abc.json"), req); err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +315,7 @@ func TestBenchFleetSuccessfulWitnessIsIngestedAsRunArtifact(t *testing.T) {
 	if code := runBenchFleetDispatchWithExec(&out, &errOut, []string{"--workspace", root, "--json"}, fake); code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
 	}
-	matches, err := filepath.Glob(filepath.Join(root, "experiments", "benchmark", "runs", "by-machine", "gcp-g2-l4", "*-bench-fleet-abc", "manifest.json"))
+	matches, err := filepath.Glob(filepath.Join(root, "experiments", "benchmark", "runs", "by-machine", "node-macos-a", "*-bench-fleet-abc", "manifest.json"))
 	if err != nil || len(matches) != 1 {
 		t.Fatalf("matches=%q err=%v", matches, err)
 	}
@@ -366,25 +328,9 @@ func TestBenchFleetSuccessfulWitnessIsIngestedAsRunArtifact(t *testing.T) {
 	}
 }
 
-func TestBenchFleetDGXCredentialFailureIsTypedWaiting(t *testing.T) {
-	root := t.TempDir()
-	bridge := filepath.Join(root, "..", "fak-private", ".dgxbridge-verify")
-	if err := os.MkdirAll(bridge, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(bridge, "dgxbridge-fresh.exe"), []byte("stub"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	w := executeBenchFleetRequest(root, benchFleetRequest{ID: "dgx", Machine: "a100", Command: "echo ok"}, func(string, ...string) ([]byte, int, error) {
-		return []byte("no Slack channel set"), 1, errors.New("exit 1")
-	})
-	if w.State != "waiting_credentials" {
-		t.Fatalf("witness=%+v", w)
-	}
-}
-
 func TestBenchFleetRejectsEmptyRemoteSuccess(t *testing.T) {
-	w := executeBenchFleetRequest(t.TempDir(), benchFleetRequest{ID: "empty", Machine: "gcp-g2-l4", Command: "true"}, func(string, ...string) ([]byte, int, error) { return nil, 0, nil })
+	t.Setenv("FAK_BENCH_MAC_HOST", "lan-node.example")
+	w := executeBenchFleetRequest(t.TempDir(), benchFleetRequest{ID: "empty", Machine: "node-macos-a", Command: "true"}, func(string, ...string) ([]byte, int, error) { return nil, 0, nil })
 	if w.State != "failed" || w.Error != "remote witness missing FAK_BENCH_NODE marker" {
 		t.Fatalf("witness=%+v", w)
 	}
@@ -401,22 +347,34 @@ func TestBenchNodeWitnessRequiresResolvedIdentity(t *testing.T) {
 	}
 }
 
-func TestBenchFleetGCPProvisionFailureIsRetryable(t *testing.T) {
-	w := executeBenchFleetRequest(t.TempDir(), benchFleetRequest{ID: "setup", Machine: "gcp-g2-l4", Command: "gpucheck"}, func(string, ...string) ([]byte, int, error) {
-		return []byte("FAK_BENCH_NODE=l4\nbash: go: command not found"), 127, errors.New("exit 127")
-	})
-	if w.State != "waiting_provision" {
-		t.Fatalf("witness=%+v", w)
+// fak-test:runtime fast est=100ms lane=default
+func TestBenchFleetRetiredGCPRoutesNeverExecute(t *testing.T) {
+	for _, machine := range []string{"gcp-g2-l4", "gcp-g2-l4-32", "gcp-a3-high-h100-1g", "a100", "cpu-server-a"} {
+		for _, benchmark := range []string{"qwen36", "agent-live", "turn-tax", "session-benchmark", "parity", "fan-benchmark", "concept-benchmark", "radix-benchmark", "model-benchmark", "gpu-benchmark", "unknown"} {
+			req := benchFleetRequest{Machine: machine, Benchmark: benchmark, Command: "must-not-run"}
+			name, args, route, state, err := benchFleetRoute(t.TempDir(), req)
+			if !errors.Is(err, errBenchFleetTargetRetired) || name != "" || len(args) != 0 || route != "retired" || state != "waiting_route" {
+				t.Fatalf("%s/%s: command=%q args=%q route=%q state=%q err=%v", machine, benchmark, name, args, route, state, err)
+			}
+			called := false
+			w := executeBenchFleetRequest(t.TempDir(), req, func(string, ...string) ([]byte, int, error) {
+				called = true
+				return nil, 0, nil
+			})
+			if called || len(w.Command) != 0 || w.State != "waiting_route" || w.Route != "retired" || w.FinishedAt == "" {
+				t.Fatalf("%s/%s: called=%v command=%q state=%q route=%q", machine, benchmark, called, w.Command, w.State, w.Route)
+			}
+		}
+	}
+	name, args, _, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: "gcp-unregistered"})
+	if err == nil || name != "" || len(args) != 0 || state != "waiting_route" {
+		t.Fatalf("unknown GCP route became executable: name=%q state=%q err=%v", name, state, err)
 	}
 }
 
 func TestBenchFleetQwen36UsesProvisionedGatewayRecipe(t *testing.T) {
 	for _, machine := range []string{"gcp-g2-l4", "gcp-g2-l4-32", "gcp-a3-high-h100-1g"} {
-		name, args, _, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: machine, Benchmark: "qwen36", Command: "fak serve + fak agent (qwen3.6-27b via gateway)"})
-		if err != nil || state != "running" || name != "gcloud" {
-			t.Fatalf("%s: name=%q state=%q err=%v, want running gcloud route", machine, name, state, err)
-		}
-		command := strings.Join(args, " ")
+		command := benchFleetRemoteCommand(benchFleetRequest{Machine: machine, Benchmark: "qwen36", Command: "fak serve + fak agent (qwen3.6-27b via gateway)"})
 		for _, want := range []string{"FAK_BENCH_NODE=", "qwen/qwen3.6-27b", ".config/fak/groq.key", "api.groq.com/openai/v1/chat/completions", "FAK_BENCH_MODEL="} {
 			if !strings.Contains(command, want) {
 				t.Fatalf("%s: command missing %q: %q", machine, want, command)
@@ -430,11 +388,7 @@ func TestBenchFleetQwen36UsesProvisionedGatewayRecipe(t *testing.T) {
 
 func TestBenchFleetGCPAgentLiveUsesBoundedGatewayRecipe(t *testing.T) {
 	for _, machine := range []string{"gcp-g2-l4", "gcp-g2-l4-32", "gcp-a3-high-h100-1g"} {
-		name, args, _, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: machine, Benchmark: "agent-live", Command: "go run ./cmd/fak agent --task <task>"})
-		if err != nil || state != "running" || name != "gcloud" {
-			t.Fatalf("%s: name=%q state=%q err=%v", machine, name, state, err)
-		}
-		command := strings.Join(args, " ")
+		command := benchFleetRemoteCommand(benchFleetRequest{Machine: machine, Benchmark: "agent-live", Command: "go run ./cmd/fak agent --task <task>"})
 		for _, want := range []string{"FAK_BENCH_NODE=", "fak agent", "qwen/qwen3.6-27b", "api.groq.com/openai/v1", "-max-turns 10", ".config/fak/groq.key"} {
 			if !strings.Contains(command, want) {
 				t.Fatalf("%s: command missing %q: %q", machine, want, command)
@@ -459,11 +413,7 @@ func TestBenchFleetExecCommandBoundsRuntimeAndPipeWait(t *testing.T) {
 
 func TestBenchFleetGCPTurnTaxUsesBoundedIsolatedRecipe(t *testing.T) {
 	for _, machine := range []string{"gcp-g2-l4", "gcp-g2-l4-32", "gcp-a3-high-h100-1g"} {
-		name, args, _, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: machine, Benchmark: "turn-tax", Command: "go run ./cmd/fak turntax --suite turntax-airline"})
-		if err != nil || state != "running" || name != "gcloud" {
-			t.Fatalf("%s: name=%q state=%q err=%v", machine, name, state, err)
-		}
-		command := strings.Join(args, " ")
+		command := benchFleetRemoteCommand(benchFleetRequest{Machine: machine, Benchmark: "turn-tax", Command: "go run ./cmd/fak turntax --suite turntax-airline"})
 		for _, want := range []string{"FAK_BENCH_NODE=", "turntax", "-suite turntax-airline", "-out /tmp/fak-turntax-report.json"} {
 			if !strings.Contains(command, want) {
 				t.Fatalf("%s: command missing %q: %q", machine, want, command)
@@ -480,11 +430,7 @@ func TestBenchFleetGCPTurnTaxUsesBoundedIsolatedRecipe(t *testing.T) {
 
 func TestBenchFleetGCPSessionUsesBoundedSyntheticRecipe(t *testing.T) {
 	for _, machine := range []string{"gcp-g2-l4", "gcp-g2-l4-32", "gcp-a3-high-h100-1g"} {
-		name, args, _, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: machine, Benchmark: "session-benchmark", Command: "go run ./cmd/sessionbench"})
-		if err != nil || state != "running" || name != "gcloud" {
-			t.Fatalf("%s: name=%q state=%q err=%v", machine, name, state, err)
-		}
-		command := strings.Join(args, " ")
+		command := benchFleetRemoteCommand(benchFleetRequest{Machine: machine, Benchmark: "session-benchmark", Command: "go run ./cmd/sessionbench"})
 		for _, want := range []string{"FAK_BENCH_NODE=", "sessionbench", "-synthetic tiny", "-agents 2", "-turns 2", "-reps 1", "/tmp/fak-sessionbench.json"} {
 			if !strings.Contains(command, want) {
 				t.Fatalf("%s: command missing %q: %q", machine, want, command)
@@ -498,11 +444,7 @@ func TestBenchFleetGCPSessionUsesBoundedSyntheticRecipe(t *testing.T) {
 
 func TestBenchFleetGCPParityUsesIsolatedArtifactRecipe(t *testing.T) {
 	for _, machine := range []string{"gcp-g2-l4", "gcp-g2-l4-32", "gcp-a3-high-h100-1g"} {
-		name, args, _, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: machine, Benchmark: "parity", Command: "go run ./cmd/paritybench"})
-		if err != nil || state != "running" || name != "gcloud" {
-			t.Fatalf("%s: name=%q state=%q err=%v", machine, name, state, err)
-		}
-		command := strings.Join(args, " ")
+		command := benchFleetRemoteCommand(benchFleetRequest{Machine: machine, Benchmark: "parity", Command: "go run ./cmd/paritybench"})
 		for _, want := range []string{"FAK_BENCH_NODE=", "paritybench", "-out-json /tmp/fak-parity.json", "-out-md /tmp/fak-parity.md"} {
 			if !strings.Contains(command, want) {
 				t.Fatalf("%s: command missing %q: %q", machine, want, command)
@@ -516,11 +458,7 @@ func TestBenchFleetGCPParityUsesIsolatedArtifactRecipe(t *testing.T) {
 
 func TestBenchFleetGCPFanUsesBoundedTopologyRecipe(t *testing.T) {
 	for _, machine := range []string{"gcp-g2-l4", "gcp-g2-l4-32", "gcp-a3-high-h100-1g"} {
-		name, args, _, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: machine, Benchmark: "fan-benchmark", Command: "go run ./cmd/fanbench"})
-		if err != nil || state != "running" || name != "gcloud" {
-			t.Fatalf("%s: name=%q state=%q err=%v", machine, name, state, err)
-		}
-		command := strings.Join(args, " ")
+		command := benchFleetRemoteCommand(benchFleetRequest{Machine: machine, Benchmark: "fan-benchmark", Command: "go run ./cmd/fanbench"})
 		for _, want := range []string{"FAK_BENCH_NODE=", "fanbench", "-agents 1,4", "-sub-turns 1", "-trials 1", "-prefixes smoke", "/tmp/fak-fanbench.json"} {
 			if !strings.Contains(command, want) {
 				t.Fatalf("%s: command missing %q: %q", machine, want, command)
@@ -534,11 +472,7 @@ func TestBenchFleetGCPFanUsesBoundedTopologyRecipe(t *testing.T) {
 
 func TestBenchFleetGCPConceptUsesBoundedReplayRecipe(t *testing.T) {
 	for _, machine := range []string{"gcp-g2-l4", "gcp-g2-l4-32", "gcp-a3-high-h100-1g"} {
-		name, args, _, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: machine, Benchmark: "concept-benchmark", Command: "go run ./cmd/conceptbench --replay cmd/conceptbench/testdata/replay"})
-		if err != nil || state != "running" || name != "gcloud" {
-			t.Fatalf("%s: name=%q state=%q err=%v", machine, name, state, err)
-		}
-		command := strings.Join(args, " ")
+		command := benchFleetRemoteCommand(benchFleetRequest{Machine: machine, Benchmark: "concept-benchmark", Command: "go run ./cmd/conceptbench --replay cmd/conceptbench/testdata/replay"})
 		for _, want := range []string{"FAK_BENCH_NODE=", "conceptbench", "-replay cmd/conceptbench/testdata/replay"} {
 			if !strings.Contains(command, want) {
 				t.Fatalf("%s: command missing %q: %q", machine, want, command)
@@ -555,11 +489,7 @@ func TestBenchFleetGCPConceptUsesBoundedReplayRecipe(t *testing.T) {
 
 func TestBenchFleetGCPRadixUsesProvisionedRealModelRecipe(t *testing.T) {
 	for _, machine := range []string{"gcp-g2-l4", "gcp-g2-l4-32", "gcp-a3-high-h100-1g"} {
-		name, args, _, state, err := benchFleetRoute(t.TempDir(), benchFleetRequest{Machine: machine, Benchmark: "radix-benchmark", Command: "go run ./cmd/radixbench"})
-		if err != nil || state != "running" || name != "gcloud" {
-			t.Fatalf("%s: name=%q state=%q err=%v", machine, name, state, err)
-		}
-		command := strings.Join(args, " ")
+		command := benchFleetRemoteCommand(benchFleetRequest{Machine: machine, Benchmark: "radix-benchmark", Command: "go run ./cmd/radixbench"})
 		for _, want := range []string{"FAK_BENCH_NODE=", "radixbench", "smollm2-135m", "-lean", "-quant", "-reps 1", "-only few-shot"} {
 			if !strings.Contains(command, want) {
 				t.Fatalf("%s: command missing %q: %q", machine, want, command)

@@ -1,31 +1,18 @@
 // Package hwgatelint is the sensor for the "local machine is the compute
 // boundary" regression — the hardware-gate anti-pattern.
 //
-// An agent working a device/GPU/heavy-compute task on the control host (a
-// laptop with no CUDA device, no Node.js, not enough RAM) keeps mis-scoping the
-// work and stopping: "not yet — no GPU on this host", "can't run the device
-// witness without CUDA", "this laptop can't test that". Every one of those
-// treats the local machine as the boundary when it is only the CONTROL POINT.
-// The fleet's whole purpose is to dispatch that work to the machine that CAN
-// witness it: a sanctioned compute node (GCP `fak-realmodel`, the DGX, `da33`,
-// the nightrun pipeline).
-//
-// This package is the dual of internal/headlesslint. headlesslint catches a
-// turn that ended by asking a HUMAN; hwgatelint catches a turn that ended by
-// declaring a LOCAL-HARDWARE blocker as terminal. The doctrine is the same
-// shape — an autonomous worker must ACT, not stop — but the remediation is
-// fixed: redirect to the sanctioned compute node (or, if the credential/bridge
-// session is missing, produce the exact ready-to-run command sequence and hand
-// it to the operator; that still counts as using the lab). The canonical route
-// is the SSOT in the local-machine-not-a-constraint fleet memory and
-// docs/sanctioned-compute-nodes.md.
+// Device and runtime witnesses may run on eligible enrolled local or LAN nodes.
+// Select current trust, lease, runtime, and device capability before dispatch;
+// historical fleet membership and cloud credentials do not establish capacity.
+// Missing admission remains unverified evidence, never a passing device witness.
+// The maintained selection guide is docs/fleet-compute-nodes.md.
 //
 // Detection is co-occurrence on a line: a HARDWARE token (names GPU/CUDA/device,
 // a missing runtime like Node.js, or "this machine/laptop/host" as the limit)
 // AND a BLOCKER framing (can't / no / unable / requires / without / not
 // available) on the SAME line. A whole-text SUPPRESSION clears the turn when it
 // already names the sanctioned route — an agent that said "no local GPU, so I
-// dispatched to the DGX" did the right thing and must never be flagged. Favoring
+// dispatched to an eligible LAN node" did the right thing and must never be flagged. Favoring
 // precision (no false positives) suits a soak-first rollout.
 //
 // Pure and stdlib-only: text in, typed findings out, no I/O and no clock. Any
@@ -56,7 +43,7 @@ const (
 // SSOT (local-machine-not-a-constraint memory / docs/fleet-compute-nodes.md).
 // Node identities stay generic here — the private hostnames live only in the
 // operator's local fleet memory, never in the repo.
-const Redirect = "Do not stop for lack of LOCAL hardware — this host is the CONTROL POINT, not the compute boundary. Dispatch the work to a sanctioned compute node: GCP `fak-realmodel` (L4 sm_89, or a spot A100/H100) for a live CUDA/GPU serve or device witness; the on-prem DGX (8× A100 sm_80) via `dgxbridge` for a device-GEMM/kernel witness; `da33` for DC-network or CPU-bench work; or the nightrun pipeline for a nightly device-witness ledger. If the credential/bridge session for the right node is missing, produce the exact ready-to-run command sequence and hand it to the operator — that still counts as using the lab, never \"blocked by local hardware.\""
+const Redirect = "Select an eligible enrolled local host or LAN compute node with the required runtime or CUDA device. Verify current trust, lease, reachability, and workload capability before dispatch, then record the scoped witness. GCP and retired fleet nodes are not testing capacity. Missing credentials or admission remain an explicit unverified gap; cloud reauthentication, provisioning, or handing an operator a command is not a passing hardware witness."
 
 // Class is the closed vocabulary of hardware-gate anti-patterns. Each member
 // names WHICH local resource the turn declared missing; the remediation is the
@@ -134,26 +121,14 @@ var blockerRE = []*regexp.Regexp{
 	re(`\bno\b`), // "no GPU", "no CUDA device", "no local accelerator"
 }
 
-// sanctionedRouteRE recognises a turn that ALREADY redirected to the lab. Its
-// presence anywhere in the text suppresses the whole scan: the agent named the
-// right node (or the act of dispatching/handing the operator a command), so it
-// did not stop at the local boundary. Favors precision over recall.
+// sanctionedRouteRE recognizes an explicit eligible local/LAN selection. Historical
+// node names, cloud commands, and operator handoffs cannot clear a hardware gap.
 var sanctionedRouteRE = []*regexp.Regexp{
-	re(`\bfak-realmodel\b`),
-	re(`\bdgxbridge\b`),
-	re(`\b(the )?dgx\b`),
-	re(`\bda33\b`),
-	re(`\bnightrun\b`),
-	re(`\bgcp\b`),
-	re(`\bgcloud\b`),
-	re(`\bspot (a100|h100|instance)\b`),
-	re(`\bdispatch(ed|ing)? (it |the |this )?(to|onto) (the |a )?(fleet|lab|remote|gpu|dgx|node|gcp)\b`),
-	re(`\brun(ning)? (it |the witness |this )?on (the |a )?(fleet|lab|remote|gpu|dgx|da33|gcp|node)\b`),
-	re(`\bhand(ed|ing)? (it |the operator |off )?(to )?the operator\b`),
-	re(`\bready-to-run\b`),
-	re(`\bremote (node|gpu|host)\b`),
-	re(`\bsanctioned (compute )?node\b`),
+	re(`\beligible enrolled (local|lan) (compute )?(node|host)\b`),
+	re(`\b(admitted|qualified) (local|lan) (compute )?(node|host)\b`),
 }
+
+var unavailableLANRouteRE = re(`\b(no|not|without|missing|unavailable)\s+(an?\s+)?(eligible enrolled|admitted|qualified) (local|lan) (compute )?(node|host)\b|\b(eligible enrolled|admitted|qualified) (local|lan) (compute )?(node|host) (is |was )?(unavailable|missing|not available)\b`)
 
 // classSpec binds a Class to its hardware-token patterns and its natural
 // sanctioned node. Specs are evaluated in slice order; the first whose pattern
@@ -169,7 +144,7 @@ type classSpec struct {
 var specs = []classSpec{
 	{
 		class:  NoLocalGPU,
-		node:   "GCP `fak-realmodel` (L4 sm_89) or a spot A100/H100; the DGX via `dgxbridge` for device-GEMM",
+		node:   "an eligible enrolled local or LAN CUDA node with current trust, lease, and device capability",
 		reason: "declares a GPU/CUDA/accelerator device missing as a terminal blocker; the laptop is the control point, not the compute boundary — dispatch the device work to a GPU node",
 		res: []*regexp.Regexp{
 			re(`\bgpus?\b`),
@@ -184,7 +159,7 @@ var specs = []classSpec{
 	},
 	{
 		class:  NoLocalRuntime,
-		node:   "a fleet node that has the runtime (dispatch or hand the operator the command)",
+		node:   "an eligible enrolled local or LAN node with the required runtime and current admission",
 		reason: "declares a non-Go runtime (Node.js/npm) missing as a terminal blocker; run it on a fleet node that has the runtime rather than treating the local host as the limit",
 		res: []*regexp.Regexp{
 			re(`\bnode\.?js\b`),
@@ -196,7 +171,7 @@ var specs = []classSpec{
 	},
 	{
 		class:  LocalBoundary,
-		node:   "the sanctioned compute node for the task (GCP/DGX/da33/nightrun)",
+		node:   "an eligible enrolled local or LAN node with current trust, lease, and workload capability",
 		reason: "treats THIS machine as the compute boundary; the fleet's point is to dispatch the work to the node that can run it — never report \"blocked for lack of local hardware\"",
 		res: []*regexp.Regexp{
 			re(`\bon this (windows )?(machine|laptop|host|box|pc)\b`),
@@ -221,6 +196,9 @@ func lineHasBlocker(low string) bool {
 
 // hasSanctionedRoute reports whether the text already names the lab route.
 func hasSanctionedRoute(low string) bool {
+	if unavailableLANRouteRE.MatchString(low) {
+		return false
+	}
 	for _, r := range sanctionedRouteRE {
 		if r.MatchString(low) {
 			return true

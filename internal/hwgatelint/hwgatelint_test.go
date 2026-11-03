@@ -50,10 +50,9 @@ func TestScanClassifies(t *testing.T) {
 // the no-false-positive guard that makes the soak-first rollout safe.
 func TestSanctionedRouteSuppresses(t *testing.T) {
 	clean := []string{
-		"The device witness needs a GPU this laptop lacks, so I dispatched it to the DGX via dgxbridge.",
-		"No local GPU here; produced the ready-to-run command sequence and handed it to the operator.",
-		"Ran it on fak-realmodel instead — no CUDA on this box, but the L4 node has it.",
-		"Can't run the CUDA suite locally, so I queued it on the nightrun pipeline.",
+		"No local GPU; dispatched to an eligible enrolled LAN node after trust, lease, and capability checks.",
+		"Cannot run CUDA here; the qualified LAN compute node ran the witness.",
+		"No Node.js here; dispatched to an admitted local host with the required runtime.",
 	}
 	for _, txt := range clean {
 		rep := Scan(txt)
@@ -84,5 +83,15 @@ func TestCleanOutputHasNoFindings(t *testing.T) {
 	rep := Scan("Implemented the parser, committed abc123, tests pass, pushed.")
 	if rep.Verdict != Clean || rep.Count != 0 {
 		t.Errorf("clean output: want clean/0, got %s/%d %+v", rep.Verdict, rep.Count, rep.Findings)
+	}
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestRetiredOrUnverifiedRoutesDoNotSuppress(t *testing.T) {
+	for _, route := range []string{"GCP", "gcloud", "fak-realmodel", "spot A100", "the DGX via dgxbridge", "da33", "nightrun", "remote GPU host", "sanctioned compute node", "no admitted LAN node", "no eligible enrolled LAN node", "qualified LAN node is unavailable", "ready-to-run command handed to the operator"} {
+		rep := Scan("No CUDA device on this host; try " + route + ".")
+		if rep.Verdict != HardwareGated || rep.Suppressed || rep.Classes[NoLocalGPU] != 1 {
+			t.Fatalf("route=%q: verdict=%q suppressed=%v classes=%v", route, rep.Verdict, rep.Suppressed, rep.Classes)
+		}
 	}
 }
