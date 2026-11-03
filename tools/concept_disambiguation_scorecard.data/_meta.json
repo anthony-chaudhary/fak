@@ -1567,6 +1567,16 @@
           "category": "incidental",
           "reason": "Exact serialized byte-size helper for the existing KVCache host-swap codec; does not define a new cache abstraction, replacement policy or storage tier.",
           "token": "KVCacheHostSwapBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "QK adapter source-file stem in the SOTA provenance row, not a new cache owner, representation or cache product; the existing cudaKV owns the storage.",
+          "token": "qwen35_qknorm_rope_cache_vllm"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pinned upstream vLLM source-file stem cited for provenance, not the name of a new FAK cache abstraction.",
+          "token": "fused_qknorm_rope_cache_kernel"
         }
       ],
       "exclude": [
@@ -1831,6 +1841,7 @@
         "formatTurnCachePair",
         "formatTurnCacheSummary",
         "formatTurnDebugStatsWithBudgetAndCache",
+        "fused_qknorm_rope_cache_kernel",
         "geminicache",
         "identityCacheLever",
         "in_process_fak_workflow_cache",
@@ -1889,6 +1900,7 @@
         "provider_cache_read_boundary",
         "provider_cache_usage_not_reported",
         "pycache",
+        "qwen35_qknorm_rope_cache_vllm",
         "qwen38CacheKey",
         "qwen38_cache_campaign",
         "qwen38_cache_report",
@@ -10368,6 +10380,11 @@
           "category": "incidental",
           "reason": "Private dispatch or optional-capability implementation of the positioned partial-prefill-context and partial-prefill-no-logits-context operations. It forwards the existing request context and preserves the same Session/backend owner; it creates no independent context, session identity, engine, cancellation policy, or scheduler.",
           "token": "inKernelContextPrefillSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pinned upstream CUDA source-file stem cited for provenance; it is not a FAK gateway, inference engine or routing layer.",
+          "token": "fused_qknorm_rope_cache_kernel"
         }
       ],
       "exclude": [
@@ -10475,6 +10492,7 @@
         "fetchWebEngine",
         "finishInKernelCleanup",
         "forcedtoolargumentsfrommessages",
+        "fused_qknorm_rope_cache_kernel",
         "gatewayLink",
         "gatewayOverview",
         "gatewayPluginExecutor",
@@ -11898,6 +11916,11 @@
           "category": "incidental",
           "reason": "Literal checked CUDA ABI marker in the native archive source prerequisite check; this is a concrete validation function, not a new policy or capability concept.",
           "token": "fcuda_q56k_mmq_preflight"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private CUDA launch-geometry and device-support query for the QK adapter; it grants no policy capability or authorization.",
+          "token": "fak_qwen35_vllm_qk_capability"
         }
       ],
       "exclude": [
@@ -12050,6 +12073,7 @@
         "fak_fleet_goal_adjudications_total",
         "fak_qwen35_attention_postprocess_capability",
         "fak_qwen35_residual_norm_capability",
+        "fak_qwen35_vllm_qk_capability",
         "fcuda_q56k_mmq_preflight",
         "foldSemanticAdjudicators",
         "formatAmendmentPosture",
