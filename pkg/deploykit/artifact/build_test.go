@@ -391,7 +391,7 @@ func TestBuildPinnedFakeLadderPasses(t *testing.T) {
 			}
 		}
 	}
-	want := "go 1.22\n\nuse (\n\t\"" + filepath.ToSlash(app) + "\"\n\t\"" + filepath.ToSlash(lib) + "\"\n)\n"
+	want := "go 1.22\n\nuse (\n\t" + goWorkUse(app) + "\n\t" + goWorkUse(lib) + "\n)\n"
 	if workDuringBuild != want {
 		t.Fatalf("generated go.work =\n%s\nwant\n%s", workDuringBuild, want)
 	}

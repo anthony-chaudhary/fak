@@ -204,7 +204,7 @@ func (b BuildPinned) pinnedEnv(ctx context.Context, ex EnvExecutor, mods []strin
 	var work strings.Builder
 	fmt.Fprintf(&work, "go %s\n\nuse (\n", version)
 	for _, m := range mods {
-		fmt.Fprintf(&work, "\t%s\n", strconv.Quote(filepath.ToSlash(m)))
+		fmt.Fprintf(&work, "\t%s\n", goWorkUse(m))
 	}
 	work.WriteString(")\n")
 	file := filepath.Join(wdir, "go.work")
@@ -213,6 +213,25 @@ func (b BuildPinned) pinnedEnv(ctx context.Context, ex EnvExecutor, mods []strin
 		return nil, nil, fmt.Errorf("%w: write pinned workspace: %v", ErrBuildFailed, err)
 	}
 	return append(base, "GOWORK="+file), cleanup, nil
+}
+
+// goWorkUse renders one module directory as a go.work use operand. The go command matches
+// workspace modules against the working directory with a separator-sensitive prefix check,
+// so absolute entries must keep their native separators: on Windows a forward-slashed entry
+// never matches and every build fails with "current directory is contained in a module that
+// is not one of the workspace modules listed in go.work". Quoting is needed only when the
+// path holds anything beyond plain path characters; strconv.Quote doubles each backslash
+// exactly the way `go work edit -use` writes it.
+func goWorkUse(dir string) string {
+	for i := 0; i < len(dir); i++ {
+		c := dir[i]
+		safe := c == '/' || c == '\\' || c == ':' || c == '.' || c == '_' || c == '-' ||
+			(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+		if !safe {
+			return strconv.Quote(dir)
+		}
+	}
+	return dir
 }
 
 // checkTuple proves every repository of the tuple is clean (no tracked or untracked changes)
