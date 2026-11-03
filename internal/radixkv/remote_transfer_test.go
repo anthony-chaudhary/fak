@@ -71,7 +71,7 @@ func TestRemoteSnapshotSplitPhaseLifecycle(t *testing.T) {
 				target := &cancellationRestoreBackend{Backend: compute.Default()}
 				store := &splitTransferStore{entered: make(chan struct{}), release: make(chan struct{})}
 				tree := NewWithTierBudgetsAndEvictionPolicy(0, 0, 0, EvictionLRU)
-				if err := tree.ConfigureRemoteSnapshotStore(store, "split-transfer", target, cfg); err != nil {
+				if err := tree.ConfigureRemoteSnapshotStore(store, "split-transfer", target, m.Cfg); err != nil {
 					t.Fatal(err)
 				}
 				ids := []int{3, 7, 11, 13}
@@ -132,7 +132,7 @@ func TestRemoteSnapshotSplitPhaseLifecycle(t *testing.T) {
 				case "cancel":
 					cancel()
 				case "reconfigure":
-					if err := tree.ConfigureRemoteSnapshotStore(store, "split-transfer", target, cfg); err != nil {
+					if err := tree.ConfigureRemoteSnapshotStore(store, "split-transfer", target, m.Cfg); err != nil {
 						mu.Unlock()
 						t.Fatal(err)
 					}
@@ -272,7 +272,7 @@ func TestRemoteSnapshotSplitPhaseRefreshesEvictedBoundary(t *testing.T) {
 			target := &cancellationRestoreBackend{Backend: compute.Default()}
 			store := &splitTransferStore{entered: make(chan struct{}), release: make(chan struct{})}
 			tree := NewWithTierBudgetsAndEvictionPolicy(0, 0, 0, EvictionLRU)
-			if err := tree.ConfigureRemoteSnapshotStore(store, "refresh-boundary", target, cfg); err != nil {
+			if err := tree.ConfigureRemoteSnapshotStore(store, "refresh-boundary", target, m.Cfg); err != nil {
 				t.Fatal(err)
 			}
 			ids := []int{3, 7, 11, 13}

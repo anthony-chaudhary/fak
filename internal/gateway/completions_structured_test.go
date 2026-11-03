@@ -347,10 +347,10 @@ func TestCompletionsStructuredNativeMatchesChat(t *testing.T) {
 			var obj map[string]any
 			return json.Unmarshal([]byte(s), &obj) == nil && obj != nil
 		}},
+		{"guided_grammar", `"guided_grammar":"root ::= \"a\""`, func(s string) bool { return s == "a" }},
+		{"structured_outputs_grammar", `"structured_outputs":{"grammar":"root ::= \"a\""}`, func(s string) bool { return s == "a" }},
 	}
 	refused := []string{
-		`"structured_outputs":{"grammar":"root ::= \"a\""}`,
-		`"guided_grammar":"root ::= \"a\""`,
 		`"ebnf":"root ::= \"a\""`,
 		`"guided_decoding_backend":"xgrammar"`,
 		`"structured_outputs":{"regex":"[ab]{2}"},"guided_regex":"[ab]{3}"`,
