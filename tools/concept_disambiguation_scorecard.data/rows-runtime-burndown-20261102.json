@@ -1,0 +1,2760 @@
+{
+  "rows": [
+    {
+      "id": "runtime-burndown-kvpool",
+      "canonical": "KVPool (ctxmmu)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Coordinates physical blocks and sequence mappings for paged attention KV storage.",
+      "distinction": "KVPoolConfig specifies dimensions and layout before construction; KVPool owns the mutable mappings and allocator.",
+      "distinct_from": [
+        "runtime-burndown-kvpoolconfig"
+      ],
+      "aliases": [],
+      "grounding": "kvpool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-kvpoolconfig",
+      "canonical": "KVPoolConfig (ctxmmu)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Specifies total pages, tokens per page, attention geometry, dtype, and topology for the paged KV pool.",
+      "distinction": "KVPool is the live pool built from this configuration, not its input specification.",
+      "distinct_from": [
+        "runtime-burndown-kvpool"
+      ],
+      "aliases": [],
+      "grounding": "kvpoolconfig",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-newkvpool",
+      "canonical": "NewKVPool (ctxmmu)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Constructs a paged KV pool from KVPoolConfig, including its physical block allocator.",
+      "distinction": "KVPool is the resulting live object; NewKVPool is its constructor and can return an error.",
+      "distinct_from": [
+        "runtime-burndown-kvpool"
+      ],
+      "aliases": [],
+      "grounding": "newkvpool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-sharedtokenpool",
+      "canonical": "SharedTokenPool (ctxmmu)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Accounts for reserved and committed attention tokens across streams against a shared capacity.",
+      "distinction": "KVPool maps sequence tokens to physical KV blocks; SharedTokenPool tracks token capacity reservations.",
+      "distinct_from": [
+        "runtime-burndown-kvpool"
+      ],
+      "aliases": [],
+      "grounding": "sharedtokenpool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-trimbackendidlepools",
+      "canonical": "trimBackendIdlePools (in-kernel planner)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Attempts to release idle backend pools through the planner before an allocation retry.",
+      "distinction": "KVPool owns physical blocks and mappings; trimBackendIdlePools requests release of idle backend allocations before retry.",
+      "distinct_from": [
+        "runtime-burndown-kvpool"
+      ],
+      "aliases": [],
+      "grounding": "trimbackendidlepools",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-errsessionreleased",
+      "canonical": "ErrSessionReleased (ctxmmu)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Signals that an operation encountered a session branch that has already been released.",
+      "distinction": "LoadSessionCheckpoint reads persisted agent state; ErrSessionReleased signals that a COW branch is no longer usable.",
+      "distinct_from": [
+        "runtime-burndown-loadsessioncheckpoint"
+      ],
+      "aliases": [],
+      "grounding": "errsessionreleased",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-loadsessioncheckpoint",
+      "canonical": "LoadSessionCheckpoint (agent)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Reads a session checkpoint from an explicit path or a session ID resolved under the default directory.",
+      "distinction": "ErrSessionReleased signals a released in-memory COW branch; LoadSessionCheckpoint reads persisted agent checkpoint data.",
+      "distinct_from": [
+        "runtime-burndown-errsessionreleased"
+      ],
+      "aliases": [],
+      "grounding": "loadsessioncheckpoint",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-llamasoftslot",
+      "canonical": "LlamaSoftSlot (HTTP planner)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Opts a planner into soft per-conversation selection of a llama-server slot.",
+      "distinction": "LlamaSoftSlotPolicy chooses the behavior when a conversation slot is busy; LlamaSoftSlot enables the feature.",
+      "distinct_from": [
+        "runtime-burndown-llamasoftslotpolicy"
+      ],
+      "aliases": [],
+      "grounding": "llamasoftslot",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-llamasoftslotpolicy",
+      "canonical": "LlamaSoftSlotPolicy (HTTP planner)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Selects the soft-slot choice policy for an opted-in planner; empty uses LRU.",
+      "distinction": "LlamaSoftSlot enables the mechanism, while this field selects its policy.",
+      "distinct_from": [
+        "runtime-burndown-llamasoftslot"
+      ],
+      "aliases": [],
+      "grounding": "llamasoftslotpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-softslotpolicylru",
+      "canonical": "SoftSlotPolicyLRU (llama)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Names the soft-slot policy that moves a conversation with a busy slot to a least recently used idle slot.",
+      "distinction": "SoftSlotPolicyWait can keep a known conversation pinned to its listed busy slot.",
+      "distinct_from": [
+        "runtime-burndown-softslotpolicywait"
+      ],
+      "aliases": [],
+      "grounding": "softslotpolicylru",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-softslotpolicywait",
+      "canonical": "SoftSlotPolicyWait (llama)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Names the soft-slot policy that may pin a known conversation to its listed slot even while busy.",
+      "distinction": "SoftSlotPolicyLRU instead moves a conversation from its busy slot to an idle least recently used slot.",
+      "distinct_from": [
+        "runtime-burndown-softslotpolicylru"
+      ],
+      "aliases": [],
+      "grounding": "softslotpolicywait",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-withllamasoftslot",
+      "canonical": "withLlamaSoftSlot (HTTP planner)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Adds an id_slot to an eligible opted-in request when soft slot selection succeeds, and returns its lease.",
+      "distinction": "LlamaSoftSlot is the enable flag; withLlamaSoftSlot carries out request selection and binding.",
+      "distinct_from": [
+        "runtime-burndown-llamasoftslot"
+      ],
+      "aliases": [],
+      "grounding": "withllamasoftslot",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-cachedprefixlen",
+      "canonical": "cachedPrefixLen (in-kernel planner)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Reports how many leading input tokens are resident in the planner cache.",
+      "distinction": "cachePopulate marks execution whose purpose is to populate that cache; cachedPrefixLen reads the resident-prefix length.",
+      "distinct_from": [
+        "runtime-burndown-cachepopulate"
+      ],
+      "aliases": [],
+      "grounding": "cachedprefixlen",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-cachepopulate",
+      "canonical": "cachePopulate (in-kernel planner)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Marks an in-kernel execution as cache-population work for the planner.",
+      "distinction": "cachedPrefixLen probes resident leading tokens; cachePopulate selects the execution purpose.",
+      "distinct_from": [
+        "runtime-burndown-cachedprefixlen"
+      ],
+      "aliases": [],
+      "grounding": "cachepopulate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-childsessionid",
+      "canonical": "childSessionID (COW fork)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Identifies the new child branch in a copy-on-write ForkSession call; it must differ from the parent and be unused.",
+      "distinction": "sessionFromPrefixClone creates a model session around a supplied KV cache; childSessionID identifies a new COW branch.",
+      "distinct_from": [
+        "runtime-burndown-sessionfromprefixclone"
+      ],
+      "aliases": [],
+      "grounding": "childsessionid",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-cachedblocks",
+      "canonical": "cachedBlocks (elastic allocator)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Holds FIFO reuse order for released blocks whose contents remain cached by the elastic allocator.",
+      "distinction": "cachedPrefixLen reports a token-prefix length; cachedBlocks is an ordered list of reusable block IDs.",
+      "distinct_from": [
+        "runtime-burndown-cachedprefixlen"
+      ],
+      "aliases": [],
+      "grounding": "cachedblocks",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-cachepolicyreplayarm",
+      "canonical": "cachePolicyReplayArm (expert cache replay)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Replays a single expert cache policy over unit-sized groups to produce its result row.",
+      "distinction": "cachePopulate marks a live in-kernel execution purpose; cachePolicyReplayArm simulates a policy over a supplied access stream.",
+      "distinct_from": [
+        "runtime-burndown-cachepopulate"
+      ],
+      "aliases": [],
+      "grounding": "cachepolicyreplayarm",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-evictledger",
+      "canonical": "evictLedger (radix KV tree)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Stores bounded eviction records pending confirmation on the radix KV tree.",
+      "distinction": "evictionLedgerCap bounds the ledger; evictLedger stores staged victim records awaiting confirmation.",
+      "distinct_from": [
+        "runtime-burndown-evictionledgercap"
+      ],
+      "aliases": [],
+      "grounding": "evictledger",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-evictionledgercap",
+      "canonical": "evictionLedgerCap (radix KV tree)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Bounds the number of pending records retained in the radix-tree eviction ledger.",
+      "distinction": "evictLedger contains the pending records; evictionLedgerCap bounds that collection.",
+      "distinct_from": [
+        "runtime-burndown-evictledger"
+      ],
+      "aliases": [],
+      "grounding": "evictionledgercap",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-sessionfromprefixclone",
+      "canonical": "sessionFromPrefixClone (in-kernel planner)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Creates a model session, using the configured backend when present, and assigns it a supplied prefix KV cache.",
+      "distinction": "childSessionID identifies a proposed copy-on-write child branch; sessionFromPrefixClone builds a model session around a supplied cache.",
+      "distinct_from": [
+        "runtime-burndown-childsessionid"
+      ],
+      "aliases": [],
+      "grounding": "sessionfromprefixclone",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-sessionview",
+      "canonical": "sessionView (gateway client runtime)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Snapshots a session terminal transcript, sorted effects, and recovery dependency under the client runtime lock.",
+      "distinction": "LoadSessionCheckpoint reads persisted agent checkpoint data; sessionView snapshots gateway client session state.",
+      "distinct_from": [
+        "runtime-burndown-loadsessioncheckpoint"
+      ],
+      "aliases": [],
+      "grounding": "sessionview",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-newenginecacheclient",
+      "canonical": "newEngineCacheClient (gateway)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Constructs the optional remote engine-cache reset client from gateway configuration, validating engine and base URL.",
+      "distinction": "cachedPrefixLen measures local in-kernel cache residency; newEngineCacheClient constructs a remote cache-reset client.",
+      "distinct_from": [
+        "runtime-burndown-cachedprefixlen"
+      ],
+      "aliases": [],
+      "grounding": "newenginecacheclient",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-inkernelrefeedlasttokenforexacthit",
+      "canonical": "inKernelRefeedLastTokenForExactHit",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Removes the final cached prompt token when eligible so an exact cache hit can refeed that token.",
+      "distinction": "cachedPrefixLen measures resident prefix length; inKernelRefeedLastTokenForExactHit modifies the cache tail for an exact hit.",
+      "distinct_from": [
+        "runtime-burndown-cachedprefixlen"
+      ],
+      "aliases": [],
+      "grounding": "inkernelrefeedlasttokenforexacthit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-contextcontrol",
+      "canonical": "contextControl (agent run config)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Marks that a run should merge context_control into its seed tool catalog.",
+      "distinction": "ContextControlCatalog supplies tool definitions when armed; contextControl is the run configuration switch.",
+      "distinct_from": [
+        "runtime-burndown-contextcontrolcatalog"
+      ],
+      "aliases": [],
+      "grounding": "contextcontrol",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-contextcontrolcatalog",
+      "canonical": "ContextControlCatalog (agent)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Returns context_control tool definitions when the control is armed, and nil when unarmed.",
+      "distinction": "contextControl is the run flag that requests catalog inclusion; ContextControlCatalog supplies the definitions.",
+      "distinct_from": [
+        "runtime-burndown-contextcontrol"
+      ],
+      "aliases": [],
+      "grounding": "contextcontrolcatalog",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-contextsafetyverdict",
+      "canonical": "ContextSafetyVerdict (superstream)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Carries a stream context-health status, reason, remaining budgets, and reset recommendation.",
+      "distinction": "EvaluateContextSafety computes this verdict from stream specification and state.",
+      "distinct_from": [
+        "runtime-burndown-evaluatecontextsafety"
+      ],
+      "aliases": [],
+      "grounding": "contextsafetyverdict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-evaluatecontextsafety",
+      "canonical": "EvaluateContextSafety (superstream)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Evaluates stream usage against turn and token limits and returns a context-safety verdict.",
+      "distinction": "ContextSafetyVerdict is the result data; EvaluateContextSafety performs the assessment.",
+      "distinct_from": [
+        "runtime-burndown-contextsafetyverdict"
+      ],
+      "aliases": [],
+      "grounding": "evaluatecontextsafety",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-burndown-withcompressioncontext",
+      "canonical": "WithCompressionContext (MCP broker)",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Creates an option that supplies the context used for structured-compression caller policy resolution.",
+      "distinction": "contextControl requests an agent tool catalog addition; WithCompressionContext configures a compression operation.",
+      "distinct_from": [
+        "runtime-burndown-contextcontrol"
+      ],
+      "aliases": [],
+      "grounding": "withcompressioncontext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-forksession",
+      "canonical": "COW page-table child fork operation",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Creates a child session branch sharing its parent pages under copy-on-write management.",
+      "distinction": "SessionFork in executionroute names a routing action; this operation creates the page-table child branch.",
+      "distinct_from": [
+        "cov5303-session-fork"
+      ],
+      "aliases": [],
+      "grounding": "forksession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-sessionbranch",
+      "canonical": "COW page-table session branch",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Represents a coordinator or subagent branch with copy-on-write page blocks.",
+      "distinction": "SessionFork is an execution-route choice; this branch holds the managed page-table state.",
+      "distinct_from": [
+        "cov5303-session-fork"
+      ],
+      "aliases": [],
+      "grounding": "sessionbranch",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-cachehint",
+      "canonical": "Provider cache hint receipt",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Carries requested, emitted, and effective provider-cache hint information on an agent completion.",
+      "distinction": "CacheHit is a vDSO cache lifecycle event; this receipt describes provider hint negotiation.",
+      "distinct_from": [
+        "x-cache-cachehit"
+      ],
+      "aliases": [],
+      "grounding": "cachehint",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-acquireslot",
+      "canonical": "Expert slot-stream acquisition",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Returns a resident expert slot on a hit; otherwise selects an empty or least-recently-used slot and assigns the requested expert ID.",
+      "distinction": "The llama soft-slot release operation frees a request pin; expert slot acquisition finds or assigns expert residency.",
+      "distinct_from": [
+        "runtime-next-releaseslot"
+      ],
+      "aliases": [],
+      "grounding": "acquireslot",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-releaseslot",
+      "canonical": "Llama upstream soft-slot release",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Releases an upstream call's soft llama-server slot pin if one exists; a nil call is safe.",
+      "distinction": "Expert slot-stream acquisition selects expert residency; this release frees a conversation request pin.",
+      "distinct_from": [
+        "runtime-next-acquireslot"
+      ],
+      "aliases": [],
+      "grounding": "releaseslot",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-confirmevictions",
+      "canonical": "Radix KV staged eviction confirmation",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Settles every staged eviction record once, increments confirmed accounting, and clears the ledger.",
+      "distinction": "The onEvict callback observes an individual policy eviction; confirmation settles a batch of staged radix-tree records.",
+      "distinct_from": [
+        "runtime-next-onevict"
+      ],
+      "aliases": [],
+      "grounding": "confirmevictions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-onevict",
+      "canonical": "WTinyLFU eviction callback",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Receives the key hash and length of an entry evicted by the WTinyLFU policy.",
+      "distinction": "Radix KV staged eviction confirmation settles recorded radix victims; this callback reports an individual policy eviction.",
+      "distinct_from": [
+        "runtime-next-confirmevictions"
+      ],
+      "aliases": [],
+      "grounding": "onevict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-sessionresettransaction",
+      "canonical": "Gateway session reset transaction",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The gateway wire form of a reset transaction, including old and new trace IDs, seed digest, contributors, omitted spans, and rearmed budget.",
+      "distinction": "The reset budget rearm is one component of this transaction, not the entire reset record.",
+      "distinct_from": [
+        "runtime-next-sessionresetbudgetrearm"
+      ],
+      "aliases": [],
+      "grounding": "sessionresettransaction",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-sessionresetbudgetrearm",
+      "canonical": "Gateway reset budget rearm",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Records fresh turn, token, and context budget values armed by a reset.",
+      "distinction": "The reset transaction encloses this budget alongside trace and seed information.",
+      "distinct_from": [
+        "runtime-next-sessionresettransaction"
+      ],
+      "aliases": [],
+      "grounding": "sessionresetbudgetrearm",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-sessionresetomittedspan",
+      "canonical": "Gateway reset omitted span",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "A payload-free pointer to a source span omitted during reset, carrying role, digest, and reason.",
+      "distinction": "The reset transaction can carry a list of omitted-span pointers; one pointer is not the whole transaction.",
+      "distinct_from": [
+        "runtime-next-sessionresettransaction"
+      ],
+      "aliases": [],
+      "grounding": "sessionresetomittedspan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-newlaunchsessionid",
+      "canonical": "Harness launch session ID mint",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Creates a harness-prefixed random identifier for one launch, returning empty if random generation fails.",
+      "distinction": "The COW child branch fork operates on session state; this function creates a launch attribution identifier.",
+      "distinct_from": [
+        "runtime-next-forksession"
+      ],
+      "aliases": [],
+      "grounding": "newlaunchsessionid",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-erremptysessionid",
+      "canonical": "Checkpoint empty session ID error",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Signals that an empty session ID was supplied to the ctxmmu checkpoint manager.",
+      "distinction": "The COW table invalid-session sentinel belongs to its branch operations; this error belongs to checkpoint operations.",
+      "distinct_from": [
+        "runtime-next-errinvalidsessionid"
+      ],
+      "aliases": [],
+      "grounding": "erremptysessionid",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-errinvalidsessionid",
+      "canonical": "COW invalid session ID error",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Signals an empty session ID in ctxmmu fork and copy-on-write session operations.",
+      "distinction": "The checkpoint manager has its own empty-session-ID sentinel; this one belongs to branch operations.",
+      "distinct_from": [
+        "runtime-next-erremptysessionid"
+      ],
+      "aliases": [],
+      "grounding": "errinvalidsessionid",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-withprefixcacheidentity",
+      "canonical": "Planner prefix cache owner binding",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Binds a nonempty tenant and optional agent identity to a planner-call context for scoped prefix caching.",
+      "distinction": "Provider cache hint receipt describes negotiation; this context binding establishes the local cache owner.",
+      "distinct_from": [
+        "runtime-next-cachehint"
+      ],
+      "aliases": [],
+      "grounding": "withprefixcacheidentity",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-attachprovidercachetelemetry",
+      "canonical": "HTTP planner provider cache telemetry attachment",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Adds provider cache telemetry to an eligible completion with reported cached prompt tokens when telemetry is not already present.",
+      "distinction": "Provider cache hint receipt records hint negotiation; this method attaches observed provider cache telemetry.",
+      "distinct_from": [
+        "runtime-next-cachehint"
+      ],
+      "aliases": [],
+      "grounding": "attachprovidercachetelemetry",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-cpucachebytes",
+      "canonical": "Radix tree retained CPU cache byte count",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Walks radix roots to total retained numeric KV payload, logits capacity, and shared dense-prefix bytes.",
+      "distinction": "The max CPU cache bytes field sets a retention bound; this function calculates retained bytes.",
+      "distinct_from": [
+        "runtime-next-maxcpucachebytes"
+      ],
+      "aliases": [],
+      "grounding": "cpucachebytes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-maxcpucachebytes",
+      "canonical": "Radix tree CPU cache retention limit",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Stores the byte bound for retained CPU KV backing storage and cached logits; zero leaves retention unlimited.",
+      "distinction": "The retained-byte count calculates current ownership; this field sets its limit.",
+      "distinct_from": [
+        "runtime-next-cpucachebytes"
+      ],
+      "aliases": [],
+      "grounding": "maxcpucachebytes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-makecpucacheroom",
+      "canonical": "Radix tree CPU cache room admission",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Attempts to fit incoming retained payload under the byte bound by releasing eligible old payloads, refusing oversized or pinned cases.",
+      "distinction": "The retained-byte count measures current storage; this method may release payloads to make room.",
+      "distinct_from": [
+        "runtime-next-cpucachebytes"
+      ],
+      "aliases": [],
+      "grounding": "makecpucacheroom",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-cachebytesum",
+      "canonical": "Radix CPU cache saturating byte sum",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Adds two byte counts, saturating at the maximum signed 64-bit value for negative inputs or overflow.",
+      "distinction": "The retained-byte count walks cache nodes; this helper safely combines individual byte counts.",
+      "distinct_from": [
+        "runtime-next-cpucachebytes"
+      ],
+      "aliases": [],
+      "grounding": "cachebytesum",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-toolcontextcontrol",
+      "canonical": "Agent context control tool name",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Names the planner-facing context_control tool for bounded context queries and controls.",
+      "distinction": "ContextControlCatalog supplies tool definitions when armed; ToolContextControl names the tool those definitions expose.",
+      "distinct_from": [
+        "runtime-burndown-contextcontrolcatalog"
+      ],
+      "aliases": [],
+      "grounding": "toolcontextcontrol",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-guardallowsubtract",
+      "canonical": "Guard allow-list subtraction",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Returns entries from an input allow-list after removing the specified names.",
+      "distinction": "Guard allow expiry stamping sets or clears time limits on grants; subtraction removes named entries from a list.",
+      "distinct_from": [
+        "runtime-next-guardallowstampexpiry"
+      ],
+      "aliases": [],
+      "grounding": "guardallowsubtract",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-guardallowstampexpiry",
+      "canonical": "Guard allow expiry stamping",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Stamps added names with now plus a positive TTL, or clears their expiry stamps for a zero TTL.",
+      "distinction": "Allow-list subtraction removes named entries; expiry stamping changes their expiry metadata.",
+      "distinct_from": [
+        "runtime-next-guardallowsubtract"
+      ],
+      "aliases": [],
+      "grounding": "guardallowstampexpiry",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-guardrouterupstream",
+      "canonical": "Guard router upstream target",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Holds the resolved router origin, gateway key, and key-source description for a guard invocation.",
+      "distinction": "The API host readiness gate summarizes probe classifications; this value identifies a guard upstream and its authentication.",
+      "distinct_from": [
+        "runtime-next-readinessgate"
+      ],
+      "aliases": [],
+      "grounding": "guardrouterupstream",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-readinessgate",
+      "canonical": "API host probe readiness gate",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Reports true when at least one target exists and none is invalid or unclassified in the API-host readiness summary.",
+      "distinction": "Guard router upstream holds connection details; the readiness gate summarizes the probe classification conditions.",
+      "distinct_from": [
+        "runtime-next-guardrouterupstream"
+      ],
+      "aliases": [],
+      "grounding": "readinessgate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-activeslots",
+      "canonical": "Subagent scheduler active slots",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Holds subagent sessions currently occupying the scheduler's active concurrency slots.",
+      "distinction": "Expert slot-stream acquisition selects a device expert buffer; activeSlots tracks scheduled subagent sessions.",
+      "distinct_from": [
+        "runtime-next-acquireslot"
+      ],
+      "aliases": [],
+      "grounding": "activeslots",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-slotstream",
+      "canonical": "Expert slot-stream package",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Implements preallocated device expert slots for MoE models and streams cold experts into slots on demand.",
+      "distinction": "Expert slot acquisition is one operation within slotstream; the package owns the slot-pool mechanism.",
+      "distinct_from": [
+        "runtime-next-acquireslot"
+      ],
+      "aliases": [],
+      "grounding": "slotstream",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-defaultsessioncheckpointdir",
+      "canonical": "Agent default checkpoint directory",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Names .fak/sessions as the default workspace directory for agent session checkpoints.",
+      "distinction": "The harness launch session ID identifies a launch; this constant identifies a default checkpoint directory.",
+      "distinct_from": [
+        "runtime-next-newlaunchsessionid"
+      ],
+      "aliases": [],
+      "grounding": "defaultsessioncheckpointdir",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-sessiondurabilityhost",
+      "canonical": "Session durability host label",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Returns the trimmed local hostname for session durability attribution, falling back to localhost when empty.",
+      "distinction": "The launch session ID is a random launch-scoped identifier; this helper supplies a host label.",
+      "distinct_from": [
+        "runtime-next-newlaunchsessionid"
+      ],
+      "aliases": [],
+      "grounding": "sessiondurabilityhost",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-guardposture",
+      "canonical": "Native agent receipt guard posture",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Records the effective guard posture name in a native agent enforcement receipt.",
+      "distinction": "The Codex no-guard flag chooses raw launching; guard posture records an effective enforcement value in a receipt.",
+      "distinct_from": [
+        "runtime-next-noguard"
+      ],
+      "aliases": [],
+      "grounding": "guardposture",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-next-noguard",
+      "canonical": "Codex launcher no-guard flag",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Acts as an alias for raw mode and contributes to the Codex launcher's raw selection.",
+      "distinction": "Guard posture is an enforcement receipt field; no-guard is a launcher flag selecting raw mode.",
+      "distinct_from": [
+        "runtime-next-guardposture"
+      ],
+      "aliases": [],
+      "grounding": "noguard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-inkernelgenerateresult",
+      "canonical": "In-kernel generation result",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Carries per-request generated and prompt counts, cache-match information, timings, stop status, and execution receipts from in-kernel generation.",
+      "distinction": "cachedPrefixLen probes currently resident prefix length; this result records the completed generation request.",
+      "distinct_from": [
+        "runtime-burndown-cachedprefixlen"
+      ],
+      "aliases": [],
+      "grounding": "inkernelgenerateresult",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-inkernelrequestdeviceheadroom",
+      "canonical": "In-kernel request device headroom",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Sets the device-memory headroom ratio to 0.15 for in-kernel request admission and related sizing.",
+      "distinction": "Radix CPU cache retention limit bounds retained host KV and logits; this ratio reserves device-memory headroom for a request.",
+      "distinct_from": [
+        "runtime-next-maxcpucachebytes"
+      ],
+      "aliases": [],
+      "grounding": "inkernelrequestdeviceheadroom",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-inkerneleffectivetoolname",
+      "canonical": "In-kernel effective tool choice name",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Resolves an explicit forced tool name or the sole tool when required; otherwise returns an empty name.",
+      "distinction": "ContextControlCatalog returns the available tool definitions; this helper resolves the tool name required by a request.",
+      "distinct_from": [
+        "runtime-burndown-contextcontrolcatalog"
+      ],
+      "aliases": [],
+      "grounding": "inkerneleffectivetoolname",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-startupcache",
+      "canonical": "Radix startup-claim cache boundary",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Serializes startup claim acquisition, validation, release and expiry reclamation over a shared radix tree.",
+      "distinction": "KVPool owns physical KV block allocation; StartupCache coordinates startup claims on a radix tree.",
+      "distinct_from": [
+        "runtime-burndown-kvpool"
+      ],
+      "aliases": [],
+      "grounding": "startupcache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-newkvcachewithprecision",
+      "canonical": "Model precision-aware KV cache constructor",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Allocates an empty model KV cache with attended K and V rows at the selected precision; unset selects FP32.",
+      "distinction": "KVPool constructor creates a paged physical-block pool; this constructor creates a model KV cache with a precision choice.",
+      "distinct_from": [
+        "runtime-burndown-newkvpool"
+      ],
+      "aliases": [],
+      "grounding": "newkvcachewithprecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-kvcachehint",
+      "canonical": "KV eviction reuse hint",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Names the bounded agent cache-control prior used to bias a KV span's estimated reuse in eviction costing.",
+      "distinction": "Provider cache hint receipt records provider hint negotiation; this hint adjusts a local eviction-cost prior.",
+      "distinct_from": [
+        "runtime-next-cachehint"
+      ],
+      "aliases": [],
+      "grounding": "kvcachehint",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-pagecacheenabled",
+      "canonical": "GGUF expert source page-cache enablement",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Reports whether a source has its mapped page-cache read path enabled.",
+      "distinction": "StartupCache coordinates radix startup claims; this predicate reports a GGUF expert-source page-cache mode.",
+      "distinct_from": [
+        "runtime-third-startupcache"
+      ],
+      "aliases": [],
+      "grounding": "pagecacheenabled",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-fakinkernelpagedprefix",
+      "canonical": "Paged prefix ledger environment switch",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Disables in-kernel paged prefix ledger creation for off, 0, false, or no; other values do not trigger that opt-out.",
+      "distinction": "The radix budget environment setting supplies a token bound; this switch controls paged ledger opt-out.",
+      "distinct_from": [
+        "runtime-third-fakinkernelradixbudget"
+      ],
+      "aliases": [],
+      "grounding": "fakinkernelpagedprefix",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-fakinkernelradixbudget",
+      "canonical": "In-kernel radix budget environment override",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Supplies a nonnegative integer override for the radix prefix cache token budget when parseable.",
+      "distinction": "Paged prefix ledger environment switch controls ledger opt-out; this setting supplies the radix token bound.",
+      "distinct_from": [
+        "runtime-third-fakinkernelpagedprefix"
+      ],
+      "aliases": [],
+      "grounding": "fakinkernelradixbudget",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-fakinkernelseed",
+      "canonical": "In-kernel sampling seed environment setting",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Provides a parsed integer seed for reproducible in-kernel sampling when set to a valid value.",
+      "distinction": "The radix budget environment setting bounds cache tokens; this value seeds sampling.",
+      "distinct_from": [
+        "runtime-third-fakinkernelradixbudget"
+      ],
+      "aliases": [],
+      "grounding": "fakinkernelseed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-fakexpertpagecache",
+      "canonical": "GGUF expert page-cache opt-in environment setting",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Enables expert page-cache adoption for documented truthy values; unset and other values keep the historical read path.",
+      "distinction": "PageCacheEnabled reports a source's active mapped read path; this setting controls the loader opt-in.",
+      "distinct_from": [
+        "runtime-third-pagecacheenabled"
+      ],
+      "aliases": [],
+      "grounding": "fakexpertpagecache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-armcontextcontrol",
+      "canonical": "Agent context control arming",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Arms the context control engine and gate and returns its tool definitions.",
+      "distinction": "ContextControlCatalog reads tool definitions when armed; arming installs the control.",
+      "distinct_from": [
+        "runtime-burndown-contextcontrolcatalog"
+      ],
+      "aliases": [],
+      "grounding": "armcontextcontrol",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-armwarmupgate",
+      "canonical": "Gateway warmup readiness gate arming",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Arms the gateway readiness policy until host-owned backend warmup completes; nil server is safe.",
+      "distinction": "API host probe readiness gate summarizes endpoint classifications; this method arms serving warmup readiness.",
+      "distinct_from": [
+        "runtime-next-readinessgate"
+      ],
+      "aliases": [],
+      "grounding": "armwarmupgate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-getsession",
+      "canonical": "COW page-table session lookup",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Looks up an active copy-on-write session branch by ID and returns an error when absent.",
+      "distinction": "COW page-table child fork creates a branch; this method retrieves one by ID.",
+      "distinct_from": [
+        "runtime-next-forksession"
+      ],
+      "aliases": [],
+      "grounding": "getsession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-gatewaycredential",
+      "canonical": "Gateway request credential extraction",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Extracts a bearer authorization token or an X-Api-Key from an HTTP request.",
+      "distinction": "Guard router upstream stores resolved outgoing router credentials; this helper reads incoming request credentials.",
+      "distinct_from": [
+        "runtime-next-guardrouterupstream"
+      ],
+      "aliases": [],
+      "grounding": "gatewaycredential",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-hassession",
+      "canonical": "COW page-table session presence check",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Reports whether a session ID is registered in the copy-on-write page table.",
+      "distinction": "COW page-table session lookup returns the branch or an error; this method returns only presence.",
+      "distinct_from": [
+        "runtime-third-getsession"
+      ],
+      "aliases": [],
+      "grounding": "hassession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-registersession",
+      "canonical": "COW page-table session registration",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Creates a copy-on-write session branch through the CreateSession operation.",
+      "distinction": "COW page-table session lookup retrieves an existing branch; registration creates one.",
+      "distinct_from": [
+        "runtime-third-getsession"
+      ],
+      "aliases": [],
+      "grounding": "registersession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-liftguard",
+      "canonical": "Gateway live text-tool lift guard",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Buffers streaming content to keep text-form tool calls from reaching the client as ordinary text before structured-call handling.",
+      "distinction": "Gateway warmup readiness arming controls readiness; the lift guard protects the live stream content boundary.",
+      "distinct_from": [
+        "runtime-third-armwarmupgate"
+      ],
+      "aliases": [],
+      "grounding": "liftguard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-latestcontexttokens",
+      "canonical": "Session cost ring latest context tokens",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Returns the latest recorded context-token observation, or zero when the cost ring has no history.",
+      "distinction": "ContextSafetyVerdict is a stream safety assessment; this method reads one recent session observation.",
+      "distinct_from": [
+        "runtime-burndown-contextsafetyverdict"
+      ],
+      "aliases": [],
+      "grounding": "latestcontexttokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-gemma4cachedcontinuation",
+      "canonical": "Gemma 4 cached continuation state",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Stores session-owned Gemma 4 cached continuation identity, attention rows, options, and lifecycle state.",
+      "distinction": "In-kernel generation result is a completed request result; this state persists cached continuation within a model session.",
+      "distinct_from": [
+        "runtime-third-inkernelgenerateresult"
+      ],
+      "aliases": [],
+      "grounding": "gemma4cachedcontinuation",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-sessionresidentkernel",
+      "canonical": "Session-owned resident host kernel",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Implements a model session's resident-weight matrix operations and admits each host matmul stage through session execution policy.",
+      "distinction": "Native forward session-step is a trace kind; sessionResidentKernel performs host resident-weight operations.",
+      "distinct_from": [
+        "runtime-third-nativeforwardsessionstep"
+      ],
+      "aliases": [],
+      "grounding": "sessionresidentkernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-nativeforwardsessionstep",
+      "canonical": "Native single-session forward trace kind",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Names the session_step forward timing kind used for serial native decode tracing.",
+      "distinction": "Session-owned resident host kernel executes model operations; this value classifies a forward timing event.",
+      "distinct_from": [
+        "runtime-third-sessionresidentkernel"
+      ],
+      "aliases": [],
+      "grounding": "nativeforwardsessionstep",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-settargetsession",
+      "canonical": "Metal MTP target session setter",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Updates an open Metal MTP coordinator target under locks, closing an owned draft session and resetting draft and verification state.",
+      "distinction": "sessionFromPrefixClone constructs a model session around a cache; this setter changes a coordinator's target.",
+      "distinct_from": [
+        "runtime-burndown-sessionfromprefixclone"
+      ],
+      "aliases": [],
+      "grounding": "settargetsession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-loadmodelq4kstreameddensecontext",
+      "canonical": "Cancellable streamed Q4K model loader",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Opens and loads a streamed-dense Q4K model with cooperative context cancellation, transferring checkpoint lifetime to the returned model.",
+      "distinction": "The precision-aware KV cache constructor creates empty attention cache state; this loader constructs a model from checkpoint weights.",
+      "distinct_from": [
+        "runtime-third-newkvcachewithprecision"
+      ],
+      "aliases": [],
+      "grounding": "loadmodelq4kstreameddensecontext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-v41engramcachepolicy",
+      "canonical": "V4.1 Engram row cache replacement policy",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Selects LRU or explicit CLOCK replacement for the bounded Engram row cache.",
+      "distinction": "Engram row cache options specify geometry, budget, prefetch and policy; this type names replacement choices.",
+      "distinct_from": [
+        "runtime-third-v41engramrowcacheoptions"
+      ],
+      "aliases": [],
+      "grounding": "v41engramcachepolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-v41engramrowcacheoptions",
+      "canonical": "V4.1 Engram row cache options",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Configures Engram row cache geometry, resident budget, prefetch and replacement policy.",
+      "distinction": "Engram cache policy selects a replacement strategy; these options configure the whole row cache.",
+      "distinct_from": [
+        "runtime-third-v41engramcachepolicy"
+      ],
+      "aliases": [],
+      "grounding": "v41engramrowcacheoptions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-v41layercacheget",
+      "canonical": "V4.1 layer expert cache lookup",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Returns a retained f32 block by name and refreshes its recency on a hit.",
+      "distinction": "Layer cache reset clears retained state; lookup reads a named block and updates recency.",
+      "distinct_from": [
+        "runtime-third-v41layercachereset"
+      ],
+      "aliases": [],
+      "grounding": "v41layercacheget",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-v41layercachereset",
+      "canonical": "V4.1 layer expert cache reset",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Clears retained layer expert blocks, eviction ordering, and byte accounting from projection scratch.",
+      "distinction": "Layer cache lookup returns and touches a block; reset clears the scratch cache.",
+      "distinct_from": [
+        "runtime-third-v41layercacheget"
+      ],
+      "aliases": [],
+      "grounding": "v41layercachereset",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-v41layerexpertcachebudget",
+      "canonical": "V4.1 layer expert cache budget",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Returns the bounded f32 layer expert cache budget when a checkpoint tier exists, otherwise zero.",
+      "distinction": "Layer cache lookup obtains retained data; this method selects the cache byte budget.",
+      "distinct_from": [
+        "runtime-third-v41layercacheget"
+      ],
+      "aliases": [],
+      "grounding": "v41layerexpertcachebudget",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-warmupgate",
+      "canonical": "Gateway backend warmup readiness state",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Tracks whether gateway backend warmup is armed and complete so readiness can reflect the boot transition.",
+      "distinction": "ArmWarmupGate arms this readiness policy; warmupGate stores the state.",
+      "distinct_from": [
+        "runtime-third-armwarmupgate"
+      ],
+      "aliases": [],
+      "grounding": "warmupgate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-withsessioncheckpoint",
+      "canonical": "Agent session checkpoint run option",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Configures per-turn durable checkpoint writes under a directory using a session ID.",
+      "distinction": "LoadSessionCheckpoint reads saved checkpoint data; this run option configures writing.",
+      "distinct_from": [
+        "runtime-burndown-loadsessioncheckpoint"
+      ],
+      "aliases": [],
+      "grounding": "withsessioncheckpoint",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-turnkeyrequestcontext",
+      "canonical": "Turnkey prefix-cache request context",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Binds the turnkey workspace tenant as the prefix-cache identity on a request context, using a background context when nil.",
+      "distinction": "WithPrefixCacheIdentity is the general owner-binding helper; turnkeyRequestContext supplies the turnkey workspace identity.",
+      "distinct_from": [
+        "runtime-next-withprefixcacheidentity"
+      ],
+      "aliases": [],
+      "grounding": "turnkeyrequestcontext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-slotsurl",
+      "canonical": "Llama cache observer slots endpoint override",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Overrides the derived llama-server slots telemetry URL for a proxy or bridge with a non-default endpoint.",
+      "distinction": "The Llama soft-slot setting enables conversation slot selection; SlotsURL directs an observer to a telemetry endpoint.",
+      "distinct_from": [
+        "runtime-burndown-llamasoftslot"
+      ],
+      "aliases": [],
+      "grounding": "slotsurl",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-newv41engramrowcache",
+      "canonical": "V4.1 Engram row cache constructor",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Validates the source, geometry, and budget and creates a bounded Engram row cache.",
+      "distinction": "Engram row cache options describe construction inputs; this function validates and constructs the cache.",
+      "distinct_from": [
+        "runtime-third-v41engramrowcacheoptions"
+      ],
+      "aliases": [],
+      "grounding": "newv41engramrowcache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-backendsessionclosed",
+      "canonical": "Model backend fail-closed session status",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Reports whether fail-closed teardown retired a model session.",
+      "distinction": "COW invalid session ID error signals an invalid branch-operation ID; this predicate reports backend session teardown state.",
+      "distinct_from": [
+        "runtime-next-errinvalidsessionid"
+      ],
+      "aliases": [],
+      "grounding": "backendsessionclosed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-parallelverifykernel",
+      "canonical": "Speculative immediate verification kernel",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Runs a speculative verification round and preserves the legacy immediate commit of its accepted prefix.",
+      "distinction": "ParallelVerifyKernelOwned returns a provisional round for a later Finish or Abort; ParallelVerifyKernel immediately commits the accepted prefix.",
+      "distinct_from": [
+        "speculative-verification-owned-round"
+      ],
+      "aliases": [],
+      "grounding": "parallelverifykernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-resolvedengine",
+      "canonical": "All-in-one effective engine label",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Returns the configured engine label, custom for an injected driver, mock for explicit mock mode, or unconfigured when no real engine exists.",
+      "distinction": "Guard router upstream stores an outgoing connection target; this method labels the all-in-one engine configuration for topology reporting.",
+      "distinct_from": [
+        "runtime-next-guardrouterupstream"
+      ],
+      "aliases": [],
+      "grounding": "resolvedengine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-closelanesession",
+      "canonical": "Native scheduler lane session close",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Clears the session's prefix lookup and closes it through an injected closer when present, otherwise through Session.Close.",
+      "distinction": "BackendSessionClosed reports whether fail-closed teardown has retired a session; closeLaneSession performs scheduler cleanup.",
+      "distinct_from": [
+        "runtime-third-backendsessionclosed"
+      ],
+      "aliases": [],
+      "grounding": "closelanesession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-errgemma4cachedcontinuation",
+      "canonical": "Gemma 4 cached continuation refusal",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Is the sentinel for fail-closed cached-continuation selection, state, or lifetime refusal.",
+      "distinction": "Gemma 4 cached continuation state stores the session's continuation; this sentinel identifies a refusal.",
+      "distinct_from": [
+        "runtime-third-gemma4cachedcontinuation"
+      ],
+      "aliases": [],
+      "grounding": "errgemma4cachedcontinuation",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-v41engramgatefunc",
+      "canonical": "V4.1 device Engram gate function",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Applies one Engram layer to resident streams by decoding gathered rows, projecting, and publishing gate/add output; it may decline before device work.",
+      "distinction": "V41EngramGateStreams specifies the fixed stream count; this function performs the layer operation.",
+      "distinct_from": [
+        "runtime-third-v41engramgatestreams"
+      ],
+      "aliases": [],
+      "grounding": "v41engramgatefunc",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-v41engramgatestreams",
+      "canonical": "V4.1 Engram gate stream count",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Defines the fixed hyper-connection stream count read by the Engram gate from its resident panel.",
+      "distinction": "The device Engram gate function applies a layer; this constant specifies its stream geometry.",
+      "distinct_from": [
+        "runtime-third-v41engramgatefunc"
+      ],
+      "aliases": [],
+      "grounding": "v41engramgatestreams",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-qwen35querygatesplitbackend",
+      "canonical": "Qwen 3.5 query-gate split backend capability",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Defines the backend operation that splits a combined Qwen 3.5 query-gate tensor into query and gate tensors.",
+      "distinction": "splitPackedQueryGate is the host splitter for packed query and output-gate vectors; this interface exposes a backend tensor split operation.",
+      "distinct_from": [
+        "issue9181-guard-gate-split-packed-query"
+      ],
+      "aliases": [],
+      "grounding": "qwen35querygatesplitbackend",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-fakguardposture",
+      "canonical": "Guard posture environment setting",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Supplies the guard adjudication posture as an environment setting when resolving guard configuration.",
+      "distinction": "Native agent receipt guard posture records the effective value; this environment setting is a configuration input.",
+      "distinct_from": [
+        "runtime-next-guardposture"
+      ],
+      "aliases": [],
+      "grounding": "fakguardposture",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-mcpfakguard",
+      "canonical": "Fak guard MCP tool prefix",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Prefixes MCP-exposed Fak guard tool names and is stripped by agent tool normalization.",
+      "distinction": "The prefixed capabilities tool name identifies a particular tool; this prefix is shared across guard tools.",
+      "distinct_from": [
+        "runtime-third-mcpfakguardfakcapabilities"
+      ],
+      "aliases": [],
+      "grounding": "mcpfakguard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-third-mcpfakguardfakcapabilities",
+      "canonical": "Fak guard MCP capabilities tool name",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Names the prefixed capabilities tool accepted by gateway capability-tool recognition.",
+      "distinction": "The Fak guard MCP prefix is shared by multiple tools; this full name identifies capabilities.",
+      "distinct_from": [
+        "runtime-third-mcpfakguard"
+      ],
+      "aliases": [],
+      "grounding": "mcpfakguardfakcapabilities",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-prefillbatchcausalattention",
+      "canonical": "Batched prefill causal attention contraction",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Computes scaled dot-product causal attention for prompt-panel queries against cached keys and values.",
+      "distinction": "Qwen causal panel geometry validation checks dimensions and ABI bounds; this function computes attention output.",
+      "distinct_from": [
+        "runtime-fourth-validateqwen35causalattentionpanelgeometry"
+      ],
+      "aliases": [],
+      "grounding": "prefillbatchcausalattention",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-validateqwen35causalattentionpanelgeometry",
+      "canonical": "Qwen causal attention panel geometry validation",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Validates Qwen causal attention panel KV and query-head geometry and checks CUDA integer ABI bounds.",
+      "distinction": "Batched prefill causal attention computes the contraction; this validator checks panel geometry before an operation.",
+      "distinct_from": [
+        "runtime-fourth-prefillbatchcausalattention"
+      ],
+      "aliases": [],
+      "grounding": "validateqwen35causalattentionpanelgeometry",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-v41attentionindexlist",
+      "canonical": "V4.1 compressed attention index list",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Resolves and validates compressed-stream selection rows and normalizes them to the published per-position top-k stride.",
+      "distinction": "Selected V4.1 shared attention invokes a selected attention operation; the index list resolves its selection indices.",
+      "distinct_from": [
+        "runtime-fourth-v41selectedsharedattention"
+      ],
+      "aliases": [],
+      "grounding": "v41attentionindexlist",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-v41selectedsharedattention",
+      "canonical": "Selected V4.1 shared attention invocation",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Invokes the selected shared attention function and wraps its failure with layer and attention-stage context.",
+      "distinction": "V4.1 attention index list resolves selection indices; this helper invokes the selected attention implementation.",
+      "distinct_from": [
+        "runtime-fourth-v41attentionindexlist"
+      ],
+      "aliases": [],
+      "grounding": "v41selectedsharedattention",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-withnativelinearattnrows",
+      "canonical": "Native linear-attention row loader option",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Controls retention of eligible native quantized linear-attention rows after raw reorder; false forces the historical Q8 route.",
+      "distinction": "Cancellable streamed Q4K model loader loads weights; this option selects eligible linear-attention row handling.",
+      "distinct_from": [
+        "runtime-third-loadmodelq4kstreameddensecontext"
+      ],
+      "aliases": [],
+      "grounding": "withnativelinearattnrows",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-newv41attentionstate",
+      "canonical": "V4.1 attention state constructor",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Validates attention geometry and constructs empty V4.1 temporal attention state with a bounded compression ratio.",
+      "distinction": "V4.1 attention index list resolves compressed selections from state; this constructor allocates and initializes the state.",
+      "distinct_from": [
+        "runtime-fourth-v41attentionindexlist"
+      ],
+      "aliases": [],
+      "grounding": "newv41attentionstate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-qwen35graphattentionresult",
+      "canonical": "Qwen 3.5 graph attention result",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Groups graph results for attention output and the raw key, post-rotation key, and value panels.",
+      "distinction": "Batched prefill causal attention computes a host contraction; this structure carries graph-owned output panels.",
+      "distinct_from": [
+        "runtime-fourth-prefillbatchcausalattention"
+      ],
+      "aliases": [],
+      "grounding": "qwen35graphattentionresult",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-validatev41sharedattention",
+      "canonical": "V4.1 shared attention input validation",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Validates shared-attention mode, geometry, scale, tensor sizes and ABI bounds before execution and computes byte sizes.",
+      "distinction": "Selected V4.1 shared attention invocation calls the chosen operation; this validator checks its inputs.",
+      "distinct_from": [
+        "runtime-fourth-v41selectedsharedattention"
+      ],
+      "aliases": [],
+      "grounding": "validatev41sharedattention",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-mgqwen35graphattention",
+      "canonical": "Metal Qwen graph attention with host F32 prefix",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Native graph entrypoint for ordered-panel Qwen attention using host F32 key and value prefix inputs.",
+      "distinction": "The device-KV entrypoint reads a persistent device prefix; this entrypoint takes host prefix pointers.",
+      "distinct_from": [
+        "runtime-fourth-mgqwen35graphattentiondkv"
+      ],
+      "aliases": [],
+      "grounding": "mgqwen35graphattention",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-mgqwen35graphattentiondkv",
+      "canonical": "Metal Qwen graph attention with device F32 KV",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Native graph entrypoint for ordered-panel Qwen attention against persistent device F32 key and value storage.",
+      "distinction": "The host-prefix entrypoint takes host key and value prefix pointers; this entrypoint uses device KV storage.",
+      "distinct_from": [
+        "runtime-fourth-mgqwen35graphattention"
+      ],
+      "aliases": [],
+      "grounding": "mgqwen35graphattentiondkv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-mgqwen35graphattentionq8",
+      "canonical": "Metal Qwen graph attention with host Q8 prefix",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Native graph entrypoint for Qwen panel attention using a packed Q8 host KV prefix and producing packed panel rows.",
+      "distinction": "The device-Q8 entrypoint attends over a persistent device store; this entrypoint takes the host packed prefix.",
+      "distinct_from": [
+        "runtime-fourth-mgqwen35graphattentiondkvq8"
+      ],
+      "aliases": [],
+      "grounding": "mgqwen35graphattentionq8",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-mgqwen35graphattentiondkvq8",
+      "canonical": "Metal Qwen graph attention with device Q8 KV",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Native graph entrypoint for Qwen panel attention that appends and reads packed Q8 KV in a persistent device store.",
+      "distinction": "The host-Q8 entrypoint receives packed host prefix rows; this entrypoint reads and appends device KV.",
+      "distinct_from": [
+        "runtime-fourth-mgqwen35graphattentionq8"
+      ],
+      "aliases": [],
+      "grounding": "mgqwen35graphattentiondkvq8",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-attnsink",
+      "canonical": "V4 Flash ratio-zero per-head attention sink weights",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Stores one learnable sink value per head for the ratio-zero reference attention reduction; the sink contributes to the softmax denominator without a value.",
+      "distinction": "v41SparseAttentionSinkChecked obtains and validates a sink for a selected layer; AttnSink is the ratio-zero reference weight vector.",
+      "distinct_from": [
+        "v41sparseattentionsinkchecked"
+      ],
+      "aliases": [],
+      "grounding": "attnsink",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-treeverifyattention",
+      "canonical": "Speculative tree-mask verification attention",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Dispatches attention with an arbitrary topologically ordered causal tree mask for up to 32 speculative queries to a capable tensor or default backend.",
+      "distinction": "Batched prefill causal attention follows sequential prompt causality; tree verification accepts an explicit branch-tree mask.",
+      "distinct_from": [
+        "runtime-fourth-prefillbatchcausalattention"
+      ],
+      "aliases": [],
+      "grounding": "treeverifyattention",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-deepseek41attentiondescriptordiagnostics",
+      "canonical": "DeepSeek 4.1 attention descriptor preflight diagnostics",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Aggregates per-layer V4.1 attention descriptor incompatibilities against the native forward admission contract.",
+      "distinction": "V4.1 shared attention input validation checks invocation tensor geometry; this preflight examines checkpoint descriptors across layers.",
+      "distinct_from": [
+        "runtime-fourth-validatev41sharedattention"
+      ],
+      "aliases": [],
+      "grounding": "deepseek41attentiondescriptordiagnostics",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-fakcudav41sharedattention",
+      "canonical": "CUDA V4.1 shared-attention build tag",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Selects the candidate CUDA shared-attention Go binding when combined with cuda and cgo build tags.",
+      "distinction": "V4.1 shared attention input validation checks runtime operands; this build tag selects compilation of the CUDA binding.",
+      "distinct_from": [
+        "runtime-fourth-validatev41sharedattention"
+      ],
+      "aliases": [],
+      "grounding": "fakcudav41sharedattention",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-policycontext",
+      "canonical": "ABI execution policy context",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Carries execution-time capability-floor posture, profile and safe-sink configuration.",
+      "distinction": "PolicyFromContext extracts this value from a context; PolicyContext is the carried data.",
+      "distinct_from": [
+        "runtime-fourth-policyfromcontext"
+      ],
+      "aliases": [],
+      "grounding": "policycontext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-policyfromcontext",
+      "canonical": "ABI policy context extraction",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Extracts a PolicyContext from a Go context when present and reports whether it was found.",
+      "distinction": "PolicyContext is the execution-time data; PolicyFromContext retrieves it.",
+      "distinct_from": [
+        "runtime-fourth-policycontext"
+      ],
+      "aliases": [],
+      "grounding": "policyfromcontext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-withcompressionpolicy",
+      "canonical": "MCP compression policy context binding",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Returns a derived context carrying the requested structured-compression policy, using a background context if nil.",
+      "distinction": "WithCompressionContext supplies a context to compression options; WithCompressionPolicy binds a policy into a context.",
+      "distinct_from": [
+        "runtime-burndown-withcompressioncontext"
+      ],
+      "aliases": [],
+      "grounding": "withcompressionpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-adjudicatewithseq",
+      "canonical": "Gateway sequenced tool adjudication",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Builds and adjudicates a tool call with an optional sequence number, handles transformations and lease admission, and records the operation.",
+      "distinction": "ABI policy context extraction reads execution policy data; this method adjudicates a gateway tool call.",
+      "distinct_from": [
+        "runtime-fourth-policyfromcontext"
+      ],
+      "aliases": [],
+      "grounding": "adjudicatewithseq",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-setconfiguredposture",
+      "canonical": "Agent configured posture setter",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Sets the posture that agent Configure uses to initialize the adjudicator policy.",
+      "distinction": "PostureDefaultOpen is one ABI posture value; this setter changes the configured agent posture.",
+      "distinct_from": [
+        "runtime-fourth-posturedefaultopen"
+      ],
+      "aliases": [],
+      "grounding": "setconfiguredposture",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-posturedefaultopen",
+      "canonical": "ABI default-open posture value",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Selects the ABI posture that permits tools by default after provable refusal checks pass.",
+      "distinction": "Agent configured posture setter changes a configured posture; PostureDefaultOpen is one possible ABI value.",
+      "distinct_from": [
+        "runtime-fourth-setconfiguredposture"
+      ],
+      "aliases": [],
+      "grounding": "posturedefaultopen",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-llamasoftpolicy",
+      "canonical": "Gateway llama soft-slot policy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Stores the configured soft-slot policy and passes it to the HTTP planner for request slot selection.",
+      "distinction": "HTTP planner LlamaSoftSlotPolicy is the consumer field; this gateway field carries its configured value.",
+      "distinct_from": [
+        "runtime-burndown-llamasoftslotpolicy"
+      ],
+      "aliases": [],
+      "grounding": "llamasoftpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-adjudicationverdict",
+      "canonical": "Gateway feature-proof adjudication verdict",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Carries the wire adjudication verdict within a gateway feature-proof record.",
+      "distinction": "Gateway sequenced tool adjudication computes a verdict; this field records one in a proof.",
+      "distinct_from": [
+        "runtime-fourth-adjudicatewithseq"
+      ],
+      "aliases": [],
+      "grounding": "adjudicationverdict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-postureoperatorapproved",
+      "canonical": "Operator-approved verdict posture marker",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Names the verdict metadata posture value stamped when an operator approval admits a call.",
+      "distinction": "ABI default-open posture is a policy default; this marker records a specific operator-approved admission.",
+      "distinct_from": [
+        "runtime-fourth-posturedefaultopen"
+      ],
+      "aliases": [],
+      "grounding": "postureoperatorapproved",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-policyrefusal",
+      "canonical": "Intra-model routing policy-refusal flag",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Marks a kernel policy block in intra-model routing input.",
+      "distinction": "PolicyReason carries the refusal reason; PolicyRefusal is the boolean block signal.",
+      "distinct_from": [
+        "runtime-fourth-policyreason"
+      ],
+      "aliases": [],
+      "grounding": "policyrefusal",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-policyreason",
+      "canonical": "Intra-model routing policy-refusal reason",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Carries the policy refusal reason in intra-model routing input.",
+      "distinction": "PolicyRefusal signals that a policy block occurred; PolicyReason carries its reason.",
+      "distinct_from": [
+        "runtime-fourth-policyrefusal"
+      ],
+      "aliases": [],
+      "grounding": "policyreason",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-attnqb",
+      "canonical": "GGUF attention query up-projection name",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Names the attention query B projection weight in GGUF tensor mappings, including the per-head query up-projection.",
+      "distinction": "The attention output projection maps attention results onward; the query B weight expands the query path into heads.",
+      "distinct_from": [
+        "runtime-fourth-attnoutput"
+      ],
+      "aliases": [],
+      "grounding": "attnqb",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-attnoutput",
+      "canonical": "GGUF attention output projection name",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Names the attention output projection tensor in GGUF mappings.",
+      "distinction": "The attention query B projection expands the query path; the output projection acts after attention.",
+      "distinct_from": [
+        "runtime-fourth-attnqb"
+      ],
+      "aliases": [],
+      "grounding": "attnoutput",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-attnknorm",
+      "canonical": "GGUF attention key normalization weight name",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Names the attention key-normalization weight in GGUF transform contracts.",
+      "distinction": "Attention output projection maps attention results onward; the key-normalization weight acts on the key path.",
+      "distinct_from": [
+        "runtime-fourth-attnoutput"
+      ],
+      "aliases": [],
+      "grounding": "attnknorm",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-errq4kloadestimateunsupported",
+      "canonical": "Unsupported Q4K transformed-load estimate sentinel",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Signals that a requested Q4K loader route lacks a qualified transformed-weight estimate; malformed inputs to supported routes use other errors.",
+      "distinction": "The cancellable streamed Q4K loader loads a model; this sentinel reports that a separate transformed-weight estimate is unqualified.",
+      "distinct_from": [
+        "runtime-third-loadmodelq4kstreameddensecontext"
+      ],
+      "aliases": [],
+      "grounding": "errq4kloadestimateunsupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-servemetaldecision",
+      "canonical": "Serve Metal availability decision",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "Carries whether the session runs a Metal forward and, for a genuine Metal miss, its skip reason.",
+      "distinction": "ResolveServeMetalDecision computes this result from serve selection and probes; serveMetalDecision carries the result.",
+      "distinct_from": [
+        "runtime-fourth-resolveservemetaldecision"
+      ],
+      "aliases": [],
+      "grounding": "servemetaldecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-resolveservemetaldecision",
+      "canonical": "Serve Metal availability resolver",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "Resolves serve Metal selection and reports a Metal miss reason only when Metal was actually targeted.",
+      "distinction": "serveMetalDecision is the result value; this function computes it.",
+      "distinct_from": [
+        "runtime-fourth-servemetaldecision"
+      ],
+      "aliases": [],
+      "grounding": "resolveservemetaldecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-servestreamedcpuoffloadpathdecision",
+      "canonical": "Serve streamed CPU-offload path decision",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "Determines whether the GGUF serve path uses streamed CPU-offload experts and returns the corresponding resident bound.",
+      "distinction": "Serve Metal availability resolver decides Metal targeting; this decision concerns the streamed CPU-offload path and resident bound.",
+      "distinct_from": [
+        "runtime-fourth-resolveservemetaldecision"
+      ],
+      "aliases": [],
+      "grounding": "servestreamedcpuoffloadpathdecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-inkernelrenderdeepseekv41chatsegments",
+      "canonical": "In-kernel DeepSeek V4.1 chat segment renderer",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "Builds the V4.1 chat branch as trusted template segments and ordinary client segments after applying tool choice.",
+      "distinction": "Template render failure message reports an upstream refusal; this function renders the in-kernel V4.1 chat request.",
+      "distinct_from": [
+        "runtime-fourth-templaterendermessage"
+      ],
+      "aliases": [],
+      "grounding": "inkernelrenderdeepseekv41chatsegments",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-codeupstreamtemplaterender",
+      "canonical": "Gateway upstream template-render error code",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "Names the OpenAI-style error code upstream_template_render for an upstream chat-template rendering failure.",
+      "distinction": "Template render message supplies scrubbed client-facing detail; this constant supplies the branchable code.",
+      "distinct_from": [
+        "runtime-fourth-templaterendermessage"
+      ],
+      "aliases": [
+        "upstream_template_render"
+      ],
+      "grounding": "codeupstreamtemplaterender",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-templaterendermessage",
+      "canonical": "Gateway upstream template-render failure message",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "Builds a bounded client message from a fixed prefix and a scrubbed upstream error message.",
+      "distinction": "The upstream template-render error code supplies a branchable identifier; this function constructs the client message.",
+      "distinct_from": [
+        "runtime-fourth-codeupstreamtemplaterender"
+      ],
+      "aliases": [],
+      "grounding": "templaterendermessage",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-validateqwen35mtpmaterialized",
+      "canonical": "Qwen 3.5 MTP retained-weight validation",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "Checks that all required Qwen 3.5 MTP head tensors were materialized when a seen set is supplied.",
+      "distinction": "Cancellable streamed Q4K model loader loads checkpoint weights; this validator checks a required retained MTP tensor set.",
+      "distinct_from": [
+        "runtime-third-loadmodelq4kstreameddensecontext"
+      ],
+      "aliases": [],
+      "grounding": "validateqwen35mtpmaterialized",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-materializedview",
+      "canonical": "Session lifecycle materialized view",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "Maintains bounded FIFO detail rows while accumulating monotonic session summary counters.",
+      "distinction": "Gateway sessionView snapshots terminal transcript and effects; this view retains lifecycle detail and summary.",
+      "distinct_from": [
+        "runtime-burndown-sessionview"
+      ],
+      "aliases": [],
+      "grounding": "materializedview",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-issurrendernote",
+      "canonical": "Stop-gate surrender-note detection",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "Reports whether text contains a recognized surrender or give-up phrase.",
+      "distinction": "StopGate evaluates completion evidence at a final boundary; IsSurrenderNote only recognizes a surrender phrase in text.",
+      "distinct_from": [
+        "stopgate"
+      ],
+      "aliases": [],
+      "grounding": "issurrendernote",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-searchcache",
+      "canonical": "vDSO scoped search result cache",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Memoizes eligible search operations across unchanged directory trees and invalidates results hierarchically by path scope.",
+      "distinction": "Radix startup-claim cache coordinates model prefix claims; SearchCache retains tool search results and invalidates them on filesystem mutation.",
+      "distinct_from": [
+        "runtime-third-startupcache"
+      ],
+      "aliases": [],
+      "grounding": "searchcache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-finalgate",
+      "canonical": "Agent loop final completion gate",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Holds an optional post-condition callback checked before a model final answer may end the owned loop.",
+      "distinction": "IsSurrenderNote detects a textual surrender phrase; finalGate checks an explicit completion post-condition.",
+      "distinct_from": [
+        "runtime-fourth-issurrendernote"
+      ],
+      "aliases": [],
+      "grounding": "finalgate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-sessionindexalivepids",
+      "canonical": "Session index live process snapshot",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Collects a process-ID set for session-index classification and reports failure when the process table is unreadable.",
+      "distinction": "Session durability host label identifies the local host; this function snapshots currently observed process IDs.",
+      "distinct_from": [
+        "runtime-next-sessiondurabilityhost"
+      ],
+      "aliases": [],
+      "grounding": "sessionindexalivepids",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-workerpool",
+      "canonical": "Harness worker allocation interface",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Defines acquire, release, availability and capacity operations for worker instances by role.",
+      "distinction": "L3 dispatcher proxy pool reuses network clients; WorkerPool allocates worker dispatchers by role.",
+      "distinct_from": [
+        "runtime-fourth-proxypool"
+      ],
+      "aliases": [],
+      "grounding": "workerpool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-proxypool",
+      "canonical": "L3 dispatcher proxy client pool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Maps remote addresses to reusable proxy clients under a mutex, closing and removing failed connections.",
+      "distinction": "Harness WorkerPool allocates worker instances; proxyPool retains network clients by address.",
+      "distinct_from": [
+        "runtime-fourth-workerpool"
+      ],
+      "aliases": [],
+      "grounding": "proxypool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-bodypoolidx",
+      "canonical": "L3 protocol message body pool index",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Records the owning body-buffer pool index on a message, or minus one for an unpooled body, so the buffer can be returned.",
+      "distinction": "L3 dispatcher proxy pool holds reusable clients; BodyPoolIdx identifies a message buffer pool.",
+      "distinct_from": [
+        "runtime-fourth-proxypool"
+      ],
+      "aliases": [],
+      "grounding": "bodypoolidx",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-errpoolstopped",
+      "canonical": "Observer stopped-pool sentinel",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "Signals that an observer pool has been stopped when an operation requires an active pool.",
+      "distinction": "Harness WorkerPool is an allocation interface; ErrPoolStopped is an observer lifecycle error.",
+      "distinct_from": [
+        "runtime-fourth-workerpool"
+      ],
+      "aliases": [],
+      "grounding": "errpoolstopped",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-fakgatewayurl",
+      "canonical": "Info command gateway URL environment default",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Supplies the default gateway URL for the fak info polling flag, falling back to the local gateway URL.",
+      "distinction": "Llama observer SlotsURL targets slots telemetry; FAK_GATEWAY_URL supplies the info command gateway default.",
+      "distinct_from": [
+        "runtime-third-slotsurl"
+      ],
+      "aliases": [],
+      "grounding": "fakgatewayurl",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-numslots",
+      "canonical": "Vulkan staging pool slot count",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Stores the number of staging slots in a Vulkan staging pool, which requires at least two at construction.",
+      "distinction": "Vulkan staging pool slot size is bytes per slot; numSlots counts slots.",
+      "distinct_from": [
+        "runtime-fourth-slotsize"
+      ],
+      "aliases": [],
+      "grounding": "numslots",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "runtime-fourth-slotsize",
+      "canonical": "Vulkan staging pool slot size",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Stores the byte capacity of each slot in a Vulkan staging pool.",
+      "distinction": "Vulkan staging pool slot count is the number of slots; slotSize is each slot's byte capacity.",
+      "distinct_from": [
+        "runtime-fourth-numslots"
+      ],
+      "aliases": [],
+      "grounding": "slotsize",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-runtime-burndown-20261102.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

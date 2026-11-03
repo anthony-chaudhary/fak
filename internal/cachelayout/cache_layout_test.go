@@ -121,3 +121,28 @@ func equalInts(a, b []int) bool {
 	}
 	return true
 }
+
+// BenchmarkNewModelCacheLayout measures layout-derivation cost for a realistic
+// 64-layer hybrid decoder stack (qwen35-family 3:1 linear/full cadence).
+func BenchmarkNewModelCacheLayout(b *testing.B) {
+	types := make([]string, 0, 64)
+	for l := 0; l < 64; l++ {
+		if l%4 == 3 {
+			types = append(types, "full_attention")
+		} else {
+			types = append(types, "linear_attention")
+		}
+	}
+	geom := CacheLayoutGeometry{
+		NumKVHeads:          4,
+		HeadDim:             128,
+		LinearNumValueHeads: 36,
+		LinearKeyHeadDim:    128,
+		LinearValueHeadDim:  128,
+		LinearConvKernelDim: 4,
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		NewModelCacheLayout(types, geom)
+	}
+}

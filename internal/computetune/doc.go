@@ -8,4 +8,11 @@
 //   - Manifest lookups require exact environment compatibility (backend, device, revisions).
 //   - Candidate outputs must match the reference implementation before timing is admitted.
 //   - Offline arbitration evaluates unified memory bandwidth against NVMe SSD flash wear.
+//
+// Wiring status (updated 2026-11-03, flow ticket debtwave2-internal-computetune):
+// the production call path is the `fak computetune` verb (cmd/fak/computetune.go),
+// which invokes Decide with the baseline Strix platform profiles or an
+// operator-supplied JSON PlatformProfile. Tune and DispatchMatMul remain offline
+// seams: no engine-runtime caller exists yet, and manifest-driven kernel
+// selection awaits a follow-on wave authorized to touch the caller side.
 package computetune

@@ -187,142 +187,16 @@ func Search(in SearchInput) SearchReport {
 	rep.Evidence = p.evidence()
 	rep.Model = &in.Model
 
-	// Hard memory facts first: they hold regardless of calibration quality. Oversize weights
-	// are a cost, not a refusal, unless the operator pinned the all-resident placement.
-	if searchTiered(p, &rep, in, isl) {
-		return rep
-	}
-	if p.hostShort {
-		refuseSearch(&rep, ReasonWeightsExceedPool, "", 0, 0, p.hostWeights-p.in.Hardware.HostPoolUsableBytes, true)
-		return rep
-	}
-	if !in.Calibration.rankable() {
-		refuseSearch(&rep, ReasonNoRankableCalibration, "", 0, 0, 0, false)
-		return rep
-	}
-	if p.gate != "" {
-		rep.Status = StatusUnknown
-		rep.Omitted = []Omission{p.gate}
-		return rep
-	}
-	if p.avail <= 0 {
-		rep.Status = StatusUnknown
-		rep.Omitted = append(rep.Omitted, OmitPoolCapacityUnknown)
+	// Hard memory facts first: they hold regardless of calibration quality.
+	// Oversize weights are a cost, not a refusal, unless the operator pinned
+	// the all-resident placement.
+	ax, admitted := admitSearch(p, &rep, in, isl, target)
+	if !admitted {
 		return rep
 	}
 
-	tiers := dedupeTiers(in.Tiers)
-	if len(tiers) == 0 {
-		rep.Status = StatusUnknown
-		rep.Omitted = append(rep.Omitted, OmitKVGeometryUnknown)
-		return rep
-	}
-
-	ctxs := contextLadder(in.ResolvedContext, in.Model.MaxContextTokens, in.Pins.ContextTokens)
-	if len(ctxs) == 0 {
-		rep.Status = StatusUnknown
-		rep.Omitted = append(rep.Omitted, OmitContextUnknown)
-		return rep
-	}
-	if in.Pins.ContextTokens > 0 {
-		ctxs = []int{in.Pins.ContextTokens} // a pin fixes the axis exactly
-	}
-	slotsList := slotLadder(target, in.Pins.Slots)
-	if in.Pins.Slots > 0 {
-		slotsList = []int{in.Pins.Slots}
-	}
-	if pin := strings.ToLower(strings.TrimSpace(in.Pins.KVPrecision)); pin != "" {
-		var filtered []KVTier
-		for _, t := range tiers {
-			if strings.ToLower(t.Precision) == pin {
-				filtered = append(filtered, t)
-			}
-		}
-		if len(filtered) == 0 {
-			refuseSearch(&rep, ReasonPinInfeasible, pin, 0, 0, 0, false)
-			rep.Refusal.Pin = "kv_precision=" + pin
-			return rep
-		}
-		tiers = filtered
-	}
-
-	var rows []searchScored
-	for _, tier := range tiers {
-		c := Candidate{KVPrecision: tier.Precision, Context: tier.Context}
-		if !kvSizable(c.Context) {
-			continue
-		}
-		for _, ctx := range ctxs {
-			c.ContextTokens = ctx
-			lkv := min(isl, ctx)
-			rate1 := p.stepRateAt(c, 1, lkv)
-			for _, slots := range slotsList {
-				q := p.atConcurrency(slots)
-				pr := q.predict(c)
-				bMem := pr.MaxConcurrency
-				if bMem < 1 {
-					continue // not even one stream fits at this ctx
-				}
-				bStar := min(bMem, slots)
-				if in.SLO.TPOTMS > 0 && bStar > 0 {
-					bStar = maxBatchAtRate(p, c, lkv, bStar, 1000.0/in.SLO.TPOTMS)
-				}
-				ttft := 0.0
-				if bStar > 0 {
-					ttft = p.chunkedTTFT(c, lkv, bStar, osl)
-				}
-				rows = append(rows, searchScored{
-					row: SearchRow{
-						KVPrecision:   tier.Precision,
-						ContextTokens: ctx,
-						Slots:         slots,
-						BStar:         bStar,
-						AggregateTokS: aggregateAt(p, c, lkv, bStar),
-						TTFTSeconds:   ttft,
-						Current:       in.CurrentKV != "" && strings.EqualFold(in.CurrentKV, tier.Precision) && ctx == in.ResolvedContext && slots == target,
-					},
-					ctxOK:   ctx >= isl,
-					ttftOK:  in.SLO.TTFTMS <= 0 || ttft*1000 <= in.SLO.TTFTMS+1e-9,
-					bMem:    bMem,
-					tpot1MS: tpotMS(rate1),
-				})
-			}
-		}
-	}
-
-	// Rows sharing (tier, ctx, B*) are the same achievable configuration priced
-	// at different enumerated operating points; keep the tightest one (rows are
-	// generated in ascending slot order, so the first occurrence wins).
-	deduped := rows[:0]
-	seenKey := map[string]bool{}
-	for _, s := range rows {
-		key := fmt.Sprintf("%s|%d|%d", s.row.KVPrecision, s.row.ContextTokens, s.row.BStar)
-		if seenKey[key] {
-			continue
-		}
-		seenKey[key] = true
-		deduped = append(deduped, s)
-	}
-	rows = deduped
-
-	// A row serves the stated workload iff its context covers the prompt, its
-	// TTFT holds the SLO, and B* reaches the target concurrency.
-	eligible := make([]searchScored, 0, len(rows))
-	for _, s := range rows {
-		if s.ctxOK && s.ttftOK && s.row.BStar >= target {
-			eligible = append(eligible, s)
-		}
-	}
-	sort.SliceStable(eligible, func(i, j int) bool {
-		a, b := eligible[i].row, eligible[j].row
-		if a.AggregateTokS != b.AggregateTokS {
-			return a.AggregateTokS > b.AggregateTokS
-		}
-		if a.ContextTokens != b.ContextTokens {
-			return a.ContextTokens > b.ContextTokens
-		}
-		return a.Slots < b.Slots
-	})
+	rows := dedupeRows(enumerateRows(p, in, ax.tiers, ax.ctxs, ax.slotsList, isl, osl, target))
+	eligible := rankEligible(rows, target)
 	if len(eligible) > 0 {
 		chosen := eligible[0]
 		rep.Chosen = &chosen.row
@@ -341,37 +215,7 @@ func Search(in SearchInput) SearchReport {
 	}
 
 	// No eligible row: classify into the typed refusal vocabulary.
-	if anyPinSet(in.Pins) {
-		classifyPin(&rep, rows, in, isl, target)
-		return rep
-	}
-	if subSat(p.avail, p.weights) < 0 {
-		if in.Model.NumExperts > 0 && in.Model.RoutedExpertBytes > 0 {
-			refuseSearch(&rep, ReasonNeedsRing, "", 0, 0, subSat(p.weights, p.avail), false)
-		} else {
-			refuseSearch(&rep, ReasonWeightsExceedPool, "", 0, 0, subSat(p.weights, p.avail), false)
-		}
-		return rep
-	}
-	desired := in.ResolvedContext
-	if desired < isl {
-		desired = isl
-	}
-	maxOne, kvOne := p.maxSlotContextFor(tiers, 1)
-	maxTarget, _ := p.maxSlotContextFor(tiers, target)
-	switch {
-	case maxOne == 0:
-		refuseSearch(&rep, ReasonContextExceedsPool, bestTierPrecision(tiers), 0, 0, p.shortfallOneStream(tiers, isl), false)
-	case maxTarget < desired:
-		if maxOne < desired {
-			refuseSearch(&rep, ReasonFitsOnlyAtCtxLT, kvOne, maxOne, 0, 0, false)
-			rep.Refusal.RequestedContext = desired
-		} else {
-			refuseSearch(&rep, ReasonConcurrencyExceedsPool, "", 0, maxConcAt(rows, desired), 0, false)
-		}
-	default:
-		refuseSLO(&rep, rows, in.SLO, target)
-	}
+	refuseNoEligible(&rep, p, rows, in, ax.tiers, isl, target)
 	return rep
 }
 

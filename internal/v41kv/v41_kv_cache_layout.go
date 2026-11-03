@@ -561,7 +561,7 @@ const (
 // whose format, geometry, width, or byte length does not match the published
 // FlashMLA layout. A layout is the cache's addressing contract, so an
 // unrecognized or inconsistent request is refused rather than guessed.
-var ErrV41KVCacheLayout = errors.New("model: DeepSeek V4.1 paged KV cache layout is invalid")
+var ErrV41KVCacheLayout = errors.New("model: V4.1 paged KV cache layout is invalid")
 
 // finite32 retains the original public refusal for every IEEE nonfinite input.
 func finite32(v float32) bool { return math.Float32bits(v)&0x7f800000 != 0x7f800000 }

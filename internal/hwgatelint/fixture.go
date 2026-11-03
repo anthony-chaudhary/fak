@@ -30,19 +30,19 @@ func Fixture() []FixtureCase {
 	return []FixtureCase{
 		// --- fleet-clean: dispatched the work, or never gated on hardware ---
 		{
-			Name:  "clean-dispatched-dgx",
-			Text:  "The device-GEMM witness needs a GPU, which this laptop lacks — so I dispatched it to the DGX via dgxbridge and recorded the result.",
+			Name:  "clean-dispatched-lan",
+			Text:  "The device-GEMM witness needs a GPU, which this laptop lacks — so I dispatched it to an eligible enrolled LAN node after admission checks and recorded the result.",
 			Clean: true,
 		},
 		{
 			Name:  "clean-gpu-node-ran-it",
-			Text:  "Ran the CUDA acceptance suite on fak-realmodel (L4 sm_89); Q8 device-GEMM matches the reference within tolerance.",
+			Text:  "Ran the CUDA acceptance suite on a qualified LAN compute node; Q8 device-GEMM matches the reference within tolerance.",
 			Clean: true,
 		},
 		{
-			Name:  "clean-handed-operator-command",
-			Text:  "No credential session for the GPU node is live here. Produced the ready-to-run command sequence and handed it to the operator to run on GCP.",
-			Clean: true,
+			Name:   "gate-unverified-operator-command",
+			Text:   "No credential session for the GPU node is live here. Produced the ready-to-run command sequence and handed it to the operator to run on GCP.",
+			Expect: []Class{NoLocalGPU},
 		},
 		{
 			Name:  "clean-no-hardware-mention",

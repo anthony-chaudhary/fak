@@ -6,12 +6,25 @@ description: ".claude/project-assets.json is the canonical registry for portable
 
 `.claude/project-assets.json` is the canonical registry for portable project skills,
 project memories, and reusable goal prompts. Claude continues to read the canonical
-`.claude` paths. Codex and OpenCode discover generated, regular-file adapters under
-`.agents/skills` (configured in `opencode.json` via `skills.paths: [".agents/skills"]`);
-each adapter points to one canonical `SKILL.md` and does not copy its
-maintained body, so the seam also works in Windows checkouts without symlinks.
+`.claude` paths. Codex, OpenCode, and pi discover generated **one-hop mirrors** under
+`.agents/skills` (OpenCode configured in `opencode.json` via
+`skills.paths: [".agents/skills"]`; pi passed explicitly via `fak pi --skill`): each
+mirror is a regular-file, full-body copy of one canonical
+`.claude/skills/<name>/SKILL.md` with provenance metadata injected in the frontmatter
+(`generated-by: fak project-assets sync` plus a `canonical:` key naming the source).
+Because mirrors are plain files, Windows checkouts need no symlinks; `.claude/skills`
+remains the single semantic source, and regeneration is idempotent and parity-gated
+(`zero_unexplained_gaps: true`).
 
-Generate adapters after adding or renaming a portable skill:
+**Why one-hop.** pi and OpenCode already page skill bodies on demand: the resident
+index carries only name, description, and path. The old pointer layer was therefore
+pure overhead, an extra read per hot-skill use and a resident index truncated at
+220 characters mid-sentence. Mirrors restore full spec-length (up to 1024 character)
+descriptions in the resident index and cut every skill load from two reads to one.
+Descriptions above the 1024-rune Agent Skills limit now fail `sync` instead of being
+silently truncated.
+
+Regenerate mirrors after adding or renaming a portable skill:
 
 ```text
 go run ./cmd/fak-project-assets sync --json
@@ -58,13 +71,15 @@ not part of the portable semantic contract.
 
 ## Functional parity witness
 
-`fleet-wave` demonstrates the simple-first rule and the native-adapter exception. Codex discovers
-`.agents/skills/fleet-wave/SKILL.md`; the tracked adapter added in `016503cc0e` carries Codex-native
-seat routing and launch commands while preserving commit
-`0094bae9c8e668a31459c0a614aae2e0b15b97b0`'s `BOUNDED` / `BROAD` / `ISSUE_OWNER` /
-`LEAF_CHILD`, one-level fan-out, independent read-back, and durable-park effects. Generated pointer
-adapters remain the default for skills that need only discovery translation.
+`fleet-wave` demonstrates the mirror contract end to end. Codex and OpenCode discover
+`.agents/skills/fleet-wave/SKILL.md`, a generated one-hop mirror whose body is the
+canonical workflow: commit `0094bae9c8e668a31459c0a614aae2e0b15b97b0`'s `BOUNDED` /
+`BROAD` / `ISSUE_OWNER` / `LEAF_CHILD`, one-level fan-out, independent read-back, and
+durable-park effects, with the Codex-native seat routing and launch commands that
+`016503cc0e` routed into the canonical body. One-hop mirrors are the default for every
+portable skill; a file under `.agents/skills` that lacks the `generated-by` marker is
+treated as a deliberate native artifact and preserved by sync rather than overwritten.
 
-This is stronger than periodic blind copying: every skill is either a canonical body plus generated
-pointer, a deliberate tracked native adapter, or an explicit exclusion, and the parity receipt makes
-unexplained gaps fail.
+This is stronger than periodic blind copying: every skill is either a canonical body
+with its generated one-hop mirror or an explicit exclusion, and the parity receipt
+makes unexplained gaps fail.

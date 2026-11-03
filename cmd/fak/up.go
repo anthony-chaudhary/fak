@@ -1133,6 +1133,10 @@ func (s *turnkeyServer) handleChatCompletions(w http.ResponseWriter, r *http.Req
 		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	if req.Fak != nil && req.Fak.BeamSearch != nil {
+		http.Error(w, "native beam search is not supported by fak up; use the native fak serve chat route", http.StatusBadRequest)
+		return
+	}
 	if req.Stream && req.Fak != nil && req.Fak.NativeInferenceReceipt {
 		http.Error(w, "native inference receipt requires a buffered response", http.StatusBadRequest)
 		return

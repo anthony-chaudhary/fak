@@ -21,6 +21,15 @@ import (
 )
 
 // Issue #6036 and Issue #12325 Contract Constants.
+//
+// DefaultModel is a documented TIME-BUDGET EXCEPTION, not a quality preference:
+// the pinned 7B keeps the FULL canonical live matrix tractable — 4 arms x
+// N{1,4,8,16,32} x 2 request shapes x 2 schedules x 5 trials at the fixed 0.85
+// memory fraction. A 27B-class Q4_K_M (~16.5 GiB of weights; ESTIMATE) would make
+// that full sweep multi-hour on consumer GPUs. Subset/smoke runs are not bound by
+// that budget: they should pin the LARGEST model the host fits within the 0.85
+// fraction (e.g. Qwen3.8-27B). Selection rule and comparability history:
+// docs/benchmarks/SUBAGENT-FANOUT-APPLES-TO-APPLES-HARNESS.md section 3.1.
 const (
 	// ContractIssue6036 is the root prefix KV reuse comparison contract issue.
 	ContractIssue6036 = "6036"

@@ -1,45 +1,38 @@
 // Package beam implements beam-search support primitives over the batched decode
 // session in internal/model. Issue #12409 ("KV cache beam indirection slot table")
-// extends #12407, but the beam-search driver package does not exist yet, so this
-// package deliberately contains ONLY the dependency-free, independently-verifiable
-// slice: the BeamIndirectionTable slot-mapping primitive plus a thin BatchDriver
-// that calls the real model.BatchSession.StepBatch / StepBatchActive API.
+// extends #12407; this package holds the dependency-free slice: the
+// BeamIndirectionTable slot-mapping primitive plus a thin BatchDriver calling the
+// real model.BatchSession.StepBatch / StepBatchActive API.
 //
-// INVARIANT (the whole point of the indirection table): branching and reordering a
-// beam search is a PURE INTEGER operation over slot pointers. The table never moves,
-// copies, or clones float32/float64 KV tensors. Fork/Reorder/Reset touch only the
-// flat []int32 mapping; the (potentially large) KV tensors stay put in the model's
-// BatchSession. A physical slot may be referenced by MULTIPLE logical rows via a
-// deliberately shared prefix (Fork aliases the parent's prefix pointers), so slot
-// ownership is tracked as a per-slot REFERENCE COUNT rather than a single owner.
-// This is what makes beam decode O(B*MaxSteps) integer moves with ZERO per-step heap
-// allocations (witness: TestBeamZeroAllocKV with testing.AllocsPerRun).
+// Branching and reordering a beam search is a pure integer operation over slot
+// pointers: the table never moves, copies, or clones float32/float64 KV tensors;
+// Fork/Reorder/Reset touch only the flat []int32 mapping. A physical slot may be
+// referenced by multiple logical rows through a deliberately shared prefix, so
+// ownership is a per-slot reference count, not a single owner; that keeps beam
+// decode to O(B*MaxSteps) integer moves with zero per-step heap allocations
+// (witness: TestBeamZeroAllocKV with testing.AllocsPerRun).
 package beam
 
 import "fmt"
 
-// BeamIndirectionTable is a flat, pre-allocated [beams][maxSteps]int32 mapping from a
-// logical (beam, position) coordinate to a physical KV slot index. It is stored as one
-// contiguous []int32 of length beams*maxSteps so the whole table is a single allocation
-// and no per-step slice is ever created. A physical slot may be referenced by more than
-// one logical cell (see slotRefs), so recycling is decided by reference count.
+// BeamIndirectionTable maps each logical (beam, position) coordinate to a physical KV
+// slot index. It is one contiguous []int32 of length beams*maxSteps — a single
+// allocation, no per-step slices — and because a physical slot may be referenced by
+// more than one logical cell, recycling is decided by reference count (see slotRefs).
 type BeamIndirectionTable struct {
 	beams    int
 	maxSteps int
 	flat     []int32
 
-	// physSlots is the physical-slot capacity. slotRefs[p] records the number of
-	// logical cells ACROSS ALL ROWS whose flat entry currently equals physical slot p;
-	// it is zero iff the slot is free. Multiple rows may reference the same physical
-	// slot via a deliberately shared prefix (Fork aliases the parent's prefix
-	// pointers), so this is a REFERENCE COUNT, not a scalar owner. The mapping itself
-	// is the flat table above; slotRefs exists to decide when a slot may be recycled.
+	// physSlots is the physical-slot capacity; slotRefs[p] counts the logical cells
+	// across all rows mapped to physical slot p (zero iff free) — a reference count,
+	// not an owner (see package doc).
 	physSlots int
 	slotRefs  []int32
 
-	// reorderBuf and reorderSeen are lazily materialised reusable buffers so
-	// Reorder performs zero heap allocations on repeated calls. reorderBuf holds the
-	// full flat table (a double buffer making row permutation overlap-proof).
+	// reorderBuf/reorderSeen are lazily materialised reusable buffers so Reorder
+	// performs zero heap allocations on repeated calls; reorderBuf snapshots the whole
+	// flat table so the row permutation is overlap-proof (see Reorder).
 	reorderBuf  []int32
 	reorderSeen []bool
 }
@@ -54,19 +47,16 @@ func NewBeamIndirectionTable(beams, maxSteps int) *BeamIndirectionTable {
 }
 
 // NewBeamIndirectionTableWithSlots is NewBeamIndirectionTable with an explicit physical
-// slot capacity. It exists so a caller can allocate a compact physical slab (e.g. one
-// shared by a prefill prefix) while still tracking per-slot reference counts.
+// slot capacity, so a caller can allocate a compact physical slab (e.g. one shared by
+// a prefill prefix) while still tracking per-slot reference counts. Assigning a
+// physical slot that other rows already reference is allowed, not an error: sharing a
+// prefix slot by pointer between parent and child is the whole point of Fork. SetSlot
+// therefore only range-checks phys and maintains the reference count; a slot becomes
+// recyclable (AssignNew returns it) exactly when its count drops to zero, and AssignNew
+// only ever returns a zero-count slot, so a freshly decoded suffix position always
+// gets distinct ownership.
 //
-// CONFLICT POLICY: the table does NOT reject assigning a physical slot that other
-// rows already reference. That is intentional: sharing a prefix slot by pointer
-// between parent and child is the whole point of Fork, so a shared reference is a
-// legitimate state, not a programmer error. SetSlot therefore only range-checks phys
-// and maintains the reference count; a slot becomes recyclable (AssignNew returns it)
-// exactly when its count drops to zero. Distinct ownership for a freshly decoded
-// suffix position is guaranteed by construction because AssignNew only ever returns a
-// zero-count slot.
-//
-// Panics if beams or maxSteps is negative, or physSlots is negative.
+// Panics if beams or maxSteps or physSlots is negative.
 func NewBeamIndirectionTableWithSlots(beams, maxSteps, physSlots int) *BeamIndirectionTable {
 	if beams < 0 {
 		panic(fmt.Sprintf("beam: negative beams %d", beams))
@@ -106,10 +96,9 @@ func (t *BeamIndirectionTable) Slot(beam, pos int) int32 {
 	return t.flat[beam*t.maxSteps+pos]
 }
 
-// SetSlot maps logical (beam, pos) to physical slot phys. It maintains the physical
-// slot reference count exactly: the cell's previous slot (if any) is decremented and
-// phys is incremented. Assigning a slot that other rows already reference is allowed
-// and expected for a shared prefix; phys == -1 clears the assignment.
+// SetSlot maps logical (beam, pos) to physical slot phys, maintaining the reference
+// count exactly (previous slot decremented, phys incremented); assigning a slot other
+// rows already reference is expected for a shared prefix. phys == -1 clears.
 func (t *BeamIndirectionTable) SetSlot(beam, pos int, phys int32) {
 	t.checkCoord(beam, pos)
 	idx := beam*t.maxSteps + pos
@@ -164,13 +153,11 @@ func (t *BeamIndirectionTable) checkCoord(beam, pos int) {
 }
 
 // Fork copies the parent beam's physical-slot pointers for positions [0,pos) into the
-// child row (the child inherits the shared prefix), then assigns the child a FRESH
-// dedicated physical slot at position pos. It is O(pos) integer moves and allocates
-// nothing. The child must be a different, in-range beam and pos must be in range.
-//
-// The parent's cells in [0,pos) are NOT cleared: the prefix KV slots are deliberately
-// shared by pointer between parent and child (zero-copy) until one branch overwrites
-// its own cell for a later position.
+// child row, then assigns the child a fresh dedicated physical slot at position pos.
+// It is O(pos) integer moves and allocates nothing. The child must be a different,
+// in-range beam and pos must be in range. The parent's cells in [0,pos) are NOT
+// cleared: the prefix slots are deliberately shared by pointer between parent and
+// child (zero-copy) until one branch overwrites its own cell for a later position.
 func (t *BeamIndirectionTable) Fork(parent, child, pos int) {
 	t.checkCoord(parent, 0)
 	t.checkCoord(child, 0)
@@ -198,12 +185,9 @@ func (t *BeamIndirectionTable) Fork(parent, child, pos int) {
 	t.AssignNew(child, pos)
 }
 
-// Reorder permutes the logical beam rows according to newOrder: after Reorder, logical
-// row i holds the row that was previously at newOrder[i]. It is O(B*MaxSteps) integer
-// moves into a scratch row (kept as a reusable field so the call itself allocates
-// nothing) and never touches a float KV tensor.
-//
-// newOrder must be a permutation of [0,beams).
+// Reorder permutes the logical beam rows: after Reorder, logical row i holds the row
+// that was previously at newOrder[i]. It is O(B*MaxSteps) integer moves into a reused
+// scratch buffer, allocating nothing. newOrder must be a permutation of [0,beams).
 func (t *BeamIndirectionTable) Reorder(newOrder []int) {
 	if len(newOrder) != t.beams {
 		panic(fmt.Sprintf("beam: Reorder order length %d != beams %d", len(newOrder), t.beams))
@@ -230,7 +214,7 @@ func (t *BeamIndirectionTable) Reorder(newOrder []int) {
 		dst := i * t.maxSteps
 		copy(t.flat[dst:dst+t.maxSteps], buf[src:src+t.maxSteps])
 	}
-	// Rebuild the reference counts from the permuted table so they stay exact. Every
+	// Rebuild the reference counts from the permuted table so they stay exact: every
 	// cell contributes exactly one reference to its physical slot.
 	for i := range t.slotRefs {
 		t.slotRefs[i] = 0
@@ -267,8 +251,7 @@ func (t *BeamIndirectionTable) Reset() {
 }
 
 // checkRefInvariant verifies that slotRefs[p] equals the number of logical cells whose
-// flat entry is p, for every physical slot. It is a debug/verification helper used by
-// tests; it never mutates the table.
+// flat entry is p, for every physical slot. Debug/verification helper; never mutates.
 func (t *BeamIndirectionTable) checkRefInvariant() bool {
 	var seen []int32
 	if t.physSlots > 0 {
@@ -291,10 +274,9 @@ func (t *BeamIndirectionTable) checkRefInvariant() bool {
 }
 
 // BytesOwned reports the bytes held by the indirection TABLE itself: the flat int32
-// table plus the per-slot reference counts, plus any scratch rows already materialised.
-// This is the ONLY memory the table costs; it is pure integer bookkeeping and is
-// deliberately orders of magnitude smaller than any KV tensor. It does not account for
-// KV tensors, which live in the driver's model BatchSession, not in this table.
+// table, the per-slot reference counts, and any scratch buffers already materialised.
+// This is the only memory the table costs — pure integer bookkeeping, orders of
+// magnitude smaller than the KV tensors it indexes, which live in the BatchSession.
 func (t *BeamIndirectionTable) BytesOwned() int {
 	n := len(t.flat)*4 + len(t.slotRefs)*4
 	n += len(t.reorderBuf) * 4
@@ -302,7 +284,6 @@ func (t *BeamIndirectionTable) BytesOwned() int {
 	return n
 }
 
-// AllocBytes is an alias for BytesOwned, reporting heap bytes held by the table. It is
-// named to make the "no KV tensors here" contract explicit at call sites and to give
-// tests a single number to assert against.
+// AllocBytes is an alias for BytesOwned, named to make the "no KV tensors here"
+// contract explicit at call sites and to give tests a single number to assert against.
 func (t *BeamIndirectionTable) AllocBytes() int { return t.BytesOwned() }

@@ -1,0 +1,68 @@
+{
+  "schema": "fak-native-performance-receipt/v3",
+  "role": "baseline",
+  "envelope_id": "qwen38-cuda-hostoverhead-fixture",
+  "changed_lever_id": "fixture.no-op-lever",
+  "revision": "r1+g0000000",
+  "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "machine": {
+    "scrubbed_id": "fixture-lab",
+    "platform": "linux/amd64",
+    "backend": "cuda"
+  },
+  "controls": {
+    "prompt_tokens": 64,
+    "decode_tokens": 32,
+    "batch": 1,
+    "context_tokens": 4096,
+    "temperature": 0,
+    "sampling": "greedy",
+    "cache_state": "warm",
+    "warmups": 1,
+    "repetitions": 2
+  },
+  "unchanged_controls": [
+    "artifact_sha256",
+    "machine",
+    "prompt_tokens",
+    "decode_tokens",
+    "batch",
+    "context_tokens",
+    "temperature",
+    "sampling",
+    "cache_state",
+    "warmups",
+    "repetitions",
+    "execution_identity"
+  ],
+  "changed_axes": [],
+  "repetitions": [
+    {
+      "end_to_end_milliseconds": 100,
+      "tokens_per_second": 10,
+      "prefill_milliseconds": 20,
+      "decode_milliseconds": 80,
+      "host_phase_us": 16000,
+      "kernel_launch_count": 1104,
+      "inter_kernel_gap_sum_us": 9000,
+      "h2d_copy_bytes": 2048,
+      "sync_roundtrips": 1104
+    },
+    {
+      "end_to_end_milliseconds": 100,
+      "tokens_per_second": 10,
+      "prefill_milliseconds": 20,
+      "decode_milliseconds": 100,
+      "host_phase_us": 20000,
+      "kernel_launch_count": 1104
+    }
+  ],
+  "memory": {"peak_bytes": 1073741824, "resident_bytes": 536870912},
+  "execution": {"engine": "fak-native", "forward_path": "device/cuda", "fallback_count": 0},
+  "quality": {"name": "exact-match", "score": 1, "higher_is_better": true},
+  "comparison": {},
+  "module_versions": [{"module": "internal/engine", "revision": "r1+g0000000"}],
+  "commands": ["go test ./internal/engine -run Fixture"],
+  "profiler_artifacts": [{"path": "raw/fixture-trace.json", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],
+  "generated_at": "2026-10-28T09:00:00Z"
+}

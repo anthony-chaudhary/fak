@@ -2,56 +2,50 @@ package model
 
 import "os"
 
-// kvgroups.go — the hybrid-model KV MEMORY PLANE: a layer-group vocabulary plus the
-// per-group budget arithmetic the whole plane sizes against (#2241, R1 of M9, epic #2236).
+// kvgroups.go — the hybrid-model KV MEMORY PLANE: a layer-group vocabulary plus the per-group
+// budget arithmetic the whole plane sizes against (#2241, R1 of M9, epic #2236).
 //
-// fak already DECODES hybrid architectures — the kernels exist and are CPU-proven: SWA
-// (swa.go), Qwen3.5/3.6 Gated-DeltaNet linear-attention layers (qwen35.go), GLM MLA/DSA.
-// But the memory plane still treats every layer as uniform full-attention KV: KVCache
-// (kvcache.go) keeps ONE per-layer K/V run per position for every layer, and PagedKVPool
-// (pagedkv.go) pages every layer into the same fixed block. That over-allocates two ways a
+// fak already DECODES hybrid architectures — the kernels exist and are CPU-proven: SWA (swa.go),
+// Qwen3.5/3.6 Gated-DeltaNet linear-attention layers (qwen35.go), GLM MLA/DSA. But the memory
+// plane still treats every layer as uniform full-attention KV, which over-allocates two ways a
 // hybrid model never uses:
 //
-//   - a SLIDING-WINDOW layer retains full history it can provably never attend to again (a
-//     position older than the window is un-attended — the correctness fact swa.go's
-//     TrimToWindow already exploits), yet the uniform plane keeps every position resident;
-//   - a RECURRENT state-space layer (Gated-DeltaNet / Mamba) holds an ACCUMULATED state, not
-//     a token-indexed span (see RecurrentEvictUnsupportedError in kvcache.go), so its
-//     footprint is O(1) per sequence — but the uniform plane budgets it as if it held ctx
-//     token-slots of K/V it never had.
+//   - a SLIDING-WINDOW layer retains full history it can provably never attend to again (the
+//     correctness fact swa.go's TrimToWindow already exploits), yet the uniform plane keeps
+//     every position resident;
+//   - a RECURRENT state-space layer (Gated-DeltaNet / Mamba) holds an ACCUMULATED state, not a
+//     token-indexed span (see RecurrentEvictUnsupportedError in kvcache.go), so its footprint is
+//     O(1) per sequence — but the uniform plane budgets it as if it held ctx token-slots of K/V
+//     it never had.
 //
-// The engines solved exactly this: vLLM's Hybrid Memory Allocator groups layers by KV shape
-// (full / sliding-window / Mamba state) with per-group budgets, and SGLang's UnifiedTree
-// offloads hybrids by group. This file lands the fak parity SPINE for that: a group
-// vocabulary (KVLayerGroup) fak can classify any decoded layer into, and the per-group
-// budget arithmetic (window layers cap at the window; state layers are O(1) per sequence).
+// The engines solved exactly this: vLLM's Hybrid Memory Allocator groups layers by KV shape with
+// per-group budgets, and SGLang's UnifiedTree offloads hybrids by group. This file lands the fak
+// parity SPINE for that: a group vocabulary (KVLayerGroup) and the per-group budget arithmetic
+// (window layers cap at the window; state layers are O(1) per sequence).
 //
 // Scope (honest, R1): the vocabulary and the budget arithmetic, gated OFF by default behind
-// FAK_HYBRID_KV (gen/next: near-term foundation, dogfood-gated until promotion evidence
-// lands). When the gate is off, ResidentKVFloats reports the uniform allocation and nothing
-// in the decode path changes. A genuinely per-group PagedKVPool (separate block pools per
-// group), the per-group radix payload for prefix reuse, and swap/restore round-trips are the
-// R2 follow-ons; the resident-bytes-vs-uniform witness on Qwen3.6-GDN is R3. What lands here
-// is the classification + arithmetic those steps size against, proven on a hybrid config.
+// FAK_HYBRID_KV. When the gate is off, ResidentKVFloats reports the uniform allocation and
+// nothing in the decode path changes. A genuinely per-group PagedKVPool, the per-group radix
+// payload for prefix reuse, and swap/restore round-trips are the R2 follow-ons; the
+// resident-bytes-vs-uniform witness on Qwen3.6-GDN is R3.
 
-// KVLayerGroup classifies a decoder layer by the SHAPE of the attention state its KV memory
-// must hold — the vocabulary the hybrid memory plane budgets against. It is orthogonal to
-// the decode kernel (two layers in the same group may run different kernels); what it
-// captures is how the layer's resident footprint scales with context length.
+// KVLayerGroup classifies a decoder layer by the SHAPE of the attention state its KV memory must
+// hold — the vocabulary the hybrid memory plane budgets against. It is orthogonal to the decode
+// kernel (two layers in the same group may run different kernels); what it captures is how the
+// layer's resident footprint scales with context length.
 type KVLayerGroup uint8
 
 const (
-	// KVGroupFull is a full-causal-attention layer: token-indexed K/V, one row per position,
-	// resident footprint GROWS linearly with context (every past position stays attendable).
+	// Full: full-causal-attention layer; token-indexed K/V whose resident footprint GROWS linearly
+	// with context (every past position stays attendable).
 	KVGroupFull KVLayerGroup = iota
-	// KVGroupSlidingWindow is a sliding-window-attention layer (SWA, e.g. Gemma3 local
-	// layers): token-indexed K/V, but a position older than the window is provably
-	// un-attended (swa.go), so the resident footprint CAPS at the window size.
+	// SlidingWindow: sliding-window-attention layer (SWA, e.g. Gemma3 local layers); token-indexed
+	// K/V, but a position older than the window is provably un-attended (swa.go), so the resident
+	// footprint CAPS at the window size.
 	KVGroupSlidingWindow
-	// KVGroupRecurrent is a recurrent state-space layer (Gated-DeltaNet / Mamba linear
-	// attention): its "KV" is an ACCUMULATED recurrent state plus a short causal-conv window,
-	// not a token-indexed span, so the resident footprint is O(1) per sequence — constant in
-	// context length.
+	// Recurrent: recurrent state-space layer (Gated-DeltaNet / Mamba linear attention); its "KV" is
+	// an ACCUMULATED recurrent state plus a short causal-conv window, so the resident footprint is
+	// O(1) per sequence — constant in context length.
 	KVGroupRecurrent
 )
 
@@ -85,14 +79,12 @@ func (c Config) KVLayerGroupOf(l int) KVLayerGroup {
 	if c.isLinearAttnLayer(l) {
 		return KVGroupRecurrent
 	}
-	// A per-layer compression schedule (DeepSeek-V4 Flash / V4.1) makes a layer retain
-	// compressed rows and indexer keys that windowForLayer() alone does not account for.
-	// This grouped plane does not model that state, so a compressed-schedule layer keeps
-	// the FULL-attention reservation instead of the window-only cap — classifying it
-	// sliding-window would silently drop the compressed history (#13617). The sibling
-	// header-sizing guard #13556 already bails on a declared schedule; keying off the same
-	// hasKVCompressionSchedule predicate here keeps the grouped residency arithmetic
-	// consistent with it, so no hybrid-KV sizing surface sizes a schedule window-only.
+	// A per-layer compression schedule (DeepSeek-V4 Flash / V4.1) makes a layer retain compressed
+	// rows and indexer keys that windowForLayer() alone does not account for, and this grouped
+	// plane does not model that state: a compressed-schedule layer keeps the FULL-attention
+	// reservation instead of the window-only cap, or it would silently drop the compressed history
+	// (#13617). Keying off the same hasKVCompressionSchedule predicate the header-sizing guard
+	// #13556 bails on keeps every hybrid-KV sizing surface from sizing a schedule window-only.
 	if c.hasKVCompressionSchedule() {
 		return KVGroupFull
 	}
@@ -105,9 +97,9 @@ func (c Config) KVLayerGroupOf(l int) KVLayerGroup {
 // recurrentStateFloats is the O(1) per-sequence float32 footprint of ONE Gated-DeltaNet
 // linear-attention layer: the accumulated recurrent state (nV value heads, each a
 // keyHeadDim*valueHeadDim matrix) plus the short causal-conv window (K-1 retained rows of
-// convDim), matching newLinearAttnLayerState / pushConvRow in qwen35.go. Both terms are
-// derived from the model geometry alone — they do NOT depend on context length, which is the
-// whole point of the recurrent group. A degenerate (non-hybrid) config yields 0.
+// convDim), matching newLinearAttnLayerState / pushConvRow in qwen35.go. Both terms derive from
+// the model geometry alone — they do NOT depend on context length, which is the whole point of
+// the recurrent group. A degenerate (non-hybrid) config yields 0.
 func (c Config) recurrentStateFloats() int {
 	_, nV, kHd, vHd, _, _, convDim := c.linearAttnDims()
 	recurrent := nV * kHd * vHd
@@ -203,12 +195,10 @@ func (c Config) KVGroupBudgetAt(ctx int) KVGroupBudget {
 	return b
 }
 
-// UniformKVFloats is the resident KV footprint the PRE-grouping plane allocates: EVERY layer
-// keeps ctx token-slots of K/Kraw/V regardless of its group. This is the over-allocation the
-// hybrid plane removes — a sliding-window layer keeps full history it can never attend to,
-// and a recurrent layer keeps token spans it never had. It is the baseline the grouped
-// budget is measured against (and, with the gate off, the footprint ResidentKVFloats
-// reports — preserving today's behavior exactly).
+// UniformKVFloats is the resident KV footprint the PRE-grouping plane allocates: EVERY layer keeps
+// ctx token-slots of K/Kraw/V regardless of its group — the over-allocation the hybrid plane
+// removes. It is the baseline the grouped budget is measured against and, with the gate off, the
+// footprint ResidentKVFloats reports (preserving today's behavior exactly).
 func (c Config) UniformKVFloats(ctx int) int {
 	if ctx < 0 {
 		ctx = 0
@@ -224,19 +214,19 @@ func (c Config) UniformKVFloats(ctx int) int {
 	return nLayers * ctx * stride * kvGroupPlanes
 }
 
-// HybridKVGroupsEnabled reports whether the layer-group hybrid KV memory plane is active.
-// It is gated OFF by default — gen/next generation intent: a near-term foundation kept
-// gated until promotion evidence (the R2 hybrid-radix witnesses and the R3 resident-bytes
-// benchmark) lands — and turned on by FAK_HYBRID_KV=1. When off, the plane budgets every
-// layer uniformly and nothing in the decode path changes; when on, budgets are per-group.
+// HybridKVGroupsEnabled reports whether the layer-group hybrid KV memory plane is active. Gated
+// OFF by default — a near-term foundation kept gated until promotion evidence (the R2
+// hybrid-radix witnesses and the R3 resident-bytes benchmark) lands — and turned on by
+// FAK_HYBRID_KV=1. When off, the plane budgets every layer uniformly; when on, budgets are
+// per-group.
 func HybridKVGroupsEnabled() bool {
 	return os.Getenv("FAK_HYBRID_KV") == "1"
 }
 
 // ResidentKVFloats is the single seam the rest of the memory plane consults for a model's
-// resident KV budget at context length ctx: the per-group total when the hybrid plane is
-// enabled, else the uniform allocation. Routing every caller (pool sizing, preemption
-// arithmetic) through here means the FAK_HYBRID_KV flag flips the whole plane in one place.
+// resident KV budget at context length ctx: the per-group total when the hybrid plane is enabled,
+// else the uniform allocation. Routing every caller through here means FAK_HYBRID_KV flips the
+// whole plane in one place.
 func (c Config) ResidentKVFloats(ctx int) int {
 	if HybridKVGroupsEnabled() {
 		return c.KVGroupBudgetAt(ctx).TotalFloats()
@@ -244,20 +234,19 @@ func (c Config) ResidentKVFloats(ctx int) int {
 	return c.UniformKVFloats(ctx)
 }
 
-// GroupBudget exposes this cache's per-group resident budget at context length ctx, so a
-// caller holding a live KVCache can see the hybrid split without reaching for the Config.
-// The arithmetic lives on Config; this is the KVCache-facing accessor named in the #2241
-// scope ("layer-group vocabulary in model.KVCache/PagedKVPool").
+// GroupBudget exposes this cache's per-group resident budget at context length ctx, so a caller
+// holding a live KVCache can see the hybrid split without reaching for the Config. The arithmetic
+// lives on Config; this is the KVCache-facing accessor named in the #2241 scope.
 func (c *KVCache) GroupBudget(ctx int) KVGroupBudget {
 	return c.cfg.KVGroupBudgetAt(ctx)
 }
 
-// GroupBudgetBlocks expresses a per-group budget in PagedKVPool blocks for a single sequence
-// of ctx tokens: each token-indexed group costs ceil(residentPositions/blockTokens) blocks
-// PER LAYER in that group, while the recurrent group's O(1) state is not block-paged (it
-// rides a per-sequence state slab, not the token-block pool) and contributes 0 blocks. This
-// is the pool-sizing arithmetic a future per-group PagedKVPool draws on (R2); it reports the
-// block demand today so preemption/offload accounting can already budget hybrids per group.
+// GroupBudgetBlocks expresses a per-group budget in PagedKVPool blocks for a single sequence of
+// ctx tokens: each token-indexed group costs ceil(residentPositions/blockTokens) blocks PER LAYER
+// in that group, while the recurrent group's O(1) state is not block-paged (it rides a
+// per-sequence state slab, not the token-block pool) and contributes 0 blocks. This is the
+// pool-sizing arithmetic a future per-group PagedKVPool draws on (R2); it reports the block demand
+// today so preemption/offload accounting can already budget hybrids per group.
 func (p *PagedKVPool) GroupBudgetBlocks(cfg Config, ctx int) (full, window, recurrent int) {
 	bt := p.blockTokens
 	if bt <= 0 {

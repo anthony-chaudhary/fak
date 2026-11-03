@@ -50,6 +50,28 @@ func writeHistogram(b *strings.Builder, name, baseLabels string, s latencySnapsh
 	}
 }
 
+// writeTokenHistogram renders a TOKEN-COUNT histogram that carries its own scaled bucket
+// edges (tokenBuckets) in the snapshot, unlike writeHistogram which pairs every counter
+// position with the fixed seconds ladder gatewayLatencyBuckets. _sum/_count render as
+// integer token totals (tokens are counts, not seconds).
+func writeTokenHistogram(b *strings.Builder, name, baseLabels string, s tokenHistogramSnapshot) {
+	lead := baseLabels
+	if lead != "" {
+		lead += ","
+	}
+	for i, le := range s.edges {
+		fmt.Fprintf(b, "%s_bucket{%sle=\"%s\"} %d\n", name, lead, promQuote(promFloat(le)), s.buckets[i])
+	}
+	fmt.Fprintf(b, "%s_bucket{%sle=\"+Inf\"} %d\n", name, lead, s.count)
+	if baseLabels == "" {
+		fmt.Fprintf(b, "%s_sum %d\n", name, s.sum)
+		fmt.Fprintf(b, "%s_count %d\n", name, s.count)
+	} else {
+		fmt.Fprintf(b, "%s_sum{%s} %d\n", name, baseLabels, s.sum)
+		fmt.Fprintf(b, "%s_count{%s} %d\n", name, baseLabels, s.count)
+	}
+}
+
 func promFloat(v float64) string {
 	return strconv.FormatFloat(v, 'g', -1, 64)
 }

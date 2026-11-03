@@ -164,6 +164,7 @@ func TestCurrentOperationalAndFixtureRefsAreClassified(t *testing.T) {
 		"internal/selfupdate/cmd/selfupdate.go":              RefClassPublicFrontDoor,
 		"scripts/overnight-check.sh":                         RefClassDevelopmentSource,
 		"internal/workdelivery/testdata/e2e/happy-path.json": RefClassFixture,
+		".agents/skills/git-subagent-sync/SKILL.md":          RefClassDevelopmentSource,
 	}
 	for path, class := range want {
 		if got := ClassifyHardcodedRef(path, "origin/main"); got != class {

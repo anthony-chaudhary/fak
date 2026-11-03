@@ -509,6 +509,12 @@ int fcuda_nvfp4_w4a4_f32(const uint8_t *dW, const uint8_t *dWLinearScale,
 /* Monotonic count of successful cublasLtMatmul enqueues, for device QA. */
 uint64_t fcuda_nvfp4_w4a4_lt_calls(void);
 // Typed default-off Q5/Q6 q8_1 qualification; legacy void ABI stays unchanged.
+// Default-off retained Q5_K/Q6_K P>=128 MMQ family; matching native archive required.
+int fcuda_q56k_mmq_enabled(void);
+unsigned long long fcuda_q56k_mmq_launch_count(int kind);
+int fcuda_q56k_mmq_preflight(const uint8_t *w, const float *x, int out, int in, int p, int kind);
+int fcuda_q56k_mmq_matmul_checked_f32(const uint8_t *w, const float *x, float *y, int out, int in, int p, int kind);
+void fcuda_q56k_mmq_retirement_failed(int first);
 int fcuda_q56k_mmvq_enabled(void);
 int fcuda_q56k_mmvq_terminal(void);
 unsigned long long fcuda_q56k_mmvq_launch_count(int kind);

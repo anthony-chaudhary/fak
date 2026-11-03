@@ -2,14 +2,44 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 )
+
+// fak-test:runtime fast est=100ms lane=default
+func TestRunBenchTraceDispatch(t *testing.T) {
+	const child = "--fak-bench-trace-dispatch-child"
+	if os.Args[len(os.Args)-1] == child {
+		cmdBench([]string{"trace", "--subagent", "--synthetic", "--json"})
+		os.Exit(97) // The subcommand exits itself; falling through is a routing failure.
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRunBenchTraceDispatch$", "--", child)
+	cmd.Dir = t.TempDir() // A missing route must not fall through into repository benchmark data.
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bench trace dispatch: %v\n%s", err, out)
+	}
+	var receipt nativeperf.SubagentTraceReceipt
+	if err := json.Unmarshal(out, &receipt); err != nil {
+		t.Fatalf("dispatch did not emit trace JSON: %v\n%s", err, out)
+	}
+	if err := receipt.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if receipt.Provenance != nativeperf.TraceSimulated || receipt.IsMeasuredEvidence() {
+		t.Fatal("dispatched simulation became measured evidence")
+	}
+}
 
 func TestRunBenchTraceSubagentJSON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
@@ -27,6 +57,9 @@ func TestRunBenchTraceSubagentJSON(t *testing.T) {
 
 	if err := receipt.Validate(); err != nil {
 		t.Fatalf("receipt failed validation: %v", err)
+	}
+	if receipt.Provenance != nativeperf.TraceSimulated || receipt.IsMeasuredEvidence() {
+		t.Fatal("host stand-in benchmark claimed measured inference evidence")
 	}
 
 	if receipt.Schema != nativeperf.SubagentTraceSchema {
@@ -103,6 +136,9 @@ func TestRunBenchTraceSynthetic(t *testing.T) {
 
 	if err := receipt.Validate(); err != nil {
 		t.Fatalf("receipt validation failed: %v", err)
+	}
+	if receipt.Provenance != nativeperf.TraceSimulated || receipt.IsMeasuredEvidence() {
+		t.Fatal("synthetic benchmark claimed measured inference evidence")
 	}
 
 	// Calibrated synthetic timings:

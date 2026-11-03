@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
+	"github.com/anthony-chaudhary/fak/internal/hooks"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/safesync"
 )
@@ -480,9 +481,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 			return syncExitInternal
 		}
 		preflight.ResumeValidated = *resumeToken != ""
-		if len(preflight.Findings) > 0 || len(recheckPaths) > 0 || preflight.ResumeValidated {
-			publicLeak = &preflight
-		}
+		publicLeak = &preflight
 	}
 
 	return outputSyncResult(stdout, stderr, command, *asJSON, info, publicLeak, recheckPaths)
@@ -492,7 +491,15 @@ func outputSyncResult(stdout, stderr io.Writer, command string, asJSON bool, inf
 	if asJSON {
 		var report any = info
 		if publicLeak != nil {
-			report = syncCheckReport{Assessment: info, PublicLeak: publicLeak}
+			r := syncCheckReport{Assessment: info}
+			// Emit timing only when real measurements are attached; absent timing keeps the report deterministic.
+			if publicLeak.Timing != (hooks.PublicLeakTreeTiming{}) {
+				r.PublicLeakTiming = &publicLeak.Timing
+			}
+			if len(publicLeak.Findings) > 0 || len(recheckPaths) > 0 || publicLeak.ResumeValidated {
+				r.PublicLeak = publicLeak
+			}
+			report = r
 		}
 		if err := writeIndentedJSON(stdout, report); err != nil {
 			fmt.Fprintf(stderr, "fak sync: %v\n", err)
@@ -500,7 +507,7 @@ func outputSyncResult(stdout, stderr io.Writer, command string, asJSON bool, inf
 		}
 	} else {
 		renderSync(stdout, command, info)
-		if publicLeak != nil {
+		if publicLeak != nil && (len(publicLeak.Findings) > 0 || len(recheckPaths) > 0 || publicLeak.ResumeValidated) {
 			renderSyncPublicLeak(stdout, *publicLeak)
 		}
 	}

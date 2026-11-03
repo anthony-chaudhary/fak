@@ -32,6 +32,10 @@ type InKernelPlannerConfig struct {
 	// Empty preserves legacy rendering; unknown values refuse prompt admission.
 	DeepSeekV41ChatProfile string
 
+	// ChatTemplate selects an immutable, hash/model-bound text Jinja program.
+	// Nil preserves historical rendering. Compile/load explicit selections before construction.
+	ChatTemplate *NativeChatTemplate
+
 	// WarmDiskModelIdentity binds restart snapshots to the loaded weight artifact.
 	// Empty declines persistence because a display model ID is not a weight identity.
 	WarmDiskModelIdentity string
@@ -128,6 +132,7 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 		v41EngramLookAhead:           cfg.V41EngramLookAhead,
 		warmDiskModelIdentity:        strings.TrimSpace(cfg.WarmDiskModelIdentity),
 		deepSeekV41ChatProfile:       cfg.DeepSeekV41ChatProfile,
+		nativeChatTemplate:           cfg.ChatTemplate,
 	}
 	if cfg.IncrementalContext {
 		p.incrementalContext = EmptyIncrementalContext()
@@ -235,6 +240,7 @@ func (p *InKernelPlanner) RuntimeConfig() InKernelPlannerConfig {
 	return InKernelPlannerConfig{
 		WarmDiskModelIdentity:     p.warmDiskModelIdentity,
 		DeepSeekV41ChatProfile:    p.deepSeekV41ChatProfile,
+		ChatTemplate:              p.nativeChatTemplate,
 		V41EngramLookAhead:        p.v41EngramLookAhead,
 		ContextTokens:             p.contextTokens,
 		CPUCacheBytes:             cpuBytes,

@@ -1,6 +1,6 @@
 {
   "schema": "fak-hardware-latest/1",
-  "as_of": "2026-10-29",
+  "as_of": "2026-11-02",
   "platforms": {
     "Mac": {
       "observed": "2026-09-03",
@@ -13,9 +13,9 @@
       "row": "| AMD | DeepSeek-V4.1-Flash-Q2_K on one 128 GB AMD Strix Halo (Ryzen AI MAX+ 395, Radeon 8060S gfx1151, Vulkan): warm single-stream decode reached 4.61 tok/s, +29% over the same-session 3.57 base, with greedy output parity in 32/32 requests; observed 2026-10-22. | Physical APU result; the 30 tok/s decode target is not yet met, so this row stands until a newer accepted AMD measurement exists. [Strix Halo V4.1 Flash results](docs/benchmarks/STRIX-HALO-DEEPSEEK-V41-FLASH.md) |"
     },
     "NVIDIA": {
-      "observed": "2026-09-05",
-      "detail": "docs/benchmarks/GCP-H100-RESULTS.md",
-      "row": "| NVIDIA | Qwen2.5-3B Q8_0 on a physical Hopper H100: fak reached 111.9 decode tok/s, 17.4% above its f32 path; observed 2026-09-05. | Native CUDA result; llama.cpp Q8_0 was 3.24× as fast at 362.7 tok/s in the same run. [H100 receipt](docs/benchmarks/GCP-H100-RESULTS.md) |"
+      "observed": "2026-10-31",
+      "detail": "docs/benchmarks/published/nvidia-cuda-perf-gap/RESULTS.md",
+      "row": "| NVIDIA | Qwen3.8-27B Q4_K_M on an RTX 5090 Laptop (sm_120): with three documented per-class revert knobs pinned against a witnessed trunk regression, fak reached 18.19 decode tok/s — 0.745× llama.cpp b11870, up from 0.545× — while cold prefill stayed at 0.284×; observed 2026-10-31. | HW-witnessed H2H re-measure; the regression is bisected but unfixed, so knob-free trunk serving is blocked, and the ≥0.8× decode / ≥0.5× prefill maturity bar is not yet met. [RTX 5090 perf-gap receipt](docs/benchmarks/published/nvidia-cuda-perf-gap/RESULTS.md) |"
     }
   }
 }

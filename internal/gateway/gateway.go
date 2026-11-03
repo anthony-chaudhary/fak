@@ -71,6 +71,10 @@ func (e *ConfigError) Error() string {
 // registered — i.e. internal/registrations was imported) and that EngineID names
 // a registered engine. It fails loud rather than degrade to a permissive default.
 func New(cfg Config) (*Server, error) {
+	causalEmbeddings, embeddingErr := newCausalEmbeddingProvider(cfg)
+	if embeddingErr != nil {
+		return nil, embeddingErr
+	}
 	if err := validateDFlash2Config(cfg); err != nil {
 		return nil, err
 	}
@@ -263,6 +267,7 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	s := &Server{
+		causalEmbeddings:             causalEmbeddings,
 		workspaceAdmissionPermissive: cfg.WorkspaceAdmissionPermissive,
 		k:                            k,
 		toolPlugins:                  append([]toolplugin.Plugin(nil), cfg.ToolPlugins...),

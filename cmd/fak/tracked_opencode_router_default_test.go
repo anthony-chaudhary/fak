@@ -39,7 +39,9 @@ type trackedOpenCodeConfig struct {
 //
 // The verified-working shape is: keep the `hive-ai/<model>` HANDLE (so it is a
 // ready Flash provider the rotation preserves) and move only its ROUTE by
-// declaring `provider.hive-ai.options.baseURL` at the loopback router. Verified
+// declaring `provider.hive-ai.options.baseURL` at the loopback router, either
+// literally or via the per-host router file token that each host resolves to
+// its own loopback router origin. Verified
 // live 2026-10-03: model `hive-ai/...` with hive-ai routed produced chain head
 // `hive-ai=http://127.0.0.1:18101/v1`; model `fak-router/...` produced
 // `hive-ai=https://api-cdn.thehive.ai/api/v3/`.
@@ -83,7 +85,7 @@ func TestTrackedOpenCodeDefaultIsKeyringPreservable(t *testing.T) {
 	if isDirectHiveURL(p.Options.BaseURL) {
 		t.Fatalf("default model provider %q resolves to a DIRECT Hive upstream (%s); a paused org would kill every spawned worker", provider, p.Options.BaseURL)
 	}
-	if !strings.HasPrefix(p.Options.BaseURL, "http://127.0.0.1:") {
+	if !isRouterBoundBaseURL(p.Options.BaseURL) {
 		t.Fatalf("default model provider %q baseURL = %q, want the loopback router", provider, p.Options.BaseURL)
 	}
 
@@ -93,7 +95,7 @@ func TestTrackedOpenCodeDefaultIsKeyringPreservable(t *testing.T) {
 	if !ok {
 		t.Fatal("tracked opencode.json declares no provider.fak-router")
 	}
-	if !strings.HasPrefix(router.Options.BaseURL, "http://127.0.0.1:") {
+	if !isRouterBoundBaseURL(router.Options.BaseURL) {
 		t.Fatalf("provider.fak-router baseURL = %q, want the loopback router", router.Options.BaseURL)
 	}
 
@@ -102,6 +104,19 @@ func TestTrackedOpenCodeDefaultIsKeyringPreservable(t *testing.T) {
 	if hive, ok := cfg.Provider["hive-ai"]; ok && isDirectHiveURL(hive.Options.BaseURL) {
 		t.Fatalf("provider.hive-ai baseURL = %q is a DIRECT Hive upstream; it must route through the local router", hive.Options.BaseURL)
 	}
+}
+
+// routerFileToken is the per-host indirection the tracked config uses instead
+// of pinning a literal port: each host resolves ~/.fak/router/base_url to its
+// own loopback router origin.
+const routerFileToken = "{file:~/.fak/router/base_url}"
+
+// isRouterBoundBaseURL reports whether a tracked baseURL binds the provider
+// route to the local fak router: a literal loopback origin or the per-host
+// router file token. Anything else (including a direct-Hive upstream) fails.
+func isRouterBoundBaseURL(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	return strings.HasPrefix(raw, "http://127.0.0.1:") || raw == routerFileToken
 }
 
 // isDirectHiveProviderName reports whether a provider id names the hosted Hive

@@ -410,6 +410,7 @@ func (k *cudaPagedKV) syncDeviceTableLocked(seqLen int) {
 		}
 		if len(k.table) > 0 {
 			C.fcuda_h2d(k.dTable, unsafe.Pointer(&k.table[0]), C.size_t(len(k.table)*4))
+			H2DCensusRecord("paged-kv-block-table", int64(len(k.table))*4) // FAK_H2D_CENSUS=1
 		}
 		k.dirty = false
 	}

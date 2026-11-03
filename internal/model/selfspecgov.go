@@ -13,7 +13,7 @@ import "math"
 // (a zero-value governor speculates nothing) exactly like the readiness seam.
 //
 // It mirrors the shape of abi/speculate.go's empirical-α gate (warmupFloor +
-// effectiveProb): below a warmup floor the measured rate is not yet trustworthy
+// effectiveProb): below a warmup floor the measured rate is not yet trustworthy,
 // so the configured depth governs (you MUST speculate through warmup — a cold
 // expert cache cannot warm if you never draft); past the floor the MEASURED
 // signal governs and can drive the depth to 0 (auto-off).
@@ -24,15 +24,14 @@ import "math"
 // expert-loads/token), so speculation is a net TIME loss until the cache warms.
 // The only honest disable criterion therefore charges a rejected draft against
 // the expert page-in cost it caused — the same lesson transfers to any fak
-// backend where experts stream from a slow tier. So the governor's decision is
-// an economic one in page-in units: keep drafting only while the page-in tax the
-// drafts incur is repaid by the decode work the accepted drafts avoid.
+// backend where experts stream from a slow tier. The decision is an economic one
+// in page-in units: keep drafting only while the page-in tax the drafts incur is
+// repaid by the decode work the accepted drafts avoid.
 
-// defaultSelfSpecWarmupDrafts is the warmup floor used when SelfSpecGovernor
-// .WarmupDrafts is unset: until this many drafts have been observed the measured
-// accept-rate is too small a sample to trust, so the governor keeps drafting at
-// the configured depth (the "invest through warmup" prior). Mirrors
-// abi.defaultMinTrials — small enough to adapt quickly, large enough that a few
+// defaultSelfSpecWarmupDrafts is the warmup floor used when SelfSpecGovernor.WarmupDrafts is
+// unset: until this many drafts have been observed the measured accept-rate is too small a sample
+// to trust, so the governor keeps drafting at the configured depth (the "invest through warmup"
+// prior). Mirrors abi.defaultMinTrials — small enough to adapt quickly, large enough that a few
 // unlucky early rejections cannot auto-off a genuinely good pattern.
 const defaultSelfSpecWarmupDrafts = 32
 
@@ -74,20 +73,19 @@ func (g SelfSpecGovernor) warmupFloor() int {
 	return defaultSelfSpecWarmupDrafts
 }
 
-// DraftDepth is the governor's decision: the draft depth to use for the next
-// step given the rolling acceptance rate, the measured per-draft expert page-in
-// count (the MARGINAL expert page-ins — SSD reads — one drafted token adds to the
-// verify pass over a plain decode; high on a cold cache, ~0 once the experts are
-// resident), and how many drafts have been observed so far. It returns either the
-// configured MaxDraftDepth (keep drafting) or 0 (auto-off).
+// DraftDepth is the governor's decision: the draft depth to use for the next step given the
+// rolling acceptance rate, the measured per-draft expert page-in count (the MARGINAL expert
+// page-ins — SSD reads — one drafted token adds to the verify pass over a plain decode; high on a
+// cold cache, ~0 once the experts are resident), and how many drafts have been observed so far.
+// It returns either the configured MaxDraftDepth (keep drafting) or 0 (auto-off):
 //
 //   - Disabled / default-off: MaxDraftDepth <= 0 => 0 (never speculate).
-//   - Warmup: fewer than warmupFloor drafts observed => MaxDraftDepth. The sample
-//     is too small to trust and the cache needs drafting to warm, so the governor
-//     invests (mirrors abi's declared-prior-governs-until-warm rule).
-//   - Post-warmup: the economic decision (speculationPaysOff). Keep MaxDraftDepth
-//     while the page-in tax is repaid; return 0 the moment it is not — the
-//     cold-cache -> 0 transition colibri's DRAFT=0 auto-off performs.
+//   - Warmup: fewer than warmupFloor drafts observed => MaxDraftDepth. The sample is too small to
+//     trust and the cache needs drafting to warm, so the governor invests (mirrors abi's
+//     declared-prior-governs-until-warm rule).
+//   - Post-warmup: the economic decision (speculationPaysOff). Keep MaxDraftDepth while the
+//     page-in tax is repaid; return 0 the moment it is not — the cold-cache -> 0 transition
+//     colibri's DRAFT=0 auto-off performs.
 func (g SelfSpecGovernor) DraftDepth(acceptRate, pageInsPerDraft float64, observedDrafts int) int {
 	n := g.MaxDraftDepth
 	if n <= 0 {
@@ -102,29 +100,27 @@ func (g SelfSpecGovernor) DraftDepth(acceptRate, pageInsPerDraft float64, observ
 	return 0 // auto-off: the page-in tax is no longer repaid
 }
 
-// speculationPaysOff is the honest page-in economics, evaluated post-warmup. A
-// draft+verify cycle at depth n with acceptance rate a commits
+// speculationPaysOff is the honest page-in economics, evaluated post-warmup. A draft+verify cycle
+// at depth n with acceptance rate a commits
 //
 //	yield = (1 - a^(n+1)) / (1 - a)
 //
-// tokens (the standard speculative-decoding expectation, Leviathan et al.
-// 2211.17192): the one token a plain step already yields plus, in expectation,
-// the run of accepted drafts. Speculation's EXTRA cost is the page-in tax the n
-// drafted tokens add to the verify — n * pageInsPerDraft marginal expert page-ins.
-// Its benefit is the decode work the BONUS tokens avoid: the (yield - 1) tokens
-// beyond the guaranteed one, each of which a plain decoder would have paid
+// tokens (the standard speculative-decoding expectation, Leviathan et al. 2211.17192): the one
+// token a plain step already yields plus, in expectation, the run of accepted drafts. Speculation's
+// EXTRA cost is the page-in tax the n drafted tokens add to the verify — n * pageInsPerDraft
+// marginal expert page-ins. Its benefit is the decode work the BONUS tokens avoid: the (yield - 1)
+// tokens beyond the guaranteed one, each of which a plain decoder would have paid
 // BasePageInsPerToken to produce. So drafting pays iff
 //
 //	n * pageInsPerDraft  <  base * (yield - 1)
 //
-// i.e. the tax is less than the avoided-decode saving. On a cold cache
-// pageInsPerDraft is elevated AND acceptance is low (yield -> 1, saving -> 0), so
-// the tax dominates and the governor disables. As the cache warms (pageInsPerDraft
-// -> 0) and acceptance rises, the saving overtakes the tax and drafting re-enables.
+// i.e. the tax is less than the avoided-decode saving. On a cold cache pageInsPerDraft is elevated
+// AND acceptance is low (yield -> 1, saving -> 0), so the tax dominates and the governor disables;
+// as the cache warms and acceptance rises, the saving overtakes the tax and drafting re-enables.
 // The tax is charged against PAGE-INS, never FLOPs — the whole point of the axis.
 //
-// When BasePageInsPerToken <= 0 the cost model is unarmed (no baseline to charge
-// against); the governor cannot honestly prove a loss and so keeps drafting.
+// When BasePageInsPerToken <= 0 the cost model is unarmed (no baseline to charge against); the
+// governor cannot honestly prove a loss and so keeps drafting.
 func (g SelfSpecGovernor) speculationPaysOff(acceptRate, pageInsPerDraft float64, n int) bool {
 	base := g.BasePageInsPerToken
 	if base <= 0 {
@@ -140,13 +136,11 @@ func (g SelfSpecGovernor) speculationPaysOff(acceptRate, pageInsPerDraft float64
 	return tax < saving
 }
 
-// expectedTokensPerCycle is the expected number of tokens a single draft+verify
-// cycle commits at depth n with acceptance rate a: (1 - a^(n+1)) / (1 - a), the
-// standard speculative-decoding yield. a is clamped to [0,1]; at a==1 every draft
-// is accepted so the yield is the full n+1, and at a==0 only the one guaranteed
-// correction token lands (yield 1). It never returns less than 1 — a verify always
-// commits at least the guaranteed token — so (yield - 1) is a well-defined
-// non-negative bonus.
+// expectedTokensPerCycle is the expected number of tokens a single draft+verify cycle commits at
+// depth n with acceptance rate a: (1 - a^(n+1)) / (1 - a), the standard speculative-decoding
+// yield. a is clamped to [0,1]; at a==1 the yield is the full n+1, and at a==0 only the one
+// guaranteed correction token lands (yield 1). It never returns less than 1 — a verify always
+// commits at least the guaranteed token — so (yield - 1) is a well-defined non-negative bonus.
 func expectedTokensPerCycle(acceptRate float64, n int) float64 {
 	a := clamp01(acceptRate)
 	if n <= 0 {

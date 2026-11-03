@@ -106,6 +106,9 @@ func QwenHybridKVCacheFromHost(cfg Config, data []byte) (_ *KVCache, err error) 
 	if !cfg.IsQwen35Hybrid() {
 		return nil, errors.New("model: Qwen hybrid restore requires a Qwen hybrid config")
 	}
+	if _, err := ComputeQwen35StateLayout(cfg, "f32"); err != nil {
+		return nil, err
+	}
 	if len(data) < sha256.Size {
 		return nil, errors.New("model: truncated Qwen hybrid swap blob")
 	}
@@ -210,11 +213,17 @@ func qwenHybridSwapErrorWithRecovery(err error, recovery string) error {
 }
 
 func newQwenHybridSwapCache(cfg Config) *KVCache {
-	leanCfg := cfg
-	leanCfg.LinearNumValueHeads = 0
-	out := NewKVCache(leanCfg)
-	out.cfg = cfg
-	return out
+	if !cfg.IsQwen35Hybrid() {
+		return NewKVCache(cfg)
+	}
+	// Keep the original strict geometry; only recurrent payload allocation is lazy.
+	// The public decoder returns this validation error before allocating a cache.
+	if _, err := ComputeQwen35StateLayout(cfg, "f32"); err != nil {
+		panic(err)
+	}
+	return newKVCacheWithLinearInitializer(cfg, KVPrecisionFP32, func(original Config) *linearAttnCache {
+		return &linearAttnCache{layers: make([]linearAttnLayerState, original.NumLayers)}
+	})
 }
 
 func qwenFullAttentionLayers(cfg Config) []int {

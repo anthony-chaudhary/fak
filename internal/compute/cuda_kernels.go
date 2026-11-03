@@ -106,7 +106,10 @@ func (c *cudaBackend) qwen35SequenceAllocLocked(shape []int, site string) (Tenso
 }
 
 func (c *cudaBackend) qwen35SequenceMatMulLocked(w, x Tensor, tokens int, site string) (Tensor, *cudaBuf, error) {
-	if err := c.validateQ56KMMVQOperands(w, x, tokens); err != nil {
+	if err := validateQwen35SequenceIQ2(w, tokens, qwen35SequenceIQ2Qualification); err != nil {
+		return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: err}
+	}
+	if err := c.validateQ56KProjectionOperands(w, x, tokens); err != nil {
 		return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: err}
 	}
 	if w.Dtype == Q2_K {
@@ -136,11 +139,11 @@ func (c *cudaBackend) qwen35SequenceMatMulLocked(w, x Tensor, tokens int, site s
 			return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: cudaGEMMError("qwen35-sequence-"+site, rc, cudaQ4KScratch(out, in, tokens))}
 		}
 	case Q5_K:
-		if err := c.q56KMMVQFailure(y, int(C.fcuda_q5k_matmul_checked_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))), in, tokens); err != nil {
+		if err := c.q56KMMVQFailure(y, c.q56KProjectionStatus(w, wb, x, y, tokens), in, tokens); err != nil {
 			return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: err}
 		}
 	case Q6_K:
-		if err := c.q56KMMVQFailure(y, int(C.fcuda_q6k_matmul_checked_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))), in, tokens); err != nil {
+		if err := c.q56KMMVQFailure(y, c.q56KProjectionStatus(w, wb, x, y, tokens), in, tokens); err != nil {
 			return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: err}
 		}
 	case Q2_K:
@@ -152,6 +155,12 @@ func (c *cudaBackend) qwen35SequenceMatMulLocked(w, x Tensor, tokens int, site s
 		if rc := int(C.fcuda_q3k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))); rc != 0 {
 			c.releaseTransientBuffers([]*cudaBuf{b})
 			return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: cudaGEMMError("qwen35-sequence-"+site, rc, cudaKQuantScratch(out, in, tokens))}
+		}
+	case IQ2_XXS, IQ2_XS:
+		// Reuse the F32-activation kernels without scratch or conversion, but
+		// capture launch status before split-QG or any other operation clears it.
+		if err := c.qwen35SequenceIQ2LaunchLocked(w, x, y, tokens); err != nil {
+			return Tensor{}, nil, &Qwen35SequenceError{Stage: site, Layer: -1, Cause: err}
 		}
 	case IQ4_XS:
 		if rc := int(C.fcuda_iq4xs_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), C.int(tokens))); rc != 0 {
@@ -498,7 +507,14 @@ func (c *cudaBackend) qwen35SequenceGDNLocked(x Tensor, layer Qwen35SequenceLaye
 }
 
 func (c *cudaBackend) qwen35SequenceSyncLocked() error {
-	status := int(C.fak_qwen35_sequence_sync())
+	var status int
+	if qwen35SequenceIQ2Qualification {
+		status = c.qwen35SequenceIQ2FenceLocked()
+	} else if cudaQ56KMMQQualification {
+		status = c.qwen35Q56KMMQFenceLocked()
+	} else {
+		status = int(C.fak_qwen35_sequence_sync())
+	}
 	if status != 0 {
 		return &Qwen35SequenceError{Stage: "final-fence", Layer: -1, Reason: fmt.Sprintf("CUDA status %d", status)}
 	}

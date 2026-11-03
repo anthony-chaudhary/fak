@@ -32,6 +32,12 @@ package compute
 extern void fcuda_dw_counters(uint64_t *out, int n);
 extern int fcuda_dw_site_rows(uint32_t *site, uint32_t *stage, uint64_t *syncs, uint64_t *wait_ns, uint64_t *d2h, int cap);
 extern const char *fcuda_dw_stage_name(uint32_t id);
+// Checked retained-IQ2 sequence ABI. These declarations and calls are enrolled
+// by tools/cuda_abi_parity.py; definitions live in cuda/iq_gemv.cuh.
+extern int fcuda_qwen35_iq2_sequence_checked_f32(const uint8_t *w, const float *x,
+    float *y, int out, int in, int tokens, int xs);
+extern int fcuda_qwen35_iq2_sequence_fence(void);
+extern void fcuda_qwen35_iq2_sequence_retirement_failed(int status);
 */
 import "C"
 
@@ -755,6 +761,11 @@ func (c *cudaBackend) Read(t Tensor) []float32 {
 		}
 		status := cudaReadNative.copy(db.device, unsafe.Pointer(&out[0]), src, uintptr(len(out)*4))
 		if status != 0 {
+			if cudaQ56KMMQQualification && db.device == 0 {
+				// Preserve the actual failed completion before deferred Go cleanup;
+				// no retry or additional successful-path fence is introduced.
+				cudaQ56KMMQRetirementFailedLocked(status)
+			}
 			// ObserveError does not classify CUDAOpError. Observe directly, then retain
 			// the typed operation/site/status even when this backend has no latch.
 			c.faultLatch.Observe(DeviceFaultExecution, "read-d2h", status)
@@ -1106,7 +1117,45 @@ func (c *cudaBackend) cudaNVFP4LtCallsForTest() uint64 {
 var cudaQ56KMMVQQualification = C.fcuda_q56k_mmvq_enabled() != 0 // immutable native archive selection
 
 func cudaQ56KMMVQReleaseBlocked() bool {
-	return cudaQ56KMMVQQualification && C.fcuda_q56k_mmvq_terminal() != 0
+	// Keep this historical name for the shared cleanup/ownership call sites.
+	// IQ2 or any other peer's failed drain freezes owners even when Q56 is off.
+	// This adds a native status query to healthy default cleanup, not a fence.
+	return C.fak_v41_checked_stream_terminal() != 0
+}
+
+// Caller holds cudaMu. Native launch and immediate status capture occur in one
+// C call (CUDA last-error state is host-thread-local). Success only enqueues;
+// failure drains before release, and an uncertain drain keeps every owner.
+func (c *cudaBackend) qwen35SequenceIQ2LaunchLocked(w, x, y Tensor, tokens int) error {
+	kind := 0
+	if w.Dtype == IQ2_XS {
+		kind = 1
+	}
+	wb := w.buf.(*cudaBuf)
+	rc := int(C.fcuda_qwen35_iq2_sequence_checked_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(w.Shape[0]), C.int(w.Shape[1]), C.int(tokens), C.int(kind)))
+	if rc == 0 {
+		return nil
+	}
+	b := y.buf.(*cudaBuf)
+	atomic.StoreUint32(&b.invalid, 1)
+	var cause error
+	if fault := c.faultLatch.Observe(DeviceFaultExecution, "qwen35-iq2-launch", rc); fault != nil {
+		cause = fault
+	}
+	c.releaseTransientBuffers([]*cudaBuf{b}) // shared terminal guard retains failed drains
+	return &CUDAOpError{Op: cudaQwen35IQ2SequenceOp, Site: "launch", Code: rc, Msg: "IQ2 launch refused; output withheld", Err: cause}
+}
+
+func (c *cudaBackend) qwen35SequenceIQ2FenceLocked() int {
+	rc := int(C.fcuda_qwen35_iq2_sequence_fence())
+	if rc != 0 {
+		c.faultLatch.Observe(DeviceFaultExecution, "qwen35-iq2-fence", rc)
+	}
+	return rc
+}
+
+func cudaQwen35IQ2SequenceRetirementFailedLocked(status int) {
+	C.fcuda_qwen35_iq2_sequence_retirement_failed(C.int(status))
 }
 
 func cudaQ56KMMVQSelected(w Tensor, p int) bool {
@@ -1195,6 +1244,9 @@ func (c *cudaBackend) validateQ56KMMVQOperands(w, x Tensor, p int) error {
 // A failed drain sets the shared terminal latch; neither this helper nor outer
 // sequence/GDN cleanup may detach or recycle the now-uncertain owners.
 func (c *cudaBackend) q56KMMVQFailure(y Tensor, rc, in, p int) error {
+	if cudaQ56KMMQQualification && p >= 128 {
+		return c.q56KMMQFailure(y, rc)
+	}
 	if rc == 0 {
 		return nil
 	}
@@ -1392,7 +1444,7 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		}
 		cudaMu.Unlock()
 	}()
-	if err := c.validateQ56KMMVQOperands(w, X, P); err != nil {
+	if err := c.validateQ56KProjectionOperands(w, X, P); err != nil {
 		panic(err)
 	}
 	if w.Dtype == Q2_K {
@@ -1437,13 +1489,13 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	case Q5_K:
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
-		if err := c.q56KMMVQFailure(y, int(C.fcuda_q5k_matmul_checked_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))), in, P); err != nil {
+		if err := c.q56KMMVQFailure(y, c.q56KProjectionStatus(w, wb, X, y, P), in, P); err != nil {
 			panic(err)
 		}
 	case Q6_K:
 		wb := c.cudaBufForSubmit(w)
 		y, _ = c.devTr([]int{P, out}, F32)
-		if err := c.q56KMMVQFailure(y, int(C.fcuda_q6k_matmul_checked_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))), in, P); err != nil {
+		if err := c.q56KMMVQFailure(y, c.q56KProjectionStatus(w, wb, X, y, P), in, P); err != nil {
 			panic(err)
 		}
 	case Q3_K:

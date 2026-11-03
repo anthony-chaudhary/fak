@@ -1,0 +1,9 @@
+{
+  "note": "directly recorded host share must win over the device-busy derivation",
+  "model": "Qwen3.8-27B-UD-Q2_K_XL",
+  "hardware": "strix1",
+  "host_share": 0.13,
+  "device_busy": 0.8,
+  "decode_steps": 64,
+  "observed_at": "2026-10-25T09:30:00Z"
+}

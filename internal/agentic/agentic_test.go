@@ -68,7 +68,7 @@ func TestCompileNativePlanPreservesExactExecutionContract(t *testing.T) {
 	if native.Engine != "fak-native" || native.DefaultModel != "Qwen3.8" {
 		t.Fatalf("native identity = engine %q model %q", native.Engine, native.DefaultModel)
 	}
-	if native.Receipt.Schema != nativeperf.ReceiptSchemaV2 || !native.Receipt.Required {
+	if native.Receipt.Schema != nativeperf.ReceiptSchemaV3 || !native.Receipt.Required {
 		t.Fatalf("receipt = %+v", native.Receipt)
 	}
 	wantFields := []string{
@@ -166,7 +166,7 @@ func TestCompileMixedDogfoodPreservesCohortsDirectionsAndContracts(t *testing.T)
 	if len(plan.Cohorts) != 2 || plan.Cohorts[0].Domain != DomainDevelopment || plan.Cohorts[1].Domain != DomainNativeModel {
 		t.Fatalf("cohorts = %+v", plan.Cohorts)
 	}
-	if plan.Native == nil || plan.Native.Engine != "fak-native" || plan.Native.DefaultModel != "Qwen3.8" || plan.Native.Receipt.Schema != nativeperf.ReceiptSchemaV2 {
+	if plan.Native == nil || plan.Native.Engine != "fak-native" || plan.Native.DefaultModel != "Qwen3.8" || plan.Native.Receipt.Schema != nativeperf.ReceiptSchemaV3 {
 		t.Fatalf("native contract = %+v", plan.Native)
 	}
 
@@ -346,7 +346,7 @@ func TestRenderIncludesDecisionsAndOfflinePosture(t *testing.T) {
 	for _, want := range []string{
 		"stage expand:", "stage experiment:", "stage contract:",
 		"issue-ready work:", "model=gpt-5.6-sol", "engine=fak-native",
-		"receipt=fak-native-performance-receipt/v2", "matched_workload=true",
+		"receipt=fak-native-performance-receipt/v3", "matched_workload=true",
 		"llama.cpp silent=false", "net_true", "docs/fleet-compute-nodes.md",
 		"schema=fak-agentic-learning/1", "read_only=true offline=true",
 	} {

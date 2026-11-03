@@ -55,7 +55,23 @@ func parsePlannerFuncs(t *testing.T) map[string]*plannerFunc {
 				continue
 			}
 			pf := &plannerFunc{calls: map[string]bool{}}
+			// spanVars tracks the locals bound to nativeperf.StartDecodeSpan so
+			// only the host decode span's Finish counts as the window-close
+			// event; unrelated Finish methods (e.g. a verification round's)
+			// must not break the mark-around-window contract.
+			spanVars := map[string]bool{}
 			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				if as, ok := n.(*ast.AssignStmt); ok && len(as.Lhs) == 1 && len(as.Rhs) == 1 {
+					if id, ok := as.Lhs[0].(*ast.Ident); ok {
+						if rhs, ok := as.Rhs[0].(*ast.CallExpr); ok {
+							if sel, ok := rhs.Fun.(*ast.SelectorExpr); ok {
+								if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "nativeperf" && sel.Sel.Name == "StartDecodeSpan" {
+									spanVars[id.Name] = true
+								}
+							}
+						}
+					}
+				}
 				if d, ok := n.(*ast.DeferStmt); ok {
 					if sel, ok := d.Call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "End" {
 						if id, ok := sel.X.(*ast.Ident); ok && id.Name == "nonDecode" {
@@ -71,8 +87,14 @@ func parsePlannerFuncs(t *testing.T) map[string]*plannerFunc {
 				callee := calleeName(call)
 				pf.calls[callee] = true
 				switch callee {
-				case "BeginNonDecodeWork", "StartDecodeSpan", "Finish":
+				case "BeginNonDecodeWork", "StartDecodeSpan":
 					pf.events = append(pf.events, callee)
+				case "Finish":
+					if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+						if id, ok := sel.X.(*ast.Ident); ok && spanVars[id.Name] {
+							pf.events = append(pf.events, "Finish")
+						}
+					}
 				case "End":
 					if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
 						if id, ok := sel.X.(*ast.Ident); ok && id.Name == "nonDecode" {

@@ -1,6 +1,6 @@
 ---
 title: "Choose sanctioned compute for hardware-gated work"
-description: "Operator route for selecting local proof, cloud GPU, private lab GPU, DC/CPU, or nightly evidence collection by workload and witness requirement."
+description: "Operator route for selecting local proof, enrolled LAN GPU, DC/CPU, or nightly evidence collection by workload and witness requirement."
 ---
 
 # Choose sanctioned compute for hardware-gated work
@@ -19,20 +19,18 @@ below and run that row's preflight before dispatching the workload.
 |---|---|---|---|
 | **Kernel policy and offline behavior; no device claim** | Local control point | The canonical proof needs no key, model, or GPU. It proves the policy and offline agent path, not CUDA, accelerator throughput, or a datacenter network. | Run the [60-second offline proof](repro-packet.md#the-60-second-offline-proof). Stop here only when its evidence matches the claim. |
 | **Local silicon accelerator verification or micro-dose probe (<50ms)** | Local physical silicon (Metal / CUDA / Vulkan) | Apple Silicon Metal (M-series), local NVIDIA CUDA, or local Vulkan. Direct in-process CGo execution. | Run `fak hil` (<50ms physical micro-dose suite) or `fak hil --probe` to verify physical execution capabilities and enforce active hardware bias before executing larger workloads. |
-| **AMD Strix Halo APU sub-kernel, Vulkan compute, or differential ablation witness** | AMD Strix Halo appliance (`strix-agent` / `strix1` / `strix-halo-fak.local`) | AMD Ryzen AI MAX+ 395 (16 Zen 5 cores, 32 threads) + Radeon 8060S (40 CUs, gfx1151) with 64GB LPDDR5X UMA. Validated natively via Mesa RADV Vulkan compute. LAN nodes and local silicon must be probed via `fak hil --lan` and `fak-dev amd-strix-probe`. | Run `fak-dev amd-strix-probe` or `fak hil --lan` to verify LAN presence and hardware facts (fast 50ms socket/mDNS discovery); run `fak-dev amd-strix-validate` or `fak validate --strix --subkernels=all --ablate=all` for physical sub-kernel verification and differential ablation. Simulations are strictly early indicators; only physical execution yields verified receipts. Headless agent execution uses `strix-agent` (zero token waste, batch mode, no PTY); human interactive logins use `strix1`. Remote appliance runbook: [`fak-private/docs/STRIX-HALO-APPLIANCE.md`](../fak-private/docs/STRIX-HALO-APPLIANCE.md). |
-| **Live CUDA serve or an operator-controlled cloud GPU burst** | GCP GPU node | The public cloud route supports quota discovery, a dry-run command preview, and bounded instance creation. Availability, quota, accelerator shape, region, and price remain observations from the selected project at dispatch time. | Run `python tools/gcp_gpu_probe.py --all-tiers`. A candidate is eligible only when the probe reports quota for its accelerator/region and does not report an auth or API blocker. Then run `python tools/gcp_bench.py --dry-run` and use its printed command, or run `GCP_PROJECT=<id> ./scripts/gcp-qwen-serve.sh --apply`. A create failure is a failed availability check, not a witness. |
-| **Device-GEMM, kernel, or multi-GPU witness on private lab hardware** | Private lab GPU server | Access, node identity, commands, credentials, and transcripts are private. The public repo may receive only a scrubbed result and its scoped hardware witness. | Open the [private control-channel route](private-comms-channel.md) and follow its authorized private runbook; return the scrubbed witness through the [lab development loop](fak/lab-dev-loop.md). |
-| **Datacenter-network access or heavy CPU evidence** | Private lab CPU/DC target | The target is CPU-only for accelerator claims. Network reach, credentials, node selection, and transcripts remain private operator data. | Use the same [private control-channel route](private-comms-channel.md), select the CPU/DC workload in its maintained node map, and return only scrubbed evidence. |
-| **Recurring device evidence rather than an interactive result** | Nightrun device-witness pipeline | The pipeline collects scheduled hardware evidence. Its runbook chooses the configured cloud or private worker; that physical target retains its own access boundary. The public ledger proves only the task, build, scrubbed machine class, and scope recorded in each row, not live capacity. | Follow the [nightrun runbook](nightrun/README.md) and verify the resulting row in `docs/nightrun/collected.jsonl`; use that row, rather than the worker's location, as the public readback. |
+| **Historical Strix Halo appliance evidence** | Retired appliance records | Historical receipts remain available; retired appliances are not testing capacity. | Select an eligible enrolled local or LAN target for new evidence. Do not wake or dispatch to retired appliances. |
+| **Live CUDA serve or device witness** | Eligible enrolled local host or LAN CUDA node | GCP test targets are retired. Historical cloud receipts and generic provider support do not establish current testing capacity. | Verify current enrollment, trust, lease, reachability, runtime, and required device capability using the maintained operator inventory before dispatch. Record the actual target and scoped result. Do not reauthenticate or provision cloud capacity for testing. |
+| **Device-GEMM, kernel, or multi-GPU witness on private lab hardware** | Eligible enrolled owned LAN GPU node | Current trust, lease, device capability, and access must be established; retired external lab records provide no admission. Node identity, commands, credentials, and transcripts remain private. | Use the maintained private inventory to admit the owned LAN target, run the scoped witness, and return only a scrubbed result through the [lab development loop](fak/lab-dev-loop.md). |
+| **Datacenter-network access or heavy CPU evidence** | Eligible enrolled owned LAN CPU/network node | The target must expose the required CPU/network boundary; CPU-only execution cannot establish accelerator claims. Retired external lab records provide no admission. | Establish current trust, lease, reachability, and workload capability in the maintained private inventory; return only scrubbed evidence. If the required boundary is absent, retain an unverified gap. |
+| **Recurring device evidence rather than an interactive result** | Nightrun device-witness pipeline | The pipeline collects scheduled hardware evidence. Its runbook selects an eligible enrolled local or LAN worker; that physical target retains its own access boundary. The public ledger proves only the task, build, scrubbed machine class, and scope recorded in each row, not live capacity. | Follow the [nightrun runbook](nightrun/README.md) and verify the resulting row in `docs/nightrun/collected.jsonl`; use that row, rather than the worker's location, as the public readback. |
 
 The evidence requirement selects the target. “GPU” alone is insufficient: a live serving
 check, a single-device kernel witness, a multi-GPU result, and a recurring nightly ledger
-are different jobs. When both a public-cloud and private-lab target meet the same device requirement, choose
-public cloud for a self-service single-node run when its probe reports eligibility; choose
-private lab for multi-GPU, device-specific lab hardware, DC reach, or a witness whose
-maintained runbook is private. If neither condition decides the target, use nightrun for a
-recurring job and ask the authorized lab operator to select the maintained interactive
-route for a one-off job.
+are different jobs. Select an eligible enrolled local or LAN target whose current
+capability matches the required evidence. A retired DGX or GCP record is historical,
+not an active route. If no target passes admission, record the precise unverified gap;
+a cloud login, provisioning plan, or operator handoff is not a passing test.
 
 ## Public choice versus private control
 
@@ -42,11 +40,10 @@ commands, credentials, channel identifiers, recovery steps, or raw transcripts. 
 belong to the authorized companion runbook reached through
 [the private-control public stub](private-comms-channel.md).
 
-A missing credential or bridge session changes the next actor, not the compute
-requirement. An unauthorized reader can select the workload class but cannot verify a
+A missing credential or admission leaves the hardware requirement unverified. An unauthorized reader can select the workload class but cannot verify a
 private target's identity or availability; that is an intentional support boundary, not a
-publicly reproducible check. Hand the authorized operator the selected row and public
-preflight; the operator completes and records private discovery in the private runbook.
+publicly reproducible check. Record the selected workload and unverified gap in the maintained private runbook;
+an operator handoff alone does not establish availability or satisfy the witness.
 Do not reconstruct private commands from dated public notes, and do not report local
 hardware absence as the result of a task whose claim requires remote hardware.
 
@@ -70,9 +67,10 @@ achieved speedup, or closing performance issues.
 Before running comparative benchmarks or sub-kernel evaluations:
 - **Local silicon** (Metal / CUDA / Vulkan) must be probed via `fak hil` (<50ms physical micro-dose suite)
   or `fak hil --probe` to verify physical capabilities and establish an active hardware bias.
-- **LAN nodes** (AMD Strix Halo APU `strix1` / `strix-agent`) must be probed via `fak hil --lan` and
-  `fak-dev amd-strix-probe` (fast 50ms socket/mDNS discovery) before running physical sub-kernel
-  validation (`fak-dev amd-strix-validate`).
+- **LAN nodes** must first pass current enrollment, trust, lease, reachability, runtime,
+  and device-capability checks through the maintained private inventory. Run only the
+  scoped physical witness supported by that admitted node; retired appliance recipes
+  and historical discovery results provide no testing capacity.
 
 Every returned result should identify the tested commit or module revision, workload,
 machine class and accelerator architecture where applicable, command or runbook step,
@@ -86,13 +84,13 @@ for what may cross repositories.
 |---|---|
 | Mode | Public selection and evidence routing. Private control is a separate authorized mode; model-serving traffic is separate from both. |
 | Generation | This is the current (`gen/now`) selection route. Linked runbooks own executable commands and supersede dated notes. |
-| Support | Public cloud tools are supported to the behavior their current preflight reports. Private targets are supported only for authorized operators through the private runbook. Nightrun support is scoped to recorded ledger rows. |
+| Support | Testing uses eligible enrolled local or owned LAN targets admitted through the maintained private inventory. GCP and retired external lab targets are excluded. Nightrun support is scoped to recorded ledger rows. |
 | Lifecycle | The maintainer of this public table records selection status here; the maintainer of each linked runbook records executable details there. Add or promote a row only with a working preflight plus a returned witness. Mark the row held when access or capacity cannot be established. Remove or replace it when its maintained runbook names a successor. |
 
-Capacity is checked at dispatch time; a dated quota or stockout observation is not a
-permanent support promise. If a preflight finds no eligible cloud target, preserve its
-output and choose another row that can produce the same required evidence, or hand the
-exact public preflight and selected requirement to the authorized operator.
+Capacity is checked at dispatch time; dated inventory and historical receipts provide
+no current admission. If no eligible local or LAN target can produce the required
+evidence, record the exact unverified gap. Do not substitute cloud provisioning,
+reauthentication, or an operator handoff for the missing physical witness.
 
 ## Enforcement and related routes
 
@@ -107,7 +105,7 @@ Alongside `fak hwgate-lint`'s routing gate, `fak hil` enforces the physical exec
 through **100× more frequent micro-doses (<50ms physical silicon probes)**:
 - **Sub-50ms Silicon Probes:** Runs micro-doses exercising context allocation, compute (GEMV/GEMM),
   bandwidth, and numerical parity on actual silicon (Metal on Darwin, CUDA on Linux/Windows,
-  Vulkan on AMD Strix Halo).
+  Vulkan on an admitted supported device).
 - **Real HW Comparison Auditing:** `fak hil --audit-comparison` audits comparative claims against
   baselines, failing with exit code 1 if either candidate or baseline was simulated, and forbidding
   issue closure or speedup claims from simulation leakage.

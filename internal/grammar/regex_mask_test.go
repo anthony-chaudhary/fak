@@ -9,11 +9,7 @@ import (
 	"testing"
 	"unicode"
 	"unicode/utf8"
-
-	"github.com/anthony-chaudhary/fak/internal/model"
 )
-
-var _ model.LogitMask = (*RegexMask)(nil)
 
 type regexTestDecoder [][]byte
 
