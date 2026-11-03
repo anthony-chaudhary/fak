@@ -123,6 +123,7 @@ var verbTiers = map[string]VerbTier{
 	"dormancy":              TierDev,
 	"fanout":                TierDev,
 	"gate":                  TierDev,
+	"glue-census":           TierDev,
 	"goal":                  TierDev,
 	"guard-goal-question":   TierDev,
 	"harness":               TierDev,

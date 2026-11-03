@@ -235,6 +235,7 @@ var verbManifest = []Verb{
 	{Name: "git-maint", Synopsis: "lock-aware safe object-DB consolidation: build midx + commit-graph, fold loose objects, never prune", Lane: "gitgate"},
 	{Name: "gitd", Synopsis: "resident per-repo git broker over a unix socket: cached content-addressed reads, provenance on every answer", Lane: "gitbroker"},
 	{Name: "glm52-prefill-sweep", Synopsis: "GLM-5.2 prefill-latency sweep: --dry-run prints the plan, --endpoint runs it and lands ledger artifacts", Lane: "cmd"},
+	{Name: "glue-census", Synopsis: "verified GLM-DSA decode-path sync round-trips/token census; --check asserts the documented reference", Lane: "cmd"},
 	{Name: "go", Synopsis: "go build/vet/test passthrough that masks peers' untracked-sibling poison via a buildcheck -overlay", Lane: "cmd"},
 	{Name: "goal", Synopsis: "manage canonical goals, lifecycle transitions, bindings, evidence, and execution topology", Lane: "cmd"},
 	{Name: "goal-park", Synopsis: "park a supervisor goal claim: status|claim a goal identity to a single owner via the .fak/goal-park store", Lane: "cmd"},

@@ -177,6 +177,10 @@ var maintainerDevCommands = []string{
 	"git-maint",
 	"gitd",
 	"glm52-prefill-sweep",
+	// Verified sync host<->device round-trips/token census for the GLM-DSA
+	// decode path: recomputable metric + source-drift gate over fak's own
+	// kernel seams, not a portable adopter pattern.
+	"glue-census",
 	"go",
 	"goal",
 	"goal-park",

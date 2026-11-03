@@ -2428,6 +2428,7 @@
         "flashAttentionWindowTileStart",
         "fvk_have_qwen35_attention_postprocess",
         "fvk_have_qwen35_attention_qg",
+        "glmDsaAppendAttentionKV",
         "haveQwenAttentionPostprocess",
         "haveQwenAttentionQG",
         "linear_attn_out",

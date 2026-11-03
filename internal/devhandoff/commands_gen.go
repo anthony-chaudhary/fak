@@ -40,6 +40,7 @@ var Commands = []Command{
 	{Name: "feature", Owner: "dev", Handler: "devcmd.RunFeature", SourceOrigin: "internal/devcmd/selfquery_commands.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "fleetcap", Owner: "dev", Handler: "devcmd.RunFleetcap", SourceOrigin: "internal/devcmd/fleetcap.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "gate", Owner: "dev", Handler: "devcmd.RunCompanionGate", SourceOrigin: "internal/devcmd/companion_bridge.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
+	{Name: "glue-census", Owner: "dev", Handler: "devcmd.RunGlueCensus", SourceOrigin: "internal/devcmd/glue_census.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "goal-fleet", Owner: "dev", Handler: "devcmd.RunGoalFleet", SourceOrigin: "internal/devcmd/goal_launch.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "goal-launch", Owner: "dev", Handler: "devcmd.RunGoalLaunch", SourceOrigin: "internal/devcmd/goal_launch.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "hostshare", Owner: "dev", Handler: "runHostShare", SourceOrigin: "cmd/fak-dev/hostshare.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
