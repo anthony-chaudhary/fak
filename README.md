@@ -16,22 +16,31 @@ speculative decoding and physical GPU Direct paths are not yet default-on or
 universally qualified. See the [local-agent milestone](docs/local-agent-milestone.md)
 and the [claims ledger](CLAIMS.md) for what is real and what is not.
 
-**Where it stands on speed** ([Qwen results](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md)):
-
-- Mac (M3 Pro, Qwen3.8-27B): fak's Metal engine measured 43.8% faster prefill than
-  its own per-op reference path (observed 2026-09-03). That is a component result, not a full run.
-- Versus llama.cpp, the strongest local engine: no accepted full-run Mac comparison
-  exists; the earlier near-parity figure was withdrawn on 2026-09-27 pending remeasurement.
-- NVIDIA (RTX 5090 Laptop, Qwen3.8-27B): with three documented revert knobs pinned against a
-  witnessed trunk regression, fak measured 18.19 decode tok/s — 0.745× llama.cpp b11870, up
-  from 0.545×; prefill still trails at 0.284× (observed 2026-10-31).
-
-llama.cpp is an explicit external reference for comparison only; fak never selects it
-as a fallback ([native inference goal](docs/native-inference-goal.md)).
+**Speed:** the newest witnessed result for each platform — with its claim boundary
+and receipt link — lives in the **Latest hardware results** section immediately below.
+Versus llama.cpp on Mac there is no accepted full-run comparison yet; the earlier
+near-parity figure was withdrawn on 2026-09-27 pending remeasurement. llama.cpp is
+an explicit external reference for comparison only; fak never selects it as a
+fallback ([native inference goal](docs/native-inference-goal.md)).
 
 **Pick your path:** run a local agent → [Try fak](#try-fak) · guard an agent you
 already use → [`fak guard`](#governance-for-external-agents-fak-guard) · check the
 evidence → [benchmarks](docs/benchmarks/README.md) and [claims](CLAIMS.md).
+
+## Latest hardware results — 2026-11-02
+
+One row per hardware family: the newest committed performance receipt for that platform,
+with its claim boundary and receipt link. A row stays historical until a newer quality-complete
+measurement exists.
+
+| Platform | Latest witnessed result | Status & Details |
+|---|---|---|
+| Mac | Qwen3.8-27B Q4_K_M on Apple M3 Pro: forward-owned Metal sequence prefill was 43.8% faster, 10,284.5 vs 18,304.9 ms, and used 1 command buffer instead of 192; observed 2026-09-03. | Accepted component-path result with exact greedy continuation and zero fallbacks; it is not a full-run throughput comparison. [Qwen result index](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) |
+| AMD | DeepSeek-V4.1-Flash-Q2_K on one 128 GB AMD Strix Halo (Ryzen AI MAX+ 395, Radeon 8060S gfx1151, Vulkan): warm single-stream decode reached 4.61 tok/s, +29% over the same-session 3.57 base, with greedy output parity in 32/32 requests; observed 2026-10-22. | Physical APU result; the 30 tok/s decode target is not yet met, so this row stands until a newer accepted AMD measurement exists. [Strix Halo V4.1 Flash results](docs/benchmarks/STRIX-HALO-DEEPSEEK-V41-FLASH.md) |
+| NVIDIA | Qwen3.8-27B Q4_K_M on an RTX 5090 Laptop (sm_120): with three documented per-class revert knobs pinned against a witnessed trunk regression, fak reached 18.19 decode tok/s — 0.745× llama.cpp b11870, up from 0.545× — while cold prefill stayed at 0.284×; observed 2026-10-31. | HW-witnessed H2H re-measure; the regression is bisected but unfixed, so knob-free trunk serving is blocked, and the ≥0.8× decode / ≥0.5× prefill maturity bar is not yet met. [RTX 5090 perf-gap receipt](docs/benchmarks/published/nvidia-cuda-perf-gap/RESULTS.md) |
+
+Read the status column before comparing rates. History: [benchmark index](docs/benchmarks/README.md);
+claim boundaries: [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md).
 
 ## Try fak
 
@@ -88,21 +97,6 @@ fak agent --offline   # -> task completed
 - **Native inference primitives:** bounded CPU beam search, an explicit score-based SPM
   tokenizer, a bounded Jinja chat-template runtime, and causal-model embeddings land natively.
 
-## Latest hardware results — 2026-11-02
-
-One row per hardware family: the newest committed performance receipt for that platform,
-with its claim boundary and receipt link. A row stays historical until a newer quality-complete
-measurement exists.
-
-| Platform | Latest witnessed result | Status & Details |
-|---|---|---|
-| Mac | Qwen3.8-27B Q4_K_M on Apple M3 Pro: forward-owned Metal sequence prefill was 43.8% faster, 10,284.5 vs 18,304.9 ms, and used 1 command buffer instead of 192; observed 2026-09-03. | Accepted component-path result with exact greedy continuation and zero fallbacks; it is not a full-run throughput comparison. [Qwen result index](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) |
-| AMD | DeepSeek-V4.1-Flash-Q2_K on one 128 GB AMD Strix Halo (Ryzen AI MAX+ 395, Radeon 8060S gfx1151, Vulkan): warm single-stream decode reached 4.61 tok/s, +29% over the same-session 3.57 base, with greedy output parity in 32/32 requests; observed 2026-10-22. | Physical APU result; the 30 tok/s decode target is not yet met, so this row stands until a newer accepted AMD measurement exists. [Strix Halo V4.1 Flash results](docs/benchmarks/STRIX-HALO-DEEPSEEK-V41-FLASH.md) |
-| NVIDIA | Qwen3.8-27B Q4_K_M on an RTX 5090 Laptop (sm_120): with three documented per-class revert knobs pinned against a witnessed trunk regression, fak reached 18.19 decode tok/s — 0.745× llama.cpp b11870, up from 0.545× — while cold prefill stayed at 0.284×; observed 2026-10-31. | HW-witnessed H2H re-measure; the regression is bisected but unfixed, so knob-free trunk serving is blocked, and the ≥0.8× decode / ≥0.5× prefill maturity bar is not yet met. [RTX 5090 perf-gap receipt](docs/benchmarks/published/nvidia-cuda-perf-gap/RESULTS.md) |
-
-Read the status column before comparing rates. History: [benchmark index](docs/benchmarks/README.md);
-claim boundaries: [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md).
-
 ## Models fak has actually run — exact Hugging Face pins
 
 Every result above measured a pinned artifact, not "latest". The URLs below are the
@@ -135,4 +129,4 @@ is linked instead of an unrecorded mirror.
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-11-02 vs VERSION 0.57.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-09 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py + /refresh-readme -->
+<!-- readme-verified: 2026-11-03 vs VERSION 0.57.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-09 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py + /refresh-readme -->
