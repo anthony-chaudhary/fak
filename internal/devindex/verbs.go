@@ -296,6 +296,7 @@ var verbManifest = []Verb{
 	{Name: "leaseref", Synopsis: "cross-machine lease visibility: read the refs/fak/locks/* lease ref namespace", Lane: "cmd"},
 	{Name: "learning-debt-dispatch", Synopsis: "learning-scorecard -> backlog: file capped triage issues for HARD learning-debt defects", Lane: "cmd"},
 	{Name: "lifecycle", Synopsis: "inspect and control phase-aware capability lifecycle state", Lane: "cmd"},
+	{Name: "launch-census", Synopsis: "verified kernel-launch/parFor census: launches/token per model shape, looped vs batched MoE expert dispatch", Lane: "cmd"},
 	{Name: "learning-observation", Synopsis: "store and trace observation -> candidate -> witness -> verdict learning records", Lane: "cmd"},
 	{Name: "learning-mesh", Synopsis: "compile learning records into deterministic cross-envelope transfer candidates", Lane: "cmd"},
 	{Name: "lint", Synopsis: "the static tool linter: the definition-time dual of the kernel's call-time re-checks", Lane: "cmd"},
