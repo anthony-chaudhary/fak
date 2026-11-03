@@ -36,7 +36,15 @@ func eventFixtureFile(t *testing.T, root, name, body string) {
 }
 func eventFixtureRoot(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
+	// Production containment (fingerprintValidateCandidate) only accepts candidate
+	// roots under os.TempDir(), but cmd/go exports GOTMPDIR=<worktree>/.gotmp to
+	// test binaries and Go 1.26 t.TempDir() honors it. Build the fixture root
+	// directly under os.TempDir() instead of t.TempDir().
+	root, err := os.MkdirTemp(os.TempDir(), "fak-validate-events-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(root) })
 	eventFixtureFile(t, root, "go.mod", "module fixture.test/events\n\ngo 1.26\n")
 	return root
 }
