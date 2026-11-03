@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -1400,6 +1401,32 @@ func TestInKernelIncrementalContextAdversarialConcurrent(t *testing.T) {
 		}
 		if r.prompt != r.want {
 			t.Fatalf("%s: prompt differs from the full rebuild:\n got %q\nwant %q", r.label, r.prompt, r.want)
+		}
+	}
+}
+
+// TestInKernelIncrementalContextProvenanceHeader pins the DIRECT-PORT attribution
+// contract of the opencode borrow on closed values: the implementation file's header
+// must carry the upstream copyright line, the exact source URL at the full commit
+// pin, and the MIT license marker, so provenance stays verifiable from the tree.
+func TestInKernelIncrementalContextProvenanceHeader(t *testing.T) {
+	data, err := os.ReadFile("inkernel_incremental.go")
+	if err != nil {
+		t.Fatalf("read inkernel_incremental.go: %v", err)
+	}
+	hdr := data
+	if i := bytes.Index(data, []byte("package agent")); i >= 0 {
+		hdr = data[:i]
+	}
+	const wantURL = "https://github.com/anomalyco/opencode/blob/4eb29a64f0054672950acf789f2b09487ebfbb20/packages/core/src/system-context/index.ts"
+	for _, want := range []string{
+		wantURL,
+		"4eb29a64f0054672950acf789f2b09487ebfbb20",
+		"MIT",
+		"Copyright (c) 2025 opencode",
+	} {
+		if !strings.Contains(string(hdr), want) {
+			t.Errorf("inkernel_incremental.go header missing DIRECT-PORT provenance value %q", want)
 		}
 	}
 }
