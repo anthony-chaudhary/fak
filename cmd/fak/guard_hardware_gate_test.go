@@ -56,7 +56,7 @@ func TestNormalizeGuardHardwareGateMode(t *testing.T) {
 func sampleHardwareGateFinding() hwgatelint.Finding {
 	return hwgatelint.Finding{
 		Class: "NO_LOCAL_GPU",
-		Node:  "GCP `fak-realmodel` (L4 sm_89) or the DGX via `dgxbridge`",
+		Node:  "an eligible enrolled LAN CUDA node",
 	}
 }
 
@@ -167,7 +167,7 @@ func TestGuardHardwareGateContinueInjectsNode(t *testing.T) {
 	if !strings.Contains(msg, "(local-hardware)") {
 		t.Errorf("blank Class did not fall back to the generic label:\n%s", msg)
 	}
-	if !strings.Contains(msg, "sanctioned compute node for the task") {
+	if !strings.Contains(msg, "eligible enrolled local or LAN node") {
 		t.Errorf("blank Node did not fall back to the generic fleet menu:\n%s", msg)
 	}
 	if strings.Contains(msg, "()") {

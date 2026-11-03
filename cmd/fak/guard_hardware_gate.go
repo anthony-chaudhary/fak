@@ -6,16 +6,15 @@ package main
 // The pathology: a headless turn ends by declaring a LOCAL-hardware blocker as terminal
 // — "no GPU on this host", "can't run the CUDA witness without a device", "not
 // reproducible on this laptop" — and stops. But in the fleet this host is only the
-// CONTROL POINT; the device/GPU/heavy work belongs on a sanctioned compute node (GCP
-// fak-realmodel, the DGX via dgxbridge, da33, the nightrun pipeline). Stopping at the
+// CONTROL POINT; device work belongs on an eligible enrolled local or LAN node. Stopping at the
 // local boundary strands work the fleet could witness.
 //
 // This file is BOTH the sensor and the act: it reads the final assistant turn from the
 // transcript itself, folds it through internal/hwgatelint, and — on a hardware-gated stop
 // — tells an autonomous worker to do what the fleet exists for INSTEAD of stopping:
-// dispatch the work to the right node, or, if the credential/bridge session is missing,
-// produce the exact ready-to-run command sequence and hand it to the operator (that still
-// counts as using the fleet). It is a fully dedicated hook: it does not read any state that
+// dispatch to an eligible enrolled local or LAN node after current admission checks.
+// Missing admission remains an explicit unverified gap. This dedicated hook does not
+// read any state that
 // another rung's sensor left behind, so it fires whether or not the reporting sensor ran.
 // It mirrors the operator-directed ladder's off|shadow|warn|enforce.
 //
@@ -130,7 +129,7 @@ func hardwareGateFinalProseTurn(path string) string {
 //	fired — false when the gate is inert: off/bad mode, no transcript, or a clean (non-gated) turn.
 //
 // enforce always BLOCKS a hardware-gated stop and redirects (there is no legitimate "give up for
-// lack of local hardware" outcome — the fleet always offers a node or an operator handoff).
+// lack of local hardware" outcome before checking eligible local or LAN capacity).
 // warn/shadow always allow (soak/observe). Fail-open: a bad mode string is treated as "do not fire".
 func runGuardHardwareGateGate(stderr io.Writer, rawMode, transcriptPath string) (exit int, disp guardStopDisposition, fired bool) {
 	mode, err := normalizeGuardHardwareGateMode(rawMode)
@@ -170,10 +169,9 @@ func guardHardwareGateDecide(stderr io.Writer, mode string, top hwgatelint.Findi
 
 // guardHardwareGateContinueMessage is the exact stderr text fed back to the MODEL when enforce
 // blocks the stop (exit 2). It names the local resource the turn treated as a wall and hands over
-// the fixed sanctioned-route redirect — dispatch to a compute node, or hand the operator the
-// ready-to-run command — then points at the sanctioned wrap-up for the genuinely-blocked case.
+// the fixed sanctioned-route redirect — dispatch to an admitted local or LAN node — then points at the sanctioned wrap-up for the genuinely-blocked case.
 func guardHardwareGateContinueMessage(top hwgatelint.Finding) string {
-	return fmt.Sprintf("fak guard Stop: this turn stopped by declaring a LOCAL-hardware blocker (%s), but this host is the control point, not the compute boundary — stopping here strands work a sanctioned node could witness. Do not stop for lack of local hardware. Instead: %s Route to %s, then finish the turn. If the credential/bridge session is genuinely missing and you cannot even hand off a command, note it on one line (`no allowed path: <reason>`) and stop cleanly.",
+	return fmt.Sprintf("fak guard Stop: this turn stopped by declaring a LOCAL-hardware blocker (%s), but this host is the control point, not the compute boundary — stopping here strands work a sanctioned node could witness. Do not stop for lack of local hardware. Instead: %s Route to %s, then finish the turn. If no eligible enrolled local or LAN node passes admission, record the unverified gap on one line (`no allowed path: <reason>`) and stop cleanly.",
 		guardHardwareGateClassLabel(top), hwgatelint.Redirect, guardHardwareGateNodeText(top))
 }
 
@@ -206,5 +204,5 @@ func guardHardwareGateNodeText(top hwgatelint.Finding) string {
 	if n := strings.TrimSpace(top.Node); n != "" {
 		return n
 	}
-	return "the sanctioned compute node for the task (GCP fak-realmodel, the DGX, da33, or nightrun)"
+	return "an eligible enrolled local or LAN node with current trust, lease, and workload capability"
 }

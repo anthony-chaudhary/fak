@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -480,40 +479,15 @@ func benchFleetLabPrefix() string {
 	return "printf 'FAK_BENCH_NODE='; hostname; export PATH=/usr/local/go/bin:/usr/local/cuda/bin:$PATH GOCACHE=/tmp/gocache GOPATH=/tmp/gopath GOTOOLCHAIN=auto; mkdir -p /tmp/fak-bench-results; repo=$(mktemp -d /tmp/fak-bench.XXXXXX) && git clone --depth 1 https://github.com/anthony-chaudhary/fak $repo && cd $repo && "
 }
 
+var errBenchFleetTargetRetired = errors.New("benchmark target retired; select an eligible enrolled local or LAN node")
+
 func benchFleetRoute(root string, req benchFleetRequest) (string, []string, string, string, error) {
+	switch req.Machine {
+	case "gcp-g2-l4", "gcp-g2-l4-32", "gcp-a3-high-h100-1g", "a100", "cpu-server-a":
+		return "", nil, "retired", "waiting_route", errBenchFleetTargetRetired
+	}
 	remote := benchFleetRemoteCommand(req)
 	switch req.Machine {
-	case "gcp-g2-l4":
-		return "gcloud", []string{"compute", "ssh", "fak-cuda-build-l4", "--zone", "us-central1-b", "--quiet", "--command", remote}, "gcp:ssh/fak-cuda-build-l4", "running", nil
-	case "gcp-g2-l4-32":
-		return "gcloud", []string{"compute", "ssh", "fak-realmodel", "--zone", "us-central1-a", "--quiet", "--command", remote}, "gcp:ssh/fak-realmodel", "running", nil
-	case "gcp-a3-high-h100-1g":
-		return "gcloud", []string{"compute", "ssh", "fak-qwen-serve", "--zone", "us-central1-f", "--quiet", "--command", remote}, "gcp:ssh/fak-qwen-serve", "running", nil
-	case "a100", "cpu-server-a":
-		bridge := filepath.Clean(filepath.Join(root, "..", "fak-private", ".dgxbridge-verify", "dgxbridge-fresh.exe"))
-		if runtime.GOOS != "windows" {
-			bridge = filepath.Clean(filepath.Join(root, "..", "fak-private", ".dgxbridge-verify", "dgxbridge-fresh"))
-		}
-		if _, err := os.Stat(bridge); err != nil {
-			return "", nil, "dgxbridge", "waiting_credentials", errors.New("private bridge unavailable")
-		}
-		cfg := benchFleetRoutes(root)
-		channel := cfg.A100Channel
-		if req.Machine == "cpu-server-a" {
-			channel = cfg.CPUServerChannel
-		}
-		args := []string{}
-		if channel != "" {
-			args = append(args, "-channel", channel)
-		}
-		// The bridge's file-readback path wedges under busy Slack channels. Transcript
-		// mode plus a generous timeout is the independently verified lab runbook.
-		// Transport the script as base64 so the Slack hub cannot reinterpret URL
-		// slashes, shell separators, or quoted JSON before bash receives it.
-		encoded := base64.StdEncoding.EncodeToString([]byte(remote))
-		remote = "printf %s " + encoded + " | base64 -d | bash"
-		args = append(args, "-timeout", "4m", "-remote-out", "/tmp/fak-bench-results/"+req.ID+".bridge.out", "run", remote)
-		return bridge, args, "dgxbridge", "running", nil
 	case "workstation-a":
 		cfg := benchFleetRoutes(root)
 		if cfg.WorkstationHost == "" || cfg.WorkstationUser == "" || cfg.WorkstationIdentityFile == "" {
