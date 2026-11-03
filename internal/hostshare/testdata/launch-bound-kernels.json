@@ -1,0 +1,11 @@
+{
+  "note": "synthetic launch-bound decode window: timed GPU time over window wall",
+  "model": "Qwen3.8-27B-UD-Q2_K_XL",
+  "backend": "vulkan",
+  "decode_steps": 128,
+  "gpu_ms_per_token": 4.1,
+  "wall_ms_per_token": 7.5,
+  "device_busy": 0.55,
+  "complete": true,
+  "observed_utc": "2026-11-01T00:00:00Z"
+}

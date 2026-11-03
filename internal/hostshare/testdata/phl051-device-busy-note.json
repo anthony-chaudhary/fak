@@ -1,0 +1,11 @@
+{
+  "note": "PHL-051-shaped bring-up measurement: device-busy fraction over the warm decode window",
+  "model": "Qwen3.8-27B-UD-Q2_K_XL",
+  "machine": {
+    "platform": "linux/amd64",
+    "backend": "vulkan"
+  },
+  "device_busy": 0.87,
+  "decode_tokens": 256,
+  "observed_utc": "2026-10-20T08:00:00Z"
+}

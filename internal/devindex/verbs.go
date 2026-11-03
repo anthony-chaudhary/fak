@@ -267,6 +267,7 @@ var verbManifest = []Verb{
 	{Name: "host-crash", Synopsis: "watch the host for crash/reboot events and append a durable JSONL signal (--once scans once)", Lane: "cmd"},
 	{Name: "hostdiag", Synopsis: "census, correlate, or trend host diagnostic evidence", Lane: "cmd"},
 	{Name: "host-relaunch-broker", Synopsis: "drain the control-plane->desktop relaunch spool and launch the queued Windows Terminal sessions", Lane: "cmd"},
+	{Name: "hostshare", Synopsis: "read host_share from perf receipts/profile notes; gate launch-bound decode at --threshold", Lane: "cmd"},
 	{Name: "hwgate-lint", Synopsis: "scan agent output for local-hardware stops (no GPU here) and redirect each to a sanctioned compute node", Lane: "cmd"},
 	{Name: "hygiene", Synopsis: "the whole-tree hygiene gates in one process (the --audit-tree twin of fak hooks)", Lane: "cmd"},
 	{Name: "idea-scout", Synopsis: "research-to-issue feeder: score arXiv/GitHub/HN/Reddit hits, dedupe, plan issues; --live FILES them for real", Lane: "cmd", Doc: "docs/idea-scout.md"},

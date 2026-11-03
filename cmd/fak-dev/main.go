@@ -180,6 +180,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunInferenceTopology(stdout, stderr, argv[1:])
 	case "regime":
 		return runRegime(stdout, stderr, argv[1:])
+	case "hostshare":
+		return runHostShare(stdout, stderr, argv[1:])
 	default:
 		fmt.Fprintf(stderr, "fak-dev: unknown command %q\n", argv[0])
 		fmt.Fprintln(stderr, "run 'fak-dev help' for repository-development commands")
@@ -272,6 +274,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  kernel-oracle <shapes|rank> [flags]    rank fak Vulkan kernels against ggml test-backend-ops per op and shape")
 	fmt.Fprintln(w, "  inference-topology <validate|analyze|inventory|render> [flags] model per-rank decode resource and collective constraints")
 	fmt.Fprintln(w, "  regime [PATH...] [--latest N] [--fail-on R] classify decode-step overhead regime (launch/compute/mem/unknown) from receipt signals")
+	fmt.Fprintln(w, "  hostshare [--receipts DIR] [--latest N]   read host_share from receipts/profile notes; gate launch-bound decode at --threshold")
 	fmt.Fprintln(w, "  version                               print fak-dev build identity")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "companion tooling (when fak-private is present):")

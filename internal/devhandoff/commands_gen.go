@@ -42,6 +42,7 @@ var Commands = []Command{
 	{Name: "gate", Owner: "dev", Handler: "devcmd.RunCompanionGate", SourceOrigin: "internal/devcmd/companion_bridge.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "goal-fleet", Owner: "dev", Handler: "devcmd.RunGoalFleet", SourceOrigin: "internal/devcmd/goal_launch.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "goal-launch", Owner: "dev", Handler: "devcmd.RunGoalLaunch", SourceOrigin: "internal/devcmd/goal_launch.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
+	{Name: "hostshare", Owner: "dev", Handler: "runHostShare", SourceOrigin: "cmd/fak-dev/hostshare.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "idea-scout", Owner: "dev", Handler: "devcmd.RunIdeaScout", SourceOrigin: "internal/devcmd/ideascout.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "index", Aliases: []string{"devindex"}, Owner: "dev", Handler: "devcmd.RunIndex", SourceOrigin: "internal/devcmd/index.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "inference-topology", Owner: "dev", Handler: "devcmd.RunInferenceTopology", SourceOrigin: "internal/devcmd/inference_topology.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},

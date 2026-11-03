@@ -197,6 +197,9 @@ var maintainerDevCommands = []string{
 	"horizon-recovery",
 	"host-crash",
 	"host-relaunch-broker",
+	// Systematic host-share reader + launch-bound gate over perf receipts: fak's own
+	// decode-regime diagnostics, not a portable adopter pattern.
+	"hostshare",
 	"hwgate-lint",
 	"hygiene",
 	"idea-scout",
