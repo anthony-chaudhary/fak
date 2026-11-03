@@ -141,6 +141,11 @@ var (
 // alone as build time: source/toolchain provenance, compile+link, artifact inspection,
 // and version/runtime capability probes are ordered phases in the durable receipt.
 func RunBuild(stdout, stderr io.Writer, argv []string) int {
+	// 'batch' is the optional source-bound data surface; ordinary build
+	// dispatch below is unchanged for every other invocation.
+	if len(argv) > 0 && argv[0] == "batch" {
+		return RunBuildBatch(stdout, stderr, argv[1:])
+	}
 	fs := flag.NewFlagSet("fak build", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	profile := fs.String("profile", "dev", "scripts/build.sh profile (release|dev|race)")
