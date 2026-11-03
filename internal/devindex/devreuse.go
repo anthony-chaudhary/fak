@@ -205,6 +205,10 @@ var maintainerDevCommands = []string{
 	"horizon-recovery",
 	"host-crash",
 	"host-relaunch-broker",
+	// Cross-receipt host-overhead regression trend gate: deterministic latest-vs-
+	// baseline delta + regime-flip verdict over the same committed receipts,
+	// fak's own decode-regime diagnostics, not a portable adopter pattern.
+	"hostregress",
 	// Systematic host-share reader + launch-bound gate over perf receipts: fak's own
 	// decode-regime diagnostics, not a portable adopter pattern.
 	"hostshare",

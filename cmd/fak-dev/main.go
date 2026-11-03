@@ -182,6 +182,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return runRegime(stdout, stderr, argv[1:])
 	case "hostshare":
 		return runHostShare(stdout, stderr, argv[1:])
+	case "hostregress":
+		return runHostRegress(stdout, stderr, argv[1:])
 	case "glue-census":
 		return devcmd.RunGlueCensus(stdout, stderr, argv[1:])
 	case "graph-audit":
@@ -279,6 +281,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  inference-topology <validate|analyze|inventory|render> [flags] model per-rank decode resource and collective constraints")
 	fmt.Fprintln(w, "  regime [PATH...] [--latest N] [--fail-on R] classify decode-step overhead regime (launch/compute/mem/unknown) from receipt signals")
 	fmt.Fprintln(w, "  hostshare [--receipts DIR] [--latest N]   read host_share from receipts/profile notes; gate launch-bound decode at --threshold")
+	fmt.Fprintln(w, "  hostregress [--receipts DIR] [--latest N] [--baseline-file F]  cross-receipt host-overhead regression trend gate (+50% relative delta or regime flip fails)")
 	fmt.Fprintln(w, "  glue-census [--preset NAME | --model-shape JSON] [--check REF] verified sync round-trips/token census for the GLM-DSA decode path")
 	fmt.Fprintln(w, "  graph-audit [--json] [--fail-on uncovered] [--snapshot PATH] presence-vs-invokability audit of CUDA/Vulkan graph capture/replay on decode paths")
 	fmt.Fprintln(w, "  version                               print fak-dev build identity")
