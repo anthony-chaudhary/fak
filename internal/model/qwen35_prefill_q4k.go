@@ -722,6 +722,10 @@ func (s *Session) Qwen35MetalForwardSequenceReceipt() Qwen35MetalForwardSequence
 }
 
 func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
+	return s.prefillQwen35HybridQ4KHiddenWithNormWorkspace(ids, s.newQwen35PrefillNormWorkspace(len(ids)))
+}
+
+func (s *Session) prefillQwen35HybridQ4KHiddenWithNormWorkspace(ids []int, normWorkspace *qwen35PrefillNormWorkspace) []float32 {
 	m, cfg := s.M, s.M.Cfg
 	H := cfg.HiddenSize
 	P := len(ids)
@@ -921,7 +925,7 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 	for l := 0; l < cfg.NumLayers; l++ {
 		// These local builtin producers return fresh, separately owned outputs.
 		// The generic callback entry below never grants a disposable qf loan.
-		s.prefillQwen35HybridQ4KLayerWithRopeRows(l, X, P, base, eps, proj, pgroup, qz, !s.MetalQ4K && s.Backend == nil, ropeRows)
+		s.prefillQwen35HybridQ4KLayerWithScratch(l, X, P, base, eps, proj, pgroup, qz, !s.MetalQ4K && s.Backend == nil, ropeRows, normWorkspace)
 	}
 
 	t = s.phaseStart()
@@ -959,11 +963,16 @@ func (s *Session) prefillQwen35HybridQ4KLayerOwnedQF(l int, X []float32, P, base
 }
 
 func (s *Session) prefillQwen35HybridQ4KLayerWithRopeRows(l int, X []float32, P, base int, eps float32, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz hybridQ4KQuantize, ownsQF bool, ropeRows *qwen35PrefillRopeRows) {
+	// Callback entry points never grant reuse of their activation inputs.
+	s.prefillQwen35HybridQ4KLayerWithScratch(l, X, P, base, eps, proj, pgroup, qz, ownsQF, ropeRows, nil)
+}
+
+func (s *Session) prefillQwen35HybridQ4KLayerWithScratch(l int, X []float32, P, base int, eps float32, proj hybridQ4KProj, pgroup hybridQ4KGroup, qz hybridQ4KQuantize, ownsQF bool, ropeRows *qwen35PrefillRopeRows, normWorkspace *qwen35PrefillNormWorkspace) {
 	dispatchWorkers := currentWorkerCount()
 	m, cfg := s.M, s.M.Cfg
 	H := cfg.HiddenSize
 	lp := func(str string) string { return layerName(l, str) }
-	Xn := make([]float32, P*H)
+	Xn := normWorkspace.panel(P, H)
 	wIn := m.tensor(lp("input_layernorm.weight"))
 	t := s.phaseStart()
 	parFor(P, dispatchWorkers, func(lo, hi int) {
@@ -991,7 +1000,7 @@ func (s *Session) prefillQwen35HybridQ4KLayerWithRopeRows(l int, X []float32, P,
 	})
 	s.phaseEnd("attn_residual", t)
 
-	Xn2 := make([]float32, P*H)
+	Xn2 := normWorkspace.panel(P, H)
 	wPost := m.tensor(lp("post_attention_layernorm.weight"))
 	t = s.phaseStart()
 	parFor(P, dispatchWorkers, func(lo, hi int) {
