@@ -640,6 +640,12 @@ func CUDAGoTags(cfg *CUDAConfig) string {
 	goTags = cudaGraphOnceTags(cfg, goTags)
 	goTags = cudaAsyncQualificationTags(cfg, goTags)
 	goTags = cudaEngramIQ4NLQualificationTags(cfg, goTags)
+	if cfg.EnableQwen35IQ2SequenceQualification {
+		// Dispatch selection only: checked IQ entries share the ordinary archive.
+		// Record the exact build command and resulting Go binary build info
+		// for qualification; native archive receipts do not record Go tags.
+		goTags += ",fak_cuda_qwen35_iq2_sequence_qualification"
+	}
 	if cfg.EnableDeepGEMMWKV {
 		goTags += ",fak_cuda_deepgemm_wkv"
 	}

@@ -147,6 +147,9 @@ func qwen35SequenceSameShape(t Tensor, want ...int) bool {
 }
 
 func qwen35SequenceMatrixBytes(t Tensor) (int, bool) {
+	if t.Dtype == IQ2_XXS || t.Dtype == IQ2_XS {
+		return qwen35SequenceIQ2MatrixBytes(t)
+	}
 	n := t.Numel()
 	if n < 0 {
 		return 0, false
@@ -249,6 +252,13 @@ func (c *cudaBackend) validateQwen35SequenceRequestLocked(req Qwen35SequencePref
 	if err := c.validateQwen35SequenceTensor("output_norm", req.OutputNorm, false, req.Hidden); err != nil {
 		return nil, err
 	}
+	outputTokens := 1
+	if req.NeedAllLogits {
+		outputTokens = len(req.TokenIDs)
+	}
+	if err := validateQwen35SequenceIQ2(req.Output, outputTokens, qwen35SequenceIQ2Qualification); err != nil {
+		return nil, err
+	}
 	if err := c.validateQwen35SequenceTensor("output", req.Output, true, vocab, req.Hidden); err != nil {
 		return nil, err
 	}
@@ -271,6 +281,11 @@ func (c *cudaBackend) validateQwen35SequenceRequestLocked(req Qwen35SequencePref
 	statePointers := make(map[unsafe.Pointer]int)
 	for index, layer := range req.Layers {
 		check := func(name string, tensor Tensor, matrix bool, shape ...int) error {
+			if matrix {
+				if err := validateQwen35SequenceIQ2(tensor, len(req.TokenIDs), qwen35SequenceIQ2Qualification); err != nil {
+					return &Qwen35SequenceError{Stage: "tensor-preflight", Layer: index, Reason: name, Cause: err}
+				}
+			}
 			if err := c.validateQwen35SequenceTensor(name, tensor, matrix, shape...); err != nil {
 				return &Qwen35SequenceError{Stage: "tensor-preflight", Layer: index, Cause: err}
 			}
@@ -495,6 +510,12 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 	failed := true
 	defer func() {
 		if failed {
+			var launch *CUDAOpError
+			if errors.As(err, &launch) && launch.Op == cudaQwen35IQ2SequenceOp {
+				// Earlier layers may already have advanced GDN/KV state. A
+				// rejected IQ2 output is never replayed as a healthy session.
+				c.qwen35SequencePoisonStates(req)
+			}
 			c.qwen35SequenceReleaseSinceLocked(transientStart)
 		}
 	}()
@@ -538,7 +559,12 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 		token := splitToken
 		splitToken = 0 // one retirement attempt, including panic/Goexit unwind
 		var status C.fcuda_sequence_split_status
-		if C.fcuda_sequence_split_end(token, &status) != 0 {
+		if code := int(C.fcuda_sequence_split_end(token, &status)); code != 0 {
+			if qwen35SequenceIQ2Qualification {
+				// cudaMu still excludes all cleanup/submission. Preserve the
+				// exact retirement failure before any outer owner can recycle.
+				cudaQwen35IQ2SequenceRetirementFailedLocked(code)
+			}
 			c.faultLatch.Observe(DeviceFaultExecution, "qwen35-sequence-split-end", int(status.code))
 			return cudaSequenceSplitStatusError(status)
 		}
