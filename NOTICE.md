@@ -191,3 +191,26 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+## Finite host-offload admission and ownership
+
+The host-swap admission in `internal/modelengine/nativesched_preempt.go`
+adapts the finite-capacity, capacity-before-allocation and completion-owned
+release contracts of `CPUOffloadingManager.prepare_store/complete_store` from
+vLLM at revision `bd5bbce6e45e09dbd07ac3e8c394626c059078f7`:
+https://github.com/vllm-project/vllm/blob/bd5bbce6e45e09dbd07ac3e8c394626c059078f7/vllm/v1/kv_offload/cpu/manager.py
+
+SPDX-License-Identifier: Apache-2.0
+SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
+Changed for Fak: synchronous native scheduler mutex ownership instead of an
+asynchronous chunk cache; codec-derived exact serialized extents before staging;
+owned lane blobs with an explicit byte limit; existing request-error retirement
+on a refused store; no implicit recompute. Readmit, error and cancellation release
+the same backing owner. The limit excludes logits (separately reported), staging,
+resident KV, allocator/RSS overhead and GPU Direct descriptors. No upstream
+eviction/replacement algorithm, Python runtime, GPU transfer or routing policy is
+ported. Existing radix snapshot budgets remain separate.
+The full Apache License retained in [existing third-party notices](THIRD_PARTY_NOTICES.md)
+also applies to this adaptation. No upstream root NOTICE exists at this pinned revision. This is
+source-only until qualified; no hardware or measured performance improvement
+is implied.

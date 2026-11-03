@@ -1562,6 +1562,11 @@
           "category": "incidental",
           "reason": "Unexported construction helper for the existing model KVCache. It preserves precision and auxiliary-cache initialization order while allowing validated hybrid host restore to supply the linear-state initializer; it introduces no distinct cache representation, residency policy, or admission authority.",
           "token": "newKVCacheWithLinearInitializer"
+        },
+        {
+          "category": "incidental",
+          "reason": "Exact serialized byte-size helper for the existing KVCache host-swap codec; does not define a new cache abstraction, replacement policy or storage tier.",
+          "token": "KVCacheHostSwapBytes"
         }
       ],
       "exclude": [
@@ -1635,6 +1640,7 @@
         "KCache",
         "KRawCache",
         "KVCacheBytesAsymmetric",
+        "KVCacheHostSwapBytes",
         "ManagedProviderCache",
         "MaxCacheLoadWorkers",
         "NewAsymmetricKVCache",
