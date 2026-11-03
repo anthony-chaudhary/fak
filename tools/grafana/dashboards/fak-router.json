@@ -1237,6 +1237,398 @@
         "mode": "markdown",
         "content": "The routing topology (which backends exist, their weights, and the fallback chain) is **configuration**, not a metric. Read it live from the router itself:\n\n```\nGET /v1/router/summary\n```\n\nThat endpoint returns the currently effective router configuration the SCM-supervised process loaded. The panels above show what that configuration is *doing* (attempts, errors, latency, fallbacks); the endpoint shows what it *is*. A config change is a discrete event, and this board does not record config history."
       }
+    },
+    {
+      "id": 49,
+      "type": "timeseries",
+      "title": "Admission pressure",
+      "description": "Backpressure before the queue: outstanding admitted requests against the admission bound, plus the high-water mark since process start. **High water never decreases** (restart-only reset) - it answers whether the admission queue ever saturated. Outstanding flat near the bound with zero rejects is headroom, not failure.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 59,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "fak_router_admission_outstanding{job=\"fak_router\"}",
+          "legendFormat": "outstanding",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "expr": "fak_router_admission_bound{job=\"fak_router\"}",
+          "legendFormat": "bound",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "C",
+          "expr": "fak_router_admission_high_water{job=\"fak_router\"}",
+          "legendFormat": "high water",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "spanNulls": false
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 50,
+      "type": "timeseries",
+      "title": "Admission rejects / s",
+      "description": "Per-second rate of requests rejected at admission, from `fak_router_admission_rejected_total`. Non-zero means the router is shedding load before routing; read it with *Admission pressure* to see whether the bound was actually reached.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 59,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(fak_router_admission_rejected_total{job=\"fak_router\"}[5m]))",
+          "legendFormat": "rejected/s",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "spanNulls": false
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 51,
+      "type": "timeseries",
+      "title": "Durable store utilization %",
+      "description": "Write-behind durable store bytes against quota. **Sampled, not live**: the gauges refresh on a sampling cadence, so read the second series (`sample age s`) to know how stale the sample is; finished-but-unGCed records linger in it.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 59,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * fak_router_durable_store_bytes{job=\"fak_router\"} / fak_router_durable_store_quota_bytes{job=\"fak_router\"}",
+          "legendFormat": "utilization %",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "expr": "fak_router_durable_store_sample_age_seconds{job=\"fak_router\"}",
+          "legendFormat": "sample age s",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "spanNulls": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "sample age s"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {}
+    },
+    {
+      "id": 52,
+      "type": "timeseries",
+      "title": "TTFT p95 by model",
+      "description": "Time to the first token-bearing frame at the 95th percentile, per backend and requested model, from `fak_router_time_to_first_token_seconds`. Streamed attempts only - buffered traffic produces no series, so absence here is missing evidence, not fast TTFT.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 67,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le,backend,request_model) (rate(fak_router_time_to_first_token_seconds_bucket{job=\"fak_router\"}[5m])))",
+          "legendFormat": "{{request_model}}/{{backend}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "spanNulls": false
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 53,
+      "type": "timeseries",
+      "title": "TPOT p95 by model",
+      "description": "Time per output token at the 95th percentile, per backend and requested model, from `fak_router_time_per_output_token_seconds`. Needs upstream-reported usage and at least two output tokens; an absent series is missing evidence, not zero pace.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 67,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le,backend,request_model) (rate(fak_router_time_per_output_token_seconds_bucket{job=\"fak_router\"}[5m])))",
+          "legendFormat": "{{request_model}}/{{backend}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "spanNulls": false
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 54,
+      "type": "timeseries",
+      "title": "Prefix-cache hit rate",
+      "description": "Share of provider-reported prompt tokens that were served from cache, windowed: `cached_prompt_tokens / cache_reported_prompt_tokens`. The denominator is the REPORTED total - a vendor that stops reporting usage silently changes the ratio's meaning, so read gaps as missing evidence, not zero hits.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 75,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(fak_router_cached_prompt_tokens_total{job=\"fak_router\"}[5m]) / rate(fak_router_cache_reported_prompt_tokens_total{job=\"fak_router\"}[5m])",
+          "legendFormat": "{{backend}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "spanNulls": false
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 55,
+      "type": "timeseries",
+      "title": "Balancer snapshot age (s)",
+      "description": "Seconds since the balancer last took a share snapshot, per backend. It grows between split decisions: a large age with stable shares is normal under low traffic; a growing age alongside drifting shares signals a broken selection strategy.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 75,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "fak_router_balance_snapshot_age_seconds{job=\"fak_router\"}",
+          "legendFormat": "{{backend}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "spanNulls": false
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {}
     }
   ]
 }
