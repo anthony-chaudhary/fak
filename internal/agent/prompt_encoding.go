@@ -110,6 +110,11 @@ func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message,
 	if err := p.admitDeepSeekV41ChatProfile(messages, sp); err != nil {
 		return preparedPrompt{}, err
 	}
+	// Validate original representations before shrink can erase unsupported input.
+	// Keep this before any selected SPM raw-only branch when composing that port.
+	if err := p.admitNativeChatTemplate(messages, tools, sp); err != nil {
+		return preparedPrompt{}, err
+	}
 	if p.tok != nil && p.tok.IsSPM() {
 		return p.prepareSPMRawPrompt(ctx, messages, tools, sp)
 	}
@@ -121,7 +126,14 @@ func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message,
 	raw := inKernelRawV41Prompt(p.m.Cfg, sp)
 	var rendered string
 	var ids []int
-	if deepSeekV41SegmentedPrompt(p.m.Cfg, sp) {
+	if p.nativeChatTemplate != nil {
+		segs, renderErr := p.renderNativeChatTemplate(ctx, renderMessages, tools, sp)
+		if renderErr != nil {
+			return preparedPrompt{}, renderErr
+		}
+		rendered = joinPromptSegments(segs)
+		ids, err = p.tok.EncodeSegments(segs)
+	} else if deepSeekV41SegmentedPrompt(p.m.Cfg, sp) {
 		segs := inKernelRenderDeepSeekV41ChatSegments(renderMessages, tools, sp)
 		rendered = joinPromptSegments(segs)
 		ids, err = p.tok.EncodeSegments(segs)
@@ -130,7 +142,14 @@ func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message,
 		ids, err = p.tok.Encode(rendered)
 	}
 	if err != nil {
+		if p.nativeChatTemplate != nil {
+			// The tokenizer's detailed error can quote an input-derived symbol.
+			return preparedPrompt{}, fmt.Errorf("%w: selected tokenizer refused", ErrNativeChatTemplate)
+		}
 		return preparedPrompt{}, err
+	}
+	if p.nativeChatTemplate != nil && len(ids) == 0 {
+		return preparedPrompt{}, fmt.Errorf("%w: empty encoded prompt", ErrNativeChatTemplate)
 	}
 	if raw && p.m.Cfg.BOSTokenID != nil {
 		ids = append([]int{*p.m.Cfg.BOSTokenID}, ids...)
@@ -152,10 +171,21 @@ func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message,
 	if sp.MaxTokens != nil && *sp.MaxTokens > 0 {
 		maxNew = *sp.MaxTokens
 	}
+	sharedBoundary := 0
+	if p.nativeChatTemplate == nil {
+		sharedBoundary = p.sharedPrefixBoundaryTokens(rendered, ids)
+	} else {
+		// The legacy system-prefix renderer is not this exact template.
+		if observer, ok := ctx.Value(nativeChatTemplatePreparedKey{}).(func(string) error); ok {
+			if err := observer(rendered); err != nil {
+				return preparedPrompt{}, err
+			}
+		}
+	}
 	return preparedPrompt{
 		messages: messages, tools: tools, rendered: rendered, ids: ids, maxNew: maxNew,
 		nativeCompaction: shrink.nativeCompaction,
-		sharedBoundary:   p.sharedPrefixBoundaryTokens(rendered, ids),
+		sharedBoundary:   sharedBoundary,
 		multimodal:       multimodal, multimodalEncoding: multimodalEncoding,
 	}, nil
 }
@@ -263,6 +293,9 @@ func (p *InKernelPlanner) admitDeepSeekV41ChatProfile(messages []Message, sp Sam
 }
 
 func (p *InKernelPlanner) promptRendererID(sp SampleParams) string {
+	if p.nativeChatTemplate != nil {
+		return p.nativeChatTemplate.String()
+	}
 	if p.tok != nil && p.tok.IsSPM() {
 		return "llama-spm-raw-v1"
 	}

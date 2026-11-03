@@ -1603,6 +1603,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+
 ## vLLM bounded native CPU beam search
 
 `internal/beam/search.go` and its ordinary native CPU chat adapter in
@@ -1627,6 +1628,7 @@ The pinned repository has no root NOTICE. Its root Apache-2.0 LICENSE
 (Git `261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64`) is reproduced byte-exactly
 in the existing TensorFold license section of this file and also applies here.
 See `internal/beam/README.md` for the consumer, adaptations and execution debt.
+
 
 ## llama.cpp score-based SPM tokenizer
 
@@ -1658,3 +1660,19 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+## llama.cpp bounded native Jinja chat-template interpreter
+
+- Upstream: ggml-org/llama.cpp, commit
+  `cd8427d018c07eefab6c110f7f115c31ec4c6157` (MIT).
+- Source: `common/jinja/lexer.cpp`, `parser.cpp`, `runtime.cpp`,
+  `string.cpp`, `string.h` and `value.cpp`; full license retained at
+  `internal/agent/JINJA-LICENSE.txt`.
+- Adaptation: bounded tag/expression/statement parsing, request-local
+  scope/macro/namespace execution and input-marked string composition, wired to
+  the ordinary native prompt preparation and segmented tokenizer consumer.
+- FAK-specific changes: independent source/model digest binding, explicit
+  construction-time opt-in, closed builtin/profile admission, finite resource
+  limits, redacted refusal, and conservative special-token provenance.
+  No Python runtime, model, tokenizer, executable or network behavior is imported.

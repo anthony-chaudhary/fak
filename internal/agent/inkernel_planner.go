@@ -317,7 +317,8 @@ type InKernelPlanner struct {
 	// warmDisk fixes the local restart-cache policy and loaded artifact identity.
 	// Empty config selects the bounded per-user default; an empty model digest
 	// declines persistence because a filename is not a model-byte identity.
-	deepSeekV41ChatProfile string // immutable construction-time prompt contract
+	deepSeekV41ChatProfile string              // immutable construction-time prompt contract
+	nativeChatTemplate     *NativeChatTemplate // immutable, explicit text renderer
 	warmDiskConfig         WarmDiskConfig
 	warmDiskModelIdentity  string
 	warmDiskCapture        bool
@@ -531,15 +532,39 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 		}
 		return comp, err
 	}
-	rendered := inKernelRenderPrompt(messages, tools, p.m.Cfg, sp)
-	if raw, selected := p.spmRawStreamPrompt(messages, sp); selected {
-		rendered = raw
+	var projector *inKernelStreamProjector
+	if p.nativeChatTemplate != nil {
+		// Seed projection from the actual once-prepared/shrunk prompt, not a
+		// second rendering that could diverge or repeat compaction side effects.
+		var preparedIdentity [32]byte
+		streamCtx = context.WithValue(streamCtx, nativeChatTemplatePreparedKey{}, func(rendered string) error {
+			identity := sha256.Sum256([]byte(rendered))
+			if projector != nil {
+				if identity != preparedIdentity {
+					return fmt.Errorf("%w: retry prompt changed", ErrNativeChatTemplate)
+				}
+				return nil
+			}
+			preparedIdentity = identity
+			projector = newInKernelStreamProjector(sink, sp.Stop, strings.HasSuffix(rendered, qwenThinkAssistantSeed))
+			projector.spans.deferTools = true
+			return nil
+		})
+	} else {
+		rendered := inKernelRenderPrompt(messages, tools, p.m.Cfg, sp)
+		if raw, selected := p.spmRawStreamPrompt(messages, sp); selected {
+			rendered = raw
+		}
+		projector = newInKernelStreamProjector(sink, sp.Stop, strings.HasSuffix(rendered, qwenThinkAssistantSeed))
+		projector.spans.deferTools = true
 	}
-	startsInReasoning := strings.HasSuffix(rendered, qwenThinkAssistantSeed)
-	projector := newInKernelStreamProjector(sink, sp.Stop, startsInReasoning)
-	projector.spans.deferTools = true
 	comp, err := p.Complete(streamCtx, messages, tools, append(opts, WithDecodeTokenObserver(func(tokenPiece, rawText string) {
 		if sinkErr != nil || tokenPiece == "" {
+			return
+		}
+		if projector == nil {
+			sinkErr = fmt.Errorf("%w: missing prepared stream identity", ErrNativeChatTemplate)
+			cancel()
 			return
 		}
 		if sinkErr = projector.feed(tokenPiece); sinkErr != nil {
@@ -550,7 +575,11 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 	// Do not flush withheld stop prefixes or ambiguous control delimiters after a
 	// decode error: those bytes were never established as safe visible content.
 	if sinkErr == nil && err == nil {
-		sinkErr = projector.finish(comp.Message.Content, len(comp.Message.ToolCalls) > 0 || hasTextToolCandidate(comp.Message.Content))
+		if projector == nil {
+			sinkErr = fmt.Errorf("%w: missing prepared stream identity", ErrNativeChatTemplate)
+		} else {
+			sinkErr = projector.finish(comp.Message.Content, len(comp.Message.ToolCalls) > 0 || hasTextToolCandidate(comp.Message.Content))
+		}
 	}
 	if sinkErr != nil {
 		return comp, sinkErr
@@ -1065,6 +1094,24 @@ func (p *InKernelPlanner) SetContextLayerMemo(m *ContextLayerMemo) {
 func (p *InKernelPlanner) RenderIncrementalContext(messages []Message, tools []ToolDef, sp SampleParams) (string, []int, ContextLayerStats, error) {
 	if p == nil || p.m == nil || p.tok == nil {
 		return "", nil, ContextLayerStats{}, errors.New("native incremental context requires a model and tokenizer")
+	}
+	if p.nativeChatTemplate != nil {
+		if err := p.admitDeepSeekV41ChatProfile(messages, sp); err != nil {
+			return "", nil, ContextLayerStats{}, err
+		}
+		segments, err := p.renderNativeChatTemplate(context.Background(), messages, tools, sp)
+		if err != nil {
+			return "", nil, ContextLayerStats{}, err
+		}
+		ids, err := p.tok.EncodeSegments(segments)
+		if err != nil {
+			return "", nil, ContextLayerStats{}, fmt.Errorf("%w: selected tokenizer refused", ErrNativeChatTemplate)
+		}
+		if len(ids) == 0 {
+			return "", nil, ContextLayerStats{}, fmt.Errorf("%w: empty encoded prompt", ErrNativeChatTemplate)
+		}
+		// No legacy layer memo may turn marked request strings into trusted text.
+		return joinPromptSegments(segments), ids, ContextLayerStats{Rendered: contextLayerAll()}, nil
 	}
 	full := func(ms []Message, ts []ToolDef) string { return inKernelRenderPrompt(ms, ts, p.m.Cfg, sp) }
 	encode := p.tok.Encode
