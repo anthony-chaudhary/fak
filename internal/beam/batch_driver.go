@@ -4,23 +4,20 @@ import "github.com/anthony-chaudhary/fak/internal/model"
 
 // StepPlan describes one decode step across the batched session: which token each beam
 // proposes next (IDs, indexed by logical beam) and which beams are active this step
-// (Active). A nil/empty Active means "every beam is active".
-//
-// NOTE: wiring actual beam-search node expansion (survivor selection, scoring,
-// top-k/top-p over the returned logits) is DEFERRED to #12407, which owns the beam
-// engine. This type is deliberately only the transport between a caller's per-beam
-// choice and the real model API.
+// (Active); a nil/empty Active means every beam is active. Wiring actual beam-search
+// node expansion (survivor selection, scoring, top-k/top-p over the returned logits)
+// is deferred to #12407, which owns the beam engine: this type is deliberately only
+// the transport between a caller's per-beam choice and the real model API.
 type StepPlan struct {
 	IDs    []int
 	Active []bool
 }
 
-// BatchDriver ties a BeamIndirectionTable to a REAL model.BatchSession. It performs no
+// BatchDriver ties a BeamIndirectionTable to a real model.BatchSession. It performs no
 // beam-search logic itself: it forwards the chosen token ids to the existing
 // StepBatch / StepBatchActive decode entry points and exposes the exact work receipt
-// (LastStepMACs) so a beam driver can attribute cost per step. The indirection table is
-// exposed read-only by slot so a caller can map logical beam positions to physical KV
-// slots without this package ever touching a float tensor.
+// (LastStepMACs) so a beam driver can attribute cost per step; the table is exposed
+// read-only by slot for logical-to-physical KV mapping.
 type BatchDriver struct {
 	bs    *model.BatchSession
 	table *BeamIndirectionTable
