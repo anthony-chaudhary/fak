@@ -246,6 +246,7 @@ var verbTiers = map[string]VerbTier{
 	"complain":                      TierDev,
 	"completion":                    TierDev,
 	"compute":                       TierDev,
+	"computetune":                   TierDev,
 	"concept":                       TierDev,
 	"concept-usage-score":           TierDev,
 	"conflation-scorecard":          TierDev,
