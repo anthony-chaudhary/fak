@@ -384,7 +384,7 @@ var matrix = []Op{
 		Slug:        "retained-q56-prompt-mmq",
 		Title:       "Retained Q5_K/Q6_K ordinary CUDA prompt MMQ family",
 		FileGlobs:   []string{"internal/compute/cuda/q56k_mmq.cuh", "internal/compute/cuda_q56k_mmq*.go", "internal/computebuild/cuda_q56k_mmq_test.go", "cmd/fak/serve_qwen35_q56k_mmq_cuda_test.go"},
-		FakPath:     "cmd/fak/serve.go -> existing raw K-quant loader -> Qwen sequence projections -> explicit checked MMQ ABI -> cuda/q56k_mmq.cuh",
+		FakPath:     "internal/compute/cuda_q56k_mmq.go + cuda/q56k_mmq.cuh; call path cmd/fak/serve.go -> existing raw K-quant loader -> Qwen sequence projections -> explicit checked MMQ ABI",
 		SOTA:        "ggml-org/llama.cpp@0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd Q5 DS4 / Q6 D4 Ampere MMQ (MIT)",
 		PrimaryLink: "https://github.com/ggml-org/llama.cpp/blob/0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd/ggml/src/ggml-cuda/mmq.cuh",
 		Route:       RouteBorrow,
