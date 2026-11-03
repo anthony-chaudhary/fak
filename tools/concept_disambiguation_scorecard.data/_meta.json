@@ -7711,6 +7711,11 @@
           "category": "incidental",
           "reason": "Private deferred-slot cleanup helper forwarding to the owned speculative round Abort operation while preserving an active panic; not a separate session type, runtime, or ownership protocol.",
           "token": "abortSpeculativeRoundSlot"
+        },
+        {
+          "category": "incidental",
+          "reason": "Reference to the existing ordinary serving-loader witness in an oracle description; no new session lifecycle or runtime abstraction is introduced.",
+          "token": "SessionPrefill"
         }
       ],
       "exclude": [
@@ -7839,6 +7844,7 @@
         "SessionOutcome",
         "SessionPanel",
         "SessionPlacement",
+        "SessionPrefill",
         "SessionProviderBoundary",
         "SessionRate",
         "SessionRecoveryScenarios",
@@ -11880,6 +11886,11 @@
           "category": "incidental",
           "reason": "Closed serialized diagnostic value for the existing issuepolicy.TagGeneratedIssue rejection; not a new policy or capability concept.",
           "token": "policy_rejected"
+        },
+        {
+          "category": "incidental",
+          "reason": "Literal checked CUDA ABI marker in the native archive source prerequisite check; this is a concrete validation function, not a new policy or capability concept.",
+          "token": "fcuda_q56k_mmq_preflight"
         }
       ],
       "exclude": [
@@ -12032,6 +12043,7 @@
         "fak_fleet_goal_adjudications_total",
         "fak_qwen35_attention_postprocess_capability",
         "fak_qwen35_residual_norm_capability",
+        "fcuda_q56k_mmq_preflight",
         "foldSemanticAdjudicators",
         "formatAmendmentPosture",
         "gradeSemanticFiles",

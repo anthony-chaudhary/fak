@@ -72,6 +72,7 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 	kv16PrefillGQA4 := fs.Bool("kv16-prefill-gqa4-qualification", false, "select typed-KV four-query/four-head prefill; default off, not device qualification")
 	qwen35IQ2Sequence := fs.Bool("qwen35-iq2-sequence-qualification", false, "select retained IQ2_XXS/XS Qwen hybrid sequence projections; default off, not device qualification")
 	q56MMVQQualification := fs.Bool("q56k-mmvq-qualification", false, "qualify approximate Q5_K/Q6_K q8_1 MMVQ at P=1..3; default off")
+	q56MMQQualification := fs.Bool("q56k-mmq-qualification", false, "qualify retained Q5_K/Q6_K Q8_1 prompt MMQ at P>=128; default off, not device qualification")
 	archSpecific := fs.Bool("arch-specific", false, "compile opt-in CUDA 13 arch-specific translation units")
 	deepGEMM := fs.Bool("deepgemm-wkv", false, "compile explicit Linux CUDA 13.1 SM100f/103f WKV candidate; requires --arch-specific and --deepgemm-wkv-sms")
 	deepGEMMSMs := fs.Int("deepgemm-wkv-sms", 0, "explicit physical SM count for the DeepGEMM persistent kernel")
@@ -209,6 +210,7 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 		EnableCaptureOnceQualification:       *captureOnce,
 		EnableTokenomosStagingQualification:  *tokenomosStaging,
 		EnableQ56KMMVQQualification:          *q56MMVQQualification,
+		EnableQ56KMMQQualification:           *q56MMQQualification,
 		EnablePagedKVCopyQualification:       *pagedKVCopyQualification,
 		EnableKV16PrefillGQA4Qualification:   *kv16PrefillGQA4,
 		EnableQwen35IQ2SequenceQualification: *qwen35IQ2Sequence,

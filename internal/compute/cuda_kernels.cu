@@ -241,6 +241,7 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/q4k_mmvq.cuh"
 #include "cuda/q4k_shared_input.cuh"
 #include "cuda/q4k_shared_input_qualification.cuh"
+#include "cuda/q56k_mmq.cuh"
 #include "cuda/quant_matmul.cuh"
 #include "cuda/q3k_matmul.cuh"
 #include "cuda/q3k_mmvq.cuh"

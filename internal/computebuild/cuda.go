@@ -160,6 +160,45 @@ func prepareCUDAPagedKVCopy(cfg *CUDAConfig) error {
 	return nil
 }
 
+type cudaQ56KMMQKey struct{}
+
+func cudaQ56KMMQFlags(ctx context.Context, args, env []string) ([]string, error) {
+	enabled, _ := ctx.Value(cudaQ56KMMQKey{}).(bool)
+	return cudaTypedQualificationFlags(args, env, enabled, "FAK_CUDA_Q56K_MMQ_QUALIFICATION", "Q5_K/Q6_K prompt MMQ")
+}
+
+// Source-presence admission only. A selected archive still needs a matching
+// rebuild, ordinary-loader witness, numerical parity and measured whole-call cost.
+func prepareCUDAQ56KMMQ(cfg *CUDAConfig) error {
+	if !cfg.EnableQ56KMMQQualification {
+		return nil
+	}
+	pkg := filepath.Join(cfg.RepoRoot, "internal", "compute")
+	if cfg.PkgDir != "" && filepath.Clean(cfg.PkgDir) != filepath.Clean(pkg) {
+		return fmt.Errorf("Q56 MMQ qualification requires the canonical compute package directory")
+	}
+	for _, c := range []struct{ path, marker string }{
+		{"cuda_kernels.cu", "#include \"cuda/q56k_mmq.cuh\""},
+		{"cuda/q56k_mmq.cuh", "vec_dot_q6_K_q8_1_mma"},
+		{"cuda/q56k_mmq.cuh", "load_tiles_q5_K"},
+		{"cuda/q56k_mmq.cuh", "fcuda_q56k_mmq_matmul_checked_f32"},
+		{"cuda_backend.h", "fcuda_q56k_mmq_preflight"},
+		{"cuda_q56k_mmq.go", "C.fcuda_q56k_mmq_preflight"},
+		{"cuda.go", "c.validateQ56KProjectionOperands"},
+		{"cuda_q56k_mmq.go", "C.fcuda_q56k_mmq_matmul_checked_f32"},
+		{"cuda_kernels.go", "c.qwen35Q56KMMQFenceLocked"},
+	} {
+		data, err := os.ReadFile(filepath.Join(pkg, c.path))
+		if err != nil {
+			return fmt.Errorf("Q56 MMQ prerequisite %s: %w", c.path, err)
+		}
+		if !strings.Contains(string(data), c.marker) {
+			return fmt.Errorf("Q56 MMQ prerequisite %s lacks %q", c.path, c.marker)
+		}
+	}
+	return nil
+}
+
 type cudaQ56KMMVQKey struct{}
 
 func cudaQ56KMMVQFlags(ctx context.Context, args, env []string) ([]string, error) {
@@ -328,6 +367,10 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 		if err != nil {
 			return nil, err
 		}
+		nvccArgs, err = cudaQ56KMMQFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
 		nvccArgs, err = cudaPagedKVCopyFlags(ctx, nvccArgs, env)
 		if err != nil {
 			return nil, err
@@ -405,6 +448,10 @@ func CompileCUDAKernels(ctx context.Context, tc *Toolchain, repoRoot string, arc
 			return nil, err
 		}
 		nvccArgs, err = cudaQ56KMMVQFlags(ctx, nvccArgs, env)
+		if err != nil {
+			return nil, err
+		}
+		nvccArgs, err = cudaQ56KMMQFlags(ctx, nvccArgs, env)
 		if err != nil {
 			return nil, err
 		}
@@ -698,6 +745,10 @@ func RunCUDA(ctx context.Context, cfg *CUDAConfig) (result error) {
 		return err
 	}
 	ctx = context.WithValue(ctx, cudaQ56KMMVQKey{}, cfg.EnableQ56KMMVQQualification)
+	if err := prepareCUDAQ56KMMQ(cfg); err != nil {
+		return err
+	}
+	ctx = context.WithValue(ctx, cudaQ56KMMQKey{}, cfg.EnableQ56KMMQQualification)
 	if err := prepareCUDAPagedKVCopy(cfg); err != nil {
 		return err
 	}
