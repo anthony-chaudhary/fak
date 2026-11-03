@@ -232,6 +232,10 @@ var maintainerDevCommands = []string{
 	"l3-serve",
 	"l3serve",
 	"launch",
+	// Verified kernel-launch/parFor census of the decode paths: recomputable
+	// launches/token metric + source-drift gate over fak's own dispatch seams
+	// (looped vs batched MoE expert dispatch), not a portable adopter pattern.
+	"launch-census",
 	"leak-audit",
 	"learning-debt-dispatch",
 	"learning-observation",
