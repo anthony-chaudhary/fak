@@ -153,6 +153,7 @@ var generatedVerbIndex = []generatedVerb{
 	{Name: "go", Synopsis: "go build/vet/test passthrough that masks peers' untracked-sibling poison via a buildcheck -overlay", Tier: "dev"},
 	{Name: "goal", Synopsis: "manage canonical goals, lifecycle transitions, bindings, evidence, and execution topology", Tier: "dev"},
 	{Name: "goal-park", Synopsis: "park a supervisor goal claim: status|claim a goal identity to a single owner via the .fak/goal-park store", Tier: "dev"},
+	{Name: "godfile-ceiling", Synopsis: "not yet cataloged — `fak godfile-ceiling -h` for usage", Tier: "dev"},
 	{Name: "godsplit-plan", Synopsis: "read-only boundary + hazard planner for a behavior-preserving Go god-file split (the /modularize --json plan)", Tier: "dev"},
 	{Name: "grafana", Synopsis: "export fak fleet metrics as a Grafana dashboard/datasource", Tier: "dev"},
 	{Name: "growthgate", Synopsis: "the unbounded-growth ratchet: census append-only ledger/log bloat vs byte budgets; --reap COLD logs", Tier: "dev"},

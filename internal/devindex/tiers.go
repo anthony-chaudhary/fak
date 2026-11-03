@@ -299,6 +299,7 @@ var verbTiers = map[string]VerbTier{
 	"glm52-prefill-sweep":           TierDev,
 	"go":                            TierDev,
 	"goal-park":                     TierDev,
+	"godfile-ceiling":               TierDev,
 	"godsplit-plan":                 TierDev,
 	"grafana":                       TierDev,
 	"growthgate":                    TierDev,

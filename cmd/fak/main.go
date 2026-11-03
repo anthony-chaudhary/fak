@@ -146,6 +146,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		cmdTrunkBuildProbe(args)
 	case "godsplit-plan":
 		cmdGodsplitPlan(args)
+	case "godfile-ceiling":
+		cmdGodFileCeiling(args)
 	case "glm52-prefill-sweep":
 		cmdGLM52PrefillSweep(args)
 	case "recall":
