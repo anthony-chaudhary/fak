@@ -344,6 +344,28 @@ tunables. No upstream source code is copied; the adaptation is witnessed by
 `internal/l3kv/prefetch_queue_test.go`. The upstream Apache-2.0 license is
 reproduced in the TensorFold benchmark evidence section above.
 
+## TensorFold CUDA graph-cache policy
+
+`internal/compute/graph_cache_policy.go` `GraphCachePolicy` adapts the keyed
+graph-cache policy (`capture-once per key, replay on hit; address-fingerprint
+drop-all; LRU cap with min_keep floor; all-rank agree vote gates misses;
+declined vote and capture OOM fall back eager; peer capture failure disables;
+environment off`) from `zig/src/cuda/graph_cache.zig` `Cache.run` at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209` of the same source:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/cuda/graph_cache.zig
+
+Changed for Fak: idiomatic Go re-expression against an injected engine
+interface so the whole policy is testable on host CPU with a fake engine,
+string keys instead of u32, and explicit sentinel errors for constructor
+misconfiguration. No Zig code, device kernel or release-binary claim is
+included; the upstream bound is preserved that its only concrete callers are
+experimental DeepSeek-V4.1 paths no release binary serves. The policy is not
+yet wired into the live `cudaBackend` capture path.
+
+The pinned repository's root Apache-2.0 LICENSE
+(Git `9e8c368b0b4c2c7892a0c9f0f302d7c164016209`) is reproduced byte-exactly
+in the existing "TensorFold benchmark evidence" license section of this file
+and also applies here.
 
 ## vLLM chunkwise Qwen host Gated-DeltaNet
 
