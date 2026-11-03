@@ -316,6 +316,7 @@ var verbTiers = map[string]VerbTier{
 	"host-relaunch-broker":          TierDev,
 	"hostregress":                   TierDev,
 	"hostshare":                     TierDev,
+	"hostsetup-bench":               TierDev,
 	"hil":                           TierDev,
 	"hwgate-lint":                   TierDev,
 	"hygiene":                       TierDev,

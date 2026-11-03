@@ -46,6 +46,7 @@ var Commands = []Command{
 	{Name: "graph-audit", Owner: "dev", Handler: "devcmd.RunGraphAudit", SourceOrigin: "internal/devcmd/graph_audit.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "h2d-inventory", Owner: "dev", Handler: "devcmd.RunH2DInventory", SourceOrigin: "internal/devcmd/h2d_inventory.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "hostregress", Owner: "dev", Handler: "runHostRegress", SourceOrigin: "cmd/fak-dev/hostregress.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
+	{Name: "hostsetup-bench", Owner: "dev", Handler: "devcmd.RunHostSetupBench", SourceOrigin: "internal/devcmd/hostsetup_bench.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "hostshare", Owner: "dev", Handler: "runHostShare", SourceOrigin: "cmd/fak-dev/hostshare.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "idea-scout", Owner: "dev", Handler: "devcmd.RunIdeaScout", SourceOrigin: "internal/devcmd/ideascout.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "index", Aliases: []string{"devindex"}, Owner: "dev", Handler: "devcmd.RunIndex", SourceOrigin: "internal/devcmd/index.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},

@@ -217,6 +217,10 @@ var maintainerDevCommands = []string{
 	// Systematic host-share reader + launch-bound gate over perf receipts: fak's own
 	// decode-regime diagnostics, not a portable adopter pattern.
 	"hostshare",
+	// Per-layer host-setup vs kernel microbench at batch 1 on the compute Planner
+	// seam (PrepareMatMul vs Plan.Run): direct setup/kernel ratio + regression gate,
+	// fak's own decode-regime diagnostics, not a portable adopter pattern.
+	"hostsetup-bench",
 	"hwgate-lint",
 	"hygiene",
 	"idea-scout",

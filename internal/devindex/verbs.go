@@ -272,6 +272,7 @@ var verbManifest = []Verb{
 	{Name: "host-relaunch-broker", Synopsis: "drain the control-plane->desktop relaunch spool and launch the queued Windows Terminal sessions", Lane: "cmd"},
 	{Name: "hostregress", Synopsis: "cross-receipt host-overhead regression gate: >=50% relative delta vs oldest-K baseline or regime flip fails", Lane: "cmd"},
 	{Name: "hostshare", Synopsis: "read host_share from perf receipts/profile notes; gate launch-bound decode at --threshold", Lane: "cmd"},
+	{Name: "hostsetup-bench", Synopsis: "per-layer host-setup vs kernel microbench at batch 1 (Planner seam); gates LAUNCH_SETUP_DOMINANT", Lane: "cmd"},
 	{Name: "hwgate-lint", Synopsis: "scan agent output for local-hardware stops (no GPU here) and redirect each to a sanctioned compute node", Lane: "cmd"},
 	{Name: "hygiene", Synopsis: "the whole-tree hygiene gates in one process (the --audit-tree twin of fak hooks)", Lane: "cmd"},
 	{Name: "idea-scout", Synopsis: "research-to-issue feeder: score arXiv/GitHub/HN/Reddit hits, dedupe, plan issues; --live FILES them for real", Lane: "cmd", Doc: "docs/idea-scout.md"},

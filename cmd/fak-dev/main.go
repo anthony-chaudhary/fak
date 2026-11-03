@@ -190,6 +190,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunGraphAudit(stdout, stderr, argv[1:])
 	case "h2d-inventory":
 		return devcmd.RunH2DInventory(stdout, stderr, argv[1:])
+	case "hostsetup-bench":
+		return devcmd.RunHostSetupBench(stdout, stderr, argv[1:])
 	case "launch-census":
 		return devcmd.RunLaunchCensus(stdout, stderr, argv[1:])
 	default:
@@ -289,6 +291,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  glue-census [--preset NAME | --model-shape JSON] [--check REF] verified sync round-trips/token census for the GLM-DSA decode path")
 	fmt.Fprintln(w, "  graph-audit [--json] [--fail-on uncovered] [--snapshot PATH] presence-vs-invokability audit of CUDA/Vulkan graph capture/replay on decode paths")
 	fmt.Fprintln(w, "  h2d-inventory [--preset NAME | --model-shape JSON] [--no-discover] [--snapshot PATH] per-token host->device copy inventory on decode state paths (sampler/mask/KV-append metadata)")
+	fmt.Fprintln(w, "  hostsetup-bench [--preset NAME | --layers N --out D --in D --block B] [--backend auto|NAME] [--warmup W] [--iters K] [--threshold F] [--gate] per-layer host-setup vs kernel microbench at batch 1; gates LAUNCH_SETUP_DOMINANT")
 	fmt.Fprintln(w, "  launch-census [--preset NAME | --model-shape JSON] [--check [REF]] launches/token census of decode-path kernel-launch/parFor sites (looped vs batched expert dispatch)")
 	fmt.Fprintln(w, "  version                               print fak-dev build identity")
 	fmt.Fprintln(w)
