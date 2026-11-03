@@ -1,0 +1,4 @@
+{
+  "schema": "fak-native-backend-model-families/1",
+  "allowed": ["Qwen3.8", "other"]
+}

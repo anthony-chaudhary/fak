@@ -98,6 +98,28 @@ var hardwareScrubberSelfTest = map[string]bool{
 }
 
 func auditRegexMatches(re *regexp.Regexp, label, line, file string) bool {
+	// These are necessary literal bytes, not replacement recognizers. Keep the
+	// original regexp and exemptions authoritative, and unknown rules unfiltered.
+	// In particular, don't lowercase Windows usernames: regexp case folding also
+	// accepts Unicode simple-fold equivalents such as long s in "users".
+	switch label {
+	case "live Slack token (xoxb/xoxp)":
+		if !strings.Contains(line, "xox") {
+			return false
+		}
+	case "GCP service-account email":
+		if !strings.Contains(line, ".iam.gserviceaccount.com") {
+			return false
+		}
+	case operatorHomePathLabel:
+		if !strings.ContainsAny(line, `/\`) {
+			return false
+		}
+	case privateGPUAliasLabel:
+		if !strings.ContainsAny(line, "0123456789") {
+			return false
+		}
+	}
 	file = strings.ReplaceAll(file, "\\", "/")
 	switch label {
 	case operatorHomePathLabel:

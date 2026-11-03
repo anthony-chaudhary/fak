@@ -1,18 +1,81 @@
 ---
 name: refresh-cachedoc-numbers
-description: Refresh the recent-operational cachevalue numbers in a guarded doc (e.g. docs/integrations/fable5-more-usage-for-free.md) when this-week's telemetry has moved on. Re-derives the frozen snapshots from live `fak...
+description: Refresh the recent-operational cachevalue numbers in a guarded doc (e.g. docs/integrations/fable5-more-usage-for-free.md) when this-week's telemetry has moved on. Re-derives the frozen snapshots from live `fak cachevalue report`, reconciles the doc's rendered numbers + snapshot_date to the fresh capture, and re-runs the hermetic audit (fak cachedoc-numbers-audit, gated in `make cachedoc-numbers-lint`) until every rendered number binds to a committed snapshot field and the doc's arithmetic invariants hold. Use when this named workflow matches the task.
+disable-model-invocation: false
+user-invocable: true
+allowed-tools: Read, Bash, Edit, Grep, Glob
+argument-hint: "[manifest-basename] (no args = every guarded doc; e.g. fable5-more-usage-for-free.json)"
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/refresh-cachedoc-numbers/SKILL.md
-  canonical-description-hash: 3500320d4b03a9ccdbc3b4098f82aedc5c25d704697e9fc115a4e02647539f52
 ---
 
-# Canonical project skill adapter
+# /refresh-cachedoc-numbers — re-capture a cachevalue doc's live numbers, honestly
 
-Load and follow [`../../../.claude/skills/refresh-cachedoc-numbers/SKILL.md`](../../../.claude/skills/refresh-cachedoc-numbers/SKILL.md). This generated discovery adapter contains no maintained workflow body.
+A doc under this gate (see `tools/docnumbers/README.md`) quotes **recent
+operational telemetry** — this week's fleet `fak cachevalue report`, the last few
+days of dev sessions. Those windows advance, so the numbers go stale. This skill
+re-captures them from live `fak`, reconciles the doc to the fresh capture, and
+proves the result with the hermetic audit — instead of hand-editing prose and
+hoping the arithmetic still closes.
 
-## Portability contract
+**The distrust that matters:** the new numbers come from a fresh `--json`
+capture, and every one of them must land back in a committed snapshot the audit
+checks. You are not "updating the text" — you are re-deriving the evidence and
+making the text match it.
 
-- The linked canonical `SKILL.md` is the single semantic workflow body for Claude, Codex, and fak-native loaders.
-- This adapter changes discovery only; it must not fork, summarize, or translate the workflow.
-- Harness-native invocation, permissions, hooks, model routing, and worker launch remain typed adapters outside the semantic body.
+## Steps
+
+1. **See what's guarded and whether it's stale.**
+   ```
+   fak cachedoc-numbers-audit
+   ```
+   A `WARN [staleness]` line, or a `FAIL`, tells you which manifest needs a
+   refresh. `Read` that manifest (`tools/docnumbers/<stem>.json`) and its doc.
+
+2. **Re-derive the frozen snapshots from live `fak`.**
+   ```
+   fak cachedoc-numbers-audit --refresh   # add --manifest <stem>.json to scope it
+   ```
+   Run this **from the repo root**, where `fak` has its data context. It rewrites
+   the snapshots under `snapshot_dir` for every source that has a `cmd`, and
+   prints how many fields each got. Sources with `cmd: null` are
+   machine-specific per-session captures — recapture those by hand with
+   `fak cachevalue status --session <id> --json` if the doc still cites them.
+
+3. **Read the fresh snapshots and reconcile the doc.** For each changed field,
+   `Edit` the doc's rendered number to the correctly-rounded fresh value, and
+   `Edit` the manifest's matching `expected` (and any `appears_as` string that
+   embeds the number). Re-derive any invariant `expect`/`parts` and the
+   `snapshot_date`. Keep the provenance labels (`WITNESSED`/`OBSERVED`/
+   `ESTIMATED`) truthful — a value's provenance does not change just because it
+   moved.
+
+   > The audit will reject a doc number that is not a correct rounding of its
+   > snapshot field, an `expected` that disagrees with the snapshot, or a
+   > decomposition that no longer sums. Let it drive you: fix what it names.
+
+4. **Prove it.**
+   ```
+   go test -v ./internal/cachedocaudit/...    # contract still holds
+   fak cachedoc-numbers-audit                 # the corpus is clean
+   ```
+   Optionally `--live` to confirm the cited fields still exist in fresh output.
+   Both must exit 0 with no FAIL before you commit.
+
+5. **Commit the doc, manifest, and snapshots together** — they are one artifact.
+   Stamp the commit with the doc's lane (`fak <leaf>`; use
+   `mcp__fak__fak_index_lane` if unsure).
+
+## Guardrails
+
+- Never edit a rendered number without also moving its snapshot + `expected`; a
+  number the audit can't trace to a committed field is exactly what this gate
+  exists to stop.
+- Don't invent precision. Match the doc's existing rounding (a `≈` value gets 3%
+  slack; a plain value must round correctly). If a field is now zero or missing
+  after `--refresh`, you likely ran it outside the repo's `fak` data context —
+  re-run from the repo root before trusting it.
+- This skill only touches guarded docs. Committed benchmark claims belong to
+  `docs/benchmarks/BENCHMARK-AUTHORITY.md`; the README's numbers to
+  `tools/readme_freshness_audit.py`. Don't cross those streams.

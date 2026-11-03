@@ -70,7 +70,9 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 	tokenomosStaging := fs.Bool("tokenomos-staging-qualification", false, "select bounded event-protected pinned IDs for non-captured native gathers; not device or performance qualification")
 	pagedKVCopyQualification := fs.Bool("paged-kv-copy-qualification", false, "select bounded all-plane paged-KV COW copy; default off, not device qualification")
 	kv16PrefillGQA4 := fs.Bool("kv16-prefill-gqa4-qualification", false, "select typed-KV four-query/four-head prefill; default off, not device qualification")
+	qwen35IQ2Sequence := fs.Bool("qwen35-iq2-sequence-qualification", false, "select retained IQ2_XXS/XS Qwen hybrid sequence projections; default off, not device qualification")
 	q56MMVQQualification := fs.Bool("q56k-mmvq-qualification", false, "qualify approximate Q5_K/Q6_K q8_1 MMVQ at P=1..3; default off")
+	q56MMQQualification := fs.Bool("q56k-mmq-qualification", false, "qualify retained Q5_K/Q6_K Q8_1 prompt MMQ at P>=128; default off, not device qualification")
 	archSpecific := fs.Bool("arch-specific", false, "compile opt-in CUDA 13 arch-specific translation units")
 	deepGEMM := fs.Bool("deepgemm-wkv", false, "compile explicit Linux CUDA 13.1 SM100f/103f WKV candidate; requires --arch-specific and --deepgemm-wkv-sms")
 	deepGEMMSMs := fs.Int("deepgemm-wkv-sms", 0, "explicit physical SM count for the DeepGEMM persistent kernel")
@@ -198,33 +200,35 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 		Stdout:             stdout,
 		Stderr:             stderr,
 
-		EnableV41EngramIQ4NLQualification:   *engramIQ4NL,
-		EnableV41CompressorPending:          *compressorPending,
-		EnableQ4KQKVQualification:           *q4Qualification,
-		EnableQ4KQKVAsync:                   *q4Async,
-		EnableQ2KMMQPrefill:                 *q2MMQ,
-		EnableQ3KMMQPrefill:                 *q3MMQ,
-		EnableQ8MMQPrefill:                  *q8MMQ,
-		EnableCaptureOnceQualification:      *captureOnce,
-		EnableTokenomosStagingQualification: *tokenomosStaging,
-		EnableQ56KMMVQQualification:         *q56MMVQQualification,
-		EnablePagedKVCopyQualification:      *pagedKVCopyQualification,
-		EnableKV16PrefillGQA4Qualification:  *kv16PrefillGQA4,
-		EnableDeepGEMMWKV:                   *deepGEMM,
-		DeepGEMMWKVSMs:                      *deepGEMMSMs,
-		EnableFlashMLADecode:                *flashMLADecode,
-		EnableFlashMLAPrefill:               *flashMLA,
-		DisableFlashMLALDRed:                *flashMLADisableLDRed,
-		EnableV41SharedAttention:            *sharedAttention,
-		EnableV41RoutedSwiGLU:               *routedSwiGLU,
-		EnableV41EngramGate:                 *engramGate,
-		EnableV41CompressorPool:             *compressorPool,
-		EnableV41Compressor:                 *compressor,
-		EnableV41Router:                     *router,
-		EnableV41TailRoPE:                   *tailRoPE,
-		EnableV41BF16Publish:                *bf16Publish,
-		EnableV41MHC:                        *mhc,
-		DisableV41Defaults:                  !*v41Defaults,
+		EnableV41EngramIQ4NLQualification:    *engramIQ4NL,
+		EnableV41CompressorPending:           *compressorPending,
+		EnableQ4KQKVQualification:            *q4Qualification,
+		EnableQ4KQKVAsync:                    *q4Async,
+		EnableQ2KMMQPrefill:                  *q2MMQ,
+		EnableQ3KMMQPrefill:                  *q3MMQ,
+		EnableQ8MMQPrefill:                   *q8MMQ,
+		EnableCaptureOnceQualification:       *captureOnce,
+		EnableTokenomosStagingQualification:  *tokenomosStaging,
+		EnableQ56KMMVQQualification:          *q56MMVQQualification,
+		EnableQ56KMMQQualification:           *q56MMQQualification,
+		EnablePagedKVCopyQualification:       *pagedKVCopyQualification,
+		EnableKV16PrefillGQA4Qualification:   *kv16PrefillGQA4,
+		EnableQwen35IQ2SequenceQualification: *qwen35IQ2Sequence,
+		EnableDeepGEMMWKV:                    *deepGEMM,
+		DeepGEMMWKVSMs:                       *deepGEMMSMs,
+		EnableFlashMLADecode:                 *flashMLADecode,
+		EnableFlashMLAPrefill:                *flashMLA,
+		DisableFlashMLALDRed:                 *flashMLADisableLDRed,
+		EnableV41SharedAttention:             *sharedAttention,
+		EnableV41RoutedSwiGLU:                *routedSwiGLU,
+		EnableV41EngramGate:                  *engramGate,
+		EnableV41CompressorPool:              *compressorPool,
+		EnableV41Compressor:                  *compressor,
+		EnableV41Router:                      *router,
+		EnableV41TailRoPE:                    *tailRoPE,
+		EnableV41BF16Publish:                 *bf16Publish,
+		EnableV41MHC:                         *mhc,
+		DisableV41Defaults:                   !*v41Defaults,
 	}
 	if sub != "check" {
 		if applied := computebuild.ApplyCUDAV41Defaults(cfg); len(applied) > 0 {

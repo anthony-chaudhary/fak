@@ -98,6 +98,9 @@ func readyUTF8PrefixLen(b []byte) int {
 }
 
 func (t *Tokenizer) decodeToken(id int) (decodedToken, error) {
+	if t.spm != nil {
+		return t.spmDecodeToken(id)
+	}
 	if id < 0 || id >= len(t.idToToken) {
 		return decodedToken{}, fmt.Errorf("tokenizer: id %d out of range", id)
 	}

@@ -55,7 +55,7 @@ func TestAgenticNativeJSONPreservesNativeContract(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
 		t.Fatal(err)
 	}
-	if plan.Native == nil || plan.Native.Engine != "fak-native" || plan.Native.DefaultModel != "Qwen3.8" || plan.Native.Receipt.Schema != "fak-native-performance-receipt/v2" || !plan.Native.MatchedWorkload {
+	if plan.Native == nil || plan.Native.Engine != "fak-native" || plan.Native.DefaultModel != "Qwen3.8" || plan.Native.Receipt.Schema != "fak-native-performance-receipt/v3" || !plan.Native.MatchedWorkload {
 		t.Fatalf("native contract = %+v", plan.Native)
 	}
 }
@@ -126,7 +126,7 @@ func TestAgenticBroad9896DogfoodIsMixedBoundedScopedAndByteStable(t *testing.T) 
 	if plan.Inference.Domain != agentic.DomainMixed || len(plan.Cohorts) != 2 {
 		t.Fatalf("mixed plan = inference=%+v cohorts=%+v", plan.Inference, plan.Cohorts)
 	}
-	if plan.Native == nil || plan.Native.Engine != "fak-native" || plan.Native.DefaultModel != "Qwen3.8" || plan.Native.Receipt.Schema != "fak-native-performance-receipt/v2" {
+	if plan.Native == nil || plan.Native.Engine != "fak-native" || plan.Native.DefaultModel != "Qwen3.8" || plan.Native.Receipt.Schema != "fak-native-performance-receipt/v3" {
 		t.Fatalf("native contract = %+v", plan.Native)
 	}
 	directionCount := 0

@@ -1,0 +1,9 @@
+{
+  "note": "corrupt meter readings: busy fraction above one and GPU time exceeding wall; neither may derive a share",
+  "model": "Qwen3.8-27B-UD-Q2_K_XL",
+  "hardware": "strix1",
+  "device_busy": 1.5,
+  "gpu_ms_per_token": 9.0,
+  "wall_ms_per_token": 7.5,
+  "decode_steps": 64
+}

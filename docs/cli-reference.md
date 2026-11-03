@@ -281,7 +281,7 @@ CPU or throughput for sampler cost and never silently drops a sample.
 
 Run the attachment command once per repetition, passing each `NEXT` receipt as the next
 call's `RECEIPT`; attestations append in repetition order. The first attachment upgrades a
-legacy `fak-native-performance-receipt/v1` to v2, and attachment refuses to overfill the
+legacy `fak-native-performance-receipt/v1` to the current schema (v3), and attachment refuses to overfill the
 1:1 `system_baselines`/`repetitions` sequence. Each repetition stores the exact attached
 attestation digest; digest mismatch or reuse is rejected.
 

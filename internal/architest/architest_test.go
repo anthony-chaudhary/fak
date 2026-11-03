@@ -794,6 +794,18 @@ var tier = map[string]int{
 
 	"reasoneval": 1, // Pure AIME/GPQA rule scoring and normalization; stdlib-only, off the hot path.
 
+	// The nine rows below were undeclared on the trunk; each is the minimum tier
+	// `fak new-leaf -suggest-tier <leaf>` derives from the leaf's imports.
+	"hostapproval":      3, // immutable host-trusted human-consent request preparation/verification over policy(3).
+	"hostshare":         1, // reads host-share evidence out of committed performance receipts; stdlib-only.
+	"leaserefcli":       2, // shared inference-independent session descriptor CLI over pathutil(1).
+	"papers":            1, // paper search/fetch/store CLI leaf; stdlib-only, off the hot path.
+	"regime":            1, // decode-step performance profile -> overhead regime classifier; stdlib-only.
+	"remotemaintresult": 1, // binds a source-validated maintenance receipt to one result-admission call; stdlib-only.
+	"sessionref":        2, // session reference substrate over refid(1).
+	"skilldiscovery":    1, // remote skill catalog/staging adaptation; stdlib-only.
+	"v41kv":             2, // typed paged quantized V4.1 KV-cache byte layout over mathx(1).
+
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
@@ -1634,6 +1646,7 @@ var interpreterExecAllow = map[string]string{
 	"mcpbroker":    "mcpbroker executes client-configured MCP tool servers through stdio; server command is caller-provided and validated at broker initialization",
 	"computebuild": "kernel/shader build toolchain (reached via witness evidence) execs resolved compiled tools — RunCmd's compiler argv, the vswhere lookup, and a smoke probe of the binary it just built; not a tool-call adjudication dependency",
 	"trajectory":   "telemetry alarm subprocess executes platform-resolved compiled notification binaries or audit tools; not an adjudication dependency of tool-call decide",
+	"fabricmap":    "ProcessAdapter execs the node-local hardware helper - a compiled binary, no shell - through caller-selected argv; driver/vendor dependencies stay outside the Go module, so the program name cannot be a literal",
 }
 
 // oracleSeamFiles names the off-path Python oracle/baseline seam scripts (DIRECTION.md

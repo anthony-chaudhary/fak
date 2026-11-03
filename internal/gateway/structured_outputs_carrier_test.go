@@ -191,10 +191,10 @@ func TestStructuredOutputsCarrierNativeRouteEnforcesOrRefuses(t *testing.T) {
 		{"json", `"structured_outputs":{"json":{"type":"object"}}`, `"guided_json":{"type":"object"}`, "{}"},
 		{"choice", `"structured_outputs":{"choice":["ab","ba"]}`, `"guided_choice":["ab","ba"]`, "ab"},
 		{"regex_with_identical_guided_regex", `"structured_outputs":{"regex":"[ab]{2}"},"guided_regex":"[ab]{2}"`, `"guided_regex":"[ab]{2}"`, "aa"},
+		{"grammar", `"structured_outputs":{"grammar":"root ::= \"a\""}`, `"guided_grammar":"root ::= \"a\""`, "a"},
 	}
 	refused := []string{
 		`"structured_outputs":{}`,
-		`"structured_outputs":{"grammar":"root ::= \"a\""}`,
 		`"structured_outputs":{"json_object":true}`,
 		`"structured_outputs":{"regex":"[ab]{2}","whitespace_pattern":"[ ]?"}`,
 		`"structured_outputs":{"regex":"[ab]{2}"},"guided_regex":"[ab]{3}"`,

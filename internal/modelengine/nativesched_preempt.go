@@ -12,7 +12,9 @@ package modelengine
 // and resumes after readmit.
 
 import (
+	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -91,6 +93,10 @@ type NativePreemptionPolicy struct {
 
 // NativePreemptionStats is the scheduler-local cumulative preemption witness.
 type NativePreemptionStats struct {
+	HostSwapBytes          int64 // retained serialized backing storage; not process RSS
+	HostSwapLimitBytes     int64 // zero means unlimited
+	HostSwapRefusals       int64
+	PreemptedLogitsBytes   int64 // separate from the serialized-KV bound
 	Running                int
 	UsedBlocks             int
 	SwappedOut             int
@@ -144,6 +150,61 @@ func (s *NativeScheduler) SetKVPreemptionPolicy(p NativePreemptionPolicy) {
 	s.signal()
 }
 
+// ErrNativeHostSwapCapacity reports a selected swap that cannot fit the explicit
+// host-KV retention bound. Like other preemption errors it ends that request;
+// it does not silently select recompute or promise a later retry.
+var ErrNativeHostSwapCapacity = errors.New("modelengine: native host swap byte capacity exhausted")
+
+// SetKVHostSwapByteLimit configures the ordinary engine's scheduler. Zero keeps
+// unlimited retention. A negative value or live shrink below current ownership
+// is refused without changing the old limit.
+func (e *Engine) SetKVHostSwapByteLimit(limit int64) error {
+	if e == nil || limit < 0 {
+		return fmt.Errorf("modelengine: invalid native host swap byte limit %d", limit)
+	}
+	return e.nativeScheduler().SetKVHostSwapByteLimit(limit)
+}
+
+func (s *NativeScheduler) SetKVHostSwapByteLimit(limit int64) error {
+	if s == nil || limit < 0 {
+		return fmt.Errorf("modelengine: invalid native host swap byte limit %d", limit)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	held, _ := s.hostSwapUsageLocked()
+	if limit > 0 && held > limit {
+		return fmt.Errorf("%w: retained=%d limit=%d", ErrNativeHostSwapCapacity, held, limit)
+	}
+	s.hostSwapLimitBytes = limit
+	return nil
+}
+
+func nativeHostByteSum(total, count int64) int64 {
+	if count < 0 || total > math.MaxInt64-count {
+		return math.MaxInt64
+	}
+	return total + count
+}
+
+// Ownership is the queued lane's backing slice, not a duplicate mutable ledger.
+// The scheduler mutex serializes reservation, serialization and publication;
+// removal/clear on readmit, failure or cancellation releases the same owner.
+func (s *NativeScheduler) hostSwapUsageLocked() (blobs, logits int64) {
+	for _, lane := range s.preempted {
+		if lane == nil {
+			continue
+		}
+		blobs = nativeHostByteSum(blobs, int64(cap(lane.hostKV)))
+		n := int64(cap(lane.savedLogits))
+		if n > math.MaxInt64/4 {
+			logits = math.MaxInt64
+		} else {
+			logits = nativeHostByteSum(logits, n*4)
+		}
+	}
+	return blobs, logits
+}
+
 // KVPreemptionStats returns a point-in-time view of the scheduler's pressure path.
 func (s *NativeScheduler) KVPreemptionStats() NativePreemptionStats {
 	s.mu.Lock()
@@ -153,6 +214,8 @@ func (s *NativeScheduler) KVPreemptionStats() NativePreemptionStats {
 	st.UsedBlocks = s.usedKVBlocksLocked()
 	st.SwappedOut = len(s.preempted)
 	st.MaxBlocks = s.preemption.MaxBlocks
+	st.HostSwapBytes, st.PreemptedLogitsBytes = s.hostSwapUsageLocked()
+	st.HostSwapLimitBytes = s.hostSwapLimitBytes
 	st.MaxPreemptRounds = s.maxPreemptRoundsLocked()
 	st.VictimRule = s.preemption.VictimRule
 	return st
@@ -180,6 +243,13 @@ func (s *NativeScheduler) WriteKVPreemptionMetrics(b *strings.Builder) {
 
 func writeNativePreemptionMetrics(b *strings.Builder, st NativePreemptionStats) {
 	const p = "fak_sched_preempt_"
+	writeNativeHelpType(b, p+"host_swap_bytes", "Retained serialized host-KV backing bytes; excludes logits, staging and RSS overhead.", "gauge")
+	fmt.Fprintf(b, "%shost_swap_bytes %d\n", p, st.HostSwapBytes)
+	writeNativeHelpType(b, p+"host_swap_limit_bytes", "Explicit serialized host-KV retention limit (0 = unlimited).", "gauge")
+	fmt.Fprintf(b, "%shost_swap_limit_bytes %d\n", p, st.HostSwapLimitBytes)
+	writeNativeHelpType(b, p+"saved_logits_bytes", "Retained preempted-lane logit backing bytes, outside the host-KV limit.", "gauge")
+	fmt.Fprintf(b, "%ssaved_logits_bytes %d\n", p, st.PreemptedLogitsBytes)
+	writeNativeCounter(b, p+"host_swap_refused_total", "Host swaps refused before staging because the retained-byte limit cannot fit.", st.HostSwapRefusals)
 	writeNativeHelpType(b, p+"running", "Sequences currently running (holding KV blocks) under the preemptor.", "gauge")
 	fmt.Fprintf(b, "%srunning %d\n", p, st.Running)
 	writeNativeHelpType(b, p+"used_blocks", "KV blocks currently held by the running set.", "gauge")
@@ -603,6 +673,27 @@ func (s *NativeScheduler) preemptLaneLocked(ln *schedLane) error {
 			mode = NativePreemptSwap
 		}
 	}
+	// Adapt vLLM CPUOffloadingManager.prepare_store's capacity-before-allocation
+	// rule (bd5bbce6e45e09dbd07ac3e8c394626c059078f7, Apache-2.0).
+	// The existing scheduler mutex is the synchronous reservation. A refused
+	// store owns nothing and leaves this resident lane intact for error retirement.
+	hostExtent := 0
+	if mode == NativePreemptSwap && s.preemption.GPUDirectSwapper == nil && s.hostSwapLimitBytes > 0 {
+		if ln.sess == nil || ln.sess.Cache == nil {
+			return fmt.Errorf("modelengine: cannot swap preempt lane without resident KV")
+		}
+		var err error
+		hostExtent, err = model.KVCacheHostSwapBytes(ln.sess.Cache, s.blockTokensLocked())
+		if err != nil {
+			return err
+		}
+		held, _ := s.hostSwapUsageLocked()
+		want := int64(hostExtent)
+		if want > s.hostSwapLimitBytes || held > s.hostSwapLimitBytes-want {
+			s.preemptStats.HostSwapRefusals++
+			return fmt.Errorf("%w: retained=%d requested=%d limit=%d", ErrNativeHostSwapCapacity, held, want, s.hostSwapLimitBytes)
+		}
+	}
 	ln.preemptMode = mode
 	ln.preemptRound = s.preemptRound
 	ln.savedLogits = copyF32(ln.logits)
@@ -664,6 +755,11 @@ func (s *NativeScheduler) preemptLaneLocked(ln *schedLane) error {
 					_ = s.recordQwenSwapUsage(modelperfobs.QwenSwapDirectionOut, modelperfobs.QwenSwapOutcomeError, modelperfobs.QwenSwapResultRefused, 0)
 				}
 				return err
+			}
+			// Both codecs allocate an exact-sized owned slice. Refuse a future
+			// codec drift rather than charging len while retaining a larger cap.
+			if s.hostSwapLimitBytes > 0 && (len(blob) != hostExtent || cap(blob) != hostExtent) {
+				return fmt.Errorf("modelengine: host swap extent changed: planned=%d len=%d cap=%d", hostExtent, len(blob), cap(blob))
 			}
 			ln.hostKV = blob
 			if qwenHybrid {

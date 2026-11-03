@@ -30,7 +30,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/egresslist"
-	"github.com/anthony-chaudhary/fak/internal/maputil"
 	"github.com/anthony-chaudhary/fak/internal/provenance"
 )
 
@@ -859,7 +858,7 @@ func Summary(p adjudicator.Policy) string {
 	fmt.Fprintf(&b, "allow (exact)      : %d tool(s)\n", allowN)
 	fmt.Fprintf(&b, "allow (prefix)     : %s\n", joinOrNone(p.AllowPrefix))
 	fmt.Fprintf(&b, "deny (explicit)    : %d tool(s)\n", len(p.Deny))
-	for _, t := range maputil.SortedKeys(p.Deny) {
+	for _, t := range sortedStringKeys(p.Deny) {
 		fmt.Fprintf(&b, "                     %s -> %s\n", t, abi.ReasonName(p.Deny[t]))
 	}
 	fmt.Fprintf(&b, "egress deny hosts  : %s\n", joinOrNone(p.EgressExtraDenyHosts))
@@ -918,7 +917,7 @@ func SummaryRuntime(rt Runtime) string {
 		fmt.Fprintf(&b, "                     %s -> %s\n", r.Tool, strings.ToUpper(r.Sink))
 	}
 	fmt.Fprintf(&b, "ifc sources        : %d tool(s)\n", len(rt.Sources))
-	for _, tool := range maputil.SortedKeys(rt.Sources) {
+	for _, tool := range sortedStringKeys(rt.Sources) {
 		fmt.Fprintf(&b, "                     %s -> %s\n", tool, rt.Sources[tool])
 	}
 	if rt.RateLimit != nil {
@@ -934,7 +933,7 @@ func SummaryRuntime(rt Runtime) string {
 	if rt.Isolation != nil {
 		fmt.Fprintf(&b, "isolation backends : %s (strongest: %s)\n",
 			strings.Join(rt.Isolation.Backends, ", "), rt.Isolation.strongest())
-		for _, lv := range maputil.SortedKeys(rt.Isolation.Trust) {
+		for _, lv := range sortedStringKeys(rt.Isolation.Trust) {
 			fmt.Fprintf(&b, "isolation trust    : %s -> %s\n", lv, rt.Isolation.Trust[lv])
 		}
 	} else {
@@ -1275,6 +1274,21 @@ func describeArgPredicate(p adjudicator.ArgPredicate) string {
 	default:
 		return fmt.Sprintf("%s.%s unknown -> %s", p.Tool, p.Arg, reason)
 	}
+}
+
+// sortedStringKeys returns the keys of m in ascending order — the stable
+// iteration order Summary rendering relies on. Kept local to the policy lane
+// rather than imported from a shared map-utility package so the lane's import
+// surface stays minimal; the algorithm matches maputil.SortedKeys exactly
+// (collect + sort.Strings). Named distinct from amendment_delta.go's
+// sortedKeys, which computes an allow-map delta.
+func sortedStringKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func joinOrNone(s []string) string {

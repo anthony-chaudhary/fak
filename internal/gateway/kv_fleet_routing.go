@@ -123,6 +123,18 @@ func (r *CacheBlindRouter) Route(prefixKey string) (int, bool) {
 type FleetCacheRouter struct {
 	instances []*residentSet
 	load      []int
+
+	// tolerance arms the bounded load-imbalance slack on the sticky path (the
+	// microsoft/vidur slack-tolerant sticky scheduler borrow; see routeSlack).
+	// Zero keeps the rigid sticky behavior the committed hit-rate witness pins;
+	// a positive value sheds a sticky prefix whose home instance's load exceeds
+	// tolerance x the fleet's minimum load.
+	tolerance float64
+
+	// home is the sticky record the slack path consults: prefix key -> the
+	// instance the policy currently pins it to. Nil unless the slack is armed
+	// (NewSlackTolerantFleetCacheRouter); the rigid path stays record-free.
+	home map[string]int
 }
 
 // NewFleetCacheRouter builds a KV-aware fleet of n instances, each able to keep
@@ -132,7 +144,29 @@ func NewFleetCacheRouter(n, capPerInstance int) *FleetCacheRouter {
 	return &FleetCacheRouter{instances: insts, load: make([]int, len(insts))}
 }
 
+// NewSlackTolerantFleetCacheRouter builds a KV-aware fleet of n instances with the
+// bounded load-imbalance slack armed: a prefix's home instance keeps its traffic
+// while its load stays within tolerance x the fleet's minimum load, and sheds to
+// the least-loaded instance once it exceeds the bound. Adapted from
+// microsoft/vidur's TolerantStickyLOPUncachedGlobalScheduler (source:
+// vidur/scheduler/global_scheduler/tolerant_sticky_lop_uncached_global_scheduler.py
+// @abae7f63aa857300f5cdc6f5e0d27860cd24721b, MIT; re-expressed in Go, no copied
+// code). The slack only bites above one replica: with a single instance the home
+// IS the minimum, so the bound can never be exceeded. tolerance <= 0 falls back
+// to the rigid sticky router.
+func NewSlackTolerantFleetCacheRouter(n, capPerInstance int, tolerance float64) *FleetCacheRouter {
+	r := NewFleetCacheRouter(n, capPerInstance)
+	if tolerance > 0 {
+		r.tolerance = tolerance
+		r.home = make(map[string]int)
+	}
+	return r
+}
+
 func (r *FleetCacheRouter) Route(prefixKey string) (int, bool) {
+	if r.tolerance > 0 && len(r.instances) > 1 {
+		return r.routeSlack(prefixKey)
+	}
 	for i, s := range r.instances {
 		if s.holds(prefixKey) {
 			s.touch(prefixKey)
@@ -144,6 +178,72 @@ func (r *FleetCacheRouter) Route(prefixKey string) (int, bool) {
 	r.instances[pick].admit(prefixKey)
 	r.load[pick]++
 	return pick, false
+}
+
+// routeSlack is the slack-tolerant sticky placement. The prefix's home instance
+// (the sticky record, seeded by its last placement) keeps the turn while its load
+// stays within the bounded slack — load[home] <= tolerance x min(load) — because
+// each turn there reuses resident prefix KV instead of a cold prefill. Past the
+// bound the turn sheds to the least-loaded OTHER instance (a cold placement that
+// duplicates the prefix's residency there) and the sticky record migrates with
+// it, so the session tracks the cool side of the fleet until loads rebalance. A
+// home that evicted the prefix (LRU pressure) loses the record and re-homes cold.
+// Deterministic: ties break to the lower instance index, unlike the upstream
+// random tie-break, so the witness is reproducible.
+func (r *FleetCacheRouter) routeSlack(prefixKey string) (int, bool) {
+	if r.home == nil {
+		r.home = make(map[string]int)
+	}
+	home, pinned := r.home[prefixKey]
+	liveHome := pinned && r.instances[home].holds(prefixKey)
+	if liveHome && float64(r.load[home]) <= r.tolerance*float64(r.minLoad()) {
+		// Within the bounded slack: keep the sticky placement (prefix hit).
+		r.instances[home].touch(prefixKey)
+		r.load[home]++
+		return home, true
+	}
+	// No live sticky record (or the home evicted the prefix, or the home's load
+	// exceeded the slack): place on the least-loaded instance, skipping the
+	// overloaded home so a shed actually moves the session, and migrate the
+	// sticky record with it.
+	exclude := -1
+	if liveHome {
+		exclude = home
+	}
+	pick := r.leastLoaded(exclude)
+	hit := r.instances[pick].holds(prefixKey)
+	r.instances[pick].admit(prefixKey)
+	r.load[pick]++
+	r.home[prefixKey] = pick
+	return pick, hit
+}
+
+// minLoad is the fleet's minimum in-flight request count — the slack bound's
+// denominator (the upstream min_load_imbalance read over the replica set).
+func (r *FleetCacheRouter) minLoad() int {
+	m := r.load[0]
+	for _, l := range r.load[1:] {
+		if l < m {
+			m = l
+		}
+	}
+	return m
+}
+
+// leastLoaded picks the instance with the fewest in-flight requests, skipping
+// except (the sticky home being shed from, so a shed always moves the session);
+// ties break to the lower index. except may be -1 for no exclusion.
+func (r *FleetCacheRouter) leastLoaded(except int) int {
+	best := -1
+	for i := range r.instances {
+		if i == except {
+			continue
+		}
+		if best == -1 || r.load[i] < r.load[best] {
+			best = i
+		}
+	}
+	return best
 }
 
 // coldPlacement homes a brand-new prefix on the instance with the most FREE cache

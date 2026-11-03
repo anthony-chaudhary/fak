@@ -10,8 +10,11 @@ import (
 type ArbitratorVerdict string
 
 const (
+	// VerdictRecompute recomputes prompt KV tokens on UMA DRAM instead of
+	// offloading them to storage.
 	VerdictRecompute ArbitratorVerdict = "RECOMPUTE"
-	VerdictOffload   ArbitratorVerdict = "OFFLOAD"
+	// VerdictOffload writes the KV cache to NVMe SSD and reloads it on reuse.
+	VerdictOffload ArbitratorVerdict = "OFFLOAD"
 )
 
 // PlatformProfile characterizes the memory, storage, and compute attributes

@@ -108,6 +108,14 @@ type OpenCodeRunReceipt struct {
 	// succeeded run. "ongoing" is the conservative fallback for any failure the
 	// runner cannot positively identify as a bounded provider blip.
 	FailureClass string `json:"failure_class,omitempty"`
+
+	// FailureTail is the bounded tail of child stderr (stdout fallback) on a
+	// failed/timeout run whose session DID start. StartError covers only the
+	// no-session case, so a run that created a session and then exited nonzero
+	// (e.g. OpenCode v2 exit 1 after a completed session) otherwise left no
+	// cause in the receipt. Additive + omitempty: succeeded runs stay
+	// byte-identical.
+	FailureTail string `json:"failure_tail,omitempty"`
 }
 
 // cronOpenCodeBunCrashSignature reports whether captured child output carries the
@@ -237,6 +245,10 @@ func cronProbeOpenCodeVersion(cmdName string, workdir string, env []string) stri
 	}
 	return cronBoundedOutputTail(string(out), 256)
 }
+
+// cronOpenCodeFailureTailBytes bounds FailureTail so a noisy child cannot bloat
+// the ledger.
+const cronOpenCodeFailureTailBytes = 1024
 
 // cronBoundedOutputTail returns at most the last maxBytes of s collapsed to a
 // single trimmed line, so child startup errors stay bounded in receipts. A cut
@@ -760,6 +772,16 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 		if receipt.StartError == "" {
 			receipt.StartError = runErr.Error()
 		}
+	}
+
+	// A run that started a session but still failed keeps a bounded cause tail
+	// so the failure is diagnosable from the ledger alone.
+	if outcome != "succeeded" && !receipt.StartupFailed {
+		tail := lastStderr
+		if strings.TrimSpace(tail) == "" {
+			tail = lastStdout
+		}
+		receipt.FailureTail = cronBoundedOutputTail(tail, cronOpenCodeFailureTailBytes)
 	}
 
 	// Session token/cost/model join (#1559): best-effort, read-only, and never

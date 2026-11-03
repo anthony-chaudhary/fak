@@ -17,7 +17,16 @@ import (
 const (
 	ReceiptSchemaV1 = "fak-native-performance-receipt/v1"
 	ReceiptSchemaV2 = "fak-native-performance-receipt/v2"
-	ReceiptSchema   = ReceiptSchemaV2
+	// ReceiptSchemaV3 adds the optional per-repetition host-overhead
+	// decomposition (host_phase_us, kernel_launch_count,
+	// inter_kernel_gap_sum_us, h2d_copy_bytes, sync_roundtrips) so every new
+	// receipt carries the small-batch decode host/device split natively at
+	// collection time instead of leaving it to post-hoc reconstruction over
+	// sparse old fields. The fields are additive and optional: a v3 receipt
+	// without them validates exactly as v2 did, and all readers keep accepting
+	// v1/v2 receipts unchanged (missing fields read as unknown, never zero).
+	ReceiptSchemaV3 = "fak-native-performance-receipt/v3"
+	ReceiptSchema   = ReceiptSchemaV3
 )
 
 const (
@@ -68,6 +77,10 @@ type ExperimentControls struct {
 	Repetitions   int     `json:"repetitions"`
 }
 
+// Repetition is one measured repetition of the envelope workload. The v3
+// host-overhead decomposition fields are pointers so that "not measured" is
+// representable: a nil field is unknown, never a fabricated zero, and
+// omitempty keeps absent fields out of the encoded receipt.
 type Repetition struct {
 	EndToEndMilliseconds float64 `json:"end_to_end_milliseconds"`
 	TokensPerSecond      float64 `json:"tokens_per_second"`
@@ -75,6 +88,13 @@ type Repetition struct {
 	PrefillMilliseconds  float64 `json:"prefill_milliseconds,omitempty"`
 	DecodeMilliseconds   float64 `json:"decode_milliseconds,omitempty"`
 	SystemBaselineDigest string  `json:"system_baseline_digest,omitempty"`
+	// v3 host-overhead decomposition for this repetition's decode window.
+	// All times are microseconds; all counts/bytes are whole-window totals.
+	HostPhaseUs         *float64 `json:"host_phase_us,omitempty"`           // host-side phase time outside device work
+	KernelLaunchCount   *uint64  `json:"kernel_launch_count,omitempty"`     // kernels launched during the window
+	InterKernelGapSumUs *float64 `json:"inter_kernel_gap_sum_us,omitempty"` // sum of inter-kernel idle gaps
+	H2DCopyBytes        *uint64  `json:"h2d_copy_bytes,omitempty"`          // host->device payload bytes
+	SyncRoundtrips      *uint64  `json:"sync_roundtrips,omitempty"`         // synchronous host<->device round trips
 }
 
 type MemoryMetrics struct {
@@ -188,7 +208,7 @@ func AttachSystemBaseline(graph Graph, receipt ExperimentReceipt, attestation sy
 		return ExperimentReceipt{}, errors.New("receipt already carries legacy ambient evidence")
 	}
 	if receipt.Schema == ReceiptSchemaV1 {
-		receipt.Schema = ReceiptSchemaV2
+		receipt.Schema = ReceiptSchema
 	}
 	if err := ValidateReceipt(graph, receipt); err != nil {
 		return ExperimentReceipt{}, err
@@ -236,8 +256,16 @@ func ValidateReceipt(graph Graph, r ExperimentReceipt) error {
 
 func receiptValidationProblems(r ExperimentReceipt) []string {
 	var f []string
-	if r.Schema != ReceiptSchemaV1 && r.Schema != ReceiptSchemaV2 {
-		f = append(f, fmt.Sprintf("schema must be %q or %q", ReceiptSchemaV1, ReceiptSchemaV2))
+	if r.Schema != ReceiptSchemaV1 && r.Schema != ReceiptSchemaV2 && r.Schema != ReceiptSchemaV3 {
+		f = append(f, fmt.Sprintf("schema must be %q, %q or %q", ReceiptSchemaV1, ReceiptSchemaV2, ReceiptSchemaV3))
+	}
+	for i, repetition := range r.Repetitions {
+		if err := repetition.hostOverheadProblems(); err != nil {
+			f = append(f, fmt.Sprintf("repetition %d: %v", i, err))
+		}
+	}
+	if r.Schema != ReceiptSchemaV3 && hostOverheadPresent(r.Repetitions) {
+		f = append(f, "host-overhead decomposition fields require schema v3")
 	}
 	if r.Schema == ReceiptSchemaV1 && len(r.SystemBaselines) > 0 {
 		f = append(f, "v1 receipts cannot carry system baseline attestations")

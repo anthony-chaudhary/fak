@@ -131,6 +131,33 @@ func syntheticShape(name string) (model.Config, bool) {
 			IntermediateSize: 18944, VocabSize: 152064, RMSNormEps: 1e-6, RopeTheta: 1000000,
 			TieWordEmbeddings: false, EOSTokenID: 151643, HiddenAct: "silu", ModelType: "qwen2",
 		}, true
+	case "qwen38-27b", "27b", "qwen3.8-27b":
+		// Pinned exact Qwen3.8-27B architecture config: 64 layers, hidden 5120,
+		// intermediate 17408, 24 attention heads, 4 KV heads, head dim 256, vocab
+		// 248320, 3:1 GDN/full-attention cadence — docs/benchmarks/qwen38-ladder/README.md
+		// ("same ... runtime architecture as Qwen3.8-27B"), corroborated by
+		// internal/model/contextsize_test.go:88 (qwen38ContextPlanConfig) and
+		// internal/model/device_bands_test.go:17 (qwen38BandConfig, "the Qwen3.8-27B
+		// geometry"). Family flags (AttnOutputGate/NormGain1p/QKNorm/partial rotary)
+		// follow cmd/qwen35check/acceptance_test.go:36 (validAcceptanceConfig), which
+		// pins the same 27B geometry. NewSynthetic dispatches per layer on LayerTypes.
+		layers := make([]string, 64)
+		for i := range layers {
+			if i%4 == 3 {
+				layers[i] = "full_attention"
+			} else {
+				layers[i] = "linear_attention"
+			}
+		}
+		return model.Config{
+			ModelType: "qwen3_5_text", NumLayers: 64, HiddenSize: 5120, NumHeads: 24,
+			NumKVHeads: 4, HeadDim: 256, IntermediateSize: 17408, VocabSize: 248320,
+			RMSNormEps: 1e-6, RopeTheta: 10000000, PartialRotaryFactor: .25,
+			FullAttentionInterval: 4, LinearConvKernelDim: 4, LinearNumKeyHeads: 16,
+			LinearKeyHeadDim: 128, LinearNumValueHeads: 48, LinearValueHeadDim: 128,
+			AttnOutputGate: true, NormGain1p: true, QKNorm: true, HiddenAct: "silu",
+			LayerTypes: layers,
+		}, true
 	}
 	return model.Config{}, false
 }
@@ -140,7 +167,7 @@ func loadModel(dir, hf, synthetic string, lean bool) (*model.Model, string, erro
 	case synthetic != "":
 		cfg, ok := syntheticShape(synthetic)
 		if !ok {
-			return nil, "", fmt.Errorf("unknown -synthetic shape %q (tiny|smollm2-135m|qwen25-1.5b|qwen25-7b)", synthetic)
+			return nil, "", fmt.Errorf("unknown -synthetic shape %q (tiny|smollm2-135m|qwen25-1.5b|qwen25-7b|qwen38-27b)", synthetic)
 		}
 		return model.NewSynthetic(cfg), synthetic + " [synthetic]", nil
 	case lean:
@@ -440,7 +467,7 @@ type cell struct {
 func main() {
 	dir := flag.String("dir", "internal/model/.cache/smollm2-135m", "model export dir (-dir mode)")
 	hf := flag.String("hf", "", "HuggingFace snapshot dir (config.json + model.safetensors)")
-	synthetic := flag.String("synthetic", "", "run weightless on a synthetic model at a named shape (tiny|smollm2-135m|qwen25-1.5b|qwen25-7b) — no -hf/-dir needed; ratios faithful, absolute wall-clock is this-box; tiny is the CPU-tractable wiring shape for unattended nightrun")
+	synthetic := flag.String("synthetic", "", "run weightless on a synthetic model at a named shape (tiny|smollm2-135m|qwen25-1.5b|qwen25-7b|qwen38-27b) — no -hf/-dir needed; ratios faithful, absolute wall-clock is this-box; tiny is the CPU-tractable wiring shape for unattended nightrun")
 	lean := flag.Bool("lean", false, "memory-lean quantize-at-load (requires -hf; implies -quant)")
 	quantF := flag.Bool("quant", false, "use the Q8_0 quantized lane (else f32) — opt-in, matching batch/model/radixbench")
 	metalF := flag.Bool("metal", false, "run the single-session forward (arms A/B's per-agent decode, arm C's ONE shared-prefix prefill) through the Apple-Silicon Metal GPU path (auto-compiled on darwin/arm64+cgo, no build tag needed; requires -quant or -lean, and a dense non-MoE/non-hybrid model). Does NOT accelerate arm C's batched decode (BatchSession.StepBatch has no Metal path at all) — see liveC's doc comment. Fails loud if requested but unavailable, matching `fak serve --metal`.")
@@ -486,7 +513,7 @@ func main() {
 			os.Exit(2)
 		}
 		if _, ok := syntheticShape(*synthetic); !ok {
-			fmt.Fprintf(os.Stderr, "unknown -synthetic shape %q (tiny|smollm2-135m|qwen25-1.5b|qwen25-7b)\n", *synthetic)
+			fmt.Fprintf(os.Stderr, "unknown -synthetic shape %q (tiny|smollm2-135m|qwen25-1.5b|qwen25-7b|qwen38-27b)\n", *synthetic)
 			os.Exit(2)
 		}
 		writeSessionReport(deterministicReport(*synthetic+" [synthetic]", quant != 0, turns, agents, *prefix, *decode, *result), *out)

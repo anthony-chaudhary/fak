@@ -14,6 +14,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -22,6 +23,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/internal/stopgate"
+	"github.com/anthony-chaudhary/fak/internal/toolbound"
 	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
@@ -650,6 +652,59 @@ func isToolResultFailure(isErr bool, verdict string, content string) bool {
 }
 
 // dispatchToolCalls adjudicates and admits every tool call from one assistant turn.
+// armedToolOutputBound is the opt-in settle-time tool-output bound (ticket
+// oss-port-agent-tool-output-spill; ADAPT of opencode's settle-time result
+// truncation, packages/core/src/tool/registry.ts@4eb29a64, MIT, onto fak's
+// existing internal/toolbound seam). When armed, the RoleTool message the turn
+// loop settles carries the toolbound-bounded head/tail preview plus the
+// spill-file notice instead of the raw result, and the full bytes live in the
+// managed spill file. Nil (the default) leaves settlement byte-for-byte
+// historical. Arming is process-scoped, like the other armed capability
+// seams in this package.
+var armedToolOutputBound atomic.Pointer[toolbound.Bounder]
+
+// ArmToolOutputBound opts the agent loop into settle-time tool-output bounding
+// with the given limits (MaxLines/MaxBytes; SpillDir empty = os.TempDir()). It
+// returns the active Bounder so the caller can manage spill retention
+// (CleanupSpillFiles). DisarmToolOutputBound restores the historical unbounded
+// settlement.
+func ArmToolOutputBound(opts toolbound.Options) *toolbound.Bounder {
+	b := toolbound.New(opts)
+	armedToolOutputBound.Store(b)
+	return b
+}
+
+// DisarmToolOutputBound restores the historical unbounded tool-result settlement.
+func DisarmToolOutputBound() {
+	armedToolOutputBound.Store(nil)
+}
+
+// ActiveToolOutputBound returns the armed settle-time bounder, or nil when unarmed.
+func ActiveToolOutputBound() *toolbound.Bounder {
+	return armedToolOutputBound.Load()
+}
+
+// settleToolResultContent returns the RoleTool message content for one executed
+// tool result under the optional settle-time bound. Unarmed (the default) it
+// returns the content byte-for-byte unchanged. Armed and over the cap, the
+// message carries the head/tail preview plus the spill-file notice while the
+// full bytes stay in the managed spill file. Bounding is presentation, not
+// admission: the injection scan and the metrics checks earlier in commitOne
+// deliberately read the UNTRUNCATED content, and a spill-write failure degrades
+// to the historical full-content message (fail-open) so the bound can never
+// break the loop.
+func (r *armRunner) settleToolResultContent(content string) string {
+	b := armedToolOutputBound.Load()
+	if b == nil {
+		return content
+	}
+	bo, err := b.Bound(content)
+	if err != nil || bo == nil || !bo.Truncated {
+		return content
+	}
+	return bo.Preview
+}
+
 func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Message) (bool, error) {
 	if len(asst.ToolCalls) == 0 {
 		if r.streamingFSM != nil && r.streamingFSM.IsDispatched() {
@@ -971,7 +1026,7 @@ func (r *armRunner) dispatchToolCalls(ctx context.Context, turn int, asst Messag
 		if recordRepeatedFailure(&r.repeatedFailures, tool, rawArgs, content) {
 			return fmt.Errorf("REPEATED_IDENTICAL_TOOL_FAILURE: tool %s failed three consecutive times", tool)
 		}
-		r.messages = append(r.messages, Message{Role: RoleTool, ToolCallID: tc.ID, Name: tool, Content: content})
+		r.messages = append(r.messages, Message{Role: RoleTool, ToolCallID: tc.ID, Name: tool, Content: r.settleToolResultContent(content)})
 		r.cfg.emitProgress(ProgressEvent{
 			Kind: ProgressResultAdmitted, Turn: turn + 1, CallID: tc.ID, Tool: tool,
 			Taint: admittedTaint(ev, content), Summary: progressResultSummary(tool, content),

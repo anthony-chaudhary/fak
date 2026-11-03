@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sort"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/pkg/referenceoracle"
@@ -47,144 +46,31 @@ type Generation struct {
 	Method       string
 }
 
+// apiProfile is one endpoint wire format: the generator that posts the raw
+// prompt under the normalized base URL and decodes the response.
+type apiProfile struct {
+	generate func(ctx context.Context, c Client, base, prompt string, maxTokens, topK int) (Generation, error)
+}
+
+// apiProfiles maps Client.API names to their wire format; an empty API uses
+// the OpenAI-compatible profile.
+var apiProfiles = map[string]apiProfile{
+	APIOpenAI: {generate: openAIGenerate},
+	APILlama:  {generate: probsGenerate},
+}
+
 // Generate decodes maxTokens greedy tokens after the raw prompt (no chat
 // template). topK is the requested top-k for an API that reports one.
 func (c Client) Generate(ctx context.Context, prompt string, maxTokens, topK int) (Generation, error) {
 	base := strings.TrimSuffix(strings.TrimRight(c.BaseURL, "/"), "/v1")
-	switch c.API {
-	case APILlama:
-		body := map[string]any{"prompt": prompt, "n_predict": maxTokens, "temperature": 0, "seed": 42,
-			"n_probs": topK, "post_sampling_probs": false, "cache_prompt": false, "return_tokens": true}
-		var out struct {
-			Content     string `json:"content"`
-			Tokens      []int  `json:"tokens"`
-			Evaluated   int    `json:"tokens_evaluated"`
-			Probability []struct {
-				ID      int     `json:"id"`
-				Token   string  `json:"token"`
-				Logprob float64 `json:"logprob"`
-				Top     []struct {
-					ID      int     `json:"id"`
-					Token   string  `json:"token"`
-					Logprob float64 `json:"logprob"`
-				} `json:"top_logprobs"`
-			} `json:"completion_probabilities"`
+	p, known := apiProfiles[c.API]
+	if !known {
+		if c.API != "" {
+			return Generation{}, fmt.Errorf("%w: unknown api %q", ErrEndpoint, c.API)
 		}
-		if err := c.post(ctx, base+"/completion", body, &out); err != nil {
-			return Generation{}, err
-		}
-		g := Generation{Text: out.Content, PromptTokens: out.Evaluated}
-		for _, p := range out.Probability {
-			pos := Position{ID: p.ID, Piece: p.Token, TopK: []Candidate{}}
-			for _, t := range p.Top {
-				pos.TopK = append(pos.TopK, Candidate{ID: t.ID, Piece: t.Token, Logprob: t.Logprob})
-			}
-			g.Positions = append(g.Positions, pos)
-		}
-		if len(g.Positions) == 0 && len(out.Tokens) > 0 {
-			return Generation{}, fmt.Errorf("%w: %s returned tokens without completion_probabilities", ErrEndpoint, base)
-		}
-		return g, nil
-	case APIOpenAI, "":
-		reportK := topK
-		if reportK < 0 {
-			reportK = 0
-		}
-		if reportK > 5 {
-			reportK = 5
-		}
-		body := map[string]any{"prompt": prompt, "max_tokens": maxTokens, "temperature": 0, "seed": 42,
-			"logprobs": reportK, "fak_decode_trace": true, "fak": map[string]any{"native_decode_token_ids": true}}
-		if m := strings.TrimSpace(c.Model); m != "" {
-			body["model"] = m
-		}
-		var out struct {
-			Choices []struct {
-				Text     string `json:"text"`
-				Logprobs *struct {
-					Tokens        []string              `json:"tokens"`
-					TokenLogprobs []*float64            `json:"token_logprobs"`
-					TopLogprobs   []map[string]*float64 `json:"top_logprobs"`
-				} `json:"logprobs"`
-			} `json:"choices"`
-			Usage struct {
-				PromptTokens int `json:"prompt_tokens"`
-			} `json:"usage"`
-			Fak *struct {
-				TokenIDs *struct {
-					TokenIDs []int `json:"token_ids"`
-				} `json:"native_decode_token_ids"`
-			} `json:"fak"`
-		}
-		err := c.post(ctx, base+"/v1/completions", body, &out)
-		if errors.Is(err, errBadRequest) {
-			// A non-native route or a strict OpenAI server refuses the extension.
-			delete(body, "fak_decode_trace")
-			delete(body, "fak")
-			err = c.post(ctx, base+"/v1/completions", body, &out)
-		}
-		if err != nil {
-			return Generation{}, err
-		}
-		if len(out.Choices) == 0 {
-			return Generation{}, fmt.Errorf("%w: %s returned no choices", ErrEndpoint, base)
-		}
-		g := Generation{Text: out.Choices[0].Text, PromptTokens: out.Usage.PromptTokens}
-		if out.Fak != nil && out.Fak.TokenIDs != nil {
-			g.Positions = make([]Position, 0, len(out.Fak.TokenIDs.TokenIDs))
-			for _, id := range out.Fak.TokenIDs.TokenIDs {
-				g.Positions = append(g.Positions, Position{ID: id})
-			}
-			return g, nil
-		}
-		rows := out.Choices[0].Logprobs
-		if rows == nil {
-			return g, nil
-		}
-		if rows.Tokens == nil || rows.TokenLogprobs == nil || rows.TopLogprobs == nil {
-			return Generation{}, fmt.Errorf("%w: %s returned a completion logprobs object without required row arrays", ErrEndpoint, base)
-		}
-		if len(rows.Tokens) != len(rows.TokenLogprobs) || len(rows.Tokens) != len(rows.TopLogprobs) {
-			return Generation{}, fmt.Errorf("%w: %s returned misaligned completion logprob rows: tokens=%d token_logprobs=%d top_logprobs=%d", ErrEndpoint, base, len(rows.Tokens), len(rows.TokenLogprobs), len(rows.TopLogprobs))
-		}
-		if len(rows.Tokens) == 0 && out.Choices[0].Text != "" {
-			return Generation{}, fmt.Errorf("%w: %s returned nonempty completion text without logprob rows", ErrEndpoint, base)
-		}
-		g.Positions = make([]Position, 0, len(rows.Tokens))
-		g.Method = TextPieces
-		for i, piece := range rows.Tokens {
-			if rows.TokenLogprobs[i] == nil {
-				return Generation{}, fmt.Errorf("%w: %s returned null token_logprobs row %d", ErrEndpoint, base, i)
-			}
-			if rows.TopLogprobs[i] == nil {
-				return Generation{}, fmt.Errorf("%w: %s returned null top_logprobs row %d", ErrEndpoint, base, i)
-			}
-			type entry struct {
-				piece   string
-				logprob float64
-			}
-			entries := make([]entry, 0, len(rows.TopLogprobs[i]))
-			for candidatePiece, logprob := range rows.TopLogprobs[i] {
-				if logprob == nil {
-					return Generation{}, fmt.Errorf("%w: %s returned null top_logprobs value at row %d", ErrEndpoint, base, i)
-				}
-				entries = append(entries, entry{piece: candidatePiece, logprob: *logprob})
-			}
-			sort.Slice(entries, func(i, j int) bool {
-				if entries[i].logprob == entries[j].logprob {
-					return entries[i].piece < entries[j].piece
-				}
-				return entries[i].logprob > entries[j].logprob
-			})
-			pos := Position{ID: UnknownID, Piece: piece, TopK: make([]Candidate, 0, len(entries)), ReportedTopK: reportK}
-			for _, candidate := range entries {
-				pos.TopK = append(pos.TopK, Candidate{ID: UnknownID, Piece: candidate.piece, Logprob: candidate.logprob})
-			}
-			g.Positions = append(g.Positions, pos)
-		}
-		return g, nil
+		p = apiProfiles[APIOpenAI]
 	}
-	return Generation{}, fmt.Errorf("%w: unknown api %q", ErrEndpoint, c.API)
+	return p.generate(ctx, c, base, prompt, maxTokens, topK)
 }
 
 func (c Client) post(ctx context.Context, url string, body any, out any) error {

@@ -1,0 +1,355 @@
+{
+  "schema": "fak.dev.launch-census.v1",
+  "root": "",
+  "head_sha": "9176015cebb6217128d4015171031209869da768",
+  "shape": {
+    "name": "glm-dsa",
+    "layers": 92,
+    "index_step_layers": 92,
+    "kv_append_layers": 92,
+    "attend_layers": 92,
+    "moe_layers": 89,
+    "active_experts": 8
+  },
+  "total_launches_per_token_loop": 3237,
+  "total_launches_per_token_batched": 1368,
+  "delta_batched_vs_loop": -1869,
+  "expert_dispatch_per_moe_layer_loop": 24,
+  "expert_dispatch_per_moe_layer_batched": 3,
+  "sites": [
+    {
+      "id": "glm-dsa-index-qa",
+      "file": "internal/model/glm_dsa_session.go",
+      "func": "glmDsaIndexStep",
+      "pattern": "q_a_proj.weight",
+      "class": "per-index-layer",
+      "factor": 1,
+      "note": "indexer q_a GEMM device launch",
+      "occurrences": 1
+    },
+    {
+      "id": "glm-dsa-index-wqb",
+      "file": "internal/model/glm_dsa_session.go",
+      "func": "glmDsaIndexStep",
+      "pattern": "indexer.wq_b.weight",
+      "class": "per-index-layer",
+      "factor": 1,
+      "note": "indexer wq_b GEMM device launch",
+      "occurrences": 1
+    },
+    {
+      "id": "glm-dsa-index-wk",
+      "file": "internal/model/glm_dsa_session.go",
+      "func": "glmDsaIndexStep",
+      "pattern": "indexer.wk.weight",
+      "class": "per-index-layer",
+      "factor": 1,
+      "note": "indexer wk GEMM device launch",
+      "occurrences": 1
+    },
+    {
+      "id": "glm-dsa-index-weights-proj",
+      "file": "internal/model/glm_dsa_session.go",
+      "func": "glmDsaIndexStep",
+      "pattern": "indexer.weights_proj.weight",
+      "class": "per-index-layer",
+      "factor": 1,
+      "note": "indexer weights_proj GEMM device launch",
+      "occurrences": 1
+    },
+    {
+      "id": "glm-dsa-index-select",
+      "file": "internal/model/glm_dsa_session.go",
+      "func": "glmDsaIndexStep",
+      "pattern": "ik.indexSelect(",
+      "class": "per-index-layer",
+      "factor": 1,
+      "note": "device indexer score + top-k selection op launch",
+      "occurrences": 1
+    },
+    {
+      "id": "glm-dsa-kv-qa",
+      "file": "internal/model/glm_dsa_session.go",
+      "func": "glmDsaAppendAttentionKV",
+      "pattern": "q_a_proj.weight",
+      "class": "per-kv-layer",
+      "factor": 1,
+      "note": "kv-step q_a GEMM device launch (second computation of q_a per layer)",
+      "occurrences": 1
+    },
+    {
+      "id": "glm-dsa-kv-qb",
+      "file": "internal/model/glm_dsa_session.go",
+      "func": "glmDsaAppendAttentionKV",
+      "pattern": "q_b_proj.weight",
+      "class": "per-kv-layer",
+      "factor": 1,
+      "note": "kv-step q_b GEMM device launch",
+      "occurrences": 1
+    },
+    {
+      "id": "glm-dsa-kv-kva",
+      "file": "internal/model/glm_dsa_session.go",
+      "func": "glmDsaAppendAttentionKV",
+      "pattern": "kv_a_proj_with_mqa.weight",
+      "class": "per-kv-layer",
+      "factor": 1,
+      "note": "compressed-KV GEMM device launch",
+      "occurrences": 1
+    },
+    {
+      "id": "glm-dsa-kv-kvb",
+      "file": "internal/model/glm_dsa_session.go",
+      "func": "glmDsaAppendAttentionKV",
+      "pattern": "kv_b_proj.weight",
+      "class": "per-kv-layer",
+      "factor": 1,
+      "note": "decompressed K/V GEMM device launch",
+      "occurrences": 1
+    },
+    {
+      "id": "glm-dsa-attend-sparse",
+      "file": "internal/model/glm_dsa_session.go",
+      "func": "glmDsaSparseAttend",
+      "pattern": "sk.sparseAttend(",
+      "class": "per-attend-layer",
+      "factor": 1,
+      "note": "device sparse-attention op launch",
+      "occurrences": 1
+    },
+    {
+      "id": "glm-dsa-attend-oproj",
+      "file": "internal/model/glm_dsa_session.go",
+      "func": "glmDsaAttendCached",
+      "pattern": "o_proj.weight",
+      "class": "per-attend-layer",
+      "factor": 1,
+      "note": "attention output projection GEMM device launch",
+      "occurrences": 1
+    },
+    {
+      "id": "moe-router-route",
+      "file": "internal/model/moe.go",
+      "func": "route",
+      "pattern": "mat.mul(routerName(layer)",
+      "class": "primitive",
+      "factor": 0,
+      "note": "router GEMV (Mixtral/Qwen3-MoE flavor): drift guard — counted once via moe-router-glmroute",
+      "occurrences": 1
+    },
+    {
+      "id": "moe-router-glmroute",
+      "file": "internal/model/moe.go",
+      "func": "glmRoute",
+      "pattern": "mat.mul(routerName(layer)",
+      "class": "per-moe-layer",
+      "factor": 1,
+      "note": "router GEMV (GLM grouped-routing flavor): the one router launch per MoE layer",
+      "occurrences": 1
+    },
+    {
+      "id": "moe-expert-gateup-looped",
+      "file": "internal/model/moe.go",
+      "func": "expertSwiGLU",
+      "pattern": "mulGroup(mat, []string{gn, un}",
+      "class": "per-active-expert",
+      "variant": "looped",
+      "factor": 2,
+      "note": "gate+up GEMVs: mulGroup loops mat.mul -\u003e one parFor per projection on non-fused kernels",
+      "occurrences": 1
+    },
+    {
+      "id": "moe-expert-down-looped",
+      "file": "internal/model/moe.go",
+      "func": "expertSwiGLU",
+      "pattern": "mat.mul(dn",
+      "class": "per-active-expert",
+      "variant": "looped",
+      "factor": 1,
+      "note": "down GEMV: exactly one dispatch per expert (both branch arms)",
+      "occurrences": 4
+    },
+    {
+      "id": "moe-expert-batched-rows",
+      "file": "internal/model/moe_host_batch.go",
+      "func": "batchExpertRows",
+      "pattern": "parForRange(total, total*inDim, body)",
+      "class": "per-moe-layer",
+      "variant": "batched",
+      "factor": 3,
+      "note": "lever 2: one parFor per projection (gate/up/down) over the flattened K-expert row space",
+      "occurrences": 1
+    },
+    {
+      "id": "parallel-parfor",
+      "file": "internal/model/parallel.go",
+      "func": "parFor",
+      "pattern": "func parFor(n, workers int, body func(lo, hi int))",
+      "class": "primitive",
+      "factor": 0,
+      "note": "host thread-pool dispatch primitive (every host GEMV funnels through it)",
+      "occurrences": 1
+    },
+    {
+      "id": "parallel-parforrange",
+      "file": "internal/model/parallel.go",
+      "func": "parForRange",
+      "pattern": "func parForRange(n, work int, body func(lo, hi int))",
+      "class": "primitive",
+      "factor": 0,
+      "note": "work-weighted host dispatch primitive (the quantized GEMV kernels)",
+      "occurrences": 1
+    },
+    {
+      "id": "backend-matmul-submit",
+      "file": "internal/model/kernel.go",
+      "func": "mul",
+      "pattern": "be.Read(be.MatMul(wt, xt))",
+      "class": "primitive",
+      "factor": 0,
+      "note": "backendKernel.mul: the per-GEMV backend submit seam",
+      "occurrences": 1
+    },
+    {
+      "id": "moe-expert-batched-q4k-scaffold",
+      "file": "internal/model/moe_host_batch.go",
+      "func": "q4kBatchRows",
+      "pattern": "batchExpertRows(K, rowsPer",
+      "class": "primitive",
+      "variant": "batched",
+      "factor": 0,
+      "note": "q4k batched gate/up rows: funnels into the single batchExpertRows parFor",
+      "occurrences": 1
+    },
+    {
+      "id": "moe-expert-batched-kquant-scaffold",
+      "file": "internal/model/moe_host_batch.go",
+      "func": "kQuantBatchRows",
+      "pattern": "batchExpertRows(K, rowsPer",
+      "class": "primitive",
+      "variant": "batched",
+      "factor": 0,
+      "note": "k-quant batched down rows: funnels into the single batchExpertRows parFor",
+      "occurrences": 1
+    },
+    {
+      "id": "cuda-copy-h2d",
+      "file": "internal/compute/cuda.go",
+      "func": "",
+      "pattern": "C.fcuda_h2d(",
+      "class": "primitive",
+      "factor": 0,
+      "note": "host-\u003edevice copy submission (all upload paths funnel through it)",
+      "occurrences": 4
+    },
+    {
+      "id": "cuda-copy-d2h",
+      "file": "internal/compute/cuda.go",
+      "func": "",
+      "pattern": "C.fcuda_d2h_on_checked(",
+      "class": "primitive",
+      "factor": 0,
+      "note": "device-\u003ehost copy submission (Read's stream-syncing drain)",
+      "occurrences": 1
+    },
+    {
+      "id": "cuda-matmul-submit",
+      "file": "internal/compute/cuda.go",
+      "func": "cudaMatMulLocked",
+      "pattern": "C.fcuda_matmul_f32(",
+      "class": "primitive",
+      "factor": 0,
+      "note": "CUDA GEMM kernel submission (the f32 arm of the quant-arm ladder in cudaBackend's locked MatMul path)",
+      "occurrences": 1
+    }
+  ],
+  "drift": null,
+  "uncovered": [
+    {
+      "file": "internal/model/hal.go",
+      "line": 1029,
+      "marker": "be.MatMul(",
+      "snippet": "y := be.MatMul(w, x)"
+    },
+    {
+      "file": "internal/model/hal.go",
+      "line": 1172,
+      "marker": "be.MatMul(",
+      "snippet": "q = be.MatMul(s.matWeightHAL(p(\"self_attn.q_proj.weight\")), xn)"
+    },
+    {
+      "file": "internal/model/hal.go",
+      "line": 1173,
+      "marker": "be.MatMul(",
+      "snippet": "kRaw = be.MatMul(s.matWeightHAL(p(\"self_attn.k_proj.weight\")), xn)"
+    },
+    {
+      "file": "internal/model/hal.go",
+      "line": 1174,
+      "marker": "be.MatMul(",
+      "snippet": "v = be.MatMul(s.matWeightHAL(p(\"self_attn.v_proj.weight\")), xn)"
+    },
+    {
+      "file": "internal/model/hal.go",
+      "line": 1218,
+      "marker": "be.MatMul(",
+      "snippet": "g = be.MatMul(s.matWeightHAL(p(\"mlp.gate_proj.weight\")), xn2)"
+    },
+    {
+      "file": "internal/model/hal.go",
+      "line": 1219,
+      "marker": "be.MatMul(",
+      "snippet": "u = be.MatMul(s.matWeightHAL(p(\"mlp.up_proj.weight\")), xn2)"
+    },
+    {
+      "file": "internal/model/hal.go",
+      "line": 1365,
+      "marker": "be.MatMul(",
+      "snippet": "logits := be.MatMul(head, hidden)"
+    },
+    {
+      "file": "internal/model/hal.go",
+      "line": 1370,
+      "marker": "be.MatMul(",
+      "snippet": "logits := be.MatMul(head, hidden)"
+    },
+    {
+      "file": "internal/model/parallel.go",
+      "line": 391,
+      "marker": "parFor(",
+      "snippet": "// parElemThreshold it runs body(0,n) inline, otherwise it dispatches parFor(n, workers, body)"
+    },
+    {
+      "file": "internal/model/parallel.go",
+      "line": 401,
+      "marker": "parFor(",
+      "snippet": "parFor(n, workers, body)"
+    },
+    {
+      "file": "internal/model/parallel.go",
+      "line": 424,
+      "marker": "parFor(",
+      "snippet": "parFor(n, workers, body)"
+    },
+    {
+      "file": "internal/model/parallel.go",
+      "line": 443,
+      "marker": "parFor(",
+      "snippet": "parFor(out, currentWorkerCount(), row)"
+    },
+    {
+      "file": "internal/model/parallel.go",
+      "line": 469,
+      "marker": "parFor(",
+      "snippet": "parFor(out, currentWorkerCount(), body)"
+    }
+  ],
+  "cross_check": {
+    "reference": 24,
+    "reference_doc": "docs/notes/GLM52-DECODE-PATH-TO-10-TOKS-2026-06-27.md",
+    "computed": 24,
+    "delta_pct": 0,
+    "tolerance_pct": 20,
+    "pass": true
+  }
+}

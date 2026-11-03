@@ -120,6 +120,7 @@ func (k backendKernel) mul(name string, x any, out, in int) []float32 {
 	wt := s.glmDsaWeightHAL(name, out, in)
 	xt := uploadHostF32Class(be, []int{in}, xf, compute.MemoryActivation, "glm-dsa-activation "+name)
 	y := be.Read(be.MatMul(wt, xt))
+	glueCensusCountIfDevice(be, name) // FAK_GLUE_CENSUS=1 measured-mode round-trip count
 	// The activation upload has a FRESH host pointer every token, so compute.uploadCache (which
 	// shares only STABLE weight pointers) can never reuse it. Evict it now — otherwise a multi-token
 	// Prefill accumulates one resident device buffer per position per GEMM until cudaMalloc fails
@@ -164,6 +165,7 @@ func (k backendKernel) sparseAttend(q, selK, selV []float32, nSel, nH, qkHead, v
 	kt := uploadHostF32Class(be, []int{nSel * nH * qkHead}, selK, compute.MemoryActivation, "glm-dsa-sparse-selected-k")
 	vt := uploadHostF32Class(be, []int{nSel * nH * vHead}, selV, compute.MemoryActivation, "glm-dsa-sparse-selected-v")
 	out := be.Read(sb.DSASparseAttend(qt, kt, vt, nSel, nH, qkHead, vHead, scale))
+	glueCensusCountIfDevice(be, "dsa_sparse_attend")
 	// Per-call gathered operands with fresh host pointers (see backendKernel.mul) — evict them so a
 	// multi-token Prefill does not accumulate one resident device copy per position. Read fenced.
 	be.Free(qt)
@@ -219,6 +221,7 @@ func (k backendKernel) indexSelect(indexQ, indexK, weights []float32, nKeys, nH,
 	kt := uploadHostF32Class(be, []int{nKeys * indexDim}, indexK, compute.MemoryActivation, "glm-dsa-index-keys")
 	wt := uploadHostF32Class(be, []int{nH}, weights, compute.MemoryActivation, "glm-dsa-index-weights")
 	sel := ib.DSAIndexSelect(qt, kt, wt, nKeys, nH, indexDim, queryPos, topK, scale)
+	glueCensusCountIfDevice(be, "dsa_index_select")
 	// Per-call operands with fresh host pointers — evict so a multi-token Prefill does not accumulate
 	// a resident device copy per position. DSAIndexSelect returns a host []int, so it has fenced.
 	be.Free(qt)

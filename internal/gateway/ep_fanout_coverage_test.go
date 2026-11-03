@@ -214,7 +214,9 @@ var epFanoutExemptRoutes = map[string]string{
 	"/a2a/v1/agent-card": epExemptNoDecode,
 	"/a2a/v1/tasks/":     epExemptNoDecode,
 
-	// embedText/moderation classification are hash-derived and local (embeddings.go,
+	// The default embedText backend is hash-derived; selected causal embeddings
+	// refuse ExpertParallelRanks > 1 at construction (TestCausalEmbeddingEPRefusal).
+	// Moderation classification is local (embeddings.go,
 	// moderations.go); EstimateAnthropicTokens is arithmetic over the decoded request.
 	"/v1/embeddings":            epExemptLocalCompute,
 	"/v1/moderations":           epExemptLocalCompute,

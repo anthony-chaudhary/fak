@@ -35,6 +35,7 @@ type Encoder interface {
 // (GPT-2/SmolLM2) — they differ on whether a non-space, non-alnum char attaches to
 // a following letter run ("(n", "_case"), so the wrong one mis-tokenizes one family.
 type Tokenizer struct {
+	spm              *spmVocabulary // immutable selected GGUF score-based SPM family; nil preserves BPE
 	idToToken        []string
 	tokenToID        map[string]int
 	special          map[int]string
@@ -158,6 +159,16 @@ func LoadJSON(path string) (*Tokenizer, error) {
 
 // ParseJSON parses a HuggingFace fast tokenizer.json payload.
 func ParseJSON(b []byte) (*Tokenizer, error) {
+	// Select the explicit profile before decoding any legacy BPE-shaped fields.
+	var selected struct {
+		Profile json.RawMessage `json:"fak_tokenizer_profile"`
+	}
+	if err := json.Unmarshal(b, &selected); err != nil {
+		return nil, err
+	}
+	if selected.Profile != nil {
+		return parseNativeSPMJSON(b)
+	}
 	var doc tokenizerJSON
 	if err := json.Unmarshal(b, &doc); err != nil {
 		return nil, err
@@ -270,6 +281,7 @@ func (t *Tokenizer) Identity() string {
 	t.identityOnce.Do(func() {
 		h := sha256.New()
 		writeIdentityPart(h, "fak.tokenizer.operational.v1")
+		t.spmIdentity(h)
 		writeIdentityPart(h, fmt.Sprint(int(t.preTokKind)))
 		writeIdentityPart(h, fmt.Sprint(t.metaspace))
 		if t.ignoreMerges {
@@ -342,6 +354,9 @@ func writeIdentityPart(h interface{ Write([]byte) (int, error) }, value string) 
 // tokens are matched literally, normal text is split by the model's pre-tokenizer,
 // then merged by tokenizer.json ranks.
 func (t *Tokenizer) Encode(text string) ([]int, error) {
+	if t.spm != nil {
+		return t.EncodeSPM(text, false, true)
+	}
 	if t.mergeRank == nil {
 		return nil, ErrEncodeUnsupported
 	}
@@ -414,6 +429,9 @@ type Segment struct {
 // Encode's ids, and that chunk never yields an added-token id. Behavior from the
 // DeepInfer deployment notes at 774ce244; see third_party/deepinfer-token-injection/NOTICE.
 func (t *Tokenizer) EncodeSegments(segs []Segment) ([]int, error) {
+	if t.spm != nil {
+		return t.spmEncodeSegments(segs, false, true)
+	}
 	if t.mergeRank == nil {
 		return nil, ErrEncodeUnsupported
 	}

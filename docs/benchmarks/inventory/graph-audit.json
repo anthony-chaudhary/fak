@@ -1,0 +1,190 @@
+{
+  "root": "",
+  "head_sha": "c2d2527448d2e1f2c58c3958b1e492ce01f016bd",
+  "sites": [
+    {
+      "id": "hal-capture-once-replay",
+      "backend": "cuda",
+      "model_path": "hal-dense-decode",
+      "file": "internal/model/hal.go",
+      "func": "tokenHALOutput",
+      "pattern": "once.GraphOnceReplay(",
+      "classification": "CAPTURED",
+      "role": "path",
+      "note": "steady-state capture-once replay: the dense F32 HAL decode step replays as ONE graph launch per token (the primary small-batch fast path)",
+      "occurrences": 1,
+      "verdict": "CAPTURED"
+    },
+    {
+      "id": "hal-classic-graph",
+      "backend": "cuda",
+      "model_path": "hal-dense-decode",
+      "file": "internal/model/hal.go",
+      "func": "tokenHALOutput",
+      "pattern": "gr.GraphBegin()",
+      "classification": "CAPTURED",
+      "role": "path",
+      "note": "classic per-token capture+replay fallback when capture-once is ineligible (still one launch per token under capture)",
+      "occurrences": 1,
+      "verdict": "CAPTURED"
+    },
+    {
+      "id": "glm-dsa-band-step",
+      "backend": "any",
+      "model_path": "glm-moe-dsa-decode",
+      "file": "internal/model/glm_dsa_session.go",
+      "func": "decodeBandGLMDsa",
+      "pattern": "s.glmDsaMatKernel()",
+      "neg_patterns": [
+        "GraphBegin(",
+        "GraphOnceReplay("
+      ],
+      "classification": "PER_LAYER_HOST_SETUP",
+      "role": "path",
+      "note": "per-layer GEMMs through the matKernel round-trip; DSA index/sparse glue stays host-resident; no graph capture on this band",
+      "occurrences": 1,
+      "verdict": "PER_LAYER_HOST_SETUP"
+    },
+    {
+      "id": "legacy-f32-blockstep",
+      "backend": "host",
+      "model_path": "legacy-f32-session",
+      "file": "internal/model/session_token_hidden.go",
+      "func": "tokenHiddenRow",
+      "pattern": "s.blockStep(",
+      "neg_patterns": [
+        "GraphBegin("
+      ],
+      "classification": "PER_LAYER_HOST_SETUP",
+      "role": "path",
+      "note": "direct []float32 session loop (pre-HAL legacy path): per-layer blockStep host setup, no device graph concept",
+      "occurrences": 1,
+      "verdict": "PER_LAYER_HOST_SETUP"
+    },
+    {
+      "id": "vulkan-no-graph",
+      "backend": "vulkan",
+      "model_path": "all-model-paths",
+      "file": "internal/compute/vulkan.go",
+      "func": "",
+      "pattern": "func (v *vulkanBackend) MatMul(",
+      "neg_patterns": [
+        "GraphBegin(",
+        "GraphOnceReplay("
+      ],
+      "classification": "NO_GRAPH_SUPPORT",
+      "role": "path",
+      "note": "Vulkan backend dispatches per-op through the C ABI (fvk_*); no graph capture/replay surface in the public tree",
+      "occurrences": 1,
+      "verdict": "NO_GRAPH_SUPPORT"
+    },
+    {
+      "id": "metal-no-graph",
+      "backend": "metal",
+      "model_path": "all-model-paths",
+      "file": "internal/compute/metal.go",
+      "func": "",
+      "pattern": "func (c *metalBackend) MatMul(",
+      "neg_patterns": [
+        "GraphBegin(",
+        "GraphOnceReplay("
+      ],
+      "classification": "NO_GRAPH_SUPPORT",
+      "role": "path",
+      "note": "Metal backend delegates every op to the flat C ABI shim; no graph capture/replay surface",
+      "occurrences": 1,
+      "verdict": "NO_GRAPH_SUPPORT"
+    },
+    {
+      "id": "cpuref-no-graph",
+      "backend": "cpu-ref",
+      "model_path": "all-model-paths",
+      "file": "internal/compute/cpuref.go",
+      "func": "",
+      "pattern": "func (c *cpuBackend) MatMul(",
+      "neg_patterns": [
+        "GraphBegin(",
+        "GraphOnceReplay("
+      ],
+      "classification": "NO_GRAPH_SUPPORT",
+      "role": "path",
+      "note": "host reference backend: Upload/Read are identity, there is no device to graph",
+      "occurrences": 1,
+      "verdict": "NO_GRAPH_SUPPORT"
+    },
+    {
+      "id": "cuda-graph-flag",
+      "backend": "cuda",
+      "model_path": "-",
+      "file": "internal/compute/cuda.go",
+      "func": "",
+      "pattern": "FAK_CUDA_GRAPH",
+      "classification": "CAPTURED",
+      "role": "primitive",
+      "note": "backend graph consent flag gating the reusable CUDA-graph decode path",
+      "occurrences": 3,
+      "verdict": "CAPTURED"
+    },
+    {
+      "id": "cuda-graph-begin",
+      "backend": "cuda",
+      "model_path": "-",
+      "file": "internal/compute/cuda.go",
+      "func": "GraphBegin",
+      "pattern": "C.fcuda_graph_begin(",
+      "classification": "CAPTURED",
+      "role": "primitive",
+      "note": "capture-open primitive (records the op stream on the capture stream)",
+      "occurrences": 1,
+      "verdict": "CAPTURED"
+    },
+    {
+      "id": "cuda-graph-end-launch",
+      "backend": "cuda",
+      "model_path": "-",
+      "file": "internal/compute/cuda.go",
+      "func": "GraphEndLaunch",
+      "pattern": "C.fcuda_graph_end_launch(",
+      "classification": "CAPTURED",
+      "role": "primitive",
+      "note": "instantiate+launch+fence primitive (the replay half of GraphBegin)",
+      "occurrences": 1,
+      "verdict": "CAPTURED"
+    },
+    {
+      "id": "cuda-graph-once-create",
+      "backend": "cuda",
+      "model_path": "-",
+      "file": "internal/compute/cuda_graph_once_qualification.go",
+      "func": "GraphOnceBegin",
+      "pattern": "C.fak_graph_once_create(",
+      "classification": "CAPTURED",
+      "role": "primitive",
+      "note": "capture-once graph creation (fixed-KV, reusable exec graph)",
+      "occurrences": 1,
+      "verdict": "CAPTURED"
+    },
+    {
+      "id": "cuda-graph-once-replay",
+      "backend": "cuda",
+      "model_path": "-",
+      "file": "internal/compute/cuda_graph_once_qualification.go",
+      "func": "GraphOnceReplay",
+      "pattern": "C.fak_graph_once_replay(",
+      "classification": "CAPTURED",
+      "role": "primitive",
+      "note": "capture-once replay primitive (one launch per token in steady state)",
+      "occurrences": 1,
+      "verdict": "CAPTURED"
+    }
+  ],
+  "drift": null,
+  "coverage": {
+    "captured": 2,
+    "per_layer_host_setup": 2,
+    "no_graph_support": 3,
+    "unknown": 0,
+    "total_decode_paths": 7,
+    "uncovered_decode_paths": 5
+  }
+}

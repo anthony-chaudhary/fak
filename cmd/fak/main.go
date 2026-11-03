@@ -734,6 +734,10 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		// The unifying work-loss card (docs/notes/AGENTIC-DEV-ANTIPATTERNS-2026-07-02.md
 		// spine): folds REDUNDANT_REWORK + UNWIRED_PKG + ORPHAN_FUNC into one antipattern_debt.
 		cmdAntipatternScorecard(args)
+	case "computetune":
+		// Storage-compute arbitration readout (flow ticket debtwave2-internal-computetune):
+		// recompute prompt KV on UMA DRAM vs offload to NVMe SSD, via internal/computetune.
+		cmdComputetune(args)
 	case "debt-lanes":
 		cmdDebtLanes(args)
 	case "debt-orchestrator":
@@ -1195,6 +1199,8 @@ func cmdBench(argv []string) {
 			os.Exit(runBenchEffort(os.Stdout, os.Stderr, argv[1:]))
 		case "subagent":
 			os.Exit(runBenchSubagent(os.Stdout, os.Stderr, argv[1:]))
+		case "trace":
+			os.Exit(runBenchTrace(os.Stdout, os.Stderr, argv[1:]))
 		case "agent":
 			os.Exit(runBenchAgent(os.Stdout, os.Stderr, argv[1:]))
 		case "h2h":

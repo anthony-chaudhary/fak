@@ -65,6 +65,12 @@ Pinned model (identical both arms — enforced, not asserted):
 ~/Library/Caches/fak-models/hub/bartowski/Qwen2.5-Coder-3B-Instruct-GGUF/main/Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf
 ```
 
+> **Forward-looking pin (next two-arm Mac run).** Future two-arm Mac runs pin the largest
+> tier alias the host fits (**27B**) instead of the 3B pilot model: at the frozen geometry
+> (N≤8, T=5, P=4096, S=512, D=64) a 27B-class model adds minutes, not hours, on UMA hosts
+> (ESTIMATE — wall-clock projection, not a measured receipt). The historical 3B receipts in
+> §5 remain valid for their measurement window; nothing here re-labels them.
+
 ### Arm 1 — llama.cpp `llama-server` (reference), port 8081
 
 ```bash
