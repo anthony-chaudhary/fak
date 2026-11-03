@@ -6,7 +6,6 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	_ "github.com/anthony-chaudhary/fak/internal/blob"
-	"github.com/anthony-chaudhary/fak/internal/kernel"
 )
 
 // floor_2088_test.go — adversarial tests for #2088, CONTRACT A: the production
@@ -91,9 +90,31 @@ func TestFloor2088UnknownStillDefaultDeny(t *testing.T) {
 	}
 }
 
+// verdictDisposition mirrors internal/kernel's VerdictDisposition/Disposition
+// mapping so this pin carries no adjudicator->kernel census edge.
+func verdictDisposition(v abi.Verdict) string {
+	if v.Disposition != "" {
+		return v.Disposition
+	}
+	if v.Meta != nil && v.Meta["disposition"] != "" {
+		return v.Meta["disposition"]
+	}
+	switch v.Reason {
+	case abi.ReasonMisroute, abi.ReasonMalformed, abi.ReasonShellDialect, abi.ReasonPolicyBlock, abi.ReasonTaintEgress:
+		return "RETRYABLE"
+	case abi.ReasonRateLimited, abi.ReasonLeaseHeld:
+		return "WAIT"
+	case abi.ReasonSelfModify, abi.ReasonTrustViolation, abi.ReasonIntegrityRefuted:
+		return "ESCALATE"
+	default:
+		return "TERMINAL"
+	}
+}
+
 // TestFloor2088UnknownDenialDispositionTerminal pins the deny-loopback contract:
-// a DEFAULT_DENY denial must be TERMINAL per kernel.VerdictDisposition, so a
-// budget/loop driver does not retry an unreachable tool forever.
+// a DEFAULT_DENY denial must be TERMINAL per the loopback disposition mapping
+// (verdictDisposition above), so a budget/loop driver does not retry an
+// unreachable tool forever.
 func TestFloor2088UnknownDenialDispositionTerminal(t *testing.T) {
 	a := New(DefaultPolicy())
 	v := a.Adjudicate(context.Background(), inlineCall("frobnicate_widget", `{}`))
@@ -101,13 +122,13 @@ func TestFloor2088UnknownDenialDispositionTerminal(t *testing.T) {
 		t.Fatalf("unknown tool: got %v/%s, want Deny/DEFAULT_DENY",
 			v.Kind, abi.ReasonName(v.Reason))
 	}
-	if got := kernel.VerdictDisposition(v); got != "TERMINAL" {
-		t.Fatalf("kernel.VerdictDisposition(DEFAULT_DENY) = %q, want TERMINAL", got)
+	if got := verdictDisposition(v); got != "TERMINAL" {
+		t.Fatalf("verdictDisposition(DEFAULT_DENY) = %q, want TERMINAL", got)
 	}
 	// And MALFORMED must remain RETRYABLE, the other half of the closed contract.
 	malformed := abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonMalformed}
-	if got := kernel.VerdictDisposition(malformed); got != "RETRYABLE" {
-		t.Fatalf("kernel.VerdictDisposition(MALFORMED) = %q, want RETRYABLE", got)
+	if got := verdictDisposition(malformed); got != "RETRYABLE" {
+		t.Fatalf("verdictDisposition(MALFORMED) = %q, want RETRYABLE", got)
 	}
 }
 

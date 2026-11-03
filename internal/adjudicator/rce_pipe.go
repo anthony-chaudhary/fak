@@ -1,10 +1,6 @@
 package adjudicator
 
-import (
-	"strings"
-
-	"github.com/anthony-chaudhary/fak/internal/shelltoken"
-)
+import "strings"
 
 const (
 	legacyRCEPipeDenyRegex  = `\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(ba)?sh\b`
@@ -502,14 +498,42 @@ func rceShellProgram(tok string) bool {
 	}
 }
 
+// Vendored verbatim from internal/shelltoken (kept alive for its other
+// consumers): rceIsAssign, rceIsShortCluster, rceClusterHas, and
+// rceProgramBasename carry the original bodies so this lane's census coupling
+// stays bounded.
 func rceIsAssign(t string) bool {
-	return shelltoken.IsAssign(t)
+	eq := strings.IndexByte(t, '=')
+	if eq <= 0 {
+		return false
+	}
+	for i := 0; i < eq; i++ {
+		ch := t[i]
+		ok := ch == '_' ||
+			(ch >= 'A' && ch <= 'Z') ||
+			(ch >= 'a' && ch <= 'z') ||
+			(i > 0 && ch >= '0' && ch <= '9')
+		if !ok {
+			return false
+		}
+	}
+	return true
 }
 
-func rceIsShortCluster(t string) bool { return shelltoken.IsShortCluster(t) }
+func rceIsShortCluster(t string) bool {
+	return len(t) >= 2 && t[0] == '-' && t[1] != '-'
+}
 
 func rceClusterHas(token string, ch byte) bool {
-	return shelltoken.ClusterHas(token, ch)
+	for i := 1; i < len(token); i++ {
+		if token[i] == '=' {
+			break
+		}
+		if token[i] == ch {
+			return true
+		}
+	}
+	return false
 }
 
 func rceDangerInterpreter(base string) bool {
@@ -534,5 +558,9 @@ func hasNumericSuffix(s, prefix string) bool {
 }
 
 func rceProgramBasename(tok string) string {
-	return shelltoken.ProgramBasename(tok)
+	base := tok
+	if i := strings.LastIndexAny(base, `/\`); i >= 0 {
+		base = base[i+1:]
+	}
+	return strings.TrimSuffix(strings.ToLower(base), ".exe")
 }
