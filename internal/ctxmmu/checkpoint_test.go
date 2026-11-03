@@ -593,7 +593,7 @@ func TestInPlaceCheckpoint_Concurrency(t *testing.T) {
 }
 
 // TestInPlaceCheckpoint_EdgeCasesAndConvenienceFunctions verifies parameter validation,
-// coherence failure handling, MMU integration, and package-level convenience functions.
+// integrity failure handling, MMU integration, and package-level convenience functions.
 func TestInPlaceCheckpoint_EdgeCasesAndConvenienceFunctions(t *testing.T) {
 	mmu := New()
 	pool := NewSharedTokenPool()
@@ -622,19 +622,19 @@ func TestInPlaceCheckpoint_EdgeCasesAndConvenienceFunctions(t *testing.T) {
 		t.Fatalf("expected ErrSessionMismatch, got %v", err)
 	}
 
-	// Coherence failure check: physical block with zero host address
-	incoherentBlock := &PhysicalKVBlock{
+	// Integrity failure check: physical block with zero host address
+	integrityFailBlock := &PhysicalKVBlock{
 		ID:                9999,
 		Granularity:       BlockGranularity64,
-		HostAddress:       0, // null host address triggers coherence failure
+		HostAddress:       0, // null host address triggers integrity failure
 		GPUVirtualAddress: RDNA35GPUVABase + 0x1000,
 	}
-	incoherentDesc := &SessionDescriptor{
-		SessionID:    "incoherent-sess",
-		PinnedBlocks: []*PhysicalKVBlock{incoherentBlock},
+	integrityFailDesc := &SessionDescriptor{
+		SessionID:    "integrity-fail-sess",
+		PinnedBlocks: []*PhysicalKVBlock{integrityFailBlock},
 	}
-	if err := cm.RestoreInPlaceCheckpoint("incoherent-sess", incoherentDesc); !errors.Is(err, ErrBlockIncoherent) {
-		t.Fatalf("expected ErrBlockIncoherent, got %v", err)
+	if err := cm.RestoreInPlaceCheckpoint("integrity-fail-sess", integrityFailDesc); !errors.Is(err, ErrBlockIntegrity) {
+		t.Fatalf("expected ErrBlockIntegrity, got %v", err)
 	}
 
 	// Package-level default checkpoint manager convenience functions

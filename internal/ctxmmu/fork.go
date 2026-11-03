@@ -47,7 +47,7 @@ var (
 	ErrInvalidGranularity = errors.New("ctxmmu: block granularity must be 16 or 64 tokens")
 	ErrSessionReleased    = errors.New("ctxmmu: session has already been released")
 	ErrInvalidSessionID   = errors.New("ctxmmu: session ID cannot be empty")
-	ErrAddressOutOfRange  = errors.New("ctxmmu: address out of coherent range")
+	ErrAddressOutOfRange  = errors.New("ctxmmu: address outside mapped range")
 	ErrSelfFork           = errors.New("ctxmmu: child ID cannot equal parent ID")
 	ErrIndexOutOfBounds   = errors.New("ctxmmu: token index out of bounds")
 )
@@ -139,8 +139,8 @@ func (b *PhysicalKVBlock) computeDigest() {
 	b.DigestHex = hex.EncodeToString(sum[:])
 }
 
-// VerifyCoherence verifies that the physical block is mapped coherently in UMA space.
-func (b *PhysicalKVBlock) VerifyCoherence() error {
+// VerifyIntegrity verifies that the physical block is mapped coherently in UMA space.
+func (b *PhysicalKVBlock) VerifyIntegrity() error {
 	if b == nil {
 		return errors.New("ctxmmu: nil physical block")
 	}
@@ -191,7 +191,7 @@ type ForkTelemetry struct {
 	COWBytesAllocated     int64         `json:"cow_bytes_allocated"`
 	Granularity           int           `json:"granularity"`
 	RDNAArch              string        `json:"rdna_arch"`
-	CoherentUMA           bool          `json:"coherent_uma"`
+	UnifiedMemory         bool          `json:"unified_memory"`
 }
 
 // SharedPrefixHitRate returns the hit rate float (1.0 = 100%).
@@ -405,7 +405,7 @@ func (m *ForkManager) RegisterSession(sessionID string, granularity int) (*Forke
 			SharedPrefixKVHitRate: 1.0,
 			Granularity:           granularity,
 			RDNAArch:              m.rdnaArch,
-			CoherentUMA:           true,
+			UnifiedMemory:         true,
 		},
 	}
 	m.sessions[sessionID] = sess
@@ -491,7 +491,7 @@ func (m *ForkManager) ForkSession(parentID string, childID string) (*ForkedSessi
 			COWBytesAllocated:     0,
 			Granularity:           parent.granularity,
 			RDNAArch:              m.rdnaArch,
-			CoherentUMA:           true,
+			UnifiedMemory:         true,
 		},
 	}
 

@@ -639,8 +639,8 @@ func TestBlockGranularity16And64(t *testing.T) {
 	}
 }
 
-// TestCoherentUMAMappingRDNA35 tests host Context MMU and RDNA 3.5 GPU virtual address translation.
-func TestCoherentUMAMappingRDNA35(t *testing.T) {
+// TestUnifiedMemoryMappingRDNA35 tests host Context MMU and RDNA 3.5 GPU virtual address translation.
+func TestUnifiedMemoryMappingRDNA35(t *testing.T) {
 	mgr := ctxmmu.NewForkManager()
 
 	sess, err := mgr.RegisterSession("sess-uma", ctxmmu.BlockGranularity64)

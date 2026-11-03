@@ -27,7 +27,7 @@ import (
 //  - MTP draft state (speculative draft depth, draft tokens, accepted count, rollback state)
 //  - PrefixHash: cryptographic SHA-256 Merkle root over the session's token sequence and block digests
 //
-// Upon zero-copy resumption, RestoreInPlaceCheckpoint validates physical block coherence (VerifyCoherence)
+// Upon zero-copy resumption, RestoreInPlaceCheckpoint validates physical block coherence (VerifyIntegrity)
 // and prefix hash integrity, restores position-free state with 0 bytes transferred over the bus, and
 // re-reserves the output headroom in SharedTokenPool.
 
@@ -64,8 +64,8 @@ var (
 	// ErrPrefixHashMismatch is returned when the cryptographic prefix hash validation fails.
 	ErrPrefixHashMismatch = errors.New("ctxmmu: prefix hash mismatch")
 
-	// ErrBlockIncoherent is returned when physical block coherence verification fails.
-	ErrBlockIncoherent = errors.New("ctxmmu: physical block coherence failure")
+	// ErrBlockIntegrity is returned when physical block integrity verification fails.
+	ErrBlockIntegrity = errors.New("ctxmmu: physical block integrity failure")
 
 	// ErrNilDescriptor is returned when a nil session descriptor is supplied.
 	ErrNilDescriptor = errors.New("ctxmmu: nil session descriptor")
@@ -776,8 +776,8 @@ func (cm *CheckpointManager) RestoreInPlaceCheckpoint(sessionID string, desc *Se
 		if blk == nil {
 			return ErrNilBlock
 		}
-		if err := blk.VerifyCoherence(); err != nil {
-			return fmt.Errorf("%w: %v", ErrBlockIncoherent, err)
+		if err := blk.VerifyIntegrity(); err != nil {
+			return fmt.Errorf("%w: %v", ErrBlockIntegrity, err)
 		}
 	}
 	for _, cowBlk := range desc.PinnedCOWBlocks {
