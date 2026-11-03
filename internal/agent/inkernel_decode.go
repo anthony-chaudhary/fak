@@ -270,7 +270,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		} else {
 			p.mu.Lock()
 			if p.backend != nil {
-				b, snap, legacyMatched, lookupTier, lookupErr := p.tree.LookupSnapshotTieredContext(ctx, ids)
+				b, snap, legacyMatched, lookupTier, lookupErr := p.tree.LookupSnapshotTieredContextLocked(ctx, ids, &p.mu)
 				matchedSnapshot, m, err = snap, legacyMatched, lookupErr
 				lookupSnapshotConsulted, lookupSnapshotM = true, legacyMatched
 				if b != nil {
@@ -302,7 +302,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 					// carries the structural Plen for cacheability; the snapshot length
 					// is the realized, restorable prefix.
 					var lookupTier radixkv.SnapshotTier
-					site, snap, snapMatched, lookupTier, lookupErr := p.tree.LookupSnapshotTieredContext(ctx, ids)
+					site, snap, snapMatched, lookupTier, lookupErr := p.tree.LookupSnapshotTieredContextLocked(ctx, ids, &p.mu)
 					if site != nil {
 						if site.Plen() > cacheable {
 							cacheable = site.Plen()

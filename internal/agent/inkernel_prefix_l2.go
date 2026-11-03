@@ -88,7 +88,7 @@ func (p *InKernelPlanner) StageKVPrefixToHost(ctx context.Context, digest string
 	// Remote L3 is independently sufficient to preserve the hot owner. Attempt it
 	// even when host L2 is disabled or full; the capacity adapter may evict only
 	// after this confirmed Put returns OK.
-	remote := p.tree.StageSnapshotToRemote(ctx, digest)
+	remote := p.tree.StageSnapshotToRemoteLocked(ctx, digest, &p.mu)
 	if remote.Outcome != radixkv.SnapshotTransferOK {
 		return lowerKVPrefixTransfer(remote)
 	}
@@ -108,7 +108,7 @@ func (p *InKernelPlanner) RestoreKVPrefixFromHost(ctx context.Context, digest st
 	if local.Outcome != radixkv.SnapshotTransferMiss || !p.tree.RemoteSnapshotEnabled() {
 		return lowerKVPrefixTransfer(local)
 	}
-	return lowerKVPrefixTransfer(p.tree.RestoreSnapshotFromRemote(ctx, digest))
+	return lowerKVPrefixTransfer(p.tree.RestoreSnapshotFromRemoteLocked(ctx, digest, &p.mu))
 }
 
 func (p *InKernelPlanner) EvictHotKVPrefix(digest string) int {

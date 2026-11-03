@@ -458,7 +458,7 @@ func (p *InKernelPlanner) warmDiskSnapshot(scope radixkv.CacheIdentity, tokens [
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	node, snap, matched, _, err := tree.LookupSnapshotTieredContext(context.Background(), tokens)
+	node, snap, matched, _, err := tree.LookupSnapshotTieredContextLocked(context.Background(), tokens, &p.mu)
 	var logits []float32
 	if node != nil {
 		logits = node.Logits()

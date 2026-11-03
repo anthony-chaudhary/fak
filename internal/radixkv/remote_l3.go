@@ -43,10 +43,18 @@ type remoteSnapshotRef struct {
 // ConfigureRemoteSnapshotStore installs the production L3 byte owner on a tree.
 // modelID and cfg are the scope/geometry gates checked before recovered bytes can
 // become a live PrefixSnapshot; backend is the physical install target.
+// cfg, including its nested metadata, is immutable caller-owned configuration,
+// not a deep copy. Keep the supplied store/backend and configuration usable for
+// every admitted job until it actually retires, including after detach or
+// reconfiguration. Normal serve boot supplies the model's static Model.Cfg.
 func (t *Tree) ConfigureRemoteSnapshotStore(store SnapshotStore, modelID string, backend compute.Backend, cfg model.Config) error {
 	if t == nil || store == nil || backend == nil || modelID == "" {
 		return errors.New("radixkv: incomplete remote prefix snapshot configuration")
 	}
+	if t.remoteConfigGeneration == ^uint64(0) {
+		return ErrRemoteConfigExhausted
+	}
+	t.remoteConfigGeneration++
 	t.remoteSnapshotStore = store
 	t.remoteModelID = modelID
 	t.remoteBackend = backend
@@ -72,6 +80,10 @@ func (t *Tree) DetachRemoteSnapshotStore(ctx context.Context) error {
 	if t == nil {
 		return nil
 	}
+	if t.remoteConfigGeneration == ^uint64(0) {
+		return ErrRemoteConfigExhausted
+	}
+	t.remoteConfigGeneration++
 	t.remoteSnapshotStore = nil
 	t.remoteModelID = ""
 	t.remoteBackend = nil
@@ -126,6 +138,10 @@ func (t *Tree) snapshotDigest(ns string, n *node) string {
 // StageSnapshotToRemote copies/uses the existing physical host image, encodes it,
 // and confirms the l3kv Put before publishing the node's remote reference.
 func (t *Tree) StageSnapshotToRemote(ctx context.Context, digest string) SnapshotTransfer {
+	return t.stageSnapshotToRemote(ctx, digest, nil)
+}
+
+func (t *Tree) stageSnapshotToRemote(ctx context.Context, digest string, lock *remoteTransferLock) SnapshotTransfer {
 	if t == nil || !t.RemoteSnapshotEnabled() {
 		return SnapshotTransfer{Outcome: SnapshotTransferMiss, Digest: digest, Reason: "remote HTTP L3 disabled"}
 	}
@@ -133,42 +149,50 @@ func (t *Tree) StageSnapshotToRemote(ctx context.Context, digest string) Snapsho
 	if n == nil || (n.snapshot == nil && n.hostSnapshot == nil) {
 		return SnapshotTransfer{Outcome: SnapshotTransferMiss, Digest: digest, Reason: "local prefix snapshot absent"}
 	}
-	if err := ctx.Err(); err != nil {
+	job, err := t.beginRemoteTransfer(ctx, ns, n, lock)
+	if err != nil {
 		return t.remoteStageFault(digest, n.plen, err, 0)
 	}
+	defer job.finish()
 	host := n.hostSnapshot
 	temporary := false
 	if host == nil {
-		var err error
 		host, err = n.snapshot.CloneToHost()
 		if err != nil {
-			return t.remoteStageFault(digest, n.plen, err, 0)
+			return t.remoteStageFault(digest, job.tokens, err, 0)
 		}
 		temporary = true
 	}
 	if temporary {
 		defer host.Close()
 	}
+	// Locked preparation copies bytes into an independent envelope. Neither a
+	// node lease nor the borrowed host image is used as an unlocked byte owner.
 	payload, err := host.MarshalBinary()
 	if err != nil {
-		return t.remoteStageFault(digest, n.plen, err, 0)
+		return t.remoteStageFault(digest, job.tokens, err, 0)
 	}
-	scope := t.snapshotScope(ns)
-	envelope := encodeRemoteSnapshotEnvelope(digest, scope, n.plen, payload)
-	started := time.Now()
-	err = t.remoteSnapshotStore.Put(ctx, digest, envelope)
-	elapsed := time.Since(started).Nanoseconds()
+	envelope := encodeRemoteSnapshotEnvelope(job.digest, job.scope, job.tokens, payload)
+	var elapsed int64
+	err = job.execute(func() error {
+		started := time.Now()
+		defer func() { elapsed = time.Since(started).Nanoseconds() }()
+		return job.store.Put(ctx, job.digest, envelope)
+	})
 	t.l3StageNanos += elapsed
+	if err == nil {
+		err = job.validate(ctx)
+	}
 	if err != nil {
-		return t.remoteStageFault(digest, n.plen, err, 0)
+		return t.remoteStageFault(digest, job.tokens, err, 0)
 	}
 	if n.remoteSnapshot != nil {
 		t.remoteSnapshotBytes -= n.remoteSnapshot.bytes
 	}
-	n.remoteSnapshot = &remoteSnapshotRef{digest: digest, scope: scope, tokens: n.plen, bytes: int64(len(envelope))}
+	n.remoteSnapshot = &remoteSnapshotRef{digest: job.digest, scope: job.scope, tokens: job.tokens, bytes: int64(len(envelope))}
 	t.remoteSnapshotBytes += int64(len(envelope))
 	t.l3StageBytes += int64(len(envelope))
-	return SnapshotTransfer{Outcome: SnapshotTransferOK, Digest: digest, Positions: n.plen, BytesMoved: int64(len(envelope))}
+	return SnapshotTransfer{Outcome: SnapshotTransferOK, Digest: digest, Positions: job.tokens, BytesMoved: int64(len(envelope))}
 }
 
 func (t *Tree) remoteStageFault(digest string, tokens int, err error, elapsed int64) SnapshotTransfer {
@@ -179,6 +203,10 @@ func (t *Tree) remoteStageFault(digest string, tokens int, err error, elapsed in
 }
 
 func (t *Tree) restoreSnapshotFromRemote(ctx context.Context, ns string, n *node) (*model.PrefixSnapshot, bool, error) {
+	return t.restoreSnapshotFromRemoteWithLock(ctx, ns, n, nil)
+}
+
+func (t *Tree) restoreSnapshotFromRemoteWithLock(ctx context.Context, ns string, n *node, lock *remoteTransferLock) (*model.PrefixSnapshot, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
 	}
@@ -186,30 +214,91 @@ func (t *Tree) restoreSnapshotFromRemote(ctx context.Context, ns string, n *node
 	if ref == nil {
 		return nil, false, nil
 	}
-	wantDigest := t.snapshotDigest(ns, n)
-	wantScope := t.snapshotScope(ns)
+	wantDigest, wantScope := t.snapshotDigest(ns, n), t.snapshotScope(ns)
 	if ref.digest != wantDigest || ref.scope != wantScope || ref.tokens != n.plen {
 		t.l3Faults++
 		t.l3RestoreFaults++
 		return nil, false, ErrRemoteSnapshotScope
 	}
+	job, err := t.beginRemoteTransfer(ctx, ns, n, lock)
+	if errors.Is(err, ErrRemoteTransferBusy) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	defer job.finish()
 	breaker := t.RemoteL3Breaker()
 	allowed, isProbe := breaker.Allow()
 	if !allowed {
 		return nil, false, nil
 	}
-	started := time.Now()
-	envelope, found, err := t.remoteSnapshotStore.Get(ctx, wantDigest)
-	t.l3RestoreNanos += time.Since(started).Nanoseconds()
-	// A successful transport read does not authorize work for an expired caller.
-	if err == nil {
-		err = ctx.Err()
+	var snap *model.PrefixSnapshot
+	var found bool
+	var envelope []byte
+	var transportErr error
+	var transportReturned bool
+	var elapsed int64
+	err = job.execute(func() error {
+		func() {
+			started := time.Now()
+			defer func() { elapsed = time.Since(started).Nanoseconds() }()
+			envelope, found, transportErr = job.store.Get(ctx, job.digest)
+			transportReturned = true
+		}()
+		if transportErr == nil {
+			transportErr = ctx.Err()
+		}
+		if transportErr != nil {
+			return transportErr
+		}
+		if !found {
+			return nil
+		}
+		payload, decodeErr := decodeRemoteSnapshotEnvelope(envelope, job.digest, job.scope, job.tokens)
+		if decodeErr != nil {
+			return decodeErr
+		}
+		host, decodeErr := model.DecodeHostPrefixSnapshot(payload, job.backend, job.config)
+		if decodeErr != nil {
+			return decodeErr
+		}
+		defer host.Close()
+		if cancelErr := ctx.Err(); cancelErr != nil {
+			return cancelErr
+		}
+		snap, decodeErr = host.Restore()
+		if decodeErr != nil {
+			return decodeErr
+		}
+		return ctx.Err()
+	})
+	t.l3RestoreNanos += elapsed
+	if !transportReturned {
+		transportErr = err
 	}
-	breaker.RecordResult(err, isProbe)
+	// A captured probe belongs to this job even if configuration changed while
+	// unlocked. Retire that exact probe once, never a replacement breaker's probe.
+	breaker.RecordResult(transportErr, isProbe)
+	if transportReturned && transportErr == nil && found {
+		t.l3RestoreBytes += int64(len(envelope))
+	}
+	if err == nil {
+		err = job.validate(ctx)
+	}
 	if err != nil {
+		job.discard(snap)
+		// Reconfiguration or replacement is a cache miss, not permission to use
+		// the old image and not a backend fault. The request can recompute safely.
+		if errors.Is(err, ErrRemoteTransferStale) {
+			return nil, false, nil
+		}
 		t.l3Faults++
 		t.l3RestoreFaults++
-		return nil, false, fmt.Errorf("radixkv: remote L3 get: %w", err)
+		if transportErr != nil {
+			return nil, false, fmt.Errorf("radixkv: remote L3 get: %w", err)
+		}
+		return nil, false, err
 	}
 	if !found {
 		t.remoteSnapshotBytes -= ref.bytes
@@ -217,50 +306,21 @@ func (t *Tree) restoreSnapshotFromRemote(ctx context.Context, ns string, n *node
 		if n.snapshot == nil && n.hostSnapshot == nil {
 			n.cachedLogits = nil
 		}
-		// A remote L3 miss on a node whose hot and host copies are already gone
-		// drops the last complete copy. Clear the record incarnation here too, or
-		// a RecordHandle minted on admission would outlive the cached bytes.
 		t.invalidateRecordIfNoLocalCopy(n)
 		return nil, false, nil
 	}
-	t.l3RestoreBytes += int64(len(envelope))
-	payload, err := decodeRemoteSnapshotEnvelope(envelope, wantDigest, wantScope, n.plen)
-	if err != nil {
-		t.l3Faults++
-		t.l3RestoreFaults++
-		return nil, false, err
-	}
-	host, err := model.DecodeHostPrefixSnapshot(payload, t.remoteBackend, t.remoteConfig)
-	if err != nil {
-		t.l3Faults++
-		t.l3RestoreFaults++
-		return nil, false, err
-	}
-	if err := ctx.Err(); err != nil {
-		host.Close()
-		return nil, false, err
-	}
-	snap, err := host.Restore()
-	host.Close()
-	if err != nil {
-		t.l3Faults++
-		t.l3RestoreFaults++
-		return nil, false, err
-	}
-	// Native restoration may finish after cancellation. Retire its acquired
-	// owner before either request lookup or explicit page-in can publish it.
-	if err := ctx.Err(); err != nil {
-		snap.Close()
-		return nil, false, err
-	}
 	t.l3Hits++
-	t.l3HitTokens += n.plen
+	t.l3HitTokens += job.tokens
 	return snap, true, nil
 }
 
 // RestoreSnapshotFromRemote is the explicit capacity page-in twin of normal L3
 // lookup. It installs the recovered PrefixSnapshot as the node's hot owner.
 func (t *Tree) RestoreSnapshotFromRemote(ctx context.Context, digest string) SnapshotTransfer {
+	return t.restoreSnapshotFromRemoteIntoTree(ctx, digest, nil)
+}
+
+func (t *Tree) restoreSnapshotFromRemoteIntoTree(ctx context.Context, digest string, lock *remoteTransferLock) SnapshotTransfer {
 	if t == nil || !t.RemoteSnapshotEnabled() {
 		return SnapshotTransfer{Outcome: SnapshotTransferMiss, Digest: digest, Reason: "remote HTTP L3 disabled"}
 	}
@@ -271,7 +331,7 @@ func (t *Tree) RestoreSnapshotFromRemote(ctx context.Context, digest string) Sna
 	if n.snapshot != nil {
 		return SnapshotTransfer{Outcome: SnapshotTransferOK, Digest: digest, Positions: n.plen}
 	}
-	snap, found, err := t.restoreSnapshotFromRemote(ctx, ns, n)
+	snap, found, err := t.restoreSnapshotFromRemoteWithLock(ctx, ns, n, lock)
 	if err != nil {
 		return SnapshotTransfer{Outcome: SnapshotTransferFault, Digest: digest, Positions: n.plen, Reason: err.Error()}
 	}

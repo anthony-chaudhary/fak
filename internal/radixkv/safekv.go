@@ -258,7 +258,7 @@ func (s *ScopedTree) LookupSnapshotTieredContext(ctx context.Context, owner Cach
 		s.tree.l2Misses++
 	}
 	if bestRemote != nil && s.tree.RemoteSnapshotEnabled() {
-		snap, found, err := s.tree.restoreSnapshotFromRemote(ctx, bestRemoteNS, bestRemote)
+		snap, found, err := s.tree.restoreSnapshotFromRemoteWithLock(ctx, bestRemoteNS, bestRemote, &remoteTransferLock{locker: s.lock})
 		if err != nil {
 			return nil, nil, bestRemoteMatched, bestRemoteScope, SnapshotTierRemoteL3, err
 		}
@@ -546,7 +546,7 @@ func (s *ScopedTree) LookupSnapshotTieredContextRegime(ctx context.Context, regi
 		s.tree.l2Misses++
 	}
 	if bestRemote != nil && s.tree.RemoteSnapshotEnabled() {
-		snap, found, err := s.tree.restoreSnapshotFromRemote(ctx, bestRemoteNS, bestRemote)
+		snap, found, err := s.tree.restoreSnapshotFromRemoteWithLock(ctx, bestRemoteNS, bestRemote, &remoteTransferLock{locker: s.lock})
 		if err != nil {
 			return nil, nil, bestRemoteMatched, bestRemoteScope, SnapshotTierRemoteL3, err
 		}
