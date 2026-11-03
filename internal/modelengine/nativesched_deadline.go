@@ -88,7 +88,10 @@ func (h waitingDeadlineEntries) Less(i, j int) bool {
 }
 
 // waitingDeadlineLess is shared by expiry and promotion: absolute deadline first,
-// then the stable request arrival identity (Vidur EDF, 25e0082, MIT).
+// then the stable request arrival identity (Vidur EDF,
+// microsoft/vidur vidur/scheduler/request_queue/edf_request_queue.py@
+// 25e0082dbbfb206fb0477c3ebbededa7ead78949, MIT; license verdict ADAPT, re-expressed
+// in Go rather than ported verbatim).
 func waitingDeadlineLess(a, b time.Time, earlierArrival bool) bool {
 	if a.Equal(b) {
 		return earlierArrival
