@@ -1232,3 +1232,113 @@ func TestOperationMetricsRefusalSubtypeBreakdown(t *testing.T) {
 		t.Errorf("metrics missing %q\n--- metrics ---\n%s", want2, text)
 	}
 }
+
+// TestTokenHistogramBucketsScaleToMaxTotalTokens pins the TGI-adapted auto-scaled token
+// bucket ladder (native ticket oss-port-gateway-token-histogram-buckets; source
+// huggingface/text-generation-inference router/src/server.rs:1948-1985 @ b4adbf2,
+// Apache-2.0, ADAPT): the closed contract is the bounded count, strict monotonicity, the
+// pinned edges at the 4K and 128K ceilings, the top edge landing exactly on the ceiling,
+// and the registered input/output histograms actually using that ladder.
+func TestTokenHistogramBucketsScaleToMaxTotalTokens(t *testing.T) {
+	pinLadder := func(t *testing.T, maxTokens int, wantLen int, wantFirst, wantFiftieth, wantSecondLast, wantLast float64) {
+		t.Helper()
+		got := tokenBuckets(maxTokens)
+		if len(got) != wantLen {
+			t.Fatalf("tokenBuckets(%d) len = %d, want %d (bounded count)", maxTokens, len(got), wantLen)
+		}
+		// Pinned positions: edge 1 (idx 0), edge 50 (idx 49), edge 99 (idx 98), edge 100 (idx 99).
+		if got[0] != wantFirst || got[49] != wantFiftieth || got[wantLen-2] != wantSecondLast || got[wantLen-1] != wantLast {
+			t.Errorf("tokenBuckets(%d) edges = [first %v, fiftieth %v, secondLast %v, last %v], want [%v %v %v %v]",
+				maxTokens, got[0], got[49], got[wantLen-2], got[wantLen-1], wantFirst, wantFiftieth, wantSecondLast, wantLast)
+		}
+		for i := 1; i < len(got); i++ {
+			if got[i] <= got[i-1] {
+				t.Fatalf("tokenBuckets(%d) not strictly monotonic at edge %d: %v <= %v", maxTokens, i, got[i], got[i-1])
+			}
+		}
+	}
+
+	t.Run("maxTokens=4096", func(t *testing.T) {
+		// 100 linear edges spanning 4096: step 40.96, top edge exact.
+		pinLadder(t, 4096, 100, 40.96, 2048, 4055.04, 4096)
+	})
+
+	t.Run("maxTokens=131072", func(t *testing.T) {
+		// 100 linear edges spanning 131072: step 1310.72, top edge exact.
+		pinLadder(t, 131072, 100, 1310.72, 65536, 129761.28, 131072)
+	})
+
+	t.Run("degenerate ceilings", func(t *testing.T) {
+		if got := tokenBuckets(0); got != nil {
+			t.Errorf("tokenBuckets(0) = %v, want nil", got)
+		}
+		if got := tokenBuckets(-1); got != nil {
+			t.Errorf("tokenBuckets(-1) = %v, want nil", got)
+		}
+		pinLadder(t, 1, 100, 0.01, 0.5, 0.99, 1)
+	})
+
+	t.Run("registered histograms use the ladder", func(t *testing.T) {
+		m := newGatewayMetrics(time.Now())
+		for name, h := range map[string]*tokenHistogram{
+			"input":  m.inferInputTokenHist,
+			"output": m.inferOutputTokenHist,
+		} {
+			if h == nil {
+				t.Fatalf("%s token histogram not registered by newGatewayMetrics", name)
+			}
+			if len(h.edges) != tokenHistogramBucketCount || h.edges[len(h.edges)-1] != float64(defaultTokenHistogramMax) {
+				t.Errorf("%s histogram edges: len=%d last=%v, want %d edges ending at %d",
+					name, len(h.edges), h.edges[len(h.edges)-1], tokenHistogramBucketCount, defaultTokenHistogramMax)
+			}
+		}
+		// The deployment ceiling re-derives both ladders while they are still empty ...
+		m.scaleTokenHistograms(4096)
+		if got := m.inferInputTokenHist.edges[len(m.inferInputTokenHist.edges)-1]; got != 4096 {
+			t.Errorf("scaleTokenHistograms(4096): input last edge = %v, want 4096", got)
+		}
+		if got := m.inferOutputTokenHist.edges[len(m.inferOutputTokenHist.edges)-1]; got != 4096 {
+			t.Errorf("scaleTokenHistograms(4096): output last edge = %v, want 4096", got)
+		}
+		// ... and the feed seam books turns into the cumulative buckets.
+		m.observeInferenceTokenCountsLocked(100, 40)
+		m.observeInferenceTokenCountsLocked(300, 4096)
+		in := m.inferInputTokenHist.snapshot()
+		if in.count != 2 || in.sum != 400 {
+			t.Errorf("input histogram = count %d sum %d, want count 2 sum 400", in.count, in.sum)
+		}
+		// 100 first lands at edge 122.88 (index 2); 300 first lands at 327.68 (index 7).
+		if in.buckets[1] != 0 || in.buckets[2] != 1 || in.buckets[7] != 2 || in.buckets[99] != 2 {
+			t.Errorf("input cumulative buckets = [b1 %d, b2 %d, b7 %d, b99 %d], want [0 1 2 2]",
+				in.buckets[1], in.buckets[2], in.buckets[7], in.buckets[99])
+		}
+		out := m.inferOutputTokenHist.snapshot()
+		if out.count != 2 || out.sum != 4136 {
+			t.Errorf("output histogram = count %d sum %d, want count 2 sum 4136", out.count, out.sum)
+		}
+		// A populated histogram keeps its ladder (no silent re-bucketing of live data).
+		m.scaleTokenHistograms(131072)
+		if got := m.inferInputTokenHist.edges[len(m.inferInputTokenHist.edges)-1]; got != 4096 {
+			t.Errorf("populated histogram re-scaled: last edge = %v, want unchanged 4096", got)
+		}
+	})
+
+	t.Run("render", func(t *testing.T) {
+		var b strings.Builder
+		writeTokenHistogram(&b, "fak_gateway_inference_input_tokens", "", tokenHistogramSnapshot{
+			count:   2,
+			sum:     400,
+			edges:   []float64{40.96, 81.92},
+			buckets: []uint64{0, 2},
+		})
+		want := `fak_gateway_inference_input_tokens_bucket{le="40.96"} 0
+fak_gateway_inference_input_tokens_bucket{le="81.92"} 2
+fak_gateway_inference_input_tokens_bucket{le="+Inf"} 2
+fak_gateway_inference_input_tokens_sum 400
+fak_gateway_inference_input_tokens_count 2
+`
+		if got := b.String(); got != want {
+			t.Errorf("writeTokenHistogram text:\n%s\nwant:\n%s", got, want)
+		}
+	})
+}
