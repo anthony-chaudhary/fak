@@ -88,7 +88,35 @@ func (a *reservationFixtureAuthority) Execute(_ context.Context, g remotemaint.G
 
 // fak-test:runtime medium est=3s lane=default
 func TestReservationAuthenticatedMCPAndCanonicalOwnership(t *testing.T) {
-	bin := t.TempDir()
+	bin, err := os.MkdirTemp("", "guardedremotemaint-dos-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Every subtest spawns the hardlinked dos fixture as a child process. On
+	// Windows the OS (and AV scanning) can hold the executable's image handle
+	// after the last child exits - on hosts where Defender real-time ML
+	// scanning takes minutes per new executable path, far past t.TempDir's
+	// single RemoveAll - so the parent fails with "Access is denied" even
+	// though every subtest passed. Retry deletion until the handle clears;
+	// if it is still held after 60s, leave the fixture dir for OS temp
+	// cleanup and log the path instead of failing the test or blocking the
+	// suite for minutes. Measured on the 2026-11-03 harvest host: the hold
+	// clears within a few minutes but exceeds any sane in-test budget.
+	t.Cleanup(func() {
+		var lastErr error
+		deadline := time.Now().Add(60 * time.Second)
+		for attempt := 0; ; attempt++ {
+			lastErr = os.RemoveAll(bin)
+			if lastErr == nil {
+				return
+			}
+			if time.Now().After(deadline) || attempt >= 120 {
+				t.Logf("dos fixture dir left behind, handle not released within 60s: %s (%v)", bin, lastErr)
+				return
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	})
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)

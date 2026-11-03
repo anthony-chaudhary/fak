@@ -173,6 +173,7 @@ var verbManifest = []Verb{
 	{Name: "component", Synopsis: "check component contracts and workload coverage from a declared root", Lane: "cmd"},
 	{Name: "compute", Synopsis: "heterogeneous compute orchestration across CUDA, Metal, and ROCm", Lane: "cmd"},
 	{Name: "compute-trace", Synopsis: "capture or summarize bounded compute-event trace artifacts", Lane: "cmd"},
+	{Name: "computetune", Synopsis: "storage-compute arbitration: recompute prompt KV on UMA DRAM vs offload to NVMe SSD (internal/computetune Decide)", Lane: "cmd"},
 	{Name: "expert-trace", Synopsis: "analyze a FAK_EXPERT_TRACE route trace: unique experts, reuse, LRU/Belady curve, prewarm hot set", Lane: "cmd"},
 	{Name: "concept", Synopsis: "position, classify, or validate entries in the concept catalog", Lane: "cmd"},
 	{Name: "concept-usage-score", Synopsis: "native concept-usage scorecard control-pane payload", Lane: "cmd"},
