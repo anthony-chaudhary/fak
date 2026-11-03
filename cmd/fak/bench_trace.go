@@ -86,7 +86,8 @@ func runBenchTrace(stdout, stderr io.Writer, args []string) int {
 func printBenchTraceHelp(w io.Writer) {
 	fmt.Fprintf(w, `Usage: fak bench trace [flags]
 
-Isolates subagent dispatch and prefix-tree ingestion overhead from raw GPU execution.
+Inspects trace receipts or runs a host-side demonstration with simulated inference phases.
+Arithmetic validation alone is not measured inference or GPU evidence.
 
 Flags:
   --subagent       decompose total subagent turn time into exact phase buckets
@@ -96,7 +97,7 @@ Flags:
   --trace          path to existing JSON trace receipt to inspect and validate
   --synthetic      run calibrated deterministic synthetic simulation
 
-Phases Measured:
+Phase Buckets (the built-in benchmark uses stand-ins, not a model or GPU):
   host_dispatch       turn gating, session lock, prompt serialization
   prefix_tree_lookup  Context MMU prefix match, trie traversal
   kv_allocation       allocating page blocks / UMA slots
@@ -115,10 +116,23 @@ func executeSubagentBenchmark(turn int, subagentID string, synthetic bool) (nati
 			nativeperf.SubagentPhaseGPUKernel:        950.0,
 			nativeperf.SubagentPhaseTokenSampling:    45.0,
 		}
-		return nativeperf.NewSubagentTraceReceipt(turn, subagentID, phases, 0)
+		receipt, err := nativeperf.NewSubagentTraceReceipt(turn, subagentID, phases, 0)
+		if err != nil {
+			return receipt, err
+		}
+		for _, phase := range nativeperf.SubagentPhases() {
+			if err := receipt.MarkPhaseSimulated(phase); err != nil {
+				return receipt, err
+			}
+		}
+		return receipt, receipt.Validate()
 	}
 
 	timer := nativeperf.NewSubagentTraceTimer(turn, subagentID)
+	// These clocks measure mock host work and sleeps, not the labeled inference operations.
+	for _, phase := range nativeperf.SubagentPhases() {
+		timer.MarkPhaseSimulated(phase)
+	}
 
 	// 1. host_dispatch (turn gating, session lock, prompt serialization)
 	stopDispatch := timer.Start(nativeperf.SubagentPhaseHostDispatch)
@@ -194,6 +208,7 @@ func renderSubagentTraceReport(w io.Writer, receipt nativeperf.SubagentTraceRece
 	fmt.Fprintf(w, "Subagent Trace Receipt (%s)\n", receipt.Schema)
 	fmt.Fprintf(w, "Subagent ID:            %s\n", receipt.SubagentID)
 	fmt.Fprintf(w, "Turn:                   %d\n", receipt.Turn)
+	fmt.Fprintf(w, "Timing Provenance:      %s (measured evidence: %t)\n", receipt.Provenance, receipt.IsMeasuredEvidence())
 	fmt.Fprintf(w, "Total Wall Latency:     %.2f µs (%.3f ms)\n\n", receipt.TotalWallUS, receipt.TotalWallUS/1000.0)
 
 	fmt.Fprintf(w, "Phase Decomposition:\n")
@@ -220,5 +235,5 @@ func renderSubagentTraceReport(w io.Writer, receipt nativeperf.SubagentTraceRece
 	fmt.Fprintf(w, "\nOverhead Isolation:\n")
 	fmt.Fprintf(w, "  %-20s %10.2f µs (%6.2f%%)\n", "Host CPU Overhead:", receipt.HostCPUOverheadUS, receipt.HostCPUOverheadPercent)
 	fmt.Fprintf(w, "  %-20s %10.2f µs (%6.2f%%)\n", "GPU Kernel Wall:", receipt.GPUKernelWallUS, receipt.GPUKernelWallPercent)
-	fmt.Fprintf(w, "\nStatus: VALIDATED (reconciled within ±%.2f µs)\n", nativeperf.DefaultSubagentTraceToleranceUS)
+	fmt.Fprintf(w, "\nStatus: VALIDATED arithmetic only (reconciled within ±%.2f µs)\n", nativeperf.DefaultSubagentTraceToleranceUS)
 }

@@ -28,6 +28,36 @@ const (
 // SubagentPhase is a stable phase label for subagent execution profiling.
 type SubagentPhase string
 
+// TraceProvenance describes how a duration was obtained, not hardware qualification.
+type TraceProvenance string
+
+const (
+	TraceMeasured  TraceProvenance = "measured"
+	TraceSimulated TraceProvenance = "simulated"
+	TraceUnknown   TraceProvenance = "unknown"
+)
+
+func normalizeTraceProvenance(p TraceProvenance) (TraceProvenance, error) {
+	switch p {
+	case "", TraceUnknown:
+		return TraceUnknown, nil
+	case TraceMeasured, TraceSimulated:
+		return p, nil
+	default:
+		return "", fmt.Errorf("unknown trace provenance %q", p)
+	}
+}
+
+func mergeTraceProvenance(a, b TraceProvenance) TraceProvenance {
+	if a == TraceSimulated || b == TraceSimulated {
+		return TraceSimulated
+	}
+	if a != TraceMeasured || b != TraceMeasured {
+		return TraceUnknown
+	}
+	return TraceMeasured
+}
+
 const (
 	PhaseHostDispatch     SubagentPhase = SubagentPhaseHostDispatch
 	PhasePrefixTreeLookup SubagentPhase = SubagentPhasePrefixTreeLookup
@@ -53,15 +83,17 @@ func SubagentPhases() []string {
 // latency into host CPU orchestration, prefix tree lookup, KV allocation, GPU kernel execution,
 // and token sampling.
 type SubagentTraceReceipt struct {
-	Schema                 string             `json:"schema"`
-	Turn                   int                `json:"turn"`
-	SubagentID             string             `json:"subagent_id"`
-	TotalWallUS            float64            `json:"total_wall_us"`
-	PhasesUS               map[string]float64 `json:"phases_us"`
-	HostCPUOverheadUS      float64            `json:"host_cpu_overhead_us"`
-	GPUKernelWallUS        float64            `json:"gpu_kernel_wall_us"`
-	HostCPUOverheadPercent float64            `json:"host_cpu_overhead_percent"`
-	GPUKernelWallPercent   float64            `json:"gpu_kernel_wall_percent"`
+	Provenance             TraceProvenance            `json:"provenance,omitempty"`
+	PhaseProvenance        map[string]TraceProvenance `json:"phase_provenance,omitempty"`
+	Schema                 string                     `json:"schema"`
+	Turn                   int                        `json:"turn"`
+	SubagentID             string                     `json:"subagent_id"`
+	TotalWallUS            float64                    `json:"total_wall_us"`
+	PhasesUS               map[string]float64         `json:"phases_us"`
+	HostCPUOverheadUS      float64                    `json:"host_cpu_overhead_us"`
+	GPUKernelWallUS        float64                    `json:"gpu_kernel_wall_us"`
+	HostCPUOverheadPercent float64                    `json:"host_cpu_overhead_percent"`
+	GPUKernelWallPercent   float64                    `json:"gpu_kernel_wall_percent"`
 }
 
 // Validate asserts that the receipt conforms to schema fak.subagent.trace/v1, has non-negative
@@ -102,6 +134,18 @@ func (r SubagentTraceReceipt) ValidateWithTolerance(toleranceUS float64) error {
 	}
 	if r.PhasesUS == nil {
 		return errors.New("phases_us map is nil")
+	}
+	rollup, err := r.provenanceRollup()
+	if err != nil {
+		return err
+	}
+	claim, err := normalizeTraceProvenance(r.Provenance)
+	if err != nil {
+		return err
+	}
+	// An absent claim preserves legacy arithmetic validation, never evidence admission.
+	if r.Provenance != "" && claim != rollup {
+		return fmt.Errorf("trace provenance %q contradicts phase rollup %q", claim, rollup)
 	}
 
 	for _, req := range CanonicalSubagentPhases {
@@ -158,6 +202,48 @@ func (r SubagentTraceReceipt) ValidateWithTolerance(toleranceUS float64) error {
 	return nil
 }
 
+func (r SubagentTraceReceipt) provenanceRollup() (TraceProvenance, error) {
+	for phase, p := range r.PhaseProvenance {
+		if _, ok := r.PhasesUS[phase]; !ok {
+			return "", fmt.Errorf("provenance for absent phase %q", phase)
+		}
+		if _, err := normalizeTraceProvenance(p); err != nil {
+			return "", err
+		}
+	}
+	rollup := TraceMeasured
+	for phase := range r.PhasesUS {
+		p, err := normalizeTraceProvenance(r.PhaseProvenance[phase])
+		if err != nil {
+			return "", err
+		}
+		rollup = mergeTraceProvenance(rollup, p)
+	}
+	return rollup, nil
+}
+
+// IsMeasuredEvidence excludes legacy, simulated, ambiguous and invalid receipts.
+// It is a necessary provenance gate, not proof of model/device identity or speed.
+func (r SubagentTraceReceipt) IsMeasuredEvidence() bool {
+	return r.Provenance == TraceMeasured && r.Validate() == nil
+}
+
+// MarkPhaseSimulated marks a stand-in and updates the aggregate claim.
+func (r *SubagentTraceReceipt) MarkPhaseSimulated(phase string) error {
+	if _, ok := r.PhasesUS[phase]; !ok {
+		return fmt.Errorf("cannot mark absent phase %q", phase)
+	}
+	if _, err := r.provenanceRollup(); err != nil {
+		return err
+	}
+	if r.PhaseProvenance == nil {
+		r.PhaseProvenance = make(map[string]TraceProvenance)
+	}
+	r.PhaseProvenance[phase] = TraceSimulated
+	r.Provenance, _ = r.provenanceRollup()
+	return nil
+}
+
 // JSON serializes the receipt to indented JSON bytes.
 func (r SubagentTraceReceipt) JSON() ([]byte, error) {
 	return json.MarshalIndent(r, "", "  ")
@@ -193,6 +279,7 @@ func NewSubagentTraceReceipt(turn int, subagentID string, phases map[string]floa
 	}
 
 	receipt := SubagentTraceReceipt{
+		Provenance:             TraceUnknown,
 		Schema:                 SubagentTraceSchema,
 		Turn:                   turn,
 		SubagentID:             subagentID,
@@ -213,6 +300,7 @@ func NewSubagentTraceReceipt(turn int, subagentID string, phases map[string]floa
 // SubagentTraceTimer provides high-resolution phase timing for subagent execution turns.
 // It tracks durations spent in individual phases and computes reconciled trace receipts.
 type SubagentTraceTimer struct {
+	provenance  map[string]TraceProvenance
 	mu          sync.Mutex
 	turn        int
 	subagentID  string
@@ -228,6 +316,7 @@ func NewSubagentTraceTimer(turn int, subagentID string) *SubagentTraceTimer {
 		phases[p] = 0.0
 	}
 	return &SubagentTraceTimer{
+		provenance: make(map[string]TraceProvenance),
 		turn:       turn,
 		subagentID: subagentID,
 		phasesUS:   phases,
@@ -241,8 +330,16 @@ func (t *SubagentTraceTimer) StartPhase(phase string) func() {
 	start := time.Now()
 	return func() {
 		elapsed := time.Since(start)
-		t.RecordDuration(phase, elapsed)
+		t.recordUS(phase, float64(elapsed.Nanoseconds())/1000.0, TraceMeasured)
 	}
+}
+
+// MarkPhaseSimulated declares a stand-in before or after timing it. The label is sticky.
+func (t *SubagentTraceTimer) MarkPhaseSimulated(phase string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.phasesUS[phase] += 0
+	t.provenance[phase] = TraceSimulated
 }
 
 // Start is an alias for StartPhase.
@@ -269,9 +366,17 @@ func (t *SubagentTraceTimer) RecordPhase(phase string, d time.Duration) {
 
 // RecordUS adds microseconds to the specified phase bucket.
 func (t *SubagentTraceTimer) RecordUS(phase string, us float64) {
+	t.recordUS(phase, us, TraceUnknown)
+}
+
+func (t *SubagentTraceTimer) recordUS(phase string, us float64, p TraceProvenance) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.phasesUS[phase] += us
+	if previous, ok := t.provenance[phase]; ok {
+		p = mergeTraceProvenance(previous, p)
+	}
+	t.provenance[phase] = p
 }
 
 // SetTotalWallUS explicitly specifies the total turn wall clock duration in microseconds.
@@ -296,7 +401,19 @@ func (t *SubagentTraceTimer) Finalize() (SubagentTraceReceipt, error) {
 		phasesCopy[k] = v
 	}
 
-	return NewSubagentTraceReceipt(t.turn, t.subagentID, phasesCopy, t.totalWallUS)
+	r, err := NewSubagentTraceReceipt(t.turn, t.subagentID, phasesCopy, t.totalWallUS)
+	if err != nil {
+		return SubagentTraceReceipt{}, err
+	}
+	r.PhaseProvenance = make(map[string]TraceProvenance, len(t.provenance))
+	for phase, p := range t.provenance {
+		r.PhaseProvenance[phase] = p
+	}
+	r.Provenance, err = r.provenanceRollup()
+	if err != nil {
+		return SubagentTraceReceipt{}, err
+	}
+	return r, r.Validate()
 }
 
 // SubagentTraceFromPhaseReceipt converts a bounded fak-native PhaseReceipt into a SubagentTraceReceipt,
@@ -347,6 +464,9 @@ func (r *PhaseRecorder) SubagentTrace(turn int, subagentID string, tolerance tim
 func (r SubagentTraceReceipt) ToPhaseRecorder(engine, backend, forwardPath string) (*PhaseRecorder, error) {
 	if err := r.Validate(); err != nil {
 		return nil, fmt.Errorf("cannot convert invalid receipt: %w", err)
+	}
+	if !r.IsMeasuredEvidence() {
+		return nil, errors.New("cannot project unmeasured trace onto a backend identity")
 	}
 
 	totalWall := time.Duration(math.Round(r.TotalWallUS * 1000.0))

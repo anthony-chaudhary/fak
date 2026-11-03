@@ -1193,6 +1193,8 @@ func cmdBench(argv []string) {
 			os.Exit(runBenchEffort(os.Stdout, os.Stderr, argv[1:]))
 		case "subagent":
 			os.Exit(runBenchSubagent(os.Stdout, os.Stderr, argv[1:]))
+		case "trace":
+			os.Exit(runBenchTrace(os.Stdout, os.Stderr, argv[1:]))
 		case "agent":
 			os.Exit(runBenchAgent(os.Stdout, os.Stderr, argv[1:]))
 		case "h2h":
