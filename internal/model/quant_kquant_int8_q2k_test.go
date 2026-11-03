@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"math"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // quant_kquant_int8_q2k_test.go is the manifest-declared parity witness for the Q2_K int8 GEMV
@@ -471,4 +473,95 @@ func TestQ2KInt8GateContract(t *testing.T) {
 	}
 
 	kQuantSDOTForce = 0
+}
+
+// TestQ2KQ8KNumaDispatch witnesses the ticket spec clause "Extend kQuantSDOT gate; correct 16-wide
+// Q2 scale/min handling plus NUMA and non-NUMA dispatch" — specifically the NUMA-pool dispatch
+// branch of the extended kQuantSDOT gate for kindQ2K in kQuantMatRowsIntoWorkers. With an eligible
+// two-node pool attached and replicas nil (rawForNode falls back to qt.raw for both nodes), the
+// SDOT-ON arm must route every row through q2kMatRowsRangeInt8Raw: the full output is asserted
+// BIT-EXACT against the int8 reference ranger over all rows, and explicitly NOT bit-identical to
+// the f32 oracle — only that pair of facts proves the NUMA branch took the int8 K-quant ranger
+// rather than silently falling back to f32. The SDOT-OFF arm must still route Q2_K to the f32
+// kQuantMatRowsRange, bit-exact. No performance, GPU, or whole-model claim is made; on this host
+// thread pinning is unsupported and the pool ignores the pin error, so correctness must not depend
+// on actual pinning.
+func TestQ2KQ8KNumaDispatch(t *testing.T) {
+	const (
+		out = 9 // odd: exercises the static [lo,hi) split tail across the two node placements
+		in  = 512
+	)
+
+	topo := []compute.NUMANodeTopology{
+		{NodeID: 0, CPUs: []int{0}},
+		{NodeID: 1, CPUs: []int{4}},
+	}
+	sched := compute.ScheduleDecodeNUMA(topo, 2)
+	if !sched.Eligible || len(sched.Placements) != 2 {
+		t.Fatalf("two-node schedule not eligible as expected (reason %s, placements %d): %+v",
+			sched.Reason, len(sched.Placements), sched)
+	}
+	pool, err := compute.NewNUMADecodePool(sched)
+	if err != nil {
+		t.Fatalf("NewNUMADecodePool: %v", err)
+	}
+	defer pool.Close()
+
+	// Random LCG code/scale bytes give every one of the 16 per-super-block sub-blocks its own
+	// distinct (scale, min) pair — the varying 16-wide Q2 scale/min state the spec clause targets,
+	// now split across workers by static [lo,hi) ranges instead of parForRangeWorkers.
+	qt := q2kTestTensor(out, in, 0x5eaf0c0def00d, 0x3000) // finite min = 0.125
+	qt.numaPool = pool
+	qt.replicas = nil // rawForNode(nodeID) returns qt.raw for both nodes
+
+	// Adversarial activation: the base pattern spans -11..11 (negative values, magnitudes above 1),
+	// and each 32-wide Q8 block gets one dominant ±64 outlier that saturates its code at ±127,
+	// so Q8_0 clamping engages on every block while the remaining codes stay well inside range.
+	// All values finite.
+	x := make([]float32, in)
+	for i := range x {
+		x[i] = float32((i*7)%23) - 11
+	}
+	for b := 0; b < in/32; b++ {
+		if b%2 == 0 {
+			x[b*32] = 64
+		} else {
+			x[b*32] = -64
+		}
+	}
+
+	// Gate-independent references: int8 ranger over all rows vs the f32 oracle over all rows.
+	qv := quantizeVecQ8(x)
+	refOn := make([]float32, out)
+	q2kMatRowsRangeInt8Raw(qt.raw, qt, qv, refOn, 0, out)
+	refOff := make([]float32, out)
+	kQuantMatRowsRange(qt, x, refOff, 0, out)
+
+	// Gate ON: the NUMA branch must take the int8 K-quant ranger for kindQ2K.
+	setKQuantSDOTForTest(true)
+	t.Cleanup(func() { kQuantSDOTForce = 0 })
+	gotOn := kQuantMatRows(qt, x)
+	for o := 0; o < out; o++ {
+		if math.IsNaN(float64(gotOn[o])) || math.IsInf(float64(gotOn[o]), 0) {
+			t.Fatalf("gate-ON NUMA row %d: non-finite %v", o, gotOn[o])
+		}
+	}
+	if !q2kSameBits(gotOn, refOn) {
+		t.Fatalf("gate-ON NUMA dispatch not bit-identical to q2kMatRowsRangeInt8Raw:\n got=%v\n ref=%v", gotOn, refOn)
+	}
+	if q2kSameBits(gotOn, refOff) {
+		t.Fatalf("gate-ON NUMA dispatch is bit-identical to the f32 oracle — the int8 ranger was not taken")
+	}
+
+	// Gate OFF: the NUMA branch's non-SDOT arm must keep routing Q2_K to the f32 path.
+	setKQuantSDOTForTest(false)
+	gotOff := kQuantMatRows(qt, x)
+	for o := 0; o < out; o++ {
+		if math.IsNaN(float64(gotOff[o])) || math.IsInf(float64(gotOff[o]), 0) {
+			t.Fatalf("gate-OFF NUMA row %d: non-finite %v", o, gotOff[o])
+		}
+	}
+	if !q2kSameBits(gotOff, refOff) {
+		t.Fatalf("gate-OFF NUMA dispatch not bit-identical to f32 kQuantMatRowsRange:\n got=%v\n ref=%v", gotOff, refOff)
+	}
 }
