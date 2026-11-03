@@ -21,25 +21,27 @@ const syncPublicLeakGate = "PUBLIC_LEAK"
 
 type syncCheckReport struct {
 	safesync.Assessment
-	PublicLeak *syncPublicLeakPreflight `json:"public_leak,omitempty"`
+	PublicLeak       *syncPublicLeakPreflight    `json:"public_leak,omitempty"`
+	PublicLeakTiming *hooks.PublicLeakTreeTiming `json:"public_leak_timing,omitempty"`
 }
 
 type syncPublicLeakPreflight struct {
-	Gate            string                  `json:"gate"`
-	OK              bool                    `json:"ok"`
-	Count           int                     `json:"count"`
-	BlockingCount   int                     `json:"blocking_count"`
-	IntroducedCount int                     `json:"introduced_count"`
-	InheritedCount  int                     `json:"inherited_count"`
-	UnknownCount    int                     `json:"unknown_count"`
-	Findings        []syncPublicLeakFinding `json:"findings"`
-	RepairSlices    []syncPublicLeakRepair  `json:"repair_slices,omitempty"`
-	LaneResolution  string                  `json:"lane_resolution,omitempty"`
-	TargetedRecheck string                  `json:"targeted_recheck,omitempty"`
-	ResumeToken     string                  `json:"resume_token,omitempty"`
-	ResumeCommand   string                  `json:"resume_command,omitempty"`
-	RecheckedPaths  []string                `json:"rechecked_paths,omitempty"`
-	ResumeValidated bool                    `json:"resume_validated,omitempty"`
+	Timing          hooks.PublicLeakTreeTiming `json:"-"`
+	Gate            string                     `json:"gate"`
+	OK              bool                       `json:"ok"`
+	Count           int                        `json:"count"`
+	BlockingCount   int                        `json:"blocking_count"`
+	IntroducedCount int                        `json:"introduced_count"`
+	InheritedCount  int                        `json:"inherited_count"`
+	UnknownCount    int                        `json:"unknown_count"`
+	Findings        []syncPublicLeakFinding    `json:"findings"`
+	RepairSlices    []syncPublicLeakRepair     `json:"repair_slices,omitempty"`
+	LaneResolution  string                     `json:"lane_resolution,omitempty"`
+	TargetedRecheck string                     `json:"targeted_recheck,omitempty"`
+	ResumeToken     string                     `json:"resume_token,omitempty"`
+	ResumeCommand   string                     `json:"resume_command,omitempty"`
+	RecheckedPaths  []string                   `json:"rechecked_paths,omitempty"`
+	ResumeValidated bool                       `json:"resume_validated,omitempty"`
 }
 
 type syncPublicLeakFinding struct {
@@ -130,6 +132,7 @@ func assessSyncPublicLeak(repo, remote string, info safesync.Assessment, only []
 	if err != nil {
 		return report, err
 	}
+	report.Timing = tree.Timing
 	current := filterSyncPublicLeakFindings(tree.Findings, only)
 
 	introduced := map[string]bool{}
