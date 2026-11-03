@@ -90,11 +90,12 @@ type PrefixStats struct {
 }
 
 type prefixHitInfo struct {
-	matched   int
-	boundary  *radixkv.Node
-	ownerTree *radixkv.Tree // tree that acquired boundary, independent of later setters
-	fullHit   bool
-	applied   bool
+	matched    int
+	rawMatched int // token-exact match before page-aligned truncation
+	boundary   *radixkv.Node
+	ownerTree  *radixkv.Tree // tree that acquired boundary, independent of later setters
+	fullHit    bool          // raw match covered the entire prompt
+	applied    bool
 }
 
 type nativePrefixState struct {
@@ -357,7 +358,31 @@ func (s *NativeScheduler) lookupPrefix(prompt []int) (int, *radixkv.Node, *radix
 	return 0, nil, nil
 }
 
-func (s *NativeScheduler) recordPrefixLookup(sess *model.Session, prompt []int, matched int, boundary *radixkv.Node, ownerTree *radixkv.Tree) {
+// lookupPrefixPageAligned applies SGLang's page-aligned match truncation on top of
+// lookupPrefix: paged KV is accounted per block, so a hit that ends mid-block cannot
+// be reused and the reusable depth is floored to a multiple of the block size in
+// tokens. A raw match shorter than one block is treated as a miss, and its boundary
+// lease is released like any other miss. The raw (pre-truncation) match is
+// returned alongside so admission can tell a floored full-prompt hit apart from
+// a genuinely partial one. Adapted from SGLang
+// python/sglang/srt/mem_cache/radix_cache.py:440-443,467@00a9a81
+// (key.page_aligned(page_size), Apache-2.0).
+func (s *NativeScheduler) lookupPrefixPageAligned(prompt []int, page int) (int, *radixkv.Node, *radixkv.Tree, int) {
+	matched, boundary, tree := s.lookupPrefix(prompt)
+	if matched == 0 || page <= 1 {
+		return matched, boundary, tree, matched
+	}
+	aligned := matched / page * page
+	if aligned == 0 {
+		if tree != nil && boundary != nil {
+			tree.Done(boundary)
+		}
+		return 0, nil, nil, matched
+	}
+	return aligned, boundary, tree, matched
+}
+
+func (s *NativeScheduler) recordPrefixLookup(sess *model.Session, prompt []int, matched, rawMatched int, boundary *radixkv.Node, ownerTree *radixkv.Tree) {
 	st := s.getPrefixState()
 	if st == nil || sess == nil {
 		return
@@ -365,10 +390,11 @@ func (s *NativeScheduler) recordPrefixLookup(sess *model.Session, prompt []int, 
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	info := &prefixHitInfo{
-		matched:   matched,
-		boundary:  boundary,
-		ownerTree: ownerTree,
-		fullHit:   matched == len(prompt),
+		matched:    matched,
+		rawMatched: rawMatched,
+		boundary:   boundary,
+		ownerTree:  ownerTree,
+		fullHit:    rawMatched == len(prompt),
 	}
 	st.holderLookups[sess] = info
 }
@@ -479,6 +505,7 @@ func (s *NativeScheduler) qwenPrefillStepBudgetLocked(iteration uint64) (*native
 func (s *NativeScheduler) qwenPrefillChunkBudget(prep schedPrepare, sess *model.Session, promptLen int) int {
 	s.mu.Lock()
 	budget := s.qwenPrefillTokens
+	page := s.blockTokensLocked()
 	s.mu.Unlock()
 	if budget < nativeQwenPrefillMinChunkTokens ||
 		!prep.q4k ||
@@ -495,10 +522,11 @@ func (s *NativeScheduler) qwenPrefillChunkBudget(prep schedPrepare, sess *model.
 		return 0
 	}
 
-	// Acceptance criteria 1: query prefix cache depth during admission.
-	matched, boundary, ownerTree := s.lookupPrefix(prep.prompt)
+	// Acceptance criteria 1: query prefix cache depth during admission, truncated
+	// to whole blocks so a mid-block hit can never end a reusable span.
+	matched, boundary, ownerTree, rawMatched := s.lookupPrefixPageAligned(prep.prompt, page)
 	if matched > 0 {
-		s.recordPrefixLookup(sess, prep.prompt, matched, boundary, ownerTree)
+		s.recordPrefixLookup(sess, prep.prompt, matched, rawMatched, boundary, ownerTree)
 	}
 
 	// Calculate chunked prefill step sizes based on uncached suffix length.
@@ -622,7 +650,34 @@ func installPrefixHitLocked(ln *schedLane, info *prefixHitInfo) int {
 		// before installing it so ordinary bounded prefill stays outside s.mu.
 		return 0
 	}
+	if info.fullHit && len(info.boundary.Logits()) > 0 && info.boundary.KV().Len() == len(ln.prompt) {
+		// Full-prompt hit whose boundary holds the complete span plus cached
+		// terminal logits: consume it whole. Lookup splits edges so a match
+		// always ends at a node boundary whose KV covers the matched prefix
+		// from the root, so KV().Len() == len(prompt) proves the stored span IS
+		// this prompt. Nothing is appended, so a hybrid Gated-DeltaNet
+		// recurrence is used at its natural length and page alignment does not
+		// shrink a span the tree holds in full.
+		ln.sess.Cache = info.boundary.KV().Clone()
+		return info.boundary.KV().Len()
+	}
+	if kvLen := info.boundary.KV().Len(); depth < kvLen {
+		// The admitted depth ends mid-span (page-aligned truncation floors it
+		// below the boundary node's stored KV). The lane appends at
+		// promptCursor, so the installed cache must represent exactly depth
+		// tokens. Mirror radixkv.split: a rewindable softmax-KV cache is
+		// truncated; a hybrid Gated-DeltaNet recurrence holds one accumulated
+		// state with no per-token journal and cannot be rolled back, so decline
+		// and let the lane cold-prefill instead of appending onto a stale
+		// recurrence.
+		if err := info.boundary.KV().CanEvict(); err != nil {
+			return 0
+		}
+	}
 	ln.sess.Cache = info.boundary.KV().Clone()
+	if depth < ln.sess.Cache.Len() {
+		ln.sess.Cache.Truncate(depth)
+	}
 	return depth
 }
 

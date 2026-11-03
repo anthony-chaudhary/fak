@@ -112,7 +112,7 @@ func TestNativeSchedulerPrefixLookupCapturesOwnerBeforeRecord(t *testing.T) {
 	}
 	// Exercise precisely the setter window between the two production calls.
 	s.SetRadixKV(nil)
-	s.recordPrefixLookup(sess, prompt, matched, boundary, owner)
+	s.recordPrefixLookup(sess, prompt, matched, matched, boundary, owner)
 	s.closeLaneSession(sess)
 	tree.SetRetention(0)
 	if tree.Stats().Tokens != 0 {
