@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "receipt-v3-gateway-engine-interkernelgapsumus",
+      "canonical": "InterKernelGapSumUs (v3 receipt host-overhead decomposition)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`InterKernelGapSumUs` is the optional per-repetition field on performance receipts (schema fak-native-performance-receipt/v3) recording the summed microseconds the device sat idle between kernel launches during one decode step. This row positions the v3 host-overhead decomposition symbol so lookup does not conflate it with the in-kernel decode lane layout or the umbrella gateway-engine domain.",
+      "distinction": "Use `InterKernelGapSumUs` for the recorded inter-launch idle sum on a v3 receipt repetition. Unlike `inKernelDecodeV41Lanes`, it measures a timing gap, not the lane layout of in-kernel decoding; unlike `gateway-engine`, it is one receipt field, not the umbrella domain.",
+      "distinct_from": [
+        "inkerneldecodev41lanes"
+      ],
+      "aliases": [],
+      "grounding": "InterKernelGapSumUs",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

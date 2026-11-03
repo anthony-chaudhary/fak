@@ -11,6 +11,9 @@
 // The reader derives host_share ONLY from recorded evidence, in priority order:
 //
 //   - a directly recorded host_share / host_share_p50 fraction (ad-hoc measured),
+//   - the native v3 host-overhead decomposition on perf receipts:
+//     repetitions[].host_phase_us over repetitions[].decode_milliseconds,
+//     averaged over the repetitions that record both,
 //   - a recorded device-busy fraction (device_busy / device_busy_p50): host_share = 1 - device_busy,
 //   - a recorded GPU busy percent (gpu_busy_percent / gpu_busy_p50): host_share = 1 - pct/100,
 //   - a recorded ms/token split (gpu_ms_per_token over wall_ms_per_token): host_share = 1 - gpu/wall.
@@ -18,7 +21,7 @@
 // A receipt carrying none of these yields an UNKNOWN reading — never a
 // fabricated zero, so an absent measurement can never masquerade as a healthy
 // regime. Evidence fields are read leniently (any JSON record shape), while
-// perf-receipt-v2 files (schema fak-native-performance-receipt/v*) are always
+// perf-receipt files (schema fak-native-performance-receipt/v*) are always
 // admitted as decode-step readings even when they record no device-busy data,
 // because their repetitions ARE the decode window.
 package hostshare
@@ -39,10 +42,11 @@ import (
 // Source kinds name which recorded evidence produced a reading's HostShare.
 // An empty source means UNKNOWN (no device-busy evidence in the record).
 const (
-	SourceHostShareRecorded  = "host-share-recorded"
-	SourceDeviceBusyFraction = "device-busy-fraction"
-	SourceGPUBusyPercent     = "gpu-busy-percent"
-	SourceMSPerTokenSplit    = "ms-per-token-split"
+	SourceHostShareRecorded      = "host-share-recorded"
+	SourceHostPhaseDecomposition = "host-phase-decomposition"
+	SourceDeviceBusyFraction     = "device-busy-fraction"
+	SourceGPUBusyPercent         = "gpu-busy-percent"
+	SourceMSPerTokenSplit        = "ms-per-token-split"
 )
 
 // nativeReceiptSchemaPrefix matches the portable A/B performance receipts
@@ -237,6 +241,9 @@ func deriveHostShare(rec map[string]any) (*float64, string) {
 	if v, ok := finiteInRange(rec, "host_share_p50", 0, 1); ok {
 		return &v, SourceHostShareRecorded
 	}
+	if v, ok := nativeHostPhaseShare(rec); ok {
+		return &v, SourceHostPhaseDecomposition
+	}
 	if v, ok := finitePositiveInRange(rec, "device_busy", 0, 1); ok {
 		hs := clamp01(1 - v)
 		return &hs, SourceDeviceBusyFraction
@@ -260,6 +267,43 @@ func deriveHostShare(rec map[string]any) (*float64, string) {
 		}
 	}
 	return nil, ""
+}
+
+// nativeHostPhaseShare reads the native v3 host-overhead decomposition out of
+// a performance receipt: repetitions[].host_phase_us over
+// repetitions[].decode_milliseconds, averaged over the repetitions that
+// record both. It returns false when no repetition carries the pair — the
+// caller must treat that as UNKNOWN, never a zero. The share may exceed 1 on
+// multi-threaded hosts, matching the process-CPU-over-wall semantics of the
+// collector that records host_phase_us.
+func nativeHostPhaseShare(rec map[string]any) (float64, bool) {
+	schema, _ := rec["schema"].(string)
+	if !strings.HasPrefix(schema, nativeReceiptSchemaPrefix) {
+		return 0, false
+	}
+	reps, _ := rec["repetitions"].([]any)
+	var sum, n float64
+	for _, rv := range reps {
+		rm, ok := rv.(map[string]any)
+		if !ok {
+			continue
+		}
+		hostUs, ok1 := numField(rm, "host_phase_us")
+		decodeMs, ok2 := numField(rm, "decode_milliseconds")
+		if !ok1 || !ok2 || decodeMs <= 0 {
+			continue
+		}
+		share := hostUs / (decodeMs * 1e3)
+		if math.IsNaN(share) || math.IsInf(share, 0) || share < 0 {
+			continue
+		}
+		sum += share
+		n++
+	}
+	if n == 0 {
+		return 0, false
+	}
+	return sum / n, true
 }
 
 // extractModel best-efforts the model identity from common record shapes.

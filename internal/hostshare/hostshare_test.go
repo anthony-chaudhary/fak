@@ -45,8 +45,8 @@ func TestScanTestdata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.FilesScanned != 7 || len(rep.Readings) != 8 {
-		t.Fatalf("files=%d readings=%d, want 7 files / 8 readings: %+v", rep.FilesScanned, len(rep.Readings), rep.Readings)
+	if rep.FilesScanned != 8 || len(rep.Readings) != 9 {
+		t.Fatalf("files=%d readings=%d, want 8 files / 9 readings: %+v", rep.FilesScanned, len(rep.Readings), rep.Readings)
 	}
 	if len(rep.MalformedFiles) != 0 {
 		t.Fatalf("malformed: %v", rep.MalformedFiles)
@@ -56,12 +56,13 @@ func TestScanTestdata(t *testing.T) {
 		want float64
 		src  string
 	}{
-		"phl051-device-busy-note.json":   {0.13, SourceDeviceBusyFraction},
-		"phl127-ms-split.json":           {1 - 71.9/75.2, SourceMSPerTokenSplit},
-		"launch-bound-kernels.json":      {0.45, SourceDeviceBusyFraction},
-		"recorded-host-share-wins.json":  {0.13, SourceHostShareRecorded},
-		"perf-receipt-v2-nobusy.json":    {math.NaN(), ""}, // UNKNOWN: no device-busy data
-		"invalid-evidence-20261015.json": {math.NaN(), ""}, // corrupt meter: never fabricated
+		"phl051-device-busy-note.json":      {0.13, SourceDeviceBusyFraction},
+		"phl127-ms-split.json":              {1 - 71.9/75.2, SourceMSPerTokenSplit},
+		"launch-bound-kernels.json":         {0.45, SourceDeviceBusyFraction},
+		"recorded-host-share-wins.json":     {0.13, SourceHostShareRecorded},
+		"perf-receipt-v2-nobusy.json":       {math.NaN(), ""},                    // UNKNOWN: no device-busy data
+		"perf-receipt-v3-hostoverhead.json": {0.2, SourceHostPhaseDecomposition}, // native v3 decomposition
+		"invalid-evidence-20261015.json":    {math.NaN(), ""},                    // corrupt meter: never fabricated
 	}
 	for suffix, want := range cases {
 		r := mustReading(t, rep.Readings, suffix)
@@ -146,6 +147,35 @@ func TestPerfReceiptV2WithoutDeviceBusyIsUnknown(t *testing.T) {
 	}
 	if _, exceeded, _ := Evaluate(rs, 0.30); exceeded {
 		t.Error("UNKNOWN reading must not exceed the threshold")
+	}
+}
+
+// TestPerfReceiptV3HostOverheadDecomposition is the consumer smoke: a v3
+// receipt whose repetitions natively carry the host-overhead decomposition
+// yields a measured host-share reading (mean of host_phase_us over
+// decode_milliseconds across recording repetitions) instead of the UNKNOWN
+// reading its v2 predecessor produced for the same workload.
+func TestPerfReceiptV3HostOverheadDecomposition(t *testing.T) {
+	rs, err := Scan([]string{"testdata/perf-receipt-v3-hostoverhead.json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rs) != 1 {
+		t.Fatalf("readings = %+v", rs)
+	}
+	r := rs[0]
+	if r.HostShare == nil {
+		t.Fatalf("HostShare nil: v3 decomposition must yield a measured reading")
+	}
+	approx(t, *r.HostShare, 0.2, 1e-9) // (16000/80000 + 20000/100000) / 2
+	if r.Source != SourceHostPhaseDecomposition {
+		t.Errorf("source = %q, want %q", r.Source, SourceHostPhaseDecomposition)
+	}
+	if Verdict(r.HostShare, 0.30) != "OK" {
+		t.Errorf("verdict = %q, want OK at 0.2 below the 0.30 gate", Verdict(r.HostShare, 0.30))
+	}
+	if r.Model != "qwen38-cuda-hostoverhead-fixture" || r.Hardware != "linux/amd64/cuda" {
+		t.Errorf("identity = (%q, %q)", r.Model, r.Hardware)
 	}
 }
 
