@@ -98,15 +98,19 @@ type prefixHitInfo struct {
 }
 
 type nativePrefixState struct {
-	mu                  sync.RWMutex
-	tree                *radixkv.Tree
-	prefixTree          PrefixTree
-	deterministic       bool
-	stats               PrefixStats
-	chunkedExactReuses  uint64
-	chunkedPrefixReuses uint64
-	holderLookups       map[*model.Session]*prefixHitInfo
-	laneLookups         map[*schedLane]*prefixHitInfo
+	mu            sync.RWMutex
+	tree          *radixkv.Tree
+	prefixTree    PrefixTree
+	deterministic bool
+	// qwenPrefillChunkAlign is the deterministic-mode prefill chunk boundary
+	// alignment A (0 = off). It sits beside deterministic because both are
+	// scheduler-level serving flags read while prefix state is live.
+	qwenPrefillChunkAlign int
+	stats                 PrefixStats
+	chunkedExactReuses    uint64
+	chunkedPrefixReuses   uint64
+	holderLookups         map[*model.Session]*prefixHitInfo
+	laneLookups           map[*schedLane]*prefixHitInfo
 }
 
 func (s *NativeScheduler) getPrefixState() *nativePrefixState {
@@ -183,6 +187,78 @@ func (s *NativeScheduler) DeterministicMode() bool {
 	st.mu.RLock()
 	defer st.mu.RUnlock()
 	return st.deterministic
+}
+
+// SetQwenPrefillChunkAlign configures the deterministic-mode prefill chunk
+// boundary alignment A. Zero (default) preserves historical arbitrary-token
+// chunk ends. A positive A constrains every non-final chunk end to a multiple
+// of A measured from position 0, never below A; the final chunk always ends at
+// the prompt tail. Negative values are refused as zero. Adapted from SGLang
+// python/sglang/srt/managers/scheduler.py:1690-1722 (truncation_align_size,
+// @00a9a81b, Apache-2.0).
+func (s *NativeScheduler) SetQwenPrefillChunkAlign(align int) {
+	st := s.getOrCreatePrefixState()
+	if st == nil {
+		return
+	}
+	if align < 0 {
+		align = 0
+	}
+	st.mu.Lock()
+	st.qwenPrefillChunkAlign = align
+	st.mu.Unlock()
+}
+
+// QwenPrefillChunkAlign reports the configured deterministic-mode prefill
+// chunk boundary alignment (0 = off).
+func (s *NativeScheduler) QwenPrefillChunkAlign() int {
+	st := s.getPrefixState()
+	if st == nil {
+		return 0
+	}
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	return st.qwenPrefillChunkAlign
+}
+
+// deterministicChunkAlign reports the chunk boundary alignment active for the
+// next prefill step: the configured A when deterministic serving is enabled,
+// otherwise 0. Caller may hold s.mu; the read follows the established
+// s.mu -> prefix-state lock order.
+func (s *NativeScheduler) deterministicChunkAlign() int {
+	st := s.getPrefixState()
+	if st == nil {
+		return 0
+	}
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	if !st.deterministic {
+		return 0
+	}
+	return st.qwenPrefillChunkAlign
+}
+
+// alignedPrefillChunkEnd applies the deterministic chunk boundary alignment to
+// one prefill step. Given the chunk start, its raw (unclamped) budget end,
+// the prompt length, and alignment A > 0, it returns the effective end:
+// the largest multiple of A at or below the raw end, measured from position 0
+// and never below A. When that multiple cannot advance the cursor (alignment
+// finer than the remaining distance), the next multiple past start is used so
+// the lane stays live. An aligned end reaching or passing the prompt tail
+// becomes the final chunk ending exactly at the tail. A <= 0 leaves the raw
+// end unchanged.
+func alignedPrefillChunkEnd(start, rawEnd, promptLen, align int) int {
+	if align <= 0 {
+		return rawEnd
+	}
+	aligned := rawEnd / align * align
+	if aligned <= start {
+		aligned = (start/align + 1) * align
+	}
+	if aligned >= promptLen {
+		return promptLen
+	}
+	return aligned
 }
 
 // SetPrefixTree installs a generic PrefixTree for prefix-cache-aware prefill scheduling.
@@ -664,7 +740,14 @@ func (s *NativeScheduler) advanceQwenPrefill(ln *schedLane, iteration uint64) {
 		}
 		chunkTokens = take
 	}
-	end := start + chunkTokens
+	rawEnd := start + chunkTokens
+	end := rawEnd
+	// Deterministic serving constrains chunk boundaries, not only cache reuse:
+	// align the non-final end before the finality decision so a remainder
+	// smaller than one tile still terminates at the prompt tail.
+	if align := s.deterministicChunkAlign(); align > 0 {
+		end = alignedPrefillChunkEnd(start, rawEnd, len(ln.prompt), align)
+	}
 	chunk := ln.prompt[start:end]
 	final := end == len(ln.prompt)
 	sess := ln.takeSessionForModelLocked()
