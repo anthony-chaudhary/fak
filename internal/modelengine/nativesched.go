@@ -89,20 +89,22 @@ type NativeScheduler struct {
 	// maxObservedRunning is the high-water mark of the running set, written only by the
 	// run goroutine under mu. It lets a witness assert the waiting queue actually gated
 	// (peak == maxRunning) without racing on a live concurrency count.
-	maxObservedRunning  int
-	maxObservedKVBlocks int
-	sharedBatchSteps    uint64
-	sharedPanels        uint64
-	sharedMACs          uint64
-	q4kGateUpOutputSlab bool
-	residentQ4K         bool
-	metalQ4K            bool
-	sessionProfiler     func(NativeSessionLifecycle) *model.PhaseProfiler
-	captureQwenState    bool
-	qwenStateReceipts   []model.Qwen35MetalStateIdentityReceipt
-	qwenPrefillTokens   int
-	qwenPrefillCap      *residentQ4KPrefillCapability
-	closed              bool
+	maxObservedRunning   int
+	maxObservedKVBlocks  int
+	sharedBatchSteps     uint64
+	sharedPanels         uint64
+	sharedMACs           uint64
+	q4kGateUpOutputSlab  bool
+	residentQ4K          bool
+	metalQ4K             bool
+	sessionProfiler      func(NativeSessionLifecycle) *model.PhaseProfiler
+	captureQwenState     bool
+	qwenStateReceipts    []model.Qwen35MetalStateIdentityReceipt
+	qwenPrefillTokens    int
+	packedPrefillEnabled bool                 // compile-selected serving lane; fixed before publication
+	packedPrefillStats   PackedPrefillReceipt // guarded by mu
+	qwenPrefillCap       *residentQ4KPrefillCapability
+	closed               bool
 
 	// preemption is disabled until MaxBlocks is set. When enabled it treats MaxBlocks as
 	// the live paged-KV block budget and preempts running lanes at scheduler boundaries
@@ -376,7 +378,8 @@ func (s *NativeScheduler) Caps() []abi.Capability {
 func (s *NativeScheduler) WeightBearing() bool { return true }
 
 // Admit registers one request. By default it preserves the historical synchronous
-// prefill-before-enqueue path. An explicitly enabled, supported Qwen Q4_K lane instead
+// prefill-before-enqueue path. A qualification-selected dense host packed lane or
+// an explicitly enabled, supported Qwen Q4_K lane instead
 // enters WAITING in PREFILLING state and lets runIteration advance one bounded prompt
 // chunk before returning to decode work. A surviving lane's output remains independent
 // of promotion timing because each lane owns its KV and decode state.
@@ -455,6 +458,10 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 		s.qwenPrefillCap.model == s.m &&
 		nativeQwenResidentAppendEligible(s.m.Cfg, len(prompt)) {
 		ln.prefillChunkTokens = s.qwenPrefillTokens
+	}
+	if s.packedPrefillCandidateLocked(ln) {
+		ln.packedPrefill = true
+		ln.prefillChunkTokens = model.PackedPrefillMaxTokens
 	}
 	capacityGateEnabled := s.effectiveMaxRunningLocked() > 0 && s.preemptionEnabledLocked()
 	if capacityGateEnabled {
@@ -548,6 +555,7 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 				ln.promptCursor = candidate.promptCursor
 				ln.promptLen = candidate.promptLen
 				ln.prefillChunkTokens = candidate.prefillChunkTokens
+				ln.packedPrefill = candidate.packedPrefill
 				ln.materializing = false
 			}
 		}
@@ -633,6 +641,13 @@ func (s *NativeScheduler) initializeLaneExecution(ln *schedLane) error {
 		}
 	}
 	prefillChunkTokens := s.qwenPrefillChunkBudget(schedPrepare{prompt: ln.prompt, tok: ln.tok, q4k: ln.prefillQ4K}, sess, len(ln.prompt))
+	if ln.packedPrefill {
+		if sess.PackedPrefillEligible() {
+			prefillChunkTokens = model.PackedPrefillMaxTokens
+		} else {
+			ln.packedPrefill = false
+		}
+	}
 	state := schedLaneDecode
 	promptCursor := len(ln.prompt)
 	promptLen := len(ln.prompt)
@@ -805,7 +820,9 @@ func (s *NativeScheduler) canMaterializeLaneLocked(candidate *schedLane) nativeA
 		seen[ln] = struct{}{}
 		stateReservations++
 		blocks := s.laneKVBlocksLocked(ln)
-		if ln.materializing || ln.sess == nil {
+		if ln.materializing || ln.sess == nil || (ln.packedPrefill && ln.state == schedLanePrefilling) {
+			// Selected empty/partial packed owners retain their full prompt reservation
+			// until DECODE; resident bytes alone undercount unfinished growth.
 			blocks = s.lanePromptBlocksLocked(ln)
 		}
 		reservedBlocks += blocks
@@ -1161,6 +1178,7 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 			pendingMaterialization.promptCursor = candidate.promptCursor
 			pendingMaterialization.promptLen = candidate.promptLen
 			pendingMaterialization.prefillChunkTokens = candidate.prefillChunkTokens
+			pendingMaterialization.packedPrefill = candidate.packedPrefill
 		}
 		closed = s.closed
 		s.mu.Unlock()
@@ -1215,14 +1233,21 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 	iteration := s.iteration
 	if prefill != nil {
 		prefillStarted := s.now()
-		s.advanceQwenPrefill(prefill, iteration)
+		var packedReady []*schedLane
+		if prefill.packedPrefill {
+			packedReady = s.advancePackedPrefill(iteration)
+		} else {
+			s.advanceQwenPrefill(prefill, iteration)
+		}
 		// PhasePrefill only: ObservePrefillChunk counts prompt tokens forwarded by
 		// prefill, and advanceQwenPrefill may resolve a KV prefix hit that skips
 		// tokens before the real chunk with no separate signal here. Reporting the
 		// cursor delta would bill cache hits as prefill; the prefix-match family is
 		// the honest owner of those tokens.
 		s.recorder.ObservePhase(enginestep.PhasePrefill, s.now().Sub(prefillStarted))
-		if !prefill.terminal && prefill.state == schedLaneDecode {
+		if prefill.packedPrefill {
+			active = append(active, packedReady...)
+		} else if !prefill.terminal && prefill.state == schedLaneDecode {
 			active = append(active, prefill)
 		}
 		if len(active) > 0 {
@@ -1720,6 +1745,7 @@ type schedLane struct {
 	state              schedLaneState
 	promptCursor       int
 	prefillChunkTokens int
+	packedPrefill      bool
 	kvReuseHits        int
 	kvPinned           bool
 	kvPinUntil         time.Time

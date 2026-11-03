@@ -1365,6 +1365,37 @@ The upstream root LICENSE is Apache-2.0 and matches this repository's LICENSE.
 Both studied source files carry the SPDX contributor notices above. No root
 NOTICE exists at this exact revision (GitHub contents API returned 404).
 
+## vLLM packed heterogeneous host prefill
+
+The optional packed host-prefill path in `internal/model/batch_prefill_packed.go`
+and `internal/modelengine/nativesched_packed_prefill.go` adapts cumulative query
+offsets, per-request computed positions, and final-row logits selection from
+vLLM's `GPUModelRunner._prepare_inputs`:
+
+- Repository: https://github.com/vllm-project/vllm
+- Revision: `5c8ae7c74aaa99d1f7fbeea942fd7282e3413810`
+- Source: `vllm/v1/worker/gpu_model_runner.py`, blob
+  `d98498a4f97bfd89700829fd36df71bbab6437f5`
+- License: Apache-2.0, root LICENSE blob
+  `261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64`
+- Copyright: Copyright contributors to the vLLM project.
+
+Changed for Fak: bounded synchronous Go CPU FP32/Q8-weight projection panels
+reuse existing per-request causal attention and independently owned FP32 caches.
+The default-off `fak_vllm_packed_prefill` qualification tag selects the existing
+native syscall Engine scheduler, with at most 32 total prompt tokens per cohort,
+full-prompt admission reservations, and existing cancel/Close session retirement.
+Unsupported execution policies, observers, layouts and storage retain their
+historical paths; no GPU, asynchronous transfer, chat-planner or speed claim is made.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this adaptation except in compliance with the License. A copy is available at
+https://www.apache.org/licenses/LICENSE-2.0. Unless required by applicable law or
+agreed to in writing, software distributed under the License is distributed on
+an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+or implied. See the License for the specific language governing permissions and
+limitations under the License.
+
 ## vLLM bounded reverse-KMP prompt lookup
 
 `internal/model/ngram.go`, `longestRecentTokenSuffix`, adapts
