@@ -129,6 +129,7 @@ var verbTiers = map[string]VerbTier{
 	"guard-goal-question":   TierDev,
 	"harness":               TierDev,
 	"learning-observation":  TierDev,
+	"launch-census":         TierDev,
 	"leak-audit":            TierDev,
 	"lifecycle":             TierDev,
 	"mcp-filter-proof":      TierDev,

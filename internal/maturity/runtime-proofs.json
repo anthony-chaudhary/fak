@@ -2733,6 +2733,11 @@
         },
         {
             "command": "fak version modules",
+            "output_contains": "internal/rawdecode",
+            "lane": "rawdecode"
+        },
+        {
+            "command": "fak version modules",
             "output_contains": "internal/reachdelta",
             "lane": "reachdelta"
         },
