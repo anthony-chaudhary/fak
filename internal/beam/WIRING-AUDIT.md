@@ -18,6 +18,11 @@ package end-to-end. Read-only import scan from the repo root:
 | Is there a cmd/ entry point to it? | Yes. Critical-path read: `cmd/fak up -> agent -> beam`, distance 2, `on_critical_path=true` | `go run ./cmd/fak debt-lanes --workspace . --target-repo fak --lane beam --json` → `critical_path` |
 | Does the reader agree? | `evidence.integrated=true`, `related.dependents=[agent,gateway]` | same witness command → `lanes[beam]` |
 
+The census "critical path" row above is an import-graph reachability measure, not a
+runtime guarantee through `fak up`: the turnkey `fak up` chat handler refuses
+`beam_search` with 400 (`cmd/fak/up.go:1135`). The live runtime entry point is the
+`fak serve` native chat route (`/v1/chat/completions`).
+
 Live call chain (per-request opt-in; omitting the ext field preserves the old sampler):
 
 1. Ext field: `internal/gateway/wire.go:465` (`BeamSearch *agent.NativeBeamSearchParams json:"beam_search,omitempty"`).
