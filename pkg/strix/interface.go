@@ -16,10 +16,10 @@ type AccelerationEngine interface {
 
 // DeviceProfile describes physical silicon specifications and bandwidth limits for GFX1151 compute units.
 type DeviceProfile struct {
-	Architecture      string // "gfx1151"
-	CUCount           int    // 40
-	Wavefront         int    // 32
-	BusWidthBits      int    // 256
+	Architecture      string
+	CUCount           int
+	Wavefront         int
+	BusWidthBits      int
 	PeakBandwidthGBps float64
 }
 

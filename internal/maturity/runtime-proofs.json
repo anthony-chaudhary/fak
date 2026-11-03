@@ -3312,6 +3312,11 @@
             "lane": "stripeload"
         },
         {
+            "command": "fak serve help all",
+            "output_contains": "Strix Halo",
+            "lane": "strix"
+        },
+        {
             "command": "fak dev devindex leaf strmatch",
             "output_contains": "strmatch",
             "lane": "strmatch"
