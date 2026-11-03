@@ -7,8 +7,9 @@ import (
 	"testing"
 )
 
-// Invariant: KV INT2 quantization evaluation must verify artifact provenance and bound cache byte metrics.
-// Guard: Evaluate refuses tampered or corrupted evaluation records fail-closed.
+// TestKVInt2EvalLifecycle proves the observed-evidence path end to end: artifact
+// provenance is verified, cache byte metrics stay bounded, and tampered or
+// corrupted evaluation records are refused fail-closed.
 
 func TestKVInt2EvalLifecycle(t *testing.T) {
 	t.Parallel()
