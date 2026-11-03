@@ -161,7 +161,8 @@ func TestLiveArtifactSeriesProducesBoundedQwen38MetalMetrics(t *testing.T) {
 		observation.Record.Artifacts[n].SHA256 = digest
 	}
 
-	got := ProduceLiveSeries(now, 5*time.Minute, observation)
+	profile := RunProfile{ModelFamily: "Qwen3.8", Backend: "metal"}
+	got := ProduceLiveSeries(profile, now, 5*time.Minute, observation)
 	if got.Status != SeriesProduced || got.UnavailableReason != ReasonNone {
 		t.Fatalf("series status = %q/%q, want %q/%q", got.Status, got.UnavailableReason, SeriesProduced, ReasonNone)
 	}
@@ -172,7 +173,7 @@ func TestLiveArtifactSeriesProducesBoundedQwen38MetalMetrics(t *testing.T) {
 	if got.Prometheus != want {
 		t.Fatalf("Prometheus output mismatch:\n--- got ---\n%s--- want ---\n%s", got.Prometheus, want)
 	}
-	if again := ProduceLiveSeries(now, 5*time.Minute, observation); again != got {
+	if again := ProduceLiveSeries(profile, now, 5*time.Minute, observation); again != got {
 		t.Fatalf("producer is nondeterministic:\nfirst=%+v\nagain=%+v", got, again)
 	}
 	for _, forbidden := range []string{digest, "artifacts.example.test", observation.ModuleRev, observation.ModelFamily} {
@@ -224,6 +225,13 @@ func TestLiveArtifactSeriesFailsClosedWithTypedUnavailable(t *testing.T) {
 			want: ReasonIncomplete,
 		},
 		{
+			name: "mismatched model family",
+			mutate: func(observation *LiveObservation) {
+				observation.ModelFamily = "Qwen3.9"
+			},
+			want: ReasonIncomplete,
+		},
+		{
 			name: "stale observation",
 			mutate: func(observation *LiveObservation) {
 				observation.CompletedAt = now.Add(-6 * time.Minute)
@@ -246,12 +254,13 @@ func TestLiveArtifactSeriesFailsClosedWithTypedUnavailable(t *testing.T) {
 		},
 	}
 
+	profile := RunProfile{ModelFamily: "Qwen3.8", Backend: "metal"}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			observation := valid
 			observation.Record.Artifacts = append([]Artifact(nil), valid.Record.Artifacts...)
 			test.mutate(&observation)
-			got := ProduceLiveSeries(now, 5*time.Minute, observation)
+			got := ProduceLiveSeries(profile, now, 5*time.Minute, observation)
 			if got.Status != SeriesUnavailable || got.UnavailableReason != test.want {
 				t.Fatalf("series status = %q/%q, want %q/%q", got.Status, got.UnavailableReason, SeriesUnavailable, test.want)
 			}
@@ -268,6 +277,30 @@ func TestLiveArtifactSeriesFailsClosedWithTypedUnavailable(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLiveArtifactSeriesFailsClosedWithoutProfile(t *testing.T) {
+	now := time.Date(2026, 8, 29, 20, 0, 0, 0, time.UTC)
+	observation := LiveObservation{
+		CompletedAt: now.Add(-30 * time.Second),
+		ModuleRev:   "internal/nativeperfartifact@r3+g3e0ab906a",
+		ModelFamily: "Qwen3.8",
+		Backend:     "metal",
+		Record: Record{
+			CorrelationKey: keyA,
+			Engine:         "fak-native",
+			Artifacts: []Artifact{
+				ready(KindReceipt, "https://artifacts.example.test/receipt.json", now.Add(time.Hour)),
+			},
+		},
+	}
+	got := ProduceLiveSeries(RunProfile{}, now, 5*time.Minute, observation)
+	if got.Status != SeriesUnavailable || got.UnavailableReason != ReasonIncomplete {
+		t.Fatalf("series status = %q/%q, want %q/%q", got.Status, got.UnavailableReason, SeriesUnavailable, ReasonIncomplete)
+	}
+	if got.Prometheus != "" {
+		t.Fatalf("unavailable evidence emitted metrics: %s", got.Prometheus)
 	}
 }
 

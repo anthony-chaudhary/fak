@@ -111,7 +111,16 @@ const (
 	ReasonUntrustedScheme UnavailableReason = "untrusted_scheme"
 )
 
-// LiveObservation binds one completed Qwen3.8 Metal run to the scrubbed index
+// RunProfile identifies the qualified native run class whose fresh evidence may
+// enter the public artifact index. Callers resolve the profile from their own
+// configuration or model registry at the seam; the package deliberately carries
+// no model-family defaults so a milestone change never requires editing the index.
+type RunProfile struct {
+	ModelFamily string
+	Backend     string
+}
+
+// LiveObservation binds one completed qualified native run to the scrubbed index
 // record produced for it. Identity and revision are validation inputs, not
 // metric labels, so an observation cannot expand Prometheus cardinality.
 type LiveObservation struct {
@@ -132,15 +141,17 @@ type LiveSeriesResult struct {
 }
 
 // ProduceLiveSeries renders the existing fak_native_artifact_info contract for
-// one fresh, complete Qwen3.8 Metal observation. The output has four fixed
-// labels and at most MaxArtifacts samples; immutable revision and digest fields
-// are validated but intentionally not exported as labels.
-func ProduceLiveSeries(now time.Time, maxAge time.Duration, observation LiveObservation) LiveSeriesResult {
+// one fresh, complete observation matching the supplied run profile. The output
+// has four fixed labels and at most MaxArtifacts samples; immutable revision and
+// digest fields are validated but intentionally not exported as labels.
+func ProduceLiveSeries(profile RunProfile, now time.Time, maxAge time.Duration, observation LiveObservation) LiveSeriesResult {
 	unavailable := func(reason UnavailableReason) LiveSeriesResult {
 		return LiveSeriesResult{Status: SeriesUnavailable, UnavailableReason: reason}
 	}
 	if now.IsZero() || maxAge <= 0 || observation.CompletedAt.IsZero() || now.Before(observation.CompletedAt) ||
-		!moduleRevRE.MatchString(observation.ModuleRev) || observation.ModelFamily != "Qwen3.8" || observation.Backend != "metal" {
+		!moduleRevRE.MatchString(observation.ModuleRev) ||
+		profile.ModelFamily == "" || profile.Backend == "" ||
+		observation.ModelFamily != profile.ModelFamily || observation.Backend != profile.Backend {
 		return unavailable(ReasonIncomplete)
 	}
 	if now.Sub(observation.CompletedAt) > maxAge {
