@@ -89,7 +89,7 @@ func (s *NativeScheduler) AdmitImported(ctx context.Context, c *abi.ToolCall, se
 		putCtx:    ctx,
 		tok:       seq.Tokenizer,
 		q4k:       seq.Q4K,
-		tokens:    make(chan abi.EngineToken, 1),
+		tokens:    newNativeRequestOutbox(),
 		done:      make(chan struct{}),
 	}
 
