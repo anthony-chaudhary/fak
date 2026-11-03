@@ -230,3 +230,26 @@ scheduler owns cancellation, terminal channel close and session/KV release.
 This is distinct from the gateway SSE boundary collector. The full Apache
 License retained in [existing third-party notices](THIRD_PARTY_NOTICES.md)
 also applies to this adaptation.
+
+## vLLM fused QK normalization, RoPE and cache publication
+
+`internal/compute/cuda/qwen35_qknorm_rope_cache_vllm.cuh` directly adapts the
+subwarp RMS reduction and shared-memory rotary-pair traversal from
+`csrc/fused_qknorm_rope_cache_kernel.cu` in vLLM at revision
+`fa3b9d1377219247060d3c8b49eae199c9e7e154`:
+https://github.com/vllm-project/vllm/blob/fa3b9d1377219247060d3c8b49eae199c9e7e154/csrc/fused_qknorm_rope_cache_kernel.cu
+
+SPDX-License-Identifier: Apache-2.0
+SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
+Changed for Fak: one ordinary decode token, separate F32 Q/K/V and effective
+norm gains, unscaled theta-derived NeoX angles, an owned contiguous device-zero
+cache and a normalized F32 Kraw shadow for eviction. FAK retains allocation,
+admission, failure and completion ownership. The adapter does not import
+PyTorch, packed half inputs, FP8 conversion, cached angles or paged slot maps.
+The donor's subwarp reduction changes F32 arithmetic relative to FAK's retained
+256-thread RMS tree; this default-off source adaptation makes no bit-parity,
+hardware-qualification or measured-throughput claim.
+
+The full Apache License, Version 2.0 in [LICENSE](LICENSE) also applies to this
+adaptation. The pinned upstream repository has no root NOTICE file.

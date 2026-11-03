@@ -252,6 +252,7 @@ static int g_qwen35_gdn_test_fault_stage = 0;
 #include "cuda/iq4xs_mmvq.cuh"
 #include "cuda/transformer_ops.cuh"
 #include "cuda/qwen35_attention_postprocess.cuh"
+#include "cuda/qwen35_qknorm_rope_cache_vllm.cuh"
 #include "cuda/qwen35_residual_norm.cuh"
 #include "cuda/fattn_mma_hd256.cuh"
 #include "cuda/attention.cuh"
