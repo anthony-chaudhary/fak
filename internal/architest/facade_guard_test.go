@@ -40,6 +40,7 @@ var facadeOffList = map[string]string{
 	"quantprov":        "intentional registration-surface reachability entry; no init side effects (fak-private#2609)",
 	"tokenprofile":     "intentional registration-surface reachability entry; no init side effects (fak-private#2609)",
 	"toolgrammar":      "intentional registration-surface reachability entry; no init side effects (fak-private#2609)",
+	"vllmquant":        "intentional registration-surface reachability entry; no init side effects (fak-private#2609)",
 	"worktreewitness":  "intentional registration-surface reachability entry; no init side effects (fak-private#2609)",
 }
 
