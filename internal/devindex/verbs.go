@@ -382,6 +382,7 @@ var verbManifest = []Verb{
 	{Name: "recover", Synopsis: "closed-vocabulary refusal recovery: print or run the safe commands for a reason token", Lane: "cmd"},
 	{Name: "redteam", Synopsis: "run adversarial red-team test batteries with egress containment and honeytoken tripwires", Lane: "cmd"},
 	{Name: "refactor-verify", Synopsis: "read-only proof that a god-split / code-motion refactor dropped no top-level declaration (--expect-motion)", Lane: "cmd"},
+	{Name: "regime", Synopsis: "classify decode-step receipts LAUNCH_BOUND/COMPUTE_BOUND/MEM_BOUND/UNKNOWN from gap/busy/mem; --fail-on gate", Lane: "cmd"},
 	{Name: "relay", Synopsis: "the perpetual-session baton, read half: print what a fresh relay leg would receive from a baton file", Lane: "cmd"},
 	{Name: "release", Synopsis: "the release front door over the tools/release_*.py helpers (status/cut/tag/publish/...)", Lane: "cmd"},
 	{Name: "release-lock", Synopsis: "the process-safe release lock every VERSION/tag mutation must take (acquire/release/status)", Lane: "cmd"},

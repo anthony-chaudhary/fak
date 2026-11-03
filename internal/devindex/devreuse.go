@@ -308,6 +308,9 @@ var maintainerDevCommands = []string{
 	"readme-visual-audit",
 	"recall",
 	"refactor-verify",
+	// Multi-signal decode-step overhead-regime classifier over committed perf
+	// receipts: fak's own decode-regime diagnostics, not a portable adopter pattern.
+	"regime",
 	"relay",
 	"release",
 	"release-lock",

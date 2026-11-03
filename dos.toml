@@ -1730,6 +1730,9 @@ traceabi     = ["pkg/traceabi/**"]
 fitplan = ["internal/fitplan/**"]
 sourceleasecontrol = ["pkg/sourceleasecontrol/**"]
 hostshare    = ["internal/hostshare/**"]
+regime             = ["internal/regime/**"]
+skilldiscovery     = ["internal/skilldiscovery/**"]
+grammarintegration = ["internal/grammarintegration/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose
