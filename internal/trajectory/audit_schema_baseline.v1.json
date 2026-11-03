@@ -206,7 +206,19 @@
         {"path": "$.id", "types": ["string"]},
         {"path": "$.parentId", "types": ["string"]},
         {"path": "$.summary", "types": ["string"]},
-        {"path": "$.systemMessage", "types": ["string"]},
+        {"path": "$.systemMessage", "types": ["object", "string"]},
+        {"path": "$.systemMessage.content", "types": ["string"]},
+        {"path": "$.systemMessage.role", "types": ["string"]},
+        {"path": "$.systemMessage.sections", "types": ["object"]},
+        {"path": "$.systemMessage.sections.cwd", "types": ["string"]},
+        {"path": "$.systemMessage.sections.docs", "types": ["string"]},
+        {"path": "$.systemMessage.sections.preamble", "types": ["string"]},
+        {"path": "$.systemMessage.sections.project_context", "types": ["string"]},
+        {"path": "$.systemMessage.sections.rules", "types": ["string"]},
+        {"path": "$.systemMessage.sections.skills", "types": ["string"]},
+        {"path": "$.systemMessage.sections.tools", "types": ["string"]},
+        {"path": "$.systemMessage.timestamp", "types": ["number"]},
+        {"path": "$.systemMessage.toolsAdded", "types": ["array"]},
         {"path": "$.timestamp", "types": ["string"]},
         {"path": "$.tokensBefore", "types": ["number"]},
         {"path": "$.type", "types": ["string"]},
@@ -227,17 +239,29 @@
     },
     {
       "source": "pi",
+      "event_type": "context_edit",
+      "builds": [{"harness": "pi"}],
+      "fields": [
+        {"path": "$", "types": ["object"]},
+        {"path": "$.id", "types": ["string"]},
+        {"path": "$.parentId", "types": ["string"]},
+        {"path": "$.replacement", "types": ["null"]},
+        {"path": "$.targetId", "types": ["string"]},
+        {"path": "$.timestamp", "types": ["string"]},
+        {"path": "$.type", "types": ["string"]}
+      ]
+    },
+    {
+      "source": "pi",
       "event_type": "custom",
       "builds": [{"harness": "pi"}],
       "fields": [
         {"path": "$", "types": ["object"]},
         {"path": "$.customType", "types": ["string"]},
         {"path": "$.data", "types": ["object"]},
-        {"path": "$.data.attempt", "types": ["number"]},
-        {"path": "$.data.attempted", "types": ["boolean"]},
+        {"path": "$.data.attempted", "types": ["boolean", "number"]},
         {"path": "$.data.cls", "types": ["string"]},
         {"path": "$.data.consecutive", "types": ["number"]},
-        {"path": "$.data.delayMs", "types": ["number"]},
         {"path": "$.data.elapsedMs", "types": ["number"]},
         {"path": "$.data.event", "types": ["string"]},
         {"path": "$.data.exitCode", "types": ["number"]},
@@ -246,9 +270,24 @@
         {"path": "$.data.status", "types": ["number"]},
         {"path": "$.data.stopName", "types": ["string"]},
         {"path": "$.data.stopReason", "types": ["string"]},
-        {"path": "$.data.switched", "types": ["boolean"]},
+        {"path": "$.data.tried", "types": ["array"]},
         {"path": "$.id", "types": ["string"]},
-        {"path": "$.parentId", "types": ["null"]},
+        {"path": "$.parentId", "types": ["null", "string"]},
+        {"path": "$.timestamp", "types": ["string"]},
+        {"path": "$.type", "types": ["string"]}
+      ]
+    },
+    {
+      "source": "pi",
+      "event_type": "custom_message",
+      "builds": [{"harness": "pi"}],
+      "fields": [
+        {"path": "$", "types": ["object"]},
+        {"path": "$.content", "types": ["string"]},
+        {"path": "$.customType", "types": ["string"]},
+        {"path": "$.display", "types": ["boolean"]},
+        {"path": "$.id", "types": ["string"]},
+        {"path": "$.parentId", "types": ["string"]},
         {"path": "$.timestamp", "types": ["string"]},
         {"path": "$.type", "types": ["string"]}
       ]
@@ -262,11 +301,16 @@
         {"path": "$.id", "types": ["string"]},
         {"path": "$.message", "types": ["object"]},
         {"path": "$.message.api", "types": ["string"]},
-        {"path": "$.message.content", "types": ["array"]},
+        {"path": "$.message.content", "types": ["array", "string"]},
         {"path": "$.message.details", "types": ["object"]},
+        {"path": "$.message.details.agentScope", "types": ["string"]},
         {"path": "$.message.details.diff", "types": ["string"]},
         {"path": "$.message.details.firstChangedLine", "types": ["number"]},
+        {"path": "$.message.details.fullOutputPath", "types": ["string"]},
+        {"path": "$.message.details.mode", "types": ["string"]},
         {"path": "$.message.details.patch", "types": ["string"]},
+        {"path": "$.message.details.projectAgentsDir", "types": ["string"]},
+        {"path": "$.message.details.results", "types": ["array"]},
         {"path": "$.message.details.truncation", "types": ["object"]},
         {"path": "$.message.details.truncation.content", "types": ["string"]},
         {"path": "$.message.details.truncation.firstLineExceedsLimit", "types": ["boolean"]},
@@ -289,6 +333,7 @@
         {"path": "$.message.responseModel", "types": ["string"]},
         {"path": "$.message.role", "types": ["string"]},
         {"path": "$.message.sections", "types": ["object"]},
+        {"path": "$.message.sections.cwd", "types": ["string"]},
         {"path": "$.message.sections.docs", "types": ["string"]},
         {"path": "$.message.sections.preamble", "types": ["string"]},
         {"path": "$.message.sections.project_context", "types": ["string"]},
@@ -327,7 +372,7 @@
         {"path": "$", "types": ["object"]},
         {"path": "$.id", "types": ["string"]},
         {"path": "$.modelId", "types": ["string"]},
-        {"path": "$.parentId", "types": ["string"]},
+        {"path": "$.parentId", "types": ["null", "string"]},
         {"path": "$.provider", "types": ["string"]},
         {"path": "$.timestamp", "types": ["string"]},
         {"path": "$.type", "types": ["string"]}
@@ -344,6 +389,19 @@
         {"path": "$.timestamp", "types": ["string"]},
         {"path": "$.type", "types": ["string"]},
         {"path": "$.version", "types": ["number"]}
+      ]
+    },
+    {
+      "source": "pi",
+      "event_type": "session_info",
+      "builds": [{"harness": "pi"}],
+      "fields": [
+        {"path": "$", "types": ["object"]},
+        {"path": "$.id", "types": ["string"]},
+        {"path": "$.name", "types": ["string"]},
+        {"path": "$.parentId", "types": ["null", "string"]},
+        {"path": "$.timestamp", "types": ["string"]},
+        {"path": "$.type", "types": ["string"]}
       ]
     },
     {

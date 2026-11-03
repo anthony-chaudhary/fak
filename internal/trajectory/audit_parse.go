@@ -980,6 +980,10 @@ func parsePiAuditRecord(record map[string]any, line int, rel string, state *audi
 		default:
 			// system or unknown roles: storage-plane only.
 		}
+	case "context_edit", "custom_message", "session_info":
+		// Harness bookkeeping envelopes (context edits, router-injected
+		// annotations, session naming): storage-plane only; there is no token
+		// or tool semantics to extract.
 	}
 }
 
