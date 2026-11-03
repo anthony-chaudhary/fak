@@ -20,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/affectedtests"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -418,6 +419,10 @@ func executeValidateEventTests(ctx context.Context, witness *validateTestWitness
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	windowgate.ConfigureBackgroundCommand(cmd)
+	// Own cancellation of the verification child tree, not just the Go driver.
+	// This is containment, not proof that every descendant has drained; the
+	// conservative receipt above intentionally remains unchanged.
+	procguard.ConfigureProcessTreeCancel(cmd)
 	err := cmd.Start()
 	if err == nil {
 		witness.Started = true

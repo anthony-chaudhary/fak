@@ -4,6 +4,15 @@ description: "The gap behind fak commit 0094bae9c8e668a31459c0a614aae2e0b15b97b0
 ---
 # Agent skill portability research — 2026-08-14
 
+> **Amendment, 2026-11-02:** the pointer regime below is retired. `fak project-assets sync`
+> now writes `.agents/skills/<name>/SKILL.md` as a **one-hop mirror**: a regular-file,
+> full-body copy of the canonical `SKILL.md` with `generated-by` + `canonical` provenance
+> keys injected in the frontmatter. The separate native-adapter exception (for example
+> `fleet-wave`) no longer exists: its seat-routing semantics live in the canonical body and
+> the mirror carries them verbatim. A file under `.agents/skills` without the `generated-by`
+> marker is still treated as a deliberate native artifact and preserved by sync. Current
+> authority: [`docs/integrations/project-assets.md`](../integrations/project-assets.md).
+
 ## Verdict
 
 The gap behind fak commit `0094bae9c8e668a31459c0a614aae2e0b15b97b0` was real: Claude's

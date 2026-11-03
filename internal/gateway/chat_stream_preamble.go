@@ -47,9 +47,24 @@ package gateway
 // the legacy /v1/completions wire adopted the same timing (#5514). chatStreamWriter now
 // embeds that writer and supplies only chat's own frames; the behavior above is
 // unchanged.
+//
+// Opt-in route-decision preamble (lemonade borrow, ADAPT verdict — re-expressed, no
+// copied code; source lemonade-sdk/lemonade src/cpp/server/route_decision_response.cpp
+// @bc8d99ccfee301742f1dd86a3f6ec406bb8a863d, Apache-2.0): streaming clients behind
+// proxies that drop custom headers cannot see which upstream and model served them,
+// because every routing fact this gateway publishes otherwise rides response HEADERS.
+// When FAK_GATEWAY_STREAM_ROUTE_PREAMBLE names the serve's chosen upstream, open()
+// emits exactly ONE SSE comment line (": " prefix — spec-legal between events, ignored
+// by OpenAI-compatible parsers) carrying that upstream plus the stream's announced
+// model, after the status line and SSE headers and strictly before the first data
+// chunk. It is a comment, never a data event: the first data frame stays byte-identical
+// with the flag off, and the wire gains no non-standard event shape.
 
 import (
+	"fmt"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 )
@@ -68,17 +83,106 @@ type chatStreamWriter struct {
 	// chunk — including the opening role chunk — carries `usage:null`, and the turn is
 	// closed by exactly one usage-only chunk; when false the field is never written.
 	includeUsage bool
+	// routePreamble is the opt-in route-decision comment payload (see the file
+	// header), or "" when the flag is off. When non-empty, open() installs a one-shot
+	// transport shim so the line ": <routePreamble>\n\n" lands between the SSE headers
+	// and the first data frame without touching the shared openWith mechanics.
+	routePreamble string
 }
 
 // newChatStreamWriter mints the stream identity (id + created) at REQUEST time rather
 // than at completion time, because the opening chunk now leaves before the turn
 // exists and every later chunk has to agree with it. model is the request model (see
 // the file comment on the #82 seam). includeUsage is the client's stream_options
-// opt-in (see the field comment).
+// opt-in (see the field comment). The route-decision preamble payload is resolved
+// here, at request time, from the operator's opt-in flag (same per-request env read
+// as the FAK_GATEWAY_JSON_SCHEMA_* caps).
 func newChatStreamWriter(w http.ResponseWriter, model string, includeUsage bool) *chatStreamWriter {
 	return &chatStreamWriter{
 		sseStreamWriter: newSSEStreamWriter(w, "chatcmpl-fak-", model),
 		includeUsage:    includeUsage,
+		routePreamble:   streamRoutePreamblePayload(os.Getenv(streamRoutePreambleEnv), model),
+	}
+}
+
+// streamRoutePreambleEnv opts the buffered chat stream into the in-band route-decision
+// preamble. Its value NAMES the serve's chosen upstream — the backend identity the
+// operator declares for this process ("inkernel", "proxy", ...). The value is the name
+// rather than a bare switch because the per-request planner choice is not known before
+// the decode (the preamble leaves before it) and no process-wide registry of the
+// selected planner exists at this seam; the operator who stands up the serve knows the
+// topology they configured. Empty, "0", "false", "off", and "no" (any case) leave the
+// preamble off, which is the default.
+const streamRoutePreambleEnv = "FAK_GATEWAY_STREAM_ROUTE_PREAMBLE"
+
+// streamRoutePreamblePayload builds the comment payload "fak-route upstream=<label>
+// model=<model>", or "" when the flag disables the preamble. label is the operator's
+// declared upstream (sanitized); model is the stream's ANNOUNCED model — the constant
+// every chunk on this wire carries — not the post-decode served-model echo, which stays
+// on the non-streaming JSON response per the #82 seam. Sanitization keeps the value to
+// one physical line so a misconfigured flag can never terminate or inject into the
+// comment frame.
+func streamRoutePreamblePayload(raw, model string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "0", "false", "off", "no":
+		return ""
+	}
+	upstream := sseCommentField(raw)
+	if upstream == "" {
+		return ""
+	}
+	m := sseCommentField(model)
+	if m == "" {
+		m = "unknown"
+	}
+	return "fak-route upstream=" + upstream + " model=" + m
+}
+
+// sseCommentField strips CR/LF and all other ASCII control characters (and trims
+// surrounding spaces) so a configured value can never break out of the single-line
+// SSE comment frame it rides in.
+func sseCommentField(v string) string {
+	var b strings.Builder
+	for _, r := range v {
+		if r >= ' ' && r != '\u007f' {
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// routePreambleWriter is the one-shot transport shim open() installs when the
+// route-decision preamble is opted in. Its FIRST Write emits the SSE comment line
+// (then flushes) before delegating, so the comment lands after the status line and
+// headers the shared preamble has already committed and strictly before the first
+// data frame; every later write passes through untouched. Header/WriteHeader forward
+// verbatim, and Flush implements http.Flusher so the shared preamble's flush-on-write
+// behavior (writeSSEData asserts the concrete writer) is unchanged with the shim in
+// place.
+type routePreambleWriter struct {
+	inner   http.ResponseWriter
+	comment string
+	armed   bool
+}
+
+func (r *routePreambleWriter) Header() http.Header { return r.inner.Header() }
+
+func (r *routePreambleWriter) WriteHeader(statusCode int) { r.inner.WriteHeader(statusCode) }
+
+func (r *routePreambleWriter) Write(b []byte) (int, error) {
+	if r.armed {
+		r.armed = false
+		if _, err := fmt.Fprintf(r.inner, ": %s\n\n", r.comment); err != nil {
+			return 0, err
+		}
+		r.Flush()
+	}
+	return r.inner.Write(b)
+}
+
+func (r *routePreambleWriter) Flush() {
+	if f, ok := r.inner.(http.Flusher); ok {
+		f.Flush()
 	}
 }
 
@@ -107,7 +211,16 @@ func (p *chatStreamWriter) chunk(d ChatDelta, finish *string, usage *agent.Usage
 //
 // It returns the write error when the client has already gone away, so the caller can
 // abandon the turn instead of decoding for a socket nobody is reading.
+//
+// With the route-decision preamble opted in, the one-shot comment shim is installed
+// BEFORE openWith runs, so the comment frame is injected on the first write — after
+// the status line and SSE headers, before the first data frame — while the shared
+// openWith mechanics stay untouched (they live in sse_stream_preamble.go, outside
+// this file's seam).
 func (p *chatStreamWriter) open() error {
+	if p.routePreamble != "" && !p.opened {
+		p.w = &routePreambleWriter{inner: p.w, comment: p.routePreamble, armed: true}
+	}
 	return p.openWith(p.chunk(ChatDelta{Role: agent.RoleAssistant}, nil, nil))
 }
 

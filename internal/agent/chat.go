@@ -450,6 +450,9 @@ func (u Usage) ReasoningTokens() int {
 
 // Completion is a planner's response for one turn.
 type Completion struct {
+	// NativeBeamSearch is emitted only by the explicit owned CPU search path.
+	NativeBeamSearch *NativeBeamSearchReceipt
+
 	Message            Message
 	FinishReason       string
 	Usage              Usage
@@ -581,6 +584,9 @@ type NativeDecodeTokenIDs struct {
 // planner like HTTPPlanner already runs temperature 0, so the two only differ when
 // the caller also wants top_p/stop, and a bare float64 could not carry that intent.
 type SampleParams struct {
+	// NativeBeamSearch is opt-in and never forwarded to an upstream provider.
+	NativeBeamSearch *NativeBeamSearchParams
+
 	ServiceTier            modelroute.ServiceMode
 	MultimodalMode         model.MultimodalMode
 	nativeVisionEncodeOnly bool

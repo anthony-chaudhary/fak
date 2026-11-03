@@ -210,7 +210,7 @@ func TestNativePerformanceAttachSystemBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Schema != nativeperf.ReceiptSchemaV2 || len(first.SystemBaselines) != 1 {
+	if first.Schema != nativeperf.ReceiptSchemaV3 || len(first.SystemBaselines) != 1 {
 		t.Fatalf("first=%+v", first)
 	}
 	originalData, err := os.ReadFile(receiptPath)

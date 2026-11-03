@@ -894,14 +894,29 @@ func buildArtifactOutputTokenizerFromGGUF(gg *ggufload.File) *tokenizer.Tokenize
 
 type productionModel struct{ model *model.Model }
 
+// Config reports the loaded model's effective configuration, including the
+// architecture parameters the executor verifies against.
 func (m *productionModel) Config() model.Config { return m.model.Cfg }
-func (m *productionModel) IsEOS(id int) bool    { return m.model.Cfg.IsEOS(id) }
-func (m *productionModel) CloseWeights() error  { return m.model.CloseWeights() }
+
+// IsEOS reports whether token id terminates generation under the loaded
+// model's end-of-sequence policy.
+func (m *productionModel) IsEOS(id int) bool { return m.model.Cfg.IsEOS(id) }
+
+// CloseWeights releases the weight storage and device handles retained by
+// the loaded model after execution completes.
+func (m *productionModel) CloseWeights() error { return m.model.CloseWeights() }
+
+// NewCPUSession opens a CPU inference session for req with the request's
+// quantization flags applied.
 func (m *productionModel) NewCPUSession(req Request) session {
 	s := m.model.NewSession()
 	applySessionFlags(s, req, false)
 	return s
 }
+
+// NewCandidateSession opens the session a verification candidate runs in: a
+// checked session on be when a backend is present, otherwise a plain CPU
+// session, with the candidate metal/quant flags applied either way.
 func (m *productionModel) NewCandidateSession(be compute.Backend, req Request) (session, error) {
 	if be == nil {
 		s := m.model.NewSession()

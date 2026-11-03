@@ -150,16 +150,44 @@ func TestNativeSchedulerLaneCarriesSubmitPriority(t *testing.T) {
 // the continuous-batching shape. Three lanes are admitted and advanced by ONE shared
 // StepBatch loop; cancelling one lane mid-run frees it (terminal context.Canceled +
 // KV reclaim) WITHOUT disturbing the other two, which decode to completion.
+// fak-test:runtime medium est=1s lane=default
 func TestNativeSchedulerBatchesLanesAndFreesCancelled(t *testing.T) {
 	m := model.NewSynthetic(SyntheticConfig())
 	s := NewNativeScheduler(m)
-	defer s.Close()
+	// Buffering must not decide whether all three requests form a shared batch
+	// or whether cancellation beats the final token. Hold real execution until
+	// admissions and readers are installed, then stop the cancel lane before
+	// its third forward until the reader has observed two tokens and canceled.
+	s.executor.Lock()
+	var unlock sync.Once
+	release := func() { unlock.Do(s.executor.Unlock) }
+	cancelBarrier := make(chan struct{})
+	var unbarrier sync.Once
+	releaseCancel := func() { unbarrier.Do(func() { close(cancelBarrier) }) }
+	t.Cleanup(func() {
+		s.Close()
+		releaseCancel()
+		release()
+		wait, stop := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stop()
+		if err := s.CloseAndWait(wait); err != nil {
+			t.Errorf("cancellation fixture did not stop: %v", err)
+		}
+	})
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	calls := []*abi.ToolCall{
 		inlineCall("search_flights", `{"from":"SFO"}`),
 		inlineCall("get_user_details", `{"id":1}`),
 		inlineCall("list_all_airports", `{"region":"EU"}`),
+	}
+	const cancelIdx = 1
+	const readBeforeCancel = 2
+	s.beforeModelExecute = func(kind nativeSchedulerEventKind, ln *schedLane) {
+		if kind == nativeSchedulerEventDecode && ln.tool == calls[cancelIdx].Tool && ln.emitted > readBeforeCancel {
+			<-cancelBarrier
+		}
 	}
 	reqs := make([]abi.EngineRequest, len(calls))
 	for i, c := range calls {
@@ -169,9 +197,6 @@ func TestNativeSchedulerBatchesLanesAndFreesCancelled(t *testing.T) {
 		}
 		reqs[i] = r
 	}
-
-	const cancelIdx = 1
-	const readBeforeCancel = 2
 
 	// Drain the two survivor lanes fully in their own goroutines.
 	counts := make([]int, len(reqs))
@@ -189,6 +214,8 @@ func TestNativeSchedulerBatchesLanesAndFreesCancelled(t *testing.T) {
 		}(i, r)
 	}
 
+	release()
+
 	// Cancel the middle lane after reading a couple of tokens.
 	cr := reqs[cancelIdx]
 	got := 0
@@ -196,6 +223,7 @@ func TestNativeSchedulerBatchesLanesAndFreesCancelled(t *testing.T) {
 		got++
 		if got == readBeforeCancel {
 			cr.Cancel()
+			releaseCancel()
 			break
 		}
 	}

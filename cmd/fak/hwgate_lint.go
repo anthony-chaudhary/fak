@@ -6,9 +6,8 @@ package main
 // "no GPU on this host", "can't run the CUDA witness without a device", "not
 // reproducible on this laptop". Each hit types into a closed anti-pattern Class
 // (NO_LOCAL_GPU / NO_LOCAL_RUNTIME / LOCAL_BOUNDARY) and carries the fixed
-// remediation: dispatch to a sanctioned compute node (GCP fak-realmodel, the DGX
-// via dgxbridge, da33, the nightrun pipeline), or hand the operator the exact
-// ready-to-run command. This host is the control point, not the compute boundary.
+// remediation: select an eligible enrolled local or LAN node and verify current
+// admission and workload capability before dispatch.
 //
 //	fak hwgate-lint --self-test [--json]     -> scan the built-in corpus; exit 0 iff every case scans as labeled
 //	fak hwgate-lint --file out.txt [--json]  -> scan a file ("-" = stdin)
@@ -112,7 +111,7 @@ func runHwGateSelfTest(stdout io.Writer, asJSON bool) int {
 func renderHwGateReport(rep hwgatelint.Report) string {
 	if rep.Count == 0 {
 		if rep.Suppressed {
-			return "fak hwgate-lint: clean — the turn already names a sanctioned route (dispatched to the fleet or handed the operator a command); fleet-safe.\n"
+			return "fak hwgate-lint: clean — the turn already names a eligible local or LAN route; fleet-safe.\n"
 		}
 		return "fak hwgate-lint: clean — no local-hardware blocker declared as terminal; fleet-safe.\n"
 	}
@@ -145,10 +144,10 @@ the closed anti-pattern vocabulary (Class -> the local resource declared missing
   NO_LOCAL_RUNTIME   a non-Go runtime (Node.js/npm) declared missing as the blocker
   LOCAL_BOUNDARY     THIS machine treated as the limit (no naming of a device)
 
-  every Class shares one remedy: dispatch the work to a sanctioned compute node
-  (GCP fak-realmodel, the DGX via dgxbridge, da33, the nightrun pipeline) — or, if
-  the credential/bridge session is missing, hand the operator the ready-to-run
-  command. A turn that already names the lab route scans clean (suppressed).
+  every Class shares one remedy: select an eligible enrolled local or LAN node.
+  Check current trust, lease, reachability, runtime, and device capability before
+  dispatch. Cloud or retired-node mentions and operator handoffs do not establish
+  testing capacity or a passing hardware witness.
 
 verdict & exit code:
   clean (0)           no local-hardware blocker declared as terminal — fleet-safe

@@ -295,6 +295,11 @@ var refClassByExactPath = map[string]string{
 	"internal/macbench/agentic_mtp.go": RefClassDevelopmentSource,
 	"internal/macbench/validation.go":  RefClassDevelopmentSource,
 
+	// Lane wiring-audit record: its single trunk ref is dated witness prose
+	// ("local as of <date>, not yet on origin/main") stating where everyday
+	// work lands — the same development-source operator law as AGENTS.md.
+	"internal/worktree/WIRING-AUDIT.md": RefClassDevelopmentSource,
+
 	"tools/bench_node.README.md": RefClassFixture,
 	"tools/gcp_bench.py":         RefClassFixture,
 }
@@ -310,6 +315,11 @@ func ClassifyHardcodedRef(path, line string) string {
 		return RefClassWorkflowCovered
 	case strings.HasPrefix(p, "internal/branchrole/"):
 		return RefClassAuditDoc
+	case strings.HasPrefix(p, ".agents/skills/"):
+		// Agent skill docs are operational prompt text: their git-workflow
+		// instructions (sync, review, worktree) land everyday work on the trunk,
+		// the same development-source family as AGENTS.md / CONTRIBUTING.md.
+		return RefClassDevelopmentSource
 	case strings.HasPrefix(p, "docs/stable-releases/") ||
 		strings.HasPrefix(p, "docs/_audits/") ||
 		strings.HasPrefix(p, "docs/"):

@@ -754,19 +754,17 @@ func TestPiLaunchSkillWiring(t *testing.T) {
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatalf("mkdir nested: %v", err)
 	}
-	got := discoverPiSkillPack(nested)
-	wantRoots := []string{agentsSkills, claudeSkills}
-	for _, want := range wantRoots {
-		if !strings.Contains(got, want) {
-			t.Errorf("discoverPiSkillPack(%q) = %q, want it to contain %q", nested, got, want)
-		}
+	// .agents/skills is the complete one-hop pack, so even with .claude/skills also
+	// present only that single root may be discovered: registering both would make
+	// pi register every skill twice (name-collision warnings for the whole pack).
+	if got := discoverPiSkillPack(nested); got != agentsSkills {
+		t.Fatalf("discoverPiSkillPack(%q) = %q, want exactly %q", nested, got, agentsSkills)
 	}
 
-	argv := buildPiLaunchArgv(piLaunchOptions{command: "pi", provider: "fak", model: "m", skillPack: got})
+	argv := buildPiLaunchArgv(piLaunchOptions{command: "pi", provider: "fak", model: "m", skillPack: agentsSkills})
 	want := []string{
 		"pi", "--provider", "fak", "--model", "m",
 		"--skill", agentsSkills,
-		"--skill", claudeSkills,
 	}
 	if len(argv) != len(want) {
 		t.Fatalf("argv length = %d, want %d: %v", len(argv), len(want), argv)

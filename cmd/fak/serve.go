@@ -109,6 +109,7 @@ func configureServeToolEngines() {
 // definition order, so the boot stages consume them without threading four dozen
 // locals through every call.
 type serveFlags struct {
+	embeddingPooling             *string
 	topologyShadowInput          *string
 	workspaceAdmissionPermissive *bool
 	configPath                   *string
@@ -142,6 +143,11 @@ type serveFlags struct {
 	remoteKVToken                *string
 	remoteKVTimeout              *time.Duration
 	engineID                     *string
+	nativeHostSwapBytes          *int64
+	nativeChatTemplateFile       *string
+	nativeChatTemplateSHA256     *string
+	nativeChatTemplateModel      *string
+	nativeChatTemplate           *agent.NativeChatTemplate
 	backendName                  *string
 	qwen38Runtime                *string
 	llamaServer                  *string
@@ -314,6 +320,8 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.remoteKVTimeout = fs.Duration("remote-kv-timeout", l3kv.DefaultRemoteKVTimeout, "remote KV connectivity probe timeout")
 	sf.engineID = fs.String("engine", "mock", "registered engine id that fak_syscall dispatches an allowed call to: mock, inkernel, vllm, sglang, llm-d, dynamo, or another registered driver (default: mock; select inkernel explicitly for fak-native model execution)")
 	sf.backendName = fs.String("backend", "", "compute backend for the in-kernel chat decode (with --gguf, no --base-url): --backend overrides FAK_BACKEND; use 'auto', 'cpu', or a registered name. Omitted/auto selects usable Vulkan on Linux/Windows, preserves Metal auto-selection on Darwin, and otherwise uses CPU. Vulkan requires -tags vulkan plus FAK_VULKAN_SPIRV; an unavailable named backend fails loud.")
+	sf.nativeHostSwapBytes = fs.Int64("native-kv-host-swap-bytes", 0, "bound retained serialized host-KV bytes in the native syscall scheduler (0 = unlimited). Requires a positive native KV block budget; full capacity ends the selected request, never silently recomputes. Excludes logits, staging, devices and process RSS")
+	registerServeNativeChatTemplateFlags(fs, sf)
 	nativeControls := registerNativeControlFlags(fs)
 	sf.nativeQwenQ4KPrefillChunk = nativeControls.prefillChunk
 	sf.nativeQwen35MetalGDNSequence = nativeControls.qwen35GDNSequence
@@ -344,6 +352,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.routeManifest = fs.String("route-manifest", "", "model-routing policy to install: each fak_syscall call is classified into a modelroute.Subject and a single-model (PICK) plan binds abi.ToolCall.Engine before Submit, so the residency PDP adjudicates the real route (#601). Empty (default) leaves Engine unset → the kernel default engine, byte-for-byte the pre-routing behavior. A malformed manifest fails startup loud (a mis-routed model is a security boundary, never a silent default). The installed file is HOT-RELOADED: an edit is picked up without a restart and swapped atomically (a request classifies against the whole old or whole new policy, never a torn read); a malformed edit is rejected and the last-good policy stays installed (#842).")
 	sf.routeAccounts = fs.String("route-accounts", "", "model-ACCOUNT roster (fak-accounts/v1) to install ALONGSIDE --route-manifest (#2528): after the manifest PICKs an abstract model id, the roster BINDS it to a concrete provider account + upstream wire model, and the account-resolved EngineRoute (openai:acct/model, local:acct/model) — not the bare plan-member string — is written to abi.ToolCall.Engine before Submit, so the residency PDP adjudicates the ACCOUNT-resolved route and an ensemble member each binds independently. A route to a provider with no registered adapter fails LOUD at dispatch (no silent fallback to the default engine). Credentials are env-var NAMES in the roster, never secrets. Empty (default) leaves the plan-member string as the route, byte-for-byte the pre-#2528 behavior. A malformed roster fails startup loud. Preflight it no-spend first with `fak api-host acceptance --from-model-accounts FILE`.")
 	sf.ggufPath = fs.String("gguf", "", "load these GGUF weights into the in-kernel engine at boot; the load is part of the measured startup sequence and its phase breakdown is exposed on /metrics. Default path is lean-Q8 (Q4→f32→Q8 round-trip); set FAK_Q4K=1 for the direct-resident-Q4_K path (Qwen3.6-27B q4_k_m, the P1/P2 decode lever)")
+	sf.embeddingPooling = fs.String("embedding-pooling", "", "OPTIONAL learned causal dense-F32/Q8_0 CPU /v1/embeddings: mean or last, final norm + L2; empty keeps hash backend. Requires local compatible model/tokenizer; not trained embedding-quality qualification.")
 	sf.tokPath = fs.String("tokenizer", "", "OPTIONAL override for the in-kernel CHAT planner's tokenizer. With --gguf and no --base-url, /v1/chat/completions AND /v1/messages already serve the in-kernel model (real ChatML chat) using the GGUF's EMBEDDED tokenizer; pass this only to override it (e.g. an SPM-only checkpoint with no embedded BPE tokenizer, or a custom vocab). Accepts a tokenizer.json or its directory. e.g. ~/.cache/fak-models/tokenizers/qwen3.6")
 	sf.ctxViewBudget = fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget, "wire the ctxplan context PLANNER into the live serve loop: each buffered turn, re-materialize the forwarded history as an O(1) planned VIEW under this resident-token budget (a planned view in place of appending the whole transcript, #555). DEFAULT-ON at a conservative 8000 resident tokens; pass 0 to disable (leaves the existing path byte-for-byte unchanged). The planner only ever SHORTENS and falls open to the full history on any doubt; on the Anthropic passthrough it keeps the cached prefix byte-identical (witness: docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md). The streaming fast-path bypasses this; the buffered turn path is what gets planned.")
 	sf.compactHistoryBudget = fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget, "on the Anthropic PASSTHROUGH (an upstream --base-url anthropic), compact OLD conversation turns in the OUTBOUND request body down to this resident-token budget while keeping the cache_control prefix BYTE-IDENTICAL, so the upstream cache hit survives. This reaches the flagship passthrough the streaming ctxplan view cannot (#555). DEFAULT-ON: once a conversation sprawls past ~48k resident tokens the cut fires and sheds the un-cacheable middle the provider re-bills every turn; a typical short session stays untouched. Pass 0 to disable (body forwarded byte-for-byte). No effect on non-passthrough wires.")
@@ -507,6 +516,10 @@ func cmdServe(argv []string) {
 		os.Exit(2)
 	}
 	parseDur := time.Since(tParse)
+	if err := validateServeHostSwapByteLimit(*sf.nativeHostSwapBytes); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
 	if err := validateServeExpertCPUMiss(os.Getenv); err != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
 		os.Exit(2)
@@ -559,6 +572,10 @@ func cmdServe(argv []string) {
 		os.Exit(2)
 	}
 	*sf.qwen38Runtime = qwen38Runtime
+	if err := validateServeNativeChatTemplateFlags(sf); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
 	keepAwakeMode, err := validateKeepAwake(*sf.keepAwake)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
@@ -737,6 +754,10 @@ func cmdServe(argv []string) {
 		os.Exit(1)
 	}
 	*sf.nativeCodeWorkspace = resolvedCodeWorkspace
+	if err := prepareServeNativeChatTemplate(sf); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
 
 	// Install the capability floor fail-loud: a bad manifest aborts startup rather
 	// than silently falling back to a more permissive default. Time it as the first
@@ -992,10 +1013,17 @@ func loadServeRouteFile[T any](flagName, path, want string, load func(string) (T
 // in-kernel serve.
 func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableControlIngress, buildErr error) {
 	resolveServeEngine(sf, rt.explicitFlags, rt.inKernelModel != nil)
+	native, _ := abi.Engine(*sf.engineID).(*modelengine.Engine)
+	if err := configureServeHostSwapBudget(sf, native); err != nil {
+		return nil, err
+	}
 	startupMessages := append([]gateway.StartupMessage(nil), rt.startupMessages...)
 	nativePlannerConfig := serveNativePlannerConfigWithContext(sf, rt.nativeContext.ResolvedTokens)
 	nativePlannerConfig.RequireDeviceExecution = rt.requireDeviceExecution
 	nativePlannerConfig.DeviceOnlyBypass = rt.executionPolicy.sessionBypass()
+	if err := applyServeNativeChatTemplate(sf, &nativePlannerConfig, rt.inKernelModel != nil && rt.inKernelTok != nil); err != nil {
+		return nil, err
+	}
 	// The backend tier check (resolveServeKVPrecision) does not see the architecture;
 	// refuse an arch-unrealized --kv-precision (e.g. q8_0 on a Qwen hybrid) before the
 	// listener binds, so the service fails admission instead of refusing every request.
@@ -1085,6 +1113,7 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableCon
 		EngineCacheAdminKey:          rt.engineCacheAdminKey,
 		EngineCacheIdleTimeout:       *sf.engineCacheIdleTimeout,
 		EngineCacheRequireExactSpan:  *sf.engineCacheRequireExactSpan,
+		EmbeddingPooling:             *sf.embeddingPooling,
 		InKernelModel:                rt.inKernelModel,
 		Tokenizer:                    rt.inKernelTok,
 		InKernelQ4K:                  rt.inKernelQ4K,
@@ -1522,4 +1551,34 @@ func startGatewayUsageSnapshotLoop(ctx context.Context, srv *gateway.Server, int
 		}
 	}()
 	return cancel
+}
+
+func validateServeHostSwapByteLimit(limit int64) error {
+	if limit < 0 {
+		return fmt.Errorf("--native-kv-host-swap-bytes must be nonnegative")
+	}
+	return nil
+}
+
+// The explicit flag reaches the selected ordinary syscall engine before
+// gateway construction/listener bind. It does not configure chat planners or
+// remote providers and does not implicitly arm KV pressure or recompute.
+func configureServeHostSwapBudget(sf *serveFlags, native *modelengine.Engine) error {
+	if sf == nil || sf.nativeHostSwapBytes == nil {
+		return nil
+	}
+	limit := *sf.nativeHostSwapBytes
+	if err := validateServeHostSwapByteLimit(limit); err != nil {
+		return err
+	}
+	if limit == 0 {
+		return nil
+	}
+	if native == nil {
+		return fmt.Errorf("--native-kv-host-swap-bytes requires the selected native engine")
+	}
+	if native.KVPreemptionStats().MaxBlocks <= 0 {
+		return fmt.Errorf("--native-kv-host-swap-bytes requires a positive native KV block budget")
+	}
+	return native.SetKVHostSwapByteLimit(limit)
 }

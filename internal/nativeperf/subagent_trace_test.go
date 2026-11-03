@@ -432,7 +432,16 @@ func TestSubagentTracePhaseRecorderIntegration(t *testing.T) {
 		t.Errorf("HostCPUOverheadPercent = %f, want 50.0", subReceipt.HostCPUOverheadPercent)
 	}
 
-	// 2. Test round-trip conversion: SubagentTraceReceipt -> PhaseRecorder -> SubagentTraceReceipt
+	// Projection from unqualified phase intervals must not manufacture backend evidence.
+	if _, err := subReceipt.ToPhaseRecorder("inkernel", "cuda", "qwen3.8_cuda"); err == nil {
+		t.Fatal("unqualified phase intervals became device evidence")
+	}
+	// Explicitly qualified fixture tests only the arithmetic round trip.
+	subReceipt.Provenance = TraceMeasured
+	subReceipt.PhaseProvenance = make(map[string]TraceProvenance)
+	for phase := range subReceipt.PhasesUS {
+		subReceipt.PhaseProvenance[phase] = TraceMeasured
+	}
 	recRoundTrip, err := subReceipt.ToPhaseRecorder("inkernel", "cuda", "qwen3.8_cuda")
 	if err != nil {
 		t.Fatalf("ToPhaseRecorder failed: %v", err)

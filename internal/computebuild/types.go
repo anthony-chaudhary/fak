@@ -90,6 +90,9 @@ type CUDAConfig struct {
 	EnablePagedKVCopyQualification     bool // default-off partial-tail COW kernel; not device qualification
 	EnableKV16PrefillGQA4Qualification bool // default-off typed-KV shared-head prefill; device evidence required
 
+	EnableQwen35IQ2SequenceQualification bool // default-off Go composition of existing raw IQ2 kernels; not device qualification
+	EnableQ56KMMQQualification           bool // default-off retained Q5_K/Q6_K P>=128 MMQ; device evidence required
+
 	EnableV41RoutedSwiGLU    bool // Explicit SM120 candidate; public capability remains unqualified.
 	EnableV41EngramGate      bool // Explicit SM120 candidate; public capability remains unqualified.
 	EnableV41CompressorPool  bool // Explicit SM120 candidate; public capability remains unqualified.

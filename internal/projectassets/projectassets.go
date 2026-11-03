@@ -1,7 +1,6 @@
 package projectassets
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,13 +9,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 )
 
 const (
 	ManifestPath             = ".claude/project-assets.json"
-	maxSkillDescriptionChars = 220
+	maxSkillDescriptionRunes = 1024 // Agent Skills spec limit for a frontmatter description.
 )
 
 type Exclusion struct {
@@ -150,8 +147,11 @@ func skillName(root, p string) (string, error) {
 	return strings.TrimSpace(string(m[1])), nil
 }
 
-// isGeneratedAdapter distinguishes disposable discovery pointers from deliberate native adapters.
-// Sync may refresh only the former; overwriting the latter would erase harness-specific behavior.
+// isGeneratedAdapter distinguishes generated one-hop mirrors from deliberate native adapters.
+// .agents/skills holds generated mirrors - full-body copies of the canonical SKILL.md with
+// provenance metadata injected in the frontmatter; the canonical file remains the single
+// semantic source. Sync may refresh only the mirrors; overwriting a native adapter would
+// erase harness-specific behavior.
 func isGeneratedAdapter(body []byte) bool {
 	return strings.Contains(string(body), "generated-by: fak project-assets sync")
 }
@@ -171,79 +171,11 @@ func skillDescription(root, path string) (string, error) {
 	return "", fmt.Errorf("%s has no frontmatter description", path)
 }
 
-type metadataField struct {
-	key   string
-	value string
-}
-
-func skillMetadata(root, path string) ([]metadataField, error) {
-	body, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
-	if err != nil {
-		return nil, err
-	}
-	lines := strings.Split(strings.ReplaceAll(string(body), "\r\n", "\n"), "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return nil, nil
-	}
-
-	var meta []metadataField
-	inFrontmatter := false
-	inMetadata := false
-
-	for i, line := range lines {
-		if i == 0 {
-			inFrontmatter = true
-			continue
-		}
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "---" {
-			break
-		}
-		if !inFrontmatter || trimmed == "" {
-			continue
-		}
-
-		isIndented := len(line) > 0 && (line[0] == ' ' || line[0] == '\t')
-		if !isIndented {
-			inMetadata = false
-			if strings.HasPrefix(trimmed, "metadata:") {
-				inMetadata = true
-			}
-			continue
-		}
-
-		if inMetadata {
-			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-				continue
-			}
-			key, val, ok := strings.Cut(trimmed, ":")
-			if !ok {
-				continue
-			}
-			k := strings.TrimSpace(key)
-			v := strings.TrimSpace(val)
-			if k == "" || k == "generated-by" || k == "canonical" || k == "canonical-description-hash" {
-				continue
-			}
-			if len(v) > 0 && (v[0] == '"' || v[0] == '\'') {
-				v = normalizeYAMLScalar(v)
-			} else {
-				if idx := strings.Index(v, " #"); idx != -1 {
-					v = strings.TrimSpace(v[:idx])
-				}
-				v = normalizeYAMLScalar(v)
-			}
-			meta = append(meta, metadataField{key: k, value: v})
-		}
-	}
-	return meta, nil
-}
-
 // normalizeYAMLScalar turns the frontmatter representation into the description
 // text that loaders see. Canonical skills use plain, single-quoted, and
 // double-quoted scalars. Some older skills also carry a missing closing quote;
-// accepting an implied close lets sync repair their generated adapters instead
-// of copying the malformed delimiter into another file.
+// accepting an implied close lets sync read their descriptions without copying
+// the malformed delimiter into a mirror.
 func normalizeYAMLScalar(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -332,36 +264,6 @@ func unquoteYAMLDouble(value string) (string, error) {
 	return strconv.Unquote(quoted.String())
 }
 
-// yamlScalar emits a block-mapping-safe YAML string without adding quoting
-// churn to descriptions that are already safe as plain scalars. strconv.Quote
-// supplies the escaping for quotes, backslashes, newlines, and control runes.
-func yamlScalar(value string) string {
-	if yamlPlainScalarSafe(value) {
-		return value
-	}
-	return strconv.Quote(value)
-}
-
-func yamlPlainScalarSafe(value string) bool {
-	if value == "" || strings.TrimSpace(value) != value || value == "---" || value == "..." {
-		return false
-	}
-	first, _ := utf8.DecodeRuneInString(value)
-	if unicode.IsDigit(first) || strings.ContainsRune("-+?.:,[]{}#&*!|>'\"%@`", first) {
-		return false
-	}
-	for _, r := range value {
-		if unicode.IsControl(r) || (r != ' ' && unicode.IsSpace(r)) || r == ':' || r == '#' {
-			return false
-		}
-	}
-	switch strings.ToLower(value) {
-	case "null", "true", "false", "yes", "no", "on", "off", "~":
-		return false
-	}
-	return true
-}
-
 func decodeYAMLScalar(value string) string {
 	value = strings.TrimSpace(value)
 	if len(value) < 2 {
@@ -383,40 +285,82 @@ func decodeYAMLScalar(value string) string {
 	return value
 }
 
-// AdapterDescription projects the canonical skill description into the adapter limit.
-func AdapterDescription(description string) string {
-	return adapterDescription(description)
-}
+// mirror generates the one-hop mirror of a canonical SKILL.md: a full-body copy
+// whose frontmatter lines are preserved verbatim and whose metadata block carries
+// the provenance pair (generated-by, canonical). .agents/skills holds these
+// generated mirrors - full-body copies of the canonical SKILL.md with provenance
+// metadata injected in the frontmatter; the canonical file remains the single
+// semantic source. Regeneration is idempotent: stale provenance inside the
+// metadata block is dropped before the fresh pair is injected.
+func mirror(canonicalPath, name, rel string) ([]byte, error) {
+	b, e := os.ReadFile(canonicalPath)
+	if e != nil {
+		return nil, e
+	}
+	lines := strings.Split(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n")
+	if len(lines) == 0 || lines[0] != "---" {
+		return nil, fmt.Errorf("skill %s (%s): missing opening frontmatter delimiter", name, canonicalPath)
+	}
+	closeIdx := -1
+	for i := 1; i < len(lines); i++ {
+		if lines[i] == "---" {
+			closeIdx = i
+			break
+		}
+	}
+	if closeIdx < 0 {
+		return nil, fmt.Errorf("skill %s (%s): missing closing frontmatter delimiter", name, canonicalPath)
+	}
+	fm := lines[1:closeIdx]
+	body := strings.Join(lines[closeIdx+1:], "\n")
 
-func adapterDescription(description string) string {
-	runes := []rune(description)
-	if len(runes) <= maxSkillDescriptionChars {
-		return string(runes)
+	provenance := []string{"  generated-by: fak project-assets sync", "  canonical: " + rel}
+
+	// Drop stale provenance inside the metadata block so regenerating a file that
+	// already carries it (a former mirror) stays byte-identical.
+	kept := make([]string, 0, len(fm))
+	metaIdx := -1
+	inMeta := false
+	for _, l := range fm {
+		trimmed := strings.TrimSpace(l)
+		if trimmed == "metadata:" {
+			if metaIdx < 0 {
+				metaIdx = len(kept)
+			}
+			inMeta = true
+			kept = append(kept, l)
+			continue
+		}
+		if inMeta {
+			switch {
+			case trimmed == "":
+				// Blank lines do not end the metadata block.
+			case l[0] != ' ' && l[0] != '\t':
+				inMeta = false
+			default:
+				if key := strings.TrimLeft(l, " \t"); strings.HasPrefix(key, "generated-by:") || strings.HasPrefix(key, "canonical:") {
+					continue
+				}
+			}
+		}
+		kept = append(kept, l)
 	}
 
-	// Keep the discovery synopsis resident and page the canonical workflow on selection.
-	// Preserve its leading trigger instead of inventing a second summary.
-	const suffix = "..."
-	limit := maxSkillDescriptionChars - len([]rune(suffix))
-	cut := strings.TrimRightFunc(string(runes[:limit]), unicode.IsSpace)
-	if boundary := strings.LastIndexAny(cut, " \t\r\n"); boundary > limit/2 {
-		cut = strings.TrimRightFunc(cut[:boundary], unicode.IsSpace)
+	out := make([]string, 0, len(kept)+4)
+	out = append(out, "---")
+	for i, l := range kept {
+		out = append(out, l)
+		if i == metaIdx {
+			out = append(out, provenance...)
+		}
 	}
-	return cut + suffix
-}
-
-func adapter(name, description, rel string, extraMeta ...metadataField) string {
-	truncated := adapterDescription(description)
-	var metaLines strings.Builder
-	for _, m := range extraMeta {
-		metaLines.WriteString(fmt.Sprintf("  %s: %s\n", m.key, yamlScalar(m.value)))
+	if metaIdx < 0 {
+		out = append(out, "metadata:")
+		out = append(out, provenance...)
 	}
-	metaLines.WriteString("  generated-by: fak project-assets sync\n")
-	metaLines.WriteString(fmt.Sprintf("  canonical: %s\n", rel))
-	if len([]rune(description)) > maxSkillDescriptionChars {
-		metaLines.WriteString(fmt.Sprintf("  canonical-description-hash: %x\n", sha256.Sum256([]byte(description))))
-	}
-	return fmt.Sprintf("---\nname: %s\ndescription: %s\nmetadata:\n%s---\n\n# Canonical project skill adapter\n\nLoad and follow [`%s`](%s). This generated discovery adapter contains no maintained workflow body.\n\n## Portability contract\n\n- The linked canonical `SKILL.md` is the single semantic workflow body for Claude, Codex, and fak-native loaders.\n- This adapter changes discovery only; it must not fork, summarize, or translate the workflow.\n- Harness-native invocation, permissions, hooks, model routing, and worker launch remain typed adapters outside the semantic body.\n", name, yamlScalar(truncated), metaLines.String(), rel, rel)
+	out = append(out, "---")
+	out = append(out, body)
+	return []byte(strings.Join(out, "\n")), nil
 }
 
 func classify(root, kind string, p Policy) ([]string, []Excluded, error) {
@@ -470,9 +414,8 @@ func Build(root string, write bool) (Receipt, error) {
 		if e != nil {
 			return r, e
 		}
-		meta, e := skillMetadata(root, p)
-		if e != nil {
-			return r, e
+		if runes := len([]rune(description)); runes > maxSkillDescriptionRunes {
+			return r, fmt.Errorf("%s: frontmatter description has %d runes, above the Agent Skills limit of %d", p, runes, maxSkillDescriptionRunes)
 		}
 		target := filepath.ToSlash(filepath.Join(m.Skills.CodexRoot, n, "SKILL.md"))
 		canon = append(canon, p)
@@ -487,8 +430,11 @@ func Build(root string, write bool) (Receipt, error) {
 				continue
 			}
 			rel, _ := filepath.Rel(filepath.Dir(abs), filepath.Join(root, filepath.FromSlash(p)))
-			e = os.WriteFile(abs, []byte(adapter(n, description, filepath.ToSlash(rel), meta...)), 0644)
+			b, e := mirror(filepath.Join(root, filepath.FromSlash(p)), n, filepath.ToSlash(rel))
 			if e != nil {
+				return r, e
+			}
+			if e = os.WriteFile(abs, b, 0644); e != nil {
 				return r, e
 			}
 		}
@@ -506,9 +452,8 @@ func Build(root string, write bool) (Receipt, error) {
 		rel, _ := filepath.Rel(filepath.Dir(abs), filepath.Join(root, filepath.FromSlash(source)))
 		b, e := os.ReadFile(abs)
 		n, _ := skillName(root, source)
-		description, descriptionErr := skillDescription(root, source)
-		meta, metaErr := skillMetadata(root, source)
-		if e != nil || descriptionErr != nil || metaErr != nil || (isGeneratedAdapter(b) && strings.ReplaceAll(string(b), "\r\n", "\n") != strings.ReplaceAll(adapter(n, description, filepath.ToSlash(rel), meta...), "\r\n", "\n")) {
+		want, mirrorErr := mirror(filepath.Join(root, filepath.FromSlash(source)), n, filepath.ToSlash(rel))
+		if e != nil || mirrorErr != nil || (isGeneratedAdapter(b) && strings.ReplaceAll(string(b), "\r\n", "\n") != string(want)) {
 			stale = append(stale, target)
 		}
 	}
@@ -541,7 +486,7 @@ func Build(root string, write bool) (Receipt, error) {
 	sort.Strings(codexImports)
 	r.Harnesses["codex"] = HarnessReceipt{all, codexImports, ex, dup, stale}
 	r.Harnesses["opencode"] = HarnessReceipt{all, codexImports, ex, dup, stale}
-	// Pi consumes the generated .agents/skills adapters the same way codex/opencode do;
+	// Pi consumes the generated .agents/skills mirrors the same way codex/opencode do;
 	// it differs only in that cmd/fak's launcher passes them explicitly via --skill.
 	r.Harnesses["pi"] = HarnessReceipt{all, codexImports, ex, dup, stale}
 	nativeImports := append(append([]string{}, canon...), prompts...)
@@ -552,7 +497,7 @@ func Build(root string, write bool) (Receipt, error) {
 	_, nok := m.Harnesses["fak-native"]
 	_, ook := m.Harnesses["opencode"]
 	// The pi harness is derived (not manifest-declared): every project that ships the
-	// generated .agents/skills adapters can be driven by `fak pi --skill`, so its
+	// generated .agents/skills mirrors can be driven by `fak pi --skill`, so its
 	// receipt must exist and carry no stale entries, exactly like codex/opencode.
 	piStale := len(r.Harnesses["pi"].Stale) == 0
 	r.ZeroUnexplainedGaps = len(dup) == 0 && len(stale) == 0 && cok && nok && ook && piStale
@@ -574,7 +519,7 @@ func Build(root string, write bool) (Receipt, error) {
 	return r, nil
 }
 
-// EnsureSync checks parity with Build(root, false) and synchronizes adapters with Build(root, true) if needed.
+// EnsureSync checks parity with Build(root, false) and synchronizes mirrors with Build(root, true) if needed.
 // When the workspace defines an .opencode directory or plugin asset, it also verifies and synchronizes the
 // OpenCode plugin asset enforcing cross-harness lease admission.
 // If workspace assets are in parity, returns (r, false, nil).
@@ -613,7 +558,7 @@ func EnsureSync(root string) (Receipt, bool, error) {
 	return syncedReceipt, true, nil
 }
 
-// Ensure checks parity with Build(root, false) and synchronizes adapters with Build(root, true) if autoSync is true.
+// Ensure checks parity with Build(root, false) and synchronizes mirrors with Build(root, true) if autoSync is true.
 // When autoSync is true and the workspace defines an .opencode directory, it also ensures the OpenCode plugin asset
 // is synchronized. When autoSync is false and an .opencode directory or plugin exists, its lease admission invariants are verified.
 func Ensure(root string, autoSync bool) (Receipt, error) {

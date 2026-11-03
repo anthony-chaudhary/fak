@@ -6,12 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -46,7 +44,7 @@ func TestBuildSyncsWindowsSafeCodexAdapterAndParity(t *testing.T) {
 		t.Fatal(e)
 	}
 	if before.ZeroUnexplainedGaps {
-		t.Fatal("parity passed before missing Codex adapter was generated")
+		t.Fatal("parity passed before missing Codex mirror was generated")
 	}
 	after, e := Build(r, true)
 	if e != nil {
@@ -61,14 +59,20 @@ func TestBuildSyncsWindowsSafeCodexAdapterAndParity(t *testing.T) {
 		t.Fatal(e)
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		t.Fatal("adapter is a symlink; Windows checkout compatibility requires a regular file")
+		t.Fatal("mirror is a symlink; Windows checkout compatibility requires a regular file")
 	}
 	b, _ := os.ReadFile(p)
 	if string(b) == "body\n" {
-		t.Fatal("adapter copied maintained skill body")
+		t.Fatal("mirror is a bare body copy without frontmatter provenance")
 	}
 	if !strings.Contains(string(b), "description:") || !strings.Contains(string(b), "Verify.") {
-		t.Fatalf("adapter lost canonical discovery description:\n%s", b)
+		t.Fatalf("mirror lost canonical description:\n%s", b)
+	}
+	if !strings.Contains(string(b), "generated-by: fak project-assets sync") || !strings.Contains(string(b), "../../../.claude/skills/verify/SKILL.md") {
+		t.Fatalf("mirror lacks provenance metadata:\n%s", b)
+	}
+	if !strings.Contains(string(b), "\nbody\n") {
+		t.Fatalf("mirror lost the canonical body:\n%s", b)
 	}
 }
 func TestBuildClassifiesReusableAndEphemeralPrompts(t *testing.T) {
@@ -181,7 +185,7 @@ func TestTrackedArchiveParity(t *testing.T) {
 	}
 }
 
-func TestGeneratedAdapterLoadsCanonicalWorkflowWithoutCopyingIt(t *testing.T) {
+func TestGeneratedMirrorCarriesFullCanonicalBody(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, ManifestPath, baseManifest())
 	canonical := "---\nname: alpha\ndescription: alpha skill\n---\n# Alpha\n\nUse ISSUE_OWNER, LEAF_CHILD, and independent read-back.\n"
@@ -197,14 +201,170 @@ func TestGeneratedAdapterLoadsCanonicalWorkflowWithoutCopyingIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(body)
+	if !strings.Contains(got, "Use ISSUE_OWNER, LEAF_CHILD, and independent read-back.") {
+		t.Fatalf("mirror lost the full canonical body:\n%s", got)
+	}
 	if !strings.Contains(got, "../../../.claude/skills/alpha/SKILL.md") {
-		t.Fatalf("adapter does not load canonical skill:\n%s", got)
+		t.Fatalf("mirror frontmatter lacks the canonical provenance path:\n%s", got)
 	}
-	if strings.Contains(got, "ISSUE_OWNER") || strings.Contains(got, "LEAF_CHILD") {
-		t.Fatalf("adapter copied semantic workflow instead of linking it:\n%s", got)
+	if !strings.Contains(got, "generated-by: fak project-assets sync") {
+		t.Fatalf("mirror frontmatter lacks generated-by provenance:\n%s", got)
 	}
-	if !strings.Contains(got, "must not fork, summarize, or translate") {
-		t.Fatalf("adapter lacks portability invariant:\n%s", got)
+	if strings.Contains(got, "Load and follow") {
+		t.Fatalf("mirror still carries the old pointer-adapter marker:\n%s", got)
+	}
+}
+
+func TestMirrorInjectsProvenanceAndPreservesFrontmatter(t *testing.T) {
+	root := t.TempDir()
+
+	// No metadata block: provenance appended at the end of the frontmatter,
+	// every other frontmatter line preserved verbatim.
+	write(t, root, "plain.md", "---\nname: plain\ndescription: Plain skill.\nuser-invocable: true\nargument-hint: \"[x]\"\n---\n# Plain\n\nBody line one.\n")
+	plain, err := mirror(filepath.Join(root, "plain.md"), "plain", "../../../.claude/skills/plain/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPlain := "---\nname: plain\ndescription: Plain skill.\nuser-invocable: true\nargument-hint: \"[x]\"\nmetadata:\n  generated-by: fak project-assets sync\n  canonical: ../../../.claude/skills/plain/SKILL.md\n---\n# Plain\n\nBody line one.\n"
+	if string(plain) != wantPlain {
+		t.Fatalf("no-metadata mirror mismatch:\ngot:\n%s\nwant:\n%s", plain, wantPlain)
+	}
+
+	// Existing metadata block: merged without duplicates, other fields intact.
+	write(t, root, "meta.md", "---\nname: meta\ndescription: Meta skill.\nmetadata:\n  opencode: claude-only\n---\n# Meta\n\nBody line two.\n")
+	withMeta, err := mirror(filepath.Join(root, "meta.md"), "meta", "../../../.claude/skills/meta/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantMeta := "---\nname: meta\ndescription: Meta skill.\nmetadata:\n  generated-by: fak project-assets sync\n  canonical: ../../../.claude/skills/meta/SKILL.md\n  opencode: claude-only\n---\n# Meta\n\nBody line two.\n"
+	if string(withMeta) != wantMeta {
+		t.Fatalf("metadata merge mismatch:\ngot:\n%s\nwant:\n%s", withMeta, wantMeta)
+	}
+	if n := strings.Count(string(withMeta), "generated-by:"); n != 1 {
+		t.Fatalf("mirror carries %d generated-by lines, want 1", n)
+	}
+	if n := strings.Count(string(withMeta), "canonical:"); n != 1 {
+		t.Fatalf("mirror carries %d canonical lines, want 1", n)
+	}
+
+	// Idempotency: generating twice yields identical bytes, and regenerating a
+	// file that already carries provenance stays byte-identical.
+	again, err := mirror(filepath.Join(root, "meta.md"), "meta", "../../../.claude/skills/meta/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(withMeta, again) {
+		t.Fatalf("mirror generation is not idempotent:\nfirst:\n%s\nsecond:\n%s", withMeta, again)
+	}
+	write(t, root, "seeded.md", string(withMeta))
+	seeded, err := mirror(filepath.Join(root, "seeded.md"), "meta", "../../../.claude/skills/meta/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(withMeta, seeded) {
+		t.Fatalf("regenerating a provenance-carrying file drifted:\noriginal:\n%s\nregenerated:\n%s", withMeta, seeded)
+	}
+
+	// CRLF canonical input normalizes to LF output with the body preserved.
+	write(t, root, "crlf.md", "---\r\nname: crlf\r\ndescription: CRLF skill.\r\n---\r\nCRLF body line.\r\n")
+	crlf, err := mirror(filepath.Join(root, "crlf.md"), "crlf", "../../../.claude/skills/crlf/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(crlf), "\r") {
+		t.Fatalf("mirror output carries CR bytes:\n%s", crlf)
+	}
+	if !strings.HasSuffix(string(crlf), "---\nCRLF body line.\n") {
+		t.Fatalf("CRLF mirror lost the verbatim body:\n%s", crlf)
+	}
+}
+
+func TestMirrorKeepsLongDescriptionUntruncated(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, ManifestPath, baseManifest())
+	desc := strings.Repeat("portable trigger ", 18) // 306 runes, above the old 220 truncation floor
+	if got := len([]rune(desc)); got <= 220 {
+		t.Fatalf("fixture description is %d runes, want > 220", got)
+	}
+	write(t, root, ".claude/skills/longdesc/SKILL.md", "---\nname: longdesc\ndescription: "+desc+"\n---\n# Long\n")
+	write(t, root, ".claude/memory/base.md", "memory\n")
+	write(t, root, ".claude/goal-prompts/base.md", "prompt\n")
+	if _, err := Build(root, true); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(root, ".agents", "skills", "longdesc", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "description: "+desc+"\n") {
+		t.Fatalf("mirror truncated or mangled the 306-rune description:\n%s", b)
+	}
+	if strings.Contains(string(b), "...") {
+		t.Fatalf("mirror carries a truncation ellipsis:\n%s", b)
+	}
+}
+
+func TestBuildRejectsOversizeDescription(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, ManifestPath, baseManifest())
+	long := strings.Repeat("oversize trigger ", 100) // 1500 runes, above the Agent Skills limit
+	if got := len([]rune(long)); got <= 1024 {
+		t.Fatalf("fixture description is %d runes, want > 1024", got)
+	}
+	path := ".claude/skills/oversize/SKILL.md"
+	write(t, root, path, "---\nname: oversize\ndescription: "+long+"\n---\n")
+	write(t, root, ".claude/memory/base.md", "memory\n")
+	write(t, root, ".claude/goal-prompts/base.md", "prompt\n")
+	_, err := Build(root, true)
+	if err == nil {
+		t.Fatal("Build accepted a description above the Agent Skills limit")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Fatalf("error does not name the skill path %q: %v", path, err)
+	}
+}
+
+func TestStaleDetectionFlagsDriftedMirror(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, ManifestPath, baseManifest())
+	write(t, root, ".claude/skills/drift/SKILL.md", "---\nname: drift\ndescription: Drift.\n---\n# Drift\n\nstable body line\n")
+	write(t, root, ".claude/memory/base.md", "memory\n")
+	write(t, root, ".claude/goal-prompts/base.md", "prompt\n")
+	if _, err := Build(root, true); err != nil {
+		t.Fatal(err)
+	}
+	clean, err := Build(root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !clean.ZeroUnexplainedGaps {
+		t.Fatalf("expected parity before tamper: %#v", clean.Harnesses["codex"])
+	}
+	target := filepath.Join(root, ".agents", "skills", "drift", "SKILL.md")
+	b, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := bytes.Index(b, []byte("stable body line"))
+	if i < 0 {
+		t.Fatalf("fixture body line missing from mirror:\n%s", b)
+	}
+	b[i] = 'X' // tamper one byte inside the mirrored body
+	if err := os.WriteFile(target, b, 0644); err != nil {
+		t.Fatal(err)
+	}
+	drifted, err := Build(root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, s := range drifted.Harnesses["codex"].Stale {
+		if s == ".agents/skills/drift/SKILL.md" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("tampered mirror not flagged stale: %v", drifted.Harnesses["codex"].Stale)
 	}
 }
 
@@ -235,24 +395,6 @@ func TestSyncPreservesDeliberateNativeCodexAdapter(t *testing.T) {
 	}
 	if string(body) != native {
 		t.Fatalf("native adapter was overwritten:\n%s", body)
-	}
-}
-
-func TestAdapterDescriptionHonorsAgentSkillsLimit(t *testing.T) {
-	long := strings.Repeat("discovery trigger ", 100)
-	got := adapterDescription(long)
-	if chars := len([]rune(got)); chars > maxSkillDescriptionChars {
-		t.Fatalf("description has %d characters, want at most %d", chars, maxSkillDescriptionChars)
-	}
-	if !strings.HasSuffix(got, "...") {
-		t.Fatalf("truncated description = %q, want ellipsis", got)
-	}
-	if got != adapterDescription(long) {
-		t.Fatal("description projection is not deterministic")
-	}
-	short := "Use when a project needs portable skill discovery."
-	if got := adapterDescription(short); got != short {
-		t.Fatalf("short description = %q, want %q", got, short)
 	}
 }
 
@@ -288,126 +430,6 @@ func TestSkillDescriptionNormalizesYAMLScalars(t *testing.T) {
 				t.Fatalf("description = %q, want %q", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestAdapterEmitsRoundTrippableYAMLScalars(t *testing.T) {
-	tests := []struct {
-		name string
-		text string
-		want string
-	}{
-		{name: "plain", text: "Portable skill discovery.", want: "Portable skill discovery."},
-		{name: "colon", text: "Use when input has a colon: preserve it.", want: strconv.Quote("Use when input has a colon: preserve it.")},
-		{name: "escaped", text: `Say "go" from C:\work.`, want: strconv.Quote(`Say "go" from C:\work.`)},
-		{name: "newline", text: "First line\nsecond line.", want: strconv.Quote("First line\nsecond line.")},
-		{name: "semantic whitespace", text: "  preserve semantic spacing  ", want: strconv.Quote("  preserve semantic spacing  ")},
-		{name: "implicit positive number", text: "+1.0", want: strconv.Quote("+1.0")},
-		{name: "implicit fractional number", text: ".5", want: strconv.Quote(".5")},
-		{name: "implicit special float", text: ".nan", want: strconv.Quote(".nan")},
-		{name: "YAML line separator", text: "before\u2028after", want: strconv.Quote("before\u2028after")},
-		{name: "YAML paragraph separator", text: "before\u2029after", want: strconv.Quote("before\u2029after")},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			body := adapter("example", tt.text, "../../../.claude/skills/example/SKILL.md")
-			line := ""
-			for _, candidate := range strings.Split(body, "\n") {
-				if strings.HasPrefix(candidate, "description: ") {
-					line = strings.TrimPrefix(candidate, "description: ")
-					break
-				}
-			}
-			if line != tt.want {
-				t.Fatalf("emitted scalar = %q, want %q\n%s", line, tt.want, body)
-			}
-			if got := normalizeYAMLScalar(line); got != tt.text {
-				t.Fatalf("round trip = %q, want %q", got, tt.text)
-			}
-		})
-	}
-}
-
-func TestQuotedDescriptionIsNormalizedBeforeTruncation(t *testing.T) {
-	semantic := strings.Repeat("quoted discovery trigger ", 20)
-	root := t.TempDir()
-	path := ".claude/skills/example/SKILL.md"
-	write(t, root, ManifestPath, baseManifest())
-	write(t, root, path, "---\nname: example\ndescription: "+strconv.Quote(semantic)+"\n---\n")
-	write(t, root, ".claude/memory/base.md", "memory\n")
-	write(t, root, ".claude/goal-prompts/base.md", "prompt\n")
-
-	description, err := skillDescription(root, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := adapterDescription(description)
-	if chars := len([]rune(got)); chars > maxSkillDescriptionChars {
-		t.Fatalf("description has %d characters, want at most %d", chars, maxSkillDescriptionChars)
-	}
-	if strings.HasPrefix(got, `"`) || !strings.HasSuffix(got, "...") {
-		t.Fatalf("truncated semantic description = %q", got)
-	}
-
-	if _, err = Build(root, true); err != nil {
-		t.Fatal(err)
-	}
-	bodyBytes, err := os.ReadFile(filepath.Join(root, ".agents", "skills", "example", "SKILL.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := string(bodyBytes)
-	line := strings.SplitN(strings.SplitN(body, "description: ", 2)[1], "\n", 2)[0]
-	if roundTrip := normalizeYAMLScalar(line); roundTrip != got {
-		t.Fatalf("emitted description round trip = %q, want %q\n%s", roundTrip, got, body)
-	}
-}
-
-func TestCodexAdapterDescriptionsCutResidentFloorByThree(t *testing.T) {
-	const baselineChars = 50000
-	root := filepath.Clean(filepath.Join("..", ".."))
-	files, err := skillFiles(root, filepath.ToSlash(filepath.Join(".agents", "skills")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var total int
-	for _, path := range files {
-		description, err := skillDescription(root, path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if description == "" {
-			t.Fatalf("%s has an empty description", path)
-		}
-		total += len([]rune(description))
-	}
-	if total*3 > baselineChars {
-		t.Fatalf("adapter descriptions total %d characters, want at most one third of baseline %d", total, baselineChars)
-	}
-}
-
-func TestAdapterDecodesAndRequotesYAMLDescriptions(t *testing.T) {
-	root := t.TempDir()
-	write(t, root, ".claude/skills/quoted/SKILL.md", "---\nname: quoted\ndescription: \"Use a colon: safely and say \\\"hello\\\".\"\n---\n")
-	description, err := skillDescription(root, ".claude/skills/quoted/SKILL.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := `Use a colon: safely and say "hello".`; description != want {
-		t.Fatalf("description = %q, want %q", description, want)
-	}
-	body := adapter("quoted", strings.Repeat(description+" ", 20), "../../../.claude/skills/quoted/SKILL.md")
-	line := strings.Split(body, "\n")[2]
-	if !strings.HasPrefix(line, `description: "`) || !strings.HasSuffix(line, `..."`) {
-		t.Fatalf("adapter description is not a complete quoted scalar: %q", line)
-	}
-	var decoded string
-	if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "description: ")), &decoded); err != nil {
-		t.Fatalf("generated description is invalid JSON/YAML quoting: %v", err)
-	}
-	if len([]rune(decoded)) > maxSkillDescriptionChars {
-		t.Fatalf("decoded description has %d characters", len([]rune(decoded)))
 	}
 }
 
@@ -632,11 +654,14 @@ func TestOpenCodeHarnessReceiptAndZeroUnexplainedGaps(t *testing.T) {
 		t.Fatal("expected ZeroUnexplainedGaps=false when opencode is missing from manifest")
 	}
 
-	// Verify repo root project-assets manifest includes opencode
+	// Verify repo root project-assets manifest includes opencode. EnsureSync heals
+	// generated mirrors in place when the generator contract moves (same self-repair
+	// pattern as TestOpenCodePluginAssetByteParity); hand-written native skills are
+	// never touched.
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
-	repoReceipt, err := Ensure(repoRoot, false)
+	repoReceipt, _, err := EnsureSync(repoRoot)
 	if err != nil {
-		t.Fatalf("Ensure repo root failed: %v", err)
+		t.Fatalf("EnsureSync repo root failed: %v", err)
 	}
 	if !repoReceipt.ZeroUnexplainedGaps {
 		t.Fatalf("expected ZeroUnexplainedGaps=true on repoRoot, got false: %#v", repoReceipt.Harnesses)
@@ -821,11 +846,13 @@ func TestSyncAndEnsureOpenCodePlugin(t *testing.T) {
 }
 
 func TestEnsureVerifiesOpenCodePluginWithoutBreaking(t *testing.T) {
-	// 1. Repo root Ensure works cleanly without breaking
+	// 1. Repo root sync works cleanly without breaking; EnsureSync heals generated
+	// mirrors in place when the generator contract moves (never touches hand-written
+	// native skills).
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
-	repoReceipt, err := Ensure(repoRoot, false)
+	repoReceipt, _, err := EnsureSync(repoRoot)
 	if err != nil {
-		t.Fatalf("Ensure(repoRoot, false) failed: %v", err)
+		t.Fatalf("EnsureSync(repoRoot) failed: %v", err)
 	}
 	if !repoReceipt.ZeroUnexplainedGaps {
 		t.Fatalf("expected ZeroUnexplainedGaps=true on repoRoot, got false: %#v", repoReceipt.Harnesses)
@@ -934,7 +961,7 @@ func TestEnsureVerifiesOpenCodePluginWithoutBreaking(t *testing.T) {
 	}
 }
 
-func TestGeneratedAdapterPreservesHarnessMetadataFences(t *testing.T) {
+func TestGeneratedMirrorPreservesHarnessMetadataFences(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, ManifestPath, baseManifest())
 	canonical := "---\nname: commit-clean\ndescription: Commit finished work cleanly.\nmetadata:\n  opencode: claude-only\n---\n# Workflow body\n"
@@ -942,7 +969,7 @@ func TestGeneratedAdapterPreservesHarnessMetadataFences(t *testing.T) {
 	write(t, root, ".claude/memory/base.md", "memory\n")
 	write(t, root, ".claude/goal-prompts/base.md", "prompt\n")
 
-	// 1. Build(root, true) generates adapter preserving metadata fence
+	// 1. Build(root, true) generates mirror preserving metadata fence
 	receipt, err := Build(root, true)
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
@@ -951,17 +978,20 @@ func TestGeneratedAdapterPreservesHarnessMetadataFences(t *testing.T) {
 		t.Fatalf("expected ZeroUnexplainedGaps=true, got %#v", receipt.Harnesses["opencode"])
 	}
 
-	adapterPath := filepath.Join(root, ".agents", "skills", "commit-clean", "SKILL.md")
-	body, err := os.ReadFile(adapterPath)
+	mirrorPath := filepath.Join(root, ".agents", "skills", "commit-clean", "SKILL.md")
+	body, err := os.ReadFile(mirrorPath)
 	if err != nil {
-		t.Fatalf("read adapter: %v", err)
+		t.Fatalf("read mirror: %v", err)
 	}
 	content := string(body)
 	if !strings.Contains(content, "opencode: claude-only") {
-		t.Fatalf("adapter frontmatter missing 'opencode: claude-only':\n%s", content)
+		t.Fatalf("mirror frontmatter missing 'opencode: claude-only':\n%s", content)
 	}
 	if !strings.Contains(content, "generated-by: fak project-assets sync") {
-		t.Fatalf("adapter frontmatter missing 'generated-by':\n%s", content)
+		t.Fatalf("mirror frontmatter missing 'generated-by':\n%s", content)
+	}
+	if !strings.Contains(content, "# Workflow body\n") {
+		t.Fatalf("mirror lost the canonical body:\n%s", content)
 	}
 
 	// 2. Parity check with Build(root, false) succeeds
@@ -973,7 +1003,7 @@ func TestGeneratedAdapterPreservesHarnessMetadataFences(t *testing.T) {
 		t.Fatalf("expected parity to hold after sync: %#v", checkReceipt.Harnesses["opencode"])
 	}
 
-	// 3. Modifying canonical metadata flags adapter as stale
+	// 3. Modifying canonical metadata flags mirror as stale
 	modifiedCanonical := "---\nname: commit-clean\ndescription: Commit finished work cleanly.\nmetadata:\n  opencode: agent-permission\n---\n# Workflow body\n"
 	write(t, root, ".claude/skills/commit-clean/SKILL.md", modifiedCanonical)
 	staleReceipt, err := Build(root, false)
@@ -992,89 +1022,6 @@ func TestGeneratedAdapterPreservesHarnessMetadataFences(t *testing.T) {
 	}
 	if !foundStale {
 		t.Fatalf("expected .agents/skills/commit-clean/SKILL.md to be stale, got: %v", staleReceipt.Harnesses["opencode"].Stale)
-	}
-}
-
-func TestParityDetectsPostTruncationDescriptionChanges(t *testing.T) {
-	root := t.TempDir()
-	write(t, root, ManifestPath, baseManifest())
-	write(t, root, ".claude/memory/base.md", "memory\n")
-	write(t, root, ".claude/goal-prompts/base.md", "prompt\n")
-
-	// Construct two descriptions longer than maxSkillDescriptionChars (220)
-	// that share the same prefix up to 220 characters so AdapterDescription
-	// produces the exact same truncated string for both.
-	basePrefix := strings.Repeat("discovery trigger prefix ", 9) // 225 chars
-	desc1 := basePrefix + " FIRST_SUFFIX_POST_220"
-	desc2 := basePrefix + " SECOND_SUFFIX_POST_220"
-
-	trunc1 := AdapterDescription(desc1)
-	trunc2 := AdapterDescription(desc2)
-	if trunc1 != trunc2 {
-		t.Fatalf("test precondition failed: truncated descriptions differ: %q vs %q", trunc1, trunc2)
-	}
-
-	// 1. Write skill with desc1 and sync adapter
-	canonicalPath := ".claude/skills/long-skill/SKILL.md"
-	write(t, root, canonicalPath, fmt.Sprintf("---\nname: long-skill\ndescription: %s\n---\n# Body\n", desc1))
-
-	receipt, err := Build(root, true)
-	if err != nil {
-		t.Fatalf("Build(true) failed: %v", err)
-	}
-	if !receipt.ZeroUnexplainedGaps {
-		t.Fatalf("expected ZeroUnexplainedGaps=true, got %#v", receipt.Harnesses["codex"])
-	}
-
-	adapterPath := filepath.Join(root, ".agents", "skills", "long-skill", "SKILL.md")
-	adapterBody, err := os.ReadFile(adapterPath)
-	if err != nil {
-		t.Fatalf("read adapter: %v", err)
-	}
-	if !strings.Contains(string(adapterBody), "canonical-description-hash:") {
-		t.Fatalf("expected truncated adapter to record canonical-description-hash:\n%s", adapterBody)
-	}
-
-	// Parity check clean
-	cleanReceipt, err := Build(root, false)
-	if err != nil {
-		t.Fatalf("Build(false) failed: %v", err)
-	}
-	if !cleanReceipt.ZeroUnexplainedGaps {
-		t.Fatal("expected ZeroUnexplainedGaps=true on clean tree")
-	}
-
-	// 2. Modify canonical skill to desc2 (change occurs only past 220 chars)
-	write(t, root, canonicalPath, fmt.Sprintf("---\nname: long-skill\ndescription: %s\n---\n# Body\n", desc2))
-
-	driftReceipt, err := Build(root, false)
-	if err != nil {
-		t.Fatalf("Build(false) after drift failed: %v", err)
-	}
-	if driftReceipt.ZeroUnexplainedGaps {
-		t.Fatal("expected ZeroUnexplainedGaps=false: post-truncation description change masked by parity gate")
-	}
-
-	target := ".agents/skills/long-skill/SKILL.md"
-	codexStale := driftReceipt.Harnesses["codex"].Stale
-	found := false
-	for _, s := range codexStale {
-		if s == target {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("target %s not found in stale list: %v", target, codexStale)
-	}
-
-	// 3. Resync restores parity
-	resyncReceipt, err := Build(root, true)
-	if err != nil {
-		t.Fatalf("Build(true) resync failed: %v", err)
-	}
-	if !resyncReceipt.ZeroUnexplainedGaps {
-		t.Fatalf("expected ZeroUnexplainedGaps=true after resync, got %#v", resyncReceipt.Harnesses["codex"])
 	}
 }
 

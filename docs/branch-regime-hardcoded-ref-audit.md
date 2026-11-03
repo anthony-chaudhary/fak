@@ -59,6 +59,7 @@ unclassified workflow development-path ref reds that package.
 | `tools/bench_migrate*.py`, `tools/bench_node.README.md`, and test fixtures with `"branch": "master"` | fixture / imported benchmark metadata | These are data examples unless the tool uses the branch value to select current development source. |
 | `internal/bench*` comments using "master goal" | not a git ref | Domain term for fan-out topology, not a branch name. |
 | `tools/demo_robustness_scorecard.py` regex that flags `@main` / `@master` installs | public-link guard | The lint intentionally detects mutable install refs. |
+| `.agents/skills/*` agent skill docs naming `origin/main` in git-workflow instructions | development source | Operational prompt text that lands everyday work on the trunk - same family as the dispatch/guard/prompt-text row above and the AGENTS.md / CONTRIBUTING.md operator law; classified by the `.agents/skills/` prefix in `internal/branchrole`. |
 
 ## Non-Workflow Gate
 

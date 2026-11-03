@@ -521,6 +521,9 @@ func (p *HTTPPlanner) prepareUpstreamContext(ctx context.Context, messages []Mes
 		return nil, err
 	}
 	sp := applySampleOpts(opts...)
+	if sp.NativeBeamSearch != nil {
+		return nil, ErrNativeBeamSearchUnsupported
+	}
 	if err := validateProviderSamplingSeed(adapter.Provider(), sp.Seed); err != nil {
 		return nil, err
 	}

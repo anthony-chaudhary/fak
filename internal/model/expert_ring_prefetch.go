@@ -2,69 +2,50 @@ package model
 
 import "github.com/anthony-chaudhary/fak/internal/compute"
 
-// expert_ring_prefetch.go — R3 of the activated-expert offload ladder (#5614, epic #5606,
-// docs/MOE-ACTIVATED-OFFLOAD-PLAN.md): tell the ring a layer's WHOLE activated set the moment the
-// router names it, instead of letting the ring discover each expert one GEMM too late.
+// expert_ring_prefetch.go — R3 of the activated-expert offload ladder (#5614, epic #5606):
+// tell the ring a layer's WHOLE activated set the moment the router names it, instead of letting
+// the ring discover each expert one GEMM too late.
 //
-// Why this rung exists. The router produces all k picks for a layer BEFORE any of their GEMMs run —
-// that is the deterministic, same-step, known-not-predicted lookahead every MoE offload design
-// starts from. The ring never got to use it: weightHALStagedBounded learns an expert exists only
-// when expertSwiGLUHAL reaches for its gate projection, so every page-in is issued at the last
-// possible instant, serialized behind the expert before it. The information was already computed
-// and thrown away.
-//
-// What this closes. prefetchActivatedExperts stages the layer's activated set into the ring in ROUTE
-// order (gate weight descending) at layer entry, so by the time the expert loop starts, its weights
-// are already resident and every demand staging is a hit. The uploads are issued back to back with
-// no GEMM between them, which is the seam an async H2D path needs — see the honest limit below.
+// The router produces all k picks for a layer BEFORE any of their GEMMs run; the ring never got to
+// use that, because weightHALStagedBounded learns an expert exists only when its GEMM reaches for
+// the gate projection. prefetchActivatedExperts stages the layer's activated set into the ring in
+// route order at layer entry, so by the time the expert loop starts its weights are resident and
+// every demand staging is a hit. The uploads are issued back to back with no GEMM between them —
+// the seam an async H2D path needs.
 //
 // Two rules make it a prefetch rather than a thrash:
+//   - DO NOT PREFETCH WHAT CANNOT STAY: only the longest PREFIX of the activated set that fits the
+//     budget is staged. Running past the budget evicts what was just fetched, converting a late
+//     miss into an early miss plus an eviction. Stopping at the prefix keeps the set ordered by the
+//     router's own confidence.
+//   - A PREFETCH IS A HINT, NOT A DEMAND: staging updates recency but earns NO heat under the R4
+//     value-aware policy and is invisible to R2's usage histogram and R4's replay trace — those are
+//     fed by the demand path only. A policy ranking on its own prefetcher's guesses would be
+//     self-confirming: it would protect exactly what was speculated, whether or not anything used it.
 //
-//   - DO NOT PREFETCH WHAT CANNOT STAY. Only the longest PREFIX of the activated set that fits the
-//     ring budget is staged. A prefetcher that runs past the budget evicts what it just fetched: it
-//     pays the upload, throws it away, and converts a late miss into an early miss PLUS an eviction.
-//     Stopping at the prefix (rather than skipping a big expert to squeeze in a later smaller one)
-//     keeps the prefetched set ordered by the router's own confidence — the picks most likely to
-//     recur next token are the ones that stay.
-//   - A PREFETCH IS A HINT, NOT A DEMAND. Staging here updates recency (the weight really is newly
-//     resident) but earns NO heat under the R4 value-aware policy, and is invisible to R2's usage
-//     histogram and to R4's replay trace — those are fed by weightHALStagedBounded on the demand
-//     path only. A policy that ranked on its own prefetcher's guesses would be self-confirming:
-//     it would protect exactly what was speculated, whether or not anything used it, and the offline
-//     gauge would score a stream the workload never produced.
+// It also never falls back: weightHALStagedBounded answers a ring refusal by promoting the weight
+// to PERMANENT halW residency, which is right for a demand but would let a misconfigured budget
+// convert speculation into permanent residency and break R0's "no routed expert reaches halW"
+// bound. On any refusal the prefetch simply stops.
 //
-// It also never falls back. weightHALStagedBounded answers a ring refusal by promoting the weight to
-// PERMANENT halW residency, which is right for a demand that must be served but wrong for a hint —
-// it would let a misconfigured budget quietly convert speculation into permanent residency and break
-// R0's "no routed expert reaches halW" bound. So the prefetch stages straight into the ring and, on
-// any refusal, simply stops.
+// Honest limit: this issues the page-ins earlier, it does not yet OVERLAP them with compute —
+// compute.Backend exposes no stream/event handle, so the plan's "fraction of page-in latency
+// overlapped with compute" witness needs an async staging primitive, which is not this rung. What
+// IS measured: the set is issued before the first GEMM, it costs zero extra page-ins, it stays
+// inside the budget, and it leaves the R2/R4 evidence streams byte-for-byte unperturbed.
 //
-// Honest limit: this issues the page-ins earlier, it does not yet OVERLAP them with compute.
-// compute.Backend exposes Upload as the only host->device path and no stream/event handle, so on a
-// backend whose Upload is internally async the batched issue does overlap (expert 0's GEMM runs
-// while experts 1..k-1 are still landing) and on cpu-ref it is a pure reordering. The plan's
-// "fraction of page-in latency overlapped with compute" witness therefore cannot be measured here —
-// it needs an async staging primitive on the Backend interface, which is not this rung. What IS
-// measured: the set is issued before the first GEMM, it costs ZERO extra page-ins, it stays inside
-// the budget, and it leaves the R2/R4 evidence streams byte-for-byte unperturbed.
-//
-// Relation to #4300: that issue owns the PREDICTIVE layer (probability thresholds, cross-token
-// speculation, layer L+1 before layer L retires — which needs a predictor, because L+1's router
-// input is downstream of L's own expert output). R3 is the deterministic floor beneath it and the
-// seam it attaches to: prefetchActivatedExperts takes a pick list, and a predictor is just a
-// different producer of one.
+// Relation to #4300: that issue owns the PREDICTIVE layer (cross-token speculation, layer L+1
+// before layer L retires); R3 is the deterministic floor beneath it and the seam it attaches to —
+// prefetchActivatedExperts takes a pick list, and a predictor is just a different producer of one.
 
 // ExpertPrefetchMode selects whether the ring is told a layer's activated set up front or discovers
-// it one expert at a time. It mirrors ExpertRingEvictPolicy's shape (a small enum whose zero value is
-// the default) so a caller reading both reads one vocabulary.
+// it one expert at a time.
 //
-// Unlike the other rungs' knobs, the ZERO value here turns the lookahead ON. That is not a change of
-// heart about default-off: the whole ring is opt-in behind ExpertRingBytes, so a session that
-// declared nothing still gets nothing. WITHIN a declared ring the prefetch is measured free — same
-// page-ins, same bytes, same arithmetic (TestExpertRingPrefetchCostsNoExtraPageIns) — so making an
-// operator ask for it twice would be asking them to opt into a strictly better default.
-// ExpertPrefetchOnDemand exists because the plan's witness for this rung is a comparison AT a fixed
-// ring budget, which needs both arms to be reachable.
+// Unlike the other rungs' knobs, the ZERO value here turns the lookahead ON: the whole ring is
+// opt-in behind ExpertRingBytes, so a session that declared nothing still gets nothing, and WITHIN
+// a declared ring the prefetch is measured free (same page-ins, same bytes, same arithmetic —
+// TestExpertRingPrefetchCostsNoExtraPageIns). ExpertPrefetchOnDemand exists because the plan's
+// witness is a comparison at a fixed ring budget, which needs both arms reachable.
 type ExpertPrefetchMode int
 
 const (
@@ -94,18 +75,16 @@ func (m ExpertPrefetchMode) String() string {
 // ringStaging is how this projection would be staged into the routed-expert ring: the dtype-prefixed
 // key, the host-source builder, the dtype and the resident byte cost. It MIRRORS weightHALQ4K /
 // weightHALKQuant (hal.go) exactly — same key, same dtype, same size — because a prefetched resident
-// must be the very same ring entry the demand path then finds. TestExpertRingPrefetchCostsNoExtraPageIns
-// is the guard on that agreement: if the two ever drift, the demand staging misses and page-ins double.
+// must be the very same ring entry the demand path then finds; TestExpertRingPrefetchCostsNoExtraPageIns
+// guards that agreement (if the two drift, the demand staging misses and page-ins double).
 //
 // ok=false for a representation the ring has no staging for. Unlike the demand path this DECLINES
-// rather than panics: a prefetch is best-effort, and a hint must never be the thing that kills a
-// forward the demand path would have served.
+// rather than panics: a hint must never kill a forward the demand path would have served.
 //
-// A checkpoint-served projection (R5/#5616) reports the descriptor its own tier derived, which is
-// built to this same rule. Note what that makes the prefetch: staging one issues the expert's stride
-// read, so an activated set over a streamed checkpoint has its reads issued together at layer entry
-// rather than one GEMM apart — and an expert the ring already holds is skipped by the isResident
-// check below, so it reads nothing at all.
+// A checkpoint-served projection (R5/#5616) reports the descriptor its own tier derived, built to
+// this same rule: staging one issues the expert's stride read, so an activated set over a streamed
+// checkpoint has its reads issued together at layer entry, and an expert the ring already holds is
+// skipped by the isResident check below.
 func (w expertWeight) ringStaging() (key string, mk func() compute.Tensor, dt compute.Dtype, bytes int64, ok bool) {
 	switch {
 	case w.ck != nil:
@@ -137,10 +116,9 @@ func (w expertWeight) ringStaging() (key string, mk func() compute.Tensor, dt co
 }
 
 // activatedExpertWeights resolves one routed expert's three projections through the SAME resolver
-// the demand path uses (Session.resolveExpertWeight, hal.go) — the resident stores first, then the
-// R5/#5616 checkpoint tier — so the prefetch reaches for exactly the weights the GEMM will, whether
-// they are host-resident or faulted per expert out of the fused slab. ok=false if any projection is
-// unreachable, in which case this expert is not a ring candidate at all.
+// the demand path uses (Session.resolveExpertWeight, hal.go) — resident stores first, then the
+// R5/#5616 checkpoint tier — so the prefetch reaches for exactly the weights the GEMM will.
+// ok=false if any projection is unreachable, in which case this expert is not a ring candidate.
 //
 // Resolving here is also what makes a checkpoint fault OVERLAPPABLE: the activated set is known at
 // layer entry, so its reads are issued together instead of one GEMM apart.
@@ -160,9 +138,9 @@ func (s *Session) activatedExpertWeights(layer, expert int) ([3]expertWeight, bo
 }
 
 // activatedExpertPlan is one resolved pick: its three staging descriptors and their total resident
-// cost, computed before ANY of them is staged so the fit decision is made on the whole expert. An
-// expert is admitted to the ring as a unit or not at all — staging two of three projections would
-// leave the ring holding a fragment no GEMM can use.
+// cost, computed before ANY of them is staged so the fit decision is made on the whole expert — an
+// expert is admitted as a unit or not at all, since two of three projections is a fragment no GEMM
+// can use.
 type activatedExpertPlan struct {
 	expert int
 	bytes  int64
@@ -189,8 +167,8 @@ func (s *Session) prefetchActivatedExperts(layer int, picks []routePick) {
 	}
 
 	// Phase 1: resolve every pick before staging any of it, so the coverage meter counts the whole
-	// activated set the router asked for — including the tail the budget will refuse. A meter that
-	// only counted what fit could never report a budget that fits nothing.
+	// activated set — including the tail the budget will refuse. A meter that only counted what fit
+	// could never report a budget that fits nothing.
 	plans := make([]activatedExpertPlan, 0, len(picks))
 	for _, pk := range picks {
 		ws, ok := s.activatedExpertWeights(layer, pk.expert)
@@ -215,9 +193,9 @@ func (s *Session) prefetchActivatedExperts(layer int, picks []routePick) {
 	if len(plans) == 0 {
 		return
 	}
-	// R7/#5618: everything from here down mutates ring state, so under a shared ring it runs inside
-	// one span — including the `prefetching` flag, which is ring-wide and would otherwise let a peer
-	// agent's DEMAND be booked as this agent's hint. A no-op under the per-session default.
+	// Everything from here down mutates ring state, so under a shared ring it runs inside one span —
+	// including the ring-wide `prefetching` flag, which would otherwise let a peer agent's DEMAND be
+	// booked as this agent's hint. A no-op under the per-session default.
 	release := s.ringEnter(r)
 	defer release()
 	r.activatedExperts += len(plans)
@@ -227,10 +205,9 @@ func (s *Session) prefetchActivatedExperts(layer int, picks []routePick) {
 	r.prefetching = true
 	defer func() { r.prefetching = false }()
 
-	// The ring's own budget is fixed; the batch-aware policy projects a larger EFFECTIVE hot-set
-	// ceiling when the admitted batch justifies one (#1295). Disabled or batch<=1 returns r.budget()
-	// byte-for-byte. The larger effective ceiling admits a longer prefetched prefix, which is the
-	// policy's aggressiveness lever; the break-on-partial prefix semantics below are untouched.
+	// The batch-aware policy projects a larger EFFECTIVE hot-set ceiling when the admitted batch
+	// justifies one (#1295); disabled or batch<=1 returns r.budget() byte-for-byte. The larger
+	// ceiling admits a longer prefetched prefix — the policy's aggressiveness lever.
 	effective := BatchAwareHotSetBytes(r.budget(), s.ExpertAdmittedBatch, s.ExpertRingBatchAware)
 	var reserved int64
 	for _, p := range plans {

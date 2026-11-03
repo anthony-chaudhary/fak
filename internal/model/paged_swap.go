@@ -27,27 +27,48 @@ func (s *PagedKV) SwapToHost() ([]byte, error) {
 		return nil, errors.New("model: cannot swap nil PagedKV")
 	}
 	p := s.pool
-	var b bytes.Buffer
-	b.WriteString(pagedKVSwapMagic)
-	for _, n := range []int{p.blockTokens, p.stride, p.nLayers, p.planes, s.nTokens, len(s.table)} {
+	header := [...]int{p.blockTokens, p.stride, p.nLayers, p.planes, s.nTokens, len(s.table)}
+	for _, n := range header {
 		if n < 0 {
 			return nil, fmt.Errorf("model: cannot swap PagedKV with negative geometry %d", n)
 		}
-		if err := binary.Write(&b, binary.LittleEndian, uint32(n)); err != nil {
-			return nil, err
-		}
 	}
+	size := len(pagedKVSwapMagic) + len(header)*4
 	for _, id := range s.table {
 		if id < 0 || id >= len(p.blocks) || p.ref[id] == 0 {
 			return nil, fmt.Errorf("model: cannot swap PagedKV with invalid block id %d", id)
 		}
-		for _, f := range p.blocks[id] {
-			if err := binary.Write(&b, binary.LittleEndian, math.Float32bits(f)); err != nil {
-				return nil, err
-			}
+		var err error
+		size, err = pagedKVSwapGrowSize(size, len(p.blocks[id]))
+		if err != nil {
+			return nil, err
 		}
 	}
-	return b.Bytes(), nil
+	// One owned output preserves the original FAKPKV1 framing and every
+	// physical float, including unused slots and reserved tail blocks.
+	blob := make([]byte, size)
+	copy(blob, pagedKVSwapMagic)
+	off := len(pagedKVSwapMagic)
+	for _, n := range header {
+		binary.LittleEndian.PutUint32(blob[off:off+4], uint32(n))
+		off += 4
+	}
+	for _, id := range s.table {
+		for _, f := range p.blocks[id] {
+			binary.LittleEndian.PutUint32(blob[off:off+4], math.Float32bits(f))
+			off += 4
+		}
+	}
+	return blob, nil
+}
+
+// pagedKVSwapGrowSize checks the addressable output extent before allocation.
+func pagedKVSwapGrowSize(size, floats int) (int, error) {
+	maxInt := int(^uint(0) >> 1)
+	if size < 0 || floats < 0 || floats > (maxInt-size)/4 {
+		return 0, errors.New("model: paged KV swap blob exceeds addressable size")
+	}
+	return size + floats*4, nil
 }
 
 // RestoreFromHost restores a SwapToHost blob into fresh owned pages in this pool. The pool
@@ -113,6 +134,7 @@ func (p *PagedKVPool) RestoreFromHost(data []byte) (*PagedKV, error) {
 		seq.Free()
 		return nil, err
 	}
+	payload := data[len(data)-r.Len():]
 	for i := 0; i < nBlocks; i++ {
 		id := p.alloc()
 		seq.table = append(seq.table, id)
@@ -120,15 +142,21 @@ func (p *PagedKVPool) RestoreFromHost(data []byte) (*PagedKV, error) {
 		if len(blk) != p.blockFloats() {
 			return fail(errors.New("model: paged KV pool block geometry changed under restore"))
 		}
-		for j := range blk {
-			var bits uint32
-			if err := binary.Read(r, binary.LittleEndian, &bits); err != nil {
-				return fail(fmt.Errorf("model: restore paged KV block %d: %w", i, err))
+		// Check before multiplying or slicing. Preserve scalar binary.Read's
+		// EOF versus partial-word error, and release only this restore's pages.
+		if len(blk) > len(payload)/4 {
+			err := error(io.EOF)
+			if len(payload)%4 != 0 {
+				err = io.ErrUnexpectedEOF
 			}
-			blk[j] = math.Float32frombits(bits)
+			return fail(fmt.Errorf("model: restore paged KV block %d: %w", i, err))
 		}
+		for j := range blk {
+			blk[j] = math.Float32frombits(binary.LittleEndian.Uint32(payload[j*4:]))
+		}
+		payload = payload[len(blk)*4:]
 	}
-	if r.Len() != 0 {
+	if len(payload) != 0 {
 		return fail(errors.New("model: paged KV swap blob has trailing bytes"))
 	}
 	return seq, nil

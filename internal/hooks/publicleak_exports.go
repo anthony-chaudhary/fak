@@ -6,14 +6,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 type PublicLeakTreeReport struct {
-	OK       bool      `json:"ok"`
-	Mode     string    `json:"mode"`
-	Count    int       `json:"count"`
-	Findings []Finding `json:"findings"`
-	Misses   []Finding `json:"misses"`
+	OK       bool                 `json:"ok"`
+	Mode     string               `json:"mode"`
+	Count    int                  `json:"count"`
+	Findings []Finding            `json:"findings"`
+	Misses   []Finding            `json:"misses"`
+	Timing   PublicLeakTreeTiming `json:"timing"`
+}
+
+// PublicLeakTreeTiming reports measured host wall time, never kernel/device time.
+type PublicLeakTreeTiming struct {
+	EnumerationNS int64 `json:"enumeration_ns"`
+	ScanNS        int64 `json:"scan_ns"`
+	TrackedPaths  int   `json:"tracked_paths"`
 }
 
 func ScanStagedPublicLeak(root string) ([]Finding, error) {
@@ -48,12 +57,15 @@ func ScanRangePublicLeak(root, revRange string) ([]Finding, error) {
 }
 
 func AuditPublicLeakTree(root string) (PublicLeakTreeReport, error) {
+	started := time.Now()
 	t, err := ReadTrackedTree(root)
 	if err != nil {
 		return PublicLeakTreeReport{}, err
 	}
+	enumerated := time.Now()
 	findings, mode := scanPublicLeakTreeFiles(t.Paths, oneShotPublicLeakTreeReader(t))
-	return PublicLeakTreeReport{OK: len(findings) == 0, Mode: mode, Count: len(findings), Findings: findings, Misses: findings}, nil
+	timing := PublicLeakTreeTiming{EnumerationNS: enumerated.Sub(started).Nanoseconds(), ScanNS: time.Since(enumerated).Nanoseconds(), TrackedPaths: len(t.Paths)}
+	return PublicLeakTreeReport{OK: len(findings) == 0, Mode: mode, Count: len(findings), Findings: findings, Misses: findings, Timing: timing}, nil
 }
 
 func PublicLeakTreeText(report PublicLeakTreeReport) string {

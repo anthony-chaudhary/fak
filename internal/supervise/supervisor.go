@@ -126,9 +126,9 @@ func (s *Supervisor) Tick(ctx context.Context, now ...time.Time) (*SuperviseRepo
 		tNow = now[0]
 	}
 
-	contracts, err := s.cfg.Store.LiveContracts(ctx, tNow)
+	contracts, err := s.cfg.Store.ListContracts(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("supervisor: failed to fetch live contracts: %w", err)
+		return nil, fmt.Errorf("supervisor: failed to fetch contracts: %w", err)
 	}
 
 	report := &SuperviseReport{

@@ -18,6 +18,7 @@ func TestEngineWaitingAdmissionDoesNotMaterializeKV(test *testing.T) {
 	test.Run("impossible_prompt_is_rejected_before_session_allocation", func(test *testing.T) {
 		engine := New()
 		scheduler := engine.nativeScheduler()
+		resumeDecode := holdCapacityNativeDecode(test, scheduler)
 		scheduler.SetMaxRunning(1)
 		scheduler.SetKVPreemptionPolicy(NativePreemptionPolicy{
 			Mode:        NativePreemptRecompute,
@@ -60,7 +61,7 @@ func TestEngineWaitingAdmissionDoesNotMaterializeKV(test *testing.T) {
 			validRequest := admitCapacityRequest(test, engine, requestContext, tool)
 			awaitCapacityToken(test, validRequest)
 			cancelRequest()
-			drainCapacityRequest(test, validRequest, context.Canceled)
+			drainCapacityRequest(test, validRequest, context.Canceled, resumeDecode)
 		}
 		if got := freshSessions.Load(); got != 2 {
 			test.Fatalf("fresh sessions after exact and normalized-empty admissions = %d, want 2", got)
@@ -112,6 +113,7 @@ func TestEngineWaitingAdmissionDoesNotMaterializeKV(test *testing.T) {
 	test.Run("impossible_prompt_is_rejected_while_state_slot_is_occupied", func(test *testing.T) {
 		engine := New()
 		scheduler := engine.nativeScheduler()
+		resumeDecode := holdCapacityNativeDecode(test, scheduler)
 		scheduler.SetMaxRunning(1)
 		scheduler.SetKVPreemptionPolicy(NativePreemptionPolicy{Mode: NativePreemptRecompute, MaxBlocks: 1, BlockTokens: 4})
 		scheduler.prepare = nativeSchedulerPrefillPrepare(map[string][]int{
@@ -144,7 +146,7 @@ func TestEngineWaitingAdmissionDoesNotMaterializeKV(test *testing.T) {
 			test.Fatalf("fresh sessions after occupied-slot rejection = %d, want 1", got)
 		}
 		cancelActive()
-		drainCapacityRequest(test, activeRequest, context.Canceled)
+		drainCapacityRequest(test, activeRequest, context.Canceled, resumeDecode)
 	})
 
 	test.Run("transient_kv_pressure_defers_with_spare_bounded_running_slot", func(test *testing.T) {
@@ -159,10 +161,10 @@ func TestEngineWaitingAdmissionDoesNotMaterializeKV(test *testing.T) {
 		assertCapacityMaterialization(test, fixture, 1, 1)
 		assertCapacityNoToken(test, waitingRequest)
 
-		drainCapacityRequest(test, activeRequest, nil)
+		drainCapacityRequest(test, activeRequest, nil, fixture.resumeDecode)
 		awaitCapacityToken(test, waitingRequest)
 		assertCapacityMaterialization(test, fixture, 2, 2)
-		drainCapacityRequest(test, waitingRequest, nil)
+		drainCapacityRequest(test, waitingRequest, nil, fixture.resumeDecode)
 	})
 
 	test.Run("bounded_swap_preserves_deliberate_preemption_overlap", func(test *testing.T) {
@@ -183,6 +185,7 @@ func TestEngineWaitingAdmissionDoesNotMaterializeKV(test *testing.T) {
 		assertCapacityMaterialization(test, fixture, 2, 2)
 		var drains sync.WaitGroup
 		for _, request := range requests {
+			fixture.resumeDecode(request)
 			drains.Add(1)
 			go func() {
 				defer drains.Done()
@@ -226,7 +229,7 @@ func TestEngineWaitingAdmissionDoesNotMaterializeKV(test *testing.T) {
 			BlockTokens: 128,
 		})
 		cancelActive()
-		drainCapacityRequest(test, activeRequest, context.Canceled)
+		drainCapacityRequest(test, activeRequest, context.Canceled, fixture.resumeDecode)
 		deadline := time.Now().Add(5 * time.Second)
 		for (fixture.freshSessions.Load() != 4 || capacityPrefillObservations(fixture.scheduler) != 4) && time.Now().Before(deadline) {
 			time.Sleep(5 * time.Millisecond)
@@ -237,7 +240,7 @@ func TestEngineWaitingAdmissionDoesNotMaterializeKV(test *testing.T) {
 			cancelWaiting()
 		}
 		for _, waitingRequest := range waitingRequests {
-			drainCapacityRequest(test, waitingRequest, context.Canceled)
+			drainCapacityRequest(test, waitingRequest, context.Canceled, fixture.resumeDecode)
 		}
 	})
 
@@ -256,8 +259,8 @@ func TestEngineWaitingAdmissionDoesNotMaterializeKV(test *testing.T) {
 		assertCapacityNoToken(test, waitingRequest)
 
 		cancelWait()
-		drainCapacityRequest(test, activeRequest, nil)
-		drainCapacityRequest(test, waitingRequest, context.Canceled)
+		drainCapacityRequest(test, activeRequest, nil, fixture.resumeDecode)
+		drainCapacityRequest(test, waitingRequest, context.Canceled, fixture.resumeDecode)
 		assertCapacityMaterialization(test, fixture, 1, 1)
 		assertCapacityPressure(test, fixture.scheduler)
 	})
@@ -273,10 +276,10 @@ func TestEngineWaitingAdmissionDoesNotMaterializeKV(test *testing.T) {
 		assertCapacityMaterialization(test, fixture, 1, 1)
 		assertCapacityNoToken(test, waitingRequest)
 
-		drainCapacityRequest(test, activeRequest, nil)
+		drainCapacityRequest(test, activeRequest, nil, fixture.resumeDecode)
 		awaitCapacityToken(test, waitingRequest)
 		assertCapacityMaterialization(test, fixture, 2, 2)
-		drainCapacityRequest(test, waitingRequest, nil)
+		drainCapacityRequest(test, waitingRequest, nil, fixture.resumeDecode)
 		assertCapacityMaterialization(test, fixture, 2, 2)
 		assertCapacityPressure(test, fixture.scheduler)
 	})
@@ -299,8 +302,8 @@ func TestEngineWaitingAdmissionDoesNotMaterializeKV(test *testing.T) {
 		}
 		assertCapacityMaterialization(test, fixture, 1, 1)
 
-		drainCapacityRequest(test, activeRequest, nil)
-		drainCapacityRequest(test, waitingRequest, &model.Qwen35MetalStateIdentityUnavailableError{})
+		drainCapacityRequest(test, activeRequest, nil, fixture.resumeDecode)
+		drainCapacityRequest(test, waitingRequest, &model.Qwen35MetalStateIdentityUnavailableError{}, fixture.resumeDecode)
 		if got := fixture.freshSessions.Load(); got != 2 {
 			test.Fatalf("fresh sessions after failed promotion = %d, want 2", got)
 		}
@@ -429,8 +432,8 @@ func TestEngineWaitingAdmissionDoesNotMaterializeKV(test *testing.T) {
 		assertCapacityMaterialization(test, fixture, 2, 2)
 
 		cancelWait()
-		drainCapacityRequest(test, activeRequest, nil)
-		drainCapacityRequest(test, waitingRequest, context.Canceled)
+		drainCapacityRequest(test, activeRequest, nil, fixture.resumeDecode)
+		drainCapacityRequest(test, waitingRequest, context.Canceled, fixture.resumeDecode)
 	})
 
 	test.Run("spare_capacity_admission_stays_live_under_backpressure", func(test *testing.T) {
@@ -469,15 +472,15 @@ func TestEngineWaitingAdmissionDoesNotMaterializeKV(test *testing.T) {
 		case <-time.After(2 * time.Second):
 			cancelActive()
 			cancelSecond()
-			drainCapacityRequest(test, activeRequest, context.Canceled)
+			drainCapacityRequest(test, activeRequest, context.Canceled, fixture.resumeDecode)
 			test.Fatal("second Admit blocked despite spare capacity")
 		}
 		assertCapacityMaterialization(test, fixture, 2, 2)
 
 		cancelActive()
 		cancelSecond()
-		drainCapacityRequest(test, activeRequest, context.Canceled)
-		drainCapacityRequest(test, secondRequest, context.Canceled)
+		drainCapacityRequest(test, activeRequest, context.Canceled, fixture.resumeDecode)
+		drainCapacityRequest(test, secondRequest, context.Canceled, fixture.resumeDecode)
 		if peak := fixture.scheduler.MaxObservedKVBlocks(); peak > 2 {
 			test.Fatalf("peak resident KV blocks = %d, want at most 2", peak)
 		}
@@ -488,6 +491,7 @@ func TestEngineWaitingAdmissionDoesNotMaterializeKV(test *testing.T) {
 		engine := New()
 		engine.PreloadQ4K(prefillModel)
 		scheduler := engine.nativeScheduler()
+		resumeDecode := holdCapacityNativeDecode(test, scheduler)
 		scheduler.prepare = nativeSchedulerPrefillPrepare(map[string][]int{
 			"capacity-budget-a":    nativeSchedulerQwenPrompt(8),
 			"capacity-budget-b":    nativeSchedulerQwenPrompt(8),
@@ -537,7 +541,7 @@ func TestEngineWaitingAdmissionDoesNotMaterializeKV(test *testing.T) {
 		assertCapacityNoToken(test, longRequest)
 
 		cancelFirst()
-		drainCapacityRequest(test, firstRequest, context.Canceled)
+		drainCapacityRequest(test, firstRequest, context.Canceled, resumeDecode)
 		awaitCapacityToken(test, secondRequest)
 		longLane, ok := longRequest.(*schedLane)
 		if !ok {
@@ -566,13 +570,13 @@ func TestEngineWaitingAdmissionDoesNotMaterializeKV(test *testing.T) {
 		}
 
 		cancelSecond()
-		drainCapacityRequest(test, secondRequest, context.Canceled)
+		drainCapacityRequest(test, secondRequest, context.Canceled, resumeDecode)
 		awaitCapacityToken(test, longRequest)
 		if got := freshSessions.Load(); got != 3 {
 			test.Fatalf("fresh sessions after empty-budget promotion = %d, want 3", got)
 		}
 		cancelLong()
-		drainCapacityRequest(test, longRequest, context.Canceled)
+		drainCapacityRequest(test, longRequest, context.Canceled, resumeDecode)
 	})
 
 	test.Run("concurrent_waiters_share_the_capacity_gate", func(test *testing.T) {
@@ -618,9 +622,9 @@ func TestEngineWaitingAdmissionDoesNotMaterializeKV(test *testing.T) {
 		for _, cancelWait := range waitCancels {
 			cancelWait()
 		}
-		drainCapacityRequest(test, activeRequest, nil)
+		drainCapacityRequest(test, activeRequest, nil, fixture.resumeDecode)
 		for _, waitingRequest := range waitingRequests {
-			drainCapacityRequest(test, waitingRequest, context.Canceled)
+			drainCapacityRequest(test, waitingRequest, context.Canceled, fixture.resumeDecode)
 		}
 		assertCapacityMaterialization(test, fixture, 1, 1)
 		assertCapacityPressure(test, fixture.scheduler)
@@ -631,13 +635,62 @@ type engineAdmissionCapacityFixture struct {
 	engine        *Engine
 	scheduler     *NativeScheduler
 	freshSessions atomic.Int64
+	resumeDecode  func(abi.EngineRequest)
+}
+
+// holdCapacityNativeDecode keeps a real owner live after its first token until
+// the fixture drains or cancels it. Output capacity must not decide whether a
+// later admission observes occupied KV or an already-completed request.
+func holdCapacityNativeDecode(test *testing.T, scheduler *NativeScheduler) func(abi.EngineRequest) {
+	test.Helper()
+	var mu sync.Mutex
+	gates := make(map[*schedLane]chan struct{})
+	gate := func(lane *schedLane) chan struct{} {
+		mu.Lock()
+		defer mu.Unlock()
+		if gates[lane] == nil {
+			gates[lane] = make(chan struct{})
+		}
+		return gates[lane]
+	}
+	scheduler.beforeModelExecute = func(kind nativeSchedulerEventKind, lane *schedLane) {
+		if kind != nativeSchedulerEventDecode || lane.emitted <= 1 {
+			return
+		}
+		select {
+		case <-gate(lane):
+		case <-lane.ctx.Done():
+		}
+	}
+	resume := func(request abi.EngineRequest) {
+		ch := gate(request.(*schedLane))
+		mu.Lock()
+		defer mu.Unlock()
+		select {
+		case <-ch:
+		default:
+			close(ch)
+		}
+	}
+	test.Cleanup(func() {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, ch := range gates {
+			select {
+			case <-ch:
+			default:
+				close(ch)
+			}
+		}
+	})
+	return resume
 }
 
 func newEngineAdmissionCapacityFixture(test *testing.T, enablePolicy bool) *engineAdmissionCapacityFixture {
 	test.Helper()
 	engine := New()
 	scheduler := engine.nativeScheduler()
-	fixture := &engineAdmissionCapacityFixture{engine: engine, scheduler: scheduler}
+	fixture := &engineAdmissionCapacityFixture{engine: engine, scheduler: scheduler, resumeDecode: holdCapacityNativeDecode(test, scheduler)}
 	scheduler.SetMaxRunning(1)
 	scheduler.SetSessionProfilerFactory(func(lifecycle NativeSessionLifecycle) *model.PhaseProfiler {
 		if lifecycle == NativeSessionFresh {
@@ -694,8 +747,9 @@ func assertCapacityNoToken(test *testing.T, request abi.EngineRequest) {
 	}
 }
 
-func drainCapacityRequest(test *testing.T, request abi.EngineRequest, wantErr error) {
+func drainCapacityRequest(test *testing.T, request abi.EngineRequest, wantErr error, resumeDecode func(abi.EngineRequest)) {
 	test.Helper()
+	resumeDecode(request)
 	drained := make(chan struct{})
 	go func() {
 		for range request.Tokens() {

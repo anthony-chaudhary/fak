@@ -254,7 +254,7 @@ func systemBaselineGateState(a, c ExperimentReceipt, required, allowSampled bool
 		if len(side.receipt.AmbientEvidence) > 0 {
 			return "investigate", fmt.Sprintf("%s mixes legacy ambient evidence with system baseline attestations", side.name)
 		}
-		if side.receipt.Schema != ReceiptSchemaV2 {
+		if side.receipt.Schema != ReceiptSchemaV2 && side.receipt.Schema != ReceiptSchemaV3 {
 			return "investigate", fmt.Sprintf("%s uses legacy receipt schema without ambient evidence contract", side.name)
 		}
 		if len(side.receipt.SystemBaselines) != len(side.receipt.Repetitions) {

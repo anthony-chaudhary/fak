@@ -12,6 +12,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
 )
 
+// The production seam: *leaseref.Store must satisfy ContractStore directly, so the
+// supervisor stays invocable against the real ref-backed store, not just the mocks.
+var _ ContractStore = (*leaseref.Store)(nil)
+
 type mockSuperviseStore struct {
 	mu        sync.Mutex
 	contracts map[string]leaseref.ContractRecord
@@ -23,7 +27,7 @@ func newMockSuperviseStore() *mockSuperviseStore {
 	}
 }
 
-func (m *mockSuperviseStore) LiveContracts(ctx context.Context, now ...time.Time) ([]leaseref.ContractRecord, error) {
+func (m *mockSuperviseStore) ListContracts(ctx context.Context) ([]leaseref.ContractRecord, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var list []leaseref.ContractRecord
@@ -33,7 +37,7 @@ func (m *mockSuperviseStore) LiveContracts(ctx context.Context, now ...time.Time
 	return list, nil
 }
 
-func (m *mockSuperviseStore) UpdateContractState(ctx context.Context, ticketID, holder string, newState leaseref.ContractState, tokensUsed int64, now ...time.Time) (leaseref.ContractRecord, error) {
+func (m *mockSuperviseStore) UpdateContractState(ctx context.Context, ticketID string, newState leaseref.ContractState, now ...time.Time) (leaseref.ContractRecord, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	rec, ok := m.contracts[ticketID]
@@ -41,9 +45,6 @@ func (m *mockSuperviseStore) UpdateContractState(ctx context.Context, ticketID, 
 		rec = leaseref.ContractRecord{TicketID: ticketID}
 	}
 	rec.State = newState
-	if tokensUsed > 0 {
-		rec.TokensUsed = tokensUsed
-	}
 	m.contracts[ticketID] = rec
 	return rec, nil
 }
