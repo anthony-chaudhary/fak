@@ -22,8 +22,8 @@ import (
 // NOT a learned model — identical text yields an identical vector and texts that
 // share tokens score higher cosine similarity, which is exactly what a drop-in
 // embeddings endpoint needs for deterministic tests, semantic-cache keys, and
-// nearest-neighbour smoke checks. Serving a LEARNED embedding model is an
-// engine/model-lane concern; swapping this backend for one is a later seam.
+// nearest-neighbour smoke checks. A configured EmbeddingPooling selects the separately admitted causal model
+// provider in embeddings_causal.go. Unset configuration preserves this hashing backend.
 // ---------------------------------------------------------------------------
 
 const (
@@ -90,6 +90,10 @@ func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	}
 	var req EmbeddingsRequest
 	if !decodeRequestBody(w, r, &req) {
+		return
+	}
+	if s.causalEmbeddings != nil {
+		s.handleCausalEmbeddings(w, r, req)
 		return
 	}
 	items, ok := normalizeTextInput(req.Input)

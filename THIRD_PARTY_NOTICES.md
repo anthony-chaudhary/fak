@@ -1571,3 +1571,34 @@ its existing single-page writer and page/COW ownership. Host admission and Go
 batch preparation/order control are Fak-specific. This does not reattribute the
 older v0.11.0 paged attention implementation or claim a measured speedup.
 The upstream Apache-2.0 license text is reproduced in the existing vLLM notice.
+
+
+## llama.cpp causal hidden-output and pooling contract
+
+The optional causal embeddings provider adapts final-normalization pooling and
+LM-head bypass from ggml-org/llama.cpp commit
+cd8427d018c07eefab6c110f7f115c31ec4c6157, src/llama-graph.cpp.
+FAK retains its own CPU layer/weight ownership implementation and explicit admission.
+No trained embedding quality or device equivalence is implied.
+
+MIT License
+
+Copyright (c) 2023-2026 The ggml authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
