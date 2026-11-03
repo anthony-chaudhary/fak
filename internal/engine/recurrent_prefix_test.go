@@ -13,11 +13,16 @@ package engine
 //   - engine wiring: reuse fires ONLY for a hybrid model with reuse enabled,
 //     and is fully disabled otherwise,
 //   - the decisive behavioral-equivalence witness: a reused turn-2 decode
-//     produces EXACTLY the token stream of a cold full-prompt prefill.
+//     produces EXACTLY the token stream of a cold full-prompt prefill,
+//   - the ticket-named witness TestRecurrentExtendOnlyPrefixReuse: the whole
+//     extend-only closed contract in both directions (admitted suffix-only
+//     prefill bit-equal to a from-zero fold; every non-extending shape a typed
+//     refusal with a full from-zero fold, never a partial graft).
 
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -429,6 +434,210 @@ func TestRecurrentPrefixBehavioralEquivalence(t *testing.T) {
 				i, reuseTokens[i], coldTokens[i], reuseTokens, coldTokens)
 		}
 	}
+}
+
+// TestRecurrentExtendOnlyPrefixReuse is the ticket-named witness for
+// oss-port-p0-recurrent-prefix-reuse (carloslfu/slotstream@53028cf, MIT, ADAPT):
+// it pins the extend-only GDN recurrent prefix reuse closed contract in both
+// directions at the engine seam.
+//
+//   - Admitted: a strictly-extending turn takes the stored boundary, prefills
+//     ONLY the extending suffix (exact matched-token accounting on the step
+//     result and the slot), and decodes a bit-identical stream to a from-zero
+//     fold of the same tokens on an independent cache-disabled batcher.
+//   - Refused: every non-extending shape yields a typed refusal from the
+//     closed sentinel vocabulary (errors.Is) — backward rewind, prefix
+//     divergence, empty key/tokens/snapshot — the retained boundary survives
+//     intact, and at the batcher admission a divergent or shorter request gets
+//     exactly zero reuse and a full from-zero fold, never a partial graft.
+//
+// // fak-test:runtime fast est=100ms lane=default
+func TestRecurrentExtendOnlyPrefixReuse(t *testing.T) {
+	t.Parallel()
+
+	prefix := []int{1, 2, 3}
+	full := append(append([]int(nil), prefix...), []int{4, 5, 6}...)
+
+	newBatcher := func(t *testing.T, disable bool) *ContinuousBatcher {
+		t.Helper()
+		cfg := DefaultContinuousBatcherConfig()
+		cfg.MaxSlots = 2
+		cfg.Model = rpHybridModel()
+		cfg.DisableRecurrentPrefixReuse = disable
+		cb, err := NewContinuousBatcher(cfg)
+		if err != nil {
+			t.Fatalf("NewContinuousBatcher: %v", err)
+		}
+		t.Cleanup(func() { _ = cb.Close() })
+		return cb
+	}
+
+	t.Run("closed_vocabulary_refusals_keep_the_retained_boundary", func(t *testing.T) {
+		t.Parallel()
+		m := rpHybridModel()
+		c := NewRecurrentPrefixCache(0)
+		if err := c.Store("conv", prefix, rpSnapshot(t, m)); err != nil {
+			t.Fatalf("Store(prefix): %v", err)
+		}
+
+		if err := c.Store("conv", []int{1, 2}, rpSnapshot(t, m)); !errors.Is(err, ErrRecurrentPrefixBackwardRewind) {
+			t.Fatalf("shorter store err = %v, want ErrRecurrentPrefixBackwardRewind", err)
+		}
+		if err := c.Store("conv", []int{1, 9, 3, 4}, rpSnapshot(t, m)); !errors.Is(err, ErrRecurrentPrefixDivergence) {
+			t.Fatalf("divergent store err = %v, want ErrRecurrentPrefixDivergence", err)
+		}
+		if err := c.Store("", []int{1}, rpSnapshot(t, m)); !errors.Is(err, ErrRecurrentPrefixEmptyKey) {
+			t.Fatalf("empty-key store err = %v, want ErrRecurrentPrefixEmptyKey", err)
+		}
+		if err := c.Store("conv", nil, rpSnapshot(t, m)); !errors.Is(err, ErrRecurrentPrefixEmptyTokens) {
+			t.Fatalf("nil-tokens store err = %v, want ErrRecurrentPrefixEmptyTokens", err)
+		}
+		if err := c.Store("other", []int{1}, nil); !errors.Is(err, ErrRecurrentPrefixEmptyTokens) {
+			t.Fatalf("nil-snapshot store err = %v, want ErrRecurrentPrefixEmptyTokens", err)
+		}
+
+		stats := c.Stats()
+		if stats.Refusals != 5 || stats.Puts != 1 || stats.Hits != 0 {
+			t.Fatalf("stats = %+v, want 5 refusals / 1 put / 0 hits", stats)
+		}
+		if got := c.Len(); got != 1 {
+			t.Fatalf("Len = %d after refusals, want 1 (the accepted boundary)", got)
+		}
+
+		// The refused stores must not have corrupted the retained boundary: a
+		// strict extension still hits with the original held length.
+		extended := append(append([]int(nil), prefix...), 7)
+		matched, snap, hit := c.Lookup("conv", extended)
+		if !hit || matched != len(prefix) || snap == nil {
+			t.Fatalf("retained boundary lost after refusals: hit=%v matched=%d snapNil=%v", hit, matched, snap == nil)
+		}
+		snap.Close()
+	})
+
+	t.Run("admitted_extend_only_prefills_suffix_and_matches_cold_fold", func(t *testing.T) {
+		t.Parallel()
+		ctx := context.Background()
+
+		warm := newBatcher(t, false)
+		if _, enabled := warm.PrefixCacheStats(); !enabled {
+			t.Fatal("warm batcher has no recurrent prefix cache")
+		}
+		if _, err := warm.Submit(&SubagentRequest{SessionID: "conv", PromptTokens: prefix, TargetTokens: 2}); err != nil {
+			t.Fatalf("Submit(turn1): %v", err)
+		}
+		rpDrive(t, warm, "conv", 2)
+		if got := warm.PrefixCacheLen(); got < 1 {
+			t.Fatalf("turn 1 retained no boundary (Len=%d); the admission check would be vacuous", got)
+		}
+
+		if _, err := warm.Submit(&SubagentRequest{SessionID: "conv", PromptTokens: full, TargetTokens: 3}); err != nil {
+			t.Fatalf("Submit(turn2): %v", err)
+		}
+		res, err := warm.StepPhase(ctx)
+		if err != nil {
+			t.Fatalf("StepPhase(turn2): %v", err)
+		}
+		if res.PrefixHits != 1 {
+			t.Fatalf("turn-2 admission PrefixHits = %d, want exactly 1", res.PrefixHits)
+		}
+		if res.PrefixReuseTokens != len(prefix) {
+			t.Fatalf("turn-2 admission PrefixReuseTokens = %d, want exactly %d (the whole held prefix skipped)", res.PrefixReuseTokens, len(prefix))
+		}
+		slot, ok := warm.GetSlot("conv")
+		if !ok || slot.PrefixHits != 1 || slot.PrefixMatchedTokens != len(prefix) {
+			t.Fatalf("slot did not record suffix-only prefill: ok=%v hits=%d matched=%d", ok, slot.PrefixHits, slot.PrefixMatchedTokens)
+		}
+		reuseTokens := rpDrive(t, warm, "conv", 3)
+		if stats, _ := warm.PrefixCacheStats(); stats.Hits < 1 {
+			t.Fatalf("turn 2 took no cached boundary (Hits=%d); equivalence check would be vacuous", stats.Hits)
+		}
+
+		cold := newBatcher(t, true)
+		if _, err := cold.Submit(&SubagentRequest{SessionID: "cold", PromptTokens: full, TargetTokens: 3}); err != nil {
+			t.Fatalf("Submit(cold): %v", err)
+		}
+		coldTokens := rpDrive(t, cold, "cold", 3)
+
+		if len(reuseTokens) != len(coldTokens) {
+			t.Fatalf("token stream length differs: reuse=%v cold=%v", reuseTokens, coldTokens)
+		}
+		for i := range coldTokens {
+			if reuseTokens[i] != coldTokens[i] {
+				t.Fatalf("extend-only reuse is NOT bit-exact: token[%d] reuse=%d cold=%d\n reuse=%v\n cold =%v", i, reuseTokens[i], coldTokens[i], reuseTokens, coldTokens)
+			}
+		}
+		t.Logf("admitted extend-only: skipped %d held tokens, streams bit-identical (%v)", len(prefix), reuseTokens)
+	})
+
+	t.Run("non_extending_admission_is_refused_and_folds_full_from_zero", func(t *testing.T) {
+		t.Parallel()
+		ctx := context.Background()
+
+		warm := newBatcher(t, false)
+		if _, err := warm.Submit(&SubagentRequest{SessionID: "conv", PromptTokens: prefix, TargetTokens: 2}); err != nil {
+			t.Fatalf("Submit(turn1): %v", err)
+		}
+		rpDrive(t, warm, "conv", 2)
+		if got := warm.PrefixCacheLen(); got < 1 {
+			t.Fatalf("turn 1 retained no boundary (Len=%d)", got)
+		}
+
+		// Divergent turn: shares the first token, then breaks the held prefix.
+		divergent := []int{1, 9, 3, 4, 5, 6}
+		if _, err := warm.Submit(&SubagentRequest{SessionID: "conv", PromptTokens: divergent, TargetTokens: 3}); err != nil {
+			t.Fatalf("Submit(divergent): %v", err)
+		}
+		res, err := warm.StepPhase(ctx)
+		if err != nil {
+			t.Fatalf("StepPhase(divergent): %v", err)
+		}
+		if res.PrefixHits != 0 || res.PrefixReuseTokens != 0 {
+			t.Fatalf("divergent admission reported reuse=%d/%d, want 0/0 (no partial graft)", res.PrefixHits, res.PrefixReuseTokens)
+		}
+		slot, ok := warm.GetSlot("conv")
+		if !ok || slot.PrefixHits != 0 || slot.PrefixMatchedTokens != 0 {
+			t.Fatalf("divergent slot recorded reuse: ok=%v hits=%d matched=%d", ok, slot.PrefixHits, slot.PrefixMatchedTokens)
+		}
+		divTokens := rpDrive(t, warm, "conv", 3)
+
+		coldDiv := newBatcher(t, true)
+		if _, err := coldDiv.Submit(&SubagentRequest{SessionID: "cold", PromptTokens: divergent, TargetTokens: 3}); err != nil {
+			t.Fatalf("Submit(cold divergent): %v", err)
+		}
+		coldDivTokens := rpDrive(t, coldDiv, "cold", 3)
+		if !reflect.DeepEqual(divTokens, coldDivTokens) {
+			t.Fatalf("divergent turn did not fold the FULL prompt from zero:\n divergent=%v\n cold      =%v", divTokens, coldDivTokens)
+		}
+
+		// Backward-rewind shape at admission: a later turn SHORTER than the
+		// retained boundary has no extending suffix and must also fold in full.
+		shorter := []int{1, 9}
+		if _, err := warm.Submit(&SubagentRequest{SessionID: "conv", PromptTokens: shorter, TargetTokens: 2}); err != nil {
+			t.Fatalf("Submit(shorter): %v", err)
+		}
+		res, err = warm.StepPhase(ctx)
+		if err != nil {
+			t.Fatalf("StepPhase(shorter): %v", err)
+		}
+		if res.PrefixHits != 0 || res.PrefixReuseTokens != 0 {
+			t.Fatalf("shorter admission reported reuse=%d/%d, want 0/0", res.PrefixHits, res.PrefixReuseTokens)
+		}
+		shortTokens := rpDrive(t, warm, "conv", 2)
+
+		coldShort := newBatcher(t, true)
+		if _, err := coldShort.Submit(&SubagentRequest{SessionID: "cold", PromptTokens: shorter, TargetTokens: 2}); err != nil {
+			t.Fatalf("Submit(cold shorter): %v", err)
+		}
+		coldShortTokens := rpDrive(t, coldShort, "cold", 2)
+		if !reflect.DeepEqual(shortTokens, coldShortTokens) {
+			t.Fatalf("shorter turn did not fold the FULL prompt from zero:\n shorter=%v\n cold   =%v", shortTokens, coldShortTokens)
+		}
+
+		stats, _ := warm.PrefixCacheStats()
+		if stats.Hits != 0 || stats.Misses < 2 {
+			t.Fatalf("warm cache stats = %+v, want 0 hits and >= 2 misses (divergent + shorter admissions)", stats)
+		}
+	})
 }
 
 // TestRecurrentPrefixBatcherNonHybridNoCache pins the model gate: a non-hybrid
