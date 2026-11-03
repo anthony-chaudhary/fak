@@ -184,6 +184,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return runHostShare(stdout, stderr, argv[1:])
 	case "glue-census":
 		return devcmd.RunGlueCensus(stdout, stderr, argv[1:])
+	case "graph-audit":
+		return devcmd.RunGraphAudit(stdout, stderr, argv[1:])
 	default:
 		fmt.Fprintf(stderr, "fak-dev: unknown command %q\n", argv[0])
 		fmt.Fprintln(stderr, "run 'fak-dev help' for repository-development commands")
@@ -278,6 +280,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  regime [PATH...] [--latest N] [--fail-on R] classify decode-step overhead regime (launch/compute/mem/unknown) from receipt signals")
 	fmt.Fprintln(w, "  hostshare [--receipts DIR] [--latest N]   read host_share from receipts/profile notes; gate launch-bound decode at --threshold")
 	fmt.Fprintln(w, "  glue-census [--preset NAME | --model-shape JSON] [--check REF] verified sync round-trips/token census for the GLM-DSA decode path")
+	fmt.Fprintln(w, "  graph-audit [--json] [--fail-on uncovered] [--snapshot PATH] presence-vs-invokability audit of CUDA/Vulkan graph capture/replay on decode paths")
 	fmt.Fprintln(w, "  version                               print fak-dev build identity")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "companion tooling (when fak-private is present):")

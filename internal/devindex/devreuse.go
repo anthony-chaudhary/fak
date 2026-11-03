@@ -186,6 +186,10 @@ var maintainerDevCommands = []string{
 	"goal-park",
 	"godsplit-plan",
 	"grafana",
+	// Presence-vs-invokability audit of CUDA/Vulkan graph capture/replay on the
+	// small-batch decode paths: recomputable coverage table + source-drift gate
+	// over fak's own engine seams, not a portable adopter pattern.
+	"graph-audit",
 	"growthgate",
 	"guard-audit",
 	"guard-goal-question",

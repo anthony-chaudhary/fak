@@ -241,6 +241,7 @@ var verbManifest = []Verb{
 	{Name: "goal-park", Synopsis: "park a supervisor goal claim: status|claim a goal identity to a single owner via the .fak/goal-park store", Lane: "cmd"},
 	{Name: "godsplit-plan", Synopsis: "read-only boundary + hazard planner for a behavior-preserving Go god-file split (the /modularize --json plan)", Lane: "cmd"},
 	{Name: "grafana", Synopsis: "export fak fleet metrics as a Grafana dashboard/datasource", Lane: "cmd"},
+	{Name: "graph-audit", Synopsis: "CUDA/Vulkan graph capture/replay audit on decode paths; --fail-on uncovered gates host-setup-bound paths", Lane: "cmd"},
 	{Name: "growthgate", Synopsis: "the unbounded-growth ratchet: census append-only ledger/log bloat vs byte budgets; --reap COLD logs", Lane: "cmd"},
 	{Name: "manage", Synopsis: "wrap an agent harness: deny, repair, or quarantine tool calls through the managed-agent front door", Aliases: []string{"m", "guard"}, Lane: "gateway", Doc: "docs/manage.md"},
 	{Name: "guard-accuracy", Synopsis: "score the guard reversibility classifier's accuracy against a labeled corpus: false-positive (benign escalated) + false-negative (dangerous let through) rates; the accuracy dual of guard-verdict-rsi, folded worst-first as a control-pane scorecard", Lane: "cmd"},

@@ -43,6 +43,7 @@ var Commands = []Command{
 	{Name: "glue-census", Owner: "dev", Handler: "devcmd.RunGlueCensus", SourceOrigin: "internal/devcmd/glue_census.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "goal-fleet", Owner: "dev", Handler: "devcmd.RunGoalFleet", SourceOrigin: "internal/devcmd/goal_launch.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "goal-launch", Owner: "dev", Handler: "devcmd.RunGoalLaunch", SourceOrigin: "internal/devcmd/goal_launch.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
+	{Name: "graph-audit", Owner: "dev", Handler: "devcmd.RunGraphAudit", SourceOrigin: "internal/devcmd/graph_audit.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "hostshare", Owner: "dev", Handler: "runHostShare", SourceOrigin: "cmd/fak-dev/hostshare.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "idea-scout", Owner: "dev", Handler: "devcmd.RunIdeaScout", SourceOrigin: "internal/devcmd/ideascout.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "index", Aliases: []string{"devindex"}, Owner: "dev", Handler: "devcmd.RunIndex", SourceOrigin: "internal/devcmd/index.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
