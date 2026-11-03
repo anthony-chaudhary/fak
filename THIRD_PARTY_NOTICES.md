@@ -1703,3 +1703,22 @@ SOFTWARE.
   construction-time opt-in, closed builtin/profile admission, finite resource
   limits, redacted refusal, and conservative special-token provenance.
   No Python runtime, model, tokenizer, executable or network behavior is imported.
+
+## TensorFold cluster admission planning
+
+`cmd/fak/cluster.go` (the `fak cluster info --plan` admission planner: `fitsAt`,
+`maxStreams`, `maxContext`, `chunkRows`, `planAdmission`) adapts the converged-round
+admission math from `zig/src/cluster/admission.zig` in TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209` (Apache-2.0):
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/cluster/admission.zig
+
+The per-rank needs-plus-KV-plus-margin budget check against each rank's GPU limit,
+the monotone stream/context binary searches, and the 16-step prompt-chunk sizing
+within (1+share) of decode-only round time are re-expressed in idiomatic Go over
+fak's own TPPlan tiling and a declared round-cost model. No upstream Zig code
+blocks, cost model, traffic link or round composition are copied; the planning
+surface keeps the upstream honesty line that admission planning never proves
+physical serving.
+
+The pinned repository's Apache-2.0 LICENSE is reproduced in the existing TensorFold
+license section of this file and also applies here.

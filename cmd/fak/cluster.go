@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/cluster"
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
@@ -88,6 +90,22 @@ common flags (coordinator/worker):
   --widths w0,.. allgather only: every rank's part width in rank order (the shared
                  tiling; this rank's --vec must be exactly --widths[rank] long)
 
+info flags (--plan runs admission planning; planning over declared limits never
+proves physical serving):
+  --plan             run admission planning after local discovery
+  --widths w0,..     tiling across ranks, e.g. 1,1 (the shared AllGather plan)
+  --limits L0,..     per-rank GPU limit bytes, e.g. 24G,24G (one value applies to all)
+  --weights B        total resident weight bytes, sharded by --widths (default 0)
+  --static B         per-rank drafter/buffer overhead bytes (default 0)
+  --margin B         per-rank headroom kept free (default 0)
+  --kv-per-token B   per-rank KV-cache bytes per token (default 0)
+  --state-per-stream B
+                     per-rank state bytes per stream (default 0)
+  --max-context N    the model's longest context in tokens (required with --plan)
+  --share F          extra round-time share prompt chunks may add (default 0.25)
+  --decode-ms F      planning ms per decode row (default 1)
+  --prompt-ms F      planning ms per prompt row (default 1)
+
 coordinator flags:
   --listen ADDR  bind address (default 0.0.0.0:7777)
 
@@ -104,15 +122,67 @@ type clusterInfoReport struct {
 	ProofScope     string                     `json:"proof_scope"`
 	DiscoveryError string                     `json:"discovery_error,omitempty"`
 	Discovery      *cluster.LocalTB5Discovery `json:"discovery"`
+	Admission      *clusterAdmissionReport    `json:"admission,omitempty"`
+}
+
+// clusterAdmissionReport is the planning payload of `fak cluster info --plan`:
+// declared limits plus model shape, reduced to the admitted load and tiling.
+type clusterAdmissionReport struct {
+	Schema     string       `json:"schema"`
+	Source     string       `json:"source"`
+	ProofScope string       `json:"proof_scope"`
+	Streams    int64        `json:"streams"`
+	Context    int64        `json:"context"`
+	ChunkRows  int64        `json:"chunk_rows"`
+	Plan       model.TPPlan `json:"plan"`
 }
 
 func cmdClusterInfo(args []string) {
 	fs := flag.NewFlagSet("cluster info", flag.ExitOnError)
 	jsonOutput := fs.Bool("json", false, "emit machine-readable JSON")
+	doPlan := fs.Bool("plan", false, "run admission planning over declared limits + model shape")
+	widthsStr := fs.String("widths", "", "plan: tiling across ranks, e.g. 1,1 (the shared AllGather plan)")
+	limitsStr := fs.String("limits", "", "plan: per-rank GPU limit bytes, e.g. 24G,24G (one value applies to all ranks)")
+	weightsStr := fs.String("weights", "0", "plan: total resident weight bytes, sharded by --widths (e.g. 8G)")
+	staticStr := fs.String("static", "0", "plan: per-rank drafter/buffer overhead bytes")
+	marginStr := fs.String("margin", "0", "plan: per-rank headroom kept free (bytes)")
+	kvStr := fs.String("kv-per-token", "0", "plan: per-rank KV-cache bytes per token")
+	stateStr := fs.String("state-per-stream", "0", "plan: per-rank state bytes per stream")
+	maxContextN := fs.Int64("max-context", 0, "plan: the model's longest context (tokens)")
+	share := fs.Float64("share", 0.25, "plan: extra round-time share prompt chunks may add (fraction)")
+	decodeMS := fs.Float64("decode-ms", 1, "plan: planning ms per decode row")
+	promptMS := fs.Float64("prompt-ms", 1, "plan: planning ms per prompt row")
 	_ = fs.Parse(args)
 
+	var admission *clusterAdmissionReport
+	if *doPlan {
+		cfg, perr := parseAdmissionConfig(*widthsStr, *limitsStr, *weightsStr, *staticStr, *marginStr, *kvStr, *stateStr, *maxContextN, *share, *decodeMS, *promptMS)
+		if perr != nil {
+			fmt.Fprintf(os.Stderr, "fak cluster info: %v\n", perr)
+			os.Exit(2)
+		}
+		ap, perr := planAdmission(cfg)
+		if perr != nil {
+			if errors.Is(perr, errAdmissionOverBudget) {
+				fmt.Fprintln(os.Stderr, "fak cluster info: admission refused: over budget (even one stream does not fit the declared limits)")
+			} else {
+				fmt.Fprintf(os.Stderr, "fak cluster info: plan admission: %v\n", perr)
+			}
+			os.Exit(1)
+		}
+		admission = &clusterAdmissionReport{
+			Schema:     "fak.cluster-admission-plan/1",
+			Source:     "declared_limits_and_model_shape",
+			ProofScope: "planning_only_not_physical_serving",
+			Streams:    ap.Streams,
+			Context:    ap.Context,
+			ChunkRows:  ap.ChunkRows,
+			Plan:       ap.Plan,
+		}
+	}
+
 	discovery, discoveryErr := cluster.DiscoverLocalTB5RDMA()
-	if discovery == nil {
+	if discovery == nil && !*doPlan {
 		fmt.Fprintf(os.Stderr, "fak cluster info: local discovery failed: %v\n", discoveryErr)
 		os.Exit(1)
 	}
@@ -122,6 +192,7 @@ func cmdClusterInfo(args []string) {
 		Source:     "local_system_discovery",
 		ProofScope: "configuration_only_not_data_transfer_or_working_mesh",
 		Discovery:  discovery,
+		Admission:  admission,
 	}
 	if discoveryErr != nil {
 		report.DiscoveryError = discoveryErr.Error()
@@ -136,21 +207,28 @@ func cmdClusterInfo(args []string) {
 		return
 	}
 
-	fmt.Println("=== Thunderbolt 5 / RDMA Local Discovery ===")
-	fmt.Println("Proof scope: local configuration only; this does not prove data transfer or a working mesh.")
-	fmt.Printf("Thunderbolt 5 ports: %d (all discovered Thunderbolt ports: %d)\n", len(discovery.TB5Ports), len(discovery.Ports))
-	fmt.Printf("RDMA enabled: %t (status: %s)\n", discovery.RDMAEnabled, discovery.RDMAStatus)
-	if discovery.HasBridgeConflict {
-		fmt.Printf("bridge0 conflict: detected (members: %s)\n", strings.Join(discovery.BridgeMembers, ", "))
+	if discovery != nil {
+		fmt.Println("=== Thunderbolt 5 / RDMA Local Discovery ===")
+		fmt.Println("Proof scope: local configuration only; this does not prove data transfer or a working mesh.")
+		fmt.Printf("Thunderbolt 5 ports: %d (all discovered Thunderbolt ports: %d)\n", len(discovery.TB5Ports), len(discovery.Ports))
+		fmt.Printf("RDMA enabled: %t (status: %s)\n", discovery.RDMAEnabled, discovery.RDMAStatus)
+		if discovery.HasBridgeConflict {
+			fmt.Printf("bridge0 conflict: detected (members: %s)\n", strings.Join(discovery.BridgeMembers, ", "))
+		} else {
+			fmt.Println("bridge0 conflict: none detected")
+		}
+		fmt.Printf("Local prerequisites flag: %t\n", discovery.MeshReady)
+		for _, warning := range discovery.Warnings {
+			fmt.Printf("warning: %s\n", warning)
+		}
 	} else {
-		fmt.Println("bridge0 conflict: none detected")
-	}
-	fmt.Printf("Local prerequisites flag: %t\n", discovery.MeshReady)
-	for _, warning := range discovery.Warnings {
-		fmt.Printf("warning: %s\n", warning)
+		fmt.Printf("local discovery: unavailable (%v)\n", discoveryErr)
 	}
 	if discoveryErr != nil {
 		fmt.Printf("discovery error: %v\n", discoveryErr)
+	}
+	if admission != nil {
+		printAdmissionText(admission)
 	}
 }
 
@@ -208,6 +286,317 @@ func planFromWidths(widths []int) (model.TPPlan, error) {
 		return model.TPPlan{}, err
 	}
 	return p, nil
+}
+
+// --- Cluster admission planning ---
+//
+// ADAPT (not a verbatim port) of the converged-round admission math from
+// TensorFold's zig/src/cluster/admission.zig @9e8c368b0b4c2c7892a0c9f0f302d7c164016209
+// (Apache-2.0; see THIRD_PARTY_NOTICES.md): fitsAt compares each rank's need —
+// resident weights plus per-stream/per-token caches plus margin — against that
+// rank's GPU limit; maxStreams/maxContext binary-search the largest admitted
+// load; chunkRows sizes prompt chunks in 16-row steps so a round stays within
+// (1+share) of its decode-only time. Re-expressed in idiomatic Go over fak's own
+// TPPlan tiling and a declared round-cost model; no upstream code blocks are
+// copied. Upstream honesty line retained: admission planning NEVER proves
+// physical serving — no process launches, no device is touched, no collective
+// runs.
+
+// admissionStreamCeiling bounds the stream bisection, mirroring the upstream search space.
+const admissionStreamCeiling = int64(1 << 16)
+
+// admissionChunkStep / admissionChunkCap bound the chunkRows walk: prompt chunks
+// move in 16-row steps and never exceed 4096 rows.
+const (
+	admissionChunkStep = int64(16)
+	admissionChunkCap  = int64(4096)
+)
+
+// errAdmissionOverBudget is the closed refusal when even one stream does not fit
+// the declared limits. Callers match it with errors.Is, never on prose.
+var errAdmissionOverBudget = errors.New("cluster admission: over budget")
+
+// admissionRank is one rank's declared memory ledger for admission planning.
+type admissionRank struct {
+	GPULimit       int64 // bytes the rank may hold
+	Weights        int64 // resident weight bytes on this rank
+	Static         int64 // drafter/buffer overhead independent of load
+	Margin         int64 // headroom kept free
+	KVPerToken     int64 // KV-cache bytes per token on this rank
+	StatePerStream int64 // recurrent/activation state bytes per stream
+}
+
+// needAt is the rank's total byte need for streams x context tokens: the static
+// need (weights + static + margin) plus the load-scaled caches.
+func (r admissionRank) needAt(streams, context int64) int64 {
+	return r.Weights + r.Static + r.Margin + r.KVPerToken*streams*context + r.StatePerStream*streams
+}
+
+// admissionShape is the model-shape input to admission planning.
+type admissionShape struct {
+	MaxContext int64 // longest context the model supports
+}
+
+// fitsAt reports whether every rank holds its caches for streams x context within
+// its GPU limit — the per-rank needs + KV + margin vs gpu_limit check.
+func fitsAt(ranks []admissionRank, streams, context int64) bool {
+	for _, r := range ranks {
+		if r.needAt(streams, context) > r.GPULimit {
+			return false
+		}
+	}
+	return true
+}
+
+// maxStreams is the most streams whose caches fit every rank at context (0 when
+// even one does not). The need is monotone in streams, so the bisection is exact:
+// if N fits, every smaller count fits.
+func maxStreams(ranks []admissionRank, context int64) int64 {
+	lo, hi := int64(0), admissionStreamCeiling
+	for lo < hi {
+		mid := lo + (hi-lo+1)/2
+		if fitsAt(ranks, mid, context) {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return lo
+}
+
+// maxContext is the longest context every one of streams streams can hold, capped
+// at the model's MaxContext.
+func maxContext(ranks []admissionRank, shape admissionShape, streams int64) int64 {
+	lo, hi := int64(0), max(shape.MaxContext, int64(1))
+	for lo < hi {
+		mid := lo + (hi-lo+1)/2
+		if fitsAt(ranks, streams, mid) {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return lo
+}
+
+// chunkRows is the prompt-chunk row count a round takes while decode rows run: the
+// largest multiple of admissionChunkStep (at least one step) that keeps the round
+// within (1+share) of its decode-only time. It walks up from the floor while the
+// NEXT step still fits the share bound and stops at the first step that does not
+// (or at the cap), returning the last step that fit — the floor when none above
+// it was measured to fit. roundCost(decode, prompt) models one round's ms.
+func chunkRows(roundCost func(decode, prompt int64) float64, decode int64, share float64) int64 {
+	base := roundCost(decode, 0)
+	chunk := admissionChunkStep
+	for chunk < admissionChunkCap {
+		if roundCost(decode, chunk+admissionChunkStep) > base*(1+share) {
+			break
+		}
+		chunk += admissionChunkStep
+	}
+	return chunk
+}
+
+// admissionShardWeights splits totalBytes across ranks proportionally to their
+// shard widths, rounding each rank UP so no rank is under-accounted (the sum may
+// exceed total by less than the rank count).
+func admissionShardWeights(totalBytes int64, widths []int) []int64 {
+	dim := 0
+	for _, w := range widths {
+		dim += w
+	}
+	out := make([]int64, len(widths))
+	for r, w := range widths {
+		out[r] = (totalBytes*int64(w) + int64(dim) - 1) / int64(dim)
+	}
+	return out
+}
+
+// admissionConfig declares everything the planner needs: the tiling, per-rank
+// limits, the model shape, and the planning round-cost coefficients.
+type admissionConfig struct {
+	Widths         []int   // tiling across ranks (drives the AllGather plan)
+	Limits         []int64 // per-rank GPU limit bytes
+	TotalWeights   int64   // total resident weight bytes, sharded by Widths
+	Static         int64   // per-rank drafter/buffer overhead
+	Margin         int64   // per-rank headroom kept free
+	KVPerToken     int64   // per-rank KV-cache bytes per token
+	StatePerStream int64   // per-rank state bytes per stream
+	MaxContext     int64   // model's longest context
+	Share          float64 // extra round-time share prompt chunks may add
+	DecodeMS       float64 // planning ms per decode row
+	PromptMS       float64 // planning ms per prompt row
+}
+
+// admissionPlan is what the planner admits: the streams and context that fit, the
+// prompt-chunk rows that ride decode rounds, and the tiling plan.
+type admissionPlan struct {
+	Streams   int64
+	Context   int64
+	ChunkRows int64
+	Plan      model.TPPlan
+}
+
+// planAdmission plans how much load a converged cluster round admits: probe
+// limits + model shape -> admitted streams/context/chunk rows + plan. Policy:
+// admit the longest context one stream can hold, then the most streams that
+// survive at that context. It refuses with errAdmissionOverBudget when even one
+// stream does not fit — over-budget is a refusal, not a zero plan. Planning is
+// arithmetic on declared limits; it never proves physical serving.
+func planAdmission(cfg admissionConfig) (admissionPlan, error) {
+	if len(cfg.Widths) == 0 || len(cfg.Limits) != len(cfg.Widths) {
+		return admissionPlan{}, fmt.Errorf("plan admission: %d limits for %d widths, want equal non-empty lists", len(cfg.Limits), len(cfg.Widths))
+	}
+	for i, l := range cfg.Limits {
+		if l <= 0 {
+			return admissionPlan{}, fmt.Errorf("plan admission: rank %d limit = %d, want > 0", i, l)
+		}
+	}
+	if cfg.TotalWeights < 0 || cfg.Static < 0 || cfg.Margin < 0 || cfg.KVPerToken < 0 || cfg.StatePerStream < 0 {
+		return admissionPlan{}, fmt.Errorf("plan admission: byte counts must be >= 0")
+	}
+	if cfg.MaxContext < 1 {
+		return admissionPlan{}, fmt.Errorf("plan admission: max context = %d, want >= 1", cfg.MaxContext)
+	}
+	if cfg.Share < 0 || cfg.DecodeMS < 0 || cfg.PromptMS < 0 || (cfg.DecodeMS == 0 && cfg.PromptMS == 0) {
+		return admissionPlan{}, fmt.Errorf("plan admission: share/ms coefficients must be >= 0 with a nonzero round cost")
+	}
+
+	plan, err := planFromWidths(cfg.Widths)
+	if err != nil {
+		return admissionPlan{}, fmt.Errorf("plan admission: %w", err)
+	}
+	weights := admissionShardWeights(cfg.TotalWeights, cfg.Widths)
+	ranks := make([]admissionRank, len(cfg.Widths))
+	for r := range cfg.Widths {
+		ranks[r] = admissionRank{
+			GPULimit:       cfg.Limits[r],
+			Weights:        weights[r],
+			Static:         cfg.Static,
+			Margin:         cfg.Margin,
+			KVPerToken:     cfg.KVPerToken,
+			StatePerStream: cfg.StatePerStream,
+		}
+	}
+
+	shape := admissionShape{MaxContext: cfg.MaxContext}
+	context := maxContext(ranks, shape, 1)
+	if context == 0 {
+		return admissionPlan{}, errAdmissionOverBudget
+	}
+	streams := maxStreams(ranks, context)
+	if streams == 0 {
+		return admissionPlan{}, errAdmissionOverBudget
+	}
+	roundCost := func(decode, prompt int64) float64 {
+		return float64(decode)*cfg.DecodeMS + float64(prompt)*cfg.PromptMS
+	}
+	return admissionPlan{
+		Streams:   streams,
+		Context:   context,
+		ChunkRows: chunkRows(roundCost, streams, cfg.Share),
+		Plan:      plan,
+	}, nil
+}
+
+// parseAdmissionConfig turns the --plan flag set into an admissionConfig. Byte
+// sizes accept raw integers or k/m/g suffixes (compute.ParseByteSizeString);
+// --limits may give one value for every rank or one per rank.
+func parseAdmissionConfig(widthsStr, limitsStr, weightsStr, staticStr, marginStr, kvStr, stateStr string, maxContextN int64, share, decodeMS, promptMS float64) (admissionConfig, error) {
+	widths, err := parseWidths(widthsStr)
+	if err != nil {
+		return admissionConfig{}, fmt.Errorf("--widths: %v", err)
+	}
+	limits, err := parseAdmissionLimits(limitsStr, len(widths))
+	if err != nil {
+		return admissionConfig{}, err
+	}
+	weights, err := nonNegativeSize(weightsStr, "--weights")
+	if err != nil {
+		return admissionConfig{}, err
+	}
+	static, err := nonNegativeSize(staticStr, "--static")
+	if err != nil {
+		return admissionConfig{}, err
+	}
+	margin, err := nonNegativeSize(marginStr, "--margin")
+	if err != nil {
+		return admissionConfig{}, err
+	}
+	kv, err := nonNegativeSize(kvStr, "--kv-per-token")
+	if err != nil {
+		return admissionConfig{}, err
+	}
+	state, err := nonNegativeSize(stateStr, "--state-per-stream")
+	if err != nil {
+		return admissionConfig{}, err
+	}
+	return admissionConfig{
+		Widths:         widths,
+		Limits:         limits,
+		TotalWeights:   weights,
+		Static:         static,
+		Margin:         margin,
+		KVPerToken:     kv,
+		StatePerStream: state,
+		MaxContext:     maxContextN,
+		Share:          share,
+		DecodeMS:       decodeMS,
+		PromptMS:       promptMS,
+	}, nil
+}
+
+// parseAdmissionLimits parses the per-rank GPU limits: one positive byte size for
+// every rank, or a single value applied to all ranks.
+func parseAdmissionLimits(s string, ranks int) ([]int64, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, fmt.Errorf("--limits is required with --plan (per-rank GPU limit bytes, e.g. 24G,24G)")
+	}
+	fields := strings.Split(s, ",")
+	vals := make([]int64, 0, len(fields))
+	for _, f := range fields {
+		v, err := compute.ParseByteSizeString(f)
+		if err != nil || v <= 0 {
+			return nil, fmt.Errorf("--limits: %q: want a positive byte size like 24G", f)
+		}
+		vals = append(vals, v)
+	}
+	if len(vals) == 1 && ranks > 1 {
+		repeated := make([]int64, ranks)
+		for i := range repeated {
+			repeated[i] = vals[0]
+		}
+		vals = repeated
+	}
+	if len(vals) != ranks {
+		return nil, fmt.Errorf("--limits has %d entries, want %d (or one value for all)", len(vals), ranks)
+	}
+	return vals, nil
+}
+
+// nonNegativeSize parses one declared byte size (raw integer or k/m/g suffix).
+func nonNegativeSize(s, name string) (int64, error) {
+	v, err := compute.ParseByteSizeString(s)
+	if err != nil || v < 0 {
+		return 0, fmt.Errorf("%s: %q: want a non-negative byte size like 8G", name, s)
+	}
+	return v, nil
+}
+
+// printAdmissionText renders the planning payload for the human surface, carrying
+// the honesty line: planning over declared limits, never physical serving.
+func printAdmissionText(a *clusterAdmissionReport) {
+	fmt.Println("=== Cluster Admission Plan ===")
+	fmt.Println("Proof scope: planning over declared limits and model shape; this does not prove physical serving.")
+	fmt.Printf("admitted streams: %d\n", a.Streams)
+	fmt.Printf("admitted context: %d\n", a.Context)
+	fmt.Printf("chunk rows: %d\n", a.ChunkRows)
+	shards := make([]string, len(a.Plan.Shards))
+	for i, s := range a.Plan.Shards {
+		shards[i] = fmt.Sprintf("rank%d=[%d,%d)", s.Rank, s.Lo, s.Hi)
+	}
+	fmt.Printf("plan: dim=%d %s\n", a.Plan.Dim, strings.Join(shards, " "))
 }
 
 // formatVec renders a float32 vector as a comma-separated line for stdout, so a
