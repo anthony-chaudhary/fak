@@ -197,10 +197,33 @@ func (r *validateRecorder) finish() {
 	r.res.ElapsedMS = elapsed.Milliseconds()
 }
 
+type validateOptions struct {
+	root           string
+	ref            string
+	asJSON         bool
+	timeout        time.Duration
+	progress       bool
+	testOnly       bool
+	wslTests       bool
+	testRun        string
+	testEvents     bool
+	auditSelection bool
+	smoke          bool
+	strix          bool
+	strixHost      string
+	subkernels     string
+	ablate         string
+	strixReceipt   string
+	mine           []string
+	mode           string
+}
+
 func cmdValidate(argv []string) { os.Exit(Run(os.Stdout, os.Stderr, argv)) }
 
-// runValidate checks committed ref plus only explicitly-owned working-tree paths.
-func Run(stdout, stderr io.Writer, argv []string) int {
+// parseValidateFlags parses and validates the complete fak validate flag
+// surface. Rejections return exit code 2 with the user-facing reason already
+// written to stderr; the flag set writes its own usage errors there too.
+func parseValidateFlags(stderr io.Writer, argv []string) (validateOptions, int) {
 	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	root := fs.String("root", "", "repo root (default: git toplevel from cwd)")
@@ -223,76 +246,90 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 	fs.Var(&mine, "mine", "owned changed path to overlay (repeatable; files and directories accepted)")
 	positional, parseErr := interspersedflags.Parse(fs, argv)
 	if parseErr != nil {
-		return 2
+		return validateOptions{}, 2
 	}
 	for _, p := range positional {
 		if p = strings.TrimSpace(p); p != "" {
 			mine = append(mine, p)
 		}
 	}
-	if len(mine) == 0 {
+	opts := validateOptions{
+		root: *root, ref: *ref, asJSON: *asJSON, timeout: *timeout, progress: *progress,
+		testOnly: *testOnly, wslTests: *wslTests, testRun: *testRun, testEvents: *testEvents,
+		auditSelection: *auditSelection, smoke: *smoke, strix: *strix, strixHost: *strixHost,
+		subkernels: *subkernels, ablate: *ablate, strixReceipt: *strixReceipt, mine: mine, mode: "full",
+	}
+	if len(opts.mine) == 0 {
 		fmt.Fprintln(stderr, "fak validate: at least one --mine path is required; ownership is never inferred from a peer-dirty tree")
-		return 2
+		return opts, 2
 	}
-	if *timeout <= 0 {
+	if opts.timeout <= 0 {
 		fmt.Fprintln(stderr, "fak validate: --timeout must be greater than zero")
-		return 2
+		return opts, 2
 	}
-	if *testEvents && (!*asJSON || *auditSelection || *wslTests || runtime.GOOS == "windows") {
+	if opts.testEvents && (!opts.asJSON || opts.auditSelection || opts.wslTests || runtime.GOOS == "windows") {
 		fmt.Fprintln(stderr, "fak validate: --test-events requires --json and native tests; cannot be combined with --audit-selection or WSL")
-		return 2
+		return opts, 2
 	}
-	if *testEvents {
+	if opts.testEvents {
 		if err := validateEventConfiguration(); err != nil {
 			fmt.Fprintln(stderr, "fak validate: "+err.Error())
-			return 2
+			return opts, 2
 		}
 	}
-	mode := "full"
-	if *testOnly {
-		mode = "test-only"
+	if opts.testOnly {
+		opts.mode = "test-only"
+	}
+	return opts, 0
+}
+
+// runValidate checks committed ref plus only explicitly-owned working-tree paths.
+func Run(stdout, stderr io.Writer, argv []string) int {
+	opts, code := parseValidateFlags(stderr, argv)
+	if code != 0 {
+		return code
 	}
 	started := validateNow()
-	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), opts.timeout)
 	defer cancel()
 	res := validateResult{
-		retainTestEvents: *testEvents,
-		Schema:           "fak-validate/1", Mode: mode, Ref: *ref, Mine: requestedMinePaths(mine), OK: true,
-		TimeoutMS: timeout.Milliseconds(), Phases: []validatePhase{}, SkippedPhases: []string{},
-		Overlays: validateOverlayProgress{Checked: []string{}, Skipped: requestedMinePaths(mine)},
+		retainTestEvents: opts.testEvents,
+		Schema:           "fak-validate/1", Mode: opts.mode, Ref: opts.ref, Mine: requestedMinePaths(opts.mine), OK: true,
+		TimeoutMS: opts.timeout.Milliseconds(), Phases: []validatePhase{}, SkippedPhases: []string{},
+		Overlays: validateOverlayProgress{Checked: []string{}, Skipped: requestedMinePaths(opts.mine)},
 		Failures: []ciPreflightFailure{},
 	}
-	phaseOrder := validatePhaseOrder(*testOnly, *auditSelection, *smoke)
-	recorder := validateRecorder{ctx: ctx, stderr: stderr, progress: *progress, started: started, phaseOrder: phaseOrder, res: &res}
+	phaseOrder := validatePhaseOrder(opts.testOnly, opts.auditSelection, opts.smoke)
+	recorder := validateRecorder{ctx: ctx, stderr: stderr, progress: opts.progress, started: started, phaseOrder: phaseOrder, res: &res}
 
 	phase := recorder.start("resolve_root")
-	r := resolveRootWithin(ctx, *root)
+	r := resolveRootWithin(ctx, opts.root)
 	phase.finish(ctx.Err())
 	if ctx.Err() != nil {
-		return finishValidateTimeout(stdout, &res, &recorder, "resolve_root", *asJSON)
+		return finishValidateTimeout(stdout, &res, &recorder, "resolve_root", opts.asJSON)
 	}
 	if r == "" {
 		fmt.Fprintln(stderr, "fak validate: not in a git repo (or git unavailable)")
 		return 2
 	}
 	phase = recorder.start("resolve_ref")
-	tip, err := gitRevParseWithin(ctx, r, *ref)
-	if code, failed := finishValidateRequiredPhase(stdout, stderr, &res, &recorder, phase, "resolve_ref", err, *asJSON,
-		fmt.Sprintf("fak validate: cannot resolve ref %q: %v", *ref, err)); failed {
+	tip, err := gitRevParseWithin(ctx, r, opts.ref)
+	if code, failed := finishValidateRequiredPhase(stdout, stderr, &res, &recorder, phase, "resolve_ref", err, opts.asJSON,
+		fmt.Sprintf("fak validate: cannot resolve ref %q: %v", opts.ref, err)); failed {
 		return code
 	}
 	res.Tip = tip
-	if runtime.GOOS == "windows" && *wslTests {
+	if runtime.GOOS == "windows" && opts.wslTests {
 		phase = recorder.start("wsl_preflight")
 		verdict := preflightValidateWSLCapabilitiesWithin(ctx)
 		res.WSLPreflight = &verdict
 		if ctx.Err() != nil {
 			phase.finish(ctx.Err())
-			return finishValidateTimeout(stdout, &res, &recorder, "wsl_preflight", *asJSON)
+			return finishValidateTimeout(stdout, &res, &recorder, "wsl_preflight", opts.asJSON)
 		}
 		if verdict.Status != "ready" {
 			phase.finishAs("failed", verdict.Detail)
-			return finishValidateWSLCapabilityRefusal(stdout, stderr, &res, &recorder, verdict, *asJSON)
+			return finishValidateWSLCapabilityRefusal(stdout, stderr, &res, &recorder, verdict, opts.asJSON)
 		}
 		phase.finish(nil)
 		// Deferred before the workspace cleanup, so it releases only after that.
@@ -302,7 +339,7 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 	}
 	prep, code, failed := prepareValidateWorkspace(validateWorkspaceRequest{
 		stdout: stdout, stderr: stderr, ctx: ctx, result: &res, recorder: &recorder,
-		root: r, tip: tip, mine: mine, testRun: *testRun, wslTests: *wslTests, asJSON: *asJSON,
+		root: r, tip: tip, mine: opts.mine, testRun: opts.testRun, wslTests: opts.wslTests, asJSON: opts.asJSON,
 	})
 	if failed {
 		return code
@@ -317,7 +354,7 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 	if hasDeletedMinePath(r, paths) {
 		phase = recorder.start("base_graph")
 		baseFileToPkg, baseEdges, _, err = validateGoListGraphWithin(ctx, dir, wslWorkspace)
-		if code, timedOut := finishValidatePhaseOrTimeout(stdout, &res, &recorder, phase, "base_graph", err, *asJSON); timedOut {
+		if code, timedOut := finishValidatePhaseOrTimeout(stdout, &res, &recorder, phase, "base_graph", err, opts.asJSON); timedOut {
 			return code
 		}
 		// Preserve the old fail-toward-running behavior: the post-overlay graph remains the
@@ -345,7 +382,7 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 	if wslWorkspace {
 		err = typeValidateWSLWorkspaceLoss(ctx, prep.wslBootID, dir, err)
 	}
-	if code, failed := finishValidateRequiredPhase(stdout, stderr, &res, &recorder, phase, "overlay", err, *asJSON,
+	if code, failed := finishValidateRequiredPhase(stdout, stderr, &res, &recorder, phase, "overlay", err, opts.asJSON,
 		fmt.Sprintf("fak validate: cannot overlay owned paths: %v", err)); failed {
 		return code
 	}
@@ -354,13 +391,13 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 		// .git overlay is refused rather than replacing our private identity.
 		phase = recorder.start("git_identity")
 		err = prepareValidateGitIdentityWithin(ctx, r, dir, tip)
-		if code, timedOut := finishValidateContextPhase(stdout, &res, &recorder, phase, "git_identity", *asJSON); timedOut {
+		if code, timedOut := finishValidateContextPhase(stdout, &res, &recorder, phase, "git_identity", opts.asJSON); timedOut {
 			return code
 		}
 		if err != nil {
 			recordValidateFailure(&res, phase, "git_identity", err.Error(), err)
 			recorder.finish()
-			emitValidateResult(stdout, res, *asJSON)
+			emitValidateResult(stdout, res, opts.asJSON)
 			// This is a failed required gate, not skipped infrastructure.
 			return 1
 		}
@@ -368,18 +405,18 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 	} else {
 		recorder.skip("git_identity", "WSL workspace identity prepared during extraction")
 	}
-	if !*testOnly {
-		if code, timedOut := runValidateGofmtPhase(ctx, stdout, &res, &recorder, r, dir, paths, wslWorkspace, *asJSON); timedOut {
+	if !opts.testOnly {
+		if code, timedOut := runValidateGofmtPhase(ctx, stdout, &res, &recorder, r, dir, paths, wslWorkspace, opts.asJSON); timedOut {
 			return code
 		}
 	}
-	if *testEvents {
+	if opts.testEvents {
 		phase = recorder.start("test_events_scope")
 		err = validateEventCandidateScope(ctx, dir)
 		if err != nil {
 			res.TestEvents = &validateTestWitness{Status: "unrun", ExitCode: -1, Reason: err.Error()}
 		}
-		if code, failed := finishValidateRequiredPhase(stdout, stderr, &res, &recorder, phase, "test_events_scope", err, *asJSON, fmt.Sprintf("fak validate: event source scope refused: %v", err)); failed {
+		if code, failed := finishValidateRequiredPhase(stdout, stderr, &res, &recorder, phase, "test_events_scope", err, opts.asJSON, fmt.Sprintf("fak validate: event source scope refused: %v", err)); failed {
 			return code
 		}
 	}
@@ -387,7 +424,7 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 	fileToPkg, edges, _, graphErr := validateGoListGraphWithin(ctx, dir, wslWorkspace)
 	phase.finish(graphErr)
 	if ctx.Err() != nil {
-		return finishValidateTimeout(stdout, &res, &recorder, "list_graph", *asJSON)
+		return finishValidateTimeout(stdout, &res, &recorder, "list_graph", opts.asJSON)
 	}
 	if graphErr != nil {
 		res.OK = false
@@ -395,40 +432,40 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 	} else {
 		vetTargets, buildTargets := selectValidatePackages(&res, &recorder, dir, paths, fileToPkg, edges, baseFileToPkg, baseEdges)
 		var vetted *validateVetCoverage
-		if !*testOnly {
-			code, timedOut, coverage := runValidateBuildAndVet(ctx, stdout, &res, &recorder, dir, wslWorkspace, *asJSON, vetTargets, buildTargets)
+		if !opts.testOnly {
+			code, timedOut, coverage := runValidateBuildAndVet(ctx, stdout, &res, &recorder, dir, wslWorkspace, opts.asJSON, vetTargets, buildTargets)
 			if timedOut {
 				return code
 			}
 			vetted = coverage
-			if code, timedOut := runValidatePlatformPhases(ctx, stdout, &res, &recorder, r, dir, paths, fileToPkg, wslWorkspace, *asJSON); timedOut {
+			if code, timedOut := runValidatePlatformPhases(ctx, stdout, &res, &recorder, r, dir, paths, fileToPkg, wslWorkspace, opts.asJSON); timedOut {
 				return code
 			}
 		}
-		selectedObservation, code, timedOut := runValidateTestsPhase(ctx, stdout, &res, &recorder, r, dir, tip, effectiveTestRun, fileToPkg, *wslTests, wslWorkspace, *auditSelection, *asJSON, vetted)
+		selectedObservation, code, timedOut := runValidateTestsPhase(ctx, stdout, &res, &recorder, r, dir, tip, effectiveTestRun, fileToPkg, opts.wslTests, wslWorkspace, opts.auditSelection, opts.asJSON, vetted)
 		if timedOut {
 			return code
 		}
-		if *auditSelection {
-			if code, timedOut := runValidateAuditSelectionPhase(ctx, stdout, &res, &recorder, r, dir, tip, paths, fileToPkg, selectedObservation, *wslTests, wslWorkspace, *asJSON); timedOut {
+		if opts.auditSelection {
+			if code, timedOut := runValidateAuditSelectionPhase(ctx, stdout, &res, &recorder, r, dir, tip, paths, fileToPkg, selectedObservation, opts.wslTests, wslWorkspace, opts.asJSON); timedOut {
 				return code
 			}
 		}
-		if *smoke {
-			if code, timedOut := runValidateSmokePhase(ctx, stdout, &res, &recorder, dir, wslWorkspace, *asJSON); timedOut {
+		if opts.smoke {
+			if code, timedOut := runValidateSmokePhase(ctx, stdout, &res, &recorder, dir, wslWorkspace, opts.asJSON); timedOut {
 				return code
 			}
 		}
-		if receiptPath := hwReceiptPath(*strixReceipt); receiptPath != "" && shouldRunStrixValidation(*strix, paths) {
+		if receiptPath := hwReceiptPath(opts.strixReceipt); receiptPath != "" && shouldRunStrixValidation(opts.strix, paths) {
 			admitHWReceipt(ctx, &res, &recorder, r, receiptPath, paths)
-		} else if shouldRunStrixValidation(*strix, paths) {
-			if err := executeStrixValidationPhase(ctx, stdout, stderr, &res, &recorder, r, *strix, *strixHost, *subkernels, *ablate, paths); err != nil {
+		} else if shouldRunStrixValidation(opts.strix, paths) {
+			if err := executeStrixValidationPhase(ctx, stdout, stderr, &res, &recorder, r, opts.strix, opts.strixHost, opts.subkernels, opts.ablate, paths); err != nil {
 				res.OK = false
 			}
 		}
 	}
 	recorder.finish()
-	emitValidateResult(stdout, res, *asJSON)
+	emitValidateResult(stdout, res, opts.asJSON)
 	if !res.OK {
 		return 1
 	}

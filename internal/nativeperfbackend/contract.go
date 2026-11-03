@@ -1,12 +1,20 @@
-// Package nativeperfbackend defines the bounded Prometheus contract used by the
-// fak-native Metal and CUDA backend drill-down dashboard.
+// Package nativeperfbackend defines the bounded Prometheus telemetry schema
+// for the fak-native Metal and CUDA backend drill-down dashboard. Snapshots
+// stay honest by construction: an unavailable backend publishes only its
+// identity, availability, and a bounded reason — never measurement zeros or
+// stale values — and any engine other than fak-native is rejected outright.
 //
-// Invariant: native perf backend snapshots are fail-closed and bounded.
-// Guard: unavailable backends cannot publish measurement zeros or stale values,
-// and fallback engines outside fak-native are strictly rejected.
+// Wiring status (audited 2026-11-02, re-audited 2026-11-03): no production
+// command imports this package yet (zero non-test importers repo-wide); the
+// natural seam is `fak grafana coverage`
+// (cmd/fak/grafanacoverage.go via internal/nativeperfcoverage), which sits
+// outside this lane's edit boundary, so the audit lands here instead of
+// forcing new wiring.
 package nativeperfbackend
 
 import (
+	_ "embed"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -119,11 +127,9 @@ func Metrics() []Metric {
 }
 
 // Snapshot is one backend scrape. Missing optional values remain absent rather
-// than becoming misleading zeros. An unavailable backend carries only identity,
-// availability, and an explicit bounded reason.
-//
-// Invariant: native perf backend snapshots are fail-closed and bounded.
-// Guard: unavailable backends cannot publish measurement zeros or stale values.
+// than becoming misleading zeros; an unavailable backend carries only identity,
+// availability, and an explicit bounded reason, so a scrape can never publish
+// measurement zeros or stale values.
 type Snapshot struct {
 	Backend              Backend
 	Engine               string
@@ -143,7 +149,44 @@ type Snapshot struct {
 	GraphState           *GraphState
 }
 
-var allowedModelFamilies = map[string]bool{"Qwen3.8": true, "other": true}
+//go:embed model_families.json
+var modelFamiliesConfig string
+
+// modelFamiliesConfigSchema pins the embedded allow-list format.
+const modelFamiliesConfigSchema = "fak-native-backend-model-families/1"
+
+type modelFamiliesFile struct {
+	Schema  string   `json:"schema"`
+	Allowed []string `json:"allowed"`
+}
+
+// allowedModelFamilies is the config-driven model-family allow-list consulted
+// by Validate. It loads from the embedded registry at package init; a missing
+// or malformed registry fails closed to an empty set so no family is admitted.
+var allowedModelFamilies = loadModelFamilies(modelFamiliesConfig)
+
+func loadModelFamilies(raw string) map[string]bool {
+	out := make(map[string]bool)
+	var cfg modelFamiliesFile
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil || cfg.Schema != modelFamiliesConfigSchema {
+		return out
+	}
+	for _, family := range cfg.Allowed {
+		out[family] = true
+	}
+	return out
+}
+
+// ModelFamilies returns the configured model-family allow-list in stable
+// sorted order, so callers consult the registry instead of hardcoding names.
+func ModelFamilies() []string {
+	families := make([]string, 0, len(allowedModelFamilies))
+	for family := range allowedModelFamilies {
+		families = append(families, family)
+	}
+	sort.Strings(families)
+	return families
+}
 
 func validBackend(v Backend) bool { return v == BackendMetal || v == BackendCUDA }
 
@@ -158,7 +201,7 @@ func Validate(s Snapshot) error {
 		problems = append(problems, `engine must be "fak-native"; fallback engines are forbidden`)
 	}
 	if !allowedModelFamilies[s.ModelFamily] {
-		problems = append(problems, "model_family must be Qwen3.8 or other")
+		problems = append(problems, "model_family must be one of: "+strings.Join(ModelFamilies(), ", "))
 	}
 	if s.Available {
 		if s.UnavailableReason != ReasonNone {

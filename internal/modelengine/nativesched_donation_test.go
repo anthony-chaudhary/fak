@@ -11,6 +11,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
+// fak-test:runtime medium est=1s lane=default
 func TestNativeSchedulerBlockedDrainDonationPreservesLifecycleSemantics(t *testing.T) {
 	calls := []*abi.ToolCall{
 		inlineCall("search_flights", `{"from":"SFO"}`),
@@ -64,6 +65,21 @@ func runDrainDonationLifecycle(t *testing.T, calls []*abi.ToolCall, donation boo
 	s := NewNativeScheduler(model.NewSynthetic(SyntheticConfig()))
 	s.SetMaxRunning(1)
 	s.SetDrainDonation(donation)
+	release := holdLifecycleNativeExecution(t, s)
+	cancelBarrier := make(chan struct{})
+	var unbarrier sync.Once
+	releaseCancel := func() { unbarrier.Do(func() { close(cancelBarrier) }) }
+	t.Cleanup(releaseCancel)
+	// Preserve the mid-decode cancellation premise independently of how many
+	// tokens the selected outbox can retain before its consumer runs.
+	s.beforeModelExecute = func(kind nativeSchedulerEventKind, lane *schedLane) {
+		if kind == nativeSchedulerEventDecode && lane.tool == calls[1].Tool && lane.emitted > 2 {
+			select {
+			case <-cancelBarrier:
+			case <-lane.ctx.Done():
+			}
+		}
+	}
 
 	// Register the donor before Admit, as Complete does. That makes the handoff
 	// deterministic: the scheduler goroutine remains the disabled-path oracle, while
@@ -95,11 +111,13 @@ func runDrainDonationLifecycle(t *testing.T, calls []*abi.ToolCall, donation boo
 				}
 				if i == 1 && seen == 2 {
 					reqs[i].Cancel()
+					releaseCancel()
 				}
 			}
 		}(i)
 	}
 
+	release()
 	if donation {
 		s.drainWithDonation(reqs[0].Tokens())
 		s.endBlockedDrain()

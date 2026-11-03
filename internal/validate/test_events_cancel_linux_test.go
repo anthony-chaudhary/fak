@@ -4,11 +4,13 @@ package validate
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -62,7 +64,11 @@ func TestValidateEventCancellationContainsOwnedDescendant(t *testing.T) {
 	}
 	alive := func() bool {
 		b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
-		if os.IsNotExist(err) {
+		// A leaf in its exit window reports ESRCH ("no such process") from
+		// /proc/<pid>/stat until it becomes a visible zombie, just as ENOENT
+		// reports it once reaped; both mean the descendant is gone, which is
+		// the expected state after cancellation, not an inspection error.
+		if os.IsNotExist(err) || errors.Is(err, syscall.ESRCH) {
 			return false
 		}
 		if err != nil {

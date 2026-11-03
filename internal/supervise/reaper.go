@@ -3,6 +3,7 @@ package supervise
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,10 +21,20 @@ const (
 	ReasonStuckLoop       = "STUCK_LOOP"
 )
 
-// ContractStore describes the contract persistence interface used by the supervisor.
+// ContractStore is the contract-persistence seam the supervisor drives.
+// *leaseref.Store satisfies it directly, which keeps the supervisor invocable
+// against the real ref-backed table rather than mock-only. The two methods are
+// pinned to the store's actual shapes on purpose:
+//   - ListContracts returns the FULL table (live AND expired). The store's
+//     LiveContracts view hides expired records, which would make the liveness
+//     rule in Supervisor.Tick untriggerable against real data; the supervisor
+//     evaluates each record's TTL itself at tick time.
+//   - UpdateContractState is the CAS state transition; the store preserves
+//     holder, token accounting, and generation across it, so the reaper never
+//     rewrites those fields.
 type ContractStore interface {
-	LiveContracts(ctx context.Context, now ...time.Time) ([]leaseref.ContractRecord, error)
-	UpdateContractState(ctx context.Context, ticketID, holder string, newState leaseref.ContractState, tokensUsed int64, now ...time.Time) (leaseref.ContractRecord, error)
+	ListContracts(ctx context.Context) ([]leaseref.ContractRecord, error)
+	UpdateContractState(ctx context.Context, ticketID string, newState leaseref.ContractState, now ...time.Time) (leaseref.ContractRecord, error)
 }
 
 // WorktreeDeallocator describes worktree deallocation.
@@ -70,10 +81,14 @@ func ReapContract(ctx context.Context, rec leaseref.ContractRecord, reason, deta
 
 	// 1. Transition contract to FAILED in leaseref store
 	if opts.Store != nil {
-		_, err := opts.Store.UpdateContractState(ctx, rec.TicketID, holder, leaseref.ContractStateFailed, rec.TokensUsed, tNow)
-		if err != nil {
+		_, err := opts.Store.UpdateContractState(ctx, rec.TicketID, leaseref.ContractStateFailed, tNow)
+		if err != nil && !errors.Is(err, leaseref.ErrContractExpired) {
 			return nil, fmt.Errorf("reaper: failed to update contract state: %w", err)
 		}
+		// ErrContractExpired: the CAS store refuses to write a state onto an already
+		// lapsed lease, so FAILED-marking is best-effort for TIMEOUT reaps. The ref
+		// stays readable (and deletable via `fak contract reap`); cleanup and the
+		// diagnosis below still run.
 	}
 
 	// 2. Deallocate worktree

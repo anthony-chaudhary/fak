@@ -16,11 +16,13 @@ import (
 	"time"
 )
 
+// Schema is the version tag embedded in tuning manifests and reports.
 const Schema = "fak.compute-tuning/1"
 
 // Operation is the bounded operation family supported by this first tuning spine.
 type Operation string
 
+// OpMatMul is the sole operation family this first tuning spine supports.
 const OpMatMul Operation = "matmul"
 
 // Compatibility binds a selection to the execution environment that produced it.
@@ -118,6 +120,9 @@ type Entry struct {
 // Manifest has no mutator; NewManifest and Entries defensively copy its entries.
 type Manifest struct{ entries []Entry }
 
+// NewManifest validates entries and returns an immutable Manifest sorted by
+// profile key. It rejects empty candidate IDs, duplicate profiles, and invalid
+// profiles so Lookup can binary-search the sorted slice.
 func NewManifest(entries []Entry) (Manifest, error) {
 	seen := make(map[string]bool, len(entries))
 	copyEntries := slices.Clone(entries)
@@ -134,8 +139,11 @@ func NewManifest(entries []Entry) (Manifest, error) {
 	return Manifest{entries: copyEntries}, nil
 }
 
+// Entries returns a defensive copy of the manifest entries.
 func (m Manifest) Entries() []Entry { return slices.Clone(m.entries) }
 
+// Lookup returns the candidate ID bound to exactly this profile. It fails
+// closed: invalid or unknown profiles yield ok=false so callers fall back.
 func (m Manifest) Lookup(p Profile) (string, bool) {
 	if p.validate() != nil {
 		return "", false
@@ -155,6 +163,8 @@ func (m Manifest) Lookup(p Profile) (string, bool) {
 	return m.entries[i].CandidateID, true
 }
 
+// MarshalJSON encodes the manifest with its schema tag, giving Digest a
+// stable canonical form independent of entry order.
 func (m Manifest) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Schema  string  `json:"schema"`
@@ -162,6 +172,8 @@ func (m Manifest) MarshalJSON() ([]byte, error) {
 	}{Schema: Schema, Entries: m.Entries()})
 }
 
+// Digest returns the sha256 hex of the canonical JSON encoding, prefixed
+// with "sha256:", for binding reports to their manifest contents.
 func (m Manifest) Digest() (string, error) {
 	b, err := m.MarshalJSON()
 	if err != nil {

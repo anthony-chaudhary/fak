@@ -1,53 +1,35 @@
 // denyrules.go — the CLOSED policy-RUNG vocabulary: WHICH rule refused.
 //
-// reasons.go gives a refusal its CLASS (POLICY_BLOCK, SELF_MODIFY, ...). That is
-// the right granularity for a caller deciding what to do next, and the wrong one
-// for a fleet operator asking WHY a cluster of workers died: measured over
-// .dispatch-runs/guard-audit/*.jsonl, a single (By, Reason) pair —
-// ("monitor", "POLICY_BLOCK") — covers the recursive-delete rung, the
-// out-of-tree-write rung and the raw deny-regex rung at once, and
-// ("gitgate", "POLICY_BLOCK") covers seven distinct trunk-discipline laws. The
-// rung identity IS present on the wire, but only as the leading words of a
-// free-text witness Claim that runs up to 447 characters and shares no grammar
-// across rungs, so routing on it means a bespoke prose parser per family.
+// reasons.go names a refusal's CLASS; that is too coarse for a fleet operator
+// asking WHY a cluster of workers died — one (By, Reason) pair covers several
+// distinct rungs, and the rung identity rides only in the leading words of a
+// free-text witness Claim. A DenyRuleID is the missing routing key: a stable,
+// closed-vocabulary id for the refusing rung, carried on Verdict.Meta[MetaDenyRule]
+// and recorded as its own field by the decision journal.
 //
-// A DenyRuleID is that missing routing key: a stable, closed-vocabulary id for
-// the rung that refused, carried on Verdict.Meta[MetaDenyRule] by the refusing
-// rung and recorded as its own field by the decision journal.
+// Safety: every id is a compile-time literal minted by the floor, never a byte
+// of tool argument, path, host, or command text. DenyRuleID is a set-membership
+// test, not a character filter: a value not already in the set is rejected whole,
+// never trimmed or truncated into it — no partial-credit outcome, unlike the
+// scrub-and-bound filter that leaked an env-assignment value into args_label
+// before #5863.
 //
-// DISCLOSURE. This vocabulary is the whole safety argument for the field. Every
-// id below is a compile-time literal MINTED BY THE FLOOR — never a byte of tool
-// argument, path, host, or command text. DenyRuleID is a SET-MEMBERSHIP test, not
-// a character filter: a value that is not already in the set is REJECTED whole,
-// never trimmed, filtered, or truncated into the set. So the field's value space
-// is exactly the finite list in coreDenyRules, and no caller — a rung, a
-// model-controlled Meta map, a future contributor — can put anything else there.
-// That is strictly stronger than a scrub-and-bound defense, which is what leaked
-// an env-assignment value into args_label before #5863: a filter that DROPS the
-// offending characters silently fuses what is left, whereas a membership test has
-// no partial-credit outcome at all.
-//
-// ADDITIVE. A new rung adds its id here in the same change that mints it; until
-// it does, its refusals simply carry no deny_rule (fail-closed and lossless — the
-// existing witness Claim is untouched). Never add an id that is derived from
-// input rather than authored in source.
+// Additive: a new rung adds its id here in the same change that mints it; until
+// then its refusals carry no deny_rule (fail-closed, lossless). Never add an id
+// derived from input rather than authored in source.
 package abi
 
 import "strings"
 
-// MetaDenyRule is the Verdict.Meta key a refusing rung stamps with its
-// DenyRuleID. Meta is the established seam for bounded refusal context (it
-// already carries "fix" and "claim"), so this needs no ABI signature change.
+// MetaDenyRule is the Verdict.Meta key a refusing rung stamps with its DenyRuleID;
+// Meta is the established seam for bounded refusal context, so this needs no ABI signature change.
 const MetaDenyRule = "deny_rule"
 
-// maxDenyRuleIDLen bounds the canonicalization input so a pathological value
-// never allocates. It is far above the longest real id (commit_by_explicit_path,
-// 24 bytes) and below anything a secret is likely to fit in — but it is only a
-// cheap pre-filter: membership below is the actual gate.
+// maxDenyRuleIDLen is a cheap pre-filter so a pathological value never allocates;
+// it is far above the longest real id and below anything a secret fits in, but membership is the actual gate.
 const maxDenyRuleIDLen = 64
 
-// Arg-predicate rung ids (internal/adjudicator/decide_argpredicates.go). Each is
-// the leading atom of the bounded witness detail that rung already emits.
+// Arg-predicate rung ids (internal/adjudicator/decide_argpredicates.go); each is the leading atom of that rung's witness detail.
 const (
 	DenyRuleAllowGlob        = "allow_glob"
 	DenyRuleDenyRegex        = "deny_regex"
@@ -64,10 +46,8 @@ const (
 	DenyRuleDeviceOp         = "device_op"
 )
 
-// Self-modify rung ids (internal/adjudicator/decide.go). All three cite
-// SELF_MODIFY and disclose only the offending glob, so today they are
-// indistinguishable on the wire even though they are three different rungs
-// reached by three different call shapes.
+// Self-modify rung ids (internal/adjudicator/decide.go). All three cite SELF_MODIFY and disclose
+// only the offending glob, so they are indistinguishable on the wire; these ids separate the rungs.
 const (
 	DenyRuleSelfModifyPath      = "self_modify_path"      // a write-shaped tool's path arg matched a guarded glob
 	DenyRuleSelfModifyCommand   = "self_modify_command"   // a shell command's write verb targeted a guarded glob
@@ -75,8 +55,7 @@ const (
 	DenyRuleCredentialPathBlock = "credential_path_block" // a tool call targeted a guarded credential or host-config path
 )
 
-// Trunk-discipline law ids (internal/gitgate). Every gitgate law is AUTHORED as
-// "<law-id>[ refused]: <prose>", so the law's own leading atom is its id.
+// Trunk-discipline law ids (internal/gitgate); every law is authored as "<law-id> refused: <prose>", so its leading atom is its id.
 const (
 	DenyRuleSkipHooks            = "skip_hooks"
 	DenyRuleSkipSigning          = "skip_signing"
@@ -103,8 +82,7 @@ const (
 	DenyRuleSpuriousStagedDelete = "spurious_staged_deletion"
 )
 
-// coreDenyRules is the closed set. A value reaches a journal row only by being
-// IN this map — see the disclosure note at the top of the file.
+// coreDenyRules is the closed set: a value reaches a journal row only by being in this map.
 var coreDenyRules = map[string]bool{
 	DenyRuleAllowGlob:        true,
 	DenyRuleDenyRegex:        true,
@@ -150,23 +128,17 @@ var coreDenyRules = map[string]bool{
 	DenyRuleSpuriousStagedDelete: true,
 }
 
-// DenyRuleID canonicalizes a rung's authored rule label and reports whether the
-// result is in the closed vocabulary. Canonicalization accepts the two spellings
-// rungs actually author — the arg-predicate family's snake_case atom and
-// gitgate's hyphenated law prefix with its "refused"/":" punctuation — and folds
-// them to one on-the-wire form.
-//
-// It is deliberately TOTAL and REJECTING: any input that does not canonicalize
-// onto a member returns ("", false). Nothing is filtered into the set, so no
-// input byte can survive in the returned value. Callers MUST honor the bool and
-// emit nothing on false.
+// DenyRuleID canonicalizes a rung's authored rule label — the arg-predicate
+// family's snake_case atom or gitgate's hyphenated law prefix with its
+// "refused"/":" punctuation — to one on-the-wire form, and reports whether the
+// result is in the closed vocabulary. It is deliberately rejecting: any input
+// that does not canonicalize onto a member returns ("", false), so no input
+// byte survives in the returned value. Callers MUST honor the bool and emit nothing on false.
 func DenyRuleID(raw string) (string, bool) {
 	s := strings.TrimSpace(raw)
-	// A rung hands us its whole authored label — an arg-predicate detail
-	// ("rm_rf recursive/forced delete") or a gitgate law
-	// ("skip-hooks refused: <prose>"). Take the first whitespace-delimited word and
-	// drop a trailing colon. Both steps are NARROWING only: they can never lengthen
-	// the candidate or splice two tokens together.
+	// Take the first whitespace-delimited word and drop a trailing colon; both
+	// steps are narrowing only — they can never lengthen the candidate or splice
+	// two tokens together.
 	if i := strings.IndexAny(s, " \t\r\n"); i >= 0 {
 		s = s[:i]
 	}

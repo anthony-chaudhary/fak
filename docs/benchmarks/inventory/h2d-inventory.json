@@ -1,0 +1,188 @@
+{
+  "schema": "fak.dev.h2d-inventory.v1",
+  "root": "",
+  "head_sha": "b66f48887",
+  "shape": {
+    "name": "small-batch-4x16k",
+    "hidden_size": 4096,
+    "vocab": 151936,
+    "layers": 32,
+    "batch": 4,
+    "seq_len": 16384,
+    "block_tokens": 64
+  },
+  "totals": {
+    "copies_per_token": 6,
+    "bytes_per_token": 689664,
+    "request_sync_copies": 1,
+    "request_sync_bytes": 1024
+  },
+  "sites": [
+    {
+      "id": "sampler-embed-row-hal",
+      "file": "internal/model/hal.go",
+      "func": "tokenHALOutput",
+      "pattern": "\"hal-token-input\"",
+      "class": "per-token",
+      "copies": 1,
+      "bytes_expr": "hidden_row_f32",
+      "note": "embedding-row upload when the device embedding table is not resident (host-fallback stage); zero when embed_tokens is device-resident",
+      "occurrences": 2,
+      "fires_per_token": 1,
+      "copies_per_token": 1,
+      "bytes_per_token": 16384
+    },
+    {
+      "id": "sampler-embed-row-batch",
+      "file": "internal/model/qwen35_batch_decode.go",
+      "func": "qwen35DecodeBatchLaneRequest",
+      "pattern": "\"qwen35-decode-batch-embedding-row\"",
+      "class": "per-token",
+      "copies": 1,
+      "bytes_expr": "hidden_row_f32",
+      "batch_scales": true,
+      "note": "per-lane gathered embedding-row upload for the independent Qwen3.5 decode batch (packed/oversized tables)",
+      "occurrences": 1,
+      "fires_per_token": 4,
+      "copies_per_token": 4,
+      "bytes_per_token": 65536
+    },
+    {
+      "id": "mask-host-resident",
+      "file": "internal/model/constraint.go",
+      "func": "sampleConstrained",
+      "pattern": "c.Mask.MaskLogits(history, eff)",
+      "class": "per-token",
+      "copies": 0,
+      "note": "grammar/JSON-schema/logit-bias mask state applies HOST-SIDE over read-back logits: zero H2D. An on-device mask would add 4 x vocab x batch B/tok — this row is the drift anchor for that regression",
+      "occurrences": 1,
+      "fires_per_token": 1,
+      "copies_per_token": 0,
+      "bytes_per_token": 0
+    },
+    {
+      "id": "kv-append-scalar-pos",
+      "file": "internal/compute/cuda_kv.go",
+      "func": "growAppend",
+      "pattern": "C.fcuda_kv_write(",
+      "class": "per-layer",
+      "copies": 0,
+      "note": "KV-append position crosses as a SCALAR KERNEL ARG (graph-stable append), not a memcpy; per-layer zero-copy witness",
+      "occurrences": 1,
+      "fires_per_token": 32,
+      "copies_per_token": 0,
+      "bytes_per_token": 0
+    },
+    {
+      "id": "paged-kv-page-ids",
+      "file": "internal/compute/cuda_paged_kv.go",
+      "func": "appendRowsLocked",
+      "pattern": "fcuda_paged_kv_write_pages_f32(",
+      "class": "per-layer",
+      "copies": 0,
+      "note": "paged KV page ids cross via the C adapter's kernel-argument copy, not a memcpy",
+      "occurrences": 1,
+      "fires_per_token": 32,
+      "copies_per_token": 0,
+      "bytes_per_token": 0
+    },
+    {
+      "id": "paged-kv-seqlen-store",
+      "file": "internal/compute/cuda_paged_kv.go",
+      "func": "syncDeviceTableLocked",
+      "pattern": "C.fcuda_paged_store_int(",
+      "class": "per-token",
+      "copies": 0,
+      "note": "paged seq-len crosses via a 1-thread store kernel (value in kernel args), not a memcpy",
+      "occurrences": 1,
+      "fires_per_token": 1,
+      "copies_per_token": 0,
+      "bytes_per_token": 0
+    },
+    {
+      "id": "paged-kv-block-table",
+      "file": "internal/compute/cuda_paged_kv.go",
+      "func": "syncDeviceTableLocked",
+      "pattern": "C.fcuda_h2d(k.dTable",
+      "class": "per-request",
+      "copies": 1,
+      "bytes_expr": "block_table_f32",
+      "note": "dirty-gated block-table H2D on page allocation: at most one upload per table change, \u003c= 4 x ceil(seq_len/block_tokens) bytes/request",
+      "occurrences": 1,
+      "fires_per_token": 0,
+      "copies_per_token": 0,
+      "bytes_per_token": 0
+    },
+    {
+      "id": "split-logits-reupload",
+      "file": "internal/model/hal.go",
+      "func": "tokenHALOutput",
+      "pattern": "\"hal-split-logits\"",
+      "class": "per-token",
+      "copies": 1,
+      "bytes_expr": "vocab_f32",
+      "note": "hybrid CPU/GPU split only: the full post-host-suffix logits vector is re-uploaded to the device after the host suffix",
+      "occurrences": 1,
+      "fires_per_token": 1,
+      "copies_per_token": 1,
+      "bytes_per_token": 607744
+    }
+  ],
+  "drift": null,
+  "uncovered": [
+    {
+      "file": "internal/compute/cuda_kv.go",
+      "line": 484,
+      "marker": "C.fcuda_h2d(",
+      "snippet": "C.fcuda_h2d(dst.ptr, unsafe.Pointer(\u0026src[0]), C.size_t(len(src)*4))"
+    },
+    {
+      "file": "internal/compute/cuda_kv.go",
+      "line": 488,
+      "marker": "C.fcuda_h2d(",
+      "snippet": "C.fcuda_h2d(ptr, unsafe.Pointer(\u0026src[0]), C.size_t(len(src)*4))"
+    },
+    {
+      "file": "internal/compute/cuda_paged_kv.go",
+      "line": 605,
+      "marker": "C.fcuda_h2d(",
+      "snippet": "C.fcuda_h2d(kp, unsafe.Pointer(\u0026state.K[l][0]), C.size_t(n*w*4))"
+    },
+    {
+      "file": "internal/compute/cuda_paged_kv.go",
+      "line": 606,
+      "marker": "C.fcuda_h2d(",
+      "snippet": "C.fcuda_h2d(rp, unsafe.Pointer(\u0026state.KRaw[l][0]), C.size_t(n*w*4))"
+    },
+    {
+      "file": "internal/compute/cuda_paged_kv.go",
+      "line": 607,
+      "marker": "C.fcuda_h2d(",
+      "snippet": "C.fcuda_h2d(vp, unsafe.Pointer(\u0026state.V[l][0]), C.size_t(n*w*4))"
+    },
+    {
+      "file": "internal/model/hal.go",
+      "line": 277,
+      "marker": "UploadClass(",
+      "snippet": "UploadClass(t compute.Tensor, as compute.Dtype, class compute.MemoryClass, site string) compute.Tens…"
+    },
+    {
+      "file": "internal/model/hal.go",
+      "line": 284,
+      "marker": "UploadClass(",
+      "snippet": "return b.UploadClass(src, compute.F32, class, site)"
+    },
+    {
+      "file": "internal/model/hal.go",
+      "line": 289,
+      "marker": "uploadHostF32(",
+      "snippet": "func (s *Session) uploadHostF32(shape []int, data []float32, class compute.MemoryClass, site string)…"
+    },
+    {
+      "file": "internal/model/hal.go",
+      "line": 332,
+      "marker": "uploadHostF32(",
+      "snippet": "return s.uploadHostF32(meta.Shape, s.M.tensor(name), compute.MemoryWeights, \"hal-weight \"+name)"
+    }
+  ]
+}

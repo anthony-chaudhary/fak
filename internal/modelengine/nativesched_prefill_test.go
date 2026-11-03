@@ -1362,6 +1362,65 @@ func TestPrefixHitApplyClampsToSnapshottedDepth(t *testing.T) {
 	})
 }
 
+// TestLookupPrefixTruncatesToPageMultiple pins SGLang's page-aligned match
+// truncation adapted into lookupPrefixPageAligned: a raw token-exact hit is
+// floored to a multiple of the block size in tokens, a sub-page hit is a miss
+// that releases its boundary lease, and page 1 leaves the raw match unchanged.
+// Source: SGLang python/sglang/srt/mem_cache/radix_cache.py:440-443,467@00a9a81
+// (key.page_aligned(page_size), Apache-2.0).
+// fak-test:runtime fast est=50ms lane=default
+func TestLookupPrefixTruncatesToPageMultiple(t *testing.T) {
+	prompt := nativeSchedulerQwenPrompt(40)
+	seed := func(cached int) *radixkv.Tree {
+		t.Helper()
+		tree := radixkv.New(0)
+		root, matched := tree.Lookup(prompt)
+		if matched != 0 {
+			t.Fatalf("empty tree matched %d tokens", matched)
+		}
+		tree.Done(tree.Insert(root, prompt[:cached], nil))
+		return tree
+	}
+
+	t.Run("page_16_floors_raw_match_37_to_32", func(t *testing.T) {
+		s := NewNativeScheduler(nil)
+		defer s.Close()
+		tree := seed(37)
+		s.SetRadixKV(tree)
+		matched, boundary, owner, _ := s.lookupPrefixPageAligned(prompt, 16)
+		if matched != 32 || boundary == nil || owner != tree {
+			t.Fatalf("matched=%d boundary=%v owner=%v, want 32/non-nil/tree", matched, boundary, owner)
+		}
+		t.Cleanup(func() { tree.Done(boundary) })
+	})
+
+	t.Run("sub_page_raw_match_15_is_a_miss", func(t *testing.T) {
+		s := NewNativeScheduler(nil)
+		defer s.Close()
+		tree := seed(15)
+		s.SetRadixKV(tree)
+		matched, boundary, owner, _ := s.lookupPrefixPageAligned(prompt, 16)
+		if matched != 0 || boundary != nil || owner != nil {
+			t.Fatalf("matched=%d boundary=%v owner=%v, want 0/nil/nil", matched, boundary, owner)
+		}
+		if got := tree.Stats().ProtectedTokens; got != 0 {
+			t.Fatalf("missed sub-page hit retained %d protected tokens", got)
+		}
+	})
+
+	t.Run("page_1_leaves_the_raw_match_unchanged", func(t *testing.T) {
+		s := NewNativeScheduler(nil)
+		defer s.Close()
+		tree := seed(37)
+		s.SetRadixKV(tree)
+		matched, boundary, owner, _ := s.lookupPrefixPageAligned(prompt, 1)
+		if matched != 37 || boundary == nil || owner != tree {
+			t.Fatalf("matched=%d boundary=%v owner=%v, want 37/non-nil/tree", matched, boundary, owner)
+		}
+		t.Cleanup(func() { tree.Done(boundary) })
+	})
+}
+
 // TestSchedLaneTransitionRejectsIllegal pins the native scheduler lane FSM: every
 // declared legal edge is accepted, and terminal->decode plus decode->prefilling
 // (without passing through preemption) are refused with the typed error and leave
@@ -1490,4 +1549,159 @@ func TestSchedLaneTransitionCachedPrefillCancellation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestQwenPrefillChunkBoundariesAlignInDeterministicMode pins the adapted
+// SGLang deterministic truncation_align_size rule (scheduler.py:1690-1722@
+// 00a9a81b, Apache-2.0): in deterministic mode a configured alignment A > 0
+// rounds each non-final prefill chunk end down to a multiple of A measured
+// from position 0 (never below A), while A = 0 and non-deterministic mode keep
+// the historical arbitrary-token boundaries. The budget itself is unchanged.
+//
+// fak-test:runtime fast est=2s lane=default
+func TestQwenPrefillChunkBoundariesAlignInDeterministicMode(t *testing.T) {
+	const (
+		promptLen = 100
+		budget    = 40
+		align     = 16
+	)
+	prompt := nativeSchedulerQwenPrompt(promptLen)
+
+	t.Run("aligned_boundary_arithmetic", func(t *testing.T) {
+		cases := []struct {
+			name    string
+			start   int
+			rawEnd  int
+			prompt  int
+			align   int
+			wantEnd int
+		}{
+			// Pinned contract sequence: 100 tokens, budget 40, A=16 -> 32, 64, 96, 100.
+			{"first_chunk", 0, 40, 100, 16, 32},
+			{"second_chunk", 32, 72, 100, 16, 64},
+			{"third_chunk_raw_end_past_tail", 64, 104, 100, 16, 96},
+			{"final_chunk", 96, 136, 100, 16, 100},
+			// Zero alignment leaves the raw end untouched.
+			{"zero_alignment_passthrough", 0, 40, 100, 0, 40},
+			{"zero_alignment_past_tail", 80, 120, 100, 0, 120},
+			// Never below A: a floor that lands at or before start rounds up to A.
+			{"floor_zero_rounds_up_to_A", 0, 16, 100, 32, 32},
+			// Alignment finer than the step cannot stall the cursor: next multiple past start.
+			{"stalled_cursor_next_multiple", 64, 80, 300, 64, 128},
+			// An aligned end landing exactly on the tail is the final chunk.
+			{"aligned_end_on_tail_is_final", 64, 104, 96, 16, 96},
+			// A fallback multiple past the tail terminates at the tail.
+			{"fallback_past_tail_is_final", 256, 296, 300, 128, 300},
+			// Exact multiples are preserved.
+			{"exact_multiple", 32, 64, 100, 16, 64},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				if got := alignedPrefillChunkEnd(tc.start, tc.rawEnd, tc.prompt, tc.align); got != tc.wantEnd {
+					t.Fatalf("alignedPrefillChunkEnd(%d,%d,%d,%d) = %d, want %d",
+						tc.start, tc.rawEnd, tc.prompt, tc.align, got, tc.wantEnd)
+				}
+			})
+		}
+	})
+
+	// assertCompletion pins the closed contract at this fixture size: the lane
+	// finishes every chunk, publishes nonzero final logits, and emits exactly
+	// one first decode token. (Whole-prompt logit parity at budget 40 is not a
+	// property of this synthetic fixture on the parent commit either.)
+	assertCompletion := func(t *testing.T, logits []float32, out []int) {
+		t.Helper()
+		if len(logits) == 0 {
+			t.Fatal("final chunk published no logits")
+		}
+		if len(out) != 1 {
+			t.Fatalf("decode tokens after final chunk = %v, want one", out)
+		}
+	}
+
+	t.Run("deterministic_mode_aligns_chunk_ends", func(t *testing.T) {
+		m := nativeSchedulerPrefillModel(t)
+		chunks, out, logits := driveAligned(t, m, true, true, prompt, budget, align)
+		want := [][2]int{{0, 32}, {32, 32}, {64, 32}, {96, 4}}
+		if !reflect.DeepEqual(chunks, want) {
+			t.Fatalf("aligned prefill chunks = %v, want %v", chunks, want)
+		}
+		for _, c := range chunks[:len(chunks)-1] {
+			end := c[0] + c[1]
+			if end%align != 0 || end < align {
+				t.Fatalf("non-final chunk end %d is not a positive multiple of %d", end, align)
+			}
+		}
+		assertCompletion(t, logits, out)
+	})
+
+	t.Run("zero_alignment_keeps_historical_boundaries", func(t *testing.T) {
+		m := nativeSchedulerPrefillModel(t)
+		chunks, out, logits := driveAligned(t, m, true, false, prompt, budget, align)
+		want := [][2]int{{0, 40}, {40, 40}, {80, 20}}
+		if !reflect.DeepEqual(chunks, want) {
+			t.Fatalf("unaligned prefill chunks = %v, want %v", chunks, want)
+		}
+		assertCompletion(t, logits, out)
+	})
+
+	t.Run("non_deterministic_mode_ignores_alignment", func(t *testing.T) {
+		m := nativeSchedulerPrefillModel(t)
+		chunks, out, logits := driveAligned(t, m, false, true, prompt, budget, align)
+		want := [][2]int{{0, 40}, {40, 40}, {80, 20}}
+		if !reflect.DeepEqual(chunks, want) {
+			t.Fatalf("non-deterministic prefill chunks = %v, want %v", chunks, want)
+		}
+		assertCompletion(t, logits, out)
+	})
+}
+
+// driveAligned drives one admitted 100-token Qwen lane through bounded chunked
+// prefill under the given deterministic/alignment configuration and returns
+// the observed (start, length) prefill chunks, the first decode token, and the
+// final logits.
+func driveAligned(t *testing.T, m *model.Model, deterministic, alignOn bool, prompt []int, budget, align int) ([][2]int, []int, []float32) {
+	t.Helper()
+	s := newNativeScheduler(m, nativeSchedulerPrefillPrepare(map[string][]int{"long": prompt}))
+	if err := s.SetQwenPrefillMaxTokensPerIteration(budget); err != nil {
+		t.Fatalf("SetQwenPrefillMaxTokensPerIteration: %v", err)
+	}
+	s.SetDeterministicMode(deterministic)
+	if alignOn {
+		s.SetQwenPrefillChunkAlign(align)
+	}
+	nativeSchedulerBeginManualDrain(t, s)
+
+	var events []nativeSchedulerEvent
+	s.observeNativeEvent = func(event nativeSchedulerEvent) {
+		events = append(events, event)
+	}
+
+	ln := nativeSchedulerAdmitLane(t, s, "long")
+	if ln.state != schedLanePrefilling || ln.prefillChunkTokens != budget {
+		t.Fatalf("admission = state %d chunk budget %d, want PREFILLING/%d",
+			ln.state, ln.prefillChunkTokens, budget)
+	}
+	for i := 0; i < 8 && ln.state != schedLaneDecode; i++ {
+		if ln.terminal {
+			t.Fatalf("lane terminated before decode: %v", ln.err)
+		}
+		nativeSchedulerDriveIteration(t, s)
+	}
+	if ln.state != schedLaneDecode {
+		t.Fatalf("lane state after drive = %d, want DECODE", ln.state)
+	}
+	out := nativeSchedulerDrainAvailable(ln)
+	var finalLogits []float32
+	var chunks [][2]int
+	for _, event := range events {
+		switch {
+		case event.Kind == nativeSchedulerEventPrefill && event.Lane == ln:
+			chunks = append(chunks, [2]int{event.ChunkStart, event.ChunkLen})
+		case event.Kind == nativeSchedulerEventTransition && event.Lane == ln:
+			finalLogits = copyF32(event.Lane.logits)
+		}
+	}
+	nativeSchedulerEndManualDrain(s)
+	return chunks, out, finalLogits
 }

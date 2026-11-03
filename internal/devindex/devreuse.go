@@ -125,6 +125,9 @@ var maintainerDevCommands = []string{
 	"completion",
 	"compute",
 	"component",
+	// Storage-compute arbitration readout (internal/computetune Decide):
+	// fak's own storage/decode-regime diagnostics, not a portable adopter pattern.
+	"computetune",
 	"concept",
 	"concept-usage-score",
 	"config",
@@ -197,6 +200,11 @@ var maintainerDevCommands = []string{
 	"guard-stops",
 	"guard-stops-slack",
 	"guard-verdict-rsi",
+	// Per-token host->device copy inventory on the decode state paths
+	// (sampler/mask/KV-append metadata): recomputable copies/token + bytes/token
+	// + source-drift gate over fak's own engine seams, not a portable adopter
+	// pattern.
+	"h2d-inventory",
 	"harness",
 	"harness-debt-dispatch",
 	"headless-lint",
@@ -212,6 +220,10 @@ var maintainerDevCommands = []string{
 	// Systematic host-share reader + launch-bound gate over perf receipts: fak's own
 	// decode-regime diagnostics, not a portable adopter pattern.
 	"hostshare",
+	// Per-layer host-setup vs kernel microbench at batch 1 on the compute Planner
+	// seam (PrepareMatMul vs Plan.Run): direct setup/kernel ratio + regression gate,
+	// fak's own decode-regime diagnostics, not a portable adopter pattern.
+	"hostsetup-bench",
 	"hwgate-lint",
 	"hygiene",
 	"idea-scout",
@@ -232,6 +244,10 @@ var maintainerDevCommands = []string{
 	"l3-serve",
 	"l3serve",
 	"launch",
+	// Verified kernel-launch/parFor census of the decode paths: recomputable
+	// launches/token metric + source-drift gate over fak's own dispatch seams
+	// (looped vs batched MoE expert dispatch), not a portable adopter pattern.
+	"launch-census",
 	"leak-audit",
 	"learning-debt-dispatch",
 	"learning-observation",

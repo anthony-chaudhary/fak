@@ -278,6 +278,7 @@ type classedUploadBackend interface {
 }
 
 func uploadHostF32Class(be compute.Backend, shape []int, data []float32, class compute.MemoryClass, site string) compute.Tensor {
+	compute.H2DCensusRecord(site, int64(len(data))*4) // FAK_H2D_CENSUS=1 measured-mode H2D count
 	src := compute.NewF32(compute.Default(), append([]int(nil), shape...), data)
 	if b, ok := be.(classedUploadBackend); ok {
 		return b.UploadClass(src, compute.F32, class, site)

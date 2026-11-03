@@ -47,6 +47,7 @@ func TestCurrentBranchRefClassifications(t *testing.T) {
 		{"goals/GOAL-inference-defaults-11580.md", "incoming origin/main overlaps", RefClassHistorical},
 		{"tools/release_cut.py", "merge remote-tracking origin/main", RefClassHistorical},
 		{"tools/release_next.py", "sync trunk with origin/main", RefClassHistorical},
+		{"internal/worktree/WIRING-AUDIT.md", "local as of 2026-11-03, not yet on origin/main", RefClassDevelopmentSource},
 	}
 	for _, tc := range cases {
 		if got := ClassifyHardcodedRef(tc.path, tc.line); got != tc.want {

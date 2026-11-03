@@ -252,7 +252,9 @@ func shouldRunStrixValidation(explicitStrix bool, mine []string) bool {
 	return explicitStrix || isGPURelatedValidation(mine)
 }
 
-// executeStrixValidationPhase runs physical validation on Strix Halo during fak validate.
+// executeStrixValidationPhase runs physical validation on Strix Halo during fak
+// validate. It is a thin orchestrator over four stages: controller-authority
+// acquisition, target probe, options build, and receipt evaluation.
 func executeStrixValidationPhase(
 	ctx context.Context,
 	stdout, stderr io.Writer,
@@ -273,6 +275,37 @@ func executeStrixValidationPhase(
 
 	phase := recorder.start("strix_validation")
 
+	authority, err := acquireStrixControllerAuthority(ctx, root, res, phase, mine)
+	if err != nil {
+		return err
+	}
+	// Keep the opaque authority alive for the full phase. A later receipt-binding
+	// leaf can consume it without reconstructing or serializing private evidence.
+	_ = authority
+
+	target, err := probeStrixTarget(ctx, explicitStrix, hostOverride, res, phase)
+	if err != nil {
+		return err
+	}
+
+	opts, err := buildStrixValidationOpts(ctx, root, target, res, subkernelsArg, ablateArg, mine, phase)
+	if err != nil {
+		return err
+	}
+
+	return evaluateStrixReceipt(ctx, opts, target, res, phase)
+}
+
+// acquireStrixControllerAuthority obtains and validates the opaque controller
+// authority required before any physical Strix work. On refusal it records the
+// ciPreflight failure, finishes the phase, and wraps the refusal for Run.
+func acquireStrixControllerAuthority(
+	ctx context.Context,
+	root string,
+	res *validateResult,
+	phase validateActivePhase,
+	mine []string,
+) (amdgpu.StrixControllerAuthority, error) {
 	authority, err := newStrixControllerAuthorityFn(ctx, root)
 	if err == nil && !strixControllerAuthorityValidFn(authority) {
 		err = errors.New("controller authority constructor returned unusable authority")
@@ -308,12 +341,21 @@ func executeStrixValidationPhase(
 			Files:  mine,
 		})
 		res.OK = false
-		return fmt.Errorf("strix controller authority refused: %s: %w", code, err)
+		return authority, fmt.Errorf("strix controller authority refused: %s: %w", code, err)
 	}
-	// Keep the opaque authority alive for the full phase. A later receipt-binding
-	// leaf can consume it without reconstructing or serializing private evidence.
-	_ = authority
+	return authority, nil
+}
 
+// probeStrixTarget discovers the appliance under a short probe budget: implicit
+// runs get a fast 1.5s probe, explicit --strix gets 5s. An unreachable target
+// records the pending-hardware-evidence failure and stops the phase.
+func probeStrixTarget(
+	ctx context.Context,
+	explicitStrix bool,
+	hostOverride string,
+	res *validateResult,
+	phase validateActivePhase,
+) (*amdgpu.StrixTarget, error) {
 	// In auto mode, probe with a fast timeout (1.5s)
 	probeTimeout := 1500 * time.Millisecond
 	if explicitStrix {
@@ -350,9 +392,24 @@ func executeStrixValidationPhase(
 			Files:  failFiles,
 		})
 		res.OK = false
-		return fmt.Errorf("strix unreachable: %w", unreachErr)
+		return nil, fmt.Errorf("strix unreachable: %w", unreachErr)
 	}
+	return target, nil
+}
 
+// buildStrixValidationOpts resolves the subkernel/ablation selections, builds
+// the exact candidate archive, and sizes the run timeout from the admission
+// budget plus the per-execution TERM/kill-after envelope.
+func buildStrixValidationOpts(
+	ctx context.Context,
+	root string,
+	target *amdgpu.StrixTarget,
+	res *validateResult,
+	subkernelsArg string,
+	ablateArg string,
+	mine []string,
+	phase validateActivePhase,
+) (amdgpu.StrixValidationOpts, error) {
 	// Prepare validation options
 	skList := amdgpu.ValidationSubkernelSelection(subkernelsArg)
 
@@ -372,7 +429,7 @@ func executeStrixValidationPhase(
 		phase.finish(archiveErr)
 		res.OK = false
 		res.Failures = append(res.Failures, ciPreflightFailure{Step: "strix-validation", Detail: fmt.Sprintf("exact candidate archive failed: %v", archiveErr), Files: mine})
-		return fmt.Errorf("strix candidate archive: %w", archiveErr)
+		return amdgpu.StrixValidationOpts{}, fmt.Errorf("strix candidate archive: %w", archiveErr)
 	}
 	admissionTimeout := 30 * time.Second
 	runCount := len(skList) + len(abList)
@@ -380,7 +437,7 @@ func executeStrixValidationPhase(
 	// TERM/kill-after envelope for every sequential device execution.
 	totalTimeout := 3*time.Minute + time.Duration(runCount)*(admissionTimeout+65*time.Second)
 
-	opts := amdgpu.StrixValidationOpts{
+	return amdgpu.StrixValidationOpts{
 		Host:                 target.Host,
 		RunSubkernels:        true,
 		Subkernels:           skList,
@@ -394,8 +451,20 @@ func executeStrixValidationPhase(
 		CandidateArchive:     candidate.Bytes,
 		SourceArchiveSHA256:  candidate.SourceArchiveSHA256,
 		AdmissionTimeout:     admissionTimeout,
-	}
+	}, nil
+}
 
+// evaluateStrixReceipt runs the physical validation and enforces the receipt
+// invariants in order: non-nil receipt, Validate() integrity, PASS verdict,
+// credit eligibility, and no trailing execution error. Each violated invariant
+// records its own ciPreflight failure entry.
+func evaluateStrixReceipt(
+	ctx context.Context,
+	opts amdgpu.StrixValidationOpts,
+	target *amdgpu.StrixTarget,
+	res *validateResult,
+	phase validateActivePhase,
+) error {
 	receipt, valErr := runStrixValidationFn(ctx, opts)
 	phase.finish(valErr)
 
