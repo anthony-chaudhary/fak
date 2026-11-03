@@ -1128,6 +1128,11 @@
         },
         {
             "command": "fak version modules",
+            "output_contains": "internal/fakroot",
+            "lane": "fakroot"
+        },
+        {
+            "command": "fak version modules",
             "output_contains": "internal/fastintent",
             "lane": "fastintent"
         },
