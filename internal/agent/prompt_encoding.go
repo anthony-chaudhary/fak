@@ -110,6 +110,9 @@ func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message,
 	if err := p.admitDeepSeekV41ChatProfile(messages, sp); err != nil {
 		return preparedPrompt{}, err
 	}
+	if p.tok != nil && p.tok.IsSPM() {
+		return p.prepareSPMRawPrompt(ctx, messages, tools, sp)
+	}
 	messages, tools, shrink := p.ApplyPromptShrink(ctx, messages, tools, opts...)
 	renderMessages, images, err := prepareVisionMessages(messages)
 	if err != nil {
@@ -260,6 +263,9 @@ func (p *InKernelPlanner) admitDeepSeekV41ChatProfile(messages []Message, sp Sam
 }
 
 func (p *InKernelPlanner) promptRendererID(sp SampleParams) string {
+	if p.tok != nil && p.tok.IsSPM() {
+		return "llama-spm-raw-v1"
+	}
 	legacy := inKernelPromptRendererID(p.m.Cfg, sp)
 	if deepSeekV41SegmentedPrompt(p.m.Cfg, sp) {
 		legacy += deepSeekV41SegmentedRendererSuffix
