@@ -884,7 +884,7 @@ func TestRawDecodeSelectedTokenLogprobNumerics(t *testing.T) {
 	}
 }
 
-func selectedTokenLogprobBindingFixture(t *testing.T) (Execution, compute.Qwen38VulkanRawDecodeResult) {
+func sealedLogprobExecutionFixture(t *testing.T) Execution {
 	t.Helper()
 	outputs := [][]float32{{10000, 9999, -10000}, {0, 4, 1}, {3, 2, 1}}
 	m := &fakeLoadedModel{candidate: &fakeSession{outputs: outputs}}
@@ -893,33 +893,19 @@ func selectedTokenLogprobBindingFixture(t *testing.T) (Execution, compute.Qwen38
 	if err != nil {
 		t.Fatalf("execute loaded: %v", err)
 	}
-	ignoreEOS, eosStopped := false, false
-	raw := compute.Qwen38VulkanRawDecodeResult{
-		PromptTokenIDs:      []int32{1},
-		GeneratedTokenLimit: 3,
-		OutputTokenIDs:      []int32{0, 1, 0},
-		Runs: []compute.Qwen38VulkanDecodeRun{{
-			Repetition:            1,
-			GeneratedTokenLimit:   3,
-			ActualGeneratedTokens: 3,
-			IgnoreEOS:             &ignoreEOS,
-			EOSStopped:            &eosStopped,
-			OutputTokenIDs:        []int32{0, 1, 0},
-		}},
-	}
-	return execution, raw
+	return execution
 }
 
-func TestBindQwen38VulkanSelectedTokenLogprobsV3IncludesPrefillAndClones(t *testing.T) {
-	execution, raw := selectedTokenLogprobBindingFixture(t)
-	bound, err := BindQwen38VulkanSelectedTokenLogprobsV3(execution, raw)
+func TestSealedSelectedTokenLogprobsIncludesPrefillAndClones(t *testing.T) {
+	execution := sealedLogprobExecutionFixture(t)
+	released, err := execution.SealedSelectedTokenLogprobs()
 	if err != nil {
 		t.Fatal(err)
 	}
-	logprobs := bound.Runs[0].SelectedTokenLogprobs
-	if len(logprobs) != len(execution.Runs[0].GeneratedTokens) || len(logprobs) != 3 {
-		t.Fatalf("bound logprobs = %v, want one per output token", logprobs)
+	if len(released) != 1 || len(released[0]) != len(execution.Runs[0].GeneratedTokens) || len(released[0]) != 3 {
+		t.Fatalf("released logprobs = %v, want one slice of one per output token", released)
 	}
+	logprobs := released[0]
 	wantPrefill := -math.Log(1 + math.Exp(-1) + math.Exp(-20000))
 	if math.Abs(logprobs[0]-wantPrefill) > 1e-12 {
 		t.Fatalf("prefill-selected logprob = %.17g, want %.17g", logprobs[0], wantPrefill)
@@ -929,65 +915,47 @@ func TestBindQwen38VulkanSelectedTokenLogprobsV3IncludesPrefillAndClones(t *test
 			t.Fatalf("selected-token logprob[%d] = %v, want finite and non-positive", i, logprob)
 		}
 	}
-	if bound.Runs[0].SelectedTokenLogprobsSHA256 != "" || raw.Runs[0].SelectedTokenLogprobs != nil {
-		t.Fatalf("binder derived digest or mutated caller raw result: bound=%+v raw=%+v", bound.Runs[0], raw.Runs[0])
-	}
-	bound.Runs[0].SelectedTokenLogprobs[0] = 0
-	rebound, err := BindQwen38VulkanSelectedTokenLogprobsV3(execution, raw)
-	if err != nil || rebound.Runs[0].SelectedTokenLogprobs[0] != wantPrefill {
-		t.Fatalf("bound slice aliased sealed evidence: rebound=%v err=%v", rebound.Runs[0].SelectedTokenLogprobs, err)
+	logprobs[0] = 0
+	rebound, err := execution.SealedSelectedTokenLogprobs()
+	if err != nil || math.Abs(rebound[0][0]-wantPrefill) > 1e-12 {
+		t.Fatalf("released slice aliased sealed evidence: rebound=%v err=%v", rebound[0], err)
 	}
 }
 
-func TestBindQwen38VulkanSelectedTokenLogprobsV3RefusesMutations(t *testing.T) {
+func TestSealedSelectedTokenLogprobsRefusesMutations(t *testing.T) {
 	tests := []struct {
 		name   string
-		mutate func(*Execution, *compute.Qwen38VulkanRawDecodeResult)
+		mutate func(*Execution)
 	}{
-		{name: "caller execution", mutate: func(e *Execution, _ *compute.Qwen38VulkanRawDecodeResult) {
+		{name: "caller execution", mutate: func(e *Execution) {
 			*e = Execution{PromptTokenIDs: []int{1}, GeneratedLimit: 3}
 		}},
-		{name: "execution prompt", mutate: func(e *Execution, _ *compute.Qwen38VulkanRawDecodeResult) { e.PromptTokenIDs[0] = 2 }},
-		{name: "execution limit", mutate: func(e *Execution, _ *compute.Qwen38VulkanRawDecodeResult) { e.GeneratedLimit++ }},
-		{name: "execution generated token", mutate: func(e *Execution, _ *compute.Qwen38VulkanRawDecodeResult) { e.Runs[0].GeneratedTokens[0] = 2 }},
-		{name: "execution prefill token", mutate: func(e *Execution, _ *compute.Qwen38VulkanRawDecodeResult) { e.Runs[0].PrefillOutputID = 2 }},
-		{name: "execution step token", mutate: func(e *Execution, _ *compute.Qwen38VulkanRawDecodeResult) { e.Runs[0].Steps[0].TokenID = 2 }},
-		{name: "execution step order", mutate: func(e *Execution, _ *compute.Qwen38VulkanRawDecodeResult) { e.Runs[0].Steps[0].Step = 1 }},
-		{name: "execution step logit", mutate: func(e *Execution, _ *compute.Qwen38VulkanRawDecodeResult) { e.Runs[0].Steps[0].Top1++ }},
-		{name: "execution step margin", mutate: func(e *Execution, _ *compute.Qwen38VulkanRawDecodeResult) { e.Runs[0].Steps[0].Margin++ }},
-		{name: "execution step tokens", mutate: func(e *Execution, _ *compute.Qwen38VulkanRawDecodeResult) { e.Runs[0].StepTokens[0] = 2 }},
-		{name: "raw prompt", mutate: func(_ *Execution, r *compute.Qwen38VulkanRawDecodeResult) { r.PromptTokenIDs[0] = 2 }},
-		{name: "raw limit", mutate: func(_ *Execution, r *compute.Qwen38VulkanRawDecodeResult) { r.GeneratedTokenLimit++ }},
-		{name: "raw output", mutate: func(_ *Execution, r *compute.Qwen38VulkanRawDecodeResult) { r.OutputTokenIDs[0] = 2 }},
-		{name: "raw repetitions", mutate: func(_ *Execution, r *compute.Qwen38VulkanRawDecodeResult) { r.Runs = nil }},
-		{name: "raw reported repetitions", mutate: func(_ *Execution, r *compute.Qwen38VulkanRawDecodeResult) { r.ReportedRuns = 2 }},
-		{name: "raw repetition index", mutate: func(_ *Execution, r *compute.Qwen38VulkanRawDecodeResult) { r.Runs[0].Repetition = 2 }},
-		{name: "raw run limit", mutate: func(_ *Execution, r *compute.Qwen38VulkanRawDecodeResult) { r.Runs[0].GeneratedTokenLimit++ }},
-		{name: "raw actual count", mutate: func(_ *Execution, r *compute.Qwen38VulkanRawDecodeResult) { r.Runs[0].ActualGeneratedTokens-- }},
-		{name: "raw run output", mutate: func(_ *Execution, r *compute.Qwen38VulkanRawDecodeResult) { r.Runs[0].OutputTokenIDs[0] = 2 }},
-		{name: "caller logprobs", mutate: func(_ *Execution, r *compute.Qwen38VulkanRawDecodeResult) {
-			r.Runs[0].SelectedTokenLogprobs = []float64{-1}
-		}},
-		{name: "caller digest", mutate: func(_ *Execution, r *compute.Qwen38VulkanRawDecodeResult) {
-			r.Runs[0].SelectedTokenLogprobsSHA256 = "sha256:caller"
-		}},
+		{name: "execution prompt", mutate: func(e *Execution) { e.PromptTokenIDs[0] = 2 }},
+		{name: "execution limit", mutate: func(e *Execution) { e.GeneratedLimit++ }},
+		{name: "execution generated token", mutate: func(e *Execution) { e.Runs[0].GeneratedTokens[0] = 2 }},
+		{name: "execution prefill token", mutate: func(e *Execution) { e.Runs[0].PrefillOutputID = 2 }},
+		{name: "execution step token", mutate: func(e *Execution) { e.Runs[0].Steps[0].TokenID = 2 }},
+		{name: "execution step order", mutate: func(e *Execution) { e.Runs[0].Steps[0].Step = 1 }},
+		{name: "execution step logit", mutate: func(e *Execution) { e.Runs[0].Steps[0].Top1++ }},
+		{name: "execution step margin", mutate: func(e *Execution) { e.Runs[0].Steps[0].Margin++ }},
+		{name: "execution step tokens", mutate: func(e *Execution) { e.Runs[0].StepTokens[0] = 2 }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			execution, raw := selectedTokenLogprobBindingFixture(t)
-			tt.mutate(&execution, &raw)
-			got, err := BindQwen38VulkanSelectedTokenLogprobsV3(execution, raw)
+			execution := sealedLogprobExecutionFixture(t)
+			tt.mutate(&execution)
+			got, err := execution.SealedSelectedTokenLogprobs()
 			if err == nil {
 				t.Fatal("mutation was accepted")
 			}
-			if !reflect.DeepEqual(got, compute.Qwen38VulkanRawDecodeResult{}) {
-				t.Fatalf("error returned non-zeroable raw result: %+v", got)
+			if got != nil {
+				t.Fatalf("error returned partial evidence: %+v", got)
 			}
 		})
 	}
 }
 
-func TestBindQwen38VulkanSelectedTokenLogprobsV3RefusesPartialCPUVerificationRun(t *testing.T) {
+func TestSealedSelectedTokenLogprobsRefusesPartialCPUVerificationRun(t *testing.T) {
 	m := &fakeLoadedModel{
 		candidate: &fakeSession{outputs: [][]float32{{0, 3, 1}}},
 		cpu:       &fakeSession{outputs: [][]float32{{4, 0, 1}}},
@@ -997,20 +965,42 @@ func TestBindQwen38VulkanSelectedTokenLogprobsV3RefusesPartialCPUVerificationRun
 	if executeErr == nil || len(execution.Runs) != 1 {
 		t.Fatalf("partial CPU-verification execution = runs %d err %v, want one of two runs plus divergence", len(execution.Runs), executeErr)
 	}
-	raw := compute.Qwen38VulkanRawDecodeResult{
-		PromptTokenIDs:      []int32{1},
-		GeneratedTokenLimit: 1,
-		OutputTokenIDs:      []int32{1},
-		Runs: []compute.Qwen38VulkanDecodeRun{{
-			Repetition:            1,
-			GeneratedTokenLimit:   1,
-			ActualGeneratedTokens: 1,
-			OutputTokenIDs:        []int32{1},
-		}},
+	got, err := execution.SealedSelectedTokenLogprobs()
+	if err == nil || got != nil {
+		t.Fatalf("partial repetition set released: got=%v err=%v", got, err)
 	}
-	got, err := BindQwen38VulkanSelectedTokenLogprobsV3(execution, raw)
-	if err == nil || !reflect.DeepEqual(got, compute.Qwen38VulkanRawDecodeResult{}) {
-		t.Fatalf("partial repetition set bound: got=%+v err=%v", got, err)
+}
+
+func TestModelConfigDigestCoversJSONHiddenFields(t *testing.T) {
+	base, baseOK := modelConfigDigest(model.Config{})
+	if !baseOK {
+		t.Fatal("zero config digest refused")
+	}
+	if again, ok := modelConfigDigest(model.Config{}); !ok || again != base {
+		t.Fatalf("digest not deterministic: %x vs %x", again, base)
+	}
+	// A json-hidden field outside the old hardcoded five must move the seal,
+	// proving the digest now tracks the complete hidden-field surface.
+	bos := 5
+	withBOS, bosOK := modelConfigDigest(model.Config{BOSTokenID: &bos})
+	if !bosOK {
+		t.Fatal("config with BOSTokenID digest refused")
+	}
+	if withBOS == base {
+		t.Fatal("digest ignored the JSON-hidden BOSTokenID field")
+	}
+	// The original intent (GLM-5-next flag moves the seal) must survive.
+	glm, glmOK := modelConfigDigest(model.Config{GLM5Next: true})
+	if !glmOK {
+		t.Fatal("config with GLM5Next digest refused")
+	}
+	if glm == base {
+		t.Fatal("digest ignored the GLM5Next field")
+	}
+	// An enabled residual hook has no stable content representation and must
+	// refuse authority instead of binding a process-local function address.
+	if _, ok := modelConfigDigest(model.Config{EnableResidualHook: true}); ok {
+		t.Fatal("digest accepted an enabled residual hook")
 	}
 }
 
