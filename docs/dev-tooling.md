@@ -319,6 +319,35 @@ preflights a C compiler, refusing rather than building a race-blind binary on a 
 (the same contract as `make test-race`). `TAGS=cuda` (the GPU image's delta from `release`)
 and future `dev`/`race` build tags layer on top of the profile, not beside it.
 
+### Optional source-bound build batch record
+
+`fak-dev build batch` is an optional, data-only companion to the ordinary build.
+It never invokes a compiler, native mutation, lease, claim, sync, or push; it only
+emits or inspects a user-supplied nonsecret record that joins declared patch
+ownership, exact input hashes, the affected-package union, ordered stage
+observations, and immutable evidence references into one advisory view. One issue
+per native commit remains mandatory, and the combined manifest is not a
+dependency-closure proof for any intermediate issue-scoped commit.
+
+```bash
+fak-dev build batch setup --root . --target-commit <sha> --profile dev \
+  --input internal/devcmd/build_batch.go \
+  --patch anthony-chaudhary/fak#1234=internal/devcmd/build_batch.go
+fak-dev build batch plan   --root . --record .fak/build-batch.json [--json]
+fak-dev build batch status --root . --record .fak/build-batch.json [--json]
+```
+
+`setup` prints a seed record to stdout; you choose whether and where to save it.
+`plan` and `status` read only the explicitly named record and its explicitly named
+input files, all below the explicit `--root`; they derive target, paths, and counts
+from the record's one authoritative manifest and refuse conflicting current-target,
+membership, or count declarations, invalid JSON, ambiguous file identities, and
+path escapes. Stale source/profile evidence is invalidated in place, unresolved
+stage attempts are preserved as unknown (an unknown outcome is not a retry
+instruction), recorded verification debt is retained, and a named publisher is
+advisory only — it grants no ownership. Existing native primitives (`fak validate`,
+`fak-flow commit`, `fak-sync push`) remain authoritative.
+
 ## Feature-tag variant taxonomy
 
 The codebase maintains a strict taxonomy of supported build-tag combinations, distinguishing

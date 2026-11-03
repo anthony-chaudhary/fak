@@ -55,7 +55,13 @@ func TestAgentBenchRejectsFalseSuccess(t *testing.T) {
 	})
 	defer server.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	// Six fixtures each pay two serial cold-cache sandboxed control compiles
+	// before any planner request lands; on an idle host the cohort already
+	// needs ~90s, and a loaded 2-vCPU CI shard sharing the runner with heavier
+	// test binaries clipped the 90s budget at four of six requests (ci-fast @
+	// f308e6e0e). Budget the full per-task cap so every fixture reaches the
+	// planner under load while keeping the one-request-per-fixture assertion.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	receipt, err := Run(ctx, taskOptions(t, server.URL, "false-success"))
 	if err != nil {

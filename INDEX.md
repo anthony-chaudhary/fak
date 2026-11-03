@@ -253,7 +253,7 @@ Working docs that track a specific effort. Dated by design; they age out.
 
 Developer, design, and internal reference docs — indexed here so each is reachable from the map.
 
-- [Developer tooling](docs/dev-tooling.md) — query the curated documentation map before surveying the tree, then choose the build, test, debug, profile, or committed-tip witness for the question at hand.
+- [Developer tooling](docs/dev-tooling.md) — query the curated documentation map before surveying the tree, then choose the build, test, debug, profile, or committed-tip witness for the question at hand; an optional source-bound build batch record (`fak-dev build batch setup|plan|status`) plans multi-patch work as advisory data only.
 - [Dev-process private boundary](docs/dev-process-private-boundary.md) — architectural boundary between public runtime (The Engine) and private autonomous development factory (The Factory), with the complete [top 100 tools migration catalog](docs/dev-process-top-100-tools-inventory.md).
 - [Top 100 autonomous factory tools inventory](docs/dev-process-top-100-tools-inventory.md) — authoritative catalog and ranking of the top 100 dev process tools migrating from Python to Go in fak-private across six functional cohorts.
 - [Nightly trajectory attribution receipt](docs/ci/trajectory-attribution-nightly.md) — the bounded local/fleet collection, budget, publication, rollback, and scrubbed-receipt contract for the scheduled trajectory audit.

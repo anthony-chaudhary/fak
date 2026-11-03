@@ -232,7 +232,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  boundary [--json] [--workspace DIR]   lint repository demo/package boundaries")
 	fmt.Fprintln(w, "  ci-preflight [--ref R] [flags]        check committed repository tip in isolation")
 	fmt.Fprintln(w, "  checkpoint [flags]                    append a developer progress milestone")
-	fmt.Fprintln(w, "  build [--profile P] [--out F] [--receipt F] [--json]  build fak and record phase timings")
+	fmt.Fprintln(w, "  build [--profile P] [--out F] [--receipt F] [--json]  build fak and record phase timings; 'build batch setup|plan|status' manages an optional source-bound data record (advisory, no execution)")
 	fmt.Fprintln(w, "  build-matrix [flags]                  validate compile matrix across build variants and targets")
 	fmt.Fprintln(w, "  buildcheck [--vet] [packages...]       compile-check while masking peer WIP")
 	fmt.Fprintln(w, "  runtime-mem [--url U] [--samples N]   scrape a serve /debug/vars go_runtime receipt; compact RSS/GC table + delta")
