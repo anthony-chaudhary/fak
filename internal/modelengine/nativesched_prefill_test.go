@@ -1362,6 +1362,65 @@ func TestPrefixHitApplyClampsToSnapshottedDepth(t *testing.T) {
 	})
 }
 
+// TestLookupPrefixTruncatesToPageMultiple pins SGLang's page-aligned match
+// truncation adapted into lookupPrefixPageAligned: a raw token-exact hit is
+// floored to a multiple of the block size in tokens, a sub-page hit is a miss
+// that releases its boundary lease, and page 1 leaves the raw match unchanged.
+// Source: SGLang python/sglang/srt/mem_cache/radix_cache.py:440-443,467@00a9a81
+// (key.page_aligned(page_size), Apache-2.0).
+// fak-test:runtime fast est=50ms lane=default
+func TestLookupPrefixTruncatesToPageMultiple(t *testing.T) {
+	prompt := nativeSchedulerQwenPrompt(40)
+	seed := func(cached int) *radixkv.Tree {
+		t.Helper()
+		tree := radixkv.New(0)
+		root, matched := tree.Lookup(prompt)
+		if matched != 0 {
+			t.Fatalf("empty tree matched %d tokens", matched)
+		}
+		tree.Done(tree.Insert(root, prompt[:cached], nil))
+		return tree
+	}
+
+	t.Run("page_16_floors_raw_match_37_to_32", func(t *testing.T) {
+		s := NewNativeScheduler(nil)
+		defer s.Close()
+		tree := seed(37)
+		s.SetRadixKV(tree)
+		matched, boundary, owner, _ := s.lookupPrefixPageAligned(prompt, 16)
+		if matched != 32 || boundary == nil || owner != tree {
+			t.Fatalf("matched=%d boundary=%v owner=%v, want 32/non-nil/tree", matched, boundary, owner)
+		}
+		t.Cleanup(func() { tree.Done(boundary) })
+	})
+
+	t.Run("sub_page_raw_match_15_is_a_miss", func(t *testing.T) {
+		s := NewNativeScheduler(nil)
+		defer s.Close()
+		tree := seed(15)
+		s.SetRadixKV(tree)
+		matched, boundary, owner, _ := s.lookupPrefixPageAligned(prompt, 16)
+		if matched != 0 || boundary != nil || owner != nil {
+			t.Fatalf("matched=%d boundary=%v owner=%v, want 0/nil/nil", matched, boundary, owner)
+		}
+		if got := tree.Stats().ProtectedTokens; got != 0 {
+			t.Fatalf("missed sub-page hit retained %d protected tokens", got)
+		}
+	})
+
+	t.Run("page_1_leaves_the_raw_match_unchanged", func(t *testing.T) {
+		s := NewNativeScheduler(nil)
+		defer s.Close()
+		tree := seed(37)
+		s.SetRadixKV(tree)
+		matched, boundary, owner, _ := s.lookupPrefixPageAligned(prompt, 1)
+		if matched != 37 || boundary == nil || owner != tree {
+			t.Fatalf("matched=%d boundary=%v owner=%v, want 37/non-nil/tree", matched, boundary, owner)
+		}
+		t.Cleanup(func() { tree.Done(boundary) })
+	})
+}
+
 // TestSchedLaneTransitionRejectsIllegal pins the native scheduler lane FSM: every
 // declared legal edge is accepted, and terminal->decode plus decode->prefilling
 // (without passing through preemption) are refused with the typed error and leave

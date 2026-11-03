@@ -65,3 +65,28 @@ Work-item verdicts:
 - **Rename the `coherence` subpackage** (with its four importers) to a name
   that does not contain a model-family keyword, which clears the
   `model_hardcoding` false positive and the associated modularity penalty.
+
+## Closure (re-verified 2026-11-03 at trunk tip 21a0c5e927)
+
+Done-condition receipts, re-run fresh on the ticket branch after
+fast-forwarding `fc3cb6ee12` -> `21a0c5e927` (zero `pkg/deploykit` changes
+between the two):
+
+| Done condition | Receipt |
+|---|---|
+| `go test ./pkg/deploykit/... -count=1` green | ok across all six packages (deploykit 0.587s, artifact 81.404s, coherence 0.043s, probe 1.296s, stamp 9.737s, swap 2.395s) |
+| `go vet ./pkg/deploykit/...` clean | exit 0, no findings; `gofmt -l pkg/deploykit` empty |
+| Reader shows maturity up or total_debt down | maturity 7.5 (> baseline 6.5) and total_debt 1.19 (< baseline 3.69) - both sides of the OR hold |
+| Committed by explicit path with `(fak pkg/deploykit)` + DCO | this commit |
+
+Independent re-audit (parallel subagent cohort, same HEAD): the five
+`model_hardcoding` findings re-derive exactly as the `cohere` subset-of-
+`coherence`/`Coherent` substring false positive (package clause line 18,
+const name+value line 42, uses lines 53/96); zero real model-family or
+checkpoint tokens in non-test code; god census unchanged (max file 503 lines
+`probe/client.go`, max func 47 lines); the four `coherence` importers remain
+outside this ticket's boundary. The residual lane debt (modularity_deficit
+via the false-positive flag plus HighCoupling at 9 transitive deps,
+dogfooded=false) is driven entirely by the two out-of-boundary follow-ons
+above; the within-boundary maturity ceiling is 7.5, which is where the lane
+sits.

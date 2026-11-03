@@ -1,10 +1,7 @@
 // agent_invariants.go — O(1) agent lifecycle invariants, thread quotas, and admission backpressure.
 //
-// This file formalizes the frozen ABI contracts for agent lifecycle management:
-//   1. Thread Priority Hierarchy: P0 (System/Control), P1 (Interactive), P2 (Batch), P3 (Speculative).
-//   2. Workload Ceilings & Queue Limits: MaxQueueCapacity (512), tier worker pool bounds.
-//   3. Fail-Closed Admission Backpressure: Structured AdmissionError types with retry_after_ms.
-//   4. Retention & Growth Bounds: Storage and memory byte ceilings for journals, scratch, and cache.
+// Frozen ABI contracts: priority tiers, queue/pool ceilings, structured admission
+// backpressure, and retention byte ceilings.
 
 package abi
 
@@ -14,20 +11,16 @@ import "fmt"
 type ThreadPriority uint8
 
 const (
-	// ThreadPriorityP0System is the highest priority tier reserved for kernel/system control,
-	// health checks, heartbeats, liveness probes, lease renewals, and emergency resource reclaim.
+	// ThreadPriorityP0System is the highest tier: kernel/system control, health checks, heartbeats, lease renewals, and emergency reclaim.
 	ThreadPriorityP0System ThreadPriority = iota
 
-	// ThreadPriorityP1Interactive is reserved for user-facing interactive queries, CLI sessions,
-	// direct synchronous RPC handling, and interactive tool calls.
+	// ThreadPriorityP1Interactive is for user-facing interactive queries, CLI sessions, and synchronous RPC/tool calls.
 	ThreadPriorityP1Interactive
 
-	// ThreadPriorityP2Batch is for autonomous background worker jobs, bulk sweeps, autonomous
-	// subagent task loops, and scheduled maintenance tasks.
+	// ThreadPriorityP2Batch is for autonomous background workers, bulk sweeps, subagent task loops, and scheduled maintenance.
 	ThreadPriorityP2Batch
 
-	// ThreadPriorityP3Speculative is for opportunistic speculative execution, background cache warming,
-	// branch pre-computation, and idle-time indexing. Strictly yieldable and preemptible under pressure.
+	// ThreadPriorityP3Speculative is for opportunistic speculative work, cache warming, and idle-time indexing; strictly yieldable and preemptible.
 	ThreadPriorityP3Speculative
 )
 
@@ -57,10 +50,9 @@ func (p ThreadPriority) IsValid() bool {
 	return p <= ThreadPriorityP3Speculative
 }
 
-// Standard capacity, queue, and worker pool bounds.
+// Admission queue depth bound, default per-tier worker-pool ceilings (in K), and the global worker-total ceiling.
 const (
-	// MaxQueueCapacity is the hard upper bound on pending admission queue depth (512).
-	// Enqueue attempts beyond this limit fail closed immediately with ErrQueueFull.
+	// MaxQueueCapacity is the hard bound on pending admission queue depth; enqueues beyond it fail closed with ErrQueueFull.
 	MaxQueueCapacity = 512
 
 	// Default worker pool ceilings (K) per priority tier.
@@ -73,26 +65,23 @@ const (
 	DefaultMaxTotalWorkers = 64
 )
 
-// Retention & Growth Bounds — hard byte ceilings for journals, scratch storage, and in-memory caches.
 const (
-	// MaxJournalSizeBytes is the hard ceiling for a single rolling event/run journal (64 MiB).
-	// When exceeded, segment rotation or compaction is triggered.
-	MaxJournalSizeBytes int64 = 64 * 1024 * 1024 // 64 MiB
+	// MaxJournalSizeBytes is the hard ceiling for a single rolling journal (64 MiB); segment rotation or compaction triggers when exceeded.
+	MaxJournalSizeBytes int64 = 64 * 1024 * 1024
 
 	// MaxScratchStorageBytes is the total workspace scratch storage ceiling (512 MiB).
-	MaxScratchStorageBytes int64 = 512 * 1024 * 1024 // 512 MiB
+	MaxScratchStorageBytes int64 = 512 * 1024 * 1024
 
 	// MaxPerRunScratchBytes is the scratch storage ceiling for an individual agent run (50 MiB).
-	MaxPerRunScratchBytes int64 = 50 * 1024 * 1024 // 50 MiB
+	MaxPerRunScratchBytes int64 = 50 * 1024 * 1024
 
 	// MaxInMemoryCacheBytes is the ceiling for volatile in-memory cache structures (256 MiB).
-	MaxInMemoryCacheBytes int64 = 256 * 1024 * 1024 // 256 MiB
+	MaxInMemoryCacheBytes int64 = 256 * 1024 * 1024
 
 	// MaxPerRunLogBytes is the cap on per-run standard capture log size (10 MiB).
-	MaxPerRunLogBytes int64 = 10 * 1024 * 1024 // 10 MiB
+	MaxPerRunLogBytes int64 = 10 * 1024 * 1024
 )
 
-// Standard error codes and default retry delays for admission backpressure.
 const (
 	// AdmissionCodeQueueFull is emitted when the admission queue capacity (512) is saturated.
 	AdmissionCodeQueueFull = "ERR_QUEUE_FULL"
@@ -107,15 +96,14 @@ const (
 	DefaultRetryAfterResourceConstrainedMS int64 = 100
 )
 
-// AdmissionError represents a structured, fail-closed backpressure refusal.
-// It serializes cleanly to JSON for wire protocols and HTTP status propagation.
+// AdmissionError is a structured backpressure refusal with a machine-readable code and retry hint.
 type AdmissionError struct {
 	Code         string `json:"code"`
 	Message      string `json:"message"`
 	RetryAfterMS int64  `json:"retry_after_ms"`
 }
 
-// Error implements the standard error interface.
+// Error renders the machine-readable code, message, and optional retry hint as the error string.
 func (e *AdmissionError) Error() string {
 	if e == nil {
 		return "<nil>"
@@ -141,7 +129,6 @@ func (e *AdmissionError) Is(target error) bool {
 	return e.Code == t.Code
 }
 
-// Standard sentinel structured admission errors.
 var (
 	// ErrQueueFull is emitted when the queue reaches MaxQueueCapacity (512).
 	ErrQueueFull = &AdmissionError{
@@ -158,7 +145,7 @@ var (
 	}
 )
 
-// NewAdmissionError returns a new structured AdmissionError.
+// NewAdmissionError builds a structured backpressure refusal with an explicit code, message, and retry hint.
 func NewAdmissionError(code, message string, retryAfterMS int64) *AdmissionError {
 	return &AdmissionError{
 		Code:         code,
@@ -167,7 +154,7 @@ func NewAdmissionError(code, message string, retryAfterMS int64) *AdmissionError
 	}
 }
 
-// NewQueueFullError creates a structured ErrQueueFull with a custom retry delay.
+// NewQueueFullError builds the queue-saturated refusal, defaulting the retry hint to DefaultRetryAfterQueueFullMS.
 func NewQueueFullError(retryAfterMS int64) *AdmissionError {
 	if retryAfterMS <= 0 {
 		retryAfterMS = DefaultRetryAfterQueueFullMS
@@ -179,7 +166,7 @@ func NewQueueFullError(retryAfterMS int64) *AdmissionError {
 	}
 }
 
-// NewResourceConstrainedError creates a structured ErrResourceConstrained with custom message and retry delay.
+// NewResourceConstrainedError builds the resource-envelope refusal, defaulting empty messages and non-positive retry hints.
 func NewResourceConstrainedError(message string, retryAfterMS int64) *AdmissionError {
 	if retryAfterMS <= 0 {
 		retryAfterMS = DefaultRetryAfterResourceConstrainedMS

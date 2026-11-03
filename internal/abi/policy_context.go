@@ -14,6 +14,7 @@ const (
 	PostureDefaultOpen
 )
 
+// String renders the posture as its stable wire token: fail_closed, admit_and_log, or default_open; unknown for unrecognized values.
 func (p Posture) String() string {
 	switch p {
 	case PostureFailClosed:
