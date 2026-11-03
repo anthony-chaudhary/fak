@@ -1,0 +1,43 @@
+vLLM fused Gated DeltaNet post-convolution decode
+
+Copyright contributors to the vLLM project
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Source: vllm-project/vllm, csrc/gdn/fused_gdn_decode_kernel.cu
+Revision: fa3b9d1377219247060d3c8b49eae199c9e7e154
+https://github.com/vllm-project/vllm/blob/fa3b9d1377219247060d3c8b49eae199c9e7e154/csrc/gdn/fused_gdn_decode_kernel.cu
+Upstream source Git blob: 5e606ffd7fa143d2164275f5e063b9f4f8a8abe1
+
+Adaptation: internal/compute/cuda/gdn_decode_vllm.cuh, included by
+internal/compute/cuda/qwen35_gdn.cuh. The 256-thread, four-chunk, paired-warp
+reduction and ordered 1..8-token recurrent update are ported directly.
+Activations, outputs, and carried state use FAK FP32 rather than upstream BF16
+activation/output rounding. FAK's canonical [head,key,value] state is staged
+through a shared-memory transpose for upstream's [value,key] computation and
+written back coalesced without a persistent layout migration. Shared V is read
+directly to keep the FP32 candidate below the default 48 KiB shared limit.
+The copy pipeline uses cp.async on SM80+ and a synchronous vector copy when
+compiled for older CUDA architectures. Head ratios 1, 2, 3, 4 and 8 are retained.
+
+FAK supplies one in-place carried state and contiguous ordered token panels.
+The upstream accepted-token slot table, per-token destination snapshots,
+BF16/FP16 dispatch, sigmoid-only output gate, and PyTorch wrapper are omitted.
+The output activation is SiLU, matching FAK's Qwen GDN contract. Existing
+convolution, projections, strict device-only ownership, error drain and final
+operation fence remain in the FAK caller.
+
+Selection: FAK_CUDA_GDN_POST_CONV=vllm for eligible ordinary decode or ordered
+sequence panels of 1..8 tokens with 128-dimensional key and value heads.
+The default, other shapes, longer sequences and graph capture use the existing
+native implementation. Kernel profiling names the selected candidate
+k_qwen35_gdn_post_conv_vllm. Independent lane batching is unchanged.
+
+Verification: TestCUDAGDNVLLMPostConvHost executes this exact source with a
+bounded CPU SIMT model against an independent FP64 recurrence, and
+TestCUDAGDNVLLMPostConvContract checks selection and caller wiring. These do
+not establish CUDA compilation, GPU execution, or performance.
+The prepared required-device witness is:
+FAK_CUDA_GDN_REQUIRED=1 go test -tags cuda ./internal/compute -run '^TestCUDAGDNVLLMPostConvDevice$' -count=1 -v
+CUDA compilation, physical state/output parity, whole-model quality and net
+performance remain separate qualification requirements. No speed or default
+promotion claim accompanies this port.
