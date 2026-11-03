@@ -116,6 +116,14 @@ type OpenCodeRunReceipt struct {
 	// cause in the receipt. Additive + omitempty: succeeded runs stay
 	// byte-identical.
 	FailureTail string `json:"failure_tail,omitempty"`
+
+	// RecoveredExitCode is the raw child exit code when a nonzero exit was
+	// scored succeeded because the session demonstrably recovered: OpenCode v2
+	// exits 1 when any step finished with an error (e.g. one mid-stream
+	// provider.transport ECONNRESET that it retried), even though the session
+	// went on to finish its final step with reason "stop". Additive +
+	// omitempty: every other receipt stays byte-identical.
+	RecoveredExitCode int `json:"recovered_exit_code,omitempty"`
 }
 
 // cronOpenCodeBunCrashSignature reports whether captured child output carries the
@@ -561,6 +569,7 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 		progressEvents    int64
 		timeoutExtensions int64
 		stopReason        string
+		recoveredExitCode int
 	)
 
 	for {
@@ -615,6 +624,7 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 		}
 
 		stopReason = "completed"
+		recoveredExitCode = 0
 		startTime = time.Now()
 		runErr = c.Start()
 		if runErr == nil {
@@ -705,6 +715,14 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 			} else {
 				exitCode = 1
 			}
+			// OpenCode v2 exits 1 after a session that hit (and retried past) a
+			// step error but still finished its final step normally. Score that
+			// as succeeded only on positive evidence from the child's own stream.
+			if cronOpenCodeRecoveredExit(exitCode, sessionID, stopReason, lastStdout) {
+				recoveredExitCode = exitCode
+				outcome = "succeeded"
+				exitCode = 0
+			}
 		} else {
 			outcome = "succeeded"
 			exitCode = 0
@@ -752,6 +770,7 @@ func RunScheduledOpenCode(opts ScheduledOpenCodeOptions) (OpenCodeRunReceipt, er
 		SoftTimeoutMS:     effectiveTimeout.Milliseconds(),
 		HardTimeoutMS:     effectiveHardTimeout.Milliseconds(),
 		StopReason:        stopReason,
+		RecoveredExitCode: recoveredExitCode,
 
 		// Provider-failure classification (#1866): stamped on failed/timeout runs
 		// only (empty on succeeded). cronClassifyFailureClass returns "ongoing" for
