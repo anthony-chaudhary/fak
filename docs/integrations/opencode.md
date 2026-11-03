@@ -244,13 +244,13 @@ OpenCode natively supports the portable [Agent Skills](https://agentskills.io) s
 | Harness | Discovery location | Format |
 |---|---|---|
 | **Claude Code** | `.claude/skills/<name>/SKILL.md` | Canonical semantic body + Claude frontmatter |
-| **OpenAI Codex** | `.agents/skills/<name>/SKILL.md` | Agent Skills standard (generated adapter / native) |
+| **OpenAI Codex** | `.agents/skills/<name>/SKILL.md` | Agent Skills standard (generated one-hop mirror) |
 | **OpenCode** | `opencode.json` -> `skills.paths` (`.agents/skills`) | Agent Skills standard / portable bundle |
 
 ### 2. Bundling and synchronization with `fak-project-assets`
 
 `cmd/fak-project-assets` serves as the portable skill bundler:
-- `go run ./cmd/fak-project-assets sync --json`: syncs canonical skills into portable regular-file adapters under `.agents/skills/` (compatible with Windows, Linux, macOS).
+- `go run ./cmd/fak-project-assets sync --json`: syncs canonical skills into portable one-hop mirrors (regular files) under `.agents/skills/` (compatible with Windows, Linux, macOS).
 - `go run ./cmd/fak-project-assets parity --json`: verifies that 100% of skills are canonical or mapped with `zero_unexplained_gaps: true`.
 
 In `opencode.json`, point `skills.paths` at the synced portable bundle:

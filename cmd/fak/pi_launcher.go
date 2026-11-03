@@ -748,12 +748,15 @@ func buildPiGuardLaunchArgv(fakBin string, opts piLaunchOptions, child []string)
 	return append(argv, child...)
 }
 
-// defaultPiSkillPackRoots lists the project-asset skill roots Pi understands, in
-// preference order: the generated .agents/skills adapters (Pi-native discovery dir)
-// and the canonical .claude/skills pack. Both are relative to a project root.
+// defaultPiSkillPackRoots lists the single project-asset skill root Pi registers:
+// .agents/skills is the complete one-hop pack (generated full-body mirrors of
+// .claude/skills). .claude/skills stays out of Pi discovery because it is the
+// canonical source consumed by Claude Code / fak-native; passing both roots would
+// double-register every skill (pi name collisions keep first + warn). The
+// FAK_PI_SKILLS environment variable still wins over this list and can name any
+// roots. Entries are relative to a project root.
 var defaultPiSkillPackRoots = []string{
 	filepath.Join(".agents", "skills"),
-	filepath.Join(".claude", "skills"),
 }
 
 // discoverPiSkillPack walks up from startDir looking for the first directory that
