@@ -72,3 +72,23 @@ After the registrations import lands on trunk, re-run the witness from a clean t
 (`go run ./cmd/fak debt-lanes --workspace . --target-repo fak --lane vllmquant --json`) and confirm
 the lane reads production_grade at committed HEAD; if the in-flight line is superseded or dropped,
 a follow-on ticket scoped to `internal/registrations` wires the same one-line seam.
+
+## Resolution (2026-11-03, wave 2)
+
+The in-flight seam was verified GONE before this lane's wave-2 pass landed anything:
+no diff in this worktree, no diff in the main checkout (`C:/work/fak` @ 80fb3d7c4b),
+no import at `origin/main` (@ 1ae9aa7857). No peer was carrying it. Per work item 1 of the
+ticket — "if disconnected and a minimal connection fits <= 3 files, wire it" — this lane
+landed the single viable seam itself: one blank-import line for `internal/vllmquant` in
+`internal/registrations/registrations.go` (alphabetical slot between `toolprocgate` and
+`worktreewitness`), the same defconfig idiom its sibling quant leaves use
+(quantdetect 513752b9da, kvquantmeta ec72eabf32, quantprov 0cbf0550dd).
+The package has no init() side effects, so the line changes no runtime behavior; it makes
+the leaf reachable from `cmd/fak serve` in the kernel driver list, which is exactly what
+the reader's next_action asked for ("integrate vllmquant: connect into production command
+or registration graph").
+
+Post-landing witness (live tree, same command as above): maturity 10, rung
+production_grade, target 8, gap 0, debt_principal 0, carrying_cost 0, total_debt 0
+(was 6.48); evidence integrated=true, dependents_count=1 (registrations);
+health status healthy, score 1.0, wiring_status integrated.
