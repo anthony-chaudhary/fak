@@ -23,8 +23,8 @@ import "fmt"
 // every expert in one band and sums the gate-weighted experts in the SAME expert-ascending
 // order glmMoeFFN uses (glmRoute returns picks sorted by expert index), and AllReduceSum of
 // one partial is the identity — so the only non-bit-exact step (regrouping the routed sum
-// across bands) vanishes (expert_parallel_test.go's TestExpertParallelGLMSharedExpert pins
-// this per-layer; the tests here pin it through the whole forward).
+// across bands) vanishes (TestExpertParallelGLMSharedExpert pins this per-layer; the tests
+// here pin it through the whole forward).
 //
 // WHAT IS SHARDED AND WHAT IS REPLICATED — honest, fail-closed scope. EP is the GLM-5.2
 // MoE multi-GPU sub-lever: a 753B glm_moe_dsa model's parameters are dominated by its routed
@@ -34,10 +34,9 @@ import "fmt"
 // every rank): its latent KV is shared across heads, so head-parallel TP is a DIFFERENT
 // decomposition (a separate sub-lever, the same one ForwardTP fails closed on for glm_moe_dsa).
 // The dense first-k FFN layers (no router) also run replicated (the monolith mlpSeq) — dense
-// FFN intermediate-parallel TP is ForwardTP's job, not EP's. So ForwardEP composes the live
-// attention + dense layers UNCHANGED with an expert-parallel MoE FFN; on real multi-GPU the
-// replicated halves cost redundant flops but no extra collective, and the expert GEMMs — the
-// dominant work — move off one device onto the rank fleet.
+// FFN intermediate-parallel TP is ForwardTP's job, not EP's. On real multi-GPU the replicated
+// halves cost redundant flops but no extra collective, and the expert GEMMs — the dominant
+// work — move off one device onto the rank fleet.
 //
 // THE DEVICE LINE — what this does NOT yet claim. The Collective ForwardEP reduces through
 // is LocalCollective (the single-box, bit-exact default) or BackendCollective on cpu-ref. A
@@ -60,8 +59,8 @@ type EPConfig struct {
 // forwardEPSupported reports (as an error) the first reason this model is not covered by the
 // wired EP path, so ForwardEP fails closed instead of mis-serving an architecture whose MoE
 // decomposition it does not implement. EP is the glm_moe_dsa MoE sub-lever: it requires a
-// glm_moe_dsa MoE config. The per-layer expertParallelGLMMoEDelta additionally fails closed
-// on gptoss experts (the expertGPTOSS form) and the qwen3.5 singular gated shared expert —
+// glm_moe_dsa MoE config. The per-layer expertParallelGLMMoEDelta additionally fails closed on
+// gptoss experts (the expertGPTOSS form) and the qwen3.5 singular gated shared expert —
 // surfaced (captured) by ForwardEP's sub-layer closure rather than silently mis-computed.
 func (m *Model) forwardEPSupported() error {
 	cfg := m.Cfg
@@ -89,10 +88,9 @@ func (m *Model) epMoeLayer(l int, xn [][]float32, mat matKernel, plan TPPlan, co
 	}
 	out := make([][]float32, len(xn))
 	for t := range xn {
-		// Prep the normed input exactly as glmMoeFFN does (mlpSeq passes mat.prep(xn[t]) to
-		// ffn.apply), then route + reduce the routed experts across the expert plan. The shared
-		// expert (if any) is added once inside expertParallelGLMMoEDelta, after the reduce —
-		// matching glmMoeFFN's routed-then-shared order.
+		// Prep the normed input exactly as glmMoeFFN does, then route + reduce the routed experts
+		// across the expert plan. The shared expert (if any) is added once inside
+		// expertParallelGLMMoEDelta, after the reduce — matching glmMoeFFN's routed-then-shared order.
 		xp := mat.prep(xn[t])
 		picks := glmRoute(m, l, xp, mat)
 		delta, err := m.expertParallelGLMMoEDelta(l, xp, mat, picks, plan, coll)

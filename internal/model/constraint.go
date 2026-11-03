@@ -1,35 +1,20 @@
 package model
 
-// Native structured-output decoding for the in-kernel reference engine (#929,
-// the native follow-on to #907's ride-mode passthrough).
+// Native structured-output decoding for the in-kernel reference engine (#929). The gateway
+// already rides client constraints onto upstream backends; the in-kernel decode has no upstream
+// to forward to, so this file owns the sampler hook:
 //
-// #907 wired the RIDE half: the gateway forwards a client's OpenAI
-// `response_format` / `logit_bias` to a vLLM/SGLang upstream, which enforces the
-// JSON-schema/grammar constraint during generation. That covers every backend fak
-// FRONTS. It does NOT cover this package — the in-kernel decode is plain greedy
-// argmax over post-head logits (kv.go:Generate -> argmaxF32) with no constraint
-// hook. There is no upstream to forward to, so fak must own the sampler hook.
+//  1. a LOGIT-BIAS mask — apply the per-request logit_bias map to the post-head logits before argmax.
+//  2. a JSON-SCHEMA / GRAMMAR logit mask behind a feature flag — a per-step token mask that keeps
+//     the decode on a valid path.
 //
-// This file is that sink, smallest-first per the issue:
+// LAYERING: model does not import grammar or the tokenizer. It defines the LogitMask seam and a
+// higher layer injects the compiled mask (the same dependency-inversion the gateway uses);
+// AllowedSetMask / StepMask are the minimal building blocks such a compiler emits.
 //
-//  1. a LOGIT-BIAS mask — apply the per-request logit_bias map (token id -> bias,
-//     the OpenAI -100..100 convention) to the post-head logits before argmax.
-//  2. a JSON-SCHEMA / GRAMMAR logit mask behind a feature flag — a per-step token
-//     mask that keeps the decode on a valid path.
-//
-// LAYERING. internal/model is tier-1 (foundation); internal/grammar is tier-2 and
-// the tokenizer-aware compiler that turns a `oneOf`-of-tools JSON-Schema into a
-// per-step token mask lives ABOVE this package. So model does NOT import grammar /
-// tokenizer: it defines the LogitMask SEAM and a higher layer (which can see both)
-// injects the compiled mask — the same dependency-inversion the gateway uses for
-// session state. The concrete masks here (AllowedSetMask / StepMask) are the
-// minimal, real building blocks such a compiler emits.
-//
-// BIT-EXACT-OFF (the load-bearing criterion). With no logit_bias and no active
-// mask, sampleConstrained returns argmaxF32(logits) VERBATIM — the same function
-// the unconstrained greedy path calls — so a constraint that is off is a proven
-// no-op, token-identical to Session.Generate. The default Generate path never
-// constructs a DecodeConstraint, so unconstrained decode is structurally unchanged.
+// BIT-EXACT-OFF: with no logit_bias and no active mask, sampleConstrained returns
+// argmaxF32(logits) verbatim — a constraint that is off is a proven no-op, token-identical to
+// Session.Generate.
 
 import (
 	"math"
@@ -38,46 +23,33 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/guideddecode"
 )
 
-// LogitBias is the OpenAI per-token logit-bias map: token id -> an additive bias
-// on that token's post-head logit, clamped to the standard [-100, 100] range. A
-// +100 bias forces a token where it is otherwise reachable; -100 effectively
-// removes it from the argmax. The nil / empty map is the unconstrained identity.
-// It mirrors agent.SampleParams.LogitBias (map[int]float64), the carrier #907
-// already threads to the gateway; this package is the in-kernel sink.
+// LogitBias is the OpenAI per-token logit-bias map: token id -> an additive bias on that
+// token's post-head logit, clamped to [-100, 100]. The nil/empty map is the identity.
 type LogitBias map[int]float64
 
 // LogitBiasClamp is the OpenAI logit_bias magnitude bound: a bias is clamped to
 // [-LogitBiasClamp, +LogitBiasClamp] before it is added to a logit.
 const LogitBiasClamp = 100.0
 
-// LogitMask is the injected schema/grammar constraint seam. A higher layer compiles
-// a JSON-Schema (the canonical `oneOf`-of-tools shape, sourced from internal/grammar)
-// to a per-step token predicate and passes an implementation in here; internal/model
-// never imports grammar or the tokenizer. MaskLogits is called on the post-head
-// logits BEFORE argmax and must set the logit of every token that would leave the
-// valid path to negative infinity, given the tokens emitted so far THIS TURN
-// (history is the generated ids, not the prompt). A masked token can never be
-// selected, regardless of any logit_bias. A nil mask is the identity.
+// LogitMask is the injected schema/grammar constraint seam. MaskLogits is called on the
+// post-head logits before argmax and must set every token that would leave the valid path to
+// -inf, given the tokens emitted so far this turn (history is the generated ids, not the
+// prompt). A masked token can never be selected, regardless of any logit_bias. Nil is the
+// identity.
 type LogitMask interface {
 	MaskLogits(history []int, logits []float32)
 }
 
-// DecodeConstraint bundles the two native sampler hooks #929 adds at the decode
-// boundary. The zero value (and a nil *DecodeConstraint) is inert: the constrained
-// sampler then reduces to the exact greedy argmax. Bias applies whenever it is
-// non-empty; Mask is the FLAGGED half (item 2) and is applied only when the native
-// guided-decode feature flag is on — see GuidedDecodeEnabled.
+// DecodeConstraint bundles the two native sampler hooks at the decode boundary. The zero
+// value is inert: the constrained sampler reduces to the exact greedy argmax. Bias applies
+// whenever non-empty; Mask applies only when the guided-decode flag is on.
 type DecodeConstraint struct {
 	Bias LogitBias
 	Mask LogitMask
 }
 
-// GuidedDecodeEnabled reports whether the native JSON-schema/grammar logit mask is
-// turned on. It is gated by FAK_NATIVE_GUIDED_DECODE=1 and DEFAULTS OFF, so a
-// schema mask is never applied unless an operator opts in — the logit-bias half
-// (item 1) needs no flag because an empty bias map is already inert. This is the
-// "flag defaults OFF" half of #929's acceptance: a non-nil Mask on a constraint is
-// dormant until the flag is set.
+// GuidedDecodeEnabled reports whether the schema/grammar logit mask is on:
+// FAK_NATIVE_GUIDED_DECODE=1, defaulting OFF, so a compiled-in Mask stays dormant until opted in.
 func GuidedDecodeEnabled() bool {
 	return os.Getenv("FAK_NATIVE_GUIDED_DECODE") == "1"
 }
@@ -88,10 +60,8 @@ func (c *DecodeConstraint) maskActive() bool {
 	return c != nil && c.Mask != nil && GuidedDecodeEnabled()
 }
 
-// Active reports whether the constraint changes the decode at all. When false the
-// sampler is a proven no-op (returns argmaxF32(logits) verbatim) — the bit-exact-off
-// path. A non-nil Mask alone does NOT make a constraint active unless the feature
-// flag is on, so a flag-off decode with a compiled-in mask stays bit-exact.
+// Active reports whether the constraint changes the decode at all; when false the sampler is
+// the bit-exact-off path. A non-nil Mask alone is not active unless the flag is on.
 func (c *DecodeConstraint) Active() bool {
 	if c == nil {
 		return false
@@ -99,14 +69,10 @@ func (c *DecodeConstraint) Active() bool {
 	return len(c.Bias) > 0 || c.maskActive()
 }
 
-// sampleConstrained selects the next token from post-head logits, applying the
-// schema/grammar mask and then the logit-bias map before argmax. With an inert
-// constraint it is byte-for-byte the greedy argmax path (bit-exact-off).
-//
-// The mask runs FIRST and sets disallowed tokens to -inf, so it wins over any bias
-// (-inf + 100 is still -inf): a mask is a hard structural constraint, a bias is a
-// soft preference. Logits are copied into a scratch buffer so the caller's logits
-// slice (a quantized Step may reuse it) is never mutated.
+// sampleConstrained selects the next token, applying the mask and then the logit-bias map
+// before argmax; with an inert constraint it is byte-for-byte the greedy argmax path. The mask
+// runs first so it wins over any bias (-inf + 100 is still -inf). Logits are copied so the
+// caller's slice (a quantized Step may reuse it) is never mutated.
 func sampleConstrained(history []int, logits []float32, c *DecodeConstraint) int {
 	if !c.Active() {
 		return argmaxF32(logits) // bit-exact-off: identical to Session.Generate
@@ -129,12 +95,9 @@ func sampleConstrained(history []int, logits []float32, c *DecodeConstraint) int
 	return argmaxF32(eff)
 }
 
-// GenerateConstrained greedily decodes up to n tokens after the prompt, applying the
-// decode constraint (logit-bias + optional flagged schema/grammar mask) at each step
-// before argmax. With an inert constraint (nil, or empty bias and a dormant mask) it
-// is token-identical to Generate — the bit-exact-off contract #929 pins. The schema
-// mask is opt-in by construction: the default Generate path builds no constraint, and
-// even a compiled-in mask stays dormant until FAK_NATIVE_GUIDED_DECODE=1.
+// GenerateConstrained greedily decodes up to n tokens after the prompt, applying the decode
+// constraint at each step before argmax. With an inert constraint it is token-identical to
+// Generate.
 func (s *Session) GenerateConstrained(prompt []int, n int, c *DecodeConstraint) []int {
 	logits := s.Prefill(prompt)
 	out := make([]int, 0, n)
@@ -149,11 +112,9 @@ func (s *Session) GenerateConstrained(prompt []int, n int, c *DecodeConstraint) 
 	return out
 }
 
-// GenerateBatchConstrained is GenerateBatch with an optional per-lane native decode
-// constraint. It applies each lane's logit-bias / flagged schema mask at the same
-// token-selection boundary that consumes StepBatchActive's logits. A nil constraints
-// slice, a missing lane entry, or an inert constraint is the identity: selection falls
-// through sampleConstrained's bit-exact-off path and matches GenerateBatch token-for-token.
+// GenerateBatchConstrained is GenerateBatch with an optional per-lane decode constraint. A nil
+// slice, a missing lane entry, or an inert constraint is the identity matching GenerateBatch
+// token-for-token.
 func (bs *BatchSession) GenerateBatchConstrained(prompts [][]int, n int, constraints []*DecodeConstraint) [][]int {
 	logits := bs.PrefillEach(prompts)
 	return bs.generateBatchDecode(logits, n, func(b int, prior []int, laneLogits []float32) int {
@@ -168,13 +129,8 @@ func constraintForLane(constraints []*DecodeConstraint, lane int) *DecodeConstra
 	return nil
 }
 
-// AllowedSetMask is the minimal concrete LogitMask: it permits only the token ids in
-// the set at EVERY step (a static mask). It is the simplest correct schema constraint
-// — e.g. "the next token must be one of the tool-name `const` tokens" — and the
-// building block a per-step grammar/tokenizer compiler emits. Tokens not in the set
-// have their logit set to -inf, so a constrained decode can never emit them. The
-// compiler that maps a JSON-Schema `oneOf`-of-tools to these token sets lives above
-// this package (the LogitMask seam); this is the sink it targets.
+// AllowedSetMask is the minimal concrete LogitMask: it permits only the token ids in the set at
+// every step (a static mask), the building block a per-step grammar compiler emits.
 type AllowedSetMask map[int]bool
 
 // MaskLogits sets every token not in the allowed set to -inf. An empty set masks
@@ -189,11 +145,9 @@ func (m AllowedSetMask) MaskLogits(_ []int, logits []float32) {
 	}
 }
 
-// StepMask permits a different allowed-token set at each decode step, indexed by the
-// number of tokens emitted so far this turn (len(history)). It is the shape a per-step
-// grammar/FSM mask takes: step k consults PerStep[k]. A nil entry, or a step past the
-// end of PerStep, allows all tokens — the constraint has terminated and the rest of
-// the turn is unconstrained. This is the per-step generalization of AllowedSetMask.
+// StepMask permits a different allowed-token set at each decode step, indexed by len(history):
+// step k consults PerStep[k]. A nil entry, or a step past the end of PerStep, allows all
+// tokens — the constraint has terminated.
 type StepMask struct {
 	PerStep []map[int]bool
 }
@@ -217,27 +171,19 @@ func (m *StepMask) MaskLogits(history []int, logits []float32) {
 	}
 }
 
-// GuidedByteMask is the LogitMask adapter that composes the byte-level guideddecode
-// FSM into a per-step TOKEN mask over a tokenizer's vocabulary — the model-facing
-// half of #26 that guideddecode's package doc names as "the next slice".
-// guideddecode.AllowedNextBytes decides which BYTES may legally extend a valid
-// tool-call envelope; this adapter lifts that byte-admission set onto token ids by
-// decoding the tokens emitted so far this turn into a byte prefix and admitting a
-// candidate token iff its decoded bytes keep that prefix on an FSM-legal path.
+// GuidedByteMask composes the byte-level guideddecode FSM into a per-step TOKEN mask:
+// guideddecode.AllowedNextBytes decides which bytes may legally extend a valid tool-call
+// envelope, and this adapter admits a candidate token iff its decoded bytes keep the prefix
+// emitted so far this turn on an FSM-legal path.
 //
-// Dependency inversion (the same discipline as the LogitMask seam itself):
-// internal/model must not import internal/tokenizer, so the id->bytes decode is
-// INJECTED as TokenBytes — pass the tokenizer.(*Tokenizer).TokenBytes method as a
-// func. guideddecode is a stdlib-only leaf (it imports neither model nor tokenizer)
-// and so is imported directly with no cycle.
+// internal/model must not import internal/tokenizer, so the id->bytes decode is injected as
+// TokenBytes (pass tokenizer.(*Tokenizer).TokenBytes as a func); guideddecode is a stdlib-only
+// leaf and is imported directly.
 //
-// NOT WIRED LIVE — this is a tested adapter only. Two things gate it out of every
-// default decode: (1) no default path constructs a DecodeConstraint with a Mask,
-// and (2) even a compiled-in mask is dormant until FAK_NATIVE_GUIDED_DECODE=1
-// (GuidedDecodeEnabled). The eventual live wiring must apply the mask inside the
-// agent's stochastic sampler (sampleLogitsWithPenalty) to preserve temperature /
-// top-p; routing tool-call decoding through the greedy GenerateConstrained would
-// silently drop sampling. That wiring is a later slice.
+// NOT WIRED LIVE — a tested adapter only: no default path constructs a DecodeConstraint with a
+// Mask, and a compiled-in mask is dormant until FAK_NATIVE_GUIDED_DECODE=1. Live wiring must
+// apply the mask inside the agent's stochastic sampler to preserve temperature/top-p; routing
+// through the greedy GenerateConstrained would silently drop sampling.
 type GuidedByteMask struct {
 	// Schema is the declared tool-name set the envelope FSM constrains to.
 	Schema guideddecode.ToolSchema
@@ -246,28 +192,18 @@ type GuidedByteMask struct {
 	TokenBytes func(id int) []byte
 }
 
-// MaskLogits sets to -inf every token whose decoded bytes cannot legally extend the
-// current tool-call-envelope prefix, given the tokens emitted so far this turn
-// (history, the generated ids — not the prompt). The prefix is reconstructed by
-// decoding history through TokenBytes; the candidate set is every id in
-// [0,len(logits)).
+// MaskLogits sets to -inf every token whose decoded bytes cannot legally extend the current
+// tool-call-envelope prefix (reconstructed by decoding history through TokenBytes).
 //
-// Admission rule (sound by construction): a candidate is ADMITTED iff, replaying
-// its decoded bytes one at a time from the current prefix, every byte is in
-// guideddecode.AllowedNextBytes at the point it is consumed — OR the FSM turns
-// UNCONSTRAINED (nil) partway through, after which the remaining bytes are free. A
-// token that diverges at any byte is MASKED. This never forbids a byte sequence the
-// FSM allows, so — lifting guideddecode's soundness contract to tokens — it can only
-// prevent an invalid tool name or a broken envelope skeleton, never steer the decode
-// off every valid envelope.
+// Admission is sound by construction: a candidate is admitted iff, replaying its decoded bytes
+// from the current prefix, every byte is in guideddecode.AllowedNextBytes at the point it is
+// consumed, or the FSM turns unconstrained partway through. It can only prevent an invalid
+// tool name or broken envelope, never steer the decode off every valid envelope.
 //
-// Two degenerate prefixes are deliberate no-ops (logits left unchanged): an
-// UNCONSTRAINED prefix (fixed skeleton fully consumed — AllowedNextBytes returns
-// nil), and a DEAD-END prefix (empty non-nil — the prefix already left every
-// envelope, which a correctly-masked decode never reaches). Masking every token on a
-// dead end would zero the whole distribution (an all -inf logit vector), so the
-// adapter declines and leaves recovery policy to the live-wiring slice. A nil
-// receiver or nil TokenBytes is likewise the identity.
+// Two degenerate prefixes are deliberate no-ops: an unconstrained prefix (skeleton consumed)
+// and a dead-end prefix (empty non-nil allowed set). Masking every token on a dead end would
+// zero the whole distribution, so the adapter declines and leaves recovery to the live-wiring
+// slice. A nil receiver or nil TokenBytes is likewise the identity.
 func (m *GuidedByteMask) MaskLogits(history []int, logits []float32) {
 	if m == nil || m.TokenBytes == nil {
 		return
@@ -288,10 +224,8 @@ func (m *GuidedByteMask) MaskLogits(history []int, logits []float32) {
 	}
 }
 
-// decodePrefix reconstructs the byte prefix emitted so far this turn by decoding each
-// history token through TokenBytes and concatenating. An undecodable history id
-// contributes no bytes (TokenBytes returns nil); under correct masking history only
-// ever holds admitted tokens, so the reconstruction is exact.
+// decodePrefix reconstructs the byte prefix emitted so far this turn by decoding each history
+// token through TokenBytes and concatenating.
 func (m *GuidedByteMask) decodePrefix(history []int) []byte {
 	var prefix []byte
 	for _, id := range history {
@@ -300,13 +234,9 @@ func (m *GuidedByteMask) decodePrefix(history []int) []byte {
 	return prefix
 }
 
-// tokenAdmissible reports whether appending tb to prefix keeps the decode on an
-// FSM-legal path. first == AllowedNextBytes(prefix) and the caller guarantees it is
-// non-nil and non-empty. Each byte must be admitted at its point of consumption; if
-// the FSM turns UNCONSTRAINED (nil) partway, the remaining bytes are free and the
-// token is admitted. An empty (dead-end) allowed set mid-token rejects, since no byte
-// is in it. A zero-byte candidate makes no progress and is not an emittable token, so
-// it is rejected. prefix is never mutated (a fresh scratch buffer is grown per call).
+// tokenAdmissible reports whether appending tb to prefix keeps the decode on an FSM-legal
+// path. first == AllowedNextBytes(prefix), guaranteed non-nil and non-empty. A zero-byte
+// candidate makes no progress and is rejected; prefix is never mutated.
 func (m *GuidedByteMask) tokenAdmissible(prefix []byte, first map[byte]bool, tb []byte) bool {
 	if len(tb) == 0 {
 		return false
