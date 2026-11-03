@@ -197,6 +197,11 @@ var maintainerDevCommands = []string{
 	"guard-stops",
 	"guard-stops-slack",
 	"guard-verdict-rsi",
+	// Per-token host->device copy inventory on the decode state paths
+	// (sampler/mask/KV-append metadata): recomputable copies/token + bytes/token
+	// + source-drift gate over fak's own engine seams, not a portable adopter
+	// pattern.
+	"h2d-inventory",
 	"harness",
 	"harness-debt-dispatch",
 	"headless-lint",

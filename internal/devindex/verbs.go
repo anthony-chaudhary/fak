@@ -255,6 +255,7 @@ var verbManifest = []Verb{
 	{Name: "guard-stops", Synopsis: "operator tally of the typed Stop-hook decision ledger: clean stops, bounded stand-downs, fail-open stops", Lane: "cmd"},
 	{Name: "guard-stops-slack", Synopsis: "durable update-in-place Slack scoreboard feeder for the guard Stop-decision ledger", Lane: "cmd"},
 	{Name: "guard-verdict-rsi", Synopsis: "the guard verdict RSI loop: fold the decision journal, score verdict-quality, keep on gain", Lane: "cmd"},
+	{Name: "h2d-inventory", Synopsis: "per-token H2D copy inventory on decode state paths: copies/token + bytes/token by shape, drift gate", Lane: "cmd"},
 	{Name: "harness", Synopsis: "compose, inspect, resolve, and verify reusable agent harness stacks", Lane: "cmd"},
 	{Name: "harness-debt-dispatch", Synopsis: "harness-strength verdict -> backlog: file one deduped deletion issue per REDUNDANT/HOBBLING HARD scaffold", Lane: "cmd"},
 	{Name: "harness-hint", Synopsis: "resolve model-specific capability hints, reasoning tradeoffs, and context bounds for agent harnesses", Aliases: []string{"harnesshint"}, Lane: "cmd"},
