@@ -314,6 +314,36 @@ witnessed by `TestDecodeShareDebtOwedAndZeroKeepsWholePromptOrder` in
 `internal/agent/inkernel_decode_share_test.go`. The upstream Apache-2.0 license
 is reproduced in the TensorFold benchmark evidence section above.
 
+## TensorFold queued disk-state read-ahead (l3kv prefetch)
+
+`internal/l3kv/prefetch_queue.go` and the read side of `internal/l3kv/
+async_job.go` (`AsyncStore.Prefetch` / `RestorePrefetched`) adapt the lane-host
+fetch contract from TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/lane_host_fetch.zig
+plus its admission caller
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/lane_host_admit.zig
+and operator documentation at
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/docs/api.md#L661
+
+The adapted contract: while other streams run, a queued request whose durable
+state is on disk has it read ahead on separate I/O workers; held reads wait
+with a bounded timeout (default 30 s) and fall back to admission restore or
+fresh prefill; concurrent-read permits are capped (default 2, 0 disables)
+with an optional resident-memory cap; a cancelled waiter does not cancel the
+read — it keeps its permit until the I/O returns; and stop cancels reads. In
+this codebase that lands as the `PrefetchQueue` type plus the `Prefetch`,
+`RestorePrefetched`, `PrefetchStats` and `StopPrefetch` methods on `AsyncStore`.
+
+Changed for Fak: idiomatic Go re-expression over fak's span-keyed `Store`
+interface instead of Zig lane-host state, sentinel-error fallback signals
+(`ErrPrefetchTimeout`, `ErrPrefetchDisabled`, `ErrPrefetchStopped`) instead of
+Zig error unions, and per-instance configuration instead of process-global
+tunables. No upstream source code is copied; the adaptation is witnessed by
+`TestRestorePrefetchPermitTimeoutFallback` in
+`internal/l3kv/prefetch_queue_test.go`. The upstream Apache-2.0 license is
+reproduced in the TensorFold benchmark evidence section above.
+
 
 ## vLLM chunkwise Qwen host Gated-DeltaNet
 

@@ -114,15 +114,18 @@ func (m *AsyncWatermarkManager) Stats() WatermarkStats {
 
 // AsyncStore wraps a synchronous Store with asynchronous job dispatching and stale watermark reset.
 type AsyncStore struct {
-	store Store
-	wm    *AsyncWatermarkManager
+	store    Store
+	wm       *AsyncWatermarkManager
+	prefetch *PrefetchQueue
 }
 
-// NewAsyncStore wraps store with watermark tracking.
+// NewAsyncStore wraps store with watermark tracking and the bounded read-ahead
+// queue at its default-on settings (30 s hold, 2 concurrent reads).
 func NewAsyncStore(store Store) *AsyncStore {
 	return &AsyncStore{
-		store: store,
-		wm:    NewAsyncWatermarkManager(),
+		store:    store,
+		wm:       NewAsyncWatermarkManager(),
+		prefetch: NewPrefetchQueue(store, DefaultPrefetchConfig),
 	}
 }
 
@@ -140,6 +143,46 @@ func (s *AsyncStore) Reset() uint64 {
 		return 0
 	}
 	return s.wm.Reset()
+}
+
+// Prefetch enqueues a read-ahead of the durable state under key so it lands
+// in memory on a separate I/O worker while other streams run. It is
+// best-effort: ErrPrefetchDisabled (zero permits) and ErrPrefetchStopped
+// decline the read-ahead without failing the demand path, which remains
+// available through RestorePrefetched.
+func (s *AsyncStore) Prefetch(key string) error {
+	if s == nil || s.prefetch == nil {
+		return ErrPrefetchDisabled
+	}
+	return s.prefetch.Enqueue(key)
+}
+
+// RestorePrefetched returns the read-ahead payload for key, holding the read
+// at most the configured timeout. A held read that times out is refused with
+// ErrPrefetchTimeout so the caller falls back to admission restore or fresh
+// prefill; a key that was never read ahead is read directly from the store.
+func (s *AsyncStore) RestorePrefetched(ctx context.Context, key string) ([]byte, bool, error) {
+	if s == nil || s.prefetch == nil {
+		return nil, false, ErrPrefetchDisabled
+	}
+	return s.prefetch.Restore(ctx, key)
+}
+
+// PrefetchStats snapshots the read-ahead queue's pressure.
+func (s *AsyncStore) PrefetchStats() PrefetchStats {
+	if s == nil || s.prefetch == nil {
+		return PrefetchStats{}
+	}
+	return s.prefetch.Stats()
+}
+
+// StopPrefetch cancels queued and in-flight read-aheads; in-flight reads keep
+// their permit until the underlying I/O returns.
+func (s *AsyncStore) StopPrefetch() {
+	if s == nil || s.prefetch == nil {
+		return
+	}
+	s.prefetch.Stop()
 }
 
 // PutAsync dispatches a background Put operation to the underlying Store.
