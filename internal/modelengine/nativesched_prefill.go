@@ -33,9 +33,13 @@ var errNativeSchedulerLaneNotDecodeReady = errors.New("modelengine: native sched
 
 // residentQ4KPrefillCapability is minted from model-owned residency when the
 // scheduler is constructed. Request/session q4k flags remain routing intent and
-// cannot manufacture this scheduler-local proof.
+// cannot manufacture this scheduler-local proof. It also owns the shared
+// per-step prefill token budget for the bounded chunked-prefill mechanism; the
+// budget's lifetime matches the capability's (bounded prefill exists only when
+// the capability is minted) and every access happens under NativeScheduler.mu.
 type residentQ4KPrefillCapability struct {
-	model *model.Model
+	model  *model.Model
+	budget nativePrefillStepBudget
 }
 
 type schedLaneState uint8
@@ -381,6 +385,21 @@ func (s *NativeScheduler) SetQwenPrefillMaxTokensPerIteration(tokens int) error 
 	return nil
 }
 
+// qwenPrefillStepBudgetLocked returns the shared step budget for iteration,
+// re-arming it from the live ceiling when the step advances. A nil capability
+// (unsupported model) reports ok=false so callers keep the historical lane-only
+// sizing. Caller holds s.mu.
+func (s *NativeScheduler) qwenPrefillStepBudgetLocked(iteration uint64) (*nativePrefillStepBudget, bool) {
+	if s.qwenPrefillCap == nil {
+		return nil, false
+	}
+	b := &s.qwenPrefillCap.budget
+	if b.step != iteration {
+		b.reset(iteration, s.qwenPrefillTokens)
+	}
+	return b, true
+}
+
 func (s *NativeScheduler) qwenPrefillChunkBudget(prep schedPrepare, sess *model.Session, promptLen int) int {
 	s.mu.Lock()
 	budget := s.qwenPrefillTokens
@@ -625,10 +644,27 @@ func (s *NativeScheduler) advanceQwenPrefill(ln *schedLane, iteration uint64) {
 		s.mu.Unlock()
 		return
 	}
-	end := start + ln.prefillChunkTokens
-	if end > len(ln.prompt) {
-		end = len(ln.prompt)
+	// Shared step budget (mini-sglang PrefillAdder.token_budget@9a91cfa): the
+	// chunk this lane may run now is capped by what the current step has not
+	// yet spent across prefill lanes. A disarmed budget (zero ceiling) keeps
+	// the historical lane-only sizing so an operator zero-disable never strands
+	// an in-flight prefill. A lane that can draw neither its nominal chunk nor
+	// a full resident minimum yields this step unchanged and resumes from the
+	// same cursor next step - the resumable chunked_req, carried here by the
+	// PREFILLING lane's cursor and resident KV.
+	chunkTokens := ln.prefillChunkTokens
+	if remain := len(ln.prompt) - start; chunkTokens > remain {
+		chunkTokens = remain
 	}
+	if budget, ok := s.qwenPrefillStepBudgetLocked(iteration); ok && budget.total > 0 {
+		take, _, err := budget.take(chunkTokens)
+		if err != nil || (take < nativeQwenPrefillMinChunkTokens && take < chunkTokens) {
+			s.mu.Unlock()
+			return
+		}
+		chunkTokens = take
+	}
+	end := start + chunkTokens
 	chunk := ln.prompt[start:end]
 	final := end == len(ln.prompt)
 	sess := ln.takeSessionForModelLocked()
