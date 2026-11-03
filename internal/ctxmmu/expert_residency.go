@@ -8,7 +8,7 @@ import (
 // expert_residency.go — the MoE expert-residency policy for the unified-memory serving tier
 // (anthony-chaudhary/fak#12952, parent #12640).
 //
-// Routed experts are ~56.6% of the DeepSeek-V4.1 checkpoint, so whether a single Halo decode
+// Routed experts are ~56.6% of the weight footprint of the motivating frontier MoE checkpoint (#12952), so whether a single Halo decode
 // is disk-bound is decided by residency policy rather than by kernel throughput. Two gaps
 // made the shipped residency path unable to express that policy:
 //
