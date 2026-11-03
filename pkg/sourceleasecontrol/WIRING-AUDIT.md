@@ -7,10 +7,12 @@ connection was forced.
 
 Date: 2026-11-02 · Audit: read-only, dual-repo (fak worktree + fak-private companion)
 
-Re-verified: 2026-11-03 — all seven checks independently re-run against a trunk 95 commits
-ahead of the audit base (trunk tip f308e6e0e1); the out-of-package history check
+Re-verified: 2026-11-03 (twice) — first against trunk tip f308e6e0e1 (95 commits ahead
+of the audit base), then again at trunk tip e72e5bf5f5 after the lane's own commit
+landed; the only intervening trunk commit (`e72e5bf5f5`, internal/sessionref tests)
+touches no verdict-relevant path, and the out-of-package history check
 (`git log --all -p -S 'github.com/anthony-chaudhary/fak/pkg/sourceleasecontrol' --
-':!pkg/sourceleasecontrol'`) stayed empty, so ABSENT stands.
+':!pkg/sourceleasecontrol'`) stayed empty both times, so ABSENT stands.
 
 ## Findings
 
@@ -50,3 +52,32 @@ Add one importing call site under `cmd/**` or `internal/**` (or the host facade 
 fak-private) that resolves an `Authority` and drives `Prepare`/`Execute`; then re-run
 `fak debt-lanes --workspace . --target-repo fak --lane sourceleasecontrol --json` and confirm
 `integrated=true` lifts the lane past the tested ceiling.
+
+## Closure receipt (2026-11-03, debtwave2-pkg-sourceleasecontrol)
+
+Final witness (`go run ./cmd/fak debt-lanes --workspace . --target-repo fak --lane
+sourceleasecontrol --json`, tree af3e926efe / trunk e72e5bf5f5):
+
+| Field | Value |
+|---|---|
+| maturity | 5.0 / 8.0, rung `tested` (gap 3.0) |
+| total_debt | 6.48 (principal 6.0 + carrying 0.48 @ rate 0.08, driver `enabling_infrastructure`) |
+| health | degraded, score 0.80 (was 0.75 pre-benchmark), issues `[disconnected_wiring, unproven_runtime]` |
+| evidence | integrated=false, dogfooded=false, benchmarked=true, has_tests=true, test_files_count=2, dependents_count=0, excess_comments=false |
+
+Done-condition status: `go test ./pkg/sourceleasecontrol/... -count=1` PASS; `go vet`
+clean; gofmt clean; all three `Benchmark*` execute green. Maturity did not rise and
+total_debt did not fall, and neither can from this boundary: pre-cap maturity is 6.5
+(base 4.0 + multi-test 0.5 + benchmarked 1.0 + clean-comments 0.5 + bounded-blast-radius
+0.5), hard-capped at 5.0 while `integrated=false` (the debtlane curve's unintegrated
+ceiling), and the interest rate sits at the 0.08 enabling floor because every surcharge
+is conditional on integration or on an already-clean evidence flag. Total debt is
+therefore invariant at (8−5)×2×1.08 = 6.48 under any in-boundary edit. Work item 1's
+mandated branch applies: ABSENT-with-reason recorded, audit evidence landed, no forced
+wiring.
+
+Projected effect of the next step (out of this ticket's boundary): landing one
+importing call site sets `integrated=true`, which lifts maturity 5.0 → 8.0 (target
+reached, rung `integrated`), drops total_debt 6.48 → 0 (gap 0 ⇒ quiescent), and raises
+health 0.80 → 0.95 with only `unproven_runtime` open — assuming comment hygiene stays
+clean and dependents stay ≤ 25.
