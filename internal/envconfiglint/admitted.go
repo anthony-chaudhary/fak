@@ -884,4 +884,18 @@ var admittedPostFreeze = []string{
 	// (=1 arms it; default off). An experimental KV-store toggle, not a credential.
 	// Relocates to: a typed compute KV config once #2862 lands.
 	"FAK_CUDA_PAGED_KV",
+
+	// SEVENTH OCCURRENCE (release-unblock): one measured-mode read shipped while the ratchet
+	// was red and unwatched again. As in the earlier occurrences it is admitted by name, not
+	// absorbed into baseline.go, and it cannot relocate until the #2862 config surface exists.
+	// Admission resolves the current offenses; it does not erase that liveness failure or pay
+	// the #2862 relocation debt.
+
+	// internal/model/glue_census_hook.go — FAK_GLUE_CENSUS=1 turns on measured-mode counting of
+	// synchronous host<->device round-trips at the GLM-DSA device seams; OFF by default and
+	// zero-cost when unset, read once at package init from the literal call site. An
+	// observability toggle for hardware receipts, not a credential — it grants access to
+	// nothing. Introduced by 5510d8a5c (32 trunk advances at admission).
+	// Relocates to: a typed measure-mode field on the model session config once #2862 lands.
+	"FAK_GLUE_CENSUS",
 }
