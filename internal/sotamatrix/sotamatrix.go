@@ -381,6 +381,17 @@ var matrix = []Op{
 		Note: "Borrow the pinned state order and GPU recurrence techniques only after measuring the current recurrence; FLA is a technique reference, never a runtime dependency. Default to the smallest parity-preserving adaptation and permit no runtime or backend fallback.",
 	},
 	{
+		Slug:        "qwen-host-tiled-attention",
+		Title:       "Qwen ordinary host prefill multi-query tiled attention",
+		FileGlobs:   []string{"internal/model/qwen35_prefill_tiled_attention*.go"},
+		FakPath:     "internal/model/qwen35_prefill_tiled_attention.go; internal/model/qwen35_prefill.go; internal/model/qwen35_prefill_q4k.go",
+		SOTA:        "ggml-org/llama.cpp@74bca3950054eed1795f525cb9cf06bfe796492d tiled CPU flash attention (MIT)",
+		PrimaryLink: "https://github.com/ggml-org/llama.cpp/blob/74bca3950054eed1795f525cb9cf06bfe796492d/ggml/src/ggml-cpu/ops.cpp",
+		Route:       RouteBorrow,
+		Oracle:      "retained score-row F32 host attention: finite causal/window/softcap tile parity, unchanged KV and custom/observer routes; ordinary Qwen Q8/Q4_K full-prefill greedy/logit parity, then matched uncached-prefill wall time with all validation/packing and process costs included",
+		Note:        "Default-off multi-query K/V packing and online normalization in an owned qf loan. Existing fdot/saxpy retained; reduction order is not bit-exact. No model, hardware or performance acceptance; reject a component win that regresses ordinary request latency or memory.",
+	},
+	{
 		Slug:        "fused-attention",
 		Title:       "Fused attention (MHA/GQA/MQA)",
 		FileGlobs:   []string{"internal/compute/cuda_kernels.cu", "internal/compute/cuda/attention.cuh", "internal/compute/flash*.go"},

@@ -1365,7 +1365,10 @@ func (s *Session) prefillQwen35FullAttnLayerQ4KWithRopeRows(l int, Xn []float32,
 	// count and declines before writes when the loan/grouped work is too small.
 	// Custom callback and Metal paths keep the original dispatch unchanged.
 	W := cfg.windowForLayer(l)
-	if !ownsQF || s.MetalQ4K || s.Backend != nil || !attnPrefillGQA3FDotInto(attnOut, Q, s.Cache.K[l], s.Cache.V[l], qf, P, base, nH, hd, w, grp, W, scale, attnCap, s.M.attnObs) {
+	tiled := qwen35PrefillTiledAttentionQualification && ownsQF && !s.Metal && !s.MetalQ4K && s.Backend == nil && m.prism == nil &&
+		!cfg.Alibi && !m.hasWeight(p("self_attn.sinks")) &&
+		qwen35PrefillTiledAttentionInto(attnOut, Q, s.Cache.K[l], s.Cache.V[l], qf, P, base, nH, hd, w, grp, W, scale, attnCap, s.M.attnObs)
+	if !tiled && (!ownsQF || s.MetalQ4K || s.Backend != nil || !attnPrefillGQA3FDotInto(attnOut, Q, s.Cache.K[l], s.Cache.V[l], qf, P, base, nH, hd, w, grp, W, scale, attnCap, s.M.attnObs)) {
 		s.attnPrefillDispatch(s.MetalQ4K, attnOut, Q, s.Cache.K[l], s.Cache.V[l], P, base, nH, hd, w, grp, W, l, scale, attnCap, fdot, s.M.attnObs)
 	}
 	s.phaseEnd("qwen35_full_attn", t)
