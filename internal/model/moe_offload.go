@@ -4,40 +4,22 @@ import "strings"
 
 // moe_offload.go — the CPU-offload hybrid matKernel (the llama.cpp `--n-cpu-moe` equivalent).
 //
-// A 753B MoE model's parameter count is dominated by its experts: in GLM-5.2 the per-layer
-// expert tensors (mlp.experts.<e>.{gate,up,down}_proj) are the overwhelming bulk of the
-// weights, while the dense projections (attention q_a/q_b/kv_a/kv_b/o_proj, the learned-index
-// projections, the MoE router) and the per-token activation FLOPs are tiny by comparison. At
-// Q4_K_M the full model is ~424 GB — far past any single GPU's VRAM — but the host has 1007 GB
-// of RAM. So the serve-able split is exactly llama.cpp's `--n-cpu-moe`: keep the ROUTED expert GEMMs
-// resident in host RAM (run them on the CPU Q4_K/Q8 kernel) while the DENSE projections + router
-// + attention, and the always-on shared expert (active on every token), run on the GPU device
-// backend. The routed experts are sparse (only top-k fire per token)
-// and bandwidth-, not latency-, bound, so the host is a reasonable home for them; the dense work
-// that runs every token on every position stays on the device where the FLOPs are.
-//
-// fak already had the two endpoints — residentKernel (host) and backendKernel (device) — and the
-// GLM-DSA forward already threads ONE matKernel through every GEMM (glm_dsa_session.go). What was
-// missing was a kernel that routes PER WEIGHT between the two. splitKernel is that kernel: a thin
-// matKernel that dispatches each named matmul to a host kernel or a device kernel by a predicate.
-// It introduces NO new arithmetic — a weight runs on whichever sub-kernel it is routed to, exactly
-// as that sub-kernel already computes it — so the only thing it can get wrong is the routing, which
-// the witnesses pin directly (placement-invariance bit-exactness + a device-shape probe).
+// Routed-expert GEMMs dominate a 753B MoE model's bytes but fire sparsely (top-k per token) and
+// are bandwidth-bound, so splitKernel keeps them in host RAM while the dense projections, router,
+// attention, and the always-on shared expert run on the device backend. It routes per weight by
+// predicate and introduces no new arithmetic: a weight computes exactly as its sub-kernel already
+// does, so the only thing it can get wrong is the routing.
 type splitKernel struct {
 	host   matKernel         // where onHost(name)==true weights run (the offloaded experts)
 	device matKernel         // where everything else runs (dense projections, router, attention)
 	onHost func(string) bool // true => keep this weight's GEMM on host RAM
 }
 
-// prep is the identity, matching both endpoints: residentKernel and backendKernel both return the
-// raw f32 activation from prep (neither pre-quantizes the operand at this seam), so a single prep
-// produces an operand both sub-kernels' mul accept. Were a sub-kernel to want a different operand
-// form, the split would have to prep per side; today it does not, so prep stays a no-op pass.
+// prep is the identity: both sub-kernels accept the raw f32 activation at this seam.
 func (k splitKernel) prep(x []float32) any { return x }
 
-// mul routes the named weight to the host or device sub-kernel by the predicate. The chosen
-// sub-kernel computes it exactly as it would in an all-host / all-device forward, so the split is
-// a pure placement decision over the SAME math.
+// mul routes the named weight to the host or device sub-kernel by the predicate — a pure
+// placement decision over the same math.
 func (k splitKernel) mul(name string, x any, out, in int) []float32 {
 	if k.onHost(name) {
 		return k.host.mul(name, x, out, in)
@@ -45,20 +27,11 @@ func (k splitKernel) mul(name string, x any, out, in int) []float32 {
 	return k.device.mul(name, x, out, in)
 }
 
-// splitHostResidentExperts reports whether the picked experts' batched GEMVs may run on the host,
-// when mat is a splitKernel (the --n-cpu-moe hybrid) whose host side is a residentKernel AND every
-// one of the picks (gate/up/down) is host-routed by the split's OWN predicate. The function is an
-// ADMISSION decision — bool only, no kernel handle — because the caller runs the Model-bound
-// hostBatchedGLMExperts(layer, …) primitive directly; that primitive reads m.q4kw/m.kqw by tensor
-// name and needs no kernel (the split's host residentKernel would be discarded anyway, which is
-// exactly what both production call sites already did). It returns false for any other kernel, for
-// a non-resident host, and — critically — for a GRADED split (ExpertSpillLayers) where any pick is
-// device-kept: the batched host primitive only models host-resident experts, so a mixed layer must
-// DECLINE to the per-expert loop rather than silently steal device-kept experts to the host (the
-// exact placement the operator's `--n-cpu-moe N` did NOT budget). This unifies the two
-// batched-expert fast paths with the split placement: without it a splitKernel misses both the
-// concrete `mat.(residentKernel)` assertion (glmMoeFFN.apply) and the type switch (moeFFN.apply), so
-// the measured ~1.8x batched primitive is unreachable on the offload-hybrid path (#12972).
+// splitHostResidentExperts admits the batched host GEMV path: true when mat is a splitKernel whose
+// host side is a resident kernel AND every pick (gate/up/down) is host-routed by the split's own
+// predicate. It declines a graded split (ExpertSpillLayers) where any pick is device-kept: the
+// batched host primitive only models host-resident experts, so a mixed layer must fall back to the
+// per-expert loop rather than steal device-kept experts to the host.
 func splitHostResidentExperts(mat matKernel, layer int, picks []routePick) bool {
 	k, ok := mat.(splitKernel)
 	if !ok {
@@ -69,12 +42,8 @@ func splitHostResidentExperts(mat matKernel, layer int, picks []routePick) bool 
 	if k.onHost == nil {
 		return false
 	}
-	// The host side must be a resident host kernel. glmDsaMatKernel threads the
-	// session-owned sessionResidentKernel (a85073d76c9) so every host GEMV is admitted
-	// as a host stage under device-only; it computes the identical residentMatRows bytes
-	// as the bare residentKernel and differs only in that admission. Gating on the bare
-	// type alone silently declined the production split and made the batched host-expert
-	// path unreachable on the --n-cpu-moe hybrid (#12972).
+	// Both resident forms compute the same residentMatRows bytes; gating on the bare type
+	// alone would silently decline the production split's sessionResidentKernel.
 	switch k.host.(type) {
 	case residentKernel, sessionResidentKernel:
 	default:
@@ -90,56 +59,31 @@ func splitHostResidentExperts(mat matKernel, layer int, picks []routePick) bool 
 	return true
 }
 
-// expertEngine is the COMPUTE ENGINE a routed expert's projections run on. It is the placement
-// decision splitKernel used to make by construction: before #13128 every routed expert under
-// `--n-cpu-moe` ran on the host CPU, because hostOffloadWeight sends the whole `.mlp.experts.<e>.*`
-// block to the host sub-kernel and nothing ever asked whether a device kernel existed for that
-// weight's encoding. On a discrete GPU that was the llama.cpp `--n-cpu-moe` model (host RAM is the
-// only large pool, PCIe is the tax). On a unified-memory APU (Strix Halo: CPU and iGPU read the
-// same LPDDR5X/GTT through the same ~256 GB/s pool) residency and compute-engine are INDEPENDENT
-// questions: bytes resident in the unified pool may be computed by either engine, and the engine
-// should follow the kernel that exists for the encoding rather than a static name predicate.
+// expertEngine is the compute engine a routed expert's projections run on. Residency and
+// compute engine are independent on unified-memory APUs (CPU and iGPU share one pool), so the
+// engine follows the kernel that exists for the encoding rather than a static name predicate.
 type expertEngine int
 
 const (
-	// expertEngineHost is the fail-closed default: the host CPU k-quant GEMV. It is what every
-	// routed expert ran before #13128 and what any expert still runs when no device kernel exists
-	// for its encoding or no device backend is attached.
+	// expertEngineHost is the fail-closed default: the host CPU k-quant GEMV, used whenever no
+	// device kernel exists for the encoding or no device backend is attached.
 	expertEngineHost expertEngine = iota
-	// expertEngineDevice runs the expert's gate/up + SwiGLU on the device backend (q4kExpertInputHAL)
-	// when a device kernel exists for its encoding. The host-CPU down-projection fallback remains
-	// inside expertSwiGLU until the Q5_K/Q6_K down kernel lands (fak#13129).
+	// expertEngineDevice runs the expert's gate/up + SwiGLU on the device backend
+	// (q4kExpertInputHAL) when a device kernel exists for its encoding.
 	expertEngineDevice
 )
 
-// deviceKernelForExpertEncoding is the PER-ENCODING device-kernel predicate #13128 asks for: it
-// answers "does a device kernel exist for THIS expert weight's encoding?" rather than assuming the
-// host CPU for every routed expert. It is consulted by the offload split before an expert is sent
-// to the host floor, so a resident expert on a device with a kernel for its encoding can execute on
-// the iGPU instead of the CPU.
+// deviceKernelForExpertEncoding answers, at the model level, whether the model carries a
+// representation of this expert projection that the device seam can execute. It is a pre-filter,
+// never an execution promise: expertEngineForWeight still requires a DeviceMemory backend, and the
+// seam declines fail-closed for any dtype the backend's resident MatMul cannot serve.
 //
-// The predicate answers at the MODEL level: it reports whether the model carries a representation of
-// this projection that the device seam can execute. The session-level arm
-// (expertEngineForWeight) still requires a DeviceMemory backend, and the seam itself
-// (expertInputDeviceWeight, moe_device_gateup.go) declines fail-closed for any dtype the backend's
-// resident MatMul cannot serve — so this stays a pre-filter, never an execution promise.
+// Admitted encodings mirror the tiers expertInputDeviceWeight resolves:
+//   - Q4_K (m.q4kw[name]): the Q4_K gate/up MatMul + SwiGLU (q4kExpertInputHAL).
+//   - A HAL-capable resident k-quant (m.kqw[name], SupportsHALKQuant): the DSV4.1 Q2_K slate.
+//   - The checkpoint tier (m.expertCheckpoint.staging): a streamed projection faulted on demand.
 //
-// The three admitted encodings mirror exactly the tiers expertInputDeviceWeight resolves:
-//   - Q4_K (m.q4kw[name] != nil): the Q4_K gate/up MatMul + SwiGLU (q4kExpertInputHAL).
-//   - A resident k-quant whose descriptor is HAL-capable (m.kqw[name], SupportsHALKQuant): this is
-//     the DeepSeek-V4.1 Q2_K routed-expert slate, packed into m.kqw (hal.go resolveExpertWeight:
-//     the resident store is read second). Before this, the predicate keyed only on m.q4kw, so a
-//     Q2_K artifact — the mission's pinned encoding — always answered host even though the seam
-//     admits and executes it (moe_device_gateup_test.go TestExpertSwiGLUDeviceQ2KGateUpResident).
-//   - The R5/#5616 checkpoint tier (m.expertCheckpoint.staging): a streamed projection whose
-//     slice is faulted on demand, with a device dtype the seam stages like any resident.
-//
-// Everything else, including a weight the model simply does not carry, answers expertEngineHost —
-// byte-for-byte the pre-#13128 host arm. (The former "Q5_K/Q6_K down has no device kernel yet
-// (fak#13129)" note is stale: fak#13129 is CLOSED and the Q6_K/*_K down seam is exercised device-side
-// in moe_device_gateup_test.go.)
-//
-// `name` is the canonical expert tensor name (expertName, moe.go).
+// Everything else answers expertEngineHost. `name` is the canonical expert tensor name (expertName).
 func deviceKernelForExpertEncoding(m *Model, name string) expertEngine {
 	if m == nil {
 		return expertEngineHost
@@ -156,12 +100,9 @@ func deviceKernelForExpertEncoding(m *Model, name string) expertEngine {
 	return expertEngineHost
 }
 
-// expertEngineForWeight is the ADMISSION wrapper the offload split consults: it resolves the compute
-// engine for one routed expert projection by its encoding, and requires the session to actually be
-// able to run a device kernel (a backend advertising DeviceMemory + UploadDtype, the same pair
-// q4kExpertInputHAL admits). A session with no backend — or a backend without a device kernel for
-// the encoding — answers expertEngineHost, so the fail-closed default is structural, not a caller
-// convention.
+// expertEngineForWeight is the session-level admission wrapper: it resolves the engine by
+// encoding and requires a backend capable of running a device kernel; otherwise it answers
+// expertEngineHost, so the fail-closed default is structural.
 func expertEngineForWeight(s *Session, name string) expertEngine {
 	if s == nil || s.Backend == nil || !s.Backend.Caps().DeviceMemory {
 		if s != nil {
@@ -176,30 +117,14 @@ func expertEngineForWeight(s *Session, name string) expertEngine {
 	return engine
 }
 
-// splitDeviceExpertInput runs the DEVICE engine for one routed expert's gate/up + SwiGLU when the
-// offload split has routed that expert's bytes to host RAM but a device kernel exists for its
-// encoding (#13128). It is the engine-selection half of the split: the WEIGHT stays host-resident
-// (residency is unchanged — the split's byte accounting is untouched), but the COMPUTE moves to the
-// iGPU, which reads the same unified pool.
-//
-// It reuses q4kExpertInputHAL verbatim — the landed moe_device_gateup prototype — so no new
-// arithmetic is introduced: the helper's own guard chain decides whether the device kernel is
-// actually available for this encoding/session, and a decline leaves the caller on the proven host
-// arm. Returning ok=false writes nothing.
-//
-// The returned *Session is the session whose counters must attribute the execution (it is non-nil
-// exactly when ok is true), so the caller does not have to re-derive it — and so a splitKernel is
-// never mistaken for a session-bearing kernel anywhere else on the expert path.
-//
-// splitKernel is the only kernel for which this path exists: residentKernel and backendKernel are
-// pure placements with no second engine to choose between (backendKernel already runs on the device,
-// residentKernel has no session), so a split over them returns ok=false and the host arm runs.
+// splitDeviceExpertInput runs the device engine for one routed expert's gate/up + SwiGLU when the
+// split has routed its bytes to host RAM but a device kernel exists for its encoding. Residency is
+// unchanged — only the compute moves to the iGPU over the same unified pool. It reuses
+// q4kExpertInputHAL, so no new arithmetic is introduced; a decline leaves the caller on the host
+// arm and ok=false writes nothing. The returned *Session is non-nil exactly when ok is true.
 func (k splitKernel) splitDeviceExpertInput(layer, expert int, xn any) (*Session, []float32, bool) {
-	// The device side of the split is the kernel whose session owns the Backend: glmDsaMatKernel
-	// builds backendKernel for the device half (moe_offload.go:194-209). Accept both session-bearing
-	// kernels so a hand-built split over the generic blockStep kernel is also reachable. A split whose
-	// device side is a residentKernel (the no-backend degenerate split) has no session behind it and
-	// therefore no device engine: decline.
+	// Only session-bearing device kernels have a device engine; a residentKernel device side
+	// (no-backend degenerate split) declines.
 	var s *Session
 	switch dk := k.device.(type) {
 	case backendKernel:
@@ -221,14 +146,10 @@ func (k splitKernel) splitDeviceExpertInput(layer, expert int, xn any) (*Session
 	return s, out, true
 }
 
-// sparseAttend forwards GLM-DSA's sparse-attention compute to the DEVICE side: sparse attention is
-// dense per-head softmax(scale·q·k)·V over the host-selected keys — attention work, not an expert —
-// so it belongs with the dense projections on the GPU. glmDsaAttendCached type-asserts the active
-// matKernel for dsaSparseKernel; implementing it here keeps the device's sparse-attention seam
-// reachable through the split. When the device kernel does not advertise it (e.g. the no-backend
-// degenerate split where device==host==residentKernel), this returns ok=false and the caller keeps
-// the byte-for-byte host softmax/ΣwV loop — which is what makes the no-backend split bit-exact with
-// the plain host forward.
+// sparseAttend forwards GLM-DSA's sparse-attention compute to the device side: it is attention
+// work, not an expert, so it belongs with the dense projections on the GPU. When the device kernel
+// does not advertise it (no-backend degenerate split), ok=false keeps the host loop, which is what
+// makes the no-backend split bit-exact with the plain host forward.
 func (k splitKernel) sparseAttend(q, selK, selV []float32, nSel, nH, qkHead, vHead int, scale float32) ([]float32, bool) {
 	if dk, ok := k.device.(dsaSparseKernel); ok {
 		return dk.sparseAttend(q, selK, selV, nSel, nH, qkHead, vHead, scale)
@@ -236,16 +157,10 @@ func (k splitKernel) sparseAttend(q, selK, selV []float32, nSel, nH, qkHead, vHe
 	return nil, false
 }
 
-// indexSelect forwards GLM-DSA's learned-indexer score + top-k SELECTION to the DEVICE side, the
-// symmetric partner of sparseAttend above: hostOffloadWeight keeps the learned-index PROJECTIONS on the
-// device under a `--n-cpu-moe` split (only the routed expert bulk goes host-resident), so the selection
-// COMPUTE they feed belongs on the device too — otherwise the offload hybrid would silently keep the
-// indexer host-resident while every other DSA op runs on the kernel. glmDsaIndexStep type-asserts the
-// active matKernel for dsaIndexKernel; routing through here keeps k_dsa_index_score + k_dsa_index_topk
-// reachable through the split. When the device kernel does not advertise DSAIndexBackend (the
-// no-backend degenerate split where device==host==residentKernel), this returns ok=false and the
-// caller keeps the host f64 score+top-k loop — which is what keeps the no-backend split selection-exact
-// with the plain host forward.
+// indexSelect forwards the learned-indexer score + top-k selection to the device side, the
+// symmetric partner of sparseAttend: the index projections stay on the device under a split, so the
+// selection compute they feed belongs there too. When the device kernel does not advertise
+// DSAIndexBackend, ok=false keeps the host loop, keeping the no-backend split selection-exact.
 func (k splitKernel) indexSelect(indexQ, indexK, weights []float32, nKeys, nH, indexDim, queryPos, topK int, scale float32) ([]int, bool) {
 	if dk, ok := k.device.(dsaIndexKernel); ok {
 		return dk.indexSelect(indexQ, indexK, weights, nKeys, nH, indexDim, queryPos, topK, scale)
@@ -260,76 +175,45 @@ func isSharedExpertWeight(name string) bool {
 	return strings.Contains(name, ".mlp.shared_experts.") || strings.Contains(name, ".ffn.shared_experts.")
 }
 
-// isRoutedExpertWeight matches the PER-TOKEN ROUTED experts (only the router-selected top-k fire per
-// token): model.layers.<l>.mlp.experts.<e>.{gate,up,down}_proj.weight (expertName, moe.go). The
-// substring ".mlp.experts." names them; the "but not shared" guard is belt-and-suspenders — the shared
-// form is ".mlp.shared_experts." so ".mlp.experts." never matches it — but it keeps the two classes
-// provably disjoint even if the naming ever drifts. A bias tensor of an expert
-// (…experts.<e>.gate_proj.bias) also matches, which is correct — its add belongs with its GEMM.
+// isRoutedExpertWeight matches the per-token routed experts:
+// model.layers.<l>.mlp.experts.<e>.{gate,up,down}_proj.weight (expertName). The not-shared guard
+// keeps the two expert classes provably disjoint even if naming drifts; expert bias tensors match
+// too, correctly — their add belongs with their GEMM.
 func isRoutedExpertWeight(name string) bool {
 	return (strings.Contains(name, ".mlp.experts.") || strings.Contains(name, ".ffn.experts.")) && !isSharedExpertWeight(name)
 }
 
-// isExpertWeight is the ACCOUNTING predicate: the union of the two disjoint expert classes
-// (isRoutedExpertWeight, isSharedExpertWeight), i.e. every parameter that belongs to an MoE expert
-// BLOCK. It deliberately does NOT match the router (mlp.gate.weight), the attention/MLA projections,
-// the learned-index projections, or the LM head: those are the small, every-token dense GEMMs that
-// stay on the device. The names are the canonical HF tensor names the GLM-DSA forward reads:
+// isExpertWeight is the ACCOUNTING predicate: the union of the routed and shared expert classes,
+// i.e. every parameter belonging to an MoE expert block. It deliberately does not match the router,
+// attention/MLA projections, learned-index projections, or the LM head.
 //
-//	routed experts: model.layers.<l>.mlp.experts.<e>.{gate,up,down}_proj.weight  (expertName, moe.go)
-//	shared experts: model.layers.<l>.mlp.shared_experts.{gate,up,down}_proj.weight (glmSharedExperts)
-//
-// It is the ACCOUNTING/classification union, NOT the runtime PLACEMENT predicate. The two differ by
-// design (see hostOffloadWeight): under offload the routed experts move to host RAM while the
-// always-on shared expert stays DEVICE-resident, but the shared expert's bytes still belong to the
-// expert block, so the union keeps the byte partitions stable: MoEResidentWeightBytes still counts
-// the routed experts against the per-layer expert term while the shared expert falls into the
-// replicated remainder (the device base the spill sizing reserves), which is EXACTLY the placement
-// hostOffloadWeight implements. Keeping this union intact is what makes that accounting stable across
-// the placement change. Callers that decide a weight's HOME must use hostOffloadWeight.
+// It is the accounting union, NOT the runtime placement predicate: the shared expert's bytes belong
+// to the expert block even though it stays device-resident, so MoEResidentWeightBytes keeps its
+// byte partition stable. Callers deciding a weight's home must use hostOffloadWeight.
 func isExpertWeight(name string) bool {
 	return isRoutedExpertWeight(name) || isSharedExpertWeight(name)
 }
 
-// hostOffloadWeight is the runtime PLACEMENT predicate splitKernel runs: it sends only the ROUTED
-// experts (.mlp.experts.<e>.*) to host RAM and pins everything else — the always-on shared expert,
-// the router, attention/MLA projections, learned-index projections, the LM head and every dense
-// weight — to the device. It is the routed-only arm of isExpertWeight.
-//
-// The distinction from isExpertWeight is the point of #1304. The shared expert is active on EVERY
-// token (hit rate 1.0), so it is resident-hot by construction; placing it on the same host path as
-// the sparse, cold routed experts streams it out and pays a needless miss latency on every token.
-// The shared expert is device-resident, so routing it to host is simply wrong. isExpertWeight stays
-// the union (accounting: the shared expert's bytes still belong to the expert block, and
-// CPUOffloadExpertWeight must keep partitioning exactly as the load-time planner expects); this
-// predicate is the routed-only placement half.
+// hostOffloadWeight is the runtime PLACEMENT predicate splitKernel runs: only the routed experts
+// go to host RAM; everything else stays on the device. The shared expert is active on every token,
+// so streaming it through the sparse, cold host path would pay a miss latency on every token — it
+// is pinned device-resident by construction.
 func hostOffloadWeight(name string) bool {
 	return isRoutedExpertWeight(name)
 }
 
-// CPUOffloadExpertWeight reports whether the canonical tensor name belongs to an MoE expert BLOCK
-// (routed OR shared) — the ACCOUNTING partition load-time memory planners size against. It is the
-// union isExpertWeight, deliberately NOT the runtime placement predicate hostOffloadWeight: the
-// runtime keeps the always-on shared expert DEVICE-resident on EVERY token (#1304), while this
-// accounting still charges the shared expert's bytes to the expert block. A caller deciding a
-// weight's HOME (host vs device) must use hostOffloadWeight, not this.
+// CPUOffloadExpertWeight reports whether the canonical tensor name belongs to an MoE expert block
+// (routed or shared) — the accounting partition load-time memory planners size against. It is not
+// the placement predicate; callers deciding a weight's home must use hostOffloadWeight.
 func CPUOffloadExpertWeight(name string) bool {
 	return isExpertWeight(name)
 }
 
-// glmDsaMatKernel selects the matKernel the GLM-DSA forward runs its dense GEMMs through, in one
-// place, so decodeBandGLMDsa stays a single instruction stream. The four cases:
-//   - no Backend, no offload    -> residentKernel (the host path; byte-for-byte unchanged default)
-//   - no Backend, offload       -> split(host=resident, device=resident): every GEMM still on host,
-//     so the forward is BIT-EXACT with residentKernel — the
-//     placement-invariance witness, and the honest degenerate config
-//     (offload requested but no device => nothing actually moves).
-//   - Backend, no offload       -> backendKernel (the all-device path; unchanged)
-//   - Backend, offload          -> split(host=resident, device=backend): THE HYBRID — expert GEMMs
-//     on host RAM, dense projections + router + attention on the device.
-//
-// CPUOffloadExperts gates the split; with no Backend it costs nothing and proves the split is a pure
-// placement decision (it computes the identical bytes the plain host forward does).
+// glmDsaMatKernel selects the matKernel the GLM-DSA forward runs its GEMMs through:
+//   - no Backend, no offload  -> residentKernel (unchanged host default)
+//   - no Backend, offload     -> split over resident: bit-exact with residentKernel (degenerate)
+//   - Backend, no offload     -> backendKernel (all-device)
+//   - Backend, offload        -> split(host=resident, device=backend): the hybrid
 func (s *Session) glmDsaMatKernel() matKernel {
 	host := matKernel(sessionResidentKernel{s})
 	device := host
@@ -337,12 +221,8 @@ func (s *Session) glmDsaMatKernel() matKernel {
 		device = backendKernel{s}
 	}
 	if s.CPUOffloadExperts {
-		// The predicate is GRADED by ExpertSpillLayers (#5612, expert_spill_placement.go): unset (the
-		// default) it is exactly hostOffloadWeight, so this line is byte-for-byte the ungraded split
-		// over ROUTED experts; set to N it spills only the first N MoE layers' routed experts and
-		// leaves the rest on the device, where R0's ring (#5611) bounds what they may hold resident.
-		// The always-on shared expert is pinned DEVICE-resident on both arms (#1304): it is never a
-		// host-offload candidate, so it is never streamed as a miss.
+		// expertSpillOnHost grades by ExpertSpillLayers when set; unset it is hostOffloadWeight.
+		// The shared expert is never a host-offload candidate on either arm.
 		return splitKernel{host: host, device: device, onHost: s.expertSpillOnHost()}
 	}
 	return device

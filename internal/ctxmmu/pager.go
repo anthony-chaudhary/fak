@@ -11,7 +11,7 @@ import (
 
 // pager.go — Batched row readahead and lazy tensor gather for SSD-backed 51B engram / PLE tables (#469).
 //
-// Frontier hybrid architectures such as Qwen 3.8 Flash-Next incorporate a 51B-parameter Per-Layer Embedding
+// Frontier hybrid architectures incorporate a 51B-parameter Per-Layer Embedding
 // (PLE) n-gram table (~26.8 GiB in 4-bit quant, ~51.2 GiB in FP8, ~95 GiB in FP16). On 64 GB/128 GB unified memory
 // systems (e.g. AMD Strix Halo APUs), pinning this table in unified GPU GTT RAM consumes 30%–50% of capacity,
 // leaving inadequate room for the KV cache and restricting context to <= 48k tokens.
@@ -32,7 +32,7 @@ import (
 //     for sub-millisecond TTFT gains.
 
 const (
-	// DefaultPLEHeads is the standard number of attention heads indexing the PLE table in Qwen 3.8 Flash-Next.
+	// DefaultPLEHeads is the standard number of attention heads indexing the PLE table in frontier hybrid models.
 	DefaultPLEHeads = 16
 
 	// DefaultPLEHeadDim is the dimension per head in the PLE embedding table.
@@ -148,7 +148,7 @@ type GatherOptions struct {
 	Advisor MadviseAdvisor
 }
 
-// DefaultGatherOptions returns recommended options for Qwen 3.8 Flash-Next on Strix Halo APUs.
+// DefaultGatherOptions returns recommended options for the default PLE engram table on Strix Halo-class APUs.
 func DefaultGatherOptions() GatherOptions {
 	return GatherOptions{
 		RowSizeBytes:      DefaultPLERowSizeBytes,
