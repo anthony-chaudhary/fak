@@ -90,7 +90,7 @@ var generatedVerbIndex = []generatedVerb{
 	{Name: "component", Synopsis: "check component contracts and workload coverage from a declared root", Tier: "dev"},
 	{Name: "compute", Synopsis: "heterogeneous compute orchestration across CUDA, Metal, and ROCm", Tier: "dev"},
 	{Name: "compute-trace", Synopsis: "capture or summarize bounded compute-event trace artifacts", Tier: "dev"},
-	{Name: "computetune", Synopsis: "storage-compute arbitration: recompute prompt KV on UMA DRAM vs offload to NVMe SSD (internal/computetune Decide)", Tier: ""},
+	{Name: "computetune", Synopsis: "storage-compute arbitration: recompute prompt KV on UMA DRAM vs offload to NVMe SSD", Tier: "dev"},
 	{Name: "concept", Synopsis: "position, classify, or validate entries in the concept catalog", Tier: "dev"},
 	{Name: "concept-usage-score", Synopsis: "native concept-usage scorecard control-pane payload", Tier: "dev"},
 	{Name: "config", Synopsis: "show configuration guides and audit deployed fak posture against them", Tier: "dev"},

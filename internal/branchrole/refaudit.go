@@ -295,6 +295,11 @@ var refClassByExactPath = map[string]string{
 	"internal/macbench/agentic_mtp.go": RefClassDevelopmentSource,
 	"internal/macbench/validation.go":  RefClassDevelopmentSource,
 
+	// Lane wiring-audit record: its single trunk ref is dated witness prose
+	// ("local as of <date>, not yet on origin/main") stating where everyday
+	// work lands — the same development-source operator law as AGENTS.md.
+	"internal/worktree/WIRING-AUDIT.md": RefClassDevelopmentSource,
+
 	"tools/bench_node.README.md": RefClassFixture,
 	"tools/gcp_bench.py":         RefClassFixture,
 }

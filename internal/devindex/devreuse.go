@@ -125,6 +125,9 @@ var maintainerDevCommands = []string{
 	"completion",
 	"compute",
 	"component",
+	// Storage-compute arbitration readout (internal/computetune Decide):
+	// fak's own storage/decode-regime diagnostics, not a portable adopter pattern.
+	"computetune",
 	"concept",
 	"concept-usage-score",
 	"config",
