@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // legacyDoc is the per-model receipt shape (fak.v41_reference_oracle.v1 and the
@@ -17,8 +18,10 @@ import (
 //	determinism.{method, results[{greedy_tokens_identical, top5_logprobs_identical_1e-6}]}
 //	trace_refs (fak.reference_oracle.v1 shape)
 //
-// When binary_sha256 is absent the digest of llama-server, then llama-cli, then
-// a lone sha256 entry is used. Prompts keep their document order.
+// When binary_sha256 is absent the digest of the engine the receipt names in
+// reference_engine.repo is used: '<engine>-server', then '<engine>-cli' (the repo
+// base without a trailing .git or .cpp suffix), then a lone sha256 entry.
+// Prompts keep their document order.
 type legacyDoc struct {
 	Schema          string `json:"schema"`
 	EvidenceLabel   string `json:"evidence_label"`
@@ -88,7 +91,7 @@ func adaptLegacy(data []byte) (Oracle, error) {
 		TraceRefs: d.TraceRefs,
 	}
 	if o.Reference.BinarySHA256 == "" {
-		o.Reference.BinarySHA256 = pickBinaryDigest(d.ReferenceEngine.SHA256)
+		o.Reference.BinarySHA256 = pickBinaryDigest(d.ReferenceEngine.Repo, d.ReferenceEngine.SHA256)
 	}
 	if err := decodeShards(d.Model.Shards, &o.Artifact); err != nil {
 		return Oracle{}, err
@@ -148,8 +151,35 @@ func legacySelfParity(method string, results []struct {
 	return sp
 }
 
-func pickBinaryDigest(m map[string]string) string {
-	for _, k := range []string{"llama-server", "llama-cli"} {
+// preferredBinaryNames derives the ordered digest keys to prefer when a
+// legacy receipt omits binary_sha256. The receipt names its own engine via
+// reference_engine.repo; the repo base without a trailing .git or .cpp source
+// suffix yields "<engine>-server" then "<engine>-cli". Nil when the repo does
+// not name an engine.
+func preferredBinaryNames(repo string) []string {
+	base := strings.TrimSpace(repo)
+	for strings.HasSuffix(base, "/") || strings.HasSuffix(base, "\\") {
+		base = base[:len(base)-1]
+	}
+	if i := strings.LastIndexAny(base, "/\\"); i >= 0 {
+		base = base[i+1:]
+	}
+	lower := strings.ToLower(base)
+	for _, suf := range []string{".git", ".cpp"} {
+		lower = strings.TrimSuffix(lower, suf)
+	}
+	if lower == "" {
+		return nil
+	}
+	return []string{lower + "-server", lower + "-cli"}
+}
+
+// pickBinaryDigest resolves the reference binary digest when binary_sha256 is
+// absent: prefer the digest of the engine build the receipt itself names
+// (reference_engine.repo), server build before cli build, then fall back to a
+// lone sha256 entry.
+func pickBinaryDigest(repo string, m map[string]string) string {
+	for _, k := range preferredBinaryNames(repo) {
 		if v := m[k]; v != "" {
 			return v
 		}
