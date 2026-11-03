@@ -320,6 +320,13 @@ func ClassifyHardcodedRef(path, line string) string {
 		// instructions (sync, review, worktree) land everyday work on the trunk,
 		// the same development-source family as AGENTS.md / CONTRIBUTING.md.
 		return RefClassDevelopmentSource
+	case strings.HasSuffix(p, "/WIRING-AUDIT.md"):
+		// Lane wiring-audit records (debt-wave tickets, internal/* and pkg/*): dated
+		// witness prose naming the trunk where work lands or pinning a past trunk
+		// state for re-run reproducibility — the same development-source operator law
+		// as internal/worktree/WIRING-AUDIT.md. A per-file exact-path entry kept
+		// redding the gate on every new lane audit (#1701 recurrence).
+		return RefClassDevelopmentSource
 	case strings.HasPrefix(p, "docs/stable-releases/") ||
 		strings.HasPrefix(p, "docs/_audits/") ||
 		strings.HasPrefix(p, "docs/"):
