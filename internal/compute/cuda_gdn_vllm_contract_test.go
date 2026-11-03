@@ -127,7 +127,12 @@ const cudaGDNVLLMHostPreamble = `
 struct dim3 { unsigned x,y,z; dim3(unsigned x=1,unsigned y=1,unsigned z=1):x(x),y(y),z(z){} };
 struct alignas(16) float4 { float x,y,z,w; };
 static float4 make_float4(float x,float y,float z,float w) { return {x,y,z,w}; }
-static float rsqrtf(float x) { return 1.0f/std::sqrt(x); }
+// Newer glibc headers declare rsqrtf as a real libm symbol, so a same-named
+// static shim no longer compiles ("declared 'extern' and later 'static'"). Keep
+// the host implementation under its own name and map the kernel's intrinsic
+// call sites onto it; the <cmath> include above stays unmacro'd.
+static float host_rsqrtf(float x) { return 1.0f/std::sqrt(x); }
+#define rsqrtf host_rsqrtf
 static dim3 blockIdx,threadIdx;
 struct Barrier;
 static ucontext_t scheduler,contexts[256];
