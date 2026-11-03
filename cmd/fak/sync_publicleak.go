@@ -132,7 +132,9 @@ func assessSyncPublicLeak(repo, remote string, info safesync.Assessment, only []
 	if err != nil {
 		return report, err
 	}
-	report.Timing = tree.Timing
+	// Measured wall-clock phases stay out of the sync-check report: the remediation-spine
+	// JSON must remain byte-deterministic across runs. Phase timing is exposed by
+	// fak public-scrub audit-tree --json instead.
 	current := filterSyncPublicLeakFindings(tree.Findings, only)
 
 	introduced := map[string]bool{}
