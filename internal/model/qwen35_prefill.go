@@ -102,7 +102,7 @@ func (s *Session) prefillQwen35HybridQHidden(ids []int) []float32 {
 		parFor(P, dispatchWorkers, func(lo, hi int) {
 			for t := lo; t < hi; t++ {
 				if cfg.NormGain1p || cfg.LayerNorm {
-					copy(Xn[t*H:(t+1)*H], rmsnormCfg(X[t*H:(t+1)*H], wIn, eps, cfg))
+					qwen35PrefillNormIntoDisjoint(Xn[t*H:(t+1)*H], X[t*H:(t+1)*H], wIn, eps, cfg)
 				} else {
 					rmsnormInto(Xn[t*H:(t+1)*H], X[t*H:(t+1)*H], wIn, eps)
 				}
@@ -130,7 +130,7 @@ func (s *Session) prefillQwen35HybridQHidden(ids []int) []float32 {
 		parFor(P, dispatchWorkers, func(lo, hi int) {
 			for t := lo; t < hi; t++ {
 				if cfg.NormGain1p || cfg.LayerNorm {
-					copy(Xn2[t*H:(t+1)*H], rmsnormCfg(X[t*H:(t+1)*H], wPost, eps, cfg))
+					qwen35PrefillNormIntoDisjoint(Xn2[t*H:(t+1)*H], X[t*H:(t+1)*H], wPost, eps, cfg)
 				} else {
 					rmsnormInto(Xn2[t*H:(t+1)*H], X[t*H:(t+1)*H], wPost, eps)
 				}
