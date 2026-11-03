@@ -288,6 +288,35 @@ The full upstream LICENSE at the pinned revision follows:
 ```
 
 
+## vLLM chunkwise Qwen host Gated-DeltaNet
+
+`internal/model/qwen35_gdn_chunked_host.go` adapts the chunk-64 causal
+triangular solve, initial/final recurrent-state schedule and distinct query
+readout from vLLM at revision
+`5c8ae7c74aaa99d1f7fbeea942fd7282e3413810`:
+
+- `csrc/cpu/sgl-kernels/fla.cpp`, intra-chunk solve/recompute and inter-chunk
+  state/readout kernels, and `chunk_gated_delta_rule_cpu`.
+  https://github.com/vllm-project/vllm/blob/5c8ae7c74aaa99d1f7fbeea942fd7282e3413810/csrc/cpu/sgl-kernels/fla.cpp
+  The pinned source header credits its adaptation from SGLang's CPU kernels.
+- `vllm/model_executor/layers/mamba/ops/cpu/gdn_attention.py`, the ordinary
+  causal-convolution / initial-state / final-state consumer.
+  https://github.com/vllm-project/vllm/blob/5c8ae7c74aaa99d1f7fbeea942fd7282e3413810/vllm/model_executor/layers/mamba/ops/cpu/gdn_attention.py
+
+Copyright contributors to the vLLM project. SPDX-License-Identifier: Apache-2.0.
+Modified for FAK: native Go/F32 rectangular key/value state, fused application
+of the unit-lower-triangular inverse, products of existing rounded scalar decay
+(including exact-zero resets), bounded private candidate output/state with
+all-head publication only after success, and ordinary Q8/mixed-Q4K host-prefill
+consumers. The default-off qualification path changes reduction order. No
+Torch, BLAS, BF16/AMX kernel, global workspace or device acceleration is copied
+or claimed. Existing causal convolution, decode and fallback remain FAK's.
+
+The pinned repository has no root NOTICE file. Its root Apache-2.0 LICENSE
+(Git `261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64`) is reproduced byte-exactly
+in the existing TensorFold license section of this file and also applies here.
+Source and adaptation details are in `qwen35_gdn_chunked_host.README.md`.
+
 ## Score-aware expert-cache eviction policies
 
 `internal/deepseekv4moe/cache_policy_bench.go` `CachePolicyLFRU` (`replayOnlineLFRU`,
@@ -518,6 +547,38 @@ https://github.com/vllm-project/vllm/tree/f47792af7fba76eb8e8f6a564b35cfad316d39
   declare a mutated argument so the compiler cannot reorder a wait ahead of the
   copy it guards).
 - `vllm/model_executor/offloader/uva.py` (pinned staging storage).
+
+### Split-phase remote snapshot transfer ownership
+
+The remote snapshot transaction in `internal/radixkv/remote_transfer.go`,
+`remote_l3.go`, the scoped tree, and the ordinary InKernelPlanner tiered lookup
+and pressure paths adapts prepare/pin, submitted-job ownership, validated
+completion, and failed-writer lifetime retention from the vLLM tiering manager:
+https://github.com/vllm-project/vllm/blob/5c8ae7c74aaa99d1f7fbeea942fd7282e3413810/vllm/v1/kv_offload/tiering/manager.py
+
+SPDX-License-Identifier: Apache-2.0
+SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+
+Changed for Fak: a single synchronous transfer job, not an asynchronous Python
+worker pipeline. Explicit held-lock APIs prepare immutable store/configuration,
+record, namespace and snapshot-reference identity under the existing planner
+mutex, release that mutex for remote transport and independently owned restore,
+then reacquire it to validate publication. Configuration generations invalidate
+late results even when model and namespace strings are unchanged. Cancellation
+does not release the charged job until the actual store callback retires; busy
+work cannot consume a breaker probe or authorize source eviction. Stale restored
+owners are closed exactly once. A stale successful Put may leave an external
+orphan because the existing SnapshotStore has no Delete; no remote rollback is
+claimed. Local snapshot capture/serialization and local/SSD work remain locked.
+No new endpoint, credential, tenant permission, background queue or device path
+is introduced. This is distinct from retained host-swap capacity and dense
+prefix payload sharing. Runtime, race and performance qualification remain
+separate from source publication.
+
+The full Apache License, Version 2.0 reproduced in the "TensorFold benchmark
+evidence" section above applies to this adaptation.
+
+### Checkpoint expert-ring adaptation
 
 Changed for Fak: the port is expressed over a synchronous `io.ReaderAt` ring fill
 rather than a CUDA copy stream. Identity becomes the absolute checkpoint byte
@@ -1014,6 +1075,40 @@ The split kernel also retains its original Apache-2.0 TIRx-author attribution.
 Source: https://github.com/NVlabs/kda/tree/260927-kda-for-kda
 ```
 
+## llama.cpp tiled CPU attention for ordinary Qwen prefill
+
+Adapted from ggml-org/llama.cpp commit `74bca3950054eed1795f525cb9cf06bfe796492d`,
+`ggml/src/ggml-cpu/ops.cpp`, `ggml_compute_forward_flash_attn_ext_tiled`:
+https://github.com/ggml-org/llama.cpp/blob/74bca3950054eed1795f525cb9cf06bfe796492d/ggml/src/ggml-cpu/ops.cpp
+
+FAK borrows the multi-query/KV tile, packed K/V reuse and running maximum/sum/output
+rescale. Its adaptation retains FAK's F32 fdot/saxpy, causal/window and softcap
+semantics, uses an invocation-owned dead projection loan, and is default-off.
+It does not import donor SIMD GEMM, quantized KV, sinks, ALiBi or a runtime dependency.
+Changed online rounding and all performance claims require separate qualification.
+
+MIT License
+
+Copyright (c) 2023-2026 The ggml authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 ## llama.cpp fattn-mma-f16 hd256 prompt attention
 
 The Qwen3.8 prompt-attention kernel `internal/compute/cuda/fattn_mma_hd256.cuh` adapts
@@ -1365,6 +1460,37 @@ The upstream root LICENSE is Apache-2.0 and matches this repository's LICENSE.
 Both studied source files carry the SPDX contributor notices above. No root
 NOTICE exists at this exact revision (GitHub contents API returned 404).
 
+## vLLM packed heterogeneous host prefill
+
+The optional packed host-prefill path in `internal/model/batch_prefill_packed.go`
+and `internal/modelengine/nativesched_packed_prefill.go` adapts cumulative query
+offsets, per-request computed positions, and final-row logits selection from
+vLLM's `GPUModelRunner._prepare_inputs`:
+
+- Repository: https://github.com/vllm-project/vllm
+- Revision: `5c8ae7c74aaa99d1f7fbeea942fd7282e3413810`
+- Source: `vllm/v1/worker/gpu_model_runner.py`, blob
+  `d98498a4f97bfd89700829fd36df71bbab6437f5`
+- License: Apache-2.0, root LICENSE blob
+  `261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64`
+- Copyright: Copyright contributors to the vLLM project.
+
+Changed for Fak: bounded synchronous Go CPU FP32/Q8-weight projection panels
+reuse existing per-request causal attention and independently owned FP32 caches.
+The default-off `fak_vllm_packed_prefill` qualification tag selects the existing
+native syscall Engine scheduler, with at most 32 total prompt tokens per cohort,
+full-prompt admission reservations, and existing cancel/Close session retirement.
+Unsupported execution policies, observers, layouts and storage retain their
+historical paths; no GPU, asynchronous transfer, chat-planner or speed claim is made.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this adaptation except in compliance with the License. A copy is available at
+https://www.apache.org/licenses/LICENSE-2.0. Unless required by applicable law or
+agreed to in writing, software distributed under the License is distributed on
+an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+or implied. See the License for the specific language governing permissions and
+limitations under the License.
+
 ## vLLM bounded reverse-KMP prompt lookup
 
 `internal/model/ngram.go`, `longestRecentTokenSuffix`, adapts
@@ -1445,3 +1571,108 @@ its existing single-page writer and page/COW ownership. Host admission and Go
 batch preparation/order control are Fak-specific. This does not reattribute the
 older v0.11.0 paged attention implementation or claim a measured speedup.
 The upstream Apache-2.0 license text is reproduced in the existing vLLM notice.
+
+
+## llama.cpp causal hidden-output and pooling contract
+
+The optional causal embeddings provider adapts final-normalization pooling and
+LM-head bypass from ggml-org/llama.cpp commit
+cd8427d018c07eefab6c110f7f115c31ec4c6157, src/llama-graph.cpp.
+FAK retains its own CPU layer/weight ownership implementation and explicit admission.
+No trained embedding quality or device equivalence is implied.
+
+MIT License
+
+Copyright (c) 2023-2026 The ggml authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+## vLLM bounded native CPU beam search
+
+`internal/beam/search.go` and its ordinary native CPU chat adapter in
+`internal/agent/inkernel_beam.go` adapt the live/completed beam lifecycle,
+top-2B expansion and generated-length score from vLLM revision
+`5c8ae7c74aaa99d1f7fbeea942fd7282e3413810`:
+
+- `vllm/entrypoints/generate/beam_search/offline.py`
+  (Git `e458ba99282ff683593e7ddbedf726d0c8612857`)
+- `vllm/entrypoints/generate/beam_search/utils.py`
+  (Git `d009008cb5a060939b26535b419ccfeea09d1673`)
+
+https://github.com/vllm-project/vllm/tree/5c8ae7c74aaa99d1f7fbeea942fd7282e3413810/vllm/entrypoints/generate/beam_search
+
+Copyright contributors to the vLLM project. SPDX-License-Identifier: Apache-2.0.
+Modified for FAK: native Go float64 finite log-softmax, stable deterministic
+ties, fixed request/work bounds, typed nonstreaming CPU selection, fresh
+owned Session replay and all-or-error ranked publication. No vLLM device
+execution, KV-sharing efficiency or model qualification is claimed.
+
+The pinned repository has no root NOTICE. Its root Apache-2.0 LICENSE
+(Git `261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64`) is reproduced byte-exactly
+in the existing TensorFold license section of this file and also applies here.
+See `internal/beam/README.md` for the consumer, adaptations and execution debt.
+
+
+## llama.cpp score-based SPM tokenizer
+
+Adapted from ggml-org/llama.cpp at cd8427d018c07eefab6c110f7f115c31ec4c6157,
+src/llama-vocab.cpp (score-priority UTF-8 symbol merging and byte fallback).
+FAK wires an explicit llama-spm-v1 JSON profile through its immutable tokenizer,
+trusted-fragment and raw-completion contracts. This does not add embedded GGUF,
+.model or generic Unigram interchange. Legacy BPE remains unchanged. Generic
+FAK encoding leaves BOS/EOS to the selected raw prompt caller.
+
+MIT License
+
+Copyright (c) 2023-2026 The ggml authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+## llama.cpp bounded native Jinja chat-template interpreter
+
+- Upstream: ggml-org/llama.cpp, commit
+  `cd8427d018c07eefab6c110f7f115c31ec4c6157` (MIT).
+- Source: `common/jinja/lexer.cpp`, `parser.cpp`, `runtime.cpp`,
+  `string.cpp`, `string.h` and `value.cpp`; full license retained at
+  `internal/agent/JINJA-LICENSE.txt`.
+- Adaptation: bounded tag/expression/statement parsing, request-local
+  scope/macro/namespace execution and input-marked string composition, wired to
+  the ordinary native prompt preparation and segmented tokenizer consumer.
+- FAK-specific changes: independent source/model digest binding, explicit
+  construction-time opt-in, closed builtin/profile admission, finite resource
+  limits, redacted refusal, and conservative special-token provenance.
+  No Python runtime, model, tokenizer, executable or network behavior is imported.

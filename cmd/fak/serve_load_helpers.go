@@ -1,9 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -1121,19 +1121,18 @@ func resolveServeTokenizer(tokPath, ggufPath string, sinks ...func(gateway.Start
 		}
 	}
 	if tokPath != "" {
-		tokFile := tokPath
-		if info, err := os.Stat(tokFile); err == nil && info.IsDir() {
-			tokFile = filepath.Join(tokFile, "tokenizer.json")
-		}
-		tok, err := tokenizer.LoadJSON(tokFile)
+		tok, err := loadExplicitServeTokenizer(tokPath)
 		must(err)
 		modelengine.SetTokenizer(tok)
 		return tok, true
 	}
 	if ggufPath != "" {
 		if info, err := os.Stat(ggufPath); err == nil && info.IsDir() {
-			tok, err := tokenizer.LoadJSON(filepath.Join(ggufPath, "tokenizer.json"))
+			tok, err := loadAutomaticServeDirectoryTokenizer(ggufPath)
 			if err != nil {
+				if errors.Is(err, tokenizer.ErrNativeSPMProfile) {
+					must(err)
+				}
 				emit(serveStartupMessage("tokenizer-fallback", "warning",
 					fmt.Sprintf("safetensors directory has no usable tokenizer.json (%v); chat uses the offline mock planner", err)))
 				return nil, false

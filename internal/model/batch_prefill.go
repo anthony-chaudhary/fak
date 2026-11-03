@@ -142,6 +142,10 @@ func rectangularPrefillLenMin(prompts [][]int, minPrompts int) (int, bool) {
 }
 
 func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bool) [][]float32 {
+	return bs.prefillEachPackedF32(prompts, packedUniformOffsets(len(prompts), P), P, wantLogits)
+}
+
+func (bs *BatchSession) prefillEachPackedF32(prompts [][]int, offsets []int, P int, wantLogits bool) [][]float32 {
 	dispatchWorkers := currentWorkerCount()
 	m, cfg := bs.M, bs.M.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim
@@ -150,13 +154,11 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 	eps := float32(cfg.RMSNormEps)
 	w := nKV * hd
 	scale := cfg.attnScale()
-	B, N := len(prompts), len(prompts)*P
+	B, N := len(prompts), offsets[len(prompts)]
 
-	baseB, caches, cosN, sinN := bs.rectPrefillGeometry(P)
+	baseB, caches, cosN, sinN := bs.packedPrefillGeometry(prompts, offsets)
 	X := make([]float32, N*H)
-	if !m.tryPrefillEmbedRectRows(X, prompts, P, H, cfg, dispatchWorkers) {
-		m.embedRectRowsInto(X, prompts, P, H, cfg)
-	}
+	m.embedPackedRowsInto(X, prompts, offsets, P, H, cfg, dispatchWorkers)
 
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(s string) string { return layerName(l, s) }
@@ -184,8 +186,8 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 		}
 
 		for b, c := range caches {
-			for t := 0; t < P; t++ {
-				row := b*P + t
+			for t := range prompts[b] {
+				row := offsets[b] + t
 				c.Kraw[l] = append(c.Kraw[l], K[row*w:(row+1)*w]...)
 			}
 		}
@@ -197,7 +199,7 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 		for b, c := range caches {
 			// Precision-aware append (#12981): f32 is the historical append (byte-identical);
 			// q8 packs each row so a quantized cache is never written with raw f32 rows.
-			c.appendBatchedKV(l, K[b*P*w:(b+1)*P*w], V[b*P*w:(b+1)*P*w], P, w)
+			c.appendBatchedKV(l, K[offsets[b]*w:offsets[b+1]*w], V[offsets[b]*w:offsets[b+1]*w], len(prompts[b]), w)
 		}
 
 		// F32 prefill keeps the plain (allocating) attention path: the windowed
@@ -205,7 +207,7 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 		// below starts attnOut zeroed (the saxpy accumulation requires it), and nil scratch
 		// means no pooling here — the pooled GQA-fused path is the Q8 hot lane only.
 		attnOut := make([]float32, N*nH*hd)
-		attnPrefillMultiBuiltinInto(attnOut, Q, caches, baseB, l, P, nH, hd, w, grp, cfg.windowForLayer(l), scale, nil)
+		attnPrefillPackedF32Into(attnOut, Q, caches, baseB, offsets, l, P, nH, hd, w, grp, cfg.windowForLayer(l), scale)
 
 		O := matMulBatch(m.tensor(lp("self_attn.o_proj.weight")), attnOut, H, nH*hd, N)
 		for row := 0; row < N; row++ {
@@ -229,12 +231,12 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 		}
 	}
 
-	bs.finishRectPrefillPositions(baseB, prompts, P)
+	bs.finishPackedPrefillPositions(baseB, prompts)
 	if !wantLogits {
 		return nil
 	}
 	for b := range baseB {
-		baseB[b] = b*P + P - 1
+		baseB[b] = offsets[b+1] - 1
 	}
 	Xnorm, err := selectLMHeadProjectionRows(make([]float32, B*H), X, H, baseB, lmHeadProjectSampledRows)
 	if err != nil {
@@ -252,6 +254,10 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 }
 
 func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool) [][]float32 {
+	return bs.prefillEachPackedQ(prompts, packedUniformOffsets(len(prompts), P), P, wantLogits)
+}
+
+func (bs *BatchSession) prefillEachPackedQ(prompts [][]int, offsets []int, P int, wantLogits bool) [][]float32 {
 	dispatchWorkers := currentWorkerCount()
 	m, cfg := bs.M, bs.M.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim
@@ -260,7 +266,7 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 	eps := float32(cfg.RMSNormEps)
 	w := nKV * hd
 	scale := cfg.attnScale()
-	B, N := len(prompts), len(prompts)*P
+	B, N := len(prompts), offsets[len(prompts)]
 	if bs.scratch == nil {
 		bs.scratch = &q8Panel{}
 	}
@@ -281,16 +287,14 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 	for b, s := range bs.Seqs {
 		baseB[b] = s.Cache.Len()
 		caches[b] = s.Cache
-		for t := 0; t < P; t++ {
-			row := b*P + t
+		for t := range prompts[b] {
+			row := offsets[b] + t
 			ropeRowInto(cosN[row], sinN[row], inv, baseB[b]+t)
 		}
 	}
 	X := grow(pb.X, N*H)
 	pb.X = X
-	if !m.tryPrefillEmbedRectRows(X, prompts, P, H, cfg, dispatchWorkers) {
-		m.embedRectRowsInto(X, prompts, P, H, cfg)
-	}
+	m.embedPackedRowsInto(X, prompts, offsets, P, H, cfg, dispatchWorkers)
 
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(s string) string { return layerName(l, s) }
@@ -334,8 +338,8 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 		}
 
 		for b, c := range caches {
-			for t := 0; t < P; t++ {
-				row := b*P + t
+			for t := range prompts[b] {
+				row := offsets[b] + t
 				c.Kraw[l] = append(c.Kraw[l], K[row*w:(row+1)*w]...)
 			}
 		}
@@ -347,7 +351,7 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 		for b, c := range caches {
 			// Precision-aware append (#12981): f32 is the historical append (byte-identical);
 			// q8 packs each row so a quantized cache is never written with raw f32 rows.
-			c.appendBatchedKV(l, K[b*P*w:(b+1)*P*w], V[b*P*w:(b+1)*P*w], P, w)
+			c.appendBatchedKV(l, K[offsets[b]*w:offsets[b+1]*w], V[offsets[b]*w:offsets[b+1]*w], len(prompts[b]), w)
 		}
 
 		// Attention. pb.attn is a reused buffer and the helper += accumulates into it, so it
@@ -359,7 +363,7 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 		// have no later consumer, while pb already retains both separate panels.
 		// Loan them for one joined fresh-cache decode before readonly attention;
 		// prefixes or ineligible shapes keep bounded worker-local read reuse.
-		pb.scores = attnPrefillMultiGQALoanedInto(attnOut, Q, K, V, caches, baseB, l, P, nH, hd, w, grp, cfg.windowForLayer(l), scale, pb.scores)
+		pb.scores = attnPrefillPackedQInto(attnOut, Q, K, V, caches, baseB, offsets, l, P, nH, hd, w, grp, cfg.windowForLayer(l), scale, pb.scores)
 
 		quantizeBatchPanelInto(bs.scratch, attnOut, N, nH*hd)
 		O := grow(pb.O, N*H)
@@ -411,12 +415,12 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 		}
 	}
 
-	bs.finishRectPrefillPositions(baseB, prompts, P)
+	bs.finishPackedPrefillPositions(baseB, prompts)
 	if !wantLogits {
 		return nil
 	}
 	for b := range baseB {
-		baseB[b] = b*P + P - 1
+		baseB[b] = offsets[b+1] - 1
 	}
 	Xnorm, err := selectLMHeadProjectionRows(grow(pb.Xnorm, B*H), X, H, baseB, lmHeadProjectSampledRows)
 	if err != nil {
@@ -437,26 +441,26 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 	return splitScaledLogits(nil, Logits, projectedRows, cfg.VocabSize, cfg)
 }
 
-func (bs *BatchSession) rectPrefillGeometry(P int) ([]int, []*KVCache, [][]float32, [][]float32) {
+func (bs *BatchSession) packedPrefillGeometry(prompts [][]int, offsets []int) ([]int, []*KVCache, [][]float32, [][]float32) {
 	B := len(bs.Seqs)
 	baseB := make([]int, B)
 	caches := make([]*KVCache, B)
-	cosN := make([][]float32, B*P)
-	sinN := make([][]float32, B*P)
+	cosN := make([][]float32, offsets[B])
+	sinN := make([][]float32, offsets[B])
 	for b, s := range bs.Seqs {
 		baseB[b] = s.Cache.Len()
 		caches[b] = s.Cache
-		for t := 0; t < P; t++ {
-			row := b*P + t
+		for t := range prompts[b] {
+			row := offsets[b] + t
 			cosN[row], sinN[row] = ropeRow(bs.M.Cfg, baseB[b]+t)
 		}
 	}
 	return baseB, caches, cosN, sinN
 }
 
-func (bs *BatchSession) finishRectPrefillPositions(baseB []int, prompts [][]int, P int) {
+func (bs *BatchSession) finishPackedPrefillPositions(baseB []int, prompts [][]int) {
 	for b, s := range bs.Seqs {
-		for t := 0; t < P; t++ {
+		for t := range prompts[b] {
 			s.Cache.appendPosition(baseB[b]+t, prompts[b][t])
 		}
 	}

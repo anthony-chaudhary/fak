@@ -241,6 +241,9 @@ type ControlIngress interface {
 // Config configures a gateway Server. The zero value is not valid — use New,
 // which fills defaults and validates against the registered ABI.
 type Config struct {
+	// EmbeddingPooling explicitly selects bounded learned CPU causal mean/last embeddings.
+	// Empty preserves the legacy hash endpoint. Unsupported selections fail at startup.
+	EmbeddingPooling string
 	// Adjudicators optionally supplies a complete per-server kernel chain. A nil
 	// chain preserves the registered pipeline; callers must retain every floor.
 	Adjudicators []abi.Adjudicator

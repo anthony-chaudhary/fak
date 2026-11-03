@@ -60,6 +60,10 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req, carriers := body.CompletionRequest, body.carriers()
+	if req.Fak != nil && req.Fak.BeamSearch != nil {
+		writeErrCode(w, http.StatusBadRequest, "native_beam_search_unsupported", "beam search is supported only by nonstreaming native /v1/chat/completions")
+		return
+	}
 	prompt, batched := normalizePrompt(req.Prompt)
 	if batched {
 		writeErrCode(w, http.StatusBadRequest, "prompt_batch_unsupported", "prompt: an array of more than one prompt is a batch, which this route does not serve; send one request per prompt")

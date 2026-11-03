@@ -817,6 +817,10 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer releaseDeadline()
+	if chatBeamParams(req) != nil && !s.chatBeamSearchSupported(req.Model) {
+		writeErrCode(w, http.StatusBadRequest, "native_beam_search_unsupported", "beam search requires the native dense CPU route")
+		return
+	}
 	if !releaseEPFanout(r) {
 		return
 	}
@@ -955,6 +959,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		agent.WithMinP(req.MinP),
 		agent.WithChatTemplateKwargs(req.ChatTemplateKwargs),
 		agent.WithSpeculativeNMax(req.SpeculativeNMax),
+		agent.WithNativeBeamSearch(chatBeamParams(req)),
 		agent.WithNativeInferenceReceipt(receiptRequested),
 		agent.WithDecodeTrace(decodeTraceRequested),
 		agent.WithNativeDecodeTokenIDs(decodeTokenIDsRequested),
@@ -996,6 +1001,12 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	asst := comp.Message
+	if chatBeamParams(req) != nil && comp.NativeBeamSearch == nil {
+		writeErr(w, http.StatusBadGateway, "native planner did not produce the requested beam-search result")
+		// A missing beam result still consumed the completed decode (#13562).
+		s.logInferenceTurn(reqTrace, "openai_chat_completions", req.Stream, comp.Usage, toolCallLogFinishReason(comp.FinishReason), time.Since(began), false)
+		return
+	}
 	asst.Role = agent.RoleAssistant
 
 	if !s.validateChatCompletionConformance(w, stream, comp, asst, receiptRequested, decodeTraceRequested, decodeTokenIDsRequested, inputTriggerRoute) {
@@ -1030,6 +1041,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 }
 
 func validateChatRequestIngress(w http.ResponseWriter, req ChatRequest) bool {
+	if !validateChatBeamSearch(w, req) {
+		return false
+	}
 	if rejectStopLimits(w, normalizeStop(req.Stop)) {
 		return false
 	}
@@ -1270,6 +1284,12 @@ func (s *Server) buildChatResponse(comp *agent.Completion, asst agent.Message, f
 			resp.Fak = &FakExt{}
 		}
 		resp.Fak.NativeDecodeTokenIDs = comp.NativeDecodeTokenIDs
+	}
+	if receipt := nativeBeamWireReceipt(comp.NativeBeamSearch); receipt != nil {
+		if resp.Fak == nil {
+			resp.Fak = &FakExt{}
+		}
+		resp.Fak.BeamSearch = receipt
 	}
 	return resp
 }

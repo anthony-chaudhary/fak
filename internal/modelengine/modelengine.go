@@ -326,6 +326,9 @@ func (e *Engine) nativeScheduler() *NativeScheduler {
 			}
 		})
 		sched.modelName = e.ModelName()
+		// Explicit qualification build only; ordinary Engine.Admit uses the same
+		// capability-gated scheduler, with no new environment/configuration key.
+		sched.packedPrefillEnabled = nativePackedPrefillSelected
 		sched.SetQ4KGateUpOutputSlab(e.q4kGateUpOutputSlab)
 		sched.SetMaxRunning(nativeMaxRunningFromEnv())
 		// Arm cross-agent in-flight coalescing of a shared cold prefill prefix

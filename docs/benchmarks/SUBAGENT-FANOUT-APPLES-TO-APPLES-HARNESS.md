@@ -40,6 +40,13 @@ To guarantee scientific reproducibility and apples-to-apples validity, the harne
 1. **Identical Weights & Quantization**:
    - Model weights must be identical across all four arms (default: `Qwen/Qwen2.5-Coder-7B-Instruct` or `Qwen3.8-27B`).
    - Quantization format must match bit-for-bit across all arms (default: `Q4_K_M` or `FP8`).
+   - **Model-selection rule (documented wall-clock exception):** the pinned 7B default is a
+     cited wall-clock exception for the **FULL canonical matrix only** (4 arms × N∈[1,4,8,16,32]
+     × 2 request shapes × 2 schedules × 5 trials at the fixed 0.85 memory fraction; a 27B
+     Q4_K_M ≈16.5 GiB of weights makes that full sweep multi-hour on consumer GPUs — ESTIMATE).
+     For any subset/smoke run, pick the **largest quantized model the host fits within the 0.85
+     memory fraction** (recommend `Qwen3.8-27B` Q4_K_M where it fits). Changing the pinned
+     default requires updating this section in the same commit.
 2. **Fixed Memory Fraction**:
    - GPU / accelerator memory allocation is fixed strictly to **`0.85`** (`--mem-fraction 0.85`). No arm is permitted excess memory headroom.
 3. **Subagent Fanout Sweep**:

@@ -54,7 +54,7 @@ func TestBenchFleetQueuesEveryPlannedNodeAndDeduplicates(t *testing.T) {
 		t.Fatalf("queue entries=%d want 3", len(entries))
 	}
 	classes := map[string]bool{}
-	wantState := map[string]string{"a100": "waiting_credentials", "cpu-server-a": "waiting_credentials", "node-macos-a": "waiting_session"}
+	wantState := map[string]string{"a100": "waiting_route", "cpu-server-a": "waiting_route", "node-macos-a": "waiting_session"}
 	for _, req := range got.Requests {
 		classes[req.NodeClass] = true
 		if req.State != wantState[req.Machine] {
@@ -115,5 +115,38 @@ func TestBenchFleetTaskSpawnsAreWindowless(t *testing.T) {
 	}
 	if findings := windowgate.GoExecViolations("cmd/fak/benchloop_fleet.go", string(src)); len(findings) != 0 {
 		t.Fatalf("Scheduled Task helper can flash a console window: %v", findings)
+	}
+}
+
+// fak-test:runtime fast est=50ms lane=default
+func TestBenchFleetPrepareHoldsRetiredGCPTargets(t *testing.T) {
+	root := t.TempDir()
+	planPath := filepath.Join(root, "plan.json")
+	plan := `{"per_machine_next":{"gcp-g2-l4":{"machine_id":"gcp-g2-l4"},"gcp-g2-l4-32":{"machine_id":"gcp-g2-l4-32"},"gcp-a3-high-h100-1g":{"machine_id":"gcp-a3-high-h100-1g"}}}`
+	if err := os.WriteFile(planPath, []byte(plan), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, stderr bytes.Buffer
+	if code := runBenchFleet(&out, &stderr, []string{"--apply", "--json", "--workspace", root, "--plan-json", planPath}); code != 0 {
+		t.Fatalf("prepare code=%d stderr=%s", code, stderr.String())
+	}
+	var report benchFleetReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Held != 3 || report.Enqueued != 3 {
+		t.Fatalf("held=%d enqueued=%d", report.Held, report.Enqueued)
+	}
+	for _, req := range report.Requests {
+		stored, err := readBenchFleetRequest(req.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stored.State != "waiting_route" || stored.HeldReason != "route" || stored.HeldSince == "" {
+			t.Fatalf("machine=%q state=%q reason=%q since=%q", stored.Machine, stored.State, stored.HeldReason, stored.HeldSince)
+		}
+		if refreshBenchFleetHold(root, req.Path) {
+			t.Fatalf("retired target %q released", stored.Machine)
+		}
 	}
 }

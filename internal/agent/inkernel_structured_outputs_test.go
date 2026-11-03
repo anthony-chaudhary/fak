@@ -249,7 +249,7 @@ func TestNativeStructuredOutputsRefusedBeforeSampling(t *testing.T) {
 		{"regex_and_choice", []SampleOpt{so(map[string]any{"regex": "a", "choice": []string{"a"}})}, "structured_outputs"},
 		{"json_object", []SampleOpt{guided(raw(`{"json_object":true}`))}, "structured_outputs.json_object"},
 		{"json_object_false", []SampleOpt{guided(raw(`{"json_object":false}`))}, "structured_outputs.json_object"},
-		{"grammar", []SampleOpt{guided(raw(`{"grammar":"root ::= \"a\""}`))}, "structured_outputs.grammar"},
+		{"invalid_grammar", []SampleOpt{guided(raw(`{"grammar":"root ::= missing"}`))}, "structured_outputs.grammar"},
 		{"structural_tag", []SampleOpt{guided(raw(`{"structural_tag":"{}"}`))}, "structured_outputs.structural_tag"},
 		{"json_with_grammar", []SampleOpt{so(map[string]any{"json": schema, "grammar": `root ::= "a"`})}, "structured_outputs.grammar"},
 		{"whitespace_pattern", []SampleOpt{so(map[string]any{"json": schema, "whitespace_pattern": `[ ]?`})}, "structured_outputs.whitespace_pattern"},

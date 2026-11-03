@@ -59,6 +59,14 @@ func (s *Session) prefillQwen35HybridQNoLogits(ids []int) {
 }
 
 func (s *Session) prefillQwen35HybridQHidden(ids []int) []float32 {
+	return s.prefillQwen35HybridQHiddenWithNormWorkspace(ids, s.newQwen35PrefillNormWorkspace(len(ids)))
+}
+
+func (s *Session) prefillQwen35HybridQHiddenWithNormWorkspace(ids []int, normWorkspace *qwen35PrefillNormWorkspace) []float32 {
+	return s.prefillQwen35HybridQHiddenWithGDNMode(ids, normWorkspace, qwen35GDNHostBuildSelected)
+}
+
+func (s *Session) prefillQwen35HybridQHiddenWithGDNMode(ids []int, normWorkspace *qwen35PrefillNormWorkspace, gdnMode qwen35GDNHostMode) []float32 {
 	dispatchWorkers := currentWorkerCount()
 	m, cfg := s.M, s.M.Cfg
 	H := cfg.HiddenSize
@@ -93,16 +101,17 @@ func (s *Session) prefillQwen35HybridQHidden(ids []int) []float32 {
 		}
 	}
 	s.phaseEnd("embed", t)
+	ropeRows := s.newQwen35PrefillRopeRows(base, P)
 
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(str string) string { return layerName(l, str) }
-		Xn := make([]float32, P*H)
+		Xn := normWorkspace.panel(P, H)
 		wIn := m.tensor(lp("input_layernorm.weight"))
 		t = s.phaseStart()
 		parFor(P, dispatchWorkers, func(lo, hi int) {
 			for t := lo; t < hi; t++ {
 				if cfg.NormGain1p || cfg.LayerNorm {
-					copy(Xn[t*H:(t+1)*H], rmsnormCfg(X[t*H:(t+1)*H], wIn, eps, cfg))
+					qwen35PrefillNormIntoDisjoint(Xn[t*H:(t+1)*H], X[t*H:(t+1)*H], wIn, eps, cfg)
 				} else {
 					rmsnormInto(Xn[t*H:(t+1)*H], X[t*H:(t+1)*H], wIn, eps)
 				}
@@ -112,9 +121,9 @@ func (s *Session) prefillQwen35HybridQHidden(ids []int) []float32 {
 
 		var o []float32
 		if cfg.isLinearAttnLayer(l) {
-			o = s.prefillQwen35LinearLayerQ(l, Xn, P, qz)
+			o = s.prefillQwen35LinearLayerQWithHostChunks(l, Xn, P, qz, qwen35GDNHostModeAllows(gdnMode))
 		} else {
-			o = s.prefillQwen35FullAttnLayerQ(l, Xn, P, base, qz)
+			o = s.prefillQwen35FullAttnLayerQWithRopeRows(l, Xn, P, base, qz, ropeRows)
 		}
 		t = s.phaseStart()
 		parFor(len(X), dispatchWorkers, func(lo, hi int) {
@@ -124,13 +133,13 @@ func (s *Session) prefillQwen35HybridQHidden(ids []int) []float32 {
 		})
 		s.phaseEnd("attn_residual", t)
 
-		Xn2 := make([]float32, P*H)
+		Xn2 := normWorkspace.panel(P, H)
 		wPost := m.tensor(lp("post_attention_layernorm.weight"))
 		t = s.phaseStart()
 		parFor(P, dispatchWorkers, func(lo, hi int) {
 			for t := lo; t < hi; t++ {
 				if cfg.NormGain1p || cfg.LayerNorm {
-					copy(Xn2[t*H:(t+1)*H], rmsnormCfg(X[t*H:(t+1)*H], wPost, eps, cfg))
+					qwen35PrefillNormIntoDisjoint(Xn2[t*H:(t+1)*H], X[t*H:(t+1)*H], wPost, eps, cfg)
 				} else {
 					rmsnormInto(Xn2[t*H:(t+1)*H], X[t*H:(t+1)*H], wPost, eps)
 				}
@@ -187,6 +196,12 @@ func (s *Session) prefillQwen35HybridQHidden(ids []int) []float32 {
 }
 
 func (s *Session) prefillQwen35LinearLayerQ(l int, Xn []float32, P int, qz func([]float32, int, int) *q8Panel) []float32 {
+	return s.prefillQwen35LinearLayerQWithHostChunks(l, Xn, P, qz, false)
+}
+
+// The ordinary Q8 panel owns this input and state; direct callback callers use
+// the non-selecting wrapper above.
+func (s *Session) prefillQwen35LinearLayerQWithHostChunks(l int, Xn []float32, P int, qz func([]float32, int, int) *q8Panel, ordinaryHost bool) []float32 {
 	dispatchWorkers := currentWorkerCount()
 	m, cfg := s.M, s.M.Cfg
 	H := cfg.HiddenSize
@@ -287,61 +302,80 @@ func (s *Session) prefillQwen35LinearLayerQ(l int, Xn []float32, P int, qz func(
 	// and the scalar float64-FMA-to-float32 path can differ even for finite
 	// inputs. Existing numeric/physical qualification remains required.
 	vectorized := os.Getenv("FAK_VECTORIZED_DELTANET") == "1" && HasVectorizedDeltaNetFor(kHd, vHd)
-	parFor(nV, dispatchWorkers, func(lo, hi int) {
-		for h := lo; h < hi; h++ {
-			kh := h / repeat
-			st := lst.recurrent[h]
-			a := aExp[h]
-			dtB := dtBias[h]
-			kvmem := make([]float32, vHd)
-			delta := make([]float32, vHd)
-			for t := 0; t < P; t++ {
-				row := convOut[t*convDim : (t+1)*convDim]
-				qn := qNormAll[t*keyDim+kh*kHd : t*keyDim+(kh+1)*kHd]
-				kn := kNormAll[t*keyDim+kh*kHd : t*keyDim+(kh+1)*kHd]
-				vh := row[2*keyDim+h*vHd : 2*keyDim+(h+1)*vHd]
-				bt := sigmoidf(bvec[t*nV+h])
-				dt := softplus(avec[t*nV+h] + dtB)
-				g := float32(math.Exp(float64(-a * dt)))
-				if vectorized && qwen35PrefillVectorizedStep(st, qn, kn, vh, core, kvmem, delta, bt, g, t, valDim, h) {
-					continue
-				}
-				// The ordinary head state and scratch are disjoint exact-shape
-				// rows. Decay each cell when retrieving it instead of making a
-				// separate full-state pass. Refused geometry keeps the old mutation
-				// and panic order, including extra state/scratch elements.
-				if !qwen35PrefillDecayRead(st, kn, kvmem, g, kHd, vHd) {
-					for i := range st {
-						st[i] *= g
+	recurrentPhase := "qwen35_linear_recurrent"
+	chunked := false
+	if s.qwen35GDNHostSelected(ordinaryHost, vectorized, P) {
+		result, ok := qwen35GDNHostCompute(qwen35GDNHostInput{
+			tokens: P, keyHeads: nK, valueHeads: nV, keyWidth: kHd, valueWidth: vHd,
+			q: qNormAll, k: kNormAll, conv: convOut, a: avec, b: bvec,
+			aExp: aExp, dtBias: dtBias, state: lst.recurrent,
+		}, dispatchWorkers)
+		if ok {
+			core = result.core
+			for h := range lst.recurrent {
+				copy(lst.recurrent[h], result.state[h])
+			}
+			chunked = true
+			recurrentPhase = "qwen35_linear_chunked_host"
+		}
+	}
+	if !chunked {
+		parFor(nV, dispatchWorkers, func(lo, hi int) {
+			for h := lo; h < hi; h++ {
+				kh := h / repeat
+				st := lst.recurrent[h]
+				a := aExp[h]
+				dtB := dtBias[h]
+				kvmem := make([]float32, vHd)
+				delta := make([]float32, vHd)
+				for t := 0; t < P; t++ {
+					row := convOut[t*convDim : (t+1)*convDim]
+					qn := qNormAll[t*keyDim+kh*kHd : t*keyDim+(kh+1)*kHd]
+					kn := kNormAll[t*keyDim+kh*kHd : t*keyDim+(kh+1)*kHd]
+					vh := row[2*keyDim+h*vHd : 2*keyDim+(h+1)*vHd]
+					bt := sigmoidf(bvec[t*nV+h])
+					dt := softplus(avec[t*nV+h] + dtB)
+					g := float32(math.Exp(float64(-a * dt)))
+					if vectorized && qwen35PrefillVectorizedStep(st, qn, kn, vh, core, kvmem, delta, bt, g, t, valDim, h) {
+						continue
 					}
-					for d := range kvmem {
-						kvmem[d] = 0
+					// The ordinary head state and scratch are disjoint exact-shape
+					// rows. Decay each cell when retrieving it instead of making a
+					// separate full-state pass. Refused geometry keeps the old mutation
+					// and panic order, including extra state/scratch elements.
+					if !qwen35PrefillDecayRead(st, kn, kvmem, g, kHd, vHd) {
+						for i := range st {
+							st[i] *= g
+						}
+						for d := range kvmem {
+							kvmem[d] = 0
+						}
+						for i := 0; i < kHd; i++ {
+							ki := kn[i]
+							base := i * vHd
+							for d := 0; d < vHd; d++ {
+								kvmem[d] = gdnFMA32(st[base+d], ki, kvmem[d])
+							}
+						}
 					}
+					for d := 0; d < vHd; d++ {
+						delta[d] = (vh[d] - kvmem[d]) * bt
+					}
+					od := core[t*valDim+h*vHd : t*valDim+(h+1)*vHd]
 					for i := 0; i < kHd; i++ {
 						ki := kn[i]
+						qi := qn[i]
 						base := i * vHd
 						for d := 0; d < vHd; d++ {
-							kvmem[d] = gdnFMA32(st[base+d], ki, kvmem[d])
+							st[base+d] = gdnFMA32(ki, delta[d], st[base+d])
+							od[d] = gdnFMA32(st[base+d], qi, od[d])
 						}
 					}
 				}
-				for d := 0; d < vHd; d++ {
-					delta[d] = (vh[d] - kvmem[d]) * bt
-				}
-				od := core[t*valDim+h*vHd : t*valDim+(h+1)*vHd]
-				for i := 0; i < kHd; i++ {
-					ki := kn[i]
-					qi := qn[i]
-					base := i * vHd
-					for d := 0; d < vHd; d++ {
-						st[base+d] = gdnFMA32(ki, delta[d], st[base+d])
-						od[d] = gdnFMA32(st[base+d], qi, od[d])
-					}
-				}
 			}
-		}
-	})
-	s.phaseEnd("qwen35_linear_recurrent", t)
+		})
+	}
+	s.phaseEnd(recurrentPhase, t)
 	t = s.phaseStart()
 	parFor(P*nV, dispatchWorkers, func(lo, hi int) {
 		for idx := lo; idx < hi; idx++ {
@@ -365,6 +399,10 @@ func (s *Session) prefillQwen35LinearLayerQ(l int, Xn []float32, P int, qz func(
 }
 
 func (s *Session) prefillQwen35FullAttnLayerQ(l int, Xn []float32, P, base int, qz func([]float32, int, int) *q8Panel) []float32 {
+	return s.prefillQwen35FullAttnLayerQWithRopeRows(l, Xn, P, base, qz, nil)
+}
+
+func (s *Session) prefillQwen35FullAttnLayerQWithRopeRows(l int, Xn []float32, P, base int, qz func([]float32, int, int) *q8Panel, ropeRows *qwen35PrefillRopeRows) []float32 {
 	dispatchWorkers := currentWorkerCount()
 	m, cfg := s.M, s.M.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim
@@ -407,9 +445,15 @@ func (s *Session) prefillQwen35FullAttnLayerQ(l int, Xn []float32, P, base int, 
 		}
 	})
 	s.Cache.Kraw[l] = append(s.Cache.Kraw[l], K...)
+	reuseRope := ropeRows.prepare(cfg, l, base, P)
 	parFor(P, dispatchWorkers, func(lo, hi int) {
 		for t := lo; t < hi; t++ {
-			cos, sin := ropeRowForLayer(cfg, l, base+t)
+			var cos, sin []float32
+			if reuseRope {
+				cos, sin = ropeRows.row(t)
+			} else {
+				cos, sin = ropeRowForLayer(cfg, l, base+t)
+			}
 			ropeRowQKInto(Q[t*qWidth:(t+1)*qWidth], K[t*w:(t+1)*w], cos, sin, hd, nH, nKV)
 		}
 	})
@@ -423,7 +467,12 @@ func (s *Session) prefillQwen35FullAttnLayerQ(l int, Xn []float32, P, base int, 
 	// projection kernels retain no target, and phase profiling records only time.
 	// Loan it as bounded score scratch only for unobserved builtin attention.
 	W := cfg.windowForLayer(l)
-	if !attnPrefillGQA3FDotInto(attnOut, Q, s.Cache.K[l], s.Cache.V[l], qf, P, base, nH, hd, w, grp, W, scale, attnCap, s.M.attnObs) {
+	// Qualified host-only tiled KV reuse takes the same dead loan. Every
+	// refusal precedes writes, so the original GQA3/score-row oracle is intact.
+	tiled := qwen35PrefillTiledAttentionQualification && !s.Metal && !s.MetalQ4K && s.Backend == nil && m.prism == nil &&
+		!cfg.Alibi && !m.hasWeight(p("self_attn.sinks")) &&
+		qwen35PrefillTiledAttentionInto(attnOut, Q, s.Cache.K[l], s.Cache.V[l], qf, P, base, nH, hd, w, grp, W, scale, attnCap, s.M.attnObs)
+	if !tiled && !attnPrefillGQA3FDotInto(attnOut, Q, s.Cache.K[l], s.Cache.V[l], qf, P, base, nH, hd, w, grp, W, scale, attnCap, s.M.attnObs) {
 		attnPrefillInto(attnOut, Q, s.Cache.K[l], s.Cache.V[l], P, base, nH, hd, w, grp, W, l, scale, attnCap, fdot, s.M.attnObs)
 	}
 	s.phaseEnd("qwen35_full_attn", t)

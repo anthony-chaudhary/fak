@@ -146,8 +146,25 @@ func TestSyntheticShapeTiny(t *testing.T) {
 		t.Fatalf("tiny attn = %dq/%dkv/headdim%d, want 8q/2kv/headdim8", cfg.NumHeads, cfg.NumKVHeads, cfg.HeadDim)
 	}
 
-	// The pre-existing shapes must still resolve (no regression from inserting tiny first).
-	for _, name := range []string{"smollm2-135m", "135m", "qwen25-1.5b", "qwen25-7b"} {
+	// The qwen38-27b shape resolves to the pinned Qwen3.8-27B hybrid geometry
+	// (docs/benchmarks/qwen38-ladder/README.md; internal/model/contextsize_test.go:88).
+	cfg27, ok := syntheticShape("qwen38-27b")
+	if !ok {
+		t.Fatal(`syntheticShape("qwen38-27b") returned ok=false; the pinned 27B shape must resolve`)
+	}
+	if cfg27.HiddenSize != 5120 || cfg27.NumLayers != 64 || cfg27.VocabSize != 248320 {
+		t.Fatalf("qwen38-27b shape = %dh/%dL/vocab%d, want 5120h/64L/vocab248320", cfg27.HiddenSize, cfg27.NumLayers, cfg27.VocabSize)
+	}
+	if cfg27.NumHeads != 24 || cfg27.NumKVHeads != 4 || cfg27.HeadDim != 256 || cfg27.IntermediateSize != 17408 {
+		t.Fatalf("qwen38-27b attn/mlp = %dq/%dkv/headdim%d/I%d, want 24q/4kv/headdim256/I17408", cfg27.NumHeads, cfg27.NumKVHeads, cfg27.HeadDim, cfg27.IntermediateSize)
+	}
+	if len(cfg27.LayerTypes) != 64 || cfg27.LayerTypes[0] != "linear_attention" || cfg27.LayerTypes[3] != "full_attention" {
+		t.Fatalf("qwen38-27b layer types = %v, want 64 layers with 3:1 linear:full cadence", cfg27.LayerTypes)
+	}
+
+	// The pre-existing shapes must still resolve (no regression from inserting tiny first),
+	// including the qwen38-27b aliases.
+	for _, name := range []string{"smollm2-135m", "135m", "qwen25-1.5b", "qwen25-7b", "27b", "qwen3.8-27b"} {
 		if _, ok := syntheticShape(name); !ok {
 			t.Errorf("syntheticShape(%q) regressed to ok=false", name)
 		}
