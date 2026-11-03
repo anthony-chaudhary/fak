@@ -405,6 +405,7 @@ var verbTiers = map[string]VerbTier{
 	"readme-visual-audit":           TierDev,
 	"recall":                        TierDev,
 	"refactor-verify":               TierDev,
+	"regime":                        TierDev,
 	"relay":                         TierDev,
 	"release":                       TierDev,
 	"release-lock":                  TierDev,
