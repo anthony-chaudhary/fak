@@ -1,9 +1,8 @@
-// Package kimik3page validates marketing page contract and links for Kimi K3.
-//
-// Contract: marketing page must adhere to accessibility, responsive design, and non-hyperbolic claims.
-// Invariants:
-// - Guard: required structural and accessibility tokens must be present.
-// - Guard: hyperbolic or unwitnessed claims are strictly forbidden (fail-closed validation).
+// Package kimik3page also provides the Kimi K3 marketing-page validator:
+// required structural, accessibility, and responsive tokens must be present
+// in the page, and
+// unwitnessed superlative claims are rejected, keeping every statement on the
+// page evidence-backed.
 package kimik3page
 
 import (

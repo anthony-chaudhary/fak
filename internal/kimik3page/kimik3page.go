@@ -1,9 +1,9 @@
-// Package kimik3page implements memory layout, page table metadata, and
-// paged-attention allocation structures for Kimi K3 hybrid architectures.
+// Package kimik3page implements paged-attention memory layout, page-table
+// metadata, and physical block allocation for Kimi K3 hybrid (KDA + MLA)
+// architectures.
 //
-// Invariant: Memory layouts enforce strict 64-byte hardware cache-line alignment
-// and fail-closed bounds checking on block tables, preventing page table overrun
-// or invalid physical index dereferencing.
+// Table operations bounds-check indices and reference counts, so an out-of-range
+// block id or double free returns an error instead of corrupting pool state.
 package kimik3page
 
 import (
@@ -30,7 +30,7 @@ const (
 )
 
 var (
-	// ErrInvalidBlockSize indicates block size is non-positive or not a power of two.
+	// ErrInvalidBlockSize indicates block size is non-positive or not a multiple of 8.
 	ErrInvalidBlockSize = errors.New("kimik3page: block size must be a positive multiple of 8")
 	// ErrBlockExhaustion indicates the pool has no available physical pages.
 	ErrBlockExhaustion = errors.New("kimik3page: physical block pool exhausted")
