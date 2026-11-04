@@ -425,6 +425,32 @@ copied; the adaptation is witnessed by
 `TestDistTransportPayloadLimitLinkState` in
 `internal/model/dist_transport_test.go`. The upstream Apache-2.0 license is
 reproduced in the TensorFold benchmark evidence section above.
+## TensorFold learned shared-prefix disk index (imprint)
+
+`internal/agent/inkernel_warm_disk.go` adapts the explicit-learn shared-prefix
+disk index from TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209`
+([prompt_imprint.zig](https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/prompt_imprint.zig),
+[cli.zig](https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/server/cli.zig)):
+the identity-scoped `root/<id>` directory layout with one durable record file
+per state plus a state index, a byte cap shared by every identity under the
+root, LRU eviction of least-recently-used states first, cross-identity sweep
+that reclaims the least-recently-opened identities when the cap needs room,
+and the pending-write marker that guards each in-flight write so a crash leaves
+a reconcilable marker and a second concurrent writer defers.
+
+Changed for Fak: idiomatic Go over fak's span-keyed `l3kv.DiskStore` records
+instead of Zig binary append-only indexes; a JSON state index with rescan
+repair instead of torn-tail truncation; identity derived from the authenticated
+tenant/agent/epoch cache scope rather than an operator-supplied id; the
+warm-prefix receipt vocabulary (`WarmDiskOutcome`/reason strings) instead of
+Zig error unions; pre-upgrade flat records remain readable as the oldest
+pseudo-identity so existing warm disks keep working across the upgrade. No
+upstream source code is copied; the adaptation is witnessed by
+`TestLearnedPrefixDiskIndex` in `internal/agent/inkernel_warm_disk_test.go`.
+The upstream Apache-2.0 license is reproduced in the TensorFold benchmark
+evidence section above.
+
 
 ## TensorFold durable conversation-state staging (warm-disk conversation state)
 
