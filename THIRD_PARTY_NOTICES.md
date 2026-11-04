@@ -2244,3 +2244,33 @@ is witnessed by `TestInflightAdmissionLeasesRefusals` in
 `internal/gateway/inflight_admission_test.go`. The upstream Apache-2.0 license
 is reproduced in the TensorFold benchmark evidence section above.
 
+## TensorFold per-key API-key auth scopes and route grants
+
+`internal/gateway/key_scope.go` (`keyScopes`, `parseKeyScopeLabel`,
+`scopedKeyFile`) and the scoped entry arm of `internal/gateway/keyset.go`
+(`keysetBinding`, `newScopedKeyset`, `keyset.lookupScoped`) adapt the per-key
+scope authentication from TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/server/auth.zig
+plus the exact method/route grant matrix at
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/server/auth_scope.zig
+
+The adapted contract: a verified key carries its own copy of its label and
+scope set, so an in-flight request keeps the scopes it was accepted with if
+the key file changes while it runs; one key digest may not carry two scope
+sets, so a load in which a restricted line is shadowed by a full copy of the
+same key is refused wholesale; an invalid reload closes every file key
+fail-closed until a valid load succeeds again; and route grants are exact
+method+route matches against a closed table — never suffix grants — with
+admin passing everything, inference covering POST inference routes and GET
+model listing, and read covering observation-plane GETs.
+
+Changed for Fak: idiomatic Go re-expression over fak's existing SHA-256
+digest keyset seam (constant-time scan discipline preserved), sentinel errors
+(`ErrInvalidKeyScopeLabel`, `ErrInvalidKeyScopes`, `ErrConflictingKeyScopes`,
+`ErrEmptyKeyFile`) instead of Zig error unions, fak's closed route tables
+instead of upstream's, and no key material held raw or logged — refusals name
+lines and labels only. No upstream source code is copied; the adaptation is
+witnessed by `TestKeysetScopeGrantsExactAndReloadCloses` in
+`internal/gateway/key_scope_test.go`. The upstream Apache-2.0 license is
+reproduced in the TensorFold benchmark evidence section above.

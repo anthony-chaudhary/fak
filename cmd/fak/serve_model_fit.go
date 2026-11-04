@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
@@ -106,6 +108,59 @@ func validateServeNativeContextTokens(tokens int) error {
 	return nil
 }
 
+// serveCapabilityReport renders the compiled capability table (modelCapabilities,
+// owned by model.go) as a stable multi-line report in the TensorFold
+// cli_capabilities.zig:20 doc shape: a version/chip/backends header, then one
+// line per family -> weight formats, native flags, env. Rows are emitted in
+// table order (static, sorted by Family) so the report is deterministic for a
+// given build. version, chip and backends are injected so the caller controls
+// the header facts; the body always lists exactly what this binary carries.
+func serveCapabilityReport(version, chip string, backends []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "fak capabilities: version=%s chip=%s backends=%s\n",
+		version, chip, capabilityReportJoin(backends))
+	for _, c := range modelCapabilities {
+		fmt.Fprintf(&b, "  family=%s formats=%s flags=%s env=%s\n",
+			c.Family, capabilityReportJoin(c.Formats), capabilityReportJoin(c.Flags), capabilityReportJoin(c.Env))
+	}
+	return b.String()
+}
+
+// capabilityReportJoin renders a list comma-joined, or "-" when empty, so
+// every report column keeps a fixed closed shape.
+func capabilityReportJoin(items []string) string {
+	if len(items) == 0 {
+		return "-"
+	}
+	return strings.Join(items, ",")
+}
+
+var serveCapabilityReportOnce sync.Once
+
+// logServeCapabilityReport emits the compiled capability report ONCE per
+// process on the serve-fit path, beside validateServeNativeContextTokens: the
+// families/formats this binary admits — the SAME table the pre-transfer gate
+// (modelTypeGate) consults — so an operator sees the disclosure at the moment
+// the fit math starts. Device backends beyond the compile-time floor are
+// driver-probed at serve start and reported there, not here.
+func logServeCapabilityReport(w io.Writer) {
+	serveCapabilityReportOnce.Do(func() {
+		fmt.Fprint(w, serveCapabilityReport(runtime.Version(), runtime.GOOS+"/"+runtime.GOARCH, serveCompiledBackends())+"\n")
+	})
+}
+
+// serveCompiledBackends is the compile-time backend floor the report header
+// claims: the pure-CPU reference everywhere, plus the Metal API on darwin.
+// Keeping the header to the static floor is what makes the report
+// deterministic for a given build.
+func serveCompiledBackends() []string {
+	backends := []string{"cpu-ref"}
+	if runtime.GOOS == "darwin" {
+		backends = append(backends, "metal")
+	}
+	return backends
+}
+
 // resolveServeNativeContext is the header-only authority for the native model
 // window. weights and fit are the selected load arm's exact sizing inputs, so
 // auto mode returns the same token count later used to build the load plan.
@@ -124,6 +179,11 @@ func resolveServeNativeContextBudget(ws *ggufload.WeightSource, be compute.Backe
 	resolution := serveNativeContextResolution{RequestedTokens: requested, Source: "auto"}
 	if err := validateServeNativeContextTokens(requested); err != nil {
 		return resolution, nil, fit, err
+	}
+	if ws != nil {
+		// Disclose the compiled family/format table at the start of the real
+		// fit (once per process); the ws==nil directory-scan paths stay silent.
+		logServeCapabilityReport(os.Stderr)
 	}
 	if requested > 0 {
 		resolution.Source = "explicit"
