@@ -187,6 +187,9 @@ var maintainerDevCommands = []string{
 	"go",
 	"goal",
 	"goal-park",
+	// Ratcheting god-file LOC ceiling gate over fak's own tree (debtwave2 lane):
+	// implementation maintains/operates fak itself, not a portable adopter pattern.
+	"godfile-ceiling",
 	"godsplit-plan",
 	"grafana",
 	// Presence-vs-invokability audit of CUDA/Vulkan graph capture/replay on the

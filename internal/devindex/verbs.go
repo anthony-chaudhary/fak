@@ -240,6 +240,7 @@ var verbManifest = []Verb{
 	{Name: "go", Synopsis: "go build/vet/test passthrough that masks peers' untracked-sibling poison via a buildcheck -overlay", Lane: "cmd"},
 	{Name: "goal", Synopsis: "manage canonical goals, lifecycle transitions, bindings, evidence, and execution topology", Lane: "cmd"},
 	{Name: "goal-park", Synopsis: "park a supervisor goal claim: status|claim a goal identity to a single owner via the .fak/goal-park store", Lane: "cmd"},
+	{Name: "godfile-ceiling", Synopsis: "the ratcheting god-file LOC ceiling gate: live tree vs committed baseline; --json emits the verdict", Lane: "cmd"},
 	{Name: "godsplit-plan", Synopsis: "read-only boundary + hazard planner for a behavior-preserving Go god-file split (the /modularize --json plan)", Lane: "cmd"},
 	{Name: "grafana", Synopsis: "export fak fleet metrics as a Grafana dashboard/datasource", Lane: "cmd"},
 	{Name: "graph-audit", Synopsis: "CUDA/Vulkan graph capture/replay audit on decode paths; --fail-on uncovered gates host-setup-bound paths", Lane: "cmd"},
