@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"testing"
@@ -418,5 +420,73 @@ func TestHostRequirementsWiringCatchesZeroValueField(t *testing.T) {
 	}
 	if unpopulated != 2 {
 		t.Fatalf("wiring assertion missed the regression: expected XcodeCLT and Clang detected as unpopulated, found %d", unpopulated)
+	}
+}
+
+// TestHostRequirementsSourcesCgoFromToolchain is the #13611 regression: with the
+// ambient CGO_ENABLED UNSET, hostRequirements must still populate CgoEnabled from
+// the selected toolchain's effective setting. The comparison target is the same
+// `go env CGO_ENABLED` query run inside the test, so both sides observe identical
+// toolchain state and the equality can only hold if the gate sources the value
+// from the toolchain rather than the process environment.
+func TestHostRequirementsSourcesCgoFromToolchain(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows shim is a static stub: the gate exits not-applicable before consulting cgo")
+	}
+	goExe, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go toolchain not on PATH; the cgo query has no toolchain to ask")
+	}
+	if saved, ok := os.LookupEnv("CGO_ENABLED"); ok {
+		os.Unsetenv("CGO_ENABLED")
+		t.Cleanup(func() { os.Setenv("CGO_ENABLED", saved) })
+	}
+	wantOut, err := exec.Command(goExe, "env", "CGO_ENABLED").Output()
+	if err != nil {
+		t.Fatalf("go env CGO_ENABLED: %v", err)
+	}
+	want := strings.TrimSpace(string(wantOut))
+	if want != "0" && want != "1" {
+		t.Fatalf("toolchain answered %q; expected the go command's 0/1 spelling", want)
+	}
+	if got := hostRequirements(runtime.GOARCH).CgoEnabled; got != want {
+		t.Fatalf("hostRequirements CgoEnabled = %q, want the toolchain's effective setting %q (ambient CGO_ENABLED was unset)", got, want)
+	}
+}
+
+// TestHostRequirementsIgnoresAmbientCgo proves the ambient variable is no longer a
+// source at all (#13605 leaf K): whatever the process environment holds, the field
+// carries the toolchain query's answer verbatim. The query is stubbed so the case
+// table is deterministic on every host, including ones without Xcode or clang.
+func TestHostRequirementsIgnoresAmbientCgo(t *testing.T) {
+	cases := []struct {
+		name      string
+		ambient   string // "" leaves the ambient variable unset
+		toolchain string
+		want      string
+	}{
+		{name: "ambient-disabled-toolchain-enabled", ambient: "0", toolchain: "1", want: "1"},
+		{name: "ambient-enabled-toolchain-disabled", ambient: "1", toolchain: "0", want: "0"},
+		{name: "ambient-unset", ambient: "", toolchain: "0", want: "0"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.ambient == "" {
+				if saved, ok := os.LookupEnv("CGO_ENABLED"); ok {
+					os.Unsetenv("CGO_ENABLED")
+					t.Cleanup(func() { os.Setenv("CGO_ENABLED", saved) })
+				}
+			} else {
+				t.Setenv("CGO_ENABLED", tc.ambient)
+			}
+			original := cgoEnabledFromToolchain
+			cgoEnabledFromToolchain = func() string { return tc.toolchain }
+			t.Cleanup(func() { cgoEnabledFromToolchain = original })
+			req := hostRequirements(runtime.GOARCH)
+			if req.CgoEnabled != tc.want {
+				t.Fatalf("ambient=%q toolchain=%q: CgoEnabled = %q, want %q", tc.ambient, tc.toolchain, req.CgoEnabled, tc.want)
+			}
+		})
 	}
 }

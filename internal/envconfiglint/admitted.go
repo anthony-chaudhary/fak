@@ -650,11 +650,6 @@ var admittedPostFreeze = []string{
 	// Relocates to: claude launcher config.
 	"ANTHROPIC_CUSTOM_HEADERS",
 
-	// cmd/metalprobe/metalcheck.go — records the build environment's cgo setting in the probe
-	// report. Read-only provenance, not behavior.
-	// Relocates to: a build-info field (debug.ReadBuildInfo) instead of the process env.
-	"CGO_ENABLED",
-
 	// cmd/fak/serve_memory_admission.go — opt-in state-envelope memory admission and the GPU
 	// wait bound for admission. Serving policy knobs.
 	// Relocates to: serve memory config.

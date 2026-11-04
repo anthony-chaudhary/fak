@@ -6,10 +6,42 @@
 package main
 
 import (
+	"context"
 	"os/exec"
+	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/pkg/sysproc"
 )
+
+// cgoEnabledFromToolchain is the host source of Requirements.CgoEnabled: the
+// selected Go toolchain's effective CGO setting, queried explicitly (#13605
+// leaf K / #13611). It is a var so tests can substitute a deterministic
+// toolchain answer; the default is the bounded `go env CGO_ENABLED` query.
+var cgoEnabledFromToolchain = querySelectedCgoEnabled
+
+// querySelectedCgoEnabled runs `<go> env CGO_ENABLED` against the go executable
+// on PATH under a hard bound and returns the trimmed toolchain answer. The
+// output of `go env` is toolchain data, not an ambient configuration read: it
+// reports the effective setting the selected toolchain will actually build
+// with, which an unset ambient variable does not determine. A failed query
+// (no go, timeout, nonzero exit) reports "" — the historical unset value — so
+// the gate falls through to the GoTool prerequisite, which names the missing
+// toolchain explicitly instead of guessing at cgo state.
+func querySelectedCgoEnabled() string {
+	goExe, err := exec.LookPath("go")
+	if err != nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := sysproc.CommandContext(ctx, goExe, "env", "CGO_ENABLED")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
 
 // checkGoTool verifies the go toolchain is present in PATH.
 func checkGoTool() ToolCheck {
