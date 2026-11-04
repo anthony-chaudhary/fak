@@ -95,32 +95,60 @@ func TestDialectToolNormalizationParity(t *testing.T) {
 		},
 	}
 
+	// Preserve every wire declaration before the serving-input fold, including
+	// the duplicate and empty name that normalization must later remove. Relate
+	// the decoded catalog to these fixture entries, not a frozen total.
+	wantDeclarations := []agent.ToolDef{
+		want[0],
+		{Type: "function", Function: agent.ToolDefFunction{Name: "search_kb", Description: "Duplicate must lose", Parameters: json.RawMessage("{}")}},
+		{Type: "function", Function: agent.ToolDefFunction{Name: "", Description: "Empty name must drop"}},
+		{Type: "function", Function: agent.ToolDefFunction{Name: "mcp__fak__fak_read", Description: "Legacy read", Parameters: json.RawMessage("{}")}},
+		want[1],
+		want[2],
+	}
+	assertDeclarations := func(t *testing.T, wire string, got []agent.ToolDef) {
+		t.Helper()
+		if len(got) != len(wantDeclarations) {
+			t.Fatalf("%s wire decoded %d declarations, want one for each fixture entry (%d)", wire, len(got), len(wantDeclarations))
+		}
+		for i, declared := range wantDeclarations {
+			if !reflect.DeepEqual(got[i], declared) {
+				t.Errorf("%s wire declaration %d = %+v, want %+v before normalization", wire, i, got[i], declared)
+			}
+		}
+	}
+
 	t.Run("all three dialects fold to one serving input", func(t *testing.T) {
 		var chatReq ChatRequest
 		if err := json.Unmarshal([]byte(`{"model":"m","messages":[{"role":"user","content":"hi"}],"tools":`+chatFragment+`}`), &chatReq); err != nil {
 			t.Fatalf("decode chat body: %v", err)
 		}
-		if len(chatReq.Tools) != 6 {
-			t.Fatalf("chat wire decoded %d tools, want 6 (decoders must keep every declaration; the fold drops)", len(chatReq.Tools))
-		}
+		assertDeclarations(t, "openai-chat", chatReq.Tools)
 		gotChat := normalizeServingToolDefs(chatReq.Tools)
 
 		var respReq ResponsesRequest
 		if err := json.Unmarshal([]byte(`{"model":"m","input":"hi","tools":`+responsesFragment+`}`), &respReq); err != nil {
 			t.Fatalf("decode responses body: %v", err)
 		}
-		if len(respReq.Tools) != 6 {
-			t.Fatalf("responses wire decoded %d tools, want 6", len(respReq.Tools))
+		// Inspect the decoded Responses fields before its production mapping
+		// normalizes them. This test projection must not drop or reorder tools.
+		decodedResponses := make([]agent.ToolDef, len(respReq.Tools))
+		for i, tool := range respReq.Tools {
+			decodedResponses[i] = agent.ToolDef{
+				Type: tool.Type,
+				Function: agent.ToolDefFunction{
+					Name: tool.Name, Description: tool.Description, Parameters: tool.Parameters,
+				},
+			}
 		}
+		assertDeclarations(t, "openai-responses", decodedResponses)
 		gotResponses := responsesToolsToToolDefs(respReq.Tools)
 
 		out, err := agent.DecodeAnthropicMessagesRequest([]byte(`{"model":"m","max_tokens":8,"messages":[{"role":"user","content":"hi"}],"tools":` + anthropicFragment + `}`))
 		if err != nil {
 			t.Fatalf("decode anthropic body: %v", err)
 		}
-		if len(out.Tools) != 6 {
-			t.Fatalf("anthropic wire decoded %d tools, want 6", len(out.Tools))
-		}
+		assertDeclarations(t, "anthropic", out.Tools)
 		gotAnthropic := normalizeServingToolDefs(out.Tools)
 
 		for name, got := range map[string][]agent.ToolDef{
