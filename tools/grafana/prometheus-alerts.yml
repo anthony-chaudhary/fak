@@ -348,9 +348,13 @@ groups:
   # describe one process's HTTP surface, and the ops rules below describe the
   # factory. These answer "is routing serving?": total failure, backend
   # health streaks, silent durability loss, admission backpressure and
-  # durable-store headroom.
+  # durable-store headroom. Source: router Prometheus KPI ranking 2026-11-03,
+  # "Next steps" item 1 (KPI rows 1, 2, 4, 12, 13).
   - name: fak_router
     rules:
+      # KPI row 1 (T1 request outcome mix): the family always emits all closed
+      # outcomes, so a non-zero all_backends_failed rate is an honest total
+      # failure, not an absence artifact.
       - alert: RouterAllBackendsFailing
         expr: sum(rate(fak_router_requests_total{outcome="all_backends_failed"}[5m])) > 0
         for: 2m
@@ -360,10 +364,11 @@ groups:
           summary: "Router serving nothing: every backend failed for requests"
           description: "Every routed request ended all_backends_failed at {{ $value | printf \"%.3f\" }}/s for 2m -- the router is serving nothing. Check /v1/router/state verdict and reasons, then backend health."
 
-      # A counter rate would go quiet across an operator reset; this gauge is
-      # STATE, deliberately surviving cache-reset, and caller-fault classes
-      # (PAYLOAD_REJECTED, CONTEXT_OVERFLOW) are excluded by construction, so a
-      # streak here is upstream/engine fault, not client error.
+      # KPI row 2 (T1 backend health streak). A counter rate would go quiet
+      # across an operator reset; this gauge is STATE, deliberately surviving
+      # cache-reset, and caller-fault classes (PAYLOAD_REJECTED,
+      # CONTEXT_OVERFLOW) are excluded by construction, so a streak here is
+      # upstream/engine fault, not client error.
       - alert: RouterBackendConsecutiveFailures
         expr: max(fak_router_backend_consecutive_failures) >= 3
         for: 5m
@@ -373,9 +378,15 @@ groups:
           summary: "Router backend failing streak >= 3"
           description: "A router backend has {{ $value }} consecutive failures for 5m. Deliberately survives operator counter-reset (state, not a counter); caller-fault classes are excluded by construction, so treat this as upstream/engine degradation."
 
-      # Any non-zero means some served requests cannot be replayed or
-      # reattached. The user saw a normal answer, so nothing else pings --
-      # this is the only signal for silent durability loss.
+      # KPI row 4 (T1 durability loss). Any non-zero means some served requests
+      # cannot be replayed or reattached. The user saw a normal answer, so
+      # nothing else pings -- this is the only signal for silent durability
+      # loss. Window/threshold choice: increase over 1h at > 0, sustained 10m.
+      # The live 24h baseline was already non-zero (lease_lost=240,
+      # store_error=136 ~ 16/h combined), so a tighter window would fire on
+      # noise while a higher threshold would miss real regressions; the 1h
+      # window catches a genuine burst of lost durability without screaming
+      # forever on a host that degrades a few records an hour.
       - alert: RouterJournalDegraded
         expr: increase(fak_router_journal_degraded_total[1h]) > 0
         for: 10m
@@ -385,6 +396,9 @@ groups:
           summary: "Router journal degraded: some served requests cannot be replayed"
           description: "{{ $value }} journaled-degraded event(s) in the trailing hour (reason={{ $labels.reason }}): some served requests cannot be replayed or reattached. Local 24h baseline lease_lost=240, store_error=136, so expect this to fire on the local host -- that is correct behavior, not a misfire."
 
+      # KPI row 12 (admission pressure): the admission counter is deliberately
+      # always-emitted at zero, so rate() starts from zero and any sustained
+      # rejection is real backpressure, not an absence artifact.
       - alert: RouterAdmissionRejecting
         expr: sum(rate(fak_router_admission_rejected_total[5m])) > 0
         for: 5m
@@ -394,6 +408,9 @@ groups:
           summary: "Router admission rejecting requests (backpressure)"
           description: "Admission rejected {{ $value | printf \"%.3f\" }} request(s)/s for 5m -- the router is shedding load before queuing. Check fak_router_admission_outstanding against its bound and the durable-store utilization rule."
 
+      # KPI row 13 (durable-store utilization): bytes/quota from the sampled
+      # capacity gauges; the live baseline was already at ~83% of quota, so
+      # this fires on today's data by design.
       - alert: RouterDurableStoreHigh
         expr: fak_router_durable_store_bytes / fak_router_durable_store_quota_bytes > 0.8
         for: 15m
