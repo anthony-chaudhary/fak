@@ -409,6 +409,15 @@ extern "C" int fcuda_causal_attention_panel_f32(
   int kvWidth = nKV * hd, qWidth = nH * hd;
   if (prefix + tokens > INT_MAX / kvWidth || tokens > INT_MAX / qWidth) return -1;
   cudaGetLastError();
+  // The tensor-core port is instantiated only for the Qwen3.8 hd256 geometry, and its f16
+  // K/V staging pays off at prompt length: route P>=128 panels through it when
+  // FAK_CUDA_QWEN38_PREFILL_ATTN selects mma. -2 declines before any effect, so every other
+  // shape, device and capture state keeps the SIMT panel kernel below.
+  if (nH == 24 && nKV == 4 && hd == QWEN38_PROMPT_HEAD_DIM && prefix + tokens >= 128 &&
+      qwen38_prefill_attention_wants_mma()) {
+    int mma = fak_qwen38_fattn_mma_hd256_launch(dQ, dK, dV, dOut, tokens, prefix, nH, nKV, scale);
+    if (mma != -2) return mma;
+  }
   size_t shmem = ((size_t)hd + FLASH_THREADS) * sizeof(float);
   FCUDA_TS("k_prompt_causal_attention_panel", tokens * nH, k_prompt_causal_attention_panel<<<tokens * nH, FLASH_THREADS, shmem, g_stream>>>(
       dQ, dK, dV, dOut, tokens, prefix, nH, nKV, hd, scale));
