@@ -241,7 +241,9 @@ func KernelOpClass(name string) string {
 	case kernelTransferNames[name], name == "fak_paged_kv_copy_blocks":
 		return KernelOpCopy
 	case strings.Contains(name, "attention"), strings.Contains(name, "fattn"), strings.Contains(name, "attend"),
-		strings.Contains(name, "spec_verify"), strings.Contains(name, "dsa_index"):
+		strings.Contains(name, "spec_verify"), strings.Contains(name, "dsa_index"),
+		// The split-KV LSE merge completes the partial attention reduction.
+		name == "k_qwen38_splitkv_lse_merge_hd256":
 		return KernelOpAttention
 	case strings.Contains(name, "in_proj"), strings.Contains(name, "gate_up"), strings.Contains(name, "down_sum"):
 		return KernelOpMatvec
