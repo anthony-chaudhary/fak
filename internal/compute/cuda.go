@@ -734,6 +734,11 @@ var cudaReadNative = cudaReadOperations{
 func (c *cudaBackend) Read(t Tensor) []float32 {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	return c.readLocked(t)
+}
+
+// readLocked preserves Read semantics for an operation holding cudaMu.
+func (c *cudaBackend) readLocked(t Tensor) []float32 {
 	if hb, ok := t.buf.(*hostBuf); ok {
 		return hb.f32 // host-resident: no device work or fence
 	}
@@ -1429,6 +1434,12 @@ func (c *cudaBackend) cudaMatMulLocked(w, x Tensor) Tensor {
 // weight dtype to the SGEMM (F32), tensor-core HGEMM (F16), or native Q8_0/Q4_K device GEMM.
 func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return c.batchedMatMulLocked(w, X, P)
+}
+
+// batchedMatMulLocked preserves dispatch and tracing while the caller holds cudaMu.
+func (c *cudaBackend) batchedMatMulLocked(w, X Tensor, P int) Tensor {
 	trace := false
 	var started time.Time
 	var y Tensor
@@ -1442,7 +1453,6 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 				}
 			}
 		}
-		cudaMu.Unlock()
 	}()
 	if err := c.validateQ56KProjectionOperands(w, X, P); err != nil {
 		panic(err)
