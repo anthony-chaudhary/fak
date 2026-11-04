@@ -82,6 +82,27 @@ func validatePrefillBatchArgs(args *PrefillBatchArgs) (int, int, error) {
 	}
 	qOut := args.NumHeads * args.HeadDim
 	kvOut := args.NumKVHeads * args.HeadDim
+	// GEMM consumes the two weight axes, not just their product. An equal
+	// element count can hide a transposed or flat weight and reach projections
+	// with the wrong input width before attention slices its result.
+	for _, weight := range []struct {
+		name       string
+		tensor     Tensor
+		rows, cols int
+	}{
+		{"Wq", args.Wq, qOut, D},
+		{"Wk", args.Wk, kvOut, D},
+		{"Wv", args.Wv, kvOut, D},
+		{"Wo", args.Wo, D, qOut},
+	} {
+		if weight.tensor.buf == nil { // Only optional Wo can be absent here.
+			continue
+		}
+		shape := weight.tensor.Shape
+		if len(shape) != 2 || shape[0] != weight.rows || shape[1] != weight.cols {
+			return 0, 0, fmt.Errorf("compute: PrefillBatch %s shape %v != expected [%d %d]", weight.name, shape, weight.rows, weight.cols)
+		}
+	}
 	if args.Wq.Numel() != qOut*D {
 		return 0, 0, fmt.Errorf("compute: PrefillBatch Wq numel %d != expected %d", args.Wq.Numel(), qOut*D)
 	}
