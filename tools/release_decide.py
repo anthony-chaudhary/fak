@@ -49,10 +49,11 @@ _DECISIVE_CI_STATES = {"green", "red"}
 # effectively unobservable and the auto-cut starves for days (the observed
 # 1746-commit / 4.1d @latest lag). This tolerance accepts the most recent COMPLETED
 # GREEN run on a commit that is an ANCESTOR of HEAD, within a bounded window,
-# PROVIDED no completed red decisive run landed BETWEEN that commit and HEAD. It
-# keeps the safety property intact — a red decisive run anywhere after the last
-# green ancestor still holds — and is fail-safe: a payload with no `recent_decisive`
-# evidence is a no-op, so the pre-#2655 behavior is byte-identical.
+# PROVIDED no completed red decisive run is equally close or closer to HEAD. It
+# keeps the safety property intact — a red decisive run at the same distance as
+# the green ancestor or closer to HEAD still holds — and is fail-safe: a payload
+# with no `recent_decisive` evidence is a no-op, so the pre-#2655 behavior is
+# byte-identical.
 CI_GREEN_ANCESTOR_DEFAULT_MAX_COMMITS = 25
 CI_GREEN_ANCESTOR_DEFAULT_MAX_MINUTES = 90.0
 
@@ -67,7 +68,7 @@ def green_ancestor_status(recent: object, *, max_commits: int,
        "commits_behind_head": int (>=0), "age_seconds": number|None}``.
 
     Returns ``"green"`` when the newest green ANCESTOR within the window has no red
-    decisive run strictly between it and HEAD; ``""`` (no opinion — caller keeps its
+    decisive run equally close or closer to HEAD; ``""`` (no opinion — caller keeps its
     existing verdict) when there is no usable green-ancestor evidence in the window.
     It only ever RELAXES a hold, never manufactures one, so a caller treats a ``""``
     exactly as "no change".
@@ -113,12 +114,12 @@ def green_ancestor_status(recent: object, *, max_commits: int,
     if green_behind is None:
         return ""
 
-    # Safety: any red decisive run STRICTLY closer to HEAD than the chosen green
-    # (i.e. on a commit between the green ancestor and HEAD, exclusive) means
-    # something broke after the last green — do not treat CI as green.
+    # Safety: a red at the same distance as the chosen green can be a conflicting
+    # run on the same commit or a different merged ancestor. Equal distance does
+    # not prove the failure was superseded, so only a strictly closer green wins.
     # Stale failures past the commit window do not hold the cut (#12169).
     for behind, result, _ in anc:
-        if result == "red" and behind < green_behind and behind <= max_commits:
+        if result == "red" and behind <= green_behind and behind <= max_commits:
             return ""
     return "green"
 
