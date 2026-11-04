@@ -2299,6 +2299,8 @@ func TestReleaseReadinessConsumesInstalledLaunchQualification(t *testing.T) {
 func TestReleaseShipAdoptsReachableAncestorCI(t *testing.T) {
 	restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
 		switch {
+		case name == "git" && sameArgs(args, "rev-parse", "--is-shallow-repository"):
+			return 0, "false\n"
 		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci-fast.yml", "--commit", "head-sha", "--event", "push", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha,event"):
 			return 0, `[{"event":"push","databaseId": 111, "status": "completed", "conclusion": "cancelled", "headSha": "head-sha"}]`
 		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci-fast.yml", "--branch", "main", "--status", "completed", "--event", "push", "--limit", "20", "--json", "databaseId,status,conclusion,url,headSha,updatedAt,event"):

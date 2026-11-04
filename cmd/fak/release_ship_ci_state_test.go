@@ -47,6 +47,8 @@ func TestReleaseShipAncestorCIDoesNotOverrideExactFailure(t *testing.T) {
 			sourceQueries, ancestorQueries, probes := 0, 0, 0
 			restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
 				switch {
+				case name == "git" && sameArgs(args, "rev-parse", "--is-shallow-repository"):
+					return 0, "false\n"
 				case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "source-sha", "--event", "push", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha,event"):
 					sourceQueries++
 					if tc.noRuns {
@@ -186,6 +188,12 @@ func TestReleaseShipAncestorCIRequiresPushEvent(t *testing.T) {
 					}
 					return 0, untrusted
 				}
+				if name == "git" && sameArgs(args, "rev-parse", "--is-shallow-repository") {
+					if !tc.adopt {
+						t.Fatal("history probe without ancestor opt-in")
+					}
+					return 0, "false\n"
+				}
 				if name != "git" || !sameArgs(args, "merge-base", "--is-ancestor", "ancestor-sha", "source-sha") {
 					t.Fatalf("untrusted run reached ancestry probe: %s %v", name, args)
 				}
@@ -217,6 +225,128 @@ func TestReleaseShipAncestorCIRequiresPushEvent(t *testing.T) {
 			}
 			if !wantGreen && (ci["status"] != "missing" || ci["run"] != nil) {
 				t.Fatalf("untrusted source must remain missing: %#v", ci)
+			}
+		})
+	}
+}
+
+// All command results describe a small source-history graph; no real git or gh runs.
+// fak-test:runtime fast est=20ms
+func TestReleaseShipAncestorCIDoesNotCrossFailedHistory(t *testing.T) {
+	const red = `{"event":"push","status":"completed","conclusion":"failure","headSha":"red-sha"}`
+	const oldGreen = `{"event":"push","status":"completed","conclusion":"success","headSha":"old-green"}`
+	const fixedGreen = `{"event":"push","status":"completed","conclusion":"success","headSha":"fixed-green"}`
+	for _, tc := range []struct {
+		name, rows, adopted string
+		ancestry            map[string]int
+	}{
+		{name: "intervening red", rows: "[" + red + "," + oldGreen + "]", ancestry: map[string]int{
+			"red-sha->source-sha": 0, "old-green->source-sha": 0, "red-sha->old-green": 1,
+		}},
+		{name: "green listed before intervening red", rows: "[" + oldGreen + "," + red + "]", ancestry: map[string]int{
+			"red-sha->source-sha": 0, "old-green->source-sha": 0, "red-sha->old-green": 1,
+		}},
+		{name: "same SHA red and green", rows: "[" + red + `,{"event":"push","status":"completed","conclusion":"success","headSha":"red-sha"}]`, ancestry: map[string]int{
+			"red-sha->source-sha": 0,
+		}},
+		{name: "green supersedes older red", rows: "[" + fixedGreen + "," + red + "]", adopted: "fixed-green", ancestry: map[string]int{
+			"red-sha->source-sha": 0, "fixed-green->source-sha": 0, "red-sha->fixed-green": 0,
+		}},
+		{name: "unrelated red", rows: "[" + red + "," + oldGreen + "]", adopted: "old-green", ancestry: map[string]int{
+			"red-sha->source-sha": 1, "old-green->source-sha": 0,
+		}},
+		{name: "later candidate supersedes red", rows: "[" + oldGreen + "," + red + "," + fixedGreen + "]", adopted: "fixed-green", ancestry: map[string]int{
+			"red-sha->source-sha": 0, "old-green->source-sha": 0, "red-sha->old-green": 1,
+			"fixed-green->source-sha": 0, "red-sha->fixed-green": 0,
+		}},
+		{name: "one superseded red does not hide merged red", rows: "[" + red + `,{"event":"push","status":"completed","conclusion":"failure","headSha":"merged-red"},` + fixedGreen + "]", ancestry: map[string]int{
+			"red-sha->source-sha": 0, "merged-red->source-sha": 0,
+			"fixed-green->source-sha": 0, "red-sha->fixed-green": 0, "merged-red->fixed-green": 1,
+		}},
+		{name: "red blocks secondary workflow", rows: "[" + red + "]", ancestry: map[string]int{
+			"red-sha->source-sha": 0,
+		}},
+		{name: "red source ancestry unreadable", rows: "[" + red + "," + oldGreen + "]", ancestry: map[string]int{
+			"red-sha->source-sha": 128,
+		}},
+		{name: "red supersession unreadable", rows: "[" + red + "," + oldGreen + "]", ancestry: map[string]int{
+			"red-sha->source-sha": 0, "old-green->source-sha": 0, "red-sha->old-green": 128,
+		}},
+		{name: "red SHA missing", rows: `[{"event":"push","status":"completed","conclusion":"failure"},` + oldGreen + "]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sourceQueries, ancestorQueries := 0, 0
+			probed := map[string]bool{}
+			restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
+				switch {
+				case name == "git" && sameArgs(args, "rev-parse", "--is-shallow-repository"):
+					return 0, "false\n"
+				case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "source-sha", "--event", "push", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha,event"):
+					sourceQueries++
+					return 0, `[{"event":"push","status":"in_progress","conclusion":"","headSha":"source-sha","databaseId":7}]`
+				case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--branch", "main", "--status", "completed", "--event", "push", "--limit", "20", "--json", "databaseId,status,conclusion,url,headSha,updatedAt,event"):
+					ancestorQueries++
+					return 0, tc.rows
+				case name == "git" && len(args) == 4 && args[0] == "merge-base" && args[1] == "--is-ancestor":
+					key := args[2] + "->" + args[3]
+					if code, ok := tc.ancestry[key]; ok {
+						probed[key] = true
+						return code, ""
+					}
+				}
+				t.Fatalf("unexpected command: %s %v", name, args)
+				return 127, "unexpected"
+			})
+			defer restore()
+			var result releaseShipResult
+			ci := releaseShipSourceCI(&result, t.TempDir(), releaseShipOptions{workflow: "ci.yml", trunk: "main", adoptAncestorCI: true}, "source-sha")
+			if sourceQueries != 1 || ancestorQueries != 1 || len(probed) != len(tc.ancestry) {
+				t.Fatalf("queries=%d/%d ancestry=%v; want one query each and %v", sourceQueries, ancestorQueries, probed, tc.ancestry)
+			}
+			if tc.adopted != "" {
+				if !releaseShipPayloadOK(ci) || ci["adopted_ancestor_sha"] != tc.adopted || ci["ancestor_ci_blocker"] != nil {
+					t.Fatalf("safe ancestor not adopted: %#v", ci)
+				}
+				return
+			}
+			run, _ := ci["run"].(map[string]any)
+			blocker, _ := ci["ancestor_ci_blocker"].(map[string]any)
+			failed, _ := blocker["run"].(map[string]any)
+			if releaseShipPayloadOK(ci) || ci["status"] != "pending" || ci["source_sha"] != "source-sha" || run["headSha"] != "source-sha" || ci["adopted_ancestor_sha"] != nil || blocker["workflow"] != "ci.yml" || failed["conclusion"] != "failure" || stringFromAny(blocker["reason"]) == "" {
+				t.Fatalf("failed ancestor lost its barrier or source evidence: %#v", ci)
+			}
+		})
+	}
+}
+
+// A non-ancestor answer from a shallow graph is not complete history evidence.
+// fak-test:runtime fast est=20ms
+func TestReleaseShipAncestorCIRequiresCompleteHistory(t *testing.T) {
+	for _, tc := range []struct {
+		name, output string
+		code         int
+	}{
+		{name: "shallow", output: "true\n"},
+		{name: "empty"},
+		{name: "malformed", output: "unknown\n"},
+		{name: "failed probe", code: 128, output: "false\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
+				calls++
+				if name != "git" || !sameArgs(args, "rev-parse", "--is-shallow-repository") {
+					t.Fatalf("unverified history reached ancestor query/probe: %s %v", name, args)
+				}
+				return tc.code, tc.output
+			})
+			defer restore()
+			fallback := map[string]any{"ok": false, "status": "missing", "source_sha": "source-sha"}
+			var result releaseShipResult
+			ci := releaseShipAdoptAncestorCI(&result, t.TempDir(), releaseShipOptions{workflow: "ci.yml", trunk: "main"}, "source-sha", fallback)
+			blocker, _ := ci["ancestor_ci_blocker"].(map[string]any)
+			if calls != 1 || releaseShipPayloadOK(ci) || ci["status"] != "missing" || ci["source_sha"] != "source-sha" || blocker["workflow"] != "ci.yml" || !strings.Contains(stringFromAny(blocker["reason"]), "history") || fallback["ancestor_ci_blocker"] != nil {
+				t.Fatalf("incomplete history escaped refusal or mutated original evidence: calls=%d CI=%#v fallback=%#v", calls, ci, fallback)
 			}
 		})
 	}

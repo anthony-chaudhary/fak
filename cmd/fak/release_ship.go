@@ -1420,6 +1420,13 @@ func releaseShipSourceCI(result *releaseShipResult, root string, opts releaseShi
 }
 
 func releaseShipAdoptAncestorCI(result *releaseShipResult, root string, opts releaseShipOptions, sha string, fallback map[string]any) map[string]any {
+	// A shallow boundary can hide a failed ancestor while leaving an older
+	// green reachable through another merge parent. Require a complete graph
+	// before treating merge-base exit 1 as proof of unrelated history.
+	code, shallow := releaseShipCmd(result, root, "git", []string{"rev-parse", "--is-shallow-repository"}, nil, releaseShipMergeBaseCommandTimeout)
+	if code != 0 || strings.TrimSpace(shallow) != "false" {
+		return releaseShipAncestorCIBlocked(fallback, opts.workflow, nil, "repository history is shallow or could not be verified complete")
+	}
 	workflows := []string{opts.workflow}
 	if opts.workflow != "ci-fast.yml" {
 		workflows = append(workflows, "ci-fast.yml")
@@ -1434,12 +1441,55 @@ func releaseShipAdoptAncestorCI(result *releaseShipResult, root string, opts rel
 		if err := json.Unmarshal([]byte(out), &rows); err != nil {
 			continue
 		}
-		for _, row := range releaseShipPushCIRuns(rows) {
+		rows = releaseShipPushCIRuns(rows)
+		var failedAncestors []map[string]any
+		for _, row := range rows {
+			status := strings.ToLower(stringFromAny(row["status"]))
+			conc := strings.ToLower(stringFromAny(row["conclusion"]))
+			if releaseShipCIState(status, conc) != "failed" {
+				continue
+			}
+			rsha := strings.TrimSpace(stringFromAny(row["headSha"]))
+			if rsha == "" {
+				return releaseShipAncestorCIBlocked(fallback, wf, row, "failed run has no source SHA")
+			}
+			code, _ := releaseShipCmd(result, root, "git", []string{"merge-base", "--is-ancestor", rsha, sha}, nil, releaseShipMergeBaseCommandTimeout)
+			if code == 0 {
+				failedAncestors = append(failedAncestors, row)
+			} else if code != 1 {
+				return releaseShipAncestorCIBlocked(fallback, wf, row, "failed run ancestry could not be verified")
+			}
+		}
+		var blocker map[string]any
+		if len(failedAncestors) > 0 {
+			blocker = failedAncestors[0]
+		}
+		for _, row := range rows {
 			conc := strings.ToLower(stringFromAny(row["conclusion"]))
 			rsha := strings.TrimSpace(stringFromAny(row["headSha"]))
 			if conc == "success" && rsha != "" {
 				mCode, _ := releaseShipCmd(result, root, "git", []string{"merge-base", "--is-ancestor", rsha, sha}, nil, releaseShipMergeBaseCommandTimeout)
 				if mCode == 0 {
+					// A candidate must include a later fix for every failed run
+					// inherited by the source, including failures on merged branches.
+					supersedesFailures := true
+					for _, failed := range failedAncestors {
+						failedSHA := strings.TrimSpace(stringFromAny(failed["headSha"]))
+						if failedSHA == rsha {
+							blocker = failed
+							supersedesFailures = false
+							break
+						}
+						code, _ := releaseShipCmd(result, root, "git", []string{"merge-base", "--is-ancestor", failedSHA, rsha}, nil, releaseShipMergeBaseCommandTimeout)
+						if code != 0 {
+							blocker = failed
+							supersedesFailures = false
+							break
+						}
+					}
+					if !supersedesFailures {
+						continue
+					}
 					return map[string]any{
 						"ok":                   true,
 						"status":               "green",
@@ -1453,8 +1503,23 @@ func releaseShipAdoptAncestorCI(result *releaseShipResult, root string, opts rel
 				}
 			}
 		}
+		if len(failedAncestors) > 0 {
+			// A secondary workflow cannot erase a failure witnessed by the
+			// requested workflow. Preserve the original inconclusive source
+			// result and attach the evidence that prevented ancestor adoption.
+			return releaseShipAncestorCIBlocked(fallback, wf, blocker, "no green ancestor supersedes the failed source history")
+		}
 	}
 	return fallback
+}
+
+func releaseShipAncestorCIBlocked(fallback map[string]any, workflow string, run map[string]any, reason string) map[string]any {
+	blocked := make(map[string]any, len(fallback)+1)
+	for key, value := range fallback {
+		blocked[key] = value
+	}
+	blocked["ancestor_ci_blocker"] = map[string]any{"workflow": workflow, "run": run, "reason": reason}
+	return blocked
 }
 
 func releaseShipCIState(status, conclusion string) string {
