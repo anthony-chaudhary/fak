@@ -44,27 +44,28 @@ func expertHotSetLearner(t *testing.T, budget int, counts []int) []ExpertUsageCo
 
 // TestExpertHotSetLearnerConvergesToHighFrequencyExperts is acceptance criterion 1's witness: a
 // skewed activation stream (expert 1 touched far more than 0/2/3) commits exactly the true top-budget
-// experts, in the learner's deterministic (layer asc, expert asc) order.
+// experts, displayed in the learner's total order (the ported rank_learned_profile order: heat desc,
+// ties by (layer, expert) index).
 func TestExpertHotSetLearnerConvergesToHighFrequencyExperts(t *testing.T) {
-	// Budget 4, four observed experts: every one is admitted, ordered by identity not heat -- the
-	// set is the whole population and the deterministic order is what is checked.
+	// Budget 4, four observed experts: every one is admitted; the display order is heat desc with the
+	// three-way heat tie at 4 broken by index -- the ported order, not identity order.
 	got := expertHotSetLearner(t, 4, []int{4, 20, 4, 4})
 	want := []ExpertUsageCount{
-		{Layer: 0, Expert: 0, Count: 4},
 		{Layer: 0, Expert: 1, Count: 20},
+		{Layer: 0, Expert: 0, Count: 4},
 		{Layer: 0, Expert: 2, Count: 4},
 		{Layer: 0, Expert: 3, Count: 4},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("budget-4 hot-set = %+v, want the four observed units in identity order %+v", got, want)
+		t.Fatalf("budget-4 hot-set = %+v, want the four observed units in ported order %+v", got, want)
 	}
 
-	// Budget 2 must keep the two HOTTEST experts (1 and, on the tie, 0), dropping 2 and 3 -- the
-	// selection is by frequency, not by identity.
+	// Budget 2 must keep the two HOTTEST experts (1 first by heat, then 0 on the heat tie by index),
+	// dropping 2 and 3 -- the selection is by frequency, not by identity.
 	got = expertHotSetLearner(t, 2, []int{4, 20, 4, 4})
 	want = []ExpertUsageCount{
-		{Layer: 0, Expert: 0, Count: 4},
 		{Layer: 0, Expert: 1, Count: 20},
+		{Layer: 0, Expert: 0, Count: 4},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("budget-2 hot-set = %+v, want the two hottest experts %+v", got, want)
@@ -301,6 +302,159 @@ func TestExpertHotSetLearnerDeterministic(t *testing.T) {
 		if !reflect.DeepEqual(hot, wantHot) {
 			t.Fatalf("rep %d HotSet = %+v, want %+v (map iteration leaked)", rep, hot, wantHot)
 		}
+	}
+}
+
+// TestExpertHotSetLearnerResidentFirstOrdering witnesses the first partition of the ported
+// rank_learned_profile order: a resident unit leads the ranking even ahead of a hotter non-resident,
+// and a committed resident is never chosen as the eviction victim while a committed non-resident
+// exists.
+func TestExpertHotSetLearnerResidentFirstOrdering(t *testing.T) {
+	// (0,5) at heat 3 is resident; (0,1) at heat 9 is not. With budget 2 the resident must be
+	// admitted FIRST despite carrying less heat, and lead the HotSet display.
+	l := NewExpertHotSetLearner(2, DefaultExpertHotSetHysteresis)
+	for i := 0; i < 9; i++ {
+		l.Observe(0, 1)
+	}
+	for i := 0; i < 3; i++ {
+		l.Observe(0, 5)
+	}
+	l.MarkResident(0, 5)
+	sw := l.Learn()
+	if len(sw) != 2 || sw[0].OutLayer != -1 || sw[0].InLayer != 0 || sw[0].InExpert != 5 {
+		t.Fatalf("first admission = %+v, want the resident (0,5) filling the first slot", sw)
+	}
+	if sw[1].InExpert != 1 {
+		t.Fatalf("second admission = %+v, want the hotter non-resident (0,1)", sw)
+	}
+	if hs := l.HotSet(); len(hs) != 2 || hs[0].Expert != 5 || hs[1].Expert != 1 {
+		t.Fatalf("HotSet = %+v, want the resident leading ahead of the hotter non-resident", hs)
+	}
+
+	// Eviction side: with both committed, a challenger clearing the band must displace the
+	// NON-RESIDENT (0,1) even though the resident (0,5) carries the lower heat.
+	for i := 0; i < 50; i++ {
+		l.Observe(0, 7)
+	}
+	sw = l.Learn()
+	if len(sw) != 1 || sw[0].OutExpert != 1 || sw[0].InExpert != 7 {
+		t.Fatalf("displacement = %+v, want the non-resident (0,1) evicted in favor of (0,7)", sw)
+	}
+	if hs := l.HotSet(); len(hs) != 2 || hs[0].Expert != 5 || hs[1].Expert != 7 {
+		t.Fatalf("HotSet = %+v, want the surviving resident still leading", hs)
+	}
+}
+
+// TestExpertHotSetLearnerWarmStartProfileRankTieBreak witnesses the third partition: at equal
+// residency and heat, the earlier warm-start profile rank wins, and the FIRST occurrence of a unit
+// in the profile fixes its rank (a later duplicate does not move it, matching upstream).
+func TestExpertHotSetLearnerWarmStartProfileRankTieBreak(t *testing.T) {
+	l := NewExpertHotSetLearner(2, DefaultExpertHotSetHysteresis)
+	for i := 0; i < 5; i++ {
+		l.Observe(0, 1)
+	}
+	for i := 0; i < 5; i++ {
+		l.Observe(0, 3)
+	}
+	// The saved profile lists (0,3) first, then (0,1), then (0,3) AGAIN: the duplicate must not
+	// demote (0,3) to rank 2 -- its rank is fixed at 0 by the first occurrence.
+	l.LoadWarmStartProfile([]ExpertUsageCount{
+		{Layer: 0, Expert: 3},
+		{Layer: 0, Expert: 1},
+		{Layer: 0, Expert: 3},
+	})
+	sw := l.Learn()
+	if len(sw) != 2 || sw[0].InExpert != 3 || sw[1].InExpert != 1 {
+		t.Fatalf("admissions = %+v, want the profile-ranked (0,3) first, then (0,1)", sw)
+	}
+	if hs := l.HotSet(); len(hs) != 2 || hs[0].Expert != 3 || hs[1].Expert != 1 {
+		t.Fatalf("HotSet = %+v, want the profile rank to break the heat tie", hs)
+	}
+}
+
+// TestExpertHotSetLearnerIndexTieBreak witnesses the fourth partition: at equal residency, heat and
+// profile rank, the (layer, expert) index decides -- layer 0 before layer 1.
+func TestExpertHotSetLearnerIndexTieBreak(t *testing.T) {
+	l := NewExpertHotSetLearner(1, DefaultExpertHotSetHysteresis)
+	for i := 0; i < 4; i++ {
+		l.Observe(0, 7)
+	}
+	for i := 0; i < 4; i++ {
+		l.Observe(1, 0)
+	}
+	sw := l.Learn()
+	if len(sw) != 1 || sw[0].InLayer != 0 || sw[0].InExpert != 7 {
+		t.Fatalf("admission = %+v, want the index-lower (0,7) to win the single slot over (1,0)", sw)
+	}
+	if hs := l.HotSet(); len(hs) != 1 || hs[0] != (ExpertUsageCount{Layer: 0, Expert: 7, Count: 4}) {
+		t.Fatalf("HotSet = %+v, want exactly (0,7) at heat 4", hs)
+	}
+}
+
+// TestExpertHotSetLearnerIgnoresOutOfRangeProfilePairs witnesses the identity guard on the ported
+// inputs: out-of-range profile pairs and residency marks are refused without poisoning the table,
+// and the remaining valid row still ranks.
+func TestExpertHotSetLearnerIgnoresOutOfRangeProfilePairs(t *testing.T) {
+	l := NewExpertHotSetLearner(2, DefaultExpertHotSetHysteresis)
+	for i := 0; i < 3; i++ {
+		l.Observe(0, 4)
+	}
+	for i := 0; i < 3; i++ {
+		l.Observe(0, 6)
+	}
+	// (-1,5) and (3,-2) are out of range and must be ignored; only (0,4) earns a rank.
+	l.LoadWarmStartProfile([]ExpertUsageCount{
+		{Layer: -1, Expert: 5},
+		{Layer: 3, Expert: -2},
+		{Layer: 0, Expert: 4},
+	})
+	sw := l.Learn()
+	if len(sw) != 2 || sw[0].InExpert != 4 || sw[1].InExpert != 6 {
+		t.Fatalf("admissions = %+v, want the valid ranked (0,4) first, then the unranked (0,6)", sw)
+	}
+	// Negative-coordinate residency marks are refused the same way.
+	l.MarkResident(-1, 5)
+	l.ClearResident(3, -2)
+	if hs := l.HotSet(); len(hs) != 2 || hs[0].Expert != 4 || hs[1].Expert != 6 {
+		t.Fatalf("HotSet = %+v, want the malformed marks to have changed nothing", hs)
+	}
+}
+
+// TestExpertHotSetLearnerDefaultOrderingRegressionPin pins the default-session behavior of the ported
+// order with no resident mark and no loaded profile: fills take the best uncommitted in heat-desc
+// then index order, a second Learn on unchanged heat is nil, and an EXACT-heat victim tie evicts the
+// HIGHEST (layer, expert) index -- the documented flip from the legacy lowest-index rule.
+func TestExpertHotSetLearnerDefaultOrderingRegressionPin(t *testing.T) {
+	// Fill order: expert 1 (heat 20) first, then expert 0 on the three-way heat-4 tie by index.
+	l := NewExpertHotSetLearner(2, DefaultExpertHotSetHysteresis)
+	counts := []int{4, 20, 4, 4}
+	for expert, n := range counts {
+		for i := 0; i < n; i++ {
+			l.Observe(0, expert)
+		}
+	}
+	sw := l.Learn()
+	if len(sw) != 2 || sw[0].InExpert != 1 || sw[1].InExpert != 0 {
+		t.Fatalf("fills = %+v, want expert 1 then expert 0 (heat desc, index tie-break)", sw)
+	}
+	if sw2 := l.Learn(); sw2 != nil {
+		t.Fatalf("second Learn on unchanged heat = %+v, want nil", sw2)
+	}
+
+	// Exact-heat victim tie: committed (0,1) and (0,2) both at heat 5; the challenger (0,3) at heat
+	// 11 clears the band 5 + 5*0.25 + 4 = 10.25 and displaces the HIGHEST index, (0,2).
+	l2 := NewExpertHotSetLearner(2, DefaultExpertHotSetHysteresis)
+	for i := 0; i < 5; i++ {
+		l2.Observe(0, 1)
+		l2.Observe(0, 2)
+	}
+	l2.Learn()
+	for i := 0; i < 11; i++ {
+		l2.Observe(0, 3)
+	}
+	sw2 := l2.Learn()
+	if len(sw2) != 1 || sw2[0].OutExpert != 2 || sw2[0].InExpert != 3 {
+		t.Fatalf("displacement = %+v, want the exact-heat tie to evict the highest index (0,2)", sw2)
 	}
 }
 
