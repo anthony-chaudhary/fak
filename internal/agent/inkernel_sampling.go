@@ -230,11 +230,14 @@ func sampleLogitsMinPCoreWS(logits []float32, temp, topP float64, topK int, minP
 	w.nonFinite = nonFinite || !finite
 	w.resize(len(logits))
 	probs := w.probs
-	var sum float64
-	for i, x := range logits {
-		p := math.Exp(float64(x-maxL) / temp)
-		probs[i] = p
-		sum += p
+	sum, selected := w.smallTopKSoftmax(logits, maxL, temp, topK)
+	if !selected {
+		sum = 0
+		for i, x := range logits {
+			p := math.Exp(float64(x-maxL) / temp)
+			probs[i] = p
+			sum += p
+		}
 	}
 	if minP > 0 {
 		sum = minPTruncate(probs, sum, minP)
@@ -245,6 +248,52 @@ func sampleLogitsMinPCoreWS(logits []float32, temp, topP float64, topK int, minP
 		coin = rng.Float64()
 	}
 	return sampleProbabilityRow(probs, sum, coin)
+}
+
+// smallTopKSoftmax preselects a bounded explicit top-k before Exp. It accepts
+// only a strict gap between the canonical kth and (k+1)th weights: float32
+// subtraction and Exp can collapse distinct logits, in which case the original
+// full-softmax path must resolve probability ties by token id instead.
+// The caller has already checked the entire row for invalid logits. Masked -Inf
+// remains legal. On refusal, the caller overwrites the scratch probability row.
+func (w *samplerWorkspace) smallTopKSoftmax(logits []float32, maxL float32, temp float64, k int) (float64, bool) {
+	if w.nonFinite || !(temp > 0) || math.IsInf(temp, 0) || k <= 0 || k > topKSmallKThreshold || k >= len(logits) {
+		return 0, false
+	}
+	// A prefix of k+1 global maxima proves the cutoff is tied without a heap
+	// sweep. This makes common flat rows decline cheaply. For ordinary rows
+	// the check stops at the first nonmaximum, usually the first entry.
+	maxPrefix := 0
+	for _, x := range logits[:k+1] {
+		if x != maxL {
+			break
+		}
+		maxPrefix++
+	}
+	if maxPrefix > k {
+		return 0, false
+	}
+	for i, x := range logits {
+		w.probs[i] = float64(x)
+	}
+	var indices [topKSmallKThreshold + 1]int
+	head := indices[:k+1]
+	topKSelectHeap(head, w.probs)
+	topKRankSort(head, w.probs)
+	weight := func(id int) float64 { return math.Exp(float64(logits[id]-maxL) / temp) }
+	if !(weight(head[k-1]) > weight(head[k])) {
+		return 0, false
+	}
+	clear(w.probs)
+	for _, id := range head[:k] {
+		w.probs[id] = weight(id)
+	}
+	// Match the existing top-k renormalization in ascending token-id order.
+	var sum float64
+	for _, p := range w.probs {
+		sum += p
+	}
+	return sum, true
 }
 
 // minPTruncate zeroes, in place, every probability below minP times the row
