@@ -342,7 +342,7 @@ func (b *QuantBuilder) AddF32Tensor(name string, shape []int, data []float32) er
 		return fmt.Errorf("model: QuantBuilder already built")
 	}
 	resolved := v41SourceTensorName(b.m.Cfg, name)
-	if b.m.Cfg.IsDeepSeekV41() && strings.HasPrefix(resolved, "model.layers.") && (strings.HasSuffix(resolved, ".engram_kv.weight") || strings.HasSuffix(resolved, ".engram_q_norm.weight") || strings.HasSuffix(resolved, ".engram_k_norm.weight")) && b.m.hasResidentWeight(resolved) {
+	if b.m.Cfg.IsDeepSeekV41() && strings.HasPrefix(resolved, "model.layers.") && (strings.HasSuffix(resolved, ".engram_kv.weight") || strings.HasSuffix(resolved, ".engram_q_norm.weight") || strings.HasSuffix(resolved, ".engram_k_norm.weight") || strings.HasSuffix(resolved, ".engram_folded_gate.weight")) && b.m.hasResidentWeight(resolved) {
 		return fmt.Errorf("model: duplicate tensor %s", resolved)
 	}
 	b.started = true
@@ -724,7 +724,8 @@ func v41SourceTensorName(cfg Config, name string) string {
 		return name
 	}
 	switch leaf {
-	case "engram_kv.weight", "engram_q_norm.weight", "engram_k_norm.weight":
+	case "engram_kv.weight", "engram_q_norm.weight", "engram_k_norm.weight",
+		"engram_folded_gate.weight":
 		return layerName(layer, leaf)
 	}
 	return name
