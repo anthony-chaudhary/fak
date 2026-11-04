@@ -8,10 +8,19 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // processCPUTime is swappable so tests can drive deterministic CPU deltas.
 var processCPUTime = readProcessCPUTime
+
+// graphReplayWitness and h2dCensus are swappable so tests can drive deterministic
+// engagement and copy-byte deltas without a capture-once backend or FAK_H2D_CENSUS.
+var (
+	graphReplayWitness = model.GraphReplayWitness
+	h2dCensusSnapshot  = compute.H2DCensusSnapshot
+	h2dCensusEnabled   = compute.H2DCensusEnabled
+)
 
 // decodeSpansInFlight and decodeSpanStarts detect overlapping decode windows.
 // Process CPU and device counters are process-wide, so an overlapped window
@@ -63,6 +72,14 @@ type DecodeSpan struct {
 	// work that starts between the two reads still drops the window.
 	nonDecodeSeq  int64
 	nonDecodeBusy bool
+	// witnessEngaged/witnessDegraded/witnessArmed snapshot the graph-replay
+	// engagement counters (model.GraphReplayWitness) at span start; h2dCopies/
+	// h2dBytes snapshot the FAK_H2D_CENSUS totals the same way.
+	witnessEngaged  uint64
+	witnessDegraded uint64
+	witnessArmed    bool
+	h2dCopies       int64
+	h2dBytes        int64
 }
 
 // StartDecodeSpan begins one decode-window sample. By default the cost is one
@@ -80,6 +97,8 @@ func StartDecodeSpan() DecodeSpan {
 		s.nonDecodeBusy = nonDecodeWorkInFlight.Load() > 0
 		s.kernels = compute.KernelProfileSnapshot()
 	}
+	s.witnessEngaged, s.witnessDegraded, s.witnessArmed = graphReplayWitness()
+	s.h2dCopies, s.h2dBytes = h2dCensusSnapshot()
 	s.cpu, s.cpuOK = processCPUTime()
 	s.started = time.Now()
 	return s
@@ -123,6 +142,20 @@ type DecodeHostWork struct {
 	DeviceIdle    *time.Duration
 	SyncSites     []compute.DeviceSyncSite
 	SyncsObserved bool
+	// H2DCopyBytes is the window's FAK_H2D_CENSUS byte delta; nil when the census
+	// was off or a counter went backwards. A measured zero stays present.
+	H2DCopyBytes *uint64
+	// GraphEngaged and GraphDegraded are the window's graph-replay engagement
+	// delta (model.GraphReplayWitness): tokens served by the captured-graph fast
+	// path versus tokens that fell to the per-layer host loop on a
+	// capture-once-capable backend. GraphArmed reports whether any step ran on
+	// such a backend at all, which separates "unsupported" from "unobserved";
+	// GraphObserved is false unless armed, the window had steps, no other decode
+	// overlapped, and neither counter went backwards.
+	GraphEngaged  uint64
+	GraphDegraded uint64
+	GraphArmed    bool
+	GraphObserved bool
 }
 
 // Finish closes the span. steps counts decode steps inside the window (the
@@ -187,6 +220,20 @@ func (s *DecodeSpan) Finish(ctx context.Context, steps int) DecodeHostWork {
 			w.Kernels = compute.KernelProfileDelta(s.kernels, after)
 		}
 	}
+	if engAfter, degAfter, armedAfter := graphReplayWitness(); engAfter >= s.witnessEngaged && degAfter >= s.witnessDegraded {
+		w.GraphEngaged = engAfter - s.witnessEngaged
+		w.GraphDegraded = degAfter - s.witnessDegraded
+		w.GraphArmed = armedAfter
+		w.GraphObserved = armedAfter && !w.Overlapped && w.Steps > 0
+	}
+	// With the census off the counters never move, so a zero delta would be an
+	// empty measurement dressed as a measured zero; the field stays absent.
+	if h2dCensusEnabled() {
+		if copiesAfter, bytesAfter := h2dCensusSnapshot(); copiesAfter >= s.h2dCopies && bytesAfter >= s.h2dBytes {
+			b := uint64(bytesAfter - s.h2dBytes)
+			w.H2DCopyBytes = &b
+		}
+	}
 	if acc := decodeHostWorkFrom(ctx); acc != nil {
 		acc.add(w)
 	}
@@ -215,23 +262,31 @@ type decodeHostWorkKey struct{}
 // DecodeHostWorkAccumulator sums every decode window of one served request
 // (an agent loop may decode several times).
 type DecodeHostWorkAccumulator struct {
-	mu            sync.Mutex
-	windows       int
-	wall          time.Duration
-	steps         int
-	cpu           time.Duration
-	cpuGap        bool
-	kernel        time.Duration
-	submitWaitGap bool
-	backend       string
-	claimed       bool
-	kernels       *compute.KernelProfile
-	kernelWindows int
-	kernelGap     bool
-	deviceIdle    time.Duration
-	deviceIdleGap bool
-	syncSites     []compute.DeviceSyncSite
-	syncGap       bool
+	mu                  sync.Mutex
+	windows             int
+	wall                time.Duration
+	steps               int
+	cpu                 time.Duration
+	cpuGap              bool
+	kernel              time.Duration
+	submitWaitGap       bool
+	backend             string
+	claimed             bool
+	hostOverheadClaimed bool
+	kernels             *compute.KernelProfile
+	kernelWindows       int
+	kernelGap           bool
+	deviceIdle          time.Duration
+	deviceIdleGap       bool
+	syncSites           []compute.DeviceSyncSite
+	syncGap             bool
+	h2dBytes            uint64
+	h2dGap              bool
+	graphEngaged        uint64
+	graphDegraded       uint64
+	graphWindows        int
+	graphArmed          bool
+	graphGap            bool
 }
 
 // WithDecodeHostWork installs a per-request accumulator on ctx.
@@ -299,6 +354,23 @@ func (a *DecodeHostWorkAccumulator) add(w DecodeHostWork) {
 		}
 		a.kernelWindows++
 	}
+	if w.H2DCopyBytes == nil {
+		a.h2dGap = true
+	} else {
+		a.h2dBytes += *w.H2DCopyBytes
+	}
+	a.graphArmed = a.graphArmed || w.GraphArmed
+	switch {
+	case w.Steps == 0:
+		// A zero-step window carries no tokens, so it neither observes nor gaps
+		// the engagement witness.
+	case w.GraphObserved:
+		a.graphWindows++
+		a.graphEngaged += w.GraphEngaged
+		a.graphDegraded += w.GraphDegraded
+	default:
+		a.graphGap = true
+	}
 }
 
 // DecodeHostWorkTotals is a request's folded decode windows. A field is set
@@ -316,6 +388,20 @@ type DecodeHostWorkTotals struct {
 	DeviceIdle    *time.Duration
 	SyncSites     []compute.DeviceSyncSite
 	SyncsObserved bool
+	// H2DCopyBytes sums every window's FAK_H2D_CENSUS byte delta; nil unless
+	// every window observed it. H2DCensusDisabled reports that the census was
+	// off for the process, which is why a nil H2DCopyBytes reads as disabled
+	// rather than unobserved in the receipt's gap reasons.
+	H2DCopyBytes      *uint64
+	H2DCensusDisabled bool
+	// GraphReplayEngaged and GraphReplayDegraded roll up every token-bearing
+	// window's graph-replay engagement witness; nil unless at least one such
+	// window observed it and none gapped. GraphBackendSupported reports whether
+	// any window saw a capture-once-capable backend, which separates "the
+	// backend cannot replay" from "it replayed zero times".
+	GraphReplayEngaged    *uint64
+	GraphReplayDegraded   *uint64
+	GraphBackendSupported bool
 }
 
 // Totals returns a coherent copy; ok is false when no decode window ran.
@@ -350,7 +436,45 @@ func (a *DecodeHostWorkAccumulator) Totals() (DecodeHostWorkTotals, bool) {
 		t.SyncSites = append([]compute.DeviceSyncSite{}, a.syncSites...)
 		t.SyncsObserved = true
 	}
+	if !a.h2dGap {
+		b := a.h2dBytes
+		t.H2DCopyBytes = &b
+	}
+	t.H2DCensusDisabled = !h2dCensusEnabled()
+	if !a.graphGap && a.graphWindows > 0 {
+		e, d := a.graphEngaged, a.graphDegraded
+		t.GraphReplayEngaged = &e
+		t.GraphReplayDegraded = &d
+	}
+	t.GraphBackendSupported = a.graphArmed
 	return t, true
+}
+
+// ClaimHostOverhead projects the request's folded decode windows into rep's v3
+// host-overhead decomposition at most once, so a request that writes two
+// receipts books its decomposition once. It fills every field the collector
+// measured and records a closed-vocabulary gap reason for every field it could
+// not observe; ok is false when no decode window ran. This is the production
+// producer for the receipt-v3 fields on the decode-window receipt path: the
+// spans started at the planner's decode sites fold into this accumulator via
+// ctx, and one claim projects the whole request.
+func (a *DecodeHostWorkAccumulator) ClaimHostOverhead(rep *Repetition) bool {
+	if a == nil || rep == nil {
+		return false
+	}
+	totals, ok := a.Totals()
+	if !ok {
+		return false
+	}
+	a.mu.Lock()
+	claimed := a.hostOverheadClaimed
+	a.hostOverheadClaimed = true
+	a.mu.Unlock()
+	if claimed {
+		return false
+	}
+	rep.FillHostOverhead(totals)
+	return true
 }
 
 // ClaimPhaseReceipt returns the request's decode-kernel phase receipt at most

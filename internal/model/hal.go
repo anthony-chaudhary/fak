@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -24,6 +25,26 @@ type graphBackend interface {
 	// was aborted is left inconsistent (its KV host bookkeeping advanced without the captured
 	// device writes executing) and must be dropped by the caller's decode-boundary recovery.
 	GraphAbort()
+}
+
+// Graph-replay engagement witness (launch-overhead prevention P3): process-lifetime
+// counts of logits-producing tokens served by the captured-graph fast path versus
+// tokens that fell to the per-layer host loop on a capture-once-capable backend.
+// The counters are process-wide, so a reader diffs them around its own window the
+// way it reads any other process counter; armed flips once when any step runs on a
+// backend implementing captureOnceBackend, which lets a receipt tell "this backend
+// cannot replay" (unsupported) from "replayed zero times" (a measured zero).
+var (
+	graphReplayEngagedTokens  atomic.Uint64
+	graphReplayDegradedTokens atomic.Uint64
+	graphReplayWitnessArmed   atomic.Bool
+)
+
+// GraphReplayWitness returns the process-lifetime graph-replay engagement counts
+// and whether any step has run on a capture-once-capable backend. It never blocks
+// on device work.
+func GraphReplayWitness() (engaged, degraded uint64, armed bool) {
+	return graphReplayEngagedTokens.Load(), graphReplayDegradedTokens.Load(), graphReplayWitnessArmed.Load()
 }
 
 // NewBackendSession starts a session whose per-token path runs through the
@@ -1050,6 +1071,9 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 	gpuLayers, isSplit := s.validateDenseGPULayers()
 	canGraph = canGraph && s.cudaGraphCaptureReady(isSplit)
 	once, hasOnce := be.(captureOnceBackend)
+	if hasOnce {
+		graphReplayWitnessArmed.Store(true)
+	}
 	onceEligible := hasOnce && canGraph && (mode == halFullLogits || mode == halArgmax) && s.halLogitsWarm &&
 		!cfg.IsQwen35Hybrid() && !cfg.IsDeepSeekV4() && !useQ8Weights && m.Q2KEmbedding == nil &&
 		!s.captureTargetHidden && s.qwen35TargetFeatureTxn == nil && s.qwen35TargetLayerCapture == nil && s.captureOnceF32Weights()
@@ -1063,6 +1087,7 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 			return once.GraphOnceReplay(x, s.halKV, pos)
 		}()
 		if used {
+			graphReplayEngagedTokens.Add(1)
 			be.Free(x)
 			featureResidualReleased = true
 			s.halStep++
@@ -1075,6 +1100,13 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 			}
 			return logits, 0
 		}
+	}
+	// P3 witness: a capture-once-capable backend ran this logits-producing token
+	// through the per-layer host loop after the session had already warmed its
+	// logits path — replay refused, the graph invalidated, or a re-capture in
+	// flight. The pre-warmup uncaptured step is not a degradation.
+	if hasOnce && mode != halNoLogits && s.halLogitsWarm {
+		graphReplayDegradedTokens.Add(1)
 	}
 	capturing, onceCapturing, onceCaptured := false, false, false
 	if onceEligible {

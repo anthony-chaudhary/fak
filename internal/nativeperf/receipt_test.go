@@ -491,26 +491,61 @@ func TestReceiptHostOverheadValidationFailsClosed(t *testing.T) {
 
 // TestFillHostOverheadProjectsOnlyMeasuredFields wires the primary writer
 // path: folded decode-window totals populate exactly the fields the collector
-// measured, and leave the rest absent instead of fabricating zeros.
+// measured, and leave the rest absent instead of fabricating zeros, recording
+// a closed-vocabulary gap reason for each absent field.
 func TestFillHostOverheadProjectsOnlyMeasuredFields(t *testing.T) {
 	cpu := time.Duration(1500 * int64(time.Microsecond))
-	kernels := &compute.KernelProfile{Rows: []compute.KernelRow{{Kernel: "gemm", Calls: 700}, {Kernel: "attn", Calls: 404}}}
+	// Window wall 8ms against 5ms of GPU-busy sum: the 3ms outside device work
+	// is the inter-kernel gap sum the launch-bound regime shows up as.
+	kernels := &compute.KernelProfile{GPUNS: 5e6, WallNS: 8e6, Rows: []compute.KernelRow{{Kernel: "gemm", Calls: 700}, {Kernel: "attn", Calls: 404}}}
+	h2d := uint64(2048)
+	graphEngaged, graphDegraded := uint64(9), uint64(2)
 	rep := Repetition{}
 	rep.FillHostOverhead(DecodeHostWorkTotals{
 		CPU: &cpu, Kernels: kernels, SyncsObserved: true,
-		SyncSites: []compute.DeviceSyncSite{{Site: "sample", Stage: "decode", Syncs: 1104}},
+		SyncSites:             []compute.DeviceSyncSite{{Site: "sample", Stage: "decode", Syncs: 1104}},
+		H2DCopyBytes:          &h2d,
+		GraphReplayEngaged:    &graphEngaged,
+		GraphReplayDegraded:   &graphDegraded,
+		GraphBackendSupported: true,
 	})
 	if rep.HostPhaseUs == nil || *rep.HostPhaseUs != 1500 || rep.KernelLaunchCount == nil || *rep.KernelLaunchCount != 1104 ||
 		rep.SyncRoundtrips == nil || *rep.SyncRoundtrips != 1104 {
 		t.Fatalf("measured fields wrong: %+v", rep)
 	}
-	if rep.InterKernelGapSumUs != nil || rep.H2DCopyBytes != nil {
-		t.Fatalf("unmeasured fields must stay absent: %+v", rep)
+	if rep.InterKernelGapSumUs == nil || *rep.InterKernelGapSumUs != 3000 {
+		t.Fatalf("inter-kernel gap sum = %v, want 3000us from wall minus GPU busy", rep.InterKernelGapSumUs)
+	}
+	if rep.H2DCopyBytes == nil || *rep.H2DCopyBytes != 2048 {
+		t.Fatalf("h2d copy bytes = %v, want 2048", rep.H2DCopyBytes)
+	}
+	if rep.GraphReplayEngagedTokens == nil || *rep.GraphReplayEngagedTokens != 9 ||
+		rep.GraphReplayDegradedTokens == nil || *rep.GraphReplayDegradedTokens != 2 {
+		t.Fatalf("graph replay witness = %v/%v, want 9 engaged / 2 degraded", rep.GraphReplayEngagedTokens, rep.GraphReplayDegradedTokens)
+	}
+	if len(rep.HostOverheadGaps) != 0 {
+		t.Fatalf("fully observed totals must carry no gaps: %v", rep.HostOverheadGaps)
 	}
 	partial := Repetition{}
 	partial.FillHostOverhead(DecodeHostWorkTotals{CPU: &cpu})
 	if partial.HostPhaseUs == nil || partial.KernelLaunchCount != nil || partial.SyncRoundtrips != nil {
 		t.Fatalf("partial totals must fill only CPU-derived fields: %+v", partial)
+	}
+	wantGaps := map[string]bool{
+		"kernel_launch_count=" + HostOverheadGapDisabled:             true,
+		"inter_kernel_gap_sum_us=" + HostOverheadGapDisabled:         true,
+		"sync_roundtrips=" + HostOverheadGapUnobserved:               true,
+		"h2d_copy_bytes=" + HostOverheadGapUnobserved:                true,
+		"graph_replay_engaged_tokens=" + HostOverheadGapUnsupported:  true,
+		"graph_replay_degraded_tokens=" + HostOverheadGapUnsupported: true,
+	}
+	if len(partial.HostOverheadGaps) != len(wantGaps) {
+		t.Fatalf("partial totals gaps = %v, want %d entries", partial.HostOverheadGaps, len(wantGaps))
+	}
+	for _, g := range partial.HostOverheadGaps {
+		if !wantGaps[g] {
+			t.Fatalf("unexpected gap entry %q in %v", g, partial.HostOverheadGaps)
+		}
 	}
 }
 

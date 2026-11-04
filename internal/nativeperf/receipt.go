@@ -19,8 +19,11 @@ const (
 	ReceiptSchemaV2 = "fak-native-performance-receipt/v2"
 	// ReceiptSchemaV3 adds the optional per-repetition host-overhead
 	// decomposition (host_phase_us, kernel_launch_count,
-	// inter_kernel_gap_sum_us, h2d_copy_bytes, sync_roundtrips) so every new
-	// receipt carries the small-batch decode host/device split natively at
+	// inter_kernel_gap_sum_us, h2d_copy_bytes, sync_roundtrips) plus the
+	// graph-replay engagement witness (graph_replay_engaged_tokens,
+	// graph_replay_degraded_tokens) and their closed-vocabulary gap reasons
+	// (host_overhead_gaps), so every new receipt carries the small-batch
+	// decode host/device split and capture-engagement state natively at
 	// collection time instead of leaving it to post-hoc reconstruction over
 	// sparse old fields. The fields are additive and optional: a v3 receipt
 	// without them validates exactly as v2 did, and all readers keep accepting
@@ -90,11 +93,27 @@ type Repetition struct {
 	SystemBaselineDigest string  `json:"system_baseline_digest,omitempty"`
 	// v3 host-overhead decomposition for this repetition's decode window.
 	// All times are microseconds; all counts/bytes are whole-window totals.
+	// The fields are produced by the decode-window receipt path (the planner's
+	// DecodeSpan windows folded into the request accumulator, projected with
+	// FillHostOverhead / ClaimHostOverhead); a nil field stayed unobserved and
+	// HostOverheadGaps carries its machine-readable reason — never a fake zero.
 	HostPhaseUs         *float64 `json:"host_phase_us,omitempty"`           // host-side phase time outside device work
 	KernelLaunchCount   *uint64  `json:"kernel_launch_count,omitempty"`     // kernels launched during the window
 	InterKernelGapSumUs *float64 `json:"inter_kernel_gap_sum_us,omitempty"` // sum of inter-kernel idle gaps
 	H2DCopyBytes        *uint64  `json:"h2d_copy_bytes,omitempty"`          // host->device payload bytes
 	SyncRoundtrips      *uint64  `json:"sync_roundtrips,omitempty"`         // synchronous host<->device round trips
+	// P3 graph-replay engagement witness: tokens served by the captured-graph
+	// fast path versus tokens that degraded to the per-layer host loop on a
+	// capture-once-capable backend, rolled up over the window. Both names are
+	// STABLE — the fak-dev decode-anatomy gate consumes them as its
+	// capture_eligibility_drift signal. Nil means unobserved; see
+	// HostOverheadGaps for the closed-vocabulary reason.
+	GraphReplayEngagedTokens  *uint64 `json:"graph_replay_engaged_tokens,omitempty"`
+	GraphReplayDegradedTokens *uint64 `json:"graph_replay_degraded_tokens,omitempty"`
+	// HostOverheadGaps enumerates every decomposition field above that stayed
+	// absent as a "<field>=<reason>" token (closed vocabulary: disabled |
+	// unobserved | unsupported). Absent when every field was measured.
+	HostOverheadGaps []string `json:"host_overhead_gaps,omitempty"`
 }
 
 type MemoryMetrics struct {

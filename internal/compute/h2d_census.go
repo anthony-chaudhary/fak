@@ -94,6 +94,18 @@ func renderH2DCensusLineLocked(total int64) string {
 	return b.String()
 }
 
+// H2DCensusEnabled reports whether measured-mode counting was on at process
+// start. A receipt producer uses it to tell "census off, field unobservable"
+// apart from "census on, zero bytes copied" — the counters stay indistinguishable
+// from an empty measurement while the census is off.
+func H2DCensusEnabled() bool { return h2dCensusOn }
+
+// H2DCensusSnapshot reads the cumulative counters lock-free, so a decode-window
+// sample can diff them around its span like any other process-wide counter.
+func H2DCensusSnapshot() (copies, bytes int64) {
+	return h2dCensusCopies.Load(), h2dCensusBytes.Load()
+}
+
 // H2DCensusTotals exposes the current measured totals for tests and receipts.
 func H2DCensusTotals() (copies, bytes int64, sites map[string]struct {
 	Copies int64 `json:"copies"`
