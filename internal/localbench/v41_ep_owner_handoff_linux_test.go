@@ -128,11 +128,55 @@ func TestV41EPOwnerChallengeReadDiagnostics(t *testing.T) {
 		"handoff phase=challenge-read mode=challenge-read-failure:",
 		"read=EOF", "wait=<nil>", "process=exit status 0",
 		"read_context=<nil>", "wait_context=<nil>",
-		`stdout="CHALLENGE_STDOUT\n"`, `stderr="CHALLENGE_STDERR\n"`,
+		`stdout="CHALLENGE_STDOUT\n"`,
 	} {
 		if !strings.Contains(string(output), want) {
 			t.Errorf("joined challenge diagnostic missing %q; output=%s", want, output)
 		}
+	}
+	if !v41EPHTestChallengeStderrMatches(string(output)) {
+		t.Errorf("joined challenge diagnostic has unexpected stderr; output=%s", output)
+	}
+}
+
+func v41EPHTestChallengeStderrMatches(output string) bool {
+	// The hermetic owner environment omits GOCOVERDIR, so a coverage-instrumented
+	// fixture appends this runtime warning on exit. Match the complete quoted
+	// field to keep every other stderr byte subject to the diagnostic assertion.
+	for _, stderr := range []string{
+		"CHALLENGE_STDERR\n",
+		"CHALLENGE_STDERR\nwarning: GOCOVERDIR not set, no coverage data emitted\n",
+	} {
+		if strings.Contains(output, fmt.Sprintf("stderr=%q", stderr)) {
+			return true
+		}
+	}
+	return false
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestV41EPOwnerChallengeStderrMatches(t *testing.T) {
+	const marker = "CHALLENGE_STDERR\n"
+	const coverageWarning = "warning: GOCOVERDIR not set, no coverage data emitted\n"
+	for _, tc := range []struct {
+		name   string
+		stderr string
+		want   bool
+	}{
+		{name: "exact-marker", stderr: marker, want: true},
+		{name: "exact-coverage-warning", stderr: marker + coverageWarning, want: true},
+		{name: "missing-marker", stderr: coverageWarning},
+		{name: "extra-diagnostic", stderr: marker + "unexpected failure\n"},
+		{name: "extra-diagnostic-after-warning", stderr: marker + coverageWarning + "unexpected failure\n"},
+		{name: "duplicate-warning", stderr: marker + coverageWarning + coverageWarning},
+		{name: "nonterminal-warning", stderr: coverageWarning + marker},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			output := fmt.Sprintf("handoff diagnostic stdout=%q stderr=%q\n", "CHALLENGE_STDOUT\n", tc.stderr)
+			if got := v41EPHTestChallengeStderrMatches(output); got != tc.want {
+				t.Fatalf("stderr match = %t, want %t; output=%s", got, tc.want, output)
+			}
+		})
 	}
 }
 
