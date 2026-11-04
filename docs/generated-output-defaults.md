@@ -78,6 +78,50 @@ scratch namespace, including live `.dos`, dispatch, and producer state; it has n
 liveness witness. The Go-temp mode is explicit maintenance (and the daily maintenance fold),
 not a hook installed in every compiler child.
 
+## Closing a run without leaving scratch
+
+Keep source changes, generated deliverables, manifests, logs, and receipts separate from
+reproducible snapshots and compiler caches. A terminal process receipt (`reaped: true`) proves
+process settlement, not filesystem cleanup. A run closes with a recorded disposition for its
+scratch: cleaned, transferred to a named owner, or retained for a specific next use and review
+time. Apply this on success, failure, and cancellation after consumers have settled.
+
+- **Clean released caches through the standard tool.** Once cleanup is authorized, the owner
+  and known borrowers have released the exact cache, current-consumer checks pass, and new
+  consumers are held off through settlement, run `GOCACHE="<released-cache>" go clean -cache`
+  through the normal guarded execution route. Hold the existing shared build/maintenance lock
+  where applicable. Preserve source, receipts, required binaries, module caches, and active
+  caches. An explicit path alone does not prove ownership; a process-namespace scan alone does
+  not establish host-wide absence of consumers. Check the command's exit and remaining cache
+  contents, then record reclaimed space on its filesystem.
+- **Use current evidence and respect actual refusals.** A predicted refusal or rejection of a
+  different action is not itself a denial of the current command; applicable restrictions still
+  hold. An actual denial of the same action remains binding until materially new, relevant
+  evidence or authorization resolves it. Retry only once per such change when the action is
+  known not to have executed; check an uncertain outcome first. Preserve the exact receipt and
+  follow documented recovery. Do not disable guards, rename a target, or substitute another
+  deletion implementation to evade a denial. Reuse still-valid ownership, input, and verification
+  evidence; refresh only what changed. Deleting a released reproducible cache does not itself
+  require rebuilding or requalifying a preserved binary.
+- **Close snapshot storage separately.** After retaining the source revision, exact overlays,
+  outputs, and receipts needed for reproduction, reap only the declared disposable snapshot
+  through its supported cleanup path. Keep unique source and active inputs. Do not retain a
+  full source archive for every diagnostic retry when a coordinated stable input root suffices.
+  Bound any intentional retention; do not assume an OS-temp directory will clean itself.
+- **Budget accumulated storage.** Before another run, count retained prior snapshots, caches,
+  and concurrent reservations, not only the new run's growth limit. Repository scratch quotas
+  cover `_scratch`, not arbitrary external run directories. Track external allocations under
+  the same owner and cleanup plan rather than letting them escape accounting.
+- **Check the filesystem that needs space.** Inspect the target's filesystem and free capacity.
+  `/tmp` may be tmpfs while the workspace uses an overlay filesystem; reclaiming one does not
+  free the other. Report the measured before/after capacity for each affected filesystem.
+
+For retained private caches managed by the Go-cache lifecycle, allocate a `go-build` basename;
+the lifecycle intentionally refuses arbitrary cache-root names. Go's automatic trimming does
+not clean abandoned per-run cache directories. Do not rename a live cache to satisfy a tool.
+These practices preserve the ambient-cache race guard and all normal ownership, permission,
+and consumer checks; they do not authorize clearing shared or in-use caches.
+
 ## Control prompts and test fixtures
 
 Treat `.claude/` as project infrastructure, not an automatic home for every Claude run.
