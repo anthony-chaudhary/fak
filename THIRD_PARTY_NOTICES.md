@@ -1986,3 +1986,28 @@ introduced. No upstream Zig code blocks are copied.
 
 The pinned repository's Apache-2.0 LICENSE is reproduced in the existing TensorFold
 license section of this file and also applies here.
+
+## TensorFold idle-engine park (agent IdleEngineManager)
+
+Adapted from ashhart/TensorFold @9e8c368b0b4c2c7892a0c9f0f302d7c164016209 (Apache-2.0):
+the idle-unload lifecycle — an opt-in timer parks a loaded engine only at zero
+active requests; one lifetime mutex guards the
+resident/unloading/unloaded/loading/stopped transitions and engine reads;
+concurrent wakes coalesce into one reload; failed opens leave the server
+parked and retryable; multi-rank GLM CUDA unload is refused because closing
+the primary rank ends the followers.
+
+Source files: zig/src/server/idle_unload.zig:27 (Manager),
+zig/src/server/idle_unload_policy.zig:4 (refusal policy).
+
+What was adapted into internal/agent (idle_engine_park.go):
+- IdleEngineManager: the five-state park/reload lifecycle with caller-driven
+  Tick, Wake/Release active accounting, shared-reload coalescing, and terminal
+  Stop, re-expressed in idiomatic Go around sync.Mutex/sync.Cond.
+- IdleUnloadRefused: the closed refusal policy (multi-rank GLM on CUDA).
+
+No Zig runtime, kernel, or model code is included.
+
+The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
+"TensorFold benchmark evidence" section above (same pinned repository and
+revision); they apply to this adaptation as well.
