@@ -1152,7 +1152,12 @@ func (p *InKernelPlanner) applyInKernelBOS(ids []int, sp SampleParams) []int {
 // ApplyPromptShrink evaluates the configured or request-level prompt-shrink levers
 // over typed messages and tools before tokenization.
 func (p *InKernelPlanner) ApplyPromptShrink(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) ([]Message, []ToolDef, TypedPromptShrinkOutcome) {
-	sp := applySampleOpts(opts...)
+	return p.applyPromptShrinkResolved(ctx, messages, tools, applySampleOpts(opts...))
+}
+
+// applyPromptShrinkResolved shares the already-resolved controls used to render
+// this prompt. It does not evaluate option closures or freeze caller-owned data.
+func (p *InKernelPlanner) applyPromptShrinkResolved(ctx context.Context, messages []Message, tools []ToolDef, sp SampleParams) ([]Message, []ToolDef, TypedPromptShrinkOutcome) {
 	compactBudget := p.compactHistoryBudget
 	if sp.CompactHistoryBudget != nil {
 		compactBudget = *sp.CompactHistoryBudget
