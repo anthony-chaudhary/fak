@@ -16,6 +16,18 @@ import (
 // session configuration and deadline checks at their existing outer boundaries.
 // Existing warm-claim, locking, lookup metrics and exact-hit behavior is retained.
 func (p *InKernelPlanner) lookupOwnedNativePrefix(ctx context.Context, ids []int, lookupStart time.Time, callerErr *error) (s *model.Session, cachedLogits []float32, cacheable, matched int, sourceTier radixkv.SnapshotTier, closeSession, skipExactDeviceL1Readmission bool, lookupLegacyM, lookupSnapshotM int, lookupSnapshotConsulted bool) {
+	// Until the final return transfers ownership to the execution frame, a
+	// restored session must unwind here if refeed or lookup telemetry panics.
+	// Use the same cleanup contract as execution to preserve its primary failure.
+	transferred := false
+	defer finishInKernelCleanup(callerErr, func() {
+		if !transferred && s != nil && (closeSession || p.v41EngramLookAhead) {
+			retiring := s
+			s, closeSession = nil, false
+			retiring.Close()
+		}
+	})
+
 	owner, scoped := prefixCacheIdentityFromContext(ctx)
 	scopedLookup := scoped && p.scopedTree != nil
 	var matchedKV *model.KVCache
@@ -177,10 +189,13 @@ func (p *InKernelPlanner) lookupOwnedNativePrefix(ctx context.Context, ids []int
 		if inKernelRefeedLastTokenForExactHit(s, len(ids)) {
 			matched = len(ids) - 1
 		} else {
-			if closeSession {
-				s.Close()
-			}
+			// Detach before Close: if it panics, rollback must not retire
+			// this same session a second time.
+			retiring, owned := s, closeSession || p.v41EngramLookAhead
 			s, matched, closeSession = nil, 0, false
+			if owned {
+				retiring.Close()
+			}
 			sourceTier = radixkv.SnapshotTierMiss
 		}
 	}
@@ -194,5 +209,6 @@ func (p *InKernelPlanner) lookupOwnedNativePrefix(ctx context.Context, ids []int
 		matched == len(ids) && cachedLogits != nil && sourceTier == radixkv.SnapshotTierDeviceL1
 	enginestep.Default.ObservePhase(enginestep.PhasePrefixLookup, time.Since(lookupStart))
 	enginestep.Default.ObservePrefixMatched(matched)
+	transferred = true
 	return
 }
