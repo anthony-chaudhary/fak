@@ -11,8 +11,9 @@ import (
 )
 
 // TestCUDAReadChecked executes the actual Read method, never a copied substitute.
-// All native operations are replaced before an owned Go buffer is used as an
-// opaque pointer. This test must remain nonparallel; installation/restoration and
+// Native allocation/copy/conversion/free operations are replaced before an owned
+// Go buffer is used as an opaque pointer. The shared terminal query remains linked
+// and reads host state only. This test must remain nonparallel; installation/restoration and
 // Read itself use cudaMu. It needs no device and must not skip on a CPU host.
 // fak-test:runtime fast est=5ms lane=default
 // Estimate covers injected calls only, not compilation or CUDA package init.

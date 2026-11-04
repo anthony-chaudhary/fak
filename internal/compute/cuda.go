@@ -751,6 +751,9 @@ func (c *cudaBackend) readLocked(t Tensor) []float32 {
 	if err := db.invalidStateError("buffer"); err != nil {
 		panic(err)
 	}
+	// A nil or reconstructed Go latch cannot reopen a terminal native stream.
+	// Refuse before compressor fences, conversion allocation or D2H publication.
+	cudaV41CheckedSubmit()
 	cudaV41CompressorSubmitLocked(db)
 	pending := cudaV41CompressorReadBeginLocked(c)
 	readOK := false
