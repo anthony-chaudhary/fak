@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
-	"github.com/anthony-chaudhary/fak/internal/blob"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 )
 
@@ -185,6 +184,9 @@ func TestHoldStampsKeepaliveOnQuarantine(t *testing.T) {
 // released the pin rather than just forgetting the ledger entry.
 func TestReapReleasesCASPin(t *testing.T) {
 	ctx := context.Background()
+	if abi.ActiveResolver() != testCAS {
+		t.Fatal("CAS pin witness must use the suite's registered resolver")
+	}
 	// A >256B secret-shaped body unique to this test: quarantines AND pages out
 	// to the CAS (not inline), so the handle carries a pinnable digest.
 	secret := []byte("sk-reaperpin" + strings.Repeat("q", 400))
@@ -192,10 +194,10 @@ func TestReapReleasesCASPin(t *testing.T) {
 	// behind in the shared store) plus the secret plus a small slack — so the
 	// secret's own Put cannot self-evict before quarantineResult pins it, while
 	// churn can still overrun the slack and cycle out every unpinned blob.
-	old := blob.Default.MaxBytes()
-	budget := blob.Default.Bytes() + int64(len(secret)) + 4096
-	blob.Default.SetMaxBytes(budget)
-	defer blob.Default.SetMaxBytes(old)
+	old := testCAS.MaxBytes()
+	budget := testCAS.Bytes() + int64(len(secret)) + 4096
+	testCAS.SetMaxBytes(budget)
+	defer testCAS.SetMaxBytes(old)
 
 	m := ctxmmu.NewWithLimit(64)
 	c := call("read_secret")
@@ -218,7 +220,7 @@ func TestReapReleasesCASPin(t *testing.T) {
 		for i, n := 0, int(budget/1024)+8; i < n; i++ {
 			body := bytes.Repeat([]byte{0xCC}, 1024) // >256B: lands in the CAS
 			copy(body, fmt.Sprintf("churn-%s-%d", phase, i))
-			if _, err := blob.Default.Put(ctx, body); err != nil {
+			if _, err := testCAS.Put(ctx, body); err != nil {
 				t.Fatalf("churn put: %v", err)
 			}
 		}
@@ -226,7 +228,7 @@ func TestReapReleasesCASPin(t *testing.T) {
 
 	// While held, the pin protects the bytes from the byte bound.
 	churn("held")
-	if _, err := blob.Default.Resolve(ctx, handle); err != nil {
+	if _, err := testCAS.Resolve(ctx, handle); err != nil {
 		t.Fatalf("pinned quarantine bytes evicted while still held: %v", err)
 	}
 
@@ -239,7 +241,7 @@ func TestReapReleasesCASPin(t *testing.T) {
 
 	// After the reap the pin is RELEASED: the same churn now evicts the bytes.
 	churn("reaped")
-	if _, err := blob.Default.Resolve(ctx, handle); err == nil {
+	if _, err := testCAS.Resolve(ctx, handle); err == nil {
 		t.Fatalf("reaped pin still protects its CAS bytes — UnpinResolved was not called")
 	}
 }
