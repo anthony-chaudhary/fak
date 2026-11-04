@@ -33,6 +33,23 @@ extern "C" int fcuda_kv_load_typed(float *dst, const void *src, int n, int dtype
   FCUDA_TS("k_kv_load_typed", ((size_t)n+255)/256, k_kv_load_typed<<<((size_t)n+255)/256,256,0,g_stream>>>(dst,src,n,dtype));
   return (int)cudaGetLastError();
 }
+// Snapshot-only completion handling. A failed copy/launch is not a drain
+// certificate: close shared admission before Go can unwind or recycle scratch.
+// All callers hold cudaMu; preserve the first error without a retry or fence.
+static int kv_snapshot_status(int status) {
+  if (status != 0 && g_cuda_cleanup_status == 0) g_cuda_cleanup_status = status;
+  return status;
+}
+extern "C" int fcuda_kv_snapshot_load_checked(float *dst, const void *src, int n, int dtype) {
+  if (v41_candidates_stream_uncertain())
+    return kv_snapshot_status(g_cuda_cleanup_status != 0 ? g_cuda_cleanup_status : (int)cudaErrorNotReady);
+  return kv_snapshot_status(fcuda_kv_load_typed(dst, src, n, dtype));
+}
+extern "C" int fcuda_kv_snapshot_d2h_checked(void *dst, const void *src, size_t bytes) {
+  if (v41_candidates_stream_uncertain())
+    return kv_snapshot_status(g_cuda_cleanup_status != 0 ? g_cuda_cleanup_status : (int)cudaErrorNotReady);
+  return kv_snapshot_status(fcuda_d2h_checked(dst, src, bytes));
+}
 __global__ void k_kv_attention_typed(
     const float *Q, const void *K, const void *V, float *Out,
     int tokens, int prefix, int nH, int nKV, int hd, float scale, int dtype) {

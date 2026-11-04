@@ -12,6 +12,7 @@ import "C"
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"sync/atomic"
 	"unsafe"
 )
@@ -186,6 +187,16 @@ type cudaKV struct {
 
 	releaseRetained bool
 	releaseNext     *cudaKV
+	snapshotCopy    *cudaKVSnapshotCopy // active/failed host and conversion ownership
+}
+
+// cudaKVSnapshotCopy owns a nonempty copy's host backing store and optional
+// conversion buffer. Never copy it after pinning. A failed copy keeps it alive
+// through the retained KV; cgo's implicit host pin ends when the call returns.
+type cudaKVSnapshotCopy struct {
+	host       []float32
+	conversion *cudaBuf
+	pin        runtime.Pinner
 }
 
 // cudaKVReleaseOwners is a process-lifetime quarantine for terminal-refused
@@ -196,6 +207,11 @@ var cudaKVReleaseOwners *cudaKV
 // A caller may already have detached its KV handle before calling Free.
 func (k *cudaKV) retainReleaseOwnerLocked() {
 	if k.releaseRetained {
+		return
+	}
+	if k.snapshotCopy != nil {
+		k.releaseRetained = true
+		k.releaseNext, cudaKVReleaseOwners = cudaKVReleaseOwners, k
 		return
 	}
 	for _, rows := range [3][]dslice{k.K, k.Kraw, k.V} {
@@ -426,6 +442,15 @@ func (k *cudaKV) cloneWithOperations(alloc func(int, string) unsafe.Pointer, cop
 	return n
 }
 
+// snapshotFailureLocked receives a status already latched by the snapshot-only
+// native adapter. Retain input, conversion and pinned host owners before
+// observing or returning the error. A failed operation is not permission to retry or free.
+func (k *cudaKV) snapshotFailureLocked(site string, status int) error {
+	k.retainReleaseOwnerLocked()
+	k.be.faultLatch.Observe(DeviceFaultExecution, site, status)
+	return &CUDAOpError{Op: "SnapshotToHost", Site: site, Code: status, Msg: "snapshot device operation failed; owners retained"}
+}
+
 // SnapshotToHost copies the complete CUDA KV owner into ordinary host DRAM,
 // including pre-RoPE Kraw. The source remains resident until the caller
 // explicitly frees/demotes it, preserving stage-before-evict ordering.
@@ -438,20 +463,50 @@ func (k *cudaKV) SnapshotToHost() (KVHostSnapshot, error) {
 	if err := k.sharedStopErrorLocked("kv-snapshot"); err != nil {
 		return KVHostSnapshot{}, err
 	}
-	copyDS := func(src dslice) []float32 {
+	copyDS := func(src dslice) ([]float32, error) {
 		out := make([]float32, src.len)
 		if len(out) > 0 {
-			if src.dtype == F32 {
-				C.fcuda_d2h(unsafe.Pointer(&out[0]), src.ptr, C.size_t(len(out)*F32.Bytes()))
-			} else {
-				ptr := k.be.dallocClass(src.len*4, MemoryScratchpad, "kv-snapshot-conversion").ptr
-				defer C.fcuda_free(ptr)
-				cudaKVCheck(C.fcuda_kv_load_typed((*C.float)(ptr), src.ptr, C.int(src.len), C.int(src.dtype)))
-				C.fcuda_d2h(unsafe.Pointer(&out[0]), ptr, C.size_t(src.len*4))
+			holder := &cudaKVSnapshotCopy{host: out}
+			if src.dtype != F32 {
+				holder.conversion = k.be.dallocClass(src.len*4, MemoryScratchpad, "kv-snapshot-conversion")
 			}
+			k.snapshotCopy = holder
+			copied, retired := false, false
+			// Register ownership cleanup before Pin or either native operation.
+			// The active defer roots k/holder during the call; failure or panic
+			// transfers that root to the existing allocation-free retained list.
+			defer func() {
+				if copied {
+					holder.pin.Unpin()
+					holder.host = nil
+				}
+				if retired {
+					k.snapshotCopy = nil
+				} else {
+					k.retainReleaseOwnerLocked()
+				}
+			}()
+			holder.pin.Pin(&out[0])
+			ptr := src.ptr
+			if holder.conversion != nil {
+				ptr = holder.conversion.ptr
+				if status := int(C.fcuda_kv_snapshot_load_checked((*C.float)(ptr), src.ptr, C.int(src.len), C.int(src.dtype))); status != 0 {
+					return nil, k.snapshotFailureLocked("kv-snapshot-convert", status)
+				}
+			}
+			if status := int(C.fcuda_kv_snapshot_d2h_checked(unsafe.Pointer(&out[0]), ptr, C.size_t(len(out)*F32.Bytes()))); status != 0 {
+				return nil, k.snapshotFailureLocked("kv-snapshot-d2h", status)
+			}
+			copied = true
+			// Only a successful copy certifies this prefix. Later row failure
+			// withholds the entire image but cannot undo a genuine earlier fence.
 			atomic.AddUint64(&k.be.fenceGen, 1)
+			if holder.conversion != nil {
+				C.fcuda_free(holder.conversion.ptr)
+			}
+			retired = true
 		}
-		return out
+		return out, nil
 	}
 	out := KVHostSnapshot{
 		Config: cloneKVConfig(k.cfg),
@@ -461,9 +516,16 @@ func (k *cudaKV) SnapshotToHost() (KVHostSnapshot, error) {
 		V:      make([][]float32, len(k.V)),
 	}
 	for layer := range k.K {
-		out.K[layer] = copyDS(k.K[layer])
-		out.KRaw[layer] = copyDS(k.Kraw[layer])
-		out.V[layer] = copyDS(k.V[layer])
+		var err error
+		if out.K[layer], err = copyDS(k.K[layer]); err != nil {
+			return KVHostSnapshot{}, err
+		}
+		if out.KRaw[layer], err = copyDS(k.Kraw[layer]); err != nil {
+			return KVHostSnapshot{}, err
+		}
+		if out.V[layer], err = copyDS(k.V[layer]); err != nil {
+			return KVHostSnapshot{}, err
+		}
 	}
 	return out, out.Validate()
 }
