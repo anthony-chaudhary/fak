@@ -426,6 +426,43 @@ copied; the adaptation is witnessed by
 `internal/model/dist_transport_test.go`. The upstream Apache-2.0 license is
 reproduced in the TensorFold benchmark evidence section above.
 
+## TensorFold durable conversation-state staging (warm-disk conversation state)
+
+The opt-in `ConversationState` path of `WarmDiskConfig` and its bounded I/O
+queue (`warmDiskStager`, `DrainConversationState`) in
+`internal/agent/inkernel_warm_disk.go` adapt the session-store durable
+conversation-state behavior behind TensorFold's `--learn-conversations`
+flag from revision `9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/sessions/store.zig
+plus the flag wiring
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/server/cli.zig#L521
+and operator documentation at
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/docs/api.md#L647
+
+The adapted contract: when the opt-in flag is set, eligible owned retained
+states are staged as owned copies into a bounded queue under a byte permit
+(default 1 GiB) and a job cap (default 8); one I/O thread writes and fsyncs
+them; a record is reusable only after all of its files are written and
+synced; a save that exceeds the permit alone, or still does not fit after one
+queued write finishes, is skipped without writing; a planned stop drains to a
+20 s deadline and then cancels the remainder; and a killed server loses
+unfinished saves outright (best effort), with private temp files reaped on the
+next prune. In this codebase that lands as the `ConversationState` opt-in on
+the existing `persistWarmPrefixDisk` seam over `l3kv.DiskStore` (whose Put
+already commits via fsync'd temp file plus atomic rename), the per-directory
+`warmDiskStager` I/O queue, and the planner-level `DrainConversationState`
+planned-stop entry point.
+
+Changed for Fak: idiomatic Go re-expression over fak's span-keyed warm-disk
+records instead of Zig session-store bytes, sentinel-error skip/cancel signals
+(`errConversationStateCapacityFull`, `errConversationStateClosed`,
+`errConversationStateCancelled`) instead of Zig error unions, and a
+directory-bound process-lifetime queue instead of process-global tunables. No
+upstream source code is copied; the adaptation is witnessed by
+`TestConversationSnapshotCompleteOnly` in
+`internal/agent/conversation_state_test.go`. The upstream Apache-2.0 license
+is reproduced in the TensorFold benchmark evidence section above.
+
 ## vLLM chunkwise Qwen host Gated-DeltaNet
 
 `internal/model/qwen35_gdn_chunked_host.go` adapts the chunk-64 causal

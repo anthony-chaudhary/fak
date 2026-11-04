@@ -24,12 +24,14 @@ import (
 const (
 	WarmDiskOutcomeRestored    WarmDiskOutcome = "restored"
 	WarmDiskOutcomePersisted                   = "persisted"
+	WarmDiskOutcomeStaged                      = "staged"
 	WarmDiskOutcomeMiss                        = "miss"
 	WarmDiskOutcomeFault                       = "fault"
 	WarmDiskOutcomeDisabled                    = "disabled"
 	WarmDiskOutcomeUnsupported                 = "unsupported"
 	WarmDiskRestored                           = WarmDiskOutcomeRestored
 	WarmDiskPersisted                          = WarmDiskOutcomePersisted
+	WarmDiskStaged                             = WarmDiskOutcomeStaged
 	WarmDiskFault                              = WarmDiskOutcomeFault
 	WarmDiskDisabled                           = WarmDiskOutcomeDisabled
 
@@ -57,6 +59,13 @@ type WarmDiskConfig struct {
 	MaxEntries     int
 	MaxBytes       int64
 	MaxRecordBytes int64
+	// ConversationState opts persistence into async conversation-state staging:
+	// eligible owned retained states are encoded, copied into a bounded I/O
+	// queue, and written + fsync'd by a background writer instead of on the
+	// request path. Default off keeps the historical synchronous persist.
+	ConversationState        bool
+	ConversationStatePermit  int64 // staged bytes held at once; <=0 selects the default
+	ConversationStateMaxJobs int   // saves queued plus in flight; <=0 selects the default
 }
 
 // WarmDiskReceipt is the bounded, prompt-free result of local restart reuse.
@@ -577,6 +586,288 @@ func (p *InKernelPlanner) admitWarmDiskSnapshot(scope radixkv.CacheIdentity, tok
 	return err
 }
 
+// Conversation-state staging bounds, adapted from TensorFold's
+// --learn-conversations store (zig/src/sessions/store.zig and docs/api.md,
+// "Conversations on disk", at revision
+// 9e8c368b0b4c2c7892a0c9f0f302d7c164016209): the engine stages an owned copy
+// between rounds under a byte permit and a job cap, an I/O thread writes and
+// fsyncs it, and a planned stop drains for 20 seconds before cancelling.
+const (
+	// ConversationStatePermitDefault caps the staged bytes held queued or in
+	// flight at once (upstream: 1 GiB).
+	ConversationStatePermitDefault int64 = 1 << 30
+	// ConversationStateJobsDefault caps saves queued plus in flight (upstream: 8).
+	ConversationStateJobsDefault = 8
+	// ConversationStateStopDrain is the planned-stop deadline: wait this long
+	// for queued saves to publish, then cancel the remainder (upstream: 20 s).
+	ConversationStateStopDrain = 20 * time.Second
+)
+
+var (
+	// errConversationStateCapacityFull reports a save the staging queue cannot
+	// take: it exceeds the byte permit even alone, or still does not fit after
+	// one queued write finished. Skipped, never written.
+	errConversationStateCapacityFull = errors.New("conversation-state staging capacity full")
+	// errConversationStateClosed reports a save offered after the planned-stop
+	// drain closed the queue.
+	errConversationStateClosed = errors.New("conversation-state staging closed")
+	// errConversationStateCancelled is delivered on a queued save's done channel
+	// when the planned-stop drain cancels it before its write starts.
+	errConversationStateCancelled = errors.New("conversation-state save cancelled before publish")
+)
+
+// warmDiskRecordWriter is the durability seam the conversation-state stager
+// publishes through. *l3kv.DiskStore satisfies it: Put commits via a temp file
+// that is fsync'd and atomically renamed, so a record is reusable only after
+// all of its files are written and synced.
+type warmDiskRecordWriter interface {
+	Put(ctx context.Context, key string, payload []byte) error
+}
+
+// warmDiskStagedSave is one encoded conversation-state record awaiting durable
+// write. The payload is an owned copy: the RAM state may leave while it waits,
+// and a cancelled save simply loses its copy.
+type warmDiskStagedSave struct {
+	key     string
+	payload []byte
+	done    chan error // one slot: nil published, sentinel when cancelled
+}
+
+// warmDiskStager is the bounded I/O queue behind opt-in conversation-state
+// persistence. One writer goroutine (the I/O thread) takes saves FIFO and hands
+// each to the record writer; a save becomes visible to readers only after that
+// writer has committed it. Staging charges the byte permit for queued plus
+// in-flight payloads; a save that finds the capacity full but would fit alone
+// waits for the next write to finish, and is skipped if it still does not fit.
+// A killed process loses unfinished saves (best effort): nothing half-written
+// is ever published, and the private temp files are reaped by PruneContext.
+type warmDiskStager struct {
+	mu       sync.Mutex
+	cond     *sync.Cond
+	store    warmDiskRecordWriter
+	queue    []warmDiskStagedSave
+	waiters  []chan struct{}
+	charged  int64 // queued + in-flight payload bytes
+	inflight int
+	permit   int64
+	maxJobs  int
+	closed   bool
+	written  int
+	failed   int
+	stopped  chan struct{}
+}
+
+func newWarmDiskStager(store warmDiskRecordWriter, permit int64, maxJobs int) *warmDiskStager {
+	if permit <= 0 {
+		permit = ConversationStatePermitDefault
+	}
+	if maxJobs <= 0 {
+		maxJobs = ConversationStateJobsDefault
+	}
+	s := &warmDiskStager{store: store, permit: permit, maxJobs: maxJobs, stopped: make(chan struct{})}
+	s.cond = sync.NewCond(&s.mu)
+	go s.run()
+	return s
+}
+
+// stage enqueues payload under key, charging the permit. It reports
+// errConversationStateCapacityFull for a save that cannot be taken (skipped),
+// errConversationStateClosed after the drain, or ctx.Err() when the caller's
+// context ends while waiting for room. The returned save's done channel
+// delivers nil once the record is published or the cancellation sentinel.
+func (s *warmDiskStager) stage(ctx context.Context, key string, payload []byte) (*warmDiskStagedSave, error) {
+	size := int64(len(payload))
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil, errConversationStateClosed
+	}
+	if s.fitsLocked(size) {
+		save := s.enqueueLocked(key, payload, size)
+		s.mu.Unlock()
+		return save, nil
+	}
+	if size > s.permit {
+		// Cannot fit even alone: skipped, never written.
+		s.mu.Unlock()
+		return nil, errConversationStateCapacityFull
+	}
+	waiter := make(chan struct{})
+	s.waiters = append(s.waiters, waiter)
+	s.mu.Unlock()
+	select {
+	case <-waiter:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil, errConversationStateClosed
+	}
+	if !s.fitsLocked(size) {
+		return nil, errConversationStateCapacityFull
+	}
+	return s.enqueueLocked(key, payload, size), nil
+}
+
+// fitsLocked reports whether one more save of size bytes fits under the job cap
+// and the byte permit.
+func (s *warmDiskStager) fitsLocked(size int64) bool {
+	return len(s.queue)+s.inflight < s.maxJobs && s.charged+size <= s.permit
+}
+
+func (s *warmDiskStager) enqueueLocked(key string, payload []byte, size int64) *warmDiskStagedSave {
+	save := &warmDiskStagedSave{key: key, payload: payload, done: make(chan error, 1)}
+	s.queue = append(s.queue, *save)
+	s.charged += size
+	s.cond.Signal()
+	return save
+}
+
+// run is the I/O thread: it takes queued saves FIFO and publishes each through
+// the record writer. It exits only after the drain closes the queue; a write
+// already in flight may finish after the deadline using only its private temp
+// file and staged bytes.
+func (s *warmDiskStager) run() {
+	defer close(s.stopped)
+	for {
+		s.mu.Lock()
+		for len(s.queue) == 0 && !s.closed {
+			s.cond.Wait()
+		}
+		if len(s.queue) == 0 {
+			s.mu.Unlock()
+			return
+		}
+		save := s.queue[0]
+		s.queue = s.queue[1:]
+		s.inflight++
+		s.mu.Unlock()
+		err := s.store.Put(context.Background(), save.key, save.payload)
+		s.mu.Lock()
+		s.inflight--
+		s.charged -= int64(len(save.payload))
+		if err != nil {
+			s.failed++
+		} else {
+			s.written++
+		}
+		s.broadcastLocked()
+		s.mu.Unlock()
+		save.done <- err // nil when published
+	}
+}
+
+// broadcastLocked wakes every stage caller waiting for room.
+func (s *warmDiskStager) broadcastLocked() {
+	for _, w := range s.waiters {
+		close(w)
+	}
+	s.waiters = nil
+}
+
+// drain runs the planned-stop protocol: keep publishing until the queue is
+// empty or the deadline passes, then close the queue and cancel whatever is
+// still queued without writing it. It reports saves published during the drain
+// and saves cancelled.
+func (s *warmDiskStager) drain(deadline time.Duration) (published, cancelled int) {
+	s.mu.Lock()
+	start := s.written
+	alreadyClosed := s.closed
+	s.mu.Unlock()
+	if !alreadyClosed {
+		deadlineAt := time.Now().Add(deadline)
+		for {
+			s.mu.Lock()
+			empty := len(s.queue) == 0 && s.inflight == 0
+			s.mu.Unlock()
+			if empty || time.Now().After(deadlineAt) {
+				break
+			}
+			time.Sleep(2 * time.Millisecond)
+		}
+	}
+	s.mu.Lock()
+	for i := range s.queue {
+		s.queue[i].done <- errConversationStateCancelled
+	}
+	cancelled = len(s.queue)
+	s.queue = nil
+	s.charged = 0
+	s.closed = true
+	s.broadcastLocked()
+	s.cond.Signal()
+	waitWriter := s.inflight == 0
+	s.mu.Unlock()
+	if waitWriter {
+		<-s.stopped // the writer exits promptly once the queue is empty and closed
+	}
+	// A write still in flight past the deadline may finish later using only its
+	// private temp file and staged bytes; it never blocks the stop.
+	s.mu.Lock()
+	published = s.written - start
+	s.mu.Unlock()
+	return published, cancelled
+}
+
+// warmDiskStagerByDir binds each conversation-state store directory to its
+// single I/O queue for the process lifetime. The queue deliberately outlives
+// any one planner: a restarted server re-opens the same directory and must
+// keep publishing behind the same byte permit, and the planned-stop drain
+// closes it explicitly. Bounded by the number of distinct store directories a
+// process ever persists into.
+var (
+	warmDiskStagerMu    sync.Mutex
+	warmDiskStagerByDir = map[string]*warmDiskStager{}
+)
+
+// conversationStager returns the I/O queue bound to the resolved store
+// directory, creating it on first use with the store first opened for
+// persistence.
+func conversationStager(dir string, store *l3kv.DiskStore, permit int64, maxJobs int) *warmDiskStager {
+	warmDiskStagerMu.Lock()
+	defer warmDiskStagerMu.Unlock()
+	if s, ok := warmDiskStagerByDir[dir]; ok {
+		return s
+	}
+	s := newWarmDiskStager(store, permit, maxJobs)
+	warmDiskStagerByDir[dir] = s
+	return s
+}
+
+// DrainConversationState runs the planned-stop protocol for opt-in
+// conversation-state staging: wait up to deadline (default
+// ConversationStateStopDrain) for queued saves to publish, then cancel the
+// remainder. It reports saves published during the drain and saves cancelled.
+// A killed process instead loses unfinished saves outright; the stale temp
+// files stay private and are reaped by PruneContext.
+func (p *InKernelPlanner) DrainConversationState(deadline time.Duration) (published, cancelled int) {
+	if p == nil {
+		return 0, 0
+	}
+	p.mu.Lock()
+	cfg := p.warmDiskConfig
+	p.mu.Unlock()
+	if !cfg.ConversationState || cfg.Disabled {
+		return 0, 0
+	}
+	resolved, err := resolveWarmDiskConfig(cfg)
+	if err != nil {
+		return 0, 0
+	}
+	warmDiskStagerMu.Lock()
+	stager := warmDiskStagerByDir[resolved.Dir]
+	warmDiskStagerMu.Unlock()
+	if stager == nil {
+		return 0, 0
+	}
+	if deadline <= 0 {
+		deadline = ConversationStateStopDrain
+	}
+	return stager.drain(deadline)
+}
+
 func (p *InKernelPlanner) persistWarmPrefixDisk(ctx context.Context, spec WarmPrefixSpec, tokens []int, prior *WarmDiskReceipt) *WarmDiskReceipt {
 	store, cfg, identity, result := p.openWarmDisk()
 	if result != nil {
@@ -626,32 +917,57 @@ func (p *InKernelPlanner) persistWarmPrefixDisk(ctx context.Context, spec WarmPr
 	if err := ctx.Err(); err != nil {
 		return newWarmDiskReceipt(cfg, WarmDiskOutcomeFault, "cancelled")
 	}
-	// Admit the write against the store's measured byte pool before staging: an
-	// unaffordable record is skipped, not faulted. When this planner already
-	// holds the capture reservation covering the payload (beginWarmDiskCapture
-	// reserves MaxRecordBytes, and the checks above bound the payload to it),
-	// the durable write completes under that permit and finish
-	// (endWarmDiskCapture) releases it; otherwise this write owns its own
-	// reservation until it finishes.
-	writeGate := p.warmDiskWriteGate()
-	if writeGate != nil {
-		p.mu.Lock()
-		covered := p.warmDiskCapture && p.warmDiskCaptureBudget >= int64(len(payload))
-		p.mu.Unlock()
-		if !covered {
-			if err := writeGate.reserve(int64(len(payload))); err != nil {
-				return newWarmDiskReceipt(cfg, WarmDiskOutcomeUnsupported, "write_budget_refused")
-			}
-			defer writeGate.release(int64(len(payload)))
-		}
-	}
 	execution := p.warmDiskExecutionIdentity()
 	key := warmDiskKey(spec, identity, execution)
-	if err := store.Put(ctx, key, payload); err != nil {
-		return newWarmDiskReceipt(cfg, WarmDiskOutcomeFault, "write_failed")
+	var staged bool
+	var writeGate *warmDiskWriteAdmission
+	if cfg.ConversationState {
+		// Opt-in conversation-state staging: hand the owned encoded copy to the
+		// I/O queue; the record becomes reusable only after the writer has
+		// written and synced every file. The stager's own byte permit governs
+		// these saves, so no per-write gate reservation is taken here: ownership
+		// of the payload outlives this call.
+		if _, err := conversationStager(cfg.Dir, store, cfg.ConversationStatePermit, cfg.ConversationStateMaxJobs).stage(ctx, key, payload); err != nil {
+			switch {
+			case errors.Is(err, errConversationStateCapacityFull):
+				return newWarmDiskReceipt(cfg, WarmDiskOutcomeUnsupported, "staging_capacity_full")
+			case errors.Is(err, errConversationStateClosed):
+				return newWarmDiskReceipt(cfg, WarmDiskOutcomeFault, "staging_closed")
+			default:
+				return newWarmDiskReceipt(cfg, WarmDiskOutcomeFault, "cancelled")
+			}
+		}
+		staged = true
+	} else {
+		// Admit the write against the store's measured byte pool before staging: an
+		// unaffordable record is skipped, not faulted. When this planner already
+		// holds the capture reservation covering the payload (beginWarmDiskCapture
+		// reserves MaxRecordBytes, and the checks above bound the payload to it),
+		// the durable write completes under that permit and finish
+		// (endWarmDiskCapture) releases it; otherwise this write owns its own
+		// reservation until it finishes.
+		writeGate = p.warmDiskWriteGate()
+		if writeGate != nil {
+			p.mu.Lock()
+			covered := p.warmDiskCapture && p.warmDiskCaptureBudget >= int64(len(payload))
+			p.mu.Unlock()
+			if !covered {
+				if err := writeGate.reserve(int64(len(payload))); err != nil {
+					return newWarmDiskReceipt(cfg, WarmDiskOutcomeUnsupported, "write_budget_refused")
+				}
+				defer writeGate.release(int64(len(payload)))
+			}
+		}
+		if err := store.Put(ctx, key, payload); err != nil {
+			return newWarmDiskReceipt(cfg, WarmDiskOutcomeFault, "write_failed")
+		}
 	}
 	recordWarmDiskSlot(ctx, cfg, spec, identity, execution)
-	receipt := &WarmDiskReceipt{Outcome: WarmDiskOutcomePersisted, Tier: warmDiskTier, WriteBytes: int64(len(payload)), BudgetBytes: cfg.MaxRecordBytes}
+	var outcome WarmDiskOutcome = WarmDiskOutcomePersisted
+	if staged {
+		outcome = WarmDiskOutcomeStaged
+	}
+	receipt := &WarmDiskReceipt{Outcome: outcome, Tier: warmDiskTier, WriteBytes: int64(len(payload)), BudgetBytes: cfg.MaxRecordBytes}
 	if prior != nil {
 		receipt.ReadBytes = prior.ReadBytes
 		receipt.RestoreOutcome = prior.RestoreOutcome
