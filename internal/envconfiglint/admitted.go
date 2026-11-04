@@ -671,14 +671,6 @@ var admittedPostFreeze = []string{
 	"FAK_ARTIFACT_SHA256",
 	"FAK_SOURCE_REVISION",
 
-	// internal/compute/strix/streamcopy.go — force/disable switches for the AVX-512 streaming
-	// copy path. Hardware capability overrides.
-	// Relocates to: strix compute capability config.
-	"FAK_AVX512_DISABLE",
-	"FAK_AVX512_FORCE",
-	"FAK_AVX512_STREAMING_DISABLE",
-	"FAK_AVX512_STREAMING_FORCE",
-
 	// cmd/fak/serve_model_load.go — env spelling of the --backend selector.
 	// Relocates to: the existing `fak serve --backend` flag.
 	"FAK_BACKEND",

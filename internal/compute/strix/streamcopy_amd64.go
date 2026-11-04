@@ -25,8 +25,8 @@ func sfenceAsm()
 
 // canExecuteAVX512 checks whether the physical CPU actually supports AVX-512 execution.
 // This is an absolute hardware safety gate: even if HasAVX512Streaming() is overridden
-// or forced via environment variables, code will never jump to AVX-512 assembly
-// instructions unless the hardware CPUID reports native AVX-512 support.
+// or a per-operation AVX512Forced selection is supplied, code will never jump to
+// AVX-512 assembly instructions unless the hardware CPUID reports native AVX-512 support.
 func canExecuteAVX512() bool {
 	return cpu.X86.HasAVX512F || cpu.X86.HasAVX512
 }
