@@ -3,6 +3,7 @@ package referenceoracle_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -30,8 +31,35 @@ func TestV41OracleLoadsThroughAdapter(t *testing.T) {
 	if rb == nil || rb.FromRev != "543d86fd975044332d4366204eadd6da1b0cbeda" || rb.ToRev != "c4a085541cb53f67ee5e57b63d255e80cef286e7" || rb.WitnessedUTC != "2026-10-27" {
 		t.Fatalf("rebind=%+v", rb)
 	}
-	if !slices.Equal(rb.Matched, []string{"shard_count", "shard1_sha256", "total_bytes"}) {
+	if !slices.Equal(rb.Matched, []string{"shard_count", "shard1_sha256", "all_shard_sha256", "total_bytes"}) {
 		t.Fatalf("rebind matched=%v", rb.Matched)
+	}
+	// The rebind must record the full seven-shard byte identity re-verified
+	// against the live revision, so an independent verifier needs nothing
+	// outside this document.
+	digests := []string{
+		"0bcee934bd4e8350c54410681d9300b0321a300fcb1df1437a20703394d08ee0",
+		"124ffa15b6b7ec9630715ad18752a4c3f371749647837b8c9d5f7eb52c4f73c0",
+		"4dd35b0b086cc0fb19d3a72afd8aed331317950e2257f37b9672702edc3f2453",
+		"d24832f4c2f42340d5d4bf4d9b3277c861e0a0a9ccd25e94bda5581c5351f960",
+		"34714c3880bde310207e3d12fa488d8d676f338ff635157fded8ec73e133efad",
+		"08dc941d26687cb51f736a4f1c3a2c4843fb1d79573164c645106711081f5faf",
+		"550bbdb94a69142abfa4b2f2db86ffe3dd6d4ca45eafbb6728f4fe40506fa6b9",
+	}
+	sizes := []int64{43072989056, 44805480352, 14935107904, 44217904672, 44804598176, 44803713696, 27875485600}
+	if len(rb.Shards) != 7 {
+		t.Fatalf("rebind shards=%d, want 7", len(rb.Shards))
+	}
+	var total int64
+	for i, s := range rb.Shards {
+		want := fmt.Sprintf("DeepSeek-V4.1-Flash-Q2_K-%05d-of-00007.gguf", i+1)
+		if s.Name != want || s.SHA256 != digests[i] || s.SizeBytes != sizes[i] {
+			t.Fatalf("rebind shard %d = %+v, want name %q sha %s size %d", i, s, want, digests[i], sizes[i])
+		}
+		total += s.SizeBytes
+	}
+	if total != 264515279456 {
+		t.Fatalf("rebind shard bytes sum to %d, want 264515279456", total)
 	}
 	wantTexts := []string{"The chemical symbol for gold is", "The capital of France is", "Say hello.", "What is 17 times 3?"}
 	var texts []string
@@ -77,6 +105,9 @@ func TestNativeOracleRoundTrip(t *testing.T) {
 	if back.Artifact.Rebind == nil || back.Artifact.Rebind.ToRev != "c4a085541cb53f67ee5e57b63d255e80cef286e7" {
 		t.Fatalf("rebind lost in native round trip: %+v", back.Artifact.Rebind)
 	}
+	if got := back.Artifact.Rebind.Shards; len(got) != 7 || got[0].SHA256 != "0bcee934bd4e8350c54410681d9300b0321a300fcb1df1437a20703394d08ee0" || got[6].SHA256 != "550bbdb94a69142abfa4b2f2db86ffe3dd6d4ca45eafbb6728f4fe40506fa6b9" {
+		t.Fatalf("rebind shard table lost in native round trip: %+v", got)
+	}
 	if !referenceoracle.IsOracleSchema("fak.qwen38_reference_oracle.v1") || referenceoracle.IsOracleSchema("fak.compute_trace.v1") {
 		t.Fatal("IsOracleSchema")
 	}
@@ -115,6 +146,31 @@ func TestOracleRefusals(t *testing.T) {
 		"rebind same rev": func(o *referenceoracle.Oracle) {
 			o.Artifact.Rebind = &referenceoracle.Rebind{FromRev: "a", ToRev: "a", WitnessedUTC: "2026-10-27"}
 		},
+		"rebind shards short": func(o *referenceoracle.Oracle) {
+			o.Artifact.ShardCount = 7
+			o.Artifact.Rebind = &referenceoracle.Rebind{FromRev: "a", ToRev: "b", WitnessedUTC: "2026-10-27",
+				Shards: []referenceoracle.Shard{{Name: "s1.gguf", SHA256: strings.Repeat("ab", 32)}}}
+		},
+		"rebind shard empty name": func(o *referenceoracle.Oracle) {
+			o.Artifact.ShardCount = 1
+			o.Artifact.Rebind = &referenceoracle.Rebind{FromRev: "a", ToRev: "b", WitnessedUTC: "2026-10-27",
+				Shards: []referenceoracle.Shard{{SHA256: strings.Repeat("cd", 32)}}}
+		},
+		"rebind shard duplicate name": func(o *referenceoracle.Oracle) {
+			o.Artifact.ShardCount = 2
+			o.Artifact.Rebind = &referenceoracle.Rebind{FromRev: "a", ToRev: "b", WitnessedUTC: "2026-10-27",
+				Shards: []referenceoracle.Shard{{Name: "s.gguf", SHA256: strings.Repeat("ab", 32)}, {Name: "s.gguf", SHA256: strings.Repeat("cd", 32)}}}
+		},
+		"rebind shard uppercase digest": func(o *referenceoracle.Oracle) {
+			o.Artifact.ShardCount = 1
+			o.Artifact.Rebind = &referenceoracle.Rebind{FromRev: "a", ToRev: "b", WitnessedUTC: "2026-10-27",
+				Shards: []referenceoracle.Shard{{Name: "s.gguf", SHA256: strings.ToUpper(strings.Repeat("ab", 32))}}}
+		},
+		"rebind shard negative size": func(o *referenceoracle.Oracle) {
+			o.Artifact.ShardCount = 1
+			o.Artifact.Rebind = &referenceoracle.Rebind{FromRev: "a", ToRev: "b", WitnessedUTC: "2026-10-27",
+				Shards: []referenceoracle.Shard{{Name: "s.gguf", SHA256: strings.Repeat("ef", 32), SizeBytes: -1}}}
+		},
 	}
 	for name, mutate := range cases {
 		o := base()
@@ -122,6 +178,15 @@ func TestOracleRefusals(t *testing.T) {
 		if err := o.Validate(); !errors.Is(err, referenceoracle.ErrInvalid) {
 			t.Errorf("%s: err=%v, want ErrInvalid", name, err)
 		}
+	}
+	// A complete, well-formed table must pass: fail-closed means rejecting the
+	// bad, not rejecting everything.
+	ok := base()
+	ok.Artifact.ShardCount = 1
+	ok.Artifact.Rebind = &referenceoracle.Rebind{FromRev: "a", ToRev: "b", WitnessedUTC: "2026-10-27",
+		Shards: []referenceoracle.Shard{{Name: "s.gguf", SHA256: strings.Repeat("ab", 32), SizeBytes: 10}}}
+	if err := ok.Validate(); err != nil {
+		t.Errorf("valid populated shard table rejected: %v", err)
 	}
 	if _, err := referenceoracle.Decode(strings.NewReader(`{"schema":"fak.compute_trace.v1"}`)); !errors.Is(err, referenceoracle.ErrUnknownSchema) {
 		t.Fatalf("unknown schema err=%v", err)
