@@ -12,6 +12,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/l3kv"
@@ -143,6 +145,204 @@ func resolveWarmDiskBounds(cfg WarmDiskConfig) WarmDiskConfig {
 
 func newWarmDiskReceipt(cfg WarmDiskConfig, outcome WarmDiskOutcome, reason string) *WarmDiskReceipt {
 	return &WarmDiskReceipt{Outcome: outcome, Tier: warmDiskTier, Reason: reason, BudgetBytes: cfg.MaxRecordBytes}
+}
+
+// Warm-disk write-admission backoff ladder (adapted from the TensorFold
+// learned_disk.zig Admission reserve/backoff): each refusal doubles the window
+// from a 1 s base, capped at 60 s once the ladder reaches its 7th rung; any
+// admitted reservation or landed write clears the ladder.
+const (
+	warmDiskWriteBackoffBase    = time.Second
+	warmDiskWriteBackoffCap     = 60 * time.Second
+	warmDiskWriteBackoffMaxFail = 7
+	warmDiskWriteDrainPoll      = 5 * time.Millisecond
+)
+
+// Closed refusal contract for warm-disk write admission; callers match with errors.Is.
+var (
+	errWarmDiskSpaceUnknown    = errors.New("warm disk write: free space unknown")
+	errWarmDiskBudgetExhausted = errors.New("warm disk write: budget exhausted")
+	errWarmDiskBackoffActive   = errors.New("warm disk write: refusal backoff active")
+)
+
+// warmDiskWriteAdmission is the byte-permit pool that gates durable warm-disk
+// writes: staging reserves bytes up front, an unmeasured limit or an
+// unaffordable request refuses fail-closed, refusals arm a bounded exponential
+// backoff, finish releases the reservation, and a landed write clears the
+// ladder. Incomplete records never publish because the store commits only via
+// temp+fsync+rename.
+type warmDiskWriteAdmission struct {
+	mu        sync.Mutex
+	limit     int64 // reservable bytes measured at first use
+	known     bool  // false when the volume's free space could not be measured
+	reserved  int64 // bytes held by in-flight staging
+	fails     int   // consecutive refusals driving the backoff ladder
+	backoff   time.Duration
+	refusedAt time.Time
+	now       func() time.Time
+}
+
+func newWarmDiskWriteAdmission(limit int64, known bool, now func() time.Time) *warmDiskWriteAdmission {
+	if now == nil {
+		now = time.Now
+	}
+	return &warmDiskWriteAdmission{limit: limit, known: known, now: now}
+}
+
+// nextWarmDiskWriteBackoff is the refusal window after the n-th consecutive
+// failure (n >= 1): 1 s doubled per failure, capped at 60 s at the 7th rung.
+func nextWarmDiskWriteBackoff(fails int) time.Duration {
+	if fails <= 0 {
+		return 0
+	}
+	rung := fails - 1
+	if rung >= warmDiskWriteBackoffMaxFail-1 {
+		return warmDiskWriteBackoffCap
+	}
+	d := warmDiskWriteBackoffBase << uint(rung)
+	if d <= 0 || d > warmDiskWriteBackoffCap {
+		return warmDiskWriteBackoffCap
+	}
+	return d
+}
+
+// reserve admits bytes into the pool before staging. It refuses when the limit
+// is unknown, when the request overflows or exceeds the remaining pool, or
+// while a refusal backoff window is still open; every refusal arms the next
+// window.
+func (a *warmDiskWriteAdmission) reserve(bytes int64) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.known {
+		return errWarmDiskSpaceUnknown
+	}
+	if a.fails > 0 && a.now().Before(a.refusedAt.Add(a.backoff)) {
+		return errWarmDiskBackoffActive
+	}
+	if bytes < 0 || bytes > a.limit-a.reserved {
+		a.armRefusalLocked()
+		return errWarmDiskBudgetExhausted
+	}
+	a.reserved += bytes
+	a.clearLadderLocked()
+	return nil
+}
+
+// release returns a finished staging's bytes to the pool regardless of outcome.
+func (a *warmDiskWriteAdmission) release(bytes int64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if bytes > 0 {
+		a.reserved -= bytes
+		if a.reserved < 0 {
+			a.reserved = 0
+		}
+	}
+}
+
+// clear drops the refusal ladder after a write lands.
+func (a *warmDiskWriteAdmission) clear() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.clearLadderLocked()
+}
+
+// drain reports whether every in-flight reservation finished before the
+// shutdown deadline; it polls until the pool empties or the deadline passes.
+func (a *warmDiskWriteAdmission) drain(deadline time.Time) bool {
+	for {
+		a.mu.Lock()
+		pending := a.reserved
+		a.mu.Unlock()
+		if pending == 0 {
+			return true
+		}
+		if !a.now().Before(deadline) {
+			return false
+		}
+		time.Sleep(warmDiskWriteDrainPoll)
+	}
+}
+
+// pending reports the bytes currently reserved by in-flight staging.
+func (a *warmDiskWriteAdmission) pending() int64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.reserved
+}
+
+func (a *warmDiskWriteAdmission) armRefusalLocked() {
+	if a.fails < warmDiskWriteBackoffMaxFail {
+		a.fails++
+	}
+	a.backoff = nextWarmDiskWriteBackoff(a.fails)
+	a.refusedAt = a.now()
+}
+
+func (a *warmDiskWriteAdmission) clearLadderLocked() {
+	a.fails = 0
+	a.backoff = 0
+}
+
+// warmDiskWriteGates holds one admission pool per resolved store directory:
+// every planner writing that store shares the same permit pool, so concurrent
+// staging cannot collectively overrun the measured budget. Entries live for
+// the process; each is a few words per directory.
+var warmDiskWriteGates struct {
+	sync.Mutex
+	m map[string]*warmDiskWriteAdmission
+}
+
+// warmDiskDiskInfo probes a store volume's free bytes; production measures the
+// real filesystem, tests simulate volumes. A nil probe fails closed as unknown.
+var warmDiskDiskInfo = compute.DiskInfo
+
+// warmDiskWritePoolLimit sizes the pool from the store cap and measured free
+// bytes; unknown or non-positive inputs stay unknown (the fail-closed arm).
+func warmDiskWritePoolLimit(maxBytes, free int64, known bool) int64 {
+	if !known || maxBytes <= 0 || free <= 0 {
+		return 0
+	}
+	if free < maxBytes {
+		return free
+	}
+	return maxBytes
+}
+
+// warmDiskWriteGateFor resolves (creating on first use) the admission pool
+// guarding dir's durable writes: the smaller of the store's byte cap and the
+// volume's measured free bytes.
+func warmDiskWriteGateFor(dir string, maxBytes int64) *warmDiskWriteAdmission {
+	warmDiskWriteGates.Lock()
+	defer warmDiskWriteGates.Unlock()
+	if ad, ok := warmDiskWriteGates.m[dir]; ok {
+		return ad
+	}
+	var free int64
+	var known bool
+	if warmDiskDiskInfo != nil {
+		_, free, known = warmDiskDiskInfo(dir)
+	}
+	ad := newWarmDiskWriteAdmission(warmDiskWritePoolLimit(maxBytes, free, known), known && maxBytes > 0, time.Now)
+	if warmDiskWriteGates.m == nil {
+		warmDiskWriteGates.m = map[string]*warmDiskWriteAdmission{}
+	}
+	warmDiskWriteGates.m[dir] = ad
+	return ad
+}
+
+// warmDiskWriteGate resolves this planner's durable-write admission pool from
+// its configured store. Callers must not hold p.mu; nil means no gating.
+func (p *InKernelPlanner) warmDiskWriteGate() *warmDiskWriteAdmission {
+	if p == nil {
+		return nil
+	}
+	cfg, _ := p.warmDiskState()
+	resolved, err := resolveWarmDiskConfig(cfg)
+	if err != nil || resolved.Disabled || strings.TrimSpace(resolved.Dir) == "" {
+		return nil
+	}
+	return warmDiskWriteGateFor(resolved.Dir, resolved.MaxBytes)
 }
 
 func resolveWarmDiskRecordBudget(requested, maxBytes, freeBytes int64, known bool) int64 {
@@ -426,6 +626,25 @@ func (p *InKernelPlanner) persistWarmPrefixDisk(ctx context.Context, spec WarmPr
 	if err := ctx.Err(); err != nil {
 		return newWarmDiskReceipt(cfg, WarmDiskOutcomeFault, "cancelled")
 	}
+	// Admit the write against the store's measured byte pool before staging: an
+	// unaffordable record is skipped, not faulted. When this planner already
+	// holds the capture reservation covering the payload (beginWarmDiskCapture
+	// reserves MaxRecordBytes, and the checks above bound the payload to it),
+	// the durable write completes under that permit and finish
+	// (endWarmDiskCapture) releases it; otherwise this write owns its own
+	// reservation until it finishes.
+	writeGate := p.warmDiskWriteGate()
+	if writeGate != nil {
+		p.mu.Lock()
+		covered := p.warmDiskCapture && p.warmDiskCaptureBudget >= int64(len(payload))
+		p.mu.Unlock()
+		if !covered {
+			if err := writeGate.reserve(int64(len(payload))); err != nil {
+				return newWarmDiskReceipt(cfg, WarmDiskOutcomeUnsupported, "write_budget_refused")
+			}
+			defer writeGate.release(int64(len(payload)))
+		}
+	}
 	execution := p.warmDiskExecutionIdentity()
 	key := warmDiskKey(spec, identity, execution)
 	if err := store.Put(ctx, key, payload); err != nil {
@@ -441,6 +660,8 @@ func (p *InKernelPlanner) persistWarmPrefixDisk(ctx context.Context, spec WarmPr
 	if err := store.PruneContext(ctx, cfg.MaxEntries, cfg.MaxBytes, key); err != nil {
 		receipt.Outcome = WarmDiskOutcomeFault
 		receipt.Reason = "prune_failed"
+	} else if writeGate != nil {
+		writeGate.clear() // a landed write clears the refusal ladder
 	}
 	return receipt
 }
@@ -486,6 +707,7 @@ func warmDiskCaptureEligible(receipt *WarmDiskReceipt) bool {
 }
 
 func (p *InKernelPlanner) beginWarmDiskCapture(budget int64) {
+	gate := p.warmDiskWriteGate()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.warmDiskCaptured != nil {
@@ -497,11 +719,20 @@ func (p *InKernelPlanner) beginWarmDiskCapture(budget int64) {
 	p.warmDiskCapturedTokens = nil
 	p.warmDiskCapturedLogits = nil
 	p.warmDiskCapturedScope = radixkv.CacheIdentity{}
+	if gate != nil && budget > 0 {
+		// Reserve the capture's byte budget before staging: an unaffordable or
+		// backoff-gated capture is skipped instead of risking an over-budget record.
+		if err := gate.reserve(budget); err != nil {
+			p.warmDiskCapture = false
+			p.warmDiskCaptureBudget = 0
+		}
+	}
 }
 
 func (p *InKernelPlanner) endWarmDiskCapture() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	capturing := p.warmDiskCapture
+	budget := p.warmDiskCaptureBudget
 	p.warmDiskCapture = false
 	p.warmDiskCaptureBudget = 0
 	if p.warmDiskCaptured != nil {
@@ -510,6 +741,12 @@ func (p *InKernelPlanner) endWarmDiskCapture() {
 	p.warmDiskCaptured = nil
 	p.warmDiskCapturedTokens = nil
 	p.warmDiskCapturedLogits = nil
+	p.mu.Unlock()
+	if capturing && budget > 0 {
+		if gate := p.warmDiskWriteGate(); gate != nil {
+			gate.release(budget) // finish releases the reservation
+		}
+	}
 }
 
 func (p *InKernelPlanner) captureWarmDiskCandidate(ctx context.Context, session *model.Session, tokens []int, logits []float32) {

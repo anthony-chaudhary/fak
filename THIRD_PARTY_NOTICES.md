@@ -1847,3 +1847,34 @@ kernel, or model code is included.
 The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
 "TensorFold benchmark evidence" section above (same pinned repository and
 revision); they apply to this adaptation as well.
+
+## TensorFold durable write admission budget
+
+`internal/agent/inkernel_warm_disk.go` adapts the staging-admission
+reserve/backoff idea from `zig/src/core/lanes/learned_disk.zig:61`
+(`Admission.reserve`) in TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209`, with the caller pattern from
+`zig/src/sessions/jobs.zig:113` and the byte-permit documentation at
+`docs/api.md:647`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/lanes/learned_disk.zig
+
+The adapted contract: durable warm-disk writes reserve their byte budget
+before staging against a pool sized from the store cap and the volume's
+measured free bytes; unknown free space or an unaffordable request refuses
+fail-closed; each refusal arms an exponential backoff (1 s base, doubled per
+failure, capped at 60 s after 7 failures); finish releases the reservation, a
+landed write clears the ladder, unaffordable writes are skipped rather than
+faulted, incomplete records stay unpublishable through the store's existing
+temp+fsync+rename commit, and in-flight reservations drain within a shutdown
+deadline. `internal/agent/warm_disk_budget_test.go` pins the sentinel
+refusals and the backoff ladder.
+
+Changed for Fak: idiomatic Go over fak's existing warm-disk seam
+(`beginWarmDiskCapture` / `persistWarmPrefixDisk`) with a per-store-directory
+permit pool and sentinel errors instead of Zig error sets; the pool is measured
+from fak's own store byte cap and `compute.DiskInfo` free-space probe. No Zig
+runtime, kernel, or model code is included.
+
+The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
+"TensorFold benchmark evidence" section above (same pinned repository and
+revision); they apply to this adaptation as well.
