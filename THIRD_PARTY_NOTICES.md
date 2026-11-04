@@ -1878,3 +1878,28 @@ runtime, kernel, or model code is included.
 The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
 "TensorFold benchmark evidence" section above (same pinned repository and
 revision); they apply to this adaptation as well.
+
+## TensorFold eviction-spill (l3kv Spiller)
+
+Adapted from ashhart/TensorFold @9e8c368b0b4c2c7892a0c9f0f302d7c164016209 (Apache-2.0):
+the eviction-spill contract — an optional spill copy of durable KV state before
+releasing RAM, reusing the durable restore path, capped on disk/staging/time;
+checkpoint slots bound retained RAM states.
+
+Source files: zig/src/native/disk_spill.zig (spill record + caps),
+zig/src/server/cli.zig:518-523 (--spill-gib/--checkpoint-slots flags),
+zig/src/core/prompt_cache.zig:191 (spill-before-release call site).
+
+What was adapted into internal/l3kv:
+- Spiller (spill.go): owned-copy staging through Store.Put under the span's
+  residency digest, with per-entry and total-disk byte caps and a bounded Put
+  window; the checkpoint-slot knob is carried/validated here, enforced on the
+  retaining side.
+- AsyncStore seam (async_job.go): EnableSpill/Spill/SpillStats mirror the
+  Prefetch read-side seam.
+
+No Zig runtime, kernel, or model code is included.
+
+The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
+"TensorFold benchmark evidence" section above (same pinned repository and
+revision); they apply to this adaptation as well.

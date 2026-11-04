@@ -117,6 +117,7 @@ type AsyncStore struct {
 	store    Store
 	wm       *AsyncWatermarkManager
 	prefetch *PrefetchQueue
+	spill    atomic.Pointer[Spiller]
 }
 
 // NewAsyncStore wraps store with watermark tracking and the bounded read-ahead
@@ -166,6 +167,49 @@ func (s *AsyncStore) RestorePrefetched(ctx context.Context, key string) ([]byte,
 		return nil, false, ErrPrefetchDisabled
 	}
 	return s.prefetch.Restore(ctx, key)
+}
+
+// EnableSpill turns on the eviction-spill write side: before a span's RAM
+// residency is released, Spill stages an owned durable copy through cfg's
+// caps so the unchanged restore path reads it back. It returns the backing
+// Spiller for direct stats/checkpoint-slot access. Idempotent; the first
+// call wins.
+func (s *AsyncStore) EnableSpill(cfg SpillConfig) (*Spiller, error) {
+	if s == nil || s.store == nil {
+		return nil, ErrSpillDisabled
+	}
+	sp, err := NewSpiller(s.store, cfg)
+	if err != nil {
+		return nil, err
+	}
+	s.spill.CompareAndSwap(nil, sp)
+	return s.spill.Load(), nil
+}
+
+// Spill stages an owned durable copy of payload under digest ahead of the
+// caller releasing the span's RAM residency. It reports ErrSpillDisabled when
+// the spill write side is off; cap skips return nil (see Spiller.Spill).
+func (s *AsyncStore) Spill(ctx context.Context, digest string, payload []byte) error {
+	if s == nil {
+		return ErrSpillDisabled
+	}
+	sp := s.spill.Load()
+	if sp == nil {
+		return ErrSpillDisabled
+	}
+	return sp.Spill(ctx, digest, payload)
+}
+
+// SpillStats snapshots current spill pressure (zero value when disabled).
+func (s *AsyncStore) SpillStats() SpillStats {
+	if s == nil {
+		return SpillStats{}
+	}
+	sp := s.spill.Load()
+	if sp == nil {
+		return SpillStats{}
+	}
+	return sp.Stats()
 }
 
 // PrefetchStats snapshots the read-ahead queue's pressure.
