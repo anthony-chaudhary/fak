@@ -120,6 +120,52 @@ func (d *dev) branchLocked() {
 	}
 }
 
+// Unknown/interface receivers still conservatively reach every possible
+// backend, but Release() cannot call Release(context.Context). Keep real
+// zero-argument, argument-bearing and variadic reentry visible.
+// fak-test:runtime fast est=1ms lane=default
+func TestVulkanMuLockOrderAuditZeroArgumentDispatch(t *testing.T) {
+	const src = `package fixture
+import ("context"; "sync")
+var vulkanMu sync.Mutex
+type noArgs interface { Release(); Required() }
+type contextual struct{}
+type requiredDev struct{}
+type harmless struct{}
+type realDev struct{}
+type variadicDev struct{}
+func (*contextual) Release(context.Context) error { vulkanMu.Lock(); defer vulkanMu.Unlock(); return nil }
+func (*requiredDev) Required(first int, rest ...int) { vulkanMu.Lock(); defer vulkanMu.Unlock() }
+func (*harmless) Release() {}
+func (*harmless) Required() {}
+func (*realDev) Ping() { vulkanMu.Lock(); defer vulkanMu.Unlock() }
+func (*variadicDev) Touch(...int) { vulkanMu.Lock(); defer vulkanMu.Unlock() }
+func zeroArgLocked(p noArgs) { p.Release(); p.Required() }
+func sameArityLocked(p interface { Ping() }) { p.Ping() }
+func withArgumentLocked(p interface { Release(context.Context) error }) { _ = p.Release(context.Background()) }
+func variadicLocked(p interface { Touch(...int) }) { p.Touch() }
+func requiredArgumentLocked(p interface { Required(int, ...int) }) { p.Required(1) }
+`
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "fixture.go", src, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range newMuAudit(fset, []*ast.File{f}).reacquisitions() {
+		got = append(got, r.Caller+"->"+r.Callee)
+	}
+	want := []string{
+		"sameArityLocked->realDev.Ping",
+		"withArgumentLocked->contextual.Release",
+		"variadicLocked->variadicDev.Touch",
+		"requiredArgumentLocked->requiredDev.Required",
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("zero-argument dispatch reacquisitions = %q; want %q", got, want)
+	}
+}
+
 type muFunc struct {
 	name, recv string
 	decl       *ast.FuncDecl
@@ -145,8 +191,9 @@ func (r muReacquisition) String() string {
 // muAudit is a conservative, name-and-shape call graph over one package. A call
 // resolves through the static type of its receiver when that type is a package
 // struct reached from the receiver, a parameter, a composite literal, or a struct
-// field; otherwise it resolves to every package method of that name, which is how an
-// interface call reaches the backend that implements it.
+// field; otherwise it resolves to every package method of that name whose
+// required arguments do not rule the call out. This keeps interface calls reaching
+// possible backends without inventing a Release() -> Release(ctx) edge.
 type muAudit struct {
 	fset      *token.FileSet
 	funcs     []*muFunc
@@ -441,13 +488,28 @@ func (a *muAudit) resolve(f *muFunc, env map[string]string, call *ast.CallExpr) 
 		}
 		var out []*muFunc
 		for _, g := range a.byName[fun.Sel.Name] {
-			if g.recv != "" {
+			if g.recv != "" && muMayAcceptCall(g.decl, call) {
 				out = append(out, g)
 			}
 		}
 		return out
 	}
 	return nil
+}
+
+// Only reject the provably impossible zero-argument case. With arguments we
+// remain conservative, including a single call expression that may supply
+// multiple values. A variadic-only method can accept no arguments.
+func muMayAcceptCall(target *ast.FuncDecl, call *ast.CallExpr) bool {
+	if len(call.Args) != 0 || target.Type.Params == nil {
+		return true
+	}
+	for _, field := range target.Type.Params.List {
+		if _, variadic := field.Type.(*ast.Ellipsis); !variadic {
+			return false
+		}
+	}
+	return true
 }
 
 func muHasEmbedded(fields map[string]string) bool {
