@@ -176,7 +176,8 @@ var v41EngramSmapsVMAPattern = regexp.MustCompile(`^([0-9a-f]+)-([0-9a-f]+) `)
 // the probe for the VMA containing addr. It stops at the next VMA header after
 // the containing one, so fields of later VMAs never leak into the result. It
 // fails closed with ErrV41EngramHugePageProbe when no VMA contains addr or a
-// recognized field does not parse.
+// recognized field does not parse. Unrecognized smaps metadata (VmFlags,
+// KernelPageSize, ...) is not numeric backing evidence and is ignored.
 func ProbeV41EngramHugePages(smaps string, addr uint64) (V41EngramHugePageProbe, error) {
 	var probe V41EngramHugePageProbe
 	inside := false
@@ -201,6 +202,13 @@ func ProbeV41EngramHugePages(smaps string, addr uint64) (V41EngramHugePageProbe,
 		if !ok {
 			continue
 		}
+		switch key {
+		case "Rss", "AnonHugePages", "ShmemPmdMapped", "FilePmdMapped":
+		default:
+			// Unrelated smaps metadata (VmFlags, KernelPageSize, ...) carries
+			// no numeric backing evidence; it must not reject the VMA.
+			continue
+		}
 		fields := strings.Fields(rest)
 		if len(fields) == 0 {
 			return V41EngramHugePageProbe{}, fmt.Errorf("%w: empty value for %q",
@@ -214,7 +222,7 @@ func ProbeV41EngramHugePages(smaps string, addr uint64) (V41EngramHugePageProbe,
 		switch key {
 		case "Rss":
 			probe.MappedKB = value
-		case "AnonHugePages", "ShmemPmdMapped", "FilePmdMapped":
+		default:
 			probe.HugeKB += value
 		}
 	}

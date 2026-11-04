@@ -103,6 +103,7 @@ const engramSmapsFixture = `
 Size:               64 kB
 Rss:                64 kB
 AnonHugePages:         0 kB
+VmFlags: rd wr mr mw me sd
 7f1000000000-7f1000400000 rw-p 00000000 00:00 0
 Size:            4194304 kB
 Rss:             1048576 kB
@@ -110,10 +111,12 @@ AnonHugePages:    1000000 kB
 ShmemPmdMapped:      48576 kB
 FilePmdMapped:           0 kB
 Private_Dirty:       1024 kB
+VmFlags: rd wr mr mw me sd
 7f2000000000-7f2000001000 r-xp 00000000 00:00 0
 Size:                 4 kB
 Rss:                  4 kB
 AnonHugePages:          4 kB
+VmFlags: rd mr me
 `
 
 func TestEngramPlacementHugePageProbe(t *testing.T) {
@@ -130,8 +133,11 @@ func TestEngramPlacementHugePageProbe(t *testing.T) {
 	if probe.HugeKB != 1000000+48576 {
 		t.Fatalf("HugeKB = %d, want %d", probe.HugeKB, 1000000+48576)
 	}
-	if got := probe.Ratio(); got < 0.98 || got > 0.99 {
-		t.Fatalf("Ratio = %v, want in [0.98, 0.99)", got)
+	// The selected VMA is fully huge-backed: Rss equals the sum of its
+	// AnonHugePages + ShmemPmdMapped + FilePmdMapped fields, so the ratio is
+	// exactly 1.
+	if got := probe.Ratio(); got != 1 {
+		t.Fatalf("Ratio = %v, want 1", got)
 	}
 
 	// Boundary addresses of the containing VMA are inside it.
