@@ -214,6 +214,13 @@ func (g *InflightGate) Acquire(principal, key string) (*InflightLease, error) {
 		return nil, &inflightRefusal{cause: ErrInflightCapacity}
 	}
 	lease.principalRes = pres
+	// Served admission retains only head. Link all successful dimensions before
+	// publishing it so both settlement and release retire the entire hold.
+	lease.head.linked = pres
+	if lease.keyRes != nil {
+		lease.head.linked = lease.keyRes
+		lease.keyRes.linked = pres
+	}
 	g.admitted++
 	return lease, nil
 }
