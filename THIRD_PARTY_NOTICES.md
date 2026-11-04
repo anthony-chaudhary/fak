@@ -2126,3 +2126,45 @@ by `TestGrammarBudgetWithinMaxTokens` and
 The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
 "TensorFold benchmark evidence" section above (same pinned repository and
 revision); they apply to this adaptation as well.
+
+## Splash bump-topology KV eviction
+
+`internal/kvmmu/eviction.go` (`RecencyClock`, `RecencyNode`, `RecencyOrder`,
+`Evictor`) adapts the bump-topology KV-eviction policy from incoai/splash at
+revision `6c6002d42aabdddb9e31b96c9bba9041e2fba29f`:
+
+- `runtime/engine/KvCache.hpp:143` (resident-leaf eligibility and the
+  `evictionCandidate` continuation scan)
+- `runtime/engine/KvCache.cpp` (`reindex`, `inherit`, retain/release, and the
+  drop/adopt-page tier transitions)
+- `runtime/engine/RecencyOrder.hpp:13` (intrusive last-used order)
+- `runtime/engine/CacheRecency.hpp:6` (shared monotonic access clock)
+
+https://github.com/incoai/splash/blob/6c6002d42aabdddb9e31b96c9bba9041e2fba29f/runtime/engine/KvCache.hpp
+
+The adapted contract: only resident leaves (no resident children, no active
+users, no in-flight transfer) are evictable; they are kept in an intrusive
+last-used order whose tree nodes are allocated once, when the owning block is
+published, so linking and unlinking under memory pressure never allocate.
+When a leaf leaves the resident tier, its parent inherits the leaf's recency
+stamp (the bump): a parent that becomes a leaf was used no later than its
+child and must not jump ahead of colder chains. `EvictionCandidate(after)`
+returns the oldest unused resident leaf and continues a scan from a previous
+candidate without a lookup.
+
+Changed for Fak: idiomatic Go re-expression - a deterministic treap keyed by
+(last-used, id) replaces the C++ node-handle set, int64 block ids instead of
+uint64_t, panics instead of std::terminate/exceptions, a sync.Mutex guarding
+the topology (upstream is single-threaded), and the disk-copy tier reduced to
+a resident/disk-only bit (no disk slots, no poisoned-subtree flow; those
+remain separate borrow rows). No upstream source code is copied; the
+adaptation is witnessed by the tests in internal/kvmmu/eviction_test.go,
+including allocation-free link/unlink witnesses.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this adaptation except in compliance with the License. A copy is available at
+https://www.apache.org/licenses/LICENSE-2.0. Unless required by applicable law or
+agreed to in writing, software distributed under the License is distributed on
+an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+or implied. See the License for the specific language governing permissions and
+limitations under the License.
