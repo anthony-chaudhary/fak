@@ -106,6 +106,8 @@ void fcuda_pool_cap_stats(size_t *cap, size_t *bytes, size_t *peak, unsigned lon
 /* fcuda_panel_peak_reset restarts the peak of panel bytes held plus cached. */
 void fcuda_panel_peak_reset(void);
 void fcuda_h2d(void *d, const void *h, size_t bytes);
+/* Returns the CUDA copy status; failure does not certify stream drain. */
+int fcuda_h2d_checked(void *d, const void *h, size_t bytes);
 /* Checked D2H: 0 only after a completed copy; otherwise 1000 + cudaError_t
  * from device selection or the copy. Bytes count only successful copies.
  * The ordinary helper uses the current device, like its legacy void wrapper. */

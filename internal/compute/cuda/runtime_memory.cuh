@@ -581,11 +581,18 @@ extern "C" int fcuda_trim_pool_large_checked(size_t max_keep_bytes) {
   if (g_cuda_cleanup_status != 0) return g_cuda_cleanup_status;
   return v41_candidates_stream_uncertain() ? (int)cudaErrorNotReady : 0;
 }
-extern "C" void fcuda_h2d(void *d, const void *h, size_t n) {
+// Return the actual synchronous H2D status so operation-owned upload callers
+// can withhold execution and select checked cleanup. A failure is not a drain
+// certificate; this helper does not retire storage or reset terminal state.
+extern "C" int fcuda_h2d_checked(void *d, const void *h, size_t n) {
   fcuda_ts_untimed_transfer();
   cudaError_t e = cudaMemcpy(d, h, n, cudaMemcpyHostToDevice);
   if (e == cudaSuccess) g_h2d_bytes += n;
   else fprintf(stderr, "fak-cuda: %s:%d %s\n", __FILE__, __LINE__, cudaGetErrorString(e));
+  return (int)e;
+}
+extern "C" void fcuda_h2d(void *d, const void *h, size_t n) {
+  (void)fcuda_h2d_checked(d, h, n);
 }
 extern "C" int fcuda_d2h_checked(void *h, const void *d, size_t n) {
   fcuda_ts_untimed_transfer();
