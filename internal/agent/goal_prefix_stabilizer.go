@@ -525,19 +525,27 @@ func isSameGoal(a, b string) bool {
 
 // StabilizeGoalContinuationMessages inspects messages in conversation order, canonicalizing
 // goal continuation messages so their leading goal definition remains byte-identical across turns,
-// and moving any volatile progress deltas to the tail of the turn.
+// and moving volatile progress deltas only into a compatible plain-text tail.
+// Source and tail must share role and name, except that plain user progress may
+// still move into a plain assistant tail for historical goal-loop compatibility.
+// Assistant/tool output and opaque message carriers are never goal sources.
 // Returns a copy of the slice if any message was modified, and a boolean indicating if changes occurred.
 func StabilizeGoalContinuationMessages(messages []Message) ([]Message, bool) {
 	if len(messages) == 0 {
 		return messages, false
 	}
 
-	var firstGoalDef string
+	var firstGoalDef, firstGoalRole string
 	var tailDeltas []string
 	modifiedIndices := make(map[int]string)
 
 	n := len(messages)
 	for i, m := range messages {
+		// Skip the whole source when its tail is incompatible: stripping first
+		// would otherwise lose progress or change the authority of its contents.
+		if !goalContinuationCompatible(m, messages[n-1]) {
+			continue
+		}
 		if !IsGoalContinuationMessage(m.Content) {
 			continue
 		}
@@ -547,8 +555,8 @@ func StabilizeGoalContinuationMessages(messages []Message) ([]Message, bool) {
 		// Canonicalize goal definition across turns
 		if stable != "" {
 			if firstGoalDef == "" {
-				firstGoalDef = stable
-			} else if isSameGoal(firstGoalDef, stable) {
+				firstGoalDef, firstGoalRole = stable, m.Role
+			} else if firstGoalRole == m.Role && isSameGoal(firstGoalDef, stable) {
 				stable = firstGoalDef
 			}
 		}
@@ -605,6 +613,27 @@ func StabilizeGoalContinuationMessages(messages []Message) ([]Message, bool) {
 	}
 
 	return out, true
+}
+
+// goalContinuationCompatible fences the goal-only text transformation. It does
+// not alter the separate world-state prepass or provider-specific role folding.
+func goalContinuationCompatible(source, tail Message) bool {
+	switch source.Role {
+	case RoleSystem, RoleDeveloper, RoleUser:
+	default:
+		return false
+	}
+	if source.Name != tail.Name || !goalContinuationPlainText(source) || !goalContinuationPlainText(tail) {
+		return false
+	}
+	return source.Role == tail.Role || (source.Role == RoleUser && tail.Role == RoleAssistant)
+}
+
+func goalContinuationPlainText(m Message) bool {
+	return !m.ContentWasStructured && m.VisionPrompt == "" && len(m.VisionImages) == 0 &&
+		len(m.ToolCalls) == 0 && m.FunctionCall == nil && m.ToolCallID == "" && !m.ToolResultIsError &&
+		m.Witness == "" && m.RefutesWitness == "" && m.Thinking == "" && m.ThinkingSignature == "" &&
+		len(m.RedactedThinking) == 0 && m.ReasoningContent == "" && m.CacheControl == nil
 }
 
 // --- world_state deduplication and rate-limiting --------------------------------
