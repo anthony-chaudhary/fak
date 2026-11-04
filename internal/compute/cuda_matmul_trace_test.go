@@ -117,7 +117,8 @@ func assertCUDAMatMulTraceWiring(t *testing.T) {
 		t.Fatal("cuda_matmul_trace.go lacks the cudaMatMulTraceEvent signature")
 	}
 	assertCUDAMatMulLockedWrapper(t)
-	for _, name := range []string{"cudaMatMulLocked", "BatchedMatMul"} {
+	assertCUDAPrefillLockedWrappers(t)
+	for _, name := range []string{"cudaMatMulLocked", "batchedMatMulLocked"} {
 		var fn *ast.FuncDecl
 		for _, decl := range file.Decls {
 			if f, ok := decl.(*ast.FuncDecl); ok && f.Name.Name == name && f.Recv != nil {
@@ -160,7 +161,7 @@ func assertCUDAMatMulTraceWiring(t *testing.T) {
 			}
 			if key == "w.cudaMatMulTraceEvent" {
 				wantInput, wantBatch := "x", "false"
-				if name == "BatchedMatMul" {
+				if name == "batchedMatMulLocked" {
 					wantInput, wantBatch = "X", "true"
 				}
 				if len(call.Args) != builderArity {
@@ -177,7 +178,7 @@ func assertCUDAMatMulTraceWiring(t *testing.T) {
 				if !inputOK || !batchOK || input.Name != wantInput || batch.Name != wantBatch {
 					t.Fatalf("%s builder does not consume its actual input/mode", name)
 				}
-				if name == "BatchedMatMul" {
+				if name == "batchedMatMulLocked" {
 					rows, ok := call.Args[3].(*ast.Ident)
 					if !ok || rows.Name != "P" {
 						t.Fatal("batch trace lost dispatched P")
