@@ -727,7 +727,7 @@ func serveNativeContextSizingInputs(ws *ggufload.WeightSource, be compute.Backen
 		if ok, err := serveArtifactCPUOffloadExperts(ws); ok && err == nil {
 			devFit := serveDeviceFitBudget(be)
 			// fak#13282: route the sizing arm through the SAME streamed-expert measurement the load
-			// arm takes (serveStreamedCPUOffloadPathDecision -> serveStreamedCPUOffloadPlanForAperture),
+			// arm takes (serveStreamedCPUOffloadPathDecision -> serveStreamedCPUOffloadCorePlan),
 			// so the auto-sizer's plan total and the loader's resident working set cannot disagree.
 			// Before this the sizing arm always called the bounded-DENSE estimator
 			// (EstimateCPUOffloadExpertsBoundedDenseMemoryPlan -> streamResident=-1), which charges the
@@ -915,17 +915,24 @@ func serveCPUOffloadBoundedDenseOptions(be compute.Backend, fit serveFitBudget) 
 }
 
 // serveCPUOffloadSizingStreamedPlan is the context-sizing arm's streamed-expert measurement,
-// shared with the load arm (serveStreamedCPUOffloadPathDecision -> serveStreamedCPUOffloadPlanForAperture)
+// shared with the load arm (serveStreamedCPUOffloadPathDecision -> serveStreamedCPUOffloadCorePlan)
 // so the auto-sizer's plan total and the loader's resident working set cannot disagree (fak#13282).
 //
 // It answers the ONE question the sizing arm needs: on this host budget, will the loader keep the
 // BOUNDED RESIDENT expert set (streamed=true) or the full routed charge (streamed=false)? On the
 // streamed arm the returned plan already folds the bounded resident expert set AND the bounded
 // dense working set (EstimateCPUOffloadExpertsStreamedBoundedDenseMemoryPlan via
-// serveStreamedCPUOffloadPlanForAperture), so its grand total is bounded against the one physical
+// serveStreamedCPUOffloadCorePlan), so its grand total is bounded against the one physical
 // pool. Before this the sizing arm always took the bounded-dense-only estimator
 // (EstimateCPUOffloadExpertsBoundedDenseMemoryPlan, streamResident=-1) and charged the FULL routed
 // set even when the loader would bound it -- the witnessed strix3 plan-total refusal.
+//
+// The returned plan is WEIGHTS-ONLY: it carries no context-sized rows. serveNativeContextSizingInputs'
+// contract is a weights-only plan, and the resolver sizes the context from these weights against
+// the pool the KV store lands in -- a plan that already carried context rows sized against ANOTHER
+// pool made that derivation subtract the stale KV from the device budget and clamp an explicit
+// request to the 512-token floor (the DeepSeek-V4.1 Flash cpu-offload-experts repro; fak-private
+// ticket aegis-27b-model-capacity).
 //
 // hostFit is taken as a parameter (the caller derives it with serveStreamedHostFit over the same
 // measured budget) so the decision is unit-testable with an injected budget: a nil backend takes
@@ -936,11 +943,11 @@ func serveCPUOffloadSizingStreamedPlan(ws *ggufload.WeightSource, be compute.Bac
 	if ws == nil {
 		return nil, false
 	}
-	plan, streamed, err := serveStreamedCPUOffloadPlanForAperture(ws, be, max(ranks, 1), 0, hostFit, ggufload.BackendSharesHostRAM(be), serveSplitAperture(be))
-	if err != nil || !streamed {
+	_, streamed, selected, err := serveStreamedCPUOffloadCorePlan(ws, be, max(ranks, 1), 0, hostFit, ggufload.BackendSharesHostRAM(be), serveSplitAperture(be))
+	if err != nil || !selected {
 		return nil, false
 	}
-	return plan, true
+	return streamed, true
 }
 
 // serveCPUOffloadSizingDenseBound folds the COMBINED streamed-expert remainder into the
@@ -973,7 +980,9 @@ func serveCPUOffloadSizingDenseBound(ws *ggufload.WeightSource, be compute.Backe
 	}
 	sharedPool := ggufload.BackendSharesHostRAM(be)
 	splitAperture := serveSplitAperture(be)
-	plan, streamed, err := serveStreamedCPUOffloadPlanForAperture(ws, be, 1, 0, hostFit, sharedPool, splitAperture)
+	// This call only reads the plan's DeviceTotal for the expert bound, so the context rows are
+	// sized against hostFit itself -- the historical behaviour, preserved byte-for-byte.
+	plan, streamed, err := serveStreamedCPUOffloadPlanForAperture(ws, be, 1, 0, hostFit, hostFit, sharedPool, splitAperture)
 	if err != nil || !streamed {
 		return declared
 	}

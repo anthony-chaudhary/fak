@@ -36,8 +36,14 @@ func serveStreamedCPUOffloadPlan(ws *ggufload.WeightSource, be compute.Backend, 
 // Selecting streaming on the grand total admits the same checkpoint with a bounded resident expert
 // set instead of refusing. The device dense side is still charged IDENTICALLY by the streamed plan,
 // so the device fit check and the resident arm cannot disagree about what stays on the device.
+//
+// This wrapper sizes the context rows against `fit` itself: every caller reaching it through this
+// form either has no device window in scope (a device-less host arm, where the KV store is
+// host-resident) or is a shared-pool tier (the KV store competes for the same physical pool,
+// fak#13286). A device arm whose KV lands in a DISTINCT device window passes that window explicitly
+// as serveStreamedCPUOffloadPlanForAperture's contextFit.
 func serveStreamedCPUOffloadPlanForPool(ws *ggufload.WeightSource, be compute.Backend, ranks, contextBudgetTokens int, fit serveFitBudget, sharedPool bool) (compute.MemoryPlan, bool, error) {
-	return serveStreamedCPUOffloadPlanForAperture(ws, be, ranks, contextBudgetTokens, fit, sharedPool, false)
+	return serveStreamedCPUOffloadPlanForAperture(ws, be, ranks, contextBudgetTokens, fit, fit, sharedPool, false)
 }
 
 // serveStreamedCPUOffloadPlanForAperture is serveStreamedCPUOffloadPlanForPool with the device
@@ -55,26 +61,55 @@ func serveStreamedCPUOffloadPlanForPool(ws *ggufload.WeightSource, be compute.Ba
 // number and forces stream-through (bound 0), which is not a genuine capacity floor: the witnessed
 // strix3 refusal (63.09 GiB dense transit vs 48.57 GiB host avail -> bound 0 -> dense-only
 // FitTooBig) is exactly that self-referential collapse, not a wall.
-func serveStreamedCPUOffloadPlanForAperture(ws *ggufload.WeightSource, be compute.Backend, ranks, contextBudgetTokens int, fit serveFitBudget, sharedPool, splitAperture bool) (compute.MemoryPlan, bool, error) {
-	plan, err := serveGGUFCPUOffloadMemoryPlan(ws, ranks, contextBudgetTokens, fit)
+//
+// fit is the HOST budget that SELECTS the streamed arm and bounds its working sets; contextFit is
+// the budget the context-sized rows (the KV store plus per-token scratch) are sized against. They
+// coincide on a device-less host arm and on a shared-pool tier (one physical pool), but on a
+// DISCRETE device the KV store is DEVICE-resident while `fit` is the host window the expert working
+// set is judged against: sizing the context against the host window over-admits KV the device
+// window cannot hold (the DeepSeek-V4.1 Flash cpu-offload-experts auto-size that the load-time
+// device check refused, fak-private ticket aegis-27b-model-capacity). The load-time device
+// admission judges the same plan against contextFit, so derivation and admission agree by
+// construction.
+func serveStreamedCPUOffloadPlanForAperture(ws *ggufload.WeightSource, be compute.Backend, ranks, contextBudgetTokens int, fit, contextFit serveFitBudget, sharedPool, splitAperture bool) (compute.MemoryPlan, bool, error) {
+	full, streamed, selected, err := serveStreamedCPUOffloadCorePlan(ws, be, ranks, contextBudgetTokens, fit, sharedPool, splitAperture)
 	if err != nil {
 		return nil, false, err
 	}
+	if !selected {
+		return full, false, nil
+	}
+	return appendServeGGUFDevicePlan(ws, be, streamed, contextBudgetTokens, contextFit), true, nil
+}
+
+// serveStreamedCPUOffloadCorePlan is the streamed fold WITHOUT the context-sized rows: the
+// full-charge plan (the arm decision's input), the bounded resident expert bound, and the streamed
+// estimator's plan. It exists so the context-sizing path can take the streamed WEIGHTS plan without
+// inheriting a second, differently-budgeted context plan: serveNativeContextSizingInputs' contract
+// is a weights-only plan, and a plan that already carries context rows sized against ANOTHER pool
+// makes the resolver's largest-fitting derivation subtract that stale KV from the pool it budgets
+// (the 8192->512 explicit clamp of the repro above). Callers needing the per-context demands apply
+// appendServeGGUFDevicePlan with the budget the KV store actually lands in.
+func serveStreamedCPUOffloadCorePlan(ws *ggufload.WeightSource, be compute.Backend, ranks, contextBudgetTokens int, fit serveFitBudget, sharedPool, splitAperture bool) (full, streamed compute.MemoryPlan, selected bool, err error) {
+	plan, err := serveGGUFCPUOffloadMemoryPlan(ws, ranks, contextBudgetTokens, fit)
+	if err != nil {
+		return nil, nil, false, err
+	}
 	if ws == nil || fit.Base <= 0 {
-		return plan, false, nil
+		return plan, plan, false, nil
 	}
 	// Discrete: judge the HOST-scoped subset (the device dense side is independent VRAM and must not
 	// be double-counted against host RAM). Shared pool: judge the GRAND total, because the device
 	// dense side consumes the same physical DRAM the host expert set is bound against.
 	if sharedPool {
 		if plan.Total() <= fit.avail() {
-			return plan, false, nil
+			return plan, plan, false, nil
 		}
 	} else if plan.HostTotal() <= fit.avail() {
-		return plan, false, nil
+		return plan, plan, false, nil
 	}
 	if !serveStreamedExpertsCapable(ws) {
-		return plan, false, nil
+		return plan, plan, false, nil
 	}
 	bound := serveCPUOffloadStreamedResidentBoundForAperture(fit, plan.DeviceTotal(), sharedPool, splitAperture)
 	// fak#13215: when the device --cpu-offload-experts arm declares a bounded streamed-dense working
@@ -84,7 +119,7 @@ func serveStreamedCPUOffloadPlanForAperture(ws *ggufload.WeightSource, be comput
 	// refuses FitTooBig against the host window. The estimator is the ONE combined kernel; with no
 	// declared bounded dense option (the default, every non-streamed serve) this is byte-for-byte
 	// EstimateCPUOffloadExpertsStreamedMemoryPlan.
-	var streamed compute.MemoryPlan
+	var s compute.MemoryPlan
 	if denseBound, ok := serveBoundedDenseWorkingSetBound(serveCPUOffloadBoundedDenseOptions(be, fit)); ok {
 		// fak#13249: the bounded dense working set must be sized from the budget REMAINING after the
 		// resident expert bound, not from the whole host budget. Deriving both independently at
@@ -94,14 +129,14 @@ func serveStreamedCPUOffloadPlanForAperture(ws *ggufload.WeightSource, be comput
 		if combined := serveCombinedStreamedDenseResidentBound(fit, bound); combined < denseBound {
 			denseBound = combined
 		}
-		streamed, err = ws.EstimateCPUOffloadExpertsStreamedBoundedDenseMemoryPlan(ranks, bound, denseBound)
+		s, err = ws.EstimateCPUOffloadExpertsStreamedBoundedDenseMemoryPlan(ranks, bound, denseBound)
 	} else {
-		streamed, err = ws.EstimateCPUOffloadExpertsStreamedMemoryPlan(bound)
+		s, err = ws.EstimateCPUOffloadExpertsStreamedMemoryPlan(bound)
 	}
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
-	return appendServeGGUFDevicePlan(ws, be, streamed, contextBudgetTokens, fit), true, nil
+	return plan, s, true, nil
 }
 
 // serveCPUOffloadStreamedResidentBoundForPool is the ONE derivation of the bounded host-resident
@@ -215,7 +250,9 @@ func serveStreamedCPUOffloadPathDecision(ggufPath string, be compute.Backend, ra
 	bound := int64(0)
 	splitAperture := serveSplitAperture(be)
 	_, err := withGGUFWeights(ggufPath, func(ws *ggufload.WeightSource) (compute.MemoryPlan, error) {
-		plan, isStreamed, perr := serveStreamedCPUOffloadPlanForAperture(ws, be, ranks, contextBudgetTokens, fit, sharedPool, splitAperture)
+		// The decision discards the plan (it only reads its DeviceTotal for the bound), so the
+		// context rows are sized against `fit` itself -- the historical behaviour, preserved.
+		plan, isStreamed, perr := serveStreamedCPUOffloadPlanForAperture(ws, be, ranks, contextBudgetTokens, fit, fit, sharedPool, splitAperture)
 		if perr != nil {
 			return nil, perr
 		}
@@ -261,16 +298,29 @@ func fitServeStreamedCPUOffloadPathOnHost(ggufPath string, ranks, contextBudgetT
 // DEVICE fit override: device admission stays serveDeviceFitBudgetFromReported(be, override).
 func fitServeStreamedCPUOffloadPathOnDevice(ggufPath string, be compute.Backend, ranks, contextBudgetTokens int, hostFit serveFitBudget, override *serveFitBudget) (compute.MemoryPlan, bool, error) {
 	fit := hostFit
+	// ONE snapshot: the same device budget the plan is JUDGED against also sizes its context rows,
+	// so derivation and admission read one measurement (fak#13205).
+	dev := serveDeviceFitBudgetFromReported(be, override)
 	ws, err := ggufload.OpenWeights(ggufPath)
 	if err != nil {
 		return nil, false, err
 	}
 	defer ws.Close()
-	plan, streamed, err := serveStreamedCPUOffloadPlanForAperture(ws, be, ranks, contextBudgetTokens, fit, ggufload.BackendSharesHostRAM(be), serveSplitAperture(be))
+	// ONE budget path for the context rows: on a DISCRETE device the KV store is device-resident, so
+	// they are sized against the DEVICE window the plan lands in -- not the host budget that selects
+	// the streamed arm and bounds its expert working set. Sizing them against the host window
+	// over-admits KV the device window cannot hold (the DeepSeek-V4.1 Flash cpu-offload-experts
+	// auto-size that the load-time device check refused; fak-private ticket aegis-27b-model-capacity).
+	// On a SHARED pool the KV competes for the same physical DRAM as the expert set, so the host
+	// window stays the sizing budget (fak#13286), byte-for-byte.
+	contextFit := fit
+	if be != nil && !ggufload.BackendSharesHostRAM(be) {
+		contextFit = dev
+	}
+	plan, streamed, err := serveStreamedCPUOffloadPlanForAperture(ws, be, ranks, contextBudgetTokens, fit, contextFit, ggufload.BackendSharesHostRAM(be), serveSplitAperture(be))
 	if err != nil {
 		return nil, false, err
 	}
-	dev := serveDeviceFitBudgetFromReported(be, override)
 	admitted, rerr := refuseIfTooBigOnDevice(plan, nil, be, &dev)
 	return admitted, streamed, rerr
 }
