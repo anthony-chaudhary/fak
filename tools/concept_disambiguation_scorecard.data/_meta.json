@@ -18156,6 +18156,11 @@
           "category": "incidental",
           "reason": "Function-local value returned by existing v41AttentionPlanFor and equality-compared after callbacks (model lines 43/52); captures existing V41AttentionPlan for mutation detection, introducing no new plan type, planner, reservation, scheduling policy or lifecycle.",
           "token": "frozenPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private accessor for the existing Responses-stream force flag on an already selected planner; not a new planning or routing abstraction.",
+          "token": "plannerForcesResponsesStream"
         }
       ],
       "exclude": [
@@ -18376,6 +18381,7 @@
         "plannedcumtokens",
         "planner",
         "plannerErr",
+        "plannerForcesResponsesStream",
         "planners",
         "planning",
         "plano",

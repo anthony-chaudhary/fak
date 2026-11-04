@@ -54,6 +54,19 @@ func plannerWireProvider(p agent.Planner) (agent.Provider, bool) {
 	return "", false
 }
 
+// plannerForcesResponsesStream reads the selected planner's force flag, not the
+// boot account's. This only informs existing optional live gates; it does not
+// expand StreamingSupported or enable a new provider wire.
+func plannerForcesResponsesStream(planner agent.Planner) bool {
+	if hp, ok := planner.(*agent.HTTPPlanner); ok {
+		return hp.ForceResponsesStream
+	}
+	if frs, ok := planner.(interface{ IsForceResponsesStream() bool }); ok {
+		return frs.IsForceResponsesStream()
+	}
+	return false
+}
+
 // responsesLiveTurn is the stabilized model-input bundle for one live Responses
 // stream: the SAME messages slice the buffered completeServed call would receive
 // (post admission, canonicalization, elision, compaction), the canonicalized tool
@@ -73,16 +86,17 @@ type responsesLiveTurn struct {
 // and returns true. persistResponse is the buffered path's continuation-store
 // closure, called with the SAME id response.created advertised.
 func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter, reqModel, reqTrace string, sessionTurn servedSessionTurn, resultAdmissions []ResultAdmission, turn responsesLiveTurn, restoreContinuation *responsesRestoreContinuation, persistResponse func(id string, asst agent.Message)) bool {
-	sp, ok := s.planner.(agent.StreamingPlanner)
+	planner := s.chatPlanner(ctx)
+	sp, ok := planner.(agent.StreamingPlanner)
 	if !ok || !sp.StreamingSupported() {
 		return false
 	}
 	// W1's Responses-wire capability gate: a wire that cannot deliver a live token
 	// stream for a Responses turn falls back to the buffered synthesis. Fail-closed:
 	// a gate-carrying planner whose provider cannot be resolved does not go live.
-	if gate, hasGate := s.planner.(responsesLiveGate); hasGate {
-		provider, provOK := plannerWireProvider(s.planner)
-		if !provOK || !gate.ResponsesWireStreamsLive(provider, s.isForceResponsesStream()) {
+	if gate, hasGate := planner.(responsesLiveGate); hasGate {
+		provider, provOK := plannerWireProvider(planner)
+		if !provOK || !gate.ResponsesWireStreamsLive(provider, plannerForcesResponsesStream(planner)) {
 			return false
 		}
 	}
@@ -273,7 +287,7 @@ func (s *Server) streamResponsesLive(ctx context.Context, w http.ResponseWriter,
 	// Copy before appending so buffered/recovery callers retain their sampling opts.
 	liveOpts := append([]agent.SampleOpt(nil), turn.sampleOpts...)
 	liveOpts = append(liveOpts, agent.WithPerTokenStream(true))
-	comp, err := sp.CompleteStream(turnCtx, firstDelta.wrap(fragments.write), turn.messages, turn.tools, liveOpts...)
+	comp, err := sp.CompleteStream(turnCtx, firstDelta.wrap(fragments.write), turn.messages, turn.tools, chatRouteOpts(ctx, liveOpts)...)
 	if err == nil && writeFailure != nil {
 		err = writeFailure
 	}
