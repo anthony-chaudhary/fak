@@ -111,6 +111,7 @@ class StableReleaseContextTest(unittest.TestCase):
         def fake_run(cmd: list[str], *, cwd: Path | None = None, timeout: int = 600) -> tuple[int, str]:
             if cmd[:3] == ["gh", "run", "list"]:
                 return 0, json.dumps([{
+                    "event": "push",
                     "databaseId": "run-1",
                     "status": "completed",
                     "conclusion": "failure",
@@ -145,6 +146,41 @@ class StableReleaseContextTest(unittest.TestCase):
         self.assertEqual(row["verdict"], "CI_BILLING")
         self.assertEqual(row["action"], "fix_ci_billing")
         self.assertEqual(row["diagnosis"]["jobs"][0]["steps"], 0)
+
+    def test_ci_gate_uses_only_push_evidence(self) -> None:
+        sr = load()
+        missing = object()
+        for event in (missing, None, "", "workflow_dispatch", "pull_request", "schedule", "unknown", [], {}):
+            for conclusion in ("success", "failure"):
+                for push_conclusion in (None, "success", "failure"):
+                    with self.subTest(event=event, conclusion=conclusion, push=push_conclusion):
+                        diagnostic = {"databaseId": "diagnostic", "status": "completed",
+                                      "conclusion": conclusion}
+                        if event is not missing:
+                            diagnostic["event"] = event
+                        push_runs = [] if push_conclusion is None else [{
+                            "event": "push", "databaseId": "push", "status": "completed",
+                            "conclusion": push_conclusion,
+                        }]
+                        calls, diagnosed = [], []
+                        sr.run = lambda cmd, **kwargs: (
+                            calls.append(cmd) or (0, json.dumps([diagnostic, *push_runs])))
+                        sr.diagnose_failed_ci_run = lambda run_id: (
+                            diagnosed.append(run_id) or {"verdict": "RED"})
+
+                        row = sr.gate_ci_green("abc123", skip=False)
+
+                        self.assertEqual(len(calls), 1)
+                        self.assertEqual(row["runs"], push_runs)
+                        self.assertEqual(row["pass"], push_conclusion != "failure")
+                        self.assertEqual(row["advisory"], push_conclusion is None)
+                        self.assertEqual(row["verdict"], {
+                            None: "PENDING", "success": "GREEN", "failure": "RED",
+                        }[push_conclusion])
+                        self.assertEqual(diagnosed, ["push"] if push_conclusion == "failure" else [])
+                        cmd = calls[0]
+                        self.assertEqual(cmd[cmd.index("--event") + 1], "push")
+                        self.assertIn("event", cmd[cmd.index("--json") + 1].split(","))
 
     def test_live_cli_smoke_no_mutation(self) -> None:
         codename = "2026-06-context-smoke"

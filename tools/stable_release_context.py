@@ -296,7 +296,7 @@ def gate_ci_green(candidate_sha: str | None, skip: bool) -> dict:
         return {"name": "ci_green", "pass": True, "advisory": True, "verdict": "NO_SIGNAL", "reason": "no candidate SHA"}
     code, out = run([
         "gh", "run", "list", "--workflow", "ci.yml", "--commit", candidate_sha,
-        "--json", "databaseId,status,conclusion,url", "--limit", "10",
+        "--event", "push", "--json", "databaseId,status,conclusion,url,event", "--limit", "10",
     ], timeout=60)
     if code != 0:
         return {"name": "ci_green", "pass": True, "advisory": True, "verdict": "NO_SIGNAL", "reason": out.strip()[:300]}
@@ -304,6 +304,9 @@ def gate_ci_green(candidate_sha: str | None, skip: bool) -> dict:
         runs = json.loads(out or "[]")
     except json.JSONDecodeError:
         return {"name": "ci_green", "pass": True, "advisory": True, "verdict": "NO_SIGNAL", "reason": "gh output was not JSON"}
+    # Manual diagnostics can run a narrower command on the same commit. They
+    # must neither supply green evidence nor mask or manufacture a push failure.
+    runs = [row for row in runs if isinstance(row, dict) and row.get("event") == "push"]
     if any(r.get("conclusion") == "success" for r in runs):
         return {"name": "ci_green", "pass": True, "advisory": False, "verdict": "GREEN", "runs": runs[:3]}
     failed = [r for r in runs if r.get("status") == "completed" and r.get("conclusion") != "success"]
