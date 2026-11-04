@@ -339,36 +339,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			cacheable = m
 		}
 		if matchedSnapshot != nil {
-			s, err = func() (restored *model.Session, restoreErr error) {
-				var candidate *model.Session
-				snapshotClosed := false
-				defer finishInKernelCleanup(&restoreErr, func() {
-					if !snapshotClosed {
-						matchedSnapshot.Close()
-					}
-				}, func() {
-					if restored == nil && candidate != nil {
-						candidate.Close()
-					}
-				})
-				if p.backend != nil {
-					// The snapshot installs its own device recurrent state below, so
-					// skip the eager zero-state upload this constructor would otherwise
-					// perform and immediately discard (fak#13801).
-					candidate, restoreErr = p.m.NewBackendSessionCheckedDeferredState(p.backend)
-					if restoreErr != nil {
-						return nil, restoreErr
-					}
-				} else {
-					candidate = p.m.NewSession()
-				}
-				if restoreErr = matchedSnapshot.Restore(candidate); restoreErr != nil {
-					return nil, restoreErr
-				}
-				snapshotClosed = true
-				matchedSnapshot.Close()
-				return candidate, nil
-			}()
+			s, err = p.restoreOwnedPrefixSnapshot(matchedSnapshot)
 			if err != nil {
 				return
 			}
