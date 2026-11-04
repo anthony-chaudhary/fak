@@ -217,7 +217,7 @@ class ReleaseStatusTest(unittest.TestCase):
     def test_next_action_prioritizes_release_blockers(self) -> None:
         rs = load()
         self.assertEqual(
-            rs.first_ci_run({"value": [{"databaseId": 1, "conclusion": "failure"}]})["databaseId"],
+            rs.first_ci_run({"value": [{"event": "push", "databaseId": 1, "conclusion": "failure"}]})["databaseId"],
             1,
         )
         self.assertEqual(rs.first_ci_run({"value": []}), {})
@@ -358,6 +358,7 @@ class ReleaseStatusTest(unittest.TestCase):
             if cmd[:3] == ["gh", "run", "list"] and "--branch" in cmd:
                 return {
                     "value": [{
+                        "event": "push",
                         "databaseId": "run-1",
                         "conclusion": "failure",
                         "status": "completed",
@@ -409,6 +410,7 @@ class ReleaseStatusTest(unittest.TestCase):
             if cmd[:3] == ["gh", "run", "list"] and "--commit" in cmd:
                 return {
                     "value": [{
+                        "event": "push",
                         "databaseId": "queued-run",
                         "conclusion": "",
                         "status": "queued",
@@ -418,6 +420,7 @@ class ReleaseStatusTest(unittest.TestCase):
             if cmd[:3] == ["gh", "run", "list"] and "--branch" in cmd:
                 return {
                     "value": [{
+                        "event": "push",
                         "databaseId": "failed-run",
                         "conclusion": "failure",
                         "status": "completed",
@@ -449,6 +452,58 @@ class ReleaseStatusTest(unittest.TestCase):
         self.assertEqual(diagnosis["run"]["databaseId"], "failed-run")
         self.assertEqual(diagnosis["failed_steps"], ["go test ./..."])
 
+    def test_ci_failure_diagnosis_requires_push_events(self) -> None:
+        manual = {"event": "workflow_dispatch", "databaseId": "manual-run", "status": "completed", "conclusion": "success"}
+        rejected = [manual, None, {"conclusion": "success"}] + [
+            {"event": event, "conclusion": "success"}
+            for event in (None, True, 1, [], {}, "", "pull_request", "schedule", "unknown", "PUSH", " push ")
+        ]
+        failed = {"event": "push", "databaseId": "push-run", "status": "completed", "conclusion": "failure"}
+        green = {**failed, "conclusion": "success"}
+        pending = {**failed, "status": "queued", "conclusion": ""}
+        for name, head, trunk, status, scope, queries in (
+            ("reject both readers", rejected, rejected, "none", None, 2),
+            ("manual failure is not diagnosed", [{**manual, "conclusion": "failure"}], [], "none", None, 2),
+            ("manual head falls back", [manual], [failed], "diagnosed", "latest_trunk", 2),
+            ("manual cannot hide exact red", [manual, failed], [], "diagnosed", "head", 1),
+            ("exact push success", [green], [], "not_failed", "head", 1),
+            ("exact push failure", [failed], [manual], "diagnosed", "head", 1),
+            ("pending push survives manual fallback", [pending], [manual], "not_failed", "head", 2),
+        ):
+            with self.subTest(name=name):
+                rs = load()
+                calls = []
+                rs.git = lambda root, args: (0, "source-sha\n")
+                rs.github_repo_slug = lambda root: ""
+
+                def fake_load_json(cmd, root, *, timeout=300):
+                    calls.append(cmd)
+                    if cmd[:3] == ["gh", "run", "list"]:
+                        return {"value": head if "--commit" in cmd else trunk}, 0, "[]"
+                    if cmd == ["gh", "run", "view", "push-run", "--json", "jobs"]:
+                        return {"jobs": [{"name": "test", "steps": [{"name": "go test", "conclusion": "failure"}]}]}, 0, "{}"
+                    raise AssertionError(f"unqualified run reached diagnosis: {cmd}")
+
+                rs.load_json = fake_load_json
+                diagnosis = rs.ci_failure_diagnosis(Path("repo"))
+                self.assertEqual(diagnosis["status"], status)
+                self.assertEqual(diagnosis.get("scope"), scope)
+                if status == "none":
+                    self.assertNotIn("run", diagnosis)
+                    self.assertIn("push", diagnosis["reason"])
+                else:
+                    self.assertEqual(diagnosis["run"]["event"], "push")
+                if status == "diagnosed":
+                    self.assertEqual(diagnosis["failed_steps"], ["go test"])
+                    action = rs.next_action({"decision": "hold", "blockers": ["CI_BASE_RED"]}, {}, {"clean": True}, diagnosis)
+                    self.assertEqual(action["kind"], "fix_ci")
+                    self.assertIn("go test", action["detail"])
+                lists = [cmd for cmd in calls if cmd[:3] == ["gh", "run", "list"]]
+                expected = [["gh", "run", "list", "--workflow", "ci.yml", "--commit", "source-sha", "--event", "push", "--limit", "1", "--json", "databaseId,headSha,status,conclusion,displayTitle,url,event"]]
+                if queries == 2:
+                    expected.append(["gh", "run", "list", "--workflow", "ci.yml", "--branch", "main", "--status", "completed", "--event", "push", "--limit", "1", "--json", "databaseId,headSha,status,conclusion,displayTitle,url,event"])
+                self.assertEqual(lists, expected)
+
     def test_failed_step_names_picks_real_failures_only(self) -> None:
         rs = load()
         job = {"steps": [
@@ -477,6 +532,7 @@ class ReleaseStatusTest(unittest.TestCase):
             if cmd[:3] == ["gh", "run", "list"] and "--commit" in cmd:
                 return {
                     "value": [{
+                        "event": "push",
                         "databaseId": "run-9",
                         "conclusion": "failure",
                         "status": "completed",
