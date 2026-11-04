@@ -71,6 +71,11 @@ func validatePrefillBatchArgs(args *PrefillBatchArgs) (int, int, error) {
 	if P <= 0 || args.X.Numel()%P != 0 {
 		return 0, 0, fmt.Errorf("compute: PrefillBatch invalid token count P=%d for X numel=%d", P, args.X.Numel())
 	}
+	// The attention loop uses (StartPos + tokenIndex) + 1. Reject an
+	// unrepresentable exclusive end before projections or KV publication.
+	if args.StartPos > int(^uint(0)>>1)-P {
+		return 0, 0, fmt.Errorf("compute: PrefillBatch position range overflows int")
+	}
 	D := args.X.Numel() / P
 	if D <= 0 {
 		return 0, 0, fmt.Errorf("compute: PrefillBatch invalid hidden dimension D=%d", D)
