@@ -15,7 +15,9 @@ import (
 // @9e8c368b0b4c2c7892a0c9f0f302d7c164016209, Apache-2.0): held reads wait with
 // a bounded timeout and fall back to admission restore or fresh prefill;
 // concurrent-read permits are capped; a cancelled waiter does not cancel the
-// read — it keeps its permit until the I/O returns; Stop cancels reads.
+// read — it keeps its permit until the I/O returns; Stop cancels the queue's
+// read context before joining workers, so cooperative stores retire their
+// in-flight reads without external release.
 const (
 	// DefaultPrefetchTimeout bounds how long a held read waits before the
 	// caller falls back to admission restore or fresh prefill.
@@ -110,6 +112,13 @@ type PrefetchQueue struct {
 	stop chan struct{}
 	wg   sync.WaitGroup
 
+	// readCtx bounds the lifetime of every in-flight Store.Get: Stop cancels
+	// it before joining workers, so a store that honors its context retires
+	// each read without external release. It is independent of any Restore
+	// waiter's context; cancelling a waiter never cancels the shared read.
+	readCtx    context.Context
+	cancelRead context.CancelFunc
+
 	mu             sync.Mutex
 	stopped        bool
 	workersStarted bool
@@ -123,12 +132,15 @@ type PrefetchQueue struct {
 // the default-on settings; a zero-permit config never starts any workers.
 func NewPrefetchQueue(store Store, cfg PrefetchConfig) *PrefetchQueue {
 	cfg = cfg.normalized()
+	readCtx, cancelRead := context.WithCancel(context.Background())
 	return &PrefetchQueue{
-		store:   store,
-		cfg:     cfg,
-		jobs:    make(chan string, 1024),
-		stop:    make(chan struct{}),
-		entries: make(map[string]*prefetchEntry),
+		store:      store,
+		cfg:        cfg,
+		jobs:       make(chan string, 1024),
+		stop:       make(chan struct{}),
+		readCtx:    readCtx,
+		cancelRead: cancelRead,
+		entries:    make(map[string]*prefetchEntry),
 	}
 }
 
@@ -246,10 +258,15 @@ func (q *PrefetchQueue) holdFor(ctx context.Context) time.Duration {
 	return hold
 }
 
-// Stop cancels queued and in-flight reads. In-flight reads keep their permit
-// until the underlying I/O returns; queued entries settle as
-// ErrPrefetchStopped, which Restore reports to waiters until they consume it,
-// and staged hit payloads are released. Stop is idempotent.
+// Stop cancels queued and in-flight reads and joins the I/O workers. Before
+// waiting it raises the stopped flag and cancels the queue's read context, so
+// a store that honors its context retires each in-flight Get without external
+// release; a store that ignores its context is still joined once its I/O
+// returns — cancellation is cooperative, never a forced interruption.
+// In-flight reads keep their permit until the underlying I/O returns; queued
+// entries settle as ErrPrefetchStopped, which Restore reports to waiters
+// until they consume it, and staged hit payloads are released. Stop is
+// idempotent.
 //
 // The stopped flag is raised under q.mu before Wait: Enqueue only starts a
 // worker (wg.Add) after observing stopped == false under that same lock, so
@@ -261,6 +278,7 @@ func (q *PrefetchQueue) Stop() {
 		return
 	}
 	q.stopped = true
+	q.cancelRead()
 	close(q.stop)
 	q.mu.Unlock()
 	q.wg.Wait()
@@ -344,7 +362,7 @@ func (q *PrefetchQueue) runRead(key string) {
 	var found bool
 	var err error
 	if q.store != nil {
-		payload, found, err = q.store.Get(context.Background(), key)
+		payload, found, err = q.store.Get(q.readCtx, key)
 	}
 
 	q.mu.Lock()
@@ -353,6 +371,11 @@ func (q *PrefetchQueue) runRead(key string) {
 	switch {
 	case !ok || entry.settled:
 		// Cancelled or consumed elsewhere; nothing to settle.
+	case err != nil && q.stopped:
+		// Stop cancelled this read; report the queue's stopped sentinel
+		// instead of the store's cancellation error so waiters fall back
+		// to the demand path rather than treating it as an I/O fault.
+		q.settleLocked(entry, prefetchOutcome{kind: outcomeStopped, err: ErrPrefetchStopped})
 	case err != nil:
 		q.settleLocked(entry, prefetchOutcome{kind: outcomeFault, err: err})
 		q.stats.Faults++

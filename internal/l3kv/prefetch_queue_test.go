@@ -63,6 +63,47 @@ func (g *gateStore) inFlight() int { return int(atomic.LoadInt32(&g.current)) }
 
 func (g *gateStore) peakConcurrency() int { return int(atomic.LoadInt32(&g.peak)) }
 
+// ctxAwareStore is a Store whose Get blocks until either its context is
+// cancelled or an external release fires, modelling a cooperative disk read
+// that retires on queue shutdown without external release.
+type ctxAwareStore struct {
+	mu      sync.Mutex
+	data    map[string][]byte
+	release chan struct{} // optional external release; nil keeps the read held
+	current int32         // in-flight Gets, atomic
+}
+
+func newCtxAwareStore(data map[string][]byte) *ctxAwareStore {
+	return &ctxAwareStore{data: data}
+}
+
+func (s *ctxAwareStore) Put(_ context.Context, key string, payload []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data[key] = append([]byte(nil), payload...)
+	return nil
+}
+
+func (s *ctxAwareStore) Get(ctx context.Context, key string) ([]byte, bool, error) {
+	atomic.AddInt32(&s.current, 1)
+	select {
+	case <-ctx.Done():
+		atomic.AddInt32(&s.current, -1)
+		return nil, false, ctx.Err()
+	case <-s.release:
+	}
+	atomic.AddInt32(&s.current, -1)
+	s.mu.Lock()
+	val, ok := s.data[key]
+	s.mu.Unlock()
+	if !ok {
+		return nil, false, nil
+	}
+	return append([]byte(nil), val...), true, nil
+}
+
+func (s *ctxAwareStore) inFlight() int { return int(atomic.LoadInt32(&s.current)) }
+
 func waitFor(t *testing.T, what string, within time.Duration, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(within)
@@ -262,6 +303,86 @@ func TestRestorePrefetchPermitTimeoutFallback(t *testing.T) {
 		}
 		if st := pq.Stats(); st.StagedBytes != 0 {
 			t.Fatalf("StagedBytes after cap drop = %d, want 0", st.StagedBytes)
+		}
+	})
+}
+
+// fak-test:runtime fast est=100ms lane=default
+func TestPrefetchStopCancelsStoreRead(t *testing.T) {
+	t.Parallel()
+
+	t.Run("stop cancels a blocked context-aware read without external release", func(t *testing.T) {
+		store := newCtxAwareStore(map[string][]byte{"span": []byte("payload")})
+		pq := NewPrefetchQueue(store, PrefetchConfig{Timeout: 5 * time.Second, MaxConcurrentReads: 2})
+
+		if err := pq.Enqueue("span"); err != nil {
+			t.Fatalf("Enqueue = %v, want nil", err)
+		}
+		waitFor(t, "read admitted onto an I/O worker", 2*time.Second, func() bool {
+			return pq.Stats().InFlight == 1
+		})
+
+		// Stop must join the worker with nobody releasing the store: the
+		// read's context carries the queue's shutdown.
+		stopped := make(chan struct{})
+		go func() {
+			pq.Stop()
+			close(stopped)
+		}()
+		select {
+		case <-stopped:
+		case <-time.After(5 * time.Second):
+			t.Fatal("Stop did not return: the blocked context-aware read was not cancelled")
+		}
+
+		if got := store.inFlight(); got != 0 {
+			t.Fatalf("store in-flight after Stop = %d, want 0 (read retired)", got)
+		}
+		if got := pq.Stats().InFlight; got != 0 {
+			t.Fatalf("InFlight after Stop = %d, want 0", got)
+		}
+		// The cancelled read settles as stopped, not as an I/O fault.
+		if _, _, err := pq.Restore(context.Background(), "span"); !errors.Is(err, ErrPrefetchStopped) {
+			t.Fatalf("post-Stop Restore = %v, want ErrPrefetchStopped", err)
+		}
+		// Stop is idempotent.
+		pq.Stop()
+	})
+
+	t.Run("cancelled waiter leaves the shared read running until stop retires it", func(t *testing.T) {
+		store := newCtxAwareStore(map[string][]byte{"k": []byte("kept")})
+		pq := NewPrefetchQueue(store, PrefetchConfig{Timeout: 5 * time.Second, MaxConcurrentReads: 2})
+
+		if err := pq.Enqueue("k"); err != nil {
+			t.Fatalf("Enqueue = %v", err)
+		}
+		waitFor(t, "read admitted", 2*time.Second, func() bool {
+			return pq.Stats().InFlight == 1
+		})
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if _, _, err := pq.Restore(ctx, "k"); !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancelled Restore = %v, want context.Canceled", err)
+		}
+		// Waiter cancellation never reaches the shared read.
+		if got := pq.Stats().InFlight; got != 1 {
+			t.Fatalf("InFlight after waiter cancel = %d, want 1 (permit kept)", got)
+		}
+
+		// Only the queue's own shutdown retires the read.
+		stopped := make(chan struct{})
+		go func() {
+			pq.Stop()
+			close(stopped)
+		}()
+		select {
+		case <-stopped:
+		case <-time.After(5 * time.Second):
+			t.Fatal("Stop did not return: the read was not cancelled by queue shutdown")
+		}
+		if got := store.inFlight(); got != 0 {
+			t.Fatalf("store in-flight after Stop = %d, want 0", got)
 		}
 	})
 }
