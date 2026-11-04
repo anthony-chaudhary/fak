@@ -1848,6 +1848,37 @@ The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
 "TensorFold benchmark evidence" section above (same pinned repository and
 revision); they apply to this adaptation as well.
 
+## TensorFold external drafter attachment (per-stream DFlash2 trees)
+
+`internal/agent/inkernel_dflash2.go` (`AttachDFlash2Tree` and the
+`dflash2TreeStream` owner) adapts the external-drafter attachment idea from
+`zig/src/core/lanes/drafted.zig:35` in TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/lanes/drafted.zig
+plus the drafter initialization at
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/native/cuda_drafted.zig
+and the operator-facing `--drafter` documentation at
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/README.md
+
+The adapted contract: the target is told the drafter's feature taps before any
+forward; kept target rows are absorbed into drafter state; the drafter stream
+lifecycle is owned end to end; and offered chain/tree nodes are bounded by the
+target width, with unsupported tree requests refusing (the upstream
+TreesNotBuilt/NotDrafting equivalents). Per-stream DFlash2 trees do not
+constitute a generic ability to load arbitrary neural drafters.
+
+Changed for Fak: idiomatic Go re-expression over the existing `EnableDFlash2`
+serving-domain seam instead of Zig stream wrappers, the authenticated target's
+verification panel as the width bound, and closed sentinel errors
+(`ErrDFlash2TreesNotBuilt`, `ErrDFlash2NotDrafting`,
+`ErrDFlash2TreeWidthExceeded`) matched with `errors.Is`. No upstream source
+code is copied; the adaptation is witnessed by `TestDFlash2TreeWidthBoundRefusal`
+in `internal/agent/dflash2_tree_test.go`.
+
+The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
+"TensorFold benchmark evidence" section above (same pinned repository and
+revision); they apply to this adaptation as well.
+
 ## TensorFold durable write admission budget
 
 `internal/agent/inkernel_warm_disk.go` adapts the staging-admission
