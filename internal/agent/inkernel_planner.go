@@ -2273,6 +2273,17 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	offered := offeredToolsFor(ctx, tools)
 	defer func() { err = p.executionDeadlineError(ctx, err) }()
 	sp := applySampleOpts(opts...)
+	return p.completeResolvedNative(ctx, messages, tools, sp, offered, &ctx, &err, opts...)
+}
+
+// completeResolvedNative consumes the ordinary invocation's resolved controls.
+// It does not detach inputs, prepare another replica or grant cache credit.
+// Publish the final context and named error on every unwind before Complete's
+// existing deadline defer runs. That defer observes both mutable variables;
+// normal-return assignments alone would lose their state on panic or Goexit.
+func (p *InKernelPlanner) completeResolvedNative(ctx context.Context, messages []Message, tools []ToolDef, sp SampleParams, offered OfferedTools, callerCtx *context.Context, callerErr *error, opts ...SampleOpt) (comp *Completion, err error) {
+	defer func() { *callerCtx, *callerErr = ctx, err }()
+
 	if sp.NativeBeamSearch != nil {
 		return p.completeNativeBeamSearch(ctx, messages, tools, sp, opts...)
 	}
