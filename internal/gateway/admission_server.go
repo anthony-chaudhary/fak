@@ -332,13 +332,15 @@ func (s *Server) admitStreamedTurn(ctx context.Context, w http.ResponseWriter, l
 	return lease, true
 }
 
-// beginServedAdmission is the served request's admission boundary, narrowest budget last:
-// the scheduler slot (admissionCtl, #35) first — a queued request must not hold token
-// budget while it waits — then the caller's OWN per-principal allotment
-// (principalTokenRates, #5379), then the shared provider token window (tokenRateGate,
-// #2019). A shed at any stage frees everything the earlier stages granted. With no gate
-// attached it is inert (nil lease, nil error) and the request path is byte-for-byte
-// historical.
+// beginServedAdmission is the served request's admission boundary, coarsest bound
+// first: the request-count inflight gate (LiveInflightGate, TensorFold borrow —
+// global/per-key caps on concurrent requests, consulted ahead of everything so a
+// request that cannot fit the node's inflight caps never queues or reserves) — then
+// the scheduler slot (admissionCtl, #35); a queued request must not hold token budget
+// while it waits — then the caller's OWN per-principal allotment (principalTokenRates,
+// #5379), then the shared provider token window (tokenRateGate, #2019). A shed at any
+// stage frees everything the earlier stages granted. With no gate attached it is inert
+// (nil lease, nil error) and the request path is byte-for-byte historical.
 //
 // The per-principal allotment is checked BEFORE the shared provider window on purpose: a
 // tenant already over its own cap must be shed without first reserving — and briefly
@@ -358,6 +360,7 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 	g := s.tokenRateGate
 	b := s.principalTokenRates
 	cap, fraction := s.warmupCapacity, s.warmupReserveFraction
+	ig := LiveInflightGate()
 	s.admissionMu.RUnlock()
 	// Zero disables the controller's token limit, so a refused fixed-state
 	// derive must stop here rather than install zero or retain a default budget.
@@ -369,8 +372,23 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 		}
 		return nil, err
 	}
-	if c == nil && g == nil && b == nil {
+	if c == nil && g == nil && b == nil && ig == nil {
 		return nil, nil
+	}
+	// The request-count inflight gate (TensorFold borrow) is consulted FIRST — the
+	// coarsest bound, ahead of the scheduler slot: a request that cannot even fit the
+	// node's inflight caps must not queue, reserve a slot, or touch any tenant budget.
+	// TensorFold keys its per-key caps by the verified key digest — the request's
+	// principal; fak's authenticated principal IS the keyset-bound identity, so both
+	// axes take it. A host using the kernel directly may pass a finer key.
+	var hold *InflightLease
+	if ig != nil {
+		p := principalFromContext(ctx)
+		var err error
+		hold, err = ig.Acquire(p, p)
+		if err != nil {
+			return nil, &AdmissionError{Verdict: VerdictShed, Reason: inflightShedReason(err)}
+		}
 	}
 	preallocCeiling := c.preallocCeiling()
 	var lease *AdmissionLease
@@ -394,6 +412,7 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 			lease, err = acquireObserved(ctx, c, req, onQueued)
 		})
 		if err != nil {
+			hold.Release() // nil-safe: free the inflight hold charging nothing
 			return nil, err
 		}
 	}
@@ -405,6 +424,7 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 		// its single shared allotment rather than to a fresh (bypassable) one.
 		res, err = b.Admit(principalFromContext(ctx), estimate)
 		if err != nil {
+			hold.Release()  // nil-safe: free the inflight hold charging nothing
 			lease.Release() // nil-safe: free the scheduler slot this tenant's cap refused to feed
 			return nil, err
 		}
@@ -416,6 +436,7 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 			// nothing) rather than Release (charge the estimate) the allotment this tenant
 			// held for one instant — a neighbour's saturation must not spend its budget.
 			res.cancel()
+			hold.Release() // nil-safe: free the inflight hold charging nothing
 			lease.Release()
 			return nil, err
 		}
@@ -428,7 +449,44 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 		}
 		lease.tokenRes = res
 	}
+	// Tie the inflight hold's release to the request's single lease-release path: ride
+	// the TokenReservation linked chain when a token reservation exists, or become the
+	// lease's sole tokenRes when it does not (the beginCausalEmbeddingAdmission
+	// precedent). A double Release cannot double-decrement: every carrier settles under
+	// its own sync.Once.
+	if hold != nil {
+		tail := res
+		for tail != nil && tail.linked != nil {
+			tail = tail.linked
+		}
+		if tail != nil {
+			tail.linked = hold.head
+		} else {
+			if lease == nil {
+				lease = &AdmissionLease{}
+			}
+			lease.tokenRes = hold.head
+		}
+	}
 	return lease, nil
+}
+
+// inflightShedReason maps the live inflight gate's closed refusal classes onto the shed
+// reason a client sees, naming WHICH class fired (global / key / capacity) — the
+// actionable difference between "the node is full" and "your key is over its cap". The
+// wording follows the borrowed upstream operator messages; HTTP mapping stays 429
+// through admissionErrorStatus.
+func inflightShedReason(err error) string {
+	switch {
+	case errors.Is(err, ErrInflightGlobal):
+		return "inflight global cap: too many model requests in progress; retry after a request finishes"
+	case errors.Is(err, ErrInflightKey):
+		return "inflight per-key cap: too many model requests in progress for this key; retry after a request finishes"
+	case errors.Is(err, ErrInflightCapacity):
+		return "inflight principal capacity: request admission capacity reached; retry after the indicated interval"
+	default:
+		return "inflight admission refused"
+	}
 }
 
 type admissionAcquireResult struct {

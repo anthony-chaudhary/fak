@@ -2216,3 +2216,31 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+## TensorFold HTTP inflight request-count admission
+
+`internal/gateway/inflight_admission.go` (`InflightGate`, `InflightLease`,
+`SetInflightGate` / `LiveInflightGate`) and its served-path wiring in
+`internal/gateway/admission_server.go` (`beginServedAdmission`) adapt the
+opt-in in-flight request-count admission from TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/server/request_admission.zig#L100
+
+The adapted contract: a request is admitted only within a global `max_inflight`
+and per-key caps (zero limits count nothing), a bounded table of distinct
+principals (default 128 slots) refuses a new principal beyond the bound with
+its own class, refusals carry closed classes (global / key / capacity) instead
+of free text, and an admitted hold is a lease released exactly once at the end
+of the reply; a refused acquire holds nothing.
+
+Changed for Fak: idiomatic Go re-expression over fak's existing token-admission
+seam — each dimension rides a `TokenRateGate` carrier whose reserve-on-admit /
+settle-on-truth machinery already decrements on release, sentinel errors
+(`ErrInflightGlobal`, `ErrInflightKey`, `ErrInflightCapacity` under one parent
+`ErrInflight`) instead of Zig error unions, and a live gate registry consulted
+first by `beginServedAdmission`, ahead of the scheduler slot. The per-second
+rate bucket (upstream's fourth refusal class) is a separate borrow-port
+part-out and is not included. No upstream source code is copied; the adaptation
+is witnessed by `TestInflightAdmissionLeasesRefusals` in
+`internal/gateway/inflight_admission_test.go`. The upstream Apache-2.0 license
+is reproduced in the TensorFold benchmark evidence section above.
+
