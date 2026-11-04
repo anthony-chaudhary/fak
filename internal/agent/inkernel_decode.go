@@ -488,6 +488,20 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		return
 	}
 
+	// Unregistered requests do no observer route eligibility work. Cold CPU
+	// reuse is conservatively excluded: GOMAXPROCS may change before the flight
+	// branch below and make additional prefix sharing eligible later.
+	var finishPrefill func(bool)
+	if observation, ok := ctx.Value(ownedPrefillObservationKey{}).(ownedPrefillObservation); ok && observation.start != nil {
+		if ownedPrefillRouteEligible(visionPrefill != nil, cachePopulate, p.backend == nil, reuse, matched) {
+			finishPrefill = p.beginOwnedPrefillObservation(ctx, promptTok, matched)
+		}
+	}
+	if finishPrefill != nil {
+		// Also releases an attempt on cancellation, error or a recovered panic.
+		defer finishPrefill(false)
+	}
+
 	// 1b) RECORD this turn's cache decision (#1538, inkernel_turntax.go). This is the seam the
 	// turn-tax planner is defined on: the persistent lookup has run and every servability/trust
 	// gate above has settled (a prefix that matched but could not be served is still
@@ -629,6 +643,9 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		// verify panel can dispatch the same GEMM) so the summary line attributes it.
 		p.prefillQ4KGEMM.Store(s.Q4KPrefillGEMMObservation())
 		p.observeFirstPrefillPlanLedgerDiff(len(ids), maxNew)
+	}
+	if finishPrefill != nil {
+		finishPrefill(true)
 	}
 	if err = ctx.Err(); err != nil {
 		return
