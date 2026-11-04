@@ -20,9 +20,28 @@ import (
 // registry; each real Handler request has a five-second cancellation backstop.
 // fak-test:runtime integration est=200ms lane=default
 func TestResponsesSummaryRetainsTrustBoundary(t *testing.T) {
+	t.Run("summary cases", testResponsesSummaryTrustBoundary)
+
+	// The next test may construct a server directly, without newTestServer.
+	// Exercise that ordering after the summary fixture's cleanup has completed.
+	if _, ok := abi.ActiveResolver().(inlineRes); !ok {
+		t.Fatalf("summary cleanup resolver = %T, want inlineRes", abi.ActiveResolver())
+	}
+	if len(abi.ResultAdmitters()) != 0 {
+		t.Fatal("summary cleanup left result admitters registered")
+	}
+	srv, err := New(Config{EngineID: "mock", Model: "test-model"})
+	if err != nil {
+		t.Fatalf("New after summary cleanup: %v", err)
+	}
+	t.Cleanup(srv.Close)
+}
+
+func testResponsesSummaryTrustBoundary(t *testing.T) {
 	t.Cleanup(func() {
 		abi.ResetForTest()
-		// Preserve the package-init invariant restored by newTestServer.
+		// Restore both construction prerequisites used by direct New callers.
+		abi.RegisterRegionBackend(inlineBackend{})
 		abi.RegisterEngine("mock", engine.MockEngine)
 	})
 	const secret = "sk-abcdef0123456789abcdef0123"

@@ -89,7 +89,8 @@ func TestResponsesCompactionMonotonicOverHTTP(t *testing.T) {
 	}
 
 	first := post(input)
-	before := append([]agent.Message{{Role: agent.RoleSystem, Content: system}}, input...)
+	// Prompt canonicalization marks the stable system prefix before compaction.
+	before := append([]agent.Message{{Role: agent.RoleSystem, Content: system, CacheControl: &agent.CacheControl{Type: "ephemeral"}}}, input...)
 	if len(first) != len(before) {
 		t.Fatalf("message count=%d, want %d", len(first), len(before))
 	}
@@ -121,7 +122,7 @@ func TestResponsesCompactionMonotonicOverHTTP(t *testing.T) {
 		agent.Message{Role: agent.RoleAssistant, Content: "Another short answer."},
 		agent.Message{Role: agent.RoleUser, Content: "Continue again."})
 	second := post(nextInput)
-	wantSecond := append([]agent.Message{{Role: agent.RoleSystem, Content: system}}, nextInput...)
+	wantSecond := append([]agent.Message{{Role: agent.RoleSystem, Content: system, CacheControl: &agent.CacheControl{Type: "ephemeral"}}}, nextInput...)
 	if !reflect.DeepEqual(second, wantSecond) {
 		t.Fatal("later HTTP turn rewrote a prior decision or expanded short context")
 	}
