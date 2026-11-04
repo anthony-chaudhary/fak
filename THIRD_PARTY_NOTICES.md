@@ -2168,3 +2168,51 @@ agreed to in writing, software distributed under the License is distributed on
 an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 or implied. See the License for the specific language governing permissions and
 limitations under the License.
+
+## opencode ordered wildcard permission ruleset
+
+`pkg/policy/perm.go` (`PermissionRuleset`, `PermissionRule`, `Evaluate`,
+`Merge`) adapts the ordered wildcard tool-permission ruleset evaluation from
+anomalyco/opencode at revision
+`4eb29a64f0054672950acf789f2b09487ebfbb20`:
+https://github.com/anomalyco/opencode/blob/4eb29a64f0054672950acf789f2b09487ebfbb20/packages/core/src/permission.ts#L76
+
+The adapted contract: an ordered list of rules where each rule's pattern is a
+wildcard over the tool name and/or the call target; evaluation walks the list
+front to back and the LAST matching rule decides (upstream `findLast`); when
+no rule matches, the caller keeps its own default instead of receiving a
+synthesized effect.
+
+Changed for Fak: the upstream two-dimensional `{action, resource, effect}`
+rule is flattened into one `"tool:target"` pattern per rule (a bare pattern
+constrains the tool name only; the first `:` splits the target glob),
+matching uses Go `path.Match`-style globs instead of upstream
+`Wildcard.match`, the effect is a free-form action string instead of the
+closed allow/deny/ask set, and a non-matching lookup returns `matched=false`
+instead of the upstream synthesized `ask` fallback. No upstream persistence,
+session store, event bus or adjudication wiring is included; the evaluator
+is pure and unwired. The adaptation is witnessed by
+`TestPermissionRulesetWildcardLastMatchWins` in `pkg/policy/perm_test.go`.
+
+MIT License
+
+Copyright (c) 2025 opencode
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
