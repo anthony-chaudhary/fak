@@ -73,7 +73,8 @@ type Status struct {
 	QuarantinedAt time.Time
 }
 
-// Lease represents an admitted launch. Finish must be called exactly once.
+// Lease represents an admitted launch. Call Finish until it returns nil; a
+// transient error leaves the lease unfinished so the caller may retry.
 type Lease struct {
 	guard    *Guard
 	identity string
@@ -216,6 +217,11 @@ func (g *Guard) Admit(identity string) (Decision, *Lease, error) {
 
 // Finish records success or failure and releases the active owner. Success
 // clears the rolling attempt budget; failure starts backoff and may quarantine.
+// finished is set only after every fallible step succeeds, so a transient
+// filesystem error (a sharing violation on a busy host) leaves the lease
+// retriable instead of consuming it: the steps are idempotent, a failed
+// writeState leaves the prior state intact, and releaseOwner re-checks the
+// token before removing the owner.
 func (l *Lease) Finish(success bool) error {
 	if l == nil || l.guard == nil {
 		return errors.New("launchguard: nil lease")
@@ -223,7 +229,6 @@ func (l *Lease) Finish(success bool) error {
 	if l.finished {
 		return errors.New("launchguard: lease already finished")
 	}
-	l.finished = true
 	g := l.guard
 	state, err := g.readState(l.identity)
 	if err != nil {
@@ -251,7 +256,11 @@ func (l *Lease) Finish(success bool) error {
 	if err := g.writeState(l.identity, state); err != nil {
 		return err
 	}
-	return g.releaseOwner(l.identity, l.token)
+	if err := g.releaseOwner(l.identity, l.token); err != nil {
+		return err
+	}
+	l.finished = true
+	return nil
 }
 
 // Inspect returns current state without changing admission.

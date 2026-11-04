@@ -305,6 +305,41 @@ func TestCooldownRefusesDuplicateLaunchesUntilWindowExpires(t *testing.T) {
 	}
 }
 
+// TestFinishTransientErrorKeepsLeaseRetriable pins the cross-process claim
+// contract under a transient filesystem fault: a Finish that fails mid-flight
+// must leave the lease unfinished so the caller's retry can complete it.
+// Before the fix the optimistic finished flag turned the retry into "lease
+// already finished", which made the multi-process crash-RSI winner exit 5
+// under host load (the CI flake this test reproduces deterministically by
+// corrupting the state file between Admit and Finish).
+func TestFinishTransientErrorKeepsLeaseRetriable(t *testing.T) {
+	g, err := New(Config{Dir: t.TempDir(), MaxAttempts: 1, Window: time.Minute, BaseBackoff: time.Second, StaleAfter: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, lease, err := g.Admit("retriable-finish")
+	if err != nil || d.Outcome != Admitted || lease == nil {
+		t.Fatalf("admit: decision=%+v lease=%v err=%v", d, lease, err)
+	}
+	statePath := filepath.Join(g.cfg.Dir, StableIdentity("retriable-finish")+".json")
+	valid, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(statePath, []byte("{corrupt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Finish(true); err == nil {
+		t.Fatal("first finish succeeded despite corrupt state")
+	}
+	if err := os.WriteFile(statePath, valid, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Finish(true); err != nil {
+		t.Fatalf("retry after healed state: %v (a transient failure must not consume the lease)", err)
+	}
+}
+
 func stringContains(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {
