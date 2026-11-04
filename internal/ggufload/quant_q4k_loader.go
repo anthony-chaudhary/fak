@@ -177,6 +177,9 @@ func WithDenseQ3KResident(enabled bool) Q4KLoadOption {
 // WithDenseIQResident retains eligible dense tensors of the given i-quant types even when
 // blanket dense k-quant residency is disabled, for a backend with native kernels for exactly
 // those formats (Vulkan iq*_matvec, ticket 05f). Other i-quants keep the dequant-to-Q8 path.
+// Passing it also admits the qwen35 raw-row routes (see qwen35DeviceQKNativeRow), so only a
+// backend that tiles the GDN core may pass it; a backend that merely advertises i-quant matmul
+// dtypes must use WithDenseIQPacked instead.
 func WithDenseIQResident(types ...TensorType) Q4KLoadOption {
 	return func(o *q4kLoadOptions) {
 		if o.residentDenseIQ == nil {
