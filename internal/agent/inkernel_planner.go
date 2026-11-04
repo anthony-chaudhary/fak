@@ -437,6 +437,12 @@ func nativePhaseTraceID(ctx context.Context) string {
 // progress still arrives independently from the owned loop.
 func (p *InKernelPlanner) StreamingSupported() bool { return true }
 
+// streamResolvedSampleOpts transfers resolved controls through Complete's
+// existing option API. Mutable referents remain shared; only the struct is copied.
+func streamResolvedSampleOpts(sp SampleParams) []SampleOpt {
+	return []SampleOpt{func(out *SampleParams) { *out = sp }}
+}
+
 // CompleteStream emits assistant PROSE to sink incrementally while the turn decodes,
 // holding every tool-call span through post-decode lifting and never exposing tool-token
 // text before adjudication can see it (the StreamingPlanner contract, stream.go).
@@ -485,6 +491,11 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 			return nil, err
 		}
 	}
+	// Reuse the controls already validated above instead of replaying caller
+	// option closures in Complete. Appended stream observers still override the
+	// copied controls in their original order. This is not a deep input freeze.
+	opts = streamResolvedSampleOpts(sp)
+
 	if sink == nil {
 		return p.Complete(ctx, messages, tools, opts...)
 	}
