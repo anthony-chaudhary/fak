@@ -393,6 +393,39 @@ source code is copied; the adaptation is witnessed by
 `internal/compute/gdn_marks_test.go`. The upstream Apache-2.0 license is
 reproduced in the TensorFold benchmark evidence section above.
 
+## TensorFold distributed message fabric (dist transport vtable)
+
+`internal/model/dist_transport.go` adapts the cluster transport contract from
+TensorFold at revision `9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/cluster/transport.zig
+plus its error classification and link-state handling at
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/cluster/fabric_link.zig#L79
+
+The adapted contract: what a control plane needs from a link layer is exactly
+four things — a bounded send, a poll of the next message from any link,
+every link's up/down state, and the largest payload a link carries — with
+messages on one link arriving IN ORDER OR NOT AT ALL, oversize payloads
+refused before sending (`TooLarge`), and observed link failures mapped to
+closed classes (peer timeout or down is one retryable class; anything else is
+corrupt). In this codebase that lands as the `DistTransport` interface
+(`Send`, `Recv`, `Links`, `Limit`) plus `NewDistTransport`, which rides a
+formed `DistComm` group's existing framed connections (the same
+writeFrame/readFrame seams `writeRequest`/`readRequest` use) with control
+frames tagged `opTransportCtrl` = 6, and the closed sentinel classes
+`ErrTooLarge`, `ErrLinkDown`, `ErrPeerTimeout`, `ErrCorrupt` with
+`ClassifyDistTransportError` mapping raw link-layer failures onto them.
+
+Changed for Fak: idiomatic Go re-expression over fak's loopback/stream TCP
+framed connections instead of Zig endpoint buffers, per-link FIFO mailboxes
+fed by one reader goroutine per peer (non-blocking `Recv` poll instead of a
+blocking any-link receive), and parking of non-control frames so the
+collective read paths drain them in arrival order. Physical RDMA stays open;
+this adaptation is loopback/stream TCP only. No upstream source code is
+copied; the adaptation is witnessed by
+`TestDistTransportPayloadLimitLinkState` in
+`internal/model/dist_transport_test.go`. The upstream Apache-2.0 license is
+reproduced in the TensorFold benchmark evidence section above.
+
 ## vLLM chunkwise Qwen host Gated-DeltaNet
 
 `internal/model/qwen35_gdn_chunked_host.go` adapts the chunk-64 causal
