@@ -158,8 +158,19 @@ func TestSyntheticShapeTiny(t *testing.T) {
 	if cfg27.NumHeads != 24 || cfg27.NumKVHeads != 4 || cfg27.HeadDim != 256 || cfg27.IntermediateSize != 17408 {
 		t.Fatalf("qwen38-27b attn/mlp = %dq/%dkv/headdim%d/I%d, want 24q/4kv/headdim256/I17408", cfg27.NumHeads, cfg27.NumKVHeads, cfg27.HeadDim, cfg27.IntermediateSize)
 	}
-	if len(cfg27.LayerTypes) != 64 || cfg27.LayerTypes[0] != "linear_attention" || cfg27.LayerTypes[3] != "full_attention" {
-		t.Fatalf("qwen38-27b layer types = %v, want 64 layers with 3:1 linear:full cadence", cfg27.LayerTypes)
+	// Every declared layer participates in the pinned 3:1 hybrid cadence;
+	// checking only the first linear/full pair misses drift in later layers.
+	cadence := []string{"linear_attention", "linear_attention", "linear_attention", "full_attention"}
+	if len(cfg27.LayerTypes) != cfg27.NumLayers {
+		t.Fatalf("qwen38-27b declares %d layer types for %d layers", len(cfg27.LayerTypes), cfg27.NumLayers)
+	}
+	if cfg27.FullAttentionInterval != len(cadence) {
+		t.Fatalf("qwen38-27b full-attention interval = %d, want the %d-layer hybrid cadence", cfg27.FullAttentionInterval, len(cadence))
+	}
+	for layer, got := range cfg27.LayerTypes {
+		if want := cadence[layer%len(cadence)]; got != want {
+			t.Errorf("qwen38-27b layer %d = %q, want %q in the 3:1 hybrid cadence", layer, got, want)
+		}
 	}
 
 	// The pre-existing shapes must still resolve (no regression from inserting tiny first),
