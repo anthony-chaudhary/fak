@@ -271,9 +271,11 @@ func normalizeCanonicalMayCopy(canon string, cfg model.Config) bool {
 }
 
 // streamedDenseLazy is the loader's streamed-dense dispatch (computeQ4KTensorWork): an eligible
-// dense Q4_K, or a retained eligible Q2_K/Q3_K/Q5_K/Q6_K, becomes a range descriptor.
+// dense Q4_K, or a retained eligible Q2_K/Q3_K/Q5_K/Q6_K, becomes a range descriptor - unless the
+// executing backend's kernel preflight requires it device-resident (streamedDensePins), which the
+// loader's own dispatch excludes from both lazy branches for the same reason.
 func streamedDenseLazy(cfg model.Config, o q4kLoadOptions, t TensorType, canon string) bool {
-	if !o.streamedDenseQ4K {
+	if !o.streamedDenseQ4K || o.streamedDensePins(canon) {
 		return false
 	}
 	if t == TensorQ4_K {
