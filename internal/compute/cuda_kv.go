@@ -260,6 +260,16 @@ func (k *cudaKV) ValuesView(layer int) Tensor {
 	return makeTensor(k.be, k.V[layer].dtype, RowMajor, []int{n, w}, nil, &cudaBuf{ptr: k.V[layer].ptr, n: k.V[layer].len * k.V[layer].dtype.Bytes(), class: MemoryKVCache})
 }
 
+// sharedStopErrorLocked refuses a consumer before it can publish host data or
+// mutate a retained owner. Caller holds cudaMu; this is a status query, not a
+// completion fence or protection against a new failure later in the operation.
+func (k *cudaKV) sharedStopErrorLocked(site string) error {
+	if k.releaseRetained || cudaQ56KMMVQReleaseBlocked() {
+		return &BackendError{Backend: "cuda", Site: site, Class: "cuda-terminal-stream", Message: "shared private stream is uncertain; process teardown required"}
+	}
+	return nil
+}
+
 // Evict compacts the cache ON-GPU — no host round-trip (#479). For every layer it shifts
 // the survivors of K/Kraw/V down past the [from,from+n) span, then re-derives the post-RoPE
 // K of each survivor whose absolute position changed by a SINGLE rotation of its (already
@@ -273,6 +283,9 @@ func (k *cudaKV) ValuesView(layer int) Tensor {
 func (k *cudaKV) Evict(from, n int) int {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	if err := k.sharedStopErrorLocked("kv-evict"); err != nil {
+		panic(err)
+	}
 	k.be.graphOnceInvalidateKVLocked(k)
 	if from < 0 || n <= 0 || from >= len(k.pos) {
 		return 0
@@ -422,6 +435,9 @@ func (k *cudaKV) SnapshotToHost() (KVHostSnapshot, error) {
 	}
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	if err := k.sharedStopErrorLocked("kv-snapshot"); err != nil {
+		return KVHostSnapshot{}, err
+	}
 	copyDS := func(src dslice) []float32 {
 		out := make([]float32, src.len)
 		if len(out) > 0 {
