@@ -1326,9 +1326,21 @@ func releaseShipCommitStillOnTrunk(result *releaseShipResult, wt string, opts re
 	return code == 0
 }
 
+// releaseShipPushCIRuns keeps diagnostics from supplying release CI evidence,
+// even if a response violates the gh query's event filter or omits the field.
+func releaseShipPushCIRuns(rows []map[string]any) []map[string]any {
+	var push []map[string]any
+	for _, row := range rows {
+		if event, ok := row["event"].(string); ok && event == "push" {
+			push = append(push, row)
+		}
+	}
+	return push
+}
+
 func waitReleaseShipCIAppears(result *releaseShipResult, wt string, opts releaseShipOptions, sha string) {
 	deadline := time.Now().Add(opts.ciAppearTimeout)
-	args := []string{"run", "list", "--workflow", opts.workflow, "--commit", sha, "--limit", "1", "--json", "databaseId,status,conclusion,url"}
+	args := []string{"run", "list", "--workflow", opts.workflow, "--commit", sha, "--event", "push", "--limit", "1", "--json", "databaseId,status,conclusion,url,event"}
 	for {
 		code, out := releaseShipCmd(result, wt, "gh", args, nil, releaseShipCIPollCommandTimeout)
 		if code != 0 {
@@ -1340,7 +1352,7 @@ func waitReleaseShipCIAppears(result *releaseShipResult, wt string, opts release
 			result.Warnings = append(result.Warnings, "gh run list emitted non-json output while waiting for CI")
 			return
 		}
-		if len(rows) > 0 {
+		if len(releaseShipPushCIRuns(rows)) > 0 {
 			return
 		}
 		if time.Now().After(deadline) {
@@ -1355,7 +1367,7 @@ func releaseShipSourceCI(result *releaseShipResult, root string, opts releaseShi
 	if strings.TrimSpace(sha) == "" {
 		return map[string]any{"ok": false, "status": "missing_source_sha"}
 	}
-	args := []string{"run", "list", "--workflow", opts.workflow, "--commit", sha, "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha"}
+	args := []string{"run", "list", "--workflow", opts.workflow, "--commit", sha, "--event", "push", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha,event"}
 	code, out := releaseShipCmd(result, root, "gh", args, nil, time.Minute)
 	if code != 0 {
 		return map[string]any{"ok": false, "status": "unavailable", "tail": tail(out)}
@@ -1364,11 +1376,13 @@ func releaseShipSourceCI(result *releaseShipResult, root string, opts releaseShi
 	if err := json.Unmarshal([]byte(out), &rows); err != nil {
 		return map[string]any{"ok": false, "status": "non_json", "tail": tail(out)}
 	}
+	rows = releaseShipPushCIRuns(rows)
 	if len(rows) == 0 {
+		missing := map[string]any{"ok": false, "status": "missing", "source_sha": sha, "reason": "no push-triggered CI run found for source"}
 		if opts.adoptAncestorCI {
-			return releaseShipAdoptAncestorCI(result, root, opts, sha, map[string]any{"ok": false, "status": "missing", "source_sha": sha})
+			return releaseShipAdoptAncestorCI(result, root, opts, sha, missing)
 		}
-		return map[string]any{"ok": false, "status": "missing", "source_sha": sha}
+		return missing
 	}
 	row := rows[0]
 	conclusion := strings.ToLower(stringFromAny(row["conclusion"]))
@@ -1410,7 +1424,7 @@ func releaseShipAdoptAncestorCI(result *releaseShipResult, root string, opts rel
 		workflows = append(workflows, "ci-fast.yml")
 	}
 	for _, wf := range workflows {
-		args := []string{"run", "list", "--workflow", wf, "--branch", opts.trunk, "--status", "completed", "--limit", "20", "--json", "databaseId,status,conclusion,url,headSha,updatedAt"}
+		args := []string{"run", "list", "--workflow", wf, "--branch", opts.trunk, "--status", "completed", "--event", "push", "--limit", "20", "--json", "databaseId,status,conclusion,url,headSha,updatedAt,event"}
 		code, out := releaseShipCmd(result, root, "gh", args, nil, time.Minute)
 		if code != 0 {
 			continue
@@ -1419,7 +1433,7 @@ func releaseShipAdoptAncestorCI(result *releaseShipResult, root string, opts rel
 		if err := json.Unmarshal([]byte(out), &rows); err != nil {
 			continue
 		}
-		for _, row := range rows {
+		for _, row := range releaseShipPushCIRuns(rows) {
 			conc := strings.ToLower(stringFromAny(row["conclusion"]))
 			rsha := strings.TrimSpace(stringFromAny(row["headSha"]))
 			if conc == "success" && rsha != "" {
