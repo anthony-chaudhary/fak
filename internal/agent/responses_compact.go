@@ -92,6 +92,11 @@ func CompactResponsesMessages(messages []Message, tokenBudget int, casPut func([
 		if len(m.ToolCalls) > 0 || m.FunctionCall != nil || m.ToolCallID != "" || m.Role == RoleTool || m.Role == "function" {
 			continue
 		}
+		// A restore stub is already a compacted decision. Rewriting it would
+		// change its cached prefix bytes and replace the original restore ref.
+		if _, _, _, ok := ParseResponsesCompactStub(m.Content); ok {
+			continue
+		}
 		if isResponsesGoalMessage(m) {
 			// Invariant 3: Goal Invariant — messages containing goal markers must NEVER be dropped.
 			continue
@@ -115,6 +120,11 @@ func CompactResponsesMessages(messages []Message, tokenBudget int, casPut func([
 
 		origTurnTokens := EstimateResponsesMessageTokens(compacted[i])
 		stubTokens := EstimateResponsesMessageTokens(stub)
+		// Protected context may keep the request over budget. Do not make it
+		// larger (or rewrite it for zero savings) merely to report a shed turn.
+		if stubTokens >= origTurnTokens {
+			continue
+		}
 
 		compacted[i] = stub
 		currentTokens = currentTokens - origTurnTokens + stubTokens
