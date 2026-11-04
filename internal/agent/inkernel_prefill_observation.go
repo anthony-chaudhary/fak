@@ -62,3 +62,14 @@ func (p *InKernelPlanner) beginOwnedPrefillObservation(ctx context.Context, prom
 func ownedPrefillRouteEligible(vision, populate, cpu, reuse bool, matched int) bool {
 	return !vision && !populate && !(cpu && reuse && matched == 0)
 }
+
+// TryWithOwnedPrefillObservation installs an observer only when this context
+// has no existing binding. Automatic instrumentation must not replace a caller's
+// observer, including one bound to a different planner. A false result leaves
+// ctx unchanged; callers must treat omitted observations as unknown, not zero.
+func (p *InKernelPlanner) TryWithOwnedPrefillObservation(ctx context.Context, start func(int, int) func(bool)) (context.Context, bool) {
+	if p == nil || start == nil || ctx.Value(ownedPrefillObservationKey{}) != nil {
+		return ctx, false
+	}
+	return p.WithOwnedPrefillObservation(ctx, start), true
+}

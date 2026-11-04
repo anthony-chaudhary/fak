@@ -326,6 +326,7 @@ func (r *ReplicaDispatch) completeReserved(ctx context.Context, route reservedPl
 	var previous error
 	for {
 		callCtx := agent.WithReplicaFailover(ctx, r.hasUntriedReplica(route, tried))
+		callCtx = route.withObservedPrefill(callCtx)
 		comp, err = route.replica.Planner.Complete(callCtx, messages, tools, opts...)
 		if err == agent.ErrSerialRetryBudgetExhausted && previous != nil {
 			err = errors.Join(err, previous)
@@ -474,6 +475,7 @@ func (r *ReplicaDispatch) CompleteStream(ctx context.Context, sink agent.StreamS
 			return nil, agent.ErrStreamingUnsupported
 		}
 		callCtx := agent.WithReplicaFailover(ctx, r.hasUntriedReplica(route, tried))
+		callCtx = route.withObservedPrefill(callCtx)
 		comp, err = sp.CompleteStream(callCtx, guarded, messages, tools, opts...)
 		if err == agent.ErrSerialRetryBudgetExhausted && previous != nil {
 			err = errors.Join(err, previous)
