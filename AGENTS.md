@@ -44,14 +44,11 @@ worker a bounded goal and distinct file set, preserve only decisions and compact
 evidence in the primary context, and independently witness worker results before
 landing or reporting them. Delegate investigation, implementation, tests, long command
 output, and independent review; do not pull their full transcripts into the coordinator.
-Structurally drive 10x subagent adoption by default: aggressively fan out 4–8 (up to 16
-on multi-core hosts) specialized subagents concurrently across pairwise tree-disjoint lanes.
 
-- **Divide and conquer by default (10x subagent adoption)**: When handling substantive, multi-part, or complex tasks,
+- **Divide and conquer by default (10x subagent adoption)**: For substantive, multi-part, or complex tasks,
   decompose them into atomic, single-concern units or parallel subagent packets. Launch 4–8 (up to 16
   on multi-core hosts) specialized subagents (`task`: worker, researcher, explore, deep-reason, cross-validator,
-  issue-auditor, tester, reviewer, scout) concurrently across pairwise tree-disjoint lanes to maximize
-  throughput and prevent coordinator context saturation.
+  issue-auditor, tester, reviewer, scout) concurrently across pairwise tree-disjoint lanes.
 - **Astra worker reservation:** Reserve `gpt-6-astra` subagents for highly pre-specified
   formal-mathematical leaves: the packet states fixed definitions and assumptions, the exact
   proposition or derivation, the required output form, and a deterministic witness. Send
