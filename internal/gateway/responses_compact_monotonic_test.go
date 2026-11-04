@@ -43,7 +43,9 @@ func TestResponsesCompactionMonotonicOverHTTP(t *testing.T) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	const trace = "responses-monotonic"
 	const system = "Pinned system instructions."
-	large := strings.Repeat("An ordinary historical explanation. ", 200)
+	// Assistant ingress trims surrounding whitespace before compaction. Keep this
+	// fixture normalized so restoration still asserts exact stashed bytes.
+	large := strings.TrimSpace(strings.Repeat("An ordinary historical explanation. ", 200))
 	input := []agent.Message{
 		{Role: agent.RoleUser, Content: "Initial task."},
 		{Role: agent.RoleAssistant, Content: "ok"},
@@ -113,7 +115,7 @@ func TestResponsesCompactionMonotonicOverHTTP(t *testing.T) {
 	}
 	restored, err := srv.restoreFromStash(trace, ref)
 	if err != nil || restored.Bytes != large {
-		t.Fatalf("original payload restore failed: %v", err)
+		t.Fatalf("original payload restore failed: err=%v got_bytes=%d want_bytes=%d", err, len(restored.Bytes), len(large))
 	}
 
 	// Echo the compacted history through the actual public ingress. Newly
@@ -128,6 +130,6 @@ func TestResponsesCompactionMonotonicOverHTTP(t *testing.T) {
 	}
 	restored, err = srv.restoreFromStash(trace, ref)
 	if err != nil || restored.Bytes != large {
-		t.Fatalf("later turn lost the original restore target: %v", err)
+		t.Fatalf("later turn lost the original restore target: err=%v got_bytes=%d want_bytes=%d", err, len(restored.Bytes), len(large))
 	}
 }
