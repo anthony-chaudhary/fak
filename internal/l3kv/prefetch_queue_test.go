@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -106,14 +107,20 @@ func (s *ctxAwareStore) inFlight() int { return int(atomic.LoadInt32(&s.current)
 
 func waitFor(t *testing.T, what string, within time.Duration, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(within)
-	for time.Now().Before(deadline) {
+	timeout := time.NewTimer(within)
+	defer timeout.Stop()
+	tick := time.NewTicker(2 * time.Millisecond)
+	defer tick.Stop()
+	for {
 		if cond() {
 			return
 		}
-		time.Sleep(2 * time.Millisecond)
+		select {
+		case <-tick.C:
+		case <-timeout.C:
+			t.Fatalf("timed out waiting for %s", what)
+		}
 	}
-	t.Fatalf("timed out waiting for %s", what)
 }
 
 // fak-test:runtime fast est=300ms lane=default
@@ -166,41 +173,50 @@ func TestRestorePrefetchPermitTimeoutFallback(t *testing.T) {
 	})
 
 	t.Run("concurrent read permits cap in-flight reads", func(t *testing.T) {
-		store := newGateStore(map[string][]byte{"a": []byte("A"), "b": []byte("B")})
-		gateA, gateB := make(chan struct{}), make(chan struct{})
-		store.setGate("a", gateA)
-		store.setGate("b", gateB)
-		pq := NewPrefetchQueue(store, PrefetchConfig{Timeout: 5 * time.Second, MaxConcurrentReads: 1})
-		t.Cleanup(pq.Stop)
+		synctest.Test(t, func(t *testing.T) {
+			store := newGateStore(map[string][]byte{"a": []byte("A"), "b": []byte("B")})
+			gateA, gateB := make(chan struct{}), make(chan struct{})
+			releaseA := sync.OnceFunc(func() { close(gateA) })
+			releaseB := sync.OnceFunc(func() { close(gateB) })
+			store.setGate("a", gateA)
+			store.setGate("b", gateB)
+			pq := NewPrefetchQueue(store, PrefetchConfig{Timeout: 5 * time.Second, MaxConcurrentReads: 1})
+			t.Cleanup(func() {
+				releaseA()
+				releaseB()
+				pq.Stop()
+			})
 
-		if err := pq.Enqueue("a"); err != nil {
-			t.Fatalf("Enqueue(a) = %v", err)
-		}
-		if err := pq.Enqueue("b"); err != nil {
-			t.Fatalf("Enqueue(b) = %v", err)
-		}
-		waitFor(t, "first read admitted", 2*time.Second, func() bool {
-			return pq.Stats().InFlight == 1
+			if err := pq.Enqueue("a"); err != nil {
+				t.Fatalf("Enqueue(a) = %v", err)
+			}
+			if err := pq.Enqueue("b"); err != nil {
+				t.Fatalf("Enqueue(b) = %v", err)
+			}
+			// All workers have run to their gates. The second read must still
+			// be queued while the first holds the only permit.
+			synctest.Wait()
+			if st := pq.Stats(); st.InFlight != 1 || st.Queued != 2 || store.inFlight() != 1 {
+				t.Fatalf("while first read held: stats=%+v store in-flight=%d, want 1 read and 2 unsettled entries", st, store.inFlight())
+			}
+
+			releaseA()
+			synctest.Wait()
+			if st := pq.Stats(); st.InFlight != 1 || st.Completed != 1 {
+				t.Fatalf("after first release: %+v, want second read held and first completed", st)
+			}
+			releaseB()
+			synctest.Wait()
+			if st := pq.Stats(); st.InFlight != 0 || st.Completed != 2 {
+				t.Fatalf("after both releases: %+v, want both reads completed", st)
+			}
+			if got := store.peakConcurrency(); got != 1 {
+				t.Fatalf("peak concurrent reads = %d, want 1 (permit cap)", got)
+			}
+			if p, found, err := pq.Restore(context.Background(), "b"); err != nil || !found || !bytes.Equal(p, []byte("B")) {
+				t.Fatalf("Restore(b) = (%q, %v, %v), want staged hit", p, found, err)
+			}
 		})
-
-		// While the single permit is held by read "a", read "b" must queue,
-		// not start: in-flight stays at exactly 1.
-		time.Sleep(50 * time.Millisecond)
-		if got := pq.Stats().InFlight; got != 1 {
-			t.Fatalf("InFlight while permit held = %d, want 1", got)
-		}
-
-		close(gateA)
-		close(gateB) // b may start only after a releases the single permit
-		waitFor(t, "both reads to finish", 2*time.Second, func() bool {
-			return pq.Stats().InFlight == 0 && pq.Stats().Completed == 2
-		})
-		if got := store.peakConcurrency(); got != 1 {
-			t.Fatalf("peak concurrent reads = %d, want 1 (permit cap)", got)
-		}
-		if p, found, err := pq.Restore(context.Background(), "b"); err != nil || !found || !bytes.Equal(p, []byte("B")) {
-			t.Fatalf("Restore(b) = (%q, %v, %v), want staged hit", p, found, err)
-		}
 	})
 
 	t.Run("zero permits disable read ahead", func(t *testing.T) {
@@ -251,38 +267,65 @@ func TestRestorePrefetchPermitTimeoutFallback(t *testing.T) {
 	})
 
 	t.Run("stop cancels queued reads", func(t *testing.T) {
-		store := newGateStore(map[string][]byte{"a": []byte("A"), "b": []byte("B")})
-		gateA, gateB := make(chan struct{}), make(chan struct{})
-		store.setGate("a", gateA)
-		store.setGate("b", gateB)
-		pq := NewPrefetchQueue(store, PrefetchConfig{Timeout: 5 * time.Second, MaxConcurrentReads: 1})
+		synctest.Test(t, func(t *testing.T) {
+			store := newGateStore(map[string][]byte{"a": []byte("A"), "b": []byte("B")})
+			gateA, gateB := make(chan struct{}), make(chan struct{})
+			releaseA := sync.OnceFunc(func() { close(gateA) })
+			releaseB := sync.OnceFunc(func() { close(gateB) })
+			store.setGate("a", gateA)
+			store.setGate("b", gateB)
+			pq := NewPrefetchQueue(store, PrefetchConfig{Timeout: 5 * time.Second, MaxConcurrentReads: 1})
+			t.Cleanup(func() {
+				releaseA()
+				releaseB()
+				pq.Stop()
+			})
 
-		if err := pq.Enqueue("a"); err != nil {
-			t.Fatalf("Enqueue(a) = %v", err)
-		}
-		waitFor(t, "read a admitted onto the single permit", 2*time.Second, func() bool {
-			return pq.Stats().InFlight == 1
+			if err := pq.Enqueue("a"); err != nil {
+				t.Fatalf("Enqueue(a) = %v", err)
+			}
+			synctest.Wait()
+			if st := pq.Stats(); st.InFlight != 1 || store.inFlight() != 1 {
+				t.Fatalf("read a not held on the single permit: %+v", st)
+			}
+			// b queues behind the held permit and must never enter Store.Get.
+			if err := pq.Enqueue("b"); err != nil {
+				t.Fatalf("Enqueue(b) = %v", err)
+			}
+
+			stopped := make(chan struct{})
+			go func() {
+				pq.Stop()
+				close(stopped)
+			}()
+			synctest.Wait()
+			if pq.readCtx.Err() == nil {
+				t.Fatal("Stop did not cancel the queue read context")
+			}
+			select {
+			case <-stopped:
+				t.Fatal("Stop returned before the held I/O completed")
+			default:
+			}
+
+			releaseA()
+			synctest.Wait()
+			select {
+			case <-stopped:
+			default:
+				t.Fatal("Stop did not return after the held I/O completed")
+			}
+
+			if err := pq.Enqueue("b"); !errors.Is(err, ErrPrefetchStopped) {
+				t.Fatalf("post-Stop Enqueue = %v, want ErrPrefetchStopped", err)
+			}
+			if _, _, err := pq.Restore(context.Background(), "b"); !errors.Is(err, ErrPrefetchStopped) {
+				t.Fatalf("post-Stop Restore = %v, want ErrPrefetchStopped", err)
+			}
+			if got := pq.Stats().InFlight; got != 0 {
+				t.Fatalf("InFlight after Stop = %d, want 0", got)
+			}
 		})
-		// b queues behind the held permit: it cannot start, so its
-		// cancellation by Stop is deterministic.
-		if err := pq.Enqueue("b"); err != nil {
-			t.Fatalf("Enqueue(b) = %v", err)
-		}
-
-		// The in-flight read a keeps its permit until the I/O returns;
-		// Stop returns only once that I/O has.
-		go func() { time.Sleep(50 * time.Millisecond); close(gateA) }()
-		pq.Stop()
-
-		if err := pq.Enqueue("b"); !errors.Is(err, ErrPrefetchStopped) {
-			t.Fatalf("post-Stop Enqueue = %v, want ErrPrefetchStopped", err)
-		}
-		if _, _, err := pq.Restore(context.Background(), "b"); !errors.Is(err, ErrPrefetchStopped) {
-			t.Fatalf("post-Stop Restore = %v, want ErrPrefetchStopped", err)
-		}
-		if got := pq.Stats().InFlight; got != 0 {
-			t.Fatalf("InFlight after Stop = %d, want 0", got)
-		}
 	})
 
 	t.Run("memory cap drops oversized staged payloads", func(t *testing.T) {
