@@ -2274,3 +2274,40 @@ lines and labels only. No upstream source code is copied; the adaptation is
 witnessed by `TestKeysetScopeGrantsExactAndReloadCloses` in
 `internal/gateway/key_scope_test.go`. The upstream Apache-2.0 license is
 reproduced in the TensorFold benchmark evidence section above.
+
+## TensorFold HTTP request-rate token-bucket admission
+
+`internal/gateway/request_rate_bucket.go` (`RateBucketPolicy`,
+`RequestRateGate`, `RateLease`, `SetRequestRateGate` /
+`LiveRequestRateGate`) and its served-path wiring in
+`internal/gateway/admission_server.go` (`beginServedAdmission`) adapt the
+per-principal request-rate token buckets from TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/server/request_admission.zig#L111
+
+The adapted contract: credit is integer ns-tokens on a monotonic clock (one
+request is one second's worth of credit), capacity equals the burst — the
+rate unless an explicit request_burst is supplied — and a fresh bucket starts
+full; replenish adds elapsed × rate ns-tokens capped at capacity so credit
+never exceeds capacity; credit below the requested tokens refuses with the
+rate class and a whole-second retry-after hint (>= 1) exact against the gate's
+clock; a bounded table of distinct principals (default 128 slots) refuses a
+new principal beyond the bound with its own class until an idle-full bucket
+can be swept; and a rate <= 0 disables the gate entirely (admit freely, no
+credit accounting).
+
+Changed for Fak: idiomatic Go re-expression over fak's existing
+token-admission seam — each bucket's liveness rides an inert `TokenRateGate`
+carrier whose live-reservation count lets the idle sweep reclaim seats without
+forgiving budget, sentinel errors (`ErrRequestRateLimited`,
+`ErrRequestRateCapacity` under one parent `ErrRequestRate`) instead of Zig
+error unions, and a live gate registry consulted first by
+`beginServedAdmission`, ahead of the request-count inflight gate: the
+one-token debit stands once admitted and a later-stage refusal cancels it
+(the provider was never called), with the seat riding the request's single
+lease-release path through the `TokenReservation` linked chain. No upstream
+source code is copied; the adaptation is witnessed by
+`TestRequestRateBucketRefusals` in
+`internal/gateway/request_rate_bucket_test.go`. The upstream Apache-2.0
+license is reproduced in the TensorFold benchmark evidence section above.
+

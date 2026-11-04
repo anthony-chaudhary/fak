@@ -333,14 +333,18 @@ func (s *Server) admitStreamedTurn(ctx context.Context, w http.ResponseWriter, l
 }
 
 // beginServedAdmission is the served request's admission boundary, coarsest bound
-// first: the request-count inflight gate (LiveInflightGate, TensorFold borrow —
-// global/per-key caps on concurrent requests, consulted ahead of everything so a
-// request that cannot fit the node's inflight caps never queues or reserves) — then
-// the scheduler slot (admissionCtl, #35); a queued request must not hold token budget
-// while it waits — then the caller's OWN per-principal allotment (principalTokenRates,
-// #5379), then the shared provider token window (tokenRateGate, #2019). A shed at any
-// stage frees everything the earlier stages granted. With no gate attached it is inert
-// (nil lease, nil error) and the request path is byte-for-byte historical.
+// first: the per-principal request-rate bucket (LiveRequestRateGate, TensorFold borrow —
+// integer ns-token credit on a monotonic clock, consulted ahead of EVERYTHING so a
+// request arriving faster than its principal's rate is shed before it can queue, hold,
+// or reserve; the one-token debit stands once admitted and a later-stage refusal
+// cancels it) — then the request-count inflight gate (LiveInflightGate, TensorFold
+// borrow — global/per-key caps on concurrent requests, consulted ahead of the rest so a
+// request that cannot fit the node's inflight caps never queues or reserves) — then the
+// scheduler slot (admissionCtl, #35); a queued request must not hold token budget while
+// it waits — then the caller's OWN per-principal allotment (principalTokenRates, #5379),
+// then the shared provider token window (tokenRateGate, #2019). A shed at any stage
+// frees everything the earlier stages granted. With no gate attached it is inert (nil
+// lease, nil error) and the request path is byte-for-byte historical.
 //
 // The per-principal allotment is checked BEFORE the shared provider window on purpose: a
 // tenant already over its own cap must be shed without first reserving — and briefly
@@ -354,6 +358,22 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 	var onQueued func()
 	if len(queuedObserver) > 0 {
 		onQueued = queuedObserver[0]
+	}
+	// The per-principal request-rate bucket (TensorFold borrow) is consulted FIRST —
+	// coarser than even the request-count inflight gate: a host-level arrival-rate bound
+	// sheds before any hold is taken, so a refusal here frees nothing. The one-token
+	// debit stands once admitted (the request consumed rate budget at admission); a
+	// later-stage refusal CANCELS it (the provider was never called), and the seat rides
+	// the request's single lease-release path like the inflight hold. A nil live gate
+	// leaves the request path byte-for-byte historical.
+	var rateHold *RateLease
+	if rg := LiveRequestRateGate(); rg != nil {
+		p := principalFromContext(ctx)
+		var err error
+		rateHold, err = rg.Take(p, 1)
+		if err != nil {
+			return nil, &AdmissionError{Verdict: VerdictShed, Reason: rateShedReason(err)}
+		}
 	}
 	s.admissionMu.RLock()
 	c := s.admissionCtl
@@ -372,11 +392,11 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 		}
 		return nil, err
 	}
-	if c == nil && g == nil && b == nil && ig == nil {
+	if c == nil && g == nil && b == nil && ig == nil && rateHold == nil {
 		return nil, nil
 	}
-	// The request-count inflight gate (TensorFold borrow) is consulted FIRST — the
-	// coarsest bound, ahead of the scheduler slot: a request that cannot even fit the
+	// The request-count inflight gate (TensorFold borrow) is consulted ahead of the
+	// scheduler slot — the coarsest COUNT bound: a request that cannot even fit the
 	// node's inflight caps must not queue, reserve a slot, or touch any tenant budget.
 	// TensorFold keys its per-key caps by the verified key digest — the request's
 	// principal; fak's authenticated principal IS the keyset-bound identity, so both
@@ -387,6 +407,7 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 		var err error
 		hold, err = ig.Acquire(p, p)
 		if err != nil {
+			rateHold.Cancel() // nil-safe: refund the rate token — the provider was never called
 			return nil, &AdmissionError{Verdict: VerdictShed, Reason: inflightShedReason(err)}
 		}
 	}
@@ -412,7 +433,8 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 			lease, err = acquireObserved(ctx, c, req, onQueued)
 		})
 		if err != nil {
-			hold.Release() // nil-safe: free the inflight hold charging nothing
+			rateHold.Cancel() // nil-safe: refund the rate token — the provider was never called
+			hold.Release()    // nil-safe: free the inflight hold charging nothing
 			return nil, err
 		}
 	}
@@ -424,8 +446,9 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 		// its single shared allotment rather than to a fresh (bypassable) one.
 		res, err = b.Admit(principalFromContext(ctx), estimate)
 		if err != nil {
-			hold.Release()  // nil-safe: free the inflight hold charging nothing
-			lease.Release() // nil-safe: free the scheduler slot this tenant's cap refused to feed
+			rateHold.Cancel() // nil-safe: refund the rate token — the provider was never called
+			hold.Release()    // nil-safe: free the inflight hold charging nothing
+			lease.Release()   // nil-safe: free the scheduler slot this tenant's cap refused to feed
 			return nil, err
 		}
 	}
@@ -435,6 +458,7 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 			// The provider window refused, so the provider is never called: cancel (charge
 			// nothing) rather than Release (charge the estimate) the allotment this tenant
 			// held for one instant — a neighbour's saturation must not spend its budget.
+			rateHold.Cancel() // nil-safe: refund the rate token — the provider was never called
 			res.cancel()
 			hold.Release() // nil-safe: free the inflight hold charging nothing
 			lease.Release()
@@ -468,6 +492,25 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 			lease.tokenRes = hold.head
 		}
 	}
+	// Tie the rate seat's release to the SAME single lease-release path as the inflight
+	// hold: the request consumed rate budget at admission, so the seat lives until the
+	// request's lease releases (a later-stage refusal already cancelled it above, which
+	// is idempotent against this release). Ride the linked chain when one exists, or
+	// become the lease's sole tokenRes when it does not.
+	if rateHold != nil {
+		tail := res
+		for tail != nil && tail.linked != nil {
+			tail = tail.linked
+		}
+		if tail != nil {
+			tail.linked = rateHold.head
+		} else {
+			if lease == nil {
+				lease = &AdmissionLease{}
+			}
+			lease.tokenRes = rateHold.head
+		}
+	}
 	return lease, nil
 }
 
@@ -486,6 +529,25 @@ func inflightShedReason(err error) string {
 		return "inflight principal capacity: request admission capacity reached; retry after the indicated interval"
 	default:
 		return "inflight admission refused"
+	}
+}
+
+// rateShedReason maps the live rate gate's closed refusal classes onto the shed reason a
+// client sees, naming WHICH class fired — the actionable difference between "you are
+// sending requests too fast, wait N seconds" and "the node's rate-table is full". The
+// wording follows the borrowed upstream operator messages; HTTP mapping stays 429
+// through admissionErrorStatus.
+func rateShedReason(err error) string {
+	switch {
+	case errors.Is(err, ErrRequestRateLimited):
+		if ra, ok := RetryAfterSeconds(err); ok {
+			return fmt.Sprintf("request rate limit: model request rate exceeded; retry after %d second(s)", ra)
+		}
+		return "request rate limit: model request rate exceeded; retry after the indicated interval"
+	case errors.Is(err, ErrRequestRateCapacity):
+		return "request rate principal capacity: request admission capacity reached; retry after the indicated interval"
+	default:
+		return "request rate admission refused"
 	}
 }
 
