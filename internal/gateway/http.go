@@ -782,6 +782,12 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	normalizeChatMaxTokens(&req)
 	req.AffinityKey = extractAffinityKey(r, req.AffinityKey)
+	// Dialect tool-normalization parity: fold the OpenAI chat tool catalog onto the
+	// same serving-input contract the Responses wire folds through, so every mounted
+	// dialect hands admission + the served core one normalized catalog (empty-name
+	// drop, first-wins dedupe, MCP legacy/canonical collapse). Capability checks stay
+	// per-dialect; only the serving input is shared.
+	req.Tools = normalizeServingToolDefs(req.Tools)
 	if !validateChatRequestIngress(w, req) {
 		return
 	}
