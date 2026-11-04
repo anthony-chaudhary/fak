@@ -138,7 +138,7 @@ func SelectV41EngramHostTablePlacement(req V41EngramHostTableRequest) (V41Engram
 	if layout == V41EngramHostTableSharded {
 		copies = req.Ranks
 	}
-	if copies > math.MaxInt64/req.TableBytes {
+	if int64(copies) > math.MaxInt64/req.TableBytes {
 		return V41EngramHostTablePlacement{}, fmt.Errorf("%w: copies=%d x table=%d overflows",
 			ErrV41EngramHostTableGeometry, copies, req.TableBytes)
 	}
