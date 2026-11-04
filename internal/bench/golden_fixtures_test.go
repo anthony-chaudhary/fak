@@ -51,18 +51,18 @@ type q4kGoldenProvenance struct {
 }
 
 type q4kGoldenCase struct {
-	Name     string `json:"name"`
-	Out      int    `json:"out"`
-	In       int    `json:"in"`
-	Width    int    `json:"width"`
-	InputHex string `json:"input_hex"`
+	Name      string `json:"name"`
+	Out       int    `json:"out"`
+	In        int    `json:"in"`
+	Width     int    `json:"width"`
+	InputHex  string `json:"input_hex"`
 	PackedHex string `json:"packed_hex"`
 }
 
 type q4kGoldenFixture struct {
-	Schema     string               `json:"schema"`
-	Provenance q4kGoldenProvenance  `json:"provenance"`
-	Cases      []q4kGoldenCase      `json:"cases"`
+	Schema     string              `json:"schema"`
+	Provenance q4kGoldenProvenance `json:"provenance"`
+	Cases      []q4kGoldenCase     `json:"cases"`
 }
 
 // q4kGoldenCaseShapes is the pinned coverage set: every width the runtime picker can emit
@@ -70,9 +70,9 @@ type q4kGoldenFixture struct {
 // structure. out%width != 0 in three of four cases because the short tail group is where
 // the offset math differs; in=512 in two cases proves multi-super-block bases.
 var q4kGoldenCaseShapes = []struct {
-	name         string
-	out, in      int
-	width        int
+	name    string
+	out, in int
+	width   int
 }{
 	{"width1-identity", 1, 256, 1},
 	{"width4-full-group-plus-tail", 5, 512, 4},
@@ -86,7 +86,7 @@ var q4kGoldenCaseShapes = []struct {
 // Go release.
 func q4kGoldenLCGByte(st *uint64) byte {
 	*st = *st*6364136223846793005 + 1442695040888963407
-	return byte(*st ^ (*st>>32))
+	return byte(*st ^ (*st >> 32))
 }
 
 // q4kGoldenF16Bits draws a finite half-precision value: sign random, exponent field held
@@ -153,7 +153,7 @@ func q4kGoldenReference(raw []byte, out, in, width int) []byte {
 		for b := 0; b < nblk; b++ {
 			base := groupStart + b*lanes*Q4KBlockBytes
 			for l := 0; l < lanes; l++ {
-				src := (g*width + l)*rowBytes + b*Q4KBlockBytes
+				src := (g*width+l)*rowBytes + b*Q4KBlockBytes
 				copy(packed[base+2*l:][:2], raw[src:src+2])
 				copy(packed[base+2*lanes+2*l:][:2], raw[src+2:src+4])
 				copy(packed[base+4*lanes+q4kScaleBytes*l:][:q4kScaleBytes], raw[src+4:src+q4kHeadBytes])
@@ -190,15 +190,15 @@ func buildQ4KGoldenFixture() q4kGoldenFixture {
 		Provenance: q4kGoldenProvenance{
 			Reference: "ggml-org/llama.cpp @ 571d0d540df04f25298d0e159e520d9fc62ed121, ggml/src/ggml-cpu/repack.cpp " +
 				"(repack_q4_K_to_q4_K_8_bl :3231, make_block_q4_Kx8 :2836, picker ggml_repack_get_optimal_repack_type ~:4520)",
-			SourceSHA:      "571d0d540df04f25298d0e159e520d9fc62ed121",
-			SourceSHA256:   "b3a1d6953fc61f2a4088337384166fb5102db617afe37a4b92f7cf07992a9f8a",
-			Fetched:        "2026-11-03",
+			SourceSHA:    "571d0d540df04f25298d0e159e520d9fc62ed121",
+			SourceSHA256: "b3a1d6953fc61f2a4088337384166fb5102db617afe37a4b92f7cf07992a9f8a",
+			Fetched:      "2026-11-03",
 			LayoutContract: "internal/bench/q4krepack.go LAYOUT block: rows grouped width at a time, per super-block " +
 				"[d x w][dmin x w][scales x w][qs byte j x w]; tail group truncated to remaining rows; pure byte permutation",
 			Divergence: "NOT byte-identical to upstream block_q4_Kx8: upstream 6-bit-repacks the scale fields across lanes, " +
 				"chunk-interleaves qs in 8-byte units, and refuses row counts not divisible by 8; fak keeps GGUF scale fields " +
 				"intact per lane and byte-interleaves qs so the resident dequant arithmetic is unchanged",
-			DerivationCmd:  "FAK_UPDATE_GOLDEN=1 go test ./internal/bench -run TestQ4KInterleaveGoldenFixtures -count=1",
+			DerivationCmd: "FAK_UPDATE_GOLDEN=1 go test ./internal/bench -run TestQ4KInterleaveGoldenFixtures -count=1",
 		},
 		Cases: cases,
 	}

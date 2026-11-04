@@ -40,22 +40,22 @@ const nvfp4SwizzleGoldenFixturePath = "testdata/nvfp4_swizzle_golden.json"
 const nvfp4SwizzleGoldenSchema = "fak.nvfp4-swizzle-golden.v1"
 
 type nvfp4SwizzleProvenance struct {
-	Reference    string `json:"reference"`
-	SourceSHA    string `json:"source_sha"`
-	HeaderSHA256 string `json:"header_sha256"`
-	KernelSHA256 string `json:"kernel_sha256"`
-	Fetched      string `json:"fetched"`
-	Formula      string `json:"formula"`
-	Padding      string `json:"padding_rule"`
+	Reference     string `json:"reference"`
+	SourceSHA     string `json:"source_sha"`
+	HeaderSHA256  string `json:"header_sha256"`
+	KernelSHA256  string `json:"kernel_sha256"`
+	Fetched       string `json:"fetched"`
+	Formula       string `json:"formula"`
+	Padding       string `json:"padding_rule"`
 	DerivationCmd string `json:"derivation_cmd"`
 }
 
 type nvfp4SwizzleCase struct {
-	Name       string `json:"name"`
-	Rows       int    `json:"rows"`
-	ScaleCols  int    `json:"scale_cols"`
-	InputHex   string `json:"input_hex"`
-	PackedHex  string `json:"packed_hex"`
+	Name      string `json:"name"`
+	Rows      int    `json:"rows"`
+	ScaleCols int    `json:"scale_cols"`
+	InputHex  string `json:"input_hex"`
+	PackedHex string `json:"packed_hex"`
 }
 
 type nvfp4SwizzleFixture struct {
@@ -68,8 +68,8 @@ type nvfp4SwizzleFixture struct {
 // fraction), exactly one 128x4 tile (no padding anywhere), and both axes padded at once
 // (row pad into the second tile row, column pad inside every tile).
 var nvfp4SwizzleCaseShapes = []struct {
-	name         string
-	rows, cols   int
+	name       string
+	rows, cols int
 }{
 	{"single-scale-padded-to-tile", 1, 1},
 	{"exact-single-tile", 128, 4},
@@ -121,12 +121,12 @@ func buildNVFP4SwizzleFixture() nvfp4SwizzleFixture {
 			Reference: "NVIDIA/TensorRT-LLM @ ecae3c97e2b646580415518a45a72bc5a5a67075, " +
 				"cpp/tensorrt_llm/kernels/quantization.h (QuantizationSFLayout::SWIZZLED) + " +
 				"cpp/tensorrt_llm/kernels/quantization.cu (block_scale_interleave_kernel)",
-			SourceSHA:    "ecae3c97e2b646580415518a45a72bc5a5a67075",
-			HeaderSHA256: "4a64db27f63ba18c790087bcae314ad9b3eec3f9ca1907cfe314faaf0c3594d7",
-			KernelSHA256: "141e4a222b0511bd568aebd0b72d3ff3d3aa6340f676eb215502aa512621318f",
-			Fetched:      "2026-11-03",
-			Formula:      "tilesK=PadUp(cols,4)/4; dst=((r/128)*tilesK+c/4)*512+(r%32)*16+((r%128)/32)*4+c%4",
-			Padding:      "out-of-range row or col writes zero; buffer is PadUp(rows,128)*PadUp(cols,4)",
+			SourceSHA:     "ecae3c97e2b646580415518a45a72bc5a5a67075",
+			HeaderSHA256:  "4a64db27f63ba18c790087bcae314ad9b3eec3f9ca1907cfe314faaf0c3594d7",
+			KernelSHA256:  "141e4a222b0511bd568aebd0b72d3ff3d3aa6340f676eb215502aa512621318f",
+			Fetched:       "2026-11-03",
+			Formula:       "tilesK=PadUp(cols,4)/4; dst=((r/128)*tilesK+c/4)*512+(r%32)*16+((r%128)/32)*4+c%4",
+			Padding:       "out-of-range row or col writes zero; buffer is PadUp(rows,128)*PadUp(cols,4)",
 			DerivationCmd: "FAK_UPDATE_GOLDEN=1 go test ./internal/compute -run TestNVFP4SwizzleGoldenFixtures -count=1",
 		},
 		Cases: cases,

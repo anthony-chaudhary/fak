@@ -256,11 +256,11 @@ func TestLaunchCensusModelShapeJSONFlag(t *testing.T) {
 // CLI path (normalization before math, both variants, text rendering).
 func TestLaunchCensusPresetTotals(t *testing.T) {
 	cases := []struct {
-		preset    string
-		looped    int
-		batched   int
-		expertL   int
-		expertB   int
+		preset  string
+		looped  int
+		batched int
+		expertL int
+		expertB int
 	}{
 		{"tiny-4", 72, 60, 6, 3},
 		{"glm-dsa", 3237, 1368, 24, 3},

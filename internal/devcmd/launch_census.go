@@ -75,9 +75,9 @@ const (
 // projection — today's documented regime) vs "batched" (lever 2: one dispatch
 // per projection across all active experts). "" = shared by both variants.
 const (
-	variantPerExpert   = "looped"
-	variantBatched  = "batched"
-	launchVariantShared   = ""
+	variantPerExpert    = "looped"
+	variantBatched      = "batched"
+	launchVariantShared = ""
 )
 
 // LaunchCallSite is one version-controlled inventory row. Pattern must occur
@@ -498,19 +498,19 @@ type LaunchCallSiteRow struct {
 
 // LaunchCensusResult is the full census payload (JSON form of the report).
 type LaunchCensusResult struct {
-	Schema                   string               `json:"schema"`
-	Root                     string               `json:"root"`
-	HeadSHA                  string               `json:"head_sha,omitempty"`
-	Shape                    LaunchShape          `json:"shape"`
-	TotalLooped              int                  `json:"total_launches_per_token_loop"`
-	TotalBatched             int                  `json:"total_launches_per_token_batched"`
-	DeltaBatchedVsLooped     int                  `json:"delta_batched_vs_loop"`
-	ExpertPerMoELayerLooped  int                  `json:"expert_dispatch_per_moe_layer_loop"`
-	ExpertPerMoELayerBatched int                  `json:"expert_dispatch_per_moe_layer_batched"`
-	Sites                    []LaunchCallSiteRow  `json:"sites"`
-	Drift                    []LaunchDrift        `json:"drift"`
-	Uncovered                []LaunchUncovered    `json:"uncovered"`
-	CrossCheck               *GlueCrossCheckRes   `json:"cross_check,omitempty"`
+	Schema                   string              `json:"schema"`
+	Root                     string              `json:"root"`
+	HeadSHA                  string              `json:"head_sha,omitempty"`
+	Shape                    LaunchShape         `json:"shape"`
+	TotalLooped              int                 `json:"total_launches_per_token_loop"`
+	TotalBatched             int                 `json:"total_launches_per_token_batched"`
+	DeltaBatchedVsLooped     int                 `json:"delta_batched_vs_loop"`
+	ExpertPerMoELayerLooped  int                 `json:"expert_dispatch_per_moe_layer_loop"`
+	ExpertPerMoELayerBatched int                 `json:"expert_dispatch_per_moe_layer_batched"`
+	Sites                    []LaunchCallSiteRow `json:"sites"`
+	Drift                    []LaunchDrift       `json:"drift"`
+	Uncovered                []LaunchUncovered   `json:"uncovered"`
+	CrossCheck               *GlueCrossCheckRes  `json:"cross_check,omitempty"`
 }
 
 const launchCensusUsage = `usage: fak-dev launch-census [--root DIR] [--preset NAME | --model-shape JSON] [--check [REF]] [--no-discover] [--snapshot PATH] [--json]
@@ -664,18 +664,18 @@ func RunLaunchCensus(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	result := LaunchCensusResult{
-		Schema:                 "fak.dev.launch-census.v1",
-		Root:                   root,
-		HeadSHA:                gitHeadSHA(root),
-		Shape:                  shape,
-		TotalLooped:            looped,
-		TotalBatched:           batched,
-		DeltaBatchedVsLooped:   batched - looped,
+		Schema:                   "fak.dev.launch-census.v1",
+		Root:                     root,
+		HeadSHA:                  gitHeadSHA(root),
+		Shape:                    shape,
+		TotalLooped:              looped,
+		TotalBatched:             batched,
+		DeltaBatchedVsLooped:     batched - looped,
 		ExpertPerMoELayerLooped:  expertDispatchPerMoELayer(launchCensusInventory, shape, variantPerExpert),
 		ExpertPerMoELayerBatched: expertDispatchPerMoELayer(launchCensusInventory, shape, variantBatched),
-		Drift:                  drift,
-		Uncovered:              uncovered,
-		CrossCheck:             xc,
+		Drift:                    drift,
+		Uncovered:                uncovered,
+		CrossCheck:               xc,
 	}
 	for _, s := range launchCensusInventory {
 		result.Sites = append(result.Sites, LaunchCallSiteRow{LaunchCallSite: s, Occurrences: occ[s.ID]})
