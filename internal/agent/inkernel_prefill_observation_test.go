@@ -233,3 +233,28 @@ func TestOwnedPrefillObservationBackendExclusions(t *testing.T) {
 		}
 	}
 }
+
+// fak-test:runtime fast est=1ms lane=default
+func TestTryOwnedPrefillObservationPreservesCaller(t *testing.T) {
+	p, other := &InKernelPlanner{}, &InKernelPlanner{}
+	calls := 0
+	ctx := p.WithOwnedPrefillObservation(context.Background(), func(int, int) func(bool) { calls++; return nil })
+	for _, target := range []*InKernelPlanner{p, other} {
+		got, ok := target.TryWithOwnedPrefillObservation(ctx, func(int, int) func(bool) { t.Fatal("replacement observer called"); return nil })
+		if ok || got != ctx {
+			t.Fatal("existing observer replaced")
+		}
+	}
+	p.beginOwnedPrefillObservation(ctx, 12, 0)
+	if calls != 1 {
+		t.Fatal(calls)
+	}
+	ctx, ok := p.TryWithOwnedPrefillObservation(context.Background(), func(int, int) func(bool) { calls++; return nil })
+	if !ok {
+		t.Fatal("empty context refused")
+	}
+	p.beginOwnedPrefillObservation(ctx, 12, 0)
+	if calls != 2 {
+		t.Fatal(calls)
+	}
+}
