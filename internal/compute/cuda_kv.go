@@ -183,6 +183,30 @@ type cudaKV struct {
 	Kraw   []dslice
 	V      []dslice
 	pos    []int
+
+	releaseRetained bool
+	releaseNext     *cudaKV
+}
+
+// cudaKVReleaseOwners is a process-lifetime quarantine for terminal-refused
+// releases. cudaMu protects this intrusive root and every retained link.
+var cudaKVReleaseOwners *cudaKV
+
+// retainReleaseOwnerLocked preserves existing device owners without allocating.
+// A caller may already have detached its KV handle before calling Free.
+func (k *cudaKV) retainReleaseOwnerLocked() {
+	if k.releaseRetained {
+		return
+	}
+	for _, rows := range [3][]dslice{k.K, k.Kraw, k.V} {
+		for _, row := range rows {
+			if row.ptr != nil {
+				k.releaseRetained = true
+				k.releaseNext, cudaKVReleaseOwners = cudaKVReleaseOwners, k
+				return
+			}
+		}
+	}
 }
 
 func (k *cudaKV) stride() int { return k.cfg.NumKVHeads * k.cfg.HeadDim }
@@ -499,9 +523,16 @@ func (c *cudaBackend) restoreContiguousKVFromHost(state KVHostSnapshot) (out KVS
 }
 
 // Free releases every layer's K/Kraw/V VRAM buffer and clears the position list.
+// A preexisting shared stop instead preserves and roots the complete owner;
+// native void free would refuse without communicating that outcome to Go.
+// This entry guard does not cover a terminal transition during a later free.
 func (k *cudaKV) Free() {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	if k.releaseRetained || cudaQ56KMMVQReleaseBlocked() {
+		k.retainReleaseOwnerLocked()
+		return
+	}
 	k.be.graphOnceInvalidateKVLocked(k)
 	releaseKVDeviceSlices(k.K, k.Kraw, k.V, &k.pos, func(d *dslice) {
 		releaseDeviceSlice(&d.ptr, &d.len, &d.cap, func(pointer unsafe.Pointer) { C.fcuda_free(pointer) })
