@@ -14,10 +14,10 @@ import (
 // pair but no shapes fails loudly instead of skipping silently.
 var roundTripShapes = map[string][]Shape{
 	"Q4_K": {
-		{Rows: 5, Cols: 256, Width: 1},  // identity width, one super-block per row
-		{Rows: 5, Cols: 512, Width: 4},  // two super-blocks, tail group of 1 row
-		{Rows: 3, Cols: 256, Width: 8},  // short tail group (3 rows mod 8)
-		{Rows: 8, Cols: 768, Width: 8},  // full 8-row groups, three super-blocks
+		{Rows: 5, Cols: 256, Width: 1}, // identity width, one super-block per row
+		{Rows: 5, Cols: 512, Width: 4}, // two super-blocks, tail group of 1 row
+		{Rows: 3, Cols: 256, Width: 8}, // short tail group (3 rows mod 8)
+		{Rows: 8, Cols: 768, Width: 8}, // full 8-row groups, three super-blocks
 	},
 	"NVFP4": {
 		{Rows: 1, Cols: 1},     // smallest legal payload, fully padded tile
@@ -46,7 +46,7 @@ func payloadBytes(family string, s Shape) []byte {
 	return b
 }
 
-// fak-test:runtime fast est=50ms lane=default
+// fak-test:runtime fast est=150ms lane=default
 func TestRegisteredTransformRoundTrip(t *testing.T) {
 	drove := 0
 	for _, c := range All() {
@@ -56,6 +56,22 @@ func TestRegisteredTransformRoundTrip(t *testing.T) {
 		shapes := roundTripShapes[c.Family]
 		if len(shapes) == 0 {
 			t.Fatalf("%s registers a transform pair but no round-trip shapes", c.Family)
+		}
+		resolved, err := Get(c.Family)
+		if err != nil {
+			t.Fatalf("Get(%q) refused a registered transform family: %v", c.Family, err)
+		}
+		lookups := []struct {
+			name      string
+			transform Transform
+		}{
+			{"Get", resolved.Transform},
+			{"Must", Must(c.Family).Transform},
+		}
+		for _, lookup := range lookups {
+			if !lookup.transform.Present() {
+				t.Fatalf("%s(%q) returned an incomplete transform pair", lookup.name, c.Family)
+			}
 		}
 		for _, s := range shapes {
 			raw := payloadBytes(c.Family, s)
@@ -79,6 +95,18 @@ func TestRegisteredTransformRoundTrip(t *testing.T) {
 			}
 			if !bytes.Equal(again, fwd) {
 				t.Fatalf("%s: Forward is not stable under a round trip at %v", c.Family, s)
+			}
+			// Lookups must preserve transform behavior, not just metadata and
+			// non-nil function fields.
+			for _, lookup := range lookups {
+				gotForward, err := lookup.transform.Forward(s, raw)
+				if err != nil || !bytes.Equal(gotForward, fwd) {
+					t.Fatalf("%s(%q): Forward(%v) differs from All: err=%v", lookup.name, c.Family, s, err)
+				}
+				gotInverse, err := lookup.transform.Inverse(s, fwd)
+				if err != nil || !bytes.Equal(gotInverse, back) {
+					t.Fatalf("%s(%q): Inverse(%v) differs from All: err=%v", lookup.name, c.Family, s, err)
+				}
 			}
 			drove++
 		}

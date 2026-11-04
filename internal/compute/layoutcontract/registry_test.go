@@ -37,10 +37,10 @@ func TestRegistryIntegrity(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Get(%q) refused a registered family: %v", c.Family, err)
 		}
-		if !reflect.DeepEqual(resolved, c) {
+		if !sameContractRegistration(resolved, c) {
 			t.Errorf("Get(%q) returned a different contract than the registry entry", c.Family)
 		}
-		if m := Must(c.Family); !reflect.DeepEqual(m, c) {
+		if m := Must(c.Family); !sameContractRegistration(m, c) {
 			t.Errorf("Must(%q) returned a different contract than the registry entry", c.Family)
 		}
 	}
@@ -50,6 +50,19 @@ func TestRegistryIntegrity(t *testing.T) {
 			t.Errorf("Get(%q) error = %v, want ErrUnknownFamily", bad, err)
 		}
 	}
+}
+
+// sameContractRegistration compares declarative fields and transform presence.
+// Non-nil function values are never deeply equal; their behavior is covered by
+// TestRegisteredTransformRoundTrip.
+func sameContractRegistration(a, b Contract) bool {
+	if (a.Transform.Forward == nil) != (b.Transform.Forward == nil) ||
+		(a.Transform.Inverse == nil) != (b.Transform.Inverse == nil) {
+		return false
+	}
+	a.Transform.Forward, a.Transform.Inverse = nil, nil
+	b.Transform.Forward, b.Transform.Inverse = nil, nil
+	return reflect.DeepEqual(a, b)
 }
 
 // fak-test:runtime fast est=20ms lane=default
