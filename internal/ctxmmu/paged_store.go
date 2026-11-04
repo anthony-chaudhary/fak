@@ -22,8 +22,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-
-	"github.com/anthony-chaudhary/fak/internal/numfmt"
 )
 
 const (
@@ -298,7 +296,7 @@ func envPositiveInt64(key string, def int64) int64 {
 
 func newDefaultPagedStore() *PagedStore {
 	maxBytes := envPositiveInt64("FAK_CTXMMU_STAGING_MAX_BYTES", DefaultPagedStoreMaxBytes)
-	maxEntries := numfmt.EnvPositiveInt("FAK_CTXMMU_STAGING_MAX_ENTRIES", DefaultPagedStoreMaxEntries)
+	maxEntries := envPositiveInt("FAK_CTXMMU_STAGING_MAX_ENTRIES", DefaultPagedStoreMaxEntries)
 	return NewPagedStore(maxBytes, maxEntries)
 }
 

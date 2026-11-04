@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,8 +28,6 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/canon"
-	"github.com/anthony-chaudhary/fak/internal/numfmt"
-	"github.com/anthony-chaudhary/fak/internal/refutil"
 )
 
 const (
@@ -94,7 +93,22 @@ type MMU struct {
 // FAK_BUDGET, FAK_NORMGATE): a tight box can shrink it, a high-memory server can raise it,
 // neither needs a recompile.
 func New() *MMU {
-	return NewWithLimit(numfmt.EnvPositiveInt("FAK_CTXMMU_MAX_HELD", DefaultMaxHeld))
+	return NewWithLimit(envPositiveInt("FAK_CTXMMU_MAX_HELD", DefaultMaxHeld))
+}
+
+// envPositiveInt reads key from the environment and parses it as a base-10
+// integer, returning def unless the value parses cleanly AND is strictly
+// positive. Local stand-in for numfmt.EnvPositiveInt: ctxmmu keeps its own
+// copy so the package's production import surface stays at the seams that
+// carry real contracts (abi, canon, toolcatalog) — debtwave2 coupling
+// reduction; behavior is byte-identical to the hoisted original.
+func envPositiveInt(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
 }
 
 var (
@@ -1218,6 +1232,22 @@ func putBytes(ctx context.Context, b []byte) (abi.Ref, bool) {
 	return abi.Ref{Kind: abi.RefInline, Inline: b, Len: int64(len(b))}, true
 }
 
+// refBytes returns inline bytes directly or materializes an external ref
+// through the active resolver. Missing resolvers and resolution failures
+// fail closed to nil. Local stand-in for refutil.Bytes (see envPositiveInt
+// for why the copy lives here).
+func refBytes(ctx context.Context, ref abi.Ref) []byte {
+	if ref.Kind == abi.RefInline {
+		return ref.Inline
+	}
+	if resolver := abi.ActiveResolver(); resolver != nil {
+		if body, err := resolver.Resolve(ctx, ref); err == nil {
+			return body
+		}
+	}
+	return nil
+}
+
 func extractOverride(ctx context.Context, c *abi.ToolCall) (string, bool) {
 	if c == nil {
 		return "", false
@@ -1229,7 +1259,7 @@ func extractOverride(ctx context.Context, c *abi.ToolCall) (string, bool) {
 			}
 		}
 	}
-	b := refutil.Bytes(ctx, c.Args)
+	b := refBytes(ctx, c.Args)
 	if len(b) > 0 {
 		var m map[string]any
 		if err := json.Unmarshal(b, &m); err == nil && m != nil {
