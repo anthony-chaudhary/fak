@@ -83,11 +83,16 @@ type q4kLoadOptions struct {
 	streamedExperts          bool
 	streamedExpertBytes      int64
 	streamedExpertDeviceRing int64
-	streamedDenseQ4K         bool
-	streamedDenseBytes       int64
-	streamedDenseBounded     bool
-	retainMTP                bool
-	prismGDNVGrouped         bool // checkpoint metadata, not a caller option
+	// expertPageCache is the resolved #1302 gate for the fused routed-expert path: when
+	// true, a shard whose reader carries a mapped region is carried on its descriptor and
+	// adopted by the checkpoint tier as a zero-copy read-through. Set by
+	// WithExpertPageCache; default (false) keeps the historical ReadAt path byte-for-byte.
+	expertPageCache      bool
+	streamedDenseQ4K     bool
+	streamedDenseBytes   int64
+	streamedDenseBounded bool
+	retainMTP            bool
+	prismGDNVGrouped     bool // checkpoint metadata, not a caller option
 	// nativeRowsOff disables the fak#13567 native-row route (qwen35NativeRowResident).
 	nativeRowsOff bool
 	// nativeSSMOutOff disables the tiled native out_proj route (qwen35TiledOutProjResident).
@@ -241,6 +246,19 @@ func WithStreamedExpertDeviceRing(bytes int64) Q4KLoadOption {
 	return func(o *q4kLoadOptions) { o.streamedExpertDeviceRing = bytes }
 }
 
+// WithExpertPageCache controls whether the R5 checkpoint tier adopts a shard's mapped
+// region for fused routed-expert faults (#1302): enabled, warm expert faults are served
+// zero-copy from the mmap; disabled (the default), every fault reads through the shard's
+// io.ReaderAt exactly as before. Mapping a shard stays the load-wide FAK_GGUF_MMAP storage
+// decision; this option is the narrower expert-path behavior change, so it needs its own
+// explicit opt-in. It replaces the retired FAK_EXPERT_PAGECACHE ambient read (#13605 leaf
+// A-cfg-int4): the decision is resolved once per load request and passed explicitly to
+// FusedExpertTensors and the checkpoint-tier construction instead of being cached in a
+// process-global sync.Once.
+func WithExpertPageCache(enabled bool) Q4KLoadOption {
+	return func(o *q4kLoadOptions) { o.expertPageCache = enabled }
+}
+
 // WithStreamedDenseQ4K leaves eligible identity-layout dense Q4_K tensors on disk. The returned model retains checkpoint range descriptors and requires the WeightSource to stay open.
 func WithStreamedDenseQ4K(enabled bool) Q4KLoadOption {
 	return func(o *q4kLoadOptions) { o.streamedDenseQ4K = enabled }
@@ -309,6 +327,9 @@ type Q4KLoadOptionEffects struct {
 	StreamedExpertBytes int64
 	// StreamedExpertDeviceRing is the declared device ring ceiling (WithStreamedExpertDeviceRing).
 	StreamedExpertDeviceRing int64
+	// ExpertPageCache reports that the option list requests the #1302 zero-copy expert
+	// read-through over a shard's mapped region (WithExpertPageCache); default off.
+	ExpertPageCache bool
 	// StreamedDenseQ4K reports that the option list requests the streamed DENSE k-quant tier, which
 	// likewise needs a checkpoint that outlives the model.
 	StreamedDenseQ4K bool
@@ -342,6 +363,7 @@ func ApplyQ4KLoadOptions(opts []Q4KLoadOption) Q4KLoadOptionEffects {
 		StreamedExperts:          o.streamedExperts,
 		StreamedExpertBytes:      o.streamedExpertBytes,
 		StreamedExpertDeviceRing: o.streamedExpertDeviceRing,
+		ExpertPageCache:          o.expertPageCache,
 		StreamedDenseQ4K:         o.streamedDenseQ4K,
 		StreamedDenseBytes:       o.streamedDenseBytes,
 		StreamedDenseBounded:     o.streamedDenseBounded,
@@ -744,11 +766,11 @@ func (s *WeightSource) QuantModelQ4KProfileOptionsContext(ctx context.Context, p
 	var expertTier *model.ExpertCheckpointTier
 	var streamed map[string]bool
 	if loadOpts.streamedExperts {
-		shards, err := s.FusedExpertTensors()
+		shards, err := s.FusedExpertTensors(opts...)
 		if err != nil {
 			return nil, err
 		}
-		expertTier, err = buildExpertCheckpointTier(shards, loadOpts.streamedExpertBytes)
+		expertTier, err = buildExpertCheckpointTier(shards, loadOpts.streamedExpertBytes, loadOpts.expertPageCache)
 		if err != nil {
 			return nil, err
 		}

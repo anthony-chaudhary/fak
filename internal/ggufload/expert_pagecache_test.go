@@ -5,8 +5,11 @@ package ggufload
 //
 // Three properties carry the rung, in order of how badly their reversal would hurt:
 //
-//   - The gate is a REAL gate. FAK_EXPERT_PAGECACHE must default OFF and honour only the documented
-//     truthy spellings, because an accidental "on" changes expert fault semantics on every load.
+//   - The gate is a REAL gate. WithExpertPageCache must default OFF and be honoured only when a
+//     load request passes it explicitly, because an accidental "on" changes expert fault semantics
+//     on every load. The retired FAK_EXPERT_PAGECACHE ambient read and its process-global
+//     sync.Once cache are gone (#13605 leaf A-cfg-int4): the decision now resolves once per load
+//     request from the caller's Q4K load options.
 //   - Adoption is exact-or-refused. A region that is not exactly the shard size, or is empty, must
 //     never be adopted; a wrong region would let the tier's offset arithmetic index outside the
 //     real mapping.
@@ -20,41 +23,21 @@ import (
 	"testing"
 )
 
-// TestExpertPageCacheEnabledEnv pins the default-OFF gate and the closed truthy vocabulary. The
-// pair is reset between cases because the decision is cached in a sync.Once per process, exactly
-// like FAK_GGUF_MMAP (gguf_mmap.go).
-func TestExpertPageCacheEnabledEnv(t *testing.T) {
-	for _, tc := range []struct {
-		value string
-		set   bool
-		want  bool
-	}{
-		{"1", true, true},
-		{"on", true, true},
-		{"true", true, true},
-		{"TRUE", true, true},
-		{" on ", true, true},
-		{"0", true, false},
-		{"off", true, false},
-		{"false", true, false},
-		{"yes", true, false},
-		{"", true, false},
-		{"", false, false},
-	} {
-		name := "unset"
-		if tc.set {
-			name = tc.value
-		}
-		t.Run(name, func(t *testing.T) {
-			resetExpertPageCacheEnv()
-			defer resetExpertPageCacheEnv()
-			if tc.set {
-				t.Setenv("FAK_EXPERT_PAGECACHE", tc.value)
-			}
-			if got := expertPageCacheEnabled(); got != tc.want {
-				t.Fatalf("FAK_EXPERT_PAGECACHE=%q (set=%v) -> enabled=%v, want %v", tc.value, tc.set, got, tc.want)
-			}
-		})
+// TestExpertPageCacheOptionResolves pins the default-OFF gate through the option seam that
+// replaced the retired FAK_EXPERT_PAGECACHE ambient read: no option means off, and an explicit
+// WithExpertPageCache(true) is the only way on.
+func TestExpertPageCacheOptionResolves(t *testing.T) {
+	if got := ApplyQ4KLoadOptions(nil).ExpertPageCache; got {
+		t.Fatal("no options enabled the expert page cache; the default must stay off")
+	}
+	if got := probeQ4KLoadOptions(nil).expertPageCache; got {
+		t.Fatal("zero-value options enabled the expert page cache; the default must stay off")
+	}
+	if got := ApplyQ4KLoadOptions([]Q4KLoadOption{WithExpertPageCache(true)}).ExpertPageCache; !got {
+		t.Fatal("WithExpertPageCache(true) did not enable the expert page cache")
+	}
+	if got := ApplyQ4KLoadOptions([]Q4KLoadOption{WithExpertPageCache(false)}).ExpertPageCache; got {
+		t.Fatal("WithExpertPageCache(false) left the expert page cache enabled")
 	}
 }
 
@@ -96,13 +79,11 @@ func TestExpertPageCacheAdoptionGates(t *testing.T) {
 
 // TestFusedExpertShardCarriesMappedData is the carriage witness. A WeightSource over a real
 // glm_moe_dsa fixture is given a fake mapped region (dataFor == the region) exactly the size of the
-// shard file; FusedExpertTensors must then hand back that SAME slice on shard.Data, which is what
-// licenses the model tier to adopt zero-copy. The region is garbage — it is never read here — which
-// is the point: carriage is a pointer/slice move, decided from the directory, never a payload scan.
+// shard file; FusedExpertTensors with WithExpertPageCache(true) must then hand back that SAME slice
+// on shard.Data, which is what licenses the model tier to adopt zero-copy. The region is garbage —
+// it is never read here — which is the point: carriage is a pointer/slice move, decided from the
+// directory, never a payload scan.
 func TestFusedExpertShardCarriesMappedData(t *testing.T) {
-	resetExpertPageCacheEnv()
-	t.Setenv("FAK_EXPERT_PAGECACHE", "1")
-	defer resetExpertPageCacheEnv()
 	path, _ := glmMoeDsaCheckpointFixture(t, TensorQ6_K)
 
 	f, gg, size, err := openAndRead(path)
@@ -123,7 +104,7 @@ func TestFusedExpertShardCarriesMappedData(t *testing.T) {
 		ws.dataFor[i] = mapped
 	}
 
-	shards, err := ws.FusedExpertTensors()
+	shards, err := ws.FusedExpertTensors(WithExpertPageCache(true))
 	if err != nil {
 		t.Fatalf("FusedExpertTensors: %v", err)
 	}
@@ -140,27 +121,27 @@ func TestFusedExpertShardCarriesMappedData(t *testing.T) {
 		t.Fatalf("carried region is %d bytes for a %d-byte shard", len(shards[0].Data), shards[0].Size)
 	}
 
-	// And the default (non-mmap) path stays nil: no dataFor, no adoption licence.
+	// And the default (non-mapped) source stays nil even with the gate on: no dataFor, no
+	// adoption licence.
 	ws.dataFor = nil
 	ws.data = nil
-	plain, err := ws.FusedExpertTensors()
+	plain, err := ws.FusedExpertTensors(WithExpertPageCache(true))
 	if err != nil {
-		t.Fatalf("FusedExpertTensors (default path): %v", err)
+		t.Fatalf("FusedExpertTensors (unmapped source): %v", err)
 	}
 	if len(plain) != 1 || plain[0].Data != nil {
-		t.Fatalf("the default os.Open path carried Data=%v; it must stay nil so ReadAt is preserved", plain[0].Data)
+		t.Fatalf("the unmapped source carried Data=%v; it must stay nil so ReadAt is preserved", plain[0].Data)
 	}
 	if _, ok := pageCacheAdoption(plain[0], true); ok {
-		t.Fatal("the default path was adopted as zero-copy despite carrying no mapped region")
+		t.Fatal("the unmapped source was adopted as zero-copy despite carrying no mapped region")
 	}
 }
 
-// TestFusedExpertShardGateOffCarriesNoData is the default-off half of the carriage witness: with
-// FAK_EXPERT_PAGECACHE unset, an mmap-backed source must still hand back Data=nil so no consumer can
-// adopt a zero-copy path the operator did not ask for. This is the byte-for-byte default.
+// TestFusedExpertShardGateOffCarriesNoData is the default-off half of the carriage witness: with no
+// WithExpertPageCache in the request, an mmap-backed source must still hand back Data=nil so no
+// consumer can adopt a zero-copy path the operator did not ask for. This is the byte-for-byte
+// default.
 func TestFusedExpertShardGateOffCarriesNoData(t *testing.T) {
-	resetExpertPageCacheEnv()
-	defer resetExpertPageCacheEnv()
 	path, _ := glmMoeDsaCheckpointFixture(t, TensorQ6_K)
 
 	f, gg, size, err := openAndRead(path)
@@ -187,7 +168,7 @@ func TestFusedExpertShardGateOffCarriesNoData(t *testing.T) {
 	if shards[0].Data != nil {
 		t.Fatal("gate off but the shard carried a mapped region; the expert path would change without an opt-in")
 	}
-	if _, ok := pageCacheAdoption(shards[0], expertPageCacheEnabled()); ok {
+	if _, ok := pageCacheAdoption(shards[0], false); ok {
 		t.Fatal("gate off but adoption still reported ok")
 	}
 }

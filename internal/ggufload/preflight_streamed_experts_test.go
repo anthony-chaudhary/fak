@@ -172,7 +172,7 @@ func TestPreflightStreamedExpertsRingUsesTierFloor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tier, err := buildExpertCheckpointTier(shards, 0)
+	tier, err := buildExpertCheckpointTier(shards, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}

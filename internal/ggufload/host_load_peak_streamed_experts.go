@@ -39,7 +39,7 @@ func (s *WeightSource) EstimateStreamedExpertHostLoadPeak(opts ...Q4KLoadOption)
 	if !o.streamedExperts || !o.streamedDenseBounded || o.expertShardSet {
 		return HostLoadPeak{}, fmt.Errorf("%w: streamed-expert host peak requires streamed experts with a bounded streamed-dense working set", ErrQ4KLoadEstimateUnsupported)
 	}
-	shards, err := s.FusedExpertTensors()
+	shards, err := s.FusedExpertTensors(opts...)
 	if err != nil {
 		return HostLoadPeak{}, err
 	}

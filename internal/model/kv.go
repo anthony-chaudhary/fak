@@ -42,7 +42,17 @@ type Session struct {
 	// Q4KGateUpOutputSlab explicitly enables the experimental session-owned Metal
 	// gate/up output slab. The default remains off until the measured KEEP gate lands.
 	Q4KGateUpOutputSlab bool
-	halKV               compute.KVStore
+	// PersistentDecodeDeviceKV explicitly enables the persistent whole-token decode
+	// device KV owner on this session's Metal Qwen3.5 sequence backend: when the panel
+	// walk ends, the device-resident KV triple is retained and each decode token
+	// attends on the device instead of re-uploading the host prefix. Default (false)
+	// keeps the historical detach-after-walk behavior byte-for-byte. It is the
+	// config-surface replacement for the retired FAK_QWEN35_PERSISTENT_DECODE_DKV
+	// ambient read (whose only opt-in token was "1"; #13605 leaf A-cfg-int4): the
+	// value is resolved once at session construction and every decode/prefill check
+	// consults this field instead of process environment.
+	PersistentDecodeDeviceKV bool
+	halKV                    compute.KVStore
 	// halKVPrecision is the device tier halKV was created at; f32 is the zero value.
 	halKVPrecision compute.KVPrecision
 	halLineage     tokenLineage

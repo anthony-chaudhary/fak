@@ -12,50 +12,19 @@ package ggufload
 // expert slabs specifically — the bytes the ladder exists to keep off the heap and out of a
 // second buffer.
 //
-// Default OFF, gate FAK_EXPERT_PAGECACHE. The gate is deliberately separate from (and narrower
-// than) FAK_GGUF_MMAP: mapping a shard is a load-wide storage decision, while adopting the map
-// on the expert path is the behaviour change that can alter expert fault semantics, so it needs
-// its own explicit opt-in. Unset, or any spelling other than the documented truthy set, keeps
-// the historical ReadAt path byte-for-byte — including on every platform without an mmap impl
-// (Windows), where data/dataFor are always nil and pageCacheAdoption therefore never fires.
+// Default OFF, gate WithExpertPageCache (quant_q4k_loader.go). The gate is deliberately separate
+// from (and narrower than) FAK_GGUF_MMAP: mapping a shard is a load-wide storage decision, while
+// adopting the map on the expert path is the behaviour change that can alter expert fault
+// semantics, so it needs its own explicit opt-in. The retired FAK_EXPERT_PAGECACHE ambient read
+// (#13605 leaf A-cfg-int4) cached its decision in a process-global sync.Once; the replacement is
+// resolved once per load request from the caller's Q4K load options and passed explicitly to
+// FusedExpertTensors and buildExpertCheckpointTier, so one load has one immutable adoption
+// contract even across split shards opened at different times. Unset options, or any request
+// without WithExpertPageCache(true), keep the historical ReadAt path byte-for-byte — including
+// on every platform without an mmap impl (Windows), where data/dataFor are always nil and
+// pageCacheAdoption therefore never fires.
 
-import (
-	"bytes"
-	"os"
-	"strings"
-	"sync"
-)
-
-// expertPageCacheOnce/expertPageCacheOn cache the FAK_EXPERT_PAGECACHE decision once per process,
-// mirroring the ggufMmapEnabled idiom (gguf_mmap.go) so loader goroutines never re-read process
-// environment and a single load has one immutable adoption contract even across split shards
-// opened at different times. Tests reset the pair directly (same package) to exercise both arms
-// in one process.
-var (
-	expertPageCacheOnce sync.Once
-	expertPageCacheOn   bool
-)
-
-// expertPageCacheEnabled reports the FAK_EXPERT_PAGECACHE opt-in. Only the documented truthy
-// spellings enable it; every other value (including unset) preserves the historical ReadAt path
-// byte-for-byte.
-func expertPageCacheEnabled() bool {
-	expertPageCacheOnce.Do(func() {
-		switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_EXPERT_PAGECACHE"))) {
-		case "1", "on", "true":
-			expertPageCacheOn = true
-		}
-	})
-	return expertPageCacheOn
-}
-
-// resetExpertPageCacheEnv clears the cached gate so a test can re-evaluate the environment in
-// one process. It is the package-local analogue of assigning ggufMmapOnce/ggufMmapOn directly
-// and is used the same way (see expert_pagecache_test.go).
-func resetExpertPageCacheEnv() {
-	expertPageCacheOnce = sync.Once{}
-	expertPageCacheOn = false
-}
+import "bytes"
 
 // pageCacheAdoption decides whether the model tier may adopt the zero-copy read-through path over
 // a shard's mapped region. It returns (data, true) only when the gate is on, the mapped region is

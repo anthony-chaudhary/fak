@@ -660,12 +660,6 @@ var admittedPostFreeze = []string{
 	// Relocates to: an agent --router flag.
 	"FAK_AGENT_ROUTER_ORIGIN",
 
-	// internal/model/qwen35_prefill_q4k.go — stamps source revision and artifact digest onto a
-	// prefill receipt. Provenance labels, not credentials.
-	// Relocates to: receipt provenance config passed by the caller.
-	"FAK_ARTIFACT_SHA256",
-	"FAK_SOURCE_REVISION",
-
 	// cmd/fak/serve_model_load.go — env spelling of the --backend selector.
 	// Relocates to: the existing `fak serve --backend` flag.
 	"FAK_BACKEND",
@@ -673,10 +667,6 @@ var admittedPostFreeze = []string{
 	// internal/model/batch_attn.go — split-K decode attention toggle.
 	// Relocates to: decode execution config.
 	"FAK_DECODE_SPLITK",
-
-	// internal/ggufload/expert_pagecache.go — expert page-cache toggle for MoE weight loading.
-	// Relocates to: loader config.
-	"FAK_EXPERT_PAGECACHE",
 
 	// internal/gateway/upstream_400_detail.go — opt-in exposure of scrubbed upstream 400 detail.
 	// Relocates to: gateway serve config.
@@ -714,10 +704,6 @@ var admittedPostFreeze = []string{
 	// cmd/fak/pi_launcher.go — skill-pack directory override for Pi launches.
 	// Relocates to: pi launcher config.
 	"FAK_PI_SKILLS",
-
-	// internal/model/metal_prefill_hybrid.go — persistent device-KV decode toggle.
-	// Relocates to: decode execution config.
-	"FAK_QWEN35_PERSISTENT_DECODE_DKV",
 
 	// internal/model/metal_prefill_hybrid_devicekv.go — existing Metal Qwen3.5 decode
 	// device-KV attention toggle (=0 forces the host-prefix attention). An A-B / rollback

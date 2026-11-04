@@ -61,7 +61,7 @@ type FusedExpertShard struct {
 	Fused  []model.FusedExpertTensor
 	// Data is the page-cache-visible mapped region backing this shard when the
 	// retained reader is a FAK_GGUF_MMAP memory map (gguf_mmap.go) and the
-	// FAK_EXPERT_PAGECACHE opt-in is on (expert_pagecache.go, issue #1302); nil
+	// WithExpertPageCache opt-in is on (expert_pagecache.go, issue #1302); nil
 	// on the default os.Open path and on every platform without an mmap impl,
 	// including Windows. It lets the model tier adopt a zero-copy read-through
 	// path over the mapped file, and its nil-ness preserves the historical
@@ -180,10 +180,17 @@ func (s *WeightSource) UnstageableRoutedExpertSlabs() ([]string, error) {
 // non-3-D expert slab, a dimension that overflows int, an expert tensor with no shard reader):
 // that is a corrupt checkpoint, not a decline, and reporting it here is cheaper than discovering it
 // mid-decode.
-func (s *WeightSource) FusedExpertTensors() ([]FusedExpertShard, error) {
+// FusedExpertTensors describes the checkpoint's fused routed-expert slabs. The optional
+// Q4K load options carry the resolved #1302 expert page-cache gate (WithExpertPageCache):
+// only when it is enabled does a shard whose reader carries a mapped region also carry that
+// region on its descriptor. Omitting the option keeps the historical ReadAt-only carriage
+// byte-for-byte (the retired FAK_EXPERT_PAGECACHE ambient read defaulted off; #13605 leaf
+// A-cfg-int4).
+func (s *WeightSource) FusedExpertTensors(opts ...Q4KLoadOption) ([]FusedExpertShard, error) {
 	if s == nil || s.File == nil {
 		return nil, nil
 	}
+	pageCacheOn := probeQ4KLoadOptions(opts).expertPageCache
 	cfg, err := s.File.Config()
 	if err != nil {
 		return nil, err
@@ -221,7 +228,7 @@ func (s *WeightSource) FusedExpertTensors() ([]FusedExpertShard, error) {
 		if i < len(s.readerFor) && s.readerFor[i] != nil {
 			r, size = s.readerFor[i], s.sizeFor[i]
 		}
-		if expertPageCacheEnabled() {
+		if pageCacheOn {
 			data = s.data
 			if i < len(s.dataFor) && s.dataFor[i] != nil {
 				data = s.dataFor[i]
@@ -258,8 +265,11 @@ func (s *WeightSource) FusedExpertTensors() ([]FusedExpertShard, error) {
 // HOST retention budget, and 0 — the default — means stream-through: every fault is read, handed to
 // the ring and dropped, which is the placement that makes a checkpoint larger than host RAM
 // servable at all. It returns nil (no error) when there is nothing to serve, so callers can treat
-// "this checkpoint has no streamable experts" as a plain absence.
-func buildExpertCheckpointTier(shards []FusedExpertShard, hostBytes int64) (*model.ExpertCheckpointTier, error) {
+// "this checkpoint has no streamable experts" as a plain absence. expertPageCache is the resolved
+// #1302 gate the caller's load request carried (WithExpertPageCache); it must agree with the gate
+// under which the shards were described, so both come from the same resolved option set rather
+// than being re-derived.
+func buildExpertCheckpointTier(shards []FusedExpertShard, hostBytes int64, expertPageCache bool) (*model.ExpertCheckpointTier, error) {
 	if len(shards) == 0 {
 		return nil, nil
 	}
@@ -269,7 +279,7 @@ func buildExpertCheckpointTier(shards []FusedExpertShard, hostBytes int64) (*mod
 		// fault is then served zero-copy instead of re-read from the device. A shard with no mapping
 		// (the default os.Open path, and every platform without an mmap impl) passes nil and takes the
 		// historical ReadAt path byte-for-byte.
-		data, _ := pageCacheAdoption(sh, expertPageCacheEnabled())
+		data, _ := pageCacheAdoption(sh, expertPageCache)
 		if err := tier.AddShardData(sh.Reader, sh.Size, data, sh.Fused); err != nil {
 			return nil, err
 		}
@@ -278,15 +288,19 @@ func buildExpertCheckpointTier(shards []FusedExpertShard, hostBytes int64) (*mod
 }
 
 // ExpertCheckpointTier builds an R5 checkpoint tier over THIS source's shard readers, or nil when
-// the checkpoint carries no fused expert slab the tier can serve.
+// the checkpoint carries no fused expert slab the tier can serve. The optional Q4K load options
+// carry the resolved #1302 expert page-cache gate (WithExpertPageCache), forwarded unchanged to
+// both the shard description and the tier construction; omitting them keeps the historical
+// ReadAt path byte-for-byte.
 //
 // The tier borrows the readers (see the file header): this source must outlive it, and every fault
 // fails after s.Close(). Callers that hand the tier to a model via Model.SetExpertCheckpoint own
 // that lifetime.
-func (s *WeightSource) ExpertCheckpointTier(hostBytes int64) (*model.ExpertCheckpointTier, error) {
-	shards, err := s.FusedExpertTensors()
+func (s *WeightSource) ExpertCheckpointTier(hostBytes int64, opts ...Q4KLoadOption) (*model.ExpertCheckpointTier, error) {
+	pageCacheOn := probeQ4KLoadOptions(opts).expertPageCache
+	shards, err := s.FusedExpertTensors(opts...)
 	if err != nil {
 		return nil, err
 	}
-	return buildExpertCheckpointTier(shards, hostBytes)
+	return buildExpertCheckpointTier(shards, hostBytes, pageCacheOn)
 }
