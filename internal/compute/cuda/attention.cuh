@@ -473,6 +473,11 @@ static int qwen38_causal_attention_panel_launch_simt(
 extern "C" int fak_qwen35_causal_attention_panel_f32(
     const float *dQ, const float *dK, const float *dV, float *dOut,
     int tokens, int prefix, int nH, int nKV, int hd, float scale) {
+  // A failed retirement has unknown completion: retain ownership and never retry or reuse.
+  if (g_cuda_cleanup_status != 0) return 52000 + g_cuda_cleanup_status;
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return 52000 + (int)cudaErrorNotReady;
+#endif
   // Any causal panel is admitted: the kernel bounds row t by prefix+t+1 itself,
   // so only the Qwen3.8 head geometry stays exact (matching the Go validator).
   if (!dQ || !dK || !dV || !dOut ||
@@ -508,12 +513,16 @@ extern "C" int fak_qwen35_causal_attention_panel_f32(
   bool splitReady = need <= g_splitkv_scratch_cap;
   if (!splitReady && !g_capture_open) {
     if (g_splitkv_scratch) {
+      cudaError_t retired = cudaFree(g_splitkv_scratch);
+      if (retired != cudaSuccess) {
+        if (g_cuda_cleanup_status == 0) g_cuda_cleanup_status = (int)retired;
+        return 52000 + g_cuda_cleanup_status;
+      }
       fak_alloc_untrack(g_splitkv_scratch);
-      cudaFree(g_splitkv_scratch);
     }
     g_splitkv_scratch = nullptr;
     g_splitkv_scratch_cap = 0;
-    cudaError_t e = cudaMalloc(&g_splitkv_scratch, need * sizeof(float));
+    cudaError_t e = fcuda_alloc_status(cudaMalloc(&g_splitkv_scratch, need * sizeof(float)));
     if (e != cudaSuccess || !g_splitkv_scratch) {
       fprintf(stderr, "fak-cuda: splitkv scratch cudaMalloc(%zu bytes) failed: %s\n",
               need * sizeof(float), cudaGetErrorString(e));
