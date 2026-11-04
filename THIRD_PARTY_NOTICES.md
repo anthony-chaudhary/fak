@@ -367,6 +367,32 @@ The pinned repository's root Apache-2.0 LICENSE
 in the existing "TensorFold benchmark evidence" license section of this file
 and also applies here.
 
+## TensorFold GDN segment-mark recurrent state
+
+`internal/compute/gdn_marks.go` adapts the markList/slotKernel discipline from
+TensorFold at revision `9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/deltanet_kernels.zig#L9
+plus the GDN recurrence context at
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/gdn.zig#L117
+
+The adapted contract: the GDN recurrent state is snapshotted into a bounded
+store at segment marks; a mark list keeps at most 4 ascending non-zero rows,
+each <= the segment's total row count, refusing empty, late, repeated or
+fifth marks; and tree state selects the narrowest slot kernel whose
+representable range holds the state's peak magnitude. In this codebase that
+lands as `GDNMarkList`, `GDNSlotKernel` / `SelectGDNSlotKernel` and
+`GDNMarkedRecurrence` beside the existing GDN dispatch seam
+(`Wave32GatedDeltaNetStep` / `tryDeltaNetSIMD`).
+
+Changed for Fak: idiomatic Go re-expression over fak's float32 recurrent-state
+buffers instead of Zig slices, sentinel errors instead of Zig error unions, a
+fixed IEEE-format slot ladder (E4M3/binary16/bfloat16/binary32) instead of
+Zig's device-dependent slot table, and defensive snapshot copies. No upstream
+source code is copied; the adaptation is witnessed by
+`TestGDNMarkListOrderAndSlotSelection` in
+`internal/compute/gdn_marks_test.go`. The upstream Apache-2.0 license is
+reproduced in the TensorFold benchmark evidence section above.
+
 ## vLLM chunkwise Qwen host Gated-DeltaNet
 
 `internal/model/qwen35_gdn_chunked_host.go` adapts the chunk-64 causal
