@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -641,6 +642,167 @@ func TestNativeStructuredMaskDeadEndAndStopSafety(t *testing.T) {
 	if err := c.accept(-1, effective); !errors.Is(err, ErrNativeStructuredNoToken) {
 		t.Fatalf("invalid selected token: got %v", err)
 	}
+}
+
+// fak-test:runtime fast est=50ms lane=default
+func TestNativeStructuredRequestLocalCarrier(t *testing.T) {
+	p := nativeStructuredTestPlanner(t)
+	stops := StopIDs(p.tok, p.m.Cfg)
+	formatB := json.RawMessage(`{"type":"json_schema","json_schema":{"strict":true,"schema":{"type":"object","properties":{"count":{"type":"integer","enum":[1,2]}},"required":["count"],"additionalProperties":false}}}`)
+
+	t.Run("all_tokens_masked_refuses_with_sentinel", func(t *testing.T) {
+		c, err := p.newNativeStructuredConstraint(nativeStructuredTestFormat, stops)
+		if err != nil {
+			t.Fatal(err)
+		}
+		deadEnd, err := p.tok.Encode("invalid")
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.history = deadEnd
+		logits := make([]float32, p.m.Cfg.VocabSize)
+		for i := range logits {
+			logits[i] = float32(i%7 + 1)
+		}
+		if _, err := c.maskLogits(logits, stops); !errors.Is(err, ErrNativeStructuredNoToken) {
+			t.Fatalf("masked vocabulary: got %v, want ErrNativeStructuredNoToken", err)
+		}
+	})
+
+	t.Run("concurrent_requests_never_cross_mask", func(t *testing.T) {
+		newConstraint := func(raw json.RawMessage) *nativeStructuredConstraint {
+			c, err := p.newNativeStructuredConstraint(raw, stops)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return c
+		}
+		// drive walks one request-local carrier to its stop token, always
+		// selecting the lowest admitted token ID.
+		drive := func(c *nativeStructuredConstraint) ([]int, error) {
+			var seq []int
+			for range 256 {
+				logits := make([]float32, p.m.Cfg.VocabSize)
+				for i := range logits {
+					logits[i] = 1
+				}
+				effective, err := c.maskLogits(logits, stops)
+				if err != nil {
+					return seq, err
+				}
+				next := -1
+				for id, value := range effective {
+					if nativeStructuredLogitFinite(value) && (next < 0 || id < next) {
+						next = id
+					}
+				}
+				if next < 0 {
+					return seq, ErrNativeStructuredNoToken
+				}
+				if err := c.accept(next, effective); err != nil {
+					return seq, err
+				}
+				seq = append(seq, next)
+				if next == c.stopID {
+					return seq, nil
+				}
+			}
+			return seq, errors.New("carrier did not reach its stop token")
+		}
+
+		soloA, err := drive(newConstraint(nativeStructuredTestFormat))
+		if err != nil {
+			t.Fatalf("solo walk A: %v", err)
+		}
+		soloB, err := drive(newConstraint(formatB))
+		if err != nil {
+			t.Fatalf("solo walk B: %v", err)
+		}
+		if slices.Equal(soloA, soloB) {
+			t.Fatalf("schemata A and B produced identical token walks; the test cannot witness separation")
+		}
+		decodeWalk := func(seq []int) string {
+			text, err := p.tok.Decode(seq[:len(seq)-1]) // drop the stop token
+			if err != nil {
+				t.Fatalf("decode %v: %v", seq, err)
+			}
+			return text
+		}
+		var answerA map[string]string
+		if err := json.Unmarshal([]byte(decodeWalk(soloA)), &answerA); err != nil || len(answerA) != 1 || (answerA["answer"] != "a" && answerA["answer"] != "b") {
+			t.Fatalf("walk A violates schema A: %q", decodeWalk(soloA))
+		}
+		var membersB map[string]any
+		if err := json.Unmarshal([]byte(decodeWalk(soloB)), &membersB); err != nil || len(membersB) != 1 {
+			t.Fatalf("walk B violates schema B: %q", decodeWalk(soloB))
+		}
+		if count, ok := membersB["count"].(float64); !ok || (count != 1 && count != 2) {
+			t.Fatalf("walk B violates schema B: %q", decodeWalk(soloB))
+		}
+
+		var (
+			wg      sync.WaitGroup
+			mu      sync.Mutex
+			failure string
+		)
+		record := func(detail string) {
+			mu.Lock()
+			if failure == "" {
+				failure = detail
+			}
+			mu.Unlock()
+		}
+		for range 4 { // fresh request-local carriers each round
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				got, err := drive(newConstraint(nativeStructuredTestFormat))
+				if err != nil || !slices.Equal(got, soloA) {
+					record(fmt.Sprintf("request A cross-masked: err=%v got %d tokens, want its solo walk of %d", err, len(got), len(soloA)))
+					return
+				}
+			}()
+			go func() {
+				defer wg.Done()
+				got, err := drive(newConstraint(formatB))
+				if err != nil || !slices.Equal(got, soloB) {
+					record(fmt.Sprintf("request B cross-masked: err=%v got %d tokens, want its solo walk of %d", err, len(got), len(soloB)))
+					return
+				}
+			}()
+			wg.Wait()
+			if failure != "" {
+				break
+			}
+		}
+		if failure != "" {
+			t.Fatal(failure)
+		}
+	})
+
+	t.Run("seeded_completion_deterministic_and_refusal_is_structured", func(t *testing.T) {
+		seed := int64(-17)
+		temperature := 0.8
+		topK, topP := 2, 0.8
+		opts := []SampleOpt{WithResponseFormat(nativeStructuredTestFormat), WithTemperature(&temperature), WithTopK(&topK), WithTopP(&topP), WithSeed(&seed)}
+		messages := []Message{{Role: RoleUser, Content: "Answer with the requested object."}}
+		first, err := p.Complete(context.Background(), messages, nil, opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		nativeStructuredCheckAnswer(t, first.Message.Content)
+		second, err := p.Complete(context.Background(), messages, nil, opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if second.Message.Content != first.Message.Content {
+			t.Fatalf("same-seed replay = %q, want %q", second.Message.Content, first.Message.Content)
+		}
+		unsupported := json.RawMessage(`{"type":"json_schema","json_schema":{"strict":true,"schema":{"type":"object","properties":{"answer":{"type":"string"},"nested":{"type":"object","properties":{},"additionalProperties":true}},"required":["answer"],"additionalProperties":false}}}`)
+		if _, err := p.Complete(context.Background(), messages, nil, WithResponseFormat(unsupported)); !errors.Is(err, ErrNativeStructuredUnsupported) {
+			t.Fatalf("unsupported schema refusal: got %v, want structured sentinel", err)
+		}
+	})
 }
 
 // fak-test:runtime fast est=20ms lane=default
