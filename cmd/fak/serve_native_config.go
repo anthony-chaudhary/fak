@@ -44,7 +44,7 @@ func registerNativeControlFlags(fs *flag.FlagSet) nativeControlFlags {
 		qwen35GDNSequence:     fs.Bool("native-qwen35-metal-gdn-sequence", false, "enable the experimental Qwen3.5 Metal GDN preprojected sequence path"),
 		q4kGateUpSlab:         fs.Bool("native-q4k-gateup-slab", false, "reuse the bounded Q4_K gate/up output slab within each native session"),
 		v41PrefillSumReadback: fs.Bool("native-v41-prefill-sum-readback", false, "enable experimental bounded DeepSeek V4.1 prefill routed-expert sum readback"),
-		kvPrecision:           fs.String("kv-precision", "", "KV cache storage tier: f32 (default, exact), q8_0 (host: f32 pre-RoPE K + q8_0 K/V; ~2x more context), or fp16/bf16 (--backend cuda: f32 pre-RoPE K + 16-bit K/V). Also settable via FAK_UP_KV_PRECISION."),
+		kvPrecision:           fs.String("kv-precision", "", "KV cache storage tier: fp16 (default on --backend cuda: f32 pre-RoPE K + 16-bit K/V halves KV bytes/token), f32 (default elsewhere, exact), q8_0 (host: f32 pre-RoPE K + q8_0 K/V; ~2x more context), or bf16 (--backend cuda: f32 pre-RoPE K + 16-bit K/V). Also settable via FAK_UP_KV_PRECISION."),
 		prefixProfile:         fs.String("native-prefix-profile", "", "write native prefix-cache operation profiles to this JSONL path"),
 		vulkanQ4KProfile:      fs.Bool("vulkan-q4k-profile", false, "enable Vulkan Q4_K timing profiles (requires a Vulkan backend)"),
 		vulkanStageQ4K:        fs.Bool("vulkan-stage-q4k", false, "use Vulkan host-visible Q4_K staging (requires a Vulkan backend)"),
@@ -92,7 +92,19 @@ func serveNativeControlConfig(sf *serveFlags) nativeControlConfig {
 	if sf.nativeGPULayers != nil {
 		gpuLayers = *sf.nativeGPULayers
 	}
+	// Resolve the KV tier once so the planner receives the same enum the
+	// validator accepted. An unset tier (flag and env both empty) then takes
+	// the serve default for this run's KV storage owner: fp16 on the CUDA
+	// store, the exact f32 zero value everywhere else.
 	prec, _ := resolveKVPrecisionValue(*sf.kvPrecision)
+	if prec == "" {
+		prec = defaultServeKVPrecisionForBackend(serveRequestedKVBackendName(sf))
+		if prec != "" {
+			// Publish the default like an explicit tier so the fit-estimator seam
+			// (serve_model_fit.go) charges the density the engine will realize.
+			_ = os.Setenv("FAK_UP_KV_PRECISION", string(prec))
+		}
+	}
 	var compactBudget int
 	if sf.nativeCompactHistoryBudget != nil {
 		compactBudget = *sf.nativeCompactHistoryBudget
@@ -128,6 +140,36 @@ func serveNativePlannerConfig(sf *serveFlags) agent.InKernelPlannerConfig {
 	return serveNativeControlConfig(sf).Planner
 }
 
+// defaultServeKVPrecisionForBackend names the KV tier an unset --kv-precision
+// resolves to for this serve's KV storage owner. The CUDA HAL store is the only
+// one that realizes 16-bit attended K/V (internal/compute/cuda_kv.go plus the
+// typed store/load/attention kernels in compute/cuda/kv_precision.cuh), so an
+// unset tier defaults to fp16 there - halving KV bytes/token at depth - and
+// keeps the historical exact-f32 zero value everywhere else (host, Metal, and
+// every other HAL store hold f32 rows). Depth parity vs f32 is owed to the
+// bench campaign, not claimed here.
+func defaultServeKVPrecisionForBackend(backend string) model.KVPrecision {
+	if backend == kvBackendCUDA {
+		return model.KVPrecisionFP16
+	}
+	return ""
+}
+
+// serveRequestedKVBackendName reports the device backend a serve run requests
+// before the registry lookup: an explicit --backend (including "auto") wins
+// FAK_BACKEND, mirroring resolveServeBackendSelection. Only the CUDA request
+// matters to the KV default; "auto" never selects the CUDA store.
+func serveRequestedKVBackendName(sf *serveFlags) string {
+	requested := ""
+	if sf != nil && sf.backendName != nil {
+		requested = strings.ToLower(strings.TrimSpace(*sf.backendName))
+	}
+	if requested == "" {
+		requested = strings.ToLower(strings.TrimSpace(os.Getenv("FAK_BACKEND")))
+	}
+	return serveKVBackendName(requested, false)
+}
+
 // resolveKVPrecisionValue maps the serve --kv-precision flag (with the documented
 // FAK_UP_KV_PRECISION env fallback) to a model.KVPrecision tier. An empty value
 // resolves to the exact f32 default; an unknown token is reported as parses=false so
@@ -139,7 +181,8 @@ func resolveKVPrecisionValue(flagValue string) (model.KVPrecision, bool) {
 	}
 	if raw == "" {
 		// Return the zero value so an unset tier leaves InKernelPlannerConfig
-		// byte-for-byte its historical zero. The planner reads "" as f32.
+		// byte-for-byte its historical zero. The planner reads "" as f32; the
+		// serve path alone applies defaultServeKVPrecisionForBackend on top.
 		return "", true
 	}
 	prec, err := model.ParseKVPrecision(raw)
@@ -154,8 +197,9 @@ func resolveKVPrecisionValue(flagValue string) (model.KVPrecision, bool) {
 }
 
 // validateServeKVPrecision refuses an unknown --kv-precision token at serve startup,
-// before any model load or listener bind, so a typo can never silently serve f32. An
-// empty value (flag and env unset) is valid and means the exact f32 default.
+// before any model load or listener bind, so a typo can never silently serve the
+// wrong tier. An empty value (flag and env unset) is valid and means the serve
+// default: fp16 on a CUDA backend, exact f32 elsewhere.
 func validateServeKVPrecision(flagValue string) error {
 	if _, ok := resolveKVPrecisionValue(flagValue); !ok {
 		raw := strings.TrimSpace(flagValue)
