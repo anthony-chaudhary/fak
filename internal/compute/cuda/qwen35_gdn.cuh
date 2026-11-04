@@ -946,6 +946,7 @@ static int qwen35_gdn_launch_status(int stage) {
 }
 
 #include "gdn_decode_vllm.cuh"
+#include "gdn_mtp_decode_vllm.cuh"
 
 // qwen35_gdn_fence is the capture-legal stream fence. Inside an open graph capture no
 // work has executed and a synchronize would invalidate the capture, so it returns success;
