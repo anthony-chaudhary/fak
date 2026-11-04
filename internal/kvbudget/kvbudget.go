@@ -226,7 +226,9 @@ var (
 // DeriveMaxBlocks sizes a paged KV pool from measured memory, adapting vLLM's
 // arithmetic (vllm/v1/worker/gpu_worker.py:621-625, vllm/v1/core/kv_cache_utils.py
 // @975dca5, Apache-2.0): available = floor(freeBytes*utilization) - nonKVBytes,
-// blocks = floor(available / bytesPerBlock).
+// blocks = floor(available / bytesPerBlock). The CUDA-graph pool footprint is
+// not charged here; DeriveMaxBlocksWithGraphReserve (graphmem.go) subtracts it
+// from the utilized budget alongside nonKVBytes before dividing.
 func DeriveMaxBlocks(freeBytes, nonKVBytes uint64, utilization float64, bytesPerBlock uint64) (int, error) {
 	if !(utilization > 0 && utilization <= 1) {
 		return 0, ErrUtilizationOutOfRange
