@@ -2146,6 +2146,35 @@ The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
 "TensorFold benchmark evidence" section above (same pinned repository and
 revision); they apply to this adaptation as well.
 
+## TensorFold strict-tool grammar (function.strict mark)
+
+`internal/agent/chat.go` (`ToolDefFunction.Strict`, its bool-only wire
+decode, and `AutoWantsGrammar`) adapts the strict-tool grammar from
+`zig/src/server/tool_grammar.zig:78` in TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/server/tool_grammar.zig
+
+The adapted contract: a JSON boolean `function.strict` (or the equivalent
+bare-tool strict mark) is the only shape that marks a tool; `false` and
+non-boolean shapes such as the string `"true"` decode without marking. Marked
+tools keep their parameter schema under `tool_choice: auto`, and an auto reply
+wants structured-grammar constraint only when at least one advertised tool
+carries the `strict: true` mark — mixed catalogs are decided by their marked
+tools, and an empty catalog wants none. Where structure support is missing,
+auto stays unconstrained.
+
+Changed for Fak: idiomatic Go on the existing `ToolDef` /
+`openAICompatibleTools` normalization seam in `internal/agent` instead of
+Zig's server-side tool-grammar admission; the mark rides request
+normalization byte-exact and is reported through `AutoWantsGrammar`. No
+upstream Zig code blocks are copied; the adaptation is witnessed by
+`TestToolDefStrictPreservedAndAutoWantsGrammar` in
+`internal/agent/chat_tool_strict_test.go`.
+
+The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
+"TensorFold benchmark evidence" section above (same pinned repository and
+revision); they apply to this adaptation as well.
+
 ## Splash bump-topology KV eviction
 
 `internal/kvmmu/eviction.go` (`RecencyClock`, `RecencyNode`, `RecencyOrder`,

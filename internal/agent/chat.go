@@ -263,6 +263,48 @@ type ToolDefFunction struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	Parameters  json.RawMessage `json:"parameters"` // JSON Schema
+	// Strict is the strict-tool mark (TensorFold tool_grammar.zig): only a JSON
+	// boolean true marks; false and non-bool shapes decode without marking.
+	Strict *bool `json:"strict,omitempty"`
+}
+
+// UnmarshalJSON captures the strict mark from a JSON boolean only, so wire
+// shapes like "strict":"true" are accepted without marking (upstream: s == .bool
+// and s.bool).
+func (f *ToolDefFunction) UnmarshalJSON(b []byte) error {
+	var aux struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description"`
+		Parameters  json.RawMessage `json:"parameters"`
+		Strict      json.RawMessage `json:"strict"`
+	}
+	if err := json.Unmarshal(b, &aux); err != nil {
+		return err
+	}
+	f.Name = aux.Name
+	f.Description = aux.Description
+	f.Parameters = aux.Parameters
+	var v any
+	if len(aux.Strict) > 0 && json.Unmarshal(aux.Strict, &v) == nil {
+		if marked, ok := v.(bool); ok {
+			mark := marked
+			f.Strict = &mark
+		}
+	}
+	return nil
+}
+
+// AutoWantsGrammar reports whether a tool_choice:auto reply over tools wants
+// structured-grammar constraint: true iff at least one tool carries the bool
+// strict:true mark. Marked tools keep their parameter schema under auto;
+// catalogs without structure support stay unconstrained.
+func AutoWantsGrammar(tools []ToolDef) bool {
+	for _, td := range tools {
+		if f := td.Function.Strict; f != nil && *f {
+			return true
+		}
+	}
+	return false
 }
 
 // Usage is the token accounting a completion reports.
