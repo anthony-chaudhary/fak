@@ -1576,5 +1576,49 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
   return 0;
 }
 
+// ---- MTP/speculative post-conv decode -----------------------------------------------
+// Replays a verification panel over the checkpoint carried state: accepted
+// positions advance the [head,key,value] FP32 state and snapshot it into their
+// destination pool slot; rejected positions leave the state and their output
+// row untouched. Pool slot 0 is the checkpoint and receives the post-panel
+// carried state. Selection extends the FAK_CUDA_GDN_POST_CONV=vllm gate with
+// the accepted-count bound; refusal declines without launching or touching
+// state. No GPU or throughput claim accompanies this seam.
+extern "C" int fcuda_qwen35_gdn_mtp_post_conv_f32(
+    const float *dConvOut, const float *dA, const float *dB,
+    const float *dALog, const float *dDtBias,
+    float *dStatePool, const float *dZ, const float *dNorm, float *dCore,
+    const int *dSnapshots,
+    int tokens, int accepted, int nK, int nV, int kHd, int vHd,
+    int convDim, float rmsEps) {
+  if (!dConvOut || !dA || !dB || !dALog || !dDtBias || !dStatePool || !dZ ||
+      !dNorm || !dCore || !dSnapshots || tokens < 1 || accepted < 0 ||
+      accepted > tokens || nK <= 0 || nV <= 0 || kHd <= 0 || vHd <= 0 ||
+      !(rmsEps > 0.0f) || !isfinite(rmsEps))
+    return -1;
+  // Existing decline path: env opt-in, capture exclusion, shape and
+  // accepted-count bounds. No launch, no state touch.
+  if (!fak_gdn_vllm_mtp::eligible_mtp(getenv("FAK_CUDA_GDN_POST_CONV"),
+      tokens, nK, nV, kHd, vHd, g_capture_open, accepted))
+    return -1;
+  cudaError_t stale = cudaGetLastError();
+  if (stale != cudaSuccess) {
+    fprintf(stderr, "fak-cuda: Qwen3.5 GDN MTP preflight found stale CUDA status: %s\n",
+        cudaGetErrorString(stale));
+    return qwen35_gdn_drain_after_error(10000 + (int)stale);
+  }
+  int status = fak_gdn_vllm_mtp::dispatch_mtp(dConvOut, dA, dB, dALog, dDtBias,
+      dStatePool, dZ, dNorm, dCore, tokens, nK, nV, convDim, rmsEps, dSnapshots);
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
+  cudaError_t completed = qwen35_gdn_fence();
+  if (completed != cudaSuccess) {
+    fprintf(stderr, "fak-cuda: Qwen3.5 GDN MTP asynchronous execution failed: %s\n",
+        cudaGetErrorString(completed));
+    return 70000 + (int)completed;
+  }
+  g_qwen35_gdn_operations++;
+  return 0;
+}
+
 extern "C" size_t fcuda_qwen35_gdn_operations(void) { return g_qwen35_gdn_operations; }
 extern "C" void fcuda_qwen35_gdn_operations_reset(void) { g_qwen35_gdn_operations = 0; }

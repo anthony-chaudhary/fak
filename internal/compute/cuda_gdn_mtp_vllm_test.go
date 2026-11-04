@@ -52,6 +52,60 @@ func TestCUDAGDNMTPVLLMPostConvHost(t *testing.T) {
 	}
 }
 
+// Pins the MTP form's selection gating: env opt-in, graph-capture exclusion,
+// shape eligibility and the accepted-count bound, executed as closed boolean
+// expectations against the production gate plus textual caller wiring.
+// fak-test:runtime fast est=3s lane=default
+func TestCUDAGDNMTPVLLMContract(t *testing.T) {
+	read := func(path string) string {
+		t.Helper()
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	mtp := read("cuda/gdn_mtp_decode_vllm.cuh")
+	for _, want := range []string{
+		"ae065918640a198a56f6f17eb45e251c3229fe41",
+		"SPDX-License-Identifier: Apache-2.0",
+		"csrc/gdn/fused_gdn_decode_kernel.cu",
+		"fused_gdn_decode_post_conv_mtp.py",
+		"cp.async.cg.shared.global", "cp.async.wait_all", "static_assert(",
+		"k_qwen35_gdn_mtp_post_conv_vllm", "fak_gdn_vllm_mtp",
+	} {
+		if !strings.Contains(mtp, want) {
+			t.Errorf("missing MTP port contract %q", want)
+		}
+	}
+	caller := read("cuda/qwen35_gdn.cuh")
+	if !strings.Contains(caller, `#include "gdn_mtp_decode_vllm.cuh"`) {
+		t.Fatal("MTP port is absent from the CUDA translation unit")
+	}
+	body := cudaFunctionBody(t, caller, "fcuda_qwen35_gdn_mtp_post_conv_f32")
+	start := strings.Index(body, `fak_gdn_vllm_mtp::eligible_mtp(getenv("FAK_CUDA_GDN_POST_CONV")`)
+	if start < 0 {
+		t.Fatal("MTP entry does not select through the extended gate")
+	}
+	arm := strings.Join(strings.Fields(body[start:]), " ")
+	if !strings.Contains(arm, "g_capture_open, accepted)") ||
+		!strings.Contains(arm, "return -1;") ||
+		!strings.Contains(arm, "status = fak_gdn_vllm_mtp::dispatch_mtp(dConvOut, dA, dB, dALog, dDtBias,") ||
+		!strings.Contains(arm, "if (status != 0) return qwen35_gdn_drain_after_error(status);") {
+		t.Fatal("MTP entry lost capture admission, the decline path or checked candidate completion")
+	}
+	const gateCut = "template <int ValueHeadsPerKeyHead>\n__global__ __launch_bounds__(kThreads, 1) void k_qwen35_gdn_mtp_post_conv_vllm("
+	gend := strings.Index(mtp, gateCut)
+	if gend < 0 || strings.Count(mtp, gateCut) != 1 {
+		t.Fatal("production MTP eligibility boundary missing")
+	}
+	out := gdnMTPCompileRun(t, t.TempDir(), "gdn_mtp_gate",
+		cudaGDNMTPHostPreamble+mtp[:gend]+"\n}\n"+cudaGDNMTPGateMain)
+	if strings.TrimSpace(out) != "PASS MTP selection gate booleans; CUDA/device/performance unrun" {
+		t.Fatalf("incomplete MTP gate witness: %s", out)
+	}
+}
+
 func gdnMTPCompiler(t *testing.T) string {
 	t.Helper()
 	for _, name := range []string{"c++", "g++"} {
@@ -606,6 +660,36 @@ int main() {
   dg.update(reinterpret_cast<const uint8_t*>(f.state.data()), 128 * 128 * sizeof(float));
   dg.update(reinterpret_cast<const uint8_t*>(f.out.data()), 8 * 128 * sizeof(float));
   std::printf("DIGEST-B %s\n", dg.hex().c_str());
+  return 0;
+}
+`
+
+const cudaGDNMTPGateMain = `
+int main() {
+  using fak_gdn_vllm_mtp::eligible_mtp;
+  // Env opt-in.
+  assert(eligible_mtp("vllm", 8, 1, 1, 128, 128, false, 8));
+  assert(!eligible_mtp(nullptr, 1, 1, 1, 128, 128, false, 1));
+  assert(!eligible_mtp("", 1, 1, 1, 128, 128, false, 1));
+  assert(!eligible_mtp("vllmx", 1, 1, 1, 128, 128, false, 1));
+  // An open graph capture refuses MTP selection.
+  assert(!eligible_mtp("vllm", 1, 1, 1, 128, 128, true, 1));
+  // Token counts outside 1..8 refuse.
+  for (int t : {0, 9}) assert(!eligible_mtp("vllm", t, 1, 1, 128, 128, false, 0));
+  // Head ratios beyond 1,2,3,4,8 refuse; eligible ratios admit.
+  for (int r : {5, 6, 7}) assert(!eligible_mtp("vllm", 1, 1, r, 128, 128, false, 1));
+  for (int r : {1, 2, 3, 4, 8}) assert(eligible_mtp("vllm", 1, 2, 2 * r, 128, 128, false, 1));
+  // Dimension and divisibility refusals.
+  assert(!eligible_mtp("vllm", 1, 1, 1, 127, 128, false, 1));
+  assert(!eligible_mtp("vllm", 1, 1, 1, 128, 129, false, 1));
+  assert(!eligible_mtp("vllm", 1, 0, 1, 128, 128, false, 1));
+  assert(!eligible_mtp("vllm", 1, 2, 3, 128, 128, false, 1));
+  // Accepted-count bound: 0..tokens admits, outside refuses.
+  assert(eligible_mtp("vllm", 8, 1, 1, 128, 128, false, 0));
+  assert(!eligible_mtp("vllm", 8, 1, 1, 128, 128, false, -1));
+  assert(!eligible_mtp("vllm", 8, 1, 1, 128, 128, false, 9));
+  assert(!eligible_mtp("vllm", 3, 1, 1, 128, 128, false, 4));
+  std::puts("PASS MTP selection gate booleans; CUDA/device/performance unrun");
   return 0;
 }
 `
