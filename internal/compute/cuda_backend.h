@@ -289,6 +289,16 @@ int fcuda_qwen35_gdn_sequence_f32(
     float *dQNorm, float *dKNorm, float *dCore,
     int hidden, int nK, int nV, int kHd, int vHd, int convKernel, float rmsEps);
 
+/* Experimental opt-in MTP post-convolution replay entry. This declaration
+ * exposes the native seam only; it does not advertise a backend capability. */
+int fcuda_qwen35_gdn_mtp_post_conv_f32(
+    const float *dConvOut, const float *dA, const float *dB,
+    const float *dALog, const float *dDtBias,
+    float *dStatePool, const float *dZ, const float *dNorm, float *dCore,
+    const int *dSnapshots,
+    int tokens, int accepted, int nK, int nV, int kHd, int vHd,
+    int convDim, float rmsEps);
+
 /* Lane-panel twin of fcuda_qwen35_gdn_decode_f32 for 2..8 independent one-token decode
  * lanes. dX/dOut and every scratch are row-major [lanes, width] panels; lane l reads and
  * updates only convStates[l] / recurrentStates[l]. Each projection weight row is streamed
