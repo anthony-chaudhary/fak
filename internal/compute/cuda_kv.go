@@ -502,7 +502,19 @@ func (k *cudaKV) SnapshotToHost() (KVHostSnapshot, error) {
 			// withholds the entire image but cannot undo a genuine earlier fence.
 			atomic.AddUint64(&k.be.fenceGen, 1)
 			if holder.conversion != nil {
-				C.fcuda_free(holder.conversion.ptr)
+				disposition := C.int(0)
+				status := int(C.fcuda_kv_snapshot_release_checked(holder.conversion.ptr, C.size_t(holder.conversion.n), &disposition))
+				if disposition == C.FCUDA_KV_SNAPSHOT_RETIRED {
+					// A native pool now owns this allocation, or physical free
+					// succeeded. Never retain it as a retryable conversion owner.
+					holder.conversion = nil
+					retired = true
+				}
+				if status != 0 || disposition != C.FCUDA_KV_SNAPSHOT_RETIRED {
+					// A zero status cannot certify an absent/malformed receipt.
+					status = int(C.fcuda_kv_snapshot_release_failed(C.int(status)))
+					return nil, k.snapshotFailureLocked("kv-snapshot-release", status)
+				}
 			}
 			retired = true
 		}

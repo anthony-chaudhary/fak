@@ -163,7 +163,7 @@ func TestCUDAKVSnapshotCheckedStatusContract(t *testing.T) {
 		for _, token := range []string{
 			"k.snapshotCopy = holder", "defer func()", "holder.pin.Pin(&out[0])",
 			"C.fcuda_kv_snapshot_load_checked(", "C.fcuda_kv_snapshot_d2h_checked(",
-			"copied = true", "atomic.AddUint64(&k.be.fenceGen, 1)", "C.fcuda_free(holder.conversion.ptr)", "retired = true",
+			"copied = true", "atomic.AddUint64(&k.be.fenceGen, 1)", "C.fcuda_kv_snapshot_release_checked(", "holder.conversion = nil", "retired = true",
 		} {
 			at := strings.Index(text, token)
 			if at <= last {
@@ -175,12 +175,15 @@ func TestCUDAKVSnapshotCheckedStatusContract(t *testing.T) {
 			"if copied {\n\t\t\t\t\tholder.pin.Unpin()",
 			"return nil, k.snapshotFailureLocked(\"kv-snapshot-convert\", status)",
 			"return nil, k.snapshotFailureLocked(\"kv-snapshot-d2h\", status)",
+			"if status != 0 || disposition != C.FCUDA_KV_SNAPSHOT_RETIRED {",
+			"C.fcuda_kv_snapshot_release_failed(C.int(status))",
+			"return nil, k.snapshotFailureLocked(\"kv-snapshot-release\", status)",
 		} {
 			if !strings.Contains(text, token) {
 				t.Fatalf("missing checked snapshot outcome %q", token)
 			}
 		}
-		if strings.Contains(text, "C.fcuda_d2h(") || strings.Contains(text, "defer C.fcuda_free(") {
+		if strings.Contains(text, "C.fcuda_d2h(") || strings.Contains(text, "defer C.fcuda_free(") || strings.Contains(text, "C.fcuda_free(holder.conversion.ptr)") {
 			t.Fatal("unchecked copy or unconditional scratch cleanup returned")
 		}
 	}
@@ -371,7 +374,7 @@ type Qwen35GDNKernelError struct { Stage string; Code int }
 func (*Qwen35GDNKernelError) Error() string { return "fixture kernel error" }
 type Qwen35GDNInvalidStateError struct { Operand string }
 func (*Qwen35GDNInvalidStateError) Error() string { return "fixture invalid buffer" }
-type cudaBuf struct { ptr unsafe.Pointer }
+type cudaBuf struct { ptr unsafe.Pointer; n int }
 type cudaBackend struct { fenceGen uint64; faultLatch *DeviceFaultLatch }
 var cudaMu sync.Mutex
 var nativeStop, queries, invalidations, copies, allocs, frees, otherNative int
@@ -381,6 +384,8 @@ var released []unsafe.Pointer
 var retainedHistory []*cudaKV
 var lastDestination unsafe.Pointer
 var copyPanic any
+var releaseCalls, failReleaseAt int
+var failReleaseStatus, failReleaseDisposition int32
 const copyFailureStatus = 1057
 const conversionFailureStatus = 17
 
@@ -393,7 +398,7 @@ func (*cudaBackend) dallocClass(bytes int, class MemoryClass, site string) *cuda
 	if class != MemoryScratchpad || site != "kv-snapshot-conversion" || bytes <= 0 || bytes%4 != 0 { panic("unexpected conversion geometry") }
 	allocs++
 	storage := make([]float32, bytes/4)
-	owner := &cudaBuf{ptr: unsafe.Pointer(&storage[0])}
+	owner := &cudaBuf{ptr: unsafe.Pointer(&storage[0]), n: bytes}
 	allocated = append(allocated, owner)
 	return owner
 }
@@ -412,6 +417,9 @@ var C = struct {
 	fcuda_kv_load_typed func(*float32, unsafe.Pointer, int32, int32) int32
 	fcuda_malloc_tagged func(uintptr, int32, int32) unsafe.Pointer
 	fcuda_free func(unsafe.Pointer)
+	fcuda_kv_snapshot_release_checked func(unsafe.Pointer, uintptr, *int32) int32
+	fcuda_kv_snapshot_release_failed func(int32) int32
+	FCUDA_KV_SNAPSHOT_RETIRED int32
 }{
 	int: func(v any) int32 { switch n := v.(type) { case int: return int32(n); case Dtype: return int32(n); default: panic("unexpected C integer") } },
 	double: func(v float64) float64 { return v },
@@ -442,9 +450,28 @@ var C = struct {
 	fcuda_kv_load_typed: func(*float32, unsafe.Pointer, int32, int32) int32 { otherNative++; panic("unexpected typed load") },
 	fcuda_malloc_tagged: func(uintptr, int32, int32) unsafe.Pointer { allocs++; panic("unexpected native allocation") },
 	fcuda_free: func(ptr unsafe.Pointer) { requireLock(); if nativeStop != 0 { panic("cleanup attempted after snapshot failure") }; frees++; released = append(released, ptr) },
+	FCUDA_KV_SNAPSHOT_RETIRED: 1,
+	fcuda_kv_snapshot_release_checked: func(ptr unsafe.Pointer, bytes uintptr, disposition *int32) int32 {
+		requireLock(); releaseCalls++; *disposition = 0
+		if nativeStop != 0 { return int32(nativeStop) }
+		if len(allocated) == 0 || allocated[len(allocated)-1].ptr != ptr || allocated[len(allocated)-1].n != int(bytes) { panic("wrong exact conversion release owner") }
+		status := int32(0); *disposition = 1
+		if releaseCalls == failReleaseAt { status = failReleaseStatus; *disposition = failReleaseDisposition }
+		if *disposition == 1 { frees++; released = append(released, ptr) }
+		if status != 0 { nativeStop = int(status) }
+		return status
+	},
+	fcuda_kv_snapshot_release_failed: func(status int32) int32 {
+		requireLock()
+		if nativeStop != 0 { return int32(nativeStop) }
+		if status == 0 { status = 1 }
+		nativeStop = int(status)
+		return status
+	},
 }
 
 func clearCounters() {
+	releaseCalls, failReleaseAt, failReleaseStatus, failReleaseDisposition = 0, 0, 0, 0
 	queries, invalidations, copies, allocs, frees, otherNative = 0, 0, 0, 0, 0, 0
 	loadCalls, copyCalls, conversions, failCopyAt, failConversionAt = 0, 0, 0, 0, 0
 	allocated, released, lastDestination, copyPanic = nil, nil, nil, nil
@@ -594,6 +621,42 @@ func TestKVConsumerHost(t *testing.T) {
 		}
 		runtime.GC()
 	})
+	for _, dtype := range []Dtype{F16, BF16} {
+		for _, tc := range []struct{name string; at int; status, disposition int32}{
+			{"retained-last", 4, 719, 0}, {"transferred-last", 4, 719, 1},
+			{"transferred-first", 1, 719, 1}, {"missing-receipt", 4, 0, 0},
+			{"malformed-receipt", 4, 0, 9}, {"error-malformed-receipt", 4, 719, 9},
+		} {
+			t.Run(fmt.Sprintf("release-%s-%d", tc.name, dtype), func(t *testing.T) {
+				k := fresh(dtype); before := snapshot(k)
+				if dtype == BF16 { k.be.faultLatch = NewDeviceFaultLatch("cuda", 1); before = snapshot(k) }
+				failReleaseAt, failReleaseStatus, failReleaseDisposition = tc.at, tc.status, tc.disposition
+				out, err := k.SnapshotToHost()
+				wantStatus := int(tc.status); if wantStatus == 0 { wantStatus = 1 }
+				op, ok := err.(*CUDAOpError)
+				if !ok || op.Op != "SnapshotToHost" || op.Site != "kv-snapshot-release" || op.Code != wantStatus || !reflect.DeepEqual(out, KVHostSnapshot{}) { t.Fatalf("cleanup lost status or published image: out=%+v err=%#v", out, err) }
+				wantCopies := 6; if tc.at == 1 { wantCopies = 1 }
+				wantFrees := tc.at-1; if tc.disposition == 1 { wantFrees++ }
+				if releaseCalls != tc.at || allocs != tc.at || conversions != tc.at || copies != wantCopies || frees != wantFrees || k.be.fenceGen != uint64(41+wantCopies) || nativeStop != wantStatus || invalidations != 0 || otherNative != 0 { t.Fatal("cleanup retried, ran later work, or lost successful-copy certificate") }
+				if !k.releaseRetained || cudaKVReleaseOwners != k || k.releaseNext != nil { t.Fatal("cleanup failure lost source root") }
+				holder := k.snapshotCopy
+				if tc.disposition == 1 {
+					if holder != nil { t.Fatal("transferred conversion remained a Go-owned retry target") }
+				} else {
+					if holder == nil || holder.conversion != allocated[len(allocated)-1] || holder.host != nil { t.Fatal("retained conversion lost identity or kept a completed host borrower") }
+					for _, ptr := range released { if ptr == holder.conversion.ptr { t.Fatal("retained conversion already transferred") } }
+				}
+				after := snapshot(k); after.releaseRetained, after.releaseNext, after.snapshotCopy = before.releaseRetained, before.releaseNext, before.snapshotCopy
+				if !reflect.DeepEqual(before, after) { t.Fatal("cleanup changed source metadata") }
+				if dtype == BF16 { fault := k.be.faultLatch.Snapshot(); if fault.LastCode != wantStatus || fault.LastSite != "kv-snapshot-release" || fault.Health != DevicePoisoned { t.Fatal("real latch lost cleanup fault") } }
+				k.Free(); _, retry := k.SnapshotToHost()
+				if retry == nil || releaseCalls != tc.at || k.snapshotCopy != holder { t.Fatal("cleanup failure was retried or owner changed") }
+				cudaMu.Lock(); sticky := C.fcuda_kv_snapshot_release_failed(888); cudaMu.Unlock()
+				if int(sticky) != wantStatus || nativeStop != wantStatus { t.Fatal("later cleanup replaced first status") }
+				runtime.GC() // completed-host holders must have unpinned despite cleanup failure
+			})
+		}
+	}
 	for _, dtype := range []Dtype{F16, BF16} {
 		t.Run(fmt.Sprintf("healthy-narrowed-%d", dtype), func(t *testing.T) {
 			k := fresh(dtype); before := snapshot(k)
