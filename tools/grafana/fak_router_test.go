@@ -277,3 +277,139 @@ func TestFakRouterCommonStatsUseRouterFamilies(t *testing.T) {
 		}
 	}
 }
+
+// TestFakRouterGapKPIPanels pins the KPI-ranking gap panels on the unified-router
+// board (fak-private ROUTER-PROMETHEUS-KPI-RANKING "Next steps", item 2): admission
+// pressure, durable-store utilization + sample age, TTFT/TPOT p95, prefix-cache hit
+// rate, balancer share vs weights, and the state-verdict gap note. Every expression
+// must stay on the router job and the HEAD metric/label contract; the honesty tokens
+// keep the absence-is-not-zero semantics from being silently dropped when a panel is
+// edited.
+func TestFakRouterGapKPIPanels(t *testing.T) {
+	d := loadFakRouter(t)
+
+	exprByTitle := map[string][]string{}
+	descByTitle := map[string]string{}
+	contentByTitle := map[string]string{}
+	for _, p := range d.Panels {
+		if p.Title != "" {
+			descByTitle[p.Title] = p.Description
+		}
+		if p.Options.Content != "" {
+			contentByTitle[p.Title] = p.Options.Content
+		}
+		for _, tgt := range p.Targets {
+			if strings.TrimSpace(tgt.Expr) != "" {
+				exprByTitle[p.Title] = append(exprByTitle[p.Title], tgt.Expr)
+			}
+		}
+	}
+
+	// (a) Each gap KPI must be backed by its real router family somewhere on the
+	// board.
+	required := []struct {
+		kpi    string
+		needle string
+	}{
+		{"admission outstanding", "fak_router_admission_outstanding"},
+		{"admission bound", "fak_router_admission_bound"},
+		{"admission high water", "fak_router_admission_high_water"},
+		{"admission reject rate", "rate(fak_router_admission_rejected_total"},
+		{"durable-store bytes", "fak_router_durable_store_bytes"},
+		{"durable-store quota", "fak_router_durable_store_quota_bytes"},
+		{"durable-store sample age", "fak_router_durable_store_sample_age_seconds"},
+		{"TTFT p95 histogram", "fak_router_time_to_first_token_seconds_bucket"},
+		{"TPOT p95 histogram", "fak_router_time_per_output_token_seconds_bucket"},
+		{"prefix-cache numerator", "fak_router_cached_prompt_tokens_total"},
+		{"prefix-cache denominator", "fak_router_cache_reported_prompt_tokens_total"},
+		{"balancer share ratio", "fak_router_balance_share_ratio"},
+		{"balancer snapshot age", "fak_router_balance_snapshot_age_seconds"},
+		{"balancer fail-open rate", "fak_router_balance_decisions_total"},
+	}
+	for _, r := range required {
+		found := false
+		for _, exprs := range exprByTitle {
+			for _, expr := range exprs {
+				if strings.Contains(expr, r.needle) {
+					found = true
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s is missing from the board: no panel targets %s", r.kpi, r.needle)
+		}
+	}
+
+	// (b) The cache-hit panel must use the REPORTED denominator: any panel that
+	// queries the cached numerator without the reported denominator divides by
+	// fak_router_prompt_tokens_total's meaning, which vendors can silently change
+	// by stopping usage reports.
+	for title, exprs := range exprByTitle {
+		for _, expr := range exprs {
+			if strings.Contains(expr, "fak_router_cached_prompt_tokens_total") &&
+				!strings.Contains(expr, "fak_router_cache_reported_prompt_tokens_total") {
+				t.Errorf("panel %q uses the cached-prompt numerator without the reported denominator "+
+					"(fak_router_cache_reported_prompt_tokens_total); got: %s", title, expr)
+			}
+		}
+	}
+
+	// (c) Admission fill must be the outstanding/bound ratio, not a raw gauge.
+	const fillTitle = "Admission fill %"
+	fill, ok := exprByTitle[fillTitle]
+	if !ok {
+		t.Fatalf("%s must expose an 'Admission fill %%' panel", fakRouterPath)
+	}
+	if len(fill) == 0 || !strings.Contains(fill[0], "fak_router_admission_outstanding") ||
+		!strings.Contains(fill[0], "fak_router_admission_bound") {
+		t.Errorf("panel 'Admission fill %%' must divide outstanding by bound; got: %v", fill)
+	}
+
+	// (d) Balancer share: pinned expression plus the absence-is-unmeasured honesty
+	// token, so the panel cannot render an empty group as a healthy zero.
+	share, ok := exprByTitle["Balancer share ratio by group / backend"]
+	if !ok {
+		t.Fatalf("%s must expose a 'Balancer share ratio by group / backend' panel", fakRouterPath)
+	}
+	if len(share) == 0 || !strings.Contains(share[0], "fak_router_balance_share_ratio") {
+		t.Errorf("panel 'Balancer share ratio by group / backend' must target fak_router_balance_share_ratio; got: %v", share)
+	}
+	if !strings.Contains(descByTitle["Balancer share ratio by group / backend"], "unmeasured") {
+		t.Errorf("balancer share panel description must say absence = unmeasured, not 0; got: %q",
+			descByTitle["Balancer share ratio by group / backend"])
+	}
+
+	// (e) Fail-open rate must count only non-empty-reason decisions: crediting
+	// fail-open rows to a member would fabricate choices.
+	failOpen, ok := exprByTitle["Balancer fail-open rate / s"]
+	if !ok {
+		t.Fatalf("%s must expose a 'Balancer fail-open rate / s' panel", fakRouterPath)
+	}
+	if len(failOpen) == 0 || !strings.Contains(failOpen[0], "fak_router_balance_decisions_total") ||
+		!strings.Contains(failOpen[0], `reason!=""`) {
+		t.Errorf("panel 'Balancer fail-open rate / s' must filter fak_router_balance_decisions_total on reason!=\"\"; got: %v", failOpen)
+	}
+
+	// (f) Durable-store utilization must warn that the gauges are sampled, with
+	// the sample-age series as the staleness witness.
+	dsDesc := descByTitle["Durable store utilization %"]
+	if dsDesc == "" {
+		t.Fatalf("%s must expose a 'Durable store utilization %%' panel", fakRouterPath)
+	}
+	if !strings.Contains(dsDesc, "sample") {
+		t.Errorf("durable-store panel description must say the gauges are sampled and to check sample age first; got: %q", dsDesc)
+	}
+
+	// (g) The state verdict has no prometheus metric yet: the board must carry a
+	// panel that documents the gap and points at the live surface, not a proxy
+	// metric masquerading as the verdict.
+	state, ok := contentByTitle["Router state verdict: read live, no metric yet (gap)"]
+	if !ok {
+		t.Fatalf("%s must expose the router state-verdict gap panel", fakRouterPath)
+	}
+	for _, want := range []string{"/v1/router/state", "dead_ladder"} {
+		if !strings.Contains(state, want) {
+			t.Errorf("state-verdict gap panel must name %s; got: %q", want, state)
+		}
+	}
+}

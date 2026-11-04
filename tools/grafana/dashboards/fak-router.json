@@ -1629,6 +1629,200 @@
         "overrides": []
       },
       "options": {}
+    },
+    {
+      "id": 56,
+      "type": "row",
+      "title": "Backpressure fill, balancer strategy, and router state",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 83,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 57,
+      "type": "stat",
+      "title": "Admission fill %",
+      "description": "Fraction of the admission bound held right now (`outstanding / bound`): 1.0 means the gate is saturated this instant. The raw gauges live in *Admission pressure*; its high-water mark never decreases (restart-only reset) and answers whether the bound was ever reached since boot.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 84,
+        "w": 4,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "fak_router_admission_outstanding{job=\"fak_router\"} / fak_router_admission_bound{job=\"fak_router\"}",
+          "legendFormat": "fill",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": false,
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.75
+              },
+              {
+                "color": "red",
+                "value": 0.95
+              }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "orientation": "auto",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 58,
+      "type": "timeseries",
+      "title": "Balancer share ratio by group / backend",
+      "description": "Share of each group's SPLIT balance decisions that chose each member - a choice share, NOT an attempt share (fail-open decisions are excluded from the denominator). Compare it with the group's declared weights (configuration, not a metric - see the topology note above): a share converging off its weight is a silently broken selection strategy. **Absence = unmeasured, not 0**: the family is emitted only once a group has >= 30 split decisions, so low-traffic groups publish nothing; it is recomputed from the counter at each scrape, so its level drops after a counter reset. Read gaps against *Balancer snapshot age*.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 84,
+        "w": 10,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "fak_router_balance_share_ratio{job=\"fak_router\"}",
+          "legendFormat": "{{group}}/{{backend}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "spanNulls": false
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 59,
+      "type": "timeseries",
+      "title": "Balancer fail-open rate / s",
+      "description": "Rate of balance decisions made WITHOUT a usable snapshot (fail-open path: `reason` one of `saturated`, `unmeasured`, `no_snapshot`, `no_eligible_member`). These credit no member - the balancer ran and returned declared order instead of choosing. A sustained non-zero rate means the selector is running blind on stale or absent signals; pair it with *Balancer snapshot age* and *Balancer share ratio by group / backend*.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 14,
+        "y": 84,
+        "w": 10,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(fak_router_balance_decisions_total{job=\"fak_router\",reason!=\"\"}[5m]))",
+          "legendFormat": "fail-open/s",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "Unavailable",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "spanNulls": false
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 60,
+      "type": "text",
+      "title": "Router state verdict: read live, no metric yet (gap)",
+      "description": "",
+      "gridPos": {
+        "x": 0,
+        "y": 92,
+        "w": 24,
+        "h": 3
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "The whole-router **state verdict** (`ok` / `degraded` / `down`) and its reasons - including every `dead_ladder:<model>` chain whose declared fallback ladder has collapsed to one live rung - answer \"which model chains are unusable right now\". As of this board's contract there is **no Prometheus metric for it**: neither the router's own `:18101/metrics` fold nor the Fak Ops exporter (`fak_ops_*`) publishes a verdict series, so this panel documents the gap instead of plotting a proxy.\n\nRead it live:\n\n```\nGET /v1/router/state        # verdict + reasons[]\nfak-sync router state       # CLI view of the same document\n```\n\nDo not infer the verdict from `fak_router_backend_consecutive_failures`: that gauge is ONE input (the backend health streak). The verdict also folds zero-live backends, funding walls, config drift, and dead-ladder reachability; ladders past the cap collapse into a single `dead_ladder:+<count>` reason."
+      }
     }
   ]
 }
