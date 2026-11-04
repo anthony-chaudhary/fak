@@ -1,0 +1,307 @@
+{
+  "schema": "fak.packingmatrix.v1",
+  "generated_at": "2026-11-03",
+  "audit_head": "9bd0f1516ae06f8e2848f07b8b9a63c78c920efd",
+  "ticket": "lg-packing-matrix",
+  "campaign": "tensor-layout-mismatch prevention (layout-guard lane)",
+  "method": "rg-based audit of every weight upload/load seam (compute backend Upload dispatches, model loaders, device format-conversion kernels) at audit_head; each cell cites file:line evidence. SW-VERIFIED: no hardware runs; modes are read from committed code paths, not measured.",
+  "mode_semantics": {
+    "native": "The exact byte layout the kernel consumes is produced at load/upload time: either a byte-identical copy of the checkpoint payload, or a one-shot load-time pack/transpose/narrow that is cached and never re-executed on the inference hot path.",
+    "runtime-repack": "A transpose/swizzle/repack of weight or scale bytes executes on the per-forward/per-token hot path (per GEMM call). This is the speedup-erasing path the campaign targets.",
+    "unknown": "Not determinable from committed code at audit time. Every unknown cell names the missing probe."
+  },
+  "device_axis_note": "Device axis is vulkan/cuda/cpu per the ticket. Metal and ROCm ship weight paths too (internal/compute/metal_*.go, rocm backend) and are OUT OF SCOPE for this v1 baseline; next step is to extend the axis once these three devices are baselined.",
+  "cells": [
+    {
+      "family": "q4_k",
+      "device": "cpu",
+      "mode": "native",
+      "evidence": [
+        "internal/model/quant_q4k.go:143-144 - resident Q4_K holds GGUF super-block bytes verbatim, row-major, no f32 materialization",
+        "internal/model/quant_q4k.go:42 - NewQ4K builds a tensor view over the raw payload (no copy, no repack)",
+        "internal/bench/q4krepack.go:159 - RepackQ4KInterleaved exists ONLY in internal/bench (#5285 spike, landed 8ce840c298); rg witness: zero production callers in internal/model or compute dispatch"
+      ]
+    },
+    {
+      "family": "q5_k",
+      "device": "cpu",
+      "mode": "native",
+      "evidence": [
+        "internal/model/quant_arm64_q5k.s, internal/model/quant_amd64_kquant.s - per-format decode kernels read GGUF super-block bytes directly",
+        "rg witness at audit_head: no repack/transpose helper for k-quants anywhere in internal/model outside tests"
+      ]
+    },
+    {
+      "family": "q6_k",
+      "device": "cpu",
+      "mode": "native",
+      "evidence": [
+        "internal/model/quant_arm64_q6k.s, internal/model/quant_amd64_kquant.s - same raw super-block contract as q5_k",
+        "rg witness at audit_head: no load- or runtime-side repack for Q6_K payloads in internal/model"
+      ]
+    },
+    {
+      "family": "q3_k",
+      "device": "cpu",
+      "mode": "native",
+      "evidence": [
+        "internal/model/quant_kquant.go - generic K-quant decode over raw GGUF blocks; internal/model/q3k_compute_parity_test.go pins parity against the ggml reference ABI",
+        "rg witness at audit_head: no Q3_K repack helper in internal/model"
+      ]
+    },
+    {
+      "family": "q2_k",
+      "device": "cpu",
+      "mode": "native",
+      "evidence": [
+        "internal/model/quant_q2.go, internal/model/quant_amd64_q2k.go - Q2_K decode reads raw 84-byte super-blocks directly",
+        "rg witness at audit_head: no Q2_K repack helper in internal/model"
+      ]
+    },
+    {
+      "family": "q8_0",
+      "device": "cpu",
+      "mode": "native",
+      "evidence": [
+        "internal/model/safetensors_quant.go:1-16 - memory-lean loader quantizes big matmul weights to Q8_0 AT LOAD TIME and drops the f32 copies; QuantizeQ8 writes the canonical llama.cpp block_q8_0 layout once",
+        "bit-identity vs regular Load+Quantize pinned by TestLoadSafetensorsQuantMatchesRegular (same file header)"
+      ]
+    },
+    {
+      "family": "iq_raw",
+      "device": "cpu",
+      "mode": "native",
+      "evidence": [
+        "raw i-quant payloads (IQ1_M..IQ4_NL via rawIQFormats) stay in checkpoint file layout; dequant is inline in the decode kernels (internal/model/hal_q2k_embedding.go, expert_iq2_backend_route_test.go route witness)",
+        "DequantRawIQ (used by the Vulkan fallback, internal/compute/vulkan_iq.go:44) reads raw bytes directly - no intermediate layout",
+        "rg witness at audit_head: no IQ repack helper in internal/model"
+      ]
+    },
+    {
+      "family": "nvfp4",
+      "device": "cpu",
+      "mode": "native",
+      "evidence": [
+        "internal/compute/nvfp4.go:17-21 - DecodeNVFP4Reference consumes UNSWIZZLED row-major codes + linear E4M3 scales by construction; no repack step exists on the CPU path",
+        "internal/compute/nvfp4_native.go:32 - CPU MatMulNVFP4 is an explicit oracle for the optional native W4A4 capability (slow reference, not a performance kernel); caveat recorded, no hot-path repack"
+      ]
+    },
+    {
+      "family": "fp8_block32_e8m0",
+      "device": "cpu",
+      "mode": "native",
+      "evidence": [
+        "internal/compute/fp8_block32.go:316 - GemvFP8Block32E8M0 scalar oracle decodes packed E4M3 bytes + raw E8M0 tile scales in place; no layout transform",
+        "interface contract internal/compute/fp8_block32.go:34-47 states weight bytes stay PACKED and the kernel decodes inline"
+      ]
+    },
+    {
+      "family": "mxfp4_e8m0",
+      "device": "cpu",
+      "mode": "native",
+      "evidence": [
+        "internal/compute/fp8_block32.go:415 - GemvMXFP4E8M0 scalar oracle decodes I8-packed E2M1 nibbles + row-major E8M0 scales in place; no layout transform"
+      ]
+    },
+    {
+      "family": "awq_int4_group",
+      "device": "cpu",
+      "mode": "native",
+      "evidence": [
+        "internal/model/awq.go:417-440 - loadAWQGroupSafetensors transposes qweight [in][out/8] -> output-major nibble-packed codes AND qzeros/scales during model load (one-shot, host-side, before any forward pass)",
+        "internal/model/awq_group.go:35 - awqPackOrder [0,2,4,6,1,3,5,7] nibble reorder is inverted by awqUnpackI32Row inside the same load-time loop",
+        "this is the loader-packing-logic-present case the campaign issue class contrasts against"
+      ]
+    },
+    {
+      "family": "gptq_int4_group",
+      "device": "cpu",
+      "mode": "native",
+      "evidence": [
+        "internal/model/gptq.go:310-470 - decodeGPTQTensor retains HF int32 packing ([in/pack][out]) unchanged; no transpose or repack at load",
+        "internal/model/gptq.go:487-502 - code()/zero()/weight() unpack nibbles on demand during dequant (intrinsic to quantized compute, not a layout move)"
+      ]
+    },
+    {
+      "family": "q4_k",
+      "device": "cuda",
+      "mode": "native",
+      "evidence": [
+        "internal/compute/cuda_upload.go:312-333 - uploadRawKQuant copies raw Q4_K super-block bytes resident: 'already narrow (144 bytes / 256 elems)... just an H2D into a uint8 VRAM buffer the dequant-fused GEMM tile consumes'; landed 77bf256c92 (#4843)",
+        "internal/compute/cuda_tensor_allocation.go:92 - devRawKQuant single allocation path, no conversion kernel",
+        "upload cache keyed on (host ptr, dtype, layout) - one-shot, never re-runs"
+      ]
+    },
+    {
+      "family": "q5_k",
+      "device": "cuda",
+      "mode": "native",
+      "evidence": [
+        "internal/compute/cuda_device_ops.go:11-18 - Q5_K in cudaRawUploadIsVerbatim set -> verbatim H2D via uploadRawKQuantClass",
+        "internal/compute/cuda/quant_matmul.cuh:890ff - k_q5k_gemm dequant-fused panel consumes the resident raw payload ('reusing the packed weight loads across four tokens')"
+      ]
+    },
+    {
+      "family": "q6_k",
+      "device": "cuda",
+      "mode": "native",
+      "evidence": [
+        "internal/compute/cuda_device_ops.go:11-18 - Q6_K in cudaRawUploadIsVerbatim set -> verbatim H2D",
+        "dequant-fused GEMV/panel kernels consume resident raw super-blocks (same seam as q5_k)"
+      ]
+    },
+    {
+      "family": "q3_k",
+      "device": "cuda",
+      "mode": "native",
+      "evidence": [
+        "internal/compute/cuda/q3k_matmul.cuh:31 - 'Exact GGUF Q3_K ABI: hmask[32], qs[64], scales[12]' - kernel ported WITH the loader layout, consumes raw bytes",
+        "internal/compute/cuda_device_ops.go:11-18 - Q3_K verbatim upload set"
+      ]
+    },
+    {
+      "family": "q2_k",
+      "device": "cuda",
+      "mode": "native",
+      "evidence": [
+        "internal/compute/cuda/quant_matmul.cuh:1192-1312 - k_q2k_gemv / k_q2k_gemm_panel decode resident raw Q2_K super-blocks inline (sm_80/sm_89/sm_90, #11945)",
+        "adjacent observation (not a layout defect): k_q2k_dequant_transient (quant_matmul.cuh:1197) widens Q2_K to transient FP32 for Tensor Core GEMM at P>=128 - a format widening with preserved element order, flagged here so a future bandwidth audit does not mistake it for a stride mismatch"
+      ]
+    },
+    {
+      "family": "q8_0",
+      "device": "cuda",
+      "mode": "native",
+      "evidence": [
+        "internal/compute/cuda.go:599-604 - prequantized Q8_0 host weight is copied resident with NO re-quantization (uploadQ8Resident), the memory-lean load path",
+        "internal/compute/cuda_upload.go:28 - uploadQ8 narrows F32 -> Q8_0 ON DEVICE at H2D exactly once (llama.cpp block_q8_0 layout, internal/compute/cuda_backend_state.go:11); result cached in uploadCache, never re-run on the hot path"
+      ]
+    },
+    {
+      "family": "iq_raw",
+      "device": "cuda",
+      "mode": "native",
+      "evidence": [
+        "internal/compute/cuda_device_ops.go:11-18 - IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL, IQ4_XS all in the verbatim-upload set (raw H2D, no conversion)",
+        "internal/compute/cuda/iq_gemv.cuh:19-24 - iq GEMV kernels read the raw super-block layout ('the same 8-weights-per-lane split as k_q2k_gemv')"
+      ]
+    },
+    {
+      "family": "nvfp4",
+      "device": "cuda",
+      "mode": "runtime-repack",
+      "evidence": [
+        "DEFECT CELL - internal/compute/cuda/weight_formats.cuh:370-373 - the cuBLASLt W4A4 path (MatMulNVFP4) re-swizzles BOTH the weight scales and the activation scales into per-call scratch buffers on EVERY matmul call: nvfp4_lt_swizzle_scales(dWLinearScale, dWScaleScratch...) then nvfp4_lt_swizzle_scales(dALinearScale, dAScaleScratch...)",
+        "internal/compute/cuda/weight_formats.cuh:229-257 - k_nvfp4_lt_swizzle_scales converts linear row-major scales to the TRT-LLM 128x4 tiled layout the Lt descriptor requires",
+        "internal/compute/cuda.go:1053-1059 - wScaleBuf/aScaleBuf are allocated per call in MemoryScratchpad ('nvfp4-w4a4-weight-scales'/'nvfp4-w4a4-activation-scales'), confirming the swizzle is not amortized into a resident buffer",
+        "root cause chain: internal/model/modelopt_nvfp4.go:24-28 - the loader deliberately normalizes any TensorRT-produced scale swizzle back to the LINEAR ModelOpt layout at load time, so the device path must rebuild the tiled layout per call; landed 3d34127991",
+        "contrast sub-path: internal/compute/cuda/quant_matmul.cuh:854-877 - k_nvfp4_w4a16_f32 consumes linear scales directly (srow = Payload + weightBytes + o*(in/16)); the W4A16 route has NO swizzle. The defect is confined to the W4A4 Lt route",
+        "fix shape for the follow-on ticket: swizzle the immutable weight scales once at upload (they never change after load) and keep them resident; only activation scales need per-call work"
+      ]
+    },
+    {
+      "family": "fp8_block32_e8m0",
+      "device": "cuda",
+      "mode": "native",
+      "evidence": [
+        "internal/model/v41_quant_decode.go:361-372 - V4.1 routed experts retain 'the checkpoint's OWN packed bytes (E4M3 for FP8, I8-packed E2M1 for MXFP4) plus the raw E8M0 scale bytes' and hand them to the device matmul UNCHANGED; 'never calls decodeV41ExpertQuant / decodeV41DenseFP8 (no f32 materialization)'",
+        "internal/compute/cuda_routed_expert_gemv.go:152-215 - UploadExpertFP8Block32E8M0 is a synchronous byte-in resident upload; Gemv doc: 'Only x and y cross the bus'",
+        "V4.1 dense WKV variant: internal/compute/cuda_deepgemm_wkv.go:71-113 - E4M3 codes uploaded verbatim; E8M0 tile scales packed ONCE at upload by internal/compute/v41_fp8_wkv.go:25-41 (packV41WKVScales, 16x160 grid -> 512x160 tiled); landed 4a47ea7cb4 (#12640)"
+      ]
+    },
+    {
+      "family": "mxfp4_e8m0",
+      "device": "cuda",
+      "mode": "native",
+      "evidence": [
+        "internal/compute/cuda_routed_expert_gemv.go:162 - UploadExpertMXFP4E8M0 byte-in resident upload of checkpoint-packed I8 E2M1 nibbles + row-major E8M0 scales; same 'only x and y cross the bus' contract as the FP8 sibling"
+      ]
+    },
+    {
+      "family": "f16_hgemm",
+      "device": "cuda",
+      "mode": "native",
+      "evidence": [
+        "non-quant family included because the ColMajor H2D repack seam lives here: internal/compute/cuda_upload.go:398-415 - uploadF16 narrows F32 -> F16 on device at H2D once; row-major in place, cached in uploadCache (landed f6eb11d4fc, #484)",
+        "ColMajor branch (cuda_upload.go:411, fcuda_f32_to_f16_T transpose-repack) EXISTS but has ZERO production callers: rg witness at audit_head shows Layout=ColMajor assignments only in _test.go files; the seam is a latent risk, not a live repack - flagged so a future ColMajor adoption lands with a load-time pack instead of discovering the H2D branch under load"
+      ]
+    },
+    {
+      "family": "q4_k",
+      "device": "vulkan",
+      "mode": "native",
+      "evidence": [
+        "internal/compute/vulkan.go:1111-1127 - uploadQ4KLocked: raw GGUF super-block bytes, straight C.fvk_h2d into the weight buffer; length-checked against out*(in/256)*144, no conversion"
+      ]
+    },
+    {
+      "family": "q5_k",
+      "device": "vulkan",
+      "mode": "native",
+      "evidence": [
+        "internal/compute/vulkan.go:1157-1183 - uploadQ5KLocked: raw 176-byte super-blocks H2D; tail padding to u32 alignment is zero-fill, not a repack (buf.logicalN keeps the payload boundary)"
+      ]
+    },
+    {
+      "family": "q6_k",
+      "device": "vulkan",
+      "mode": "native",
+      "evidence": [
+        "internal/compute/vulkan.go:1129-1155 - uploadQ6KLocked: raw 210-byte super-blocks H2D with zero-filled tail word; payload layout untouched"
+      ]
+    },
+    {
+      "family": "q3_k",
+      "device": "vulkan",
+      "mode": "native",
+      "evidence": [
+        "internal/compute/vulkan.go:1203-1228 - uploadQ3KLocked: raw 110-byte super-blocks H2D with two-byte-aligned tail padding; payload layout untouched"
+      ]
+    },
+    {
+      "family": "q2_k",
+      "device": "vulkan",
+      "mode": "native",
+      "evidence": [
+        "internal/compute/vulkan.go:1185-1201 - uploadQ2KLocked: raw 84-byte super-blocks H2D, length-checked against out*(in/256)*84"
+      ]
+    },
+    {
+      "family": "q8_0",
+      "device": "vulkan",
+      "mode": "native",
+      "evidence": [
+        "internal/compute/vulkan.go:1230ff - uploadQ8Locked: host int8 codes + f32 scales copied straight H2D into two weight-class buffers; no transformation",
+        "internal/compute/vulkan.go:1087-1095 - F32 -> Q8_0 narrowing runs QuantizeQ8 on the HOST at upload time (one-shot load-time quantization into the canonical block layout), then takes the same verbatim path"
+      ]
+    },
+    {
+      "family": "iq_raw",
+      "device": "vulkan",
+      "mode": "native",
+      "evidence": [
+        "internal/compute/vulkan_iq.go:34-55 - uploadRawIQLocked: when the SPIR-V iq*_matvec pipeline is built, raw bytes upload verbatim; when it is absent (kill switch / missing shader), the weight expands to Q8_0 through CPU dequant AT UPLOAD (one-shot, host-side) - both branches are load-time, neither touches the hot path"
+      ]
+    }
+  ],
+  "excluded_pairs": [
+    {"family": "nvfp4", "device": "vulkan", "reason": "no shipped NVFP4 upload or kernel on the Vulkan backend (no NVFP4 arm in vulkan.go uploadClass)"},
+    {"family": "fp8_block32_e8m0", "device": "vulkan", "reason": "no shipped FP8/MXFP4 expert or dense path on Vulkan"},
+    {"family": "mxfp4_e8m0", "device": "vulkan", "reason": "no shipped FP8/MXFP4 expert or dense path on Vulkan"},
+    {"family": "f16_hgemm", "device": "vulkan", "reason": "internal/compute/vulkan.go:1087 - 'vulkan Upload supports only F32 today' for non-quant dtypes; no F16 weight path"},
+    {"family": "f16_hgemm", "device": "cpu", "reason": "CPU reference backend is F32 SGEMM; no F16 GEMM kernel"},
+    {"family": "awq_int4_group", "device": "cuda", "reason": "AWQ tensors are host-resident (Session decode via residentMatRows); no device upload path exists"},
+    {"family": "awq_int4_group", "device": "vulkan", "reason": "AWQ tensors are host-resident; no device upload path exists"},
+    {"family": "gptq_int4_group", "device": "cuda", "reason": "GPTQ tensors are host-resident (Session.GPTQ / residentMatRows); no device upload path exists"},
+    {"family": "gptq_int4_group", "device": "vulkan", "reason": "GPTQ tensors are host-resident; no device upload path exists"}
+  ],
+  "lesson_refs": {
+    "PHL-051": "internal/hostshare/testdata/phl051-device-busy-note.json - prose reading cited by docs/notes/FAK-HOST-OVERHEAD-PREVENTION-INDEX-2026-11-03.md row 1 (sibling host-overhead campaign; context only, not layout evidence)",
+    "PHL-127": "internal/hostshare/testdata/phl127-ms-split.json - GPU busy split reading, same index (context only)",
+    "MBL-*": "no MBL-* lesson IDs exist in the public repo at audit_head (rg witness); if the campaign ledger lives in the fak-private companion, cite them there when cross-linking"
+  },
+  "known_gaps": [
+    "Metal and ROCm weight paths are unaudited (out of scope for the ticket's vulkan/cuda/cpu axis). Missing probes: metal_q4k_projection_upload_on.go projection-upload seam and the ROCm backend Upload dispatch; extend the device axis in a follow-on ticket.",
+    "No committed bench receipt measures the NVFP4 W4A4 per-call swizzle cost yet (docs/benchmarks/ holds no nvfp4 layout receipt at audit_head). Missing probe: a perf-receipt-v3 capture of MatMulNVFP4 with the swizzle kernels timed separately (FCUDA_TS already tags k_nvfp4_lt_swizzle_scales, so the ledger rows exist to diff against)."
+  ]
+}
