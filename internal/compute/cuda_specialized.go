@@ -39,9 +39,12 @@ func (c *cudaBackend) DSASparseAttend(q, selK, selV Tensor, nSel, nH, qkHead, vH
 // POSITIONS — the last GLM-5.2 compute that was host-resident even after the projections and the
 // sparse-attention math moved to the kernel. The per-key score dot is accumulated in f64 on-device,
 // so the selected set is bit-identical to the host f64 selection (selection-stable — the indexer
-// drives a discrete top-k, so it is held reduction-faithful, NOT to a cosine floor). It is the
-// optional compute.DSAIndexBackend capability; a backend without it leaves the selection host-side.
-// q/k/weights arrive device-resident; only the small index list crosses back to the host.
+// drives a discrete top-k, so it is held reduction-faithful, NOT to a cosine floor). The selection
+// pass is a single-pass radix/bucket select over the f64 scores (bounded shared state, no key-count
+// cap — ADAPTED from vLLM's persistent-topk radix select), so deep-context windows past the old
+// 4096-key mask cap stay on-device. It is the optional compute.DSAIndexBackend capability; a backend
+// without it leaves the selection host-side. q/k/weights arrive device-resident; only the small
+// index list crosses back to the host.
 func (c *cudaBackend) DSAIndexSelect(indexQ, indexK, weights Tensor, nKeys, nH, indexDim, queryPos, topK int, scale float32) []int {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
