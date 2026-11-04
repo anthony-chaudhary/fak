@@ -75,13 +75,98 @@ class ReleaseTagTest(unittest.TestCase):
         rt = load()
         self.assertEqual(rt.fold_ci_runs([], require_ci=False)["verdict"], "NO_SIGNAL")
         self.assertFalse(rt.fold_ci_runs([], require_ci=True)["pass"])
-        self.assertTrue(rt.fold_ci_runs([{"status": "completed", "conclusion": "success"}], require_ci=True)["pass"])
-        red = rt.fold_ci_runs([{"status": "completed", "conclusion": "failure"}], require_ci=False)
+        self.assertTrue(rt.fold_ci_runs([{"event": "push", "status": "completed", "conclusion": "success"}], require_ci=True)["pass"])
+        red = rt.fold_ci_runs([{"event": "push", "status": "completed", "conclusion": "failure"}], require_ci=False)
         self.assertFalse(red["pass"])
         self.assertEqual(red["verdict"], "RED")
-        pending = rt.fold_ci_runs([{"status": "in_progress"}], require_ci=False)
+        pending = rt.fold_ci_runs([{"event": "push", "status": "in_progress"}], require_ci=False)
         self.assertTrue(pending["pass"])
         self.assertEqual(pending["verdict"], "PENDING")
+
+    def test_fold_ci_runs_requires_push_event(self) -> None:
+        rt = load()
+        missing = object()
+        for event in (missing, None, "", "workflow_dispatch", "pull_request", "schedule", "unknown", [], {}):
+            diagnostic = {"status": "completed", "conclusion": "success"}
+            if event is not missing:
+                diagnostic["event"] = event
+            with self.subTest(event=event):
+                for require_ci in (False, True):
+                    folded = rt.fold_ci_runs([diagnostic], require_ci=require_ci)
+                    self.assertEqual(folded["verdict"], "NO_SIGNAL")
+                    self.assertEqual(folded["pass"], not require_ci)
+                    self.assertEqual(folded["advisory"], not require_ci)
+                    self.assertNotIn("run", folded)
+                push = {"event": "push", "status": "completed", "conclusion": "failure"}
+                folded = rt.fold_ci_runs([diagnostic, push], require_ci=True)
+                self.assertEqual(folded["verdict"], "RED")
+                self.assertEqual(folded["run"], push)
+        self.assertEqual(rt.fold_ci_runs([None, "invalid", []], require_ci=True)["verdict"], "NO_SIGNAL")
+        push = {"event": "push", "status": "completed", "conclusion": "success"}
+        diagnostic = {"event": "workflow_dispatch", "status": "completed", "conclusion": "failure"}
+        self.assertEqual(rt.fold_ci_runs([diagnostic, push], require_ci=True)["verdict"], "GREEN")
+        pending = {"event": "push", "status": "in_progress"}
+        self.assertEqual(rt.fold_ci_runs([pending, push], require_ci=True)["verdict"], "PENDING")
+
+    def test_ci_signal_filters_events_before_and_after_watch(self) -> None:
+        rt = load()
+        for conclusion, expected in ((None, "NO_SIGNAL"), ("success", "GREEN"), ("failure", "RED")):
+            with self.subTest(conclusion=conclusion):
+                calls = []
+                lists = 0
+                diagnostic = {"event": "workflow_dispatch", "status": "completed",
+                              "conclusion": "success", "databaseId": "manual"}
+
+                def runner(cmd: list[str]) -> tuple[int, str]:
+                    nonlocal lists
+                    calls.append(cmd)
+                    if cmd[:3] == ["gh", "run", "list"]:
+                        lists += 1
+                        rows = [diagnostic]
+                        if lists == 1:
+                            rows.append({"event": "push", "status": "in_progress", "databaseId": "push-1"})
+                        elif conclusion is not None:
+                            rows.append({"event": "push", "status": "completed",
+                                         "conclusion": conclusion, "databaseId": "push-1"})
+                        return 0, json.dumps(rows)
+                    if cmd == ["gh", "run", "watch", "push-1", "--exit-status"]:
+                        return 0, "finished"
+                    if cmd == ["gh", "run", "view", "push-1", "--json", "jobs"]:
+                        return 0, json.dumps({"jobs": []})
+                    raise AssertionError(cmd)
+
+                folded = rt.ci_signal(Path("repo"), "abc123", workflow="ci.yml",
+                                      require_ci=True, wait=True, runner=runner)
+                self.assertEqual(folded["verdict"], expected)
+                self.assertEqual(folded["pass"], conclusion == "success")
+                self.assertTrue(folded["watched"])
+                self.assertEqual(lists, 2)
+                for cmd in calls:
+                    if cmd[:3] == ["gh", "run", "list"]:
+                        self.assertIn("--event", cmd)
+                        self.assertEqual(cmd[cmd.index("--event") + 1], "push")
+                        self.assertIn("event", cmd[cmd.index("--json") + 1].split(","))
+
+    def test_diagnostic_success_cannot_create_required_ci_tag(self) -> None:
+        rt = load()
+        root, sha = self._repo()
+        rt.load_release_dry_run = lambda root, ref: {"ok": True, "exit_code": 0, "trailer": "release-dry-run: fixture"}
+        original_ci_signal = rt.ci_signal
+
+        def runner(cmd: list[str]) -> tuple[int, str]:
+            self.assertEqual(cmd[:3], ["gh", "run", "list"])
+            return 0, json.dumps([{"event": "workflow_dispatch", "status": "completed",
+                                   "conclusion": "success", "headSha": sha,
+                                   "databaseId": "manual", "release_eligible": False}])
+
+        rt.ci_signal = lambda root, sha, **kwargs: original_ci_signal(root, sha, runner=runner, **kwargs)
+        context = rt.build_context(root, version="0.1.0", ref=sha, trunk="master",
+                                   require_ci=True, wait_ci=True, skip_remote_tag=True)
+        result = rt.execute_tag(root, context, use_lock=False)
+        self.assertFalse(result["tag_created"], result)
+        self.assertFalse(context["ok"], context)
+        self.assertIn("ci_not_green:NO_SIGNAL", context["errors"])
+        self.assertNotIn("v0.1.0", git(root, "tag", "-l"))
 
     def test_ci_signal_diagnoses_billing_annotation_on_red_run(self) -> None:
         rt = load()
@@ -89,6 +174,7 @@ class ReleaseTagTest(unittest.TestCase):
         def runner(cmd: list[str]) -> tuple[int, str]:
             if cmd[:5] == ["gh", "run", "list", "--workflow", "ci.yml"]:
                 return 0, json.dumps([{
+                    "event": "push",
                     "databaseId": "run-1",
                     "status": "completed",
                     "conclusion": "failure",

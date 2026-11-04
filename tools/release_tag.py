@@ -132,12 +132,15 @@ def load_release_dry_run(root: Path, ref: str) -> dict:
 
 
 def fold_ci_runs(runs: list[dict[str, Any]], *, require_ci: bool) -> dict:
+    # Manual diagnostics may run only a narrow command or test a different
+    # checkout. Missing/unknown events cannot supply tag-after-green evidence.
+    runs = [row for row in runs if isinstance(row, dict) and row.get("event") == "push"]
     if not runs:
         return {
             "pass": not require_ci,
             "verdict": "NO_SIGNAL",
             "advisory": not require_ci,
-            "reason": "no GitHub Actions run found for commit",
+            "reason": "no push-triggered GitHub Actions run found for commit",
         }
     run_row = runs[0]
     status = str(run_row.get("status") or "").lower()
@@ -259,8 +262,9 @@ def ci_signal(root: Path, sha: str, *, workflow: str, require_ci: bool,
         "gh", "run", "list",
         "--workflow", workflow,
         "--commit", sha,
+        "--event", "push",
         "--limit", "10",
-        "--json", "databaseId,status,conclusion,url,createdAt,headSha",
+        "--json", "databaseId,status,conclusion,url,createdAt,headSha,event",
     ]
     code, out = runner(cmd)
     if code != 0:
