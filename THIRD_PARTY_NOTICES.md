@@ -1903,3 +1903,22 @@ No Zig runtime, kernel, or model code is included.
 The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
 "TensorFold benchmark evidence" section above (same pinned repository and
 revision); they apply to this adaptation as well.
+
+## TensorFold bounded top-k selection
+
+`internal/agent/inkernel_sampling.go` (`topKRankOrder`, shared sweep
+`topKSelectHeap`) adapts the bounded top-k selection contract from
+`zig/src/core/lanes/sampling_selection.zig` (line 7, with `sampling.zig` lines
+116/134) in ashhart/TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209` (Apache-2.0):
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/lanes/sampling_selection.zig
+
+Greedy best-by-value-descending-then-id-ascending picks, null-on-any-non-finite
+row, and allocation of only the k selected indices are re-expressed in idiomatic
+Go over fak's existing samplerWorkspace hot path: the non-finite rejection maps
+to the package's ErrNonFiniteLogits sentinel, and the bounded min-heap sweep is
+shared with the pre-existing topKTruncate seam so no parallel selection path is
+introduced. No upstream Zig code blocks are copied.
+
+The pinned repository's Apache-2.0 LICENSE is reproduced in the existing TensorFold
+license section of this file and also applies here.

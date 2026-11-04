@@ -599,15 +599,22 @@ func maskKept(probs []float64, kept map[int]bool) float64 {
 
 const topKSmallKThreshold = 64
 
-// topKHeapLess returns true if heap index a is worse than heap index b.
-// An element is worse if it has lower probability, or equal probability and higher index.
-func topKHeapLess(heap []int, probs []float64, a, b int) bool {
-	ia, ib := heap[a], heap[b]
+// topKRankWorse is the top-k candidate relation: position ia is worse than ib
+// when its probability is lower, or equal and its input position higher. It is
+// the single value-desc / id-asc order the whole bounded-selection seam ranks by,
+// so the greedy pick, the heap admission test, and the final rank sort all agree.
+func topKRankWorse(probs []float64, ia, ib int) bool {
 	pa, pb := probs[ia], probs[ib]
 	if pa != pb {
 		return pa < pb
 	}
 	return ia > ib
+}
+
+// topKHeapLess returns true if heap index a is worse than heap index b under
+// topKRankWorse (lower probability, or equal probability and higher index).
+func topKHeapLess(heap []int, probs []float64, a, b int) bool {
+	return topKRankWorse(probs, heap[a], heap[b])
 }
 
 func topKSiftDown(heap []int, probs []float64, root, n int) {
@@ -627,11 +634,13 @@ func topKSiftDown(heap []int, probs []float64, root, n int) {
 	}
 }
 
-// topKTruncateSmallK implements sort-free bounded selection for k <= 64 via a
-// bounded min-heap in O(V log k) time with zero heap allocations on the hot path.
-func topKTruncateSmallK(probs []float64, k int) float64 {
-	var heapBuf [topKSmallKThreshold]int
-	heap := heapBuf[:k]
+// topKSelectHeap fills heap (len k, caller-owned, k >= 1) with the k best
+// positions of probs under topKRankWorse, leaving them in heap (unsorted) order.
+// It is the shared O(V log k) bounded-selection sweep of the top-k seam: seed
+// the first k positions, build the min-heap, then admit each later position only
+// while it beats the current worst (the root). No allocation.
+func topKSelectHeap(heap []int, probs []float64) {
+	k := len(heap)
 	for i := 0; i < k; i++ {
 		heap[i] = i
 	}
@@ -641,13 +650,64 @@ func topKTruncateSmallK(probs []float64, k int) float64 {
 
 	rootProb := probs[heap[0]]
 	for i := k; i < len(probs); i++ {
-		p := probs[i]
-		if p > rootProb {
+		if p := probs[i]; p > rootProb {
 			heap[0] = i
 			topKSiftDown(heap, probs, 0, k)
 			rootProb = probs[heap[0]]
 		}
 	}
+}
+
+// topKRankSort orders idx (the kept set from topKSelectHeap) into deterministic
+// rank order: probability descending, ties by ascending input position. Insertion
+// sort over the bounded k keeps the pass allocation-free.
+func topKRankSort(idx []int, probs []float64) {
+	for i := 1; i < len(idx); i++ {
+		key := idx[i]
+		j := i - 1
+		for j >= 0 && topKRankWorse(probs, idx[j], key) {
+			idx[j+1] = idx[j]
+			j--
+		}
+		idx[j+1] = key
+	}
+}
+
+// topKRankOrder returns the k highest-probability positions of probs in
+// deterministic rank order — probability descending, ties by ascending input
+// position — allocating exactly k indices. It is the bounded-selection face of
+// the top-k seam: the returned set is the top-k under that order, so a full sort
+// of the row begins with exactly these k. A NaN or infinite probability anywhere
+// in the row rejects the whole row with ErrNonFiniteLogits (the host twin of the
+// upstream null-on-non-finite-row contract); no partial selection is ever
+// returned. The caller owns the returned slice.
+//
+// Adapted from ashhart/TensorFold zig/src/core/lanes/sampling_selection.zig:7
+// @9e8c368b0b4c2c7892a0c9f0f302d7c164016209 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
+func topKRankOrder(probs []float64, k int) ([]int, error) {
+	if k <= 0 || len(probs) == 0 {
+		return nil, nil
+	}
+	if k > len(probs) {
+		k = len(probs)
+	}
+	for _, p := range probs {
+		if math.IsNaN(p) || math.IsInf(p, 0) {
+			return nil, ErrNonFiniteLogits
+		}
+	}
+	heap := make([]int, k)
+	topKSelectHeap(heap, probs)
+	topKRankSort(heap, probs)
+	return heap, nil
+}
+
+// topKTruncateSmallK implements sort-free bounded selection for k <= 64 via a
+// bounded min-heap in O(V log k) time with zero heap allocations on the hot path.
+func topKTruncateSmallK(probs []float64, k int) float64 {
+	var heapBuf [topKSmallKThreshold]int
+	heap := heapBuf[:k]
+	topKSelectHeap(heap, probs)
 
 	// Sort kept indices in ascending order (insertion sort over <= 64 elements,
 	// zero allocations, ensures deterministic summation order matching maskKept).
@@ -707,21 +767,7 @@ func (w *samplerWorkspace) topKTruncate(probs []float64, sum float64, k int) flo
 // of the small-k path and of the reference full-sort oracle.
 func (w *samplerWorkspace) topKHeap(probs []float64, k int) float64 {
 	heap := w.heapBuf(k)
-	for i := 0; i < k; i++ {
-		heap[i] = i
-	}
-	for i := k/2 - 1; i >= 0; i-- {
-		topKSiftDown(heap, probs, i, k)
-	}
-
-	rootProb := probs[heap[0]]
-	for i := k; i < len(probs); i++ {
-		if p := probs[i]; p > rootProb {
-			heap[0] = i
-			topKSiftDown(heap, probs, 0, k)
-			rootProb = probs[heap[0]]
-		}
-	}
+	topKSelectHeap(heap, probs)
 
 	for i := 1; i < k; i++ {
 		key := heap[i]
