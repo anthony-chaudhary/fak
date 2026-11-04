@@ -907,4 +907,19 @@ var admittedPostFreeze = []string{
 	// admission).
 	// Relocates to: a typed measure-mode field on the compute census config once #2862 lands.
 	"FAK_H2D_CENSUS",
+
+	// EIGHTH OCCURRENCE (release-unblock): one experimental CUDA kernel toggle shipped while
+	// the ratchet was red and unwatched again. As in the earlier occurrences it is admitted
+	// by name, not absorbed into baseline.go, and it cannot relocate until the #2862 config
+	// surface exists. Admission resolves the current offense; it does not erase that
+	// liveness failure or pay the #2862 relocation debt.
+
+	// internal/compute/cuda_qwen35_qknorm_rope_cache_vllm.go — FAK_CUDA_QWEN35_VLLM_QK=1 arms
+	// the opt-in vLLM fused QK norm/RoPE/KV-append candidate on CUDA (=1 arms it; default
+	// off), read once at package init from the literal call site. An experimental kernel
+	// toggle, like its admitted siblings FAK_CUDA_QWEN35_ATTN_POSTPROCESS and
+	// FAK_CUDA_QWEN35_RESIDUAL_NORM; not a credential — it grants access to nothing.
+	// Introduced by 15699d6468 (28 trunk advances at admission).
+	// Relocates to: a typed compute capability config once #2862 lands.
+	"FAK_CUDA_QWEN35_VLLM_QK",
 }
