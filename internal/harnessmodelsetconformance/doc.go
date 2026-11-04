@@ -9,4 +9,9 @@
 // Contract: conformance evaluation requires explicit role bindings and validated candidate digests before asserting startup compatibility.
 //
 // Precondition: caller test fixtures must define canonical role requirements and uncorrupted candidate inventory records.
+//
+// 2026-11-02 debtwave2 wiring audit: no production call path reaches this
+// lane (ABSENT-with-reason; see wiring_audit_test.go for the durable
+// witness). The lane remains an evidence boundary witnessing the
+// `fak harness model-set` command.
 package harnessmodelsetconformance
