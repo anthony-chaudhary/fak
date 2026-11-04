@@ -121,7 +121,15 @@ runs on the CPU-session path (`backend == nil`). Its cache-specific knobs are:
 | Variable | Type / units | Default | When to use | Source |
 |---|---|---|---|---|
 | `FAK_INKERNEL_RADIX` | enum-ish: `off` disables, anything else/unset enables | enabled | Turn off planner-owned RadixAttention prefix reuse for A/B or diagnosis. Device-backend planner requests still bypass radix reuse today because the reusable prefix clone is a CPU-session cache. | `internal/agent/inkernel_planner.go:162` |
-| `FAK_INKERNEL_RADIX_BUDGET` | int, edge tokens | unset / invalid / `0` = unbounded | Bound the planner radix tree's edge-token budget. When over budget, the tree uses `FAK_NATIVE_KV_VICTIM_RULE`; `cost-aware` keeps reused prefixes ahead of one-shot cold prompts. | `internal/agent/inkernel_planner.go:163` |
+
+The tree's edge-token budget is no longer an ambient variable: it is the
+planner's explicit `InKernelPlannerConfig.RadixBudgetTokens` — negative =
+unbounded, positive = explicit bound, zero = one context window of cached
+prefix derived from the resolved context ceiling. The former
+`FAK_INKERNEL_RADIX_BUDGET` spelling is retired (#13605); its `0` value meant
+unbounded, which the negative field value carries. When over budget, the tree
+uses `FAK_NATIVE_KV_VICTIM_RULE`; `cost-aware` keeps reused prefixes ahead of
+one-shot cold prompts.
 
 ## 4. Matmul parallelism (worker budget)
 

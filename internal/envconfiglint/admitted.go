@@ -706,11 +706,6 @@ var admittedPostFreeze = []string{
 	// Relocates to: gateway server config.
 	"FAK_HTTP_DRAIN_TIMEOUT_S",
 
-	// internal/agent/inkernel_planner_config.go — operator override for the in-kernel radix
-	// token budget.
-	// Relocates to: InKernelPlannerConfig, which already carries the default.
-	"FAK_INKERNEL_RADIX_BUDGET",
-
 	// cmd/fak/leaseref_coordinator_client.go — lease coordinator endpoint.
 	// Relocates to: lease coordinator config.
 	"FAK_LEASE_COORDINATOR_URL",

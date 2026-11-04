@@ -65,13 +65,14 @@ type InKernelPlannerConfig struct {
 	DeferColdTools            bool
 	// RadixBudgetTokens bounds the process-scoped RadixAttention prefix cache to
 	// this many cached tokens. A negative value keeps the historical unbounded
-	// default (0 == unbounded); zero derives the bound from ContextTokens (see
+	// default; zero derives the bound from ContextTokens (see
 	// resolveInKernelRadixBudgetTokens). It exists so a long-running resident
 	// server (turnkey `fak up`) bounds the deep-chain footprint without an
 	// operator env: radixkv stores the FULL-prefix KV per node, so an unbounded
 	// tree accumulates nested KV clones on every turn of a growing conversation
-	// (see the MEMORY NOTE on InKernelPlanner.tree). FAK_INKERNEL_RADIX_BUDGET
-	// still wins whenever it is set, for callers that never set this field.
+	// (see the MEMORY NOTE on InKernelPlanner.tree). The former ambient spelling
+	// FAK_INKERNEL_RADIX_BUDGET is retired (#13605 leaf A-S); its zero value
+	// meant unbounded, which the negative value carries.
 	RadixBudgetTokens int
 	// BatchDecode opts this planner into the continuous-batch decode wiring
 	// (#401/#1590) at construction time instead of relying on the process-wide
@@ -416,30 +417,24 @@ func contextTokensForRadixBudget(cfg InKernelPlannerConfig, m *model.Model) int 
 }
 
 // resolveInKernelRadixBudgetTokens resolves the RadixAttention prefix-cache token
-// budget with precedence:
+// budget from the planner's explicit configuration:
 //
-//  1. FAK_INKERNEL_RADIX_BUDGET when set (>= 0) — the historical operator knob
-//     still wins for every caller, so an explicit env cannot be silently
-//     overridden by this new default.
-//  2. cfg.RadixBudgetTokens when negative (keep-unbounded) or positive (explicit).
-//  3. Otherwise, when a finite context ceiling is known, bound the tree to ONE
+//  1. cfg.RadixBudgetTokens when negative (keep-unbounded) or positive (explicit).
+//  2. Otherwise, when a finite context ceiling is known, bound the tree to ONE
 //     full context of cached prefix tokens. This is the leak fix: an unbounded
 //     tree stores the FULL-prefix KV per node, so a resident server that serves a
 //     long, growing conversation accumulates nested KV clones without limit. One
 //     context's worth of cached prefix preserves the maximal-reuse win for the
 //     common case (a static system+tool prefix reused turn after turn) while
 //     making the deep-chain footprint bounded and predictable.
-//  4. No finite ceiling known (contextTokens == 0): 0 == unbounded, preserving
+//  3. No finite ceiling known (contextTokens == 0): 0 == unbounded, preserving
 //     the historical default for a planner that cannot state a bound.
 //
-// It is pure and independent of env for the returned-value witnesses; the only
-// env read is the documented operator override in step 1.
+// The former ambient override FAK_INKERNEL_RADIX_BUDGET is retired (#13605 leaf
+// A-S): an operator who set it to 0 (unbounded) now sets a negative field value,
+// and a positive value moves verbatim into the field. It is pure — no env or
+// clock read — so construction-time witnesses see exactly this resolution.
 func resolveInKernelRadixBudgetTokens(cfg InKernelPlannerConfig, contextTokens int) int {
-	if v, ok := os.LookupEnv("FAK_INKERNEL_RADIX_BUDGET"); ok {
-		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n >= 0 {
-			return n
-		}
-	}
 	if cfg.RadixBudgetTokens < 0 {
 		return 0
 	}

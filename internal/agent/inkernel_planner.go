@@ -128,8 +128,9 @@ type InKernelPlanner struct {
 	//
 	// MEMORY NOTE: radixkv stores the FULL-prefix KV per node, so a long single growing
 	// conversation accumulates nested KV clones (see radixkv's Tokens-vs-PrefixTokens
-	// note). FAK_INKERNEL_RADIX_BUDGET sets the edge-token budget (0 = unbounded, the
-	// default — the maximal-reuse regime the witnesses measure), and
+	// note). InKernelPlannerConfig.RadixBudgetTokens sets the edge-token budget
+	// (negative = unbounded, the historical default — the maximal-reuse regime the
+	// witnesses measure; zero derives one context window), and
 	// FAK_NATIVE_KV_VICTIM_RULE=cost-aware selects the KVBM victim rule for budget pressure.
 	// Operators serving long sessions should set a budget; bounding the deep-chain
 	// footprint is tracked.

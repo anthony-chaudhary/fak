@@ -13,7 +13,8 @@ import (
 // fak-test:runtime medium est=5s lane=default
 func TestInKernelSharedDensePrefixOrdinaryRoute(t *testing.T) {
 	t.Setenv("FAK_INKERNEL_RADIX", "on")
-	t.Setenv("FAK_INKERNEL_RADIX_BUDGET", "0")
+	// The unbounded budget the retired FAK_INKERNEL_RADIX_BUDGET=0 spelling meant
+	// is now the explicit negative RadixBudgetTokens below (#13605 leaf A-S).
 	t.Setenv("FAK_INKERNEL_RADIX_CPU_BYTES", "")
 	t.Setenv("FAK_INKERNEL_BATCH", "off")
 	m := model.NewSynthetic(tinyConcurrencyConfig())
