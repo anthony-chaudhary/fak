@@ -387,6 +387,7 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 	// Validate the SAME captured controller used for Acquire: a concurrent
 	// replacement must not check one stream bound then acquire under another.
 	if err := fixedWarmupCapacityAdmissionError(cap, c, fraction); err != nil {
+		rateHold.Cancel() // nil-safe: the provider was never called
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -498,16 +499,16 @@ func (s *Server) beginServedAdmission(ctx context.Context, turn servedSessionTur
 	// is idempotent against this release). Ride the linked chain when one exists, or
 	// become the lease's sole tokenRes when it does not.
 	if rateHold != nil {
-		tail := res
+		if lease == nil {
+			lease = &AdmissionLease{}
+		}
+		tail := lease.tokenRes
 		for tail != nil && tail.linked != nil {
 			tail = tail.linked
 		}
 		if tail != nil {
 			tail.linked = rateHold.head
 		} else {
-			if lease == nil {
-				lease = &AdmissionLease{}
-			}
 			lease.tokenRes = rateHold.head
 		}
 	}
