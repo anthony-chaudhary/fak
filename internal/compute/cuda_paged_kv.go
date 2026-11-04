@@ -239,9 +239,11 @@ func (p *cudaKVPagePool) copyErrorLocked(k *cudaPagedKV) error {
 		if err := AdmitDevice(p.be, "paged-kv-copy"); err != nil {
 			return p.stopCopyLocked(-75706, k)
 		}
-		if C.fcuda_paged_kv_copy_terminal() != 0 {
-			return p.stopCopyLocked(-75701, k)
-		}
+	}
+	// Shared stream uncertainty applies to every archive, not just the copy
+	// qualification. Refuse before page/private-owner accounting can change.
+	if C.fcuda_paged_kv_copy_terminal() != 0 {
+		return p.stopCopyLocked(-75701, k)
 	}
 	return nil
 }

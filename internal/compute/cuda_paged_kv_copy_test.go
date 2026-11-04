@@ -168,10 +168,31 @@ func TestCUDAPagedKVCopyConsumerGuards(t *testing.T) {
 		"pagedPanelAppendLocked": 0, "pagedPanelAttentionLocked": 0,
 		"AppendKV": 2, "KeysView": 2, "ValuesView": 2, "Clone": 2,
 	}
+	sharedStopSeen := false
 	for _, decl := range file.Decls {
 		f, ok := decl.(*ast.FuncDecl)
 		if !ok || f.Body == nil {
 			continue
+		}
+		if f.Name.Name == "copyErrorLocked" {
+			sharedStopSeen = true
+			// Cached failure, qualified admission, then the shared terminal
+			// query must remain ordered siblings. The last check must also run
+			// when qualification is off and no Go fault latch is installed.
+			if len(f.Body.List) != 4 {
+				t.Fatal("shared stop query is not an unconditional pool boundary")
+			}
+			for i, want := range []string{
+				"if status := p.copyFailure.Load(); status != 0",
+				"if cudaPagedKVCopyQualification",
+				"if C.fcuda_paged_kv_copy_terminal() != 0",
+			} {
+				stmt := f.Body.List[i]
+				text := strings.Join(strings.Fields(string(source[fs.Position(stmt.Pos()).Offset:fs.Position(stmt.End()).Offset])), " ")
+				if !strings.HasPrefix(text, want+" {") {
+					t.Fatalf("pool check %d = %q, want %q", i, text, want)
+				}
+			}
 		}
 		at, ok := direct[f.Name.Name]
 		if !ok {
@@ -186,6 +207,9 @@ func TestCUDAPagedKVCopyConsumerGuards(t *testing.T) {
 			t.Fatalf("%s first effect is %q", f.Name.Name, body)
 		}
 		delete(direct, f.Name.Name)
+	}
+	if !sharedStopSeen {
+		t.Fatal("missing shared pool stop boundary")
 	}
 	if len(direct) != 0 {
 		t.Fatalf("missing guarded consumers: %v", direct)
@@ -437,6 +461,48 @@ func TestPagedCopyHost(t *testing.T) {
 		terminal(t, empty.Free)
 		retained(t, p, a, b) // empty refusal must not mint an unbounded retained list
 	})
+	t.Run("default-shared-stop-retains-before-release", func(t *testing.T) {
+		a, b := setup(2, false) // no qualification and no Go admission fault
+		p := a.pool
+		for _, ptr := range []*unsafe.Pointer{&b.dTable, &b.dSeqLen, &b.scratch, &b.gK, &b.gV} {
+			*ptr = unsafe.Pointer(new(int))
+		}
+		b.dTableCap, b.scratchF, b.gKF, b.gVF = 3, 11, 5, 9
+		beforeA, beforeB := stable(a), stable(b)
+		arenas := append(append(append([]unsafe.Pointer(nil), p.K...), p.Kraw...), p.V...)
+		queries := terminalQueries
+		terminalStatus = 1
+		terminal(t, a.Free)
+		if p.copyFailure.Load() != -75701 || terminalQueries != queries+1 {
+			t.Fatal("default archive did not latch shared terminal status")
+		}
+		queries = terminalQueries
+		for i := 0; i < 2; i++ {
+			terminal(t, a.Free)
+			terminal(t, a.releaseLocked)
+			terminal(t, b.Free)
+			terminal(t, func() { p.allocLocked() })
+			terminal(t, func() { p.growLocked(5) })
+			terminal(t, func() { a.writablePageLocked(0) })
+			terminal(t, func() { a.Clone() })
+			terminal(t, func() { p.be.newPagedKV(a.cfg) })
+			if out, err := p.be.restorePagedKVFromHost(KVHostSnapshot{Config: a.cfg}); out != nil || err == nil {
+				t.Fatal("shared-stop restore minted an owner")
+			}
+		}
+		retained(t, p, a, b)
+		if stable(a) != beforeA || stable(b) != beforeB ||
+			!reflect.DeepEqual(arenas, append(append(append([]unsafe.Pointer(nil), p.K...), p.Kraw...), p.V...)) ||
+			copyCalls != 0 || d2dCalls != 0 || freeCalls != 0 || terminalQueries != queries {
+			t.Fatal("shared stop changed pages, arenas, private owners, accounting or submissions")
+		}
+		if err := p.stopCopyLocked(99, b); err.(*cudaPagedKVCopyFailure).Status != -75701 {
+			t.Fatal("shared stop lost first-error identity")
+		}
+		empty := &cudaPagedKV{pool: p}
+		terminal(t, empty.Free)
+		retained(t, p, a, b)
+	})
 	t.Run("terminal-reservation-retains-unwinding-owner", func(t *testing.T) {
 		a, b := setup(3, true)
 		p := a.pool
@@ -493,8 +559,8 @@ func TestPagedCopyHost(t *testing.T) {
 			}
 			a.Free()
 			b.Free()
-			if !tc.enabled && terminalQueries != 0 {
-				t.Fatal("disabled profile added native health calls")
+			if terminalQueries == 0 {
+				t.Fatal("healthy pool skipped shared native health checks")
 			}
 			if p.blocks.live != 0 || len(p.blocks.free) != p.capBlocks || freeCalls != 5 || p.copyOwners != nil {
 				t.Fatal("healthy cleanup changed")
