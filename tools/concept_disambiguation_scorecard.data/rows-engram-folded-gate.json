@@ -1,0 +1,24 @@
+{
+  "rows": [
+    {
+      "id": "v41engramfoldedgateleaf",
+      "canonical": "engram_folded_gate",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The canonical leaf spelling of the DS4.1 folded Engram gate coefficient tensor (engram_folded_gate.weight): one F32 resident weight carrying the pre-composed per-cell gate product that the V4.1 forward consumes directly, which the GGUF and SafeTensors loaders resolve the locally evidenced upstream spelling onto so the forward's admission lookup finds it.",
+      "distinction": "A model-weight tensor name and loader alias target, not an authorization guard or safety policy gate; not the CUDA device-side Engram gating kernel (cudaV41EngramGate); not the unfolded q/k norm leaves (engram_q_norm / engram_k_norm) whose product it replaces; and not the look-ahead read-policy or serial-selection knobs that gate Engram serving rather than its coefficients.",
+      "distinct_from": [
+        "raider-engram-gate",
+        "v41engramlookaheadreadpolicy",
+        "v41engramseriallookaheadselection"
+      ],
+      "aliases": [],
+      "grounding": "engram_folded_gate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

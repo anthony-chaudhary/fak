@@ -100,6 +100,13 @@ func init() {
 		prepushTestQuality = func(io.Writer, io.Writer, []string) int { forbidden("live test-quality scan"); return 2 }
 	}
 	args := os.Args[1:]
+	if len(args) >= 2 && args[0] == "concept" && args[1] == "freshness" {
+		// Protocol-only child verdicts keep these shell tests independent of
+		// Python/generation. Actual freshness is covered by concept CLI tests.
+		code, _ := strconv.Atoi(os.Getenv("FAK_PREPUSH_FRESHNESS_EXIT"))
+		fmt.Fprintln(os.Stdout, "freshness shell-protocol fixture")
+		os.Exit(code)
+	}
 	if len(args) >= 2 && args[0] == "workflow" {
 		os.Exit(runWorkflow(os.Stdout, os.Stderr, os.Stdin, args[1:]))
 	}
@@ -200,8 +207,8 @@ func TestPrepushFocusedBuildOffGuards(t *testing.T) {
 				t.Fatalf("exact focused range admission did not run: %v", calls)
 			}
 			if tc.code == 0 {
-				if len(calls) != 2 || focusedCallCount(calls, "import-witness") != 1 || focusedCallCount(calls, "pre-push") != 1 {
-					t.Fatalf("one import witness and one range admission required per clean pair: %v", calls)
+				if len(calls) != 3 || focusedCallCount(calls, "import-witness") != 1 || focusedCallCount(calls, "pre-push") != 1 || focusedFreshnessCallCount(calls, tc.tip) != 1 {
+					t.Fatalf("one import witness, range admission and exact-tip freshness required per clean pair: %v", calls)
 				}
 				if !strings.Contains(out, "trunk-build-gate: SKIPPED_EXPLICIT") ||
 					!strings.Contains(out, "concept-admission: PASSED") ||
@@ -235,6 +242,44 @@ func TestPrepushFocusedBuildOffGuards(t *testing.T) {
 }
 
 // fak-test:runtime medium est=2s lane=default
+func TestPrepushFocusedFreshnessFailsClosed(t *testing.T) {
+	f := newFocusedFixture(t)
+	row := "refs/heads/main " + f.good + " refs/heads/main " + f.base + "\n"
+	for _, tc := range []struct {
+		name, childExit string
+		want            int
+	}{
+		{"fresh", "0", 0},
+		{"stale", "1", 1},
+		{"unknown", "2", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("FAK_PREPUSH_FRESHNESS_EXIT", tc.childExit)
+			out, code, calls := f.run(t, gitHookShell(t), []string{prepushHookUnderTest(t)}, row)
+			if code != tc.want || focusedFreshnessCallCount(calls, f.good) != 1 {
+				t.Fatalf("freshness must use advertised tip and fail closed: code=%d want=%d calls=%v\n%s", code, tc.want, calls, out)
+			}
+			if len(calls) != 3 || focusedCallCount(calls, "import-witness", "--rev", f.good) != 1 || focusedCallCount(calls, "pre-push", "--base", f.base, "--tip", f.good) != 1 {
+				t.Fatalf("freshness must preserve import and range admission: %v", calls)
+			}
+			if tc.want != 0 && !strings.Contains(out, "CONCEPT_FRESHNESS (blocked)") {
+				t.Fatalf("missing typed freshness refusal:\n%s", out)
+			}
+		})
+	}
+}
+
+func focusedFreshnessCallCount(calls [][]string, tip string) int {
+	count := 0
+	for _, args := range calls {
+		if slices.Equal(args, []string{"concept", "freshness", "--staged", "--tree", tip, "--json"}) {
+			count++
+		}
+	}
+	return count
+}
+
+// fak-test:runtime medium est=2s lane=default
 func TestPrepushFocusedReportCannotBecomeBuildEvidence(t *testing.T) {
 	f := newFocusedFixture(t)
 	out, code, _ := f.run(t, f.executable, []string{"hooks", "pre-push", "--skip-build", "--root", f.root, "--base", f.base, "--tip", f.good, "--json"}, "")
@@ -264,6 +309,7 @@ type focusedFixture struct {
 
 func newFocusedFixture(t *testing.T) focusedFixture {
 	t.Helper()
+	t.Setenv("FAK_PREPUSH_FRESHNESS_EXIT", "0")
 	f := focusedFixture{root: t.TempDir(), bin: t.TempDir()}
 	f.git(t, "init", "-q")
 	f.git(t, "symbolic-ref", "HEAD", "refs/heads/main")
@@ -881,8 +927,8 @@ func TestPrepushWithoutLazyFetchOption(t *testing.T) {
 			if !tc.hook && !strings.Contains(out, "PREPUSH_BASE_AVAILABLE") {
 				t.Fatalf("hydration did not admit the present base:\n%s", out)
 			}
-			if tc.hook && (len(calls) != 2 || focusedCallCount(calls, "pre-push", "--hydrate-bases", "") != 0) {
-				t.Fatalf("present base must reach exactly the import witness and range admission: %v", calls)
+			if tc.hook && (len(calls) != 3 || focusedCallCount(calls, "pre-push", "--hydrate-bases", "") != 0 || focusedFreshnessCallCount(calls, f.good) != 1) {
+				t.Fatalf("present base must reach import witness, range admission and freshness: %v", calls)
 			}
 		})
 	}

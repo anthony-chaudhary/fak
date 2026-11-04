@@ -281,3 +281,342 @@ func TestInKernelV41DriverUnavailableUsesPublicStep(t *testing.T) {
 		}
 	}
 }
+
+// v41OracleLogits derives one request's scripted 16-wide logit row from its seed.
+// The spread keeps every keyed draw genuinely stochastic while remaining fully
+// deterministic, so cross-lane contamination moves a stream.
+func v41OracleLogits(seed int) []float32 {
+	out := make([]float32, 16)
+	for j := range out {
+		out[j] = float32((seed*7+j*11)%19) * 0.1
+	}
+	return out
+}
+
+// v41OracleScriptedLane builds a keyed decode lane over an empty Session for
+// scripted V4.1 driver results: the script owns every forward, the lane pins the
+// per-request sampling identity (key, base, temp > 0) only.
+func v41OracleScriptedLane(key uint64, base, maxNew int, logits []float32) (*decodeLane, *batchLaneSink) {
+	sink := &batchLaneSink{}
+	ln := &decodeLane{
+		s:         &model.Session{},
+		logits:    append([]float32(nil), logits...),
+		counts:    make([]int32, len(logits)),
+		rng:       rand.New(rand.NewSource(13)),
+		emit:      sink.emit,
+		stops:     map[int]bool{},
+		maxNew:    maxNew,
+		temp:      1,
+		sampleKey: key, sampleKeyed: true, sampleBase: base,
+		forwarded: make([]int, 0, maxNew),
+	}
+	return ln, sink
+}
+
+// TestV41BatchCompositionInvariantAcrossNeighbors is the V4.1-specific
+// singleton-versus-batch composition oracle adapted from DeepInfer's
+// test_batch_invariant.py (oss-port-deepinfer-batch-invariance-oracle, leaf 1):
+// keyed-sampling lanes driven through the live V4.1 driver seam must emit token
+// streams identical to their singleton runs regardless of neighbor permutation or
+// early retirement, preserving the transactional no-replay rule. The dense
+// synthetic fixture refuses StepV41Batch, so the model-driven arm rides the
+// driver's public scalar fallback; it pins driver composition, not Flash
+// shared-head serving.
+//
+// fak-test:runtime fast est=1s lane=default
+func TestV41BatchCompositionInvariantAcrossNeighbors(t *testing.T) {
+	t.Run("keyed streams match singletons across composition", func(t *testing.T) {
+		cfg := tinyCfg()
+		m := model.NewSynthetic(cfg)
+		sharedPrompt := synthIDs(cfg.VocabSize, 13, 9101)
+		type request struct {
+			prompt []int
+			key    uint64
+			maxNew int
+		}
+		requests := []request{
+			{prompt: sharedPrompt, key: 101, maxNew: 12},
+			{prompt: sharedPrompt, key: ^uint64(0), maxNew: 12},
+			{prompt: synthIDs(cfg.VocabSize, 9, 9102), key: 303, maxNew: 8},
+			{prompt: synthIDs(cfg.VocabSize, 17, 9103), key: 0, maxNew: 1},
+		}
+		run := func(order []int) map[int][]int {
+			lanes := make([]*decodeLane, len(order))
+			sinks := make([]*batchLaneSink, len(order))
+			for batchIndex, requestIndex := range order {
+				r := requests[requestIndex]
+				lane, sink := newDecodeLaneOver(m, r.prompt, r.maxNew, 777)
+				lane.temp, lane.topP, lane.topK = 5, 0.95, 16
+				lane.sampleKey, lane.sampleKeyed, lane.sampleBase = r.key, true, len(r.prompt)
+				lanes[batchIndex], sinks[batchIndex] = lane, sink
+				t.Cleanup(lane.s.Close)
+			}
+			receipt, err := inKernelDecodeV41Lanes(context.Background(), lanes, m)
+			if err != nil {
+				t.Fatalf("composition %v failed: %v", order, err)
+			}
+			if receipt.sharedPanels != 0 || receipt.sharedRows != 0 {
+				t.Fatalf("dense fixture claimed shared-head work: %+v", receipt)
+			}
+			got := make(map[int][]int, len(order))
+			for batchIndex, requestIndex := range order {
+				if lanes[batchIndex].err != nil {
+					t.Fatalf("request %d decode failed: %v", requestIndex, lanes[batchIndex].err)
+				}
+				if len(sinks[batchIndex].toks) != requests[requestIndex].maxNew {
+					t.Fatalf("request %d produced %d tokens, want %d", requestIndex, len(sinks[batchIndex].toks), requests[requestIndex].maxNew)
+				}
+				got[requestIndex] = sinks[batchIndex].toks
+			}
+			return got
+		}
+		singletons := make(map[int][]int, len(requests))
+		for i := range requests {
+			singletons[i] = run([]int{i})[i]
+			if replay := run([]int{i})[i]; !eqInts(replay, singletons[i]) {
+				t.Fatalf("request %d keyed replay diverged: got %v want %v", i, replay, singletons[i])
+			}
+		}
+		if eqInts(singletons[0], singletons[1]) {
+			t.Fatalf("distinct keys on one prompt did not activate stochastic sampling: %v", singletons[0])
+		}
+		assertMatchesSingleton := func(name string, got map[int][]int, ids ...int) {
+			t.Helper()
+			for _, id := range ids {
+				if !eqInts(got[id], singletons[id]) {
+					t.Fatalf("%s changed request %d:\n got =%v\n want=%v", name, id, got[id], singletons[id])
+				}
+			}
+		}
+		assertMatchesSingleton("original order", run([]int{0, 1, 2}), 0, 1, 2)
+		assertMatchesSingleton("permuted order", run([]int{2, 0, 1}), 0, 1, 2)
+		assertMatchesSingleton("early-retiring neighbor", run([]int{3, 0, 1, 2}), 0, 1, 2, 3)
+	})
+
+	t.Run("failing row isolates its lane", func(t *testing.T) {
+		fault := errors.New("selected V4.1 lane failure")
+		keys := []uint64{11, 22, 33, 44}
+		bases := []int{40, 41, 42, 43}
+		seeds := []int{1, 2, 3, 4}
+		const maxNew = 4
+		build := func() ([]*decodeLane, []*batchLaneSink, map[*model.Session]int) {
+			lanes := make([]*decodeLane, 4)
+			sinks := make([]*batchLaneSink, 4)
+			bySession := make(map[*model.Session]int, 4)
+			for i := range lanes {
+				lanes[i], sinks[i] = v41OracleScriptedLane(keys[i], bases[i], maxNew, v41OracleLogits(seeds[i]))
+				bySession[lanes[i].s] = i
+			}
+			return lanes, sinks, bySession
+		}
+		operations := func(bySession map[*model.Session]int) inKernelV41DecodeOps {
+			rounds := make(map[*model.Session]int, 4)
+			return inKernelV41DecodeOps{
+				batch: func(input []model.V41BatchLane) (model.V41BatchResult, error) {
+					out := model.V41BatchResult{Selected: true, SharedHeadPanels: 1, SharedHeadRows: len(input), Lanes: make([]model.V41BatchLaneResult, len(input))}
+					for i, lane := range input {
+						index := bySession[lane.Session]
+						rounds[lane.Session]++
+						if index == 1 && rounds[lane.Session] > 1 {
+							out.Lanes[i] = model.V41BatchLaneResult{ID: lane.ID, Err: fault}
+							continue
+						}
+						out.Lanes[i] = model.V41BatchLaneResult{ID: lane.ID, Committed: true, Logits: v41OracleLogits(seeds[index])}
+					}
+					return out, nil
+				},
+				serial: func(*model.Session, int) ([]float32, error) {
+					return nil, errors.New("unexpected scalar replay")
+				},
+				wait: func(context.Context) error { return errors.New("unexpected busy wait") },
+			}
+		}
+		// Singleton references: the same script drives each lane alone, so a healthy
+		// peer's stream is pinned independently of batch composition.
+		refs := make([][]int, 4)
+		for i := 0; i < 4; i++ {
+			lanes, sinks, bySession := build()
+			_, err := inKernelDecodeV41LanesWithOps(context.Background(), []*decodeLane{lanes[i]}, operations(bySession))
+			if i == 1 {
+				if err != nil || lanes[i].err != fault {
+					t.Fatalf("singleton failing lane terminal=%v laneErr=%v", err, lanes[i].err)
+				}
+			} else if err != nil || lanes[i].err != nil {
+				t.Fatalf("singleton %d failed: terminal=%v laneErr=%v", i, err, lanes[i].err)
+			}
+			refs[i] = sinks[i].toks
+		}
+		// The fault row lands at round two's forward, so the failing lane emits two
+		// tokens but commits only the first.
+		if len(refs[1]) != 2 {
+			t.Fatalf("scripted failure did not fire at round two: %v", refs[1])
+		}
+		lanes, sinks, bySession := build()
+		terminal, err := inKernelDecodeV41LanesWithOps(context.Background(), lanes, operations(bySession))
+		if err != nil {
+			t.Fatalf("failing row broadcast over the terminal error: %v", err)
+		}
+		// Three forwards commit (rounds one to three); the fourth emission retires
+		// the healthy lanes without a further forward, so receipts stop at 3x(1,3+4).
+		if terminal.sharedPanels != 3 || terminal.sharedRows != 11 {
+			t.Fatalf("healthy peers lost committed projection: %+v", terminal)
+		}
+		for i := 0; i < 4; i++ {
+			if !eqInts(sinks[i].toks, refs[i]) || !lanes[i].done {
+				t.Fatalf("lane %d drifted under the failing peer: emitted=%v want %v done=%t", i, sinks[i].toks, refs[i], lanes[i].done)
+			}
+		}
+		if lanes[1].err != fault || lanes[1].gen != 2 || !eqInts(lanes[1].forwarded, refs[1][:1]) {
+			t.Fatalf("failing lane outcome=%v gen=%d forwarded=%v", lanes[1].err, lanes[1].gen, lanes[1].forwarded)
+		}
+		for i := 0; i < 4; i++ {
+			if i == 1 {
+				continue
+			}
+			if lanes[i].err != nil || lanes[i].gen != maxNew || !eqInts(lanes[i].forwarded, refs[i][:maxNew-1]) {
+				t.Fatalf("healthy lane %d lost: err=%v gen=%d forwarded=%v", i, lanes[i].err, lanes[i].gen, lanes[i].forwarded)
+			}
+		}
+	})
+
+	t.Run("busy refusal retries with chosen token and keyed state", func(t *testing.T) {
+		keys := []uint64{101, 303}
+		bases := []int{40, 41}
+		seeds := []int{1, 2}
+		const maxNew = 3
+		buildPair := func() ([]*decodeLane, []*batchLaneSink, map[*model.Session]int) {
+			lanes := make([]*decodeLane, 2)
+			sinks := make([]*batchLaneSink, 2)
+			bySession := make(map[*model.Session]int, 2)
+			for i := range lanes {
+				lanes[i], sinks[i] = v41OracleScriptedLane(keys[i], bases[i], maxNew, v41OracleLogits(seeds[i]))
+				bySession[lanes[i].s] = i
+			}
+			return lanes, sinks, bySession
+		}
+		commitRows := func(input []model.V41BatchLane, bySession map[*model.Session]int) model.V41BatchResult {
+			out := model.V41BatchResult{Selected: true, SharedHeadPanels: 1, SharedHeadRows: len(input), Lanes: make([]model.V41BatchLaneResult, len(input))}
+			for i, lane := range input {
+				out.Lanes[i] = model.V41BatchLaneResult{ID: lane.ID, Committed: true, Logits: v41OracleLogits(seeds[bySession[lane.Session]])}
+			}
+			return out
+		}
+		controlLanes, controlSinks, controlBySession := buildPair()
+		if _, err := inKernelDecodeV41LanesWithOps(context.Background(), controlLanes, inKernelV41DecodeOps{
+			batch: func(input []model.V41BatchLane) (model.V41BatchResult, error) {
+				return commitRows(input, controlBySession), nil
+			},
+			serial: func(*model.Session, int) ([]float32, error) { return nil, errors.New("unexpected scalar replay") },
+			wait:   func(context.Context) error { return errors.New("unexpected busy wait") },
+		}); err != nil {
+			t.Fatalf("control run failed: %v", err)
+		}
+		refs := [][]int{controlSinks[0].toks, controlSinks[1].toks}
+		for i := range refs {
+			if len(refs[i]) != maxNew {
+				t.Fatalf("control lane %d produced %d tokens, want %d", i, len(refs[i]), maxNew)
+			}
+		}
+		lanes, sinks, bySession := buildPair()
+		var first []model.V41BatchLane
+		calls, waits := 0, 0
+		got, err := inKernelDecodeV41LanesWithOps(context.Background(), lanes, inKernelV41DecodeOps{
+			batch: func(input []model.V41BatchLane) (model.V41BatchResult, error) {
+				calls++
+				if calls == 1 {
+					first = append([]model.V41BatchLane(nil), input...)
+					return v41DriverRefusal(input), model.ErrV41BatchBusy
+				}
+				if calls == 2 && !reflect.DeepEqual(first, input) {
+					t.Fatal("busy retry changed chosen token, identity, context or membership")
+				}
+				return commitRows(input, bySession), nil
+			},
+			serial: func(*model.Session, int) ([]float32, error) {
+				return nil, errors.New("unexpected scalar replay")
+			},
+			wait: func(context.Context) error {
+				waits++
+				for i, lane := range lanes {
+					want := refs[i][0]
+					if lane.gen != 1 || lane.counts[want] != 1 || !eqInts(sinks[i].toks, []int{want}) || len(lane.forwarded) != 0 {
+						t.Fatalf("busy wait resampled or re-emitted lane %d: gen=%d counts=%v emitted=%v", i, lane.gen, lane.counts, sinks[i].toks)
+					}
+				}
+				return nil
+			},
+		})
+		if err != nil || calls != 3 || waits != 1 || got.sharedPanels != 2 || got.sharedRows != 4 {
+			t.Fatalf("busy retry receipt=%+v err=%v calls=%d waits=%d", got, err, calls, waits)
+		}
+		for i := range lanes {
+			if !eqInts(sinks[i].toks, refs[i]) || !eqInts(lanes[i].forwarded, refs[i][:maxNew-1]) {
+				t.Fatalf("busy refusal perturbed lane %d: emitted=%v forwarded=%v want %v", i, sinks[i].toks, lanes[i].forwarded, refs[i])
+			}
+		}
+	})
+
+	t.Run("unavailable refusal falls back serially without resampling", func(t *testing.T) {
+		keys := []uint64{101, 303}
+		bases := []int{40, 41}
+		seeds := []int{1, 2}
+		const maxNew = 3
+		buildPair := func() ([]*decodeLane, []*batchLaneSink, map[*model.Session]int) {
+			lanes := make([]*decodeLane, 2)
+			sinks := make([]*batchLaneSink, 2)
+			bySession := make(map[*model.Session]int, 2)
+			for i := range lanes {
+				lanes[i], sinks[i] = v41OracleScriptedLane(keys[i], bases[i], maxNew, v41OracleLogits(seeds[i]))
+				bySession[lanes[i].s] = i
+			}
+			return lanes, sinks, bySession
+		}
+		commitRows := func(input []model.V41BatchLane, bySession map[*model.Session]int) model.V41BatchResult {
+			out := model.V41BatchResult{Selected: true, SharedHeadPanels: 1, SharedHeadRows: len(input), Lanes: make([]model.V41BatchLaneResult, len(input))}
+			for i, lane := range input {
+				out.Lanes[i] = model.V41BatchLaneResult{ID: lane.ID, Committed: true, Logits: v41OracleLogits(seeds[bySession[lane.Session]])}
+			}
+			return out
+		}
+		controlLanes, controlSinks, controlBySession := buildPair()
+		if _, err := inKernelDecodeV41LanesWithOps(context.Background(), controlLanes, inKernelV41DecodeOps{
+			batch: func(input []model.V41BatchLane) (model.V41BatchResult, error) {
+				return commitRows(input, controlBySession), nil
+			},
+			serial: func(*model.Session, int) ([]float32, error) { return nil, errors.New("unexpected scalar replay") },
+			wait:   func(context.Context) error { return errors.New("unexpected busy wait") },
+		}); err != nil {
+			t.Fatalf("control run failed: %v", err)
+		}
+		refs := [][]int{controlSinks[0].toks, controlSinks[1].toks}
+		lanes, sinks, bySession := buildPair()
+		calls, serialCalls := 0, 0
+		var serialTokens []int
+		got, err := inKernelDecodeV41LanesWithOps(context.Background(), lanes, inKernelV41DecodeOps{
+			batch: func(input []model.V41BatchLane) (model.V41BatchResult, error) {
+				calls++
+				if calls == 1 {
+					return v41DriverRefusal(input), model.ErrV41BatchUnavailable
+				}
+				return commitRows(input, bySession), nil
+			},
+			serial: func(s *model.Session, token int) ([]float32, error) {
+				serialCalls++
+				serialTokens = append(serialTokens, token)
+				return v41OracleLogits(seeds[bySession[s]]), nil
+			},
+			wait: func(context.Context) error { return errors.New("unexpected busy wait") },
+		})
+		if err != nil || calls != 2 || serialCalls != 2 || !eqInts(serialTokens, []int{refs[0][0], refs[1][0]}) {
+			t.Fatalf("serial fallback resampled: calls=%d serial=%d tokens=%v want %v", calls, serialCalls, serialTokens, []int{refs[0][0], refs[1][0]})
+		}
+		if got.sharedPanels != 1 || got.sharedRows != 2 {
+			t.Fatalf("serial fallback erased completed projections: %+v", got)
+		}
+		for i := range lanes {
+			if !eqInts(sinks[i].toks, refs[i]) || !eqInts(lanes[i].forwarded, refs[i][:maxNew-1]) {
+				t.Fatalf("unavailable refusal perturbed lane %d: emitted=%v forwarded=%v want %v", i, sinks[i].toks, lanes[i].forwarded, refs[i])
+			}
+		}
+	})
+}

@@ -1003,7 +1003,10 @@ func (c *AdmissionController) Offer(req SeqRequest) AdmissionVerdict {
 	// Fast path: nobody is waiting and there is headroom now — admit immediately so an
 	// idle/underloaded node does not pay a Schedule round to serve its first requests.
 	if len(c.waiting) == 0 && c.batchBudgetStatusLocked(req).status < batchBudgetExhausted {
-		c.admitLocked(req)
+		if err := c.admitLocked(req); err != nil {
+			c.recordReservationShedLocked(req, err)
+			return VerdictShed
+		}
 		c.recordDecisionLocked(req, VerdictAdmitted, "", "")
 		return VerdictAdmitted
 	}
@@ -1068,7 +1071,11 @@ func (c *AdmissionController) Acquire(ctx context.Context, req SeqRequest) (*Adm
 		return nil, &AdmissionError{Verdict: VerdictShed, Budget: check.budget, Reason: check.reason}
 	}
 	if len(c.waiting) == 0 && c.batchBudgetStatusLocked(req).status < batchBudgetExhausted {
-		c.admitLocked(req)
+		if err := c.admitLocked(req); err != nil {
+			c.recordReservationShedLocked(req, err)
+			c.mu.Unlock()
+			return nil, err
+		}
 		c.recordDecisionLocked(req, VerdictAdmitted, "", "")
 		c.mu.Unlock()
 		enginestep.Default.ObservePhase(enginestep.PhaseAdmissionWait, time.Since(waitStart))
@@ -1204,8 +1211,10 @@ func (c *AdmissionController) scheduleLocked() []SeqRequest {
 			if !c.prefillFitsLocked(tickPrompt, e.req) {
 				break
 			}
+			if c.admitLocked(e.req) != nil {
+				break
+			}
 			tickPrompt += e.req.promptTokens()
-			c.admitLocked(e.req)
 			c.queuedTokens -= e.req.Tokens
 			if e.ready != nil {
 				close(e.ready)
@@ -1291,9 +1300,10 @@ func (c *AdmissionController) scheduleLocked() []SeqRequest {
 		if !c.prefillFitsLocked(tickPrompt, e.req) {
 			break
 		}
+		if c.admitLocked(e.req) != nil {
+			break
+		}
 		tickPrompt += e.req.promptTokens()
-
-		c.admitLocked(e.req)
 		c.queuedTokens -= e.req.Tokens
 		if e.ready != nil {
 			close(e.ready)
@@ -1610,16 +1620,6 @@ func (r SeqRequest) promptTokens() int {
 func (c *AdmissionController) prefillFitsLocked(tickPrompt int, req SeqRequest) bool {
 	budget := c.policy.PrefillTokenBudget
 	return budget <= 0 || tickPrompt == 0 || tickPrompt+req.promptTokens() <= budget
-}
-
-// admitLocked moves a request into the running set and charges its tokens. Caller holds c.mu.
-func (c *AdmissionController) admitLocked(req SeqRequest) {
-	if c.pool != nil {
-		c.pool.Draw(req.Tokens)
-	}
-	c.running[req.TraceID] = req
-	c.tokens += req.Tokens
-	c.stats.Admitted++
 }
 
 // deadlineOrder is the EDF tiebreak within equal effective priority, adapted from

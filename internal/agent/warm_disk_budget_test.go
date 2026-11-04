@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"math"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,10 +13,23 @@ import (
 )
 
 // warmDiskFakeClock drives admission backoff windows deterministically.
-type warmDiskFakeClock struct{ t time.Time }
+// The drain test advances time while admission reads it from another goroutine.
+type warmDiskFakeClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
 
-func (c *warmDiskFakeClock) now() time.Time          { return c.t }
-func (c *warmDiskFakeClock) advance(d time.Duration) { c.t = c.t.Add(d) }
+func (c *warmDiskFakeClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *warmDiskFakeClock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = c.t.Add(d)
+}
 
 func warmDiskLadderState(ad *warmDiskWriteAdmission) (fails int, backoff time.Duration) {
 	ad.mu.Lock()
@@ -147,17 +161,17 @@ func TestWriteBudgetReserveSkipBackoff(t *testing.T) {
 	t.Run("drain honors the shutdown deadline", func(t *testing.T) {
 		clock := &warmDiskFakeClock{}
 		idle := newWarmDiskWriteAdmission(1000, true, clock.now)
-		if !idle.drain(clock.t) {
+		if !idle.drain(clock.now()) {
 			t.Fatal("empty pool must drain immediately")
 		}
 		ad := newWarmDiskWriteAdmission(1000, true, clock.now)
 		if err := ad.reserve(100); err != nil {
 			t.Fatalf("reserve: %v", err)
 		}
-		if ad.drain(clock.t) {
+		if ad.drain(clock.now()) {
 			t.Fatal("outstanding reservation must not drain at a passed deadline")
 		}
-		deadline := clock.t.Add(50 * time.Millisecond)
+		deadline := clock.now().Add(50 * time.Millisecond)
 		go func() {
 			clock.advance(20 * time.Millisecond) // still inside the deadline
 			ad.release(100)

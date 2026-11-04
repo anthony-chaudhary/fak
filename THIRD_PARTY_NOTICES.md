@@ -2311,3 +2311,33 @@ source code is copied; the adaptation is witnessed by
 `internal/gateway/request_rate_bucket_test.go`. The upstream Apache-2.0
 license is reproduced in the TensorFold benchmark evidence section above.
 
+
+## antirez/ds4 V4.1 DSpark support-GGUF artifact contract admission
+
+`internal/model/v41_dspark.go` (`DeepSeekV41DSparkConfig.GGUF`,
+`RefuseDeepSeekV41DSpark`) and its test
+`internal/model/v41_dspark_gguf_contract_test.go` adapt the support-GGUF
+artifact contract for arch `deepseek41-dspark` from antirez/ds4 at revision
+`b4e3faf5262b21db94ec309cf321640ff1eed460`:
+https://github.com/antirez/ds4/blob/b4e3faf5262b21db94ec309cf321640ff1eed460/gguf-tools/deepseek41_dspark.py
+(`metadata()` at lines 166-182) plus the drafter allocation guards at
+https://github.com/antirez/ds4/blob/b4e3faf5262b21db94ec309cf321640ff1eed460/ds4_deepseek41_dspark.h
+(lines 72-74).
+
+The adapted contract: when the DSpark decoder is enabled on a V4.1 config that
+carries a support-GGUF artifact declaration, admission enforces the pinned
+key set (`dspark.target_architecture`, `dspark.source_config`,
+`dspark.weight_encoding`, `dspark.target_layer_ids`, and the u32 scalars
+`block_size` / `markov_rank` / `noise_token_id` / `n_routed_experts` /
+`num_experts_per_tok`), strict dimension validation against the embedded
+source config (`model_type == deepseek_v41`, 32x32 FP8 weight blocks, three
+distinct in-range target layer taps, expert-per-token bounds, draft window
+within the sliding window), and unclaimed-tensor refusal against the checked
+three-stage inventory. A violated contract is refused with the typed
+`ErrV41DSparkArtifact` sentinel; a valid contract still refuses execution with
+`ErrV41DSparkUnsupported` - header validity never enables speculative
+execution. No upstream source code is copied; the adaptation is witnessed by
+`TestDSparkGGUFContractAdmission` in
+`internal/model/v41_dspark_gguf_contract_test.go`. The ds4 MIT copyright and
+permission notice is reproduced in the "antirez/ds4 (DwarfStar) V4 Flash CUDA
+kernels" section above.

@@ -416,7 +416,11 @@ func (s *Server) runNativeArmStreamSeed(ctx context.Context, seed nativeWireSeed
 // checkpoint, client-declared tools, and recursive child options stay outside
 // the child run.
 func (s *Server) nativeChildTaskOptions(ctx context.Context, reqTrace string, opts []agent.RunOption) []agent.RunOption {
-	if s == nil || !s.native || s.planner == nil || len(s.nativeCodeCatalog) == 0 {
+	if s == nil || !s.native || len(s.nativeCodeCatalog) == 0 {
+		return opts
+	}
+	planner := s.chatPlanner(ctx)
+	if planner == nil {
 		return opts
 	}
 	policy := adjudicator.Default.PolicySnapshot()
@@ -431,7 +435,7 @@ func (s *Server) nativeChildTaskOptions(ctx context.Context, reqTrace string, op
 		agent.WithRouteAccounts(s.roster),
 		agent.WithRoutePrincipal(principal),
 	)
-	if hp, ok := s.planner.(*agent.HTTPPlanner); ok {
+	if hp, ok := planner.(*agent.HTTPPlanner); ok {
 		routeOpts = append(routeOpts,
 			agent.WithProvider(string(hp.Provider)),
 			agent.WithBaseURL(hp.BaseURL),
@@ -442,7 +446,7 @@ func (s *Server) nativeChildTaskOptions(ctx context.Context, reqTrace string, op
 		baseOpts := append([]agent.RunOption(nil), routeOpts...)
 		baseOpts = append(baseOpts, agent.WithSessionGate(agent.SessionGate{}, nativeChildTrace(reqTrace, scope, req.TaskID)))
 		childRunner := agent.NewNativeChildTaskRunner(
-			s.planner,
+			planner,
 			s.nativeMaxTurns,
 			baseOpts,
 			s.nativeCodeCatalog,

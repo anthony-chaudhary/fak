@@ -765,8 +765,9 @@ func deepseek41HasEngramTable(f *File) bool {
 // eager-dequantize it - on the published vcruz Q2_K checkpoint one table is
 // [256, ~384M rows] = ~98.3B elements, i.e. a 366.2 GiB f32 span that OOMs the
 // Go runtime (fak#13152). The projection-side Engram tensors
-// (engram_wkv/engram_q/engram_k and their forward spellings) are deliberately
-// EXCLUDED: those ARE consumed as f32 weights by the forward and must load.
+// (engram_wkv/engram_q/engram_k, engram_folded_gate, and their forward
+// spellings) are deliberately EXCLUDED: those ARE consumed as f32 weights by
+// the forward and must load.
 func deepseek41EngramTableTensor(name string) bool {
 	_, _, suffix, ok := splitDeepSeek41BlkTensor(name)
 	if !ok {
@@ -935,6 +936,7 @@ func deepseek41CanonicalSuffix(suffix string) (string, bool) {
 //	Engram wkv projection  -> engram_kv.weight
 //	Engram q norm          -> engram_q_norm.weight
 //	Engram k norm          -> engram_k_norm.weight
+//	Engram folded gate     -> engram_folded_gate.weight
 //
 // The loader therefore NORMALIZES both the converter spelling (engram_wkv /
 // engram_q / engram_k) and the forward spelling (engram_kv / engram_q_norm /
@@ -942,7 +944,9 @@ func deepseek41CanonicalSuffix(suffix string) (string, bool) {
 // exactly the name internal/model/v41_forward.go:295 and
 // v41_forward_engram.go:212 look up. Without this the forward's v41AdmitShape
 // lookup cannot find the projection and a declared Engram layer refuses on a
-// naming mismatch rather than a genuine unsupported-model refusal.
+// naming mismatch rather than a genuine unsupported-model refusal. The folded
+// gate carries no second dialect: its single spelling already matches the
+// forward-consumed leaf it resolves to (fak#14122).
 func deepseek41EngramSuffixName(suffix string) (string, bool) {
 	leaf := strings.TrimSuffix(suffix, ".weight")
 	switch leaf {
@@ -957,6 +961,11 @@ func deepseek41EngramSuffixName(suffix string) (string, bool) {
 		return "engram_q_norm", true
 	case "engram_k", "engram_k_norm":
 		return "engram_k_norm", true
+	// Folded Engram gate (fak#14122): the locally evidenced DS4.1 GGUF spelling
+	// of the folded-gate coefficient already carries the forward-consumed leaf,
+	// so it resolves to itself rather than any projection-side alias.
+	case "engram_folded_gate":
+		return "engram_folded_gate", true
 	}
 	return "", false
 }

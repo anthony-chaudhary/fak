@@ -570,7 +570,7 @@ func TestV41EngramProjectionSourceNamesAndCollision(t *testing.T) {
 	t.Parallel()
 	cfg := v41EngProjFixture(t, "F32", false).Cfg
 	cfg.ModelType, cfg.DeepSeekV41 = "deepseek41", nil
-	for _, leaf := range []string{"engram_kv.weight", "engram_q_norm.weight", "engram_k_norm.weight"} {
+	for _, leaf := range []string{"engram_kv.weight", "engram_q_norm.weight", "engram_k_norm.weight", "engram_folded_gate.weight"} {
 		source, native := "model.engram.0."+leaf, layerName(0, leaf)
 		if got, keep := quantSourceTensorNameWithRetention(cfg, source, true); !keep || got != native {
 			t.Errorf("source %s resolves to %s retained=%t", source, got, keep)

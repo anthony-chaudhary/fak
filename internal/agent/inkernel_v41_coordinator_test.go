@@ -1366,3 +1366,218 @@ func TestInKernelV41CoordinatorPostDecodePanic(t *testing.T) {
 		}
 	}
 }
+
+// v41OracleReference replays one request's keyed target draws serially against
+// the scripted logits: the exact reference the coalesced route must reproduce
+// token-for-token (oss-port-deepinfer-batch-invariance-oracle, leaf 2). It
+// mirrors decodeOne's sampling call: keyed coin at absolute position base+step,
+// temperature 1, no truncation, zero penalties.
+func v41OracleReference(key uint64, base, maxNew int, logits []float32) []int {
+	counts := make([]int32, len(logits))
+	ws := &samplerWorkspace{}
+	toks := make([]int, 0, maxNew)
+	for step := 0; step < maxNew; step++ {
+		coin := model.KeyedUniform64(key, model.DomainTargetSample, base+step)
+		token := sampleLogitsWithPenaltyCoreWS(logits, 1, 0, 0, 0, nil, 0, 0, counts, nil, coin, true, ws)
+		counts[token]++
+		toks = append(toks, token)
+	}
+	return toks
+}
+
+// TestV41CoalescedRoutePinsPerRequestOutput pins per-request output on the live
+// V4.1 coalesced route (DeepInfer test_batch_invariant.py adaptation,
+// oss-port-deepinfer-batch-invariance-oracle, leaf 2): requests admitted through
+// runV41DecodeCohort, including late-fill admissions via lifecycle.admit, complete
+// with receipts whose CohortID, participation-window deltas and cohort telemetry
+// match the episode, and every request's emitted tokens equal the scripted serial
+// reference exactly under every admission ordering exercised. Scripted results
+// qualify request/driver state transitions only; no Flash head arithmetic is
+// fabricated.
+//
+// fak-test:runtime fast est=50ms lane=default
+func TestV41CoalescedRoutePinsPerRequestOutput(t *testing.T) {
+	prepareErr := errors.New("coalesced late preparation failed")
+	type spec struct {
+		name   string
+		key    uint64
+		base   int
+		seed   int
+		maxNew int
+	}
+	specs := []spec{
+		{name: "A", key: 101, base: 40, seed: 1, maxNew: 4},
+		{name: "B", key: 202, base: 41, seed: 2, maxNew: 2},
+		{name: "C", key: 303, base: 42, seed: 3, maxNew: 2},
+		{name: "D", key: 404, base: 43, seed: 4, maxNew: 2},
+		{name: "E", key: 505, base: 44, seed: 5, maxNew: 2},
+	}
+	specByName := make(map[string]spec, len(specs))
+	for _, s := range specs {
+		specByName[s.name] = s
+	}
+	planner := &InKernelPlanner{m: model.NewSynthetic(tinyCfg())}
+	wantReceipt := func(cohort uint64, size, panels, rows int, closes uint32) InKernelBatchReceipt {
+		return InKernelBatchReceipt{CohortID: cohort, CohortSize: size, SharedPanels: panels, SharedRows: rows, SessionCloses: closes}
+	}
+	runEpisode := func(name string, initial []string, waves map[int][]string, probeRequest string, probeCall int, wantBatches [][]string, wantPeak int, wantReceipts map[string]InKernelBatchReceipt) uint64 {
+		requests := make(map[string]*inKernelCoalesceRequest, 6)
+		sinks := make(map[string]*batchLaneSink, 5)
+		refs := make(map[string][]int, 5)
+		bySession := make(map[*model.Session]string, 5)
+		for _, s := range specs {
+			lane, sink := v41OracleScriptedLane(s.key, s.base, s.maxNew, v41OracleLogits(s.seed))
+			sinks[s.name], refs[s.name], bySession[lane.s] = sink, v41OracleReference(s.key, s.base, s.maxNew, v41OracleLogits(s.seed)), s.name
+			requests[s.name] = v41CoordinatorRequest(context.Background(), func(runContext context.Context) (inKernelGenerateResult, error) {
+				defer lane.s.Close()
+				coordinated, err := coalescedDecode(runContext, lane)
+				if !coordinated && err == nil {
+					err = errors.New("request did not enter coordinated decode")
+				}
+				return inKernelGenerateResult{gen: lane.gen}, err
+			})
+		}
+		requests["F"] = v41CoordinatorRequest(context.Background(), func(context.Context) (inKernelGenerateResult, error) {
+			return inKernelGenerateResult{}, prepareErr
+		})
+		waveRequests := make(map[int][]*inKernelCoalesceRequest, len(waves))
+		for call, names := range waves {
+			for _, n := range names {
+				waveRequests[call] = append(waveRequests[call], requests[n])
+			}
+		}
+		var batches [][]string
+		retiredBeforeReplacement := false
+		calls := 0
+		operations := inKernelV41DecodeOps{
+			batch: func(input []model.V41BatchLane) (model.V41BatchResult, error) {
+				calls++
+				names := make([]string, 0, len(input))
+				for _, lane := range input {
+					names = append(names, bySession[lane.Session])
+				}
+				batches = append(batches, names)
+				if queued := waveRequests[calls]; len(queued) > 0 {
+					v41LateFillQueue(planner, queued...)
+				}
+				if calls == probeCall {
+					select {
+					case <-requests[probeRequest].receiptReady:
+						retiredBeforeReplacement = true
+					default:
+					}
+				}
+				out := model.V41BatchResult{Selected: true, SharedHeadPanels: 1, SharedHeadRows: len(input), Lanes: make([]model.V41BatchLaneResult, len(input))}
+				for i, lane := range input {
+					out.Lanes[i] = model.V41BatchLaneResult{ID: lane.ID, Committed: true, Logits: v41OracleLogits(specByName[bySession[lane.Session]].seed)}
+				}
+				return out, nil
+			},
+			serial: func(*model.Session, int) ([]float32, error) {
+				return nil, errors.New("unexpected scalar replay")
+			},
+			wait: func(context.Context) error { return errors.New("unexpected busy wait") },
+		}
+		cohort := make([]*inKernelCoalesceRequest, 0, len(initial))
+		for _, n := range initial {
+			cohort = append(cohort, requests[n])
+		}
+		before := enginestep.Default.Snapshot(0, enginestep.KindCohort).Cohorts.Steps
+		planner.runV41DecodeCohort(cohort, func(ctx context.Context, got []*decodeLane, _ *model.Model) (inKernelV41DecodeReceipt, error) {
+			return inKernelDecodeV41LanesWithOps(ctx, got, operations)
+		})
+		after := enginestep.Default.Snapshot(1, enginestep.KindCohort)
+		if !retiredBeforeReplacement {
+			t.Errorf("%s: retiring request %s's receipt was not published before the replacement batch", name, probeRequest)
+		}
+		if !reflect.DeepEqual(batches, wantBatches) {
+			t.Errorf("%s: batch compositions=%v want=%v", name, batches, wantBatches)
+		}
+		cohortID := requests["A"].receipt.CohortID
+		if cohortID == 0 {
+			t.Fatalf("%s: cohort ID never assigned", name)
+		}
+		for n, want := range wantReceipts {
+			want.CohortID = cohortID // every request in the episode shares one cohort
+			wantReceipts[n] = want
+		}
+		involved := make(map[string]bool, len(wantReceipts))
+		for n := range wantReceipts {
+			involved[n] = true
+		}
+		for _, s := range specs {
+			if !involved[s.name] {
+				continue
+			}
+			req := requests[s.name]
+			select {
+			case <-req.receiptReady:
+			default:
+				t.Errorf("%s: request %s lacks terminal receipt", name, s.name)
+			}
+			if req.receipt.CohortID != cohortID {
+				t.Errorf("%s: request %s cohort=%d want %d", name, s.name, req.receipt.CohortID, cohortID)
+			}
+			if want := wantReceipts[s.name]; req.receipt != want {
+				t.Errorf("%s: request %s receipt=%+v want %+v", name, s.name, req.receipt, want)
+			}
+			if !eqInts(sinks[s.name].toks, refs[s.name]) {
+				t.Errorf("%s: request %s stream=%v want %v", name, s.name, sinks[s.name].toks, refs[s.name])
+			}
+		}
+		failed := requests["F"]
+		select {
+		case result := <-failed.result:
+			if result.err != prepareErr {
+				t.Errorf("%s: failed preparation result=%v", name, result.err)
+			}
+		default:
+			t.Errorf("%s: failed preparation request F has no result", name)
+		}
+		if failed.closes.Load() != 0 {
+			t.Errorf("%s: failed preparation request closed a session: %d", name, failed.closes.Load())
+		}
+		if want := wantReceipts["F"]; failed.receipt != want {
+			t.Errorf("%s: failed preparation receipt=%+v want %+v", name, failed.receipt, want)
+		}
+		if queued := v41LateFillQueued(planner); len(queued) != 0 {
+			t.Errorf("%s: queue retained %d requests after the episode", name, len(queued))
+		}
+		if after.Cohorts.Steps != before+1 {
+			t.Errorf("%s: cohort Steps delta=%d want 1", name, after.Cohorts.Steps-before)
+		}
+		if len(after.Recent) != 1 || after.Recent[0].Lanes != wantPeak {
+			t.Errorf("%s: cohort recent=%+v want peak %d", name, after.Recent, wantPeak)
+		}
+		return cohortID
+	}
+	// Episode shapes follow the driver's admission rule: a completed round opens
+	// 4-len(pending) slots, so healthy late-fills join as one wave up to that cap.
+	id1 := runEpisode("single-wave full fill", []string{"A", "B"},
+		map[int][]string{1: {"F", "C", "D", "E"}}, "B", 2,
+		[][]string{{"A", "B"}, {"A", "C", "D", "E"}, {"A"}}, 4,
+		map[string]InKernelBatchReceipt{
+			"A": wantReceipt(0, 4, 3, 7, 5), "B": wantReceipt(0, 2, 1, 2, 1),
+			"C": wantReceipt(0, 4, 1, 4, 4), "D": wantReceipt(0, 4, 1, 4, 4),
+			"E": wantReceipt(0, 4, 1, 4, 4), "F": wantReceipt(0, 0, 0, 0, 1),
+		})
+	id2 := runEpisode("staggered two-wave fill", []string{"A", "B"},
+		map[int][]string{1: {"C", "D"}, 2: {"E", "F"}}, "B", 2,
+		[][]string{{"A", "B"}, {"A", "C", "D"}, {"A", "E"}}, 3,
+		map[string]InKernelBatchReceipt{
+			"A": wantReceipt(0, 3, 3, 7, 5), "B": wantReceipt(0, 2, 1, 2, 1),
+			"C": wantReceipt(0, 3, 1, 3, 3), "D": wantReceipt(0, 3, 1, 3, 3),
+			"E": wantReceipt(0, 2, 1, 2, 5), "F": wantReceipt(0, 0, 0, 0, 3),
+		})
+	id3 := runEpisode("solo leader with late-filled followers", []string{"A"},
+		map[int][]string{1: {"B", "C", "D", "F"}}, "B", 3,
+		[][]string{{"A"}, {"A", "B", "C", "D"}, {"A"}}, 4,
+		map[string]InKernelBatchReceipt{
+			"A": wantReceipt(0, 4, 3, 6, 4), "B": wantReceipt(0, 4, 1, 4, 3),
+			"C": wantReceipt(0, 4, 1, 4, 3), "D": wantReceipt(0, 4, 1, 4, 3),
+			"F": wantReceipt(0, 0, 0, 0, 3),
+		})
+	if !(id1 < id2 && id2 < id3) {
+		t.Errorf("cohort IDs did not advance across episodes: %d %d %d", id1, id2, id3)
+	}
+}

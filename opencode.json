@@ -134,11 +134,40 @@
       "name": "FAK Strix Halo (local)",
       "npm": "@ai-sdk/openai-compatible",
       "options": {
+        "apiKey": "{file:~/.fak/router/gateway.key}",
         "baseURL": "{file:~/.fak/router/base_url}"
       }
     },
     "fak-router": {
       "models": {
+        "Qwen3.8-27B-UD-Q2_K_XL": {
+          "limit": {
+            "context": 131072,
+            "output": 16384
+          },
+          "name": "Qwen 3.8 27B through the local Fak router",
+          "options": {
+            "presence_penalty": 1.5,
+            "temperature": 0.7,
+            "top_k": 20,
+            "top_p": 0.8
+          },
+          "tool_call": true
+        },
+        "qwen/qwen3.8-27b": {
+          "limit": {
+            "context": 262144,
+            "output": 16384
+          },
+          "name": "Qwen 3.8 27B via Modular through Fak router",
+          "options": {
+            "presence_penalty": 1.5,
+            "temperature": 0.7,
+            "top_k": 20,
+            "top_p": 0.8
+          },
+          "tool_call": true
+        },
         "deepseek-ai/DeepSeek-V4.1-Flash": {
           "limit": {
             "context": 1048576,
@@ -157,7 +186,7 @@
       "name": "FAK Router (routing mode)",
       "npm": "@ai-sdk/openai-compatible",
       "options": {
-        "apiKey": "fak-local",
+        "apiKey": "{file:~/.fak/router/gateway.key}",
         "baseURL": "{file:~/.fak/router/base_url}",
         "timeout": 1800000
       }
