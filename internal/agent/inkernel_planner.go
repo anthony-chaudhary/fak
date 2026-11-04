@@ -223,6 +223,8 @@ type InKernelPlanner struct {
 	// nil keeps the historical unbounded host path; SetHostMemoryBudget arms it.
 	hostBudgetMu sync.Mutex
 	hostBudget   *hostMemoryBudget
+	// Outstanding session/beam charges survive ceiling replacement and disarming.
+	hostReservedBytes int64
 
 	// kvSpanEvict gates the model-side KV-quarantine eviction BRIDGE (internal/kvmmu)
 	// on the live serve path (issue #579). When on, a tool-result QUARANTINE drives a

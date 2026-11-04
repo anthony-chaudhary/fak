@@ -36,9 +36,10 @@ const inKernelHostReliefHalvings = 3
 
 // hostMemoryBudget is the armed per-process ceiling and its live usage probe.
 type hostMemoryBudget struct {
-	ceiling  int64
-	used     func() (int64, bool)
-	reserved int64 // bytes admitted to in-flight requests and not yet released
+	ceiling        int64
+	used           func() (int64, bool)
+	reserved       int64  // this generation's in-flight charges, for release provenance
+	sharedReserved *int64 // planner-wide charges across configuration generations
 
 	declined      int64
 	lastDeclineAt time.Time
@@ -60,8 +61,9 @@ type HostMemoryBudgetStats struct {
 	Structural    bool
 }
 
-// HostMemoryBudgetStats snapshots the armed host budget. An unarmed planner returns the
-// zero value (Armed=false); an unknown usage probe returns UsedKnown=false.
+// HostMemoryBudgetStats snapshots the host budget. An unarmed planner reports
+// Armed=false but retains Reserved for outstanding charges from earlier budgets.
+// An unknown usage probe reports UsedKnown=false.
 func (p *InKernelPlanner) HostMemoryBudgetStats() HostMemoryBudgetStats {
 	if p == nil {
 		return HostMemoryBudgetStats{}
@@ -70,12 +72,12 @@ func (p *InKernelPlanner) HostMemoryBudgetStats() HostMemoryBudgetStats {
 	defer p.hostBudgetMu.Unlock()
 	b := p.hostBudget
 	if b == nil {
-		return HostMemoryBudgetStats{}
+		return HostMemoryBudgetStats{Reserved: p.hostReservedBytes}
 	}
 	st := HostMemoryBudgetStats{
 		Armed:         true,
 		Ceiling:       b.ceiling,
-		Reserved:      b.reserved,
+		Reserved:      b.reservedTotal(),
 		DeclinedTotal: b.declined,
 		LastDeclineAt: b.lastDeclineAt,
 	}
@@ -85,7 +87,7 @@ func (p *InKernelPlanner) HostMemoryBudgetStats() HostMemoryBudgetStats {
 	}
 	st.UsedKnown = true
 	st.Used = used
-	st.AvailSigned = b.ceiling - used - b.reserved
+	st.AvailSigned = hostAvailableAfterReservations(b.ceiling, used, b.reservedTotal())
 	st.Structural = b.structural(used)
 	return st
 }
@@ -93,7 +95,7 @@ func (p *InKernelPlanner) HostMemoryBudgetStats() HostMemoryBudgetStats {
 // structural reports whether the idle resident footprint alone exhausts the ceiling.
 // The caller holds hostBudgetMu.
 func (b *hostMemoryBudget) structural(used int64) bool {
-	return b.reserved == 0 && b.ceiling-used <= 0
+	return b.reservedTotal() == 0 && b.ceiling-used <= 0
 }
 
 // inKernelSkipPrefixAdmissionKey marks a request whose working set fits the host ceiling
@@ -118,7 +120,7 @@ func (p *InKernelPlanner) SetHostMemoryBudget(ceiling int64, used func() (int64,
 		p.hostBudget = nil
 		return
 	}
-	p.hostBudget = &hostMemoryBudget{ceiling: ceiling, used: used}
+	p.hostBudget = &hostMemoryBudget{ceiling: ceiling, used: used, sharedReserved: &p.hostReservedBytes}
 }
 
 // hostMemoryAdmissionArmed reports whether this request must pass the host arm: the
@@ -286,9 +288,9 @@ func (p *InKernelPlanner) admitHostMemory(ctx context.Context, promptTokens, max
 	default:
 		b.declined++
 		b.lastDeclineAt = time.Now()
-		structural := b.reserved == 0 && avail <= 0
+		structural := b.reservedTotal() == 0 && avail <= 0
 		log.Printf("inkernel_chat host-memory model=%s action=decline session_bytes=%d avail_bytes=%d ceiling_bytes=%d reserved_bytes=%d structural=%t declined_total=%d",
-			p.modelID, session, avail, b.ceiling, b.reserved, structural, b.declined)
+			p.modelID, session, avail, b.ceiling, b.reservedTotal(), structural, b.declined)
 		return ctx, noop, &InKernelCapacityError{
 			Want:        session,
 			Avail:       max(avail, 0),
@@ -299,7 +301,12 @@ func (p *InKernelPlanner) admitHostMemory(ctx context.Context, promptTokens, max
 			Site:        "host-memory-precheck",
 		}
 	}
-	b.reserved += want
+	if !b.reserve(want) {
+		return ctx, noop, &InKernelCapacityError{
+			Want: want, Avail: 0, Scope: compute.MemoryScopeHost,
+			Site: "host-memory-precheck", Detail: "reservation overflow",
+		}
+	}
 	released := false
 	return ctx, func() {
 		p.hostBudgetMu.Lock()
@@ -308,10 +315,7 @@ func (p *InKernelPlanner) admitHostMemory(ctx context.Context, promptTokens, max
 			return
 		}
 		released = true
-		b.reserved -= want
-		if b.reserved < 0 {
-			b.reserved = 0
-		}
+		b.release(want)
 	}, nil
 }
 
@@ -322,7 +326,47 @@ func (b *hostMemoryBudget) available() (int64, bool) {
 	if !ok || used < 0 {
 		return 0, false
 	}
-	return b.ceiling - used - b.reserved, true
+	return hostAvailableAfterReservations(b.ceiling, used, b.reservedTotal()), true
+}
+
+// All reservation helpers run under the owning planner's hostBudgetMu.
+func (b *hostMemoryBudget) reservedTotal() int64 {
+	if b.sharedReserved != nil {
+		return *b.sharedReserved
+	}
+	return b.reserved
+}
+
+func (b *hostMemoryBudget) reserve(bytes int64) bool {
+	if bytes < 0 || b.reserved < 0 || b.reservedTotal() < 0 ||
+		b.reserved > math.MaxInt64-bytes || b.reservedTotal() > math.MaxInt64-bytes {
+		return false
+	}
+	b.reserved += bytes
+	if b.sharedReserved != nil {
+		*b.sharedReserved += bytes
+	}
+	return true
+}
+
+func (b *hostMemoryBudget) release(bytes int64) {
+	// Retain charges on inconsistent provenance rather than freeing another
+	// generation's reservation. The public release closures are idempotent.
+	if bytes < 0 || bytes > b.reserved || bytes > b.reservedTotal() {
+		return
+	}
+	b.reserved -= bytes
+	if b.sharedReserved != nil {
+		*b.sharedReserved -= bytes
+	}
+}
+
+func hostAvailableAfterReservations(ceiling, used, reserved int64) int64 {
+	available := ceiling - used // armed ceiling > 0 and known used >= 0
+	if reserved < 0 || available < math.MinInt64+reserved {
+		return math.MinInt64
+	}
+	return available - reserved
 }
 
 // trimPrefixCacheForHostPressure evicts prefix-cache entries until fits reports true:

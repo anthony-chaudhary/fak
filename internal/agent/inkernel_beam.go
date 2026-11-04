@@ -135,17 +135,16 @@ func (p *InKernelPlanner) admitBeamWorkspace(expected *hostMemoryBudget) (func()
 	if known && avail < beam.SearchWorkspaceBudgetBytes {
 		return nil, &InKernelCapacityError{Want: beam.SearchWorkspaceBudgetBytes, Avail: max(avail, 0), AvailSigned: avail, Scope: compute.MemoryScopeHost, Site: "native-beam-workspace"}
 	}
-	if b.reserved > math.MaxInt64-beam.SearchWorkspaceBudgetBytes {
+	if !b.reserve(beam.SearchWorkspaceBudgetBytes) {
 		return nil, fmt.Errorf("%w: workspace reservation overflow", ErrNativeBeamSearchUnsupported)
 	}
-	b.reserved += beam.SearchWorkspaceBudgetBytes
 	released := false
 	return func() {
 		p.hostBudgetMu.Lock()
 		defer p.hostBudgetMu.Unlock()
 		if !released {
 			released = true
-			b.reserved -= beam.SearchWorkspaceBudgetBytes
+			b.release(beam.SearchWorkspaceBudgetBytes)
 		}
 	}, nil
 }
