@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +22,67 @@ func TestReleaseShipCIState(t *testing.T) {
 		t.Run(tt.status+"/"+tt.conclusion, func(t *testing.T) {
 			if got := releaseShipCIState(tt.status, tt.conclusion); got != tt.want {
 				t.Fatalf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=20ms
+func TestReleaseShipAncestorCIDoesNotOverrideExactFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name, status, conclusion string
+		adopt, noRuns            bool
+	}{
+		{name: "failure", status: "completed", conclusion: "failure"},
+		{name: "timeout", status: "completed", conclusion: "timed_out"},
+		{name: "action required", status: "completed", conclusion: "action_required"},
+		{name: "startup failure", status: "completed", conclusion: "startup_failure"},
+		{name: "unrecognized conclusion", status: "completed", conclusion: "unknown"},
+		{name: "pending", status: "in_progress", adopt: true},
+		{name: "missing conclusion", status: "completed", adopt: true},
+		{name: "cancelled", status: "completed", conclusion: "cancelled", adopt: true},
+		{name: "no signal", adopt: true, noRuns: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sourceQueries, ancestorQueries, probes := 0, 0, 0
+			restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
+				switch {
+				case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "source-sha", "--event", "push", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha,event"):
+					sourceQueries++
+					if tc.noRuns {
+						return 0, `[]`
+					}
+					return 0, fmt.Sprintf(`[{"event":"push","headSha":"source-sha","status":%q,"conclusion":%q}]`, tc.status, tc.conclusion)
+				case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--branch", "main", "--status", "completed", "--event", "push", "--limit", "20", "--json", "databaseId,status,conclusion,url,headSha,updatedAt,event"):
+					ancestorQueries++
+					return 0, `[{"event":"push","status":"completed","conclusion":"success","headSha":"ancestor-sha"}]`
+				case name == "git" && sameArgs(args, "merge-base", "--is-ancestor", "ancestor-sha", "source-sha"):
+					probes++
+					return 0, ""
+				default:
+					t.Fatalf("unexpected command: %s %v", name, args)
+					return 127, "unexpected"
+				}
+			})
+			defer restore()
+			var result releaseShipResult
+			ci := releaseShipSourceCI(&result, t.TempDir(), releaseShipOptions{workflow: "ci.yml", trunk: "main", adoptAncestorCI: true}, "source-sha")
+			wantAncestorQueries := 0
+			if tc.adopt {
+				wantAncestorQueries = 1
+			}
+			if sourceQueries != 1 || ancestorQueries != wantAncestorQueries || probes != wantAncestorQueries || releaseShipPayloadOK(ci) != tc.adopt {
+				t.Fatalf("CI=%#v queries=%d/%d probes=%d; want adopted=%v", ci, sourceQueries, ancestorQueries, probes, tc.adopt)
+			}
+			if tc.adopt {
+				if ci["status"] != "green" || ci["adopted_ancestor_sha"] != "ancestor-sha" {
+					t.Fatalf("inconclusive source lost ancestor adoption: %#v", ci)
+				}
+			} else {
+				run, _ := ci["run"].(map[string]any)
+				if ci["status"] != "failed" || ci["conclusion"] != tc.conclusion || ci["source_sha"] != "source-sha" || run["headSha"] != "source-sha" || ci["adopted_ancestor_sha"] != nil {
+					t.Fatalf("exact failure evidence was replaced: %#v", ci)
+				}
 			}
 		})
 	}

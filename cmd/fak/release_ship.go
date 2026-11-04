@@ -1398,7 +1398,8 @@ func releaseShipSourceCI(result *releaseShipResult, root string, opts releaseShi
 			"run":             row,
 		}
 	}
-	if opts.adoptAncestorCI {
+	// Ancestor evidence can fill an inconclusive result, never erase an exact failure.
+	if opts.adoptAncestorCI && (state == "pending" || state == "missing" || state == "cancelled_or_starved") {
 		return releaseShipAdoptAncestorCI(result, root, opts, sha, map[string]any{
 			"ok":              false,
 			"status":          state,
