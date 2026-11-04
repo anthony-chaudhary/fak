@@ -633,6 +633,120 @@ func TestMTPTransactionPartialCommitRestoresLiveTargetPrefix(t *testing.T) {
 	}
 }
 
+// TestMTPZeroGrantAbsorb mirrors TensorFold's cuda_mtp_budget.zig test "zero
+// grant: Qwen CUDA MTP absorbs committed rows without scoring them":
+// zero-grant items are absorbed straight into the stream's head-owned state
+// while nothing reaches the scored batch; granted items pass through untouched.
+func TestMTPZeroGrantAbsorb(t *testing.T) {
+	m := qwen38HybridMTPEnabledSyntheticModel(t)
+	target := m.NewSession()
+	t.Cleanup(target.Close)
+
+	target.Prefill([]int{0, 1})
+	baseLen := target.Cache.Len()
+
+	tx, err := NewMTPTransactionWithTarget(target, MTPTransactionConfig{
+		HiddenSize:    m.Cfg.HiddenSize,
+		VocabSize:     m.Cfg.VocabSize,
+		MaxDraftDepth: 4,
+		Backend:       Qwen38MTPBackendMetal,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tx.Close() })
+
+	// Per-stream state ownership: the bound target is registered under
+	// TargetStreamID, seeded at the target's cache boundary.
+	got := tx.StreamState(TargetStreamID)
+	if got == nil || got.Begin != baseLen || got.End != baseLen {
+		t.Fatalf("target stream state = %+v, want begin/end %d", got, baseLen)
+	}
+
+	// Zero grant: two committed rows per item, absorbed 180 times without
+	// scoring (the Zig test's follow=[13,17] x 180 rounds -> 360 rows).
+	zero := MTPAbsorbItem{StreamID: TargetStreamID, Tokens: []int{13, 17}, Propose: false}
+	for i := 0; i < 180; i++ {
+		active, err := tx.Active([]MTPAbsorbItem{zero})
+		if err != nil {
+			t.Fatalf("round %d Active error = %v", i, err)
+		}
+		if len(active) != 0 {
+			t.Fatalf("round %d active = %d, want 0 (zero grant must not reach the scored batch)", i, len(active))
+		}
+	}
+	acc := tx.Accounting()
+	if acc.AbsorbedRows != 360 || acc.ZeroGrantAbsorbs != 180 {
+		t.Fatalf("accounting = %+v, want 360 absorbed rows over 180 zero-grant absorbs", acc)
+	}
+	if acc.ProposedCount != 0 || acc.AcceptedCount != 0 || acc.RejectedCount != 0 || acc.RollbackCount != 0 {
+		t.Fatalf("zero-grant absorb must not score: %+v", acc)
+	}
+	if st := tx.StreamState(TargetStreamID); st.End != baseLen+360 {
+		t.Fatalf("stream End = %d, want %d", st.End, baseLen+360)
+	}
+
+	// Granted items pass through untouched; mixed batches split correctly.
+	granted := MTPAbsorbItem{StreamID: TargetStreamID, Tokens: []int{21}, Propose: true}
+	active, err := tx.Active([]MTPAbsorbItem{granted, zero, granted})
+	if err != nil {
+		t.Fatalf("Active(mixed) error = %v", err)
+	}
+	if len(active) != 2 || !active[0].Propose || !active[1].Propose {
+		t.Fatalf("mixed batch active = %+v, want the two granted items", active)
+	}
+	if got := tx.Accounting().AbsorbedRows; got != 362 {
+		t.Fatalf("AbsorbedRows = %d, want 362 after mixed batch", got)
+	}
+
+	// Distinct streams own distinct buffers: absorbing elsewhere leaves the
+	// target stream's state untouched.
+	other := MTPAbsorbItem{StreamID: "peer", Tokens: []int{5, 6, 7}, Hidden: []float32{1, 2, 3, 4}, Propose: false}
+	if err := tx.Absorb(other); err != nil {
+		t.Fatalf("Absorb(peer) error = %v", err)
+	}
+	if peer := tx.StreamState("peer"); peer == nil || peer.End != 3 || peer.LastHidden == nil {
+		t.Fatalf("peer stream state = %+v, want End 3 with last hidden", peer)
+	}
+	if got := tx.StreamState(TargetStreamID); got.End != baseLen+362 {
+		t.Fatalf("target stream End = %d, want %d (peer absorb must not touch it)", got.End, baseLen+362)
+	}
+	if tx.StreamCount() != 2 {
+		t.Fatalf("StreamCount = %d, want 2", tx.StreamCount())
+	}
+
+	// Deep-copy discipline: mutating the returned state cannot corrupt the head.
+	peek := tx.StreamState("peer")
+	peek.End = 99
+	if got := tx.StreamState("peer"); got.End != 3 {
+		t.Fatalf("StreamState leaked internals: End = %d, want 3", got.End)
+	}
+
+	// Fail-closed: NaN in committed rows downgrades instead of corrupting state.
+	nanTx, err := NewMTPTransactionWithTarget(target, MTPTransactionConfig{
+		HiddenSize:    m.Cfg.HiddenSize,
+		VocabSize:     m.Cfg.VocabSize,
+		MaxDraftDepth: 4,
+		Backend:       Qwen38MTPBackendMetal,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nanTx.Close()
+	nan := MTPAbsorbItem{StreamID: TargetStreamID, Tokens: []int{1}, Hidden: []float32{1, float32(math.NaN()), 3, 4}, Propose: false}
+	if _, err := nanTx.Active([]MTPAbsorbItem{nan}); err == nil {
+		t.Fatal("expected error on NaN in zero-grant absorb")
+	}
+	if !nanTx.IsDowngraded() || nanTx.DowngradeReason() != MTPDowngradeNumericalNaN {
+		t.Fatalf("expected numerical_nan downgrade, got downgraded=%v reason=%q", nanTx.IsDowngraded(), nanTx.DowngradeReason())
+	}
+
+	// The zero-grant path refuses granted items outright.
+	if err := tx.Absorb(granted); err == nil {
+		t.Fatal("expected error absorbing a granted item")
+	}
+}
+
 func assertNoForeignFallback(t *testing.T, tx *MTPTransaction) {
 	t.Helper()
 	eng := string(tx.Engine())

@@ -2011,3 +2011,24 @@ No Zig runtime, kernel, or model code is included.
 The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
 "TensorFold benchmark evidence" section above (same pinned repository and
 revision); they apply to this adaptation as well.
+
+## TensorFold integrated MTP head zero-grant absorb
+
+`internal/model/mtp_transaction.go` (the MTP head's per-stream state ownership and
+zero-grant absorb: `MTPStreamState`, `MTPAbsorbItem`, `Active`, `Absorb`, and the
+per-stream seeding in `NewMTPTransactionWithTarget`) adapts the integrated MTP head's
+per-stream context ownership from line 117 (`Mtp.init`, the per-stream `Ctx` ring/
+last/held-draft buffers) of `zig/src/families/qwen3_5/cuda_mtp.zig` and the zero-grant
+filter from `zig/src/families/qwen3_5/cuda_mtp_budget.zig` (`active` routing
+`propose=false` items to `absorbOne`) in TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209` (Apache-2.0):
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/families/qwen3_5/cuda_mtp.zig
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/families/qwen3_5/cuda_mtp_budget.zig
+
+Head-owned per-stream recurrent/ring buffers, committed-row absorption without
+scoring, and the granted-versus-zero-grant batch split are re-expressed in idiomatic
+Go over fak's existing MTP transaction seam. No upstream Zig code blocks, CUDA
+kernels, or weight layouts are copied.
+
+The pinned repository's Apache-2.0 LICENSE is reproduced in the existing TensorFold
+license section of this file and also applies here.
