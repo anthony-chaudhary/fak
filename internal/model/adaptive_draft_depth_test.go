@@ -1,6 +1,9 @@
 package model
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestAdaptiveDraftDepthHysteresisAndReceipt(t *testing.T) {
 	c := AdaptiveDraftDepthController{MinDepth: 1, MaxDepth: 4, RaiseAcceptance: .8, LowerAcceptance: .3, HysteresisWindows: 2}
@@ -46,5 +49,46 @@ func TestAdaptiveDraftDepthRejectsInvalid(t *testing.T) {
 	c := AdaptiveDraftDepthController{MinDepth: 1, MaxDepth: 2, RaiseAcceptance: .8, LowerAcceptance: .2, HysteresisWindows: 2}
 	if _, e := c.Observe(AdaptiveDraftSample{Accepted: 2, Proposed: 1}); e == nil {
 		t.Fatal("accepted impossible sample")
+	}
+}
+
+// fak-test:runtime fast est=20ms lane=default
+func TestAdaptiveDraftDepthModuleNaming(t *testing.T) {
+	key, e := AdaptiveDraftModuleKey("qwen3.8-exact", 4)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if key != "qwen3.8-exact_d4" {
+		t.Fatalf("key=%q", key)
+	}
+	reg := NewAdaptiveDraftModuleRegistry()
+	if e := reg.Compile("qwen3.8-exact", 4, "module-d4"); e != nil {
+		t.Fatal(e)
+	}
+	got, ok := reg.Lookup("qwen3.8-exact", 4)
+	if !ok || got != "module-d4" {
+		t.Fatalf("same-length lookup=(%q,%v)", got, ok)
+	}
+	if _, ok := reg.Lookup("qwen3.8-exact", 5); ok {
+		t.Fatal("length-mismatched lookup must miss")
+	}
+	if e := reg.Compile("qwen3.8-exact", 5, "module-d5"); e != nil {
+		t.Fatal(e)
+	}
+	got, ok = reg.Lookup("qwen3.8-exact", 5)
+	if !ok || got != "module-d5" {
+		t.Fatalf("recompiled lookup=(%q,%v)", got, ok)
+	}
+	if _, ok := reg.Lookup("other-checkpoint", 4); ok {
+		t.Fatal("cross-artifact lookup must miss")
+	}
+	if e := reg.Compile("", 4, "module"); !errors.Is(e, ErrInvalidAdaptiveDraftModule) {
+		t.Fatalf("empty artifact err=%v", e)
+	}
+	if e := reg.Compile("qwen3.8-exact", 0, "module"); !errors.Is(e, ErrInvalidAdaptiveDraftModule) {
+		t.Fatalf("zero draft length err=%v", e)
+	}
+	if e := reg.Compile("qwen3.8-exact", 4, ""); !errors.Is(e, ErrInvalidAdaptiveDraftModule) {
+		t.Fatalf("empty module err=%v", e)
 	}
 }
