@@ -599,6 +599,12 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 	}
 	tLoad := time.Now()
 	if info, err := os.Stat(modelPath); err == nil && info.IsDir() {
+		// Layout guard (lg-preflight-wire): the header-only manifest preflight refuses a
+		// broken checkpoint before any tensor byte is read, fail-closed.
+		if err := serveAdmitSafetensorsPreflight(modelPath); err != nil {
+			fmt.Fprintln(os.Stderr, "fak serve: safetensors manifest preflight:", err)
+			return nil, false, nil, gateway.StartupPhase{}, nil, err
+		}
 		m, err := fakmodel.LoadSafetensorsQuantConfigDir(modelPath)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "fak serve: safetensors load:", err)
@@ -624,6 +630,14 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 	}
 	artifactQuant := ggufload.ClassifyTensorQuant(artifactSource.File.Tensors)
 	hostQ3Fallback := !cpuOffloadExperts && serveV41CUDAHostQ3Fallback(artifactSource, backend)
+	// Layout guard (lg-preflight-wire): the header-only manifest preflight runs on the merged
+	// shard header before arm selection and fail-closed — a refusal aborts the load before any
+	// tensor payload read or dispatch.
+	if err := serveAdmitManifestPreflight(ggufPath, artifactSource.File); err != nil {
+		_ = artifactSource.Close()
+		fmt.Fprintln(os.Stderr, "fak serve: GGUF manifest preflight:", err)
+		return nil, false, nil, gateway.StartupPhase{}, nil, err
+	}
 	if err := artifactSource.Close(); err != nil {
 		fmt.Fprintln(os.Stderr, "fak serve: GGUF quant inventory close:", err)
 		return nil, false, nil, gateway.StartupPhase{}, nil, err
