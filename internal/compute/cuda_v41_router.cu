@@ -16,6 +16,19 @@
 // the in-order F32 sum (+1e-20 when full) and the four-word fault record follow
 // decodeV41RouterTopK. Every arithmetic step is a separately rounded __f*_rn
 // so nvcc never contracts it.
+//
+// The fused sqrt(softplus) scoring folded into this pass for both the gate
+// and the token-hash layers is the vLLM topkGatingSoftplusSqrt and
+// dsv4HashTopkSoftplusSqrt pattern (vllm-project/vllm
+// csrc/moe/topk_softplus_sqrt_kernels.cu:245,78 at
+// ae065918640a198a56f6f17eb45e251c3229fe41, Apache-2.0): score every expert
+// sqrt(softplus(z)) inside the selection kernel, take the gate picks by
+// top-k or the hash picks from the token-to-expert table, and renormalize
+// the unbiased scores by the in-order sum times the routed scaling factor.
+// Re-expressed, not copied: upstream's log(1+exp) form rounds 1+exp to 1 for
+// |z| >~= 16.6 and zeroes those scores, so the stable log1p(exp(-|z|)) form
+// keeps the underflow-region scores the host reference publishes, and
+// upstream's NaN clamp for padding rows stays fak's four-word fault record.
 
 #define V41RT_LANES 32
 #define V41RT_ROWS 4
