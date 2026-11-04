@@ -2095,3 +2095,34 @@ kernels, or weight layouts are copied.
 
 The pinned repository's Apache-2.0 LICENSE is reproduced in the existing TensorFold
 license section of this file and also applies here.
+
+## TensorFold grammar/completion-token budget
+
+`internal/agent/inkernel_grammar_budget.go` (the guided-decode `grammar_budget`
+side-band, its arm-time refusal ladder, and the bounded completion-distance
+probe) adapts the `grammar_budget` feature flag from
+`zig/src/server/server.zig:339` (`budgetStructure`) and
+`zig/src/core/lanes/grammar.zig:234` (`Constraint.Budget`) in TensorFold at
+revision `9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/server/server.zig
+
+The adapted contract: an off-unless-requested boolean that, when armed, keeps
+every grammar mask clearing the bits of the tokens after which no reply
+completes within the remaining draws of the request's token ceiling; refusals
+for a non-boolean value, an uncompiled grammar, a missing budget ABI, and
+rules not coverable by a bound; and a no-op when the request carries no
+grammar. The budget reasons over the same draw space as the decode loop, so
+reasoning tokens count against it.
+
+Changed for Fak: idiomatic Go over fak's `model.LogitMask` seam in
+`internal/agent` instead of xgrammar matcher tables, a node-capped depth-first
+completion-distance probe with fail-open degradation instead of precomputed
+state tables, and sentinel errors wired into the guided-decode refusal
+boundary. No upstream Zig code blocks are copied; the adaptation is witnessed
+by `TestGrammarBudgetWithinMaxTokens` and
+`TestGrammarBudgetArmedCompletion` in
+`internal/agent/inkernel_grammar_budget_test.go`.
+
+The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
+"TensorFold benchmark evidence" section above (same pinned repository and
+revision); they apply to this adaptation as well.
