@@ -22,6 +22,7 @@ import (
 // It does not execute upload admission, allocation, copies, frees, or CUDA. The
 // fixtures satisfy the outer nonempty, rank-two, and complete-row preconditions.
 func TestCUDAUploadCacheGeometryHost(t *testing.T) {
+	assertCUDAUploadLockedBoundary(t)
 	if os.Getenv("FAK_TEST_CUDA_UPLOAD_CACHE_GEOMETRY_HOST") != "1" {
 		t.Skip("set FAK_TEST_CUDA_UPLOAD_CACHE_GEOMETRY_HOST=1 for the host cache witness")
 	}
@@ -33,7 +34,7 @@ func TestCUDAUploadCacheGeometryHost(t *testing.T) {
 	program.Write(src[fs.Position(fn.Pos()).Offset:fs.Position(fn.End()).Offset])
 	program.WriteByte('\n')
 	for _, route := range []struct{ file, method string }{
-		{"cuda.go", "uploadClass"},
+		{"cuda.go", "uploadClassLocked"},
 		{"cuda_upload.go", "uploadQ2Resident"},
 		{"cuda_upload.go", "uploadRawKQuant"},
 	} {
@@ -242,10 +243,10 @@ func TestCacheGeometry(t *testing.T) {
 		layout Layout
 		first, second []int
 	}{
-		{"f32", probeuploadClass, F32, F32, RowMajor, []int{2,64}, []int{4,32}},
-		{"f16-row", probeuploadClass, F32, F16, RowMajor, []int{2,64}, []int{4,32}},
-		{"f16-col", probeuploadClass, F32, F16, ColMajor, []int{2,64}, []int{4,32}},
-		{"q8-from-f32", probeuploadClass, F32, Q8_0, RowMajor, []int{2,64}, []int{4,32}},
+		{"f32", probeuploadClassLocked, F32, F32, RowMajor, []int{2,64}, []int{4,32}},
+		{"f16-row", probeuploadClassLocked, F32, F16, RowMajor, []int{2,64}, []int{4,32}},
+		{"f16-col", probeuploadClassLocked, F32, F16, ColMajor, []int{2,64}, []int{4,32}},
+		{"q8-from-f32", probeuploadClassLocked, F32, Q8_0, RowMajor, []int{2,64}, []int{4,32}},
 		{"q2-resident", probeuploadQ2Resident, Q2_0, Q2_0, RowMajor, []int{2,64}, []int{4,32}},
 		{"raw-k", probeuploadRawKQuant, Q4_K, Q4_K, RowMajor, []int{2,512}, []int{4,256}},
 	} {
