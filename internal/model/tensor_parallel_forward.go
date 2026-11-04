@@ -60,6 +60,13 @@ type TPConfig struct {
 	AttnRanks int
 	FFNRanks  int
 	Coll      Collective
+	// SharedAttentionGeometry makes ForwardTP consult the shared-attention shape contract
+	// (shared_attention_geometry.go, ADAPTED from TensorFold shared_attention.zig) before any
+	// sharded-attention dispatch: NumHeads/NumKVHeads/HeadDim/rotary width must pass
+	// SharedAttentionShape.Validate. Set it when serving under the native shared-attention
+	// kernel contract. The CPU reference path stays open to toy fixture geometries (e.g.
+	// HeadDim=8 bit-exact oracle models) that the kernel contract does not admit.
+	SharedAttentionGeometry bool
 }
 
 // clampRanks bounds a requested rank count to [1, dim]: a dimension cannot be sharded across
@@ -72,6 +79,21 @@ func clampRanks(r, dim int) int {
 		return dim
 	}
 	return r
+}
+
+// sharedAttentionGeometry derives the shared-attention shape contract from the model config:
+// query/KV head counts, head dim, the effective rotary width (cfg.rotaryDim()), and this
+// forward's key capacity (the sequence length). ForwardTP validates it before native
+// dispatch when TPConfig.SharedAttentionGeometry is set.
+func (m *Model) sharedAttentionGeometry(capacity int) SharedAttentionShape {
+	cfg := m.Cfg
+	return SharedAttentionShape{
+		QueryHeads: cfg.NumHeads,
+		KVHeads:    cfg.NumKVHeads,
+		HeadDim:    cfg.HeadDim,
+		RotaryDim:  cfg.rotaryDim(),
+		Capacity:   capacity,
+	}
 }
 
 // forwardTPSupported reports (as an error) the first reason this model's architecture is not
@@ -508,6 +530,15 @@ func (m *Model) ForwardTP(ids []int, tp TPConfig) (*Activations, error) {
 	coll := tp.Coll
 	if coll == nil {
 		coll = LocalCollective{}
+	}
+	// Shared-attention geometry gate, consulted before native dispatch: when the caller
+	// serves under the shared-attention kernel contract, refuse GQA/RoPE shapes the
+	// contract does not admit here, instead of letting integer-division head banding
+	// proceed on a shape the kernel cannot serve.
+	if tp.SharedAttentionGeometry {
+		if err := m.sharedAttentionGeometry(seq).Validate(); err != nil {
+			return nil, err
+		}
 	}
 	attnPlan, err := NewTPPlan(cfg.NumKVHeads, clampRanks(tp.AttnRanks, cfg.NumKVHeads))
 	if err != nil {

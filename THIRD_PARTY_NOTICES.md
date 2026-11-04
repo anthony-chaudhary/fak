@@ -1820,3 +1820,30 @@ existing E2M1/E4M3 tables. No upstream Zig code blocks are copied.
 
 The pinned repository's Apache-2.0 LICENSE is reproduced in the existing TensorFold
 license section of this file and also applies here.
+
+## TensorFold shared-attention geometry contract
+
+`internal/model/shared_attention_geometry.go` adapts the shared-attention
+geometry contract from `zig/src/core/shared_attention.zig:17` in TensorFold at
+revision `9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/shared_attention.zig
+
+The adapted contract: query heads divide KV heads (GQA) with head dim bounded
+at 256 and 32-aligned; the rotary range fits the head and is even; the byte
+mask[row*stride+key] alone decides which keys each row sees; and cache appends
+go to unique physical slots on pairwise-disjoint K/V/cache stores. `ForwardTP`
+in `internal/model/tensor_parallel_forward.go` consults the shape half before
+native dispatch when `TPConfig.SharedAttentionGeometry` is set, and
+`internal/model/shared_attention_geometry_test.go` pins the sentinel refusals.
+
+Changed for Fak: idiomatic Go over fak's float32 tensors with sentinel errors
+(`ErrSharedAttentionShape`, `ErrSharedAttentionView`,
+`ErrSharedAttentionAppend*`, `ErrSharedAttentionAliased`, ...) instead of Zig
+error sets; buffer identity by opaque store ID with fail-closed empty-ID
+aliasing; and an opt-in ForwardTP gate so the CPU reference path keeps serving
+toy fixture geometries the kernel contract does not admit. No Zig runtime,
+kernel, or model code is included.
+
+The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
+"TensorFold benchmark evidence" section above (same pinned repository and
+revision); they apply to this adaptation as well.
