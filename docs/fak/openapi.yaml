@@ -4180,7 +4180,8 @@ components:
           description: Only version 1 is served; anything else is refused 400 `decisions_bad_prompt_format`.
         temperature:
           type: number
-          exclusiveMinimum: 0
+          minimum: 0
+          exclusiveMinimum: true
           description: Finite and strictly positive; divides the logits before the stable softmax.
         prompt:
           type: string
