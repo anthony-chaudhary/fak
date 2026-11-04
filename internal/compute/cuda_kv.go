@@ -39,6 +39,14 @@ func (c *cudaBackend) NewKV(cfg KVConfig) KVStore {
 }
 
 func (c *cudaBackend) newContiguousKV(cfg KVConfig) *cudaKV {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return c.newContiguousKVLocked(cfg)
+}
+
+// newContiguousKVLocked owns native allocator-map access and rollback under the
+// caller's cudaMu. Restore already holds this lock; public construction does not.
+func (c *cudaBackend) newContiguousKVLocked(cfg KVConfig) *cudaKV {
 	dtype := F32
 	switch cfg.Precision {
 	case KVPrecisionF32:
@@ -62,8 +70,8 @@ func (c *cudaBackend) newContiguousKV(cfg KVConfig) *cudaKV {
 	}
 	free := FreeUnknown
 	if graphEnabled && cfg.GraphCapture {
-		// Unlocked query: RestoreKVFromHost calls NewKV under cudaMu, and cudaMemGetInfo
-		// is thread-safe in the runtime.
+		// Caller holds cudaMu for the allocator maps used below. The runtime
+		// memory query itself is thread-safe.
 		var freeMem, totalMem C.size_t
 		if C.fcuda_mem_info(&freeMem, &totalMem) == 0 && totalMem > 0 {
 			free = uint64ToCapInt64(uint64(freeMem))
@@ -557,7 +565,7 @@ func (c *cudaBackend) restoreContiguousKVFromHost(state KVHostSnapshot) (out KVS
 	}
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	k := c.newContiguousKV(cloneKVConfig(state.Config))
+	k := c.newContiguousKVLocked(cloneKVConfig(state.Config))
 	if k == nil {
 		return nil, fmt.Errorf("cuda: NewKV returned an incompatible store during host restore")
 	}
