@@ -560,6 +560,11 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 	requireCUDAUploadLayout("cuda Upload", t, as, class, site)
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	return c.uploadClassLocked(t, as, class, site)
+}
+
+// Caller holds cudaMu and has validated the upload layout.
+func (c *cudaBackend) uploadClassLocked(t Tensor, as Dtype, class MemoryClass, site string) Tensor {
 	hb, ok := t.buf.(HostBuffer)
 	if !ok {
 		panic(&CUDAOpError{
@@ -1800,30 +1805,31 @@ func (c *cudaBackend) PrefillBatch(args PrefillBatchArgs) (PrefillBatchResult, e
 
 	// Ensure inputs are resident device tensors
 	xDev := args.X
-	if _, isHost := c.Host(xDev); isHost {
-		xDev = c.Upload(xDev, F32)
+	hostX, isHostX := c.Host(xDev)
+	var qf, kf, vf []float32
+	if isHostX {
+		qf, kf, vf, err = c.prefillHostProjections(xDev, hostX, args.Wq, args.Wk, args.Wv, P)
+		if err != nil {
+			return PrefillBatchResult{}, err
+		}
+	} else {
+		wqDev := args.Wq
+		if _, isHost := c.Host(wqDev); isHost {
+			wqDev = c.Upload(wqDev, F32)
+		}
+		wkDev := args.Wk
+		if _, isHost := c.Host(wkDev); isHost {
+			wkDev = c.Upload(wkDev, F32)
+		}
+		wvDev := args.Wv
+		if _, isHost := c.Host(wvDev); isHost {
+			wvDev = c.Upload(wvDev, F32)
+		}
+		qTen := c.BatchedMatMul(wqDev, xDev, P)
+		kTen := c.BatchedMatMul(wkDev, xDev, P)
+		vTen := c.BatchedMatMul(wvDev, xDev, P)
+		qf, kf, vf = c.Read(qTen), c.Read(kTen), c.Read(vTen)
 	}
-	wqDev := args.Wq
-	if _, isHost := c.Host(wqDev); isHost {
-		wqDev = c.Upload(wqDev, F32)
-	}
-	wkDev := args.Wk
-	if _, isHost := c.Host(wkDev); isHost {
-		wkDev = c.Upload(wkDev, F32)
-	}
-	wvDev := args.Wv
-	if _, isHost := c.Host(wvDev); isHost {
-		wvDev = c.Upload(wvDev, F32)
-	}
-
-	// 1. Batched projections on CUDA GPU
-	qTen := c.BatchedMatMul(wqDev, xDev, P)
-	kTen := c.BatchedMatMul(wkDev, xDev, P)
-	vTen := c.BatchedMatMul(wvDev, xDev, P)
-
-	qf := c.Read(qTen)
-	kf := c.Read(kTen)
-	vf := c.Read(vTen)
 
 	kRawAll := append([]float32(nil), kf...)
 	qRoped := make([]float32, len(qf))

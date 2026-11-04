@@ -4,10 +4,6 @@ package compute
 
 import (
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
 	"strings"
 	"testing"
 	"unsafe"
@@ -79,22 +75,9 @@ func TestCUDAF32Q8AlignedCachedWidthsRemainAdmitted(t *testing.T) {
 // Unmeasured estimate. AST checks constrain the guard's actual cache/native order
 // and its explicit empty-input exception; no zero-sized native allocation is run.
 func TestCUDAQ8WidthGuardPrecedesCacheAndPreservesEmptyPolicy(t *testing.T) {
-	raw, err := os.ReadFile("cuda.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	fs := token.NewFileSet()
-	file, err := parser.ParseFile(fs, "cuda.go", raw, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bodies := map[string]string{}
-	for _, decl := range file.Decls {
-		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Body != nil {
-			bodies[fn.Name.Name] = string(raw[fs.Position(fn.Body.Pos()).Offset:fs.Position(fn.Body.End()).Offset])
-		}
-	}
-	body := bodies["uploadClass"]
+	assertCUDAUploadLockedBoundary(t)
+	bodies := cudaUploadContractBodies(t)
+	body := bodies["uploadClassLocked"]
 	guard := "store == Q8_0 && len(f) > 0 && len(t.Shape) == 2 && t.Shape[1]%q8DeviceBlock != 0"
 	at := strings.Index(body, guard)
 	cache := strings.Index(body, "uploadCache[")

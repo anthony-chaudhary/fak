@@ -616,3 +616,5 @@ extern "C" void fcuda_d2d(void *dst, const void *src, size_t n) {
   FCUDA_TS("d2d_copy", dim3(0, 0), CK(cudaMemcpyAsync(dst, src, n, cudaMemcpyDeviceToDevice, g_stream)));
 }
 extern "C" void fcuda_sync(void) { CK(cudaDeviceSynchronize()); }
+
+#include "prefill_input_owner.cuh"

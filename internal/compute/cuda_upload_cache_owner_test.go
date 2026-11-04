@@ -24,6 +24,7 @@ import (
 // real cleanup control flow, not CUDA fault injection, fences or poison recovery.
 // Device numerics and serving-model behavior are not exercised.
 func TestCUDAUploadCacheOwnerHost(t *testing.T) {
+	assertCUDAUploadLockedBoundary(t)
 	if os.Getenv("FAK_TEST_CUDA_UPLOAD_CACHE_OWNER_HOST") != "1" {
 		t.Skip("set FAK_TEST_CUDA_UPLOAD_CACHE_OWNER_HOST=1 for the host upload-cache owner witness")
 	}
@@ -33,14 +34,14 @@ func TestCUDAUploadCacheOwnerHost(t *testing.T) {
 		"QuantSpec": false, "Buffer": false, "HostBuffer": false, "Tensor": false,
 		"ErrUnsupportedLayout": false, "checkRowMajor": false, "requireRowMajor": false,
 		"checkCUDAUploadLayout": false, "requireCUDAUploadLayout": false,
-		"cudaQ8UploadSource": false, "makeTensor": false, "Tensor.Numel": false,
+		"cudaRawUploadIsVerbatim": false, "cudaQ8UploadSource": false, "makeTensor": false, "Tensor.Numel": false,
 		"NewQ2": false, "bytesAsI8": false, "*cudaBackend.uploadQ2Resident": false,
-		"*cudaBackend.Upload": false, "*cudaBackend.uploadClass": false,
+		"*cudaBackend.Upload": false, "*cudaBackend.uploadClass": false, "*cudaBackend.uploadClassLocked": false,
 		"*cudaBackend.Free": false, "*cudaBackend.cudaFreeLocked": false,
 		"*cudaBackend.cudaFreeStorageLocked": false,
 		"*cudaBackend.Recycle":               false, "*cudaBackend.releaseTransientBuffers": false,
 	}
-	for _, path := range []string{"compute.go", "tensor_layout.go", "quant_q2.go", "cuda_upload.go", "cuda.go"} {
+	for _, path := range []string{"compute.go", "tensor_layout.go", "quant_q2.go", "cuda_upload.go", "cuda_device_ops.go", "cuda.go"} {
 		src, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)

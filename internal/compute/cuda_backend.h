@@ -108,6 +108,11 @@ void fcuda_panel_peak_reset(void);
 void fcuda_h2d(void *d, const void *h, size_t bytes);
 /* Returns the CUDA copy status; failure does not certify stream drain. */
 int fcuda_h2d_checked(void *d, const void *h, size_t bytes);
+/* Private, single-owner host-prefill input. All calls require cudaMu. */
+int fcuda_prefill_input_admit(void);
+int fcuda_prefill_input_acquire(const void *host, size_t bytes, int panel, void **out, int *managed);
+void fcuda_prefill_input_failed(int status);
+int fcuda_prefill_input_retire(void *expected, size_t bytes);
 /* Checked D2H: 0 only after a completed copy; otherwise 1000 + cudaError_t
  * from device selection or the copy. Bytes count only successful copies.
  * The ordinary helper uses the current device, like its legacy void wrapper. */

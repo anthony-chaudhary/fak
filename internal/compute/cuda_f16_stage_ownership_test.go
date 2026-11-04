@@ -4,10 +4,6 @@ package compute
 
 import (
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
 	"strings"
 	"testing"
 	"unsafe"
@@ -110,22 +106,8 @@ func TestCUDAF16StageSuccessPreservesOwners(t *testing.T) {
 // Actual uploadF16 remains the consumer; no CUDA calls during this contract check.
 // fak-test:runtime fast est=10ms lane=default
 func TestCUDAF16StageNativeBindingAndOrder(t *testing.T) {
-	raw, err := os.ReadFile("cuda.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	fs := token.NewFileSet()
-	file, err := parser.ParseFile(fs, "cuda.go", raw, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bodies := map[string]string{}
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if ok && fn.Body != nil {
-			bodies[fn.Name.Name] = string(raw[fs.Position(fn.Body.Pos()).Offset:fs.Position(fn.Body.End()).Offset])
-		}
-	}
+	assertCUDAUploadLockedBoundary(t)
+	bodies := cudaUploadContractBodies(t)
 	body := bodies["uploadF16"]
 	for _, want := range []string{"c.devF16(t.Shape, t.Layout)", "c.allocateF16UploadStage(buf, len(f)*4,", "c.dallocClass(bytes, MemoryScratchpad, \"f16-stage\")", "C.fcuda_free(ptr)", "C.fcuda_f32_to_f16_T(", "C.fcuda_f32_to_f16(", "C.fcuda_free(stage.ptr)", "c.accountImmutableWeightUpload(", "uploadCache["} {
 		if !strings.Contains(body, want) {
@@ -141,7 +123,7 @@ func TestCUDAF16StageNativeBindingAndOrder(t *testing.T) {
 		prev = i
 	}
 	for _, want := range []string{"cudaMu.Lock()", "defer cudaMu.Unlock()", "return c.uploadF16(t, hb, f, hp)"} {
-		if !strings.Contains(bodies["uploadClass"], want) {
+		if !strings.Contains(bodies["uploadClass"]+bodies["uploadClassLocked"], want) {
 			t.Errorf("missing serialized consumer %q", want)
 		}
 	}

@@ -4,10 +4,6 @@ package compute
 
 import (
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -149,22 +145,8 @@ func TestCUDADevQ2SuccessfulAndEmptyLayout(t *testing.T) {
 // Pin the allocation transaction to the real packed upload owner and native leaves.
 // fak-test:runtime fast est=10ms lane=default
 func TestCUDADevQ2NativeAllocationBinding(t *testing.T) {
-	raw, err := os.ReadFile("cuda.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	set := token.NewFileSet()
-	file, err := parser.ParseFile(set, "cuda.go", raw, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bodies := map[string]string{}
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if ok && fn.Body != nil {
-			bodies[fn.Name.Name] = string(raw[set.Position(fn.Body.Pos()).Offset:set.Position(fn.Body.End()).Offset])
-		}
-	}
+	assertCUDAUploadLockedBoundary(t)
+	bodies := cudaUploadContractBodies(t)
 	for _, want := range []string{"c.devQ2WithOperations(", "c.dallocWeight,", "c.dallocClass(bytes, MemoryWeights, \"q2-scale\")", "C.fcuda_free(ptr)"} {
 		if !strings.Contains(bodies["devQ2"], want) {
 			t.Errorf("native allocation binding missing %q", want)
@@ -175,7 +157,7 @@ func TestCUDADevQ2NativeAllocationBinding(t *testing.T) {
 			t.Errorf("actual caller %s disconnected", name)
 		}
 	}
-	if !strings.Contains(bodies["uploadClass"], "return c.uploadQ2Resident(t, hb)") || !strings.Contains(bodies["uploadClass"], "cudaMu.Lock()") || !strings.Contains(bodies["uploadClass"], "defer cudaMu.Unlock()") {
+	if !strings.Contains(bodies["uploadClassLocked"], "return c.uploadQ2Resident(t, hb)") || !strings.Contains(bodies["uploadClass"], "cudaMu.Lock()") || !strings.Contains(bodies["uploadClass"], "defer cudaMu.Unlock()") {
 		t.Fatal("upload owner no longer serialized")
 	}
 	for _, forbidden := range []string{".Free(", "cudaMu.Lock()", "uploadCache", "fcuda_h2d"} {
