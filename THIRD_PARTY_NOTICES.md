@@ -287,6 +287,25 @@ The full upstream LICENSE at the pinned revision follows:
    limitations under the License.
 ```
 
+## TensorFold draft-depth pooled verify costs
+
+- Upstream: ashhart/TensorFold, commit
+  `9e8c368b0b4c2c7892a0c9f0f302d7c164016209` (Apache-2.0), source
+  `zig/src/core/draft_depth.zig` (`Costs`, `DepthRule`):
+  https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/draft_depth.zig
+- Adaptation: `internal/model/draft_depth_cost.go` re-expresses the pooled
+  marginal verify-cost table (pool adjacent violators with kernel-regime
+  boundaries) and the confidence-priced keep/more rule in Go; the governor
+  wiring consumes it through modeled-cost pricing on
+  `Qwen38MTPAdaptiveDepthGovernor` in `internal/model/qwen38_mtp_adaptive.go`.
+  No Zig code blocks are copied; the algorithm, defaults and test vectors are
+  adapted.
+- License: Apache License 2.0, already reproduced above under "TensorFold
+  benchmark evidence".
+- Witness: `TestDraftDepthPooledCostsAndKeepStop` in
+  `internal/model/draft_depth_cost_test.go` pins the pooled verify-cost
+  table and the confidence-priced keep/stop rule (software evidence only).
+
 ## TensorFold decode/prefill wall-time share
 
 `internal/agent/inkernel_qwen_coordinator.go` and
