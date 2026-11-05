@@ -230,8 +230,8 @@ func TestReleaseShipAncestorCIRequiresPushEvent(t *testing.T) {
 	}
 }
 
-// An unreadable primary history is not evidence that the secondary may replace it.
-// fak-test:runtime fast est=20ms
+// An unreadable or inconsistent primary history cannot justify secondary adoption.
+// fak-test:runtime fast est=40ms
 func TestReleaseShipAncestorCIRequiresReadableWorkflowHistory(t *testing.T) {
 	const green = `[{"event":"push","status":"completed","conclusion":"success","headSha":"ancestor-sha"}]`
 	for _, tc := range []struct {
@@ -241,6 +241,15 @@ func TestReleaseShipAncestorCIRequiresReadableWorkflowHistory(t *testing.T) {
 	}{
 		{name: "query failed despite green output", code: 1, output: green, reason: "could not be queried"},
 		{name: "invalid JSON", output: "not-json", reason: "not valid JSON"},
+		{name: "null is not empty history", output: "null", reason: "not a JSON array"},
+		{name: "success without status", output: `[{"event":"push","conclusion":"success","headSha":"ancestor-sha"}]`, reason: "incomplete or inconsistent"},
+		{name: "success with unknown status", output: `[{"event":"push","status":"unknown","conclusion":"success","headSha":"ancestor-sha"}]`, reason: "incomplete or inconsistent"},
+		{name: "success with nonstring status", output: `[{"event":"push","status":1,"conclusion":"success","headSha":"ancestor-sha"}]`, reason: "incomplete or inconsistent"},
+		{name: "pending success", output: `[{"event":"push","status":"in_progress","conclusion":"success","headSha":"ancestor-sha"}]`, reason: "incomplete or inconsistent"},
+		{name: "pending failure before green", output: `[{"event":"push","status":"queued","conclusion":"failure","headSha":"red-sha"},{"event":"push","status":"completed","conclusion":"success","headSha":"ancestor-sha"}]`, reason: "incomplete or inconsistent"},
+		{name: "pending failure after green", output: `[{"event":"push","status":"completed","conclusion":"success","headSha":"ancestor-sha"},{"event":"push","status":"queued","conclusion":"failure","headSha":"red-sha"}]`, reason: "incomplete or inconsistent"},
+		{name: "completed without conclusion", output: `[{"event":"push","status":"completed","headSha":"red-sha"}]`, reason: "incomplete or inconsistent"},
+		{name: "completed with nonstring conclusion", output: `[{"event":"push","status":"completed","conclusion":false,"headSha":"red-sha"}]`, reason: "incomplete or inconsistent"},
 		{name: "valid empty primary permits secondary", output: "[]", adopt: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

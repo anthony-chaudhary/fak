@@ -1443,11 +1443,19 @@ func releaseShipAdoptAncestorCI(result *releaseShipResult, root string, opts rel
 		if err := json.Unmarshal([]byte(out), &rows); err != nil {
 			return releaseShipAncestorCIBlocked(fallback, wf, nil, "completed workflow history was not valid JSON")
 		}
+		if rows == nil {
+			return releaseShipAncestorCIBlocked(fallback, wf, nil, "completed workflow history was not a JSON array")
+		}
 		rows = releaseShipPushCIRuns(rows)
 		var failedAncestors []map[string]any
 		for _, row := range rows {
 			status := strings.ToLower(stringFromAny(row["status"]))
 			conc := strings.ToLower(stringFromAny(row["conclusion"]))
+			// Validate every push row before selecting green evidence: a
+			// contradictory pending status must not hide a failed conclusion.
+			if status != "completed" || conc == "" {
+				return releaseShipAncestorCIBlocked(fallback, wf, row, "completed workflow history contained an incomplete or inconsistent push run")
+			}
 			if releaseShipCIState(status, conc) != "failed" {
 				continue
 			}
