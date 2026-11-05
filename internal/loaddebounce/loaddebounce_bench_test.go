@@ -2,6 +2,7 @@ package loaddebounce
 
 import (
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -221,9 +222,11 @@ func BenchmarkPublisher_Parallel(b *testing.B) {
 	b.Run("ParallelIndependentWorkers", func(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
+		var lastPublished atomic.Int64
 		b.RunParallel(func(pb *testing.PB) {
+			var publishedVal int
 			p := NewPublisher[int](DefaultDebounce, func() time.Time { return now }, func(v int) {
-				benchValSink = v
+				publishedVal = v
 			})
 			p.Prime(1)
 			idx := 0
@@ -236,6 +239,9 @@ func BenchmarkPublisher_Parallel(b *testing.B) {
 				}
 				idx++
 			}
+			// Publish one result per worker, without adding contention to Sample.
+			lastPublished.Store(int64(publishedVal))
 		})
+		benchValSink = int(lastPublished.Load())
 	})
 }

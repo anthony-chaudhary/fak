@@ -33,6 +33,7 @@ package blobhttp
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"net/http"
@@ -247,6 +248,10 @@ func (s *Store) Delete(ctx context.Context, digest string) error {
 
 // newRequest builds a signed request for a digest's object URL.
 func (s *Store) newRequest(ctx context.Context, method, digest string, body io.Reader) (*http.Request, error) {
+	// A Ref supplies this value: it must not introduce URL components before signing.
+	if !isObjectDigest(digest) {
+		return nil, fmt.Errorf("blobhttp: invalid SHA-256 digest")
+	}
 	req, err := http.NewRequestWithContext(ctx, method, s.urlFor(digest), body)
 	if err != nil {
 		return nil, fmt.Errorf("blobhttp: build %s %s: %w", method, digest, err)
@@ -257,6 +262,20 @@ func (s *Store) newRequest(ctx context.Context, method, digest string, body io.R
 		}
 	}
 	return req, nil
+}
+
+// isObjectDigest accepts a SHA-256 hex address, never a path or query fragment.
+func isObjectDigest(digest string) bool {
+	if len(digest) != 2*sha256.Size {
+		return false
+	}
+	for i := 0; i < len(digest); i++ {
+		c := digest[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 // drainClose drains and closes a response body so the connection can be reused.

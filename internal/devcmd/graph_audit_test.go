@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -268,8 +269,20 @@ func TestGraphAuditSnapshotWritesMachineReadableTable(t *testing.T) {
 	if res.HeadSHA != gitHeadSHA(root) {
 		t.Fatalf("head_sha = %q, want %q (best-effort resolution of the fixture root's git tree)", res.HeadSHA, gitHeadSHA(root))
 	}
-	if res.Coverage.UncoveredPaths != 5 || len(res.Sites) != 12 {
-		t.Fatalf("snapshot coverage/sites = %+v / %d, want 5 uncovered / 12 rows", res.Coverage, len(res.Sites))
+	if res.Coverage.UncoveredPaths != 5 {
+		t.Fatalf("snapshot coverage = %+v, want 5 uncovered", res.Coverage)
+	}
+	if len(res.Sites) != len(graphAuditInventory) {
+		t.Fatalf("snapshot sites = %d, want inventory rows %d", len(res.Sites), len(graphAuditInventory))
+	}
+	for i, want := range graphAuditInventory {
+		got := res.Sites[i]
+		if !reflect.DeepEqual(got.GraphSite, want) {
+			t.Errorf("snapshot site %d = %+v, want inventory row %+v", i, got.GraphSite, want)
+		}
+		if got.Verdict != want.Class || got.Occurrences != 1 {
+			t.Errorf("snapshot site %q verdict/occurrences = %s/%d, want %s/1", want.ID, got.Verdict, got.Occurrences, want.Class)
+		}
 	}
 }
 

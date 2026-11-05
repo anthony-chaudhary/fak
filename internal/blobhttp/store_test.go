@@ -137,9 +137,10 @@ func TestResolveMissingDigest(t *testing.T) {
 	defer srv.Close()
 	ctx := context.Background()
 	s := New(srv.URL)
-	_, err := s.Resolve(ctx, abi.Ref{Kind: abi.RefBlob, Digest: "deadbeef"})
-	if err == nil {
-		t.Fatal("expected an error resolving an absent digest")
+	digest := blob.Digest([]byte("absent object"))
+	_, err := s.Resolve(ctx, abi.Ref{Kind: abi.RefBlob, Digest: digest})
+	if err == nil || !strings.Contains(err.Error(), "unknown digest") {
+		t.Fatalf("absent object error = %v, want remote not-found", err)
 	}
 }
 
