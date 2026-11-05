@@ -52,6 +52,7 @@ package ratelimit
 import (
 	"container/list"
 	"context"
+	"math"
 	"os"
 	"strconv"
 	"sync"
@@ -110,6 +111,8 @@ func (l Limit) unlimited() bool { return l.MaxCalls == 0 && l.MaxCost == 0 }
 type counter struct {
 	calls int
 	cost  int64
+	// costOverflow preserves above-int64 usage until this counter is reset.
+	costOverflow bool
 }
 
 // Limiter is the throughput/cost-governor adjudicator. It holds per-key counters
@@ -249,13 +252,20 @@ func (r *Limiter) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
 		r.denies++
 		return denyVerdict(key, "max_calls", int64(r.lim.MaxCalls), r.retryAfterLocked())
 	}
-	if r.lim.MaxCost > 0 && st.cost+cost > r.lim.MaxCost {
+	if r.lim.MaxCost > 0 && (st.costOverflow || st.cost > r.lim.MaxCost || cost > r.lim.MaxCost-st.cost) {
 		r.denies++
 		return denyVerdict(key, "max_cost", r.lim.MaxCost, r.retryAfterLocked())
 	}
 
 	st.calls++
-	st.cost += cost
+	// Cost can be unlimited while a call quota still tracks usage. Preserve an
+	// overflow so a later cost cap cannot mistake wrapped usage for headroom.
+	if cost > math.MaxInt64-st.cost {
+		st.cost = math.MaxInt64
+		st.costOverflow = true
+	} else {
+		st.cost += cost
+	}
 	r.admits++
 	return defer_()
 }
