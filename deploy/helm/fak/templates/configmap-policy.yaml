@@ -1,0 +1,16 @@
+{{- if not .Values.policy.configMapName }}
+# The capability floor (--policy). Fail-closed: anything not affirmatively allowed
+# and not explicitly denied resolves to DEFAULT_DENY. Validate before it gates
+# traffic: `fak policy --check policy.json`. Set values.policy.configMapName to an
+# EXISTING ConfigMap (with a `policy.json` key) to mount that instead — this
+# template then renders nothing.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "fak.policyConfigMapName" . }}
+  labels:
+    {{- include "fak.labels" . | nindent 4 }}
+data:
+  policy.json: |
+{{ .Values.policy.json | trim | indent 4 }}
+{{- end }}

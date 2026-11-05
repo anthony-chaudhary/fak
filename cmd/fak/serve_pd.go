@@ -41,6 +41,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelengine"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
@@ -124,13 +125,13 @@ func runServePD(stdout, stderr io.Writer, argv []string) int {
 	}
 	cfg := servePDConfig{
 		Role:          *role,
-		GGUF:          *gguf,
+		GGUF:          pathutil.ExpandTilde(*gguf),
 		Listen:        *listen,
 		DecodeAddr:    *decodeAddr,
 		DecodeWorkers: *decodeWorkers,
 		BackendName:   *backendName,
 		Q4K:           *q4k,
-		TokenizerPath: *tokPath,
+		TokenizerPath: pathutil.ExpandTilde(*tokPath),
 		HTTPAddr:      *httpAddr,
 	}
 	if err := validateServePD(cfg); err != nil {

@@ -370,6 +370,22 @@ def _gateway_metric_names(exprs):
     return set(re.findall(r"(?<![a-z0-9_])fak_[a-z0-9_]+", joined))
 
 
+# Alert surfaces whose metric families are validated by their own dedicated
+# cross-surface lock instead of the gateway-plane check below: the fleet
+# exporter pair (this file) and the router/ops planes (internal/grafanacontract;
+# their emitters live in the companion private repo).
+_ALERT_OWNED_PREFIXES = ("fak_fleet_", "fak_router_", "fak_ops_")
+
+
+def _alert_recorded_prefixes(text):
+    """Pre-colon prefixes of recorded rule names defined in the alerts file
+    (fak_ops from `record: fak_ops:context_growth:delta1h`). An expr may query a
+    recorded metric; the name extractor stops at the colon, so the bare prefix
+    would otherwise read as a raw family no exporter emits."""
+    return {m.split(":", 1)[0]
+            for m in re.findall(r"record:\s*(fak_[a-z0-9_]+(?::[a-z0-9_]+)+)", text)}
+
+
 def _gateway_families():
     """Families declared by gateway renderers and its injected metric providers."""
     root = Path(HERE).parent
@@ -511,15 +527,24 @@ class CrossSurfaceContractTest(unittest.TestCase):
                 self.assertFalse(missing, f"gateway dashboard queries phantom metrics: {sorted(missing)}")
 
     def test_alerts_reference_only_emitted_metrics(self):
-        exprs = re.findall(r"expr:\s*(.+)", _read(ALERTS))
+        alerts_text = _read(ALERTS)
+        exprs = re.findall(r"expr:\s*(.+)", alerts_text)
         fleet_refs = _fleet_metric_names(exprs)
         self.assertTrue(fleet_refs, "alerts reference no fleet_ metrics?")
         missing_fleet = fleet_refs - self.fams
         self.assertFalse(missing_fleet, f"alerts query phantom fleet metrics: {sorted(missing_fleet)}")
 
+        # Every other fak_* family an alert queries must be emitted by the gateway
+        # package or one of its injected providers -- so a fabricated family (a
+        # resurrected fak_harness_tool_*, any new invented prefix) cannot hide in
+        # an alert expr. Surfaces owned by dedicated cross-surface locks are
+        # excluded, as are recorded-rule refs, which reduce to their pre-colon
+        # prefix under extraction.
+        recorded = _alert_recorded_prefixes(alerts_text)
         gateway_refs = {name for name in _gateway_metric_names(exprs)
-                        if name.startswith(("fak_gateway_", "fak_kernel_"))}
-        self.assertTrue(gateway_refs, "alerts reference no fak gateway/kernel metrics?")
+                        if not name.startswith(_ALERT_OWNED_PREFIXES)
+                        and name not in recorded}
+        self.assertTrue(gateway_refs, "alerts reference no gateway-plane fak_* metrics?")
         missing_gateway = _missing_gateway(gateway_refs, self.gateway_fams)
         self.assertFalse(missing_gateway, f"alerts query phantom gateway metrics: {sorted(missing_gateway)}")
 

@@ -325,7 +325,10 @@ func (m *gatewayMetrics) recordPerf(loc servingLocality, promptTok, complTok, ca
 
 // observeDecodeWindowReceipt claims one request's decode-window kernel/decode
 // split, once per request, books it into the native phase counters, and returns
-// it for the request's full phase receipt.
+// it for the request's full phase receipt. It also claims the request's v3
+// host-overhead decomposition from the same accumulator, once per request, and
+// retains it on the observation as a seam for the row's repetition fields
+// (consumer follow-up: no ledger row emits the decomposition yet).
 func (m *gatewayMetrics) observeDecodeWindowReceipt(src perfSource) (nativeperf.PhaseReceipt, bool) {
 	o := src.observation
 	if o == nil {
@@ -334,9 +337,16 @@ func (m *gatewayMetrics) observeDecodeWindowReceipt(src perfSource) (nativeperf.
 	o.mu.Lock()
 	ctx := o.phaseContext
 	o.mu.Unlock()
-	receipt, ok := nativeperf.RequestDecodeHostWork(ctx).ClaimPhaseReceipt()
+	acc := nativeperf.RequestDecodeHostWork(ctx)
+	receipt, ok := acc.ClaimPhaseReceipt()
 	if ok && m.nativePhases != nil {
 		m.nativePhases.ObservePhases(receipt, time.Now())
+	}
+	var rep nativeperf.Repetition
+	if acc.ClaimHostOverhead(&rep) {
+		o.mu.Lock()
+		o.hostOverhead = &rep
+		o.mu.Unlock()
 	}
 	return receipt, ok
 }

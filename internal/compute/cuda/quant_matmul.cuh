@@ -392,22 +392,10 @@ static int q8_rows_matmul(const int8_t *dCodes, const float *dScales, const floa
                                                 dY, out, in, P, block));
   return 0;
 }
-extern "C" int fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float *dX,
-                                   float *dY, int out, int in, int P, int block) {
-#ifdef FAK_CUDA_Q8_MMQ_PREFILL
-  // Qualification only: never touches the BitExact rows entry point.
-  const char *prefill_arm = getenv("FAK_CUDA_Q8_PREFILL");
-  if (prefill_arm && strcmp(prefill_arm, "mmq") == 0) {
-    const int status = fcuda_q8_mmq_matmul(dCodes, dScales, dX, dY, out, in, P, block);
-    if (status != FCUDA_Q8_MMQ_REFUSED) return status;
-  }
-#endif
-  if (P >= 128) return q8_dequant_sgemm(dCodes, dScales, dX, dY, out, in, P, block);
-  return q8_rows_matmul(dCodes, dScales, dX, dY, out, in, P, block);
-}
 // fcuda_q8_matmul_rows_f32 is the BitExact prompt-panel GEMM: every row bitwise the P=1 decode
 // GEMV for every P. Block-32 weights with 16-byte aligned codes run k_q8_gemm_rowtile over
-// balanced tiles of at most kQ8TileRows rows; anything else runs k_q8_gemm itself.
+// balanced tiles of at most kQ8TileRows rows; anything else runs k_q8_gemm itself. It precedes
+// fcuda_q8_matmul_f32 because the latter delegates its P>=128 panels here.
 extern "C" int fcuda_q8_matmul_rows_f32(const int8_t *dCodes, const float *dScales, const float *dX,
                                         float *dY, int out, int in, int P, int block) {
   if (!dCodes || !dScales || !dX || !dY || out <= 0 || in <= 0 || P <= 0 || P > 65535 ||
@@ -422,6 +410,28 @@ extern "C" int fcuda_q8_matmul_rows_f32(const int8_t *dCodes, const float *dScal
   FCUDA_TS("k_q8_gemm_rowtile", dim3(tiles, outGroups), k_q8_gemm_rowtile<<<dim3(tiles, outGroups), kQ8TileWarps * 32, 0, g_stream>>>(
       (const signed char *)dCodes, dScales, g_q8_qX, g_q8_xScale, dY, out, in, P, rowsPerTile));
   return 0;
+}
+extern "C" int fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float *dX,
+                                   float *dY, int out, int in, int P, int block) {
+#ifdef FAK_CUDA_Q8_MMQ_PREFILL
+  // Qualification only: never touches the BitExact rows entry point.
+  const char *prefill_arm = getenv("FAK_CUDA_Q8_PREFILL");
+  if (prefill_arm && strcmp(prefill_arm, "mmq") == 0) {
+    const int status = fcuda_q8_mmq_matmul(dCodes, dScales, dX, dY, out, in, P, block);
+    if (status != FCUDA_Q8_MMQ_REFUSED) return status;
+  }
+#endif
+  if (P < 128) return q8_rows_matmul(dCodes, dScales, dX, dY, out, in, P, block);
+  // oss-port-cuda-perf-gdn-q8-dequant-retire: the P>=128 dequant -> fp16 split + 3x cuBLAS arm
+  // no longer serves prefill panels. Every panel row now runs the per-row BitExact lane: the
+  // rowtile panel GEMM when its contract holds (block 32, 16-byte aligned codes, bounded output
+  // groups), the plain per-row GEMM otherwise - neither dequants the weight or allocates a
+  // weight-sized f32/fp16 image. A -1 refusal means the shape left that lane's argument bounds
+  // (P > 65535 or an int overflow guard); only there does the retired dequant arm remain as a
+  // last-resort fallback, so ordinary GDN/attn-qk panels never reach it.
+  const int rc = fcuda_q8_matmul_rows_f32(dCodes, dScales, dX, dY, out, in, P, block);
+  if (rc != -1) return rc;
+  return q8_dequant_sgemm(dCodes, dScales, dX, dY, out, in, P, block);
 }
 
 // getScaleMinK4_dev reproduces the GGUF loader's getScaleMinK4 (internal/ggufload) bit-for-bit:

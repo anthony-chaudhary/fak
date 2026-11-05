@@ -679,14 +679,20 @@ func TestNgramHybridDraftCopySafety(t *testing.T) {
 	history := []int{1, 2, 3, 4, 5, 1, 2, 3}
 	d := NgramDrafter{Enabled: true, MinMatch: 3, MaxMatch: 3, MaxDraft: 6}
 	buffer := []int{77, 88, 99}
+	historyBefore := append([]int(nil), history...)
+	bufferBefore := append([]int(nil), buffer...)
 	got := d.HybridDraft(history, func() []int { return buffer })
-	if len(got) != 6 {
-		t.Fatalf("hybrid length = %d, want 6", len(got))
+	if len(got) != d.MaxDraft {
+		t.Fatalf("hybrid length = %d, want configured window %d", len(got), d.MaxDraft)
 	}
-	got[0] = -1
-	got[5] = -1
-	if history[3] != 4 || buffer[0] != 77 {
-		t.Fatal("hybrid draft aliases committed history or the model drafter buffer")
+	for i := range got {
+		got[i] = -1
+	}
+	if !ngramEqualInts(history, historyBefore) {
+		t.Fatalf("hybrid draft modified committed history: got %v, want %v", history, historyBefore)
+	}
+	if !ngramEqualInts(buffer, bufferBefore) {
+		t.Fatalf("hybrid draft modified model drafter buffer: got %v, want %v", buffer, bufferBefore)
 	}
 }
 
