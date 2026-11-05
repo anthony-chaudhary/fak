@@ -96,8 +96,9 @@ func CheckCaptureSource(sources ...string) CaptureSourceMatch {
 }
 
 // CheckCaptureJSON evaluates structured tool arguments plus source-bearing metadata.
-// It never returns the extracted strings. Malformed/non-object args are treated
-// conservatively as a single possible source selector.
+// It never returns the extracted strings. Object fields are filtered by source
+// keys; top-level strings, including array elements, are possible source selectors.
+// Malformed JSON is conservatively checked as a single possible source selector.
 func CheckCaptureJSON(raw []byte, meta map[string]string) CaptureSourceMatch {
 	values := make([]string, 0, len(meta)+4)
 	if len(raw) > 0 {
@@ -105,7 +106,7 @@ func CheckCaptureJSON(raw []byte, meta map[string]string) CaptureSourceMatch {
 		if err := json.Unmarshal(raw, &value); err != nil {
 			values = append(values, string(raw))
 		} else {
-			collectSourceValues(value, false, &values)
+			collectSourceValues(value, true, &values)
 		}
 	}
 	for key, value := range meta {
