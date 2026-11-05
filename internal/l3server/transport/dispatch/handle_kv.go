@@ -70,8 +70,8 @@ func (d *Dispatcher) HandleSet(msg protocol.Message) protocol.Message {
 		return ErrResponse(msg.Header.RequestID, err.Error())
 	}
 
-	// Cluster: route to primary if not local
-	if d.Ring != nil {
+	// Replicas apply locally; only original writes route to the primary.
+	if d.Ring != nil && msg.Header.Flags&protocol.FlagReplicated == 0 {
 		primary, isLocal := d.isLocalKey(key)
 		if !isLocal && primary != nil {
 			c, cerr := d.getProxyConn(primary.Addr)
@@ -119,8 +119,8 @@ func (d *Dispatcher) HandleDelete(msg protocol.Message) protocol.Message {
 		return ErrResponse(msg.Header.RequestID, err.Error())
 	}
 
-	// Cluster: route to primary if not local
-	if d.Ring != nil {
+	// Replicas apply locally; only original writes route to the primary.
+	if d.Ring != nil && msg.Header.Flags&protocol.FlagReplicated == 0 {
 		primary, isLocal := d.isLocalKey(key)
 		if !isLocal && primary != nil {
 			c, cerr := d.getProxyConn(primary.Addr)
