@@ -31,6 +31,10 @@ type requestObservation struct {
 	lifecycle          modelLoadLifecycle
 	configSHA          string
 	phaseContext       context.Context
+	// hostOverhead holds the v3 host-overhead decomposition claimed once from
+	// the request's decode-window accumulator when its perf row commits; nil
+	// until a decode window ran and was claimed.
+	hostOverhead *nativeperf.Repetition
 }
 
 type observationBody struct {
@@ -117,6 +121,18 @@ func bindRequestPhaseContext(r *http.Request, ctx context.Context) {
 	o.mu.Lock()
 	o.phaseContext = ctx
 	o.mu.Unlock()
+}
+
+// claimedHostOverhead returns the request's claimed v3 host-overhead
+// decomposition; ok is false when no decode window ran or the claim has not
+// happened yet.
+func (o *requestObservation) claimedHostOverhead() (*nativeperf.Repetition, bool) {
+	if o == nil {
+		return nil, false
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.hostOverhead, o.hostOverhead != nil
 }
 
 func requestPartialNativePhases(ctx context.Context) *perfledger.PartialNativePhases {
