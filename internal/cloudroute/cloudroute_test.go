@@ -1,6 +1,7 @@
 package cloudroute
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -48,12 +49,12 @@ func TestDetectTreatsAnEmptyOrFalseSelectorAsOff(t *testing.T) {
 	}
 }
 
-// Windows environment names are case-insensitive and a shell may well export a
-// mixed-case name, so detection must fold. A missed detection there is the exact
-// wrong-cause refusal this package exists to prevent.
+// Only Windows folds environment-name case. Elsewhere this is a distinct name
+// that must not select a route the child will not use.
 func TestDetectFoldsNameCase(t *testing.T) {
-	if _, ok := Detect([]string{"Claude_Code_Use_Bedrock=1"}); !ok {
-		t.Fatal("mixed-case selector not detected")
+	_, ok := Detect([]string{"Claude_Code_Use_Bedrock=1"})
+	if want := runtime.GOOS == "windows"; ok != want {
+		t.Fatalf("mixed-case selector detected = %v, want %v", ok, want)
 	}
 }
 
