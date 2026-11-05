@@ -459,6 +459,17 @@ func (e *Engine) KVPreemptionEnvErr() error {
 	return e.kvEnvErr
 }
 
+// ForwardSlot returns this engine's forward-pass slot (Continual Engine phase
+// 0), the atomic indirection every decode step loads before its forward call.
+// It is nil-safe like the other Engine accessors: a nil engine yields nil, and
+// the scheduler's slot is always initialized with the default impl.
+func (e *Engine) ForwardSlot() *ForwardSlot {
+	if e == nil {
+		return nil
+	}
+	return e.nativeScheduler().fwd
+}
+
 // SetKVPreemptionPolicy updates the package Default engine.
 func SetKVPreemptionPolicy(p NativePreemptionPolicy) { Default.SetKVPreemptionPolicy(p) }
 

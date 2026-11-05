@@ -179,6 +179,12 @@ type NativeScheduler struct {
 
 	coupler *WorkerCoupler
 
+	// fwd is the forward-pass slot (Continual Engine phase 0): every decode
+	// step loads the live generation once, before its forward call, so the
+	// whole step runs on one generation. Initialized with the default
+	// (pre-slot) impl; a hot swap never changes this pointer.
+	fwd *ForwardSlot
+
 	// elastic is the FAK_NATIVE_KV_ELASTIC_BLOCKS block ledger; nil (default) is off.
 	// Set once before the scheduler is published.
 	elastic *nativeElasticLedger
@@ -682,6 +688,7 @@ func newNativeScheduler(m *model.Model, prepare schedPrepareFunc) *NativeSchedul
 		stopped:       make(chan struct{}),
 		drainDonation: true,
 		coupler:       NewDefaultWorkerCoupler(),
+		fwd:           NewForwardSlot(DefaultForwardImpl()),
 		closeSession:  func(sess *model.Session) { sess.Close() },
 		recorder:      enginestep.Default,
 	}
@@ -2045,8 +2052,11 @@ func (s *NativeScheduler) stepSolo(ln *schedLane, iteration uint64) {
 		}
 		s.beforeModelExecution(nativeSchedulerEventDecode, ln)
 		decodeStarted := s.now()
+		// Load the live forward generation once, BEFORE the forward call, so
+		// this whole step runs on one generation (in-flight continuity).
+		gen := s.fwd.Load()
 		logits := RunWithOp(s.coupler, OpDecode, func() []float32 {
-			return sess.Step(next)
+			return gen.Impl.Step(sess, next)
 		})
 		s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
 		if !s.publishDecodeSession(ln, sess, logits) {
@@ -2127,8 +2137,11 @@ func (s *NativeScheduler) stepOnce(active []*schedLane, iteration uint64) {
 	if len(execLanes) == 1 {
 		s.beforeModelExecution(nativeSchedulerEventDecode, execLanes[0])
 		decodeStarted := s.now()
+		// Load the live forward generation once, BEFORE the forward call, so
+		// this whole step runs on one generation (in-flight continuity).
+		gen := s.fwd.Load()
 		logits := RunWithOp(s.coupler, OpDecode, func() []float32 {
-			return seqs[0].Step(execIDs[0])
+			return gen.Impl.Step(seqs[0], execIDs[0])
 		})
 		s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
 		if s.publishDecodeSession(execLanes[0], seqs[0], logits) {
@@ -2146,8 +2159,11 @@ func (s *NativeScheduler) stepOnce(active []*schedLane, iteration uint64) {
 		s.beforeModelExecution(nativeSchedulerEventDecode, ln)
 	}
 	decodeStarted := s.now()
+	// Load the live forward generation once, BEFORE the forward call, so this
+	// whole batch step runs on one generation (in-flight continuity).
+	gen := s.fwd.Load()
 	out := RunWithOp(s.coupler, OpBatch, func() [][]float32 {
-		return bs.StepBatch(execIDs)
+		return gen.Impl.StepBatch(bs, execIDs)
 	})
 	s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
 	if panels := bs.LastStepSharedPanels(); panels > 0 {
