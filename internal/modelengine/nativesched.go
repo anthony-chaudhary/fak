@@ -35,6 +35,13 @@ import (
 
 var errSchedClosed = errors.New("modelengine: native scheduler closed")
 
+// prefillDrainPerInterval is the number of waiting lanes one prefill-interval
+// window drains: exactly one release step per window, and a release step
+// advances one prefill lane. A waiting queue deeper than that outruns the
+// interval's drain, so the engine records itself capacity-bound and stops
+// throttling (the vLLM prefill_capacity_bound escape, scheduler.py:1562-1564).
+const prefillDrainPerInterval = 1
+
 // ErrNativePromptExceedsKVCapacity reports a request whose prompt alone can
 // never fit the configured native paged-KV budget. Callers may use errors.Is.
 var ErrNativePromptExceedsKVCapacity = errors.New("modelengine: prompt exceeds native KV capacity")
@@ -154,6 +161,20 @@ type NativeScheduler struct {
 	blockedDrains     int
 	donatedIterations uint64
 	iteration         uint64
+
+	// Local prefill cadence (vLLM prefill_schedule_interval port, ADAPT): hold
+	// prefill to every Nth engine step so decode runs in longer uninterrupted
+	// stretches. prefillInterval <= 1 keeps today's mixed-step order bit-for-bit.
+	// lastPrefillStep is the executed-step index of the last prefill-carrying
+	// step, armed at -prefillInterval so the first step is never gated;
+	// executedSteps counts iterations that scheduled tokens; prefillCapacityBound
+	// records a backed-up engine whose waiting queue outruns one interval's
+	// drain, which stops throttling so the queue cannot grow without bound. All
+	// four are written only by runIteration under mu.
+	prefillInterval      int
+	lastPrefillStep      int
+	executedSteps        int
+	prefillCapacityBound bool
 
 	closeSession       func(*model.Session)
 	observeNativeEvent func(nativeSchedulerEvent)
@@ -862,6 +883,22 @@ func (s *NativeScheduler) SetMaxTokensPerStep(n int) {
 	s.signal()
 }
 
+// SetPrefillInterval holds prefill to every Nth engine step so decode runs in
+// longer uninterrupted stretches (vLLM local prefill cadence). n<=1 disables
+// the hold and keeps today's mixed-step order bit-for-bit. A deferred step
+// carries no prefill at all, including chunks of an already-admitted prompt,
+// so a long prompt can take up to N times as many steps to finish prefilling.
+// Set it before the first Admit; the run loop reads it each iteration.
+func (s *NativeScheduler) SetPrefillInterval(n int) {
+	if n < 1 {
+		n = 1
+	}
+	s.mu.Lock()
+	s.prefillInterval = n
+	s.lastPrefillStep = -n
+	s.mu.Unlock()
+}
+
 // laneStepTokens is a lane's per-step token cost under maxTokensPerStep.
 func laneStepTokens(ln *schedLane) int {
 	if ln.state != schedLanePrefilling && (ln.sess != nil || ln.prefillChunkTokens == 0) {
@@ -1220,6 +1257,21 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 			}
 		}
 	}
+	// Prefill cadence gate (vLLM local prefill interval, scheduler.py:748-769):
+	// defer this iteration's prefill when fewer than prefillInterval executed
+	// steps have passed since the last prefill-carrying step and at least one
+	// running lane is not a prefill chunk. A capacity-bound engine stops
+	// throttling so a backed-up waiting queue cannot grow without bound. The
+	// captured cursor/state let the stamp below tell a step that carried
+	// prefill from one that yielded it unchanged.
+	var prefillStartCursor int
+	var prefillStartState schedLaneState
+	if prefill != nil {
+		prefillStartCursor = prefill.promptCursor
+		prefillStartState = prefill.state
+	}
+	deferPrefill := prefill != nil && s.prefillInterval > 1 && !s.prefillCapacityBound &&
+		(s.executedSteps+1-s.lastPrefillStep) < s.prefillInterval && len(active) > 0
 	closed = s.closed
 	waitingDepth := len(s.waiting)
 	idle = len(s.lanes) == 0 && len(s.waiting) == 0 && len(s.preempted) == 0
@@ -1232,7 +1284,7 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 	}
 	s.iteration++
 	iteration := s.iteration
-	if prefill != nil {
+	if prefill != nil && !deferPrefill {
 		prefillStarted := s.now()
 		var packedReady []*schedLane
 		if prefill.packedPrefill {
@@ -1273,6 +1325,23 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 		s.stepOnce(active, iteration)
 		s.recorder.ObserveDecodeStep(enginestep.PathBatched, len(active), s.now().Sub(stepStarted))
 	}
+	// Cadence stamping (vLLM scheduler.py:1562-1577): count only steps that
+	// actually scheduled tokens, restart the interval from any step that
+	// carried prefill (new admission or running chunk), and record the capacity
+	// escape on every release step so a backed-up engine stops throttling.
+	s.mu.Lock()
+	carried := prefill != nil && !deferPrefill &&
+		(prefill.promptCursor != prefillStartCursor || prefill.state != prefillStartState)
+	if solo != nil || len(active) > 0 || carried {
+		s.executedSteps++
+	}
+	if carried {
+		s.lastPrefillStep = s.executedSteps
+	}
+	if !deferPrefill {
+		s.prefillCapacityBound = len(s.waiting) > prefillDrainPerInterval
+	}
+	s.mu.Unlock()
 	if donated {
 		s.mu.Lock()
 		s.donatedIterations++
