@@ -1388,6 +1388,11 @@ func releaseShipSourceCI(result *releaseShipResult, root string, opts releaseShi
 	conclusion := strings.ToLower(stringFromAny(row["conclusion"]))
 	workflowStatus := strings.ToLower(stringFromAny(row["status"]))
 	state := releaseShipCIState(workflowStatus, conclusion)
+	// A terminal conclusion without completed status is contradictory evidence,
+	// not a green result or an inconclusive source that ancestry may replace.
+	if conclusion != "" && workflowStatus != "completed" {
+		state = "inconsistent"
+	}
 	if state == "green" {
 		return map[string]any{
 			"ok":              true,

@@ -90,6 +90,41 @@ func TestReleaseShipAncestorCIDoesNotOverrideExactFailure(t *testing.T) {
 	}
 }
 
+// Exact-source contradictions must refuse before any ancestor query or probe.
+// fak-test:runtime fast est=20ms
+func TestReleaseShipSourceCIRejectsInconsistentConclusion(t *testing.T) {
+	for _, tc := range []struct {
+		name, statusJSON, conclusion string
+	}{
+		{name: "success without status", conclusion: "success"},
+		{name: "success with null status", statusJSON: `,"status":null`, conclusion: "success"},
+		{name: "success with nonstring status", statusJSON: `,"status":1`, conclusion: "success"},
+		{name: "success with unknown status", statusJSON: `,"status":"unknown"`, conclusion: "success"},
+		{name: "pending success", statusJSON: `,"status":"in_progress"`, conclusion: "success"},
+		{name: "pending failure", statusJSON: `,"status":"queued"`, conclusion: "failure"},
+		{name: "pending timeout", statusJSON: `,"status":"waiting"`, conclusion: "timed_out"},
+		{name: "pending cancellation", statusJSON: `,"status":"requested"`, conclusion: "cancelled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
+				calls++
+				if name != "gh" || !sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "source-sha", "--event", "push", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha,event") {
+					t.Fatalf("inconsistent exact source reached another command: %s %v", name, args)
+				}
+				return 0, fmt.Sprintf(`[{"event":"push","headSha":"source-sha","databaseId":7,"conclusion":%q%s}]`, tc.conclusion, tc.statusJSON)
+			})
+			defer restore()
+			var result releaseShipResult
+			ci := releaseShipSourceCI(&result, t.TempDir(), releaseShipOptions{workflow: "ci.yml", trunk: "main", adoptAncestorCI: true}, "source-sha")
+			run, _ := ci["run"].(map[string]any)
+			if calls != 1 || releaseShipPayloadOK(ci) || ci["status"] != "inconsistent" || ci["source_sha"] != "source-sha" || ci["conclusion"] != tc.conclusion || run["headSha"] != "source-sha" || run["databaseId"] != float64(7) || run["conclusion"] != tc.conclusion || ci["adopted_ancestor_sha"] != nil {
+				t.Fatalf("inconsistent source was relaxed or its evidence lost: calls=%d CI=%#v", calls, ci)
+			}
+		})
+	}
+}
+
 // All commands are stubbed and the appearance deadline is already expired.
 // fak-test:runtime fast est=20ms
 func TestReleaseShipCIRequiresPushEvent(t *testing.T) {
