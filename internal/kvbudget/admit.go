@@ -87,12 +87,13 @@ func ceilDiv(a, b int) int {
 }
 
 // valid reports whether the stream's fields are self-consistent enough to size
-// a reservation. A non-positive block size or any negative count is rejected so
-// admission fails closed rather than reserving a nonsense amount.
+// a reservation. A non-positive block size, negative count, or unrepresentable
+// total length is rejected so admission fails closed instead of undercharging.
 func (s Stream) valid() bool {
 	return s.BlockSize > 0 &&
 		s.PromptTokens >= 0 &&
 		s.MaxNewTokens >= 0 &&
+		s.PromptTokens <= math.MaxInt-s.MaxNewTokens &&
 		s.HeldBlocks >= 0 &&
 		s.RetainedBlocks >= 0
 }
@@ -130,7 +131,8 @@ const (
 	// the no-drop guarantee forbids.
 	ReasonNoRoomToRetain Reason = "no_room_to_retain_worst_case"
 	// ReasonInvalidRequest refuses a self-inconsistent request (non-positive
-	// block size or a negative count) without touching the budget.
+	// block size, negative count, or unrepresentable total length) without
+	// touching the budget.
 	ReasonInvalidRequest Reason = "invalid_request"
 )
 
