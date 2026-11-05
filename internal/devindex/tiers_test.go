@@ -117,7 +117,7 @@ func TestVerbTiersNameOnlyLiveVerbs(t *testing.T) {
 // 28 (was 27): `study` is the product-owned local content-addressed receipt store;
 // its separate study-* forge/classify/link operators remain development commands.
 func TestCurrentDispatchedVerbTiersStayClassified(t *testing.T) {
-	for _, name := range []string{"architecture", "catchup", "codex-resume", "component", "config", "fanout", "harness", "progress", "quantbench", "stale-work", "test-quality", "windows-setup", "work-delivery"} {
+	for _, name := range []string{"architecture", "catchup", "codex-resume", "component", "config", "decode-anatomy", "fanout", "harness", "progress", "quantbench", "stale-work", "test-quality", "windows-setup", "work-delivery"} {
 		if got, ok := TierOf(name); !ok || got != TierDev {
 			t.Errorf("TierOf(%q)=(%q,%v), want dev", name, got, ok)
 		}

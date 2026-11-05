@@ -261,6 +261,7 @@ var verbTiers = map[string]VerbTier{
 	"cuda-gpudirect":                TierDev,
 	"debug":                         TierDev,
 	"debt-lanes":                    TierDev,
+	"decode-anatomy":                TierDev,
 	"deepseekbench":                 TierDev,
 	"demo":                          TierDev,
 	"dispatch":                      TierDev,
