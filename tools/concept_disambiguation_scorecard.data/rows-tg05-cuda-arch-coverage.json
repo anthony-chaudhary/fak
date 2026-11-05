@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "cuda-arch-coverage",
+      "canonical": "cuda_coverage",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "The closed classification CUDACoverage (internal/compute) for how a detected CUDA GPU arch maps to the kernels fak was built with: CUDANative (the arch carries native SASS in the build), CUDAJITFromPTX (no SASS but PTX for a lower arch, so kernels JIT at runtime), or CUDAUncovered (neither).",
+      "distinction": "The per-arch BUILD-SUPPORT classification the serve backend gate reads (cuda_arch_coverage) - NOT the coverage metric (coverage) that scores how much of a declared universe has evidence, NOT unsupportedcoverage (what a release claims is supported), and NOT CUDA device detection/receipts (which report what a live device IS, not whether the build covers its arch).",
+      "distinct_from": [
+        "coverage",
+        "unsupportedcoverage"
+      ],
+      "aliases": [],
+      "grounding": "CUDACoverage",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

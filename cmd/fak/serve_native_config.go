@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -155,10 +156,13 @@ func defaultServeKVPrecisionForBackend(backend string) model.KVPrecision {
 	return ""
 }
 
-// serveRequestedKVBackendName reports the device backend a serve run requests
-// before the registry lookup: an explicit --backend (including "auto") wins
-// FAK_BACKEND, mirroring resolveServeBackendSelection. Only the CUDA request
-// matters to the KV default; "auto" never selects the CUDA store.
+// serveRequestedKVBackendName reports the KV storage owner a serve run resolves
+// to: an explicit --backend wins FAK_BACKEND, mirroring resolveServeBackendSelection,
+// and an omitted or "auto" request resolves through that same selection seam.
+// Automatic selection can now pick the CUDA store (when its detected arch is
+// covered), so the pre-lookup request alone no longer answers which store will
+// serve. Only the CUDA store matters to the KV default (fp16); every other
+// owner keeps the historical exact-f32 zero value.
 func serveRequestedKVBackendName(sf *serveFlags) string {
 	requested := ""
 	if sf != nil && sf.backendName != nil {
@@ -166,6 +170,12 @@ func serveRequestedKVBackendName(sf *serveFlags) string {
 	}
 	if requested == "" {
 		requested = strings.ToLower(strings.TrimSpace(os.Getenv("FAK_BACKEND")))
+	}
+	if requested == "" || requested == serveBackendAuto {
+		if sel, err := resolveServeBackendSelection(requested, "", runtime.GOOS, lookupRegisteredServeBackend, probeServeCUDAArchCoverage); err == nil && sel.backend != nil {
+			return serveKVBackendName(sel.backend.Name(), false)
+		}
+		return kvBackendHost
 	}
 	return serveKVBackendName(requested, false)
 }

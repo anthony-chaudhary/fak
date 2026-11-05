@@ -44,7 +44,7 @@ func TestServeBackendAutoSelection(t *testing.T) {
 		{name: "environment auto when omitted", envBackend: "auto", registered: "vulkan", want: autoWant},
 		{name: "omitted uses platform automatic selection", registered: "vulkan", want: autoWant},
 		{name: "omitted keeps CPU without Vulkan", want: "cpu"},
-		{name: "auto never selects arbitrary accelerator", registered: "cuda", want: "cpu"},
+		{name: "auto skips cuda registration without a device receipt", registered: "cuda", want: "cpu"},
 		{name: "explicit CPU override", requested: "cpu", envBackend: "vulkan", registered: "vulkan", want: "cpu"},
 		{name: "environment CPU override", envBackend: "cpu", registered: "vulkan", want: "cpu"},
 		{name: "unknown explicit fails visibly", requested: "definitely-not-a-backend", envBackend: "vulkan", registered: "vulkan", wantErr: "--backend"},
