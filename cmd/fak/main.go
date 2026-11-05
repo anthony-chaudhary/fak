@@ -462,6 +462,9 @@ func dispatchCoreVerbB(name string, args []string) bool {
 		if len(args) > 0 && args[0] == "proof" {
 			os.Exit(runServeProof(os.Stdout, os.Stderr, args[1:]))
 		}
+		if len(args) > 0 && args[0] == "pd" {
+			os.Exit(runServePD(os.Stdout, os.Stderr, args[1:]))
+		}
 		cmdServe(args)
 	case "serve-wiring":
 		cmdServeWiring(args)

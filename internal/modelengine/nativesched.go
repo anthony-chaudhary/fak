@@ -146,6 +146,12 @@ type NativeScheduler struct {
 	// Set once before the scheduler is published.
 	elastic *nativeElasticLedger
 
+	// sessionDecorator decorates every lane session this scheduler mints (fresh
+	// and restored) before use — e.g. binding the device backend a P/D decode
+	// role resolved. Set once before the first Admit; nil keeps the historical
+	// session shape byte-for-byte.
+	sessionDecorator func(*model.Session)
+
 	wake    chan struct{} // buffered(1): Admit/Close nudge an idle loop
 	started sync.Once
 	stopped chan struct{}
@@ -220,6 +226,17 @@ func (s *NativeScheduler) WorkerCoupler() *WorkerCoupler {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.coupler
+}
+
+// SetSessionDecorator installs the per-lane session decorator applied to every
+// fresh and restored lane session before use. Set it before the first Admit;
+// like the profiler hook it is read lock-free at mint time, so a post-boot
+// write cannot silently change the shape of already-minted sessions. nil
+// clears the decorator.
+func (s *NativeScheduler) SetSessionDecorator(d func(*model.Session)) {
+	s.mu.Lock()
+	s.sessionDecorator = d
+	s.mu.Unlock()
 }
 
 // WorkerCouplingStats returns telemetry for this scheduler's worker coupler.

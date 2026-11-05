@@ -801,6 +801,11 @@ func (s *NativeScheduler) newLaneSession(q4k bool, lifecycle NativeSessionLifecy
 	if s.sessionProfiler != nil {
 		sess.PhaseProfiler = s.sessionProfiler(lifecycle)
 	}
+	// Read without mu: this path may already hold it (restorePreemptedLaneLocked),
+	// and the decorator is fixed before the first Admit, like sessionProfiler.
+	if decorator := s.sessionDecorator; decorator != nil {
+		decorator(sess)
+	}
 	return sess
 }
 
