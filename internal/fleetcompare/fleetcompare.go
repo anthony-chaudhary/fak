@@ -29,6 +29,11 @@ func SliceFixed(cols map[string][]float64, key string, val float64) Slice {
 	if key == "turns" {
 		other = "agents"
 	}
+	// Every referenced column must describe the same observations.
+	n := len(cols[key])
+	if len(cols[other]) != n || len(cols["shared_saved_mean"]) != n || len(cols["cross_uplift_mean"]) != n {
+		return Slice{}
+	}
 	var idx []int
 	for i, v := range cols[key] {
 		if v == val {
