@@ -103,6 +103,8 @@ func CoverageScores(data []byte, modulePath string) (map[string]float64, error) 
 		if b == nil {
 			b = &blockStat{module: module, stmts: stmts}
 			blocks[key] = b
+		} else if b.stmts != stmts {
+			return nil, fmt.Errorf("modver: coverage profile line %d: inconsistent statement count for %s:%s: %d and %d", i+1, file, span, b.stmts, stmts)
 		}
 		if count > 0 {
 			b.covered = true
