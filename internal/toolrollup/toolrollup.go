@@ -93,14 +93,16 @@ func Rollup(records []ToolCall) []ToolStat {
 func ReadCorpus(r io.Reader) ([]ToolCall, error) {
 	dec := json.NewDecoder(r)
 	out := []ToolCall{}
-	for i := 1; dec.More(); i++ {
+	for i := 1; ; i++ {
 		var tc ToolCall
 		if err := dec.Decode(&tc); err != nil {
+			if err == io.EOF {
+				return out, nil
+			}
 			return nil, fmt.Errorf("toolrollup: decode corpus record %d: %w", i, err)
 		}
 		out = append(out, tc)
 	}
-	return out, nil
 }
 
 // Render formats aggregated tool statistics into an aligned text table.
