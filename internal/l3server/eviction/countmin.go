@@ -1,7 +1,7 @@
 package eviction
 
 // CountMinSketch is a probabilistic frequency counter.
-// Uses 4 rows of uint8 counters with independent hash seeds.
+// Uses 4 rows of uint8 counters with row-specific full-hash mixing.
 type CountMinSketch struct {
 	rows    [4][]uint8
 	width   uint64
@@ -33,7 +33,7 @@ func NewCountMinSketch(width uint64) *CountMinSketch {
 // Increment adds 1 to the estimated count for the given hash.
 func (s *CountMinSketch) Increment(hash uint64) {
 	for i := 0; i < 4; i++ {
-		idx := (hash ^ s.seeds[i]) & (s.width - 1)
+		idx := s.rowIndex(hash, i)
 		if s.rows[i][idx] < 255 {
 			s.rows[i][idx]++
 		}
@@ -48,12 +48,21 @@ func (s *CountMinSketch) Increment(hash uint64) {
 func (s *CountMinSketch) Estimate(hash uint64) uint8 {
 	min := uint8(255)
 	for i := 0; i < 4; i++ {
-		idx := (hash ^ s.seeds[i]) & (s.width - 1)
+		idx := s.rowIndex(hash, i)
 		if s.rows[i][idx] < min {
 			min = s.rows[i][idx]
 		}
 	}
 	return min
+}
+
+// rowIndex mixes before masking so equal low bits do not collide in every row.
+// The SplitMix64 finalizer spreads the seeded hash across all output bits.
+func (s *CountMinSketch) rowIndex(hash uint64, row int) uint64 {
+	h := hash + s.seeds[row]
+	h = (h ^ (h >> 30)) * 0xbf58476d1ce4e5b9
+	h = (h ^ (h >> 27)) * 0x94d049bb133111eb
+	return (h ^ (h >> 31)) & (s.width - 1)
 }
 
 // reset halves all counters (aging/decay) to prevent counter saturation.
