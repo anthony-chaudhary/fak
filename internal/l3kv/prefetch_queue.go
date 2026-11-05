@@ -197,8 +197,9 @@ func (q *PrefetchQueue) Restore(ctx context.Context, key string) ([]byte, bool, 
 				return outcome.payload, true, nil
 			case outcomeMiss:
 				return nil, false, nil
+			default:
+				return nil, false, outcome.err // fault or stopped; never retry the read
 			}
-			return nil, false, outcome.err // fault or stopped
 		}
 		return q.getDirect(ctx, key)
 	}
@@ -236,8 +237,9 @@ func (q *PrefetchQueue) Restore(ctx context.Context, key string) ([]byte, bool, 
 			return outcome.payload, true, nil
 		case outcomeMiss:
 			return nil, false, nil
+		default:
+			return nil, false, outcome.err // preserve the settled fault or stop reason
 		}
-		return nil, false, outcome.err
 	}
 	q.mu.Unlock()
 	return q.getDirect(ctx, key)

@@ -633,12 +633,15 @@ func (c *cudaBackend) uploadClassLocked(t Tensor, as Dtype, class MemoryClass, s
 			C.fcuda_h2d(buf.ptr, unsafe.Pointer(&values[0]), C.size_t(len(values)*4))
 		})
 	}
-	store := F32 // the resident dtype the `as` request narrows f32 host weights to
+	var store Dtype // the resident dtype the `as` request narrows f32 host weights to
 	switch as {
 	case F16:
 		store = F16
 	case Q8_0:
 		store = Q8_0
+	default:
+		// Upload preserves F32 for requests without a narrowing route.
+		store = F32
 	}
 	f := hb.F32()
 	// Q8 narrowing and both native matmul routes require complete row blocks.
@@ -670,17 +673,18 @@ func (c *cudaBackend) uploadClassLocked(t Tensor, as Dtype, class MemoryClass, s
 		return c.uploadF16(t, hb, f, hp)
 	case Q8_0:
 		return c.uploadQ8(t, hb, f, hp)
-	}
-	out, buf := c.dev(t.Shape, F32)
-	if len(f) > 0 {
-		C.fcuda_h2d(buf.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
-		c.accountImmutableWeightUpload(len(f)*F32.Bytes(), buf)
-		if hp != 0 {
-			buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, hb, F32, t.Layout
-			uploadCache[ucKey{hp, F32, t.Layout}] = out
+	default:
+		out, buf := c.dev(t.Shape, F32)
+		if len(f) > 0 {
+			C.fcuda_h2d(buf.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
+			c.accountImmutableWeightUpload(len(f)*F32.Bytes(), buf)
+			if hp != 0 {
+				buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, hb, F32, t.Layout
+				uploadCache[ucKey{hp, F32, t.Layout}] = out
+			}
 		}
+		return out
 	}
-	return out
 }
 
 // uploadNVFP4 copies NewNVFP4's owned payload resident without widening it: packed E2M1

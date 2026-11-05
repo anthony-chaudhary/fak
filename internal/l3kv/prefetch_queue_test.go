@@ -105,6 +105,70 @@ func (s *ctxAwareStore) Get(ctx context.Context, key string) ([]byte, bool, erro
 
 func (s *ctxAwareStore) inFlight() int { return int(atomic.LoadInt32(&s.current)) }
 
+type prefetchFaultStore struct {
+	release chan struct{}
+	err     error
+	reads   atomic.Int32
+}
+
+func (s *prefetchFaultStore) Put(context.Context, string, []byte) error { return nil }
+
+func (s *prefetchFaultStore) Get(ctx context.Context, _ string) ([]byte, bool, error) {
+	s.reads.Add(1)
+	select {
+	case <-s.release:
+		return nil, false, s.err
+	case <-ctx.Done():
+		return nil, false, ctx.Err()
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestPrefetchRestorePropagatesReadFault(t *testing.T) {
+	for _, settled := range []bool{true, false} {
+		name := "held"
+		if settled {
+			name = "settled"
+		}
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				fault := errors.New("store integrity fault")
+				store := &prefetchFaultStore{release: make(chan struct{}), err: fault}
+				pq := NewPrefetchQueue(store, PrefetchConfig{MaxConcurrentReads: 1})
+				defer pq.Stop()
+				if err := pq.Enqueue("span"); err != nil {
+					t.Fatal(err)
+				}
+				synctest.Wait()
+				if settled {
+					close(store.release)
+					synctest.Wait()
+				}
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					payload, found, err := pq.Restore(context.Background(), "span")
+					if payload != nil || found || err != fault {
+						t.Errorf("Restore = (%q, %v, %v), want original store fault", payload, found, err)
+					}
+				}()
+				if !settled {
+					synctest.Wait()
+					close(store.release)
+				}
+				<-done
+				if reads := store.reads.Load(); reads != 1 {
+					t.Errorf("Store.Get calls = %d, want one read without a fault retry", reads)
+				}
+				stats := pq.Stats()
+				if stats.Faults != 1 || stats.Queued != 0 || stats.InFlight != 0 || stats.StagedBytes != 0 || stats.StagedEntries != 0 {
+					t.Errorf("fault settlement left unexpected queue state: %+v", stats)
+				}
+			})
+		})
+	}
+}
+
 func waitFor(t *testing.T, what string, within time.Duration, cond func() bool) {
 	t.Helper()
 	timeout := time.NewTimer(within)

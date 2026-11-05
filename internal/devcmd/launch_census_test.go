@@ -40,6 +40,32 @@ func TestLaunchCensusShapeMath(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=1ms lane=default
+func TestLaunchCensusExpertDispatchExcludesOtherCadences(t *testing.T) {
+	t.Parallel()
+	// Tag every cadence with the selected variant so the class filter, rather
+	// than the variant filter, must exclude non-expert work and drift guards.
+	inv := []LaunchCallSite{
+		{Class: LaunchPerIndexLayer, Variant: variantPerExpert, Factor: 100},
+		{Class: LaunchPerKVLayer, Variant: variantPerExpert, Factor: 100},
+		{Class: LaunchPerAttendLayer, Variant: variantPerExpert, Factor: 100},
+		{Class: LaunchPerMoELayer, Variant: variantPerExpert, Factor: 2},
+		{Class: LaunchPerActiveExpert, Variant: variantPerExpert, Factor: 3},
+		{Class: LaunchPerToken, Variant: variantPerExpert, Factor: 100},
+		{Class: LaunchPerRequest, Variant: variantPerExpert, Factor: 100},
+		{Class: LaunchPrimitive, Variant: variantPerExpert, Factor: 100},
+		{Class: LaunchClass("unknown"), Variant: variantPerExpert, Factor: 100},
+		{Class: LaunchPerMoELayer, Variant: variantBatched, Factor: 7},
+		{Class: LaunchPerActiveExpert, Variant: launchVariantShared, Factor: 100},
+	}
+	if got := expertDispatchPerMoELayer(inv, fixtureLaunchShape, variantPerExpert); got != 14 {
+		t.Fatalf("looped expert/MoE layer = %d, want 2 + 3*4 = 14", got)
+	}
+	if got := expertDispatchPerMoELayer(inv, fixtureLaunchShape, variantBatched); got != 7 {
+		t.Fatalf("batched expert/MoE layer = %d, want 7", got)
+	}
+}
+
 func TestLaunchShapeNormalizeDefaultsAndBounds(t *testing.T) {
 	s, err := (LaunchShape{Name: "x", Layers: 7, MoELayers: 3, ActiveExperts: 2}).normalize()
 	if err != nil {

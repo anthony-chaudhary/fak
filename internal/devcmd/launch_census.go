@@ -100,6 +100,8 @@ type LaunchCallSite struct {
 // expert rows reproduce the documented breakdown exactly: gate+up (mulGroup
 // loops mat.mul -> one parFor per projection on non-fused kernels) + down =
 // 3 dispatches per active expert, i.e. 3*K per MoE layer (~24 at K=8).
+//
+//enumlint:exempt This is a verified decode-path call-site inventory, not a class catalogue; per-token/request cadences remain supported math inputs but have no inventoried sites in this decode scope.
 var launchCensusInventory = []LaunchCallSite{
 	// GLM-DSA learned-indexer step: 4 projection GEMMs + device top-k select.
 	{ID: "glm-dsa-index-qa", File: "internal/model/glm_dsa_session.go", Func: "glmDsaIndexStep",
@@ -312,6 +314,9 @@ func expertDispatchPerMoELayer(inv []LaunchCallSite, shape LaunchShape, variant 
 			sum += s.Factor * shape.ActiveExperts
 		case LaunchPerMoELayer:
 			sum += s.Factor
+		default:
+			// Other cadences and primitive/unknown rows are not expert dispatch.
+			continue
 		}
 	}
 	return sum

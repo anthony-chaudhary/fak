@@ -79,6 +79,8 @@ type GlueCallSite struct {
 // projections, glmDsaAttendCached sparseAttend + o_proj, and the MoE router.
 // q_a_proj is intentionally listed twice — it is computed once in the index
 // step AND once in the KV step (the doc calls this out explicitly).
+//
+//enumlint:exempt This is a verified GLM-DSA call-site inventory, not a class catalogue; per-token/request cadences remain supported math inputs but have no inventoried sites in this decode scope.
 var glueCensusInventory = []GlueCallSite{
 	// glmDsaIndexStep: learned-indexer projections + device top-k selection.
 	{ID: "glm-dsa-index-q-a", File: "internal/model/glm_dsa_session.go", Func: "glmDsaIndexStep",
