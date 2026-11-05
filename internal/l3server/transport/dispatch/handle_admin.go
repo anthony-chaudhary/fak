@@ -158,10 +158,13 @@ func (d *Dispatcher) HandleRestore(msg protocol.Message) protocol.Message {
 
 	// Flush all shards before installing the loaded snapshot.
 	for i := 0; i < d.Manager.NumShards(); i++ {
-		d.Manager.Shard(i).Submit(shard.ShardOp{
+		result := d.Manager.Shard(i).Submit(shard.ShardOp{
 			Type:   shard.OpFlush,
 			Result: make(chan shard.OpResult, 1),
 		})
+		if result.Err != nil {
+			return ErrResponse(msg.Header.RequestID, fmt.Sprintf("restore flush shard %d: %v", i, result.Err))
+		}
 	}
 
 	// Group entries by current shard layout

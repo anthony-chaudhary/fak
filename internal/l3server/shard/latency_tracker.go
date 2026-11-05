@@ -2,47 +2,48 @@ package shard
 
 import (
 	"sort"
+	"sync/atomic"
 	"time"
 )
 
 const latencyRingSize = 256
 
 // opLatencyTracker is a fixed-size ring buffer that tracks recent op latencies
-// for computing p99 during migration. Single-threaded only (shard goroutine).
+// for computing recent operation percentiles. record and reset must
+// remain serialized on the shard goroutine; concurrent readers load each sample
+// atomically, but a percentile is an approximate, possibly mixed-window snapshot.
 type opLatencyTracker struct {
-	ring  [latencyRingSize]int64 // nanoseconds
-	pos   int
-	count int
+	ring  [latencyRingSize]atomic.Int64 // nanoseconds
+	pos   int                           // single writer only
+	count atomic.Int64
 }
 
 // record inserts a duration sample into the ring buffer.
 func (t *opLatencyTracker) record(d time.Duration) {
-	t.ring[t.pos] = d.Nanoseconds()
+	t.ring[t.pos].Store(d.Nanoseconds())
 	t.pos = (t.pos + 1) % latencyRingSize
-	if t.count < latencyRingSize {
-		t.count++
+	if count := t.count.Load(); count < latencyRingSize {
+		t.count.Store(count + 1)
 	}
 }
 
 // percentile returns the p-th percentile latency (p in 0..100).
 // Returns 0 if fewer than 10 samples have been recorded.
 func (t *opLatencyTracker) percentile(p int) time.Duration {
-	if t.count < 10 {
+	n := int(t.count.Load())
+	if n < 10 {
 		return 0
 	}
 
 	// Copy to scratch array and sort
 	var scratch [latencyRingSize]int64
-	n := t.count
 	if n > latencyRingSize {
 		n = latencyRingSize
 	}
 
-	// Copy the most recent n entries
-	if t.count >= latencyRingSize {
-		copy(scratch[:], t.ring[:])
-	} else {
-		copy(scratch[:n], t.ring[:n])
+	// Copy samples individually; the writer may advance or reset meanwhile.
+	for i := 0; i < n; i++ {
+		scratch[i] = t.ring[i].Load()
 	}
 
 	sort.Slice(scratch[:n], func(i, j int) bool {
@@ -69,7 +70,7 @@ func (t *opLatencyTracker) p99() time.Duration {
 // reset clears all tracked latencies.
 func (t *opLatencyTracker) reset() {
 	t.pos = 0
-	t.count = 0
+	t.count.Store(0)
 }
 
 // opLatencyTrackers tracks latency per operation category.
