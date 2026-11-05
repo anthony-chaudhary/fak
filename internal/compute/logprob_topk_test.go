@@ -92,7 +92,7 @@ func closeF32(got float32, want float64, tol float64) bool {
 // (a) a k=5 row equals the float64 host oracle within fp32 tolerance,
 // including the chosen token's entry;
 // (b) tie order matches the Go sort (logprob desc, id asc);
-// (c) a NaN/inf logit row returns the ErrNonFiniteLogits-class sentinel
+// (c) a NaN/inf logit row returns the ErrLogprobTopKNonFinite-class sentinel
 // instead of garbage. Fixtures (a)/(b) are built so the assertions hold by
 // construction of the upstream semantics, not by running the implementation.
 func TestDeviceTopKLogprobsMatchHostFloat64(t *testing.T) {
@@ -261,14 +261,14 @@ func TestDeviceTopKLogprobsMatchHostFloat64(t *testing.T) {
 			name, row := name, row
 			t.Run(name, func(t *testing.T) {
 				res, err := DeviceTopKLogprobs(row, []int32{0, 1}, 0)
-				if !errors.Is(err, ErrNonFiniteLogits) {
-					t.Errorf("DeviceTopKLogprobs error = %v, want ErrNonFiniteLogits", err)
+				if !errors.Is(err, ErrLogprobTopKNonFinite) {
+					t.Errorf("DeviceTopKLogprobs error = %v, want ErrLogprobTopKNonFinite", err)
 				}
 				if res != nil {
 					t.Errorf("result = %+v, want nil on refusal", res)
 				}
-				if _, err := ArgmaxTopK(row, 2); !errors.Is(err, ErrNonFiniteLogits) {
-					t.Errorf("ArgmaxTopK error = %v, want ErrNonFiniteLogits", err)
+				if _, err := ArgmaxTopK(row, 2); !errors.Is(err, ErrLogprobTopKNonFinite) {
+					t.Errorf("ArgmaxTopK error = %v, want ErrLogprobTopKNonFinite", err)
 				}
 			})
 		}

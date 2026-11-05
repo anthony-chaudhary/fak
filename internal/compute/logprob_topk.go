@@ -20,7 +20,7 @@
 //   - Logprobs are emitted only at the caller-gathered ids; a full-vocab
 //     logprob vector is never materialized.
 //   - A NaN or infinite logit anywhere in the row refuses the whole row with
-//     ErrNonFiniteLogits instead of producing garbage.
+//     ErrLogprobTopKNonFinite instead of producing garbage.
 //   - Ties order by ascending id, matching the Go sort (logprob desc, id asc).
 
 package compute
@@ -48,9 +48,10 @@ var (
 	// ErrLogprobTopKShape rejects a negative k.
 	ErrLogprobTopKShape = errors.New("compute: logprob topk: k must be >= 0")
 
-	// ErrNonFiniteLogits refuses a row containing a NaN or infinite logit;
-	// the compute-side twin of agent.ErrNonFiniteLogits.
-	ErrNonFiniteLogits = errors.New("compute: logprob topk: non-finite model logit")
+	// ErrLogprobTopKNonFinite refuses a row containing a NaN or infinite
+	// logit; the compute-side twin of agent.ErrNonFiniteLogits. Distinct from
+	// ErrNonFiniteLogits, the sampling-truncation family's own sentinel.
+	ErrLogprobTopKNonFinite = errors.New("compute: logprob topk: non-finite model logit")
 )
 
 // TopKLogprobsRow is one row's computed receipt: the log-softmax value at each
@@ -107,7 +108,7 @@ func DeviceTopKLogprobs(logits []float32, ids []int32, chosen int32) (*TopKLogpr
 			}
 		}
 		if bad {
-			return nil, ErrNonFiniteLogits
+			return nil, ErrLogprobTopKNonFinite
 		}
 		if partialMax > maxVal {
 			maxVal = partialMax
@@ -174,7 +175,7 @@ func ArgmaxTopK(logits []float32, k int) ([]int32, error) {
 	top := make([]int32, 0, k)
 	for id, raw := range logits {
 		if math.IsNaN(float64(raw)) || math.IsInf(float64(raw), 0) {
-			return nil, ErrNonFiniteLogits
+			return nil, ErrLogprobTopKNonFinite
 		}
 		if len(top) == k && raw <= logits[top[k-1]] {
 			continue
