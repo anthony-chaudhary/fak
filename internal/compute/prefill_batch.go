@@ -30,8 +30,8 @@ type PrefillBatchArgs struct {
 	NumKVHeads int     // number of key/value heads (nKV)
 	HeadDim    int     // dimension per head (hd)
 	Tokens     int     // optional token count P; if <= 0, derived from X
-	RopeTheta  float64 // rotary embedding base theta (e.g. 10000.0)
-	Scale      float32 // attention scaling factor; 0 => 1/sqrt(HeadDim)
+	RopeTheta  float64 // finite rotary embedding base; <= 0 => 10000.0
+	Scale      float32 // finite attention scaling factor; <= 0 => 1/sqrt(HeadDim)
 }
 
 // PrefillBatchResult returns the outputs of a batched prompt prefill operation.
@@ -114,6 +114,14 @@ func validatePrefillBatchArgs(args *PrefillBatchArgs) (int, int, error) {
 	}
 	if args.Wo.buf != nil && args.Wo.Numel() != D*qOut {
 		return 0, 0, fmt.Errorf("compute: PrefillBatch Wo numel %d != expected %d", args.Wo.Numel(), D*qOut)
+	}
+	// Nonfinite controls must fail before projections or KV publication;
+	// comparison-based defaulting alone lets NaN and positive infinity through.
+	if math.IsNaN(args.RopeTheta) || math.IsInf(args.RopeTheta, 0) {
+		return 0, 0, fmt.Errorf("compute: PrefillBatch RopeTheta must be finite")
+	}
+	if math.IsNaN(float64(args.Scale)) || math.IsInf(float64(args.Scale), 0) {
+		return 0, 0, fmt.Errorf("compute: PrefillBatch Scale must be finite")
 	}
 	if args.RopeTheta <= 0 {
 		args.RopeTheta = 10000.0
