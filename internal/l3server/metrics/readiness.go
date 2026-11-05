@@ -44,14 +44,19 @@ func (c *Collector) slabReady() (ready bool, pending int, total int) {
 }
 
 // ReadyHandler returns 200 with {"status":"ready"} when the server is ready,
-// or 503 with JSON progress details otherwise. HTTP status codes are unchanged
-// for backward compatibility with k8s probes.
+// or 503 with JSON status/progress details otherwise. Shutdown takes precedence
+// over startup readiness and optional slab detection.
 //
 // When ?slab=true is present, also checks that all shards have completed slab
-// detection (no shard in "warming_up" status). Without ?slab=true, behavior is
-// identical to previous versions.
+// detection (no shard in "warming_up" status). Outside shutdown, the existing
+// startup and slab readiness behavior is preserved.
 func (c *Collector) ReadyHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	if c.shuttingDown.Load() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(`{"status":"shutting_down"}` + "\n"))
+		return
+	}
 	if c.startup.Ready.Load() {
 		// Base server is ready; optionally check slab detection status.
 		if r.URL.Query().Get("slab") == "true" {
