@@ -129,10 +129,11 @@ func (rep *Report) scanFile(p string) error {
 		return err
 	}
 	rep.FilesScanned++
+	if malformed {
+		rep.MalformedFiles = append(rep.MalformedFiles, filepath.ToSlash(p))
+	}
 	if len(readings) == 0 {
-		if malformed {
-			rep.MalformedFiles = append(rep.MalformedFiles, filepath.ToSlash(p))
-		} else {
+		if !malformed {
 			rep.EvidenceFree++
 		}
 		return nil
@@ -142,7 +143,8 @@ func (rep *Report) scanFile(p string) error {
 }
 
 // readPath parses one file into zero or more readings. malformed reports that
-// the file was neither one JSON document nor line-delimited JSON objects.
+// the file was neither one JSON object nor entirely line-delimited JSON objects.
+// Valid objects from a mixed JSONL file are retained alongside that warning.
 func readPath(path string) ([]Reading, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -153,12 +155,15 @@ func readPath(path string) ([]Reading, bool, error) {
 	}
 	rel := filepath.ToSlash(path)
 	var records []map[string]any
+	malformed := false
 	if rec, ok := parseObject(data); ok {
 		records = []map[string]any{rec}
 	} else if lines := splitLines(data); lines != nil {
 		for _, line := range lines {
 			if rec, ok := parseObject([]byte(line)); ok {
 				records = append(records, rec)
+			} else {
+				malformed = true
 			}
 		}
 	}
@@ -172,7 +177,7 @@ func readPath(path string) ([]Reading, bool, error) {
 		}
 		out = append(out, newReading(rel, rec))
 	}
-	return out, false, nil
+	return out, malformed, nil
 }
 
 // parseObject decodes one JSON document that must be an object.
