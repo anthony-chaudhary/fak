@@ -1,6 +1,7 @@
 package toolplugin
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 )
@@ -55,4 +56,75 @@ func TestResolveBudgetDecodesJSONPointerEscapes(t *testing.T) {
 	if err != nil || got.Decision != "clamp" || got.Effective != 3 {
 		t.Fatalf("got=%+v err=%v", got, err)
 	}
+}
+
+// Runtime estimate is unmeasured; all cases use tiny in-memory JSON arguments.
+// fak-test:runtime fast est=10ms lane=default
+func TestResolveBudgetRejectsTrailingDataBeforeRewriting(t *testing.T) {
+	contracts := []BudgetContract{{Tool: "search", Pointers: []string{"/limit"}, Ceiling: 10}}
+	for _, budget := range []struct {
+		name      string
+		requested int64
+	}{
+		{"pass", 5},
+		{"clamp", 99},
+	} {
+		encoded, err := json.Marshal(map[string]any{"label": "λ", "limit": budget.requested})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tail := range []struct {
+			name, suffix string
+			valid        bool
+		}{
+			{"empty", "", true},
+			{"JSON whitespace", " \t\r\n", true},
+			{"array close", "]", false},
+			{"object close", "}", false},
+			{"second object", "{}", false},
+			{"nonbreaking space", "\u00a0", false},
+		} {
+			t.Run(budget.name+"/"+tail.name, func(t *testing.T) {
+				// A multibyte label and leading whitespace exercise InputOffset's byte boundary.
+				raw := []byte(" \n" + string(encoded) + tail.suffix)
+				before := append([]byte(nil), raw...)
+				got, err := ResolveBudget("search", raw, contracts)
+				if !bytes.Equal(raw, before) {
+					t.Fatal("rewriter changed caller-owned arguments")
+				}
+				if !tail.valid {
+					if err == nil || got.Decision != "error" || !bytes.Equal(got.Arguments, before) ||
+						got.Pointer != "" || got.Requested != 0 || got.Effective != 0 {
+						t.Fatalf("malformed arguments were admitted or rewritten: %+v, err %v", got, err)
+					}
+					return
+				}
+				wantEffective := budget.requested
+				if wantEffective > 10 {
+					wantEffective = 10
+				}
+				if err != nil || got.Decision != budget.name || got.Pointer != "/limit" ||
+					got.Requested != budget.requested || got.Effective != wantEffective {
+					t.Fatalf("valid resolution changed: %+v, err %v", got, err)
+				}
+				if budget.name == "pass" && !bytes.Equal(got.Arguments, before) {
+					t.Fatal("pass changed original JSON bytes")
+				}
+				var value struct {
+					Label string `json:"label"`
+					Limit int64  `json:"limit"`
+				}
+				if err := json.Unmarshal(got.Arguments, &value); err != nil || value.Label != "λ" || value.Limit != wantEffective {
+					t.Fatalf("valid output payload changed: %s, err %v", got.Arguments, err)
+				}
+			})
+		}
+	}
+	t.Run("uncontracted tool remains unchanged", func(t *testing.T) {
+		raw := []byte(`{"limit":99}]`)
+		got, err := ResolveBudget("other", raw, contracts)
+		if err != nil || got.Decision != "pass" || !bytes.Equal(got.Arguments, raw) {
+			t.Fatalf("uncontracted input behavior changed: %+v, err %v", got, err)
+		}
+	})
 }
