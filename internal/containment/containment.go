@@ -2,6 +2,8 @@
 // and hybrid cgroup vs parameter metadata max-pooling for unified memory APU inference.
 package containment
 
+import "math"
+
 // ModelMetadata declares deterministic model weight, context, and scratch geometry
 // used to calculate an unforgeable capacity floor for APU memory attribution.
 type ModelMetadata struct {
@@ -78,16 +80,18 @@ func EvaluateAPUAllocation(instanceID string, cgroupBytes int64, meta ModelMetad
 
 // ArbitrateAPUHeadroom calculates total attributed memory consumption across multiple model instances
 // and reports remaining free headroom in the APU's unified memory aperture.
+// Negative allocation sizes or an unrepresentable total fail closed with consumedBytes
+// saturated to MaxInt64, zero free bytes, and no capacity. A negative aperture also has no capacity.
 func ArbitrateAPUHeadroom(totalApertureBytes int64, allocations []APUAllocationRecord) (consumedBytes int64, freeBytes int64, hasCapacity bool) {
 	for _, alloc := range allocations {
-		consumedBytes += alloc.AttributedResidentBytes
+		bytes := alloc.AttributedResidentBytes
+		if bytes < 0 || bytes > math.MaxInt64-consumedBytes {
+			return math.MaxInt64, 0, false
+		}
+		consumedBytes += bytes
 	}
-	freeBytes = totalApertureBytes - consumedBytes
-	if freeBytes < 0 {
-		freeBytes = 0
-		hasCapacity = false
-	} else {
-		hasCapacity = true
+	if totalApertureBytes < 0 || consumedBytes > totalApertureBytes {
+		return consumedBytes, 0, false
 	}
-	return consumedBytes, freeBytes, hasCapacity
+	return consumedBytes, totalApertureBytes - consumedBytes, true
 }
