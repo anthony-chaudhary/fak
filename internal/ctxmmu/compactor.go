@@ -647,6 +647,82 @@ func VerifyPrefixWarmth(before, after []TokenPage) bool {
 	return true
 }
 
+// HistoryClose reports where a sequential prefix substitution closed and what
+// the carve-out preserved.
+type HistoryClose struct {
+	// MismatchTurn is the first historical turn whose content was edited
+	// after it became resident; zero when the history is unedited.
+	MismatchTurn int
+	// Closed reports whether the substitution closed at a historical mismatch.
+	Closed bool
+	// ReasoningPreserved counts active-turn reasoning pages kept across the close.
+	ReasoningPreserved int
+}
+
+// PreserveCurrentTurnReasoning performs sequential prefix substitution over
+// stored context pages given the set of historically edited turns.
+//
+// The walk is sequential from the front of the context: the pinned prefix stays
+// warm, and stored pages are trusted turn by turn until the first historical
+// mismatch - the earliest edited turn - where the substitution closes. Under
+// the standard rule, every stored page at or after the close point is stale and
+// stripped, including reasoning from later turns. The carve-out keeps the
+// active (current) turn's reasoning span: assistant reasoning pages of the
+// highest interactive turn persist independently of earlier edits.
+//
+// An unedited history (nil or empty edited set) returns the context
+// byte-identical: no page is dropped, reordered, or rewritten.
+//
+// This deliberately does not adopt mtplx's oldest-first eviction: nothing is
+// evicted by age; the close point is content-driven.
+func PreserveCurrentTurnReasoning(pages []TokenPage, editedTurns map[int]bool) ([]TokenPage, HistoryClose) {
+	var closeInfo HistoryClose
+	if len(pages) == 0 {
+		return pages, closeInfo
+	}
+
+	mismatch := 0
+	for turn := range editedTurns {
+		if turn >= 1 && (mismatch == 0 || turn < mismatch) {
+			mismatch = turn
+		}
+	}
+	if mismatch == 0 {
+		return pages, closeInfo // unedited: byte-identical
+	}
+
+	maxTurn := 0
+	for i := range pages {
+		if !pages[i].Kind.IsPrefix() && pages[i].TurnIndex > maxTurn {
+			maxTurn = pages[i].TurnIndex
+		}
+	}
+	if mismatch > maxTurn {
+		// Close point lies beyond the context; nothing is stale.
+		return pages, closeInfo
+	}
+
+	closeInfo.Closed = true
+	closeInfo.MismatchTurn = mismatch
+
+	out := make([]TokenPage, 0, len(pages))
+	for i := range pages {
+		p := &pages[i]
+		switch {
+		case p.Kind.IsPrefix() || p.TurnIndex < 1:
+			out = append(out, *p) // warm prefix, verbatim
+		case p.Pinned:
+			out = append(out, *p) // pinned pages are never evicted
+		case p.TurnIndex < mismatch:
+			out = append(out, *p) // unbroken historical prefix
+		case p.TurnIndex == maxTurn && p.Kind == PageKindAssistant:
+			out = append(out, *p) // carve-out: active reasoning span
+			closeInfo.ReasoningPreserved++
+		}
+	}
+	return out, closeInfo
+}
+
 const hextable = "0123456789abcdef"
 
 func appendHex(dst []byte, src []byte) []byte {

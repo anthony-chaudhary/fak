@@ -474,6 +474,92 @@ func TestCompactorConcurrency(t *testing.T) {
 	wg.Wait()
 }
 
+// TestCtxmmuPreserveCurrentTurnReasoning pins the clean-room adaptation of
+// mtplx independent current-turn reasoning preservation:
+//
+//	(a) an edited historical turn still keeps the current turn's reasoning span;
+//	(b) an unedited history is unchanged (byte-identical).
+func TestCtxmmuPreserveCurrentTurnReasoning(t *testing.T) {
+	sysPrompt := []byte("You are fak agent kernel assistant.")
+	toolSchemas := []byte(`[{"name":"bash","description":"execute command"}]`)
+	turn1User := []byte("Inspect the build log")
+	turn1Result := makePayload("build log line ", 2048)
+	turn1Reasoning := []byte("Historical reasoning: the failing step is the linker.")
+	turn2User := []byte("Now check the tests")
+	turn2Result := makePayload("test runner output ", 2048)
+	turn2Reasoning := []byte("Later historical reasoning: the race is in the pool.")
+	turn3User := []byte("Fix it")
+	turn3Reasoning := []byte("Active turn reasoning: patch the seam and re-run the witness.")
+
+	buildPages := func() []ctxmmu.TokenPage {
+		return []ctxmmu.TokenPage{
+			{ID: 1, TurnIndex: 0, Kind: ctxmmu.PageKindPrefixSystem, Role: "system", Content: sysPrompt, Tokens: ctxmmu.EstimateTokens(sysPrompt), Resident: true, Pinned: true},
+			{ID: 2, TurnIndex: 0, Kind: ctxmmu.PageKindPrefixTools, Role: "system", Content: toolSchemas, Tokens: ctxmmu.EstimateTokens(toolSchemas), Resident: true, Pinned: true},
+			{ID: 3, TurnIndex: 1, Kind: ctxmmu.PageKindUser, Role: "user", Content: turn1User, Tokens: 10, Resident: true},
+			{ID: 4, TurnIndex: 1, Kind: ctxmmu.PageKindToolResult, Role: "tool", ToolName: "bash", Content: turn1Result, Tokens: 512, Resident: true},
+			{ID: 5, TurnIndex: 1, Kind: ctxmmu.PageKindAssistant, Role: "assistant", Content: turn1Reasoning, Tokens: 20, Resident: true},
+			{ID: 6, TurnIndex: 2, Kind: ctxmmu.PageKindUser, Role: "user", Content: turn2User, Tokens: 10, Resident: true},
+			{ID: 7, TurnIndex: 2, Kind: ctxmmu.PageKindToolResult, Role: "tool", ToolName: "bash", Content: turn2Result, Tokens: 512, Resident: true},
+			{ID: 8, TurnIndex: 2, Kind: ctxmmu.PageKindAssistant, Role: "assistant", Content: turn2Reasoning, Tokens: 20, Resident: true},
+			{ID: 9, TurnIndex: 3, Kind: ctxmmu.PageKindUser, Role: "user", Content: turn3User, Tokens: 10, Resident: true},
+			{ID: 10, TurnIndex: 3, Kind: ctxmmu.PageKindAssistant, Role: "assistant", Content: turn3Reasoning, Tokens: 20, Resident: true},
+		}
+	}
+
+	t.Run("edited historical turn keeps current reasoning span", func(t *testing.T) {
+		pages := buildPages()
+		out, report := ctxmmu.PreserveCurrentTurnReasoning(pages, map[int]bool{1: true})
+
+		if !report.Closed || report.MismatchTurn != 1 {
+			t.Fatalf("want closed at mismatch turn 1, got %+v", report)
+		}
+		if report.ReasoningPreserved != 1 {
+			t.Errorf("ReasoningPreserved: want 1, got %d", report.ReasoningPreserved)
+		}
+		if len(out) != 3 {
+			t.Fatalf("want 3 surviving pages (warm prefix x2 + active reasoning), got %d", len(out))
+		}
+		if !bytes.Equal(out[0].Content, sysPrompt) || !bytes.Equal(out[1].Content, toolSchemas) {
+			t.Fatalf("warm prefix mutated: %q / %q", out[0].Content, out[1].Content)
+		}
+		active := out[2]
+		if active.TurnIndex != 3 || active.Kind != ctxmmu.PageKindAssistant {
+			t.Fatalf("surviving tail is not the active reasoning span: turn=%d kind=%v", active.TurnIndex, active.Kind)
+		}
+		if !bytes.Equal(active.Content, turn3Reasoning) {
+			t.Fatalf("current reasoning span mutated: got %q", active.Content)
+		}
+		for _, p := range out {
+			if p.TurnIndex == 2 && p.Kind == ctxmmu.PageKindAssistant {
+				t.Fatalf("turn 2 reasoning survived the close: %q", p.Content)
+			}
+		}
+	})
+
+	t.Run("unedited history is byte-identical", func(t *testing.T) {
+		pages := buildPages()
+		before := make([]ctxmmu.TokenPage, len(pages))
+		copy(before, pages)
+
+		out, report := ctxmmu.PreserveCurrentTurnReasoning(pages, nil)
+
+		if report.Closed || report.MismatchTurn != 0 {
+			t.Fatalf("unedited history must not close: %+v", report)
+		}
+		if len(out) != len(before) {
+			t.Fatalf("page count changed: want %d, got %d", len(before), len(out))
+		}
+		for i := range before {
+			if !bytes.Equal(out[i].Content, before[i].Content) {
+				t.Fatalf("page %d content mutated: %q -> %q", i, before[i].Content, out[i].Content)
+			}
+			if out[i].TurnIndex != before[i].TurnIndex || out[i].Kind != before[i].Kind || out[i].Tokens != before[i].Tokens {
+				t.Fatalf("page %d structure mutated: %+v -> %+v", i, before[i], out[i])
+			}
+		}
+	})
+}
+
 // ---------------------------------------------------------------------------
 // ZERO-ALLOCATION BENCHMARKS
 // ---------------------------------------------------------------------------
