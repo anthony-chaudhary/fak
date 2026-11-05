@@ -45,9 +45,6 @@ func TestScanTestdata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.FilesScanned != 8 || len(rep.Readings) != 9 {
-		t.Fatalf("files=%d readings=%d, want 8 files / 9 readings: %+v", rep.FilesScanned, len(rep.Readings), rep.Readings)
-	}
 	if len(rep.MalformedFiles) != 0 {
 		t.Fatalf("malformed: %v", rep.MalformedFiles)
 	}
@@ -63,6 +60,15 @@ func TestScanTestdata(t *testing.T) {
 		"perf-receipt-v2-nobusy.json":       {math.NaN(), ""},                    // UNKNOWN: no device-busy data
 		"perf-receipt-v3-hostoverhead.json": {0.2, SourceHostPhaseDecomposition}, // native v3 decomposition
 		"invalid-evidence-20261015.json":    {math.NaN(), ""},                    // corrupt meter: never fabricated
+	}
+	wantJSONLHostShares := []float64{
+		0.23, // gpu_busy_percent 77
+		0.60, // gpu_busy_percent 40
+	}
+	wantFiles := len(cases) + 1 // one JSONL file alongside the single-reading JSON fixtures
+	wantReadings := len(cases) + len(wantJSONLHostShares)
+	if rep.FilesScanned != wantFiles || len(rep.Readings) != wantReadings {
+		t.Fatalf("files=%d readings=%d, want %d files / %d readings: %+v", rep.FilesScanned, len(rep.Readings), wantFiles, wantReadings, rep.Readings)
 	}
 	for suffix, want := range cases {
 		r := mustReading(t, rep.Readings, suffix)
@@ -87,11 +93,12 @@ func TestScanTestdata(t *testing.T) {
 			jsonl = append(jsonl, r)
 		}
 	}
-	if len(jsonl) != 2 {
-		t.Fatalf("jsonl readings = %d, want 2", len(jsonl))
+	if len(jsonl) != len(wantJSONLHostShares) {
+		t.Fatalf("jsonl readings = %d, want %d", len(jsonl), len(wantJSONLHostShares))
 	}
-	approx(t, *jsonl[0].HostShare, 0.23, 1e-9) // gpu_busy_percent 77
-	approx(t, *jsonl[1].HostShare, 0.60, 1e-9) // gpu_busy_percent 40
+	for i, want := range wantJSONLHostShares {
+		approx(t, *jsonl[i].HostShare, want, 1e-9)
+	}
 	if !jsonl[0].Timestamp.Before(jsonl[1].Timestamp) {
 		t.Errorf("jsonl recency order wrong: %v then %v", jsonl[0].Timestamp, jsonl[1].Timestamp)
 	}
