@@ -73,6 +73,7 @@ func TestNewServeFlagsLandInTheirCategories(t *testing.T) {
 		}
 	}
 	for _, tc := range []struct{ flag, category string }{
+		{"role", "start"},
 		{"arm-lease-store", "policy"},
 		{"native-allow-bash-command", "native"},
 		{"native-bash-command-timeout", "native"},
@@ -80,6 +81,22 @@ func TestNewServeFlagsLandInTheirCategories(t *testing.T) {
 		if got := categorized[tc.flag]; got != tc.category {
 			t.Errorf("serve flag --%s categorized as %q, want %q", tc.flag, got, tc.category)
 		}
+	}
+}
+
+func TestServeHelpExplainsRoleAtStartup(t *testing.T) {
+	fs, _ := newServeFlagSet()
+	var out bytes.Buffer
+	printServeHelp(&out, fs, "start")
+	for _, want := range []string{"--role string", "prefill or decode (empty = ordinary combined serve)"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("startup help missing %q:\n%s", want, out.String())
+		}
+	}
+	out.Reset()
+	printServeHelp(&out, fs, "all")
+	if !strings.Contains(out.String(), fs.Lookup("role").Usage) {
+		t.Fatalf("detailed help lost the full role contract:\n%s", out.String())
 	}
 }
 
