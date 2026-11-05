@@ -22,6 +22,7 @@
 package attemptbudget
 
 import (
+	"math"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/strmatch"
@@ -366,8 +367,9 @@ type Decision struct {
 	// the effective policy (Input.Backoff, or DefaultBackoffSeconds).
 	BackoffSeconds int64 `json:"backoff_seconds,omitempty"`
 	// CooldownUntilUnix is the last attempt's AtUnix plus BackoffSeconds --
-	// the earliest time this issue should be re-offered. Zero when there is
-	// no recorded attempt.
+	// the earliest time this issue should be re-offered, saturated at the int64
+	// bounds when the sum is not representable. Positive overflow remains a
+	// future cooldown even at NowUnix == MaxInt64. Zero with no recorded attempt.
 	CooldownUntilUnix int64 `json:"cooldown_until_unix,omitempty"`
 	// BlockReason is the structured, queryable reason this issue was
 	// auto-blocked, distinguishing a genuinely-stuck issue (a repeated failure
@@ -411,8 +413,16 @@ func Decide(in Input) Decision {
 		d.LastFailureClass = last.FailureClass
 		d.BackoffClass = classify(last.FailureClass)
 		d.BackoffSeconds = backoffSeconds(d.BackoffClass, in.Backoff)
-		d.CooldownUntilUnix = last.AtUnix + d.BackoffSeconds
-		if in.NowUnix > 0 && in.NowUnix < d.CooldownUntilUnix {
+		positiveOverflow := d.BackoffSeconds > 0 && last.AtUnix > math.MaxInt64-d.BackoffSeconds
+		switch {
+		case positiveOverflow:
+			d.CooldownUntilUnix = math.MaxInt64
+		case d.BackoffSeconds < 0 && last.AtUnix < math.MinInt64-d.BackoffSeconds:
+			d.CooldownUntilUnix = math.MinInt64
+		default:
+			d.CooldownUntilUnix = last.AtUnix + d.BackoffSeconds
+		}
+		if in.NowUnix > 0 && (positiveOverflow || in.NowUnix < d.CooldownUntilUnix) {
 			d.Status = StatusCoolingDown
 		}
 	}
