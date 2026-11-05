@@ -421,3 +421,147 @@ func TestJSONSchemaMaskEmptyObjectAndMissingEOSFailClosed(t *testing.T) {
 		t.Fatalf("complete object without EOS survivors = %v, want fail-closed empty set", got)
 	}
 }
+
+// fak-test:runtime fast est=10ms lane=default
+func TestJSONSchemaMaskLimits(t *testing.T) {
+	objectSchema := func(total, required int) []byte {
+		var schema strings.Builder
+		schema.WriteString(`{"type":"object","properties":{`)
+		for i := 0; i < total; i++ {
+			if i > 0 {
+				schema.WriteByte(',')
+			}
+			fmt.Fprintf(&schema, `"p%02d":{"type":"string"}`, i)
+		}
+		schema.WriteString(`},"required":[`)
+		for i := 0; i < required; i++ {
+			if i > 0 {
+				schema.WriteByte(',')
+			}
+			fmt.Fprintf(&schema, `"p%02d"`, i)
+		}
+		schema.WriteString(`],"additionalProperties":false}`)
+		return []byte(schema.String())
+	}
+	compileAt := func(t *testing.T, total, required int) {
+		t.Helper()
+		if _, err := CompileJSONSchema(objectSchema(total, required), jsonSchemaTokenDecoder{[]byte(`{}`)}, CompileOptions{EOS: -1}); err != nil {
+			t.Fatalf("%d total/%d required properties: %v", total, required, err)
+		}
+	}
+	refuseAt := func(t *testing.T, total, required int) {
+		t.Helper()
+		_, err := CompileJSONSchema(objectSchema(total, required), jsonSchemaTokenDecoder{[]byte(`{}`)}, CompileOptions{EOS: -1})
+		if !errors.Is(err, ErrUnsupportedSchema) {
+			t.Fatalf("%d total/%d required properties: err = %v, want ErrUnsupportedSchema", total, required, err)
+		}
+	}
+
+	t.Run("byte_limit", func(t *testing.T) {
+		base := []byte(`{"type":"object","properties":{},"required":[]}`)
+		atLimit := append(append([]byte(nil), base...), []byte(strings.Repeat(" ", maxJSONSchemaBytes-len(base)))...)
+		if len(atLimit) != maxJSONSchemaBytes {
+			t.Fatalf("at-limit schema is %d bytes, want %d", len(atLimit), maxJSONSchemaBytes)
+		}
+		if _, err := CompileJSONSchema(atLimit, jsonSchemaTokenDecoder{[]byte(`{}`)}, CompileOptions{EOS: -1}); err != nil {
+			t.Fatalf("%d-byte schema at the limit: %v", len(atLimit), err)
+		}
+		over := append(atLimit[:len(atLimit):len(atLimit)], ' ')
+		if _, err := CompileJSONSchema(over, jsonSchemaTokenDecoder{[]byte(`{}`)}, CompileOptions{EOS: -1}); !errors.Is(err, ErrUnsupportedSchema) {
+			t.Fatalf("%d-byte schema over the limit: err = %v, want ErrUnsupportedSchema", len(over), err)
+		}
+	})
+
+	t.Run("property_limit", func(t *testing.T) {
+		compileAt(t, maxJSONSchemaProperties, maxJSONSchemaProperties)
+		refuseAt(t, maxJSONSchemaProperties+1, maxJSONSchemaProperties+1)
+	})
+
+	t.Run("optional_limit", func(t *testing.T) {
+		compileAt(t, 1+maxJSONSchemaOptional, 1)
+		refuseAt(t, 1+maxJSONSchemaOptional+1, 1)
+	})
+
+	t.Run("mask_logits_sentinel", func(t *testing.T) {
+		const eos = 1
+		dec := jsonSchemaTokenDecoder{
+			[]byte(`{"a":"x"}`), // 0: the complete object
+			nil,                 // 1: EOS
+			[]byte(`garbage`),   // 2: never admitted
+		}
+		mask, err := CompileJSONSchema([]byte(`{"type":"object","properties":{"a":{"type":"string"}},"required":["a"],"additionalProperties":false}`), dec, CompileOptions{EOS: eos})
+		if err != nil {
+			t.Fatalf("CompileJSONSchema: %v", err)
+		}
+		neg := float32(math.Inf(-1))
+		logits := []float32{1, 2, 3}
+		mask.MaskLogits(nil, logits)
+		if logits[0] != 1 {
+			t.Fatalf("admitted token logit = %v, want the untouched input 1", logits[0])
+		}
+		for _, id := range []int{eos, 2} {
+			if logits[id] != neg {
+				t.Fatalf("disallowed token %d logit = %v, want the mask sentinel %v", id, logits[id], neg)
+			}
+		}
+		logits = []float32{1, 2, 3}
+		mask.MaskLogits([]int{0}, logits) // pinned history: the object is complete
+		if logits[eos] != 2 {
+			t.Fatalf("EOS after the complete object = %v, want the untouched input 2", logits[eos])
+		}
+		for _, id := range []int{0, 2} {
+			if logits[id] != neg {
+				t.Fatalf("post-completion token %d logit = %v, want the mask sentinel %v", id, logits[id], neg)
+			}
+		}
+	})
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestCompileJSONSchemaBoundedOptionalScalarContract(t *testing.T) {
+	// Pins the documented bounded optional-scalar acceptance contract
+	// published at 982aab4b43 + df974fbd87: schema byte cap 65,536, 16 total
+	// properties, 4 optional properties, at most 16 canonical shapes.
+	if maxJSONSchemaBytes != 65_536 || maxJSONSchemaProperties != 16 || maxJSONSchemaOptional != 4 {
+		t.Fatalf("documented admission limits = bytes %d / properties %d / optional %d, want 65536 / 16 / 4",
+			maxJSONSchemaBytes, maxJSONSchemaProperties, maxJSONSchemaOptional)
+	}
+
+	var schema strings.Builder
+	schema.WriteString(`{"type":"object","properties":{`)
+	for i := range maxJSONSchemaProperties {
+		if i > 0 {
+			schema.WriteByte(',')
+		}
+		fmt.Fprintf(&schema, `"p%02d":{"type":"string"}`, i)
+	}
+	schema.WriteString(`},"required":[`)
+	for i := 0; i < maxJSONSchemaProperties-maxJSONSchemaOptional; i++ {
+		if i > 0 {
+			schema.WriteByte(',')
+		}
+		fmt.Fprintf(&schema, `"p%02d"`, i)
+	}
+	schema.WriteString(`],"additionalProperties":false}`)
+
+	mask, err := CompileJSONSchema([]byte(schema.String()), jsonSchemaTokenDecoder{[]byte(`{}`)}, CompileOptions{EOS: -1})
+	if err != nil {
+		t.Fatalf("maximum combined schema (16 total, 4 optional): %v", err)
+	}
+	wantShapes := 1 << maxJSONSchemaOptional
+	if got := len(mask.objects); got != wantShapes {
+		t.Fatalf("maximum combined schema compiled %d shapes, want %d canonical shapes", got, wantShapes)
+	}
+	seen := make(map[string]bool, len(mask.objects))
+	for _, obj := range mask.objects {
+		var lit strings.Builder
+		for _, seg := range obj.segs {
+			lit.Write(seg.lit)
+		}
+		key := lit.String()
+		if seen[key] {
+			t.Fatalf("duplicate canonical shape among %d shapes: %q", len(mask.objects), key)
+		}
+		seen[key] = true
+	}
+}
