@@ -257,7 +257,10 @@ func DecodeKVBody(body []byte, flags uint8) (key, value []byte, ttlMs int64, err
 	}
 	value = body[off : off+int(valueLen)]
 	off += int(valueLen)
-	if flags&FlagWithTTL != 0 && off+8 <= len(body) {
+	if flags&FlagWithTTL != 0 {
+		if len(body)-off < 8 {
+			return nil, nil, 0, fmt.Errorf("kv body TTL truncated")
+		}
 		ttlMs = int64(binary.LittleEndian.Uint64(body[off:]))
 	}
 	return key, value, ttlMs, nil
