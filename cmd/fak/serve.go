@@ -389,13 +389,16 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.memoryGovernor = fs.Bool("memory-governor", false, "enable dynamic zero-swap memory governor admission on Apple Silicon / Metal serving (auto-enabled with --metal or FAK_MEMORY_GOVERNOR=1)")
 	sf.gpudirectOverflow = fs.Bool("gpudirect-overflow", false, "reserved compatibility flag; GPU Direct overflow is not implemented on this command (default off)")
 	sf.expertParallel = fs.Int("expert-parallel", 1, "with --gguf: shard the routed MoE experts of a glm_moe_dsa model (GLM-5.2) across N expert-parallel ranks — the lever to move supported expert GEMMs off the host (the `--cpu-offload-experts` wall) onto resident GPUs (#971). Mixed k-quant expert formats without backend kernels (for example Q5_K/Q6_K today) still use the host k-quant fallback; set FAK_KQ_INT8=1 to use its production int8 path. The per-rank residual partials are reduced by one AllReduceSum through the wired Collective. 1 (default) = the unchanged monolith forward. N>1 requires an initialized non-cpu-ref compute.CollectiveBackend; CUDA builds provide that only with -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1) on a box with enough visible GPUs.")
-	// Structural speculative-decode selector (#1891): the DEFAULT front door sets
-	// the fast decode route by construction instead of leaving it env-only. "mtp"
-	// (default) selects the resident Metal/Vulkan MTP path where the admissibility
-	// envelope holds; "ngram" selects prompt n-gram speculation; "" leaves the
-	// route unselected. FAK_SPECULATIVE / SPECULATIVE remain the operator override
-	// and win when set, so this flag only supplies the structural default.
-	sf.speculative = fs.String("speculative", "mtp", "structural speculative-decode selector: mtp (default) or ngram; empty disables; env overrides")
+	// Structural speculative-decode selector (#1891 + DFlash2 wiring): the DEFAULT
+	// front door sets the fast decode route by construction instead of leaving it
+	// env-only. "mtp" (default) selects the resident Metal/Vulkan MTP path where
+	// the admissibility envelope holds; "ngram" selects prompt n-gram speculation;
+	// "dflash2" routes to the authenticated DFlash2 sidecar request constructor;
+	// "" leaves the route unselected. FAK_SPECULATIVE / SPECULATIVE remain the
+	// operator override and win when set, so this flag only supplies the structural
+	// default. The closed set is admitted at startup (resolveSpeculativeMode): an
+	// unknown value fails loud before any weight load.
+	sf.speculative = fs.String("speculative", "mtp", "structural speculative-decode selector: mtp (default), ngram, or dflash2; empty disables; FAK_SPECULATIVE/SPECULATIVE env overrides win; an unknown value fails startup")
 	sf.tensorParallel = fs.Int("tensor-parallel", 1, "with --gguf: tensor-parallel rank count for the dense projections (the Megatron column/row split, tensor_parallel.go). 1 (default) = no split. N>1 uses the same initialized device-collective gate as --expert-parallel; CUDA builds require -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1).")
 	sf.budgetWebhook = fs.String("budget-webhook", "", "POST a JSON event to this URL when a served session's context budget crosses the warning threshold (--budget-warn-fraction) or is exhausted (the reset trigger), so an operator/monitor is notified before exhaustion (#743). Also carries the --spend-cap breach event (kind:\"spend_breach\", #4859) when a scope crosses its token/USD budget. Empty = off. Needs --context-budget-tokens to have a budget to watch.")
 	sf.budgetWarnFraction = fs.Float64("budget-warn-fraction", 0.8, "consumed share (0..1) of the context budget at which --budget-webhook fires its pre-exhaustion warning (default 0.8 = 80%); <=0 or >=1 disables the warning while the exhaustion event still fires")
@@ -424,6 +427,49 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.fleetBusInterval = fs.Duration("fleet-bus-interval", DefaultFleetBusInterval, "with --fleet-bus: how often this instance re-announces presence and drains pending directives. Must stay well under fleetbus.DefaultInstanceTTL (90s) or a live instance flickers out of the roster and silently shrinks the denominator a control point measures \"everyone acked\" against. <=0 uses the default.")
 	sf.keepAwake = fs.String("keep-awake", KeepAwakeOff, "prevent OS sleep during execution: off|while-active|always (default off)")
 	return fs, sf
+}
+
+// ErrSpeculativeModeUnknown marks a --speculative selector (or its FAK_SPECULATIVE /
+// SPECULATIVE override) that names a mode outside the closed admission set. It is the
+// startup refusal for a misspelled structural selector: such a value must never boot a
+// server whose fast decode route is silently unselected.
+var ErrSpeculativeModeUnknown = errors.New("unknown speculative mode")
+
+// The closed structural speculative-decode selector values admitted by `fak serve`:
+// the historical mtp/ngram routes plus the DFlash2 sidecar route; "" disables.
+const (
+	serveSpeculativeMTP     = "mtp"
+	serveSpeculativeNGram   = "ngram"
+	serveSpeculativeDFlash2 = "dflash2"
+)
+
+// resolveSpeculativeMode resolves the effective structural speculative-decode selector
+// for `fak serve`. The FAK_SPECULATIVE / SPECULATIVE operator overrides win over the
+// --speculative flag (FAK_SPECULATIVE first), mirroring the gateway's historical env-OR
+// precedence; normalization (lowercase, trim) matches the gateway's own comparison so an
+// admitted value reaches every downstream route byte-for-byte. The winner must land in
+// the closed admission set {mtp, ngram, dflash2, empty}; anything else fails startup
+// with ErrSpeculativeModeUnknown before any weight load. An admitted value is returned
+// verbatim for buildGateway to thread into gateway.Config.SpeculativeMode — including
+// "dflash2", which the gateway routes to the DFlash2 request constructor (a selected
+// DFlash2 route without an authenticated target owner still refuses there, fail-closed).
+func resolveSpeculativeMode(flagValue string, getenv func(string) string) (string, error) {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	effective := strings.ToLower(strings.TrimSpace(flagValue))
+	for _, name := range []string{"FAK_SPECULATIVE", "SPECULATIVE"} {
+		if v := strings.ToLower(strings.TrimSpace(getenv(name))); v != "" {
+			effective = v
+			break
+		}
+	}
+	switch effective {
+	case "", serveSpeculativeMTP, serveSpeculativeNGram, serveSpeculativeDFlash2:
+		return effective, nil
+	default:
+		return "", fmt.Errorf("%w: %q (admitted: mtp, ngram, dflash2, empty)", ErrSpeculativeModeUnknown, effective)
+	}
 }
 
 func (sf *serveFlags) effectiveAdmissionTokenBudget() int {
@@ -597,6 +643,19 @@ func cmdServe(argv []string) {
 		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
 		os.Exit(2)
 	}
+	// Structural speculative-decode selector admission (#1891 + DFlash2 wiring): the
+	// closed set {mtp, ngram, dflash2, empty} is validated BEFORE any weight load so a
+	// misspelled selector fails startup loud instead of booting a server whose fast
+	// decode route is silently unselected. FAK_SPECULATIVE / SPECULATIVE remain the
+	// operator override and win over the flag; the resolved value is what buildGateway
+	// threads to the gateway (the mtp/ngram routes keep their historical env-OR
+	// selection byte-for-byte).
+	resolvedSpeculative, err := resolveSpeculativeMode(*sf.speculative, os.Getenv)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
+	*sf.speculative = resolvedSpeculative
 	if err := validateServeFitFlags(*sf.fit, *sf.workloadPromptTokens, *sf.workloadOutputTokens, *sf.workloadConcurrency, *sf.sloTPOTMS, *sf.sloTTFTMS); err != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
 		os.Exit(2)

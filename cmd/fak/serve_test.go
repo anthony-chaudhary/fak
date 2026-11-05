@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -17,6 +18,83 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/macobs"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
+
+// TestSpeculativeSelectorAdmitsDFlash2 pins the closed structural selector contract:
+// the admission matrix {mtp, ngram, dflash2, ""} is admitted verbatim (dflash2 routes
+// to the DFlash2 request constructor through gateway.Config.SpeculativeMode), an unknown
+// mode fails startup with the ErrSpeculativeModeUnknown sentinel, and the FAK_SPECULATIVE
+// / SPECULATIVE operator overrides still win over the --speculative flag.
+// fak-test:runtime fast est=50ms lane=default
+func TestSpeculativeSelectorAdmitsDFlash2(t *testing.T) {
+	noEnv := func(string) string { return "" }
+
+	// Closed admission matrix: every structural value the serve selector admits.
+	for _, mode := range []string{"mtp", "ngram", "dflash2", ""} {
+		got, err := resolveSpeculativeMode(mode, noEnv)
+		if err != nil {
+			t.Fatalf("admitted %q refused: %v", mode, err)
+		}
+		if got != mode {
+			t.Fatalf("resolved %q, want %q (admitted values pass through verbatim)", got, mode)
+		}
+	}
+
+	// Normalization matches the gateway's historical lowercase/trim comparison.
+	if got, err := resolveSpeculativeMode(" DFlash2 ", noEnv); err != nil || got != "dflash2" {
+		t.Fatalf("normalized dflash2: got (%q,%v), want (\"dflash2\",nil)", got, err)
+	}
+
+	// Unknown modes fail startup with the closed sentinel, not a bare error.
+	for _, bad := range []string{"eagle", "MTP2", "off", "mt p"} {
+		_, err := resolveSpeculativeMode(bad, noEnv)
+		if !errors.Is(err, ErrSpeculativeModeUnknown) {
+			t.Fatalf("unknown %q: err=%v, want errors.Is(ErrSpeculativeModeUnknown)", bad, err)
+		}
+	}
+
+	// The FAK_SPECULATIVE override wins over the flag; SPECULATIVE is the second override.
+	if got, _ := resolveSpeculativeMode("dflash2", func(k string) string {
+		if k == "FAK_SPECULATIVE" {
+			return "mtp"
+		}
+		return ""
+	}); got != "mtp" {
+		t.Fatalf("FAK_SPECULATIVE must win over the flag, got %q", got)
+	}
+	if got, _ := resolveSpeculativeMode("dflash2", func(k string) string {
+		if k == "SPECULATIVE" {
+			return "ngram"
+		}
+		return ""
+	}); got != "ngram" {
+		t.Fatalf("SPECULATIVE must win over the flag, got %q", got)
+	}
+	// An unknown OVERRIDE value fails too: the override is the effective selector.
+	if _, err := resolveSpeculativeMode("mtp", func(k string) string {
+		if k == "FAK_SPECULATIVE" {
+			return "bogus"
+		}
+		return ""
+	}); !errors.Is(err, ErrSpeculativeModeUnknown) {
+		t.Fatalf("unknown override: err=%v, want errors.Is(ErrSpeculativeModeUnknown)", err)
+	}
+
+	// Live flag surface: the default stays the mtp structural default and dflash2 parses.
+	fs, sf := newServeFlagSet()
+	if err := fs.Parse(nil); err != nil {
+		t.Fatalf("parse empty: %v", err)
+	}
+	if *sf.speculative != "mtp" {
+		t.Fatalf("--speculative default = %q, want mtp", *sf.speculative)
+	}
+	fs2, sf2 := newServeFlagSet()
+	if err := fs2.Parse([]string{"--speculative=dflash2"}); err != nil {
+		t.Fatalf("parse --speculative=dflash2: %v", err)
+	}
+	if *sf2.speculative != "dflash2" {
+		t.Fatalf("--speculative=dflash2 not admitted by the flag, got %q", *sf2.speculative)
+	}
+}
 
 // TestCompactHistoryBudgetDefaultsToDefaultConst pins the default-on sprawl trigger: the
 // --compact-history-budget flag (defined identically in runServe and runGuard) now defaults
