@@ -271,6 +271,11 @@ func (c *Config) Validate() error {
 		if c.GossipPingMs <= 0 || int64(c.GossipPingMs) > maxGossipPingMs {
 			return fmt.Errorf("gossip_ping_ms must be in [1, %d] when cluster_enabled, got %d", maxGossipPingMs, c.GossipPingMs)
 		}
+		// The failure detector also doubles this duration before declaring death.
+		const maxGossipSuspectMs = int64(1<<63-1) / (2 * int64(time.Millisecond))
+		if c.GossipSuspectMs <= 0 || int64(c.GossipSuspectMs) > maxGossipSuspectMs {
+			return fmt.Errorf("gossip_suspect_ms must be in [1, %d] when cluster_enabled, got %d", maxGossipSuspectMs, c.GossipSuspectMs)
+		}
 	}
 
 	if c.MaxMemoryGB <= 0 {
