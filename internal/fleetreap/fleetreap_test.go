@@ -61,6 +61,22 @@ func TestReapByDeadOwnerSparesLiveAndUnknown(t *testing.T) {
 	}
 }
 
+// Runtime estimate is unmeasured; the test creates and rereads one tiny temporary file.
+// fak-test:runtime fast est=20ms lane=default
+func TestReapByDeadOwnerRequiresLivenessCheck(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Unix(1_700_000_000, 0)
+	path := writeAt(t, dir, fmt.Sprintf("seed-%d.tmp", os.Getpid()), "keep", now)
+	res, err := ReapByDeadOwner(dir, "*.tmp", nil, now)
+	if err == nil || res.Removed != 0 {
+		t.Fatalf("missing liveness checker: result=%+v err=%v, want refusal with no removals", res, err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != "keep" {
+		t.Fatalf("unknown owner file changed: content=%q err=%v", got, err)
+	}
+}
+
 func TestMeasureFootprint(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Unix(1_700_000_000, 0)
