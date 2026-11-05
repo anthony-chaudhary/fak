@@ -154,10 +154,10 @@ func readEntries(rd io.Reader) ([]KVEntry, error) {
 	var buf [8]byte
 
 	for {
-		// keyLen
+		// A complete shard ends with the sentinel, not bare EOF.
 		if _, err := io.ReadFull(rd, buf[:2]); err != nil {
 			if err == io.EOF {
-				break
+				err = io.ErrUnexpectedEOF
 			}
 			return entries, err
 		}
