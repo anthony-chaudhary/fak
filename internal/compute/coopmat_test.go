@@ -419,3 +419,124 @@ func TestCooperativeMatrixPrefillThroughputModel(t *testing.T) {
 		})
 	}
 }
+
+// TestCoopmatSplitKSchedule pins the mid-M split-K schedule branch: mid-M shapes
+// select the split-K plan with a wider row tile, their outputs are bit-identical
+// to the standard plan (identical-output gate) and match an independent
+// reference; small-M and large-M plans and outputs are unchanged. No throughput
+// or hardware claim is made.
+// fak-test:runtime fast est=500ms lane=default
+func TestCoopmatSplitKSchedule(t *testing.T) {
+	// 1. Plan selection: mid-M takes the split-K branch; small-M and large-M
+	// keep the legacy standard plan.
+	plans := []struct {
+		m, n, k int
+		kind    CoopMatScheduleKind
+		macroM  int
+		splitK  int
+	}{
+		{1, 64, 64, CoopMatScheduleStandard, 64, 1},
+		{16, 64, 64, CoopMatScheduleStandard, 64, 1},
+		{32, 128, 256, CoopMatScheduleStandard, 64, 1},
+		{33, 64, 64, CoopMatScheduleSplitK, 128, 2},
+		{64, 64, 64, CoopMatScheduleSplitK, 128, 2},
+		{128, 256, 512, CoopMatScheduleSplitK, 128, 2},
+		{256, 64, 128, CoopMatScheduleSplitK, 128, 2},
+		{511, 512, 256, CoopMatScheduleSplitK, 128, 2},
+		{512, 64, 64, CoopMatScheduleStandard, 64, 1},
+		{1024, 128, 256, CoopMatScheduleStandard, 64, 1},
+	}
+	for _, p := range plans {
+		got := SelectCoopMatSchedule(p.m, p.n, p.k)
+		if got.Kind != p.kind || got.MacroM != p.macroM || got.SplitK != p.splitK {
+			t.Errorf("SelectCoopMatSchedule(%d,%d,%d) = kind=%s macroM=%d splitK=%d, want kind=%s macroM=%d splitK=%d",
+				p.m, p.n, p.k, got.Kind, got.MacroM, got.SplitK, p.kind, p.macroM, p.splitK)
+		}
+		if got.MacroN != 64 || got.MacroK != 32 {
+			t.Errorf("SelectCoopMatSchedule(%d,%d,%d) = macroN=%d macroK=%d, want (64, 32)",
+				p.m, p.n, p.k, got.MacroN, got.MacroK)
+		}
+	}
+
+	// Partition ranges stay block-aligned, contiguous, cover K exactly once,
+	// and clamp the tail; earlier partitions absorb the uneven remainder.
+	sched := SelectCoopMatSchedule(128, 64, 96) // 3 K blocks of 32
+	if start, end := sched.SplitKRange(0, 96); start != 0 || end != 64 {
+		t.Errorf("SplitKRange(0, 96) = [%d, %d), want [0, 64)", start, end)
+	}
+	if start, end := sched.SplitKRange(1, 96); start != 64 || end != 96 {
+		t.Errorf("SplitKRange(1, 96) = [%d, %d), want [64, 96)", start, end)
+	}
+	short := SelectCoopMatSchedule(64, 64, 32)
+	if start, end := short.SplitKRange(1, 32); start != 32 || end != 32 {
+		t.Errorf("single-block K: SplitKRange(1, 32) = [%d, %d), want empty [32, 32)", start, end)
+	}
+
+	engine, err := NewCooperativeMatrixEngine(CoopMatVulkan, "gfx1151", CoopMatFP16)
+	if err != nil {
+		t.Fatalf("NewCooperativeMatrixEngine: %v", err)
+	}
+	rng := rand.New(rand.NewSource(4682))
+
+	runShape := func(m, n, k int) (got, std, naive []float32) {
+		A := make([]float32, m*k)
+		B := make([]float32, k*n)
+		for i := range A {
+			A[i] = rng.Float32()*2 - 1
+		}
+		for i := range B {
+			B[i] = rng.Float32()*2 - 1
+		}
+		got, err := engine.ExecuteGEMM(A, B, m, n, k)
+		if err != nil {
+			t.Fatalf("ExecuteGEMM(%d,%d,%d): %v", m, n, k, err)
+		}
+		cfg, err := engine.ConfigureTileGeometry(m, n, k)
+		if err != nil {
+			t.Fatalf("ConfigureTileGeometry(%d,%d,%d): %v", m, n, k, err)
+		}
+		std = engine.executeGEMMStandard(A, B, m, n, k, cfg)
+		naive = naiveGEMMReference(A, B, m, n, k)
+		return got, std, naive
+	}
+
+	// 2. Mid-M shapes take the split-K branch and pass the identical-output
+	// gate: bit-identical to the standard plan, matching the independent
+	// reference.
+	for _, sh := range []struct{ m, n, k int }{{33, 64, 64}, {64, 64, 64}, {128, 256, 512}, {256, 64, 128}, {511, 128, 96}} {
+		got, std, naive := runShape(sh.m, sh.n, sh.k)
+		if !identicalFloat32(got, std) {
+			t.Errorf("mid-M (%dx%dx%d): split-K output is not bit-identical to the standard plan (identical-output gate)",
+				sh.m, sh.n, sh.k)
+		}
+		if cos := cosine(got, naive); cos < 0.9999 {
+			t.Errorf("mid-M (%dx%dx%d): split-K cosine vs independent reference %.8f < 0.9999",
+				sh.m, sh.n, sh.k, cos)
+		}
+	}
+
+	// 3. Regression: small-M and large-M schedules are unchanged and their
+	// outputs still match the independent reference.
+	for _, sh := range []struct{ m, n, k int }{{16, 64, 64}, {32, 128, 256}, {512, 64, 64}, {1024, 64, 128}} {
+		got, _, naive := runShape(sh.m, sh.n, sh.k)
+		if cos := cosine(got, naive); cos < 0.9999 {
+			t.Errorf("%d-M regression: cosine vs independent reference %.8f < 0.9999", sh.m, cos)
+		}
+	}
+}
+
+// naiveGEMMReference is the independent triple-loop reference for the split-K
+// schedule pin: Y = A @ B with a single sequential K fold.
+func naiveGEMMReference(A, B []float32, M, N, K int) []float32 {
+	C := make([]float32, M*N)
+	for i := 0; i < M; i++ {
+		for j := 0; j < N; j++ {
+			var s float32
+			for k := 0; k < K; k++ {
+				s += A[i*K+k] * B[k*N+j]
+			}
+			C[i*N+j] = s
+		}
+	}
+	return C
+}

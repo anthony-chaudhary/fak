@@ -1,6 +1,10 @@
 package compute
 
-import "unsafe"
+import (
+	"crypto/sha256"
+	"sync"
+	"unsafe"
+)
 
 func normalizeUploadClass(class MemoryClass, site, sitePrefix string) (MemoryClass, string) {
 	if class == "" {
@@ -52,4 +56,62 @@ func releaseKVDeviceSlices[D any](keys, rawKeys, values []D, positions *[]int, r
 		release(&values[layer])
 	}
 	*positions = nil
+}
+
+// Compute kernel source-hash cache (INSPIRE-ONLY clean-room adaptation of the
+// mlx Metal kernel cache, which keys compiled pipelines on the kernel source
+// so identical sources compile once: ml-explore/mlx
+// mlx/backend/common/metal_kernel.cpp @f624f8ec47e8049253c93360868b2bfea8a5b061,
+// MIT; no upstream code copied). Backends re-emit equivalent programs per
+// call site; keying the compiled-program cache on a content hash of the
+// source lets byte-identical sources share one entry while edited sources
+// recompile under their own.
+
+// kernelSourceHash identifies a compute kernel's source text by content:
+// byte-identical sources share one hash regardless of call site.
+type kernelSourceHash [sha256.Size]byte
+
+func hashKernelSource(source string) kernelSourceHash {
+	return sha256.Sum256([]byte(source))
+}
+
+// kernelProgramCache[P] maps kernel source hashes to compiled programs P.
+// Compile holds the mutex across lookup and compilation, so each distinct
+// source compiles exactly once per cache and every later lookup for that
+// source serves the cached program without invoking compile. A changed
+// source hashes differently and recompiles under its own entry; a failed
+// compilation stores nothing, so it never shadows a retry.
+type kernelProgramCache[P any] struct {
+	mu       sync.Mutex
+	programs map[kernelSourceHash]P
+}
+
+func newKernelProgramCache[P any]() *kernelProgramCache[P] {
+	return &kernelProgramCache[P]{programs: make(map[kernelSourceHash]P)}
+}
+
+// Compile returns the compiled program for source. An exact source-hash hit
+// returns the cached program; a miss invokes compile(source), stores its
+// result under the source's hash, and returns it.
+func (c *kernelProgramCache[P]) Compile(source string, compile func(string) (P, error)) (P, error) {
+	var zero P
+	h := hashKernelSource(source)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if program, ok := c.programs[h]; ok {
+		return program, nil
+	}
+	program, err := compile(source)
+	if err != nil {
+		return zero, err
+	}
+	c.programs[h] = program
+	return program, nil
+}
+
+// Len reports the number of distinct compiled programs held.
+func (c *kernelProgramCache[P]) Len() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.programs)
 }

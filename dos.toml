@@ -569,6 +569,11 @@ concurrent = [
   "traceabi",
   "fitplan",
   "sourceleasecontrol",
+  # pkg/billing (74f57abf05/a40a434b33/9d103f7d9c) and pkg/routerlaunch landed
+  # without a lane declaration, so the undeclared-leaf detector resolved them as
+  # drift; reconciled here like the moecache/turncost precedent.
+  "billing",
+  "routerlaunch",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -754,6 +759,8 @@ autopick = [
   "stepspan",
   "traceabi",
   "fitplan",
+  "billing",
+  "routerlaunch",
   # new-leaf:lane
 ]
 
@@ -1748,6 +1755,8 @@ cachelayout  = ["internal/cachelayout/**"]
 replayoracle = ["internal/replayoracle/**"]
 moecache     = ["pkg/moecache/**"]
 turncost     = ["pkg/turncost/**"]
+billing      = ["pkg/billing/**"]
+routerlaunch = ["pkg/routerlaunch/**"]
 # Root docs/index files are part of the docs lane too. Without these exact
 # entries, `fak sweep` can only surface README/llms churn as no-lane residuals,
 # so the shared tree never fully drains through `fak sweep --apply --lane docs`.

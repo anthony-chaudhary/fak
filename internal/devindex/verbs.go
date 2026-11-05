@@ -194,6 +194,7 @@ var verbManifest = []Verb{
 	{Name: "debt-lanes", Synopsis: "debt lane allocation and wave assignment for autonomous subagents", Lane: "cmd"},
 	{Name: "debt-orchestrator", Synopsis: "coordinate bounded maturity debt burndown across dedicated debt lanes with witness tracking", Lane: "cmd"},
 	{Name: "debug", Synopsis: "the context debugger: attach to a finished session as a core dump and demand-page its working set", Lane: "cmd"},
+	{Name: "decode-anatomy", Synopsis: "decode-window receipt gate: launches/syncs/barriers per token, µs-witness gaps, capture drift, host_share", Lane: "cmd"},
 	{Name: "deepseekbench", Synopsis: "DeepSeek V4 Pro/Flash TTFT/TPOT scorecard: no-key dry-run fixture, live run gated by key + --spend", Lane: "cmd"},
 	{Name: "demo", Synopsis: "zero-flag 60-second proof: run fak's offline scenario through the real kernel, one verdict per call class", Lane: "cmd"},
 	{Name: "disambiguation", Synopsis: "query, audit, and generate the canonical concept disambiguation index", Lane: "cmd"},
