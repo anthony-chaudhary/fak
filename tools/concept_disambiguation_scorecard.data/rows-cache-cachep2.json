@@ -1,0 +1,569 @@
+{
+  "rows": [
+    {
+      "id": "cachep2-infercachedtokensbyclient",
+      "canonical": "inferCachedTokensByClient",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Per-client map of inferred cached prompt tokens held by the gateway metrics snapshot when a provider does not report cache reads.",
+      "distinction": "Gateway-side inference bookkeeping; it is not the provider-reported CachedPromptTokens field and not engine KV-cache telemetry.",
+      "distinct_from": [
+        "x-cache-cachedprompttokens"
+      ],
+      "aliases": [],
+      "grounding": "inferCachedTokensByClient",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-kvcachebytes",
+      "canonical": "KVCacheBytes",
+      "family": "cache",
+      "kind": "metric",
+      "definition": "Byte footprint of resident KV tensors as reported by the device-spine gauge and the componentized memory plan.",
+      "distinction": "Raw KV storage byte count; it is not vCache page-table virtualization accounting and not the MALL Infinity Cache size knobs.",
+      "distinct_from": [
+        "kv-cache"
+      ],
+      "aliases": [],
+      "grounding": "KVCacheBytes",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-kvcachen",
+      "canonical": "kvCacheN",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "llama.cpp-shaped timings.cache_n counter recording how many prompt tokens were served from cache, tracked in the gateway perf ledger.",
+      "distinction": "Token count of cache-served prompts; it is not the byte footprint (KVCacheBytes), not the external kvcached management tool, and not the Q8_0 KV module.",
+      "distinct_from": [
+        "c4681-kvcached",
+        "cachep2-kvcacheq8",
+        "kv-cache"
+      ],
+      "aliases": [],
+      "grounding": "kvCacheN",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-kvcacheq8",
+      "canonical": "kvcache_q8",
+      "family": "cache",
+      "kind": "doc-term",
+      "definition": "Source module internal/model/kvcache_q8.go implementing the Q8_0 quantized KV cache realization (#12981) with its KVPackedRow int8-code scheme.",
+      "distinction": "The quantization module cited in provenance comments; it is not the serve-time KV precision policy selector, not the external kvcached tool, and not the generic KV cache concept.",
+      "distinct_from": [
+        "c4681-kvcached",
+        "cachep2-kvcachen",
+        "kv-cache"
+      ],
+      "aliases": [],
+      "grounding": "kvcache_q8",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-kvcachestationary",
+      "canonical": "KVCacheStationary",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Continuous-batcher admission flag marking a request whose KV cache remains resident in UMA between turns instead of being evicted.",
+      "distinction": "Residency decision flag on an admission record; it is not the byte cap MaxKVCacheBytes and not an engine-reported usage fraction.",
+      "distinct_from": [
+        "cachep2-maxkvcachebytes",
+        "cachep2-kvcacheusage"
+      ],
+      "aliases": [],
+      "grounding": "KVCacheStationary",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-kvcacheusage",
+      "canonical": "KVCacheUsage",
+      "family": "cache",
+      "kind": "metric",
+      "definition": "Unitless fraction (0..1) of engine KV cache in use, accumulated by the vLLM, SGLang and MLX engine adapters from their scrapes.",
+      "distinction": "Normalized engine-adapter fraction; it is not the percent-typed field KVCacheUsagePct (MLX) and not the vLLM wire label kv_cache_usage_perc.",
+      "distinct_from": [
+        "cachep2-kvcacheusagepct",
+        "cachep2-kvcacheusageperc"
+      ],
+      "aliases": [],
+      "grounding": "KVCacheUsage",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-kvcacheusagepct",
+      "canonical": "KVCacheUsagePct",
+      "family": "cache",
+      "kind": "metric",
+      "definition": "Percent of KV cache in use exposed by macobs MLX serving telemetry (json kv_cache_usage_pct).",
+      "distinction": "macobs percent reading for MLX serving; it is not the vLLM wire label kv_cache_usage_perc and not the normalized engine fraction KVCacheUsage.",
+      "distinct_from": [
+        "cachep2-kvcacheusage",
+        "cachep2-kvcacheusageperc"
+      ],
+      "aliases": [],
+      "grounding": "KVCacheUsagePct",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-kvcacheusageperc",
+      "canonical": "kv_cache_usage_perc",
+      "family": "cache",
+      "kind": "metric",
+      "definition": "vLLM wire metric label reporting KV cache usage as a percentage, ingested by the vLLM adapter and mirrored into macobs scrapes.",
+      "distinction": "vLLM-specific percent wire label; it is not the MLX telemetry field KVCacheUsagePct and not the unitless engine fraction KVCacheUsage.",
+      "distinct_from": [
+        "cachep2-kvcacheusage",
+        "cachep2-kvcacheusagepct"
+      ],
+      "aliases": [],
+      "grounding": "kv_cache_usage_perc",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-mallcachemodel",
+      "canonical": "MALLCacheModel",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Software model of the AMD Strix Halo 32 MiB on-die MALL Infinity Cache used by the strix compute package for tiling and eviction simulation.",
+      "distinction": "Behavioral simulator of the hardware L3; it is not the byte capacity constant StrixHaloInfinityCacheBytes and not the MB sizing knob MALLCacheSizeMB.",
+      "distinct_from": [
+        "cachep2-strixhaloinfinitycachebytes",
+        "cachep2-mallcachesizemb"
+      ],
+      "aliases": [],
+      "grounding": "MALLCacheModel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-mallcachesizemb",
+      "canonical": "MALLCacheSizeMB",
+      "family": "cache",
+      "kind": "config",
+      "definition": "Megabyte knob (json mall_cache_size_mb, default 32) declaring the MALL Infinity Cache size consumed by roofline probes and campaign fanout contracts.",
+      "distinction": "Operator-visible MB sizing knob; it is not the platform byte constant StrixHaloMALLCacheSizeMB and not the software simulator MALLCacheModel.",
+      "distinct_from": [
+        "cachep2-strixhalomallcachesizemb",
+        "cachep2-mallcachemodel"
+      ],
+      "aliases": [],
+      "grounding": "MALLCacheSizeMB",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-maxkvcachebytes",
+      "canonical": "MaxKVCacheBytes",
+      "family": "cache",
+      "kind": "config",
+      "definition": "Continuous-batcher configuration cap on total KV cache bytes across active slots, where 0 means unconstrained.",
+      "distinction": "Admission-time capacity cap; it is not the observed footprint KVCacheBytes and not the residency flag KVCacheStationary.",
+      "distinct_from": [
+        "cachep2-kvcachebytes",
+        "cachep2-kvcachestationary"
+      ],
+      "aliases": [],
+      "grounding": "MaxKVCacheBytes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-memcache",
+      "canonical": "mem_cache",
+      "family": "cache",
+      "kind": "doc-term",
+      "definition": "SGLang upstream python module path (python/sglang/srt/mem_cache/) cited in provenance comments behind fak's RadixKV eviction and prefix-ownership adaptations.",
+      "distinction": "Upstream reference path only; it is not fak's RadixKV subsystem and not the MoE expert-weight cache pkg/moecache.",
+      "distinct_from": [
+        "radixkv",
+        "cachep2-moecache"
+      ],
+      "aliases": [],
+      "grounding": "mem_cache",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-moecache",
+      "canonical": "moecache",
+      "family": "cache",
+      "kind": "subsystem",
+      "definition": "Public pkg/moecache owning the closed routed-expert weight-cache tier vocabulary (DRAM/checkpoint/NVMe) and its typed metric envelope.",
+      "distinction": "MoE expert-weight cache plane; it is not the SGLang mem_cache provenance path and not the Go build cache GOCACHE.",
+      "distinct_from": [
+        "cachep2-memcache",
+        "x3-cache-gocache"
+      ],
+      "aliases": [],
+      "grounding": "moecache",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-newmallcachemodel",
+      "canonical": "NewMALLCacheModel",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Constructor instantiating the MALL Infinity Cache model with 32,768 sets and 16 ways at 32 MiB.",
+      "distinction": "Allocation entry point; it is not the MALLCacheModel type itself and not the MALLCacheSizeMB sizing knob.",
+      "distinct_from": [
+        "cachep2-mallcachemodel",
+        "cachep2-mallcachesizemb"
+      ],
+      "aliases": [],
+      "grounding": "NewMALLCacheModel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-prefixcachetelemetry",
+      "canonical": "PrefixCacheTelemetry",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "macobs telemetry block carrying observed provider prefix-cache behavior collected during MLX serving scrapes.",
+      "distinction": "Observed-telemetry DTO; it is not the provider prefix-cache mechanism itself (prefix_cache) and not vCache calibration state.",
+      "distinct_from": [
+        "c4681-prefixcache"
+      ],
+      "aliases": [],
+      "grounding": "PrefixCacheTelemetry",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-radixcache",
+      "canonical": "radix_cache",
+      "family": "cache",
+      "kind": "doc-term",
+      "definition": "SGLang upstream radix_cache.py module cited in provenance comments backing fak's RadixKV eviction and dense-prefix ownership logic.",
+      "distinction": "Upstream reference; it is not fak's RadixKV subsystem and not the sibling mem_cache provenance path.",
+      "distinct_from": [
+        "radixkv",
+        "cachep2-memcache"
+      ],
+      "aliases": [],
+      "grounding": "radix_cache",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-recurrentprefixcache",
+      "canonical": "RecurrentPrefixCache",
+      "family": "cache",
+      "kind": "concept",
+      "definition": "Extend-only prefix cache enabled by the continuous batcher for hybrid models so recurrent-state prefixes are retained without full recompute.",
+      "distinction": "Engine-side recurrent prefix retention; it is not the SGLang radix_cache provenance path and not the V4.1 engram row cache.",
+      "distinct_from": [
+        "cachep2-radixcache",
+        "cachep2-v41engramrowcache"
+      ],
+      "aliases": [],
+      "grounding": "RecurrentPrefixCache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-strixhaloinfinitycachebytes",
+      "canonical": "StrixHaloInfinityCacheBytes",
+      "family": "cache",
+      "kind": "config",
+      "definition": "Byte capacity of the Strix Halo Infinity Cache (L3) used by ROCm compute planning to check scratch fit.",
+      "distinction": "Platform byte constant; it is not the megabyte constant StrixHaloMALLCacheSizeMB and not the software model MALLCacheModel.",
+      "distinct_from": [
+        "cachep2-strixhalomallcachesizemb",
+        "cachep2-mallcachemodel"
+      ],
+      "aliases": [],
+      "grounding": "StrixHaloInfinityCacheBytes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-strixhalomallcachesizemb",
+      "canonical": "StrixHaloMALLCacheSizeMB",
+      "family": "cache",
+      "kind": "config",
+      "definition": "Megabyte capacity constant (32 MB) of the Strix Halo Infinity/MALL cache feeding roofline probes and qwen38campaign fanout contracts.",
+      "distinction": "Strix-Halo-platform MB constant; it is not the generic MALLCacheSizeMB config knob and not the byte constant StrixHaloInfinityCacheBytes.",
+      "distinct_from": [
+        "cachep2-mallcachesizemb",
+        "cachep2-strixhaloinfinitycachebytes"
+      ],
+      "aliases": [],
+      "grounding": "StrixHaloMALLCacheSizeMB",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-tokencountsserverusagenocacherpt",
+      "canonical": "TokenCountsServerUsageNoCacheRpt",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "agentxbench token-counts status constant \"server_usage_cache_unreported\" marking receipts where server usage is present but the cache breakdown is unreported.",
+      "distinction": "Receipt status enum member; it is not a cache mechanism and not provider-observed cache-read counters.",
+      "distinct_from": [
+        "cov5304-observed-cache-read-tokens"
+      ],
+      "aliases": [],
+      "grounding": "TokenCountsServerUsageNoCacheRpt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-umacachelinealignment",
+      "canonical": "UMACacheLineAlignment",
+      "family": "cache",
+      "kind": "config",
+      "definition": "64-byte cache-line alignment matching Zen 5 CPU MMU expectations, applied to Strix UMA pool-allocator allocations.",
+      "distinction": "Alignment constant; it is not the MALL cache simulator and not any Infinity Cache capacity value.",
+      "distinct_from": [
+        "cachep2-mallcachemodel"
+      ],
+      "aliases": [],
+      "grounding": "UMACacheLineAlignment",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-uncachedprompt",
+      "canonical": "uncachedPrompt",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Local prompt-token delta not served from cache, computed as total minus cached in bench effort scoring and gateway ctx-value observation.",
+      "distinction": "Local prompt-side delta; it is not the provider billing field UncachedPromptTokens and not the regime input UncachedTokens.",
+      "distinct_from": [
+        "x-goal25-cache-uncachedprompttokens",
+        "cachep2-uncachedtokens"
+      ],
+      "aliases": [],
+      "grounding": "uncachedPrompt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-uncachedtokens",
+      "canonical": "UncachedTokens",
+      "family": "cache",
+      "kind": "metric",
+      "definition": "Uncached-token count fed to cache regime classification (cacheobs) and effort-bench receipts.",
+      "distinction": "Regime/bench token count; it is not the provider billing field UncachedInputTokens, not the gateway prompt delta uncachedPrompt, and the complement of the provider hit field CachedTokens.",
+      "distinct_from": [
+        "x-cache-cachedtokens",
+        "x-goal25-cache-uncachedinputtokens",
+        "cachep2-uncachedprompt"
+      ],
+      "aliases": [],
+      "grounding": "UncachedTokens",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-updatecachedsnapshot",
+      "canonical": "updateCachedSnapshot",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "l3server shard size-tracker method refreshing the cached shard-size snapshot after shard operations and rebalance.",
+      "distinction": "Internal refresh seam on the size tracker; it is not a cache tier and not the LRU capacity tunable DefaultCacheSize.",
+      "distinct_from": [
+        "x2-cache-cachesize"
+      ],
+      "aliases": [],
+      "grounding": "updateCachedSnapshot",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-v41attentionrolescached",
+      "canonical": "v41AttentionRolesCached",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "V4.1 model method resolving per-layer KV/index execution roles, memoized across forward steps.",
+      "distinction": "Role-resolution memo; it is not the V4.1 engram row cache and not the published KV cache layout table.",
+      "distinct_from": [
+        "cachep2-v41engramrowcache",
+        "cachep2-v41kvcachelayouts"
+      ],
+      "aliases": [],
+      "grounding": "v41AttentionRolesCached",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-v41engramrowcache",
+      "canonical": "V41EngramRowCache",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Byte-oriented cache of V4.1 engram rows (Q2_K packed) read geometry-agnostic from GGUF checkpoints.",
+      "distinction": "Engram-row staging cache; it is not the attention-role memo v41AttentionRolesCached and not its constructor/options rows.",
+      "distinct_from": [
+        "cachep2-v41attentionrolescached",
+        "runtime-third-newv41engramrowcache"
+      ],
+      "aliases": [],
+      "grounding": "V41EngramRowCache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-v41kvcachelayoutfor",
+      "canonical": "V41KVCacheLayoutFor",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Resolver returning the published V4.1 KV cache layout for one record quant format.",
+      "distinction": "Single-format lookup; it is not the whole-set census accessor V41KVCacheLayouts.",
+      "distinct_from": [
+        "cachep2-v41kvcachelayouts"
+      ],
+      "aliases": [],
+      "grounding": "V41KVCacheLayoutFor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-v41kvcachelayouts",
+      "canonical": "V41KVCacheLayouts",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Closed set of published V4.1 KV record layouts (fp8 first) returned for census and enumeration.",
+      "distinction": "Whole-set census accessor; it is not the per-format resolver V41KVCacheLayoutFor.",
+      "distinct_from": [
+        "cachep2-v41kvcachelayoutfor"
+      ],
+      "aliases": [],
+      "grounding": "V41KVCacheLayouts",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-vcachecodexsessionextract",
+      "canonical": "vcache_codex_session_extract",
+      "family": "cache",
+      "kind": "cli-verb",
+      "definition": "fak vcache codex-session-extract verb sanitizing a raw Codex session JSONL into vCache observed-window rows, optionally emitting a snapshot and score artifact.",
+      "distinction": "Codex-session extraction entrypoint; it is not the periodic vcacheobserve scrape loop and not the vcacheextract package alone.",
+      "distinct_from": [
+        "x-cache-vcacheobserve",
+        "x-goal25b-cache-vcacheextract"
+      ],
+      "aliases": [],
+      "grounding": "vcache_codex_session_extract",
+      "grounding_kind": "verb",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep2-withexpertpagecache",
+      "canonical": "WithExpertPageCache",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "ggufload functional option enabling the expert checkpoint page cache (issue #1302) on expert sources, keeping the historical ReadAt path when off.",
+      "distinction": "Opt-in loader flag; it is not the ExpertCheckpointPageCacheStats counters and not the FAK_EXPERT_PAGE_CACHE environment opt-in.",
+      "distinct_from": [
+        "expert-checkpoint-page-cache-stats",
+        "runtime-third-fakexpertpagecache"
+      ],
+      "aliases": [],
+      "grounding": "WithExpertPageCache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}
