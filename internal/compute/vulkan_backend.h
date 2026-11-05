@@ -947,8 +947,13 @@ void fvk_batch_begin(void);
 void fvk_batch_flush(void);
 /* fvk_batch_cycle() closes the open batch and opens the next without waiting on it: the
  * device runs the closed batch while the host records the next, and only the batch before
- * it is retired. Every host fence, one-shot command and buffer destruction drains the
- * in-flight batch first. FAK_VULKAN_PIPELINE_FLUSH=0 restores flush+begin. */
+ * it is retired. V4.1-checked batches cycle too: a failed submit latches the pending-failure
+ * quarantine synchronously (the recorded state is retained, nothing recycles) and a failed
+ * completion fence latches it at retire, before any descriptor set, command or parked buffer
+ * of the retiring batch is recycled. An open V4.1 step window stays serialized because the
+ * model reads per-op status/readback inside it. Every host fence, one-shot command and buffer
+ * destruction drains the in-flight batch first. FAK_VULKAN_PIPELINE_FLUSH=0 restores
+ * flush+begin. */
 void fvk_batch_cycle(void);
 int fvk_batch_inflight(void);
 bool fvk_batch_active(void);
