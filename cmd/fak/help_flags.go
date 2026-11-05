@@ -28,12 +28,16 @@ func conciseFlagSummary(s string) string {
 	if i := strings.Index(s, ". "); i >= 0 {
 		s = s[:i+1]
 	}
-	const max = 160
+	const max = 110 - 6 // Leave room for the rendered explanation's indentation.
 	r := []rune(s)
 	if len(r) > max {
 		r = r[:max-1]
-		for len(r) > 0 && !unicode.IsSpace(r[len(r)-1]) {
-			r = r[:len(r)-1]
+		end := len(r)
+		for end > 0 && !unicode.IsSpace(r[end-1]) {
+			end--
+		}
+		if end > 0 {
+			r = r[:end]
 		}
 		s = strings.TrimSpace(string(r)) + "…"
 	}
