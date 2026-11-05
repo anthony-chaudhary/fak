@@ -315,7 +315,7 @@ func expertDispatchPerMoELayer(inv []LaunchCallSite, shape LaunchShape, variant 
 		case LaunchPerMoELayer:
 			sum += s.Factor
 		default:
-			// Other cadences and primitive/unknown rows are not expert dispatch.
+			// Other and unknown cadence classes do not contribute to this expert-only subtotal.
 			continue
 		}
 	}
