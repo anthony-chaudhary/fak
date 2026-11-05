@@ -176,14 +176,18 @@ func (b *RemoteL3Breaker) Allow() (bool, bool) {
 }
 
 // RecordResult records the outcome of a remote read:
-//   - If err is nil: if HalfOpen -> transitions to Closed, resets consecutive faults,
+//   - If err is nil: a HalfOpen probe transitions to Closed, resets consecutive faults,
 //     increments probe recoveries. If Closed -> resets consecutive faults.
 //   - If err is context.Canceled: ignored (caller cancellation is not a backend fault).
 //     If this was a probe, returns state to Open without penalty so another probe can run.
 //   - If err is backend fault:
-//   - If HalfOpen -> transitions to Open, restarts cooldown, increments probe failures.
+//   - If this was a probe -> transitions to Open, restarts cooldown, increments probe failures.
 //   - If Closed -> increments consecutive faults. If consecutive faults >= FaultThreshold
 //     -> transitions to Open, records openedAt.
+//
+// Ordinary reads admitted before the breaker opened may finish later. Their
+// results cannot end the cooldown or retire the exclusive half-open probe;
+// backend faults still contribute to the fault counters.
 func (b *RemoteL3Breaker) RecordResult(err error, isProbe bool) {
 	if b == nil {
 		return
@@ -206,6 +210,9 @@ func (b *RemoteL3Breaker) RecordResult(err error, isProbe bool) {
 	if err == nil {
 		switch state {
 		case BreakerHalfOpen:
+			if !isProbe {
+				return
+			}
 			b.state = BreakerClosed
 			b.consecutiveFaults = 0
 			b.probeRecoveries++
@@ -213,9 +220,8 @@ func (b *RemoteL3Breaker) RecordResult(err error, isProbe bool) {
 		case BreakerClosed:
 			b.consecutiveFaults = 0
 		case BreakerOpen:
-			b.state = BreakerClosed
-			b.consecutiveFaults = 0
-			b.openedAt = time.Time{}
+			// A delayed ordinary success is not a recovery probe.
+			return
 		}
 		return
 	}
@@ -224,7 +230,7 @@ func (b *RemoteL3Breaker) RecordResult(err error, isProbe bool) {
 	b.totalFaults++
 	now := b.nowLocked()
 
-	if state == BreakerHalfOpen || isProbe {
+	if isProbe {
 		b.state = BreakerOpen
 		b.openedAt = now
 		b.probeFailures++
