@@ -175,6 +175,9 @@ func (t *Table) Insert(keyHash uint64, e Entry) (uint64, bool) {
 		if empties != 0 {
 			bit := uint64(bits.TrailingZeros16(empties))
 			idx := (pos + bit) & (t.capacity - 1)
+			if t.ctrl[idx] == CtrlTombstone {
+				t.tombstones--
+			}
 			t.ctrl[idx] = h2
 			// Mirror to overflow region if needed
 			if idx < GroupSize {
