@@ -51,9 +51,10 @@ type HarnessHealth struct {
 }
 
 // HealthReport is the live health input consulted during harness selection. When
-// Candidates is empty the health gate is inert and selection falls back to the
-// static requirements alone, so existing callers are unaffected. Keys are
-// candidate ids or harness-profile names/aliases, matched after normalization.
+// Candidates is empty and RequireEvidence is false, the health gate is inert and
+// selection falls back to static requirements alone. Requiring evidence keeps an
+// empty report fail-closed. Keys are candidate ids or harness-profile names/aliases,
+// matched after normalization.
 type HealthReport struct {
 	Candidates map[string]HarnessHealth `json:"candidates,omitempty"`
 	// MaxAgeSeconds bounds freshness: a reading older than this (or one with an
@@ -74,7 +75,7 @@ type HarnessRejection struct {
 }
 
 // active reports whether the report gates selection at all.
-func (r HealthReport) active() bool { return len(r.Candidates) > 0 }
+func (r HealthReport) active() bool { return r.RequireEvidence || len(r.Candidates) > 0 }
 
 // lookup finds the reading for a candidate, trying each supplied key (the
 // candidate id, the profile's canonical name, and its aliases) after
