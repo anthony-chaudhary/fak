@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // DefaultFix is the canonical remediation message for a cache headline violation.
@@ -174,6 +175,19 @@ func CheckLine(line string) (isViolation bool, matchedHeadline string) {
 	return true, matched
 }
 
+// findingText keeps the diagnostic's 160-byte budget without splitting a UTF-8 rune.
+func findingText(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if len(trimmed) <= 160 {
+		return trimmed
+	}
+	end := 160
+	for end > 0 && !utf8.RuneStart(trimmed[end]) {
+		end--
+	}
+	return trimmed[:end]
+}
+
 // ScanText scans the given text (e.g. file content) line by line and returns findings.
 // Line numbers are 1-based.
 func ScanText(text string, filename string) []Finding {
@@ -181,14 +195,10 @@ func ScanText(text string, filename string) []Finding {
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
 		if bad, _ := CheckLine(line); bad {
-			trimmed := strings.TrimSpace(line)
-			if len(trimmed) > 160 {
-				trimmed = trimmed[:160]
-			}
 			findings = append(findings, Finding{
 				File: filename,
 				Line: i + 1,
-				Text: trimmed,
+				Text: findingText(line),
 				Fix:  DefaultFix,
 			})
 		}
@@ -306,14 +316,10 @@ func AuditStaged(root string) ([]Finding, error) {
 		}
 		for _, sl := range addedLines {
 			if bad, _ := CheckLine(sl.text); bad {
-				trimmed := strings.TrimSpace(sl.text)
-				if len(trimmed) > 160 {
-					trimmed = trimmed[:160]
-				}
 				findings = append(findings, Finding{
 					File: relpath,
 					Line: sl.lineNo,
-					Text: trimmed,
+					Text: findingText(sl.text),
 					Fix:  DefaultFix,
 				})
 			}
