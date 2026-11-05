@@ -45,7 +45,7 @@ func TestCUDAKVConstructorLockBoundary(t *testing.T) {
 		bodies[fn.Name.Name] = string(raw[set.Position(fn.Body.Pos()).Offset:set.Position(fn.Body.End()).Offset])
 	}
 	wrapper := strings.Join(strings.Fields(bodies["newContiguousKV"]), " ")
-	if wrapper != "{ cudaMu.Lock() defer cudaMu.Unlock() return c.newContiguousKVLocked(cfg) }" {
+	if wrapper != "{ cudaMu.Lock() defer cudaMu.Unlock() k, err := c.newContiguousKVLocked(cfg) if err != nil { panic(err) } return k }" {
 		t.Fatal("contiguous constructor must lock exactly once around the locked implementation")
 	}
 	locked := bodies["newContiguousKVLocked"]
@@ -58,7 +58,7 @@ func TestCUDAKVConstructorLockBoundary(t *testing.T) {
 	restore := bodies["restoreContiguousKVFromHost"]
 	lock := strings.Index(restore, "cudaMu.Lock()")
 	unlock := strings.Index(restore, "defer cudaMu.Unlock()")
-	call := strings.Index(restore, "k := c.newContiguousKVLocked(cloneKVConfig(state.Config))")
+	call := strings.Index(restore, "k, err := c.newContiguousKVLocked(cloneKVConfig(state.Config))")
 	if lock < 0 || unlock <= lock || call <= unlock || strings.Count(restore, "cudaMu.Lock()") != 1 || strings.Count(restore, "cudaMu.Unlock()") != 1 || strings.Contains(restore, "c.newContiguousKV(") {
 		t.Fatal("restore must call the locked constructor under its existing mutex")
 	}
@@ -140,7 +140,7 @@ func TestCUDAKVConstructorLockHostContract(t *testing.T) {
 		t.Fatal("review constructor scalar type boundary")
 	}
 	body = strings.ReplaceAll(body, "C.size_t", "uint64") + cudaKVConstructorLockMain
-	guard := "\tcudaMu.Lock()\n\tdefer cudaMu.Unlock()\n\treturn c.newContiguousKVLocked(cfg)"
+	guard := "\tcudaMu.Lock()\n\tdefer cudaMu.Unlock()\n\tk, err := c.newContiguousKVLocked(cfg)"
 	if strings.Count(body, guard) != 1 {
 		t.Fatal("constructor lock negative-control boundary changed")
 	}
@@ -148,7 +148,7 @@ func TestCUDAKVConstructorLockHostContract(t *testing.T) {
 		t.Run(variant, func(t *testing.T) {
 			source := body
 			if variant != "candidate" {
-				source = strings.Replace(source, guard, "\treturn c.newContiguousKVLocked(cfg)", 1)
+				source = strings.Replace(source, guard, "\tk, err := c.newContiguousKVLocked(cfg)", 1)
 			}
 			dir := t.TempDir()
 			goFile, binary := filepath.Join(dir, "main.go"), filepath.Join(dir, "probe")
@@ -207,6 +207,8 @@ func require(ok bool,msg string){if !ok{fmt.Fprintln(os.Stderr,"FAIL:",msg);os.E
 func CUDAPagedKVEnabled()bool{return false}
 func CUDAPagedKVEligible(KVConfig)bool{return false}
 func(*cudaBackend)newPagedKV(KVConfig)KVStore{panic("paged dispatch outside fixture")}
+// Admission is healthy in this lock-only witness; terminal behavior has its own witness.
+func(*cudaKV)sharedStopErrorLocked(string)error{return nil}
 func(*cudaBackend)dallocKV(int,string)*cudaBuf{allocations++;if cudaMu.TryLock(){unlockedAllocations++;cudaMu.Unlock()};if allocations==failAt{panic(primary)};v:=new(float32);storage=append(storage,v);return &cudaBuf{unsafe.Pointer(v)}}
 func cudaKVElements(int){}
 func uint64ToCapInt64(x uint64)int64{return int64(x)}

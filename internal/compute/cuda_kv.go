@@ -41,12 +41,17 @@ func (c *cudaBackend) NewKV(cfg KVConfig) KVStore {
 func (c *cudaBackend) newContiguousKV(cfg KVConfig) *cudaKV {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	return c.newContiguousKVLocked(cfg)
+	k, err := c.newContiguousKVLocked(cfg)
+	if err != nil {
+		panic(err)
+	}
+	return k
 }
 
 // newContiguousKVLocked owns native allocator-map access and rollback under the
 // caller's cudaMu. Restore already holds this lock; public construction does not.
-func (c *cudaBackend) newContiguousKVLocked(cfg KVConfig) *cudaKV {
+// Admission errors return to restore; the public constructor raises them.
+func (c *cudaBackend) newContiguousKVLocked(cfg KVConfig) (*cudaKV, error) {
 	dtype := F32
 	switch cfg.Precision {
 	case KVPrecisionF32:
@@ -67,6 +72,9 @@ func (c *cudaBackend) newContiguousKVLocked(cfg KVConfig) *cudaKV {
 	for l := range k.K {
 		k.K[l].dtype = dtype
 		k.V[l].dtype = dtype
+	}
+	if err := k.sharedStopErrorLocked("kv-create"); err != nil {
+		return nil, err
 	}
 	free := FreeUnknown
 	if graphEnabled && cfg.GraphCapture {
@@ -89,7 +97,7 @@ func (c *cudaBackend) newContiguousKVLocked(cfg KVConfig) *cudaKV {
 			func(ptr unsafe.Pointer) { C.fcuda_free(ptr) },
 		)
 	}
-	return k
+	return k, nil
 }
 
 // GraphCaptureReady reports whether this store holds the fixed graph capacity. Only such a
@@ -397,6 +405,9 @@ func (c *cudaBackend) compactDS(d *dslice, fromF, endF, tailFloats int, scratch 
 func (k *cudaKV) Clone() KVStore {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	if err := k.sharedStopErrorLocked("kv-clone"); err != nil {
+		panic(err)
+	}
 	return k.cloneWithOperations(
 		func(bytes int, site string) unsafe.Pointer { return k.be.dallocKV(bytes, site).ptr },
 		func(dst, src unsafe.Pointer, bytes int) { C.fcuda_d2d(dst, src, C.size_t(bytes)) },
@@ -565,7 +576,10 @@ func (c *cudaBackend) restoreContiguousKVFromHost(state KVHostSnapshot) (out KVS
 	}
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	k := c.newContiguousKVLocked(cloneKVConfig(state.Config))
+	k, err := c.newContiguousKVLocked(cloneKVConfig(state.Config))
+	if err != nil {
+		return nil, err
+	}
 	if k == nil {
 		return nil, fmt.Errorf("cuda: NewKV returned an incompatible store during host restore")
 	}
