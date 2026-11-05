@@ -173,6 +173,8 @@ func contains(v []string, w string) bool {
 // Handoff coordinates policy validation, approval, packaging, and dispatch.
 func (b *Broker) Handoff(p Policy, r Request, approve Approval, send Transport, local Attempt) (Receipt, error) {
 	receipt := Receipt{Schema: "fak.cloud-handoff-receipt/1", OperationID: r.OperationID, Attempts: []Attempt{local}}
+	// Local completion describes the supplied attempt, regardless of remote outcome.
+	receipt.LocalCompleted = local.Location == "local" && local.Outcome == "completed"
 	deny := func(reason string) (Receipt, error) {
 		b.emit(r, "denied", reason)
 		receipt.Terminal = "denied"
@@ -224,6 +226,5 @@ func (b *Broker) Handoff(p Policy, r Request, approve Approval, send Transport, 
 	receipt.Attempts = append(receipt.Attempts, Attempt{Engine: "app_provider", Location: "remote", Outcome: "completed"})
 	receipt.Terminal = "completed"
 	receipt.RemoteCompleted = true
-	receipt.LocalCompleted = local.Location == "local" && local.Outcome == "completed"
 	return receipt, nil
 }
