@@ -106,37 +106,37 @@ func TestOpLatencyTrackersRouting(t *testing.T) {
 	}
 
 	// all tracker should have 60 samples
-	if lt.all.count != 60 {
-		t.Errorf("expected all.count=60, got %d", lt.all.count)
+	if lt.all.count.Load() != 60 {
+		t.Errorf("expected all.count=60, got %d", lt.all.count.Load())
 	}
-	if lt.get.count != 20 {
-		t.Errorf("expected get.count=20, got %d", lt.get.count)
+	if lt.get.count.Load() != 20 {
+		t.Errorf("expected get.count=20, got %d", lt.get.count.Load())
 	}
-	if lt.set.count != 20 {
-		t.Errorf("expected set.count=20, got %d", lt.set.count)
+	if lt.set.count.Load() != 20 {
+		t.Errorf("expected set.count=20, got %d", lt.set.count.Load())
 	}
-	if lt.exists.count != 20 {
-		t.Errorf("expected exists.count=20, got %d", lt.exists.count)
+	if lt.exists.count.Load() != 20 {
+		t.Errorf("expected exists.count=20, got %d", lt.exists.count.Load())
 	}
 
 	// OpMGet should route to get
 	lt.record(OpMGet, 15*time.Microsecond)
-	if lt.get.count != 21 {
-		t.Errorf("expected get.count=21 after OpMGet, got %d", lt.get.count)
+	if lt.get.count.Load() != 21 {
+		t.Errorf("expected get.count=21 after OpMGet, got %d", lt.get.count.Load())
 	}
 
 	// OpMSet should route to set
 	lt.record(OpMSet, 25*time.Microsecond)
-	if lt.set.count != 21 {
-		t.Errorf("expected set.count=21 after OpMSet, got %d", lt.set.count)
+	if lt.set.count.Load() != 21 {
+		t.Errorf("expected set.count=21 after OpMSet, got %d", lt.set.count.Load())
 	}
 
 	// OpDelete should only go to all
 	lt.record(OpDelete, 3*time.Microsecond)
-	if lt.all.count != 63 {
-		t.Errorf("expected all.count=63, got %d", lt.all.count)
+	if lt.all.count.Load() != 63 {
+		t.Errorf("expected all.count=63, got %d", lt.all.count.Load())
 	}
-	if lt.get.count != 21 || lt.set.count != 21 || lt.exists.count != 20 {
+	if lt.get.count.Load() != 21 || lt.set.count.Load() != 21 || lt.exists.count.Load() != 20 {
 		t.Error("OpDelete should not route to get/set/exists")
 	}
 }
