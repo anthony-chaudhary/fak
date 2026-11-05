@@ -1583,6 +1583,40 @@ per layer index, in layer order, once per panel rather than once per
 prompt/chunk — with `TestLayerMajorPrefillExpertWarm`. The flag's zero value
 keeps the walk byte-for-byte unchanged. Upstream TTFT numbers are estimates
 here, not a measured gain or hardware claim.
+
+## Strata DFlash2 drafter stack (end-to-end wiring and per-load sidecar retention)
+
+The DFlash2 speculative-drafter stack wired for Qwen3.8 serving — the pinned
+BF16 sidecar contract and per-load retention registry in
+`internal/model/dflash2_weights.go`, the borrowing request constructors in
+`internal/model/dflash2_request.go` and
+`internal/model/dflash2_request_options.go`, the ownership-aware reference in
+`internal/model/dflash2_reference.go`, the `--speculative=dflash2` structural
+selector and per-load retention hook in `cmd/fak/serve.go`, and the gateway
+mode passthrough in `internal/gateway` — adapts the drafter-stack discipline
+from Niko1221/Strata at commits `7f97c35a` (Q8_0 pack tool and top-16 candidate
+selector), `5bc7f8ca` (tiled Q8 GEMM with head-major K/V ring, prefetching
+attention and PLE read-ahead) and `89799596` (fused conv+residual+norm+quant),
+pinned at `46c152a1`:
+- https://github.com/Niko1221/Strata/commit/7f97c35a
+- https://github.com/Niko1221/Strata/commit/5bc7f8ca
+- https://github.com/Niko1221/Strata/commit/89799596
+
+https://github.com/Niko1221/Strata/tree/46c152a1
+
+Copyright (c) 2026 Niko1221 and the Strata contributors.
+SPDX-License-Identifier: MIT
+The complete copyright, permission and warranty notice is retained in
+`internal/model/STRATA_LICENSE.txt`.
+
+Design reference only; no Strata code blocks are copied. The upstream witness
+is 1.4-2.6x real-text decode with batched verification; Fak's native host-f32
+reference plus the per-load retention of the pinned 3.8 GiB BF16 sidecar (one
+authenticated open shared by every request of the load, released at load
+retirement) is software-verified only `[SW-VERIFIED]`. The hardware ABBA
+remains owed under the paired-serve fleet study; no measured speedup is
+claimed here. Drafter-artifact availability is fail-closed: an unavailable
+sidecar surfaces the typed refusal instead of a silent host fallback.
 ## Strata / Project Maya Engram CLOCK replacement
 
 `internal/model/v41_cache.go` adapts `EgRowCache`'s hand/reference-bit replacement

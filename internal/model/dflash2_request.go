@@ -60,6 +60,34 @@ func NewQwen38DFlash2Request(ctx context.Context, target *Session, sidecarPath s
 	return q, nil
 }
 
+// NewQwen38DFlash2RequestWithSidecar builds a request that borrows a
+// load-retained sidecar instead of opening its own copy: the pinned artifact
+// was opened and authenticated once per load, and this request neither
+// re-authenticates nor closes it. The load owner retains the sidecar for the
+// load's lifetime and releases it at retirement. On failure the caller retains
+// target ownership; on success Close is required even if Bootstrap fails — it
+// retires the target session, never the shared sidecar.
+func NewQwen38DFlash2RequestWithSidecar(ctx context.Context, target *Session, sidecar *Qwen38DFlash2Sidecar) (*Qwen38DFlash2Request, error) {
+	if ctx == nil {
+		return nil, errors.New("dflash2: request context required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := dflash2FreshTarget(target); err != nil {
+		return nil, err
+	}
+	f, err := newQwen38DFlash2ReferenceWithSidecar(ctx, target, sidecar, 0)
+	if err != nil {
+		return nil, err
+	}
+	q, err := newDFlash2Request(f)
+	if err != nil {
+		return nil, errors.Join(err, f.Close())
+	}
+	return q, nil
+}
+
 func dflash2FreshTarget(target *Session) error {
 	if err := validateQwen35TargetFeatureSession(target); err != nil {
 		return err

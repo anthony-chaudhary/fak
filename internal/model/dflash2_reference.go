@@ -46,6 +46,7 @@ type dflash2Reference struct {
 	cache        [5]dflash2ContextKV
 	nextPosition int
 	prefixTokens []uint32 // exact owned lineage, including context dropped from K/V
+	ownsWeights  bool
 	closed       bool
 	closeErr     error
 }
@@ -68,10 +69,33 @@ func newQwen38DFlash2Reference(ctx context.Context, target *Session, path string
 	return f, nil
 }
 
+// newQwen38DFlash2ReferenceWithSidecar verifies the stock target geometry and
+// borrows a load-retained sidecar. A released or unavailable handle refuses
+// before any target state moves; on success the reference never closes the
+// shared reader — the retaining load owns its lifetime.
+func newQwen38DFlash2ReferenceWithSidecar(ctx context.Context, target *Session, sidecar *Qwen38DFlash2Sidecar, firstContextPosition int) (*dflash2Reference, error) {
+	w, err := sidecar.borrow()
+	if err != nil {
+		return nil, err
+	}
+	if target == nil || target.M == nil || target.M.Cfg.NumLayers != 64 || target.M.Cfg.HiddenSize != 5120 || target.M.Cfg.VocabSize != 248320 || !target.M.Cfg.IsQwen35Hybrid() || target.M.Cfg.IsDeepSeekV41() {
+		return nil, errors.New("dflash2: stock Qwen3.8 target geometry required")
+	}
+	return newDFlash2ReferenceWithOwnership(w, target, qwen38DFlash2Geometry(), firstContextPosition, false)
+}
+
 // The private geometry seam permits real five-layer arithmetic with tiny BF16
-// fixtures. Only the stock constructor above is a production artifact opener.
+// fixtures. Only the stock constructors above are production artifact openers.
 // On success the reference owns w and holds the target Model's weight lifetime.
 func newDFlash2Reference(w *dflash2Weights, target *Session, g dflash2Geometry, first int) (*dflash2Reference, error) {
+	return newDFlash2ReferenceWithOwnership(w, target, g, first, true)
+}
+
+// newDFlash2ReferenceWithOwnership keeps the exact validation of
+// newDFlash2Reference; ownsWeights decides whether Close retires the reader
+// too. The borrowed form is how one load-retained sidecar feeds many requests
+// without closing the shared file.
+func newDFlash2ReferenceWithOwnership(w *dflash2Weights, target *Session, g dflash2Geometry, first int, ownsWeights bool) (*dflash2Reference, error) {
 	if w == nil || first < 0 {
 		return nil, errors.New("dflash2: live target and weight owner required")
 	}
@@ -100,7 +124,7 @@ func newDFlash2Reference(w *dflash2Weights, target *Session, g dflash2Geometry, 
 		return nil, errors.New("dflash2: target weights are closing")
 	}
 	g.taps = append([]int(nil), g.taps...)
-	return &dflash2Reference{w: w, target: target, g: g, nextPosition: first, prefixTokens: append([]uint32(nil), lineage.ids[:first]...)}, nil
+	return &dflash2Reference{w: w, target: target, g: g, nextPosition: first, prefixTokens: append([]uint32(nil), lineage.ids[:first]...), ownsWeights: ownsWeights}, nil
 }
 
 func (f *dflash2Reference) ready(ctx context.Context) error {
@@ -153,7 +177,13 @@ func (f *dflash2Reference) Close() error {
 		var closeErr error
 		// Keep the durable incomplete error until file close AND final model
 		// retirement return. Both releases run even if a sibling calls Goexit.
-		runBackendSiblingCleanup(func() { closeErr = w.Close() }, m.releaseWeightSession)
+		// A borrowed sidecar reader belongs to the retaining load, not this
+		// reference: retire only the model pin in that case.
+		if f.ownsWeights {
+			runBackendSiblingCleanup(func() { closeErr = w.Close() }, m.releaseWeightSession)
+		} else {
+			runBackendSiblingCleanup(m.releaseWeightSession)
+		}
 		f.closeErr = closeErr
 	}
 	if f == nil {

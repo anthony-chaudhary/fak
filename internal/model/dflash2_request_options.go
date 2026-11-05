@@ -94,6 +94,40 @@ func NewQwen38DFlash2RequestWithOptions(ctx context.Context, target *Session, si
 	return q, nil
 }
 
+// NewQwen38DFlash2RequestWithOptionsWithSidecar mirrors
+// NewQwen38DFlash2RequestWithOptions over a load-retained sidecar: invalid or
+// unsupported selections refuse before any draft state forms, and the built
+// request borrows the sidecar without closing it. Zero options delegate
+// directly to the borrowing constructor.
+func NewQwen38DFlash2RequestWithOptionsWithSidecar(ctx context.Context, target *Session, sidecar *Qwen38DFlash2Sidecar, options Qwen38DFlash2RequestOptions) (*Qwen38DFlash2Request, error) {
+	width, err := options.panelWidth()
+	if err != nil {
+		return nil, err
+	}
+	if width == 0 {
+		return NewQwen38DFlash2RequestWithSidecar(ctx, target, sidecar)
+	}
+	if ctx == nil {
+		return nil, errors.New("dflash2: request context required")
+	}
+	if err = ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err = dflash2FreshTarget(target); err != nil {
+		return nil, err
+	}
+	if err = admitQwen35TargetFeaturePanel(target, qwen38DFlash2Geometry().taps, width); err != nil {
+		return nil, err
+	}
+	q, err := NewQwen38DFlash2RequestWithSidecar(ctx, target, sidecar)
+	if err != nil {
+		return nil, err
+	}
+	// No callback or fallible work occurs between adoption and publication.
+	q.options = options
+	return q, nil
+}
+
 func (q *Qwen38DFlash2Request) beginVerification() (*qwen35TargetFeatureTransaction, error) {
 	width, err := q.options.panelWidth()
 	if err != nil {

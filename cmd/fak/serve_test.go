@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -93,6 +94,56 @@ func TestSpeculativeSelectorAdmitsDFlash2(t *testing.T) {
 	}
 	if *sf2.speculative != "dflash2" {
 		t.Fatalf("--speculative=dflash2 not admitted by the flag, got %q", *sf2.speculative)
+	}
+}
+
+// TestServeDFlash2SidecarRetention pins the per-load sidecar retention gate:
+// only a dflash2-resolved load with a resident in-kernel model AND an
+// operator-pinned FAK_DFLASH2_SIDECAR retains the artifact; every other
+// combination leaves the route unretained so the gateway's fail-loud
+// target-owner validation keeps governing admission. The pinned path is
+// cleaned exactly once.
+// fak-test:runtime fast est=10ms lane=default
+func TestServeDFlash2SidecarRetention(t *testing.T) {
+	pinned := "/models/qwen38/dflash2.safetensors"
+	getenv := func(k string) string {
+		if k == "FAK_DFLASH2_SIDECAR" {
+			return pinned
+		}
+		return ""
+	}
+	noEnv := func(string) string { return "" }
+
+	for _, tc := range []struct {
+		mode       string
+		loaded     bool
+		env        func(string) string
+		wantPath   string
+		wantRetain bool
+	}{
+		{serveSpeculativeDFlash2, true, getenv, filepath.Clean(pinned), true},
+		{serveSpeculativeDFlash2, false, getenv, "", false},
+		{serveSpeculativeMTP, true, getenv, "", false},
+		{serveSpeculativeNGram, true, getenv, "", false},
+		{"", true, getenv, "", false},
+		{serveSpeculativeDFlash2, true, noEnv, "", false},
+	} {
+		gotPath, ok := serveDFlash2SidecarDecision(tc.mode, tc.loaded, tc.env)
+		if ok != tc.wantRetain || gotPath != tc.wantPath {
+			pinned := tc.env("FAK_DFLASH2_SIDECAR") != ""
+			t.Fatalf("mode=%q loaded=%v pinned=%v: got (%q,%v) want (%q,%v)",
+				tc.mode, tc.loaded, pinned, gotPath, ok, tc.wantPath, tc.wantRetain)
+		}
+	}
+
+	// Redundant separators and dots are collapsed exactly once at decision time.
+	messy := func(string) string { return "/models/../models/./qwen38//dflash2.safetensors" }
+	if got, ok := serveDFlash2SidecarDecision(serveSpeculativeDFlash2, true, messy); !ok || got != filepath.Clean("/models/qwen38/dflash2.safetensors") {
+		t.Fatalf("messy path: got (%q,%v), want (%q,true)", got, ok, filepath.Clean("/models/qwen38/dflash2.safetensors"))
+	}
+	// Whitespace-only pinning is not a path.
+	if got, ok := serveDFlash2SidecarDecision(serveSpeculativeDFlash2, true, func(string) string { return "   " }); ok || got != "" {
+		t.Fatalf("blank pin: got (%q,%v), want (\"\",false)", got, ok)
 	}
 }
 

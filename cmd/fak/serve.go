@@ -479,6 +479,23 @@ func resolveSpeculativeMode(flagValue string, getenv func(string) string) (strin
 	}
 }
 
+// serveDFlash2SidecarDecision resolves the per-load DFlash2 sidecar retention
+// for a structural selector: only a dflash2-resolved load with a resident
+// in-kernel model AND an operator-pinned FAK_DFLASH2_SIDECAR path retains the
+// artifact. Every other combination leaves the route unretained — the
+// gateway's fail-loud target-owner validation keeps governing admission, and
+// no sidecar is opened for a load that will not draft.
+func serveDFlash2SidecarDecision(resolvedMode string, inKernelLoaded bool, getenv func(string) string) (string, bool) {
+	if resolvedMode != serveSpeculativeDFlash2 || !inKernelLoaded {
+		return "", false
+	}
+	path := strings.TrimSpace(getenv("FAK_DFLASH2_SIDECAR"))
+	if path == "" {
+		return "", false
+	}
+	return filepath.Clean(path), true
+}
+
 // ErrServeRoleUnknown marks a --role value outside the closed native P/D role
 // admission set. A misspelled role must refuse startup before any weight load
 // rather than silently boot an ordinary combined serve that ignores the split.
@@ -1054,6 +1071,27 @@ func cmdServe(argv []string) {
 	}
 	if releaseMetalResidency != nil {
 		defer releaseMetalResidency()
+	}
+	// Per-load DFlash2 sidecar retention: a dflash2-resolved load with an
+	// operator-pinned artifact retains the authenticated BF16 sidecar ONCE, so
+	// every request borrows the single open instead of re-opening and
+	// re-hashing the 3.8 GiB file per request. An unavailable artifact refuses
+	// startup with the model sentinel — the serial verify route stays visible,
+	// no silent host fallback. The release runs at process teardown; the
+	// sidecar file is independent of the model weights, so its close order
+	// against the residency releases is immaterial.
+	if sidecarPath, ok := serveDFlash2SidecarDecision(*sf.speculative, rt.inKernelModel != nil, os.Getenv); ok {
+		sidecar, err := fakmodel.RetainQwen38DFlash2Sidecar(context.Background(), sidecarPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fak serve: retain DFlash2 sidecar: %v\n", err)
+			os.Exit(2)
+		}
+		rt.addStartupMessage(newServeStartupMessage("speculative", "dflash2-sidecar", "info", "pinned BF16 sidecar retained per load: "+sidecar.Path()))
+		defer func() {
+			if err := sidecar.Release(); err != nil {
+				fmt.Fprintf(os.Stderr, "fak serve: release DFlash2 sidecar: %v\n", err)
+			}
+		}()
 	}
 	rt.configureEPDecode()
 	rt.resolveSessionPlane(sf)
