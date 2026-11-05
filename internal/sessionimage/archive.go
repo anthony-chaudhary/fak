@@ -108,6 +108,11 @@ func Unpack(r io.Reader, dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
 	tr := tar.NewReader(r)
 	seen := map[string]bool{}
 	var entries int
@@ -145,7 +150,9 @@ func Unpack(r io.Reader, dir string) error {
 		if total += h.Size; total > maxArchiveBytes {
 			return fmt.Errorf("sessionimage: archive exceeds the %d-byte total budget — refused", int64(maxArchiveBytes))
 		}
-		f, err := os.OpenFile(filepath.Join(dir, name), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+		// Resolve entry names beneath the opened destination, including existing
+		// symlinks, so a safe basename cannot redirect writes outside the bundle.
+		f, err := root.OpenFile(name, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 		if err != nil {
 			return err
 		}
