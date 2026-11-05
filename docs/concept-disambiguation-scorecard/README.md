@@ -15,24 +15,24 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **662** (clarity 0 + coverage 662) |
-| **Crystal-clear concepts (and climbing)** | **1545** crystal of 3356 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3438 / 4100** (83.9% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **622** (clarity 1 + coverage 621) |
+| **Crystal-clear concepts (and climbing)** | **1545** crystal of 3397 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3479 / 4100** (84.9% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 229 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **95** of 4742 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **95** of 4786 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 89.5/100 (grade B) |
+| Legacy bounded score (saturates; not the driver) | 89.8/100 (grade B) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3356 concepts - score 89.5/100 (grade B) - disambiguation-debt 662
+concept-disambiguation chart - 3397 concepts - score 89.8/100 (grade B) - disambiguation-debt 622
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ########################.... 1545
-  o defined       ############################ 1811
+  * crystal       #######################..... 1545
+  o defined       ############################ 1852
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
@@ -50,7 +50,7 @@ clarity mix by family (each cell = one concept):
   guard-gate       ***************************************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (474 concept(s); 231 crystal)
   layout           ******************ooooooooo (27 concept(s); 18 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
-  plan             ******************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (431 concept(s); 186 crystal)
+  plan             ******************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (472 concept(s); 186 crystal)
   policy-capability *************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (228 concept(s); 121 crystal)
   pool             *************************************oooooooooooooooooooooooooooooooooo (71 concept(s); 37 crystal)
   render-materialize *************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (206 concept(s); 49 crystal)
@@ -62,7 +62,7 @@ clarity mix by family (each cell = one concept):
   witness-proof    *************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (177 concept(s); 85 crystal)
 
 coverage by family (positioned / discovered):
-  plan             ######################...... 493/626
+  plan             ########################.... 534/626
   cache            ########################.... 373/434
   gateway-engine   #######################..... 266/324
   session-runtime  ########################.... 327/381
@@ -70,7 +70,7 @@ coverage by family (positioned / discovered):
   guard-gate       ##########################.. 535/578
   support-maturity ####################........ 99/142
   attention        #######################..... 191/229
-  pool             ###################......... 73/110
+  pool             ###################......... 74/110
   render-materialize #########################... 224/253
   evict            ###################......... 61/89
   policy-capability #########################... 252/279
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 83.9%  (3438/4100 confusable tokens positioned)
+namespace coverage  [###########################.....] 84.9%  (3479/4100 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 229
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 229/229
 
-name index: 4742 lookup name(s) -> 3356 concept(s), 95 ambiguous
+name index: 4786 lookup name(s) -> 3397 concept(s), 95 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,8 +118,8 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **229 / 229** (229 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2792 / 6132 |
-| Dangling `distinct_from` references (drive to 0) | 0 |
+| Boundaries drawn (mutual / total) | 2816 / 6197 |
+| Dangling `distinct_from` references (drive to 0) | 1 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
 
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4742 over 3356 concepts |
+| Lookup names indexed | 4786 over 3397 concepts |
 | Lookup names landing on several concepts | 95 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3356 |
+| Concepts carrying a contrast set | 3397 |
 
 ## The concepts (best verdict first)
 
@@ -2832,6 +2832,47 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | plan | **DispatchLaneCandidate (dispatch lane scoring input)** - internal/dispatchtick's DispatchLaneCandidate is the normalized input to unattended whole-lane scoring: lane, priority, step budget, count, and core flag, scored by DispatchLaneScorer functions. |
 | o | defined | symbol | plan | **indexCtxPlans (fak index ctxplans verb)** - cmd/fak's indexCtxPlans is the `fak index ctxplans` verb (#2202): it enumerates context-touching surfaces (cmd verbs + skills) marked DECLARED or UNDECLARED for the ctxplan-required advisory lint. |
 | o | defined | symbol | plan | **PlanMemoryComponents (session byte budget)** - PlanMemoryComponents validates independently typed KV, recurrent, expert, and scratch byte descriptors and returns their exact total within a session device budget before any pool allocation. |
+| o | defined | symbol | plan | **packedPrefillCandidateLocked (NativeScheduler packed-prefill lane lock)** - A NativeScheduler predicate reporting whether a schedLane's packed prefill candidate is locked, reserving that candidate against concurrent lane scheduling. |
+| o | defined | symbol | plan | **CategoryPlanAndDecompose (agentopt operational category)** - The OperationalCategory value 'plan_and_decompose' classifying initial prompts, high-level queries, and replan instructions as effort-high turns in the intra-model router. |
+| o | defined | symbol | plan | **PlanCompile (buildwitness matrix compile plan)** - A buildwitness constructor producing the MatrixCompilePlan describing how one package variant compiles for one release target and output path. |
+| o | defined | symbol | plan | **PlanDeviceBands (model multi-device band assignment)** - A model package planner assigning one contiguous weight band to each device in order, minimizing cross-band traffic under per-device byte budgets. |
+| o | defined | symbol | plan | **PlanLedgerDiff (gateway post-load planner-vs-ledger diff)** - The gateway ModelLoadProfile field carrying the post-load diff between the fit planner's predicted memory and the allocation ledger's live numbers. |
+| o | defined | symbol | plan | **planLedgerDiffState (agent once-per-serve first-prefill diff)** - An unexported agent package state holding the once-per-serve first-prefill diff between the in-kernel planner's prediction and the allocation ledger. |
+| o | defined | symbol | plan | **PlannedLanes (debtlane wave-plan lane count)** - The debtlane WavePlan field counting how many lanes the debt wave plan scheduled across its total waves. |
+| o | defined | symbol | plan | **plannerKVPrecisionError (in-kernel planner KV precision check)** - An agent package helper returning the error for requesting a given KV precision on a model/backend combination during in-kernel planner configuration. |
+| o | defined | symbol | plan | **planServeGoMemoryLimit (serve Go runtime limit plan)** - A cmd/fak helper computing the serveGoMemoryLimitPlan that decides what Go runtime memory limit to set for a serve process given host load peak and total host memory. |
+| o | defined | symbol | plan | **PlanSpan (radixkv prompt segment)** - A radixkv struct describing one contiguous segment of tokens in the executed prompt, recorded as part of a ReusePlan's span list. |
+| o | defined | symbol | plan | **PlanValid (StrixComparatorPlanValidation verdict)** - The StrixComparatorPlanValidation field meaning the strix comparator manifest is internally complete enough to take to a real device. |
+| o | defined | symbol | plan | **PrefillArmCandidate (macbench prefill witness arm)** - The macbench prefill-witness arm name 'candidate' identifying the candidate implementation side of a baseline-versus-candidate prefill benchmark. |
+| o | defined | symbol | plan | **PublishCandidates (V41 attention state candidate mask publish)** - A V41AttentionState method recording the latest source-published V4.1 candidate mask and ratio for incremental attention. |
+| o | defined | symbol | plan | **Qwen4ExpPLEHashPlan (CUDA PLE hash operation plan)** - A compute package interface for a prepared device-resident Qwen4-expert PLE hash operation that is dispatched after preparation. |
+| o | defined | symbol | plan | **reCtxplanSkill (ctxplan markdown skill marker regex)** - The compiled regular expression matching the '<!-- fak:ctxplan' HTML-comment marker that declares a ctxplan skill block in markdown. |
+| o | defined | symbol | plan | **reCtxplanVerb (ctxplan Go comment verb regex)** - The compiled regular expression matching the '//fak:ctxplan' comment verb that marks Go source as ctxplan-managed. |
+| o | defined | symbol | plan | **resolveStrixCandidate (devcmd strix candidate commit resolver)** - A devcmd helper resolving a strix candidate directory plus optional explicit tip and mine paths into a concrete resolvedStrixCandidate commit. |
+| o | defined | symbol | plan | **radixkv.ReusePlan (compiled reuse layout)** - A radixkv struct representing the compiled execution and reuse layout for a prompt, composed from non-overlapping token spans covering the prompt range. |
+| o | defined | symbol | plan | **RunFleetPlan (goalrunner serial fleet executor)** - A goalrunner function running the contracts in a FleetPlan serially and recording witness evidence for each contract. |
+| o | defined | symbol | plan | **ScannedCandidates (issue orchestrator discovery counter)** - The issue orchestrator wave-result field counting how many candidate issues the discovery scan examined before dispatchability filtering. |
+| o | defined | symbol | plan | **SchemaCandidate (readmenext fragment schema id)** - The readmenext constant 'fak-readme-candidate/1' identifying the canonical schema of README candidate fragments. |
+| o | defined | symbol | plan | **serveFitPlanSizing (serve sizing artifact echo)** - A cmd/fak struct echoing what the serve sizing artifact already sized so the fit plan re-reads no pool budget. |
+| o | defined | symbol | plan | **serveGGUFWeightMemoryPlanForArm (per-arm GGUF weight plan)** - A cmd/fak function computing the compute.MemoryPlan for one serve load arm's GGUF weight bytes under Q4K load options. |
+| o | defined | symbol | plan | **serveStreamedCPUOffloadCorePlan (streamed offload fold without context rows)** - A cmd/fak function returning the streamed CPU-offload memory fold WITHOUT the context-sized rows, shared by the fit and load arms. |
+| o | defined | symbol | plan | **serveStreamedCPUOffloadPlanForAperture (split-aperture streamed offload plan)** - A cmd/fak function that is serveStreamedCPUOffloadPlanForPool with the device split-aperture made backend-aware. |
+| o | defined | symbol | plan | **serveStreamedCPUOffloadPlanForPool (shared-pool streamed offload plan)** - A cmd/fak function that is serveStreamedCPUOffloadPlan with the shared host/device pool topology made explicit. |
+| o | defined | symbol | plan | **SetCandidateCache (selfupdate receipt builder setter)** - A selfupdate Builder method recording whether candidate compilation reused shared warm worktree objects or populated cold entries, stamped on the update receipt. |
+| o | defined | symbol | plan | **Server.SetPlanner (gateway active chat planner setter)** - A gateway Server method installing the active agent.Planner used for chat turns on that server. |
+| o | defined | symbol | plan | **SpecRejectionPlan (speculative decode rejection decision)** - A model package side-effect-free decision for one stochastic speculative-decoding round, built from immutable evidence and optionally committed by the caller. |
+| o | defined | symbol | plan | **SpecRejectionPlanInput (speculative rejection evidence)** - A model package struct carrying the immutable evidence for one stochastic speculative-decoding round fed to BuildSpecRejectionPlan. |
+| o | defined | symbol | plan | **SpeculativeGraphPlanner (CUDA graph capture planner)** - A compute package planner managing speculative-decode CUDA graph capture dimensions and producing stable capture keys. |
+| o | defined | symbol | plan | **turnkeyPlannerContextWindow (fak up planner window probe)** - A cmd/fak helper extracting the context-window token count from a turnkey agent.Planner so 'fak up' can report it. |
+| o | defined | symbol | plan | **UnifiedHostResidencyPlan (ggufload host residency plan)** - A ggufload WeightSource method sizing the plan whose total simultaneous physical footprint bounds host-resident weight residency. |
+| o | defined | doc-term | plan | **unplannable (issue orchestrator non-dispatchable class)** - The issue orchestrator's term for issues that cannot be turned into a dispatchable plan leaf, used in the --auto-expand flag help and the high-ratio advisory warning. |
+| o | defined | metric | plan | **UnplannableRatio (issue orchestrator non-dispatchable share)** - The issue orchestrator wave-result ratio of non-dispatchable (unplannable) issues to all scanned issues in one discovery window. |
+| o | defined | config | plan | **UnplannableWarnRatio (issue orchestrator advisory threshold)** - The issue orchestrator option and --unplannable-warn-ratio flag (default 0.65) setting the unplannable-ratio threshold that triggers the advisory warning and dynamic horizon expansion. |
+| o | defined | symbol | plan | **v41_candidates_stream_uncertain (CUDA peer uncertain-state guard)** - A process-wide C++ predicate in cuda_kernels.cu returning true when any V4.1 CUDA peer (checked stream, router, mmid, swiglu, engram, compressor pool, MHC, bf16 publish) has latched an uncertain state, refusing further shared-stream operations. |
+| o | defined | symbol | plan | **V41SelectCandidateBlocks (V4.1 indexer level-one selector)** - A model package function implementing the first level of the V4.1 indexer, selecting top-K compressed blocks from logits into a candidate mask. |
+| o | defined | symbol | plan | **validateEventCandidateScope (validate test-event scope checker)** - A validate package function checking that test events' candidate scopes stay inside the validated root before acceptance. |
+| o | defined | symbol | plan | **ValidateStrixComparatorPlan (device-free strix comparator validator)** - A llamacppinterop function performing fail-closed device-free validation of a proposed StrixComparatorManifest's immutable identity, returning a StrixComparatorPlanValidation. |
+| o | defined | symbol | plan | **VulkanHazardPlan (Vulkan batch hazard lowering)** - A compute package deterministic lowering result for one Vulkan batch window, capturing barrier floors and hazard statistics. |
 | o | defined | symbol | plan | **PlanTick (gardenbundle)** - gardenbundle.PlanTick(results, dryRun) computes a TickPlan - the decided set of stale-work reap and surface actions for one garden tick from the member results. |
 | o | defined | symbol | plan | **TickPlan (gardenbundle)** - gardenbundle.TickPlan is the value PlanTick returns: the decided reap/surface counts for one garden tick, with Acted() true when the tick will change anything. |
 | o | defined | symbol | plan | **LaneCandidate (dispatchtick)** - dispatchtick.LaneCandidate is one orderable issue in a dispatch lane: its number and the priority signal orderLaneCandidates ranks it by. |
@@ -3634,26 +3675,26 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| honesty | `kind_grounding_soft` | 60 | 0 | 28 kind/grounding mismatch |
+| separation | `reference_resolves` | 86 | 1 | 1 dangling distinct_from reference(s) |
+| honesty | `kind_grounding_soft` | 60 | 0 | 29 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3340/6132 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3356 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3381/6197 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3397 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
-| separation | `reference_resolves` | 100 | 0 | every distinct_from reference resolves to a real concept |
 | separation | `pair_separated` | 100 | 0 | all 229 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4742 lookup name(s) resolves - 95 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4786 lookup name(s) resolves - 95 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| plan | 493 | 626 | 133 |
+| plan | 534 | 626 | 92 |
 | cache | 373 | 434 | 61 |
 | gateway-engine | 266 | 324 | 58 |
 | session-runtime | 327 | 381 | 54 |
@@ -3661,7 +3702,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | guard-gate | 535 | 578 | 43 |
 | support-maturity | 99 | 142 | 43 |
 | attention | 191 | 229 | 38 |
-| pool | 73 | 110 | 37 |
+| pool | 74 | 110 | 36 |
 | render-materialize | 224 | 253 | 29 |
 | evict | 61 | 89 | 28 |
 | policy-capability | 252 | 279 | 27 |
