@@ -258,7 +258,7 @@ func verbFlagUsage(fs *flag.FlagSet, tok string) {
 			return
 		}
 		fmt.Fprintln(w)
-		printConciseFlagDefaults(w, fs)
+		printFlagDefaults(w, fs, false)
 		fmt.Fprintf(w, "\nDetailed guide: fak help %s\n", tok)
 	}
 }
