@@ -17,6 +17,7 @@ package modelengine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -45,6 +46,26 @@ const prefillDrainPerInterval = 1
 // ErrNativePromptExceedsKVCapacity reports a request whose prompt alone can
 // never fit the configured native paged-KV budget. Callers may use errors.Is.
 var ErrNativePromptExceedsKVCapacity = errors.New("modelengine: prompt exceeds native KV capacity")
+
+// ErrNativeBatchSequenceNotActive reports a proposed decode batch whose
+// sequence id is not a member of the scheduler's active set. Callers may use
+// errors.Is; BatchSequenceError names the first offending sequence.
+var ErrNativeBatchSequenceNotActive = errors.New("modelengine: batch sequence is not in the active set")
+
+// BatchSequenceError identifies the first proposed-batch sequence id outside
+// the scheduler's active set, carrying the offending admission UID
+// (schedLane.seqNo). It matches ErrNativeBatchSequenceNotActive via errors.Is.
+type BatchSequenceError struct {
+	SeqNo int64
+}
+
+func (e *BatchSequenceError) Error() string {
+	return fmt.Sprintf("modelengine: batch sequence %d is not in the active set", e.SeqNo)
+}
+
+// Unwrap matches every BatchSequenceError against ErrNativeBatchSequenceNotActive
+// so callers can use errors.Is on the sentinel.
+func (e *BatchSequenceError) Unwrap() error { return ErrNativeBatchSequenceNotActive }
 
 type nativeAllocationStatus uint8
 
@@ -646,6 +667,50 @@ func (s *NativeScheduler) AdmitWithHint(ctx context.Context, c *abi.ToolCall, hi
 func (s *NativeScheduler) AdmitTokenIDs(ctx context.Context, name string, prompt []int) (abi.EngineRequest, error) {
 	call := &abi.ToolCall{Tool: name}
 	return s.admitPrepared(ctx, call, dispatchtick.WaveHint{}, schedPrepare{prompt: append([]int(nil), prompt...)})
+}
+
+// ValidateBatchSequences checks a caller-composed decode batch against the
+// scheduler's active set BEFORE dispatch: every sequence id must belong to a
+// non-terminal lane this scheduler admitted — running (lanes), waiting, or
+// preempted. The first unknown sequence in input order is refused with a
+// BatchSequenceError, and no slot, queue, counter, or session state changes on
+// refusal. Known sequences pass in their given order; the check reorders
+// nothing and assigns no slots.
+//
+// Port of the batch sequence-membership validation in ggml-org/llama.cpp
+// llama_batch_allocr::init at pinned revision
+// 25603ef89168a570ea4f34803ce36531c05fd357 (MIT), referenced at
+// src/llama-batch.cpp:475 (PR #30386): a batch carrying a sequence outside the
+// allocated set is refused before the allocator touches slot state instead of
+// corrupting it. Concept adaptation, not copied code: the upstream guard
+// protects per-token sequence-set bookkeeping; here the active set is the
+// scheduler's live lane population keyed by the stable admission UID
+// (schedLane.seqNo).
+func (s *NativeScheduler) ValidateBatchSequences(seqNos []int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	active := make(map[int64]struct{}, len(s.lanes)+len(s.waiting)+len(s.preempted))
+	for _, ln := range s.lanes {
+		if !ln.terminal {
+			active[ln.seqNo] = struct{}{}
+		}
+	}
+	for _, ln := range s.waiting {
+		if !ln.terminal {
+			active[ln.seqNo] = struct{}{}
+		}
+	}
+	for _, ln := range s.preempted {
+		if !ln.terminal {
+			active[ln.seqNo] = struct{}{}
+		}
+	}
+	for _, seqNo := range seqNos {
+		if _, ok := active[seqNo]; !ok {
+			return &BatchSequenceError{SeqNo: seqNo}
+		}
+	}
+	return nil
 }
 
 func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hint dispatchtick.WaveHint, prep schedPrepare) (abi.EngineRequest, error) {
