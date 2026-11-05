@@ -21,7 +21,7 @@ name: deploy-helm-lint
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
     paths:
       - "deploy/helm/**"
       - "deploy/k8s/**"

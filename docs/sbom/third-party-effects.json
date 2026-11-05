@@ -162,6 +162,18 @@
     },
     {
       "class": "ci_action",
+      "reference": "azure/setup-helm@v4",
+      "consumer_domains": [
+        ".github/workflows"
+      ],
+      "status": "used",
+      "pin": "unresolved",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "ci_action",
       "reference": "docker/build-push-action@v6",
       "consumer_domains": [
         ".github/workflows"
