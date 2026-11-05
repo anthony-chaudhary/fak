@@ -295,7 +295,7 @@
       "kind": "doc-term",
       "definition": "kvcached is the external kernel-module-level KV-cache management tool studied in BORROW-KVCACHED-STUDY-2026-07-10 for its in_shrink guard (where available_size() floors to prevent reclaim storms), referenced as a prior-art anchor in dispatchtick's predictive preflight.",
       "distinction": "It is an EXTERNAL prior-art tool studied for borrow, not the KV cache (fak's own tensor storage) and not vCache (fak's virtual cache control plane).",
-      "distinct_from": ["kv-cache", "vcache"],
+      "distinct_from": ["kv-cache", "vcache", "cachep2-kvcachen", "cachep2-kvcacheq8"],
       "aliases": ["kvcached"],
       "grounding": "kvcached",
       "grounding_kind": "doc",

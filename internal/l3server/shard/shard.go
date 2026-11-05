@@ -648,8 +648,8 @@ func (s *Shard) ID() int {
 }
 
 // OpLatencySnapshot returns p50/p99 latencies per op category and queue depth.
-// Called from the metrics scrape goroutine â€” reads ring buffer entries which are
-// int64 aligned (atomic on 64-bit platforms), so no lock is needed.
+// Called from the metrics scrape goroutine; samples and counts are loaded
+// atomically. Percentiles and categories are approximate, not one coherent snapshot.
 func (s *Shard) OpLatencySnapshot() (allP50, allP99, getP50, getP99, setP50, setP99, existsP50, existsP99, queueWaitP50, queueWaitP99, allocDurP50, allocDurP99 int64, queueDepth, queueCap int) {
 	allP50 = s.latency.all.p50().Microseconds()
 	allP99 = s.latency.all.p99().Microseconds()

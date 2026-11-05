@@ -1,0 +1,161 @@
+# Release Helm chart — publish the `fak` Helm chart to GitHub Container Registry
+# as an OCI artifact.
+#
+# Companion to release-container.yml (which publishes the ghcr image). On a `v*`
+# tag push this packages deploy/helm/fak and pushes
+# `oci://ghcr.io/<owner>/fak/charts/fak:<version>`, so adopters install without
+# cloning: `helm install fak oci://ghcr.io/anthony-chaudhary/fak/charts/fak
+# --version X.Y.Z` (Helm 3.8+). The published chart is version-stamped at package
+# time (--version/--app-version from the tag), so it ALWAYS carries the release
+# version even though the committed Chart.yaml values are the checkout-install
+# defaults.
+#
+# Why ghcr: ghcr authenticates with the built-in GITHUB_TOKEN (packages: write),
+# so there is no external secret to manage — same single-artifact,
+# no-extra-credentials posture as the rest of the release path. First publish
+# requires a one-time maintainer step to set the ghcr package visibility to
+# public (same posture as the mcp-registry one-time publish step in
+# docs/fak/mcp-registry.md).
+name: release-helm
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing vX.Y.Z tag to (re)package and push the chart for"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-helm-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  chart:
+    name: package + push helm chart to ghcr
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write # push to ghcr.io
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      chart_ref: ${{ steps.meta.outputs.chart_ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Resolve version + lowercase chart ref
+        id: meta
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          # ghcr paths must be lowercase; the owner login may carry uppercase.
+          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          CHART_REF="oci://ghcr.io/${OWNER}/fak/charts"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "chart_ref=${CHART_REF}" >> "$GITHUB_OUTPUT"
+          echo "resolved ${CHART_REF}/fak:${VERSION}"
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          # EXACT pin: azure/setup-helm downloads get.helm.sh/helm-v<version>
+          # verbatim, so a range like "~3.17.0" becomes a literal ~ in the URL and
+          # 404s (pin convention from deploy-helm-lint.yml).
+          version: 3.17.2
+
+      - name: Log in to ghcr.io
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # Belt: structure / values types / template syntax before packaging.
+      - name: helm lint (chart)
+        run: helm lint deploy/helm/fak
+
+      - name: Package with release stamp
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/helm-pkg
+          # Package-time stamping: the published chart ALWAYS carries the release
+          # version, even though the committed Chart.yaml appVersion lags (it is
+          # the checkout-install default).
+          helm package deploy/helm/fak \
+            --version "${{ steps.meta.outputs.version }}" \
+            --app-version "${{ steps.meta.outputs.version }}" \
+            --destination /tmp/helm-pkg
+
+      - name: Push chart to ghcr
+        id: publish
+        run: |
+          set -euo pipefail
+          helm push "/tmp/helm-pkg/fak-${{ steps.meta.outputs.version }}.tgz" "${{ steps.meta.outputs.chart_ref }}"
+
+      - name: Summary
+        run: |
+          {
+            echo "## release helm chart - ${{ github.event.inputs.tag || github.ref_name }}"
+            echo "published: ${{ steps.meta.outputs.chart_ref }}/fak:${{ steps.meta.outputs.version }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  verify-chart:
+    name: verify published helm chart
+    needs: chart
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 3.17.2
+
+      - name: Log in to ghcr.io
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: verify pulled chart version stamps
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${{ needs.chart.outputs.version }}"
+          CHART_REF="${{ needs.chart.outputs.chart_ref }}"
+
+          fail=0
+          mkdir -p /tmp/helm-verify
+          helm pull "${CHART_REF}/fak" --version "$VERSION" --destination /tmp/helm-verify
+
+          CHART_META="$(helm show chart "/tmp/helm-verify/fak-${VERSION}.tgz")"
+          ESCAPED_VERSION="${VERSION//./\\.}"
+          if ! grep -Eq "^appVersion:[[:space:]]*[\"']?${ESCAPED_VERSION}[\"']?$" <<<"$CHART_META"; then
+            echo "::error::published chart appVersion mismatch: want ${VERSION}, got $(grep '^appVersion:' <<<"$CHART_META" || true)"
+            fail=1
+          fi
+          if ! grep -Eq "^version:[[:space:]]*${ESCAPED_VERSION}$" <<<"$CHART_META"; then
+            echo "::error::published chart version mismatch: want ${VERSION}, got $(grep '^version:' <<<"$CHART_META" || true)"
+            fail=1
+          fi
+
+          helm lint "/tmp/helm-verify/fak-${VERSION}.tgz"
+          helm template fak "/tmp/helm-verify/fak-${VERSION}.tgz" > /dev/null
+
+          {
+            echo "## verify published helm chart - ${TAG}"
+            echo "chart ref: ${CHART_REF}/fak:${VERSION}"
+            echo "appVersion: $(grep '^appVersion:' <<<"$CHART_META" || true)"
+            echo "version: $(grep '^version:' <<<"$CHART_META" || true)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$fail"

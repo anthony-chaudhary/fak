@@ -44,6 +44,7 @@ const (
 	DraftRejectionLowerPriority        DraftRejectionReason = "lower_priority_fallback"
 	DraftRejectionUnsupportedEnvelope  DraftRejectionReason = "unsupported_envelope"
 	DraftRejectionIncompatibleStacking DraftRejectionReason = "incompatible_stacking_unauthorized"
+	DraftRejectionConcurrencyExceeded  DraftRejectionReason = "decode_concurrency_exceeded"
 )
 
 // ValidDraftRejectionReason checks whether the rejection reason belongs to the closed vocabulary.
@@ -58,12 +59,33 @@ func ValidDraftRejectionReason(r DraftRejectionReason) bool {
 		DraftRejectionPolicyDisabled,
 		DraftRejectionLowerPriority,
 		DraftRejectionUnsupportedEnvelope,
-		DraftRejectionIncompatibleStacking:
+		DraftRejectionIncompatibleStacking,
+		DraftRejectionConcurrencyExceeded:
 		return true
 	default:
 		return false
 	}
 }
+
+// Qwen38MTPMaxConcurrentStreams is the load-aware ceiling on active decode
+// streams for which the composite draft policy selects MTP self-speculation.
+// The boundary is one stream, fixed by the controlled strix1 exclusive-lease
+// sweep of MTP draft length against concurrency on 2026-10-10 (aggregate
+// decode t/s, mean of 3 reps): at c=1 static n=2 lifted independent decode
+// from 18.7 to 29.6 t/s (+58%); at c=2 the same n=2 arm was break-even
+// (32.4 to 32.7, +1%, inside the 2-8% rep spread) with only n=1 showing a
+// small gain; at c=4 speculation-off won outright (48.2 vs 33.3, -31%), and
+// the shared-prefix workload repeated the shape (c=1 all MTP arms positive,
+// c=4 none best at 48.9). Draft acceptance did not fall with concurrency, so
+// the multi-stream loss is verify cost, not worse drafts. Selecting MTP above
+// one in-flight decode stream therefore costs aggregate throughput and is
+// declined under DraftRejectionConcurrencyExceeded instead.
+const Qwen38MTPMaxConcurrentStreams = 1
+
+// Qwen38MTPConcurrencyExceeded is the downgrade reason recorded on a
+// target-only receipt when MTP was declined because active decode
+// concurrency exceeded Qwen38MTPMaxConcurrentStreams.
+const Qwen38MTPConcurrencyExceeded Qwen38MTPDowngradeReason = "decode_concurrency_exceeded"
 
 // RejectedDraftSource records a rejected alternative alongside its typed rejection reason.
 type RejectedDraftSource struct {
@@ -120,6 +142,10 @@ type Qwen38DraftPolicyInput struct {
 	ExplicitStackAuth bool                                `json:"explicit_stack_auth"`
 	MinAcceptanceRate float64                             `json:"min_acceptance_rate"`
 	OperatorEnabled   bool                                `json:"operator_enabled"`
+	// ActiveDecodeStreams reports how many decode streams are in flight on the
+	// serving node. Zero means the caller did not report a load signal; the
+	// policy then applies no load-based decline (legacy behavior).
+	ActiveDecodeStreams int `json:"active_decode_streams"`
 }
 
 // Qwen38DraftPolicyReceipt witnesses the deterministic draft source decision.
@@ -180,6 +206,25 @@ func (r Qwen38DraftPolicyReceipt) Validate() error {
 		}
 	}
 
+	return nil
+}
+
+// ErrDraftDeclinedConcurrency is the sentinel error reported when the
+// composite draft policy declines MTP self-speculation because active decode
+// concurrency exceeds Qwen38MTPMaxConcurrentStreams. Callers match it with
+// errors.Is against receipts produced by SelectDraftSource.
+var ErrDraftDeclinedConcurrency = errors.New("model: mtp draft declined: active decode concurrency exceeds threshold")
+
+// MTPDeclineError returns the typed error describing this receipt's MTP
+// rejection, if any. It wraps ErrDraftDeclinedConcurrency when MTP was
+// rejected under DraftRejectionConcurrencyExceeded and nil otherwise.
+func (r Qwen38DraftPolicyReceipt) MTPDeclineError() error {
+	for i := range r.Rejected {
+		rej := &r.Rejected[i]
+		if rej.Source == DraftSourceMTP && rej.Reason == DraftRejectionConcurrencyExceeded {
+			return fmt.Errorf("%w: %s", ErrDraftDeclinedConcurrency, rej.Detail)
+		}
+	}
 	return nil
 }
 
@@ -288,6 +333,9 @@ func qwen38PolicyDisabledReceipt(allSources []DraftSource, allowStacked bool, st
 func evaluateQwen38MTPCandidate(input Qwen38DraftPolicyInput, minAcceptance float64) qwen38DraftEvaluation {
 	mtpState, hasMTPState := input.Candidates[DraftSourceMTP]
 	switch {
+	case input.ActiveDecodeStreams > Qwen38MTPMaxConcurrentStreams:
+		return qwen38DraftRejected(DraftSourceMTP, DraftRejectionConcurrencyExceeded,
+			fmt.Sprintf("%d active decode streams exceed MTP max concurrent streams %d", input.ActiveDecodeStreams, Qwen38MTPMaxConcurrentStreams))
 	case input.MTPEligibility != nil && !input.MTPEligibility.Eligible:
 		return qwen38DraftRejected(DraftSourceMTP, DraftRejectionUnsupportedEnvelope, string(input.MTPEligibility.DowngradeReason))
 	case hasMTPState && !mtpState.Eligible:
@@ -364,6 +412,8 @@ func resolveQwen38DraftSelection(evals map[DraftSource]qwen38DraftEvaluation, al
 					sel.downgradeReason = Qwen38MTPQualityOutsideEnvelope
 				} else if src == DraftSourceMTP && evals[src].rejection.Reason == DraftRejectionUnsupportedEnvelope {
 					sel.downgradeReason = Qwen38MTPModelUnsupported
+				} else if src == DraftSourceMTP && evals[src].rejection.Reason == DraftRejectionConcurrencyExceeded {
+					sel.downgradeReason = Qwen38MTPConcurrencyExceeded
 				}
 			}
 		}

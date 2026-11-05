@@ -44,6 +44,7 @@ TAG_CONTRACT_FIXTURE_PATHS = (
     ".github/workflows/release-macos.yml",
     ".github/workflows/release-container.yml",
     ".github/workflows/release-cuda-container.yml",
+    ".github/workflows/release-helm.yml",
     ".github/workflows/ci.yml",
     "install.sh",
     "Dockerfile",

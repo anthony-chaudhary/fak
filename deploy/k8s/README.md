@@ -169,9 +169,15 @@ neo-cloud / enterprise k8s shops (#2665). Every values toggle maps 1:1 to a real
 `resources`, `service.port`, and probe delays.
 
 ```bash
-helm install fak deploy/helm/fak                                  # proxy stack
+helm install fak deploy/helm/fak                                  # proxy stack (from a checkout)
 helm install fak-gpu deploy/helm/fak \
-  --set mode=inkernel --set gpu.enabled=true                      # GPU overlay shape
+  --set mode=inkernel --set gpu.enabled=true                      # GPU overlay shape (from a checkout)
+
+# Or without a clone: the chart is published to ghcr as an OCI artifact on every
+# v* tag (.github/workflows/release-helm.yml), alongside the ghcr image. Helm 3.8+
+# required for OCI registries; first publish needs a one-time maintainer step to
+# set the ghcr package visibility to public (docs/fak/mcp-registry.md).
+helm install fak oci://ghcr.io/anthony-chaudhary/fak/charts/fak --version X.Y.Z
 ```
 
 This raw manifest + kustomize remains the no-Helm path; the chart is additive, and CI

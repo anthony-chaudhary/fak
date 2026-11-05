@@ -18,6 +18,9 @@ func (d *Dispatcher) HandleGet(msg protocol.Message) protocol.Message {
 
 	// Try local first â€” use pre-decoded key to avoid double DecodeKeyBody
 	result := d.submitPreDecoded(key, shard.OpGet)
+	if result.Err != nil {
+		return ErrResponse(msg.Header.RequestID, result.Err.Error())
+	}
 	if result.Found {
 		return protocol.Message{
 			Header: protocol.Header{OpCode: protocol.RespValue},
@@ -159,6 +162,9 @@ func (d *Dispatcher) HandleTest(msg protocol.Message) protocol.Message {
 
 	// Use pre-decoded key to avoid double DecodeKeyBody
 	result := d.submitPreDecoded(key, shard.OpTest)
+	if result.Err != nil {
+		return ErrResponse(msg.Header.RequestID, result.Err.Error())
+	}
 
 	if !result.Found && d.Ring != nil {
 		primary, isLocal := d.isLocalKey(key)

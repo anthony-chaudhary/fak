@@ -5,6 +5,13 @@
 # unit for neo-cloud / enterprise k8s shops. The raw manifest + kustomize path
 # stays supported; this chart is additive. appVersion tracks the published image
 # tag used by deploy/k8s/fak.yaml.
+#
+# Published form: .github/workflows/release-helm.yml packages this chart on every
+# v* tag and pushes it to ghcr as an OCI artifact
+# (oci://ghcr.io/anthony-chaudhary/fak/charts/fak:<version>), stamping BOTH
+# version and appVersion from the release tag at package time — the published
+# chart always carries the release version. The committed values below are the
+# checkout-install defaults (`helm install fak deploy/helm/fak`).
 apiVersion: v2
 name: fak
 description: fak serve — the kernel gateway that adjudicates every proposed tool call before the client sees it (proxy mode, or GPU in-kernel)
