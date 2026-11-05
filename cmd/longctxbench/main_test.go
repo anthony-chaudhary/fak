@@ -187,10 +187,16 @@ func TestLadderReportIsDeterministic(t *testing.T) {
 	if !ok {
 		t.Fatal("qwen25-7b shape must resolve")
 	}
+	wantShapes := turnbench.CanonicalLadder()
 	r1 := turnbench.RunLongContextLadder(s, turnbench.CanonicalLadder(), turnbench.DefaultCostModel())
 	r2 := turnbench.RunLongContextLadder(s, turnbench.CanonicalLadder(), turnbench.DefaultCostModel())
-	if len(r1.Cells) != 6 {
-		t.Fatalf("canonical ladder must have 6 cells, got %d", len(r1.Cells))
+	if len(r1.Cells) != len(wantShapes) {
+		t.Fatalf("ladder report has %d cells for %d input shapes", len(r1.Cells), len(wantShapes))
+	}
+	for i, want := range wantShapes {
+		if got := r1.Cells[i].Shape; got != want {
+			t.Errorf("cell %d shape = %+v, want input shape %+v", i, got, want)
+		}
 	}
 	if string(r1.JSON()) != string(r2.JSON()) {
 		t.Fatal("ladder report must be byte-identical across runs")

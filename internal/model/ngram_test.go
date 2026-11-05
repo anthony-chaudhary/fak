@@ -623,6 +623,116 @@ func TestNgramDrafterAdaptiveContractionUponRejection(t *testing.T) {
 	}
 }
 
+func TestNgramHybridDraftFillsWindowFromModelDrafter(t *testing.T) {
+	// Suffix [1,2,3] earlier occurred at index 0, followed by [4,5,1,2,3] — five
+	// tokens, so with a six-wide window the n-gram match leaves one slot for the
+	// model drafter.
+	history := []int{1, 2, 3, 4, 5, 1, 2, 3}
+	d := NgramDrafter{Enabled: true, MinMatch: 3, MaxMatch: 3, MaxDraft: 6}
+	got := d.HybridDraft(history, func() []int { return []int{77, 88, 99} })
+	want := []int{4, 5, 1, 2, 3, 77}
+	if !ngramEqualInts(got, want) {
+		t.Fatalf("hybrid draft = %v, want n-gram prefix then model fill %v", got, want)
+	}
+}
+
+func TestNgramHybridDraftSkipsModelDrafterOnSaturatedMatch(t *testing.T) {
+	history := []int{1, 2, 3, 4, 5, 1, 2, 3}
+	d := NgramDrafter{Enabled: true, MinMatch: 3, MaxMatch: 3, MaxDraft: 4}
+	calls := 0
+	got := d.HybridDraft(history, func() []int {
+		calls++
+		return []int{77, 88, 99, 100}
+	})
+	want := d.Draft(history)
+	if !ngramEqualInts(got, want) {
+		t.Fatalf("saturated hybrid = %v, want plain n-gram draft %v", got, want)
+	}
+	if calls != 0 {
+		t.Fatalf("model drafter called %d times on a saturated match, want 0", calls)
+	}
+}
+
+func TestNgramHybridDraftFallsBackToModelDrafter(t *testing.T) {
+	novel := []int{1, 2, 3, 4, 5, 6, 7, 8} // no repeated suffix
+	modelTokens := []int{10, 11, 12, 13, 14}
+
+	d := NgramDrafter{Enabled: true, MinMatch: 3, MaxMatch: 8, MaxDraft: 4}
+	if got := d.HybridDraft(novel, func() []int { return modelTokens }); !ngramEqualInts(got, modelTokens[:4]) {
+		t.Fatalf("novel-text hybrid = %v, want model drafter capped to window %v", got, modelTokens[:4])
+	}
+
+	off := NgramDrafter{MinMatch: 3, MaxMatch: 8, MaxDraft: 4} // disabled: pure fallback
+	if got := off.HybridDraft(novel, func() []int { return modelTokens }); !ngramEqualInts(got, modelTokens[:4]) {
+		t.Fatalf("disabled hybrid = %v, want model drafter capped to window %v", got, modelTokens[:4])
+	}
+
+	if got := d.HybridDraft(novel, nil); got != nil {
+		t.Fatalf("no source hybrid = %v, want nil", got)
+	}
+	if got := d.HybridDraft(novel, func() []int { return nil }); got != nil {
+		t.Fatalf("empty model draft hybrid = %v, want nil", got)
+	}
+}
+
+func TestNgramHybridDraftCopySafety(t *testing.T) {
+	history := []int{1, 2, 3, 4, 5, 1, 2, 3}
+	d := NgramDrafter{Enabled: true, MinMatch: 3, MaxMatch: 3, MaxDraft: 6}
+	buffer := []int{77, 88, 99}
+	got := d.HybridDraft(history, func() []int { return buffer })
+	if len(got) != 6 {
+		t.Fatalf("hybrid length = %d, want 6", len(got))
+	}
+	got[0] = -1
+	got[5] = -1
+	if history[3] != 4 || buffer[0] != 77 {
+		t.Fatal("hybrid draft aliases committed history or the model drafter buffer")
+	}
+}
+
+func TestSpecDecodeGreedyWithNgramHybridMatchesPlainGreedy(t *testing.T) {
+	m := NewSynthetic(cfgV(64, 4, 4, 2, 16, 128))
+	prompt := []int{1, 2, 3, 4, 1, 2, 3}
+	want := m.NewSession().Generate(prompt, 20)
+
+	ngram := NgramDrafter{Enabled: true, MinMatch: 3, MaxMatch: 3, MaxDraft: 4}
+	k := 4
+	// Stateless model-drafter continuation: a fresh session per round keeps the
+	// closure free of KV rollback while still running a real second drafter.
+	proposeCalls := 0
+	propose := func(committed []int) []int {
+		proposeCalls++
+		s := m.NewSession()
+		logits := s.Prefill(committed)
+		drafts := make([]int, 0, k)
+		for j := 0; j < k; j++ {
+			tok := argmaxF32(logits)
+			drafts = append(drafts, tok)
+			logits = s.Step(tok)
+		}
+		return drafts
+	}
+	hybrid := func(committed []int) []int {
+		return ngram.HybridDraft(committed, func() []int { return propose(committed) })
+	}
+
+	run, err := SpecDecodeGreedyWithDrafter(m.NewSession(), prompt, 20, k, hybrid)
+	if err != nil {
+		t.Fatalf("SpecDecodeGreedyWithDrafter(hybrid): %v", err)
+	}
+	if !ngramEqualInts(run.Output, want) {
+		t.Fatalf("hybrid output = %v, plain greedy = %v", run.Output, want)
+	}
+	if run.DraftedTokens == 0 {
+		t.Fatal("hybrid proposed no tokens; verify path was not exercised")
+	}
+	// Round one's committed history is the prompt, whose n-gram match saturates the
+	// four-wide window, so the lazy seam must have skipped the model drafter there.
+	if proposeCalls >= run.Rounds {
+		t.Fatalf("model drafter ran %d of %d rounds; expected a saturated round to skip it", proposeCalls, run.Rounds)
+	}
+}
+
 func TestNgramDrafterAdaptiveDisabled(t *testing.T) {
 	d := NgramDrafter{
 		Enabled:           true,

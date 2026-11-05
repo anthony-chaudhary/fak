@@ -287,6 +287,25 @@ The full upstream LICENSE at the pinned revision follows:
    limitations under the License.
 ```
 
+## TensorFold draft-depth pooled verify costs
+
+- Upstream: ashhart/TensorFold, commit
+  `9e8c368b0b4c2c7892a0c9f0f302d7c164016209` (Apache-2.0), source
+  `zig/src/core/draft_depth.zig` (`Costs`, `DepthRule`):
+  https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/draft_depth.zig
+- Adaptation: `internal/model/draft_depth_cost.go` re-expresses the pooled
+  marginal verify-cost table (pool adjacent violators with kernel-regime
+  boundaries) and the confidence-priced keep/more rule in Go; the governor
+  wiring consumes it through modeled-cost pricing on
+  `Qwen38MTPAdaptiveDepthGovernor` in `internal/model/qwen38_mtp_adaptive.go`.
+  No Zig code blocks are copied; the algorithm, defaults and test vectors are
+  adapted.
+- License: Apache License 2.0, already reproduced above under "TensorFold
+  benchmark evidence".
+- Witness: `TestDraftDepthPooledCostsAndKeepStop` in
+  `internal/model/draft_depth_cost_test.go` pins the pooled verify-cost
+  table and the confidence-priced keep/stop rule (software evidence only).
+
 ## TensorFold decode/prefill wall-time share
 
 `internal/agent/inkernel_qwen_coordinator.go` and
@@ -1536,6 +1555,34 @@ goroutine. Private outputs join before retirement and preserve current router
 IDs, weights, dtype and reduction order. The explicit host-payload budget is
 default off. This is a Go ownership adaptation, not a copied CUDA kernel,
 modified routing/quantization policy, device qualification or performance claim.
+
+## Strata layer-major prefill with per-layer expert warm-up
+
+`internal/model/batch_prefill.go` adapts the layer-major prefill walk — every
+layer's experts are read once per layer pass, with a per-layer expert warm hook
+armed at layer entry — from Niko1221/Strata at commits `ffe40c16`, `162dec34`
+and `37e4832a` (pinned at `46c152a1`), plus `docs/release-notes-0.2.7.md:20` at
+the same pin:
+- https://github.com/Niko1221/Strata/commit/ffe40c16
+- https://github.com/Niko1221/Strata/commit/162dec34
+- https://github.com/Niko1221/Strata/commit/37e4832a
+- https://github.com/Niko1221/Strata/blob/46c152a1/docs/release-notes-0.2.7.md
+
+https://github.com/Niko1221/Strata/tree/46c152a1
+
+Copyright (c) 2026 Niko1221 and the Strata contributors.
+SPDX-License-Identifier: MIT
+The complete copyright, permission and warranty notice is retained in
+`internal/model/STRATA_LICENSE.txt`.
+
+Design reference only; no Strata code blocks are copied. Fak's packed
+rectangular prefill loops already walk layers outer over the whole panel; this
+change arms a session-flag-gated per-layer expert warm hook at the entry of both
+packed layer loops (f32 and Q8 lanes) and pins the firing discipline — one fire
+per layer index, in layer order, once per panel rather than once per
+prompt/chunk — with `TestLayerMajorPrefillExpertWarm`. The flag's zero value
+keeps the walk byte-for-byte unchanged. Upstream TTFT numbers are estimates
+here, not a measured gain or hardware claim.
 ## Strata / Project Maya Engram CLOCK replacement
 
 `internal/model/v41_cache.go` adapts `EgRowCache`'s hand/reference-bit replacement
@@ -2122,6 +2169,35 @@ boundary. No upstream Zig code blocks are copied; the adaptation is witnessed
 by `TestGrammarBudgetWithinMaxTokens` and
 `TestGrammarBudgetArmedCompletion` in
 `internal/agent/inkernel_grammar_budget_test.go`.
+
+The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
+"TensorFold benchmark evidence" section above (same pinned repository and
+revision); they apply to this adaptation as well.
+
+## TensorFold strict-tool grammar (function.strict mark)
+
+`internal/agent/chat.go` (`ToolDefFunction.Strict`, its bool-only wire
+decode, and `AutoWantsGrammar`) adapts the strict-tool grammar from
+`zig/src/server/tool_grammar.zig:78` in TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/server/tool_grammar.zig
+
+The adapted contract: a JSON boolean `function.strict` (or the equivalent
+bare-tool strict mark) is the only shape that marks a tool; `false` and
+non-boolean shapes such as the string `"true"` decode without marking. Marked
+tools keep their parameter schema under `tool_choice: auto`, and an auto reply
+wants structured-grammar constraint only when at least one advertised tool
+carries the `strict: true` mark — mixed catalogs are decided by their marked
+tools, and an empty catalog wants none. Where structure support is missing,
+auto stays unconstrained.
+
+Changed for Fak: idiomatic Go on the existing `ToolDef` /
+`openAICompatibleTools` normalization seam in `internal/agent` instead of
+Zig's server-side tool-grammar admission; the mark rides request
+normalization byte-exact and is reported through `AutoWantsGrammar`. No
+upstream Zig code blocks are copied; the adaptation is witnessed by
+`TestToolDefStrictPreservedAndAutoWantsGrammar` in
+`internal/agent/chat_tool_strict_test.go`.
 
 The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
 "TensorFold benchmark evidence" section above (same pinned repository and

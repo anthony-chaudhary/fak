@@ -105,9 +105,11 @@ func (p *ManifestPreflight) refuse(reason newmodel.RefusalReason, axis, format s
 // Header-only callers cannot read tensor payloads; an already bound source may
 // let Config read bounded integer auxiliaries. Every <arch>.* key must have a
 // reader and agree with the HF config, every requested tensor must be present at
-// its shape, every present tensor must have a consumer, and every materialized
-// weight dtype must have a host kernel. It aggregates instead of stopping at the
-// first problem, so one run names every seam.
+// its shape, every present tensor must have a consumer, every declared MTP head
+// must ship its tensors, every deepseek41 forward-requested operand must be
+// present at an admitted geometry, and every materialized weight dtype must have
+// a host kernel. It aggregates instead of stopping at the first problem, so one
+// run names every seam.
 func BuildManifestPreflight(in ManifestPreflightInput) ManifestPreflight {
 	out := ManifestPreflight{
 		Schema:   ManifestPreflightSchema,
@@ -135,7 +137,11 @@ func BuildManifestPreflight(in ManifestPreflightInput) ManifestPreflight {
 	if cfgErr == nil {
 		runArchKeyReaders(&f, cfg)
 	}
-
+	if cfgErr == nil {
+		// The MTP declaration read must precede key coverage so a declared
+		// nextn_predict_layers counts as read by its own census.
+		checkMTPDeclaration(&out, &f, cfg)
+	}
 	if cfgErr == nil {
 		// A failed Config stops reading partway, so every later key would read as unread.
 		checkKeyCoverage(&out, &f)
@@ -143,6 +149,7 @@ func BuildManifestPreflight(in ManifestPreflightInput) ManifestPreflight {
 	checkHFParity(&out, &f, cfg, in.HFConfig)
 	if cfgErr == nil {
 		checkTensorCoverage(&out, &f, cfg)
+		deepseek41ForwardRequestCensus(&out, &f, cfg)
 	}
 	checkDTypes(&out, &f, cfg, cfgErr == nil)
 	return out.finish()

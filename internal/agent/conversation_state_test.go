@@ -128,14 +128,15 @@ func TestConversationSnapshotCompleteOnly(t *testing.T) {
 		s := newWarmDiskStager(w, 100, 4)
 		k1 := "cc33dd44ee55ff66aa77bb88cc99dd00ee11ff22aa33bb44cc55dd66aa11bb22"
 		k2 := "dd44ee55ff66aa77bb88cc99dd00ee11ff22aa33bb44cc55dd66aa11bb22cc33"
-		if _, err := s.stage(ctx, k1, convStatePattern(60)); err != nil {
+		wantPayload := convStatePattern(60)
+		if _, err := s.stage(ctx, k1, bytes.Clone(wantPayload)); err != nil {
 			t.Fatalf("stage first: %v", err)
 		}
 		// The first save holds 60 of the 100-byte permit; the second would
 		// exceed it and must wait for the first write to finish.
 		second := make(chan error, 1)
 		go func() {
-			_, err := s.stage(ctx, k2, convStatePattern(60))
+			_, err := s.stage(ctx, k2, bytes.Clone(wantPayload))
 			second <- err
 		}()
 		deadline := time.Now().Add(5 * time.Second)
@@ -154,10 +155,12 @@ func TestConversationSnapshotCompleteOnly(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("second save never enqueued after the first write finished")
 		}
-		if got := convStateAwaitPublish(t, store, k1); len(got) != 60 {
-			t.Fatalf("first record = %d bytes, want 60", len(got))
+		if got := convStateAwaitPublish(t, store, k1); !bytes.Equal(got, wantPayload) {
+			t.Fatalf("first record bytes differ: got %d bytes, want %d bytes", len(got), len(wantPayload))
 		}
-		convStateAwaitPublish(t, store, k2)
+		if got := convStateAwaitPublish(t, store, k2); !bytes.Equal(got, wantPayload) {
+			t.Fatalf("second record bytes differ: got %d bytes, want %d bytes", len(got), len(wantPayload))
+		}
 	})
 
 	t.Run("planned stop drains to the deadline then cancels the rest", func(t *testing.T) {

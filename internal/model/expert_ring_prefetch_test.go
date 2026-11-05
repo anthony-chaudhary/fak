@@ -1,6 +1,7 @@
 package model
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -294,4 +295,194 @@ func ringKeyTensorName(key string) string {
 		return key[i+1:]
 	}
 	return key
+}
+
+// ---- oss-port-strata-layer-major-prefill leaf 1 (prefill warm hook) ----
+// Closed contract for the packed per-layer expert warm hook, kept in this file to
+// honor the ticket scope (allowed test file: expert_ring_prefetch_test.go).
+
+// batch_prefill_test.go — closed contract for oss-port-strata-layer-major-prefill leaf 1
+// (prefill-warm-hook): the packed rectangular prefill walk carries a session-flag-gated
+// per-layer expert warm hook at the entry of BOTH packed layer loops (F32 and Q8 lanes).
+// The flag's zero value keeps the walk byte-for-byte unchanged (rejection probe); armed,
+// the hook fires exactly once per layer index, in layer order 0..NumLayers-1, counted
+// through the fake hook seam — one pass per layer for the whole panel, never once per
+// prompt/chunk. Software witness only ([SW-VERIFIED]); no throughput or hardware claim.
+
+// layerMajorTestConfig is a tiny dense PreNorm geometry that routes to BOTH packed
+// rectangular lanes (the MoE axis is excluded by batchPreNormFastPathOK, which is the
+// point: the hook pins the layer-major discipline these lanes owe their expert reads).
+func layerMajorTestConfig() Config {
+	return Config{
+		HiddenSize: 64, NumLayers: 3, NumHeads: 4, NumKVHeads: 2, HeadDim: 16,
+		IntermediateSize: 128, VocabSize: 200, RMSNormEps: 1e-5, RopeTheta: 10000,
+		TieWordEmbeddings: true, EOSTokenID: -1,
+	}
+}
+
+func layerMajorPrompts(B, P, V int) [][]int {
+	prompts := make([][]int, B)
+	for b := 0; b < B; b++ {
+		p := make([]int, P)
+		for t := range p {
+			p[t] = (b*41 + t*17 + 5) % V
+		}
+		prompts[b] = p
+	}
+	return prompts
+}
+
+// assertBitIdenticalLogits pins []float32 rows byte-for-byte (math.Float32bits), the
+// same bar TestPrefillEachRectangularMatchesSerial holds the packed lane to the serial
+// per-token walk.
+func assertBitIdenticalLogits(t *testing.T, got, want [][]float32, label string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("%s: %d logit rows, want %d", label, len(got), len(want))
+	}
+	for b := range got {
+		if len(got[b]) != len(want[b]) {
+			t.Fatalf("%s row %d: width %d, want %d", label, b, len(got[b]), len(want[b]))
+		}
+		for i := range got[b] {
+			if math.Float32bits(got[b][i]) != math.Float32bits(want[b][i]) {
+				t.Fatalf("%s row %d logit[%d]: %v != %v", label, b, i, got[b][i], want[b][i])
+			}
+		}
+	}
+}
+
+// TestLayerMajorPrefillExpertWarm pins the leaf-1 closed contract on both packed lanes:
+//   - flag off (zero value): zero warm hook fires even with a hook installed, and the
+//     F32 lane's logits stay bit-identical to the independent serial per-token walk —
+//     the disabled arm retains the current walk visibly (rejection probe);
+//   - flag on: exactly one warm hook fire per layer index per prefill call, in layer
+//     order 0..NumLayers-1, counted through the fake hook seam;
+//   - one-pass-per-layer: a two-prompt panel warms layer L's expert set once, not once
+//     per prompt/chunk (total fires == NumLayers, each layer exactly once across the
+//     panel's sessions).
+func TestLayerMajorPrefillExpertWarm(t *testing.T) {
+	cfg := layerMajorTestConfig()
+	const B, P = 2, 4
+	V := cfg.VocabSize
+	prompts := layerMajorPrompts(B, P, V)
+
+	// Premise: this geometry routes to both packed rectangular lanes, so the test is
+	// not vacuous.
+	if !batchRectFastPathOK(cfg, false) {
+		t.Fatal("premise broken: config no longer routes to prefillEachPackedF32")
+	}
+	if !batchRectFastPathOK(cfg, true) {
+		t.Fatal("premise broken: config no longer routes to prefillEachPackedQ")
+	}
+	if got, ok := rectangularPrefillLen(prompts); !ok || got != P {
+		t.Fatalf("premise broken: prompts not rectangular P=%d ok=%v", got, ok)
+	}
+
+	t.Run("f32", func(t *testing.T) {
+		m := NewSynthetic(cfg)
+
+		// Independent baseline: the serial per-token walk ("today's output").
+		refLogits := make([][]float32, B)
+		for b := 0; b < B; b++ {
+			refLogits[b] = m.NewSession().Prefill(prompts[b])
+		}
+
+		// Flag OFF with a hook installed: the flag, not the hook, gates the fire.
+		var offFires []int
+		offHook := func(l int) { offFires = append(offFires, l) }
+		bsOff := m.NewBatchSession(B)
+		for _, s := range bsOff.Seqs {
+			s.SetPrefillExpertWarm(false, offHook)
+		}
+		gotOff := bsOff.PrefillEach(prompts)
+		if len(offFires) != 0 {
+			t.Fatalf("flag off: %d warm hook fires, want 0 (fires=%v)", len(offFires), offFires)
+		}
+		assertBitIdenticalLogits(t, gotOff, refLogits, "flag-off f32 lane")
+
+		// Flag ON: one fire per layer index, in layer order, once per panel.
+		fires := make([][]int, B) // per-session counters: no session may double-warm
+		bsOn := m.NewBatchSession(B)
+		for b, s := range bsOn.Seqs {
+			b := b
+			s.SetPrefillExpertWarm(true, func(l int) { fires[b] = append(fires[b], l) })
+		}
+		gotOn := bsOn.PrefillEach(prompts)
+
+		total := 0
+		for b := range fires {
+			total += len(fires[b])
+		}
+		if total != cfg.NumLayers {
+			t.Fatalf("flag on: %d total warm hook fires for a %d-prompt panel, want %d (one pass per layer, not per prompt; fires=%v)",
+				total, B, cfg.NumLayers, fires)
+		}
+		seen := map[int]int{}
+		for b := range fires {
+			for _, l := range fires[b] {
+				seen[l]++
+			}
+		}
+		for l := 0; l < cfg.NumLayers; l++ {
+			if seen[l] != 1 {
+				t.Fatalf("layer %d: %d warm hook fires across the panel, want exactly 1 (fires=%v)", l, seen[l], fires)
+			}
+		}
+		// Layer order 0..NumLayers-1: the panel's combined fire sequence is ascending
+		// and contiguous.
+		combined := make([]int, 0, cfg.NumLayers)
+		for l := 0; l < cfg.NumLayers; l++ {
+			for b := range fires {
+				for _, fl := range fires[b] {
+					if fl == l {
+						combined = append(combined, fl)
+					}
+				}
+			}
+		}
+		for i, l := range combined {
+			if l != i {
+				t.Fatalf("warm hook fire %d is layer %d, want %d (layer order broken; fires=%v)", i, l, i, fires)
+			}
+		}
+		// Arming changes nothing numerically.
+		assertBitIdenticalLogits(t, gotOn, gotOff, "flag-on f32 lane")
+	})
+
+	t.Run("q8", func(t *testing.T) {
+		m := NewSynthetic(cfg)
+		m.Quantize()
+
+		// Pure zero-value default: no arm installed at all.
+		bsDefault := m.NewBatchSession(B)
+		bsDefault.SetQuant(true)
+		gotDefault := bsDefault.PrefillEach(prompts)
+		if len(bsDefault.Seqs) != B {
+			t.Fatalf("q8 default arm returned %d sessions, want %d", len(bsDefault.Seqs), B)
+		}
+
+		// Flag ON through the quantized twin.
+		var onFires []int
+		bsOn := m.NewBatchSession(B)
+		bsOn.SetQuant(true)
+		for _, s := range bsOn.Seqs {
+			s.SetPrefillExpertWarm(true, func(l int) { onFires = append(onFires, l) })
+		}
+		gotOn := bsOn.PrefillEach(prompts)
+
+		if len(onFires) != cfg.NumLayers {
+			t.Fatalf("q8 flag on: %d warm hook fires, want %d (one pass per layer; fires=%v)",
+				len(onFires), cfg.NumLayers, onFires)
+		}
+		for i, l := range onFires {
+			if l != i {
+				t.Fatalf("q8 warm hook fire %d is layer %d, want %d (layer order broken; fires=%v)", i, l, i, onFires)
+			}
+		}
+		// The gate preserves the quantized lane byte-for-byte: the flag-off run IS
+		// today's walk (the arm adds no arithmetic when un-armed), so flag-on must
+		// equal it bit-for-bit.
+		assertBitIdenticalLogits(t, gotOn, gotDefault, "q8 lane")
+	})
 }

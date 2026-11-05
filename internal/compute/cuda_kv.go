@@ -12,6 +12,7 @@ import "C"
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"sync/atomic"
 	"unsafe"
 )
@@ -38,6 +39,19 @@ func (c *cudaBackend) NewKV(cfg KVConfig) KVStore {
 }
 
 func (c *cudaBackend) newContiguousKV(cfg KVConfig) *cudaKV {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	k, err := c.newContiguousKVLocked(cfg)
+	if err != nil {
+		panic(err)
+	}
+	return k
+}
+
+// newContiguousKVLocked owns native allocator-map access and rollback under the
+// caller's cudaMu. Restore already holds this lock; public construction does not.
+// Admission errors return to restore; the public constructor raises them.
+func (c *cudaBackend) newContiguousKVLocked(cfg KVConfig) (*cudaKV, error) {
 	dtype := F32
 	switch cfg.Precision {
 	case KVPrecisionF32:
@@ -59,10 +73,13 @@ func (c *cudaBackend) newContiguousKV(cfg KVConfig) *cudaKV {
 		k.K[l].dtype = dtype
 		k.V[l].dtype = dtype
 	}
+	if err := k.sharedStopErrorLocked("kv-create"); err != nil {
+		return nil, err
+	}
 	free := FreeUnknown
 	if graphEnabled && cfg.GraphCapture {
-		// Unlocked query: RestoreKVFromHost calls NewKV under cudaMu, and cudaMemGetInfo
-		// is thread-safe in the runtime.
+		// Caller holds cudaMu for the allocator maps used below. The runtime
+		// memory query itself is thread-safe.
 		var freeMem, totalMem C.size_t
 		if C.fcuda_mem_info(&freeMem, &totalMem) == 0 && totalMem > 0 {
 			free = uint64ToCapInt64(uint64(freeMem))
@@ -80,7 +97,7 @@ func (c *cudaBackend) newContiguousKV(cfg KVConfig) *cudaKV {
 			func(ptr unsafe.Pointer) { C.fcuda_free(ptr) },
 		)
 	}
-	return k
+	return k, nil
 }
 
 // GraphCaptureReady reports whether this store holds the fixed graph capacity. Only such a
@@ -186,6 +203,16 @@ type cudaKV struct {
 
 	releaseRetained bool
 	releaseNext     *cudaKV
+	snapshotCopy    *cudaKVSnapshotCopy // active/failed host and conversion ownership
+}
+
+// cudaKVSnapshotCopy owns a nonempty copy's host backing store and optional
+// conversion buffer. Never copy it after pinning. A failed copy keeps it alive
+// through the retained KV; cgo's implicit host pin ends when the call returns.
+type cudaKVSnapshotCopy struct {
+	host       []float32
+	conversion *cudaBuf
+	pin        runtime.Pinner
 }
 
 // cudaKVReleaseOwners is a process-lifetime quarantine for terminal-refused
@@ -196,6 +223,11 @@ var cudaKVReleaseOwners *cudaKV
 // A caller may already have detached its KV handle before calling Free.
 func (k *cudaKV) retainReleaseOwnerLocked() {
 	if k.releaseRetained {
+		return
+	}
+	if k.snapshotCopy != nil {
+		k.releaseRetained = true
+		k.releaseNext, cudaKVReleaseOwners = cudaKVReleaseOwners, k
 		return
 	}
 	for _, rows := range [3][]dslice{k.K, k.Kraw, k.V} {
@@ -373,24 +405,30 @@ func (c *cudaBackend) compactDS(d *dslice, fromF, endF, tailFloats int, scratch 
 func (k *cudaKV) Clone() KVStore {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	if err := k.sharedStopErrorLocked("kv-clone"); err != nil {
+		panic(err)
+	}
 	return k.cloneWithOperations(
 		func(bytes int, site string) unsafe.Pointer { return k.be.dallocKV(bytes, site).ptr },
-		func(dst, src unsafe.Pointer, bytes int) { C.fcuda_d2d(dst, src, C.size_t(bytes)) },
+		func(dst, src unsafe.Pointer, bytes int) int {
+			return int(C.fcuda_kv_clone_d2d_checked(dst, src, C.size_t(bytes)))
+		},
 		func(ptr unsafe.Pointer) { C.fcuda_free(ptr) },
 	)
 }
 
 // cloneWithOperations runs under the caller's cudaMu. Destination rows own each
-// allocation before the copy; a later allocation panic retires all unpublished
-// rows without touching the source or recursively locking via public Free.
-// Native d2d is void and logs errors; this does not add copy-error detection.
-func (k *cudaKV) cloneWithOperations(alloc func(int, string) unsafe.Pointer, copyDevice func(unsafe.Pointer, unsafe.Pointer, int), release func(unsafe.Pointer)) *cudaKV {
+// allocation before the copy; a later allocation panic attempts cleanup of
+// unpublished rows without touching the source or recursively calling public Free.
+// A returned copy failure retains both owners; successful submission is not a
+// completion fence. Allocation-panic cleanup still uses the existing void release.
+func (k *cudaKV) cloneWithOperations(alloc func(int, string) unsafe.Pointer, copyDevice func(unsafe.Pointer, unsafe.Pointer, int) int, release func(unsafe.Pointer)) *cudaKV {
 	n := &cudaKV{be: k.be, cfg: k.cfg,
 		K: make([]dslice, len(k.K)), Kraw: make([]dslice, len(k.Kraw)), V: make([]dslice, len(k.V)),
 		pos: append([]int(nil), k.pos...)}
 	published := false
 	defer func() {
-		if published {
+		if published || n.releaseRetained {
 			return
 		}
 		for _, rows := range [][]dslice{n.K, n.Kraw, n.V} {
@@ -415,7 +453,13 @@ func (k *cudaKV) cloneWithOperations(alloc func(int, string) unsafe.Pointer, cop
 		}
 		np := alloc(src.len*src.dtype.Bytes(), site)
 		dst.ptr, dst.len, dst.cap = np, src.len, src.len
-		copyDevice(np, src.ptr, src.len*src.dtype.Bytes())
+		if status := copyDevice(np, src.ptr, src.len*src.dtype.Bytes()); status != 0 {
+			// Native status has already closed shared admission. Root both
+			// existing owners before allocating an error or unwinding.
+			k.retainReleaseOwnerLocked()
+			n.retainReleaseOwnerLocked()
+			panic(&CUDAOpError{Op: "Clone", Site: site, Code: status, Class: MemoryKVCache, Msg: "device copy submission failed; owners retained"})
+		}
 	}
 	for l := range k.K {
 		cp(&n.K[l], &k.K[l], "kv-key-clone layer "+itoaC(l))
@@ -424,6 +468,15 @@ func (k *cudaKV) cloneWithOperations(alloc func(int, string) unsafe.Pointer, cop
 	}
 	published = true
 	return n
+}
+
+// snapshotFailureLocked receives a status already latched by the snapshot-only
+// native adapter. Retain input, conversion and pinned host owners before
+// observing or returning the error. A failed operation is not permission to retry or free.
+func (k *cudaKV) snapshotFailureLocked(site string, status int) error {
+	k.retainReleaseOwnerLocked()
+	k.be.faultLatch.Observe(DeviceFaultExecution, site, status)
+	return &CUDAOpError{Op: "SnapshotToHost", Site: site, Code: status, Msg: "snapshot device operation failed; owners retained"}
 }
 
 // SnapshotToHost copies the complete CUDA KV owner into ordinary host DRAM,
@@ -438,20 +491,62 @@ func (k *cudaKV) SnapshotToHost() (KVHostSnapshot, error) {
 	if err := k.sharedStopErrorLocked("kv-snapshot"); err != nil {
 		return KVHostSnapshot{}, err
 	}
-	copyDS := func(src dslice) []float32 {
+	copyDS := func(src dslice) ([]float32, error) {
 		out := make([]float32, src.len)
 		if len(out) > 0 {
-			if src.dtype == F32 {
-				C.fcuda_d2h(unsafe.Pointer(&out[0]), src.ptr, C.size_t(len(out)*F32.Bytes()))
-			} else {
-				ptr := k.be.dallocClass(src.len*4, MemoryScratchpad, "kv-snapshot-conversion").ptr
-				defer C.fcuda_free(ptr)
-				cudaKVCheck(C.fcuda_kv_load_typed((*C.float)(ptr), src.ptr, C.int(src.len), C.int(src.dtype)))
-				C.fcuda_d2h(unsafe.Pointer(&out[0]), ptr, C.size_t(src.len*4))
+			holder := &cudaKVSnapshotCopy{host: out}
+			if src.dtype != F32 {
+				holder.conversion = k.be.dallocClass(src.len*4, MemoryScratchpad, "kv-snapshot-conversion")
 			}
+			k.snapshotCopy = holder
+			copied, retired := false, false
+			// Register ownership cleanup before Pin or either native operation.
+			// The active defer roots k/holder during the call; failure or panic
+			// transfers that root to the existing allocation-free retained list.
+			defer func() {
+				if copied {
+					holder.pin.Unpin()
+					holder.host = nil
+				}
+				if retired {
+					k.snapshotCopy = nil
+				} else {
+					k.retainReleaseOwnerLocked()
+				}
+			}()
+			holder.pin.Pin(&out[0])
+			ptr := src.ptr
+			if holder.conversion != nil {
+				ptr = holder.conversion.ptr
+				if status := int(C.fcuda_kv_snapshot_load_checked((*C.float)(ptr), src.ptr, C.int(src.len), C.int(src.dtype))); status != 0 {
+					return nil, k.snapshotFailureLocked("kv-snapshot-convert", status)
+				}
+			}
+			if status := int(C.fcuda_kv_snapshot_d2h_checked(unsafe.Pointer(&out[0]), ptr, C.size_t(len(out)*F32.Bytes()))); status != 0 {
+				return nil, k.snapshotFailureLocked("kv-snapshot-d2h", status)
+			}
+			copied = true
+			// Only a successful copy certifies this prefix. Later row failure
+			// withholds the entire image but cannot undo a genuine earlier fence.
 			atomic.AddUint64(&k.be.fenceGen, 1)
+			if holder.conversion != nil {
+				disposition := C.int(0)
+				status := int(C.fcuda_kv_snapshot_release_checked(holder.conversion.ptr, C.size_t(holder.conversion.n), &disposition))
+				if disposition == C.FCUDA_KV_SNAPSHOT_RETIRED {
+					// A native pool now owns this allocation, or physical free
+					// succeeded. Never retain it as a retryable conversion owner.
+					holder.conversion = nil
+					retired = true
+				}
+				if status != 0 || disposition != C.FCUDA_KV_SNAPSHOT_RETIRED {
+					// A zero status cannot certify an absent/malformed receipt.
+					status = int(C.fcuda_kv_snapshot_release_failed(C.int(status)))
+					return nil, k.snapshotFailureLocked("kv-snapshot-release", status)
+				}
+			}
+			retired = true
 		}
-		return out
+		return out, nil
 	}
 	out := KVHostSnapshot{
 		Config: cloneKVConfig(k.cfg),
@@ -461,9 +556,16 @@ func (k *cudaKV) SnapshotToHost() (KVHostSnapshot, error) {
 		V:      make([][]float32, len(k.V)),
 	}
 	for layer := range k.K {
-		out.K[layer] = copyDS(k.K[layer])
-		out.KRaw[layer] = copyDS(k.Kraw[layer])
-		out.V[layer] = copyDS(k.V[layer])
+		var err error
+		if out.K[layer], err = copyDS(k.K[layer]); err != nil {
+			return KVHostSnapshot{}, err
+		}
+		if out.KRaw[layer], err = copyDS(k.Kraw[layer]); err != nil {
+			return KVHostSnapshot{}, err
+		}
+		if out.V[layer], err = copyDS(k.V[layer]); err != nil {
+			return KVHostSnapshot{}, err
+		}
 	}
 	return out, out.Validate()
 }
@@ -483,7 +585,10 @@ func (c *cudaBackend) restoreContiguousKVFromHost(state KVHostSnapshot) (out KVS
 	}
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	k := c.newContiguousKV(cloneKVConfig(state.Config))
+	k, err := c.newContiguousKVLocked(cloneKVConfig(state.Config))
+	if err != nil {
+		return nil, err
+	}
 	if k == nil {
 		return nil, fmt.Errorf("cuda: NewKV returned an incompatible store during host restore")
 	}

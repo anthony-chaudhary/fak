@@ -68,8 +68,11 @@ func preflightServeBackendForward(path string, be compute.Backend) (serveBackend
 
 // preflightServeBackendForwardWith reads only the GGUF header and tensor directory,
 // derives the architecture config, closes the source, and then validates the selected
-// backend. It deliberately does not call BuildModelPreflight: memory planning belongs
-// to the later load stage and must not precede this forward-path refusal.
+// backend. It deliberately does not call BuildModelPreflight or the layout-guard manifest
+// preflight: this seam checks BACKEND CAPABILITY against the declared config, while the
+// artifact's tensor coverage is refused fail-closed at the load funnel
+// (loadServeInKernelModelPlacedErr) where every arm funnels before dispatch. Memory planning
+// likewise belongs to the later load stage and must not precede this forward-path refusal.
 func preflightServeBackendForwardWith(
 	path string,
 	be compute.Backend,

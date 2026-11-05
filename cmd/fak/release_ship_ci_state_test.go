@@ -90,28 +90,97 @@ func TestReleaseShipAncestorCIDoesNotOverrideExactFailure(t *testing.T) {
 	}
 }
 
-// All commands are stubbed and the appearance deadline is already expired.
+// JSON null is unreadable source evidence, not an empty array permitting adoption.
+// fak-test:runtime fast est=10ms
+func TestReleaseShipSourceCIRejectsNullResponse(t *testing.T) {
+	for _, adopt := range []bool{false, true} {
+		t.Run(fmt.Sprintf("adopt=%v", adopt), func(t *testing.T) {
+			calls := 0
+			restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
+				calls++
+				if name != "gh" || !sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "source-sha", "--event", "push", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha,event") {
+					t.Fatalf("null source response reached another command: %s %v", name, args)
+				}
+				return 0, "null\n"
+			})
+			defer restore()
+			var result releaseShipResult
+			ci := releaseShipSourceCI(&result, t.TempDir(), releaseShipOptions{workflow: "ci.yml", trunk: "main", adoptAncestorCI: adopt}, "source-sha")
+			if calls != 1 || releaseShipPayloadOK(ci) || ci["status"] != "invalid_response" || ci["source_sha"] != "source-sha" || !strings.Contains(stringFromAny(ci["reason"]), "not a JSON array") || ci["run"] != nil || ci["adopted_ancestor_sha"] != nil {
+				t.Fatalf("null response was treated as absence or adopted: calls=%d CI=%#v", calls, ci)
+			}
+		})
+	}
+}
+
+// Exact-source contradictions must refuse before any ancestor query or probe.
 // fak-test:runtime fast est=20ms
+func TestReleaseShipSourceCIRejectsInconsistentConclusion(t *testing.T) {
+	for _, tc := range []struct {
+		name, statusJSON, conclusion string
+	}{
+		{name: "success without status", conclusion: "success"},
+		{name: "success with null status", statusJSON: `,"status":null`, conclusion: "success"},
+		{name: "success with nonstring status", statusJSON: `,"status":1`, conclusion: "success"},
+		{name: "success with unknown status", statusJSON: `,"status":"unknown"`, conclusion: "success"},
+		{name: "pending success", statusJSON: `,"status":"in_progress"`, conclusion: "success"},
+		{name: "pending failure", statusJSON: `,"status":"queued"`, conclusion: "failure"},
+		{name: "pending timeout", statusJSON: `,"status":"waiting"`, conclusion: "timed_out"},
+		{name: "pending cancellation", statusJSON: `,"status":"requested"`, conclusion: "cancelled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
+				calls++
+				if name != "gh" || !sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "source-sha", "--event", "push", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha,event") {
+					t.Fatalf("inconsistent exact source reached another command: %s %v", name, args)
+				}
+				return 0, fmt.Sprintf(`[{"event":"push","headSha":"source-sha","databaseId":7,"conclusion":%q%s}]`, tc.conclusion, tc.statusJSON)
+			})
+			defer restore()
+			var result releaseShipResult
+			ci := releaseShipSourceCI(&result, t.TempDir(), releaseShipOptions{workflow: "ci.yml", trunk: "main", adoptAncestorCI: true}, "source-sha")
+			run, _ := ci["run"].(map[string]any)
+			if calls != 1 || releaseShipPayloadOK(ci) || ci["status"] != "inconsistent" || ci["source_sha"] != "source-sha" || ci["conclusion"] != tc.conclusion || run["headSha"] != "source-sha" || run["databaseId"] != float64(7) || run["conclusion"] != tc.conclusion || ci["adopted_ancestor_sha"] != nil {
+				t.Fatalf("inconsistent source was relaxed or its evidence lost: calls=%d CI=%#v", calls, ci)
+			}
+		})
+	}
+}
+
+// All commands are stubbed and the appearance deadline is already expired.
+// fak-test:runtime fast est=40ms
 func TestReleaseShipCIRequiresPushEvent(t *testing.T) {
 	for _, tc := range []struct {
 		name, payload, status string
 		code                  int
 		appeared              bool
 	}{
-		{name: "missing event", payload: `[{"status":"completed","conclusion":"success"}]`, status: "missing"},
-		{name: "null event", payload: `[{"event":null,"status":"completed","conclusion":"success"}]`, status: "missing"},
-		{name: "empty event", payload: `[{"event":"","status":"completed","conclusion":"success"}]`, status: "missing"},
+		{name: "missing event", payload: `[{"status":"completed","conclusion":"success"}]`, status: "invalid_event"},
+		{name: "missing-event exact failure", payload: `[{"status":"completed","conclusion":"failure"}]`, status: "invalid_event"},
+		{name: "null event", payload: `[{"event":null,"status":"completed","conclusion":"success"}]`, status: "invalid_event"},
+		{name: "empty event", payload: `[{"event":"","status":"completed","conclusion":"success"}]`, status: "invalid_event"},
 		{name: "manual success", payload: `[{"event":"workflow_dispatch","status":"completed","conclusion":"success"}]`, status: "missing"},
 		{name: "pull request", payload: `[{"event":"pull_request","status":"completed","conclusion":"success"}]`, status: "missing"},
 		{name: "scheduled", payload: `[{"event":"schedule","status":"completed","conclusion":"success"}]`, status: "missing"},
 		{name: "unknown event", payload: `[{"event":"unknown","status":"completed","conclusion":"success"}]`, status: "missing"},
-		{name: "wrong case", payload: `[{"event":"PUSH","status":"completed","conclusion":"success"}]`, status: "missing"},
-		{name: "padded event", payload: `[{"event":" push ","status":"completed","conclusion":"success"}]`, status: "missing"},
-		{name: "number event", payload: `[{"event":1,"status":"completed","conclusion":"success"}]`, status: "missing"},
-		{name: "boolean event", payload: `[{"event":true,"status":"completed","conclusion":"success"}]`, status: "missing"},
-		{name: "array event", payload: `[{"event":["push"],"status":"completed","conclusion":"success"}]`, status: "missing"},
-		{name: "object event", payload: `[{"event":{"name":"push"},"status":"completed","conclusion":"success"}]`, status: "missing"},
-		{name: "null row", payload: `[null]`, status: "missing"},
+		{name: "future event token", payload: `[{"event":"future_event","status":"completed","conclusion":"success"}]`, status: "missing"},
+		{name: "future event token with digit", payload: `[{"event":"future_event2","status":"completed","conclusion":"success"}]`, status: "missing"},
+		{name: "wrong case", payload: `[{"event":"PUSH","status":"completed","conclusion":"success"}]`, status: "invalid_event"},
+		{name: "padded event", payload: `[{"event":" push ","status":"completed","conclusion":"success"}]`, status: "invalid_event"},
+		{name: "interior whitespace", payload: `[{"event":"pu sh","status":"completed","conclusion":"failure"}]`, status: "invalid_event"},
+		{name: "interior control", payload: `[{"event":"pu\u0000sh","status":"completed","conclusion":"failure"}]`, status: "invalid_event"},
+		{name: "punctuation event", payload: `[{"event":"pu.sh","status":"completed","conclusion":"failure"}]`, status: "invalid_event"},
+		{name: "leading underscore", payload: `[{"event":"_push","status":"completed","conclusion":"failure"}]`, status: "invalid_event"},
+		{name: "leading digit", payload: `[{"event":"2push","status":"completed","conclusion":"failure"}]`, status: "invalid_event"},
+		{name: "non-ASCII event", payload: `[{"event":"püsh","status":"completed","conclusion":"failure"}]`, status: "invalid_event"},
+		{name: "number event", payload: `[{"event":1,"status":"completed","conclusion":"success"}]`, status: "invalid_event"},
+		{name: "boolean event", payload: `[{"event":true,"status":"completed","conclusion":"success"}]`, status: "invalid_event"},
+		{name: "array event", payload: `[{"event":["push"],"status":"completed","conclusion":"success"}]`, status: "invalid_event"},
+		{name: "object event", payload: `[{"event":{"name":"push"},"status":"completed","conclusion":"success"}]`, status: "invalid_event"},
+		{name: "null row", payload: `[null]`, status: "invalid_event"},
+		{name: "missing-event failure before green", payload: `[{"status":"completed","conclusion":"failure"},{"event":"push","status":"completed","conclusion":"success"}]`, status: "invalid_event", appeared: true},
+		{name: "missing-event failure after green", payload: `[{"event":"push","status":"completed","conclusion":"success"},{"status":"completed","conclusion":"failure"}]`, status: "invalid_event", appeared: true},
 		{name: "push success", payload: `[{"event":"push","status":"completed","conclusion":"success"}]`, status: "green", appeared: true},
 		{name: "push pending", payload: `[{"event":"push","status":"in_progress","conclusion":""}]`, status: "pending", appeared: true},
 		{name: "push failure", payload: `[{"event":"push","status":"completed","conclusion":"failure"}]`, status: "failed", appeared: true},
@@ -135,7 +204,7 @@ func TestReleaseShipCIRequiresPushEvent(t *testing.T) {
 				return tc.code, tc.payload
 			})
 			defer restore()
-			opts := releaseShipOptions{workflow: "ci.yml", ciAppearTimeout: -time.Nanosecond}
+			opts := releaseShipOptions{workflow: "ci.yml", ciAppearTimeout: -time.Nanosecond, adoptAncestorCI: tc.status == "invalid_event"}
 			var source, appearance releaseShipResult
 			ci := releaseShipSourceCI(&source, t.TempDir(), opts, "source-sha")
 			if ci["status"] != tc.status || releaseShipPayloadOK(ci) != (tc.status == "green") {
@@ -143,6 +212,9 @@ func TestReleaseShipCIRequiresPushEvent(t *testing.T) {
 			}
 			if tc.status == "missing" && (ci["run"] != nil || !strings.Contains(stringFromAny(ci["reason"]), "push")) {
 				t.Fatalf("unqualified evidence must be omitted with a reason: %#v", ci)
+			}
+			if tc.status == "invalid_event" && (ci["source_sha"] != "source-sha" || ci["adopted_ancestor_sha"] != nil || !strings.Contains(stringFromAny(ci["reason"]), "event")) {
+				t.Fatalf("unreadable event escaped refusal or lost source context: %#v", ci)
 			}
 			waitReleaseShipCIAppears(&appearance, t.TempDir(), opts, "source-sha")
 			if calls != 2 || (len(appearance.Warnings) == 0) != tc.appeared {
@@ -157,7 +229,8 @@ func TestReleaseShipCIRequiresPushEvent(t *testing.T) {
 
 // fak-test:runtime fast est=20ms
 func TestReleaseShipAncestorCIRequiresPushEvent(t *testing.T) {
-	const untrusted = `[{"status":"completed","conclusion":"success","headSha":"untrusted"},{"event":null,"conclusion":"success","headSha":"untrusted"},{"event":"workflow_dispatch","conclusion":"success","headSha":"untrusted"},{"event":"pull_request","conclusion":"success","headSha":"untrusted"},{"event":"schedule","conclusion":"success","headSha":"untrusted"},{"event":"unknown","conclusion":"success","headSha":"untrusted"},{"event":[],"conclusion":"success","headSha":"untrusted"},{"event":{},"conclusion":"success","headSha":"untrusted"}]`
+	// Explicit non-push diagnostics remain ignorable; malformed events refuse separately.
+	const untrusted = `[{"event":"workflow_dispatch","conclusion":"success","headSha":"untrusted"},{"event":"pull_request","conclusion":"success","headSha":"untrusted"},{"event":"schedule","conclusion":"success","headSha":"untrusted"},{"event":"future_event","conclusion":"success","headSha":"untrusted"}]`
 	for _, tc := range []struct {
 		name, pushWorkflow string
 		adopt, reachable   bool
@@ -225,6 +298,88 @@ func TestReleaseShipAncestorCIRequiresPushEvent(t *testing.T) {
 			}
 			if !wantGreen && (ci["status"] != "missing" || ci["run"] != nil) {
 				t.Fatalf("untrusted source must remain missing: %#v", ci)
+			}
+		})
+	}
+}
+
+// An unreadable or inconsistent primary history cannot justify secondary adoption.
+// fak-test:runtime fast est=70ms
+func TestReleaseShipAncestorCIRequiresReadableWorkflowHistory(t *testing.T) {
+	const green = `[{"event":"push","status":"completed","conclusion":"success","headSha":"ancestor-sha"}]`
+	for _, tc := range []struct {
+		name, output, reason string
+		code                 int
+		adopt                bool
+	}{
+		{name: "query failed despite green output", code: 1, output: green, reason: "could not be queried"},
+		{name: "invalid JSON", output: "not-json", reason: "not valid JSON"},
+		{name: "null is not empty history", output: "null", reason: "not a JSON array"},
+		{name: "history row without event", output: `[{"status":"completed","conclusion":"failure","headSha":"red-sha"}]`, reason: "missing or malformed event"},
+		{name: "null history row", output: `[null]`, reason: "missing or malformed event"},
+		{name: "nonstring history event", output: `[{"event":[],"status":"completed","conclusion":"failure","headSha":"red-sha"}]`, reason: "missing or malformed event"},
+		{name: "history event with interior whitespace", output: `[{"event":"pu sh","status":"completed","conclusion":"failure","headSha":"red-sha"}]`, reason: "missing or malformed event"},
+		{name: "punctuation event after green", output: `[{"event":"push","status":"completed","conclusion":"success","headSha":"ancestor-sha"},{"event":"pu.sh","status":"completed","conclusion":"failure","headSha":"red-sha"}]`, reason: "missing or malformed event"},
+		{name: "missing-event failure before green", output: `[{"status":"completed","conclusion":"failure","headSha":"red-sha"},{"event":"push","status":"completed","conclusion":"success","headSha":"ancestor-sha"}]`, reason: "missing or malformed event"},
+		{name: "missing-event failure after green", output: `[{"event":"push","status":"completed","conclusion":"success","headSha":"ancestor-sha"},{"status":"completed","conclusion":"failure","headSha":"red-sha"}]`, reason: "missing or malformed event"},
+		{name: "success without status", output: `[{"event":"push","conclusion":"success","headSha":"ancestor-sha"}]`, reason: "incomplete or inconsistent"},
+		{name: "success with unknown status", output: `[{"event":"push","status":"unknown","conclusion":"success","headSha":"ancestor-sha"}]`, reason: "incomplete or inconsistent"},
+		{name: "success with nonstring status", output: `[{"event":"push","status":1,"conclusion":"success","headSha":"ancestor-sha"}]`, reason: "incomplete or inconsistent"},
+		{name: "pending success", output: `[{"event":"push","status":"in_progress","conclusion":"success","headSha":"ancestor-sha"}]`, reason: "incomplete or inconsistent"},
+		{name: "pending failure before green", output: `[{"event":"push","status":"queued","conclusion":"failure","headSha":"red-sha"},{"event":"push","status":"completed","conclusion":"success","headSha":"ancestor-sha"}]`, reason: "incomplete or inconsistent"},
+		{name: "pending failure after green", output: `[{"event":"push","status":"completed","conclusion":"success","headSha":"ancestor-sha"},{"event":"push","status":"queued","conclusion":"failure","headSha":"red-sha"}]`, reason: "incomplete or inconsistent"},
+		{name: "completed without conclusion", output: `[{"event":"push","status":"completed","headSha":"red-sha"}]`, reason: "incomplete or inconsistent"},
+		{name: "completed with nonstring conclusion", output: `[{"event":"push","status":"completed","conclusion":false,"headSha":"red-sha"}]`, reason: "incomplete or inconsistent"},
+		{name: "valid empty primary permits secondary", output: "[]", adopt: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			historyProbes, primaryQueries, secondaryQueries, ancestryProbes := 0, 0, 0, 0
+			restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
+				switch {
+				case name == "git" && sameArgs(args, "rev-parse", "--is-shallow-repository"):
+					historyProbes++
+					return 0, "false\n"
+				case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--branch", "main", "--status", "completed", "--event", "push", "--limit", "20", "--json", "databaseId,status,conclusion,url,headSha,updatedAt,event"):
+					primaryQueries++
+					return tc.code, tc.output
+				case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci-fast.yml", "--branch", "main", "--status", "completed", "--event", "push", "--limit", "20", "--json", "databaseId,status,conclusion,url,headSha,updatedAt,event"):
+					secondaryQueries++
+					return 0, green
+				case name == "git" && sameArgs(args, "merge-base", "--is-ancestor", "ancestor-sha", "source-sha"):
+					ancestryProbes++
+					return 0, ""
+				default:
+					t.Fatalf("unexpected command: %s %v", name, args)
+					return 127, "unexpected"
+				}
+			})
+			defer restore()
+			fallback := map[string]any{
+				"ok": false, "status": "pending", "source_sha": "source-sha",
+				"run": map[string]any{"headSha": "source-sha", "databaseId": 7},
+			}
+			var result releaseShipResult
+			ci := releaseShipAdoptAncestorCI(&result, t.TempDir(), releaseShipOptions{workflow: "ci.yml", trunk: "main"}, "source-sha", fallback)
+			wantSecondary := 0
+			if tc.adopt {
+				wantSecondary = 1
+			}
+			if historyProbes != 1 || primaryQueries != 1 || secondaryQueries != wantSecondary || ancestryProbes != wantSecondary {
+				t.Fatalf("queries/probes=%d/%d/%d/%d; want complete primary evidence before secondary=%d", historyProbes, primaryQueries, secondaryQueries, ancestryProbes, wantSecondary)
+			}
+			if fallback["ancestor_ci_blocker"] != nil || fallback["status"] != "pending" || releaseShipPayloadOK(fallback) {
+				t.Fatalf("original source evidence mutated: %#v", fallback)
+			}
+			if tc.adopt {
+				if !releaseShipPayloadOK(ci) || ci["status"] != "green" || ci["adopted_ancestor_sha"] != "ancestor-sha" || ci["workflow"] != "ci-fast.yml" || ci["ancestor_ci_blocker"] != nil {
+					t.Fatalf("valid empty primary lost secondary adoption: %#v", ci)
+				}
+				return
+			}
+			run, _ := ci["run"].(map[string]any)
+			blocker, _ := ci["ancestor_ci_blocker"].(map[string]any)
+			if releaseShipPayloadOK(ci) || ci["status"] != "pending" || ci["source_sha"] != "source-sha" || run["headSha"] != "source-sha" || run["databaseId"] != 7 || ci["adopted_ancestor_sha"] != nil || blocker["workflow"] != "ci.yml" || !strings.Contains(stringFromAny(blocker["reason"]), tc.reason) {
+				t.Fatalf("unreadable primary history lost its barrier or source evidence: %#v", ci)
 			}
 		})
 	}

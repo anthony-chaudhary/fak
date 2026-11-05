@@ -1326,6 +1326,27 @@ func releaseShipCommitStillOnTrunk(result *releaseShipResult, wt string, opts re
 	return code == 0
 }
 
+// An unreadable event cannot establish the absence of failed push runs.
+// Accept lowercase event tokens, including future names, but not malformed text.
+func releaseShipCIEventsReadable(rows []map[string]any) bool {
+	for _, row := range rows {
+		event, ok := row["event"].(string)
+		if !ok || event == "" {
+			return false
+		}
+		for i, ch := range event {
+			if ch >= 'a' && ch <= 'z' {
+				continue
+			}
+			if i > 0 && (ch >= '0' && ch <= '9' || ch == '_') {
+				continue
+			}
+			return false
+		}
+	}
+	return true
+}
+
 // releaseShipPushCIRuns keeps diagnostics from supplying release CI evidence,
 // even if a response violates the gh query's event filter or omits the field.
 func releaseShipPushCIRuns(rows []map[string]any) []map[string]any {
@@ -1376,6 +1397,12 @@ func releaseShipSourceCI(result *releaseShipResult, root string, opts releaseShi
 	if err := json.Unmarshal([]byte(out), &rows); err != nil {
 		return map[string]any{"ok": false, "status": "non_json", "tail": tail(out)}
 	}
+	if rows == nil {
+		return map[string]any{"ok": false, "status": "invalid_response", "source_sha": sha, "reason": "source CI response was not a JSON array"}
+	}
+	if !releaseShipCIEventsReadable(rows) {
+		return map[string]any{"ok": false, "status": "invalid_event", "source_sha": sha, "reason": "CI response contained a missing or malformed event"}
+	}
 	rows = releaseShipPushCIRuns(rows)
 	if len(rows) == 0 {
 		missing := map[string]any{"ok": false, "status": "missing", "source_sha": sha, "reason": "no push-triggered CI run found for source"}
@@ -1388,6 +1415,11 @@ func releaseShipSourceCI(result *releaseShipResult, root string, opts releaseShi
 	conclusion := strings.ToLower(stringFromAny(row["conclusion"]))
 	workflowStatus := strings.ToLower(stringFromAny(row["status"]))
 	state := releaseShipCIState(workflowStatus, conclusion)
+	// A terminal conclusion without completed status is contradictory evidence,
+	// not a green result or an inconclusive source that ancestry may replace.
+	if conclusion != "" && workflowStatus != "completed" {
+		state = "inconsistent"
+	}
 	if state == "green" {
 		return map[string]any{
 			"ok":              true,
@@ -1434,18 +1466,31 @@ func releaseShipAdoptAncestorCI(result *releaseShipResult, root string, opts rel
 	for _, wf := range workflows {
 		args := []string{"run", "list", "--workflow", wf, "--branch", opts.trunk, "--status", "completed", "--event", "push", "--limit", "20", "--json", "databaseId,status,conclusion,url,headSha,updatedAt,event"}
 		code, out := releaseShipCmd(result, root, "gh", args, nil, time.Minute)
+		// An unreadable workflow can hide failed ancestors; only a successful
+		// history query can justify trying the secondary workflow.
 		if code != 0 {
-			continue
+			return releaseShipAncestorCIBlocked(fallback, wf, nil, "completed workflow history could not be queried")
 		}
 		var rows []map[string]any
 		if err := json.Unmarshal([]byte(out), &rows); err != nil {
-			continue
+			return releaseShipAncestorCIBlocked(fallback, wf, nil, "completed workflow history was not valid JSON")
+		}
+		if rows == nil {
+			return releaseShipAncestorCIBlocked(fallback, wf, nil, "completed workflow history was not a JSON array")
+		}
+		if !releaseShipCIEventsReadable(rows) {
+			return releaseShipAncestorCIBlocked(fallback, wf, nil, "completed workflow history contained a missing or malformed event")
 		}
 		rows = releaseShipPushCIRuns(rows)
 		var failedAncestors []map[string]any
 		for _, row := range rows {
 			status := strings.ToLower(stringFromAny(row["status"]))
 			conc := strings.ToLower(stringFromAny(row["conclusion"]))
+			// Validate every push row before selecting green evidence: a
+			// contradictory pending status must not hide a failed conclusion.
+			if status != "completed" || conc == "" {
+				return releaseShipAncestorCIBlocked(fallback, wf, row, "completed workflow history contained an incomplete or inconsistent push run")
+			}
 			if releaseShipCIState(status, conc) != "failed" {
 				continue
 			}

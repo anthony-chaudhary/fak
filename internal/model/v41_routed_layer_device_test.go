@@ -373,6 +373,141 @@ func TestV41RoutedLayerFaultAttribution(t *testing.T) {
 	}
 }
 
+// v41PagedExpertWindowBytes measures one fixture expert's three-projection resident cost —
+// the unit the K-of-E window's budget is stated in. The fixture experts are uniform in shape,
+// so expert 0 prices them all.
+func v41PagedExpertWindowBytes(t *testing.T, m *Model) int64 {
+	t.Helper()
+	stem := "ffn.experts." + itoa(0)
+	var expert int64
+	for _, leaf := range []string{".w1.weight", ".w3.weight", ".w2.weight"} {
+		qt := m.kqw[layerName(0, stem+leaf)]
+		if qt == nil {
+			t.Fatalf("fixture expert 0 lacks %s", leaf)
+		}
+		expert += kQuantResidentBytes(qt)
+	}
+	if expert <= 0 {
+		t.Fatal("fixture expert reports no resident bytes")
+	}
+	return expert
+}
+
+// The rejection probe the port owes: force the K-of-E window BELOW the distinct-expert set a
+// walk touches and observe the miss-upload path selected — every tight step stays Handled on the
+// device (never a silent host fallback), misses page in through the ring's ordinary demand path,
+// and the ledger's hits/misses/waves agree with the ring's own counters.
+// fak-test:runtime medium est=5s lane=default
+func TestPagedExpertTightWindowPagesInNeverHostFallback(t *testing.T) {
+	t.Setenv(v41PagedExpertsEnv, "1")
+	m := v41IncrementalExpertFixture(t, true, false)
+	b := newV41RoutedLayerTestBackend()
+	s, err := m.NewBackendSessionChecked(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	fn := s.v41RoutedLayerFunc()
+	if fn == nil {
+		t.Fatal("batched routed layer unbound")
+	}
+	k := m.Cfg.NumExpertsPerTok
+	// Window holds exactly one step's picks: per-layer demand always fits (handled), but a walk
+	// touching more distinct experts than K cannot stay resident — later picks must miss.
+	s.ExpertRingBytes = v41PagedExpertWindowBytes(t, m) * int64(k)
+	x := make([]float32, m.Cfg.HiddenSize)
+	for i := range x {
+		x[i] = v41OracleBF16(float32(i%7-3) * .19)
+	}
+	step := func(round int) {
+		picks := make([]routePick, k)
+		for slot := range picks {
+			picks[slot] = routePick{expert: (round*k + slot) % m.Cfg.NumExperts, weight: .25 + float32(slot)/8}
+		}
+		sum, outcome, err := fn(0, picks, x)
+		if err != nil || outcome != v41RoutedExpertHandled || sum == nil {
+			t.Fatalf("round %d: outcome=%v err=%v — a tight window must page in, never decline to host", round, outcome, err)
+		}
+	}
+	step(0) // cold: every pick misses
+	step(1) // disjoint: full LRU wave
+	step(1) // repeat: every pick now a hit
+	step(0) // displaced again: full LRU wave
+	splits := PagedExpertSplitsFor(s)
+	if len(splits) != 1 {
+		t.Fatalf("ledger holds %d layers, want 1", len(splits))
+	}
+	sp := splits[0]
+	if sp.K != k {
+		t.Fatalf("window K=%d, want the %d-pick step", sp.K, k)
+	}
+	if sp.Steps != 4 || sp.Hits != k || sp.Misses != 3*k {
+		t.Fatalf("split steps=%d hits=%d misses=%d, want 4/%d/%d", sp.Steps, sp.Hits, sp.Misses, k, 3*k)
+	}
+	if sp.Demand != 6*k {
+		t.Fatalf("planned demand=%d, want %d (k + 2k + k + 2k)", sp.Demand, 6*k)
+	}
+	if sp.WaveEvictions != 2*k {
+		t.Fatalf("planned wave evictions=%d, want %d (one full window turned twice)", sp.WaveEvictions, 2*k)
+	}
+	st := s.ExpertRing()
+	if st.PageIns != 9*k || st.Evictions != 6*k || st.Hits != 3*k {
+		t.Fatalf("ring pageIns=%d evictions=%d hits=%d, want %d/%d/%d", st.PageIns, st.Evictions, st.Hits, 9*k, 6*k, 3*k)
+	}
+}
+
+// The parity the port owes: decided layers stay bit-identical to undecided ones. At fixed seed
+// and identical rings, the paged-window session's logits equal both the plain-ring session's and
+// the truly unpaged baseline's across prefill plus decode steps, while only the opted-in session
+// records a split.
+// fak-test:justify why=contract when=changed:internal/model/**
+// fak-test:runtime slow est=30s lane=default
+func TestPagedExpertWindowKeepsLogitsBitIdentical(t *testing.T) {
+	const steps = 3
+	build := func(ringBytes int64) *Session {
+		m := v41IncrementalExpertFixture(t, true, false)
+		b := newV41RoutedLayerTestBackend()
+		s, err := m.NewBackendSessionChecked(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.ExpertRingBytes = ringBytes
+		return s
+	}
+	probeModel := v41IncrementalExpertFixture(t, true, false)
+	ringBytes := v41PagedExpertWindowBytes(t, probeModel) * int64(probeModel.Cfg.NumExpertsPerTok+1)
+	windowed := build(ringBytes)
+	defer windowed.Close()
+	plain := build(ringBytes)
+	defer plain.Close()
+	unpaged := build(0) // the truly unpaged baseline: permanent residency
+	defer unpaged.Close()
+
+	t.Setenv(v41PagedExpertsEnv, "1")
+	prompt := []int{1, 2, 3}
+	got := v41RoutedLayerSteps(t, windowed, prompt, steps)
+	t.Setenv(v41PagedExpertsEnv, "")
+	wantRing := v41RoutedLayerSteps(t, plain, prompt, steps)
+	wantUnpaged := v41RoutedLayerSteps(t, unpaged, prompt, steps)
+	for i := range wantRing {
+		if !reflect.DeepEqual(got[i], wantRing[i]) {
+			t.Fatalf("window %d logits differ between the paged-window session and the plain-ring session", i)
+		}
+		if !reflect.DeepEqual(got[i], wantUnpaged[i]) {
+			t.Fatalf("window %d logits differ between the paged-window session and the unpaged baseline", i)
+		}
+	}
+	if len(PagedExpertSplitsFor(windowed)) == 0 {
+		t.Fatal("FAK_V41_PAGED_EXPERTS=1 decided no layer: the window never ran")
+	}
+	if got := PagedExpertSplitsFor(plain); len(got) != 0 {
+		t.Fatalf("unset env recorded splits %+v: the window is not opt-in", got)
+	}
+	if got := PagedExpertSplitsFor(unpaged); len(got) != 0 {
+		t.Fatalf("no-ring session recorded splits %+v", got)
+	}
+}
+
 // A ring that pins one expert at a time but not a whole layer declines the
 // batch before any device work, and the per-pick loop still runs.
 // fak-test:runtime medium est=5s lane=default

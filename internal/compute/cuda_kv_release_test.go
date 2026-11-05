@@ -77,6 +77,7 @@ func TestCUDAKVReleaseHostContract(t *testing.T) {
 	program.WriteString(cudaKVReleaseHostFixture)
 	wanted := map[string]bool{
 		"dslice": false, "cudaKV": false, "cudaKVReleaseOwners": false,
+		"cudaKVSnapshotCopy":               false,
 		"*cudaKV.retainReleaseOwnerLocked": false, "*cudaKV.Free": false,
 		"*cudaKV.ResidentBytes":    false,
 		"clearDeviceSliceMetadata": false, "releaseDeviceSlice": false, "releaseKVDeviceSlices": false,
@@ -188,6 +189,7 @@ const (F32 Dtype = iota; F16; BF16)
 func (d Dtype) Bytes() int { if d == F32 { return 4 }; return 2 }
 type KVConfig struct { NumLayers, NumKVHeads, HeadDim int }
 type cudaBackend struct{}
+type cudaBuf struct{ ptr unsafe.Pointer }
 
 var cudaMu sync.Mutex
 var sharedStop bool
@@ -275,6 +277,15 @@ func TestKVReleaseHost(t *testing.T) {
 			}
 		})
 	}
+	t.Run("snapshot-holder-only-owner", func(t *testing.T) {
+		reset()
+		k := &cudaKV{be: &cudaBackend{}, snapshotCopy: &cudaKVSnapshotCopy{host: []float32{1}}}
+		sharedStop = true
+		k.Free()
+		if !k.releaseRetained || cudaKVReleaseOwners != k || k.snapshotCopy == nil || invalidations != 0 || len(released) != 0 {
+			t.Fatal("terminal Free dropped a snapshot-only holder")
+		}
+	})
 	t.Run("healthy-release-order-and-metadata", func(t *testing.T) {
 		reset()
 		k := fresh(BF16)

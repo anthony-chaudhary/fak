@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -675,9 +676,10 @@ func TestServeCPUOffloadSizingDenseBoundNoopWithoutStreamKnob(t *testing.T) {
 
 // On a host budget the full routed charge cannot fit, the sizing helper must select the streamed
 // plan and return a plan whose host total is STRICTLY below avail — the bounded resident expert set
-// + bounded dense working set, not the full routed charge. The plan must be byte-identical to the
-// one the load-arm decision path (serveStreamedCPUOffloadPlanForAperture) produces, so the two
-// cannot disagree.
+// + bounded dense working set, not the full routed charge. The plan is the WEIGHTS-ONLY view of the
+// one measurement the load-arm decision path (serveStreamedCPUOffloadCorePlan) shares: the load
+// plan is that weights plan plus its auto-sized context rows, nothing else, so the two cannot
+// disagree about the expert/dense accounting.
 func TestServeCPUOffloadSizingStreamedPlanBoundsPlanTotal(t *testing.T) {
 	t.Setenv("FAK_STREAM_Q4K", "1")
 	ws := serveStreamedSynthWeightSource(t)
@@ -707,17 +709,26 @@ func TestServeCPUOffloadSizingStreamedPlanBoundsPlanTotal(t *testing.T) {
 		t.Fatalf("streamed sizing host total %d is not below the full routed charge %d; the sizing arm still charges the full expert set", plan.HostTotal(), resident.HostTotal())
 	}
 
-	// The load-arm decision path produces the SAME plan shape from the same measurement.
-	loadPlan, loadStreamed, err := serveStreamedCPUOffloadPlanForAperture(ws, nil, 1, 0, hostFit, false, false)
+	// The load-arm plan is the sizing WEIGHTS plan plus its auto-sized context rows: one
+	// derivation, so the two arms cannot disagree about the expert/dense accounting. The sizing
+	// plan omits the context rows by contract (weights-only), so compare against the load plan
+	// with exactly those rows removed -- the same auto-sizer, the same weights, the same budget.
+	loadPlan, loadStreamed, err := serveStreamedCPUOffloadPlanForAperture(ws, nil, 1, 0, hostFit, hostFit, false, false)
 	if err != nil {
 		t.Fatalf("load-arm streamed plan: %v", err)
 	}
 	if !loadStreamed {
 		t.Fatal("load arm did not select the streamed plan on the same budget; sizing and load disagree")
 	}
-	if plan.HostTotal() != loadPlan.HostTotal() || plan.DeviceTotal() != loadPlan.DeviceTotal() {
-		t.Fatalf("sizing plan host/device = %d/%d, load plan = %d/%d; the two arms disagree",
-			plan.HostTotal(), plan.DeviceTotal(), loadPlan.HostTotal(), loadPlan.DeviceTotal())
+	cfg, err := ws.File.Config()
+	if err != nil {
+		t.Fatalf("Config: %v", err)
+	}
+	csc := cfg.ContextSizeConfigWithPrecision(serveKVPrecision())
+	tokens := compute.LargestFittingContextTokens(csc, plan, hostFit.avail())
+	want := append(append(compute.MemoryPlan(nil), plan...), csc.PerContextMemoryPlan(tokens)...)
+	if !reflect.DeepEqual(loadPlan, want) {
+		t.Fatalf("load plan = %+v, want the sizing weights plan plus its auto-sized context rows %+v; the two arms disagree", loadPlan, want)
 	}
 
 	// A budget the full routed charge DOES fit keeps the historical resident-arm sizing: the helper

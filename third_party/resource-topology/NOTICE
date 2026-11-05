@@ -69,3 +69,21 @@ are not live resource collection, capacity launches or hardware qualifications.
 Exact selected source headers and Apache-2.0 root licenses were inspected on
 2026-11-02; root NOTICE returned 404 for both repositories at the cited pins.
 The existing LICENSE contains the applicable Apache License 2.0.
+
+Live role resource snapshot admission
+
+DeepInfer
+https://github.com/deepseek-ai/DeepInfer
+deep_cluster/hardware/device.py:56-126
+deep_cluster/hardware/nvidia.py:18-79
+deep_cluster/topology/bind.py:42-71
+at 9bd9cf243fc53ef9afbf8f04d391d989117d6ab9
+Adapted GPU discovery reader semantics — device enumeration with lifecycle and
+health state, observed free-memory reporting, and topology binding checks —
+into the existing capability, memory and membership facts of the observed
+runtime topology validator and its runtime-inventory command. No vendor
+submodule copy: nothing under deep_cluster is vendored, re-implemented as a
+second reader, or pulled in as a dependency; the Go side reads only supplied
+documents. These software fixtures are not live resource collection or
+hardware qualifications. The applicable Apache License 2.0 is reproduced in
+LICENSE.

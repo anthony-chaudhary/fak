@@ -303,6 +303,109 @@ func TestExpertRingDefaultOffIsUnchanged(t *testing.T) {
 	}
 }
 
+// --- paged-expert K-of-E window (borrow-port oss-port-strata-paged-experts) --------
+//
+// The window makes the ring's byte-budgeted working set an explicit object: auto-K sizing from
+// the declared budget, a planned LRU wave per layer entry, and an observed hit/miss split. The
+// three witnesses below cover the pure planner, the split against a LIVE ring, and (in
+// v41_routed_layer_device_test.go) the end-to-end probe: a tight window pages misses in through
+// the ordinary demand path — never a silent host fallback — while decided layers stay
+// bit-identical to undecided ones.
+
+// TestPagedExpertWindowAutoK pins the auto-K sizing law: the window holds as many whole experts
+// as the budget buys, floored and clamped to the expert count; anything that cannot be sized
+// honestly answers 0.
+func TestPagedExpertWindowAutoK(t *testing.T) {
+	cases := []struct {
+		name string
+		w    PagedExpertWindow
+		want int
+	}{
+		{"zero window", PagedExpertWindow{}, 0},
+		{"no experts", PagedExpertWindow{Experts: 0, AvgExpertBytes: 100, Budget: 1000}, 0},
+		{"unmeasured cost", PagedExpertWindow{Experts: 8, AvgExpertBytes: 0, Budget: 1000}, 0},
+		{"negative budget", PagedExpertWindow{Experts: 8, AvgExpertBytes: 100, Budget: -5}, 0},
+		{"below one expert", PagedExpertWindow{Experts: 8, AvgExpertBytes: 1000, Budget: 999}, 0},
+		{"exact multiple", PagedExpertWindow{Experts: 8, AvgExpertBytes: 1000, Budget: 5000}, 5},
+		{"floor", PagedExpertWindow{Experts: 8, AvgExpertBytes: 1000, Budget: 5999}, 5},
+		{"clamped to experts", PagedExpertWindow{Experts: 8, AvgExpertBytes: 1000, Budget: 100000}, 8},
+	}
+	for _, c := range cases {
+		if got := c.w.K(); got != c.want {
+			t.Errorf("%s: K=%d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+// TestPagedExpertWavePlan pins the LRU wave law: the wave is the excess of the step's distinct
+// expert demand over the window, and a demand that fits plans no wave.
+func TestPagedExpertWavePlan(t *testing.T) {
+	cases := []struct {
+		demand, k, want int
+	}{
+		{0, 0, 0},
+		{4, 4, 0},
+		{4, 5, 0},
+		{10, 10, 0},
+		{6, 4, 2},
+		{3, 0, 3},
+	}
+	for _, c := range cases {
+		if got := PagedExpertWavePlan(c.demand, c.k); got != c.want {
+			t.Errorf("demand=%d k=%d: wave=%d, want %d", c.demand, c.k, got, c.want)
+		}
+	}
+}
+
+// TestPagedExpertHitMissSplitVsLiveRing drives the decide step against a REAL ring: expert 0 is
+// made resident through the ordinary demand path, then two steps are decided — one mixing a
+// resident pick with a cold one inside a fitting demand, one pushing the demand past the window.
+// The ledger must agree with the ring's actual residency on every axis.
+func TestPagedExpertHitMissSplitVsLiveRing(t *testing.T) {
+	const H, E = 256, 6
+	m := expertRingTestModel(t, H, E)
+	x := expertRingTestInput(H)
+	perWeight := expertRingWeightBytes(t, m)
+	s := expertRingSession(m, perWeight*6) // window of two whole experts
+	defer s.Close()
+	ResetPagedExpertSplits(s)
+
+	triple := func(e int) [3]string {
+		return [3]string{
+			expertName(0, e, "gate_proj.weight"),
+			expertName(0, e, "up_proj.weight"),
+			expertName(0, e, "down_proj.weight"),
+		}
+	}
+	// Expert 0 becomes resident through the ordinary demand path.
+	expertSwiGLU(m, 0, 0, x, sessionQ4KKernel{s: s})
+	if !s.expertRing.isResident("q4k:" + expertName(0, 0, "gate_proj.weight")) {
+		t.Fatal("expert 0 did not take ring residency under its budget")
+	}
+
+	// Step 1: resident expert 0 plus cold expert 1. Demand {0,1} fits the two-expert
+	// window: no wave; one hit, one miss.
+	s.pagedExpertDecide(0, []routePick{{expert: 0, weight: .5}, {expert: 1, weight: .5}}, s.expertRing, [][3]string{triple(0), triple(1)})
+	// Step 2: two cold experts. Demand {0,2,3} outgrows the window: a one-expert wave.
+	s.pagedExpertDecide(0, []routePick{{expert: 2, weight: .5}, {expert: 3, weight: .5}}, s.expertRing, [][3]string{triple(2), triple(3)})
+
+	got := PagedExpertSplitsFor(s)
+	if len(got) != 1 {
+		t.Fatalf("ledger holds %d layers, want 1", len(got))
+	}
+	want := PagedExpertSplit{Layer: 0, K: 2, Steps: 2, Demand: 5, Hits: 1, Misses: 3, WaveEvictions: 1}
+	if got[0] != want {
+		t.Fatalf("split=%+v, want %+v", got[0], want)
+	}
+	// The ledger is opt-in bookkeeping: a fresh session has none, and so does nil.
+	if other := PagedExpertSplitsFor(expertRingSession(m, 0)); len(other) != 0 {
+		t.Fatalf("fresh session reports splits %+v", other)
+	}
+	if PagedExpertSplitsFor(nil) != nil {
+		t.Fatal("nil session reported splits")
+	}
+}
+
 // --- dtype-based routed-expert admission (fak#13360) --------------------------------
 //
 // The routed-expert HAL route (expertSwiGLUHAL) used to be gated ONLY by the explicit

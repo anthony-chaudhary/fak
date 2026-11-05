@@ -158,3 +158,69 @@ func TestScoreWithTierWeightedOverlapComposes(t *testing.T) {
 		t.Fatalf("score must be pure: %g then %g", a, b)
 	}
 }
+
+// TestTierOverlapCreditsMixedTierChainPerBlock pins the per-block mixed-tier chain
+// credit (llm-d tier-weighted longest-consecutive-prefix rule): each held block takes
+// the MAX weight of the tiers holding it, and scoring stops at the first break. With
+// the standing weights (device 1.0 / host 0.75 / shared 0.5 / disk 0.25):
+//   - a device,device,host,miss chain scores exactly 1 + 1 + 0.75 = 2.75;
+//   - a chain starting with a miss scores exactly 0.
+func TestTierOverlapCreditsMixedTierChainPerBlock(t *testing.T) {
+	w := DefaultTierWeights()
+
+	// device, device, host, miss -> 1.0 + 1.0 + 0.75, then the miss breaks the chain.
+	chain := []BlockTiers{
+		{TierDevice},
+		{TierDevice},
+		{TierHost},
+		{}, // miss: first break stops the scan
+	}
+	const want = 1.0 + 1.0 + 0.75
+	if got := MixedTierChainCredit(w, chain); math.Abs(got-want) > 1e-9 {
+		t.Fatalf("mixed-tier chain must score 1+1+0.75: got %g want %g", got, want)
+	}
+
+	// A miss at block 0 breaks the chain immediately: 0, even though later blocks are
+	// held — nothing before the break is credited.
+	brokenFirst := []BlockTiers{
+		{},           // miss at block 0
+		{TierDevice}, // held, but unreachable behind the break
+		{TierDevice},
+	}
+	if got := MixedTierChainCredit(w, brokenFirst); got != 0 {
+		t.Fatalf("chain starting with a miss must score 0: got %g", got)
+	}
+
+	// A block held on several tiers takes its fastest tier ONCE — never the sum of its
+	// tiers, so multi-tier residency can't double-count one block.
+	dual := []BlockTiers{{TierDevice, TierHost}}
+	if got := MixedTierChainCredit(w, dual); math.Abs(got-1.0) > 1e-9 {
+		t.Fatalf("multi-tier-held block must take its best tier once: got %g want 1.0", got)
+	}
+
+	// Blocks past a mid-chain break contribute nothing: only the pre-break block counts.
+	pastBreak := []BlockTiers{{TierDisk}, {}, {TierDevice}}
+	if got := MixedTierChainCredit(w, pastBreak); math.Abs(got-0.25) > 1e-9 {
+		t.Fatalf("only the pre-break block is credited: got %g want 0.25", got)
+	}
+
+	// Fail closed: an invalid weight table earns zero credit.
+	bad := TierWeights{Device: -1, Host: 0.75, Shared: 0.5, Disk: 0.25}
+	if got := MixedTierChainCredit(bad, chain); got != 0 {
+		t.Fatalf("bad weight table must fail closed to 0: got %g", got)
+	}
+
+	// Unknown tier tags are ignored inside a held block; a block held ONLY by unknown
+	// tags is a break, so it ends the chain at 0.
+	if got := MixedTierChainCredit(w, []BlockTiers{{TierHost, OverlapTier(99)}, {TierHost}}); math.Abs(got-1.5) > 1e-9 {
+		t.Fatalf("unknown tags are ignored inside a held block: got %g want 1.5", got)
+	}
+	if got := MixedTierChainCredit(w, []BlockTiers{{OverlapTier(99)}, {TierDevice}}); got != 0 {
+		t.Fatalf("block held only by unknown tiers must break the chain: got %g", got)
+	}
+
+	// An empty chain earns nothing.
+	if got := MixedTierChainCredit(w, nil); got != 0 {
+		t.Fatalf("empty chain must score 0: got %g", got)
+	}
+}

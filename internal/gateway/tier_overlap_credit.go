@@ -16,7 +16,9 @@ package gateway
 // request AND the memory tier each held run sits in, it sums a tier-weighted credit
 // (higher credit = better placement). It REPLACES the raw block-count in the score
 // (it does not add on top), so folding it in never double-counts the same overlap.
-// Deterministic and wall-clock-free — no network, no GPU, no time source.
+// MixedTierChainCredit adds the per-block view of the same rule: a cached prefix
+// credited block by block at each block's best holding tier, stopping at the first
+// break. Deterministic and wall-clock-free — no network, no GPU, no time source.
 
 import "math"
 
@@ -137,4 +139,53 @@ func ScoreWithTierWeightedOverlap(credit float64, load int) float64 {
 		load = 0
 	}
 	return credit / float64(1+load)
+}
+
+// BlockTiers is the set of memory tiers holding one prefix block. An empty set means
+// no known tier holds the block: a break in the consecutive cached chain.
+type BlockTiers []OverlapTier
+
+// MixedTierChainCredit credits a request's cached prefix block by block under the
+// tier-weighted longest-consecutive-prefix rule borrowed from llm-d's KV indexer
+// scorer (ADAPT, Apache-2.0): walk the prefix from block 0, and each held block takes
+// the MAX weight of the tiers holding it — a block resident on several tiers is worth
+// its fastest tier once, never the sum of its tiers. Scoring stops at the first
+// break: a block no known tier holds ends the chain, and every later block
+// contributes nothing even if held.
+//
+// This complements TierWeightedOverlapCredit, which prices whole contiguous runs at a
+// single tier: where a run spans device-then-host, that term credits both blocks at
+// one weight, while this term credits each block at its own best tier. Properties the
+// witness pins:
+//   - Per-block max: a device,device,host,miss chain scores 1.0 + 1.0 + 0.75 with the
+//     standing weights; a chain starting with a miss scores 0.
+//   - Breaks are sticky: blocks past the first break contribute nothing.
+//   - Unknown tier tags are ignored inside a held block; a block held ONLY by unknown
+//     tags is a break.
+//   - Fail closed: an invalid weight table earns zero credit.
+//
+// Deterministic and wall-clock-free — no network, no GPU, no time source.
+func MixedTierChainCredit(w TierWeights, chain []BlockTiers) float64 {
+	if !w.valid() {
+		return 0
+	}
+	total := 0.0
+	for _, tiers := range chain {
+		best := 0.0
+		held := false
+		for _, t := range tiers {
+			wt, ok := w.weightFor(t)
+			if !ok {
+				continue
+			}
+			if !held || wt > best {
+				best, held = wt, true
+			}
+		}
+		if !held {
+			break // first break: nothing known holds this block; stop crediting
+		}
+		total += best
+	}
+	return total
 }

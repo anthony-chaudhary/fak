@@ -3,11 +3,12 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
+	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"reflect"
-	"strings"
-	"testing"
 )
 
 // fak-test:runtime fast est=2ms
@@ -1011,4 +1012,191 @@ func TestOfferedToolsSnapshotAndEmptyExtension(t *testing.T) {
 	if offeredToolsFor(ctx, nil).allows("restore") {
 		t.Fatal("inherited extension widened empty request")
 	}
+}
+
+// fak-test:runtime fast est=5ms
+func TestAgentTruncatedToolCallSignal(t *testing.T) {
+	offered := NewOfferedTools([]ToolDef{
+		{Function: ToolDefFunction{Name: "Bash"}},
+		{Function: ToolDefFunction{Name: "Read"}},
+	})
+
+	t.Run("unrepaired_truncated_call_yields_signal_not_final_answer", func(t *testing.T) {
+		comp := &Completion{
+			FinishReason: "length",
+			Message: Message{
+				Role:    RoleAssistant,
+				Content: "I'll list the files:\n<|python_tag|>{\"name\": \"Bash\", \"arguments\": {\"command\": \"ls -la\"",
+			},
+			Usage: Usage{CompletionTokens: 256},
+		}
+		sig, err := TruncatedToolCall(comp)
+		if !errors.Is(err, ErrTruncatedToolCall) {
+			t.Fatalf("err = %v, want ErrTruncatedToolCall", err)
+		}
+		if sig.ToolName != "Bash" || sig.FinishReason != "length" || sig.OutputTokens != 256 {
+			t.Fatalf("signal = %+v, want Bash/length/256", sig)
+		}
+		if !strings.Contains(sig.Fragment, `"command"`) {
+			t.Fatalf("fragment %q lost the partial arguments", sig.Fragment)
+		}
+		fb := sig.Feedback()
+		if fb.Role != RoleUser || !strings.Contains(fb.Content, "Split the call") {
+			t.Fatalf("feedback = %+v, want user-role split-the-call instruction", fb)
+		}
+		// Not a final answer: the lift path fabricates no call from the husk.
+		lifted := LiftTextToolCalls(comp.Message, offered)
+		if len(lifted.ToolCalls) != 0 {
+			t.Fatalf("lift fabricated %d calls from a truncated block", len(lifted.ToolCalls))
+		}
+	})
+
+	t.Run("repairable_call_is_unaffected", func(t *testing.T) {
+		// Closed payload with a trailing comma: RepairClosedJSON fixes it, the
+		// existing lift path takes it, and no truncation signal fires.
+		comp := &Completion{
+			FinishReason: "stop",
+			Message: Message{
+				Role:    RoleAssistant,
+				Content: "<|python_tag|>{\"name\": \"Bash\", \"arguments\": {\"command\": \"ls\",}}<|eom_id|>",
+			},
+		}
+		lifted := LiftTextToolCalls(comp.Message, offered)
+		if len(lifted.ToolCalls) != 1 || lifted.ToolCalls[0].Function.Name != "Bash" {
+			t.Fatalf("repairable call did not lift: %+v", lifted)
+		}
+		if sig, err := TruncatedToolCall(comp); err != nil || sig.ToolName != "" {
+			t.Fatalf("repairable call signaled (%+v, %v)", sig, err)
+		}
+	})
+
+	t.Run("closed_payload_under_length_finish_is_not_truncation", func(t *testing.T) {
+		// The provider stopped exactly at a closed block boundary: repairable,
+		// so no signal even under an output-limit finish.
+		comp := &Completion{
+			FinishReason: "length",
+			Message: Message{
+				Role:    RoleAssistant,
+				Content: "<|python_tag|>{\"name\": \"Bash\", \"arguments\": {\"command\": \"ls\"}}<|eom_id|>",
+			},
+		}
+		if sig, err := TruncatedToolCall(comp); err != nil || sig.ToolName != "" {
+			t.Fatalf("closed payload signaled (%+v, %v)", sig, err)
+		}
+	})
+
+	t.Run("non_output_limit_finish_does_not_signal", func(t *testing.T) {
+		for _, finish := range []string{"stop", "tool_calls", ""} {
+			comp := &Completion{
+				FinishReason: finish,
+				Message:      Message{Role: RoleAssistant, Content: `<tool_response>{"name": "Bash", "arguments": {"command": "ls`},
+			}
+			if sig, err := TruncatedToolCall(comp); err != nil || sig.ToolName != "" {
+				t.Fatalf("finish=%q signaled (%+v, %v)", finish, sig, err)
+			}
+		}
+	})
+
+	t.Run("content_filter_finish_signals", func(t *testing.T) {
+		comp := &Completion{
+			FinishReason: "Content_Filter", // case/space-insensitive normalization
+			Message:      Message{Role: RoleAssistant, Content: `Calling now: <tool_call>{"name": "Read", "arguments": {"path": "/etc/ho`},
+		}
+		sig, err := TruncatedToolCall(comp)
+		if !errors.Is(err, ErrTruncatedToolCall) {
+			t.Fatalf("err = %v, want ErrTruncatedToolCall", err)
+		}
+		if sig.ToolName != "Read" || sig.FinishReason != "content_filter" {
+			t.Fatalf("signal = %+v, want Read/content_filter", sig)
+		}
+	})
+
+	t.Run("structured_calls_win", func(t *testing.T) {
+		comp := &Completion{
+			FinishReason: "length",
+			Message: Message{
+				Role:      RoleAssistant,
+				ToolCalls: []ToolCall{{ID: "c1", Type: "function", Function: Func{Name: "Bash", Arguments: `{"command":"ls"}`}}},
+			},
+		}
+		if sig, err := TruncatedToolCall(comp); err != nil || sig.ToolName != "" {
+			t.Fatalf("structured completion signaled (%+v, %v)", sig, err)
+		}
+	})
+
+	t.Run("qwen_antl_truncated", func(t *testing.T) {
+		comp := &Completion{
+			FinishReason: "length",
+			Message:      Message{Role: RoleAssistant, Content: `<function=Bash>\n<parameter=command>ls -la`},
+		}
+		sig, err := TruncatedToolCall(comp)
+		if !errors.Is(err, ErrTruncatedToolCall) {
+			t.Fatalf("err = %v, want ErrTruncatedToolCall", err)
+		}
+		if sig.ToolName != "Bash" {
+			t.Fatalf("signal = %+v, want tool name Bash", sig)
+		}
+	})
+
+	t.Run("bare_json_truncated", func(t *testing.T) {
+		comp := &Completion{
+			FinishReason: "length",
+			Message:      Message{Role: RoleAssistant, Content: `{"name": "Bash", "arguments": {"command": "ls`},
+		}
+		sig, err := TruncatedToolCall(comp)
+		if !errors.Is(err, ErrTruncatedToolCall) {
+			t.Fatalf("err = %v, want ErrTruncatedToolCall", err)
+		}
+		if sig.ToolName != "Bash" {
+			t.Fatalf("signal = %+v, want tool name Bash", sig)
+		}
+	})
+
+	t.Run("unclosed_fence", func(t *testing.T) {
+		comp := &Completion{
+			FinishReason: "length",
+			Message:      Message{Role: RoleAssistant, Content: "Calling the tool:\n```json\n{\"name\": \"Bash\", \"arguments\": {\"command\": \"ls\""},
+		}
+		sig, err := TruncatedToolCall(comp)
+		if !errors.Is(err, ErrTruncatedToolCall) {
+			t.Fatalf("err = %v, want ErrTruncatedToolCall", err)
+		}
+		if sig.ToolName != "Bash" {
+			t.Fatalf("signal = %+v, want tool name Bash", sig)
+		}
+	})
+
+	t.Run("closed_non_tool_json_is_not_truncation", func(t *testing.T) {
+		for _, content := range []string{`{"foo": 1}`, `{"name": "x"}`} {
+			comp := &Completion{FinishReason: "length", Message: Message{Role: RoleAssistant, Content: content}}
+			if sig, err := TruncatedToolCall(comp); err != nil || sig.ToolName != "" {
+				t.Fatalf("content %q signaled (%+v, %v)", content, sig, err)
+			}
+		}
+	})
+
+	t.Run("fragment_capped_at_fragmentCap", func(t *testing.T) {
+		long := strings.Repeat("a", fragmentCap+64)
+		comp := &Completion{
+			FinishReason: "length",
+			Message:      Message{Role: RoleAssistant, Content: `{"name": "Bash", "arguments": {"command": "` + long},
+		}
+		sig, err := TruncatedToolCall(comp)
+		if !errors.Is(err, ErrTruncatedToolCall) {
+			t.Fatalf("err = %v, want ErrTruncatedToolCall", err)
+		}
+		if len(sig.Fragment) != fragmentCap {
+			t.Fatalf("fragment length = %d, want %d", len(sig.Fragment), fragmentCap)
+		}
+	})
+
+	t.Run("nil_and_empty_completions", func(t *testing.T) {
+		if sig, err := TruncatedToolCall(nil); err != nil || sig.ToolName != "" {
+			t.Fatalf("nil completion signaled (%+v, %v)", sig, err)
+		}
+		comp := &Completion{FinishReason: "length", Message: Message{Role: RoleAssistant}}
+		if sig, err := TruncatedToolCall(comp); err != nil || sig.ToolName != "" {
+			t.Fatalf("empty content signaled (%+v, %v)", sig, err)
+		}
+	})
 }

@@ -91,8 +91,14 @@ type q4kLoadOptions struct {
 	streamedDenseQ4K     bool
 	streamedDenseBytes   int64
 	streamedDenseBounded bool
-	retainMTP            bool
-	prismGDNVGrouped     bool // checkpoint metadata, not a caller option
+	// streamedDensePinned names the eligible streamed-dense tensors the executing backend's kernel
+	// preflight requires DEVICE-RESIDENT (WithStreamedDenseDeviceResident). A pinned tensor is
+	// excluded from EVERY mirror of the streamed-dense lazy route - the estimate fold, the loader
+	// dispatch, and the host-load-peak mirrors - so it keeps its device charge instead of folding
+	// into the bounded host working set. Nil (the default) pins nothing.
+	streamedDensePinned func(canon string) bool
+	retainMTP           bool
+	prismGDNVGrouped    bool // checkpoint metadata, not a caller option
 	// nativeRowsOff disables the fak#13567 native-row route (qwen35NativeRowResident).
 	nativeRowsOff bool
 	// nativeSSMOutOff disables the tiled native out_proj route (qwen35TiledOutProjResident).
@@ -284,6 +290,26 @@ func WithStreamedDenseQ4KWorkingSet(hostBytes int64) Q4KLoadOption {
 		o.streamedDenseBounded = true
 		o.streamedDenseBytes = hostBytes
 	}
+}
+
+// WithStreamedDenseDeviceResident declares which eligible streamed-dense tensors the executing
+// backend's kernel preflight requires to stay DEVICE-RESIDENT, by canonical name. The bounded
+// streamed-dense policy otherwise folds every eligible dense k-quant into one bounded HOST working
+// set - but a backend whose sequence-prefill kernel validates its operands for a live default-device
+// allocation (the qwen35-hybrid CUDA/Vulkan paths) fails closed at warmup on any operand the HAL
+// spilled to managed memory under VRAM pressure. Pinned tensors are excluded from EVERY mirror of
+// the lazy route (the estimate fold, the loader dispatch, the host-load-peak mirrors), so they keep
+// their device charge in both the plan and the load and the fit guard judges what the kernel
+// actually needs. The predicate receives the canonical name AFTER the qwen35 source chain, exactly
+// as the eligibility gates do; a nil or absent option pins nothing. It is orthogonal to the
+// working-set bound: it shrinks the streamed set, it never changes the bound.
+func WithStreamedDenseDeviceResident(pinned func(canon string) bool) Q4KLoadOption {
+	return func(o *q4kLoadOptions) { o.streamedDensePinned = pinned }
+}
+
+// streamedDensePins is the nil-safe read of the device-residency pin for one canonical tensor.
+func (o q4kLoadOptions) streamedDensePins(canon string) bool {
+	return o.streamedDensePinned != nil && o.streamedDensePinned(canon)
 }
 
 // probeQ4KLoadOptions applies opts to the zero value without the config-dependent validation, for
@@ -1501,7 +1527,8 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 		tw.pending = []pendingTensor{{q4kEmbed: true, name: canon, shape: shape, raw: raw}}
 		return tw
 	}
-	if loadOpts.streamedDenseQ4K && info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, canon) {
+	if loadOpts.streamedDenseQ4K && !loadOpts.streamedDensePins(canon) &&
+		info.Type == TensorQ4_K && model.ResidentQ4KEligible(cfg, canon) {
 		return s.lazyDenseQ4KTensorWork(info, canon, tw.tickBytes)
 	}
 	// #13201: the bounded dense route must cover the dense k-quant TYPES the pinned artifact
@@ -1512,9 +1539,11 @@ func (s *WeightSource) computeQ4KTensorWork(info TensorInfo, cfg model.Config, w
 	// can mirror it exactly and the two cannot disagree. Q4_K is excluded because the branch above
 	// already owns it. The route is also gated on the residency options (denseKQuantRetained): a
 	// type the caller asked to convert to Q8 must fall through to that conversion below rather
-	// than be held lazily in the raw k-quant store its backend cannot execute.
-	if loadOpts.streamedDenseQ4K && info.Type != TensorQ4_K && denseKQuantRetained(loadOpts, info.Type) &&
-		lazyDenseKQuantBoundedEligible(cfg, info.Type, canon) {
+	// than be held lazily in the raw k-quant store its backend cannot execute. A tensor the
+	// executing backend's kernel preflight requires device-resident (streamedDensePins) is excluded
+	// from BOTH lazy branches: it falls through to the resident/expansion charge below instead.
+	if loadOpts.streamedDenseQ4K && !loadOpts.streamedDensePins(canon) && info.Type != TensorQ4_K &&
+		denseKQuantRetained(loadOpts, info.Type) && lazyDenseKQuantBoundedEligible(cfg, info.Type, canon) {
 		return s.lazyKQuantTensorWork(info, canon, tw.tickBytes)
 	}
 	shape, raw, ok := s.shapeAndBytesOrFail(info, &tw)

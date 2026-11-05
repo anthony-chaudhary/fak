@@ -19,6 +19,7 @@ const (
 	envNativeDeterministic    = "FAK_NATIVE_DETERMINISTIC"
 	envNativeKVAutosize       = "FAK_NATIVE_KV_AUTOSIZE"
 	envNativeKVElasticBlocks  = "FAK_NATIVE_KV_ELASTIC_BLOCKS"
+	envNativePrefillInterval  = "FAK_NATIVE_PREFILL_INTERVAL"
 )
 
 func nativeEnvOn(name string) bool {
@@ -76,6 +77,12 @@ func applyNativeServeKnobs(sched *NativeScheduler, blockTokens int) {
 		if l, err := newNativeElasticLedger(n, blockTokens); err == nil {
 			sched.elastic = l
 		}
+	}
+	// FAK_NATIVE_PREFILL_INTERVAL holds prefill to every Nth engine step so decode
+	// runs in longer uninterrupted stretches (vLLM local prefill cadence port).
+	// Unset or <=1 keeps today's mixed-step order bit-for-bit.
+	if n := nativeEnvPositiveInt(envNativePrefillInterval); n > 1 {
+		sched.SetPrefillInterval(n)
 	}
 }
 

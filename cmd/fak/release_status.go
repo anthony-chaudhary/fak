@@ -1155,20 +1155,6 @@ func releaseStatusDirtyRequiresCleanBeforeStatus(dirty map[string]any) bool {
 	return releaseStatusInt(dirty["release_relevant_count"]) > 0
 }
 
-func releaseStatusFirstArrayObject(v any) map[string]any {
-	switch x := v.(type) {
-	case []any:
-		if len(x) > 0 {
-			return releaseStatusMap(x[0])
-		}
-	case map[string]any:
-		if arr, ok := x["value"].([]any); ok && len(arr) > 0 {
-			return releaseStatusMap(arr[0])
-		}
-	}
-	return nil
-}
-
 func releaseStatusMap(v any) map[string]any {
 	if m, ok := v.(map[string]any); ok {
 		return m

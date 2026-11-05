@@ -62,6 +62,64 @@ func runtimeTopologyFixture(prefill, decode, decodePP int) RuntimeTopology {
 	return RuntimeTopology{Schema: RuntimeTopologySchema, ID: "fixture", Configured: RuntimeTopologyConfigured{Groups: groups, Ranks: ranks}, Observed: RuntimeTopologyObserved{At: "2026-10-26T10:00:00Z", TTLSeconds: 60, Epoch: 7, Provenance: "synthetic-test-observation", Visibility: visible, Devices: devices, Links: links}, Supported: support, Available: available}
 }
 
+// runtimeTopologyTwoRankGroup upgrades one TP1/EP1 group of a fixture into a
+// two-rank group along the named dimension ("tp" or "ep"): the second rank
+// keeps the stage layer cut, owns disjoint KV, sits on its own observed active
+// healthy device with explicit support and availability, and carries the
+// required same-stage link.
+func runtimeTopologyTwoRankGroup(top *RuntimeTopology, groupID, dim string) {
+	var g *RuntimeTopologyGroup
+	for i := range top.Configured.Groups {
+		if top.Configured.Groups[i].ID == groupID {
+			g = &top.Configured.Groups[i]
+		}
+	}
+	if g == nil {
+		panic("unknown group " + groupID)
+	}
+	var first *RuntimeTopologyRank
+	for i := range top.Configured.Ranks {
+		if top.Configured.Ranks[i].GroupID == groupID {
+			first = &top.Configured.Ranks[i]
+		}
+	}
+	if first == nil {
+		panic("group " + groupID + " has no rank")
+	}
+	secondID := groupID + "-r1-s0"
+	deviceID := "gpu-" + secondID
+	second := RuntimeTopologyRank{
+		ID:                secondID,
+		Incarnation:       "rank-inc-1",
+		GroupID:           groupID,
+		Role:              g.Role,
+		DeviceID:          deviceID,
+		DeviceIncarnation: "device-inc-1",
+		PPStage:           0,
+		LayerStart:        first.LayerStart,
+		LayerEnd:          first.LayerEnd,
+		KVOwnership:       []string{"kv-" + secondID},
+		Commitment:        Resources{ResidentWeightBytes: 40, KVResidentBytes: 5},
+	}
+	switch dim {
+	case "tp":
+		g.TP = 2
+		second.TPRank = 1
+	case "ep":
+		g.EP = 2
+		second.EPRank = 1
+	default:
+		panic("unknown dimension " + dim)
+	}
+	g.RankIDs = append(g.RankIDs, secondID)
+	top.Configured.Ranks = append(top.Configured.Ranks, second)
+	top.Observed.Devices = append(top.Observed.Devices, RuntimeObservedDevice{ID: deviceID, Incarnation: "device-inc-1", Lifecycle: "active", Health: "healthy", CapacityBytes: 80, FreeBytes: 75, FreeBytesKnown: true})
+	top.Supported = append(top.Supported, RuntimeTopologySupport{DeviceID: deviceID, Incarnation: "device-inc-1", State: "supported"})
+	top.Available = append(top.Available, RuntimeTopologyAvailable{DeviceID: deviceID, Incarnation: "device-inc-1", State: "available"})
+	top.Observed.Visibility = append(top.Observed.Visibility, deviceID)
+	top.Observed.Links = append(top.Observed.Links, RuntimeObservedLink{FromDeviceID: first.DeviceID, FromDeviceIncarnation: first.DeviceIncarnation, ToDeviceID: deviceID, ToDeviceIncarnation: "device-inc-1", Kind: "pcie", State: "available", BytesPerSecond: 1e9})
+}
+
 // fak-test:runtime fast est=20ms lane=default
 func TestRuntimeTopologyObservedAvailability(t *testing.T) {
 	now := time.Date(2026, 10, 26, 10, 0, 30, 0, time.UTC)
@@ -91,6 +149,91 @@ func TestRuntimeTopologyObservedAvailability(t *testing.T) {
 		top.Configured.Ranks[0].Role = RuntimeRoleBoth
 		if _, err := ValidateRuntimeTopology(top, now); err != nil {
 			t.Fatal(err)
+		}
+	})
+
+	t.Run("tp2_group_accepted", func(t *testing.T) {
+		top := runtimeTopologyFixture(1, 1, 1)
+		runtimeTopologyTwoRankGroup(&top, "prefill-0", "tp")
+		g := top.Configured.Groups[0]
+		if g.TP*g.PP*g.EP != 2 || len(g.RankIDs) != 2 {
+			t.Fatalf("tp2 group rank count drifted: %+v", g)
+		}
+		receipt, err := ValidateRuntimeTopology(top, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := RuntimeTopologyEligibility{
+			Schema:           "fak-runtime-topology-eligibility/1",
+			TopologyID:       "fixture",
+			ObservationEpoch: 7,
+			Configured:       []string{"decode-0-r0-s0", "prefill-0-r0-s0", "prefill-0-r1-s0"},
+			Observed:         []string{"decode-0-r0-s0", "prefill-0-r0-s0", "prefill-0-r1-s0"},
+			Supported:        []string{"decode-0-r0-s0", "prefill-0-r0-s0", "prefill-0-r1-s0"},
+			Available:        []string{"decode-0-r0-s0", "prefill-0-r0-s0", "prefill-0-r1-s0"},
+		}
+		if !reflect.DeepEqual(receipt, want) {
+			t.Fatalf("tp2 receipt diverged: got=%+v want=%+v", receipt, want)
+		}
+	})
+
+	t.Run("ep2_group_accepted", func(t *testing.T) {
+		top := runtimeTopologyFixture(1, 1, 1)
+		runtimeTopologyTwoRankGroup(&top, "decode-0", "ep")
+		var g RuntimeTopologyGroup
+		for _, candidate := range top.Configured.Groups {
+			if candidate.ID == "decode-0" {
+				g = candidate
+			}
+		}
+		if g.EP*g.TP*g.PP != 2 || len(g.RankIDs) != 2 {
+			t.Fatalf("ep2 group rank count drifted: %+v", g)
+		}
+		receipt, err := ValidateRuntimeTopology(top, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := RuntimeTopologyEligibility{
+			Schema:           "fak-runtime-topology-eligibility/1",
+			TopologyID:       "fixture",
+			ObservationEpoch: 7,
+			Configured:       []string{"decode-0-r0-s0", "decode-0-r1-s0", "prefill-0-r0-s0"},
+			Observed:         []string{"decode-0-r0-s0", "decode-0-r1-s0", "prefill-0-r0-s0"},
+			Supported:        []string{"decode-0-r0-s0", "decode-0-r1-s0", "prefill-0-r0-s0"},
+			Available:        []string{"decode-0-r0-s0", "decode-0-r1-s0", "prefill-0-r0-s0"},
+		}
+		if !reflect.DeepEqual(receipt, want) {
+			t.Fatalf("ep2 receipt diverged: got=%+v want=%+v", receipt, want)
+		}
+	})
+
+	t.Run("heterogeneous_free_bytes_do_not_poison_eligibility", func(t *testing.T) {
+		base := runtimeTopologyFixture(1, 1, 1)
+		runtimeTopologyTwoRankGroup(&base, "prefill-0", "tp")
+		want, err := ValidateRuntimeTopology(base, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		top := base
+		// Heterogeneous observed free bytes across the two ranks of one group:
+		// each rank's 45-byte commitment fits its own device, but the summed
+		// 90-byte commitment exceeds either device's free bytes, so a validator
+		// that summed commitments across ranks would poison eligibility.
+		for i := range top.Observed.Devices {
+			switch top.Observed.Devices[i].ID {
+			case "gpu-prefill-0-r0-s0":
+				top.Observed.Devices[i].FreeBytes = 46
+			case "gpu-prefill-0-r1-s0":
+				top.Observed.Devices[i].CapacityBytes = 1200
+				top.Observed.Devices[i].FreeBytes = 1000
+			}
+		}
+		got, err := ValidateRuntimeTopology(top, now)
+		if err != nil {
+			t.Fatalf("heterogeneous free bytes poisoned eligibility: %v", err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("heterogeneous receipt diverged: got=%+v want=%+v", got, want)
 		}
 	})
 

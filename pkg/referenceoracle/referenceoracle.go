@@ -98,12 +98,17 @@ type Shard struct {
 // ToRev while the captured bytes stayed identical: Rev keeps naming the
 // capture identity, and ToRev is the live revision independently witnessed to
 // carry the same checkpoint. Matched lists which pin facts were re-verified
-// against ToRev (for example "shard_count", "shard1_sha256", "total_bytes").
+// against ToRev (for example "shard_count", "all_shard_sha256",
+// "total_bytes"). Shards, when populated, is the per-shard digest table
+// re-verified against ToRev; it must cover every shard named by the artifact's
+// shard_count so an independent verifier can confirm the checkpoint's byte
+// identity from the document alone.
 type Rebind struct {
 	FromRev      string   `json:"from_rev"`
 	ToRev        string   `json:"to_rev"`
 	WitnessedUTC string   `json:"witnessed_utc"`
 	Matched      []string `json:"matched,omitempty"`
+	Shards       []Shard  `json:"shards,omitempty"`
 }
 
 // Prompt is one prompt's exact input and the reference's greedy continuation.
@@ -200,6 +205,21 @@ func invalid(format string, args ...any) error {
 	return fmt.Errorf("%w: "+format, append([]any{ErrInvalid}, args...)...)
 }
 
+// isSHA256 reports whether d is a lowercase 64-character hex SHA-256 digest,
+// the form every digest in this schema is recorded in.
+func isSHA256(d string) bool {
+	if len(d) != 64 {
+		return false
+	}
+	for i := 0; i < len(d); i++ {
+		c := d[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 // Validate checks the structural contract every consumer relies on: a named
 // reference and artifact, at least one prompt with input and greedy ids, top-5
 // rows that are finite, descending and led by the greedy id, and trace refs that
@@ -220,6 +240,27 @@ func (o Oracle) Validate() error {
 		}
 		if rb.ToRev == rb.FromRev {
 			return invalid("artifact.rebind: to_rev %q equals from_rev", rb.ToRev)
+		}
+		if len(rb.Shards) > 0 {
+			if o.Artifact.ShardCount <= 0 || len(rb.Shards) != o.Artifact.ShardCount {
+				return invalid("artifact.rebind.shards: %d entries, artifact shard_count is %d", len(rb.Shards), o.Artifact.ShardCount)
+			}
+			seen := map[string]bool{}
+			for i, s := range rb.Shards {
+				if s.Name == "" {
+					return invalid("artifact.rebind.shards[%d]: name is required", i)
+				}
+				if seen[s.Name] {
+					return invalid("artifact.rebind.shards[%d]: duplicate shard %q", i, s.Name)
+				}
+				seen[s.Name] = true
+				if !isSHA256(s.SHA256) {
+					return invalid("artifact.rebind.shards[%d] (%s): sha256 %q is not a lowercase 64-character hex digest", i, s.Name, s.SHA256)
+				}
+				if s.SizeBytes < 0 {
+					return invalid("artifact.rebind.shards[%d] (%s): size_bytes %d is negative", i, s.Name, s.SizeBytes)
+				}
+			}
 		}
 	}
 	if len(o.Prompts) == 0 {
