@@ -338,47 +338,56 @@ func (m *Model) prepareV41RoleAttention(l int, plan V41AttentionPlan, x []float3
 	}
 	var mix v41MHCMix
 	var collapsed []float32
-	if resident != nil {
+	switch {
+	case resident != nil:
 		rows, rerr := resident.beginLayer(l, hcItersOrDefault(cfg), hcEpsOrDefault(cfg), eps)
 		if rerr != nil {
 			return v41RoleAttentionContinuation{}, rerr
 		}
 		collapsed = rows[0]
-	} else {
-		// Role steps require the full flattened mHC geometry, so the
-		// historical pre-collapse host normalization has no consumer.
-		var input []float32
-		if mhcFlat {
-			width, ok := checkedMulInt(4, H)
-			if !ok || len(streams) != 4 {
-				return v41RoleAttentionContinuation{}, v41StageErr(v41StageMHC, l, errV41ProjectionResult)
-			}
-			input = make([]float32, 0, width)
-			for _, stream := range streams {
-				if len(stream) != H {
+	default:
+		// sglang pre-mix hand-off: the previous role layer's FFN window may
+		// have published this layer's attention mix stats and pre-collapse
+		// against exactly this panel and cursor. Consume them instead of
+		// recomputing: byte-identical coefficients, earlier schedule.
+		if stagedMix, stagedCollapsed, ok := scratch.mhcCarry.takeStagedAttention(l); ok {
+			mix, collapsed = stagedMix, stagedCollapsed
+		} else {
+			// Role steps require the full flattened mHC geometry, so the
+			// historical pre-collapse host normalization has no consumer.
+			var input []float32
+			if mhcFlat {
+				width, ok := checkedMulInt(4, H)
+				if !ok || len(streams) != 4 {
 					return v41RoleAttentionContinuation{}, v41StageErr(v41StageMHC, l, errV41ProjectionResult)
 				}
-				input = append(input, stream...)
+				input = make([]float32, 0, width)
+				for _, stream := range streams {
+					if len(stream) != H {
+						return v41RoleAttentionContinuation{}, v41StageErr(v41StageMHC, l, errV41ProjectionResult)
+					}
+					input = append(input, stream...)
+				}
 			}
-		}
-		projectMHC := m.v41MHCProjectorObserved(l, H, eps, mhcFlat, mhcTransposed, scratch, scratch.v41StepMHCObserver())
-		mixes, err := projectMHC(input)
-		if err != nil {
-			return v41RoleAttentionContinuation{}, err
-		}
-		mix, err = v41MHCSplitOnObserved(mhcDevice, l, mixes, mixScale, mixBase, 4, hcItersOrDefault(cfg), hcEpsOrDefault(cfg), scratch.v41StepMHCObserver())
-		if err != nil {
-			return v41RoleAttentionContinuation{}, err
-		}
-		if mhcDevice != nil {
-			collapsed, err = v41MHCPreBF16OnObserved(mhcDevice, l, streams, scratch.mhcCarry.pre[0], scratch.v41StepMHCObserver())
+			projectMHC := m.v41MHCProjectorObserved(l, H, eps, mhcFlat, mhcTransposed, scratch, scratch.v41StepMHCObserver())
+			mixes, err := projectMHC(input)
 			if err != nil {
 				return v41RoleAttentionContinuation{}, err
 			}
-		} else {
-			collapsed, err = v41MHCPreObserved(streams, scratch.mhcCarry.pre[0], scratch.v41StepMHCObserver())
+			mix, err = v41MHCSplitOnObserved(mhcDevice, l, mixes, mixScale, mixBase, 4, hcItersOrDefault(cfg), hcEpsOrDefault(cfg), scratch.v41StepMHCObserver())
 			if err != nil {
-				return v41RoleAttentionContinuation{}, v41StageErr(v41StageMHC, l, err)
+				return v41RoleAttentionContinuation{}, err
+			}
+			if mhcDevice != nil {
+				collapsed, err = v41MHCPreBF16OnObserved(mhcDevice, l, streams, scratch.mhcCarry.pre[0], scratch.v41StepMHCObserver())
+				if err != nil {
+					return v41RoleAttentionContinuation{}, err
+				}
+			} else {
+				collapsed, err = v41MHCPreObserved(streams, scratch.mhcCarry.pre[0], scratch.v41StepMHCObserver())
+				if err != nil {
+					return v41RoleAttentionContinuation{}, v41StageErr(v41StageMHC, l, err)
+				}
 			}
 		}
 	}
@@ -729,7 +738,10 @@ func (m *Model) prepareV41LayerStepRoleFinishInto(l, pos int, x []float32, strea
 		copy(x, next[0])
 		scratch.mhcCarry.pre[0] = ffnMix.pre
 		scratch.mhcCarry.nextLayer++
-		return nil
+		// sglang pre-mix hand-off: stage layer l+1's attention mix stats in
+		// this layer's FFN window tail; the next role layer consumes them at
+		// its head. Self-skips when the schedule cannot consume the result.
+		return m.v41MHCStageNextAttention(l, l+1, streams, scratch)
 	}
 	return work, nil
 }
