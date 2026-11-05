@@ -2,6 +2,7 @@ package alloc
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"sync/atomic"
 )
@@ -231,6 +232,15 @@ func planSlabClasses(cfg SlabConfig) ([]slabClassPlan, error) {
 		}
 	}
 
+	for i, w := range weights {
+		if w < 0 || math.IsNaN(w) || math.IsInf(w, 0) {
+			return nil, fmt.Errorf("slab class %d weight must be finite and nonnegative, got %g", deduped[i], w)
+		}
+	}
+	if totalWeight <= 0 || math.IsInf(totalWeight, 0) {
+		return nil, fmt.Errorf("total slab class weight must be finite and positive, got %g", totalWeight)
+	}
+
 	minUsefulSlots := uint64(16)
 	if cfg.MaxMemoryBytes < 128*1024*1024 {
 		minUsefulSlots = 2
@@ -260,6 +270,10 @@ func planSlabClasses(cfg SlabConfig) ([]slabClassPlan, error) {
 				totalWeight += w
 			}
 		}
+	}
+
+	if totalWeight <= 0 {
+		return nil, fmt.Errorf("retained slab class weight must be positive")
 	}
 
 	plans := make([]slabClassPlan, len(deduped))
