@@ -119,7 +119,14 @@ func (r *ConnRegistry) Register(transport, remoteAddr, device, deviceIP string) 
 func (r *ConnRegistry) Deregister(id uint64) {
 	r.mu.Lock()
 	cm, ok := r.conns[id]
+	var recv, sent int64
 	if ok {
+		// Transfer under the same lock used to sum active and retired counts.
+		recv = cm.BytesRecv()
+		sent = cm.BytesSent()
+		r.totalBytesRecv.Add(recv)
+		r.totalBytesSent.Add(sent)
+		r.totalRequests.Add(cm.Requests())
 		delete(r.conns, id)
 	}
 	r.conns, r.connsPeak = compactMap(r.conns, r.connsPeak)
@@ -128,12 +135,6 @@ func (r *ConnRegistry) Deregister(id uint64) {
 		r.ClientStatsReg.Remove(id)
 	}
 	if ok {
-		recv := cm.BytesRecv()
-		sent := cm.BytesSent()
-		r.totalBytesRecv.Add(recv)
-		r.totalBytesSent.Add(sent)
-		r.totalRequests.Add(cm.Requests())
-
 		if cm.Device != "" {
 			r.nicMu.Lock()
 			ns, exists := r.nicTotals[cm.Device]
@@ -168,8 +169,8 @@ func (r *ConnRegistry) ActiveCount() int {
 
 // TotalBytesRecv returns cumulative + active wire bytes received.
 func (r *ConnRegistry) TotalBytesRecv() int64 {
-	total := r.totalBytesRecv.Load()
 	r.mu.Lock()
+	total := r.totalBytesRecv.Load()
 	for _, cm := range r.conns {
 		total += cm.BytesRecv()
 	}
@@ -179,8 +180,8 @@ func (r *ConnRegistry) TotalBytesRecv() int64 {
 
 // TotalBytesSent returns cumulative + active wire bytes sent.
 func (r *ConnRegistry) TotalBytesSent() int64 {
-	total := r.totalBytesSent.Load()
 	r.mu.Lock()
+	total := r.totalBytesSent.Load()
 	for _, cm := range r.conns {
 		total += cm.BytesSent()
 	}
@@ -190,8 +191,8 @@ func (r *ConnRegistry) TotalBytesSent() int64 {
 
 // TotalRequests returns cumulative + active request count.
 func (r *ConnRegistry) TotalRequests() int64 {
-	total := r.totalRequests.Load()
 	r.mu.Lock()
+	total := r.totalRequests.Load()
 	for _, cm := range r.conns {
 		total += cm.Requests()
 	}
@@ -237,13 +238,13 @@ func (r *ConnRegistry) NICIPs() map[string]string {
 
 // ResetAll zeroes all wire counters and resets the stats epoch (called on FLUSH).
 func (r *ConnRegistry) ResetAll() {
+	r.mu.Lock()
 	r.totalBytesRecv.Store(0)
 	r.totalBytesSent.Store(0)
 	r.totalRequests.Store(0)
 	now := time.Now().UnixNano()
 	r.lastFlushedAt.Store(now)
 	r.statsEpoch.Store(now)
-	r.mu.Lock()
 	fresh := make(map[uint64]*ConnMetrics, len(r.conns))
 	for k, cm := range r.conns {
 		cm.Reset()
