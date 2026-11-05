@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
+	"github.com/anthony-chaudhary/fak/internal/strictjson"
 )
 
 const Schema = "fak-provider-cost-ledger/1"
@@ -104,9 +105,7 @@ func Parse(b []byte) ([]Row, error) {
 			continue
 		}
 		var r Row
-		d := json.NewDecoder(bytes.NewReader(s.Bytes()))
-		d.DisallowUnknownFields()
-		if err := d.Decode(&r); err != nil {
+		if err := strictjson.Decode(s.Bytes(), &r, "trailing data after provider cost row"); err != nil {
 			return nil, fmt.Errorf("line %d: %w", line, err)
 		}
 		if err := Validate(r); err != nil {
