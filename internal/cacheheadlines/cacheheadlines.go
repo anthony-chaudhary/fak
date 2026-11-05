@@ -11,12 +11,13 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/anthony-chaudhary/fak/pkg/sysproc"
 )
 
 // DefaultFix is the canonical remediation message for a cache headline violation.
@@ -212,7 +213,7 @@ func AuditTree(root string) ([]Finding, error) {
 	if err == nil {
 		root = absRoot
 	}
-	cmd := exec.Command("git", "ls-files", "-z", "*.md", "*.html", "*.txt")
+	cmd := sysproc.Command("git", "ls-files", "-z", "*.md", "*.html", "*.txt")
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
@@ -248,7 +249,7 @@ type stagedLine struct {
 var hunkRE = regexp.MustCompile(`^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@`)
 
 func stagedAddedLines(root string, relpath string) ([]stagedLine, error) {
-	cmd := exec.Command("git", "diff", "--cached", "--unified=0", "--no-ext-diff", "--", relpath)
+	cmd := sysproc.Command("git", "diff", "--cached", "--unified=0", "--no-ext-diff", "--", relpath)
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
@@ -293,7 +294,7 @@ func AuditStaged(root string) ([]Finding, error) {
 	if err == nil {
 		root = absRoot
 	}
-	cmd := exec.Command("git", "diff", "--cached", "--name-only", "--diff-filter=AM", "-z")
+	cmd := sysproc.Command("git", "diff", "--cached", "--name-only", "--diff-filter=AM", "-z")
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
