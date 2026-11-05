@@ -173,9 +173,8 @@ func windowMatches(window []line, want []string) bool {
 
 // reindent rewrites newStr so its whole block is shifted from the model's own
 // base indentation to base. Relative indentation WITHIN newStr is preserved, and
-// each new line keeps the terminator of the corresponding old line when there is
-// one (so the replacement cannot drop a newline that separated the block from the
-// following content).
+// each new line keeps its explicit terminator. An unterminated final replacement
+// line inherits the old block's final terminator, preserving its trailing boundary.
 func reindent(oldBlock []line, newLines []line, base string) string {
 	if len(newLines) == 0 {
 		return ""
@@ -190,8 +189,8 @@ func reindent(oldBlock []line, newLines []line, base string) string {
 		if l.end != "" {
 			b.WriteString(l.end)
 		} else if i == len(newLines)-1 && len(oldBlock) > 0 {
-			// An expanded replacement still needs the old block's trailing boundary.
-			b.WriteString(oldBlock[min(i, len(oldBlock)-1)].end)
+			// The replacement needs the whole old block's trailing boundary.
+			b.WriteString(oldBlock[len(oldBlock)-1].end)
 		} else if i < len(newLines)-1 {
 			b.WriteString("\n")
 		}
