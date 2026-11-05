@@ -79,6 +79,14 @@ func Grade(m Manifest) Report {
 		if r.Model == "" || r.Account == "" || r.Revision == "" || r.DurationSeconds <= 0 || len(r.TurnaroundMS) < 2 || r.Witness == "" || (r.Quality != "pass" && r.Quality != "fail") {
 			return Report{Schema: Schema, Verdict: "NOT_YET", Reason: "run evidence incomplete or turnaround undersampled"}
 		}
+		if !finite(r.DurationSeconds) || r.ToolCalls < 0 {
+			return Report{Schema: Schema, Verdict: "NOT_YET", Reason: "run measurements must be finite and non-negative"}
+		}
+		for _, ms := range r.TurnaroundMS {
+			if !finite(ms) || ms < 0 {
+				return Report{Schema: Schema, Verdict: "NOT_YET", Reason: "run measurements must be finite and non-negative"}
+			}
+		}
 		if byClass[class] == nil {
 			byClass[class] = map[string]Run{}
 		}
@@ -111,7 +119,13 @@ func Grade(m Manifest) Report {
 			return Report{Schema: Schema, Verdict: "NOT_YET", Reason: "arms are not pinned to identical model, account, and revision"}
 		}
 		fa, sa := arm(fast), arm(standard)
+		if !finite(fa.ToolCallsPerHour) || !finite(sa.ToolCallsPerHour) {
+			return Report{Schema: Schema, Verdict: "NOT_YET", Reason: "derived tool throughput is non-finite"}
+		}
 		c := Comparison{WorkClass: class, Fast: fa, Standard: sa, P50Delta: delta(sa.P50MS, fa.P50MS), P90Delta: delta(sa.P90MS, fa.P90MS), ToolDelta: delta(sa.ToolCallsPerHour, fa.ToolCallsPerHour)}
+		if !finite(c.P50Delta) || !finite(c.P90Delta) || !finite(c.ToolDelta) {
+			return Report{Schema: Schema, Verdict: "NOT_YET", Reason: "derived comparison delta is non-finite"}
+		}
 		switch {
 		case fa.Quality != "pass" || sa.Quality != "pass":
 			c.Verdict, c.Reason = "NOT_YET", "quality witness failed"
@@ -151,6 +165,8 @@ func delta(base, candidate float64) float64 {
 	}
 	return (candidate - base) * 100 / base
 }
+func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
+
 func Validate(m Manifest) error {
 	if r := Grade(m); r.Verdict == "NOT_YET" && len(r.Comparisons) == 0 {
 		return fmt.Errorf("%s", r.Reason)
