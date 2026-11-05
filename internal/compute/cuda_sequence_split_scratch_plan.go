@@ -28,6 +28,8 @@ func cudaSequenceSplitScratchBytes(weightElements, activationElements uint64) (c
 func planCUDASequenceSplitScratch(req Qwen35SequencePrefillRequest, arm CUDAQ4KPrefillArm, armErr error) (cudaSequenceSplitScratchPlan, error) {
 	var plan cudaSequenceSplitScratchPlan
 	tokens := len(req.TokenIDs)
+	// Preserve the existing sequence-loan envelope. IQ4_XS also uses split
+	// halves at 32..127 tokens, but those panels retain per-operation scratch.
 	if tokens < 128 {
 		return plan, nil
 	}
@@ -53,7 +55,7 @@ func planCUDASequenceSplitScratch(req Qwen35SequencePrefillRequest, arm CUDAQ4KP
 	}
 	generic := func(weight Tensor) error {
 		switch weight.Dtype {
-		case Q8_0, Q2_K:
+		case Q8_0, Q2_K, IQ4_XS:
 			return add(weight)
 		case Q4_K:
 			// An invalid Q4 selection is irrelevant unless this request will
@@ -70,8 +72,8 @@ func planCUDASequenceSplitScratch(req Qwen35SequencePrefillRequest, arm CUDAQ4KP
 				return fmt.Errorf("unsupported CUDA Q4_K prefill arm %q", arm)
 			}
 		default:
-			// only Q8_0/Q2_K/Q4_K reach the compensated split dispatch; every other dtype
-			// contributes no split-half bytes
+			// Only Q8_0/Q2_K/Q4_K/IQ4_XS reach the compensated split dispatch;
+			// every other dtype contributes no split-half bytes.
 			return nil
 		}
 	}
