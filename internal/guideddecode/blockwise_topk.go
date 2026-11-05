@@ -300,7 +300,10 @@ func BlockwiseTopKReference(starts []BlockwiseStartSlot, ends []int, endScores [
 					best = j
 				}
 			}
-			kept[i], kept[best] = kept[best], kept[i]
+			// Move the selected pair without reversing any displaced ties.
+			selected := kept[best]
+			copy(kept[i+1:best+1], kept[i:best])
+			kept[i] = selected
 		}
 		if len(kept) > ks {
 			kept = kept[:ks]
