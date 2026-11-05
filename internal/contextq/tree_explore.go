@@ -317,9 +317,10 @@ func treePage[T any](all []T, off, lim int) ([]T, int, error) {
 	if off < 0 || lim <= 0 || off > len(all) {
 		return nil, 0, treeRefuse(TreeReasonPlanInvalid, "invalid offset or limit")
 	}
-	end := off + lim
-	if end > len(all) {
-		end = len(all)
+	end := len(all)
+	// Compare with the remaining length before adding so a large limit cannot overflow.
+	if lim < len(all)-off {
+		end = off + lim
 	}
 	return all[off:end], end, nil
 }

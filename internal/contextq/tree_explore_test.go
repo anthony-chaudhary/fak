@@ -99,3 +99,45 @@ func TestTreeExploreRefusals(t *testing.T) {
 		t.Fatalf("want cancellation, got %v", err)
 	}
 }
+
+// fak-test:runtime fast est=1ms lane=default
+func TestTreeExploreLargePageLimit(t *testing.T) {
+	const body = `{"c":3,"a":1,"b":2}`
+	maxInt := int(^uint(0) >> 1)
+	limits := TreeLimits{MaxSourceBytes: 128, MaxOutputBytes: 2048, MaxDepth: 2, MaxWidth: 3, MaxPaths: 1, MaxNodes: 4, MaxWorkUnits: 128, MaxLeafBytes: 8}
+	for _, op := range []TreeOperation{TreeKeys, TreeChildren} {
+		for _, tc := range []struct {
+			name   string
+			offset int
+		}{
+			{"start", 0},
+			{"middle", 1},
+			{"end", 3},
+		} {
+			t.Run(string(op)+"/"+tc.name, func(t *testing.T) {
+				resolver, source := testSource([]byte(body))
+				plan := TreePlan{Operation: op, Path: "/", Offset: tc.offset, Limit: 3}
+				want, err := ExploreTree(context.Background(), resolver, source, plan, limits)
+				if err != nil {
+					t.Fatal(err)
+				}
+				plan.Limit = maxInt
+				got, err := ExploreTree(context.Background(), resolver, source, plan, limits)
+				if err != nil {
+					t.Fatal(err)
+				}
+				// The requested limit remains part of the plan identity; only the
+				// returned page is bounded by the three available entries.
+				want.Plan = plan
+				canonical, err := json.Marshal(plan)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want.PlanDigest = digestBytes(canonical)
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("large limit changed the bounded page: got %+v, want %+v", got, want)
+				}
+			})
+		}
+	}
+}
