@@ -7,6 +7,9 @@ layout(local_size_x = 128) in;
 const int LANES = 128;
 const int CHUNK = 2048;
 const int NONE = 0x7fffffff;
+// A lane owns at most this many rows of a chunk; caching them in registers
+// keeps non-resident rows out of the denominator/output recomputes.
+const int REGS = (CHUNK + LANES - 1) / LANES;
 
 layout(std430, binding = 0) readonly buffer QBuf { float Q[]; };
 layout(std430, binding = 1) readonly buffer KVBuf { float KV[]; };
@@ -94,13 +97,20 @@ void main() {
     uint outBase = head * uint(pc.headDim);
     for (int d = lane; d < pc.headDim; d += LANES) Out[outBase + uint(d)] = 0.0;
     bool resident = pc.selectedRows <= CHUNK;
+    float reg[REGS];
 
     // Plain and compressed intentionally have different finite-extreme behavior.
     float seed = pc.mode == 0 ? uintBitsToFloat(0xff800000u) : uintBitsToFloat(0xff7fffffu);
     float maximum = pc.hasSink != 0 ? Sink[head] : seed;
     for (int base = 0; base < pc.selectedRows; base += CHUNK) {
         int count = pc.selectedRows - base < CHUNK ? pc.selectedRows - base : CHUNK;
-        for (int i = lane; i < count; i += LANES) sScore[i] = scaledScore(head, base + i);
+        int k = 0;
+        for (int i = lane; i < count; i += LANES) {
+            float score = scaledScore(head, base + i);
+            sScore[i] = score;
+            reg[k] = score;
+            ++k;
+        }
         sync();
         if (lane == 0) {
             for (int i = 0; i < count; ++i) {
@@ -134,12 +144,14 @@ void main() {
 
     for (int base = 0; base < pc.selectedRows; base += CHUNK) {
         int count = pc.selectedRows - base < CHUNK ? pc.selectedRows - base : CHUNK;
+        int k = 0;
         for (int i = lane; i < count; i += LANES) {
             // A finite extreme subtraction may become -Inf; exp(-Inf)=0 is valid.
-            float score = resident ? sScore[i] : scaledScore(head, base + i);
+            float score = resident ? sScore[i] : reg[k];
             precise float shift = score - maximum;
             precise float term = exp(shift);
             sWeight[i] = term;
+            ++k;
         }
         sync();
         if (lane == 0) {
@@ -166,17 +178,19 @@ void main() {
 
     for (int base = 0; base < pc.selectedRows; base += CHUNK) {
         int count = pc.selectedRows - base < CHUNK ? pc.selectedRows - base : CHUNK;
+        int k = 0;
         for (int i = lane; i < count; i += LANES) {
             float term;
             if (resident) {
                 term = sWeight[i];
             } else {
-                float score = scaledScore(head, base + i);
+                float score = reg[k];
                 precise float shift = score - maximum;
                 term = exp(shift);
             }
             precise float weight = term / denominator;
             sWeight[i] = weight;
+            ++k;
         }
         sync();
         if (lane == 0) {

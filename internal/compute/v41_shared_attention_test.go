@@ -231,6 +231,8 @@ func TestV41SharedAttentionShaderSourceContract(t *testing.T) {
 	s := string(raw)
 	for _, token := range []string{
 		"layout(local_size_x = 128) in;", "const int CHUNK = 2048;",
+		"const int REGS = (CHUNK + LANES - 1) / LANES;", "float reg[REGS];",
+		"sScore[i] = score;", "reg[k] = score;", "resident ? sScore[i] : reg[k]", "float score = reg[k];",
 		"binding = 0) readonly buffer QBuf { float Q[]; }", "binding = 1) readonly buffer KVBuf { float KV[]; }",
 		"binding = 2) readonly buffer SinkBuf { float Sink[]; }", "binding = 3) buffer OutBuf { float Out[]; }",
 		"binding = 4) writeonly buffer StatusBuf { uint Status[]; }",
@@ -256,6 +258,9 @@ func TestV41SharedAttentionShaderSourceContract(t *testing.T) {
 	}
 	if strings.Count(s, "binding = ") != 5 || strings.Count(s, "for (int base = 0; base < pc.selectedRows; base += CHUNK)") != 3 {
 		t.Fatal("five bindings or three ordered chunk passes changed")
+	}
+	if n := strings.Count(s, "scaledScore(head, base + i)"); n != 1 {
+		t.Fatalf("non-resident rows must reuse the per-lane register cache, not recompute scores (%d sites)", n)
 	}
 	if check, skip := strings.Index(s, "if (!finiteValue(score))"), strings.Index(s, "if (maximum == seed) {"); check < 0 || skip <= check {
 		t.Fatal("compressed sentinel skipped score validation")
