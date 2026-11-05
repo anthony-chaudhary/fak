@@ -513,12 +513,14 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 	}
 	transientStart := len(c.transient)
 	failed := true
+	statesMayHaveAdvanced := false
 	defer func() {
 		if failed {
 			var launch *CUDAOpError
-			if errors.As(err, &launch) && (launch.Op == cudaQwen35IQ2SequenceOp || launch.Op == cudaQ56KMMQOp) {
-				// Earlier layers may already have advanced GDN/KV state. A
-				// rejected retained-quant output is never replayed as a healthy session.
+			if statesMayHaveAdvanced || (errors.As(err, &launch) && (launch.Op == cudaQwen35IQ2SequenceOp || launch.Op == cudaQ56KMMQOp)) {
+				// Stateful execution cannot be rolled back. Allocation errors,
+				// panics and other failed unwinds must not leave a retryable
+				// partially advanced session, regardless of the error type.
 				c.qwen35SequencePoisonStates(req)
 			}
 			c.qwen35SequenceReleaseSinceLocked(transientStart)
@@ -618,6 +620,7 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 		var residualErr error
 		fusedResidual := false
 		if layer.Linear {
+			statesMayHaveAdvanced = true
 			branch, branchBuf, branchErr := c.qwen35SequenceGDNLocked(normed, layer, req.States[index], req, tokens, index)
 			if branchErr != nil {
 				return result, branchErr
