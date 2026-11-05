@@ -50,7 +50,7 @@ var (
 	}
 
 	benchHostSiblingEnv = append(append([]string(nil), benchBaseEnv...),
-		"aws_ca_bundle=/etc/corp/bundle.pem",
+		"AWS_CA_BUNDLE=/etc/corp/bundle.pem",
 		"NODE_EXTRA_CA_CERTS=/etc/corp/bundle.pem",
 		"CURL_CA_BUNDLE=/etc/corp/bundle.pem",
 		"REQUESTS_CA_BUNDLE=",
@@ -553,6 +553,11 @@ func TestBenchmarkOperationsSanity(t *testing.T) {
 	siblings := HostSiblingTrustVars(benchHostSiblingEnv)
 	if len(siblings) != 3 {
 		t.Fatalf("HostSiblingTrustVars got %d siblings, want 3", len(siblings))
+	}
+	for i, name := range []string{"NODE_EXTRA_CA_CERTS", "AWS_CA_BUNDLE", "CURL_CA_BUNDLE"} {
+		if siblings[i].Name != name || siblings[i].Path != "/etc/corp/bundle.pem" {
+			t.Fatalf("HostSiblingTrustVars sibling %d = %+v, want %s at /etc/corp/bundle.pem", i, siblings[i], name)
+		}
 	}
 
 	summarySmall := SubjectSummary(benchSubjectsSmall)
