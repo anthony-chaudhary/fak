@@ -194,7 +194,8 @@ func scratchFiles(root string) ([]string, error) {
 		if err != nil {
 			return nil // skip an unreadable subtree rather than abort the scan
 		}
-		if d.IsDir() {
+		// Inspect entry type without following symlinks or opening special files.
+		if !d.Type().IsRegular() {
 			return nil
 		}
 		rel, relErr := filepath.Rel(root, path)
