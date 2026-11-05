@@ -3,10 +3,13 @@ package toolrollup
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"math"
 	"reflect"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 // sampleCorpus is 6 synthetic tool calls across 3 tools, with a mix of successes and
@@ -175,6 +178,39 @@ func TestReadCorpus_MalformedRecordErrors(t *testing.T) {
 `
 	if _, err := ReadCorpus(strings.NewReader(jsonl)); err == nil {
 		t.Fatal("expected an error on a malformed record, got nil")
+	}
+}
+
+// Runtime estimate is unmeasured; six tiny in-memory/error-reader streams are used.
+// fak-test:runtime fast est=10ms lane=default
+func TestReadCorpusRequiresCleanEOF(t *testing.T) {
+	readErr := errors.New("corpus read failed")
+	const record = "{\"tool\":\"Read\",\"ok\":true}\n"
+	for _, tc := range []struct {
+		name   string
+		reader io.Reader
+		record string
+		cause  error
+	}{
+		{"leading array close", strings.NewReader("]"), "record 1", nil},
+		{"leading object close", strings.NewReader("}"), "record 1", nil},
+		{"trailing array close", strings.NewReader(record + "]"), "record 2", nil},
+		{"trailing object close", strings.NewReader(record + "}"), "record 2", nil},
+		{"initial read error", iotest.ErrReader(readErr), "record 1", readErr},
+		{"trailing read error", io.MultiReader(strings.NewReader(record), iotest.ErrReader(readErr)), "record 2", readErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ReadCorpus(tc.reader)
+			if err == nil || got != nil {
+				t.Fatalf("ReadCorpus = (%+v, %v), want no records and a termination error", got, err)
+			}
+			if !strings.Contains(err.Error(), tc.record) {
+				t.Fatalf("error %q does not identify %s", err, tc.record)
+			}
+			if tc.cause != nil && !errors.Is(err, tc.cause) {
+				t.Fatalf("error %v does not preserve reader cause %v", err, tc.cause)
+			}
+		})
 	}
 }
 
