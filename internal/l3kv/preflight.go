@@ -176,6 +176,7 @@ func ProbeRemoteKV(ctx context.Context, cfg RemoteKVConfig, probe RemoteKVProbeF
 		return receipt, nil
 	}
 
+	probeErr = sanitizeProbeError(probeErr)
 	receipt.Error = probeErr.Error()
 	if isTimeoutError(probeErr, probeCtx) {
 		receipt.Outcome = RemoteKVOutcomeTimeout
@@ -218,6 +219,24 @@ func DefaultRemoteKVProbe(ctx context.Context, cfg RemoteKVConfig) error {
 	return nil
 }
 
+// sanitizedProbeError keeps URL-bearing failures out of displayed receipts while
+// preserving the original cause for errors.Is and errors.As. Unwrapped causes
+// retain their original data and must not be formatted into public diagnostics.
+type sanitizedProbeError struct {
+	cause error
+}
+
+func (e sanitizedProbeError) Error() string { return "URL failure (details redacted)" }
+func (e sanitizedProbeError) Unwrap() error { return e.cause }
+
+func sanitizeProbeError(err error) error {
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return sanitizedProbeError{cause: err}
+	}
+	return err
+}
+
 func sanitizeURL(rawURL, token string) (string, error) {
 	trimmed := strings.TrimSpace(rawURL)
 	if trimmed == "" {
@@ -225,7 +244,7 @@ func sanitizeURL(rawURL, token string) (string, error) {
 	}
 	u, err := url.Parse(trimmed)
 	if err != nil {
-		return "", fmt.Errorf("parse url: %w", err)
+		return "", fmt.Errorf("parse url: %w", sanitizeProbeError(err))
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return "", fmt.Errorf("unsupported scheme %q (must be http or https)", u.Scheme)

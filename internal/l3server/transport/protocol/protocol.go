@@ -252,7 +252,7 @@ func DecodeKVBody(body []byte, flags uint8) (key, value []byte, ttlMs int64, err
 	}
 	valueLen := binary.LittleEndian.Uint32(body[off:])
 	off += 4
-	if off+int(valueLen) > len(body) {
+	if uint64(valueLen) > uint64(len(body)-off) {
 		return nil, nil, 0, fmt.Errorf("kv body value truncated")
 	}
 	value = body[off : off+int(valueLen)]
