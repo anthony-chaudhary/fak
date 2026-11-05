@@ -132,6 +132,7 @@ func (r *Reader) ReadShard(shardID int) ([]KVEntry, error) {
 }
 
 // ReadAllEntries reads entries from all shard files. Used when shard count differs.
+// Every declared shard, including an empty one, must be readable.
 func (r *Reader) ReadAllEntries() ([]KVEntry, error) {
 	m, err := r.ReadManifest()
 	if err != nil {
@@ -141,9 +142,6 @@ func (r *Reader) ReadAllEntries() ([]KVEntry, error) {
 	for i := 0; i < m.ShardCount; i++ {
 		entries, err := r.ReadShard(i)
 		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
 			return nil, fmt.Errorf("read shard %d: %w", i, err)
 		}
 		all = append(all, entries...)
