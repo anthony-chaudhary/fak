@@ -110,7 +110,12 @@ func (s Stream) WorstCaseBlocks() int {
 // the ref-held reusable blocks. Clamped at zero (a stream that already holds its
 // whole worst case reserves nothing further).
 func (s Stream) ReserveBlocks() int {
-	n := s.WorstCaseBlocks() - s.HeldBlocks - s.RetainedBlocks
+	n := s.WorstCaseBlocks() - s.HeldBlocks
+	// Clamp each credit separately so their combined subtraction cannot wrap.
+	if n < 0 {
+		return 0
+	}
+	n -= s.RetainedBlocks
 	if n < 0 {
 		return 0
 	}
