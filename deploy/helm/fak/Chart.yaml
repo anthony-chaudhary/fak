@@ -1,0 +1,24 @@
+# Chart.yaml — the Helm chart for `fak serve` (#2665).
+#
+# Wraps the committed Kubernetes manifests (deploy/k8s/fak.yaml = proxy mode,
+# deploy/k8s/overlays/gpu/fak-gpu.yaml = GPU in-kernel) as an idiomatic install
+# unit for neo-cloud / enterprise k8s shops. The raw manifest + kustomize path
+# stays supported; this chart is additive. appVersion tracks the published image
+# tag used by deploy/k8s/fak.yaml.
+apiVersion: v2
+name: fak
+description: fak serve — the kernel gateway that adjudicates every proposed tool call before the client sees it (proxy mode, or GPU in-kernel)
+type: application
+version: 0.1.0
+appVersion: "0.36.0"
+keywords:
+  - fak
+  - llm
+  - gateway
+  - openai-compatible
+  - kubernetes
+home: https://github.com/anthony-chaudhary/fak
+sources:
+  - https://github.com/anthony-chaudhary/fak
+maintainers:
+  - name: anthony-chaudhary

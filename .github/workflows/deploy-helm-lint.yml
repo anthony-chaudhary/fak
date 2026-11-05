@@ -1,0 +1,117 @@
+# deploy-helm-lint.yml — keep the Helm chart honest against the committed manifests (#2665).
+#
+# WHY THIS EXISTS: deploy/helm/fak wraps the committed k8s manifests
+# (deploy/k8s/fak.yaml = proxy, deploy/k8s/overlays/gpu/fak-gpu.yaml = GPU in-kernel).
+# Without a gate the chart can silently drift from them — a renamed flag, a dropped
+# hardening field, a probe that no longer matches the binary's health semantics. This
+# job lints the chart, renders BOTH modes (proxy defaults and mode=inkernel +
+# gpu.enabled=true), builds the rendered objects through kubectl so structural errors
+# surface here instead of at `helm install` time on a customer cluster, and proves
+# the closed-vocabulary guards have teeth (a third mode value and an inverted
+# timeout pair must be REFUSED).
+#
+# The kubectl step uses `kubectl kustomize` (not `apply --dry-run=client`) because
+# hosted runners have no cluster to serve API discovery from; kustomize performs the
+# same client-side object build fully offline.
+#
+# Path-filtered like cuda-build.yml: it gates the people touching the deploy
+# artifacts without blocking unrelated PRs. The raw manifest + kustomize path stays
+# supported; the chart is additive, and this job keeps the two in lockstep.
+name: deploy-helm-lint
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "deploy/helm/**"
+      - "deploy/k8s/**"
+      - ".github/workflows/deploy-helm-lint.yml"
+  pull_request:
+    paths:
+      - "deploy/helm/**"
+      - "deploy/k8s/**"
+      - ".github/workflows/deploy-helm-lint.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-helm-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  helm-lint:
+    name: helm ${{ matrix.helm }} · lint + template (proxy & inkernel) + kubectl build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      # Prove the chart renders on BOTH majors: most neo-cloud shops are still on
+      # Helm 3, and alpine/helm:latest tracks 4.x — the templates avoid functions
+      # removed between the two (e.g. replaceAll), so one green row per major.
+      fail-fast: false
+      matrix:
+        helm: ["~3.17.0", "~4.3.0"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm (${{ matrix.helm }})
+        uses: azure/setup-helm@v4
+        with:
+          version: ${{ matrix.helm }}
+
+      # Lint the chart itself (structure, values types, template syntax).
+      - name: helm lint (chart)
+        run: helm lint deploy/helm/fak
+
+      # Render the PROXY shape (default values) — the deploy/k8s/fak.yaml sibling.
+      - name: helm template (proxy mode, default values)
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/helm-check/proxy /tmp/helm-check/gpu
+          helm template fak deploy/helm/fak > /tmp/helm-check/proxy/rendered.yaml
+          echo "== proxy render =="
+          cat /tmp/helm-check/proxy/rendered.yaml
+
+      # Render the IN-KERNEL GPU shape — the deploy/k8s/overlays/gpu/fak-gpu.yaml
+      # sibling (-cuda image, nvidia.com/gpu request+limit, weights PVC, long
+      # liveness delay).
+      - name: helm template (inkernel mode, gpu.enabled=true)
+        run: |
+          set -euo pipefail
+          helm template fak-gpu deploy/helm/fak \
+            --set mode=inkernel \
+            --set gpu.enabled=true > /tmp/helm-check/gpu/rendered.yaml
+          echo "== inkernel render =="
+          cat /tmp/helm-check/gpu/rendered.yaml
+
+      # Structural teeth: build every rendered object through kubectl's client-side
+      # builder (fully offline — no cluster needed). Catches what `helm lint` does
+      # not (malformed nesting, bad apiVersions, broken multi-doc separators).
+      - name: kubectl kustomize build (both renders)
+        run: |
+          set -euo pipefail
+          for mode in proxy gpu; do
+            printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n  - rendered.yaml\n' \
+              > "/tmp/helm-check/${mode}/kustomization.yaml"
+            echo "== kubectl build: ${mode} =="
+            kubectl kustomize "/tmp/helm-check/${mode}"
+          done
+
+      # Negative probes: the closed mode vocabulary must REFUSE a third value, and
+      # the write>=planner timeout rule must refuse an inverted pair — a green pass
+      # here means the guards have teeth.
+      - name: negative probes (bad mode / inverted timeouts must fail)
+        run: |
+          set -uo pipefail
+          if helm template fak deploy/helm/fak --set mode=bogus >/dev/null 2>&1; then
+            echo "::error::mode=bogus was accepted — the closed-vocabulary guard is toothless"
+            exit 1
+          fi
+          echo "ok: mode=bogus refused"
+          if helm template fak deploy/helm/fak \
+              --set timeouts.httpWriteSeconds=30 --set timeouts.plannerSeconds=60 >/dev/null 2>&1; then
+            echo "::error::inverted timeouts were accepted — the write>=planner guard is toothless"
+            exit 1
+          fi
+          echo "ok: write<planner refused"

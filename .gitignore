@@ -487,8 +487,10 @@ fak/.bench-baseline.json
 # Exception: deploy/k8s/ is the committed, secret-free Kubernetes manifest
 # (placeholders only — no private project id) the persona scorecard and the
 # deployment guide point to; it must be tracked so every clone has it.
+# deploy/helm/ is the committed Helm chart (#2665) wrapping those same manifests.
 /deploy/*
 !/deploy/k8s/
+!/deploy/helm/
 /.gcloudignore
 
 # Local nested test-clone used as a self-contained "bite test" fixture by

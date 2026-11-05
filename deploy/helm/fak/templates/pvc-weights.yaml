@@ -1,0 +1,20 @@
+{{- if and (eq (include "fak.mode" .) "inkernel") (.Values.gpu.enabled | default false) }}
+# The model-weights claim. Load the .gguf once; every pod restart reuses it.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.gpu.weights.claimName | default "fak-weights" }}
+  labels:
+    {{- include "fak.labels" . | nindent 4 }}
+spec:
+  # One replica == one writer; RWO is the widest-supported mode on neo clouds.
+  # Switch to ReadOnlyMany if your storage class supports it and you scale replicas.
+  accessModes:
+    {{- toYaml .Values.gpu.weights.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.gpu.weights.storage | default "50Gi" }}
+  {{- if .Values.gpu.weights.storageClassName }}
+  storageClassName: {{ .Values.gpu.weights.storageClassName }}
+  {{- end }}
+{{- end }}
