@@ -139,8 +139,8 @@ func (w *WTinyLFU) Admit(keyHash uint64, keyLen uint16) []uint64 {
 	nodeIdx := w.allocNode()
 	if nodeIdx < 0 {
 		// Pool exhausted — force eviction
-		evHash := w.forceEvict()
-		if evHash != 0 {
+		evHash, ok := w.forceEvict()
+		if ok {
 			evicted = append(evicted, evHash)
 		}
 		nodeIdx = w.allocNode()
@@ -160,8 +160,8 @@ func (w *WTinyLFU) Admit(keyHash uint64, keyLen uint16) []uint64 {
 
 	// Drain window overflow through admission filter
 	for w.window.size > w.windowCap {
-		evHash := w.drainWindow()
-		if evHash != 0 {
+		evHash, ok := w.drainWindow()
+		if ok {
 			evicted = append(evicted, evHash)
 		}
 	}
@@ -195,13 +195,15 @@ func (w *WTinyLFU) Size() uint64 {
 
 // EvictOne force-evicts a single entry. Returns false if nothing to evict.
 func (w *WTinyLFU) EvictOne() bool {
-	return w.forceEvict() != 0
+	_, evicted := w.forceEvict()
+	return evicted
 }
 
 // drainWindow moves the window tail to probation (or evicts main tail).
-func (w *WTinyLFU) drainWindow() uint64 {
+// The bool distinguishes an evicted zero hash from no eviction.
+func (w *WTinyLFU) drainWindow() (uint64, bool) {
 	if w.window.tail < 0 {
-		return 0
+		return 0, false
 	}
 	candidate := w.window.tail
 	w.removeFrom(&w.window, candidate)
@@ -214,11 +216,11 @@ func (w *WTinyLFU) drainWindow() uint64 {
 	// Main not full — admit directly to probation
 	w.pool[candidate].listType = listProbation
 	w.pushHead(&w.probation, candidate)
-	return 0
+	return 0, false
 }
 
 // admissionFilter: compare candidate freq vs probation tail freq.
-func (w *WTinyLFU) admissionFilter(candidateIdx int32) uint64 {
+func (w *WTinyLFU) admissionFilter(candidateIdx int32) (uint64, bool) {
 	candidate := &w.pool[candidateIdx]
 	candidateFreq := w.sketch.Estimate(candidate.keyHash)
 
@@ -228,7 +230,7 @@ func (w *WTinyLFU) admissionFilter(candidateIdx int32) uint64 {
 		// No probation entries, just admit candidate
 		candidate.listType = listProbation
 		w.pushHead(&w.probation, candidateIdx)
-		return 0
+		return 0, false
 	}
 
 	victim := &w.pool[victimIdx]
@@ -247,7 +249,7 @@ func (w *WTinyLFU) admissionFilter(candidateIdx int32) uint64 {
 
 		candidate.listType = listProbation
 		w.pushHead(&w.probation, candidateIdx)
-		return evictedHash
+		return evictedHash, true
 	}
 
 	// Victim wins — evict candidate
@@ -258,7 +260,7 @@ func (w *WTinyLFU) admissionFilter(candidateIdx int32) uint64 {
 	if w.onEvict != nil {
 		w.onEvict(evictedHash, evictedKeyLen)
 	}
-	return evictedHash
+	return evictedHash, true
 }
 
 func (w *WTinyLFU) demoteProtected() {
@@ -271,7 +273,7 @@ func (w *WTinyLFU) demoteProtected() {
 	w.pushHead(&w.probation, idx)
 }
 
-func (w *WTinyLFU) forceEvict() uint64 {
+func (w *WTinyLFU) forceEvict() (uint64, bool) {
 	// Only fall back to the protected LRU tail after the other segments empty.
 	if w.probation.tail < 0 && w.window.tail < 0 {
 		w.demoteProtected()
@@ -287,7 +289,7 @@ func (w *WTinyLFU) forceEvict() uint64 {
 		if w.onEvict != nil {
 			w.onEvict(hash, kLen)
 		}
-		return hash
+		return hash, true
 	}
 	if w.window.tail >= 0 {
 		idx := w.window.tail
@@ -299,9 +301,9 @@ func (w *WTinyLFU) forceEvict() uint64 {
 		if w.onEvict != nil {
 			w.onEvict(hash, kLen)
 		}
-		return hash
+		return hash, true
 	}
-	return 0
+	return 0, false
 }
 
 // Linked list operations (intrusive, pool-based)
