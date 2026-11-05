@@ -314,3 +314,38 @@ func BenchmarkClassifyHTTPStatus(b *testing.B) {
 		}
 	}
 }
+
+// fak-test:runtime fast est=1ms lane=default
+func TestResetPassedAtRejectsInvalidClockFields(t *testing.T) {
+	anchor := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	now := anchor.Add(13 * time.Hour)
+	for _, when := range []string{
+		"0am (UTC)", "00pm (UTC)", "13pm (UTC)", "99am (UTC)",
+		"12:60pm (UTC)", "1:99am (UTC)", "112pm (UTC)",
+		"7:999pm (UTC)", "x7pm (UTC)",
+	} {
+		t.Run(when, func(t *testing.T) {
+			if passed, ok := ResetPassedAt(when, now, anchor); passed || ok {
+				t.Fatalf("invalid clock returned passed=%v ok=%v", passed, ok)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		when   string
+		passed bool
+	}{
+		{"12am (UTC)", true},
+		{"12pm (UTC)", true},
+		{"1pm (UTC)", true},
+		{"1:01pm (UTC)", false},
+		{"11:59pm (UTC)", false},
+		{"01:00 PM (UTC)", true},
+		{"resets at 1pm (UTC)", true},
+	} {
+		t.Run(tc.when, func(t *testing.T) {
+			if passed, ok := ResetPassedAt(tc.when, now, anchor); !ok || passed != tc.passed {
+				t.Fatalf("valid clock returned passed=%v ok=%v, want passed=%v", passed, ok, tc.passed)
+			}
+		})
+	}
+}
