@@ -53,14 +53,14 @@ func Decide(in Input) Decision {
 	cutoff := in.Now.Add(-in.Window)
 	var own []Event
 	for _, e := range in.History {
+		if e.Session == in.Session && !e.At.Before(cutoff) {
+			own = append(own, e)
+		}
 		if e.Signature != in.Signature {
 			continue
 		}
 		if !e.At.Before(cutoff) {
 			sessions[e.Session] = true
-		}
-		if e.Session == in.Session && !e.At.Before(cutoff) {
-			own = append(own, e)
 		}
 	}
 	if in.Session != "" {
@@ -86,8 +86,16 @@ func Decide(in Input) Decision {
 	if latestSig != in.Signature {
 		return Decision{Eligible: true, Sessions: names}
 	}
-	sort.Slice(own, func(i, j int) bool { return own[i].At.Before(own[j].At) })
-	repeat := len(own)
+	// Count only the latest consecutive run. Equal timestamps retain history
+	// order, matching the first-event tie choice in the latest-signature scan.
+	sort.SliceStable(own, func(i, j int) bool { return own[i].At.After(own[j].At) })
+	repeat := 0
+	for _, e := range own {
+		if e.Signature != in.Signature {
+			break
+		}
+		repeat++
+	}
 	if repeat >= in.CrashLoopBudget {
 		return Decision{
 			Eligible:    false,
