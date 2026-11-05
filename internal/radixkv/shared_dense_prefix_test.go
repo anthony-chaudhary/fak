@@ -130,6 +130,8 @@ func TestSharedDensePrefixBudgetScopesAndLegacy(t *testing.T) {
 	s := m.NewSession()
 	defer s.Close()
 	ids := []int{1, 2, 3, 4, 5}
+	// Preserve the caller input before any callee can mutate its backing array.
+	wantIDs := append([]int(nil), ids...)
 	logits := append([]float32(nil), s.Prefill(ids)...)
 	plan, ok := model.PlanDensePrefixCapture(s.Cache, nil)
 	if !ok {
@@ -210,7 +212,7 @@ func TestSharedDensePrefixBudgetScopesAndLegacy(t *testing.T) {
 	if got, _, matched, _, _ := scoped.Lookup(bob, ids); got != nil || matched != 0 {
 		t.Fatal("revoked fleet payload remains visible")
 	}
-	if !reflect.DeepEqual(ids, []int{1, 2, 3, 4, 5}) {
+	if !reflect.DeepEqual(ids, wantIDs) {
 		t.Fatal("caller token slice mutated")
 	}
 }
