@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"unicode"
 )
 
 // Validate checks that the CUDA build and documentation surfaces agree on the
@@ -109,7 +108,7 @@ func validArch(value string) bool {
 		return false
 	}
 	for _, r := range value[3:] {
-		if !unicode.IsDigit(r) {
+		if r < '0' || r > '9' {
 			return false
 		}
 	}

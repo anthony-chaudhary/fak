@@ -209,3 +209,38 @@ func TestValidateSourceFile(t *testing.T) {
 		}
 	})
 }
+
+// fak-test:runtime fast est=1ms lane=default
+func TestParseArchitecturesRequiresASCIIDigits(t *testing.T) {
+	for _, tc := range []struct {
+		arch  string
+		valid bool
+	}{
+		{"sm_0", true},
+		{"sm_80", true},
+		{"sm_103", true},
+		{"sm_120", true},
+		{"sm_999", true},
+		{"sm_000", true},
+		{"sm_\u0668\u0660", false},
+		{"sm_\uff18\uff10", false},
+		{"sm_8\u0660", false},
+		{"sm_\u096e\u0966", false},
+		{"sm_80a", false},
+		{"sm_future", false},
+	} {
+		t.Run(tc.arch, func(t *testing.T) {
+			arches, errs := ParseArchitectures(tc.arch)
+			if len(arches) != 1 || arches[0] != tc.arch {
+				t.Fatalf("arches=%q, want unchanged token %q", arches, tc.arch)
+			}
+			if tc.valid {
+				if len(errs) != 0 {
+					t.Fatalf("ASCII token rejected: %v", errs)
+				}
+			} else if len(errs) != 1 || errs[0] != "cuda_arch.txt entries must use sm_<digits>" {
+				t.Fatalf("errors=%q, want architecture syntax error", errs)
+			}
+		})
+	}
+}
