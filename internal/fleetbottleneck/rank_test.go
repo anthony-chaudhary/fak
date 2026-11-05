@@ -28,3 +28,36 @@ func TestRankIdleIsSilent(t *testing.T) {
 		t.Fatalf("got=%v", got)
 	}
 }
+
+// fak-test:runtime fast est=1ms lane=default
+func TestRankThrottleCountsDoNotOverflow(t *testing.T) {
+	maxInt := int64(^uint(0) >> 1)
+	for _, tc := range []struct {
+		name      string
+		throttled int64
+		healthy   int64
+		wantScore float64
+	}{
+		{"ordinary", 1, 1, .875},
+		{"overflow", maxInt, maxInt, .875},
+		{"preserve rounded tie", 3160077690863166028, 790019422715791087, .95},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.throttled > maxInt || tc.healthy > maxInt {
+				t.Skip("fixture requires 64-bit int")
+			}
+			got := Rank(Snapshot{
+				Machines:       1,
+				ThrottledSeats: int(tc.throttled),
+				HealthySeats:   int(tc.healthy),
+				HostLoad:       1,
+			})
+			if len(got) != 2 {
+				t.Fatalf("rank=%+v, want host and throttle", got)
+			}
+			if got[0].Class != ClassHost || got[1].Class != ClassThrottle || got[1].Score != tc.wantScore {
+				t.Fatalf("rank=%+v, want host before throttle at score %v", got, tc.wantScore)
+			}
+		})
+	}
+}

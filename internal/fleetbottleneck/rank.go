@@ -56,10 +56,16 @@ func Rank(s Snapshot) []Bottleneck {
 		add(ClassAuth, .9+min(float64(s.AuthBlocked)/10, .1), itoa(s.AuthBlocked)+" auth-blocked")
 	}
 	if s.ThrottledSeats > 0 {
-		denom := s.ThrottledSeats + s.HealthySeats
+		var denom float64
+		if s.HealthySeats <= int(^uint(0)>>1)-s.ThrottledSeats {
+			denom = float64(s.ThrottledSeats + s.HealthySeats)
+		} else {
+			// Avoid integer overflow without changing representable-sum rounding.
+			denom = float64(s.ThrottledSeats) + float64(s.HealthySeats)
+		}
 		ratio := 1.0
 		if denom > 0 {
-			ratio = float64(s.ThrottledSeats) / float64(denom)
+			ratio = float64(s.ThrottledSeats) / denom
 		}
 		add(ClassThrottle, .75+.25*ratio, itoa(s.ThrottledSeats)+" throttled seats")
 	}
