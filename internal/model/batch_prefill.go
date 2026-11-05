@@ -1,6 +1,11 @@
 package model
 
-import "fmt"
+import (
+	"fmt"
+	"runtime"
+	"sync"
+	"weak"
+)
 
 type lmHeadProjectionMode uint8
 
@@ -68,6 +73,67 @@ func lmHeadProjectedRows(selected []float32, hiddenSize int) int {
 		panic("model: invalid selected lm_head panel")
 	}
 	return len(selected) / hiddenSize
+}
+
+// prefillExpertWarmArm is one session's arm of the packed-prefill per-layer expert
+// warm hook (the Strata layer-major borrow, oss-port-strata-layer-major-prefill leaf 1).
+// enabled is the session-level flag — zero value off; hook is the seam the walk fires
+// at each layer entry when enabled. A nil hook with enabled=true keeps the production
+// default: today's packed lanes are dense-only (batchPreNormFastPathOK excludes the MoE
+// axis), so there is no expert set to read yet; this leaf pins the seam and its firing
+// discipline, not a measured gain.
+type prefillExpertWarmArm struct {
+	enabled bool
+	hook    func(layer int)
+}
+
+// prefillExpertWarmArms attaches an arm to a *Session without widening the Session
+// struct (kv.go is outside this leaf's fence): keys are weak and a runtime cleanup
+// deletes the entry once the session is unreachable, so released fixtures do not
+// linger. Un-armed sessions never insert, so the default pays one map miss per lookup
+// and nothing else.
+var prefillExpertWarmArms sync.Map // map[weak.Pointer[Session]]*prefillExpertWarmArm
+
+// SetPrefillExpertWarm arms or disarms this session's per-layer expert warm flag for
+// the packed rectangular prefill walk. When armed, the walk fires hook exactly once
+// per layer index, in layer order 0..NumLayers-1, at each layer entry — one pass per
+// layer for the whole panel, never once per prompt/chunk. enabled=false (the zero
+// value) disarms: no hook fires and the walk stays byte-for-byte unchanged. Tests
+// install a fake hook that counts fires.
+func (s *Session) SetPrefillExpertWarm(enabled bool, hook func(layer int)) {
+	if s == nil {
+		return
+	}
+	key := weak.Make(s)
+	if !enabled {
+		prefillExpertWarmArms.Delete(key)
+		runtime.KeepAlive(s)
+		return
+	}
+	if _, loaded := prefillExpertWarmArms.Swap(key, &prefillExpertWarmArm{enabled: true, hook: hook}); !loaded {
+		runtime.AddCleanup(s, func(k weak.Pointer[Session]) { prefillExpertWarmArms.Delete(k) }, key)
+	}
+	runtime.KeepAlive(s)
+}
+
+// prefillExpertWarmFire resolves the panel's per-layer expert warm hook: the first
+// armed session's hook in Seqs order, or nil when no session armed one. It is resolved
+// ONCE per prefill call so the layer loop itself pays no lookup cost; the returned
+// closure is then fired once per layer index — the one-pass-per-layer property: a
+// two-prompt panel warms layer L's expert set once, not once per prompt/chunk.
+func (bs *BatchSession) prefillExpertWarmFire() func(int) {
+	for _, s := range bs.Seqs {
+		v, ok := prefillExpertWarmArms.Load(weak.Make(s))
+		runtime.KeepAlive(s)
+		if !ok {
+			continue
+		}
+		a, _ := v.(*prefillExpertWarmArm)
+		if a != nil && a.enabled && a.hook != nil {
+			return a.hook
+		}
+	}
+	return nil
 }
 
 // PrefillEach ingests each user's (possibly distinct) prompt into that user's own cache and
@@ -160,7 +226,16 @@ func (bs *BatchSession) prefillEachPackedF32(prompts [][]int, offsets []int, P i
 	X := make([]float32, N*H)
 	m.embedPackedRowsInto(X, prompts, offsets, P, H, cfg, dispatchWorkers)
 
+	// Per-layer expert warm hook (Strata layer-major borrow): resolved once per prefill
+	// call, fired once per layer index at layer entry — see prefillExpertWarmFire. An
+	// un-armed panel keeps the current walk byte-for-byte (rejection probe:
+	// TestLayerMajorPrefillExpertWarm).
+	warmFire := bs.prefillExpertWarmFire()
+
 	for l := 0; l < cfg.NumLayers; l++ {
+		if warmFire != nil {
+			warmFire(l)
+		}
 		lp := func(s string) string { return layerName(l, s) }
 
 		// LayerNorm families (StableLM, GPT-NeoX, Falcon, biased Cohere) carry a learned norm
@@ -296,7 +371,15 @@ func (bs *BatchSession) prefillEachPackedQ(prompts [][]int, offsets []int, P int
 	pb.X = X
 	m.embedPackedRowsInto(X, prompts, offsets, P, H, cfg, dispatchWorkers)
 
+	// Per-layer expert warm hook (Strata layer-major borrow): same arm and firing
+	// discipline as the F32 twin — once per layer index at layer entry, never per
+	// prompt/chunk.
+	warmFire := bs.prefillExpertWarmFire()
+
 	for l := 0; l < cfg.NumLayers; l++ {
+		if warmFire != nil {
+			warmFire(l)
+		}
 		lp := func(s string) string { return layerName(l, s) }
 		ql := m.q8Layer(l)
 

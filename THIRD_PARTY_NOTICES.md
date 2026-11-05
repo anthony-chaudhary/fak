@@ -1555,6 +1555,34 @@ goroutine. Private outputs join before retirement and preserve current router
 IDs, weights, dtype and reduction order. The explicit host-payload budget is
 default off. This is a Go ownership adaptation, not a copied CUDA kernel,
 modified routing/quantization policy, device qualification or performance claim.
+
+## Strata layer-major prefill with per-layer expert warm-up
+
+`internal/model/batch_prefill.go` adapts the layer-major prefill walk — every
+layer's experts are read once per layer pass, with a per-layer expert warm hook
+armed at layer entry — from Niko1221/Strata at commits `ffe40c16`, `162dec34`
+and `37e4832a` (pinned at `46c152a1`), plus `docs/release-notes-0.2.7.md:20` at
+the same pin:
+- https://github.com/Niko1221/Strata/commit/ffe40c16
+- https://github.com/Niko1221/Strata/commit/162dec34
+- https://github.com/Niko1221/Strata/commit/37e4832a
+- https://github.com/Niko1221/Strata/blob/46c152a1/docs/release-notes-0.2.7.md
+
+https://github.com/Niko1221/Strata/tree/46c152a1
+
+Copyright (c) 2026 Niko1221 and the Strata contributors.
+SPDX-License-Identifier: MIT
+The complete copyright, permission and warranty notice is retained in
+`internal/model/STRATA_LICENSE.txt`.
+
+Design reference only; no Strata code blocks are copied. Fak's packed
+rectangular prefill loops already walk layers outer over the whole panel; this
+change arms a session-flag-gated per-layer expert warm hook at the entry of both
+packed layer loops (f32 and Q8 lanes) and pins the firing discipline — one fire
+per layer index, in layer order, once per panel rather than once per
+prompt/chunk — with `TestLayerMajorPrefillExpertWarm`. The flag's zero value
+keeps the walk byte-for-byte unchanged. Upstream TTFT numbers are estimates
+here, not a measured gain or hardware claim.
 ## Strata / Project Maya Engram CLOCK replacement
 
 `internal/model/v41_cache.go` adapts `EgRowCache`'s hand/reference-bit replacement
