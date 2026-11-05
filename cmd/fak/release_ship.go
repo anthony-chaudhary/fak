@@ -1326,6 +1326,27 @@ func releaseShipCommitStillOnTrunk(result *releaseShipResult, wt string, opts re
 	return code == 0
 }
 
+// An unreadable event cannot establish the absence of failed push runs.
+// Accept lowercase event tokens, including future names, but not malformed text.
+func releaseShipCIEventsReadable(rows []map[string]any) bool {
+	for _, row := range rows {
+		event, ok := row["event"].(string)
+		if !ok || event == "" {
+			return false
+		}
+		for i, ch := range event {
+			if ch >= 'a' && ch <= 'z' {
+				continue
+			}
+			if i > 0 && (ch >= '0' && ch <= '9' || ch == '_') {
+				continue
+			}
+			return false
+		}
+	}
+	return true
+}
+
 // releaseShipPushCIRuns keeps diagnostics from supplying release CI evidence,
 // even if a response violates the gh query's event filter or omits the field.
 func releaseShipPushCIRuns(rows []map[string]any) []map[string]any {
@@ -1375,6 +1396,9 @@ func releaseShipSourceCI(result *releaseShipResult, root string, opts releaseShi
 	var rows []map[string]any
 	if err := json.Unmarshal([]byte(out), &rows); err != nil {
 		return map[string]any{"ok": false, "status": "non_json", "tail": tail(out)}
+	}
+	if !releaseShipCIEventsReadable(rows) {
+		return map[string]any{"ok": false, "status": "invalid_event", "source_sha": sha, "reason": "CI response contained a missing or malformed event"}
 	}
 	rows = releaseShipPushCIRuns(rows)
 	if len(rows) == 0 {
@@ -1450,6 +1474,9 @@ func releaseShipAdoptAncestorCI(result *releaseShipResult, root string, opts rel
 		}
 		if rows == nil {
 			return releaseShipAncestorCIBlocked(fallback, wf, nil, "completed workflow history was not a JSON array")
+		}
+		if !releaseShipCIEventsReadable(rows) {
+			return releaseShipAncestorCIBlocked(fallback, wf, nil, "completed workflow history contained a missing or malformed event")
 		}
 		rows = releaseShipPushCIRuns(rows)
 		var failedAncestors []map[string]any

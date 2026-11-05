@@ -126,27 +126,38 @@ func TestReleaseShipSourceCIRejectsInconsistentConclusion(t *testing.T) {
 }
 
 // All commands are stubbed and the appearance deadline is already expired.
-// fak-test:runtime fast est=20ms
+// fak-test:runtime fast est=40ms
 func TestReleaseShipCIRequiresPushEvent(t *testing.T) {
 	for _, tc := range []struct {
 		name, payload, status string
 		code                  int
 		appeared              bool
 	}{
-		{name: "missing event", payload: `[{"status":"completed","conclusion":"success"}]`, status: "missing"},
-		{name: "null event", payload: `[{"event":null,"status":"completed","conclusion":"success"}]`, status: "missing"},
-		{name: "empty event", payload: `[{"event":"","status":"completed","conclusion":"success"}]`, status: "missing"},
+		{name: "missing event", payload: `[{"status":"completed","conclusion":"success"}]`, status: "invalid_event"},
+		{name: "missing-event exact failure", payload: `[{"status":"completed","conclusion":"failure"}]`, status: "invalid_event"},
+		{name: "null event", payload: `[{"event":null,"status":"completed","conclusion":"success"}]`, status: "invalid_event"},
+		{name: "empty event", payload: `[{"event":"","status":"completed","conclusion":"success"}]`, status: "invalid_event"},
 		{name: "manual success", payload: `[{"event":"workflow_dispatch","status":"completed","conclusion":"success"}]`, status: "missing"},
 		{name: "pull request", payload: `[{"event":"pull_request","status":"completed","conclusion":"success"}]`, status: "missing"},
 		{name: "scheduled", payload: `[{"event":"schedule","status":"completed","conclusion":"success"}]`, status: "missing"},
 		{name: "unknown event", payload: `[{"event":"unknown","status":"completed","conclusion":"success"}]`, status: "missing"},
-		{name: "wrong case", payload: `[{"event":"PUSH","status":"completed","conclusion":"success"}]`, status: "missing"},
-		{name: "padded event", payload: `[{"event":" push ","status":"completed","conclusion":"success"}]`, status: "missing"},
-		{name: "number event", payload: `[{"event":1,"status":"completed","conclusion":"success"}]`, status: "missing"},
-		{name: "boolean event", payload: `[{"event":true,"status":"completed","conclusion":"success"}]`, status: "missing"},
-		{name: "array event", payload: `[{"event":["push"],"status":"completed","conclusion":"success"}]`, status: "missing"},
-		{name: "object event", payload: `[{"event":{"name":"push"},"status":"completed","conclusion":"success"}]`, status: "missing"},
-		{name: "null row", payload: `[null]`, status: "missing"},
+		{name: "future event token", payload: `[{"event":"future_event","status":"completed","conclusion":"success"}]`, status: "missing"},
+		{name: "future event token with digit", payload: `[{"event":"future_event2","status":"completed","conclusion":"success"}]`, status: "missing"},
+		{name: "wrong case", payload: `[{"event":"PUSH","status":"completed","conclusion":"success"}]`, status: "invalid_event"},
+		{name: "padded event", payload: `[{"event":" push ","status":"completed","conclusion":"success"}]`, status: "invalid_event"},
+		{name: "interior whitespace", payload: `[{"event":"pu sh","status":"completed","conclusion":"failure"}]`, status: "invalid_event"},
+		{name: "interior control", payload: `[{"event":"pu\u0000sh","status":"completed","conclusion":"failure"}]`, status: "invalid_event"},
+		{name: "punctuation event", payload: `[{"event":"pu.sh","status":"completed","conclusion":"failure"}]`, status: "invalid_event"},
+		{name: "leading underscore", payload: `[{"event":"_push","status":"completed","conclusion":"failure"}]`, status: "invalid_event"},
+		{name: "leading digit", payload: `[{"event":"2push","status":"completed","conclusion":"failure"}]`, status: "invalid_event"},
+		{name: "non-ASCII event", payload: `[{"event":"püsh","status":"completed","conclusion":"failure"}]`, status: "invalid_event"},
+		{name: "number event", payload: `[{"event":1,"status":"completed","conclusion":"success"}]`, status: "invalid_event"},
+		{name: "boolean event", payload: `[{"event":true,"status":"completed","conclusion":"success"}]`, status: "invalid_event"},
+		{name: "array event", payload: `[{"event":["push"],"status":"completed","conclusion":"success"}]`, status: "invalid_event"},
+		{name: "object event", payload: `[{"event":{"name":"push"},"status":"completed","conclusion":"success"}]`, status: "invalid_event"},
+		{name: "null row", payload: `[null]`, status: "invalid_event"},
+		{name: "missing-event failure before green", payload: `[{"status":"completed","conclusion":"failure"},{"event":"push","status":"completed","conclusion":"success"}]`, status: "invalid_event", appeared: true},
+		{name: "missing-event failure after green", payload: `[{"event":"push","status":"completed","conclusion":"success"},{"status":"completed","conclusion":"failure"}]`, status: "invalid_event", appeared: true},
 		{name: "push success", payload: `[{"event":"push","status":"completed","conclusion":"success"}]`, status: "green", appeared: true},
 		{name: "push pending", payload: `[{"event":"push","status":"in_progress","conclusion":""}]`, status: "pending", appeared: true},
 		{name: "push failure", payload: `[{"event":"push","status":"completed","conclusion":"failure"}]`, status: "failed", appeared: true},
@@ -170,7 +181,7 @@ func TestReleaseShipCIRequiresPushEvent(t *testing.T) {
 				return tc.code, tc.payload
 			})
 			defer restore()
-			opts := releaseShipOptions{workflow: "ci.yml", ciAppearTimeout: -time.Nanosecond}
+			opts := releaseShipOptions{workflow: "ci.yml", ciAppearTimeout: -time.Nanosecond, adoptAncestorCI: tc.status == "invalid_event"}
 			var source, appearance releaseShipResult
 			ci := releaseShipSourceCI(&source, t.TempDir(), opts, "source-sha")
 			if ci["status"] != tc.status || releaseShipPayloadOK(ci) != (tc.status == "green") {
@@ -178,6 +189,9 @@ func TestReleaseShipCIRequiresPushEvent(t *testing.T) {
 			}
 			if tc.status == "missing" && (ci["run"] != nil || !strings.Contains(stringFromAny(ci["reason"]), "push")) {
 				t.Fatalf("unqualified evidence must be omitted with a reason: %#v", ci)
+			}
+			if tc.status == "invalid_event" && (ci["source_sha"] != "source-sha" || ci["adopted_ancestor_sha"] != nil || !strings.Contains(stringFromAny(ci["reason"]), "event")) {
+				t.Fatalf("unreadable event escaped refusal or lost source context: %#v", ci)
 			}
 			waitReleaseShipCIAppears(&appearance, t.TempDir(), opts, "source-sha")
 			if calls != 2 || (len(appearance.Warnings) == 0) != tc.appeared {
@@ -192,7 +206,8 @@ func TestReleaseShipCIRequiresPushEvent(t *testing.T) {
 
 // fak-test:runtime fast est=20ms
 func TestReleaseShipAncestorCIRequiresPushEvent(t *testing.T) {
-	const untrusted = `[{"status":"completed","conclusion":"success","headSha":"untrusted"},{"event":null,"conclusion":"success","headSha":"untrusted"},{"event":"workflow_dispatch","conclusion":"success","headSha":"untrusted"},{"event":"pull_request","conclusion":"success","headSha":"untrusted"},{"event":"schedule","conclusion":"success","headSha":"untrusted"},{"event":"unknown","conclusion":"success","headSha":"untrusted"},{"event":[],"conclusion":"success","headSha":"untrusted"},{"event":{},"conclusion":"success","headSha":"untrusted"}]`
+	// Explicit non-push diagnostics remain ignorable; malformed events refuse separately.
+	const untrusted = `[{"event":"workflow_dispatch","conclusion":"success","headSha":"untrusted"},{"event":"pull_request","conclusion":"success","headSha":"untrusted"},{"event":"schedule","conclusion":"success","headSha":"untrusted"},{"event":"future_event","conclusion":"success","headSha":"untrusted"}]`
 	for _, tc := range []struct {
 		name, pushWorkflow string
 		adopt, reachable   bool
@@ -266,7 +281,7 @@ func TestReleaseShipAncestorCIRequiresPushEvent(t *testing.T) {
 }
 
 // An unreadable or inconsistent primary history cannot justify secondary adoption.
-// fak-test:runtime fast est=40ms
+// fak-test:runtime fast est=70ms
 func TestReleaseShipAncestorCIRequiresReadableWorkflowHistory(t *testing.T) {
 	const green = `[{"event":"push","status":"completed","conclusion":"success","headSha":"ancestor-sha"}]`
 	for _, tc := range []struct {
@@ -277,6 +292,13 @@ func TestReleaseShipAncestorCIRequiresReadableWorkflowHistory(t *testing.T) {
 		{name: "query failed despite green output", code: 1, output: green, reason: "could not be queried"},
 		{name: "invalid JSON", output: "not-json", reason: "not valid JSON"},
 		{name: "null is not empty history", output: "null", reason: "not a JSON array"},
+		{name: "history row without event", output: `[{"status":"completed","conclusion":"failure","headSha":"red-sha"}]`, reason: "missing or malformed event"},
+		{name: "null history row", output: `[null]`, reason: "missing or malformed event"},
+		{name: "nonstring history event", output: `[{"event":[],"status":"completed","conclusion":"failure","headSha":"red-sha"}]`, reason: "missing or malformed event"},
+		{name: "history event with interior whitespace", output: `[{"event":"pu sh","status":"completed","conclusion":"failure","headSha":"red-sha"}]`, reason: "missing or malformed event"},
+		{name: "punctuation event after green", output: `[{"event":"push","status":"completed","conclusion":"success","headSha":"ancestor-sha"},{"event":"pu.sh","status":"completed","conclusion":"failure","headSha":"red-sha"}]`, reason: "missing or malformed event"},
+		{name: "missing-event failure before green", output: `[{"status":"completed","conclusion":"failure","headSha":"red-sha"},{"event":"push","status":"completed","conclusion":"success","headSha":"ancestor-sha"}]`, reason: "missing or malformed event"},
+		{name: "missing-event failure after green", output: `[{"event":"push","status":"completed","conclusion":"success","headSha":"ancestor-sha"},{"status":"completed","conclusion":"failure","headSha":"red-sha"}]`, reason: "missing or malformed event"},
 		{name: "success without status", output: `[{"event":"push","conclusion":"success","headSha":"ancestor-sha"}]`, reason: "incomplete or inconsistent"},
 		{name: "success with unknown status", output: `[{"event":"push","status":"unknown","conclusion":"success","headSha":"ancestor-sha"}]`, reason: "incomplete or inconsistent"},
 		{name: "success with nonstring status", output: `[{"event":"push","status":1,"conclusion":"success","headSha":"ancestor-sha"}]`, reason: "incomplete or inconsistent"},
