@@ -254,6 +254,7 @@ Working docs that track a specific effort. Dated by design; they age out.
 Developer, design, and internal reference docs — indexed here so each is reachable from the map.
 
 - [Developer tooling](docs/dev-tooling.md) — query the curated documentation map before surveying the tree, then choose the build, test, debug, profile, or committed-tip witness for the question at hand; an optional source-bound build batch record (`fak-dev build batch setup|plan|status`) plans multi-patch work as advisory data only.
+- [Verb lifecycle](docs/VERB-LIFECYCLE.md) — how a fak verb is created from a dispatch switch, classified on three axes (tier, reuse class, lane), cataloged in the curated overlay, regenerated into the model- and human-facing surfaces, reviewed, and kept drift-free; carries the exact refresh runbook and every gate that pins it.
 - [Dev-process private boundary](docs/dev-process-private-boundary.md) — architectural boundary between public runtime (The Engine) and private autonomous development factory (The Factory), with the complete [top 100 tools migration catalog](docs/dev-process-top-100-tools-inventory.md).
 - [Top 100 autonomous factory tools inventory](docs/dev-process-top-100-tools-inventory.md) — authoritative catalog and ranking of the top 100 dev process tools migrating from Python to Go in fak-private across six functional cohorts.
 - [Nightly trajectory attribution receipt](docs/ci/trajectory-attribution-nightly.md) — the bounded local/fleet collection, budget, publication, rollback, and scrubbed-receipt contract for the scheduled trajectory audit.
@@ -1031,6 +1032,22 @@ front page.
 - [`docs/notes/CONCEPT-NATIVE-HARNESS-DATABASE-AND-DATASLOT-LIFECYCLE-2026-09-03.md`](docs/notes/CONCEPT-NATIVE-HARNESS-DATABASE-AND-DATASLOT-LIFECYCLE-2026-09-03.md) — Internal session persistence, local database discovery, query, and migration safety in the native fak harness (#10646).
 - [`docs/notes/CONCEPT-STUDY-PERFORMANCE-OSS-PROCESS-FAILURES-2026-09-03.md`](docs/notes/CONCEPT-STUDY-PERFORMANCE-OSS-PROCESS-FAILURES-2026-09-03.md) — Forensic study of engineering process failures across high-commit OSS inference repositories (vLLM, llama.cpp, SGLang, TRT-LLM).
 - [`docs/notes/IN-BATCH-PREFIX-FUSION-MEASUREMENT-2026-10-04.md`](docs/notes/IN-BATCH-PREFIX-FUSION-MEASUREMENT-2026-10-04.md) — In-batch cold-prefix fusion (fak#1914): production reachability shipped, resident-chunked integration bounded as ABSTAIN (recurrent cache cannot truncate), and an honest head-to-head measurement of ~1.0x vs the tuned warm-cache next-best alternative (the 1.4x claim is refuted).
+
+- [Deconstructing TRUST_VIOLATION: zero-trust capability boundaries (2026-09-04)](docs/notes/2026-09-04-deconstructing-trust-violation-architecture.md) — architecture for the TRUST_VIOLATION class: zero-trust capability boundaries (#11392).
+- [Codex Desktop for Windows — UI/UX architecture and harness integration study (2026-09-05)](docs/notes/2026-09-05-codex-desktop-windows-uiux-harness-study.md) — bounded local installation audit, empirical issue analysis, and harness architectural specification.
+- [Cross-harness lease audit (2026-09-05)](docs/notes/2026-09-05-cross-harness-lease-audit.md) — lease behavior audited across harnesses; tracker FAK MCP admission #11834.
+- [Frontier model evolution & the Astra pattern (2026-09-05)](docs/notes/2026-09-05-frontier-model-evolution-audit-astra-and-beyond.md) — designing agent kernels for increasingly capable, strict, and literal models.
+- [Harness child tasks: spawn, input queues, and pending execution (2026-09-05)](docs/notes/2026-09-05-harness-task-spawn-queue-study.md) — bounded source study of child-task spawn and pending-execution flow; source inspection is not execution proof.
+- [OpenCode auto-resume sessions when reopened (2026-09-06)](docs/notes/2026-09-06-opencode-auto-resume-sessions-when-reopened.md) — session continuation lifecycle, TUI routing, and FAK supervisor reattachment.
+- [UD GGUF native CPU support (2026-09-06)](docs/notes/2026-09-06-ud-gguf-native-support.md) — UD GGUF native CPU support work (#11957 within #9820).
+- [The naive dispatch arm as a measured control (2026-09-28)](docs/notes/2026-09-28-naive-arm-measured-control.md) — `internal/naivecontrol` + `fak naive-control` record the naive arm and the orchestrated loop on one ruler: git-ancestry-verified ship counts and an explicit MISSING_MEASUREMENT state instead of zeros.
+- [A-MEM note-evolution / neighbor-merge (2026-09-21)](docs/notes/CONCEPT-STUDY-A-MEM-NOTE-EVOLUTION-W6-2026-09-21.md) — concept study: adopt the disposition seam, SKIP the unattended rewrite (#2625 / #2618).
+- [NVIDIA Personal AI Router (PAIR) concept study (2026-09-04)](docs/notes/CONCEPT-STUDY-NVIDIA-PERSONAL-AI-ROUTER-2026-09-04.md) — pinned study of the PAIR architecture and subsystems.
+- [pctablet505/glm53-flash-single-gpu concept study (2026-09-03)](docs/notes/CONCEPT-STUDY-PCTABLET505-GLM53-UVA-2026-09-03.md) — pinned study: 181GB GLM-5.3 on a 96GB GPU via 52 GB/s Triton gather & grouped DMA.
+- [OpenCode free models — auto-update design note (2026-10-16)](docs/notes/OPENCODE-FREE-MODELS-AUTO-UPDATE-2026-10-16.md) — design note for the free-models auto-update path.
+- [Operator permissive workspace admission (2026-10-02)](docs/notes/OPERATOR-PERMISSIVE-ADMISSION-2026-10-02.md) — plan: gateway verdict projection and `fak serve`/`fak guard` flags; explicit operator authorization requests a more permissive guard, default stays strict.
+- [Quantized loader conversions in startup diagnostics (2026-11-01)](docs/notes/QUANT-DEQUANT-STARTUP-ALERTS-2026-11-01.md) — surfacing quant/dequant conversions in startup diagnostics.
+- [CLI baseline repair acceptance receipt (2026-09-12)](docs/notes/cli-baseline-repair-2026-09-12.md) — acceptance receipt for the CLI baseline repair (#12832).
 
 ## Extended documentation index
 
