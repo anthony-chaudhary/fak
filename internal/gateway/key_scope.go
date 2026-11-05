@@ -9,11 +9,10 @@ package gateway
 //   - zig/src/server/auth_scope.zig (the closed inference/read/admin scope set and
 //     the exact method+route grant matrix, never suffix grants).
 //
-// This file is the self-contained GRANT MODEL and the FILE arm of the port: it
-// compiles against the unmodified keyset seam (keyset.go) and carries its own
-// entry type (scopedKeyEntry). The env-spec arm of the keyset gains the same
-// per-key scope set in the follow-up leaf that extends keyset.go. Scopes are
-// authorization only — they bound which routes a key may reach, exactly like the
+// This file is the GRANT MODEL and the FILE arm of the port: it loads into
+// keyset.go's keysetEntry, which carries the per-key scope bitset, so the file
+// arm and the scoped-load arm share one entry type. Scopes are authorization
+// only — they bound which routes a key may reach, exactly like the
 // X-Fak-Auth-Scope guard (scope_guard.go) bounds a caller-declared claim, but
 // carried BY THE KEY rather than declared by the caller, so a compromised caller
 // cannot widen them. Key material is never held raw past hashing and never
@@ -197,16 +196,6 @@ func keyHasWhitespace(key string) bool {
 	return false
 }
 
-// scopedKeyEntry binds one api-key DIGEST (never the raw key) to the label and
-// the per-key scope set its line grants. It is the file arm's own entry type:
-// the keyset.go entry gains the same scopes field in the follow-up leaf, and
-// this file must compile against the unmodified keyset seam until then.
-type scopedKeyEntry struct {
-	digest    [sha256.Size]byte
-	principal string
-	scopes    keyScopes
-}
-
 // parseKeyFileLines parses a key file's contents into keyset entries. Line
 // grammar: `label[scopes]: key` or a bare `key` (which keeps fullKeyScopes);
 // blank lines and `#` comments are skipped. One key digest may repeat across
@@ -216,9 +205,9 @@ type scopedKeyEntry struct {
 // first entry (rotation); conflicting ones refuse the load. Refusals wrap the
 // closed sentinel classes above and name the offending line number, never the
 // key bytes.
-func parseKeyFileLines(text string) ([]scopedKeyEntry, error) {
+func parseKeyFileLines(text string) ([]keysetEntry, error) {
 	assigned := make(map[[sha256.Size]byte]keyScopes)
-	var entries []scopedKeyEntry
+	var entries []keysetEntry
 	for n, rawLine := range strings.Split(text, "\n") {
 		line := strings.TrimSpace(rawLine)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -248,7 +237,7 @@ func parseKeyFileLines(text string) ([]scopedKeyEntry, error) {
 			continue // identical-scope repeat: rotation, deduped to the first entry
 		}
 		assigned[d] = scopes
-		entries = append(entries, scopedKeyEntry{digest: d, principal: label, scopes: scopes})
+		entries = append(entries, keysetEntry{digest: d, principal: label, scopes: scopes})
 	}
 	if len(entries) == 0 {
 		return nil, ErrEmptyKeyFile
@@ -271,7 +260,7 @@ func parseKeyFileLines(text string) ([]scopedKeyEntry, error) {
 type scopedKeyFile struct {
 	mu      sync.RWMutex
 	valid   bool
-	entries []scopedKeyEntry
+	entries []keysetEntry
 }
 
 // reload re-parses the key file's contents and swaps the file's keys on
@@ -297,17 +286,17 @@ func (f *scopedKeyFile) reload(text string) error {
 // refused reload) every file key misses. The scan compares digests in constant
 // time and runs to completion even after a hit, so reject latency reveals
 // neither the set's size nor which entry matched.
-func (f *scopedKeyFile) match(presentedKey string) (scopedKeyEntry, bool) {
+func (f *scopedKeyFile) match(presentedKey string) (keysetEntry, bool) {
 	if presentedKey == "" {
-		return scopedKeyEntry{}, false
+		return keysetEntry{}, false
 	}
 	got := sha256.Sum256([]byte(presentedKey))
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	if !f.valid {
-		return scopedKeyEntry{}, false
+		return keysetEntry{}, false
 	}
-	var hit scopedKeyEntry
+	var hit keysetEntry
 	matched := false
 	for i := range f.entries {
 		if subtle.ConstantTimeCompare(got[:], f.entries[i].digest[:]) == 1 {

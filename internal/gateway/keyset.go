@@ -99,10 +99,14 @@ func ParseKeyPrincipals(specs []string, lookupEnv func(string) string) (map[stri
 }
 
 // keysetEntry binds one api-key DIGEST (never the raw key) to the org/project
-// principal that key authenticates as.
+// principal that key authenticates as and the scopes that key may exercise.
+// Scopes are authorization only (key_scope.go): a zero value grants nothing,
+// so an entry built by the unscoped newKeyset path fails closed on any scoped
+// route check until the operator arms a scope set via newScopedKeyset.
 type keysetEntry struct {
 	digest    [sha256.Size]byte
 	principal string
+	scopes    keyScopes
 }
 
 // keyset is an immutable set of api-key→principal bindings, matched by constant-time
@@ -166,4 +170,87 @@ func (ks *keyset) lookup(presentedKey string) (principal string, matched bool) {
 		}
 	}
 	return principal, matched
+}
+
+// keysetBinding is one operator-supplied api-key binding: the raw key (held only
+// until hashed), the principal it authenticates as, and the scopes that key may
+// exercise. Scopes must be set explicitly; a zero value grants nothing, so a
+// caller that forgets the bitset fails closed rather than inheriting full.
+type keysetBinding struct {
+	Key       string
+	Principal string
+	Scopes    keyScopes
+}
+
+// newScopedKeyset builds a keyset whose entries carry per-key scopes, hashing
+// each key to a digest and discarding the raw bytes (the same SHA-256 discipline
+// as newKeyset). It refuses the WHOLE load — returning ErrConflictingKeyScopes
+// wrapped with context — when one key digest carries two different scope sets:
+// a restricted line cannot be shadowed by a full copy of the same key
+// (TensorFold auth.zig @9e8c368b0b4c2c7892a0c9f0f302d7c164016209). The same
+// digest repeated with IDENTICAL scopes is key rotation and is deduped to one
+// entry. Half-specified bindings (empty key or principal) are dropped exactly
+// as newKeyset drops them. Returns nil, nil when no usable binding remains.
+func newScopedKeyset(bindings []keysetBinding) (*keyset, error) {
+	if len(bindings) == 0 {
+		return nil, nil
+	}
+	ks := &keyset{}
+	seen := make(map[[sha256.Size]byte]keyScopes, len(bindings))
+	for _, b := range bindings {
+		key := strings.TrimSpace(b.Key)
+		principal := strings.TrimSpace(b.Principal)
+		if key == "" || principal == "" {
+			continue
+		}
+		d := sha256.Sum256([]byte(key))
+		if prev, dup := seen[d]; dup && prev != b.Scopes {
+			return nil, fmt.Errorf("%w: one key digest carries two scope sets", ErrConflictingKeyScopes)
+		}
+		if _, dup := seen[d]; !dup {
+			seen[d] = b.Scopes
+			ks.entries = append(ks.entries, keysetEntry{
+				digest:    d,
+				principal: principal,
+				scopes:    b.Scopes,
+			})
+		}
+	}
+	if len(ks.entries) == 0 {
+		return nil, nil
+	}
+	// Deterministic order (principal, then digest) so the scan order and any
+	// diagnostic are stable regardless of Go map iteration — it never depends on
+	// the raw keys.
+	sort.Slice(ks.entries, func(i, j int) bool {
+		if ks.entries[i].principal != ks.entries[j].principal {
+			return ks.entries[i].principal < ks.entries[j].principal
+		}
+		return bytes.Compare(ks.entries[i].digest[:], ks.entries[j].digest[:]) < 0
+	})
+	return ks, nil
+}
+
+// lookupScoped resolves a presented credential to a COPIED identity: the
+// principal it authenticates as and the scopes it was accepted with. The copy
+// is the request's own (TensorFold auth.zig Matched @pin): whatever the keyset
+// later becomes, an in-flight request keeps the scopes it matched. Constant-time
+// scan discipline is identical to lookup.
+func (ks *keyset) lookupScoped(presentedKey string) (principal string, scopes keyScopes, matched bool) {
+	if ks == nil || presentedKey == "" {
+		return "", 0, false
+	}
+	got := sha256.Sum256([]byte(presentedKey))
+	var p string
+	var s keyScopes
+	m := false
+	for i := range ks.entries {
+		if subtle.ConstantTimeCompare(got[:], ks.entries[i].digest[:]) == 1 {
+			p = ks.entries[i].principal
+			s = ks.entries[i].scopes
+			m = true
+			// No break: keep the scan length independent of the match position.
+		}
+	}
+	return p, s, m
 }
