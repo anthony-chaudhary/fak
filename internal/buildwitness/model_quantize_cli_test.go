@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 	"time"
 
@@ -45,7 +46,7 @@ func TestModelQuantizeCLI(t *testing.T) {
 		t.Fatal("CLI build diagnostics truncated")
 	}
 	input := filepath.Join(dir, "input.gguf")
-	original := modelQuantizeCLIFixture()
+	original, matrixValues := modelQuantizeCLIFixture()
 	if err := os.WriteFile(input, original, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -88,8 +89,15 @@ func TestModelQuantizeCLI(t *testing.T) {
 			t.Fatal(err)
 		}
 		decoded, info, err := ws.TensorF32("matrix")
-		if err != nil || len(decoded) != 256 {
+		if err != nil {
 			t.Fatalf("reload: %v", err)
+		}
+		if len(decoded) != len(matrixValues) {
+			t.Fatalf("decoded matrix elements = %d, want input elements %d", len(decoded), len(matrixValues))
+		}
+		wantDims := []uint64{uint64(len(matrixValues)), 1}
+		if !slices.Equal(info.Dims, wantDims) {
+			t.Fatalf("decoded matrix dims = %v, want input dims %v", info.Dims, wantDims)
 		}
 		wantType := map[string]ggufload.TensorType{"q4_k": ggufload.TensorQ4_K, "q5_k": ggufload.TensorQ5_K, "q6_k": ggufload.TensorQ6_K}[kind]
 		if info.Type != wantType {
@@ -124,7 +132,13 @@ func TestModelQuantizeCLI(t *testing.T) {
 	}
 }
 
-func modelQuantizeCLIFixture() []byte {
+func modelQuantizeCLIFixture() ([]byte, []float32) {
+	// One complete K-quant block; derive the file shape and payload from the
+	// same input values whose cardinality the CLI round-trip must preserve.
+	values := make([]float32, 256)
+	for i := range values {
+		values[i] = float32((i*73)%251-125) / 16
+	}
 	var b bytes.Buffer
 	u32 := func(v uint32) { binary.Write(&b, binary.LittleEndian, v) }
 	u64 := func(v uint64) { binary.Write(&b, binary.LittleEndian, v) }
@@ -135,7 +149,7 @@ func modelQuantizeCLIFixture() []byte {
 	u64(0)
 	str("matrix")
 	u32(2)
-	u64(256)
+	u64(uint64(len(values)))
 	u64(1)
 	u32(0)
 	u64(0)
@@ -143,13 +157,13 @@ func modelQuantizeCLIFixture() []byte {
 	u32(1)
 	u64(1)
 	u32(0)
-	u64(1024)
+	u64(uint64(len(values)) * 4)
 	for b.Len()%32 != 0 {
 		b.WriteByte(0)
 	}
-	for i := 0; i < 256; i++ {
-		u32(math.Float32bits(float32((i*73)%251-125) / 16))
+	for _, value := range values {
+		u32(math.Float32bits(value))
 	}
 	u32(math.Float32bits(1))
-	return b.Bytes()
+	return b.Bytes(), values
 }
