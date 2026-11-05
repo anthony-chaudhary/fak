@@ -305,6 +305,10 @@ func (c *Client) MGet(keys [][]byte) ([][]byte, []bool, error) {
 		return nil, nil, fmt.Errorf("server error: %s", string(resp.Body))
 	}
 
+	if resp.Header.OpCode != protocol.RespMultiValue {
+		return nil, nil, fmt.Errorf("unexpected MGET response opcode: 0x%02x", resp.Header.OpCode)
+	}
+
 	return protocol.DecodeMultiValueResponse(resp.Body)
 }
 
