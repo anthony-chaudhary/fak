@@ -40,6 +40,43 @@ func TestLaunchCensusShapeMath(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=1ms
+func TestExpertDispatchPerMoELayerMatchingVariantClasses(t *testing.T) {
+	t.Parallel()
+	shape := LaunchShape{ActiveExperts: 4}
+	cases := []struct {
+		class LaunchClass
+		want  int
+	}{
+		{LaunchPerIndexLayer, 0},
+		{LaunchPerKVLayer, 0},
+		{LaunchPerAttendLayer, 0},
+		{LaunchPerMoELayer, 3},
+		{LaunchPerActiveExpert, 12},
+		{LaunchPerToken, 0},
+		{LaunchPerRequest, 0},
+		{LaunchPrimitive, 0},
+		{LaunchClass("future-class"), 0},
+	}
+	for _, variants := range []struct{ selected, other string }{
+		{variantPerExpert, variantBatched},
+		{variantBatched, variantPerExpert},
+	} {
+		for _, tc := range cases {
+			t.Run(variants.selected+"/"+string(tc.class), func(t *testing.T) {
+				inv := []LaunchCallSite{
+					{Class: tc.class, Variant: variants.selected, Factor: 3},
+					{Class: LaunchPerActiveExpert, Variant: variants.other, Factor: 100},
+					{Class: LaunchPerActiveExpert, Variant: launchVariantShared, Factor: 100},
+				}
+				if got := expertDispatchPerMoELayer(inv, shape, variants.selected); got != tc.want {
+					t.Fatalf("expert subtotal = %d, want %d for matching class %q", got, tc.want, tc.class)
+				}
+			})
+		}
+	}
+}
+
 func TestLaunchShapeNormalizeDefaultsAndBounds(t *testing.T) {
 	s, err := (LaunchShape{Name: "x", Layers: 7, MoELayers: 3, ActiveExperts: 2}).normalize()
 	if err != nil {
