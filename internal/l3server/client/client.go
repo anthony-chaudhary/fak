@@ -217,6 +217,9 @@ func (c *Client) Delete(key []byte) error {
 	if resp.Header.OpCode == protocol.RespError {
 		return fmt.Errorf("server error: %s", string(resp.Body))
 	}
+	if resp.Header.OpCode != protocol.RespOK {
+		return fmt.Errorf("unexpected DELETE response opcode: 0x%02x", resp.Header.OpCode)
+	}
 	return nil
 }
 
@@ -520,6 +523,9 @@ func (c *Client) DeleteReplicated(key []byte) error {
 
 	if resp.Header.OpCode == protocol.RespError {
 		return fmt.Errorf("server error: %s", string(resp.Body))
+	}
+	if resp.Header.OpCode != protocol.RespOK {
+		return fmt.Errorf("unexpected DELETE response opcode: 0x%02x", resp.Header.OpCode)
 	}
 	return nil
 }
