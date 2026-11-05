@@ -6,12 +6,15 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
-// promptPanelBackend is the optional device seam the dense HAL prefill uses to ingest a prompt
+// promptPanelBackend is the optional device seam the HAL prefill uses to ingest a prompt
 // as [rows, width] panels: per layer one GEMM per projection over the rows instead of one GEMV
 // per token. Every op must be the per-row form of the op tokenHALOutput issues for one token,
 // so a panel row is bitwise the token loop's row whatever the row count or chunking (the BitExact
 // default). Row t of a panel sits at absolute position start+t. A backend that implements it
 // must also run RMSNorm, AddBias, SwiGLU and AddInPlace row-wise over [rows, width] panels.
+// For deepseek_v4 the routed FFN stays a per-row primitive (applyV4ExpertHAL): the panel
+// extracts each residual row, runs the token loop's exact FFN on it, and writes the updated
+// row back through PromptPanelSetRow.
 type promptPanelBackend interface {
 	// PromptPanelRowExact reports whether PromptPanelMatMul over a weight of dt computes each
 	// row bitwise as MatMul computes that row alone. A prompt with any other weight dtype keeps
@@ -37,6 +40,9 @@ type promptPanelBackend interface {
 	// PromptPanelRow copies row of a [rows, width] panel into a new [width] tensor that
 	// outlives PromptPanelEnd.
 	PromptPanelRow(x compute.Tensor, row, width int) compute.Tensor
+	// PromptPanelSetRow copies src into row of the [rows, width] panel x, the inverse of
+	// PromptPanelRow: a per-row FFN updates its residual back into the panel.
+	PromptPanelSetRow(x compute.Tensor, row, width int, src compute.Tensor)
 }
 
 // promptPanelMaxTokens caps one panel chunk. A longer prompt runs as consecutive chunks that
@@ -53,8 +59,9 @@ var promptPanelProjections = [...]string{
 }
 
 // promptPanelFor returns the backend's panel seam when this prompt can take it. The panel
-// mirrors only tokenHALOutput's plain dense branch and only weight dtypes with a per-row exact
-// GEMM, so every arch, capture, placement and dtype that does not qualify keeps the token loop.
+// mirrors tokenHALOutput's plain dense branch plus deepseek_v4's per-row live-expert FFN, and
+// only weight dtypes with a per-row exact GEMM, so every arch, capture, placement and dtype
+// that does not qualify keeps the token loop.
 func (s *Session) promptPanelFor(ids []int) (promptPanelBackend, bool) {
 	if len(ids) < 2 || s.Backend == nil || s.halKV == nil {
 		return nil, false
@@ -64,8 +71,14 @@ func (s *Session) promptPanelFor(ids []int) (promptPanelBackend, bool) {
 		return nil, false
 	}
 	cfg := s.M.Cfg
-	if q8PrefillNeedsTokenLoop(cfg) || cfg.IsDeepSeekV4() || cfg.QKNorm || cfg.usesMLAMoELayout() ||
-		cfg.isMiniMaxSparseAttn() || cfg.isGemma4() {
+	// MoE prefill takes the panel for exactly the arch whose routed FFN is a per-row
+	// primitive the panel can interleave after its batched attention sublayer:
+	// deepseek_v4's live-expert route (applyV4ExpertHAL). Every other MoE axis keeps the
+	// token loop, which owns those FFNs; the non-MoE refusals stay unchanged.
+	panelMoE := cfg.IsDeepSeekV4() && !cfg.QKNorm && !cfg.DenseMLP && !cfg.Alibi &&
+		!cfg.AttnOutputGate && cfg.BlockTopology == PreNorm && !cfg.hasLayerSpecificRopeTheta()
+	if !panelMoE && (q8PrefillNeedsTokenLoop(cfg) || cfg.IsDeepSeekV4() || cfg.QKNorm ||
+		cfg.usesMLAMoELayout() || cfg.isMiniMaxSparseAttn() || cfg.isGemma4()) {
 		return nil, false
 	}
 	if s.captureTargetHidden || s.qwen35TargetFeatureTxn != nil || s.qwen35TargetLayerCapture != nil {
@@ -77,8 +90,15 @@ func (s *Session) promptPanelFor(ids []int) (promptPanelBackend, bool) {
 	if _, split := s.validateDenseGPULayers(); split {
 		return nil, false
 	}
+	// The panel GEMMs are the attention projections; a dense layer adds the MLP triple.
+	// deepseek_v4's router and expert weights run per row through the token loop's own
+	// single-row ops, so they need no row-exact panel dtype.
+	projections := promptPanelProjections[:4]
+	if !cfg.IsDeepSeekV4() {
+		projections = promptPanelProjections[:]
+	}
 	for l := 0; l < cfg.NumLayers; l++ {
-		for _, name := range promptPanelProjections {
+		for _, name := range projections {
 			if !panel.PromptPanelRowExact(s.matWeightHAL(layerName(l, name)).Dtype) {
 				return nil, false
 			}
@@ -94,16 +114,26 @@ func (s *Session) promptPanelChunkTokens() int {
 		return promptPanelChunkOverride
 	}
 	c := s.M.Cfg
+	ffnWidth := c.IntermediateSize
+	if ffnWidth <= 0 && c.MoEIntermediateSize > 0 {
+		// An MoE-only width declaration (deepseek_v4): price the row's FFN transient at the
+		// expert width instead of letting the incomplete geometry degenerate the chunk to
+		// one row. The live-expert transients are hidden/router-wide, so this over-prices
+		// conservatively; the estimate only ever refuses MORE rows.
+		ffnWidth = c.MoEIntermediateSize
+	}
 	return compute.PromptPanelChunkTokens(compute.TransformerScratchConfig{
-		HiddenSize: c.HiddenSize, IntermediateSize: c.IntermediateSize, VocabSize: c.VocabSize,
+		HiddenSize: c.HiddenSize, IntermediateSize: ffnWidth, VocabSize: c.VocabSize,
 		NumLayers: c.NumLayers, NumHeads: c.NumHeads, NumKVHeads: c.NumKVHeads, HeadDim: c.HeadDim,
 		IncludeLogits: true,
 	}, promptPanelMaxTokens)
 }
 
-// prefillHALPanel is the batched twin of the prefillHAL token loop for a dense PreNorm model.
-// It ingests the prompt in bounded chunks; per chunk and layer it issues one RMSNorm, one
-// per-row GEMM per projection, one RoPE, one KV append and one causal attention.
+// prefillHALPanel is the batched twin of the prefillHAL token loop for a PreNorm model. It
+// ingests the prompt in bounded chunks; per chunk and layer it issues one RMSNorm, one
+// per-row GEMM per projection, one RoPE, one KV append and one causal attention. A
+// deepseek_v4 layer's routed FFN stays per row: each residual row runs the token loop's exact
+// live-expert FFN and is written back into the panel (PromptPanelSetRow).
 func (s *Session) prefillHALPanel(panel promptPanelBackend, ids []int, wantLogits bool) []float32 {
 	finishLineage := s.beginHALTokenLineageWrite(ids)
 	defer finishLineage()
@@ -203,15 +233,35 @@ func (s *Session) promptPanelChunk(panel promptPanelBackend, ids []int) compute.
 		o := panel.PromptPanelMatMul(s.matWeightHAL(p("self_attn.o_proj.weight")), attn, P)
 		be.AddInPlace(x, o)
 
-		xn2 := be.RMSNorm(x, s.normWeightHAL(p("post_attention_layernorm.weight")), eps)
-		g := panel.PromptPanelMatMul(s.matWeightHAL(p("mlp.gate_proj.weight")), xn2, P)
-		u := panel.PromptPanelMatMul(s.matWeightHAL(p("mlp.up_proj.weight")), xn2, P)
-		ff := be.SwiGLU(g, u)
-		down := panel.PromptPanelMatMul(s.matWeightHAL(p("mlp.down_proj.weight")), ff, P)
-		be.AddInPlace(x, down)
+		var xn2, g, u, ff, down compute.Tensor
+		if cfg.IsDeepSeekV4() {
+			// Routed FFN: the live-expert runtime is a per-token primitive, so each panel
+			// row runs the token loop's exact FFN (router + top-k experts + shared add) and
+			// writes its updated residual back into the panel. Row t is prompt token ids[t].
+			for t := 0; t < P; t++ {
+				row := panel.PromptPanelRow(x, t, H)
+				if err := s.applyV4ExpertHAL(l, ids[t], row, s.normWeightHAL(p("post_attention_layernorm.weight")), eps); err != nil {
+					be.Free(row)
+					panic(err)
+				}
+				panel.PromptPanelSetRow(x, t, H, row)
+				be.Free(row)
+			}
+		} else {
+			xn2 = be.RMSNorm(x, s.normWeightHAL(p("post_attention_layernorm.weight")), eps)
+			g = panel.PromptPanelMatMul(s.matWeightHAL(p("mlp.gate_proj.weight")), xn2, P)
+			u = panel.PromptPanelMatMul(s.matWeightHAL(p("mlp.up_proj.weight")), xn2, P)
+			ff = be.SwiGLU(g, u)
+			down = panel.PromptPanelMatMul(s.matWeightHAL(p("mlp.down_proj.weight")), ff, P)
+			be.AddInPlace(x, down)
+		}
 		// Return this layer's panel transients now so the scope never holds more than one
 		// layer's set plus the residual.
-		for _, t := range []compute.Tensor{xn, q, kRaw, v, qr, kr, attn, o, xn2, g, u, ff, down} {
+		transients := []compute.Tensor{xn, q, kRaw, v, qr, kr, attn, o}
+		if !cfg.IsDeepSeekV4() {
+			transients = append(transients, xn2, g, u, ff, down)
+		}
+		for _, t := range transients {
 			be.Free(t)
 		}
 	}

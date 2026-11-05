@@ -361,6 +361,24 @@ func (c *cudaBackend) PromptPanelRow(x Tensor, row, width int) Tensor {
 	return y
 }
 
+// PromptPanelSetRow copies src into row of the [rows, width] panel x, the inverse of
+// PromptPanelRow: a deepseek_v4 layer's per-row live-expert FFN updates its residual back into
+// the panel. It allocates nothing, so it runs under the panel scope and reuses the same
+// stream-ordered device-to-device copy PromptPanelRow issues.
+func (c *cudaBackend) PromptPanelSetRow(x Tensor, row, width int, src Tensor) {
+	if width <= 0 || row < 0 || (row+1)*width > x.Numel() || src.Numel() != width {
+		cudaPromptPanelFail("prompt-panel-setrow-geometry", "panel row write outside the panel or wrong source width", 0)
+	}
+	if x.Dtype != F32 || src.Dtype != F32 {
+		cudaPromptPanelFail("prompt-panel-setrow-dtype", "panel row write requires F32 panel and source", 0)
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	dst := c.cudaBufForSubmit(x)
+	s := c.cudaBufForSubmit(src)
+	C.fcuda_d2d(unsafe.Add(dst.ptr, row*width*F32.Bytes()), s.ptr, C.size_t(width*F32.Bytes()))
+}
+
 // CUDAPoolStats is the allocator witness for panel tests: cached (free) decode-pool bytes and
 // non-empty buckets, the largest such bucket, cached panel bytes, panel buffers still held, and
 // the last panel scope's peak of panel bytes held plus cached.

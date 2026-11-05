@@ -1,7 +1,13 @@
 package model
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
+	"fmt"
 	"math"
+	"sort"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -112,6 +118,13 @@ func (b *promptPanelRecordingBackend) PromptPanelRow(x compute.Tensor, row, widt
 	return b.row(x, row, width)
 }
 
+// PromptPanelSetRow writes src back into row of the panel, the inverse of PromptPanelRow.
+func (b *promptPanelRecordingBackend) PromptPanelSetRow(x compute.Tensor, row, width int, src compute.Tensor) {
+	d, _ := b.Host(x)
+	s, _ := b.Host(src)
+	copy(d[row*width:(row+1)*width], s)
+}
+
 // promptPanelBiasModel is a dense synthetic model with q/k/v projection biases, so the panel's
 // AttentionBias branch runs.
 func promptPanelBiasModel() *Model {
@@ -176,42 +189,98 @@ func assertSameHALKV(t *testing.T, label string, got, want *Session) {
 }
 
 // TestHALPromptPrefillRunsOneGEMMPerProjection is the regression for CUDA prefill running at
-// decode speed: a backend that offers the prompt-panel seam must ingest a dense prompt with one
-// panel GEMM per projection per layer, not one MatMul per token, and must leave the same
-// logits and KV state, bit for bit, as the per-token HAL loop.
+// decode speed: a backend that offers the prompt-panel seam must ingest a prompt with one panel
+// GEMM per batched projection per layer, not one MatMul per token, and must leave the same
+// logits and KV state, bit for bit, as the per-token HAL loop. The dense-bias case covers the
+// original seven-projection layer; the deepseek-v4-moe case covers the MoE arch the panel
+// admits: its attention sublayer batches over the rows while its routed FFN stays the proven
+// per-row live-expert primitive, so a layer contributes four panel GEMMs plus one single-row
+// router MatMul per row. [SW-VERIFIED]: cpu-ref witness, no GPU host.
 func TestHALPromptPrefillRunsOneGEMMPerProjection(t *testing.T) {
 	setPromptPanelChunk(t, 64)
-	m := promptPanelBiasModel()
-	cfg := m.Cfg
 	prompt := []int{3, 7, 11, 19, 23}
-
-	ref := m.NewBackendSession(compute.Pick("cpu-ref"))
-	defer ref.Close()
-	wantLogits := ref.Prefill(prompt)
-
-	be := newPromptPanelRecordingBackend()
-	s := m.NewBackendSession(be)
-	defer s.Close()
-	gotLogits := s.Prefill(prompt)
-	assertSameBits(t, "panel prefill logits", gotLogits, wantLogits)
-
-	const projectionsPerLayer = 7 // q, k, v, o, gate, up, down
-	if want := projectionsPerLayer * cfg.NumLayers; be.panelMatMuls != want {
-		t.Fatalf("prompt prefill panel GEMMs = %d, want %d (one per projection per layer)", be.panelMatMuls, want)
+	cases := []struct {
+		name               string
+		model              func() *Model
+		wire               func(t *testing.T, m *Model, s *Session) // per-session extras (fake expert runtime)
+		panelProjsPerLayer int                                      // panel GEMMs per layer (dense: 7, deepseek_v4: 4 attention projections)
+		routerRowsPerLayer int                                      // single-row router MatMuls per layer (0 for dense)
+	}{
+		{name: "dense-bias", model: promptPanelBiasModel, panelProjsPerLayer: 7},
+		{name: "deepseek-v4-moe", model: promptPanelV4Model, wire: wirePanelV4FakeRuntime, panelProjsPerLayer: 4, routerRowsPerLayer: 1},
 	}
-	if be.matmuls > 1 {
-		t.Fatalf("prompt prefill MatMul calls = %d, want at most 1 (the last-token head)", be.matmuls)
-	}
-	if be.panelAttention != cfg.NumLayers || be.begins != 1 || be.ends != 1 {
-		t.Fatalf("panel attention=%d begin=%d end=%d, want %d/1/1", be.panelAttention, be.begins, be.ends, cfg.NumLayers)
-	}
-	assertSameHALKV(t, "panel prefill", s, ref)
-	assertSameBits(t, "decode after panel prefill", s.Step(29), ref.Step(29))
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := tc.model()
+			cfg := m.Cfg
 
-	// A continuation prefill starts at the cached length and attends over the prefix.
-	more := []int{5, 41, 2}
-	assertSameBits(t, "continuation panel prefill logits", s.Prefill(more), ref.Prefill(more))
-	assertSameHALKV(t, "continuation panel prefill", s, ref)
+			ref := m.NewBackendSession(compute.Pick("cpu-ref"))
+			defer ref.Close()
+			var refFakes []*panelV4FakeRouted
+			if tc.wire != nil {
+				tc.wire(t, m, ref)
+				refFakes = append(refFakes, ref.v4Expert.(*panelV4FakeRouted))
+			}
+			wantLogits := ref.Prefill(prompt)
+
+			be := newPromptPanelRecordingBackend()
+			s := m.NewBackendSession(be)
+			defer s.Close()
+			if tc.wire != nil {
+				tc.wire(t, m, s)
+			}
+			gotLogits := s.Prefill(prompt)
+			assertSameBits(t, "panel prefill logits", gotLogits, wantLogits)
+
+			if want := tc.panelProjsPerLayer * cfg.NumLayers; be.panelMatMuls != want {
+				t.Fatalf("prompt prefill panel GEMMs = %d, want %d (one per batched projection per layer)", be.panelMatMuls, want)
+			}
+			wantMatMuls := len(prompt)*tc.routerRowsPerLayer*cfg.NumLayers + 1 // per-row routers + the last-token head
+			if be.matmuls != wantMatMuls {
+				t.Fatalf("prompt prefill MatMul calls = %d, want %d (per-row routers + the last-token head)", be.matmuls, wantMatMuls)
+			}
+			if be.panelAttention != cfg.NumLayers || be.begins != 1 || be.ends != 1 {
+				t.Fatalf("panel attention=%d begin=%d end=%d, want %d/1/1", be.panelAttention, be.begins, be.ends, cfg.NumLayers)
+			}
+			if tc.wire != nil {
+				assertSameV4FFNCalls(t, "prefill", s.v4Expert.(*panelV4FakeRouted), refFakes[0], cfg.NumLayers, prompt)
+			}
+			assertSameHALKV(t, "panel prefill", s, ref)
+			assertSameBits(t, "decode after panel prefill", s.Step(29), ref.Step(29))
+
+			// A continuation prefill starts at the cached length and attends over the prefix.
+			more := []int{5, 41, 2}
+			assertSameBits(t, "continuation panel prefill logits", s.Prefill(more), ref.Prefill(more))
+			assertSameHALKV(t, "continuation panel prefill", s, ref)
+		})
+	}
+}
+
+// assertSameV4FFNCalls proves both paths ran the per-row routed FFN once for every
+// (layer, prompt token) pair: the panel path visits them layer-major, the token loop
+// token-major, so the multisets must agree exactly.
+func assertSameV4FFNCalls(t *testing.T, label string, got, want *panelV4FakeRouted, layers int, prompt []int) {
+	t.Helper()
+	gc, wc := got.callsSnapshot(), want.callsSnapshot()
+	if len(gc) != layers*len(prompt) || len(wc) != layers*len(prompt) {
+		t.Fatalf("%s: FFN forward calls = %d/%d, want %d on both paths", label, len(gc), len(wc), layers*len(prompt))
+	}
+	key := func(c panelV4Call) string { return fmt.Sprintf("%d:%d", c.layer, c.tokenID) }
+	gk := make(map[string]int, len(gc))
+	for _, c := range gc {
+		gk[key(c)]++
+	}
+	for _, c := range wc {
+		if gk[key(c)] == 0 {
+			t.Fatalf("%s: token-loop FFN call (%d,%d) has no panel-path twin", label, c.layer, c.tokenID)
+		}
+		gk[key(c)]--
+	}
+	for k, n := range gk {
+		if n != 0 {
+			t.Fatalf("%s: panel-path FFN call %s ran %d extra time(s)", label, k, n)
+		}
+	}
 }
 
 // TestHALPromptPrefillChunkingKeepsBits runs one prompt whole, in uneven chunks and one row
@@ -287,5 +356,194 @@ func TestHALPromptPrefillKeepsTokenStepWhenNotRowExact(t *testing.T) {
 		if b.panelMatMuls != 0 || b.panelAttention != 0 || b.begins != 0 {
 			t.Fatalf("prompt took the panel: gemms=%d attention=%d begins=%d", b.panelMatMuls, b.panelAttention, b.begins)
 		}
+	}
+}
+
+// promptPanelV4Model builds a small deepseek_v4 MoE model: attention projections, layernorms and
+// the per-layer router gate, but no dense MLP triple (V4 has none) and no expert tensors — the
+// routed FFN is served by an injected fake v4LiveExpertRuntime, so no expert bytes are ever read.
+// The layout mirrors NewSyntheticMoE's tensor set with the V4 identity, which is what
+// promptPanelFor's named MoE subset keys on.
+func promptPanelV4Model() *Model {
+	cfg := Config{
+		ModelType: "deepseek_v4", HiddenSize: 16, NumLayers: 2, NumHeads: 4, NumKVHeads: 2,
+		HeadDim: 4, VocabSize: 64, RMSNormEps: 1e-5, RopeTheta: 10000,
+		NumExperts: 4, NumExpertsPerTok: 2, NSharedExperts: 0,
+		TieWordEmbeddings: true, EOSTokenID: -1,
+	}
+	H, E := cfg.HiddenSize, cfg.NumExperts
+	type ts = synthTensor
+	var tensors []ts
+	tensors = append(tensors, ts{"model.embed_tokens.weight", []int{cfg.VocabSize, H}})
+	for l := 0; l < cfg.NumLayers; l++ {
+		p := layerPrefix(l)
+		tensors = append(tensors,
+			ts{p + "input_layernorm.weight", []int{H}},
+			ts{p + "self_attn.q_proj.weight", []int{cfg.NumHeads * cfg.HeadDim, H}},
+			ts{p + "self_attn.k_proj.weight", []int{cfg.NumKVHeads * cfg.HeadDim, H}},
+			ts{p + "self_attn.v_proj.weight", []int{cfg.NumKVHeads * cfg.HeadDim, H}},
+			ts{p + "self_attn.o_proj.weight", []int{H, cfg.NumHeads * cfg.HeadDim}},
+			ts{p + "post_attention_layernorm.weight", []int{H}},
+			ts{routerName(l), []int{E, H}},
+		)
+	}
+	tensors = append(tensors, ts{"model.norm.weight", []int{H}})
+	man, raw := synthBuildRawResolved(tensors, func(name string) synthElemFill {
+		if strings.HasSuffix(name, "layernorm.weight") || name == "model.norm.weight" {
+			return synthConstFill(1.0)
+		}
+		return synthMatmulFillFor(name)
+	})
+	return &Model{Cfg: cfg, manifest: man, raw: raw}
+}
+
+// panelV4Call is one recorded live-expert forward: the layer it ran in and the prompt token id
+// whose row it contracted.
+type panelV4Call struct{ layer, tokenID int }
+
+// panelV4FakeRouted is a deterministic v4LiveExpertRuntime for the panel MoE witness: its output
+// is a pure function of the router logits and the normalized row (top-k by logit value, ties to
+// the lower expert index, each pick weighted by its own logit), so two sessions that feed it
+// identical rows get identical bits back. It records every forward call so a witness can compare
+// the (layer, tokenID) coverage of the panel and token-loop paths.
+type panelV4FakeRouted struct {
+	mu     sync.Mutex
+	hidden int
+	topK   int
+	calls  []panelV4Call
+}
+
+func (f *panelV4FakeRouted) forward(layer, tokenID int, x, logits, correctionBias []float32) ([]float32, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, panelV4Call{layer, tokenID})
+	f.mu.Unlock()
+	out := make([]float32, f.hidden)
+	order := make([]int, len(logits))
+	for e := range order {
+		order[e] = e
+	}
+	sort.SliceStable(order, func(a, b int) bool { return logits[order[a]] > logits[order[b]] })
+	k := min(f.topK, len(order))
+	for rank := 0; rank < k; rank++ {
+		e := order[rank]
+		w := logits[e] * float32(rank+1)
+		for i := 0; i < f.hidden; i++ {
+			out[i] += w * x[(i+e)%f.hidden]
+		}
+	}
+	return out, nil
+}
+
+func (f *panelV4FakeRouted) Close() error { return nil }
+
+func (f *panelV4FakeRouted) Stats() v4ExpertRuntimeStats { return v4ExpertRuntimeStats{} }
+
+func (f *panelV4FakeRouted) callsSnapshot() []panelV4Call {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]panelV4Call(nil), f.calls...)
+}
+
+// wirePanelV4FakeRuntime installs the deterministic fake routed-expert runtime on one session
+// over the V4 fixture: ensureV4LiveExpert requires an indexed source directory, and the fake
+// means no weight is ever read from it.
+func wirePanelV4FakeRuntime(t *testing.T, m *Model, s *Session) {
+	t.Helper()
+	if m.sourceDir == "" {
+		m.sourceDir = t.TempDir()
+	}
+	s.v4Expert = &panelV4FakeRouted{hidden: m.Cfg.HiddenSize, topK: m.Cfg.NumExpertsPerTok}
+}
+
+// TestHALPromptPrefillMoEGreedyParity is the greedy-sha parity witness between the two prefill
+// paths for the MoE arch the panel admits: the batched panel path and the per-token HAL loop
+// must produce bit-identical prefill logits, KV state and greedy generations. [SW-VERIFIED]:
+// cpu-ref reference backend, no GPU host, no hardware timing claim.
+func TestHALPromptPrefillMoEGreedyParity(t *testing.T) {
+	setPromptPanelChunk(t, 64)
+	const steps = 8
+	prompt := []int{3, 7, 11, 19, 23, 29}
+
+	ref := promptPanelV4Model()
+	refBe := compute.Pick("cpu-ref")
+	refS := ref.NewBackendSession(refBe)
+	defer refS.Close()
+	wirePanelV4FakeRuntime(t, ref, refS)
+	wantLogits := refS.Prefill(prompt)
+
+	panel := promptPanelV4Model()
+	be := newPromptPanelRecordingBackend()
+	s := panel.NewBackendSession(be)
+	defer s.Close()
+	wirePanelV4FakeRuntime(t, panel, s)
+	gotLogits := s.Prefill(prompt)
+	assertSameBits(t, "greedy-parity prefill logits", gotLogits, wantLogits)
+	assertSameHALKV(t, "greedy-parity prefill", s, refS)
+	if be.panelMatMuls != 4*panel.Cfg.NumLayers {
+		t.Fatalf("panel GEMMs = %d, want %d (attention projections only)", be.panelMatMuls, 4*panel.Cfg.NumLayers)
+	}
+	wantGreedy := greedySequence(t, refS, argmaxF32(wantLogits), steps)
+	gotGreedy := greedySequence(t, s, argmaxF32(gotLogits), steps)
+
+	if len(gotGreedy) != len(wantGreedy) {
+		t.Fatalf("greedy lengths = %d/%d, want equal", len(gotGreedy), len(wantGreedy))
+	}
+	for i := range gotGreedy {
+		if gotGreedy[i] != wantGreedy[i] {
+			t.Fatalf("greedy[%d] = %d, want %d (panel vs token loop diverged)", i, gotGreedy[i], wantGreedy[i])
+		}
+	}
+	t.Logf("[SW-VERIFIED] greedy-sha parity: panel sha256=%s token-loop sha256=%s tokens=%v",
+		greedySHA256(gotGreedy), greedySHA256(wantGreedy), gotGreedy)
+}
+
+// greedySequence decodes n tokens greedily from seed on s and returns their ids.
+func greedySequence(t *testing.T, s *Session, seed int, n int) []int {
+	t.Helper()
+	out := make([]int, 0, n)
+	cur := seed
+	for i := 0; i < n; i++ {
+		logits := s.Step(cur)
+		cur = argmaxF32(logits)
+		out = append(out, cur)
+	}
+	return out
+}
+
+// greedySHA256 digests a generated token sequence as little-endian uint32 rows.
+func greedySHA256(seq []int) string {
+	buf := make([]byte, 4*len(seq))
+	for i, id := range seq {
+		binary.LittleEndian.PutUint32(buf[4*i:], uint32(id))
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(buf))
+}
+
+// TestHALPromptPrefillMoEFallbackKeepsTokenLoop pins the named-subset boundary: a generic MoE
+// arch (not deepseek_v4) keeps the per-token loop even when the backend offers the panel seam,
+// because its routed FFN has no per-row HAL primitive yet; a deepseek_v4 config carrying an
+// axis the panel does not model (QKNorm here) is refused the same way. [SW-VERIFIED]
+func TestHALPromptPrefillMoEFallbackKeepsTokenLoop(t *testing.T) {
+	generic := Config{HiddenSize: 16, NumLayers: 1, NumHeads: 4, NumKVHeads: 2, HeadDim: 4,
+		IntermediateSize: 32, VocabSize: 64, RMSNormEps: 1e-5, RopeTheta: 10000,
+		NumExperts: 4, NumExpertsPerTok: 2, TieWordEmbeddings: true}
+	m := NewSyntheticMoE(generic)
+	be := newPromptPanelRecordingBackend()
+	s := m.NewBackendSession(be)
+	defer s.Close()
+	if _, ok := s.promptPanelFor([]int{3, 7}); ok {
+		t.Fatal("generic MoE took the panel, want the token loop")
+	}
+	if be.panelMatMuls != 0 || be.begins != 0 {
+		t.Fatalf("generic MoE ran panel ops: gemms=%d begins=%d", be.panelMatMuls, be.begins)
+	}
+
+	v4 := promptPanelV4Model()
+	v4.Cfg.QKNorm = true
+	be2 := newPromptPanelRecordingBackend()
+	s2 := v4.NewBackendSession(be2)
+	defer s2.Close()
+	if _, ok := s2.promptPanelFor([]int{3, 7}); ok {
+		t.Fatal("deepseek_v4 with QKNorm took the panel, want the token loop")
 	}
 }
