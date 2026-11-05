@@ -35,21 +35,34 @@ func ParseIndex(indexText string) [][2]string {
 	return out
 }
 
-// StripFrontmatter removes a leading YAML frontmatter block.
+// StripFrontmatter removes a leading YAML frontmatter block delimited by complete
+// "---" lines, optionally followed by horizontal whitespace and a YAML comment.
 func StripFrontmatter(text string) string {
-	if !strings.HasPrefix(text, "---") {
+	first, rest, found := strings.Cut(text, "\n")
+	if !found || !frontmatterDelimiter(first) {
 		return text
 	}
-	end := strings.Index(text[3:], "\n---")
-	if end == -1 {
-		return text
+	for {
+		line, body, more := strings.Cut(rest, "\n")
+		if frontmatterDelimiter(line) {
+			return strings.TrimLeft(body, "\n")
+		}
+		if !more {
+			return text
+		}
+		rest = body
 	}
-	end += 3
-	nl := strings.Index(text[end+1:], "\n")
-	if nl == -1 {
-		return text
+}
+
+func frontmatterDelimiter(line string) bool {
+	line = strings.TrimRight(line, " \t\r")
+	if line == "---" {
+		return true
 	}
-	return strings.TrimLeft(text[end+1+nl+1:], "\n")
+	if strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "---\t") {
+		return strings.HasPrefix(strings.TrimLeft(line[3:], " \t"), "#")
+	}
+	return false
 }
 
 // DefaultStore resolves the committed memory mirror below root.
