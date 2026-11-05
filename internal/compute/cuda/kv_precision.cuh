@@ -55,6 +55,17 @@ static int kv_snapshot_status(int status) {
   if (status != 0 && g_cuda_cleanup_status == 0) g_cuda_cleanup_status = status;
   return status;
 }
+extern "C" void fcuda_kv_snapshot_failed(int status) {
+  (void)kv_snapshot_status(status ? status : -75707);
+}
+// Preserve the gather API's coarse status (4 for a launch error), not a second
+// CUDA last-error query. The shared latch closes default-build cleanup too.
+extern "C" int fcuda_paged_kv_snapshot_gather_checked(float *dst, const float *cache,
+    const int *table, int tokens, int heads, int head_size, int block_size, int key_layout) {
+  if (v41_candidates_stream_uncertain())
+    return kv_snapshot_status(g_cuda_cleanup_status != 0 ? g_cuda_cleanup_status : (int)cudaErrorNotReady);
+  return kv_snapshot_status(fcuda_paged_kv_gather_f32(dst, cache, table, tokens, heads, head_size, block_size, key_layout));
+}
 extern "C" int fcuda_kv_snapshot_load_checked(float *dst, const void *src, int n, int dtype) {
   if (v41_candidates_stream_uncertain())
     return kv_snapshot_status(g_cuda_cleanup_status != 0 ? g_cuda_cleanup_status : (int)cudaErrorNotReady);
