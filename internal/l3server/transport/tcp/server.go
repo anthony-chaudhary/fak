@@ -172,17 +172,12 @@ func (s *Server) acceptLoop() {
 			}
 		}
 
-		// Reject if at connection limit
-		if s.maxConns > 0 {
-			s.connsMu.Lock()
-			atLimit := len(s.conns) >= s.maxConns
-			s.connsMu.Unlock()
-			if atLimit {
-				conn.Close()
-				metrics.IncrTCPConnectionRejections()
-				log.Printf("[tcp] WARNING: rejecting connection from %s â€” at limit (%d/%d)", conn.RemoteAddr(), s.maxConns, s.maxConns)
-				continue
-			}
+		// Reserve capacity before launching a handler, including pending handlers.
+		if !s.trackConn(conn) {
+			conn.Close()
+			metrics.IncrTCPConnectionRejections()
+			log.Printf("[tcp] WARNING: rejecting connection from %s â€” at limit (%d/%d)", conn.RemoteAddr(), s.maxConns, s.maxConns)
+			continue
 		}
 
 		// Set TCP options
@@ -195,6 +190,20 @@ func (s *Server) acceptLoop() {
 		s.wg.Add(1)
 		go s.handleConn(conn)
 	}
+}
+
+// trackConn checks the limit and reserves a connection in the same critical section.
+func (s *Server) trackConn(conn net.Conn) bool {
+	s.connsMu.Lock()
+	defer s.connsMu.Unlock()
+	if s.maxConns > 0 && len(s.conns) >= s.maxConns {
+		return false
+	}
+	s.conns[conn] = struct{}{}
+	if n := len(s.conns); n > s.connsPeak {
+		s.connsPeak = n
+	}
+	return true
 }
 
 func (s *Server) handleConn(conn net.Conn) {
@@ -211,13 +220,7 @@ func (s *Server) handleConn(conn net.Conn) {
 		}
 	}()
 
-	// Track connection for forced close on shutdown
-	s.connsMu.Lock()
-	s.conns[conn] = struct{}{}
-	if n := len(s.conns); n > s.connsPeak {
-		s.connsPeak = n
-	}
-	s.connsMu.Unlock()
+	// Retire the connection reserved by acceptLoop.
 	defer func() {
 		s.connsMu.Lock()
 		delete(s.conns, conn)
