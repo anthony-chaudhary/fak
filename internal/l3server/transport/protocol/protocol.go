@@ -291,10 +291,10 @@ func DecodeValueResponse(body []byte) (value []byte, found bool, err error) {
 		return nil, false, fmt.Errorf("value response truncated")
 	}
 	valueLen := binary.LittleEndian.Uint32(body[1:5])
-	if 5+int(valueLen) > len(body) {
+	if uint64(valueLen) > uint64(len(body)-5) {
 		return nil, false, fmt.Errorf("value response value truncated")
 	}
-	return body[5 : 5+valueLen], true, nil
+	return body[5 : 5+int(valueLen)], true, nil
 }
 
 // EncodeErrorResponse creates an error response body.
