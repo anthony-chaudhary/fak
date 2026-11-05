@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -17,6 +18,27 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelloadplan"
 )
 
+// ErrModelPlanMultiGPUUnsupported marks a non-V4.1 placement leaf asked for
+// more than one GPU. The qwen38 leaf places the full model on exactly one
+// device; two-GPU tensor-parallel serving is a separate capability with its
+// own provenance (fak tpcheck), not a planner flag.
+var ErrModelPlanMultiGPUUnsupported = errors.New("the qwen38 placement leaf supports exactly one GPU; two-GPU full-model placement is not implemented (TP=2 collectives are proven separately via fak tpcheck)")
+
+// validateModelPlanGPUs is the closed-contract check over --gpus before any
+// leaf runs. Below one GPU is a CLI misuse (exit 2 at the call site); above
+// one on a non-V4.1 leaf is the typed multi-GPU refusal (exit 3, matching the
+// V4.1 planner's own single-GPU refusal). V4.1 passes through untouched: its
+// planner owns the GPU-count verdict.
+func validateModelPlanGPUs(gpus int, isV41 bool) error {
+	if gpus < 1 {
+		return fmt.Errorf("fak model plan: --gpus must be >= 1 (got %d)", gpus)
+	}
+	if !isV41 && gpus > 1 {
+		return ErrModelPlanMultiGPUUnsupported
+	}
+	return nil
+}
+
 func runModelPlan(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("model plan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -28,7 +50,7 @@ func runModelPlan(stdout, stderr io.Writer, args []string) int {
 	hostGiB := fs.Float64("host-gib", 0, "usable host GiB; V4.1: cache budget AFTER OS/CPU decoder/pinned-transfer reserves (0 unknown)")
 	diskGiB := fs.Float64("disk-gib", 0, "usable model-cache disk in GiB (0 means unknown)")
 	jsonOut := fs.Bool("json", false, "emit the versioned plan as JSON")
-	gpus := fs.Int("gpus", 1, "V4.1 placement GPU count (first leaf supports one)")
+	gpus := fs.Int("gpus", 1, "placement GPU count; qwen38 places exactly one GPU (refused above one), V4.1 passes through to its planner")
 	hfConfig := fs.String("hf-config", "", "V4.1 HF config JSON; metadata only")
 	hfIndex := fs.String("hf-index", "", "pinned1017 model.safetensors.index.json; hashed metadata only")
 	revision := fs.String("revision", v41.V41Placement1017Revision, "V4.1 packed checkpoint revision (1017 only)")
@@ -48,6 +70,14 @@ func runModelPlan(stdout, stderr io.Writer, args []string) int {
 	isV41 := modelArg == "deepseek-v41-flash"
 	if fs.NArg() > 0 || (modelArg != "" && !isV41 && !oneOfString(modelArg, "qwen38", "qwen38:27b", "qwen/qwen3.8-27b")) {
 		fmt.Fprintln(stderr, "fak model plan: supported models are qwen38:27b (default) and deepseek-v41-flash (offline placement)")
+		return 2
+	}
+	if err := validateModelPlanGPUs(*gpus, isV41); err != nil {
+		if errors.Is(err, ErrModelPlanMultiGPUUnsupported) {
+			fmt.Fprintln(stderr, err)
+			return 3
+		}
+		fmt.Fprintln(stderr, err)
 		return 2
 	}
 	toBytes := func(name string, n float64) (int64, bool) {
