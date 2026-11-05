@@ -119,8 +119,13 @@ func Reconcile(s Snapshot) (Receipt, error) {
 		if _, ok := m[a.IntentID]; !ok {
 			return Receipt{}, fmt.Errorf("attempt references unknown intent %q", a.IntentID)
 		}
-		if a.State == AttemptReserved || a.State == AttemptLaunching || a.State == AttemptRunning {
+		switch a.State {
+		case AttemptReserved, AttemptLaunching, AttemptRunning:
 			active[a.IntentID] = true
+		case AttemptSucceeded, AttemptFailed:
+			// Terminal attempts do not occupy a live slot.
+		default:
+			return Receipt{}, fmt.Errorf("unsupported attempt state %q for attempt %q", a.State, a.ID)
 		}
 	}
 	eligible := []string{}
