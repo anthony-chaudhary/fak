@@ -74,14 +74,16 @@ func (p *RadixKVPager) PageBytes(raw []byte) (tokens []int, pages int, nodeAlign
 	if align <= 0 {
 		align = DefaultRadixPagerAlign
 	}
-	pages = (len(raw) + align - 1) / align
+	// Subtract before rounding up so large alignments cannot overflow int.
+	pages = 1 + (len(raw)-1)/align
 	tokens = make([]int, 0, pages)
-	for off := 0; off < len(raw); off += align {
-		end := off + align
-		if end > len(raw) {
-			end = len(raw)
+	for off := 0; off < len(raw); {
+		end := len(raw)
+		if align < len(raw)-off {
+			end = off + align
 		}
 		tokens = append(tokens, pageToken(raw[off:end]))
+		off = end
 	}
 	nodeAligned = (uintptr(unsafe.Pointer(&raw[0])) % uintptr(align)) == 0
 	return tokens, pages, nodeAligned, nil

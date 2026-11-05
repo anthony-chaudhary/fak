@@ -26,6 +26,23 @@ func TestPageBytesDeterministicAndCounted(t *testing.T) {
 	}
 }
 
+// Runtime estimate is unmeasured; each case uses three input bytes and one metadata slot.
+// fak-test:runtime fast est=10ms lane=default
+func TestPageBytesLargeAlignmentDoesNotOverflow(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
+	raw := []byte{1, 2, 3}
+	for _, align := range []int{maxInt - 1, maxInt} {
+		p := NewRadixKVPager(nil, align, 1)
+		tokens, pages, _, err := p.PageBytes(raw)
+		if err != nil || pages != 1 || len(tokens) != 1 {
+			t.Fatalf("alignment %d: pages=%d tokens=%v err=%v, want one page", align, pages, tokens, err)
+		}
+		if tokens[0] != pageToken(raw) {
+			t.Fatalf("alignment %d: token=%d, want full input token %d", align, tokens[0], pageToken(raw))
+		}
+	}
+}
+
 func TestAdmitRawUnalignedReturnsTokensNoBind(t *testing.T) {
 	p := NewRadixKVPager(nil, 4096, 64)
 	raw := []byte("not-page-aligned")
