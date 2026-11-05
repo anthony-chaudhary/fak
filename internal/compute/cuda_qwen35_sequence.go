@@ -76,6 +76,11 @@ func validateQwen35SequenceGeometry(req Qwen35SequencePrefillRequest) error {
 	if len(req.TokenIDs) == 0 || req.StartPos < 0 {
 		return qwen35SequenceFailure("request", -1, "token panel must be non-empty and start position non-negative")
 	}
+	// Every hybrid group runs GDN kernels with tokens in CUDA grid.y.
+	// Refuse impossible grids before reserving KV or allocating panel scratch.
+	if len(req.TokenIDs) > 65535 {
+		return qwen35SequenceFailure("geometry", -1, "GDN token panel must fit CUDA grid.y (1..65535)")
+	}
 	if req.Hidden <= 0 || req.Intermediate <= 0 || req.NumHeads <= 0 || req.NumKVHeads <= 0 || req.HeadDim <= 0 || req.RotaryDim <= 0 {
 		return qwen35SequenceFailure("geometry", -1, "hidden, FFN, attention head counts, and dimensions must be positive")
 	}
