@@ -697,8 +697,14 @@ func TestLearnedPrefixDiskIndex(t *testing.T) {
 		}
 
 		idA, idB := learnedPrefixIdentity(specA.Scope), learnedPrefixIdentity(specB.Scope)
-		if len(idA) != 16 || len(idB) != 16 || idA == idB {
-			t.Fatalf("identities %q/%q, want distinct 16-hex names", idA, idB)
+		if idA == idB {
+			t.Fatalf("identities %q/%q, want distinct names", idA, idB)
+		}
+		for _, id := range []string{idA, idB} {
+			decoded, err := hex.DecodeString(id)
+			if err != nil || len(decoded) != binary.Size(uint64(0)) || id != strings.ToLower(id) {
+				t.Fatalf("identity %q: decoded=%x err=%v, want a 64-bit lowercase hex name", id, decoded, err)
+			}
 		}
 		keyA := warmDiskKey(specA, modelDigest, a.warmDiskExecutionIdentity())
 		keyB := warmDiskKey(specB, modelDigest, b.warmDiskExecutionIdentity())
@@ -765,11 +771,31 @@ func TestLearnedPrefixDiskIndex(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, id, learnedPendingFile)); !os.IsNotExist(err) {
 			t.Fatalf("pending marker survived commit: %v", err)
 		}
-		if b, err := os.ReadFile(filepath.Join(dir, id, learnedUsedFile)); err != nil || len(b) != 8 {
-			t.Fatalf("used word file: err=%v len=%d, want 8 bytes", err, len(b))
+		readWord := func(path string) uint64 {
+			t.Helper()
+			b, err := os.ReadFile(path)
+			if err != nil || len(b) != binary.Size(uint64(0)) {
+				t.Fatalf("word file %s: err=%v len=%d, want a uint64 encoding", path, err, len(b))
+			}
+			return binary.LittleEndian.Uint64(b)
 		}
-		if b, err := os.ReadFile(filepath.Join(dir, learnedClockFile)); err != nil || len(b) != 8 {
-			t.Fatalf("clock word file: err=%v len=%d, want 8 bytes", err, len(b))
+		usedPath := filepath.Join(dir, id, learnedUsedFile)
+		clockPath := filepath.Join(dir, learnedClockFile)
+		clock := readWord(clockPath)
+		if used := readWord(usedPath); clock == 0 || used != clock {
+			t.Fatalf("clock=%d used=%d, want matching nonzero open stamps", clock, used)
+		}
+
+		// Cross a byte boundary so the reopen witness also detects wrong endianness.
+		const previousClock uint64 = 0xff
+		if err := os.WriteFile(clockPath, binary.LittleEndian.AppendUint64(nil, previousClock), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		openResolved(t, dir, spec)
+		for _, path := range []string{clockPath, usedPath} {
+			if got := readWord(path); got != previousClock+1 {
+				t.Fatalf("reopened word %s=%d, want %d", path, got, previousClock+1)
+			}
 		}
 	})
 
