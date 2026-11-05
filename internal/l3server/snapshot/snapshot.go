@@ -123,6 +123,9 @@ func (r *Reader) ReadManifest() (Manifest, error) {
 	if err := json.Unmarshal(data, &m); err != nil {
 		return Manifest{}, err
 	}
+	if m.ShardCount < 0 {
+		return Manifest{}, fmt.Errorf("snapshot shard_count must be non-negative, got %d", m.ShardCount)
+	}
 	return m, nil
 }
 
