@@ -146,6 +146,23 @@ type NativeScheduler struct {
 	// Set once before the scheduler is published.
 	elastic *nativeElasticLedger
 
+	// Spec admission padding, adapted from vLLM's pad_spec_decode (source pin in
+	// the commit body). With specPadK > 0, a waiting lane promoted into a
+	// spec-carrying decode step reserves specPadK placeholder draft slots so its
+	// first decode step rides the same fixed-shape panel as the resident
+	// 1+specPadK lanes; a step whose token budget cannot carry the padded cost
+	// holds the lane in waiting instead of admitting a short row off the
+	// captured bucket. Zero (the default) keeps historical admission
+	// byte-for-byte. Guarded by mu; written by SetSpecAdmissionPad, read only
+	// by the executor.
+	specPadK int
+	// specAdmissionPads/specAdmissionPadSlots count pad_spec_decode reservations
+	// made at admission time: one reservation per padded promotion, plus the
+	// placeholder draft slots it reserved. Guarded by mu; written only by the
+	// executor.
+	specAdmissionPads     uint64
+	specAdmissionPadSlots uint64
+
 	// sessionDecorator decorates every lane session this scheduler mints (fresh
 	// and restored) before use — e.g. binding the device backend a P/D decode
 	// role resolved. Set once before the first Admit; nil keeps the historical
@@ -358,6 +375,20 @@ func (s *NativeScheduler) SharedWorkReceipt() SharedWorkReceipt {
 		Panels: s.sharedPanels,
 		MACs:   s.sharedMACs,
 	}
+}
+
+// SpecAdmissionPadReceipt reports pad_spec_decode admission activity: how many
+// promotions reserved placeholder draft slots and how many slots were reserved
+// in total. All-zero means no padded admission ever ran.
+type SpecAdmissionPadReceipt struct {
+	Pads  uint64
+	Slots uint64
+}
+
+func (s *NativeScheduler) SpecAdmissionPadReceipt() SpecAdmissionPadReceipt {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return SpecAdmissionPadReceipt{Pads: s.specAdmissionPads, Slots: s.specAdmissionPadSlots}
 }
 
 // SkipDraftsReason is the closed vocabulary for a skip=true verdict: why the
@@ -1070,6 +1101,24 @@ func (s *NativeScheduler) SetMaxTokensPerStep(n int) {
 	s.signal()
 }
 
+// SetSpecAdmissionPad arms vLLM's pad_spec_decode admission padding
+// (vllm/v1/core/sched/scheduler.py:1271-1296@ae065918640a198a56f6f17eb45e251c3229fe41,
+// Apache-2.0): with k > 0, a waiting lane promoted into a spec-carrying decode step
+// reserves k placeholder draft slots, so its first decode step rides the same
+// fixed-shape panel as the resident 1+k lanes; a step whose token budget cannot
+// carry the padded cost holds the lane in waiting rather than admitting a short
+// row off the captured bucket. k <= 0 disables the pad (the default). Set it
+// before the first Admit.
+func (s *NativeScheduler) SetSpecAdmissionPad(k int) {
+	if k < 0 {
+		k = 0
+	}
+	s.mu.Lock()
+	s.specPadK = k
+	s.mu.Unlock()
+	s.signal()
+}
+
 // SetPrefillInterval holds prefill to every Nth engine step so decode runs in
 // longer uninterrupted stretches (vLLM local prefill cadence). n<=1 disables
 // the hold and keeps today's mixed-step order bit-for-bit. A deferred step
@@ -1099,6 +1148,36 @@ func laneStepTokens(ln *schedLane) int {
 		return 1
 	}
 	return chunk
+}
+
+// specStepCarriesLocked reports whether this step is a spec-carrying decode step
+// for pad_spec_decode purposes: at least one running lane has computed context
+// (materialized and decoding), and no running lane still prefills a chunk this
+// step. Caller holds s.mu.
+func (s *NativeScheduler) specStepCarriesLocked() bool {
+	carrying := false
+	for _, ln := range s.lanes {
+		switch ln.state {
+		case schedLanePrefilling:
+			return false // a prefill chunk rides this step: not a pure decode step
+		case schedLaneDecode:
+			if ln.sess != nil {
+				carrying = true
+			}
+		}
+	}
+	return carrying
+}
+
+// specStepPanelLocked returns the fixed per-row token shape a spec-carrying
+// decode step rides: 1 target token plus specPadK draft slots for every row,
+// residents and padded newcomers alike. ok=false when the step is not a
+// spec-carrying decode step. Caller holds s.mu.
+func (s *NativeScheduler) specStepPanelLocked() (int, bool) {
+	if s.specPadK <= 0 || !s.specStepCarriesLocked() {
+		return 0, false
+	}
+	return 1 + s.specPadK, true
 }
 
 // promoteWaitingLocked moves waiting lanes into the running set in deadline order
@@ -1151,15 +1230,30 @@ func (s *NativeScheduler) promoteWaitingLocked(maxRun int) (queueWaits []time.Du
 			kept = append(kept, ln)
 			continue
 		}
+		cost := laneStepTokens(ln)
+		pad := 0
+		if s.specPadK > 0 && cost == 1 && s.specStepCarriesLocked() {
+			// pad_spec_decode admission: reserve K placeholder draft slots so the
+			// newcomer's first decode step rides the same fixed-shape panel as the
+			// resident 1+K lanes instead of forcing the step off the captured bucket.
+			pad = s.specPadK
+			cost += pad
+		}
 		if s.maxTokensPerStep > 0 {
-			cost := laneStepTokens(ln)
 			if cost > budget && len(s.lanes) > 0 {
+				// Skip this lane, not break the pass: a padded row that does not fit
+				// stays in waiting while later lanes that do fit are still admitted.
 				kept = append(kept, ln)
 				continue
 			}
 			budget -= cost
 		}
 		s.lanes = append(s.lanes, ln)
+		if pad > 0 {
+			ln.specAdmissionPad = pad
+			s.specAdmissionPads++
+			s.specAdmissionPadSlots += uint64(pad)
+		}
 		// First scheduling only, following vLLM v1 metrics/stats.py at
 		// 0c63ce9f0e0b5b2782f0f30cb491069dac158bb2 (Apache-2.0).
 		// This is a Go concept adaptation, not copied upstream code. A later
@@ -1581,6 +1675,12 @@ func (ln *schedLane) stageDeferredToken() bool {
 	if ln.state != schedLaneDecode || len(ln.logits) == 0 || ln.sess == nil || ln.sess == ln.statsSess {
 		ln.finish(nil, errNativeSchedulerLaneNotDecodeReady)
 		return false
+	}
+	// pad_spec_decode placeholder resolution: the lane's first decode forward
+	// consumes the admission-reserved draft slots; rejected placeholders publish
+	// nothing (upstream resolves them to -1 in update_draft_token_ids_in_output).
+	if ln.specAdmissionPad > 0 {
+		ln.specAdmissionPad = 0
 	}
 	next := argmax(ln.logits)
 	ln.deferredToken = &nativeDeferredToken{
@@ -2040,6 +2140,12 @@ type schedLane struct {
 	// Lower values are more important, following vLLM's request-priority convention
 	// (vllm/v1/core/sched/scheduler.py:735@975dca5, Apache-2.0).
 	priority int
+
+	// specAdmissionPad is the number of placeholder draft slots reserved for this
+	// lane's first decode step when it was promoted into a spec-carrying decode
+	// step (pad_spec_decode admission). Consumed by the first decode staging; the
+	// placeholders publish no tokens. Guarded by sched.mu.
+	specAdmissionPad int
 
 	// Preemption state. A preempted lane is removed from the running set without closing
 	// its token stream; readmit restores sess/logits and the stream resumes.

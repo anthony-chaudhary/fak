@@ -20,6 +20,7 @@ const (
 	envNativeKVAutosize       = "FAK_NATIVE_KV_AUTOSIZE"
 	envNativeKVElasticBlocks  = "FAK_NATIVE_KV_ELASTIC_BLOCKS"
 	envNativePrefillInterval  = "FAK_NATIVE_PREFILL_INTERVAL"
+	envNativeSpecAdmissionPad = "FAK_NATIVE_SPEC_ADMISSION_PAD"
 )
 
 func nativeEnvOn(name string) bool {
@@ -83,6 +84,10 @@ func applyNativeServeKnobs(sched *NativeScheduler, blockTokens int) {
 	// Unset or <=1 keeps today's mixed-step order bit-for-bit.
 	if n := nativeEnvPositiveInt(envNativePrefillInterval); n > 1 {
 		sched.SetPrefillInterval(n)
+	}
+	// Unset or 0 keeps historical admission byte-for-byte.
+	if n := nativeEnvPositiveInt(envNativeSpecAdmissionPad); n > 0 {
+		sched.SetSpecAdmissionPad(n)
 	}
 }
 
