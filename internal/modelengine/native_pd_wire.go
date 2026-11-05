@@ -36,6 +36,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"net"
 	"sync"
@@ -520,9 +521,27 @@ func (s *PDWireServer) handleConn(ctx context.Context, conn net.Conn) {
 	})
 	defer stop()
 	if err := s.serveHandoff(ctx, conn); err != nil {
-		// Best-effort log-free teardown: the client already saw (or will see)
-		// the failure; nothing else to say on a dead socket.
-		_ = err
+		// A failed read or reply may leave the client without a diagnostic.
+		// Error text may contain protocol strings or prompt IDs from the peer;
+		// only closed classifications belong in the receiver's normal log.
+		log.Printf("modelengine: P/D wire handoff failed: peer=%q code=%s class=%s", conn.RemoteAddr(), pdWireErrorCode(err), pdWireErrorClass(err))
+	}
+}
+
+// pdWireErrorClass records useful transport distinctions without echoing
+// request-derived error text. All returned values are a closed vocabulary.
+func pdWireErrorClass(err error) string {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline_exceeded"
+	case errors.Is(err, io.ErrUnexpectedEOF):
+		return "truncated_frame"
+	case errors.Is(err, io.EOF):
+		return "eof"
+	default:
+		return pdWireErrorCode(err)
 	}
 }
 
