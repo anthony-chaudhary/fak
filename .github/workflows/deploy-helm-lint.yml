@@ -49,9 +49,12 @@ jobs:
       # Prove the chart renders on BOTH majors: most neo-cloud shops are still on
       # Helm 3, and alpine/helm:latest tracks 4.x — the templates avoid functions
       # removed between the two (e.g. replaceAll), so one green row per major.
+      # EXACT pins: azure/setup-helm downloads get.helm.sh/helm-v<version> verbatim,
+      # so a range like "~3.17.0" becomes a literal ~ in the URL and 404s. These two
+      # are the versions verified locally via alpine/helm (3.17.2 / 4.3.1).
       fail-fast: false
       matrix:
-        helm: ["~3.17.0", "~4.3.0"]
+        helm: ["3.17.2", "4.3.1"]
     steps:
       - uses: actions/checkout@v4
 

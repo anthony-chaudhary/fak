@@ -1,0 +1,38 @@
+# /etc/systemd/system/fak.service
+# fak serve — the Fused Agent Kernel gateway (agent tool-call adjudication).
+#
+# Committed copy of the hardened unit shown in docs/fak/deployment-guide.md
+# ("Run as a service (systemd)"). COPY, DON'T RETYPE:
+#
+#   sudo cp deploy/systemd/fak.service /etc/systemd/system/fak.service
+#   sudo cp deploy/systemd/fak.env.example /etc/fak/fak.env   # then edit values
+#
+# Secrets live ONLY in /etc/fak/fak.env (chmod 600, root-owned) — the ExecStart
+# line references env-var NAMES (--api-key-env, --require-key-env), never values.
+# The deployment guide is the source of truth for every flag and default.
+
+[Unit]
+Description=fak serve — agent tool-call adjudication gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=/etc/fak/fak.env
+ExecStart=/usr/local/bin/fak serve --addr 0.0.0.0:8080 \
+  --provider openai --base-url https://api.openai.com/v1 \
+  --model gpt-4o --api-key-env OPENAI_API_KEY \
+  --policy /etc/fak/policy.json \
+  --require-key-env FAK_GATEWAY_KEY
+Restart=on-failure
+RestartSec=2
+# Run unprivileged with a hardened sandbox.
+DynamicUser=yes
+# /var/lib/fak for the audit journal (FAK_AUDIT_JOURNAL in fak.env).
+StateDirectory=fak
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
