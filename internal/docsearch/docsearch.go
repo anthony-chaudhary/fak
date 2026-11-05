@@ -105,7 +105,7 @@ func DiscoverDocs(root string) []Doc {
 	}
 	var docs []Doc
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if !entry.Type().IsRegular() {
 			continue
 		}
 		ext := strings.ToLower(filepath.Ext(entry.Name()))
