@@ -44,7 +44,7 @@ func registerNativeControlFlags(fs *flag.FlagSet) nativeControlFlags {
 		qwen35GDNSequence:     fs.Bool("native-qwen35-metal-gdn-sequence", false, "enable the experimental Qwen3.5 Metal GDN preprojected sequence path"),
 		q4kGateUpSlab:         fs.Bool("native-q4k-gateup-slab", false, "reuse the bounded Q4_K gate/up output slab within each native session"),
 		v41PrefillSumReadback: fs.Bool("native-v41-prefill-sum-readback", false, "enable experimental bounded DeepSeek V4.1 prefill routed-expert sum readback"),
-		kvPrecision:           fs.String("kv-precision", "", "KV cache storage tier: fp16 (default on --backend cuda: f32 pre-RoPE K + 16-bit K/V halves KV bytes/token), f32 (default elsewhere, exact), q8_0 (host: f32 pre-RoPE K + q8_0 K/V; ~2x more context), or bf16 (--backend cuda: f32 pre-RoPE K + 16-bit K/V). Also settable via FAK_UP_KV_PRECISION."),
+		kvPrecision:           fs.String("kv-precision", "", "KV cache storage tier: fp16 (default on --backend cuda: f32 pre-RoPE K + 16-bit K/V halves KV bytes/token), f32 (default elsewhere, exact), q8_0 (host: f32 pre-RoPE K + q8_0 K/V; ~2x more context), or bf16 (--backend cuda: f32 pre-RoPE K + 16-bit K/V). Also settable via FAK_UP_KV_PRECISION. On CUDA the 16-bit tiers route prompt attention through the typed kernel; the split-KV chunked-prefill panel (prefix>=1024) runs only on the f32 tier."),
 		prefixProfile:         fs.String("native-prefix-profile", "", "write native prefix-cache operation profiles to this JSONL path"),
 		vulkanQ4KProfile:      fs.Bool("vulkan-q4k-profile", false, "enable Vulkan Q4_K timing profiles (requires a Vulkan backend)"),
 		vulkanStageQ4K:        fs.Bool("vulkan-stage-q4k", false, "use Vulkan host-visible Q4_K staging (requires a Vulkan backend)"),
