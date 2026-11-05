@@ -146,6 +146,9 @@ func (c *Client) Get(key []byte) ([]byte, error) {
 	if resp.Header.OpCode == protocol.RespError {
 		return nil, fmt.Errorf("server error: %s", string(resp.Body))
 	}
+	if resp.Header.OpCode != protocol.RespValue {
+		return nil, fmt.Errorf("unexpected GET response opcode: 0x%02x", resp.Header.OpCode)
+	}
 
 	value, found, err := protocol.DecodeValueResponse(resp.Body)
 	if err != nil {
@@ -239,6 +242,9 @@ func (c *Client) Exists(key []byte) (bool, error) {
 
 	if resp.Header.OpCode == protocol.RespError {
 		return false, fmt.Errorf("server error: %s", string(resp.Body))
+	}
+	if resp.Header.OpCode != protocol.RespOK {
+		return false, fmt.Errorf("unexpected EXISTS response opcode: 0x%02x", resp.Header.OpCode)
 	}
 	if len(resp.Body) > 0 && resp.Body[0] == 1 {
 		return true, nil
