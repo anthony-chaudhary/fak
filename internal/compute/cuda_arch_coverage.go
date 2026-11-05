@@ -145,3 +145,69 @@ func KnownCUDAArches() []string {
 	}
 	return out
 }
+
+// ---- Decode program selection -----------------------------------------------------
+//
+// The dispatch-time half of decode planning: given the device arch in front of it and the element
+// dtype the model runs in, WHICH decode stage does a CUDA build run? The principle ported here is
+// FlashInfer's per-arch MSA binding (flashinfer-ai/flashinfer, Apache-2.0, INSPIRE-ONLY): an
+// arch+dtype -> program table consulted at dispatch, with fallback to the generic path when the
+// pair is uncovered. Only the PRINCIPLE is ported — no upstream code, and no Blackwell kernels:
+// Blackwell parts deliberately have no specialized entry below, so they keep the exact generic
+// behavior they had before this table existed. No speed claim attaches to any entry; the table
+// selects a plan, it does not measure one.
+
+// CUDADecodeProgram is the decode-attention program a CUDA build dispatches to for one
+// (device arch, element dtype) pair. It is a PLAN identity, not machine code: every entry maps
+// onto an already-shipped decode stage, so selecting one changes which existing program runs,
+// never what is compiled or embedded.
+type CUDADecodeProgram struct {
+	// Name is the stable program identifier a dispatch receipt records ("decode/fp16-flat-ring",
+	// "decode/sm90-fp8-uniform"). Stable across builds so receipts stay comparable.
+	Name string
+	// DType is the element format the program computes in: F16 for the generic flat-ring stage,
+	// FP8 for a per-arch uniform-FP8 stage.
+	DType Dtype
+	// Specialized marks a per-arch table entry; false is the generic fallback.
+	Specialized bool
+}
+
+// cudaDecodeKey keys the specialized decode-program table: exact device arch plus element dtype.
+// Exact-match on purpose — the choice is a table lookup, not ad-hoc if/else re-derived at each
+// call site, which is the whole point of consulting a table at dispatch.
+type cudaDecodeKey struct {
+	cc    cudaCC
+	dtype Dtype
+}
+
+// cudaDecodePrograms is the arch+dtype -> specialized decode-program table consulted at dispatch.
+// Only non-Blackwell parts get specialized uniform-FP8 stages: Hopper sm_90 and Ada sm_89 are the
+// pre-Blackwell NVIDIA parts whose tensor cores take uniform FP8, and both sit in the embedded
+// cubin set (TestCudaArchDecodeProgramSelect pins that invariant). Ampere sm_80 gets none — its
+// tensor cores have no FP8 lane. Blackwell (sm_100/sm_103/sm_120) gets none by construction: this
+// port adds no Blackwell kernels, so a Blackwell device decoding in FP8 falls back to the generic
+// FP16 flat-ring path exactly as before.
+var cudaDecodePrograms = map[cudaDecodeKey]CUDADecodeProgram{
+	{cc: cudaCC{9, 0}, dtype: FP8}: {Name: "decode/sm90-fp8-uniform", DType: FP8, Specialized: true},
+	{cc: cudaCC{8, 9}, dtype: FP8}: {Name: "decode/sm89-fp8-uniform", DType: FP8, Specialized: true},
+}
+
+// cudaGenericDecodeProgram is the behavior-identical fallback: the FP16 flat-ring decode stage
+// every (arch, dtype) pair absent from cudaDecodePrograms dispatches to. Its fields are pinned
+// byte-for-byte by TestCudaArchDecodeProgramSelect so the generic path cannot silently change.
+var cudaGenericDecodeProgram = CUDADecodeProgram{
+	Name:        "decode/fp16-flat-ring",
+	DType:       F16,
+	Specialized: false,
+}
+
+// SelectCUDADecodeProgram picks the decode program for a device of compute capability
+// (major, minor) running element dtype dt: the specialized table entry when one exists for that
+// exact arch+dtype pair, else the generic FP16 flat-ring program. Pure table lookup — no GPU, no
+// build tag — so it is unit-witnessed on any host, the same split ClassifyCUDAArch uses.
+func SelectCUDADecodeProgram(major, minor int, dt Dtype) CUDADecodeProgram {
+	if p, ok := cudaDecodePrograms[cudaDecodeKey{cc: cudaCC{major, minor}, dtype: dt}]; ok {
+		return p
+	}
+	return cudaGenericDecodeProgram
+}
