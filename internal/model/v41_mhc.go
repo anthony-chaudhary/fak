@@ -177,14 +177,73 @@ type v41MHCCarry struct {
 	// resident is the device-resident stream panel when device is resident;
 	// the host stream slices are then placeholders, never authoritative.
 	resident *v41MHCResident
+	// preMixOverlap enables the sglang-style pre-mix hand-off on the role
+	// layer-step seam: each role layer's FFN window stages the next role
+	// layer's attention mix stats and pre-collapse below, and that layer's
+	// attention preparation consumes them instead of recomputing. Off by
+	// default; a pure scheduling change, never a numeric one.
+	preMixOverlap bool
+	// staged* hold at most one pending hand-off: the attention mix stats and
+	// pre-collapse computed for stagedLayer during the previous role layer's
+	// FFN window, published against the graph cursor as it stood then. A
+	// consumer accepts them only when it is that layer and the cursor has
+	// moved exactly onto it, so an intervening step or panel mutation falls
+	// back to the serial computation.
+	staged          bool
+	stagedLayer     int
+	stagedCursor    int
+	stagedMix       v41MHCMix
+	stagedCollapsed []float32
 }
 
 func newV41MHCCarry(rows int) *v41MHCCarry {
-	c := &v41MHCCarry{pre: make([][]float32, rows)}
+	c := &v41MHCCarry{pre: make([][]float32, rows), stagedLayer: -1, stagedCursor: -1}
 	for i := range c.pre {
 		c.pre[i] = []float32{1, 0, 0, 0}
 	}
 	return c
+}
+
+// EnablePreMixOverlap turns on the sglang-style pre-mix hand-off for this
+// carry's role layer steps. The plain-layer seam stays serial either way.
+func (c *v41MHCCarry) EnablePreMixOverlap() {
+	if c != nil {
+		c.preMixOverlap = true
+	}
+}
+
+// stageAttention publishes one pending pre-mix hand-off, replacing any older
+// entry. The caller passes owned coefficient and collapse rows computed from
+// the just-published stream panel; publication tags the graph cursor so a
+// consumer can prove no step intervened.
+func (c *v41MHCCarry) stageAttention(layer int, mix v41MHCMix, collapsed []float32) {
+	if c == nil {
+		return
+	}
+	c.staged = true
+	c.stagedLayer = layer
+	c.stagedCursor = c.nextLayer
+	c.stagedMix = mix
+	c.stagedCollapsed = collapsed
+}
+
+// takeStagedAttention returns the pending pre-mix hand-off for layer l exactly
+// once. It refuses (ok=false, slot untouched) unless l is the staged layer and
+// the graph cursor sits exactly where the publication was made, and clears the
+// slot on success so a replayed step recomputes serially.
+func (c *v41MHCCarry) takeStagedAttention(l int) (v41MHCMix, []float32, bool) {
+	if c == nil || !c.staged || c.stagedLayer != l || c.nextLayer != c.stagedCursor ||
+		len(c.stagedMix.pre) != 4 || len(c.stagedMix.post) != 4 || len(c.stagedMix.comb) != 16 ||
+		len(c.stagedCollapsed) == 0 {
+		return v41MHCMix{}, nil, false
+	}
+	mix, collapsed := c.stagedMix, c.stagedCollapsed
+	c.staged = false
+	c.stagedLayer = -1
+	c.stagedCursor = -1
+	c.stagedMix = v41MHCMix{}
+	c.stagedCollapsed = nil
+	return mix, collapsed, true
 }
 
 func (c *v41MHCCarry) validate(layer, rows int) error {
@@ -332,4 +391,92 @@ func (m *Model) v41FullFFNInput(layer int, streams [][]float32, attnMix v41MHCMi
 	}
 	normalized, err := m.v41FFNNormWithPublish(layer, collapsed, float32(m.Cfg.RMSNormEps), scratch.ffnNorm.normFunc(), scratch.gatherOps.bf16PublishFunc())
 	return updated, mix, normalized, err
+}
+
+// v41MHCStageNextAttention computes layer next's attention-sublayer mHC mix
+// stats (projection + split) and its pre-collapse during layer current's FFN
+// window tail, adapting the sglang pre-mix hand-off: the next sublayer's
+// coefficients run beside the current sublayer's post-mix instead of opening
+// the next layer's window. It mirrors the serial arithmetic of layer next's own
+// attention preparation exactly -- same projector, split and pre-collapse, same
+// device seam and observer -- so a staged coefficient set is byte-identical to
+// the serial control.
+//
+// Fail-closed and self-skipping: it returns nil without touching the carry when
+// the schedule cannot consume the result (overlap disabled, no next layer, a
+// plain next layer, or a resident panel), and refuses with the typed
+// ErrV41ForwardStage when the next layer's admitted geometry or the panel is
+// malformed.
+func (m *Model) v41MHCStageNextAttention(current, next int, streams [][]float32, scratch *v41ProjScratch) error {
+	cfg := m.Cfg
+	full, err := v41ForwardGeometry(cfg)
+	if err != nil {
+		return err
+	}
+	if !full || next <= current || next >= cfg.NumLayers {
+		return nil
+	}
+	if scratch == nil || scratch.mhcCarry == nil || !scratch.mhcCarry.preMixOverlap || scratch.mhcCarry.resident != nil {
+		return nil
+	}
+	plan, err := v41AttentionPlanFor(cfg, next, m.v41AttentionRolesCached())
+	if err != nil {
+		return v41StageErr(v41StageMHC, next, err)
+	}
+	// Only the role seam consumes a staged hand-off; a plain next layer would
+	// recompute serially, so staging for it is wasted work, not overlap.
+	if plan.Role == V41AttentionRolePerLayer && plan.Ratio == 0 {
+		return nil
+	}
+	H := cfg.HiddenSize
+	if len(streams) != 4 {
+		return v41StageErr(v41StageMHC, next, errV41ProjectionResult)
+	}
+	for s := range streams {
+		if len(streams[s]) != H {
+			return v41StageErr(v41StageMHC, next, errV41ProjectionResult)
+		}
+	}
+	if len(scratch.mhcCarry.pre) == 0 {
+		return v41StageErr(v41StageMHC, next, errV41ProjectionResult)
+	}
+	if err := m.v41AdmitMHC(next); err != nil {
+		return err
+	}
+	mhcFlat, mhcTransposed, ok := m.v41MHCWeightLayout(next)
+	if !ok {
+		return v41StageErr(v41StageMHC, next,
+			fmt.Errorf("%w: mHC mix weight holds no admitted geometry", ErrV41ForwardStage))
+	}
+	width, valid := checkedMulInt(4, H)
+	if !valid {
+		return v41StageErr(v41StageMHC, next, errV41ProjectionResult)
+	}
+	input := make([]float32, 0, width)
+	for _, stream := range streams {
+		input = append(input, stream...)
+	}
+	device := scratch.mhcCarry.device
+	observe := scratch.v41StepMHCObserver()
+	eps := float32(cfg.RMSNormEps)
+	projectMHC := m.v41MHCProjectorObserved(next, H, eps, mhcFlat, mhcTransposed, scratch, observe)
+	mixes, err := projectMHC(input)
+	if err != nil {
+		return err
+	}
+	mix, err := v41MHCSplitOnObserved(device, next, mixes, m.v41LeafTensor(next, v41LeafMHCScale), m.v41LeafTensor(next, v41LeafMHCBase), 4, hcItersOrDefault(cfg), hcEpsOrDefault(cfg), observe)
+	if err != nil {
+		return err
+	}
+	var collapsed []float32
+	if device != nil {
+		collapsed, err = v41MHCPreBF16OnObserved(device, next, streams, scratch.mhcCarry.pre[0], observe)
+	} else {
+		collapsed, err = v41MHCPreObserved(streams, scratch.mhcCarry.pre[0], observe)
+	}
+	if err != nil {
+		return v41StageErr(v41StageMHC, next, err)
+	}
+	scratch.mhcCarry.stageAttention(next, mix, collapsed)
+	return nil
 }

@@ -24,7 +24,12 @@ func TestGrantExpiryDoesNotWrap(t *testing.T) {
 		{name: "negative clock remains representable", limit: maxExpiry, duration: maxExpiry, now: -100, want: maxExpiry - 100},
 		{name: "overflowing renewal extends", limit: maxExpiry, duration: maxExpiry, now: start, existing: start + 500, want: maxExpiry},
 		{name: "renewal never shortens", limit: maxExpiry, duration: 1, now: start, existing: maxExpiry, want: maxExpiry},
-		{name: "small maximum keeps default ordering", limit: 1000, now: start, want: start + 5000},
+		{name: "small maximum caps default duration", limit: 1000, now: start, want: start + 1000},
+		{name: "small maximum caps negative default", limit: 1000, duration: -1, now: start, want: start + 1000},
+		{name: "small positive duration unchanged", limit: 1000, duration: 500, now: start, want: start + 500},
+		{name: "default cap never shortens renewal", limit: 1000, now: start, existing: start + 5000, want: start + 5000},
+		{name: "zero maximum keeps fallback", duration: 1000, now: start, want: start + 5000},
+		{name: "negative maximum keeps fallback", limit: -1, duration: 1000, now: start, want: start + 5000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			table := NewTable(tc.limit)

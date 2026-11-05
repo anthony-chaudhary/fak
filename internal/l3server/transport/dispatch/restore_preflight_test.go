@@ -22,6 +22,7 @@ func TestRestoreLoadsBeforeSubmittingFlush(t *testing.T) {
 	}{
 		{"missing_manifest", ""},
 		{"invalid_manifest", "{"},
+		{"negative_shard_count", `{"version":1,"shard_count":-1}`},
 		{"missing_shard", `{"version":1,"shard_count":1}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

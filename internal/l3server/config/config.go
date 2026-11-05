@@ -8,6 +8,7 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/l3server/index"
 )
@@ -262,6 +263,13 @@ func (c *Config) Validate() error {
 		}
 		if err := ValidatePreset(c); err != nil {
 			return err
+		}
+	}
+
+	if c.ClusterEnabled {
+		const maxGossipPingMs = int64(1<<63-1) / int64(time.Millisecond)
+		if c.GossipPingMs <= 0 || int64(c.GossipPingMs) > maxGossipPingMs {
+			return fmt.Errorf("gossip_ping_ms must be in [1, %d] when cluster_enabled, got %d", maxGossipPingMs, c.GossipPingMs)
 		}
 	}
 

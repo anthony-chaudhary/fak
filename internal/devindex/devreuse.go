@@ -143,6 +143,7 @@ var maintainerDevCommands = []string{
 	"customization-index",
 	"debug",
 	"debt-lanes",
+	"decode-anatomy",
 	"deepseekbench",
 	"demo",
 	"disambiguation",

@@ -31,6 +31,9 @@ func (t *Table) grantAt(keyHash uint64, durationMs, now int64) {
 	}
 	if durationMs <= 0 {
 		durationMs = 5000 // default 5s
+		if t.maxDurationMs > 0 && durationMs > t.maxDurationMs {
+			durationMs = t.maxDurationMs
+		}
 	}
 	// An unrepresentable future deadline must not wrap into an expired lease.
 	const maxExpiry = int64(^uint64(0) >> 1)

@@ -56,7 +56,9 @@ func (d *Dispatcher) HandleSnapshot(msg protocol.Message) protocol.Message {
 		Dir string `json:"dir"`
 	}
 	if len(msg.Body) > 0 {
-		_ = json.Unmarshal(msg.Body, &req)
+		if err := json.Unmarshal(msg.Body, &req); err != nil {
+			return ErrResponse(msg.Header.RequestID, "invalid snapshot JSON: "+err.Error())
+		}
 	}
 	dir := req.Dir
 	if dir == "" {
@@ -134,7 +136,9 @@ func (d *Dispatcher) HandleRestore(msg protocol.Message) protocol.Message {
 		Dir string `json:"dir"`
 	}
 	if len(msg.Body) > 0 {
-		_ = json.Unmarshal(msg.Body, &req)
+		if err := json.Unmarshal(msg.Body, &req); err != nil {
+			return ErrResponse(msg.Header.RequestID, "invalid restore JSON: "+err.Error())
+		}
 	}
 	dir := req.Dir
 	if dir == "" {

@@ -26,9 +26,9 @@ func TestPreviewKeepsResolvedHeadWhenHEADAdvances(t *testing.T) {
 		if reflect.DeepEqual(args, []string{"rev-parse", "--verify", "HEAD^{commit}"}) {
 			return RunResult{Stdout: []byte(head + "\n")}, nil
 		}
-		if len(args) == 6 && args[0] == "log" {
-			want := []string{"log", "--reverse", "--format=%H%x1f%an%x1f%ae%x1f%ct%x1f%s%x1e",
-				base + ".." + head, "--", "internal/leaf"}
+		want := []string{"log", "--reverse", "--format=%H%x1f%an%x1f%ae%x1f%ct%x1f%s%x1e",
+			base + ".." + head, "--", "internal/leaf"}
+		if len(args) == len(want) && args[0] == "log" {
 			switch args[3] {
 			case base + ".." + head:
 			case base + "..HEAD":

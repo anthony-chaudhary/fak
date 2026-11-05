@@ -177,7 +177,7 @@ func DecodeKeysBody(body []byte) ([]byte, error) {
 	if len(body) < 2 {
 		return nil, fmt.Errorf("keys body too short")
 	}
-	patLen := binary.LittleEndian.Uint16(body[0:2])
+	patLen := int(binary.LittleEndian.Uint16(body[0:2]))
 	if int(patLen)+2 > len(body) {
 		return nil, fmt.Errorf("keys body truncated")
 	}

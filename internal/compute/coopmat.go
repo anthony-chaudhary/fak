@@ -327,6 +327,80 @@ type CooperativeMatrixConfigDescriptor struct {
 	BoundaryViolations []string               `json:"boundary_violations"`
 }
 
+// CoopMatScheduleKind names the tiling plan selected for a GEMM.
+type CoopMatScheduleKind string
+
+const (
+	// CoopMatScheduleStandard is the legacy 64x64x32 block-tiled plan kept for
+	// small-M and large-M shapes.
+	CoopMatScheduleStandard CoopMatScheduleKind = "standard"
+	// CoopMatScheduleSplitK is the mid-M plan: a wider row tile whose K
+	// reduction is partitioned into contiguous splits.
+	CoopMatScheduleSplitK CoopMatScheduleKind = "splitk"
+)
+
+// CoopMatSchedule is the static tiling plan selected for a cooperative-matrix
+// GEMM. It is a planning artifact: these helpers do not dispatch device
+// kernels, and the band thresholds below are model assumptions, not measured
+// occupancy decisions.
+type CoopMatSchedule struct {
+	Kind   CoopMatScheduleKind `json:"kind"`
+	MacroM int                 `json:"macro_m"` // row tile width
+	MacroN int                 `json:"macro_n"` // column tile width
+	MacroK int                 `json:"macro_k"` // K step per staged block
+	SplitK int                 `json:"split_k"` // K partitions (1 = unsplit)
+}
+
+const (
+	coopMatSmallMMax     = 32  // M <= 32 keeps the standard schedule
+	coopMatLargeMMin     = 512 // M >= 512 keeps the standard schedule
+	coopMatSplitKRowTile = 128 // wider row tile for the mid-M split-K plan
+	coopMatSplitKParts   = 2   // K partitions for the mid-M split-K plan
+)
+
+// SelectCoopMatSchedule selects the tiling plan for an M x N x K GEMM. Small-M
+// (M <= 32) and large-M (M >= 512) shapes keep the legacy 64x64x32 standard
+// plan; mid-M shapes route through a split-K plan with a wider 128-row tile
+// and two K partitions. The plan kind depends only on M; N and K shape the
+// partition ranges, not the kind.
+func SelectCoopMatSchedule(M, N, K int) CoopMatSchedule {
+	standard := CoopMatSchedule{Kind: CoopMatScheduleStandard, MacroM: 64, MacroN: 64, MacroK: 32, SplitK: 1}
+	if M <= 0 || N <= 0 || K <= 0 {
+		return standard
+	}
+	if M <= coopMatSmallMMax || M >= coopMatLargeMMin {
+		return standard
+	}
+	return CoopMatSchedule{Kind: CoopMatScheduleSplitK, MacroM: coopMatSplitKRowTile, MacroN: 64, MacroK: 32, SplitK: coopMatSplitKParts}
+}
+
+// BlocksPerSplit divides the K blocks of size MacroK into SplitK contiguous
+// partitions; earlier partitions absorb the remainder.
+func (s CoopMatSchedule) BlocksPerSplit(K int) int {
+	blocks := (K + s.MacroK - 1) / s.MacroK
+	if s.SplitK <= 1 {
+		return blocks
+	}
+	return (blocks + s.SplitK - 1) / s.SplitK
+}
+
+// SplitKRange returns the [start, end) K range owned by partition p.
+func (s CoopMatSchedule) SplitKRange(p, K int) (int, int) {
+	if s.SplitK <= 1 {
+		return 0, K
+	}
+	bps := s.BlocksPerSplit(K)
+	start := p * bps * s.MacroK
+	end := (p + 1) * bps * s.MacroK
+	if start > K {
+		start = K
+	}
+	if end > K {
+		end = K
+	}
+	return start, end
+}
+
 // CooperativeMatrixEngine provides a host reference and static 2D block-tiled GEMM model.
 // It does not execute on the named accelerator backend.
 type CooperativeMatrixEngine struct {
@@ -648,6 +722,9 @@ func (e *CooperativeMatrixEngine) ValidateConfig(cfg *CooperativeMatrixConfigDes
 // ExecuteGEMM executes a host reference GEMM with modeled block tiling and Pad-2 staging.
 // The backend name does not select a native device kernel.
 // A has shape [M, K], B has shape [K, N] (or W^T with W [N, K]), returning C [M, N].
+// The tiling plan comes from SelectCoopMatSchedule: small-M and large-M shapes run
+// the legacy standard loop; mid-M shapes run the split-K plan, gated on
+// bit-identical output against the standard plan before the result is returned.
 func (e *CooperativeMatrixEngine) ExecuteGEMM(A, B []float32, M, N, K int) ([]float32, error) {
 	if len(A) < M*K || len(B) < K*N {
 		return nil, fmt.Errorf("coopmat: buffer size mismatch: len(A)=%d (want %d), len(B)=%d (want %d)",
@@ -661,6 +738,23 @@ func (e *CooperativeMatrixEngine) ExecuteGEMM(A, B []float32, M, N, K int) ([]fl
 		return nil, err
 	}
 
+	sched := SelectCoopMatSchedule(M, N, K)
+	if sched.Kind == CoopMatScheduleStandard {
+		return e.executeGEMMStandard(A, B, M, N, K, cfg), nil
+	}
+
+	out := e.executeGEMMSplitK(A, B, M, N, K, sched)
+	ref := e.executeGEMMStandard(A, B, M, N, K, cfg)
+	if identicalFloat32(out, ref) {
+		return out, nil
+	}
+	// Identical-output gate failed: fall back to the standard plan's result so
+	// the split-K branch can never change a GEMM's numeric answer.
+	return ref, nil
+}
+
+// executeGEMMStandard runs the legacy 64x64x32 block-tiled host reference GEMM.
+func (e *CooperativeMatrixEngine) executeGEMMStandard(A, B []float32, M, N, K int, cfg *CooperativeMatrixConfigDescriptor) []float32 {
 	outC := make([]float32, M*N)
 	macroM := cfg.MacroTile.M              // 64
 	macroN := cfg.MacroTile.N              // 64
@@ -740,7 +834,121 @@ func (e *CooperativeMatrixEngine) ExecuteGEMM(A, B []float32, M, N, K int) ([]fl
 		}
 	}
 
-	return outC, nil
+	return outC
+}
+
+// executeGEMMSplitK runs the mid-M split-K host reference GEMM: a wider row tile
+// (MacroM rows) whose K reduction is partitioned into SplitK contiguous ranges.
+// Each partition stages its K slice and folds its block dots into the shared
+// accumulator in global K-block order, so the per-element addition order matches
+// executeGEMMStandard exactly and the outputs are bit-identical. MacroM must be
+// a multiple of 64: the wider tile is staged as 64-row halves mirroring the
+// standard plan's wave grid.
+func (e *CooperativeMatrixEngine) executeGEMMSplitK(A, B []float32, M, N, K int, sched CoopMatSchedule) []float32 {
+	outC := make([]float32, M*N)
+	macroM := sched.MacroM
+	macroN := sched.MacroN
+	macroK := sched.MacroK
+	strideK := macroK + 2 // Pad-2, as in the standard plan
+	strideN := macroN + 2
+	const subTileRows = 64
+	halves := macroM / subTileRows
+
+	for wgRow := 0; wgRow < M; wgRow += macroM {
+		for wgCol := 0; wgCol < N; wgCol += macroN {
+			ldsA := make([]float32, macroM*strideK)
+			ldsB := make([]float32, macroK*strideN)
+
+			acc := make([][]float32, halves)
+			for h := range acc {
+				acc[h] = make([]float32, 4*32*32)
+			}
+
+			for s := 0; s < sched.SplitK; s++ {
+				kStart, kEnd := sched.SplitKRange(s, K)
+				for kBlock := kStart; kBlock < kEnd; kBlock += macroK {
+					for r := 0; r < macroM; r++ {
+						for c := 0; c < macroK; c++ {
+							gRow := wgRow + r
+							gCol := kBlock + c
+							val := float32(0)
+							if gRow < M && gCol < K {
+								val = A[gRow*K+gCol]
+							}
+							ldsA[r*strideK+c] = val
+						}
+					}
+
+					for r := 0; r < macroK; r++ {
+						for c := 0; c < macroN; c++ {
+							gRow := kBlock + r
+							gCol := wgCol + c
+							val := float32(0)
+							if gRow < K && gCol < N {
+								val = B[gRow*N+gCol]
+							}
+							ldsB[r*strideN+c] = val
+						}
+					}
+
+					for h := 0; h < halves; h++ {
+						wAcc := acc[h]
+						for w := 0; w < 4; w++ {
+							wRow := h*subTileRows + (w/2)*32
+							wCol := (w % 2) * 32
+							base := w * 32 * 32
+
+							for wr := 0; wr < 32; wr++ {
+								for wc := 0; wc < 32; wc++ {
+									var sum float32
+									for kk := 0; kk < macroK; kk++ {
+										aElem := ldsA[(wRow+wr)*strideK+kk]
+										bElem := ldsB[kk*strideN+(wCol+wc)]
+										sum += aElem * bElem
+									}
+									wAcc[base+wr*32+wc] += sum
+								}
+							}
+						}
+					}
+				}
+			}
+
+			for h := 0; h < halves; h++ {
+				wAcc := acc[h]
+				for w := 0; w < 4; w++ {
+					wRow := h*subTileRows + (w/2)*32
+					wCol := (w % 2) * 32
+					base := w * 32 * 32
+
+					for wr := 0; wr < 32; wr++ {
+						for wc := 0; wc < 32; wc++ {
+							gRow := wgRow + wRow + wr
+							gCol := wgCol + wCol + wc
+							if gRow < M && gCol < N {
+								outC[gRow*N+gCol] = wAcc[base+wr*32+wc]
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return outC
+}
+
+// identicalFloat32 reports whether two buffers hold bit-identical values.
+func identicalFloat32(a, b []float32) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if math.Float32bits(a[i]) != math.Float32bits(b[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // ExecuteGEMMFP16 executes block-tiled GEMM with IEEE 754 float16 arithmetic emulation.

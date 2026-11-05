@@ -204,7 +204,7 @@ func DecodeKeyBody(body []byte) ([]byte, error) {
 	if len(body) < 2 {
 		return nil, fmt.Errorf("key body too short")
 	}
-	keyLen := binary.LittleEndian.Uint16(body[0:2])
+	keyLen := int(binary.LittleEndian.Uint16(body[0:2]))
 	if int(keyLen)+2 > len(body) {
 		return nil, fmt.Errorf("key body truncated")
 	}
@@ -322,7 +322,7 @@ func DecodeLeaseBody(body []byte) (key []byte, durationMs int64, err error) {
 	if len(body) < 2 {
 		return nil, 0, fmt.Errorf("lease body too short")
 	}
-	keyLen := binary.LittleEndian.Uint16(body[0:2])
+	keyLen := int(binary.LittleEndian.Uint16(body[0:2]))
 	if 2+int(keyLen)+8 > len(body) {
 		return nil, 0, fmt.Errorf("lease body truncated")
 	}

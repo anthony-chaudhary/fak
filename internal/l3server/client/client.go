@@ -217,6 +217,9 @@ func (c *Client) Delete(key []byte) error {
 	if resp.Header.OpCode == protocol.RespError {
 		return fmt.Errorf("server error: %s", string(resp.Body))
 	}
+	if resp.Header.OpCode != protocol.RespOK {
+		return fmt.Errorf("unexpected DELETE response opcode: 0x%02x", resp.Header.OpCode)
+	}
 	return nil
 }
 
@@ -332,6 +335,9 @@ func (c *Client) MSet(keys, values [][]byte) ([]byte, error) {
 	if resp.Header.OpCode == protocol.RespMSetResult {
 		statuses, perr := protocol.DecodeMSetResultResponse(resp.Body)
 		return statuses, perr
+	}
+	if resp.Header.OpCode != protocol.RespOK {
+		return nil, fmt.Errorf("unexpected MSET response opcode: 0x%02x", resp.Header.OpCode)
 	}
 	return nil, nil // RespOK â€” all succeeded
 }
@@ -517,6 +523,9 @@ func (c *Client) DeleteReplicated(key []byte) error {
 
 	if resp.Header.OpCode == protocol.RespError {
 		return fmt.Errorf("server error: %s", string(resp.Body))
+	}
+	if resp.Header.OpCode != protocol.RespOK {
+		return fmt.Errorf("unexpected DELETE response opcode: 0x%02x", resp.Header.OpCode)
 	}
 	return nil
 }

@@ -36,6 +36,7 @@ var Commands = []Command{
 	{Name: "commit-subject-coverage", Owner: "dev", Handler: "devcmd.RunCommitSubjectCoverage", SourceOrigin: "internal/devcmd/commit_subject_coverage.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "cuda-gpudirect", Owner: "dev", Handler: "devcmd.RunCUDAGPUDirect", SourceOrigin: "internal/devcmd/cuda_gpudirect.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "customization-index", Owner: "dev", Handler: "devcmd.RunCustomizationIndex", SourceOrigin: "internal/devcmd/customization_index.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
+	{Name: "decode-anatomy", Owner: "dev", Handler: "devcmd.RunDecodeAnatomy", SourceOrigin: "internal/devcmd/decode_anatomy.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "factory-migrate", Aliases: []string{"factorymigrate"}, Owner: "dev", Handler: "devcmd.RunFactoryMigrate", SourceOrigin: "internal/devcmd/factory_migrate.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "feature", Owner: "dev", Handler: "devcmd.RunFeature", SourceOrigin: "internal/devcmd/selfquery_commands.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "fleetcap", Owner: "dev", Handler: "devcmd.RunFleetcap", SourceOrigin: "internal/devcmd/fleetcap.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},

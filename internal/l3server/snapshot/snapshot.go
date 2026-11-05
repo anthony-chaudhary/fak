@@ -54,6 +54,13 @@ func (w *Writer) WriteManifest(m Manifest) error {
 // WriteShard writes entries for a single shard.
 // Format: [keyLen:2][key][valueLen:4][value][ttlMs:8]... [0x0000] (sentinel)
 func (w *Writer) WriteShard(shardID int, entries []KVEntry) error {
+	// Zero is the sentinel; other key lengths must fit the two-byte field.
+	// Validate every entry before creating or truncating the shard file.
+	for i, e := range entries {
+		if len(e.Key) == 0 || len(e.Key) > 1<<16-1 {
+			return fmt.Errorf("snapshot entry %d key length %d out of range [1, 65535]", i, len(e.Key))
+		}
+	}
 	if err := os.MkdirAll(w.dir, 0755); err != nil {
 		return fmt.Errorf("create snapshot dir: %w", err)
 	}
@@ -115,6 +122,9 @@ func (r *Reader) ReadManifest() (Manifest, error) {
 	var m Manifest
 	if err := json.Unmarshal(data, &m); err != nil {
 		return Manifest{}, err
+	}
+	if m.ShardCount < 0 {
+		return Manifest{}, fmt.Errorf("snapshot shard_count must be non-negative, got %d", m.ShardCount)
 	}
 	return m, nil
 }
