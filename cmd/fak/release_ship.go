@@ -1397,6 +1397,9 @@ func releaseShipSourceCI(result *releaseShipResult, root string, opts releaseShi
 	if err := json.Unmarshal([]byte(out), &rows); err != nil {
 		return map[string]any{"ok": false, "status": "non_json", "tail": tail(out)}
 	}
+	if rows == nil {
+		return map[string]any{"ok": false, "status": "invalid_response", "source_sha": sha, "reason": "source CI response was not a JSON array"}
+	}
 	if !releaseShipCIEventsReadable(rows) {
 		return map[string]any{"ok": false, "status": "invalid_event", "source_sha": sha, "reason": "CI response contained a missing or malformed event"}
 	}

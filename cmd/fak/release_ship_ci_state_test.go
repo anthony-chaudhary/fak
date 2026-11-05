@@ -90,6 +90,29 @@ func TestReleaseShipAncestorCIDoesNotOverrideExactFailure(t *testing.T) {
 	}
 }
 
+// JSON null is unreadable source evidence, not an empty array permitting adoption.
+// fak-test:runtime fast est=10ms
+func TestReleaseShipSourceCIRejectsNullResponse(t *testing.T) {
+	for _, adopt := range []bool{false, true} {
+		t.Run(fmt.Sprintf("adopt=%v", adopt), func(t *testing.T) {
+			calls := 0
+			restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
+				calls++
+				if name != "gh" || !sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "source-sha", "--event", "push", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha,event") {
+					t.Fatalf("null source response reached another command: %s %v", name, args)
+				}
+				return 0, "null\n"
+			})
+			defer restore()
+			var result releaseShipResult
+			ci := releaseShipSourceCI(&result, t.TempDir(), releaseShipOptions{workflow: "ci.yml", trunk: "main", adoptAncestorCI: adopt}, "source-sha")
+			if calls != 1 || releaseShipPayloadOK(ci) || ci["status"] != "invalid_response" || ci["source_sha"] != "source-sha" || !strings.Contains(stringFromAny(ci["reason"]), "not a JSON array") || ci["run"] != nil || ci["adopted_ancestor_sha"] != nil {
+				t.Fatalf("null response was treated as absence or adopted: calls=%d CI=%#v", calls, ci)
+			}
+		})
+	}
+}
+
 // Exact-source contradictions must refuse before any ancestor query or probe.
 // fak-test:runtime fast est=20ms
 func TestReleaseShipSourceCIRejectsInconsistentConclusion(t *testing.T) {
