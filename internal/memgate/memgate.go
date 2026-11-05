@@ -140,8 +140,9 @@ func ParseLinux(meminfo string) Memory {
 	}
 	total := vals["MemTotal"]
 	free := vals["MemFree"]
-	avail := vals["MemAvailable"]
-	if avail == 0 {
+	avail, availableKnown := vals["MemAvailable"]
+	// A reported zero is authoritative; only absent or unparseable rows fall back.
+	if !availableKnown {
 		avail = free + vals["Cached"]
 	}
 	return Memory{

@@ -71,7 +71,8 @@ const (
 // reserve withheld, and KeptAmount is the measurement left after the reserve. On
 // a fail-closed TokenBudget is zero and Reason carries the typed cause.
 type DerivedBudget struct {
-	// TokenBudget is the derived admission budget in tokens (0 on fail-closed).
+	// TokenBudget is the derived admission budget in tokens (0 on fail-closed),
+	// capped at math.MaxInt so the gateway can use it without narrowing overflow.
 	TokenBudget int64
 	// Reason is empty on success, else the typed fail-closed cause.
 	Reason Reason
@@ -144,7 +145,7 @@ func deriveBudget(usable, perUnit, tokensPerUnit int64, fraction float64) Derive
 		}
 	}
 	return DerivedBudget{
-		TokenBudget:    units * tokensPerUnit,
+		TokenBudget:    min(saturatingMul(units, tokensPerUnit), int64(math.MaxInt)),
 		ReservedAmount: reserved,
 		KeptAmount:     kept,
 	}
@@ -235,7 +236,7 @@ func (c WarmupCapacity) deriveWithFixedState(fraction float64) DerivedBudget {
 		}
 	}
 	return DerivedBudget{
-		TokenBudget:      units,
+		TokenBudget:      min(units, int64(math.MaxInt)),
 		ReservedAmount:   reserved,
 		KeptAmount:       room,
 		FixedStateAmount: fixed,

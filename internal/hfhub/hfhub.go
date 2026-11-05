@@ -28,6 +28,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -113,9 +114,11 @@ func ParseURI(uri string) (Ref, error) {
 
 // ResolveURL builds the Hub download URL for the ref against base (e.g.
 // DefaultBaseURL): {base}/{repo}/resolve/{revision}/{file}.
+// File is a literal repo-relative path, not a pre-escaped URL.
 func (r Ref) ResolveURL(base string) string {
 	base = strings.TrimRight(base, "/")
-	return base + "/" + r.Repo + "/resolve/" + r.Revision + "/" + r.File
+	file := url.URL{Path: r.File}
+	return base + "/" + r.Repo + "/resolve/" + r.Revision + "/" + file.EscapedPath()
 }
 
 // cacheRel is the ref's path under the cache root: {repo}/{revision}/{file}.

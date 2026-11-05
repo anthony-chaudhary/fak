@@ -518,3 +518,58 @@ func TestSearchDocsDeterministicTiebreak(t *testing.T) {
 		t.Fatalf("tiebreak top = %q, want docs/a.md (path order)", first[0].Path)
 	}
 }
+
+// fak-test:runtime fast est=50ms lane=default
+func TestDiscoverDocsSkipsSymlinks(t *testing.T) {
+	root := t.TempDir()
+	docs := filepath.Join(root, "docs")
+	if err := os.MkdirAll(docs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"note.txt": "# Regular Note\n",
+		"real.md":  "# Regular Guide\n",
+	} {
+		if err := os.WriteFile(filepath.Join(docs, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, target := range map[string]string{
+		"file-link.md": "real.md",
+		"dir-link.md":  ".",
+		"missing.txt":  "absent.md",
+	} {
+		if err := os.Symlink(target, filepath.Join(docs, name)); err != nil {
+			t.Skipf("symlink fixture unavailable: %v", err)
+		}
+	}
+	got := DiscoverDocs(root)
+	if len(got) != 2 {
+		t.Fatalf("DiscoverDocs = %+v, want only the two regular files", got)
+	}
+	for i, want := range []struct{ path, blurb string }{
+		{"docs/note.txt", "Regular Note"},
+		{"docs/real.md", "Regular Guide"},
+	} {
+		if got[i].Path != want.path || got[i].Blurb != want.blurb ||
+			!got[i].Discovered || strings.Join(got[i].Sources, ",") != "tree" {
+			t.Errorf("DiscoverDocs[%d] = %+v, want regular tree entry %+v", i, got[i], want)
+		}
+	}
+
+	// Curated paths keep their existing authority; only tree discovery filters types.
+	if err := os.WriteFile(filepath.Join(root, "INDEX.md"),
+		[]byte("- [Explicit Link](docs/file-link.md) — curated target\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	catalog := LoadDocs(root)
+	if len(catalog.Docs) != 3 {
+		t.Fatalf("LoadDocs = %+v, want one curated link and two regular files", catalog.Docs)
+	}
+	curated := catalog.Docs[0]
+	if curated.Path != "docs/file-link.md" || curated.Title != "Explicit Link" ||
+		curated.Blurb != "curated target" || curated.Discovered ||
+		strings.Join(curated.Sources, ",") != "INDEX.md" {
+		t.Fatalf("curated link changed: %+v", curated)
+	}
+}

@@ -213,7 +213,7 @@ func ProbeLlamaServer(ctx context.Context, client HTTPDoer, target ProbeTarget) 
 		} `json:"choices"`
 	}
 	if err := decodeObject(body, &chat); err != nil || chat.Object != "chat.completion" || len(chat.Choices) == 0 ||
-		chat.Choices[0].Message == nil || chat.Choices[0].Message.Role == "" || len(chat.Choices[0].Message.Content) == 0 {
+		chat.Choices[0].Message == nil || chat.Choices[0].Message.Role != "assistant" || len(chat.Choices[0].Message.Content) == 0 {
 		if err == nil {
 			err = errors.New("chat response is missing completion fields")
 		}

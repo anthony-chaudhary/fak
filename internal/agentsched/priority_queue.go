@@ -1,6 +1,7 @@
 package agentsched
 
 import (
+	"slices"
 	"sync"
 	"time"
 
@@ -124,6 +125,7 @@ func (pq *PriorityQueue) Dequeue(allowP3 bool) (*Task, bool) {
 	for p := abi.ThreadPriorityP0System; p <= maxTier; p++ {
 		if len(pq.buckets[p]) > 0 {
 			task := pq.buckets[p][0]
+			pq.buckets[p][0] = nil // Release the removed task before retaining the suffix.
 			pq.buckets[p] = pq.buckets[p][1:]
 			pq.total--
 			return task, true
@@ -140,7 +142,7 @@ func (pq *PriorityQueue) Remove(taskID string) bool {
 	for p := 0; p < 4; p++ {
 		for i, t := range pq.buckets[p] {
 			if t.ID == taskID {
-				pq.buckets[p] = append(pq.buckets[p][:i], pq.buckets[p][i+1:]...)
+				pq.buckets[p] = slices.Delete(pq.buckets[p], i, i+1)
 				pq.total--
 				return true
 			}
@@ -160,7 +162,7 @@ func (pq *PriorityQueue) RemoveTask(target *Task) bool {
 	for p := 0; p < 4; p++ {
 		for i, t := range pq.buckets[p] {
 			if t == target {
-				pq.buckets[p] = append(pq.buckets[p][:i], pq.buckets[p][i+1:]...)
+				pq.buckets[p] = slices.Delete(pq.buckets[p], i, i+1)
 				pq.total--
 				return true
 			}

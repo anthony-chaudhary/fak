@@ -8,6 +8,7 @@
 package cloudroute
 
 import (
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -284,11 +285,14 @@ func envMap(environ []string) map[string]string {
 	return out
 }
 
-// canon folds an environment variable name for comparison. Every name this
-// package knows is upper-case ASCII, so upper-casing can only match the variable
-// intended — and it is required on Windows, where env names are case-insensitive
-// and a shell may well have exported `Aws_Profile`.
-func canon(k string) string { return strings.ToUpper(strings.TrimSpace(k)) }
+// canon follows the host's environment-name comparison: case-insensitive on
+// Windows, exact elsewhere. Whitespace is part of the name on every platform.
+func canon(k string) string {
+	if runtime.GOOS == "windows" {
+		return strings.ToUpper(k)
+	}
+	return k
+}
 
 // truthy is the shared "is this selector on" rule, matching the vocabulary
 // internal/secretload already uses for FAK_SANDBOX_INHERIT_ENV so an operator

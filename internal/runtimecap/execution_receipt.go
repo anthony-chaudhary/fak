@@ -161,6 +161,9 @@ func ExecutionModeReceiptFromReport(report Report) ExecutionModeReceipt {
 		opts.NativePerformance = true
 	case exec.Backend == "cpu-ref" && exec.CPUEnvelope != "":
 		mode, health = ExecutionModeOfflineModelBacked, ExecutionHealthOffline
+		if envelope, ok := findCPUEnvelope(report.SupportedCPUEnvelopes, exec.CPUEnvelope); ok {
+			opts.Model = envelope.Model
+		}
 		opts.Offline = "full"
 		opts.Egress = "denied"
 		opts.OperatingEnvelope = exec.CPUEnvelope
