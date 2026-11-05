@@ -1387,9 +1387,9 @@ func TestLookupPrefixTruncatesToPageMultiple(t *testing.T) {
 		defer s.Close()
 		tree := seed(37)
 		s.SetRadixKV(tree)
-		matched, boundary, owner, _ := s.lookupPrefixPageAligned(prompt, 16)
-		if matched != 32 || boundary == nil || owner != tree {
-			t.Fatalf("matched=%d boundary=%v owner=%v, want 32/non-nil/tree", matched, boundary, owner)
+		matched, boundary, owner, raw := s.lookupPrefixPageAligned(prompt, 16)
+		if matched != 32 || boundary == nil || owner != tree || raw != 37 {
+			t.Fatalf("matched=%d boundary=%v owner=%v raw=%d, want 32/non-nil/tree/37", matched, boundary, owner, raw)
 		}
 		t.Cleanup(func() { tree.Done(boundary) })
 	})
@@ -1399,9 +1399,9 @@ func TestLookupPrefixTruncatesToPageMultiple(t *testing.T) {
 		defer s.Close()
 		tree := seed(15)
 		s.SetRadixKV(tree)
-		matched, boundary, owner, _ := s.lookupPrefixPageAligned(prompt, 16)
-		if matched != 0 || boundary != nil || owner != nil {
-			t.Fatalf("matched=%d boundary=%v owner=%v, want 0/nil/nil", matched, boundary, owner)
+		matched, boundary, owner, raw := s.lookupPrefixPageAligned(prompt, 16)
+		if matched != 0 || boundary != nil || owner != nil || raw != 15 {
+			t.Fatalf("matched=%d boundary=%v owner=%v raw=%d, want 0/nil/nil/15", matched, boundary, owner, raw)
 		}
 		if got := tree.Stats().ProtectedTokens; got != 0 {
 			t.Fatalf("missed sub-page hit retained %d protected tokens", got)
@@ -1413,9 +1413,9 @@ func TestLookupPrefixTruncatesToPageMultiple(t *testing.T) {
 		defer s.Close()
 		tree := seed(37)
 		s.SetRadixKV(tree)
-		matched, boundary, owner, _ := s.lookupPrefixPageAligned(prompt, 1)
-		if matched != 37 || boundary == nil || owner != tree {
-			t.Fatalf("matched=%d boundary=%v owner=%v, want 37/non-nil/tree", matched, boundary, owner)
+		matched, boundary, owner, raw := s.lookupPrefixPageAligned(prompt, 1)
+		if matched != 37 || boundary == nil || owner != tree || raw != 37 {
+			t.Fatalf("matched=%d boundary=%v owner=%v raw=%d, want 37/non-nil/tree/37", matched, boundary, owner, raw)
 		}
 		t.Cleanup(func() { tree.Done(boundary) })
 	})
