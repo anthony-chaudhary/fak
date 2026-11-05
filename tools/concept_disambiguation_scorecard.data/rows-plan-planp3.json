@@ -1,0 +1,767 @@
+{
+  "rows": [
+    {
+      "id": "planp3-packedprefillcandidatelocked",
+      "canonical": "packedPrefillCandidateLocked (NativeScheduler packed-prefill lane lock)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A NativeScheduler predicate reporting whether a schedLane's packed prefill candidate is locked, reserving that candidate against concurrent lane scheduling.",
+      "distinction": "It is a per-lane admission lock state inside the native scheduler, not the ctxplanner Candidate record scored for prefix reuse, nor a serve-time memory plan.",
+      "distinct_from": [
+        "candidate-planner"
+      ],
+      "aliases": [],
+      "grounding": "packedPrefillCandidateLocked",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-plananddecompose",
+      "canonical": "CategoryPlanAndDecompose (agentopt operational category)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The OperationalCategory value 'plan_and_decompose' classifying initial prompts, high-level queries, and replan instructions as effort-high turns in the intra-model router.",
+      "distinction": "It is a turn-classification label that routes effort, not an execution Plan data type produced by a planner.",
+      "distinct_from": [
+        "plan-planner",
+        "planp1-categoryplananddecompose"
+      ],
+      "aliases": [],
+      "grounding": "plananddecompose",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-plancompile",
+      "canonical": "PlanCompile (buildwitness matrix compile plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A buildwitness constructor producing the MatrixCompilePlan describing how one package variant compiles for one release target and output path.",
+      "distinction": "It plans build-matrix compilation steps for witness collection; it does not plan agent actions, dispatch waves, or serve memory.",
+      "distinct_from": [
+        "x-plan-buildplan"
+      ],
+      "aliases": [],
+      "grounding": "PlanCompile",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-plandevicebands",
+      "canonical": "PlanDeviceBands (model multi-device band assignment)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A model package planner assigning one contiguous weight band to each device in order, minimizing cross-band traffic under per-device byte budgets.",
+      "distinction": "It partitions weights across several devices into bands; it is not the engine's single-device placement plan that maps whole tensors onto one device.",
+      "distinct_from": [
+        "x-plan-planplacementfordevice"
+      ],
+      "aliases": [],
+      "grounding": "PlanDeviceBands",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-planledgerdiff",
+      "canonical": "PlanLedgerDiff (gateway post-load planner-vs-ledger diff)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The gateway ModelLoadProfile field carrying the post-load diff between the fit planner's predicted memory and the allocation ledger's live numbers.",
+      "distinction": "It is the wire/debug projection of a finished load diff on the gateway profile; the agent-side once-per-serve state object holding the same diff is planLedgerDiffState.",
+      "distinct_from": [
+        "planp3-planledgerdiffstate",
+        "x-plan-memoryplan"
+      ],
+      "aliases": [],
+      "grounding": "PlanLedgerDiff",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-planledgerdiffstate",
+      "canonical": "planLedgerDiffState (agent once-per-serve first-prefill diff)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "An unexported agent package state holding the once-per-serve first-prefill diff between the in-kernel planner's prediction and the allocation ledger.",
+      "distinction": "It is the process-local holder inside the agent in-kernel planner; the gateway's exported wire copy of the same diff is PlanLedgerDiff on ModelLoadProfile.",
+      "distinct_from": [
+        "planp3-planledgerdiff",
+        "x-plan-memoryplan"
+      ],
+      "aliases": [],
+      "grounding": "planLedgerDiffState",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-plannedlanes",
+      "canonical": "PlannedLanes (debtlane wave-plan lane count)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The debtlane WavePlan field counting how many lanes the debt wave plan scheduled across its total waves.",
+      "distinction": "It counts lanes inside a debt-orchestrator wave plan; it is not the issue orchestrator's PlannedIssues count, which counts issues rather than lanes.",
+      "distinct_from": [
+        "covg-plan-plannedissues",
+        "cov-debt-tail2-plan-waveplan"
+      ],
+      "aliases": [],
+      "grounding": "PlannedLanes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-plannerkvprecisionerror",
+      "canonical": "plannerKVPrecisionError (in-kernel planner KV precision check)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "An agent package helper returning the error for requesting a given KV precision on a model/backend combination during in-kernel planner configuration.",
+      "distinction": "It validates one knob of InKernelPlannerConfig; it is not the planner itself, nor a serve-time memory plan.",
+      "distinct_from": [
+        "issue10046-plan-inkernelplannerconfig"
+      ],
+      "aliases": [],
+      "grounding": "plannerKVPrecisionError",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-planservegomemorylimit",
+      "canonical": "planServeGoMemoryLimit (serve Go runtime limit plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A cmd/fak helper computing the serveGoMemoryLimitPlan that decides what Go runtime memory limit to set for a serve process given host load peak and total host memory.",
+      "distinction": "It sizes the Go runtime ceiling of the serve process; it does not size model weights or KV, which belong to the compute.MemoryPlan family.",
+      "distinct_from": [
+        "x-plan-refusememoryplaniftoobig"
+      ],
+      "aliases": [],
+      "grounding": "planServeGoMemoryLimit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-planspan",
+      "canonical": "PlanSpan (radixkv prompt segment)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A radixkv struct describing one contiguous segment of tokens in the executed prompt, recorded as part of a ReusePlan's span list.",
+      "distinction": "It is one segment row inside a radix-KV reuse plan; it is not the memq explain-plan PlanStep, which is a stage of a documented explain output.",
+      "distinct_from": [
+        "planp3-reuseplan",
+        "x-cov-plan-planstep"
+      ],
+      "aliases": [],
+      "grounding": "PlanSpan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-planvalid",
+      "canonical": "PlanValid (StrixComparatorPlanValidation verdict)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The StrixComparatorPlanValidation field meaning the strix comparator manifest is internally complete enough to take to a real device.",
+      "distinction": "It is the verdict field of a fail-closed device-free validation result; the function producing that result is ValidateStrixComparatorPlan.",
+      "distinct_from": [
+        "planp3-validatestrixcomparatorplan"
+      ],
+      "aliases": [],
+      "grounding": "PlanValid",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-prefillarmcandidate",
+      "canonical": "PrefillArmCandidate (macbench prefill witness arm)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The macbench prefill-witness arm name 'candidate' identifying the candidate implementation side of a baseline-versus-candidate prefill benchmark.",
+      "distinction": "It names a benchmark arm in the macbench prefill witness; it is not the ctxplanner Candidate record scored for prefix reuse.",
+      "distinct_from": [
+        "candidate-planner"
+      ],
+      "aliases": [],
+      "grounding": "PrefillArmCandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-publishcandidates",
+      "canonical": "PublishCandidates (V41 attention state candidate mask publish)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A V41AttentionState method recording the latest source-published V4.1 candidate mask and ratio for incremental attention.",
+      "distinction": "It publishes a ready candidate mask into attention state; it does not select candidate blocks from logits, which is V41SelectCandidateBlocks.",
+      "distinct_from": [
+        "v41candidatepublication",
+        "planp3-v41selectcandidateblocks"
+      ],
+      "aliases": [],
+      "grounding": "PublishCandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-qwen4expplehashplan",
+      "canonical": "Qwen4ExpPLEHashPlan (CUDA PLE hash operation plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A compute package interface for a prepared device-resident Qwen4-expert PLE hash operation that is dispatched after preparation.",
+      "distinction": "It is a prepared CUDA kernel-operation handle; it is not a byte-budget MemoryPlan over model weights and KV.",
+      "distinct_from": [
+        "x-plan-memoryplan"
+      ],
+      "aliases": [],
+      "grounding": "Qwen4ExpPLEHashPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-rectxplanskill",
+      "canonical": "reCtxplanSkill (ctxplan markdown skill marker regex)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The compiled regular expression matching the '<!-- fak:ctxplan' HTML-comment marker that declares a ctxplan skill block in markdown.",
+      "distinction": "It detects the markdown skill declaration; the companion reCtxplanVerb detects the '//fak:ctxplan' Go comment verb.",
+      "distinct_from": [
+        "planp3-rectxplanverb",
+        "x3-plan-indexctxplans"
+      ],
+      "aliases": [],
+      "grounding": "reCtxplanSkill",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-rectxplanverb",
+      "canonical": "reCtxplanVerb (ctxplan Go comment verb regex)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The compiled regular expression matching the '//fak:ctxplan' comment verb that marks Go source as ctxplan-managed.",
+      "distinction": "It detects the Go comment verb; the markdown skill declaration is matched by the separate reCtxplanSkill regex.",
+      "distinct_from": [
+        "planp3-rectxplanskill",
+        "x3-plan-indexctxplans"
+      ],
+      "aliases": [],
+      "grounding": "reCtxplanVerb",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-resolvestrixcandidate",
+      "canonical": "resolveStrixCandidate (devcmd strix candidate commit resolver)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A devcmd helper resolving a strix candidate directory plus optional explicit tip and mine paths into a concrete resolvedStrixCandidate commit.",
+      "distinction": "It resolves which commit a strix candidate directory points at; it neither archives candidates (StrixCandidateArchive) nor builds the archive.",
+      "distinct_from": [
+        "plan-candidatearchive",
+        "plan-buildstrixcandidatearchivefn"
+      ],
+      "aliases": [],
+      "grounding": "resolveStrixCandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-reuseplan",
+      "canonical": "radixkv.ReusePlan (compiled reuse layout)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A radixkv struct representing the compiled execution and reuse layout for a prompt, composed from non-overlapping token spans covering the prompt range.",
+      "distinction": "It is the whole compiled radix-KV reuse layout; a single contiguous token segment inside it is a PlanSpan.",
+      "distinct_from": [
+        "planp3-planspan",
+        "x-cov-plan-planstep"
+      ],
+      "aliases": [],
+      "grounding": "ReusePlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-runfleetplan",
+      "canonical": "RunFleetPlan (goalrunner serial fleet executor)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A goalrunner function running the contracts in a FleetPlan serially and recording witness evidence for each contract.",
+      "distinction": "It executes a fleet plan; the FleetPlan type it consumes is the data structure, and this is not a dispatch-wave execution plan.",
+      "distinct_from": [
+        "cov-plan-fleetplan"
+      ],
+      "aliases": [],
+      "grounding": "RunFleetPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-scannedcandidates",
+      "canonical": "ScannedCandidates (issue orchestrator discovery counter)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The issue orchestrator wave-result field counting how many candidate issues the discovery scan examined before dispatchability filtering.",
+      "distinction": "It counts scanned issues in one discovery window; it is not the ratio of non-dispatchable ones (UnplannableRatio) nor the repair loop's CandidatesExamined counter.",
+      "distinct_from": [
+        "planp3-unplannableratio",
+        "covg-plan-candidatesexamined"
+      ],
+      "aliases": [],
+      "grounding": "ScannedCandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-schemacandidate",
+      "canonical": "SchemaCandidate (readmenext fragment schema id)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The readmenext constant 'fak-readme-candidate/1' identifying the canonical schema of README candidate fragments.",
+      "distinction": "It is a schema identifier constant for candidate fragments; the fragment payload itself is the CandidateFragment type.",
+      "distinct_from": [
+        "candidate-fragment"
+      ],
+      "aliases": [],
+      "grounding": "SchemaCandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-servefitplansizing",
+      "canonical": "serveFitPlanSizing (serve sizing artifact echo)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A cmd/fak struct echoing what the serve sizing artifact already sized so the fit plan re-reads no pool budget.",
+      "distinction": "It carries already-sized inputs into the fit plan; it is not the arch or hardware facts the fit plan also consumes.",
+      "distinct_from": [
+        "serve-fit-plan-arch",
+        "serve-fit-plan-hardware"
+      ],
+      "aliases": [],
+      "grounding": "serveFitPlanSizing",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-serveggufweightmemoryplanforarm",
+      "canonical": "serveGGUFWeightMemoryPlanForArm (per-arm GGUF weight plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A cmd/fak function computing the compute.MemoryPlan for one serve load arm's GGUF weight bytes under Q4K load options.",
+      "distinction": "It plans weight bytes for one specific load arm; the arm-neutral serveGGUFMemoryPlan covers the whole model, and the positioned serveGGUFMemoryPlanForArm ring plan is a separate concept.",
+      "distinct_from": [
+        "serve-ring-arm-memory-plan",
+        "cov5306-serve-gguf-memory-plan"
+      ],
+      "aliases": [],
+      "grounding": "serveGGUFWeightMemoryPlanForArm",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-servestreamedcpuoffloadcoreplan",
+      "canonical": "serveStreamedCPUOffloadCorePlan (streamed offload fold without context rows)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A cmd/fak function returning the streamed CPU-offload memory fold WITHOUT the context-sized rows, shared by the fit and load arms.",
+      "distinction": "It is the core fold without context-sized rows; the pool-topology and split-aperture variants add topology decisions around it.",
+      "distinct_from": [
+        "planp3-servestreamedcpuoffloadplanforpool",
+        "planp3-servestreamedcpuoffloadplanforaperture",
+        "cov5306-serve-gguf-cpu-offload-memory-plan"
+      ],
+      "aliases": [],
+      "grounding": "serveStreamedCPUOffloadCorePlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-servestreamedcpuoffloadplanforaperture",
+      "canonical": "serveStreamedCPUOffloadPlanForAperture (split-aperture streamed offload plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A cmd/fak function that is serveStreamedCPUOffloadPlanForPool with the device split-aperture made backend-aware.",
+      "distinction": "It adds the split-aperture dimension on top of the pool variant; the core plan is the fold without context-sized rows.",
+      "distinct_from": [
+        "planp3-servestreamedcpuoffloadplanforpool",
+        "planp3-servestreamedcpuoffloadcoreplan"
+      ],
+      "aliases": [],
+      "grounding": "serveStreamedCPUOffloadPlanForAperture",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-servestreamedcpuoffloadplanforpool",
+      "canonical": "serveStreamedCPUOffloadPlanForPool (shared-pool streamed offload plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A cmd/fak function that is serveStreamedCPUOffloadPlan with the shared host/device pool topology made explicit.",
+      "distinction": "It makes the pool topology explicit; the aperture variant further splits the device aperture, and the core plan omits context-sized rows.",
+      "distinct_from": [
+        "planp3-servestreamedcpuoffloadplanforaperture",
+        "planp3-servestreamedcpuoffloadcoreplan"
+      ],
+      "aliases": [],
+      "grounding": "serveStreamedCPUOffloadPlanForPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-setcandidatecache",
+      "canonical": "SetCandidateCache (selfupdate receipt builder setter)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A selfupdate Builder method recording whether candidate compilation reused shared warm worktree objects or populated cold entries, stamped on the update receipt.",
+      "distinction": "It stamps candidate-cache disposition onto a selfupdate receipt; it is not the clonescan token-window candidate cache nor a ctxplanner Candidate.",
+      "distinct_from": [
+        "candidate-planner"
+      ],
+      "aliases": [],
+      "grounding": "SetCandidateCache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-setplanner",
+      "canonical": "Server.SetPlanner (gateway active chat planner setter)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A gateway Server method installing the active agent.Planner used for chat turns on that server.",
+      "distinction": "It swaps the server's active planner instance; it is not the chatPlanner selection heuristic, nor the Plan data type a planner produces.",
+      "distinct_from": [
+        "gateway-chat-planner-5633",
+        "plan-planner"
+      ],
+      "aliases": [],
+      "grounding": "SetPlanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-specrejectionplan",
+      "canonical": "SpecRejectionPlan (speculative decode rejection decision)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A model package side-effect-free decision for one stochastic speculative-decoding round, built from immutable evidence and optionally committed by the caller.",
+      "distinction": "It is the decision value; the immutable evidence it is built from is SpecRejectionPlanInput.",
+      "distinct_from": [
+        "planp3-specrejectionplaninput"
+      ],
+      "aliases": [],
+      "grounding": "SpecRejectionPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-specrejectionplaninput",
+      "canonical": "SpecRejectionPlanInput (speculative rejection evidence)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A model package struct carrying the immutable evidence for one stochastic speculative-decoding round fed to BuildSpecRejectionPlan.",
+      "distinction": "It is the input evidence; the resulting side-effect-free decision is SpecRejectionPlan.",
+      "distinct_from": [
+        "planp3-specrejectionplan"
+      ],
+      "aliases": [],
+      "grounding": "SpecRejectionPlanInput",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-speculativegraphplanner",
+      "canonical": "SpeculativeGraphPlanner (CUDA graph capture planner)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A compute package planner managing speculative-decode CUDA graph capture dimensions and producing stable capture keys.",
+      "distinction": "It plans CUDA graph capture geometry for speculative decoding; it is not a chat-turn planner such as the gateway StreamingPlanner.",
+      "distinct_from": [
+        "x-plan-streamingplanner",
+        "plan-planner"
+      ],
+      "aliases": [],
+      "grounding": "SpeculativeGraphPlanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-turnkeyplannercontextwindow",
+      "canonical": "turnkeyPlannerContextWindow (fak up planner window probe)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A cmd/fak helper extracting the context-window token count from a turnkey agent.Planner so 'fak up' can report it.",
+      "distinction": "It reads a property off an existing planner for the turnkey launch flow; it does not construct or configure planners.",
+      "distinct_from": [
+        "plan-planner"
+      ],
+      "aliases": [],
+      "grounding": "turnkeyPlannerContextWindow",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-unifiedhostresidencyplan",
+      "canonical": "UnifiedHostResidencyPlan (ggufload host residency plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A ggufload WeightSource method sizing the plan whose total simultaneous physical footprint bounds host-resident weight residency.",
+      "distinction": "It sizes unified host residency for weight loading; the session-scoped SessionResidencyPlan is a different residency concept, and MoE checkpoints are refused by name here.",
+      "distinct_from": [
+        "plan-sessionresidency",
+        "x-plan-estimateloadmemoryplan"
+      ],
+      "aliases": [],
+      "grounding": "UnifiedHostResidencyPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-unplannable",
+      "canonical": "unplannable (issue orchestrator non-dispatchable class)",
+      "family": "plan",
+      "kind": "doc-term",
+      "definition": "The issue orchestrator's term for issues that cannot be turned into a dispatchable plan leaf, used in the --auto-expand flag help and the high-ratio advisory warning.",
+      "distinction": "It is the qualitative class name; the measured share of such issues is UnplannableRatio, and the threshold that triggers the advisory is UnplannableWarnRatio.",
+      "distinct_from": [
+        "planp3-unplannableratio",
+        "planp3-unplannablewarnratio"
+      ],
+      "aliases": [],
+      "grounding": "unplannable",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-unplannableratio",
+      "canonical": "UnplannableRatio (issue orchestrator non-dispatchable share)",
+      "family": "plan",
+      "kind": "metric",
+      "definition": "The issue orchestrator wave-result ratio of non-dispatchable (unplannable) issues to all scanned issues in one discovery window.",
+      "distinction": "It is the measured ratio; the warn threshold compared against it is UnplannableWarnRatio, and the raw scanned denominator is ScannedCandidates.",
+      "distinct_from": [
+        "planp3-unplannablewarnratio",
+        "planp3-unplannable"
+      ],
+      "aliases": [],
+      "grounding": "UnplannableRatio",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-unplannablewarnratio",
+      "canonical": "UnplannableWarnRatio (issue orchestrator advisory threshold)",
+      "family": "plan",
+      "kind": "config",
+      "definition": "The issue orchestrator option and --unplannable-warn-ratio flag (default 0.65) setting the unplannable-ratio threshold that triggers the advisory warning and dynamic horizon expansion.",
+      "distinction": "It is the configured threshold; the measured value it guards is UnplannableRatio.",
+      "distinct_from": [
+        "planp3-unplannableratio",
+        "planp3-unplannable"
+      ],
+      "aliases": [],
+      "grounding": "UnplannableWarnRatio",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-v41candidatesstreamuncertain",
+      "canonical": "v41_candidates_stream_uncertain (CUDA peer uncertain-state guard)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A process-wide C++ predicate in cuda_kernels.cu returning true when any V4.1 CUDA peer (checked stream, router, mmid, swiglu, engram, compressor pool, MHC, bf16 publish) has latched an uncertain state, refusing further shared-stream operations.",
+      "distinction": "It is the shared guard predicate consulted by every V4.1 CUDA entry point; it does not select candidate blocks, which is V41SelectCandidateBlocks.",
+      "distinct_from": [
+        "v41selectcandidatesource"
+      ],
+      "aliases": [],
+      "grounding": "v41_candidates_stream_uncertain",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-v41selectcandidateblocks",
+      "canonical": "V41SelectCandidateBlocks (V4.1 indexer level-one selector)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A model package function implementing the first level of the V4.1 indexer, selecting top-K compressed blocks from logits into a candidate mask.",
+      "distinction": "It selects candidate blocks from logits; publishing a ready mask into attention state is PublishCandidates, and the stream guard they all consult is v41_candidates_stream_uncertain.",
+      "distinct_from": [
+        "planp3-publishcandidates",
+        "planp3-v41candidatesstreamuncertain"
+      ],
+      "aliases": [],
+      "grounding": "V41SelectCandidateBlocks",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-validateeventcandidatescope",
+      "canonical": "validateEventCandidateScope (validate test-event scope checker)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A validate package function checking that test events' candidate scopes stay inside the validated root before acceptance.",
+      "distinction": "It checks event-candidate scope in the validate harness; it is not the placement-tax validateCandidate feasibility validator.",
+      "distinct_from": [
+        "issue10231-placementtax-validate-candidate"
+      ],
+      "aliases": [],
+      "grounding": "validateEventCandidateScope",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-validatestrixcomparatorplan",
+      "canonical": "ValidateStrixComparatorPlan (device-free strix comparator validator)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A llamacppinterop function performing fail-closed device-free validation of a proposed StrixComparatorManifest's immutable identity, returning a StrixComparatorPlanValidation.",
+      "distinction": "It is the validating function; its PlanValid verdict field reports whether the manifest is complete enough for a real device.",
+      "distinct_from": [
+        "planp3-planvalid",
+        "plan-candidatearchive"
+      ],
+      "aliases": [],
+      "grounding": "ValidateStrixComparatorPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp3-vulkanhazardplan",
+      "canonical": "VulkanHazardPlan (Vulkan batch hazard lowering)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A compute package deterministic lowering result for one Vulkan batch window, capturing barrier floors and hazard statistics.",
+      "distinction": "It is the lowered hazard result for one batch window; vulkan_plan is the broader command-buffer compute plan it feeds.",
+      "distinct_from": [
+        "x2-plan-vulkanplan"
+      ],
+      "aliases": [],
+      "grounding": "VulkanHazardPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}
