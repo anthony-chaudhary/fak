@@ -1434,12 +1434,14 @@ func releaseShipAdoptAncestorCI(result *releaseShipResult, root string, opts rel
 	for _, wf := range workflows {
 		args := []string{"run", "list", "--workflow", wf, "--branch", opts.trunk, "--status", "completed", "--event", "push", "--limit", "20", "--json", "databaseId,status,conclusion,url,headSha,updatedAt,event"}
 		code, out := releaseShipCmd(result, root, "gh", args, nil, time.Minute)
+		// An unreadable workflow can hide failed ancestors; only a successful
+		// history query can justify trying the secondary workflow.
 		if code != 0 {
-			continue
+			return releaseShipAncestorCIBlocked(fallback, wf, nil, "completed workflow history could not be queried")
 		}
 		var rows []map[string]any
 		if err := json.Unmarshal([]byte(out), &rows); err != nil {
-			continue
+			return releaseShipAncestorCIBlocked(fallback, wf, nil, "completed workflow history was not valid JSON")
 		}
 		rows = releaseShipPushCIRuns(rows)
 		var failedAncestors []map[string]any

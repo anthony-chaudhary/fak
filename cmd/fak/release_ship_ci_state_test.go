@@ -230,6 +230,72 @@ func TestReleaseShipAncestorCIRequiresPushEvent(t *testing.T) {
 	}
 }
 
+// An unreadable primary history is not evidence that the secondary may replace it.
+// fak-test:runtime fast est=20ms
+func TestReleaseShipAncestorCIRequiresReadableWorkflowHistory(t *testing.T) {
+	const green = `[{"event":"push","status":"completed","conclusion":"success","headSha":"ancestor-sha"}]`
+	for _, tc := range []struct {
+		name, output, reason string
+		code                 int
+		adopt                bool
+	}{
+		{name: "query failed despite green output", code: 1, output: green, reason: "could not be queried"},
+		{name: "invalid JSON", output: "not-json", reason: "not valid JSON"},
+		{name: "valid empty primary permits secondary", output: "[]", adopt: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			historyProbes, primaryQueries, secondaryQueries, ancestryProbes := 0, 0, 0, 0
+			restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
+				switch {
+				case name == "git" && sameArgs(args, "rev-parse", "--is-shallow-repository"):
+					historyProbes++
+					return 0, "false\n"
+				case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--branch", "main", "--status", "completed", "--event", "push", "--limit", "20", "--json", "databaseId,status,conclusion,url,headSha,updatedAt,event"):
+					primaryQueries++
+					return tc.code, tc.output
+				case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci-fast.yml", "--branch", "main", "--status", "completed", "--event", "push", "--limit", "20", "--json", "databaseId,status,conclusion,url,headSha,updatedAt,event"):
+					secondaryQueries++
+					return 0, green
+				case name == "git" && sameArgs(args, "merge-base", "--is-ancestor", "ancestor-sha", "source-sha"):
+					ancestryProbes++
+					return 0, ""
+				default:
+					t.Fatalf("unexpected command: %s %v", name, args)
+					return 127, "unexpected"
+				}
+			})
+			defer restore()
+			fallback := map[string]any{
+				"ok": false, "status": "pending", "source_sha": "source-sha",
+				"run": map[string]any{"headSha": "source-sha", "databaseId": 7},
+			}
+			var result releaseShipResult
+			ci := releaseShipAdoptAncestorCI(&result, t.TempDir(), releaseShipOptions{workflow: "ci.yml", trunk: "main"}, "source-sha", fallback)
+			wantSecondary := 0
+			if tc.adopt {
+				wantSecondary = 1
+			}
+			if historyProbes != 1 || primaryQueries != 1 || secondaryQueries != wantSecondary || ancestryProbes != wantSecondary {
+				t.Fatalf("queries/probes=%d/%d/%d/%d; want complete primary evidence before secondary=%d", historyProbes, primaryQueries, secondaryQueries, ancestryProbes, wantSecondary)
+			}
+			if fallback["ancestor_ci_blocker"] != nil || fallback["status"] != "pending" || releaseShipPayloadOK(fallback) {
+				t.Fatalf("original source evidence mutated: %#v", fallback)
+			}
+			if tc.adopt {
+				if !releaseShipPayloadOK(ci) || ci["status"] != "green" || ci["adopted_ancestor_sha"] != "ancestor-sha" || ci["workflow"] != "ci-fast.yml" || ci["ancestor_ci_blocker"] != nil {
+					t.Fatalf("valid empty primary lost secondary adoption: %#v", ci)
+				}
+				return
+			}
+			run, _ := ci["run"].(map[string]any)
+			blocker, _ := ci["ancestor_ci_blocker"].(map[string]any)
+			if releaseShipPayloadOK(ci) || ci["status"] != "pending" || ci["source_sha"] != "source-sha" || run["headSha"] != "source-sha" || run["databaseId"] != 7 || ci["adopted_ancestor_sha"] != nil || blocker["workflow"] != "ci.yml" || !strings.Contains(stringFromAny(blocker["reason"]), tc.reason) {
+				t.Fatalf("unreadable primary history lost its barrier or source evidence: %#v", ci)
+			}
+		})
+	}
+}
+
 // All command results describe a small source-history graph; no real git or gh runs.
 // fak-test:runtime fast est=20ms
 func TestReleaseShipAncestorCIDoesNotCrossFailedHistory(t *testing.T) {
