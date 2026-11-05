@@ -77,6 +77,19 @@ func (b kvBackend) ModelID() string {
 	return ""
 }
 
+// WeightEpoch reports the session's current weight-state stamp (the continual-engine
+// weight-epoch seam): the KV-MMU stamps it onto every appended segment so a span can
+// be checked against the live weight state at serve time (fail-closed mismatch,
+// never-silent-recompute). It is additive to the abi.KVBackend seam, reachable by
+// type assertion exactly like CanEvict: a backend that does not implement it simply
+// leaves its spans unstamped, exactly as today.
+func (b kvBackend) WeightEpoch() WeightEpochStamp {
+	if b.s == nil || b.s.M == nil {
+		return WeightEpochStamp{}
+	}
+	return b.s.M.WeightEpoch()
+}
+
 // KVBackend wraps a *Session as an abi.KVBackend (the in-process default the KV-MMU
 // enforces through). A nil session yields ok=false so a caller can fail closed.
 func KVBackend(s *Session) (abi.KVBackend, bool) {
