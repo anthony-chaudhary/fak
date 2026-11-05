@@ -72,6 +72,7 @@ func TestCUDACompensatedScratchFailureOwnership(t *testing.T) {
 	// Compile the actual ledger, including its pointer table and atomic counters.
 	// Only the header-only pragma is omitted in this generated translation unit.
 	program := strings.TrimPrefix(read("cuda/alloc_ledger.h"), "#pragma once\n") + "\n" + cudaCompensatedScratchHarness
+	program += "\n" + function(read("cuda_kernels.cu"), "static bool v41_candidates_stream_uncertain(void)") + "\n"
 	// Keep the allocator's real pool accounting and pending-membership dependency.
 	program += "\n" + between(memory, "static size_t g_pool_bytes", "static size_t fcuda_pool_default_cap")
 	program += "\n" + read("cuda/v41_compressor_pending.cuh")
@@ -269,7 +270,7 @@ static cublasStatus_t cublasGemmEx(int, int, int, int, int, int, const float *,
 }
 using cudaError_t = int;
 using cudaStreamCaptureStatus = int;
-static constexpr int cudaSuccess=0, cudaErrorInvalidValue=1, cudaErrorMemoryAllocation=2;
+static constexpr int cudaSuccess=0, cudaErrorInvalidValue=1, cudaErrorMemoryAllocation=2, cudaErrorNotReady=34;
 static constexpr int cudaStreamCaptureStatusNone=0, cudaStreamCaptureStatusActive=1, cudaStreamCaptureStatusInvalidated=2;
 static bool g_capture_open=false;
 static bool g_v41_router_uncertain=false;
@@ -327,9 +328,6 @@ static int cudaStreamSynchronize(int) {
   return 0;
 }
 static void q4_coeff_cache_evict(const void *) {}
-static bool v41_candidates_stream_uncertain(void) {
-  return g_v41_router_uncertain || g_v41_mmid_uncertain || g_cuda_cleanup_status != 0;
-}
 #define CK(value) do { (void)(value); } while (0)
 static size_t pooled() {
   size_t count=0;
@@ -461,6 +459,54 @@ int main() {
   const size_t wbytes=640*256*sizeof(__half), xbytes=128*512*sizeof(__half);
   unsigned long long token=0;
   fcuda_sequence_split_status status{};
+  // A shared terminal entry cannot begin a fresh loan or retire an active
+  // one, even when a later stream fence would succeed. Exercise both the
+  // precise cleanup status and the peer-family uncertainty fallback.
+  for (int stop=0; stop<2; ++stop) {
+    const int stopped=stop==0 ? 719 : cudaErrorNotReady;
+    reset_context();
+    CHECK(fcuda_sequence_split_begin(wbytes,xbytes,&token,&status)==0);
+    CHECK(route0(320,256,128)==0 && pending_reads==1);
+    const auto owners=allocated;
+    if (stop==0) g_cuda_cleanup_status=719;
+    else g_v41_router_uncertain=true;
+    CHECK(fcuda_sequence_split_end(token,&status)==stopped);
+    CHECK(status.phase==FCUDA_SEQUENCE_SPLIT_QUARANTINE && status.code==stopped);
+    CHECK(g_sequence_split.phase==SequenceSplitPhase::Quarantined);
+    CHECK(attempts==4 && capture_queries==1 && sync_calls==0 && free_attempts==0);
+    CHECK(g_live.size()==4 && physical.size()==4 && pooled()==0 && pending_reads==1);
+    for (int i=0; i<4; ++i) {
+      CHECK(g_sequence_split.ptr[i]==owners[i].first && g_sequence_split.bytes[i]==owners[i].second);
+    }
+    CHECK(private_ledger_matches());
+    CHECK(g_cuda_cleanup_status==(stop==0 ? 719 : 0));
+    // A later flag change cannot rehabilitate the quarantined loan.
+    g_cuda_cleanup_status=0; g_v41_router_uncertain=false;
+    CHECK(fcuda_sequence_split_begin(wbytes,xbytes,&token,&status)==stopped);
+    CHECK(token==0 && status.phase==FCUDA_SEQUENCE_SPLIT_QUARANTINE && status.code==stopped);
+    CHECK(attempts==4 && capture_queries==1 && sync_calls==0 && free_attempts==0);
+    CHECK(private_ledger_matches());
+
+    reset_context();
+    if (stop==0) g_cuda_cleanup_status=719;
+    else g_v41_router_uncertain=true;
+    token=123;
+    CHECK(fcuda_sequence_split_begin(wbytes,xbytes,&token,&status)==stopped);
+    CHECK(token==0 && status.phase==FCUDA_SEQUENCE_SPLIT_QUARANTINE && status.code==stopped);
+    CHECK(attempts==0 && capture_queries==0 && sync_calls==0 && free_attempts==0);
+    CHECK(g_live.empty() && physical.empty() && private_ledger_matches());
+  }
+  reset_context();
+  CHECK(fcuda_sequence_split_begin(wbytes,xbytes,&token,&status)==0);
+  CHECK(route0(320,256,128)==0);
+  sync_fail_at=1;
+  CHECK(fak_qwen35_sequence_sync()==60700);
+  g_cuda_cleanup_status=719;
+  CHECK(fcuda_sequence_split_end(token,&status)==700);
+  CHECK(status.phase==FCUDA_SEQUENCE_SPLIT_QUARANTINE && status.code==700);
+  CHECK(g_sequence_split.failed_fence==700 && g_cuda_cleanup_status==719);
+  CHECK(sync_calls==1 && capture_queries==1 && free_attempts==0 && pending_reads==1);
+  CHECK(g_live.size()==4 && physical.size()==4 && private_ledger_matches());
   for (Route route : routes) {
     for (int fail=1; fail<=3; ++fail) {
       reset_context();

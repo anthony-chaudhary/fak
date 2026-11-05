@@ -20,8 +20,8 @@ import (
 )
 
 // TestSpeculativeSelectorAdmitsDFlash2 pins the closed structural selector contract:
-// the admission matrix {mtp, ngram, dflash2, ""} is admitted verbatim (dflash2 routes
-// to the DFlash2 request constructor through gateway.Config.SpeculativeMode), an unknown
+// the parser matrix {mtp, ngram, dflash2, ""} is admitted verbatim (DFlash2 startup
+// separately refuses until serve can retain an authenticated owner), an unknown
 // mode fails startup with the ErrSpeculativeModeUnknown sentinel, and the FAK_SPECULATIVE
 // / SPECULATIVE operator overrides still win over the --speculative flag.
 // fak-test:runtime fast est=50ms lane=default

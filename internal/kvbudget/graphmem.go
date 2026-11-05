@@ -46,7 +46,7 @@ type GraphMemProbe struct {
 // the per-bucket cost (floored at MinPerGraphBytes) and the total is
 // first + (totalBuckets-1) × per-bucket. Samples beyond the second are
 // ignored. A zero-bucket or NONE-mode probe (no deltas, or totalBuckets ≤ 0)
-// reserves 0.
+// reserves 0. Overflow saturates to math.MaxUint64 rather than undercharging.
 func (p GraphMemProbe) ExtrapolatedPoolFootprint(totalBuckets int) uint64 {
 	if len(p.Deltas) == 0 || totalBuckets <= 0 {
 		return 0
@@ -59,7 +59,11 @@ func (p GraphMemProbe) ExtrapolatedPoolFootprint(totalBuckets int) uint64 {
 			perBucket = MinPerGraphBytes
 		}
 	}
-	return first + uint64(totalBuckets-1)*perBucket
+	buckets := uint64(totalBuckets - 1)
+	if perBucket != 0 && buckets > (math.MaxUint64-first)/perBucket {
+		return math.MaxUint64
+	}
+	return first + buckets*perBucket
 }
 
 // DeriveMaxBlocksWithGraphReserve sizes a paged KV pool from measured memory
@@ -85,9 +89,9 @@ func DeriveMaxBlocksWithGraphReserve(freeBytes, nonKVBytes, graphReserveBytes ui
 	}
 	nonKVTotal := nonKVBytes
 	if graphReserveBytes > math.MaxUint64-nonKVBytes {
-		// Saturate instead of wrapping: an absurd reserve must refuse, not
-		// wrap past the budget.
-		nonKVTotal = math.MaxUint64
+		// An overflowing charge exceeds every representable budget, including
+		// MaxUint64; saturation alone would incorrectly report success there.
+		return 0, ErrNonKVExceedsBudget
 	} else {
 		nonKVTotal += graphReserveBytes
 	}

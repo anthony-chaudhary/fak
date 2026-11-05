@@ -175,8 +175,8 @@ func TestNVFP4SpecialValuesAndMismatch(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(got) != 64 {
-			t.Fatalf("decoded %d values, want 64", len(got))
+		if wantValues := len(codes) * 2; len(got) != wantValues {
+			t.Fatalf("decoded %d values, want %d from %d packed bytes", len(got), wantValues, len(codes))
 		}
 		want := map[int]float32{
 			0:       0.25, // 1.0 * 1 * 0.25

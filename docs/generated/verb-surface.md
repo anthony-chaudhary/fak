@@ -6,10 +6,10 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1338<br>
-rows: 1311<br>
-unverified rows: 0 / 1311<br>
-source-only rows absent from help: 1075
+parsed files: 1352<br>
+rows: 1316<br>
+unverified rows: 0 / 1316<br>
+source-only rows absent from help: 1080
 
 ## Surface table
 
@@ -122,6 +122,7 @@ source-only rows absent from help: 1075
 | `fak bench tb4 preflight` |  | runTB4Preflight / internal/tb4bench | `case` arm of the dispatch switch in runBenchTB4() | STRUCTURAL | `NOT_FOUND` | **SOURCE ONLY** |
 | `fak bench tb4 replay` |  | runTB4Replay / internal/tb4bench | `case` arm of the dispatch switch in runBenchTB4() | NONE | — | **SOURCE ONLY** |
 | `fak bench tb4 run` |  | runTB4Run / internal/tb4bench | `case` arm of the dispatch switch in runBenchTB4() | NONE | — | **SOURCE ONLY** |
+| `fak bench trace` | the `fak bench trace` CLI verb isolating subagent dispatch and prefix-tree ingestion overhead from raw GPU execution. | runBenchTrace / internal/nativeperf | `case` arm of the dispatch switch in cmdBench() | NONE | — | **SOURCE ONLY** |
 | `fak bench-effort` | benchmark reasoning and thinking effort trade-offs across models | cmdBenchEffort | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak bench-ingest` | fold benchmark snapshot fixtures into provenanced modelscore rows; offline, --check validates only | cmdBenchIngest / internal/benchcatalog | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | **SOURCE ONLY** |
 | `fak bench-loop` | benchmark super-loop manager: status, next action, surface walk, and local collection entrypoint | cmdBenchLoop / internal/benchloop | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | yes |
@@ -216,7 +217,7 @@ source-only rows absent from help: 1075
 | `fak cluster` | multi-node compute: run a real cross-node collective over fak's process group | cmdCluster | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | yes |
 | `fak cluster coordinator` |  | cmdClusterCoordinator / internal/model | `case` arm of the dispatch switch in cmdCluster() | RUNTIME | — | yes |
 | `fak cluster help` |  | clusterUsage | `case` arm of the dispatch switch in cmdCluster() | NONE | — | **SOURCE ONLY** |
-| `fak cluster info` |  | cmdClusterInfo / internal/cluster | `case` arm of the dispatch switch in cmdCluster() | NONE | — | **SOURCE ONLY** |
+| `fak cluster info` |  | cmdClusterInfo / internal/cluster, internal/compute, internal/model | `case` arm of the dispatch switch in cmdCluster() | NONE | — | **SOURCE ONLY** |
 | `fak cluster selftest` |  | cmdClusterSelftest / internal/model | `case` arm of the dispatch switch in cmdCluster() | RUNTIME | — | yes |
 | `fak cluster worker` |  | cmdClusterWorker / internal/model | `case` arm of the dispatch switch in cmdCluster() | RUNTIME | — | yes |
 | `fak code-debt` | code debt measurement, prioritization, and remediation tracking | cmdCodeDebt / internal/codedebt | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | yes |
@@ -252,6 +253,7 @@ source-only rows absent from help: 1075
 | `fak compute-trace logprobs` | scores an endpoint's greedy continuations against a reference oracle file or a live llama-server (check_logprobs_close). | runComputeTraceLogprobs | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
 | `fak compute-trace profile` | prints the per-(layer, stage) activation error profile of an actual trace against a reference trace. | runComputeTraceProfile / internal/computetrace | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
 | `fak compute-trace summary` |  | eventDuration | `case` arm of the dispatch switch in runComputeTrace() | NONE | — | **SOURCE ONLY** |
+| `fak computetune` | storage-compute arbitration: recompute prompt KV on UMA DRAM vs offload to NVMe SSD | cmdComputetune / internal/computetune | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak concept` | position, classify, or validate entries in the concept catalog | runConceptCLI / internal/conceptcatalog, internal/hooks, internal/windowgate | `case` arm of the dispatch switch in dispatchCoreVerbA() | RUNTIME | — | **SOURCE ONLY** |
 | `fak concept freshness` | answers the question the gate asks, so an operator can check a pathspec before paying for a refusal. | runConceptFreshnessStaged / internal/conceptcatalog, internal/windowgate | `case` arm of the dispatch switch in runConceptCLI() | RUNTIME | — | **SOURCE ONLY** |
 | `fak concept generate` | command CONCEPT_FRESHNESS prints when it refuses | runConceptGenerateStaged / internal/conceptcatalog, internal/windowgate | `case` arm of the dispatch switch in runConceptCLI() | RUNTIME | — | **SOURCE ONLY** |
@@ -390,7 +392,7 @@ source-only rows absent from help: 1075
 | `fak doctor launch-posture` |  | runDoctorLaunchPosture / internal/agent, internal/gateway, internal/harnessprofile, internal/policy, internal/syspromptmmu, internal/vcachecalibration | `if` arm of the dispatch in runDoctor() | NONE | — | **SOURCE ONLY** |
 | `fak doctor mcp` |  | runDoctorMCP / internal/session | `if` arm of the dispatch in runDoctor() | STRUCTURAL | `CHILD_TIMEOUT`, `CONFIG_INVALID`, `EXECUTABLE_MISSING`, `EXECUTABLE_PERMISSION_DENIED`, `INITIALIZE_ERROR`, `INITIALIZE_TIMEOUT`, `INITIALIZE_WRITE_FAILED`, `SPAWN_FAILED` | **SOURCE ONLY** |
 | `fak doctor movers` | renders the `fak doctor movers` section (#2472): the fastest- moving modules and the dormant-with-open-issues candidates, folded purely from the append-only module-versions ledger that `fak version mo… | runDoctorMovers / internal/modver, internal/pathutil, internal/windowgate | `if` arm of the dispatch in runDoctor() | RUNTIME | — | **SOURCE ONLY** |
-| `fak doctor serve` | testable core of `fak doctor serve`: it parses flags, probes the live host (unless facts are injected via the parsed flags), and renders the readiness table | runServeDoctor / internal/compute, internal/ggufload, internal/gpulease, internal/hfhub, internal/localadmission, internal/macfit, internal/memgate, internal/modelreg, internal/pathutil | `if` arm of the dispatch in runDoctor() | NONE | — | yes |
+| `fak doctor serve` | testable core of `fak doctor serve`: it parses flags, probes the live host (unless facts are injected via the parsed flags), and renders the readiness table | runServeDoctor / internal/compute, internal/gateway, internal/ggufload, internal/gpulease, internal/hfhub, internal/localadmission, internal/macfit, internal/memgate, internal/model, internal/modelreg, internal/pathutil | `if` arm of the dispatch in runDoctor() | STRUCTURAL | `DEGRADED_OR_BLOCKED`, `FEATURE_PROOF_AUTH_UNAVAILABLE`, `FEATURE_PROOF_HTTP_ERROR`, `FEATURE_PROOF_INVALID_ARGUMENT`, `FEATURE_PROOF_TIMEOUT`, `FEATURE_REFUSED_UNAVAILABLE`, `PROOF_GENERATION_FAILED` | yes |
 | `fak doctor telemetry` |  | runDoctorTelemetry / internal/trajectory | `if` arm of the dispatch in runDoctor() | NONE | — | **SOURCE ONLY** |
 | `fak doctor terminal-risk` |  | runDoctorTerminalRisk / internal/terminalrisk | `if` arm of the dispatch in runDoctor() | NONE | — | **SOURCE ONLY** |
 | `fak doctor trust` |  | runDoctorTrust / internal/httptrust | `if` arm of the dispatch in runDoctor() | NONE | — | yes |
@@ -510,6 +512,7 @@ source-only rows absent from help: 1075
 | `fak goal-park` | park a supervisor goal claim: status\|claim a goal identity to a single owner via the .fak/goal-park store | cmdGoalPark / internal/goalpark | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak goal-park claim` |  |  | `case` arm of the dispatch switch in cmdGoalPark() | N/A | — | **SOURCE ONLY** |
 | `fak goal-park status` |  |  | `case` arm of the dispatch switch in cmdGoalPark() | N/A | — | **SOURCE ONLY** |
+| `fak godfile-ceiling` | the ratcheting god-file LOC ceiling gate: live tree vs committed baseline; --json emits the verdict | cmdGodFileCeiling / internal/godfileceiling | `case` arm of the dispatch switch in dispatchCoreVerbA() | STRUCTURAL | `GODFILE_CEILING_MEASURE_FAILED` | **SOURCE ONLY** |
 | `fak godsplit-plan` | read-only boundary + hazard planner for a behavior-preserving Go god-file split (the /modularize --json plan) | cmdGodsplitPlan / internal/godsplitplan | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
 | `fak grafana` | export fak fleet metrics as a Grafana dashboard/datasource | cmdGrafana | `case` arm of the dispatch switch in dispatchExtendedVerbB() | NONE | — | **SOURCE ONLY** |
 | `fak growthgate` | the unbounded-growth ratchet: census append-only ledger/log bloat vs byte budgets; --reap COLD logs | cmdGrowthgate / internal/growthgate | `case` arm of the dispatch switch in dispatchCoreVerbA() | NONE | — | **SOURCE ONLY** |
@@ -756,6 +759,7 @@ source-only rows absent from help: 1075
 | `fak model preflight` | checks a checkpoint header (every shard, no tensor bytes) for unread keys, HF-config mismatches, missing/orphan tensors, dtypes without a host kernel, and — with --device cuda --arch — weight ops… | runModelPreflight / internal/compute, internal/ggufload, internal/model, internal/newmodel, internal/pathutil | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model provider-contracts` |  | runModelProviderContracts / internal/modelroute | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model pull` | `fak pull <ref>` / `fak model pull <ref>`: resolve an alias to its target (a bare hf:// URI or path passes through), download it into the local cache (cache-hit if already present), and print the loca… | cmdModelPull / internal/hfhub, internal/modelreg | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
+| `fak model quantize` |  | runModelQuantize / internal/ggufload | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model qwen38-ladder` |  | runModelQwen38Ladder / internal/qwen38ladder | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model readiness-inventory` |  | runModelReadinessInventory / internal/modelaccept | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
 | `fak model trace-stub` |  | runModelTraceStub / internal/ggufload, internal/model, internal/pathutil, internal/qwen4exp | `case` arm of the dispatch switch in cmdModel() | NONE | — | **SOURCE ONLY** |
@@ -971,7 +975,7 @@ source-only rows absent from help: 1075
 | `fak self` | converge a built-from-source fak binary on origin/main | cmdSelfUpdate / internal/selfupdate/cmd | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | **SOURCE ONLY** |
 | `fak self-update` | converge a built-from-source fak binary on origin/main | cmdSelfUpdate / internal/selfupdate/cmd | `case` arm of the dispatch switch in dispatchPrimaryVerb() | NONE | — | yes |
 | `fak sensecheck` | evaluate text, commits, or session traces for grounded truth and hallucination drift | cmdSenseCheck / internal/sensecheck | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
-| `fak serve` | run the OpenAI-compatible gateway in front of a local or remote model | cmdServe / internal/abi, internal/adjudicator, internal/agent, internal/branchrole, internal/compute, internal/compute/strix, internal/deploymanifest, internal/fitplan, internal/gateway, internal/ggufload, internal/gpulease, internal/guardvars, internal/ifc, internal/journal, internal/l3kv, internal/localadmission, internal/memgate, internal/model, internal/pathutil, internal/policy, internal/power, internal/projectassets, internal/ratelimit, internal/snapshot, internal/toolplugin | `case` arm of the dispatch switch in dispatchCoreVerbB() | STRUCTURAL | `DEFAULT_DENY`, `FAK_REMOTE_KV_TIMEOUT`, `POLICY_BLOCK` | yes |
+| `fak serve` | run the OpenAI-compatible gateway in front of a local or remote model | cmdServe / internal/abi, internal/adjudicator, internal/agent, internal/branchrole, internal/compute, internal/compute/strix, internal/deploymanifest, internal/fitplan, internal/gateway, internal/ggufload, internal/gpulease, internal/guardvars, internal/ifc, internal/journal, internal/l3kv, internal/localadmission, internal/memgate, internal/model, internal/modelengine, internal/pathutil, internal/policy, internal/power, internal/projectassets, internal/ratelimit, internal/snapshot, internal/toolplugin | `case` arm of the dispatch switch in dispatchCoreVerbB() | STRUCTURAL | `DEFAULT_DENY`, `FAK_REMOTE_KV_TIMEOUT`, `POLICY_BLOCK` | yes |
 | `fak serve help` |  |  | `if` arm of the dispatch in serveHelpTopic() | N/A | — | **SOURCE ONLY** |
 | `fak serve-wiring` | audit fak serve flag -> gateway.Config -> runtime-read wiring | cmdServeWiring | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | yes |
 | `fak service` | run or install fak as a long-lived OS service (Windows service dispatcher + install/status) | cmdService / internal/guardsessions, internal/servicewatchdog, internal/systemservice | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |
@@ -1043,6 +1047,7 @@ source-only rows absent from help: 1075
 | `fak skill compile` |  | runSkillCompile / internal/toolcatalog | `case` arm of the dispatch switch in cmdSkill() | NONE | — | **SOURCE ONLY** |
 | `fak skill footprint` |  | runSkillFootprint / internal/capindex, internal/capindexgw, internal/skillfootprint | `case` arm of the dispatch switch in cmdSkill() | NONE | — | **SOURCE ONLY** |
 | `fak skill help` |  | skillUsage | `case` arm of the dispatch switch in cmdSkill() | NONE | — | **SOURCE ONLY** |
+| `fak skill pull` | an explicit operator acquisition, not agent startup discovery | runSkillPull / internal/skilldiscovery | `case` arm of the dispatch switch in cmdSkill() | NONE | — | **SOURCE ONLY** |
 | `fak skill query` |  | runSkillQuery / internal/capindex, internal/capindexgw | `case` arm of the dispatch switch in cmdSkill() | NONE | — | yes |
 | `fak skill residency` |  | runSkillResidency / internal/capindex, internal/capindexgw, internal/ctxresidency | `case` arm of the dispatch switch in cmdSkill() | NONE | — | yes |
 | `fak skill swap` |  | runSkillSwap / internal/capindex, internal/ctxresidency, internal/skillenv | `case` arm of the dispatch switch in cmdSkill() | NONE | — | yes |
@@ -1323,6 +1328,6 @@ source-only rows absent from help: 1075
 | `fak worktree worker list` |  | worktreeWorkerList / internal/dispatchaudit, internal/leaseref, internal/windowgate, internal/workerworktree | `case` arm of the dispatch switch in cmdWorktreeWorker() | RUNTIME | — | **SOURCE ONLY** |
 | `fak worktree worker prepare` |  | worktreeWorkerPrepare / internal/dispatchaudit, internal/dojocal, internal/leaseref, internal/processalive, internal/treedoctor, internal/windowgate, internal/workerworktree | `case` arm of the dispatch switch in cmdWorktreeWorker() | STRUCTURAL | `PRESERVATION_ADMISSION_REFUSED` | **SOURCE ONLY** |
 | `fak worktree worker publish` |  | worktreeWorkerPublish / internal/dispatchaudit, internal/leaseref, internal/windowgate, internal/workerworktree | `case` arm of the dispatch switch in cmdWorktreeWorker() | RUNTIME | — | **SOURCE ONLY** |
-| `fak worktree worker reap` |  | worktreeWorkerReap / internal/windowgate, internal/wipinventory, internal/wiplifecycle, internal/workerworktree | `case` arm of the dispatch switch in cmdWorktreeWorker() | STRUCTURAL | `WIP_LIFECYCLE_CAPTURE_FAILED` | **SOURCE ONLY** |
+| `fak worktree worker reap` |  | worktreeWorkerReap / internal/windowgate, internal/workerworktree, internal/worktreereapcli | `case` arm of the dispatch switch in cmdWorktreeWorker() | RUNTIME | — | **SOURCE ONLY** |
 | `fak worktree worker recover` | crash-resume inventory for isolated lands | worktreeWorkerRecover / internal/windowgate, internal/wipinventory, internal/wiplifecycle, internal/workerworktree | `case` arm of the dispatch switch in cmdWorktreeWorker() | STRUCTURAL | `WIP_LIFECYCLE_CAPTURE_FAILED` | **SOURCE ONLY** |
 | `fak worktype` | attribute session token spend and outcomes to classified work types | runWorktypeSpend / internal/cacheprice, internal/gatewayusageledger, internal/sessionmine, internal/worktype | `case` arm of the dispatch switch in dispatchCoreVerbB() | NONE | — | **SOURCE ONLY** |

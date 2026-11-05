@@ -2,8 +2,39 @@ package kvbudget
 
 import (
 	"errors"
+	"math"
 	"testing"
 )
+
+// fak-test:runtime fast est=10ms lane=default
+func TestAdmissionCeilingAvoidsOverflow(t *testing.T) {
+	s := Stream{PromptTokens: math.MaxInt, BlockSize: 16}
+	want := math.MaxInt/16 + 1
+	for name, got := range map[string]int{
+		"worst case":        s.WorstCaseBlocks(),
+		"capped worst case": s.CappedWorstCaseBlocks(1),
+		"actual charge":     s.ChargedBlocks(0),
+	} {
+		if got != want {
+			t.Errorf("%s: got %d blocks, want %d", name, got, want)
+		}
+	}
+	for name, admit := range map[string]func(*Reservation) Verdict{
+		"uncapped": func(r *Reservation) Verdict { return r.Admit(s) },
+		"capped":   func(r *Reservation) Verdict { return r.AdmitCapped(s, 1) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := Reservation{FreeBlocks: want - 1}
+			if got := admit(&r); got.Admitted || got.Reason != ReasonNoRoomToRetain || r.ReservedBlocks != 0 {
+				t.Fatalf("insufficient pool admitted an overflowed reservation: verdict=%+v budget=%+v", got, r)
+			}
+			r.FreeBlocks = want
+			if got := admit(&r); !got.Admitted || got.ReservedBlocks != want || r.Available() != 0 {
+				t.Fatalf("exact-fit pool: verdict=%+v budget=%+v", got, r)
+			}
+		})
+	}
+}
 
 // TestReserveBlocksWorstCase pins the worst-case block math: blocks are sized
 // against prompt+MaxNewTokens (the maximum length), rounded up per block, with

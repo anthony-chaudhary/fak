@@ -229,17 +229,29 @@ func TestNCCLOpGroupAbortOnceNoDestroy(t *testing.T) {
 	})
 
 	t.Run("rank-order-gather", func(t *testing.T) {
-		g, err := openOpGroup(1, 3)
-		if err != nil {
-			t.Fatalf("openOpGroup(1,3) = %v, want ok", err)
+		rankBands := [][2]float32{{1, 2}, {3, 4}, {5, 6}}
+		shards := make([][]float32, len(rankBands))
+		for rank, band := range rankBands {
+			// Keep the oracle independent of any writes through the gather inputs.
+			shards[rank] = slices.Clone(band[:])
 		}
-		out, err := g.allGather([][]float32{{1, 2}, {3, 4}, {5, 6}})
+		g, err := openOpGroup(1, len(rankBands))
+		if err != nil {
+			t.Fatalf("openOpGroup(1,%d) = %v, want ok", len(rankBands), err)
+		}
+		out, err := g.allGather(shards)
 		if err != nil {
 			t.Fatalf("allGather = %v, want ok", err)
 		}
-		// Rank 0's band first, rank 1's next, rank 2's last — the rank-order layout.
-		if !slices.Equal(out, []float32{1, 2, 3, 4, 5, 6}) {
-			t.Fatalf("allGather layout = %v, want [1 2 3 4 5 6] (rank order)", out)
+		bandSize := len(rankBands[0])
+		if want := len(rankBands) * bandSize; len(out) != want {
+			t.Fatalf("allGather extent = %d, want %d from rank bands", len(out), want)
+		}
+		for rank, band := range rankBands {
+			got := out[rank*bandSize : (rank+1)*bandSize]
+			if !slices.Equal(got, band[:]) {
+				t.Fatalf("allGather rank %d band = %v, want %v", rank, got, band)
+			}
 		}
 		if _, err := g.allGather([][]float32{{1, 2}, {3, 4}}); !errors.Is(err, ErrNCCLWorldMismatch) {
 			t.Fatalf("short gather err = %v, want ErrNCCLWorldMismatch", err)

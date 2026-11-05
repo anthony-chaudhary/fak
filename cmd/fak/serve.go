@@ -396,12 +396,12 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	// front door sets the fast decode route by construction instead of leaving it
 	// env-only. "mtp" (default) selects the resident Metal/Vulkan MTP path where
 	// the admissibility envelope holds; "ngram" selects prompt n-gram speculation;
-	// "dflash2" routes to the authenticated DFlash2 sidecar request constructor;
+	// "dflash2" is recognized but refuses until serve owns an authenticated target;
 	// "" leaves the route unselected. FAK_SPECULATIVE / SPECULATIVE remain the
 	// operator override and win when set, so this flag only supplies the structural
 	// default. The closed set is admitted at startup (resolveSpeculativeMode): an
 	// unknown value fails loud before any weight load.
-	sf.speculative = fs.String("speculative", "mtp", "structural speculative-decode selector: mtp (default), ngram, or dflash2; empty disables; FAK_SPECULATIVE/SPECULATIVE env overrides win; an unknown value fails startup")
+	sf.speculative = fs.String("speculative", "mtp", "structural speculative-decode selector: mtp (default), ngram, or dflash2 (serve owner unavailable; refuses before load); empty disables; FAK_SPECULATIVE/SPECULATIVE env overrides win; an unknown value fails startup")
 	// Native P/D role selector (#28): the closed set is admitted at startup
 	// (resolveServePDRole) BEFORE any weight load, so a misspelled role refuses
 	// startup instead of silently booting an ordinary combined serve.
@@ -458,8 +458,8 @@ const (
 // the closed admission set {mtp, ngram, dflash2, empty}; anything else fails startup
 // with ErrSpeculativeModeUnknown before any weight load. An admitted value is returned
 // verbatim for buildGateway to thread into gateway.Config.SpeculativeMode — including
-// "dflash2", which the gateway routes to the DFlash2 request constructor (a selected
-// DFlash2 route without an authenticated target owner still refuses there, fail-closed).
+// "dflash2". The CLI separately refuses that route before acquisition until its
+// authenticated target owner is wired; gateway/library owner support is unchanged.
 func resolveSpeculativeMode(flagValue string, getenv func(string) string) (string, error) {
 	if getenv == nil {
 		getenv = os.Getenv
@@ -841,6 +841,16 @@ func cmdServe(argv []string) {
 			os.Exit(2)
 		}
 	}
+	// Model-free inspection must remain usable even when the selected serving
+	// route is unavailable. Policy validation also precedes alias/HF acquisition.
+	if *sf.policyCheck {
+		runServePolicyCheck(*sf.policyPath)
+		return
+	}
+	if err := validateServeDFlash2Startup(resolvedSpeculative, os.Getenv); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
 
 	rt := &serveRuntime{t0: t0, toolPlugins: toolPlugins, toolPreferences: toolPreferences,
 		explicitFlags: explicit, nativeAdmissionExplicit: explicit["native-admission-token-budget"], startupPhases: []gateway.StartupPhase{
@@ -851,11 +861,6 @@ func cmdServe(argv []string) {
 		os.Exit(2)
 	}
 	rt.resolveServeModelSources(sf)
-	// --policy-check: validate the manifest and exit, binding no listener.
-	if *sf.policyCheck {
-		runServePolicyCheck(*sf.policyPath)
-		return
-	}
 
 	// --plan-json (#4361): emit the versioned header-derived memory sizing artifact
 	// and exit before load — the colibri-inspired pre-load inspection dry-run,
