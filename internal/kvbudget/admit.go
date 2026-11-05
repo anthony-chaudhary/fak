@@ -82,7 +82,8 @@ func ceilDiv(a, b int) int {
 	if b <= 0 || a <= 0 {
 		return 0
 	}
-	return (a + b - 1) / b
+	// Subtract before rounding so a representable token count cannot overflow.
+	return 1 + (a-1)/b
 }
 
 // valid reports whether the stream's fields are self-consistent enough to size
