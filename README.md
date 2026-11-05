@@ -44,7 +44,7 @@ claim boundaries: [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md).
 
 ## Try fak
 
-Install with `curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh` (or `go install github.com/anthony-chaudhary/fak/cmd/fak@latest`).
+Install with `curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh` (or `go install github.com/anthony-chaudhary/fak/cmd/fak@latest`). More install options — Homebrew, Docker/OCI, Compose, Kubernetes/Helm, systemd, winget, macOS launchd — in the [install-options matrix](INSTALL.md#install-options-at-a-glance).
 
 1. Start local inference on a supported Apple Silicon Mac. `fak up` sizes the model
    and context to your memory, holds new work back under memory pressure instead of

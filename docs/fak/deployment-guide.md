@@ -504,7 +504,9 @@ fak version
 `.sha256`, plus an aggregate `SHA256SUMS`) at
 <https://github.com/anthony-chaudhary/fak/releases/latest>. The
 `curl | sh` installer covers macOS (amd64/arm64) and linux (amd64/arm64); Windows users
-download the `.zip` manually.
+download the `.zip` manually (or use the committed winget manifest in
+[`deploy/winget/`](https://github.com/anthony-chaudhary/fak/tree/main/deploy/winget)).
+Every install option is listed in [INSTALL.md](https://github.com/anthony-chaudhary/fak/blob/main/INSTALL.md).
 
 **linux/arm64 is a first-class published target** — the same pure-Go binary on a
 Raspberry Pi / Jetson / arm64 edge gateway as on a datacenter host (`CGO_ENABLED=0`, so
@@ -518,6 +520,14 @@ go build -trimpath -o /usr/local/bin/fak ./cmd/fak   # Go 1.26+, auto-fetched vi
 ```
 
 ### Run as a service (systemd)
+
+> **Copy, don't retype.** The unit and its environment-file template are
+> **committed at [`deploy/systemd/`](https://github.com/anthony-chaudhary/fak/tree/main/deploy/systemd)**
+> — copy [`fak.service`](https://github.com/anthony-chaudhary/fak/blob/main/deploy/systemd/fak.service)
+> and [`fak.env.example`](https://github.com/anthony-chaudhary/fak/blob/main/deploy/systemd/fak.env.example)
+> instead of hand-typing the blocks below (see
+> [`deploy/systemd/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/deploy/systemd/README.md)).
+> The blocks below match the committed files and are kept here for reference.
 
 Store secrets in a root-only environment file, then run the gateway as an
 unprivileged dynamic user:
@@ -549,7 +559,8 @@ Restart=on-failure
 RestartSec=2
 # Run unprivileged with a hardened sandbox.
 DynamicUser=yes
-StateDirectory=fak                 # /var/lib/fak for the audit journal
+# /var/lib/fak for the audit journal (FAK_AUDIT_JOURNAL in fak.env).
+StateDirectory=fak
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
@@ -717,6 +728,9 @@ cross-machine commit atomicity remains the collective-commit barrier's separate 
   authoring the capability floor and the refusal vocabulary
 - [`Dockerfile`](https://github.com/anthony-chaudhary/fak/blob/main/Dockerfile) and [`install.sh`](https://github.com/anthony-chaudhary/fak/blob/main/install.sh) — the
   build and install sources this guide describes
+- [`INSTALL.md`](https://github.com/anthony-chaudhary/fak/blob/main/INSTALL.md) — the
+  install-options matrix (installer, Homebrew, Docker, Compose, Kubernetes/Helm,
+  systemd, winget, launchd)
 
 ## All-in-one runtime (`fak up`)
 

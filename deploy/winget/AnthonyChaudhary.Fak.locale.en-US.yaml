@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+# fak winget manifest — default-locale file (multi-file manifest schema 1.6.0).
+PackageIdentifier: AnthonyChaudhary.Fak
+PackageVersion: 0.56.0
+PackageLocale: en-US
+Publisher: Anthony Chaudhary
+PublisherUrl: https://github.com/anthony-chaudhary
+PublisherSupportUrl: https://github.com/anthony-chaudhary/fak/issues
+Author: Anthony Chaudhary
+PackageName: fak
+PackageUrl: https://github.com/anthony-chaudhary/fak
+License: Apache-2.0
+LicenseUrl: https://github.com/anthony-chaudhary/fak/blob/main/LICENSE
+ShortDescription: Fused Agent Kernel — governed local-model serving and agent tool-call adjudication
+Description: >-
+  fak is a single static binary that serves local models and governs agent tool
+  calls behind a deny-first capability floor. fak serve is an OpenAI-compatible
+  gateway that adjudicates every proposed tool call; one binary carries the
+  gateway, guard, policy, sessions, models, and audit surface.
+Moniker: fak
+Tags:
+  - agent
+  - adjudication
+  - gateway
+  - governance
+  - llm
+  - local-first
+  - mcp
+  - openai-compatible
+  - tool-calls
+ReleaseNotesUrl: https://github.com/anthony-chaudhary/fak/releases/tag/v0.56.0
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

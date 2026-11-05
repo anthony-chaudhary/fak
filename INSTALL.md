@@ -17,7 +17,9 @@ Three supported paths, fastest first:
 [What's in the binary](#whats-in-the-binary) answers the question the three paths above
 skip — why one ~13 MB binary carries hundreds of verbs, and which of them are yours. A
 [build-from-source](#build-from-source) fallback and the [`go install`
-status](#about-go-install) are at the end.
+status](#about-go-install) are at the end. The full map of options — Homebrew,
+Docker/OCI, Compose, Kubernetes/Helm, systemd, winget, macOS launchd — is in the
+[install-options matrix](#install-options-at-a-glance).
 
 Next: once `fak` is on your PATH, the [first-session tutorial](docs/fak/tutorial.md)
 walks you from the binary to your first adjudicated tool call — fully offline, no key or GPU.
@@ -37,6 +39,27 @@ Apple notarization. Its checksum verifies download integrity, not source provena
 Vulkan publication remains pending its release and hardware gate. For Vulkan until then,
 build from source or explicitly request a CPU reference.
 A packaged backend still needs qualification on the actual model and GPU.
+
+---
+
+## Install options at a glance
+
+The three paths above plus every packaging option in one place. Running the
+gateway in production (auth, policy, sizing, service units) is
+[`docs/fak/deployment-guide.md`](docs/fak/deployment-guide.md).
+
+| Option | How | Best for |
+| --- | --- | --- |
+| One-line installer | [`curl \| sh`](#1-one-line-installer-recommended) | Linux/macOS laptops and servers; verifies against `SHA256SUMS` |
+| Manual download | [release archive](#2-manual-download) | Air-gapped hosts; the Windows `.zip` |
+| `go install` | [`go install …@latest`](#about-go-install) | Go developers |
+| Homebrew | [`Formula/fak.rb`](Formula/fak.rb) | macOS (and Linuxbrew) |
+| Docker / OCI | [`ghcr.io/anthony-chaudhary/fak`](#3-docker) | Containers; published multi-arch `linux/amd64` + `linux/arm64` (plus the NVIDIA CUDA image) |
+| Docker Compose | [`examples/compose-ollama`](examples/compose-ollama) | fak + Ollama on one box |
+| Kubernetes / Helm | [`deploy/k8s`](deploy/k8s), [`deploy/helm`](deploy/helm) | Clusters — `kubectl apply -k deploy/k8s` |
+| systemd | [`deploy/systemd`](deploy/systemd) | Linux service — hardened unit, `DynamicUser` |
+| winget | [`deploy/winget`](deploy/winget) | Windows — `winget install AnthonyChaudhary.Fak` (after the one-time submission) |
+| macOS launchd | [`tools/com.fak.serve-gateway.plist`](tools/com.fak.serve-gateway.plist) | macOS service |
 
 ---
 

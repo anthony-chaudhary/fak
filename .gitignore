@@ -491,6 +491,12 @@ fak/.bench-baseline.json
 /deploy/*
 !/deploy/k8s/
 !/deploy/helm/
+# deploy/systemd/ is the committed hardened systemd unit + env template the
+# deployment guide points to (deploy/systemd/README.md). deploy/winget/ is the
+# committed winget manifest set for the windows/amd64 release asset
+# (deploy/winget/README.md).
+!/deploy/systemd/
+!/deploy/winget/
 /.gcloudignore
 
 # Local nested test-clone used as a self-contained "bite test" fixture by
