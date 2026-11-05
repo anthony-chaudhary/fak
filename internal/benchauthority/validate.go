@@ -2,6 +2,7 @@ package benchauthority
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -153,7 +154,11 @@ func ValidateArtifacts(root string, claims []Claim) []error {
 			// Preserve it. A document that claims to carry the shared envelope,
 			// however, must decode; otherwise malformed simulation metadata could
 			// evade the promotion check by making DecodeArtifact return false.
-			if bytes.Contains(raw, []byte(`"benchmark_artifact"`)) {
+			// JSON keys may spell characters with Unicode escapes. Recognize the
+			// decoded key as well as the literal marker in malformed JSON/text.
+			var envelope map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &envelope); bytes.Contains(raw, []byte(`"benchmark_artifact"`)) ||
+				(err == nil && envelope["benchmark_artifact"] != nil) {
 				errs = append(errs, fmt.Errorf("claim %d %q: Artifact %q has a malformed benchmark_artifact envelope", i, c.ID, p))
 			}
 			continue
