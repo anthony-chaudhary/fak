@@ -2,6 +2,7 @@ package ggufload
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -45,6 +46,11 @@ func tensorOnDiskBytes(t TensorInfo) int64 {
 // package (cmd/fak partial-offload admission); 0 means the tensor is not byte-sizable.
 func (t TensorInfo) OnDiskBytes() int64 { return tensorOnDiskBytes(t) }
 
+// ErrNoSimplePayload marks a TensorType with no entry in the shared type-traits
+// table, so its payload cannot be sized from block geometry; callers match it
+// with errors.Is.
+var ErrNoSimplePayload = errors.New("tensor type does not have a simple payload")
+
 func tensorPayloadBytes(t TensorInfo) (uint64, error) {
 	elems, err := tensorElems(t)
 	if err != nil {
@@ -52,7 +58,7 @@ func tensorPayloadBytes(t TensorInfo) (uint64, error) {
 	}
 	traits, ok := tensorTypeTraits(t.Type)
 	if !ok {
-		return 0, fmt.Errorf("gguf: tensor %s type %s does not have a simple payload", t.Name, t.Type)
+		return 0, fmt.Errorf("gguf: tensor %s type %s: %w", t.Name, t.Type, ErrNoSimplePayload)
 	}
 	if elems%traits.BlockSize != 0 {
 		return 0, fmt.Errorf("gguf: tensor %s %s element count %d is not a multiple of %d", t.Name, t.Type, elems, traits.BlockSize)
@@ -274,117 +280,117 @@ func dequantF32IntoLimited(scratch []float32, t TensorInfo, raw []byte, workerLi
 			}
 		}
 	case TensorQ4_0:
-		if _, err := checkQuantPayload(t, elems, raw, qk4, blockQ4_0Bytes, "Q4_0"); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantQ4_0Limited(out, raw, workerLimit)
 	case TensorQ2_0, TensorPQ2_0:
-		if _, err := checkQuantPayload(t, elems, raw, 128, blockPQ2_0Bytes, t.Type.String()); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantQ2_0Scalar(out, raw)
 	case TensorQ1_0:
-		if _, err := checkQuantPayload(t, elems, raw, 128, blockQ1_0Bytes, "Q1_0"); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantQ1_0Scalar(out, raw)
 	case TensorHQQ4:
-		if _, err := checkQuantPayload(t, elems, raw, qkHQQ4, blockHQQ4Bytes, "HQQ4"); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantHQQ4Scalar(out, raw)
 	case TensorQ4_1:
-		if _, err := checkQuantPayload(t, elems, raw, qk4, blockQ4_1Bytes, "Q4_1"); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantQ4_1Limited(out, raw, workerLimit)
 	case TensorQ5_0:
-		if _, err := checkQuantPayload(t, elems, raw, qk5, blockQ5_0Bytes, "Q5_0"); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantQ5_0Limited(out, raw, workerLimit)
 	case TensorQ5_1:
-		if _, err := checkQuantPayload(t, elems, raw, qk5, blockQ5_1Bytes, "Q5_1"); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantQ5_1Limited(out, raw, workerLimit)
 	case TensorQ8_0:
-		if _, err := checkQuantPayload(t, elems, raw, qk8_0, blockQ8_0Bytes, "Q8_0"); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantQ8_0Limited(out, raw, workerLimit)
 	case TensorQ2_K:
-		if _, err := checkQuantPayload(t, elems, raw, qkK, blockQ2KBytes, "Q2_K"); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantQ2KLimited(out, raw, workerLimit)
 	case TensorQ3_K:
-		if _, err := checkQuantPayload(t, elems, raw, qkK, blockQ3KBytes, "Q3_K"); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantQ3KLimited(out, raw, workerLimit)
 	case TensorQ4_K:
-		if _, err := checkQuantPayload(t, elems, raw, qkK, blockQ4KBytes, "Q4_K"); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantQ4KLimited(out, raw, workerLimit)
 	case TensorQ5_K:
-		if _, err := checkQuantPayload(t, elems, raw, qkK, blockQ5KBytes, "Q5_K"); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantQ5KLimited(out, raw, workerLimit)
 	case TensorQ6_K:
-		if _, err := checkQuantPayload(t, elems, raw, qkK, blockQ6KBytes, "Q6_K"); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantQ6KLimited(out, raw, workerLimit)
 	case TensorIQ2_XXS:
-		if _, err := checkQuantPayload(t, elems, raw, qkK, blockIQ2XXSBytes, "IQ2_XXS"); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantIQ2XXS(out, raw)
 	case TensorIQ2_XS:
-		if _, err := checkQuantPayload(t, elems, raw, qkK, blockIQ2XSBytes, "IQ2_XS"); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantIQ2XS(out, raw)
 	case TensorIQ1_S:
-		if _, err := checkQuantPayload(t, elems, raw, qkK, blockIQ1SBytes, "IQ1_S"); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantIQ1S(out, raw)
 	case TensorIQ2_S:
-		if _, err := checkQuantPayload(t, elems, raw, qkK, blockIQ2SBytes, "IQ2_S"); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantIQ2S(out, raw)
 	case TensorIQ1_M:
-		if _, err := checkQuantPayload(t, elems, raw, qkK, blockIQ1MBytes, "IQ1_M"); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantIQ1M(out, raw)
 	case TensorMXFP4:
-		if _, err := checkQuantPayload(t, elems, raw, qkMXFP4, blockMXFP4Bytes, "MXFP4"); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantMXFP4Limited(out, raw, workerLimit)
 	case TensorIQ4_NL:
-		if _, err := checkQuantPayload(t, elems, raw, qkIQ4NL, blockIQ4NLBytes, "IQ4_NL"); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantIQ4NLLimited(out, raw, workerLimit)
 	case TensorIQ3_S:
-		if _, err := checkQuantPayload(t, elems, raw, qkIQ3S, blockIQ3SBytes, "IQ3_S"); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantIQ3S(out, raw)
 	case TensorIQ4_XS:
-		if _, err := checkQuantPayload(t, elems, raw, qkK, blockIQ4XSBytes, "IQ4_XS"); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantIQ4XSLimited(out, raw, workerLimit)
 	case TensorIQ3_XXS:
-		if _, err := checkQuantPayload(t, elems, raw, qkK, blockIQ3XXSBytes, "IQ3_XXS"); err != nil {
+		if _, err := checkQuantPayload(t, elems, raw); err != nil {
 			return nil, err
 		}
 		dequantIQ3XXSLimited(out, raw, workerLimit)
@@ -395,9 +401,25 @@ func dequantF32IntoLimited(scratch []float32, t TensorInfo, raw []byte, workerLi
 }
 
 // checkQuantPayload validates that a quantized tensor's raw payload is a whole number of
-// blocks (elems divisible by qk) and exactly the size those blocks pack to, returning that
-// expected byte count. It is the shared block-shape guard the per-type dequant cases all ran
-// inline; label is the quant name in the error text (byte-identical to the inlined checks).
+// blocks (elems divisible by the type's BlockSize) and exactly the size those blocks pack to,
+// returning that expected byte count. Block geometry comes from the shared type-traits table
+// instead of per-case literals; the quant name in the error text is TensorType.String().
+func checkQuantPayload(t TensorInfo, elems uint64, raw []byte) (int, error) {
+	traits, ok := tensorTypeTraits(t.Type)
+	if !ok {
+		return 0, fmt.Errorf("gguf: tensor %s type %s: %w", t.Name, t.Type, ErrNoSimplePayload)
+	}
+	label := t.Type.String()
+	if elems%traits.BlockSize != 0 {
+		return 0, fmt.Errorf("gguf: tensor %s %s element count %d is not a multiple of %d", t.Name, label, elems, traits.BlockSize)
+	}
+	want := int(elems / traits.BlockSize * traits.TypeSize)
+	if len(raw) != want {
+		return 0, fmt.Errorf("gguf: tensor %s %s payload has %d bytes, want %d", t.Name, label, len(raw), want)
+	}
+	return want, nil
+}
+
 func plainFloatEncoding(typ TensorType) (width int, label string) {
 	switch typ {
 	case TensorF32:
@@ -419,17 +441,6 @@ func checkFloatPayload(t TensorInfo, raw []byte, want int, label string) error {
 		return fmt.Errorf("gguf: tensor %s %s payload has %d bytes, want %d", t.Name, label, len(raw), want)
 	}
 	return nil
-}
-
-func checkQuantPayload(t TensorInfo, elems uint64, raw []byte, qk, blockBytes uint64, label string) (int, error) {
-	if elems%qk != 0 {
-		return 0, fmt.Errorf("gguf: tensor %s %s element count %d is not a multiple of %d", t.Name, label, elems, qk)
-	}
-	want := int(elems / qk * blockBytes)
-	if len(raw) != want {
-		return 0, fmt.Errorf("gguf: tensor %s %s payload has %d bytes, want %d", t.Name, label, len(raw), want)
-	}
-	return want, nil
 }
 
 // dequantQ4_0 expands the legacy GGML Q4_0 32-element block. Each block is a
