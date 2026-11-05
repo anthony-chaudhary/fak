@@ -363,7 +363,10 @@ class DockerfileContractTest(unittest.TestCase):
         self.text = DOCKERFILE.read_text(encoding="utf-8")
 
     def test_two_stage_static_distroless(self) -> None:
-        self.assertIn("FROM golang:1.26 AS build", self.text)
+        # The builder pins --platform=$BUILDPLATFORM so the multi-arch
+        # release-container.yml build cross-compiles linux/arm64 natively on the
+        # amd64 runner (no QEMU emulation); the runtime stage stays target-platform.
+        self.assertIn("FROM --platform=$BUILDPLATFORM golang:1.26 AS build", self.text)
         self.assertIn("CGO_ENABLED=0", self.text)
         self.assertIn("gcr.io/distroless/static", self.text)
         # The version stamp is DRY'd into scripts/build.sh (#3709); the Dockerfile
