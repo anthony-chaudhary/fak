@@ -73,7 +73,9 @@ func ParsePolicy(raw []byte) (Policy, error) {
 	if err := dec.Decode(&p); err != nil {
 		return Policy{}, err
 	}
-	if dec.More() {
+	// More reports container elements, so a stray closing delimiter is not EOF.
+	// InputOffset is a byte offset; only JSON whitespace may follow this policy.
+	if len(bytes.Trim(raw[dec.InputOffset():], " \t\r\n")) != 0 {
 		return Policy{}, fmt.Errorf("multiple privacy values")
 	}
 	if err := p.Validate(); err != nil {
