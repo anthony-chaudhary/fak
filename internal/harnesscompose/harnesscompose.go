@@ -3,6 +3,7 @@ package harnesscompose
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -259,7 +260,7 @@ func conflict(layer Layer, asset Asset, reason string) error {
 }
 func kindReason(kind, action string) string { return kind + " uses explicit " + action + " semantics" }
 func equivalent(prior EffectiveAsset, asset Asset) bool {
-	return prior.Value == asset.Value && prior.Ref == asset.Ref && prior.Boundary == asset.Boundary && strings.Join(sortedUnique(prior.Grants), "\x00") == strings.Join(sortedUnique(asset.Grants), "\x00") && strings.Join(sortedUnique(prior.Denies), "\x00") == strings.Join(sortedUnique(asset.Denies), "\x00")
+	return prior.Value == asset.Value && prior.Ref == asset.Ref && prior.Boundary == asset.Boundary && slices.Equal(sortedUnique(prior.Grants), sortedUnique(asset.Grants)) && slices.Equal(sortedUnique(prior.Denies), sortedUnique(asset.Denies))
 }
 func sortedUnique(values []string) []string {
 	seen := map[string]bool{}
