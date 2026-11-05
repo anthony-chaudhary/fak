@@ -6,6 +6,8 @@ extern "C" {
 #endif
 int fcuda_kv_store_typed(void *dst, const float *src, int offset, int n, int dtype);
 int fcuda_kv_load_typed(float *dst, const void *src, int n, int dtype);
+// Checks submission only; successful return does not certify copy completion.
+int fcuda_kv_clone_d2d_checked(void *dst, const void *src, size_t bytes);
 int fcuda_kv_snapshot_load_checked(float *dst, const void *src, int n, int dtype);
 int fcuda_kv_snapshot_d2h_checked(void *dst, const void *src, size_t bytes);
 // Retirement is an ownership receipt, not a physical-free counter.

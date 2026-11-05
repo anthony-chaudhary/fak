@@ -236,6 +236,12 @@ type KVStore interface{}
 type cudaBackend struct{}
 type cudaBuf struct{ptr unsafe.Pointer}
 type VulkanErrorClass string
+// Copy failure/retention has a separate actual-source witness; this fixture's
+// checked native copy always succeeds after its entry admission.
+type CUDAOpError struct{Op,Site,Msg string;Code int;Class string}
+func(e *CUDAOpError)Error()string{return e.Msg}
+const MemoryKVCache="kv_cache"
+func(*cudaKV)retainReleaseOwnerLocked(){panic("copy failure outside admission fixture")}
 var cudaMu sync.Mutex
 var graphEnabled=true
 var cudaKVMaxPos=2
@@ -263,14 +269,14 @@ func GraphKVPreallocFor(enabled bool,cfg KVConfig,n int,free int64)preallocResul
 var C=struct{
  fcuda_mem_info func(*uint64,*uint64)int
  fcuda_free func(unsafe.Pointer)
- fcuda_d2d func(unsafe.Pointer,unsafe.Pointer,uint64)
+ fcuda_kv_clone_d2d_checked func(unsafe.Pointer,unsafe.Pointer,uint64)int
  fak_v41_checked_stream_terminal func()int
  fcuda_h2d func(unsafe.Pointer,unsafe.Pointer,uint64)
  fcuda_kv_store_typed func(unsafe.Pointer,*float32,int,int,int)int
 }{
  func(f,t *uint64)int{requireLock();memQueries++;*f=1024;*t=2048;return 0},
  func(unsafe.Pointer){requireLock();releases++},
- func(dst,src unsafe.Pointer,n uint64){requireLock();copies++;copySources=append(copySources,src);copySizes=append(copySizes,int(n));copy(unsafe.Slice((*byte)(dst),int(n)),unsafe.Slice((*byte)(src),int(n)))},
+ func(dst,src unsafe.Pointer,n uint64)int{requireLock();copies++;copySources=append(copySources,src);copySizes=append(copySizes,int(n));copy(unsafe.Slice((*byte)(dst),int(n)),unsafe.Slice((*byte)(src),int(n)));return 0},
  func()int{requireLock();queries++;if sharedStop{return 1};return 0},
  func(dst,src unsafe.Pointer,n uint64){requireLock();uploads++;copy(unsafe.Slice((*byte)(dst),int(n)),unsafe.Slice((*byte)(src),int(n)))},
  func(unsafe.Pointer,*float32,int,int,int)int{panic("narrowed restore conversion outside fixture")},

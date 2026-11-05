@@ -33,6 +33,21 @@ extern "C" int fcuda_kv_load_typed(float *dst, const void *src, int n, int dtype
   FCUDA_TS("k_kv_load_typed", ((size_t)n+255)/256, k_kv_load_typed<<<((size_t)n+255)/256,256,0,g_stream>>>(dst,src,n,dtype));
   return (int)cudaGetLastError();
 }
+// Clone submission failure closes shared admission before Go can unwind.
+// Keep the direct copy status even if optional timestamp profiling issues a
+// diagnostic event afterward. No additional fence; timestamp begin may already drain.
+static int kv_clone_copy_status(int status) {
+  if (status != 0 && g_cuda_cleanup_status == 0) g_cuda_cleanup_status = status;
+  return status;
+}
+extern "C" int fcuda_kv_clone_d2d_checked(void *dst, const void *src, size_t bytes) {
+  if (v41_candidates_stream_uncertain())
+    return kv_clone_copy_status(g_cuda_cleanup_status != 0 ? g_cuda_cleanup_status : (int)cudaErrorNotReady);
+  cudaError_t status = cudaSuccess;
+  FCUDA_TS("d2d_copy", dim3(0, 0), status = cudaMemcpyAsync(dst, src, bytes, cudaMemcpyDeviceToDevice, g_stream));
+  return kv_clone_copy_status((int)status);
+}
+
 // Snapshot-only completion handling. A failed copy/launch is not a drain
 // certificate: close shared admission before Go can unwind or recycle scratch.
 // All callers hold cudaMu; preserve the first error without a retry or fence.

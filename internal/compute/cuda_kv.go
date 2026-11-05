@@ -410,22 +410,25 @@ func (k *cudaKV) Clone() KVStore {
 	}
 	return k.cloneWithOperations(
 		func(bytes int, site string) unsafe.Pointer { return k.be.dallocKV(bytes, site).ptr },
-		func(dst, src unsafe.Pointer, bytes int) { C.fcuda_d2d(dst, src, C.size_t(bytes)) },
+		func(dst, src unsafe.Pointer, bytes int) int {
+			return int(C.fcuda_kv_clone_d2d_checked(dst, src, C.size_t(bytes)))
+		},
 		func(ptr unsafe.Pointer) { C.fcuda_free(ptr) },
 	)
 }
 
 // cloneWithOperations runs under the caller's cudaMu. Destination rows own each
-// allocation before the copy; a later allocation panic retires all unpublished
-// rows without touching the source or recursively locking via public Free.
-// Native d2d is void and logs errors; this does not add copy-error detection.
-func (k *cudaKV) cloneWithOperations(alloc func(int, string) unsafe.Pointer, copyDevice func(unsafe.Pointer, unsafe.Pointer, int), release func(unsafe.Pointer)) *cudaKV {
+// allocation before the copy; a later allocation panic attempts cleanup of
+// unpublished rows without touching the source or recursively calling public Free.
+// A returned copy failure retains both owners; successful submission is not a
+// completion fence. Allocation-panic cleanup still uses the existing void release.
+func (k *cudaKV) cloneWithOperations(alloc func(int, string) unsafe.Pointer, copyDevice func(unsafe.Pointer, unsafe.Pointer, int) int, release func(unsafe.Pointer)) *cudaKV {
 	n := &cudaKV{be: k.be, cfg: k.cfg,
 		K: make([]dslice, len(k.K)), Kraw: make([]dslice, len(k.Kraw)), V: make([]dslice, len(k.V)),
 		pos: append([]int(nil), k.pos...)}
 	published := false
 	defer func() {
-		if published {
+		if published || n.releaseRetained {
 			return
 		}
 		for _, rows := range [][]dslice{n.K, n.Kraw, n.V} {
@@ -450,7 +453,13 @@ func (k *cudaKV) cloneWithOperations(alloc func(int, string) unsafe.Pointer, cop
 		}
 		np := alloc(src.len*src.dtype.Bytes(), site)
 		dst.ptr, dst.len, dst.cap = np, src.len, src.len
-		copyDevice(np, src.ptr, src.len*src.dtype.Bytes())
+		if status := copyDevice(np, src.ptr, src.len*src.dtype.Bytes()); status != 0 {
+			// Native status has already closed shared admission. Root both
+			// existing owners before allocating an error or unwinding.
+			k.retainReleaseOwnerLocked()
+			n.retainReleaseOwnerLocked()
+			panic(&CUDAOpError{Op: "Clone", Site: site, Code: status, Class: MemoryKVCache, Msg: "device copy submission failed; owners retained"})
+		}
 	}
 	for l := range k.K {
 		cp(&n.K[l], &k.K[l], "kv-key-clone layer "+itoaC(l))
