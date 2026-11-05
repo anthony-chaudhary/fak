@@ -13,6 +13,7 @@ type AdaptiveDraftDepthController struct {
 	RaiseAcceptance, LowerAcceptance float64
 	HysteresisWindows                int
 	depth, high, low                 int
+	generation                       int // advances on every fitted-depth move
 }
 
 type AdaptiveDraftSample struct {
@@ -53,6 +54,7 @@ func (c *AdaptiveDraftDepthController) Observe(s AdaptiveDraftSample) (int, erro
 		if c.high >= c.HysteresisWindows && c.depth < c.MaxDepth {
 			c.depth++
 			c.high = 0
+			c.generation++
 		}
 	case rate <= c.LowerAcceptance:
 		c.low++
@@ -60,6 +62,7 @@ func (c *AdaptiveDraftDepthController) Observe(s AdaptiveDraftSample) (int, erro
 		if c.low >= c.HysteresisWindows && c.depth > c.MinDepth {
 			c.depth--
 			c.low = 0
+			c.generation++
 		}
 	default:
 		c.high = 0
@@ -67,6 +70,23 @@ func (c *AdaptiveDraftDepthController) Observe(s AdaptiveDraftSample) (int, erro
 	}
 	return c.depth, nil
 }
+
+// Generation reports how many times the fitted depth has moved since
+// construction. A serving path that caches the fitted draft limit compares
+// generations before each draft: an advanced counter means the cached limit
+// is stale and must be re-read via Limit; an unchanged one means the cache
+// stays valid.
+func (c *AdaptiveDraftDepthController) Generation() int { return c.generation }
+
+// Limit reports the currently fitted draft depth - MinDepth until the first
+// fit moves it. It is the value a drafter refreshes when Generation advances.
+func (c *AdaptiveDraftDepthController) Limit() int {
+	if c.depth == 0 {
+		return c.MinDepth
+	}
+	return c.depth
+}
+
 func EvaluateAdaptiveDraftDepth(c AdaptiveDraftDepthController, fixed int, samples []AdaptiveDraftSample, artifact string, dflashCandidate bool) (AdaptiveDraftReceipt, error) {
 	if fixed <= 0 || artifact == "" || len(samples) == 0 {
 		return AdaptiveDraftReceipt{}, errors.New("model: incomplete adaptive draft evaluation")
