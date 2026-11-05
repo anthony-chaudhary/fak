@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -415,8 +416,11 @@ func TLSTrustHint(err error) string {
 	}
 }
 
-// envName canonicalizes an environment variable name for comparison. Windows env
-// names are case-insensitive and Unix names are not; upper-casing everywhere is
-// the safe direction here because every name in ChildTrustVars is already
-// upper-case, so folding can only match the variable we mean.
-func envName(k string) string { return strings.ToUpper(strings.TrimSpace(k)) }
+// envName follows host environment-name comparison: only Windows folds case.
+// Whitespace is part of a name, not padding around it.
+func envName(k string) string {
+	if runtime.GOOS == "windows" {
+		return strings.ToUpper(k)
+	}
+	return k
+}

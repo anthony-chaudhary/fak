@@ -303,8 +303,8 @@ func TestHostSiblingTrustVarsReadsOnlyTheKnownTrustNames(t *testing.T) {
 	got := HostSiblingTrustVars([]string{
 		"PATH=/usr/bin",
 		"AWS_SECRET_ACCESS_KEY=shhh",
-		"aws_ca_bundle=/etc/corp/root.pem", // Windows folds env-name case
-		"REQUESTS_CA_BUNDLE=",              // set-but-empty is not a declaration
+		"AWS_CA_BUNDLE=/etc/corp/root.pem",
+		"REQUESTS_CA_BUNDLE=", // set-but-empty is not a declaration
 		"NODE_EXTRA_CA_CERTS=/etc/corp/node.pem",
 	})
 	if len(got) != 2 {
@@ -314,7 +314,7 @@ func TestHostSiblingTrustVarsReadsOnlyTheKnownTrustNames(t *testing.T) {
 		t.Fatalf("order is not ChildTrustVars order: %+v", got)
 	}
 	if got[1].Path != "/etc/corp/root.pem" {
-		t.Fatalf("case-folded name lost its value: %+v", got[1])
+		t.Fatalf("declared name lost its value: %+v", got[1])
 	}
 	for _, s := range got {
 		if strings.Contains(s.Path, "shhh") {

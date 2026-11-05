@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -229,6 +230,55 @@ func TestChildEnvNeverOverridesAnOperatorsOwnValue(t *testing.T) {
 func TestChildEnvIsInertWithoutABundle(t *testing.T) {
 	if got := ChildEnv("  ", []string{"PATH=/usr/bin"}); got != nil {
 		t.Fatalf("ChildEnv = %v, want nil when no bundle is declared", got)
+	}
+}
+
+// Three tiny environment snapshots; runtime estimate is unmeasured.
+// fak-test:runtime fast est=1ms lane=default
+func TestTrustEnvironmentNamesFollowHostCase(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		recognized bool
+	}{
+		{"AWS_CA_BUNDLE", true},
+		{"aws_ca_bundle", runtime.GOOS == "windows"},
+		{" AWS_CA_BUNDLE", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			parent := []string{tc.name + "=/operator/roots.pem"}
+			derived := ChildEnv("/declared/roots.pem", parent)
+			var filled bool
+			for _, value := range derived {
+				if value == "AWS_CA_BUNDLE=/declared/roots.pem" {
+					filled = true
+				}
+			}
+			if filled == tc.recognized {
+				t.Fatalf("ChildEnv = %v: recognized=%v, filled=%v", derived, tc.recognized, filled)
+			}
+			var missing bool
+			for _, name := range UninheritedRuntimes(parent) {
+				if name == "AWS_CA_BUNDLE" {
+					missing = true
+				}
+			}
+			if missing == tc.recognized {
+				t.Fatalf("AWS_CA_BUNDLE missing=%v, recognized=%v", missing, tc.recognized)
+			}
+			siblings := HostSiblingTrustVars(parent)
+			if tc.recognized {
+				if len(siblings) != 1 || siblings[0].Name != "AWS_CA_BUNDLE" || siblings[0].Path != "/operator/roots.pem" {
+					t.Fatalf("operator trust declaration changed: %+v", siblings)
+				}
+			} else if len(siblings) != 0 {
+				t.Fatalf("unrecognized variable reported as trust declaration: %+v", siblings)
+			}
+			child := append(append([]string(nil), parent...), derived...)
+			if missing := UninheritedRuntimes(child); len(missing) != 0 {
+				t.Fatalf("derived environment still lacks trust names: %v", missing)
+			}
+		})
 	}
 }
 
