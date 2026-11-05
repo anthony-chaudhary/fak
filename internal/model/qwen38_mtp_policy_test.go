@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -319,5 +320,111 @@ func TestQwen38MTP_Policy_StackingRules(t *testing.T) {
 	}
 	if receipt2.StackedSources[0] != DraftSourcePromptLookup || receipt2.StackedSources[1] != DraftSourceNGram {
 		t.Fatalf("unexpected stacked sources: %v", receipt2.StackedSources)
+	}
+}
+
+func TestQwen38MTP_Policy_LoadAwareConcurrency(t *testing.T) {
+	policy := NewQwen38CompositeDraftPolicy()
+
+	mtpOnly := func(streams int) Qwen38DraftPolicyInput {
+		return Qwen38DraftPolicyInput{
+			OperatorEnabled:     true,
+			ActiveDecodeStreams: streams,
+			Candidates: map[DraftSource]DraftCandidateState{
+				DraftSourceMTP: {
+					Source:   DraftSourceMTP,
+					Eligible: true,
+					Health:   DraftSourceHealth{Healthy: true},
+					Performance: DraftSourcePerformance{
+						ProposedTokens: 100,
+						AcceptedTokens: 80,
+						AcceptanceRate: 0.80,
+					},
+				},
+			},
+		}
+	}
+
+	// Exactly one decode stream in flight: MTP selected as primary.
+	receipt1 := policy.SelectDraftSource(mtpOnly(1))
+	if err := receipt1.Validate(); err != nil {
+		t.Fatalf("receipt1.Validate() error = %v", err)
+	}
+	if receipt1.ChosenSource != DraftSourceMTP {
+		t.Fatalf("receipt1.ChosenSource = %q, want %q", receipt1.ChosenSource, DraftSourceMTP)
+	}
+	if receipt1.Engine != Qwen38EngineMTP {
+		t.Fatalf("receipt1.Engine = %q, want %q", receipt1.Engine, Qwen38EngineMTP)
+	}
+	if receipt1.MTPDeclineError() != nil {
+		t.Fatalf("receipt1.MTPDeclineError() = %v, want nil at one stream", receipt1.MTPDeclineError())
+	}
+
+	// Above the threshold: MTP declined with the typed concurrency reason.
+	for _, streams := range []int{2, 4} {
+		receipt := policy.SelectDraftSource(mtpOnly(streams))
+		if err := receipt.Validate(); err != nil {
+			t.Fatalf("streams=%d: receipt.Validate() error = %v", streams, err)
+		}
+		if receipt.ChosenSource != DraftSourceNone {
+			t.Fatalf("streams=%d: ChosenSource = %q, want %q", streams, receipt.ChosenSource, DraftSourceNone)
+		}
+		if receipt.Engine != Qwen38EngineTargetDecode {
+			t.Fatalf("streams=%d: Engine = %q, want %q", streams, receipt.Engine, Qwen38EngineTargetDecode)
+		}
+		var mtpRej *RejectedDraftSource
+		for i := range receipt.Rejected {
+			if receipt.Rejected[i].Source == DraftSourceMTP {
+				mtpRej = &receipt.Rejected[i]
+				break
+			}
+		}
+		if mtpRej == nil {
+			t.Fatalf("streams=%d: DraftSourceMTP missing from rejected list", streams)
+		}
+		if mtpRej.Reason != DraftRejectionConcurrencyExceeded {
+			t.Fatalf("streams=%d: mtpRej.Reason = %q, want %q", streams, mtpRej.Reason, DraftRejectionConcurrencyExceeded)
+		}
+		if !errors.Is(receipt.MTPDeclineError(), ErrDraftDeclinedConcurrency) {
+			t.Fatalf("streams=%d: errors.Is(MTPDeclineError(), ErrDraftDeclinedConcurrency) = false, got %v", streams, receipt.MTPDeclineError())
+		}
+		if receipt.DowngradeReason != Qwen38MTPConcurrencyExceeded {
+			t.Fatalf("streams=%d: DowngradeReason = %q, want %q", streams, receipt.DowngradeReason, Qwen38MTPConcurrencyExceeded)
+		}
+	}
+
+	// Unreported load (zero streams) preserves legacy behavior: MTP selectable.
+	receiptLegacy := policy.SelectDraftSource(mtpOnly(0))
+	if err := receiptLegacy.Validate(); err != nil {
+		t.Fatalf("receiptLegacy.Validate() error = %v", err)
+	}
+	if receiptLegacy.ChosenSource != DraftSourceMTP {
+		t.Fatalf("receiptLegacy.ChosenSource = %q, want %q", receiptLegacy.ChosenSource, DraftSourceMTP)
+	}
+
+	// Fallback preserved: a concurrency-declined MTP yields to an eligible lexical source.
+	inputFallback := mtpOnly(4)
+	inputFallback.Prompt = PromptCharacteristics{
+		TokenCount:     128,
+		Repetitive:     true,
+		HasLookupMatch: true,
+		HasNGramMatch:  true,
+	}
+	inputFallback.Cache = CacheCharacteristics{PrefixCacheReady: true}
+	inputFallback.Candidates[DraftSourcePromptLookup] = DraftCandidateState{
+		Source:   DraftSourcePromptLookup,
+		Eligible: true,
+		Health:   DraftSourceHealth{Healthy: true},
+	}
+
+	receiptFB := policy.SelectDraftSource(inputFallback)
+	if err := receiptFB.Validate(); err != nil {
+		t.Fatalf("receiptFB.Validate() error = %v", err)
+	}
+	if receiptFB.ChosenSource != DraftSourcePromptLookup {
+		t.Fatalf("receiptFB.ChosenSource = %q, want %q", receiptFB.ChosenSource, DraftSourcePromptLookup)
+	}
+	if !errors.Is(receiptFB.MTPDeclineError(), ErrDraftDeclinedConcurrency) {
+		t.Fatalf("receiptFB: errors.Is(MTPDeclineError(), ErrDraftDeclinedConcurrency) = false, got %v", receiptFB.MTPDeclineError())
 	}
 }
