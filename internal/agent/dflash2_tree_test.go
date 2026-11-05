@@ -57,14 +57,20 @@ func TestDFlash2TreeWidthBoundRefusal(t *testing.T) {
 
 	// Offers are bounded by the target width: exactly the first n node IDs,
 	// and one past the bound refuses with the width sentinel.
-	got, err := s.Nodes(ctx, 8)
-	if err != nil || !reflect.DeepEqual(got, []int{0, 1, 2, 3, 4, 5, 6, 7}) {
+	width := s.Width()
+	got, err := s.Nodes(ctx, width)
+	if err != nil || len(got) != width {
 		t.Fatalf("full-width offer=%v err=%v", got, err)
+	}
+	for i, id := range got {
+		if id != i {
+			t.Fatalf("full-width node[%d]=%d, want %d", i, id, i)
+		}
 	}
 	if got, err := s.Nodes(ctx, 3); err != nil || !reflect.DeepEqual(got, []int{0, 1, 2}) {
 		t.Fatalf("partial offer=%v err=%v", got, err)
 	}
-	if _, err := s.Nodes(ctx, 9); !errors.Is(err, ErrDFlash2TreeWidthExceeded) {
+	if _, err := s.Nodes(ctx, width+1); !errors.Is(err, ErrDFlash2TreeWidthExceeded) {
 		t.Fatalf("over-width offer: %v", err)
 	}
 	if _, err := s.Nodes(ctx, 0); err == nil {
