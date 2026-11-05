@@ -272,6 +272,10 @@ func (w *WTinyLFU) demoteProtected() {
 }
 
 func (w *WTinyLFU) forceEvict() uint64 {
+	// Only fall back to the protected LRU tail after the other segments empty.
+	if w.probation.tail < 0 && w.window.tail < 0 {
+		w.demoteProtected()
+	}
 	// Evict from probation first, then window
 	if w.probation.tail >= 0 {
 		idx := w.probation.tail
