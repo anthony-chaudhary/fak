@@ -404,6 +404,7 @@ type PDWireServer struct {
 	mu       sync.Mutex
 	wg       sync.WaitGroup
 	closed   bool
+	conns    map[net.Conn]context.CancelFunc
 }
 
 // NewPDWireServer builds the receiver path over cluster. Every accepted
@@ -454,15 +455,37 @@ func (s *PDWireServer) Serve() error {
 			}
 			return err
 		}
+		ctx, cancel := context.WithCancel(context.Background())
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			cancel()
+			_ = conn.Close()
+			return nil
+		}
+		if s.conns == nil {
+			s.conns = make(map[net.Conn]context.CancelFunc)
+		}
+		s.conns[conn] = cancel
+		// Register under the close mutex: no Add can race a zero-count Wait.
 		s.wg.Add(1)
+		s.mu.Unlock()
 		go func() {
 			defer s.wg.Done()
-			s.handleConn(conn)
+			defer func() {
+				cancel()
+				_ = conn.Close()
+				s.mu.Lock()
+				delete(s.conns, conn)
+				s.mu.Unlock()
+			}()
+			s.handleConn(ctx, conn)
 		}()
 	}
 }
 
-// Close stops the accept loop and waits for in-flight handoffs to retire.
+// Close stops accepting, cancels and closes accepted connections, and waits for
+// their handoffs to retire. Idle clients cannot hold shutdown open.
 // Idempotent.
 func (s *PDWireServer) Close() error {
 	if s == nil {
@@ -471,12 +494,17 @@ func (s *PDWireServer) Close() error {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
+		s.wg.Wait()
 		return nil
 	}
 	s.closed = true
 	var lnErr error
 	if s.listener != nil {
 		lnErr = s.listener.Close()
+	}
+	for conn, cancel := range s.conns {
+		cancel()
+		_ = conn.Close()
 	}
 	s.mu.Unlock()
 	s.wg.Wait()
@@ -486,9 +514,7 @@ func (s *PDWireServer) Close() error {
 // handleConn serves exactly one handoff on conn. Any failure replies with a
 // closed error code when the wire still allows it, and frees KV the server
 // came to own.
-func (s *PDWireServer) handleConn(conn net.Conn) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+func (s *PDWireServer) handleConn(ctx context.Context, conn net.Conn) {
 	stop := context.AfterFunc(ctx, func() {
 		_ = conn.SetDeadline(time.Now())
 	})
