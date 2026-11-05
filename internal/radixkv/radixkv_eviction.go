@@ -555,9 +555,10 @@ func (t *Tree) removeLeaf(v *node) {
 // capability an opportunistic LRU cache cannot provide: a poisoned prefix is removed
 // because POLICY says so, not because memory ran out. (Callers serving from a leased node
 // should still hold their own session; this drops the SHARED cached copy so no future
-// request can reuse the poisoned prefix.)
+// request can reuse the poisoned prefix.) Roots, detached handles, and handles from
+// another tree are no-ops; a stale handle must not remove a replacement at the same key.
 func (t *Tree) EvictNode(n *node) int {
-	if n == nil || n.parent == nil { // parent==nil is any namespace root (incl. the default)
+	if n == nil || n.parent == nil || !t.nodeAttached(n) {
 		return 0
 	}
 	freed := subtreeTokens(n)
