@@ -97,6 +97,18 @@ static int sequence_split_status(fcuda_sequence_split_status *status, int phase,
   return code;
 }
 
+// A shared terminal status is not a completion certificate for this loan.
+// Refuse before any CUDA call and retain its exact owners and ledger entries.
+// Local quarantine stays terminal even if another family later changes state.
+static int sequence_split_shared_stop(fcuda_sequence_split_status *status) {
+  if (!v41_candidates_stream_uncertain()) return 0;
+  const int code = g_sequence_split.failed_fence != 0 ? g_sequence_split.failed_fence
+      : g_cuda_cleanup_status != 0 ? g_cuda_cleanup_status : (int)cudaErrorNotReady;
+  g_sequence_split.phase = SequenceSplitPhase::Quarantined;
+  g_sequence_split.held_code = code;
+  return sequence_split_status(status, FCUDA_SEQUENCE_SPLIT_QUARANTINE, code);
+}
+
 // Every owner is detached only after its exact cudaFree succeeds. A failure
 // never skips another independent owner and never returns a pointer to a pool.
 static int sequence_split_free_owned() {
@@ -133,6 +145,7 @@ extern "C" int fcuda_sequence_split_begin(size_t weight_half_bytes, size_t activ
   *status = {};
   if (g_sequence_split.phase == SequenceSplitPhase::Quarantined)
     return sequence_split_status(status, FCUDA_SEQUENCE_SPLIT_QUARANTINE, g_sequence_split.held_code);
+  if (const int stopped = sequence_split_shared_stop(status)) return stopped;
   const size_t max_bytes = (size_t)-1;
   if (g_capture_open || g_sequence_split.phase != SequenceSplitPhase::Idle ||
       !weight_half_bytes || !activation_half_bytes ||
@@ -201,6 +214,7 @@ extern "C" int fcuda_sequence_split_end(unsigned long long token, fcuda_sequence
   if (!token || token != g_sequence_split.token ||
       g_sequence_split.phase != SequenceSplitPhase::Active)
     return sequence_split_status(status, FCUDA_SEQUENCE_SPLIT_CONTRACT, (int)cudaErrorInvalidValue);
+  if (const int stopped = sequence_split_shared_stop(status)) return stopped;
   if (g_capture_open) {
     g_sequence_split.phase = SequenceSplitPhase::Quarantined;
     g_sequence_split.held_code = (int)cudaErrorInvalidValue;
