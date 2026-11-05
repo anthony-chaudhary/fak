@@ -151,6 +151,40 @@ class ReleaseTagTest(unittest.TestCase):
                     self.assertEqual(bool(folded.get("watched")), wait_for_pending)
                     self.assertEqual(len(calls), 3 if wait_for_pending else 1)
 
+    def test_ci_signal_requires_array_before_and_after_watch(self) -> None:
+        # Pure folds and stubbed runners add less than 20 ms; no Git or gh calls.
+        rt = load()
+        for response in (None, {}, False, 0, "push", []):
+            for wait_for_pending in (False, True):
+                for require_ci in (False, True):
+                    with self.subTest(response=response, wait=wait_for_pending, require_ci=require_ci):
+                        calls = []
+
+                        def runner(cmd: list[str]) -> tuple[int, str]:
+                            calls.append(cmd)
+                            if wait_for_pending and len(calls) == 1:
+                                self.assertEqual(cmd[:3], ["gh", "run", "list"])
+                                return 0, json.dumps([{"event": "push", "status": "in_progress",
+                                                       "databaseId": "push-1"}])
+                            if wait_for_pending and len(calls) == 2:
+                                self.assertEqual(cmd, ["gh", "run", "watch", "push-1", "--exit-status"])
+                                return 0, "finished"
+                            self.assertEqual(len(calls), 3 if wait_for_pending else 1)
+                            self.assertEqual(cmd[:3], ["gh", "run", "list"])
+                            return 0, json.dumps(response)
+
+                        folded = rt.ci_signal(Path("repo"), "abc123", workflow="ci.yml",
+                                              require_ci=require_ci, wait=True, runner=runner)
+                        valid_empty = isinstance(response, list)
+                        self.assertEqual(folded["verdict"], "NO_SIGNAL" if valid_empty else "INVALID_RESPONSE")
+                        self.assertEqual(folded["pass"], valid_empty and not require_ci)
+                        self.assertEqual(folded["advisory"], valid_empty and not require_ci)
+                        self.assertEqual(bool(folded.get("watched")), wait_for_pending)
+                        self.assertNotIn("run", folded)
+                        self.assertEqual(len(calls), 3 if wait_for_pending else 1)
+                        if not valid_empty:
+                            self.assertIn("JSON array", folded["reason"])
+
     def test_ci_signal_filters_events_before_and_after_watch(self) -> None:
         rt = load()
         for conclusion, expected in ((None, "NO_SIGNAL"), ("success", "GREEN"), ("failure", "RED")):
