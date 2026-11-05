@@ -152,6 +152,17 @@ type NativeScheduler struct {
 	// session shape byte-for-byte.
 	sessionDecorator func(*model.Session)
 
+	// skipDrafts* carries the vLLM skip_drafts/_drafts_unused adaptation: the
+	// per-execution verdicts that tell the MTP self-speculation path to propose
+	// K=0 drafts on steps whose drafts are SURE to be unused. Counters are
+	// guarded by mu; the observer, when set, is invoked outside it, in
+	// execution order.
+	skipDraftsObserver       func(SkipDraftsDecision)
+	skipDraftsSteps          uint64
+	skipDraftsSkipped        uint64
+	skipDraftsPrefillChunks  uint64
+	skipDraftsTerminalTokens uint64
+
 	wake    chan struct{} // buffered(1): Admit/Close nudge an idle loop
 	started sync.Once
 	stopped chan struct{}
@@ -347,6 +358,165 @@ func (s *NativeScheduler) SharedWorkReceipt() SharedWorkReceipt {
 		Panels: s.sharedPanels,
 		MACs:   s.sharedMACs,
 	}
+}
+
+// SkipDraftsReason is the closed vocabulary for a skip=true verdict: why the
+// drafts a drafter would stage after the step are SURE to be unused.
+type SkipDraftsReason string
+
+const (
+	// SkipDraftsPrefillChunk marks a prefill execution that ran only
+	// non-final chunks: every scheduled lane sampled nothing, so no next
+	// decode step exists to verify drafts against.
+	SkipDraftsPrefillChunk SkipDraftsReason = "prefill_chunk"
+	// SkipDraftsTerminalToken marks a step after which every scheduled lane
+	// left without a draft-consuming next step: each lane either retired or
+	// staged its last output token (EOS observed, or the genTokens cap
+	// reached even if every draft rejects). Stop tokens and strings cannot
+	// be known in advance, so no other ground earns skip=true.
+	SkipDraftsTerminalToken SkipDraftsReason = "terminal_token"
+)
+
+// SkipDraftsDecision is one completed model execution's skip-drafts verdict.
+// Skip=true tells the MTP self-speculation path to propose K=0 drafts: the
+// drafts it would stage after this execution are SURE to be unused, so the
+// drafter forward and the draft KV writes it would make are skipped entirely.
+// Acceptance accounting of previously staged drafts is unaffected.
+type SkipDraftsDecision struct {
+	Iteration uint64
+	Skip      bool
+	Reason    SkipDraftsReason // zero when Skip is false
+}
+
+// SkipDraftsReceipt counts skip-drafts verdicts since scheduler construction.
+// Steps counts every prefill/decode phase that produced a verdict; Skipped
+// counts the skip=true subset, split by the closed reason vocabulary.
+type SkipDraftsReceipt struct {
+	Steps          uint64
+	Skipped        uint64
+	PrefillChunks  uint64
+	TerminalTokens uint64
+}
+
+// SetSkipDraftsObserver installs the per-execution verdict sink the MTP
+// self-speculation path consumes to skip the drafter forward (K=0 drafts).
+// Verdicts arrive in execution order, outside the scheduler mutex. Nil
+// (default) keeps the scheduler allocation-free; in-package tests inject a
+// witness instead.
+func (s *NativeScheduler) SetSkipDraftsObserver(obs func(SkipDraftsDecision)) {
+	s.mu.Lock()
+	s.skipDraftsObserver = obs
+	s.mu.Unlock()
+}
+
+// SkipDraftsReceipt reports the skip-drafts verdict ledger.
+func (s *NativeScheduler) SkipDraftsReceipt() SkipDraftsReceipt {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return SkipDraftsReceipt{
+		Steps:          s.skipDraftsSteps,
+		Skipped:        s.skipDraftsSkipped,
+		PrefillChunks:  s.skipDraftsPrefillChunks,
+		TerminalTokens: s.skipDraftsTerminalTokens,
+	}
+}
+
+// laneDraftsUnusedLocked reports whether drafts proposed after the execution
+// that just completed are SURE to be unused for this lane. Adaptation of
+// vLLM's _drafts_unused predicate (vllm/v1/core/sched/scheduler.py:483-525,
+// with the can_skip_drafts gate :311-315 @ae065918, Apache-2.0): drafts are
+// verified in the lane's next decode step, and that step either never samples
+// (a non-final prefill chunk, num_computed+num_new < num_tokens) or publishes
+// the lane's last output token. Caller holds s.mu.
+func (s *NativeScheduler) laneDraftsUnusedLocked(ln *schedLane, prefillPhase bool) (bool, SkipDraftsReason) {
+	if ln.terminal {
+		return true, SkipDraftsTerminalToken
+	}
+	if prefillPhase {
+		// Still PREFILLING after its chunk: the cursor sits short of the
+		// prompt tail, so the step sampled nothing. A lane that transitioned
+		// to DECODE (final chunk, or a full prefix-cache hit that consumed
+		// the whole prompt without a forward) keeps its draft opportunity in
+		// the decode phase and reports not-unused here — conservative, never
+		// a missed skip.
+		return ln.state == schedLanePrefilling, SkipDraftsPrefillChunk
+	}
+	// Decode phase: the step's sampled token is the freshly staged deferred
+	// token; done marks the last output token (EOS or the genTokens cap).
+	return ln.deferredToken != nil && ln.deferredToken.done, SkipDraftsTerminalToken
+}
+
+// noteStepSkipDrafts evaluates and records the skip-drafts verdict for one
+// completed model execution over its scheduled lane set. prefillPhase marks
+// an execution that carried only prefill chunks; otherwise it is a decode
+// step. The verdict is the AND over scheduled lanes of
+// laneDraftsUnusedLocked — vLLM proposes K=0 drafts only when the predicate
+// holds for EVERY scheduled request (scheduler.py:1528-1530 per-request OR
+// into drafts_needed, :1693 skip_drafts=not drafts_needed @ae065918).
+// Caller must not hold s.mu; the observer, when set, is invoked outside it.
+func (s *NativeScheduler) noteStepSkipDrafts(iteration uint64, prefillPhase bool, lanes []*schedLane) {
+	if len(lanes) == 0 {
+		return
+	}
+	s.mu.Lock()
+	skip := true
+	var reason SkipDraftsReason
+	for _, ln := range lanes {
+		unused, r := s.laneDraftsUnusedLocked(ln, prefillPhase)
+		if !unused {
+			skip = false
+			reason = "" // a keep-drafts verdict carries no reason
+			break
+		}
+		if reason == "" {
+			reason = r
+		}
+	}
+	s.skipDraftsSteps++
+	if skip {
+		s.skipDraftsSkipped++
+		switch reason {
+		case SkipDraftsPrefillChunk:
+			s.skipDraftsPrefillChunks++
+		case SkipDraftsTerminalToken:
+			s.skipDraftsTerminalTokens++
+		}
+	}
+	obs := s.skipDraftsObserver
+	s.mu.Unlock()
+	if obs != nil {
+		obs(SkipDraftsDecision{Iteration: iteration, Skip: skip, Reason: reason})
+	}
+}
+
+// noteQwenPrefillSkipDrafts records the verdict for the qwen bounded-prefill
+// route once advanceQwenPrefill returns. The chunk counts as executed only
+// when the lane's cursor actually advanced (budget-starved steps yield
+// unchanged; error paths finish the lane without moving it), so no verdict
+// is minted for a step that ran no forward. Caller must not hold s.mu.
+func (s *NativeScheduler) noteQwenPrefillSkipDrafts(iteration uint64, ln *schedLane, cursorBefore int) {
+	s.mu.Lock()
+	advanced := ln.promptCursor > cursorBefore
+	s.mu.Unlock()
+	if advanced {
+		s.noteStepSkipDrafts(iteration, true, []*schedLane{ln})
+	}
+}
+
+// notePackedPrefillSkipDrafts records the verdict for a packed-prefill
+// execution over the lanes whose cursors advanced; declined batches move no
+// cursor and mint no verdict. cursors parallels candidates. Caller must not
+// hold s.mu.
+func (s *NativeScheduler) notePackedPrefillSkipDrafts(iteration uint64, candidates []*schedLane, cursors []int) {
+	s.mu.Lock()
+	advanced := make([]*schedLane, 0, len(candidates))
+	for i, ln := range candidates {
+		if ln.promptCursor > cursors[i] {
+			advanced = append(advanced, ln)
+		}
+	}
+	s.mu.Unlock()
+	s.noteStepSkipDrafts(iteration, true, advanced)
 }
 
 // NewNativeScheduler builds a scheduler over an already-constructed model (a real
@@ -1289,6 +1459,25 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 	}
 	deferPrefill := prefill != nil && s.prefillInterval > 1 && !s.prefillCapacityBound &&
 		(s.executedSteps+1-s.lastPrefillStep) < s.prefillInterval && len(active) > 0
+
+	// Skip-drafts verdict inputs (vLLM skip_drafts adaptation): the cursors
+	// the prefilling lanes hold before this iteration's prefill execution, so
+	// the post-execution verdict counts only lanes whose chunk advanced.
+	prefillCursorBefore := -1
+	var packedCandidates []*schedLane
+	var packedCandidateCursors []int
+	if prefill != nil {
+		if prefill.packedPrefill {
+			for _, ln := range s.lanes {
+				if ln.packedPrefill && ln.state == schedLanePrefilling {
+					packedCandidates = append(packedCandidates, ln)
+					packedCandidateCursors = append(packedCandidateCursors, ln.promptCursor)
+				}
+			}
+		} else {
+			prefillCursorBefore = prefill.promptCursor
+		}
+	}
 	closed = s.closed
 	waitingDepth := len(s.waiting)
 	idle = len(s.lanes) == 0 && len(s.waiting) == 0 && len(s.preempted) == 0
@@ -1306,8 +1495,10 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 		var packedReady []*schedLane
 		if prefill.packedPrefill {
 			packedReady = s.advancePackedPrefill(iteration)
+			s.notePackedPrefillSkipDrafts(iteration, packedCandidates, packedCandidateCursors)
 		} else {
 			s.advanceQwenPrefill(prefill, iteration)
+			s.noteQwenPrefillSkipDrafts(iteration, prefill, prefillCursorBefore)
 		}
 		// PhasePrefill only: ObservePrefillChunk counts prompt tokens forwarded by
 		// prefill, and advanceQwenPrefill may resolve a KV prefix hit that skips
@@ -1509,6 +1700,7 @@ func (s *NativeScheduler) stepSolo(ln *schedLane, iteration uint64) {
 		if !ln.retireDeferredToken(iteration) || !ln.stageDeferredToken() {
 			return
 		}
+		s.noteStepSkipDrafts(iteration, false, []*schedLane{ln})
 		select {
 		case <-s.wake:
 			return
@@ -1588,6 +1780,7 @@ func (s *NativeScheduler) stepOnce(active []*schedLane, iteration uint64) {
 			execLanes[0].retireDeferredToken(iteration)
 			execLanes[0].stageDeferredToken()
 		}
+		s.noteStepSkipDrafts(iteration, false, active)
 		return
 	}
 	// The shared, weight-stream-amortised decode step: ONE StepBatch over every
@@ -1615,6 +1808,7 @@ func (s *NativeScheduler) stepOnce(active []*schedLane, iteration uint64) {
 			ln.stageDeferredToken()
 		}
 	}
+	s.noteStepSkipDrafts(iteration, false, active)
 }
 
 // decodeBatchBucket selects the fixed-shape decode graph bucket that a live
