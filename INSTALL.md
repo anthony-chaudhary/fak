@@ -56,10 +56,16 @@ gateway in production (auth, policy, sizing, service units) is
 | Homebrew | [`Formula/fak.rb`](Formula/fak.rb) | macOS (and Linuxbrew) |
 | Docker / OCI | [`ghcr.io/anthony-chaudhary/fak`](#3-docker) | Containers; published multi-arch `linux/amd64` + `linux/arm64` (plus the NVIDIA CUDA image) |
 | Docker Compose | [`examples/compose-ollama`](examples/compose-ollama) | fak + Ollama on one box |
-| Kubernetes / Helm | [`deploy/k8s`](deploy/k8s), [`deploy/helm`](deploy/helm) | Clusters — `kubectl apply -k deploy/k8s` |
+| Kubernetes / Helm | [`deploy/k8s`](deploy/k8s), [`deploy/helm`](deploy/helm) | Clusters — `kubectl apply -k deploy/k8s`; Helm from a checkout: `helm install fak deploy/helm/fak`; Helm without a clone: `helm install fak oci://ghcr.io/anthony-chaudhary/fak/charts/fak --version X.Y.Z` (Helm 3.8+) |
 | systemd | [`deploy/systemd`](deploy/systemd) | Linux service — hardened unit, `DynamicUser` |
 | winget | [`deploy/winget`](deploy/winget) | Windows — `winget install AnthonyChaudhary.Fak` (after the one-time submission) |
 | macOS launchd | [`tools/com.fak.serve-gateway.plist`](tools/com.fak.serve-gateway.plist) | macOS service |
+
+The Helm chart is also published to ghcr as an OCI artifact on every `v*` tag
+([`.github/workflows/release-helm.yml`](.github/workflows/release-helm.yml)),
+alongside the ghcr image — its first publish requires a one-time maintainer step
+to set the ghcr package visibility to public, the same posture as the
+[mcp-registry one-time publish step](docs/fak/mcp-registry.md).
 
 ---
 
