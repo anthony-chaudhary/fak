@@ -290,6 +290,8 @@ type KVStore interface {
 }
 type cudaBackend struct{ fault bool }
 type cudaBuf struct{ ptr unsafe.Pointer }
+// Entry/COW fixture only; the dedicated snapshot fixture extracts the real holder.
+type cudaPagedKVSnapshotCopy struct{}
 
 func cloneKVConfig(c KVConfig) KVConfig { return c }
 func itoaC(v int) string                { return strconv.Itoa(v) }
