@@ -30,6 +30,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/strictjson"
 )
 
 // SchemaV1 names the versioned desired-state schema this package parses.
@@ -212,10 +214,8 @@ type ExitRecord struct {
 // drop intent). The returned spec is normalized: defaults filled, env sorted
 // by name, depends_on sorted and deduplicated.
 func ParseSpec(data []byte) (*Spec, error) {
-	dec := json.NewDecoder(strings.NewReader(string(data)))
-	dec.DisallowUnknownFields()
 	var s Spec
-	if err := dec.Decode(&s); err != nil {
+	if err := strictjson.Decode(data, &s, "trailing data after service spec"); err != nil {
 		if strings.Contains(err.Error(), "unknown field") {
 			return nil, fmt.Errorf("servicespec: %w", err)
 		}
