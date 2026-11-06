@@ -417,6 +417,13 @@ type Model struct {
 	// (decode-time apply, no merged weight copy). See lora.go.
 	lora *LoRASet
 
+	// wds is the optional weight-delta layer fronting this model's weight funnel
+	// (weightdelta.go): typed, CAS-named, reversible weight-state mutations carrying
+	// a monotonic weight-epoch for KV-span accounting. nil by default — WeightEpoch
+	// then reports generation 0 over the base-state digest and nothing else changes.
+	// Installed explicitly via SetWeightDeltaSource; see weightdelta.go.
+	wds *WeightDeltaSource
+
 	// epRanks is the expert-parallel rank count for the routed MoE FFN: the number of
 	// expert shards the per-token MoE delta is reduced across (expert_parallel.go). 0/1
 	// keep the live forward on the monolith glmMoeFFN (the no-op default — nothing
