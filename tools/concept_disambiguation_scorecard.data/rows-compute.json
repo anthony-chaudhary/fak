@@ -401,7 +401,8 @@
         "cudasequencesplitscratchplan",
         "qwen35gdnpackedinputcapability",
         "qwen35gdnpackedinputpolicy",
-        "resolveqwen35gdnpackedinputpolicy"
+        "resolveqwen35gdnpackedinputpolicy",
+        "kvfp8evictionplan"
       ],
       "aliases": [],
       "grounding": "Qwen35GDNPackedInputPlan",
@@ -468,6 +469,151 @@
       ],
       "aliases": [],
       "grounding": "ResolveQwen35GDNPackedInputPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "kvfp8evictionplan",
+      "canonical": "kvFP8EvictionPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Generation-bound canonical-row relocation map with copied per-layer rotary contracts for complete-image eager FP8 KV eviction.",
+      "distinction": "This is retained mutable-KV row geometry, not Qwen35GDNPackedInputPlan static weight storage or ctxplan.PlanEviction survival-class token-budget selection. A mapping does not authorize stale owner use or graph replay.",
+      "distinct_from": [
+        "qwen35gdnpackedinputplan",
+        "c2421-plan-eviction",
+        "kvfp8ownerplanevict",
+        "kvfp8evictionplan-evict",
+        "kvfp8ownerplanevict-evict",
+        "kvfp8evicteager",
+        "kvfp8applyevictioneager"
+      ],
+      "aliases": [],
+      "grounding": "kvFP8EvictionPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "kvfp8ownerplanevict",
+      "canonical": "kvFP8Owner.planEvict",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Constructs a canonical-row FP8 eviction mapping from the current owner generation, row range and copied per-layer rotary contracts without device effects.",
+      "distinction": "This is the planner that returns kvFP8EvictionPlan, not the returned mapping or its eager execution. It plans complete-image row relocation, not survival-class token-budget selection, and does not establish caller lifetime or hardware qualification.",
+      "distinct_from": [
+        "kvfp8evictionplan",
+        "c2421-plan-eviction",
+        "kvfp8evictionplan-evict",
+        "kvfp8ownerplanevict-evict",
+        "kvfp8evicteager",
+        "kvfp8applyevictioneager"
+      ],
+      "aliases": [],
+      "grounding": "planEvict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "kvfp8evictionplan-evict",
+      "canonical": "kvFP8EvictionPlan (eviction descriptor)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Eviction-family view of the same kvFP8EvictionPlan symbol: an owner-generation-bound row relocation descriptor retaining exact per-layer rotary contracts for complete-image replacement.",
+      "distinction": "This cross-indexes the plan-family descriptor rather than defining a second implementation. It carries the eviction mapping but neither chooses a survival-class token budget nor executes the planner or replacement.",
+      "distinct_from": [
+        "kvfp8evictionplan",
+        "kvfp8ownerplanevict",
+        "c2421-plan-eviction",
+        "kvfp8ownerplanevict-evict",
+        "kvfp8evicteager",
+        "kvfp8applyevictioneager"
+      ],
+      "aliases": [],
+      "grounding": "kvFP8EvictionPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "kvfp8ownerplanevict-evict",
+      "canonical": "kvFP8Owner.planEvict (eviction planning)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Eviction-family view of the same planEvict method: validates the current complete-image row relocation contract and constructs its generation-bound mapping without device effects.",
+      "distinction": "This is the same planner indexed in the plan family, not a second operation. It constructs the descriptor but does not apply it, mutate device planes or choose a survival-class token budget.",
+      "distinct_from": [
+        "kvfp8evictionplan",
+        "kvfp8ownerplanevict",
+        "kvfp8evictionplan-evict",
+        "c2421-plan-eviction",
+        "kvfp8evicteager",
+        "kvfp8applyevictioneager"
+      ],
+      "aliases": [],
+      "grounding": "planEvict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "kvfp8evicteager",
+      "canonical": "kvFP8EvictEager",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Complete-image eager FP8 eviction entry that constructs a current-owner canonical-row plan and delegates its checked execution to kvFP8ApplyEvictionEager.",
+      "distinction": "This combines planning and application, unlike planEvict alone or an already prepared descriptor. It is internal orchestration rather than public precision selection, in-place compaction, graph replay or measured performance.",
+      "distinct_from": [
+        "kvfp8evictionplan",
+        "kvfp8ownerplanevict",
+        "kvfp8evictionplan-evict",
+        "kvfp8ownerplanevict-evict",
+        "c2421-plan-eviction",
+        "kvfp8applyevictioneager"
+      ],
+      "aliases": [],
+      "grounding": "kvFP8EvictEager",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "kvfp8applyevictioneager",
+      "canonical": "kvFP8ApplyEvictionEager",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Executes a prepared generation-bound FP8 eviction mapping through disjoint all-layer staging, exact retained-row copies, bounded suffix rerotation, quantization and checked completion before publication.",
+      "distinction": "This consumes an existing mapping, whereas kvFP8EvictEager also plans it and planEvict only constructs it. It does not compact in place, activate a serving constructor or qualify graph replay, device lifetime or performance.",
+      "distinct_from": [
+        "kvfp8evictionplan",
+        "kvfp8ownerplanevict",
+        "kvfp8evictionplan-evict",
+        "kvfp8ownerplanevict-evict",
+        "kvfp8evicteager",
+        "c2421-plan-eviction"
+      ],
+      "aliases": [],
+      "grounding": "kvFP8ApplyEvictionEager",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

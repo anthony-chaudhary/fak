@@ -18182,10 +18182,26 @@
           "category": "false-positive",
           "reason": "Numerical widening of an FP8 K/V storage-plane image with F32 scales; it is unrelated to planning or execution-plan authority.",
           "token": "DequantizeKVFP8Plane"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Native allocation-role label for an FP8 storage plane. Plane denotes physical K/V/code/scale storage, not a plan or planner.",
+          "token": "FCUDA_KV_FP8_OWNER_PLANE"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Owner helper computing checked byte extents for physical FP8 storage planes; the Plane lexical prefix does not denote a plan.",
+          "token": "planeBytes"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Count of the five physical FP8 KV storage planes per layer, not an execution plan or planning operation.",
+          "token": "kvFP8Planes"
         }
       ],
       "exclude": [
         "DequantizeKVFP8Plane",
+        "FCUDA_KV_FP8_OWNER_PLANE",
         "KVFP8Plane",
         "QuantizeKVFP8Plane",
         "ReferenceOverCandidate",
@@ -18193,7 +18209,9 @@
         "candidate_fak_share_net",
         "explanat",
         "hasTextToolCandidate",
+        "kvFP8Planes",
         "plane",
+        "planeBytes",
         "plank",
         "transplant"
       ],
