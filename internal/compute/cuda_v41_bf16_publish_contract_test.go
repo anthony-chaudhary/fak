@@ -1,16 +1,209 @@
 package compute
 
 import (
+	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"go/parser"
 	"go/token"
 	"math"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
+
+// Executes the unchanged integer kernel bodies with sequential host thread IDs.
+// This witnesses integer arithmetic and status attribution, not CUDA compilation,
+// atomic concurrency, stream completion, allocation lifetime or device execution.
+// fak-test:runtime medium est=3s lane=default
+// fak-test:justify One C++14 build executes exact publication source and four mutation controls.
+func TestCUDAV41BF16PublishHostIntegerSource(t *testing.T) {
+	compiler, err := exec.LookPath("c++")
+	if err != nil {
+		t.Fatal("C++14 compiler required for the BF16 integer source witness: ", err)
+	}
+	source := cudaSourceClosure(t, "cuda_kernels.cu")
+	declaration := func(name string) string {
+		t.Helper()
+		marker := "__global__ void " + name + "("
+		if strings.Count(source, marker) != 1 {
+			t.Fatalf("expected one production definition of %s", name)
+		}
+		start := strings.Index(source, marker)
+		body := cudaFunctionBody(t, source[start:], name)
+		open := strings.Index(source[start:], "{")
+		return source[start : start+open+len(body)]
+	}
+	status := declaration("k_v41_bf16_publish_status")
+	kernel := declaration("k_v41_bf16_publish")
+	t.Logf("exact status/kernel source sha256=%x/%x; host integer execution only", sha256.Sum256([]byte(status)), sha256.Sum256([]byte(kernel)))
+	variants := []struct{ name, before, after string }{
+		{"actual", "", ""},
+		{"tie", "((u >> 16) & 1u)", "0u"},
+		{"nonfinite", "(u & 0x7f800000u) == 0x7f800000u ||", "false ||"},
+		{"overflow", "(rounded & 0x7f800000u) == 0x7f800000u", "false"},
+		{"lowest", "atomicMin((unsigned int *)&status[2], (unsigned int)i);", "status[2] = i;"},
+	}
+	var cpp strings.Builder
+	cpp.WriteString(cudaV41BF16HostPreamble)
+	for _, variant := range variants {
+		body := kernel
+		if variant.before != "" {
+			if strings.Count(body, variant.before) != 1 {
+				t.Fatalf("mutation %s no longer binds one production expression", variant.name)
+			}
+			body = strings.Replace(body, variant.before, variant.after, 1)
+		}
+		fmt.Fprintf(&cpp, "namespace %s {\n%s\n%s\n}\n", variant.name, status, body)
+	}
+	cpp.WriteString(cudaV41BF16HostMain)
+	dir := t.TempDir()
+	input, binary := filepath.Join(dir, "bf16.cpp"), filepath.Join(dir, "bf16-host.exe")
+	if err := os.WriteFile(input, []byte(cpp.String()), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	defer cancel()
+	run := func(command string, args ...string) ([]byte, error) {
+		cmd := exec.CommandContext(ctx, command, args...)
+		cmd.WaitDelay = time.Second
+		return cmd.CombinedOutput()
+	}
+	if out, err := run(compiler, "-std=c++14", "-O2", input, "-o", binary); err != nil {
+		t.Fatalf("compile actual integer kernel and controls: %v\n%s", err, out)
+	}
+	for _, variant := range variants {
+		t.Run(variant.name, func(t *testing.T) {
+			out, err := run(binary, variant.name)
+			if ctx.Err() != nil {
+				t.Fatalf("integer witness deadline: %v", ctx.Err())
+			}
+			if variant.name == "actual" {
+				if err != nil || strings.TrimSpace(string(out)) != "PASS exact BF16 integer source; 393216 boundary words; CUDA/device unrun" {
+					t.Fatalf("actual integer witness: %v\n%s", err, out)
+				}
+			} else {
+				var exit *exec.ExitError
+				if !errors.As(err, &exit) || exit.ExitCode() != 1 || !strings.HasPrefix(string(out), "MISMATCH ") {
+					t.Fatalf("mutation %s must execute and fail its arithmetic/status check: %v\n%s", variant.name, err, out)
+				}
+			}
+			t.Log(strings.TrimSpace(string(out)))
+		})
+	}
+}
+
+const cudaV41BF16HostPreamble = `
+#include <algorithm>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <vector>
+#define __global__
+struct HostDim { uint32_t x; } blockIdx, blockDim, threadIdx, gridDim;
+static unsigned int atomicMin(unsigned int *p, unsigned int value) {
+  const unsigned int old = *p;
+  *p = std::min(old, value);
+  return old;
+}
+`
+
+const cudaV41BF16HostMain = `
+using Publish = void (*)(const uint32_t *, uint32_t *, uint32_t *, uint32_t);
+using Status = void (*)(uint32_t *, uint32_t, uint32_t);
+// Independent branch/carry oracle, rather than the production bias expression.
+static bool reference(uint32_t input, uint32_t &output) {
+  if (((input >> 23) & 255u) == 255u) return false;
+  uint32_t high = input >> 16, low = input & 65535u;
+  if (low > 32768u || (low == 32768u && (high % 2u) != 0)) ++high;
+  if ((high & 32640u) == 32640u) return false;
+  output = high << 16;
+  return true;
+}
+static bool mismatch(const char *what, uint32_t index) {
+  std::printf("MISMATCH %s at %u\n", what, index);
+  return false;
+}
+static bool check(Publish publish, Status initialize, const std::vector<uint32_t> &words) {
+  const uint32_t count = static_cast<uint32_t>(words.size()), guard = 0xdeadbeefu;
+  std::vector<uint32_t> input(count+2, guard), output(count+2, guard);
+  std::copy(words.begin(), words.end(), input.begin()+1);
+  const auto untouched = input;
+  // Different launch extents exercise grid strides and threads beyond the tail.
+  for (uint32_t blocks : {1u, 3u}) for (uint32_t threads : {1u, 17u, 256u}) {
+    for (bool reverse : {false, true}) {
+      std::fill(output.begin(), output.end(), guard);
+      uint32_t status[4] = {~0u, ~0u, ~0u, ~0u};
+      initialize(status, count, 21u);
+      blockDim.x = threads; gridDim.x = blocks;
+      for (uint32_t step=0; step<blocks*threads; ++step) {
+        const uint32_t id = reverse ? blocks*threads-1-step : step;
+        blockIdx.x = id/threads; threadIdx.x = id%threads;
+        publish(input.data()+1, output.data()+1, status, count);
+      }
+      uint32_t bad = ~0u;
+      for (uint32_t i=0; i<count; ++i) {
+        uint32_t expected = guard;
+        // Invalid output is never published; only its failure attribution matters.
+        if (!reference(words[i], expected)) { bad = std::min(bad,i); continue; }
+        if (output[i+1] != expected) return mismatch("output", i);
+      }
+      if (status[0] != 0x42463143u || status[1] != 21u || status[3] != count)
+        return mismatch("envelope", count);
+      if (status[2] != bad) return mismatch("lowest-invalid-index", bad);
+      if (input != untouched || output.front() != guard || output.back() != guard)
+        return mismatch("input-or-guard", count);
+    }
+  }
+  return true;
+}
+int main(int argc, char **argv) {
+  if (argc != 2) return 2;
+  Publish publish = nullptr; Status initialize = nullptr;
+#define SELECT(name) if (std::strcmp(argv[1], #name)==0) { publish=name::k_v41_bf16_publish; initialize=name::k_v41_bf16_publish_status; }
+  SELECT(actual) SELECT(tie) SELECT(nonfinite) SELECT(overflow) SELECT(lowest)
+#undef SELECT
+  if (!publish) return 2;
+  // Literal goldens independently pin signed zeros, subnormals and both tie parities.
+  const uint32_t golden[][2] = {
+    {0x00000000u,0x00000000u},{0x80000000u,0x80000000u},
+    {0x00000001u,0x00000000u},{0x80000001u,0x80000000u},
+    {0x00008000u,0x00000000u},{0x00008001u,0x00010000u},
+    {0x00018000u,0x00020000u},{0x80018000u,0x80020000u},
+    {0x007fffffu,0x00800000u},{0x807fffffu,0x80800000u},
+    {0x3f808000u,0x3f800000u},{0x3f818000u,0x3f820000u},
+    {0xbf808000u,0xbf800000u},{0xbf818000u,0xbf820000u},
+    {0x7f7f7fffu,0x7f7f0000u},{0xff7f7fffu,0xff7f0000u}
+  };
+  std::vector<uint32_t> words;
+  for (const auto &g : golden) {
+    uint32_t out=0;
+    if (!reference(g[0],out) || out!=g[1]) { mismatch("literal-oracle",g[0]); return 1; }
+    words.push_back(g[0]);
+  }
+  if (!check(publish,initialize,words)) return 1;
+  for (uint32_t bad : {0x7f800000u,0xff800000u,0x7fc00000u,0x7f800001u,0x7fffffffu,0xffffffffu,0x7f7f8000u,0xff7f8000u}) {
+    uint32_t unused=0;
+    if (reference(bad,unused)) { mismatch("invalid-oracle",bad); return 1; }
+    words.assign(513,0x3f808000u);
+    words[1]=bad; words[256]=bad; words[512]=bad;
+    if (!check(publish,initialize,words)) return 1;
+  }
+  words.clear(); words.reserve(65536*6);
+  for (uint32_t high=0; high<65536; ++high)
+    for (uint32_t low : {0u,1u,32767u,32768u,32769u,65535u}) words.push_back((high<<16)|low);
+  if (!check(publish,initialize,words)) return 1;
+  // A successful publication immediately after invalid input must start fresh.
+  if (!check(publish,initialize,{0x80000000u,0x3f800000u})) return 1;
+  std::puts("PASS exact BF16 integer source; 393216 boundary words; CUDA/device unrun");
+}
+`
 
 // This is a source/protocol witness, not a CUDA compilation or device receipt.
 // The repository's fcuda_* checker does not inspect this private candidate ABI.
