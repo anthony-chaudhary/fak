@@ -741,7 +741,7 @@ func BenchmarkCompactor100kTokensCompactInPlace(b *testing.B) {
 }
 
 // fak-test:runtime fast est=1ms lane=default
-func TestCtxmmuPreserveCurrentTurnReasoning(t *testing.T) {
+func TestCtxmmuSubstituteCommittedReasoningPreservesCurrentTurn(t *testing.T) {
 	asst := func(id uint64, turn int, gate string) ctxmmu.TokenPage {
 		return ctxmmu.TokenPage{
 			ID:        id,
