@@ -2231,3 +2231,45 @@ Immutable per-load Q4_K/Q6_K admission decision resolved from explicit enable an
 Resolver that honors default-off and both force-off controls, checks actual whole-GDN decode and sequence method/path contracts, validates the versioned declaration and probes each admitted resident dtype before returning a copied per-load policy or typed refusal.
 
 **Distinct from:** Unlike Qwen35GDNPackedInputPolicy, this is the validating constructor rather than the immutable result. Unlike Qwen35GDNPackedInputCapability, it combines explicit request and actual probes instead of accepting a declaration alone. It reads no environment, makes no tensor upload, device allocation or model-operation call and never admits packed graph capture.
+
+
+### kvFP8EvictionPlan
+
+Generation-bound canonical-row relocation map with copied per-layer rotary contracts for complete-image eager FP8 KV eviction.
+
+**Distinct from:** This is retained mutable-KV row geometry, not Qwen35GDNPackedInputPlan static weight storage or ctxplan.PlanEviction survival-class token-budget selection. A mapping does not authorize stale owner use or graph replay.
+
+
+### kvFP8Owner.planEvict
+
+Constructs a canonical-row FP8 eviction mapping from the current owner generation, row range and copied per-layer rotary contracts without device effects.
+
+**Distinct from:** This is the planner that returns kvFP8EvictionPlan, not the returned mapping or its eager execution. It plans complete-image row relocation, not survival-class token-budget selection, and does not establish caller lifetime or hardware qualification.
+
+
+### kvFP8EvictionPlan (eviction descriptor)
+
+Eviction-family view of the same kvFP8EvictionPlan symbol: an owner-generation-bound row relocation descriptor retaining exact per-layer rotary contracts for complete-image replacement.
+
+**Distinct from:** This cross-indexes the plan-family descriptor rather than defining a second implementation. It carries the eviction mapping but neither chooses a survival-class token budget nor executes the planner or replacement.
+
+
+### kvFP8Owner.planEvict (eviction planning)
+
+Eviction-family view of the same planEvict method: validates the current complete-image row relocation contract and constructs its generation-bound mapping without device effects.
+
+**Distinct from:** This is the same planner indexed in the plan family, not a second operation. It constructs the descriptor but does not apply it, mutate device planes or choose a survival-class token budget.
+
+
+### kvFP8EvictEager
+
+Complete-image eager FP8 eviction entry that constructs a current-owner canonical-row plan and delegates its checked execution to kvFP8ApplyEvictionEager.
+
+**Distinct from:** This combines planning and application, unlike planEvict alone or an already prepared descriptor. It is internal orchestration rather than public precision selection, in-place compaction, graph replay or measured performance.
+
+
+### kvFP8ApplyEvictionEager
+
+Executes a prepared generation-bound FP8 eviction mapping through disjoint all-layer staging, exact retained-row copies, bounded suffix rerotation, quantization and checked completion before publication.
+
+**Distinct from:** This consumes an existing mapping, whereas kvFP8EvictEager also plans it and planEvict only constructs it. It does not compact in place, activate a serving constructor or qualify graph replay, device lifetime or performance.
