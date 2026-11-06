@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
 )
 
 // fak-test:runtime fast est=1s
@@ -257,6 +259,89 @@ func TestLeaseAdmissionDiagnosticsLegacyAndFutureFailureFallbacks(t *testing.T) 
 						}
 					}
 				}
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=1s
+// The composed lease-admission DEFAULT_DENY note must carry the remedy sentence
+// EXACTLY ONCE: remedyNote already renders it as the sanctioned alternative, so
+// defaultDenyOperatorRemedy may only contribute the typed recovery token. The
+// verdict is built through leaseAdmissionRefusal, the same seam the wire uses.
+func TestLeaseAdmissionComposedNoteCarriesRemedyOnce(t *testing.T) {
+	verdict := leaseAdmissionRefusal(abi.ReasonDefaultDeny, leaseFailureUnknownFootprint, "write footprint is unknown")
+	adj := ToolAdjudication{ToolCallID: "call-once", Tool: "bash", Verdict: verdict}
+	remedy := verdict.Detail["remedy"]
+	surfaces := map[string]string{
+		"denySummary":      denySummary([]ToolAdjudication{adj}),
+		"adjudicationNote": adjudicationNote([]ToolAdjudication{adj}),
+		"deniedToolResult": deniedToolResult(adj),
+	}
+	if notes, _ := renderRefusalNotes(adj); notes != "" {
+		surfaces["renderRefusalNotes"] = notes
+	}
+	for name, got := range surfaces {
+		if n := strings.Count(got, remedy); n != 1 {
+			t.Errorf("%s carries the remedy sentence %d times, want exactly 1:\n%s", name, n, got)
+		}
+		if !strings.Contains(got, "recovery=USE_FILE_TOOLS") {
+			t.Errorf("%s missing typed token recovery=USE_FILE_TOOLS:\n%s", name, got)
+		}
+		alt := strings.Index(got, "sanctioned alternative:")
+		tok := strings.Index(got, "recovery=USE_FILE_TOOLS")
+		if alt < 0 || tok < 0 || alt > tok {
+			t.Errorf("%s order broken (sanctioned alternative:%d, token:%d):\n%s", name, alt, tok, got)
+		}
+	}
+}
+
+// fak-test:runtime fast est=1s
+// The unknown_write_footprint remedy keeps its two pinned sentences and states
+// the structural truth: re-proposing the identical mutating shell call cannot
+// prove its write footprint, so it will be refused again.
+func TestLeaseAdmissionUnknownFootprintRemedyStatesStructuralTruth(t *testing.T) {
+	diagnostic, ok := diagnosticForLeaseAdmissionFailure(leaseFailureUnknownFootprint)
+	if !ok {
+		t.Fatal("unknown_write_footprint has no diagnostic")
+	}
+	for _, want := range []string{
+		"Use structured file tools with explicit paths.",
+		"Native shell commands have no blanket fak-run exemption: use an actually registered typed operation; generic opaque effects remain denied.",
+		"cannot prove its write footprint and will be refused again",
+		"move the step to structured file tools or a registered typed operation instead of re-proposing it",
+	} {
+		if !strings.Contains(diagnostic.remedy, want) {
+			t.Errorf("remedy missing %q:\n%s", want, diagnostic.remedy)
+		}
+	}
+}
+
+// fak-test:runtime fast est=1s
+// Deduplication must not eat the sentence on wires whose Detail["remedy"] is
+// empty or differs from the diagnostic: they keep the full typed composition.
+func TestLeaseAdmissionDedupKeepsSentenceOnUntypedOrForeignRemedy(t *testing.T) {
+	diag, _ := diagnosticForLeaseAdmissionFailure(leaseFailureUnknownFootprint)
+	cases := []struct {
+		name   string
+		detail map[string]string
+	}{
+		{"empty remedy detail", map[string]string{"admission_failure": "unknown_write_footprint", "recovery": "USE_FILE_TOOLS"}},
+		{"foreign remedy detail", map[string]string{"admission_failure": "unknown_write_footprint", "recovery": "USE_FILE_TOOLS", "remedy": "bounded remedy"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			adj := ToolAdjudication{
+				ToolCallID: "call-dedup",
+				Tool:       "bash",
+				Verdict: WireVerdict{
+					Kind: "DENY", Reason: "DEFAULT_DENY", By: leaseAdmissionBy, Disposition: "TERMINAL", Detail: tc.detail,
+				},
+			}
+			want := "recovery=USE_FILE_TOOLS: " + diag.remedy
+			notes, _ := renderRefusalNotes(adj)
+			if !strings.Contains(notes, want) {
+				t.Fatalf("renderRefusalNotes lost the full typed remedy composition:\n%s", notes)
 			}
 		})
 	}

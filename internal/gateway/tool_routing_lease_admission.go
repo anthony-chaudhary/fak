@@ -165,10 +165,10 @@ func adjudicateRawWriteTargets(tool, rawArgs string, readOnly bool) (args map[st
 		} else if adjudicateShellCommandTool(base) {
 			// A shell can hide writes behind scripts, aliases, environment stripping,
 			// or syntax the target extractor does not recognize. The caller's
-			// read_only hint requests classification; only the existing positive
+			// read_only hint is untrusted and never sufficient on its own; only the positive
 			// CLI, in-process shell-read, or constrained SSH grammar can prove a read.
 			_, promotableRead := vdso.ParseShellRead(command)
-			if readOnly && (adjudicator.PositiveCLIReadOnly(command) || promotableRead || adjudicator.PositiveSSHReadProbe(command)) {
+			if adjudicator.PositiveCLIReadOnly(command) || promotableRead || adjudicator.PositiveSSHReadProbe(command) {
 				return args, nil, false, true
 			}
 			return args, nil, true, false

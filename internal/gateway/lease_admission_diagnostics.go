@@ -44,7 +44,7 @@ func diagnosticForLeaseAdmissionFailure(failure leaseAdmissionFailure) (leaseAdm
 	case leaseFailureUnknownFootprint:
 		return leaseAdmissionDiagnostic{
 			recovery: leaseRecoveryUseFileTools,
-			remedy:   "Use structured file tools with explicit paths. Native shell commands have no blanket fak-run exemption: use an actually registered typed operation; generic opaque effects remain denied.",
+			remedy:   "Use structured file tools with explicit paths. Native shell commands have no blanket fak-run exemption: use an actually registered typed operation; generic opaque effects remain denied. An identical mutating shell call cannot prove its write footprint and will be refused again; move the step to structured file tools or a registered typed operation instead of re-proposing it.",
 		}, true
 	case leaseFailureOutsideWorkspace:
 		return leaseAdmissionDiagnostic{
