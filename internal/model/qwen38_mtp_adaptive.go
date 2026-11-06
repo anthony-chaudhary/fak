@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 )
@@ -42,6 +43,18 @@ func DefaultQwen38AdaptiveConfig() Qwen38AdaptiveConfig {
 
 // Validate checks whether the config satisfies all operational invariants.
 func (cfg Qwen38AdaptiveConfig) Validate() error {
+	for _, field := range []struct {
+		name  string
+		value float64
+	}{
+		{"alpha_ema", cfg.AlphaEMA}, {"speedup_threshold_high", cfg.SpeedupThresholdHigh},
+		{"speedup_threshold_low", cfg.SpeedupThresholdLow}, {"target_only_threshold", cfg.TargetOnlyThreshold},
+		{"min_acceptance_rate", cfg.MinAcceptanceRate},
+	} {
+		if math.IsNaN(field.value) || math.IsInf(field.value, 0) {
+			return fmt.Errorf("model: %s must be finite", field.name)
+		}
+	}
 	if cfg.MaxDepth < 1 {
 		return errors.New("model: max_depth must be at least 1")
 	}
@@ -68,10 +81,15 @@ func (cfg Qwen38AdaptiveConfig) Validate() error {
 		return fmt.Errorf("model: speedup_threshold_high %g must exceed speedup_threshold_low %g",
 			cfg.SpeedupThresholdHigh, cfg.SpeedupThresholdLow)
 	}
+	if cfg.MinAcceptanceRate < 0 || cfg.MinAcceptanceRate > 1 {
+		return errors.New("model: min_acceptance_rate must be in [0, 1]")
+	}
 	return nil
 }
 
-// Qwen38AdaptiveStepObservation records the measured performance of one decode step.
+// Qwen38AdaptiveStepObservation records feedback for one decode step. Positive
+// Speedup overrides timing; absent timing uses an analytical estimate, not a
+// measured performance witness.
 type Qwen38AdaptiveStepObservation struct {
 	ProposedTokens int           `json:"proposed_tokens"`
 	AcceptedTokens int           `json:"accepted_tokens"`
@@ -275,8 +293,17 @@ func (g *Qwen38MTPAdaptiveDepthGovernor) ObserveStep(obs Qwen38AdaptiveStepObser
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	g.stepCount++
-	depthBefore := g.currentDepth
+	// Refuse before changing counters, hysteresis, probe progress or the attached
+	// cost rule. A malformed observation must not poison subsequent valid work.
+	if obs.ProposedTokens < 0 || obs.AcceptedTokens < 0 || obs.AcceptedTokens > obs.ProposedTokens {
+		return g.currentDepth, Qwen38AdaptiveTraceRecord{}, errors.New("model: invalid adaptive token counts")
+	}
+	if obs.ProposedTokens == int(^uint(0)>>1) {
+		return g.currentDepth, Qwen38AdaptiveTraceRecord{}, errors.New("model: adaptive verification row count overflows")
+	}
+	if obs.StepLatency < 0 || obs.TargetLatency < 0 || obs.Speedup < 0 || math.IsNaN(obs.Speedup) || math.IsInf(obs.Speedup, 0) {
+		return g.currentDepth, Qwen38AdaptiveTraceRecord{}, errors.New("model: invalid adaptive timing or speedup")
+	}
 
 	// 1. Calculate step metrics
 	speedup := obs.ComputeSpeedup()
@@ -284,7 +311,12 @@ func (g *Qwen38MTPAdaptiveDepthGovernor) ObserveStep(obs Qwen38AdaptiveStepObser
 	if obs.ProposedTokens > 0 {
 		acceptanceRate = float64(obs.AcceptedTokens) / float64(obs.ProposedTokens)
 	}
+	if speedup <= 0 || math.IsNaN(speedup) || math.IsInf(speedup, 0) || math.IsInf(g.sumSpeedup+speedup, 0) || math.IsInf(g.sumAcceptanceRate+acceptanceRate, 0) {
+		return g.currentDepth, Qwen38AdaptiveTraceRecord{}, errors.New("model: adaptive feedback exceeds finite accounting")
+	}
 
+	g.stepCount++
+	depthBefore := g.currentDepth
 	g.sumSpeedup += speedup
 	g.sumAcceptanceRate += acceptanceRate
 
@@ -472,7 +504,9 @@ func (g *Qwen38MTPAdaptiveDepthGovernor) Trace() []Qwen38AdaptiveTraceRecord {
 	return copied
 }
 
-// Receipt generates a verified receipt summarizing governor decisions and performance.
+// Receipt summarizes governor decisions and feedback. MeanSpeedup is a per-step
+// arithmetic mean that may include analytical estimates or explicit overrides;
+// it is not an independently verified end-to-end performance improvement.
 func (g *Qwen38MTPAdaptiveDepthGovernor) Receipt() Qwen38AdaptiveDepthReceipt {
 	g.mu.Lock()
 	defer g.mu.Unlock()
