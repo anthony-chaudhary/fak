@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -106,7 +107,11 @@ func TestExecCommandReadOnlyAdmission(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			v := a.Adjudicate(context.Background(), inlineCall("functions.exec_command", string(encoded)))
+			call := inlineCall("functions.exec_command", string(encoded))
+			if strings.Contains(tc.name, "unhinted") {
+				call.Meta["readOnlyHint"] = "false"
+			}
+			v := a.Adjudicate(context.Background(), call)
 			if v.Kind != tc.kind {
 				t.Fatalf("verdict = %v/%s by %q, want %v", v.Kind, abi.ReasonName(v.Reason), v.By, tc.kind)
 			}
