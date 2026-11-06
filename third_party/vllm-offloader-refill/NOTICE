@@ -1,4 +1,4 @@
-FAK expert-ring compatible-slot refill (model consumer)
+FAK expert-ring compatible-slot refill (model consumer and CUDA provider)
 
 Conceptual adaptation from vLLM:
   Copyright contributors to the vLLM project
@@ -17,7 +17,13 @@ selects one equal-size victim, settles prior transfers, retires the old
 logical identity before overwrite, and retains failed or uncertain ownership.
 It requires an explicitly enabled provider and a live execution domain.
 
+The CUDA provider connects that consumer to checked synchronous same-allocation
+refill, with bounded pinned-source staging and a fresh backend handle. It retires
+the old handle before overwrite and retains failed or uncertain native ownership.
+The first arm is at most64MiB, byte-verbatim F32, Q2_K/Q3_K/Q4_K/Q5_K/Q6_K,
+IQ4_NL or IQ4_XS only, with profiling, graphs and capture excluded.
+
 No upstream Python implementation, modulo layer scheduler, or graph/capture
-protocol is copied here. This packet supplies the model consumer and software
-test controls, not the CUDA refill provider or a new enabled runtime default.
-CUDA provider integration and physical/performance qualification are separate.
+protocol is copied here. FAK_CUDA_EXPERT_RING_REFILL=1 is required; ordinary
+defaults are unchanged. Source/host controls are not CUDA build/link, physical
+completion, model quality or performance qualification.

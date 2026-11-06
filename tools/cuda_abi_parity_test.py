@@ -355,6 +355,51 @@ class TestCollectIncludes(unittest.TestCase):
         self.assertEqual(payload["verdict"], "AUDIT_ERROR", payload)
         self.assertIn("escapes repository", payload["reason"])
 
+    # fak-test:runtime fast est=100ms lane=default
+    def test_offload_refill_binding_and_real_omissions(self):
+        binding = "internal/compute/cuda_offload_refill.go"
+        source = "internal/compute/cuda/async_upload.cuh"
+        self.assertIn(binding, m.BINDINGS)
+        signatures = {
+            "fcuda_offload_refill_probe": "int fcuda_offload_refill_probe(void *d, const void *h, size_t n)",
+            "fcuda_offload_refill_copy": "int fcuda_offload_refill_copy(void *d, const void *h, size_t n)",
+            "fcuda_offload_refill_stop": "void fcuda_offload_refill_stop(void *d)",
+        }
+        self.assertFalse(signatures.keys() & m.UNDECLARED_DEF_OK.keys())
+
+        def seed(omit_decl=None, omit_def=None):
+            declarations = "\n".join(
+                "extern " + signature + ";" for name, signature in signatures.items()
+                if name != omit_decl)
+            definitions = "\n".join(
+                'extern "C" ' + signature +
+                (" {}" if name.endswith("_stop") else " { return 0; }")
+                for name, signature in signatures.items() if name != omit_def)
+            self.write(binding, "/*\n#include <stddef.h>\n" + declarations +
+                       '\n*/\nimport "C"\nC.fcuda_offload_refill_probe(0, 0, 16)\n'
+                       "C.fcuda_offload_refill_copy(0, 0, 16)\n"
+                       "C.fcuda_offload_refill_stop(0)\n")
+            self.write(m.KERNELS[0], 'extern "C" int fcuda_test(void) { return 0; }\n'
+                       '#include "cuda/async_upload.cuh"\n')
+            self.write(source, definitions + "\n")
+            return m.collect(self.root)
+
+        payload = seed()
+        self.assertEqual(payload["verdict"], "OK", payload)
+        for key in ("n_declared", "n_defined", "n_called"):
+            self.assertEqual(payload["corpus"][key], 4, payload)
+        self.assertEqual(payload["corpus"]["preamble_decls"], sorted(signatures))
+        for name in signatures:
+            with self.subTest(symbol=name, missing="prototype"):
+                payload = seed(omit_decl=name)
+                self.assertEqual(payload["verdict"], "ACTION", payload)
+                self.assertIn(name, payload["corpus"]["undeclared_calls"])
+                self.assertIn(name, payload["corpus"]["undeclared_defs"])
+            with self.subTest(symbol=name, missing="definition"):
+                payload = seed(omit_def=name)
+                self.assertEqual(payload["verdict"], "ACTION", payload)
+                self.assertIn(name, payload["corpus"]["undefined"])
+
     def test_preamble_prototype_flows_through_collect(self):
         self.write(m.BINDINGS[0], (
             '/*\n#include "cuda_backend.h"\n'
