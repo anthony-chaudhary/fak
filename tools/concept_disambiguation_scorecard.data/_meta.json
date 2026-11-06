@@ -11921,6 +11921,11 @@
           "category": "incidental",
           "reason": "Private CUDA launch-geometry and device-support query for the QK adapter; it grants no policy capability or authorization.",
           "token": "fak_qwen35_vllm_qk_capability"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed error sentinel for refusal by the positioned ResolveQwen35GDNPackedInputPolicy constructor and its representation checks; it is not a separate policy, capability declaration or authorization decision.",
+          "token": "ErrQwen35GDNPackedPolicy"
         }
       ],
       "exclude": [
@@ -11957,6 +11962,7 @@
         "DispositionMultiCapability",
         "EmptyUsageGuard",
         "ErrNotAdjudicated",
+        "ErrQwen35GDNPackedPolicy",
         "EvictionPolicyFIFO",
         "EvictionPolicyLRU",
         "EvidenceAdjudication",

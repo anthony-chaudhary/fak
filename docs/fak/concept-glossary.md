@@ -2203,3 +2203,31 @@ PlanDensePrefixCapture validates a dense-FP32 cache and optional bit-identical r
 NewSharedTokenPoolWithCapacity constructs a device-neutral logical token and byte admission ledger from positive, finite, representable capacity and geometry, without Halo defaults or environment values.
 
 **Distinct from:** Unlike PagedKVPool, this constructor admits logical token reservations only; it allocates no physical KV blocks and supplies no device-memory availability evidence. Existing Halo constructors retain their permissive defaults.
+
+
+### Qwen35GDNPackedInputPlan
+
+Checked representation metadata for canonical Qwen GDN QKV or Z weights: admitted Q4_K/Q6_K dtype, exact matrix rows and columns, block size and raw byte extent for shared use by loading and estimation; consumer wiring is separate.
+
+**Distinct from:** Unlike V41Q2KTokenPanelPlan, this describes a canonical QKV/Z weight representation rather than token-panel dispatch geometry. Unlike cudaSequenceSplitScratchPlan, it describes raw weight bytes rather than temporary compensated-split capacities. It does not establish tensor role, row normalization, device residency, current health, graph legality or permission to execute.
+
+
+### Qwen35GDNPackedInputCapability
+
+Versioned backend source declaration that the existing whole-GDN decode and sequence implementations understand canonical row-major block-256 Q4_K or Q6_K QKV/Z weights with F32 mutable state.
+
+**Distinct from:** Unlike Qwen35GDNPackedInputPlan, this declares an implementation contract rather than geometry or raw bytes. The declaration alone does not enable loading: explicit request controls, exact operation identities and actual independent dtype probes must resolve a per-load policy. It promises no graph capture, device health or measured hardware result.
+
+
+### Qwen35GDNPackedInputPolicy
+
+Immutable per-load Q4_K/Q6_K admission decision resolved from explicit enable and force-off controls, the versioned whole-GDN implementation contract and actual backend residency/upload/dtype probes. Its zero value admits no packed GDN inputs.
+
+**Distinct from:** Unlike Qwen35GDNPackedInputCapability, this is the resolved decision rather than a backend declaration. Unlike Qwen35GDNPackedInputPlan, it selects admissible representations rather than calculating one tensor extent. It cannot establish current device health, memory capacity, canonical row identity, whole-operation validity or graph legality; capture remains refused.
+
+
+### ResolveQwen35GDNPackedInputPolicy
+
+Resolver that honors default-off and both force-off controls, checks actual whole-GDN decode and sequence method/path contracts, validates the versioned declaration and probes each admitted resident dtype before returning a copied per-load policy or typed refusal.
+
+**Distinct from:** Unlike Qwen35GDNPackedInputPolicy, this is the validating constructor rather than the immutable result. Unlike Qwen35GDNPackedInputCapability, it combines explicit request and actual probes instead of accepting a declaration alone. It reads no environment, makes no tensor upload, device allocation or model-operation call and never admits packed graph capture.
