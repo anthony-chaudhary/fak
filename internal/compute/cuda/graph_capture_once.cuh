@@ -77,7 +77,7 @@ extern "C" int fak_graph_once_begin(void *owner, int pos) {
   return 0;
 }
 
-// All three wrappers are capture-only, and consume the SAME owner scalar pair.
+// These wrappers are capture-only, and consume the SAME owner scalar pair.
 // Invalid geometry poisons capture; end must abort before release, never launch a partial graph.
 static int graph_once_capture_admit(fak_graph_once *s) {
   return s && s == g_graph_once_capture && g_capture_open && !s->terminal;
@@ -92,6 +92,72 @@ extern "C" int fak_graph_once_rope(void *owner, float *x, int heads, int hd, dou
   if (cudaGetLastError() != cudaSuccess) { s->terminal = true; return 3; }
   return 0;
 }
+// Native prerequisite only: no Go/HAL caller or hybrid admission is added here.
+// Caller retains all four buffers and the graph owner through checked retirement.
+// These span checks establish live device allocation extents, not dependency
+// generations or the model's public execution scope; those remain caller gates.
+static bool graph_once_partial_rope_span(const void *ptr, size_t bytes,
+                                         uintptr_t *lo, uintptr_t *hi) {
+  uintptr_t begin = (uintptr_t)ptr;
+  if (!ptr || !bytes || begin % alignof(float) || bytes > UINTPTR_MAX - begin)
+    return false;
+  *lo = begin;
+  *hi = begin + bytes;
+  return true;
+}
+static bool graph_once_partial_rope_inputs(fak_graph_once *s,
+    const float *q, const float *k, float *qout, float *kout,
+    int qheads, int kheads, int hd, int rotary, double theta) {
+  if (!s || !s->position || qheads <= 0 || kheads <= 0 || hd <= 0 ||
+      rotary <= 0 || rotary > hd || (rotary & 1) || qheads % kheads ||
+      !(theta > 0.0) || !isfinite(theta) ||
+      qheads > INT_MAX / hd || kheads > INT_MAX / hd ||
+      (size_t)qheads > SIZE_MAX / sizeof(float) / (size_t)hd ||
+      (size_t)kheads > SIZE_MAX / sizeof(float) / (size_t)hd) return false;
+  size_t qbytes = (size_t)qheads * hd * sizeof(float);
+  size_t kbytes = (size_t)kheads * hd * sizeof(float);
+  const void *ptrs[4] = {q, k, qout, kout};
+  size_t bytes[4] = {qbytes, kbytes, qbytes, kbytes};
+  uintptr_t lo[4], hi[4], position_lo, position_hi;
+  if (!graph_once_partial_rope_span(s->position, 2 * sizeof(int),
+                                    &position_lo, &position_hi)) return false;
+  for (int i = 0; i < 4; ++i) {
+    if (!graph_once_partial_rope_span(ptrs[i], bytes[i], &lo[i], &hi[i])) return false;
+    auto found = g_live.find((void *)ptrs[i]);
+    if (found == g_live.end() || found->second < bytes[i]) return false;
+  }
+  // Q and K may share read-only storage. Neither output may overlap either
+  // input, the other output, or the owner's retained position/length scalars.
+  for (int i = 2; i < 4; ++i) {
+    if (lo[i] < position_hi && position_lo < hi[i]) return false;
+    for (int j = 0; j < 4; ++j)
+      if (i != j && lo[i] < hi[j] && lo[j] < hi[i]) return false;
+  }
+  return true;
+}
+extern "C" int fak_graph_once_partial_rope(void *owner,
+    const float *q, const float *k, float *qout, float *kout,
+    int qheads, int kheads, int hd, int rotary, double theta) {
+  fak_graph_once *s = (fak_graph_once *)owner;
+  if (!graph_once_capture_admit(s)) return 1;
+  if (v41_candidates_stream_uncertain() ||
+      !graph_once_partial_rope_inputs(s, q, k, qout, kout, qheads, kheads,
+                                     hd, rotary, theta)) {
+    s->terminal = true; return 1;
+  }
+  // Do not erase or attribute a preceding CUDA error to this operation.
+  if (cudaPeekAtLastError() != cudaSuccess) { s->terminal = true; return 3; }
+  unsigned qn = (unsigned)qheads * (unsigned)hd;
+  unsigned kn = (unsigned)kheads * (unsigned)hd;
+  unsigned qblocks = qn / 256 + (qn % 256 != 0);
+  unsigned kblocks = kn / 256 + (kn % 256 != 0);
+  FCUDA_TS("k_partial_rope_copy", qblocks, k_partial_rope_copy<true><<<qblocks,256,0,g_stream>>>(qout,q,0,qheads,hd,rotary,theta,s->position));
+  if (cudaGetLastError() != cudaSuccess) { s->terminal = true; return 3; }
+  FCUDA_TS("k_partial_rope_copy", kblocks, k_partial_rope_copy<true><<<kblocks,256,0,g_stream>>>(kout,k,0,kheads,hd,rotary,theta,s->position));
+  if (cudaGetLastError() != cudaSuccess) { s->terminal = true; return 3; }
+  return 0; // Recorded only. No completed-token counter or host state advances.
+}
+
 extern "C" int fak_graph_once_kv_write(void *owner, float *dst, const float *src, int width) {
   fak_graph_once *s = (fak_graph_once *)owner;
   if (!graph_once_capture_admit(s)) return 1;

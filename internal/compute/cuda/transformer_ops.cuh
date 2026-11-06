@@ -136,20 +136,22 @@ extern "C" int fcuda_rope_panel_f32(const float *dX, float *dY, int tokens, int 
 }
 
 
+template <bool device_position = false>
 __global__ void k_partial_rope_copy(float *out, const float *in, int pos,
                                     int nHeads, int headDim, int rotaryDim,
-                                    double theta) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  int n = nHeads * headDim;
+                                    double theta, const int *position = nullptr) {
+  if (device_position) pos = position[0];
+  size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+  size_t n = (size_t)nHeads * headDim;
   if (i >= n) return;
-  int d = i % headDim;
-  int h = i / headDim;
+  int d = (int)(i % headDim);
+  size_t base = (i / headDim) * headDim;
   if (d >= rotaryDim) { out[i] = in[i]; return; }
   int half = rotaryDim / 2;
   int j = d < half ? d : d - half;
   double freq = pow(theta, -(2.0 * j) / rotaryDim);
   float cs = cos((double)pos * freq), sn = sin((double)pos * freq);
-  float a = in[h * headDim + j], b = in[h * headDim + j + half];
+  float a = in[base + j], b = in[base + j + half];
   out[i] = d < half ? a * cs - b * sn : b * cs + a * sn;
 }
 extern "C" void fcuda_partial_rope_qk_f32(const float *dQ, const float *dK,
@@ -157,9 +159,9 @@ extern "C" void fcuda_partial_rope_qk_f32(const float *dQ, const float *dK,
                                              int nQHeads, int nKHeads, int headDim,
                                              int rotaryDim, double theta) {
   int qn = nQHeads * headDim, kn = nKHeads * headDim;
-  FCUDA_TS("k_partial_rope_copy", (qn+255)/256, k_partial_rope_copy<<<(qn+255)/256,256,0,g_stream>>>(dQOut,dQ,pos,nQHeads,headDim,rotaryDim,theta));
+  FCUDA_TS("k_partial_rope_copy", (qn+255)/256, k_partial_rope_copy<false><<<(qn+255)/256,256,0,g_stream>>>(dQOut,dQ,pos,nQHeads,headDim,rotaryDim,theta));
   CK(cudaGetLastError());
-  FCUDA_TS("k_partial_rope_copy", (kn+255)/256, k_partial_rope_copy<<<(kn+255)/256,256,0,g_stream>>>(dKOut,dK,pos,nKHeads,headDim,rotaryDim,theta));
+  FCUDA_TS("k_partial_rope_copy", (kn+255)/256, k_partial_rope_copy<false><<<(kn+255)/256,256,0,g_stream>>>(dKOut,dK,pos,nKHeads,headDim,rotaryDim,theta));
   CK(cudaGetLastError());
 }
 __global__ void k_sigmoid_mul(float *x, const float *gate, int n) {

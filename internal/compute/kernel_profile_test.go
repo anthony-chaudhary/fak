@@ -1046,15 +1046,20 @@ func TestKernelOpClassGraphOnceNames(t *testing.T) {
 		"k_graph_once_position": KernelOpOther,
 		"k_graph_once_copyrow":  KernelOpOther,
 		"k_rope":                KernelOpRope,
+		"k_partial_rope_copy":   KernelOpRope,
 		"k_flash_attention":     KernelOpAttention,
 		"d2d_copy":              KernelOpCopy,
 	}
 	if len(rows) != len(want) {
-		t.Fatalf("graph timestamp rows = %v, want exactly five named operations", rows)
+		t.Fatalf("graph timestamp rows = %v, want exactly six named operations", rows)
 	}
 	for name, class := range want {
-		if rows[name] != 1 {
-			t.Errorf("graph row %s occurs %d times, want one", name, rows[name])
+		wantCount := 1
+		if name == "k_partial_rope_copy" {
+			wantCount = 2 // separate Q and K launches share the same operation class
+		}
+		if rows[name] != wantCount {
+			t.Errorf("graph row %s occurs %d times, want %d", name, rows[name], wantCount)
 		}
 		if got := KernelOpClass(name); got != class {
 			t.Errorf("KernelOpClass(%q) = %s, want %s", name, got, class)
