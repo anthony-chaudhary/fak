@@ -363,6 +363,8 @@ static int q8_dequant_sgemm(const void *codes, const float *scales,
   return gemm_status != 0 ? gemm_status : release_status;
 }
 
+#include "gdn_shared_split.cuh"
+
 __global__ void k_qwen35_gdn_fused_in_proj(
     const float *x,
     const void *wQKV, const float *sQKV, int qQKV,
@@ -1502,10 +1504,20 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
   if (status != 0) return qwen35_gdn_drain_after_error(status);
   const char *projectionMode = getenv("FAK_CUDA_GDN_INPUT_PROJECTION");
   if (tokens >= 128 && inQKVQ8 == 1 && inZQ8 == 1 && inBQ8 == 1 && inAQ8 == 1) {
-    int dq = qwen35_gdn_q8_prefill(dInQKV, dInQKVScale, dX, dMixed, convDim, hidden, tokens, 32);
-    if (dq == 0) dq = qwen35_gdn_q8_prefill(dInZ, dInZScale, dX, dZ, nV * vHd, hidden, tokens, 32);
-    if (dq == 0) dq = qwen35_gdn_q8_prefill(dInB, dInBScale, dX, dB, nV, hidden, tokens, 32);
-    if (dq == 0) dq = qwen35_gdn_q8_prefill(dInA, dInAScale, dX, dA, nV, hidden, tokens, 32);
+    int dq = 0;
+    if (fak_gdn_shared_split::selected(projectionMode,
+        getenv("FAK_CUDA_Q8_SEQUENCE_PREFILL"), g_capture_open, tokens)) {
+      const void *codes[4] = {dInQKV, dInZ, dInB, dInA};
+      const float *scales[4] = {dInQKVScale, dInZScale, dInBScale, dInAScale};
+      float *outputs[4] = {dMixed, dZ, dB, dA};
+      const int rows[4] = {convDim, valueDim, nV, nV};
+      dq = qwen35_gdn_q8_shared_split(codes, scales, dX, outputs, rows, hidden, tokens);
+    } else {
+      dq = qwen35_gdn_q8_prefill(dInQKV, dInQKVScale, dX, dMixed, convDim, hidden, tokens, 32);
+      if (dq == 0) dq = qwen35_gdn_q8_prefill(dInZ, dInZScale, dX, dZ, nV * vHd, hidden, tokens, 32);
+      if (dq == 0) dq = qwen35_gdn_q8_prefill(dInB, dInBScale, dX, dB, nV, hidden, tokens, 32);
+      if (dq == 0) dq = qwen35_gdn_q8_prefill(dInA, dInAScale, dX, dA, nV, hidden, tokens, 32);
+    }
     if (dq != 0) return qwen35_gdn_drain_after_error(dq);
   } else if (tokens == 4 && hidden == 5120 && nK == 16 && nV == 48 &&
              kHd == 128 && vHd == 128 && convKernel == 4 &&
