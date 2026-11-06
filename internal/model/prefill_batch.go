@@ -148,6 +148,14 @@ func (s *Session) prefillBatched(ids []int) []float32 {
 			X[i] += O[i]
 		}
 
+		if cfg.IsMoE() {
+			// f32PrefillBatchedMoEOK admitted this arch: each row routes to its own top-k
+			// experts, so the FFN runs per row through blockStep's exact PreNorm sublayer
+			// (mlpNorms + normCfg, ffnForLayer(l).apply on f32Kernel, residual add).
+			m.prefillRowFFN(l, X, P, H, eps, cfg)
+			continue
+		}
+
 		// MLP (SwiGLU), batched + residual.
 		Xn2 := make([]float32, P*H)
 		parFor(P, dispatchWorkers, func(lo, hi int) {
@@ -172,6 +180,20 @@ func (s *Session) prefillBatched(ids []int) []float32 {
 	// its optional bias, and eps are bound together, so this lane cannot drift from the
 	// per-token path again the way the hard-coded nil bias here did.
 	return m.finalNorm(last)
+}
+
+// prefillRowFFN applies layer l's FFN sublayer to each of the P rows of X in place,
+// in token order, through the same composeSublayer(PreNorm) step blockStep runs, so every
+// row's residual is bit-identical to the per-token loop. Rows stay serial: f32Kernel's
+// parMatRows already parallelizes each projection across cores.
+func (m *Model) prefillRowFFN(l int, X []float32, P, H int, eps float32, cfg Config) {
+	norms := m.mlpNorms(l)
+	layerFFN := m.ffnForLayer(l)
+	mat := f32Kernel{m}
+	body := func(xn []float32) []float32 { return layerFFN.apply(m, l, mat.prep(xn), mat) }
+	for t := 0; t < P; t++ {
+		composeSublayer(PreNorm, X[t*H:(t+1)*H], norms, eps, cfg, body)
+	}
 }
 
 // The caller must provide dst disjoint from x and w. Both production callers
