@@ -109,6 +109,7 @@ var v41OpProbes = []v41OpProbe{
 	{"V41LogitScaleBackend", v41Avail(func(b V41LogitScaleBackend) bool { return b.V41LogitScaleAvailable() })},
 	{"V41MHCBackend", v41Avail(func(b V41MHCBackend) bool { return b.SupportsV41MHC() })},
 	{"V41MHCPrenormBackend", v41Avail(func(b V41MHCPrenormBackend) bool { return b.V41MHCPrenormAvailable() })},
+	{"V41PrefillExpertPanelBackend", v41Present[V41PrefillExpertPanelBackend](V41ProbeShapeGated)},
 	{"V41Q2KEmbeddingGatherBackend", v41Avail(func(b V41Q2KEmbeddingGatherBackend) bool { return b.V41Q2KEmbeddingGatherAvailable() })},
 	{"V41Q2KTokenPairBackend", v41Present[V41Q2KTokenPairBackend](V41ProbeShapeGated)},
 	{"V41Q2KTokenPanelBackend", v41Present[V41Q2KTokenPanelBackend](V41ProbeShapeGated)},

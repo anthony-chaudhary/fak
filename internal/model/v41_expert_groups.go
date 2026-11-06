@@ -381,6 +381,60 @@ func (m *Model) v41ContractRoutedGroupedOwned(l int, xnByToken [][]float32, perT
 				continue
 			}
 		}
+		// DRC-K17: offer the group's rows in bounded panels to the session's
+		// optional batched prefill-expert panel seam BEFORE the host cohort and
+		// the per-row stream. A handled chunk stores its weighted rows exactly
+		// as the cohort and id-panel paths do, so the replay below is unchanged.
+		// A decline before any chunk was handled keeps the whole group on the
+		// historical stream byte-for-byte; a decline after a handled chunk is a
+		// protocol violation and surfaces, matching the id-panel discipline.
+		if full && st != nil && st.callbackOwner != nil && st.expertPanel != nil {
+			panelHandled := false
+			for first := 0; ; {
+				last, done := v41NextPrefillExpertPanelChunk(g.Rows, first, compute.V41PrefillExpertPanelMaxRows)
+				if done {
+					break
+				}
+				inputs := make([][]float32, last-first)
+				weights := make([]float32, last-first)
+				for p, row := range g.Rows[first:last] {
+					inputs[p] = xnByToken[row.Token]
+					weights[p] = perTokenPicks[row.Token][row.Slot].weight
+				}
+				rows, outcome, cause := st.expertPanel(l, stem, g.Rows[first:last], inputs, weights)
+				switch outcome {
+				case v41PanelHandled:
+					if cause != nil || len(rows) != last-first {
+						return v41ExpertOperationErr(l, "down", errV41ExpertResult)
+					}
+					panelHandled = true
+					for p, row := range g.Rows[first:last] {
+						if len(rows[p]) != H {
+							return v41ExpertOperationErr(l, "down", errV41ExpertResult)
+						}
+						unweighted[row.Token][row.Slot] = rows[p]
+						m.v41NoteExpertContraction()
+					}
+					first = last
+				case v41PanelError:
+					if cause == nil {
+						cause = v41ExpertOperationErr(l, "gate/up", errV41ExpertResult)
+					}
+					return cause
+				case v41PanelDeclined:
+					if panelHandled {
+						return v41ExpertOperationErr(l, "gate/up", errV41ExpertResult)
+					}
+					// No panel was handled: the whole group keeps the per-row stream.
+					first = len(g.Rows)
+				default:
+					return v41ExpertOperationErr(l, "gate/up", errV41ExpertResult)
+				}
+			}
+			if panelHandled {
+				continue
+			}
+		}
 		if full {
 			handled, cause := m.v41ContractHostExpertGroup(l, stem, g.Rows, xnByToken, perTokenPicks, unweighted, cfg, st, hostTriple, hostDown, scratch)
 			if cause != nil {

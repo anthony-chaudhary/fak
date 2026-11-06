@@ -26,7 +26,7 @@ func (m *Model) v41ContractHostExpertGroup(layer int, stem string, rows []v41Exp
 	if !ok {
 		return false, nil
 	}
-	if st != nil && (st.routedExpert != nil || st.expertGateUp != nil || st.expertDown != nil || st.gatherOps.bf16PublishFunc() != nil) {
+	if st != nil && (st.routedExpert != nil || st.expertGateUp != nil || st.expertDown != nil || st.expertPanel != nil || st.gatherOps.bf16PublishFunc() != nil) {
 		return false, nil
 	}
 	// Identity publication is essential: the cohort reads the immutable
