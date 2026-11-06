@@ -198,8 +198,8 @@ func TestCUDACompensatedScratchFailureOwnership(t *testing.T) {
 		}
 	}
 	if loan {
-		sequence := read("cuda_qwen35_sequence.go")
-		allRows := between(sequence, "\tif req.NeedAllLogits {", "\n\tc.releaseTransientBuffers([]*cudaBuf{xBuf, finalPanelBuf})")
+		sequence := function(read("cuda_qwen35_sequence.go"), "func (c *cudaBackend) Qwen35SequencePrefill(")
+		allRows := function(sequence, "\tif req.NeedAllLogits {")
 		end := strings.Index(allRows, "if splitErr := finishSplit(); splitErr != nil {")
 		head := strings.Index(allRows, "logitsRows, logitsRowsBuf, err = c.qwen35SequenceMatMulLocked(req.Output, finalPanel, tokens, \"output-all-head\")")
 		if end < 0 || head <= end {
@@ -217,11 +217,22 @@ func TestCUDACompensatedScratchFailureOwnership(t *testing.T) {
 				t.Fatalf("early layer-loan retirement failure handler missing %q", want)
 			}
 		}
+		// The raw-hidden panel is the final residual owner. Only the
+		// unrequested branch may release it before the final output fence.
+		release := between(sequence, "\tif rawHiddenBuf == nil {", "\n\tvar logits Tensor")
+		unrequested := function(release, "if rawHiddenBuf == nil {")
+		requested := between(release, "} else {", "\n\t}")
+		if strings.Count(release, "c.releaseTransientBuffers(") != 2 ||
+			!strings.Contains(unrequested, "c.releaseTransientBuffers([]*cudaBuf{xBuf, finalPanelBuf})") ||
+			!strings.Contains(requested, "c.releaseTransientBuffers([]*cudaBuf{finalPanelBuf})") ||
+			strings.Contains(requested, "xBuf") || strings.Contains(requested, "rawHiddenBuf") {
+			t.Fatal("early release must retain requested raw-hidden rows and preserve unrequested owner order")
+		}
 		for _, want := range []string{
 			"if splitToken != 0 {\n\t\tfinalFenceErr = finishSplit()\n\t} else {\n\t\tfinalFenceErr = c.qwen35SequenceSyncLocked()\n\t}",
 			"atomic.StoreUint32(&logitsRowsBuf.invalid, 1)",
 			"LogitsRows: logitsRows",
-			"c.qwen35SequenceReleaseSinceLocked(transientStart, lastBuf, logitsBuf, logitsRowsBuf)",
+			"c.qwen35SequenceReleaseSinceLocked(transientStart, lastBuf, logitsBuf, logitsRowsBuf, rawHiddenBuf)",
 		} {
 			if !strings.Contains(sequence, want) {
 				t.Fatalf("all-row output fence/publication contract missing %q", want)
