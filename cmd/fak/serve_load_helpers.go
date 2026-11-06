@@ -563,6 +563,30 @@ func loadServeInKernelModelPlaced(modelPath string, backend compute.Backend, cpu
 	return m, q4k, prof, ph
 }
 
+// serveDirLoadArm names the loader a safetensors checkpoint directory routes to.
+type serveDirLoadArm string
+
+const (
+	serveDirArmSafetensors   serveDirLoadArm = "safetensors"
+	serveDirArmModelOptNVFP4 serveDirLoadArm = "modelopt-nvfp4"
+)
+
+// serveSelectDirLoadArm routes a directory carrying a ModelOpt NVFP4 declaration
+// (config.json quantization_config or hf_quant_config.json) to the NVFP4 loader;
+// every other directory keeps the safetensors Q8/FP8 arm. A ModelOpt declaration
+// fak does not admit (non-NVFP4 algo, bad group size) refuses here with
+// fakmodel.ErrModelOptNVFP4Config instead of falling through to the FP8 refusal.
+func serveSelectDirLoadArm(dir string) (serveDirLoadArm, error) {
+	_, ok, err := fakmodel.ReadModelOptNVFP4Config(dir)
+	if err != nil {
+		return "", err
+	}
+	if ok {
+		return serveDirArmModelOptNVFP4, nil
+	}
+	return serveDirArmSafetensors, nil
+}
+
 // serveQuantBackendName maps the resolved serve backend onto the post-load quant-capability
 // census axis (#12983): a nil backend is the Apple-Silicon Metal-native load arm, any registered
 // device backend serves its k-quant bulk through the bounded host routes.
@@ -599,24 +623,38 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 	}
 	tLoad := time.Now()
 	if info, err := os.Stat(modelPath); err == nil && info.IsDir() {
-		// Layout guard (lg-preflight-wire): the header-only manifest preflight refuses a
-		// broken checkpoint before any tensor byte is read, fail-closed.
-		if err := serveAdmitSafetensorsPreflight(modelPath); err != nil {
-			fmt.Fprintln(os.Stderr, "fak serve: safetensors manifest preflight:", err)
+		arm, err := serveSelectDirLoadArm(modelPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "fak serve: directory load arm:", err)
 			return nil, false, nil, gateway.StartupPhase{}, nil, err
 		}
-		m, err := fakmodel.LoadSafetensorsQuantConfigDir(modelPath)
+		var m *fakmodel.Model
+		switch arm {
+		case serveDirArmModelOptNVFP4:
+			// The NVFP4 loader validates its own sharded layout fail-closed and refuses a
+			// backend without MatMulNVFP4 at load (ErrNVFP4GEMMUnsupported); the generic
+			// safetensors preflight does not model packed FP4 + FP8 block-scale tensors.
+			m, err = fakmodel.LoadModelOptNVFP4Dir(modelPath, backend)
+		default:
+			// Layout guard (lg-preflight-wire): the header-only manifest preflight refuses a
+			// broken checkpoint before any tensor byte is read, fail-closed.
+			if err := serveAdmitSafetensorsPreflight(modelPath); err != nil {
+				fmt.Fprintln(os.Stderr, "fak serve: safetensors manifest preflight:", err)
+				return nil, false, nil, gateway.StartupPhase{}, nil, err
+			}
+			m, err = fakmodel.LoadSafetensorsQuantConfigDir(modelPath)
+		}
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "fak serve: safetensors load:", err)
+			fmt.Fprintf(os.Stderr, "fak serve: %s load: %v\n", arm, err)
 			return nil, false, nil, gateway.StartupPhase{}, nil, err
 		}
 		loadDur := time.Since(tLoad)
 		profile := &gateway.ModelLoadProfile{
 			Source:       modelPath,
-			Mode:         "safetensors",
+			Mode:         string(arm),
 			TotalSeconds: loadDur.Seconds(),
-			Bottleneck:   "safetensors-load",
-			Phases:       []gateway.ModelLoadPhase{{Phase: "safetensors-load", Seconds: loadDur.Seconds()}},
+			Bottleneck:   string(arm) + "-load",
+			Phases:       []gateway.ModelLoadPhase{{Phase: string(arm) + "-load", Seconds: loadDur.Seconds()}},
 			Messages: []gateway.StartupMessage{serveStartupMessage("load-complete", "info",
 				fmt.Sprintf("model_type=%s layers=%d hidden=%d %s", m.Cfg.ModelType, m.Cfg.NumLayers, m.Cfg.HiddenSize, fakmodel.FormatResidentReport(m.ResidentReport())))},
 		}
