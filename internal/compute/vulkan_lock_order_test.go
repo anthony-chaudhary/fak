@@ -166,6 +166,53 @@ func requiredArgumentLocked(p interface { Required(int, ...int) }) { p.Required(
 	}
 }
 
+// Excess explicit arguments cannot shrink to fit a nonvariadic method. Keep an
+// extra receiver allowance for method expressions and retain multi-result calls.
+// fak-test:runtime fast est=1ms lane=default
+func TestVulkanMuLockOrderAuditExcessArgumentDispatch(t *testing.T) {
+	const src = `package fixture
+import "sync"
+var vulkanMu sync.Mutex
+type owner struct{}
+type unrelated struct{}
+type realDev struct{}
+func makeOwner() *owner { return &owner{} }
+func (*owner) replace(a, b, c, d, e, f int) {}
+func (*unrelated) replace(int) { vulkanMu.Lock(); defer vulkanMu.Unlock() }
+func impossibleLocked() { next := makeOwner(); next.replace(1, 2, 3, 4, 5, 6) }
+func (*realDev) Matching(int, int) { vulkanMu.Lock(); defer vulkanMu.Unlock() }
+func (*realDev) Grouped(a, b, c int) { vulkanMu.Lock(); defer vulkanMu.Unlock() }
+func (*realDev) Expression(int) { vulkanMu.Lock(); defer vulkanMu.Unlock() }
+func (*realDev) Multiple(int, int) { vulkanMu.Lock(); defer vulkanMu.Unlock() }
+func (*realDev) Variadic(...int) { vulkanMu.Lock(); defer vulkanMu.Unlock() }
+func pair() (int, int) { return 1, 2 }
+func matchingLocked(p interface { Matching(int, int) }) { p.Matching(1, 2) }
+func groupedLocked(p interface { Grouped(int, int, int) }) { p.Grouped(1, 2, 3) }
+func expressionLocked() { (*realDev).Expression(&realDev{}, 1) }
+func multipleLocked(p interface { Multiple(int, int) }) { p.Multiple(pair()) }
+func variadicLocked(p interface { Variadic(...int) }) { p.Variadic(1, 2, 3, 4, 5, 6) }
+`
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "fixture.go", src, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range newMuAudit(fset, []*ast.File{f}).reacquisitions() {
+		got = append(got, r.Caller+"->"+r.Callee)
+	}
+	want := []string{
+		"matchingLocked->realDev.Matching",
+		"groupedLocked->realDev.Grouped",
+		"expressionLocked->realDev.Expression",
+		"multipleLocked->realDev.Multiple",
+		"variadicLocked->realDev.Variadic",
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("excess-argument dispatch reacquisitions = %q; want %q", got, want)
+	}
+}
+
 type muFunc struct {
 	name, recv string
 	decl       *ast.FuncDecl
@@ -497,19 +544,28 @@ func (a *muAudit) resolve(f *muFunc, env map[string]string, call *ast.CallExpr) 
 	return nil
 }
 
-// Only reject the provably impossible zero-argument case. With arguments we
-// remain conservative, including a single call expression that may supply
-// multiple values. A variadic-only method can accept no arguments.
+// Reject only provably impossible argument counts. A single call expression may
+// supply multiple values, and an unresolved method expression may take an extra
+// explicit receiver. Variadic methods have no upper bound on explicit arguments.
 func muMayAcceptCall(target *ast.FuncDecl, call *ast.CallExpr) bool {
-	if len(call.Args) != 0 || target.Type.Params == nil {
-		return true
-	}
-	for _, field := range target.Type.Params.List {
-		if _, variadic := field.Type.(*ast.Ellipsis); !variadic {
-			return false
+	required, variadic := 0, false
+	if target.Type.Params != nil {
+		for _, field := range target.Type.Params.List {
+			if _, ok := field.Type.(*ast.Ellipsis); ok {
+				variadic = true
+				continue
+			}
+			n := len(field.Names)
+			if n == 0 {
+				n = 1
+			}
+			required += n
 		}
 	}
-	return true
+	if len(call.Args) == 0 {
+		return required == 0
+	}
+	return variadic || len(call.Args) <= required+1
 }
 
 func muHasEmbedded(fields map[string]string) bool {
