@@ -20,8 +20,15 @@ It requires an explicitly enabled provider and a live execution domain.
 The CUDA provider connects that consumer to checked synchronous same-allocation
 refill, with bounded pinned-source staging and a fresh backend handle. It retires
 the old handle before overwrite and retains failed or uncertain native ownership.
-The first arm is at most64MiB, byte-verbatim F32, Q2_K/Q3_K/Q4_K/Q5_K/Q6_K,
-IQ4_NL or IQ4_XS only, with profiling, graphs and capture excluded.
+The supported arm is at most 64 MiB, byte-verbatim F32, Q2_K/Q3_K/Q4_K/Q5_K/Q6_K,
+IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL or IQ4_XS, with profiling, graphs and capture
+excluded. Raw-IQ metadata follows FAK's existing constructors: NewRawIQ uses
+Bits=4, while the dedicated NewIQ2XXS also supports Bits=2 for the identical
+raw layout. For these three lower-bit IQ formats, explicitly opted-in,
+validated MemoryOffload uploads retain a private copy of that host descriptor
+instead of the shared allocator's nominal-bit descriptor. Immutable weights and
+opt-out uploads keep their prior behavior. Refill still requires equal source
+and destination metadata; no quantization or conversion is introduced.
 
 No upstream Python implementation, modulo layer scheduler, or graph/capture
 protocol is copied here. FAK_CUDA_EXPERT_RING_REFILL=1 is required; ordinary

@@ -50,10 +50,26 @@ func (c *cudaBackend) uploadRawKQuantClassWithOperations(t Tensor, hb HostBuffer
 		}
 	}()
 	raw := hb.I8()
+	// Refillable offload slots must retain the validated host descriptor.
+	// The shared resident allocator uses nominal IQ bits, unlike NewRawIQ.
+	// Keep that incumbent convention for opt-out and immutable weights.
+	var refillQuant *QuantSpec
+	if c.OffloadRefillEnabled() {
+		switch t.Dtype {
+		case IQ2_XXS, IQ2_XS, IQ1_M:
+			if n, ok := cudaOffloadRefillBytes(t); ok && n == len(raw) {
+				q := *t.Quant
+				refillQuant = &q
+			}
+		}
+	}
 	out, _ := c.devRawKQuantWithAllocator(t.Dtype, t.Shape, len(raw), func(nbytes int) *cudaBuf {
 		owner = allocate(nbytes)
 		return owner
 	})
+	if refillQuant != nil {
+		out.Quant = refillQuant
+	}
 	if len(raw) > 0 {
 		copyToDevice(owner.ptr, raw)
 	}
