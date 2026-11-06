@@ -82,7 +82,7 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 	q2MMQ := fs.Bool("q2k-mmq-prefill", false, "compile qualification-only Q2_K MMQ; runtime FAK_CUDA_Q2K_PREFILL=mmq still required")
 	q3MMQ := fs.Bool("q3k-mmq-prefill", false, "compile qualification-only Q3_K MMQ; runtime FAK_CUDA_Q3K_PREFILL=mmq still required")
 	q8MMQ := fs.Bool("q8-mmq-prefill", false, "compile qualification-only Q8 MMQ; runtime FAK_CUDA_Q8_PREFILL=mmq still required")
-	routedSwiGLU := fs.Bool("v41-routed-swiglu", false, "compile explicit SM120 V4.1 routed-SwiGLU candidate; public capability remains unqualified")
+	routedSwiGLU := fs.Bool("v41-routed-swiglu", false, "compile the opt-in SM90/SM120 V4.1 routed-SwiGLU candidate; untagged builds remain unchanged")
 	engramGate := fs.Bool("v41-engram-gate", false, "compile explicit SM120 V4.1 Engram-gate candidate; public capability remains unqualified")
 	compressorPool := fs.Bool("v41-compressor-pool", false, "compile explicit SM120 V4.1 compressor-pool candidate; public capability remains unqualified")
 	engramIQ4NL := fs.Bool("v41-engram-iq4nl-qualification", false, "compile explicit IQ4_NL Engram row-decoder witness with paired native and Go selections; public serving support remains false")

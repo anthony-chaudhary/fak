@@ -13,7 +13,8 @@ import (
 )
 
 // Oracle/fixtures copied from vulkan_v41_routed_swiglu_test.go at be41c0a4.
-// Vulkan-specific Bounds deliberately NOT copied. Host comparison is diagnostic.
+// The CUDA bound below replaces the Vulkan registry bound with the expf
+// 2-ULP account; host comparison is a hard acceptance, not diagnostic.
 func cudaRoutedWitnessBF16(v float32) float32 {
 	bits := math.Float32bits(v)
 	return math.Float32frombits((bits + 0x7fff + (bits>>16)&1) &^ 0xffff)
@@ -55,9 +56,31 @@ func cudaRoutedWitnessLanes(rng *rand.Rand, n int, limit float32) (gate, up []fl
 	return gate, up
 }
 
+// cudaRoutedWitnessBF16Key maps a widened BF16 value onto an ordered integer
+// key in which adjacent grid values differ by exactly one. Negative patterns
+// shift below zero so the key stays monotone across the sign boundary.
+func cudaRoutedWitnessBF16Key(v float32) int32 {
+	p := int32(uint32(math.Float32bits(v)) >> 16)
+	if p < 0 {
+		p -= 0x8000
+	}
+	return p
+}
+
+// Donor order pins add, multiply, division and both BF16 roundings to exact
+// RNE; only expf carries device precision (documented <=2 ULP). The three
+// remaining RNE steps each add half a ULP, so every lane lands within one
+// BF16 ULP of the host-published value. The 2^-100 floor admits only the
+// flush-to-zero tail where the host publishes signed zero.
+const cudaRoutedWitnessTailFloor = 0x1p-100
+
 // fak-test:runtime integration est=5s lane=optin
-// Structural/fault witness only; ending SKIP prevents full numerical acceptance.
-func TestCUDAV41RoutedSwiGLUDiagnosticWitness(t *testing.T) {
+// Ref #13815. Qualification requires FAK_CUDA_ROUTED_SWIGLU_WITNESS=1 plus the
+// operator evidence pins; a skip is no physical witness. On a healthy
+// candidate build the public qualification must admit, and every device lane
+// must be a widened BF16 value bit-equal to the scalar oracle or inside one
+// BF16 ULP of it (or the documented zero-tail floor).
+func TestCUDAV41RoutedSwiGLUWitness(t *testing.T) {
 	if os.Getenv("FAK_CUDA_ROUTED_SWIGLU_WITNESS") != "1" {
 		t.Skip("explicit device opt-in required; skip is not acceptance")
 	}
@@ -71,8 +94,8 @@ func TestCUDAV41RoutedSwiGLUDiagnosticWitness(t *testing.T) {
 	if !ok || c == nil {
 		t.Fatal("CUDA backend absent")
 	}
-	if c.V41RoutedSwiGLUAvailable() {
-		t.Fatal("unexpected public qualification")
+	if !c.V41RoutedSwiGLUAvailable() {
+		t.Fatal("public qualification refused on a healthy candidate build")
 	}
 	exact := func(t *testing.T, label string, got, want []float32) {
 		t.Helper()
@@ -94,7 +117,7 @@ func TestCUDAV41RoutedSwiGLUDiagnosticWitness(t *testing.T) {
 	}
 	invoke := func(t *testing.T, g, u Tensor, limit, weight float32) (Tensor, error) {
 		t.Helper()
-		out, err := c.cudaV41RoutedSwiGLU(g, u, limit, weight, true)
+		out, err := c.V41RoutedSwiGLU(g, u, limit, weight)
 		if err != nil {
 			if out.buf != nil {
 				t.Fatal("error published output")
@@ -118,7 +141,7 @@ func TestCUDAV41RoutedSwiGLUDiagnosticWitness(t *testing.T) {
 		n             int
 		limit, weight float32
 	}{{2048, 10, .501953125}, {2048, 0, 1}, {2304, .75, 2.5}, {1 << 20, 10, .125}, {1, 10, -.75}, {65, -1, 0}, {65, 10, -32}} {
-		t.Run(fmt.Sprintf("diagnostic_n%d_limit%g_weight%g", tc.n, tc.limit, tc.weight), func(t *testing.T) {
+		t.Run(fmt.Sprintf("parity_n%d_limit%g_weight%g", tc.n, tc.limit, tc.weight), func(t *testing.T) {
 			g, u := cudaRoutedWitnessLanes(rng, tc.n, tc.limit)
 			gd, ud := upload(t, g), upload(t, u)
 			out, err := invoke(t, gd, ud, tc.limit, tc.weight)
@@ -129,21 +152,31 @@ func TestCUDAV41RoutedSwiGLUDiagnosticWitness(t *testing.T) {
 			if len(got) != tc.n {
 				t.Fatal("output length")
 			}
-			mismatch := 0
+			bitExact, withinULP, tail := 0, 0, 0
 			for i, v := range got {
 				if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) || math.Float32bits(v)&0xffff != 0 {
 					t.Fatalf("lane %d not finite widened BF16", i)
 				}
 				pre, _ := cudaRoutedWitnessHostLane(g[i], u[i], tc.limit, tc.weight)
 				want := cudaRoutedWitnessBF16(pre)
-				if math.Float32bits(v) != math.Float32bits(want) {
-					mismatch++
-					if mismatch <= 16 {
-						t.Logf("DIAGNOSTIC lane=%d gate=%08x up=%08x device=%08x host=%08x", i, math.Float32bits(g[i]), math.Float32bits(u[i]), math.Float32bits(v), math.Float32bits(want))
+				switch {
+				case math.Float32bits(v) == math.Float32bits(want):
+					bitExact++
+				default:
+					delta := cudaRoutedWitnessBF16Key(v) - cudaRoutedWitnessBF16Key(want)
+					if delta < 0 {
+						delta = -delta
+					}
+					if delta <= 1 {
+						withinULP++
+					} else if math.Abs(float64(v)) <= cudaRoutedWitnessTailFloor && math.Abs(float64(want)) <= cudaRoutedWitnessTailFloor {
+						tail++
+					} else {
+						t.Fatalf("lane %d gate=%08x up=%08x: device %08x outside 1 BF16 ULP of host %08x", i, math.Float32bits(g[i]), math.Float32bits(u[i]), math.Float32bits(v), math.Float32bits(want))
 					}
 				}
 			}
-			t.Logf("DIAGNOSTIC mismatches=%d/%d; no CUDA numerical threshold or acceptance", mismatch, tc.n)
+			t.Logf("PARITY n=%d limit=%g weight=%g bit-exact=%d/%d within1ULP=%d tail=%d", tc.n, tc.limit, tc.weight, bitExact, tc.n, withinULP, tail)
 			exact(t, "gate immutable", c.Read(gd), g)
 			exact(t, "up immutable", c.Read(ud), u)
 		})
@@ -223,14 +256,13 @@ func TestCUDAV41RoutedSwiGLUDiagnosticWitness(t *testing.T) {
 			name          string
 			g, u          Tensor
 			limit, weight float32
-			witness       bool
 		}{
-			{"host", NewF32(Default(), []int{4}, ones(4)), ud, 10, 1, true},
-			{"shape", gd, short, 10, 1, true}, {"nan_limit", gd, ud, nan, 1, true},
-			{"inf_weight", gd, ud, 10, inf, true}, {"public", gd, ud, 10, 1, false},
+			{"host", NewF32(Default(), []int{4}, ones(4)), ud, 10, 1},
+			{"shape", gd, short, 10, 1}, {"nan_limit", gd, ud, nan, 1},
+			{"inf_weight", gd, ud, 10, inf},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
-				out, err := c.cudaV41RoutedSwiGLU(tc.g, tc.u, tc.limit, tc.weight, tc.witness)
+				out, err := c.V41RoutedSwiGLU(tc.g, tc.u, tc.limit, tc.weight)
 				var backend *BackendError
 				if !errors.As(err, &backend) || out.buf != nil {
 					t.Fatalf("not fail closed: %v", err)
@@ -262,5 +294,4 @@ func TestCUDAV41RoutedSwiGLUDiagnosticWitness(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	t.Skip("DIAGNOSTIC ONLY: CUDA numerical qualification, native injected-failure/lifetime and full-model acceptance remain pending; subtest success is not qualification")
 }

@@ -6,6 +6,16 @@ import (
 	"testing"
 )
 
+// Non-CUDA and untagged hosts must stay byte-for-byte on the host routes: the
+// fused routed seam exists only behind the CUDA opt-in tag, so the default
+// backend never exposes it and the model seam stays unbound.
+// fak-test:runtime fast est=1ms lane=default
+func TestV41RoutedSwiGLUCPUFallbackUnchanged(t *testing.T) {
+	if _, ok := Default().(V41RoutedSwiGLUBackend); ok {
+		t.Fatal("the default host backend exposes the fused routed SwiGLU seam")
+	}
+}
+
 // fak-test:runtime fast est=10ms lane=default
 func TestV41RoutedSwiGLUValidation(t *testing.T) {
 	vec := func(n int) Tensor { return Tensor{Dtype: F32, Layout: RowMajor, Shape: []int{n}} }

@@ -93,7 +93,7 @@ type CUDAConfig struct {
 	EnableQwen35IQ2SequenceQualification bool // default-off Go composition of existing raw IQ2 kernels; not device qualification
 	EnableQ56KMMQQualification           bool // default-off retained Q5_K/Q6_K P>=128 MMQ; device evidence required
 
-	EnableV41RoutedSwiGLU    bool // Explicit SM120 candidate; public capability remains unqualified.
+	EnableV41RoutedSwiGLU    bool // Explicit SM90/SM120 candidate; per-arch witness receipt owed before any default set.
 	EnableV41EngramGate      bool // Explicit SM120 candidate; public capability remains unqualified.
 	EnableV41CompressorPool  bool // Explicit SM120 candidate; public capability remains unqualified.
 	EnableV41Compressor      bool // Explicit SM120 ring/pool candidate; build selection is not qualification.
