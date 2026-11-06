@@ -112,23 +112,49 @@ func TestServeGPULayersFlagsReachTypedPlannerConfig(t *testing.T) {
 
 // fak-test:justify why=regression when=changed:cmd/fak/serve*.go
 // fak-test:runtime fast est=10ms lane=default
-func TestServeNativeKVDefaultF16(t *testing.T) {
+// HW receipts (fak-private docs/benchmarks/receipts + .fak/receipts/abba): h2h-paired-qwen3-8-27b-q4_k_m-raider-fak-20261106T0140Z-cuda.json, ...20261106T0222Z-cuda.json (collapsed), ...20261106T0343Z-cuda.json (parent healthy), abba-20261106T015048Z-comparison.json (knob isolation).
+func TestServeNativeKVDefaultF32(t *testing.T) {
 	// Closed contract: the resolved precision enum value, not prose.
-	t.Run("cuda-unset-defaults-to-fp16", func(t *testing.T) {
+	t.Run("cuda-unset-defaults-to-f32", func(t *testing.T) {
 		t.Setenv("FAK_UP_KV_PRECISION", "")
 		t.Setenv("FAK_BACKEND", "")
 		fs, sf := newServeFlagSet()
 		if err := fs.Parse([]string{"--backend", "cuda"}); err != nil {
 			t.Fatal(err)
 		}
-		if got := serveNativePlannerConfig(sf).KVPrecision; got != model.KVPrecisionFP16 {
-			t.Fatalf("unset --kv-precision on --backend cuda resolved %q, want the fp16 default", got)
+		if got := serveNativePlannerConfig(sf).KVPrecision; got != model.KVPrecisionFP32 {
+			t.Fatalf("unset --kv-precision on --backend cuda resolved %q, want the f32 default enum", got)
 		}
 		// The default publishes its tier so the fit-estimator seam charges the density the engine realizes.
-		if got := os.Getenv("FAK_UP_KV_PRECISION"); got != string(model.KVPrecisionFP16) {
-			t.Fatalf("published FAK_UP_KV_PRECISION = %q, want %q", got, model.KVPrecisionFP16)
+		if got := os.Getenv("FAK_UP_KV_PRECISION"); got != string(model.KVPrecisionFP32) {
+			t.Fatalf("published FAK_UP_KV_PRECISION = %q, want %q", got, model.KVPrecisionFP32)
 		}
 	})
+
+	// The 16-bit tiers stay fully opt-in via flag and env after the default revert.
+	for _, tc := range []struct {
+		name string
+		args []string
+		env  string
+		want model.KVPrecision
+	}{
+		{"flag-fp16", []string{"--backend", "cuda", "--kv-precision", "fp16"}, "", model.KVPrecisionFP16},
+		{"flag-bf16", []string{"--backend", "cuda", "--kv-precision", "bf16"}, "", model.KVPrecisionBF16},
+		{"env-fp16", []string{"--backend", "cuda"}, "fp16", model.KVPrecisionFP16},
+		{"env-bf16", []string{"--backend", "cuda"}, "bf16", model.KVPrecisionBF16},
+	} {
+		t.Run(tc.name+"-still-selectable", func(t *testing.T) {
+			t.Setenv("FAK_UP_KV_PRECISION", tc.env)
+			t.Setenv("FAK_BACKEND", "")
+			fs, sf := newServeFlagSet()
+			if err := fs.Parse(tc.args); err != nil {
+				t.Fatal(err)
+			}
+			if got := serveNativePlannerConfig(sf).KVPrecision; got != tc.want {
+				t.Fatalf("%s resolved %q, want %q", tc.name, got, tc.want)
+			}
+		})
+	}
 
 	t.Run("explicit-f32-still-selectable", func(t *testing.T) {
 		t.Setenv("FAK_UP_KV_PRECISION", "")
@@ -178,8 +204,8 @@ func TestServeNativeKVDefaultF16(t *testing.T) {
 
 	t.Run("default-contract", func(t *testing.T) {
 		t.Setenv("FAK_BACKEND", "")
-		if got := defaultServeKVPrecisionForBackend(kvBackendCUDA); got != model.KVPrecisionFP16 {
-			t.Fatalf("cuda default = %q, want the fp16 enum", got)
+		if got := defaultServeKVPrecisionForBackend(kvBackendCUDA); got != model.KVPrecisionFP32 {
+			t.Fatalf("cuda default = %q, want the f32 enum", got)
 		}
 		for _, backend := range []string{kvBackendHost, kvBackendMetal, kvBackendVulkan} {
 			if got := defaultServeKVPrecisionForBackend(backend); got != "" {
@@ -207,7 +233,7 @@ func TestServeNativeKVDefaultF16(t *testing.T) {
 			env  string
 			want bool
 		}{
-			{"cuda-default-fp16", []string{"--backend", "cuda"}, "", false},
+			{"cuda-default-f32", []string{"--backend", "cuda"}, "", true},
 			{"cuda-explicit-fp16", []string{"--backend", "cuda", "--kv-precision", "fp16"}, "", false},
 			{"cuda-bf16", []string{"--backend", "cuda", "--kv-precision", "bf16"}, "", false},
 			{"cuda-explicit-f32-flag", []string{"--backend", "cuda", "--kv-precision", "f32"}, "", true},
