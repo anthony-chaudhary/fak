@@ -267,6 +267,64 @@ func TestV41SharedAttentionShaderSourceContract(t *testing.T) {
 	}
 }
 
+// Source contract for the shipped V41C-12 fast path: the Wave32 two-level sum
+// (butterfly, wave-ordered staging, fixed low/high pairing) replaced the
+// serial kernel's lane-0 denominator scan, and the determinism-class surface
+// keeps its pinned constants, sentinel, and startup env.
+// This is a source guard, not compilation, a SPIR-V receipt, or a device witness.
+// fak-test:runtime fast est=1ms lane=default
+func TestV41SharedAttentionWave32TreeDenominatorContract(t *testing.T) {
+	t.Parallel()
+	fast, err := os.ReadFile("shaders/v41_shared_attention_fast.comp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs := string(fast)
+	for _, token := range []string{
+		"const int WAVE = 32;", "const int WAVES = 4;",
+		"precise float next = s + subgroupShuffleXor(s, offset);",
+		"if (subgroupElect()) sWaveF[wave] = s;",
+		"precise float low = sWaveF[0] + sWaveF[1];", "precise float high = sWaveF[2] + sWaveF[3];",
+		"layout(local_size_x = 128) in;",
+		"#extension GL_KHR_shader_subgroup_basic : require",
+		"#extension GL_KHR_shader_subgroup_arithmetic : require",
+		"#extension GL_KHR_shader_subgroup_shuffle : require",
+		"#extension GL_KHR_shader_subgroup_ballot : require",
+	} {
+		if !strings.Contains(fs, token) {
+			t.Errorf("missing fast-module contract %q", token)
+		}
+	}
+	for _, forbidden := range []string{"for (int i = 0; i < count; ++i) {", "float16_t", "atomic"} {
+		if strings.Contains(fs, forbidden) {
+			t.Errorf("replaced serial behavior %q reappeared in the fast module", forbidden)
+		}
+	}
+	serial, err := os.ReadFile("shaders/v41_shared_attention.comp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const laneZeroScan = "if (lane == 0) {\n            precise float denominator = sDenominator;\n            for (int i = 0; i < count; ++i) {"
+	if !strings.Contains(string(serial), laneZeroScan) {
+		t.Error("serial oracle lost its lane-0 denominator scan")
+	}
+	driver, err := os.ReadFile("vulkan_v41_shared_attention.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ds := string(driver)
+	for _, token := range []string{
+		"V41SharedAttentionRunToRun V41SharedAttentionClass = 1",
+		"var ErrV41SharedAttentionClassUnavailable = errors.New(",
+		"FAK_V41_SHARED_ATTENTION_DETERMINISM",
+		`fmt.Errorf("%w: class %d (code %d)", ErrV41SharedAttentionClassUnavailable, class, status)`,
+	} {
+		if !strings.Contains(ds, token) {
+			t.Errorf("missing driver-surface contract %q", token)
+		}
+	}
+}
+
 // This mathematical oracle evaluates logits/normalization in binary64 with
 // stored probabilities, independently of the production three-pass code. It is
 // used only away from the explicitly separate compressed sentinel behavior.
