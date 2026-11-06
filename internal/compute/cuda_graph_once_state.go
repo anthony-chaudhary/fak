@@ -19,20 +19,24 @@ import (
 var cudaGraphOnceOwner *cudaBackend
 
 type cudaGraphOnceState struct {
-	invalidated           bool
-	dependencyInvalidated bool
-	dependencies          map[*cudaBuf]cudaGraphOnceDependency
-	reservationPointers   []unsafe.Pointer
-	reservationBytes      []C.size_t
-	reservationIDs        []C.uint64_t
-	borrowed              map[*cudaBuf]struct{}
-	owner                 unsafe.Pointer
-	kv                    *cudaKV
-	input, output         Tensor
-	buffers               []*cudaBuf
-	keys, raw, values     []dslice
-	next                  int
-	capturing             bool
+	invalidated                              bool
+	dependencyInvalidated                    bool
+	dependencies                             map[*cudaBuf]cudaGraphOnceDependency
+	reservationPointers                      []unsafe.Pointer
+	reservationBytes                         []C.size_t
+	reservationIDs                           []C.uint64_t
+	borrowed                                 map[*cudaBuf]struct{}
+	owner                                    unsafe.Pointer
+	kv                                       *cudaKV
+	kvBindingAttempted, kvBound              bool
+	kvBackend                                *cudaBackend
+	kvLayers, kvHeads, kvHeadDim, kvCapacity int
+	kvTickets                                []uint64
+	input, output                            Tensor
+	buffers                                  []*cudaBuf
+	keys, raw, values                        []dslice
+	next                                     int
+	capturing                                bool
 }
 
 // A receipt freezes allocation metadata and native ledger reservation tickets,
@@ -56,6 +60,94 @@ type cudaGraphOnceDependency struct {
 	hostDt                         Dtype
 	hostLo                         Layout
 	hostKeep                       HostBuffer
+}
+
+// graphOnceBindKVLocked freezes complete F32 allocations, not the changing row
+// length. Caller holds cudaMu and retains the actual store. This is a one-shot
+// observation before graph prewarm/create: zero/partial tickets cannot refresh.
+func (s *cudaGraphOnceState) graphOnceBindKVLocked(c *cudaBackend, pos int) bool {
+	if s == nil || s.kvBindingAttempted {
+		return false
+	}
+	s.kvBindingAttempted = true
+	k := s.kv
+	if c == nil || k == nil || k.be != c || k.releaseRetained || k.snapshotCopy != nil ||
+		k.cfg.Precision != KVPrecisionF32 || k.cfg.NumLayers <= 0 || k.cfg.NumLayers > 2147483647/3 ||
+		len(k.K) != k.cfg.NumLayers || len(k.Kraw) != len(k.K) || len(k.V) != len(k.K) ||
+		k.maxPos <= 0 || k.maxPos >= 2147483647 || pos < 0 || pos >= k.maxPos || len(k.pos) != pos ||
+		k.cfg.NumKVHeads <= 0 || k.cfg.HeadDim <= 0 || k.cfg.NumKVHeads > 2147483647/k.cfg.HeadDim ||
+		len(s.reservationPointers) != 0 || len(s.reservationBytes) != 0 || len(s.reservationIDs) != 0 {
+		return false
+	}
+	w := k.cfg.NumKVHeads * k.cfg.HeadDim
+	maxFloats := int(^uint(0)>>1) / 4
+	// Capture kernels use wide row offsets, but ordinary F32 warmup writes still
+	// take an int element offset. Keep this qualification's full capacity within
+	// that signed range as well; this does not repair general eager growable KV.
+	if maxFloats > 2147483647 {
+		maxFloats = 2147483647
+	}
+	if k.maxPos > maxFloats/w {
+		return false
+	}
+	required := k.maxPos * w
+	s.kvBackend, s.kvLayers, s.kvHeads, s.kvHeadDim, s.kvCapacity = c, k.cfg.NumLayers, k.cfg.NumKVHeads, k.cfg.HeadDim, k.maxPos
+	s.keys, s.raw, s.values = append([]dslice(nil), k.K...), append([]dslice(nil), k.Kraw...), append([]dslice(nil), k.V...)
+	seen := make(map[unsafe.Pointer]struct{}, s.kvLayers*3)
+	for l := 0; l < s.kvLayers; l++ {
+		for _, d := range [3]dslice{s.keys[l], s.raw[l], s.values[l]} {
+			if d.ptr == nil || d.dtype != F32 || d.cap < required || d.cap > maxFloats || d.len != pos*w {
+				return false
+			}
+			if _, exists := seen[d.ptr]; exists {
+				return false
+			}
+			seen[d.ptr] = struct{}{}
+			bytes := d.cap * 4
+			id := uint64(C.fcuda_alloc_reservation_id(d.ptr, C.size_t(bytes)))
+			if id == 0 {
+				return false
+			}
+			s.kvTickets = append(s.kvTickets, id)
+			s.reservationPointers = append(s.reservationPointers, d.ptr)
+			s.reservationBytes = append(s.reservationBytes, C.size_t(bytes))
+			s.reservationIDs = append(s.reservationIDs, C.uint64_t(id))
+		}
+	}
+	s.kvBound = true
+	return true
+}
+
+// KV tickets occupy an immutable prefix in the existing single native batch.
+// Only logical row lengths may change, within the retained capacity. The
+// position/complete-row protocol is checked separately by graphOnceSameKV.
+func (s *cudaGraphOnceState) graphOnceKVSlotsValid() (int, bool) {
+	if s == nil || !s.kvBindingAttempted || !s.kvBound || s.kvLayers <= 0 || s.kvLayers > 2147483647/3 {
+		return 0, false
+	}
+	k := s.kv
+	count := s.kvLayers * 3
+	if k == nil || s.kvBackend == nil || k.be != s.kvBackend || k.releaseRetained || k.snapshotCopy != nil ||
+		k.cfg.Precision != KVPrecisionF32 || k.cfg.NumLayers != s.kvLayers || k.cfg.NumKVHeads != s.kvHeads || k.cfg.HeadDim != s.kvHeadDim || k.maxPos != s.kvCapacity ||
+		len(k.K) != s.kvLayers || len(k.Kraw) != s.kvLayers || len(k.V) != s.kvLayers ||
+		len(s.keys) != s.kvLayers || len(s.raw) != s.kvLayers || len(s.values) != s.kvLayers || len(s.kvTickets) != count ||
+		len(s.reservationPointers) < count || len(s.reservationBytes) < count || len(s.reservationIDs) < count {
+		return 0, false
+	}
+	at := 0
+	for l := 0; l < s.kvLayers; l++ {
+		for _, pair := range [3][2]dslice{{k.K[l], s.keys[l]}, {k.Kraw[l], s.raw[l]}, {k.V[l], s.values[l]}} {
+			live, saved := pair[0], pair[1]
+			if saved.ptr == nil || saved.dtype != F32 || saved.cap <= 0 || saved.cap > int(^uint(0)>>1)/4 || saved.cap > 2147483647 ||
+				live.ptr != saved.ptr || live.cap != saved.cap || live.dtype != saved.dtype || live.len < 0 || live.len > live.cap ||
+				s.kvTickets[at] == 0 || s.reservationPointers[at] != saved.ptr || s.reservationBytes[at] != C.size_t(saved.cap*4) ||
+				uint64(s.reservationIDs[at]) != s.kvTickets[at] {
+				return 0, false
+			}
+			at++
+		}
+	}
+	return count, true
 }
 
 func graphOnceDependencyOf(b *cudaBuf) cudaGraphOnceDependency {
@@ -146,7 +238,10 @@ func (s *cudaGraphOnceState) graphOnceDependenciesValid() bool {
 	if !ok || !d.pinned || d.arenaIndex != 0 || !d.matches(input) {
 		return false
 	}
-	expectedTickets := 0
+	expectedTickets, kvOK := s.graphOnceKVSlotsValid()
+	if !kvOK {
+		return false
+	}
 	for i, b := range s.buffers {
 		d, ok := s.dependencies[b]
 		if !ok || !d.pinned || d.arenaIndex != i || !d.matches(b) || !d.reservationSlotsMatch(s) {

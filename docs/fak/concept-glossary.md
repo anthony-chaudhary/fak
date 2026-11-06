@@ -2329,3 +2329,10 @@ Private prerequisite check for one FP8 owner and an exact three-GDN/one-attentio
 Correspondence check between a frozen graph allocation receipt and its capture-built primary/scale pointer, extent and nonzero reservation-ID array slots. Under the caller complete-array-length validation, it checks slot bounds before accessing and comparing each required entry.
 
 **Distinct from:** Unlike fusedVulkanSlotBytesOKLocked checking live expert-weight nominal extents, this compares immutable graph receipt slots. It performs no native lookup, synchronization or ownership transfer and does not prove model, content or completion identity.
+
+
+### cudaGraphOnceState.graphOnceKVSlotsValid
+
+Bounds-first correspondence check for a capture-owned immutable K/Kraw/V reservation-ticket prefix and the current dense F32 KV store, geometry and full-capacity plane descriptors. It accepts logical row growth within retained capacity and returns the validated prefix length without reacquiring tickets.
+
+**Distinct from:** Unlike cudaGraphOnceDependency.reservationSlotsMatch checking primary/scale slots for one cudaBuf receipt, this validates all selected KV plane slots and retained store metadata. Native allocation identity is checked separately by the shared batch validator; this method does not prove physical ownership, content, CUDA completion or complete captured producer inventory.

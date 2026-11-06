@@ -50,7 +50,8 @@ func graphOnceArenaBufferLegal(b *cudaBuf, input bool) bool {
 
 // Metadata rebinding cannot be repaired by releasing whatever a mutable buffer
 // now points at. Keep the original receipt/root and close shared admission before
-// launch, input copy or retirement. This is not an allocation-ABA detector.
+// launch, input copy or retirement. Native tickets detect tracked reservation
+// replacement, not untracked reuse, content changes or device-context identity.
 func (c *cudaBackend) graphOnceRequireDependenciesLocked() {
 	s := c.graphOnce
 	if s == nil || !s.graphOnceDependenciesValid() {
@@ -125,18 +126,17 @@ func (c *cudaBackend) graphOnceInvalidateKVLocked(k *cudaKV) {
 }
 
 func graphOnceSameKV(s *cudaGraphOnceState, pos int) bool {
+	if _, ok := s.graphOnceKVSlotsValid(); !ok {
+		return false
+	}
 	k := s.kv
-	if k == nil || pos != s.next || pos < 0 || pos >= k.maxPos || len(k.pos) != pos {
+	if pos != s.next || pos < 0 || pos >= s.kvCapacity || len(k.pos) != pos {
 		return false
 	}
-	if len(k.K) != len(s.keys) || len(k.Kraw) != len(s.raw) || len(k.V) != len(s.values) {
-		return false
-	}
-	w := k.stride()
-	for l := range k.K {
-		for _, pair := range [][2]dslice{{k.K[l], s.keys[l]}, {k.Kraw[l], s.raw[l]}, {k.V[l], s.values[l]}} {
-			a, b := pair[0], pair[1]
-			if a.ptr != b.ptr || a.cap != b.cap || a.dtype != b.dtype || a.len != pos*w {
+	w := s.kvHeads * s.kvHeadDim // bounded and frozen by the one-shot binding
+	for l := 0; l < s.kvLayers; l++ {
+		for _, row := range [3]dslice{k.K[l], k.Kraw[l], k.V[l]} {
+			if row.len != pos*w {
 				return false
 			}
 		}
@@ -214,16 +214,9 @@ func (c *cudaBackend) GraphOnceBegin(input Tensor, kv KVStore, pos int) bool {
 			return false
 		}
 	}
-	w := k.stride()
-	if w <= 0 || w > 2147483647 || k.maxPos > int(^uint(0)>>1)/w || len(k.K) == 0 {
+	s := &cudaGraphOnceState{kv: k, input: input, next: pos + 1}
+	if !s.graphOnceBindKVLocked(c, pos) {
 		return false
-	}
-	for l := range k.K {
-		for _, d := range []dslice{k.K[l], k.Kraw[l], k.V[l]} {
-			if d.dtype != F32 || d.len != pos*w || d.cap < k.maxPos*w || d.ptr == nil {
-				return false
-			}
-		}
 	}
 	b := c.cudaBufForSubmit(input)
 	if b.device != 0 || b.managed || b.scales != nil || !graphOnceArenaBufferLegal(b, true) {
@@ -233,7 +226,6 @@ func (c *cudaBackend) GraphOnceBegin(input Tensor, kv KVStore, pos int) bool {
 		panic(err)
 	}
 	C.fcuda_graph_prewarm(C.int(graphPrewarmDepth))
-	s := &cudaGraphOnceState{kv: k, input: input, next: pos + 1, keys: append([]dslice(nil), k.K...), raw: append([]dslice(nil), k.Kraw...), values: append([]dslice(nil), k.V...)}
 	c.graphOnce = s
 	cudaGraphOnceOwner = c
 	c.graphOnceCheck(C.fak_graph_once_create(C.int(k.maxPos), &s.owner))
