@@ -125,6 +125,57 @@ func NewTranscriptAdapter(provider Provider) (TranscriptAdapter, error) {
 	}
 }
 
+// OpenAIChatRequestSpec is the planner-free input to MarshalOpenAIChatRequest: the
+// canonical request fields an OpenAI-compatible chat-completions upstream accepts.
+// Zero-valued optional fields are omitted from the wire exactly as the planner's
+// adapterRequest defaults omit them, so a translated body differs from the
+// planner-sent body for the same inputs by nothing but the fields the caller set.
+// Temperature is the one deliberate caller-visible distinction: nil omits the
+// field (upstream default applies), while a non-nil 0 encodes an explicit 0 —
+// the /v1/messages planner path sends an explicit 0 when its client omits the
+// value, so a translator that wants that shape passes a non-nil 0.
+type OpenAIChatRequestSpec struct {
+	Model    string
+	Messages []Message
+	Tools    []ToolDef
+	// ToolChoice overrides the adapter default ("auto" when Tools is non-empty).
+	// It is the already-mapped OPENAI wire value; a caller holding an Anthropic
+	// tool_choice maps it first (pkg/anthropicbridge does).
+	ToolChoice  json.RawMessage
+	MaxTokens   int
+	Temperature *float64 // nil => omit from the wire (planner/provider default)
+	TopP        *float64 // nil => omit from the wire
+	Stop        []string // empty => omit from the wire
+	Stream      bool     // true => SSE + stream_options.include_usage
+	ExtraBody   json.RawMessage
+}
+
+// MarshalOpenAIChatRequest encodes the canonical request as an OpenAI
+// chat-completions body — the same encoder HTTPPlanner uses on the OpenAI wire,
+// exported for wire-translation callers that hold no planner (the /v1/messages
+// routing mode in pkg/anthropicbridge). It adds nothing the planner path does
+// not send: a streamed body differs from a buffered one only by the stream flag
+// and the usage-carrying stream option.
+func MarshalOpenAIChatRequest(spec OpenAIChatRequestSpec) ([]byte, error) {
+	req := adapterRequest{
+		Model:      spec.Model,
+		Messages:   spec.Messages,
+		Tools:      spec.Tools,
+		ToolChoice: spec.ToolChoice,
+		MaxTokens:  spec.MaxTokens,
+		TopP:       spec.TopP,
+		Stop:       spec.Stop,
+		Stream:     spec.Stream,
+		ExtraBody:  spec.ExtraBody,
+	}
+	if spec.Temperature != nil {
+		req.Temperature = *spec.Temperature
+	} else {
+		req.OmitTemperature = true
+	}
+	return openAIAdapter{provider: ProviderOpenAI}.MarshalRequest(req)
+}
+
 func joinEndpoint(baseURL, suffix string) string {
 	return strings.TrimRight(baseURL, "/") + suffix
 }

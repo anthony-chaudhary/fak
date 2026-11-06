@@ -646,6 +646,21 @@ func normalizeCompletionFields(comp *Completion) *Completion {
 	return comp
 }
 
+// NormalizeStreamedToolCalls applies the streamed-completion tool-call
+// normalization a streamed turn needs before its calls render anywhere:
+// empty or duplicate call ids mint unique call_fak_N ids, blank types default
+// to "function", and a surviving tool call rewrites the finish reason to
+// "tool_calls" (length/content_filter preserved). The planner applies the same
+// normalization on its own streaming path; exported for wire-translation
+// callers that assemble completions without a planner (pkg/anthropicbridge),
+// so a non-conformant upstream that omits tool_calls[].id still yields a
+// tool_use block the client can answer. The text-lift fallback
+// (liftTextToolCallsObserved) stays planner-owned: it needs the offered-tools
+// set and is in-fak repair machinery.
+func NormalizeStreamedToolCalls(comp *Completion) *Completion {
+	return normalizeCompletionFields(comp)
+}
+
 // finishReasonClaimsToolCalls reports whether a raw OpenAI-family finish_reason
 // indicates the model intended to call a tool. Both the modern "tool_calls" and
 // the legacy "function_call" forms count; matching is case/space-insensitive so a

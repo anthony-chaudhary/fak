@@ -34,6 +34,12 @@ type AnthropicMessagesRequest struct {
 	TopK          *int
 	StopSequences []string
 	Stream        bool
+	// ToolChoice is the request's Anthropic tool_choice, kept RAW (the verbatim
+	// wire value) for downstream mapping — pkg/anthropicbridge maps it onto the
+	// OpenAI Chat Completions tool_choice vocabulary. The gateway planner path
+	// ignores it (the OpenAI marshal already defaults to "auto" when tools are
+	// offered), so capturing it changes no existing wire behavior.
+	ToolChoice json.RawMessage
 	// Raw is the inbound request body, byte-for-byte. The anthropic→anthropic
 	// passthrough path forwards these bytes verbatim to the real Anthropic API so
 	// the client's prompt-cache prefix survives intact (a real cache hit). Set by
@@ -57,6 +63,7 @@ type anthropicInbound struct {
 	Messages      []anthropicInboundMessage `json:"messages"`
 	Tools         []anthropicInboundTool    `json:"tools"`
 	Stream        bool                      `json:"stream"`
+	ToolChoice    json.RawMessage           `json:"tool_choice"`
 }
 
 type anthropicInboundMessage struct {
@@ -111,6 +118,7 @@ func DecodeAnthropicMessagesRequest(raw []byte) (*AnthropicMessagesRequest, erro
 		TopK:          in.TopK,
 		StopSequences: in.StopSequences,
 		Stream:        in.Stream,
+		ToolChoice:    in.ToolChoice,
 		System:        parseAnthropicSystem(in.System),
 		Raw:           raw,
 	}

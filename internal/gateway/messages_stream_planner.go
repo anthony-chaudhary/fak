@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/pkg/anthropicbridge"
 )
 
 // streamAnthropicPlannerLive translates a generic planner content stream into
@@ -324,21 +325,11 @@ func (s *Server) plannerSampleOpts(req *agent.AnthropicMessagesRequest, sessionT
 
 // emitAnthropicToolUseBlocks streams the surviving tool_use blocks as
 // content_block_start/input_json_delta/content_block_stop triples, advancing outIdx for
-// each block so the client-facing index numbering stays contiguous.
+// each block so the client-facing index numbering stays contiguous. The rendering
+// lives in the public translator (pkg/anthropicbridge.StreamToolUseBlocks) — the
+// exact code the routed /v1/messages arm runs — so both wires stay byte-identical.
 func emitAnthropicToolUseBlocks(send func(string, any), outIdx *int, kept []agent.ToolCall) {
-	for _, blk := range agent.AnthropicResponseBlocks(agent.Message{Role: agent.RoleAssistant, ToolCalls: kept}) {
-		oi := *outIdx
-		*outIdx++
-		send("content_block_start", map[string]any{
-			"type": "content_block_start", "index": oi,
-			"content_block": map[string]any{"type": "tool_use", "id": blk.ID, "name": blk.Name, "input": map[string]any{}},
-		})
-		send("content_block_delta", map[string]any{
-			"type": "content_block_delta", "index": oi,
-			"delta": map[string]any{"type": "input_json_delta", "partial_json": string(blk.Input)},
-		})
-		send("content_block_stop", map[string]any{"type": "content_block_stop", "index": oi})
-	}
+	anthropicbridge.StreamToolUseBlocks(send, outIdx, kept)
 }
 
 // streamPlannerUpstreamError renders the right failure for a CompleteStream error and
@@ -370,21 +361,11 @@ func (s *Server) streamPlannerUpstreamError(w http.ResponseWriter, err error, st
 	return true
 }
 
+// sendAnthropicTerminal emits the terminal message_delta (stop_reason + the REAL
+// turn usage — the message_start figure was a pre-completion estimate; cache
+// counters included only when nonzero) and message_stop. The rendering lives in
+// the public translator (pkg/anthropicbridge.StreamTerminal) — the exact code the
+// routed /v1/messages arm runs — so both wires stay byte-identical by construction.
 func sendAnthropicTerminal(send func(string, any), stop string, usage anthropicUsage) {
-	finalUsage := map[string]int{
-		"input_tokens":  usage.InputTokens,
-		"output_tokens": usage.OutputTokens,
-	}
-	if usage.CacheReadInputTokens > 0 {
-		finalUsage["cache_read_input_tokens"] = usage.CacheReadInputTokens
-	}
-	if usage.CacheCreationInputTokens > 0 {
-		finalUsage["cache_creation_input_tokens"] = usage.CacheCreationInputTokens
-	}
-	send("message_delta", map[string]any{
-		"type":  "message_delta",
-		"delta": map[string]any{"stop_reason": stop, "stop_sequence": nil},
-		"usage": finalUsage,
-	})
-	send("message_stop", map[string]any{"type": "message_stop"})
+	anthropicbridge.StreamTerminal(send, stop, usage)
 }
