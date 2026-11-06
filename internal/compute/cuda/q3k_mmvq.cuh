@@ -17,8 +17,9 @@
 //   * No fusion (gate, bias), MoE ids, channel or sample broadcast: one resident Q3_K weight
 //     [out, in] times one f32 activation [P, in], dst [P, out]. MMVQ serves P in 1..3 when the
 //     k-quant mmvq decode arm is selected (FAK_CUDA_Q4K_DECODE=mmvq, shared with Q4_K); otherwise
-//     P < 128 takes the f32 dequant-fused panel in cuda/q3k_matmul.cuh. P >= 128 dequantizes to a
-//     transient f32 image (dequantize_block_q3_K) and runs Fak's compensated fp16 GEMM.
+//     P < 128 takes the f32 dequant-fused panel in cuda/q3k_matmul.cuh. P >= 128 dequantizes to
+//     direct hi/lo half planes (dequantize_block_q3_K) for Fak's compensated fp16 GEMM,
+//     preserving the F32 dequantization rounding before each half conversion.
 //   * With two rows per CUDA block the second row's weight read is clamped to the last row, so
 //     an odd out never reads past the resident weight (upstream relies on row padding); its
 //     result is still not written.
@@ -181,9 +182,11 @@ static __global__ void mul_mat_vec_q(const void *__restrict__ vx, const block_q8
     }
 }
 
-// convert.cu dequantize_block_q3_K (f32 destination), one CUDA block of 64 threads per
-// 256-value super-block.
-static __global__ void dequantize_block_q3_K(const void *__restrict__ vx, float *__restrict__ yy) {
+// convert.cu dequantize_block_q3_K mapping, one CUDA block of 64 threads per
+// 256-value super-block. Emit the existing compensated hi/lo representation directly,
+// preserving the two F32 product roundings and the separate residual subtraction.
+// Half overflow and non-finite inputs retain the former split behavior.
+static __global__ void dequantize_block_q3_K(const void *__restrict__ vx, __half *__restrict__ hi, __half *__restrict__ lo) {
 
     const int64_t i = blockIdx.x;
     const block_q3_K *x = (const block_q3_K *)vx;
@@ -204,14 +207,17 @@ static __global__ void dequantize_block_q3_K(const void *__restrict__ vx, float 
                 is < 12 ? (x[i].scales[is - 8] >> 4) | (((x[i].scales[is + 0] >> 4) & 3) << 4) :
                           (x[i].scales[is - 8] >> 4) | (((x[i].scales[is - 4] >> 6) & 3) << 4);
     float d_all = __half2float(x[i].d);
-    float dl = d_all * (us - 32);
+    float dl = __fmul_rn(d_all, (float)(us - 32));
 
-    float *y = yy + i * QK_K + 128 * n + 32 * j;
+    const int64_t base = i * QK_K + 128 * n + 32 * j;
     const uint8_t *q = x[i].qs + 32 * n;
     const uint8_t *hm = x[i].hmask;
 
     for (int l = l0; l < l0 + 4; ++l) {
-        y[l] = dl * ((int8_t)((q[l] >> shift) & 3) - ((hm[l] & m) ? 0 : 4));
+        const float value = __fmul_rn(dl, (float)((int8_t)((q[l] >> shift) & 3) - ((hm[l] & m) ? 0 : 4)));
+        const __half high = __float2half_rn(value);
+        hi[base + l] = high;
+        lo[base + l] = __float2half_rn(__fsub_rn(value, __half2float(high)));
     }
 }
 
@@ -266,14 +272,17 @@ extern "C" int fcuda_q3k_matmul_f32(const uint8_t *dQ3K, const float *dX, float 
     }
 #endif
     if (valid && P >= 128) {
-        const size_t wn = (size_t)out * in;
-        float *w = (float *)scratch_malloc(wn * sizeof(float));
-        if (!w) return FCUDA_SCRATCH_ALLOC_FAILED;
+        const size_t wn = (size_t)out * in, xn = (size_t)P * in;
+        FP16CompensatedScratch scratch;
+        const int scratch_status = fp16_compensated_scratch(wn, xn, &scratch);
+        if (scratch_status != 0) return scratch_status;
+        __half *wHi = scratch.ptr[0], *wLo = scratch.ptr[1], *xHi = scratch.ptr[2], *xLo = scratch.ptr[3];
         const int nb = (int)(wn / QK_K);
-        FCUDA_TS("k_q3k_dequant", nb, dequantize_block_q3_K<<<nb, 64, 0, g_stream>>>(dQ3K, w));
-        const int status = fp16_compensated_matmul(w, dX, dY, out, in, P);
-        fcuda_free(w);
-        return status;
+        FCUDA_TS("k_q3k_dequant", nb, dequantize_block_q3_K<<<nb, 64, 0, g_stream>>>(dQ3K, wHi, wLo));
+        FCUDA_TS("k_fp16_split", (xn + 255) / 256, k_fp16_split<<<(xn + 255) / 256, 256, 0, g_stream>>>(dX, xHi, xLo, xn));
+        const int gemm_status = fp16_compensated_gemm(wHi, wLo, xHi, xLo, dY, out, in, P);
+        const int release_status = fp16_compensated_release(&scratch);
+        return gemm_status != 0 ? gemm_status : release_status;
     }
     if (!valid || P > max_cols || g_q4k_decode_arm != 1) return fcuda_q3k_panel_f32(dQ3K, dX, dY, out, in, P);
     const size_t need = (size_t)P * (in / QK8_1) * sizeof(block_q8_1);
