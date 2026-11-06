@@ -74,6 +74,8 @@ type h2hRunFlags struct {
 	system       *int
 	turnTokens   *int
 	answer       *int
+	concurrency  *int
+	concList     *string
 	timeout      *time.Duration
 	keepThinking *bool
 	slotsURL     *string
@@ -99,6 +101,8 @@ func registerH2HRunFlags(fs *flag.FlagSet) *h2hRunFlags {
 	f.system = fs.Int("system", 4096, "multi-turn shared system prefix size in tokens")
 	f.turnTokens = fs.Int("turn-tokens", 256, "new user tokens per multi-turn turn")
 	f.answer = fs.Int("answer", 16, "max tokens for cold and multi-turn answers")
+	f.concurrency = fs.Int("concurrency", 1, "in-flight client streams replaying the full scenario sequence (1 = sequential)")
+	f.concList = fs.String("concurrency-list", "", "comma-separated concurrency grid run in one invocation, e.g. 1,2,4,8 (overrides --concurrency)")
 	f.timeout = fs.Duration("timeout", 10*time.Minute, "per-request timeout")
 	f.keepThinking = fs.Bool("keep-thinking", false, "do not send chat_template_kwargs.enable_thinking=false")
 	f.slotsURL = fs.String("slots-url", "", "llama-server /slots URL on the shared upstream: rows taken while another client held a slot are flagged and kept out of the medians")
@@ -179,17 +183,41 @@ func runBenchH2HRun(stdout, stderr io.Writer, argv []string) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	rows, err := h2hbench.Run(ctx, cfg)
-	if err != nil {
-		fmt.Fprintln(stderr, "fak bench h2h run:", err)
+	concs := []int{*f.concurrency}
+	if strings.TrimSpace(*f.concList) != "" {
+		cs, err := parsePositiveIntList(*f.concList)
+		if err != nil {
+			fmt.Fprintln(stderr, "fak bench h2h run: --concurrency-list:", err)
+			return 2
+		}
+		concs = cs
 	}
-	rep := h2hbench.Summarize(rows)
+	var all []h2hbench.Row
+	var runErr error
+	for _, c := range concs {
+		if err := ctx.Err(); err != nil {
+			runErr = err
+			break
+		}
+		cfg.Concurrency = c
+		if len(concs) > 1 {
+			fmt.Fprintf(stderr, "h2h run %s concurrency=%d\n", cfg.RunID, c)
+		}
+		rows, err := h2hbench.Run(ctx, cfg)
+		all = append(all, rows...)
+		if err != nil {
+			fmt.Fprintln(stderr, "fak bench h2h run:", err)
+			runErr = err
+			break
+		}
+	}
+	rep := h2hbench.Summarize(all)
 	if *jsonOut {
 		_ = json.NewEncoder(stdout).Encode(rep)
 	} else {
 		h2hbench.Render(stdout, rep)
 	}
-	if err != nil {
+	if runErr != nil {
 		return 1
 	}
 	return 0
