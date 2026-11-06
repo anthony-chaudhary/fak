@@ -195,7 +195,7 @@ func (s *Session) prefillF32(ids []int) []float32 {
 	wasQuant := s.Quant
 	s.Quant = false
 	defer func() { s.Quant = wasQuant }()
-	if q8PrefillNeedsTokenLoop(s.M.Cfg) {
+	if s.f32PrefillNeedsTokenLoop() {
 		return s.prefillTokenLoop(ids)
 	}
 	return s.head(s.prefillBatched(ids))
