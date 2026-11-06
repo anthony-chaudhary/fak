@@ -3,6 +3,7 @@ package compute
 import (
 	"errors"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -79,10 +80,20 @@ func TestV41IndexerAdmissionFaultBeforeCapability(t *testing.T) {
 	}
 	shim := read("vulkan_shim.cpp")
 	// The status getter is sufficient only while native pending quarantine
-	// implies nonzero sticky status. Every pending transition outside the
-	// checked completion (pinned below) must set sticky status in its own block.
+	// implies nonzero sticky status before a locked caller can observe it.
+	// Keep the preceding-status rule, except for the two exact adjacent async
+	// pairs audited below and the separately pinned checked completion.
 	checkedBody := section(shim, "bool v41EndSubmitWaitChecked(VkCommandBuffer cmd, bool submit) {", "\n}\n")
 	outside := strings.Replace(shim, checkedBody, "", 1)
+	for _, name := range []string{"drainInflight", "batchCycle"} {
+		body, ok := v41AsyncPendingStatusPair(outside, name)
+		if !ok {
+			t.Fatalf("%s lost its adjacent normalized pending/status publication", name)
+		}
+		// Exempt only this one verified transition, not the rest of the function.
+		audited := strings.Replace(body, "g_v41SubmissionPendingFailure = true;", "/* audited async pending/status pair */", 1)
+		outside = strings.Replace(outside, body, audited, 1)
+	}
 	lines := strings.Split(outside, "\n")
 	pending := 0
 	for i, line := range lines {
@@ -130,5 +141,92 @@ func TestV41IndexerAdmissionFaultBeforeCapability(t *testing.T) {
 	if strings.Count(production, "return ") != 1 || !strings.HasSuffix(production, "return v41IndexerScorePrerequisites() ? 1 : 0;") ||
 		strings.Contains(production, "getenv") {
 		t.Fatal("production capability is no longer exactly the dispatch prerequisites")
+	}
+}
+
+// v41AsyncPendingStatusPair recognizes only the two existing asynchronous
+// publishers. Both assignments must be adjacent complete code lines in that
+// exact function, with the same result and nonzero normalization. This is a
+// deliberately narrow source contract, not a general C++ control-flow parser.
+func v41AsyncPendingStatusPair(source, name string) (string, bool) {
+	result := ""
+	switch name {
+	case "drainInflight":
+		result = "wr"
+	case "batchCycle":
+		result = "sr"
+	default:
+		return "", false
+	}
+	signature := "void " + name + "() {"
+	if strings.Count(source, signature) != 1 {
+		return "", false
+	}
+	start := strings.Index(source, signature)
+	end := strings.Index(source[start:], "\n}\n")
+	if end < 0 {
+		return "", false
+	}
+	body := source[start : start+end+len("\n}\n")]
+	if strings.Count(body, "g_v41SubmissionPendingFailure = true;") != 1 {
+		return "", false
+	}
+	pair := regexp.MustCompile(`(?m)^[ \t]*g_v41SubmissionPendingFailure = true;\n[ \t]*g_submissionStatus = ` +
+		result + ` < VK_SUCCESS \? ` + result + ` : VK_ERROR_UNKNOWN;[ \t]*$`)
+	return body, len(pair.FindAllStringIndex(body, -1)) == 1
+}
+
+// The positive controls are unchanged production bodies. Each negative changes
+// only its named fault; no model of Vulkan submission or device timing is run.
+// fak-test:runtime fast est=5ms lane=default
+func TestV41AsyncPendingStatusPair(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile("vulkan_shim.cpp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const pending = "g_v41SubmissionPendingFailure = true;"
+	for _, tc := range []struct{ name, result, other string }{
+		{"drainInflight", "wr", "sr"},
+		{"batchCycle", "sr", "wr"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, ok := v41AsyncPendingStatusPair(string(raw), tc.name)
+			if !ok {
+				t.Fatal("actual async publisher was not recognized")
+			}
+			status := "g_submissionStatus = " + tc.result + " < VK_SUCCESS ? " + tc.result + " : VK_ERROR_UNKNOWN;"
+			if strings.Count(body, status) != 1 {
+				t.Fatal("mutation anchor must be unique in actual production body")
+			}
+			mutations := []struct{ name, old, replacement string }{
+				{"missing-status", status, ""},
+				{"zero-status", status, "g_submissionStatus = VK_SUCCESS;"},
+				{"raw-result", status, "g_submissionStatus = " + tc.result + ";"},
+				{"wrong-result", status, "g_submissionStatus = " + tc.other + " < VK_SUCCESS ? " + tc.other + " : VK_ERROR_UNKNOWN;"},
+				{"mismatched-result", "? " + tc.result + " :", "? " + tc.other + " :"},
+				{"wrong-comparison", tc.result + " < VK_SUCCESS", tc.result + " <= VK_SUCCESS"},
+				{"delayed-call", pending, pending + "\n        observe();"},
+				{"delayed-return", pending, pending + "\n        return;"},
+				{"conditional-status", status, "if (false) " + status},
+				{"commented-status", status, "// " + status},
+				{"duplicate-pending", pending, pending + "\n        " + pending},
+				{"wrong-context", "void " + tc.name + "() {", "void unrelated() {"},
+			}
+			for _, mutation := range mutations {
+				t.Run(mutation.name, func(t *testing.T) {
+					if strings.Count(body, mutation.old) != 1 {
+						t.Fatalf("mutation anchor %q is not unique", mutation.old)
+					}
+					changed := strings.Replace(body, mutation.old, mutation.replacement, 1)
+					if _, accepted := v41AsyncPendingStatusPair(changed, tc.name); accepted {
+						t.Fatal("unsafe publication mutation was accepted")
+					}
+				})
+			}
+			if _, accepted := v41AsyncPendingStatusPair(body, "unrelated"); accepted {
+				t.Fatal("unrelated function must not acquire an async exception")
+			}
+		})
 	}
 }

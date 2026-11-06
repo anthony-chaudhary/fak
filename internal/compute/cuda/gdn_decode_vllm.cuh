@@ -7,6 +7,8 @@
  * FAK uses FP32 activations and one canonical [head,key,value] carried state.
  * The upstream 1..8-token warp-row recurrence is retained; shared-memory
  * transposition adapts the state without a persistent layout or allocation change.
+ * FAK's independent-lane specialization reuses that arithmetic with one row and
+ * one canonical carried state per lane; it does not reinterpret lanes as time.
  */
 
 namespace fak_gdn_vllm {
@@ -82,13 +84,30 @@ __device__ __forceinline__ float warp_reduce_sum(float x) {
   return x;
 }
 
-template <int ValueHeadsPerKeyHead>
+// Bounded by-value kernel arguments: no device pointer to a host pointer array.
+// The caller already owns and validates one distinct recurrent state per lane.
+struct IndependentLaneStates { float* recurrent[kMaxTokens]; };
+
+template <int ValueHeadsPerKeyHead, bool IndependentLanes = false>
 __global__ __launch_bounds__(kThreads, 1) void k_qwen35_gdn_post_conv_vllm(
     const float* __restrict__ mixed_qkv, const float* __restrict__ a,
     const float* __restrict__ b, const float* __restrict__ a_log,
     const float* __restrict__ dt_bias, float* __restrict__ state,
     const float* __restrict__ output_gate, const float* __restrict__ norm_weight,
-    float* __restrict__ out, int tokens, int nK, int nV, int convDim, float norm_eps) {
+    float* __restrict__ out, int tokens, int nK, int nV, int convDim, float norm_eps,
+    IndependentLaneStates lane_states = {}) {
+  // Independent decode lanes share weights, not carried state or time. The
+  // default specialization retains the original contiguous-token addressing.
+  if (IndependentLanes) {
+    const size_t batch = static_cast<size_t>(blockIdx.y);
+    mixed_qkv += batch * convDim;
+    a += batch * nV;
+    b += batch * nV;
+    output_gate += batch * nV * kDim;
+    out += batch * nV * kDim;
+    state = lane_states.recurrent[batch];
+    tokens = 1;
+  }
   const int value_head = blockIdx.x;
   const int tid = threadIdx.x;
   const int lane = tid & 31;
@@ -278,6 +297,44 @@ static int dispatch(const float* mixed, const float* a, const float* b,
     default: return -1;
   }
 #undef FAK_GDN_VLLM_CASE
+}
+
+// Independent-lane adaptation of the retained Apache-2.0 vLLM port above.
+// Grid.y selects a lane-owned state and one activation row; no allocation or
+// public ABI change. Keep the ordinary contiguous dispatch separate.
+template <int Ratio>
+static int launch_lanes(const float* mixed, const float* a, const float* b,
+                        const float* aLog, const float* dtBias, IndependentLaneStates states,
+                        const float* z, const float* norm, float* core,
+                        int lanes, int nK, int nV, int convDim, float eps) {
+  const dim3 grid((unsigned)nV, (unsigned)lanes);
+  int status = 0;
+  FCUDA_TS("k_qwen35_gdn_post_conv_vllm", grid,
+      k_qwen35_gdn_post_conv_vllm<Ratio, true><<<grid, kThreads, 0, g_stream>>>(
+          mixed, a, b, aLog, dtBias, nullptr, z, norm, core,
+          1, nK, nV, convDim, eps, states);
+      status = qwen35_gdn_launch_status(5));
+  return status;
+}
+
+static int dispatch_lanes(const float* mixed, const float* a, const float* b,
+                          const float* aLog, const float* dtBias, IndependentLaneStates states,
+                          const float* z, const float* norm, float* core,
+                          int lanes, int nK, int nV, int convDim, float eps) {
+  if (lanes < 1 || lanes > kMaxTokens || nK <= 0 || nV <= 0 || nV % nK != 0)
+    return -1;
+  for (int lane = 0; lane < lanes; ++lane) if (!states.recurrent[lane]) return -1;
+#define FAK_GDN_VLLM_LANES_CASE(ratio) case ratio: return launch_lanes<ratio>( \
+    mixed, a, b, aLog, dtBias, states, z, norm, core, lanes, nK, nV, convDim, eps)
+  switch (nV / nK) {
+    FAK_GDN_VLLM_LANES_CASE(1);
+    FAK_GDN_VLLM_LANES_CASE(2);
+    FAK_GDN_VLLM_LANES_CASE(3);
+    FAK_GDN_VLLM_LANES_CASE(4);
+    FAK_GDN_VLLM_LANES_CASE(8);
+    default: return -1;
+  }
+#undef FAK_GDN_VLLM_LANES_CASE
 }
 
 }  // namespace fak_gdn_vllm

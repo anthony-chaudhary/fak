@@ -188,6 +188,16 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	if rejectStopLimits(w, req.StopSequences) {
 		return
 	}
+	// Alias-variant fallback (audit finding 2, ticket claude-alias-fallback): resolve
+	// a variant-spelled model id (`<alias>[1m]`, `<alias>-1m`) to its served base
+	// BEFORE anything binds to the label — the conversation key, the roster/chat-route
+	// binding, the dual-planner routing, the turn echo, and the passthrough raw bytes
+	// all read req.Model below. A variant with no resolvable base fails closed here
+	// with a typed model_not_found instead of riding downstream to die as an empty
+	// turn; a non-variant id is untouched (the pass-through contract stands).
+	if !s.normalizeAnthropicRequestModel(w, req) {
+		return
+	}
 	s.bindUnkeyedWireConversation(w, r, "anthropic", req.Model, req.Raw)
 	r, ok = s.prepareChatRoute(w, r, req.Model)
 	if !ok {

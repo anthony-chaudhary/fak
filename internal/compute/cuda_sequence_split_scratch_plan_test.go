@@ -14,6 +14,7 @@ func TestCUDASequenceSplitScratchPlan(t *testing.T) {
 	q8 := splitPlanTensor(Q8_0, 4, 256)
 	q4 := splitPlanTensor(Q4_K, 8, 256)
 	q2 := splitPlanTensor(Q2_K, 7, 512)
+	q3 := splitPlanTensor(Q3_K, 8, 512)
 	badArm := errors.New("latched Q4 arm refusal")
 	gdn := Qwen35SequenceLayer{Linear: true,
 		GDNInQKV: splitPlanTensor(Q8_0, 40, 256), GDNInZ: splitPlanTensor(Q8_0, 24, 256),
@@ -32,6 +33,24 @@ func TestCUDASequenceSplitScratchPlan(t *testing.T) {
 		{name: "127 rows no loan", tokens: 127, layer: Qwen35SequenceLayer{Gate: q4}, armErr: badArm},
 		{name: "Q8 threshold", tokens: 128, layer: Qwen35SequenceLayer{Gate: q8}, w: 2048, x: 65536},
 		{name: "Q2", tokens: 128, layer: Qwen35SequenceLayer{Down: q2}, w: 7168, x: 131072},
+		{name: "Q3 only ignores unrelated Q4 refusal", tokens: 128, layer: Qwen35SequenceLayer{Gate: q3}, armErr: badArm, w: 8192, x: 131072},
+		{name: "Q3 exceeds mixed Q8 loan", tokens: 128, layer: Qwen35SequenceLayer{Gate: q8, Down: q3}, w: 8192, x: 131072},
+		{name: "Q3 weight and Q8 activation maxima", tokens: 128, layer: Qwen35SequenceLayer{
+			Gate: splitPlanTensor(Q3_K, 1024, 256), Down: splitPlanTensor(Q8_0, 128, 512)}, w: 524288, x: 131072},
+		{name: "Q8 weight and Q3 activation maxima", tokens: 128, layer: Qwen35SequenceLayer{
+			Gate: splitPlanTensor(Q8_0, 1024, 256), Up: splitPlanTensor(Q3_K, 128, 512)}, w: 524288, x: 131072},
+		{name: "Q3 sub-128 stays outside loan", tokens: 127, layer: Qwen35SequenceLayer{Gate: q3}},
+		{name: "Q3 attention Q", tokens: 128, layer: Qwen35SequenceLayer{Q: q3}, w: 8192, x: 131072},
+		{name: "Q3 attention K", tokens: 128, layer: Qwen35SequenceLayer{K: q3}, w: 8192, x: 131072},
+		{name: "Q3 attention V", tokens: 128, layer: Qwen35SequenceLayer{V: q3}, w: 8192, x: 131072},
+		{name: "Q3 attention O", tokens: 128, layer: Qwen35SequenceLayer{O: q3}, w: 8192, x: 131072},
+		{name: "unsupported GDN Q3 remains excluded", tokens: 128, layer: Qwen35SequenceLayer{
+			Linear: true, GDNInQKV: q3, GDNInZ: q3, GDNInB: q3, GDNInA: q3, GDNOut: q3}},
+		{name: "Q3 zero dimension", tokens: 128, layer: Qwen35SequenceLayer{Gate: splitPlanTensor(Q3_K, 0, 256)}, wantErr: true},
+		{name: "Q3 negative dimension", tokens: 128, layer: Qwen35SequenceLayer{Gate: splitPlanTensor(Q3_K, 8, -256)}, wantErr: true},
+		{name: "Q3 wrong rank", tokens: 128, layer: Qwen35SequenceLayer{Gate: Tensor{Dtype: Q3_K, Shape: []int{8, 256, 1}}}, wantErr: true},
+		{name: "Q3 weight product overflow", tokens: 128, layer: Qwen35SequenceLayer{Gate: splitPlanTensor(Q3_K, 65536, 65536)}, wantErr: true},
+		{name: "Q3 activation product overflow", tokens: 128, layer: Qwen35SequenceLayer{Gate: splitPlanTensor(Q3_K, 1, 1<<25)}, wantErr: true},
 		{name: "IQ4_XS exceeds mixed GDN Q8 loan", tokens: 128, layer: Qwen35SequenceLayer{
 			Linear: true, Gate: splitPlanTensor(IQ4_XS, 1024, 256),
 			GDNOut: splitPlanTensor(Q8_0, 256, 128)}, w: 524288, x: 65536},

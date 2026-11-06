@@ -1418,23 +1418,34 @@ extern "C" int fcuda_qwen35_gdn_decode_lanes_f32(
       dMixed, dConvW, states, dConvOut, convDim, convKernel));
   status = qwen35_gdn_launch_status(3);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
-  int qThreads = qwen35_gdn_threads(kHd);
-  FCUDA_TS("k_qwen35_gdn_qk_norm_panel", dim3(nK, lanes), k_qwen35_gdn_qk_norm_panel<<<dim3(nK, lanes), qThreads, (size_t)2 * qThreads * sizeof(float), g_stream>>>(
-      dConvOut, dQNorm, dKNorm, lanes, convDim, nK, kHd));
-  status = qwen35_gdn_launch_status(4);
-  if (status != 0) return qwen35_gdn_drain_after_error(status);
-  int vThreads = qwen35_gdn_threads(vHd);
-  if (vThreads > kQwen35GDNDecodeRegisterMaxThreads) return -1;
-  dim3 recGrid((unsigned)nV, (unsigned)lanes);
-  if (kHd <= kQwen35GDNDecodeRegisterMaxKeyHeadDim) {
-    FCUDA_TS("k_qwen35_gdn_recurrent_gated_norm_lanes", recGrid, k_qwen35_gdn_recurrent_gated_norm_lanes<true><<<recGrid, vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
-        dConvOut, dQNorm, dKNorm, dZ, dB, dA, dALog, dDtBias, dNorm, states, dCore, nK, nV, kHd, vHd, rmsEps));
+  // Opt-in fused post-conv work keeps each independent lane's own state.
+  if (fak_gdn_vllm::eligible(getenv("FAK_CUDA_GDN_POST_CONV"), lanes, nK, nV, kHd, vHd, g_capture_open)) {
+    status = qwen35_gdn_launch_status(4);
+    if (status != 0) return qwen35_gdn_drain_after_error(status);
+    fak_gdn_vllm::IndependentLaneStates laneStates = {};
+    for (int l = 0; l < lanes; ++l) laneStates.recurrent[l] = states.recurrent[l];
+    status = fak_gdn_vllm::dispatch_lanes(dConvOut, dA, dB, dALog, dDtBias,
+        laneStates, dZ, dNorm, dCore, lanes, nK, nV, convDim, rmsEps);
+    if (status != 0) return qwen35_gdn_drain_after_error(status);
   } else {
-    FCUDA_TS("k_qwen35_gdn_recurrent_gated_norm_lanes", recGrid, k_qwen35_gdn_recurrent_gated_norm_lanes<false><<<recGrid, vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
-        dConvOut, dQNorm, dKNorm, dZ, dB, dA, dALog, dDtBias, dNorm, states, dCore, nK, nV, kHd, vHd, rmsEps));
+    int qThreads = qwen35_gdn_threads(kHd);
+    FCUDA_TS("k_qwen35_gdn_qk_norm_panel", dim3(nK, lanes), k_qwen35_gdn_qk_norm_panel<<<dim3(nK, lanes), qThreads, (size_t)2 * qThreads * sizeof(float), g_stream>>>(
+        dConvOut, dQNorm, dKNorm, lanes, convDim, nK, kHd));
+    status = qwen35_gdn_launch_status(4);
+    if (status != 0) return qwen35_gdn_drain_after_error(status);
+    int vThreads = qwen35_gdn_threads(vHd);
+    if (vThreads > kQwen35GDNDecodeRegisterMaxThreads) return -1;
+    dim3 recGrid((unsigned)nV, (unsigned)lanes);
+    if (kHd <= kQwen35GDNDecodeRegisterMaxKeyHeadDim) {
+      FCUDA_TS("k_qwen35_gdn_recurrent_gated_norm_lanes", recGrid, k_qwen35_gdn_recurrent_gated_norm_lanes<true><<<recGrid, vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
+          dConvOut, dQNorm, dKNorm, dZ, dB, dA, dALog, dDtBias, dNorm, states, dCore, nK, nV, kHd, vHd, rmsEps));
+    } else {
+      FCUDA_TS("k_qwen35_gdn_recurrent_gated_norm_lanes", recGrid, k_qwen35_gdn_recurrent_gated_norm_lanes<false><<<recGrid, vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
+          dConvOut, dQNorm, dKNorm, dZ, dB, dA, dALog, dDtBias, dNorm, states, dCore, nK, nV, kHd, vHd, rmsEps));
+    }
+    status = qwen35_gdn_launch_status(5);
+    if (status != 0) return qwen35_gdn_drain_after_error(status);
   }
-  status = qwen35_gdn_launch_status(5);
-  if (status != 0) return qwen35_gdn_drain_after_error(status);
   FCUDA_TS("k_qwen35_gdn_out_proj_lanes", hidden, k_qwen35_gdn_out_proj_lanes<<<hidden, 256, 0, g_stream>>>(
       dOutW, dOutWScale, outWQ8, dCore, dOut, lanes, hidden, valueDim));
   status = qwen35_gdn_launch_status(6);

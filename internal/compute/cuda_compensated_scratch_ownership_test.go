@@ -67,6 +67,7 @@ func TestCUDACompensatedScratchFailureOwnership(t *testing.T) {
 	}
 	gdn, quant := read("cuda/qwen35_gdn.cuh"), read("cuda/quant_matmul.cuh")
 	iq4xs := read("cuda/iq4xs_mmvq.cuh")
+	q3k := read("cuda/q3k_mmvq.cuh")
 	memory, header := read("cuda/runtime_memory.cuh"), read("cuda_backend.h")
 	loan := strings.Contains(gdn, "struct SequenceSplitOwner")
 	// Compile the actual ledger, including its pointer table and atomic counters.
@@ -116,6 +117,7 @@ func TestCUDACompensatedScratchFailureOwnership(t *testing.T) {
 		{quant, "extern \"C\" int fcuda_q4k_matmul_f32(", "if (P >= 128)", "size_t wn ="},
 		{quant, "extern \"C\" int fcuda_q2k_matmul_f32(", "if (P >= 128)", "size_t wn ="},
 		{iq4xs, "extern \"C\" int fcuda_iq4xs_matmul_f32(", "if (P >= FCUDA_IQ4XS_DEQUANT_MIN_P)", "const size_t wn ="},
+		{q3k, "extern \"C\" int fcuda_q3k_matmul_f32(", "if (valid && P >= 128)", "const size_t wn ="},
 	} {
 		body := function(tc.source, tc.signature)
 		if tc.branch != "" {
@@ -388,7 +390,7 @@ static bool private_ledger_matches() {
 #endif
 int main() {
   using Route=int (*)(int,int,int);
-  const Route routes[]={route0, route1, route2, route3, route4};
+  const Route routes[]={route0, route1, route2, route3, route4, route5};
   // The shared allocator consumes a real capacity miss exactly once, while
   // leaving a non-OOM execution fault pending for the next status reader.
   reset_context(); alloc_fail_at=1;
@@ -398,7 +400,7 @@ int main() {
   CHECK(fcuda_malloc(1024)==nullptr);
   CHECK(last_error==700 && get_last_error_calls==0 && g_live.empty());
   // Synchronous cuBLAS errors cannot become scratch-release success. Test the
-  // exact helper and all five actual caller suffixes; these are synthetic
+  // exact helper and all six actual caller suffixes; these are synthetic
   // statuses, not a CUDA numerical, device, or asynchronous-error witness.
   for (Route route : routes) {
     for (int fail=1; fail<=3; ++fail) {

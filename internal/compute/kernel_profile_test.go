@@ -425,8 +425,26 @@ func TestTimestampProfileCountsLostBatches(t *testing.T) {
 			t.Errorf("shim lost-batch accounting %s is missing", name)
 		}
 	}
-	if got := strings.Count(src, "tsBatchCollect();"); got != 2 {
-		t.Errorf("tsBatchCollect call sites = %d, want 2 (each with a lost-batch branch)", got)
+	// The asynchronous retire path is a third collector, not an unguarded
+	// timestamp read. Its loss decision and quarantine return must precede
+	// collection in the checked-batch block of the actual drain function.
+	drain := cFuncBody(t, src, "void drainInflight() {")
+	async := regexp.MustCompile(`if \(done\.v41\) \{\n(?:[ \t]*//[^\n]*\n)*[ \t]*if \(!completed \|\| !done\.hadWork \|\| g_v41SubmissionPendingFailure\) tsBatchLost\(\);\n[ \t]*if \(g_v41SubmissionPendingFailure\) return;[ \t]*(?://[^\n]*)?\n[ \t]*if \(completed && done\.hadWork\) tsBatchCollect\(\);\n[ \t]*\}`)
+	if !async.MatchString(drain) || strings.Count(drain, "tsBatchCollect();") != 1 {
+		t.Error("asynchronous checked retire must lose or conditionally collect timestamps after quarantine refusal")
+	}
+	for name, mutation := range map[string]string{
+		"wrong-member":             strings.ReplaceAll(drain, "done.", "done_"),
+		"missing-loss":             strings.Replace(drain, "if (!completed || !done.hadWork || g_v41SubmissionPendingFailure) tsBatchLost();", "", 1),
+		"missing-refusal":          strings.Replace(drain, "if (g_v41SubmissionPendingFailure) return;", "", 1),
+		"unconditional-collection": strings.Replace(drain, "if (completed && done.hadWork) tsBatchCollect();", "tsBatchCollect();", 1),
+	} {
+		if mutation == drain || async.MatchString(mutation) {
+			t.Errorf("asynchronous timestamp contract accepted %s mutation", name)
+		}
+	}
+	if got := strings.Count(src, "tsBatchCollect();"); got != 3 {
+		t.Errorf("tsBatchCollect call sites = %d, want 3 (each with a lost-batch branch)", got)
 	}
 }
 
