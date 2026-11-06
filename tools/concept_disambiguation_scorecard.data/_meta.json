@@ -7759,6 +7759,16 @@
           "category": "incidental",
           "reason": "Reference to the existing ordinary serving-loader witness in an oracle description; no new session lifecycle or runtime abstraction is introduced.",
           "token": "SessionPrefill"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed #12100 readiness audit code for an existing session descriptor that cannot be decoded or matched to its ref identity; not a separate session-runtime primitive.",
+          "token": "UNREADABLE_SESSION_RECORD"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed #12100 readiness audit code for unbounded, missing, future-dated or overflow-prone heartbeat/TTL evidence; it reports unknown liveness and introduces no separate session-runtime primitive.",
+          "token": "UNKNOWN_SESSION_EVIDENCE"
         }
       ],
       "exclude": [
@@ -7904,6 +7914,8 @@
         "SetSessionAffinity",
         "SoftSlotStolen",
         "StoreVerifiedSlot",
+        "UNKNOWN_SESSION_EVIDENCE",
+        "UNREADABLE_SESSION_RECORD",
         "UNSUPPORTED_SESSION_KIND",
         "V41ExpertParallelSessionRequest",
         "VerifySessionMoveDestinationReceipt",

@@ -202,7 +202,7 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
       The delete is an ordinary ref delete that converges across clones the same way
       acquisition does.
 
-  fak leaseref audit [--dir DIR]
+  fak leaseref audit [--dir DIR] [--require-ready]
       READ-ONLY staleness report over refs/fak/locks/*: list every lease, classify
       live-vs-expired against now, and emit the garden control-pane envelope
       (ok/verdict/reason) plus would_reap[] dry-run evidence: owner, lane, tree,
@@ -215,6 +215,11 @@ const leaserefUsage = `fak leaseref - cross-machine lease visibility (over inter
       fenced release by its holder or an explicit operator --force, not the reaper.
       Reaps NOTHING — verdict ACTION
       is the signal to act. This is the member 'fak garden' folds.
+      --require-ready emits fak.leaseref-readiness.v1 and exits 1 while blocked.
+      It strictly reads pinned lease/session objects, exposes incompatible records,
+      and joins TTL hygiene with session liveness without mutating any refs.
+      Local Git observations, even when stable, cannot prove authoritative
+      freshness: this mode remains not ready until that authority is available.
 
   fak leaseref acquire --id ID --holder H [--session S] [--tree GLOB ...] [--ttl SEC] [--dir DIR] [--announce on|off|offline --announce-issue N --announce-repo OWNER/REPO]
       FENCED acquire (#906-C1): take the lease with a monotonic fencing token.
@@ -539,11 +544,15 @@ func runLeaserefAudit(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	dir := fs.String("dir", "", "repo dir (default: git discovery from cwd)")
 	asControlPane := fs.Bool("control-pane", false, "emit the garden control-pane envelope (the default for this verb)")
+	requireReady := fs.Bool("require-ready", false, "emit a fail-closed LAN-readiness report; local Git visibility alone is never READY")
 	_ = asControlPane // the audit verb only speaks the control-pane envelope; the flag is accepted for symmetry
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
 	*dir = pathutil.ExpandTilde(*dir)
+	if *requireReady {
+		return runLeaserefReadiness(stdout, stderr, *dir)
+	}
 	store := leaseref.NewInDir(*dir)
 	ctx := context.Background()
 	recs, err := store.List(ctx)
