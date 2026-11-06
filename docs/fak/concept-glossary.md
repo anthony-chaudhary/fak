@@ -2273,3 +2273,45 @@ Complete-image eager FP8 eviction entry that constructs a current-owner canonica
 Executes a prepared generation-bound FP8 eviction mapping through disjoint all-layer staging, exact retained-row copies, bounded suffix rerotation, quantization and checked completion before publication.
 
 **Distinct from:** This consumes an existing mapping, whereas kvFP8EvictEager also plans it and planEvict only constructs it. It does not compact in place, activate a serving constructor or qualify graph replay, device lifetime or performance.
+
+
+### kvFP8AttentionQuery
+
+Private retained F32 query owner, exact byte extent and backend/device metadata for one staged FP8 attention operation.
+
+**Distinct from:** Unlike fcuda_kv_attention_typed, this value neither executes attention nor owns the staged KV image; it retains the source query and does not prove numerical validity or expose a public Tensor.
+
+
+### kvFP8AttentionOutput
+
+Ephemeral F32 output allocation view and cumulative numerical-status allocation scoped to the checked staged-attention use callback.
+
+**Distinct from:** Unlike the retained input kvFP8AttentionQuery, this borrowed view represents the fresh output and status used inside the callback; it is not an owning public Buffer, a returned Tensor or an attention executor.
+
+
+### kvFP8AttentionRoots
+
+Retention holder for prior raw/key/value input roots, the query owner and fresh output allocation across uncertain staged FP8 attention work.
+
+**Distinct from:** Unlike the query or output views, this holder keeps their underlying roots reachable before allocation or submission and through abnormal control transfer; it is not a cache, reusable pool, checked completion receipt or numerical-validity claim.
+
+
+### kvFP8AttentionBytes
+
+Checked F32 query/output byte-extent calculation for the bounded four-KV-head, head-dimension-256 staged FP8 attention geometry.
+
+**Distinct from:** Unlike the retained query/output/roots values and attention entrypoints, this helper performs only bounded dimension and integer-overflow checks; it neither allocates memory nor reserves global capacity or establishes device support.
+
+
+### cudaKVFP8Adapter.stagedAttentionLocked
+
+Uncalled qualification-only typed query gate and binding of the retained staged-attention helper to the private native FP8 attention wrapper under existing ForwardExecutionOwner and cudaMu serialization.
+
+**Distinct from:** Unlike the query/output metadata and the native wrapper alone, this adapter validates Tensor provenance and binds checked host lifecycle callbacks; it is not a public model or serving route, graph capture path or default attention dispatch.
+
+
+### fcuda_kv_fp8_attention_owned
+
+Private native five-plane, query, output and status provenance/extent/alias gate around the existing scalar FP8 attention submission, returning a selected diagnostic receipt.
+
+**Distinct from:** Unlike the qualification-only typed adapter and the F16/BF16 fcuda_kv_attention_typed entry, this wrapper admits private FP8 planes and fresh output; zero status means accepted submission only, not checked completion, numerical validity, publication or H200 qualification.

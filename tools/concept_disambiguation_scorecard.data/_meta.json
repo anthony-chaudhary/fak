@@ -2386,6 +2386,21 @@
           "category": "incidental",
           "reason": "Build-tag spelling for the immutable qualification-only admission gate of the separately positioned attnDecodeQ8Packed consumer (host-q8-packed-decode-tile). Ordinary builds keep the gate false; the tag changes that gate, not attention arithmetic, cache ownership, eligibility, precedence or fallback. It is not a distinct attention operator, a maturity assertion, performance promotion or permission for default enablement.",
           "token": "fak_qattn_q8_packed_qualification"
+        },
+        {
+          "category": "incidental",
+          "reason": "Cgo include-header filename spelling for the private owned FP8 attention ABI. The real native wrapper and qualification adapter are separately positioned; the header token does not denote another attention operation.",
+          "token": "cuda_kv_fp8_attention_owner"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal Go error sentinel reporting staged-attention contract refusal, not an attention implementation, capability claim or selection policy. The real query/output/roots/extent and native/adapter symbols are separately positioned.",
+          "token": "errKVFP8Attention"
+        },
+        {
+          "category": "incidental",
+          "reason": "Diagnostic phase code 14 used to select native failure provenance. It is not an attention implementation, completion proof, numerical-validity claim or hardware qualification.",
+          "token": "FCUDA_KV_FP8_PHASE_ATTENTION"
         }
       ],
       "exclude": [
@@ -2401,6 +2416,7 @@
         "ExecutionPrefillAttention",
         "FAK_CUDA_QWEN35_ATTN_POSTPROCESS",
         "FAK_QATTN_Q8_PACKED",
+        "FCUDA_KV_FP8_PHASE_ATTENTION",
         "MetalFallbackPrefillAttentionCPU",
         "PrefillAttentionSupported",
         "PrefillAttentionTiming",
@@ -2433,6 +2449,8 @@
         "cudaV41SharedAttentionFlags",
         "cudaV41SharedAttentionKey",
         "cudaV41SharedAttentionTags",
+        "cuda_kv_fp8_attention_owner",
+        "errKVFP8Attention",
         "estimated_attention_s",
         "executevulkanattentionwithdequantonce",
         "fak_qattn_q8_packed_qualification",
