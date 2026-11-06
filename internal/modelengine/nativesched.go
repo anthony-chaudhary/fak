@@ -1869,25 +1869,18 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 		}
 		if len(active) > 0 {
 			s.recorder.ObserveCohort(len(active))
-			stepStarted := s.now()
 			s.stepOnce(active, iteration)
-			s.recorder.ObserveDecodeStep(enginestep.PathBatched, len(active), s.now().Sub(stepStarted))
 		}
 	} else if solo != nil {
 		s.recorder.ObserveCohort(1)
-		stepStarted := s.now()
 		if donated {
 			s.stepOnce([]*schedLane{solo}, iteration)
-			s.recorder.ObserveDecodeStep(enginestep.PathSerial, 1, s.now().Sub(stepStarted))
 		} else {
 			s.stepSolo(solo, iteration)
-			s.recorder.ObserveDecodeStep(enginestep.PathSerial, 1, s.now().Sub(stepStarted))
 		}
 	} else {
 		s.recorder.ObserveCohort(len(active))
-		stepStarted := s.now()
 		s.stepOnce(active, iteration)
-		s.recorder.ObserveDecodeStep(enginestep.PathBatched, len(active), s.now().Sub(stepStarted))
 	}
 	// Cadence stamping (vLLM scheduler.py:1562-1577): count only steps that
 	// actually scheduled tokens, restart the interval from any step that
@@ -2058,7 +2051,9 @@ func (s *NativeScheduler) stepSolo(ln *schedLane, iteration uint64) {
 		logits := RunWithOp(s.coupler, OpDecode, func() []float32 {
 			return gen.Impl.Step(sess, next)
 		})
-		s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
+		elapsed := s.now().Sub(decodeStarted)
+		s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, elapsed)
+		s.recorder.ObserveDecodeStep(enginestep.PathSerial, 1, elapsed)
 		if !s.publishDecodeSession(ln, sess, logits) {
 			return
 		}
@@ -2143,7 +2138,9 @@ func (s *NativeScheduler) stepOnce(active []*schedLane, iteration uint64) {
 		logits := RunWithOp(s.coupler, OpDecode, func() []float32 {
 			return gen.Impl.Step(seqs[0], execIDs[0])
 		})
-		s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
+		elapsed := s.now().Sub(decodeStarted)
+		s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, elapsed)
+		s.recorder.ObserveDecodeStep(enginestep.PathSerial, 1, elapsed)
 		if s.publishDecodeSession(execLanes[0], seqs[0], logits) {
 			execLanes[0].retireDeferredToken(iteration)
 			execLanes[0].stageDeferredToken()
@@ -2155,6 +2152,9 @@ func (s *NativeScheduler) stepOnce(active []*schedLane, iteration uint64) {
 	// still-running lane's own Session (each owns its KV). This is the exact
 	// continuous-batching primitive a real native scheduler is built on.
 	bs := &model.BatchSession{M: s.m, Seqs: seqs}
+	if s.recorder != nil {
+		bs.ObserveSerialStep = s.recorder.ObserveSerialFallback
+	}
 	for _, ln := range execLanes {
 		s.beforeModelExecution(nativeSchedulerEventDecode, ln)
 	}
@@ -2165,8 +2165,12 @@ func (s *NativeScheduler) stepOnce(active []*schedLane, iteration uint64) {
 	out := RunWithOp(s.coupler, OpBatch, func() [][]float32 {
 		return gen.Impl.StepBatch(bs, execIDs)
 	})
-	s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
+	elapsed := s.now().Sub(decodeStarted)
+	s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, elapsed)
 	if panels := bs.LastStepSharedPanels(); panels > 0 {
+		// Scheduling a cohort is not shared execution: declined batches are
+		// observed per actual scalar forward by ObserveSerialStep instead.
+		s.recorder.ObserveDecodeStep(enginestep.PathBatched, len(execLanes), elapsed)
 		s.mu.Lock()
 		s.sharedBatchSteps++
 		s.sharedPanels += uint64(panels)

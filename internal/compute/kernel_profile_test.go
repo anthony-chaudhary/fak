@@ -755,6 +755,63 @@ var cudaUntimedTransferSites = map[string]bool{
 	"cuda/async_upload.cuh:fcuda_upload_async": true,
 }
 
+// The checked uploader records whether a copy was attempted before draining
+// failures. Its one untimed-transfer counter dominates that exact guarded copy;
+// the intervening bookkeeping does not make the copy a g_stream timing row.
+func cudaAsyncUploadAccountingSite(path, src string, off int) bool {
+	if path != "cuda/async_upload.cuh" {
+		return false
+	}
+	const begin = `extern "C" int fcuda_upload_async(`
+	const end = `extern "C" int fcuda_upload_async_fence(`
+	if strings.Count(src, begin) != 1 || strings.Count(src, end) != 1 {
+		return false
+	}
+	start, stop := strings.Index(src, begin), strings.Index(src, end)
+	if stop <= start || off < start || off >= stop {
+		return false
+	}
+	body := src[start:stop]
+	if strings.Count(body, "fcuda_ts_untimed_transfer(") != 1 || strings.Count(body, "cudaMemcpyAsync(") != 1 {
+		return false
+	}
+	copy := regexp.MustCompile(`if \(!st\) st = fcuda_async_status\(cudaStreamWaitEvent\(g_copy_stream, g_copy_order, 0\), "order wait"\);\s+fcuda_ts_untimed_transfer\(\);\s+bool copy_attempted = false;\s+if \(!st\) \{\s+copy_attempted = true;\s+st = fcuda_async_status\((cudaMemcpyAsync)\(d, s\.host, n, cudaMemcpyHostToDevice, g_copy_stream\), "memcpy"\);\s+\}`)
+	matches := copy.FindAllStringSubmatchIndex(body, -1)
+	return len(matches) == 1 && start+matches[0][2] == off
+}
+
+// fak-test:runtime fast est=20ms lane=default
+func TestCUDAAsyncUploadAccountingSourceContract(t *testing.T) {
+	const path = "cuda/async_upload.cuh"
+	src := cudaProfileSources(t)[path]
+	check := func(s string, want bool) {
+		t.Helper()
+		off := strings.Index(s, "cudaMemcpyAsync(")
+		if got := cudaAsyncUploadAccountingSite(path, s, off); got != want {
+			t.Fatalf("checked async upload accounting accepted=%v want=%v", got, want)
+		}
+	}
+	check(src, true)
+	for _, mutation := range []struct{ old, new string }{
+		{"fcuda_ts_untimed_transfer();", ""},
+		{"fcuda_ts_untimed_transfer();", "fcuda_ts_untimed_transfer(); fcuda_ts_untimed_transfer();"},
+		{"fcuda_ts_untimed_transfer();", "if (st) fcuda_ts_untimed_transfer();"},
+		{"bool copy_attempted = false;", "return 1; bool copy_attempted = false;"},
+		{"copy_attempted = true;", "copy_attempted = true; fcuda_async_init();"},
+		{"if (!st) {", "if (st) {"},
+		{"cudaMemcpyHostToDevice, g_copy_stream", "cudaMemcpyHostToDevice, g_stream"},
+	} {
+		if !strings.Contains(src, mutation.old) {
+			t.Fatalf("mutation absent: %q", mutation.old)
+		}
+		check(strings.Replace(src, mutation.old, mutation.new, 1), false)
+	}
+	if cudaAsyncUploadAccountingSite("cuda/other.cuh", src, strings.Index(src, "cudaMemcpyAsync(")) ||
+		cudaAsyncUploadAccountingSite(path, src, 0) {
+		t.Fatal("foreign path or offset accepted")
+	}
+}
+
 // These exact bodies are deliberately closed source contracts, not a general
 // callback/dataflow exemption. Any changed control flow must be reviewed again.
 func cudaTokenomosAccountingSite(srcs map[string]string, path string, off int, sync bool) bool {
@@ -940,7 +997,8 @@ func TestCUDATimestampSourceCoversEveryLaunch(t *testing.T) {
 				continue
 			}
 			line := src[:strings.LastIndex(src[:m[0]], "\n")+1]
-			if got == "" && cudaUntimedNote.MatchString(line) && cudaUntimedTransferSites[path+":"+cudaEnclosingFunc(src, m[0])] {
+			if got == "" && cudaUntimedTransferSites[path+":"+cudaEnclosingFunc(src, m[0])] &&
+				(cudaUntimedNote.MatchString(line) || cudaAsyncUploadAccountingSite(path, src, m[0])) {
 				continue
 			}
 			t.Errorf("%s:%d %s in %s is timed as %q, want %q (or a listed untimed transfer)", path, at(src, m[0]), call, cudaEnclosingFunc(src, m[0]), got, want)

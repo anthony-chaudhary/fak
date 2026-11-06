@@ -6,6 +6,8 @@
 // Checked launch/writeback/stream-k scaffolding reused from private q3k_mmq,
 // originally Fak q4k_mmq.cuh, whose
 // upstream pin is 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd.
+// Stream-K iteration cap additionally follows llama.cpp change
+// 4c1004c49221b07c3b8108977e3d1991fc9f45cc (ggml/src/ggml-cuda/mmq.cuh).
 // Copyright (c) 2023-2026 The ggml authors. MIT text follows.
 /*
 MIT License
@@ -654,13 +656,19 @@ static int launch_mul_mat_q(q8_weight_view x, const int * y, float * dst, int nr
     // For the stream-k kernel it is possible to run it with tiling by setting the number of CUDA blocks equal to the number of tiles.
     // This is worthwhile if the efficiency of tiling is high and skipping the fixup kernel is more important.
     const int ntiles_dst = ntx * nty;
-    const int64_t tiles_nwaves = ((int64_t)ntiles_dst + info.nsm - 1) / info.nsm;
-    const int tiles_efficiency_percent = (int)(100LL * ntiles_dst / (info.nsm*tiles_nwaves));
-    const dim3 block_nums_stream_k(tiles_efficiency_percent >= 90 ? ntiles_dst : info.nsm, 1, 1);
-
-    if ((int64_t) ntiles_dst * blocks_per_ne00_fd.z >= (1 << 30)) { // kbc would overflow.
+    const int64_t nblocks = (int64_t) ntiles_dst * blocks_per_ne00_fd.z;
+    if (nblocks >= (1 << 30)) { // kbc would overflow; check raw blocks before narrowing.
         return (int)cudaErrorInvalidValue;
     }
+    const int64_t tiles_nwaves = ((int64_t)ntiles_dst + info.nsm - 1) / info.nsm;
+    const int tiles_efficiency_percent = (int)(100LL * ntiles_dst / (info.nsm*tiles_nwaves));
+    // Admission requires full ITER_K rows. Count iterations, not quant blocks:
+    // the partition rounds every boundary down to blocks_per_iter. When work
+    // is below SM count, omitting empty CTAs preserves all nonempty intervals
+    // and their reverse fixup contribution order.
+    const int64_t nwork = nblocks / blocks_per_iter;
+    const int stream_k_blocks = nwork < info.nsm ? (int)nwork : info.nsm;
+    const dim3 block_nums_stream_k(tiles_efficiency_percent >= 90 ? ntiles_dst : stream_k_blocks, 1, 1);
 
     const bool fixup_needed = ntiles_dst % block_nums_stream_k.x != 0;
 
