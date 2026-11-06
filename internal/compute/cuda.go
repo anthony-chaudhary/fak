@@ -240,6 +240,11 @@ func (c *cudaBackend) Recycle() {
 	cudaQ4KAsyncRequireDrainLocked(c)
 	if cudaKernelProfileOn {
 		C.fcuda_ts_boundary() // token boundary: resolve this token's event pairs
+		// Timing APIs can surface an earlier asynchronous fault. Native free
+		// refuses a newly terminal stream, so preserve every Go root as well.
+		if cudaQ56KMMVQReleaseBlocked() {
+			return
+		}
 	}
 	for _, b := range c.transient {
 		if b.ptr != nil && !b.graphOncePinned {

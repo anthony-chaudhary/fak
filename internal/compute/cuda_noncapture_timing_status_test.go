@@ -14,7 +14,9 @@ import (
 )
 
 // Real profile implementation plus exact changed call-site statements; only
-// CUDA APIs and kernel execution are simulated. This is not CUDA/GPU proof.
+// CUDA APIs and kernel execution are simulated. Event failures retain their first
+// observed cause and quarantine timing owners, without changing wrapped operation
+// execution or certifying every caller's propagation. This is not CUDA/GPU proof.
 // fak-test:runtime medium est=2s lane=default
 func TestCUDANonCaptureTimingPreservesOperationStatus(t *testing.T) {
 	compiler, err := exec.LookPath("c++")
@@ -179,19 +181,30 @@ struct dim3 { unsigned x,y,z; dim3(unsigned a=1,unsigned b=1,unsigned c=1):x(a),
 static bool g_capture_open=false;
 static cudaStream_t g_stream=(void*)1,cudaStreamLegacy=(void*)2;
 static int last_error=0,operation_error=0,operations=0,event_records=0,fail_record=0,expected_kind=0;
-static int clears=0;
+static int clears=0,g_cuda_cleanup_status=0;
+static int creates=0,destroys=0,fail_create=0,create_error=0,create_last=0;
+static int record_error=700,record_last=700,syncs=0,sync_error=0,sync_last=0;
+static int samples=0,fail_sample=0,sample_error=0,sample_last=0;
 static const char *cudaGetErrorString(int) { return "mock"; }
 static cudaError_t cudaPeekAtLastError() { return last_error; }
-static cudaError_t cudaGetLastError() { ++clears; int e=last_error;last_error=0;return e; }
-static cudaError_t cudaEventCreate(cudaEvent_t *e) { *e=(void*)3;return 0; }
-static cudaError_t cudaEventDestroy(cudaEvent_t) { return 0; }
-static cudaError_t cudaEventRecord(cudaEvent_t,cudaStream_t stream) {
- assert(stream==g_stream);++event_records;
- if(event_records==fail_record) return last_error=700;
+[[maybe_unused]] static cudaError_t cudaGetLastError() { ++clears; int e=last_error;last_error=0;return e; }
+static cudaError_t cudaEventCreate(cudaEvent_t *e) {
+ ++creates;*e=(void*)(uintptr_t)(creates+2);
+ if(creates==fail_create) { last_error=create_last;return create_error; }
  return 0;
 }
-static cudaError_t cudaEventSynchronize(cudaEvent_t) { return 0; }
-static cudaError_t cudaEventElapsedTime(float *ms,cudaEvent_t,cudaEvent_t) { *ms=1;return 0; }
+[[maybe_unused]] static cudaError_t cudaEventDestroy(cudaEvent_t) { ++destroys;return 0; }
+static cudaError_t cudaEventRecord(cudaEvent_t,cudaStream_t stream) {
+ assert(stream==g_stream);++event_records;
+ if(event_records==fail_record) { last_error=record_last;return record_error; }
+ return 0;
+}
+static cudaError_t cudaEventSynchronize(cudaEvent_t) { ++syncs;last_error=sync_last;return sync_error; }
+static cudaError_t cudaEventElapsedTime(float *ms,cudaEvent_t,cudaEvent_t) {
+ ++samples;*ms=1;
+ if(samples==fail_sample) { last_error=sample_last;return sample_error; }
+ return 0;
+}
 static cudaError_t cudaStreamSynchronize(cudaStream_t) { return 0; }
 static cudaError_t cudaDeviceSynchronize() { return 0; }
 static cudaError_t cudaGraphLaunch(cudaGraphExec_t,cudaStream_t) { return 0; }
@@ -219,23 +232,96 @@ static int i=0,blocks=2;
 `
 
 const cudaNonCaptureTimingMain = `
+static void reset_profile() {
+ // Fixture-only fresh-process reset. Production never reopens a failed ring.
+ g_cuda_cleanup_status=last_error=clears=creates=destroys=fail_create=0;
+ create_error=create_last=operation_error=operations=event_records=fail_record=expected_kind=0;
+ record_error=record_last=700;syncs=sync_error=sync_last=0;
+ samples=fail_sample=sample_error=sample_last=0;
+ g_ts_pending.clear();g_ts_events.clear();g_ts_agg.clear();
+ g_ts_names.clear();g_ts_name_ids.clear();
+ g_ts_init_tried=g_ts_usable=g_ts_batch_open=false;
+ g_ts_batches=g_ts_ops=g_ts_truncated=0;g_ts_gpu_ns=g_ts_wall_ns=0;
+}
+static void timed_op() { FCUDA_TS("fixture",1,mock_operation(0,g_stream)); }
+static void assert_quarantined(int error) {
+ assert(g_cuda_cleanup_status==error && !g_ts_usable && clears==0 && destroys==0);
+ const int before_creates=creates,before_records=event_records,before_syncs=syncs,before_samples=samples;
+ assert(fcuda_ts_begin("later",dim3(1))==-1);
+ fcuda_ts_boundary();
+ fak_cuda_ts_totals totals{};
+ (void)fcuda_ts_snapshot(&totals,nullptr,0);
+ assert(!totals.usable && g_cuda_cleanup_status==error);
+ assert(creates==before_creates && event_records==before_records && syncs==before_syncs && samples==before_samples);
+}
 int main() {
  for(Route route:routes) {
   for(int op:{0,17}) for(int fail:{0,1,2}) {
-   g_ts_pending.clear();g_ts_batch_open=false;
-   operation_error=op;fail_record=fail;operations=event_records=clears=0;last_error=0;
+   reset_profile();operation_error=op;fail_record=fail;
    int result=route();
-   assert(operations==1 && result==op);
-   if(!g_ts_on) assert(event_records==0 && clears==0);
+   // A begin fault must not silently skip a body that owns its result contract.
+   assert(operations==1 && result==op && clears==0);
+   if(!g_ts_on) assert(event_records==0 && g_cuda_cleanup_status==0);
    else {
-    assert(event_records==(fail==1?1:2));
-    // Real stop-event handling must not consume a previously pending op fault.
-    // It may be overwritten by the fake event API; no universal slot guarantee.
-    if(op && fail==2) assert(last_error==700 && clears==0);
-    if(!op && fail==2) assert(last_error==0 && clears==1);
+    assert(event_records==((fail==1 || op)?1:2));
+    const int first=fail==1?700:(op?op:(fail==2?700:0));
+    assert(g_cuda_cleanup_status==first);
+    if(first) assert_quarantined(first);
+    else {
+     assert(g_ts_usable && g_ts_pending.size()==1);
+     fcuda_ts_boundary();
+     assert(syncs==1 && samples==1 && g_ts_ops==1 && g_ts_truncated==0);
+    }
    }
   }
  }
+ if(!g_ts_on) return 0;
+ // No event call may replace a fault already observable before initialization.
+ reset_profile();last_error=611;
+ assert(fcuda_ts_init()==-1 && creates==0 && last_error==611);
+ assert_quarantined(611);
+ // Failed creation can publish a handle. Both partial owners stay rooted;
+ // the direct return is observed before the differing post-call runtime slot.
+ reset_profile();fail_create=2;create_error=701;create_last=702;
+ assert(fcuda_ts_init()==-1 && creates==2 && last_error==702);
+ assert(g_ts_events.size()==2*kTsPairs && g_ts_events[0] && g_ts_events[1]);
+ assert_quarantined(701);
+ // A successful API return does not hide a newly observable runtime fault.
+ reset_profile();fail_create=1;create_last=703;
+ assert(fcuda_ts_init()==-1 && creates==1 && last_error==703);
+ assert_quarantined(703);
+ // Direct-only event return with a clear runtime slot is preserved too.
+ reset_profile();fail_record=1;record_error=704;record_last=0;timed_op();
+ assert(operations==1 && g_ts_truncated==1);
+ assert_quarantined(704);
+ // The established process-wide cause predates this operation's local error.
+ reset_profile();assert(fcuda_ts_init()==0);
+ g_cuda_cleanup_status=705;last_error=706;
+ assert(fcuda_ts_begin("closed",dim3(1))==-1 && event_records==0 && last_error==706);
+ assert_quarantined(705);
+ // Drain failures cannot fabricate completed intervals or recycle event slots.
+ for(int direct:{0,707}) {
+  reset_profile();timed_op();sync_error=direct;sync_last=708;
+  fcuda_ts_boundary();
+  assert(syncs==1 && samples==0 && g_ts_ops==0 && g_ts_truncated==1 && g_ts_pending.empty());
+  assert(g_ts_events.size()==2*kTsPairs && g_ts_events[0] && last_error==708);
+  assert_quarantined(direct?direct:708);
+ }
+ reset_profile();timed_op();last_error=709;ts_drain();
+ assert(syncs==0 && samples==0 && g_ts_truncated==1 && last_error==709);
+ assert_quarantined(709);
+ // Keep only intervals already read successfully after a successful fence;
+ // an elapsed-time failure cannot double-count the prefix as truncated.
+ reset_profile();timed_op();timed_op();
+ fail_sample=2;sample_error=710;sample_last=711;ts_drain();
+ assert(syncs==1 && samples==2 && g_ts_ops==1 && g_ts_truncated==1 && g_ts_pending.empty());
+ assert_quarantined(710);
+ // Ring-full begin is also a drain site. Failure must prevent slot reuse.
+ reset_profile();assert(fcuda_ts_init()==0);
+ g_ts_pending.assign(kTsPairs,TsPending{0,1,1});sync_error=712;
+ assert(fcuda_ts_begin("full",dim3(1))==-1);
+ assert(syncs==1 && event_records==0 && samples==0 && g_ts_truncated==kTsPairs);
+ assert_quarantined(712);
  return 0;
 }
 `
