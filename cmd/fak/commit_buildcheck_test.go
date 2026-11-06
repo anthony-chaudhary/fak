@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,8 +12,10 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
+	"github.com/anthony-chaudhary/fak/internal/amdgpu"
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
 )
 
@@ -430,6 +434,102 @@ func TestFormatPreexistingRedAdvisorySafeFields(t *testing.T) {
 	for _, want := range []string{"github.com/example/pkg-name/v2", "undefined: pkg.符号"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("safe compiler field missing %q: %q", want, out)
+		}
+	}
+}
+
+// fak-test:justify why=regression when=changed:cmd/fak/commit_buildcheck.go
+// fak-test:runtime medium est=10s lane=default
+func TestCommitBuildCheckReleasesSnapshotAndPreservesPendingHardware(t *testing.T) {
+	t.Setenv("GOENV", "off")
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOTOOLCHAIN", "local")
+	t.Setenv("GOFLAGS", "-p=1")
+	t.Setenv("FAK_WORKSPACE_ROOT", "")
+	t.Setenv("FAK_VALIDATE_STRIX_RECEIPT", filepath.Join(t.TempDir(), "unrelated-strix-receipt.json"))
+	tempParent := t.TempDir()
+	for _, name := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(name, tempParent)
+	}
+	peer := filepath.Join(tempParent, "fak-committed-tree-peer")
+	if err := os.Mkdir(peer, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeBuildCheckFile(t, peer, "keep.txt", "another owner's fresh snapshot\n")
+	repo, git := seedBuildCheckRepo(t)
+	const source = "internal/compute/cuda.go"
+	const contract = "internal/compute/qwen35_qknorm_rope_cache_vllm_contract_test.go"
+	writeBuildCheckFile(t, repo, "go.mod", "module github.com/anthony-chaudhary/fak\n\ngo 1.26\n")
+	writeBuildCheckFile(t, repo, source, "package compute\n\nfunc Value() int { return 1 }\n")
+	writeBuildCheckFile(t, repo, contract, "package compute\n\nimport \"testing\"\n\nfunc TestHostContract(t *testing.T) { if Value() != 1 { t.Fatal(\"old value\") } }\n")
+	commitBuildCheckPlumbing(t, repo, git, "seed CUDA contract", "go.mod", source, contract)
+	writeBuildCheckFile(t, repo, source, "package compute\n\nfunc Value() int { return 2 }\n")
+	writeBuildCheckFile(t, repo, contract, "package compute\n\nimport \"testing\"\n\nfunc TestHostContract(t *testing.T) {\n\tif Value() != 2 {\n\t\tt.Fatal(\"candidate value\")\n\t}\n}\n")
+
+	oldAuthority, oldDiscover := newStrixControllerAuthorityFn, discoverStrixTargetFn
+	oldArchive, oldRun, oldPhase := buildStrixCandidateArchiveFn, runStrixValidationFn, validatePhaseHook
+	t.Cleanup(func() {
+		newStrixControllerAuthorityFn, discoverStrixTargetFn = oldAuthority, oldDiscover
+		buildStrixCandidateArchiveFn, runStrixValidationFn, validatePhaseHook = oldArchive, oldRun, oldPhase
+	})
+	validationStarted := false
+	validatePhaseHook = func(_ context.Context, phase string) {
+		if phase != "resolve_root" {
+			return
+		}
+		validationStarted = true
+		snapshots, err := filepath.Glob(filepath.Join(tempParent, "fak-committed-tree-*"))
+		if err != nil || !reflect.DeepEqual(snapshots, []string{peer}) {
+			t.Fatalf("completed build snapshot overlaps validator start: snapshots=%v err=%v", snapshots, err)
+		}
+	}
+	newStrixControllerAuthorityFn = func(context.Context, string) (amdgpu.StrixControllerAuthority, error) {
+		t.Fatal("software commit must not request retired hardware authority")
+		return amdgpu.StrixControllerAuthority{}, nil
+	}
+	discoverStrixTargetFn = func(context.Context, string) (*amdgpu.StrixTarget, error) {
+		t.Fatal("software commit must not discover retired hardware")
+		return nil, nil
+	}
+	buildStrixCandidateArchiveFn = func(context.Context, string, string, []string) (amdgpu.StrixCandidateArchive, error) {
+		t.Fatal("software commit must not prepare a hardware payload")
+		return amdgpu.StrixCandidateArchive{}, nil
+	}
+	runStrixValidationFn = func(context.Context, amdgpu.StrixValidationOpts) (*amdgpu.StrixValidationReceipt, error) {
+		t.Fatal("software commit must not launch a hardware job")
+		return nil, nil
+	}
+
+	head, index := buildCheckGitState(t, git)
+	var stderr bytes.Buffer
+	outcome, detail := runCommitBuildCheck(&stderr, repo, []string{source, contract}, 2*time.Minute)
+	if !validationStarted {
+		t.Fatalf("required validator did not run: outcome=%s detail=%s stderr=%s", outcome, detail, stderr.String())
+	}
+	requireBuildCheckGitState(t, git, head, index)
+	if body, err := os.ReadFile(filepath.Join(peer, "keep.txt")); err != nil || string(body) != "another owner's fresh snapshot\n" {
+		t.Fatalf("cleanup touched unrelated snapshot: body=%q err=%v", body, err)
+	}
+	if body, err := os.ReadFile(filepath.Join(repo, source)); err != nil || !bytes.Contains(body, []byte("return 2")) {
+		t.Fatalf("cleanup touched owned working source: body=%q err=%v", body, err)
+	}
+	snapshots, err := filepath.Glob(filepath.Join(tempParent, "fak-committed-tree-*"))
+	if err != nil || !reflect.DeepEqual(snapshots, []string{peer}) {
+		t.Fatalf("validator left a snapshot behind: snapshots=%v err=%v", snapshots, err)
+	}
+	result, admit, reason := safecommit.DecideBuildCheck(outcome, detail, false)
+	if outcome != safecommit.BuildCheckPassed || !admit || reason != "" || !result.Compiled || result.FailedOpen {
+		t.Fatalf("software validation outcome=%s result=%+v admit=%v reason=%s stderr=%s", outcome, result, admit, reason, stderr.String())
+	}
+	wire, err := json.Marshal(struct {
+		BuildCheck safecommit.BuildCheckResult `json:"build_check"`
+	}{result})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"PENDING_HARDWARE", "cuda"} {
+		if !strings.Contains(detail, want) || !strings.Contains(stderr.String(), want) || !bytes.Contains(wire, []byte(want)) {
+			t.Fatalf("software pass erased %s: detail=%q stderr=%s wire=%s", want, detail, stderr.String(), wire)
 		}
 	}
 }
