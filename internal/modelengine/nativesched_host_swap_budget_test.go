@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math"
 	"reflect"
 	"strings"
 	"sync"
@@ -17,6 +18,87 @@ import (
 
 // fak-test:runtime medium est=1s lane=default
 func TestNativeHostSwapBudget(t *testing.T) {
+	t.Run("retained-backing-capacity", func(t *testing.T) {
+		first := &schedLane{hostKV: make([]byte, 2, 64), savedLogits: make([]float32, 1, 8)}
+		second := &schedLane{hostKV: make([]byte, 3, 128), savedLogits: make([]float32, 2, 16)}
+		first.hostKV[0], second.hostKV[0] = 17, 29
+		s := &NativeScheduler{preempted: []*schedLane{first, second}}
+		st := s.KVPreemptionStats()
+		if st.HostSwapBytes != 192 || st.PreemptedLogitsBytes != 96 || st.SwappedOut != 2 {
+			t.Fatalf("backing capacity across owners=%+v", st)
+		}
+		// Saved logits are reported separately, not charged to the serialized-KV limit.
+		if err := s.SetKVHostSwapByteLimit(192); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetKVHostSwapByteLimit(191); !errors.Is(err, ErrNativeHostSwapCapacity) {
+			t.Fatalf("shrink below retained backing error=%v", err)
+		}
+		if st = s.KVPreemptionStats(); st.HostSwapLimitBytes != 192 || st.HostSwapBytes != 192 ||
+			st.PreemptedLogitsBytes != 96 || first.hostKV[0] != 17 || second.hostKV[0] != 29 {
+			t.Fatalf("refused shrink changed ownership or configuration: %+v", st)
+		}
+		// Accounting follows the retained owners, without a duplicate byte ledger.
+		first.hostKV, first.savedLogits = nil, nil
+		if st = s.KVPreemptionStats(); st.HostSwapBytes != 128 || st.PreemptedLogitsBytes != 64 {
+			t.Fatalf("cleared owner still charged: %+v", st)
+		}
+		if err := s.SetKVHostSwapByteLimit(128); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("saturating-byte-sum", func(t *testing.T) {
+		for _, tc := range []struct {
+			total, count, want int64
+		}{
+			{0, 0, 0}, {64, 128, 192},
+			{math.MaxInt64 - 1, 1, math.MaxInt64},
+			{math.MaxInt64 - 1, 2, math.MaxInt64},
+			{math.MaxInt64, 1, math.MaxInt64},
+			{0, -1, math.MaxInt64},
+		} {
+			if got := nativeHostByteSum(tc.total, tc.count); got != tc.want {
+				t.Errorf("sum(%d, %d)=%d, want %d", tc.total, tc.count, got, tc.want)
+			}
+		}
+	})
+
+	t.Run("concurrent-limit-and-stats", func(t *testing.T) {
+		// Owners stay immutable while public configuration and stats contend.
+		s := &NativeScheduler{preempted: []*schedLane{
+			{hostKV: make([]byte, 2, 64), savedLogits: make([]float32, 1, 8)},
+			{hostKV: make([]byte, 3, 128), savedLogits: make([]float32, 2, 16)},
+		}}
+		limits := []int64{0, 192, 384}
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for worker := range 4 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				for i := range 256 {
+					if worker < 2 {
+						if err := s.SetKVHostSwapByteLimit(limits[(i+worker)%len(limits)]); err != nil {
+							t.Errorf("concurrent limit: %v", err)
+							return
+						}
+					} else {
+						st := s.KVPreemptionStats()
+						if st.HostSwapBytes != 192 || st.PreemptedLogitsBytes != 96 || st.SwappedOut != 2 ||
+							(st.HostSwapLimitBytes != 0 && st.HostSwapLimitBytes != 192 && st.HostSwapLimitBytes != 384) {
+							t.Errorf("concurrent snapshot=%+v", st)
+							return
+						}
+					}
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+	})
+
 	for _, hybrid := range []bool{false, true} {
 		name := "dense"
 		m := model.NewSynthetic(SyntheticConfig())
