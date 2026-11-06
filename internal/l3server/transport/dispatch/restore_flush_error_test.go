@@ -20,7 +20,7 @@ func TestRestoreRequiresSuccessfulFlush(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
-			entries := [][]snapshot.KVEntry{{{Key: []byte("new"), Value: []byte("value")}}}
+			entries := map[int][]snapshot.KVEntry{0: {{Key: []byte("new"), Value: []byte("value")}}}
 			if err := snapshot.Save(dir, "test", "slab", entries); err != nil {
 				t.Fatal(err)
 			}
