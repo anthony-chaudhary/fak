@@ -430,7 +430,8 @@
         "renderplan-context",
         "rendered-ctxplan",
         "x-render-materialize-oprender",
-        "x2-render-materialize-renderer"
+        "x2-render-materialize-renderer",
+        "rm-renderd"
       ],
       "aliases": [],
       "grounding": "render",

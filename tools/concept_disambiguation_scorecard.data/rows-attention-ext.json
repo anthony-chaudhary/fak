@@ -5,15 +5,17 @@
       "canonical": "Attention (softmax token-mixer)",
       "family": "attention",
       "kind": "concept",
-      "definition": "The default softmax scaled-dot-product self-attention token mixer (the be.Attention HAL op and m.attnSeq body) that mixes tokens via Q\u00b7K softmax over V.",
+      "definition": "The default softmax scaled-dot-product self-attention token mixer (the be.Attention HAL op and m.attnSeq body) that mixes tokens via Q·K softmax over V.",
       "distinction": "Unlike linear attention (Gated-DeltaNet), it computes an explicit O(n^2) softmax over key positions rather than a recurrent linear scan.",
       "distinct_from": [
-        "linear-attn-cache",
+        "x-cache-newlinearattncache",
         "linear attention (Gated-DeltaNet)",
         "x-attention-v41attentionrolereader",
         "cuda-kv16-prefill-gqa4-kernel",
         "host-q8-packed-decode-tile",
-        "dspark-gguf-attention-tensor-roles"
+        "dspark-gguf-attention-tensor-roles",
+        "att-attention-qg",
+        "att-attention-v"
       ],
       "aliases": [
         "attn"
@@ -174,10 +176,11 @@
       "canonical": "attnScale (SDPA denominator)",
       "family": "attention",
       "kind": "symbol",
-      "definition": "cfg.attnScale() \u2014 the per-head scaled-dot-product denominator (1/sqrt(HeadDim), or 1/sqrt(QueryPreAttnScalar) for Gemma) multiplied into the raw QK scores before softmax.",
+      "definition": "cfg.attnScale() — the per-head scaled-dot-product denominator (1/sqrt(HeadDim), or 1/sqrt(QueryPreAttnScalar) for Gemma) multiplied into the raw QK scores before softmax.",
       "distinction": "It scales scores PRE-softmax, NOT the Gemma2 tanh logit soft-cap applied to the scores.",
       "distinct_from": [
-        "attended"
+        "attended",
+        "mopup6b-hcattnscale"
       ],
       "aliases": [],
       "grounding": "attnscale",
@@ -192,7 +195,7 @@
       "canonical": "AttnSoftcap (Gemma2 logit soft-cap)",
       "family": "attention",
       "kind": "config",
-      "definition": "cfg.AttnSoftcap \u2014 the Gemma2 tanh soft-cap value applied in-place to attention logits (softcapInPlace) to bound them; 0 means off.",
+      "definition": "cfg.AttnSoftcap — the Gemma2 tanh soft-cap value applied in-place to attention logits (softcapInPlace) to bound them; 0 means off.",
       "distinction": "It bounds the score magnitude via tanh, NOT the SDPA scale denominator attnScale.",
       "distinct_from": [
         "attnScale (SDPA denominator)"
@@ -212,7 +215,7 @@
       "canonical": "AttentionBias (QKV bias flag)",
       "family": "attention",
       "kind": "config",
-      "definition": "cfg.AttentionBias \u2014 the all-or-nothing flag (inferred from attn_{q,k,v}.bias tensors) that the q/k/v projections carry an additive learned bias (e.g. Qwen2).",
+      "definition": "cfg.AttentionBias — the all-or-nothing flag (inferred from attn_{q,k,v}.bias tensors) that the q/k/v projections carry an additive learned bias (e.g. Qwen2).",
       "distinction": "It is a learned projection bias on q/k/v, NOT the per-score soft-cap AttnSoftcap.",
       "distinct_from": [
         "AttnSoftcap (Gemma2 logit soft-cap)"
@@ -232,7 +235,7 @@
       "canonical": "attentionNorms (attention norm bundle)",
       "family": "attention",
       "kind": "symbol",
-      "definition": "m.attentionNorms(l) \u2014 the bundle of pre/post normalization weights (and biases) that wrap the attention sublayer for a layer's topology.",
+      "definition": "m.attentionNorms(l) — the bundle of pre/post normalization weights (and biases) that wrap the attention sublayer for a layer's topology.",
       "distinction": "It is the attention sublayer's own norm weights, NOT the post_attention_layernorm that feeds the following MLP. The V4.1 attentionNorm field stores an executable normalization callback rather than this bundle of weights and biases.",
       "distinct_from": [
         "attended",
@@ -253,7 +256,7 @@
       "canonical": "post_attention_layernorm (MLP input norm)",
       "family": "attention",
       "kind": "symbol",
-      "definition": "The HF-named `post_attention_layernorm.weight` \u2014 the RMSNorm applied to the residual BEFORE the MLP/SwiGLU sublayer (its name notwithstanding).",
+      "definition": "The HF-named `post_attention_layernorm.weight` — the RMSNorm applied to the residual BEFORE the MLP/SwiGLU sublayer (its name notwithstanding).",
       "distinction": "Despite the name it normalizes the MLP input, NOT the attention sublayer's pre-norm (attentionNorms.pre).",
       "distinct_from": [
         "attentionNorms (attention norm bundle)"
@@ -273,7 +276,7 @@
       "canonical": "attnSeq (dense attention body)",
       "family": "attention",
       "kind": "symbol",
-      "definition": "m.attnSeq \u2014 the cacheless whole-sequence dense attention body (Q/K/V projection, RoPE, SDPA, o_proj) run over a panel of normalized inputs.",
+      "definition": "m.attnSeq — the cacheless whole-sequence dense attention body (Q/K/V projection, RoPE, SDPA, o_proj) run over a panel of normalized inputs.",
       "distinction": "It processes a whole sequence panel, NOT the cached single-position attnBody used on the decode/session path.",
       "distinct_from": [
         "attended"
@@ -293,7 +296,7 @@
       "canonical": "attnBody (cached attention sublayer)",
       "family": "attention",
       "kind": "symbol",
-      "definition": "The attnBody closure \u2014 the per-step attention sublayer over an already-normalized input that reads/writes the KV cache (kv.go, glm_dsa_session, minimax_m3_session) and returns the raw attention output.",
+      "definition": "The attnBody closure — the per-step attention sublayer over an already-normalized input that reads/writes the KV cache (kv.go, glm_dsa_session, minimax_m3_session) and returns the raw attention output.",
       "distinction": "It is the cached single-step sublayer, NOT the cacheless whole-sequence attnSeq.",
       "distinct_from": [
         "attnSeq (dense attention body)"
@@ -311,7 +314,7 @@
       "canonical": "attnPrefillInto (prefill attention kernel)",
       "family": "attention",
       "kind": "symbol",
-      "definition": "attnPrefillInto \u2014 the batched causal GQA attention kernel that computes a P-token prefill panel's attention and writes it into attnOut with optional sliding-window and soft-cap.",
+      "definition": "attnPrefillInto — the batched causal GQA attention kernel that computes a P-token prefill panel's attention and writes it into attnOut with optional sliding-window and soft-cap.",
       "distinction": "It serves a prefill panel, NOT one batched decode step across users (attnDecodeBatch).",
       "distinct_from": [
         "attended",
@@ -332,7 +335,7 @@
       "canonical": "attnDecodeBatch (batched decode attention)",
       "family": "attention",
       "kind": "symbol",
-      "definition": "attnDecodeBatch \u2014 computes per-user causal attention for ONE batched decode step across B users, bit-identical to serial Step.",
+      "definition": "attnDecodeBatch — computes per-user causal attention for ONE batched decode step across B users, bit-identical to serial Step.",
       "distinction": "It is the single-step decode analogue, NOT the prefill-panel kernel attnPrefillInto.",
       "distinct_from": [
         "attnPrefillInto (prefill attention kernel)",
@@ -351,7 +354,7 @@
       "canonical": "attnGQAFuse (GQA fast-path flag)",
       "family": "attention",
       "kind": "config",
-      "definition": "attnGQAFuse \u2014 the env-tunable flag that fuses a GQA group of 3 query heads sharing a KV head into one combined score-dot fast path.",
+      "definition": "attnGQAFuse — the env-tunable flag that fuses a GQA group of 3 query heads sharing a KV head into one combined score-dot fast path.",
       "distinction": "It is the GQA-group fusion toggle, NOT the SIMD score-dot enable attnFdot3SIMD it depends on.",
       "distinct_from": [
         "attended"
@@ -369,7 +372,7 @@
       "canonical": "attnFdot3SIMD (3-wide score-dot SIMD)",
       "family": "attention",
       "kind": "config",
-      "definition": "attnFdot3SIMD (with its attnFdot3SIMDMinBatch threshold) \u2014 the toggle enabling a 3-wide SIMD fused score dot-product (scoreDot3) for a GQA-3 group.",
+      "definition": "attnFdot3SIMD (with its attnFdot3SIMDMinBatch threshold) — the toggle enabling a 3-wide SIMD fused score dot-product (scoreDot3) for a GQA-3 group.",
       "distinction": "It vectorizes the QK score dot-product, NOT the value-accumulation saxpy path (attnSaxpy3SIMD).",
       "distinct_from": [
         "attended",
@@ -390,7 +393,7 @@
       "canonical": "attnSaxpy3SIMD thresholds",
       "family": "attention",
       "kind": "config",
-      "definition": "attnSaxpy3SIMDMinBatch / attnSaxpy3SIMDMinPos \u2014 the batch- and position-count thresholds gating the 3-wide SIMD saxpy fast path that accumulates weighted value vectors.",
+      "definition": "attnSaxpy3SIMDMinBatch / attnSaxpy3SIMDMinPos — the batch- and position-count thresholds gating the 3-wide SIMD saxpy fast path that accumulates weighted value vectors.",
       "distinction": "These gate the value-accumulation saxpy, NOT the score dot-product path attnFdot3SIMD.",
       "distinct_from": [
         "attnFdot3SIMD (3-wide score-dot SIMD)"
@@ -414,7 +417,7 @@
       "distinction": "It is the recurrent linear mixer, NOT the full softmax Attention token-mixer.",
       "distinct_from": [
         "Attention (softmax token-mixer)",
-        "linear-attn-cache"
+        "x-cache-newlinearattncache"
       ],
       "aliases": [
         "linearattention",
@@ -432,11 +435,11 @@
       "canonical": "linearAttnSeq (DeltaNet scan)",
       "family": "attention",
       "kind": "symbol",
-      "definition": "m.linearAttnSeq \u2014 the concrete Gated-DeltaNet recurrent-scan implementation over a sequence (with linearAttnSeqBatched as the issue-#443 batched variant) that produces the linear-attention outputs.",
-      "distinction": "It is the scan computation, NOT the linear-attention layer concept/predicate (linearattn) nor its state cache (linear-attn-cache).",
+      "definition": "m.linearAttnSeq — the concrete Gated-DeltaNet recurrent-scan implementation over a sequence (with linearAttnSeqBatched as the issue-#443 batched variant) that produces the linear-attention outputs.",
+      "distinction": "It is the scan computation, NOT the linear-attention layer concept/predicate (linearattn) nor its state cache (x-cache-newlinearattncache).",
       "distinct_from": [
         "linear attention (Gated-DeltaNet)",
-        "linear-attn-cache",
+        "x-cache-newlinearattncache",
         "x-attention-linearattnstep"
       ],
       "aliases": [],
@@ -452,14 +455,17 @@
       "canonical": "FullAttentionInterval (hybrid full layers)",
       "family": "attention",
       "kind": "config",
-      "definition": "cfg.FullAttentionInterval \u2014 the hybrid Qwen3.5 schedule where every Nth decoder layer uses full (global) attention (LayerTypes 'full_attention') while the rest slide.",
+      "definition": "cfg.FullAttentionInterval — the hybrid Qwen3.5 schedule where every Nth decoder layer uses full (global) attention (LayerTypes 'full_attention') while the rest slide.",
       "distinction": "It marks the global-attention layers in the cadence, NOT a sliding-window layer.",
       "distinct_from": [
         "attended",
-        "x-disambig-fullattentioninterval",
-        "fitplan-attn-layers"
+        "x-attention-flashattention",
+        "fitplan-attn-layers",
+        "x-disambig-fullattentioninterval"
       ],
-      "aliases": [],
+      "aliases": [
+        "full_attention_interval"
+      ],
       "grounding": "fullattention",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
@@ -490,7 +496,7 @@
       "canonical": "isMiniMaxSparseAttn (MiniMax sparse path)",
       "family": "attention",
       "kind": "symbol",
-      "definition": "c.isMiniMaxSparseAttn \u2014 the predicate selecting the MiniMax-M3 sparse-attention decoder path (m.layerMiniMax) for a layer.",
+      "definition": "c.isMiniMaxSparseAttn — the predicate selecting the MiniMax-M3 sparse-attention decoder path (m.layerMiniMax) for a layer.",
       "distinction": "It routes to MiniMax sparse attention, NOT the Gated-DeltaNet linear-attention path.",
       "distinct_from": [
         "linear attention (Gated-DeltaNet)"
@@ -544,7 +550,7 @@
       "canonical": "FusedAttn (capability flag)",
       "family": "attention",
       "kind": "symbol",
-      "definition": "Caps.FusedAttn \u2014 the backend capability bit advertising it can lower the Attention op to ONE fused flash/online-softmax (paged) kernel (e.g. the CUDA backend, issue #486).",
+      "definition": "Caps.FusedAttn — the backend capability bit advertising it can lower the Attention op to ONE fused flash/online-softmax (paged) kernel (e.g. the CUDA backend, issue #486).",
       "distinction": "It is the capability seam the model loop type-asserts, NOT the kernel concept itself (PagedAttention).",
       "distinct_from": [
         "PagedAttention (paged KV kernel)",
@@ -564,7 +570,7 @@
       "canonical": "ropeAttentionFactor (RoPE scaling)",
       "family": "attention",
       "kind": "symbol",
-      "definition": "c.ropeAttentionFactor() \u2014 the RoPE long-context attention-scaling multiplier (YaRN/longrope), read from RopeParams.AttentionFactor, applied to the attention computation.",
+      "definition": "c.ropeAttentionFactor() — the RoPE long-context attention-scaling multiplier (YaRN/longrope), read from RopeParams.AttentionFactor, applied to the attention computation.",
       "distinction": "It scales for extended context via RoPE, NOT the base per-head SDPA denominator attnScale.",
       "distinct_from": [
         "attnScale (SDPA denominator)"
@@ -584,7 +590,7 @@
       "canonical": "softmaxAttentionScores (score softmax + sinks)",
       "family": "attention",
       "kind": "symbol",
-      "definition": "m.softmaxAttentionScores \u2014 applies softmax to a head's attention scores, honoring per-head attention-sink logits (self_attn.sinks) when present.",
+      "definition": "m.softmaxAttentionScores — applies softmax to a head's attention scores, honoring per-head attention-sink logits (self_attn.sinks) when present.",
       "distinction": "It is the post-score normalization step, NOT the pre-softmax scale attnScale.",
       "distinct_from": [
         "attnScale (SDPA denominator)",
@@ -602,10 +608,10 @@
     },
     {
       "id": "x-attention-attentionindexreferences",
-      "canonical": "AttentionIndexReferences (index\u2192KV dep)",
+      "canonical": "AttentionIndexReferences (index→KV dep)",
       "family": "attention",
       "kind": "symbol",
-      "definition": "cachemeta.AttentionIndexReferences \u2014 the predicate reporting whether an attention_index cache entry depends on a given KV span (used by eviction/external-invalidation).",
+      "definition": "cachemeta.AttentionIndexReferences — the predicate reporting whether an attention_index cache entry depends on a given KV span (used by eviction/external-invalidation).",
       "distinction": "It tests a dependency on the index, NOT the attention_index entry/request itself (attention-index).",
       "distinct_from": [
         "attention-index",
@@ -624,7 +630,7 @@
       "canonical": "SignalNoiseFromAttention (S/N split)",
       "family": "attention",
       "kind": "symbol",
-      "definition": "ctxplan.SignalNoiseFromAttention \u2014 folds a Plan plus a WITNESSED per-span attention attribution into a signal-vs-noise mass split for a turn.",
+      "definition": "ctxplan.SignalNoiseFromAttention — folds a Plan plus a WITNESSED per-span attention attribution into a signal-vs-noise mass split for a turn.",
       "distinction": "It yields the signal/noise scalar split, NOT the per-turn bucketed Outcome (OutcomeFromAttention).",
       "distinct_from": [
         "OutcomeFromAttention (turn outcome)",
@@ -643,7 +649,7 @@
       "canonical": "OutcomeFromAttention (turn outcome)",
       "family": "attention",
       "kind": "symbol",
-      "definition": "ctxplan.OutcomeFromAttention \u2014 produces a WITNESSED per-turn Outcome (classifies each resident span by its witnessed attention mass vs a hit threshold).",
+      "definition": "ctxplan.OutcomeFromAttention — produces a WITNESSED per-turn Outcome (classifies each resident span by its witnessed attention mass vs a hit threshold).",
       "distinction": "It classifies spans into outcome buckets, NOT the signal/noise scalar split (SignalNoiseFromAttention).",
       "distinct_from": [
         "SignalNoiseFromAttention (S/N split)"
@@ -679,7 +685,7 @@
       "canonical": "SetAttnObserver (install observer)",
       "family": "attention",
       "kind": "symbol",
-      "definition": "m.SetAttnObserver \u2014 installs (or clears with nil) the default-off attention-mass witness observer on the model, used to capture post-softmax weights without perturbing the forward pass.",
+      "definition": "m.SetAttnObserver — installs (or clears with nil) the default-off attention-mass witness observer on the model, used to capture post-softmax weights without perturbing the forward pass.",
       "distinction": "It is the installer, NOT the AttnObserver callback type it installs (attn-observer).",
       "distinct_from": [
         "attn-observer"
@@ -697,7 +703,7 @@
       "canonical": "emitAttnRow (emit attention row)",
       "family": "attention",
       "kind": "symbol",
-      "definition": "emitAttnRow \u2014 the hot-path helper that copies the post-softmax weights for one (layer, query position, head) window and hands the fresh slices to the installed observer.",
+      "definition": "emitAttnRow — the hot-path helper that copies the post-softmax weights for one (layer, query position, head) window and hands the fresh slices to the installed observer.",
       "distinction": "It is the per-row emit site, NOT the installer SetAttnObserver or the observer type attn-observer.",
       "distinct_from": [
         "SetAttnObserver (install observer)",
@@ -710,8 +716,7 @@
       "parent": "",
       "verdict": "defined",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-attention-v41sharedattentionplain",
       "canonical": "V41SharedAttentionPlain (V4.1 softmax mode)",
@@ -733,8 +738,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-attention-v41sharedattentionrows",
       "canonical": "v41SharedAttentionRows (borrowed combined KV descriptor)",
@@ -757,8 +761,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "v41sharedattentionbinding",
       "canonical": "v41SharedAttentionBinding",
@@ -780,8 +783,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "v41sharedattentioncontinuation",
       "canonical": "v41SharedAttentionContinuation",
@@ -805,8 +807,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "v41sharedattentionvalidation",
       "canonical": "v41SharedAttentionValidation",
@@ -828,8 +829,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "v41sharedattentionresult",
       "canonical": "v41SharedAttentionResult",
@@ -850,8 +850,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "v41attentioninputpanel",
       "canonical": "v41AttentionInputPanel",
@@ -873,8 +872,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "v41plainattentioncontinuation",
       "canonical": "v41PlainAttentionContinuation",

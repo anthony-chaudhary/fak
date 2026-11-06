@@ -17,24 +17,6 @@
       "glossary_anchor": "",
       "verdict": "defined",
       "gaps": []
-    },
-    {
-      "id": "x5-mopup-reasonintegrityrefuted",
-      "canonical": "ReasonIntegrityRefuted (ABI integrity-refutation reason)",
-      "family": "witness-proof",
-      "kind": "symbol",
-      "definition": "abi.ReasonIntegrityRefuted is the core ABI refusal reason code (wire name INTEGRITY_REFUTED) attached to a deny verdict when the witness resolver actively refutes the claimed effect - the proof presented contradicts the claim, so the call is refused even though a witness was supplied.",
-      "distinction": "A refusal REASON on the deny verdict, NOT the WitnessRefuted outcome value in the world-state witness triple, NOT callavoid's economic ProofRefuted break-even status, and NOT ReasonUnwitnessed, which fires when no corroborating witness exists at all - here a witness was found and it contradicts the claim.",
-      "distinct_from": [
-        "WitnessRefuted (witness outcome)",
-        "ProofRefuted (callavoid status)"
-      ],
-      "aliases": [],
-      "grounding": "ReasonIntegrityRefuted",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "",
-      "verdict": "defined",
-      "gaps": []
     }
   ]
 }

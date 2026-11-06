@@ -1,0 +1,525 @@
+{
+  "rows": [
+    {
+      "id": "evict-amdgpu-no-evict-flag",
+      "canonical": "AMDGPU_GEM_CREATE_NO_EVICT (KFD GEM alloc flag)",
+      "family": "evict",
+      "kind": "config",
+      "definition": "AMD KFD GEM allocation flag bit marking a GPU memory object as pinned so the driver's TTM page allocator must not evict its pages under memory pressure.",
+      "distinction": "Driver-level pinning of one GEM allocation inside AMD's kernel-driver ABI - NOT any fak-owned eviction policy or counter (EvictLRU, EvictOne, IncrEvictions) that chooses victims in fak stores.",
+      "distinct_from": [
+        "evict-kvcache",
+        "evict-lru-method"
+      ],
+      "aliases": [],
+      "grounding": "AMDGPU_GEM_CREATE_NO_EVICT",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-bounded-evictions-counter",
+      "canonical": "BoundedEvictions (radixkv bounded-plane counter)",
+      "family": "evict",
+      "kind": "metric",
+      "definition": "radixkv Stats counter of victims staged and detached by the ratio-capped bounded eviction plane (#3387, plan.go).",
+      "distinction": "Counts only the bounded ratio-capped plane - NOT the coarse Evictions total across all planes and not PageEvictions (page-aware leaf evictions).",
+      "distinct_from": [
+        "x-evict-evictions",
+        "evict-page-evictions"
+      ],
+      "aliases": [],
+      "grounding": "BoundedEvictions",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-evictable-ratio",
+      "canonical": "EvictableRatio (l3server client stat)",
+      "family": "evict",
+      "kind": "metric",
+      "definition": "Per-client l3server statistic giving the fraction of that client's cached tokens currently eligible for eviction.",
+      "distinction": "A readiness ratio over what MAY be evicted - NOT an eviction rate (ratio of eviction events to load operations) and not a counter of evictions performed.",
+      "distinct_from": [
+        "evict-eviction-rate",
+        "evict-incr-evictions"
+      ],
+      "aliases": [],
+      "grounding": "EvictableRatio",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-eviction-count",
+      "canonical": "EvictionCount (hierarchical-memory and MALL stat)",
+      "family": "evict",
+      "kind": "metric",
+      "definition": "Cumulative eviction-event counter shared by the compute hierarchical-memory stats block and the strix MALLCacheBudgetTracker line/block eviction accounting.",
+      "distinction": "A lifetime COUNT of eviction events - NOT EvictionRate (dimensionless ratio over weight loads) nor EvictionDuration (time held pending eviction).",
+      "distinct_from": [
+        "evict-eviction-rate",
+        "evict-eviction-duration"
+      ],
+      "aliases": [],
+      "grounding": "EvictionCount",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-eviction-duration",
+      "canonical": "EvictionDuration (batcher slot timing)",
+      "family": "evict",
+      "kind": "metric",
+      "definition": "Wall-clock duration recorded on a continuous-batcher slot or subagent schedule entry for the window its resident state sat pending eviction (invariantly 0 ms in UMA mode).",
+      "distinction": "A TIMING measurement of an eviction window - NOT a count of evictions (EvictionCount) or a pressure ratio (EvictionRate).",
+      "distinct_from": [
+        "evict-eviction-count",
+        "evict-eviction-rate"
+      ],
+      "aliases": [],
+      "grounding": "EvictionDuration",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-eviction-rate",
+      "canonical": "EvictionRate (MALL budget-tracker ratio)",
+      "family": "evict",
+      "kind": "metric",
+      "definition": "Dimensionless ratio of MALL cache line evictions over weight-load operations returned by MALLCacheBudgetTracker.EvictionRate().",
+      "distinction": "An observed pressure RATIO on Strix MALL - NOT the vacuum_eviction_rate_norm configuration knob of l3server and not a raw event count (EvictionCount).",
+      "distinct_from": [
+        "evict-eviction-count",
+        "evict-mall-evictions"
+      ],
+      "aliases": [],
+      "grounding": "EvictionRate",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-evictions-failed",
+      "canonical": "EvictionsFailed (l3server shard metric)",
+      "family": "evict",
+      "kind": "metric",
+      "definition": "Lifetime l3server shard counter of eviction attempts that failed to free an entry.",
+      "distinction": "Counts FAILED eviction attempts - NOT successful evictions (IncrEvictions) and not lease-protected skips (EvictionsLeaseSkip).",
+      "distinct_from": [
+        "evict-incr-evictions",
+        "evict-evictions-lease-skip"
+      ],
+      "aliases": [],
+      "grounding": "EvictionsFailed",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-evictions-key-pressure",
+      "canonical": "EvictionsKeyPressure (l3server shard metric)",
+      "family": "evict",
+      "kind": "metric",
+      "definition": "Lifetime l3server shard counter of entries evicted because the key namespace was under capacity pressure.",
+      "distinction": "Cause attribution = KEY pressure - NOT value pressure (EvictionsValuePressure), rebalance movement (EvictionsRebalance), or lease skips (EvictionsLeaseSkip).",
+      "distinct_from": [
+        "evict-evictions-value-pressure",
+        "evict-evictions-rebalance"
+      ],
+      "aliases": [],
+      "grounding": "EvictionsKeyPressure",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-evictions-lease-skip",
+      "canonical": "EvictionsLeaseSkip (l3server shard metric)",
+      "family": "evict",
+      "kind": "metric",
+      "definition": "Lifetime l3server shard counter of eviction candidates skipped because a live lease protected them.",
+      "distinction": "Skipped-due-to-lease outcomes - NOT evictions that executed (IncrEvictions) or failed (EvictionsFailed).",
+      "distinct_from": [
+        "evict-incr-evictions",
+        "evict-evictions-failed"
+      ],
+      "aliases": [],
+      "grounding": "EvictionsLeaseSkip",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-evictions-rebalance",
+      "canonical": "EvictionsRebalance (l3server shard metric)",
+      "family": "evict",
+      "kind": "metric",
+      "definition": "Lifetime l3server shard counter of entries evicted as part of shard rebalancing.",
+      "distinction": "Cause attribution = REBALANCE movement between shards - NOT pressure-driven evictions (EvictionsKeyPressure, EvictionsValuePressure).",
+      "distinct_from": [
+        "evict-evictions-key-pressure",
+        "evict-evictions-value-pressure"
+      ],
+      "aliases": [],
+      "grounding": "EvictionsRebalance",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-evictions-value-pressure",
+      "canonical": "EvictionsValuePressure (l3server shard metric)",
+      "family": "evict",
+      "kind": "metric",
+      "definition": "Lifetime l3server shard counter of entries evicted because stored values were under capacity pressure.",
+      "distinction": "Cause attribution = VALUE pressure - NOT key pressure (EvictionsKeyPressure) or rebalance movement (EvictionsRebalance).",
+      "distinct_from": [
+        "evict-evictions-key-pressure",
+        "evict-evictions-rebalance"
+      ],
+      "aliases": [],
+      "grounding": "EvictionsValuePressure",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-lru-method",
+      "canonical": "EvictLRU (slab/offload/pool reclaim method)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Recency-based reclaim method implemented on CUDADirectStorageMemorySlab, KVPageOffloader, and ctxmmu KVPool that evicts least-recently-used blocks or pages up to a target count.",
+      "distinction": "fak-owned LRU block/page reclaim on storage slabs, offloaded KV pages, and the ctxmmu pool - NOT the KVEvictLRU replay-policy enum label, not evictOldestLocked (bounded graph-cache helper), and not EvictOne (l3server policy op).",
+      "distinct_from": [
+        "evict-kvevictlru",
+        "evict-evictor",
+        "evict-oldest-locked",
+        "evict-one"
+      ],
+      "aliases": [],
+      "grounding": "EvictLRU",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-oldest-locked",
+      "canonical": "evictOldestLocked (graph-cache LRU helper)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Unexported lock-held helper that evicts the oldest entry from small bounded in-process caches (GraphCachePolicy, PowerOfTwoGraphCache, responses continuation store, SpeculativeBranchCache, rate Limiter).",
+      "distinction": "Oldest-entry eviction under an already-held mutex inside small config/graph caches - NOT EvictLRU (slab/page/pool block reclaim with target counts) and not EvictOne (l3server SIEVE/WTinyLFU policy op).",
+      "distinct_from": [
+        "evict-lru-method",
+        "evict-one"
+      ],
+      "aliases": [],
+      "grounding": "evictOldestLocked",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-one",
+      "canonical": "EvictOne (l3server eviction policy op)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Single-entry eviction operation on the l3server eviction.Policy interface, implemented by SIEVE and WTinyLFU and driven by shard admission when a shard is full.",
+      "distinction": "One forced entry drop through a named probabilistic/recency policy - NOT bulk recency reclaim (EvictLRU), not the physical KV-span plane (evict (KV cache)), not the informal Evictor role term, and not orphan-worktree eviction (EvictOptions).",
+      "distinct_from": [
+        "evict-lru-method",
+        "evict-kvcache",
+        "evict-evictor",
+        "evict-options",
+        "x-evict-evictions",
+        "x-evict-evictnode"
+      ],
+      "aliases": [],
+      "grounding": "EvictOne",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-options",
+      "canonical": "EvictOptions (wipinventory orphan-eviction options)",
+      "family": "evict",
+      "kind": "config",
+      "definition": "Variadic options struct configuring wipinventory EvictOrphans/PurgeOrphans quarantine behavior for abandoned worktrees and WIP lanes.",
+      "distinction": "Configuration surface for WIP-orphan eviction tooling (cmd/fak sweep / wip-evict callers) - NOT cache or KV eviction (l3server/radixkv/strix) and not a CLI verb itself.",
+      "distinct_from": [
+        "evict-kvcache",
+        "evict-one"
+      ],
+      "aliases": [],
+      "grounding": "EvictOptions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-incr-evictions",
+      "canonical": "IncrEvictions (ShardMetrics increment)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "ShardMetrics method that increments the current-window and lifetime eviction counters after a successful l3server shard eviction.",
+      "distinction": "The increment seam for SUCCESSFUL evictions - NOT the cause-attributed sibling counters beside it (EvictionsKeyPressure, EvictionsValuePressure, EvictionsRebalance, EvictionsLeaseSkip, EvictionsFailed).",
+      "distinct_from": [
+        "evict-evictions-failed",
+        "evict-evictions-lease-skip"
+      ],
+      "aliases": [],
+      "grounding": "IncrEvictions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-kv-evict-label",
+      "canonical": "kv_evict (nativeperf phase label)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Wire string value of the nativeperf PhaseKVEvict constant marking KV-eviction work in trace phases and CPU-work burndown buckets.",
+      "distinction": "The observed LABEL in traces and metrics - NOT the Go constant PhaseKVEvict that carries it and not any eviction implementation (KVEvictor, EvictOne).",
+      "distinct_from": [
+        "evict-phase-kv-evict",
+        "evict-kv-evictor",
+        "x-evict-evictkv"
+      ],
+      "aliases": [],
+      "grounding": "kv_evict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-kv-evictor",
+      "canonical": "KVEvictor (gateway KV-tier eviction interface)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Gateway interface that executes physical eviction or pruning on the KV tier (with KVEvictorFunc adapter), wired into gateway server state and the direct-I/O loopback path.",
+      "distinction": "The gateway-side EXECUTION PORT for KV eviction - NOT the informal prose role term Evictor, not the kv_evict trace label, and not the cachemeta KVEvictionScope invalidation vocabulary.",
+      "distinct_from": [
+        "evict-evictor",
+        "evict-kv-evict-label",
+        "evict-kvevictlru"
+      ],
+      "aliases": [],
+      "grounding": "KVEvictor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-last-evict-candidates",
+      "canonical": "LastEvictCandidates (radixkv last-evict diagnostic)",
+      "family": "evict",
+      "kind": "metric",
+      "definition": "radixkv Stats field recording how many candidate leaves the most recent eviction pass considered.",
+      "distinction": "Diagnostic of the LAST eviction event - NOT the lifetime Evictions/BoundedEvictions counters and not the victim's own statistics (LastEvictVictim* fields).",
+      "distinct_from": [
+        "x-evict-evictions",
+        "evict-last-evict-victim-cost"
+      ],
+      "aliases": [],
+      "grounding": "LastEvictCandidates",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-last-evict-locked",
+      "canonical": "LastEvictLocked (radixkv last-evict diagnostic)",
+      "family": "evict",
+      "kind": "metric",
+      "definition": "radixkv Stats field recording how many locked/pinned candidates the most recent eviction pass had to skip.",
+      "distinction": "Lock-skips observed in radixkv's last pass - NOT the l3server EvictionsLeaseSkip counter, which counts shard lease protections.",
+      "distinct_from": [
+        "evict-last-evict-candidates",
+        "evict-evictions-lease-skip"
+      ],
+      "aliases": [],
+      "grounding": "LastEvictLocked",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-last-evict-victim-cost",
+      "canonical": "LastEvictVictimCost (radixkv last-evict diagnostic)",
+      "family": "evict",
+      "kind": "metric",
+      "definition": "radixkv Stats field recording the cost score of the leaf chosen as victim by the most recent eviction.",
+      "distinction": "The recorded score OF THE CHOSEN VICTIM - NOT the KVEvictionCost scoring function that produces such scores.",
+      "distinct_from": [
+        "evict-kvevictioncost",
+        "evict-last-evict-victim-hits"
+      ],
+      "aliases": [],
+      "grounding": "LastEvictVictimCost",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-last-evict-victim-hits",
+      "canonical": "LastEvictVictimHits (radixkv last-evict diagnostic)",
+      "family": "evict",
+      "kind": "metric",
+      "definition": "radixkv Stats field recording the historical hit count of the leaf chosen as victim by the most recent eviction.",
+      "distinction": "Hit count OF THE CHOSEN VICTIM - NOT tree-wide hit counters and not the victim's token count (LastEvictVictimTokens).",
+      "distinct_from": [
+        "evict-last-evict-victim-cost",
+        "evict-last-evict-victim-tokens"
+      ],
+      "aliases": [],
+      "grounding": "LastEvictVictimHits",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-last-evict-victim-prefix",
+      "canonical": "LastEvictVictimPrefix (radixkv last-evict diagnostic)",
+      "family": "evict",
+      "kind": "metric",
+      "definition": "radixkv Stats field recording the prefix length shared by the victim leaf chosen in the most recent eviction.",
+      "distinction": "Prefix-depth statistic of ONE victim - NOT the EvictPrefix token-path eviction operation itself.",
+      "distinct_from": [
+        "evict-evictprefix",
+        "evict-last-evict-victim-tokens"
+      ],
+      "aliases": [],
+      "grounding": "LastEvictVictimPrefix",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-last-evict-victim-tokens",
+      "canonical": "LastEvictVictimTokens (radixkv last-evict diagnostic)",
+      "family": "evict",
+      "kind": "metric",
+      "definition": "radixkv Stats field recording the token count released by the victim leaf in the most recent eviction.",
+      "distinction": "Tokens freed by ONE victim - NOT the tree-wide Tokens stat and not the victim's hit count (LastEvictVictimHits).",
+      "distinct_from": [
+        "evict-last-evict-victim-hits",
+        "evict-last-evict-candidates"
+      ],
+      "aliases": [],
+      "grounding": "LastEvictVictimTokens",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-mall-evictions",
+      "canonical": "MALLEvictions (strix MALL tiling counter)",
+      "family": "evict",
+      "kind": "metric",
+      "definition": "strix MALL tiling/stream counter of MALL cache block evictions observed during weight streaming, which must remain 0 under temporal pinning.",
+      "distinction": "Hardware MALL cache-line evictions on Strix - NOT the generic hierarchical EvictionCount stat and not l3server shard eviction counters.",
+      "distinct_from": [
+        "evict-eviction-count",
+        "evict-incr-evictions"
+      ],
+      "aliases": [],
+      "grounding": "MALLEvictions",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-page-evictions",
+      "canonical": "PageEvictions (radixkv page-aware counter)",
+      "family": "evict",
+      "kind": "metric",
+      "definition": "radixkv counter of page-aware leaf evictions performed, tracked alongside the global Evictions/CostEvictions totals in admin stats.",
+      "distinction": "PAGE-granular eviction count - NOT the bounded-plane BoundedEvictions counter and not the coarse Evictions total.",
+      "distinct_from": [
+        "evict-bounded-evictions-counter",
+        "x-evict-evictions"
+      ],
+      "aliases": [],
+      "grounding": "PageEvictions",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-phase-kv-evict",
+      "canonical": "PhaseKVEvict (nativeperf phase constant)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "nativeperf Phase constant whose value is the kv_evict label, classifying KV-eviction work in trace phases and CPU-work burndown buckets.",
+      "distinction": "The Go CONSTANT naming the phase - NOT its wire label kv_evict and not an eviction implementation (KVEvictor, EvictOne).",
+      "distinct_from": [
+        "evict-kv-evict-label",
+        "evict-kv-evictor"
+      ],
+      "aliases": [],
+      "grounding": "PhaseKVEvict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

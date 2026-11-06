@@ -8,10 +8,11 @@
    "definition": "internal/compute/layoutcontract is the declarative registry of tensor layout contracts for every quantized kernel family present in-tree (Q4_K, Q8_0, NVFP4, MXFP4): each Contract pins the closed fact set a loader must satisfy - storage order, interleave width, scale layout, padding rule, packing path - plus a source ref pinned at path:line@sha, so loader/kernel drift shows up as a stale ref to re-pin instead of a silent runtime transpose or repack.",
    "distinction": "A declarative registry of EXPECTED packed layouts (facts about what the loader must produce). Not layoutoracle (which recomputes byte geometry from first principles and refuses declared-vs-actual descriptor mismatches), not Layout (tensor) element ordering, not the newmodel WeightLayout checkpoint-packing envelope, and not `fak pack` (the OCI image bundler - 'pack' there means archive an image, not pack weights).",
    "distinct_from": [
-    "x-layout-layoutoracle-package",
-    "x-layout-layoutcontract-verb",
-    "layout-tensor",
-    "newmodel-native-weight-layout"
+     "x-layout-layoutoracle-package",
+     "x-layout-layoutcontract-verb",
+     "layout-tensor",
+     "newmodel-native-weight-layout",
+     "layout-contract"
    ],
    "aliases": [],
    "grounding": "layoutcontract",
@@ -29,8 +30,9 @@
    "definition": "The read-only `fak-dev layoutcontract` CLI surface over the layoutcontract registry: families lists registered kernel families, show FAMILY emits the full contract (receipt schema fak.layoutcontract/1), check FAMILY --observed FILE compares an observed-layout file against the contract under the closed field vocabulary storage_order / scale_layout / interleave_width / padding_rule / packing_stage (receipt fak.layoutcontract-check/1; exit 0 match, 1 mismatch, 2 usage-or-unknown-family), and orphans reports registered families with no production call site (receipt fak.layoutcontract-orphans/1). No subcommand mutates state.",
    "distinction": "A CLI query surface, not the registry itself (LayoutContract registry (compute)) - it adds no layout facts and mutates nothing. Not `fak-dev kernel-oracle` either, which ranks Vulkan kernels against ggml test-backend-ops per op and shape (kernel performance ranking, not layout).",
    "distinct_from": [
-    "x-layout-layoutcontract-registry",
-    "x-layout-layoutoracle-package"
+     "x-layout-layoutcontract-registry",
+     "x-layout-layoutoracle-package",
+     "layout-contract"
    ],
    "aliases": [
     "runLayoutContract"

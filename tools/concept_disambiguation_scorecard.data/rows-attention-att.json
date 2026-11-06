@@ -1,0 +1,730 @@
+{
+  "rows": [
+    {
+      "id": "att-v41-shared-attention-op",
+      "canonical": "V41SharedAttention (backend op)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The optional one-position shared-latent sink attention operation on V41SharedAttentionBackend (compute.V41SharedAttention) that consumes q, sharedKV and an optional sink F32 tensor plus selectedRows/heads/headDim/scale/mode/hasSink and returns a fresh output tensor disjoint from inputs and status storage.",
+      "distinction": "The device OP itself - NOT the interface it belongs to (V41SharedAttentionBackend), NOT the numeric mode selector (V41SharedAttentionMode), NOT the capability probe (SupportsV41SharedAttention), and NOT the model-side callback request descriptor (v41SharedAttentionRequest).",
+      "distinct_from": [
+        "att-v41-shared-attention-backend",
+        "att-v41-shared-attention-mode",
+        "att-v41-shared-attention-supports",
+        "att-v41-shared-attention-request"
+      ],
+      "aliases": [],
+      "grounding": "V41SharedAttention",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-v41-shared-attention-backend",
+      "canonical": "V41SharedAttentionBackend",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The optional compute.Backend extension interface declaring SupportsV41SharedAttention and the one-position V41SharedAttention contraction over immutable, live, unquantized row-major F32 tensors where each ordered shared row supplies both K and V to every head.",
+      "distinction": "The CAPABILITY INTERFACE - NOT the op method it declares (V41SharedAttention), NOT the mode enum its op takes (V41SharedAttentionMode), and NOT the model-side binding that wraps a host callback (v41SharedAttentionBinding).",
+      "distinct_from": [
+        "att-v41-shared-attention-op",
+        "att-v41-shared-attention-mode",
+        "v41sharedattentionbinding"
+      ],
+      "aliases": [],
+      "grounding": "V41SharedAttentionBackend",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-v41-shared-attention-mode",
+      "canonical": "V41SharedAttentionMode",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The int32 native/shader ABI value selecting one of the two live V4.1 host contraction maximum seeds: V41SharedAttentionPlain (0, -Inf seed) or V41SharedAttentionCompressed (1, -MaxFloat32 seed with sentinel-survival skip).",
+      "distinction": "A NUMERIC MODE SELECTOR for the shared-attention op - NOT the op itself (V41SharedAttention), NOT the separately positioned Plain constant (V41SharedAttentionPlain), and NOT the borrowed combined KV row storage (v41SharedAttentionRows).",
+      "distinct_from": [
+        "att-v41-shared-attention-op",
+        "x-attention-v41sharedattentionplain",
+        "x-attention-v41sharedattentionrows"
+      ],
+      "aliases": [],
+      "grounding": "V41SharedAttentionMode",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-v41-shared-attention-supports",
+      "canonical": "SupportsV41SharedAttention",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The backend capability predicate on V41SharedAttentionBackend reporting whether the one-position shared-attention primitive is available on this backend, implemented under the backend mutex on CUDA and Vulkan.",
+      "distinction": "A STABLE AVAILABILITY PROBE - NOT the execution call it gates (V41SharedAttention), NOT the transient native state preflight, and NOT the BF16 publication eligibility method (SupportsV41AttentionBF16).",
+      "distinct_from": [
+        "att-v41-shared-attention-op",
+        "att-v41-shared-attention-backend",
+        "v41-attention-bf16-supports"
+      ],
+      "aliases": [],
+      "grounding": "SupportsV41SharedAttention",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-v41-shared-attention-status-decode",
+      "canonical": "decodeV41SharedAttentionStatus",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The shared status-envelope decoder that validates every head's producer-stage record against issued heads/selectedRows/headDim before selecting the first failure, surfacing typed protocol or arithmetic errors with the failing stage.",
+      "distinction": "Decodes DEVICE-REPORTED stage records after transport - NOT the Go return-code mapping (vulkanV41AttentionBF16StatusError), NOT the model-side typed selected-op failure (V41SharedAttentionOperationError), and NOT the op itself (V41SharedAttention).",
+      "distinct_from": [
+        "att-v41-shared-attention-op",
+        "att-v41-shared-attention-operation-error",
+        "v41-attention-bf16-status-decoder"
+      ],
+      "aliases": [],
+      "grounding": "decodeV41SharedAttentionStatus",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-v41-shared-attention-func",
+      "canonical": "v41SharedAttentionFunc",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The session-local callback signature func(layer int, request v41SharedAttentionRequest) ([]float32, error) that a selected shared-attention device owner invokes per layer; nil means the original host function.",
+      "distinction": "The CALLBACK TYPE - NOT the immutable provenance container holding it (v41SharedAttentionBinding), NOT the per-layer request descriptor it receives (v41SharedAttentionRequest), and NOT the device op on the backend (V41SharedAttention).",
+      "distinct_from": [
+        "v41sharedattentionbinding",
+        "att-v41-shared-attention-request",
+        "att-v41-shared-attention-op"
+      ],
+      "aliases": [],
+      "grounding": "v41SharedAttentionFunc",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-v41-shared-attention-request",
+      "canonical": "v41SharedAttentionRequest",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The per-layer request descriptor handed to v41SharedAttentionFunc carrying the mode, q/kv/sink slices, index list, plain/compressed options, optional borrowed rowKV and resident KV view, and the sink checkpoint key.",
+      "distinction": "INPUT DATA for one callback invocation - NOT the callback type (v41SharedAttentionFunc), NOT the borrowed combined KV descriptor it may carry (v41SharedAttentionRows), and NOT the one-use validated witness (v41SharedAttentionValidation).",
+      "distinct_from": [
+        "att-v41-shared-attention-func",
+        "x-attention-v41sharedattentionrows",
+        "v41sharedattentionvalidation"
+      ],
+      "aliases": [],
+      "grounding": "v41SharedAttentionRequest",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-v41-shared-attention-operation-error",
+      "canonical": "V41SharedAttentionOperationError",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The typed model error identifying a selected V4.1 shared-attention contraction failure at a specific layer (Layer + Cause), which continuations must exclude from host replay even when its cause wraps ErrV41ForwardStage.",
+      "distinction": "A SELECTED-OP FAILURE MARKER - NOT the forward stage tag it may wrap (v41StageAttention), NOT the device status decoder (decodeV41SharedAttentionStatus), and NOT the execution-eligibility continuation (v41SharedAttentionContinuation).",
+      "distinct_from": [
+        "att-v41-stage-attention",
+        "att-v41-shared-attention-status-decode",
+        "v41sharedattentioncontinuation"
+      ],
+      "aliases": [],
+      "grounding": "V41SharedAttentionOperationError",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-v41-attention-plan",
+      "canonical": "V41AttentionPlan",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The resolved, immutable per-layer execution plan for the V4.1 attention path recording role, compress ratio, resolved KV/index source layer IDs, candidate block geometry, and top-K width.",
+      "distinction": "The RESOLVED PLAN VALUE - NOT the resolver that produces it (v41AttentionPlanFor), NOT the per-layer role map (v41AttentionRoles), and NOT the role enum member it carries (V41AttentionRolePerLayer).",
+      "distinct_from": [
+        "att-v41-attention-plan-for",
+        "att-v41-attention-roles",
+        "att-v41-attention-role-per-layer"
+      ],
+      "aliases": [],
+      "grounding": "V41AttentionPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-v41-attention-plan-for",
+      "canonical": "v41AttentionPlanFor",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The resolver that builds one layer's V41AttentionPlan from the config and declared source sets, returning an error for a malformed schedule (compress ratio outside the representable set) rather than silently downgrading the layer.",
+      "distinction": "The PLAN-CONSTRUCTION FUNCTION - NOT the plan struct it returns (V41AttentionPlan), NOT the role resolver (v41AttentionRoles), and NOT the umbrella dense softmax token-mixer (Attention).",
+      "distinct_from": [
+        "att-v41-attention-plan",
+        "att-v41-attention-roles",
+        "x-attention-attention"
+      ],
+      "aliases": [],
+      "grounding": "v41AttentionPlanFor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-v41-attention-roles",
+      "canonical": "v41AttentionRoles",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The single-site resolver that maps a config's KVSourceLayerIDs/IndexSourceLayerIDs/CompressRatios onto a per-layer V41AttentionRole (PerLayer/KVSource/Reader), deciding each layer's role and its nearest preceding source once and consistently.",
+      "distinction": "The PER-LAYER ROLE SCHEDULE - NOT one role constant (V41AttentionRolePerLayer), NOT the per-layer plan (V41AttentionPlan), and NOT the operations watchdog health gate sharing the word attention (NeedsAttention).",
+      "distinct_from": [
+        "att-v41-attention-role-per-layer",
+        "att-v41-attention-plan",
+        "x-attention-needsattention"
+      ],
+      "aliases": [],
+      "grounding": "v41AttentionRoles",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-v41-attention-role-per-layer",
+      "canonical": "V41AttentionRolePerLayer",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The default V41AttentionRole value (iota 0) marking a layer with no shared-source participation: ratio 0 contracts only its own projected window KV rows.",
+      "distinction": "ONE ENUM MEMBER of V41AttentionRole - NOT the resolver that assigns roles (v41AttentionRoles), NOT the sibling roles KVSource/Reader, and NOT the plan struct that carries a role (V41AttentionPlan).",
+      "distinct_from": [
+        "att-v41-attention-roles",
+        "att-v41-attention-plan"
+      ],
+      "aliases": [],
+      "grounding": "V41AttentionRolePerLayer",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-v41-attention-state",
+      "canonical": "V41AttentionState",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The session-owned bounded ring state for the V4.1 CED/CSA2 attention path: a 128-row circular window KV buffer, caller-supplied completed compressed rows and index-key cache per source layer, and source-published candidate/top-k selection slots.",
+      "distinction": "PERSISTENT COMPRESSED ATTENTION STATE - NOT the lazy per-forward accessor that builds it (attentionState), NOT Gemma4's owned token-history rows (attentionStateRows), and NOT the Gated-DeltaNet recurrent layer state (linearAttnLayerState).",
+      "distinct_from": [
+        "att-attention-state-accessor",
+        "att-attention-state-rows",
+        "att-linear-attn-layer-state"
+      ],
+      "aliases": [],
+      "grounding": "V41AttentionState",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-attention-state-accessor",
+      "canonical": "attentionState (v41 forward-state accessor)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The v41ForwardState method lazily building and caching the *V41AttentionState registry for a forward pass given headDim, ratioCap and optional indexHeadDim; also the lifecycle-field name on the plain-attention continuation.",
+      "distinction": "The LAZY ACCESSOR / LIFECYCLE FIELD - NOT the ring state type it returns (V41AttentionState), NOT Gemma4's bounded token-history owner (attentionStateRows), and NOT the DSA index metadata (AttentionIndex).",
+      "distinct_from": [
+        "att-v41-attention-state",
+        "att-attention-state-rows",
+        "attention-index"
+      ],
+      "aliases": [],
+      "grounding": "attentionState",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-attention-state-rows",
+      "canonical": "attentionStateRows",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The Gemma4 session structure owning a bounded attention continuation including its exact token history: per-layer K/V planes reserved up front (full layers MaxTokens, ring layers min(Window, MaxTokens)) that never aliases a KVCache or transient projection.",
+      "distinction": "OWNED HOST TOKEN-HISTORY STORAGE - NOT the V4.1 compressed ring state (V41AttentionState), NOT the lazy forward-state accessor (attentionState), and NOT the KV cache it must not alias (KV cache).",
+      "distinct_from": [
+        "att-attention-state-accessor",
+        "att-v41-attention-state",
+        "kv-cache"
+      ],
+      "aliases": [],
+      "grounding": "attentionStateRows",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-v41-sparse-attention-sink",
+      "canonical": "V41SparseAttentionSink",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The host sparse sink-attention contraction transcribing the pinned reference exactly: scores projected query heads against caller-selected KV rows, masks -1 and over-topk-length slots, folds exp(sink[h]-max) into the softmax denominator, and returns a fresh [B,M,Heads,HeadDim] tensor.",
+      "distinction": "The PURE HOST KERNEL - NOT its geometry/options struct (V41SparseAttentionSinkOptions), NOT the device-routing variant that dispatches through a selected callback (v41SparseAttentionSinkResident), and NOT the covmatrix topology fence sharing the name root (SparseAttn).",
+      "distinct_from": [
+        "att-v41-sparse-attention-sink-options",
+        "att-v41-sparse-attention-sink-resident",
+        "att-sparse-attn-topology"
+      ],
+      "aliases": [],
+      "grounding": "V41SparseAttentionSink",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-v41-sparse-attention-sink-options",
+      "canonical": "V41SparseAttentionSinkOptions",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The geometry/options struct naming already-projected sparse sink-attention inputs: B/M/Heads/HeadDim/TopK/N, the Softmax scale, an optional TopKLength valid-slot count, and an optional inverse output RoPE with even RopeDim.",
+      "distinction": "INPUT DESCRIPTORS ONLY - NOT the contraction that consumes them (V41SparseAttentionSink), NOT the device-routing variant (v41SparseAttentionSinkResident), and NOT the compressed-forward shared KV options (V41AttentionSharedKVOptions).",
+      "distinct_from": [
+        "att-v41-sparse-attention-sink",
+        "att-v41-sparse-attention-sink-resident"
+      ],
+      "aliases": [],
+      "grounding": "V41SparseAttentionSinkOptions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-v41-sparse-attention-sink-resident",
+      "canonical": "v41SparseAttentionSinkResident",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The device-routing variant of the sparse sink contraction: falls back to host V41SparseAttentionSink when no callback is bound, otherwise builds a Plain-mode v41SharedAttentionRequest (optionally attaching the resident KV view and sink key) and dispatches through the selected shared attention.",
+      "distinction": "The SELECTION/Routing SEAM - NOT the host kernel itself (V41SparseAttentionSink), NOT the request descriptor it builds (v41SharedAttentionRequest), and NOT the callback type it dispatches through (v41SharedAttentionFunc).",
+      "distinct_from": [
+        "att-v41-sparse-attention-sink",
+        "att-v41-shared-attention-request",
+        "att-v41-shared-attention-func"
+      ],
+      "aliases": [],
+      "grounding": "v41SparseAttentionSinkResident",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-v41-stage-attention",
+      "canonical": "v41StageAttention",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The v41ForwardStage constant (\"attention\") used with v41StageErr to attribute shape-admission, projection and contraction failures to the attention stage of a specific V4.1 layer.",
+      "distinction": "An ERROR-ATTRIBUTION STAGE TAG - NOT the typed selected-op failure that may wrap it (V41SharedAttentionOperationError), NOT the attention op itself (V41SharedAttention), and NOT the operations-plane NeedsAttention gate.",
+      "distinct_from": [
+        "att-v41-shared-attention-operation-error",
+        "x-attention-needsattention"
+      ],
+      "aliases": [],
+      "grounding": "v41StageAttention",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-v41-attention-qkrope-with-publish",
+      "canonical": "v41AttentionQKRoPEWithPublish",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The V4.1 full-graph helper applying tail RoPE to q and kv while optionally publishing Q+KV as one owned BF16 row through a bound device publication boundary before rotation; nil publish retains in-place F32 arithmetic.",
+      "distinction": "A ROTARY + PUBLICATION COMPOSITE - NOT the RoPE long-context scaling factor (ropeAttentionFactor), NOT the plan that sizes the rotation (V41AttentionPlan), and NOT the BF16 publication site policy itself.",
+      "distinct_from": [
+        "x-attention-ropeattentionfactor",
+        "att-v41-attention-plan"
+      ],
+      "aliases": [],
+      "grounding": "v41AttentionQKRoPEWithPublish",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-deepseek-v41-attention-geometry",
+      "canonical": "DeepSeekV41AttentionGeometry",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The pinned DeepSeek V4.1 attention geometry config struct (NumLayers, HiddenSize, HeadDim, OGroups, QLoraRank, NumHeads, ...) whose values V4.1 admission asserts against the loaded model.",
+      "distinction": "MODEL-SPECIFIC PINNED CONSTANTS - NOT the ctxmmu mask-topology enum (AttentionGeometry), NOT the runtime ring state sized by them (V41AttentionState), and NOT the GGUF MHC tensor-name leaf (hc_attn_fn).",
+      "distinct_from": [
+        "att-attention-geometry",
+        "att-v41-attention-state",
+        "att-hc-attn-fn"
+      ],
+      "aliases": [],
+      "grounding": "DeepSeekV41AttentionGeometry",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-attention-geometry",
+      "canonical": "AttentionGeometry (ctxmmu mask topology)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The ctxmmu string enum naming the attention mask topology of a checkpoint descriptor (causal, sliding_window, chunked, prefix_lm), recorded alongside causal/sliding-window masks and quarantined IDs.",
+      "distinction": "MASK TOPOLOGY CLASSIFICATION - NOT the pinned V4.1 model geometry struct (DeepSeekV41AttentionGeometry), NOT the hybrid full-attention cadence (FullAttentionInterval), and NOT the SWA layer type (sliding_attention).",
+      "distinct_from": [
+        "att-deepseek-v41-attention-geometry",
+        "x-attention-fullattention",
+        "x-attention-slidingattention"
+      ],
+      "aliases": [],
+      "grounding": "AttentionGeometry",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-err-v4-flash-ratio-invalid",
+      "canonical": "ErrV4FlashAttentionRatioInvalid",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The fail-closed sentinel error returned when a DeepSeek-V4 Flash layer declares a compression ratio outside the published closed set derived from the declared schedule (V4FlashRatioScheduleClosedSet).",
+      "distinction": "MALFORMED-METADATA REFUSAL - NOT the quarantine for valid-but-unimplemented ratios (ErrV4FlashAttentionUnimplemented), and NOT the V4.1 selected-op error (V41SharedAttentionOperationError).",
+      "distinct_from": [
+        "att-err-v4-flash-unimplemented",
+        "att-v41-shared-attention-operation-error"
+      ],
+      "aliases": [],
+      "grounding": "ErrV4FlashAttentionRatioInvalid",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-err-v4-flash-unimplemented",
+      "canonical": "ErrV4FlashAttentionUnimplemented",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The fail-closed sentinel error quarantining a DeepSeek-V4 session whose attention compression ratio (4 or 128) selects the unimplemented native compressed forward, keeping the model loadable at component level while the full token path is disconnected.",
+      "distinction": "UNIMPLEMENTED-REGIME QUARANTINE - NOT the malformed-ratio metadata refusal (ErrV4FlashAttentionRatioInvalid), and NOT the window-only regime (ratio 0) which is implemented.",
+      "distinct_from": [
+        "att-err-v4-flash-ratio-invalid"
+      ],
+      "aliases": [],
+      "grounding": "ErrV4FlashAttentionUnimplemented",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-full-attention-layers",
+      "canonical": "FullAttentionLayers",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The ModelCacheLayout method returning the indices of the token-indexed full-attention layers (sliding-window layers excluded), mirrored as a per-band counter field on device bands.",
+      "distinction": "A CACHE-LAYOUT LAYER INDEX LIST - NOT the short macobs counter field (FullAttnLayers), NOT the hybrid cadence config (FullAttentionInterval), and NOT the Qwen3.5 config helper (qwenfullattentionlayers).",
+      "distinct_from": [
+        "att-full-attn-layers",
+        "x-attention-fullattention"
+      ],
+      "aliases": [],
+      "grounding": "FullAttentionLayers",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-full-attn-layers",
+      "canonical": "FullAttnLayers",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The uint64 counter field on macobs/macfit/bench reports counting a hybrid model's full-attention layers (e.g. the Qwen3.8 3:1 GDN split), consumed by MAC/roofline estimation.",
+      "distinction": "A REPORT COUNTER - NOT the cachelayout index-list method (FullAttentionLayers), NOT the cadence config (FullAttentionInterval), and NOT a layer type.",
+      "distinct_from": [
+        "att-full-attention-layers",
+        "x-attention-fullattention"
+      ],
+      "aliases": [],
+      "grounding": "FullAttnLayers",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-qwen35-prefill-tiled-into",
+      "canonical": "qwen35PrefillTiledAttentionInto",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The tiled host prefill attention kernel computing a P-token panel's attention into attnOut, borrowing only a builtin producer's dead scratch, gated on qualification and non-Metal/non-Q4K sessions.",
+      "distinction": "A QWEN3.5 HOST PREFILL TILE - NOT the general batched causal GQA prefill kernel (attnPrefillInto), NOT its build-tag qualification constant (qwen35PrefillTiledAttentionQualification), and NOT the cached decode sublayer (attnBody).",
+      "distinct_from": [
+        "att-qwen35-prefill-tiled-qualification",
+        "x-attention-attnprefillinto",
+        "x-attention-attnbody"
+      ],
+      "aliases": [],
+      "grounding": "qwen35PrefillTiledAttentionInto",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-qwen35-prefill-tiled-qualification",
+      "canonical": "qwen35PrefillTiledAttentionQualification",
+      "family": "attention",
+      "kind": "config",
+      "definition": "The build-tag qualification constant (true in _qualification.go, false in _default.go) gating whether the Qwen3.5 tiled prefill attention path is compiled in and eligible to run.",
+      "distinction": "A COMPILE-TIME GATE - NOT the kernel it gates (qwen35PrefillTiledAttentionInto), and NOT the env-tunable GQA fusion flag (attnGQAFuse).",
+      "distinct_from": [
+        "att-qwen35-prefill-tiled-into",
+        "x-attention-attngqafuse"
+      ],
+      "aliases": [],
+      "grounding": "qwen35PrefillTiledAttentionQualification",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-attention-qg",
+      "canonical": "attention_qg (QG allocation label)",
+      "family": "attention",
+      "kind": "doc-term",
+      "definition": "The device-pinned allocation wire label for the fused query/gate projection tensor of a Qwen3.5 hybrid layer (self_attn.q_proj.weight), checked alongside k/v/o during sequence residency setup on CUDA and Vulkan.",
+      "distinction": "AN ALLOCATION LABEL for the Q/G projection - NOT the value-projection label (attention_v), NOT the Vulkan fused QG kernel entrypoint (tryQwen35AttentionQGLocked), NOT the self_attn tensor namespace, and NOT the umbrella dense softmax token-mixer (Attention).",
+      "distinct_from": [
+        "att-attention-v",
+        "x-attention-attention",
+        "x-attention-selfattn"
+      ],
+      "aliases": [],
+      "grounding": "attention_qg",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-attention-v",
+      "canonical": "attention_v (value allocation label)",
+      "family": "attention",
+      "kind": "doc-term",
+      "definition": "The device-pinned allocation wire label for the value projection tensor of a Qwen3.5 hybrid layer (self_attn.v_proj.weight), checked during sequence residency setup on CUDA and Vulkan.",
+      "distinction": "AN ALLOCATION LABEL for the V projection - NOT the Q/G label (attention_qg), NOT the dense value weight concept (attn_v), NOT the Metal state role string (Qwen35MetalStateRoleV), and NOT the umbrella dense softmax token-mixer (Attention).",
+      "distinct_from": [
+        "att-attention-qg",
+        "x-attention-attention",
+        "x-attention-attnv"
+      ],
+      "aliases": [],
+      "grounding": "attention_v",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-graph-once-attention-locked",
+      "canonical": "graphOnceAttentionLocked",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The mutex-held CUDA backend method running (or capturing into a graph) one cached attention position, returning whether the graph-once fast path was taken for the call.",
+      "distinction": "A CUDA GRAPH-CAPTURE ATTENTION SEAM - NOT the dense cached sublayer (attnBody), NOT the speculative verify kernel (SpecVerifyAttention), and NOT the graph-once qualification state it reads.",
+      "distinct_from": [
+        "x-attention-attnbody",
+        "att-spec-verify-attention"
+      ],
+      "aliases": [],
+      "grounding": "graphOnceAttentionLocked",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-spec-verify-attention",
+      "canonical": "SpecVerifyAttention",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The optional backend capability (SpecVerifyBackend / SpecVerifyAttentionBackend) and its split-KV multi-query speculative verify attention kernel (#11100), with a byte-for-byte CPU reference and host-fallback stage labeling.",
+      "distinction": "A SPECULATIVE-DECODING VERIFY KERNEL - NOT the dense cached attention sublayer (attnBody), NOT the CUDA graph-once capture path (graphOnceAttentionLocked), and NOT the flash kernel technique (FlashAttention).",
+      "distinct_from": [
+        "att-graph-once-attention-locked",
+        "x-attention-attnbody",
+        "x-attention-flashattention"
+      ],
+      "aliases": [],
+      "grounding": "SpecVerifyAttention",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-sparse-attn-topology",
+      "canonical": "SparseAttn (covmatrix topology)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The covmatrix.Topology constant marking MLA/DSA/MSA model families whose sparse-attention index fences CI coverage (OracleInCI families such as DeepSeek-MLA, GLM-5.2-DSA and MiniMax-MSA).",
+      "distinction": "A TEST-MATRIX TOPOLOGY FENCE - NOT the V4.1 host sparse sink kernel (V41SparseAttentionSink), NOT the MiniMax sparse-path predicate (isMiniMaxSparseAttn), and NOT the DSA index metadata (AttentionIndex).",
+      "distinct_from": [
+        "att-v41-sparse-attention-sink",
+        "x-attention-isminimaxsparseattn",
+        "attention-index"
+      ],
+      "aliases": [],
+      "grounding": "SparseAttn",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-linear-attn-layer-state",
+      "canonical": "linearAttnLayerState",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The per-Gated-DeltaNet-layer recurrent state inside linearAttnCache: independently owned zero recurrent matrices per value head plus convolution history, advanced by linearAttnStep/linearAttnSeq.",
+      "distinction": "PER-LAYER RECURRENT STATE - NOT the model-wide cache collection (linearAttnCache), NOT its zero-state constructor (newLinearAttnLayerState), and NOT the softmax KV cache.",
+      "distinct_from": [
+        "x-cache-newlinearattncache",
+        "attention-newlinearattnlayerstate"
+      ],
+      "aliases": [],
+      "grounding": "linearAttnLayerState",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-hc-attn-fn",
+      "canonical": "hc_attn_fn (GGUF MHC tensor)",
+      "family": "attention",
+      "kind": "doc-term",
+      "definition": "The per-sublayer-dialect GGUF tensor name (blk.<L>.hc_attn_fn.weight, [HCMult*H, 24] Q2_K) that ggufload resolves onto the forward-consumed mhc.mixes.weight leaf of the V4.1 mHC flattened four-stream mix projection.",
+      "distinction": "A GGUF NAME-RESOLUTION LEAF - NOT the pinned geometry struct (DeepSeekV41AttentionGeometry), NOT the sibling hc_attn_base/hc_attn_scale leaves, and NOT the mhc.ffn_* FFN trio.",
+      "distinct_from": [
+        "att-deepseek-v41-attention-geometry"
+      ],
+      "aliases": [],
+      "grounding": "hc_attn_fn",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-attention-dequant-once",
+      "canonical": "AttentionDequantOnce (retired Vulkan entrypoint)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The retired Vulkan backend attention entrypoint (with AttentionQuantizedKV, fak#13875), now referenced only in retirement notes on the vulkan_ops surface.",
+      "distinction": "A RETIRED SYMBOL - NOT the live shared-attention op (V41SharedAttention), NOT the dense softmax token-mixer (Attention), and NOT any current capability bit.",
+      "distinct_from": [
+        "att-v41-shared-attention-op",
+        "x-attention-attention"
+      ],
+      "aliases": [],
+      "grounding": "AttentionDequantOnce",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "att-v41-attention-file-label",
+      "canonical": "v41_attention (V4.1 attention path source label)",
+      "family": "attention",
+      "kind": "doc-term",
+      "definition": "The source-file label (v41_attention.go) naming the implementation of the DeepSeek V4.1 CED/CSA2 attention path, referenced in package doc comments across the model package.",
+      "distinction": "A FILE LABEL for the V4.1 attention path - NOT the per-layer plan struct (V41AttentionPlan), NOT the ring state (V41AttentionState), and NOT the umbrella dense softmax token-mixer (Attention).",
+      "distinct_from": [
+        "att-v41-attention-plan",
+        "att-v41-attention-state",
+        "x-attention-attention"
+      ],
+      "aliases": [],
+      "grounding": "v41_attention",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

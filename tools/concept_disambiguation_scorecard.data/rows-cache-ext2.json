@@ -216,26 +216,7 @@
       "verdict": "defined",
       "gaps": []
     },
-    {
-      "id": "x2-cache-cachewitness",
-      "canonical": "cachewitness (provenance evidence fold)",
-      "family": "cache",
-      "kind": "subsystem",
-      "definition": "internal/cachewitness reads a live fak gateway's /metrics and folds the cache numbers into ONE provenance-labeled Record, splitting the WITNESSED in-kernel KV-prefix reuse fak controls from the OBSERVED provider cache_read it only relays, so a reader can never mistake fak's own reuse for the provider's.",
-      "distinction": "It is the provenance-labeled evidence fold over /metrics that keeps WITNESSED and OBSERVED cache numbers in separate fields, not the cachevalue ledger that persists ledgered observations nor the provider cache it observes.",
-      "distinct_from": [
-        "vCache",
-        "Provider cache",
-        "x2-witness-proof-cachewitness"
-      ],
-      "aliases": [],
-      "grounding": "cachewitness",
-      "grounding_kind": "path",
-      "glossary_anchor": "",
-      "parent": "",
-      "verdict": "defined",
-      "gaps": []
-    },
+
     {
       "id": "x2-cache-cachedspan",
       "canonical": "CompactReasonCachedSpan (compaction guard)",

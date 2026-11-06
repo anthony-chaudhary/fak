@@ -104,7 +104,8 @@
       "distinction": "Builds the pricer; it does no ranking itself: Plan prices one preselected demand list while Search drives the same planner over a candidate grid and applies operator pins.",
       "distinct_from": [
         "fitplan-planner",
-        "fitplan-build-candidates"
+        "fitplan-build-candidates",
+        "planp2-noplanner"
       ],
       "aliases": [],
       "grounding": "newPlanner",

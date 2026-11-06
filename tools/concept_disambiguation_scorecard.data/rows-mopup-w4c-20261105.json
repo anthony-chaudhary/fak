@@ -1,0 +1,114 @@
+{
+  "rows": [
+    {
+      "id": "w4c-stopunwitnessed",
+      "canonical": "STOP_UNWITNESSED (stop-gate denial signal)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The STOP_UNWITNESSED signal string emitted when a session's stop carries no declared witness: gateway registers it as ReasonStopUnwitnessed (abi.ReasonCode 1070, named via ReasonStopUnwitnessedName, internal/gateway/stop_gate.go:10-15), stopgate returns it as the boundary decision reason/signal (internal/stopgate/boundary.go:214,281; internal/stopgate/witness.go:110), and the agent loop recognizes it to splice the continue-working continuation (internal/agent/loop_turn.go:588).",
+      "distinction": "A DENIAL SIGNAL naming why the stop was refused, not the block-budget counter that counts such refusals (WitnessBlockCount) and not the gate function that decides them (EvaluateWitness).",
+      "distinct_from": [
+        "cov-debt250-witness-proof-witnessblockcount",
+        "cov-debt250-witness-proof-evaluatewitness",
+        "wp-reason-stop-unwitnessed"
+      ],
+      "aliases": [],
+      "grounding": "STOP_UNWITNESSED",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "w4c-unwitnessedcount",
+      "canonical": "UnwitnessedCount (recovery count of unwitnessed runs)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The UnwitnessedCount field (json unwitnessed_count) on looprecover's recovery result (internal/looprecover/looprecover.go:144): how many in-flight ledger runs had no completion witness when the loop crashed, so fak loop recover re-runs them alongside OrphanedCount (cmd/fak/loop_recover.go:103-123); conceptbench's agentic floor also projects it (internal/conceptbench/agentic_floor.go).",
+      "distinction": "A RECOVERY INPUT COUNT (runs to redo after a crash), not the recovery subsystem itself (looprecover) and not a dishonesty metric like ClaimUnwitnessedCount, which grades narrated-but-unwitnessed done claims.",
+      "distinct_from": [
+        "looprecover",
+        "wp-unwitnessed-count"
+      ],
+      "aliases": [],
+      "grounding": "UnwitnessedCount",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "w4c-v41hostbf16witness",
+      "canonical": "v41HostBF16Witness (host BF16 publish witness flag)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "Package-level atomic.Bool (internal/model/v41_bf16_publish.go:16) set true while the V4.1 host-side BF16 weight publish path has produced a witnessed binding; every V4.1 forward pass consults it before trusting host-published BF16 tensors (resident binding v41_bf16_resident_binding.go:152, compressor/index v41_compress_index.go:227, engram decode v41_engram_row_decode.go:28, norm bindings, KV/query norm bindings).",
+      "distinction": "A LIVE PUBLISH-STATE FLAG gating trust in host BF16 tensors at runtime, not a build-tag witness archive (v41_indexer_witness) and not a measured hardware witness receipt.",
+      "distinct_from": [
+        "w4c-v41indexerwitness",
+        "wp-v41-host-bf16-witness"
+      ],
+      "aliases": [],
+      "grounding": "v41HostBF16Witness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "w4c-v41indexerwitness",
+      "canonical": "v41_indexer_witness (Vulkan indexer-score build tag)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The cgo build tag v41_indexer_witness that switches the Vulkan compute backend onto the dedicated libfakvulkan_v41_indexer_witness native archive (internal/compute/vulkan.go:14 plus the matching #cgo LDFLAGS lines in vulkan_ops_vulkan.go, vulkan_glm_kda.go, vulkan_matmul_fused.go, vulkan_device_sync.go, vulkan_device_debug.go); computebuild receipts recognize its companion FAK_V41_INDEXER_SCORE_WITNESS env var (internal/computebuild/vulkan_receipt_successor.go:105).",
+      "distinction": "A BUILD TAG selecting which prebuilt native archive links the V4.1 indexer score, not a runtime witness flag (v41HostBF16Witness) and not the scoring backend interface itself (V41IndexerScoreBackend).",
+      "distinct_from": [
+        "w4c-v41hostbf16witness",
+        "wp-v41-indexer-witness"
+      ],
+      "aliases": [],
+      "grounding": "v41_indexer_witness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "w4c-witnessunwitnessedclaim",
+      "canonical": "WitnessUnwitnessedClaim (observer verdict: claim without diff)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The WITNESS_UNWITNESSED_CLAIM member of observer's closed WitnessVerdict vocabulary (internal/observer/verdict.go:56): stamped on a mutating tool observation whose claimed effect produced no verifiable diff; screen.go fails it closed when RequireWitnessDiff is set (internal/observer/screen.go:228) and pool.go both stamps it and enforces it (internal/observer/pool.go:169,196,613).",
+      "distinction": "One of two CLOSED VERDICT VALUES (the other being WitnessDiffConfirmed) - a result label, not the vocabulary type itself (WitnessVerdict) and not a stop-gate denial signal (STOP_UNWITNESSED).",
+      "distinct_from": [
+        "w4c-witnessverdict",
+        "w4c-stopunwitnessed",
+        "wp-witness-unwitnessed-claim"
+      ],
+      "aliases": [],
+      "grounding": "WitnessUnwitnessedClaim",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "w4c-witnessverdict",
+      "canonical": "WitnessVerdict (observer mutation-evidence vocabulary)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The closed string-vocabulary type for mutation evidence verification in internal/observer/verdict.go:52, with members WitnessDiffConfirmed / WitnessUnwitnessedClaim, strict parsing via ParseWitnessVerdict and membership via IsValid; carried on Observation.WitnessVerdict (json witness_verdict, verdict.go:112) and read back by metrics' trust-violation accounting (internal/metrics/trust_violation.go).",
+      "distinction": "The VOCABULARY TYPE plus its parse/validate helpers, not one of its member values (WitnessUnwitnessedClaim) and not a remote-DRAM witness state machine (RemoteDRAMWitnessVerdict).",
+      "distinct_from": [
+        "w4c-witnessunwitnessedclaim",
+        "wp-witness-verdict"
+      ],
+      "aliases": [],
+      "grounding": "WitnessVerdict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

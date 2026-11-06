@@ -1,0 +1,118 @@
+{
+  "rows": [
+    {
+      "id": "w4a-benchmarkwitnesses",
+      "canonical": "BenchmarkWitnesses (debtlane benchmark authority mentions)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The Related.BenchmarkWitnesses []string field on debtlane lane records (internal/debtlane/debtlane.go, wire key benchmark_witnesses) holding the benchmark-authority mention keys collected while scanning a lane (internal/debtlane/scan.go) and checked against BENCHMARK-AUTHORITY.md by the debt-clean workflow (internal/debtlane/detectors.go).",
+      "distinction": "A lane-scan COLLECTION of benchmark-authority mention keys, NOT a proof bundle or an obligation counter: unlike DisambiguationWitnesses (worker-land scorecard proof artifacts) it stores authority-reference strings attached to a debt lane, and unlike RequiredWitnesses (witnesses still owed) it is the raw mention list, not a remaining-due count.",
+      "distinct_from": [
+        "issue9909-disambiguation-witnesses",
+        "cov-debt250-witness-proof-requiredwitnesses",
+        "wp-benchmark-witnesses"
+      ],
+      "aliases": [],
+      "grounding": "BenchmarkWitnesses",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "w4a-dispclaimunwitnessedcontinue",
+      "canonical": "DispClaimUnwitnessedContinue (stopgate unwitnessed-claim continue disposition)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The stopgate Disposition constant in internal/stopgate/types.go (wire value claim_unwitnessed_continue) returned when a session's done-claim lacks a confirming witness under enforce mode: the stop gate blocks the exit (exit code 2, Blocked=true) while letting the session continue to produce the missing witness (internal/stopgate/boundary.go).",
+      "distinction": "A stopgate DISPOSITION on the blocked-but-continuing branch, NOT a loop-gate marker or a sweep verdict: unlike LOOP_DONE_UNWITNESSED (loop-gate unwitnessed-done marker) it is a typed Disposition value that steers exit codes, and unlike ClaimWitnessed (dispatch-tick sweep verdict) it fires precisely when the claim is NOT witnessed.",
+      "distinct_from": [
+        "x-goal25-witness-proof-loopdoneunwitnessed",
+        "drive-witness-proof-claimwitnessed",
+        "wp-disp-claim-unwitnessed-continue"
+      ],
+      "aliases": [],
+      "grounding": "DispClaimUnwitnessedContinue",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "w4a-dispclaimunwitnessedgiveup",
+      "canonical": "DispClaimUnwitnessedGiveUp (stopgate unwitnessed-claim give-up disposition)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The stopgate Disposition constant in internal/stopgate/types.go (wire value claim_unwitnessed_give_up) returned when an unwitnessed done-claim exhausts its retry budget: the gate stops blocking, allows the exit (exit code 0), and records the StageGiveUp outcome (internal/stopgate/boundary.go).",
+      "distinction": "The TERMINAL branch of the same unwitnessed-claim path, NOT a separate gate: it differs from DispClaimUnwitnessedContinue only in budget exhaustion - the gate stops blocking and allows the exit - and from the generic GiveUp dispositions (BlindGiveUp, SameIssueGiveUp) in that its trigger is specifically a missing done-claim witness.",
+      "distinct_from": [
+        "w4a-dispclaimunwitnessedcontinue",
+        "x2-witness-proof-unwitnessed",
+        "wp-disp-claim-unwitnessed-giveup"
+      ],
+      "aliases": [],
+      "grounding": "DispClaimUnwitnessedGiveUp",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "w4a-dispclaimwitnessed",
+      "canonical": "DispClaimWitnessed (stopgate witnessed-claim allow disposition)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The stopgate Disposition constant in internal/stopgate/types.go (wire value claim_witnessed) returned when a session's done-claim carries a verifying witness: the stop gate allows the exit and stamps the witness into the decision note (internal/stopgate/witness.go).",
+      "distinction": "The WITNESSED branch of the stopgate done-claim check, NOT a sweep verdict or a commit grader: unlike ClaimWitnessed (dispatch-tick sweep verdict over ledger rows) it is a per-session Disposition deciding exit allowance, and unlike CommitWitnessed (dispatch-tick audit-row grader) it grades the done-claim itself, not a commit.",
+      "distinct_from": [
+        "drive-witness-proof-claimwitnessed",
+        "witness-proof-commitwitnessed",
+        "wp-disp-claim-witnessed"
+      ],
+      "aliases": [],
+      "grounding": "DispClaimWitnessed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "w4a-errunwitnesseddiff",
+      "canonical": "ErrUnwitnessedDiff (observer mutating-step diff-witness error)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The sentinel error defined in internal/observer/verdict.go that the observer pool returns when a mutating step reports success without a confirmed diff witness (internal/observer/pool.go); screen.go screens it together with the unwitnessed-claim verdict to hold the step's result (internal/observer/screen.go).",
+      "distinction": "A sentinel ERROR IDENTITY, NOT a verdict value or a prose reason: unlike WitnessOK (the diff-witnessed constant flagging a witnessed diff) it is the failure signal raised when the diff witness is absent, and unlike ReasonUnwitnessed (a deny reason string) it is matched with errors.Is, not compared as text.",
+      "distinct_from": [
+        "x-issue1420-witness-proof-witnessok",
+        "x-witness-proof-unwitnessed",
+        "wp-err-unwitnessed-diff"
+      ],
+      "aliases": [],
+      "grounding": "ErrUnwitnessedDiff",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "w4a-executionwitness",
+      "canonical": "ExecutionWitness (roofline physical-execution receipt field)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The ExecutionWitness receipt field (internal/roofline/empirical.go, mirrored in internal/amdgpu/roofline_probe.go and cmd/fak/validate_acceptance.go) that must be non-empty whenever a roofline receipt claims physical device execution (Simulated=false); Verify() refuses such receipts without it.",
+      "distinction": "A RECEIPT FIELD attesting physical execution, NOT a witness mechanism or a whole proof document: unlike the vDSO world-state witness (external world-state token per tool call) it attests hardware execution inside a roofline receipt, and unlike FeatureProofReceipt (gateway feature-rewrite proof artifact) it is one string field gated by Simulated=false, not a receipt document.",
+      "distinct_from": [
+        "world-state-witness",
+        "gateway-feature-proof-receipt",
+        "wp-execution-witness"
+      ],
+      "aliases": [],
+      "grounding": "ExecutionWitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

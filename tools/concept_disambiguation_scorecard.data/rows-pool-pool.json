@@ -1,0 +1,603 @@
+{
+  "rows": [
+    {
+      "id": "pool-p-autoreleasepool",
+      "canonical": "AutoReleasePool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The Objective-C @autoreleasepool scope used in darwin Metal sources to bound ARC temporary allocations around kernel dispatch.",
+      "distinction": "A language-level memory-scoping directive embedded in ObjC/Metal code; it allocates nothing and is not any fak buffer pool, slot pool, or pool profile.",
+      "distinct_from": [
+        "pool-p-setbufferpool"
+      ],
+      "aliases": [],
+      "grounding": "autoreleasepool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-availablekvpoolbytes",
+      "canonical": "AvailableKVPoolBytes",
+      "family": "pool",
+      "kind": "metric",
+      "definition": "The macobs headroom-snapshot field reporting how many bytes of unified-memory KV pool remain available for concurrent agent sessions.",
+      "distinction": "An observed host-fit telemetry value about remaining capacity; it neither declares a placement pool nor reports a pool's usable-bytes input like fitplan's PoolUsableBytes.",
+      "distinct_from": [
+        "fitplan-pool-usable-bytes",
+        "fitplan-host-pool-usable-bytes"
+      ],
+      "aliases": [],
+      "grounding": "AvailableKVPoolBytes",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-compressorpool",
+      "canonical": "compressorPool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The v41DeviceGatherOps field holding the bound V4.1 gated-compressor-pool seam for device gather operations.",
+      "distinction": "A holder field on the gather-ops struct; it stores the v41CompressorPoolFunc value exposed by the compressorPoolFunc() accessor rather than being the func type or the accessor itself.",
+      "distinct_from": [
+        "pool-p-v41compressorpoolfunc",
+        "pool-p-compressorpoolfunc"
+      ],
+      "aliases": [],
+      "grounding": "compressorPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-compressorpoolfunc",
+      "canonical": "compressorPoolFunc",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The v41DeviceGatherOps accessor method returning the bound gated-pool seam, nil under device-only when the backend exposes no V4.1 compressor pool.",
+      "distinction": "An accessor method on the gather-ops struct; it returns the v41CompressorPoolFunc value held in the compressorPool field and is not the func type itself.",
+      "distinct_from": [
+        "pool-p-v41compressorpoolfunc",
+        "pool-p-compressorpool"
+      ],
+      "aliases": [],
+      "grounding": "compressorPoolFunc",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-devicelocalpool",
+      "canonical": "DeviceLocalPool",
+      "family": "pool",
+      "kind": "doc-term",
+      "definition": "The Strix Halo Vulkan residency ablation arm name for direct device-local allocation (VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT mapped into APU GTT) versus host-visible streaming.",
+      "distinction": "A named benchmark ablation arm measuring residency latency; it is not a runtime pool container, allocator, or sizing knob.",
+      "distinct_from": [
+        "x-pool-sharedpool"
+      ],
+      "aliases": [],
+      "grounding": "device_local_pool",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-embeddingpooling",
+      "canonical": "EmbeddingPooling",
+      "family": "pool",
+      "kind": "config",
+      "definition": "The gateway Config field selecting bounded learned CPU causal embedding pooling mode ('mean' or 'last'); empty leaves the hash default unchanged.",
+      "distinction": "A text-embedding aggregation mode over hidden states; 'pooling' here means mean/last-token reduction, not a memory pool or pool profile.",
+      "distinct_from": [
+        "poolprofile-cachemeta"
+      ],
+      "aliases": [],
+      "grounding": "EmbeddingPooling",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-errnilpool",
+      "canonical": "ErrNilPool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The package-local sentinel error returned when a KV or page pool binding is nil, defined separately as kvmmu.ErrNilPool and radixkv.ErrNilPool.",
+      "distinction": "A nil-input guard sentinel on pool bindings; it is not the observer-pool lifecycle sentinels ErrPoolClosed or ErrPoolStopped.",
+      "distinct_from": [
+        "pool-errpoolclosed",
+        "runtime-fourth-errpoolstopped"
+      ],
+      "aliases": [],
+      "grounding": "ErrNilPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-fakqwen35wholetokenpool",
+      "canonical": "FAK_QWEN35_WHOLE_TOKEN_POOL",
+      "family": "pool",
+      "kind": "config",
+      "definition": "The environment opt-out (=0) that disables per-shape recycling of dead intermediate projection/norm buffers in Qwen3.5 whole-token Metal prefill graphs, restoring fresh allocations for rollback or A/B measurement.",
+      "distinction": "An env-var toggle for the graph buffer-recycle pool; it enables SetBufferPool(8) on the whole-token graph and is not the SetBufferPool API itself or the C entry point behind it.",
+      "distinct_from": [
+        "pool-p-setbufferpool",
+        "pool-p-mggraphsetbufferpool"
+      ],
+      "aliases": [],
+      "grounding": "FAK_QWEN35_WHOLE_TOKEN_POOL",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-fakv41compressorpoolf32",
+      "canonical": "fakV41CompressorPoolF32",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The extern-C CUDA kernel entry point implementing the DeepSeek V4.1 gated compressor pool in binary32, cgo-bound by the compute package's live and pending compressor bindings.",
+      "distinction": "A device kernel symbol for one backend implementation; it is not the V41CompressorPoolBackend interface that declares the host-facing pool contract.",
+      "distinct_from": [
+        "pool-p-v41compressorpoolbackend"
+      ],
+      "aliases": [
+        "fak_v41_compressor_pool_f32"
+      ],
+      "grounding": "fak_v41_compressor_pool_f32",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-indexkpool",
+      "canonical": "IndexKPool",
+      "family": "pool",
+      "kind": "config",
+      "definition": "The GLM5-next spine config field (json index_kpool, default 4) fixing the indexer K-pool slot count for hybrid sparse-attention admission.",
+      "distinction": "A model-config scalar naming a key-slot budget; it is not a memory pool container and not the external K-pool tail patch script cited in the GLM-5.3 study.",
+      "distinct_from": [
+        "pool-p-patchkpooltailpositions",
+        "mopup6b-indexkpool"
+      ],
+      "aliases": [],
+      "grounding": "IndexKPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-maxgttallocpoolbytes",
+      "canonical": "MaxGTTAllocPoolBytes",
+      "family": "pool",
+      "kind": "config",
+      "definition": "The Strix Halo constant bounding GTT physical allocations at 116 GiB on 128 GiB DRAM, enforced by the KFD and UMA allocators.",
+      "distinction": "A hardware allocation-ceiling constant; it caps individual allocations rather than sizing a reusable buffer pool or a worktree pool cap.",
+      "distinct_from": [
+        "x2-pool-workerworktreepoolcap"
+      ],
+      "aliases": [],
+      "grounding": "MaxGTTAllocPoolBytes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-mggraphsetbufferpool",
+      "canonical": "mgGraphSetBufferPool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The Metal engine C entry point enabling the per-shape idle-buffer recycle pool at a given maximum idle depth, implemented in q4k.m.",
+      "distinction": "The C/Metal side of the graph buffer pool; the Go ProjectionGraph.SetBufferPool method wraps it and adds the opt-in pre-first-encode guard.",
+      "distinct_from": [
+        "pool-p-setbufferpool"
+      ],
+      "aliases": [
+        "mg_graph_set_buffer_pool"
+      ],
+      "grounding": "mg_graph_set_buffer_pool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-newnumadecodepool",
+      "canonical": "NewNUMADecodePool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The constructor creating and starting a persistent NUMA-pinned decode worker pool from a DecodeNUMASchedule.",
+      "distinction": "A factory function; it builds the NUMADecodePool type and is not the pool state referenced by model fields.",
+      "distinct_from": [
+        "pool-p-numadecodepool"
+      ],
+      "aliases": [],
+      "grounding": "NewNUMADecodePool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-newv41compressorpool",
+      "canonical": "NewV41CompressorPool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The constructor building a host V41CompressorPool for a validated ratio/width, the entry point of the DeepSeek V4.1 gated compressor pool group.",
+      "distinction": "A factory for the host pool type; it is not the device-backend interface, its argument validator, or the checked cudaV41CompressorPool operator.",
+      "distinct_from": [
+        "pool-p-v41compressorpool",
+        "raider-compressor-pool"
+      ],
+      "aliases": [],
+      "grounding": "NewV41CompressorPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-numadecodepool",
+      "canonical": "NUMADecodePool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The compute package type managing a set of pinned decode workers distributed across NUMA nodes for barrier-free bit-identical decode.",
+      "distinction": "The worker-pool type itself; it is not its constructor NewNUMADecodePool nor the model-state field numaPool that references an instance of it.",
+      "distinct_from": [
+        "pool-p-newnumadecodepool",
+        "pool-p-numapool"
+      ],
+      "aliases": [],
+      "grounding": "NUMADecodePool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-numapool",
+      "canonical": "numaPool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The model-state field (*compute.NUMADecodePool) shared by quantized heads so decode reads each replica from its own NUMA node.",
+      "distinction": "A reference field on model state; it points at a NUMADecodePool instance and is not the pool type or its constructor.",
+      "distinct_from": [
+        "pool-p-numadecodepool"
+      ],
+      "aliases": [],
+      "grounding": "numaPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-patchkpooltailpositions",
+      "canonical": "PatchKPoolTailPositions",
+      "family": "pool",
+      "kind": "doc-term",
+      "definition": "The upstream vLLM patch script (patch_kpool_tail_positions.py) cited in the GLM-5.3 EXL3 concept study that restores positions= in hybrid-model state for the K-pool tail cache.",
+      "distinction": "An external upstream bugfix script referenced in study notes; it is not a fak pool container, config field, or the GLM5-next IndexKPool slot count.",
+      "distinct_from": [
+        "pool-p-indexkpool"
+      ],
+      "aliases": [
+        "patch_kpool_tail_positions"
+      ],
+      "grounding": "patch_kpool_tail_positions",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-pooldemand",
+      "canonical": "PoolDemand",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The fitplan placement-report entry recording one physical memory pool's ID, usable bytes, and fit status against summed rank demand.",
+      "distinction": "A report-side demand record; it consumes the MemoryPool capacity declaration and differs from PoolUsableBytes, which reports the capacity value alone.",
+      "distinct_from": [
+        "fitplan-memory-pool",
+        "fitplan-pool-usable-bytes"
+      ],
+      "aliases": [],
+      "grounding": "PoolDemand",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-poolrebuilds",
+      "canonical": "PoolRebuilds",
+      "family": "pool",
+      "kind": "metric",
+      "definition": "The L3 server client-stats counter of pool rebuilds, exported as the l3_client_pool_rebuilds gauge.",
+      "distinction": "A rebuild-event counter; it counts pool reconstruction events rather than reporting the current pool size measured by PoolSize.",
+      "distinct_from": [
+        "pool-p-poolsize"
+      ],
+      "aliases": [],
+      "grounding": "PoolRebuilds",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-poolsharedwithhost",
+      "canonical": "PoolSharedWithHost",
+      "family": "pool",
+      "kind": "config",
+      "definition": "The contextsizer flag reporting that the device aperture and host window are one physical DRAM pool on an integrated/APU tier, switching discrete-vs-shared sizing rules.",
+      "distinction": "A topology predicate on the memory plan; it is not the serveSharedPoolSizingFit helper that computes the host-window ceiling when it is true.",
+      "distinct_from": [
+        "pool-p-servesharedpoolsizingfit"
+      ],
+      "aliases": [],
+      "grounding": "PoolSharedWithHost",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-poolsize",
+      "canonical": "PoolSize",
+      "family": "pool",
+      "kind": "metric",
+      "definition": "The L3 server client-stats gauge of the current client pool size, exported as l3_client_pool_size.",
+      "distinction": "A current-size gauge; it measures pool occupancy rather than counting rebuild events recorded by PoolRebuilds.",
+      "distinct_from": [
+        "pool-p-poolrebuilds"
+      ],
+      "aliases": [],
+      "grounding": "PoolSize",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-poolworkers",
+      "canonical": "PoolWorkers",
+      "family": "pool",
+      "kind": "metric",
+      "definition": "The harnessbench thundering-herd receipt field recording the witness pool's worker count used for the burst.",
+      "distinction": "A receipt measurement of configured concurrency; it is not the lease-accounting map leaseWorkersByPool that tracks per-pool leased workers.",
+      "distinct_from": [
+        "pool-leaseworkersbypool"
+      ],
+      "aliases": [],
+      "grounding": "PoolWorkers",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-servesharedpoolsizingfit",
+      "canonical": "serveSharedPoolSizingFit",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The cmd/fak helper computing the host-window memory ceiling the context auto-sizer must size against when PoolSharedWithHost makes the KV store compete with co-resident weights for one physical pool.",
+      "distinction": "A sizing-budget substitution for shared-pool boxes; it consumes the PoolSharedWithHost predicate and is not that predicate or a generic pool container.",
+      "distinct_from": [
+        "pool-p-poolsharedwithhost"
+      ],
+      "aliases": [],
+      "grounding": "serveSharedPoolSizingFit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-setbufferpool",
+      "canonical": "SetBufferPool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The ProjectionGraph method enabling the per-shape idle-buffer recycle pool at a maximum idle depth, opt-in before the first encode, so intermediate results are recycled through Release instead of fresh Metal allocations.",
+      "distinction": "The Go opt-in API on the graph; it wraps the C entry point mg_graph_set_buffer_pool and is toggled for whole-token prefill by the FAK_QWEN35_WHOLE_TOKEN_POOL env var.",
+      "distinct_from": [
+        "pool-p-mggraphsetbufferpool",
+        "pool-p-fakqwen35wholetokenpool"
+      ],
+      "aliases": [],
+      "grounding": "SetBufferPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-slotpool",
+      "canonical": "slotPool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The metalgemm expert-stream manager of preallocated reusable buffers with LRU eviction and lease lifecycles for queued expert loads.",
+      "distinction": "A private expert-load buffer pool inside metalgemm; it is not the MultiTensorSlotPool sized against device VRAM by NewMultiTensorSlotPoolForDevice, nor the ci-coverage seatpool identifier.",
+      "distinct_from": [
+        "slotstream-multitensor-for-device",
+        "x-ci-coverage-pool-seatpool"
+      ],
+      "aliases": [],
+      "grounding": "slotPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-srcpool",
+      "canonical": "srcPool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The transient PagedKVPool local in the native prefill/decode-disaggregation path that converts the prefill session cache into paged form for transfer.",
+      "distinction": "A short-lived local conversion pool on the PD wire path; it instantiates the general PagedKVPool type and is not that type's long-lived serving instances.",
+      "distinct_from": [
+        "x2-pool-pagedkvpool"
+      ],
+      "aliases": [],
+      "grounding": "srcPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-unpooled",
+      "canonical": "Unpooled",
+      "family": "pool",
+      "kind": "doc-term",
+      "definition": "The comment term naming the fresh-allocation regime without buffer-pool recycling, used in the shellpool cost analysis (unpooled cost is TasksRun) and the Qwen3.5 pooled/unpooled graph parity claim.",
+      "distinction": "An allocation-mode adjective contrasting with pooled recycling; it names the absence of a pool rather than any pool container or its enabler SetBufferPool.",
+      "distinct_from": [
+        "pool-p-setbufferpool"
+      ],
+      "aliases": [],
+      "grounding": "unpooled",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-v41compressorpool",
+      "canonical": "V41CompressorPool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The DeepSeek V4.1 gated compressor pool: the host model.V41CompressorPool group-emission state and the same-named V41CompressorPoolBackend method transcribing its Push-group softmax gating for ratio >= 2.",
+      "distinction": "The pool concept itself across host state and device contract; it is not the checked cudaV41CompressorPool CUDA operator, its constructor, the backend interface, or the gather-ops field storing the seam.",
+      "distinct_from": [
+        "raider-compressor-pool",
+        "pool-p-newv41compressorpool",
+        "pool-p-v41compressorpoolbackend",
+        "pool-p-compressorpool"
+      ],
+      "aliases": [],
+      "grounding": "V41CompressorPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-v41compressorpoolbackend",
+      "canonical": "V41CompressorPoolBackend",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The optional compute.Backend extension declaring SupportsV41CompressorPool and the device-side V41CompressorPool(kv, scores, ratio, width) gated-pool call.",
+      "distinction": "The capability interface a backend implements; it is not the pool concept it serves, the argument validator, or the Vulkan fail-closed error constructor.",
+      "distinct_from": [
+        "pool-p-v41compressorpool",
+        "pool-p-validatev41compressorpool",
+        "pool-p-vulkanv41compressorpoolstatuserror"
+      ],
+      "aliases": [],
+      "grounding": "V41CompressorPoolBackend",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-v41compressorpoolfunc",
+      "canonical": "v41CompressorPoolFunc",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The model-package func type owning one completed compressor group's gated pool call (layer, kv, scores, ratio, width -> pooled rows), the seam between host pool and device backend.",
+      "distinction": "A callable type; it is stored in the compressorPool field and returned by the compressorPoolFunc() accessor, and is not either of those struct members.",
+      "distinct_from": [
+        "pool-p-compressorpool",
+        "pool-p-compressorpoolfunc"
+      ],
+      "aliases": [],
+      "grounding": "v41CompressorPoolFunc",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-validatev41compressorpool",
+      "canonical": "ValidateV41CompressorPool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The pre-dispatch validator rejecting V4.1 compressor pool calls whose ratio/width fall outside the gated domain or whose operands are not unquantized row-major F32 [ratio,width] tensors.",
+      "distinction": "An argument-domain gate; it validates inputs to the V41CompressorPoolBackend call and is not the backend interface or the pool concept itself.",
+      "distinct_from": [
+        "pool-p-v41compressorpoolbackend"
+      ],
+      "aliases": [],
+      "grounding": "validateV41CompressorPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-p-vulkanv41compressorpoolstatuserror",
+      "canonical": "VulkanV41CompressorPoolStatusError",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The Vulkan-specific fail-closed BackendError constructor tagging a failed dedicated compressor pool dispatch with Site V41CompressorPool.",
+      "distinction": "An error-construction helper for one backend's failure path; it reports a pool dispatch failure and is not the backend interface or the pool concept.",
+      "distinct_from": [
+        "pool-p-v41compressorpoolbackend"
+      ],
+      "aliases": [],
+      "grounding": "vulkanV41CompressorPoolStatusError",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

@@ -1,0 +1,824 @@
+{
+  "rows": [
+    {
+      "id": "guardgate-bindgatedpool",
+      "canonical": "bindGatedPool (cold-compressor panel binder)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Per-layer binder on the V4.1 cold-compressor panel that routes completed ratio >= 2 compressor groups through the device-side gated compressor pool.",
+      "distinction": "The binding action that installs the pool callback per layer; it is not the gatedPool callback field it sets, nor an expert gate/up dispatch seam.",
+      "distinct_from": [
+        "guardgate-gatedpool",
+        "x2-guard-gate-v41expertgateup"
+      ],
+      "aliases": [],
+      "grounding": "bindGatedPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-commitbuildcheckgate",
+      "canonical": "commitBuildCheckGate (commit-time build-check runner)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Commit-time build-check gate runner that executes the changed-package build check and reports a typed safecommit.BuildCheckOutcome plus diagnostic detail without deciding the commit's fate.",
+      "distinction": "Runs and reports the pre-commit build check; it neither owns the commit decision (safecommit.DecideBuildCheck) nor the FLEET_BUILDCHECK_GUARD env toggle that disables the fleet-wide check.",
+      "distinct_from": [
+        "git-hook-gate",
+        "guardgate-fleetbuildcheckguard"
+      ],
+      "aliases": [],
+      "grounding": "commitBuildCheckGate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-engramgate",
+      "canonical": "engramGate (v41-engram-gate build flag)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "Compile-time build flag (--v41-engram-gate) selecting the explicit SM120 V4.1 Engram-gate candidate; public capability remains unqualified.",
+      "distinction": "A build selection flag, not the V41EngramGate backend op it qualifies nor the engramGateFunc accessor that hands out the bound device function.",
+      "distinct_from": [
+        "guardgate-v41engramgate",
+        "guardgate-engramgatefunc"
+      ],
+      "aliases": [],
+      "grounding": "engramGate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-engramgatefunc",
+      "canonical": "engramGateFunc (device gather-ops accessor)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Device gather-ops accessor returning the session-bound V4.1 Engram gate function pointer used by the forward layer when the panel stays device-resident.",
+      "distinction": "An accessor over the bound device callback, not the V41EngramGate backend op itself nor the build flag that compiles the candidate.",
+      "distinct_from": [
+        "guardgate-v41engramgate",
+        "runtime-third-v41engramgatefunc"
+      ],
+      "aliases": [],
+      "grounding": "engramGateFunc",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-ffngateshexp",
+      "canonical": "ffn_gate_shexp (GGUF shared-expert gate tensor name)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "GGUF tensor-name suffix in DeepSeek 4.1 / GLM / Qwen4-exp manifests that maps onto the shared-experts gate projection ffn.shared_experts.w1.weight.",
+      "distinction": "The shared-experts gate tensor name, not the MoE router gate (ffn.gate / ffn_gate_inp) nor the up/down shared-expert tensors.",
+      "distinct_from": [
+        "ffn-gate",
+        "guard-gate-ffngateinp"
+      ],
+      "aliases": [],
+      "grounding": "ffn_gate_shexp",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-fleetbuildcheckguard",
+      "canonical": "FLEET_BUILDCHECK_GUARD (fleet build-check guard env)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "Environment variable (FLEET_BUILDCHECK_GUARD=off) that disables the fleet-wide commit build-check guard, set alongside FAK_COMMIT_BUILD_CHECK during fak commit runs.",
+      "distinction": "An env toggle for the fleet build-check guard, not the commitBuildCheckGate runner itself nor the typed BuildCheckOutcome that runner emits.",
+      "distinct_from": [
+        "guardgate-commitbuildcheckgate",
+        "git-hook-gate"
+      ],
+      "aliases": [],
+      "grounding": "FLEET_BUILDCHECK_GUARD",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-gatebuf",
+      "canonical": "gateBuf (split query/gate device buffer)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Transient device buffer holding the gate half of a split Qwen3.5 [query, gate] projection in CUDA and Vulkan decode paths.",
+      "distinction": "A scratch buffer for the split gate component, not the query-gate projection weight concept nor the SplitQwen35QueryGate op that produces the split.",
+      "distinct_from": [
+        "q-gate-proj",
+        "issue9181-guard-gate-split-packed-query"
+      ],
+      "aliases": [],
+      "grounding": "gateBuf",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-gateddeltanet",
+      "canonical": "GatedDeltaNet (linear-attention SSM layer family)",
+      "family": "guard-gate",
+      "kind": "concept",
+      "definition": "Gated DeltaNet linear-attention/SSM layer family (ggml op GATED_DELTA_NET) used by Qwen3.5-class models, with a parallel host recurrence fallback.",
+      "distinction": "A recurrent linear-attention layer class, not a single attention gate projection (q_gate_proj) nor an attention output-gate flag.",
+      "distinct_from": [
+        "q-gate-proj",
+        "attn-output-gate"
+      ],
+      "aliases": [],
+      "grounding": "GatedDeltaNet",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-gatedpool",
+      "canonical": "gatedPool (compressor-pool routing callback)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Callback field on V41CompressorPool that routes completed ratio >= 2 compressor groups through the device pool, inherited by replay panels.",
+      "distinction": "The pool-routing callback state, not the bindGatedPool action that installs it per layer, nor a batched gated-MLP compute path.",
+      "distinct_from": [
+        "guardgate-bindgatedpool",
+        "c729-batched-gated-mlp",
+        "c729-graded-pool"
+      ],
+      "aliases": [],
+      "grounding": "gatedPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-gateimportwitness",
+      "canonical": "gate_importwitness (commit-boundary import-witness gate)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Advisory commit-boundary hook gate (internal/hooks/gate_importwitness.go) that catches committed files importing a module-local package with zero tracked or staged non-test .go files.",
+      "distinction": "The import-witness commit gate, not the generic git-hook gate class nor the GUARD_MCP_STATUS audit gate in the same hooks package.",
+      "distinct_from": [
+        "git-hook-gate",
+        "guardgate-guardmcpstatus"
+      ],
+      "aliases": [],
+      "grounding": "gate_importwitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-gateissue",
+      "canonical": "GateIssue (devexmeter issue gate)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "devexmeter gate function that grades one issue candidate against measured developer-experience rows and returns a GateResult.",
+      "distinction": "An issue-dispatchability grader in devexmeter, not the generic gate decision point nor an advisory gate verdict.",
+      "distinct_from": [
+        "gate",
+        "x-goal-guard-gate-gate-verdict"
+      ],
+      "aliases": [],
+      "grounding": "GateIssue",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-gatepassed",
+      "canonical": "GatePassed (quality-gate result flag)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Boolean result flag (JSON gate_passed) recorded on benchmark and receipt structs - frontierswe Correctness and nativeperf reproducibility - stating whether the applicable quality gate passed.",
+      "distinction": "A recorded pass/fail flag on results, not the gate mechanism itself nor a gate verdict type.",
+      "distinct_from": [
+        "gate",
+        "x-goal-guard-gate-gate-verdict"
+      ],
+      "aliases": [],
+      "grounding": "GatePassed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-gateshare",
+      "canonical": "gateshare (dispatch share-metric lesson citation)",
+      "family": "guard-gate",
+      "kind": "doc-term",
+      "definition": "Lesson-series citation (gateshare/fak/lesson-N) in dispatch-status code pinning how gate/share throughput metrics fold into the fleet dispatch card, headline first.",
+      "distinction": "A documentation citation for dispatch tick share metrics, not a gate implementation nor the gateStats counters it describes.",
+      "distinct_from": [
+        "gate",
+        "x-goal-guard-gate-gate-stats"
+      ],
+      "aliases": [],
+      "grounding": "gateshare",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-gatetensor",
+      "canonical": "gateTensor (MLP gate-projection weight handle)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Weight-tensor handle for the MLP gate projection (mlp.gate_proj.weight) used by Qwen3.5 Metal decode blocks and V4 expert-shared paths.",
+      "distinction": "A loaded weight handle, not the gate_proj tensor-name concept nor the fused gate_up_proj pair.",
+      "distinct_from": [
+        "mlp-gate-proj",
+        "gate-up-proj"
+      ],
+      "aliases": [],
+      "grounding": "gateTensor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-gateupprojbias",
+      "canonical": "gate_up_proj_bias (GPT-OSS expert gate/up bias tensor)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Safetensors tensor suffix naming the GPT-OSS expert gate/up bias, materialized as mlp.experts.gate_up_proj.bias during weight loading.",
+      "distinction": "The bias tensor of the fused gate/up pair, not the gate/up weight pair itself nor a single gate_proj.",
+      "distinct_from": [
+        "gate-up-proj",
+        "mlp-gate-proj"
+      ],
+      "aliases": [],
+      "grounding": "gate_up_proj_bias",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-guardaccuracydebt",
+      "canonical": "guard_accuracy_debt (guard-accuracy debt corpus key)",
+      "family": "guard-gate",
+      "kind": "metric",
+      "definition": "Control-pane corpus key (DebtKey) the guard-accuracy fold writes the headline accuracy-debt count into.",
+      "distinction": "A reported debt counter key, not the guardaccuracy accuracy corpus that feeds it nor the guard-RSI fold.",
+      "distinct_from": [
+        "guard-gate-guardaccuracy",
+        "x2-guard-gate-guardrsi"
+      ],
+      "aliases": [],
+      "grounding": "guard_accuracy_debt",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-guardcodexlocalplaceholderapikey",
+      "canonical": "guardCodexLocalPlaceholderAPIKey (local Codex placeholder key)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "Placeholder API-key value injected into locally launched Codex children when no real key is present, enabling break-glass local recovery.",
+      "distinction": "The local-placeholder key constant, not the OAuth placeholder key twin nor the FAK_GUARD_API_KEY_ENV env knob.",
+      "distinct_from": [
+        "cov-debt-tail-guard-gate-guardcodexoauthplaceholderapikey",
+        "x-goal-guard-gate-guard-apikey-env"
+      ],
+      "aliases": [],
+      "grounding": "guardCodexLocalPlaceholderAPIKey",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-guardedremotemaint",
+      "canonical": "guardedremotemaint (guarded remote-maintenance pkg)",
+      "family": "guard-gate",
+      "kind": "subsystem",
+      "definition": "Public pkg (pkg/guardedremotemaint) providing the guarded remote-maintenance agent-session facade whose kernel boundary routes verdicts through the adjudication ABI.",
+      "distinction": "A remote-maintenance session facade package, not the fak guard kernel nor a decision-point gate.",
+      "distinct_from": [
+        "guard-kernel",
+        "gate"
+      ],
+      "aliases": [],
+      "grounding": "guardedremotemaint",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-guardhoprsi",
+      "canonical": "guard_hop_rsi (guard hop-latency RSI watchdog)",
+      "family": "guard-gate",
+      "kind": "doc-term",
+      "definition": "Watchdog measurement (tools/guard_hop_rsi.py, ported to platform/watchdogs) whose PENDING_MEASUREMENT/check_plan fencing the guard-RSI fold reads as latency-loop honesty evidence.",
+      "distinction": "The hop-latency RSI measurement rung, not the guardrsi fold that consumes it nor the guard RSI CLI verbs.",
+      "distinct_from": [
+        "x2-guard-gate-guardrsi",
+        "x-goal-guard-gate-guard-rsi-verbs"
+      ],
+      "aliases": [],
+      "grounding": "guard_hop_rsi",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-guardmcpstatus",
+      "canonical": "GUARD_MCP_STATUS (guard MCP-status audit gate)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Hook gate (byte-faithful port of tools/guard_mcp_status_audit.py) auditing the guard/MCP proof packet against current evidence artifacts such as default-floor tests and dogfood denials.",
+      "distinction": "The MCP-status audit gate, not the guardMcpStatusAudit helper it wraps nor the import-witness commit gate.",
+      "distinct_from": [
+        "x2-guard-gate-mcpstatusaudit",
+        "guardgate-gateimportwitness"
+      ],
+      "aliases": [],
+      "grounding": "GUARD_MCP_STATUS",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-guardpi",
+      "canonical": "guard_pi (fak guard -- pi child wiring)",
+      "family": "guard-gate",
+      "kind": "subsystem",
+      "definition": "First-class `fak guard -- pi` child wiring (cmd/fak/guard_pi.go) that prepends a session-scoped extension registering the anthropic provider at the gateway for Pi children only.",
+      "distinction": "The Pi-specific child launch extension, not the installGuardPiExtension install record nor the guard kernel generally.",
+      "distinct_from": [
+        "covg-guard-gate-installpiextension",
+        "guard-kernel",
+        "x-ci-coverage-guard-gate-guardgo",
+        "x2-guard-gate-guardrsi"
+      ],
+      "aliases": [],
+      "grounding": "guard_pi",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-mcpfakguardfakcontextrestore",
+      "canonical": "mcp__fak_guard__fak_context_restore (guard-namespaced context-restore tool)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "MCP tool name served under the fak_guard namespace that restores a previously admitted context, detected by the gateway chat-restore tool resolver.",
+      "distinction": "The guard-namespaced context-restore tool, not the MCP tool prefix itself nor the gateRestoreByDigest admission gate.",
+      "distinct_from": [
+        "runtime-third-mcpfakguard",
+        "cov5305-gate-restore-by-digest"
+      ],
+      "aliases": [],
+      "grounding": "mcp__fak_guard__fak_context_restore",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-memguardstopevent",
+      "canonical": "memGuardStopEvent (RSS governor stop event)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Event record (At/RSS/Peak/Ceiling) describing the sample that tripped the turnkey-server memory-ceiling governor's sustained-breach stop.",
+      "distinction": "The stop-event payload of the RSS governor, not the memgate concept nor the guard kernel.",
+      "distinct_from": [
+        "x-goal25-guard-gate-memgate",
+        "guard-kernel"
+      ],
+      "aliases": [],
+      "grounding": "memGuardStopEvent",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-newtokenrategate",
+      "canonical": "NewTokenRateGate (provider-budget gate constructor)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Constructor building a TokenRateGate under a TokenRatePolicy - one provider budget's rolling-window token/concurrency admission gate for the served path.",
+      "distinction": "The constructor, not the TokenRateGate type it builds nor the SetTokenRateGate install seam.",
+      "distinct_from": [
+        "x-goal25-guard-gate-tokenrategate",
+        "cov5305-set-token-rate-gate"
+      ],
+      "aliases": [],
+      "grounding": "NewTokenRateGate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-outcomegatefailed",
+      "canonical": "outcomeGateFailed (selfupdate gate-failed outcome)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Self-update receipt outcome alias (selfupdate.OutcomeGateFailed, wire value gate-failed) marking that the update gate refused the rotation.",
+      "distinction": "A selfupdate receipt outcome, not the OPERATOR_GATE refusal-reason category nor the gateway StopGate.",
+      "distinct_from": [
+        "operatorgate",
+        "stopgate"
+      ],
+      "aliases": [],
+      "grounding": "outcomeGateFailed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-preservationgate",
+      "canonical": "PreservationGate (preserving-worktree preparation gate)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "workerworktree gate callback (func(context.Context) error) consulted before preparing a preserving worktree so existing peers' state is never altered without proof.",
+      "distinction": "The preserving-worktree preparation gate, not the rehearsal PreflightGate nor a generic decision point.",
+      "distinct_from": [
+        "x-goal-guard-gate-preflight-gate",
+        "gate"
+      ],
+      "aliases": [],
+      "grounding": "PreservationGate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-registerprocresourceguard",
+      "canonical": "register_proc_resource_guard (FleetProcResourceGuard task installer)",
+      "family": "guard-gate",
+      "kind": "doc-term",
+      "definition": "Grandfathered installer script (tools/register_proc_resource_guard.ps1) that registers the FleetProcResourceGuard scheduled task, inventoried by taskvc and restarted by watchdog autoheal.",
+      "distinction": "The task-registration script, not the FleetProcResourceGuard guard it installs nor the trunk guard.",
+      "distinct_from": [
+        "x2-guard-gate-procresourceguard",
+        "trunk-guard"
+      ],
+      "aliases": [],
+      "grounding": "register_proc_resource_guard",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-runcompaniongate",
+      "canonical": "RunCompanionGate (fak-dev gate companion verb handler)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "devcmd handler behind the `fak-dev gate` companion verb that runs the companion bridge's gate checks.",
+      "distinction": "The companion-bridge gate verb handler, not a generic gate nor the PreflightGate rehearsal check.",
+      "distinct_from": [
+        "gate",
+        "x-goal-guard-gate-preflight-gate"
+      ],
+      "aliases": [],
+      "grounding": "RunCompanionGate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-runguardallowapprove",
+      "canonical": "runGuardAllowApprove (guard allow --approve handler)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "CLI handler for `fak guard allow --approve` that approves pending guard allow-list entries with TTL and conflict handling.",
+      "distinction": "The approve-path handler, not the guard allow subcommand surface nor the allow-overlay schema it persists.",
+      "distinct_from": [
+        "guard-gate-guardallow",
+        "x-goal-guard-gate-guard-allow-overlay"
+      ],
+      "aliases": [],
+      "grounding": "runGuardAllowApprove",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-safeguards",
+      "canonical": "Safeguards (research-note heading term)",
+      "family": "guard-gate",
+      "kind": "doc-term",
+      "definition": "Documentation heading term (research notes) naming the protective measures and circuit breakers that bound a study or cadence.",
+      "distinction": "A prose heading word, not the guardrail safety-boundary concept nor the guardrail rule catalog.",
+      "distinct_from": [
+        "guardrail",
+        "issue9909-guardrail-clusters"
+      ],
+      "aliases": [],
+      "grounding": "Safeguards",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-splitqwen35querygate",
+      "canonical": "SplitQwen35QueryGate (per-head query/gate row splitter)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "HAL/backend op separating Qwen3.5's per-head [query, gate] projection rows on device into separate query and gate tensors.",
+      "distinction": "The query/gate row splitter, not the packed-query/output-gate splitter nor the backend capability flag that advertises it.",
+      "distinct_from": [
+        "issue9181-guard-gate-split-packed-query",
+        "runtime-third-qwen35querygatesplitbackend"
+      ],
+      "aliases": [],
+      "grounding": "SplitQwen35QueryGate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-streamliftguard",
+      "canonical": "stream_lift_guard (live-stream text-lift withholding guard)",
+      "family": "guard-gate",
+      "kind": "subsystem",
+      "definition": "Gateway live-stream guard that withholds text-form tool-call dialect spans so streamed bytes stay a prefix of LiftTextToolCalls' output, preserving the kernel adjudication invariant on the live wire.",
+      "distinction": "The withholding guard on the live stream, not the liftGuard instance concept nor its newLiftGuard constructor.",
+      "distinct_from": [
+        "runtime-third-liftguard",
+        "x2-guard-gate-newliftguard"
+      ],
+      "aliases": [],
+      "grounding": "stream_lift_guard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-suffixgateproj",
+      "canonical": "suffixGateProj (fused-tensor gate_proj carve suffix)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Constant naming the mlp.gate_proj.weight output suffix carved out of a fused tensor during weight splitting.",
+      "distinction": "The split-carving suffix constant, not the gate_proj tensor concept nor the fused gate_up_proj pair.",
+      "distinct_from": [
+        "mlp-gate-proj",
+        "gate-up-proj"
+      ],
+      "aliases": [],
+      "grounding": "suffixGateProj",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-supportsv41engramgate",
+      "canonical": "SupportsV41EngramGate (Engram-gate capability probe)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Capability predicate on V41EngramGateBackend reporting whether the backend can run the V4.1 Engram gate (currently false on CUDA pending numerical proof).",
+      "distinction": "The support probe, not the V41EngramGate op it probes nor the backend interface declaring both.",
+      "distinct_from": [
+        "guardgate-v41engramgate",
+        "guardgate-v41engramgatebackend"
+      ],
+      "aliases": [],
+      "grounding": "SupportsV41EngramGate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-testguarddefaultpolicydeniesdangerallowsbenign",
+      "canonical": "TestGuardDefaultPolicyDeniesDangerAllowsBenign (default-policy behavior test)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak guard_test.go regression pinning that the guard default policy denies dangerous git operations and allows benign ones.",
+      "distinction": "The default-policy behavior test, not the embedded default policy JSON it exercises nor the guard entry point.",
+      "distinct_from": [
+        "guard-gate-guarddefaultpolicyjson",
+        "x2-guard-gate-cmdguard"
+      ],
+      "aliases": [],
+      "grounding": "TestGuardDefaultPolicyDeniesDangerAllowsBenign",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-v41engramgate",
+      "canonical": "V41EngramGate (device Engram gate/add op)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Compute-backend op implementing the DeepSeek V4.1 Engram gate/add over the device-resident mHC stream panel, bit-exact against the host full-geometry arithmetic.",
+      "distinction": "The gate op itself, not the cudaV41EngramGate CUDA implementation twin nor the V41EngramGateBackend interface declaring it.",
+      "distinct_from": [
+        "raider-engram-gate",
+        "guardgate-v41engramgatebackend"
+      ],
+      "aliases": [],
+      "grounding": "V41EngramGate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-v41engramgatebackend",
+      "canonical": "V41EngramGateBackend (optional Engram-gate backend interface)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Optional compute-backend interface exposing the V4.1 Engram gate op and its SupportsV41EngramGate capability probe.",
+      "distinction": "The interface, not the V41EngramGate op alone nor the SupportsV41EngramGate predicate alone.",
+      "distinct_from": [
+        "guardgate-v41engramgate",
+        "guardgate-supportsv41engramgate"
+      ],
+      "aliases": [],
+      "grounding": "V41EngramGateBackend",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-v41engramgateparamserr",
+      "canonical": "v41EngramGateParamsErr (model-side Engram-gate params check)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Model-side parameter-validation error helper for the V4.1 Engram gate (layer, eps, qNorm, kNorm) checked before lookahead gather.",
+      "distinction": "The model-layer params error, not the compute-side validateV41EngramGate operand check nor the gate op itself.",
+      "distinct_from": [
+        "guardgate-v41engramgate",
+        "guardgate-validatev41engramgate"
+      ],
+      "aliases": [],
+      "grounding": "v41EngramGateParamsErr",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-v41expertgateupfunc",
+      "canonical": "v41ExpertGateUpFunc (device expert gate+up callback type)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Function type of the optional V4.1 device expert gate+up projection callback invoked per routed-expert group in the MoE forward.",
+      "distinction": "The callback function type, not the expertGateUp session state that holds it nor its v41ExpertGateUpOutcome return.",
+      "distinct_from": [
+        "x2-guard-gate-v41expertgateup",
+        "guardgate-v41expertgateupoutcome"
+      ],
+      "aliases": [],
+      "grounding": "v41ExpertGateUpFunc",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-v41expertgateupoutcome",
+      "canonical": "v41ExpertGateUpOutcome (expert gate-up outcome type)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Outcome type returned by the V4.1 expert gate-up callback: handled, declined, or error.",
+      "distinction": "The outcome type, not one of its constants (v41GateUpDeclined) nor the callback function type producing it.",
+      "distinct_from": [
+        "guardgate-v41gateupdeclined",
+        "guardgate-v41expertgateupfunc"
+      ],
+      "aliases": [],
+      "grounding": "v41ExpertGateUpOutcome",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-v41gateupdeclined",
+      "canonical": "v41GateUpDeclined (device-declined expert gate-up outcome)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "V4.1 expert gate-up outcome constant meaning the device declined, so the forward falls back to the unchanged host triple.",
+      "distinction": "One outcome constant, not the whole v41ExpertGateUpOutcome type nor the callback that returns it.",
+      "distinct_from": [
+        "guardgate-v41expertgateupoutcome",
+        "guardgate-v41expertgateupfunc"
+      ],
+      "aliases": [],
+      "grounding": "v41GateUpDeclined",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-validatev41engramgate",
+      "canonical": "validateV41EngramGate (Engram-gate operand validator)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Shared operand/geometry validator for the V41EngramGate backend op bounding rows/hidden and checking unquantized row-major F32 operands before dispatch.",
+      "distinction": "The pre-dispatch validator, not the V41EngramGate op nor the model-side v41EngramGateParamsErr check.",
+      "distinct_from": [
+        "guardgate-v41engramgate",
+        "guardgate-v41engramgatebackend"
+      ],
+      "aliases": [],
+      "grounding": "validateV41EngramGate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "guardgate-validatev41routergatetopk",
+      "canonical": "validateV41RouterGateTopK (router gate top-K geometry validator)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Geometry validator for the V41RouterGateTopK backend op checking weight/x/bias shapes and experts/hidden/topK bounds before device routing.",
+      "distinction": "The router-gate-topK validator, not the generic gate decision point nor the expert gate-up callback validation.",
+      "distinct_from": [
+        "gate",
+        "guardgate-v41expertgateupfunc"
+      ],
+      "aliases": [],
+      "grounding": "validateV41RouterGateTopK",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

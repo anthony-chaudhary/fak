@@ -199,7 +199,7 @@
    "kind": "symbol",
    "definition": "Renders the cache-savings SLO gate verdict as a short pass/fail block (internal/cachevaluereport/audit.go).",
    "distinction": "Renders only the SLO GATE verdict, not RenderAudit (the full reconciliation table) or RenderLint (the dollar-blind scan).",
-   "distinct_from": ["render-materialize-render-audit", "render-materialize-render-lint", "x-ci-coverage-render-materialize-rendergaps"],
+   "distinct_from": ["render-materialize-render-audit", "render-materialize-render-lint", "x-ci-coverage-render-materialize-rendergaps", "rm-renderpath"],
    "aliases": ["RenderGate", "rendergate"],
    "grounding": "RenderGate",
    "grounding_kind": "symbol",
@@ -607,8 +607,7 @@
    "parent": "",
    "verdict": "defined",
    "gaps": []
-  }
- ,
+  },
     {
       "id": "render-materialize-deepseek-v41-chat",
       "canonical": "renderDeepSeekV41Chat (DeepSeek V4.1 GGUF-style prompt)",

@@ -1,0 +1,87 @@
+{
+  "rows": [
+    {
+      "id": "mopup6-cacheevents",
+      "canonical": "CacheEvent (engine residency event stream)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "The typed residency event in internal/engine/cacheevents.go: CacheEvent carries created/stored/removed/updated residency changes with tier and priority diffs as the engine normalizes live-engine events into the shared cachemeta.Entry stream; CacheEventRoutingReceipt and CacheEventMetrics render the aggregate Prometheus view keyed by (direction, outcome, to_tier).",
+      "distinction": "The event RECORD/stream file, not the recorder type that persists it (x2-cache-cacheeventrecorder), not the sink a caller installs (x-cache-setcacheeventsink), and not the emit call site (x-cache-emitcache).",
+      "distinct_from": [
+        "x-cache-emitcache",
+        "x-cache-setcacheeventsink",
+        "x2-cache-cacheeventrecorder"
+      ],
+      "aliases": [
+        "cacheevents"
+      ],
+      "grounding": "CacheEvent",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "mopup6-runbenchh2hplan",
+      "canonical": "runBenchH2HPlan (bench h2h plan verb)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The internal/h2hbench function behind `fak bench h2h plan`: for each --arm in the order given it emits the exact single-arm `fak bench h2h run` invocation with its own ledger under --ledger-dir, printing the commands without executing them (verb-surface SOURCE ONLY dispatch arm of runBenchH2H).",
+      "distinction": "A dry-run INVOCATION PRINTER for the h2h benchmark, not the executed benchmark (runBenchH2H and its run/report/gpu-idle sibling arms) and not a ctxplan planning cell or budget plan.",
+      "distinct_from": [
+        "mopup6-nextplan"
+      ],
+      "aliases": [
+        "runbenchh2hplan"
+      ],
+      "grounding": "runBenchH2HPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "mopup6-forwardslot",
+      "canonical": "ForwardSlot (modelengine forward-pass slot)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Engine.ForwardSlot() in internal/modelengine (Continual Engine phase 0): returns the engine's forward-pass slot, the whole-old/whole-new install/revert unit pinned while a forward pass runs, witnessed by forward_slot_test.go's install/revert round-trip.",
+      "distinction": "A forward-pass SLOT handle inside the model engine, not a session worker index (SessionSlot / x-session-runtime-sessionslotfield) and not a KV cache slot or dispatch lease seat.",
+      "distinct_from": [
+        "x-session-runtime-sessionslotfield"
+      ],
+      "aliases": [
+        "forwardslot"
+      ],
+      "grounding": "ForwardSlot",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "mopup6-nextplan",
+      "canonical": "nextPlan (ctxplandemo successor plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The successor-plan local in cmd/ctxplandemo's demo loop: nextPlan = ctxplan.PlanCells(allSpans, learned, ctxplan.Budget{Tokens: budget}, tokCost) is recomputed each iteration and admitted only when ctxplan.Audit(nextPlan).Faithful holds and the budget is not exceeded.",
+      "distinction": "A demo-loop LOCAL holding the recomputed plan value, not the PlanCells planner itself, not a persisted plan policy, and not the h2h benchmark plan verb (runBenchH2HPlan).",
+      "distinct_from": [
+        "mopup6-runbenchh2hplan",
+        "x-goal25-plan-testplan"
+      ],
+      "aliases": [
+        "nextplan"
+      ],
+      "grounding": "nextPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

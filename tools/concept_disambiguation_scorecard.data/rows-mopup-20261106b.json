@@ -1,0 +1,127 @@
+{
+  "rows": [
+    {
+      "id": "mopup6b-hcattnbase",
+      "canonical": "hc_attn_base (GLM-5.3-Flash hyper-connection attention base)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The per-layer GLM-5.3-Flash (glm5_next) checkpoint tensor layers.N.hc_attn_base: the base term of the hyper-connection attention parameter set (hc_attn_fn/hc_attn_base/hc_attn_scale) consumed by the Sinkhorn-projected stream combiner; glm5next_forward requires it in the pinned manifest for every layer.",
+      "distinction": "The ATTENTION stream's base term, not the attention scale (hc_attn_scale) and not the FFN stream's base (hc_ffn_base) - the attn/ffn split mirrors attnSite's parameter-set selection.",
+      "distinct_from": [
+        "mopup6b-hcattnscale"
+      ],
+      "aliases": [
+        "hc_attn_base"
+      ],
+      "grounding": "hc_attn_base",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "mopup6b-hcattnscale",
+      "canonical": "hc_attn_scale (GLM-5.3-Flash hyper-connection attention scale)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The per-layer GLM-5.3-Flash (glm5_next) checkpoint tensor layers.N.hc_attn_scale: the scale term of the hyper-connection attention parameter set consumed by the Sinkhorn-projected stream combiner; required in the pinned manifest for every layer (glm5next_forward.go manifest check).",
+      "distinction": "The ATTENTION stream's scale term, not the attention base (hc_attn_base) and not the FFN stream's scale (hc_ffn_scale).",
+      "distinct_from": [
+        "mopup6b-hcattnbase",
+        "x-attention-attnscale"
+      ],
+      "aliases": [
+        "hc_attn_scale"
+      ],
+      "grounding": "hc_attn_scale",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "mopup6b-tensorparallelattn",
+      "canonical": "tensor_parallel_attn.go (Megatron attention shard)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "The second Megatron tensor-parallel building block in internal/model/tensor_parallel_attn.go: multi-head attention sharded by head across ranks - column-parallel Q/K/V over contiguous KV-head-group bands (GQA query heads map to their kv head's rank), row-parallel output projection with exactly one AllReduce per attention block, completing the within-a-layer TP pair proved by tensor_parallel.go's FFN block.",
+      "distinction": "The ATTENTION shard file, not the vocabulary-parallel plan (tpVocabPlan shards the vocab/LM-head axis) and not the FFN column/row block proved in tensor_parallel.go.",
+      "distinct_from": [
+        "mopup6b-tpvocabplan"
+      ],
+      "aliases": [
+        "tensor_parallel_attn"
+      ],
+      "grounding": "tensor_parallel_attn",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "mopup6b-indexkpool",
+      "canonical": "IndexKpool (GLM-5.3-Flash DSA indexer pooled-key width)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The GLM-5.3-Flash (glm5_next) indexer k-pool compression width (config json index_kpool, carried as d.indexKpool in glm5next_forward): the pooled-key width the DSA indexer scores over - pools of IndexKpool cached keys collapse into one scored candidate. Zero/absent keeps every other family untouched.",
+      "distinction": "A POOLING WIDTH config for the indexer's key candidates, not the incomplete-pool tail-append policy (IndexKpoolAlwaysSelectTail) and not the KV cache pool or agent k-pool reporters.",
+      "distinct_from": [
+        "mopup6b-indexkpoolalwaysselecttail",
+        "pool-p-indexkpool"
+      ],
+      "aliases": [
+        "kpool",
+        "index_kpool"
+      ],
+      "grounding": "IndexKpool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "mopup6b-indexkpoolalwaysselecttail",
+      "canonical": "IndexKpoolAlwaysSelectTail (indexer incomplete-pool tail append)",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "The GLM-5.3-Flash (glm5_next) bool config (json index_kpool_always_select_tail) that appends the current incomplete k-pool as raw token indices, so the DSA indexer always scores the tail pool instead of waiting until IndexKpool cached keys fill a complete pool.",
+      "distinction": "A TAIL-APPEND POLICY bool over the indexer's pools, not the pooled-key width itself (IndexKpool) and not a cache eviction or selection strategy elsewhere.",
+      "distinct_from": [
+        "mopup6b-indexkpool"
+      ],
+      "aliases": [
+        "index_kpool_always_select_tail"
+      ],
+      "grounding": "IndexKpoolAlwaysSelectTail",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "mopup6b-tpvocabplan",
+      "canonical": "tpVocabPlan (vocabulary-parallel TP plan)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "tpVocabPlan(cfg Config, ranks int) (TPPlan, error) in internal/model/tensor_parallel_vocab.go: builds the vocabulary-parallel plan over the model's vocab size - the tensor-parallel sharding applied to the LM-head/vocab axis rather than to a transformer block.",
+      "distinction": "The VOCAB-axis parallel plan, not the attention head shard (tensor_parallel_attn.go) and not the FFN column/row plan or a ctxplan cell plan.",
+      "distinct_from": [
+        "mopup6b-tensorparallelattn"
+      ],
+      "aliases": [
+        "tpvocabplan"
+      ],
+      "grounding": "tpVocabPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

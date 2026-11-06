@@ -1,0 +1,500 @@
+{
+  "rows": [
+    {
+      "id": "srp1-available-agent-slots",
+      "canonical": "AvailableAgentSlots (macobs governor telemetry)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The macobs GovernorTelemetry gauge field reporting how many agent-launch slots remain available under the macOS memory governor.",
+      "distinction": "A macOS memory-governor capacity gauge over agent-launch slots; not the engine's free/busy decode Slot and not the FreeSlots count on the drive table.",
+      "distinct_from": [
+        "slot",
+        "x-session-runtime-freeslots"
+      ],
+      "aliases": [],
+      "grounding": "AvailableAgentSlots",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-claude-code-child-session",
+      "canonical": "CLAUDE_CODE_CHILD_SESSION",
+      "family": "session-runtime",
+      "kind": "config",
+      "definition": "Environment variable naming a Claude Code child session, scrubbed from spawned children so they do not inherit the parent's session identity.",
+      "distinction": "Marks the CHILD session; CLAUDE_SESSION_ID names the parent session, and both are stripped by goalrunner/resume env scrubbing.",
+      "distinct_from": [
+        "x-session-runtime-claudesessionid"
+      ],
+      "aliases": [],
+      "grounding": "CLAUDE_CODE_CHILD_SESSION",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-close-session-locked",
+      "canonical": "closeSessionLocked (batcher slot teardown)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Continuous-batcher method on Slot that releases the slot's model-session ownership exactly once; the caller must hold the batcher lock.",
+      "distinction": "Releases session ownership under the lock; restoreSessionFromModelLocked performs the inverse rebind, and neither is the gateway's SessionReset.",
+      "distinct_from": [
+        "srp1-restore-session-from-model-locked",
+        "session-reset"
+      ],
+      "aliases": [],
+      "grounding": "closeSessionLocked",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-configure-native-session",
+      "canonical": "configureNativeSession (planner session setup)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "InKernelPlanner method that applies the planner's quant, execution policy, and KV precision to a model.Session before any prefill or decode append.",
+      "distinction": "Configures an existing model.Session for native execution; NativeSessionLifecycle labels where a scheduler-minted session came from, it does not configure it.",
+      "distinct_from": [
+        "nativesessionlifecycle",
+        "session-state"
+      ],
+      "aliases": [],
+      "grounding": "configureNativeSession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-cron-fire-slot",
+      "canonical": "cronFireSlot (cron tick quantizer)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "cmd/fak helper that quantizes a cron tick to its schedule-slot key, truncating a positive interval so duplicate fires inside one slot collapse to one.",
+      "distinction": "A time-quantization string key for cron de-duplication; it allocates no engine Slot and carries no free/busy semantics.",
+      "distinct_from": [
+        "slot"
+      ],
+      "aliases": [],
+      "grounding": "cronFireSlot",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-current-slot-utilization",
+      "canonical": "CurrentSlotUtilization (L3 shard gauge)",
+      "family": "session-runtime",
+      "kind": "metric",
+      "definition": "L3 server shard snapshot field giving current slot utilization as a percentage, paired with eviction-rate evidence in shard-sizing decisions.",
+      "distinction": "An occupancy-percentage gauge on the L3 shard size tracker; ModelTotalSlots is the absolute detected slot count, and neither is an engine decode Slot.",
+      "distinct_from": [
+        "srp1-model-total-slots",
+        "slot"
+      ],
+      "aliases": [],
+      "grounding": "CurrentSlotUtilization",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-err-native-sched-lane",
+      "canonical": "errNativeSchedulerLaneNotDecodeReady",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "modelengine sentinel error returned when a NativeScheduler lane is asked to execute but is not yet decode-ready.",
+      "distinction": "A readiness refusal on one schedLane; not a scheduler-wide failure and not the session-origin label tracked by NativeSessionLifecycle.",
+      "distinct_from": [
+        "x-session-runtime-nativescheduler",
+        "nativesessionlifecycle"
+      ],
+      "aliases": [],
+      "grounding": "errNativeSchedulerLaneNotDecodeReady",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-err-session-already-exists",
+      "canonical": "ErrSessionAlreadyExists",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Continuous-batcher sentinel error returned at admission when the submitted session ID is already registered in the batcher.",
+      "distinction": "An admission-time duplicate-ID refusal; later lifecycle changes flow through StepResult promotion/retirement lists, not errors.",
+      "distinct_from": [
+        "session-id",
+        "srp1-promoted-session-ids"
+      ],
+      "aliases": [],
+      "grounding": "ErrSessionAlreadyExists",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-fak-total-slots-source",
+      "canonical": "fak_total_slots_source (/props provenance tag)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "JSON field on the gateway /props response naming which fak field produced the reported total_slots value, e.g. AdmissionPolicy.MaxNumSeqs.",
+      "distinction": "A provenance tag distinguishing a fak-imposed cap from llama-server's own total_slots; slot discovery ignores caps tagged this way.",
+      "distinct_from": [
+        "srp1-model-total-slots",
+        "x-session-runtime-idslot"
+      ],
+      "aliases": [],
+      "grounding": "fak_total_slots_source",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-glm-dsa-session",
+      "canonical": "GLM-DSA session (glm_dsa_session.go)",
+      "family": "session-runtime",
+      "kind": "subsystem",
+      "definition": "The GLM MLA + dynamic-sparse-attention decode implementation in internal/model/glm_dsa_session.go, owning the per-layer K/V/indexer caches and the glmDsaAttentionStep decode path.",
+      "distinction": "A model-family attention decode surface inside package model; not the drive-record Session and not a DurabilitySession tier.",
+      "distinct_from": [
+        "session",
+        "x-session-runtime-durabilitysession"
+      ],
+      "aliases": [],
+      "grounding": "glm_dsa_session",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-llama-slot-http-client",
+      "canonical": "llamaSlotHTTPClient (bounded probe client)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Package-level bounded-timeout http.Client used to probe llama-server slot endpoints during slot-affinity discovery and residency checks.",
+      "distinction": "The transport for slot-discovery probes; LlamaSlotAffinity is the planner opt-in consuming probe results, and id_slot is the request field being probed.",
+      "distinct_from": [
+        "x-session-runtime-llamaslotaffinity",
+        "x-session-runtime-idslot"
+      ],
+      "aliases": [],
+      "grounding": "llamaSlotHTTPClient",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-max-slots",
+      "canonical": "MaxSlots (batcher lane ceiling)",
+      "family": "session-runtime",
+      "kind": "config",
+      "definition": "Continuous-batcher bound - constant MaxSlots = 32 plus the Config.MaxSlots field - capping concurrent active subagent decode lanes.",
+      "distinction": "A configured ceiling on batcher lanes; MinSlots is its floor, and FreeSlots counts currently idle lanes rather than the cap.",
+      "distinct_from": [
+        "srp1-min-slots",
+        "x-session-runtime-freeslots",
+        "slot"
+      ],
+      "aliases": [],
+      "grounding": "MaxSlots",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-min-slots",
+      "canonical": "MinSlots (batcher lane floor)",
+      "family": "session-runtime",
+      "kind": "config",
+      "definition": "Continuous-batcher lower bound - constant MinSlots = 1 - below which a configured lane count is refused.",
+      "distinction": "The floor paired with MaxSlots' ceiling; it sizes nothing by itself and is not a free/busy Slot.",
+      "distinct_from": [
+        "srp1-max-slots",
+        "slot"
+      ],
+      "aliases": [],
+      "grounding": "MinSlots",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-model-session-id",
+      "canonical": "ModelSession (causal receipt scope)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The model_session identity scope in causalreceipt.IDs recording which model session executed a turn-graph phase.",
+      "distinction": "A receipt identity field; not the drive-record Session and not the SessionID string type.",
+      "distinct_from": [
+        "session",
+        "session-id"
+      ],
+      "aliases": [],
+      "grounding": "ModelSession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-model-total-slots",
+      "canonical": "ModelTotalSlots (L3 detection)",
+      "family": "session-runtime",
+      "kind": "metric",
+      "definition": "L3 metrics snapshot field carrying the total number of model slots detected on the machine, used to derive effective GB per slot class.",
+      "distinction": "An absolute detected-count input to L3 sizing math; CurrentSlotUtilization is the occupancy percentage, and fak_total_slots_source tags gateway-side caps.",
+      "distinct_from": [
+        "srp1-current-slot-utilization",
+        "srp1-fak-total-slots-source"
+      ],
+      "aliases": [],
+      "grounding": "ModelTotalSlots",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-native-scheduler-event",
+      "canonical": "nativeSchedulerEvent (lane observation)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "modelengine observation record (iteration, kind, lane, state, token) emitted by NativeScheduler as lanes transition through prefill and decode.",
+      "distinction": "An event record consumed via observeNativeEvent; NativeScheduler is the actor emitting them, and NativeSessionLifecycle labels session origin, not events.",
+      "distinct_from": [
+        "x-session-runtime-nativescheduler",
+        "nativesessionlifecycle"
+      ],
+      "aliases": [],
+      "grounding": "nativeSchedulerEvent",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-new-lane-session",
+      "canonical": "newLaneSession (schedLane session mint)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "NativeScheduler method that mints the model.Session for a schedLane, tagging it with the given NativeSessionLifecycle origin.",
+      "distinction": "Mints a scheduler-owned model session per lane; NewSession admits a drive-record session into the gateway table - a different Session entirely.",
+      "distinct_from": [
+        "new-session",
+        "nativesessionlifecycle"
+      ],
+      "aliases": [],
+      "grounding": "newLaneSession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-qwen35-mtp-draft-session",
+      "canonical": "Qwen35MTPDraftSession",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Native MTP draft session owning one Qwen3.8 multi-token-prediction forward/cache, constructed by NewQwen35MTPDraftSession bound to a target model.Session.",
+      "distinction": "A speculative draft head over a target session; not the target's session.State and not a BatchSession decode group.",
+      "distinct_from": [
+        "session-state",
+        "x-session-runtime-batchsession"
+      ],
+      "aliases": [
+        "NewQwen35MTPDraftSession"
+      ],
+      "grounding": "Qwen35MTPDraftSession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-per-session-plan",
+      "canonical": "SessionResidencyPlan.PerSession (per-session memory component)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The per-session memory-class envelope component of localadmission's SessionResidencyPlan, multiplied by the enforced MaxSessions bound to form the steady-state footprint.",
+      "distinction": "A single-session byte plan inside the residency envelope; PerSessionKVBytes is the up-capacity KV budget reserved per admitted session, and Budget is the pacing concept.",
+      "distinct_from": [
+        "srp1-per-session-kv-bytes",
+        "budget"
+      ],
+      "aliases": [
+        "perSession"
+      ],
+      "grounding": "PerSession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-per-session-kv-bytes",
+      "canonical": "PerSessionKVBytes (up capacity budget)",
+      "family": "session-runtime",
+      "kind": "config",
+      "definition": "up-capacity field reserving the KV bytes budget per admitted session, computed from context-budget tokens times KV bytes-per-token.",
+      "distinction": "A per-session KV byte reservation driving max-session capacity; SessionResidencyPlan.PerSession is the full memory-class envelope, not just KV.",
+      "distinct_from": [
+        "srp1-per-session-plan",
+        "budget"
+      ],
+      "aliases": [],
+      "grounding": "PerSessionKVBytes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-possession-proof",
+      "canonical": "key possession proof",
+      "family": "session-runtime",
+      "kind": "doc-term",
+      "definition": "The gatewayauth property that an endpoint proves it holds the router key (via KeyProofPath) before that key is sent as a bearer token; 'possession' in tree prose always means this key-possession proof, never a session.",
+      "distinction": "A credential-holding proof about keys; not the MCP session bearer capability and not any session-runtime concept despite containing 'session'.",
+      "distinct_from": [
+        "mcp-session-bearer",
+        "x-session-runtime-faksessionid"
+      ],
+      "aliases": [],
+      "grounding": "possession",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-promoted-session-ids",
+      "canonical": "PromotedSessionIDs (batcher step result)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Continuous-batcher StepResult field listing session IDs promoted to active status during a step.",
+      "distinction": "The promotion half of a step's lifecycle delta; RetiredSessionIDs lists sessions dropped in the same step.",
+      "distinct_from": [
+        "srp1-retired-session-ids",
+        "session-id"
+      ],
+      "aliases": [],
+      "grounding": "PromotedSessionIDs",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-restore-session-from-model-locked",
+      "canonical": "restoreSessionFromModelLocked (lane rebind)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "schedLane method that rebinds the lane to a real model.Session while the scheduler lock is held, refusing when the lane is not running decode.",
+      "distinction": "Rebinds an existing lane under lock; closeSessionLocked releases ownership instead, and NativeSessionRestored is the lifecycle label for readmitted sessions.",
+      "distinct_from": [
+        "srp1-close-session-locked",
+        "nativesessionrestored"
+      ],
+      "aliases": [],
+      "grounding": "restoreSessionFromModelLocked",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-retired-session-ids",
+      "canonical": "RetiredSessionIDs (batcher step result)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Continuous-batcher StepResult field listing session IDs retired (dropped) during a step.",
+      "distinction": "The retirement half of a step's lifecycle delta; PromotedSessionIDs lists sessions elevated in the same step.",
+      "distinct_from": [
+        "srp1-promoted-session-ids",
+        "session-id"
+      ],
+      "aliases": [],
+      "grounding": "RetiredSessionIDs",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-run-session-publish",
+      "canonical": "RunSessionPublish (leaseref CLI)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "leaserefcli entry point implementing both fak leaseref session-publish and the standalone fak-leaseref spelling, updating a local session descriptor under refs/fak/locks without acquiring a lease or publishing remotely.",
+      "distinction": "The leaseref publish verb's shared implementation; handleFakSession is the gateway HTTP route for session control, a different surface.",
+      "distinct_from": [
+        "x-session-runtime-faksession"
+      ],
+      "aliases": [],
+      "grounding": "RunSessionPublish",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "srp1-scheduler-reachable",
+      "canonical": "SchedulerReachable (speculative receipt stamp)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "TargetVerificationReceipt field stamped true by StampSchedulerReachable when the verified speculative profile shape confirms the target's scheduler is reachable.",
+      "distinction": "A verification-receipt boolean about a speculative target; Scheduler is the general scheduling concept and NativeScheduler is the modelengine lane scheduler.",
+      "distinct_from": [
+        "scheduler",
+        "x-session-runtime-nativescheduler"
+      ],
+      "aliases": [],
+      "grounding": "SchedulerReachable",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

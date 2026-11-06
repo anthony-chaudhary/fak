@@ -56,11 +56,11 @@
       "family": "context-ctx",
       "kind": "symbol",
       "definition": "compute.AutoSizeContextPlan derives the largest context-token count that fits available memory and returns the per-context KV/scratch MemoryPlan for it, reading geometry from a compute.ContextSizeConfig (KV/scratch configs plus the model's declared MaxContext).",
-      "distinction": "Not the ctxplan turn-history planner (ctxplan); this sizes the KV/scratch memory budget at serve time and emits a MemoryPlan, not a model-visible context view.",
+      "distinction": "Not the ctxplan turn-history planner (ctxplan); this sizes the KV/scratch memory budget against host headroom at serve time and emits a MemoryPlan, not a model-visible context view.",
       "distinct_from": [
         "ctxplan (context planner)",
         "context window",
-        "x2-plan-autosizecontextplan"
+        "MemoryPlan (compute)"
       ],
       "aliases": [
         "contextsizeconfig"
@@ -371,7 +371,9 @@
         "render-materialize-renderer-id-native-prompt",
         "x-ci-coverage-render-materialize-renderers",
         "x2-render-materialize-gitdailyrenderhealth",
-        "issue10230-performance-rsi-debt"
+        "issue10230-performance-rsi-debt",
+        "rm-renderd",
+        "rm-rendererr"
       ],
       "aliases": [],
       "grounding": "renderer",

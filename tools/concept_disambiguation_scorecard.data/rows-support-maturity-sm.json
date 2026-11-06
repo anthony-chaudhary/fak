@@ -1,0 +1,701 @@
+{
+  "rows": [
+    {
+      "id": "sm-coveragereceipt",
+      "canonical": "CoverageReceipt",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "CoverageReceipt (schema fak.debt-coverage-receipt.v1) is the machine-readable report BuildCoverageReceipt constructs from scanned debt lanes and findings, scoring discovery breadth over observed surface classes against detector depth over evaluated health dimensions.",
+      "distinction": "It audits how much of the repository surface space a debt-lane scan actually saw; it is not the serving-time SLO objective ReceiptCoverage, which measures the fraction of expected execution receipts collected.",
+      "distinct_from": [
+        "coverage",
+        "sm-receiptcoverage"
+      ],
+      "aliases": [],
+      "grounding": "CoverageReceipt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-receiptcoverage",
+      "canonical": "ReceiptCoverage",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "ReceiptCoverage is the nativeperfslo Objective (\"receipt_coverage\") whose value is the fraction of expected execution receipts actually collected during a native-inference observation window, gated by MinReceiptCoverage (default 0.95).",
+      "distinction": "It is a runtime SLO metric over evidence collection while serving; it is not the static debtlane CoverageReceipt artifact that reports scan breadth and depth, and not the generic coverage fraction.",
+      "distinct_from": [
+        "coverage",
+        "sm-coveragereceipt"
+      ],
+      "aliases": [],
+      "grounding": "ReceiptCoverage",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-cpumodelparity",
+      "canonical": "CPUModelParity",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "CPUModelParity is the *bool quality-evidence field (json cpu_model_parity) on Qwen38VulkanRawDecodeResult that the raw-decode bench sets when the Vulkan candidate's outputs match the CPU model reference across all runs.",
+      "distinction": "It is a per-trial pass/fail flag on one decode receipt; it is not a continuous similarity score such as CosineParity and not a generic parity comparison.",
+      "distinct_from": [
+        "parity",
+        "x-support-maturity-cosineparity"
+      ],
+      "aliases": [],
+      "grounding": "CPUModelParity",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-cudaabiparity",
+      "canonical": "CUDA ABI parity checker",
+      "family": "support-maturity",
+      "kind": "subsystem",
+      "definition": "tools/cuda_abi_parity.py is the GPU-free static cross-check that reads the CUDA C-ABI seam (headers, cgo preambles, kernel definitions) as text and reports every prototype/definition/call-site mismatch before the remote nvcc link would catch it.",
+      "distinction": "It verifies that the header, preamble, and kernel source sets agree on one flat C ABI; it does not measure numerical agreement of results, and a clean run proves nothing about build success on a GPU node.",
+      "distinct_from": [
+        "parity"
+      ],
+      "aliases": [],
+      "grounding": "cuda_abi_parity",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-disparity",
+      "canonical": "Disparity",
+      "family": "support-maturity",
+      "kind": "doc-term",
+      "definition": "Disparity is the doc term used in notes and benchmark reports to name a measured gap between two quantities, e.g. the 4.20x-to-1.86x speedup gap resolved by the calibration fix in the MAC agentic 4x Qwen3.8 note.",
+      "distinction": "It names the size and direction of a gap between measurements; parity names the comparison itself and its match/lead/trail verdict, and a disparity claim does not imply a parity measurement exists.",
+      "distinct_from": [
+        "parity"
+      ],
+      "aliases": [],
+      "grounding": "Disparity",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-dogfoodcoverage",
+      "canonical": "DogfoodCoverage",
+      "family": "support-maturity",
+      "kind": "subsystem",
+      "definition": "internal/dogfoodcoverage (exposed as `fak dogfood-coverage`) is the stdlib-only Go port of tools/dogfood_coverage.py that evaluates fleet and journal dogfood KPIs into a coverage percentage with hard/soft gates and an A-F grade.",
+      "distinction": "It scores how much of the declared dogfood KPI space is evidenced across live journals; it is not test-statement coverage and not the generic coverage fraction.",
+      "distinct_from": [
+        "coverage",
+        "sm-coveragereceipt"
+      ],
+      "aliases": [],
+      "grounding": "dogfoodcoverage",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-dosenumericparity",
+      "canonical": "DoseNumericParity",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "DoseNumericParity (\"numeric_parity\") is the HIL micro-dose kind that runs a small device GEMV/GEMM and compares its numerics against the host reference to certify hardware compute correctness.",
+      "distinction": "It is one member of the closed HIL dose-kind vocabulary that probes hardware; it is not the acceptance-report NumericalParity pillar and not a benchmark parity report.",
+      "distinct_from": [
+        "parity",
+        "sm-numericalparity"
+      ],
+      "aliases": [],
+      "grounding": "DoseNumericParity",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-errencodeunsupported",
+      "canonical": "ErrEncodeUnsupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "ErrEncodeUnsupported is the tokenizer sentinel returned when a tokenizer.json shape falls outside the leaf's encode gate, refusing offline text/id conversion for that tokenizer.",
+      "distinction": "It refuses encoding for unsupported tokenizer shapes; it says nothing about decode support, vocabulary coverage, or model maturity.",
+      "distinct_from": [
+        "support"
+      ],
+      "aliases": [],
+      "grounding": "ErrEncodeUnsupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-errnativebeamsearchunsupported",
+      "canonical": "ErrNativeBeamSearchUnsupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "ErrNativeBeamSearchUnsupported is the agent sentinel wrapping every admission failure of bounded raw-logit CPU beam search: width and length-penalty bounds, an unmodified nonstreaming text request without tools or sampling modifiers, a plain dense CPU planner, and workspace reservation overflow.",
+      "distinction": "It is the typed in-process refusal for beam-search admission; the gateway wire code native_beam_search_unsupported is its HTTP projection, and neither claims general sampling support.",
+      "distinct_from": [
+        "support",
+        "sm-nativebeamsearchunsupported"
+      ],
+      "aliases": [],
+      "grounding": "ErrNativeBeamSearchUnsupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-nativebeamsearchunsupported",
+      "canonical": "native_beam_search_unsupported",
+      "family": "support-maturity",
+      "kind": "config",
+      "definition": "native_beam_search_unsupported is the closed HTTP error-code string the gateway writes with status 400 when native beam-search parameters fail validation or admission.",
+      "distinction": "It is the wire label clients see on refusal; ErrNativeBeamSearchUnsupported is the in-process sentinel it wraps, and the code identifies the refused capability rather than a missing provider protocol.",
+      "distinct_from": [
+        "support",
+        "sm-errnativebeamsearchunsupported"
+      ],
+      "aliases": [],
+      "grounding": "native_beam_search_unsupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-errnativeforwardcoverageinvalid",
+      "canonical": "ErrNativeForwardCoverageInvalid",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "ErrNativeForwardCoverageInvalid is the model sentinel for incomplete, cardinality-mismatched, or otherwise malformed native forward-coverage evidence, including output-to-layer traversal mismatches and prefix-snapshot identity or geometry mismatches.",
+      "distinction": "It validates that forward-coverage evidence completely and consistently describes the executed layers; it does not judge whether the produced logits are correct.",
+      "distinct_from": [
+        "coverage"
+      ],
+      "aliases": [],
+      "grounding": "ErrNativeForwardCoverageInvalid",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-errv41nativeunsupported",
+      "canonical": "ErrV41NativeUnsupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "ErrV41NativeUnsupported is the model sentinel for DeepSeek V4.1 native-path refusals, such as Engram look-ahead requiring an attached V4.1 model, explicit serial decode, and no speculative, DFlash2, or expert-parallel execution.",
+      "distinction": "It marks a specific V4.1 native execution path unavailable in this configuration; it is not the packed-tensor read refusal ErrV41PackedUnsupported.",
+      "distinct_from": [
+        "support",
+        "sm-errv41packedunsupported"
+      ],
+      "aliases": [],
+      "grounding": "ErrV41NativeUnsupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-errv41packedunsupported",
+      "canonical": "ErrV41PackedUnsupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "ErrV41PackedUnsupported is the typed refusal for a V4.1 packed tensor read request the live shard cannot safely serve: an unadmitted config, unknown name, tensor outside the shard, dtype/shape disagreement with the inventory, a missing or malformed scale sibling, or a request over the caller's byte bound.",
+      "distinction": "It guards packed weight reads from live shards; it does not refuse native execution paths the way ErrV41NativeUnsupported does.",
+      "distinct_from": [
+        "support",
+        "sm-errv41nativeunsupported"
+      ],
+      "aliases": [],
+      "grounding": "ErrV41PackedUnsupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-hostcompleteprefixsnapshotsupported",
+      "canonical": "HostCompletePrefixSnapshotSupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Config.HostCompletePrefixSnapshotSupported (fak#13338) reports whether the device-less HOST complete-prefix-snapshot route carries full v41ForwardSnapshot continuation state, admitting V4.1 planner prefix reuse without a device witness.",
+      "distinction": "It is the host-route eligibility predicate; the device route is InKernelBackendPrefixReuseSupportedFor, and both sit behind the bare-KV refusal rather than weakening it.",
+      "distinct_from": [
+        "support",
+        "x-support-maturity-errwarmprefixunsupported"
+      ],
+      "aliases": [],
+      "grounding": "HostCompletePrefixSnapshotSupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-numericalparity",
+      "canonical": "NumericalParity",
+      "family": "support-maturity",
+      "kind": "metric",
+      "definition": "NumericalParity is the SubagentFanoutParity record (json numerical_parity) in the subagent fanout acceptance report: logit cosine similarity against a named reference GEMV with a minimum threshold and a passed flag, feeding Pillar 2.",
+      "distinction": "It is a recorded fidelity measurement with an explicit threshold; it is not a live comparison mechanism, not the Strix CosineParity score, and not a bare parity claim.",
+      "distinct_from": [
+        "parity",
+        "x-support-maturity-cosineparity"
+      ],
+      "aliases": [],
+      "grounding": "NumericalParity",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-overridesupported",
+      "canonical": "override_supported",
+      "family": "support-maturity",
+      "kind": "config",
+      "definition": "override_supported is the closed JSON meta key published on quarantined tool-result stubs by ctxmmu, ifc, and normgate stating whether the safety hold can be retrieved or overridden with a logged justification.",
+      "distinction": "It describes override availability for one safety hold; it is not generic feature support and it does not grant the override, which still requires a logged reason.",
+      "distinct_from": [
+        "support"
+      ],
+      "aliases": [],
+      "grounding": "override_supported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-paritymatch",
+      "canonical": "PARITY_MATCH",
+      "family": "support-maturity",
+      "kind": "config",
+      "definition": "PARITY_MATCH is one of the three closed Strix ablation receipt verdicts (VERIFIED_LIFT | PARITY_MATCH | REGRESSION): the candidate arm stays within the speed and cosine-parity bounds of the baseline without a verified lift.",
+      "distinction": "It certifies equivalence within bounds; VERIFIED_LIFT additionally requires demonstrated lift, and a slow PARITY_MATCH is rejected by receipt validation.",
+      "distinct_from": [
+        "parity",
+        "x-support-maturity-cosineparity"
+      ],
+      "aliases": [],
+      "grounding": "PARITY_MATCH",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-qwen38mtpbackendunsupported",
+      "canonical": "Qwen38MTPBackendUnsupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Qwen38MTPBackendUnsupported (\"backend_unsupported\") is the Qwen38MTPDowngradeReason recorded when the backend is not ready for Qwen3.8 MTP speculative decoding, downgrading the session to ordinary decoding.",
+      "distinction": "It names the backend axis of the closed MTP downgrade vocabulary; model, precision, sampling, and depth failures carry their own members.",
+      "distinct_from": [
+        "support",
+        "sm-qwen38mtpmodelunsupported"
+      ],
+      "aliases": [],
+      "grounding": "Qwen38MTPBackendUnsupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-qwen38mtpcorrectnessdiverged",
+      "canonical": "Qwen38MTPCorrectnessDiverged",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Qwen38MTPCorrectnessDiverged (\"correctness_diverged\") is the Qwen38MTPDowngradeReason recorded post-execution when the draft verifier's acceptance diverges from the reference trajectory, forcing a fallback decode.",
+      "distinction": "It is a post-execution correctness divergence; the pre-execution eligibility reasons (backend, model, sampling, depth) refuse before any draft work runs.",
+      "distinct_from": [
+        "correctness",
+        "sm-qwen38mtpdepthunsupported"
+      ],
+      "aliases": [],
+      "grounding": "Qwen38MTPCorrectnessDiverged",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-qwen38mtpdepthunsupported",
+      "canonical": "Qwen38MTPDepthUnsupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Qwen38MTPDepthUnsupported (\"depth_unsupported\") is the Qwen38MTPDowngradeReason recorded when the requested draft depth exceeds the supported maximum for Qwen3.8 MTP.",
+      "distinction": "It is the depth axis of the closed downgrade vocabulary; session-not-fresh, memory-unsafe, and policy-disabled states are separate closed reasons.",
+      "distinct_from": [
+        "support",
+        "sm-qwen38mtpbackendunsupported"
+      ],
+      "aliases": [],
+      "grounding": "Qwen38MTPDepthUnsupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-qwen38mtpmodelunsupported",
+      "canonical": "Qwen38MTPModelUnsupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Qwen38MTPModelUnsupported (\"model_or_artifact_unsupported\") is the Qwen38MTPDowngradeReason recorded when the model or its artifact does not carry the MTP envelope required for Qwen3.8 speculative decoding.",
+      "distinction": "It is the model-axis reason; backend readiness, sampling mode, and depth each have their own closed members.",
+      "distinct_from": [
+        "support",
+        "sm-qwen38mtpbackendunsupported"
+      ],
+      "aliases": [],
+      "grounding": "Qwen38MTPModelUnsupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-qwen38mtpsamplingunsupported",
+      "canonical": "Qwen38MTPSamplingUnsupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Qwen38MTPSamplingUnsupported (\"sampling_mode_unsupported\") is the Qwen38MTPDowngradeReason recorded when the request's sampling mode lies outside the greedy envelope MTP decoding admits.",
+      "distinction": "It is the sampling-mode axis of the same closed downgrade vocabulary; it is emitted alongside Qwen38SamplingDowngradeError details rather than replacing them.",
+      "distinct_from": [
+        "support",
+        "sm-qwen38mtpdepthunsupported"
+      ],
+      "aliases": [],
+      "grounding": "Qwen38MTPSamplingUnsupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-rsimaturity",
+      "canonical": "rsi_maturity",
+      "family": "support-maturity",
+      "kind": "metric",
+      "definition": "rsi_maturity is the control-pane scorecard key (debt rsi_debt, script tools/rsi_maturity_scorecard.py) that reports RSI-maturity debt on the operator scoreboard debt page.",
+      "distinction": "It is one pane of the operator control plane aggregating RSI-maturity debt; it is not the generic maturity concept and not a per-capability maturity rung.",
+      "distinct_from": [
+        "maturity"
+      ],
+      "aliases": [],
+      "grounding": "rsi_maturity",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-supportsdeviceweightdtype",
+      "canonical": "SupportsDeviceWeightDtype",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "SupportsDeviceWeightDtype is the compute.Backend interface method reporting the exact dtype set the backend's MatMul has a resident case for, probed by the dense k-quant HAL staging seam and the MoE device gate/up seam.",
+      "distinction": "It is a per-backend dtype capability probe; SupportsHAL and SupportsHALKQuant are quant-format-level predicates at the model layer, not backend probes.",
+      "distinct_from": [
+        "support",
+        "sm-supportshalkquant"
+      ],
+      "aliases": [],
+      "grounding": "SupportsDeviceWeightDtype",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-supportshal",
+      "canonical": "SupportsHAL",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "SupportsHAL is the QuantDescriptor method reporting whether that quant format is supported for device HAL weight staging.",
+      "distinction": "It is a per-format descriptor fact consulted when building HAL weights; SupportsHALKQuant is the model-layer predicate over k-quant kinds, and SupportsDeviceWeightDtype probes a concrete backend's MatMul dtypes.",
+      "distinct_from": [
+        "support",
+        "sm-supportshalkquant"
+      ],
+      "aliases": [],
+      "grounding": "SupportsHAL",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-supportshalkquant",
+      "canonical": "SupportsHALKQuant",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "SupportsHALKQuant(kind) is the internal/model package-level predicate reporting whether a k-quant kind has a HAL kernel somewhere, independent of any particular backend.",
+      "distinction": "It answers whether the model layer has a HAL kernel for the kind; the backend check (SupportsDeviceWeightDtype) separately answers whether this backend serves the dtype, and both must admit for device execution.",
+      "distinct_from": [
+        "support",
+        "sm-supportshal",
+        "sm-supportsdeviceweightdtype"
+      ],
+      "aliases": [],
+      "grounding": "SupportsHALKQuant",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-supportsq2k",
+      "canonical": "SupportsQ2K",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "SupportsQ2K() bool is the optional q2kCapableBackend capability method advertising that a backend can matmul over packed Q2_K blocks without first expanding them to Q8/F32.",
+      "distinction": "It is the packed-Q2_K matmul capability asserted locally so serve wiring never names a concrete device backend; SupportsDeviceWeightDtype(Q2_K) only says the dtype has a MatMul case.",
+      "distinct_from": [
+        "support",
+        "sm-supportsdeviceweightdtype"
+      ],
+      "aliases": [],
+      "grounding": "SupportsQ2K",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-supportsv41bf16publish",
+      "canonical": "SupportsV41BF16Publish",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "SupportsV41BF16Publish(rank) is the optional V41BF16PublishBackend contract method reporting whether the backend publishes BF16 rows for V4.1 on-device, probed at rank 1 by the op-coverage reader.",
+      "distinction": "It is one of the closed V4.1 op contracts the op-coverage reader classifies as device, host-fallback, or absent; absence routes the op to the host path rather than failing the request.",
+      "distinct_from": [
+        "support",
+        "sm-supportsv41compressorpool"
+      ],
+      "aliases": [],
+      "grounding": "SupportsV41BF16Publish",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-supportsv41compressorpool",
+      "canonical": "SupportsV41CompressorPool",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "SupportsV41CompressorPool() is the optional V41CompressorPoolBackend contract method reporting whether the backend serves the V4.1 compressor-pool operation on-device.",
+      "distinction": "It is one of the closed V4.1 op contracts read by the single op-coverage reader; a false answer means host fallback for that op, not a refusal of the model.",
+      "distinct_from": [
+        "support",
+        "sm-supportsv41bf16publish"
+      ],
+      "aliases": [],
+      "grounding": "SupportsV41CompressorPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-supportsv41engramrowdecode",
+      "canonical": "SupportsV41EngramRowDecode",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "SupportsV41EngramRowDecode() is the optional V41EngramRowDecodeBackend contract method reporting whether the backend decodes V4.1 Engram rows on-device.",
+      "distinction": "It is one of the closed V4.1 op contracts; the related encoding direction and the indexer-score contract are separate probes.",
+      "distinct_from": [
+        "support",
+        "sm-supportsv41indexerscore"
+      ],
+      "aliases": [],
+      "grounding": "SupportsV41EngramRowDecode",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-supportsv41exactrmsnorm",
+      "canonical": "SupportsV41ExactRMSNorm",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "SupportsV41ExactRMSNorm(rows, tol) is the optional V41ExactRMSNormBackend contract method reporting whether the backend computes the V4.1 exact RMSNorm within tolerance on-device, probed at 4096 rows and 1e-6.",
+      "distinction": "It is one of the closed V4.1 op contracts with a numeric tolerance probe; approximate normalization paths do not satisfy it.",
+      "distinct_from": [
+        "support",
+        "sm-supportsv41indexerscore"
+      ],
+      "aliases": [],
+      "grounding": "SupportsV41ExactRMSNorm",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-supportsv41indexerscore",
+      "canonical": "SupportsV41IndexerScore",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "SupportsV41IndexerScore() is the optional V41IndexerScoreBackend contract method reporting whether the backend scores V4.1 indexer keys on-device.",
+      "distinction": "It is one of the closed V4.1 op contracts read by the op-coverage reader; it concerns indexer scoring, not Engram row decoding or MHC mixing.",
+      "distinct_from": [
+        "support",
+        "sm-supportsv41engramrowdecode"
+      ],
+      "aliases": [],
+      "grounding": "SupportsV41IndexerScore",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-supportsv41mhc",
+      "canonical": "SupportsV41MHC",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "SupportsV41MHC() is the optional V41MHCBackend contract method reporting whether the backend serves the V4.1 MHC stream operations (initial streams, split coefficients with Sinkhorn-normalized combinations, pre/post mixing) on-device.",
+      "distinction": "It is one of the closed V4.1 op contracts; absence permits caller selection of the host reference, and after selection an operation error propagates instead of replaying on CPU.",
+      "distinct_from": [
+        "support",
+        "sm-supportsv41exactrmsnorm"
+      ],
+      "aliases": [],
+      "grounding": "SupportsV41MHC",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-supportsv41routedidweight",
+      "canonical": "SupportsV41RoutedIDWeight",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "SupportsV41RoutedIDWeight(dt) is the V41RoutedIDBackend method reporting which weight dtypes the backend's V41MatVecID serves; CUDA and Vulkan admit Q2_K and Q3_K.",
+      "distinction": "It is the routed-ID matvec weight-dtype axis; the fused gate-up and down contracts are separate methods on the same interface.",
+      "distinct_from": [
+        "support",
+        "sm-supportsv41tailrope"
+      ],
+      "aliases": [],
+      "grounding": "SupportsV41RoutedIDWeight",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-supportsv41tailrope",
+      "canonical": "SupportsV41TailRoPE",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "SupportsV41TailRoPE() is the optional V41TailRoPEBackend contract method reporting whether the backend applies the V4.1 tail RoPE rotation to query/key tensors on-device.",
+      "distinction": "It is one of the closed V4.1 op contracts; the companion row and exact variants refine which rotation forms the backend serves.",
+      "distinct_from": [
+        "support",
+        "sm-supportsv41routedidweight"
+      ],
+      "aliases": [],
+      "grounding": "SupportsV41TailRoPE",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-unsupportedproviderprotocol",
+      "canonical": "unsupported_provider_protocol",
+      "family": "support-maturity",
+      "kind": "config",
+      "definition": "unsupported_provider_protocol is the closed preflight refusal reason the fak ops run inference commands emit when the selected provider is not the admitted openai-compatible wire protocol.",
+      "distinction": "It is a CLI preflight refusal label written to the ops receipt; it is not a backend capability probe and it does not evaluate the model, only the provider protocol.",
+      "distinct_from": [
+        "support"
+      ],
+      "aliases": [],
+      "grounding": "unsupported_provider_protocol",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sm-v41phasefieldcoverage",
+      "canonical": "V41PhaseFieldCoverage",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "V41PhaseFieldCoverage is the struct type qualifying each legacy numeric V4.1 phase total with a status (measured, unavailable, not_applicable), reason, boundary, overlap, outcome, and measured/unavailable sample counts.",
+      "distinction": "It records how a phase number was obtained and how many samples back it; it is not the timing value itself, not a fault-attribution verdict, and not a forward-coverage completeness check.",
+      "distinct_from": [
+        "coverage",
+        "sm-errnativeforwardcoverageinvalid"
+      ],
+      "aliases": [],
+      "grounding": "V41PhaseFieldCoverage",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

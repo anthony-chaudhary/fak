@@ -23,7 +23,7 @@
       "kind": "symbol",
       "definition": "ContextSizeConfig.PerContextMemoryPlan projects model geometry and a context token count into classed KV and scratch memory demands. Native serve combines this contextPlan with its selected load arm's weight demands for memory sizing and plan JSON.",
       "distinction": "Projects per-context memory demand at a given token count; AutoSizeContextPlan chooses the fitting count. This is a compute MemoryPlan, not ctxplan's selection of resident conversation spans.",
-      "distinct_from": ["x-plan-memoryplan", "x2-plan-autosizecontextplan", "ctxplan", "fitplan-planner"],
+      "distinct_from": [ "x-plan-memoryplan", "ctxplan", "fitplan-planner" ],
       "aliases": ["contextplan"],
       "grounding": "PerContextMemoryPlan",
       "grounding_kind": "symbol",

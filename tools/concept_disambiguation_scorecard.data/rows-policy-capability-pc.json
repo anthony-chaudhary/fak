@@ -1,0 +1,470 @@
+{
+  "rows": [
+    {
+      "id": "pc-assumption-policy",
+      "canonical": "AssumptionPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The ctxplan threshold struct deciding when a provenance-tagged context assumption (stated vs inferred confidence) is promoted into an accepted working assumption.",
+      "distinction": "An effect-context assumption-threshold table; it neither authorizes tools nor loads a policy manifest, and its conservative default is the separate DefaultAssumptionPolicy constructor.",
+      "distinct_from": [
+        "x-goal25b-policy-capability-defaultassumptionpolicy",
+        "policy-loaded"
+      ],
+      "aliases": [],
+      "grounding": "AssumptionPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-build-safetensors-preflight",
+      "canonical": "BuildSafetensorsPreflight",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The header-only planner that reads bounded safetensors headers and emits the SafetensorsPreflight tensor census plus loader-role classification before any weight allocation.",
+      "distinction": "It builds the plan; it is not the plan's input struct (SafetensorsPreflightInput), the per-tensor census row (SafetensorsPreflightTensor), or the GGUF-side ManifestPreflight.",
+      "distinct_from": [
+        "safetensors-preflight-tensor",
+        "gguf-manifest-header-preflight",
+        "cov5307-build-model-preflight"
+      ],
+      "aliases": [],
+      "grounding": "BuildSafetensorsPreflight",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-comparison-quality-policy",
+      "canonical": "ComparisonQualityPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The macbench MTP-comparison quality gate: the pinned policy identity (ID, version, SHA256) and minimum score a speculative-decoding trial must beat to count as qualified.",
+      "distinction": "A benchmark qualification gate, not an authorization/capability Policy manifest; its serialized wire key is the separate quality_policy label and its statistical sibling is MultiplicityPolicy.",
+      "distinct_from": [
+        "multiplicitypolicy",
+        "pc-quality-policy-wire"
+      ],
+      "aliases": [],
+      "grounding": "ComparisonQualityPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-config-policy-receipt",
+      "canonical": "ConfigPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The ops-run receipt field (config_policy) carrying the harness config-policy evidence verdict: source, digest, status, and refusal reason for the child-enforcement check.",
+      "distinction": "Evidence about the harness CONFIG policy attached to an ops-run receipt; it is not the inference-preflight receipt next to it, nor the on-disk policy manifest it digests.",
+      "distinct_from": [
+        "pc-inference-preflight-receipt",
+        "policy-manifest"
+      ],
+      "aliases": [],
+      "grounding": "ConfigPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-execution-policy-portable",
+      "canonical": "ExecutionPolicyPortable",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The model ExecutionPolicy iota value marking a session whose execution may roam across host/device layers (portable), as opposed to being pinned to the accelerator.",
+      "distinction": "A value of the execution-policy enum, not the DeviceOnly twin, not the SetExecutionPolicy mutator, and not the V4.1 session's v41DeviceOnlyPolicy predicate.",
+      "distinct_from": [
+        "halo-gpu-execution-policy-device-only",
+        "halo-gpu-set-execution-policy",
+        "pc-v41-device-only-policy"
+      ],
+      "aliases": [],
+      "grounding": "ExecutionPolicyPortable",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-fail-ops-run-inference-preflight",
+      "canonical": "failOpsRunInferencePreflight",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The cmd-layer helper that stamps a failed inference-preflight receipt onto the ops-run receipt and reports the typed refusal before any harness launch.",
+      "distinction": "The failure path around the InferencePreflight receipt; it neither performs the gateway probe nor records capability evidence (opsRunAddCapabilityEvidence).",
+      "distinct_from": [
+        "pc-inference-preflight-receipt",
+        "pc-ops-run-add-capability-evidence"
+      ],
+      "aliases": [],
+      "grounding": "failOpsRunInferencePreflight",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-fak-agent-posture-env",
+      "canonical": "FAK_AGENT_POSTURE",
+      "family": "policy-capability",
+      "kind": "config",
+      "definition": "The environment variable selecting the agent/chat adjudication posture (default_open | fail_closed | admit_and_log) when the --posture flag is absent.",
+      "distinction": "An env knob choosing among the existing posture values; it defines no new posture and is distinct from the guard plane's reasoning-posture knobs.",
+      "distinct_from": [
+        "posture",
+        "runtime-fourth-setconfiguredposture"
+      ],
+      "aliases": [],
+      "grounding": "FAK_AGENT_POSTURE",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-inference-preflight-receipt",
+      "canonical": "InferencePreflight",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The typed gateway-probe qualification receipt (inference_preflight) on the ops-run receipt: status, receipt ref, and reason proving the target gateway answers before a harness launches.",
+      "distinction": "The probe result itself, not the ConfigPolicy evidence beside it, not the failOpsRunInferencePreflight failure stamp, and not the general preflight ladder.",
+      "distinct_from": [
+        "pc-config-policy-receipt",
+        "pc-fail-ops-run-inference-preflight",
+        "preflight-ladder"
+      ],
+      "aliases": [],
+      "grounding": "InferencePreflight",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-last-evict-policy",
+      "canonical": "LastEvictPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The radixkv stats field reporting which eviction policy performed the most recent eviction, so operators can see the live policy choice without tracing calls.",
+      "distinction": "A read-only observation of the last eviction decision; it selects nothing, unlike KVEvictPolicy (the compute-side KV eviction policy type) or the preemption-policy mutators.",
+      "distinct_from": [
+        "policy-capability-kv-evict-policy",
+        "setkvpreemptionpolicy"
+      ],
+      "aliases": [],
+      "grounding": "LastEvictPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-mcp-fak-adjudicate-dialect",
+      "canonical": "mcp__fak__fak_adjudicate",
+      "family": "policy-capability",
+      "kind": "doc-term",
+      "definition": "The MCP client-dialect spelling of the fak_adjudicate tool (server `fak`, OpenCode double fak_fak_ prefix) that NormalizeToolName decodes back to the canonical tool name.",
+      "distinction": "A wire spelling of one existing tool, not a second adjudicator: the handler is handleFakAdjudicate and the concept is the single adjudicator kernel.",
+      "distinct_from": [
+        "x-policy-capability-fakadjudicate",
+        "adjudicator"
+      ],
+      "aliases": [],
+      "grounding": "mcp__fak__fak_adjudicate",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-new-policy-constructor",
+      "canonical": "NewPolicy (manifest + eviction constructors)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The constructor name shared by internal/policy.NewPolicy (compiles manifest bytes into a loaded *Policy at generation 1) and l3server/eviction.NewPolicy (builds a named eviction Policy).",
+      "distinction": "Two package-local factories behind one name: neither is the loaded Policy value they produce, the ToPolicy manifest conversion, nor the unrelated view/mem/set policies.",
+      "distinct_from": [
+        "policy-loaded",
+        "x-policy-capability-topolicy",
+        "sharedtask-viewpolicy",
+        "policy-capability-mempolicy",
+        "x-policy-capability-setpolicy"
+      ],
+      "aliases": [],
+      "grounding": "NewPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-ops-run-add-capability-evidence",
+      "canonical": "opsRunAddCapabilityEvidence",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The cmd-layer helper appending capability-evidence refs (config-policy digest, inference-preflight receipt ref) to the ops-run launch-identity receipt.",
+      "distinction": "Evidence bookkeeping on the launch identity; it grants no capability and performs no preflight itself.",
+      "distinct_from": [
+        "pc-config-policy-receipt",
+        "pc-inference-preflight-receipt"
+      ],
+      "aliases": [],
+      "grounding": "opsRunAddCapabilityEvidence",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-parse-and-adjudicate",
+      "canonical": "ParseAndAdjudicate (bitnetmeta + vllmquant contract boundary)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The end-to-end metadata-boundary entrypoint that parses a serialized request and adjudicates it against declared capabilities, returning a typed result instead of guessing.",
+      "distinction": "One package-local boundary function in bitnetmeta (raw, caps) and vllmquant (raw); it is the parse-then-adjudicate seam, not the gateway's proposed-call adjudication or the FP4 metadata adjudicator.",
+      "distinct_from": [
+        "adjudicator",
+        "x-policy-capability-adjudicateproposed",
+        "adjudicatefp4metadata"
+      ],
+      "aliases": [],
+      "grounding": "ParseAndAdjudicate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-policy-id-field",
+      "canonical": "PolicyID",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The stable identifier field of a verification/quality policy document (vulkan score-proof structure ID, macbench quality-policy ID) that pins WHICH policy a result was judged under.",
+      "distinction": "Names the policy; it does not pin its bytes (PolicySHA256) and is not the attestation-plane policyRef digest.",
+      "distinct_from": [
+        "pc-policy-sha256-field",
+        "issue9909-attestation-policy-ref",
+        "policy-loaded"
+      ],
+      "aliases": [],
+      "grounding": "PolicyID",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-policy-name-field",
+      "canonical": "PolicyName",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The human-readable placement-policy label (TEMPORAL_PINNED, STREAMING_BYPASS, PARTITIONED, ...) on strix tiling/streaming and quant-forward descriptors.",
+      "distinction": "A display label for a memory-placement choice; it carries no authorization weight and is not the policy manifest's identity (PolicyID) or a PolicyKnob.",
+      "distinct_from": [
+        "pc-policy-id-field",
+        "policyknob"
+      ],
+      "aliases": [],
+      "grounding": "PolicyName",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-policy-sha256-field",
+      "canonical": "PolicySHA256",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The content-digest field pinning the exact bytes of a quality/verification policy document so a comparison arm can prove it ran under the same policy text.",
+      "distinction": "Pins policy BYTES; it complements PolicyID (which policy) and differs from the guard-spawn PolicyDigest provenance and the generic policyRef attestation digest.",
+      "distinct_from": [
+        "pc-policy-id-field",
+        "x-issue1420-policy-capability-policydigest",
+        "issue9909-attestation-policy-ref"
+      ],
+      "aliases": [],
+      "grounding": "PolicySHA256",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-preflighted-term",
+      "canonical": "preflighted",
+      "family": "policy-capability",
+      "kind": "doc-term",
+      "definition": "The past-participle term used in comments, docs, and error strings for an executable or tool whose hash or availability was verified before launch (the completed preflight).",
+      "distinction": "A state adjective about a finished check; it is not the preflight ladder mechanism, a PreflightVerdict value, or the plural preflights collection.",
+      "distinct_from": [
+        "preflight-ladder",
+        "x-issue1420-policy-capability-preflightverdict",
+        "x-goal25b-policy-capability-preflights"
+      ],
+      "aliases": [],
+      "grounding": "preflighted",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-quality-policy-wire",
+      "canonical": "quality_policy (macbench wire label)",
+      "family": "policy-capability",
+      "kind": "config",
+      "definition": "The JSON wire key (quality_policy) carrying the ComparisonQualityPolicy block inside a macbench packet/arm, mirrored by the arm's policy_id/policy_sha256 fields.",
+      "distinction": "A serialization label, not the gate itself: the concept is ComparisonQualityPolicy; this token is how it travels on the wire.",
+      "distinct_from": [
+        "pc-comparison-quality-policy",
+        "pc-policy-sha256-field"
+      ],
+      "aliases": [],
+      "grounding": "quality_policy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-qwen38-mtp-disabled-by-policy",
+      "canonical": "Qwen38MTPDisabledByPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The Qwen3.8 MTP downgrade reason emitted when operator policy disables multi-token-prediction speculation, distinguishing a policy refusal from memory-unsafe or correctness-diverged downgrades.",
+      "distinction": "A policy-originated MTP refusal reason; it is not the hardware fallback policy (FallbackPolicy) nor a device-residency execution policy.",
+      "distinct_from": [
+        "issue9909-runtimecap-fallback-policy",
+        "pc-execution-policy-portable"
+      ],
+      "aliases": [],
+      "grounding": "Qwen38MTPDisabledByPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-run-validate-wsl-capability-command",
+      "canonical": "runValidateWSLCapabilityCommand",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The WSL command-availability probe executor behind fak validate: runs a candidate capability command under the preflighted timeout/retry bounds and returns its output.",
+      "distinction": "Executes one probe command; it does not judge the verdict (validateWSLCapabilityVerdict) and is not the CI preflight runner.",
+      "distinct_from": [
+        "policy-capability-ci-preflight",
+        "preflight-ladder"
+      ],
+      "aliases": [],
+      "grounding": "runValidateWSLCapabilityCommand",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-safetensors-preflight-input",
+      "canonical": "SafetensorsPreflightInput",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The input struct (checkpoint directory + optional HF config override) feeding BuildSafetensorsPreflight's header-only plan.",
+      "distinction": "The plan's INPUT, not the builder (BuildSafetensorsPreflight) nor the per-tensor census row (SafetensorsPreflightTensor).",
+      "distinct_from": [
+        "pc-build-safetensors-preflight",
+        "safetensors-preflight-tensor"
+      ],
+      "aliases": [],
+      "grounding": "SafetensorsPreflightInput",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-token-rate-policy",
+      "canonical": "TokenRatePolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The gateway admission cap bundle (ratelimit.TokenCaps: total/input/output/uncached ceilings, concurrency, target utilization) that seeds a token rate gate.",
+      "distinction": "Per-request TOKEN admission caps; it is not the batch-policy scheduling knob, the principal-rate book, or the fleet admission policy.",
+      "distinct_from": [
+        "x-policy-capability-batchpolicy",
+        "admissionpolicy"
+      ],
+      "aliases": [],
+      "grounding": "TokenRatePolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-turn-adjudications",
+      "canonical": "turnAdjudications",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The gateway helper concatenating pre-recovery refusals with the live adjudications of a turn so denial-recovery replays keep every verdict in order.",
+      "distinction": "A slice-join over ToolAdjudication rows; it produces no verdict itself and is not the FakExt.Adjudications wire counter.",
+      "distinct_from": [
+        "x-policy-capability-tooladjudication",
+        "x-policy-capability-adjudications"
+      ],
+      "aliases": [],
+      "grounding": "turnAdjudications",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pc-v41-device-only-policy",
+      "canonical": "v41DeviceOnlyPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The V4.1 session predicate true when the session runs device-only, gating compressed-publication, engram-gate, and gather-op paths off the host fallback.",
+      "distinction": "A V4.1 session-mode predicate; it is not the generic ExecutionPolicyDeviceOnly enum value nor the portable twin ExecutionPolicyPortable.",
+      "distinct_from": [
+        "halo-gpu-execution-policy-device-only",
+        "pc-execution-policy-portable"
+      ],
+      "aliases": [],
+      "grounding": "v41DeviceOnlyPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

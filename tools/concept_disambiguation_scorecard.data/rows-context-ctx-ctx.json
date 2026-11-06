@@ -1,0 +1,859 @@
+{
+  "rows": [
+    {
+      "id": "ctx-audit-compaction-event",
+      "canonical": "AuditCompactionEvent",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A trajectory audit record measuring one compaction event's explicit transcript content with its unit, origin, and coverage.",
+      "distinction": "An audit measurement of a compaction event in the trajectory audit; not the guard's compaction-witness ledger and not a compaction-economics verdict.",
+      "distinct_from": [
+        "compactionjoinkey",
+        "x-context-ctx-compactionfired"
+      ],
+      "aliases": [],
+      "grounding": "AuditCompactionEvent",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-close-context",
+      "canonical": "CloseContext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The microagent Host/WaveHost method that closes a managed context under the caller's deadline.",
+      "distinction": "Closes a managed agent context; not Go stdlib context plumbing and not a session-reset reason.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext",
+        "x2-context-ctx-budgetcontextexhausted"
+      ],
+      "aliases": [],
+      "grounding": "CloseContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-context-err",
+      "canonical": "contextErr",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A gateway-local typed-error variable receiving *agent.InKernelContextLengthError when classifying upstream and HTTP error responses.",
+      "distinction": "A Go error-classification local in the gateway; not an LLM context-length value and not a refusal-reason token.",
+      "distinct_from": [
+        "x-context-ctx-contexttokenscap",
+        "x2-context-ctx-budgetcontextexhausted"
+      ],
+      "aliases": [],
+      "grounding": "contextErr",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-context-ladder",
+      "canonical": "ContextLadder",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A fitplan function returning the ladder of context sizes to try: the resolved context, any extra pinned contexts, and common served windows.",
+      "distinction": "Enumerates candidate context sizes for fit search; not a budget cap and not a reported window-token count.",
+      "distinct_from": [
+        "x-context-ctx-maxcontext",
+        "x-context-ctx-contextwindowtokens"
+      ],
+      "aliases": [],
+      "grounding": "ContextLadder",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-context-len",
+      "canonical": "ContextLen",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A local context-length value threaded through the CUDA Q4-exp PLE hash geometry and FlashAttention setup.",
+      "distinction": "A kernel-shape length input to attention paths; not a session budget and not a model-config window.",
+      "distinct_from": [
+        "x-context-ctx-contextwindowtokens",
+        "x-context-ctx-ropeorigcontext"
+      ],
+      "aliases": [],
+      "grounding": "ContextLen",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-context-override",
+      "canonical": "contextOverride",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "An optional *int guard flag overriding the session context budget when the guard budget envelope is applied.",
+      "distinction": "A CLI override pointer fed to the guard envelope; not the resolved budget value and not a hard cap.",
+      "distinct_from": [
+        "x-context-ctx-contextbudgetlimit",
+        "x-context-ctx-hardcontextcap"
+      ],
+      "aliases": [],
+      "grounding": "contextOverride",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-context-rows",
+      "canonical": "contextRows",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A local slice or count of context rows: vCache context-join status rows in the cache-value readout and prior-KV row counts in reference attention kernels.",
+      "distinction": "Carries context-row data in two planes; not a context plan, span, or budget.",
+      "distinct_from": [
+        "x-context-ctx-contextjoin",
+        "x-context-ctx-ctxspans"
+      ],
+      "aliases": [],
+      "grounding": "contextRows",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-context-size-config-with-precision",
+      "canonical": "ContextSizeConfigWithPrecision",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A model.Config method returning the compute.ContextSizeConfig appropriate for a given KV precision.",
+      "distinction": "Produces a precision-specific sizing config; not the fit-search ladder and not a served-window constant.",
+      "distinct_from": [
+        "x-context-ctx-maxcontext",
+        "x-context-ctx-contextwindowtokens"
+      ],
+      "aliases": [],
+      "grounding": "ContextSizeConfigWithPrecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-context-trace",
+      "canonical": "contexttrace",
+      "family": "context-ctx",
+      "kind": "doc-term",
+      "definition": "The tracing-dataflow ticket scope (feat(contexttrace)) covering live native context and KV lifecycle transition tracing.",
+      "distinction": "A ticket label for tracing work; not a runtime trace context and not a compaction event record.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext",
+        "cov-debt250-context-ctx-tracefromcontext"
+      ],
+      "aliases": [],
+      "grounding": "contexttrace",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-context-weights",
+      "canonical": "contextWeights",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A serve-runtime field (compute.MemoryPlan) holding the memory-plan weights for the context stage of serve-fit.",
+      "distinction": "Memory-plan weight vectors for the context stage; not a context budget and not expert-ring weights.",
+      "distinct_from": [
+        "x2-context-ctx-contextbudget",
+        "x-context-ctx-maxcontext"
+      ],
+      "aliases": [],
+      "grounding": "contextWeights",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-contiguization-min-context",
+      "canonical": "ContiguizationMinContext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A compute constant (32768 tokens) below which KV contiguization is skipped on the RADV/HIP/AMDGPU attention paths.",
+      "distinction": "A hardware-path threshold constant; not a context budget and not a window size.",
+      "distinct_from": [
+        "x-context-ctx-contextwindowtokens",
+        "x-context-ctx-maxcontext"
+      ],
+      "aliases": [],
+      "grounding": "ContiguizationMinContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-ctx-err",
+      "canonical": "ctxErr",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A local variable holding ctx.Err(), the Go context cancellation error, across guard, planner, and bench call sites.",
+      "distinction": "A stdlib context error value; not an LLM context-length error and not a refusal reason.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext",
+        "ctx-context-err"
+      ],
+      "aliases": [],
+      "grounding": "ctxErr",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-ctxmms",
+      "canonical": "CTXMMS",
+      "family": "context-ctx",
+      "kind": "doc-term",
+      "definition": "The spec'd structured virtual context memory system that treats the conversation context as demand-paged virtual memory with typed cells.",
+      "distinction": "A spec-level virtual-memory concept for context views; not the runtime vCache page table and not the persisted recall core.",
+      "distinct_from": [
+        "x-context-ctx-contextsnapshot",
+        "x-context-ctx-ctxstore"
+      ],
+      "aliases": [],
+      "grounding": "CTXMMS",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-ctxs",
+      "canonical": "ctxs",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A fitplan search-axis field: the list of context sizes enumerated during candidate expansion.",
+      "distinction": "A search-enumeration list; not a single resolved context and not a budget cap.",
+      "distinct_from": [
+        "ctx-context-ladder",
+        "x-context-ctx-maxcontext"
+      ],
+      "aliases": [],
+      "grounding": "ctxs",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-decode-step-context",
+      "canonical": "DecodeStepContext",
+      "family": "context-ctx",
+      "kind": "doc-term",
+      "definition": "The Metal argument-buffer struct isolating per-step dynamic parameters so the ICB stays immutable across decode replay.",
+      "distinction": "A GPU argument-buffer layout from the ICB decode-replay research note; not a Go execution context and not a decode state machine.",
+      "distinct_from": [
+        "Kctx",
+        "Vctx"
+      ],
+      "aliases": [],
+      "grounding": "DecodeStepContext",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-device-context-probe",
+      "canonical": "DeviceContextProbe",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The optional Backend capability method proving the device context is still alive before reuse in device-fault detection.",
+      "distinction": "A liveness probe on the device context; not a request context and not a context budget.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext",
+        "x-context-ctx-maxcontext"
+      ],
+      "aliases": [],
+      "grounding": "DeviceContextProbe",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-ensure-pi-safe-compaction",
+      "canonical": "EnsurePiSafeCompaction",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A projectassets function ensuring the Pi safe-compaction settings (context budget) are written into the target settings file.",
+      "distinction": "Writes Pi harness settings; not a compaction event, witness, or economics verdict.",
+      "distinct_from": [
+        "compactionjoinkey",
+        "x-context-ctx-compactionboundary"
+      ],
+      "aliases": [],
+      "grounding": "EnsurePiSafeCompaction",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-est-context-tokens",
+      "canonical": "estContextTokens",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A microagent estimator of the token count of a message list, used for context caps and compaction receipts.",
+      "distinction": "An estimation function over messages; not a reported usage counter and not a budget cap.",
+      "distinct_from": [
+        "x-context-ctx-contexttokens",
+        "x-context-ctx-contexttokenscap"
+      ],
+      "aliases": [],
+      "grounding": "estContextTokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-exec-ctx",
+      "canonical": "execCtx",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The wazero sandbox execution context, optionally bounded by a timeout, under which the VM runs.",
+      "distinction": "A process-execution deadline context; not an LLM context and not a turn descriptor.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext",
+        "ctx-turn-ctx"
+      ],
+      "aliases": [],
+      "grounding": "execCtx",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-finish-validate-context-phase",
+      "canonical": "finishValidateContextPhase",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A validate-package helper finalizing one validation phase: recording the result, rendering output, and reporting timeouts.",
+      "distinction": "A test-validation phase closer; not a serve phase and not a compaction step.",
+      "distinct_from": [
+        "x-context-ctx-contextstatus",
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "finishValidateContextPhase",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-hctx",
+      "canonical": "hCtx",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A deadline-bounded Go context local (LAN probes, replica hedging) carrying a timeout for outbound calls.",
+      "distinction": "A stdlib context with a deadline; not an LLM context view and not a hedge result.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext",
+        "ctx-pctx"
+      ],
+      "aliases": [],
+      "grounding": "hCtx",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-inflight-id-from-ctx",
+      "canonical": "inflightIDFromCtx",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A gateway helper extracting the uint64 in-flight request ID stored in the request context for progress and metrics attachment.",
+      "distinction": "Reads a request-tracking ID; not the request-identity type and not a receipt key.",
+      "distinct_from": [
+        "ctx-responses-restore-context-key",
+        "x-context-ctx-requestcontextchange"
+      ],
+      "aliases": [],
+      "grounding": "inflightIDFromCtx",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-involuntary-ctx-switches",
+      "canonical": "InvoluntaryCtxSwitches",
+      "family": "context-ctx",
+      "kind": "metric",
+      "definition": "An L3-server metrics-snapshot counter of context switches forced by the scheduler rather than requested by clients.",
+      "distinction": "Counts involuntary switches; not voluntary switches and not the OS context-switch rate.",
+      "distinct_from": [
+        "ctx-voluntary-ctx-switches",
+        "x-context-ctx-contextswitchespersec"
+      ],
+      "aliases": [],
+      "grounding": "InvoluntaryCtxSwitches",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-kctx",
+      "canonical": "Kctx",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A flattened copy of the per-layer K-cache slices passed into metalgemm.DecodeStep for Metal decode.",
+      "distinction": "The K-side decode buffer; not the V-side buffer and not the full KV cache store.",
+      "distinct_from": [
+        "ctx-vctx",
+        "x2-context-ctx-contextview"
+      ],
+      "aliases": [],
+      "grounding": "Kctx",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-launch-context",
+      "canonical": "LaunchContext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A perfrsiscore versioned, digest-bound record pinning the launch axes whose values were witnessed.",
+      "distinction": "Pins performance-score launch axes; not a process-launch environment and not a request context.",
+      "distinct_from": [
+        "pendingadmission-contextdigest",
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "LaunchContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-lookup-snapshot-tiered-context-locked",
+      "canonical": "LookupSnapshotTieredContextLocked",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A radixkv.Tree method performing a tiered prefix-snapshot lookup while the caller holds the tree lock.",
+      "distinction": "A locked lookup primitive; not the unlocked public lookup and not a remote-transfer operation.",
+      "distinct_from": [
+        "x-context-ctx-contextsnapshot",
+        "x2-context-ctx-contextview"
+      ],
+      "aliases": [],
+      "grounding": "LookupSnapshotTieredContextLocked",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-mcp-fak-context-restore",
+      "canonical": "mcp__fak__fak_context_restore",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "The MCP-prefixed wire name of the fak_context_restore tool, restoring a previously stashed context.",
+      "distinction": "A tool-name spelling variant; not the restore-continuation key and not the stash table.",
+      "distinct_from": [
+        "x-context-ctx-fakcontextrestore",
+        "ctx-responses-restore-context-key"
+      ],
+      "aliases": [],
+      "grounding": "mcp__fak__fak_context_restore",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-pctx",
+      "canonical": "pctx",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A cancellable primary-attempt context in replica hedging and related supervisors, derived from the family context.",
+      "distinction": "A hedge attempt's execution context; not the family/root context and not a request context.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext",
+        "ctx-hctx"
+      ],
+      "aliases": [],
+      "grounding": "pctx",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-phase-context",
+      "canonical": "phaseContext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A requestObservation field in the gateway perf ledger holding the context used to derive per-phase native timings.",
+      "distinction": "Carries timing-derivation context; not a request identity and not a phase receipt.",
+      "distinct_from": [
+        "ctx-inflight-id-from-ctx",
+        "x-context-ctx-requestcontextchange"
+      ],
+      "aliases": [],
+      "grounding": "phaseContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-pi-context-budget-for",
+      "canonical": "PiContextBudgetFor",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A projectassets function computing the Pi context budget for a served window with the compaction trigger capped at maxCompactTrigger.",
+      "distinction": "Computes a budget; not the settings writer and not the served-window constant.",
+      "distinct_from": [
+        "ctx-ensure-pi-safe-compaction",
+        "x-context-ctx-contextbudgetlimit"
+      ],
+      "aliases": [],
+      "grounding": "PiContextBudgetFor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-rctx",
+      "canonical": "rctx",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A cancellable request/run context local (continuous batcher, benches, wakelock) scoping one unit of work.",
+      "distinction": "A stdlib cancel-scoped context; not a request-context value type and not a turn descriptor.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext",
+        "ctx-turn-ctx"
+      ],
+      "aliases": [],
+      "grounding": "rctx",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-reason-compaction",
+      "canonical": "ReasonCompaction",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A trajctl SampleReason constant ('compaction') marking turn-end samples taken because the context was compacted.",
+      "distinction": "A sampling-reason token; not a compaction-economics verdict and not a thrash refusal.",
+      "distinct_from": [
+        "compactionjoinkey",
+        "x-context-ctx-compactionfired"
+      ],
+      "aliases": [],
+      "grounding": "ReasonCompaction",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-reason-fits-only-at-ctx-lt",
+      "canonical": "ReasonFitsOnlyAtCtxLT",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A fitplan RefusalReason ('fits_only_at_ctx_lt') returned when a model fits only below the requested context.",
+      "distinction": "A fit-refusal reason; not a context cap and not a budget-exhausted reset.",
+      "distinct_from": [
+        "x-context-ctx-maxcontext",
+        "x2-context-ctx-budgetcontextexhausted"
+      ],
+      "aliases": [],
+      "grounding": "ReasonFitsOnlyAtCtxLT",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-req-ctx",
+      "canonical": "reqCtx",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A request-scoped Go context local (benches, recovery, engines) carrying the deadline for one request.",
+      "distinction": "A request-local execution context; not the gateway request-identity type and not a turn descriptor.",
+      "distinct_from": [
+        "agentbench-request-context",
+        "ctx-turn-ctx"
+      ],
+      "aliases": [],
+      "grounding": "reqCtx",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-requested-context",
+      "canonical": "RequestedContext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A fitplan result field: the context size the ask wanted, reported alongside fits_only_at_ctx_lt refusals.",
+      "distinction": "The asked-for size; not the resolved size and not the maximum window.",
+      "distinct_from": [
+        "ctx-resolved-context",
+        "x-context-ctx-maxcontext"
+      ],
+      "aliases": [],
+      "grounding": "RequestedContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-reskill-ctx-noun",
+      "canonical": "reSkillCtxNoun",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A ctxknobs regular expression matching context nouns (context, memory, window, token budget) in skill descriptions.",
+      "distinction": "A text-classifier regex; not a context knob value and not a plan lint.",
+      "distinct_from": [
+        "x-context-ctx-ctxknobs",
+        "x-context-ctx-ctxplans"
+      ],
+      "aliases": [],
+      "grounding": "reSkillCtxNoun",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-resolved-context",
+      "canonical": "ResolvedContext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A fitplan search-result field: the context size actually resolved and served by the fit search.",
+      "distinction": "The outcome size; not the requested size and not the candidate ladder.",
+      "distinct_from": [
+        "ctx-requested-context",
+        "ctx-context-ladder"
+      ],
+      "aliases": [],
+      "grounding": "ResolvedContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-resolve-serve-native-context-budget",
+      "canonical": "resolveServeNativeContextBudget",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A cmd/fak resolver producing the native-serve context budget (resolution, memory plan, fit budget) from weights, backend, and request.",
+      "distinction": "Resolves a serve-time budget; not the planner-config builder and not the Pi budget.",
+      "distinct_from": [
+        "ctx-serve-native-planner-config-with-context",
+        "ctx-pi-context-budget-for"
+      ],
+      "aliases": [],
+      "grounding": "resolveServeNativeContextBudget",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-responses-restore-context-key",
+      "canonical": "responsesRestoreContextKey",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "An unexported gateway context-key type carrying the Responses-API restore continuation in the request context.",
+      "distinction": "A context-value key; not the MCP tool name and not the stash-table entry.",
+      "distinct_from": [
+        "ctx-mcp-fak-context-restore",
+        "x-context-ctx-ctxrestore"
+      ],
+      "aliases": [],
+      "grounding": "responsesRestoreContextKey",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-serve-native-planner-config-with-context",
+      "canonical": "serveNativePlannerConfigWithContext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A cmd/fak builder assembling the in-kernel planner config from serve flags and the resolved context-token count.",
+      "distinction": "Builds a planner config; not the budget resolver and not the planner itself.",
+      "distinct_from": [
+        "ctx-resolve-serve-native-context-budget",
+        "x-context-ctx-contextbudgetlimit"
+      ],
+      "aliases": [],
+      "grounding": "serveNativePlannerConfigWithContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-shutdown-ctx",
+      "canonical": "shutdownCtx",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A short-timeout Go context bounding serve-stack shutdown in fak up and PD separation.",
+      "distinction": "A shutdown deadline context; not a request context and not a session close.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext",
+        "ctx-close-context"
+      ],
+      "aliases": [],
+      "grounding": "shutdownCtx",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-source-binding-from-context",
+      "canonical": "SourceBindingFromContext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "An amdgpu helper reading the Strix source binding out of a Go context.",
+      "distinction": "Reads a benchmark source binding; not a request binding and not a trace context.",
+      "distinct_from": [
+        "gateway-chat-route-context-5633",
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "SourceBindingFromContext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-turn-ctx",
+      "canonical": "turnCtx",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A gateway local of type agentopt.TurnContext built from the request messages for effort classification.",
+      "distinction": "An LLM turn-effort descriptor; not a Go execution context and not a turn-cache sample.",
+      "distinct_from": [
+        "ctx-req-ctx",
+        "agentbench-request-context"
+      ],
+      "aliases": [],
+      "grounding": "turnCtx",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-vctx",
+      "canonical": "Vctx",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "A flattened copy of the per-layer V-cache slices passed into metalgemm.DecodeStep for Metal decode.",
+      "distinction": "The V-side decode buffer; not the K-side buffer and not the full KV cache store.",
+      "distinct_from": [
+        "ctx-kctx",
+        "x2-context-ctx-contextview"
+      ],
+      "aliases": [],
+      "grounding": "Vctx",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "ctx-voluntary-ctx-switches",
+      "canonical": "VoluntaryCtxSwitches",
+      "family": "context-ctx",
+      "kind": "metric",
+      "definition": "An L3-server metrics-snapshot counter of client-requested context switches.",
+      "distinction": "Counts voluntary switches; not involuntary switches and not the OS context-switch rate.",
+      "distinct_from": [
+        "ctx-involuntary-ctx-switches",
+        "x-context-ctx-contextswitchespersec"
+      ],
+      "aliases": [],
+      "grounding": "VoluntaryCtxSwitches",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

@@ -1,0 +1,137 @@
+{
+  "rows": [
+    {
+      "id": "w4b-glmwitnessrecord",
+      "canonical": "glm_witness_record (GLM GPU witness log parser)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "tools/glm_witness_record.py is the pure-stdlib parser that turns a GLM-5.2 GPU-witness run log (the say() banners plus go test -tags cuda -v stdout emitted by tools/dgx_glm_gpu_witness.sh) into one structured content-hashed record under schema glm-gpu-witness/1 (tools/schemas/glm-gpu-witness.v1.json), stamping SHA256 over the exact raw log so the record is provably the one parsed from that log; its emitter identity is RECORD_TOOL glm_witness_record.py@1.",
+      "distinction": "It is the log-to-record PARSER for the GPU correctness witness, not the on-GPU proof runner itself (gpuServerGlmGpuWitness) and not taskmgr's WitnessRecord evidence struct attached beside a claimed state.",
+      "distinct_from": [
+        "x-witness-proof-dgxglmgpuwitness",
+        "x-witness-proof-witnessrecord",
+        "wp-glm-witness-record"
+      ],
+      "aliases": [],
+      "grounding": "glm_witness_record",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "w4b-importwitness",
+      "canonical": "importwitness (fak hooks import-witness command)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "cmd/fak/importwitness.go implements the fak hooks import-witness hook verb (runHooksImportWitness): the cheap structural half of the tree-level build witness (#1325 acceptance criterion 2) that reads only the committed tree (git ls-tree plus one git grep at a rev, default HEAD) and flags each committed importer whose module-local target package has zero tracked non-test .go files, naming the exact git add that greens it; exit codes mirror the hooks contract: 0 clean, 1 IMPORT_OF_UNCOMMITTED_PACKAGE, 2 could-not-run fail-open.",
+      "distinction": "It is the userland hook FRONT DOOR and its verdict plumbing (importWitnessVerdict), not the internal/hooks gate_importwitness commit-boundary gate function that performs the same detection inside the hooks framework, nor the heavy compile-integrity pre-push gate that catches the failure only via a full go build.",
+      "distinct_from": [
+        "guardgate-gateimportwitness",
+        "git-hook-gate",
+        "wp-import-witness"
+      ],
+      "aliases": [],
+      "grounding": "importwitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "w4b-integrityrefuted",
+      "canonical": "INTEGRITY_REFUTED (closed refusal name)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "INTEGRITY_REFUTED is the stable closed-vocabulary refusal name mapped to abi.ReasonIntegrityRefuted in coreReasonNames (internal/abi/reasons.go): the kernel denies a require-witness call when a registered witness resolver actively refuted the claimed effect, unlike UNWITNESSED where no corroborating witness was found at all.",
+      "distinction": "It is the serialized NAME of the refutation reason, not the Go constant ReasonIntegrityRefuted itself and not the resolver's abi.WitnessRefuted outcome value that the kernel folds into the denial.",
+      "distinct_from": [
+        "wp-reason-integrity-refuted",
+        "x-witness-proof-witnessrefuted"
+      ],
+      "aliases": [],
+      "grounding": "INTEGRITY_REFUTED",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "w4b-launchwitness",
+      "canonical": "LaunchWitness (goalrunner launch receipt string)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The LaunchResult.LaunchWitness field (json launch_witness, internal/goalrunner/types.go) set by goalrunner's launcher: PLAN_ONLY tag=... run_id=... in dry-run mode and LAUNCH_WITNESS pid=... tag=... run_id=... after spawning (internal/goalrunner/launcher.go), the one-line machine-readable witness of what the launch actually did.",
+      "distinction": "It is the launch OUTCOME witness string carried on LaunchResult, not the PlanOnly option that produces the PLAN_ONLY variant, not the GoalLaunchReceipt persisted beside it, and not gateway-engine's kernel launch counter.",
+      "distinct_from": [
+        "plan-planonly",
+        "gep2-kernellaunchcount",
+        "wp-launch-witness"
+      ],
+      "aliases": [],
+      "grounding": "LaunchWitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "w4b-lfakvulkanv41indexerwitness",
+      "canonical": "-lfakvulkan_v41_indexer_witness (cgo linker option)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The exact cgo LDFLAGS linker-option token selecting libfakvulkan_v41_indexer_witness.a for the V4.1 indexer witness-tagged Go build: every Vulkan source file in internal/compute carrying the #cgo selector (vulkan.go, vulkan_ops_vulkan.go, vulkan_matmul_fused.go, vulkan_glm_kda.go, vulkan_device_sync.go, vulkan_device_debug.go) chooses this input exclusively under the v41_indexer_witness,!v41_bf16_boundary_witness,!v41_logit_scale_witness,!v41_tail_rope_exact_witness tag combination.",
+      "distinction": "It names the LINKER INPUT for the indexer witness archive, separately from the v41_indexer_witness Go build tag and its native/shader define; like its BF16-boundary, logit-scale and tail-RoPE siblings, the option alone does not prove linked bytes.",
+      "distinct_from": [
+        "bf16-boundary-witness-archive-link",
+        "logit-scale-witness-archive-link",
+        "tail-rope-exact-witness-archive-link",
+        "wp-lfak-vulkan-v41-indexer-witness"
+      ],
+      "aliases": [],
+      "grounding": "lfakvulkan_v41_indexer_witness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "w4b-reasonclosurewitnessmissing",
+      "canonical": "ReasonClosureWitnessMissing (issue contract refusal)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The issuepolicy contract refusal constant (internal/issuepolicy/contract.go) whose wire value ISSUE_CLOSURE_WITNESS_MISSING marks an issue whose closure claim lacks the required closure witness standard; devcmd's discoverability repair action for it is 'add closure witness standard' (internal/devcmd/issue_discoverability.go).",
+      "distinction": "It is the MISSING-closure-witness contract refusal, not its MISMATCH twin (a closure claim present but contradicted by the witnessed standard) and not the shipgate REFUTE cross-model audit verdict.",
+      "distinct_from": [
+        "w4b-reasonclosurewitnessmismatch",
+        "cov-debt250-policy-capability-issuepolicy",
+        "wp-reason-closure-witness-missing"
+      ],
+      "aliases": [],
+      "grounding": "ReasonClosureWitnessMissing",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "w4b-reasonclosurewitnessmismatch",
+      "canonical": "ReasonClosureWitnessMismatch (issue contract refusal)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "The issuepolicy contract refusal constant (internal/issuepolicy/contract.go) whose wire value ISSUE_CLOSURE_WITNESS_MISMATCH marks an issue whose closure claim contradicts the declared closure witness standard; devcmd's discoverability repair action for it is 'reconcile closure claim with witnessed standard' (internal/devcmd/issue_discoverability.go).",
+      "distinction": "It is the MISMATCH closure-witness contract refusal (claim present but contradicted), not the MISSING twin (no closure witness standard declared at all) and not the shipgate REFUTE cross-model audit verdict.",
+      "distinct_from": [
+        "w4b-reasonclosurewitnessmissing",
+        "cov-debt250-policy-capability-issuepolicy",
+        "wp-reason-closure-witness-mismatch"
+      ],
+      "aliases": [],
+      "grounding": "ReasonClosureWitnessMismatch",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}
