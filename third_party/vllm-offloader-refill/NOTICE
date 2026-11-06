@@ -1,0 +1,23 @@
+FAK expert-ring compatible-slot refill (model consumer)
+
+Conceptual adaptation from vLLM:
+  Copyright contributors to the vLLM project
+  Licensed under the Apache License, Version 2.0 (see LICENSE).
+  Repository: https://github.com/vllm-project/vllm
+  Revision: fa3b9d1377219247060d3c8b49eae199c9e7e154
+  Source: vllm/model_executor/offloader/prefetch.py
+  https://github.com/vllm-project/vllm/blob/fa3b9d1377219247060d3c8b49eae199c9e7e154/vllm/model_executor/offloader/prefetch.py
+
+That upstream source acknowledges adaptation from SGLang:
+  https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/utils/offloader.py
+
+FAK adapts the geometry-matched reusable-slot and completion-before-reuse
+patterns to its existing expert-ring admission policy. The model consumer
+selects one equal-size victim, settles prior transfers, retires the old
+logical identity before overwrite, and retains failed or uncertain ownership.
+It requires an explicitly enabled provider and a live execution domain.
+
+No upstream Python implementation, modulo layer scheduler, or graph/capture
+protocol is copied here. This packet supplies the model consumer and software
+test controls, not the CUDA refill provider or a new enabled runtime default.
+CUDA provider integration and physical/performance qualification are separate.

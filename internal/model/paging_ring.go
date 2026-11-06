@@ -20,8 +20,9 @@ import (
 // Upload-on-miss / Free-on-evict lifecycle.
 //
 // Correctness contract: a ring matMul is bit-equal to a resident MatMul whether the weight was a hit
-// or a miss — only the residency lifetime differs, never the math; used() <= budget() always; an
-// evicted weight pages in again on its next use. Stages f32, Q8_0, or Q4_K weights, accounting the
+// or a miss — only the residency lifetime differs, never the math; a healthy ring stays within budget; an
+// evicted weight pages in again on its next use. A terminal refill keeps its detached bytes charged,
+// even if a later control shrinks the budget. Stages f32, Q8_0, or Q4_K weights, accounting the
 // quantized residency a memory-lean MoE host actually streams. Wired into the session weight HAL via
 // stage() + expert_ring_hal.go, opt-in per session (Session.ExpertRingBytes > 0).
 //
@@ -35,6 +36,9 @@ type pagedRing struct {
 	pool *polymodel.Pool
 	// resident is kept in exact lockstep with pool (a name is in one iff it is in the other).
 	resident map[polymodel.ModelID]compute.Tensor
+	// An optional eager refill owns a detached slot until checked publication.
+	// A terminal record retains/quarantines its bytes and blocks further staging.
+	refill *expertRingRefill
 
 	pageIn int // cold uploads (a miss that was admitted)
 	hit    int // resident reuses (a handle served without upload)
@@ -188,6 +192,7 @@ func (r *pagedRing) domainJoined() bool {
 func (r *pagedRing) settlePendingTransfers() {
 	r.drainScope = nil
 	r.drainTransfers()
+	r.requireRefillIdle()
 }
 
 // matMulStaged is the dtype-general ring core shared by the f32 matMul and the quantized
@@ -226,8 +231,7 @@ func (r *pagedRing) stage(name string, mk func() compute.Tensor, dtype compute.D
 
 func (r *pagedRing) stageWithError(name string, mk func() compute.Tensor, dtype compute.Dtype, weightBytes int64, pinned bool) (compute.Tensor, error) {
 	id := polymodel.ModelID(name)
-	r.lookups++      // booked before anything is decided, so it counts every exit
-	r.noteAccess(id) // recency clock always, decaying heat under a value-aware policy
+	r.lookups++ // booked before anything is decided, so it counts every exit
 	booked := false
 	defer func() {
 		if !booked {
@@ -237,6 +241,8 @@ func (r *pagedRing) stageWithError(name string, mk func() compute.Tensor, dtype 
 			}
 		}
 	}()
+	r.requireRefillIdle()
+	r.noteAccess(id) // recency clock always, decaying heat under a value-aware policy
 	// A demand is an agent asking for bytes, so the prefetch's hints are excluded from the ledger.
 	if r.shared != nil && !r.prefetching {
 		r.shared.noteDemand()
@@ -272,11 +278,18 @@ func (r *pagedRing) stageWithError(name string, mk func() compute.Tensor, dtype 
 	// the just-uploaded handle straight back out. Under a non-default victim policy the ring makes
 	// room itself first (evictForPolicy), so Admit fits and polymodel's LRU choice never applies.
 	source := mk()
+	m := polymodel.Model{ID: id, WeightBytes: weightBytes, Pinned: pinned}
+	if wt, reused := r.tryRefill(source, m, dtype); reused {
+		r.pageIn++
+		booked = true
+		r.pageInBytes += weightBytes // Reusing storage does not remove H2D traffic.
+		r.noteDemandServe(id)
+		return wt, nil
+	}
 	wt, fence := uploadStagedAsync(r.be, source, dtype, "paged-ring-weight", r.domainJoined())
 	if err := r.retainStaged(id, source, wt, fence); err != nil {
 		return compute.Tensor{}, err
 	}
-	m := polymodel.Model{ID: id, WeightBytes: weightBytes, Pinned: pinned}
 	if err := r.settleAdmissionVictims(m); err != nil {
 		if cleanup := r.rollbackStaged(id, wt); cleanup != nil {
 			return compute.Tensor{}, cleanup
@@ -443,6 +456,7 @@ func (r *pagedRing) freeAll() {
 	if r == nil {
 		return
 	}
+	r.requireRefillIdle() // No optimistic Free or retry of an uncertain refill.
 	r.drainTransfers()
 	for id, t := range r.resident {
 		r.discardStaged(id) // never tear down storage a transfer is still writing into
@@ -490,8 +504,15 @@ func (r *pagedRing) isResident(name string) bool {
 // residentCount is the number of weights holding a device handle (== the pool's resident count).
 func (r *pagedRing) residentCount() int { return len(r.resident) }
 
-// used / budget expose the polymodel byte accounting: used() <= budget() always.
-func (r *pagedRing) used() int64   { return r.pool.Used() }
+// used includes a detached refill's charged storage until checked publication.
+// A terminal ring retains that charge even if another control shrinks its budget.
+func (r *pagedRing) used() int64 {
+	n := r.pool.Used()
+	if r.refill != nil && r.refill.reserved {
+		n += r.refill.bytes
+	}
+	return n
+}
 func (r *pagedRing) budget() int64 { return r.pool.Budget() }
 
 // peakUsed is the high-water mark of used() over the ring's life — the number a boundedness
