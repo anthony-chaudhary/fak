@@ -37,6 +37,32 @@ func TestKVFP8PlaneCodec(t *testing.T) {
 			}
 		}
 	})
+	t.Run("exact_division_not_rounded_reciprocal", func(t *testing.T) {
+		// 3136/448=7 and 12.6875/7=1.8125 exactly. The latter is
+		// the E4M3 midpoint between even 0x3e and odd 0x3f.
+		// F32(1/7)=9586981/2^26; multiplying adds 87/2^30 to
+		// that midpoint, beyond half an F32 ulp (64/2^30).
+		for _, hd := range []int{65, 256} {
+			src := make([]float32, hd)
+			src[0], src[1], src[hd-1] = 3136, 12.6875, -12.6875
+			p, err := QuantizeKVFP8Plane(src, 1, 1, hd)
+			if err != nil || len(p.Codes) != hd || len(p.Scales) != 1 {
+				t.Fatalf("hd=%d: %+v %v", hd, p, err)
+			}
+			if math.Float32bits(p.Scales[0]) != 0x40e00000 ||
+				p.Codes[0] != 0x7e || p.Codes[1] != 0x3e || p.Codes[hd-1] != 0xbe {
+				t.Fatalf("hd=%d: division midpoint changed: %+v", hd, p)
+			}
+			// Negative control: this fixture must distinguish the shortcut,
+			// not merely agree with another calculation of the same division.
+			reciprocal := float32(1 / p.Scales[0])
+			if math.Float32bits(reciprocal) != 0x3e124925 ||
+				rfqEncodeE4M3(float32(src[1]*reciprocal)) != 0x3f ||
+				rfqEncodeE4M3(float32(src[hd-1]*reciprocal)) != 0xbf {
+				t.Fatalf("hd=%d: reciprocal negative control no longer discriminates", hd)
+			}
+		}
+	})
 	t.Run("zero_and_underflow", func(t *testing.T) {
 		negativeZero := math.Float32frombits(0x80000000)
 		p, err := QuantizeKVFP8Plane([]float32{0, negativeZero}, 1, 1, 2)
