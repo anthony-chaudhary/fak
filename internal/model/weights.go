@@ -545,7 +545,18 @@ func newModel(cfg Config, man map[string]tensorMeta, raw []byte) (*Model, error)
 	// missing self_attn.q_proj.weight mid-request. Must run before
 	// splitFusedProjections so the operator gets the arch refusal rather than a
 	// misleading fused-tensor row-count mismatch from the GDN in_proj.
-	if err := refuseUnsupportedHybridArch(cfg, man); err != nil {
+	// GLM-5.3-Flash (glm5_next) admits BEFORE this scan: its native forward
+	// (glm5next_forward.go) owns the family, so a checkpoint that passes the
+	// engine-manifest check loads instead of dying in the generic hybrid
+	// refusal; one that does not fails closed with named missing tensors.
+	if cfg.GLM5Next {
+		if err := validateGLM5NextManifestFor(cfg, man); err != nil {
+			return nil, fmt.Errorf("model: glm5_next admission refused: %w", err)
+		}
+		if err := validateGLM5NextEngineManifest(cfg, man); err != nil {
+			return nil, err
+		}
+	} else if err := refuseUnsupportedHybridArch(cfg, man); err != nil {
 		return nil, err
 	}
 	// Refuse the two Falcon variants whose fused-qkv layout the contiguous split

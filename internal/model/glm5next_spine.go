@@ -10,16 +10,18 @@ const (
 	glm5NextArchitecture = "Glm5NextForConditionalGeneration"
 )
 
-// GLM5NextUnsupportedError is returned before forward selection for the exact
-// GLM-5.3-Flash family. fak recognizes this envelope, but its KDA/DSA/indexer/mHC
-// execution path is not implemented by the native engine yet.
+// GLM5NextUnsupportedError is returned before forward selection when a
+// glm5_next checkpoint cannot be classified against a materialized manifest.
+// The native execution path itself lives in glm5next_forward.go (weights-bound
+// engine forward + stepwise session); this refusal covers the manifest-less
+// classification seam and any admission failure surfaced before it.
 type GLM5NextUnsupportedError struct {
 	ModelType    string
 	Architecture string
 }
 
 func (e *GLM5NextUnsupportedError) Error() string {
-	return fmt.Sprintf("fak-native: recognized %s/%s checkpoint, but native execution is unsupported (KDA/DSA/indexer/mHC kernels are not implemented)", e.ModelType, e.Architecture)
+	return fmt.Sprintf("fak-native: recognized %s/%s checkpoint, but no validated tensor manifest is available for native execution (the KDA/DSA/indexer/mHC engine path lives in glm5next_forward.go; load-time admission owns the executable path)", e.ModelType, e.Architecture)
 }
 
 type glm5NextIdentity struct {

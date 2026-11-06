@@ -491,6 +491,12 @@ func (m *Model) Forward(ids []int) *Activations {
 		}
 		return act
 	}
+	if m.Cfg.GLM5Next {
+		// GLM-5.3-Flash resolves its embedding through the language-model
+		// prefix fallbacks (model.language_model.embed_tokens.weight), and its
+		// stepwise session owns the forward (see glm5next_forward.go).
+		return m.forwardGLM5Next(m.glm5NextEmbed(ids))
+	}
 	// embedding lookup -> x[t] is the working hidden vector for position t
 	// (the arch embed scale applied inside embedBand).
 	return m.forwardHiddenRows(m.embedBand(ids))

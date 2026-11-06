@@ -11,6 +11,7 @@ func (bs *BatchSession) StepBatch(ids []int) [][]float32 {
 	if len(ids) != len(bs.Seqs) {
 		panic("model: StepBatch id count != batch size")
 	}
+	bs.Seqs[0].requireGLM5NextSessionUnsupported("BatchSession.StepBatch")
 	// Reset the per-step MAC count: a serial-fallback step (a single lane, or a config the
 	// batched fast path does not cover) does no shared-weight batched projection work, so it
 	// honestly reports 0 rather than the previous call's stale count. stepBatchF32/Q set it.
