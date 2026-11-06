@@ -140,9 +140,10 @@ func TestFleetMembershipFiltersByModel(t *testing.T) {
 }
 
 // TestFleetMembershipModelFilterPrecedesHealthFilter proves the ORDERING the design
-// turns on, in both directions: a holder that is down is an OUTAGE (and never falls
-// through to a healthy worker holding something else), while a model nobody holds is
-// a CONFIGURATION fault even when the fleet is otherwise perfectly healthy.
+// turns on, in both directions: a holder that is down fails OPEN onto itself and a
+// holder that is draining is an OUTAGE (neither falls through to a healthy worker
+// holding something else), while a model nobody holds is a CONFIGURATION fault even
+// when the fleet is otherwise perfectly healthy.
 func TestFleetMembershipModelFilterPrecedesHealthFilter(t *testing.T) {
 	sp := newScriptedProbe()
 	m := NewFleetMembership(MembershipConfig{HealthyAfter: 1, UnhealthyAfter: 1, Probe: sp.probe})
@@ -151,12 +152,23 @@ func TestFleetMembershipModelFilterPrecedesHealthFilter(t *testing.T) {
 	ctx := context.Background()
 	m.ProbeOnce(ctx) // both healthy
 
+	if err := m.Acquire("glm-w"); err != nil { // keeps the drain below from removing it
+		t.Fatalf("Acquire(glm-w): %v", err)
+	}
 	sp.set("glm-w", false)
 	m.ProbeOnce(ctx) // the only glm holder is now unhealthy
 
+	// All glm holders unhealthy -> fail open onto them, never onto qwen-w.
+	if got, err := m.PickForModel("glm-4.6"); err != nil || got.ID != "glm-w" {
+		t.Fatalf("holder down: PickForModel(glm-4.6) = %q, %v; want glm-w (fail-open), nil", got.ID, err)
+	}
+
+	if err := m.Drain("glm-w"); err != nil {
+		t.Fatalf("Drain(glm-w): %v", err)
+	}
 	_, err := m.PickForModel("glm-4.6")
 	if !errors.Is(err, ErrNoHealthyWorker) {
-		t.Fatalf("holder down: PickForModel(glm-4.6) err = %v, want ErrNoHealthyWorker", err)
+		t.Fatalf("holder draining: PickForModel(glm-4.6) err = %v, want ErrNoHealthyWorker", err)
 	}
 	if errors.Is(err, ErrNoWorkerForModel) {
 		t.Fatalf("an outage was reported as a configuration fault: %v", err)

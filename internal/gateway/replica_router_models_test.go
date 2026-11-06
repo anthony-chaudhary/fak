@@ -98,7 +98,30 @@ func TestReplicaDispatchModelVerdictIsDistinctFromOutage(t *testing.T) {
 		}
 	})
 
-	t.Run("the holder is unhealthy", func(t *testing.T) {
+	t.Run("the holder is unhealthy fails open onto it", func(t *testing.T) {
+		sp := newScriptedProbe()
+		mem := NewFleetMembership(MembershipConfig{HealthyAfter: 1, UnhealthyAfter: 1, Probe: sp.probe})
+		mustAdd(t, mem, WorkerSpec{ID: "glm-w", Endpoint: "glm-w", Models: []string{"glm-4.6"}})
+		mustAdd(t, mem, WorkerSpec{ID: "qwen-w", Endpoint: "qwen-w", Models: []string{"qwen3-32b"}})
+		mem.ProbeOnce(ctx)
+		router, glm, qwen := glmQwenRouter(t, "glm-4.6")
+		router.WithMembership(mem)
+
+		sp.set("glm-w", false)
+		mem.ProbeOnce(ctx)
+
+		if _, err := router.Complete(ctx, nil, nil); err != nil {
+			t.Fatalf("holder unhealthy: Complete err = %v, want fail-open success", err)
+		}
+		if c, _ := glm.counts(); c != 1 {
+			t.Fatalf("glm planner dialed %d time(s), want 1 (fail-open)", c)
+		}
+		if c, _ := qwen.counts(); c != 0 {
+			t.Fatalf("router fell through to the qwen upstream %d time(s)", c)
+		}
+	})
+
+	t.Run("the holder is draining", func(t *testing.T) {
 		sp := newScriptedProbe()
 		mem := NewFleetMembership(MembershipConfig{HealthyAfter: 1, UnhealthyAfter: 1, Probe: sp.probe})
 		mustAdd(t, mem, WorkerSpec{ID: "glm-w", Endpoint: "glm-w", Models: []string{"glm-4.6"}})
@@ -107,12 +130,16 @@ func TestReplicaDispatchModelVerdictIsDistinctFromOutage(t *testing.T) {
 		router, _, qwen := glmQwenRouter(t, "glm-4.6")
 		router.WithMembership(mem)
 
-		sp.set("glm-w", false)
-		mem.ProbeOnce(ctx)
+		if err := mem.Acquire("glm-w"); err != nil { // keeps the drain from removing it
+			t.Fatalf("Acquire(glm-w): %v", err)
+		}
+		if err := mem.Drain("glm-w"); err != nil {
+			t.Fatalf("Drain(glm-w): %v", err)
+		}
 
 		_, err := router.Complete(ctx, nil, nil)
 		if !errors.Is(err, ErrNoHealthyWorker) {
-			t.Fatalf("holder down: Complete err = %v, want ErrNoHealthyWorker", err)
+			t.Fatalf("holder draining: Complete err = %v, want ErrNoHealthyWorker", err)
 		}
 		if errors.Is(err, ErrNoWorkerForModel) {
 			t.Fatalf("an outage was typed as a configuration fault: %v", err)
