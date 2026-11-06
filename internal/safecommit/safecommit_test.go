@@ -1516,8 +1516,8 @@ func TestCommitReconcilesHistoricalCheckpointForExactAuthoredPaths(t *testing.T)
 		rep, opts := peerSetup("corpus/doc.txt")
 		workerDiff := "diff --git a/corpus/doc.txt b/corpus/doc.txt\n@@ -10,5 +10,6 @@\n context\n+worker edit\n"
 		peerDiff := "diff --git a/corpus/doc.txt b/corpus/doc.txt\n@@ -100,5 +100,6 @@\n context\n+peer edit\n"
-		rep["diff --no-ext-diff HEAD -- corpus/doc.txt"] = reply{out: workerDiff, code: 0}
-		rep["diff --no-ext-diff HEAD "+oid+" -- corpus/doc.txt"] = reply{out: peerDiff, code: 0}
+		rep["diff --no-ext-diff -U0 HEAD -- corpus/doc.txt"] = reply{out: workerDiff, code: 0}
+		rep["diff --no-ext-diff -U0 HEAD "+oid+" -- corpus/doc.txt"] = reply{out: peerDiff, code: 0}
 		g := &fakeGit{reply: rep}
 
 		res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
@@ -1536,8 +1536,8 @@ func TestCommitReconcilesHistoricalCheckpointForExactAuthoredPaths(t *testing.T)
 		rep, opts := peerSetup("corpus/doc.txt")
 		workerDiff := "diff --git a/corpus/doc.txt b/corpus/doc.txt\n@@ -10,5 +10,6 @@\n context\n+worker edit\n"
 		peerDiff := "diff --git a/corpus/doc.txt b/corpus/doc.txt\n@@ -10,5 +10,6 @@\n context\n+peer edit\n"
-		rep["diff --no-ext-diff HEAD -- corpus/doc.txt"] = reply{out: workerDiff, code: 0}
-		rep["diff --no-ext-diff HEAD "+oid+" -- corpus/doc.txt"] = reply{out: peerDiff, code: 0}
+		rep["diff --no-ext-diff -U0 HEAD -- corpus/doc.txt"] = reply{out: workerDiff, code: 0}
+		rep["diff --no-ext-diff -U0 HEAD "+oid+" -- corpus/doc.txt"] = reply{out: peerDiff, code: 0}
 		g := &fakeGit{reply: rep}
 
 		res, err := CommitWith(context.Background(), g.run, okLock(nil), opts)
