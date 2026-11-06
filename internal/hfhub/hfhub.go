@@ -28,6 +28,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -113,9 +114,11 @@ func ParseURI(uri string) (Ref, error) {
 
 // ResolveURL builds the Hub download URL for the ref against base (e.g.
 // DefaultBaseURL): {base}/{repo}/resolve/{revision}/{file}.
+// File is a literal repo-relative path, not a pre-escaped URL.
 func (r Ref) ResolveURL(base string) string {
 	base = strings.TrimRight(base, "/")
-	return base + "/" + r.Repo + "/resolve/" + r.Revision + "/" + r.File
+	file := url.URL{Path: r.File}
+	return base + "/" + r.Repo + "/resolve/" + r.Revision + "/" + file.EscapedPath()
 }
 
 // cacheRel is the ref's path under the cache root: {repo}/{revision}/{file}.
@@ -130,6 +133,20 @@ type Client struct {
 	HTTP     *http.Client // defaults to http.DefaultClient (follows redirects)
 	Token    string       // bearer token for gated/private repos; from HF_TOKEN
 	CacheDir string       // cache root; defaults to <user-cache>/fak-models/hub
+
+	// retryBackoff sets the first download-retry delay (it doubles per
+	// attempt); values <= 0 use defaultDownloadBackoff.
+	retryBackoff time.Duration
+	// backoffProbe, when non-nil, observes each scheduled retry delay so
+	// tests can pin the doubling sequence without waiting on wall clock.
+	backoffProbe func(time.Duration)
+}
+
+func (c *Client) backoff() time.Duration {
+	if c.retryBackoff > 0 {
+		return c.retryBackoff
+	}
+	return defaultDownloadBackoff
 }
 
 // NewClient returns a Client wired from the environment: BaseURL = DefaultBaseURL,
@@ -304,9 +321,15 @@ func (c *Client) CachePath(r Ref) string {
 
 // Download fetches r into the cache and returns the local path. A non-empty
 // cached file is returned without any network call (idempotent re-runs are
-// free). When the Hub stamps an LFS sha256 (X-Linked-Etag), the downloaded
-// bytes are verified against it and a mismatch is a hard error. progress, when
-// non-nil, receives human-readable status lines.
+// free). The transfer itself is resumable and bounded: when the Hub stamps an
+// LFS sha256 (X-Linked-Etag), an interrupted dst+".part" prefix is continued
+// with "Range: bytes=N-" and rehashed into the same digest; a 200 instead of
+// 206 restarts from zero; transient failures retry up to five times with
+// doubling backoff; without a sha256 the finished bytes are checked against
+// the Hub's git-blob-sha1 ETag when one is stamped. A digest mismatch removes
+// the partial and restarts once, then fails with ErrDigestMismatch. dst is
+// published (renamed) only after verification. progress, when non-nil,
+// receives human-readable status lines.
 func (c *Client) Download(ctx context.Context, r Ref, progress io.Writer) (string, error) {
 	dst := c.CachePath(r)
 	resolveURL := r.ResolveURL(c.base())
@@ -338,52 +361,8 @@ func (c *Client) Download(ctx context.Context, r Ref, progress io.Writer) (strin
 		}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, resolveURL, nil)
-	if err != nil {
-		return "", err
-	}
-	c.authorize(req)
-	logf(progress, "GET %s", resolveURL)
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
+	if err := c.downloadFile(ctx, resolveURL, dst, want, progress); err != nil {
 		return "", fmt.Errorf("hfhub: download %s: %w", r.File, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("hfhub: download %s: hub returned %s", r.File, resp.Status)
-	}
-	if want == "" {
-		want = trimETag(resp.Header.Get("X-Linked-Etag"))
-	}
-
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return "", err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(dst), ".hfhub-*.part")
-	if err != nil {
-		return "", err
-	}
-	tmpName := tmp.Name()
-	hasher := sha256.New()
-	n, copyErr := io.Copy(io.MultiWriter(tmp, hasher), resp.Body)
-	closeErr := tmp.Close()
-	if copyErr != nil || closeErr != nil {
-		os.Remove(tmpName)
-		return "", errors.Join(copyErr, closeErr)
-	}
-	got := hex.EncodeToString(hasher.Sum(nil))
-	if want != "" && !strings.EqualFold(want, got) {
-		os.Remove(tmpName)
-		return "", fmt.Errorf("hfhub: sha256 mismatch for %s: hub oid %s, got %s", r.File, want, got)
-	}
-	if err := os.Rename(tmpName, dst); err != nil {
-		os.Remove(tmpName)
-		return "", err
-	}
-	if want != "" {
-		logf(progress, "downloaded %d bytes, sha256 verified: %s", n, dst)
-	} else {
-		logf(progress, "downloaded %d bytes (no hub oid to verify): %s", n, dst)
 	}
 	return dst, nil
 }
@@ -458,16 +437,23 @@ func (c *Client) linkedSHA(ctx context.Context, url string) string {
 	return trimETag(resp.Header.Get("X-Linked-Etag"))
 }
 
+// bareHashETag extracts a bare hex hash from an ETag-style header value
+// (stripping surrounding quotes and any weak-validator prefix), returning ""
+// unless exactly n hex characters remain.
+func bareHashETag(v string, n int) string {
+	v = strings.TrimSpace(v)
+	v = strings.TrimPrefix(v, "W/")
+	v = strings.Trim(v, `"`)
+	if len(v) == n && isHex(v) {
+		return v
+	}
+	return ""
+}
+
 // trimETag strips the surrounding quotes (and any weak-validator prefix) the Hub
 // wraps the LFS oid in, returning a bare 64-hex sha256 or "".
 func trimETag(etag string) string {
-	etag = strings.TrimSpace(etag)
-	etag = strings.TrimPrefix(etag, "W/")
-	etag = strings.Trim(etag, `"`)
-	if len(etag) == 64 && isHex(etag) {
-		return etag
-	}
-	return ""
+	return bareHashETag(etag, 64)
 }
 
 func isHex(s string) bool {

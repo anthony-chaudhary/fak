@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -438,5 +439,161 @@ func TestGuardPiBaseURLTrimsTrailingSlash(t *testing.T) {
 		if got := guardPiBaseURL(tc.in); got != tc.want {
 			t.Fatalf("guardPiBaseURL(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+// fak-test:runtime slow est=60s lane=default
+// TestGuardPiInstalledWriteEffect is an opt-in installed-client boundary witness.
+func TestGuardPiInstalledWriteEffect(t *testing.T) {
+	if os.Getenv("FAK_PI_INSTALLED_WRITE_WITNESS") != "1" {
+		t.Skip("set FAK_PI_INSTALLED_WRITE_WITNESS=1 for installed Pi filesystem witness")
+	}
+	pi, err := exec.LookPath("pi")
+	if err != nil {
+		t.Skip("installed Pi unavailable")
+	}
+	for _, finish := range []string{"tool_calls", "length", "unknown_authority"} {
+		t.Run(finish, func(t *testing.T) {
+			root := t.TempDir()
+			if finish != "unknown_authority" {
+				gitInit := exec.Command("git", "init", "--quiet")
+				gitInit.Dir = root
+				if out, err := gitInit.CombinedOutput(); err != nil {
+					t.Fatalf("initialize isolated Git authority: %v: %.1000s", err, out)
+				}
+				dos, err := exec.LookPath("dos")
+				if err != nil {
+					t.Skip("dos CLI unavailable for canonical write authority")
+				}
+				if out, err := exec.Command(dos, "init", root).CombinedOutput(); err != nil {
+					t.Fatalf("initialize isolated authority: %v: %.1000s", err, out)
+				}
+				warm := exec.Command(dos, "lease-lane", "live")
+				warm.Dir = root
+				if out, err := warm.CombinedOutput(); err != nil {
+					t.Fatalf("read isolated authority: %v: %.1000s", err, out)
+				}
+			}
+			target, sibling := filepath.Join(root, "result.json"), filepath.Join(root, "sibling.json")
+			const payload = "{\"effect\":\"independent-write-witness\"}\n"
+			var calls atomic.Int32
+			var requestBudget atomic.Value
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				raw, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+				var request map[string]json.RawMessage
+				_ = json.Unmarshal(raw, &request)
+				requestBudget.Store(map[string]json.RawMessage{"max_tokens": request["max_tokens"], "max_completion_tokens": request["max_completion_tokens"]})
+				if !bytes.Contains(raw, []byte(`"write"`)) {
+					t.Error("Pi request omitted native write schema")
+				}
+				stage := calls.Add(1)
+				delta := map[string]any{"role": "assistant", "content": "done"}
+				reason := "stop"
+				if stage <= 2 && (stage == 1 || finish == "tool_calls") {
+					path := target
+					if stage == 2 {
+						path = sibling
+					}
+					args, _ := json.Marshal(map[string]string{"file_path": filepath.ToSlash(path), "content": payload})
+					delta = map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"index": 0, "id": "write-effect-" + string(rune('0'+stage)), "type": "function", "function": map[string]any{"name": "write", "arguments": string(args)}}}}
+					reason = finish
+					if finish == "unknown_authority" {
+						reason = "tool_calls"
+					}
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				for _, choice := range []map[string]any{{"index": 0, "delta": delta, "finish_reason": nil}, {"index": 0, "delta": map[string]any{}, "finish_reason": reason}} {
+					frame, _ := json.Marshal(map[string]any{"id": "effect-fixture", "object": "chat.completion.chunk", "model": "fixture", "choices": []any{choice}})
+					_, _ = w.Write(append(append([]byte("data: "), frame...), []byte("\n\n")...))
+				}
+				_, _ = io.WriteString(w, "data: [DONE]\n\n")
+			}))
+			defer upstream.Close()
+			policy, _ := json.Marshal(map[string]any{"version": "fak-policy/v1", "allow": []string{"write"}, "posture": "fail_closed", "arg_rules": []any{map[string]any{"tool": "write", "arg": "path", "allow_exact": filepath.ToSlash(target), "reason": "POLICY_BLOCK"}}})
+			policyPath, audit := filepath.Join(root, "policy.json"), filepath.Join(root, "audit.jsonl")
+			if err := os.WriteFile(policyPath, policy, 0600); err != nil {
+				t.Fatal(err)
+			}
+			args := []string{"--quiet", "--split", "off", "--provider", "openai", "--base-url", upstream.URL + "/v1", "--api-key-env", "FAK_PI_TEST_KEY", "--model", "fixture", "--policy", policyPath, "--audit", audit, "--max-duration", "25s", "--soft-deadline-lead", "0", "--commit-grace-period", "0", "--child-stop-grace", "20ms", "--", pi, "--provider", "fak", "--model", "fixture", "--mode", "json", "--no-session", "--no-extensions", "--tools", "write", "-p", "audit"}
+			ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, os.Args[0])
+			cmd.Dir = root
+			cmd.Env = append(os.Environ(), guardE2EHelperEnv+"="+strings.Join(args, " "), "FAK_PI_TEST_KEY=test-only", "FAK_LEASEPLANE_DIR="+root, "FAK_FLEET_BUS="+filepath.Join(root, "fleet-bus"), "TMP="+root, "TEMP="+root)
+			var output bytes.Buffer
+			cmd.Stdout = &output
+			cmd.Stderr = &output
+			runErr := cmd.Run()
+			var toolResults []json.RawMessage
+			var matchedResult *bool
+			sawLength := false
+			sawAuthorityRefusal := false
+			for _, line := range bytes.Split(output.Bytes(), []byte("\n")) {
+				var event struct {
+					Type       string `json:"type"`
+					ToolCallID string `json:"toolCallId"`
+					IsError    bool   `json:"isError"`
+					Message    struct {
+						Role       string `json:"role"`
+						StopReason string `json:"stopReason"`
+						Content    []struct {
+							Type string `json:"type"`
+							Text string `json:"text"`
+						} `json:"content"`
+					} `json:"message"`
+				}
+				if json.Unmarshal(line, &event) != nil {
+					continue
+				}
+				if event.Type == "message_end" && event.Message.Role == "assistant" && event.Message.StopReason == "length" {
+					sawLength = true
+				}
+				if event.Type == "message_end" && event.Message.Role == "assistant" {
+					for _, block := range event.Message.Content {
+						if block.Type == "text" && strings.Contains(block.Text, "recovery=RESTORE_LEASE_AUTHORITY") && strings.Contains(block.Text, "DEFAULT_DENY/TERMINAL") {
+							sawAuthorityRefusal = true
+						}
+					}
+				}
+				if event.Type == "tool_execution_end" {
+					if event.ToolCallID == "write-effect-1" {
+						value := event.IsError
+						matchedResult = &value
+					}
+					toolResults = append(toolResults, append(json.RawMessage(nil), line...))
+				}
+			}
+			evidence, _ := json.Marshal(map[string]any{"finish_reason": finish, "run_error": fmt.Sprint(runErr), "tool_execution_end": toolResults, "provider_requests": calls.Load(), "request_budget": requestBudget.Load(), "assistant_length": sawLength, "authority_refusal": sawAuthorityRefusal})
+			if dir := os.Getenv("FAK_PI_WRITE_EVIDENCE_DIR"); dir != "" {
+				if err := os.WriteFile(filepath.Join(dir, "pi-write-"+finish+".json"), evidence, 0600); err != nil {
+					t.Fatal(err)
+				}
+				_ = os.WriteFile(filepath.Join(dir, "pi-write-"+finish+".stdout.jsonl"), output.Bytes(), 0600)
+				if b, e := os.ReadFile(audit); e == nil {
+					_ = os.WriteFile(filepath.Join(dir, "pi-write-"+finish+".audit.jsonl"), b, 0600)
+				}
+			}
+			t.Logf("bounded execution evidence: %.6000s", evidence)
+			got, readErr := os.ReadFile(target)
+			if finish == "tool_calls" {
+				if runErr != nil || readErr != nil || string(got) != payload || matchedResult == nil || *matchedResult {
+					t.Fatalf("native write effect absent: run=%v read=%v bytes=%q; evidence=%.6000s", runErr, readErr, got, evidence)
+				}
+				auditBytes, _ := os.ReadFile(audit)
+				if !bytes.Contains(auditBytes, []byte(`"verdict":"DENY"`)) {
+					t.Fatalf("sibling denial missing: %s", auditBytes)
+				}
+			} else if finish == "length" {
+				if readErr == nil || !sawLength || matchedResult == nil || !*matchedResult {
+					t.Fatalf("truncated write was not refused with actual tool error: file=%q results=%.6000s", got, evidence)
+				}
+			}
+			if finish == "unknown_authority" && (readErr == nil || matchedResult != nil || !sawAuthorityRefusal) {
+				t.Fatalf("unknown authority did not refuse before native execution: file=%q evidence=%.6000s", got, evidence)
+			}
+			if _, err := os.Stat(sibling); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("sibling unexpectedly exists: %v", err)
+			}
+		})
 	}
 }

@@ -59,7 +59,23 @@ import (
 type TPConfig struct {
 	AttnRanks int
 	FFNRanks  int
-	Coll      Collective
+	// VocabRanks shards the token-embedding table and the LM head across the VOCABULARY
+	// dimension (the vLLM VocabParallelEmbedding/ParallelLMHead block,
+	// tensor_parallel_vocab.go — the two largest projections in a checkpoint). 0/1 keeps
+	// the monolithic embedBand/fillSeqLogits tail (bit-identical to Forward, the
+	// transitive-HF-gate leg); N>1 runs the vocab-parallel embedding in and the
+	// vocab-parallel logits tail out, both bit-exact vs the monolith at any rank count
+	// (each id/logit has exactly one owning rank). Requires the f32-resident embed table
+	// and head; fails closed on quant-resident/prism/LoRA head seams.
+	VocabRanks int
+	Coll       Collective
+	// SharedAttentionGeometry makes ForwardTP consult the shared-attention shape contract
+	// (shared_attention_geometry.go, ADAPTED from TensorFold shared_attention.zig) before any
+	// sharded-attention dispatch: NumHeads/NumKVHeads/HeadDim/rotary width must pass
+	// SharedAttentionShape.Validate. Set it when serving under the native shared-attention
+	// kernel contract. The CPU reference path stays open to toy fixture geometries (e.g.
+	// HeadDim=8 bit-exact oracle models) that the kernel contract does not admit.
+	SharedAttentionGeometry bool
 }
 
 // clampRanks bounds a requested rank count to [1, dim]: a dimension cannot be sharded across
@@ -72,6 +88,21 @@ func clampRanks(r, dim int) int {
 		return dim
 	}
 	return r
+}
+
+// sharedAttentionGeometry derives the shared-attention shape contract from the model config:
+// query/KV head counts, head dim, the effective rotary width (cfg.rotaryDim()), and this
+// forward's key capacity (the sequence length). ForwardTP validates it before native
+// dispatch when TPConfig.SharedAttentionGeometry is set.
+func (m *Model) sharedAttentionGeometry(capacity int) SharedAttentionShape {
+	cfg := m.Cfg
+	return SharedAttentionShape{
+		QueryHeads: cfg.NumHeads,
+		KVHeads:    cfg.NumKVHeads,
+		HeadDim:    cfg.HeadDim,
+		RotaryDim:  cfg.rotaryDim(),
+		Capacity:   capacity,
+	}
 }
 
 // forwardTPSupported reports (as an error) the first reason this model's architecture is not
@@ -496,7 +527,10 @@ func guardedSublayer(subErr *error, seq, width int, run func([][]float32) ([][]f
 // yet implement — GLM MLA+DSA, MoE, DenseMLP, ParallelResidual, linear-attention — and on a
 // quant-resident model (the sharded matmuls slice raw f32 output rows). The norm/residual
 // composition reuses the live composeSeqSublayer, so PreNorm / PostNorm / SandwichNorm all
-// stay bit-exact at ranks=1.
+// stay bit-exact at ranks=1. TPConfig.VocabRanks additionally arms the VOCAB-PARALLEL tail
+// (tensor_parallel_vocab.go, the vLLM VocabParallelEmbedding/ParallelLMHead port): the
+// embedding lookup and the LM-head logits shard across the vocabulary dimension, bit-exact
+// vs the monolith tail at any rank count; 0/1 keeps the Forward-identical monolith tail.
 func (m *Model) ForwardTP(ids []int, tp TPConfig) (*Activations, error) {
 	if err := m.forwardTPSupported(); err != nil {
 		return nil, err
@@ -509,6 +543,15 @@ func (m *Model) ForwardTP(ids []int, tp TPConfig) (*Activations, error) {
 	if coll == nil {
 		coll = LocalCollective{}
 	}
+	// Shared-attention geometry gate, consulted before native dispatch: when the caller
+	// serves under the shared-attention kernel contract, refuse GQA/RoPE shapes the
+	// contract does not admit here, instead of letting integer-division head banding
+	// proceed on a shape the kernel cannot serve.
+	if tp.SharedAttentionGeometry {
+		if err := m.sharedAttentionGeometry(seq).Validate(); err != nil {
+			return nil, err
+		}
+	}
 	attnPlan, err := NewTPPlan(cfg.NumKVHeads, clampRanks(tp.AttnRanks, cfg.NumKVHeads))
 	if err != nil {
 		return nil, fmt.Errorf("model: ForwardTP attention plan: %w", err)
@@ -517,8 +560,42 @@ func (m *Model) ForwardTP(ids []int, tp TPConfig) (*Activations, error) {
 	if err != nil {
 		return nil, fmt.Errorf("model: ForwardTP ffn plan: %w", err)
 	}
+	// The vocab-parallel tail (tensor_parallel_vocab.go): when armed, the embedding lookup
+	// and the LM-head logits are sharded across the vocabulary dimension. All fail-closed
+	// checks run HERE, before any compute, so an unsupported head seam (quant-resident,
+	// prism, LoRA) or an out-of-range id refuses the whole forward instead of surfacing
+	// mid-layer.
+	vocabRanks := clampRanks(tp.VocabRanks, cfg.VocabSize)
+	var vocabPlan TPPlan
+	if vocabRanks > 1 {
+		vp, err := tpVocabPlan(cfg, vocabRanks)
+		if err != nil {
+			return nil, fmt.Errorf("model: ForwardTP vocab plan: %w", err)
+		}
+		if err := m.requireTPVocabResidentF32(); err != nil {
+			return nil, err
+		}
+		if err := m.requireTPHeadResidentF32(); err != nil {
+			return nil, err
+		}
+		for _, id := range ids {
+			if id < 0 || id >= cfg.VocabSize {
+				return nil, fmt.Errorf("model: ForwardTP token id %d outside [0,%d) (the vocab-parallel lookup refuses out-of-range ids instead of zero-filling them)", id, cfg.VocabSize)
+			}
+		}
+		vocabPlan = vp
+	}
+	vocabParallel := len(vocabPlan.Shards) > 0
 
-	x := m.embedBand(ids)
+	var x [][]float32
+	if vocabParallel {
+		x, err = m.tpEmbedLayer(ids, vocabPlan, coll)
+		if err != nil {
+			return nil, fmt.Errorf("model: ForwardTP vocab-parallel embedding: %w", err)
+		}
+	} else {
+		x = m.embedBand(ids)
+	}
 	act := &Activations{Seq: seq, Hidden: [][]float32{flatten(x)}}
 
 	var subErr error
@@ -538,6 +615,16 @@ func (m *Model) ForwardTP(ids []int, tp TPConfig) (*Activations, error) {
 		act.Hidden = append(act.Hidden, flatten(x))
 	}
 
-	m.fillSeqLogits(act, x)
+	// The logits tail: the vocab-parallel head (ParallelLMHead) when armed, the monolith
+	// fillSeqLogits otherwise. Both end with the arch logit scale applied once.
+	if vocabParallel {
+		logits, err := m.tpHeadLogits(x, vocabPlan, coll)
+		if err != nil {
+			return nil, fmt.Errorf("model: ForwardTP vocab-parallel head: %w", err)
+		}
+		act.Logits = logits
+	} else {
+		m.fillSeqLogits(act, x)
+	}
 	return act, nil
 }

@@ -114,15 +114,19 @@ func (m *AsyncWatermarkManager) Stats() WatermarkStats {
 
 // AsyncStore wraps a synchronous Store with asynchronous job dispatching and stale watermark reset.
 type AsyncStore struct {
-	store Store
-	wm    *AsyncWatermarkManager
+	store    Store
+	wm       *AsyncWatermarkManager
+	prefetch *PrefetchQueue
+	spill    atomic.Pointer[Spiller]
 }
 
-// NewAsyncStore wraps store with watermark tracking.
+// NewAsyncStore wraps store with watermark tracking and the bounded read-ahead
+// queue at its default-on settings (30 s hold, 2 concurrent reads).
 func NewAsyncStore(store Store) *AsyncStore {
 	return &AsyncStore{
-		store: store,
-		wm:    NewAsyncWatermarkManager(),
+		store:    store,
+		wm:       NewAsyncWatermarkManager(),
+		prefetch: NewPrefetchQueue(store, DefaultPrefetchConfig),
 	}
 }
 
@@ -140,6 +144,89 @@ func (s *AsyncStore) Reset() uint64 {
 		return 0
 	}
 	return s.wm.Reset()
+}
+
+// Prefetch enqueues a read-ahead of the durable state under key so it lands
+// in memory on a separate I/O worker while other streams run. It is
+// best-effort: ErrPrefetchDisabled (zero permits) and ErrPrefetchStopped
+// decline the read-ahead without failing the demand path, which remains
+// available through RestorePrefetched.
+func (s *AsyncStore) Prefetch(key string) error {
+	if s == nil || s.prefetch == nil {
+		return ErrPrefetchDisabled
+	}
+	return s.prefetch.Enqueue(key)
+}
+
+// RestorePrefetched returns the read-ahead payload for key, holding the read
+// at most the configured timeout. A held read that times out is refused with
+// ErrPrefetchTimeout so the caller falls back to admission restore or fresh
+// prefill; a key that was never read ahead is read directly from the store.
+func (s *AsyncStore) RestorePrefetched(ctx context.Context, key string) ([]byte, bool, error) {
+	if s == nil || s.prefetch == nil {
+		return nil, false, ErrPrefetchDisabled
+	}
+	return s.prefetch.Restore(ctx, key)
+}
+
+// EnableSpill turns on the eviction-spill write side: before a span's RAM
+// residency is released, Spill stages an owned durable copy through cfg's
+// caps so the unchanged restore path reads it back. It returns the backing
+// Spiller for direct stats/checkpoint-slot access. Idempotent; the first
+// call wins.
+func (s *AsyncStore) EnableSpill(cfg SpillConfig) (*Spiller, error) {
+	if s == nil || s.store == nil {
+		return nil, ErrSpillDisabled
+	}
+	sp, err := NewSpiller(s.store, cfg)
+	if err != nil {
+		return nil, err
+	}
+	s.spill.CompareAndSwap(nil, sp)
+	return s.spill.Load(), nil
+}
+
+// Spill stages an owned durable copy of payload under digest ahead of the
+// caller releasing the span's RAM residency. It reports ErrSpillDisabled when
+// the spill write side is off; cap skips return nil (see Spiller.Spill).
+func (s *AsyncStore) Spill(ctx context.Context, digest string, payload []byte) error {
+	if s == nil {
+		return ErrSpillDisabled
+	}
+	sp := s.spill.Load()
+	if sp == nil {
+		return ErrSpillDisabled
+	}
+	return sp.Spill(ctx, digest, payload)
+}
+
+// SpillStats snapshots current spill pressure (zero value when disabled).
+func (s *AsyncStore) SpillStats() SpillStats {
+	if s == nil {
+		return SpillStats{}
+	}
+	sp := s.spill.Load()
+	if sp == nil {
+		return SpillStats{}
+	}
+	return sp.Stats()
+}
+
+// PrefetchStats snapshots the read-ahead queue's pressure.
+func (s *AsyncStore) PrefetchStats() PrefetchStats {
+	if s == nil || s.prefetch == nil {
+		return PrefetchStats{}
+	}
+	return s.prefetch.Stats()
+}
+
+// StopPrefetch cancels queued and in-flight read-aheads; in-flight reads keep
+// their permit until the underlying I/O returns.
+func (s *AsyncStore) StopPrefetch() {
+	if s == nil || s.prefetch == nil {
+		return
+	}
+	s.prefetch.Stop()
 }
 
 // PutAsync dispatches a background Put operation to the underlying Store.

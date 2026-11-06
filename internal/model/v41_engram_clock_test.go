@@ -160,6 +160,70 @@ func TestV41EngramClockPolicy(t *testing.T) {
 			t.Fatal("CLOCK changed the reduced native forward's logits")
 		}
 	})
+	t.Run("deterministic comparison counts", func(t *testing.T) {
+		// Deterministic half of #14143's bounded CPU comparison: identical
+		// exact key traces through both policies at the ordinary four-row
+		// default and a larger configured budget. Latency and allocation stay
+		// with BenchmarkV41EngramClock; no hit-rate or latency improvement is
+		// assumed. The cycle trace is the classic capacity+1 cyclic walk, so
+		// only the post-warm first pass hits; the hot trace keeps key 0
+		// resident every even op while five odd keys churn through the rest.
+		const ops = 128
+		for _, tc := range []struct {
+			capacity           int
+			trace              string
+			wantLRU, wantCLOCK [2]int64 // [hits, misses] over the ops window
+		}{
+			{4, "cycle", [2]int64{4, 124}, [2]int64{4, 124}},
+			// LRU keeps key 0 pinned (refreshed every even op) and eats the
+			// warm-set hits on odd ops 1/3/5; CLOCK's all-referenced first
+			// sweep at op 7 evicts key 0 once and re-faults it at op 8.
+			{4, "hot", [2]int64{67, 61}, [2]int64{66, 62}},
+			{64, "cycle", [2]int64{64, 64}, [2]int64{64, 64}},
+			{64, "hot", [2]int64{127, 1}, [2]int64{127, 1}},
+		} {
+			got := map[V41EngramCachePolicy][2]int64{}
+			for _, policy := range []V41EngramCachePolicy{V41EngramCacheLRU, V41EngramCacheCLOCK} {
+				src := &v41CacheFakeEngram{rows: tc.capacity + 2, rowBytes: 8}
+				c, err := NewV41EngramRowCache(src, V41EngramRowCacheOptions{
+					TableRows: src.rows, RowBytes: src.rowBytes,
+					BudgetBytes: int64(tc.capacity * src.rowBytes), CachePolicy: policy,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				for i := 0; i < tc.capacity; i++ {
+					if _, err := c.Row(i); err != nil {
+						t.Fatal(err)
+					}
+				}
+				before := c.Stats()
+				for i := 0; i < ops; i++ {
+					key := i % (tc.capacity + 1)
+					if tc.trace == "hot" {
+						key = 0
+						if i%2 != 0 {
+							key = 1 + (i/2)%(tc.capacity+1)
+						}
+					}
+					if _, err := c.Row(key); err != nil {
+						t.Fatal(err)
+					}
+				}
+				after := c.Stats()
+				got[policy] = [2]int64{after.Hits - before.Hits, after.Misses - before.Misses}
+				if st := c.inner.Stats(); st.ResidentEntries != tc.capacity || st.ResidentBytes != int64(tc.capacity)*int64(src.rowBytes) {
+					t.Fatalf("capacity=%d trace=%s %s residency left the row bound: %+v", tc.capacity, tc.trace, policy, st)
+				}
+			}
+			if got[V41EngramCacheLRU] != tc.wantLRU || got[V41EngramCacheCLOCK] != tc.wantCLOCK {
+				t.Fatalf("capacity=%d trace=%s comparison counts moved: lru=%v want %v, clock=%v want %v",
+					tc.capacity, tc.trace, got[V41EngramCacheLRU], tc.wantLRU, got[V41EngramCacheCLOCK], tc.wantCLOCK)
+			}
+			t.Logf("capacity=%d trace=%s lru=[hits %d misses %d] clock=[hits %d misses %d]",
+				tc.capacity, tc.trace, got[V41EngramCacheLRU][0], got[V41EngramCacheLRU][1], got[V41EngramCacheCLOCK][0], got[V41EngramCacheCLOCK][1])
+		}
+	})
 }
 
 // BenchmarkV41EngramClock compares actual Row calls at fixed width/capacity and

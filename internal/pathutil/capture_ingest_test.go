@@ -60,3 +60,32 @@ func TestDecideJSONReadsOnlySourceSelectors(t *testing.T) {
 		t.Fatalf("content/query text was mistaken for a source selector: %+v", allowed)
 	}
 }
+
+// fak-test:runtime fast est=1ms lane=default
+func TestCaptureJSONChecksTopLevelSourceStrings(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		raw        string
+		wantSource string
+	}{
+		{"string", `"/tmp/.ssh/id_rsa"`, "/tmp/.ssh/id_rsa"},
+		{"escaped string", `"/tmp/\u002essh/id_rsa"`, "/tmp/.ssh/id_rsa"},
+		{"string array", `["USD","../fak-private/file"]`, "../fak-private/file"},
+		{"nested array", `[["/tmp/.ssh/id_rsa"]]`, "/tmp/.ssh/id_rsa"},
+		{"object source", `{"path":"/tmp/.ssh/id_rsa"}`, "/tmp/.ssh/id_rsa"},
+		{"object content", `{"data":"/tmp/.ssh/id_rsa"}`, ""},
+		{"array object content", `[{"data":"/tmp/.ssh/id_rsa"}]`, ""},
+		{"ordinary string", `"USD"`, ""},
+		{"ordinary array", `["USD","docs/public.md"]`, ""},
+		{"null", `null`, ""},
+		{"number", `123`, ""},
+		{"malformed", `/tmp/.ssh/id_rsa`, "/tmp/.ssh/id_rsa"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			want := CheckCaptureSource(tc.wantSource)
+			if got := CheckCaptureJSON([]byte(tc.raw), nil); got != want {
+				t.Fatalf("capture decision = %+v, want %+v", got, want)
+			}
+		})
+	}
+}

@@ -103,7 +103,11 @@ func (p preparedPrompt) promptTokens() int {
 	return len(p.ids)
 }
 
-func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message, tools []ToolDef, sp SampleParams, opts ...SampleOpt) (preparedPrompt, error) {
+// preparePrompt uses sp as the authoritative resolved controls, including shrink.
+// Legacy private callers may still pass opts; they are not evaluated here.
+// This is not a request-wide exactly-once guarantee: CompleteStream resolves its
+// own controls before entering Complete.
+func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message, tools []ToolDef, sp SampleParams, _ ...SampleOpt) (preparedPrompt, error) {
 	if err := ctx.Err(); err != nil {
 		return preparedPrompt{}, err
 	}
@@ -118,7 +122,7 @@ func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message,
 	if p.tok != nil && p.tok.IsSPM() {
 		return p.prepareSPMRawPrompt(ctx, messages, tools, sp)
 	}
-	messages, tools, shrink := p.ApplyPromptShrink(ctx, messages, tools, opts...)
+	messages, tools, shrink := p.applyPromptShrinkResolved(ctx, messages, tools, sp)
 	renderMessages, images, err := prepareVisionMessages(messages)
 	if err != nil {
 		return preparedPrompt{}, err

@@ -233,9 +233,11 @@ func (s *WeightSource) EstimateQ4KHostLoadPeak(mapped bool, opts ...Q4KLoadOptio
 // mappedResidentFileBacked mirrors computeQ4KTensorWork under the WithStreamedDenseQ4K(true) the
 // mapped-resident entry adds: only an identity-layout Q4_K matmul and a retained Q2_K/Q3_K/Q5_K/
 // Q6_K the lazy k-quant store can hold become range descriptors (and then views into the map).
-// MTP roles, native-row reorders and i-quants are read into owned copies on that route too.
+// MTP roles, native-row reorders and i-quants are read into owned copies on that route too, as is
+// any tensor the executing backend's kernel preflight requires device-resident (streamedDensePins),
+// which the loader's own dispatch excludes from both lazy branches for the same reason.
 func mappedResidentFileBacked(cfg model.Config, st q4kTensorStorage, o q4kLoadOptions) bool {
-	if st.qwenMTP || st.kind != q4kStoragePacked {
+	if st.qwenMTP || st.kind != q4kStoragePacked || o.streamedDensePins(st.canon) {
 		return false
 	}
 	if st.info.Type == TensorQ4_K {

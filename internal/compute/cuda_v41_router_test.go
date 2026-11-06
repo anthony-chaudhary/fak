@@ -318,3 +318,124 @@ func TestCUDAV41RouterFullSoftplusPublication(t *testing.T) {
 		}
 	}
 }
+
+// TestCUDAV41RouterSoftplusSqrtDeviceParity is the compiled-kernel twin of
+// TestV41RouterSoftplusSqrtMatchesHostReference (the untagged host-side pin):
+// the same fixtures run through the device sqrt(softplus) scoring folded into
+// the top-k pass (the vLLM topkGatingSoftplusSqrt / dsv4HashTopkSoftplusSqrt
+// pattern, see cuda_v41_router.cu) and checked against the host reference:
+// (a) score equality across z in [-40,40] including the exp-underflow
+// region, (b) topK selection with exact-tie ordering, and (c) hash-table
+// layer weights normalized by the in-order sum times routeScale.
+// fak-test:runtime slow est=1s lane=cuda
+func TestCUDAV41RouterSoftplusSqrtDeviceParity(t *testing.T) {
+	cb := cudaV41RouterOrSkip(t)
+	dummy := mkResident(cb, []int{1}, []float32{0})
+	defer cb.Free(dummy)
+
+	// (a) One row per z in [-40,40] at half-unit steps: expert 0 carries z,
+	// expert 1 a fixed anchor, so each weight ratio pins the device score
+	// against the host reference across the whole range. Half-steps from -40
+	// are exact in F32, so the reduced guard's -20 boundary lands on a row,
+	// and z <= -20 exercises the exp-underflow region of both geometries.
+	const sweepRows = 161
+	sweep := make([]float32, sweepRows*2)
+	for i := 0; i < sweepRows; i++ {
+		sweep[i*2] = float32(-40 + 0.5*float64(i))
+		sweep[i*2+1] = 3
+	}
+	dsweep := mkResident(cb, []int{sweepRows, 2}, sweep)
+	defer cb.Free(dsweep)
+	for _, full := range []bool{false, true} {
+		label := fmt.Sprintf("sweep full=%v", full)
+		wantIDs, wantW, stage := v41RouterReferenceForTest(sweep, nil, nil, sweepRows, 2, 2, 1.5, full)
+		if stage != 0 {
+			t.Fatalf("%s: reference faulted at %v", label, stage)
+		}
+		got, err := cb.V41RouterTopK(dsweep, dummy, sweepRows, 2, 2, 1.5, full, false)
+		if err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+		requireExactPicks(t, label, got.Experts, wantIDs)
+		requireRelativeWeights(t, label, got.Weights, wantW)
+	}
+
+	// (b) Exact ties keep the lower expert first: the higher tied block leads
+	// in id order, then the lower block's lowest ids, and an all-equal row
+	// picks 0..topK-1 with equal weights.
+	const tieExperts = 32
+	ties := make([]float32, 2*tieExperts)
+	for e := 0; e < tieExperts; e++ {
+		z := float32(-30)
+		switch {
+		case e < 4:
+			z = 5
+		case e < 8:
+			z = 7
+		case e < 12:
+			z = 5
+		}
+		ties[e] = z
+		ties[tieExperts+e] = 1
+	}
+	dt := mkResident(cb, []int{2, tieExperts}, ties)
+	defer cb.Free(dt)
+	tieBias := make([]float32, tieExperts)
+	for i := range tieBias {
+		tieBias[i] = 0.5
+	}
+	dbias := mkResident(cb, []int{tieExperts}, tieBias)
+	defer cb.Free(dbias)
+	for _, hasBias := range []bool{false, true} {
+		devBias, hb := dummy, []float32(nil)
+		if hasBias {
+			devBias, hb = dbias, tieBias
+		}
+		label := fmt.Sprintf("ties bias=%v", hasBias)
+		wantIDs, wantW, stage := v41RouterReferenceForTest(ties, hb, nil, 2, tieExperts, 6, 1.5, false)
+		if stage != 0 {
+			t.Fatalf("%s: reference faulted at %v", label, stage)
+		}
+		got, err := cb.V41RouterTopK(dt, devBias, 2, tieExperts, 6, 1.5, false, hasBias)
+		if err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+		requireExactPicks(t, label, got.Experts, wantIDs)
+		requireRelativeWeights(t, label, got.Weights, wantW)
+	}
+
+	// (c) Hash-table layers: picks come from the table, weights are the
+	// unbiased scores over the in-order table sum times routeScale, spanning
+	// the underflow region (-40) and the large-positive side (40).
+	hashLogits := []float32{
+		40, -40, 0, 3, -25, 1, 0.5, -5,
+		-3, 2, -30, 40, 0.5, -40, 1, 2.5,
+		0, 0, 5, -20, -20, 0, 5, 5,
+	}
+	hashIDs := []int32{
+		7, 0, 3, 1,
+		5, 3, 2, 0,
+		4, 6, 1, 2,
+	}
+	dh := mkResident(cb, []int{3, 8}, hashLogits)
+	defer cb.Free(dh)
+	for _, tc := range []struct {
+		full bool
+		rs   float32
+	}{
+		{false, 1.5},
+		{true, 2},
+	} {
+		label := fmt.Sprintf("hash full=%v scale=%g", tc.full, tc.rs)
+		wantIDs, wantW, stage := v41RouterReferenceForTest(hashLogits, nil, hashIDs, 3, 8, 4, tc.rs, tc.full)
+		if stage != 0 {
+			t.Fatalf("%s: reference faulted at %v", label, stage)
+		}
+		got, err := cb.V41RouterHash(dh, hashIDs, 3, 8, 4, tc.rs, tc.full)
+		if err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+		requireExactPicks(t, label, got.Experts, wantIDs)
+		requireRelativeWeights(t, label, got.Weights, wantW)
+	}
+}

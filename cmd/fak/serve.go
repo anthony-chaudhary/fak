@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -28,6 +29,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/l3kv"
 	"github.com/anthony-chaudhary/fak/internal/macobs"
+	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelengine"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/session"
@@ -164,6 +166,7 @@ type serveFlags struct {
 	invalidation                 *string
 	requireKeyEnv                *string
 	speculative                  *string
+	pdRole                       *string
 	allowLAN                     *bool
 	keyPrincipal                 repeatedStringFlag
 	unsafeUnauthedBind           *bool
@@ -319,7 +322,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.remoteKVToken = fs.String("remote-kv-token", "", "remote KV store auth token (default: FAK_REMOTE_KV_TOKEN or FAK_BLOB_HTTP_TOKEN)")
 	sf.remoteKVTimeout = fs.Duration("remote-kv-timeout", l3kv.DefaultRemoteKVTimeout, "remote KV connectivity probe timeout")
 	sf.engineID = fs.String("engine", "mock", "registered engine id that fak_syscall dispatches an allowed call to: mock, inkernel, vllm, sglang, llm-d, dynamo, or another registered driver (default: mock; select inkernel explicitly for fak-native model execution)")
-	sf.backendName = fs.String("backend", "", "compute backend for the in-kernel chat decode (with --gguf, no --base-url): --backend overrides FAK_BACKEND; use 'auto', 'cpu', or a registered name. Omitted/auto selects usable Vulkan on Linux/Windows, preserves Metal auto-selection on Darwin, and otherwise uses CPU. Vulkan requires -tags vulkan plus FAK_VULKAN_SPIRV; an unavailable named backend fails loud.")
+	sf.backendName = fs.String("backend", "", "compute backend for the in-kernel chat decode (with --gguf, no --base-url): --backend overrides FAK_BACKEND; use 'auto', 'cpu', or a registered name. Omitted/auto selects CUDA on Linux/Windows when this build's cubins/PTX cover the detected device arch, else usable Vulkan, preserves Metal auto-selection on Darwin, and otherwise uses CPU. Vulkan requires -tags vulkan plus FAK_VULKAN_SPIRV; an unavailable named backend fails loud.")
 	sf.nativeHostSwapBytes = fs.Int64("native-kv-host-swap-bytes", 0, "bound retained serialized host-KV bytes in the native syscall scheduler (0 = unlimited). Requires a positive native KV block budget; full capacity ends the selected request, never silently recomputes. Excludes logits, staging, devices and process RSS")
 	registerServeNativeChatTemplateFlags(fs, sf)
 	nativeControls := registerNativeControlFlags(fs)
@@ -389,13 +392,20 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.memoryGovernor = fs.Bool("memory-governor", false, "enable dynamic zero-swap memory governor admission on Apple Silicon / Metal serving (auto-enabled with --metal or FAK_MEMORY_GOVERNOR=1)")
 	sf.gpudirectOverflow = fs.Bool("gpudirect-overflow", false, "reserved compatibility flag; GPU Direct overflow is not implemented on this command (default off)")
 	sf.expertParallel = fs.Int("expert-parallel", 1, "with --gguf: shard the routed MoE experts of a glm_moe_dsa model (GLM-5.2) across N expert-parallel ranks — the lever to move supported expert GEMMs off the host (the `--cpu-offload-experts` wall) onto resident GPUs (#971). Mixed k-quant expert formats without backend kernels (for example Q5_K/Q6_K today) still use the host k-quant fallback; set FAK_KQ_INT8=1 to use its production int8 path. The per-rank residual partials are reduced by one AllReduceSum through the wired Collective. 1 (default) = the unchanged monolith forward. N>1 requires an initialized non-cpu-ref compute.CollectiveBackend; CUDA builds provide that only with -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1) on a box with enough visible GPUs.")
-	// Structural speculative-decode selector (#1891): the DEFAULT front door sets
-	// the fast decode route by construction instead of leaving it env-only. "mtp"
-	// (default) selects the resident Metal/Vulkan MTP path where the admissibility
-	// envelope holds; "ngram" selects prompt n-gram speculation; "" leaves the
-	// route unselected. FAK_SPECULATIVE / SPECULATIVE remain the operator override
-	// and win when set, so this flag only supplies the structural default.
-	sf.speculative = fs.String("speculative", "mtp", "structural speculative-decode selector: mtp (default) or ngram; empty disables; env overrides")
+	// Structural speculative-decode selector (#1891 + DFlash2 wiring): the DEFAULT
+	// front door sets the fast decode route by construction instead of leaving it
+	// env-only. "mtp" (default) selects the resident Metal/Vulkan MTP path where
+	// the admissibility envelope holds; "ngram" selects prompt n-gram speculation;
+	// "dflash2" is recognized but refuses until serve owns an authenticated target;
+	// "" leaves the route unselected. FAK_SPECULATIVE / SPECULATIVE remain the
+	// operator override and win when set, so this flag only supplies the structural
+	// default. The closed set is admitted at startup (resolveSpeculativeMode): an
+	// unknown value fails loud before any weight load.
+	sf.speculative = fs.String("speculative", "mtp", "structural speculative-decode selector: mtp (default), ngram, or dflash2 (serve owner unavailable; refuses before load); empty disables; FAK_SPECULATIVE/SPECULATIVE env overrides win; an unknown value fails startup")
+	// Native P/D role selector (#28): the closed set is admitted at startup
+	// (resolveServePDRole) BEFORE any weight load, so a misspelled role refuses
+	// startup instead of silently booting an ordinary combined serve.
+	sf.pdRole = fs.String("role", "", "native P/D serving role for this host: prefill or decode (empty = ordinary combined serve). With --gguf, constructs the native P/D role runtime (modelengine.NativePDCluster) over the in-kernel model at boot and wires role admission (Admit on prefill, AdmitImported on decode) plus per-role /metrics. Any other value refuses startup before any weight load.")
 	sf.tensorParallel = fs.Int("tensor-parallel", 1, "with --gguf: tensor-parallel rank count for the dense projections (the Megatron column/row split, tensor_parallel.go). 1 (default) = no split. N>1 uses the same initialized device-collective gate as --expert-parallel; CUDA builds require -tags cuda,nccl (build_cuda.sh: FAK_CUDA_NCCL=1).")
 	sf.budgetWebhook = fs.String("budget-webhook", "", "POST a JSON event to this URL when a served session's context budget crosses the warning threshold (--budget-warn-fraction) or is exhausted (the reset trigger), so an operator/monitor is notified before exhaustion (#743). Also carries the --spend-cap breach event (kind:\"spend_breach\", #4859) when a scope crosses its token/USD budget. Empty = off. Needs --context-budget-tokens to have a budget to watch.")
 	sf.budgetWarnFraction = fs.Float64("budget-warn-fraction", 0.8, "consumed share (0..1) of the context budget at which --budget-webhook fires its pre-exhaustion warning (default 0.8 = 80%); <=0 or >=1 disables the warning while the exhaustion event still fires")
@@ -424,6 +434,189 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.fleetBusInterval = fs.Duration("fleet-bus-interval", DefaultFleetBusInterval, "with --fleet-bus: how often this instance re-announces presence and drains pending directives. Must stay well under fleetbus.DefaultInstanceTTL (90s) or a live instance flickers out of the roster and silently shrinks the denominator a control point measures \"everyone acked\" against. <=0 uses the default.")
 	sf.keepAwake = fs.String("keep-awake", KeepAwakeOff, "prevent OS sleep during execution: off|while-active|always (default off)")
 	return fs, sf
+}
+
+// ErrSpeculativeModeUnknown marks a --speculative selector (or its FAK_SPECULATIVE /
+// SPECULATIVE override) that names a mode outside the closed admission set. It is the
+// startup refusal for a misspelled structural selector: such a value must never boot a
+// server whose fast decode route is silently unselected.
+var ErrSpeculativeModeUnknown = errors.New("unknown speculative mode")
+
+// The closed structural speculative-decode selector values admitted by `fak serve`:
+// the historical mtp/ngram routes plus the DFlash2 sidecar route; "" disables.
+const (
+	serveSpeculativeMTP     = "mtp"
+	serveSpeculativeNGram   = "ngram"
+	serveSpeculativeDFlash2 = "dflash2"
+)
+
+// resolveSpeculativeMode resolves the effective structural speculative-decode selector
+// for `fak serve`. The FAK_SPECULATIVE / SPECULATIVE operator overrides win over the
+// --speculative flag (FAK_SPECULATIVE first), mirroring the gateway's historical env-OR
+// precedence; normalization (lowercase, trim) matches the gateway's own comparison so an
+// admitted value reaches every downstream route byte-for-byte. The winner must land in
+// the closed admission set {mtp, ngram, dflash2, empty}; anything else fails startup
+// with ErrSpeculativeModeUnknown before any weight load. An admitted value is returned
+// verbatim for buildGateway to thread into gateway.Config.SpeculativeMode — including
+// "dflash2". The CLI separately refuses that route before acquisition until its
+// authenticated target owner is wired; gateway/library owner support is unchanged.
+func resolveSpeculativeMode(flagValue string, getenv func(string) string) (string, error) {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	effective := strings.ToLower(strings.TrimSpace(flagValue))
+	for _, name := range []string{"FAK_SPECULATIVE", "SPECULATIVE"} {
+		if v := strings.ToLower(strings.TrimSpace(getenv(name))); v != "" {
+			effective = v
+			break
+		}
+	}
+	switch effective {
+	case "", serveSpeculativeMTP, serveSpeculativeNGram, serveSpeculativeDFlash2:
+		return effective, nil
+	default:
+		return "", fmt.Errorf("%w: %q (admitted: mtp, ngram, dflash2, empty)", ErrSpeculativeModeUnknown, effective)
+	}
+}
+
+// serveDFlash2SidecarDecision resolves the per-load DFlash2 sidecar retention
+// for a structural selector: only a dflash2-resolved load with a resident
+// in-kernel model AND an operator-pinned FAK_DFLASH2_SIDECAR path retains the
+// artifact. Every other combination leaves the route unretained — the
+// gateway's fail-loud target-owner validation keeps governing admission, and
+// no sidecar is opened for a load that will not draft.
+func serveDFlash2SidecarDecision(resolvedMode string, inKernelLoaded bool, getenv func(string) string) (string, bool) {
+	if resolvedMode != serveSpeculativeDFlash2 || !inKernelLoaded {
+		return "", false
+	}
+	path := strings.TrimSpace(getenv("FAK_DFLASH2_SIDECAR"))
+	if path == "" {
+		return "", false
+	}
+	return filepath.Clean(path), true
+}
+
+// ErrServeRoleUnknown marks a --role value outside the closed native P/D role
+// admission set. A misspelled role must refuse startup before any weight load
+// rather than silently boot an ordinary combined serve that ignores the split.
+var ErrServeRoleUnknown = errors.New("unknown serve role")
+
+// ErrServeRoleMismatch marks a role admission surface invoked on the wrong role
+// host: a prefill host admits prompts only, a decode host admits imported
+// sequences only. The asymmetry is the contract — a host that answered both
+// would be a combined serve wearing a role flag.
+var ErrServeRoleMismatch = errors.New("serve role mismatch")
+
+// ErrServeRoleRequiresModel marks a native P/D role host without the in-kernel
+// model: role serving is defined over resident weights, so without them there
+// is nothing to split into prefill and decode work.
+var ErrServeRoleRequiresModel = errors.New("serve role requires the in-kernel model")
+
+// resolveServePDRole resolves the --role selector against the closed admission
+// set {prefill, decode, empty}: empty keeps the ordinary combined serve. The
+// normalization (lowercase, trim) matches resolveSpeculativeMode so an admitted
+// value reaches the role host byte-for-byte.
+func resolveServePDRole(flagValue string) (modelengine.NativePDRole, error) {
+	effective := strings.ToLower(strings.TrimSpace(flagValue))
+	switch effective {
+	case "":
+		return modelengine.NativePDRole(""), nil
+	case string(modelengine.NativePDRolePrefill):
+		return modelengine.NativePDRolePrefill, nil
+	case string(modelengine.NativePDRoleDecode):
+		return modelengine.NativePDRoleDecode, nil
+	default:
+		return "", fmt.Errorf("%w: %q (admitted: prefill, decode, empty)", ErrServeRoleUnknown, effective)
+	}
+}
+
+// servePDRoleDefaultDecodeWorkers is the decode half of a role host's pool when
+// --role decode routes imported sequences. Two workers let round-robin admission
+// queue one import while an earlier lane is still decoding.
+const servePDRoleDefaultDecodeWorkers = 2
+
+// servePDRoleHost is the per-host native P/D role runtime: a NativePDCluster
+// exposed through exactly one role admission surface. Keeping the two surfaces
+// behind role checks is what makes --role meaningful — a prefill host never
+// admits imported decode work, and a decode host never runs prompt prefill.
+type servePDRoleHost struct {
+	role    modelengine.NativePDRole
+	cluster *modelengine.NativePDCluster
+
+	mu     sync.Mutex
+	rr     int
+	closed bool
+}
+
+// newServePDRoleHost builds a role host over the in-kernel model. The guards are
+// fail-loud by design: an unknown role or a missing model must refuse the host
+// instead of constructing a cluster that silently serves the wrong shape.
+func newServePDRoleHost(role modelengine.NativePDRole, m *fakmodel.Model, decodeWorkers int) (*servePDRoleHost, error) {
+	switch role {
+	case modelengine.NativePDRolePrefill, modelengine.NativePDRoleDecode:
+	default:
+		return nil, fmt.Errorf("%w: %q (admitted: prefill, decode)", ErrServeRoleUnknown, role)
+	}
+	if m == nil {
+		return nil, fmt.Errorf("serve P/D role host: %w", ErrServeRoleRequiresModel)
+	}
+	if decodeWorkers < 1 {
+		return nil, fmt.Errorf("serve P/D role host: decode workers must be >= 1, got %d", decodeWorkers)
+	}
+	return &servePDRoleHost{role: role, cluster: modelengine.NewNativePDCluster(m, decodeWorkers)}, nil
+}
+
+func (h *servePDRoleHost) Role() modelengine.NativePDRole { return h.role }
+
+// Cluster returns the underlying cluster; it satisfies
+// gateway.NativePDMetricsProvider via Metrics(), which is the seam the serve
+// entrypoint wires onto per-role /metrics.
+func (h *servePDRoleHost) Cluster() *modelengine.NativePDCluster { return h.cluster }
+
+// AdmitPrefill is the prefill role surface: prompt prefill plus KV transfer
+// through the cluster's Admit. A decode host answers with ErrServeRoleMismatch
+// so misrouted work fails at the caller instead of silently re-prefilling.
+func (h *servePDRoleHost) AdmitPrefill(ctx context.Context, req modelengine.NativePDRequest) (modelengine.NativePDAdmission, error) {
+	if h == nil || h.role != modelengine.NativePDRolePrefill {
+		return modelengine.NativePDAdmission{}, fmt.Errorf("%w: AdmitPrefill requires the prefill role", ErrServeRoleMismatch)
+	}
+	return h.cluster.Admit(ctx, req)
+}
+
+// AdmitImported is the decode role surface: sequences whose prompt KV was built
+// elsewhere enter a decode worker's scheduler without re-prefill. Round-robin
+// over the decode pool spreads imports; the mutex keeps the counter race-free
+// under concurrent admissions.
+func (h *servePDRoleHost) AdmitImported(ctx context.Context, call *abi.ToolCall, seq modelengine.ImportedSequence) (abi.EngineRequest, error) {
+	if h == nil || h.role != modelengine.NativePDRoleDecode {
+		return nil, fmt.Errorf("%w: AdmitImported requires the decode role", ErrServeRoleMismatch)
+	}
+	workers := h.cluster.DecodeWorkers()
+	if len(workers) == 0 {
+		return nil, errors.New("serve P/D role host: no decode workers")
+	}
+	h.mu.Lock()
+	w := workers[h.rr%len(workers)]
+	h.rr++
+	h.mu.Unlock()
+	return w.Scheduler().AdmitImported(ctx, call, seq)
+}
+
+// Close is idempotent and nil-safe: serve teardown paths may run it alongside
+// deferred cleanup without coordinating, and a double close must not re-close
+// live scheduler state underneath an in-flight admission.
+func (h *servePDRoleHost) Close() {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		return
+	}
+	h.closed = true
+	h.mu.Unlock()
+	h.cluster.Close()
 }
 
 func (sf *serveFlags) effectiveAdmissionTokenBudget() int {
@@ -597,6 +790,33 @@ func cmdServe(argv []string) {
 		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
 		os.Exit(2)
 	}
+	// Structural speculative-decode selector admission (#1891 + DFlash2 wiring): the
+	// closed set {mtp, ngram, dflash2, empty} is validated BEFORE any weight load so a
+	// misspelled selector fails startup loud instead of booting a server whose fast
+	// decode route is silently unselected. FAK_SPECULATIVE / SPECULATIVE remain the
+	// operator override and win over the flag; the resolved value is what buildGateway
+	// threads to the gateway (the mtp/ngram routes keep their historical env-OR
+	// selection byte-for-byte).
+	resolvedSpeculative, err := resolveSpeculativeMode(*sf.speculative, os.Getenv)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
+	*sf.speculative = resolvedSpeculative
+	// Native P/D role admission (#28): the closed set {prefill, decode, empty} is
+	// resolved in the same pre-weight-load band as the speculative selector so an
+	// unknown --role never loads weights. A role host is defined over the in-kernel
+	// model, so --role without --gguf fails here for the same fail-loud reason.
+	resolvedPDRole, pdRoleErr := resolveServePDRole(*sf.pdRole)
+	if pdRoleErr != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", pdRoleErr)
+		os.Exit(2)
+	}
+	if resolvedPDRole != "" && *sf.ggufPath == "" {
+		fmt.Fprintf(os.Stderr, "fak serve: %v: --role %s requires --gguf\n", ErrServeRoleRequiresModel, resolvedPDRole)
+		os.Exit(2)
+	}
+	*sf.pdRole = string(resolvedPDRole)
 	if err := validateServeFitFlags(*sf.fit, *sf.workloadPromptTokens, *sf.workloadOutputTokens, *sf.workloadConcurrency, *sf.sloTPOTMS, *sf.sloTTFTMS); err != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
 		os.Exit(2)
@@ -638,6 +858,16 @@ func cmdServe(argv []string) {
 			os.Exit(2)
 		}
 	}
+	// Model-free inspection must remain usable even when the selected serving
+	// route is unavailable. Policy validation also precedes alias/HF acquisition.
+	if *sf.policyCheck {
+		runServePolicyCheck(*sf.policyPath)
+		return
+	}
+	if err := validateServeDFlash2Startup(resolvedSpeculative, os.Getenv); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
 
 	rt := &serveRuntime{t0: t0, toolPlugins: toolPlugins, toolPreferences: toolPreferences,
 		explicitFlags: explicit, nativeAdmissionExplicit: explicit["native-admission-token-budget"], startupPhases: []gateway.StartupPhase{
@@ -648,11 +878,6 @@ func cmdServe(argv []string) {
 		os.Exit(2)
 	}
 	rt.resolveServeModelSources(sf)
-	// --policy-check: validate the manifest and exit, binding no listener.
-	if *sf.policyCheck {
-		runServePolicyCheck(*sf.policyPath)
-		return
-	}
 
 	// --plan-json (#4361): emit the versioned header-derived memory sizing artifact
 	// and exit before load — the colibri-inspired pre-load inspection dry-run,
@@ -847,6 +1072,27 @@ func cmdServe(argv []string) {
 	if releaseMetalResidency != nil {
 		defer releaseMetalResidency()
 	}
+	// Per-load DFlash2 sidecar retention: a dflash2-resolved load with an
+	// operator-pinned artifact retains the authenticated BF16 sidecar ONCE, so
+	// every request borrows the single open instead of re-opening and
+	// re-hashing the 3.8 GiB file per request. An unavailable artifact refuses
+	// startup with the model sentinel — the serial verify route stays visible,
+	// no silent host fallback. The release runs at process teardown; the
+	// sidecar file is independent of the model weights, so its close order
+	// against the residency releases is immaterial.
+	if sidecarPath, ok := serveDFlash2SidecarDecision(*sf.speculative, rt.inKernelModel != nil, os.Getenv); ok {
+		sidecar, err := fakmodel.RetainQwen38DFlash2Sidecar(context.Background(), sidecarPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fak serve: retain DFlash2 sidecar: %v\n", err)
+			os.Exit(2)
+		}
+		rt.addStartupMessage(newServeStartupMessage("speculative", "dflash2-sidecar", "info", "pinned BF16 sidecar retained per load: "+sidecar.Path()))
+		defer func() {
+			if err := sidecar.Release(); err != nil {
+				fmt.Fprintf(os.Stderr, "fak serve: release DFlash2 sidecar: %v\n", err)
+			}
+		}()
+	}
 	rt.configureEPDecode()
 	rt.resolveSessionPlane(sf)
 	rt.resolveObservers(sf)
@@ -873,6 +1119,18 @@ func cmdServe(argv []string) {
 		os.Exit(2)
 	}
 	rt.wireGateway(sf)
+	// Role runtime wiring (#28) runs after wireGateway so rt.srv exists for the
+	// per-role /metrics splice, and before the feature catalog so the role split
+	// is observable from the first served turn.
+	if resolvedPDRole != "" {
+		pdHost, pdHostErr := newServePDRoleHost(resolvedPDRole, rt.inKernelModel, servePDRoleDefaultDecodeWorkers)
+		if pdHostErr != nil {
+			fmt.Fprintf(os.Stderr, "fak serve: %v\n", pdHostErr)
+			os.Exit(2)
+		}
+		defer pdHost.Close()
+		rt.srv.SetNativePDMetrics(pdHost.Cluster())
+	}
 	catalog, err := evaluateServeFeatures(sf, manifest, featureExplicit, os.Getenv, rt)
 	if err == nil && keepAwakeReleaser != nil {
 		for i := range catalog.Features {

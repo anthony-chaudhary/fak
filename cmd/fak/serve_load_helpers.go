@@ -290,6 +290,41 @@ func serveV41CUDAHostQ3FallbackPath(path string, backend compute.Backend) bool {
 	return serveV41CUDAHostQ3Fallback(ws, backend)
 }
 
+// qwen35SequencePrefillMarker is the capability seam the whole-prompt qwen35-hybrid sequence
+// prefill advertises (internal/model's Qwen35SequencePrefillBackend, asserted locally so the
+// serve wiring never names the contract type). A backend behind this seam validates every kernel
+// operand for a live default-device allocation before dispatch and refuses managed memory, so its
+// weight operands may not be left to the streamed-dense host fold.
+type qwen35SequencePrefillMarker interface {
+	Qwen35SequencePrefillPath() string
+}
+
+// serveQwen35SequencePrefillConfig reports the artifact config when this backend executes the
+// qwen35-hybrid sequence prefill with the qualified path identity: the marker advertised AND the
+// path matches compute.Qwen35SequencePrefillPath (a marker with any other identity is a backend
+// that REFUSES the sequence path, whose fallback scalar replay does not carry the strict operand
+// audit), AND the checkpoint is a qwen35-family hybrid. Header-only; an unreadable checkpoint
+// reports false so the caller keeps the historical un-pinned options.
+func serveQwen35SequencePrefillConfig(backend compute.Backend, ggufPath string) (fakmodel.Config, bool) {
+	if backend == nil || ggufPath == "" {
+		return fakmodel.Config{}, false
+	}
+	marker, ok := backend.(qwen35SequencePrefillMarker)
+	if !ok || marker.Qwen35SequencePrefillPath() != compute.Qwen35SequencePrefillPath {
+		return fakmodel.Config{}, false
+	}
+	ws, err := ggufload.OpenWeights(ggufPath)
+	if err != nil {
+		return fakmodel.Config{}, false
+	}
+	defer ws.Close()
+	cfg, err := ws.File.Config()
+	if err != nil {
+		return fakmodel.Config{}, false
+	}
+	return cfg, cfg.IsQwen35Hybrid()
+}
+
 // serveResidentQ4KLoadOptions keeps loader and admission storage selection on
 // the same backend/artifact predicates. Sharding and streaming remain explicit
 // additions owned by their respective load paths.
@@ -309,6 +344,16 @@ func serveResidentQ4KLoadOptions(backend compute.Backend, ggufPath string, resid
 		// allocation of the load; the V4.1 forward gathers rows from the packed table on host
 		// and device alike.
 		opts = append(opts, ggufload.WithQ2KEmbeddingResident(true))
+	}
+	// Device-residency pin for the bounded streamed-dense fold: on a backend whose qwen35-hybrid
+	// sequence prefill refuses a managed or host-backed operand, every materialized weight operand
+	// stays device-charged in BOTH the estimate and the loader instead of folding into the bounded
+	// host working set. Without this the estimator admitted a plan whose kernel operand the HAL
+	// spilled to managed memory under VRAM pressure, and the warmup preflight failed closed on it.
+	// It is orthogonal to the streamed-dense bound: it shrinks the streamed set, never the budget.
+	if cfg, pinned := serveQwen35SequencePrefillConfig(backend, ggufPath); pinned {
+		pred := func(canon string) bool { return fakmodel.Qwen35SequencePrefillDeviceResident(cfg, canon) }
+		opts = append(opts, ggufload.WithStreamedDenseDeviceResident(pred))
 	}
 	return opts
 }
@@ -554,6 +599,12 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 	}
 	tLoad := time.Now()
 	if info, err := os.Stat(modelPath); err == nil && info.IsDir() {
+		// Layout guard (lg-preflight-wire): the header-only manifest preflight refuses a
+		// broken checkpoint before any tensor byte is read, fail-closed.
+		if err := serveAdmitSafetensorsPreflight(modelPath); err != nil {
+			fmt.Fprintln(os.Stderr, "fak serve: safetensors manifest preflight:", err)
+			return nil, false, nil, gateway.StartupPhase{}, nil, err
+		}
 		m, err := fakmodel.LoadSafetensorsQuantConfigDir(modelPath)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "fak serve: safetensors load:", err)
@@ -579,6 +630,14 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 	}
 	artifactQuant := ggufload.ClassifyTensorQuant(artifactSource.File.Tensors)
 	hostQ3Fallback := !cpuOffloadExperts && serveV41CUDAHostQ3Fallback(artifactSource, backend)
+	// Layout guard (lg-preflight-wire): the header-only manifest preflight runs on the merged
+	// shard header before arm selection and fail-closed — a refusal aborts the load before any
+	// tensor payload read or dispatch.
+	if err := serveAdmitManifestPreflight(ggufPath, artifactSource.File); err != nil {
+		_ = artifactSource.Close()
+		fmt.Fprintln(os.Stderr, "fak serve: GGUF manifest preflight:", err)
+		return nil, false, nil, gateway.StartupPhase{}, nil, err
+	}
 	if err := artifactSource.Close(); err != nil {
 		fmt.Fprintln(os.Stderr, "fak serve: GGUF quant inventory close:", err)
 		return nil, false, nil, gateway.StartupPhase{}, nil, err

@@ -12,8 +12,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/affectedtests"
 	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
 	"github.com/anthony-chaudhary/fak/internal/testroute"
-
-	"github.com/anthony-chaudhary/fak/internal/strmatch"
 )
 
 const (
@@ -408,7 +406,7 @@ func PrepareWorkspace(ctx context.Context, plan WorkspacePreflight, prep Workspa
 		rep.Steps = append(rep.Steps, out)
 		if err != nil || !lease.Held {
 			rep.Verdict = WorkspaceVerdictBlockedByLease
-			rep.Reason = strmatch.FirstNonBlank(lease.Reason, ReasonLeaseAcquireFailed)
+			rep.Reason = firstNonBlank(lease.Reason, ReasonLeaseAcquireFailed)
 			rep.Detail = out.Detail
 			return rep
 		}
@@ -423,7 +421,7 @@ func PrepareWorkspace(ctx context.Context, plan WorkspacePreflight, prep Workspa
 		rep.Steps = append(rep.Steps, out)
 		if err != nil || build.Verdict != WorkspaceVerdictReady {
 			rep.Verdict = WorkspaceVerdictWouldBeRed
-			rep.Reason = strmatch.FirstNonBlank(build.Reason, ReasonBuildCacheWarmFailed)
+			rep.Reason = firstNonBlank(build.Reason, ReasonBuildCacheWarmFailed)
 			rep.Detail = out.Detail
 			return rep
 		}
@@ -435,7 +433,7 @@ func PrepareWorkspace(ctx context.Context, plan WorkspacePreflight, prep Workspa
 		rep.Steps = append(rep.Steps, out)
 		if err != nil || !dev.OK {
 			rep.Verdict = WorkspaceVerdictWouldBeRed
-			rep.Reason = strmatch.FirstNonBlank(dev.Reason, ReasonDevIndexWarmFailed)
+			rep.Reason = firstNonBlank(dev.Reason, ReasonDevIndexWarmFailed)
 			rep.Detail = out.Detail
 			return rep
 		}
@@ -634,4 +632,18 @@ func errorDetail(err error, fallback string) string {
 		return err.Error()
 	}
 	return fallback
+}
+
+// firstNonBlank returns the first value whose trimmed form is non-blank, else "".
+// Kept local rather than imported from internal/strmatch: preflight is a core
+// lane counted by the debt-lanes coupling census, and this two-arg specialization
+// is the only use the package needs.
+func firstNonBlank(a, b string) string {
+	if strings.TrimSpace(a) != "" {
+		return a
+	}
+	if strings.TrimSpace(b) != "" {
+		return b
+	}
+	return ""
 }

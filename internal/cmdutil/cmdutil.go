@@ -111,6 +111,7 @@ func MaxAbsDiffF32(a, b []float32) float64 {
 func MarkdownCell(s string) string {
 	s = strings.ReplaceAll(s, "|", "\\|")
 	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
 	return s
 }

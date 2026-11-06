@@ -179,9 +179,17 @@ func (ix *Index) Search(query string, k, window int) []Hit {
 }
 
 func (ix *Index) windowAround(center, window int) []Doc {
+	// Search supplies a non-negative radius; saturate endpoints instead of wrapping.
+	lower, upper := math.MinInt, math.MaxInt
+	if center >= math.MinInt+window {
+		lower = center - window
+	}
+	if center <= math.MaxInt-window {
+		upper = center + window
+	}
 	var w []Doc
 	for _, d := range ix.docs {
-		if d.Ordinal >= center-window && d.Ordinal <= center+window {
+		if d.Ordinal >= lower && d.Ordinal <= upper {
 			w = append(w, d)
 		}
 	}

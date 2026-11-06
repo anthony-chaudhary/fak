@@ -43,6 +43,36 @@ func TestSliceFixedTurnsSweepsAgents(t *testing.T) {
 	}
 }
 
+// Runtime estimate is unmeasured; only bounded in-memory column fixtures are used.
+// fak-test:runtime fast est=10ms lane=default
+func TestSliceFixedRejectsUnalignedColumns(t *testing.T) {
+	for _, key := range []string{"agents", "turns"} {
+		for _, column := range []string{"agents", "turns", "shared_saved_mean", "cross_uplift_mean"} {
+			for _, shape := range []string{"missing", "short", "long"} {
+				t.Run(key+"/"+column+"/"+shape, func(t *testing.T) {
+					cols := fixtureCols()
+					switch shape {
+					case "missing":
+						delete(cols, column)
+					case "short":
+						cols[column] = cols[column][:1]
+					case "long":
+						cols[column] = append(cols[column], 0)
+					}
+					val := 50.0
+					if key == "turns" {
+						val = 30
+					}
+					got := SliceFixed(cols, key, val)
+					if len(got.Xs) != 0 || len(got.Shared) != 0 || len(got.Cross) != 0 || len(got.Isolated) != 0 {
+						t.Fatalf("unaligned columns returned comparison points: %+v", got)
+					}
+				})
+			}
+		}
+	}
+}
+
 func BenchmarkSliceFixed(b *testing.B) {
 	cols := fixtureCols()
 	b.ResetTimer()

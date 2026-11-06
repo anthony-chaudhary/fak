@@ -9,8 +9,27 @@ struct fak_graph_once {
   bool terminal;
   cudaGraph_t graph;
   cudaGraphExec_t exec;
+  // POD fields keep calloc construction and existing create extraction valid.
+  void *quant_ops;
+  void *quant_scratch[3];
+  size_t quant_bytes[3];
+  bool quant_tracked[3];
+  int quant_count, quant_cursor, quant_error;
+  bool quant_prepared;
+  // Optional immutable GDN manifest. POD callbacks keep unprepared dense and
+  // quant-only owners independent of the GDN producer and its test harness.
+  enum { GDN_BEGIN=1, GDN_END=2, GDN_REPLAY=3, GDN_COPY=4 };
+  void *gdn_plan;
+  int gdn_count, gdn_cursor;
+  const void *gdn_quant_plan;
+  int gdn_quant_count;
+  bool (*gdn_check)(fak_graph_once *,int);
+  void (*gdn_retire)(fak_graph_once *);
 };
 static fak_graph_once *g_graph_once_capture = nullptr;
+static bool graph_once_quant_ready(fak_graph_once *s);
+static bool graph_once_quant_idle(fak_graph_once *s);
+static int graph_once_quant_retire(fak_graph_once *s);
 
 __global__ void k_graph_once_position(int *state, int pos) {
   state[0] = pos;
@@ -66,6 +85,9 @@ extern "C" int fak_graph_once_begin(void *owner, int pos) {
   if (!s || s->terminal || !s->position || s->graph || s->exec ||
       g_capture_open || g_graph_once_capture || pos < 0 || pos >= s->capacity ||
       v41_candidates_stream_uncertain()) return 1;
+  if (s->gdn_check && !s->gdn_check(s,fak_graph_once::GDN_BEGIN)) { s->terminal = true; return 1; }
+  if (!graph_once_quant_idle(s)) { s->terminal = true; return 1; }
+  s->quant_cursor = 0;
   int rc = graph_once_set_position(s, pos);
   if (rc) return rc;
   if (graph_once_drain(s)) return 5;
@@ -77,11 +99,13 @@ extern "C" int fak_graph_once_begin(void *owner, int pos) {
   return 0;
 }
 
-// All three wrappers are capture-only, and consume the SAME owner scalar pair.
+// These wrappers are capture-only, and consume the SAME owner scalar pair.
 // Invalid geometry poisons capture; end must abort before release, never launch a partial graph.
 static int graph_once_capture_admit(fak_graph_once *s) {
   return s && s == g_graph_once_capture && g_capture_open && !s->terminal;
 }
+#include "graph_quant_workspace.cuh"
+#include "graph_gdn_capture.cuh"
 extern "C" int fak_graph_once_rope(void *owner, float *x, int heads, int hd, double theta) {
   fak_graph_once *s = (fak_graph_once *)owner;
   if (!graph_once_capture_admit(s)) return 1;
@@ -92,6 +116,72 @@ extern "C" int fak_graph_once_rope(void *owner, float *x, int heads, int hd, dou
   if (cudaGetLastError() != cudaSuccess) { s->terminal = true; return 3; }
   return 0;
 }
+// Native prerequisite only: no Go/HAL caller or hybrid admission is added here.
+// Caller retains all four buffers and the graph owner through checked retirement.
+// These span checks establish live device allocation extents, not dependency
+// generations or the model's public execution scope; those remain caller gates.
+static bool graph_once_partial_rope_span(const void *ptr, size_t bytes,
+                                         uintptr_t *lo, uintptr_t *hi) {
+  uintptr_t begin = (uintptr_t)ptr;
+  if (!ptr || !bytes || begin % alignof(float) || bytes > UINTPTR_MAX - begin)
+    return false;
+  *lo = begin;
+  *hi = begin + bytes;
+  return true;
+}
+static bool graph_once_partial_rope_inputs(fak_graph_once *s,
+    const float *q, const float *k, float *qout, float *kout,
+    int qheads, int kheads, int hd, int rotary, double theta) {
+  if (!s || !s->position || qheads <= 0 || kheads <= 0 || hd <= 0 ||
+      rotary <= 0 || rotary > hd || (rotary & 1) || qheads % kheads ||
+      !(theta > 0.0) || !isfinite(theta) ||
+      qheads > INT_MAX / hd || kheads > INT_MAX / hd ||
+      (size_t)qheads > SIZE_MAX / sizeof(float) / (size_t)hd ||
+      (size_t)kheads > SIZE_MAX / sizeof(float) / (size_t)hd) return false;
+  size_t qbytes = (size_t)qheads * hd * sizeof(float);
+  size_t kbytes = (size_t)kheads * hd * sizeof(float);
+  const void *ptrs[4] = {q, k, qout, kout};
+  size_t bytes[4] = {qbytes, kbytes, qbytes, kbytes};
+  uintptr_t lo[4], hi[4], position_lo, position_hi;
+  if (!graph_once_partial_rope_span(s->position, 2 * sizeof(int),
+                                    &position_lo, &position_hi)) return false;
+  for (int i = 0; i < 4; ++i) {
+    if (!graph_once_partial_rope_span(ptrs[i], bytes[i], &lo[i], &hi[i])) return false;
+    auto found = g_live.find((void *)ptrs[i]);
+    if (found == g_live.end() || found->second < bytes[i]) return false;
+  }
+  // Q and K may share read-only storage. Neither output may overlap either
+  // input, the other output, or the owner's retained position/length scalars.
+  for (int i = 2; i < 4; ++i) {
+    if (lo[i] < position_hi && position_lo < hi[i]) return false;
+    for (int j = 0; j < 4; ++j)
+      if (i != j && lo[i] < hi[j] && lo[j] < hi[i]) return false;
+  }
+  return true;
+}
+extern "C" int fak_graph_once_partial_rope(void *owner,
+    const float *q, const float *k, float *qout, float *kout,
+    int qheads, int kheads, int hd, int rotary, double theta) {
+  fak_graph_once *s = (fak_graph_once *)owner;
+  if (!graph_once_capture_admit(s)) return 1;
+  if (v41_candidates_stream_uncertain() ||
+      !graph_once_partial_rope_inputs(s, q, k, qout, kout, qheads, kheads,
+                                     hd, rotary, theta)) {
+    s->terminal = true; return 1;
+  }
+  // Do not erase or attribute a preceding CUDA error to this operation.
+  if (cudaPeekAtLastError() != cudaSuccess) { s->terminal = true; return 3; }
+  unsigned qn = (unsigned)qheads * (unsigned)hd;
+  unsigned kn = (unsigned)kheads * (unsigned)hd;
+  unsigned qblocks = qn / 256 + (qn % 256 != 0);
+  unsigned kblocks = kn / 256 + (kn % 256 != 0);
+  FCUDA_TS("k_partial_rope_copy", qblocks, k_partial_rope_copy<true><<<qblocks,256,0,g_stream>>>(qout,q,0,qheads,hd,rotary,theta,s->position));
+  if (cudaGetLastError() != cudaSuccess) { s->terminal = true; return 3; }
+  FCUDA_TS("k_partial_rope_copy", kblocks, k_partial_rope_copy<true><<<kblocks,256,0,g_stream>>>(kout,k,0,kheads,hd,rotary,theta,s->position));
+  if (cudaGetLastError() != cudaSuccess) { s->terminal = true; return 3; }
+  return 0; // Recorded only. No completed-token counter or host state advances.
+}
+
 extern "C" int fak_graph_once_kv_write(void *owner, float *dst, const float *src, int width) {
   fak_graph_once *s = (fak_graph_once *)owner;
   if (!graph_once_capture_admit(s)) return 1;
@@ -125,6 +215,9 @@ static int graph_once_launch(fak_graph_once *s) {
 extern "C" int fak_graph_once_end(void *owner) {
   fak_graph_once *s = (fak_graph_once *)owner;
   if (!s || s != g_graph_once_capture || !g_capture_open) return 1;
+  // Incomplete/invalid quant recording must close capture but never launch it.
+  if (!graph_once_quant_ready(s) || s->quant_cursor != s->quant_count) s->terminal = true;
+  if (s->gdn_check && !s->gdn_check(s,fak_graph_once::GDN_END)) s->terminal = true;
   g_graph_once_capture = nullptr;
   g_capture_open = false;
   cudaError_t e = cudaStreamEndCapture(g_stream, &s->graph);
@@ -136,6 +229,8 @@ extern "C" int fak_graph_once_replay(void *owner, int pos) {
   fak_graph_once *s = (fak_graph_once *)owner;
   if (!s || s->terminal || !s->exec || g_capture_open || g_graph_once_capture ||
       pos != s->next || pos < 0 || pos >= s->capacity || v41_candidates_stream_uncertain()) return 1;
+  if (s->gdn_check && !s->gdn_check(s,fak_graph_once::GDN_REPLAY)) { s->terminal = true; return 1; }
+  if (!graph_once_quant_idle(s)) { s->terminal = true; return 1; }
   int rc = graph_once_set_position(s, pos);
   if (rc) return rc;
   rc = graph_once_launch(s);
@@ -156,6 +251,9 @@ extern "C" int fak_graph_once_release(void **owner) {
     if (cudaGraphDestroy(s->graph) != cudaSuccess) { s->terminal = true; return 3; }
     s->graph = nullptr;
   }
+  int quant_rc = graph_once_quant_retire(s);
+  if (quant_rc) return quant_rc;
+  if (s->gdn_retire) s->gdn_retire(s); // graph and exec no longer refer to borrowed GDN data
   if (s->position) {
     if (cudaFree(s->position) != cudaSuccess) { s->terminal = true; return 2; }
     s->position = nullptr;
@@ -171,6 +269,7 @@ extern "C" int fak_graph_once_copy_input(void *owner, void *dst, const void *src
   fak_graph_once *s = (fak_graph_once *)owner;
   if (!s || s->terminal || !s->exec || !dst || !src || !bytes || g_capture_open ||
       v41_candidates_stream_uncertain()) return 1;
+  if (s->gdn_check && !s->gdn_check(s,fak_graph_once::GDN_COPY)) { s->terminal = true; return 1; }
   cudaError_t e;
   FCUDA_TS("d2d_copy", dim3(0, 0), e = cudaMemcpyAsync(dst, src, bytes, cudaMemcpyDeviceToDevice, g_stream));
   return e == cudaSuccess ? 0 : graph_once_fail(s, 3);
@@ -184,4 +283,62 @@ extern "C" int fak_graph_once_abort(void *owner) {
   cudaError_t e = cudaStreamEndCapture(g_stream, &s->graph);
   int drain = graph_once_drain(s);
   return drain ? drain : (e == cudaSuccess ? 0 : 3);
+}
+
+// Graph arena retirement is deliberately physical, not a pool transfer. A zero
+// return certifies the exact allocation was freed; any nonzero return retains
+// the live record and Go root, closes shared admission, and forbids retry. This
+// cold invalidation path cannot lose the subject to a later pool eviction error.
+extern "C" int fak_graph_once_arena_failed(int status) {
+  if (!status) status = (int)cudaErrorInvalidValue;
+  if (!g_cuda_cleanup_status) g_cuda_cleanup_status = status;
+  return g_cuda_cleanup_status;
+}
+extern "C" int fak_graph_once_arena_release_checked(void *expected, size_t bytes, int f32_input) {
+  if (g_cuda_cleanup_status) return g_cuda_cleanup_status;
+  if (!expected || !bytes || (f32_input != 0 && f32_input != 1) ||
+      g_capture_open || g_graph_once_capture || v41_candidates_stream_uncertain() ||
+      kv_snapshot_release_refused(expected))
+    return fak_graph_once_arena_failed((int)cudaErrorNotReady);
+  cudaError_t status = cudaPeekAtLastError();
+  if (status != cudaSuccess) return fak_graph_once_arena_failed((int)status);
+  cudaStreamCaptureStatus capture;
+  status = cudaStreamIsCapturing(g_stream, &capture);
+  if (status != cudaSuccess) return fak_graph_once_arena_failed((int)status);
+  if (capture != cudaStreamCaptureStatusNone)
+    return fak_graph_once_arena_failed((int)cudaErrorNotReady);
+  auto ordinary = g_live.find(expected);
+  auto managed = g_managed_live.find(expected);
+  auto panel = g_panel_live.find(expected);
+  if ((ordinary != g_live.end()) + (managed != g_managed_live.end()) +
+      (panel != g_panel_live.end()) != 1 ||
+      (ordinary != g_live.end() && ordinary->second != bytes) ||
+      (managed != g_managed_live.end() && managed->second != bytes) ||
+      (panel != g_panel_live.end() && (panel->second != bytes || g_panel_live_bytes < bytes)))
+    return fak_graph_once_arena_failed((int)cudaErrorInvalidValue);
+  {
+    fak_alloc_tags_guard guard;
+    auto found = g_alloc_tags.find(expected);
+    if (found == g_alloc_tags.end()) return fak_graph_once_arena_failed((int)cudaErrorInvalidValue);
+    const fak_alloc_tag &tag = found->second;
+    const bool scratch = tag.cls == FAK_ALLOC_ACTIVATIONS_SCRATCH ||
+        tag.cls == FAK_ALLOC_PREFILL_SCRATCH || tag.cls == FAK_ALLOC_ATTENTION_SCRATCH ||
+        tag.cls == FAK_ALLOC_SAMPLING;
+    // The Go adapter proves F32 input identity and no scale side-channel. All
+    // other arena members come from transient allocators, never packed weights.
+    const bool input_weight = f32_input && ordinary != g_live.end() && tag.cls == FAK_ALLOC_WEIGHTS;
+    const int kind = managed != g_managed_live.end() ? FAK_ALLOC_MANAGED : FAK_ALLOC_DEVICE_LOCAL;
+    if (tag.bytes != bytes || tag.kind != kind || (!scratch && !input_weight) ||
+        (panel != g_panel_live.end() && tag.cls != FAK_ALLOC_PREFILL_SCRATCH))
+      return fak_graph_once_arena_failed((int)cudaErrorInvalidValue);
+  }
+  // Caller has already destroyed graph/exec and completed its final checked
+  // drain under cudaMu. No new work, second drain, cache hook or pool allocation.
+  status = cudaFree(expected);
+  if (status != cudaSuccess) return fak_graph_once_arena_failed((int)status);
+  fak_alloc_untrack(expected);
+  if (ordinary != g_live.end()) g_live.erase(ordinary);
+  else if (managed != g_managed_live.end()) g_managed_live.erase(managed);
+  else { g_panel_live_bytes -= bytes; g_panel_live.erase(panel); }
+  return 0;
 }

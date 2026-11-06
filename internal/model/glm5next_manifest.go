@@ -12,12 +12,29 @@ import (
 // - For layers 0..44:
 //   - Input norm
 //   - Cadence: layer%4 != 3 -> KDA linear mixer weights (linear_attn.in_proj OR q_proj + k_conv1d)
-//   - Cadence: layer%4 == 3 -> DSA sparse mixer weights (q_proj)
+//   - Cadence: layer%4 == 3 -> DSA sparse mixer weights (q_proj OR the q_a/q_b MLA split)
 //   - Cadence: layer < 3   -> Dense MLP weights (gate_proj)
 //   - Cadence: layer >= 3  -> MoE weights (router OR experts.0.down_proj)
 func ValidateGLM5NextManifest(manifest map[string]tensorMeta) error {
+	return validateGLM5NextManifestFor(Config{NumLayers: 45, FirstKDenseReplace: 3}, manifest)
+}
+
+// validateGLM5NextManifestFor is the cfg-driven form: the same cadence contract
+// with the layer count and dense-cutoff taken from the parsed config, so the
+// admission gate accepts any geometry this forward can execute while the
+// exported pinned form keeps checking the canonical 45-layer checkpoint.
+func validateGLM5NextManifestFor(cfg Config, manifest map[string]tensorMeta) error {
 	if manifest == nil {
 		return fmt.Errorf("model: nil GLM5Next manifest")
+	}
+	layers := cfg.NumLayers
+	if layers <= 0 {
+		// A zero-valued config means the pinned canonical checkpoint contract.
+		layers = 45
+	}
+	denseCut := cfg.FirstKDenseReplace
+	if denseCut <= 0 {
+		denseCut = 3
 	}
 
 	prefix := "model."
@@ -57,7 +74,7 @@ func ValidateGLM5NextManifest(manifest map[string]tensorMeta) error {
 		}
 	}
 
-	for l := 0; l < 45; l++ {
+	for l := 0; l < layers; l++ {
 		layerPrefix := fmt.Sprintf("%slayers.%d", prefix, l)
 		normKey := layerPrefix + ".input_layernorm.weight"
 		if !has(normKey) {
@@ -76,13 +93,18 @@ func ValidateGLM5NextManifest(manifest map[string]tensorMeta) error {
 				return fmt.Errorf("model: KDA layer %d missing %s", l, linearKey)
 			}
 		} else {
+			// DSA layers are MLA: the pinned checkpoint carries the q_a/q_b
+			// LoRA split (q_a_proj + q_b_proj); the GGUF-style fused q_proj
+			// naming is the alternative. Either form satisfies the contract.
 			dsaKey := layerPrefix + ".self_attn.q_proj.weight"
-			if !has(dsaKey) {
+			qaKey := layerPrefix + ".self_attn.q_a_proj.weight"
+			qbKey := layerPrefix + ".self_attn.q_b_proj.weight"
+			if !has(dsaKey) && !(has(qaKey) && has(qbKey)) {
 				return fmt.Errorf("model: DSA layer %d missing %s", l, dsaKey)
 			}
 		}
 
-		isDense := l < 3
+		isDense := l < denseCut
 		if isDense {
 			mlpKey := layerPrefix + ".mlp.gate_proj.weight"
 			if !has(mlpKey) {

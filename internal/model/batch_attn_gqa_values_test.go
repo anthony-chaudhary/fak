@@ -43,8 +43,20 @@ func TestSplitKGQAValuesScalarBits(t *testing.T) {
 					saxpy(old[h*width:(h+1)*width], x, a[h])
 				}
 				saxpy3scalar(got[:width], got[width:2*width], got[2*width:], x, a[0], a[1], a[2])
-				assertGQAValueBits(t, fmt.Sprintf("helper width=%d mode=%d step=%d", width, mode, step), got, old)
+				assertGQAScalarArithmetic(t, fmt.Sprintf("helper width=%d mode=%d step=%d", width, mode, step), got, old)
 			}
+		}
+	}
+}
+
+func assertGQAScalarArithmetic(t *testing.T, label string, got, want []float32) {
+	t.Helper()
+	if len(got) != len(want) || cap(got) != cap(want) {
+		t.Fatalf("%s len/cap got=%d/%d want=%d/%d", label, len(got), cap(got), len(want), cap(want))
+	}
+	for i := range want {
+		if !sameGQAArithmeticResult(got[i], want[i]) {
+			t.Fatalf("%s[%d] bits got=%08x want=%08x (%g vs %g)", label, i, math.Float32bits(got[i]), math.Float32bits(want[i]), got[i], want[i])
 		}
 	}
 }
@@ -58,6 +70,40 @@ func assertGQAValueBits(t *testing.T, label string, got, want []float32) {
 		if math.Float32bits(got[i]) != math.Float32bits(want[i]) {
 			t.Fatalf("%s[%d] bits got=%08x want=%08x (%g vs %g)", label, i, math.Float32bits(got[i]), math.Float32bits(want[i]), got[i], want[i])
 		}
+	}
+}
+
+func sameGQAArithmeticResult(got, want float32) bool {
+	// Register allocation can select either NaN operand's payload for a
+	// commutative operation, including under race instrumentation. Every
+	// non-NaN bit, including zero and infinity signs, remains part of parity.
+	return math.Float32bits(got) == math.Float32bits(want) ||
+		(math.IsNaN(float64(got)) && math.IsNaN(float64(want)))
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestGQAArithmeticResultComparison(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		got, want uint32
+		equal     bool
+	}{
+		{"same finite", 0x3f800000, 0x3f800000, true},
+		{"finite one ULP", 0x3f800001, 0x3f800000, false},
+		{"zero sign", 0, 0x80000000, false},
+		{"same infinity", 0x7f800000, 0x7f800000, true},
+		{"infinity sign", 0x7f800000, 0xff800000, false},
+		{"NaN payload and sign", 0x7fc00001, 0xffc23456, true},
+		{"signaling NaN", 0x7f800001, 0x7fc12345, true},
+		{"unexpected NaN", 0x7fc00001, 0x3f800000, false},
+		{"missing NaN", 0x3f800000, 0x7fc00001, false},
+		{"NaN versus infinity", 0x7fc00001, 0x7f800000, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sameGQAArithmeticResult(math.Float32frombits(tc.got), math.Float32frombits(tc.want)); got != tc.equal {
+				t.Fatalf("comparison(%08x, %08x) = %t, want %t", tc.got, tc.want, got, tc.equal)
+			}
+		})
 	}
 }
 

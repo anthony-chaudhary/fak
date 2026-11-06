@@ -1,0 +1,40 @@
+{
+  "rows": [
+    {
+      "id": "x5-mopup-tdebt",
+      "canonical": "tDEBT (tab-separated DEBT column label)",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "The identifier spelling tDEBT that the scorecard's identifier scanner reads out of the tab-escape-prefixed DEBT column labels in fak's tab-separated status table headers - the loop status table (cmd/fak/loop.go), the superloop member table (cmd/fak/superloop.go), and the debtlane wave slot table (internal/debtlane/wave.go); the leading t is the tail of the \\t tab escape fused onto the DEBT column label by the identifier regex, so the token names the DEBT header column, not a debt measurement.",
+      "distinction": "A table-header rendering artifact, NOT a debt metric: unlike total_debt or debt_by_kpi (real scored debt integers folded into the corpus), tDEBT measures nothing - it is only the column under which per-lane/per-member debt counts are printed.",
+      "distinct_from": [
+        "total-debt",
+        "score-debt-debt-by-kpi"
+      ],
+      "aliases": [],
+      "grounding": "tDEBT",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "x5-mopup-reasonintegrityrefuted",
+      "canonical": "ReasonIntegrityRefuted (ABI integrity-refutation reason)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "abi.ReasonIntegrityRefuted is the core ABI refusal reason code (wire name INTEGRITY_REFUTED) attached to a deny verdict when the witness resolver actively refutes the claimed effect - the proof presented contradicts the claim, so the call is refused even though a witness was supplied.",
+      "distinction": "A refusal REASON on the deny verdict, NOT the WitnessRefuted outcome value in the world-state witness triple, NOT callavoid's economic ProofRefuted break-even status, and NOT ReasonUnwitnessed, which fires when no corroborating witness exists at all - here a witness was found and it contradicts the claim.",
+      "distinct_from": [
+        "WitnessRefuted (witness outcome)",
+        "ProofRefuted (callavoid status)"
+      ],
+      "aliases": [],
+      "grounding": "ReasonIntegrityRefuted",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

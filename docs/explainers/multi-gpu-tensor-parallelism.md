@@ -61,6 +61,17 @@ AllReduce per block, the intermediate never gathered. `TensorParallelFFN` and
 `TensorParallelAttention` (`internal/model/tensor_parallel.go`,
 `tensor_parallel_attn.go`) are those composed blocks.
 
+**Vocab-parallel** (the third building block, `internal/model/tensor_parallel_vocab.go`,
+adapted from vLLM's `VocabParallelEmbedding`/`ParallelLMHead` at `v0.33.0rc3`): the token-
+embedding table and the LM head — the two LARGEST projections in a checkpoint — shard across
+the **vocabulary** dimension. Each rank looks up only ids inside its band (out-of-band rows
+masked to zero, upstream `get_masked_input_and_mask`) and the per-rank rows are
+**AllReduce**-summed; each id has exactly one owning rank, so the reduce adds zeros and the
+result is exact. The head computes each rank's logits band and the bands are
+**AllGather**-concatenated in rank order; each logit is one rank's `fdot` over the same
+weight rows as the monolith, so the vocab tail is **bit-exact vs the single-device path at
+every rank count** — no reassociation anywhere, unlike the row-parallel blocks.
+
 The algebra the wired forward path obeys:
 
 ```
@@ -78,6 +89,7 @@ witnessable on a CPU, with **no multi-GPU hardware**.
 | You call | Where | What it does |
 |---|---|---|
 | `Model.ForwardTP(ids, TPConfig{AttnRanks, FFNRanks, Coll})` | `internal/model/tensor_parallel_forward.go` | The wired TP forward. `AttnRanks` shards attention over the kv-head groups; `FFNRanks` shards the FFN over the intermediate dim. `Coll == nil` → `LocalCollective`. |
+| `TPConfig.VocabRanks` | `internal/model/tensor_parallel_vocab.go` | Arms the **vocab-parallel tail**: the embedding table and LM head shard across the vocabulary dimension (the vLLM `VocabParallelEmbedding`/`ParallelLMHead` port). 0/1 keeps the monolithic tail; N>1 is bit-exact vs the monolith at any rank count. Fails closed on a quant-resident/prism/LoRA head seam or an out-of-range id. |
 | `NewTPPlan(dim, ranks)` → `TPPlan` / `TPShard` | `internal/model/tensor_parallel.go` | Validated tiling of one dimension into `ranks` contiguous, non-overlapping, complete shards. Fails closed on a degenerate plan (a rank with no work). |
 | `Collective` (`LocalCollective`) | `internal/model/tensor_parallel.go` | The host-`[]float32` AllGather/AllReduce seam; `LocalCollective` is the single-box, bit-exact default. |
 | `CollectiveBackend` | `internal/compute/compute.go` | The **device-tensor** cross-rank seam at the HAL — the swap-in point for real hardware (see §5). |
@@ -160,6 +172,11 @@ no GPU required:
 | Row-parallel matmul == shard-grouped reference | `model.TestRowParallelMatMulMatchesShardReference` |
 | TP FFN / attention / full layer == monolith | `model.TestTensorParallelFFNMatchesMonolith`, `TestTensorParallelAttentionMatchesMonolith`, `TestTensorParallelLayerMatchesMonolith` |
 | `ForwardTP(ranks=1)` == `Forward` (**bit-exact vs single-device**) | `model.TestForwardTPMatchesForward`, `TestTPForwardRanks1MatchesLive` |
+| **Vocab-parallel embedding** == monolith `embedBand` at every rank count | `model.TestVocabParallelEmbeddingMatchesMonolith` |
+| **Vocab-parallel head** == monolith `logitsFromHidden` at every rank count (tied + untied) | `model.TestVocabParallelHeadLogitsMatchesMonolith` |
+| `ForwardTP(VocabRanks=N)` == `ForwardTP(VocabRanks=1)` == `Forward` (**bit-exact**) | `model.TestForwardTPVocabRanksMatchesRanks1AndForward` |
+| Vocab-parallel fail-closed (OOB id, quant-resident/prism/LoRA head, Q2K table) | `model.TestForwardTPVocabFailClosed` |
+| `tpcheck` vocab-parallel witness (max\|Δ\|=0 at ranks 1/2/4/8) | `go run ./cmd/tpcheck` (the `vocab-parallel tail` table) |
 | Reduction order is rank-order pinned | `model.TestTPForwardReductionRankOrderPinned` |
 | HAL collective bridge == `LocalCollective` byte-for-byte | `model.TestBackendCollectiveMatchesLocal`, `TestForwardTPViaBackendCollective` |
 | **Real cross-process** `ForwardTP` over `DistComm` == single-process `ForwardTP` | `model.TestForwardTPDistCommRanksMatchLocalForwardTP`, `TestForwardTPViaDistCommCollective` |
@@ -193,6 +210,7 @@ and the real multi-GPU run** are the remaining work, and they need multi-GPU har
 ```
 internal/model/tensor_parallel.go          # TPPlan/TPShard, TensorParallelFFN, Collective/LocalCollective
 internal/model/tensor_parallel_attn.go     # TensorParallelAttention
+internal/model/tensor_parallel_vocab.go    # vocab-parallel embedding + LM head (the vLLM port)
 internal/model/tensor_parallel_forward.go  # ForwardTP, TPConfig (the wired forward)
 internal/model/collective_bridge.go        # BackendCollective (model→HAL bridge)
 internal/model/dist_collective.go          # DistComm (cross-process communicator over TCP)

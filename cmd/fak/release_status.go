@@ -347,13 +347,13 @@ func releaseStatusBranchAhead(root, releaseHead, developmentHead string) (int, i
 
 func releaseStatusBranchCI(root, branch, head string) string {
 	if head != "" {
-		row := releaseStatusCIRow(root, "run", "list", "--workflow", "ci.yml", "--commit", head, "--limit", "1", "--json", "status,conclusion,headSha,url")
+		row := releaseStatusCIRow(root, "run", "list", "--workflow", "ci.yml", "--commit", head, "--event", "push", "--limit", "1", "--json", "status,conclusion,headSha,url,event")
 		if len(row) > 0 {
 			return releaseStatusFirstString(releaseStatusString(row["conclusion"]), releaseStatusString(row["status"]))
 		}
 	}
 	if branch != "" {
-		row := releaseStatusCIRow(root, "run", "list", "--workflow", "ci.yml", "--branch", branch, "--status", "completed", "--limit", "1", "--json", "status,conclusion,headSha,url")
+		row := releaseStatusCIRow(root, "run", "list", "--workflow", "ci.yml", "--branch", branch, "--status", "completed", "--event", "push", "--limit", "1", "--json", "status,conclusion,headSha,url,event")
 		if len(row) > 0 {
 			return releaseStatusFirstString(releaseStatusString(row["conclusion"]), releaseStatusString(row["status"]))
 		}
@@ -362,11 +362,22 @@ func releaseStatusBranchCI(root, branch, head string) string {
 }
 
 func releaseStatusCIRow(root string, args ...string) map[string]any {
-	run, err := releaseStatusRunExternalJSON(root, 30*time.Second, "gh", args...)
+	run, err := releaseStatusRunGHJSON(root, 30*time.Second, "gh", args...)
 	if err != nil {
 		return nil
 	}
-	return releaseStatusFirstArrayObject(run)
+	if wrapped, ok := run.(map[string]any); ok {
+		run = wrapped["value"]
+	}
+	rows, _ := run.([]any)
+	for _, value := range rows {
+		row := releaseStatusMap(value)
+		// Manual diagnostics and missing events cannot establish branch CI.
+		if event, ok := row["event"].(string); ok && event == "push" {
+			return row
+		}
+	}
+	return nil
 }
 
 func releaseStatusReleaseLockHeld(root string) bool {
@@ -1142,20 +1153,6 @@ func releaseStatusDirtyRequiresCleanBeforeStatus(dirty map[string]any) bool {
 		return true
 	}
 	return releaseStatusInt(dirty["release_relevant_count"]) > 0
-}
-
-func releaseStatusFirstArrayObject(v any) map[string]any {
-	switch x := v.(type) {
-	case []any:
-		if len(x) > 0 {
-			return releaseStatusMap(x[0])
-		}
-	case map[string]any:
-		if arr, ok := x["value"].([]any); ok && len(arr) > 0 {
-			return releaseStatusMap(arr[0])
-		}
-	}
-	return nil
 }
 
 func releaseStatusMap(v any) map[string]any {

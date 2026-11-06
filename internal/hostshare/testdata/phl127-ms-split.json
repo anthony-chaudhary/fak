@@ -1,0 +1,9 @@
+{
+  "note": "PHL-127-shaped decode profile note: GPU busy ms/token over wall ms/token",
+  "model": "Qwen3.8-27B-UD-Q2_K_XL",
+  "hardware": "strix1",
+  "gpu_ms_per_token": 71.9,
+  "wall_ms_per_token": 75.2,
+  "decode_steps": 128,
+  "date": "2026-10-22"
+}

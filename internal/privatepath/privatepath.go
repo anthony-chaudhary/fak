@@ -94,6 +94,20 @@ func resolveRoot(opts Options) (string, error) {
 		if rel == "." {
 			return "", fmt.Errorf("private root must not be the public checkout: %s", abs)
 		}
+		// Keep the lexical check above, then reject aliases that resolve into
+		// the checkout, including when the checkout itself is a symlink.
+		resolvedRoot, err := filepath.EvalSymlinks(abs)
+		if err != nil {
+			return "", fmt.Errorf("resolve private root symlinks: %w", err)
+		}
+		resolvedPublic, err := filepath.EvalSymlinks(publicAbs)
+		if err != nil {
+			return "", fmt.Errorf("resolve public root symlinks: %w", err)
+		}
+		rel, err = filepath.Rel(resolvedPublic, resolvedRoot)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return "", fmt.Errorf("private root must resolve outside the public checkout: %s", abs)
+		}
 	}
 	return abs, nil
 }

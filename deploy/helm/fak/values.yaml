@@ -1,0 +1,148 @@
+# values.yaml — fak serve chart (#2665).
+#
+# Every toggle below maps 1:1 to a real `fak serve` flag or environment variable
+# (docs/fak/server-config.md) or to a field of the committed Kubernetes manifests
+# (deploy/k8s/fak.yaml = proxy, deploy/k8s/overlays/gpu/fak-gpu.yaml = GPU
+# in-kernel). Nothing here invents config the binary does not have.
+#
+# PRODUCTION RULE (the one that bites first): a network-facing gateway MUST set
+# `requireKeyEnv` and pin a policy floor (`policy.json` below, or an existing
+# ConfigMap via `policy.configMapName`). /healthz is the ONLY unauthenticated
+# route — it drives the probes; every other route requires
+# `Authorization: Bearer <key>`. TLS terminates at your Ingress / load balancer;
+# fak speaks plain HTTP.
+
+# Serving mode:
+#   proxy    — fak adjudicates; an upstream provider generates (--base-url). Light.
+#   inkernel — fak loads GGUF weights into the in-kernel engine on a GPU
+#              (--engine inkernel --backend cuda --gguf ...). Heavy.
+# Must agree with gpu.enabled: inkernel ⇔ gpu.enabled=true (the chart fails
+# closed on a mismatch).
+mode: proxy
+
+# Replicas. null = mode default: proxy 2 (stateless), inkernel 1 (the RWO weights
+# PVC admits one writer; scaling inkernel needs ReadOnlyMany storage).
+replicas: null
+
+image:
+  repository: ghcr.io/anthony-chaudhary/fak
+  # Proxy-mode tag (static image; matches deploy/k8s/fak.yaml). Pin a release
+  # tag, never `latest`.
+  tag: "0.36.0"
+  # In-kernel/CUDA tag (Dockerfile.cuda, #2661); used when mode=inkernel.
+  # `cuda-latest` is the moving tag; pin `<version>-cuda` (e.g. 0.55.0-cuda) for
+  # reproducible deploys.
+  cudaTag: "cuda-latest"
+  pullPolicy: IfNotPresent
+
+# Upstream provider (proxy mode only) — maps to --provider/--base-url/--model/
+# --api-key-env. Empty values omit the corresponding flag (empty baseUrl enables
+# the offline mock planner; empty apiKeyEnv omits the provider key entirely).
+provider: openai                  # openai | anthropic | gemini | xai
+baseUrl: https://api.openai.com/v1
+model: gpt-4o
+apiKeyEnv: OPENAI_API_KEY
+
+# In-kernel model path (inkernel mode only) — maps to --gguf. Inside the pod the
+# weights PVC mounts read-only at /weights.
+gguf: /weights/model.gguf
+
+# Capability floor — maps to --policy (mounted at /etc/fak/policy.json). Either
+# leave configMapName empty so the chart creates <fullname>-policy from `json`
+# below (the committed manifests' default floor), or set configMapName to an
+# EXISTING ConfigMap with a `policy.json` key to mount that instead.
+policy:
+  configMapName: ""
+  json: |
+    {
+      "version": "fak-policy/v1",
+      "posture": "fail_closed",
+      "allow_prefix": ["read_", "get_", "list_", "search_"],
+      "deny": { "bash": "POLICY_BLOCK", "write_file": "POLICY_BLOCK" },
+      "redact_fields": ["api_key", "token", "password"]
+    }
+
+# Authentication — maps to --require-key-env. The value is the NAME of the
+# environment variable holding the bearer token; the token itself lives in the
+# Secret under key `gateway-key`. Empty = no auth (loopback/dev only — do NOT run
+# a network-facing gateway without it).
+requireKeyEnv: FAK_GATEWAY_KEY
+
+# Secret values. Leave EMPTY to have the chart NOT create a Secret — then create
+# one yourself (external secret manager, or `kubectl create secret generic
+# <fullname>-secrets --from-literal=gateway-key=...`) before the pods can start;
+# they stay pending until it exists (fail-closed, never silently unauthenticated).
+#
+# STRONG-KEY WARNING: generate the gateway key with `openssl rand -hex 32`. An
+# empty or weak key exposes the whole gateway; in production prefer an external
+# secret manager over committing a filled value. NEVER commit a filled key.
+secrets:
+  gatewayKey: ""
+  # Upstream provider key (proxy mode only); stored under the key derived from
+  # apiKeyEnv (OPENAI_API_KEY -> openai-api-key, matching the committed manifest).
+  providerKey: ""
+
+# HTTP timeouts — env vars FAK_HTTP_WRITE_TIMEOUT_S / FAK_PLANNER_TIMEOUT_S.
+# null = binary default (90s / 60s); a positive integer sets that env var. In
+# inkernel mode the chart defaults BOTH to 600 (a local model decodes slower than
+# a hosted API) unless you override. The write timeout must stay >= the planner
+# timeout; the chart refuses to render otherwise.
+timeouts:
+  httpWriteSeconds: null
+  plannerSeconds: null
+
+# Resources. `resources` applies in proxy mode; `gpu.resources` in inkernel mode
+# (size memory to the model: >= the .gguf size plus headroom for the KV cache and
+# host staging).
+resources:
+  requests:
+    cpu: "250m"
+    memory: "128Mi"
+  limits:
+    cpu: "1"
+    memory: "512Mi"
+
+gpu:
+  # Enables the nvidia.com/gpu request+limit and the weights PVC. Must equal
+  # (mode == inkernel). Prerequisite: the NVIDIA device plugin (or GPU Operator)
+  # is already installed — fak installs neither.
+  enabled: false
+  resources:
+    requests:
+      cpu: "1"
+      memory: "8Gi"
+    limits:
+      cpu: "4"
+      memory: "16Gi"
+  # Some clusters key GPU pods on a RuntimeClass (GKE/EKS device-plugin pools
+  # usually need none). Set to e.g. `nvidia` if your cluster defines one.
+  runtimeClassName: ""
+  weights:
+    # The PersistentVolumeClaim the chart creates (inkernel mode). Load the .gguf
+    # onto it once at /weights/model.gguf (kubectl cp via a helper pod, a Job, or
+    # your cloud's dataset tooling); every restart reuses it.
+    claimName: fak-weights
+    storage: 50Gi
+    accessModes:
+      - ReadWriteOnce
+    # Neo clouds ship different default classes (CKS/Lambda/GKE/EKS); empty uses
+    # the cluster default.
+    storageClassName: ""
+
+service:
+  type: ClusterIP
+  port: 80          # Service front port (TLS terminates at your Ingress / LB)
+  targetPort: 8080  # container port fak listens on (--addr 0.0.0.0:8080)
+
+# Probes. /healthz answers 200 only AFTER the listener is bound AND the model is
+# loaded, so it drives BOTH liveness and readiness (there is no separate /readyz)
+# and needs no token. null = mode default: proxy 5s/10s liveness, 3s/5s
+# readiness; inkernel 600s/20s liveness (the model-load budget — an early kill
+# would restart-loop the pod) and 30s/10s readiness.
+probes:
+  liveness:
+    initialDelaySeconds: null
+    periodSeconds: null
+  readiness:
+    initialDelaySeconds: null
+    periodSeconds: null

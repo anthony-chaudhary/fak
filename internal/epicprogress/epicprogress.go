@@ -353,6 +353,9 @@ func ParseTaskList(body string) []TaskListItem {
 			continue
 		}
 		mark := ln[3]
+		if strings.IndexByte(" \t\n\v\f\rxX", mark) < 0 {
+			continue
+		}
 		item := TaskListItem{Checked: mark == 'x' || mark == 'X'}
 		if m := issueRefPattern.FindStringSubmatch(ln[5:]); m != nil {
 			if n, err := strconv.Atoi(m[2]); err == nil {

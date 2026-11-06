@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -69,21 +70,40 @@ func TestCompleteRidesAdmit(t *testing.T) {
 // TestAdmitCancelStopsMidDecodeAndReclaims is the acceptance-#3 witness: cancelling
 // ctx after a few streamed tokens stops decode BEFORE the fixed genTokens budget and
 // signals KV reclaim — the per-step control point the buffered Complete never had.
+// fak-test:runtime medium est=1s lane=default
 func TestAdmitCancelStopsMidDecodeAndReclaims(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	e := New()
+	s := e.nativeScheduler()
+	release := holdLifecycleNativeExecution(t, s)
+	const readBeforeCancel = 3
+	cancelBarrier := make(chan struct{})
+	var unbarrier sync.Once
+	releaseCancel := func() { unbarrier.Do(func() { close(cancelBarrier) }) }
+	t.Cleanup(releaseCancel)
+	// Hold the fourth real forward until the reader has canceled after ID3.
+	// Delivery capacity must not decide whether cancellation beats completion.
+	s.beforeModelExecute = func(kind nativeSchedulerEventKind, ln *schedLane) {
+		if kind == nativeSchedulerEventDecode && ln.emitted > readBeforeCancel {
+			select {
+			case <-cancelBarrier:
+			case <-ctx.Done():
+			}
+		}
+	}
 	req, err := e.Admit(ctx, inlineCall("calculate", `{"expr":"2+2"}`))
 	if err != nil {
 		t.Fatalf("Admit: %v", err)
 	}
 
-	const readBeforeCancel = 3
+	release()
 	got := 0
 	for range req.Tokens() {
 		got++
 		if got == readBeforeCancel {
 			cancel()
+			releaseCancel()
 			break // stop reading; the producer must observe cancel at its next step
 		}
 	}
@@ -114,9 +134,11 @@ func TestAdmitCancelStopsMidDecodeAndReclaims(t *testing.T) {
 // now rides NativeScheduler rather than the retired per-request goroutine: requests admitted
 // before any consumer drains them are co-promoted into the scheduler's running set and decode
 // through the shared StepBatch loop, while each lane's tokens remain serial-bit-identical.
+// fak-test:runtime medium est=1s lane=default
 func TestEngineAdmitUsesNativeContinuousBatching(t *testing.T) {
 	ctx := context.Background()
 	e := New()
+	release := holdLifecycleNativeExecution(t, e.nativeScheduler())
 	m := e.model()
 	calls := []*abi.ToolCall{
 		inlineCall("search_flights", `{"from":"SFO"}`),
@@ -150,6 +172,7 @@ func TestEngineAdmitUsesNativeContinuousBatching(t *testing.T) {
 			}
 		}(i, r)
 	}
+	release()
 	wg.Wait()
 
 	if peak := e.nativeScheduler().MaxObservedRunning(); peak < 2 {
@@ -209,12 +232,14 @@ func TestEngineNativeSchedulerMaxRunningEnv(t *testing.T) {
 	}
 }
 
+// fak-test:runtime medium est=1s lane=default
 func TestEngineNativeSchedulerKVPreemptionEnv(t *testing.T) {
 	t.Setenv("FAK_NATIVE_KV_MAX_BLOCKS", "1")
 	t.Setenv("FAK_NATIVE_KV_BLOCK_TOKENS", "128")
 	t.Setenv("FAK_NATIVE_KV_PREEMPT_MODE", "recompute")
 	ctx := context.Background()
 	e := New()
+	release := holdLifecycleNativeExecution(t, e.nativeScheduler())
 	calls := []*abi.ToolCall{
 		inlineCall("issue31_first", `{"prompt":"alpha"}`),
 		inlineCall("issue31_second", `{"prompt":"bravo"}`),
@@ -238,6 +263,7 @@ func TestEngineNativeSchedulerKVPreemptionEnv(t *testing.T) {
 			}
 		}(r)
 	}
+	release()
 	wg.Wait()
 	for i, r := range reqs {
 		if _, err := r.Result(); err != nil {
@@ -252,6 +278,25 @@ func TestEngineNativeSchedulerKVPreemptionEnv(t *testing.T) {
 	if stats.SwapPreemptions != 0 || stats.SwapBytes != 0 || stats.SwapRestoredBytes != 0 {
 		t.Fatalf("FAK_NATIVE_KV_PREEMPT_MODE=recompute used swap stats: %+v", stats)
 	}
+}
+
+// holdLifecycleNativeExecution makes concurrent admission independent of token
+// delivery speed. It joins the real executor on every fixture exit.
+func holdLifecycleNativeExecution(t *testing.T, s *NativeScheduler) func() {
+	t.Helper()
+	s.executor.Lock()
+	var once sync.Once
+	release := func() { once.Do(s.executor.Unlock) }
+	t.Cleanup(func() {
+		s.Close()
+		release()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.CloseAndWait(ctx); err != nil {
+			t.Errorf("lifecycle executor did not stop: %v", err)
+		}
+	})
+	return release
 }
 
 func serialGreedyTokens(m *model.Model, prompt []int) []int {

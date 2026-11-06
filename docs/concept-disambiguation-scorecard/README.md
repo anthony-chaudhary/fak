@@ -15,84 +15,84 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **619** (clarity 0 + coverage 619) |
-| **Crystal-clear concepts (and climbing)** | **1542** crystal of 3353 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3436 / 4055** (84.7% of the discovered confusable space) |
-| **Undrawn twin-pairs (drive to 0)** | **0** of 229 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **95** of 4739 indexed names |
+| **Disambiguation-debt (drive to 0)** | **599** (clarity 1 + coverage 598) |
+| **Crystal-clear concepts (and climbing)** | **1580** crystal of 3464 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3532 / 4130** (85.5% of the discovered confusable space) |
+| **Undrawn twin-pairs (drive to 0)** | **0** of 239 confusable name-pairs |
+| **Ambiguous lookup names (drive to 0)** | **99** of 4855 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 90.1/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 90.2/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3353 concepts - score 90.1/100 (grade A) - disambiguation-debt 619
+concept-disambiguation chart - 3464 concepts - score 90.2/100 (grade A) - disambiguation-debt 599
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ########################.... 1542
-  o defined       ############################ 1811
+  * crystal       #######################..... 1580
+  o defined       ############################ 1884
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
 
 clarity mix by family (each cell = one concept):
-  attention        *********************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (197 concept(s); 93 crystal)
-  cache            **************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (328 concept(s); 146 crystal)
+  attention        ***************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (203 concept(s); 99 crystal)
+  cache            **************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (358 concept(s); 146 crystal)
   context-ctx      ********************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (263 concept(s); 104 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         ***************************************ooooooooooooooooooooo (60 concept(s); 39 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
-  evict            **********************oooooooooooooooooooooooooooooooo (54 concept(s); 22 crystal)
-  gateway-engine   ************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (218 concept(s); 96 crystal)
-  guard-gate       **************************************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (473 concept(s); 230 crystal)
-  layout           ******************ooooooooo (27 concept(s); 18 crystal)
+  evict            **************************oooooooooooooooooooooooooooooooo (58 concept(s); 26 crystal)
+  gateway-engine   *************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (219 concept(s); 97 crystal)
+  guard-gate       ***************************************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (474 concept(s); 231 crystal)
+  layout           ***********************************ooooooooo (44 concept(s); 35 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
-  plan             ******************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (431 concept(s); 186 crystal)
-  policy-capability *************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (228 concept(s); 121 crystal)
-  pool             *************************************oooooooooooooooooooooooooooooooooo (71 concept(s); 37 crystal)
+  plan             *********************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (475 concept(s); 189 crystal)
+  policy-capability *****************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (232 concept(s); 125 crystal)
+  pool             **************************************oooooooooooooooooooooooooooooooooo (72 concept(s); 38 crystal)
   render-materialize *************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (206 concept(s); 49 crystal)
-  score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
+  score-debt       ***********************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (100 concept(s); 35 crystal)
   session-runtime  ***************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (309 concept(s); 135 crystal)
-  support-maturity ******************************************************************oooooooooooooooooooooooooooo (94 concept(s); 66 crystal)
+  support-maturity *******************************************************************oooooooooooooooooooooooooooo (95 concept(s); 67 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
-  witness-proof    *************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (177 concept(s); 85 crystal)
+  witness-proof    *************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (178 concept(s); 85 crystal)
 
 coverage by family (positioned / discovered):
-  plan             ######################...... 493/623
-  cache            ########################.... 373/428
-  gateway-engine   #######################..... 266/320
-  context-ctx      ########################.... 288/333
-  support-maturity ###################......... 98/141
-  guard-gate       ##########################.. 534/576
-  session-runtime  #########################... 327/368
-  pool             ###################......... 73/109
-  attention        ########################.... 191/226
+  plan             ########################.... 536/631
+  gateway-engine   #######################..... 266/324
+  session-runtime  ########################.... 328/382
+  context-ctx      ########################.... 288/334
+  guard-gate       ##########################.. 535/578
+  support-maturity ####################........ 99/142
+  attention        #######################..... 198/238
+  pool             ##################.......... 74/112
+  cache            ##########################.. 403/435
   render-materialize #########################... 224/253
-  evict            ###################......... 61/88
-  score-debt       #######################..... 114/140
-  policy-capability ##########################.. 252/276
-  witness-proof    #########################... 175/199
-  layout           #################........... 27/45
-  loop             ########################.... 100/117
+  evict            ####################........ 65/93
+  policy-capability #########################... 256/283
+  score-debt       #######################..... 115/141
+  witness-proof    #########################... 176/199
+  layout           ##################.......... 35/55
+  loop             ########################.... 100/118
   decision         ###########################. 65/68
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 84.7%  (3436/4055 confusable tokens positioned)
+namespace coverage  [############################....] 85.5%  (3532/4130 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
-  mutual       ############################ 229
+  mutual       ############################ 239
   one-sided    ............................ 0
   undrawn      ............................ 0
-  pairs separated   [################################] 229/229
+  pairs separated   [################################] 239/239
 
-name index: 4739 lookup name(s) -> 3353 concept(s), 95 ambiguous
+name index: 4855 lookup name(s) -> 3464 concept(s), 99 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -114,12 +114,12 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 
 | Separation metric | Value |
 |---|---|
-| Confusable name-pairs discovered | 229 |
-| **Separated from each other (drive to all)** | **229 / 229** (229 mutual, 0 one-sided) |
+| Confusable name-pairs discovered | 239 |
+| **Separated from each other (drive to all)** | **239 / 239** (239 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2792 / 6126 |
-| Dangling `distinct_from` references (drive to 0) | 0 |
+| Boundaries drawn (mutual / total) | 2990 / 6412 |
+| Dangling `distinct_from` references (drive to 0) | 1 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
 
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4739 over 3353 concepts |
-| Lookup names landing on several concepts | 95 |
+| Lookup names indexed | 4855 over 3464 concepts |
+| Lookup names landing on several concepts | 99 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3353 |
+| Concepts carrying a contrast set | 3464 |
 
 ## The concepts (best verdict first)
 
@@ -157,6 +157,12 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | attention | **fvk_qwen35_attention_qg_supported** - Mutation-free eligibility predicate for Vulkan fused interleaved-QG postprocessing. |
 | * | crystal | symbol | attention | **fvk_qwen35_attention_qg_f32** - Checked Vulkan command-recording boundary for direct interleaved QG consumption, Q/K normalization, partial RoPE, unchanged gate extraction and three KV-tail outputs. |
 | * | crystal | symbol | attention | **fcuda_kv_attention_typed** - CUDA device attention entrypoint reading F16 or BF16 position-major attended KV planes with F32 queries and online-softmax accumulators. |
+| * | crystal | symbol | attention | **kvFP8AttentionQuery** - Private retained F32 query owner, exact byte extent and backend/device metadata for one staged FP8 attention operation. |
+| * | crystal | symbol | attention | **kvFP8AttentionOutput** - Ephemeral F32 output allocation view and cumulative numerical-status allocation scoped to the checked staged-attention use callback. |
+| * | crystal | symbol | attention | **kvFP8AttentionRoots** - Retention holder for prior raw/key/value input roots, the query owner and fresh output allocation across uncertain staged FP8 attention work. |
+| * | crystal | symbol | attention | **kvFP8AttentionBytes** - Checked F32 query/output byte-extent calculation for the bounded four-KV-head, head-dimension-256 staged FP8 attention geometry. |
+| * | crystal | symbol | attention | **cudaKVFP8Adapter.stagedAttentionLocked** - Uncalled qualification-only typed query gate and binding of the retained staged-attention helper to the private native FP8 attention wrapper under existing ForwardExecutionOwner and cudaMu serialization. |
+| * | crystal | symbol | attention | **fcuda_kv_fp8_attention_owned** - Private native five-plane, query, output and status provenance/extent/alias gate around the existing scalar FP8 attention submission, returning a selected diagnostic receipt. |
 | * | crystal | symbol | attention | **qwen35_attention_qg** - Vulkan registered shader module for fused interleaved QG attention postprocessing with a separate unchanged gate output. |
 | * | crystal | symbol | attention | **attention implementation surface for attnresidual** - `attn_residual` is the attention phase symbol at `internal/model/qwen35_prefill.go:100`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | attention | **attention implementation surface for accumulateattentiongroup** - `accumulateattentiongroup` is a concrete tree symbol classified in the `attention` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
@@ -537,6 +543,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | concept | dev-tier | **fak-dev command surface** - The separately buildable `cmd/fak-dev` maintainer CLI that dispatches repository-development commands such as ci-preflight, buildcheck, plan-audit, orient, and issue tooling through internal/devcmd. |
 | * | crystal | subsystem | dev-tier | **devindex** - internal/devindex: the CATALOG that classifies every verb's tier (TierFrontdoor / TierDev / TierHidden) from the live dispatch switch - the WITNESSED source the two operator-heaviness meters read to split frontdoor_verbs from dev_verbs. |
 | * | crystal | symbol | evict | **EvictionVictim** - cacheprice.EvictionVictim(residents) returns the INDEX of the disaggregated-KV-pool prefix to evict first: the lowest retention DENSITY (DisaggregationRetentionValue per CapacityTokens), compared exactly by cross-multiplication (float-free), ties breaking toward the larger footprint. |
+| * | crystal | symbol | evict | **kvFP8EvictionPlan (eviction descriptor)** - Eviction-family view of the same kvFP8EvictionPlan symbol: an owner-generation-bound row relocation descriptor retaining exact per-layer rotary contracts for complete-image replacement. |
+| * | crystal | symbol | evict | **kvFP8Owner.planEvict (eviction planning)** - Eviction-family view of the same planEvict method: validates the current complete-image row relocation contract and constructs its generation-bound mapping without device effects. |
+| * | crystal | symbol | evict | **kvFP8EvictEager** - Complete-image eager FP8 eviction entry that constructs a current-owner canonical-row plan and delegates its checked execution to kvFP8ApplyEvictionEager. |
+| * | crystal | symbol | evict | **kvFP8ApplyEvictionEager** - Executes a prepared generation-bound FP8 eviction mapping through disjoint all-layer staging, exact retained-row copies, bounded suffix rerotation, quantization and checked completion before publication. |
 | * | crystal | symbol | evict | **evict implementation surface for evictionpageaware** - `EvictionPageAware` is the evict symbol declared at `internal/radixkv/radixkv.go:135`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | evict | **PIN_EVICT_REFUSED (survival-class compaction refusal)** - The closed refusal token a history compaction names when the plan it was about to forward would have evicted a page the kernel classes PINNED - the session's active steer, its live continuation seed, or a standing system invariant (#2421). Registered in dos.toml [reasons.PIN_EVICT_REFUSED] and in the internal/agent compaction bail vocabulary; on it the outbound body is forwarded UNCHANGED rather than compacted lossily. |
 | * | crystal | symbol | evict | **ctxplan.ClassEvictable (survival class)** - The least-protected member of ctxplan's survival-class vocabulary (#2421): a context page that may be dropped and is then genuinely gone - aged transcript prose. It is the ZERO value of SurvivalClass, so an unstamped or unrecognised page falls to it and can never be silently promoted into the protected set by a kind string the model supplied. |
@@ -642,6 +652,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | metric | gateway-engine | **fak_gateway_go_goroutines** - Gateway gauge of live Go goroutines in the gateway process from the runtime scheduler observation; omitted when unavailable. |
 | * | crystal | metric | gateway-engine | **fak_gateway_device_transient_pool_bytes** - Gateway gauges labeled by backend and kind for request-transient device buffers parked for reuse: kind=pooled is current parked bytes, kind=peak is the high-water mark since backend start. Backends without the optional pool reporter emit no series. |
 | * | crystal | metric | gateway-engine | **fak_gateway_device_transient_pool_buffers** - Gateway gauge labeled by backend for the current count of request-transient device buffers parked for reuse. It is emitted only when the optional backend pool reporter supplies an observation. |
+| * | crystal | symbol | gateway-engine | **InterKernelGapSumUs (v3 receipt host-overhead decomposition)** - `InterKernelGapSumUs` is the optional per-repetition field on performance receipts (schema fak-native-performance-receipt/v3) recording the summed microseconds the device sat idle between kernel launches during one decode step. This row positions the v3 host-overhead decomposition symbol so lookup does not conflate it with the in-kernel decode lane layout or the umbrella gateway-engine domain. |
 | * | crystal | symbol | gateway-engine | **newEngineCacheClient (gateway)** - Constructs the optional remote engine-cache reset client from gateway configuration, validating engine and base URL. |
 | * | crystal | symbol | gateway-engine | **inKernelRefeedLastTokenForExactHit** - Removes the final cached prompt token when eligible so an exact cache hit can refeed that token. |
 | * | crystal | symbol | gateway-engine | **In-kernel generation result** - Carries per-request generated and prompt counts, cache-match information, timings, stop status, and execution receipts from in-kernel generation. |
@@ -680,6 +691,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | config | guard-gate | **guardLifecycleTokenEnv** - The constant (guardLifecycleTokenEnv = FAK_GUARD_LIFECYCLE_TOKEN) naming the env var that carries the guard lifecycle IPC auth token used by precompact/stophook. |
 | * | crystal | symbol | guard-gate | **claudeGuardTurnsPerEpoch** - The turn-count multiplier in cmd/dispatchworker/guard.go that converts the per-turn model window ceiling into the CUMULATIVE --context-budget-tokens allowance a dispatch claude worker launches with: budget = max(hardCap - outputReserve, baseline) x claudeGuardTurnsPerEpoch. Set to 12 so the 3-equivalent-restart reaper (3 x 12 = 36 turns) stays behind the ~30-turn wall-clock runway, letting the graceful --max-duration drain win. |
 | * | crystal | symbol | guard-gate | **deepMergeConfig (dispatchworker guard config merge)** - cmd/dispatchworker.deepMergeConfig recursively overlays nested map values onto a base configuration map, preserving unrelated operator keys while replacing scalar or type-conflicting values. |
+| * | crystal | symbol | guard-gate | **engram_folded_gate** - The canonical leaf spelling of the DS4.1 folded Engram gate coefficient tensor (engram_folded_gate.weight): one F32 resident weight carrying the pre-composed per-cell gate product that the V4.1 forward consumes directly, which the GGUF and SafeTensors loaders resolve the locally evidenced upstream spelling onto so the forward's admission lookup finds it. |
 | * | crystal | symbol | guard-gate | **guard_self_tighten** - The admission gate for a SELF-authored (agent-proposed) policy overlay: admitSelfTightenOverlay classifies the delta from the installed effective floor to the proposed one through policy.DiffAmendment and admits only a no-op or tighten-only verdict, so an agent's own authority may ratchet the capability floor tighter but never wider (#5181, epic #5170 Track F). |
 | * | crystal | symbol | guard-gate | **guardSelfTightenOverlay (self-tighten overlay schema)** - cmd/fak/guard_self_tighten_overlay.go: the on-disk schema of the overlay the WRAPPED AGENT may author for itself (.fak/agent/self-tighten.json) - a ratchet-only subset of the policy manifest carrying only Deny, BlockHosts and SelfModifyGlobs, each of which can only narrow the floor. It declares no allow / allow_prefix / posture field and is decoded with DisallowUnknownFields, so a forged widening cannot even be spelled: it fails to decode and the overlay is refused wholesale rather than partially applied (#5181, epic #5170 Track F). |
 | * | crystal | symbol | guard-gate | **guardAdmitSelfTightenProposal** - cmd/fak/guard_self_tighten_overlay.go: the admit-and-install step for an agent-authored tighten proposal. It routes the pair (installed floor, proposed floor) through admitSelfTightenOverlay and replaces policy.Runtime.Adjudicator with the proposal ONLY on an admit verdict, refusing with AmendmentFrozenViolation when there is no runtime to amend. A refusal returns the class and reason and leaves the live floor untouched, so a proposal is installed wholesale or not at all (#5411). |
@@ -890,6 +902,23 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | subsystem | layout | **guard_format_layout** - The guard exit-summary block LAYOUT (guard_format_layout.go) - the pure text layout of the guard summary onto which color is layered at print time (guardColorizeSummary). |
 | * | crystal | symbol | layout | **LayoutDigest (runtime topology search)** - SHA-256 identity of canonical configured runtime topology groups and ranks, including device incarnations, KV ownership and configured resource commitments, binding measured observations to their exact placement. |
 | * | crystal | symbol | layout | **layout implementation surface for daylayout** - `DayLayout` is the layout symbol declared or used at `cmd/fak/git_daily.go:347` as `// LOCAL date, matching gitdaily.DayLayout — the ledger's day keys are local, so a`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | subsystem | layout | **LayoutContract registry (compute)** - internal/compute/layoutcontract is the declarative registry of tensor layout contracts for every quantized kernel family present in-tree (Q4_K, Q8_0, NVFP4, MXFP4): each Contract pins the closed fact set a loader must satisfy - storage order, interleave width, scale layout, padding rule, packing path - plus a source ref pinned at path:line@sha, so loader/kernel drift shows up as a stale ref to re-pin instead of a silent runtime transpose or repack. |
+| * | crystal | cli-verb | layout | **layoutcontract (fak-dev verb)** - The read-only `fak-dev layoutcontract` CLI surface over the layoutcontract registry: families lists registered kernel families, show FAMILY emits the full contract (receipt schema fak.layoutcontract/1), check FAMILY --observed FILE compares an observed-layout file against the contract under the closed field vocabulary storage_order / scale_layout / interleave_width / padding_rule / packing_stage (receipt fak.layoutcontract-check/1; exit 0 match, 1 mismatch, 2 usage-or-unknown-family), and orphans reports registered families with no production call site (receipt fak.layoutcontract-orphans/1). No subcommand mutates state. |
+| * | crystal | symbol | layout | **ErrUnknownFamily (layoutcontract)** - Fail-closed sentinel error returned by layoutcontract.Get/Must for a family tag the registry does not register; callers pin it with errors.Is, and the fak-dev layoutcontract verb maps it to exit code 2 (usage-or-unknown-family). |
+| * | crystal | symbol | layout | **CheckLoaderPackingAgainstInventory (studymonitor)** - studymonitor.CheckLoaderPackingAgainstInventory compares the layout obligations a kernel_inventory evidence record fills (expected_input_layout, swizzle_pattern, scale_layout, packing_source) against a declared loader packing path (PackingPathFacts) and refuses typed instead of accepting: nil when every filled obligation matches, ErrLayoutMismatch when both sides declare differing values on an obligated axis, ErrLayoutUnknown when a filled value falls outside the closed starter vocabulary or the packing path leaves the obligated axis undeclared. The first failing axis in field declaration order is reported; whitespace-only fields count as unfilled. |
+| * | crystal | symbol | layout | **PackingPathFacts (studymonitor)** - The struct declaring what a loader packing path produces for one kernel family's tensors at load time, on the same four layout axes as the kernel_inventory record it is checked against: ExpectedInputLayout, SwizzlePattern, ScaleLayout, PackingSource. Every field is optional - an empty string means the packing path does not declare that axis, which CheckLoaderPackingAgainstInventory treats as unverifiable whenever the record obligates it. |
+| * | crystal | symbol | layout | **ErrLayoutMismatch (studymonitor)** - Closed sentinel refusal from the studymonitor packing check for a kernel_inventory record whose filled layout obligation differs from the value the declared loader packing path produces on the same axis; the witnessed class is LML-07 (ssm_out value-head-tiled GGUF columns fed through the Q8_0 deinterleave packing path). Callers pin the refusal class with errors.Is and never assert on the wrapped message prose. |
+| * | crystal | symbol | layout | **ErrLayoutUnknown (studymonitor)** - Closed sentinel refusal from the studymonitor packing check for a filled layout obligation that cannot be verified: the record value falls outside the closed starter vocabulary, or the packing path leaves the obligated axis undeclared. Novel values and undeclared packing axes refuse as ErrLayoutUnknown rather than being coerced to match. |
+| * | crystal | config | layout | **KnownExpectedInputLayouts (studymonitor)** - Starter closed vocabulary for the kernel_inventory expected_input_layout axis: row-major, tile-swizzled, column-interleaved, value-head-tiled, grouped. The value-head-tiled/grouped order pair names the Qwen3.5-family ssm_out arrangement (GGUF input columns stored value-head-tiled while the GDN core emits grouped order, commit 36d3e634c3, ledger row LML-07). Registry readers stay open to newer values; only the packing check fails closed. |
+| * | crystal | config | layout | **KnownScaleLayouts (studymonitor)** - Starter closed vocabulary for the kernel_inventory scale_layout axis: linear (separate row-major scale array aligned to the weight grid) versus 128x4-tiled (the TensorRT-LLM NVFP4 block-scale image), aligned with the scale layouts fak registers per kernel family. |
+| * | crystal | subsystem | layout | **layoutoracle (package)** - internal/layoutoracle is an independent geometry/stride oracle for tensor descriptors: given a declared descriptor (what the admission plan expects) and an actual descriptor (what the artifact's real header carries), it computes byte geometry from first principles - min/max offset over the strided box times dtype size, overflow-checked - and refuses mismatches before dispatch. It exists because total-byte agreement does not imply layout agreement: LML-02 witnessed published native-safetensors inventory shapes applied unchanged to converted GGUF where mHC [4H,24] flattened vs grouped share the same element count but different axis partitionings. |
+| * | crystal | symbol | layout | **Descriptor (layoutoracle)** - One side of a layoutoracle geometry check - the declared expectation or the artifact's actual header geometry: Shape (outermost-first logical extents; nil/empty is a rank-0 scalar), Strides (ELEMENT strides, not bytes; nil means row-major contiguous, a zero stride marks a padded/broadcast axis), DTypeSize (bytes per element, >= 1), Groups (leading-axis partition: 1 = flat, G > 1 = G blocks of Shape[0]/G along axis 0, requiring Shape[0] % G == 0). |
+| * | crystal | symbol | layout | **ExpectedBytes (layoutoracle)** - layoutoracle.ExpectedBytes computes a descriptor's byte geometry from first principles: with the closed policy (non-negative strides) the minimum offset over the strided box is always 0, so the element span is maxOffset+1 where maxOffset sums (Shape[i]-1)*Strides[i]; zero-size tensors occupy 0 bytes, rank-0 returns DTypeSize, and arithmetic that would overflow int64 errors with ErrOverflow instead of wrapping. |
+| * | crystal | symbol | layout | **CheckGeometry (layoutoracle)** - layoutoracle.CheckGeometry refuses a declared-vs-actual Descriptor pair whose byte geometry or logical grouping disagrees, BEFORE dispatch: both sides validate first (an invalid side yields *InvalidDescriptor naming the side), then rank, per-axis shape, per-axis element stride, dtype size, byte span, and leading-axis grouping are compared in order; the first disagreement is reported as a *Mismatch naming the axis and both values, unwrapping to ErrGroupingMismatch for grouping disagreements and ErrGeometryMismatch for all others. Identical geometry (including nil-vs-explicit row-major strides) passes. |
+| * | crystal | symbol | layout | **ErrGeometryMismatch (layoutoracle)** - Sentinel pinning a structural disagreement between two VALID layoutoracle descriptors: rank, per-axis shape, per-axis element stride, dtype size, or computed byte span. The concrete *Mismatch values carrying those kinds Unwrap to it, so callers pin behavior with errors.Is rather than rendered text. |
+| * | crystal | symbol | layout | **ErrGroupingMismatch (layoutoracle)** - Sentinel pinning a leading-axis partitioning disagreement: the descriptors agree on every byte-level property (rank, shape, strides, dtype, span) but declare different group counts - flat vs grouped storage of the same element set, the LML-02 defect shape. Compared only after all byte properties agree. |
+| * | crystal | symbol | layout | **ErrInvalidDescriptor (layoutoracle)** - Sentinel pinning a descriptor that violates the closed layoutoracle policy: negative dim or stride, non-positive dtype size, inconsistent group partitioning, or stride/rank length mismatch. The concrete *InvalidDescriptor refusal names which side ('declared' or 'actual'), which field (shape/strides/dtype_size/groups), the offending axis (-1 for whole-field), and the offending value. |
+| * | crystal | symbol | layout | **ErrOverflow (layoutoracle)** - Sentinel pinning byte-geometry arithmetic in layoutoracle that exceeds int64 (the mulChecked/addChecked guards in the effectiveStrides/ExpectedBytes paths); huge dims error with ErrOverflow instead of wrapping. |
 | * | crystal | symbol | layout | **WeightLayout (newmodel native envelope)** - newmodel.NativeHardwareEnvelope.WeightLayout names the checkpoint weight packing/storage contract that native obligation compilation must match before allocation, such as gguf-q4-k. |
 | * | crystal | symbol | layout | **StateLayout (newmodel native envelope)** - newmodel.NativeHardwareEnvelope.StateLayout names the physical organization of recurrent/KV state admitted by obligation compilation, such as contiguous, independent of state kind and residency. |
 | * | crystal | symbol | layout | **Layout (tensor)** - Tensor element physical arrangement: RowMajor, ColMajor, or other ordering |
@@ -974,6 +1003,9 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | plan | **PlanV41Q3KTokenPanel** - Pure planner validating Q3_K matrix geometry, block divisibility, padded 110-byte block storage, signed 32-bit byte bounds and exactly 2/4/8 token rows before returning V41Q3KTokenPanelPlan. |
 | * | crystal | symbol | plan | **cudaSequenceSplitScratchPlan** - Immutable checked per-half byte capacities for a Qwen CUDA layer-sequence compensated split loan, with independent maximum weight-half and activation-half sizes. When a nonzero loan is active, capacity is reserved for two weight buffers and two activation buffers within one private loan. |
 | * | crystal | symbol | plan | **planCUDASequenceSplitScratch** - Pure geometry preflight that computes the checked weight-half and activation-half capacities for an eligible Qwen CUDA compensated layer-sequence split loan from the existing P >= 128 dispatch predicates and locked Q4-arm snapshot. It validates dimensions and byte overflow, ignores irrelevant Q4 errors, and returns zero capacities when no eligible layer projection exists. |
+| * | crystal | symbol | plan | **Qwen35GDNPackedInputPlan** - Checked representation metadata for canonical Qwen GDN QKV or Z weights: admitted Q4_K/Q6_K dtype, exact matrix rows and columns, block size and raw byte extent for shared use by loading and estimation; consumer wiring is separate. |
+| * | crystal | symbol | plan | **kvFP8EvictionPlan** - Generation-bound canonical-row relocation map with copied per-layer rotary contracts for complete-image eager FP8 KV eviction. |
+| * | crystal | symbol | plan | **kvFP8Owner.planEvict** - Constructs a canonical-row FP8 eviction mapping from the current owner generation, row range and copied per-layer rotary contracts without device effects. |
 | * | crystal | symbol | plan | **PerContextMemoryPlan** - ContextSizeConfig.PerContextMemoryPlan projects model geometry and a context token count into classed KV and scratch memory demands. Native serve combines this contextPlan with its selected load arm's weight demands for memory sizing and plan JSON. |
 | * | crystal | symbol | plan | **plan implementation surface for candidatedigest** - `candidateDigest` is the plan symbol declared or used at `internal/experiments/nativeperf_transaction.go:101`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | plan | **plan implementation surface for plandigest** - `PlanDigest` is the plan symbol declared or used at `internal/contextq/tree_explore.go:69`. This row positions that concrete implementation surface, not merely the family label. |
@@ -1146,6 +1178,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | policy-capability | **benchmark capability insufficient** - The stable benchmark preflight refusal emitted when a compute resource is present but its observed quantity is below the task minimum. |
 | * | crystal | symbol | policy-capability | **benchmark capability forbidden** - The stable benchmark preflight refusal emitted when the provider environment exposes a capability the task contract requires to be absent. |
 | * | crystal | symbol | policy-capability | **strixPreflight** - Serve runtime field retaining detected Strix appliance capabilities for gateway configuration and hardware-derived feature provenance. |
+| * | crystal | symbol | policy-capability | **Qwen35GDNPackedInputCapability** - Versioned backend source declaration that the existing whole-GDN decode and sequence implementations understand canonical row-major block-256 Q4_K or Q6_K QKV/Z weights with F32 mutable state. |
+| * | crystal | symbol | policy-capability | **Qwen35GDNPackedInputPolicy** - Immutable per-load Q4_K/Q6_K admission decision resolved from explicit enable and force-off controls, the versioned whole-GDN implementation contract and actual backend residency/upload/dtype probes. Its zero value admits no packed GDN inputs. |
+| * | crystal | symbol | policy-capability | **ResolveQwen35GDNPackedInputPolicy** - Resolver that honors default-off and both force-off controls, checks actual whole-GDN decode and sequence method/path contracts, validates the versioned declaration and probes each admitted resident dtype before returning a copied per-load policy or typed refusal. |
+| * | crystal | symbol | policy-capability | **kvFP8HybridPreflight** - Private prerequisite check for one FP8 owner and an exact three-GDN/one-attention layer map: validates canonical position range, fixed partial-RoPE binding, supported selected modes, live GDN invalid-bit roots and non-overlapping storage before whole-forward admission. |
 | * | crystal | symbol | policy-capability | **policy-capability implementation surface for adjudicatereceipt** - `adjudicateReceipt` is the policy-capability symbol declared at `internal/gateway/tool_routing.go:71`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | policy-capability | **policy-capability implementation surface for gatepolicy** - `GatePolicy` is the policy-capability symbol declared or used at `cmd/fak/native_performance_test.go:594`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | policy-capability | **policy-capability implementation surface for faklooppolicy** - `FAK_LOOP_POLICY` is the policy-capability environment variable declared or used at `cmd/fak/loop.go`. This row positions that concrete implementation surface, not merely the family label. |
@@ -1260,6 +1296,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | policy-capability | **DefaultCrossAuditPolicy** - The calibrated CrossAuditPolicy instance built from the measured issue-3854 calibration evidence (two independent families at issue-resolution-audit/v2) with the issue-3859 dogfood loop not green, so the closure gate ships enforcement-capable but in dry-run (#3860). |
 | * | crystal | symbol | policy-capability | **AdjudicateClosure** - The fail-closed shipgate decision function for a high-risk issue closure: structural deny first, then a calibrated, independent, fresh PASS receipt or an audited break-glass; runs dry-run while the calibration and dogfood prerequisites are unmet (#3860). |
 | * | crystal | symbol | policy-capability | **supervision policy** - Typed platform-neutral decision policy for fault-domain restart, reattach, hold, and escalation. |
+| * | crystal | symbol | pool | **Explicit logical token-pool capacity** - NewSharedTokenPoolWithCapacity constructs a device-neutral logical token and byte admission ledger from positive, finite, representable capacity and geometry, without Halo defaults or environment values. |
 | * | crystal | config | pool | **DISPATCH_POOL** - The env var (DISPATCH_POOL) naming which dispatch worker POOL a worker belongs to, forwarded into the guard Pool field alongside DISPATCH_LEASE. |
 | * | crystal | symbol | pool | **FakExpertRingPoolFractionEnv (auto expert-ring host-memory fraction)** - FakExpertRingPoolFractionEnv names FAK_EXPERT_RING_POOL_FRACTION. For auto activated-expert ring sizing with known host MemTotal, the fraction contributes a sizing bound before the activated-layer minimum is applied. The default is 0.10, accepted values satisfy 0 < f <= 0.5, and invalid values are refused. Explicit byte sizes are unaffected; the activated-layer minimum can exceed the fraction-derived bound. |
 | * | crystal | symbol | pool | **MemoryPool** - A declared physical memory allocation pool with an identity and usable capacity for model placement accounting. |
@@ -1576,6 +1613,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | concept | support-maturity | **correctness** - Correctness is the property that the implementation's behavior matches its stated contract or oracle for the case being judged. |
 | * | crystal | concept | support-maturity | **parity** - Parity is a same-workload comparison against a named peer, baseline, or oracle, reporting match, lead, or trailing behavior under the stated conditions. |
 | * | crystal | concept | support-maturity | **maturity** - Maturity is the readiness level of a supported capability after considering implementation completeness, evidence breadth, correctness witnesses, parity results, guardrails, and operating posture. |
+| * | crystal | symbol | support-maturity | **cuda_coverage** - The closed classification CUDACoverage (internal/compute) for how a detected CUDA GPU arch maps to the kernels fak was built with: CUDANative (the arch carries native SASS in the build), CUDAJITFromPTX (no SASS but PTX for a lower arch, so kernels JIT at runtime), or CUDAUncovered (neither). |
 | * | crystal | symbol | support-maturity | **unsupported_coverage** - Machine-readable trajectory audit refusal code emitted when an OpenCode source root is present but its corpus parser is unavailable, marking the source unscanned rather than successfully empty. |
 | * | crystal | symbol | support-maturity | **SupportsV41RoutedFusedGateUp (fused routed gate/up pipeline availability)** - The optional backend predicate reports whether the loaded Vulkan bundle's fused routed-FFN gate/up module serves the given (gate, up) dtype pair, checked before a batched routed layer picks the two-dispatch fused path over the five-dispatch id path. |
 | * | crystal | symbol | support-maturity | **SupportsV41RoutedFusedDown (fused routed down/sum pipeline availability)** - The optional backend predicate reports whether the loaded Vulkan bundle's fused routed-FFN down/sum module serves the given down-projection dtype, checked before a batched routed layer picks the two-dispatch fused path over the five-dispatch id path. |
@@ -1804,6 +1842,36 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | cache | **VCacheContextJoinReport (vCache context-join report path)** - cmd/fak/cachevalue_status.go: the filesystem PATH source for the vCache CONTEXT-JOIN report (how the modeled cache joins against the live context) folded into cache-value status. |
 | o | defined | symbol | cache | **VCacheContextWitnessReport (vCache context-witness report path)** - cmd/fak/cachevalue_status.go + cachevalue_status_vcachewitness.go: the PATH source for the vCache CONTEXT-WITNESS report, whose rows witness that a modeled vCache context matched the real one; rowsFromVCacheContextWitnessReport turns it into status rows. |
 | o | defined | symbol | cache | **vcache_context_snapshot (vCache context state dump)** - cmd/fak/cachevalue_status.go + cachevalue_status_session.go: the vCache CONTEXT SNAPSHOT dependency - a point-in-time dump of the modeled virtual-cache context state that the status report and session analysis read. |
+| o | defined | symbol | cache | **inferCachedTokensByClient** - Per-client map of inferred cached prompt tokens held by the gateway metrics snapshot when a provider does not report cache reads. |
+| o | defined | metric | cache | **KVCacheBytes** - Byte footprint of resident KV tensors as reported by the device-spine gauge and the componentized memory plan. |
+| o | defined | symbol | cache | **kvCacheN** - llama.cpp-shaped timings.cache_n counter recording how many prompt tokens were served from cache, tracked in the gateway perf ledger. |
+| o | defined | doc-term | cache | **kvcache_q8** - Source module internal/model/kvcache_q8.go implementing the Q8_0 quantized KV cache realization (#12981) with its KVPackedRow int8-code scheme. |
+| o | defined | symbol | cache | **KVCacheStationary** - Continuous-batcher admission flag marking a request whose KV cache remains resident in UMA between turns instead of being evicted. |
+| o | defined | metric | cache | **KVCacheUsage** - Unitless fraction (0..1) of engine KV cache in use, accumulated by the vLLM, SGLang and MLX engine adapters from their scrapes. |
+| o | defined | metric | cache | **KVCacheUsagePct** - Percent of KV cache in use exposed by macobs MLX serving telemetry (json kv_cache_usage_pct). |
+| o | defined | metric | cache | **kv_cache_usage_perc** - vLLM wire metric label reporting KV cache usage as a percentage, ingested by the vLLM adapter and mirrored into macobs scrapes. |
+| o | defined | symbol | cache | **MALLCacheModel** - Software model of the AMD Strix Halo 32 MiB on-die MALL Infinity Cache used by the strix compute package for tiling and eviction simulation. |
+| o | defined | config | cache | **MALLCacheSizeMB** - Megabyte knob (json mall_cache_size_mb, default 32) declaring the MALL Infinity Cache size consumed by roofline probes and campaign fanout contracts. |
+| o | defined | config | cache | **MaxKVCacheBytes** - Continuous-batcher configuration cap on total KV cache bytes across active slots, where 0 means unconstrained. |
+| o | defined | doc-term | cache | **mem_cache** - SGLang upstream python module path (python/sglang/srt/mem_cache/) cited in provenance comments behind fak's RadixKV eviction and prefix-ownership adaptations. |
+| o | defined | subsystem | cache | **moecache** - Public pkg/moecache owning the closed routed-expert weight-cache tier vocabulary (DRAM/checkpoint/NVMe) and its typed metric envelope. |
+| o | defined | symbol | cache | **NewMALLCacheModel** - Constructor instantiating the MALL Infinity Cache model with 32,768 sets and 16 ways at 32 MiB. |
+| o | defined | symbol | cache | **PrefixCacheTelemetry** - macobs telemetry block carrying observed provider prefix-cache behavior collected during MLX serving scrapes. |
+| o | defined | doc-term | cache | **radix_cache** - SGLang upstream radix_cache.py module cited in provenance comments backing fak's RadixKV eviction and dense-prefix ownership logic. |
+| o | defined | concept | cache | **RecurrentPrefixCache** - Extend-only prefix cache enabled by the continuous batcher for hybrid models so recurrent-state prefixes are retained without full recompute. |
+| o | defined | config | cache | **StrixHaloInfinityCacheBytes** - Byte capacity of the Strix Halo Infinity Cache (L3) used by ROCm compute planning to check scratch fit. |
+| o | defined | config | cache | **StrixHaloMALLCacheSizeMB** - Megabyte capacity constant (32 MB) of the Strix Halo Infinity/MALL cache feeding roofline probes and qwen38campaign fanout contracts. |
+| o | defined | symbol | cache | **TokenCountsServerUsageNoCacheRpt** - agentxbench token-counts status constant "server_usage_cache_unreported" marking receipts where server usage is present but the cache breakdown is unreported. |
+| o | defined | config | cache | **UMACacheLineAlignment** - 64-byte cache-line alignment matching Zen 5 CPU MMU expectations, applied to Strix UMA pool-allocator allocations. |
+| o | defined | symbol | cache | **uncachedPrompt** - Local prompt-token delta not served from cache, computed as total minus cached in bench effort scoring and gateway ctx-value observation. |
+| o | defined | metric | cache | **UncachedTokens** - Uncached-token count fed to cache regime classification (cacheobs) and effort-bench receipts. |
+| o | defined | symbol | cache | **updateCachedSnapshot** - l3server shard size-tracker method refreshing the cached shard-size snapshot after shard operations and rebalance. |
+| o | defined | symbol | cache | **v41AttentionRolesCached** - V4.1 model method resolving per-layer KV/index execution roles, memoized across forward steps. |
+| o | defined | symbol | cache | **V41EngramRowCache** - Byte-oriented cache of V4.1 engram rows (Q2_K packed) read geometry-agnostic from GGUF checkpoints. |
+| o | defined | symbol | cache | **V41KVCacheLayoutFor** - Resolver returning the published V4.1 KV cache layout for one record quant format. |
+| o | defined | symbol | cache | **V41KVCacheLayouts** - Closed set of published V4.1 KV record layouts (fp8 first) returned for census and enumeration. |
+| o | defined | cli-verb | cache | **vcache_codex_session_extract** - fak vcache codex-session-extract verb sanitizing a raw Codex session JSONL into vCache observed-window rows, optionally emitting a snapshot and score artifact. |
+| o | defined | symbol | cache | **WithExpertPageCache** - ggufload functional option enabling the expert checkpoint page cache (issue #1302) on expert sources, keeping the historical ReadAt path when off. |
 | o | defined | metric | cache | **CacheReadFraction (prompt-served-from-cache share)** - cachevaluereport.CacheReadFraction is the share of prompt tokens the provider served from its prompt cache (cache_read / prompt_tokens), surfaced in the cache-value audit row and the TUI savings overview. |
 | o | defined | metric | cache | **FakCompactionCacheReadTokens (compaction-point cache_read counter)** - gateway.FakCompactionCacheReadTokens is the OBSERVED provider cache_read token count at a session's compaction point - the tokens the provider evidenced as cache_reads, surfaced in cache_pricing and the /debug/vars attribution block. |
 | o | defined | metric | cache | **CacheTTLUpgradesUpgraded (managed-cache TTL-upgrade counter)** - gatewayusageledger.CacheTTLUpgradesUpgraded (with CacheTTLUpgradeReasons) is the usage-ledger counter pair recording how many times the managed-cache posture AUTHORED a 1h-TTL upgrade of a stable prefix (wrote ttl:1h into the outbound body) and why, surfaced in the weekly cache-value report. It counts fak AUTHORING, NOT the provider ACCEPTING: on a subscription-OAuth seat the provider 400s the 1h body, so a nonzero count there is a crash signal, not realized 1h caching. |
@@ -2829,6 +2897,47 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | plan | **DispatchLaneCandidate (dispatch lane scoring input)** - internal/dispatchtick's DispatchLaneCandidate is the normalized input to unattended whole-lane scoring: lane, priority, step budget, count, and core flag, scored by DispatchLaneScorer functions. |
 | o | defined | symbol | plan | **indexCtxPlans (fak index ctxplans verb)** - cmd/fak's indexCtxPlans is the `fak index ctxplans` verb (#2202): it enumerates context-touching surfaces (cmd verbs + skills) marked DECLARED or UNDECLARED for the ctxplan-required advisory lint. |
 | o | defined | symbol | plan | **PlanMemoryComponents (session byte budget)** - PlanMemoryComponents validates independently typed KV, recurrent, expert, and scratch byte descriptors and returns their exact total within a session device budget before any pool allocation. |
+| o | defined | symbol | plan | **packedPrefillCandidateLocked (NativeScheduler packed-prefill lane lock)** - A NativeScheduler predicate reporting whether a schedLane's packed prefill candidate is locked, reserving that candidate against concurrent lane scheduling. |
+| o | defined | symbol | plan | **CategoryPlanAndDecompose (agentopt operational category)** - The OperationalCategory value 'plan_and_decompose' classifying initial prompts, high-level queries, and replan instructions as effort-high turns in the intra-model router. |
+| o | defined | symbol | plan | **PlanCompile (buildwitness matrix compile plan)** - A buildwitness constructor producing the MatrixCompilePlan describing how one package variant compiles for one release target and output path. |
+| o | defined | symbol | plan | **PlanDeviceBands (model multi-device band assignment)** - A model package planner assigning one contiguous weight band to each device in order, minimizing cross-band traffic under per-device byte budgets. |
+| o | defined | symbol | plan | **PlanLedgerDiff (gateway post-load planner-vs-ledger diff)** - The gateway ModelLoadProfile field carrying the post-load diff between the fit planner's predicted memory and the allocation ledger's live numbers. |
+| o | defined | symbol | plan | **planLedgerDiffState (agent once-per-serve first-prefill diff)** - An unexported agent package state holding the once-per-serve first-prefill diff between the in-kernel planner's prediction and the allocation ledger. |
+| o | defined | symbol | plan | **PlannedLanes (debtlane wave-plan lane count)** - The debtlane WavePlan field counting how many lanes the debt wave plan scheduled across its total waves. |
+| o | defined | symbol | plan | **plannerKVPrecisionError (in-kernel planner KV precision check)** - An agent package helper returning the error for requesting a given KV precision on a model/backend combination during in-kernel planner configuration. |
+| o | defined | symbol | plan | **planServeGoMemoryLimit (serve Go runtime limit plan)** - A cmd/fak helper computing the serveGoMemoryLimitPlan that decides what Go runtime memory limit to set for a serve process given host load peak and total host memory. |
+| o | defined | symbol | plan | **PlanSpan (radixkv prompt segment)** - A radixkv struct describing one contiguous segment of tokens in the executed prompt, recorded as part of a ReusePlan's span list. |
+| o | defined | symbol | plan | **PlanValid (StrixComparatorPlanValidation verdict)** - The StrixComparatorPlanValidation field meaning the strix comparator manifest is internally complete enough to take to a real device. |
+| o | defined | symbol | plan | **PrefillArmCandidate (macbench prefill witness arm)** - The macbench prefill-witness arm name 'candidate' identifying the candidate implementation side of a baseline-versus-candidate prefill benchmark. |
+| o | defined | symbol | plan | **PublishCandidates (V41 attention state candidate mask publish)** - A V41AttentionState method recording the latest source-published V4.1 candidate mask and ratio for incremental attention. |
+| o | defined | symbol | plan | **Qwen4ExpPLEHashPlan (CUDA PLE hash operation plan)** - A compute package interface for a prepared device-resident Qwen4-expert PLE hash operation that is dispatched after preparation. |
+| o | defined | symbol | plan | **reCtxplanSkill (ctxplan markdown skill marker regex)** - The compiled regular expression matching the '<!-- fak:ctxplan' HTML-comment marker that declares a ctxplan skill block in markdown. |
+| o | defined | symbol | plan | **reCtxplanVerb (ctxplan Go comment verb regex)** - The compiled regular expression matching the '//fak:ctxplan' comment verb that marks Go source as ctxplan-managed. |
+| o | defined | symbol | plan | **resolveStrixCandidate (devcmd strix candidate commit resolver)** - A devcmd helper resolving a strix candidate directory plus optional explicit tip and mine paths into a concrete resolvedStrixCandidate commit. |
+| o | defined | symbol | plan | **radixkv.ReusePlan (compiled reuse layout)** - A radixkv struct representing the compiled execution and reuse layout for a prompt, composed from non-overlapping token spans covering the prompt range. |
+| o | defined | symbol | plan | **RunFleetPlan (goalrunner serial fleet executor)** - A goalrunner function running the contracts in a FleetPlan serially and recording witness evidence for each contract. |
+| o | defined | symbol | plan | **ScannedCandidates (issue orchestrator discovery counter)** - The issue orchestrator wave-result field counting how many candidate issues the discovery scan examined before dispatchability filtering. |
+| o | defined | symbol | plan | **SchemaCandidate (readmenext fragment schema id)** - The readmenext constant 'fak-readme-candidate/1' identifying the canonical schema of README candidate fragments. |
+| o | defined | symbol | plan | **serveFitPlanSizing (serve sizing artifact echo)** - A cmd/fak struct echoing what the serve sizing artifact already sized so the fit plan re-reads no pool budget. |
+| o | defined | symbol | plan | **serveGGUFWeightMemoryPlanForArm (per-arm GGUF weight plan)** - A cmd/fak function computing the compute.MemoryPlan for one serve load arm's GGUF weight bytes under Q4K load options. |
+| o | defined | symbol | plan | **serveStreamedCPUOffloadCorePlan (streamed offload fold without context rows)** - A cmd/fak function returning the streamed CPU-offload memory fold WITHOUT the context-sized rows, shared by the fit and load arms. |
+| o | defined | symbol | plan | **serveStreamedCPUOffloadPlanForAperture (split-aperture streamed offload plan)** - A cmd/fak function that is serveStreamedCPUOffloadPlanForPool with the device split-aperture made backend-aware. |
+| o | defined | symbol | plan | **serveStreamedCPUOffloadPlanForPool (shared-pool streamed offload plan)** - A cmd/fak function that is serveStreamedCPUOffloadPlan with the shared host/device pool topology made explicit. |
+| o | defined | symbol | plan | **SetCandidateCache (selfupdate receipt builder setter)** - A selfupdate Builder method recording whether candidate compilation reused shared warm worktree objects or populated cold entries, stamped on the update receipt. |
+| o | defined | symbol | plan | **Server.SetPlanner (gateway active chat planner setter)** - A gateway Server method installing the active agent.Planner used for chat turns on that server. |
+| o | defined | symbol | plan | **SpecRejectionPlan (speculative decode rejection decision)** - A model package side-effect-free decision for one stochastic speculative-decoding round, built from immutable evidence and optionally committed by the caller. |
+| o | defined | symbol | plan | **SpecRejectionPlanInput (speculative rejection evidence)** - A model package struct carrying the immutable evidence for one stochastic speculative-decoding round fed to BuildSpecRejectionPlan. |
+| o | defined | symbol | plan | **SpeculativeGraphPlanner (CUDA graph capture planner)** - A compute package planner managing speculative-decode CUDA graph capture dimensions and producing stable capture keys. |
+| o | defined | symbol | plan | **turnkeyPlannerContextWindow (fak up planner window probe)** - A cmd/fak helper extracting the context-window token count from a turnkey agent.Planner so 'fak up' can report it. |
+| o | defined | symbol | plan | **UnifiedHostResidencyPlan (ggufload host residency plan)** - A ggufload WeightSource method sizing the plan whose total simultaneous physical footprint bounds host-resident weight residency. |
+| o | defined | doc-term | plan | **unplannable (issue orchestrator non-dispatchable class)** - The issue orchestrator's term for issues that cannot be turned into a dispatchable plan leaf, used in the --auto-expand flag help and the high-ratio advisory warning. |
+| o | defined | metric | plan | **UnplannableRatio (issue orchestrator non-dispatchable share)** - The issue orchestrator wave-result ratio of non-dispatchable (unplannable) issues to all scanned issues in one discovery window. |
+| o | defined | config | plan | **UnplannableWarnRatio (issue orchestrator advisory threshold)** - The issue orchestrator option and --unplannable-warn-ratio flag (default 0.65) setting the unplannable-ratio threshold that triggers the advisory warning and dynamic horizon expansion. |
+| o | defined | symbol | plan | **v41_candidates_stream_uncertain (CUDA peer uncertain-state guard)** - A process-wide C++ predicate in cuda_kernels.cu returning true when any V4.1 CUDA peer (checked stream, router, mmid, swiglu, engram, compressor pool, MHC, bf16 publish) has latched an uncertain state, refusing further shared-stream operations. |
+| o | defined | symbol | plan | **V41SelectCandidateBlocks (V4.1 indexer level-one selector)** - A model package function implementing the first level of the V4.1 indexer, selecting top-K compressed blocks from logits into a candidate mask. |
+| o | defined | symbol | plan | **validateEventCandidateScope (validate test-event scope checker)** - A validate package function checking that test events' candidate scopes stay inside the validated root before acceptance. |
+| o | defined | symbol | plan | **ValidateStrixComparatorPlan (device-free strix comparator validator)** - A llamacppinterop function performing fail-closed device-free validation of a proposed StrixComparatorManifest's immutable identity, returning a StrixComparatorPlanValidation. |
+| o | defined | symbol | plan | **VulkanHazardPlan (Vulkan batch hazard lowering)** - A compute package deterministic lowering result for one Vulkan batch window, capturing barrier floors and hazard statistics. |
 | o | defined | symbol | plan | **PlanTick (gardenbundle)** - gardenbundle.PlanTick(results, dryRun) computes a TickPlan - the decided set of stale-work reap and surface actions for one garden tick from the member results. |
 | o | defined | symbol | plan | **TickPlan (gardenbundle)** - gardenbundle.TickPlan is the value PlanTick returns: the decided reap/surface counts for one garden tick, with Acted() true when the tick will change anything. |
 | o | defined | symbol | plan | **LaneCandidate (dispatchtick)** - dispatchtick.LaneCandidate is one orderable issue in a dispatch lane: its number and the priority signal orderLaneCandidates ranks it by. |
@@ -3148,6 +3257,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | score-debt | **tooling_quality_scorecard** - tools/tooling_quality_scorecard.py is the Python-tooling quality scorecard on the control pane (py_debt) - the meter for Python not yet ported to the Go-first hygiene path. |
 | o | defined | metric | score-debt | **ui_quality_debt** - ui_quality_debt (internal/uiquality DebtKey) is the debt key of the uiquality scorecard over fak's render surfaces. |
 | o | defined | concept | score-debt | **code_slop_scorecard (slop surface)** - code_slop_scorecard is the batch code-slop scorecard (tools/code_slop_scorecard.py; ported engine in internal/clonescan) that grades duplication and other slop KPIs into a slop_score / slop_debt over the Go corpus. |
+| o | defined | symbol | score-debt | **tDEBT (tab-separated DEBT column label)** - The identifier spelling tDEBT that the scorecard's identifier scanner reads out of the tab-escape-prefixed DEBT column labels in fak's tab-separated status table headers - the loop status table (cmd/fak/loop.go), the superloop member table (cmd/fak/superloop.go), and the debtlane wave slot table (internal/debtlane/wave.go); the leading t is the tail of the \t tab escape fused onto the DEBT column label by the identifier regex, so the token names the DEBT header column, not a debt measurement. |
 | o | defined | symbol | score-debt | **cmdConflationScorecard verb** - The cmd/fak Go func that implements `fak conflation-scorecard`, folding internal/conflationscore's findings into the shared scorecard control-pane payload. |
 | o | defined | symbol | score-debt | **cmdLoopIndexScorecard verb** - The cmd/fak Go func that implements the agentic-coding loop-index scorecard: derives each loop stage's witness probes (orient/plan/act/verify/ship/learn) from the tracked tree and folds them into loopindex_debt via internal/loopindex.Score. |
 | o | defined | symbol | score-debt | **cmdMilestoneScorecard verb** - The cmd/fak Go func for `fak milestone-scorecard` (issue #1444): folds the milestone report's maturity-CLIMB and epic-ROADMAP dimensions into a deterministic milestone_debt integer plus a worst-first retire worklist. |
@@ -3444,6 +3554,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | witness-proof | **WitnessWindow** - WitnessWindow (internal/cachewitness/cachewitness.go) is the bounded record window a cache-usage witness folds over. |
 | o | defined | symbol | witness-proof | **WitnessCommands (observed proof commands)** - WitnessCommands is the recorded list of build, test, or verification commands observed in fleet/session summaries as evidence for a claimed change. |
 | o | defined | symbol | witness-proof | **WitnessOK (diff-witnessed constant)** - WitnessOK is the dispatchtick constant value diff-witnessed that marks a claimed resolution as corroborated by the required witness rung. |
+| o | defined | symbol | witness-proof | **ReasonIntegrityRefuted (ABI integrity-refutation reason)** - abi.ReasonIntegrityRefuted is the core ABI refusal reason code (wire name INTEGRITY_REFUTED) attached to a deny verdict when the witness resolver actively refutes the claimed effect - the proof presented contradicts the claim, so the call is refused even though a witness was supplied. |
 | o | defined | subsystem | witness-proof | **buildwitness (default-build compile guard)** - internal/buildwitness is a structural CI-guard package whose test runs `go build ./cmd/fak` under default build tags from a clean checkout, proving the default build is green independent of any WIP file left tagless in the shared tree. |
 | o | defined | symbol | witness-proof | **CommitWitnessed (dispatch-tick audit-row grader)** - internal/dispatchtick.CommitWitnessed(verdict, witness string) bool grades one `dos commit-audit` row into a dispatch-tick worker slot's productive keep-bit, true only when verdict is OK AND witness equals the diff-witnessed constant WitnessOK. |
 | o | defined | symbol | witness-proof | **InvalidationExternalRefutation (cachemeta invalidation-mode)** - internal/cachemeta.InvalidationExternalRefutation ("external_refutation") is the InvalidationMode enum value recording that a cache entry's Coherence.InvalidationMode was set because its bound external world-state witness was refuted, as opposed to LRU, TTL, write-epoch, or policy eviction. |
@@ -3631,41 +3742,41 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| honesty | `kind_grounding_soft` | 60 | 0 | 28 kind/grounding mismatch |
+| separation | `reference_resolves` | 86 | 1 | 1 dangling distinct_from reference(s) |
+| honesty | `kind_grounding_soft` | 60 | 0 | 31 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3334/6126 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3353 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3422/6412 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3464 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
-| separation | `reference_resolves` | 100 | 0 | every distinct_from reference resolves to a real concept |
-| separation | `pair_separated` | 100 | 0 | all 229 confusable name-pair(s) are separated |
+| separation | `pair_separated` | 100 | 0 | all 239 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4739 lookup name(s) resolves - 95 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4855 lookup name(s) resolves - 99 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| plan | 493 | 623 | 130 |
-| cache | 373 | 428 | 55 |
-| gateway-engine | 266 | 320 | 54 |
-| context-ctx | 288 | 333 | 45 |
-| support-maturity | 98 | 141 | 43 |
-| guard-gate | 534 | 576 | 42 |
-| session-runtime | 327 | 368 | 41 |
-| pool | 73 | 109 | 36 |
-| attention | 191 | 226 | 35 |
+| plan | 536 | 631 | 95 |
+| gateway-engine | 266 | 324 | 58 |
+| session-runtime | 328 | 382 | 54 |
+| context-ctx | 288 | 334 | 46 |
+| guard-gate | 535 | 578 | 43 |
+| support-maturity | 99 | 142 | 43 |
+| attention | 198 | 238 | 40 |
+| pool | 74 | 112 | 38 |
+| cache | 403 | 435 | 32 |
 | render-materialize | 224 | 253 | 29 |
-| evict | 61 | 88 | 27 |
-| score-debt | 114 | 140 | 26 |
-| policy-capability | 252 | 276 | 24 |
-| witness-proof | 175 | 199 | 24 |
-| layout | 27 | 45 | 18 |
-| loop | 100 | 117 | 17 |
+| evict | 65 | 93 | 28 |
+| policy-capability | 256 | 283 | 27 |
+| score-debt | 115 | 141 | 26 |
+| witness-proof | 176 | 199 | 23 |
+| layout | 35 | 55 | 20 |
+| loop | 100 | 118 | 18 |
 | decision | 65 | 68 | 3 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |

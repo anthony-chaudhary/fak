@@ -42,6 +42,13 @@
 static ncclComm_t g_pg_comm;
 static int g_pg_rank = -1;
 static int g_pg_world = 0;
+// g_pg_aborted latches the first fcuda_nccl_pg_abort (the TP-group abort-once discipline
+// adapted from ashhart/TensorFold zig/src/cuda/tp_group.zig@9e8c368b0b4c2c7892a0c9f0f302d7c164016209,
+// Apache-2.0; ADAPT — re-expressed, no upstream code copied). Once set, fcuda_nccl_pg_destroy
+// REFUSES the ncclCommDestroy (abort-then-destroy is a no-op — no double teardown of an
+// already-aborted communicator). The closed contract is pinned on a CPU host by
+// nccl_group_lifecycle_test.go (TestNCCLOpGroupAbortOnceNoDestroy).
+static int g_pg_aborted = 0;
 
 extern "C" int fcuda_nccl_pg_get_unique_id(void *out_id) {
   if (out_id == nullptr) return -1;
@@ -82,9 +89,65 @@ extern "C" int fcuda_nccl_pg_allreduce_f32(void *dbuf, int count) {
   return 0;
 }
 
+// fcuda_nccl_pg_send(dbuf, count, peer): post `count` f32 elements at dbuf to rank `peer`
+// over g_pg_comm. Matched counts: the peer's matching fcuda_nccl_pg_recv MUST take the SAME
+// element count — NCCL pairs posts by (peer, count, type), so a mismatched count deadlocks
+// or corrupts the exchange rather than failing clean. Post-sync check: the default stream is
+// synchronized before return so a failed post surfaces HERE, not later in the reader.
+// Returns 0 on success, -1 when no group is active, -2 for a non-positive count, -3 for a
+// peer outside [0, world), else the NCCL/CUDA error code.
+extern "C" int fcuda_nccl_pg_send(void *dbuf, int count, int peer) {
+  if (g_pg_world == 0) return -1;
+  if (count <= 0) return -2;
+  if (peer < 0 || peer >= g_pg_world) return -3;
+  NK(ncclSend(dbuf, (size_t)count, ncclFloat32, peer, g_pg_comm, /*stream=*/0));
+  CKR(cudaStreamSynchronize(0));
+  return 0;
+}
+
+// fcuda_nccl_pg_recv(dbuf, count, peer): receive `count` f32 elements FROM rank `peer` into
+// dbuf. Same matched-counts contract and post-sync check as fcuda_nccl_pg_send; same return
+// codes (-1 uninitialized, -2 bad count, -3 peer out of range).
+extern "C" int fcuda_nccl_pg_recv(void *dbuf, int count, int peer) {
+  if (g_pg_world == 0) return -1;
+  if (count <= 0) return -2;
+  if (peer < 0 || peer >= g_pg_world) return -3;
+  NK(ncclRecv(dbuf, (size_t)count, ncclFloat32, peer, g_pg_comm, /*stream=*/0));
+  CKR(cudaStreamSynchronize(0));
+  return 0;
+}
+
+// fcuda_nccl_pg_check: the post-sync check (TensorFold Group.check analog) — materialize any
+// async error the preceding collectives left on the default stream BEFORE the caller reads
+// results. Call it after a synchronize that consumed a peer-posted buffer. -1 when no group
+// is active, 0 when the stream is clean, the CUDA error code otherwise.
+extern "C" int fcuda_nccl_pg_check(void) {
+  if (g_pg_world == 0) return -1;
+  CKR(cudaStreamSynchronize(0));
+  return 0;
+}
+
+// fcuda_nccl_pg_abort: abort-ONCE. The first call latches g_pg_aborted and runs
+// ncclCommAbort(g_pg_comm) — NCCL gives up the device waits, unblocking any rank stuck in a
+// collective. Later calls are no-ops (0) so no path can double-abort. -1 when no group is
+// active.
+extern "C" int fcuda_nccl_pg_abort(void) {
+  if (g_pg_world == 0) return -1;
+  if (g_pg_aborted) return 0;
+  g_pg_aborted = 1;
+  NK(ncclCommAbort(g_pg_comm));
+  return 0;
+}
+
+// fcuda_nccl_pg_destroy: ordered teardown with the destroy-after-abort refusal. After an
+// abort it performs NO ncclCommDestroy — abort-then-destroy is a no-op: the aborted
+// communicator is already dead, and tearing it down a second time is the double-destroy
+// hazard this lifecycle exists to prevent. Resets the globals either way so a later
+// fcuda_nccl_pg_init can form a fresh group. Safe to call when no group is active (no-op).
 extern "C" void fcuda_nccl_pg_destroy(void) {
   if (g_pg_world == 0) return;
-  ncclCommDestroy(g_pg_comm);
+  if (!g_pg_aborted) ncclCommDestroy(g_pg_comm);
   g_pg_rank = -1;
   g_pg_world = 0;
+  g_pg_aborted = 0;
 }

@@ -2,7 +2,10 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"math"
 	"math/rand"
+	"sort"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -194,4 +197,173 @@ func BenchmarkInkernelSampleOneShot(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = sampleLogitsWithPenalty(logits, 1.0, 0.9, 50, nil, 0, 0, nil, rng)
 	}
+}
+
+// rankedAll is the full-sort oracle: every position ordered by probability
+// descending, ties by ascending input position — the closed contract topKRankOrder
+// must reproduce as a prefix.
+func rankedAll(probs []float64) []int {
+	idx := make([]int, len(probs))
+	for i := range idx {
+		idx[i] = i
+	}
+	sort.Slice(idx, func(a, b int) bool {
+		if probs[idx[a]] != probs[idx[b]] {
+			return probs[idx[a]] > probs[idx[b]]
+		}
+		return idx[a] < idx[b]
+	})
+	return idx
+}
+
+func sameInts(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// fak-test:runtime fast est=5ms lane=default
+// TestTopKBoundedSelectionOrder pins the borrowed bounded top-k selection
+// contract: the O(k)-storage selector returns exactly the top-k of a full sort
+// (value-desc, id-asc), stays tie-stable across repeated calls, agrees with the
+// existing topKTruncate seam on the kept set and surviving mass, allocates only
+// the k indices, and rejects any non-finite row with the package sentinel.
+func TestTopKBoundedSelectionOrder(t *testing.T) {
+	// Fixed row with deliberate ties across ranks: 0.30 x2, 0.25 x2, 0.10 x2, 0.05 x2.
+	probs := []float64{0.05, 0.30, 0.10, 0.30, 0.00, 0.25, 0.05, 0.40, 0.25, 0.10}
+	full := rankedAll(probs)
+
+	t.Run("prefix-equality-small", func(t *testing.T) {
+		for _, k := range []int{1, 2, 3, 5, 8, 10} {
+			got, err := topKRankOrder(probs, k)
+			if err != nil {
+				t.Fatalf("topKRankOrder(k=%d): unexpected error %v", k, err)
+			}
+			if want := full[:k]; !sameInts(got, want) {
+				t.Fatalf("k=%d: rank order %v, want full-sort prefix %v", k, got, want)
+			}
+		}
+	})
+
+	// 200-position row with heavy structured ties ((i*37)%50 cycles all 50 values
+	// four times each) exercises the shared sweep well past the small-k threshold.
+	big := make([]float64, 200)
+	for i := range big {
+		big[i] = float64((i*37)%50) / 100
+	}
+	bigFull := rankedAll(big)
+
+	t.Run("prefix-equality-large", func(t *testing.T) {
+		for _, k := range []int{65, 100, 199} {
+			got, err := topKRankOrder(big, k)
+			if err != nil {
+				t.Fatalf("topKRankOrder(k=%d): unexpected error %v", k, err)
+			}
+			if want := bigFull[:k]; !sameInts(got, want) {
+				t.Fatalf("k=%d: rank order diverges from full-sort prefix at first diff", k)
+			}
+		}
+	})
+
+	t.Run("tie-stability", func(t *testing.T) {
+		// All-equal row: rank order must be pure input position, repeat for repeat.
+		eq := make([]float64, 80)
+		for i := range eq {
+			eq[i] = 0.5
+		}
+		first, err := topKRankOrder(eq, 80)
+		if err != nil {
+			t.Fatalf("topKRankOrder(equal row): unexpected error %v", err)
+		}
+		for i := range first {
+			if first[i] != i {
+				t.Fatalf("equal row position %d = %d, want %d", i, first[i], i)
+			}
+		}
+		second, err := topKRankOrder(eq, 80)
+		if err != nil || !sameInts(first, second) {
+			t.Fatalf("repeated selection not stable: %v vs %v (err=%v)", first, second, err)
+		}
+	})
+
+	t.Run("seam-agreement", func(t *testing.T) {
+		// The existing truncate seam must keep exactly the rank-ordered set, and its
+		// surviving mass must equal the kept values summed in ascending-index order.
+		const k = 100
+		kept, err := topKRankOrder(big, k)
+		if err != nil {
+			t.Fatalf("topKRankOrder: unexpected error %v", err)
+		}
+		row := append([]float64(nil), big...)
+		var total float64
+		for _, p := range row {
+			total += p
+		}
+		sum := (&samplerWorkspace{}).topKTruncate(row, total, k)
+		wantSet := make([]bool, len(row))
+		for _, idx := range kept {
+			wantSet[idx] = true
+		}
+		for i := range row {
+			if (row[i] != 0) != wantSet[i] {
+				t.Fatalf("position %d survivor=%v, rank-order kept=%v", i, row[i] != 0, wantSet[i])
+			}
+		}
+		order := append([]int(nil), kept...)
+		sort.Ints(order)
+		var wantSum float64
+		for _, idx := range order {
+			wantSum += big[idx]
+		}
+		if sum != wantSum {
+			t.Fatalf("surviving mass %v, want kept-set sum %v", sum, wantSum)
+		}
+	})
+
+	t.Run("allocation-contract", func(t *testing.T) {
+		// The borrowed storage bound: exactly one allocation, the k-index slice.
+		allocs := testing.AllocsPerRun(10, func() {
+			_, _ = topKRankOrder(big, 100)
+		})
+		if allocs != 1 {
+			t.Fatalf("topKRankOrder allocated %v per call, want 1 (the k-index slice)", allocs)
+		}
+	})
+
+	t.Run("non-finite-row-rejects", func(t *testing.T) {
+		for name, bad := range map[string]float64{"nan": math.NaN(), "+inf": math.Inf(1), "-inf": math.Inf(-1)} {
+			row := append([]float64(nil), big...)
+			row[3] = bad
+			got, err := topKRankOrder(row, 10)
+			if !errors.Is(err, ErrNonFiniteLogits) {
+				t.Fatalf("%s row: error = %v, want ErrNonFiniteLogits", name, err)
+			}
+			if got != nil {
+				t.Fatalf("%s row: partial selection %v returned, want none", name, got)
+			}
+		}
+	})
+
+	t.Run("k-clamping", func(t *testing.T) {
+		// k beyond the row returns the whole row in rank order; k<=0 selects nothing.
+		all, err := topKRankOrder(probs, 100)
+		if err != nil {
+			t.Fatalf("topKRankOrder(k>len): unexpected error %v", err)
+		}
+		if !sameInts(all, full) {
+			t.Fatalf("k>len: %v, want full rank order %v", all, full)
+		}
+		if got, err := topKRankOrder(probs, 0); err != nil || got != nil {
+			t.Fatalf("k=0: (%v, %v), want (nil, nil)", got, err)
+		}
+		if got, err := topKRankOrder(nil, 5); err != nil || got != nil {
+			t.Fatalf("empty row: (%v, %v), want (nil, nil)", got, err)
+		}
+	})
 }

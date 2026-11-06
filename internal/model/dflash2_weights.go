@@ -12,7 +12,9 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -296,4 +298,138 @@ func (w *dflash2Weights) Close() error {
 		}
 	}
 	return w.closeErr
+}
+
+var (
+	// ErrDFlash2SidecarUnavailable marks a pinned sidecar that cannot be
+	// opened or authenticated for a load. Callers surface it verbatim: the
+	// serial verify route stays visible instead of a silent host fallback.
+	ErrDFlash2SidecarUnavailable = errors.New("dflash2: sidecar artifact unavailable")
+	// ErrDFlash2SidecarReleased marks a handle retired by its last release.
+	ErrDFlash2SidecarReleased = errors.New("dflash2: sidecar handle released")
+)
+
+// dflash2RetainSidecarOpener opens and authenticates one sidecar file. The
+// private test seam lets the retention lifecycle run against a tiny real
+// file instead of the 3.8 GiB stock artifact.
+var dflash2RetainSidecarOpener = openQwen38DFlash2Weights
+
+type qwen38DFlash2SidecarEntry struct {
+	w    *dflash2Weights
+	refs int
+}
+
+// dflash2SidecarRetention retains the pinned BF16 sidecar once per load:
+// every retained handle shares the single authenticated reader, and the last
+// release closes the file. The key is the cleaned absolute path; the file
+// must remain immutable for the whole load, matching the stock opener.
+var dflash2SidecarRetention = struct {
+	sync.Mutex
+	entries map[string]*qwen38DFlash2SidecarEntry
+}{entries: map[string]*qwen38DFlash2SidecarEntry{}}
+
+// Qwen38DFlash2Sidecar is one retained reference to the pinned stock BF16
+// sidecar. A load retains it once and releases it when the load retires;
+// requests borrow it through the WithSidecar constructors and never close it.
+// Handles are independent: releasing one leaves the others and the shared
+// reader untouched until the last release.
+type Qwen38DFlash2Sidecar struct {
+	mu       sync.Mutex
+	path     string
+	released bool
+}
+
+// RetainQwen38DFlash2Sidecar opens and authenticates the pinned sidecar once
+// per load and returns one retained reference. Concurrent retains of the same
+// path share the single open; only the first pays the full hash. An
+// unavailable, corrupt, or non-absolute artifact fails with
+// ErrDFlash2SidecarUnavailable before any handle escapes.
+func RetainQwen38DFlash2Sidecar(ctx context.Context, path string) (*Qwen38DFlash2Sidecar, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("%w: context required", ErrDFlash2SidecarUnavailable)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	key := filepath.Clean(strings.TrimSpace(path))
+	if !filepath.IsAbs(key) {
+		return nil, fmt.Errorf("%w: absolute sidecar path required", ErrDFlash2SidecarUnavailable)
+	}
+	dflash2SidecarRetention.Lock()
+	defer dflash2SidecarRetention.Unlock()
+	if entry := dflash2SidecarRetention.entries[key]; entry != nil {
+		entry.refs++
+		return &Qwen38DFlash2Sidecar{path: key}, nil
+	}
+	w, err := dflash2RetainSidecarOpener(ctx, key)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: %v", ErrDFlash2SidecarUnavailable, err)
+	}
+	dflash2SidecarRetention.entries[key] = &qwen38DFlash2SidecarEntry{w: w, refs: 1}
+	return &Qwen38DFlash2Sidecar{path: key}, nil
+}
+
+// Path reports the retained artifact identity for operator receipts.
+func (s *Qwen38DFlash2Sidecar) Path() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.path
+}
+
+// Release retires one retained reference. The last release closes the file
+// and drops the entry; earlier releases leave the shared reader live. A
+// second release of the same handle fails with ErrDFlash2SidecarReleased.
+func (s *Qwen38DFlash2Sidecar) Release() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	if s.released {
+		s.mu.Unlock()
+		return ErrDFlash2SidecarReleased
+	}
+	s.released = true
+	key := s.path
+	s.mu.Unlock()
+	dflash2SidecarRetention.Lock()
+	defer dflash2SidecarRetention.Unlock()
+	entry := dflash2SidecarRetention.entries[key]
+	if entry == nil || entry.refs < 1 {
+		return ErrDFlash2SidecarReleased
+	}
+	entry.refs--
+	if entry.refs > 0 {
+		return nil
+	}
+	delete(dflash2SidecarRetention.entries, key)
+	return entry.w.Close()
+}
+
+// borrow hands out the shared reader while at least one reference lives. It
+// takes no reference: the owning load already holds one. A released or
+// vanished entry refuses with ErrDFlash2SidecarReleased; nothing reopens the
+// artifact behind a caller's back.
+func (s *Qwen38DFlash2Sidecar) borrow() (*dflash2Weights, error) {
+	if s == nil {
+		return nil, ErrDFlash2SidecarReleased
+	}
+	s.mu.Lock()
+	released := s.released
+	s.mu.Unlock()
+	if released {
+		return nil, ErrDFlash2SidecarReleased
+	}
+	dflash2SidecarRetention.Lock()
+	defer dflash2SidecarRetention.Unlock()
+	entry := dflash2SidecarRetention.entries[s.path]
+	if entry == nil || entry.refs < 1 {
+		return nil, ErrDFlash2SidecarReleased
+	}
+	return entry.w, nil
 }

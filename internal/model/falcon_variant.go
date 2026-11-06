@@ -115,11 +115,11 @@ func (e *UnsupportedFalconVariantError) Error() string {
 	}
 }
 
-// falconFusedQKVSource returns the first per-layer HF-vocabulary fused attention
-// tensor present in the manifest. Its presence is what makes the variant question
-// load-bearing: it is the tensor splitFusedProjections is about to cut, and it is
-// also the gate materializeFalconTensors itself keys on (a transformer.h.* source
-// vocabulary), so a checkpoint without it never reached the falcon path at all.
+// falconFusedQKVSource returns the first per-layer HF-vocabulary fused attention tensor present in
+// the manifest. Its presence is what makes the variant question load-bearing: it is the tensor
+// splitFusedProjections is about to cut, and it is also the gate materializeFalconTensors itself
+// keys on (a transformer.h.* source vocabulary), so a checkpoint without it never reached the
+// falcon path at all.
 func falconFusedQKVSource(cfg Config, man map[string]tensorMeta) (string, bool) {
 	for l := 0; l < cfg.NumLayers; l++ {
 		name := "transformer.h." + itoa(l) + ".self_attention.query_key_value.weight"
@@ -130,13 +130,12 @@ func falconFusedQKVSource(cfg Config, man map[string]tensorMeta) (string, bool) 
 	return "", false
 }
 
-// falconDualBlockNorm returns the first per-layer ln_attn / ln_mlp tensor in the
-// manifest. That pair is the STRUCTURAL tell for new_decoder_architecture=true:
-// HF's FalconDecoderLayer builds ln_attn+ln_mlp when and only when
-// new_decoder_architecture is set, and builds input_layernorm otherwise. Keying on
-// the tensors rather than on a "new_decoder_architecture" config field means the
-// detection still works for a checkpoint (or a GGUF conversion) that does not
-// carry the key at all.
+// falconDualBlockNorm returns the first per-layer ln_attn / ln_mlp tensor in the manifest. That
+// pair is the STRUCTURAL tell for new_decoder_architecture=true: HF's FalconDecoderLayer builds
+// ln_attn+ln_mlp when and only when new_decoder_architecture is set, and builds input_layernorm
+// otherwise. Keying on the tensors rather than on a "new_decoder_architecture" config field means
+// the detection still works for a checkpoint (or a GGUF conversion) that does not carry the key
+// at all.
 func falconDualBlockNorm(cfg Config, man map[string]tensorMeta) (string, bool) {
 	for l := 0; l < cfg.NumLayers; l++ {
 		p := "transformer.h." + itoa(l) + "."
@@ -149,27 +148,26 @@ func falconDualBlockNorm(cfg Config, man map[string]tensorMeta) (string, bool) {
 	return "", false
 }
 
-// refuseUnsupportedFalconVariant fails the load with a typed
-// *UnsupportedFalconVariantError when a fused-qkv Falcon checkpoint is one of the
-// two variants whose layout the contiguous split does not implement.
+// refuseUnsupportedFalconVariant fails the load with a typed *UnsupportedFalconVariantError when a
+// fused-qkv Falcon checkpoint is one of the two variants whose layout the contiguous split does not
+// implement.
 //
-// It must run AFTER materializeFalconTensors (so the falcon path has been taken)
-// and BEFORE splitFusedProjections (so the operator gets this named variant
-// refusal instead of a silently mis-cut q/k/v).
+// It must run AFTER materializeFalconTensors (so the falcon path has been taken) and BEFORE
+// splitFusedProjections (so the operator gets this named variant refusal instead of a silently
+// mis-cut q/k/v).
 //
 // Both tells are structural or already-derived — no new speculative config flag:
 //
-//   - new_decoder_architecture: the ln_attn/ln_mlp block-norm pair exists in the
-//     manifest. Falcon-7B has neither.
-//   - Falcon-RW: num_kv_heads == num_attention_heads. multi_query=true drives
-//     NumKVHeads to 1 (config.go deriveConfigAxes) and 40B/180B declare a
-//     num_kv_heads strictly below num_attention_heads, so plain MHA on a FUSED
-//     Falcon qkv is reachable only through the deriveConfigAxes fallback that
-//     fires when neither key selects a KV count — exactly the RW config.
+//   - new_decoder_architecture: the ln_attn/ln_mlp block-norm pair exists in the manifest. Falcon-7B
+//     has neither.
+//   - Falcon-RW: num_kv_heads == num_attention_heads. multi_query=true drives NumKVHeads to 1
+//     (config.go deriveConfigAxes) and 40B/180B declare a num_kv_heads strictly below
+//     num_attention_heads, so plain MHA on a FUSED Falcon qkv is reachable only through the
+//     deriveConfigAxes fallback that fires when neither key selects a KV count — exactly the RW
+//     config.
 //
-// NumHeads<=1 is deliberately NOT refused: at a single head the per-head
-// interleaved layout and the contiguous layout are the same bytes, so there is no
-// divergence to fence.
+// NumHeads<=1 is deliberately NOT refused: at a single head the per-head interleaved layout and the
+// contiguous layout are the same bytes, so there is no divergence to fence.
 func refuseUnsupportedFalconVariant(cfg Config, man map[string]tensorMeta) error {
 	src, ok := falconFusedQKVSource(cfg, man)
 	if !ok {

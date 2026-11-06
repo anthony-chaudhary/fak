@@ -109,6 +109,20 @@ func (b V41EngramArtifactBinding) validateExtent() error {
 	return nil
 }
 
+// HostTableExtent reports the full resident byte extent a host table bound to
+// this artifact would hold. It is the binding's validated Size — exactly
+// rows * effective row width — so placement admission
+// (v41_engram_placement.go) charges the WHOLE table against the host budget,
+// unlike the file-backed row cache, which budgets a bounded resident window.
+// A malformed binding is refused through the same extent validation every
+// other consumer uses.
+func (b V41EngramArtifactBinding) HostTableExtent() (int64, error) {
+	if err := b.validateExtent(); err != nil {
+		return 0, err
+	}
+	return b.Size, nil
+}
+
 // v41EngramDigestExtent hashes exactly the declared extent of reader. It reads in
 // bounded chunks so a large declared extent does not require a full-size buffer.
 // The chunk reads run ahead on a bounded worker pool (v41_engram_digest.go)

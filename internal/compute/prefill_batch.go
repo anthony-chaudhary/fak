@@ -30,8 +30,8 @@ type PrefillBatchArgs struct {
 	NumKVHeads int     // number of key/value heads (nKV)
 	HeadDim    int     // dimension per head (hd)
 	Tokens     int     // optional token count P; if <= 0, derived from X
-	RopeTheta  float64 // rotary embedding base theta (e.g. 10000.0)
-	Scale      float32 // attention scaling factor; 0 => 1/sqrt(HeadDim)
+	RopeTheta  float64 // finite rotary embedding base; <= 0 => 10000.0
+	Scale      float32 // finite attention scaling factor; <= 0 => 1/sqrt(HeadDim)
 }
 
 // PrefillBatchResult returns the outputs of a batched prompt prefill operation.
@@ -71,12 +71,38 @@ func validatePrefillBatchArgs(args *PrefillBatchArgs) (int, int, error) {
 	if P <= 0 || args.X.Numel()%P != 0 {
 		return 0, 0, fmt.Errorf("compute: PrefillBatch invalid token count P=%d for X numel=%d", P, args.X.Numel())
 	}
+	// The attention loop uses (StartPos + tokenIndex) + 1. Reject an
+	// unrepresentable exclusive end before projections or KV publication.
+	if args.StartPos > int(^uint(0)>>1)-P {
+		return 0, 0, fmt.Errorf("compute: PrefillBatch position range overflows int")
+	}
 	D := args.X.Numel() / P
 	if D <= 0 {
 		return 0, 0, fmt.Errorf("compute: PrefillBatch invalid hidden dimension D=%d", D)
 	}
 	qOut := args.NumHeads * args.HeadDim
 	kvOut := args.NumKVHeads * args.HeadDim
+	// GEMM consumes the two weight axes, not just their product. An equal
+	// element count can hide a transposed or flat weight and reach projections
+	// with the wrong input width before attention slices its result.
+	for _, weight := range []struct {
+		name       string
+		tensor     Tensor
+		rows, cols int
+	}{
+		{"Wq", args.Wq, qOut, D},
+		{"Wk", args.Wk, kvOut, D},
+		{"Wv", args.Wv, kvOut, D},
+		{"Wo", args.Wo, D, qOut},
+	} {
+		if weight.tensor.buf == nil { // Only optional Wo can be absent here.
+			continue
+		}
+		shape := weight.tensor.Shape
+		if len(shape) != 2 || shape[0] != weight.rows || shape[1] != weight.cols {
+			return 0, 0, fmt.Errorf("compute: PrefillBatch %s shape %v != expected [%d %d]", weight.name, shape, weight.rows, weight.cols)
+		}
+	}
 	if args.Wq.Numel() != qOut*D {
 		return 0, 0, fmt.Errorf("compute: PrefillBatch Wq numel %d != expected %d", args.Wq.Numel(), qOut*D)
 	}
@@ -88,6 +114,14 @@ func validatePrefillBatchArgs(args *PrefillBatchArgs) (int, int, error) {
 	}
 	if args.Wo.buf != nil && args.Wo.Numel() != D*qOut {
 		return 0, 0, fmt.Errorf("compute: PrefillBatch Wo numel %d != expected %d", args.Wo.Numel(), D*qOut)
+	}
+	// Nonfinite controls must fail before projections or KV publication;
+	// comparison-based defaulting alone lets NaN and positive infinity through.
+	if math.IsNaN(args.RopeTheta) || math.IsInf(args.RopeTheta, 0) {
+		return 0, 0, fmt.Errorf("compute: PrefillBatch RopeTheta must be finite")
+	}
+	if math.IsNaN(float64(args.Scale)) || math.IsInf(float64(args.Scale), 0) {
+		return 0, 0, fmt.Errorf("compute: PrefillBatch Scale must be finite")
 	}
 	if args.RopeTheta <= 0 {
 		args.RopeTheta = 10000.0

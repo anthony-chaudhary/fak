@@ -18,6 +18,9 @@ func (d *Dispatcher) HandleGet(msg protocol.Message) protocol.Message {
 
 	// Try local first â€” use pre-decoded key to avoid double DecodeKeyBody
 	result := d.submitPreDecoded(key, shard.OpGet)
+	if result.Err != nil {
+		return ErrResponse(msg.Header.RequestID, result.Err.Error())
+	}
 	if result.Found {
 		return protocol.Message{
 			Header: protocol.Header{OpCode: protocol.RespValue},
@@ -70,8 +73,8 @@ func (d *Dispatcher) HandleSet(msg protocol.Message) protocol.Message {
 		return ErrResponse(msg.Header.RequestID, err.Error())
 	}
 
-	// Cluster: route to primary if not local
-	if d.Ring != nil {
+	// Replicas apply locally; only original writes route to the primary.
+	if d.Ring != nil && msg.Header.Flags&protocol.FlagReplicated == 0 {
 		primary, isLocal := d.isLocalKey(key)
 		if !isLocal && primary != nil {
 			c, cerr := d.getProxyConn(primary.Addr)
@@ -119,8 +122,8 @@ func (d *Dispatcher) HandleDelete(msg protocol.Message) protocol.Message {
 		return ErrResponse(msg.Header.RequestID, err.Error())
 	}
 
-	// Cluster: route to primary if not local
-	if d.Ring != nil {
+	// Replicas apply locally; only original writes route to the primary.
+	if d.Ring != nil && msg.Header.Flags&protocol.FlagReplicated == 0 {
 		primary, isLocal := d.isLocalKey(key)
 		if !isLocal && primary != nil {
 			c, cerr := d.getProxyConn(primary.Addr)
@@ -159,6 +162,9 @@ func (d *Dispatcher) HandleTest(msg protocol.Message) protocol.Message {
 
 	// Use pre-decoded key to avoid double DecodeKeyBody
 	result := d.submitPreDecoded(key, shard.OpTest)
+	if result.Err != nil {
+		return ErrResponse(msg.Header.RequestID, result.Err.Error())
+	}
 
 	if !result.Found && d.Ring != nil {
 		primary, isLocal := d.isLocalKey(key)

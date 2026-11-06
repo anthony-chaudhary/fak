@@ -520,6 +520,31 @@ class GreenAncestorDecideTest(unittest.TestCase):
         self.assertIn("CI_BASE_RED", verdict["blockers"])
         self.assertFalse(verdict["ci_ancestor_relaxed"])
 
+    def test_equal_distance_red_does_not_relax_either_ci_signal(self) -> None:
+        rd = load()
+        # Conflicting runs at HEAD, on one ancestor, or on equally distant merged
+        # ancestors do not establish that a green run superseded the red one.
+        for behind, same_sha in ((0, True), (4, True), (4, False)):
+            for source in ("whole", "fast"):
+                for reverse in (False, True):
+                    with self.subTest(behind=behind, same_sha=same_sha,
+                                      source=source, reverse=reverse):
+                        red = dict(_run("red", behind=behind, age=30),
+                                   head_sha="abc1234")
+                        green = dict(_run("green", behind=behind, age=60),
+                                     head_sha="abc1234" if same_sha else "def5678")
+                        recent = [green, red] if reverse else [red, green]
+                        signal = {"status": "red", "recent_decisive": recent}
+                        inputs = {"ci_on_head" if source == "whole" else "ci_fast": signal}
+                        verdict = rd.decide(payload(**inputs), require_ci_green=True)
+                        self.assertEqual(verdict["decision"], "hold")
+                        self.assertIn("CI_BASE_RED", verdict["blockers"])
+                        self.assertFalse(verdict["ci_ancestor_relaxed"])
+                        self.assertEqual(verdict["ci_source"], source)
+                        self.assertEqual(verdict["ci_signal"], signal)
+                        self.assertEqual(rd.green_ancestor_status(
+                            recent, max_commits=25, max_minutes=90), "")
+
     def test_tolerance_can_be_disabled(self) -> None:
         rd = load()
         # With the tolerance off, a churned trunk holds on the raw head signal even

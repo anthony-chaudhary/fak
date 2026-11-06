@@ -13,16 +13,22 @@
 #   docker build --build-arg APP_VERSION=0.24.0 -t fak:0.24.0 .
 
 # --- builder -------------------------------------------------------------------
-FROM golang:1.26 AS build
+# Cross-compiles for the TARGET platform natively: the toolchain runs on the build
+# host's platform (`--platform=$BUILDPLATFORM`) and Go emits the $TARGETARCH binary,
+# so the arm64 image is produced by native cross-compilation on the amd64 CI runner
+# — never under QEMU emulation. The runtime stage below stays on the target platform.
+FROM --platform=$BUILDPLATFORM golang:1.26 AS build
 ARG APP_VERSION=docker
-ENV CGO_ENABLED=0 GOTOOLCHAIN=auto
+ARG TARGETARCH
+ENV CGO_ENABLED=0 GOTOOLCHAIN=auto GOARCH=$TARGETARCH
 WORKDIR /src
 # Copy the module (the Go module is the repo root) and build it. The dependency set
 # is two golang.org/x modules pinned by a 4-line go.sum, so the fetch is small enough
 # that there is no separate download-cache stage.
 COPY . .
 # Build through the one canonical release recipe (scripts/build.sh, #3709); this
-# stage's ENV (CGO_ENABLED=0, GOTOOLCHAIN=auto) passes through to it unchanged.
+# stage's ENV (CGO_ENABLED=0, GOTOOLCHAIN=auto, GOARCH=$TARGETARCH) passes through
+# to it unchanged — build.sh is toolchain-agnostic and overrides none of them.
 RUN OUT=/out/fak VERSION="${APP_VERSION}" sh scripts/build.sh
 
 # --- runtime -------------------------------------------------------------------

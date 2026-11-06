@@ -298,6 +298,11 @@ func requiredLiterals(pattern string) []string {
 	walk = func(r *syntax.Regexp) []rune {
 		switch r.Op {
 		case syntax.OpLiteral:
+			// Postings are case-sensitive, so a folded literal is not an exact
+			// required substring. Let regexp verification handle its variants.
+			if r.Flags&syntax.FoldCase != 0 {
+				return nil
+			}
 			return append([]rune(nil), r.Rune...)
 		case syntax.OpConcat:
 			var run []rune
@@ -318,11 +323,10 @@ func requiredLiterals(pattern string) []string {
 			}
 			return nil
 		case syntax.OpPlus:
-			// x+ requires at least one x; if x is a literal it is still required.
+			// x+ requires at least one x, but its variable length must break
+			// literal runs on both sides. Keep child hints separate.
 			if len(r.Sub) == 1 {
-				if lit := walk(r.Sub[0]); lit != nil {
-					return lit
-				}
+				emit(&out, walk(r.Sub[0]))
 			}
 			return nil
 		default:

@@ -982,38 +982,74 @@ func determineResponsesRestoreTool(tools []responsesTool) (restoreToolName strin
 //
 // When incoming tools contain duplicate definitions for the same base tool across legacy
 // and canonical namespaces, collapse them into the canonical tool definition.
-func responsesToolsToToolDefs(tools []responsesTool) []agent.ToolDef {
-	if len(tools) == 0 {
+// normalizeServingToolDefs folds one dialect's decoded tool declarations into the
+// gateway's single serving-input contract, so every mounted HTTP dialect hands the
+// served core the same folded catalog instead of each route keeping its own ad-hoc
+// cleanup pass. Closed contract (pinned by TestDialectToolNormalizationParity):
+//   - non-function carriers (Responses custom/freeform/web_search) pass through
+//     untouched — they carry no function name for adjudication to gate;
+//   - function entries with an empty name drop (a declaration that names no tool
+//     carries nothing for the capability floor to check);
+//   - an MCP legacy mcp__fak__X entry drops when its canonical mcp__fak_guard__X
+//     counterpart is present anywhere in the same catalog, regardless of order —
+//     the canonical guard namespace wins;
+//   - exact duplicate function names keep the FIRST occurrence only, so the
+//     served core never sees two capabilities under one name.
+//
+// Dialect-specific CAPABILITY checks stay distinct: this fold normalizes the
+// serving input; it does not adjudicate any tool.
+func normalizeServingToolDefs(defs []agent.ToolDef) []agent.ToolDef {
+	if len(defs) == 0 {
 		return nil
 	}
 	hasCanon := make(map[string]bool)
-	for _, t := range tools {
-		if t.Type == "function" && strings.HasPrefix(t.Name, mcpCanonPrefix) {
-			hasCanon[strings.TrimPrefix(t.Name, mcpCanonPrefix)] = true
+	for _, d := range defs {
+		if d.Type == "function" && strings.HasPrefix(d.Function.Name, mcpCanonPrefix) {
+			hasCanon[strings.TrimPrefix(d.Function.Name, mcpCanonPrefix)] = true
 		}
 	}
-	out := make([]agent.ToolDef, 0, len(tools))
+	out := make([]agent.ToolDef, 0, len(defs))
 	seen := make(map[string]bool)
-	for _, t := range tools {
-		if t.Type != "function" {
-			out = append(out, agent.ToolDef{Type: t.Type, ResponsesWire: append(json.RawMessage(nil), t.raw...)})
+	for _, d := range defs {
+		if d.Type != "function" {
+			out = append(out, d)
 			continue
 		}
-		if t.Name == "" {
+		if d.Function.Name == "" {
 			continue
 		}
-		if strings.HasPrefix(t.Name, mcpLegacyPrefix) {
-			toolName := strings.TrimPrefix(t.Name, mcpLegacyPrefix)
+		if strings.HasPrefix(d.Function.Name, mcpLegacyPrefix) {
+			toolName := strings.TrimPrefix(d.Function.Name, mcpLegacyPrefix)
 			if hasCanon[toolName] {
 				// Suppress legacy tool when canonical definition is present.
 				continue
 			}
 		}
-		if seen[t.Name] {
+		if seen[d.Function.Name] {
 			continue
 		}
-		seen[t.Name] = true
-		out = append(out, agent.ToolDef{
+		seen[d.Function.Name] = true
+		out = append(out, d)
+	}
+	return out
+}
+
+// responsesToolsToToolDefs maps the Responses wire tool shape onto agent.ToolDef
+// (the nested chat shape) so the planner sees one canonical catalog. The mapping is
+// pure wire-shape translation; the serving-input fold (empty-name drop, dedupe, MCP
+// legacy/canonical collapse) runs once in normalizeServingToolDefs, shared with the
+// other mounted dialects.
+func responsesToolsToToolDefs(tools []responsesTool) []agent.ToolDef {
+	if len(tools) == 0 {
+		return nil
+	}
+	mapped := make([]agent.ToolDef, 0, len(tools))
+	for _, t := range tools {
+		if t.Type != "function" {
+			mapped = append(mapped, agent.ToolDef{Type: t.Type, ResponsesWire: append(json.RawMessage(nil), t.raw...)})
+			continue
+		}
+		mapped = append(mapped, agent.ToolDef{
 			Type: "function",
 			Function: agent.ToolDefFunction{
 				Name:        t.Name,
@@ -1022,7 +1058,7 @@ func responsesToolsToToolDefs(tools []responsesTool) []agent.ToolDef {
 			},
 		})
 	}
-	return out
+	return normalizeServingToolDefs(mapped)
 }
 
 const reservedGuardBanner = "[fak] BLOCKED_BY_GUARD"

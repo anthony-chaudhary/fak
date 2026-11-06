@@ -75,13 +75,175 @@ class ReleaseTagTest(unittest.TestCase):
         rt = load()
         self.assertEqual(rt.fold_ci_runs([], require_ci=False)["verdict"], "NO_SIGNAL")
         self.assertFalse(rt.fold_ci_runs([], require_ci=True)["pass"])
-        self.assertTrue(rt.fold_ci_runs([{"status": "completed", "conclusion": "success"}], require_ci=True)["pass"])
-        red = rt.fold_ci_runs([{"status": "completed", "conclusion": "failure"}], require_ci=False)
+        self.assertTrue(rt.fold_ci_runs([{"event": "push", "status": "completed", "conclusion": "success"}], require_ci=True)["pass"])
+        red = rt.fold_ci_runs([{"event": "push", "status": "completed", "conclusion": "failure"}], require_ci=False)
         self.assertFalse(red["pass"])
         self.assertEqual(red["verdict"], "RED")
-        pending = rt.fold_ci_runs([{"status": "in_progress"}], require_ci=False)
+        pending = rt.fold_ci_runs([{"event": "push", "status": "in_progress"}], require_ci=False)
         self.assertTrue(pending["pass"])
         self.assertEqual(pending["verdict"], "PENDING")
+
+    def test_fold_ci_runs_requires_push_event(self) -> None:
+        rt = load()
+        for event in ("workflow_dispatch", "pull_request", "schedule", "unknown", "future_event2"):
+            diagnostic = {"event": event, "status": "completed", "conclusion": "success"}
+            with self.subTest(event=event):
+                for require_ci in (False, True):
+                    folded = rt.fold_ci_runs([diagnostic], require_ci=require_ci)
+                    self.assertEqual(folded["verdict"], "NO_SIGNAL")
+                    self.assertEqual(folded["pass"], not require_ci)
+                    self.assertEqual(folded["advisory"], not require_ci)
+                    self.assertNotIn("run", folded)
+                push = {"event": "push", "status": "completed", "conclusion": "failure"}
+                folded = rt.fold_ci_runs([diagnostic, push], require_ci=True)
+                self.assertEqual(folded["verdict"], "RED")
+                self.assertEqual(folded["run"], push)
+        push = {"event": "push", "status": "completed", "conclusion": "success"}
+        diagnostic = {"event": "workflow_dispatch", "status": "completed", "conclusion": "failure"}
+        self.assertEqual(rt.fold_ci_runs([diagnostic, push], require_ci=True)["verdict"], "GREEN")
+        pending = {"event": "push", "status": "in_progress"}
+        self.assertEqual(rt.fold_ci_runs([pending, push], require_ci=True)["verdict"], "PENDING")
+
+    def test_ci_runs_refuse_unreadable_events_before_filtering(self) -> None:
+        # Pure folds and stubbed runners add less than 20 ms; no Git or gh calls.
+        rt = load()
+        green = {"event": "push", "status": "completed", "conclusion": "success"}
+        failure = {"status": "completed", "conclusion": "failure"}
+        malformed = [failure, None, "invalid", []]
+        malformed += [dict(failure, event=event) for event in
+                      (None, "", " ", "PUSH", " push", "push ", "push\npush", "push\x00",
+                       "push\tpush", "push\rpush", "push push", "push-push", "push.push",
+                       "püsh", "push\u200b", "_push", "1push", [], {}, True, 1)]
+        for bad in malformed:
+            for rows in ([bad], [bad, green], [green, bad]):
+                for require_ci in (False, True):
+                    with self.subTest(rows=rows, require_ci=require_ci):
+                        folded = rt.fold_ci_runs(rows, require_ci=require_ci)
+                        self.assertEqual(folded["verdict"], "INVALID_EVENT")
+                        self.assertFalse(folded["pass"])
+                        self.assertFalse(folded["advisory"])
+                        self.assertIn("event", folded["reason"])
+                        self.assertNotIn("run", folded)
+
+        for wait_for_pending in (False, True):
+            for require_ci in (False, True):
+                with self.subTest(wait_for_pending=wait_for_pending, require_ci=require_ci):
+                    calls = []
+
+                    def runner(cmd: list[str]) -> tuple[int, str]:
+                        calls.append(cmd)
+                        if wait_for_pending and len(calls) == 1:
+                            self.assertEqual(cmd[:3], ["gh", "run", "list"])
+                            return 0, json.dumps([{"event": "push", "status": "in_progress",
+                                                   "databaseId": "push-1"}])
+                        if wait_for_pending and len(calls) == 2:
+                            self.assertEqual(cmd, ["gh", "run", "watch", "push-1", "--exit-status"])
+                            return 0, "finished"
+                        self.assertEqual(len(calls), 3 if wait_for_pending else 1)
+                        self.assertEqual(cmd[:3], ["gh", "run", "list"])
+                        return 0, json.dumps([failure, green])
+
+                    folded = rt.ci_signal(Path("repo"), "abc123", workflow="ci.yml",
+                                          require_ci=require_ci, wait=True, runner=runner)
+                    self.assertEqual(folded["verdict"], "INVALID_EVENT")
+                    self.assertFalse(folded["pass"])
+                    self.assertFalse(folded["advisory"])
+                    self.assertEqual(bool(folded.get("watched")), wait_for_pending)
+                    self.assertEqual(len(calls), 3 if wait_for_pending else 1)
+
+    def test_ci_signal_requires_array_before_and_after_watch(self) -> None:
+        # Pure folds and stubbed runners add less than 20 ms; no Git or gh calls.
+        rt = load()
+        for response in (None, {}, False, 0, "push", []):
+            for wait_for_pending in (False, True):
+                for require_ci in (False, True):
+                    with self.subTest(response=response, wait=wait_for_pending, require_ci=require_ci):
+                        calls = []
+
+                        def runner(cmd: list[str]) -> tuple[int, str]:
+                            calls.append(cmd)
+                            if wait_for_pending and len(calls) == 1:
+                                self.assertEqual(cmd[:3], ["gh", "run", "list"])
+                                return 0, json.dumps([{"event": "push", "status": "in_progress",
+                                                       "databaseId": "push-1"}])
+                            if wait_for_pending and len(calls) == 2:
+                                self.assertEqual(cmd, ["gh", "run", "watch", "push-1", "--exit-status"])
+                                return 0, "finished"
+                            self.assertEqual(len(calls), 3 if wait_for_pending else 1)
+                            self.assertEqual(cmd[:3], ["gh", "run", "list"])
+                            return 0, json.dumps(response)
+
+                        folded = rt.ci_signal(Path("repo"), "abc123", workflow="ci.yml",
+                                              require_ci=require_ci, wait=True, runner=runner)
+                        valid_empty = isinstance(response, list)
+                        self.assertEqual(folded["verdict"], "NO_SIGNAL" if valid_empty else "INVALID_RESPONSE")
+                        self.assertEqual(folded["pass"], valid_empty and not require_ci)
+                        self.assertEqual(folded["advisory"], valid_empty and not require_ci)
+                        self.assertEqual(bool(folded.get("watched")), wait_for_pending)
+                        self.assertNotIn("run", folded)
+                        self.assertEqual(len(calls), 3 if wait_for_pending else 1)
+                        if not valid_empty:
+                            self.assertIn("JSON array", folded["reason"])
+
+    def test_ci_signal_filters_events_before_and_after_watch(self) -> None:
+        rt = load()
+        for conclusion, expected in ((None, "NO_SIGNAL"), ("success", "GREEN"), ("failure", "RED")):
+            with self.subTest(conclusion=conclusion):
+                calls = []
+                lists = 0
+                diagnostic = {"event": "workflow_dispatch", "status": "completed",
+                              "conclusion": "success", "databaseId": "manual"}
+
+                def runner(cmd: list[str]) -> tuple[int, str]:
+                    nonlocal lists
+                    calls.append(cmd)
+                    if cmd[:3] == ["gh", "run", "list"]:
+                        lists += 1
+                        rows = [diagnostic]
+                        if lists == 1:
+                            rows.append({"event": "push", "status": "in_progress", "databaseId": "push-1"})
+                        elif conclusion is not None:
+                            rows.append({"event": "push", "status": "completed",
+                                         "conclusion": conclusion, "databaseId": "push-1"})
+                        return 0, json.dumps(rows)
+                    if cmd == ["gh", "run", "watch", "push-1", "--exit-status"]:
+                        return 0, "finished"
+                    if cmd == ["gh", "run", "view", "push-1", "--json", "jobs"]:
+                        return 0, json.dumps({"jobs": []})
+                    raise AssertionError(cmd)
+
+                folded = rt.ci_signal(Path("repo"), "abc123", workflow="ci.yml",
+                                      require_ci=True, wait=True, runner=runner)
+                self.assertEqual(folded["verdict"], expected)
+                self.assertEqual(folded["pass"], conclusion == "success")
+                self.assertTrue(folded["watched"])
+                self.assertEqual(lists, 2)
+                for cmd in calls:
+                    if cmd[:3] == ["gh", "run", "list"]:
+                        self.assertIn("--event", cmd)
+                        self.assertEqual(cmd[cmd.index("--event") + 1], "push")
+                        self.assertIn("event", cmd[cmd.index("--json") + 1].split(","))
+
+    def test_diagnostic_success_cannot_create_required_ci_tag(self) -> None:
+        rt = load()
+        root, sha = self._repo()
+        rt.load_release_dry_run = lambda root, ref: {"ok": True, "exit_code": 0, "trailer": "release-dry-run: fixture"}
+        original_ci_signal = rt.ci_signal
+
+        def runner(cmd: list[str]) -> tuple[int, str]:
+            self.assertEqual(cmd[:3], ["gh", "run", "list"])
+            return 0, json.dumps([{"event": "workflow_dispatch", "status": "completed",
+                                   "conclusion": "success", "headSha": sha,
+                                   "databaseId": "manual", "release_eligible": False}])
+
+        rt.ci_signal = lambda root, sha, **kwargs: original_ci_signal(root, sha, runner=runner, **kwargs)
+        context = rt.build_context(root, version="0.1.0", ref=sha, trunk="master",
+                                   require_ci=True, wait_ci=True, skip_remote_tag=True)
+        result = rt.execute_tag(root, context, use_lock=False)
+        self.assertFalse(result["tag_created"], result)
+        self.assertFalse(context["ok"], context)
+        self.assertIn("ci_not_green:NO_SIGNAL", context["errors"])
+        self.assertNotIn("v0.1.0", git(root, "tag", "-l"))
 
     def test_ci_signal_diagnoses_billing_annotation_on_red_run(self) -> None:
         rt = load()
@@ -89,6 +251,7 @@ class ReleaseTagTest(unittest.TestCase):
         def runner(cmd: list[str]) -> tuple[int, str]:
             if cmd[:5] == ["gh", "run", "list", "--workflow", "ci.yml"]:
                 return 0, json.dumps([{
+                    "event": "push",
                     "databaseId": "run-1",
                     "status": "completed",
                     "conclusion": "failure",

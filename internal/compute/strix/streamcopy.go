@@ -5,7 +5,6 @@ package strix
 import (
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -33,18 +32,53 @@ var (
 	cachedAVX512StreamingInit bool
 )
 
-func evaluateAVX512Streaming() bool {
-	if os.Getenv("FAK_AVX512_DISABLE") != "" || os.Getenv("FAK_AVX512_STREAMING_DISABLE") != "" {
+// AVX512Selection is the explicit per-operation choice for the AVX-512 streaming copy
+// path. It replaces the four retired ambient toggles FAK_AVX512_DISABLE,
+// FAK_AVX512_FORCE, FAK_AVX512_STREAMING_DISABLE and FAK_AVX512_STREAMING_FORCE
+// (#13605 leaf A-avx512): the value is resolved once per operation and passed
+// explicitly to the kernel decision instead of being read from the process
+// environment.
+type AVX512Selection int
+
+const (
+	// AVX512Auto (the zero value) falls back to physical capability detection:
+	// the AVX-512 path is taken only when HasAVX512Streaming reports support.
+	// This preserves the historical unset-environment default.
+	AVX512Auto AVX512Selection = iota
+	// AVX512Forced selects the AVX-512 path regardless of detection. It still
+	// passes the absolute hardware safety gate (canExecuteAVX512), so forcing can
+	// never execute AVX-512 instructions on unsupported hardware, and a forced
+	// selection is never reported as detected hardware.
+	AVX512Forced
+	// AVX512Disabled forces the optimized Go fallback even when AVX-512 is
+	// available. Disable-over-force precedence is preserved structurally: one
+	// operation carries exactly one selection, and any disable arm wins.
+	AVX512Disabled
+)
+
+// WithAVX512Selection sets the explicit per-operation AVX-512 selection.
+func WithAVX512Selection(sel AVX512Selection) StreamCopyOption {
+	return func(c *streamCopyConfig) {
+		c.avx512Sel = sel
+	}
+}
+
+// resolveAVX512Selection maps the per-operation selection onto the boolean that gates
+// the AVX-512 kernel. Auto defers to capability detection; Forced bypasses detection
+// only (the hardware safety gate still applies downstream); Disabled always refuses.
+func resolveAVX512Selection(sel AVX512Selection) bool {
+	switch sel {
+	case AVX512Disabled:
 		return false
-	}
-	if os.Getenv("FAK_AVX512_FORCE") != "" || os.Getenv("FAK_AVX512_STREAMING_FORCE") != "" {
+	case AVX512Forced:
 		return true
+	default: // AVX512Auto
+		return HasAVX512Streaming()
 	}
-	return hardwareHasAVX512()
 }
 
 // ResetAVX512StreamingCapabilityForTesting invalidates the cached CPU capability so
-// updated environment variables are re-read in tests.
+// the next HasAVX512Streaming call re-probes the hardware.
 func ResetAVX512StreamingCapabilityForTesting() {
 	streamAVX512Mu.Lock()
 	defer streamAVX512Mu.Unlock()
@@ -65,14 +99,19 @@ func SetAVX512StreamingOverrideForTesting(override *bool) {
 	}
 }
 
-// HasAVX512Streaming checks whether AVX-512 non-temporal streaming copy instructions
+// HasAVX512Streaming reports whether AVX-512 non-temporal streaming copy instructions
 // (vmovntdqa streaming load and vmovntdq streaming store) are supported on the current CPU.
+// It reports DETECTION ONLY: a forced per-operation selection
+// (WithAVX512Selection(AVX512Forced)) never flows back into this answer, so forced
+// selection is never reported as detected hardware (#13605 leaf A-avx512).
 //
 // Priority order:
 //  1. Programmatic test override set via SetAVX512StreamingOverrideForTesting.
-//  2. Environment variables FAK_AVX512_DISABLE or FAK_AVX512_STREAMING_DISABLE (returns false).
-//  3. Environment variables FAK_AVX512_FORCE or FAK_AVX512_STREAMING_FORCE (returns true).
-//  4. Physical hardware detection on amd64 via CPUID / cpu.X86.HasAVX512F.
+//  2. Physical hardware detection on amd64 via CPUID / cpu.X86.HasAVX512F.
+//
+// The former ambient toggles FAK_AVX512_DISABLE, FAK_AVX512_FORCE,
+// FAK_AVX512_STREAMING_DISABLE and FAK_AVX512_STREAMING_FORCE are retired; their behavior
+// survives as the explicit per-operation WithAVX512Selection tri-state.
 func HasAVX512Streaming() bool {
 	streamAVX512Mu.RLock()
 	if streamAVX512Override != nil {
@@ -93,7 +132,7 @@ func HasAVX512Streaming() bool {
 		return *streamAVX512Override
 	}
 	if !cachedAVX512StreamingInit {
-		cachedAVX512Streaming = evaluateAVX512Streaming()
+		cachedAVX512Streaming = hardwareHasAVX512()
 		cachedAVX512StreamingInit = true
 	}
 	return cachedAVX512Streaming
@@ -126,6 +165,7 @@ type streamCopyConfig struct {
 	destWC        bool
 	forceFallback bool
 	storeFence    bool
+	avx512Sel     AVX512Selection
 	telemetry     *StreamCopyTelemetry
 }
 
@@ -252,8 +292,9 @@ func StreamCopy(dst, src []byte, opts ...StreamCopyOption) (int64, error) {
 		return int64(n), nil
 	}
 
-	// AVX-512 execution requires both capability flag and physical hardware capability.
-	useAVX512 := HasAVX512Streaming() && !cfg.forceFallback && canExecuteAVX512()
+	// AVX-512 execution requires the explicit per-operation selection (detection when
+	// auto), no fallback request, and the absolute physical hardware safety gate.
+	useAVX512 := resolveAVX512Selection(cfg.avx512Sel) && !cfg.forceFallback && canExecuteAVX512()
 
 	var (
 		headBytes        int

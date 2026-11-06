@@ -87,6 +87,105 @@ func ggufMmapEnabled() bool {
 	return ggufMmapOn
 }
 
+// LoadMode selects how the retained shard reader materializes checkpoint bytes:
+// none (the historical os.Open + ReadAt default), mmap (a read-only memory map served
+// by the page cache), mlock (keep weights pinned in RAM — syscalls not yet implemented
+// in this build), direct-io (bypass the page cache — syscalls not yet implemented in
+// this build), or auto (pick mmap when the platform supports it, else none). The
+// numeric values mirror llama.cpp's enum llama_load_mode (include/llama.h:206-211 at
+// 83078fec0db82d6b5a00d9599062c38c39145755, MIT) so config spellings stay portable
+// across the two codebases; upstream value 3 (mmap+mlock) is intentionally absent.
+type LoadMode int32
+
+const (
+	LoadModeAuto     LoadMode = -1 // auto-detect based on platform capabilities
+	LoadModeNone     LoadMode = 0  // no special load mode
+	LoadModeMmap     LoadMode = 1  // memory-map the model
+	LoadModeMlock    LoadMode = 2  // force the system to keep the model in RAM rather than swapping or compressing
+	LoadModeDirectIO LoadMode = 4  // use direct I/O if available
+)
+
+// String renders the LoadMode as its config spelling ("auto", "none", "mmap",
+// "mlock", "direct-io"), falling back to "LoadMode(n)" for an unrecognized value.
+func (m LoadMode) String() string {
+	switch m {
+	case LoadModeAuto:
+		return "auto"
+	case LoadModeNone:
+		return "none"
+	case LoadModeMmap:
+		return "mmap"
+	case LoadModeMlock:
+		return "mlock"
+	case LoadModeDirectIO:
+		return "direct-io"
+	default:
+		return fmt.Sprintf("LoadMode(%d)", m)
+	}
+}
+
+// ResolveLoadMode resolves a requested LoadMode against the platform's actual
+// capabilities into the load path this build will actually take, plus a
+// human-readable reason when the resolution DEGRADED from the request ("" when
+// the request was honored, or when AUTO made its policy pick). It never fails:
+// an unsupported explicit request degrades to the plain-file-load path instead
+// of erroring, mirroring llama_model_loader's constructor (src/llama-model-loader.cpp:559
+// at 83078fec0db82d6b5a00d9599062c38c39145755, MIT), which derives use_mmap /
+// use_direct_io from the requested mode and then downgrades use_mmap with a
+// warning when mmap is unavailable on the platform.
+//
+// Rules (pinned by TestResolveLoadModeDegradesWithReason):
+//   - Auto:     mmap when mmapSupported, else none — the policy pick carries no reason.
+//   - None:     honored as-is.
+//   - Mmap:     honored when mmapSupported; otherwise degrades to none with a reason.
+//   - Mlock:    honored when mlockSupported; otherwise degrades to none with a reason
+//     (upstream LLAMA_LOAD_MODE_MLOCK pins a normally-loaded buffer without mmap, so
+//     the degraded path is the plain-file-load path, not the mapped one).
+//   - DirectIO: always degrades to none with a reason — this build implements no
+//     direct-I/O syscalls, so the request is never supported here.
+//   - Unknown:  degrades to none with a reason naming the unrecognized value.
+//
+// Pure: no I/O, no env reads, no globals. Callers supply the capability flags
+// (on Windows the mmap flag is false via the model.MmapOpen ok=false contract).
+func ResolveLoadMode(requested LoadMode, mmapSupported, mlockSupported bool) (LoadMode, string) {
+	switch requested {
+	case LoadModeAuto:
+		if mmapSupported {
+			return LoadModeMmap, ""
+		}
+		return LoadModeNone, ""
+	case LoadModeNone:
+		return LoadModeNone, ""
+	case LoadModeMmap:
+		if mmapSupported {
+			return LoadModeMmap, ""
+		}
+		return LoadModeNone, "mmap not supported on this platform; falling back to plain file reads"
+	case LoadModeMlock:
+		if mlockSupported {
+			return LoadModeMlock, ""
+		}
+		return LoadModeNone, "mlock not supported on this platform; falling back to plain file reads"
+	case LoadModeDirectIO:
+		return LoadModeNone, "direct I/O not implemented in this build; falling back to plain file reads"
+	default:
+		return LoadModeNone, fmt.Sprintf("unknown load mode %s; falling back to plain file reads", requested.String())
+	}
+}
+
+// ggufMmapRequest reports the LoadMode request implied by the FAK_GGUF_MMAP opt-in
+// gate: LoadModeMmap when the gate is enabled, LoadModeNone otherwise. It delegates
+// to ggufMmapEnabled so the gate keeps its exact historical semantics (same truthy
+// spellings, same once-per-process capture); this mapping is what turns the boolean
+// gate into a load-mode request that callers feed through ResolveLoadMode together
+// with the platform's capability flags.
+func ggufMmapRequest() LoadMode {
+	if ggufMmapEnabled() {
+		return LoadModeMmap
+	}
+	return LoadModeNone
+}
+
 // openShardReader opens the RETAINED reader for one GGUF shard: the io.ReaderAt that
 // WeightSource keeps for the checkpoint's lifetime and serves every TensorBytes from.
 // Under FAK_GGUF_MMAP (and on a platform where model.MmapOpen succeeds) that reader is

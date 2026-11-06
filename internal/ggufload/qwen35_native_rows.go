@@ -142,6 +142,14 @@ func normalizeQwen35NativeRows(canon string, shape []int, raw []byte, cfg model.
 // Metal runtime, which never retains raw i-quants. The type must be one the backend already keeps
 // packed; a raw in-proj makes the fused Q8 GDN in-proj decline to its composed MatMul path.
 // FAK_QWEN35_NATIVE_QK_ROWS=0 / FAK_QWEN35_NATIVE_GDN_INPROJ_ROWS=0 restore Q8 per class.
+//
+// Caller contract: this route fires whenever the options retain ANY i-quant through the
+// row-route arm (WithDenseIQResident), so that arm may only be passed by a backend whose GDN
+// forward actually consumes raw rows (compute.Qwen35GDNTiledOutBackend). A backend whose GDN
+// sequence primitive takes f32/Q8_0 only (CUDA/ROCm) must pass WithDenseIQPacked plus the GDN
+// off-switches instead; advertising i-quant matmul dtypes is not by itself license for these
+// rows — trunk commit 217d2d0f1 did exactly that for CUDA and GDN warmup failed closed at
+// tensor-preflight until the per-class revert knobs were set.
 func qwen35DeviceQKNativeRow(cfg model.Config, canon string, t TensorType, shape []int, o q4kLoadOptions) bool {
 	if len(o.residentDenseIQ) == 0 {
 		return false

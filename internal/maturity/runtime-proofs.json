@@ -1128,6 +1128,11 @@
         },
         {
             "command": "fak version modules",
+            "output_contains": "internal/fakroot",
+            "lane": "fakroot"
+        },
+        {
+            "command": "fak version modules",
             "output_contains": "internal/fastintent",
             "lane": "fastintent"
         },
@@ -2733,6 +2738,11 @@
         },
         {
             "command": "fak version modules",
+            "output_contains": "internal/rawdecode",
+            "lane": "rawdecode"
+        },
+        {
+            "command": "fak version modules",
             "output_contains": "internal/reachdelta",
             "lane": "reachdelta"
         },
@@ -3300,6 +3310,11 @@
             "command": "fak dev devindex leaf stripeload",
             "output_contains": "stripeload",
             "lane": "stripeload"
+        },
+        {
+            "command": "fak serve help all",
+            "output_contains": "Strix Halo",
+            "lane": "strix"
         },
         {
             "command": "fak dev devindex leaf strmatch",

@@ -300,6 +300,152 @@ __global__ void k_qwen38_causal_attention_panel_hd256(
   }
 }
 
+// ---- Split-KV chunked-prefill panel (vLLM merge_attn_states borrow) --------------
+// ADAPT of vllm-project/vllm csrc/attention/merge_attn_states.cu:18 at
+// ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0; notice at
+// third_party/vllm-merge-attn-states/NOTICE): rows whose prefix exceeds
+// QWEN38_SPLITKV_PREFIX_THRESHOLD split their causal KV range into at most
+// QWEN38_SPLITKV_MAX_PARTITIONS contiguous partitions, one CTA per
+// (row, head, partition). Each CTA runs k_qwen38_causal_attention_panel_hd256's
+// online-softmax recurrence over its own key range and writes the UNNORMALIZED
+// partial (m, l, O); the merge kernel folds the per-row partials by LSE —
+// M = max m_p, L = sum l_p exp(m_p - M), O = sum O_p exp(m_p - M), out = O/L —
+// the same log-sum-exp combine upstream does with LSE = m + ln(l). Re-expressed
+// for Fak's f32 hd256 panel: no upstream code blocks are copied, the two-state
+// prefix/suffix form is generalized to N partitions, and an empty partition
+// (j0 == j1) writes the sentinel partial m = -INFINITY, l = 0, O = 0 that the
+// merge drops exactly (weight exp(-INFINITY - M) = 0). Short prefixes keep the
+// single-pass panel bitwise: qwen38_splitkv_partitions returns 1 below the
+// threshold and the launcher takes the unchanged path. Complementary to the P-05
+// MMA verdict (fattn_mma_hd256.cuh): when the tensor-core arm is selected and
+// available it still owns the panel; split-KV parallelizes only the SIMT arm.
+#define QWEN38_SPLITKV_PREFIX_THRESHOLD 1024
+#define QWEN38_SPLITKV_MAX_PARTITIONS 4
+static int qwen38_splitkv_partitions(int prefix, int tokens) {
+  (void)tokens;
+  if (prefix < QWEN38_SPLITKV_PREFIX_THRESHOLD) return 1;
+  int p = 1 + prefix / QWEN38_SPLITKV_PREFIX_THRESHOLD;
+  if (p > QWEN38_SPLITKV_MAX_PARTITIONS) p = QWEN38_SPLITKV_MAX_PARTITIONS;
+  return p;
+}
+// Partial kernel: same geometry and recurrence as k_qwen38_causal_attention_panel_hd256,
+// restricted to the row's partition [j0, j1) (floor-divided boundaries, so unaligned
+// splits and empty leading partitions fall out of the integer arithmetic). The first key
+// of the partition seeds (m, l, acc) exactly like the panel's j == 0 branch; the slot
+// layout is [m, l, O[QWEN38_PROMPT_HEAD_DIM]] per (rowHead, partition).
+__global__ void k_qwen38_causal_attention_panel_hd256_splitkv_partial(
+    const float *Q, const float *K, const float *V, float *Partials,
+    int tokens, int prefix, int nH, int nKV, float scale, int nsplits) {
+  int rowHead = blockIdx.x % (tokens * nH);
+  int partition = blockIdx.x / (tokens * nH);
+  int h = rowHead % nH, token = rowHead / nH;
+  if (h >= nH || token >= tokens || partition >= nsplits) return;
+  int tid = threadIdx.x, kvh = h / (nH / nKV);
+  int width = nKV * QWEN38_PROMPT_HEAD_DIM;
+  int nPos = prefix + token + 1;
+  int j0 = (int)((long long)partition * nPos / nsplits);
+  int j1 = (int)((long long)(partition + 1) * nPos / nsplits);
+  const float *qh = Q + (size_t)token * nH * QWEN38_PROMPT_HEAD_DIM +
+                    (size_t)h * QWEN38_PROMPT_HEAD_DIM;
+  extern __shared__ float smem[];
+  float *qs = smem;
+  float *red = smem + QWEN38_PROMPT_HEAD_DIM;
+  for (int d = tid; d < QWEN38_PROMPT_HEAD_DIM; d += FLASH_THREADS) qs[d] = qh[d];
+  __syncthreads();
+  float *slot = Partials + ((size_t)rowHead * nsplits + partition) *
+                         (QWEN38_PROMPT_HEAD_DIM + 2);
+  if (j0 >= j1) {
+    // Empty partition: the sentinel partial the merge drops exactly.
+    slot[0] = -INFINITY;
+    slot[1] = 0.f;
+    int k = 0;
+    for (int d = tid; d < QWEN38_PROMPT_HEAD_DIM; d += FLASH_THREADS, k++) slot[2 + k] = 0.f;
+    return;
+  }
+  float m = 0.f, l = 0.f;
+  float acc[QWEN38_PROMPT_HEAD_DIM / FLASH_THREADS];
+#pragma unroll
+  for (int k = 0; k < QWEN38_PROMPT_HEAD_DIM / FLASH_THREADS; k++) acc[k] = 0.f;
+  for (int j = j0; j < j1; j++) {
+    const float *kj = K + (size_t)j * width +
+                      (size_t)kvh * QWEN38_PROMPT_HEAD_DIM;
+    float partial = 0.f;
+    for (int d = tid; d < QWEN38_PROMPT_HEAD_DIM; d += FLASH_THREADS) {
+      partial += qs[d] * kj[d];
+    }
+    red[tid] = partial;
+    __syncthreads();
+    for (int s = FLASH_THREADS / 2; s > 0; s >>= 1) {
+      if (tid < s) red[tid] += red[tid + s];
+      __syncthreads();
+    }
+    float score = red[0] * scale;
+    __syncthreads();
+    const float *vj = V + (size_t)j * width +
+                      (size_t)kvh * QWEN38_PROMPT_HEAD_DIM;
+    if (j == j0) {
+      m = score;
+      l = 1.f;
+      int k = 0;
+      for (int d = tid; d < QWEN38_PROMPT_HEAD_DIM; d += FLASH_THREADS, k++) acc[k] = vj[d];
+      continue;
+    }
+    float nextM = fmaxf(m, score);
+    float correction = expf(m - nextM), probability = expf(score - nextM);
+    l = l * correction + probability;
+    int k = 0;
+    for (int d = tid; d < QWEN38_PROMPT_HEAD_DIM; d += FLASH_THREADS, k++) {
+      acc[k] = acc[k] * correction + probability * vj[d];
+    }
+    m = nextM;
+  }
+  slot[0] = m;
+  slot[1] = l;
+  int k = 0;
+  for (int d = tid; d < QWEN38_PROMPT_HEAD_DIM; d += FLASH_THREADS, k++) slot[2 + k] = acc[k];
+}
+// Merge kernel: one block per (row, head); every thread strides the head dims exactly as
+// the panel kernels do. The LSE fold rescales each partial onto the row max M and divides
+// by the merged denominator; an all-empty row (M == -INFINITY, unreachable for a valid
+// causal row) writes zeros instead of dividing by zero.
+__global__ void k_qwen38_splitkv_lse_merge_hd256(
+    const float *Partials, float *Out, int tokens, int nH, int nsplits) {
+  int flat = blockIdx.x;
+  int h = flat % nH, token = flat / nH;
+  if (h >= nH || token >= tokens) return;
+  int tid = threadIdx.x;
+  const float *base = Partials + (size_t)flat * nsplits * (QWEN38_PROMPT_HEAD_DIM + 2);
+  float mMax = -INFINITY;
+  for (int p = 0; p < nsplits; p++) {
+    mMax = fmaxf(mMax, base[p * (QWEN38_PROMPT_HEAD_DIM + 2)]);
+  }
+  float *outRow = Out + (size_t)token * nH * QWEN38_PROMPT_HEAD_DIM +
+                   (size_t)h * QWEN38_PROMPT_HEAD_DIM;
+  if (mMax == -INFINITY) {
+    int k = 0;
+    for (int d = tid; d < QWEN38_PROMPT_HEAD_DIM; d += FLASH_THREADS, k++) outRow[d] = 0.f;
+    return;
+  }
+  float lSum = 0.f;
+  float acc[QWEN38_PROMPT_HEAD_DIM / FLASH_THREADS];
+#pragma unroll
+  for (int k = 0; k < QWEN38_PROMPT_HEAD_DIM / FLASH_THREADS; k++) acc[k] = 0.f;
+  for (int p = 0; p < nsplits; p++) {
+    const float *slot = base + p * (QWEN38_PROMPT_HEAD_DIM + 2);
+    float weight = expf(slot[0] - mMax);
+    lSum += slot[1] * weight;
+    int k = 0;
+    for (int d = tid; d < QWEN38_PROMPT_HEAD_DIM; d += FLASH_THREADS, k++) {
+      acc[k] += slot[2 + k] * weight;
+    }
+  }
+  float invL = lSum > 0.f ? 1.f / lSum : 0.f;
+  int k = 0;
+  for (int d = tid; d < QWEN38_PROMPT_HEAD_DIM; d += FLASH_THREADS, k++) {
+    outRow[d] = acc[k] * invL;
+  }
+}
+
 // FAK_CUDA_QWEN38_PREFILL_ATTN selects the Qwen3.8 prompt-attention kernel: "simt" forces
 // the SIMT kernel above (the parity oracle and rollback), "mma" the tensor-core port in
 // fattn_mma_hd256.cuh on sm_80+. Unset keeps SIMT until the P-05 hardware A/B records a
@@ -312,9 +458,26 @@ static bool qwen38_prefill_attention_wants_mma(void) {
   return QWEN38_PREFILL_ATTN_MMA_DEFAULT != 0;
 }
 
+// The unchanged single-pass SIMT panel launch: short prefixes, and any call
+// that must stay allocation-free (scratch growth is illegal mid-capture).
+static int qwen38_causal_attention_panel_launch_simt(
+    const float *dQ, const float *dK, const float *dV, float *dOut,
+    int tokens, int prefix, int nH, int nKV, float scale) {
+  size_t shmem = ((size_t)QWEN38_PROMPT_HEAD_DIM + FLASH_THREADS) * sizeof(float);
+  FCUDA_TS("k_qwen38_causal_attention_panel_hd256", tokens * nH, k_qwen38_causal_attention_panel_hd256<<<tokens * nH, FLASH_THREADS, shmem, g_stream>>>(
+      dQ, dK, dV, dOut, tokens, prefix, nH, nKV, scale));
+  cudaError_t launch = cudaGetLastError();
+  return launch == cudaSuccess ? 0 : 50000 + (int)launch;
+}
+
 extern "C" int fak_qwen35_causal_attention_panel_f32(
     const float *dQ, const float *dK, const float *dV, float *dOut,
     int tokens, int prefix, int nH, int nKV, int hd, float scale) {
+  // A failed retirement has unknown completion: retain ownership and never retry or reuse.
+  if (g_cuda_cleanup_status != 0) return 52000 + g_cuda_cleanup_status;
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return 52000 + (int)cudaErrorNotReady;
+#endif
   // Any causal panel is admitted: the kernel bounds row t by prefix+t+1 itself,
   // so only the Qwen3.8 head geometry stays exact (matching the Go validator).
   if (!dQ || !dK || !dV || !dOut ||
@@ -330,6 +493,8 @@ extern "C" int fak_qwen35_causal_attention_panel_f32(
   int kvWidth = nKV * hd, qWidth = nH * hd;
   int positions = prefix + tokens;
   if (positions > INT_MAX / kvWidth || tokens > INT_MAX / qWidth) return -1;
+  int nsplits = qwen38_splitkv_partitions(prefix, tokens);
+  if (nsplits > 1 && tokens > INT_MAX / nH / nsplits) return -1;
   cudaGetLastError();
   if (qwen38_prefill_attention_wants_mma()) {
     // -2 means the mma path is unavailable for this call (below sm_80, or staging growth
@@ -337,11 +502,53 @@ extern "C" int fak_qwen35_causal_attention_panel_f32(
     int mma = fak_qwen38_fattn_mma_hd256_launch(dQ, dK, dV, dOut, tokens, prefix, nH, nKV, scale);
     if (mma != -2) return mma;
   }
+  if (nsplits <= 1) {
+    return qwen38_causal_attention_panel_launch_simt(dQ, dK, dV, dOut, tokens, prefix, nH, nKV, scale);
+  }
+  // Split-KV SIMT panel: one CTA per (row, head, partition) writes its unnormalized
+  // (m, l, O) partial into grow-only scratch; the LSE merge kernel folds them per row.
+  static float *g_splitkv_scratch = nullptr;
+  static size_t g_splitkv_scratch_cap = 0; // floats
+  size_t need = (size_t)tokens * nH * nsplits * (QWEN38_PROMPT_HEAD_DIM + 2);
+  bool splitReady = need <= g_splitkv_scratch_cap;
+  if (!splitReady && !g_capture_open) {
+    if (g_splitkv_scratch) {
+      cudaError_t retired = cudaFree(g_splitkv_scratch);
+      if (retired != cudaSuccess) {
+        if (g_cuda_cleanup_status == 0) g_cuda_cleanup_status = (int)retired;
+        return 52000 + g_cuda_cleanup_status;
+      }
+      fak_alloc_untrack(g_splitkv_scratch);
+    }
+    g_splitkv_scratch = nullptr;
+    g_splitkv_scratch_cap = 0;
+    cudaError_t e = fcuda_alloc_status(cudaMalloc(&g_splitkv_scratch, need * sizeof(float)));
+    if (e != cudaSuccess || !g_splitkv_scratch) {
+      fprintf(stderr, "fak-cuda: splitkv scratch cudaMalloc(%zu bytes) failed: %s\n",
+              need * sizeof(float), cudaGetErrorString(e));
+      g_splitkv_scratch = nullptr;
+      return 50000 + (int)e;
+    }
+    fak_alloc_track(g_splitkv_scratch, FAK_ALLOC_ATTENTION_SCRATCH, FAK_ALLOC_DEVICE_LOCAL,
+                    FAK_ALLOC_SITE("qwen38-splitkv-scratch"), need * sizeof(float));
+    g_splitkv_scratch_cap = need;
+    splitReady = true;
+  }
+  if (!splitReady) {
+    // Scratch growth is illegal mid-capture: keep the bitwise single-pass panel.
+    return qwen38_causal_attention_panel_launch_simt(dQ, dK, dV, dOut, tokens, prefix, nH, nKV, scale);
+  }
   size_t shmem = ((size_t)QWEN38_PROMPT_HEAD_DIM + FLASH_THREADS) * sizeof(float);
-  FCUDA_TS("k_qwen38_causal_attention_panel_hd256", tokens * nH, k_qwen38_causal_attention_panel_hd256<<<tokens * nH, FLASH_THREADS, shmem, g_stream>>>(
-      dQ, dK, dV, dOut, tokens, prefix, nH, nKV, scale));
-  cudaError_t launch = cudaGetLastError();
-  return launch == cudaSuccess ? 0 : 50000 + (int)launch;
+  FCUDA_TS("k_qwen38_causal_attention_panel_hd256_splitkv_partial", tokens * nH * nsplits,
+           k_qwen38_causal_attention_panel_hd256_splitkv_partial<<<tokens * nH * nsplits, FLASH_THREADS, shmem, g_stream>>>(
+               dQ, dK, dV, g_splitkv_scratch, tokens, prefix, nH, nKV, scale, nsplits));
+  cudaError_t partialLaunch = cudaGetLastError();
+  if (partialLaunch != cudaSuccess) return 50000 + (int)partialLaunch;
+  FCUDA_TS("k_qwen38_splitkv_lse_merge_hd256", tokens * nH,
+           k_qwen38_splitkv_lse_merge_hd256<<<tokens * nH, FLASH_THREADS, 0, g_stream>>>(
+               g_splitkv_scratch, dOut, tokens, nH, nsplits));
+  cudaError_t mergeLaunch = cudaGetLastError();
+  return mergeLaunch == cudaSuccess ? 0 : 50000 + (int)mergeLaunch;
 }
 
 // Prompt-panel causal attention for the dense HAL prefill: one block per (row, head), each
@@ -409,6 +616,15 @@ extern "C" int fcuda_causal_attention_panel_f32(
   int kvWidth = nKV * hd, qWidth = nH * hd;
   if (prefix + tokens > INT_MAX / kvWidth || tokens > INT_MAX / qWidth) return -1;
   cudaGetLastError();
+  // The tensor-core port is instantiated only for the Qwen3.8 hd256 geometry, and its f16
+  // K/V staging pays off at prompt length: route P>=128 panels through it when
+  // FAK_CUDA_QWEN38_PREFILL_ATTN selects mma. -2 declines before any effect, so every other
+  // shape, device and capture state keeps the SIMT panel kernel below.
+  if (nH == 24 && nKV == 4 && hd == QWEN38_PROMPT_HEAD_DIM && prefix + tokens >= 128 &&
+      qwen38_prefill_attention_wants_mma()) {
+    int mma = fak_qwen38_fattn_mma_hd256_launch(dQ, dK, dV, dOut, tokens, prefix, nH, nKV, scale);
+    if (mma != -2) return mma;
+  }
   size_t shmem = ((size_t)hd + FLASH_THREADS) * sizeof(float);
   FCUDA_TS("k_prompt_causal_attention_panel", tokens * nH, k_prompt_causal_attention_panel<<<tokens * nH, FLASH_THREADS, shmem, g_stream>>>(
       dQ, dK, dV, dOut, tokens, prefix, nH, nKV, hd, scale));

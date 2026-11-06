@@ -228,6 +228,27 @@ func (g *Gossip) handleMessage(msg gossipMessage, from *net.UDPAddr) {
 	case "ack":
 		g.mu.Lock()
 		if m, ok := g.members[msg.SenderID]; ok {
+			if m.State != "alive" {
+				// Restore routing when an acknowledged member becomes live again.
+				node := &Node{
+					ID:      m.NodeID,
+					Addr:    m.Addr,
+					IsLocal: m.NodeID == g.config.NodeID,
+					Alive:   true,
+				}
+				for _, existing := range g.ring.Nodes() {
+					if existing.ID == m.NodeID {
+						node = existing
+						if !existing.Alive {
+							updated := *existing
+							updated.Alive = true
+							node = &updated
+						}
+						break
+					}
+				}
+				g.ring.AddNode(node)
+			}
 			m.State = "alive"
 			m.LastPing = time.Now()
 		}

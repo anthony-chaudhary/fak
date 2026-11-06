@@ -219,7 +219,14 @@ func (c Client) post(ctx context.Context, endpoint string, body []byte, contentT
 		// ctx without a deadline would otherwise inherit DefaultClient's no-timeout.
 		httpClient = &http.Client{Timeout: 10 * time.Second}
 	}
-	return httpClient.Do(req)
+	// An acknowledgment must come from the configured control endpoint, not
+	// a redirect target (which may turn this POST into a GET). Copy the client
+	// so a caller's shared redirect policy is not changed.
+	controlClient := *httpClient
+	controlClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return controlClient.Do(req)
 }
 
 // exactSpanCapable reports whether this client can evict an exact span: either the

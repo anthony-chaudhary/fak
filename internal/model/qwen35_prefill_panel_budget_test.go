@@ -177,6 +177,15 @@ func TestPrefillPanelRoundTripBudget(t *testing.T) {
 	const oldPanelRoundTrips = promptTokens / oldPanelTokens // the pre-#13041 shape: 8
 
 	s, runner := newPanelBudgetSession(t)
+	// Provenance stamps (#13605 leaf A-cfg-int4): the retired FAK_SOURCE_REVISION /
+	// FAK_ARTIFACT_SHA256 ambient reads are replaced by these build-time stamp
+	// variables, and the aggregate receipt must carry whatever they hold.
+	qwen35MetalReceiptSourceRevision = "panel-witness-source-revision"
+	qwen35MetalReceiptArtifactSHA256 = "panel-witness-artifact-sha256"
+	defer func() {
+		qwen35MetalReceiptSourceRevision = ""
+		qwen35MetalReceiptArtifactSHA256 = ""
+	}()
 	ids := make([]int, promptTokens)
 	for i := range ids {
 		ids[i] = i % 512
@@ -201,6 +210,10 @@ func TestPrefillPanelRoundTripBudget(t *testing.T) {
 	}
 	if agg.Tokens != promptTokens {
 		t.Fatalf("aggregate Tokens=%d, want %d", agg.Tokens, promptTokens)
+	}
+	if agg.SourceRevision != "panel-witness-source-revision" || agg.ArtifactSHA256 != "panel-witness-artifact-sha256" {
+		t.Fatalf("aggregate receipt provenance revision=%q artifact=%q, want the build stamps",
+			agg.SourceRevision, agg.ArtifactSHA256)
 	}
 
 	// The L1 budget assertion, sourced from the receipt the production path fills.

@@ -8,9 +8,9 @@ import (
 	"unicode"
 )
 
-// printConciseFlagDefaults keeps `fak <verb> --help` scannable. The authored
-// flag text remains available to bespoke deep-help surfaces such as serve/all.
-func printConciseFlagDefaults(w io.Writer, fs *flag.FlagSet) {
+// printFlagDefaults preserves authored descriptions for per-verb deep help.
+// Shortening is opt-in for explicitly concise help surfaces.
+func printFlagDefaults(w io.Writer, fs *flag.FlagSet, concise bool) {
 	fs.VisitAll(func(f *flag.Flag) {
 		arg, usage := flag.UnquoteUsage(f)
 		if arg == "" && !isBoolFlag(f) {
@@ -19,7 +19,10 @@ func printConciseFlagDefaults(w io.Writer, fs *flag.FlagSet) {
 		if arg != "" {
 			arg = " " + arg
 		}
-		fmt.Fprintf(w, "  --%s%s\n      %s\n", f.Name, arg, conciseFlagSummary(usage))
+		if concise {
+			usage = conciseFlagSummary(usage)
+		}
+		fmt.Fprintf(w, "  --%s%s\n      %s\n", f.Name, arg, usage)
 	})
 }
 
@@ -28,12 +31,16 @@ func conciseFlagSummary(s string) string {
 	if i := strings.Index(s, ". "); i >= 0 {
 		s = s[:i+1]
 	}
-	const max = 160
+	const max = 110 - 6 // Leave room for the rendered explanation's indentation.
 	r := []rune(s)
 	if len(r) > max {
 		r = r[:max-1]
-		for len(r) > 0 && !unicode.IsSpace(r[len(r)-1]) {
-			r = r[:len(r)-1]
+		end := len(r)
+		for end > 0 && !unicode.IsSpace(r[end-1]) {
+			end--
+		}
+		if end > 0 {
+			r = r[:end]
 		}
 		s = strings.TrimSpace(string(r)) + "…"
 	}

@@ -42,12 +42,15 @@ const (
 
 // nativeGuided is the one guided constraint a request carries: a regex pattern
 // (guided_regex, regex, guided_choice), a character-rule GBNF grammar, or a JSON
-// schema (guided_json, json_schema), possibly sent as a structured_outputs member.
+// schema (guided_json, json_schema), possibly sent as a structured_outputs
+// member, plus the optional grammar_budget side-band that arms the
+// completion-token budget on whichever grammar the request carries.
 type nativeGuided struct {
 	carrier string
 	pattern string
 	gbnf    string
 	schema  json.RawMessage
+	budget  bool
 }
 
 // refuseNativeGuidedCarriers rejects every provider-native guided-decode field
@@ -76,11 +79,22 @@ func nativeGuidedKind(carrier string) string {
 
 // parseNativeGuided returns the request's guided constraint, if any. Only one
 // kind may be sent; carriers of the same kind may be sent together only with
-// the same constraint.
+// the same constraint. The grammar_budget side-band may accompany any carrier;
+// it is refused when its value is not a boolean, before any carrier is read.
 func parseNativeGuided(guided map[string]json.RawMessage) (nativeGuided, error) {
-	refused, keys := "", []string{}
+	refused, keys, budgetOn := "", []string{}, false
 	for key, raw := range guided {
 		if nativeGuidedAbsent(raw) {
+			continue
+		}
+		if key == nativeGuidedBudgetKey {
+			// Side-band option, not a constraint carrier: it arms the
+			// completion-token budget on whichever grammar the request carries.
+			flag, err := parseNativeGrammarBudget(raw)
+			if err != nil {
+				return nativeGuided{}, &nativeGuidedBudgetError{Carrier: nativeGuidedBudgetKey, Err: err}
+			}
+			budgetOn = flag
 			continue
 		}
 		if !slices.Contains(nativeGuidedCarriers[:], key) {
@@ -157,6 +171,7 @@ func parseNativeGuided(guided map[string]json.RawMessage) (nativeGuided, error) 
 			return nativeGuided{}, &nativeGuidedCarrierError{Carrier: m.carrier}
 		}
 	}
+	spec.budget = budgetOn
 	return spec, nil
 }
 
@@ -326,47 +341,68 @@ func (p *InKernelPlanner) newNativeRequestConstraint(sp SampleParams, stops map[
 	if err != nil {
 		return nil, err
 	}
+	var c *nativeStructuredConstraint
 	if guided.carrier == "" {
-		return p.newNativeStructuredConstraint(sp.ResponseFormat, stops)
-	}
-	if !nativeGuidedAbsent(sp.ResponseFormat) {
-		if _, err := nativeExactMembers(sp.ResponseFormat, "type", "json_schema"); err != nil {
-			return nil, &nativeGuidedCarrierError{Carrier: guided.carrier}
+		c, err = p.newNativeStructuredConstraint(sp.ResponseFormat, stops)
+		if err != nil {
+			return nil, err
 		}
-		formatType := nativeResponseFormatType(sp.ResponseFormat)
-		switch {
-		case formatType == "text":
-		case formatType == "json_schema" && guided.schema != nil:
-			schema, err := nativeResponseFormatSchema(sp.ResponseFormat)
+	} else {
+		if !nativeGuidedAbsent(sp.ResponseFormat) {
+			if _, err := nativeExactMembers(sp.ResponseFormat, "type", "json_schema"); err != nil {
+				return nil, &nativeGuidedCarrierError{Carrier: guided.carrier}
+			}
+			formatType := nativeResponseFormatType(sp.ResponseFormat)
+			switch {
+			case formatType == "text":
+			case formatType == "json_schema" && guided.schema != nil:
+				schema, err := nativeResponseFormatSchema(sp.ResponseFormat)
+				if err != nil {
+					return nil, err
+				}
+				if !nativeGuidedSameSchema(schema, guided.schema) {
+					return nil, &nativeGuidedCarrierError{Carrier: guided.carrier}
+				}
+			default:
+				return nil, &nativeGuidedCarrierError{Carrier: guided.carrier}
+			}
+		}
+		if guided.schema != nil {
+			c, err = p.newNativeJSONSchemaConstraint(guided.schema, stops)
 			if err != nil {
 				return nil, err
 			}
-			if !nativeGuidedSameSchema(schema, guided.schema) {
-				return nil, &nativeGuidedCarrierError{Carrier: guided.carrier}
+		} else {
+			stopID, err := p.nativeStructuredStopID(stops)
+			if err != nil {
+				return nil, err
 			}
-		default:
-			return nil, &nativeGuidedCarrierError{Carrier: guided.carrier}
+			if guided.gbnf != "" {
+				mask, err := grammar.CompileGBNF(guided.gbnf, nativeRegexTokenDecoder{tok: p.tok, special: p.tok.SpecialTokens()}, grammar.CompileOptions{EOS: stopID})
+				if err != nil {
+					return nil, fmt.Errorf("%w: %w", &nativeGuidedCarrierError{Carrier: guided.carrier}, err)
+				}
+				c = &nativeStructuredConstraint{mask: mask, stopID: stopID, openID: -1, closeID: -1}
+			} else {
+				mask, err := grammar.CompileRegex(guided.pattern, nativeRegexTokenDecoder{tok: p.tok, special: p.tok.SpecialTokens()}, grammar.CompileOptions{EOS: stopID})
+				if err != nil {
+					return nil, fmt.Errorf("%w: %s: %w", ErrNativeStructuredUnsupported, guided.carrier, err)
+				}
+				c = &nativeStructuredConstraint{mask: mask, stopID: stopID, openID: -1, closeID: -1}
+			}
 		}
 	}
-	if guided.schema != nil {
-		return p.newNativeJSONSchemaConstraint(guided.schema, stops)
-	}
-	stopID, err := p.nativeStructuredStopID(stops)
-	if err != nil {
-		return nil, err
-	}
-	if guided.gbnf != "" {
-		mask, err := grammar.CompileGBNF(guided.gbnf, nativeRegexTokenDecoder{tok: p.tok, special: p.tok.SpecialTokens()}, grammar.CompileOptions{EOS: stopID})
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", &nativeGuidedCarrierError{Carrier: guided.carrier}, err)
+	// Grammar/completion-token budget (adapted from TensorFold's
+	// grammar_budget, Apache-2.0): off unless the request asks for it. When
+	// armed, the compiled grammar mask additionally keeps the reply
+	// completable within the request's token ceiling; with no grammar the flag
+	// is a no-op.
+	if guided.budget && c != nil {
+		if err := c.armGrammarBudget(p, nativeGrammarBudgetCeiling(sp, p.maxNew)); err != nil {
+			return nil, err
 		}
-		return &nativeStructuredConstraint{mask: mask, stopID: stopID, openID: -1, closeID: -1}, nil
 	}
-	mask, err := grammar.CompileRegex(guided.pattern, nativeRegexTokenDecoder{tok: p.tok, special: p.tok.SpecialTokens()}, grammar.CompileOptions{EOS: stopID})
-	if err != nil {
-		return nil, fmt.Errorf("%w: %s: %w", ErrNativeStructuredUnsupported, guided.carrier, err)
-	}
-	return &nativeStructuredConstraint{mask: mask, stopID: stopID, openID: -1, closeID: -1}, nil
+	return c, nil
 }
 
 type nativeStructuredConstraintContextKey struct{}
@@ -397,6 +433,9 @@ type nativeStructuredConstraint struct {
 	initial nativeStructuredPhase
 	phase   nativeStructuredPhase
 	closed  bool
+
+	budget         *nativeGrammarBudget
+	budgetSnapshot []float32
 }
 
 func nativeStructuredConstraintFromContext(ctx context.Context) *nativeStructuredConstraint {
@@ -611,6 +650,9 @@ func (c *nativeStructuredConstraint) fork() *nativeStructuredConstraint {
 	fork := *c
 	fork.history = append([]int(nil), c.history...)
 	fork.maskBuffer = nil
+	if c.budget != nil {
+		fork.budget = c.budget.clone()
+	}
 	return &fork
 }
 
@@ -618,6 +660,9 @@ func (c *nativeStructuredConstraint) reset() {
 	c.history = c.history[:0]
 	c.phase = c.initial
 	c.closed = false
+	if c.budget != nil {
+		c.budget.emitted = 0
+	}
 }
 
 // reasoningActive reports whether the JSON object has not started yet.
@@ -678,6 +723,7 @@ func (c *nativeStructuredConstraint) maskLogits(logits []float32, stops map[int]
 		c.maskBuffer = c.maskBuffer[:len(logits)]
 	}
 	copy(c.maskBuffer, logits)
+	masked := false
 	switch c.phase {
 	case nativeStructuredReasoning:
 		// Reasoning is unconstrained except that the response cannot end before
@@ -691,10 +737,12 @@ func (c *nativeStructuredConstraint) maskLogits(logits []float32, stops map[int]
 			return nil, err
 		}
 		c.maskBuffer[c.openID] = open
+		masked = true
 	default:
 		if err := c.applyMask(); err != nil {
 			return nil, err
 		}
+		masked = true
 	}
 	for _, logit := range c.maskBuffer {
 		if math.IsNaN(float64(logit)) || math.IsInf(float64(logit), 1) {
@@ -709,6 +757,9 @@ func (c *nativeStructuredConstraint) maskLogits(logits []float32, stops map[int]
 				c.maskBuffer[id] = float32(math.Inf(-1))
 			}
 		}
+	}
+	if c.budget != nil && masked && !complete {
+		c.applyBudget()
 	}
 	survivor := false
 	for _, logit := range c.maskBuffer {
@@ -738,6 +789,9 @@ func (c *nativeStructuredConstraint) applyMask() error {
 func (c *nativeStructuredConstraint) accept(token int, effective []float32) error {
 	if c == nil || token < 0 || token >= len(effective) {
 		return ErrNativeStructuredNoToken
+	}
+	if c.budget != nil {
+		c.budget.emitted++
 	}
 	switch c.phase {
 	case nativeStructuredReasoning:

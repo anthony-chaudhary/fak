@@ -13,18 +13,16 @@ type benchContractStore struct {
 	contracts []leaseref.ContractRecord
 }
 
-func (s *benchContractStore) LiveContracts(ctx context.Context, now ...time.Time) ([]leaseref.ContractRecord, error) {
+func (s *benchContractStore) ListContracts(ctx context.Context) ([]leaseref.ContractRecord, error) {
 	cp := make([]leaseref.ContractRecord, len(s.contracts))
 	copy(cp, s.contracts)
 	return cp, nil
 }
 
-func (s *benchContractStore) UpdateContractState(ctx context.Context, ticketID, holder string, newState leaseref.ContractState, tokensUsed int64, now ...time.Time) (leaseref.ContractRecord, error) {
+func (s *benchContractStore) UpdateContractState(ctx context.Context, ticketID string, newState leaseref.ContractState, now ...time.Time) (leaseref.ContractRecord, error) {
 	return leaseref.ContractRecord{
-		TicketID:   ticketID,
-		Holder:     holder,
-		State:      newState,
-		TokensUsed: tokensUsed,
+		TicketID: ticketID,
+		State:    newState,
 	}, nil
 }
 

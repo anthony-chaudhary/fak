@@ -305,6 +305,43 @@ func PromptPanelChunkTokens(cfg TransformerScratchConfig, maxTokens int) int {
 	return int(n)
 }
 
+// DequantGEMMScratchRows is the activation row count at which the CUDA quantized GEMM
+// switches from the per-row kernel to the P>=128 dequant + fp16 cuBLAS arm
+// (fcuda_q8_matmul_f32 / fcuda_q4k_matmul_f32): below it no dequant scratch is allocated.
+const DequantGEMMScratchRows = 128
+
+// DequantScratchBytes reports the peak device scratch one P>=128 quantized GEMM holds for an
+// out x in weight: the f32 dequant copy plus one fp16 weight half of the compensated cuBLAS
+// arm. It mirrors cudaDequantScratch (cuda_prompt_panel.go) — the allocation whose miss is
+// the typed mid-prefill OOM admission must price before launch (raider-fak-arm-oom-20261028).
+func DequantScratchBytes(out, in int64) int64 {
+	return saturatingMulInt64(out, in, int64(F32.Bytes()+F16.Bytes()))
+}
+
+// DequantScratchDemand prices the worst-case P>=128 dequant + fp16 GEMM scratch
+// over the decoder-block GEMMs (q/k/v/o projections and gate/up/down) as one device-scope
+// scratchpad demand: the largest out x in product among hidden x intermediate, hidden x q,
+// and hidden x kv, times the f32 + fp16 weight-copy bytes. Incomplete geometry returns nil so
+// the caller's plan stays byte-for-byte unchanged (the fail-open contract every fit helper
+// uses); a calculator result alone grants no allocation or hardware readiness.
+func DequantScratchDemand(cfg TransformerScratchConfig) MemoryPlan {
+	if cfg.HiddenSize <= 0 || cfg.IntermediateSize <= 0 || cfg.NumHeads <= 0 || cfg.NumKVHeads <= 0 || cfg.HeadDim <= 0 {
+		return nil
+	}
+	width := int64(cfg.IntermediateSize)
+	if q := saturatingMulInt64(int64(cfg.NumHeads), int64(cfg.HeadDim)); q > width {
+		width = q
+	}
+	if kv := saturatingMulInt64(int64(cfg.NumKVHeads), int64(cfg.HeadDim)); kv > width {
+		width = kv
+	}
+	bytes := DequantScratchBytes(int64(cfg.HiddenSize), width)
+	if bytes <= 0 {
+		return nil
+	}
+	return MemoryPlan{{Class: MemoryScratchpad, Bytes: bytes, Detail: "cuda-prefill-dequant-scratch", Scope: MemoryScopeDevice, DType: "f32+fp16"}}
+}
+
 // ExpertParallelLargestBandExperts reports how many experts the BUSIEST rank holds when
 // numExperts experts are tiled across `ranks` near-even contiguous bands (the
 // model.ExpertParallelPlan / NewTPPlan tiling): ceil(numExperts/ranks). The per-card residency

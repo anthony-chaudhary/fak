@@ -1,3 +1,15 @@
+// Package reachdelta is a deterministic referee for adjudicator policy reach
+// expansion: Delta categorizes what a proposed adjudicator.Policy newly makes
+// reachable relative to a base policy (newly allowed tools and prefixes, new
+// research egress hosts, removed denies and protections, widened postures,
+// added complain or advisory modes), SuppressAccepted drops findings backed by
+// live accepted-risk records in the knownbad ledger, and Ratify /
+// RatifyPromotion gate the survivors into an approve-or-hold verdict,
+// including the complain-mode promotion clone path. As of the 2026-11-03
+// wiring audit, no production call path imports this package yet; the only
+// consumer is a test-only vendored copy of Delta in
+// internal/adjudicator/dogfood_manifest_test.go, so it is not wired into any
+// production command, and connecting it would require an out-of-lane edit.
 package reachdelta
 
 import (

@@ -273,6 +273,20 @@ type Config struct {
 	IndexTopK     int      `json:"index_topk,omitempty"`
 	IndexerTypes  []string `json:"indexer_types,omitempty"`
 
+	// GLM-5.3-Flash (glm5_next) indexer k-pool compression. IndexKpool is the
+	// pooled-key width the DSA indexer scores over (pools of IndexKpool cached
+	// keys collapse into one scored candidate); IndexKpoolAlwaysSelectTail
+	// appends the current incomplete pool as raw token indices. Zero/absent
+	// keeps every other family untouched.
+	IndexKpool                 int  `json:"index_kpool,omitempty"`
+	IndexKpoolAlwaysSelectTail bool `json:"index_kpool_always_select_tail,omitempty"`
+
+	// GLM-5.3-Flash KDA forget-gate lower bound (linear_attn_config.
+	// gate_lower_bound): decay = bound * sigmoid(exp(A_log) * g) when non-zero;
+	// zero means the HF unbounded softplus path. Folded from the nested
+	// linear_attn_config object at parse time.
+	LinearGateLowerBound float64 `json:"linear_gate_lower_bound,omitempty"`
+
 	// DeepSeek-V4-Flash-0731 forward metadata from revision
 	// 7872f01b1d1fe23eabc4c98b48bffcef5a386062. CompressRatios selects one
 	// compression regime for each attention layer; the remaining fields define the
@@ -483,6 +497,15 @@ type configJSONHints struct {
 // both EOSTokenID (first) and EOSTokenIDs (full set). The rope-scaling params live in
 // HF under a nested rope_scaling object; the flat json tags above are what
 // export_oracle.py flattens them to, so a re-export carries them with zero code change.
+// glm5LinearAttnConfigJSON mirrors the nested linear_attn_config object the
+// GLM-5.3-Flash checkpoint carries inside text_config.
+type glm5LinearAttnConfigJSON struct {
+	NumHeads            int     `json:"num_heads"`
+	HeadDim             int     `json:"head_dim"`
+	ShortConvKernelSize int     `json:"short_conv_kernel_size"`
+	GateLowerBound      float64 `json:"gate_lower_bound"`
+}
+
 func (c *Config) UnmarshalJSON(b []byte) error {
 	eosInitiallyUnset := !c.eosJSONDecoded && c.EOSTokenID == 0 && len(c.EOSTokenIDs) == 0
 	c.GLM5Next = isExactGLM5NextConfig(b)
@@ -537,6 +560,33 @@ func (c *Config) UnmarshalJSON(b []byte) error {
 		}
 	}
 	c.EOSTokenIDs = aux.EOS.ids
+	// GLM-5.3-Flash nests its KDA (linear-attention) geometry under
+	// "linear_attn_config" instead of the flat qwen35 field names; fold the
+	// nested object onto the same axes so the native forward reads one surface.
+	var linearWrap struct {
+		LinearAttnConfig *glm5LinearAttnConfigJSON `json:"linear_attn_config"`
+	}
+	if err := json.Unmarshal(lm, &linearWrap); err == nil && linearWrap.LinearAttnConfig != nil {
+		lc := linearWrap.LinearAttnConfig
+		if c.LinearNumKeyHeads == 0 {
+			c.LinearNumKeyHeads = lc.NumHeads
+		}
+		if c.LinearNumValueHeads == 0 {
+			c.LinearNumValueHeads = lc.NumHeads
+		}
+		if c.LinearKeyHeadDim == 0 {
+			c.LinearKeyHeadDim = lc.HeadDim
+		}
+		if c.LinearValueHeadDim == 0 {
+			c.LinearValueHeadDim = lc.HeadDim
+		}
+		if c.LinearConvKernelDim == 0 {
+			c.LinearConvKernelDim = lc.ShortConvKernelSize
+		}
+		if c.LinearGateLowerBound == 0 {
+			c.LinearGateLowerBound = lc.GateLowerBound
+		}
+	}
 	// Default only an initially unset EOS. Later JSON overlays retain the scalar
 	// fallback while clearing the list, preserving the existing decode behavior.
 	if !aux.EOS.present && eosInitiallyUnset {

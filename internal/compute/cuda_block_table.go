@@ -41,6 +41,52 @@ func (b *CUDAPageBlock) DecRef() int64 {
 	return atomic.AddInt64(&b.refCount, -1)
 }
 
+// CUDAPagedPrefillPath names the dtype path a CUDA block table pages its KV memory on
+// during prefill (oss-port-flashinfer-fp8-prefill-6393, PR #3321).
+type CUDAPagedPrefillPath string
+
+const (
+	// CUDAPagedPrefillGeneric is the default paged path: one F32 element per slot
+	// (4 bytes). Every arch not admitted to the FP8 branch pages on it, including
+	// unknown compute capabilities — the generic path is the always-available fallback.
+	CUDAPagedPrefillGeneric CUDAPagedPrefillPath = "generic"
+	// CUDAPagedPrefillFP8 is the arch-gated paged path: one FP8 (E4M3) element per slot
+	// (1 byte). It is enabled only where the arch admits it (sm_120 today). It changes
+	// byte accounting, never block topology: the same page boundaries, IDs, and
+	// refcounts the generic path produces.
+	CUDAPagedPrefillFP8 CUDAPagedPrefillPath = "fp8"
+)
+
+// elementBytes is the per-slot width of the path's elements.
+func (p CUDAPagedPrefillPath) elementBytes() int {
+	if p == CUDAPagedPrefillFP8 {
+		return 1
+	}
+	return 4
+}
+
+// The FP8 paged branch's arch admission. INSPIRE-ONLY port of the principle behind
+// flashinfer-ai/flashinfer's SM120 FMHA paged prefill
+// (flashinfer/attention/cute_dsl/sm120_fmha.py, Apache-2.0): an FP8 paged prefill
+// path exists only where the architecture covers it; every other arch falls back to
+// the generic path. This file adds no kernel — it selects and accounts the path on
+// the host side.
+const (
+	cudaFP8PagedPrefillMajor = 12
+	cudaFP8PagedPrefillMinor = 0
+)
+
+// SelectCUDAPagedPrefillPath reports which paged-prefill dtype path a device of
+// compute capability (major, minor) runs. Only sm_120 is admitted to the FP8
+// branch; every other known arch, and any unknown capability (major <= 0), keeps
+// the generic path. Pure: no cgo, no GPU.
+func SelectCUDAPagedPrefillPath(major, minor int) CUDAPagedPrefillPath {
+	if major > 0 && major == cudaFP8PagedPrefillMajor && minor == cudaFP8PagedPrefillMinor {
+		return CUDAPagedPrefillFP8
+	}
+	return CUDAPagedPrefillGeneric
+}
+
 // CUDABlockTable represents a logical-to-physical block table for a session's KV cache (#10723, epic #2236).
 // Instead of a single flat device allocation per layer, KV memory is divided into fixed-size
 // physical blocks. Cloning a session duplicates only the block table pointers and increments
@@ -48,19 +94,36 @@ func (b *CUDAPageBlock) DecRef() int64 {
 type CUDABlockTable struct {
 	mu        sync.Mutex
 	blockSize int // tokens per block
-	stride    int // floats per token per layer
+	stride    int // elements per token per layer
 	blocks    []*CUDAPageBlock
 	nextID    int64
+	path      CUDAPagedPrefillPath // paged-prefill dtype path; generic unless arch-admitted to FP8
 }
 
-// NewCUDABlockTable creates a block table with the given page block token capacity.
+// NewCUDABlockTable creates a block table with the given page block token capacity,
+// on the generic paged-prefill path.
 func NewCUDABlockTable(blockSize, stride int) *CUDABlockTable {
+	return newCUDABlockTable(blockSize, stride, CUDAPagedPrefillGeneric)
+}
+
+// NewCUDABlockTableForArch creates a block table whose paged-prefill dtype path is
+// selected by the device's compute capability: sm_120 admits the FP8 paged branch,
+// every other arch (and an unknown capability) keeps the generic path.
+func NewCUDABlockTableForArch(blockSize, stride, major, minor int) *CUDABlockTable {
+	return newCUDABlockTable(blockSize, stride, SelectCUDAPagedPrefillPath(major, minor))
+}
+
+func newCUDABlockTable(blockSize, stride int, path CUDAPagedPrefillPath) *CUDABlockTable {
 	if blockSize <= 0 {
 		blockSize = 16 // standard PagedAttention default
+	}
+	if path == "" {
+		path = CUDAPagedPrefillGeneric
 	}
 	return &CUDABlockTable{
 		blockSize: blockSize,
 		stride:    stride,
+		path:      path,
 	}
 }
 
@@ -99,7 +162,7 @@ func (t *CUDABlockTable) AppendLogicalTokens(count int) []*CUDAPageBlock {
 			toAdd = room
 		}
 		active.Tokens += toAdd
-		active.Bytes += int64(toAdd * t.stride * 4) // 4 bytes per float32
+		active.Bytes += int64(toAdd * t.stride * t.path.elementBytes())
 		remaining -= toAdd
 	}
 	return allocated
@@ -122,6 +185,7 @@ func (t *CUDABlockTable) Clone() *CUDABlockTable {
 		stride:    t.stride,
 		blocks:    clonedBlocks,
 		nextID:    t.nextID,
+		path:      t.path,
 	}
 }
 
@@ -130,6 +194,13 @@ func (t *CUDABlockTable) Blocks() []*CUDAPageBlock {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return append([]*CUDAPageBlock(nil), t.blocks...)
+}
+
+// PagedPrefillPath returns the dtype path this block table pages on.
+func (t *CUDABlockTable) PagedPrefillPath() CUDAPagedPrefillPath {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.path
 }
 
 // TokenCount returns the total logical tokens mapped.

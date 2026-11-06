@@ -111,7 +111,7 @@ func TestRequiredLiteralsSoundness(t *testing.T) {
 		{`foo(bar)?`, []string{"foo"}},                // bar is optional -> not required
 		{`(cat|dog)house`, []string{"house"}},         // alternation contributes nothing
 		{`ab*cdef`, []string{"cdef"}},                 // b* breaks "ab", cdef survives
-		{`ident+`, []string{"ident"}},                 // x+ requires at least one -> "ident" required
+		{`ident+`, []string{"iden"}},                  // a repeated node breaks the exact run
 		{`.*`, nil},                                   // no required literal
 	}
 	for _, c := range cases {

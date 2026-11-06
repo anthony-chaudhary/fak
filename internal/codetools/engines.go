@@ -102,7 +102,8 @@ func window(content string, offset, limit int, truncated bool) (string, bool) {
 		return "", truncated
 	}
 	end := len(lines)
-	if limit > 0 && start+limit < end {
+	// Compare remaining lines before adding a caller-supplied limit.
+	if limit > 0 && limit < end-start {
 		end = start + limit
 		truncated = true
 	}

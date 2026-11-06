@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"flag"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 func TestNativeControlFlagsExposeSharedPublicHelp(t *testing.T) {
@@ -33,6 +35,8 @@ func TestNativeControlFlagsExposeSharedPublicHelp(t *testing.T) {
 }
 
 func TestServeNativeFlagsReachTypedPlannerConfig(t *testing.T) {
+	t.Setenv("FAK_BACKEND", "")
+	t.Setenv("FAK_UP_KV_PRECISION", "")
 	t.Setenv("FAK_INKERNEL_QWEN_Q4K_PREFILL_CHUNK_TOKENS", "4096")
 	t.Setenv("FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE", "off")
 	t.Setenv("FAK_Q4K_GATEUP_SLAB", "0")
@@ -104,6 +108,126 @@ func TestServeGPULayersFlagsReachTypedPlannerConfig(t *testing.T) {
 	if got := serveNativePlannerConfig(sf2).DenseGPULayers; got != 24 {
 		t.Fatalf("--native-gpu-layers: DenseGPULayers = %d, want 24", got)
 	}
+}
+
+// fak-test:justify why=regression when=changed:cmd/fak/serve*.go
+// fak-test:runtime fast est=10ms lane=default
+func TestServeNativeKVDefaultF16(t *testing.T) {
+	// Closed contract: the resolved precision enum value, not prose.
+	t.Run("cuda-unset-defaults-to-fp16", func(t *testing.T) {
+		t.Setenv("FAK_UP_KV_PRECISION", "")
+		t.Setenv("FAK_BACKEND", "")
+		fs, sf := newServeFlagSet()
+		if err := fs.Parse([]string{"--backend", "cuda"}); err != nil {
+			t.Fatal(err)
+		}
+		if got := serveNativePlannerConfig(sf).KVPrecision; got != model.KVPrecisionFP16 {
+			t.Fatalf("unset --kv-precision on --backend cuda resolved %q, want the fp16 default", got)
+		}
+		// The default publishes its tier so the fit-estimator seam charges the density the engine realizes.
+		if got := os.Getenv("FAK_UP_KV_PRECISION"); got != string(model.KVPrecisionFP16) {
+			t.Fatalf("published FAK_UP_KV_PRECISION = %q, want %q", got, model.KVPrecisionFP16)
+		}
+	})
+
+	t.Run("explicit-f32-still-selectable", func(t *testing.T) {
+		t.Setenv("FAK_UP_KV_PRECISION", "")
+		t.Setenv("FAK_BACKEND", "")
+		fs, sf := newServeFlagSet()
+		if err := fs.Parse([]string{"--backend", "cuda", "--kv-precision", "f32"}); err != nil {
+			t.Fatal(err)
+		}
+		if got := serveNativePlannerConfig(sf).KVPrecision; got != model.KVPrecisionFP32 {
+			t.Fatalf("explicit f32 on --backend cuda resolved %q, want the exact f32 override", got)
+		}
+	})
+
+	t.Run("env-override-to-f32-still-selectable", func(t *testing.T) {
+		t.Setenv("FAK_UP_KV_PRECISION", "f32")
+		t.Setenv("FAK_BACKEND", "")
+		fs, sf := newServeFlagSet()
+		if err := fs.Parse([]string{"--backend", "cuda"}); err != nil {
+			t.Fatal(err)
+		}
+		if got := serveNativePlannerConfig(sf).KVPrecision; got != model.KVPrecisionFP32 {
+			t.Fatalf("FAK_UP_KV_PRECISION=f32 on --backend cuda resolved %q, want the exact f32 override", got)
+		}
+	})
+
+	t.Run("non-cuda-keeps-exact-f32-zero-value", func(t *testing.T) {
+		t.Setenv("FAK_UP_KV_PRECISION", "")
+		t.Setenv("FAK_BACKEND", "")
+		for _, args := range [][]string{
+			{}, // host
+			{"--backend", "cpu"},
+			{"--backend", "vulkan"},
+			{"--metal"},
+		} {
+			fs, sf := newServeFlagSet()
+			if err := fs.Parse(args); err != nil {
+				t.Fatal(err)
+			}
+			if got := serveNativePlannerConfig(sf).KVPrecision; got != "" {
+				t.Fatalf("%v: unset --kv-precision resolved %q, want the exact f32 zero value", args, got)
+			}
+		}
+		if got := os.Getenv("FAK_UP_KV_PRECISION"); got != "" {
+			t.Fatalf("non-CUDA default published FAK_UP_KV_PRECISION=%q, want untouched", got)
+		}
+	})
+
+	t.Run("default-contract", func(t *testing.T) {
+		t.Setenv("FAK_BACKEND", "")
+		if got := defaultServeKVPrecisionForBackend(kvBackendCUDA); got != model.KVPrecisionFP16 {
+			t.Fatalf("cuda default = %q, want the fp16 enum", got)
+		}
+		for _, backend := range []string{kvBackendHost, kvBackendMetal, kvBackendVulkan} {
+			if got := defaultServeKVPrecisionForBackend(backend); got != "" {
+				t.Fatalf("%s default = %q, want the exact f32 zero value", backend, got)
+			}
+		}
+		if got := serveRequestedKVBackendName(nil); got != kvBackendHost {
+			t.Fatalf("nil flags backend = %q, want host", got)
+		}
+	})
+
+	// Closed contract for the D3/splitkv interaction: the split-KV chunked-prefill
+	// panel (attention.cuh, auto-enabled at prefix >= 1024) reads an f32 KV buffer -
+	// qwen35SequenceAttentionLocked dispatches on the realized layer dtype - so the
+	// arm is reachable only when the serve-resolved tier is the exact f32 tier. The
+	// 16-bit tiers route prompt attention through fcuda_kv_attention_typed, which has
+	// no partitioning arm; depth parity vs f32 is owed to the bench campaign, not
+	// claimed here. Pinning the boolean forces a conscious update if a typed
+	// split-KV arm lands or the default tier changes.
+	t.Run("splitkv-panel-arm-reachability", func(t *testing.T) {
+		const panelArmTier = model.KVPrecisionFP32
+		cases := []struct {
+			name string
+			args []string
+			env  string
+			want bool
+		}{
+			{"cuda-default-fp16", []string{"--backend", "cuda"}, "", false},
+			{"cuda-explicit-fp16", []string{"--backend", "cuda", "--kv-precision", "fp16"}, "", false},
+			{"cuda-bf16", []string{"--backend", "cuda", "--kv-precision", "bf16"}, "", false},
+			{"cuda-explicit-f32-flag", []string{"--backend", "cuda", "--kv-precision", "f32"}, "", true},
+			{"cuda-explicit-f32-env", []string{"--backend", "cuda"}, "f32", true},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Setenv("FAK_BACKEND", "")
+				t.Setenv("FAK_UP_KV_PRECISION", tc.env)
+				fs, sf := newServeFlagSet()
+				if err := fs.Parse(tc.args); err != nil {
+					t.Fatal(err)
+				}
+				prec := serveNativePlannerConfig(sf).KVPrecision
+				if got := prec == panelArmTier; got != tc.want {
+					t.Fatalf("%s: resolved %q reaches the f32-only split-KV panel arm = %v, want %v", tc.name, prec, got, tc.want)
+				}
+			})
+		}
+	})
 }
 
 // fak-test:justify why=regression when=changed:cmd/fak/serve*.go

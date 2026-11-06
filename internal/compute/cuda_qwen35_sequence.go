@@ -76,6 +76,11 @@ func validateQwen35SequenceGeometry(req Qwen35SequencePrefillRequest) error {
 	if len(req.TokenIDs) == 0 || req.StartPos < 0 {
 		return qwen35SequenceFailure("request", -1, "token panel must be non-empty and start position non-negative")
 	}
+	// Every hybrid group runs GDN kernels with tokens in CUDA grid.y.
+	// Refuse impossible grids before reserving KV or allocating panel scratch.
+	if len(req.TokenIDs) > 65535 {
+		return qwen35SequenceFailure("geometry", -1, "GDN token panel must fit CUDA grid.y (1..65535)")
+	}
 	if req.Hidden <= 0 || req.Intermediate <= 0 || req.NumHeads <= 0 || req.NumKVHeads <= 0 || req.HeadDim <= 0 || req.RotaryDim <= 0 {
 		return qwen35SequenceFailure("geometry", -1, "hidden, FFN, attention head counts, and dimensions must be positive")
 	}
@@ -508,12 +513,14 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 	}
 	transientStart := len(c.transient)
 	failed := true
+	statesMayHaveAdvanced := false
 	defer func() {
 		if failed {
 			var launch *CUDAOpError
-			if errors.As(err, &launch) && (launch.Op == cudaQwen35IQ2SequenceOp || launch.Op == cudaQ56KMMQOp) {
-				// Earlier layers may already have advanced GDN/KV state. A
-				// rejected retained-quant output is never replayed as a healthy session.
+			if statesMayHaveAdvanced || (errors.As(err, &launch) && (launch.Op == cudaQwen35IQ2SequenceOp || launch.Op == cudaQ56KMMQOp)) {
+				// Stateful execution cannot be rolled back. Allocation errors,
+				// panics and other failed unwinds must not leave a retryable
+				// partially advanced session, regardless of the error type.
 				c.qwen35SequencePoisonStates(req)
 			}
 			c.qwen35SequenceReleaseSinceLocked(transientStart)
@@ -613,6 +620,7 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 		var residualErr error
 		fusedResidual := false
 		if layer.Linear {
+			statesMayHaveAdvanced = true
 			branch, branchBuf, branchErr := c.qwen35SequenceGDNLocked(normed, layer, req.States[index], req, tokens, index)
 			if branchErr != nil {
 				return result, branchErr

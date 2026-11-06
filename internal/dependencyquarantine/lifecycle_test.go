@@ -4,9 +4,6 @@ import (
 	"testing"
 )
 
-// Invariant: Dependency quarantine checks must discover nested modules and verify root dependencies.
-// Guard: NestedModules discovers nested go.mod directories across the workspace.
-
 func TestDependencyQuarantineLifecycle(t *testing.T) {
 	t.Parallel()
 

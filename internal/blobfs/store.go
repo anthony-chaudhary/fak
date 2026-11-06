@@ -315,6 +315,10 @@ func (s *Store) Resolve(ctx context.Context, r abi.Ref) ([]byte, error) {
 		return append([]byte(nil), r.Inline...), nil
 	case abi.RefBlob, abi.RefRegion:
 		atomic.AddInt64(&s.resolv, 1)
+		// Caller-supplied refs must be valid before pathFor slices or joins the digest.
+		if !isDigest(r.Digest) {
+			return nil, fmt.Errorf("blobfs: invalid SHA-256 digest")
+		}
 		b, err := os.ReadFile(s.pathFor(r.Digest))
 		if err != nil {
 			if os.IsNotExist(err) {

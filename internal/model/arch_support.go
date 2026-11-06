@@ -138,7 +138,7 @@ func ClassifyForwardPath(cfg Config, man map[string]tensorMeta) (ForwardPathKind
 		if man == nil {
 			return "", &GLM5NextUnsupportedError{ModelType: glm5NextModelType, Architecture: glm5NextArchitecture}
 		}
-		if err := ValidateGLM5NextManifest(man); err != nil {
+		if err := validateGLM5NextManifestFor(cfg, man); err != nil {
 			return "", err
 		}
 		return ForwardGLM5Next, nil

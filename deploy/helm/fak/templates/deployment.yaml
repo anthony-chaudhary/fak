@@ -1,0 +1,188 @@
+{{- include "fak.validate" . -}}
+{{- $mode := include "fak.mode" . -}}
+{{- $targetPort := .Values.service.targetPort | default 8080 -}}
+{{/* Probe defaults by mode: /healthz answers 200 only after the model loads, so
+    inkernel keeps the long liveness delay (the model-load budget). */}}
+{{- $lvInit := .Values.probes.liveness.initialDelaySeconds -}}
+{{- $lvPeriod := .Values.probes.liveness.periodSeconds -}}
+{{- $rdInit := .Values.probes.readiness.initialDelaySeconds -}}
+{{- $rdPeriod := .Values.probes.readiness.periodSeconds -}}
+{{- if kindIs "invalid" $lvInit -}}{{- if eq $mode "inkernel" -}}{{- $lvInit = 600 -}}{{- else -}}{{- $lvInit = 5 -}}{{- end -}}{{- end -}}
+{{- if kindIs "invalid" $lvPeriod -}}{{- if eq $mode "inkernel" -}}{{- $lvPeriod = 20 -}}{{- else -}}{{- $lvPeriod = 10 -}}{{- end -}}{{- end -}}
+{{- if kindIs "invalid" $rdInit -}}{{- if eq $mode "inkernel" -}}{{- $rdInit = 30 -}}{{- else -}}{{- $rdInit = 3 -}}{{- end -}}{{- end -}}
+{{- if kindIs "invalid" $rdPeriod -}}{{- if eq $mode "inkernel" -}}{{- $rdPeriod = 10 -}}{{- else -}}{{- $rdPeriod = 5 -}}{{- end -}}{{- end -}}
+{{/* Timeouts: null = binary default; inkernel defaults both to 600 unless
+    overridden. The write timeout must stay >= the planner timeout. */}}
+{{- $writeRaw := .Values.timeouts.httpWriteSeconds -}}
+{{- $plannerRaw := .Values.timeouts.plannerSeconds -}}
+{{- $write := 0 -}}
+{{- $planner := 0 -}}
+{{- if not (kindIs "invalid" $writeRaw) -}}{{- $write = $writeRaw -}}{{- else if eq $mode "inkernel" -}}{{- $write = 600 -}}{{- end -}}
+{{- if not (kindIs "invalid" $plannerRaw) -}}{{- $planner = $plannerRaw -}}{{- else if eq $mode "inkernel" -}}{{- $planner = 600 -}}{{- end -}}
+{{- if lt ($write | int) ($planner | int) -}}
+{{-   fail "fak: FAK_HTTP_WRITE_TIMEOUT_S must be >= FAK_PLANNER_TIMEOUT_S (got write=" ($write | toString) ", planner=" ($planner | toString) "); docs/fak/deployment-guide.md" -}}
+{{- end -}}
+{{- $emitWrite := or (not (kindIs "invalid" $writeRaw)) (gt ($write | int) 0) -}}
+{{- $emitPlanner := or (not (kindIs "invalid" $plannerRaw)) (gt ($planner | int) 0) -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "fak.fullname" . }}
+  labels:
+    {{- include "fak.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.replicas }}
+  replicas: {{ .Values.replicas }}
+  {{- else }}
+  # Mode default: proxy 2 (stateless), inkernel 1 (the RWO weights PVC admits one writer).
+  replicas: {{ if eq $mode "inkernel" }}1{{ else }}2{{ end }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "fak.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "fak.selectorLabels" . | nindent 8 }}
+    spec:
+      # fak never calls the Kubernetes API, so it needs no service-account token.
+      automountServiceAccountToken: false
+      {{- if eq $mode "inkernel" }}
+      {{- if .Values.gpu.runtimeClassName }}
+      # Neo clouds differ on how pods reach the driver: some GPU Operator installs
+      # key on a RuntimeClass, GKE/EKS device-plugin pools usually need none.
+      runtimeClassName: {{ .Values.gpu.runtimeClassName }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        # The CUDA image declares its user BY NAME (`USER fak`, Dockerfile.cuda), and
+        # runAsNonRoot alone makes the kubelet refuse a container whose non-root-ness
+        # it cannot verify from a non-numeric user. Pinning the uid/gid keeps the pod
+        # non-root AND verifiable. Weights files must be world-readable (0644 is
+        # fine); set fsGroup instead if your storage class needs it.
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      {{- else }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
+      containers:
+        - name: fak
+          image: {{ include "fak.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          args:
+            - serve
+            - --addr=0.0.0.0:8080
+            {{- if eq $mode "proxy" }}
+            {{- if .Values.provider }}
+            - --provider={{ .Values.provider }}
+            {{- end }}
+            {{- if .Values.baseUrl }}
+            - --base-url={{ .Values.baseUrl }}
+            {{- end }}
+            {{- if .Values.model }}
+            - --model={{ .Values.model }}
+            {{- end }}
+            {{- if .Values.apiKeyEnv }}
+            - --api-key-env={{ .Values.apiKeyEnv }}
+            {{- end }}
+            {{- else }}
+            - --engine=inkernel
+            - --backend=cuda
+            - --gguf={{ .Values.gguf | default "/weights/model.gguf" }}
+            {{- end }}
+            - --policy=/etc/fak/policy.json
+            {{- if .Values.requireKeyEnv }}
+            - --require-key-env={{ .Values.requireKeyEnv }}
+            {{- end }}
+          ports:
+            - containerPort: {{ $targetPort }}
+          {{- if or .Values.requireKeyEnv (and (eq $mode "proxy") .Values.apiKeyEnv) $emitWrite $emitPlanner }}
+          env:
+            {{- if .Values.requireKeyEnv }}
+            - name: {{ .Values.requireKeyEnv }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "fak.secretsName" . }}
+                  key: gateway-key
+            {{- end }}
+            {{- if and (eq $mode "proxy") .Values.apiKeyEnv }}
+            - name: {{ .Values.apiKeyEnv }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "fak.secretsName" . }}
+                  key: {{ include "fak.providerSecretKey" . }}
+            {{- end }}
+            {{- if $emitWrite }}
+            # A local model decodes slower than a hosted API: raise both timeouts
+            # together (write >= planner, per docs/fak/deployment-guide.md).
+            - name: FAK_HTTP_WRITE_TIMEOUT_S
+              value: "{{ $write }}"
+            {{- end }}
+            {{- if $emitPlanner }}
+            - name: FAK_PLANNER_TIMEOUT_S
+              value: "{{ $planner }}"
+            {{- end }}
+          {{- end }}
+          volumeMounts:
+            - name: policy
+              mountPath: /etc/fak
+              readOnly: true
+            {{- if eq $mode "inkernel" }}
+            - name: weights
+              mountPath: /weights
+              readOnly: true
+            {{- end }}
+          # /healthz answers 200 {"ok":true,...} once the listener is bound and the
+          # model is loaded — a valid liveness AND readiness signal (there is no
+          # separate /readyz), and always unauthenticated so probes need no token.
+          # In inkernel mode the long liveness delay is the model-load budget: a big
+          # .gguf takes minutes to load, and an early liveness kill would restart-loop
+          # the pod forever.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ $targetPort }}
+            initialDelaySeconds: {{ $lvInit }}
+            periodSeconds: {{ $lvPeriod }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ $targetPort }}
+            initialDelaySeconds: {{ $rdInit }}
+            periodSeconds: {{ $rdPeriod }}
+          # Starting points — size memory to the model in inkernel mode (>= the
+          # .gguf size plus headroom for the KV cache and host staging).
+          resources:
+            {{- if eq $mode "inkernel" }}
+            {{- $req := deepCopy .Values.gpu.resources.requests }}
+            {{- $lim := deepCopy .Values.gpu.resources.limits }}
+            {{- $_ := set $req "nvidia.com/gpu" "1" }}
+            {{- $_ := set $lim "nvidia.com/gpu" "1" }}
+            {{- toYaml (dict "requests" $req "limits" $lim) | nindent 12 }}
+            {{- else }}
+            {{- toYaml .Values.resources | nindent 12 }}
+            {{- end }}
+          # Same hardened container securityContext as the committed manifests. In
+          # particular readOnlyRootFilesystem STILL holds in inkernel mode — the
+          # weights come from the mounted claim, not from a writable root.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: policy
+          configMap:
+            name: {{ include "fak.policyConfigMapName" . }}
+        {{- if eq $mode "inkernel" }}
+        - name: weights
+          persistentVolumeClaim:
+            claimName: {{ .Values.gpu.weights.claimName | default "fak-weights" }}
+            readOnly: true
+        {{- end }}

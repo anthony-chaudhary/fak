@@ -125,3 +125,44 @@ func TestHierarchicalLoadConcurrencyBudgetReleasesOnError(t *testing.T) {
 		t.Fatalf("second load compute calls = %d, want 2", got)
 	}
 }
+
+// fak-test:justify why=contract when=changed:internal/ggufload/**
+// fak-test:runtime fast est=1ms
+func TestTensorPayloadBytesUsesTypeTraits(t *testing.T) {
+	t.Parallel()
+	// Expected payload bytes for dims [BlockSize, 3] per named enum value, captured from the
+	// pre-traits switch sizing: elements/BlockSize*TypeSize. Any drift in the shared
+	// type-traits table or its consumers fails here.
+	witness := []struct {
+		typ   TensorType
+		block uint64
+		size  uint64
+	}{
+		{TensorF32, 1, 4}, {TensorF16, 1, 2}, {TensorBF16, 1, 2},
+		{TensorQ4_0, 32, 18}, {TensorQ4_1, 32, 20}, {TensorQ5_0, 32, 22}, {TensorQ5_1, 32, 24}, {TensorQ8_0, 32, 34},
+		{TensorQ2_K, 256, 84}, {TensorQ3_K, 256, 110}, {TensorQ4_K, 256, 144}, {TensorQ5_K, 256, 176}, {TensorQ6_K, 256, 210},
+		{TensorIQ2_XXS, 256, 66}, {TensorIQ2_XS, 256, 74}, {TensorIQ3_XXS, 256, 98}, {TensorIQ1_S, 256, 50},
+		{TensorIQ4_NL, 32, 18}, {TensorIQ3_S, 256, 110}, {TensorIQ2_S, 256, 82}, {TensorIQ4_XS, 256, 136}, {TensorIQ1_M, 256, 56},
+		{TensorMXFP4, 32, 17},
+		{TensorQ2_0, 128, 34}, {TensorPQ2_0, 128, 34}, {TensorQ1_0, 128, 18}, {TensorHQQ4, 64, 36},
+	}
+	for _, w := range witness {
+		info := TensorInfo{Name: "payload", Type: w.typ, Dims: []uint64{w.block, 3}}
+		got, err := tensorPayloadBytes(info)
+		if err != nil || got != w.size*3 {
+			t.Errorf("%s: tensorPayloadBytes = %d, %v; want %d (elements/BlockSize*TypeSize)", w.typ, got, err, w.size*3)
+		}
+	}
+	// Unknown types refuse through both repointed entry points with the typed sentinel.
+	unknown := TensorInfo{Name: "unknown", Type: TensorType(999), Dims: []uint64{256}}
+	if _, err := tensorPayloadBytes(unknown); !errors.Is(err, ErrNoSimplePayload) {
+		t.Errorf("tensorPayloadBytes unknown type error = %v, want errors.Is(ErrNoSimplePayload)", err)
+	}
+	if _, err := checkQuantPayload(unknown, 256, make([]byte, 256)); !errors.Is(err, ErrNoSimplePayload) {
+		t.Errorf("checkQuantPayload unknown type error = %v, want errors.Is(ErrNoSimplePayload)", err)
+	}
+	// A non-multiple row length still refuses before any byte math.
+	if _, err := checkQuantPayload(TensorInfo{Name: "partial", Type: TensorQ4_K, Dims: []uint64{255}}, 255, make([]byte, 143)); err == nil {
+		t.Error("checkQuantPayload accepted an element count that is not a multiple of the block size")
+	}
+}

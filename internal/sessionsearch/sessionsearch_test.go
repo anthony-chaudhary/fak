@@ -539,3 +539,46 @@ func TestDocsFromJournal_SingleLineTornWriteOnEmptyJournal(t *testing.T) {
 		t.Fatal("expected error on corrupt event with newline, got nil")
 	}
 }
+
+// fak-test:runtime fast est=1ms lane=default
+func TestSearchWindowBoundsDoNotOverflow(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
+	minInt := -maxInt - 1
+	for _, tc := range []struct {
+		name     string
+		center   int
+		radius   int
+		ordinals []int
+		want     []int
+	}{
+		{"large radius", 1, maxInt, []int{0, 1, 2}, []int{0, 1, 2}},
+		{"near minimum", minInt + 1, 3, []int{minInt, minInt + 1, minInt + 2, 0}, []int{minInt, minInt + 1, minInt + 2}},
+		{"near maximum", maxInt - 1, 3, []int{0, maxInt - 2, maxInt - 1, maxInt}, []int{maxInt - 2, maxInt - 1, maxInt}},
+		{"zero radius", 1, 0, []int{0, 1, 2}, []int{1}},
+		{"negative uses default", 5, -1, []int{-1, 0, 5, 10, 11}, []int{0, 5, 10}},
+		{"wide exact boundary", 0, maxInt, []int{minInt, -maxInt, 0, maxInt}, []int{-maxInt, 0, maxInt}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ix := NewIndex()
+			for _, ordinal := range tc.ordinals {
+				text := "noise"
+				if ordinal == tc.center {
+					text = "needle"
+				}
+				ix.Add(Doc{Ordinal: ordinal, Text: text})
+			}
+			hits := ix.Search("needle", 1, tc.radius)
+			if len(hits) != 1 || hits[0].Doc.Ordinal != tc.center {
+				t.Fatalf("hits=%+v, want the center document", hits)
+			}
+			if len(hits[0].Window) != len(tc.want) {
+				t.Fatalf("window=%+v, want ordinals %v", hits[0].Window, tc.want)
+			}
+			for i, ordinal := range tc.want {
+				if hits[0].Window[i].Ordinal != ordinal {
+					t.Fatalf("window[%d]=%d, want %d", i, hits[0].Window[i].Ordinal, ordinal)
+				}
+			}
+		})
+	}
+}

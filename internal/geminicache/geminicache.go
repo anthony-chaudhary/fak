@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -73,6 +74,9 @@ func (a Admission) Check() error {
 	}
 	if a.TTL <= 0 || (a.MaxTTL > 0 && a.TTL > a.MaxTTL) {
 		return errors.New("gemini cache: TTL exceeds residency ceiling")
+	}
+	if math.IsNaN(a.PredictedReuseValueUSD) || math.IsInf(a.PredictedReuseValueUSD, 0) || math.IsNaN(a.CreationStorageCostUSD) || math.IsInf(a.CreationStorageCostUSD, 0) {
+		return errors.New("gemini cache: predicted reuse value and creation/storage cost must be finite")
 	}
 	if a.PredictedReuseValueUSD <= a.CreationStorageCostUSD {
 		return errors.New("gemini cache: predicted reuse value does not exceed creation/storage cost")

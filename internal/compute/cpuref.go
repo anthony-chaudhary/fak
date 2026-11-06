@@ -221,9 +221,12 @@ func (c *cpuBackend) MatMul(w, x Tensor) Tensor {
 		dx := act.scales(nblk)
 		quantizeVecQ8Into(xf, blk, qx, dx)
 		wc, ws := c.i8(w), w.Quant.Scale
-		for o := 0; o < out; o++ {
-			y[o] = qdot8scalar(wc[o*in:o*in+in], ws[o*nblk:o*nblk+nblk], qx, dx, blk)
-		}
+		// Group-column decode walk (llama.cpp AMX-inspired): the quantized group is the outer
+		// unit and the output row the inner one, so each activation block + scale is read once
+		// per group instead of once per output row. Per-output accumulation order is unchanged,
+		// so the result is bit-identical to the row-innermost walk (pinned by
+		// TestCpuRefGroupColumnWalk against an independent oracle).
+		q8GroupColumnWalk(y, out, in, blk, wc, ws, qx, dx, amxDecodeGroupRows)
 	case Q4_K:
 		raw, rowBytes := c.q4kRows(w, in)
 		for o := 0; o < out; o++ {
@@ -817,24 +820,73 @@ func (a *cpuRefQ8Act) scales(n int) []float32 {
 	return a.d[:n]
 }
 
+// qdot8BlockPartial is the single-block contribution of a Q8_0 row dot: the exact 4-lane int32
+// code sum scaled by the two block scales, evaluated in the same left-to-right order
+// qdot8scalar folds into its accumulator. Factoring it out lets the group-column decode walk
+// share the per-block arithmetic without changing a single operation.
+func qdot8BlockPartial(qw []int8, dw, dx float32, qx []int8, block int) float32 {
+	var s0, s1, s2, s3 int32
+	for i := 0; i < block; i += 4 {
+		s0 += int32(qw[i]) * int32(qx[i])
+		s1 += int32(qw[i+1]) * int32(qx[i+1])
+		s2 += int32(qw[i+2]) * int32(qx[i+2])
+		s3 += int32(qw[i+3]) * int32(qx[i+3])
+	}
+	return float32((s0+s1)+(s2+s3)) * dw * dx
+}
+
 // qdot8scalar: Q8_0 inner product, 4 int32 accumulators per block, fixed float combine —
-// matching model.qdot8scalar (the decode kernel reference).
+// matching model.qdot8scalar (the decode kernel reference). Each block's partial is exactly
+// qdot8BlockPartial, accumulated in block order.
 func qdot8scalar(qw []int8, dw []float32, qx []int8, dx []float32, block int) float32 {
 	nblk := len(qw) / block
 	var acc float32
 	for b := 0; b < nblk; b++ {
-		wb := qw[b*block:]
-		xb := qx[b*block:]
-		var s0, s1, s2, s3 int32
-		for i := 0; i < block; i += 4 {
-			s0 += int32(wb[i]) * int32(xb[i])
-			s1 += int32(wb[i+1]) * int32(xb[i+1])
-			s2 += int32(wb[i+2]) * int32(xb[i+2])
-			s3 += int32(wb[i+3]) * int32(xb[i+3])
-		}
-		acc += float32((s0+s1)+(s2+s3)) * dw[b] * dx[b]
+		acc += qdot8BlockPartial(qw[b*block:b*block+block], dw[b], dx[b], qx[b*block:b*block+block], block)
 	}
 	return acc
+}
+
+// amxDecodeGroupRows is the output-row group width of the Q8_0 decode group-column walk. The
+// width is a locality knob only: every width yields bit-identical output because the walk never
+// reorders any output's block-partial accumulation (see q8GroupColumnWalk).
+const amxDecodeGroupRows = 8
+
+// q8GroupColumnWalk computes dst[o] = Σ_b partial(o,b) with the group-column traversal adapted
+// from llama.cpp's AMX mmq kernels (ggml/src/ggml-cpu/amx/mmq.cpp:1573@8df6229c0fd56f735f91ddbbd4e7308fce4a96ab,
+// MIT, INSPIRE-ONLY): where the row-innermost walk completes one output row before starting the
+// next, this fixes the quantized group (block column b) and walks the group of output rows, so
+// the activation block and its scale are read once per group instead of once per output row —
+// the tile-residency principle behind the reported +13% tg on AMX. Bit identity with the
+// row-innermost walk is structural: every output still receives its block partials in block
+// order b=0..nblk-1, the same floating-point sequence qdot8scalar folds into its accumulator,
+// so any group width produces identical bits (TestCpuRefGroupColumnWalk pins it against an
+// independent oracle). Quantization formats are untouched; no throughput claim — unmeasured.
+func q8GroupColumnWalk(dst []float32, out, in, blk int, wc []int8, ws []float32, qx []int8, dx []float32, group int) {
+	if out == 0 {
+		return
+	}
+	nblk := in / blk
+	if group <= 0 || group > out {
+		group = out
+	}
+	for g := 0; g < out; g += group {
+		end := g + group
+		if end > out {
+			end = out
+		}
+		for o := g; o < end; o++ {
+			dst[o] = 0
+		}
+		for b := 0; b < nblk; b++ {
+			base := b * blk
+			xb := qx[base : base+blk]
+			dxb := dx[b]
+			for o := g; o < end; o++ {
+				dst[o] += qdot8BlockPartial(wc[o*in+base:o*in+base+blk], ws[o*nblk+b], dxb, xb, blk)
+			}
+		}
+	}
 }
 
 // qgemm8cell: the deferred-reduction Q8_0 dot the prefill tile kernel is pinned to

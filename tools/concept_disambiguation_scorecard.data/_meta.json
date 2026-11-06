@@ -1567,6 +1567,16 @@
           "category": "incidental",
           "reason": "Exact serialized byte-size helper for the existing KVCache host-swap codec; does not define a new cache abstraction, replacement policy or storage tier.",
           "token": "KVCacheHostSwapBytes"
+        },
+        {
+          "category": "incidental",
+          "reason": "QK adapter source-file stem in the SOTA provenance row, not a new cache owner, representation or cache product; the existing cudaKV owns the storage.",
+          "token": "qwen35_qknorm_rope_cache_vllm"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pinned upstream vLLM source-file stem cited for provenance, not the name of a new FAK cache abstraction.",
+          "token": "fused_qknorm_rope_cache_kernel"
         }
       ],
       "exclude": [
@@ -1831,6 +1841,7 @@
         "formatTurnCachePair",
         "formatTurnCacheSummary",
         "formatTurnDebugStatsWithBudgetAndCache",
+        "fused_qknorm_rope_cache_kernel",
         "geminicache",
         "identityCacheLever",
         "in_process_fak_workflow_cache",
@@ -1889,6 +1900,7 @@
         "provider_cache_read_boundary",
         "provider_cache_usage_not_reported",
         "pycache",
+        "qwen35_qknorm_rope_cache_vllm",
         "qwen38CacheKey",
         "qwen38_cache_campaign",
         "qwen38_cache_report",
@@ -2374,6 +2386,26 @@
           "category": "incidental",
           "reason": "Build-tag spelling for the immutable qualification-only admission gate of the separately positioned attnDecodeQ8Packed consumer (host-q8-packed-decode-tile). Ordinary builds keep the gate false; the tag changes that gate, not attention arithmetic, cache ownership, eligibility, precedence or fallback. It is not a distinct attention operator, a maturity assertion, performance promotion or permission for default enablement.",
           "token": "fak_qattn_q8_packed_qualification"
+        },
+        {
+          "category": "incidental",
+          "reason": "Cgo include-header filename spelling for the private owned FP8 attention ABI. The real native wrapper and qualification adapter are separately positioned; the header token does not denote another attention operation.",
+          "token": "cuda_kv_fp8_attention_owner"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal Go error sentinel reporting staged-attention contract refusal, not an attention implementation, capability claim or selection policy. The real query/output/roots/extent and native/adapter symbols are separately positioned.",
+          "token": "errKVFP8Attention"
+        },
+        {
+          "category": "incidental",
+          "reason": "Diagnostic phase code 14 used to select native failure provenance. It is not an attention implementation, completion proof, numerical-validity claim or hardware qualification.",
+          "token": "FCUDA_KV_FP8_PHASE_ATTENTION"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local error result from kvFP8AttendEager inside the rooted Qwen transaction; it names no separate attention mechanism, capability, or execution policy.",
+          "token": "attentionErr"
         }
       ],
       "exclude": [
@@ -2389,12 +2421,14 @@
         "ExecutionPrefillAttention",
         "FAK_CUDA_QWEN35_ATTN_POSTPROCESS",
         "FAK_QATTN_Q8_PACKED",
+        "FCUDA_KV_FP8_PHASE_ATTENTION",
         "MetalFallbackPrefillAttentionCPU",
         "PrefillAttentionSupported",
         "PrefillAttentionTiming",
         "TreeAttentionMask",
         "ValidateTreeAttentionMask",
         "attentionContinuation",
+        "attentionErr",
         "attentionFunc",
         "attentionInput",
         "attentionInputPanel",
@@ -2421,6 +2455,8 @@
         "cudaV41SharedAttentionFlags",
         "cudaV41SharedAttentionKey",
         "cudaV41SharedAttentionTags",
+        "cuda_kv_fp8_attention_owner",
+        "errKVFP8Attention",
         "estimated_attention_s",
         "executevulkanattentionwithdequantonce",
         "fak_qattn_q8_packed_qualification",
@@ -2428,6 +2464,7 @@
         "flashAttentionWindowTileStart",
         "fvk_have_qwen35_attention_postprocess",
         "fvk_have_qwen35_attention_qg",
+        "glmDsaAppendAttentionKV",
         "haveQwenAttentionPostprocess",
         "haveQwenAttentionQG",
         "linear_attn_out",
@@ -10367,6 +10404,11 @@
           "category": "incidental",
           "reason": "Private dispatch or optional-capability implementation of the positioned partial-prefill-context and partial-prefill-no-logits-context operations. It forwards the existing request context and preserves the same Session/backend owner; it creates no independent context, session identity, engine, cancellation policy, or scheduler.",
           "token": "inKernelContextPrefillSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Pinned upstream CUDA source-file stem cited for provenance; it is not a FAK gateway, inference engine or routing layer.",
+          "token": "fused_qknorm_rope_cache_kernel"
         }
       ],
       "exclude": [
@@ -10474,6 +10516,7 @@
         "fetchWebEngine",
         "finishInKernelCleanup",
         "forcedtoolargumentsfrommessages",
+        "fused_qknorm_rope_cache_kernel",
         "gatewayLink",
         "gatewayOverview",
         "gatewayPluginExecutor",
@@ -11897,6 +11940,16 @@
           "category": "incidental",
           "reason": "Literal checked CUDA ABI marker in the native archive source prerequisite check; this is a concrete validation function, not a new policy or capability concept.",
           "token": "fcuda_q56k_mmq_preflight"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private CUDA launch-geometry and device-support query for the QK adapter; it grants no policy capability or authorization.",
+          "token": "fak_qwen35_vllm_qk_capability"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed error sentinel for refusal by the positioned ResolveQwen35GDNPackedInputPolicy constructor and its representation checks; it is not a separate policy, capability declaration or authorization decision.",
+          "token": "ErrQwen35GDNPackedPolicy"
         }
       ],
       "exclude": [
@@ -11933,6 +11986,7 @@
         "DispositionMultiCapability",
         "EmptyUsageGuard",
         "ErrNotAdjudicated",
+        "ErrQwen35GDNPackedPolicy",
         "EvictionPolicyFIFO",
         "EvictionPolicyLRU",
         "EvidenceAdjudication",
@@ -12049,6 +12103,7 @@
         "fak_fleet_goal_adjudications_total",
         "fak_qwen35_attention_postprocess_capability",
         "fak_qwen35_residual_norm_capability",
+        "fak_qwen35_vllm_qk_capability",
         "fcuda_q56k_mmq_preflight",
         "foldSemanticAdjudicators",
         "formatAmendmentPosture",
@@ -18131,15 +18186,56 @@
           "category": "incidental",
           "reason": "Function-local value returned by existing v41AttentionPlanFor and equality-compared after callbacks (model lines 43/52); captures existing V41AttentionPlan for mutation detection, introducing no new plan type, planner, reservation, scheduling policy or lifecycle.",
           "token": "frozenPlan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private accessor for the existing Responses-stream force flag on an already selected planner; not a new planning or routing abstraction.",
+          "token": "plannerForcesResponsesStream"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Numeric K or V storage-plane image with per-position/head FP8 codes and scales; the Plane substring is not a planning or execution-plan concept.",
+          "token": "KVFP8Plane"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Numerical conversion from F32 values into an FP8 K/V storage-plane image; it does not create, select, or execute a plan.",
+          "token": "QuantizeKVFP8Plane"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Numerical widening of an FP8 K/V storage-plane image with F32 scales; it is unrelated to planning or execution-plan authority.",
+          "token": "DequantizeKVFP8Plane"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Native allocation-role label for an FP8 storage plane. Plane denotes physical K/V/code/scale storage, not a plan or planner.",
+          "token": "FCUDA_KV_FP8_OWNER_PLANE"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Owner helper computing checked byte extents for physical FP8 storage planes; the Plane lexical prefix does not denote a plan.",
+          "token": "planeBytes"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Count of the five physical FP8 KV storage planes per layer, not an execution plan or planning operation.",
+          "token": "kvFP8Planes"
         }
       ],
       "exclude": [
+        "DequantizeKVFP8Plane",
+        "FCUDA_KV_FP8_OWNER_PLANE",
+        "KVFP8Plane",
+        "QuantizeKVFP8Plane",
         "ReferenceOverCandidate",
         "candidate_fak_share_gross",
         "candidate_fak_share_net",
         "explanat",
         "hasTextToolCandidate",
+        "kvFP8Planes",
         "plane",
+        "planeBytes",
         "plank",
         "transplant"
       ],
@@ -18351,6 +18447,7 @@
         "plannedcumtokens",
         "planner",
         "plannerErr",
+        "plannerForcesResponsesStream",
         "planners",
         "planning",
         "plano",
@@ -18891,6 +18988,16 @@
           "category": "build-tag-only",
           "reason": "Compile-time selector or preprocessor define for the explicitly named CUDA candidate, not an independent resource pool or policy gate; runtime qualification remains separate.",
           "token": "DFAK_CUDA_V41_COMPRESSOR_POOL"
+        },
+        {
+          "category": "incidental",
+          "reason": "Error sentinel for malformed explicit logical capacity facts; not a distinct pool abstraction.",
+          "token": "ErrInvalidPoolCapacity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Checked arithmetic helper for the logical token-pool admission limit; not a distinct pool abstraction.",
+          "token": "checkedTokenCapacity"
         }
       ],
       "exclude": [
@@ -18902,6 +19009,7 @@
         "DeviceTransientPool",
         "DeviceTransientPoolReporter",
         "EnableV41CompressorPool",
+        "ErrInvalidPoolCapacity",
         "ErrNotPoolable",
         "FAK_EXPERT_RING_POOL_FRACTION",
         "FLEET_WORKER_WORKTREE_POOL",
@@ -18925,6 +19033,7 @@
         "TransientPoolBackend",
         "TransientPoolStats",
         "canonicalPoolLane",
+        "checkedTokenCapacity",
         "cudaV41CompressorPoolFlags",
         "cudaV41CompressorPoolKey",
         "cudaV41CompressorPoolTags",

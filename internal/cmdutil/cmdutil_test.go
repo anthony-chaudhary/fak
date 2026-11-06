@@ -124,3 +124,21 @@ func TestMarkdownCellEscapesPipesAndFlattensLines(t *testing.T) {
 		t.Fatalf("MarkdownCell = %q, want %q", got, want)
 	}
 }
+
+// fak-test:runtime fast est=1ms lane=default
+func TestMarkdownCellFlattensAllLineEndings(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, input, want string
+	}{
+		{"bare CR", "left\rright", "left right"},
+		{"mixed endings", "a|b\rc\r\nd\ne", `a\|b c d e`},
+		{"adjacent endings", "\r\r\n\n", "   "},
+		{"CRLF once", "left\r\nright", "left right"},
+		{"other bytes", "a\tb\\c|d", "a\tb\\c\\|d"},
+	} {
+		if got := MarkdownCell(tc.input); got != tc.want {
+			t.Errorf("%s: MarkdownCell(%q) = %q, want %q", tc.name, tc.input, got, tc.want)
+		}
+	}
+}

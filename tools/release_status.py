@@ -525,7 +525,10 @@ def first_ci_run(payload: dict | None) -> dict:
         return {}
     value = payload.get("value")
     runs = value if isinstance(value, list) else payload
-    return runs[0] if isinstance(runs, list) and runs and isinstance(runs[0], dict) else {}
+    if not isinstance(runs, list):
+        return {}
+    # Diagnose the same push-triggered CI that supplies release readiness.
+    return next((row for row in runs if isinstance(row, dict) and row.get("event") == "push"), {})
 
 
 def ci_failure_diagnosis(root: Path) -> dict:
@@ -536,8 +539,9 @@ def ci_failure_diagnosis(root: Path) -> dict:
         "gh", "run", "list",
         "--workflow", "ci.yml",
         "--commit", head.strip(),
+        "--event", "push",
         "--limit", "1",
-        "--json", "databaseId,headSha,status,conclusion,displayTitle,url",
+        "--json", "databaseId,headSha,status,conclusion,displayTitle,url,event",
     ], root, timeout=30)
     if payload is None:
         return {"status": "unavailable", "reason": raw.strip()[-300:] or "gh run list failed"}
@@ -552,8 +556,9 @@ def ci_failure_diagnosis(root: Path) -> dict:
             "--workflow", "ci.yml",
             "--branch", "main",
             "--status", "completed",
+            "--event", "push",
             "--limit", "1",
-            "--json", "databaseId,headSha,status,conclusion,displayTitle,url",
+            "--json", "databaseId,headSha,status,conclusion,displayTitle,url,event",
         ], root, timeout=30)
         if payload is None:
             return {"status": "unavailable", "reason": trunk_raw.strip()[-300:] or "gh trunk run list failed"}
@@ -562,7 +567,7 @@ def ci_failure_diagnosis(root: Path) -> dict:
             run_doc = trunk_run
             scope = "latest_trunk"
     if not run_doc:
-        return {"status": "none", "reason": "no ci.yml run found for HEAD or latest main"}
+        return {"status": "none", "reason": "no push-triggered ci.yml run found for HEAD or latest main"}
     if run_doc.get("conclusion") != "failure":
         return {
             "status": "not_failed",

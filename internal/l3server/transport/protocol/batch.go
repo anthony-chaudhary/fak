@@ -113,7 +113,7 @@ func DecodeMSetBody(body []byte) (keys, values [][]byte, err error) {
 		}
 		valLen := binary.LittleEndian.Uint32(body[off:])
 		off += 4
-		if off+int(valLen) > len(body) {
+		if uint64(valLen) > uint64(len(body)-off) {
 			return nil, nil, fmt.Errorf("mset body value %d truncated", i)
 		}
 		values[i] = body[off : off+int(valLen)]
@@ -177,7 +177,7 @@ func DecodeKeysBody(body []byte) ([]byte, error) {
 	if len(body) < 2 {
 		return nil, fmt.Errorf("keys body too short")
 	}
-	patLen := binary.LittleEndian.Uint16(body[0:2])
+	patLen := int(binary.LittleEndian.Uint16(body[0:2]))
 	if int(patLen)+2 > len(body) {
 		return nil, fmt.Errorf("keys body truncated")
 	}
@@ -254,7 +254,7 @@ func DecodeMultiValueResponse(body []byte) (values [][]byte, founds []bool, err 
 		}
 		valLen := binary.LittleEndian.Uint32(body[off:])
 		off += 4
-		if off+int(valLen) > len(body) {
+		if uint64(valLen) > uint64(len(body)-off) {
 			return nil, nil, fmt.Errorf("multi value response value %d truncated", i)
 		}
 		values[i] = body[off : off+int(valLen)]
@@ -278,9 +278,9 @@ func DecodeMSetResultResponse(body []byte) ([]byte, error) {
 	if len(body) < 4 {
 		return nil, fmt.Errorf("mset result body too short: %d", len(body))
 	}
-	count := int(binary.LittleEndian.Uint32(body[0:4]))
-	if len(body) < 4+count {
-		return nil, fmt.Errorf("mset result truncated: have %d, need %d", len(body), 4+count)
+	count := binary.LittleEndian.Uint32(body[0:4])
+	if uint64(count) > uint64(len(body)-4) {
+		return nil, fmt.Errorf("mset result truncated: have %d, need %d", len(body), uint64(count)+4)
 	}
-	return body[4 : 4+count], nil
+	return body[4 : 4+int(count)], nil
 }

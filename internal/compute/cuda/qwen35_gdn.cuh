@@ -97,6 +97,18 @@ static int sequence_split_status(fcuda_sequence_split_status *status, int phase,
   return code;
 }
 
+// A shared terminal status is not a completion certificate for this loan.
+// Refuse before any CUDA call and retain its exact owners and ledger entries.
+// Local quarantine stays terminal even if another family later changes state.
+static int sequence_split_shared_stop(fcuda_sequence_split_status *status) {
+  if (!v41_candidates_stream_uncertain()) return 0;
+  const int code = g_sequence_split.failed_fence != 0 ? g_sequence_split.failed_fence
+      : g_cuda_cleanup_status != 0 ? g_cuda_cleanup_status : (int)cudaErrorNotReady;
+  g_sequence_split.phase = SequenceSplitPhase::Quarantined;
+  g_sequence_split.held_code = code;
+  return sequence_split_status(status, FCUDA_SEQUENCE_SPLIT_QUARANTINE, code);
+}
+
 // Every owner is detached only after its exact cudaFree succeeds. A failure
 // never skips another independent owner and never returns a pointer to a pool.
 static int sequence_split_free_owned() {
@@ -133,6 +145,7 @@ extern "C" int fcuda_sequence_split_begin(size_t weight_half_bytes, size_t activ
   *status = {};
   if (g_sequence_split.phase == SequenceSplitPhase::Quarantined)
     return sequence_split_status(status, FCUDA_SEQUENCE_SPLIT_QUARANTINE, g_sequence_split.held_code);
+  if (const int stopped = sequence_split_shared_stop(status)) return stopped;
   const size_t max_bytes = (size_t)-1;
   if (g_capture_open || g_sequence_split.phase != SequenceSplitPhase::Idle ||
       !weight_half_bytes || !activation_half_bytes ||
@@ -201,6 +214,7 @@ extern "C" int fcuda_sequence_split_end(unsigned long long token, fcuda_sequence
   if (!token || token != g_sequence_split.token ||
       g_sequence_split.phase != SequenceSplitPhase::Active)
     return sequence_split_status(status, FCUDA_SEQUENCE_SPLIT_CONTRACT, (int)cudaErrorInvalidValue);
+  if (const int stopped = sequence_split_shared_stop(status)) return stopped;
   if (g_capture_open) {
     g_sequence_split.phase = SequenceSplitPhase::Quarantined;
     g_sequence_split.held_code = (int)cudaErrorInvalidValue;
@@ -348,6 +362,8 @@ static int q8_dequant_sgemm(const void *codes, const float *scales,
   const int release_status = fp16_compensated_release(&scratch);
   return gemm_status != 0 ? gemm_status : release_status;
 }
+
+#include "gdn_shared_split.cuh"
 
 __global__ void k_qwen35_gdn_fused_in_proj(
     const float *x,
@@ -945,6 +961,9 @@ static int qwen35_gdn_launch_status(int stage) {
   return stage * 10000 + (int)e;
 }
 
+#include "gdn_decode_vllm.cuh"
+#include "gdn_mtp_decode_vllm.cuh"
+
 // qwen35_gdn_fence is the capture-legal stream fence. Inside an open graph capture no
 // work has executed and a synchronize would invalidate the capture, so it returns success;
 // the graph fence (fcuda_graph_end_launch) reports a replayed fault instead.
@@ -1080,28 +1099,38 @@ extern "C" int fcuda_qwen35_gdn_decode_f32(
   status = qwen35_gdn_launch_status(3);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
 
-  int qThreads = qwen35_gdn_threads(kHd);
-  FCUDA_TS("k_qwen35_gdn_qk_norm", nK, k_qwen35_gdn_qk_norm<<<nK, qThreads, (size_t)2 * qThreads * sizeof(float), g_stream>>>(
-      dConvOut, dQNorm, dKNorm, nK, kHd));
-  status = qwen35_gdn_launch_status(4);
-  if (status != 0) return qwen35_gdn_drain_after_error(status);
-
-  int vThreads = qwen35_gdn_threads(vHd);
-  bool registerState = !g_qwen35_gdn_decode_global_state_test &&
-                       kHd <= kQwen35GDNDecodeRegisterMaxKeyHeadDim &&
-                       vThreads <= kQwen35GDNDecodeRegisterMaxThreads;
-  if (registerState) {
-    FCUDA_TS("k_qwen35_gdn_recurrent_gated_norm_regstate", nV, k_qwen35_gdn_recurrent_gated_norm_regstate<<<nV, vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
-        dConvOut, dQNorm, dKNorm, dZ, dB, dA, dALog, dDtBias, dNorm,
-        dRecurrentState, dCore, nK, nV, kHd, vHd, rmsEps));
+  // Explicit candidate until physical state/logit parity and net benefit qualify it.
+  if (!g_qwen35_gdn_decode_global_state_test &&
+      fak_gdn_vllm::eligible(getenv("FAK_CUDA_GDN_POST_CONV"), 1, nK, nV, kHd, vHd, g_capture_open)) {
+    status = qwen35_gdn_launch_status(4);
+    if (status != 0) return qwen35_gdn_drain_after_error(status);
+    status = fak_gdn_vllm::dispatch(dConvOut, dA, dB, dALog, dDtBias,
+        dRecurrentState, dZ, dNorm, dCore, 1, nK, nV, convDim, rmsEps);
+    if (status != 0) return qwen35_gdn_drain_after_error(status);
   } else {
-    FCUDA_TS("k_qwen35_gdn_recurrent_gated_norm", nV, k_qwen35_gdn_recurrent_gated_norm<<<nV, vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
-        dConvOut, dQNorm, dKNorm, dZ, dB, dA, dALog, dDtBias, dNorm,
-        dRecurrentState, dCore, nK, nV, kHd, vHd, rmsEps));
+    int qThreads = qwen35_gdn_threads(kHd);
+    FCUDA_TS("k_qwen35_gdn_qk_norm", nK, k_qwen35_gdn_qk_norm<<<nK, qThreads, (size_t)2 * qThreads * sizeof(float), g_stream>>>(
+        dConvOut, dQNorm, dKNorm, nK, kHd));
+    status = qwen35_gdn_launch_status(4);
+    if (status != 0) return qwen35_gdn_drain_after_error(status);
+
+    int vThreads = qwen35_gdn_threads(vHd);
+    bool registerState = !g_qwen35_gdn_decode_global_state_test &&
+                         kHd <= kQwen35GDNDecodeRegisterMaxKeyHeadDim &&
+                         vThreads <= kQwen35GDNDecodeRegisterMaxThreads;
+    if (registerState) {
+      FCUDA_TS("k_qwen35_gdn_recurrent_gated_norm_regstate", nV, k_qwen35_gdn_recurrent_gated_norm_regstate<<<nV, vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
+          dConvOut, dQNorm, dKNorm, dZ, dB, dA, dALog, dDtBias, dNorm,
+          dRecurrentState, dCore, nK, nV, kHd, vHd, rmsEps));
+    } else {
+      FCUDA_TS("k_qwen35_gdn_recurrent_gated_norm", nV, k_qwen35_gdn_recurrent_gated_norm<<<nV, vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
+          dConvOut, dQNorm, dKNorm, dZ, dB, dA, dALog, dDtBias, dNorm,
+          dRecurrentState, dCore, nK, nV, kHd, vHd, rmsEps));
+    }
+    status = qwen35_gdn_launch_status(5);
+    if (status != 0) return qwen35_gdn_drain_after_error(status);
+    if (registerState) g_qwen35_gdn_decode_register_state_launches++;
   }
-  status = qwen35_gdn_launch_status(5);
-  if (status != 0) return qwen35_gdn_drain_after_error(status);
-  if (registerState) g_qwen35_gdn_decode_register_state_launches++;
 
   FCUDA_TS("k_qwen35_gdn_out_proj", hidden, k_qwen35_gdn_out_proj<<<hidden, 256, 0, g_stream>>>(
       dOutW, dOutWScale, outWQ8, dCore, dOut, hidden, valueDim));
@@ -1475,10 +1504,20 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
   if (status != 0) return qwen35_gdn_drain_after_error(status);
   const char *projectionMode = getenv("FAK_CUDA_GDN_INPUT_PROJECTION");
   if (tokens >= 128 && inQKVQ8 == 1 && inZQ8 == 1 && inBQ8 == 1 && inAQ8 == 1) {
-    int dq = qwen35_gdn_q8_prefill(dInQKV, dInQKVScale, dX, dMixed, convDim, hidden, tokens, 32);
-    if (dq == 0) dq = qwen35_gdn_q8_prefill(dInZ, dInZScale, dX, dZ, nV * vHd, hidden, tokens, 32);
-    if (dq == 0) dq = qwen35_gdn_q8_prefill(dInB, dInBScale, dX, dB, nV, hidden, tokens, 32);
-    if (dq == 0) dq = qwen35_gdn_q8_prefill(dInA, dInAScale, dX, dA, nV, hidden, tokens, 32);
+    int dq = 0;
+    if (fak_gdn_shared_split::selected(projectionMode,
+        getenv("FAK_CUDA_Q8_SEQUENCE_PREFILL"), g_capture_open, tokens)) {
+      const void *codes[4] = {dInQKV, dInZ, dInB, dInA};
+      const float *scales[4] = {dInQKVScale, dInZScale, dInBScale, dInAScale};
+      float *outputs[4] = {dMixed, dZ, dB, dA};
+      const int rows[4] = {convDim, valueDim, nV, nV};
+      dq = qwen35_gdn_q8_shared_split(codes, scales, dX, outputs, rows, hidden, tokens);
+    } else {
+      dq = qwen35_gdn_q8_prefill(dInQKV, dInQKVScale, dX, dMixed, convDim, hidden, tokens, 32);
+      if (dq == 0) dq = qwen35_gdn_q8_prefill(dInZ, dInZScale, dX, dZ, nV * vHd, hidden, tokens, 32);
+      if (dq == 0) dq = qwen35_gdn_q8_prefill(dInB, dInBScale, dX, dB, nV, hidden, tokens, 32);
+      if (dq == 0) dq = qwen35_gdn_q8_prefill(dInA, dInAScale, dX, dA, nV, hidden, tokens, 32);
+    }
     if (dq != 0) return qwen35_gdn_drain_after_error(dq);
   } else if (tokens == 4 && hidden == 5120 && nK == 16 && nV == 48 &&
              kHd == 128 && vHd == 128 && convKernel == 4 &&
@@ -1509,36 +1548,44 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
       dMixed, dConvState, tokens, convDim, convKernel));
   status = qwen35_gdn_launch_status(3);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
-  int qThreads = qwen35_gdn_threads(kHd);
-  FCUDA_TS("k_qwen35_gdn_qk_norm_panel", dim3(nK, tokens), k_qwen35_gdn_qk_norm_panel<<<dim3(nK, tokens), qThreads, (size_t)2 * qThreads * sizeof(float), g_stream>>>(
-      dConvOut, dQNorm, dKNorm, tokens, convDim, nK, kHd));
-  status = qwen35_gdn_launch_status(4);
-  if (status != 0) return qwen35_gdn_drain_after_error(status);
-  size_t gates = (size_t)tokens * nV;
-  FCUDA_TS("k_qwen35_gdn_gate_panel", (unsigned)((gates + 255) / 256), k_qwen35_gdn_gate_panel<<<(unsigned)((gates + 255) / 256), 256, 0, g_stream>>>(
-      dB, dA, dALog, dDtBias, tokens, nV));
-  status = qwen35_gdn_launch_status(5);
-  if (status != 0) return qwen35_gdn_drain_after_error(status);
-  int colBlocks = (vHd + kQwen35GDNPanelCols - 1) / kQwen35GDNPanelCols;
-  // Explicit opt-in until physical NVIDIA state/logit parity and end-to-end
-  // performance qualify the changed FP32 summation order. No allocation or ABI
-  // change: static shared storage is below 24 KiB, within CUDA's 48 KiB floor.
-  const char *recurrence = getenv("FAK_CUDA_GDN_RECURRENCE");
-  if (tokens >= kQwen35GDNChunk && recurrence && strcmp(recurrence, "chunk16") == 0) {
-    int chunkCols = (vHd + kQwen35GDNChunkCols - 1) / kQwen35GDNChunkCols;
-    FCUDA_TS("k_qwen35_gdn_recurrent_chunks", nV * chunkCols, k_qwen35_gdn_recurrent_chunks<<<nV * chunkCols, 128, 0, g_stream>>>(
-        dConvOut, dQNorm, dKNorm, dB, dA, dRecurrentState, dCore, tokens, convDim, nK, nV, kHd, vHd));
+  if (fak_gdn_vllm::eligible(getenv("FAK_CUDA_GDN_POST_CONV"), tokens, nK, nV, kHd, vHd, g_capture_open)) {
+    status = qwen35_gdn_launch_status(4);
+    if (status != 0) return qwen35_gdn_drain_after_error(status);
+    status = fak_gdn_vllm::dispatch(dConvOut, dA, dB, dALog, dDtBias,
+        dRecurrentState, dZ, dNorm, dCore, tokens, nK, nV, convDim, rmsEps);
+    if (status != 0) return qwen35_gdn_drain_after_error(status);
   } else {
-    FCUDA_TS("k_qwen35_gdn_recurrent_panel_cols", nV * colBlocks, k_qwen35_gdn_recurrent_panel_cols<<<nV * colBlocks, kQwen35GDNPanelCols, 0, g_stream>>>(
-        dConvOut, dQNorm, dKNorm, dB, dA, dRecurrentState, dCore, tokens, convDim, nK, nV, kHd, vHd));
+    int qThreads = qwen35_gdn_threads(kHd);
+    FCUDA_TS("k_qwen35_gdn_qk_norm_panel", dim3(nK, tokens), k_qwen35_gdn_qk_norm_panel<<<dim3(nK, tokens), qThreads, (size_t)2 * qThreads * sizeof(float), g_stream>>>(
+        dConvOut, dQNorm, dKNorm, tokens, convDim, nK, kHd));
+    status = qwen35_gdn_launch_status(4);
+    if (status != 0) return qwen35_gdn_drain_after_error(status);
+    size_t gates = (size_t)tokens * nV;
+    FCUDA_TS("k_qwen35_gdn_gate_panel", (unsigned)((gates + 255) / 256), k_qwen35_gdn_gate_panel<<<(unsigned)((gates + 255) / 256), 256, 0, g_stream>>>(
+        dB, dA, dALog, dDtBias, tokens, nV));
+    status = qwen35_gdn_launch_status(5);
+    if (status != 0) return qwen35_gdn_drain_after_error(status);
+    int colBlocks = (vHd + kQwen35GDNPanelCols - 1) / kQwen35GDNPanelCols;
+    // Explicit opt-in until physical NVIDIA state/logit parity and end-to-end
+    // performance qualify the changed FP32 summation order. No allocation or ABI
+    // change: static shared storage is below 24 KiB, within CUDA's 48 KiB floor.
+    const char *recurrence = getenv("FAK_CUDA_GDN_RECURRENCE");
+    if (tokens >= kQwen35GDNChunk && recurrence && strcmp(recurrence, "chunk16") == 0) {
+      int chunkCols = (vHd + kQwen35GDNChunkCols - 1) / kQwen35GDNChunkCols;
+      FCUDA_TS("k_qwen35_gdn_recurrent_chunks", nV * chunkCols, k_qwen35_gdn_recurrent_chunks<<<nV * chunkCols, 128, 0, g_stream>>>(
+          dConvOut, dQNorm, dKNorm, dB, dA, dRecurrentState, dCore, tokens, convDim, nK, nV, kHd, vHd));
+    } else {
+      FCUDA_TS("k_qwen35_gdn_recurrent_panel_cols", nV * colBlocks, k_qwen35_gdn_recurrent_panel_cols<<<nV * colBlocks, kQwen35GDNPanelCols, 0, g_stream>>>(
+          dConvOut, dQNorm, dKNorm, dB, dA, dRecurrentState, dCore, tokens, convDim, nK, nV, kHd, vHd));
+    }
+    status = qwen35_gdn_launch_status(5);
+    if (status != 0) return qwen35_gdn_drain_after_error(status);
+    int vThreads = qwen35_gdn_threads(vHd);
+    FCUDA_TS("k_qwen35_gdn_out_norm_panel", dim3(tokens, nV), k_qwen35_gdn_out_norm_panel<<<dim3(tokens, nV), vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
+        dZ, dNorm, dCore, nV, vHd, rmsEps));
+    status = qwen35_gdn_launch_status(5);
+    if (status != 0) return qwen35_gdn_drain_after_error(status);
   }
-  status = qwen35_gdn_launch_status(5);
-  if (status != 0) return qwen35_gdn_drain_after_error(status);
-  int vThreads = qwen35_gdn_threads(vHd);
-  FCUDA_TS("k_qwen35_gdn_out_norm_panel", dim3(tokens, nV), k_qwen35_gdn_out_norm_panel<<<dim3(tokens, nV), vThreads, (size_t)vThreads * sizeof(float), g_stream>>>(
-      dZ, dNorm, dCore, nV, vHd, rmsEps));
-  status = qwen35_gdn_launch_status(5);
-  if (status != 0) return qwen35_gdn_drain_after_error(status);
   if (tokens >= 128 && outWQ8) {
     int dq = qwen35_gdn_q8_prefill(dOutW, dOutWScale, dCore, dOut, hidden, nV * vHd, tokens, 32);
     if (dq != 0) return qwen35_gdn_drain_after_error(dq);
@@ -1552,6 +1599,50 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
   sequence_split_note_failed_fence(sync);
   if (sync != cudaSuccess) return 70000 + (int) sync;
   g_qwen35_gdn_operations += (size_t) tokens;
+  return 0;
+}
+
+// ---- MTP/speculative post-conv decode -----------------------------------------------
+// Replays a verification panel over the checkpoint carried state: accepted
+// positions advance the [head,key,value] FP32 state and snapshot it into their
+// destination pool slot; rejected positions leave the state and their output
+// row untouched. Pool slot 0 is the checkpoint and receives the post-panel
+// carried state. Selection extends the FAK_CUDA_GDN_POST_CONV=vllm gate with
+// the accepted-count bound; refusal declines without launching or touching
+// state. No GPU or throughput claim accompanies this seam.
+extern "C" int fcuda_qwen35_gdn_mtp_post_conv_f32(
+    const float *dConvOut, const float *dA, const float *dB,
+    const float *dALog, const float *dDtBias,
+    float *dStatePool, const float *dZ, const float *dNorm, float *dCore,
+    const int *dSnapshots,
+    int tokens, int accepted, int nK, int nV, int kHd, int vHd,
+    int convDim, float rmsEps) {
+  if (!dConvOut || !dA || !dB || !dALog || !dDtBias || !dStatePool || !dZ ||
+      !dNorm || !dCore || !dSnapshots || tokens < 1 || accepted < 0 ||
+      accepted > tokens || nK <= 0 || nV <= 0 || kHd <= 0 || vHd <= 0 ||
+      !(rmsEps > 0.0f) || !isfinite(rmsEps))
+    return -1;
+  // Existing decline path: env opt-in, capture exclusion, shape and
+  // accepted-count bounds. No launch, no state touch.
+  if (!fak_gdn_vllm_mtp::eligible_mtp(getenv("FAK_CUDA_GDN_POST_CONV"),
+      tokens, nK, nV, kHd, vHd, g_capture_open, accepted))
+    return -1;
+  cudaError_t stale = cudaGetLastError();
+  if (stale != cudaSuccess) {
+    fprintf(stderr, "fak-cuda: Qwen3.5 GDN MTP preflight found stale CUDA status: %s\n",
+        cudaGetErrorString(stale));
+    return qwen35_gdn_drain_after_error(10000 + (int)stale);
+  }
+  int status = fak_gdn_vllm_mtp::dispatch_mtp(dConvOut, dA, dB, dALog, dDtBias,
+      dStatePool, dZ, dNorm, dCore, tokens, nK, nV, convDim, rmsEps, dSnapshots);
+  if (status != 0) return qwen35_gdn_drain_after_error(status);
+  cudaError_t completed = qwen35_gdn_fence();
+  if (completed != cudaSuccess) {
+    fprintf(stderr, "fak-cuda: Qwen3.5 GDN MTP asynchronous execution failed: %s\n",
+        cudaGetErrorString(completed));
+    return 70000 + (int)completed;
+  }
+  g_qwen35_gdn_operations++;
   return 0;
 }
 

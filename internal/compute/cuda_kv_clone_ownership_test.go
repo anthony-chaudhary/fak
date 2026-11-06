@@ -66,11 +66,12 @@ func TestCUDAKVCloneUnwindsAllocationPanic(t *testing.T) {
 						ptr := unsafe.Pointer(&b[0])
 						owned[ptr] = true
 						return ptr
-					}, func(dst, src unsafe.Pointer, bytes int) {
+					}, func(dst, src unsafe.Pointer, bytes int) int {
 						if !owned[dst] || src == nil || bytes != 16 {
 							t.Error("invalid copy callback")
 						}
 						copies++
+						return 0
 					}, func(ptr unsafe.Pointer) {
 						if !owned[ptr] {
 							t.Error("released source or unknown pointer")
@@ -116,9 +117,10 @@ func TestCUDAKVCloneSuccessfulOwnershipAndEmptyRows(t *testing.T) {
 		b := make([]float32, bytes/4)
 		storage = append(storage, b)
 		return unsafe.Pointer(&b[0])
-	}, func(dst, src unsafe.Pointer, bytes int) {
+	}, func(dst, src unsafe.Pointer, bytes int) int {
 		sources = append(sources, src)
 		copy(unsafe.Slice((*float32)(dst), bytes/4), unsafe.Slice((*float32)(src), bytes/4))
+		return 0
 	}, func(unsafe.Pointer) { releases++ })
 	expectedSites := []string{"kv-key-clone layer 0", "kv-value-clone layer 0", "kv-key-clone layer 1", "kv-pre-rope-key-clone layer 1", "kv-value-clone layer 1"}
 	expectedSources := []unsafe.Pointer{source.K[0].ptr, source.V[0].ptr, source.K[1].ptr, source.Kraw[1].ptr, source.V[1].ptr}
@@ -143,7 +145,7 @@ func TestCUDAKVCloneSuccessfulOwnershipAndEmptyRows(t *testing.T) {
 	if source.pos[0] != 4 || len(storage) != len(expectedSources) || len(backing) != len(source.K)+len(source.Kraw)+len(source.V) {
 		t.Fatal("source position alias or backing mismatch")
 	}
-	empty := (&cudaKV{}).cloneWithOperations(func(int, string) unsafe.Pointer { t.Fatal("empty allocation"); return nil }, func(unsafe.Pointer, unsafe.Pointer, int) { t.Fatal("empty copy") }, func(unsafe.Pointer) { t.Fatal("empty release") })
+	empty := (&cudaKV{}).cloneWithOperations(func(int, string) unsafe.Pointer { t.Fatal("empty allocation"); return nil }, func(unsafe.Pointer, unsafe.Pointer, int) int { t.Fatal("empty copy"); return 0 }, func(unsafe.Pointer) { t.Fatal("empty release") })
 	if empty == nil || len(empty.pos) != 0 {
 		t.Fatal("empty clone mismatch")
 	}
@@ -177,7 +179,7 @@ func TestCUDAKVCloneProductionOperationBinding(t *testing.T) {
 		}
 		body = string(raw[set.Position(fn.Body.Pos()).Offset:set.Position(fn.Body.End()).Offset])
 	}
-	for _, want := range []string{"cudaMu.Lock()", "defer cudaMu.Unlock()", "return k.cloneWithOperations(", "k.be.dallocKV(bytes, site).ptr", "C.fcuda_d2d(dst, src, C.size_t(bytes))", "C.fcuda_free(ptr)"} {
+	for _, want := range []string{"cudaMu.Lock()", "defer cudaMu.Unlock()", "return k.cloneWithOperations(", "k.be.dallocKV(bytes, site).ptr", "return int(C.fcuda_kv_clone_d2d_checked(dst, src, C.size_t(bytes)))", "C.fcuda_free(ptr)"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("public Clone missing binding %q", want)
 		}

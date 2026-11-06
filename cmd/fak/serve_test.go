@@ -3,11 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -17,6 +19,133 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/macobs"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
+
+// TestSpeculativeSelectorAdmitsDFlash2 pins the closed structural selector contract:
+// the parser matrix {mtp, ngram, dflash2, ""} is admitted verbatim (DFlash2 startup
+// separately refuses until serve can retain an authenticated owner), an unknown
+// mode fails startup with the ErrSpeculativeModeUnknown sentinel, and the FAK_SPECULATIVE
+// / SPECULATIVE operator overrides still win over the --speculative flag.
+// fak-test:runtime fast est=50ms lane=default
+func TestSpeculativeSelectorAdmitsDFlash2(t *testing.T) {
+	noEnv := func(string) string { return "" }
+
+	// Closed admission matrix: every structural value the serve selector admits.
+	for _, mode := range []string{"mtp", "ngram", "dflash2", ""} {
+		got, err := resolveSpeculativeMode(mode, noEnv)
+		if err != nil {
+			t.Fatalf("admitted %q refused: %v", mode, err)
+		}
+		if got != mode {
+			t.Fatalf("resolved %q, want %q (admitted values pass through verbatim)", got, mode)
+		}
+	}
+
+	// Normalization matches the gateway's historical lowercase/trim comparison.
+	if got, err := resolveSpeculativeMode(" DFlash2 ", noEnv); err != nil || got != "dflash2" {
+		t.Fatalf("normalized dflash2: got (%q,%v), want (\"dflash2\",nil)", got, err)
+	}
+
+	// Unknown modes fail startup with the closed sentinel, not a bare error.
+	for _, bad := range []string{"eagle", "MTP2", "off", "mt p"} {
+		_, err := resolveSpeculativeMode(bad, noEnv)
+		if !errors.Is(err, ErrSpeculativeModeUnknown) {
+			t.Fatalf("unknown %q: err=%v, want errors.Is(ErrSpeculativeModeUnknown)", bad, err)
+		}
+	}
+
+	// The FAK_SPECULATIVE override wins over the flag; SPECULATIVE is the second override.
+	if got, _ := resolveSpeculativeMode("dflash2", func(k string) string {
+		if k == "FAK_SPECULATIVE" {
+			return "mtp"
+		}
+		return ""
+	}); got != "mtp" {
+		t.Fatalf("FAK_SPECULATIVE must win over the flag, got %q", got)
+	}
+	if got, _ := resolveSpeculativeMode("dflash2", func(k string) string {
+		if k == "SPECULATIVE" {
+			return "ngram"
+		}
+		return ""
+	}); got != "ngram" {
+		t.Fatalf("SPECULATIVE must win over the flag, got %q", got)
+	}
+	// An unknown OVERRIDE value fails too: the override is the effective selector.
+	if _, err := resolveSpeculativeMode("mtp", func(k string) string {
+		if k == "FAK_SPECULATIVE" {
+			return "bogus"
+		}
+		return ""
+	}); !errors.Is(err, ErrSpeculativeModeUnknown) {
+		t.Fatalf("unknown override: err=%v, want errors.Is(ErrSpeculativeModeUnknown)", err)
+	}
+
+	// Live flag surface: the default stays the mtp structural default and dflash2 parses.
+	fs, sf := newServeFlagSet()
+	if err := fs.Parse(nil); err != nil {
+		t.Fatalf("parse empty: %v", err)
+	}
+	if *sf.speculative != "mtp" {
+		t.Fatalf("--speculative default = %q, want mtp", *sf.speculative)
+	}
+	fs2, sf2 := newServeFlagSet()
+	if err := fs2.Parse([]string{"--speculative=dflash2"}); err != nil {
+		t.Fatalf("parse --speculative=dflash2: %v", err)
+	}
+	if *sf2.speculative != "dflash2" {
+		t.Fatalf("--speculative=dflash2 not admitted by the flag, got %q", *sf2.speculative)
+	}
+}
+
+// TestServeDFlash2SidecarRetention pins the per-load sidecar retention gate:
+// only a dflash2-resolved load with a resident in-kernel model AND an
+// operator-pinned FAK_DFLASH2_SIDECAR retains the artifact; every other
+// combination leaves the route unretained so the gateway's fail-loud
+// target-owner validation keeps governing admission. The pinned path is
+// cleaned exactly once.
+// fak-test:runtime fast est=10ms lane=default
+func TestServeDFlash2SidecarRetention(t *testing.T) {
+	pinned := "/models/qwen38/dflash2.safetensors"
+	getenv := func(k string) string {
+		if k == "FAK_DFLASH2_SIDECAR" {
+			return pinned
+		}
+		return ""
+	}
+	noEnv := func(string) string { return "" }
+
+	for _, tc := range []struct {
+		mode       string
+		loaded     bool
+		env        func(string) string
+		wantPath   string
+		wantRetain bool
+	}{
+		{serveSpeculativeDFlash2, true, getenv, filepath.Clean(pinned), true},
+		{serveSpeculativeDFlash2, false, getenv, "", false},
+		{serveSpeculativeMTP, true, getenv, "", false},
+		{serveSpeculativeNGram, true, getenv, "", false},
+		{"", true, getenv, "", false},
+		{serveSpeculativeDFlash2, true, noEnv, "", false},
+	} {
+		gotPath, ok := serveDFlash2SidecarDecision(tc.mode, tc.loaded, tc.env)
+		if ok != tc.wantRetain || gotPath != tc.wantPath {
+			pinned := tc.env("FAK_DFLASH2_SIDECAR") != ""
+			t.Fatalf("mode=%q loaded=%v pinned=%v: got (%q,%v) want (%q,%v)",
+				tc.mode, tc.loaded, pinned, gotPath, ok, tc.wantPath, tc.wantRetain)
+		}
+	}
+
+	// Redundant separators and dots are collapsed exactly once at decision time.
+	messy := func(string) string { return "/models/../models/./qwen38//dflash2.safetensors" }
+	if got, ok := serveDFlash2SidecarDecision(serveSpeculativeDFlash2, true, messy); !ok || got != filepath.Clean("/models/qwen38/dflash2.safetensors") {
+		t.Fatalf("messy path: got (%q,%v), want (%q,true)", got, ok, filepath.Clean("/models/qwen38/dflash2.safetensors"))
+	}
+	// Whitespace-only pinning is not a path.
+	if got, ok := serveDFlash2SidecarDecision(serveSpeculativeDFlash2, true, func(string) string { return "   " }); ok || got != "" {
+		t.Fatalf("blank pin: got (%q,%v), want (\"\",false)", got, ok)
+	}
+}
 
 // TestCompactHistoryBudgetDefaultsToDefaultConst pins the default-on sprawl trigger: the
 // --compact-history-budget flag (defined identically in runServe and runGuard) now defaults

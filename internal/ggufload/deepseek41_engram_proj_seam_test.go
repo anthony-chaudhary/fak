@@ -86,6 +86,53 @@ func TestDeepSeek41EngramForwardNamesAreAdmitted(t *testing.T) {
 	}
 }
 
+// TestDeepSeek41EngramFoldedGateAlias is the bounded reproduction for the
+// folded-gate spelling gap named by #14121: the locally evidenced DS4.1 GGUF
+// carries blk.<L>.engram_folded_gate.weight, which the reduced native forward
+// admits and reads under model.layers.<L>.engram_folded_gate.weight
+// (layerName(l, "engram_folded_gate.weight")). The loader must resolve the
+// spelling onto the dedicated engram-root leaf; without the arm the tensor
+// dies at a naming mismatch instead of landing on the forward-consumed leaf.
+func TestDeepSeek41EngramFoldedGateAlias(t *testing.T) {
+	const suffix = "engram_folded_gate.weight"
+	for _, layer := range []int{0, 7} {
+		raw := fmt.Sprintf("blk.%d.%s", layer, suffix)
+		got, ok := CanonicalTensorNameArch(raw, "deepseek41")
+		if !ok {
+			t.Errorf("CanonicalTensorNameArch(%q, deepseek41) = ok=false; the folded Engram gate spelling the native forward consumes must resolve", raw)
+			continue
+		}
+		want := fmt.Sprintf("model.engram.%d.%s", layer, suffix)
+		if got != want {
+			t.Errorf("CanonicalTensorNameArch(%q, deepseek41) = %q, want forward-consumed %q", raw, got, want)
+		}
+		// The folded gate must never fall through to a generic attention/MLP
+		// leaf, or the forward would silently read the wrong tensor.
+		if strings.Contains(got, "self_attn.") || strings.Contains(got, "mlp.") {
+			t.Errorf("%q mapped into a generic attention/MLP namespace: %q", raw, got)
+		}
+		// It is an f32 coefficient consumed by the forward, NOT a packed row
+		// table read through model.V41EngramRowSource: the materializing
+		// quant loaders must eager-load it, never route it through the
+		// packed-table seam.
+		if deepseek41EngramTableTensor(raw) {
+			t.Errorf("%q classified as a packed Engram table; the folded gate loads as an f32 weight", raw)
+		}
+	}
+	// Sibling-arch leak check: the alias lives in the deepseek41 map only. A
+	// non-V4.1 arch resolving the spelling into the model.engram.* root would
+	// let a foreign checkpoint's tensor land on a V4.1-dedicated leaf.
+	for _, arch := range []string{"llama", "qwen2", "deepseek2", "glm_moe_dsa"} {
+		for _, layer := range []int{0, 7} {
+			raw := fmt.Sprintf("blk.%d.%s", layer, suffix)
+			got, _ := CanonicalTensorNameArch(raw, arch)
+			if strings.HasPrefix(got, "model.engram.") {
+				t.Errorf("arch %s resolved %q into the V4.1-dedicated engram root: %q", arch, raw, got)
+			}
+		}
+	}
+}
+
 // TestDeepSeek41EngramProjectionSuffixesDoNotCollide pins that the two dialect
 // spellings of each projection-side tensor converge on ONE canonical leaf. A
 // divergence would let a file carrying both spellings write two different targets

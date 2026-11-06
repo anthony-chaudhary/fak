@@ -29,6 +29,12 @@ type DeepSeekV41DSparkConfig struct {
 	MarkovRank         int
 	NumRoutedExperts   int
 	NumExpertsPerTok   int
+	// GGUF is the optional support-GGUF artifact declaration (arch
+	// deepseek41-dspark) attached at intake. When present,
+	// RefuseDeepSeekV41DSpark enforces the pinned ds4 artifact contract on it
+	// before the unsupported-execution refusal. Presence never enables
+	// execution; it only sharpens the refusal reason for a bad artifact.
+	GGUF *V41DSparkGGUFHeader
 }
 
 // HasDeepSeekV41DSpark reports whether the config requests the V4.1 DSpark
@@ -42,11 +48,22 @@ func (c Config) HasDeepSeekV41DSpark() bool {
 // before any speculative work. It is nil (no-op) for every non-V4.1 family and
 // for a V4.1 config that requests no DSpark, so the plain text path is
 // byte-for-byte unchanged. A V4.1 DSpark request is refused with
-// ErrV41DSparkUnsupported.
+// ErrV41DSparkUnsupported. When the decoder is enabled and the config carries
+// a support-GGUF artifact declaration (GGUF), the pinned ds4 artifact contract
+// (dspark.* key set, strict dimension validation, unclaimed-tensor refusal) is
+// enforced first; a violated contract is refused with its typed
+// ErrV41DSparkArtifact sentinel instead. This is fail-closed admission
+// hardening only: a valid contract still refuses execution below, and no
+// speculative execution is added.
 func (c Config) RefuseDeepSeekV41DSpark() error {
 	if !c.IsDeepSeekV41() || !c.HasDeepSeekV41DSpark() {
 		return nil
 	}
 	d := c.DeepSeekV41.DSpark
+	if d.GGUF != nil {
+		if _, err := ValidateV41DSparkGGUFHeader(*d.GGUF); err != nil {
+			return err
+		}
+	}
 	return fmt.Errorf("%w: %s@%s declares DSpark(block=%d targets=%v markov=%d); speculation stays disabled until the text baseline is qualified", ErrV41DSparkUnsupported, DeepSeekV41FlashModelID, DeepSeekV41FlashRevision, d.BlockSize, d.TargetLayerIDs, d.MarkovRank)
 }

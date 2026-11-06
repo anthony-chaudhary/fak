@@ -47,13 +47,16 @@ func TestUpBootsUnifiedAgentRuntime(t *testing.T) {
 	if err := os.MkdirAll(goTmp, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	buildCtx, cancelBuild := context.WithTimeout(t.Context(), 30*time.Second)
+	// Match the startup process witness's separate checkout-CLI build budget.
+	// Runtime readiness and shutdown retain their own bounds below.
+	const buildTimeout = 3 * time.Minute
+	buildCtx, cancelBuild := context.WithTimeout(t.Context(), buildTimeout)
 	defer cancelBuild()
 	build := exec.CommandContext(buildCtx, "go", "build", "-o", bin, "./cmd/fak")
 	build.Dir = root
 	build.Env = append(os.Environ(), "GOTMPDIR="+goTmp)
 	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build fak: %v\n%s", err, out)
+		t.Fatalf("build fak: %v (build context: %v; budget: %s)\n%s", err, buildCtx.Err(), buildTimeout, out)
 	}
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

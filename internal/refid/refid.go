@@ -8,6 +8,10 @@ func Valid(id string) bool {
 	if id == "" || len(id) > 200 || strings.HasPrefix(id, "-") || strings.HasPrefix(id, ".") {
 		return false
 	}
+	// Git forbids consecutive dots, a trailing dot, and a .lock component suffix.
+	if strings.Contains(id, "..") || strings.HasSuffix(id, ".") || strings.HasSuffix(id, ".lock") {
+		return false
+	}
 	for _, c := range []byte(id) {
 		switch {
 		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':

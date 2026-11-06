@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
-	"github.com/anthony-chaudhary/fak/internal/numfmt"
 )
 
 // ---------------------------------------------------------------------------
@@ -176,7 +175,7 @@ func classifyOutputTool(c *abi.ToolCall, r *abi.Result) outputToolClass {
 func oversizeThresholdForClass(class outputToolClass) int {
 	switch class {
 	case outputToolRead:
-		return numfmt.EnvPositiveInt("FAK_READ_OVERSIZE_BYTES", ReadOversizeBytes)
+		return envPositiveInt("FAK_READ_OVERSIZE_BYTES", ReadOversizeBytes)
 	case outputToolSearchExec:
 		return SearchExecOversizeBytes
 	default:

@@ -321,3 +321,68 @@ func TestEveryArmVisitsEveryPosition(t *testing.T) {
 		}
 	}
 }
+
+// Concurrent streams each replay the full scenario sequence with their own
+// seeds and nonces (streams never warm each other's prompt cache); rows carry
+// stream/concurrency tags and Summarize folds per-(C, scenario) cells.
+func TestConcurrencyStreamsTagRowsAndFoldCells(t *testing.T) {
+	srv := httptest.NewServer(&fakeEngine{reportCache: true, perTokenDur: time.Millisecond})
+	defer srv.Close()
+	arm, _ := ParseArm("fak=" + srv.URL + "/v1")
+	rows, err := Run(context.Background(), Config{RunID: "conc", Model: "m", Arms: []Arm{arm},
+		Reps: 1, ColdSizes: []int{64}, DecodeTokens: 0, Turns: 0, Concurrency: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2 (one per stream)", len(rows))
+	}
+	streams := map[int]bool{}
+	for _, r := range rows {
+		if r.Concurrency != 2 {
+			t.Fatalf("row concurrency = %d, want 2", r.Concurrency)
+		}
+		if r.Stream != 0 && r.Stream != 1 {
+			t.Fatalf("row stream = %d, want 0 or 1", r.Stream)
+		}
+		streams[r.Stream] = true
+		if !r.OK {
+			t.Fatalf("stream %d row not ok: %s", r.Stream, r.Error)
+		}
+	}
+	if len(streams) != 2 {
+		t.Fatalf("streams seen = %v, want {0,1}", streams)
+	}
+	rep := Summarize(rows)
+	if len(rep.ConcurrencyCells) != 1 {
+		t.Fatalf("concurrency cells = %d, want 1", len(rep.ConcurrencyCells))
+	}
+	c := rep.ConcurrencyCells[0]
+	if c.Concurrency != 2 || c.Requests != 2 || c.Errors != 0 || c.WallS <= 0 || c.AggPrefillTPS <= 0 {
+		t.Fatalf("conc cell = %+v, want requests=2 errors=0 wall>0 agg_prefill>0", c)
+	}
+}
+
+// The default sequential run keeps the legacy row shape: no stream/concurrency
+// fields on rows and no concurrency_cells on the report.
+func TestSequentialRowsStayLegacyShaped(t *testing.T) {
+	srv := httptest.NewServer(&fakeEngine{perTokenDur: time.Millisecond})
+	defer srv.Close()
+	arm, _ := ParseArm("fak=" + srv.URL + "/v1")
+	rows, err := Run(context.Background(), Config{RunID: "seq", Model: "m", Arms: []Arm{arm},
+		Reps: 1, ColdSizes: []int{64}, DecodeTokens: 0, Turns: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	b, _ := json.Marshal(rows[0])
+	if strings.Contains(string(b), "\"stream\"") || strings.Contains(string(b), "\"concurrency\"") {
+		t.Fatalf("sequential row carries concurrency fields: %s", b)
+	}
+	rep := Summarize(rows)
+	if rep.ConcurrencyCells != nil {
+		t.Fatalf("sequential report has concurrency cells: %+v", rep.ConcurrencyCells)
+	}
+}

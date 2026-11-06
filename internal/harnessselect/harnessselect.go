@@ -3,6 +3,7 @@ package harnessselect
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -74,13 +75,19 @@ var scopeRank = map[string]int{
 	"task":    70,
 }
 
-// Parse deserializes and validates a harness selection manifest from JSON.
+// Parse deserializes and validates exactly one harness selection manifest from JSON.
 // It enforces the expected schema version, unique layer IDs, valid scopes, and non-empty capability names.
 func Parse(raw []byte) (Manifest, error) {
 	var m Manifest
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&m); err != nil {
+		return Manifest{}, fmt.Errorf("parse manifest: %w", err)
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return Manifest{}, fmt.Errorf("parse manifest: trailing data after manifest")
+		}
 		return Manifest{}, fmt.Errorf("parse manifest: %w", err)
 	}
 	if m.Schema != Schema {

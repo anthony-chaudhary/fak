@@ -122,7 +122,7 @@ func (t *Table) Lookup(keyHash uint64, keyLen uint16) (Entry, uint64, bool) {
 	h2 := H2(keyHash)
 	pos := H1(keyHash) & (t.capacity - 1)
 
-	for {
+	for i := uint64(0); i < t.capacity; i += GroupSize {
 		// Probe group of 16 ctrl bytes
 		matches := t.matchGroup(pos, h2)
 		for matches != 0 {
@@ -144,6 +144,7 @@ func (t *Table) Lookup(keyHash uint64, keyLen uint16) (Entry, uint64, bool) {
 		// Move to next group
 		pos = (pos + GroupSize) & (t.capacity - 1)
 	}
+	return Entry{}, 0, false
 }
 
 // Insert inserts or updates an entry. Returns (slotIndex, grew).
@@ -174,6 +175,9 @@ func (t *Table) Insert(keyHash uint64, e Entry) (uint64, bool) {
 		if empties != 0 {
 			bit := uint64(bits.TrailingZeros16(empties))
 			idx := (pos + bit) & (t.capacity - 1)
+			if t.ctrl[idx] == CtrlTombstone {
+				t.tombstones--
+			}
 			t.ctrl[idx] = h2
 			// Mirror to overflow region if needed
 			if idx < GroupSize {

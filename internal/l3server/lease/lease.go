@@ -21,13 +21,26 @@ func NewTable(maxDurationMs int64) *Table {
 
 // Grant creates or extends a lease for a key hash.
 func (t *Table) Grant(keyHash uint64, durationMs int64) {
+	t.grantAt(keyHash, durationMs, time.Now().UnixMilli())
+}
+
+// grantAt keeps the clock input explicit for deterministic deadline checks.
+func (t *Table) grantAt(keyHash uint64, durationMs, now int64) {
 	if durationMs > t.maxDurationMs {
 		durationMs = t.maxDurationMs
 	}
 	if durationMs <= 0 {
 		durationMs = 5000 // default 5s
+		if t.maxDurationMs > 0 && durationMs > t.maxDurationMs {
+			durationMs = t.maxDurationMs
+		}
 	}
-	expiry := time.Now().UnixMilli() + durationMs
+	// An unrepresentable future deadline must not wrap into an expired lease.
+	const maxExpiry = int64(^uint64(0) >> 1)
+	expiry := maxExpiry
+	if now <= maxExpiry-durationMs {
+		expiry = now + durationMs
+	}
 	// Only extend, never shorten an existing lease
 	if existing, ok := t.leases[keyHash]; ok && existing > expiry {
 		return

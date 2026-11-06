@@ -558,7 +558,8 @@
         "PoolProfile",
         "x2-pool-workerworktreepoolcapenv",
         "x2-pool-workerworktreepoolcap",
-        "pool-expert-ring-host-memory-fraction"
+        "pool-expert-ring-host-memory-fraction",
+        "newsharedtokenpoolwithcapacity"
       ],
       "aliases": [
         "newpagedkvpool",

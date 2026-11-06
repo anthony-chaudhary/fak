@@ -1,0 +1,27 @@
+{
+  "schema": "fak-native-glm5next-engine-forward/v1",
+  "engine": "fak-native",
+  "model": "zai-org/GLM-5.3-Flash",
+  "rung": "weights-bound engine forward (Model.Forward + GLM5NextSession)",
+  "layers": 8,
+  "cadence": "3:1 KDA:DSA (layer%4==3 is DSA)",
+  "mixers": [
+    "kda-delta-rule",
+    "dsa-mla-nope-kpool-indexer"
+  ],
+  "mlp": "clamped-swiglu dense(0..2) + 288-expert top-8 sigmoid MoE + shared expert",
+  "state_seams": [
+    "kda recurrent state",
+    "kda causal conv state",
+    "dsa key/value cache",
+    "dsa indexer kpool cache",
+    "mhc residual streams"
+  ],
+  "pinned_artifact_revision": "zai-org/GLM-5.3-Flash@04c4e9e95c5da8862dced7e5056455116f83a7e0",
+  "test_geometry": {
+    "hidden": 32,
+    "layers": 8
+  },
+  "geometry_note": "reduced-geometry witness; tensor names and cadence are the pinned canonical contract",
+  "witness": "SW-VERIFIED: admission (manifest + engine tensor checks), Forward(seq) parity with the stepwise session, snapshot/restore, reset determinism, prefix causality, batched-path loud refusal"
+}

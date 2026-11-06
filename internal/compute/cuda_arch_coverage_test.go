@@ -95,3 +95,89 @@ func TestCUDACoverageString(t *testing.T) {
 		}
 	}
 }
+
+// TestCudaArchDecodeProgramSelect pins the arch+dtype decode-program table's dispatch contract:
+// a covered (arch, dtype) pair selects its specialized entry; an uncovered arch OR dtype falls
+// back to the generic FP16 flat-ring program; the generic entry itself is stable; and every
+// specialized entry stays inside the static embedded-cubin coverage data with no Blackwell part.
+func TestCudaArchDecodeProgramSelect(t *testing.T) {
+	t.Run("covered-arch-dtype-selects-specialized", func(t *testing.T) {
+		cases := []struct {
+			major, minor int
+			dt           Dtype
+			wantName     string
+		}{
+			{9, 0, FP8, "decode/sm90-fp8-uniform"}, // Hopper: covered arch + covered dtype
+			{8, 9, FP8, "decode/sm89-fp8-uniform"}, // Ada: covered arch + covered dtype
+		}
+		for _, c := range cases {
+			got := SelectCUDADecodeProgram(c.major, c.minor, c.dt)
+			if got.Name != c.wantName {
+				t.Errorf("SelectCUDADecodeProgram(%d,%d,%s).Name = %q, want %q", c.major, c.minor, c.dt, got.Name, c.wantName)
+			}
+			if !got.Specialized {
+				t.Errorf("SelectCUDADecodeProgram(%d,%d,%s).Specialized = false, want true (table entry)", c.major, c.minor, c.dt)
+			}
+			if got.DType != c.dt {
+				t.Errorf("SelectCUDADecodeProgram(%d,%d,%s).DType = %s, want %s", c.major, c.minor, c.dt, got.DType, c.dt)
+			}
+		}
+	})
+
+	t.Run("uncovered-arch-or-dtype-falls-back-to-generic", func(t *testing.T) {
+		cases := []struct {
+			major, minor int
+			dt           Dtype
+			why          string
+		}{
+			{10, 0, FP8, "Blackwell sm_100: no specialized entry (this port adds no Blackwell kernels)"},
+			{10, 3, FP8, "Blackwell sm_103: no specialized entry"},
+			{12, 0, FP8, "Blackwell consumer sm_120: no specialized entry"},
+			{7, 5, FP8, "Turing 7.5: not in the embedded cubin set, no entry"},
+			{13, 0, FP8, "future 13.0: not in the table"},
+			{8, 0, FP8, "Ampere sm_80: no FP8 tensor-core lane, no entry"},
+			{9, 0, F16, "Hopper arch covered but FP16 has no specialized stage"},
+			{9, 0, BF16, "BF16: no specialized stage anywhere"},
+			{9, 0, F32, "F32: no specialized stage anywhere"},
+		}
+		for _, c := range cases {
+			got := SelectCUDADecodeProgram(c.major, c.minor, c.dt)
+			if got.Specialized {
+				t.Errorf("SelectCUDADecodeProgram(%d,%d,%s) = specialized %q, want generic fallback (%s)", c.major, c.minor, c.dt, got.Name, c.why)
+			}
+			if got.Name != cudaGenericDecodeProgram.Name {
+				t.Errorf("SelectCUDADecodeProgram(%d,%d,%s).Name = %q, want the generic %q (%s)", c.major, c.minor, c.dt, got.Name, cudaGenericDecodeProgram.Name, c.why)
+			}
+		}
+	})
+
+	t.Run("generic-path-output-stable", func(t *testing.T) {
+		// Regression pin: the generic fallback IS today's decode path. If these fields move, the
+		// fallback is no longer behavior-identical and something downstream of dispatch changed.
+		got := SelectCUDADecodeProgram(9, 0, F16) // any uncovered pair returns the same entry
+		want := CUDADecodeProgram{Name: "decode/fp16-flat-ring", DType: F16, Specialized: false}
+		if got != want {
+			t.Errorf("generic fallback = %+v, want unchanged %+v", got, want)
+		}
+	})
+
+	t.Run("table-stays-within-static-coverage", func(t *testing.T) {
+		// The static coverage data stays authoritative: a specialized entry may only target an arch
+		// this build embeds a native SASS cubin for, and no entry may target a Blackwell part.
+		for k, p := range cudaDecodePrograms {
+			embedded := false
+			for _, c := range cudaEmbeddedArches {
+				if c == k.cc {
+					embedded = true
+					break
+				}
+			}
+			if !embedded {
+				t.Errorf("specialized entry %q targets arch {%d,%d} with no embedded cubin", p.Name, k.cc.Major, k.cc.Minor)
+			}
+			if k.cc.Major >= 10 {
+				t.Errorf("specialized entry %q targets Blackwell {%d,%d}; this port adds no Blackwell programs", p.Name, k.cc.Major, k.cc.Minor)
+			}
+		}
+	})
+}

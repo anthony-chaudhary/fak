@@ -662,9 +662,11 @@ func applyRestoreBounds(res CtxRestoreResult, req ContextRestoreRequest) CtxRest
 		limit = fullLen - offset
 	}
 
-	end := offset + limit
-	if end > fullLen {
-		end = fullLen
+	// Compare against remaining bytes before adding a caller-supplied limit:
+	// even a small page plus a valid MaxInt limit can overflow offset+limit.
+	end := fullLen
+	if limit < fullLen-offset {
+		end = offset + limit
 	}
 
 	res.Bytes = res.Bytes[offset:end]

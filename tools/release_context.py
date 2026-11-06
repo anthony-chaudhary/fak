@@ -465,7 +465,7 @@ def fold_latest_trunk_ci(latest_trunk: object,
     indecisive = 0
     stale_failure_ci: dict | None = None
     for row in latest_trunk:
-        if not isinstance(row, dict):
+        if not isinstance(row, dict) or row.get("event") != "push":
             continue
         conclusion = str(row.get("conclusion") or "")
         if conclusion not in _DECISIVE_CI_CONCLUSIONS:
@@ -564,7 +564,7 @@ def decisive_runs_with_ancestry(latest_trunk: object, head: str,
         return []
     out: list[dict] = []
     for row in latest_trunk:
-        if not isinstance(row, dict):
+        if not isinstance(row, dict) or row.get("event") != "push":
             continue
         conclusion = str(row.get("conclusion") or "")
         if conclusion not in _DECISIVE_CI_CONCLUSIONS:
@@ -609,13 +609,18 @@ def ci_signal_for_workflow(workflow: str, default_branch: str = DEFAULT_BRANCH,
     reads ``runs_on_head`` from no signal and ``latest_trunk_ci.attempt`` only
     from the whole-``ci.yml`` one, so the fast subset skips that extra `gh` call
     on the auto-cut critical path.
+
+    Only push-triggered runs supply release readiness. Manual diagnostics may
+    test another SHA or a narrower command, even when their event ref is main.
+    Request the event explicitly and reject missing/unknown events at each fold.
     """
     head = run(["git", "rev-parse", "HEAD"]).strip()
     runs_on_head: list[dict] = []
     if head and include_runs_on_head:
         got = _run_gh_json([
             "run", "list", "--workflow", workflow, "--commit", head,
-            "--limit", "10", "--json", "workflowName,status,conclusion,attempt,databaseId,url",
+            "--event", "push", "--limit", "10",
+            "--json", "workflowName,status,conclusion,attempt,databaseId,url,event",
         ])
         if isinstance(got, list):
             runs_on_head = [
@@ -627,13 +632,13 @@ def ci_signal_for_workflow(workflow: str, default_branch: str = DEFAULT_BRANCH,
                     "database_id": row.get("databaseId"),
                     "url": row.get("url"),
                 }
-                for row in got if isinstance(row, dict)
+                for row in got if isinstance(row, dict) and row.get("event") == "push"
             ]
 
     latest_trunk = _run_gh_json([
         "run", "list", "--workflow", workflow, "--branch", default_branch,
-        "--status", "completed", "--limit", "30",
-        "--json", "conclusion,headSha,updatedAt,attempt,databaseId,url",
+        "--event", "push", "--status", "completed", "--limit", "30",
+        "--json", "conclusion,headSha,updatedAt,attempt,databaseId,url,event",
     ])
     status, latest, note = fold_latest_trunk_ci(latest_trunk, workflow, head=head)
     return {

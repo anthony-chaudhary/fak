@@ -655,3 +655,91 @@ func TestMetalMTPAdaptiveDepthChangesWithPressure(t *testing.T) {
 		}
 	}
 }
+
+// TestQwen38MTP_Adaptive_ModeledCostPricing pins the governor extension: an
+// attached DraftDepthRule prices draft rows through ModeledKeep/ModeledMore and
+// folds every observed step into its token/ms EMAs from the cost model (a
+// proposed-draft window prices as proposed+1 rows, a target-only step as one
+// row), never from wall-clock latencies.
+func TestQwen38MTP_Adaptive_ModeledCostPricing(t *testing.T) {
+	cfg := DefaultQwen38AdaptiveConfig()
+	gov, err := NewQwen38MTPAdaptiveDepthGovernor(cfg)
+	if err != nil {
+		t.Fatalf("failed to create governor: %v", err)
+	}
+
+	// Fail-closed while no cost rule is attached.
+	if gov.CostRule() != nil {
+		t.Fatalf("CostRule = non-nil before SetCostRule")
+	}
+	if gov.ModeledKeep(1, 0.0) || gov.ModeledMore(0, 1.0) {
+		t.Fatalf("modeled pricing answered without a cost rule")
+	}
+
+	c, err := NewDraftDepthCosts(draftDepthFixture(), 0.6132, 16)
+	if err != nil {
+		t.Fatalf("NewDraftDepthCosts: %v", err)
+	}
+	rule, err := NewDraftDepthRule(c, 15, nil, 2.0)
+	if err != nil {
+		t.Fatalf("NewDraftDepthRule: %v", err)
+	}
+	gov.SetCostRule(rule)
+	if gov.CostRule() != rule {
+		t.Fatalf("CostRule did not return the attached rule")
+	}
+
+	// Modeled pricing flows through the governor, priced by the fresh EMAs
+	// (tokens 2.0, ms 13.0532): row 2 costs 2.28 ms, row+level costs 2.8932.
+	if !gov.ModeledKeep(1, 0.0) {
+		t.Fatalf("ModeledKeep(1, 0.0) = false, want row 1 always kept")
+	}
+	if !gov.ModeledKeep(2, 0.99) {
+		t.Fatalf("ModeledKeep(2, 0.99) = false, want high confidence to accept row 2")
+	}
+	if gov.ModeledKeep(2, 0.1) {
+		t.Fatalf("ModeledKeep(2, 0.1) = true, want low confidence to reject row 2")
+	}
+	if !gov.ModeledMore(1, 0.67) || gov.ModeledMore(1, 0.66) {
+		t.Fatalf("ModeledMore(1, .67/.66) = %v/%v, want accept/reject at the row+level price",
+			gov.ModeledMore(1, 0.67), gov.ModeledMore(1, 0.66))
+	}
+
+	// A drafting step: 3 proposed, 2 accepted -> 3 tokens earned, a 4-row
+	// verify window, one chain level.
+	depth, rec, err := gov.ObserveStep(Qwen38AdaptiveStepObservation{
+		ProposedTokens: 3,
+		AcceptedTokens: 2,
+		Speedup:        1.10,
+	})
+	if err != nil {
+		t.Fatalf("observe step error: %v", err)
+	}
+	if depth != 2 || rec.Action != "hold" {
+		t.Fatalf("step 1 depth/action = %d/%q, want 2/hold (adjudication unchanged)", depth, rec.Action)
+	}
+	if rule.Tokens() != 2.125 { // 2 + 0.125*((2+1)-2)
+		t.Fatalf("Tokens = %v, want 2.125", rule.Tokens())
+	}
+	// 13.0532 + 0.125*(16.92 + 0.6132 - 13.0532) = 13.6132
+	draftDepthApproxEq(t, "MS after drafting step", rule.MS(), 13.6132)
+
+	// A target-only step prices as a one-row verify plus one level, with one
+	// token earned: tokens 2.125 -> 2.125 + 0.125*(1-2.125) = 1.984375;
+	// ms 13.6132 -> 13.6132 + 0.125*(9.85 + 0.6132 - 13.6132) = 13.21945.
+	depth, rec, err = gov.ObserveStep(Qwen38AdaptiveStepObservation{
+		ProposedTokens: 0,
+		AcceptedTokens: 0,
+		Speedup:        1.0,
+	})
+	if err != nil {
+		t.Fatalf("observe target-only step error: %v", err)
+	}
+	if depth != 2 || rec.Action != "hold" {
+		t.Fatalf("step 2 depth/action = %d/%q, want 2/hold", depth, rec.Action)
+	}
+	if rule.Tokens() != 1.984375 {
+		t.Fatalf("Tokens = %v, want 1.984375", rule.Tokens())
+	}
+	draftDepthApproxEq(t, "MS after target-only step", rule.MS(), 13.21945)
+}

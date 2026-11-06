@@ -18,6 +18,7 @@ WORKFLOW = ROOT / ".github" / "workflows" / "release-artifacts.yml"
 MACOS_WORKFLOW = ROOT / ".github" / "workflows" / "release-macos.yml"
 CONTAINER_WORKFLOW = ROOT / ".github" / "workflows" / "release-container.yml"
 CUDA_CONTAINER_WORKFLOW = ROOT / ".github" / "workflows" / "release-cuda-container.yml"
+HELM_WORKFLOW = ROOT / ".github" / "workflows" / "release-helm.yml"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 INSTALL_SH = ROOT / "install.sh"
 DOCKERFILE = ROOT / "Dockerfile"
@@ -363,7 +364,10 @@ class DockerfileContractTest(unittest.TestCase):
         self.text = DOCKERFILE.read_text(encoding="utf-8")
 
     def test_two_stage_static_distroless(self) -> None:
-        self.assertIn("FROM golang:1.26 AS build", self.text)
+        # The builder pins --platform=$BUILDPLATFORM so the multi-arch
+        # release-container.yml build cross-compiles linux/arm64 natively on the
+        # amd64 runner (no QEMU emulation); the runtime stage stays target-platform.
+        self.assertIn("FROM --platform=$BUILDPLATFORM golang:1.26 AS build", self.text)
         self.assertIn("CGO_ENABLED=0", self.text)
         self.assertIn("gcr.io/distroless/static", self.text)
         # The version stamp is DRY'd into scripts/build.sh (#3709); the Dockerfile
@@ -375,6 +379,52 @@ class DockerfileContractTest(unittest.TestCase):
         # Containers must bind 0.0.0.0, not loopback.
         self.assertIn("0.0.0.0:8080", self.text)
         self.assertIn("EXPOSE 8080", self.text)
+
+
+class ReleaseHelmWorkflowContractTest(unittest.TestCase):
+    """The release-helm workflow publishes deploy/helm/fak to ghcr as an OCI
+    artifact on every v* tag, so the chart installs without a git checkout."""
+
+    def setUp(self) -> None:
+        self.assertTrue(HELM_WORKFLOW.exists(), f"missing {HELM_WORKFLOW}")
+        self.text = HELM_WORKFLOW.read_text(encoding="utf-8")
+
+    def test_named_and_triggered_by_tag_or_dispatch(self) -> None:
+        self.assertIn("name: release-helm", self.text)
+        self.assertIn("push:", self.text)
+        self.assertIn('tags: ["v*"]', self.text)
+        self.assertIn("workflow_dispatch:", self.text)
+        self.assertIn("tag:", self.text)
+
+    def test_chart_job_pushes_documented_oci_ref_with_packages_write(self) -> None:
+        self.assertIn("packages: write", self.text)
+        self.assertIn("oci://ghcr.io/", self.text)
+        self.assertIn("/fak/charts", self.text)
+        self.assertIn("helm push", self.text)
+
+    def test_stamps_version_and_app_version_from_the_tag(self) -> None:
+        # Anti-staleness contract: the published chart ALWAYS carries the release
+        # version even though the committed Chart.yaml appVersion lags — both
+        # stamps route through the resolved tag version, never hardcoded values.
+        self.assertIn('VERSION="${TAG#v}"', self.text)
+        self.assertIn("--version", self.text)
+        self.assertIn("--app-version", self.text)
+        self.assertIn("steps.meta.outputs.version", self.text)
+
+    def test_verify_job_pulls_the_pushed_chart_and_checks_appversion(self) -> None:
+        self.assertIn("verify-chart:", self.text)
+        self.assertIn("needs: chart", self.text)
+        self.assertIn("helm pull", self.text)
+        self.assertIn("appVersion", self.text)
+        self.assertIn("helm template", self.text)
+        self.assertIn("GITHUB_STEP_SUMMARY", self.text)
+
+    def test_setup_helm_is_exact_version_pinned(self) -> None:
+        # azure/setup-helm downloads get.helm.sh/helm-v<version> verbatim; a range
+        # like "~3.17.0" becomes a literal ~ in the URL and 404s (the
+        # deploy-helm-lint.yml pin convention).
+        self.assertIn("azure/setup-helm@v4", self.text)
+        self.assertIn("version: 3.17.2", self.text)
 
 
 if __name__ == "__main__":

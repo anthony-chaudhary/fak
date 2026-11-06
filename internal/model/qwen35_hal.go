@@ -1100,44 +1100,51 @@ func (s *Session) qwen35FullAttentionHAL(layer, pos int, residual compute.Tensor
 		be.AddBias(v, s.weightHAL(p("self_attn.v_proj.bias")))
 	}
 
-	if cfg.QKNorm {
-		var err error
-		q, kRaw, err = s.qwen35ResidentQKNorm(layer, q, kRaw)
-		if err != nil {
-			s.failBackendForward(layer, "resident QK normalization", err)
-		}
-	}
-
 	kvLayer := qwen35HALKVLayer(cfg, layer)
 	theta := cfg.ropeThetaForLayer(layer)
-	if cfg.rotaryDim() != hd {
-		// The device capability takes theta directly, so use it only for the unscaled
-		// Qwen path. Scaled/YaRN configurations retain the exact cached-inv-freq fallback.
-		if partial, ok := be.(qwen35PartialRoPEBackend); ok && cfg.RopeScaling == "" && cfg.LongRope == nil {
-			var kRope compute.Tensor
-			q, kRope = partial.PartialRoPEQK(q, kRaw, pos, nH, nKV, hd, cfg.rotaryDim(), theta)
-			s.halKV.AppendKV(kvLayer, kRaw, kRope, v, pos)
-		} else {
-			s.refuseHostFallback("Qwen partial RoPE")
-			qHost := s.readQwen35FullAttention(layer, "partial-RoPE query read", q)
-			kHost := s.readQwen35FullAttention(layer, "partial-RoPE key read", kRaw)
-			cos, sin := ropeRowForLayer(cfg, layer, pos)
-			ropeRowQKInto(qHost, kHost, cos, sin, hd, nH, nKV)
-			q = s.uploadHostF32([]int{nH * hd}, qHost, compute.MemoryActivation, "qwen35-full-attn-rope-q")
-			kRope := s.uploadHostF32([]int{nKV * hd}, kHost, compute.MemoryActivation, "qwen35-full-attn-rope-k")
-			s.halKV.AppendKV(kvLayer, kRaw, kRope, v, pos)
-		}
+	qPost, fusedQK, fusedErr := s.qwen35TryFusedQK(layer, kvLayer, pos, q, kRaw, v)
+	if fusedErr != nil {
+		s.failBackendForward(layer, "fused QK normalization, RoPE and KV append", fusedErr)
+	}
+	if fusedQK {
+		q = qPost
 	} else {
-		if rope, ok := be.(ropeInPlaceBackend); ok {
-			q = rope.RoPEInPlace(q, pos, nH, hd, theta)
-		} else {
-			q = be.RoPE(q, pos, nH, hd, theta)
+		if cfg.QKNorm {
+			var err error
+			q, kRaw, err = s.qwen35ResidentQKNorm(layer, q, kRaw)
+			if err != nil {
+				s.failBackendForward(layer, "resident QK normalization", err)
+			}
 		}
-		if appender, ok := s.halKV.(kvRoPEAppender); ok {
-			appender.AppendKVRoPE(kvLayer, kRaw, v, pos, nKV, hd, theta)
+		if cfg.rotaryDim() != hd {
+			// The device capability takes theta directly, so use it only for the unscaled
+			// Qwen path. Scaled/YaRN configurations retain the exact cached-inv-freq fallback.
+			if partial, ok := be.(qwen35PartialRoPEBackend); ok && cfg.RopeScaling == "" && cfg.LongRope == nil {
+				var kRope compute.Tensor
+				q, kRope = partial.PartialRoPEQK(q, kRaw, pos, nH, nKV, hd, cfg.rotaryDim(), theta)
+				s.halKV.AppendKV(kvLayer, kRaw, kRope, v, pos)
+			} else {
+				s.refuseHostFallback("Qwen partial RoPE")
+				qHost := s.readQwen35FullAttention(layer, "partial-RoPE query read", q)
+				kHost := s.readQwen35FullAttention(layer, "partial-RoPE key read", kRaw)
+				cos, sin := ropeRowForLayer(cfg, layer, pos)
+				ropeRowQKInto(qHost, kHost, cos, sin, hd, nH, nKV)
+				q = s.uploadHostF32([]int{nH * hd}, qHost, compute.MemoryActivation, "qwen35-full-attn-rope-q")
+				kRope := s.uploadHostF32([]int{nKV * hd}, kHost, compute.MemoryActivation, "qwen35-full-attn-rope-k")
+				s.halKV.AppendKV(kvLayer, kRaw, kRope, v, pos)
+			}
 		} else {
-			kRope := be.RoPE(kRaw, pos, nKV, hd, theta)
-			s.halKV.AppendKV(kvLayer, kRaw, kRope, v, pos)
+			if rope, ok := be.(ropeInPlaceBackend); ok {
+				q = rope.RoPEInPlace(q, pos, nH, hd, theta)
+			} else {
+				q = be.RoPE(q, pos, nH, hd, theta)
+			}
+			if appender, ok := s.halKV.(kvRoPEAppender); ok {
+				appender.AppendKVRoPE(kvLayer, kRaw, v, pos, nKV, hd, theta)
+			} else {
+				kRope := be.RoPE(kRaw, pos, nKV, hd, theta)
+				s.halKV.AppendKV(kvLayer, kRaw, kRope, v, pos)
+			}
 		}
 	}
 

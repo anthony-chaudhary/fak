@@ -69,7 +69,12 @@ func (s Stream) CappedWorstCaseBlocks(capNewTokens int) int {
 // reusable blocks, clamped at zero. This is what admit.go's ReserveBlocks would
 // return if MaxNewTokens were min(MaxNewTokens, cap). Assumes a positive cap.
 func (s Stream) CappedReserveBlocks(capNewTokens int) int {
-	n := s.CappedWorstCaseBlocks(capNewTokens) - s.HeldBlocks - s.RetainedBlocks
+	n := s.CappedWorstCaseBlocks(capNewTokens) - s.HeldBlocks
+	// Clamp each credit separately so their combined subtraction cannot wrap.
+	if n < 0 {
+		return 0
+	}
+	n -= s.RetainedBlocks
 	if n < 0 {
 		return 0
 	}
@@ -86,7 +91,12 @@ func (s Stream) ChargedBlocks(genNewTokens int) int {
 	if genNewTokens < 0 {
 		genNewTokens = 0
 	}
-	n := ceilDiv(s.PromptTokens+genNewTokens, s.BlockSize) - s.HeldBlocks - s.RetainedBlocks
+	n := ceilDiv(s.PromptTokens+genNewTokens, s.BlockSize) - s.HeldBlocks
+	// Clamp each credit separately so their combined subtraction cannot wrap.
+	if n < 0 {
+		return 0
+	}
+	n -= s.RetainedBlocks
 	if n < 0 {
 		return 0
 	}

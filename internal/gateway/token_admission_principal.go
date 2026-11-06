@@ -147,7 +147,11 @@ func (b *PrincipalTokenRates) Admit(principal string, estimate ratelimit.TokenUs
 	if b == nil {
 		return nil, nil
 	}
-	return b.allotmentFor(principal).Admit(estimate)
+	// Keep selection and reservation atomic with the idle sweep: an expired gate
+	// must not be detached after selection but before its reservation is visible.
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.allotmentForLocked(principal).Admit(estimate)
 }
 
 // AllotmentCounts reports the book's live size: how many named principals hold their own
@@ -188,12 +192,11 @@ func keyForPrincipal(principal string) allotmentKey {
 	return allotmentKey{class: allotmentUnidentified}
 }
 
-// allotmentFor resolves (creating if needed) the gate a principal is charged to, applying
-// the idle sweep and the ceiling fallback described in the file header. Never nil.
-func (b *PrincipalTokenRates) allotmentFor(principal string) *TokenRateGate {
+// allotmentForLocked resolves (creating if needed) the gate a principal is charged to,
+// applying the idle sweep and ceiling fallback. Never nil. Caller holds b.mu through
+// reservation, using the same book-before-gate lock order as sweepIdleLocked.
+func (b *PrincipalTokenRates) allotmentForLocked(principal string) *TokenRateGate {
 	key := keyForPrincipal(principal)
-	b.mu.Lock()
-	defer b.mu.Unlock()
 	if g := b.book[key]; g != nil {
 		return g
 	}

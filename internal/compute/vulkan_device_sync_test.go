@@ -42,8 +42,11 @@ func goClockSlack() time.Duration {
 	return 2 * tick
 }
 
-// vulkanPipelinedCycles mirrors batchCycle's eligibility for a plain dense
-// window: the process-start env gates, not a runtime toggle.
+// vulkanPipelinedCycles mirrors batchCycle's eligibility,
+// g_pipelineFlush && !g_stepBatch && !g_tsOn && !g_batchHazardsArmed &&
+// g_submissionStatus == VK_SUCCESS, for a window outside any open step window:
+// the process-start env gates plus a healthy context, not a runtime toggle.
+// V4.1-checked batches cycle too; only an open step window keeps the flush.
 func vulkanPipelinedCycles() bool {
 	return os.Getenv("FAK_VULKAN_PIPELINE_FLUSH") != "0" &&
 		os.Getenv("FAK_VULKAN_TIMESTAMP_PROFILE") != "1" &&

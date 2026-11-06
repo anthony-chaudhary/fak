@@ -160,6 +160,107 @@ func TestNVFP4Reference(t *testing.T) {
 	})
 }
 
+// fak-test:runtime fast est=1ms lane=default
+func TestNVFP4SpecialValuesAndMismatch(t *testing.T) {
+	t.Run("per-stack globals against hand-decoded goldens", func(t *testing.T) {
+		// Two experts of [1, 32]: two scale groups per row; byte 0 holds columns 0 (low) and 1 (high).
+		codes := make([]byte, 32)
+		codes[0] = 0xF2                          // column 0: e2m1 2 -> 1.0; column 1: e2m1 0xF -> -6
+		codes[8] = 0x07                          // column 16: e2m1 7 -> 6
+		codes[16+15] = 0x30                      // expert 1, column 31: e2m1 3 -> 1.5
+		scales := []byte{0x38, 0x40, 0x38, 0x30} // 1, 2 | 1, 0.5
+		globals := []float32{0.25, 2}
+
+		got, err := DecodeNVFP4Stacks(2, 1, 32, codes, scales, globals)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if wantValues := len(codes) * 2; len(got) != wantValues {
+			t.Fatalf("decoded %d values, want %d from %d packed bytes", len(got), wantValues, len(codes))
+		}
+		want := map[int]float32{
+			0:       0.25, // 1.0 * 1 * 0.25
+			1:       -1.5, // -6 * 1 * 0.25
+			16:      3,    // 6 * 2 * 0.25
+			32 + 31: 1.5,  // 1.5 * 0.5 * 2
+		}
+		for i, v := range got {
+			if w, ok := want[i]; ok && v != w {
+				t.Fatalf("value %d = %v, want golden %v", i, v, w)
+			}
+		}
+		for i, v := range got {
+			if _, ok := want[i]; ok {
+				continue
+			}
+			if v != 0 {
+				t.Fatalf("value %d = %v, want zero code", i, v)
+			}
+		}
+	})
+
+	t.Run("subnormal and maximal e4m3 scales decode exactly", func(t *testing.T) {
+		packed := make([]byte, 8)
+		packed[0] = 0x01 // column 0 (low nibble): e2m1 1 -> 0.5
+		got, err := DecodeNVFP4Stacks(1, 1, 16, packed, []byte{0x01}, []float32{1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := float32(math.Ldexp(1, -10)); got[0] != want { // 0.5 * 2^-9
+			t.Fatalf("subnormal-scale value = %v, want exact %v", got[0], want)
+		}
+
+		maxPacked := []byte{0x07, 0, 0, 0, 0, 0, 0, 0} // column 0: e2m1 7 -> 6
+		got, err = DecodeNVFP4Stacks(1, 1, 16, maxPacked, []byte{0x7e}, []float32{1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := float32(6) * 448; got[0] != want { // largest finite e4m3 scale
+			t.Fatalf("max-scale value = %v, want exact %v", got[0], want)
+		}
+	})
+
+	t.Run("closed error contracts", func(t *testing.T) {
+		validPacked := make([]byte, 16) // two stacks of [1, 16]
+		validScales := []byte{0x38, 0x38}
+		validGlobals := []float32{1, 1}
+		maxInt := int(^uint(0) >> 1)
+		cases := []struct {
+			name    string
+			stacks  int
+			rows    int
+			cols    int
+			packed  []byte
+			scales  []byte
+			globals []float32
+			wantErr error
+		}{
+			{"zero stacks", 0, 1, 16, validPacked, validScales, nil, ErrNVFP4Shape},
+			{"zero rows", 2, 0, 16, validPacked, validScales, validGlobals, ErrNVFP4Shape},
+			{"partial block", 2, 1, 15, validPacked, validScales, validGlobals, ErrNVFP4Shape},
+			{"shape overflow", 2, maxInt, 16, nil, nil, validGlobals, ErrNVFP4Shape},
+			{"short packed", 2, 1, 16, validPacked[:15], validScales, validGlobals, ErrNVFP4Shape},
+			{"long packed", 2, 1, 16, append(validPacked, 0), validScales, validGlobals, ErrNVFP4Shape},
+			{"short block scales", 2, 1, 16, validPacked, validScales[:1], validGlobals, ErrNVFP4Scale},
+			{"NaN block scale", 2, 1, 16, validPacked, []byte{0x7f, 0x38}, validGlobals, ErrNVFP4Scale},
+			{"signed NaN block scale", 2, 1, 16, validPacked, []byte{0xff, 0x38}, validGlobals, ErrNVFP4Scale},
+			{"negative block scale", 2, 1, 16, validPacked, []byte{0xb8, 0x38}, validGlobals, ErrNVFP4Scale},
+			{"fewer globals than stacks", 2, 1, 16, validPacked, validScales, validGlobals[:1], ErrNVFP4Shape},
+			{"more globals than stacks", 1, 1, 16, validPacked[:8], validScales[:1], validGlobals, ErrNVFP4Shape},
+			{"negative global", 2, 1, 16, validPacked, validScales, []float32{-1, 1}, ErrNVFP4Scale},
+			{"NaN global", 2, 1, 16, validPacked, validScales, []float32{float32(math.NaN()), 1}, ErrNVFP4Scale},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				_, err := DecodeNVFP4Stacks(tc.stacks, tc.rows, tc.cols, tc.packed, tc.scales, tc.globals)
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("error = %v, want errors.Is(_, %v)", err, tc.wantErr)
+				}
+			})
+		}
+	})
+}
+
 func testNVFP4E2M1(code byte) float32 {
 	sign := float32(1)
 	if code&8 != 0 {

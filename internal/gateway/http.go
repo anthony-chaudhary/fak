@@ -115,6 +115,12 @@ func (s *Server) routeTable() []gatewayRoute {
 		{"/v1/responses", s.handleResponses},
 		{"/v1/embeddings", s.handleEmbeddings},
 		{"/v1/moderations", s.handleModerations},
+		// /v1/decisions is the single-choice decision-probability surface: one
+		// validated option set (unique ids, A-Z labels, temperature > 0), engine-
+		// scored logits through the installed scoring hook, stable softmax out.
+		// Inert (404 decisions_hook_unwired) until a host installs the hook via
+		// InstallDecisionsScorer. See decisions.go.
+		{"/v1/decisions", s.handleDecisions},
 		// Anthropic Messages surface.
 		{"/v1/messages", s.handleAnthropicMessages},
 		{"/v1/messages/count_tokens", s.handleAnthropicCountTokens},
@@ -776,6 +782,12 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	normalizeChatMaxTokens(&req)
 	req.AffinityKey = extractAffinityKey(r, req.AffinityKey)
+	// Dialect tool-normalization parity: fold the OpenAI chat tool catalog onto the
+	// same serving-input contract the Responses wire folds through, so every mounted
+	// dialect hands admission + the served core one normalized catalog (empty-name
+	// drop, first-wins dedupe, MCP legacy/canonical collapse). Capability checks stay
+	// per-dialect; only the serving input is shared.
+	req.Tools = normalizeServingToolDefs(req.Tools)
 	if !validateChatRequestIngress(w, req) {
 		return
 	}

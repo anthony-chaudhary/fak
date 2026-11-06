@@ -44,14 +44,11 @@ worker a bounded goal and distinct file set, preserve only decisions and compact
 evidence in the primary context, and independently witness worker results before
 landing or reporting them. Delegate investigation, implementation, tests, long command
 output, and independent review; do not pull their full transcripts into the coordinator.
-Structurally drive 10x subagent adoption by default: aggressively fan out 4–8 (up to 16
-on multi-core hosts) specialized subagents concurrently across pairwise tree-disjoint lanes.
 
-- **Divide and conquer by default (10x subagent adoption)**: When handling substantive, multi-part, or complex tasks,
+- **Divide and conquer by default (10x subagent adoption)**: For substantive, multi-part, or complex tasks,
   decompose them into atomic, single-concern units or parallel subagent packets. Launch 4–8 (up to 16
   on multi-core hosts) specialized subagents (`task`: worker, researcher, explore, deep-reason, cross-validator,
-  issue-auditor, tester, reviewer, scout) concurrently across pairwise tree-disjoint lanes to maximize
-  throughput and prevent coordinator context saturation.
+  issue-auditor, tester, reviewer, scout) concurrently across pairwise tree-disjoint lanes.
 - **Astra worker reservation:** Reserve `gpt-6-astra` subagents for highly pre-specified
   formal-mathematical leaves: the packet states fixed definitions and assumptions, the exact
   proposition or derivation, the required output form, and a deterministic witness. Send
@@ -415,7 +412,7 @@ is a no-op). **When you cite evidence in a claim or a handoff, prefer `module@re
 - **Preserve shared-tree buildability.** A tracked or untracked `.go` sibling enters every package build. Fence incomplete cross-file WIP with `//go:build wip_<feature>` until its symbols exist; validate only your explicit paths with `fak validate --mine`. Build verification never writes an in-tree binary.
 - **Migrate CI/CD contracts atomically.** Before changing workflow inputs, JSON schemas consumed by workflows, check/job names, secrets/env, runner labels, or artifact/cache names, search the whole tree for consumers and update them together. Include changed contract, migrated consumers, impact/cutover, and rollback in the commit body; prove committed tip with `fak-dev ci-preflight`. Checklist: [`docs/ci/ci-spec-change-migration.md`](docs/ci/ci-spec-change-migration.md).
 - **Use only the sanctioned detached worker worktree.** Drive isolated workers through `fak worktree worker prepare|land|reap|list`; all branch worktrees remain forbidden. Reap stale scratch worktrees with `tools/worktree_doctor.py`, which preserves live sessions. See [`docs/managed-worker-worktrees.md`](docs/managed-worker-worktrees.md) for the operator guide, portable defaults, and remote recovery runbook.
-- **Allocate and reap scratch explicitly.** Use `fak tree-doctor --scratch-dir <producer>` or `--scratch-path <producer>/<file>`, then `--reap-scratch <producer> --json`. Never use `git clean -Xdf` under `_scratch/`. Per-run prompts/transcripts belong in allocated scratch; `testdata/` is only for fixtures landed with a consuming test. See [`docs/generated-output-defaults.md`](docs/generated-output-defaults.md).
+- **Allocate and reap scratch explicitly.** Use `fak tree-doctor --scratch-dir <producer>` or `--scratch-path <producer>/<file>`, then `--reap-scratch <producer> --json`. Never use `git clean -Xdf` under `_scratch/`. Per-run prompts/transcripts belong in allocated scratch; `testdata/` is only for fixtures landed with a consuming test. Process reaping does not remove snapshots. Account for retained runs, release disposable data promptly, and use standard guarded cleanup once authorized ownership and consumer checks pass; an anticipated denial is not an observed refusal. See [`docs/generated-output-defaults.md`](docs/generated-output-defaults.md#closing-a-run-without-leaving-scratch).
 - **Keep comments durable.** Explain non-obvious invariants, safety, concurrency, compatibility, or performance tradeoffs; do not narrate syntax. Preserve required exported-API, package, directive, generated, and legal comments.
 - **Keep claims and gains witnessed.** Every `CLAIMS.md` row needs its required tag. Report performance only from net-true end-to-end accounting, with quality and operating-envelope constraints; setup/recovery/verification overhead counts. Use the project claim and benchmark gates rather than hand-written “looks faster” prose.
 - **Extend through leaves and Go tooling.** Add capabilities with `fak new-leaf`; avoid editing the core registry directly. New durable tooling is a Go leaf or nested Go sub-module plus a `fak` verb, not another `tools/*.py`, `.ps1`, or `.sh` script; the Python and script gates permit maintenance of grandfathered scripts, not new ones.

@@ -72,3 +72,78 @@ func TestResolveRoot(t *testing.T) {
 		t.Fatalf("ResolveRoot = %q, want %q", got, private)
 	}
 }
+
+// fak-test:runtime fast est=50ms lane=default
+func TestResolveRunChecksSymlinkContainmentBeforeCreating(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		privateTarget     string
+		privateAlias      bool
+		aliasInsidePublic bool
+		publicAlias       bool
+		wantErr           bool
+	}{
+		{name: "private alias to public root", privateTarget: "public", privateAlias: true, wantErr: true},
+		{name: "private alias to public child", privateTarget: "nested", privateAlias: true, wantErr: true},
+		{name: "public root is an alias", privateTarget: "nested", publicAlias: true, wantErr: true},
+		{name: "lexical child still refused", privateTarget: "private", privateAlias: true, aliasInsidePublic: true, wantErr: true},
+		{name: "outside alias remains valid", privateTarget: "private", privateAlias: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := t.TempDir()
+			public := filepath.Join(base, "public")
+			targets := map[string]string{
+				"public":  public,
+				"nested":  filepath.Join(public, "nested"),
+				"private": filepath.Join(base, "private"),
+			}
+			for _, path := range targets {
+				if err := os.MkdirAll(path, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			root := targets[tc.privateTarget]
+			if tc.privateAlias {
+				link := filepath.Join(base, "private-link")
+				if tc.aliasInsidePublic {
+					link = filepath.Join(public, "private-link")
+				}
+				if err := os.Symlink(root, link); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+				root = link
+			}
+			repo := public
+			if tc.publicAlias {
+				repo = filepath.Join(base, "public-link")
+				if err := os.Symlink(public, repo); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+			}
+			got, err := ResolveRun(Options{RepoRoot: repo, Root: root, Create: true})
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "public checkout") {
+					t.Fatalf("ResolveRun = %+v, %v; want public checkout refusal", got, err)
+				}
+				if got != (Result{}) {
+					t.Fatalf("refused run returned %+v", got)
+				}
+				if _, err := os.Stat(filepath.Join(targets[tc.privateTarget], "fleet-runs")); !os.IsNotExist(err) {
+					t.Fatalf("refused run created a directory or could not be inspected: %v", err)
+				}
+				return
+			}
+			if err != nil || !got.Created || got.Root != root {
+				t.Fatalf("valid outside alias = %+v, %v", got, err)
+			}
+			resolvedPrivate, err := filepath.EvalSymlinks(targets["private"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			resolved, err := filepath.EvalSymlinks(got.Path)
+			if err != nil || !strings.HasPrefix(resolved, resolvedPrivate+string(filepath.Separator)) {
+				t.Fatalf("created path = %q, %v; want separate private directory", resolved, err)
+			}
+		})
+	}
+}

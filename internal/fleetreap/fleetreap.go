@@ -84,7 +84,11 @@ func ReapByAgeCount(dir, pattern string, maxAge time.Duration, maxCount int, now
 
 // ReapByDeadOwner removes files whose basename contains a decimal pid and whose
 // owner is no longer alive. Files without exactly one parseable pid are spared.
+// A non-nil liveness checker is required; without one no files are inspected or removed.
 func ReapByDeadOwner(dir, pattern string, alive func(pid int) bool, now time.Time) (Result, error) {
+	if alive == nil {
+		return Result{}, fmt.Errorf("fleetreap: owner liveness checker is required")
+	}
 	rows, err := matchingFiles(dir, pattern)
 	if err != nil {
 		return Result{}, err
@@ -92,7 +96,7 @@ func ReapByDeadOwner(dir, pattern string, alive func(pid int) bool, now time.Tim
 	res := Result{Before: footprint(rows, now)}
 	for _, row := range rows {
 		pid, ok := ownerPID(filepath.Base(row.path))
-		if !ok || (alive != nil && alive(pid)) {
+		if !ok || alive(pid) {
 			continue
 		}
 		if err := os.Remove(row.path); err != nil && !os.IsNotExist(err) {

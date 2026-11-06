@@ -70,8 +70,7 @@ func (s *SIEVE) Admit(keyHash uint64, keyLen uint16) []uint64 {
 
 	var evicted []uint64
 	for s.size >= s.capacity {
-		evHash := s.evict()
-		if evHash != 0 {
+		if evHash, ok := s.evict(); ok {
 			evicted = append(evicted, evHash)
 		}
 	}
@@ -123,12 +122,13 @@ func (s *SIEVE) Size() uint64 {
 
 // EvictOne force-evicts a single entry. Returns false if nothing to evict.
 func (s *SIEVE) EvictOne() bool {
-	return s.evict() != 0
+	_, ok := s.evict()
+	return ok
 }
 
-func (s *SIEVE) evict() uint64 {
+func (s *SIEVE) evict() (uint64, bool) {
 	if s.size == 0 {
-		return 0
+		return 0, false
 	}
 
 	// Start hand at tail if unset
@@ -142,7 +142,7 @@ func (s *SIEVE) evict() uint64 {
 			s.hand = s.tail
 		}
 		if s.hand < 0 {
-			return 0
+			return 0, false
 		}
 
 		node := &s.pool[s.hand]
@@ -159,7 +159,7 @@ func (s *SIEVE) evict() uint64 {
 			if s.onEvict != nil {
 				s.onEvict(evicted, evictedKeyLen)
 			}
-			return evicted
+			return evicted, true
 		}
 
 		// Clear visited and advance hand

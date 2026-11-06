@@ -560,6 +560,11 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 	requireCUDAUploadLayout("cuda Upload", t, as, class, site)
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	return c.uploadClassLocked(t, as, class, site)
+}
+
+// Caller holds cudaMu and has validated the upload layout.
+func (c *cudaBackend) uploadClassLocked(t Tensor, as Dtype, class MemoryClass, site string) Tensor {
 	hb, ok := t.buf.(HostBuffer)
 	if !ok {
 		panic(&CUDAOpError{
@@ -628,12 +633,15 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 			C.fcuda_h2d(buf.ptr, unsafe.Pointer(&values[0]), C.size_t(len(values)*4))
 		})
 	}
-	store := F32 // the resident dtype the `as` request narrows f32 host weights to
+	var store Dtype // the resident dtype the `as` request narrows f32 host weights to
 	switch as {
 	case F16:
 		store = F16
 	case Q8_0:
 		store = Q8_0
+	default:
+		// Upload preserves F32 for requests without a narrowing route.
+		store = F32
 	}
 	f := hb.F32()
 	// Q8 narrowing and both native matmul routes require complete row blocks.
@@ -665,17 +673,18 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 		return c.uploadF16(t, hb, f, hp)
 	case Q8_0:
 		return c.uploadQ8(t, hb, f, hp)
-	}
-	out, buf := c.dev(t.Shape, F32)
-	if len(f) > 0 {
-		C.fcuda_h2d(buf.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
-		c.accountImmutableWeightUpload(len(f)*F32.Bytes(), buf)
-		if hp != 0 {
-			buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, hb, F32, t.Layout
-			uploadCache[ucKey{hp, F32, t.Layout}] = out
+	default:
+		out, buf := c.dev(t.Shape, F32)
+		if len(f) > 0 {
+			C.fcuda_h2d(buf.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
+			c.accountImmutableWeightUpload(len(f)*F32.Bytes(), buf)
+			if hp != 0 {
+				buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, hb, F32, t.Layout
+				uploadCache[ucKey{hp, F32, t.Layout}] = out
+			}
 		}
+		return out
 	}
-	return out
 }
 
 // uploadNVFP4 copies NewNVFP4's owned payload resident without widening it: packed E2M1
@@ -734,6 +743,11 @@ var cudaReadNative = cudaReadOperations{
 func (c *cudaBackend) Read(t Tensor) []float32 {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	return c.readLocked(t)
+}
+
+// readLocked preserves Read semantics for an operation holding cudaMu.
+func (c *cudaBackend) readLocked(t Tensor) []float32 {
 	if hb, ok := t.buf.(*hostBuf); ok {
 		return hb.f32 // host-resident: no device work or fence
 	}
@@ -741,6 +755,9 @@ func (c *cudaBackend) Read(t Tensor) []float32 {
 	if err := db.invalidStateError("buffer"); err != nil {
 		panic(err)
 	}
+	// A nil or reconstructed Go latch cannot reopen a terminal native stream.
+	// Refuse before compressor fences, conversion allocation or D2H publication.
+	cudaV41CheckedSubmit()
 	cudaV41CompressorSubmitLocked(db)
 	pending := cudaV41CompressorReadBeginLocked(c)
 	readOK := false
@@ -1429,6 +1446,12 @@ func (c *cudaBackend) cudaMatMulLocked(w, x Tensor) Tensor {
 // weight dtype to the SGEMM (F32), tensor-core HGEMM (F16), or native Q8_0/Q4_K device GEMM.
 func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return c.batchedMatMulLocked(w, X, P)
+}
+
+// batchedMatMulLocked preserves dispatch and tracing while the caller holds cudaMu.
+func (c *cudaBackend) batchedMatMulLocked(w, X Tensor, P int) Tensor {
 	trace := false
 	var started time.Time
 	var y Tensor
@@ -1442,7 +1465,6 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 				}
 			}
 		}
-		cudaMu.Unlock()
 	}()
 	if err := c.validateQ56KProjectionOperands(w, X, P); err != nil {
 		panic(err)
@@ -1790,30 +1812,31 @@ func (c *cudaBackend) PrefillBatch(args PrefillBatchArgs) (PrefillBatchResult, e
 
 	// Ensure inputs are resident device tensors
 	xDev := args.X
-	if _, isHost := c.Host(xDev); isHost {
-		xDev = c.Upload(xDev, F32)
+	hostX, isHostX := c.Host(xDev)
+	var qf, kf, vf []float32
+	if isHostX {
+		qf, kf, vf, err = c.prefillHostProjections(xDev, hostX, args.Wq, args.Wk, args.Wv, P)
+		if err != nil {
+			return PrefillBatchResult{}, err
+		}
+	} else {
+		wqDev := args.Wq
+		if _, isHost := c.Host(wqDev); isHost {
+			wqDev = c.Upload(wqDev, F32)
+		}
+		wkDev := args.Wk
+		if _, isHost := c.Host(wkDev); isHost {
+			wkDev = c.Upload(wkDev, F32)
+		}
+		wvDev := args.Wv
+		if _, isHost := c.Host(wvDev); isHost {
+			wvDev = c.Upload(wvDev, F32)
+		}
+		qTen := c.BatchedMatMul(wqDev, xDev, P)
+		kTen := c.BatchedMatMul(wkDev, xDev, P)
+		vTen := c.BatchedMatMul(wvDev, xDev, P)
+		qf, kf, vf = c.Read(qTen), c.Read(kTen), c.Read(vTen)
 	}
-	wqDev := args.Wq
-	if _, isHost := c.Host(wqDev); isHost {
-		wqDev = c.Upload(wqDev, F32)
-	}
-	wkDev := args.Wk
-	if _, isHost := c.Host(wkDev); isHost {
-		wkDev = c.Upload(wkDev, F32)
-	}
-	wvDev := args.Wv
-	if _, isHost := c.Host(wvDev); isHost {
-		wvDev = c.Upload(wvDev, F32)
-	}
-
-	// 1. Batched projections on CUDA GPU
-	qTen := c.BatchedMatMul(wqDev, xDev, P)
-	kTen := c.BatchedMatMul(wkDev, xDev, P)
-	vTen := c.BatchedMatMul(wvDev, xDev, P)
-
-	qf := c.Read(qTen)
-	kf := c.Read(kTen)
-	vf := c.Read(vTen)
 
 	kRawAll := append([]float32(nil), kf...)
 	qRoped := make([]float32, len(qf))

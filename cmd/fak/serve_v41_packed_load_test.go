@@ -592,6 +592,18 @@ func writeV41CUDAFallbackFixture(t *testing.T, experts int) string {
 		{"token_embd.weight", []uint64{256, 1}, ggufload.TensorQ2_K, make([]byte, 84)},
 		{"output.weight", []uint64{256, 1}, ggufload.TensorQ6_K, make([]byte, 210)},
 		{"output_norm.weight", []uint64{256}, ggufload.TensorF32, make([]byte, 1024)},
+		// Eight 32-wide heads keep the attention projections Q2_K block-aligned
+		// while preserving the small KV geometry and the no-Q8-conversion witness.
+		{"blk.0.attn_q_a.weight", []uint64{256, 256}, ggufload.TensorQ2_K, make([]byte, 256*84)},
+		{"blk.0.attn_q_b.weight", []uint64{256, 256}, ggufload.TensorQ2_K, make([]byte, 256*84)},
+		{"blk.0.attn_kv.weight", []uint64{256, 32}, ggufload.TensorQ2_K, make([]byte, 32*84)},
+		{"blk.0.attn_output_a.weight", []uint64{256, 256}, ggufload.TensorQ2_K, make([]byte, 256*84)},
+		{"blk.0.attn_output_b.weight", []uint64{256, 256}, ggufload.TensorQ2_K, make([]byte, 256*84)},
+		{"blk.0.attn_sinks.weight", []uint64{8}, ggufload.TensorF32, make([]byte, 8*4)},
+		// Keep all three shared projections in Q3_K so this mixed-family fixture
+		// does not qualify for the separate UD-Q2_K_XL recipe admission route.
+		{"blk.0.ffn_gate_shexp.weight", []uint64{256, 256}, ggufload.TensorQ3_K, bytes.Repeat(v41PackedQ3Block(), 256)},
+		{"blk.0.ffn_up_shexp.weight", []uint64{256, 256}, ggufload.TensorQ3_K, bytes.Repeat(v41PackedQ3Block(), 256)},
 		{"blk.0.ffn_down_shexp.weight", []uint64{256, 256}, ggufload.TensorQ3_K, bytes.Repeat(v41PackedQ3Block(), 256)},
 		{"blk.0.ffn_gate_exps.weight", []uint64{256, 256, uint64(experts)}, ggufload.TensorQ2_K, make([]byte, 256*experts*84)},
 		{"blk.0.ffn_up_exps.weight", []uint64{256, 256, uint64(experts)}, ggufload.TensorQ2_K, make([]byte, 256*experts*84)},
@@ -601,11 +613,12 @@ func writeV41CUDAFallbackFixture(t *testing.T, experts int) string {
 		key   string
 		value uint64
 	}{
-		{"embedding_length", 256}, {"block_count", 1}, {"attention.head_count", 1},
+		{"embedding_length", 256}, {"block_count", 1}, {"attention.head_count", 8},
 		{"attention.head_count_kv", 1}, {"attention.key_length", 32}, {"feed_forward_length", 256},
 		{"context_length", 2048}, {"expert_count", uint64(experts)}, {"expert_used_count", 2},
-		{"expert_feed_forward_length", 256}, {"attention.q_lora_rank", 32}, {"attention.kv_lora_rank", 32},
+		{"expert_feed_forward_length", 256}, {"attention.q_lora_rank", 256}, {"attention.kv_lora_rank", 32},
 		{"attention.qk_nope_head_dim", 16}, {"attention.qk_rope_head_dim", 16}, {"attention.value_length_mla", 16},
+		{"attention.output_group_count", 1}, {"attention.output_lora_rank", 256},
 	}
 	var b bytes.Buffer
 	writeMinimalHeaderForTest(&b, uint64(len(tensors)), uint64(3+len(keys)))
@@ -643,6 +656,9 @@ func TestServeV41MixedQuantCUDAHostFallbackLoadArm(t *testing.T) {
 	defer ws.Close()
 	be := newV41CUDAFallbackBackend(1 << 30)
 	artifact := ggufload.ClassifyTensorQuant(ws.File.Tensors)
+	if artifact.Name != "mixed(Q2_K+Q3_K+Q6_K)" || artifact.Recipe != "" {
+		t.Fatalf("host-fallback fixture must select only the mixed-family route: %+v", artifact)
+	}
 	if serveArtifactNativeKQuant(be, artifact) || compute.BackendSupportsDeviceWeightDtype(be, compute.Q3_K) {
 		t.Fatal("host storage admission fabricated Q3 CUDA execution capability")
 	}

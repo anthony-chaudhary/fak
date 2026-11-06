@@ -1034,7 +1034,8 @@ static int run_variant(const uint8_t *w, const float *x, float *y, int out, int 
     }
     // The final shared Y tile may over-read into the J_max tail. Initialize it
     // before quantization; no pool bytes or prior request metadata are consumed.
-    int rc = (int)cudaMemsetAsync(activation, 0, plan.activation_bytes, g_stream);
+    int rc;
+    FCUDA_TS("fill", dim3(0, 0), rc = (int)cudaMemsetAsync(activation, 0, plan.activation_bytes, g_stream));
     if (rc) return retire(activation, fixup, rc);
     const int64_t padded = FAK_Q56K_MMQ_PAD((int64_t)in, MATRIX_ROW_PADDING);
     const dim3 qgrid(p, padded/(4*CUDA_QUANTIZE_BLOCK_SIZE_MMQ), 1);
@@ -1056,7 +1057,7 @@ static int run_variant(const uint8_t *w, const float *x, float *y, int out, int 
     if (rc) return retire(activation, fixup, rc);
     if (plan.fixup) {
         const dim3 fgrid(plan.blocks, I/warp_size, 1), fblock(warp_size, nwarps/2, 1);
-        FCUDA_TS("q56k_mmq_stream_k_fixup", fgrid, {
+        FCUDA_TS("q56k_mmq_mul_mat_q_stream_k_fixup", fgrid, {
             mul_mat_q_stream_k_fixup<J,fallback><<<fgrid, fblock, 0, g_stream>>>
                 (y, fixup, kb, out, p, out, nx);
             rc = (int)cudaGetLastError();

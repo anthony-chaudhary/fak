@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"net"
+	"sync"
 )
 
 // dist_collective.go — DistComm, the first REAL cross-process collective on fak: a
@@ -80,6 +81,12 @@ const (
 	opAllReduceSum distOp = 1
 	opAllGather    distOp = 2
 	opBroadcast    distOp = 3
+	// opTransportCtrl tags control-plane frames carried by the DistTransport
+	// vtable (dist_transport.go) over the group's links. It is distinct from
+	// every collective op (including opV41EPReduce = 4 and opV41EPPanelReduce =
+	// 5) so a transport link reader demuxes control traffic from collective
+	// frames by the tag byte alone.
+	opTransportCtrl distOp = 6
 )
 
 func (o distOp) String() string {
@@ -90,6 +97,8 @@ func (o distOp) String() string {
 		return "AllGather"
 	case opBroadcast:
 		return "Broadcast"
+	case opTransportCtrl:
+		return "TransportCtrl"
 	default:
 		return fmt.Sprintf("distOp(%d)", byte(o))
 	}
@@ -99,12 +108,21 @@ func (o distOp) String() string {
 // coordinator and holds one connection per worker (workers[r], r>=1); a worker rank holds
 // its single connection to the coordinator (coord). It is NOT safe for concurrent use by
 // multiple goroutines on one rank — a process group runs one collective at a time, in the
-// same order on every rank, exactly like an MPI/NCCL communicator.
+// same order on every rank, exactly like an MPI/NCCL communicator. A formed group may
+// additionally be wrapped in a DistTransport (dist_transport.go): its link readers then
+// claim frames off the wire into pending so the collective read paths below drain them in
+// arrival order, but WRITES still follow the one-collective-at-a-time discipline.
 type DistComm struct {
 	rank    int
 	size    int
 	workers []net.Conn // rank 0 only: len==size, workers[0]==nil (self), workers[r] for r>=1
 	coord   net.Conn   // rank r>0 only: the connection to the coordinator
+
+	// pendingMu guards pending: frames a DistTransport link reader already claimed
+	// off the wire, held here so the collective read paths observe them in arrival
+	// order before touching the wire again. Empty when no transport wraps the group.
+	pendingMu sync.Mutex
+	pending   [][]byte
 }
 
 // Rank returns this handle's rank in [0,Size).
@@ -170,6 +188,46 @@ func Join(conn net.Conn, rank, size int) (*DistComm, error) {
 		return nil, fmt.Errorf("model: Join announce rank %d: %w", rank, err)
 	}
 	return &DistComm{rank: rank, size: size, coord: conn}, nil
+}
+
+// linkConn returns this rank's connection to peer r: rank 0 holds one per worker;
+// a worker holds its single connection to the coordinator. Nil where no link exists
+// (the self slot or an out-of-range peer).
+func (g *DistComm) linkConn(peer int) net.Conn {
+	if peer < 0 || peer >= g.size || peer == g.rank {
+		return nil
+	}
+	if g.rank == 0 {
+		return g.workers[peer]
+	}
+	if peer == 0 {
+		return g.coord
+	}
+	return nil
+}
+
+// enqueuePending parks a frame a DistTransport link reader claimed off the wire, so the
+// collective read paths drain it in arrival order (readFrameAny).
+func (g *DistComm) enqueuePending(frame []byte) {
+	g.pendingMu.Lock()
+	g.pending = append(g.pending, frame)
+	g.pendingMu.Unlock()
+}
+
+// readFrameAny yields the next framed payload for this link: a frame already parked in
+// pending wins (preserving arrival order), else the wire itself is read.
+func (g *DistComm) readFrameAny(conn net.Conn) ([]byte, error) {
+	g.pendingMu.Lock()
+	var frame []byte
+	if len(g.pending) > 0 {
+		frame = g.pending[0]
+		g.pending = g.pending[1:]
+	}
+	g.pendingMu.Unlock()
+	if frame != nil {
+		return frame, nil
+	}
+	return readFrame(conn)
 }
 
 // Close closes the connections this rank owns. The coordinator closes every worker
@@ -248,7 +306,7 @@ func (g *DistComm) BroadcastFromRoot(payload []byte) ([]byte, error) {
 func (g *DistComm) broadcastCoordinate(payload []byte) ([]byte, error) {
 	var gatherErr error
 	for r := 1; r < g.size; r++ {
-		gotOp, _, err := readRequestRaw(g.workers[r])
+		gotOp, _, err := readRequestRaw(g, g.workers[r])
 		if err != nil {
 			if gatherErr == nil {
 				gatherErr = fmt.Errorf("model: Broadcast read rank %d announce: %w", r, err)
@@ -280,7 +338,7 @@ func (g *DistComm) broadcastWorker() ([]byte, error) {
 	if err := writeRequestRaw(g.coord, opBroadcast, nil); err != nil {
 		return nil, fmt.Errorf("model: rank %d send %s announce: %w", g.rank, opBroadcast, err)
 	}
-	out, err := readResponseRaw(g.coord)
+	out, err := readResponseRaw(g, g.coord)
 	if err != nil {
 		return nil, fmt.Errorf("model: rank %d recv %s response: %w", g.rank, opBroadcast, err)
 	}
@@ -298,7 +356,7 @@ func (g *DistComm) coordinate(op distOp, myPart []float32, plan TPPlan) ([]float
 	parts[0] = myPart
 	var gatherErr error
 	for r := 1; r < g.size; r++ {
-		gotOp, part, err := readRequest(g.workers[r])
+		gotOp, part, err := readRequest(g, g.workers[r])
 		if err != nil {
 			// A transport error means we cannot trust the round; record it but keep draining
 			// every connection so a later writeResponse cannot block a half-read peer.
@@ -352,7 +410,7 @@ func (g *DistComm) worker(op distOp, myPart []float32) ([]float32, error) {
 	if err := writeRequest(g.coord, op, myPart); err != nil {
 		return nil, fmt.Errorf("model: rank %d send %s request: %w", g.rank, op, err)
 	}
-	out, err := readResponse(g.coord)
+	out, err := readResponse(g, g.coord)
 	if err != nil {
 		return nil, fmt.Errorf("model: rank %d recv %s response: %w", g.rank, op, err)
 	}
@@ -417,8 +475,8 @@ func writeRequest(conn net.Conn, op distOp, v []float32) error {
 }
 
 // readRequest decodes a frame written by writeRequest.
-func readRequest(conn net.Conn) (distOp, []float32, error) {
-	payload, err := readFrame(conn)
+func readRequest(g *DistComm, conn net.Conn) (distOp, []float32, error) {
+	payload, err := g.readFrameAny(conn)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -444,8 +502,8 @@ func writeResponse(conn net.Conn, result []float32, opErr error) error {
 
 // readResponse decodes a frame written by writeResponse, surfacing the coordinator's
 // fail-closed error as an error on this rank so a refusal propagates to every rank.
-func readResponse(conn net.Conn) ([]float32, error) {
-	payload, err := readFrame(conn)
+func readResponse(g *DistComm, conn net.Conn) ([]float32, error) {
+	payload, err := g.readFrameAny(conn)
 	if err != nil {
 		return nil, err
 	}
@@ -471,8 +529,8 @@ func writeRequestRaw(conn net.Conn, op distOp, payload []byte) error {
 }
 
 // readRequestRaw decodes a frame written by writeRequestRaw.
-func readRequestRaw(conn net.Conn) (distOp, []byte, error) {
-	payload, err := readFrame(conn)
+func readRequestRaw(g *DistComm, conn net.Conn) (distOp, []byte, error) {
+	payload, err := g.readFrameAny(conn)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -493,8 +551,8 @@ func writeResponseRaw(conn net.Conn, result []byte, opErr error) error {
 
 // readResponseRaw decodes a frame written by writeResponseRaw, surfacing the coordinator's
 // fail-closed error as an error on this rank so a refusal propagates to every rank.
-func readResponseRaw(conn net.Conn) ([]byte, error) {
-	payload, err := readFrame(conn)
+func readResponseRaw(g *DistComm, conn net.Conn) ([]byte, error) {
+	payload, err := g.readFrameAny(conn)
 	if err != nil {
 		return nil, err
 	}

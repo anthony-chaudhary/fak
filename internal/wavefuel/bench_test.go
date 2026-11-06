@@ -37,6 +37,32 @@ func TestWaveFuelAccounting(t *testing.T) {
 	}
 }
 
+// Runtime estimate is unmeasured; this exercises only a fixed-clock ledger.
+// fak-test:runtime fast est=5ms lane=default
+func TestDebitRejectsOverflowWithoutConsumingBudget(t *testing.T) {
+	const maxTokens = int64(1<<63 - 1)
+	now := time.Unix(0, 0)
+	acct := NewAccount(maxTokens, 1, time.Time{})
+	if err := acct.Debit(maxTokens-1, now); err != nil {
+		t.Fatalf("initial debit: %v", err)
+	}
+	if err := acct.Debit(2, now); err != ErrExhausted {
+		t.Fatalf("overflowing debit = %v, want ErrExhausted", err)
+	}
+	if got := acct.RemainingTokens(); got != 1 {
+		t.Fatalf("refused debit changed remaining budget: got %d, want 1", got)
+	}
+	if err := acct.Debit(1, now); err != nil {
+		t.Fatalf("exact remaining budget refused: %v", err)
+	}
+	if got := acct.RemainingTokens(); got != 0 {
+		t.Fatalf("exhausted budget = %d, want 0", got)
+	}
+	if err := acct.Debit(1, now); err != ErrExhausted {
+		t.Fatalf("debit after exhaustion = %v, want ErrExhausted", err)
+	}
+}
+
 func BenchmarkWaveFuel(b *testing.B) {
 	now := time.Now()
 	deadline := now.Add(24 * time.Hour)

@@ -369,8 +369,13 @@ func (s *WeightSource) walkQ4KLoadStorage(opts []Q4KLoadOption, visit func(q4kTe
 		// is the SAME predicate the loader dispatches on, so the estimate and the loader cannot
 		// disagree about which tensors the policy covers. A non-Q4_K type the residency options
 		// send to Q8 (denseKQuantRetained false) is not held lazily by the loader either, so it
-		// stays on the Q8 device charge above instead of folding into the host working set.
-		if loadOpts.streamedDenseBounded && denseBoundedEligible(cfg, info.Type, canon) &&
+		// stays on the Q8 device charge above instead of folding into the host working set. A
+		// tensor the executing backend's kernel preflight requires device-resident
+		// (streamedDensePins, WithStreamedDenseDeviceResident) is excluded from the fold for the
+		// same reason: the loader holds it resident, so charging it to the host working set would
+		// admit a plan whose kernel operand the HAL spills to managed memory under VRAM pressure.
+		if loadOpts.streamedDenseBounded && !loadOpts.streamedDensePins(canon) &&
+			denseBoundedEligible(cfg, info.Type, canon) &&
 			(info.Type == TensorQ4_K || denseKQuantRetained(loadOpts, info.Type)) {
 			st.streamedBounded = true
 			if err := visit(st); err != nil {

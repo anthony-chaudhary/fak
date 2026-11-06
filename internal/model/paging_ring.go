@@ -5,176 +5,118 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/polymodel"
 )
 
-// paging_ring.go — pagedRing, the bounded per-weight resident cache that turns pagedKernel's
-// page-EVERY-op primitive into the "per-weight VRAM ring" the native-753B Pillar-4 "async expert
-// streaming" step needs (issue #2726, epic #2722 — Mac CPU+RAM+SSD offload serving): hold as many
-// paged weights device-resident as a weight-byte budget allows, reuse a resident handle on a hit,
-// and page a cold weight in on a miss — evicting the coldest UNPINNED weight (LRU) when admitting
-// the newcomer would exceed the budget.
+// paging_ring.go — pagedRing, the bounded per-weight resident cache: hold as many paged weights
+// device-resident as a weight-byte budget allows, reuse a resident handle on a hit, and page a cold
+// weight in on a miss, evicting the coldest unpinned weight when the budget would be exceeded.
 //
-// It is the middle tier between the two weight placements that exist today. splitKernel
-// (moe_offload.go, the --n-cpu-moe split) keeps ALL experts HOST-resident forever — no device
-// residency at all. pagedKernel (paging.go) uploads AND frees a weight on EVERY op — the device
-// holds exactly one weight and nothing is cached. The ring is the bounded working set between them:
-// a hot set of weights resident on the device, cold ones streamed on demand — the Tier-1 GPU ring
-// of the SOTA 3-tier (GPU / pinned-CPU / SSD) expert cache.
+// It is the middle tier between the two weight placements that bracket it: splitKernel (moe_offload.go)
+// keeps all experts host-resident forever, and pagedKernel (paging.go) uploads and frees a weight on
+// every op. The ring is the bounded working set between them — the Tier-1 GPU ring of the 3-tier
+// (GPU / pinned-CPU / SSD) expert cache.
 //
-// Policy REUSE, not reinvention: the byte budget, the LRU victim choice, the pinned-exemption and
-// the all-or-nothing admit are ALL polymodel.Pool's, here bound to per-WEIGHT device handles. So every
-// polymodel invariant its witness suite asserts (used<=budget, pinned-never-evicted,
-// admit-unchanged-on-error) holds here by construction; the ring adds only the name->handle binding
-// and the Upload-on-miss / Free-on-evict lifecycle.
+// Policy reuse, not reinvention: the byte budget, LRU victim choice, pinned exemption, and
+// all-or-nothing admit are all polymodel.Pool's, bound here to per-weight device handles, so every
+// polymodel invariant holds by construction; the ring adds only the name->handle binding and the
+// Upload-on-miss / Free-on-evict lifecycle.
 //
-// Correctness contract (pinned by paging_ring_test.go against the cpu-ref backend, where Upload/Free
-// are no-ops but the lifecycle and the counters are exact):
-//   - a ring matMul is BIT-EQUAL to a resident MatMul whether the weight was a HIT (resident handle
-//     reused) or a MISS (freshly uploaded) — only the residency LIFETIME differs, never the math;
-//   - pageIn counts each cold upload, hit counts each resident reuse, evict counts each page-out
-//     (LRU or explicit); used()<=budget() always, so the device footprint is bounded;
-//   - a weight evicted under budget pressure pages IN again on its next use — it is not silently
-//     lost, distinguishing a ring (bounded residency) from splitKernel (unbounded host residency).
+// Correctness contract: a ring matMul is bit-equal to a resident MatMul whether the weight was a hit
+// or a miss — only the residency lifetime differs, never the math; used() <= budget() always; an
+// evicted weight pages in again on its next use. Stages f32, Q8_0, or Q4_K weights, accounting the
+// quantized residency a memory-lean MoE host actually streams. Wired into the session weight HAL via
+// stage() + expert_ring_hal.go, opt-in per session (Session.ExpertRingBytes > 0).
 //
-// Scope: it stages f32, Q8_0, or Q4_K weights (matMul / matMulQ8 / matMulQ4K), so the ring accounts
-// the QUANTIZED residency a memory-lean MoE host actually streams (#3174 R1) rather than an f32
-// expansion of it. The follow-on rung #2726 named — wiring it into the session weight HAL as the
-// bounded twin of weightHALQ4K/weightHALQ8, so a real model streams ROUTED EXPERTS under a device
-// budget — landed as #5611 (epic #5606 R0) via stage() + expert_ring_hal.go; it is opt-in per
-// session (Session.ExpertRingBytes > 0) and inert at the default 0.
-//
-// Async H2D landed with #5627: a backend advertising compute.AsyncUploader stages through
-// UploadAsync and the ring holds the Fence in `pending` until the weight is demanded. A DEMAND
-// stage (hit or miss) always settles its fence before returning a handle, so every existing caller
-// keeps a synchronous contract; only the #5614 prefetch returns with a transfer still in flight,
-// which is what makes overlap possible AND measurable (awaitStaged). A backend without the
-// extension takes the synchronous path with a nil fence and is byte-for-byte unchanged.
+// Async H2D: a backend advertising compute.AsyncUploader stages through UploadAsync and the ring
+// holds the Fence in pending until the weight is demanded. A demand stage always settles its fence
+// before returning a handle, so callers keep a synchronous contract; only the activated-set
+// prefetch returns with a transfer in flight, which is what makes overlap measurable (awaitStaged).
+// A backend without the extension takes the synchronous path with a nil fence.
 type pagedRing struct {
 	be   compute.Backend
 	pool *polymodel.Pool
-	// resident is the name->live device weight handle map; it is kept in exact lockstep with pool
-	// (a name is in one iff it is in the other), so pool's residency bookkeeping governs the handles.
+	// resident is kept in exact lockstep with pool (a name is in one iff it is in the other).
 	resident map[polymodel.ModelID]compute.Tensor
 
 	pageIn int // cold uploads (a miss that was admitted)
 	hit    int // resident reuses (a handle served without upload)
 	evict  int // page-outs (LRU victims dropped during admit to stay within budget)
 
-	// lookups and refused are the RECONCILIATION pair (R6/#5617). lookups is incremented once at the
-	// top of stage(), before anything is decided; refused once on each exit that returns no
-	// handle. Every stage call therefore ends in exactly one of hit / pageIn / refused, so
-	// `hit + pageIn + refused == lookups` is an identity an operator surface can CHECK rather than
-	// assume — the difference between reporting the ring's own accounting and reporting a parallel
-	// estimate that can silently drift from it. They are counted independently of the outcome
-	// counters on purpose: a check whose two sides are computed from the same increment proves
-	// nothing.
+	// Reconciliation pair: every stage() call ends in exactly one of hit / pageIn / refused, so
+	// hit + pageIn + refused == lookups is an identity an operator surface can check. Counted
+	// independently of the outcome counters on purpose.
 	lookups int
 	refused int
-	// pageInBytes is the total device bytes moved by cold uploads. Bytes-per-token is the operator's
-	// tuning number and it cannot be recovered from pageIn alone, because routed-expert projections
-	// are not all the same size (a gate/up pair and a down matrix differ, and quantization differs
-	// per tensor).
+	// Total device bytes moved by cold uploads; bytes-per-token cannot be recovered from pageIn
+	// alone because routed-expert projections differ in size and quantization.
 	pageInBytes int64
 
-	// pending holds the in-flight transfer Fence for each weight staged through
-	// compute.AsyncUploader and not yet awaited (#5627). A weight is in this map for exactly the
-	// window between "issued" and "visible": awaitStaged clears it, and NOTHING may read, multiply
-	// or Free a handle while its id is still here.
-	pending map[polymodel.ModelID]compute.Fence
-	// asyncOverlapped / asyncWaited split the awaited fences by whether the transfer had ALREADY
-	// landed when its weight was finally demanded. Overlapped means the bytes moved underneath other
-	// work — the fraction the activated-set prefetch exists to grow. Waited means the demand caught
-	// up with the transfer and paid for it on the critical path. Their ratio is the overlap meter;
-	// counting them needs no clock, which is why it is trustworthy on a machine under load.
+	// In-flight transfer Fences not yet awaited. Nothing may read, multiply, or Free a handle
+	// while its id is still here.
+	pending map[polymodel.ModelID]*expertRingTransfer
+	// Split the awaited fences by whether the transfer had already landed when demanded: the
+	// clock-free overlap meter.
 	asyncOverlapped int
 	asyncWaited     int
-	// drainScope is the live execution scope this ring registered a pending-fence drain on
-	// (armRingDomainDrain). Only while it is live may an owner-capable backend issue async.
+	// Live execution scope this ring registered a pending-fence drain on; only while live may an
+	// owner-capable backend issue async.
 	drainScope *backendExecutionScope
 
-	// peak is the high-water mark of pool.Used() — the largest device weight footprint the ring ever
-	// held. It is the boundedness WITNESS: peak <= budget across an arbitrary access sequence is what
-	// distinguishes a ring from the unbounded halW memoizer, and it cannot be recovered after the fact
-	// from used() (which only reports the instantaneous set).
+	// High-water mark of pool.Used(): the boundedness witness, unrecoverable from used() alone.
 	peak int64
 
-	// holds counts the live hold() spans per weight (see hold/release). A weight with a live hold is
-	// PINNED in the pool for the span, so admitting a later weight cannot evict a handle its caller is
-	// still using — the invariant a multi-weight op (one expert's gate/up/down) depends on.
+	// Live hold() spans per weight; a held weight is pinned in the pool for the span, so a later
+	// admit cannot evict a handle its caller is still using.
 	holds map[polymodel.ModelID]int
-	// heldPins records the ids whose Pinned bit hold() itself set, so release() restores only those and
-	// never clears a pin the durable pin-set owns.
+	// Ids whose Pinned bit hold() itself set, so release() restores only those and never clears a
+	// pin the durable pin-set owns.
 	heldPins map[polymodel.ModelID]bool
 
-	// pins is the online-learning resident pin-set (expert_warmpins.go): the workload-personalized
-	// hot-set warm-started from the summed cross-session usage histogram and drifted between turns by
-	// RepinPass. nil until WarmStartPins seeds it — a ring that was never warm-started has no pin-set,
-	// so isExpertPinned reports false and RepinPass is a no-op. R2/#5613 gave it its live-path
-	// consumer: weightHALStagedBounded computes matMulStaged's `pinned` from it per routed expert
-	// (expert_ring_pins.go), so the pool's pinned-never-evicted invariant now protects the workload's
-	// hot set instead of nothing.
+	// Online-learning resident pin-set (expert_warmpins.go): the workload hot-set protected by the
+	// pool's pinned-never-evicted invariant. nil until WarmStartPins seeds it.
 	pins *ExpertPinSet
-	// turn is THIS turn's routed-expert usage, folded in by observeExpert and consumed by
-	// Session.ExpertRingEndTurn (which decays the standing heat, folds this in, repins, and dumps).
-	// nil alongside a nil pins, so a ring that was never warm-started observes nothing.
+	// This turn's routed-expert usage, consumed by Session.ExpertRingEndTurn. nil alongside a nil pins.
 	turn *ExpertUsageHistogram
-	// hotSet is the ONLINE hot-set learner (expert_hot_set.go, #1301), built lazily WITH the pin-set
-	// and only when Session.ExpertHotSetHysteresis > 0. ExpertRingEndTurn folds each turn's heat
-	// into it, calls Learn() under the hysteresis band, and applies the learned swaps to pins —
-	// so the durable pin-set is seeded by learned activation statistics, not only by RepinPass.
-	// nil on every default session (no pin-set, or hysteresis 0), so nothing is allocated and the
-	// pinned-never-evicted path is exactly R2's.
+	// Online hot-set learner (expert_hot_set.go), built lazily with the pin-set and only when
+	// Session.ExpertHotSetHysteresis > 0; seeds the durable pin-set from learned activation
+	// statistics. nil on every default session.
 	hotSet *ExpertHotSetLearner
 
-	// policy is the VICTIM ranking among unpinned residents (R4/#5615, expert_ring_policy.go).
-	// At the zero value (ExpertRingEvictLRU) the ring evicts nothing of its
-	// own and polymodel's coldestUnpinned choice stands, which is this file's original behaviour
-	// byte-for-byte; under ExpertRingEvictValueAware the ring picks victims by decaying heat and
-	// evicts them BEFORE Admit, so Admit fits without choosing.
+	// Victim ranking among unpinned residents (expert_ring_policy.go). Zero value (LRU) keeps
+	// polymodel's coldestUnpinned choice; value-aware picks victims by decaying heat and evicts
+	// them before Admit.
 	policy ExpertRingEvictPolicy
-	// policyGeneration identifies the policy-local measurement epoch. It starts at one so zero
-	// remains an uninitialized/not-a-ring value in exported receipts, stats, and traces.
+	// Starts at one so zero remains an uninitialized/not-a-ring value in exported receipts.
 	policyGeneration uint64
-	// heat is the per-weight decaying access counter the value-aware policy ranks on, and lastUse
-	// the recency clock it tie-breaks on. heat is nil under LRU (never allocated) and RETAINS an
-	// evicted weight's count as ghost heat. accesses drives the decay cadence.
+	// Per-weight decaying access counter (value-aware ranking) and recency tie-break clock. heat is
+	// nil under LRU and retains an evicted weight's count as ghost heat.
 	heat     map[polymodel.ModelID]int
 	lastUse  map[polymodel.ModelID]uint64
 	clock    uint64
 	accesses int
 
-	// trace is the ORDERED routed-expert access sequence this ring staged — what the offline regret
-	// gauge replays. The R2 histogram above is aggregate and loses the order Belady needs, so the
-	// two coexist rather than one deriving from the other. traceDropped counts accesses past
-	// expertRingTraceLimit, so a truncated window cannot read as a complete one.
+	// Ordered routed-expert access sequence for the offline regret gauge; the histogram above is
+	// aggregate and loses the order Belady needs. traceDropped marks a truncated window.
 	trace        []ExpertAccessTraceEvent
 	traceDropped int
 
-	// prefetching marks the stagings issued by the R3 activated-set prefetch (#5614,
-	// expert_ring_prefetch.go) as HINTS rather than demands: they take recency (the weight really is
-	// newly resident) but earn no heat, because a policy that ranked on its own prefetcher's guesses
-	// would protect what was speculated instead of what was used.
+	// Marks activated-set prefetch stagings as hints rather than demands: they take recency but
+	// earn no heat, so the policy ranks on what was used, not what was speculated.
 	prefetching bool
-	// prefetched counts weights staged ahead of their GEMM. activatedExperts / activatedCovered are
-	// the COVERAGE meter — of the experts the router activated and this ring could serve, how many
-	// the budget could actually hold — which is the plan's "were this token's activated experts
-	// resident?" question made countable.
+	// Coverage meter: of the experts the router activated, how many the budget could actually hold.
 	prefetched       int
 	activatedExperts int
 	activatedCovered int
 
-	// shared is the cross-agent owner (R7/#5618, expert_ring_shared.go) when this ring is the
-	// residency of a (model, device) pair rather than of one conversation: it carries the mutex every
-	// attached session serializes on and the coalescing ledger the hooks below feed. nil on a private
-	// per-session ring, which is the default and where every hook is a branch not taken.
+	// Cross-agent owner when this ring is the residency of a (model, device) pair rather than one
+	// conversation; nil on a private per-session ring (the default).
 	//
-	// The methods in THIS file never lock, under any owner. Serialization happens at the session-level
-	// entry points (Session.ringEnter), so there is one place to audit and no lock ordering to get
-	// wrong — see expert_ring_shared.go's header.
+	// The methods in this file never lock, under any owner. Serialization happens at the
+	// session-level entry points (Session.ringEnter), leaving one place to audit and no lock
+	// ordering to get wrong — see expert_ring_shared.go's header.
 	shared *SharedExpertRing
 }
 
-// dropResidency closes a weight's residency span in the cross-agent ledger, if there is one. Called
-// wherever a handle leaves `resident`, so the next page-in of that weight is accounted as a new span
-// with a new payer rather than continuing the old one.
+// dropResidency closes a weight's residency span in the cross-agent ledger, called wherever a
+// handle leaves resident, so the next page-in opens a new span with a new payer.
 func (r *pagedRing) dropResidency(id polymodel.ModelID) {
 	if r.shared != nil {
 		r.shared.endResidency(id)
@@ -196,12 +138,9 @@ func newPagedRing(be compute.Backend, budgetBytes int64) *pagedRing {
 	}
 }
 
-// uploadStaged stages a host source tensor onto be as dtype under the MemoryOffload class — the same
-// routing uploadHostF32Class uses (UploadClass when the backend honors placement, plain Upload
-// otherwise), but dtype-general so the ring can stage a RESIDENT quantized weight (Q8_0 / Q4_K)
-// exactly as the Session weightHALQ8/weightHALQ4K staged builders do. On the cpu-ref backend (no
-// UploadClass) it falls through to be.Upload(src, dtype) — the path the quantized HAL and its
-// witnesses already pin.
+// uploadStaged stages a host source tensor onto be as dtype under the MemoryOffload class
+// (UploadClass when the backend honors placement, plain Upload otherwise), dtype-general so the
+// ring can stage a resident quantized weight exactly as the Session weight HAL builders do.
 func uploadStaged(be compute.Backend, src compute.Tensor, dtype compute.Dtype, site string) compute.Tensor {
 	if b, ok := be.(classedUploadBackend); ok {
 		return b.UploadClass(src, dtype, compute.MemoryOffload, site)
@@ -210,20 +149,17 @@ func uploadStaged(be compute.Backend, src compute.Tensor, dtype compute.Dtype, s
 }
 
 // uploadStagedAsync is uploadStaged over compute.AsyncUploader when the backend offers one,
-// returning the in-flight handle plus its Fence. A backend without the extension falls through to
-// the synchronous path and a nil Fence, which awaitStaged treats as already-landed — so cpu-ref
-// and every other synchronous backend keep the exact upload they had (#5627).
+// returning the in-flight handle plus its Fence; a backend without the extension falls through to
+// the synchronous path with a nil Fence, which awaitStaged treats as already-landed.
 //
 // Two guards keep an async transfer from escaping what owns it:
-//
-//   - CLASS. A placement-aware backend (UploadClass) goes async only through
-//     compute.ClassedAsyncUploader, which books the allocation under MemoryOffload exactly as the
-//     synchronous classed path does; a plain UploadAsync would leave it unlabelled and corrupt the
-//     offload accounting that sizes the ring.
-//   - DOMAIN. An undemanded prefetch fence can outlive the enclosing forward, so on a backend
-//     with a recording-domain owner (compute.ForwardExecutionOwnerBackend) the transfer goes async
-//     only when domainJoined: the ring has registered a drain on the live execution scope, which
-//     settles every pending fence before the domain mutex is released (armRingDomainDrain).
+//   - CLASS: a placement-aware backend goes async only through ClassedAsyncUploader, which books
+//     the allocation under MemoryOffload; a plain UploadAsync would leave it unlabelled and corrupt
+//     the offload accounting that sizes the ring.
+//   - DOMAIN: an undemanded prefetch fence can outlive the enclosing forward, so on a backend with
+//     a recording-domain owner the transfer goes async only when domainJoined: the ring has
+//     registered a drain on the live execution scope that settles every pending fence before the
+//     domain mutex is released.
 func uploadStagedAsync(be compute.Backend, src compute.Tensor, dtype compute.Dtype, site string, domainJoined bool) (compute.Tensor, compute.Fence) {
 	if _, owned := be.(compute.ForwardExecutionOwnerBackend); owned && !domainJoined {
 		return uploadStaged(be, src, dtype, site), nil
@@ -247,28 +183,22 @@ func (r *pagedRing) domainJoined() bool {
 }
 
 // settlePendingTransfers waits out every in-flight transfer without booking the overlap meter: a
-// prefetch still undemanded when its forward ends computed nothing, exactly like discardStaged's
-// evicted-before-demand case. The weights stay resident; the next demand is an ordinary hit.
+// prefetch still undemanded when its forward ends computed nothing. The weights stay resident; the
+// next demand is an ordinary hit.
 func (r *pagedRing) settlePendingTransfers() {
 	r.drainScope = nil
-	for id := range r.pending {
-		r.discardStaged(id)
-	}
+	r.drainTransfers()
 }
 
-// matMulStaged is the dtype-general ring core shared by the f32 matMul and the quantized matMulQ8 /
-// matMulQ4K twins. It runs y = w·x for the named weight, keeping the uploaded device handle resident
-// under the ring budget. On a HIT (name already resident) the handle is reused and Touched (no
-// upload); on a MISS mk builds the host source (f32 / Q8_0 / Q4_K, exactly as the weightHAL staged
-// builders do), it is uploaded as dtype (page-in) and admitted to the pool — evicting the coldest
-// UNPINNED residents to stay within budget, whose handles are Freed — and retained. Bit-equal to a
-// resident Upload(mk(), dtype)+MatMul either way; only the residency lifetime differs. weightBytes is
-// the RESIDENT footprint the budget accounts (caller-supplied, exactly as polymodel.Model.WeightBytes)
-// — the QUANTIZED size for a quantized weight (Q8_0 ~1.125 B/weight, Q4_K ~0.56), so a ring sized for
-// N f32 experts holds several times as many quantized ones. Returns nil — paging nothing and leaving
-// the resident set unchanged — when the weight alone exceeds the budget (polymodel.ErrTooLarge) or
-// fits only by dropping a pinned resident (ErrPinnedNoRoom); the caller then falls back to a per-op
-// paged (pagedKernel) or host GEMM, exactly as an over-budget weight would.
+// matMulStaged is the dtype-general ring core shared by the f32 matMul and the quantized
+// matMulQ8 / matMulQ4K twins: it runs y = w·x for the named weight, keeping the uploaded device
+// handle resident under the ring budget. On a hit the handle is reused and Touched; on a miss mk
+// builds the host source, it is uploaded (page-in) and admitted, evicting the coldest unpinned
+// residents to stay within budget. Bit-equal to a resident Upload+MatMul either way; only the
+// residency lifetime differs. weightBytes is the resident (quantized) footprint the budget
+// accounts. Returns nil — paging nothing — when the weight alone exceeds the budget
+// (polymodel.ErrTooLarge) or fits only by dropping a pinned resident (ErrPinnedNoRoom); the caller
+// then falls back to a per-op paged or host GEMM.
 func (r *pagedRing) matMulStaged(name string, mk func() compute.Tensor, dtype compute.Dtype, x compute.Tensor, weightBytes int64, pinned bool) []float32 {
 	wt, ok := r.stage(name, mk, dtype, weightBytes, pinned)
 	if !ok {
@@ -277,133 +207,123 @@ func (r *pagedRing) matMulStaged(name string, mk func() compute.Tensor, dtype co
 	return append([]float32(nil), r.be.Read(r.be.MatMul(wt, x))...)
 }
 
-// stage is the RESIDENCY half of matMulStaged with the GEMM removed: it makes the named weight
+// stage is the residency half of matMulStaged with the GEMM removed: it makes the named weight
 // device-resident under the ring budget and hands back the live handle, so a caller that wants to
-// run its OWN ops against the weight (the session weight HAL, whose expertSwiGLUHAL issues three
-// MatMuls and a SwiGLU itself) gets the bounded residency without the ring dictating the math.
-// matMulStaged is stage + MatMul, so the two share one lifecycle by construction and the bit-equality
-// the ring witnesses for matMulStaged transfers to every stage() caller: on a HIT the resident handle
-// is reused and Touched, on a MISS mk builds the host source, it is uploaded as dtype (page-in) and
-// admitted — evicting the coldest UNPINNED residents, whose handles are Freed — and retained.
+// run its own ops against the weight (the session weight HAL) gets the bounded residency without
+// the ring dictating the math. matMulStaged is stage + MatMul, so the two share one lifecycle by
+// construction.
 //
-// Returns ok=false, having paged nothing and left the resident set unchanged, when the weight is
-// unadmittable (polymodel.ErrTooLarge — it alone exceeds the budget; or ErrPinnedNoRoom — it fits
-// only by dropping a pinned resident). The caller then falls back to its own unbounded/host path,
-// exactly as matMulStaged's nil return means.
-//
-// The returned handle is valid only until the NEXT stage/matMul on the same ring may evict it. A
-// caller holding several handles at once must hold() each for the span it uses them (see hold).
+// Returns ok=false, having paged nothing, when the weight is unadmittable (polymodel.ErrTooLarge or
+// ErrPinnedNoRoom). The returned handle is valid only until the next stage/matMul on the same ring
+// may evict it; a caller holding several handles at once must hold() each for the span it uses them.
 func (r *pagedRing) stage(name string, mk func() compute.Tensor, dtype compute.Dtype, weightBytes int64, pinned bool) (compute.Tensor, bool) {
 	t, err := r.stageWithError(name, mk, dtype, weightBytes, pinned)
+	if expertRingIsTransferError(err) {
+		panic(err) // A failed copy is not a budget refusal permitting a fallback upload.
+	}
 	return t, err == nil
 }
 
 func (r *pagedRing) stageWithError(name string, mk func() compute.Tensor, dtype compute.Dtype, weightBytes int64, pinned bool) (compute.Tensor, error) {
 	id := polymodel.ModelID(name)
-	r.lookups++      // R6 reconciliation: booked before anything is decided, so it counts every exit
-	r.noteAccess(id) // policy bookkeeping (R4): recency clock always, decaying heat under a value-aware policy
-	// R7 ledger: a DEMAND is an agent asking for bytes, so the prefetch's hints are excluded — they
-	// are the ring guessing, and counting them would inflate the B*K numerator with demand that never
-	// existed. A serve is booked on hit and on miss alike, because either way this agent got the
-	// weight off this residency span.
+	r.lookups++      // booked before anything is decided, so it counts every exit
+	r.noteAccess(id) // recency clock always, decaying heat under a value-aware policy
+	booked := false
+	defer func() {
+		if !booked {
+			r.refused++
+			if r.shared != nil {
+				r.shared.noteRefusal()
+			}
+		}
+	}()
+	// A demand is an agent asking for bytes, so the prefetch's hints are excluded from the ledger.
 	if r.shared != nil && !r.prefetching {
 		r.shared.noteDemand()
 	}
 	if wt, ok := r.resident[id]; ok {
+		// A hit on a prefetched weight is where overlap is observed; skip the fence while
+		// prefetching so re-hinting an in-flight weight does not block the hint path.
+		if !r.prefetching {
+			if err := r.awaitStaged(id); err != nil {
+				return compute.Tensor{}, err
+			}
+		}
 		r.pool.Touch(id)
 		r.hit++
+		booked = true
 		r.noteDemandServe(id)
-		// A HIT on a weight the prefetch staged is where overlap is actually observed: the transfer
-		// was issued a GEMM or more ago, and either landed underneath that work or did not. Skip the
-		// fence while prefetching — re-hinting an in-flight weight must not block the hint path.
-		if !r.prefetching {
-			r.awaitStaged(id)
-		}
 		return wt, nil
 	}
-	// A miss larger than the entire budget cannot be admitted under any victim policy.
-	// Refuse before building its host source or allocating/uploading device storage: a
-	// post-upload refusal briefly allocates the very weight the budget excludes. Keep
-	// this after the hit path, whose resident descriptor is immutable. Caller fallback
-	// is unchanged; this is not a bound on permanent residency or fitting-miss transients.
+	if p := r.pending[id]; p != nil {
+		return compute.Tensor{}, p.refused(compute.ErrOwnedTransferUnknown)
+	}
+	// Refuse before building the host source or uploading: a post-upload refusal would briefly
+	// allocate the very weight the budget excludes.
 	if weightBytes > r.pool.Budget() {
-		r.refused++
-		if r.shared != nil {
-			r.shared.noteRefusal()
-		}
 		return compute.Tensor{}, polymodel.ErrTooLarge
 	}
-	// Reuse the pool's authoritative snapshot check rather than duplicating its
-	// pinned/held feasibility rule. Shared callers hold the existing owner lock;
-	// private rings are single-owner, and builders/backends must not reenter or
-	// mutate this pool. This is no reservation: the final Admit still rechecks.
-	// Other errors keep their existing post-upload cleanup/fallback behavior.
+	// Reuse the pool's snapshot check rather than duplicating its pinned/held feasibility
+	// rule. This is no reservation: the final Admit still rechecks.
 	if r.pool.CheckAdmission(polymodel.Model{ID: id, WeightBytes: weightBytes, Pinned: pinned}) == polymodel.ErrPinnedNoRoom {
-		r.refused++
-		if r.shared != nil {
-			r.shared.noteRefusal()
-		}
 		return compute.Tensor{}, polymodel.ErrPinnedNoRoom
 	}
-	// Miss: build + upload the weight, then admit it under the budget. Admit is all-or-nothing: on
-	// error the pool is unchanged, so page the just-uploaded handle straight back out and defer.
-	// Under a non-default victim policy the ring makes room ITSELF first (evictForPolicy), so the
-	// Admit below fits and polymodel's own LRU choice never applies.
-	wt, fence := uploadStagedAsync(r.be, mk(), dtype, "paged-ring-weight", r.domainJoined())
-	r.evictForPolicy(weightBytes)
-	evicted, err := r.pool.Admit(polymodel.Model{ID: id, WeightBytes: weightBytes, Pinned: pinned})
-	if err != nil {
-		if fence != nil {
-			fence.Wait() // never Free storage a transfer is still writing into
+	// Build + upload, then admit. Admit is all-or-nothing: on error the pool is unchanged, so page
+	// the just-uploaded handle straight back out. Under a non-default victim policy the ring makes
+	// room itself first (evictForPolicy), so Admit fits and polymodel's LRU choice never applies.
+	source := mk()
+	wt, fence := uploadStagedAsync(r.be, source, dtype, "paged-ring-weight", r.domainJoined())
+	if err := r.retainStaged(id, source, wt, fence); err != nil {
+		return compute.Tensor{}, err
+	}
+	m := polymodel.Model{ID: id, WeightBytes: weightBytes, Pinned: pinned}
+	if err := r.settleAdmissionVictims(m); err != nil {
+		if cleanup := r.rollbackStaged(id, wt); cleanup != nil {
+			return compute.Tensor{}, cleanup
 		}
-		r.be.Free(wt)
-		r.refused++
-		if r.shared != nil {
-			// R7: on a shared ring this is the operator's signal that the budget cannot hold the
-			// CONCURRENTLY HELD experts of the attached agents — see SharedExpertRingConfig.BudgetBytes.
-			// The fallback is safe (permanent halW residency) but unbounded, so it must be counted.
-			r.shared.noteRefusal()
+		return compute.Tensor{}, err
+	}
+	r.evictForPolicy(weightBytes)
+	evicted, err := r.pool.Admit(m)
+	if err != nil {
+		if cleanup := r.rollbackStaged(id, wt); cleanup != nil {
+			return compute.Tensor{}, cleanup
 		}
 		return compute.Tensor{}, err
 	}
 	r.pageIn++
+	booked = true
 	r.pageInBytes += weightBytes
 	if r.shared != nil {
-		// The payer is booked even for a prefetch: the bytes were paid for by whoever hinted them,
-		// and a later agent served off that span is coalescing whether the span opened on a demand or
-		// on a guess.
+		// The payer is booked even for a prefetch: a later agent served off that span is
+		// coalescing whether the span opened on a demand or on a guess.
 		r.shared.notePageIn(id, weightBytes)
 	}
-	if fence != nil {
-		if r.pending == nil {
-			r.pending = map[polymodel.ModelID]compute.Fence{}
-		}
-		r.pending[id] = fence
+	// Admission owns this tensor even if retiring a previous allocation panics.
+	// Install it before callbacks so a scope drain cannot mistake it for rollback.
+	r.resident[id] = wt
+	if used := r.pool.Used(); used > r.peak {
+		r.peak = used
 	}
 	for _, vid := range evicted {
 		if vh, ok := r.resident[vid]; ok {
-			// A victim may itself still be in flight (prefetched, then evicted before it was ever
-			// demanded). Freeing storage under a live transfer is a use-after-free the synchronous
-			// path could not produce, so the fence is settled first and its cost is NOT booked as
-			// overlap — nothing computed against it.
+			// A victim may still be in flight; settling the fence first avoids freeing storage a
+			// transfer is writing into, and nothing computed against it, so no overlap is booked.
 			r.discardStaged(vid)
-			r.be.Free(vh) // page the LRU victim out; its device storage is released
+			r.be.Free(vh)
 			delete(r.resident, vid)
 			r.dropResidency(vid)
 			r.evict++
 		}
 	}
-	r.resident[id] = wt
-	r.noteDemandServe(id)
-	// A DEMAND miss must hand back a settled handle: every caller of stage() goes straight on to
-	// read or multiply it. Only the prefetch path may return with the transfer still in flight,
-	// which is the whole point of the extension — issue now, pay later or not at all.
+	// A demand miss must hand back a settled handle; only the prefetch path may return with the
+	// transfer still in flight.
 	if !r.prefetching {
-		r.awaitStaged(id)
+		if err := r.awaitStaged(id); err != nil {
+			return compute.Tensor{}, err
+		}
 	}
-	if used := r.pool.Used(); used > r.peak {
-		r.peak = used
-	}
+	r.noteDemandServe(id)
 	return wt, nil
 }
 
@@ -413,58 +333,28 @@ func (r *pagedRing) noteDemandServe(id polymodel.ModelID) {
 	}
 }
 
-// awaitStaged makes a staged weight visible to subsequent ops and books the overlap (#5627).
-//
-// The Done() poll happens BEFORE the Wait, and that ordering is the whole meter: a fence already
-// satisfied when its weight is demanded moved its bytes underneath other work, and one that is not
-// costs the caller the remainder on the critical path. Counting the two is clock-free, so the
-// number means the same thing on an idle box and a loaded one.
-//
-// It is idempotent and safe on a weight that was never staged asynchronously — a missing entry is
-// an already-visible weight, which is exactly the synchronous backend's every case.
-func (r *pagedRing) awaitStaged(id polymodel.ModelID) {
-	f, ok := r.pending[id]
-	if !ok {
-		return
-	}
-	delete(r.pending, id)
-	if f == nil {
-		return
-	}
-	if f.Done() {
-		r.asyncOverlapped++
-		return
-	}
-	r.asyncWaited++
-	f.Wait()
+// awaitStaged makes a staged weight visible to subsequent ops and books the overlap. The Done()
+// poll happens before the Wait, and that ordering is the whole meter: a fence already satisfied
+// when demanded moved its bytes underneath other work; counting the two is clock-free. Idempotent
+// and safe on a weight never staged asynchronously.
+func (r *pagedRing) awaitStaged(id polymodel.ModelID) error {
+	return r.settleStaged(id, true)
 }
 
-// discardStaged settles an in-flight transfer whose weight is about to be dropped, WITHOUT booking
-// it in the overlap meter. An evicted-before-demand prefetch tells us nothing about whether
-// transfers overlap compute — nothing ever computed against it — so counting it either way would
-// bias the fraction the meter exists to report.
+// discardStaged settles an in-flight transfer whose weight is about to be dropped, without
+// booking it in the overlap meter: nothing ever computed against it, so counting it either way
+// would bias the fraction the meter exists to report.
 func (r *pagedRing) discardStaged(id polymodel.ModelID) {
-	f, ok := r.pending[id]
-	if !ok {
-		return
-	}
-	delete(r.pending, id)
-	if f != nil {
-		f.Wait()
+	if err := r.settleStaged(id, false); err != nil {
+		panic(err)
 	}
 }
 
-// stageInFlight makes the named weight device-resident under the ring budget WITHOUT
-// settling its transfer, issuing the upload back to back with its siblings so the
-// host->device copies overlap the compute that follows (#13044). It is `stage` minus the
-// demand-path await: the upload is put on the wire here, and the caller settles it by
-// demanding the weight through the ordinary path (matMul -> stage -> awaitStaged), which
-// books the fence as overlapped when its bytes landed under intervening work.
-//
-// Semantics are otherwise exactly `stage`: on a hit the resident handle is reused and no
-// transfer is issued; the `prefetching` flag is set for the duration so the transfer is
-// booked as a hint rather than a demand, and earns no heat under the value-aware policy —
-// the demand itself is booked by the matMul that follows.
+// stageInFlight makes the named weight device-resident without settling its transfer, issuing the
+// upload back to back with its siblings so the host->device copies overlap the compute that
+// follows. It is stage minus the demand-path await: the caller settles the fence by demanding the
+// weight through the ordinary path. Otherwise the semantics are exactly stage's, with the
+// prefetching flag set for the duration so the transfer is booked as a hint, not a demand.
 func (r *pagedRing) stageInFlight(name string, mk func() compute.Tensor, dtype compute.Dtype, weightBytes int64, pinned bool) (compute.Tensor, bool) {
 	wasPrefetching := r.prefetching
 	r.prefetching = true
@@ -473,17 +363,14 @@ func (r *pagedRing) stageInFlight(name string, mk func() compute.Tensor, dtype c
 }
 
 // hold protects an already-staged weight from eviction for the span of a multi-weight computation,
-// and release ends that span. They exist because one MoE expert is THREE weights (gate/up/down) used
-// together: without a hold, staging `up` under a tight budget could evict `gate` and Free a handle
-// the caller is about to MatMul against — a use-after-free the unbounded halW memoizer could never
-// produce. Holds nest (a second hold on the same weight only increments), so overlapping spans are safe.
+// and release ends that span. One MoE expert is three weights (gate/up/down) used together: without
+// a hold, staging `up` under a tight budget could evict `gate` and Free a handle the caller is about
+// to MatMul against — a use-after-free the unbounded halW memoizer could never produce. Holds nest.
 //
-// The mechanism is polymodel's own documented recipe for changing a resident descriptor — Evict then
-// re-Admit with Pinned set — not a new policy: a held weight is exactly a pinned resident, so it
-// inherits the pool's proven pinned-never-evicted invariant. release restores ONLY pins hold itself
-// set (heldPins), so a durable pin from the warm-start pin-set survives a hold/release cycle. A hold
-// on a weight the ring does not hold (an unadmittable one that fell back to the caller's own path) is
-// a no-op, so callers need not branch on whether staging was served by the ring.
+// The mechanism is polymodel's Evict-then-re-Admit-with-Pinned recipe: a held weight is exactly a
+// pinned resident, inheriting the pool's pinned-never-evicted invariant. release restores only pins
+// hold itself set (heldPins), so a durable pin from the warm-start pin-set survives. A hold on a
+// weight the ring does not hold is a no-op.
 func (r *pagedRing) hold(name string) {
 	id := polymodel.ModelID(name)
 	if r.holds == nil {
@@ -505,8 +392,8 @@ func (r *pagedRing) hold(name string) {
 	r.heldPins[id] = true
 }
 
-// release ends one hold span (see hold). The last release of a weight hold() pinned clears that pin,
-// returning it to the LRU victim pool.
+// release ends one hold span; the last release of a weight hold() pinned clears that pin, returning
+// it to the LRU victim pool.
 func (r *pagedRing) release(name string) {
 	id := polymodel.ModelID(name)
 	n := r.holds[id]
@@ -529,10 +416,14 @@ func (r *pagedRing) release(name string) {
 }
 
 // repin rewrites a resident descriptor in place via polymodel's Evict-then-Admit recipe (the pool
-// documents the descriptor as immutable otherwise). Re-admitting bytes the pool just released cannot
-// exceed a budget they already fit, so the Admit cannot fail; if it ever did, the handle is paged out
-// so `resident` and `pool` stay in the exact lockstep the rest of the ring assumes.
+// documents the descriptor as immutable otherwise). If the Admit ever failed, the handle is paged
+// out so resident and pool stay in lockstep.
 func (r *pagedRing) repin(id polymodel.ModelID, m polymodel.Model) {
+	// Normal holds change only Pinned and must not prematurely settle prefetch.
+	// A different identity/size can fail after removal, so settle it first.
+	if old, ok := r.pool.Get(id); !ok || m.ID != id || m.WeightBytes != old.WeightBytes {
+		r.discardStaged(id)
+	}
 	r.pool.Evict(id)
 	if _, err := r.pool.Admit(m); err != nil {
 		if h, live := r.resident[id]; live {
@@ -546,12 +437,13 @@ func (r *pagedRing) repin(id polymodel.ModelID, m polymodel.Model) {
 	}
 }
 
-// freeAll pages every resident weight out and drops the pool accounting to zero — the teardown a ring
-// owner runs at close so no device handle outlives the session that staged it.
+// freeAll pages every resident weight out and drops the pool accounting to zero — the teardown a
+// ring owner runs at close so no device handle outlives the session that staged it.
 func (r *pagedRing) freeAll() {
 	if r == nil {
 		return
 	}
+	r.drainTransfers()
 	for id, t := range r.resident {
 		r.discardStaged(id) // never tear down storage a transfer is still writing into
 		r.be.Free(t)
@@ -563,32 +455,26 @@ func (r *pagedRing) freeAll() {
 	r.holds, r.heldPins = nil, nil
 }
 
-// matMul runs y = w·x for the named f32 weight [out,in] under the ring budget — the original ring
-// path, now a thin f32 specialization of matMulStaged. See matMulStaged for the hit/miss/evict
-// lifecycle and the nil-on-unadmittable contract.
+// matMul runs y = w·x for the named f32 weight under the ring budget — a thin f32 specialization
+// of matMulStaged.
 func (r *pagedRing) matMul(name string, shape []int, w []float32, x compute.Tensor, weightBytes int64, pinned bool) []float32 {
 	return r.matMulStaged(name, func() compute.Tensor {
 		return compute.NewF32(compute.Default(), append([]int(nil), shape...), w)
 	}, compute.F32, x, weightBytes, pinned)
 }
 
-// matMulQ8 is the Q8_0 twin of matMul: it stages qt as a RESIDENT Q8_0 weight under the ring budget
-// and runs the quantized GEMM the cpu-ref / cuda Q8 kernel serves — the path past the ring's former
-// f32-only scope (#3174 R1: a MoE expert-weight cache holds the QUANTIZED experts a memory-lean host
-// actually streams, ~1.125 B/weight, not their f32 expansion). qt is the same prequantized source
-// the Session weightHALQ8 stages; weightBytes is its resident Q8 footprint. Bit-equal to a resident
-// Q8 GEMM on a hit or a miss.
+// matMulQ8 is the Q8_0 twin of matMul: it stages qt as a resident Q8_0 weight under the ring
+// budget and runs the quantized GEMM, accounting the quantized footprint (~1.125 B/weight) rather
+// than an f32 expansion.
 func (r *pagedRing) matMulQ8(name string, qt *q8Tensor, x compute.Tensor, weightBytes int64, pinned bool) []float32 {
 	return r.matMulStaged(name, func() compute.Tensor {
 		return compute.NewQ8(compute.Default(), []int{qt.out, qt.in}, qt.q, qt.d, qBlk)
 	}, compute.Q8_0, x, weightBytes, pinned)
 }
 
-// matMulQ4K is the Q4_K twin of matMul: it stages qt (raw GGUF super-blocks) as a RESIDENT Q4_K
-// weight under the ring budget and runs the dequant-fused Q4_K GEMM (k_q4k_gemm on cuda, the Q4_K
-// MatMul on cpu-ref) — the ~0.56 B/weight residency that lets a 753B GLM-5.2's expert majority ride
-// a bounded device ring. qt is the same source the Session weightHALQ4K stages; weightBytes is its
-// resident Q4_K footprint. Bit-equal to a resident Q4_K GEMM on a hit or a miss.
+// matMulQ4K is the Q4_K twin of matMul: it stages qt (raw GGUF super-blocks) as a resident Q4_K
+// weight under the ring budget and runs the dequant-fused Q4_K GEMM — the ~0.56 B/weight residency
+// that lets a large MoE's expert majority ride a bounded device ring.
 func (r *pagedRing) matMulQ4K(name string, qt *q4kTensor, x compute.Tensor, weightBytes int64, pinned bool) []float32 {
 	return r.matMulStaged(name, func() compute.Tensor {
 		return compute.NewQ4K(compute.Default(), []int{qt.out, qt.in}, qt.raw)
@@ -608,6 +494,6 @@ func (r *pagedRing) residentCount() int { return len(r.resident) }
 func (r *pagedRing) used() int64   { return r.pool.Used() }
 func (r *pagedRing) budget() int64 { return r.pool.Budget() }
 
-// peakUsed is the high-water mark of used() over the ring's life — the number a boundedness witness
-// asserts against budget(), since used() alone cannot show what the footprint reached in between.
+// peakUsed is the high-water mark of used() over the ring's life — the number a boundedness
+// witness asserts against budget().
 func (r *pagedRing) peakUsed() int64 { return r.peak }

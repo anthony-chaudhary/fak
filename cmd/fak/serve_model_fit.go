@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
@@ -106,6 +108,59 @@ func validateServeNativeContextTokens(tokens int) error {
 	return nil
 }
 
+// serveCapabilityReport renders the compiled capability table (modelCapabilities,
+// owned by model.go) as a stable multi-line report in the TensorFold
+// cli_capabilities.zig:20 doc shape: a version/chip/backends header, then one
+// line per family -> weight formats, native flags, env. Rows are emitted in
+// table order (static, sorted by Family) so the report is deterministic for a
+// given build. version, chip and backends are injected so the caller controls
+// the header facts; the body always lists exactly what this binary carries.
+func serveCapabilityReport(version, chip string, backends []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "fak capabilities: version=%s chip=%s backends=%s\n",
+		version, chip, capabilityReportJoin(backends))
+	for _, c := range modelCapabilities {
+		fmt.Fprintf(&b, "  family=%s formats=%s flags=%s env=%s\n",
+			c.Family, capabilityReportJoin(c.Formats), capabilityReportJoin(c.Flags), capabilityReportJoin(c.Env))
+	}
+	return b.String()
+}
+
+// capabilityReportJoin renders a list comma-joined, or "-" when empty, so
+// every report column keeps a fixed closed shape.
+func capabilityReportJoin(items []string) string {
+	if len(items) == 0 {
+		return "-"
+	}
+	return strings.Join(items, ",")
+}
+
+var serveCapabilityReportOnce sync.Once
+
+// logServeCapabilityReport emits the compiled capability report ONCE per
+// process on the serve-fit path, beside validateServeNativeContextTokens: the
+// families/formats this binary admits — the SAME table the pre-transfer gate
+// (modelTypeGate) consults — so an operator sees the disclosure at the moment
+// the fit math starts. Device backends beyond the compile-time floor are
+// driver-probed at serve start and reported there, not here.
+func logServeCapabilityReport(w io.Writer) {
+	serveCapabilityReportOnce.Do(func() {
+		fmt.Fprint(w, serveCapabilityReport(runtime.Version(), runtime.GOOS+"/"+runtime.GOARCH, serveCompiledBackends())+"\n")
+	})
+}
+
+// serveCompiledBackends is the compile-time backend floor the report header
+// claims: the pure-CPU reference everywhere, plus the Metal API on darwin.
+// Keeping the header to the static floor is what makes the report
+// deterministic for a given build.
+func serveCompiledBackends() []string {
+	backends := []string{"cpu-ref"}
+	if runtime.GOOS == "darwin" {
+		backends = append(backends, "metal")
+	}
+	return backends
+}
+
 // resolveServeNativeContext is the header-only authority for the native model
 // window. weights and fit are the selected load arm's exact sizing inputs, so
 // auto mode returns the same token count later used to build the load plan.
@@ -124,6 +179,11 @@ func resolveServeNativeContextBudget(ws *ggufload.WeightSource, be compute.Backe
 	resolution := serveNativeContextResolution{RequestedTokens: requested, Source: "auto"}
 	if err := validateServeNativeContextTokens(requested); err != nil {
 		return resolution, nil, fit, err
+	}
+	if ws != nil {
+		// Disclose the compiled family/format table at the start of the real
+		// fit (once per process); the ws==nil directory-scan paths stay silent.
+		logServeCapabilityReport(os.Stderr)
 	}
 	if requested > 0 {
 		resolution.Source = "explicit"
@@ -667,7 +727,7 @@ func serveNativeContextSizingInputs(ws *ggufload.WeightSource, be compute.Backen
 		if ok, err := serveArtifactCPUOffloadExperts(ws); ok && err == nil {
 			devFit := serveDeviceFitBudget(be)
 			// fak#13282: route the sizing arm through the SAME streamed-expert measurement the load
-			// arm takes (serveStreamedCPUOffloadPathDecision -> serveStreamedCPUOffloadPlanForAperture),
+			// arm takes (serveStreamedCPUOffloadPathDecision -> serveStreamedCPUOffloadCorePlan),
 			// so the auto-sizer's plan total and the loader's resident working set cannot disagree.
 			// Before this the sizing arm always called the bounded-DENSE estimator
 			// (EstimateCPUOffloadExpertsBoundedDenseMemoryPlan -> streamResident=-1), which charges the
@@ -855,17 +915,24 @@ func serveCPUOffloadBoundedDenseOptions(be compute.Backend, fit serveFitBudget) 
 }
 
 // serveCPUOffloadSizingStreamedPlan is the context-sizing arm's streamed-expert measurement,
-// shared with the load arm (serveStreamedCPUOffloadPathDecision -> serveStreamedCPUOffloadPlanForAperture)
+// shared with the load arm (serveStreamedCPUOffloadPathDecision -> serveStreamedCPUOffloadCorePlan)
 // so the auto-sizer's plan total and the loader's resident working set cannot disagree (fak#13282).
 //
 // It answers the ONE question the sizing arm needs: on this host budget, will the loader keep the
 // BOUNDED RESIDENT expert set (streamed=true) or the full routed charge (streamed=false)? On the
 // streamed arm the returned plan already folds the bounded resident expert set AND the bounded
 // dense working set (EstimateCPUOffloadExpertsStreamedBoundedDenseMemoryPlan via
-// serveStreamedCPUOffloadPlanForAperture), so its grand total is bounded against the one physical
+// serveStreamedCPUOffloadCorePlan), so its grand total is bounded against the one physical
 // pool. Before this the sizing arm always took the bounded-dense-only estimator
 // (EstimateCPUOffloadExpertsBoundedDenseMemoryPlan, streamResident=-1) and charged the FULL routed
 // set even when the loader would bound it -- the witnessed strix3 plan-total refusal.
+//
+// The returned plan is WEIGHTS-ONLY: it carries no context-sized rows. serveNativeContextSizingInputs'
+// contract is a weights-only plan, and the resolver sizes the context from these weights against
+// the pool the KV store lands in -- a plan that already carried context rows sized against ANOTHER
+// pool made that derivation subtract the stale KV from the device budget and clamp an explicit
+// request to the 512-token floor (the DeepSeek-V4.1 Flash cpu-offload-experts repro; fak-private
+// ticket aegis-27b-model-capacity).
 //
 // hostFit is taken as a parameter (the caller derives it with serveStreamedHostFit over the same
 // measured budget) so the decision is unit-testable with an injected budget: a nil backend takes
@@ -876,11 +943,11 @@ func serveCPUOffloadSizingStreamedPlan(ws *ggufload.WeightSource, be compute.Bac
 	if ws == nil {
 		return nil, false
 	}
-	plan, streamed, err := serveStreamedCPUOffloadPlanForAperture(ws, be, max(ranks, 1), 0, hostFit, ggufload.BackendSharesHostRAM(be), serveSplitAperture(be))
-	if err != nil || !streamed {
+	_, streamed, selected, err := serveStreamedCPUOffloadCorePlan(ws, be, max(ranks, 1), 0, hostFit, ggufload.BackendSharesHostRAM(be), serveSplitAperture(be))
+	if err != nil || !selected {
 		return nil, false
 	}
-	return plan, true
+	return streamed, true
 }
 
 // serveCPUOffloadSizingDenseBound folds the COMBINED streamed-expert remainder into the
@@ -913,7 +980,9 @@ func serveCPUOffloadSizingDenseBound(ws *ggufload.WeightSource, be compute.Backe
 	}
 	sharedPool := ggufload.BackendSharesHostRAM(be)
 	splitAperture := serveSplitAperture(be)
-	plan, streamed, err := serveStreamedCPUOffloadPlanForAperture(ws, be, 1, 0, hostFit, sharedPool, splitAperture)
+	// This call only reads the plan's DeviceTotal for the expert bound, so the context rows are
+	// sized against hostFit itself -- the historical behaviour, preserved byte-for-byte.
+	plan, streamed, err := serveStreamedCPUOffloadPlanForAperture(ws, be, 1, 0, hostFit, hostFit, sharedPool, splitAperture)
 	if err != nil || !streamed {
 		return declared
 	}

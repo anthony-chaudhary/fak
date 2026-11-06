@@ -56,6 +56,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -482,11 +483,28 @@ func (r *Resolver) resolveSymptomExec(ctx context.Context, ref string, tests []s
 	return abi.WitnessConfirmed, "changed tests failed at parent and passed at candidate"
 }
 
+// vulkanSymptomCgoDisabled reports whether the selected Go toolchain's effective
+// CGO setting is disabled, queried once via a bounded `go env CGO_ENABLED`
+// (#13605 leaf K / #13611: an unset ambient variable is not the toolchain's
+// effective setting; symptom_proof_cache already keys proofs on these same
+// toolchain facts). A failed query reads as enabled, preserving the historical
+// unset-env default: preparation proceeds and the cgo build itself fails loudly
+// if cgo is truly unavailable.
+func vulkanSymptomCgoDisabled(ctx context.Context) bool {
+	qctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	out, code, err := commandRunner(qctx, "", "go", "env", "CGO_ENABLED")
+	if err != nil || code != 0 {
+		return false
+	}
+	return strings.TrimSpace(out) == "0"
+}
+
 func prepareVulkanSymptomScratch(ctx context.Context, repoRoot string, pkgs, tags []string, required bool) (map[string]string, bool, error) {
 	if runtime.GOOS != "windows" && runtime.GOOS != "linux" {
 		return nil, false, nil
 	}
-	if strings.TrimSpace(os.Getenv("CGO_ENABLED")) == "0" {
+	if vulkanSymptomCgoDisabled(ctx) {
 		return nil, false, nil
 	}
 	vulkan := false

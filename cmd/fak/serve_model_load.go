@@ -173,6 +173,10 @@ type serveBackendSelection struct {
 	backend  compute.Backend
 	source   string
 	explicit bool
+	// cudaRefusal names why the Linux/Windows auto branch probed CUDA and fell
+	// through instead of selecting it (nil when CUDA was selected or never
+	// probed). Typed, never prose: entry points and tests read .Reason.
+	cudaRefusal *cudaAutoRefusalError
 }
 
 const (
@@ -199,13 +203,73 @@ func (e *haloGPURequiredError) Error() string {
 	return fmt.Sprintf("fak serve: GFX1151 requires device-only model execution (%s): %s", e.Reason, e.Detail)
 }
 
+// serveCUDASkipReason is the closed vocabulary naming why the Linux/Windows auto
+// branch probed CUDA and did not select it.
+type serveCUDASkipReason string
+
+const (
+	// cudaSkipNotRegistered: the compute HAL has no "cuda" backend — this binary
+	// was built without the cuda tag or its device failed to initialize.
+	cudaSkipNotRegistered serveCUDASkipReason = "cuda-not-registered"
+	// cudaSkipArchUncovered: the registered CUDA backend's detected device arch is
+	// UNCOVERED by this build's cubin set and PTX floor (compute.ClassifyCUDAArch),
+	// so kernels would JIT-or-die instead of running — the fail-closed answer.
+	cudaSkipArchUncovered serveCUDASkipReason = "cuda-arch-uncovered"
+	// cudaSkipProbeError: the arch-coverage probe itself failed — the backend
+	// emits no typed device receipt, so there is no detected arch to classify.
+	cudaSkipProbeError serveCUDASkipReason = "cuda-probe-error"
+)
+
+// cudaAutoRefusalError is the typed refusal recorded when the Linux/Windows auto
+// branch probes CUDA and falls through instead of selecting it. Reason is closed
+// vocabulary so entry points and tests do not parse prose; Cause preserves the
+// underlying lookup or probe failure (nil only for the clean arch-uncovered
+// classification). The refusal never aborts
+// serve — auto falls through to Vulkan, then the CPU reference — it names why
+// CUDA was skipped so startup surfaces can stamp an honest line.
+type cudaAutoRefusalError struct {
+	Reason serveCUDASkipReason
+	Cause  error
+}
+
+func (e *cudaAutoRefusalError) Error() string {
+	if e.Cause != nil {
+		return fmt.Sprintf("fak serve: auto backend skipped cuda (%s): %v", e.Reason, e.Cause)
+	}
+	return fmt.Sprintf("fak serve: auto backend skipped cuda (%s)", e.Reason)
+}
+
+func (e *cudaAutoRefusalError) Unwrap() error { return e.Cause }
+
+// serveCUDAProbe classifies how this build reaches the detected arch of a
+// registered CUDA backend's device. The production probe reads the typed device
+// receipt the backend captured at init (compute.CUDADeviceReceiptOf); tests
+// inject coverage or errors directly.
+type serveCUDAProbe func(compute.Backend) (compute.CUDACoverage, error)
+
+// probeServeCUDAArchCoverage is the production serveCUDAProbe: it reports the
+// cuda_arch_coverage classification the CUDA backend computed for the detected
+// device arch at init. A backend that emits no typed device receipt has no
+// detectable arch, so the probe fails closed and auto falls through.
+func probeServeCUDAArchCoverage(be compute.Backend) (compute.CUDACoverage, error) {
+	receipt, ok := compute.CUDADeviceReceiptOf(be)
+	if !ok {
+		return compute.CUDAUncovered, fmt.Errorf("backend %q emits no typed CUDA device receipt", be.Name())
+	}
+	return receipt.Coverage, nil
+}
+
 // resolveServeBackendSelection applies the native backend policy without touching
-// process globals, so callers can prove it with an injected registry and GOOS.
-// An explicit --backend (including "auto") wins FAK_BACKEND. Linux and Windows
-// automatic selection probes only Vulkan: registration already proves that the
-// tagged backend initialized a usable device. Darwin leaves automatic execution to
-// the existing metalgemm seam. The documented "cpu" name is the portable opt-out.
-func resolveServeBackendSelection(requested, envValue, goos string, lookup serveBackendLookup) (serveBackendSelection, error) {
+// process globals, so callers can prove it with an injected registry, GOOS, and
+// CUDA arch probe. An explicit --backend (including "auto") wins FAK_BACKEND.
+// Linux and Windows automatic selection probes CUDA first — selected when the
+// backend is registered and cuda_arch_coverage passes for the detected device
+// arch — then Vulkan: registration already proves that the tagged backend
+// initialized a usable device. Every CUDA probe miss falls through to Vulkan and
+// then the CPU reference with a typed refusal reason (cudaAutoRefusalError).
+// Darwin leaves automatic execution to the existing metalgemm seam. The
+// documented "cpu" name is the portable opt-out.
+func resolveServeBackendSelection(requested, envValue, goos string, lookup serveBackendLookup, probe serveCUDAProbe) (serveBackendSelection, error) {
 	requested = strings.ToLower(strings.TrimSpace(requested))
 	envValue = strings.ToLower(strings.TrimSpace(envValue))
 	goos = strings.ToLower(strings.TrimSpace(goos))
@@ -227,10 +291,32 @@ func resolveServeBackendSelection(requested, envValue, goos string, lookup serve
 		case "darwin":
 			return serveBackendSelection{name: "metal", source: "auto", explicit: explicit}, nil
 		case "linux", "windows":
-			be, err := lookup("vulkan")
-			if err == nil && be != nil {
-				return serveBackendSelection{name: "vulkan", backend: be, source: "auto", explicit: explicit}, nil
+			sel := serveBackendSelection{source: "auto", explicit: explicit}
+			cuda, err := lookup("cuda")
+			switch {
+			case err != nil || cuda == nil:
+				if err == nil {
+					err = fmt.Errorf("backend lookup returned no backend")
+				}
+				sel.cudaRefusal = &cudaAutoRefusalError{Reason: cudaSkipNotRegistered, Cause: err}
+			default:
+				coverage, probeErr := probe(cuda)
+				switch {
+				case probeErr != nil:
+					sel.cudaRefusal = &cudaAutoRefusalError{Reason: cudaSkipProbeError, Cause: probeErr}
+				case coverage == compute.CUDAUncovered:
+					sel.cudaRefusal = &cudaAutoRefusalError{Reason: cudaSkipArchUncovered}
+				default:
+					sel.name, sel.backend = "cuda", cuda
+					return sel, nil
+				}
 			}
+			if be, err := lookup("vulkan"); err == nil && be != nil {
+				sel.name, sel.backend = "vulkan", be
+				return sel, nil
+			}
+			sel.name, sel.source = serveBackendCPU, "default"
+			return sel, nil
 		}
 		return serveBackendSelection{name: serveBackendCPU, source: "default", explicit: explicit}, nil
 	}
@@ -284,7 +370,7 @@ func resolveServeChatBackendForHost(backendName, envValue, goos string, lookup s
 }
 
 func resolveServeChatBackendForHostPolicy(backendName, envValue, goos string, lookup serveBackendLookup, halo bool, policy *serveExecutionPolicy) (compute.Backend, error) {
-	selection, err := resolveServeBackendSelection(backendName, envValue, goos, lookup)
+	selection, err := resolveServeBackendSelection(backendName, envValue, goos, lookup, probeServeCUDAArchCoverage)
 	if err != nil {
 		return nil, err
 	}
@@ -356,7 +442,7 @@ func writeBackendUnavailableBail(w io.Writer, verb, backendName string) {
 // was missed (metalgemm.Compiled false → not compiled; else no device), for startup stamp surfaces.
 func resolveServeMetal(flag, env bool, backendName string) (bool, error) {
 	requested := flag || env
-	selection, selectionErr := resolveServeBackendSelection(backendName, os.Getenv("FAK_BACKEND"), runtime.GOOS, lookupRegisteredServeBackend)
+	selection, selectionErr := resolveServeBackendSelection(backendName, os.Getenv("FAK_BACKEND"), runtime.GOOS, lookupRegisteredServeBackend, probeServeCUDAArchCoverage)
 	// The main compute resolver reports explicit --backend failures first. Propagate
 	// environment failures here as well so direct callers cannot turn a bad
 	// FAK_BACKEND value into automatic Metal by accident.

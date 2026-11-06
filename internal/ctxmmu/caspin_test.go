@@ -4,24 +4,32 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
-	"github.com/anthony-chaudhary/fak/internal/blob"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 )
 
+// Keep churn distinct across repeated invocations in the same test binary.
+var casPinChurnSequence atomic.Uint64
+
 // TestQuarantinePageInSurvivesCASEviction proves the held-quarantine CAS pin
-// end-to-end: a sealed result paged out to the BOUNDED global CAS still pages back
+// end-to-end: a sealed result paged out to the BOUNDED registered CAS still pages back
 // in (after a witness Clear) even after CAS churn that evicts unpinned blobs. The
 // gated page-in is not broken by the byte bound — the soundness property the pin
 // exists to protect.
 func TestQuarantinePageInSurvivesCASEviction(t *testing.T) {
 	ctx := context.Background()
-	old := blob.Default.MaxBytes()
-	blob.Default.SetMaxBytes(8192) // tight enough that churn forces eviction
-	defer blob.Default.SetMaxBytes(old)
+	if abi.ActiveResolver() != testCAS {
+		t.Fatal("CAS pin witness must use the suite's registered resolver")
+	}
+	old := testCAS.MaxBytes()
+	budget := testCAS.Bytes() + 8192 // allow prior held pins plus this test's payload
+	testCAS.SetMaxBytes(budget)
+	defer testCAS.SetMaxBytes(old)
 
 	m := ctxmmu.New()
 
@@ -36,19 +44,30 @@ func TestQuarantinePageInSurvivesCASEviction(t *testing.T) {
 	if id == "" {
 		t.Fatalf("no quarantine_id stamped")
 	}
+	handle := m.Held()[id]
+	if handle.Digest == "" {
+		t.Fatal("quarantine handle carries no CAS digest")
+	}
 
 	// Control: an UNPINNED CAS blob put now should be evicted by the churn below.
-	ctrl, err := blob.Default.Put(ctx, bytes.Repeat([]byte{0xAB}, 1000))
+	ctrl, err := testCAS.Put(ctx, bytes.Repeat([]byte{0xAB}, 1000))
 	if err != nil {
 		t.Fatalf("put control: %v", err)
 	}
-	for i := 0; i < 64; i++ { // distinct >256B blobs drive the bound past capacity
-		if _, err := blob.Default.Put(ctx, bytes.Repeat([]byte{byte(i) + 1}, 1024)); err != nil {
+	churnID := casPinChurnSequence.Add(1)
+	for i, n := 0, int(budget/1024)+8; i < n; i++ {
+		body := bytes.Repeat([]byte{0xAB}, 1024)
+		copy(body, fmt.Sprintf("caspin-quarantine-%d-%d", churnID, i))
+		if _, err := testCAS.Put(ctx, body); err != nil {
 			t.Fatalf("churn put: %v", err)
 		}
 	}
-	if _, err := blob.Default.Resolve(ctx, ctrl); err == nil {
+	if _, err := testCAS.Resolve(ctx, ctrl); err == nil {
 		t.Fatalf("control (unpinned) blob should have been evicted by the bound")
+	}
+	// Verify the actual CAS bytes, so staging fallback cannot mask a lost pin.
+	if got, err := testCAS.Resolve(ctx, handle); err != nil || !bytes.Equal(got, secret) {
+		t.Fatalf("held quarantine CAS bytes = (%q, %v), want original secret", got, err)
 	}
 
 	// The quarantine bytes are PINNED, so the gated page-in still resolves them.
@@ -64,9 +83,13 @@ func TestQuarantinePageInSurvivesCASEviction(t *testing.T) {
 
 func TestPagedResultSurvivesCASEviction(t *testing.T) {
 	ctx := context.Background()
-	old := blob.Default.MaxBytes()
-	blob.Default.SetMaxBytes(8192) // tight enough that churn forces eviction
-	defer blob.Default.SetMaxBytes(old)
+	if abi.ActiveResolver() != testCAS {
+		t.Fatal("CAS pin witness must use the suite's registered resolver")
+	}
+	old := testCAS.MaxBytes()
+	budget := testCAS.Bytes() + 8192 // allow prior held pins plus this test's payload
+	testCAS.SetMaxBytes(budget)
+	defer testCAS.SetMaxBytes(old)
 
 	m := ctxmmu.New()
 
@@ -103,19 +126,29 @@ func TestPagedResultSurvivesCASEviction(t *testing.T) {
 		t.Fatalf("stub size = %v, want %d", stub["size"], len(originalBytes))
 	}
 
-	// Put unpinned control blob into blob.Default, churn 64 KiB to evict unpinned blobs.
-	ctrl, err := blob.Default.Put(ctx, bytes.Repeat([]byte{0xCD}, 1000))
+	// Churn the registered CAS past its whole budget with distinct bodies.
+	ctrl, err := testCAS.Put(ctx, bytes.Repeat([]byte{0xCD}, 1000))
 	if err != nil {
 		t.Fatalf("put control: %v", err)
 	}
-	for i := 0; i < 64; i++ {
-		if _, err := blob.Default.Put(ctx, bytes.Repeat([]byte{byte(i) + 1}, 1024)); err != nil {
+	churnID := casPinChurnSequence.Add(1)
+	for i, n := 0, int(budget/1024)+8; i < n; i++ {
+		body := bytes.Repeat([]byte{0xCD}, 1024)
+		copy(body, fmt.Sprintf("caspin-paged-%d-%d", churnID, i))
+		if _, err := testCAS.Put(ctx, body); err != nil {
 			t.Fatalf("churn put: %v", err)
 		}
 	}
 	// Assert unpinned control blob is evicted.
-	if _, err := blob.Default.Resolve(ctx, ctrl); err == nil {
+	if _, err := testCAS.Resolve(ctx, ctrl); err == nil {
 		t.Fatalf("control (unpinned) blob should have been evicted by the bound")
+	}
+	handle := m.Held()[ref]
+	if handle.Digest == "" {
+		t.Fatal("paged result carries no held CAS digest")
+	}
+	if got, err := testCAS.Resolve(ctx, handle); err != nil || !bytes.Equal(got, originalBytes) {
+		t.Fatalf("held paged CAS bytes = (%q, %v), want original payload", got, err)
 	}
 
 	// Assert ctxmmu.ResolvePaged(ctx, ref) and m.ResolvePagedRef(ctx, ref) successfully resolve the exact original bytes.

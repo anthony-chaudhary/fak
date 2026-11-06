@@ -40,7 +40,7 @@ type ToolCheck struct {
 type Requirements struct {
 	Goos       string // runtime.GOOS of the running gate binary ("darwin", "windows", ...)
 	Goarch     string
-	CgoEnabled string // CGO_ENABLED from the environment; "" means enabled (Go default)
+	CgoEnabled string // effective CGO setting of the selected Go toolchain (`go env CGO_ENABLED`); "" means enabled (Go default)
 	GoTool     ToolCheck
 	XcodeCLT   ToolCheck
 	Clang      ToolCheck
@@ -68,8 +68,9 @@ func (req Requirements) withCanonicalArch() Requirements {
 	return req
 }
 
-// cgoDisabled reports whether CGO_ENABLED is explicitly set to 0. Anything else —
-// unset, "1", "2" — means cgo is enabled (the Go default).
+// cgoDisabled reports whether the toolchain's effective CGO setting is disabled
+// ("0"). Anything else — "" (query failed or no explicit setting), "1", "2" —
+// means cgo is enabled (the Go default).
 func cgoDisabled(cgoEnabled string) bool {
 	return strings.TrimSpace(cgoEnabled) == "0"
 }
@@ -215,14 +216,17 @@ func ArePrereqsSatisfied(req Requirements) bool {
 	return Adjudicate(req) != 1
 }
 
-// hostRequirements performs every host-specific lookup (env, toolchain) and bundles
-// them into the Requirements the pure Adjudicate decides over. It exists so Run's
-// prerequisite-population wiring is directly testable on the host it runs on.
+// hostRequirements performs every host-specific lookup (toolchain query, tools)
+// and bundles them into the Requirements the pure Adjudicate decides over. It
+// exists so Run's prerequisite-population wiring is directly testable on the
+// host it runs on. The cgo fact comes from the selected toolchain itself
+// (#13605 leaf K / #13611): an unset ambient variable is not the toolchain's
+// effective CGO setting, so the process environment is never read here.
 func hostRequirements(goarch string) Requirements {
 	return Requirements{
 		Goos:       runtime.GOOS,
 		Goarch:     goarch,
-		CgoEnabled: os.Getenv("CGO_ENABLED"),
+		CgoEnabled: cgoEnabledFromToolchain(),
 		GoTool:     checkGoTool(),
 		XcodeCLT:   checkXcodeCLT(),
 		Clang:      checkClang(),

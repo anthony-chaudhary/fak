@@ -56,7 +56,9 @@ func (d *Dispatcher) HandleSnapshot(msg protocol.Message) protocol.Message {
 		Dir string `json:"dir"`
 	}
 	if len(msg.Body) > 0 {
-		_ = json.Unmarshal(msg.Body, &req)
+		if err := json.Unmarshal(msg.Body, &req); err != nil {
+			return ErrResponse(msg.Header.RequestID, "invalid snapshot JSON: "+err.Error())
+		}
 	}
 	dir := req.Dir
 	if dir == "" {
@@ -134,7 +136,9 @@ func (d *Dispatcher) HandleRestore(msg protocol.Message) protocol.Message {
 		Dir string `json:"dir"`
 	}
 	if len(msg.Body) > 0 {
-		_ = json.Unmarshal(msg.Body, &req)
+		if err := json.Unmarshal(msg.Body, &req); err != nil {
+			return ErrResponse(msg.Header.RequestID, "invalid restore JSON: "+err.Error())
+		}
 	}
 	dir := req.Dir
 	if dir == "" {
@@ -146,18 +150,21 @@ func (d *Dispatcher) HandleRestore(msg protocol.Message) protocol.Message {
 
 	start := time.Now()
 
-	// Flush all shards first
-	for i := 0; i < d.Manager.NumShards(); i++ {
-		d.Manager.Shard(i).Submit(shard.ShardOp{
-			Type:   shard.OpFlush,
-			Result: make(chan shard.OpResult, 1),
-		})
-	}
-
-	// Load and restore
+	// Load successfully before discarding any live shard data.
 	manifest, entries, err := snapshot.Load(dir, d.Manager.NumShards())
 	if err != nil {
 		return ErrResponse(msg.Header.RequestID, fmt.Sprintf("restore from %s: %v", dir, err))
+	}
+
+	// Flush all shards before installing the loaded snapshot.
+	for i := 0; i < d.Manager.NumShards(); i++ {
+		result := d.Manager.Shard(i).Submit(shard.ShardOp{
+			Type:   shard.OpFlush,
+			Result: make(chan shard.OpResult, 1),
+		})
+		if result.Err != nil {
+			return ErrResponse(msg.Header.RequestID, fmt.Sprintf("restore flush shard %d: %v", i, result.Err))
+		}
 	}
 
 	// Group entries by current shard layout

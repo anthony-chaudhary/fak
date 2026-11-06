@@ -77,6 +77,15 @@ func (s *NativeScheduler) AdmitImported(ctx context.Context, c *abi.ToolCall, se
 	if promptLen == 0 {
 		promptLen = seq.Session.Cache.Len()
 	}
+	// The imported lane takes ownership of this session; apply the scheduler's
+	// session decorator exactly as newLaneSession does for fresh lanes, so a
+	// serve role's device backend binds symmetrically across P/D roles.
+	s.mu.Lock()
+	decorator := s.sessionDecorator
+	s.mu.Unlock()
+	if decorator != nil {
+		decorator(seq.Session)
+	}
 	cctx, cancel := context.WithCancel(ctx)
 	ln := &schedLane{
 		sched:     s,
@@ -89,7 +98,7 @@ func (s *NativeScheduler) AdmitImported(ctx context.Context, c *abi.ToolCall, se
 		putCtx:    ctx,
 		tok:       seq.Tokenizer,
 		q4k:       seq.Q4K,
-		tokens:    make(chan abi.EngineToken, 1),
+		tokens:    newNativeRequestOutbox(),
 		done:      make(chan struct{}),
 	}
 
@@ -262,6 +271,10 @@ type NativePDCluster struct {
 	localityHits      int64
 	coldRoutes        int64
 	lastDecodeName    string
+	// sessionHook decorates every session the cluster mints (prefill half and
+	// decode lane sessions) before use; nil keeps the historical shape. Fixed
+	// by the constructor options, read-only afterwards.
+	sessionHook func(*model.Session)
 }
 
 func NewNativePDCluster(m *model.Model, decodeWorkers int) *NativePDCluster {
@@ -307,6 +320,16 @@ func NewNativePDClusterWithResidency(m *model.Model, decodeWorkers int, residenc
 			opt(c)
 		}
 	}
+	// The session decorator is fixed once options are applied: every decode
+	// lane session (fresh and restored) takes the same shape the prefill half
+	// uses, so a serve role's device backend binds symmetrically across roles.
+	if c.sessionHook != nil {
+		for _, w := range c.decode {
+			if w.sched != nil {
+				w.sched.SetSessionDecorator(c.sessionHook)
+			}
+		}
+	}
 	return c
 }
 
@@ -323,6 +346,16 @@ func (c *NativePDCluster) Close() {
 }
 
 func (c *NativePDCluster) PrefillWorker() *NativePDWorker { return c.prefill }
+
+// VocabSize reports the loaded model's vocabulary. Two roles pairing over the
+// P/D wire must agree on it; operators read it from both startup lines to
+// catch a mispaired checkpoint before the first handoff.
+func (c *NativePDCluster) VocabSize() int {
+	if c == nil || c.m == nil {
+		return 0
+	}
+	return c.m.Cfg.VocabSize
+}
 
 func (c *NativePDCluster) DecodeWorkers() []*NativePDWorker {
 	out := make([]*NativePDWorker, len(c.decode))
@@ -357,7 +390,10 @@ func (c *NativePDCluster) Admit(ctx context.Context, req NativePDRequest) (Nativ
 	prefixSegments := c.prefixSegments(req, prefixKey)
 	decode, _, hit := c.routeDecode(prefixSegments)
 
-	prefillSess := c.m.NewSession()
+	// The prefill-half session takes the cluster's optional decorator exactly
+	// like the decode lane sessions do; without one this is byte-for-byte the
+	// historical m.NewSession().
+	prefillSess := c.newPrefillSession()
 	logits := prefillSess.Prefill(prompt)
 	srcPool := model.NewPagedKVPoolWithRaw(c.m.Cfg, nativePDDefaultBlockTokens)
 	src, err := model.KVCacheToPaged(srcPool, prefillSess.Cache)

@@ -316,6 +316,7 @@ func drainLoser(result <-chan hedgeResult, timeout time.Duration, policy *HedgeP
 }
 
 func runHedgeAttempt(ctx context.Context, index int, route reservedPlannerReplica, ch chan<- hedgeResult, m []agent.Message, t []agent.ToolDef, o ...agent.SampleOpt) {
+	ctx = route.withObservedPrefill(ctx)
 	c, e := route.replica.Planner.Complete(ctx, m, t, o...)
 	route.finish(ctx, c, e, false)
 	ch <- hedgeResult{index: index, completion: c, err: e, finished: time.Now()}

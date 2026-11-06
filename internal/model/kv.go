@@ -42,7 +42,17 @@ type Session struct {
 	// Q4KGateUpOutputSlab explicitly enables the experimental session-owned Metal
 	// gate/up output slab. The default remains off until the measured KEEP gate lands.
 	Q4KGateUpOutputSlab bool
-	halKV               compute.KVStore
+	// PersistentDecodeDeviceKV explicitly enables the persistent whole-token decode
+	// device KV owner on this session's Metal Qwen3.5 sequence backend: when the panel
+	// walk ends, the device-resident KV triple is retained and each decode token
+	// attends on the device instead of re-uploading the host prefix. Default (false)
+	// keeps the historical detach-after-walk behavior byte-for-byte. It is the
+	// config-surface replacement for the retired FAK_QWEN35_PERSISTENT_DECODE_DKV
+	// ambient read (whose only opt-in token was "1"; #13605 leaf A-cfg-int4): the
+	// value is resolved once at session construction and every decode/prefill check
+	// consults this field instead of process environment.
+	PersistentDecodeDeviceKV bool
+	halKV                    compute.KVStore
 	// halKVPrecision is the device tier halKV was created at; f32 is the zero value.
 	halKVPrecision compute.KVPrecision
 	halLineage     tokenLineage
@@ -597,6 +607,18 @@ func (s *Session) requireV41NativeUnsupported(path string) {
 	}
 }
 
+// requireGLM5NextSessionUnsupported fails closed at the KV/HAL batched session
+// entrypoints for a glm5_next config. The family's executable path is the
+// stepwise engine session in glm5next_forward.go (Model.Forward /
+// GLM5NextSession); the batched KV/HAL substrate does not own the KDA/DSA/mHC
+// state yet, and silently running the generic GQA loop would emit wrong logits
+// instead of an error.
+func (s *Session) requireGLM5NextSessionUnsupported(path string) {
+	if s.M != nil && s.M.Cfg.GLM5Next {
+		panic(fmt.Errorf("%s: glm5_next native execution runs through the stepwise session (glm5next_forward.go GLM5NextSession); the batched KV/HAL path is not wired for the KDA/DSA/mHC state yet", path))
+	}
+}
+
 func (s *Session) tappedLogitsAt(pos int, logits []float32) []float32 {
 	if tap := s.activeTap(); tap != nil && tap.wants(pos) {
 		tap.dumpLogits(pos, logits)
@@ -1067,6 +1089,7 @@ func ropeRowQKInto(q, k, cos, sin []float32, hd, nH, nKV int) {
 // distribution over the first generated token). Each token is placed at the next
 // absolute position (Cache.Len()), so a prior Evict() compaction shifts these down.
 func (s *Session) Prefill(ids []int) []float32 {
+	s.requireGLM5NextSessionUnsupported("Session.Prefill")
 	scope := s.beginBackendExecution()
 	complete := false
 	defer scope.finishCompleted(&complete)
@@ -1083,6 +1106,7 @@ func (s *Session) PrefillContext(ctx context.Context, ids []int) ([]float32, err
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	s.requireGLM5NextSessionUnsupported("Session.PrefillContext")
 	scope := s.beginBackendExecution()
 	complete := false
 	// A returned cancellation is primary over a secondary cleanup panic. Keep
@@ -1245,6 +1269,7 @@ func (s *Session) prefillOwnedContext(ctx context.Context, ids []int) []float32 
 // distribution. It is for teacher-forced context growth where the caller already knows the
 // next input token and only needs KV state advanced.
 func (s *Session) PrefillNoLogits(ids []int) {
+	s.requireGLM5NextSessionUnsupported("Session.PrefillNoLogits")
 	scope := s.beginBackendExecution()
 	complete := false
 	defer scope.finishCompleted(&complete)
@@ -1258,6 +1283,7 @@ func (s *Session) PrefillNoLogitsContext(ctx context.Context, ids []int) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	s.requireGLM5NextSessionUnsupported("Session.PrefillNoLogitsContext")
 	scope := s.beginBackendExecution()
 	complete := false
 	defer scope.finishCompleted(&complete)
@@ -1425,6 +1451,7 @@ func (s *Session) prefillTokenLoop(ids []int) []float32 {
 // sessions reuse their logits buffer; consume or copy the returned slice before the next
 // quantized Prefill/Step call on the same session.
 func (s *Session) Step(id int) []float32 {
+	s.requireGLM5NextSessionUnsupported("Session.Step")
 	scope := s.beginBackendExecution()
 	complete := false
 	defer scope.finishCompleted(&complete)
@@ -1438,6 +1465,7 @@ func (s *Session) Step(id int) []float32 {
 // token id (logits == nil). Every other path returns Step's host logits unchanged
 // (next == 0) for the caller to select from.
 func (s *Session) StepGreedy(id int) (next int, logits []float32) {
+	s.requireGLM5NextSessionUnsupported("Session.StepGreedy")
 	scope := s.beginBackendExecution()
 	complete := false
 	defer scope.finishCompleted(&complete)

@@ -2,6 +2,9 @@ package model
 
 import (
 	"errors"
+	"sort"
+	"strings"
+	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/polymodel"
@@ -343,4 +346,232 @@ func (r *pagedRing) stats() ExpertRingStats {
 		AsyncOverlapped:  r.asyncOverlapped,
 		AsyncWaited:      r.asyncWaited,
 	}
+}
+
+// --- Paged-expert K-of-E window (borrow-port oss-port-strata-paged-experts) -------
+//
+// ADAPT of SGLang's paged-experts design (PR #42557@8e7601ae, Apache-2.0 — auto-K sizing, LRU
+// waves, bit-identical vs unpaged; slot lookup fused into decide per #46457/#46567) and Strata's
+// batched remote-expert-pool discipline (docs/DEEPSEEK41.md:54@46c152a1, MIT), extended onto the
+// existing ring seams rather than built in parallel: the bounded pagedRing already holds a
+// byte-budgeted working set of routed experts, and this leaf makes that working set an explicit
+// K-of-E WINDOW with a planned LRU wave and an observed hit/miss split instead of an emergent
+// property of byte-LRU. The window sizes itself from the declared budget (auto-K), plans how many
+// of this layer's residents must leave when the step's picks arrive (the wave), and splits each
+// pick into a hit (all three projections resident — compute immediately) or a miss (paged in
+// through the ring's ordinary demand path, which routes through the CUDA copy stream on
+// owner-capable backends). Nothing here stages bytes or touches a handle: dispatch order and math
+// are untouched, so a decided layer stays bit-identical to an undecided one. Opt-in via
+// FAK_V41_PAGED_EXPERTS=1 at the v41 routed-layer seam; default off is byte-for-byte unchanged.
+
+// PagedExpertWindow states the K-of-E resident expert window from the declared ring budget and
+// the measured cost of one whole expert.
+type PagedExpertWindow struct {
+	Experts        int   // E: routed experts per layer (Config.NumExperts)
+	AvgExpertBytes int64 // resident bytes of ONE expert's three projections
+	Budget         int64 // the session's declared expert-ring weight-byte budget
+}
+
+// K is the auto-sized window: as many whole experts as the budget buys, floor(Budget /
+// AvgExpertBytes), clamped to [0, Experts]. A window that cannot be sized honestly — no experts,
+// no measured cost, or no budget — answers 0 rather than guessing.
+func (w PagedExpertWindow) K() int {
+	if w.Experts <= 0 || w.AvgExpertBytes <= 0 || w.Budget <= 0 {
+		return 0
+	}
+	k := int(w.Budget / w.AvgExpertBytes)
+	if k > w.Experts {
+		return w.Experts
+	}
+	return k
+}
+
+// PagedExpertWavePlan is the LRU wave size for one layer entry. demand is the number of DISTINCT
+// experts the layer must hold once the step's picks are admitted — the union of the live ring's
+// current residents and this step's incoming picks — and k the window. When demand outgrows the
+// window, the excess leaves the ring as coldest unpinned residents; a demand that fits plans no
+// wave. The plan is a per-layer prediction: the shared ring's global LRU chooses the actual
+// victims, so the observed evictions are the witness, not the plan.
+func PagedExpertWavePlan(demand, k int) int {
+	if n := demand - k; n > 0 {
+		return n
+	}
+	return 0
+}
+
+// PagedExpertSplit is one layer's accumulated paged-expert window ledger across the steps that
+// decided it: how many picks the window served on a hit versus paged in on a miss, the demand it
+// planned against, and the total LRU wave it predicted.
+type PagedExpertSplit struct {
+	Layer         int
+	K             int // auto-sized window observed on the recorded steps
+	Steps         int
+	Demand        int // sum over steps of the distinct-expert demand (residents ∪ picks)
+	Hits          int // picks whose three projections were all resident at decide time
+	Misses        int // picks paged in through the ring's ordinary demand path
+	WaveEvictions int // sum over steps of the planned LRU wave sizes
+}
+
+// pagedExpertState is the package-level window ledger, keyed by *Session exactly like
+// crossLayerGateState: one mutex guards the map, entries are created lazily and only for a
+// session that actually decided, so a default-off run allocates nothing. The documented leak
+// until Close moves it onto the Session mirrors that precedent.
+var pagedExpertState = struct {
+	mu     sync.Mutex
+	splits map[*Session]map[int]*PagedExpertSplit
+}{splits: map[*Session]map[int]*PagedExpertSplit{}}
+
+// PagedExpertSplitsFor returns s's accumulated paged-expert window splits, one entry per decided
+// layer in layer order. A nil session, or one that never decided, reports the empty slice. Safe
+// to call from another goroutine.
+func PagedExpertSplitsFor(s *Session) []PagedExpertSplit {
+	if s == nil {
+		return nil
+	}
+	pagedExpertState.mu.Lock()
+	defer pagedExpertState.mu.Unlock()
+	byLayer := pagedExpertState.splits[s]
+	if len(byLayer) == 0 {
+		return nil
+	}
+	out := make([]PagedExpertSplit, 0, len(byLayer))
+	for _, sp := range byLayer {
+		out = append(out, *sp)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Layer < out[j].Layer })
+	return out
+}
+
+// ResetPagedExpertSplits clears s's window ledger so a measurement can start from zero. A nil
+// session is a no-op.
+func ResetPagedExpertSplits(s *Session) {
+	if s == nil {
+		return
+	}
+	pagedExpertState.mu.Lock()
+	delete(pagedExpertState.splits, s)
+	pagedExpertState.mu.Unlock()
+}
+
+// recordPagedExpertSplit folds one decided layer entry into s's ledger.
+func recordPagedExpertSplit(s *Session, layer, k, demand, hits, misses, wave int) {
+	if s == nil {
+		return
+	}
+	pagedExpertState.mu.Lock()
+	byLayer := pagedExpertState.splits[s]
+	if byLayer == nil {
+		byLayer = map[int]*PagedExpertSplit{}
+		pagedExpertState.splits[s] = byLayer
+	}
+	sp := byLayer[layer]
+	if sp == nil {
+		sp = &PagedExpertSplit{Layer: layer}
+		byLayer[layer] = sp
+	}
+	sp.Steps++
+	sp.K = k
+	sp.Demand += demand
+	sp.Hits += hits
+	sp.Misses += misses
+	sp.WaveEvictions += wave
+	pagedExpertState.mu.Unlock()
+}
+
+// ringKeyExpertIdentity recovers the (layer, expert) identity behind a ring resident key. The ring
+// keys a routed expert's projections under exactly two dtype prefixes — "q4k:" and "kquant-raw:" —
+// built by expertWeight.halKey and the checkpoint tier's halKey to the same rule, so stripping
+// either prefix yields the canonical weight name routedExpertIdentity parses. Any other key earns
+// no opinion: the scan simply skips it.
+func ringKeyExpertIdentity(key polymodel.ModelID) (layer, expert int, ok bool) {
+	name := string(key)
+	switch {
+	case strings.HasPrefix(name, "q4k:"):
+		name = name[len("q4k:"):]
+	case strings.HasPrefix(name, "kquant-raw:"):
+		name = name[len("kquant-raw:"):]
+	default:
+		return 0, 0, false
+	}
+	return routedExpertIdentity(name)
+}
+
+// pagedExpertDecide runs the K-of-E window's decide step for one layer entry: it sizes the window
+// from the ring budget and the picked experts' own byte cost, counts this layer's distinct
+// residents against the live ring, plans the LRU wave, and splits the picks into hits and misses.
+// It records the split in the session ledger and changes NOTHING else — no bytes are staged, no
+// handle is touched, dispatch order and math are untouched — so a decided layer stays bit-identical
+// to an undecided one. The reads take their own reentrant ring span.
+func (s *Session) pagedExpertDecide(layer int, picks []routePick, r *pagedRing, names [][3]string) {
+	if s == nil || r == nil || s.M == nil || len(picks) == 0 || len(names) != len(picks) {
+		return
+	}
+	done := s.ringEnter(r)
+	defer done()
+	// Auto-K sizing, measured on the first pick's own triple: one expert's three projections.
+	var expertBytes int64
+	sized := true
+	for _, name := range names[0] {
+		w, ok := s.resolveExpertWeight(name)
+		if !ok {
+			sized = false
+			break
+		}
+		switch {
+		case w.ck != nil:
+			expertBytes += w.ck.bytes
+		case w.q4 != nil:
+			expertBytes += q4kResidentBytes(w.q4)
+		default:
+			expertBytes += kQuantResidentBytes(w.kq)
+		}
+	}
+	win := PagedExpertWindow{Experts: s.M.Cfg.NumExperts, Budget: s.ExpertRingBytes}
+	if sized && expertBytes > 0 {
+		win.AvgExpertBytes = expertBytes
+	}
+	k := win.K()
+	// Distinct experts the layer must hold after the step: the union of the live ring's residents
+	// for THIS layer and this step's picks.
+	incoming := make(map[int]struct{}, len(picks))
+	for _, p := range picks {
+		incoming[p.expert] = struct{}{}
+	}
+	// One expert is THREE resident keys, so the union is counted per DISTINCT expert, not per
+	// projection key.
+	counted := make(map[int]struct{})
+	demand := 0
+	for key := range r.resident {
+		l, ex, ok := ringKeyExpertIdentity(key)
+		if !ok || l != layer {
+			continue
+		}
+		if _, in := incoming[ex]; in {
+			continue
+		}
+		if _, done := counted[ex]; done {
+			continue
+		}
+		counted[ex] = struct{}{}
+		demand++
+	}
+	demand += len(incoming)
+	wave := PagedExpertWavePlan(demand, k)
+	hits, misses := 0, 0
+	for slot := range picks {
+		hit := true
+		for _, name := range names[slot] {
+			w, ok := s.resolveExpertWeight(name)
+			if !ok || !r.isResident(w.halKey()) {
+				hit = false
+				break
+			}
+		}
+		if hit {
+			hits++
+		} else {
+			misses++
+		}
+	}
+	recordPagedExpertSplit(s, layer, k, demand, hits, misses, wave)
 }

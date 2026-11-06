@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
+	"github.com/anthony-chaudhary/fak/internal/hooks"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/safesync"
 )
@@ -490,7 +491,11 @@ func outputSyncResult(stdout, stderr io.Writer, command string, asJSON bool, inf
 	if asJSON {
 		var report any = info
 		if publicLeak != nil {
-			r := syncCheckReport{Assessment: info, PublicLeakTiming: &publicLeak.Timing}
+			r := syncCheckReport{Assessment: info}
+			// Emit timing only when real measurements are attached; absent timing keeps the report deterministic.
+			if publicLeak.Timing != (hooks.PublicLeakTreeTiming{}) {
+				r.PublicLeakTiming = &publicLeak.Timing
+			}
 			if len(publicLeak.Findings) > 0 || len(recheckPaths) > 0 || publicLeak.ResumeValidated {
 				r.PublicLeak = publicLeak
 			}

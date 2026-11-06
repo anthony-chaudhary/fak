@@ -32,6 +32,11 @@ func TestCUDASequenceSplitScratchPlan(t *testing.T) {
 		{name: "127 rows no loan", tokens: 127, layer: Qwen35SequenceLayer{Gate: q4}, armErr: badArm},
 		{name: "Q8 threshold", tokens: 128, layer: Qwen35SequenceLayer{Gate: q8}, w: 2048, x: 65536},
 		{name: "Q2", tokens: 128, layer: Qwen35SequenceLayer{Down: q2}, w: 7168, x: 131072},
+		{name: "IQ4_XS exceeds mixed GDN Q8 loan", tokens: 128, layer: Qwen35SequenceLayer{
+			Linear: true, Gate: splitPlanTensor(IQ4_XS, 1024, 256),
+			GDNOut: splitPlanTensor(Q8_0, 256, 128)}, w: 524288, x: 65536},
+		{name: "IQ4_XS only", tokens: 128, layer: Qwen35SequenceLayer{Gate: splitPlanTensor(IQ4_XS, 1024, 256)}, w: 524288, x: 65536},
+		{name: "IQ4_XS sub-128 stays outside loan", tokens: 127, layer: Qwen35SequenceLayer{Gate: splitPlanTensor(IQ4_XS, 1024, 256)}},
 		{name: "attention Q K V O", tokens: 128, layer: Qwen35SequenceLayer{
 			Q: q8, K: q4, V: q2, O: splitPlanTensor(Q8_0, 16, 256)},
 			arm: CUDAQ4KPrefillCompensated, w: 8192, x: 131072},

@@ -204,7 +204,7 @@ func DecodeKeyBody(body []byte) ([]byte, error) {
 	if len(body) < 2 {
 		return nil, fmt.Errorf("key body too short")
 	}
-	keyLen := binary.LittleEndian.Uint16(body[0:2])
+	keyLen := int(binary.LittleEndian.Uint16(body[0:2]))
 	if int(keyLen)+2 > len(body) {
 		return nil, fmt.Errorf("key body truncated")
 	}
@@ -252,12 +252,15 @@ func DecodeKVBody(body []byte, flags uint8) (key, value []byte, ttlMs int64, err
 	}
 	valueLen := binary.LittleEndian.Uint32(body[off:])
 	off += 4
-	if off+int(valueLen) > len(body) {
+	if uint64(valueLen) > uint64(len(body)-off) {
 		return nil, nil, 0, fmt.Errorf("kv body value truncated")
 	}
 	value = body[off : off+int(valueLen)]
 	off += int(valueLen)
-	if flags&FlagWithTTL != 0 && off+8 <= len(body) {
+	if flags&FlagWithTTL != 0 {
+		if len(body)-off < 8 {
+			return nil, nil, 0, fmt.Errorf("kv body TTL truncated")
+		}
 		ttlMs = int64(binary.LittleEndian.Uint64(body[off:]))
 	}
 	return key, value, ttlMs, nil
@@ -288,10 +291,10 @@ func DecodeValueResponse(body []byte) (value []byte, found bool, err error) {
 		return nil, false, fmt.Errorf("value response truncated")
 	}
 	valueLen := binary.LittleEndian.Uint32(body[1:5])
-	if 5+int(valueLen) > len(body) {
+	if uint64(valueLen) > uint64(len(body)-5) {
 		return nil, false, fmt.Errorf("value response value truncated")
 	}
-	return body[5 : 5+valueLen], true, nil
+	return body[5 : 5+int(valueLen)], true, nil
 }
 
 // EncodeErrorResponse creates an error response body.
@@ -319,7 +322,7 @@ func DecodeLeaseBody(body []byte) (key []byte, durationMs int64, err error) {
 	if len(body) < 2 {
 		return nil, 0, fmt.Errorf("lease body too short")
 	}
-	keyLen := binary.LittleEndian.Uint16(body[0:2])
+	keyLen := int(binary.LittleEndian.Uint16(body[0:2]))
 	if 2+int(keyLen)+8 > len(body) {
 		return nil, 0, fmt.Errorf("lease body truncated")
 	}

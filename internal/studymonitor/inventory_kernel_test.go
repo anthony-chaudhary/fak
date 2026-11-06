@@ -2,6 +2,7 @@ package studymonitor
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -434,6 +435,89 @@ func TestInventoryReportRefusesMapsThatHideKernelSurface(t *testing.T) {
 				t.Fatalf("report = %+v, want the hidden kernel surface to block readiness", report.Repositories[0])
 			}
 		})
+	}
+}
+
+func TestKernelInventoryEvidenceCarriesLayoutObligationFields(t *testing.T) {
+	// One populated example: a study of an NVFP4 GEMM family recording the
+	// layout obligations its kernels expect at load time.
+	populated := InventorySourceEvidence{
+		Class:               KernelInventorySourceClass,
+		Evidence:            []string{"docs/research/o-up2/kernel-inventory.json"},
+		ExpectedInputLayout: "tile-swizzled",
+		SwizzlePattern:      "nvfp4-scale-128x4",
+		ScaleLayout:         "128x4-tiled",
+		PackingSource:       "loader-native",
+	}
+	data, err := json.Marshal(populated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"expected_input_layout":"tile-swizzled"`, `"swizzle_pattern":"nvfp4-scale-128x4"`, `"scale_layout":"128x4-tiled"`, `"packing_source":"loader-native"`} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("wire form %s missing %s", data, want)
+		}
+	}
+	var decoded InventorySourceEvidence
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(decoded, populated) {
+		t.Fatalf("round trip = %+v, want %+v", decoded, populated)
+	}
+	if got := decoded.UnknownLayoutValues(); len(got) != 0 {
+		t.Fatalf("starter values flagged unknown = %v", got)
+	}
+
+	// Backward compatibility: an entry written before the fields exist still
+	// validates, reads back unknown, and serializes byte-identically.
+	legacy := `{"class":"kernel_inventory","evidence":["docs/research/o-up2/kernel-inventory.json"]}`
+	var legacyDecoded InventorySourceEvidence
+	if err := json.Unmarshal([]byte(legacy), &legacyDecoded); err != nil {
+		t.Fatal(err)
+	}
+	if legacyDecoded.HasLayoutObligation() {
+		t.Fatalf("legacy entry %+v reads back with layout obligations", legacyDecoded)
+	}
+	legacyBytes, err := json.Marshal(legacyDecoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(legacyBytes, []byte(legacy)) {
+		t.Fatalf("legacy wire form = %s, want unchanged %s", legacyBytes, legacy)
+	}
+
+	// Reader support: a novel value is accepted, not refused, and named.
+	novel := populated
+	novel.SwizzlePattern = "flash-attention-3-paged"
+	if got := novel.UnknownLayoutValues(); !reflect.DeepEqual(got, []string{"swizzle_pattern"}) {
+		t.Fatalf("novel values = %v, want [swizzle_pattern]", got)
+	}
+
+	// The report flow keeps the populated record intact; the registry accepts
+	// it on the kernel_inventory class and refuses it anywhere else.
+	report := buildKernelReportForTest(t, validInventoryMapForTest(), &populated)
+	row := report.Repositories[0]
+	if !row.Ready {
+		t.Fatalf("report = %+v, want a populated kernel_inventory record to stay ready", row)
+	}
+	found := false
+	for _, evidence := range row.SourceEvidence {
+		if evidence.Class == KernelInventorySourceClass && evidence.PackingSource == "loader-native" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("row source evidence = %+v, want the populated layout obligations carried through", row.SourceEvidence)
+	}
+
+	contract := completeInventoryContractForTest()
+	contract.SourceEvidence = append(contract.SourceEvidence, InventorySourceEvidence{
+		Class: "readme_docs", Evidence: []string{"README.md"}, PackingSource: "loader-native",
+	})
+	registry := registryWithInventoryForTest(contract)
+	if err := registry.Validate(); err == nil || !strings.Contains(err.Error(), "layout obligation fields belong to the kernel_inventory record") {
+		t.Fatalf("Validate() error = %v, want layout fields refused off the kernel_inventory record", err)
 	}
 }
 

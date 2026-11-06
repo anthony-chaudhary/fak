@@ -10,7 +10,7 @@ import (
 )
 
 func registerServeNativeChatTemplateFlags(fs *flag.FlagSet, sf *serveFlags) {
-	sf.nativeChatTemplateFile = fs.String("native-chat-template-file", "", "explicit local text Jinja template; requires --native-chat-template-sha256 and --native-chat-template-model; native local-model serving only")
+	sf.nativeChatTemplateFile = fs.String("native-chat-template-file", "", "explicit local Jinja template; needs --native-chat-template-sha256 and --model; native route only")
 	sf.nativeChatTemplateSHA256 = fs.String("native-chat-template-sha256", "", "independently selected lowercase SHA-256 of the exact native chat template bytes")
 	sf.nativeChatTemplateModel = fs.String("native-chat-template-model", "", "exact --model identity bound to the selected native text Jinja template")
 }

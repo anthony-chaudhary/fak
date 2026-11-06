@@ -33,6 +33,49 @@ extern "C" int fcuda_kv_load_typed(float *dst, const void *src, int n, int dtype
   FCUDA_TS("k_kv_load_typed", ((size_t)n+255)/256, k_kv_load_typed<<<((size_t)n+255)/256,256,0,g_stream>>>(dst,src,n,dtype));
   return (int)cudaGetLastError();
 }
+// Clone submission failure closes shared admission before Go can unwind.
+// Keep the direct copy status even if optional timestamp profiling issues a
+// diagnostic event afterward. No additional fence; timestamp begin may already drain.
+static int kv_clone_copy_status(int status) {
+  if (status != 0 && g_cuda_cleanup_status == 0) g_cuda_cleanup_status = status;
+  return status;
+}
+extern "C" int fcuda_kv_clone_d2d_checked(void *dst, const void *src, size_t bytes) {
+  if (v41_candidates_stream_uncertain())
+    return kv_clone_copy_status(g_cuda_cleanup_status != 0 ? g_cuda_cleanup_status : (int)cudaErrorNotReady);
+  cudaError_t status = cudaSuccess;
+  FCUDA_TS("d2d_copy", dim3(0, 0), status = cudaMemcpyAsync(dst, src, bytes, cudaMemcpyDeviceToDevice, g_stream));
+  return kv_clone_copy_status((int)status);
+}
+
+// Snapshot-only completion handling. A failed copy/launch is not a drain
+// certificate: close shared admission before Go can unwind or recycle scratch.
+// All callers hold cudaMu; preserve the first error without a retry or fence.
+static int kv_snapshot_status(int status) {
+  if (status != 0 && g_cuda_cleanup_status == 0) g_cuda_cleanup_status = status;
+  return status;
+}
+extern "C" void fcuda_kv_snapshot_failed(int status) {
+  (void)kv_snapshot_status(status ? status : -75707);
+}
+// Preserve the gather API's coarse status (4 for a launch error), not a second
+// CUDA last-error query. The shared latch closes default-build cleanup too.
+extern "C" int fcuda_paged_kv_snapshot_gather_checked(float *dst, const float *cache,
+    const int *table, int tokens, int heads, int head_size, int block_size, int key_layout) {
+  if (v41_candidates_stream_uncertain())
+    return kv_snapshot_status(g_cuda_cleanup_status != 0 ? g_cuda_cleanup_status : (int)cudaErrorNotReady);
+  return kv_snapshot_status(fcuda_paged_kv_gather_f32(dst, cache, table, tokens, heads, head_size, block_size, key_layout));
+}
+extern "C" int fcuda_kv_snapshot_load_checked(float *dst, const void *src, int n, int dtype) {
+  if (v41_candidates_stream_uncertain())
+    return kv_snapshot_status(g_cuda_cleanup_status != 0 ? g_cuda_cleanup_status : (int)cudaErrorNotReady);
+  return kv_snapshot_status(fcuda_kv_load_typed(dst, src, n, dtype));
+}
+extern "C" int fcuda_kv_snapshot_d2h_checked(void *dst, const void *src, size_t bytes) {
+  if (v41_candidates_stream_uncertain())
+    return kv_snapshot_status(g_cuda_cleanup_status != 0 ? g_cuda_cleanup_status : (int)cudaErrorNotReady);
+  return kv_snapshot_status(fcuda_d2h_checked(dst, src, bytes));
+}
 __global__ void k_kv_attention_typed(
     const float *Q, const void *K, const void *V, float *Out,
     int tokens, int prefix, int nH, int nKV, int hd, float scale, int dtype) {
@@ -253,4 +296,146 @@ extern "C" int fcuda_kv_attention_typed(const float *q, const void *k, const voi
 #endif
   FCUDA_TS("k_kv_attention_typed", tokens*heads, k_kv_attention_typed<<<tokens*heads,FLASH_THREADS,((size_t)hd+FLASH_THREADS)*sizeof(float),g_stream>>>(q,k,v,out,tokens,prefix,heads,kvheads,hd,scale,dtype));
   return (int)cudaGetLastError();
+}
+
+// Snapshot release reuses every generic per-pointer refusal without changing
+// generic Free. The source contract compares this exact prefix to fcuda_free;
+// adding or changing a peer guard requires updating both, in the same order.
+static bool kv_snapshot_release_refused(void *d) {
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return true;
+#endif
+  if (v41c_pending_contains(d)) return true;
+  if (!d) return true;
+  if (g_cuda_cleanup_status != 0) return true;
+  if (g_v41_router_uncertain) return true;
+  if (g_v41_mmid_uncertain) return true;
+#ifdef FAK_CUDA_V41_BF16_PUBLISH
+  // Publication drains prior stream work too; its three operands cannot name
+  // every allocation still in use after an unsuccessful drain.
+  if (g_v41_bf16_uncertain) return true;
+#endif
+#ifdef FAK_CUDA_V41_COMPRESSOR
+  // A failed drain can cover earlier no-emit ring stores, not just the last
+  // call's pointers. Keep every allocation out of reuse while it is uncertain.
+  if (g_v41_compressor_uncertain) return true;
+#endif
+#ifdef FAK_CUDA_V41_ROUTED_SWIGLU
+  for (const void *held : g_v41_routed_swiglu_quarantine)
+    if (d == held) return true;
+#endif
+#ifdef FAK_CUDA_V41_ENGRAM_GATE
+  for (const void *held : g_v41_engram_quarantine)
+    if (d == held) return true;
+#endif
+#ifdef FAK_CUDA_V41_SHARED_ATTENTION
+  for (const void *held : g_v41_sa_quarantine)
+    if (d == held) return true;
+#endif
+#ifdef FAK_CUDA_V41_COMPRESSOR_POOL
+  for (const void *held : g_v41_pool_quarantine)
+    if (d == held) return true;
+#endif
+#ifdef FAK_CUDA_DEEPGEMM_WKV
+  for (const void *held : g_deepgemm_wkv_quarantine) {
+    if (d == held) return true;
+  }
+#endif
+#ifdef FAK_CUDA_FLASHMLA_PREFILL
+  for (const void *held : g_flashmla_quarantine) {
+    if (d == held) return true;
+  }
+#endif
+#ifdef FAK_CUDA_V41_MHC
+  for (const void *held : g_v41_mhc_quarantine) {
+    if (d == held) return true;
+  }
+#endif
+#ifdef FAK_CUDA_V41_INDEXER
+  for (const void *held : g_v41_indexer_quarantine) {
+    if (d == held) return true;
+  }
+#endif
+#ifdef FAK_CUDA_V41_BF16_PUBLISH
+  for (const void *held : g_v41_bf16_quarantine) {
+    if (d == held) return true;
+  }
+#endif
+#ifdef FAK_CUDA_V41_TAIL_ROPE
+  for (const void *held : g_v41_rope_quarantine) {
+    if (d == held) return true;
+  }
+#endif
+  return false;
+}
+
+// Malformed receipts and cleanup errors must close admission even without a Go
+// fault latch. Keep the original native error; never retry or add a fence.
+extern "C" int fcuda_kv_snapshot_release_failed(int status) {
+  if (status == 0) status = (int)cudaErrorInvalidValue;
+  (void)kv_snapshot_status(status);
+  return g_cuda_cleanup_status;
+}
+
+// Exact private conversion ownership, not an arbitrary scratch view. RETIRED
+// means physical release OR transfer to a native pool; a cleanup error can be
+// returned after transfer, including eviction failure of a different pointer.
+extern "C" int fcuda_kv_snapshot_release_checked(void *expected, size_t bytes, int *disposition) {
+  if (disposition) *disposition = FCUDA_KV_SNAPSHOT_RETAINED;
+  if (g_cuda_cleanup_status != 0) return g_cuda_cleanup_status;
+  if (!disposition || !expected || !bytes || g_capture_open)
+    return fcuda_kv_snapshot_release_failed((int)cudaErrorInvalidValue);
+  if (v41_candidates_stream_uncertain() || kv_snapshot_release_refused(expected))
+    return fcuda_kv_snapshot_release_failed((int)cudaErrorNotReady);
+  auto ordinary = g_live.find(expected);
+  auto managed = g_managed_live.find(expected);
+  auto panel = g_panel_live.find(expected);
+  const int matches = (ordinary != g_live.end()) +
+                      (managed != g_managed_live.end()) +
+                      (panel != g_panel_live.end());
+  if (matches != 1 ||
+      (ordinary != g_live.end() && ordinary->second != bytes) ||
+      (managed != g_managed_live.end() && managed->second != bytes) ||
+      (panel != g_panel_live.end() && (panel->second != bytes || g_panel_live_bytes < bytes)))
+    return fcuda_kv_snapshot_release_failed((int)cudaErrorInvalidValue);
+  {
+    fak_alloc_tags_guard guard;
+    auto found = g_alloc_tags.find(expected);
+    if (found == g_alloc_tags.end())
+      return fcuda_kv_snapshot_release_failed((int)cudaErrorInvalidValue);
+    const fak_alloc_tag &tag = found->second;
+    const int sites = g_alloc_site_n.load(std::memory_order_relaxed);
+    const int cls = panel != g_panel_live.end() ? FAK_ALLOC_PREFILL_SCRATCH : FAK_ALLOC_ACTIVATIONS_SCRATCH;
+    const int kind = managed != g_managed_live.end() ? FAK_ALLOC_MANAGED : FAK_ALLOC_DEVICE_LOCAL;
+    // Overflow site zero cannot prove private snapshot provenance. Fail closed;
+    // do not substitute class/extent for the exact interned allocation site.
+    if (tag.bytes != bytes || tag.cls != cls || tag.kind != kind ||
+        tag.site <= FAK_ALLOC_SITE_OVERFLOW || tag.site >= sites || tag.site >= FAK_ALLOC_SITE_CAP ||
+        strcmp(g_alloc_sites[tag.site].name, "kv-snapshot-conversion") != 0)
+      return fcuda_kv_snapshot_release_failed((int)cudaErrorInvalidValue);
+  }
+  // The private scratch provenance excludes a weight-cache owner. Do not call
+  // the generic cache hook, which discards cudaGetDevice status.
+  if (managed != g_managed_live.end()) {
+#if defined(FAK_CUDA_V41_TAIL_ROPE) && defined(FAK_CUDA_V41_TAIL_ROPE_TEST)
+    ++g_v41_rope_test_free_attempts;
+#endif
+    const cudaError_t status = cudaFree(expected);
+    if (status != cudaSuccess) return fcuda_kv_snapshot_release_failed((int)status);
+    fak_alloc_untrack(expected);
+    g_managed_live.erase(managed);
+  } else if (panel != g_panel_live.end()) {
+    fak_alloc_retag(expected, FAK_ALLOC_IDLE_POOL, FAK_ALLOC_SITE("panel-pool"));
+    g_panel_pool[bytes].push_back(expected);
+    g_panel_live_bytes -= bytes;
+    g_panel_cached_bytes += bytes;
+    g_panel_live.erase(panel);
+  } else {
+    g_live.erase(ordinary);
+    fcuda_pool_put(expected, bytes);
+  }
+  *disposition = FCUDA_KV_SNAPSHOT_RETIRED;
+  if (g_cuda_cleanup_status != 0) return g_cuda_cleanup_status;
+  return v41_candidates_stream_uncertain()
+      ? fcuda_kv_snapshot_release_failed((int)cudaErrorNotReady) : 0;
 }

@@ -77,6 +77,15 @@ type InventorySourceEvidence struct {
 	Class    string   `json:"class"`
 	Evidence []string `json:"evidence"`
 	Note     string   `json:"note,omitempty"`
+	// Layout obligation fields belong to the kernel_inventory record: they
+	// name the tensor layout the studied kernel family expects at load time so
+	// the loader packing path can be checked against it. Empty means unknown
+	// until a study fills it in; see inventory_kernel_layout.go for the open
+	// enum starter vocabularies.
+	ExpectedInputLayout string `json:"expected_input_layout,omitempty"`
+	SwizzlePattern      string `json:"swizzle_pattern,omitempty"`
+	ScaleLayout         string `json:"scale_layout,omitempty"`
+	PackingSource       string `json:"packing_source,omitempty"`
 }
 
 type InventoryReport struct {
@@ -185,6 +194,9 @@ func (r Registry) Validate() error {
 				}
 				if missing := missingInventoryEvidenceFacets(evidence.Class, refs); len(missing) > 0 {
 					return fmt.Errorf("%s.inventory.source_evidence[%d]: missing evidence facets: %s", prefix, j, strings.Join(missing, ","))
+				}
+				if evidence.Class != KernelInventorySourceClass && evidence.HasLayoutObligation() {
+					return fmt.Errorf("%s.inventory.source_evidence[%d]: layout obligation fields belong to the %s record", prefix, j, KernelInventorySourceClass)
 				}
 			}
 		}
@@ -674,7 +686,15 @@ func normalizedSourceEvidence(values []InventorySourceEvidence) []InventorySourc
 		if class == "" || len(evidence) == 0 {
 			continue
 		}
-		out = append(out, InventorySourceEvidence{Class: class, Evidence: evidence, Note: strings.TrimSpace(value.Note)})
+		out = append(out, InventorySourceEvidence{
+			Class:               class,
+			Evidence:            evidence,
+			Note:                strings.TrimSpace(value.Note),
+			ExpectedInputLayout: strings.TrimSpace(value.ExpectedInputLayout),
+			SwizzlePattern:      strings.TrimSpace(value.SwizzlePattern),
+			ScaleLayout:         strings.TrimSpace(value.ScaleLayout),
+			PackingSource:       strings.TrimSpace(value.PackingSource),
+		})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Class != out[j].Class {

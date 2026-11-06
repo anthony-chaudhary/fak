@@ -213,3 +213,6 @@ func (p *promptPanelFencedProfile) PromptPanelRow(x compute.Tensor, row, w int) 
 	p.timed("panel_row", func() { y = p.panel.PromptPanelRow(x, row, w) })
 	return y
 }
+func (p *promptPanelFencedProfile) PromptPanelSetRow(x compute.Tensor, row, w int, src compute.Tensor) {
+	p.timed("panel_set_row", func() { p.panel.PromptPanelSetRow(x, row, w, src) })
+}

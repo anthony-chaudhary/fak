@@ -30,6 +30,13 @@ const v41RoutedFusedEnv = "FAK_V41_ROUTED_FUSED"
 // the layer returns or tears down; unset keeps demand reads only.
 const v41RoutedPrefetchEnv = "FAK_V41_ROUTED_PREFETCH"
 
+// v41PagedExpertsEnv set to "1" opts a batched layer into the K-of-E paged-expert
+// window's decide step on its expert ring: auto-K sizing, LRU wave planning and
+// the hit/miss split ledger (expert_ring_hal.go). The decide stages nothing and
+// changes no dispatch order, so an opted-in layer stays bit-identical; unset
+// keeps the walk byte-for-byte unchanged.
+const v41PagedExpertsEnv = "FAK_V41_PAGED_EXPERTS"
+
 // v41RoutedLayerFunc runs every routed pick of one full-profile decode layer on
 // the device and returns their routed sum (#13820). Each pick issues the
 // kernels v41RoutedExpertFunc issues, in the same order, and the sum adds the
@@ -232,6 +239,14 @@ func (s *Session) v41RoutedLayerFunc() v41RoutedLayerFunc {
 				weights[slot] = v41RoutedLayerWeights{gateW, upW, downW}
 			}
 			return true
+		}
+		if os.Getenv(v41PagedExpertsEnv) == "1" {
+			// The window decides BEFORE any demand staging of this step: hits are
+			// what the ring already holds, misses are what the ordinary demand
+			// path below pages in. It records only; it never stages or declines.
+			if r := s.routedExpertRing(names[0][0]); r != nil {
+				s.pagedExpertDecide(layer, picks, r, names)
+			}
 		}
 		ok := admitted()
 		if crossLayer {

@@ -97,7 +97,7 @@ func Preview(ctx context.Context, dir string, opt Options) (Report, error) {
 		rep.Empty = true
 		return rep, nil
 	}
-	commits, err := logCommits(ctx, dir, since, paths, run)
+	commits, err := logCommits(ctx, dir, since, head, paths, run)
 	if err != nil {
 		return Report{}, err
 	}
@@ -116,8 +116,8 @@ func Preview(ctx context.Context, dir string, opt Options) (Report, error) {
 	return rep, nil
 }
 
-func logCommits(ctx context.Context, dir, since string, paths []string, run Runner) ([]Commit, error) {
-	args := []string{"log", "--reverse", "--format=%H%x1f%an%x1f%ae%x1f%ct%x1f%s%x1e", since + "..HEAD", "--"}
+func logCommits(ctx context.Context, dir, since, head string, paths []string, run Runner) ([]Commit, error) {
+	args := []string{"log", "--reverse", "--format=%H%x1f%an%x1f%ae%x1f%ct%x1f%s%x1e", since + ".." + head, "--"}
 	args = append(args, paths...)
 	out, err := run(ctx, dir, args...)
 	if err != nil {

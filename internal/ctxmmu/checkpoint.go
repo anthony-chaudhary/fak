@@ -35,7 +35,7 @@ const (
 	// DefaultCheckpointTTL is the default time-to-live for an in-place session checkpoint (10 minutes).
 	DefaultCheckpointTTL = 10 * time.Minute
 
-	// DefaultDeltaNetLayers is the number of linear attention layers in modern hybrid models (e.g. Qwen 3.5/3.6/3.8).
+	// DefaultDeltaNetLayers is the number of linear attention layers in modern hybrid models.
 	DefaultDeltaNetLayers = 48
 
 	// DefaultDeltaNetValueHeads is the number of value heads in the hybrid linear attention scan.
@@ -540,6 +540,7 @@ type CheckpointManager struct {
 	cowTable    *COWPageTable
 	checkpoints map[string]*SessionDescriptor
 	defaultTTL  time.Duration
+	modelShape  ModelShape
 }
 
 // NewCheckpointManager constructs a new CheckpointManager instance.
@@ -551,6 +552,7 @@ func NewCheckpointManager(mmu *MMU, pool *SharedTokenPool, forkMgr *ForkManager,
 		cowTable:    cowTable,
 		checkpoints: make(map[string]*SessionDescriptor),
 		defaultTTL:  DefaultCheckpointTTL,
+		modelShape:  DefaultModelShape,
 	}
 }
 
@@ -568,6 +570,23 @@ func (cm *CheckpointManager) DefaultTTL() time.Duration {
 	return cm.defaultTTL
 }
 
+// SetModelShape overrides the per-model architecture shape used when building
+// sequence descriptors. Callers serving a specific model resolve its shape
+// from the model catalog / provider abstraction at the engine layer and inject
+// it here; zero-valued fields fall back to DefaultModelShape.
+func (cm *CheckpointManager) SetModelShape(shape ModelShape) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	cm.modelShape = shape.normalized()
+}
+
+// ModelShape returns the currently configured per-model architecture shape.
+func (cm *CheckpointManager) ModelShape() ModelShape {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	return cm.modelShape
+}
+
 // SaveInPlaceCheckpoint preserves physical KV cache page mappings in-place,
 // reclaims uncommitted output headroom to the shared pool, retains physical blocks (blk.Retain()),
 // and captures a lightweight sequence descriptor.
@@ -578,6 +597,10 @@ func (cm *CheckpointManager) SaveInPlaceCheckpoint(sessionID string) (*SessionDe
 
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
+
+	// Per-model architecture shape for the sequence descriptor below; unset
+	// fields already fell back to DefaultModelShape in SetModelShape/ctor.
+	shape := cm.modelShape.normalized()
 
 	var (
 		committed       int
@@ -672,20 +695,20 @@ func (cm *CheckpointManager) SaveInPlaceCheckpoint(sessionID string) (*SessionDe
 	attnMask := AttentionMaskDescriptor{
 		Geometry:          GeometryCausal,
 		Causal:            true,
-		SlidingWindowSize: 4096,
+		SlidingWindowSize: shape.SlidingWindowSize,
 		QuarantinedIDs:    quarantinedIDs,
-		HeadCount:         32,
+		HeadCount:         shape.AttentionHeadCount,
 		QueryLen:          len(tokens),
 		KeyLen:            len(tokens),
 	}
 
 	// Step 6: Construct DeltaNet state descriptor (~110 MB)
 	deltaNet := NewDeltaNetStateDescriptor(
-		DefaultDeltaNetLayers,
-		DefaultDeltaNetValueHeads,
-		DefaultDeltaNetKeyHeadDim,
-		DefaultDeltaNetValHeadDim,
-		DefaultDeltaNetConvKernel,
+		shape.DeltaNetLayers,
+		shape.DeltaNetValueHeads,
+		shape.DeltaNetKeyHeadDim,
+		shape.DeltaNetValHeadDim,
+		shape.DeltaNetConvKernel,
 	)
 
 	// Step 7: Construct RoPE offsets
@@ -695,7 +718,7 @@ func (cm *CheckpointManager) SaveInPlaceCheckpoint(sessionID string) (*SessionDe
 	}
 	rope := RoPEOffsets{
 		PositionIndex: posIdx,
-		BaseFrequency: 1000000.0,
+		BaseFrequency: shape.RoPEBaseFrequency,
 		ScalingFactor: 1.0,
 		MRoPE3D:       [3]int64{0, 0, 0},
 		PositionDelta: 0,
@@ -703,7 +726,7 @@ func (cm *CheckpointManager) SaveInPlaceCheckpoint(sessionID string) (*SessionDe
 
 	// Step 8: Construct MTP draft state
 	mtp := MTPDraftState{
-		DraftDepth:       4,
+		DraftDepth:       shape.MTPDraftDepth,
 		DraftTokens:      nil,
 		AcceptedCount:    0,
 		RollbackOccurred: false,

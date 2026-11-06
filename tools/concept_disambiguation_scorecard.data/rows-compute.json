@@ -31,7 +31,8 @@
         "planv41q2ktokenpanel",
         "v41q3ktokenpanelplan",
         "v41q2ktokenpairplan",
-        "cudasequencesplitscratchplan"
+        "cudasequencesplitscratchplan",
+        "qwen35gdnpackedinputplan"
       ],
       "aliases": [],
       "grounding": "V41Q2KTokenPanelPlan",
@@ -336,7 +337,13 @@
       "definition": "CUDA device attention entrypoint reading F16 or BF16 position-major attended KV planes with F32 queries and online-softmax accumulators.",
       "distinction": "Unlike fak_qwen35_attention_postprocess_f32, which normalizes and rotates projection rows while writing F32 KV, this entry reads already populated typed KV and produces grouped causal attention output; it does not mutate cache rows or normalize projections.",
       "distinct_from": [
-        "fakqwen35attentionpostprocessf32"
+        "fakqwen35attentionpostprocessf32",
+        "kvfp8attentionquery",
+        "kvfp8attentionoutput",
+        "kvfp8attentionroots",
+        "kvfp8attentionbytes",
+        "stagedattentionlocked",
+        "fcudakvfp8attentionowned"
       ],
       "aliases": [],
       "grounding": "fcuda_kv_attention_typed",
@@ -356,7 +363,8 @@
       "distinction": "Unlike V41Q2KTokenPanelPlan, this result describes compensated split scratch half capacities, not token-panel launch geometry. It carries no device pointers, ownership, scheduling, or route policy and is not a total peak-VRAM bound; ordinary activations, KV, noncompensated arms, and vocabulary heads are outside this capacity pair.",
       "distinct_from": [
         "v41q2ktokenpanelplan",
-        "plancudasequencesplitscratch"
+        "plancudasequencesplitscratch",
+        "qwen35gdnpackedinputplan"
       ],
       "aliases": [],
       "grounding": "cudaSequenceSplitScratchPlan",
@@ -382,6 +390,404 @@
       "grounding": "planCUDASequenceSplitScratch",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "qwen35gdnpackedinputplan",
+      "canonical": "Qwen35GDNPackedInputPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Checked representation metadata for canonical Qwen GDN QKV or Z weights: admitted Q4_K/Q6_K dtype, exact matrix rows and columns, block size and raw byte extent for shared use by loading and estimation; consumer wiring is separate.",
+      "distinction": "Unlike V41Q2KTokenPanelPlan, this describes a canonical QKV/Z weight representation rather than token-panel dispatch geometry. Unlike cudaSequenceSplitScratchPlan, it describes raw weight bytes rather than temporary compensated-split capacities. It does not establish tensor role, row normalization, device residency, current health, graph legality or permission to execute.",
+      "distinct_from": [
+        "v41q2ktokenpanelplan",
+        "cudasequencesplitscratchplan",
+        "qwen35gdnpackedinputcapability",
+        "qwen35gdnpackedinputpolicy",
+        "resolveqwen35gdnpackedinputpolicy",
+        "kvfp8evictionplan"
+      ],
+      "aliases": [],
+      "grounding": "Qwen35GDNPackedInputPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "qwen35gdnpackedinputcapability",
+      "canonical": "Qwen35GDNPackedInputCapability",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Versioned backend source declaration that the existing whole-GDN decode and sequence implementations understand canonical row-major block-256 Q4_K or Q6_K QKV/Z weights with F32 mutable state.",
+      "distinction": "Unlike Qwen35GDNPackedInputPlan, this declares an implementation contract rather than geometry or raw bytes. The declaration alone does not enable loading: explicit request controls, exact operation identities and actual independent dtype probes must resolve a per-load policy. It promises no graph capture, device health or measured hardware result.",
+      "distinct_from": [
+        "qwen35gdnpackedinputplan",
+        "qwen35gdnpackedinputpolicy",
+        "resolveqwen35gdnpackedinputpolicy"
+      ],
+      "aliases": [],
+      "grounding": "Qwen35GDNPackedInputCapability",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "qwen35gdnpackedinputpolicy",
+      "canonical": "Qwen35GDNPackedInputPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Immutable per-load Q4_K/Q6_K admission decision resolved from explicit enable and force-off controls, the versioned whole-GDN implementation contract and actual backend residency/upload/dtype probes. Its zero value admits no packed GDN inputs.",
+      "distinction": "Unlike Qwen35GDNPackedInputCapability, this is the resolved decision rather than a backend declaration. Unlike Qwen35GDNPackedInputPlan, it selects admissible representations rather than calculating one tensor extent. It cannot establish current device health, memory capacity, canonical row identity, whole-operation validity or graph legality; capture remains refused.",
+      "distinct_from": [
+        "qwen35gdnpackedinputcapability",
+        "qwen35gdnpackedinputplan",
+        "resolveqwen35gdnpackedinputpolicy",
+        "kvfp8hybridpreflight"
+      ],
+      "aliases": [],
+      "grounding": "Qwen35GDNPackedInputPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "resolveqwen35gdnpackedinputpolicy",
+      "canonical": "ResolveQwen35GDNPackedInputPolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Resolver that honors default-off and both force-off controls, checks actual whole-GDN decode and sequence method/path contracts, validates the versioned declaration and probes each admitted resident dtype before returning a copied per-load policy or typed refusal.",
+      "distinction": "Unlike Qwen35GDNPackedInputPolicy, this is the validating constructor rather than the immutable result. Unlike Qwen35GDNPackedInputCapability, it combines explicit request and actual probes instead of accepting a declaration alone. It reads no environment, makes no tensor upload, device allocation or model-operation call and never admits packed graph capture.",
+      "distinct_from": [
+        "qwen35gdnpackedinputpolicy",
+        "qwen35gdnpackedinputcapability",
+        "qwen35gdnpackedinputplan",
+        "kvfp8hybridpreflight"
+      ],
+      "aliases": [],
+      "grounding": "ResolveQwen35GDNPackedInputPolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "kvfp8evictionplan",
+      "canonical": "kvFP8EvictionPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Generation-bound canonical-row relocation map with copied per-layer rotary contracts for complete-image eager FP8 KV eviction.",
+      "distinction": "This is retained mutable-KV row geometry, not Qwen35GDNPackedInputPlan static weight storage or ctxplan.PlanEviction survival-class token-budget selection. A mapping does not authorize stale owner use or graph replay.",
+      "distinct_from": [
+        "qwen35gdnpackedinputplan",
+        "c2421-plan-eviction",
+        "kvfp8ownerplanevict",
+        "kvfp8evictionplan-evict",
+        "kvfp8ownerplanevict-evict",
+        "kvfp8evicteager",
+        "kvfp8applyevictioneager"
+      ],
+      "aliases": [],
+      "grounding": "kvFP8EvictionPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "kvfp8ownerplanevict",
+      "canonical": "kvFP8Owner.planEvict",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Constructs a canonical-row FP8 eviction mapping from the current owner generation, row range and copied per-layer rotary contracts without device effects.",
+      "distinction": "This is the planner that returns kvFP8EvictionPlan, not the returned mapping or its eager execution. It plans complete-image row relocation, not survival-class token-budget selection, and does not establish caller lifetime or hardware qualification.",
+      "distinct_from": [
+        "kvfp8evictionplan",
+        "c2421-plan-eviction",
+        "kvfp8evictionplan-evict",
+        "kvfp8ownerplanevict-evict",
+        "kvfp8evicteager",
+        "kvfp8applyevictioneager"
+      ],
+      "aliases": [],
+      "grounding": "planEvict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "kvfp8evictionplan-evict",
+      "canonical": "kvFP8EvictionPlan (eviction descriptor)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Eviction-family view of the same kvFP8EvictionPlan symbol: an owner-generation-bound row relocation descriptor retaining exact per-layer rotary contracts for complete-image replacement.",
+      "distinction": "This cross-indexes the plan-family descriptor rather than defining a second implementation. It carries the eviction mapping but neither chooses a survival-class token budget nor executes the planner or replacement.",
+      "distinct_from": [
+        "kvfp8evictionplan",
+        "kvfp8ownerplanevict",
+        "c2421-plan-eviction",
+        "kvfp8ownerplanevict-evict",
+        "kvfp8evicteager",
+        "kvfp8applyevictioneager"
+      ],
+      "aliases": [],
+      "grounding": "kvFP8EvictionPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "kvfp8ownerplanevict-evict",
+      "canonical": "kvFP8Owner.planEvict (eviction planning)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Eviction-family view of the same planEvict method: validates the current complete-image row relocation contract and constructs its generation-bound mapping without device effects.",
+      "distinction": "This is the same planner indexed in the plan family, not a second operation. It constructs the descriptor but does not apply it, mutate device planes or choose a survival-class token budget.",
+      "distinct_from": [
+        "kvfp8evictionplan",
+        "kvfp8ownerplanevict",
+        "kvfp8evictionplan-evict",
+        "c2421-plan-eviction",
+        "kvfp8evicteager",
+        "kvfp8applyevictioneager"
+      ],
+      "aliases": [],
+      "grounding": "planEvict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "kvfp8evicteager",
+      "canonical": "kvFP8EvictEager",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Complete-image eager FP8 eviction entry that constructs a current-owner canonical-row plan and delegates its checked execution to kvFP8ApplyEvictionEager.",
+      "distinction": "This combines planning and application, unlike planEvict alone or an already prepared descriptor. It is internal orchestration rather than public precision selection, in-place compaction, graph replay or measured performance.",
+      "distinct_from": [
+        "kvfp8evictionplan",
+        "kvfp8ownerplanevict",
+        "kvfp8evictionplan-evict",
+        "kvfp8ownerplanevict-evict",
+        "c2421-plan-eviction",
+        "kvfp8applyevictioneager"
+      ],
+      "aliases": [],
+      "grounding": "kvFP8EvictEager",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "kvfp8applyevictioneager",
+      "canonical": "kvFP8ApplyEvictionEager",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Executes a prepared generation-bound FP8 eviction mapping through disjoint all-layer staging, exact retained-row copies, bounded suffix rerotation, quantization and checked completion before publication.",
+      "distinction": "This consumes an existing mapping, whereas kvFP8EvictEager also plans it and planEvict only constructs it. It does not compact in place, activate a serving constructor or qualify graph replay, device lifetime or performance.",
+      "distinct_from": [
+        "kvfp8evictionplan",
+        "kvfp8ownerplanevict",
+        "kvfp8evictionplan-evict",
+        "kvfp8ownerplanevict-evict",
+        "kvfp8evicteager",
+        "c2421-plan-eviction"
+      ],
+      "aliases": [],
+      "grounding": "kvFP8ApplyEvictionEager",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "kvfp8attentionquery",
+      "canonical": "kvFP8AttentionQuery",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Private retained F32 query owner, exact byte extent and backend/device metadata for one staged FP8 attention operation.",
+      "distinction": "Unlike fcuda_kv_attention_typed, this value neither executes attention nor owns the staged KV image; it retains the source query and does not prove numerical validity or expose a public Tensor.",
+      "distinct_from": [
+        "fcudakvattentiontyped",
+        "kvfp8attentionoutput",
+        "kvfp8attentionroots",
+        "kvfp8attentionbytes",
+        "stagedattentionlocked",
+        "fcudakvfp8attentionowned"
+      ],
+      "aliases": [],
+      "grounding": "kvFP8AttentionQuery",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "kvfp8attentionoutput",
+      "canonical": "kvFP8AttentionOutput",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Ephemeral F32 output allocation view and cumulative numerical-status allocation scoped to the checked staged-attention use callback.",
+      "distinction": "Unlike the retained input kvFP8AttentionQuery, this borrowed view represents the fresh output and status used inside the callback; it is not an owning public Buffer, a returned Tensor or an attention executor.",
+      "distinct_from": [
+        "fcudakvattentiontyped",
+        "kvfp8attentionquery",
+        "kvfp8attentionroots",
+        "kvfp8attentionbytes",
+        "stagedattentionlocked",
+        "fcudakvfp8attentionowned"
+      ],
+      "aliases": [],
+      "grounding": "kvFP8AttentionOutput",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "kvfp8attentionroots",
+      "canonical": "kvFP8AttentionRoots",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Retention holder for prior raw/key/value input roots, the query owner and fresh output allocation across uncertain staged FP8 attention work.",
+      "distinction": "Unlike the query or output views, this holder keeps their underlying roots reachable before allocation or submission and through abnormal control transfer; it is not a cache, reusable pool, checked completion receipt or numerical-validity claim.",
+      "distinct_from": [
+        "fcudakvattentiontyped",
+        "kvfp8attentionquery",
+        "kvfp8attentionoutput",
+        "kvfp8attentionbytes",
+        "stagedattentionlocked",
+        "fcudakvfp8attentionowned"
+      ],
+      "aliases": [],
+      "grounding": "kvFP8AttentionRoots",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "kvfp8attentionbytes",
+      "canonical": "kvFP8AttentionBytes",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Checked F32 query/output byte-extent calculation for the bounded four-KV-head, head-dimension-256 staged FP8 attention geometry.",
+      "distinction": "Unlike the retained query/output/roots values and attention entrypoints, this helper performs only bounded dimension and integer-overflow checks; it neither allocates memory nor reserves global capacity or establishes device support.",
+      "distinct_from": [
+        "fcudakvattentiontyped",
+        "kvfp8attentionquery",
+        "kvfp8attentionoutput",
+        "kvfp8attentionroots",
+        "stagedattentionlocked",
+        "fcudakvfp8attentionowned"
+      ],
+      "aliases": [],
+      "grounding": "kvFP8AttentionBytes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "stagedattentionlocked",
+      "canonical": "cudaKVFP8Adapter.stagedAttentionLocked",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Uncalled qualification-only typed query gate and binding of the retained staged-attention helper to the private native FP8 attention wrapper under existing ForwardExecutionOwner and cudaMu serialization.",
+      "distinction": "Unlike the query/output metadata and the native wrapper alone, this adapter validates Tensor provenance and binds checked host lifecycle callbacks; it is not a public model or serving route, graph capture path or default attention dispatch.",
+      "distinct_from": [
+        "fcudakvattentiontyped",
+        "kvfp8attentionquery",
+        "kvfp8attentionoutput",
+        "kvfp8attentionroots",
+        "kvfp8attentionbytes",
+        "fcudakvfp8attentionowned"
+      ],
+      "aliases": [],
+      "grounding": "stagedAttentionLocked",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "fcudakvfp8attentionowned",
+      "canonical": "fcuda_kv_fp8_attention_owned",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Private native five-plane, query, output and status provenance/extent/alias gate around the existing scalar FP8 attention submission, returning a selected diagnostic receipt.",
+      "distinction": "Unlike the qualification-only typed adapter and the F16/BF16 fcuda_kv_attention_typed entry, this wrapper admits private FP8 planes and fresh output; zero status means accepted submission only, not checked completion, numerical validity, publication or H200 qualification.",
+      "distinct_from": [
+        "fcudakvattentiontyped",
+        "kvfp8attentionquery",
+        "kvfp8attentionoutput",
+        "kvfp8attentionroots",
+        "kvfp8attentionbytes",
+        "stagedattentionlocked"
+      ],
+      "aliases": [],
+      "grounding": "fcuda_kv_fp8_attention_owned",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "kvfp8hybridpreflight",
+      "canonical": "kvFP8HybridPreflight",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Private prerequisite check for one FP8 owner and an exact three-GDN/one-attention layer map: validates canonical position range, fixed partial-RoPE binding, supported selected modes, live GDN invalid-bit roots and non-overlapping storage before whole-forward admission.",
+      "distinction": "This checks the supplied hybrid state descriptors, not the default-off packed-GDN dtype policy or its backend capability declaration. It does not validate every model weight, native GDN allocation provenance, output-consumer arithmetic or a public serving route.",
+      "distinct_from": [
+        "qwen35gdnpackedinputpolicy",
+        "resolveqwen35gdnpackedinputpolicy"
+      ],
+      "aliases": [],
+      "grounding": "kvFP8HybridPreflight",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",
       "verdict": "crystal",
       "gaps": []

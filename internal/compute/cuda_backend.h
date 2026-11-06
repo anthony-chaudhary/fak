@@ -106,6 +106,13 @@ void fcuda_pool_cap_stats(size_t *cap, size_t *bytes, size_t *peak, unsigned lon
 /* fcuda_panel_peak_reset restarts the peak of panel bytes held plus cached. */
 void fcuda_panel_peak_reset(void);
 void fcuda_h2d(void *d, const void *h, size_t bytes);
+/* Returns the CUDA copy status; failure does not certify stream drain. */
+int fcuda_h2d_checked(void *d, const void *h, size_t bytes);
+/* Private, single-owner host-prefill input. All calls require cudaMu. */
+int fcuda_prefill_input_admit(void);
+int fcuda_prefill_input_acquire(const void *host, size_t bytes, int panel, void **out, int *managed);
+void fcuda_prefill_input_failed(int status);
+int fcuda_prefill_input_retire(void *expected, size_t bytes);
 /* Checked D2H: 0 only after a completed copy; otherwise 1000 + cudaError_t
  * from device selection or the copy. Bytes count only successful copies.
  * The ordinary helper uses the current device, like its legacy void wrapper. */
@@ -288,6 +295,16 @@ int fcuda_qwen35_gdn_sequence_f32(
     float *dMixed, float *dZ, float *dB, float *dA, float *dConvOut,
     float *dQNorm, float *dKNorm, float *dCore,
     int hidden, int nK, int nV, int kHd, int vHd, int convKernel, float rmsEps);
+
+/* Experimental opt-in MTP post-convolution replay entry. This declaration
+ * exposes the native seam only; it does not advertise a backend capability. */
+int fcuda_qwen35_gdn_mtp_post_conv_f32(
+    const float *dConvOut, const float *dA, const float *dB,
+    const float *dALog, const float *dDtBias,
+    float *dStatePool, const float *dZ, const float *dNorm, float *dCore,
+    const int *dSnapshots,
+    int tokens, int accepted, int nK, int nV, int kHd, int vHd,
+    int convDim, float rmsEps);
 
 /* Lane-panel twin of fcuda_qwen35_gdn_decode_f32 for 2..8 independent one-token decode
  * lanes. dX/dOut and every scratch are row-major [lanes, width] panels; lane l reads and

@@ -222,9 +222,12 @@ func (d *Dispatcher) HandleMSet(msg protocol.Message) protocol.Message {
 						}
 					}
 				}
-				// Replicate local keys
+				// Replicate only keys accepted by their local shard.
 				if d.Replicator != nil && msg.Header.Flags&protocol.FlagReplicated == 0 {
 					for j := range ng.keys {
+						if allStatuses[ng.indices[j]] != 0 {
+							continue
+						}
 						d.Replicator.ReplicateSet(ng.keys[j], ng.values[j], 0)
 					}
 				}

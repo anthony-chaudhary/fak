@@ -650,11 +650,6 @@ var admittedPostFreeze = []string{
 	// Relocates to: claude launcher config.
 	"ANTHROPIC_CUSTOM_HEADERS",
 
-	// cmd/metalprobe/metalcheck.go — records the build environment's cgo setting in the probe
-	// report. Read-only provenance, not behavior.
-	// Relocates to: a build-info field (debug.ReadBuildInfo) instead of the process env.
-	"CGO_ENABLED",
-
 	// cmd/fak/serve_memory_admission.go — opt-in state-envelope memory admission and the GPU
 	// wait bound for admission. Serving policy knobs.
 	// Relocates to: serve memory config.
@@ -665,20 +660,6 @@ var admittedPostFreeze = []string{
 	// Relocates to: an agent --router flag.
 	"FAK_AGENT_ROUTER_ORIGIN",
 
-	// internal/model/qwen35_prefill_q4k.go — stamps source revision and artifact digest onto a
-	// prefill receipt. Provenance labels, not credentials.
-	// Relocates to: receipt provenance config passed by the caller.
-	"FAK_ARTIFACT_SHA256",
-	"FAK_SOURCE_REVISION",
-
-	// internal/compute/strix/streamcopy.go — force/disable switches for the AVX-512 streaming
-	// copy path. Hardware capability overrides.
-	// Relocates to: strix compute capability config.
-	"FAK_AVX512_DISABLE",
-	"FAK_AVX512_FORCE",
-	"FAK_AVX512_STREAMING_DISABLE",
-	"FAK_AVX512_STREAMING_FORCE",
-
 	// cmd/fak/serve_model_load.go — env spelling of the --backend selector.
 	// Relocates to: the existing `fak serve --backend` flag.
 	"FAK_BACKEND",
@@ -686,10 +667,6 @@ var admittedPostFreeze = []string{
 	// internal/model/batch_attn.go — split-K decode attention toggle.
 	// Relocates to: decode execution config.
 	"FAK_DECODE_SPLITK",
-
-	// internal/ggufload/expert_pagecache.go — expert page-cache toggle for MoE weight loading.
-	// Relocates to: loader config.
-	"FAK_EXPERT_PAGECACHE",
 
 	// internal/gateway/upstream_400_detail.go — opt-in exposure of scrubbed upstream 400 detail.
 	// Relocates to: gateway serve config.
@@ -705,11 +682,6 @@ var admittedPostFreeze = []string{
 	// internal/gateway/http.go — graceful HTTP drain timeout in seconds.
 	// Relocates to: gateway server config.
 	"FAK_HTTP_DRAIN_TIMEOUT_S",
-
-	// internal/agent/inkernel_planner_config.go — operator override for the in-kernel radix
-	// token budget.
-	// Relocates to: InKernelPlannerConfig, which already carries the default.
-	"FAK_INKERNEL_RADIX_BUDGET",
 
 	// cmd/fak/leaseref_coordinator_client.go — lease coordinator endpoint.
 	// Relocates to: lease coordinator config.
@@ -732,10 +704,6 @@ var admittedPostFreeze = []string{
 	// cmd/fak/pi_launcher.go — skill-pack directory override for Pi launches.
 	// Relocates to: pi launcher config.
 	"FAK_PI_SKILLS",
-
-	// internal/model/metal_prefill_hybrid.go — persistent device-KV decode toggle.
-	// Relocates to: decode execution config.
-	"FAK_QWEN35_PERSISTENT_DECODE_DKV",
 
 	// internal/model/metal_prefill_hybrid_devicekv.go — existing Metal Qwen3.5 decode
 	// device-KV attention toggle (=0 forces the host-prefix attention). An A-B / rollback
@@ -884,4 +852,42 @@ var admittedPostFreeze = []string{
 	// (=1 arms it; default off). An experimental KV-store toggle, not a credential.
 	// Relocates to: a typed compute KV config once #2862 lands.
 	"FAK_CUDA_PAGED_KV",
+
+	// SEVENTH OCCURRENCE (release-unblock): two measured-mode census reads shipped while the
+	// ratchet was red and unwatched again. As in the earlier occurrences they are admitted by
+	// name, not absorbed into baseline.go, and they cannot relocate until the #2862 config
+	// surface exists. Admission resolves the current offenses; it does not erase that liveness
+	// failure or pay the #2862 relocation debt.
+
+	// internal/model/glue_census_hook.go — FAK_GLUE_CENSUS=1 turns on measured-mode counting of
+	// synchronous host<->device round-trips at the GLM-DSA device seams; OFF by default and
+	// zero-cost when unset, read once at package init from the literal call site. An
+	// observability toggle for hardware receipts, not a credential — it grants access to
+	// nothing. Introduced by 5510d8a5c (32 trunk advances at admission).
+	// Relocates to: a typed measure-mode field on the model session config once #2862 lands.
+	"FAK_GLUE_CENSUS",
+
+	// internal/compute/h2d_census.go — FAK_H2D_CENSUS=1 turns on measured-mode counting of
+	// host->device copies at the per-decode-token state seams inventoried by
+	// `fak-dev h2d-inventory`; OFF by default and zero-cost when unset, read once at package
+	// init from the literal call site. An observability toggle for hardware receipts, not a
+	// credential — it grants access to nothing. Introduced by cc9316efe (2 trunk advances at
+	// admission).
+	// Relocates to: a typed measure-mode field on the compute census config once #2862 lands.
+	"FAK_H2D_CENSUS",
+
+	// EIGHTH OCCURRENCE (release-unblock): one experimental CUDA kernel toggle shipped while
+	// the ratchet was red and unwatched again. As in the earlier occurrences it is admitted
+	// by name, not absorbed into baseline.go, and it cannot relocate until the #2862 config
+	// surface exists. Admission resolves the current offense; it does not erase that
+	// liveness failure or pay the #2862 relocation debt.
+
+	// internal/compute/cuda_qwen35_qknorm_rope_cache_vllm.go — FAK_CUDA_QWEN35_VLLM_QK=1 arms
+	// the opt-in vLLM fused QK norm/RoPE/KV-append candidate on CUDA (=1 arms it; default
+	// off), read once at package init from the literal call site. An experimental kernel
+	// toggle, like its admitted siblings FAK_CUDA_QWEN35_ATTN_POSTPROCESS and
+	// FAK_CUDA_QWEN35_RESIDUAL_NORM; not a credential — it grants access to nothing.
+	// Introduced by 15699d6468 (28 trunk advances at admission).
+	// Relocates to: a typed compute capability config once #2862 lands.
+	"FAK_CUDA_QWEN35_VLLM_QK",
 }

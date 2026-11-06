@@ -33,6 +33,12 @@ import (
 // launcher follows the router's current model instead of the stale hardcoded
 // 8080 / qwen38:27b-q4 Mac placeholder. If the router is not live the launcher
 // keeps its historical direct default.
+//
+// Keyed routers: the supervised router gates /v1/models and inference behind
+// its gateway bearer, so the probes and the front door present the discovered
+// credential (FAK_ROUTER_GATEWAY_KEY, else ~/.fak/router/gateway.key) instead
+// of the keyless placeholder; a router with no configured key still admits the
+// placeholder path unchanged.
 
 const (
 	// claudeRouterDefaultOrigin is the SCM-supervised fak router. It matches the
@@ -40,15 +46,49 @@ const (
 	// and never the cmd/fak-server bare default :8080.
 	claudeRouterDefaultOrigin = "http://127.0.0.1:18101"
 	// claudeRouterKeyEnv is the credential the front door presents to the router.
-	// The supervised router admits keyless loopback inference, so the default is
-	// a non-empty placeholder rather than a real secret.
-	claudeRouterKeyEnv       = "FAK_CLAUDE_ROUTER_KEY"
-	claudeRouterKeylessValue = "fak-claude-keyless"
+	// When unset, discovery falls back to the supervised gateway key file, then
+	// to a non-empty placeholder for routers that admit keyless loopback.
+	claudeRouterKeyEnv = "FAK_CLAUDE_ROUTER_KEY"
+	// claudeRouterGatewayKeyEnv names an operator-set bearer for the supervised
+	// router; it wins over the on-disk gateway key file.
+	claudeRouterGatewayKeyEnv = "FAK_ROUTER_GATEWAY_KEY"
+	claudeRouterKeylessValue  = "fak-claude-keyless"
 	// claudeRouterFrontDoorKeyEnv carries the per-launch bearer the front door
 	// requires of its clients (Claude Code), so no other local process can spend
 	// through it.
 	claudeRouterFrontDoorKeyEnv = "FAK_CLAUDE_FRONTDOOR_KEY"
 )
+
+// claudeRouterGatewayKeyFile is the supervised router's gateway key location —
+// the same file opencode.json references as {file:~/.fak/router/gateway.key}
+// and the private ops verbs default to. Empty when the home dir cannot be
+// resolved.
+func claudeRouterGatewayKeyFile() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".fak", "router", "gateway.key")
+}
+
+// claudeRouterDiscoveredKey reports the real router credential found on this
+// host: FAK_ROUTER_GATEWAY_KEY when set, else the contents of the supervised
+// gateway key file. Empty means no real key was found; callers fall back to
+// the keyless placeholder.
+func claudeRouterDiscoveredKey() string {
+	if v := strings.TrimSpace(os.Getenv(claudeRouterGatewayKeyEnv)); v != "" {
+		return v
+	}
+	p := claudeRouterGatewayKeyFile()
+	if p == "" {
+		return ""
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
 
 // claudeRouterOrigin resolves the router origin: an explicit value, else
 // FAK_ROUTER_URL, else the supervised 18101 listener. A trailing slash or /v1
@@ -95,6 +135,18 @@ func claudeRouterLiveProbe(origin string, timeout time.Duration) (string, bool) 
 // It is a package var so tests override it with a stub instead of dialing.
 var claudeRouterModel = claudeRouterModelProbe
 
+// claudeRouterAuthHeader returns the Authorization value for router probes:
+// Bearer + the discovered credential when it is a real key. The keyless
+// placeholder sends nothing: a known-bad bearer is indistinguishable from none
+// (both 401 on a keyed router), while omitting it lets a keyless router admit
+// the probe.
+func claudeRouterAuthHeader() string {
+	if c := claudeFrontDoorRouterCredential(""); c != claudeRouterKeylessValue {
+		return "Bearer " + c
+	}
+	return ""
+}
+
 func claudeRouterModelProbe(client *http.Client, origin string) string {
 	if v := strings.TrimSpace(os.Getenv("FAK_ROUTER_MODEL")); v != "" {
 		return v
@@ -102,6 +154,9 @@ func claudeRouterModelProbe(client *http.Client, origin string) string {
 	req, err := http.NewRequest(http.MethodGet, strings.TrimRight(origin, "/")+"/v1/models", nil)
 	if err != nil {
 		return ""
+	}
+	if h := claudeRouterAuthHeader(); h != "" {
+		req.Header.Set("Authorization", h)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -151,13 +206,17 @@ func claudeFrontDoorArgv(addr, routerOrigin, model string) []string {
 }
 
 // claudeFrontDoorRouterCredential is the bearer the front door presents to the
-// router: an explicit value, else a non-empty placeholder that the supervised
-// keyless loopback router admits.
+// router: an explicit value, else FAK_CLAUDE_ROUTER_KEY, else the discovered
+// supervised gateway key (FAK_ROUTER_GATEWAY_KEY or ~/.fak/router/gateway.key),
+// else the non-empty placeholder a keyless loopback router admits.
 func claudeFrontDoorRouterCredential(explicit string) string {
 	if v := strings.TrimSpace(explicit); v != "" {
 		return v
 	}
 	if v := strings.TrimSpace(os.Getenv(claudeRouterKeyEnv)); v != "" {
+		return v
+	}
+	if v := claudeRouterDiscoveredKey(); v != "" {
 		return v
 	}
 	return claudeRouterKeylessValue

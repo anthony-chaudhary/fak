@@ -60,7 +60,8 @@ func TestCUDAQ2KRejectsMalformedBeforeSubmission(t *testing.T) {
 	}
 	s := string(b)
 	assertCUDAMatMulLockedWrapper(t)
-	for _, name := range []string{"cudaMatMulLocked", "BatchedMatMul"} {
+	assertCUDAPrefillLockedWrappers(t)
+	for _, name := range []string{"cudaMatMulLocked", "batchedMatMulLocked"} {
 		start := strings.Index(s, "func (c *cudaBackend) "+name+"(")
 		if start < 0 {
 			t.Fatal(name)

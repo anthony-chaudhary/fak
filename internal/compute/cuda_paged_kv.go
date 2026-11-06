@@ -197,6 +197,7 @@ type cudaPagedKV struct {
 	gKF, gVF     int
 	copyRetained bool
 	copyNext     *cudaPagedKV
+	snapshotCopy *cudaPagedKVSnapshotCopy
 }
 
 // The immutable archive query is wired only by the typed build qualification.
@@ -213,7 +214,7 @@ func (e *cudaPagedKVCopyFailure) Error() string {
 // an intrusive list anchored in the globally retained pool. Caller may already
 // have detached its handle before Free; refusing must not lose private owners.
 func (p *cudaKVPagePool) retainCopyOwnerLocked(k *cudaPagedKV) {
-	if k == nil || k.copyRetained || len(k.table) == 0 &&
+	if k == nil || k.copyRetained || k.snapshotCopy == nil && len(k.table) == 0 &&
 		k.dTable == nil && k.dSeqLen == nil && k.scratch == nil && k.gK == nil && k.gV == nil {
 		return
 	}
@@ -239,9 +240,11 @@ func (p *cudaKVPagePool) copyErrorLocked(k *cudaPagedKV) error {
 		if err := AdmitDevice(p.be, "paged-kv-copy"); err != nil {
 			return p.stopCopyLocked(-75706, k)
 		}
-		if C.fcuda_paged_kv_copy_terminal() != 0 {
-			return p.stopCopyLocked(-75701, k)
-		}
+	}
+	// Shared stream uncertainty applies to every archive, not just the copy
+	// qualification. Refuse before page/private-owner accounting can change.
+	if C.fcuda_paged_kv_copy_terminal() != 0 {
+		return p.stopCopyLocked(-75701, k)
 	}
 	return nil
 }
@@ -410,6 +413,7 @@ func (k *cudaPagedKV) syncDeviceTableLocked(seqLen int) {
 		}
 		if len(k.table) > 0 {
 			C.fcuda_h2d(k.dTable, unsafe.Pointer(&k.table[0]), C.size_t(len(k.table)*4))
+			H2DCensusRecord("paged-kv-block-table", int64(len(k.table))*4) // FAK_H2D_CENSUS=1
 		}
 		k.dirty = false
 	}
@@ -554,33 +558,7 @@ func (k *cudaPagedKV) SnapshotToHost() (KVHostSnapshot, error) {
 	if err := k.pool.copyErrorLocked(k); err != nil {
 		return KVHostSnapshot{}, err
 	}
-	w := k.stride()
-	out := KVHostSnapshot{Config: cloneKVConfig(k.cfg), Pos: append([]int(nil), k.pos...),
-		K: make([][]float32, k.cfg.NumLayers), KRaw: make([][]float32, k.cfg.NumLayers), V: make([][]float32, k.cfg.NumLayers)}
-	maxN := 0
-	for _, n := range k.lens {
-		maxN = max(maxN, n)
-	}
-	var tmp unsafe.Pointer
-	if maxN > 0 {
-		tmp = k.pool.be.dallocKV(maxN*w*4, "kv-paged-snapshot").ptr
-		defer C.fcuda_free(tmp)
-	}
-	read := func(arena unsafe.Pointer, layer int, keyLayout bool) []float32 {
-		n := k.lens[layer]
-		rows := make([]float32, n*w)
-		if n > 0 {
-			k.gatherLocked(tmp, arena, layer, n, keyLayout)
-			C.fcuda_d2h(unsafe.Pointer(&rows[0]), tmp, C.size_t(len(rows)*4))
-		}
-		return rows
-	}
-	for l := 0; l < k.cfg.NumLayers; l++ {
-		out.K[l] = read(k.pool.K[l], l, true)
-		out.KRaw[l] = read(k.pool.Kraw[l], l, true)
-		out.V[l] = read(k.pool.V[l], l, false)
-	}
-	return out, out.Validate()
+	return k.snapshotToHostLocked()
 }
 
 // loadFromHostLocked replaces the store's contents with a host image. Caller holds cudaMu.

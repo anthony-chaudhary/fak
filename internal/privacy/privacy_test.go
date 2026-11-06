@@ -2,6 +2,7 @@ package privacy
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -55,5 +56,45 @@ func TestPrivacyMalformedFailsClosed(t *testing.T) {
 		if _, err := ParsePolicy([]byte(raw)); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}
+	}
+}
+
+// Runtime estimate is unmeasured; each case parses one tiny policy document.
+// fak-test:runtime fast est=10ms lane=default
+func TestParsePolicyRejectsTrailingData(t *testing.T) {
+	want := DefaultPolicy()
+	want.Log.RedactFields = []string{"秘密"}
+	encoded, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Leading whitespace and a multibyte field exercise the byte offset boundary.
+	document := " \n" + string(encoded)
+	for _, tc := range []struct {
+		name   string
+		suffix string
+		valid  bool
+	}{
+		{"empty", "", true},
+		{"JSON whitespace", " \t\r\n", true},
+		{"array close", "]", false},
+		{"object close", "}", false},
+		{"second object", "{}", false},
+		{"second null", "null", false},
+		{"truncated array", "[", false},
+		{"vertical tab", "\v", false},
+		{"nonbreaking space", "\u00a0", false},
+		{"NUL", "\x00", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ParsePolicy([]byte(document + tc.suffix))
+			if tc.valid {
+				if err != nil || !reflect.DeepEqual(got, want) {
+					t.Fatalf("valid policy changed: got %+v, err %v", got, err)
+				}
+			} else if err == nil || !reflect.DeepEqual(got, Policy{}) {
+				t.Fatalf("trailing data returned policy: got %+v, err %v", got, err)
+			}
+		})
 	}
 }

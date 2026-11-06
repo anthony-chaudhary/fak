@@ -156,7 +156,10 @@ These sources shape graph structure rather than supply fak measurements:
 
 ## Baseline/candidate experiment receipts
 
-Use the current `fak-native-performance-receipt/v2` contract before changing a lever:
+Use the current `fak-native-performance-receipt/v3` contract before changing a lever. v3 adds the
+optional per-repetition host-overhead decomposition (`host_phase_us`, `kernel_launch_count`,
+`inter_kernel_gap_sum_us`, `h2d_copy_bytes`, `sync_roundtrips`) — fill each only when the capture
+tool measured it; absent fields stay absent, and v1/v2 receipts keep validating unchanged:
 
 ```bash
 fak native-performance --baseline metal.command-buffer-amortization > baseline.json

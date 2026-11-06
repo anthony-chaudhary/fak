@@ -92,11 +92,11 @@ func cudaQ8RowsScratch(rows, in, block int) cudaGEMMScratch {
 	return cudaGEMMScratch{main: rows*in + rows*(in/block)*F32.Bytes()}
 }
 
-// cudaQ8MatMulScratch is the scratch fcuda_q8_matmul_f32 needs for rows rows.
+// cudaQ8MatMulScratch is the scratch fcuda_q8_matmul_f32 needs for rows rows: the per-row
+// activation codes plus f32 block scales, whatever the row count. The P>=128 dequant + fp16
+// split arm was retired (oss-port-cuda-perf-gdn-q8-dequant-retire), so no weight-sized f32/fp16
+// image is ever allocated or priced for a Q8_0 GEMM.
 func cudaQ8MatMulScratch(out, in, rows, block int) cudaGEMMScratch {
-	if rows >= 128 {
-		return cudaDequantScratch(out, in)
-	}
 	return cudaQ8RowsScratch(rows, in, block)
 }
 
@@ -359,6 +359,24 @@ func (c *cudaBackend) PromptPanelRow(x Tensor, row, width int) Tensor {
 	c.promptPanel = inPanel
 	C.fcuda_d2d(ybuf.ptr, unsafe.Add(src.ptr, row*width*F32.Bytes()), C.size_t(width*F32.Bytes()))
 	return y
+}
+
+// PromptPanelSetRow copies src into row of the [rows, width] panel x, the inverse of
+// PromptPanelRow: a deepseek_v4 layer's per-row live-expert FFN updates its residual back into
+// the panel. It allocates nothing, so it runs under the panel scope and reuses the same
+// stream-ordered device-to-device copy PromptPanelRow issues.
+func (c *cudaBackend) PromptPanelSetRow(x Tensor, row, width int, src Tensor) {
+	if width <= 0 || row < 0 || (row+1)*width > x.Numel() || src.Numel() != width {
+		cudaPromptPanelFail("prompt-panel-setrow-geometry", "panel row write outside the panel or wrong source width", 0)
+	}
+	if x.Dtype != F32 || src.Dtype != F32 {
+		cudaPromptPanelFail("prompt-panel-setrow-dtype", "panel row write requires F32 panel and source", 0)
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	dst := c.cudaBufForSubmit(x)
+	s := c.cudaBufForSubmit(src)
+	C.fcuda_d2d(unsafe.Add(dst.ptr, row*width*F32.Bytes()), s.ptr, C.size_t(width*F32.Bytes()))
 }
 
 // CUDAPoolStats is the allocator witness for panel tests: cached (free) decode-pool bytes and

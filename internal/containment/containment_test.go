@@ -1,6 +1,7 @@
 package containment
 
 import (
+	"math"
 	"testing"
 )
 
@@ -126,5 +127,36 @@ func TestArbitrateAPUHeadroom(t *testing.T) {
 	}
 	if freeAll != 0 {
 		t.Errorf("freeAll = %d, want 0", freeAll)
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestArbitrateAPUHeadroomCheckedAccounting(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		aperture    int64
+		allocations []int64
+		consumed    int64
+		free        int64
+		capacity    bool
+	}{
+		{"within budget", 120, []int64{40, 50}, 90, 30, true},
+		{"exact maximum", math.MaxInt64, []int64{math.MaxInt64 - 1, 1}, math.MaxInt64, 0, true},
+		{"overflow by one", math.MaxInt64, []int64{math.MaxInt64, 1}, math.MaxInt64, 0, false},
+		{"overflow falsely frees capacity", 120, []int64{math.MaxInt64, math.MaxInt64}, math.MaxInt64, 0, false},
+		{"negative allocation", 120, []int64{40, -1}, math.MaxInt64, 0, false},
+		{"negative aperture subtraction overflow", math.MinInt64, []int64{1}, 1, 0, false},
+		{"empty zero aperture", 0, nil, 0, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			allocations := make([]APUAllocationRecord, len(tc.allocations))
+			for i, bytes := range tc.allocations {
+				allocations[i].AttributedResidentBytes = bytes
+			}
+			consumed, free, capacity := ArbitrateAPUHeadroom(tc.aperture, allocations)
+			if consumed != tc.consumed || free != tc.free || capacity != tc.capacity {
+				t.Fatalf("got consumed=%d free=%d capacity=%v, want %d %d %v", consumed, free, capacity, tc.consumed, tc.free, tc.capacity)
+			}
+		})
 	}
 }

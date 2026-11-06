@@ -197,6 +197,16 @@ func runClaude(stdout, stderr io.Writer, argv []string) int {
 			rc := &http.Client{Timeout: 2 * time.Second}
 			if liveModel, live := claudeRouterLive(routerOrigin, 2*time.Second); live {
 				useLiveRouter = true
+				// Prefer the router's default-backend model over the first
+				// advertised id when nothing pins the model. An explicit
+				// --model or FAK_ROUTER_MODEL still wins: the preference runs
+				// only while effectiveModel is "" and no router-model pin is
+				// set (the pin is honored inside claudeRouterModel below).
+				if effectiveModel == "" && strings.TrimSpace(os.Getenv("FAK_ROUTER_MODEL")) == "" {
+					if m := claudeRouterPreferredModelFn(routerOrigin); m != "" {
+						effectiveModel = m
+					}
+				}
 				if effectiveModel == "" {
 					effectiveModel = claudeRouterModel(rc, routerOrigin)
 				}

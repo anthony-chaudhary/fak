@@ -209,6 +209,49 @@ func (d NgramDrafter) Draft(committed []int) []int {
 	return append([]int(nil), continuation...)
 }
 
+// HybridDraft returns a bounded hybrid draft proposal: the host-side n-gram match
+// (Draft) occupies the front of the draft window, and the caller-supplied model
+// drafter fills the remainder. Adapted from ExLlamaV3's hybrid drafting
+// (exllamav3/generator/generator.py iterate_hybrid_gen and
+// exllamav3/generator/ngram.py, turboderp-org/exllamav3 at
+// 3a513ac9f91aae777f317ca2341b8e445b62c64e, MIT): the long suffix-match
+// continuation rides ahead of the regular drafter's guess, so verbatim repetition
+// of context (reciting a drafted reply, editing source) advances many tokens at
+// prefill speed while novel text falls back to the model drafter. Upstream batches
+// rows and pads non-firing rows; here the two sources meet sequentially in one
+// sequence's window, and the target's verify pass still gates every token, so a
+// poor blend costs a rollback, never correctness. No upstream Python/CUDA copied.
+//
+// modelDraft is called lazily, only when the n-gram match leaves room in the
+// window; a saturated match skips the model drafter entirely. Its result is
+// truncated to the remaining room. When the drafter is disabled or no repeated
+// suffix exists, the proposal is whatever the model drafter supplies, capped by
+// the window. The returned slice aliases neither committed history nor the
+// drafter's buffer.
+func (d NgramDrafter) HybridDraft(committed []int, modelDraft func() []int) []int {
+	window := d.effectiveDraftLen()
+	if window <= 0 {
+		return nil
+	}
+	prefix := d.Draft(committed)
+	if len(prefix) >= window {
+		return prefix[:window]
+	}
+	if modelDraft == nil {
+		return prefix
+	}
+	rest := modelDraft()
+	if cap := window - len(prefix); len(rest) > cap {
+		rest = rest[:cap]
+	}
+	if len(rest) == 0 {
+		return prefix
+	}
+	out := make([]int, 0, window)
+	out = append(out, prefix...)
+	return append(out, rest...)
+}
+
 // longestRecentTokenSuffix adapts the bounded reverse-KMP scan from
 // vllm/v1/spec_decode/ngram_proposer.py at
 // 85591000403fc3bc3b4d0303e3a97bedab007763 (Apache-2.0).

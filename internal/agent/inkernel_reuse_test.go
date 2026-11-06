@@ -255,11 +255,13 @@ func TestInKernelKVMemoryStatsDeviceBackendReportsGeometryOnly(t *testing.T) {
 
 func TestInKernelRadixCostAwareVictimRuleFromEnv(t *testing.T) {
 	t.Setenv("FAK_INKERNEL_RADIX", "on")
-	t.Setenv("FAK_INKERNEL_RADIX_BUDGET", "20")
 	t.Setenv("FAK_NATIVE_KV_VICTIM_RULE", "cost-aware")
 
 	cfg := tinyCfg()
-	p := NewInKernelPlanner(model.NewSynthetic(cfg), nil, "synthetic", false, nil, false)
+	// The radix edge-token budget now comes from the explicit planner config
+	// (FAK_INKERNEL_RADIX_BUDGET is retired, #13605 leaf A-S); 20 keeps the
+	// over-budget eviction arm this test exercises.
+	p := NewInKernelPlannerWithConfig(model.NewSynthetic(cfg), nil, "synthetic", false, nil, false, InKernelPlannerConfig{RadixBudgetTokens: 20})
 	p.quant = false
 	if p.tree == nil {
 		t.Fatal("FAK_INKERNEL_RADIX=on should construct a radix tree")

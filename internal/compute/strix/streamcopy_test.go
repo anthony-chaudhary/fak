@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -174,13 +173,10 @@ func TestStreamCopy_OptionsAndTelemetry(t *testing.T) {
 }
 
 // TestStreamCopy_HardwareCapabilityAndOverrides verifies hardware detection,
-// test overrides, and environment variable flags.
+// test overrides, and the explicit per-operation AVX-512 selection that replaced
+// the retired FAK_AVX512_* environment toggles (#13605 leaf A-avx512).
 func TestStreamCopy_HardwareCapabilityAndOverrides(t *testing.T) {
 	defer SetAVX512StreamingOverrideForTesting(nil)
-	_ = os.Unsetenv("FAK_AVX512_STREAMING_FORCE")
-	_ = os.Unsetenv("FAK_AVX512_STREAMING_DISABLE")
-	_ = os.Unsetenv("FAK_AVX512_FORCE")
-	_ = os.Unsetenv("FAK_AVX512_DISABLE")
 
 	// 1. Programmatic override
 	overrideTrue := true
@@ -197,23 +193,42 @@ func TestStreamCopy_HardwareCapabilityAndOverrides(t *testing.T) {
 
 	SetAVX512StreamingOverrideForTesting(nil)
 
-	// 2. Env variable disable
-	_ = os.Setenv("FAK_AVX512_STREAMING_DISABLE", "1")
-	ResetAVX512StreamingCapabilityForTesting()
-	if HasAVX512Streaming() {
-		t.Errorf("expected HasAVX512Streaming=false with FAK_AVX512_STREAMING_DISABLE")
+	// 2. Explicit per-operation selection (replaces the retired env toggles).
+	// Capability detection stays separate: auto must agree with the probe,
+	// forced never reports as detected, disabled always refuses.
+	if got := resolveAVX512Selection(AVX512Auto); got != HasAVX512Streaming() {
+		t.Errorf("AVX512Auto resolved to %v, want the detection answer %v", got, HasAVX512Streaming())
 	}
-	_ = os.Unsetenv("FAK_AVX512_STREAMING_DISABLE")
-	ResetAVX512StreamingCapabilityForTesting()
+	if resolveAVX512Selection(AVX512Disabled) {
+		t.Error("AVX512Disabled must refuse the AVX-512 path unconditionally")
+	}
+	if !resolveAVX512Selection(AVX512Forced) {
+		t.Error("AVX512Forced must select the AVX-512 path regardless of detection")
+	}
 
-	// 3. Env variable force
-	_ = os.Setenv("FAK_AVX512_STREAMING_FORCE", "1")
-	ResetAVX512StreamingCapabilityForTesting()
-	if !HasAVX512Streaming() {
-		t.Errorf("expected HasAVX512Streaming=true with FAK_AVX512_STREAMING_FORCE")
+	// 3. End-to-end: the selection reaches the kernel decision, gated by hardware.
+	const size = 4096
+	src := make([]byte, size)
+	dst := make([]byte, size)
+	for i := range src {
+		src[i] = byte(i)
 	}
-	_ = os.Unsetenv("FAK_AVX512_STREAMING_FORCE")
-	ResetAVX512StreamingCapabilityForTesting()
+	run := func(sel AVX512Selection) bool {
+		var telem StreamCopyTelemetry
+		if _, err := StreamCopy(dst, src, WithTelemetry(&telem), WithAVX512Selection(sel)); err != nil {
+			t.Fatalf("StreamCopy(%v) failed: %v", sel, err)
+		}
+		return telem.UsedAVX512
+	}
+	if run(AVX512Disabled) {
+		t.Error("expected UsedAVX512=false under AVX512Disabled")
+	}
+	if got, want := run(AVX512Forced), canExecuteAVX512(); got != want {
+		t.Errorf("AVX512Forced: UsedAVX512=%v, want the hardware safety gate %v", got, want)
+	}
+	if got, want := run(AVX512Auto), HasAVX512Streaming() && canExecuteAVX512(); got != want {
+		t.Errorf("AVX512Auto: UsedAVX512=%v, want detection AND hardware gate %v", got, want)
+	}
 
 	// 4. MemoryStoreFence execution
 	MemoryStoreFence()

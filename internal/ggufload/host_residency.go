@@ -304,8 +304,15 @@ func (s *WeightSource) UnifiedHostResidencyPlan(opts ...Q4KLoadOption) (compute.
 		// Bounded streamed dense: the eligible dense side is charged at its declared host
 		// working set (fak#13194), so the residency bound judges what the loader retains rather
 		// than the full on-disk dense side. Only a genuinely unbounded request (no working set
-		// declared) still falls back to the raw full-charge plan, preserving fail-closed.
-		plan, err := s.EstimateQ4KLoadMemoryPlan(WithStreamedDenseQ4KWorkingSet(o.streamedDenseBytes))
+		// declared) still falls back to the raw full-charge plan, preserving fail-closed. The
+		// device-residency pin travels with the reconstruction: a tensor the executing backend's
+		// kernel preflight requires device-resident stays out of the host fold here exactly as it
+		// does in the estimate and the loader dispatch.
+		rebuilt := []Q4KLoadOption{WithStreamedDenseQ4KWorkingSet(o.streamedDenseBytes)}
+		if o.streamedDensePinned != nil {
+			rebuilt = append(rebuilt, WithStreamedDenseDeviceResident(o.streamedDensePinned))
+		}
+		plan, err := s.EstimateQ4KLoadMemoryPlan(rebuilt...)
 		if errors.Is(err, ErrQ4KLoadEstimateUnsupported) {
 			// The dense-family Q4_K estimate refuses an MoE checkpoint by name. Charging the
 			// raw full-payload plan there SILENTLY discards the declared bounded dense working

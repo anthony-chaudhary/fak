@@ -1978,6 +1978,9 @@ struct InflightBatch {
     uint64_t d2dBytes = 0;
     bool d2dValid = true;
     uint32_t syncStage = UINT32_MAX;
+    // Checked bookkeeping runs at retire, before any recycling below.
+    bool v41 = false;
+    bool hadWork = false;
 };
 InflightBatch g_inflight;
 VkFence g_pipeFences[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
@@ -1992,7 +1995,20 @@ void drainInflight() {
     InflightBatch done = std::move(g_inflight);
     g_inflight = InflightBatch{};
     const auto t0 = std::chrono::steady_clock::now();
-    VKCHECK(vkWaitForFences(g_dev, 1, &done.fence, VK_TRUE, UINT64_MAX));
+    const VkResult wr = vkWaitForFences(g_dev, 1, &done.fence, VK_TRUE, UINT64_MAX);
+    const bool completed = wr == VK_SUCCESS;
+    if (!completed) {
+        if (!done.v41) {
+            fprintf(stderr, "fak-vulkan: %s:%d VkResult=%d\n", __FILE__, __LINE__, (int)wr);
+            abort();
+        }
+        // Checked wait-side latch: only a signaled fence proves quiescence. Retain the
+        // retiring command, descriptor sets and parked buffers; nothing may recycle.
+        g_v41SubmissionPendingFailure = true;
+        g_submissionStatus = wr < VK_SUCCESS ? wr : VK_ERROR_UNKNOWN;
+        tsBatchLost();
+        return;
+    }
     g_syncPipeDrains.fetch_add(1, std::memory_order_release);
     syncSignaled(kSyncSitePipelineDrain, done.syncStage,
         (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(t0.time_since_epoch()).count(), false);
@@ -2000,6 +2016,12 @@ void drainInflight() {
         g_pipeWaitNs.fetch_add((uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - t0).count(), std::memory_order_relaxed);
         g_pipeDrains.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (done.v41) {
+        // The closing flush's checked bookkeeping, ordered before any recycling.
+        if (!completed || !done.hadWork || g_v41SubmissionPendingFailure) tsBatchLost();
+        if (g_v41SubmissionPendingFailure) return; // retain command, sets and parked buffers
+        if (completed && done.hadWork) tsBatchCollect();
     }
     if (!done.d2dValid || !checkedCounterAdd(g_d2dCount, done.d2dCount) ||
         !checkedCounterAdd(g_d2dBytes, done.d2dBytes)) {
@@ -2056,7 +2078,10 @@ void batchFlush();
 void batchCycle() {
     if (g_v41SubmissionPendingFailure || !g_batching) return;
     VkFence fence = VK_NULL_HANDLE;
-    const bool eligible = g_pipelineFlush && !g_batchHasV41 && !g_stepBatch && !g_tsOn &&
+    // V4.1-checked batches cycle too: their submit latches synchronously below and their
+    // completion latches at retire. Only an open step window stays serialized, because the
+    // model reads per-op status/readback inside it.
+    const bool eligible = g_pipelineFlush && !g_stepBatch && !g_tsOn &&
         !g_batchHazardsArmed && g_submissionStatus == VK_SUCCESS;
     if (eligible && g_batchOps == 0) return;
     if (eligible) fence = pipelineFence();
@@ -2073,7 +2098,20 @@ void batchCycle() {
     si.commandBufferCount = 1;
     si.pCommandBuffers = &g_batchCmd;
     const uint64_t syncAt = submitWaitNow();
-    VKCHECK(vkQueueSubmit(g_queue, 1, &si, fence));
+    const VkResult sr = vkQueueSubmit(g_queue, 1, &si, fence);
+    if (sr != VK_SUCCESS) {
+        if (!g_batchHasV41) {
+            fprintf(stderr, "fak-vulkan: %s:%d VkResult=%d\n", __FILE__, __LINE__, (int)sr);
+            abort();
+        }
+        // Checked submit-side latch: no failure result is a quiescence proof. Retain the
+        // recorded state exactly like the blocking path; nothing stashes, nothing recycles.
+        if (sr > VK_SUCCESS) fprintf(stderr, "fak-vulkan: V4.1 incomplete submission VkResult=%d\n", int(sr));
+        g_v41SubmissionPendingFailure = true;
+        g_submissionStatus = sr < VK_SUCCESS ? sr : VK_ERROR_UNKNOWN;
+        drainInflight();
+        return;
+    }
     syncSubmitted(syncAt);
     g_syncPipeSubmits.fetch_add(1, std::memory_order_relaxed);
     const uint32_t syncStage = syncTakeBatchStage();
@@ -2087,6 +2125,8 @@ void batchCycle() {
     g_inflight.d2dCount = g_batchD2DCount;
     g_inflight.d2dBytes = g_batchD2DBytes;
     g_inflight.d2dValid = g_batchD2DValid;
+    g_inflight.v41 = g_batchHasV41;
+    g_inflight.hadWork = g_batchOps > 0;
     g_batchCmd = VK_NULL_HANDLE;
     g_batching = false;
     g_batchOps = 0;
@@ -2111,6 +2151,8 @@ void batchFlush() {
     bool hadWork = g_batchOps > 0;
     if (g_batchHasV41) {
         drainInflight();
+        const bool quarantined = g_v41SubmissionPendingFailure;
+        if (quarantined) return; // predecessor's retire quarantined; retain
         if (hadWork) dpBatchSubmit();
         const bool completed = v41EndSubmitWaitChecked(g_batchCmd, hadWork);
         if (!completed || !hadWork || g_v41SubmissionPendingFailure) tsBatchLost();

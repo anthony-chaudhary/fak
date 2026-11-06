@@ -52,6 +52,8 @@ type Segment struct {
 	Cumulative    float64           // lifetime undecayed attention mass
 	EMA           float64           // recency-decayed rolling attention mass
 	Pinned        bool              // protected from attention-driven eviction
+	WeightEpoch   uint64            // weight-epoch generation the span's KV was computed under (0 = unstamped)
+	WeightDigest  string            // content identity of that weight state ("" = unstamped); see weight_epoch.go
 	traj          []float64         // bounded ring of recent turn masses
 	trajHead      int               // next write slot in traj ring
 	trajLen       int               // valid entry count in traj ring
@@ -121,10 +123,17 @@ func NewBackendWithGate(kv abi.KVBackend, gate Gate) *Context {
 
 // Append prefills a labeled prompt segment into the KV cache and returns logits and the recorded segment.
 // Precondition: token ids sequence must be non-empty and represent a discrete contiguous prompt segment.
-// Postcondition: returns non-nil segment record positioned at the prior cache boundary with matching length.
+// Postcondition: returns non-nil segment record positioned at the prior cache boundary with matching length,
+// stamped with the backend's live weight-epoch state when the backend exposes the optional WeightEpoch seam
+// (weight_epoch.go); backends without it leave the span unstamped, exactly as before.
 func (c *Context) Append(id, tool string, ids []int) ([]float32, *Segment) {
 	from := c.kv.Len()
 	seg := &Segment{ID: id, Tool: tool, From: from, Len: len(ids), KV: c.kvEntryID(ids), Pinned: defaultPinned(tool)}
+	if ep, ok := c.kv.(interface{ WeightEpoch() model.WeightEpochStamp }); ok {
+		st := ep.WeightEpoch()
+		seg.WeightEpoch = st.Generation
+		seg.WeightDigest = st.Digest
+	}
 	c.segs = append(c.segs, seg)
 	logits := c.kv.Prefill(ids)
 	return logits, seg

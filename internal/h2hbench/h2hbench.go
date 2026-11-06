@@ -34,6 +34,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -115,6 +116,12 @@ type Config struct {
 	// process (a second server, a tuning run) shares the device, which /slots
 	// cannot see.
 	GPUBusyPath string
+	// Concurrency is the number of in-flight client streams that replay the
+	// full scenario sequence simultaneously (1 = sequential default, legacy
+	// row shape). Each stream gets its own seeds and nonces so streams never
+	// warm each other's prompt caches; rows carry stream/concurrency tags and
+	// Summarize folds per-(concurrency, scenario) aggregate cells.
+	Concurrency int
 }
 
 // gpuBusyContended is the idle-GPU busy percentage above which a reading is
@@ -200,7 +207,11 @@ type Row struct {
 	// Pos is this request's place in its back-to-back group of arms. On
 	// llama-server the second request of a pair measured ~400 ms slower on warm
 	// multi-turn TTFT regardless of arm (strix3), so the fold balances by Pos.
-	Pos              int     `json:"pos"`
+	Pos int `json:"pos"`
+	// Stream is the in-flight stream index when Concurrency > 1; both fields
+	// are omitted on sequential runs so legacy ledgers stay byte-compatible.
+	Stream           int     `json:"stream,omitempty"`
+	Concurrency      int     `json:"concurrency,omitempty"`
 	OK               bool    `json:"ok"`
 	Error            string  `json:"error,omitempty"`
 	PromptTokens     int     `json:"prompt_tokens"`
@@ -335,11 +346,17 @@ func Run(ctx context.Context, cfg Config) ([]Row, error) {
 	if cfg.Client == nil {
 		cfg.Client = &http.Client{}
 	}
+	if cfg.Concurrency <= 0 {
+		cfg.Concurrency = 1
+	}
 	if cfg.ConversationsN <= 0 {
 		cfg.ConversationsN = cfg.Reps
 	}
 	var rows []Row
+	var mu sync.Mutex
 	emit := func(r Row) error {
+		mu.Lock()
+		defer mu.Unlock()
 		rows = append(rows, r)
 		if cfg.Progress != nil {
 			status := "ok"
@@ -364,93 +381,134 @@ func Run(ctx context.Context, cfg Config) ([]Row, error) {
 		}
 		return arms
 	}
-	base := func(arm Arm, scenario string, size, rep int) Row {
-		return Row{Schema: Schema, RunID: cfg.RunID, Host: cfg.Host, Model: cfg.Model,
+	base := func(arm Arm, scenario string, size, rep, stream int) Row {
+		r := Row{Schema: Schema, RunID: cfg.RunID, Host: cfg.Host, Model: cfg.Model,
 			Arm: arm.Name, Role: arm.Role, Scenario: scenario, Size: size, Rep: rep,
 			RequestedSpeculation: cfg.speculativeMode, RequestedDraftCap: cfg.requestedDraftCap, SpeculationEvidence: "unknown"}
-	}
-
-	// Cold prefill: identical seeded body per (size, rep), unique nonce per arm.
-	for _, size := range cfg.ColdSizes {
-		for rep := 0; rep < cfg.Reps; rep++ {
-			body := filler(rand.New(rand.NewSource(int64(size*1000+rep))), size)
-			for pos, arm := range order(rep) {
-				if err := ctx.Err(); err != nil {
-					return rows, err
-				}
-				msgs := []message{{Role: "user", Content: nonce(speculativeNonceID(cfg), arm.Name, fmt.Sprintf("cold-%d-%d", size, rep)) + body +
-					"\n\nIn one short sentence, what is the most frequent word above?"}}
-				r := base(arm, ScenarioCold, size, rep)
-				r.Pos = pos
-				if _, err := measure(ctx, cfg, arm, msgs, cfg.AnswerTokens, &r); err != nil {
-					r.Error = err.Error()
-				}
-				if err := emit(r); err != nil {
-					return rows, err
-				}
-			}
+		if cfg.Concurrency > 1 {
+			r.Stream, r.Concurrency = stream, cfg.Concurrency
 		}
+		return r
 	}
 
-	// Decode: short prompt, long answer.
-	if cfg.DecodeTokens > 0 {
-		for rep := 0; rep < cfg.Reps; rep++ {
-			for pos, arm := range order(rep) {
-				if err := ctx.Err(); err != nil {
-					return rows, err
-				}
-				msgs := []message{{Role: "user", Content: nonce(speculativeNonceID(cfg), arm.Name, fmt.Sprintf("decode-%d", rep)) +
-					"Write the integers from 1 to 1000 in English words, separated by commas. Do not stop early."}}
-				r := base(arm, ScenarioDecode, cfg.DecodeTokens, rep)
-				r.Pos = pos
-				if _, err := measure(ctx, cfg, arm, msgs, cfg.DecodeTokens, &r); err != nil {
-					r.Error = err.Error()
-				}
-				if err := emit(r); err != nil {
-					return rows, err
-				}
+	// runSequence replays the full scenario workload once. stream < cfg.Concurrency
+	// indexes an in-flight stream; with Concurrency == 1 it is the legacy
+	// sequential run (identical seeds, nonces, and row shape).
+	runSequence := func(stream int) error {
+		// Stream-scoped seeds and nonces: streams never share filler text or
+		// cache nonces, so one stream cannot warm another's prompt cache.
+		seed := func(base int64) int64 { return base + int64(stream)*10_000_000 }
+		nonceID := func(id string) string {
+			if cfg.Concurrency <= 1 {
+				return id
 			}
+			return fmt.Sprintf("s%d-%s", stream, id)
 		}
-	}
-
-	// Multi-turn: one conversation per arm per rep, turns interleaved across arms
-	// so every arm's turn t runs back to back.
-	if cfg.Turns > 0 {
-		for conv := 0; conv < cfg.ConversationsN; conv++ {
-			r0 := rand.New(rand.NewSource(int64(7_000_000 + conv)))
-			system := filler(r0, cfg.SystemTokens)
-			turnText := make([]string, cfg.Turns)
-			for t := range turnText {
-				turnText[t] = filler(r0, cfg.TurnTokens)
-			}
-			hist := map[string][]message{}
-			for _, arm := range cfg.Arms {
-				hist[arm.Name] = []message{{Role: "system", Content: nonce(speculativeNonceID(cfg), arm.Name, fmt.Sprintf("mt-%d", conv)) +
-					"You are a terse assistant. Reference material follows.\n" + system}}
-			}
-			for t := 0; t < cfg.Turns; t++ {
-				for pos, arm := range order(conv + t) {
+		// Cold prefill: identical seeded body per (size, rep), unique nonce per arm.
+		for _, size := range cfg.ColdSizes {
+			for rep := 0; rep < cfg.Reps; rep++ {
+				body := filler(rand.New(rand.NewSource(seed(int64(size*1000+rep)))), size)
+				for pos, arm := range order(rep) {
 					if err := ctx.Err(); err != nil {
-						return rows, err
+						return err
 					}
-					h := append(hist[arm.Name], message{Role: "user", Content: fmt.Sprintf("Turn %d notes:\n%s\nReply with one short sentence.", t+1, turnText[t])})
-					r := base(arm, ScenarioMultiTurn, t+1, conv)
+					msgs := []message{{Role: "user", Content: nonce(speculativeNonceID(cfg), arm.Name, nonceID(fmt.Sprintf("cold-%d-%d", size, rep))) + body +
+						"\n\nIn one short sentence, what is the most frequent word above?"}}
+					r := base(arm, ScenarioCold, size, rep, stream)
 					r.Pos = pos
-					answer, err := measure(ctx, cfg, arm, h, cfg.AnswerTokens, &r)
-					if err != nil {
+					if _, err := measure(ctx, cfg, arm, msgs, cfg.AnswerTokens, &r); err != nil {
 						r.Error = err.Error()
-						answer = "ok."
 					}
-					if strings.TrimSpace(answer) == "" {
-						answer = "ok."
-					}
-					hist[arm.Name] = append(h, message{Role: "assistant", Content: answer})
 					if err := emit(r); err != nil {
-						return rows, err
+						return err
 					}
 				}
 			}
 		}
+
+		// Decode: short prompt, long answer.
+		if cfg.DecodeTokens > 0 {
+			for rep := 0; rep < cfg.Reps; rep++ {
+				for pos, arm := range order(rep) {
+					if err := ctx.Err(); err != nil {
+						return err
+					}
+					msgs := []message{{Role: "user", Content: nonce(speculativeNonceID(cfg), arm.Name, nonceID(fmt.Sprintf("decode-%d", rep))) +
+						"Write the integers from 1 to 1000 in English words, separated by commas. Do not stop early."}}
+					r := base(arm, ScenarioDecode, cfg.DecodeTokens, rep, stream)
+					r.Pos = pos
+					if _, err := measure(ctx, cfg, arm, msgs, cfg.DecodeTokens, &r); err != nil {
+						r.Error = err.Error()
+					}
+					if err := emit(r); err != nil {
+						return err
+					}
+				}
+			}
+		}
+
+		// Multi-turn: one conversation per arm per rep, turns interleaved across arms
+		// so every arm's turn t runs back to back.
+		if cfg.Turns > 0 {
+			for conv := 0; conv < cfg.ConversationsN; conv++ {
+				r0 := rand.New(rand.NewSource(seed(int64(7_000_000 + conv))))
+				system := filler(r0, cfg.SystemTokens)
+				turnText := make([]string, cfg.Turns)
+				for t := range turnText {
+					turnText[t] = filler(r0, cfg.TurnTokens)
+				}
+				hist := map[string][]message{}
+				for _, arm := range cfg.Arms {
+					hist[arm.Name] = []message{{Role: "system", Content: nonce(speculativeNonceID(cfg), arm.Name, nonceID(fmt.Sprintf("mt-%d", conv))) +
+						"You are a terse assistant. Reference material follows.\n" + system}}
+				}
+				for t := 0; t < cfg.Turns; t++ {
+					for pos, arm := range order(conv + t) {
+						if err := ctx.Err(); err != nil {
+							return err
+						}
+						h := append(hist[arm.Name], message{Role: "user", Content: fmt.Sprintf("Turn %d notes:\n%s\nReply with one short sentence.", t+1, turnText[t])})
+						r := base(arm, ScenarioMultiTurn, t+1, conv, stream)
+						r.Pos = pos
+						answer, err := measure(ctx, cfg, arm, h, cfg.AnswerTokens, &r)
+						if err != nil {
+							r.Error = err.Error()
+							answer = "ok."
+						}
+						if strings.TrimSpace(answer) == "" {
+							answer = "ok."
+						}
+						hist[arm.Name] = append(h, message{Role: "assistant", Content: answer})
+						if err := emit(r); err != nil {
+							return err
+						}
+					}
+				}
+			}
+		}
+		return nil
+	}
+
+	if cfg.Concurrency > 1 {
+		errs := make([]error, cfg.Concurrency)
+		var wg sync.WaitGroup
+		for s := 0; s < cfg.Concurrency; s++ {
+			wg.Add(1)
+			go func(s int) {
+				defer wg.Done()
+				errs[s] = runSequence(s)
+			}(s)
+		}
+		wg.Wait()
+		for _, err := range errs {
+			if err != nil {
+				return rows, err
+			}
+		}
+		return rows, nil
+	}
+	if err := runSequence(0); err != nil {
+		return rows, err
 	}
 	return rows, nil
 }
@@ -641,6 +699,7 @@ func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
 // Cell is one (arm, scenario, size) fold.
 type Cell struct {
 	RequestedSpeculation string  `json:"requested_speculation,omitempty"`
+	Concurrency          int     `json:"concurrency,omitempty"` // >1 only on concurrent runs
 	DraftObserved        int     `json:"draft_observed"`
 	SpeculationUnknown   int     `json:"speculation_unknown"`
 	Arm                  string  `json:"arm"`
@@ -672,6 +731,29 @@ type Loss struct {
 	Gap float64 `json:"gap"`
 }
 
+// ConcCell folds one (concurrency, scenario, size) group of a concurrent run:
+// aggregate throughput over the group's wall window plus latency percentiles
+// across its requests. The wall window runs from the first request's start to
+// the last request's end (UnixMS is the request start; end = UnixMS + E2EMS);
+// aggregate tok/s is the summed token count over that wall window, which is
+// the batching-efficiency curve a concurrency sweep is read from.
+type ConcCell struct {
+	Concurrency   int     `json:"concurrency"`
+	Scenario      string  `json:"scenario"`
+	Size          int     `json:"size"`
+	Requests      int     `json:"requests"`
+	Errors        int     `json:"errors"`
+	WallS         float64 `json:"wall_s"`
+	SumPrompt     int     `json:"sum_uncached_prompt_tokens"`
+	SumDecode     int     `json:"sum_decode_tokens"`
+	AggPrefillTPS float64 `json:"aggregate_prefill_tps"`
+	AggDecodeTPS  float64 `json:"aggregate_decode_tps"`
+	TTFTP50       float64 `json:"ttft_ms_p50"`
+	TTFTP90       float64 `json:"ttft_ms_p90"`
+	TPOP50        float64 `json:"tpot_ms_p50"`
+	TPOTP90       float64 `json:"tpot_ms_p90"`
+}
+
 // Report is the folded, agent-readable view of one run.
 type Report struct {
 	Schema string `json:"schema"`
@@ -680,8 +762,10 @@ type Report struct {
 	Model  string `json:"model,omitempty"`
 	Rows   int    `json:"rows"`
 	Cells  []Cell `json:"cells"`
-	Losses []Loss `json:"losses"`
-	Wins   []Loss `json:"wins"` // same shape; Gap is how far fak leads
+	// ConcurrencyCells is non-empty only when the run used Concurrency > 1.
+	ConcurrencyCells []ConcCell `json:"concurrency_cells,omitempty"`
+	Losses           []Loss     `json:"losses"`
+	Wins             []Loss     `json:"wins"` // same shape; Gap is how far fak leads
 }
 
 func quantile(xs []float64, q float64) float64 {
@@ -720,6 +804,7 @@ func Summarize(rows []Row) Report {
 	type key struct {
 		arm, scenario, speculation string
 		size                       int
+		conc                       int
 	}
 	type acc struct {
 		cell                     Cell
@@ -733,14 +818,14 @@ func Summarize(rows []Row) Report {
 		if rep.RunID == "" {
 			rep.RunID, rep.Host, rep.Model = r.RunID, r.Host, r.Model
 		}
-		ks := []key{{r.Arm, r.Scenario, r.RequestedSpeculation, r.Size}}
+		ks := []key{{r.Arm, r.Scenario, r.RequestedSpeculation, r.Size, r.Concurrency}}
 		if r.Scenario == ScenarioMultiTurn && r.Size >= 2 {
-			ks = append(ks, key{r.Arm, r.Scenario, r.RequestedSpeculation, WarmTurns})
+			ks = append(ks, key{r.Arm, r.Scenario, r.RequestedSpeculation, WarmTurns, r.Concurrency})
 		}
 		for _, k := range ks {
 			a := accs[k]
 			if a == nil {
-				a = &acc{cell: Cell{Arm: r.Arm, Role: r.Role, Scenario: k.scenario, Size: k.size, RequestedSpeculation: k.speculation},
+				a = &acc{cell: Cell{Arm: r.Arm, Role: r.Role, Scenario: k.scenario, Size: k.size, RequestedSpeculation: k.speculation, Concurrency: k.conc},
 					ttftP: map[int][]float64{}, prefillP: map[int][]float64{}, decodeP: map[int][]float64{}}
 				accs[k] = a
 				keys = append(keys, k)
@@ -777,6 +862,9 @@ func Summarize(rows []Row) Report {
 		if keys[i].size != keys[j].size {
 			return keys[i].size < keys[j].size
 		}
+		if keys[i].conc != keys[j].conc {
+			return keys[i].conc < keys[j].conc
+		}
 		if keys[i].speculation != keys[j].speculation {
 			return keys[i].speculation < keys[j].speculation
 		}
@@ -794,7 +882,82 @@ func Summarize(rows []Row) Report {
 		rep.Cells = append(rep.Cells, c)
 	}
 	rep.Losses, rep.Wins = Compare(rep.Cells)
+	rep.ConcurrencyCells = foldConcurrency(rows)
 	return rep
+}
+
+// foldConcurrency builds the per-(concurrency, scenario, size) aggregate cells
+// for concurrent runs; sequential rows (Concurrency <= 1) are skipped.
+func foldConcurrency(rows []Row) []ConcCell {
+	type ckey struct {
+		conc     int
+		scenario string
+		size     int
+	}
+	type cacc struct {
+		cell       ConcCell
+		start, end int64
+		ttft, tpot []float64
+	}
+	caccs := map[ckey]*cacc{}
+	var ckeys []ckey
+	for _, r := range rows {
+		if r.Concurrency <= 1 {
+			continue
+		}
+		k := ckey{r.Concurrency, r.Scenario, r.Size}
+		a := caccs[k]
+		if a == nil {
+			a = &cacc{cell: ConcCell{Concurrency: r.Concurrency, Scenario: r.Scenario, Size: r.Size}}
+			caccs[k] = a
+			ckeys = append(ckeys, k)
+		}
+		a.cell.Requests++
+		if a.start == 0 || r.UnixMS < a.start {
+			a.start = r.UnixMS
+		}
+		if !r.OK {
+			a.cell.Errors++
+			continue
+		}
+		if e := r.UnixMS + int64(r.E2EMS); e > a.end {
+			a.end = e
+		}
+		a.cell.SumPrompt += r.PromptTokens - r.CachedTokens
+		if r.CompletionTokens > 1 {
+			a.cell.SumDecode += r.CompletionTokens - 1
+			if dt := r.E2EMS - r.TTFTMS; dt > 0 {
+				a.tpot = append(a.tpot, dt/float64(r.CompletionTokens-1))
+			}
+		}
+		a.ttft = append(a.ttft, r.TTFTMS)
+	}
+	if len(ckeys) == 0 {
+		return nil
+	}
+	sort.SliceStable(ckeys, func(i, j int) bool {
+		if ckeys[i].conc != ckeys[j].conc {
+			return ckeys[i].conc < ckeys[j].conc
+		}
+		if ckeys[i].scenario != ckeys[j].scenario {
+			return scenarioRank(ckeys[i].scenario) < scenarioRank(ckeys[j].scenario)
+		}
+		return ckeys[i].size < ckeys[j].size
+	})
+	out := make([]ConcCell, 0, len(ckeys))
+	for _, k := range ckeys {
+		c := caccs[k].cell
+		a := caccs[k]
+		if a.end > a.start {
+			c.WallS = float64(a.end-a.start) / 1000
+			c.AggPrefillTPS = float64(c.SumPrompt) / c.WallS
+			c.AggDecodeTPS = float64(c.SumDecode) / c.WallS
+		}
+		c.TTFTP50, c.TTFTP90 = quantile(a.ttft, 0.5), quantile(a.ttft, 0.9)
+		c.TPOP50, c.TPOTP90 = quantile(a.tpot, 0.5), quantile(a.tpot, 0.9)
+		out = append(out, c)
+	}
+	return out
 }
 
 func scenarioRank(s string) int {

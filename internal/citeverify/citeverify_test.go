@@ -86,3 +86,36 @@ func BenchmarkVerify(b *testing.B) {
 		}
 	}
 }
+
+// fak-test:runtime fast est=50ms lane=default
+func TestVerifyCitationEOFBelongsToNoLine(t *testing.T) {
+	root := t.TempDir()
+	for _, tt := range []struct {
+		name, body string
+		evidence   []string
+		want       Status
+	}{
+		{"empty source first line", "", []string{"fixture.go:1"}, Contradicts},
+		{"empty source later line", "", []string{"fixture.go:2"}, Contradicts},
+		{"one past LF terminated line", "Target\n", []string{"fixture.go:2"}, Contradicts},
+		{"one past CRLF terminated line", "Target\r\n", []string{"fixture.go:2"}, Contradicts},
+		{"one past trailing blank line", "Target\n\n", []string{"fixture.go:3"}, Contradicts},
+		{"real trailing blank line", "Target\n\n", []string{"fixture.go:2"}, Unknown},
+		{"real blank only line", "\n", []string{"fixture.go:1"}, Unknown},
+		{"real unterminated line", "Target", []string{"fixture.go:1"}, Supports},
+		{"past unterminated line", "Target", []string{"fixture.go:2"}, Contradicts},
+		{"real LF terminated line", "Target\n", []string{"fixture.go:1"}, Supports},
+		{"real CRLF terminated line", "Target\r\n", []string{"fixture.go:1"}, Supports},
+		{"resolved nonmatching line", "Other\n", []string{"fixture.go:1"}, Contradicts},
+		{"support plus nonexistent line is mixed", "Target\n", []string{"fixture.go:1", "fixture.go:2"}, Mixed},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := os.WriteFile(filepath.Join(root, "fixture.go"), []byte(tt.body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if got := Verify("`Target` exists", tt.evidence, root); got != tt.want {
+				t.Fatalf("Verify(%q, %v) = %q, want %q", tt.body, tt.evidence, got, tt.want)
+			}
+		})
+	}
+}

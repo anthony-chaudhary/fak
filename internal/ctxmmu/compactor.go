@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -92,6 +93,7 @@ type TokenPage struct {
 	Resident       bool      `json:"resident"`                  // true if resident in context
 	Pinned         bool      `json:"pinned,omitempty"`          // if true, never evicted or tombstoned
 	IsContinuation bool      `json:"is_continuation,omitempty"` // true if part of a multi-page tool result
+	Reasoning      string    `json:"reasoning,omitempty"`       // committed reasoning span carried by SubstituteCommittedReasoning
 	Tombstone      Tombstone `json:"tombstone,omitempty"`
 }
 
@@ -572,6 +574,126 @@ func (c *Compactor) Compact(ctx context.Context, pages []TokenPage) ([]TokenPage
 	return compacted, report, err
 }
 
+// CommittedReasoning holds one assistant turn's committed reasoning span from
+// the session's committed stream, plus the identifiers used to verify a live
+// page still belongs to that turn before its reasoning is carried onto it.
+type CommittedReasoning struct {
+	// Interior is the committed reasoning interior; "" when the turn had none.
+	Interior string
+	// Gate is the visible content of the turn before any tool call.
+	Gate string
+	// Tools is the ordered tool-call identity of the turn; nil when it made
+	// no calls. A branch switch that changed only the calls must not inherit
+	// reasoning that argued for the old calls.
+	Tools []string
+}
+
+// NormalizeReasoningGate reduces raw visible turn content to the gate form
+// both sides of a reasoning substitution compare through: surrounding
+// whitespace stripped, otherwise byte-exact. Comparing both sides through this
+// single normalizer keeps client-laundered turns from reading as rewritten.
+func NormalizeReasoningGate(content []byte) string {
+	return strings.TrimSpace(string(content))
+}
+
+// SubstituteCommittedReasoning positionally carries committed reasoning spans
+// onto matching assistant pages. It walks the pages in order; each assistant
+// turn (an assistant page plus the contiguous tool-call pages sharing its
+// turn index) consumes one committed span. Prefix rule: the first turn whose
+// gate or tool identity mismatches its committed span closes substitution for
+// itself and every later turn, because a rewritten historical turn makes the
+// positional mapping untrustworthy. Assistant pages that render to nothing
+// consume no span.
+//
+// Current-turn carve-out: the final assistant turn is owned by the active
+// request, so its gate and tool identity are verified against the last
+// committed span independently of earlier mismatches; an edited historical
+// turn never strips the current turn's reasoning span. Each span is carried
+// at most once. Returns a copy of pages with Reasoning set on carried turns
+// and the number of spans carried.
+func SubstituteCommittedReasoning(pages []TokenPage, committed []CommittedReasoning) ([]TokenPage, int) {
+	if len(pages) == 0 {
+		return nil, 0
+	}
+	out := make([]TokenPage, len(pages))
+	copy(out, pages)
+	if len(committed) == 0 {
+		return out, 0
+	}
+
+	type liveTurn struct {
+		pageIdx int
+		gate    string
+		tools   []string
+	}
+	var turns []liveTurn
+	for i := range out {
+		p := &out[i]
+		if p.Kind != PageKindAssistant {
+			continue
+		}
+		var tools []string
+		for j := i + 1; j < len(out) && out[j].Kind == PageKindToolCall && out[j].TurnIndex == p.TurnIndex; j++ {
+			tools = append(tools, out[j].ToolName)
+		}
+		if NormalizeReasoningGate(p.Content) == "" && len(tools) == 0 {
+			// Renders to nothing: the committed stream never saw this turn,
+			// so it must not shift the positional mapping.
+			continue
+		}
+		turns = append(turns, liveTurn{pageIdx: i, gate: NormalizeReasoningGate(p.Content), tools: tools})
+	}
+	if len(turns) == 0 {
+		return out, 0
+	}
+
+	match := func(t liveTurn, c CommittedReasoning) bool {
+		if t.gate != NormalizeReasoningGate([]byte(c.Gate)) {
+			return false
+		}
+		if len(t.tools) != len(c.Tools) {
+			return false
+		}
+		for k := range t.tools {
+			if t.tools[k] != c.Tools[k] {
+				return false
+			}
+		}
+		return true
+	}
+
+	carry := func(pageIdx int, c CommittedReasoning) bool {
+		if c.Interior == "" || out[pageIdx].Reasoning != "" {
+			return false
+		}
+		out[pageIdx].Reasoning = c.Interior
+		return true
+	}
+
+	substituted := 0
+	open := true
+	for ti, t := range turns {
+		if !open || ti >= len(committed) {
+			break
+		}
+		if !match(t, committed[ti]) {
+			open = false
+			continue
+		}
+		if carry(t.pageIdx, committed[ti]) {
+			substituted++
+		}
+	}
+
+	// Current-turn carve-out: re-match the final assistant turn against the
+	// last committed span even when the walk closed on an earlier mismatch.
+	last := turns[len(turns)-1]
+	if match(last, committed[len(committed)-1]) && carry(last.pageIdx, committed[len(committed)-1]) {
+		substituted++
+	}
+	return out, substituted
+}
+
 func (c *Compactor) pageOutToCAS(body []byte) (string, error) {
 	if c.mmu != nil {
 		h := c.mmu.pageOut(context.Background(), body)
@@ -645,6 +767,82 @@ func VerifyPrefixWarmth(before, after []TokenPage) bool {
 		}
 	}
 	return true
+}
+
+// HistoryClose reports where a sequential prefix substitution closed and what
+// the carve-out preserved.
+type HistoryClose struct {
+	// MismatchTurn is the first historical turn whose content was edited
+	// after it became resident; zero when the history is unedited.
+	MismatchTurn int
+	// Closed reports whether the substitution closed at a historical mismatch.
+	Closed bool
+	// ReasoningPreserved counts active-turn reasoning pages kept across the close.
+	ReasoningPreserved int
+}
+
+// PreserveCurrentTurnReasoning performs sequential prefix substitution over
+// stored context pages given the set of historically edited turns.
+//
+// The walk is sequential from the front of the context: the pinned prefix stays
+// warm, and stored pages are trusted turn by turn until the first historical
+// mismatch - the earliest edited turn - where the substitution closes. Under
+// the standard rule, every stored page at or after the close point is stale and
+// stripped, including reasoning from later turns. The carve-out keeps the
+// active (current) turn's reasoning span: assistant reasoning pages of the
+// highest interactive turn persist independently of earlier edits.
+//
+// An unedited history (nil or empty edited set) returns the context
+// byte-identical: no page is dropped, reordered, or rewritten.
+//
+// This deliberately does not adopt mtplx's oldest-first eviction: nothing is
+// evicted by age; the close point is content-driven.
+func PreserveCurrentTurnReasoning(pages []TokenPage, editedTurns map[int]bool) ([]TokenPage, HistoryClose) {
+	var closeInfo HistoryClose
+	if len(pages) == 0 {
+		return pages, closeInfo
+	}
+
+	mismatch := 0
+	for turn := range editedTurns {
+		if turn >= 1 && (mismatch == 0 || turn < mismatch) {
+			mismatch = turn
+		}
+	}
+	if mismatch == 0 {
+		return pages, closeInfo // unedited: byte-identical
+	}
+
+	maxTurn := 0
+	for i := range pages {
+		if !pages[i].Kind.IsPrefix() && pages[i].TurnIndex > maxTurn {
+			maxTurn = pages[i].TurnIndex
+		}
+	}
+	if mismatch > maxTurn {
+		// Close point lies beyond the context; nothing is stale.
+		return pages, closeInfo
+	}
+
+	closeInfo.Closed = true
+	closeInfo.MismatchTurn = mismatch
+
+	out := make([]TokenPage, 0, len(pages))
+	for i := range pages {
+		p := &pages[i]
+		switch {
+		case p.Kind.IsPrefix() || p.TurnIndex < 1:
+			out = append(out, *p) // warm prefix, verbatim
+		case p.Pinned:
+			out = append(out, *p) // pinned pages are never evicted
+		case p.TurnIndex < mismatch:
+			out = append(out, *p) // unbroken historical prefix
+		case p.TurnIndex == maxTurn && p.Kind == PageKindAssistant:
+			out = append(out, *p) // carve-out: active reasoning span
+			closeInfo.ReasoningPreserved++
+		}
+	}
+	return out, closeInfo
 }
 
 const hextable = "0123456789abcdef"

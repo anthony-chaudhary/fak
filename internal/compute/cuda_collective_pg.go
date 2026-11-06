@@ -20,6 +20,16 @@ package compute
 /*
 #cgo LDFLAGS: -lnccl
 #include "cuda_backend.h"
+
+// The TP-group lifecycle additions below land in cuda_nccl.cu / cuda_nccl_pg.cu ahead of
+// their cuda_backend.h declarations (that header is outside this ticket's fence); the local
+// externs keep cgo honest until the ABI moves into the shared header (ticket follow-up).
+extern int fcuda_nccl_abort(void);
+extern int fcuda_nccl_destroy(void);
+extern int fcuda_nccl_pg_send(void *dbuf, int count, int peer);
+extern int fcuda_nccl_pg_recv(void *dbuf, int count, int peer);
+extern int fcuda_nccl_pg_check(void);
+extern int fcuda_nccl_pg_abort(void);
 */
 import "C"
 
@@ -88,8 +98,95 @@ func (c *cudaBackend) AllReduceSumPG(t Tensor) (Tensor, error) {
 	return t, nil
 }
 
+// ProcessGroupSend posts this process's single f32 device tensor to rank `peer` over the
+// process group via fcuda_nccl_pg_send. Matched counts: the peer's ProcessGroupRecv must
+// present a tensor with the SAME element count — the count is derived from the tensor here,
+// so a mismatch is refused by the C layer or deadlocks inside NCCL; the closed contract is
+// pinned by TestNCCLOpGroupAbortOnceNoDestroy's matched-send-recv subtest.
+func (c *cudaBackend) ProcessGroupSend(t Tensor, peer int) error {
+	if t.Backend() != Backend(c) {
+		return fmt.Errorf("compute: ProcessGroupSend tensor is owned by a different backend (cross-backend exchange is rejected)")
+	}
+	if t.Dtype != F32 {
+		return fmt.Errorf("compute: ProcessGroupSend dtype = %s, want f32", t.Dtype)
+	}
+	if !t.Ready() {
+		return fmt.Errorf("compute: ProcessGroupSend tensor is not ready")
+	}
+	db, ok := t.buf.(*cudaBuf)
+	if !ok || db.ptr == nil {
+		return fmt.Errorf("compute: ProcessGroupSend tensor has no device buffer")
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	if db.invalidForSubmit() {
+		return fmt.Errorf("compute: ProcessGroupSend tensor is not ready")
+	}
+	if rc := int(C.fcuda_nccl_pg_send(db.ptr, C.int(t.Numel()), C.int(peer))); rc != 0 {
+		return fmt.Errorf("compute: fcuda_nccl_pg_send(peer=%d) rc=%d", peer, rc)
+	}
+	return nil
+}
+
+// ProcessGroupRecv receives this process's single f32 device tensor FROM rank `peer` over
+// the process group via fcuda_nccl_pg_recv. Same fail-closed validation and matched-counts
+// contract as ProcessGroupSend (the peer's send must carry the same element count).
+func (c *cudaBackend) ProcessGroupRecv(t Tensor, peer int) error {
+	if t.Backend() != Backend(c) {
+		return fmt.Errorf("compute: ProcessGroupRecv tensor is owned by a different backend (cross-backend exchange is rejected)")
+	}
+	if t.Dtype != F32 {
+		return fmt.Errorf("compute: ProcessGroupRecv dtype = %s, want f32", t.Dtype)
+	}
+	if !t.Ready() {
+		return fmt.Errorf("compute: ProcessGroupRecv tensor is not ready")
+	}
+	db, ok := t.buf.(*cudaBuf)
+	if !ok || db.ptr == nil {
+		return fmt.Errorf("compute: ProcessGroupRecv tensor has no device buffer")
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	if db.invalidForSubmit() {
+		return fmt.Errorf("compute: ProcessGroupRecv tensor is not ready")
+	}
+	if rc := int(C.fcuda_nccl_pg_recv(db.ptr, C.int(t.Numel()), C.int(peer))); rc != 0 {
+		return fmt.Errorf("compute: fcuda_nccl_pg_recv(peer=%d) rc=%d", peer, rc)
+	}
+	return nil
+}
+
+// ProcessGroupCheck is the post-sync check (fcuda_nccl_pg_check): it materializes any async
+// error the preceding process-group collective left on the default stream BEFORE the caller
+// reads results. Call it after a synchronize that consumed a peer-posted buffer; it returns
+// nil when the stream is clean.
+func (c *cudaBackend) ProcessGroupCheck() error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	if rc := int(C.fcuda_nccl_pg_check()); rc != 0 {
+		return fmt.Errorf("compute: fcuda_nccl_pg_check rc=%d", rc)
+	}
+	return nil
+}
+
+// ProcessGroupAbort aborts the process-group communicator ONCE (fcuda_nccl_pg_abort): NCCL
+// gives up the device waits, unblocking any rank stuck in a collective. Subsequent calls
+// are no-ops (abort-once), and after an abort DestroyProcessGroup refuses the second
+// teardown on the C side (abort-then-destroy is a no-op — no double destroy).
+func (c *cudaBackend) ProcessGroupAbort() error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	if rc := int(C.fcuda_nccl_pg_abort()); rc != 0 {
+		return fmt.Errorf("compute: fcuda_nccl_pg_abort rc=%d", rc)
+	}
+	return nil
+}
+
 // DestroyProcessGroup tears down this process's NCCL process-group communicator via
-// fcuda_nccl_pg_destroy. Safe to call when no group is active (the C side no-ops).
+// fcuda_nccl_pg_destroy. Safe to call when no group is active (the C side no-ops). After a
+// ProcessGroupAbort the C side REFUSES the ncclCommDestroy — abort-then-destroy is a no-op,
+// so this call only resets the group state and never destroys the aborted communicator a
+// second time.
 func (c *cudaBackend) DestroyProcessGroup() {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()

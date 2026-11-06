@@ -178,6 +178,264 @@ func (p *InKernelPlanner) EnableDFlash2(target *DFlash2Target) error {
 	return nil
 }
 
+// Sentinel errors for the per-stream DFlash2 tree contract. Callers match
+// these with errors.Is; wrapped details name the offending value.
+var (
+	// ErrDFlash2TreesNotBuilt: a tree request arrived before the stream built its trees.
+	ErrDFlash2TreesNotBuilt = errors.New("dflash2: tree stream has no built trees")
+	// ErrDFlash2NotDrafting: kept-row absorption or node offers arrived outside the drafting window.
+	ErrDFlash2NotDrafting = errors.New("dflash2: tree stream is not drafting")
+	// ErrDFlash2TreeWidthExceeded: the requested tree exceeds the target width bound.
+	ErrDFlash2TreeWidthExceeded = errors.New("dflash2: tree node request exceeds target width")
+)
+
+// DFlash2TreeSpec is the fixed per-stream DFlash2 tree shape. Attaching a tree
+// is not a generic arbitrary-drafter load: only this exact shape may bind to an
+// authenticated target, and every tap is checked against the target geometry
+// before the target learns them.
+type DFlash2TreeSpec struct {
+	Taps []int // target layer indices whose feature rows feed the tree
+}
+
+// dflash2TreeStream owns one per-stream DFlash2 tree drafter attached to a
+// registered serving domain. The target learns the drafter's taps at attach,
+// before any forward; kept target rows are absorbed into drafter state;
+// offered chain/tree nodes are bounded by the target width. Unsupported tree
+// requests refuse with the closed sentinels above.
+type dflash2TreeStream struct {
+	mu       sync.Mutex
+	target   *DFlash2Target
+	taps     []int
+	width    int
+	built    bool
+	drafting bool
+	kept     []int
+	retired  bool
+	closeErr error
+}
+
+// AttachDFlash2Tree binds one per-stream DFlash2 tree drafter to the planner's
+// authenticated target. Startup-only: the target learns the drafter's taps
+// while no lease is live, so no forward can precede the tap declaration. A
+// serial target panel verifies one row at a time, offers no parallel tree
+// width, and refuses the attach.
+func (p *InKernelPlanner) AttachDFlash2Tree(spec DFlash2TreeSpec) (*dflash2TreeStream, error) {
+	if p == nil || p.dflash2 == nil {
+		return nil, errors.New("dflash2: authenticated target required")
+	}
+	if err := p.dflash2.ValidateBinding(p.m, p.tok, p.backend, p.q4k, p.metal); err != nil {
+		return nil, err
+	}
+	t := p.dflash2
+	t.mu.Lock()
+	busy := len(t.leases) != 0
+	t.mu.Unlock()
+	if busy {
+		return nil, ErrDFlash2Busy
+	}
+	layers := p.m.Cfg.NumLayers
+	if len(spec.Taps) == 0 || len(spec.Taps) > layers {
+		return nil, errors.New("dflash2: tree taps must cover one to all target layers")
+	}
+	seen := make(map[int]bool, len(spec.Taps))
+	for _, tap := range spec.Taps {
+		if tap < 0 || tap >= layers || seen[tap] {
+			return nil, errors.New("dflash2: tree tap outside target layers or repeated")
+		}
+		seen[tap] = true
+	}
+	width, err := dflash2TreeTargetWidth(t.options)
+	if err != nil {
+		return nil, err
+	}
+	if width == 0 {
+		return nil, errors.New("dflash2: serial target panel offers no tree width")
+	}
+	return &dflash2TreeStream{target: t, taps: slices.Clone(spec.Taps), width: width}, nil
+}
+
+// dflash2TreeTargetWidth maps the authenticated target's verification panel to
+// the node width bound offered to attached tree streams. It mirrors the model
+// panel widths; serial verification offers no parallel tree width.
+func dflash2TreeTargetWidth(o DFlash2TargetOptions) (int, error) {
+	switch o.Request.TargetPanel {
+	case model.DFlash2TargetSerial:
+		return 0, nil
+	case model.DFlash2TargetPanel4:
+		return 4, nil
+	case model.DFlash2TargetPanel8:
+		return 8, nil
+	default:
+		return 0, errors.New("dflash2: unknown target panel selection")
+	}
+}
+
+// usableLocked reports whether the stream still belongs to an open target.
+// Callers hold s.mu; the target lock nests inside it and no other path takes
+// the pair in reverse order.
+func (s *dflash2TreeStream) usableLocked() error {
+	if s.retired {
+		return errors.New("dflash2: tree stream retired")
+	}
+	s.target.mu.Lock()
+	defer s.target.mu.Unlock()
+	if s.target.closed {
+		return errors.New("dflash2: target closed")
+	}
+	return nil
+}
+
+// Build materializes the tree node table once per stream. The target already
+// learned the taps at attach, before any forward.
+func (s *dflash2TreeStream) Build(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("dflash2: context required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.usableLocked(); err != nil {
+		return err
+	}
+	if s.built {
+		return errors.New("dflash2: tree stream already built")
+	}
+	s.built = true
+	return nil
+}
+
+// Begin opens the drafting window. Node offers and kept-row absorption refuse
+// while the window is closed.
+func (s *dflash2TreeStream) Begin(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("dflash2: context required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.usableLocked(); err != nil {
+		return err
+	}
+	if !s.built {
+		return ErrDFlash2TreesNotBuilt
+	}
+	if s.drafting {
+		return errors.New("dflash2: tree stream already drafting")
+	}
+	s.drafting = true
+	return nil
+}
+
+// Finish closes the drafting window. Absorbed kept rows remain drafter state.
+func (s *dflash2TreeStream) Finish() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.usableLocked(); err != nil {
+		return err
+	}
+	if !s.drafting {
+		return ErrDFlash2NotDrafting
+	}
+	s.drafting = false
+	return nil
+}
+
+// Nodes offers chain/tree node IDs bounded by the target width: exactly the
+// first requested node IDs, never more than width. A request past the bound is
+// unsupported and refuses instead of silently shrinking.
+func (s *dflash2TreeStream) Nodes(ctx context.Context, requested int) ([]int, error) {
+	if ctx == nil {
+		return nil, errors.New("dflash2: context required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.usableLocked(); err != nil {
+		return nil, err
+	}
+	if !s.built {
+		return nil, ErrDFlash2TreesNotBuilt
+	}
+	if !s.drafting {
+		return nil, ErrDFlash2NotDrafting
+	}
+	if requested < 1 {
+		return nil, errors.New("dflash2: tree node request must be positive")
+	}
+	if requested > s.width {
+		return nil, fmt.Errorf("%w: requested=%d width=%d", ErrDFlash2TreeWidthExceeded, requested, s.width)
+	}
+	nodes := make([]int, requested)
+	for i := range nodes {
+		nodes[i] = i
+	}
+	return nodes, nil
+}
+
+// AbsorbKept folds committed kept target rows into drafter state. Rows are the
+// token IDs a committed round kept; they persist across Finish until Close.
+func (s *dflash2TreeStream) AbsorbKept(rows []int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.usableLocked(); err != nil {
+		return err
+	}
+	if !s.drafting {
+		return ErrDFlash2NotDrafting
+	}
+	if len(rows) == 0 {
+		return errors.New("dflash2: kept rows required")
+	}
+	for _, row := range rows {
+		if row < 0 {
+			return errors.New("dflash2: kept row outside vocabulary")
+		}
+	}
+	s.kept = append(s.kept, rows...)
+	return nil
+}
+
+// KeptRows returns an owned copy of the absorbed kept target rows.
+func (s *dflash2TreeStream) KeptRows() []int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.kept)
+}
+
+// Taps returns the tap set the target learned before any forward.
+func (s *dflash2TreeStream) Taps() []int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.taps)
+}
+
+// Width reports the target width bound on offered tree nodes.
+func (s *dflash2TreeStream) Width() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.width
+}
+
+// Close retires the stream exactly once and ends the drafter stream lifecycle.
+// Repeated Close returns the stored result; a clean retirement stores nil.
+func (s *dflash2TreeStream) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.retired {
+		return s.closeErr
+	}
+	s.retired = true
+	s.drafting = false
+	s.closeErr = nil
+	return nil
+}
+
 func (p *InKernelPlanner) validateDFlash2Request(sp SampleParams, temp, frequency, presence float64) error {
 	if p.dflash2 == nil {
 		return nil

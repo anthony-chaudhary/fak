@@ -1,16 +1,23 @@
 package hfhub
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestParseURI(t *testing.T) {
@@ -428,4 +435,270 @@ func TestIsURI(t *testing.T) {
 	if IsURI("/local/path.gguf") {
 		t.Error("IsURI local = true")
 	}
+}
+
+// TestDownloadResumableRangeRetryAndGitSha1 pins the TensorFold-adapted
+// transfer contract: Range resume of a retained .part prefix fed into the
+// same digest, a zero restart when the server answers 200 instead of 206,
+// bounded retries with doubling backoff, exactly one digest-mismatch restart,
+// git-blob-sha1 fallback verification, and publication only after the
+// verified rename.
+func TestDownloadResumableRangeRetryAndGitSha1(t *testing.T) {
+	const size = 8192
+	body := make([]byte, size)
+	for i := range body {
+		body[i] = byte((i * 7) % 251)
+	}
+	sum := sha256hex(body)
+	ref := Ref{Repo: "owner/repo", Revision: "main", File: "model.gguf"}
+
+	seedPart := func(t *testing.T, c *Client, prefix []byte) {
+		t.Helper()
+		dst := c.CachePath(ref)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dst+".part", prefix, 0o644); err != nil { // an interrupted run left a prefix
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("resumes_range_prefix_into_same_digest", func(t *testing.T) {
+		var mu sync.Mutex
+		var ranges []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodHead {
+				w.Header().Set("X-Linked-Etag", `"`+sum+`"`)
+				return
+			}
+			mu.Lock()
+			ranges = append(ranges, r.Header.Get("Range"))
+			mu.Unlock()
+			w.Header().Set("X-Linked-Etag", `"`+sum+`"`)
+			start := 0
+			if rng := r.Header.Get("Range"); strings.HasPrefix(rng, "bytes=") {
+				start, _ = strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(rng, "bytes="), "-"))
+				w.WriteHeader(http.StatusPartialContent)
+				_, _ = w.Write(body[start:])
+				return
+			}
+			_, _ = w.Write(body)
+		}))
+		defer srv.Close()
+
+		c := &Client{BaseURL: srv.URL, HTTP: srv.Client(), CacheDir: t.TempDir(), retryBackoff: time.Millisecond}
+		seedPart(t, c, body[:1000])
+
+		path, err := c.Download(context.Background(), ref, nil)
+		if err != nil {
+			t.Fatalf("Download: %v", err)
+		}
+		dst := c.CachePath(ref)
+		if path != dst {
+			t.Fatalf("path = %q, want %q", path, dst)
+		}
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, body) {
+			t.Fatalf("content = %d bytes, want the full %d-byte object", len(got), size)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if len(ranges) != 1 || ranges[0] != "bytes=1000-" {
+			t.Fatalf("GETs saw Range %v, want exactly [bytes=1000-]", ranges)
+		}
+		if _, err := os.Stat(dst + ".part"); !os.IsNotExist(err) {
+			t.Fatalf("partial left behind after publication: %v", err)
+		}
+	})
+
+	t.Run("ignored_range_restarts_from_zero", func(t *testing.T) {
+		var gets atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodHead {
+				w.Header().Set("X-Linked-Etag", `"`+sum+`"`)
+				return
+			}
+			gets.Add(1)
+			w.Header().Set("X-Linked-Etag", `"`+sum+`"`)
+			_, _ = w.Write(body) // the server ignores Range: full object, status 200
+		}))
+		defer srv.Close()
+
+		c := &Client{BaseURL: srv.URL, HTTP: srv.Client(), CacheDir: t.TempDir(), retryBackoff: time.Millisecond}
+		seedPart(t, c, body[:1000])
+
+		if _, err := c.Download(context.Background(), ref, nil); err != nil {
+			t.Fatalf("Download: %v", err)
+		}
+		got, _ := os.ReadFile(c.CachePath(ref))
+		if !bytes.Equal(got, body) {
+			t.Fatalf("content = %d bytes, want the full %d-byte object (the stale prefix must be discarded)", len(got), size)
+		}
+		if n := gets.Load(); n != 1 {
+			t.Fatalf("GETs = %d, want 1", n)
+		}
+	})
+
+	t.Run("transient_failures_retry_with_doubling_backoff", func(t *testing.T) {
+		var gets atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodHead {
+				w.Header().Set("X-Linked-Etag", `"`+sum+`"`)
+				return
+			}
+			if gets.Add(1) <= 2 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			w.Header().Set("X-Linked-Etag", `"`+sum+`"`)
+			_, _ = w.Write(body)
+		}))
+		defer srv.Close()
+
+		var delays []time.Duration
+		c := &Client{BaseURL: srv.URL, HTTP: srv.Client(), CacheDir: t.TempDir(), retryBackoff: time.Millisecond,
+			backoffProbe: func(d time.Duration) { delays = append(delays, d) }}
+		if _, err := c.Download(context.Background(), ref, nil); err != nil {
+			t.Fatalf("Download: %v", err)
+		}
+		if n := gets.Load(); n != 3 {
+			t.Fatalf("GETs = %d, want 3 (two 503s, then success)", n)
+		}
+		want := []time.Duration{time.Millisecond, 2 * time.Millisecond}
+		if len(delays) != len(want) {
+			t.Fatalf("backoff delays = %v, want %v", delays, want)
+		}
+		for i := range want {
+			if delays[i] != want[i] {
+				t.Fatalf("backoff delay[%d] = %v, want %v (doubling)", i, delays[i], want[i])
+			}
+		}
+	})
+
+	t.Run("retry_exhaustion_is_bounded_at_five_attempts", func(t *testing.T) {
+		var gets atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodHead {
+				return
+			}
+			gets.Add(1)
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}))
+		defer srv.Close()
+
+		var delays []time.Duration
+		c := &Client{BaseURL: srv.URL, HTTP: srv.Client(), CacheDir: t.TempDir(), retryBackoff: time.Millisecond,
+			backoffProbe: func(d time.Duration) { delays = append(delays, d) }}
+		_, err := c.Download(context.Background(), ref, nil)
+		if err == nil {
+			t.Fatal("Download: want failure after retry exhaustion, got nil")
+		}
+		if errors.Is(err, ErrDigestMismatch) {
+			t.Fatalf("error %v is a digest mismatch, want a transport/status failure", err)
+		}
+		if n := gets.Load(); n != 5 {
+			t.Fatalf("GETs = %d, want exactly 5 attempts", n)
+		}
+		want := []time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond, 8 * time.Millisecond}
+		if len(delays) != len(want) {
+			t.Fatalf("backoff delays = %v, want %v", delays, want)
+		}
+		for i := range want {
+			if delays[i] != want[i] {
+				t.Fatalf("backoff delay[%d] = %v, want %v (doubling)", i, delays[i], want[i])
+			}
+		}
+	})
+
+	t.Run("digest_mismatch_deletes_partial_and_restarts_once", func(t *testing.T) {
+		wrong := make([]byte, size)
+		copy(wrong, body)
+		wrong[0] ^= 0xFF
+		var gets atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodHead {
+				w.Header().Set("X-Linked-Etag", `"`+sum+`"`) // the hub claims the real digest...
+				return
+			}
+			gets.Add(1)
+			w.Header().Set("X-Linked-Etag", `"`+sum+`"`)
+			_, _ = w.Write(wrong) // ...but serves corrupt bytes
+		}))
+		defer srv.Close()
+
+		c := &Client{BaseURL: srv.URL, HTTP: srv.Client(), CacheDir: t.TempDir(), retryBackoff: time.Millisecond}
+		dst := c.CachePath(ref)
+		_, err := c.Download(context.Background(), ref, nil)
+		if !errors.Is(err, ErrDigestMismatch) {
+			t.Fatalf("error = %v, want ErrDigestMismatch", err)
+		}
+		if n := gets.Load(); n != 2 {
+			t.Fatalf("GETs = %d, want 2 (one mismatch restart, then fail)", n)
+		}
+		if _, statErr := os.Stat(dst); !os.IsNotExist(statErr) {
+			t.Fatalf("destination published despite mismatch: %v", statErr)
+		}
+		if _, statErr := os.Stat(dst + ".part"); !os.IsNotExist(statErr) {
+			t.Fatalf("corrupt partial not deleted: %v", statErr)
+		}
+	})
+
+	t.Run("git_blob_sha1_verifies_without_sha256", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodHead {
+				return // no LFS oid stamped anywhere
+			}
+			w.Header().Set("ETag", `"`+gitBlobSHA1Fixture(body)+`"`)
+			_, _ = w.Write(body)
+		}))
+		defer srv.Close()
+
+		c := &Client{BaseURL: srv.URL, HTTP: srv.Client(), CacheDir: t.TempDir(), retryBackoff: time.Millisecond}
+		dst, err := c.Download(context.Background(), ref, nil)
+		if err != nil {
+			t.Fatalf("Download (blob sha1): %v", err)
+		}
+		got, _ := os.ReadFile(dst)
+		if !bytes.Equal(got, body) {
+			t.Fatalf("content = %d bytes, want %d", len(got), size)
+		}
+	})
+
+	t.Run("git_blob_sha1_mismatch_fails_after_one_restart", func(t *testing.T) {
+		var gets atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodHead {
+				return
+			}
+			gets.Add(1)
+			w.Header().Set("ETag", "\"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\"") // a wrong blob id
+			_, _ = w.Write(body)
+		}))
+		defer srv.Close()
+
+		c := &Client{BaseURL: srv.URL, HTTP: srv.Client(), CacheDir: t.TempDir(), retryBackoff: time.Millisecond}
+		dst := c.CachePath(ref)
+		_, err := c.Download(context.Background(), ref, nil)
+		if !errors.Is(err, ErrDigestMismatch) {
+			t.Fatalf("error = %v, want ErrDigestMismatch", err)
+		}
+		if n := gets.Load(); n != 2 {
+			t.Fatalf("GETs = %d, want 2", n)
+		}
+		if _, statErr := os.Stat(dst); !os.IsNotExist(statErr) {
+			t.Fatalf("destination published despite blob sha1 mismatch: %v", statErr)
+		}
+	})
+}
+
+// gitBlobSHA1Fixture computes the git blob identifier of b: sha1 over the
+// "blob <size>\x00" header plus the raw bytes.
+func gitBlobSHA1Fixture(b []byte) string {
+	h := sha1.New()
+	fmt.Fprintf(h, "blob %d\x00", len(b))
+	h.Write(b)
+	return hex.EncodeToString(h.Sum(nil))
 }

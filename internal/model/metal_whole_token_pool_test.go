@@ -21,7 +21,8 @@ func TestQwen35MetalWholeTokenPoolDefault(t *testing.T) {
 	}
 	setQ4KSDOTForTest(false)
 	t.Cleanup(func() { setQ4KSDOTForTest(true) })
-	t.Setenv("FAK_QWEN35_PERSISTENT_DECODE_DKV", "0")
+	// Persistent decode device KV stays off here: Session.PersistentDecodeDeviceKV
+	// defaults to false, the historical unset-env behavior (#13605 leaf A-cfg-int4).
 	cfg := qwen35HybridQ4KTestCfg()
 	cfg.QKNorm = true
 	m := NewSynthetic(cfg)

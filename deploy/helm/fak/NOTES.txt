@@ -1,0 +1,32 @@
+fak serve ({{ include "fak.mode" . }} mode) installed as "{{ .Release.Name }}"
+image: {{ include "fak.image" . }}
+service: {{ include "fak.fullname" . }}:{{ .Values.service.port | default 80 }} -> targetPort {{ .Values.service.targetPort | default 8080 }}
+
+The one rule that bites first:
+  * A network-facing gateway MUST authenticate: set auth.requireKeyEnv (default
+    FAK_GATEWAY_KEY) and provide the key — either via values.secrets.gatewayKey or
+    by creating the Secret "{{ include "fak.secretsName" . }}" yourself
+    (key: gateway-key). Until that Secret exists the pods stay pending —
+    fail-closed, never silently unauthenticated. Generate it with
+    `openssl rand -hex 32`.
+  * /healthz is the ONLY unauthenticated route; every other route requires
+    `Authorization: Bearer <key>`. TLS terminates at your Ingress / load balancer
+    — fak speaks plain HTTP.
+
+Smoke test:
+  kubectl port-forward svc/{{ include "fak.fullname" . }} 8080:{{ .Values.service.port | default 80 }}
+  curl -s http://127.0.0.1:8080/healthz                  # {"ok":true,...} (no auth)
+  curl -s http://127.0.0.1:8080/v1/models \
+    -H "Authorization: Bearer $FAK_GATEWAY_KEY"
+
+{{- if eq (include "fak.mode" .) "inkernel" }}
+
+In-kernel extras:
+  * Prerequisite: the NVIDIA device plugin (or GPU Operator) is already installed
+    on the cluster — fak installs neither.
+  * Load the .gguf onto the "{{ .Values.gpu.weights.claimName | default "fak-weights" }}" PVC at
+    /weights/model.gguf ONCE (kubectl cp via a helper pod, a Job, or your cloud's
+    dataset tooling); every restart reuses it.
+  * /healthz answers 200 only AFTER the model is loaded — expect the long liveness
+    initialDelay (default 600s) to elapse before the pod reports Ready.
+{{- end }}

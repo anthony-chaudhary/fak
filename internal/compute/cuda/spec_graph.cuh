@@ -316,78 +316,181 @@ __global__ void k_dsa_index_score(const float *indexQ, const float *indexK, cons
   if (threadIdx.x == 0) dScores[k] = red[0];
 }
 
-// k_dsa_index_topk: single block. Repeats a max-reduction topK times, each pass picking the highest
-// remaining score (ties by LOWER position — the dsaTopKIndices order) and masking it out for the
-// next pass. nKeys is small (one decode step's causal window) and topK tiny, so the O(topK·nKeys)
-// host-equivalent selection is cheap on one block. Writes the selected positions to dSel[0..ret-1].
+// dsaRadixKey maps an f64 score to a uint64 whose unsigned order equals the score's numeric order
+// (the standard signed-float radix transform): flip the sign bit for non-negative values, flip every
+// bit for negative values. Equal scores map to equal keys, so a radix select over the key isolates
+// the boundary value exactly and the position tie-break is resolved inside the equal-key group. The
+// scoring lane seeds +0.0 and accumulates finite f32 products, so NaN/-0.0 never reach the key.
+__device__ __forceinline__ unsigned long long dsaRadixKey(double v) {
+  unsigned long long b = __double_as_longlong(v);
+  if (b & (1ull << 63)) return ~b;
+  return b | (1ull << 63);
+}
+
+// k_dsa_index_topk: single-pass radix/bucket select over the f64 score array — the selection pass of
+// fcuda_dsa_index_select_f32. ADAPTED from vLLM's persistent-topk radix select (vllm-project/vllm
+// csrc/persistent_topk.cuh:868 persistent_topk_kernel / :1295 FilteredTopKUnifiedKernel @
+// ae065918640a198a56f6f17eb45e251c3229fe41, Apache-2.0): histogram the monotone score keys into 256
+// buckets, suffix-scan for the bucket that carries the k-th key, emit every strictly-above item
+// directly, and refine the boundary bucket byte by byte — bounded shared state (256 counters +
+// scalars), NO O(nKeys) taken[] mask, so windows past any fixed key count stay on-device. Re-expressed
+// for this engine's f64 scores and its EXACT total order (score descending, ties by LOWER position —
+// the dsaTopKIndices order): once the boundary key K* is found, the above-boundary items are gathered
+// together with the lowest-position boundary items (the scan is position-ascending, so the fill lands
+// on positions 0..first), then an in-place bitonic sort over the <= topK selected pairs emits the
+// dsaTopKIndices order. Masked keys (i >= nValid, -1e300 in dScores) are excluded by the scan bound
+// nValid, never by a mask cap. Launched with 256 threads. dSelV/dSelP must hold P = nextPow2(ret)
+// entries each. Writes dSel[0..ret-1] in order and *dCount = ret = min(topK, nValid).
 __global__ void k_dsa_index_topk(const double *dScores, int nKeys, int queryPos, int topK,
-                                 int *dSel, int *dCount) {
-  __shared__ double vbest[256];
-  __shared__ int ibest[256];
-  __shared__ char taken[4096]; // == DSA_TOPK_MAX_KEYS; the host wrapper declines nKeys past it, so
-                               // every key the top-k sees here is maskable (no un-masked re-select tail).
-  int nValid = (queryPos + 1 < nKeys) ? queryPos + 1 : nKeys;
-  for (int i = threadIdx.x; i < nKeys && i < 4096; i += blockDim.x) taken[i] = 0;
-  __syncthreads();
-  int picked = 0;
-  int want = topK < nValid ? topK : nValid;
-  for (int pass = 0; pass < want; pass++) {
-    double bv = -1e300; int bi = -1;
-    for (int i = threadIdx.x; i < nValid; i += blockDim.x) {
-      if (i < 4096 && taken[i]) continue;
-      double v = dScores[i];
-      if (bi < 0 || v > bv || (v == bv && i < bi)) { bv = v; bi = i; }
-    }
-    vbest[threadIdx.x] = bv; ibest[threadIdx.x] = bi;
+                                 double *dSelV, int *dSel, int *dCount) {
+  const int nValid = (queryPos + 1 < nKeys) ? queryPos + 1 : nKeys;
+  const int want = topK < nValid ? topK : nValid;
+  if (want <= 0) {
+    if (threadIdx.x == 0) *dCount = 0;
+    return;
+  }
+  __shared__ int hist[256];   // per-byte bucket counts (reused every round)
+  __shared__ int red[32];     // block-reduction staging (<= blockDim.x/32 warps)
+  __shared__ int sScalars[4]; // [0] boundary bucket, [1] cAbove, [2] above-slot counter, [3] equal-slot counter
+  const int lane = threadIdx.x & 31;
+  const int warp = threadIdx.x >> 5;
+
+  // Phase 1: MSB-first window narrowing. `remaining` counts how many keys are still owed FROM the
+  // current window [lo, lo + wsize) (wsize = 2^(s+8); wsize == 0 denotes the full key range at the
+  // first round, since 2^64 is unrepresentable). Invariant: the window holds at least `remaining`
+  // keys and every key above the window is already accounted for as selected. Each round narrows to
+  // the boundary bucket that carries the next-owed key and credits the buckets above it.
+  int remaining = want;
+  unsigned long long lo = 0;
+  for (int s = 56; s >= 0; s -= 8) {
+    for (int b = threadIdx.x; b < 256; b += blockDim.x) hist[b] = 0;
     __syncthreads();
-    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
-      if (threadIdx.x < s) {
-        double ov = vbest[threadIdx.x + s]; int oi = ibest[threadIdx.x + s];
-        int cur = ibest[threadIdx.x];
-        if (oi >= 0 && (cur < 0 || ov > vbest[threadIdx.x] || (ov == vbest[threadIdx.x] && oi < cur))) {
-          vbest[threadIdx.x] = ov; ibest[threadIdx.x] = oi;
+    const unsigned long long wsize = (s == 56) ? 0 : (1ull << (s + 8));
+    for (int i = threadIdx.x; i < nValid; i += blockDim.x) {
+      const unsigned long long k = dsaRadixKey(dScores[i]);
+      if (wsize == 0 || (k - lo) < wsize) atomicAdd(&hist[(k >> s) & 0xFF], 1);
+    }
+    __syncthreads();
+    if (threadIdx.x == 0) {
+      int running = 0, bb = 0;
+      for (int b = 255; b >= 0; b--) {
+        running += hist[b];
+        if (running >= remaining) { bb = b; break; }
+      }
+      sScalars[0] = bb;
+      sScalars[3] = running - hist[bb]; // keys in the buckets above the boundary (all selected)
+    }
+    __syncthreads();
+    lo += (unsigned long long)sScalars[0] << s;
+    remaining -= sScalars[3];
+    __syncthreads(); // hist reuse barrier before the next round's zeroing
+  }
+  const unsigned long long kStar = lo; // the want-th largest key (the boundary value)
+
+  // Phase 2a: count the strictly-above-boundary items (all selected: rank-proven above the k-th key).
+  int aboveLocal = 0;
+  for (int i = threadIdx.x; i < nValid; i += blockDim.x) {
+    if (dsaRadixKey(dScores[i]) > kStar) aboveLocal++;
+  }
+  for (int off = 16; off > 0; off >>= 1) aboveLocal += __shfl_down_sync(0xffffffff, aboveLocal, off);
+  if (lane == 0) red[warp] = aboveLocal;
+  __syncthreads();
+  if (warp == 0) {
+    aboveLocal = (lane < (blockDim.x / 32)) ? red[lane] : 0;
+    for (int off = 16; off > 0; off >>= 1) aboveLocal += __shfl_down_sync(0xffffffff, aboveLocal, off);
+    if (lane == 0) sScalars[1] = aboveLocal;
+  }
+  __syncthreads();
+  const int cAbove = sScalars[1];
+  const int fillCap = want - cAbove; // boundary slots still open (ties resolve by lower position)
+
+  // Phase 2b: gather. Above-boundary items take slots [0, cAbove); the position-ascending scan fills
+  // the first fillCap boundary items into [cAbove, want) — exactly the lowest positions among ties.
+  if (threadIdx.x == 0) { sScalars[2] = 0; sScalars[3] = 0; }
+  __syncthreads();
+  for (int i = threadIdx.x; i < nValid; i += blockDim.x) {
+    const unsigned long long k = dsaRadixKey(dScores[i]);
+    if (k > kStar) {
+      const int slot = atomicAdd(&sScalars[2], 1);
+      dSelV[slot] = dScores[i];
+      dSel[slot] = i;
+    } else if (k == kStar) {
+      const int slot = atomicAdd(&sScalars[3], 1);
+      if (slot < fillCap) {
+        dSelV[cAbove + slot] = dScores[i];
+        dSel[cAbove + slot] = i;
+      }
+    }
+  }
+  // Pad the bitonic working set with rank-last sentinels (-inf value sinks below every real pair).
+  int P = 1;
+  while (P < want) P <<= 1;
+  for (int i = threadIdx.x; i < P; i += blockDim.x) {
+    if (i >= want) { dSelV[i] = -INFINITY; dSel[i] = 0; }
+  }
+  __syncthreads();
+
+  // Phase 3: in-place bitonic ordering over the P padded pairs under the total order (value desc,
+  // position asc) — index 0 holds the best pair. Each row touches disjoint pairs, so one
+  // __syncthreads per row is the only synchronization the network needs.
+  for (int kk = 2; kk <= P; kk <<= 1) {
+    for (int j = kk >> 1; j > 0; j >>= 1) {
+      for (int p = threadIdx.x; p < P; p += blockDim.x) {
+        if (p & j) continue;
+        const int b = p ^ j;
+        const double va = dSelV[p], vb = dSelV[b];
+        const bool aBeforeB = (va > vb) || (va == vb && dSel[p] < dSel[b]);
+        const bool asc = ((p / kk) & 1) == 0;
+        if ((asc && !aBeforeB) || (!asc && aBeforeB)) {
+          dSelV[p] = vb;
+          dSelV[b] = va;
+          const int pa = dSel[p];
+          dSel[p] = dSel[b];
+          dSel[b] = pa;
         }
       }
       __syncthreads();
     }
-    if (threadIdx.x == 0) {
-      int sel = ibest[0];
-      dSel[picked] = sel;
-      if (sel >= 0 && sel < 4096) taken[sel] = 1;
-    }
-    __syncthreads();
-    picked++;
   }
-  if (threadIdx.x == 0) *dCount = picked;
+  if (threadIdx.x == 0) *dCount = want;
 }
 
-// DSA_TOPK_MAX_KEYS is the causal-window cap k_dsa_index_topk's shared `taken[]` mask can cover. A
-// decode step's nKeys is the causal window (one position's history), well under this for every context
-// the device path serves today; but to keep the boundary HONEST rather than silently degrading, the
-// host wrapper refuses (sentinel -1 → caller falls back to the host f64 loop) when nKeys exceeds it,
-// instead of running a topk whose un-maskable tail could re-select a position. Must match the literal
-// shared-array size in k_dsa_index_topk.
-#define DSA_TOPK_MAX_KEYS 4096
-
 // fcuda_dsa_index_select_f32 scores all keys (k_dsa_index_score, f64-accumulated) then selects the
-// top-k positions (k_dsa_index_topk) on the device, copying back only the small index list. The
-// f64 score scratch is allocated internally (sized [nKeys] doubles) so the caller never sees the
-// double dtype. Returns the number of positions written into host outIdx (= min(topK, #valid keys)),
-// or -1 to DECLINE (nKeys past the shared-mem top-k cap) so the caller keeps the host selection.
+// top-k positions (k_dsa_index_topk, the single-pass radix/bucket select) on the device, copying
+// back only the small index list. The f64 score scratch and the selected-pair scratch are allocated
+// internally (sized [nKeys] doubles and P = nextPow2(min(topK, #valid)) pairs) so the caller never
+// sees the double dtype. Returns the number of positions written into host outIdx (= min(topK,
+// #valid keys)), or -1 to DECLINE — now only when a scratch allocation fails (genuinely
+// pathological device OOM) — so the caller keeps the host f64 selection. There is no nKeys cap: the
+// radix select streams the scores from global memory and its shared state is bounded (256 counters +
+// scalars), so deep-context windows stay on-device instead of falling back to the host loop.
 extern "C" int fcuda_dsa_index_select_f32(const float *dIndexQ, const float *dIndexK,
                                           const float *dWeights, int nKeys, int nH,
                                           int indexDim, int queryPos, int topK, float scale,
                                           int *outIdx) {
   if (nKeys <= 0 || topK <= 0) return 0;
-  if (nKeys > DSA_TOPK_MAX_KEYS) return -1; // window past the maskable top-k tail: decline, host falls back
+  int nValid = (queryPos + 1 < nKeys) ? queryPos + 1 : nKeys;
+  if (nValid <= 0) return 0;
   int threads = 256;
   double *dScores = (double *)fcuda_malloc(sizeof(double) * (size_t)nKeys);
+  if (!dScores) return -1; // pathological: no score scratch -> host keeps the f64 loop
   FCUDA_TS("k_dsa_index_score", nKeys, k_dsa_index_score<<<nKeys, threads, 0, g_stream>>>(dIndexQ, dIndexK, dWeights,
                                                      dScores, nKeys, nH, indexDim,
                                                      queryPos, scale));
-  int *dSel = (int *)fcuda_malloc(sizeof(int) * (size_t)topK);
+  int want = topK < nValid ? topK : nValid;
+  int pSize = 1;
+  while (pSize < want) pSize <<= 1;
+  double *dSelV = (double *)fcuda_malloc(sizeof(double) * (size_t)pSize);
+  int *dSelP = (int *)fcuda_malloc(sizeof(int) * (size_t)pSize);
   int *dCount = (int *)fcuda_malloc(sizeof(int));
-  FCUDA_TS("k_dsa_index_topk", 1, k_dsa_index_topk<<<1, threads, 0, g_stream>>>(dScores, nKeys, queryPos, topK, dSel, dCount));
+  if (!dSelV || !dSelP || !dCount) {
+    fcuda_free(dScores);
+    fcuda_free(dSelV);
+    fcuda_free(dSelP);
+    fcuda_free(dCount);
+    return -1; // decline sentinel retained for genuinely pathological sizes (allocation failure)
+  }
+  FCUDA_TS("k_dsa_index_topk", 1, k_dsa_index_topk<<<1, threads, 0, g_stream>>>(dScores, nKeys, queryPos, topK, dSelV, dSelP, dCount));
   int hCount = 0;
   fcuda_ts_untimed_transfer();
   CK(cudaMemcpy(&hCount, dCount, sizeof(int), cudaMemcpyDeviceToHost));
@@ -395,11 +498,12 @@ extern "C" int fcuda_dsa_index_select_f32(const float *dIndexQ, const float *dIn
   if (hCount > topK) hCount = topK;
   if (hCount > 0) {
     fcuda_ts_untimed_transfer();
-    CK(cudaMemcpy(outIdx, dSel, sizeof(int) * (size_t)hCount, cudaMemcpyDeviceToHost));
+    CK(cudaMemcpy(outIdx, dSelP, sizeof(int) * (size_t)hCount, cudaMemcpyDeviceToHost));
   }
   g_host_bytes += sizeof(int) * (size_t)(hCount + 1); // only the index list crosses host-ward
   fcuda_free(dScores);
-  fcuda_free(dSel);
+  fcuda_free(dSelV);
+  fcuda_free(dSelP);
   fcuda_free(dCount);
   return hCount;
 }

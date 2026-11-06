@@ -15,6 +15,11 @@
 //   - ROW-parallel matmul (shard the contraction, AllReduce) and the composed Megatron
 //     FFN match within the AllReduce's documented reassociation round-off (~1e-6/1e-5),
 //     never garbage.
+//   - VOCAB-PARALLEL tail (tensor_parallel_vocab.go, the vLLM VocabParallelEmbedding/
+//     ParallelLMHead port): the token-embedding table and the LM head sharded across the
+//     VOCABULARY dimension are BIT-EXACT vs the monolith at EVERY rank count — each token
+//     id / logit has exactly one owning rank, so the reduce adds zeros and the gather
+//     concatenates in token-id order (no reassociation anywhere).
 //
 // The single-rank TP result is the monolithic reference here; the unit test
 // (tensor_parallel_test.go) pins that 1-rank result bit-for-bit to matRows/the SwiGLU FFN,
@@ -239,6 +244,71 @@ func runWired(ranks []int, coll model.Collective) error {
 	}
 	fmt.Println("tpcheck: OK — wired ForwardTP bit-exact vs Forward at rank-1; same argmax within AllReduce round-off across ranks.")
 	fmt.Println("  (Forward is gated bit-exact against the HF oracle in internal/model/oracle_test.go, so ForwardTP inherits it.)")
+
+	if err := runVocab(ranks, coll); err != nil {
+		return err
+	}
+	return nil
+}
+
+// runVocab witnesses the VOCAB-PARALLEL tail (tensor_parallel_vocab.go, the vLLM
+// VocabParallelEmbedding/ParallelLMHead port): the token-embedding table and the LM head —
+// the two largest projections in a checkpoint — sharded across the VOCABULARY dimension.
+// Each token id and each logit has exactly ONE owning rank, so unlike the row-parallel
+// AllReduce blocks this tail is BIT-EXACT vs the monolith at EVERY rank count (no
+// reassociation: the embedding reduce adds zeros to the owning rank's row; the head gather
+// concatenates one rank's fdot per logit in token-id order). The reference is the monolith
+// Forward; ForwardTP(VocabRanks=N, AttnRanks=1, FFNRanks=1) must match it at max|Δ|=0.
+func runVocab(ranks []int, coll model.Collective) error {
+	cfg := model.Config{
+		HiddenSize: 64, NumLayers: 4, NumHeads: 8, NumKVHeads: 4, HeadDim: 8,
+		IntermediateSize: 256, VocabSize: 96, RMSNormEps: 1e-5, RopeTheta: 10000,
+		ModelType: "llama", EOSTokenID: -1,
+	}
+	m := model.NewSynthetic(cfg)
+	ids := []int{0, 5, 17, 31, 47, 63, 80, 95} // cross every band seam of the tilings below
+	full := m.Forward(ids)
+	last := len(ids) - 1
+
+	fmt.Printf("\n  vocab-parallel tail: ForwardTP(VocabRanks=r) vs monolithic Forward  (V=%d H=%d)\n", cfg.VocabSize, cfg.HiddenSize)
+	fmt.Printf("  embedding sharded over V (masked lookup + AllReduce); head over V (band fdot + AllGather)\n")
+	fmt.Printf("  %-6s | %-26s | %-18s\n", "ranks", "last-logits vs Forward", "argmax agreement")
+	fmt.Printf("  %s\n", strings.Repeat("-", 60))
+
+	vocabFailed := false
+	for _, r := range ranks {
+		if r < 1 {
+			continue
+		}
+		act, err := m.ForwardTP(ids, model.TPConfig{VocabRanks: r, AttnRanks: 1, FFNRanks: 1, Coll: coll})
+		if err != nil {
+			return fmt.Errorf("ForwardTP vocab ranks=%d: %v", r, err)
+		}
+		agree := 0
+		for pos := range full.Logits {
+			if argmaxIdx(act.Logits[pos]) == argmaxIdx(full.Logits[pos]) {
+				agree++
+			}
+		}
+		var msg string
+		if bitExact(act.Logits[last], full.Logits[last]) {
+			msg = "max|Δ|=0 (bit-exact)"
+		} else {
+			msg = fmt.Sprintf("max|Δ|=%.2e (BUG: vocab tail must be exact)", maxAbs(act.Logits[last], full.Logits[last]))
+			vocabFailed = true
+		}
+		agreeMsg := fmt.Sprintf("%d/%d positions", agree, len(full.Logits))
+		if agree != len(full.Logits) {
+			agreeMsg += " (MISMATCH)"
+			vocabFailed = true
+		}
+		fmt.Printf("  %-6d | %-26s | %-18s\n", r, msg, agreeMsg)
+	}
+	fmt.Println()
+	if vocabFailed {
+		return fmt.Errorf("vocab-parallel witness failed")
+	}
+	fmt.Println("tpcheck: OK — vocab-parallel embedding+head bit-exact vs the monolith at every rank count (each id/logit has exactly one owning rank).")
 	return nil
 }
 

@@ -34,11 +34,11 @@ func estimateVulkanStreamedExperts(in PreflightInput) (preflightEstimate, error)
 	if err != nil {
 		return preflightEstimate{}, err
 	}
-	shards, err := s.FusedExpertTensors()
+	shards, err := s.FusedExpertTensors(opts...)
 	if err != nil {
 		return preflightEstimate{}, err
 	}
-	tier, err := buildExpertCheckpointTier(shards, 0)
+	tier, err := buildExpertCheckpointTier(shards, 0, o.expertPageCache)
 	if err != nil {
 		return preflightEstimate{}, err
 	}

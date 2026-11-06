@@ -146,6 +146,9 @@ func (c *Client) Get(key []byte) ([]byte, error) {
 	if resp.Header.OpCode == protocol.RespError {
 		return nil, fmt.Errorf("server error: %s", string(resp.Body))
 	}
+	if resp.Header.OpCode != protocol.RespValue {
+		return nil, fmt.Errorf("unexpected GET response opcode: 0x%02x", resp.Header.OpCode)
+	}
 
 	value, found, err := protocol.DecodeValueResponse(resp.Body)
 	if err != nil {
@@ -185,6 +188,9 @@ func (c *Client) Set(key, value []byte, ttlMs int64) error {
 	if resp.Header.OpCode == protocol.RespError {
 		return fmt.Errorf("server error: %s", string(resp.Body))
 	}
+	if resp.Header.OpCode != protocol.RespOK {
+		return fmt.Errorf("unexpected SET response opcode: 0x%02x", resp.Header.OpCode)
+	}
 	return nil
 }
 
@@ -211,6 +217,9 @@ func (c *Client) Delete(key []byte) error {
 	if resp.Header.OpCode == protocol.RespError {
 		return fmt.Errorf("server error: %s", string(resp.Body))
 	}
+	if resp.Header.OpCode != protocol.RespOK {
+		return fmt.Errorf("unexpected DELETE response opcode: 0x%02x", resp.Header.OpCode)
+	}
 	return nil
 }
 
@@ -236,6 +245,9 @@ func (c *Client) Exists(key []byte) (bool, error) {
 
 	if resp.Header.OpCode == protocol.RespError {
 		return false, fmt.Errorf("server error: %s", string(resp.Body))
+	}
+	if resp.Header.OpCode != protocol.RespOK {
+		return false, fmt.Errorf("unexpected EXISTS response opcode: 0x%02x", resp.Header.OpCode)
 	}
 	if len(resp.Body) > 0 && resp.Body[0] == 1 {
 		return true, nil
@@ -293,6 +305,10 @@ func (c *Client) MGet(keys [][]byte) ([][]byte, []bool, error) {
 		return nil, nil, fmt.Errorf("server error: %s", string(resp.Body))
 	}
 
+	if resp.Header.OpCode != protocol.RespMultiValue {
+		return nil, nil, fmt.Errorf("unexpected MGET response opcode: 0x%02x", resp.Header.OpCode)
+	}
+
 	return protocol.DecodeMultiValueResponse(resp.Body)
 }
 
@@ -323,6 +339,9 @@ func (c *Client) MSet(keys, values [][]byte) ([]byte, error) {
 	if resp.Header.OpCode == protocol.RespMSetResult {
 		statuses, perr := protocol.DecodeMSetResultResponse(resp.Body)
 		return statuses, perr
+	}
+	if resp.Header.OpCode != protocol.RespOK {
+		return nil, fmt.Errorf("unexpected MSET response opcode: 0x%02x", resp.Header.OpCode)
 	}
 	return nil, nil // RespOK â€” all succeeded
 }
@@ -478,6 +497,9 @@ func (c *Client) SetReplicated(key, value []byte, ttlMs int64) error {
 	if resp.Header.OpCode == protocol.RespError {
 		return fmt.Errorf("server error: %s", string(resp.Body))
 	}
+	if resp.Header.OpCode != protocol.RespOK {
+		return fmt.Errorf("unexpected SET response opcode: 0x%02x", resp.Header.OpCode)
+	}
 	return nil
 }
 
@@ -505,6 +527,9 @@ func (c *Client) DeleteReplicated(key []byte) error {
 
 	if resp.Header.OpCode == protocol.RespError {
 		return fmt.Errorf("server error: %s", string(resp.Body))
+	}
+	if resp.Header.OpCode != protocol.RespOK {
+		return fmt.Errorf("unexpected DELETE response opcode: 0x%02x", resp.Header.OpCode)
 	}
 	return nil
 }

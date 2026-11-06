@@ -264,6 +264,24 @@ type Qwen35MetalForwardSequenceReceipt struct {
 	RetainedBufferBytes uint64 `json:"retained_buffer_bytes"`
 }
 
+// qwen35MetalReceiptSourceRevision and qwen35MetalReceiptArtifactSHA256 are the
+// build-provenance stamps carried onto every Qwen35MetalForwardSequenceReceipt. They
+// replace the retired ambient reads FAK_SOURCE_REVISION and FAK_ARTIFACT_SHA256
+// (#13605 leaf A-cfg-int4): release and installer builds stamp them at link time with
+//
+//	-ldflags "-X github.com/anthony-chaudhary/fak/internal/model.qwen35MetalReceiptSourceRevision=<commit> \
+//	            -X github.com/anthony-chaudhary/fak/internal/model.qwen35MetalReceiptArtifactSHA256=<sha256>"
+//
+// (the appversion.BuildVersion idiom; the vulkan warm-disk stamps use the same seam).
+// An unstamped build leaves both empty, and the receipt fields stay empty too —
+// unknown provenance, exactly the historical unset-environment behavior. Only a
+// build-time fact lands here: no operator text is labelled verified and nothing
+// hashes per turn.
+var (
+	qwen35MetalReceiptSourceRevision string
+	qwen35MetalReceiptArtifactSHA256 string
+)
+
 type qwen35MetalForwardSequenceRunner interface {
 	Qwen35MetalForwardSequence(*Session, []int) ([]float32, Qwen35MetalForwardSequenceReceipt, bool, error)
 	Qwen35MetalForwardSequenceReceipt() (Qwen35MetalForwardSequenceReceipt, bool)
@@ -557,8 +575,8 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 						agg.ExecutedPanels = 1
 						agg.FallbackCount = 0
 						agg.Device = metalgemm.DeviceName()
-						agg.SourceRevision = os.Getenv("FAK_SOURCE_REVISION")
-						agg.ArtifactSHA256 = os.Getenv("FAK_ARTIFACT_SHA256")
+						agg.SourceRevision = qwen35MetalReceiptSourceRevision
+						agg.ArtifactSHA256 = qwen35MetalReceiptArtifactSHA256
 						aggValid = true
 					} else {
 						agg.ExecutedPanels++

@@ -54,6 +54,13 @@ func (w *Writer) WriteManifest(m Manifest) error {
 // WriteShard writes entries for a single shard.
 // Format: [keyLen:2][key][valueLen:4][value][ttlMs:8]... [0x0000] (sentinel)
 func (w *Writer) WriteShard(shardID int, entries []KVEntry) error {
+	// Zero is the sentinel; other key lengths must fit the two-byte field.
+	// Validate every entry before creating or truncating the shard file.
+	for i, e := range entries {
+		if len(e.Key) == 0 || len(e.Key) > 1<<16-1 {
+			return fmt.Errorf("snapshot entry %d key length %d out of range [1, 65535]", i, len(e.Key))
+		}
+	}
 	if err := os.MkdirAll(w.dir, 0755); err != nil {
 		return fmt.Errorf("create snapshot dir: %w", err)
 	}
@@ -116,6 +123,9 @@ func (r *Reader) ReadManifest() (Manifest, error) {
 	if err := json.Unmarshal(data, &m); err != nil {
 		return Manifest{}, err
 	}
+	if m.ShardCount < 0 {
+		return Manifest{}, fmt.Errorf("snapshot shard_count must be non-negative, got %d", m.ShardCount)
+	}
 	return m, nil
 }
 
@@ -132,6 +142,7 @@ func (r *Reader) ReadShard(shardID int) ([]KVEntry, error) {
 }
 
 // ReadAllEntries reads entries from all shard files. Used when shard count differs.
+// Every declared shard, including an empty one, must be readable.
 func (r *Reader) ReadAllEntries() ([]KVEntry, error) {
 	m, err := r.ReadManifest()
 	if err != nil {
@@ -141,9 +152,6 @@ func (r *Reader) ReadAllEntries() ([]KVEntry, error) {
 	for i := 0; i < m.ShardCount; i++ {
 		entries, err := r.ReadShard(i)
 		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
 			return nil, fmt.Errorf("read shard %d: %w", i, err)
 		}
 		all = append(all, entries...)
@@ -156,10 +164,10 @@ func readEntries(rd io.Reader) ([]KVEntry, error) {
 	var buf [8]byte
 
 	for {
-		// keyLen
+		// A complete shard ends with the sentinel, not bare EOF.
 		if _, err := io.ReadFull(rd, buf[:2]); err != nil {
 			if err == io.EOF {
-				break
+				err = io.ErrUnexpectedEOF
 			}
 			return entries, err
 		}

@@ -48,7 +48,7 @@ func (b *metalQwen35GDNSequenceBackend) AdmitDeviceKV(s *Session, tokens int) *m
 		return nil // a walk is already in flight; never share the triple across walks
 	}
 	capacity := total
-	if qwen35PersistentDecodeDeviceKV() {
+	if s.PersistentDecodeDeviceKV {
 		capacity = -1
 		for l := 0; l < cfg.NumLayers; l++ {
 			if cfg.isLinearAttnLayer(l) {
@@ -110,7 +110,7 @@ func (b *metalQwen35GDNSequenceBackend) AdmitDeviceKV(s *Session, tokens int) *m
 	if b.deviceKVLineageLen > 0 {
 		b.deviceKVLineageTail = s.Cache.lineage.ids[b.deviceKVLineageLen-1]
 	}
-	b.deviceKVPersistent = qwen35PersistentDecodeDeviceKV()
+	b.deviceKVPersistent = s.PersistentDecodeDeviceKV
 	return kv
 }
 
@@ -133,7 +133,7 @@ func (b *metalQwen35GDNSequenceBackend) DetachDeviceKV() *metalgemm.DeviceKV {
 }
 
 func (b *metalQwen35GDNSequenceBackend) KeepDeviceKV(s *Session) bool {
-	if b == nil || s == nil || !qwen35PersistentDecodeDeviceKV() {
+	if b == nil || s == nil || !s.PersistentDecodeDeviceKV {
 		return false
 	}
 	b.mu.Lock()
@@ -151,7 +151,7 @@ func (b *metalQwen35GDNSequenceBackend) KeepDeviceKV(s *Session) bool {
 }
 
 func (b *metalQwen35GDNSequenceBackend) decodeDeviceKV(s *Session) *metalgemm.DeviceKV {
-	if b == nil || s == nil || !qwen35PersistentDecodeDeviceKV() {
+	if b == nil || s == nil || !s.PersistentDecodeDeviceKV {
 		return nil
 	}
 	b.mu.Lock()

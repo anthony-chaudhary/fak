@@ -89,23 +89,33 @@ type qwen35GDNDecodeHostOracle struct {
 	conv, recurrent                           []float64
 }
 
+func qwen35GDNHostMatvec(w []float32, rows, cols int, in []float64) []float64 {
+	out := make([]float64, rows)
+	for r := range out {
+		for c := 0; c < cols; c++ {
+			out[r] += float64(w[r*cols+c]) * in[c]
+		}
+	}
+	return out
+}
+
 func (o *qwen35GDNDecodeHostOracle) step(x []float32) []float64 {
 	g := o.g
-	matvec := func(w []float32, rows, cols int, in []float64) []float64 {
-		out := make([]float64, rows)
-		for r := range out {
-			for c := 0; c < cols; c++ {
-				out[r] += float64(w[r*cols+c]) * in[c]
-			}
-		}
-		return out
-	}
-	silu := func(v float64) float64 { return v / (1 + math.Exp(-v)) }
 	xs := qwen35GDNFloat64s(x)
-	mixed := matvec(o.inQKV, g.convDim(), g.hidden, xs)
-	z := matvec(o.inZ, g.valueDim(), g.hidden, xs)
-	b := matvec(o.inB, g.nV, g.hidden, xs)
-	a := matvec(o.inA, g.nV, g.hidden, xs)
+	return o.stepProjected(
+		qwen35GDNHostMatvec(o.inQKV, g.convDim(), g.hidden, xs),
+		qwen35GDNHostMatvec(o.inZ, g.valueDim(), g.hidden, xs),
+		qwen35GDNHostMatvec(o.inB, g.nV, g.hidden, xs),
+		qwen35GDNHostMatvec(o.inA, g.nV, g.hidden, xs),
+	)
+}
+
+// stepProjected keeps the same independent FP64 recurrence while permitting a
+// separately modeled quantized projection. Feeding device projections here would
+// hide projection defects, so callers must construct these inputs on the host.
+func (o *qwen35GDNDecodeHostOracle) stepProjected(mixed, z, b, a []float64) []float64 {
+	g := o.g
+	silu := func(v float64) float64 { return v / (1 + math.Exp(-v)) }
 	convOut := make([]float64, g.convDim())
 	for c := range convOut {
 		acc := float64(o.convW[c*g.kernel+g.kernel-1]) * mixed[c]
@@ -166,5 +176,5 @@ func (o *qwen35GDNDecodeHostOracle) step(x []float32) []float64 {
 			core[vd] = float64(o.norm[d]) * core[vd] * inv * silu(z[vd])
 		}
 	}
-	return matvec(o.outW, g.hidden, g.valueDim(), core)
+	return qwen35GDNHostMatvec(o.outW, g.hidden, g.valueDim(), core)
 }

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -713,4 +714,283 @@ func normalizeToolArguments(raw json.RawMessage) string {
 		}
 	}
 	return s
+}
+
+// Truncated-tool-call signal. Clean-room port of an output-limit robustness
+// principle studied in proxysoul/Empryo src/core/agents/stream-options.ts:131-176
+// @6329f0dd (BUSL-1.1; INSPIRE-ONLY — no upstream code copied): when a tool
+// call's arguments are cut off by the output budget and cannot be repaired,
+// feed back a synthetic "cut off — split the call" input instead of treating
+// the turn as a final answer, and treat length/content-filter finishes as
+// errors. The lift path above already refuses to fabricate calls from unclosed
+// payloads (liftClosedPayload fails on them by construction, because
+// strictjson.RepairClosedJSON never salvages an unclosed value); this section
+// adds the typed SIGNAL for that case so a completion loop can recognize the
+// unrepaired husk and re-prompt with the split-the-call instruction.
+
+// ErrTruncatedToolCall is the closed contract for a tool call whose arguments
+// were cut off by an output-limit finish reason ("length"/"content_filter")
+// and could not be repaired into a complete payload. Callers match it with
+// errors.Is; the prose is not part of the API.
+var ErrTruncatedToolCall = errors.New("agent: tool call truncated by output limit and unrepaired")
+
+// fragmentCap bounds the raw partial payload carried in a signal. The fragment
+// is evidence for logging and re-prompting, not a replay buffer; it may end
+// mid-rune at the cap.
+const fragmentCap = 1024
+
+// TruncatedToolCallSignal records one unrepaired truncated tool call observed
+// on a completion that ended in an output-limit finish. ToolName is best
+// effort ("" when the partial payload names no tool), FinishReason is
+// normalized to "length" or "content_filter", Fragment is the raw partial
+// payload capped at fragmentCap bytes, and OutputTokens is the provider-reported
+// completion token count when available (0 otherwise).
+type TruncatedToolCallSignal struct {
+	ToolName     string
+	FinishReason string
+	Fragment     string
+	OutputTokens int
+}
+
+// TruncatedToolCall inspects a completion for a tool call whose arguments ran
+// out of room before the block closed and could not be repaired. It fires only
+// when BOTH hold:
+//
+//   - the raw finish reason is an output-limit stop ("length" or
+//     "content_filter", case/space-insensitive): those finishes mark a turn
+//     that must never be treated as a final answer;
+//   - the content carries a tool-call opening whose payload did not close:
+//     neither valid JSON nor repairable by strictjson.RepairClosedJSON (which
+//     refuses unclosed values by construction).
+//
+// A CLOSED payload that merely fails to lift (unoffered name, example prose,
+// non-tool JSON) is not truncation and yields no signal. Structured calls win:
+// a completion that already carries ToolCalls reports none. On detection it
+// returns the signal and ErrTruncatedToolCall; otherwise the zero signal and
+// nil.
+func TruncatedToolCall(comp *Completion) (TruncatedToolCallSignal, error) {
+	if comp == nil {
+		return TruncatedToolCallSignal{}, nil
+	}
+	finish := strings.ToLower(strings.TrimSpace(comp.FinishReason))
+	if finish != "length" && finish != "content_filter" {
+		return TruncatedToolCallSignal{}, nil
+	}
+	if len(comp.Message.ToolCalls) > 0 {
+		return TruncatedToolCallSignal{}, nil
+	}
+	content := comp.Message.Content
+	if content == "" {
+		return TruncatedToolCallSignal{}, nil
+	}
+	block, ok := findTruncatedToolCallBlock(content)
+	if !ok {
+		return TruncatedToolCallSignal{}, nil
+	}
+	return TruncatedToolCallSignal{
+		ToolName:     block.name,
+		FinishReason: finish,
+		Fragment:     capFragment(block.payload),
+		OutputTokens: comp.Usage.CompletionTokens,
+	}, ErrTruncatedToolCall
+}
+
+// Feedback renders the synthetic input fed back to the model instead of
+// treating the truncated turn as a final answer: the call was cut off at the
+// output limit, its arguments cannot be completed, and the work must be split
+// into smaller calls. The wording is fixed (closed contract); only the
+// recovered tool name and token count vary.
+func (s TruncatedToolCallSignal) Feedback() Message {
+	var b strings.Builder
+	b.WriteString("Your tool call was cut off at the output limit (finish_reason=")
+	b.WriteString(s.FinishReason)
+	b.WriteString(")")
+	if s.OutputTokens > 0 {
+		fmt.Fprintf(&b, " after %d tokens", s.OutputTokens)
+	}
+	if s.ToolName != "" {
+		fmt.Fprintf(&b, "; the %q arguments could not be completed", s.ToolName)
+	}
+	b.WriteString(". They cannot be repaired. Split the call into smaller calls and retry.")
+	return Message{Role: RoleUser, Content: b.String()}
+}
+
+// truncatedBlock is one tool-call span in content that opened but did not
+// close: the dialect marker was recognized, yet the payload after it is not a
+// closed value.
+type truncatedBlock struct {
+	name    string
+	payload string
+}
+
+// truncationDialect names one text tool-call dialect's opening marker and the
+// closers that bound its payload. The bounds mirror the lift-path regexes: a
+// payload ends at its earliest closer when one is present, otherwise at
+// end-of-content — which is exactly where a truncated block stops.
+type truncationDialect struct {
+	open    string
+	closers []string
+}
+
+// The Hermes open marker is assembled from parts so the literal stays
+// machine-stable across edits; it must match hermesToolCallRe exactly.
+var truncationHermesOpen = "<" + "tool_" + "call" + ">"
+
+var truncationDialects = []truncationDialect{
+	{open: truncationHermesOpen, closers: []string{"</tool_call"}},
+	{open: "<function_call>", closers: []string{"</function_call>"}},
+	{open: "<|python_tag|>", closers: []string{"<|eom_id|>", "<|eot_id|>"}},
+	{open: deepSeekDSMLCallsOpen, closers: []string{deepSeekDSMLCallsClose}},
+	{open: "[TOOL_CALLS]", closers: nil},
+}
+
+// findTruncatedToolCallBlock locates the LAST tool-call opening in content and
+// checks whether its payload failed to close. Truncation happens at the end of
+// the stream (the output budget runs out mid-block), so the unfinished block is
+// always the last opening of its kind; earlier well-formed blocks are ignored.
+// It reports ok=false when no opening is present, when the payload closed
+// (repairable or not-a-tool-call), or when the tail is not a recognizable
+// tool-call shape.
+func findTruncatedToolCallBlock(content string) (truncatedBlock, bool) {
+	for _, d := range truncationDialects {
+		idx := strings.LastIndex(content, d.open)
+		if idx < 0 {
+			continue
+		}
+		payload := content[idx+len(d.open):]
+		for _, closer := range d.closers {
+			if ci := strings.Index(payload, closer); ci >= 0 {
+				payload = payload[:ci]
+			}
+		}
+		if looksLikeToolCallStart(payload) && !payloadCloses(payload) {
+			return truncatedBlock{name: nameFromPayload(payload), payload: payload}, true
+		}
+	}
+	// Qwen antl-style: <function=NAME> opens without a JSON body; a truncated
+	// block lacks its </function> close, so parseQwenFunctionToolCall fails on
+	// it while a closed block parses (and would have lifted through the normal
+	// path when offered).
+	if idx := strings.LastIndex(content, "<function="); idx >= 0 {
+		payload := content[idx:]
+		if _, _, ok := parseQwenFunctionToolCall(payload); !ok {
+			name := ""
+			if m := qwenFuncOpenNameRe.FindStringSubmatch(payload); m != nil {
+				name = m[1]
+			}
+			return truncatedBlock{name: name, payload: payload}, true
+		}
+	}
+	// Unclosed fence: an opening ``` (json/tool_call/bare tag) whose body runs
+	// to end-of-content with no closing fence. fencedJSONRe requires the close,
+	// so the lift path never sees these.
+	if open, body := lastUnclosedFence(content); open >= 0 {
+		if looksLikeToolCallStart(body) && !payloadCloses(body) {
+			return truncatedBlock{name: nameFromPayload(body), payload: body}, true
+		}
+	}
+	// Bare JSON: the entire trimmed content is one unterminated object/array.
+	trimmed := strings.TrimSpace(content)
+	if (strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")) &&
+		looksLikeToolCallStart(trimmed) && !payloadCloses(trimmed) {
+		return truncatedBlock{name: nameFromPayload(trimmed), payload: trimmed}, true
+	}
+	return truncatedBlock{}, false
+}
+
+// looksLikeToolCallStart reports whether a partial payload plausibly began a
+// tool call rather than being unrelated JSON or prose: an object opening that
+// names "name" or "function", an array opening (Mistral emits arrays), or a
+// Qwen <function= tag.
+func looksLikeToolCallStart(payload string) bool {
+	t := strings.TrimLeft(payload, " \t\r\n")
+	switch {
+	case strings.HasPrefix(t, "<function="):
+		return true
+	case strings.HasPrefix(t, "["):
+		return true
+	case strings.HasPrefix(t, "{"):
+		return strings.Contains(payload, `"name"`) || strings.Contains(payload, `"function"`)
+	}
+	return false
+}
+
+// payloadCloses reports whether a delimited/fenced/bare payload is a CLOSED
+// value: valid JSON as-is, or closed enough that strictjson.RepairClosedJSON
+// accepts it (fence strip + trailing commas only — it never inserts bytes or
+// salvages an unclosed value).
+func payloadCloses(payload string) bool {
+	trimmed := strings.TrimSpace(payload)
+	if json.Valid([]byte(trimmed)) {
+		return true
+	}
+	_, ok := strictjson.RepairClosedJSON([]byte(trimmed))
+	return ok
+}
+
+// capFragment bounds a raw fragment at fragmentCap bytes (evidence field, not
+// a replay buffer).
+func capFragment(s string) string {
+	if len(s) <= fragmentCap {
+		return s
+	}
+	return s[:fragmentCap]
+}
+
+// Name-recovery patterns for partial payloads: the JSON "name" field, the
+// function-nested form, and DeepSeek DSML's invoke name="..." attribute.
+var (
+	truncatedToolNameRe = regexp.MustCompile(`"name"\s*:\s*"([^"]*)"`)
+	truncatedFuncNameRe = regexp.MustCompile(`"function"\s*:\s*\{\s*"name"\s*:\s*"([^"]*)"`)
+	truncatedDSMLNameRe = regexp.MustCompile(`invoke name="([^"]*)"`)
+	qwenFuncOpenNameRe  = regexp.MustCompile(`^<function=([^>\s]+)`)
+)
+
+func nameFromPayload(payload string) string {
+	if m := truncatedToolNameRe.FindStringSubmatch(payload); m != nil {
+		return m[1]
+	}
+	if m := truncatedFuncNameRe.FindStringSubmatch(payload); m != nil {
+		return m[1]
+	}
+	if m := truncatedDSMLNameRe.FindStringSubmatch(payload); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// lastUnclosedFence returns the index of the last opening ``` fence whose body
+// runs to end-of-content without a closing fence, plus the trimmed body, or
+// (-1, "") when every fence is closed. Fences pair in order, so an odd count
+// means the last one is an opener; only the empty/json/tool_call tags mirror
+// fencedJSONRe.
+func lastUnclosedFence(content string) (int, string) {
+	var idxs []int
+	start := 0
+	for {
+		i := strings.Index(content[start:], "```")
+		if i < 0 {
+			break
+		}
+		idxs = append(idxs, start+i)
+		start += i + 3
+	}
+	if len(idxs)%2 == 0 {
+		return -1, ""
+	}
+	open := idxs[len(idxs)-1]
+	rest := content[open+3:]
+	body := rest
+	if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
+		tag := strings.TrimSpace(rest[:nl])
+		if tag != "" && tag != "json" && tag != "tool_call" {
+			return -1, ""
+		}
+		body = rest[nl+1:]
+	}
+	body = strings.TrimSpace(body)
+	if !strings.HasPrefix(body, "{") && !strings.HasPrefix(body, "[") {
+		return -1, ""
+	}
+	return open, body
 }

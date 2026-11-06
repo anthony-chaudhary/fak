@@ -1,8 +1,16 @@
 // inkernel_incremental.go — a Go port of OpenCode's SystemContext Source / Registry
-// / Snapshot incremental-context-update pattern (opencode@4eb29a6, MIT): models
-// privileged system context as independently refreshable typed sources so a resident
-// context is re-baselined only when a source genuinely changes, and a source that is
-// merely unavailable keeps its admitted snapshot instead of being mistaken for removed.
+// / Snapshot incremental-context-update pattern: models privileged system context as
+// independently refreshable typed sources so a resident context is re-baselined only
+// when a source genuinely changes, and a source that is merely unavailable keeps its
+// admitted snapshot instead of being mistaken for removed.
+//
+// Upstream provenance (DIRECT-PORT, closed contract):
+//   repository:  https://github.com/anomalyco/opencode
+//   pin:         4eb29a64f0054672950acf789f2b09487ebfbb20
+//   source:      packages/core/src/system-context/index.ts
+//                https://github.com/anomalyco/opencode/blob/4eb29a64f0054672950acf789f2b09487ebfbb20/packages/core/src/system-context/index.ts
+//   license:     MIT
+//   Copyright (c) 2025 opencode
 //
 // Semantics mirror the upstream exactly. A Source is one typed value with a
 // namespaced Key, a Load observer, a Baseline render for a fresh generation, an

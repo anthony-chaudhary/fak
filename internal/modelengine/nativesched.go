@@ -17,6 +17,8 @@ package modelengine
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,9 +37,36 @@ import (
 
 var errSchedClosed = errors.New("modelengine: native scheduler closed")
 
+// prefillDrainPerInterval is the number of waiting lanes one prefill-interval
+// window drains: exactly one release step per window, and a release step
+// advances one prefill lane. A waiting queue deeper than that outruns the
+// interval's drain, so the engine records itself capacity-bound and stops
+// throttling (the vLLM prefill_capacity_bound escape, scheduler.py:1562-1564).
+const prefillDrainPerInterval = 1
+
 // ErrNativePromptExceedsKVCapacity reports a request whose prompt alone can
 // never fit the configured native paged-KV budget. Callers may use errors.Is.
 var ErrNativePromptExceedsKVCapacity = errors.New("modelengine: prompt exceeds native KV capacity")
+
+// ErrNativeBatchSequenceNotActive reports a proposed decode batch whose
+// sequence id is not a member of the scheduler's active set. Callers may use
+// errors.Is; BatchSequenceError names the first offending sequence.
+var ErrNativeBatchSequenceNotActive = errors.New("modelengine: batch sequence is not in the active set")
+
+// BatchSequenceError identifies the first proposed-batch sequence id outside
+// the scheduler's active set, carrying the offending admission UID
+// (schedLane.seqNo). It matches ErrNativeBatchSequenceNotActive via errors.Is.
+type BatchSequenceError struct {
+	SeqNo int64
+}
+
+func (e *BatchSequenceError) Error() string {
+	return fmt.Sprintf("modelengine: batch sequence %d is not in the active set", e.SeqNo)
+}
+
+// Unwrap matches every BatchSequenceError against ErrNativeBatchSequenceNotActive
+// so callers can use errors.Is on the sentinel.
+func (e *BatchSequenceError) Unwrap() error { return ErrNativeBatchSequenceNotActive }
 
 type nativeAllocationStatus uint8
 
@@ -86,6 +115,10 @@ type NativeScheduler struct {
 	maxTokensPerStep int
 	promotionPicker  PromotionPicker
 	sessionAffinity  map[string]int
+	// longPrefillTokenThreshold caps a lone long prefill's per-step advance
+	// while other requests are queued (waiting or preempted); 0 disables it.
+	// Guarded by mu; set before publication like maxTokensPerStep.
+	longPrefillTokenThreshold int
 	// maxObservedRunning is the high-water mark of the running set, written only by the
 	// run goroutine under mu. It lets a witness assert the waiting queue actually gated
 	// (peak == maxRunning) without racing on a live concurrency count.
@@ -126,6 +159,17 @@ type NativeScheduler struct {
 	prefixStateMu sync.RWMutex
 	prefixState   *nativePrefixState
 
+	// LoRA slot-cache currency, adapted from llama.cpp's slot reset: the server
+	// compares the global adapter configuration and resets slots whose cached
+	// prompt was produced under a previous one, because a prefix hit installed
+	// from cache replays KV and logits that only the producing adapters justify.
+	// loraAdapters is the last-applied global adapter list and loraGeneration
+	// bumps once per genuine change; both are guarded by mu (not prefixStateMu).
+	// A genuine change invalidates every recorded prefix hit so affected lanes
+	// cold-prefill under the new adapters instead of consuming stale KV.
+	loraAdapters   []string
+	loraGeneration uint64
+
 	prefixFlights     *radixkv.PrefixFlightGroup
 	prefixFlightsMu   sync.Mutex
 	inBatchDedup      bool
@@ -135,9 +179,49 @@ type NativeScheduler struct {
 
 	coupler *WorkerCoupler
 
+	// fwd is the forward-pass slot (Continual Engine phase 0): every decode
+	// step loads the live generation once, before its forward call, so the
+	// whole step runs on one generation. Initialized with the default
+	// (pre-slot) impl; a hot swap never changes this pointer.
+	fwd *ForwardSlot
+
 	// elastic is the FAK_NATIVE_KV_ELASTIC_BLOCKS block ledger; nil (default) is off.
 	// Set once before the scheduler is published.
 	elastic *nativeElasticLedger
+
+	// Spec admission padding, adapted from vLLM's pad_spec_decode (source pin in
+	// the commit body). With specPadK > 0, a waiting lane promoted into a
+	// spec-carrying decode step reserves specPadK placeholder draft slots so its
+	// first decode step rides the same fixed-shape panel as the resident
+	// 1+specPadK lanes; a step whose token budget cannot carry the padded cost
+	// holds the lane in waiting instead of admitting a short row off the
+	// captured bucket. Zero (the default) keeps historical admission
+	// byte-for-byte. Guarded by mu; written by SetSpecAdmissionPad, read only
+	// by the executor.
+	specPadK int
+	// specAdmissionPads/specAdmissionPadSlots count pad_spec_decode reservations
+	// made at admission time: one reservation per padded promotion, plus the
+	// placeholder draft slots it reserved. Guarded by mu; written only by the
+	// executor.
+	specAdmissionPads     uint64
+	specAdmissionPadSlots uint64
+
+	// sessionDecorator decorates every lane session this scheduler mints (fresh
+	// and restored) before use — e.g. binding the device backend a P/D decode
+	// role resolved. Set once before the first Admit; nil keeps the historical
+	// session shape byte-for-byte.
+	sessionDecorator func(*model.Session)
+
+	// skipDrafts* carries the vLLM skip_drafts/_drafts_unused adaptation: the
+	// per-execution verdicts that tell the MTP self-speculation path to propose
+	// K=0 drafts on steps whose drafts are SURE to be unused. Counters are
+	// guarded by mu; the observer, when set, is invoked outside it, in
+	// execution order.
+	skipDraftsObserver       func(SkipDraftsDecision)
+	skipDraftsSteps          uint64
+	skipDraftsSkipped        uint64
+	skipDraftsPrefillChunks  uint64
+	skipDraftsTerminalTokens uint64
 
 	wake    chan struct{} // buffered(1): Admit/Close nudge an idle loop
 	started sync.Once
@@ -154,6 +238,20 @@ type NativeScheduler struct {
 	blockedDrains     int
 	donatedIterations uint64
 	iteration         uint64
+
+	// Local prefill cadence (vLLM prefill_schedule_interval port, ADAPT): hold
+	// prefill to every Nth engine step so decode runs in longer uninterrupted
+	// stretches. prefillInterval <= 1 keeps today's mixed-step order bit-for-bit.
+	// lastPrefillStep is the executed-step index of the last prefill-carrying
+	// step, armed at -prefillInterval so the first step is never gated;
+	// executedSteps counts iterations that scheduled tokens; prefillCapacityBound
+	// records a backed-up engine whose waiting queue outruns one interval's
+	// drain, which stops throttling so the queue cannot grow without bound. All
+	// four are written only by runIteration under mu.
+	prefillInterval      int
+	lastPrefillStep      int
+	executedSteps        int
+	prefillCapacityBound bool
 
 	closeSession       func(*model.Session)
 	observeNativeEvent func(nativeSchedulerEvent)
@@ -199,6 +297,17 @@ func (s *NativeScheduler) WorkerCoupler() *WorkerCoupler {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.coupler
+}
+
+// SetSessionDecorator installs the per-lane session decorator applied to every
+// fresh and restored lane session before use. Set it before the first Admit;
+// like the profiler hook it is read lock-free at mint time, so a post-boot
+// write cannot silently change the shape of already-minted sessions. nil
+// clears the decorator.
+func (s *NativeScheduler) SetSessionDecorator(d func(*model.Session)) {
+	s.mu.Lock()
+	s.sessionDecorator = d
+	s.mu.Unlock()
 }
 
 // WorkerCouplingStats returns telemetry for this scheduler's worker coupler.
@@ -311,6 +420,255 @@ func (s *NativeScheduler) SharedWorkReceipt() SharedWorkReceipt {
 	}
 }
 
+// SetLoRAAdapters applies the global LoRA adapter configuration to the
+// scheduler's prefix-cache currency. A configuration that differs from the
+// last-applied one bumps the LoRA generation and invalidates every recorded
+// prefix hit, so a lane that would have consumed cached KV or logits produced
+// under the previous adapters cold-prefills instead (llama.cpp slot reset:
+// common/server.cpp compares the global adapter list per request and resets
+// slots whose cached prompt predates the change). Re-applying the identical
+// configuration is a no-op that preserves recorded hits. Adapter loading is
+// untouched; the shared radix tree's entries are not yet generation-keyed, so
+// only the recorded per-slot hits are invalidated here.
+func (s *NativeScheduler) SetLoRAAdapters(adapters []string) {
+	s.mu.Lock()
+	changed := !slices.Equal(s.loraAdapters, adapters)
+	if changed {
+		s.loraAdapters = append([]string(nil), adapters...)
+		s.loraGeneration++
+	}
+	s.mu.Unlock()
+	if changed {
+		s.invalidateRecordedPrefixHits()
+	}
+}
+
+// LoRAGeneration reports the current LoRA configuration generation: bumped
+// exactly once per genuine global adapter-config change and stable across
+// identical re-application.
+func (s *NativeScheduler) LoRAGeneration() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.loraGeneration
+}
+
+// invalidateRecordedPrefixHits releases every recorded prefix-hit boundary
+// lease and drops the per-session and per-lane hit records, so the next
+// prefill iteration cold-prefills instead of consuming KV produced under a
+// superseded LoRA configuration. Lane hits alias their holder's record, so
+// each distinct record is released exactly once; this mirrors the per-session
+// cleanup in clearPrefixLookup at scheduler scope.
+func (s *NativeScheduler) invalidateRecordedPrefixHits() {
+	st := s.getPrefixState()
+	if st == nil {
+		return
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	released := make(map[*prefixHitInfo]struct{}, len(st.holderLookups)+len(st.laneLookups))
+	for _, info := range st.holderLookups {
+		if info == nil {
+			continue
+		}
+		if _, seen := released[info]; seen {
+			continue
+		}
+		released[info] = struct{}{}
+		if info.boundary != nil && info.ownerTree != nil {
+			info.ownerTree.Done(info.boundary)
+			info.boundary = nil
+		}
+	}
+	for _, info := range st.laneLookups {
+		if info == nil {
+			continue
+		}
+		if _, seen := released[info]; seen {
+			continue
+		}
+		released[info] = struct{}{}
+		if info.boundary != nil && info.ownerTree != nil {
+			info.ownerTree.Done(info.boundary)
+			info.boundary = nil
+		}
+	}
+	st.holderLookups = make(map[*model.Session]*prefixHitInfo)
+	st.laneLookups = make(map[*schedLane]*prefixHitInfo)
+}
+
+// SpecAdmissionPadReceipt reports pad_spec_decode admission activity: how many
+// promotions reserved placeholder draft slots and how many slots were reserved
+// in total. All-zero means no padded admission ever ran.
+type SpecAdmissionPadReceipt struct {
+	Pads  uint64
+	Slots uint64
+}
+
+func (s *NativeScheduler) SpecAdmissionPadReceipt() SpecAdmissionPadReceipt {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return SpecAdmissionPadReceipt{Pads: s.specAdmissionPads, Slots: s.specAdmissionPadSlots}
+}
+
+// SkipDraftsReason is the closed vocabulary for a skip=true verdict: why the
+// drafts a drafter would stage after the step are SURE to be unused.
+type SkipDraftsReason string
+
+const (
+	// SkipDraftsPrefillChunk marks a prefill execution that ran only
+	// non-final chunks: every scheduled lane sampled nothing, so no next
+	// decode step exists to verify drafts against.
+	SkipDraftsPrefillChunk SkipDraftsReason = "prefill_chunk"
+	// SkipDraftsTerminalToken marks a step after which every scheduled lane
+	// left without a draft-consuming next step: each lane either retired or
+	// staged its last output token (EOS observed, or the genTokens cap
+	// reached even if every draft rejects). Stop tokens and strings cannot
+	// be known in advance, so no other ground earns skip=true.
+	SkipDraftsTerminalToken SkipDraftsReason = "terminal_token"
+)
+
+// SkipDraftsDecision is one completed model execution's skip-drafts verdict.
+// Skip=true tells the MTP self-speculation path to propose K=0 drafts: the
+// drafts it would stage after this execution are SURE to be unused, so the
+// drafter forward and the draft KV writes it would make are skipped entirely.
+// Acceptance accounting of previously staged drafts is unaffected.
+type SkipDraftsDecision struct {
+	Iteration uint64
+	Skip      bool
+	Reason    SkipDraftsReason // zero when Skip is false
+}
+
+// SkipDraftsReceipt counts skip-drafts verdicts since scheduler construction.
+// Steps counts every prefill/decode phase that produced a verdict; Skipped
+// counts the skip=true subset, split by the closed reason vocabulary.
+type SkipDraftsReceipt struct {
+	Steps          uint64
+	Skipped        uint64
+	PrefillChunks  uint64
+	TerminalTokens uint64
+}
+
+// SetSkipDraftsObserver installs the per-execution verdict sink the MTP
+// self-speculation path consumes to skip the drafter forward (K=0 drafts).
+// Verdicts arrive in execution order, outside the scheduler mutex. Nil
+// (default) keeps the scheduler allocation-free; in-package tests inject a
+// witness instead.
+func (s *NativeScheduler) SetSkipDraftsObserver(obs func(SkipDraftsDecision)) {
+	s.mu.Lock()
+	s.skipDraftsObserver = obs
+	s.mu.Unlock()
+}
+
+// SkipDraftsReceipt reports the skip-drafts verdict ledger.
+func (s *NativeScheduler) SkipDraftsReceipt() SkipDraftsReceipt {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return SkipDraftsReceipt{
+		Steps:          s.skipDraftsSteps,
+		Skipped:        s.skipDraftsSkipped,
+		PrefillChunks:  s.skipDraftsPrefillChunks,
+		TerminalTokens: s.skipDraftsTerminalTokens,
+	}
+}
+
+// laneDraftsUnusedLocked reports whether drafts proposed after the execution
+// that just completed are SURE to be unused for this lane. Adaptation of
+// vLLM's _drafts_unused predicate (vllm/v1/core/sched/scheduler.py:483-525,
+// with the can_skip_drafts gate :311-315 @ae065918, Apache-2.0): drafts are
+// verified in the lane's next decode step, and that step either never samples
+// (a non-final prefill chunk, num_computed+num_new < num_tokens) or publishes
+// the lane's last output token. Caller holds s.mu.
+func (s *NativeScheduler) laneDraftsUnusedLocked(ln *schedLane, prefillPhase bool) (bool, SkipDraftsReason) {
+	if ln.terminal {
+		return true, SkipDraftsTerminalToken
+	}
+	if prefillPhase {
+		// Still PREFILLING after its chunk: the cursor sits short of the
+		// prompt tail, so the step sampled nothing. A lane that transitioned
+		// to DECODE (final chunk, or a full prefix-cache hit that consumed
+		// the whole prompt without a forward) keeps its draft opportunity in
+		// the decode phase and reports not-unused here — conservative, never
+		// a missed skip.
+		return ln.state == schedLanePrefilling, SkipDraftsPrefillChunk
+	}
+	// Decode phase: the step's sampled token is the freshly staged deferred
+	// token; done marks the last output token (EOS or the genTokens cap).
+	return ln.deferredToken != nil && ln.deferredToken.done, SkipDraftsTerminalToken
+}
+
+// noteStepSkipDrafts evaluates and records the skip-drafts verdict for one
+// completed model execution over its scheduled lane set. prefillPhase marks
+// an execution that carried only prefill chunks; otherwise it is a decode
+// step. The verdict is the AND over scheduled lanes of
+// laneDraftsUnusedLocked — vLLM proposes K=0 drafts only when the predicate
+// holds for EVERY scheduled request (scheduler.py:1528-1530 per-request OR
+// into drafts_needed, :1693 skip_drafts=not drafts_needed @ae065918).
+// Caller must not hold s.mu; the observer, when set, is invoked outside it.
+func (s *NativeScheduler) noteStepSkipDrafts(iteration uint64, prefillPhase bool, lanes []*schedLane) {
+	if len(lanes) == 0 {
+		return
+	}
+	s.mu.Lock()
+	skip := true
+	var reason SkipDraftsReason
+	for _, ln := range lanes {
+		unused, r := s.laneDraftsUnusedLocked(ln, prefillPhase)
+		if !unused {
+			skip = false
+			reason = "" // a keep-drafts verdict carries no reason
+			break
+		}
+		if reason == "" {
+			reason = r
+		}
+	}
+	s.skipDraftsSteps++
+	if skip {
+		s.skipDraftsSkipped++
+		switch reason {
+		case SkipDraftsPrefillChunk:
+			s.skipDraftsPrefillChunks++
+		case SkipDraftsTerminalToken:
+			s.skipDraftsTerminalTokens++
+		}
+	}
+	obs := s.skipDraftsObserver
+	s.mu.Unlock()
+	if obs != nil {
+		obs(SkipDraftsDecision{Iteration: iteration, Skip: skip, Reason: reason})
+	}
+}
+
+// noteQwenPrefillSkipDrafts records the verdict for the qwen bounded-prefill
+// route once advanceQwenPrefill returns. The chunk counts as executed only
+// when the lane's cursor actually advanced (budget-starved steps yield
+// unchanged; error paths finish the lane without moving it), so no verdict
+// is minted for a step that ran no forward. Caller must not hold s.mu.
+func (s *NativeScheduler) noteQwenPrefillSkipDrafts(iteration uint64, ln *schedLane, cursorBefore int) {
+	s.mu.Lock()
+	advanced := ln.promptCursor > cursorBefore
+	s.mu.Unlock()
+	if advanced {
+		s.noteStepSkipDrafts(iteration, true, []*schedLane{ln})
+	}
+}
+
+// notePackedPrefillSkipDrafts records the verdict for a packed-prefill
+// execution over the lanes whose cursors advanced; declined batches move no
+// cursor and mint no verdict. cursors parallels candidates. Caller must not
+// hold s.mu.
+func (s *NativeScheduler) notePackedPrefillSkipDrafts(iteration uint64, candidates []*schedLane, cursors []int) {
+	s.mu.Lock()
+	advanced := make([]*schedLane, 0, len(candidates))
+	for i, ln := range candidates {
+		if ln.promptCursor > cursors[i] {
+			advanced = append(advanced, ln)
+		}
+	}
+	s.mu.Unlock()
+	s.noteStepSkipDrafts(iteration, true, advanced)
+}
+
 // NewNativeScheduler builds a scheduler over an already-constructed model (a real
 // export or model.NewSynthetic). It is deliberately NOT auto-registered as a second
 // kernel engine id; the registered "inkernel" Engine owns its own scheduler.
@@ -330,6 +688,7 @@ func newNativeScheduler(m *model.Model, prepare schedPrepareFunc) *NativeSchedul
 		stopped:       make(chan struct{}),
 		drainDonation: true,
 		coupler:       NewDefaultWorkerCoupler(),
+		fwd:           NewForwardSlot(DefaultForwardImpl()),
 		closeSession:  func(sess *model.Session) { sess.Close() },
 		recorder:      enginestep.Default,
 	}
@@ -409,6 +768,50 @@ func (s *NativeScheduler) AdmitTokenIDs(ctx context.Context, name string, prompt
 	return s.admitPrepared(ctx, call, dispatchtick.WaveHint{}, schedPrepare{prompt: append([]int(nil), prompt...)})
 }
 
+// ValidateBatchSequences checks a caller-composed decode batch against the
+// scheduler's active set BEFORE dispatch: every sequence id must belong to a
+// non-terminal lane this scheduler admitted — running (lanes), waiting, or
+// preempted. The first unknown sequence in input order is refused with a
+// BatchSequenceError, and no slot, queue, counter, or session state changes on
+// refusal. Known sequences pass in their given order; the check reorders
+// nothing and assigns no slots.
+//
+// Port of the batch sequence-membership validation in ggml-org/llama.cpp
+// llama_batch_allocr::init at pinned revision
+// 25603ef89168a570ea4f34803ce36531c05fd357 (MIT), referenced at
+// src/llama-batch.cpp:475 (PR #30386): a batch carrying a sequence outside the
+// allocated set is refused before the allocator touches slot state instead of
+// corrupting it. Concept adaptation, not copied code: the upstream guard
+// protects per-token sequence-set bookkeeping; here the active set is the
+// scheduler's live lane population keyed by the stable admission UID
+// (schedLane.seqNo).
+func (s *NativeScheduler) ValidateBatchSequences(seqNos []int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	active := make(map[int64]struct{}, len(s.lanes)+len(s.waiting)+len(s.preempted))
+	for _, ln := range s.lanes {
+		if !ln.terminal {
+			active[ln.seqNo] = struct{}{}
+		}
+	}
+	for _, ln := range s.waiting {
+		if !ln.terminal {
+			active[ln.seqNo] = struct{}{}
+		}
+	}
+	for _, ln := range s.preempted {
+		if !ln.terminal {
+			active[ln.seqNo] = struct{}{}
+		}
+	}
+	for _, seqNo := range seqNos {
+		if _, ok := active[seqNo]; !ok {
+			return &BatchSequenceError{SeqNo: seqNo}
+		}
+	}
+	return nil
+}
+
 func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hint dispatchtick.WaveHint, prep schedPrepare) (abi.EngineRequest, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -445,7 +848,7 @@ func (s *NativeScheduler) admitPrepared(ctx context.Context, c *abi.ToolCall, hi
 		kvReuseHits: kvReuseHits,
 		kvPinned:    kvPinned,
 		kvPinUntil:  kvPinUntil,
-		tokens:      make(chan abi.EngineToken, 1),
+		tokens:      newNativeRequestOutbox(),
 		done:        make(chan struct{}),
 		hint:        hint,
 		priority:    priority,
@@ -862,6 +1265,128 @@ func (s *NativeScheduler) SetMaxTokensPerStep(n int) {
 	s.signal()
 }
 
+// SetSpecAdmissionPad arms vLLM's pad_spec_decode admission padding
+// (vllm/v1/core/sched/scheduler.py:1271-1296@ae065918640a198a56f6f17eb45e251c3229fe41,
+// Apache-2.0): with k > 0, a waiting lane promoted into a spec-carrying decode step
+// reserves k placeholder draft slots, so its first decode step rides the same
+// fixed-shape panel as the resident 1+k lanes; a step whose token budget cannot
+// carry the padded cost holds the lane in waiting rather than admitting a short
+// row off the captured bucket. k <= 0 disables the pad (the default). Set it
+// before the first Admit.
+func (s *NativeScheduler) SetSpecAdmissionPad(k int) {
+	if k < 0 {
+		k = 0
+	}
+	s.mu.Lock()
+	s.specPadK = k
+	s.mu.Unlock()
+	s.signal()
+}
+
+// SetPrefillInterval holds prefill to every Nth engine step so decode runs in
+// longer uninterrupted stretches (vLLM local prefill cadence). n<=1 disables
+// the hold and keeps today's mixed-step order bit-for-bit. A deferred step
+// carries no prefill at all, including chunks of an already-admitted prompt,
+// so a long prompt can take up to N times as many steps to finish prefilling.
+// Set it before the first Admit; the run loop reads it each iteration.
+func (s *NativeScheduler) SetPrefillInterval(n int) {
+	if n < 1 {
+		n = 1
+	}
+	s.mu.Lock()
+	s.prefillInterval = n
+	s.lastPrefillStep = -n
+	s.mu.Unlock()
+}
+
+// SetLongPrefillTokenThreshold arms the cross-request fairness cap on a lone
+// long prefill: while other requests are queued (waiting or preempted), that
+// prefill advances at most n prompt tokens per scheduler step. The clamp lands
+// on the step's chunk without touching the p0-prefill-budget resumable
+// chunking: the admission-time nominal chunk is restored after each step, and
+// the clamped cursor simply resumes next step. n<=0 disables the cap (the
+// default). A positive n below the resident minimum chunk is refused and
+// leaves the cap disabled rather than starving the lane into sub-minimum
+// chunks. Source: vllm-project/vllm, vllm/config/scheduler.py:79-90 and
+// vllm/v1/core/sched/scheduler.py:728-742, revision
+// ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0):
+// https://github.com/vllm-project/vllm/blob/ae065918640a198a56f6f17eb45e251c3229fe41/vllm/v1/core/sched/scheduler.py
+// Adapted for Fak as idiomatic Go (no upstream code blocks copied): only the
+// queued-others trigger and the min(chunk, threshold) clamp are ported; the
+// adaptive fair-share floor arrives with the serve-knob wiring leaf.
+func (s *NativeScheduler) SetLongPrefillTokenThreshold(n int) error {
+	if n > 0 && n < nativeQwenPrefillMinChunkTokens {
+		s.mu.Lock()
+		s.longPrefillTokenThreshold = 0
+		s.mu.Unlock()
+		return fmt.Errorf("modelengine: long prefill token threshold %d is below resident minimum %d", n, nativeQwenPrefillMinChunkTokens)
+	}
+	if n < 0 {
+		n = 0
+	}
+	s.mu.Lock()
+	s.longPrefillTokenThreshold = n
+	s.mu.Unlock()
+	s.signal()
+	return nil
+}
+
+// longPrefillStepCapLocked reports this step's cross-request fairness cap for
+// the running prefill lane: the armed threshold while other requests are
+// queued (waiting or preempted), zero when nobody waits or the cap is
+// disabled. Caller holds s.mu.
+func (s *NativeScheduler) longPrefillStepCapLocked() int {
+	if s.longPrefillTokenThreshold <= 0 || len(s.waiting)+len(s.preempted) == 0 {
+		return 0
+	}
+	return s.longPrefillTokenThreshold
+}
+
+// clampLongPrefillStep bounds one prefill step's chunk to the cross-request
+// fairness cap by temporarily lowering the lane's nominal chunk for the
+// duration of a single advanceQwenPrefill call, and returns the values needed
+// to undo it. The admission-time nominal survives the resume, so the
+// p0-prefill-budget resumable chunking keeps its own economics and the
+// clamped cursor resumes from where the clamped chunk stopped - no token
+// dropped or replayed. A cap below the resident minimum chunk floors at the
+// minimum so the lane stays live instead of tripping the not-decode-ready
+// guard. limit<=0 or a nominal already within the cap leaves the lane
+// untouched. Caller holds the executor lock; the brief s.mu takes fence the
+// shared queue and lane-field access against Admit-side publishers.
+func (s *NativeScheduler) clampLongPrefillStep(ln *schedLane, limit int) (orig, clamped int) {
+	orig = ln.prefillChunkTokens
+	if limit <= 0 || orig <= limit {
+		return orig, orig
+	}
+	if limit < nativeQwenPrefillMinChunkTokens {
+		limit = nativeQwenPrefillMinChunkTokens
+	}
+	if orig <= limit {
+		return orig, orig
+	}
+	s.mu.Lock()
+	ln.prefillChunkTokens = limit
+	s.mu.Unlock()
+	return orig, limit
+}
+
+// restoreLongPrefillStep undoes clampLongPrefillStep once the step's model
+// call has published its cursor, restoring the admission-time nominal
+// unconditionally: the clamp never permanently alters the lane's chunk plan.
+// For a lane that left PREFILLING this step - a final clamped chunk, or a
+// full prefix hit's explicit zero - the field is inert afterwards: every
+// reader (laneStepTokens, the prefill advance, dedup donor/twin matching)
+// gates on schedLanePrefilling before consulting it. No-op when the clamp
+// left the lane untouched. Caller holds the executor lock.
+func (s *NativeScheduler) restoreLongPrefillStep(ln *schedLane, orig, clamped int) {
+	if clamped == orig {
+		return
+	}
+	s.mu.Lock()
+	ln.prefillChunkTokens = orig
+	s.mu.Unlock()
+}
+
 // laneStepTokens is a lane's per-step token cost under maxTokensPerStep.
 func laneStepTokens(ln *schedLane) int {
 	if ln.state != schedLanePrefilling && (ln.sess != nil || ln.prefillChunkTokens == 0) {
@@ -875,6 +1400,36 @@ func laneStepTokens(ln *schedLane) int {
 		return 1
 	}
 	return chunk
+}
+
+// specStepCarriesLocked reports whether this step is a spec-carrying decode step
+// for pad_spec_decode purposes: at least one running lane has computed context
+// (materialized and decoding), and no running lane still prefills a chunk this
+// step. Caller holds s.mu.
+func (s *NativeScheduler) specStepCarriesLocked() bool {
+	carrying := false
+	for _, ln := range s.lanes {
+		switch ln.state {
+		case schedLanePrefilling:
+			return false // a prefill chunk rides this step: not a pure decode step
+		case schedLaneDecode:
+			if ln.sess != nil {
+				carrying = true
+			}
+		}
+	}
+	return carrying
+}
+
+// specStepPanelLocked returns the fixed per-row token shape a spec-carrying
+// decode step rides: 1 target token plus specPadK draft slots for every row,
+// residents and padded newcomers alike. ok=false when the step is not a
+// spec-carrying decode step. Caller holds s.mu.
+func (s *NativeScheduler) specStepPanelLocked() (int, bool) {
+	if s.specPadK <= 0 || !s.specStepCarriesLocked() {
+		return 0, false
+	}
+	return 1 + s.specPadK, true
 }
 
 // promoteWaitingLocked moves waiting lanes into the running set in deadline order
@@ -927,15 +1482,30 @@ func (s *NativeScheduler) promoteWaitingLocked(maxRun int) (queueWaits []time.Du
 			kept = append(kept, ln)
 			continue
 		}
+		cost := laneStepTokens(ln)
+		pad := 0
+		if s.specPadK > 0 && cost == 1 && s.specStepCarriesLocked() {
+			// pad_spec_decode admission: reserve K placeholder draft slots so the
+			// newcomer's first decode step rides the same fixed-shape panel as the
+			// resident 1+K lanes instead of forcing the step off the captured bucket.
+			pad = s.specPadK
+			cost += pad
+		}
 		if s.maxTokensPerStep > 0 {
-			cost := laneStepTokens(ln)
 			if cost > budget && len(s.lanes) > 0 {
+				// Skip this lane, not break the pass: a padded row that does not fit
+				// stays in waiting while later lanes that do fit are still admitted.
 				kept = append(kept, ln)
 				continue
 			}
 			budget -= cost
 		}
 		s.lanes = append(s.lanes, ln)
+		if pad > 0 {
+			ln.specAdmissionPad = pad
+			s.specAdmissionPads++
+			s.specAdmissionPadSlots += uint64(pad)
+		}
 		// First scheduling only, following vLLM v1 metrics/stats.py at
 		// 0c63ce9f0e0b5b2782f0f30cb491069dac158bb2 (Apache-2.0).
 		// This is a Go concept adaptation, not copied upstream code. A later
@@ -1220,9 +1790,51 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 			}
 		}
 	}
+	// Prefill cadence gate (vLLM local prefill interval, scheduler.py:748-769):
+	// defer this iteration's prefill when fewer than prefillInterval executed
+	// steps have passed since the last prefill-carrying step and at least one
+	// running lane is not a prefill chunk. A capacity-bound engine stops
+	// throttling so a backed-up waiting queue cannot grow without bound. The
+	// captured cursor/state let the stamp below tell a step that carried
+	// prefill from one that yielded it unchanged.
+	var prefillStartCursor int
+	var prefillStartState schedLaneState
+	if prefill != nil {
+		prefillStartCursor = prefill.promptCursor
+		prefillStartState = prefill.state
+	}
+	deferPrefill := prefill != nil && s.prefillInterval > 1 && !s.prefillCapacityBound &&
+		(s.executedSteps+1-s.lastPrefillStep) < s.prefillInterval && len(active) > 0
+
+	// Skip-drafts verdict inputs (vLLM skip_drafts adaptation): the cursors
+	// the prefilling lanes hold before this iteration's prefill execution, so
+	// the post-execution verdict counts only lanes whose chunk advanced.
+	prefillCursorBefore := -1
+	var packedCandidates []*schedLane
+	var packedCandidateCursors []int
+	if prefill != nil {
+		if prefill.packedPrefill {
+			for _, ln := range s.lanes {
+				if ln.packedPrefill && ln.state == schedLanePrefilling {
+					packedCandidates = append(packedCandidates, ln)
+					packedCandidateCursors = append(packedCandidateCursors, ln.promptCursor)
+				}
+			}
+		} else {
+			prefillCursorBefore = prefill.promptCursor
+		}
+	}
 	closed = s.closed
 	waitingDepth := len(s.waiting)
 	idle = len(s.lanes) == 0 && len(s.waiting) == 0 && len(s.preempted) == 0
+	// Cross-request fairness cap (vLLM long_prefill_token_threshold): while
+	// other requests are queued, a lone long prefill advances at most the
+	// armed threshold this step. Packed prefill keeps its own packing
+	// economics and stays uncapped.
+	longPrefillLimit := 0
+	if prefill != nil && !prefill.packedPrefill {
+		longPrefillLimit = s.longPrefillStepCapLocked()
+	}
 	s.mu.Unlock()
 
 	s.recorder.SetQueueDepth(waitingDepth)
@@ -1232,13 +1844,17 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 	}
 	s.iteration++
 	iteration := s.iteration
-	if prefill != nil {
+	if prefill != nil && !deferPrefill {
 		prefillStarted := s.now()
 		var packedReady []*schedLane
 		if prefill.packedPrefill {
 			packedReady = s.advancePackedPrefill(iteration)
+			s.notePackedPrefillSkipDrafts(iteration, packedCandidates, packedCandidateCursors)
 		} else {
+			origChunk, clampedChunk := s.clampLongPrefillStep(prefill, longPrefillLimit)
 			s.advanceQwenPrefill(prefill, iteration)
+			s.restoreLongPrefillStep(prefill, origChunk, clampedChunk)
+			s.noteQwenPrefillSkipDrafts(iteration, prefill, prefillCursorBefore)
 		}
 		// PhasePrefill only: ObservePrefillChunk counts prompt tokens forwarded by
 		// prefill, and advanceQwenPrefill may resolve a KV prefix hit that skips
@@ -1273,6 +1889,23 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 		s.stepOnce(active, iteration)
 		s.recorder.ObserveDecodeStep(enginestep.PathBatched, len(active), s.now().Sub(stepStarted))
 	}
+	// Cadence stamping (vLLM scheduler.py:1562-1577): count only steps that
+	// actually scheduled tokens, restart the interval from any step that
+	// carried prefill (new admission or running chunk), and record the capacity
+	// escape on every release step so a backed-up engine stops throttling.
+	s.mu.Lock()
+	carried := prefill != nil && !deferPrefill &&
+		(prefill.promptCursor != prefillStartCursor || prefill.state != prefillStartState)
+	if solo != nil || len(active) > 0 || carried {
+		s.executedSteps++
+	}
+	if carried {
+		s.lastPrefillStep = s.executedSteps
+	}
+	if !deferPrefill {
+		s.prefillCapacityBound = len(s.waiting) > prefillDrainPerInterval
+	}
+	s.mu.Unlock()
 	if donated {
 		s.mu.Lock()
 		s.donatedIterations++
@@ -1304,6 +1937,12 @@ func (ln *schedLane) stageDeferredToken() bool {
 	if ln.state != schedLaneDecode || len(ln.logits) == 0 || ln.sess == nil || ln.sess == ln.statsSess {
 		ln.finish(nil, errNativeSchedulerLaneNotDecodeReady)
 		return false
+	}
+	// pad_spec_decode placeholder resolution: the lane's first decode forward
+	// consumes the admission-reserved draft slots; rejected placeholders publish
+	// nothing (upstream resolves them to -1 in update_draft_token_ids_in_output).
+	if ln.specAdmissionPad > 0 {
+		ln.specAdmissionPad = 0
 	}
 	next := argmax(ln.logits)
 	ln.deferredToken = &nativeDeferredToken{
@@ -1413,8 +2052,11 @@ func (s *NativeScheduler) stepSolo(ln *schedLane, iteration uint64) {
 		}
 		s.beforeModelExecution(nativeSchedulerEventDecode, ln)
 		decodeStarted := s.now()
+		// Load the live forward generation once, BEFORE the forward call, so
+		// this whole step runs on one generation (in-flight continuity).
+		gen := s.fwd.Load()
 		logits := RunWithOp(s.coupler, OpDecode, func() []float32 {
-			return sess.Step(next)
+			return gen.Impl.Step(sess, next)
 		})
 		s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
 		if !s.publishDecodeSession(ln, sess, logits) {
@@ -1423,6 +2065,7 @@ func (s *NativeScheduler) stepSolo(ln *schedLane, iteration uint64) {
 		if !ln.retireDeferredToken(iteration) || !ln.stageDeferredToken() {
 			return
 		}
+		s.noteStepSkipDrafts(iteration, false, []*schedLane{ln})
 		select {
 		case <-s.wake:
 			return
@@ -1494,14 +2137,18 @@ func (s *NativeScheduler) stepOnce(active []*schedLane, iteration uint64) {
 	if len(execLanes) == 1 {
 		s.beforeModelExecution(nativeSchedulerEventDecode, execLanes[0])
 		decodeStarted := s.now()
+		// Load the live forward generation once, BEFORE the forward call, so
+		// this whole step runs on one generation (in-flight continuity).
+		gen := s.fwd.Load()
 		logits := RunWithOp(s.coupler, OpDecode, func() []float32 {
-			return seqs[0].Step(execIDs[0])
+			return gen.Impl.Step(seqs[0], execIDs[0])
 		})
 		s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
 		if s.publishDecodeSession(execLanes[0], seqs[0], logits) {
 			execLanes[0].retireDeferredToken(iteration)
 			execLanes[0].stageDeferredToken()
 		}
+		s.noteStepSkipDrafts(iteration, false, active)
 		return
 	}
 	// The shared, weight-stream-amortised decode step: ONE StepBatch over every
@@ -1512,8 +2159,11 @@ func (s *NativeScheduler) stepOnce(active []*schedLane, iteration uint64) {
 		s.beforeModelExecution(nativeSchedulerEventDecode, ln)
 	}
 	decodeStarted := s.now()
+	// Load the live forward generation once, BEFORE the forward call, so this
+	// whole batch step runs on one generation (in-flight continuity).
+	gen := s.fwd.Load()
 	out := RunWithOp(s.coupler, OpBatch, func() [][]float32 {
-		return bs.StepBatch(execIDs)
+		return gen.Impl.StepBatch(bs, execIDs)
 	})
 	s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, s.now().Sub(decodeStarted))
 	if panels := bs.LastStepSharedPanels(); panels > 0 {
@@ -1529,6 +2179,7 @@ func (s *NativeScheduler) stepOnce(active []*schedLane, iteration uint64) {
 			ln.stageDeferredToken()
 		}
 	}
+	s.noteStepSkipDrafts(iteration, false, active)
 }
 
 // decodeBatchBucket selects the fixed-shape decode graph bucket that a live
@@ -1760,6 +2411,12 @@ type schedLane struct {
 	// Lower values are more important, following vLLM's request-priority convention
 	// (vllm/v1/core/sched/scheduler.py:735@975dca5, Apache-2.0).
 	priority int
+
+	// specAdmissionPad is the number of placeholder draft slots reserved for this
+	// lane's first decode step when it was promoted into a spec-carrying decode
+	// step (pad_spec_decode admission). Consumed by the first decode staging; the
+	// placeholders publish no tokens. Guarded by sched.mu.
+	specAdmissionPad int
 
 	// Preemption state. A preempted lane is removed from the running set without closing
 	// its token stream; readmit restores sess/logits and the stream resumes.

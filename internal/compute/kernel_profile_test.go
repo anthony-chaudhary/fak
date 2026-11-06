@@ -215,6 +215,8 @@ func TestKernelOpClassClosed(t *testing.T) {
 		"sigmoid_mul":                   KernelOpOther,
 		"readback":                      KernelOpCopy,
 		"h2d_upload":                    KernelOpCopy,
+		"splitkv":                       KernelOpOther,
+		"lse_merge":                     KernelOpOther,
 		"unknown":                       KernelOpOther,
 		"":                              KernelOpOther,
 	} {
@@ -492,10 +494,14 @@ func cudaLaunchTimingName(path, launch, kernel string) string {
 		"cuda/q8_mmq.cuh:mul_mat_q<J,fallback>":                                                                      "q8_mul_mat_q",
 		"cuda/q8_mmq.cuh:mul_mat_q_stream_k_fixup<J,fallback>":                                                       "q8_mul_mat_q_stream_k_fixup",
 		"cuda/q4k_shared_input.cuh:mul_mat_vec_q<1>":                                                                 "k_q4k_mmvq_gemv",
+		"cuda/graph_quant_workspace.cuh:mul_mat_vec_q<1>":                                                            "k_q4k_mmvq_gemv",
 		"cuda/q2k_mmq.cuh:mul_mat_q<J,fallback>":                                                                     "q2_mul_mat_q",
 		"cuda/q2k_mmq.cuh:mul_mat_q_stream_k_fixup<J,fallback>":                                                      "q2_mul_mat_q_stream_k_fixup",
 		"cuda/q3k_mmq.cuh:mul_mat_q<J,fallback>":                                                                     "q3_mul_mat_q",
 		"cuda/q3k_mmq.cuh:mul_mat_q_stream_k_fixup<J,fallback>":                                                      "q3_mul_mat_q_stream_k_fixup",
+		"cuda/q56k_mmq.cuh:quantize_mmq_q8_1<kind>":                                                                  "q56k_mmq_quantize",
+		"cuda/q56k_mmq.cuh:mul_mat_q<kind,J,fallback>":                                                               "q56k_mmq_mul_mat_q",
+		"cuda/q56k_mmq.cuh:mul_mat_q_stream_k_fixup<J,fallback>":                                                     "q56k_mmq_mul_mat_q_stream_k_fixup",
 		"cuda/quant_matmul.cuh:k_q5k_gemm<4>":                                                                        "k_q5k_gemm_panel",
 		"cuda/quant_matmul.cuh:k_q6k_gemm<4>":                                                                        "k_q6k_gemm_panel",
 		"cuda/q4k_fp8lt.cuh:amax<true>":                                                                              "q4k_fp8lt_weight_amax",
@@ -555,6 +561,9 @@ func TestCUDATimestampSemanticAliases(t *testing.T) {
 		{"q8 wrong source", "cuda/other.cuh", `FCUDA_TS("q8_mul_mat_q", grid, mul_mat_q<J, fallback><<<grid, block>>>(x));`, false},
 		{"shared q4", "cuda/q4k_shared_input.cuh", `FCUDA_TS("k_q4k_mmvq_gemv", grid, mul_mat_vec_q<1><<<grid, block>>>(x));`, true},
 		{"shared q4 wrong specialization", "cuda/q4k_shared_input.cuh", `FCUDA_TS("k_q4k_mmvq_gemv", grid, mul_mat_vec_q<2><<<grid, block>>>(x));`, false},
+		{"graph fixed q4", "cuda/graph_quant_workspace.cuh", `FCUDA_TS("k_q4k_mmvq_gemv", grid, mul_mat_vec_q<1><<<grid, block>>>(x));`, true},
+		{"graph fixed q4 wrong specialization", "cuda/graph_quant_workspace.cuh", `FCUDA_TS("k_q4k_mmvq_gemv", grid, mul_mat_vec_q<2><<<grid, block>>>(x));`, false},
+		{"graph fixed q4 wrong row", "cuda/graph_quant_workspace.cuh", `FCUDA_TS("k_q56k_mmvq_gemv", grid, mul_mat_vec_q<1><<<grid, block>>>(x));`, false},
 		{"q2 mul_mat_q", "cuda/q2k_mmq.cuh", `FCUDA_TS("q2_mul_mat_q", grid, mul_mat_q<J, fallback><<<grid, block>>>(x));`, true},
 		{"q2 mul_mat_q_stream_k_fixup", "cuda/q2k_mmq.cuh", `FCUDA_TS("q2_mul_mat_q_stream_k_fixup", grid, mul_mat_q_stream_k_fixup<J, fallback><<<grid, block>>>(x));`, true},
 		{"q2 wrong source", "cuda/other.cuh", `FCUDA_TS("q2_mul_mat_q", grid, mul_mat_q<J, fallback><<<grid, block>>>(x));`, false},
@@ -563,6 +572,9 @@ func TestCUDATimestampSemanticAliases(t *testing.T) {
 		{"q3 mul_mat_q_stream_k_fixup", "cuda/q3k_mmq.cuh", `FCUDA_TS("q3_mul_mat_q_stream_k_fixup", grid, mul_mat_q_stream_k_fixup<J, fallback><<<grid, block>>>(x));`, true},
 		{"q3 wrong source", "cuda/other.cuh", `FCUDA_TS("q3_mul_mat_q", grid, mul_mat_q<J, fallback><<<grid, block>>>(x));`, false},
 		{"q3 wrong specialization", "cuda/q3k_mmq.cuh", `FCUDA_TS("q3_mul_mat_q", grid, mul_mat_q<1, fallback><<<grid, block>>>(x));`, false},
+		{"q56k quantize", "cuda/q56k_mmq.cuh", `FCUDA_TS("q56k_mmq_quantize", qgrid, quantize_mmq_q8_1<kind><<<qgrid, block>>>(x));`, true},
+		{"q56k mul_mat_q", "cuda/q56k_mmq.cuh", `FCUDA_TS("q56k_mmq_mul_mat_q", grid, mul_mat_q<kind, J, fallback><<<grid, block>>>(x));`, true},
+		{"q56k stream_k_fixup", "cuda/q56k_mmq.cuh", `FCUDA_TS("q56k_mmq_mul_mat_q_stream_k_fixup", fgrid, mul_mat_q_stream_k_fixup<J, fallback><<<fgrid, block>>>(x));`, true},
 		{"panel", "cuda/quant_matmul.cuh", `FCUDA_TS("k_q5k_gemm_panel", grid, k_q5k_gemm<4><<<grid, block>>>(x));`, true},
 		{"panel whitespace", "cuda/quant_matmul.cuh", `FCUDA_TS("k_q6k_gemm_panel", grid, k_q6k_gemm < 4 > <<<grid, block>>>(x));`, true},
 		{"ordinary template", "cuda/quant_matmul.cuh", `FCUDA_TS("k_q5k_gemm", grid, k_q5k_gemm<1><<<grid, block>>>(x));`, true},
@@ -967,7 +979,7 @@ var cudaKernelOtherAllowlist = map[string]bool{
 	"k_mhc": true, "k_v41_engram": true, "k_v41_pool": true, "v41c_status_kernel": true,
 	"v41c_compressor_store_kernel": true, "v41c_compressor_update_pool_kernel": true,
 	"quantize_q8_1": true, "k_q3k_dequant": true, "k_iq4xs_dequant_split": true,
-	"quantize_mmq_q8_1_d2s6": true, "quantize_mmq_q8_1_d4": true,
+	"quantize_mmq_q8_1_d2s6": true, "quantize_mmq_q8_1_d4": true, "q56k_mmq_quantize": true,
 	// Engram row gathers/dequantization and poisoned-output status publication.
 	"v41_eg_q5": true, "v41_eg_q2": true, "v41_eg_f32": true, "v41_eg_rows": true,
 	"v41_eg_iq4nl": true, "v41_eg_iq4nl_row": true, "v41_eg_iq4nl_poison": true,
@@ -1006,9 +1018,11 @@ func TestKernelOpClassCUDANames(t *testing.T) {
 		"q8_mul_mat_q": KernelOpMatmul, "q8_mul_mat_q_stream_k_fixup": KernelOpMatmul,
 		"q2_mul_mat_q": KernelOpMatmul, "q2_mul_mat_q_stream_k_fixup": KernelOpMatmul,
 		"q3_mul_mat_q": KernelOpMatmul, "q3_mul_mat_q_stream_k_fixup": KernelOpMatmul,
+		"q56k_mmq_mul_mat_q": KernelOpMatmul, "q56k_mmq_mul_mat_q_stream_k_fixup": KernelOpMatmul,
 		"mul_mat_q": KernelOpMatmul, "mul_mat_q_stream_k_fixup": KernelOpMatmul, "k_nvfp4_w4a16_f32": KernelOpMatmul,
 		"cublas_sgemm": KernelOpMatmul, "cublas_gemm_ex": KernelOpMatmul, "cublaslt_matmul": KernelOpMatmul,
 		"k_qwen38_fattn_mma_hd256": KernelOpAttention, "k_qwen38_fattn_stage_kv_f16": KernelOpAttention,
+		"k_qwen38_causal_attention_panel_hd256_splitkv_partial": KernelOpAttention, "k_qwen38_splitkv_lse_merge_hd256": KernelOpAttention,
 		"k_dsa_sparse_attend": KernelOpAttention, "k_dsa_index_topk": KernelOpAttention, "k_spec_verify_combine": KernelOpAttention,
 		"k_tree_verify_attention": KernelOpAttention, "k_qwen35_gdn_fused_in_proj": KernelOpMatvec,
 		"k_qwen35_gdn_recurrent_panel_cols": KernelOpGDN, "d2d_copy": KernelOpCopy, "fill": KernelOpCopy,
@@ -1036,15 +1050,20 @@ func TestKernelOpClassGraphOnceNames(t *testing.T) {
 		"k_graph_once_position": KernelOpOther,
 		"k_graph_once_copyrow":  KernelOpOther,
 		"k_rope":                KernelOpRope,
+		"k_partial_rope_copy":   KernelOpRope,
 		"k_flash_attention":     KernelOpAttention,
 		"d2d_copy":              KernelOpCopy,
 	}
 	if len(rows) != len(want) {
-		t.Fatalf("graph timestamp rows = %v, want exactly five named operations", rows)
+		t.Fatalf("graph timestamp rows = %v, want exactly six named operations", rows)
 	}
 	for name, class := range want {
-		if rows[name] != 1 {
-			t.Errorf("graph row %s occurs %d times, want one", name, rows[name])
+		wantCount := 1
+		if name == "k_partial_rope_copy" {
+			wantCount = 2 // separate Q and K launches share the same operation class
+		}
+		if rows[name] != wantCount {
+			t.Errorf("graph row %s occurs %d times, want %d", name, rows[name], wantCount)
 		}
 		if got := KernelOpClass(name); got != class {
 			t.Errorf("KernelOpClass(%q) = %s, want %s", name, got, class)

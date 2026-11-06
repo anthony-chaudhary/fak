@@ -96,12 +96,12 @@ func hostReserved(p *InKernelPlanner) int64 {
 // hostSessionReusePlanner builds the resident host-session planner the way `fak up` does
 // (backend nil, so prefix reuse is on and the radix tree exists) over a tiny synthetic model.
 // metal stays false at construction so PrepareMetalResidency never runs; the admission arm
-// keys on backend == nil, which is the host-session seam either way. The env is pinned so the
-// radix tree exists and its token budget is the model's declared context window.
+// keys on backend == nil, which is the host-session seam either way. FAK_INKERNEL_RADIX is
+// pinned on so the radix tree exists; with no explicit RadixBudgetTokens its token budget
+// is the model's declared context window.
 func hostSessionReusePlanner(t *testing.T) *InKernelPlanner {
 	t.Helper()
 	t.Setenv("FAK_INKERNEL_RADIX", "on")
-	t.Setenv("FAK_INKERNEL_RADIX_BUDGET", "")
 	cfg := tinyConcurrencyConfig()
 	cfg.MaxPositionEmbeddings = 4096
 	p := NewInKernelPlanner(model.NewSynthetic(cfg), loadProbeTok(t), "host-budget-reuse", false, nil, false)

@@ -103,6 +103,7 @@ func TestNativeGBNFMaskForkSpecialAndEOS(t *testing.T) {
 	parent := &nativeStructuredConstraint{mask: mask, stopID: 0, openID: -1, closeID: -1}
 	stops := map[int]bool{0: true}
 	logits := []float32{100, 1, 1, 1, 1, 1, 1, 1000}
+	originalLogits := slices.Clone(logits)
 	effective, err := parent.maskLogits(logits, stops)
 	if err != nil {
 		t.Fatal(err)
@@ -154,7 +155,7 @@ func TestNativeGBNFMaskForkSpecialAndEOS(t *testing.T) {
 	if !nativeStructuredLogitFinite(effective[3]) || !nativeStructuredLogitFinite(effective[5]) {
 		t.Fatal("rollback did not return to root")
 	}
-	if !slices.Equal(logits, []float32{100, 1, 1, 1, 1, 1, 1, 1000}) {
+	if !slices.Equal(logits, originalLogits) {
 		t.Fatal("original logits mutated")
 	}
 }

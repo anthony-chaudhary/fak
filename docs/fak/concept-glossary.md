@@ -2196,3 +2196,129 @@ Configured bounded serving targets for one role pool: replica minimum/maximum an
 PlanDensePrefixCapture validates a dense-FP32 cache and optional bit-identical retained prefix, computes an upper bound on additional retained numeric backing, and returns a synchronous one-shot DensePrefixCapture for later Capture under the same external tree lock; unsupported/malformed layouts refuse before page allocation or reference changes.
 
 **Distinct from:** Unlike v41PlanHostRawGateUp, which selects deferred host raw-weight projection, this plans immutable prefix-page ownership and byte-budget admission; unlike compute MemoryPlan's classed demands, it binds an actual source/prefix and must not outlive their locked stability. It may allocate plan/pool metadata and inspect existing numeric bytes, but acquires no page references until Capture.
+
+
+### Explicit logical token-pool capacity
+
+NewSharedTokenPoolWithCapacity constructs a device-neutral logical token and byte admission ledger from positive, finite, representable capacity and geometry, without Halo defaults or environment values.
+
+**Distinct from:** Unlike PagedKVPool, this constructor admits logical token reservations only; it allocates no physical KV blocks and supplies no device-memory availability evidence. Existing Halo constructors retain their permissive defaults.
+
+
+### Qwen35GDNPackedInputPlan
+
+Checked representation metadata for canonical Qwen GDN QKV or Z weights: admitted Q4_K/Q6_K dtype, exact matrix rows and columns, block size and raw byte extent for shared use by loading and estimation; consumer wiring is separate.
+
+**Distinct from:** Unlike V41Q2KTokenPanelPlan, this describes a canonical QKV/Z weight representation rather than token-panel dispatch geometry. Unlike cudaSequenceSplitScratchPlan, it describes raw weight bytes rather than temporary compensated-split capacities. It does not establish tensor role, row normalization, device residency, current health, graph legality or permission to execute.
+
+
+### Qwen35GDNPackedInputCapability
+
+Versioned backend source declaration that the existing whole-GDN decode and sequence implementations understand canonical row-major block-256 Q4_K or Q6_K QKV/Z weights with F32 mutable state.
+
+**Distinct from:** Unlike Qwen35GDNPackedInputPlan, this declares an implementation contract rather than geometry or raw bytes. The declaration alone does not enable loading: explicit request controls, exact operation identities and actual independent dtype probes must resolve a per-load policy. It promises no graph capture, device health or measured hardware result.
+
+
+### Qwen35GDNPackedInputPolicy
+
+Immutable per-load Q4_K/Q6_K admission decision resolved from explicit enable and force-off controls, the versioned whole-GDN implementation contract and actual backend residency/upload/dtype probes. Its zero value admits no packed GDN inputs.
+
+**Distinct from:** Unlike Qwen35GDNPackedInputCapability, this is the resolved decision rather than a backend declaration. Unlike Qwen35GDNPackedInputPlan, it selects admissible representations rather than calculating one tensor extent. It cannot establish current device health, memory capacity, canonical row identity, whole-operation validity or graph legality; capture remains refused.
+
+
+### ResolveQwen35GDNPackedInputPolicy
+
+Resolver that honors default-off and both force-off controls, checks actual whole-GDN decode and sequence method/path contracts, validates the versioned declaration and probes each admitted resident dtype before returning a copied per-load policy or typed refusal.
+
+**Distinct from:** Unlike Qwen35GDNPackedInputPolicy, this is the validating constructor rather than the immutable result. Unlike Qwen35GDNPackedInputCapability, it combines explicit request and actual probes instead of accepting a declaration alone. It reads no environment, makes no tensor upload, device allocation or model-operation call and never admits packed graph capture.
+
+
+### kvFP8EvictionPlan
+
+Generation-bound canonical-row relocation map with copied per-layer rotary contracts for complete-image eager FP8 KV eviction.
+
+**Distinct from:** This is retained mutable-KV row geometry, not Qwen35GDNPackedInputPlan static weight storage or ctxplan.PlanEviction survival-class token-budget selection. A mapping does not authorize stale owner use or graph replay.
+
+
+### kvFP8Owner.planEvict
+
+Constructs a canonical-row FP8 eviction mapping from the current owner generation, row range and copied per-layer rotary contracts without device effects.
+
+**Distinct from:** This is the planner that returns kvFP8EvictionPlan, not the returned mapping or its eager execution. It plans complete-image row relocation, not survival-class token-budget selection, and does not establish caller lifetime or hardware qualification.
+
+
+### kvFP8EvictionPlan (eviction descriptor)
+
+Eviction-family view of the same kvFP8EvictionPlan symbol: an owner-generation-bound row relocation descriptor retaining exact per-layer rotary contracts for complete-image replacement.
+
+**Distinct from:** This cross-indexes the plan-family descriptor rather than defining a second implementation. It carries the eviction mapping but neither chooses a survival-class token budget nor executes the planner or replacement.
+
+
+### kvFP8Owner.planEvict (eviction planning)
+
+Eviction-family view of the same planEvict method: validates the current complete-image row relocation contract and constructs its generation-bound mapping without device effects.
+
+**Distinct from:** This is the same planner indexed in the plan family, not a second operation. It constructs the descriptor but does not apply it, mutate device planes or choose a survival-class token budget.
+
+
+### kvFP8EvictEager
+
+Complete-image eager FP8 eviction entry that constructs a current-owner canonical-row plan and delegates its checked execution to kvFP8ApplyEvictionEager.
+
+**Distinct from:** This combines planning and application, unlike planEvict alone or an already prepared descriptor. It is internal orchestration rather than public precision selection, in-place compaction, graph replay or measured performance.
+
+
+### kvFP8ApplyEvictionEager
+
+Executes a prepared generation-bound FP8 eviction mapping through disjoint all-layer staging, exact retained-row copies, bounded suffix rerotation, quantization and checked completion before publication.
+
+**Distinct from:** This consumes an existing mapping, whereas kvFP8EvictEager also plans it and planEvict only constructs it. It does not compact in place, activate a serving constructor or qualify graph replay, device lifetime or performance.
+
+
+### kvFP8AttentionQuery
+
+Private retained F32 query owner, exact byte extent and backend/device metadata for one staged FP8 attention operation.
+
+**Distinct from:** Unlike fcuda_kv_attention_typed, this value neither executes attention nor owns the staged KV image; it retains the source query and does not prove numerical validity or expose a public Tensor.
+
+
+### kvFP8AttentionOutput
+
+Ephemeral F32 output allocation view and cumulative numerical-status allocation scoped to the checked staged-attention use callback.
+
+**Distinct from:** Unlike the retained input kvFP8AttentionQuery, this borrowed view represents the fresh output and status used inside the callback; it is not an owning public Buffer, a returned Tensor or an attention executor.
+
+
+### kvFP8AttentionRoots
+
+Retention holder for prior raw/key/value input roots, the query owner and fresh output allocation across uncertain staged FP8 attention work.
+
+**Distinct from:** Unlike the query or output views, this holder keeps their underlying roots reachable before allocation or submission and through abnormal control transfer; it is not a cache, reusable pool, checked completion receipt or numerical-validity claim.
+
+
+### kvFP8AttentionBytes
+
+Checked F32 query/output byte-extent calculation for the bounded four-KV-head, head-dimension-256 staged FP8 attention geometry.
+
+**Distinct from:** Unlike the retained query/output/roots values and attention entrypoints, this helper performs only bounded dimension and integer-overflow checks; it neither allocates memory nor reserves global capacity or establishes device support.
+
+
+### cudaKVFP8Adapter.stagedAttentionLocked
+
+Uncalled qualification-only typed query gate and binding of the retained staged-attention helper to the private native FP8 attention wrapper under existing ForwardExecutionOwner and cudaMu serialization.
+
+**Distinct from:** Unlike the query/output metadata and the native wrapper alone, this adapter validates Tensor provenance and binds checked host lifecycle callbacks; it is not a public model or serving route, graph capture path or default attention dispatch.
+
+
+### fcuda_kv_fp8_attention_owned
+
+Private native five-plane, query, output and status provenance/extent/alias gate around the existing scalar FP8 attention submission, returning a selected diagnostic receipt.
+
+**Distinct from:** Unlike the qualification-only typed adapter and the F16/BF16 fcuda_kv_attention_typed entry, this wrapper admits private FP8 planes and fresh output; zero status means accepted submission only, not checked completion, numerical validity, publication or H200 qualification.
+
+
+### kvFP8HybridPreflight
+
+Private prerequisite check for one FP8 owner and an exact three-GDN/one-attention layer map: validates canonical position range, fixed partial-RoPE binding, supported selected modes, live GDN invalid-bit roots and non-overlapping storage before whole-forward admission.
+
+**Distinct from:** This checks the supplied hybrid state descriptors, not the default-off packed-GDN dtype policy or its backend capability declaration. It does not validate every model weight, native GDN allocation provenance, output-consumer arithmetic or a public serving route.

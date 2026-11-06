@@ -269,7 +269,10 @@ func CanonicalizeResponsesPrefix(
 
 	for i := startIdx; i < len(messages); i++ {
 		msg := messages[i]
-		if summaryBlock == "" && reCompactionSummary.MatchString(msg.Content) {
+		// Summary tags in conversation or tool output are data, not permission to
+		// promote those bytes to system instructions before result admission.
+		trustedSummary := msg.Role == agent.RoleSystem || msg.Role == "developer"
+		if trustedSummary && summaryBlock == "" && reCompactionSummary.MatchString(msg.Content) {
 			cleaned, s := ExtractCompactionSummary(msg.Content)
 			summaryBlock = s
 			if cleaned == "" {

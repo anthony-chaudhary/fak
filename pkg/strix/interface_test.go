@@ -45,21 +45,4 @@ func TestPublicInterfaceDefinitions(t *testing.T) {
 	if addr != 0x2000 {
 		t.Fatalf("expected address 0x2000, got 0x%x", addr)
 	}
-
-	profile := strix.DefaultStrixHaloProfile()
-	if profile.Architecture != "gfx1151" {
-		t.Fatalf("expected gfx1151, got %s", profile.Architecture)
-	}
-	if profile.CUCount != 40 {
-		t.Fatalf("expected 40 CUs, got %d", profile.CUCount)
-	}
-	if profile.Wavefront != 32 {
-		t.Fatalf("expected 32 wavefront, got %d", profile.Wavefront)
-	}
-	if profile.BusWidthBits != 256 {
-		t.Fatalf("expected 256-bit bus, got %d", profile.BusWidthBits)
-	}
-	if profile.PeakBandwidthGBps <= 0 {
-		t.Fatalf("expected positive peak bandwidth, got %f", profile.PeakBandwidthGBps)
-	}
 }

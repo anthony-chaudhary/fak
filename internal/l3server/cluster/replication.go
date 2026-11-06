@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"bytes"
 	"log"
 	"sync"
 
@@ -57,18 +58,28 @@ func (r *Replicator) Stop() {
 }
 
 // ReplicateSet queues an async SET replication.
+// Copy the payload because the caller may reuse its request buffer on return.
 func (r *Replicator) ReplicateSet(key, value []byte, ttlMs int64) {
+	// Drop before copying when the buffered queue is already full.
+	if cap(r.queue) > 0 && len(r.queue) == cap(r.queue) {
+		return
+	}
 	select {
-	case r.queue <- replicateOp{Key: key, Value: value, TTLMs: ttlMs, Op: "set"}:
+	case r.queue <- replicateOp{Key: bytes.Clone(key), Value: bytes.Clone(value), TTLMs: ttlMs, Op: "set"}:
 	default:
 		// Queue full â€” drop (fire-and-forget)
 	}
 }
 
 // ReplicateDelete queues an async DELETE replication.
+// The queued key must outlive the caller's request buffer.
 func (r *Replicator) ReplicateDelete(key []byte) {
+	// Drop before copying when the buffered queue is already full.
+	if cap(r.queue) > 0 && len(r.queue) == cap(r.queue) {
+		return
+	}
 	select {
-	case r.queue <- replicateOp{Key: key, Op: "delete"}:
+	case r.queue <- replicateOp{Key: bytes.Clone(key), Op: "delete"}:
 	default:
 	}
 }

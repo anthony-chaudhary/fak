@@ -48,7 +48,7 @@ func (a *Account) Debit(tokens int64, now time.Time) error {
 	if !a.deadline.IsZero() && now.After(a.deadline) {
 		return ErrDeadlineExceeded
 	}
-	if a.usedTokens+tokens > a.maxTokens {
+	if tokens > a.maxTokens-a.usedTokens {
 		return ErrExhausted
 	}
 	a.usedTokens += tokens

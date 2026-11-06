@@ -70,6 +70,9 @@ func ApplyDirect2D(path string, raw []byte, now time.Time) (string, error) {
 	if err := json.Unmarshal(raw, &root); err != nil {
 		return "", err
 	}
+	if root == nil {
+		return "", fmt.Errorf("Windows Terminal settings must be a JSON object")
+	}
 	root["graphicsAPI"] = Direct2D
 	out, err := json.MarshalIndent(root, "", "    ")
 	if err != nil {

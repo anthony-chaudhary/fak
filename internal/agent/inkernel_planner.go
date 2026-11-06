@@ -128,8 +128,9 @@ type InKernelPlanner struct {
 	//
 	// MEMORY NOTE: radixkv stores the FULL-prefix KV per node, so a long single growing
 	// conversation accumulates nested KV clones (see radixkv's Tokens-vs-PrefixTokens
-	// note). FAK_INKERNEL_RADIX_BUDGET sets the edge-token budget (0 = unbounded, the
-	// default — the maximal-reuse regime the witnesses measure), and
+	// note). InKernelPlannerConfig.RadixBudgetTokens sets the edge-token budget
+	// (negative = unbounded, the historical default — the maximal-reuse regime the
+	// witnesses measure; zero derives one context window), and
 	// FAK_NATIVE_KV_VICTIM_RULE=cost-aware selects the KVBM victim rule for budget pressure.
 	// Operators serving long sessions should set a budget; bounding the deep-chain
 	// footprint is tracked.
@@ -222,6 +223,8 @@ type InKernelPlanner struct {
 	// nil keeps the historical unbounded host path; SetHostMemoryBudget arms it.
 	hostBudgetMu sync.Mutex
 	hostBudget   *hostMemoryBudget
+	// Outstanding session/beam charges survive ceiling replacement and disarming.
+	hostReservedBytes int64
 
 	// kvSpanEvict gates the model-side KV-quarantine eviction BRIDGE (internal/kvmmu)
 	// on the live serve path (issue #579). When on, a tool-result QUARANTINE drives a
@@ -436,6 +439,12 @@ func nativePhaseTraceID(ctx context.Context) string {
 // progress still arrives independently from the owned loop.
 func (p *InKernelPlanner) StreamingSupported() bool { return true }
 
+// streamResolvedSampleOpts transfers resolved controls through Complete's
+// existing option API. Mutable referents remain shared; only the struct is copied.
+func streamResolvedSampleOpts(sp SampleParams) []SampleOpt {
+	return []SampleOpt{func(out *SampleParams) { *out = sp }}
+}
+
 // CompleteStream emits assistant PROSE to sink incrementally while the turn decodes,
 // holding every tool-call span through post-decode lifting and never exposing tool-token
 // text before adjudication can see it (the StreamingPlanner contract, stream.go).
@@ -484,6 +493,11 @@ func (p *InKernelPlanner) CompleteStream(ctx context.Context, sink StreamSink, m
 			return nil, err
 		}
 	}
+	// Reuse the controls already validated above instead of replaying caller
+	// option closures in Complete. Appended stream observers still override the
+	// copied controls in their original order. This is not a deep input freeze.
+	opts = streamResolvedSampleOpts(sp)
+
 	if sink == nil {
 		return p.Complete(ctx, messages, tools, opts...)
 	}
@@ -1151,7 +1165,12 @@ func (p *InKernelPlanner) applyInKernelBOS(ids []int, sp SampleParams) []int {
 // ApplyPromptShrink evaluates the configured or request-level prompt-shrink levers
 // over typed messages and tools before tokenization.
 func (p *InKernelPlanner) ApplyPromptShrink(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) ([]Message, []ToolDef, TypedPromptShrinkOutcome) {
-	sp := applySampleOpts(opts...)
+	return p.applyPromptShrinkResolved(ctx, messages, tools, applySampleOpts(opts...))
+}
+
+// applyPromptShrinkResolved shares the already-resolved controls used to render
+// this prompt. It does not evaluate option closures or freeze caller-owned data.
+func (p *InKernelPlanner) applyPromptShrinkResolved(ctx context.Context, messages []Message, tools []ToolDef, sp SampleParams) ([]Message, []ToolDef, TypedPromptShrinkOutcome) {
 	compactBudget := p.compactHistoryBudget
 	if sp.CompactHistoryBudget != nil {
 		compactBudget = *sp.CompactHistoryBudget
@@ -2256,6 +2275,17 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	offered := offeredToolsFor(ctx, tools)
 	defer func() { err = p.executionDeadlineError(ctx, err) }()
 	sp := applySampleOpts(opts...)
+	return p.completeResolvedNative(ctx, messages, tools, sp, offered, &ctx, &err, opts...)
+}
+
+// completeResolvedNative consumes the ordinary invocation's resolved controls.
+// It does not detach inputs, prepare another replica or grant cache credit.
+// Publish the final context and named error on every unwind before Complete's
+// existing deadline defer runs. That defer observes both mutable variables;
+// normal-return assignments alone would lose their state on panic or Goexit.
+func (p *InKernelPlanner) completeResolvedNative(ctx context.Context, messages []Message, tools []ToolDef, sp SampleParams, offered OfferedTools, callerCtx *context.Context, callerErr *error, opts ...SampleOpt) (comp *Completion, err error) {
+	defer func() { *callerCtx, *callerErr = ctx, err }()
+
 	if sp.NativeBeamSearch != nil {
 		return p.completeNativeBeamSearch(ctx, messages, tools, sp, opts...)
 	}

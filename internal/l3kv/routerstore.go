@@ -111,8 +111,8 @@ func newRouterStore(dir, remote, token string) (*routerStore, error) {
 }
 
 // NewRemoteStore opens the l3kv span-keyed manifest over a blobhttp primary
-// without a local content mirror. The small manifest remains crash-safe locally;
-// every snapshot payload byte is PUT to and GET from the remote HTTP store.
+// without a local content mirror. The manifest (including inline entries) remains
+// crash-safe locally; blob-backed payloads are PUT to and GET from the remote store.
 func NewRemoteStore(dir, remote, token string) (Store, error) {
 	if remote == "" {
 		return nil, fmt.Errorf("l3kv: remote snapshot store requires FAK_BLOB_HTTP_URL")
@@ -135,10 +135,14 @@ func newRouterStoreWithLocalMirror(dir, remote, token string, localMirror bool) 
 		// (Accept false) so tierFor falls through to the pool, and mirror writes
 		// the local stand-in copy through best-effort. A put the pool refuses
 		// FAILS (typed FAULT upstream; the live span is retained) — off-box
-		// residency is confirmed, never assumed. Resolve order is unchanged
-		// (blobfs first): a local mirror hit needs no network round-trip.
+		// residency is confirmed, never assumed. With local mirroring, resolve
+		// order stays blobfs first: a local mirror hit needs no network round-trip.
 		tiers[0].Accept = func(int) bool { return false }
 		tiers = append(tiers, storedrv.Tier{Driver: blobhttp.New(remote, blobhttp.WithBearer(token)), Durable: true})
+		if !localMirror {
+			// A previous local copy must not count as a remote restore.
+			tiers = tiers[1:]
+		}
 		mirror = localMirror
 	}
 	router, err := storedrv.New(tiers, mirror)

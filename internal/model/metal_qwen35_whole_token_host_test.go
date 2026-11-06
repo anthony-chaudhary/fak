@@ -60,7 +60,8 @@ func TestQwen35WholeTokenDecodeMirrorHeadAndFlushParity(t *testing.T) {
 		} else {
 			t.Setenv("FAK_QWEN35_WHOLE_TOKEN_FLUSH", "0")
 		}
-		t.Setenv("FAK_QWEN35_PERSISTENT_DECODE_DKV", "0")
+		// Persistent decode device KV stays off here: Session.PersistentDecodeDeviceKV
+		// defaults to false, the historical unset-env behavior (#13605 leaf A-cfg-int4).
 		s := m.NewSession()
 		s.Q4K, s.MetalQ4K = true, true
 		if err := s.EnableQwen35MetalGDNPreprojectedSequence(); err != nil {

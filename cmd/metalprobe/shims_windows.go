@@ -7,6 +7,11 @@
 // future darwin-only caller ever re-uses it.
 package main
 
+// cgoEnabledFromToolchain on windows: never consulted (the not-applicable exit
+// precedes it); reports the historical unset value. Kept as a var like its
+// non-windows sibling so tests can substitute a deterministic answer anywhere.
+var cgoEnabledFromToolchain = func() string { return "" }
+
 // checkGoTool on windows: never consulted (not-applicable exit precedes it).
 func checkGoTool() ToolCheck {
 	return ToolCheck{OK: false, Extra: "unavailable on windows host (gate is not applicable here)"}

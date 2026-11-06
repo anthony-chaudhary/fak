@@ -40,7 +40,9 @@ func ResolveBudget(tool string, arguments []byte, contracts []BudgetContract) (B
 	dec := json.NewDecoder(bytes.NewReader(arguments))
 	dec.UseNumber()
 	var root any
-	if err := dec.Decode(&root); err != nil || dec.More() {
+	// More tests container elements, not whether a complete JSON document ended.
+	// Reject every trailing byte except JSON whitespace before rewriting arguments.
+	if err := dec.Decode(&root); err != nil || len(bytes.Trim(arguments[dec.InputOffset():], " \t\r\n")) != 0 {
 		if err == nil {
 			err = errors.New("multiple JSON values")
 		}

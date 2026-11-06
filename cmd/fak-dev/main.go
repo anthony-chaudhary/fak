@@ -178,6 +178,24 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return runKernelOracle(stdout, stderr, argv[1:])
 	case "inference-topology":
 		return devcmd.RunInferenceTopology(stdout, stderr, argv[1:])
+	case "regime":
+		return runRegime(stdout, stderr, argv[1:])
+	case "hostshare":
+		return runHostShare(stdout, stderr, argv[1:])
+	case "hostregress":
+		return runHostRegress(stdout, stderr, argv[1:])
+	case "decode-anatomy":
+		return devcmd.RunDecodeAnatomy(stdout, stderr, argv[1:])
+	case "glue-census":
+		return devcmd.RunGlueCensus(stdout, stderr, argv[1:])
+	case "graph-audit":
+		return devcmd.RunGraphAudit(stdout, stderr, argv[1:])
+	case "h2d-inventory":
+		return devcmd.RunH2DInventory(stdout, stderr, argv[1:])
+	case "hostsetup-bench":
+		return devcmd.RunHostSetupBench(stdout, stderr, argv[1:])
+	case "launch-census":
+		return devcmd.RunLaunchCensus(stdout, stderr, argv[1:])
 	default:
 		fmt.Fprintf(stderr, "fak-dev: unknown command %q\n", argv[0])
 		fmt.Fprintln(stderr, "run 'fak-dev help' for repository-development commands")
@@ -216,7 +234,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  boundary [--json] [--workspace DIR]   lint repository demo/package boundaries")
 	fmt.Fprintln(w, "  ci-preflight [--ref R] [flags]        check committed repository tip in isolation")
 	fmt.Fprintln(w, "  checkpoint [flags]                    append a developer progress milestone")
-	fmt.Fprintln(w, "  build [--profile P] [--out F] [--receipt F] [--json]  build fak and record phase timings")
+	fmt.Fprintln(w, "  build [--profile P] [--out F] [--receipt F] [--json]  build fak and record phase timings; 'build batch setup|plan|status' manages an optional source-bound data record (advisory, no execution)")
 	fmt.Fprintln(w, "  build-matrix [flags]                  validate compile matrix across build variants and targets")
 	fmt.Fprintln(w, "  buildcheck [--vet] [packages...]       compile-check while masking peer WIP")
 	fmt.Fprintln(w, "  runtime-mem [--url U] [--samples N]   scrape a serve /debug/vars go_runtime receipt; compact RSS/GC table + delta")
@@ -269,6 +287,15 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  bench-subagent-fanout [flags]          apples-to-apples subagent fanout benchmark harness (SGLang/vLLM/FAK)")
 	fmt.Fprintln(w, "  kernel-oracle <shapes|rank> [flags]    rank fak Vulkan kernels against ggml test-backend-ops per op and shape")
 	fmt.Fprintln(w, "  inference-topology <validate|analyze|inventory|render> [flags] model per-rank decode resource and collective constraints")
+	fmt.Fprintln(w, "  regime [PATH...] [--latest N] [--fail-on R] classify decode-step overhead regime (launch/compute/mem/unknown) from receipt signals")
+	fmt.Fprintln(w, "  hostshare [--receipts DIR] [--latest N]   read host_share from receipts/profile notes; gate launch-bound decode at --threshold")
+	fmt.Fprintln(w, "  hostregress [--receipts DIR] [--latest N] [--baseline-file F]  cross-receipt host-overhead regression trend gate (+50% relative delta or regime flip fails)")
+	fmt.Fprintln(w, "  decode-anatomy [--receipts DIR] [--root DIR] [--json] [--fail-on SIG[,SIG...]] [--snapshot PATH] runtime launch-hygiene gate over decode-window receipts (launches/syncs/barriers per token, missing-µs-witness claim rows, capture-eligibility drift, host_share)")
+	fmt.Fprintln(w, "  glue-census [--preset NAME | --model-shape JSON] [--check REF] verified sync round-trips/token census for the GLM-DSA decode path")
+	fmt.Fprintln(w, "  graph-audit [--json] [--fail-on uncovered] [--snapshot PATH] presence-vs-invokability audit of CUDA/Vulkan graph capture/replay on decode paths")
+	fmt.Fprintln(w, "  h2d-inventory [--preset NAME | --model-shape JSON] [--no-discover] [--snapshot PATH] per-token host->device copy inventory on decode state paths (sampler/mask/KV-append metadata)")
+	fmt.Fprintln(w, "  hostsetup-bench [--preset NAME | --layers N --out D --in D --block B] [--backend auto|NAME] [--warmup W] [--iters K] [--threshold F] [--gate] per-layer host-setup vs kernel microbench at batch 1; gates LAUNCH_SETUP_DOMINANT")
+	fmt.Fprintln(w, "  launch-census [--preset NAME | --model-shape JSON] [--check [REF]] launches/token census of decode-path kernel-launch/parFor sites (looped vs batched expert dispatch)")
 	fmt.Fprintln(w, "  version                               print fak-dev build identity")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "companion tooling (when fak-private is present):")

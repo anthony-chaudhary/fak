@@ -146,6 +146,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		cmdTrunkBuildProbe(args)
 	case "godsplit-plan":
 		cmdGodsplitPlan(args)
+	case "godfile-ceiling":
+		cmdGodFileCeiling(args)
 	case "glm52-prefill-sweep":
 		cmdGLM52PrefillSweep(args)
 	case "recall":
@@ -460,6 +462,9 @@ func dispatchCoreVerbB(name string, args []string) bool {
 		if len(args) > 0 && args[0] == "proof" {
 			os.Exit(runServeProof(os.Stdout, os.Stderr, args[1:]))
 		}
+		if len(args) > 0 && args[0] == "pd" {
+			os.Exit(runServePD(os.Stdout, os.Stderr, args[1:]))
+		}
 		cmdServe(args)
 	case "serve-wiring":
 		cmdServeWiring(args)
@@ -732,6 +737,10 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		// The unifying work-loss card (docs/notes/AGENTIC-DEV-ANTIPATTERNS-2026-07-02.md
 		// spine): folds REDUNDANT_REWORK + UNWIRED_PKG + ORPHAN_FUNC into one antipattern_debt.
 		cmdAntipatternScorecard(args)
+	case "computetune":
+		// Storage-compute arbitration readout (flow ticket debtwave2-internal-computetune):
+		// recompute prompt KV on UMA DRAM vs offload to NVMe SSD, via internal/computetune.
+		cmdComputetune(args)
 	case "debt-lanes":
 		cmdDebtLanes(args)
 	case "debt-orchestrator":

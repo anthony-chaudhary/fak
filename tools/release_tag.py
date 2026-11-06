@@ -131,13 +131,33 @@ def load_release_dry_run(root: Path, ref: str) -> dict:
     return payload
 
 
-def fold_ci_runs(runs: list[dict[str, Any]], *, require_ci: bool) -> dict:
+def fold_ci_runs(runs: Any, *, require_ci: bool) -> dict:
+    if not isinstance(runs, list):
+        return {
+            "pass": False,
+            "verdict": "INVALID_RESPONSE",
+            "advisory": False,
+            "reason": "GitHub Actions run response was not a JSON array",
+        }
+    # Manual diagnostics may run only a narrow command or test a different
+    # checkout. Validate every event before filtering, so unreadable evidence
+    # cannot hide a failed push behind an otherwise qualified green run.
+    for row in runs:
+        event = row.get("event") if isinstance(row, dict) else None
+        if not isinstance(event, str) or re.fullmatch(r"[a-z][a-z0-9_]*", event) is None:
+            return {
+                "pass": False,
+                "verdict": "INVALID_EVENT",
+                "advisory": False,
+                "reason": "GitHub Actions run has a missing or malformed event",
+            }
+    runs = [row for row in runs if row["event"] == "push"]
     if not runs:
         return {
             "pass": not require_ci,
             "verdict": "NO_SIGNAL",
             "advisory": not require_ci,
-            "reason": "no GitHub Actions run found for commit",
+            "reason": "no push-triggered GitHub Actions run found for commit",
         }
     run_row = runs[0]
     status = str(run_row.get("status") or "").lower()
@@ -259,8 +279,9 @@ def ci_signal(root: Path, sha: str, *, workflow: str, require_ci: bool,
         "gh", "run", "list",
         "--workflow", workflow,
         "--commit", sha,
+        "--event", "push",
         "--limit", "10",
-        "--json", "databaseId,status,conclusion,url,createdAt,headSha",
+        "--json", "databaseId,status,conclusion,url,createdAt,headSha,event",
     ]
     code, out = runner(cmd)
     if code != 0:
@@ -281,8 +302,6 @@ def ci_signal(root: Path, sha: str, *, workflow: str, require_ci: bool,
             "reason": "gh run list emitted non-JSON output",
             "detail": out.strip()[-300:],
         }
-    if not isinstance(runs, list):
-        runs = []
     folded = fold_ci_runs(runs, require_ci=require_ci)
     run_row = folded.get("run") or {}
     if wait and folded.get("verdict") == "PENDING" and run_row.get("databaseId"):
@@ -293,9 +312,8 @@ def ci_signal(root: Path, sha: str, *, workflow: str, require_ci: bool,
         if code == 0:
             try:
                 rerun_rows = json.loads(out)
-                if isinstance(rerun_rows, list):
-                    folded = fold_ci_runs(rerun_rows, require_ci=require_ci)
-                    folded["watched"] = True
+                folded = fold_ci_runs(rerun_rows, require_ci=require_ci)
+                folded["watched"] = True
             except json.JSONDecodeError:
                 pass
     run_row = folded.get("run") or {}

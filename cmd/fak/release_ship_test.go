@@ -28,8 +28,8 @@ func TestReleaseShipExecutesDetachedCutPushTagPublish(t *testing.T) {
 			return 0, ""
 		case name == "git" && sameArgs(args, "rev-parse", "--verify", "origin/main^{commit}"):
 			return 0, "base-sha\n"
-		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "base-sha", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha"):
-			return 0, `[{"databaseId":40,"status":"completed","conclusion":"success","headSha":"base-sha","url":"https://example.test/source-ci"}]`
+		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "base-sha", "--event", "push", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha,event"):
+			return 0, `[{"event":"push","databaseId":40,"status":"completed","conclusion":"success","headSha":"base-sha","url":"https://example.test/source-ci"}]`
 		case name == "git" && sameArgs(args, "worktree", "add", "--detach", fakeReleaseWorktree, "base-sha"):
 			return 0, ""
 		case name == releaseShipPython() && len(args) > 0 && strings.HasSuffix(args[0], filepath.Join("tools", "release_cut.py")):
@@ -66,8 +66,8 @@ func TestReleaseShipExecutesDetachedCutPushTagPublish(t *testing.T) {
 			return 0, ""
 		case name == "git" && sameArgs(args, "ls-remote", "origin", "refs/heads/main"):
 			return 0, "release-sha\trefs/heads/main\n"
-		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "release-sha", "--limit", "1", "--json", "databaseId,status,conclusion,url"):
-			return 0, `[{"databaseId":41,"status":"completed","conclusion":"success","url":"https://example.test/main-ci"}]`
+		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "release-sha", "--event", "push", "--limit", "1", "--json", "databaseId,status,conclusion,url,event"):
+			return 0, `[{"event":"push","databaseId":41,"status":"completed","conclusion":"success","url":"https://example.test/main-ci"}]`
 		case name == releaseShipPython() && len(args) > 0 && strings.HasSuffix(args[0], filepath.Join("tools", "release_tag.py")):
 			if !containsArgPair(args, "--trunk", "") {
 				t.Fatalf("release_tag must skip local-branch reachability after remote push: %v", args)
@@ -140,7 +140,7 @@ func TestReleaseShipExecutesDetachedCutPushTagPublish(t *testing.T) {
 		t.Fatalf("before-publish renewal = %#v, want caller ttl renewal", result.ReleaseLockRenewals[1])
 	}
 	sourceCIIdx := releaseShipCommandIndex(result.ExecutedCommands, func(cmd releaseShipCommand) bool {
-		return cmd.Name == "gh" && sameArgs(cmd.Args, "run", "list", "--workflow", "ci.yml", "--commit", "base-sha", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha")
+		return cmd.Name == "gh" && sameArgs(cmd.Args, "run", "list", "--workflow", "ci.yml", "--commit", "base-sha", "--event", "push", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha,event")
 	})
 	lockIdx := releaseShipCommandIndex(result.ExecutedCommands, func(cmd releaseShipCommand) bool {
 		return cmd.Name == releaseShipPython() && len(cmd.Args) > 1 && strings.HasSuffix(cmd.Args[0], filepath.Join("tools", "release_lock.py")) && cmd.Args[1] == "acquire"
@@ -161,7 +161,7 @@ func TestReleaseShipExecutesDetachedCutPushTagPublish(t *testing.T) {
 		return cmd.Name == "git" && sameArgs(cmd.Args, "ls-remote", "origin", "refs/heads/main")
 	})
 	ciIdx := releaseShipCommandIndex(result.ExecutedCommands, func(cmd releaseShipCommand) bool {
-		return cmd.Name == "gh" && sameArgs(cmd.Args, "run", "list", "--workflow", "ci.yml", "--commit", "release-sha", "--limit", "1", "--json", "databaseId,status,conclusion,url")
+		return cmd.Name == "gh" && sameArgs(cmd.Args, "run", "list", "--workflow", "ci.yml", "--commit", "release-sha", "--event", "push", "--limit", "1", "--json", "databaseId,status,conclusion,url,event")
 	})
 	tagIdx := releaseShipCommandIndex(result.ExecutedCommands, func(cmd releaseShipCommand) bool {
 		return cmd.Name == releaseShipPython() && len(cmd.Args) > 0 && strings.HasSuffix(cmd.Args[0], filepath.Join("tools", "release_tag.py"))
@@ -189,8 +189,8 @@ func TestReleaseShipDryRunReportsSourceAndTargetBranches(t *testing.T) {
 			return 0, ""
 		case name == "git" && sameArgs(args, "rev-parse", "--verify", "origin/dev^{commit}"):
 			return 0, "dev-source-sha\n"
-		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "dev-source-sha", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha"):
-			return 0, `[{"databaseId":42,"status":"completed","conclusion":"success","headSha":"dev-source-sha","url":"https://example.test/ci"}]`
+		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "dev-source-sha", "--event", "push", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha,event"):
+			return 0, `[{"event":"push","databaseId":42,"status":"completed","conclusion":"success","headSha":"dev-source-sha","url":"https://example.test/ci"}]`
 		case name == "git" && sameArgs(args, "rev-parse", "--verify", "origin/main^{commit}"):
 			return 0, "main-target-sha\n"
 		case name == "git" && sameArgs(args, "merge-base", "--is-ancestor", "main-target-sha", "dev-source-sha"):
@@ -681,6 +681,15 @@ func TestReleaseShipExistingCutRecoveryAllowsFirstReleaseTag(t *testing.T) {
 }
 
 func TestReleaseShipExecuteRefusesMissingSourceCI(t *testing.T) {
+	for _, tc := range []struct{ name, response string }{
+		{"no runs", `[]`},
+		{"manual success", `[{"event":"workflow_dispatch","status":"completed","conclusion":"success","headSha":"dev-source-sha"}]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) { testReleaseShipExecuteRefusesUnqualifiedCI(t, tc.response) })
+	}
+}
+
+func testReleaseShipExecuteRefusesUnqualifiedCI(t *testing.T, ciResponse string) {
 	restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
 		switch {
 		case name == "git" && sameArgs(args, "fetch", "origin", "refs/heads/dev:refs/remotes/origin/dev"):
@@ -689,8 +698,8 @@ func TestReleaseShipExecuteRefusesMissingSourceCI(t *testing.T) {
 			return 0, ""
 		case name == "git" && sameArgs(args, "rev-parse", "--verify", "origin/dev^{commit}"):
 			return 0, "dev-source-sha\n"
-		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "dev-source-sha", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha"):
-			return 0, `[]`
+		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "dev-source-sha", "--event", "push", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha,event"):
+			return 0, ciResponse
 		default:
 			t.Fatalf("missing source CI should refuse before the release lock and release work; got %s %v in %s", name, args, cwd)
 			return 127, "unexpected"
@@ -1030,8 +1039,8 @@ func TestReleaseShipOpenPRDryRunPreviewsPlan(t *testing.T) {
 			return 0, ""
 		case name == "git" && sameArgs(args, "rev-parse", "--verify", "origin/dev^{commit}"):
 			return 0, "dev-source-sha\n"
-		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "dev-source-sha", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha"):
-			return 0, `[{"databaseId":42,"status":"completed","conclusion":"success","headSha":"dev-source-sha","url":"https://example.test/ci"}]`
+		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "dev-source-sha", "--event", "push", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha,event"):
+			return 0, `[{"event":"push","databaseId":42,"status":"completed","conclusion":"success","headSha":"dev-source-sha","url":"https://example.test/ci"}]`
 		case name == "git" && sameArgs(args, "rev-parse", "--verify", "origin/main^{commit}"):
 			return 0, "main-target-sha\n"
 		case name == "git" && sameArgs(args, "merge-base", "--is-ancestor", "main-target-sha", "dev-source-sha"):
@@ -1749,10 +1758,10 @@ func TestReleaseShipRetryReWitnessesSourceCIOnRebasedTip(t *testing.T) {
 				return 0, "base-sha\n"
 			}
 			return 0, "new-base-sha\n"
-		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "base-sha", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha"):
-			return 0, `[{"databaseId":40,"status":"completed","conclusion":"success","headSha":"base-sha","url":"https://example.test/base-ci"}]`
-		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "new-base-sha", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha"):
-			return 0, `[{"databaseId":41,"status":"completed","conclusion":"success","headSha":"new-base-sha","url":"https://example.test/new-base-ci"}]`
+		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "base-sha", "--event", "push", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha,event"):
+			return 0, `[{"event":"push","databaseId":40,"status":"completed","conclusion":"success","headSha":"base-sha","url":"https://example.test/base-ci"}]`
+		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "new-base-sha", "--event", "push", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha,event"):
+			return 0, `[{"event":"push","databaseId":41,"status":"completed","conclusion":"success","headSha":"new-base-sha","url":"https://example.test/new-base-ci"}]`
 		case name == "git" && sameArgs(args, "worktree", "add", "--detach", fakeReleaseWorktree, "base-sha"):
 			return 0, ""
 		case name == releaseShipPython() && len(args) > 0 && strings.HasSuffix(args[0], filepath.Join("tools", "release_cut.py")):
@@ -1832,7 +1841,17 @@ func TestReleaseShipRetryReWitnessesSourceCIOnRebasedTip(t *testing.T) {
 }
 
 func TestReleaseShipRetryRefusesUnconfirmedSourceCIOnRebasedTip(t *testing.T) {
+	for _, tc := range []struct{ name, response string }{
+		{"no runs", `[]`},
+		{"manual success", `[{"event":"workflow_dispatch","status":"completed","conclusion":"success","headSha":"new-base-sha"}]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) { testReleaseShipRetryRefusesUnqualifiedCI(t, tc.response) })
+	}
+}
+
+func testReleaseShipRetryRefusesUnqualifiedCI(t *testing.T, ciResponse string) {
 	revParseCount := 0
+	cutCount := 0
 	restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
 		switch {
 		case name == releaseShipPython() && len(args) > 1 && strings.HasSuffix(args[0], filepath.Join("tools", "release_lock.py")) && args[1] == "acquire":
@@ -1845,13 +1864,17 @@ func TestReleaseShipRetryRefusesUnconfirmedSourceCIOnRebasedTip(t *testing.T) {
 				return 0, "base-sha\n"
 			}
 			return 0, "new-base-sha\n"
-		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "base-sha", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha"):
-			return 0, `[{"databaseId":40,"status":"completed","conclusion":"success","headSha":"base-sha","url":"https://example.test/base-ci"}]`
-		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "new-base-sha", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha"):
-			return 0, `[]`
+		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "base-sha", "--event", "push", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha,event"):
+			return 0, `[{"event":"push","databaseId":40,"status":"completed","conclusion":"success","headSha":"base-sha","url":"https://example.test/base-ci"}]`
+		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci.yml", "--commit", "new-base-sha", "--event", "push", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha,event"):
+			return 0, ciResponse
 		case name == "git" && sameArgs(args, "worktree", "add", "--detach", fakeReleaseWorktree, "base-sha"):
 			return 0, ""
 		case name == releaseShipPython() && len(args) > 0 && strings.HasSuffix(args[0], filepath.Join("tools", "release_cut.py")):
+			cutCount++
+			if cutCount > 1 {
+				t.Fatal("unconfirmed source CI must refuse before re-cutting")
+			}
 			return 0, `{"ok":true,"version":"0.35.0","tag":"v0.35.0","commit_sha":"release-sha"}`
 		case name == "git" && sameArgs(args, "merge-base", "--is-ancestor", "base-sha", "release-sha"):
 			return 0, ""
@@ -1893,6 +1916,9 @@ func TestReleaseShipRetryRefusesUnconfirmedSourceCIOnRebasedTip(t *testing.T) {
 		pushRetries:     2,
 	})
 
+	if cutCount != 1 {
+		t.Fatalf("cut count=%d, want only the original cut", cutCount)
+	}
 	if result.OK {
 		t.Fatalf("result unexpectedly ok: %#v", result)
 	}
@@ -2273,10 +2299,12 @@ func TestReleaseReadinessConsumesInstalledLaunchQualification(t *testing.T) {
 func TestReleaseShipAdoptsReachableAncestorCI(t *testing.T) {
 	restore := stubReleaseShipRunner(t, func(cwd, name string, args []string, env []string, timeout time.Duration) (int, string) {
 		switch {
-		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci-fast.yml", "--commit", "head-sha", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha"):
-			return 0, `[{"databaseId": 111, "status": "completed", "conclusion": "cancelled", "headSha": "head-sha"}]`
-		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci-fast.yml", "--branch", "main", "--status", "completed", "--limit", "20", "--json", "databaseId,status,conclusion,url,headSha,updatedAt"):
-			return 0, `[{"databaseId": 100, "status": "completed", "conclusion": "success", "headSha": "ancestor-sha", "updatedAt": "2026-09-02T12:00:00Z"}]`
+		case name == "git" && sameArgs(args, "rev-parse", "--is-shallow-repository"):
+			return 0, "false\n"
+		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci-fast.yml", "--commit", "head-sha", "--event", "push", "--limit", "1", "--json", "databaseId,status,conclusion,url,headSha,event"):
+			return 0, `[{"event":"push","databaseId": 111, "status": "completed", "conclusion": "cancelled", "headSha": "head-sha"}]`
+		case name == "gh" && sameArgs(args, "run", "list", "--workflow", "ci-fast.yml", "--branch", "main", "--status", "completed", "--event", "push", "--limit", "20", "--json", "databaseId,status,conclusion,url,headSha,updatedAt,event"):
+			return 0, `[{"event":"push","databaseId": 100, "status": "completed", "conclusion": "success", "headSha": "ancestor-sha", "updatedAt": "2026-09-02T12:00:00Z"}]`
 		case name == "git" && sameArgs(args, "merge-base", "--is-ancestor", "ancestor-sha", "head-sha"):
 			return 0, ""
 		default:

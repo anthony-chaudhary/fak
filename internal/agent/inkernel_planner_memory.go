@@ -439,7 +439,45 @@ func (p *InKernelPlanner) requestMemoryPlanWithExtras(promptTokens, maxNew int, 
 	if len(extras) > 0 {
 		plan = append(plan, extras...)
 	}
+	if scratch := p.cudaDequantScratchDemand(promptTokens); scratch != nil {
+		plan = append(plan, scratch...)
+	}
 	return plan, nil
+}
+
+// cudaDequantScratchDemand prices the P>=128 dequant + fp16 GEMM scratch the CUDA prefill
+// path allocates per large GEMM (compute.DequantScratchBytes, mirroring cudaDequantScratch)
+// into the request plan: without it the plan passes RefuseMemoryPlanIfTooBig and the request
+// dies mid-prefill on a typed cudaMalloc miss instead of being refused before launch
+// (raider-fak-arm-oom-20261028; nvidia-cuda-perf-gap ATTRIBUTION V4). It is priced only when
+// the planned prompt can reach the dequant arm's row threshold on a backend that runs that
+// arm; every other case returns nil so the base plan stays byte-for-byte unchanged (the
+// fail-open contract every capacity helper uses).
+func (p *InKernelPlanner) cudaDequantScratchDemand(promptTokens int) compute.MemoryPlan {
+	if p == nil || p.backend == nil || p.m == nil || promptTokens < compute.DequantGEMMScratchRows {
+		return nil
+	}
+	if !isCUDAPrefillBackend(p.backend) {
+		return nil
+	}
+	cfg := p.m.Cfg
+	if cfg.HiddenSize <= 0 || cfg.IntermediateSize <= 0 || cfg.NumHeads <= 0 || cfg.NumKVHeads <= 0 || cfg.HeadDim <= 0 {
+		return nil
+	}
+	return compute.DequantScratchDemand(compute.TransformerScratchConfig{
+		HiddenSize:       cfg.HiddenSize,
+		IntermediateSize: cfg.IntermediateSize,
+		NumHeads:         cfg.NumHeads,
+		NumKVHeads:       cfg.NumKVHeads,
+		HeadDim:          cfg.HeadDim,
+	})
+}
+
+// isCUDAPrefillBackend reports whether the backend runs the CUDA P>=128 quantized GEMM
+// dequant + fp16 split arm whose scratch cudaDequantScratchDemand prices. Name-based:
+// the dequant arm exists only on the CUDA backend.
+func isCUDAPrefillBackend(b compute.Backend) bool {
+	return b != nil && strings.EqualFold(strings.TrimSpace(b.Name()), "cuda")
 }
 
 // qwen35RuntimeExtraDemands prices the panel and retained-history terms via the pure #13315

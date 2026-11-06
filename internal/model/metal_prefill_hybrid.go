@@ -71,10 +71,6 @@ type metalQwen35GDNSequenceBackend struct {
 	traceLastEnd     time.Time // FAK_QWEN35_WHOLE_TOKEN_TRACE host gap between tokens
 }
 
-func qwen35PersistentDecodeDeviceKV() bool {
-	return os.Getenv("FAK_QWEN35_PERSISTENT_DECODE_DKV") == "1"
-}
-
 const (
 	Qwen35MetalMTPVerifyPanelSchema = "fak.qwen35-metal-mtp-p4-verify/1"
 	Qwen35MetalMTPVerifyPanelPath   = "fak-native/metal/qwen3.8-mtp-p4-target-verify-v1"

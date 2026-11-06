@@ -89,6 +89,8 @@ type MTPAccounting struct {
 	RejectedCount      int           `json:"rejected_count"`
 	ProposedCount      int           `json:"proposed_count"`
 	RollbackCount      int           `json:"rollback_count"`
+	AbsorbedRows       int           `json:"absorbed_rows"`
+	ZeroGrantAbsorbs   int           `json:"zero_grant_absorbs"`
 	PeakMemoryBytes    int64         `json:"peak_memory_bytes"`
 	CurrentMemoryBytes int64         `json:"current_memory_bytes"`
 }
@@ -167,6 +169,97 @@ func (s *MTPState) Equal(other *MTPState) bool {
 		matrixEqual(s.Hidden, other.Hidden)
 }
 
+// TargetStreamID is the stream identity under which NewMTPTransactionWithTarget
+// registers the bound target session's head-owned recurrent/ring state.
+const TargetStreamID = "target"
+
+// MTPStreamState owns one stream's recurrent/ring buffers and the newest
+// absorbed row's normed target feature. The MTP head (MTPTransaction)
+// allocates and owns these buffers exclusively; streams never share them
+// across heads or transactions. Adapted from TensorFold's per-stream Ctx
+// (ring over [begin, end), the newest absorbed row's normed output, held
+// drafts) in zig/src/families/qwen3_5/cuda_mtp.zig.
+type MTPStreamState struct {
+	Begin      int         `json:"begin"` // first position covered by RingKV
+	End        int         `json:"end"`   // one past the newest absorbed position
+	RingKV     [][]float32 `json:"ring_kv"`
+	Recurrent  [][]float32 `json:"recurrent"`
+	Conv       [][]float32 `json:"conv"`
+	LastHidden []float32   `json:"last_hidden,omitempty"`
+}
+
+// Clone creates an independent deep copy of the stream state.
+func (s *MTPStreamState) Clone() *MTPStreamState {
+	if s == nil {
+		return nil
+	}
+	return &MTPStreamState{
+		Begin:      s.Begin,
+		End:        s.End,
+		RingKV:     cloneFloat32Matrix(s.RingKV),
+		Recurrent:  cloneFloat32Matrix(s.Recurrent),
+		Conv:       cloneFloat32Matrix(s.Conv),
+		LastHidden: cloneFloat32Slice(s.LastHidden),
+	}
+}
+
+// ByteSize estimates the resident bytes owned by the stream state.
+func (s *MTPStreamState) ByteSize() int64 {
+	if s == nil {
+		return 0
+	}
+	var count int64
+	for _, row := range s.RingKV {
+		count += int64(len(row))
+	}
+	for _, row := range s.Recurrent {
+		count += int64(len(row))
+	}
+	for _, row := range s.Conv {
+		count += int64(len(row))
+	}
+	count += int64(len(s.LastHidden))
+	return count * 4
+}
+
+// Absorb folds committed target rows into the stream's owned buffers without
+// scoring: the KV ring grows, the recurrent/convolution state moves to the new
+// boundary, and the newest row's normed target feature becomes the first draft
+// row's state. It performs no draft proposal or verification.
+func (s *MTPStreamState) Absorb(tokens []int, kv, recurrent, conv [][]float32, hidden []float32) error {
+	if matrixContainsNaNOrInf(kv) || matrixContainsNaNOrInf(recurrent) || matrixContainsNaNOrInf(conv) || containsNaNOrInf(hidden) {
+		return fmt.Errorf("model: mtp stream absorb: NaN or Inf detected in committed rows")
+	}
+	s.End += len(tokens)
+	if r := cloneFloat32Matrix(kv); len(r) > 0 {
+		s.RingKV = append(s.RingKV, r...)
+	}
+	if len(recurrent) > 0 {
+		s.Recurrent = cloneFloat32Matrix(recurrent)
+	}
+	if len(conv) > 0 {
+		s.Conv = cloneFloat32Matrix(conv)
+	}
+	if len(hidden) > 0 {
+		s.LastHidden = cloneFloat32Slice(hidden)
+	}
+	return nil
+}
+
+// MTPAbsorbItem is one stream's batch of committed target rows arriving at the
+// MTP head. Propose reports whether the stream holds a nonzero draft grant:
+// granted items enter the scored draft/verify path; zero-grant items are
+// absorbed straight into the stream's owned state without scoring.
+type MTPAbsorbItem struct {
+	StreamID  string
+	Tokens    []int
+	KV        [][]float32
+	Recurrent [][]float32
+	Conv      [][]float32
+	Hidden    []float32 // newest committed row's normed target feature
+	Propose   bool
+}
+
 // MTPCheckpoint snapshots pre-round verified state for atomic rollback.
 type MTPCheckpoint struct {
 	id         uint64
@@ -230,6 +323,7 @@ type MTPTransaction struct {
 	state        *MTPState
 	checkpoint   *MTPCheckpoint
 	stepStates   []*MTPState
+	streams      map[string]*MTPStreamState
 	draftTokens  []int
 	targetHidden [][]float32
 	roundActive  bool
@@ -270,14 +364,119 @@ func NewMTPTransactionWithState(state *MTPState, cfg MTPTransactionConfig) *MTPT
 }
 
 // NewMTPTransactionWithTarget binds an MTPTransaction to a live target Session.
+// The transaction owns per-stream recurrent/ring buffers: the bound target is
+// registered under TargetStreamID, seeded at the target's current cache
+// boundary, so committed rows can be absorbed into head-owned state without
+// scoring (TensorFold cuda_mtp_budget.active zero-grant filter).
 func NewMTPTransactionWithTarget(s *Session, cfg MTPTransactionConfig) (*MTPTransaction, error) {
 	if s == nil {
 		return nil, errors.New("model: mtp transaction requires non-nil session")
 	}
 	tx := NewMTPTransaction(cfg)
 	tx.session = s
+	boundary := 0
+	if s.Cache != nil {
+		boundary = s.Cache.Len()
+	}
+	tx.streams = map[string]*MTPStreamState{
+		TargetStreamID: {Begin: boundary, End: boundary},
+	}
 	tx.updateMemoryLocked()
 	return tx, nil
+}
+
+// streamOf returns the head-owned state for id, allocating it on first use.
+// The caller must hold tx.mu.
+func (tx *MTPTransaction) streamOf(id string) *MTPStreamState {
+	if tx.streams == nil {
+		tx.streams = make(map[string]*MTPStreamState)
+	}
+	if st, ok := tx.streams[id]; ok {
+		return st
+	}
+	st := &MTPStreamState{}
+	tx.streams[id] = st
+	return st
+}
+
+// Absorb folds one stream's committed rows into its head-owned recurrent/ring
+// state without scoring (the zero-grant path). It never proposes drafts or
+// verifies against the target.
+func (tx *MTPTransaction) Absorb(item MTPAbsorbItem) error {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+
+	if tx.closed {
+		return errors.New("model: mtp transaction is closed")
+	}
+	if tx.downgraded {
+		return tx.downgradeErr
+	}
+	if item.Propose {
+		return errors.New("model: mtp zero-grant absorb requires a zero-grant item (Propose=false)")
+	}
+	return tx.absorbOneLocked(item)
+}
+
+// absorbOneLocked absorbs a zero-grant item into its stream's owned state.
+// The caller must hold tx.mu.
+func (tx *MTPTransaction) absorbOneLocked(item MTPAbsorbItem) error {
+	if err := tx.streamOf(item.StreamID).Absorb(item.Tokens, item.KV, item.Recurrent, item.Conv, item.Hidden); err != nil {
+		return tx.downgradeLocked(MTPDowngradeNumericalNaN, err.Error())
+	}
+	tx.accounting.AbsorbedRows += len(item.Tokens)
+	tx.accounting.ZeroGrantAbsorbs++
+	tx.updateMemoryLocked()
+	if tx.config.MaxMemoryBytes > 0 && uint64(tx.accounting.CurrentMemoryBytes) > tx.config.MaxMemoryBytes {
+		return tx.downgradeLocked(MTPDowngradeMemoryPressure, "stream absorb exceeded memory headroom budget")
+	}
+	return nil
+}
+
+// Active splits an absorb batch exactly like TensorFold's cuda_mtp_budget.active:
+// zero-grant items (Propose == false) are absorbed immediately into their
+// stream's owned recurrent/ring state without scoring, and the remaining
+// granted items are returned for the scored draft/verify path.
+func (tx *MTPTransaction) Active(items []MTPAbsorbItem) ([]MTPAbsorbItem, error) {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+
+	if tx.closed {
+		return nil, errors.New("model: mtp transaction is closed")
+	}
+	if tx.downgraded {
+		return nil, tx.downgradeErr
+	}
+
+	out := make([]MTPAbsorbItem, 0, len(items))
+	for _, item := range items {
+		if !item.Propose {
+			if err := tx.absorbOneLocked(item); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+// StreamState returns a deep copy of the stream's head-owned state, or nil when
+// the stream has no state yet.
+func (tx *MTPTransaction) StreamState(id string) *MTPStreamState {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+	if st, ok := tx.streams[id]; ok {
+		return st.Clone()
+	}
+	return nil
+}
+
+// StreamCount reports how many streams hold head-owned state.
+func (tx *MTPTransaction) StreamCount() int {
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+	return len(tx.streams)
 }
 
 // BeginRound initiates a speculative round, checkpointing persistent KV, recurrent,
@@ -984,6 +1183,10 @@ func (tx *MTPTransaction) Close() error {
 		tx.stepStates[i] = nil
 	}
 	tx.stepStates = nil
+	for id := range tx.streams {
+		tx.streams[id] = nil
+	}
+	tx.streams = nil
 	tx.draftTokens = nil
 	tx.targetHidden = nil
 	tx.roundActive = false
@@ -1003,6 +1206,11 @@ func (tx *MTPTransaction) updateMemoryLocked() {
 	for _, step := range tx.stepStates {
 		if step != nil {
 			current += step.ByteSize()
+		}
+	}
+	for _, st := range tx.streams {
+		if st != nil {
+			current += st.ByteSize()
 		}
 	}
 	tx.accounting.CurrentMemoryBytes = current

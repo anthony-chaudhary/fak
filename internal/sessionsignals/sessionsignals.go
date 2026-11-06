@@ -98,7 +98,7 @@ func hasBareLimitSignal(text string) bool {
 // WeeklyReset returns the weekly reset window from a throttle banner, or empty.
 func WeeklyReset(text string) string { return LimitResets(text).Weekly }
 
-var resetTimeRE = regexp.MustCompile(`(?i)(\d{1,2})(?::(\d{2}))?\s*([ap])m\b`)
+var resetTimeRE = regexp.MustCompile(`(?i)\b(\d{1,2})(?::(\d{2}))?\s*([ap])m\b`)
 
 // tzOffsetHours maps US timezones found in banners to fixed UTC offsets.
 var tzOffsetHours = map[string]int{
@@ -133,13 +133,20 @@ func ResetPassedAt(when string, nowUTC, anchorUTC time.Time) (passed, ok bool) {
 	if m == nil {
 		return false, false
 	}
-	hour := atoiSafe(m[1]) % 12
+	hour := atoiSafe(m[1])
+	if hour < 1 || hour > 12 {
+		return false, false
+	}
+	hour %= 12
 	if strings.EqualFold(m[3], "p") {
 		hour += 12
 	}
 	minute := 0
 	if m[2] != "" {
 		minute = atoiSafe(m[2])
+		if minute > 59 {
+			return false, false
+		}
 	}
 	tz := time.FixedZone("banner", resetTZOffset(when)*3600)
 	anchor := anchorUTC

@@ -36,6 +36,7 @@ flowchart LR
 | [`fak.yaml`](fak.yaml) | The whole stack: a `Secret` (gateway + provider keys), a policy `ConfigMap`, a hardened `Deployment`, and a `Service`. |
 | [`kustomization.yaml`](kustomization.yaml) | Wraps `fak.yaml` so `kubectl apply -k deploy/k8s` works and you can patch image / namespace / replicas without editing the manifest. |
 | [`overlays/gpu/`](overlays/gpu/) | The **GPU (in-kernel)** stack: [`fak-gpu.yaml`](overlays/gpu/fak-gpu.yaml) (Secret, policy ConfigMap, weights PVC, one-GPU Deployment, Service) + its kustomization — `kubectl apply -k deploy/k8s/overlays/gpu`. |
+| [`../helm/fak/`](../helm/fak/) | The **Helm chart** wrapping this exact stack (proxy + GPU in-kernel) — `helm install fak deploy/helm/fak`; see the [Helm chart](#helm-chart) note below. |
 
 The committed `Deployment` adds two hardenings on top of the guide's example —
 `seccompProfile: RuntimeDefault` and `automountServiceAccountToken: false` (fak never
@@ -153,8 +154,35 @@ So `overlays/gpu/` carries its own full manifest and the proxy base stays untouc
   longer `initialDelaySeconds`. See the guide for the underlying knobs.
 - **Reload policy without a restart.** Edit the `fak-policy` ConfigMap, let the mount
   refresh, then `POST /v1/fak/policy/reload` (with the bearer token) to each pod.
-- **No Helm chart yet.** This raw manifest (+ kustomize) is the supported path; a Helm
-  chart is not shipped.
+- **Helm chart.** [`../helm/fak/`](../helm/fak/) ships a Helm chart wrapping these same
+  manifests — see [Helm chart](#helm-chart) below.
+
+## Helm chart
+
+[`../helm/fak/`](../helm/fak/) wraps this exact stack as an idiomatic install unit for
+neo-cloud / enterprise k8s shops (#2665). Every values toggle maps 1:1 to a real
+`fak serve` flag/env or a field of the manifests above: `mode: proxy|inkernel`,
+`gpu.enabled` (nvidia.com/gpu request+limit + weights PVC), `image.tag` vs
+`image.cudaTag`, `replicas`, `requireKeyEnv`, `provider`/`baseUrl`/`model`/`apiKeyEnv`,
+`gguf`, `policy` (inline JSON or an existing ConfigMap ref), `timeouts`
+(`FAK_HTTP_WRITE_TIMEOUT_S` / `FAK_PLANNER_TIMEOUT_S`, write ≥ planner enforced),
+`resources`, `service.port`, and probe delays.
+
+```bash
+helm install fak deploy/helm/fak                                  # proxy stack (from a checkout)
+helm install fak-gpu deploy/helm/fak \
+  --set mode=inkernel --set gpu.enabled=true                      # GPU overlay shape (from a checkout)
+
+# Or without a clone: the chart is published to ghcr as an OCI artifact on every
+# v* tag (.github/workflows/release-helm.yml), alongside the ghcr image. Helm 3.8+
+# required for OCI registries; first publish needs a one-time maintainer step to
+# set the ghcr package visibility to public (docs/fak/mcp-registry.md).
+helm install fak oci://ghcr.io/anthony-chaudhary/fak/charts/fak --version X.Y.Z
+```
+
+This raw manifest + kustomize remains the no-Helm path; the chart is additive, and CI
+(`deploy-helm-lint`) lints the chart and renders both modes on every change to
+`deploy/` so the two cannot drift silently.
 
 ## See also
 

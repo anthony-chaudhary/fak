@@ -306,6 +306,15 @@ func TestQwen35MetalP32TwoP1PersistentDeviceKV(t *testing.T) {
 	}
 	setQ4KSDOTForTest(false)
 	t.Cleanup(func() { setQ4KSDOTForTest(true) })
+	// Provenance stamps (#13605 leaf A-cfg-int4): the retired FAK_SOURCE_REVISION /
+	// FAK_ARTIFACT_SHA256 ambient reads are replaced by these build-time stamp
+	// variables, and the prefill receipt must carry whatever they hold.
+	qwen35MetalReceiptSourceRevision = "witness-source-revision"
+	qwen35MetalReceiptArtifactSHA256 = "witness-artifact-sha256"
+	defer func() {
+		qwen35MetalReceiptSourceRevision = ""
+		qwen35MetalReceiptArtifactSHA256 = ""
+	}()
 	cfg := qwen35HybridQ4KTestCfg()
 	cfg.QKNorm = true
 	// Keep the real Qwen3.8 count of sixteen full-attention planes while retaining
@@ -329,16 +338,12 @@ func TestQwen35MetalP32TwoP1PersistentDeviceKV(t *testing.T) {
 		t.Helper()
 		// The control is the historical host-prefix decode, so it also turns off the
 		// whole-token decode's own mirror; one command buffer keeps the receipt exact.
+		on := map[bool]string{false: "0", true: "1"}[persistent]
 		t.Setenv("FAK_QWEN35_WHOLE_TOKEN_FLUSH", "0")
-		if persistent {
-			t.Setenv("FAK_QWEN35_PERSISTENT_DECODE_DKV", "1")
-			t.Setenv("FAK_QWEN35_DECODE_DKV", "1")
-		} else {
-			t.Setenv("FAK_QWEN35_PERSISTENT_DECODE_DKV", "0")
-			t.Setenv("FAK_QWEN35_DECODE_DKV", "0")
-		}
+		t.Setenv("FAK_QWEN35_DECODE_DKV", on)
 		s := m.NewSession()
 		s.Q4K, s.MetalQ4K = true, true
+		s.PersistentDecodeDeviceKV = persistent
 		s.Cache.Reserve(35)
 		if err := s.EnableQwen35MetalGDNPreprojectedSequence(); err != nil {
 			t.Fatal(err)
@@ -346,6 +351,16 @@ func TestQwen35MetalP32TwoP1PersistentDeviceKV(t *testing.T) {
 		s.Prefill(prompt)
 		if executed, err := s.FinalizeQwen35MetalGDNPreprojectedSequence(); err != nil || !executed {
 			t.Fatalf("finalize persistent=%v executed=%v err=%v", persistent, executed, err)
+		}
+		// The prefill walk's terminal receipt carries the build-provenance stamps
+		// verbatim; an unstamped build would leave both fields empty here.
+		prefill := s.Qwen35MetalForwardSequenceReceipt()
+		if !prefill.Available {
+			t.Fatalf("persistent=%v prefill produced no terminal Metal receipt", persistent)
+		}
+		if prefill.SourceRevision != "witness-source-revision" || prefill.ArtifactSHA256 != "witness-artifact-sha256" {
+			t.Fatalf("prefill receipt provenance revision=%q artifact=%q, want the build stamps",
+				prefill.SourceRevision, prefill.ArtifactSHA256)
 		}
 		out := make([][]float32, 2)
 		receipts := make([]Qwen35MetalForwardSequenceReceipt, 2)

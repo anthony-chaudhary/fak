@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
@@ -175,29 +178,189 @@ func blockedModelMessage(arg, label string) (string, bool) {
 		label, arg, blocked.Reason, blocked.Filename, blocked.Bytes, blocked.SHA256), true
 }
 
-func resolveAndFetchModelRef(arg, label string, notFoundExit int) {
+// ErrUnknownModelType is the closed-contract sentinel for the pre-transfer
+// capability gate: a ref whose declared model family is absent from the
+// compiled capability table (modelCapabilities) is refused before a single
+// byte is transferred. Adapted from TensorFold's pre-transfer gate
+// (zig/src/cli/pull.zig:69 @9e8c368b0b4c2c7892a0c9f0f302d7c164016209).
+var ErrUnknownModelType = errors.New("model type not supported by this build")
+
+// unknownModelTypeError carries the offending family token on the sentinel so
+// the refusal can name the requested type without enumerating registry
+// contents (the rejection probe: the message must not list known types).
+type unknownModelTypeError struct{ family string }
+
+func (e *unknownModelTypeError) Error() string {
+	return fmt.Sprintf("model type %q is not supported by this build", e.family)
+}
+
+func (e *unknownModelTypeError) Unwrap() error { return ErrUnknownModelType }
+
+// modelCapability is one row of the compiled capability table: a model family
+// this binary can load, the weight formats its loader accepts, and the native
+// flags and env knobs that steer it. The table is the SINGLE source both the
+// pre-transfer gate (modelTypeGate) and the serve-fit capability report
+// (serveCapabilityReport) consult, so a listed family is admitted everywhere
+// and an unlisted one is refused everywhere — the two gates cannot disagree.
+// Rows are static and sorted by Family, so the report is deterministic for a
+// given build (TensorFold cli_capabilities.zig:20 doc shape: version/chip/
+// backends/families -> weight formats, native flags, env).
+type modelCapability struct {
+	Family  string   // family token matched against the alias name
+	Formats []string // weight formats the loader accepts for this family
+	Flags   []string // native CLI flags that apply
+	Env     []string // env knobs that apply
+}
+
+// modelCapabilities is the compiled family/format table. It mirrors the
+// embedded alias catalog's families exactly, so every registered alias
+// proceeds through the gate unchanged while an alias-declared family outside
+// this set is refused before transfer.
+var modelCapabilities = []modelCapability{
+	{Family: "glm-5.3-flash", Formats: []string{"bf16", "fp8"}},
+	{Family: "glm53", Formats: []string{"bf16", "fp8"}},
+	{Family: "ornith", Formats: []string{"fp8", "q4_k_m"}, Flags: []string{"--gguf"}, Env: []string{"FAK_Q4K"}},
+	{Family: "qwen2.5", Formats: []string{"q4_k_m", "q8_0"}, Flags: []string{"--gguf"}, Env: []string{"FAK_Q4K"}},
+	{Family: "qwen2.5-coder", Formats: []string{"q4_k_m"}, Flags: []string{"--gguf"}, Env: []string{"FAK_Q4K"}},
+	{Family: "qwen3.8", Formats: []string{"fp8", "q4_k_m", "ud_q2_k_xl"}, Flags: []string{"--gguf"}, Env: []string{"FAK_Q4K", "FAK_STREAM_Q4K"}},
+	{Family: "qwen38", Formats: []string{"fp8", "q4_k_m", "ud_q2_k_xl"}, Flags: []string{"--gguf"}, Env: []string{"FAK_Q4K", "FAK_STREAM_Q4K"}},
+	{Family: "smollm2", Formats: []string{"q8_0"}, Flags: []string{"--gguf"}},
+}
+
+// modelFamilyOfAlias extracts the family token the pre-transfer gate matches
+// against the compiled table: the alias with its ":tag" suffix stripped
+// ("qwen38:27b" -> "qwen38"), mirroring modelreg's "default" normalization so
+// `fak pull default` gates on the default alias's family.
+func modelFamilyOfAlias(arg string) string {
+	a := strings.TrimSpace(arg)
+	if strings.EqualFold(a, "default") {
+		a = modelreg.DefaultAlias
+	}
+	if i := strings.IndexByte(a, ':'); i > 0 {
+		a = a[:i]
+	}
+	return a
+}
+
+// modelFamilyListed reports whether token matches a compiled capability row:
+// exact family equality, or a dash-separated extension of a listed family
+// ("qwen3.8-70b-q4_k_m" extends "qwen3.8"). Longest family wins, so
+// "qwen2.5-coder" matches its own row rather than "qwen2.5".
+func modelFamilyListed(token string) bool {
+	best := 0
+	for _, c := range modelCapabilities {
+		if token == c.Family || strings.HasPrefix(token, c.Family+"-") {
+			if len(c.Family) > best {
+				best = len(c.Family)
+			}
+		}
+	}
+	return best > 0
+}
+
+// modelTypeGate is the pre-transfer capability gate: it refuses (with
+// ErrUnknownModelType) an alias-declared model family that the compiled
+// capability table does not list, so an unknown type never reaches the
+// downloader. expanded=false (a bare hf:// URI or local path) declares no
+// type and passes through — its format is judged at load time, not here. It
+// is the SAME table the serve-fit path reports (serveCapabilityReport), so
+// admission and disclosure agree by construction.
+func modelTypeGate(arg string, expanded bool) error {
+	if !expanded {
+		return nil
+	}
+	family := modelFamilyOfAlias(arg)
+	if !modelFamilyListed(family) {
+		return &unknownModelTypeError{family: family}
+	}
+	return nil
+}
+
+type modelTransferKind int
+
+const (
+	modelTransferBlocked modelTransferKind = iota
+	modelTransferNotFound
+	modelTransferLocal
+	modelTransferFetch
+)
+
+// modelTransferPlan is the decision of planModelTransfer: which outcome the
+// caller takes, the concrete ref (or local path) involved, the human-facing
+// refusal text, and the process exit code. kind==modelTransferFetch means the
+// ref cleared every check up to the byte transfer itself.
+type modelTransferPlan struct {
+	kind     modelTransferKind
+	ref      string
+	message  string
+	exit     int
+	expanded bool
+}
+
+// planModelTransfer performs every step of resolveAndFetchModelRef up to (but
+// excluding) the byte transfer: the blocked-source refusal, alias expansion,
+// the local-path short-circuit, and the pre-transfer capability gate. It moves
+// no bytes, so a test can inspect the decision with a transfer spy standing in
+// for modelTransfer.
+func planModelTransfer(arg, label string, notFoundExit int) modelTransferPlan {
 	if message, blocked := blockedModelMessage(arg, label); blocked {
-		fmt.Fprintln(os.Stderr, message)
-		os.Exit(1)
+		return modelTransferPlan{kind: modelTransferBlocked, message: message, exit: 1}
 	}
 	ref, expanded := modelreg.Resolve(arg)
-	if expanded {
-		fmt.Fprintf(os.Stderr, "fak %s: %s → %s\n", label, arg, ref)
-	}
 	if !hfhub.IsURI(ref) {
 		if _, err := os.Stat(ref); err == nil {
-			fmt.Println(ref)
-			return
+			return modelTransferPlan{kind: modelTransferLocal, ref: ref, expanded: expanded}
 		}
-		fmt.Fprintf(os.Stderr, "fak %s: %q is not a known alias, an hf:// URI, or an existing path\n", label, arg)
-		os.Exit(notFoundExit)
+		return modelTransferPlan{
+			kind:     modelTransferNotFound,
+			message:  fmt.Sprintf("fak %s: %q is not a known alias, an hf:// URI, or an existing path", label, arg),
+			exit:     notFoundExit,
+			expanded: expanded,
+		}
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-	path, err := hfhub.FetchURI(ctx, ref, os.Stderr)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "fak %s: %v\n", label, err)
-		os.Exit(1)
+	if err := modelTypeGate(arg, expanded); err != nil {
+		return modelTransferPlan{
+			kind:     modelTransferBlocked,
+			message:  fmt.Sprintf("fak %s: %v", label, err),
+			exit:     1,
+			expanded: expanded,
+		}
 	}
-	fmt.Println(path)
+	return modelTransferPlan{kind: modelTransferFetch, ref: ref, expanded: expanded}
+}
+
+// modelTransfer is the byte-transfer seam behind the pull/load gate; production
+// wraps hfhub.FetchURI. Tests replace it with a counting spy to witness that a
+// refused model type never reaches the downloader.
+var modelTransfer func(ctx context.Context, ref string, progress io.Writer) (string, error) = func(ctx context.Context, ref string, progress io.Writer) (string, error) {
+	return hfhub.FetchURI(ctx, ref, progress)
+}
+
+func resolveAndFetchModelRef(arg, label string, notFoundExit int) {
+	plan := planModelTransfer(arg, label, notFoundExit)
+	// The blocked case never resolved an alias (plan.expanded stays false), so
+	// only post-resolution outcomes carry the expansion arrow.
+	if plan.expanded {
+		fmt.Fprintf(os.Stderr, "fak %s: %s → %s\n", label, arg, plan.ref)
+	}
+	switch plan.kind {
+	case modelTransferBlocked:
+		fmt.Fprintln(os.Stderr, plan.message)
+		os.Exit(plan.exit)
+	case modelTransferNotFound:
+		fmt.Fprintln(os.Stderr, plan.message)
+		os.Exit(plan.exit)
+	case modelTransferLocal:
+		fmt.Println(plan.ref)
+		return
+	default: // modelTransferFetch
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+		path, err := modelTransfer(ctx, plan.ref, os.Stderr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fak %s: %v\n", label, err)
+			os.Exit(1)
+		}
+		fmt.Println(path)
+	}
 }

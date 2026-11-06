@@ -22,6 +22,10 @@ var (
 	ErrInvalidTokenCount = errors.New("radixkv: invalid token count")
 	ErrBufferTooSmall    = errors.New("radixkv: buffer too small for token kv")
 	ErrInvalidLayerIndex = errors.New("radixkv: invalid layer index")
+	// ErrTouchingFreeRanges reports that two free ranges of one physical row
+	// touch or overlap: they share a boundary page and must be merged into a
+	// single range before reaching the allocator.
+	ErrTouchingFreeRanges = errors.New("radixkv: touching free ranges on one row must merge before free")
 )
 
 // PagedBlockTable represents a stream's logical-to-physical block table for Metal PagedAttention.
@@ -653,6 +657,84 @@ func (p *PagedRadixKVPool) BindNode(n *Node, streamID string) (*PagedBlockTable,
 	p.zeroCopyBindings.Add(1)
 	p.tensorAllocsAvoided.Add(1)
 	return table, nil
+}
+
+// Free-path invariants (borrowed, adapted from the SGLang unified radix cache
+// correctness fix: sgl-project/sglang python/sglang/srt/mem_cache/
+// unified_radix_cache.py:998,1073-1078 and unified_cache/components/base.py:387
+// @b02e16a; upstream PRs #38982 and #39426 hit the same boundary-page bug twice):
+//
+//  1. Re-floor after a cross-component min. When several components each cap a
+//     shared cached length and the caps are min'd together, the result must be
+//     re-floored to every component's own alignment. A length left between two
+//     group boundaries of any component leaves that component's boundary page
+//     partially owned, and the deferred tail free then mis-frees the shared
+//     boundary page.
+//  2. Merge touching free ranges before free. Two free ranges of one physical
+//     row that touch (one ends where the other begins) share their boundary
+//     page and must be emitted as the single merged union; handing the
+//     allocator two touching ranges is the double-free abort shape.
+//
+// fak frees whole blocks under refcounts (ReleaseBlockTable / EvictNodePaged),
+// so the abort shape is structurally less likely here than upstream. The guards
+// below pin both invariants so a future multi-component free path cannot
+// regress into the shape silently.
+type freeRange struct {
+	start int // inclusive first token offset within the row
+	end   int // exclusive last token offset within the row
+}
+
+// floorToAlignment floors length to the largest multiple of alignment not
+// exceeding it. alignment <= 1 is the identity alignment (no constraint).
+func floorToAlignment(length, alignment int) int {
+	if alignment <= 1 {
+		return length
+	}
+	return length / alignment * alignment
+}
+
+// validateRowFreeRanges enforces invariant 2 above over well-formed ranges
+// (start <= end): no two free ranges of one row may touch or overlap, because
+// adjacent ranges share the boundary page at the meeting point.
+func validateRowFreeRanges(ranges []freeRange) error {
+	for i := 0; i < len(ranges); i++ {
+		for j := i + 1; j < len(ranges); j++ {
+			a, b := ranges[i], ranges[j]
+			lo, hi := a, b
+			if lo.end > hi.end {
+				lo, hi = hi, lo
+			}
+			if hi.start <= lo.end { // touching (==) or overlapping (<)
+				return ErrTouchingFreeRanges
+			}
+		}
+	}
+	return nil
+}
+
+// planTailFreeRanges builds the tail-free range set for one physical row when
+// a cached prefix shorter than the full request length is released: the
+// unaligned-tail half [freeFrom, effectiveLen) plus the optional deferred
+// truncation-tail half [tailStart, fullLen). When the halves meet at the
+// truncation boundary they share its page and are emitted once as the union
+// [freeFrom, fullLen) instead of two touching ranges. tailStart <= 0 means no
+// deferred tail; an empty or inverted first half (protected prefix already
+// past the truncated length) is dropped rather than emitted.
+func planTailFreeRanges(freeFrom, effectiveLen, tailStart, fullLen int) []freeRange {
+	var ranges []freeRange
+	if freeFrom < effectiveLen {
+		ranges = append(ranges, freeRange{start: freeFrom, end: effectiveLen})
+	}
+	if tailStart <= 0 || tailStart > fullLen {
+		return ranges
+	}
+	if n := len(ranges); n > 0 && tailStart <= ranges[n-1].end {
+		// Adjacent halves share the boundary page at the truncation point;
+		// emit their union as a single range.
+		ranges[n-1].end = fullLen
+		return ranges
+	}
+	return append(ranges, freeRange{start: tailStart, end: fullLen})
 }
 
 // ReleaseBlockTable releases a stream's lease on shared physical blocks, decrementing

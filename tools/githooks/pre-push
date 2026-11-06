@@ -281,7 +281,7 @@ fi
 # Mode (env FLEET_BUILD_GUARD):  block (default) | warn | off
 #   warn   allow the push, print the build error + how to fix it   (exit 0)  — explicit advisory override
 #   block  refuse the push until the pushed tip compiles           (exit 1)
-#   off    skip compilation but require immutable import and concept admission
+#   off    skip compilation but require immutable import, concept admission and freshness
 # Escape:  FLEET_ALLOW_BUILD_BREAK=1 git push   always allows.
 # Default BLOCK refuses both a red pushed tree and infrastructure/UNKNOWN failures.
 # Warn mode reports either failure without refusing the push.
@@ -315,6 +315,15 @@ if [ "$build_mode" = "off" ] && [ "${FLEET_ALLOW_BUILD_BREAK:-0}" != "1" ]; then
 		echo "$focused_out" >&2
 		if [ "$focused_status" -ne 0 ]; then
 			echo "PREPUSH_STRUCTURE (blocked): immutable-range admission refused or could not run." >&2
+			exit 1
+		fi
+		# The scorecard also depends on ordinary production-source changes, not
+		# just catalog edits. Check the advertised tip, never live HEAD or WIP.
+		freshness_out="$(fak concept freshness --staged --tree "$focused_tip" --json 2>&1)"
+		freshness_status=$?
+		if [ "$freshness_status" -ne 0 ]; then
+			echo "$freshness_out" >&2
+			echo "CONCEPT_FRESHNESS (blocked): exact-tip generated artifacts are stale or could not be checked." >&2
 			exit 1
 		fi
 	done

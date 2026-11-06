@@ -299,3 +299,46 @@ func TestNilRunnerDefaults(t *testing.T) {
 		t.Fatalf("explicit runner must be honored, got %+v", c)
 	}
 }
+
+// fak-test:runtime fast est=1ms lane=default
+func TestCountsIgnoresInvalidCheckboxMarks(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		bodyJSON   string
+		wantTotal  int
+		wantClosed int
+		wantErr    bool
+	}{
+		{
+			name:       "mixed valid and invalid marks",
+			bodyJSON:   `{"body":"- [x] done\n- [X] also done\n- [ ] pending\n- [y] #999 not a task\n- [-] partial notation\n- [?] question notation"}`,
+			wantTotal:  3,
+			wantClosed: 2,
+		},
+		{
+			name:      "preserve ASCII whitespace marks",
+			bodyJSON:  `{"body":"- [\t] tab\n- [\u000b] line tabulation\n- [\f] form feed\n- [\r] carriage return"}`,
+			wantTotal: 4,
+		},
+		{
+			name:     "invalid marks provide no child signal",
+			bodyJSON: `{"body":"- [y] #999 not a task\n- [-] partial notation\n- [?] question notation"}`,
+			wantErr:  true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := fakeRunner{"view 800": {out: tc.bodyJSON, ok: true}}
+			got := Counts(fake.run, "", EpicSpec{Number: 800})
+			if got.Total != tc.wantTotal || got.Closed != tc.wantClosed || (got.Err != "") != tc.wantErr {
+				t.Fatalf("counts=%+v, want closed=%d total=%d error=%v", got, tc.wantClosed, tc.wantTotal, tc.wantErr)
+			}
+			wantSource := SourceChecklist
+			if tc.wantErr {
+				wantSource = ""
+			}
+			if got.Source != wantSource {
+				t.Fatalf("source=%q, want %q", got.Source, wantSource)
+			}
+		})
+	}
+}

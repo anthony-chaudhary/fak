@@ -436,6 +436,9 @@ func contextLadder(anchor, modelMax, pinned int) []int {
 	set := map[int]bool{}
 	for c := 4096; c <= modelMax; c <<= 1 {
 		set[c] = true
+		if c > modelMax/2 {
+			break // The next power exceeds the bound; do not overflow int.
+		}
 	}
 	if modelMax > 0 {
 		set[modelMax] = true

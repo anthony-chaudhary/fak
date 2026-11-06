@@ -85,8 +85,20 @@ func TestClaudeFrontDoorArgvTranslatesAnthropicToOpenAI(t *testing.T) {
 	}
 }
 
+// isolateClaudeHome points os.UserHomeDir at an empty temp dir so credential
+// discovery never sees this host's real ~/.fak/router/gateway.key.
+func isolateClaudeHome(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("USERPROFILE", dir)
+	t.Setenv("HOME", dir)
+	return dir
+}
+
 func TestClaudeRouterCredentialPlaceholder(t *testing.T) {
+	isolateClaudeHome(t)
 	t.Setenv(claudeRouterKeyEnv, "")
+	t.Setenv(claudeRouterGatewayKeyEnv, "")
 	if got := claudeFrontDoorRouterCredential(""); got != claudeRouterKeylessValue {
 		t.Errorf("keyless credential = %q, want %q", got, claudeRouterKeylessValue)
 	}
@@ -96,6 +108,77 @@ func TestClaudeRouterCredentialPlaceholder(t *testing.T) {
 	t.Setenv(claudeRouterKeyEnv, "env-key")
 	if got := claudeFrontDoorRouterCredential(""); got != "env-key" {
 		t.Errorf("env credential = %q", got)
+	}
+}
+
+// TestClaudeRouterGatewayKeyDiscovery pins the discovery order: the operator
+// env var wins over the supervised gateway key file; the file is read and
+// trimmed when the env var is unset; nothing found leaves discovery empty so
+// the caller falls back to the keyless placeholder.
+func TestClaudeRouterGatewayKeyDiscovery(t *testing.T) {
+	home := isolateClaudeHome(t)
+	keyPath := filepath.Join(home, ".fak", "router", "gateway.key")
+	if err := os.MkdirAll(filepath.Dir(keyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, []byte("file-gateway-key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(claudeRouterGatewayKeyEnv, "")
+	if got := claudeRouterDiscoveredKey(); got != "file-gateway-key" {
+		t.Errorf("discovered key = %q, want the trimmed file value", got)
+	}
+	t.Setenv(claudeRouterGatewayKeyEnv, "env-gateway-key")
+	if got := claudeRouterDiscoveredKey(); got != "env-gateway-key" {
+		t.Errorf("discovered key = %q, want the env value to win", got)
+	}
+	t.Setenv(claudeRouterGatewayKeyEnv, "")
+	if err := os.Remove(keyPath); err != nil {
+		t.Fatal(err)
+	}
+	if got := claudeRouterDiscoveredKey(); got != "" {
+		t.Errorf("discovered key = %q after removing the file, want empty", got)
+	}
+}
+
+// TestClaudeRouterCredentialOrderWithDiscovery pins that the front-door
+// upstream credential prefers the explicit value, then FAK_CLAUDE_ROUTER_KEY,
+// then the discovered gateway key, then the keyless placeholder.
+func TestClaudeRouterCredentialOrderWithDiscovery(t *testing.T) {
+	home := isolateClaudeHome(t)
+	keyPath := filepath.Join(home, ".fak", "router", "gateway.key")
+	if err := os.MkdirAll(filepath.Dir(keyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, []byte("file-gateway-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(claudeRouterKeyEnv, "")
+	t.Setenv(claudeRouterGatewayKeyEnv, "")
+	if got := claudeFrontDoorRouterCredential(""); got != "file-gateway-key" {
+		t.Errorf("credential = %q, want the discovered gateway key", got)
+	}
+	if got := claudeFrontDoorRouterCredential("explicit"); got != "explicit" {
+		t.Errorf("credential = %q, want the explicit value", got)
+	}
+	t.Setenv(claudeRouterKeyEnv, "frontdoor-env-key")
+	if got := claudeFrontDoorRouterCredential(""); got != "frontdoor-env-key" {
+		t.Errorf("credential = %q, want FAK_CLAUDE_ROUTER_KEY over the file", got)
+	}
+}
+
+// TestClaudeRouterAuthHeader pins that probes send Bearer only for real keys:
+// the keyless placeholder sends no Authorization header at all.
+func TestClaudeRouterAuthHeader(t *testing.T) {
+	isolateClaudeHome(t)
+	t.Setenv(claudeRouterKeyEnv, "")
+	t.Setenv(claudeRouterGatewayKeyEnv, "")
+	if got := claudeRouterAuthHeader(); got != "" {
+		t.Errorf("auth header with only the placeholder = %q, want empty", got)
+	}
+	t.Setenv(claudeRouterKeyEnv, "some-key")
+	if got := claudeRouterAuthHeader(); got != "Bearer some-key" {
+		t.Errorf("auth header = %q, want Bearer some-key", got)
 	}
 }
 

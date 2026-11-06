@@ -72,7 +72,13 @@
       "distinction": "Class-aware and refusal-capable, distinct from EvictUnderBudget, which evicts to a budget with no survival contract and therefore no outcome in which it declines; and distinct from CheckEviction, which judges a plan rather than producing one.",
       "distinct_from": [
         "x2-evict-evictunderbudget",
-        "c2421-check-eviction"
+        "c2421-check-eviction",
+        "kvfp8evictionplan",
+        "kvfp8ownerplanevict",
+        "kvfp8evictionplan-evict",
+        "kvfp8ownerplanevict-evict",
+        "kvfp8evicteager",
+        "kvfp8applyevictioneager"
       ],
       "aliases": [],
       "grounding": "PlanEviction",

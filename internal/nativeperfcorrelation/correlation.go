@@ -1,9 +1,8 @@
-// Package nativeperfcorrelation provides a bounded, scrubbed index that joins
-// native-performance evidence without exporting high-cardinality identifiers as
-// metric labels.
-//
-// Invariant: all indexed records scrub raw client identifiers into one-way sha256
-// digests and store bounded relative locators so public metrics never leak trace data.
+// Package nativeperfcorrelation joins native-performance evidence through a
+// bounded index that never exports high-cardinality identifiers as metric
+// labels. Indexed records replace raw request, run, receipt, trace, and profile
+// IDs with one-way SHA-256 digests and keep only bounded relative artifact
+// locators, so public metrics cannot leak trace data.
 package nativeperfcorrelation
 
 import (
@@ -123,14 +122,12 @@ type Exemplar struct {
 	CorrelationKey string `json:"correlation_key"`
 }
 
-// Contract: Index bounds in-memory retention strictly to capacity, evicting the oldest
-// entry on overflow while maintaining exact idempotency for identical inputs.
-//
-// Invariant: Records never retain raw high-cardinality IDs; all request, run, receipt,
-// trace, and profile identifiers are cryptographically fingerprinted using SHA-256 before admission.
-//
-// Index provides a concurrency-safe, bounded in-memory cache retaining at most Capacity records.
-// When full, inserting a new record evicts the oldest insertion. Re-inserting an identical record is idempotent.
+// Index is a concurrency-safe, bounded in-memory cache of scrubbed correlation
+// records. It retains at most capacity records; when full, adding a new record
+// evicts the oldest insertion, and re-adding an identical record is idempotent.
+// Stored records never retain raw high-cardinality IDs: every request, run,
+// receipt, trace, and profile identifier is SHA-256 fingerprinted before
+// admission.
 type Index struct {
 	mu       sync.RWMutex
 	capacity int
@@ -152,10 +149,9 @@ func WithKeyFunc(fn func(Record) string) Option {
 	}
 }
 
-// Precondition: NewIndex requires capacity to be strictly positive (capacity > 0)
-// to prevent zero-capacity indexes or unbounded memory growth.
-//
-// NewIndex constructs a thread-safe correlation index bounded by the specified positive capacity.
+// NewIndex constructs a concurrency-safe correlation index bounded by capacity.
+// Capacity must be positive: a non-positive bound would either admit nothing or
+// grow without limit.
 func NewIndex(capacity int, options ...Option) (*Index, error) {
 	if capacity <= 0 {
 		return nil, errors.New("native performance correlation capacity must be positive")
@@ -171,10 +167,10 @@ func NewIndex(capacity int, options ...Option) (*Index, error) {
 	return index, nil
 }
 
-// Postcondition: Add returns either an admitted immutable clone of the Record with a
-// deterministic npc1_ correlation key, or an explicit validation error without mutating state.
-//
-// Add scrubs and admits execution input into the bounded index, evicting the oldest record if capacity is reached.
+// Add scrubs and admits execution input into the bounded index, returning an
+// immutable clone carrying a deterministic npc1_ key. Invalid input or a key
+// collision returns an error without mutating state; when full, the oldest
+// record is evicted first.
 func (i *Index) Add(input Input) (Record, error) {
 	record, err := scrub(input)
 	if err != nil {
@@ -232,11 +228,9 @@ func (i *Index) Exemplar(key string) (Exemplar, error) {
 	return Exemplar{CorrelationKey: key}, nil
 }
 
-// Guard: VerifyArtifact inspects artifact content streams bounded by maxBytes and enforces
-// constant-time hex SHA-256 verification against the pre-indexed manifest digest.
-//
 // VerifyArtifact streams one indexed artifact from fsys, bounded by maxBytes,
-// and verifies that it is the exact content named by the record.
+// and verifies its SHA-256 digest against the pre-indexed manifest value.
+// Streams longer than maxBytes fail with ErrArtifactTooLarge.
 func (i *Index) VerifyArtifact(key string, kind ArtifactKind, fsys fs.FS, maxBytes int64) error {
 	record, err := i.Lookup(key)
 	if err != nil {
@@ -271,8 +265,9 @@ func (i *Index) VerifyArtifact(key string, kind ArtifactKind, fsys fs.FS, maxByt
 	return nil
 }
 
-// Fail-closed: Any unscrubbed engine backend, traversal path, non-relative locator,
-// or missing required artifact kind immediately halts admission and returns an explicit error.
+// scrub rejects any input that could carry unsanitized data past admission:
+// unbounded engine identities, absolute or traversal locators, and missing
+// required artifact kinds each halt with an explicit error.
 func scrub(input Input) (Record, error) {
 	for name, value := range map[string]string{
 		"request ID": input.RequestID,

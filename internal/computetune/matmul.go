@@ -19,8 +19,11 @@ type MatMulImplementation struct {
 	Inputs      MatMulInputs
 }
 
+// ID returns the candidate ID used in manifest entries and tuning reports.
 func (c MatMulImplementation) ID() string { return c.CandidateID }
 
+// Run executes the adapted backend GEMM for one profile and frees the output
+// buffer when it returns.
 func (c MatMulImplementation) Run(_ context.Context, profile Profile) ([]float32, error) {
 	if profile.Operation != OpMatMul {
 		return nil, errors.New("computetune: candidate only supports matmul")

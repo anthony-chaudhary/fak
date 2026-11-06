@@ -69,6 +69,14 @@ func ReadTail(path string, maxBytes int64) []byte {
 		return nil
 	}
 	if start > 0 {
+		// A window beginning just after a newline already starts at a full row.
+		var previous [1]byte
+		if _, err := f.ReadAt(previous[:], start-1); err != nil {
+			return nil
+		}
+		if previous[0] == '\n' {
+			return b
+		}
 		if i := bytes.IndexByte(b, '\n'); i >= 0 {
 			b = b[i+1:]
 		} else {

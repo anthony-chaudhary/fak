@@ -287,6 +287,226 @@ The full upstream LICENSE at the pinned revision follows:
    limitations under the License.
 ```
 
+## TensorFold draft-depth pooled verify costs
+
+- Upstream: ashhart/TensorFold, commit
+  `9e8c368b0b4c2c7892a0c9f0f302d7c164016209` (Apache-2.0), source
+  `zig/src/core/draft_depth.zig` (`Costs`, `DepthRule`):
+  https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/draft_depth.zig
+- Adaptation: `internal/model/draft_depth_cost.go` re-expresses the pooled
+  marginal verify-cost table (pool adjacent violators with kernel-regime
+  boundaries) and the confidence-priced keep/more rule in Go; the governor
+  wiring consumes it through modeled-cost pricing on
+  `Qwen38MTPAdaptiveDepthGovernor` in `internal/model/qwen38_mtp_adaptive.go`.
+  No Zig code blocks are copied; the algorithm, defaults and test vectors are
+  adapted.
+- License: Apache License 2.0, already reproduced above under "TensorFold
+  benchmark evidence".
+- Witness: `TestDraftDepthPooledCostsAndKeepStop` in
+  `internal/model/draft_depth_cost_test.go` pins the pooled verify-cost
+  table and the confidence-priced keep/stop rule (software evidence only).
+
+## TensorFold decode/prefill wall-time share
+
+`internal/agent/inkernel_qwen_coordinator.go` and
+`internal/agent/inkernel_v41_coordinator.go` adapt the lane-host fill
+scheduling idea from TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/lane_host_fill.zig
+plus its operator knobs documented at
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/docs/api.md#prefill-lane-host-fill-scheduling
+
+The adapted contract: while decoders are live, a prompt step taking `t`
+nanoseconds owes them `t*(1-p)/p` of decode time (`p` is the prompt's wall-time
+share, floored at 0.01); decode rounds pay the debt down; a decode share outside
+(0,1) — including 0 — keeps whole-prompt arrival ordering; and an optional row
+budget caps the rows a visit fills beside live decoders. In this codebase that
+lands as the `inKernelDecodeShare` type plus two operator knobs,
+`FAK_INKERNEL_DECODE_SHARE` and `FAK_INKERNEL_PROMPT_ROW_BUDGET`, wired into the
+coalescer admission paths of both in-kernel decode cohorts.
+
+Changed for Fak: idiomatic Go re-expression of the scheduling contract over
+fak's prepare/decode visits instead of Zig lane-host fill rounds, int64 debt
+saturation instead of unbounded floats, and env-var configuration instead of
+process-global flags. No upstream source code is copied; the adaptation is
+witnessed by `TestDecodeShareDebtOwedAndZeroKeepsWholePromptOrder` in
+`internal/agent/inkernel_decode_share_test.go`. The upstream Apache-2.0 license
+is reproduced in the TensorFold benchmark evidence section above.
+
+## TensorFold queued disk-state read-ahead (l3kv prefetch)
+
+`internal/l3kv/prefetch_queue.go` and the read side of `internal/l3kv/
+async_job.go` (`AsyncStore.Prefetch` / `RestorePrefetched`) adapt the lane-host
+fetch contract from TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/lane_host_fetch.zig
+plus its admission caller
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/lane_host_admit.zig
+and operator documentation at
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/docs/api.md#L661
+
+The adapted contract: while other streams run, a queued request whose durable
+state is on disk has it read ahead on separate I/O workers; held reads wait
+with a bounded timeout (default 30 s) and fall back to admission restore or
+fresh prefill; concurrent-read permits are capped (default 2, 0 disables)
+with an optional resident-memory cap; a cancelled waiter does not cancel the
+read — it keeps its permit until the I/O returns; and stop cancels reads. In
+this codebase that lands as the `PrefetchQueue` type plus the `Prefetch`,
+`RestorePrefetched`, `PrefetchStats` and `StopPrefetch` methods on `AsyncStore`.
+
+Changed for Fak: idiomatic Go re-expression over fak's span-keyed `Store`
+interface instead of Zig lane-host state, sentinel-error fallback signals
+(`ErrPrefetchTimeout`, `ErrPrefetchDisabled`, `ErrPrefetchStopped`) instead of
+Zig error unions, and per-instance configuration instead of process-global
+tunables. No upstream source code is copied; the adaptation is witnessed by
+`TestRestorePrefetchPermitTimeoutFallback` in
+`internal/l3kv/prefetch_queue_test.go`. The upstream Apache-2.0 license is
+reproduced in the TensorFold benchmark evidence section above.
+
+## TensorFold CUDA graph-cache policy
+
+`internal/compute/graph_cache_policy.go` `GraphCachePolicy` adapts the keyed
+graph-cache policy (`capture-once per key, replay on hit; address-fingerprint
+drop-all; LRU cap with min_keep floor; all-rank agree vote gates misses;
+declined vote and capture OOM fall back eager; peer capture failure disables;
+environment off`) from `zig/src/cuda/graph_cache.zig` `Cache.run` at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209` of the same source:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/cuda/graph_cache.zig
+
+Changed for Fak: idiomatic Go re-expression against an injected engine
+interface so the whole policy is testable on host CPU with a fake engine,
+string keys instead of u32, and explicit sentinel errors for constructor
+misconfiguration. No Zig code, device kernel or release-binary claim is
+included; the upstream bound is preserved that its only concrete callers are
+experimental DeepSeek-V4.1 paths no release binary serves. The policy is not
+yet wired into the live `cudaBackend` capture path.
+
+The pinned repository's root Apache-2.0 LICENSE
+(Git `9e8c368b0b4c2c7892a0c9f0f302d7c164016209`) is reproduced byte-exactly
+in the existing "TensorFold benchmark evidence" license section of this file
+and also applies here.
+
+## TensorFold GDN segment-mark recurrent state
+
+`internal/compute/gdn_marks.go` adapts the markList/slotKernel discipline from
+TensorFold at revision `9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/deltanet_kernels.zig#L9
+plus the GDN recurrence context at
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/gdn.zig#L117
+
+The adapted contract: the GDN recurrent state is snapshotted into a bounded
+store at segment marks; a mark list keeps at most 4 ascending non-zero rows,
+each <= the segment's total row count, refusing empty, late, repeated or
+fifth marks; and tree state selects the narrowest slot kernel whose
+representable range holds the state's peak magnitude. In this codebase that
+lands as `GDNMarkList`, `GDNSlotKernel` / `SelectGDNSlotKernel` and
+`GDNMarkedRecurrence` beside the existing GDN dispatch seam
+(`Wave32GatedDeltaNetStep` / `tryDeltaNetSIMD`).
+
+Changed for Fak: idiomatic Go re-expression over fak's float32 recurrent-state
+buffers instead of Zig slices, sentinel errors instead of Zig error unions, a
+fixed IEEE-format slot ladder (E4M3/binary16/bfloat16/binary32) instead of
+Zig's device-dependent slot table, and defensive snapshot copies. No upstream
+source code is copied; the adaptation is witnessed by
+`TestGDNMarkListOrderAndSlotSelection` in
+`internal/compute/gdn_marks_test.go`. The upstream Apache-2.0 license is
+reproduced in the TensorFold benchmark evidence section above.
+
+## TensorFold distributed message fabric (dist transport vtable)
+
+`internal/model/dist_transport.go` adapts the cluster transport contract from
+TensorFold at revision `9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/cluster/transport.zig
+plus its error classification and link-state handling at
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/cluster/fabric_link.zig#L79
+
+The adapted contract: what a control plane needs from a link layer is exactly
+four things — a bounded send, a poll of the next message from any link,
+every link's up/down state, and the largest payload a link carries — with
+messages on one link arriving IN ORDER OR NOT AT ALL, oversize payloads
+refused before sending (`TooLarge`), and observed link failures mapped to
+closed classes (peer timeout or down is one retryable class; anything else is
+corrupt). In this codebase that lands as the `DistTransport` interface
+(`Send`, `Recv`, `Links`, `Limit`) plus `NewDistTransport`, which rides a
+formed `DistComm` group's existing framed connections (the same
+writeFrame/readFrame seams `writeRequest`/`readRequest` use) with control
+frames tagged `opTransportCtrl` = 6, and the closed sentinel classes
+`ErrTooLarge`, `ErrLinkDown`, `ErrPeerTimeout`, `ErrCorrupt` with
+`ClassifyDistTransportError` mapping raw link-layer failures onto them.
+
+Changed for Fak: idiomatic Go re-expression over fak's loopback/stream TCP
+framed connections instead of Zig endpoint buffers, per-link FIFO mailboxes
+fed by one reader goroutine per peer (non-blocking `Recv` poll instead of a
+blocking any-link receive), and parking of non-control frames so the
+collective read paths drain them in arrival order. Physical RDMA stays open;
+this adaptation is loopback/stream TCP only. No upstream source code is
+copied; the adaptation is witnessed by
+`TestDistTransportPayloadLimitLinkState` in
+`internal/model/dist_transport_test.go`. The upstream Apache-2.0 license is
+reproduced in the TensorFold benchmark evidence section above.
+## TensorFold learned shared-prefix disk index (imprint)
+
+`internal/agent/inkernel_warm_disk.go` adapts the explicit-learn shared-prefix
+disk index from TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209`
+([prompt_imprint.zig](https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/prompt_imprint.zig),
+[cli.zig](https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/server/cli.zig)):
+the identity-scoped `root/<id>` directory layout with one durable record file
+per state plus a state index, a byte cap shared by every identity under the
+root, LRU eviction of least-recently-used states first, cross-identity sweep
+that reclaims the least-recently-opened identities when the cap needs room,
+and the pending-write marker that guards each in-flight write so a crash leaves
+a reconcilable marker and a second concurrent writer defers.
+
+Changed for Fak: idiomatic Go over fak's span-keyed `l3kv.DiskStore` records
+instead of Zig binary append-only indexes; a JSON state index with rescan
+repair instead of torn-tail truncation; identity derived from the authenticated
+tenant/agent/epoch cache scope rather than an operator-supplied id; the
+warm-prefix receipt vocabulary (`WarmDiskOutcome`/reason strings) instead of
+Zig error unions; pre-upgrade flat records remain readable as the oldest
+pseudo-identity so existing warm disks keep working across the upgrade. No
+upstream source code is copied; the adaptation is witnessed by
+`TestLearnedPrefixDiskIndex` in `internal/agent/inkernel_warm_disk_test.go`.
+The upstream Apache-2.0 license is reproduced in the TensorFold benchmark
+evidence section above.
+
+
+## TensorFold durable conversation-state staging (warm-disk conversation state)
+
+The opt-in `ConversationState` path of `WarmDiskConfig` and its bounded I/O
+queue (`warmDiskStager`, `DrainConversationState`) in
+`internal/agent/inkernel_warm_disk.go` adapt the session-store durable
+conversation-state behavior behind TensorFold's `--learn-conversations`
+flag from revision `9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/sessions/store.zig
+plus the flag wiring
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/server/cli.zig#L521
+and operator documentation at
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/docs/api.md#L647
+
+The adapted contract: when the opt-in flag is set, eligible owned retained
+states are staged as owned copies into a bounded queue under a byte permit
+(default 1 GiB) and a job cap (default 8); one I/O thread writes and fsyncs
+them; a record is reusable only after all of its files are written and
+synced; a save that exceeds the permit alone, or still does not fit after one
+queued write finishes, is skipped without writing; a planned stop drains to a
+20 s deadline and then cancels the remainder; and a killed server loses
+unfinished saves outright (best effort), with private temp files reaped on the
+next prune. In this codebase that lands as the `ConversationState` opt-in on
+the existing `persistWarmPrefixDisk` seam over `l3kv.DiskStore` (whose Put
+already commits via fsync'd temp file plus atomic rename), the per-directory
+`warmDiskStager` I/O queue, and the planner-level `DrainConversationState`
+planned-stop entry point.
+
+Changed for Fak: idiomatic Go re-expression over fak's span-keyed warm-disk
+records instead of Zig session-store bytes, sentinel-error skip/cancel signals
+(`errConversationStateCapacityFull`, `errConversationStateClosed`,
+`errConversationStateCancelled`) instead of Zig error unions, and a
+directory-bound process-lifetime queue instead of process-global tunables. No
+upstream source code is copied; the adaptation is witnessed by
+`TestConversationSnapshotCompleteOnly` in
+`internal/agent/conversation_state_test.go`. The upstream Apache-2.0 license
+is reproduced in the TensorFold benchmark evidence section above.
 
 ## vLLM chunkwise Qwen host Gated-DeltaNet
 
@@ -1335,6 +1555,68 @@ goroutine. Private outputs join before retirement and preserve current router
 IDs, weights, dtype and reduction order. The explicit host-payload budget is
 default off. This is a Go ownership adaptation, not a copied CUDA kernel,
 modified routing/quantization policy, device qualification or performance claim.
+
+## Strata layer-major prefill with per-layer expert warm-up
+
+`internal/model/batch_prefill.go` adapts the layer-major prefill walk — every
+layer's experts are read once per layer pass, with a per-layer expert warm hook
+armed at layer entry — from Niko1221/Strata at commits `ffe40c16`, `162dec34`
+and `37e4832a` (pinned at `46c152a1`), plus `docs/release-notes-0.2.7.md:20` at
+the same pin:
+- https://github.com/Niko1221/Strata/commit/ffe40c16
+- https://github.com/Niko1221/Strata/commit/162dec34
+- https://github.com/Niko1221/Strata/commit/37e4832a
+- https://github.com/Niko1221/Strata/blob/46c152a1/docs/release-notes-0.2.7.md
+
+https://github.com/Niko1221/Strata/tree/46c152a1
+
+Copyright (c) 2026 Niko1221 and the Strata contributors.
+SPDX-License-Identifier: MIT
+The complete copyright, permission and warranty notice is retained in
+`internal/model/STRATA_LICENSE.txt`.
+
+Design reference only; no Strata code blocks are copied. Fak's packed
+rectangular prefill loops already walk layers outer over the whole panel; this
+change arms a session-flag-gated per-layer expert warm hook at the entry of both
+packed layer loops (f32 and Q8 lanes) and pins the firing discipline — one fire
+per layer index, in layer order, once per panel rather than once per
+prompt/chunk — with `TestLayerMajorPrefillExpertWarm`. The flag's zero value
+keeps the walk byte-for-byte unchanged. Upstream TTFT numbers are estimates
+here, not a measured gain or hardware claim.
+
+## Strata DFlash2 drafter stack (end-to-end wiring and per-load sidecar retention)
+
+The DFlash2 speculative-drafter stack wired for Qwen3.8 serving — the pinned
+BF16 sidecar contract and per-load retention registry in
+`internal/model/dflash2_weights.go`, the borrowing request constructors in
+`internal/model/dflash2_request.go` and
+`internal/model/dflash2_request_options.go`, the ownership-aware reference in
+`internal/model/dflash2_reference.go`, the `--speculative=dflash2` structural
+selector and per-load retention hook in `cmd/fak/serve.go`, and the gateway
+mode passthrough in `internal/gateway` — adapts the drafter-stack discipline
+from Niko1221/Strata at commits `7f97c35a` (Q8_0 pack tool and top-16 candidate
+selector), `5bc7f8ca` (tiled Q8 GEMM with head-major K/V ring, prefetching
+attention and PLE read-ahead) and `89799596` (fused conv+residual+norm+quant),
+pinned at `46c152a1`:
+- https://github.com/Niko1221/Strata/commit/7f97c35a
+- https://github.com/Niko1221/Strata/commit/5bc7f8ca
+- https://github.com/Niko1221/Strata/commit/89799596
+
+https://github.com/Niko1221/Strata/tree/46c152a1
+
+Copyright (c) 2026 Niko1221 and the Strata contributors.
+SPDX-License-Identifier: MIT
+The complete copyright, permission and warranty notice is retained in
+`internal/model/STRATA_LICENSE.txt`.
+
+Design reference only; no Strata code blocks are copied. The upstream witness
+is 1.4-2.6x real-text decode with batched verification; Fak's native host-f32
+reference plus the per-load retention of the pinned 3.8 GiB BF16 sidecar (one
+authenticated open shared by every request of the load, released at load
+retirement) is software-verified only `[SW-VERIFIED]`. The hardware ABBA
+remains owed under the paired-serve fleet study; no measured speedup is
+claimed here. Drafter-artifact availability is fail-closed: an unavailable
+sidecar surfaces the typed refusal instead of a silent host fallback.
 ## Strata / Project Maya Engram CLOCK replacement
 
 `internal/model/v41_cache.go` adapts `EgRowCache`'s hand/reference-bit replacement
@@ -1676,3 +1958,517 @@ SOFTWARE.
   construction-time opt-in, closed builtin/profile admission, finite resource
   limits, redacted refusal, and conservative special-token provenance.
   No Python runtime, model, tokenizer, executable or network behavior is imported.
+
+## TensorFold cluster admission planning
+
+`cmd/fak/cluster.go` (the `fak cluster info --plan` admission planner: `fitsAt`,
+`maxStreams`, `maxContext`, `chunkRows`, `planAdmission`) adapts the converged-round
+admission math from `zig/src/cluster/admission.zig` in TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209` (Apache-2.0):
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/cluster/admission.zig
+
+The per-rank needs-plus-KV-plus-margin budget check against each rank's GPU limit,
+the monotone stream/context binary searches, and the 16-step prompt-chunk sizing
+within (1+share) of decode-only round time are re-expressed in idiomatic Go over
+fak's own TPPlan tiling and a declared round-cost model. No upstream Zig code
+blocks, cost model, traffic link or round composition are copied; the planning
+surface keeps the upstream honesty line that admission planning never proves
+physical serving.
+
+The pinned repository's Apache-2.0 LICENSE is reproduced in the existing TensorFold
+license section of this file and also applies here.
+
+## TensorFold NVFP4 host reference interpretation
+
+`internal/compute/nvfp4.go` (`DecodeNVFP4Stacks`, stacked multi-expert input to the
+NVFP4 CPU reference) adapts the host dequantization semantics from
+`zig/src/core/quant/nvfp4.zig` in TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209` (Apache-2.0):
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/quant/nvfp4.zig
+
+Per-expert global scales follow the Qwen4 device-weight loading in
+`zig/src/families/qwen4/device_weights.zig` at the same revision:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/families/qwen4/device_weights.zig
+
+Contiguous expert stacks, e2m1 low-nibble-first packing, one e4m3 scale per 16
+inputs, per-stack global scaling, exact subnormal-scale decoding, and
+shape/stack mismatch refusals are re-expressed in idiomatic Go over fak's
+existing E2M1/E4M3 tables. No upstream Zig code blocks are copied.
+
+The pinned repository's Apache-2.0 LICENSE is reproduced in the existing TensorFold
+license section of this file and also applies here.
+
+## TensorFold shared-attention geometry contract
+
+`internal/model/shared_attention_geometry.go` adapts the shared-attention
+geometry contract from `zig/src/core/shared_attention.zig:17` in TensorFold at
+revision `9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/shared_attention.zig
+
+The adapted contract: query heads divide KV heads (GQA) with head dim bounded
+at 256 and 32-aligned; the rotary range fits the head and is even; the byte
+mask[row*stride+key] alone decides which keys each row sees; and cache appends
+go to unique physical slots on pairwise-disjoint K/V/cache stores. `ForwardTP`
+in `internal/model/tensor_parallel_forward.go` consults the shape half before
+native dispatch when `TPConfig.SharedAttentionGeometry` is set, and
+`internal/model/shared_attention_geometry_test.go` pins the sentinel refusals.
+
+Changed for Fak: idiomatic Go over fak's float32 tensors with sentinel errors
+(`ErrSharedAttentionShape`, `ErrSharedAttentionView`,
+`ErrSharedAttentionAppend*`, `ErrSharedAttentionAliased`, ...) instead of Zig
+error sets; buffer identity by opaque store ID with fail-closed empty-ID
+aliasing; and an opt-in ForwardTP gate so the CPU reference path keeps serving
+toy fixture geometries the kernel contract does not admit. No Zig runtime,
+kernel, or model code is included.
+
+The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
+"TensorFold benchmark evidence" section above (same pinned repository and
+revision); they apply to this adaptation as well.
+
+## TensorFold external drafter attachment (per-stream DFlash2 trees)
+
+`internal/agent/inkernel_dflash2.go` (`AttachDFlash2Tree` and the
+`dflash2TreeStream` owner) adapts the external-drafter attachment idea from
+`zig/src/core/lanes/drafted.zig:35` in TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/lanes/drafted.zig
+plus the drafter initialization at
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/native/cuda_drafted.zig
+and the operator-facing `--drafter` documentation at
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/README.md
+
+The adapted contract: the target is told the drafter's feature taps before any
+forward; kept target rows are absorbed into drafter state; the drafter stream
+lifecycle is owned end to end; and offered chain/tree nodes are bounded by the
+target width, with unsupported tree requests refusing (the upstream
+TreesNotBuilt/NotDrafting equivalents). Per-stream DFlash2 trees do not
+constitute a generic ability to load arbitrary neural drafters.
+
+Changed for Fak: idiomatic Go re-expression over the existing `EnableDFlash2`
+serving-domain seam instead of Zig stream wrappers, the authenticated target's
+verification panel as the width bound, and closed sentinel errors
+(`ErrDFlash2TreesNotBuilt`, `ErrDFlash2NotDrafting`,
+`ErrDFlash2TreeWidthExceeded`) matched with `errors.Is`. No upstream source
+code is copied; the adaptation is witnessed by `TestDFlash2TreeWidthBoundRefusal`
+in `internal/agent/dflash2_tree_test.go`.
+
+The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
+"TensorFold benchmark evidence" section above (same pinned repository and
+revision); they apply to this adaptation as well.
+
+## TensorFold durable write admission budget
+
+`internal/agent/inkernel_warm_disk.go` adapts the staging-admission
+reserve/backoff idea from `zig/src/core/lanes/learned_disk.zig:61`
+(`Admission.reserve`) in TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209`, with the caller pattern from
+`zig/src/sessions/jobs.zig:113` and the byte-permit documentation at
+`docs/api.md:647`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/lanes/learned_disk.zig
+
+The adapted contract: durable warm-disk writes reserve their byte budget
+before staging against a pool sized from the store cap and the volume's
+measured free bytes; unknown free space or an unaffordable request refuses
+fail-closed; each refusal arms an exponential backoff (1 s base, doubled per
+failure, capped at 60 s after 7 failures); finish releases the reservation, a
+landed write clears the ladder, unaffordable writes are skipped rather than
+faulted, incomplete records stay unpublishable through the store's existing
+temp+fsync+rename commit, and in-flight reservations drain within a shutdown
+deadline. `internal/agent/warm_disk_budget_test.go` pins the sentinel
+refusals and the backoff ladder.
+
+Changed for Fak: idiomatic Go over fak's existing warm-disk seam
+(`beginWarmDiskCapture` / `persistWarmPrefixDisk`) with a per-store-directory
+permit pool and sentinel errors instead of Zig error sets; the pool is measured
+from fak's own store byte cap and `compute.DiskInfo` free-space probe. No Zig
+runtime, kernel, or model code is included.
+
+The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
+"TensorFold benchmark evidence" section above (same pinned repository and
+revision); they apply to this adaptation as well.
+
+## TensorFold eviction-spill (l3kv Spiller)
+
+Adapted from ashhart/TensorFold @9e8c368b0b4c2c7892a0c9f0f302d7c164016209 (Apache-2.0):
+the eviction-spill contract — an optional spill copy of durable KV state before
+releasing RAM, reusing the durable restore path, capped on disk/staging/time;
+checkpoint slots bound retained RAM states.
+
+Source files: zig/src/native/disk_spill.zig (spill record + caps),
+zig/src/server/cli.zig:518-523 (--spill-gib/--checkpoint-slots flags),
+zig/src/core/prompt_cache.zig:191 (spill-before-release call site).
+
+What was adapted into internal/l3kv:
+- Spiller (spill.go): owned-copy staging through Store.Put under the span's
+  residency digest, with per-entry and total-disk byte caps and a bounded Put
+  window; the checkpoint-slot knob is carried/validated here, enforced on the
+  retaining side.
+- AsyncStore seam (async_job.go): EnableSpill/Spill/SpillStats mirror the
+  Prefetch read-side seam.
+
+No Zig runtime, kernel, or model code is included.
+
+The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
+"TensorFold benchmark evidence" section above (same pinned repository and
+revision); they apply to this adaptation as well.
+
+## TensorFold bounded top-k selection
+
+`internal/agent/inkernel_sampling.go` (`topKRankOrder`, shared sweep
+`topKSelectHeap`) adapts the bounded top-k selection contract from
+`zig/src/core/lanes/sampling_selection.zig` (line 7, with `sampling.zig` lines
+116/134) in ashhart/TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209` (Apache-2.0):
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/lanes/sampling_selection.zig
+
+Greedy best-by-value-descending-then-id-ascending picks, null-on-any-non-finite
+row, and allocation of only the k selected indices are re-expressed in idiomatic
+Go over fak's existing samplerWorkspace hot path: the non-finite rejection maps
+to the package's ErrNonFiniteLogits sentinel, and the bounded min-heap sweep is
+shared with the pre-existing topKTruncate seam so no parallel selection path is
+introduced. No upstream Zig code blocks are copied.
+
+The pinned repository's Apache-2.0 LICENSE is reproduced in the existing TensorFold
+license section of this file and also applies here.
+
+## TensorFold idle-engine park (agent IdleEngineManager)
+
+Adapted from ashhart/TensorFold @9e8c368b0b4c2c7892a0c9f0f302d7c164016209 (Apache-2.0):
+the idle-unload lifecycle — an opt-in timer parks a loaded engine only at zero
+active requests; one lifetime mutex guards the
+resident/unloading/unloaded/loading/stopped transitions and engine reads;
+concurrent wakes coalesce into one reload; failed opens leave the server
+parked and retryable; multi-rank GLM CUDA unload is refused because closing
+the primary rank ends the followers.
+
+Source files: zig/src/server/idle_unload.zig:27 (Manager),
+zig/src/server/idle_unload_policy.zig:4 (refusal policy).
+
+What was adapted into internal/agent (idle_engine_park.go):
+- IdleEngineManager: the five-state park/reload lifecycle with caller-driven
+  Tick, Wake/Release active accounting, shared-reload coalescing, and terminal
+  Stop, re-expressed in idiomatic Go around sync.Mutex/sync.Cond.
+- IdleUnloadRefused: the closed refusal policy (multi-rank GLM on CUDA).
+
+No Zig runtime, kernel, or model code is included.
+
+The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
+"TensorFold benchmark evidence" section above (same pinned repository and
+revision); they apply to this adaptation as well.
+
+## TensorFold integrated MTP head zero-grant absorb
+
+`internal/model/mtp_transaction.go` (the MTP head's per-stream state ownership and
+zero-grant absorb: `MTPStreamState`, `MTPAbsorbItem`, `Active`, `Absorb`, and the
+per-stream seeding in `NewMTPTransactionWithTarget`) adapts the integrated MTP head's
+per-stream context ownership from line 117 (`Mtp.init`, the per-stream `Ctx` ring/
+last/held-draft buffers) of `zig/src/families/qwen3_5/cuda_mtp.zig` and the zero-grant
+filter from `zig/src/families/qwen3_5/cuda_mtp_budget.zig` (`active` routing
+`propose=false` items to `absorbOne`) in TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209` (Apache-2.0):
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/families/qwen3_5/cuda_mtp.zig
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/families/qwen3_5/cuda_mtp_budget.zig
+
+Head-owned per-stream recurrent/ring buffers, committed-row absorption without
+scoring, and the granted-versus-zero-grant batch split are re-expressed in idiomatic
+Go over fak's existing MTP transaction seam. No upstream Zig code blocks, CUDA
+kernels, or weight layouts are copied.
+
+The pinned repository's Apache-2.0 LICENSE is reproduced in the existing TensorFold
+license section of this file and also applies here.
+
+## TensorFold grammar/completion-token budget
+
+`internal/agent/inkernel_grammar_budget.go` (the guided-decode `grammar_budget`
+side-band, its arm-time refusal ladder, and the bounded completion-distance
+probe) adapts the `grammar_budget` feature flag from
+`zig/src/server/server.zig:339` (`budgetStructure`) and
+`zig/src/core/lanes/grammar.zig:234` (`Constraint.Budget`) in TensorFold at
+revision `9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/server/server.zig
+
+The adapted contract: an off-unless-requested boolean that, when armed, keeps
+every grammar mask clearing the bits of the tokens after which no reply
+completes within the remaining draws of the request's token ceiling; refusals
+for a non-boolean value, an uncompiled grammar, a missing budget ABI, and
+rules not coverable by a bound; and a no-op when the request carries no
+grammar. The budget reasons over the same draw space as the decode loop, so
+reasoning tokens count against it.
+
+Changed for Fak: idiomatic Go over fak's `model.LogitMask` seam in
+`internal/agent` instead of xgrammar matcher tables, a node-capped depth-first
+completion-distance probe with fail-open degradation instead of precomputed
+state tables, and sentinel errors wired into the guided-decode refusal
+boundary. No upstream Zig code blocks are copied; the adaptation is witnessed
+by `TestGrammarBudgetWithinMaxTokens` and
+`TestGrammarBudgetArmedCompletion` in
+`internal/agent/inkernel_grammar_budget_test.go`.
+
+The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
+"TensorFold benchmark evidence" section above (same pinned repository and
+revision); they apply to this adaptation as well.
+
+## TensorFold strict-tool grammar (function.strict mark)
+
+`internal/agent/chat.go` (`ToolDefFunction.Strict`, its bool-only wire
+decode, and `AutoWantsGrammar`) adapts the strict-tool grammar from
+`zig/src/server/tool_grammar.zig:78` in TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/server/tool_grammar.zig
+
+The adapted contract: a JSON boolean `function.strict` (or the equivalent
+bare-tool strict mark) is the only shape that marks a tool; `false` and
+non-boolean shapes such as the string `"true"` decode without marking. Marked
+tools keep their parameter schema under `tool_choice: auto`, and an auto reply
+wants structured-grammar constraint only when at least one advertised tool
+carries the `strict: true` mark — mixed catalogs are decided by their marked
+tools, and an empty catalog wants none. Where structure support is missing,
+auto stays unconstrained.
+
+Changed for Fak: idiomatic Go on the existing `ToolDef` /
+`openAICompatibleTools` normalization seam in `internal/agent` instead of
+Zig's server-side tool-grammar admission; the mark rides request
+normalization byte-exact and is reported through `AutoWantsGrammar`. No
+upstream Zig code blocks are copied; the adaptation is witnessed by
+`TestToolDefStrictPreservedAndAutoWantsGrammar` in
+`internal/agent/chat_tool_strict_test.go`.
+
+The upstream NOTICE and full Apache License, Version 2.0 are reproduced in the
+"TensorFold benchmark evidence" section above (same pinned repository and
+revision); they apply to this adaptation as well.
+
+## Splash bump-topology KV eviction
+
+`internal/kvmmu/eviction.go` (`RecencyClock`, `RecencyNode`, `RecencyOrder`,
+`Evictor`) adapts the bump-topology KV-eviction policy from incoai/splash at
+revision `6c6002d42aabdddb9e31b96c9bba9041e2fba29f`:
+
+- `runtime/engine/KvCache.hpp:143` (resident-leaf eligibility and the
+  `evictionCandidate` continuation scan)
+- `runtime/engine/KvCache.cpp` (`reindex`, `inherit`, retain/release, and the
+  drop/adopt-page tier transitions)
+- `runtime/engine/RecencyOrder.hpp:13` (intrusive last-used order)
+- `runtime/engine/CacheRecency.hpp:6` (shared monotonic access clock)
+
+https://github.com/incoai/splash/blob/6c6002d42aabdddb9e31b96c9bba9041e2fba29f/runtime/engine/KvCache.hpp
+
+The adapted contract: only resident leaves (no resident children, no active
+users, no in-flight transfer) are evictable; they are kept in an intrusive
+last-used order whose tree nodes are allocated once, when the owning block is
+published, so linking and unlinking under memory pressure never allocate.
+When a leaf leaves the resident tier, its parent inherits the leaf's recency
+stamp (the bump): a parent that becomes a leaf was used no later than its
+child and must not jump ahead of colder chains. `EvictionCandidate(after)`
+returns the oldest unused resident leaf and continues a scan from a previous
+candidate without a lookup.
+
+Changed for Fak: idiomatic Go re-expression - a deterministic treap keyed by
+(last-used, id) replaces the C++ node-handle set, int64 block ids instead of
+uint64_t, panics instead of std::terminate/exceptions, a sync.Mutex guarding
+the topology (upstream is single-threaded), and the disk-copy tier reduced to
+a resident/disk-only bit (no disk slots, no poisoned-subtree flow; those
+remain separate borrow rows). No upstream source code is copied; the
+adaptation is witnessed by the tests in internal/kvmmu/eviction_test.go,
+including allocation-free link/unlink witnesses.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this adaptation except in compliance with the License. A copy is available at
+https://www.apache.org/licenses/LICENSE-2.0. Unless required by applicable law or
+agreed to in writing, software distributed under the License is distributed on
+an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+or implied. See the License for the specific language governing permissions and
+limitations under the License.
+
+## opencode ordered wildcard permission ruleset
+
+`pkg/policy/perm.go` (`PermissionRuleset`, `PermissionRule`, `Evaluate`,
+`Merge`) adapts the ordered wildcard tool-permission ruleset evaluation from
+anomalyco/opencode at revision
+`4eb29a64f0054672950acf789f2b09487ebfbb20`:
+https://github.com/anomalyco/opencode/blob/4eb29a64f0054672950acf789f2b09487ebfbb20/packages/core/src/permission.ts#L76
+
+The adapted contract: an ordered list of rules where each rule's pattern is a
+wildcard over the tool name and/or the call target; evaluation walks the list
+front to back and the LAST matching rule decides (upstream `findLast`); when
+no rule matches, the caller keeps its own default instead of receiving a
+synthesized effect.
+
+Changed for Fak: the upstream two-dimensional `{action, resource, effect}`
+rule is flattened into one `"tool:target"` pattern per rule (a bare pattern
+constrains the tool name only; the first `:` splits the target glob),
+matching uses Go `path.Match`-style globs instead of upstream
+`Wildcard.match`, the effect is a free-form action string instead of the
+closed allow/deny/ask set, and a non-matching lookup returns `matched=false`
+instead of the upstream synthesized `ask` fallback. No upstream persistence,
+session store, event bus or adjudication wiring is included; the evaluator
+is pure and unwired. The adaptation is witnessed by
+`TestPermissionRulesetWildcardLastMatchWins` in `pkg/policy/perm_test.go`.
+
+MIT License
+
+Copyright (c) 2025 opencode
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+## TensorFold HTTP inflight request-count admission
+
+`internal/gateway/inflight_admission.go` (`InflightGate`, `InflightLease`,
+`SetInflightGate` / `LiveInflightGate`) and its served-path wiring in
+`internal/gateway/admission_server.go` (`beginServedAdmission`) adapt the
+opt-in in-flight request-count admission from TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/server/request_admission.zig#L100
+
+The adapted contract: a request is admitted only within a global `max_inflight`
+and per-key caps (zero limits count nothing), a bounded table of distinct
+principals (default 128 slots) refuses a new principal beyond the bound with
+its own class, refusals carry closed classes (global / key / capacity) instead
+of free text, and an admitted hold is a lease released exactly once at the end
+of the reply; a refused acquire holds nothing.
+
+Changed for Fak: idiomatic Go re-expression over fak's existing token-admission
+seam — each dimension rides a `TokenRateGate` carrier whose reserve-on-admit /
+settle-on-truth machinery already decrements on release, sentinel errors
+(`ErrInflightGlobal`, `ErrInflightKey`, `ErrInflightCapacity` under one parent
+`ErrInflight`) instead of Zig error unions, and a live gate registry consulted
+first by `beginServedAdmission`, ahead of the scheduler slot. The per-second
+rate bucket (upstream's fourth refusal class) is a separate borrow-port
+part-out and is not included. No upstream source code is copied; the adaptation
+is witnessed by `TestInflightAdmissionLeasesRefusals` in
+`internal/gateway/inflight_admission_test.go`. The upstream Apache-2.0 license
+is reproduced in the TensorFold benchmark evidence section above.
+
+## TensorFold per-key API-key auth scopes and route grants
+
+`internal/gateway/key_scope.go` (`keyScopes`, `parseKeyScopeLabel`,
+`scopedKeyFile`) and the scoped entry arm of `internal/gateway/keyset.go`
+(`keysetBinding`, `newScopedKeyset`, `keyset.lookupScoped`) adapt the per-key
+scope authentication from TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/server/auth.zig
+plus the exact method/route grant matrix at
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/server/auth_scope.zig
+
+The adapted contract: a verified key carries its own copy of its label and
+scope set, so an in-flight request keeps the scopes it was accepted with if
+the key file changes while it runs; one key digest may not carry two scope
+sets, so a load in which a restricted line is shadowed by a full copy of the
+same key is refused wholesale; an invalid reload closes every file key
+fail-closed until a valid load succeeds again; and route grants are exact
+method+route matches against a closed table — never suffix grants — with
+admin passing everything, inference covering POST inference routes and GET
+model listing, and read covering observation-plane GETs.
+
+Changed for Fak: idiomatic Go re-expression over fak's existing SHA-256
+digest keyset seam (constant-time scan discipline preserved), sentinel errors
+(`ErrInvalidKeyScopeLabel`, `ErrInvalidKeyScopes`, `ErrConflictingKeyScopes`,
+`ErrEmptyKeyFile`) instead of Zig error unions, fak's closed route tables
+instead of upstream's, and no key material held raw or logged — refusals name
+lines and labels only. No upstream source code is copied; the adaptation is
+witnessed by `TestKeysetScopeGrantsExactAndReloadCloses` in
+`internal/gateway/key_scope_test.go`. The upstream Apache-2.0 license is
+reproduced in the TensorFold benchmark evidence section above.
+
+## TensorFold HTTP request-rate token-bucket admission
+
+`internal/gateway/request_rate_bucket.go` (`RateBucketPolicy`,
+`RequestRateGate`, `RateLease`, `SetRequestRateGate` /
+`LiveRequestRateGate`) and its served-path wiring in
+`internal/gateway/admission_server.go` (`beginServedAdmission`) adapt the
+per-principal request-rate token buckets from TensorFold at revision
+`9e8c368b0b4c2c7892a0c9f0f302d7c164016209`:
+https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/server/request_admission.zig#L111
+
+The adapted contract: credit is integer ns-tokens on a monotonic clock (one
+request is one second's worth of credit), capacity equals the burst — the
+rate unless an explicit request_burst is supplied — and a fresh bucket starts
+full; replenish adds elapsed × rate ns-tokens capped at capacity so credit
+never exceeds capacity; credit below the requested tokens refuses with the
+rate class and a whole-second retry-after hint (>= 1) exact against the gate's
+clock; a bounded table of distinct principals (default 128 slots) refuses a
+new principal beyond the bound with its own class until an idle-full bucket
+can be swept; and a rate <= 0 disables the gate entirely (admit freely, no
+credit accounting).
+
+Changed for Fak: idiomatic Go re-expression over fak's existing
+token-admission seam — each bucket's liveness rides an inert `TokenRateGate`
+carrier whose live-reservation count lets the idle sweep reclaim seats without
+forgiving budget, sentinel errors (`ErrRequestRateLimited`,
+`ErrRequestRateCapacity` under one parent `ErrRequestRate`) instead of Zig
+error unions, and a live gate registry consulted first by
+`beginServedAdmission`, ahead of the request-count inflight gate: the
+one-token debit stands once admitted and a later-stage refusal cancels it
+(the provider was never called), with the seat riding the request's single
+lease-release path through the `TokenReservation` linked chain. No upstream
+source code is copied; the adaptation is witnessed by
+`TestRequestRateBucketRefusals` in
+`internal/gateway/request_rate_bucket_test.go`. The upstream Apache-2.0
+license is reproduced in the TensorFold benchmark evidence section above.
+
+
+## antirez/ds4 V4.1 DSpark support-GGUF artifact contract admission
+
+`internal/model/v41_dspark.go` (`DeepSeekV41DSparkConfig.GGUF`,
+`RefuseDeepSeekV41DSpark`) and its test
+`internal/model/v41_dspark_gguf_contract_test.go` adapt the support-GGUF
+artifact contract for arch `deepseek41-dspark` from antirez/ds4 at revision
+`b4e3faf5262b21db94ec309cf321640ff1eed460`:
+https://github.com/antirez/ds4/blob/b4e3faf5262b21db94ec309cf321640ff1eed460/gguf-tools/deepseek41_dspark.py
+(`metadata()` at lines 166-182) plus the drafter allocation guards at
+https://github.com/antirez/ds4/blob/b4e3faf5262b21db94ec309cf321640ff1eed460/ds4_deepseek41_dspark.h
+(lines 72-74).
+
+The adapted contract: when the DSpark decoder is enabled on a V4.1 config that
+carries a support-GGUF artifact declaration, admission enforces the pinned
+key set (`dspark.target_architecture`, `dspark.source_config`,
+`dspark.weight_encoding`, `dspark.target_layer_ids`, and the u32 scalars
+`block_size` / `markov_rank` / `noise_token_id` / `n_routed_experts` /
+`num_experts_per_tok`), strict dimension validation against the embedded
+source config (`model_type == deepseek_v41`, 32x32 FP8 weight blocks, three
+distinct in-range target layer taps, expert-per-token bounds, draft window
+within the sliding window), and unclaimed-tensor refusal against the checked
+three-stage inventory. A violated contract is refused with the typed
+`ErrV41DSparkArtifact` sentinel; a valid contract still refuses execution with
+`ErrV41DSparkUnsupported` - header validity never enables speculative
+execution. No upstream source code is copied; the adaptation is witnessed by
+`TestDSparkGGUFContractAdmission` in
+`internal/model/v41_dspark_gguf_contract_test.go`. The ds4 MIT copyright and
+permission notice is reproduced in the "antirez/ds4 (DwarfStar) V4 Flash CUDA
+kernels" section above.
+
+## TensorFold cost-modeled MTP draft depth (governor pricing)
+
+- Upstream: ashhart/TensorFold, commit
+  `9e8c368b0b4c2c7892a0c9f0f302d7c164016209` (Apache-2.0), source
+  `zig/src/core/draft_depth.zig` (`Costs`, `DepthRule`):
+  https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/draft_depth.zig
+- Adaptation: `internal/model/qwen38_mtp_adaptive.go` attaches the
+  `DraftDepthRule` from `internal/model/draft_depth_cost.go` to
+  `Qwen38MTPAdaptiveDepthGovernor` via `SetCostRule`/`CostRule` (nil detaches),
+  prices draft rows through `ModeledKeep`/`ModeledMore` (fail-closed while no
+  rule is attached), and folds every observed step into the rule's token/ms
+  EMAs from the cost model - a drafting step prices proposed+1 verify rows
+  plus one chain level, a target-only step one row plus one level; never wall
+  clock, so split ranks price alike. No Zig code blocks are copied; the
+  algorithm, defaults and test vectors are adapted.
+- License: Apache License 2.0, already reproduced above under "TensorFold
+  benchmark evidence".
+- Witness: `TestQwen38MTP_Adaptive_ModeledCostPricing` in
+  `internal/model/qwen38_mtp_adaptive_test.go` pins the modeled keep/more
+  pricing and the per-step EMA fold (software evidence only).

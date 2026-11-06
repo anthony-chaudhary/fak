@@ -7,10 +7,10 @@ import (
 	"syscall"
 )
 
-// ConfigureDurableChild configures cmd so the child outlives its launcher. Off
-// Windows the POSIX setsid already detaches the child from the launcher's
-// controlling terminal and session, so this is the same configuration as
-// ConfigureDetached and carries no per-child console cost (fak#13468).
+// ConfigureDurableChild configures cmd so the child outlives its launcher.
+// POSIX setsid already detaches the child from the launcher's controlling
+// terminal and session, so this is the same configuration as ConfigureDetached
+// and carries no per-child console cost (fak#13468).
 func ConfigureDurableChild(cmd *exec.Cmd) {
 	ConfigureDetached(cmd)
 }

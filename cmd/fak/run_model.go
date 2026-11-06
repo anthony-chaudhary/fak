@@ -88,7 +88,7 @@ func newRunFlagSet(name string, errorHandling flag.ErrorHandling) (*flag.FlagSet
 	flags := &runFlags{}
 
 	// Chat / model controls
-	flags.backendName = fs.String("backend", "", "compute backend for decode: --backend overrides FAK_BACKEND; use 'auto', 'cpu', or a registered name. Omitted/auto selects usable Vulkan on Linux/Windows, preserves Metal auto-selection on Darwin, and otherwise uses CPU. Vulkan requires -tags vulkan plus FAK_VULKAN_SPIRV; an unavailable named backend fails loud.")
+	flags.backendName = fs.String("backend", "", "compute backend for decode: --backend overrides FAK_BACKEND; use 'auto', 'cpu', or a registered name. Omitted/auto selects CUDA on Linux/Windows when this build's cubins/PTX cover the detected device arch, else usable Vulkan, preserves Metal auto-selection on Darwin, and otherwise uses CPU. Vulkan requires -tags vulkan plus FAK_VULKAN_SPIRV; an unavailable named backend fails loud.")
 	flags.metal = fs.Bool("metal", false, "run the in-kernel chat through the Apple-Silicon Metal GPU forward (auto-selected on darwin/arm64 with a usable Metal device; mutually exclusive with --backend)")
 	flags.nativeFlags = registerRunNativeControlFlags(fs)
 	flags.system = fs.String("system", "", "optional system prompt prepended to the conversation")

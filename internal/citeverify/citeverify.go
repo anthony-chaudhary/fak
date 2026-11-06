@@ -95,6 +95,9 @@ func readCitation(root, cited string, lineNo int) (string, Status) {
 	for n := 1; ; n++ {
 		line, err := reader.ReadString('\n')
 		if n == lineNo {
+			if errors.Is(err, io.EOF) && line == "" {
+				return "", Contradicts
+			}
 			if errors.Is(err, io.EOF) || err == nil {
 				return strings.TrimRight(line, "\r\n"), Supports
 			}

@@ -139,10 +139,11 @@ type memberWorker struct {
 	spec               WorkerSpec
 	health             WorkerHealth
 	draining           bool
-	okStreak           int // consecutive successful probes (drives the healthy hysteresis)
-	failStreak         int // consecutive failed probes (drives the unhealthy hysteresis)
-	inflight           int // in-flight requests acquired against this worker
-	bookedOutputBlocks int // anticipated decode blocks owned by those requests
+	okStreak           int                                  // consecutive successful probes (drives the healthy hysteresis)
+	failStreak         int                                  // consecutive failed probes (drives the unhealthy hysteresis)
+	inflight           int                                  // in-flight requests acquired against this worker
+	bookedOutputBlocks int                                  // anticipated decode blocks owned by those requests
+	observedPrefills   map[*observedPrefillAttempt]struct{} // active measured attempts, guarded by FleetMembership.mu
 }
 
 // admissible reports whether a worker may receive NEW work: healthy and not
@@ -210,7 +211,8 @@ type FleetMembership struct {
 // the membership lock, so there is never a selected-but-unbooked fallback. Release
 // is idempotent and never lets occupancy become negative.
 type fleetReservation struct {
-	worker             *memberWorker // captured incarnation; never charge a replacement
+	worker             *memberWorker         // captured incarnation; never charge a replacement
+	prefillEpoch       *observedPrefillEpoch // unique physical reservation placement; fences ABA
 	mu                 sync.Mutex
 	fleet              *FleetMembership
 	workerID           string
@@ -357,6 +359,11 @@ type WorkerStatus struct {
 	Draining           bool
 	Inflight           int
 	BookedOutputBlocks int
+	// ObservedPrefill is partial, selected-attempt telemetry, NOT total queued
+	// work or candidate cache credit. Unsupported and pre-seam work is omitted.
+	ObservedPrefillTokens   int
+	ObservedPrefillAttempts int
+	ObservedPrefillOverflow bool
 }
 
 // Snapshot returns the current per-worker status in registration order.
@@ -366,7 +373,7 @@ func (m *FleetMembership) Snapshot() []WorkerStatus {
 	out := make([]WorkerStatus, 0, len(m.order))
 	for _, id := range m.order {
 		if w := m.workers[id]; w != nil {
-			out = append(out, WorkerStatus{Incarnation: w.incarnation, Spec: w.spec, Health: w.health, Draining: w.draining, Inflight: w.inflight, BookedOutputBlocks: w.bookedOutputBlocks})
+			out = append(out, w.statusWithObservedPrefillLocked())
 		}
 	}
 	return out
@@ -389,6 +396,7 @@ func (m *FleetMembership) reserveForModel(model string, engine EngineKind, allow
 	}
 	return &fleetReservation{
 		fleet:              m,
+		prefillEpoch:       &observedPrefillEpoch{},
 		worker:             m.workers[decision.workerID],
 		workerID:           decision.workerID,
 		engine:             m.workers[decision.workerID].spec.Engine,
@@ -420,14 +428,7 @@ func (m *FleetMembership) reserveForModelLocked(model string, engine EngineKind,
 		if engine != "" && w.spec.Engine != engine {
 			continue
 		}
-		statuses = append(statuses, WorkerStatus{
-			Incarnation:        w.incarnation,
-			Spec:               w.spec,
-			Health:             w.health,
-			Draining:           w.draining,
-			Inflight:           w.inflight,
-			BookedOutputBlocks: w.bookedOutputBlocks,
-		})
+		statuses = append(statuses, w.statusWithObservedPrefillLocked())
 		candidates[id] = struct{}{}
 	}
 	if len(statuses) == 0 {
@@ -498,6 +499,8 @@ func (r *fleetReservation) Retarget(model string, allowed, skip map[string]struc
 	defer m.mu.Unlock()
 
 	failed := r.workerID
+	// Fence all callbacks bound to the previous placement, including A-B-A.
+	r.prefillEpoch = nil
 	if m.workers[failed] == r.worker {
 		m.releaseReservationLocked(failed, r.bookedOutputBlocks)
 		m.markDispatchFailureLocked(failed)
@@ -510,6 +513,7 @@ func (r *fleetReservation) Retarget(model string, allowed, skip map[string]struc
 		return "", err
 	}
 	r.worker = m.workers[decision.workerID]
+	r.prefillEpoch = &observedPrefillEpoch{}
 	r.workerID = decision.workerID
 	r.bookedOutputBlocks = decision.bookedOutputBlocks
 	return decision.workerID, nil
@@ -530,6 +534,7 @@ func (r *fleetReservation) Release() {
 		r.fleet.releaseReservationLocked(r.workerID, r.bookedOutputBlocks)
 	}
 	r.fleet.mu.Unlock()
+	r.prefillEpoch = nil
 	r.workerID = ""
 	r.released = true
 }

@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "newsharedtokenpoolwithcapacity",
+      "canonical": "Explicit logical token-pool capacity",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "NewSharedTokenPoolWithCapacity constructs a device-neutral logical token and byte admission ledger from positive, finite, representable capacity and geometry, without Halo defaults or environment values.",
+      "distinction": "Unlike PagedKVPool, this constructor admits logical token reservations only; it allocates no physical KV blocks and supplies no device-memory availability evidence. Existing Halo constructors retain their permissive defaults.",
+      "distinct_from": [
+        "x2-pool-pagedkvpool"
+      ],
+      "aliases": [],
+      "grounding": "NewSharedTokenPoolWithCapacity",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
