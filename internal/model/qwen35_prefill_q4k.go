@@ -48,11 +48,12 @@ import (
 // covers. The recurrence is the same f32 math fed by those projections. Pinned by
 // TestPrefillQwen35HybridQ4KMatchesTokenLoop and the Metal Q4K/Q8 gates.
 
-// q4kQwen35HybridPrefillOK gates the batched resident-Q4_K hybrid prefill. It is the same
-// architecture gate the Q8 hybrid path uses (q8Qwen35HybridPrefillOK) — the resident-Q4_K
-// path covers the identical Qwen3.5/3.6 hybrid family; only the projection kernel differs.
+// q4kQwen35HybridPrefillOK gates the batched resident-Q4_K hybrid prefill. It is the
+// dense-only hybrid gate (qwen35HybridDensePrefillOK): the Q8 hybrid path's architecture
+// gate minus MoE, because this lane's MLP is a batched dense GEMM with no per-row
+// routed-FFN seam yet. Only the projection kernel differs from the Q8 path.
 func q4kQwen35HybridPrefillOK(cfg Config, promptLen int) bool {
-	return q8Qwen35HybridPrefillOK(cfg, promptLen)
+	return qwen35HybridDensePrefillOK(cfg, promptLen)
 }
 
 // q4kQwen35HybridPrefillAtPositionOK preserves the established fresh-prefill

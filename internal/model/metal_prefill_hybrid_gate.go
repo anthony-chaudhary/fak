@@ -16,9 +16,9 @@ package model
 // core prefillQwen35HybridViaMM (metal_prefill_hybrid_core.go) is exactly that body; the Metal
 // twin feeds it a GPU f16 GEMM (#71).
 
-// metalQwen35HybridPrefillOK gates the Metal hybrid prefill. It is the SAME architecture gate the
-// Q8 and resident-Q4_K hybrid paths use (q8Qwen35HybridPrefillOK) — the Metal path covers the
-// identical Qwen3.5/3.6 hybrid family; only the projection backend differs.
+// metalQwen35HybridPrefillOK gates the Metal hybrid prefill. It is the dense-only hybrid gate
+// the resident-Q4_K path uses (qwen35HybridDensePrefillOK): the Q8 architecture gate minus MoE,
+// since the Metal twin batches the MLP as one dense GEMM. Only the projection backend differs.
 func metalQwen35HybridPrefillOK(cfg Config, promptLen int) bool {
-	return q8Qwen35HybridPrefillOK(cfg, promptLen)
+	return qwen35HybridDensePrefillOK(cfg, promptLen)
 }
