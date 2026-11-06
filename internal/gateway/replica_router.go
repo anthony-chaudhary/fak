@@ -339,7 +339,7 @@ func (r *ReplicaDispatch) completeReserved(ctx context.Context, route reservedPl
 			return nil, err
 		}
 		tried[route.replica.Name] = struct{}{}
-		retargetErr := r.retargetRoute(&route, tried, opts)
+		retargetErr := r.retargetRoute(&route, tried, opts, err)
 		if retargetErr != nil {
 			if errors.Is(retargetErr, ErrReplicaDispatchEmpty) {
 				return nil, err
@@ -384,7 +384,7 @@ func (r *ReplicaDispatch) hasUntriedReplica(route reservedPlannerReplica, tried 
 	return false
 }
 
-func (r *ReplicaDispatch) retargetRoute(route *reservedPlannerReplica, tried map[string]struct{}, opts []agent.SampleOpt) error {
+func (r *ReplicaDispatch) retargetRoute(route *reservedPlannerReplica, tried map[string]struct{}, opts []agent.SampleOpt, cause error) error {
 	if route.reservation == nil {
 		// Static decode bookings must leave the failed replica before a fresh
 		// booking is made. The caller's deferred finish sees the replacement.
@@ -395,7 +395,7 @@ func (r *ReplicaDispatch) retargetRoute(route *reservedPlannerReplica, tried map
 		}
 		return err
 	}
-	next, err := r.retargetReserved(route.reservation, route.decode, route.prefix, tried)
+	next, err := r.retargetReserved(route.reservation, route.decode, route.prefix, tried, cause)
 	if err == nil {
 		route.replica = next
 		if decision, ok := route.currentDecodeDecision(); ok {
@@ -489,7 +489,7 @@ func (r *ReplicaDispatch) CompleteStream(ctx context.Context, sink agent.StreamS
 			return comp, err
 		}
 		tried[route.replica.Name] = struct{}{}
-		retargetErr := r.retargetRoute(&route, tried, opts)
+		retargetErr := r.retargetRoute(&route, tried, opts, err)
 		if retargetErr != nil {
 			if errors.Is(retargetErr, ErrReplicaDispatchEmpty) {
 				return nil, err
@@ -605,14 +605,14 @@ func (r *ReplicaDispatch) reserveOnEngineWithDecode(prefix []string, skip map[st
 	return reservedPlannerReplica{replica: repl, reservation: reservation, prefix: prefix, decode: booking, decodeDecision: decision}, nil
 }
 
-func (r *ReplicaDispatch) retargetReserved(reservation *fleetReservation, booking *decodeFootprintReservation, prefix []string, skip map[string]struct{}) (PlannerReplica, error) {
+func (r *ReplicaDispatch) retargetReserved(reservation *fleetReservation, booking *decodeFootprintReservation, prefix []string, skip map[string]struct{}, cause error) (PlannerReplica, error) {
 	byName := make(map[string]PlannerReplica, len(r.replicas))
 	allowed := make(map[string]struct{}, len(r.replicas))
 	for _, repl := range r.replicas {
 		byName[repl.Name] = repl
 		allowed[repl.Name] = struct{}{}
 	}
-	workerID, err := reservation.Retarget(r.model, allowed, skip, r.reservationPicker(prefix, byName, decodeFootprintRouteRequest{}, booking, nil))
+	workerID, err := reservation.Retarget(r.model, allowed, skip, r.reservationPicker(prefix, byName, decodeFootprintRouteRequest{}, booking, nil), cause)
 	if err != nil {
 		return PlannerReplica{}, err
 	}

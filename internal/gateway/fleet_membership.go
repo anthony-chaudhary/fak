@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
 // Live fleet membership + health/drain/failover — the loop the router reads.
@@ -481,10 +483,11 @@ func (r *fleetReservation) WorkerID() string {
 	return r.workerID
 }
 
-// Retarget releases the failed physical attempt, records its membership failure,
-// and books the next worker as one lock-held transition. If no fallback can be
-// booked, the reservation is left released so a deferred Release stays a no-op.
-func (r *fleetReservation) Retarget(model string, allowed, skip map[string]struct{}, pick fleetReservationPick) (string, error) {
+// Retarget releases the failed physical attempt, records its membership failure
+// (classified by cause), and books the next worker as one lock-held transition.
+// If no fallback can be booked, the reservation is left released so a deferred
+// Release stays a no-op.
+func (r *fleetReservation) Retarget(model string, allowed, skip map[string]struct{}, pick fleetReservationPick, cause error) (string, error) {
 	if r == nil || r.fleet == nil {
 		return "", ErrNoHealthyWorker
 	}
@@ -503,7 +506,7 @@ func (r *fleetReservation) Retarget(model string, allowed, skip map[string]struc
 	r.prefillEpoch = nil
 	if m.workers[failed] == r.worker {
 		m.releaseReservationLocked(failed, r.bookedOutputBlocks)
-		m.markDispatchFailureLocked(failed)
+		m.markDispatchFailureLocked(failed, cause)
 	}
 
 	decision, err := m.reserveForModelLocked(model, r.engine, allowed, skip, pick)
@@ -904,7 +907,7 @@ func (m *FleetMembership) DispatchForModel(ctx context.Context, model string, se
 		if m.workers[spec.ID] == member {
 			m.releaseWorkerLocked(spec.ID, member)
 			if err != nil && m.workers[spec.ID] == member {
-				m.markDispatchFailureWorkerLocked(spec.ID, member)
+				m.markDispatchFailureWorkerLocked(spec.ID, member, err)
 			}
 		}
 		m.mu.Unlock()
@@ -919,21 +922,42 @@ func (m *FleetMembership) DispatchForModel(ctx context.Context, model string, se
 // markDispatchFailure records a mid-request send failure as a failed probe (so a
 // worker that fails dispatches crosses to unhealthy under the same hysteresis) and
 // emits a failover transition labeled with the worker the request moved off of.
-func (m *FleetMembership) markDispatchFailure(id string) {
+// A neutral cause (dispatchOutcomeNeutral) emits the transition but is not a probe.
+func (m *FleetMembership) markDispatchFailure(id string, cause error) {
 	m.withWorkerLockVoid(id, func(w *memberWorker) {
-		m.markDispatchFailureWorkerLocked(id, w)
+		m.markDispatchFailureWorkerLocked(id, w, cause)
 	})
 }
 
-func (m *FleetMembership) markDispatchFailureLocked(id string) {
+func (m *FleetMembership) markDispatchFailureLocked(id string, cause error) {
 	w := m.workers[id]
 	if w == nil {
 		return
 	}
-	m.markDispatchFailureWorkerLocked(id, w)
+	m.markDispatchFailureWorkerLocked(id, w, cause)
 }
 
-func (m *FleetMembership) markDispatchFailureWorkerLocked(id string, w *memberWorker) {
+func (m *FleetMembership) markDispatchFailureWorkerLocked(id string, w *memberWorker, cause error) {
 	m.emit(MembershipEvent{Kind: EventFailover, WorkerID: id})
+	if dispatchOutcomeNeutral(cause) {
+		return
+	}
 	m.applyProbeLocked(w, false)
+}
+
+// dispatchOutcomeNeutral reports whether a dispatch error proves the worker alive
+// but busy: it answered with an overload/rate-limit status, so the request moves
+// on without counting toward ejection (nor resetting a failure streak). Transport
+// errors, timeouts and 502/504 remain failures.
+// Concept: sglang sgl-router/src/health/circuit_breaker.rs@9285994a (Apache-2.0).
+func dispatchOutcomeNeutral(err error) bool {
+	var status *agent.UpstreamStatusError
+	if !errors.As(err, &status) {
+		return false
+	}
+	switch status.Status {
+	case 429, 500, 503, 529:
+		return true
+	}
+	return false
 }
