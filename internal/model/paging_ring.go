@@ -51,7 +51,7 @@ type pagedRing struct {
 
 	// In-flight transfer Fences not yet awaited. Nothing may read, multiply, or Free a handle
 	// while its id is still here.
-	pending map[polymodel.ModelID]compute.Fence
+	pending map[polymodel.ModelID]*expertRingTransfer
 	// Split the awaited fences by whether the transfer had already landed when demanded: the
 	// clock-free overlap meter.
 	asyncOverlapped int
@@ -187,9 +187,7 @@ func (r *pagedRing) domainJoined() bool {
 // next demand is an ordinary hit.
 func (r *pagedRing) settlePendingTransfers() {
 	r.drainScope = nil
-	for id := range r.pending {
-		r.discardStaged(id)
-	}
+	r.drainTransfers()
 }
 
 // matMulStaged is the dtype-general ring core shared by the f32 matMul and the quantized
@@ -220,6 +218,9 @@ func (r *pagedRing) matMulStaged(name string, mk func() compute.Tensor, dtype co
 // may evict it; a caller holding several handles at once must hold() each for the span it uses them.
 func (r *pagedRing) stage(name string, mk func() compute.Tensor, dtype compute.Dtype, weightBytes int64, pinned bool) (compute.Tensor, bool) {
 	t, err := r.stageWithError(name, mk, dtype, weightBytes, pinned)
+	if expertRingIsTransferError(err) {
+		panic(err) // A failed copy is not a budget refusal permitting a fallback upload.
+	}
 	return t, err == nil
 }
 
@@ -227,70 +228,82 @@ func (r *pagedRing) stageWithError(name string, mk func() compute.Tensor, dtype 
 	id := polymodel.ModelID(name)
 	r.lookups++      // booked before anything is decided, so it counts every exit
 	r.noteAccess(id) // recency clock always, decaying heat under a value-aware policy
+	booked := false
+	defer func() {
+		if !booked {
+			r.refused++
+			if r.shared != nil {
+				r.shared.noteRefusal()
+			}
+		}
+	}()
 	// A demand is an agent asking for bytes, so the prefetch's hints are excluded from the ledger.
 	if r.shared != nil && !r.prefetching {
 		r.shared.noteDemand()
 	}
 	if wt, ok := r.resident[id]; ok {
-		r.pool.Touch(id)
-		r.hit++
-		r.noteDemandServe(id)
 		// A hit on a prefetched weight is where overlap is observed; skip the fence while
 		// prefetching so re-hinting an in-flight weight does not block the hint path.
 		if !r.prefetching {
-			r.awaitStaged(id)
+			if err := r.awaitStaged(id); err != nil {
+				return compute.Tensor{}, err
+			}
 		}
+		r.pool.Touch(id)
+		r.hit++
+		booked = true
+		r.noteDemandServe(id)
 		return wt, nil
+	}
+	if p := r.pending[id]; p != nil {
+		return compute.Tensor{}, p.refused(compute.ErrOwnedTransferUnknown)
 	}
 	// Refuse before building the host source or uploading: a post-upload refusal would briefly
 	// allocate the very weight the budget excludes.
 	if weightBytes > r.pool.Budget() {
-		r.refused++
-		if r.shared != nil {
-			r.shared.noteRefusal()
-		}
 		return compute.Tensor{}, polymodel.ErrTooLarge
 	}
 	// Reuse the pool's snapshot check rather than duplicating its pinned/held feasibility
 	// rule. This is no reservation: the final Admit still rechecks.
 	if r.pool.CheckAdmission(polymodel.Model{ID: id, WeightBytes: weightBytes, Pinned: pinned}) == polymodel.ErrPinnedNoRoom {
-		r.refused++
-		if r.shared != nil {
-			r.shared.noteRefusal()
-		}
 		return compute.Tensor{}, polymodel.ErrPinnedNoRoom
 	}
 	// Build + upload, then admit. Admit is all-or-nothing: on error the pool is unchanged, so page
 	// the just-uploaded handle straight back out. Under a non-default victim policy the ring makes
 	// room itself first (evictForPolicy), so Admit fits and polymodel's LRU choice never applies.
-	wt, fence := uploadStagedAsync(r.be, mk(), dtype, "paged-ring-weight", r.domainJoined())
-	r.evictForPolicy(weightBytes)
-	evicted, err := r.pool.Admit(polymodel.Model{ID: id, WeightBytes: weightBytes, Pinned: pinned})
-	if err != nil {
-		if fence != nil {
-			fence.Wait() // never Free storage a transfer is still writing into
+	source := mk()
+	wt, fence := uploadStagedAsync(r.be, source, dtype, "paged-ring-weight", r.domainJoined())
+	if err := r.retainStaged(id, source, wt, fence); err != nil {
+		return compute.Tensor{}, err
+	}
+	m := polymodel.Model{ID: id, WeightBytes: weightBytes, Pinned: pinned}
+	if err := r.settleAdmissionVictims(m); err != nil {
+		if cleanup := r.rollbackStaged(id, wt); cleanup != nil {
+			return compute.Tensor{}, cleanup
 		}
-		r.be.Free(wt)
-		r.refused++
-		if r.shared != nil {
-			// On a shared ring this signals the budget cannot hold the concurrently held experts of
-			// the attached agents; the fallback is safe but unbounded, so it must be counted.
-			r.shared.noteRefusal()
+		return compute.Tensor{}, err
+	}
+	r.evictForPolicy(weightBytes)
+	evicted, err := r.pool.Admit(m)
+	if err != nil {
+		if cleanup := r.rollbackStaged(id, wt); cleanup != nil {
+			return compute.Tensor{}, cleanup
 		}
 		return compute.Tensor{}, err
 	}
 	r.pageIn++
+	booked = true
 	r.pageInBytes += weightBytes
 	if r.shared != nil {
 		// The payer is booked even for a prefetch: a later agent served off that span is
 		// coalescing whether the span opened on a demand or on a guess.
 		r.shared.notePageIn(id, weightBytes)
 	}
-	if fence != nil {
-		if r.pending == nil {
-			r.pending = map[polymodel.ModelID]compute.Fence{}
-		}
-		r.pending[id] = fence
+	// Admission owns this tensor even if retiring a previous allocation panics.
+	// Install it before callbacks so a scope drain cannot mistake it for rollback.
+	r.resident[id] = wt
+	if used := r.pool.Used(); used > r.peak {
+		r.peak = used
 	}
 	for _, vid := range evicted {
 		if vh, ok := r.resident[vid]; ok {
@@ -303,16 +316,14 @@ func (r *pagedRing) stageWithError(name string, mk func() compute.Tensor, dtype 
 			r.evict++
 		}
 	}
-	r.resident[id] = wt
-	r.noteDemandServe(id)
 	// A demand miss must hand back a settled handle; only the prefetch path may return with the
 	// transfer still in flight.
 	if !r.prefetching {
-		r.awaitStaged(id)
+		if err := r.awaitStaged(id); err != nil {
+			return compute.Tensor{}, err
+		}
 	}
-	if used := r.pool.Used(); used > r.peak {
-		r.peak = used
-	}
+	r.noteDemandServe(id)
 	return wt, nil
 }
 
@@ -326,34 +337,16 @@ func (r *pagedRing) noteDemandServe(id polymodel.ModelID) {
 // poll happens before the Wait, and that ordering is the whole meter: a fence already satisfied
 // when demanded moved its bytes underneath other work; counting the two is clock-free. Idempotent
 // and safe on a weight never staged asynchronously.
-func (r *pagedRing) awaitStaged(id polymodel.ModelID) {
-	f, ok := r.pending[id]
-	if !ok {
-		return
-	}
-	delete(r.pending, id)
-	if f == nil {
-		return
-	}
-	if f.Done() {
-		r.asyncOverlapped++
-		return
-	}
-	r.asyncWaited++
-	f.Wait()
+func (r *pagedRing) awaitStaged(id polymodel.ModelID) error {
+	return r.settleStaged(id, true)
 }
 
 // discardStaged settles an in-flight transfer whose weight is about to be dropped, without
 // booking it in the overlap meter: nothing ever computed against it, so counting it either way
 // would bias the fraction the meter exists to report.
 func (r *pagedRing) discardStaged(id polymodel.ModelID) {
-	f, ok := r.pending[id]
-	if !ok {
-		return
-	}
-	delete(r.pending, id)
-	if f != nil {
-		f.Wait()
+	if err := r.settleStaged(id, false); err != nil {
+		panic(err)
 	}
 }
 
@@ -426,6 +419,11 @@ func (r *pagedRing) release(name string) {
 // documents the descriptor as immutable otherwise). If the Admit ever failed, the handle is paged
 // out so resident and pool stay in lockstep.
 func (r *pagedRing) repin(id polymodel.ModelID, m polymodel.Model) {
+	// Normal holds change only Pinned and must not prematurely settle prefetch.
+	// A different identity/size can fail after removal, so settle it first.
+	if old, ok := r.pool.Get(id); !ok || m.ID != id || m.WeightBytes != old.WeightBytes {
+		r.discardStaged(id)
+	}
 	r.pool.Evict(id)
 	if _, err := r.pool.Admit(m); err != nil {
 		if h, live := r.resident[id]; live {
@@ -445,6 +443,7 @@ func (r *pagedRing) freeAll() {
 	if r == nil {
 		return
 	}
+	r.drainTransfers()
 	for id, t := range r.resident {
 		r.discardStaged(id) // never tear down storage a transfer is still writing into
 		r.be.Free(t)
