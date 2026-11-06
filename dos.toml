@@ -2819,7 +2819,7 @@ see_also = ["internal/safecommit/checkerpin.go", "internal/safecommit/checkerpin
 category = "OPERATOR_GATE"
 refusal  = true
 summary  = "Tool call attempted to write or edit gating test files under an implementation lane."
-fix      = "Modify only implementation files in your assigned lane; test modifications are forbidden."
+fix      = "Modify only implementation files in your assigned lane; test modifications are forbidden. To recover a corrupted test file, restore its committed bytes with `git restore --source=HEAD --staged --worktree -- <path>` (or `git checkout HEAD -- <path>`): a single HEAD-only restore is admitted; any other source is still refused (#14209)."
 see_also = ["internal/adjudicator", "internal/witness"]
 
 [reasons.UNWITNESSED_NARRATION_CLAIM]
