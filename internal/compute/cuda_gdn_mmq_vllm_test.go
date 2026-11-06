@@ -18,7 +18,9 @@ import (
 // H200 qualification additionally requires an external H200 UUID/model receipt;
 // sm_90 alone also admits H100 and must not be presented as H200 evidence.
 // This is not a full-model quality, throughput, graph or FP8-KV qualification.
-// fak-test:runtime slow est=60s lane=optin
+// The Stream-K case also requires at least 30 visible SMs to witness the exact
+// useful-work capped grid; a smaller partition is not this qualification cohort.
+// fak-test:runtime slow est=65s lane=optin
 func TestCUDAGDNMMQVLLMComposition(t *testing.T) {
 	if os.Getenv("FAK_CUDA_GDN_MMQ_REQUIRED") != "1" {
 		t.Skip("set FAK_CUDA_GDN_MMQ_REQUIRED=1 on an admitted CUDA node")
@@ -68,25 +70,31 @@ func TestCUDAGDNMMQVLLMComposition(t *testing.T) {
 		tokens, nK, nV int
 		qkv, z         Dtype
 		rounded        bool
+		streamK        bool
 	}{
-		{"decode", 1, 2, 6, Q4_K, Q4_K, false},
-		{"below-mmq", 7, 2, 6, Q4_K, Q4_K, false},
-		{"joint-exact", 8, 2, 6, Q4_K, Q4_K, false},
-		{"joint-rounded", 8, 2, 6, Q4_K, Q4_K, true},
-		{"above-vllm", 9, 2, 6, Q4_K, Q4_K, true},
-		{"long-panel", 128, 2, 6, Q4_K, Q4_K, true},
-		{"q4-q6", 8, 2, 6, Q4_K, Q6_K, false},
-		{"q6-q4", 8, 2, 6, Q6_K, Q4_K, false},
-		{"qwen38-head-axes", 8, 16, 48, Q4_K, Q4_K, true},
-		{"ratio1", 8, 1, 1, Q4_K, Q4_K, false},
-		{"ratio2", 8, 1, 2, Q4_K, Q4_K, false},
-		{"ratio4", 8, 1, 4, Q4_K, Q4_K, false},
-		{"ratio8", 8, 1, 8, Q4_K, Q4_K, false},
+		{"decode", 1, 2, 6, Q4_K, Q4_K, false, false},
+		{"below-mmq", 7, 2, 6, Q4_K, Q4_K, false, false},
+		{"joint-exact", 8, 2, 6, Q4_K, Q4_K, false, false},
+		{"joint-rounded", 8, 2, 6, Q4_K, Q4_K, true, false},
+		{"above-vllm", 9, 2, 6, Q4_K, Q4_K, true, false},
+		{"long-panel", 128, 2, 6, Q4_K, Q4_K, true, false},
+		{"q4-q6", 8, 2, 6, Q4_K, Q6_K, false, false},
+		{"q6-q4", 8, 2, 6, Q6_K, Q4_K, false, false},
+		{"qwen38-head-axes", 8, 16, 48, Q4_K, Q4_K, true, false},
+		{"ratio1", 8, 1, 1, Q4_K, Q4_K, false, false},
+		{"ratio2", 8, 1, 2, Q4_K, Q4_K, false, false},
+		{"ratio4", 8, 1, 4, Q4_K, Q4_K, false, false},
+		{"ratio8", 8, 1, 8, Q4_K, Q4_K, false, false},
+		{"joint-stream-k-three-blocks", 8, 2, 6, Q4_K, Q4_K, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			// 256 is a complete GGUF block, not Qwen's full hidden width. The
-			// real 16/48 head axes are covered without pretending this is a model.
-			g := cudaGDNGeometry{256, tc.nK, tc.nV, 128, 128, 4, 1e-6}
+			// Neither width is Qwen's full hidden width. Three K superblocks
+			// exercise row strides and partial-tile fixup before GDN consumes Y.
+			hidden := 256
+			if tc.streamK {
+				hidden = 768
+			}
+			g := cudaGDNGeometry{hidden, tc.nK, tc.nV, 128, 128, 4, 1e-6}
 			o := newCUDAGDNOperands(t, be, g)
 			var qkv, z []float32
 			var qkvRaw, zRaw []byte
@@ -144,7 +152,7 @@ func TestCUDAGDNMMQVLLMComposition(t *testing.T) {
 							qwen35GDNHostMatvec(host.inB, g.nV, g.hidden, x),
 							qwen35GDNHostMatvec(host.inA, g.nV, g.hidden, x))...)
 					}
-					cudaGDNMMQRun(t, be, arm, g, tc.tokens, wantMMQ, mode == "vllm" && tc.tokens <= 8, want, &host)
+					cudaGDNMMQRun(t, be, arm, g, tc.tokens, wantMMQ, tc.streamK, mode == "vllm" && tc.tokens <= 8, want, &host)
 					if !equalF32Bits(be.Read(input), inputs) {
 						t.Fatal("whole operation changed immutable device input")
 					}
@@ -162,7 +170,7 @@ func TestCUDAGDNMMQVLLMComposition(t *testing.T) {
 						}
 						arm.x = uploadCUDAGDN(t, be, []int{g.hidden}, x, MemoryActivation, "mmq-vllm-continued-input")
 						want := host.step(x)
-						cudaGDNMMQRun(t, be, arm, g, 1, 0, nextMode == "vllm", want, &host)
+						cudaGDNMMQRun(t, be, arm, g, 1, 0, false, nextMode == "vllm", want, &host)
 					}
 				})
 			}
@@ -196,8 +204,11 @@ func cudaGDNMMQInputs(rng *cudaGDNLCG, tokens, hidden int, rounded bool) []float
 }
 
 func cudaGDNMMQRun(t *testing.T, be *cudaBackend, o cudaGDNOperands, g cudaGDNGeometry,
-	tokens int, wantMMQ uint64, wantVLLM bool, want []float64, host *qwen35GDNDecodeHostOracle) {
+	tokens int, wantMMQ uint64, wantStreamK, wantVLLM bool, want []float64, host *qwen35GDNDecodeHostOracle) {
 	t.Helper()
+	// t.Run uses its own goroutine; pin the goroutine executing the operation.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	before := KernelProfileSnapshot()
 	mmqBefore, operationsBefore := be.q4kMMQLaunchesForTest(), be.Qwen35GDNOperationCount()
 	be.ResetHostXfer()
@@ -231,7 +242,8 @@ func cudaGDNMMQRun(t *testing.T, be *cudaBackend, o cudaGDNOperands, g cudaGDNGe
 	if delta == nil || delta.Backend != "cuda" || delta.Truncated != 0 {
 		t.Fatalf("missing complete CUDA dispatch profile: %+v", delta)
 	}
-	var vllmCalls, quantizeCalls uint64
+	var vllmCalls, quantizeCalls, mmqCalls, fixupCalls uint64
+	mainGrids, fixupGrids := make(map[uint32]uint64), make(map[uint32]uint64)
 	for _, row := range delta.Rows {
 		switch row.Kernel {
 		case "k_qwen35_gdn_post_conv_vllm":
@@ -241,19 +253,41 @@ func cudaGDNMMQRun(t *testing.T, be *cudaBackend, o cudaGDNOperands, g cudaGDNGe
 			}
 		case "quantize_mmq_q8_1_ds4":
 			quantizeCalls += row.Calls
+		case "mul_mat_q":
+			mmqCalls += row.Calls
+			if wantStreamK && row.GY != 1 {
+				t.Fatalf("MMQ main launch geometry: %+v", row)
+			}
+			mainGrids[row.GX] += row.Calls
+		case "mul_mat_q_stream_k_fixup":
+			fixupCalls += row.Calls
+			if wantStreamK && row.GY != 4 {
+				t.Fatalf("MMQ fixup launch geometry: %+v", row)
+			}
+			fixupGrids[row.GX] += row.Calls
 		}
 	}
 	wantCalls := uint64(0)
 	if wantVLLM {
 		wantCalls = 1
 	}
-	if vllmCalls != wantCalls || quantizeCalls != wantMMQ {
-		t.Fatalf("dispatch vllm=%d want=%d MMQ-quantize=%d want=%d", vllmCalls, wantCalls, quantizeCalls, wantMMQ)
+	if vllmCalls != wantCalls || quantizeCalls != wantMMQ || mmqCalls != wantMMQ {
+		t.Fatalf("dispatch vllm=%d want=%d MMQ-quantize=%d main=%d want=%d", vllmCalls, wantCalls, quantizeCalls, mmqCalls, wantMMQ)
+	}
+	if wantStreamK {
+		// P=8 selects J=8; I=128. QKV has 10 row tiles and Z has 6.
+		// With three K blocks and >=30 visible SMs, the useful-work cap
+		// launches 30/18 CTAs, each owning one K block. Both projections
+		// require fixup (10%30 and 6%18 are nonzero), with grid.y=I/32=4.
+		if fixupCalls != 2 || mainGrids[30] != 1 || mainGrids[18] != 1 ||
+			fixupGrids[30] != 1 || fixupGrids[18] != 1 {
+			t.Fatalf("required three-block Stream-K path absent: main=%v fixup=%v calls=%d; need >=30 visible SMs", mainGrids, fixupGrids, fixupCalls)
+		}
 	}
 	got := be.Read(out)
 	requireFiniteNonzeroCUDA(t, "composed output", got)
 	requireQwen35GDNClose(t, "composed output", tokens, got, want)
 	requireQwen35GDNClose(t, "composed convolution state", tokens, be.Read(conv), host.conv)
 	requireQwen35GDNClose(t, "composed canonical recurrent state", tokens, be.Read(state), host.recurrent)
-	t.Log(fmt.Sprintf("P=%d MMQ=%d vLLM=%d output+conv+state match independent model", tokens, wantMMQ, wantCalls))
+	t.Log(fmt.Sprintf("P=%d hidden=%d MMQ=%d fixup=%d vLLM=%d output+conv+state match independent model", tokens, g.hidden, wantMMQ, fixupCalls, wantCalls))
 }
