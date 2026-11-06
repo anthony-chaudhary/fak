@@ -56,9 +56,9 @@ func TestCUDASplitKVScratchOwnershipAndStatus(t *testing.T) {
 			if out, err := exec.CommandContext(ctx, compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable", "-Wno-unused-function", "-Wno-unused-parameter", cpp, "-o", binary).CombinedOutput(); err != nil {
 				t.Fatalf("compile actual split-KV caller: %v\n%s", err, out)
 			}
-			cases := []string{"oom", "fatal-alloc", "null-alloc", "retire", "growth", "capture", "terminal"}
+			cases := []string{"oom", "fatal-alloc", "null-alloc", "pointer-fatal", "pointer-oom", "track-throw", "untrack-miss", "partial-fault", "merge-fault", "profile-fault", "byte-bound", "retire", "growth", "capture", "terminal"}
 			if checked {
-				cases = append(cases, "checked")
+				cases = append(cases, "checked", "checked-after-partial")
 			}
 			for _, scenario := range cases {
 				t.Run(scenario, func(t *testing.T) {
@@ -81,14 +81,17 @@ const splitKVOwnershipHarness = `
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <new>
 using std::isfinite;
 using cudaError_t = int;
-constexpr int cudaSuccess=0, cudaErrorMemoryAllocation=2, cudaErrorNotReady=34;
+constexpr int cudaSuccess=0, cudaErrorInvalidValue=1, cudaErrorMemoryAllocation=2, cudaErrorNotReady=34;
 constexpr int FLASH_THREADS=128, FAK_ALLOC_ATTENTION_SCRATCH=1, FAK_ALLOC_DEVICE_LOCAL=2;
 #define FAK_ALLOC_SITE(x) x
 static int g_cuda_cleanup_status=0, pending=0, alloc_status=0, free_status=0;
 static int allocs=0, frees=0, tracks=0, untracks=0, reads=0, partial=0, merge=0, simt=0, mma=0, selections=0;
 static bool g_capture_open=false, uncertain=false, want_mma=false, null_alloc=false;
+static bool pointer_error=false,throw_track=false,miss_untrack=false,close_after_partial=false;
+static int partial_status=0,merge_status=0,profile_status=0;
 static float storage[4];
 static void *tracked=nullptr, *freed=nullptr, *allocated=nullptr;
 static bool v41_candidates_stream_uncertain() { return uncertain; }
@@ -96,7 +99,7 @@ static int cudaGetLastError() { ++reads; int e=pending; pending=0; return e; }
 static const char *cudaGetErrorString(int) { return "injected"; }
 static int cudaMalloc(float **p, size_t) {
  ++allocs; assert(!tracked);
- if (alloc_status) { pending=alloc_status; *p=nullptr; return alloc_status; }
+ if (alloc_status) { pending=alloc_status; *p=pointer_error?&storage[allocs % 4]:nullptr; allocated=*p; return alloc_status; }
  *p=null_alloc ? nullptr : &storage[allocs % 4]; allocated=*p; return 0;
 }
 static int cudaFree(void *p) {
@@ -104,18 +107,18 @@ static int cudaFree(void *p) {
  if (!free_status) freed=p;
  return free_status;
 }
-static void fak_alloc_untrack(void *p) {
- assert(p==tracked && p==freed); ++untracks; tracked=nullptr; freed=nullptr;
+static bool fak_alloc_untrack(void *p) {
+ assert(p==tracked && p==freed); ++untracks; tracked=nullptr; freed=nullptr; return !miss_untrack;
 }
 static void fak_alloc_track(void *p, int, int, const char *, size_t) {
- assert(p && !tracked && p==allocated); ++tracks; tracked=p;
+ assert(p && !tracked && p==allocated); ++tracks; tracked=p; if(throw_track)throw std::bad_alloc();
 }
 static bool qwen38_prefill_attention_wants_mma() { ++selections; return want_mma; }
 static int fak_qwen38_fattn_mma_hd256_launch(const float *, const float *, const float *, float *, int, int, int, int, float) { ++mma; return -2; }
 static void launch(const char *name) {
  if (!strcmp(name,"k_qwen38_causal_attention_panel_hd256")) ++simt;
- else if (!strcmp(name,"k_qwen38_causal_attention_panel_hd256_splitkv_partial")) { assert(tracked); ++partial; }
- else if (!strcmp(name,"k_qwen38_splitkv_lse_merge_hd256")) { assert(tracked); ++merge; }
+ else if (!strcmp(name,"k_qwen38_causal_attention_panel_hd256_splitkv_partial")) { assert(tracked); ++partial; pending=partial_status; if(profile_status)g_cuda_cleanup_status=profile_status; if(close_after_partial)uncertain=true; }
+ else if (!strcmp(name,"k_qwen38_splitkv_lse_merge_hd256")) { assert(tracked); ++merge; pending=merge_status; }
  else assert(false);
 }
 // Only device launch syntax is replaced; host allocation, status and routing are real.
@@ -136,12 +139,52 @@ int main(int argc, char **argv) {
  if (!strcmp(s,"oom") || !strcmp(s,"fatal-alloc") || !strcmp(s,"null-alloc")) {
   null_alloc=!strcmp(s,"null-alloc");
   alloc_status=null_alloc ? 0 : (!strcmp(s,"oom") ? 2 : 700);
-  assert(call()==50000+alloc_status);
+  assert(call()==50000+(null_alloc?cudaErrorInvalidValue:alloc_status));
   assert(allocs==1 && !tracked && !tracks && !partial && !merge && !simt && !frees);
   assert(pending==(alloc_status==700 ? 700 : 0));
-  if (alloc_status==700) return 0; // Sticky execution faults must not be consumed as capacity misses.
+  if (alloc_status==700 || null_alloc) {
+   int code=null_alloc?cudaErrorInvalidValue:700; assert(g_cuda_cleanup_status==code);
+   int old_reads=reads;alloc_status=0;null_alloc=false;want_mma=true;
+   assert(call()==52000+code && call(1,0)==52000+code && allocs==1 && reads==old_reads && !mma && !simt);
+   return 0;
+  }
+  assert(!g_cuda_cleanup_status); // Only genuine null OOM remains retryable.
   alloc_status=0; null_alloc=false;
   assert(call()==0 && allocs==2 && tracks==1 && partial==1 && merge==1);
+ } else if (!strcmp(s,"pointer-fatal") || !strcmp(s,"pointer-oom")) {
+  pointer_error=true;alloc_status=!strcmp(s,"pointer-oom")?2:700;
+  const int code=alloc_status;
+  assert(call()==50000+code && allocated && allocs==1 && !tracks && !frees && !partial && !merge);
+  assert(g_cuda_cleanup_status==code);
+  int old_reads=reads;alloc_status=0;pointer_error=false;
+  assert(call()==52000+code && allocs==1 && !frees && reads==old_reads && !partial && !merge);
+ } else if (!strcmp(s,"track-throw")) {
+  throw_track=true;
+  assert(call()==50002 && tracked && tracks==1 && allocs==1 && !partial && !merge && !frees);
+  assert(g_cuda_cleanup_status==2);throw_track=false;
+  assert(call()==52002 && allocs==1 && !frees && tracks==1);
+ } else if (!strcmp(s,"untrack-miss")) {
+  assert(call()==0);miss_untrack=true;
+  assert(call(2)==50001 && g_cuda_cleanup_status==1 && frees==1 && untracks==1 && allocs==1 && !tracked);
+  assert(call(2)==52001 && frees==1 && allocs==1);
+ } else if (!strcmp(s,"partial-fault") || !strcmp(s,"merge-fault") ||
+            !strcmp(s,"profile-fault") || !strcmp(s,"checked-after-partial")) {
+  if(!strcmp(s,"partial-fault"))partial_status=700;
+  if(!strcmp(s,"merge-fault"))merge_status=700;
+  if(!strcmp(s,"profile-fault"))profile_status=700;
+  if(!strcmp(s,"checked-after-partial"))close_after_partial=true;
+  const int code=close_after_partial?34:700;
+  assert(call()==50000+code && g_cuda_cleanup_status==code && tracked && allocs==1 && partial==1);
+  assert(merge==(merge_status?1:0) && !frees && !simt);
+  int old_reads=reads,old_selections=selections;partial_status=merge_status=profile_status=0;uncertain=false;want_mma=true;
+  assert(call()==52000+code && call(1,0)==52000+code);
+  assert(allocs==1 && !frees && reads==old_reads && selections==old_selections && !mma && !simt && partial==1);
+ } else if (!strcmp(s,"byte-bound")) {
+  // Maximal caller-admitted Q extent: byte arithmetic must still refuse on
+  // 32-bit hosts. Fake launches do not dereference this large logical shape.
+  int rc=call(INT_MAX/(24*256),3072);
+  if(sizeof(size_t)==4)assert(rc==-1 && !allocs && !frees && !partial && !merge);
+  else assert(rc==0 && allocs==1 && tracks==1 && partial==1 && merge==1);
  } else if (!strcmp(s,"retire")) {
   assert(call()==0); void *old=tracked;
   free_status=17;

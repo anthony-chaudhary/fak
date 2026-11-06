@@ -495,10 +495,19 @@ extern "C" int fak_qwen35_causal_attention_panel_f32(
   if (positions > INT_MAX / kvWidth || tokens > INT_MAX / qWidth) return -1;
   int nsplits = qwen38_splitkv_partitions(prefix, tokens);
   if (nsplits > 1 && tokens > INT_MAX / nH / nsplits) return -1;
-  cudaGetLastError();
+  // Preserve the first observed stream/runtime fault before selector fallback.
+  if (g_cuda_cleanup_status != 0) return 52000 + g_cuda_cleanup_status;
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return 52000 + (int)cudaErrorNotReady;
+#endif
+  cudaError_t prior = cudaGetLastError();
+  if (prior != cudaSuccess) {
+    if (g_cuda_cleanup_status == 0) g_cuda_cleanup_status = (int)prior;
+    return 52000 + g_cuda_cleanup_status;
+  }
   if (qwen38_prefill_attention_wants_mma()) {
-    // -2 means the mma path is unavailable for this call (below sm_80, or staging growth
-    // inside a graph capture) and has had no effect, so the SIMT kernel runs instead.
+    // -2 means below sm_80, capture growth, or a known null-allocation OOM.
+    // No operand work was submitted, so the SIMT kernel may run instead.
     int mma = fak_qwen38_fattn_mma_hd256_launch(dQ, dK, dV, dOut, tokens, prefix, nH, nKV, scale);
     if (mma != -2) return mma;
   }
@@ -509,29 +518,51 @@ extern "C" int fak_qwen35_causal_attention_panel_f32(
   // (m, l, O) partial into grow-only scratch; the LSE merge kernel folds them per row.
   static float *g_splitkv_scratch = nullptr;
   static size_t g_splitkv_scratch_cap = 0; // floats
-  size_t need = (size_t)tokens * nH * nsplits * (QWEN38_PROMPT_HEAD_DIM + 2);
+  // The preceding int geometry check bounds slots, but bytes also have to fit
+  // size_t before any retirement/allocation (including a 32-bit host build).
+  const size_t slots = (size_t)tokens * nH * nsplits;
+  const size_t slotWidth = QWEN38_PROMPT_HEAD_DIM + 2;
+  if (slots > (size_t)-1 / slotWidth / sizeof(float)) return -1;
+  const size_t need = slots * slotWidth;
+  auto splitFailed = [](cudaError_t status) {
+    if (status == cudaSuccess) status = cudaErrorInvalidValue;
+    if (g_cuda_cleanup_status == 0) g_cuda_cleanup_status = (int)status;
+    return 50000 + g_cuda_cleanup_status;
+  };
   bool splitReady = need <= g_splitkv_scratch_cap;
   if (!splitReady && !g_capture_open) {
     if (g_splitkv_scratch) {
-      cudaError_t retired = cudaFree(g_splitkv_scratch);
+      float *retiring = g_splitkv_scratch;
+      cudaError_t retired = cudaFree(retiring);
       if (retired != cudaSuccess) {
         if (g_cuda_cleanup_status == 0) g_cuda_cleanup_status = (int)retired;
         return 52000 + g_cuda_cleanup_status;
       }
-      fak_alloc_untrack(g_splitkv_scratch);
+      // The physical free is final: bookkeeping refusal cannot retry it.
+      g_splitkv_scratch = nullptr;
+      g_splitkv_scratch_cap = 0;
+      if (!fak_alloc_untrack(retiring)) return splitFailed(cudaErrorInvalidValue);
     }
     g_splitkv_scratch = nullptr;
     g_splitkv_scratch_cap = 0;
     cudaError_t e = fcuda_alloc_status(cudaMalloc(&g_splitkv_scratch, need * sizeof(float)));
-    if (e != cudaSuccess || !g_splitkv_scratch) {
+    if (e != cudaSuccess) {
       fprintf(stderr, "fak-cuda: splitkv scratch cudaMalloc(%zu bytes) failed: %s\n",
               need * sizeof(float), cudaGetErrorString(e));
-      g_splitkv_scratch = nullptr;
-      return 50000 + (int)e;
+      // Preserve a pointer returned with failure. Only null OOM is a known
+      // capacity refusal that leaves future calls eligible to retry.
+      if (e == cudaErrorMemoryAllocation && !g_splitkv_scratch) return 50000 + (int)e;
+      return splitFailed(e);
     }
-    fak_alloc_track(g_splitkv_scratch, FAK_ALLOC_ATTENTION_SCRATCH, FAK_ALLOC_DEVICE_LOCAL,
-                    FAK_ALLOC_SITE("qwen38-splitkv-scratch"), need * sizeof(float));
+    if (!g_splitkv_scratch) return splitFailed(cudaErrorInvalidValue);
     g_splitkv_scratch_cap = need;
+    try {
+      fak_alloc_track(g_splitkv_scratch, FAK_ALLOC_ATTENTION_SCRATCH, FAK_ALLOC_DEVICE_LOCAL,
+                      FAK_ALLOC_SITE("qwen38-splitkv-scratch"), need * sizeof(float));
+    } catch (...) {
+      // Retain device ownership/extent if host ledger insertion failed.
+      return splitFailed(cudaErrorMemoryAllocation);
+    }
     splitReady = true;
   }
   if (!splitReady) {
@@ -543,11 +574,20 @@ extern "C" int fak_qwen35_causal_attention_panel_f32(
            k_qwen38_causal_attention_panel_hd256_splitkv_partial<<<tokens * nH * nsplits, FLASH_THREADS, shmem, g_stream>>>(
                dQ, dK, dV, g_splitkv_scratch, tokens, prefix, nH, nKV, scale, nsplits));
   cudaError_t partialLaunch = cudaGetLastError();
-  if (partialLaunch != cudaSuccess) return 50000 + (int)partialLaunch;
+  if (partialLaunch != cudaSuccess) return splitFailed(partialLaunch);
+  if (g_cuda_cleanup_status != 0) return 50000 + g_cuda_cleanup_status;
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return splitFailed(cudaErrorNotReady);
+#endif
   FCUDA_TS("k_qwen38_splitkv_lse_merge_hd256", tokens * nH,
            k_qwen38_splitkv_lse_merge_hd256<<<tokens * nH, FLASH_THREADS, 0, g_stream>>>(
                g_splitkv_scratch, dOut, tokens, nH, nsplits));
   cudaError_t mergeLaunch = cudaGetLastError();
+  if (mergeLaunch != cudaSuccess) return splitFailed(mergeLaunch);
+  if (g_cuda_cleanup_status != 0) return 50000 + g_cuda_cleanup_status;
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return splitFailed(cudaErrorNotReady);
+#endif
   return mergeLaunch == cudaSuccess ? 0 : 50000 + (int)mergeLaunch;
 }
 
@@ -615,11 +655,20 @@ extern "C" int fcuda_causal_attention_panel_f32(
       nKV > INT_MAX / hd || nH > INT_MAX / hd) return -1;
   int kvWidth = nKV * hd, qWidth = nH * hd;
   if (prefix + tokens > INT_MAX / kvWidth || tokens > INT_MAX / qWidth) return -1;
-  cudaGetLastError();
+  // Preserve the first observed stream/runtime fault before selector fallback.
+  if (g_cuda_cleanup_status != 0) return 52000 + g_cuda_cleanup_status;
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+  if (v41_candidates_stream_uncertain()) return 52000 + (int)cudaErrorNotReady;
+#endif
+  cudaError_t prior = cudaGetLastError();
+  if (prior != cudaSuccess) {
+    if (g_cuda_cleanup_status == 0) g_cuda_cleanup_status = (int)prior;
+    return 52000 + g_cuda_cleanup_status;
+  }
   // The tensor-core port is instantiated only for the Qwen3.8 hd256 geometry, and its f16
   // K/V staging pays off at prompt length: route P>=128 panels through it when
-  // FAK_CUDA_QWEN38_PREFILL_ATTN selects mma. -2 declines before any effect, so every other
-  // shape, device and capture state keeps the SIMT panel kernel below.
+  // FAK_CUDA_QWEN38_PREFILL_ATTN selects mma. Only -2 permits fallback before
+  // operand work; runtime faults return positively and close shared admission.
   if (nH == 24 && nKV == 4 && hd == QWEN38_PROMPT_HEAD_DIM && prefix + tokens >= 128 &&
       qwen38_prefill_attention_wants_mma()) {
     int mma = fak_qwen38_fattn_mma_hd256_launch(dQ, dK, dV, dOut, tokens, prefix, nH, nKV, scale);

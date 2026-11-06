@@ -798,8 +798,9 @@ extern "C" unsigned long long fak_qwen38_fattn_mma_launch_count(void) {
 }
 
 // Returns 0 on launch, a positive 52000+ code on a CUDA error, or -2 when the mma path is
-// unavailable for this call (device below sm_80, or staging growth during capture) so the
-// caller can fall back to the SIMT kernel before any effect.
+// unavailable for this call (device below sm_80, staging growth during capture, or
+// known null-allocation OOM). Only those cases permit SIMT fallback before operand
+// work. Other runtime failures retain ownership and close shared admission.
 static int fak_qwen38_fattn_mma_hd256_launch(
         const float *dQ, const float *dK, const float *dV, float *dOut,
         int tokens, int prefix, int nH, int nKV, float scale) {
@@ -808,12 +809,19 @@ static int fak_qwen38_fattn_mma_hd256_launch(
 #ifdef FAK_CUDA_V41_CHECKED_STREAM
     if (v41_candidates_stream_uncertain()) return 52000 + (int)cudaErrorNotReady;
 #endif
+    auto failed = [](cudaError_t status) {
+        if (status == cudaSuccess) status = cudaErrorInvalidValue;
+        if (g_cuda_cleanup_status == 0) g_cuda_cleanup_status = (int) status;
+        return 52000 + g_cuda_cleanup_status;
+    };
+    // Do not attribute or clear an earlier error as this launcher's capacity miss.
+    cudaError_t prior = cudaPeekAtLastError();
+    if (prior != cudaSuccess) return failed(prior);
     int device = 0, major = 0;
-    if (cudaGetDevice(&device) != cudaSuccess ||
-        cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, device) != cudaSuccess) {
-        cudaGetLastError();
-        return -2;
-    }
+    cudaError_t query = cudaGetDevice(&device);
+    if (query != cudaSuccess) return failed(query);
+    query = cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, device);
+    if (query != cudaSuccess) return failed(query);
     if (major < 8) return -2;
     const int nbatch_fa = fak_fattn_mma::nbatch_fa;
     const int positions = prefix + tokens;
@@ -824,24 +832,33 @@ static int fak_qwen38_fattn_mma_hd256_launch(
     if (need > g_qwen38_fattn_kv16_bytes) {
         if (g_capture_open) return -2;
         if (g_qwen38_fattn_kv16) {
-            cudaError_t retired = cudaFree(g_qwen38_fattn_kv16);
-            if (retired != cudaSuccess) {
-                if (g_cuda_cleanup_status == 0) g_cuda_cleanup_status = (int) retired;
-                return 52000 + g_cuda_cleanup_status;
-            }
-            fak_alloc_untrack(g_qwen38_fattn_kv16);
+            half2 *retiring = g_qwen38_fattn_kv16;
+            cudaError_t retired = cudaFree(retiring);
+            if (retired != cudaSuccess) return failed(retired);
+            // Physical retirement is final even if subsequent bookkeeping fails.
+            g_qwen38_fattn_kv16 = nullptr;
+            g_qwen38_fattn_kv16_bytes = 0;
+            if (!fak_alloc_untrack(retiring)) return failed(cudaErrorInvalidValue);
         }
         g_qwen38_fattn_kv16 = nullptr;
         g_qwen38_fattn_kv16_bytes = 0;
         cudaError_t grown = fcuda_alloc_status(cudaMalloc(&g_qwen38_fattn_kv16, need));
         if (grown != cudaSuccess) {
-            g_qwen38_fattn_kv16 = nullptr;
-            cudaGetLastError();
-            return -2;
+            // Only a known capacity miss with no returned owner is a fallback.
+            // A pointer returned with an error remains rooted and is never retried.
+            if (grown == cudaErrorMemoryAllocation && !g_qwen38_fattn_kv16) return -2;
+            return failed(grown);
         }
-        fak_alloc_track(g_qwen38_fattn_kv16, FAK_ALLOC_ATTENTION_SCRATCH, FAK_ALLOC_DEVICE_LOCAL,
-                        FAK_ALLOC_SITE("qwen38-fattn-kv16"), need);
+        if (!g_qwen38_fattn_kv16) return failed(cudaErrorInvalidValue);
         g_qwen38_fattn_kv16_bytes = need;
+        try {
+            fak_alloc_track(g_qwen38_fattn_kv16, FAK_ALLOC_ATTENTION_SCRATCH, FAK_ALLOC_DEVICE_LOCAL,
+                            FAK_ALLOC_SITE("qwen38-fattn-kv16"), need);
+        } catch (...) {
+            // Host bookkeeping may fail after device allocation. Preserve that
+            // exact owner and extent; no exception may escape the public C ABI.
+            return failed(cudaErrorMemoryAllocation);
+        }
     }
     half2 *K16 = g_qwen38_fattn_kv16, *V16 = g_qwen38_fattn_kv16 + total2;
     const size_t live2 = (size_t) positions * kvWidth / 2;
@@ -850,7 +867,11 @@ static int fak_qwen38_fattn_mma_hd256_launch(
     FCUDA_TS("k_qwen38_fattn_stage_kv_f16", (unsigned) (stageBlocks < 65535 ? stageBlocks : 65535), fak_fattn_mma::k_qwen38_fattn_stage_kv_f16<<<(unsigned) (stageBlocks < 65535 ? stageBlocks : 65535), stageThreads, 0, g_stream>>>(
         (const float2 *) dK, (const float2 *) dV, K16, V16, live2, total2));
     cudaError_t staged = cudaGetLastError();
-    if (staged != cudaSuccess) return 52000 + (int) staged;
+    if (staged != cudaSuccess) return failed(staged);
+    if (g_cuda_cleanup_status != 0) return 52000 + g_cuda_cleanup_status;
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+    if (v41_candidates_stream_uncertain()) return failed(cudaErrorNotReady);
+#endif
 
     const int ncols1 = fak_fattn_mma::ncols1_qwen38;
     const int stride_tile = fak_fattn_mma::DKQ_QWEN38/2 + 4;
@@ -864,7 +885,11 @@ static int fak_qwen38_fattn_mma_hd256_launch(
     FCUDA_TS("k_qwen38_fattn_mma_hd256", grid, fak_fattn_mma::k_qwen38_fattn_mma_hd256<<<grid, dim3(fak_fattn_mma::warp_size, fak_fattn_mma::nthreads / fak_fattn_mma::warp_size, 1), shmem, g_stream>>>(
         dQ, K16, V16, dOut, tokens, prefix, nH, nKV, scale));
     cudaError_t launch = cudaGetLastError();
-    if (launch != cudaSuccess) return 52000 + (int) launch;
+    if (launch != cudaSuccess) return failed(launch);
+    if (g_cuda_cleanup_status != 0) return 52000 + g_cuda_cleanup_status;
+#ifdef FAK_CUDA_V41_CHECKED_STREAM
+    if (v41_candidates_stream_uncertain()) return failed(cudaErrorNotReady);
+#endif
     g_qwen38_fattn_mma_launches++;
     return 0;
 }
