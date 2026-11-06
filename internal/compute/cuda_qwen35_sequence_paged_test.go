@@ -201,7 +201,7 @@ typedef int cudaStreamCaptureStatus;
 const int cudaStreamCaptureStatusNone=0;
 static void *g_stream=nullptr;
 static bool g_capture_open=false;
-static int g_cuda_cleanup_status=0,mode=0,at=0,allocs=0,copies=0,gathers=0,writes=0,retires=0,fences=0,attention=0;
+static int g_cuda_cleanup_status=0,mode=0,at=0,allocs=0,copies=0,gathers=0,writes=0,retires=0,fences=0,attention=0,pool_attempts=0,pool_faults=0;
 static size_t h2d=0;
 static std::vector<float> attention_first,attention_last;
 static std::unordered_map<void*,size_t> g_live,g_managed_live,g_panel_live;
@@ -222,7 +222,8 @@ static cudaError_t cudaMemcpyAsync(void*d,const void*s,size_t n,int,void*){
  if(mode==3){queued.push_back({d,s,n});return 0;}
  memcpy(d,s,n);if(mode==4&&copies==at)g_cuda_cleanup_status=54;return 0;
 }
-static void fcuda_pool_put(void*p,size_t){++retires;if(mode==7&&retires==at){g_cuda_cleanup_status=57;return;} (void)p;}
+// Pool fault selection is independent of generic transient frees counted in retires.
+static void fcuda_pool_put(void*p,size_t){++retires;++pool_attempts;if(mode==7&&pool_attempts==at){++pool_faults;g_cuda_cleanup_status=57;return;} (void)p;}
 `
 
 const cudaPagedSequenceNativeShims = `
@@ -233,8 +234,8 @@ extern "C" void *test_alloc(size_t n,int cls,const char*name){
  if(s==g_alloc_site_n.load()){if(s>=512)abort();strncpy(g_alloc_sites[s].name,name,127);g_alloc_site_n.store(s+1);}g_alloc_tags[p]={n,cls,0,s};return p;
 }
 extern "C" void test_mode(int m,int a){mode=m;at=a;}
-extern "C" void test_reset(){for(void*p:all)free(p);all.clear();queued.clear();attention_first.clear();attention_last.clear();g_live.clear();g_managed_live.clear();g_panel_live.clear();g_alloc_tags.clear();g_alloc_site_n.store(1);g_cuda_cleanup_status=mode=at=allocs=copies=gathers=writes=retires=fences=attention=0;h2d=0;}
-extern "C" int test_counter(int n){switch(n){case 0:return allocs;case 1:return copies;case 2:return writes;case 3:return gathers;case 4:return retires;case 5:return fences;case 6:return attention;case 7:return g_cuda_cleanup_status;case 8:return (int)queued.size();default:return (int)g_live.size();}}
+extern "C" void test_reset(){for(void*p:all)free(p);all.clear();queued.clear();attention_first.clear();attention_last.clear();g_live.clear();g_managed_live.clear();g_panel_live.clear();g_alloc_tags.clear();g_alloc_site_n.store(1);g_cuda_cleanup_status=mode=at=allocs=copies=gathers=writes=retires=fences=attention=pool_attempts=pool_faults=0;h2d=0;}
+extern "C" int test_counter(int n){switch(n){case 0:return allocs;case 1:return copies;case 2:return writes;case 3:return gathers;case 4:return retires;case 5:return fences;case 6:return attention;case 7:return g_cuda_cleanup_status;case 8:return (int)queued.size();case 9:return pool_attempts;case 10:return pool_faults;default:return (int)g_live.size();}}
 extern "C" float test_attention_value(int call,int last){return last?attention_last.at(call):attention_first.at(call);}
 extern "C" void test_finish_deferred(){for(auto p:queued)memcpy(p.d,p.s,p.n);queued.clear();}
 extern "C" int test_fence(){++fences;if(mode==3)return 53;test_finish_deferred();return g_cuda_cleanup_status;}
@@ -270,8 +271,8 @@ extern "C" int test_retire_probe(){
  g_alloc_tags[p].cls=0;if(fcuda_paged_kv_owner_checked(p,64)==0)return 2;g_alloc_tags[p].cls=3;
  test_mode(10,0);if(fcuda_paged_kv_owner_checked(p,64)!=61||g_cuda_cleanup_status!=61)return 3;
  test_reset();p=test_alloc(64,3,"qwen35-paged-table");test_mode(7,1);
- if(fcuda_paged_kv_release_checked(p,64,&d)!=57||d!=FCUDA_PAGED_KV_RETIRED||g_live.count(p))return 4;
- if(fcuda_paged_kv_release_checked(p,64,&d)!=57||d!=FCUDA_PAGED_KV_RETAINED||retires!=1)return 5;
+ if(fcuda_paged_kv_release_checked(p,64,&d)!=57||d!=FCUDA_PAGED_KV_RETIRED||g_live.count(p)||pool_attempts!=1||pool_faults!=1)return 4;
+ if(fcuda_paged_kv_release_checked(p,64,&d)!=57||d!=FCUDA_PAGED_KV_RETAINED||retires!=1||pool_attempts!=1||pool_faults!=1)return 5;
  test_reset();return 0;
 }
 `
@@ -428,9 +429,10 @@ func main(){
  for _,mode:=range []int{1,2,3,4,5,6,7,8,9,10,11,12}{
   c,k=reset();preparePrefix(c,k,14);clone=k.Clone().(*cudaPagedKV);r=reqFor(c,clone,14,3)
   oldTable:=append([]int32(nil),clone.table...);oldArena:=clone.pool.K[0]
-  target:=1;switch mode{case 1:target=int(C.test_counter(0))+1;case 2,4:target=int(C.test_counter(1))+1;case 6:target=int(C.test_counter(2))+1;case 7:target=int(C.test_counter(4))+1;case 8:target=int(C.test_counter(3))+1}
+  target:=1;switch mode{case 1:target=int(C.test_counter(0))+1;case 2,4:target=int(C.test_counter(1))+1;case 6:target=int(C.test_counter(2))+1;case 7:target=int(C.test_counter(9))+1;case 8:target=int(C.test_counter(3))+1}
   if mode==9{splitSelected=true};C.test_mode(C.int(mode),C.int(target));_,e=c.Qwen35SequencePrefill(r)
-  must(e!=nil&&clone.Len()==14&&clone.lens[0]==14&&clone.lens[1]==14,"failure publishes frontier")
+  if mode==7{must(int(C.test_counter(9))==target&&C.test_counter(10)==1&&C.test_counter(7)==57,fmt.Sprintf("pool fault not injected exactly once: target=%d attempts=%d hits=%d terminal=%d",target,C.test_counter(9),C.test_counter(10),C.test_counter(7)));fmt.Printf("checked pool-retirement fault hit: attempts=%d target=%d hits=%d terminal=%d\n",C.test_counter(9),target,C.test_counter(10),C.test_counter(7))}
+  must(e!=nil&&clone.Len()==14&&clone.lens[0]==14&&clone.lens[1]==14,fmt.Sprintf("failure publishes frontier: mode=%d error=%v len=%d lens=%v terminal=%d",mode,e,clone.Len(),clone.lens,C.test_counter(7)))
   must(cudaQwen35PagedOwners!=nil&&cudaQwen35PagedOwners.k==clone&&clone.pool.copyFailure.Load()!=0,"failure lost actual owner")
   retireBefore:=C.test_counter(4);func(){defer func(){must(recover()!=nil,"terminal Clone accepted")}();clone.Clone()}();func(){defer func(){must(recover()!=nil,"terminal Free accepted")}();clone.Free()}()
   must(C.test_counter(4)==retireBefore&&k.Len()==14&&k.pool.K[0]!=nil,"terminal path released source")
