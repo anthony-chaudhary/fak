@@ -22,8 +22,10 @@ import (
 // NOT a learned model — identical text yields an identical vector and texts that
 // share tokens score higher cosine similarity, which is exactly what a drop-in
 // embeddings endpoint needs for deterministic tests, semantic-cache keys, and
-// nearest-neighbour smoke checks. A configured EmbeddingPooling selects the separately admitted causal model
-// provider in embeddings_causal.go. Unset configuration preserves this hashing backend.
+// nearest-neighbour smoke checks. A live encoder worker (embedding_worker.go)
+// takes precedence when installed; otherwise a configured EmbeddingPooling
+// selects the separately admitted causal model provider in
+// embeddings_causal.go. Unset configuration preserves this hashing backend.
 // ---------------------------------------------------------------------------
 
 const (
@@ -80,16 +82,24 @@ type EmbeddingUsage struct {
 	TotalTokens  int `json:"total_tokens"`
 }
 
-// handleEmbeddings serves POST /v1/embeddings. It is fully self-contained — no
-// upstream model round-trip — so it works in CI / drop-in mode identically to a
-// live deployment. Batch input (an array) returns one vector per item; the
-// vectors are deterministic feature-hash projections (see embedText).
+// handleEmbeddings serves POST /v1/embeddings. A live encoder worker
+// (SetEmbeddingEncoderWorker, embedding_worker.go) takes precedence when
+// installed; otherwise a configured EmbeddingPooling selects the separately
+// admitted causal model provider in embeddings_causal.go; unset configuration
+// preserves this self-contained hashing backend — no upstream model round-trip
+// — so it works in CI / drop-in mode identically to a live deployment. Batch
+// input (an array) returns one vector per item; the hashing-backend vectors are
+// deterministic feature-hash projections (see embedText).
 func (s *Server) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
 	var req EmbeddingsRequest
 	if !decodeRequestBody(w, r, &req) {
+		return
+	}
+	if wk := GetEmbeddingEncoderWorker(); wk != nil {
+		s.handleEncoderEmbeddings(w, r, req, wk)
 		return
 	}
 	if s.causalEmbeddings != nil {

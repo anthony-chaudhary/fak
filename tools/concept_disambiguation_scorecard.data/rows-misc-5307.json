@@ -46,8 +46,8 @@
       "definition": "internal/resume (cmd/fak/resume.go): SourcePolicy is the source-governor policy the resume path evaluates - the rules deciding whether a stalled source/account may be resumed given its ledger.",
       "distinction": "The RESUME source-governor policy - NOT ViewPolicy (a shared-task scope policy) and NOT the guard capability floor; it governs source resumption, not tool admission or view scope.",
       "distinct_from": [
-        "cov5307-view-policy",
-        "capability-floor"
+        "capability-floor",
+        "sharedtask-viewpolicy"
       ],
       "aliases": [],
       "grounding": "SourcePolicy",
@@ -57,27 +57,7 @@
       "verdict": "defined",
       "gaps": []
     },
-    {
-      "id": "cov5307-view-policy",
-      "canonical": "ViewPolicy (shared-task view-scope policy)",
-      "family": "policy-capability",
-      "kind": "symbol",
-      "definition": "internal/sharedtask (cmd/fak/sharedtask_endpoint.go): ViewPolicy caps what a shared-task viewer may see - a MaxScope on the shared-task endpoint's returned data.",
-      "distinction": "A shared-task VIEW-SCOPE cap - NOT SourcePolicy (a resume governor) and NOT PolicyKnobRegistry; it limits visibility, not resumption or amendment.",
-      "distinct_from": [
-        "cov5307-source-policy",
-        "cov5307-policy-knob-registry",
-        "sharedtask-viewpolicy",
-        "x2-policy-capability-tierpolicy"
-      ],
-      "aliases": [],
-      "grounding": "ViewPolicy",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "",
-      "parent": "",
-      "verdict": "defined",
-      "gaps": []
-    },
+
     {
       "id": "cov5307-env-adapter-capability",
       "canonical": "EnvAdapterCapability (benchmark env-adapter capability)",
@@ -308,27 +288,7 @@
       "verdict": "defined",
       "gaps": []
     },
-    {
-      "id": "cov5307-engine-route",
-      "canonical": "EngineRoute (routing target's engine route)",
-      "family": "gateway-engine",
-      "kind": "symbol",
-      "definition": "internal/modelroute/account.go Target.EngineRoute: returns the engine-route string for a routing Target - which serving engine/backend a routed request lands on.",
-      "distinction": "The ENGINE-ROUTE string of a target - NOT DecisionRecord (the recorded routing decision) and NOT HarnessCandidates; it names the engine, not the decision or the options.",
-      "distinct_from": [
-        "cov5307-decision-record",
-        "decision-kernel",
-        "x-gateway-engine-engineroute",
-        "x2-gateway-engine-routeengine"
-      ],
-      "aliases": [],
-      "grounding": "EngineRoute",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "",
-      "parent": "",
-      "verdict": "defined",
-      "gaps": []
-    },
+
     {
       "id": "cov5307-decision-record",
       "canonical": "DecisionRecord (recorded routing decision)",
@@ -337,9 +297,9 @@
       "definition": "internal/modelroute (gateway/routing_observability.go): DecisionRecord is the recorded routing DECISION (version, chosen target, overhead) emitted for observability after a route resolves.",
       "distinction": "The RECORDED routing decision (for telemetry) - NOT EngineRoute (the chosen engine string inside it) and NOT the live Decision being made; it is the observability artifact.",
       "distinct_from": [
-        "cov5307-engine-route",
         "decision-kernel",
-        "x2-decision-decisionjournal"
+        "x2-decision-decisionjournal",
+        "x-gateway-engine-engineroute"
       ],
       "aliases": [],
       "grounding": "DecisionRecord",
@@ -362,25 +322,6 @@
       ],
       "aliases": [],
       "grounding": "EvictionPolicy",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "",
-      "parent": "",
-      "verdict": "defined",
-      "gaps": []
-    },
-    {
-      "id": "cov5307-support-maturity",
-      "canonical": "supportmaturity (support-maturity rung scale)",
-      "family": "support-maturity",
-      "kind": "subsystem",
-      "definition": "internal/supportmaturity (internal/milestonereport uses M4Correct): the support-maturity rung scale (M0..M4) grading how mature a subsystem's support is; maturedRung = M4Correct is the top rung a milestone requires.",
-      "distinction": "The MATURITY RUNG scale (M0..M4 support grades) - NOT a single milestone report and NOT capability-floor; it is the ladder milestones are scored against.",
-      "distinct_from": [
-        "support-maturity",
-        "maturity"
-      ],
-      "aliases": [],
-      "grounding": "supportmaturity",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
       "parent": "",

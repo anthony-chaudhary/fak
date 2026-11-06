@@ -54,7 +54,6 @@
         "x2-context-ctx-basecontextplan"
       ],
       "aliases": [
-        "basecontextplan",
         "maybeplananthropicraw"
       ],
       "grounding": "planof",
@@ -64,25 +63,7 @@
       "verdict": "defined",
       "gaps": []
     },
-    {
-      "id": "x2-plan-autosizecontextplan",
-      "canonical": "AutoSizeContextPlan (compute headroom sizer)",
-      "family": "plan",
-      "kind": "symbol",
-      "definition": "compute.AutoSizeContextPlan takes a ContextSizeConfig and a MemoryPlan weight set plus available bytes and returns the auto-sized context token budget and the fitted MemoryPlan for a serve.",
-      "distinction": "It SIZES a compute MemoryPlan against host headroom, NOT a ctxplan resident view of conversation history nor a routed model plan.",
-      "distinct_from": [
-        "MemoryPlan (compute)",
-        "x2-context-ctx-autosizecontextplan"
-      ],
-      "aliases": [],
-      "grounding": "autosizecontextplan",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "",
-      "parent": "",
-      "verdict": "defined",
-      "gaps": []
-    },
+
     {
       "id": "x2-plan-vulkanplan",
       "canonical": "vulkan_plan (Vulkan command-buffer compute plan)",

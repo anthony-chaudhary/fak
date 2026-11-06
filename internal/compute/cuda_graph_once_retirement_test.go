@@ -66,6 +66,7 @@ func TestCUDAGraphOnceRetirementContract(t *testing.T) {
 		t.Fatal("unchecked free returned to graph arena")
 	}
 	ordered(methods["GraphOnceBegin"], "input.Dtype != F32", "!graphOnceArenaBufferLegal(b, true)", "C.fcuda_graph_prewarm", "C.fak_graph_once_begin")
+	ordered(methods["GraphOnceBegin"], "graphOnceBindKVLocked(c, pos)", "C.fcuda_graph_prewarm", "c.graphOnce = s", "C.fak_graph_once_create", "C.fak_graph_once_begin")
 	root := readCUDASource(t, "cuda_kernels.cu")
 	ordered(root, "#include \"cuda/kv_precision.cuh\"", "#include \"cuda/graph_capture_once.cuh\"")
 	state := readCUDASource(t, "cuda_graph_once_state.go")
@@ -104,6 +105,13 @@ func TestCUDAGraphOnceRetirementContract(t *testing.T) {
 			t.Fatalf("missing ticket bound %q", token)
 		}
 	}
+	for _, token := range []string{"kvBindingAttempted", "kvBound", "d.cap > maxFloats", "d.len != pos*w", "graphOnceKVSlotsValid", "live.len > live.cap", "s.kvTickets[at]", "C.size_t(saved.cap*4)"} {
+		if !strings.Contains(state, token) {
+			t.Fatalf("missing complete KV reservation contract %q", token)
+		}
+	}
+	ordered(state, "s.kvBindingAttempted = true", "id := uint64(C.fcuda_alloc_reservation_id(d.ptr, C.size_t(bytes)))", "if id == 0", "s.kvBound = true")
+	ordered(methods["graphOnceSameKV"], "graphOnceKVSlotsValid()", "pos != s.next", "row.len != pos*w")
 	// kv_snapshot_release_refused itself is bound to generic Free's full refusal
 	// inventory by TestCUDAKVSnapshotReleaseSourceContract, not reimplemented here.
 }
@@ -178,9 +186,9 @@ func TestCUDAGraphOnceRetirementHost(t *testing.T) {
 			t.Fatal("actual graph state declarations missing")
 		}
 
-		replace := strings.NewReplacer("C.fak_graph_once_arena_release_checked", "fakeArenaRelease", "C.fak_graph_once_arena_failed", "fakeFailed", "C.fak_graph_once_release", "fakeGraphRelease", "C.fcuda_alloc_reservation_id", "fakeReservationID", "C.fcuda_alloc_reservations_match", "fakeReservationBatch", "C.uint64_t", "uint64", "C.int", "int", "C.size_t", "uintptr")
+		replace := strings.NewReplacer("C.fak_graph_once_arena_release_checked", "fakeArenaRelease", "C.fak_graph_once_arena_failed", "fakeFailed", "C.fak_graph_once_release", "fakeGraphRelease", "C.fcuda_alloc_reservation_id", "fakeReservationID", "C.fcuda_alloc_reservations_match", "fakeReservationBatch", "C.fcuda_graph_prewarm", "fakePrewarm", "C.fak_graph_once_create", "fakeCreate", "C.fak_graph_once_begin", "fakeBegin", "C.fak_graph_once_end", "fakeEnd", "C.fak_graph_once_copy_input", "fakeCopyInput", "C.fak_graph_once_replay", "fakeReplay", "C.uint64_t", "uint64", "C.int", "int", "C.size_t", "uintptr")
 		program += "\n" + replace.Replace(state[start:]) + "\n"
-		for _, name := range []string{"graphOnceCheck", "graphOnceArenaBufferLegal", "graphOnceRequireDependenciesLocked", "graphOnceReleaseLocked"} {
+		for _, name := range []string{"graphOnceCheck", "graphOnceArenaBufferLegal", "graphOnceRequireDependenciesLocked", "graphOnceReleaseLocked", "graphOnceSameKV", "GraphOnceBegin", "GraphOnceEnd", "GraphOnceSave", "GraphOnceReplay"} {
 			if methods[name] == "" {
 				t.Fatalf("missing production method %s", name)
 			}
@@ -279,25 +287,48 @@ int main(){
 }
 `
 const graphOnceRetirementGoShim = `package main
-import("fmt";"runtime";"unsafe")
+import("fmt";"runtime";"unsafe";"sync";"sync/atomic")
 type MemoryClass int
 const(MemoryScratchpad MemoryClass=iota;MemoryActivation;MemoryWeights)
 const F32=1
 const DeviceFaultExecution=1
 type cudaBuf struct{be *cudaBackend;bornGen uint64;invalid bool;ptr unsafe.Pointer;n,device,scalesN int;scales unsafe.Pointer;budgetedWeightBytes int64;managedWeight,managed,graphOncePinned bool;class MemoryClass;host uintptr;hostDt,hostLo int;hostKeep any}
 func(b *cudaBuf)invalidForSubmit()bool{return b!=nil&&b.invalid}
-type Tensor struct{buf any}
+type Tensor struct{buf any;Dtype Dtype}
+func(t Tensor)Backend()*cudaBackend{return t.buf.(*cudaBuf).be}
+func(t Tensor)Numel()int{return t.buf.(*cudaBuf).n/4}
+type KVStore interface{}
 type ucKey struct{host uintptr;dt,lo int}
 var uploadCache=map[ucKey]Tensor{}
-type cudaKV struct{}
-type dslice struct{}
+const KVPrecisionF32=0
+type KVConfig struct{NumLayers,NumKVHeads,HeadDim,Precision int}
+type cudaKVSnapshotCopy struct{}
+type cudaKV struct{be *cudaBackend;cfg KVConfig;maxPos int;K,Kraw,V []dslice;pos []int;releaseRetained bool;snapshotCopy *cudaKVSnapshotCopy}
+func(k *cudaKV)stride()int{return k.cfg.NumKVHeads*k.cfg.HeadDim}
+type dslice struct{ptr unsafe.Pointer;len,cap int;dtype Dtype}
 type Dtype = int
 type Layout = int
 type HostBuffer = any
 type latch struct{code int}
 func(l *latch)Observe(_ int,_ string,code int){if l.code==0 {l.code=code}}
 func(l *latch)Admit(_ string)error{if l.code!=0{return fmt.Errorf("stopped %d",l.code)};return nil}
-type cudaBackend struct{graphOnce *cudaGraphOnceState;faultLatch *latch;fenceGen uint64}
+type cudaBackend struct{graphOnce *cudaGraphOnceState;faultLatch *latch;fenceGen uint64;capturing bool}
+func(c *cudaBackend)cudaBufForSubmit(t Tensor)*cudaBuf{b:=t.buf.(*cudaBuf);c.graphOnceObserveLocked(b);return b}
+var cudaMu sync.Mutex
+var graphEnabled=true
+var cudaKernelProfileOn bool
+var cudaCaptureOnceMode=struct{enabled bool}{true}
+const graphPrewarmDepth=1
+func cudaAsyncGraphOnceAllowed()bool{return true}
+var cudaGraphOnceWitnessCaptures,cudaGraphOnceWitnessReplays uint64
+var cudaGraphReplays atomic.Int64
+var prewarms,creates,begins,ends,copies,replays,launchStatus int
+func fakePrewarm(int){prewarms++}
+func fakeCreate(_ int,p *unsafe.Pointer)int{creates++;*p=unsafe.Pointer(new(int));return 0}
+func fakeBegin(unsafe.Pointer,int)int{begins++;return 0}
+func fakeEnd(unsafe.Pointer)int{ends++;return launchStatus}
+func fakeCopyInput(unsafe.Pointer,unsafe.Pointer,unsafe.Pointer,uintptr)int{copies++;return 0}
+func fakeReplay(unsafe.Pointer,int)int{replays++;return launchStatus}
 
 type fakeReservation struct{bytes uintptr;id uint64}
 var fakeReservations map[unsafe.Pointer]fakeReservation
@@ -319,18 +350,45 @@ func fakeGraphRelease(owner *unsafe.Pointer)int{graphCalls++;if graphStatus!=0{r
 func fakeArenaRelease(p unsafe.Pointer,_ uintptr,_ int)int{if stopped!=0{return stopped};calls++;if calls==failAt{return fakeFailed(719)};delete(fakeReservations,p);return 0}
 func require(ok bool,why string){if !ok{panic(why)}}
 func caught(f func())(value any){defer func(){value=recover()}();f();return nil}
-func setup()(*cudaBackend,[]*cudaBuf){
+func resetFixture(){
  fakeReservations=map[unsafe.Pointer]fakeReservation{};nextReservation=0;ticketQueries=0;ticketBatches=0;ticketSupported=true
  calls=0;graphCalls=0;failAt=0;graphStatus=0;stopped=0;uploadCache=map[ucKey]Tensor{}
+ cudaGraphOnceOwner=nil;prewarms=0;creates=0;begins=0;ends=0;copies=0;replays=0;launchStatus=0
+ cudaGraphOnceWitnessCaptures=0;cudaGraphOnceWitnessReplays=0;cudaGraphReplays.Store(0)
+}
+func fixtureKV(c *cudaBackend)*cudaKV{
+ k:=&cudaKV{be:c,cfg:KVConfig{2,1,2,KVPrecisionF32},maxPos:4,K:make([]dslice,2),Kraw:make([]dslice,2),V:make([]dslice,2)}
+ for _,rows:=range [3][]dslice{k.K,k.Kraw,k.V}{for i:=range rows{storage:=new([8]float32);rows[i]=dslice{ptr:unsafe.Pointer(&storage[0]),cap:8,dtype:F32};fakeTrack(rows[i].ptr,32)}}
+ return k
+}
+func fixtureInput(c *cudaBackend)Tensor{
+ b:=&cudaBuf{be:c,ptr:unsafe.Pointer(new([4]float32)),n:16,class:MemoryWeights,hostKeep:new(int)};fakeTrackBuffer(b);return Tensor{buf:b,Dtype:F32}
+}
+func setup()(*cudaBackend,[]*cudaBuf){
+ resetFixture();c:=&cudaBackend{faultLatch:&latch{}}
  buffers:=make([]*cudaBuf,3)
- for i:=range buffers {buffers[i]=&cudaBuf{ptr:unsafe.Pointer(new(int)),n:16,class:MemoryScratchpad,hostKeep:new(int)}}
- buffers[0].class=MemoryWeights;buffers[0].host=1;buffers[0].hostDt=F32;uploadCache[ucKey{1,F32,0}]=Tensor{buffers[0]}
- c:=&cudaBackend{graphOnce:&cudaGraphOnceState{owner:unsafe.Pointer(new(int)),capturing:true,input:Tensor{buffers[0]}},faultLatch:&latch{}}
+ for i:=range buffers {buffers[i]=&cudaBuf{be:c,ptr:unsafe.Pointer(new(int)),n:16,class:MemoryScratchpad,hostKeep:new(int)}}
+ buffers[0].class=MemoryWeights;buffers[0].host=1;buffers[0].hostDt=F32;uploadCache[ucKey{1,F32,0}]=Tensor{buf:buffers[0],Dtype:F32}
+ c.graphOnce=&cudaGraphOnceState{kv:fixtureKV(c),owner:unsafe.Pointer(new(int)),capturing:true,input:Tensor{buf:buffers[0],Dtype:F32},next:1}
+ require(c.graphOnce.graphOnceBindKVLocked(c,0),"fixture complete KV binding")
  cudaGraphOnceOwner=c;for _,b:=range buffers{fakeTrackBuffer(b);c.graphOncePinLocked(b)};c.graphOnce.capturing=false;return c,buffers
 }
+func beginFixture()(*cudaBackend,*cudaKV,Tensor){resetFixture();c:=&cudaBackend{faultLatch:&latch{}};return c,fixtureKV(c),fixtureInput(c)}
+func captureFixture()(*cudaBackend,*cudaKV,Tensor){
+ c,k,input:=beginFixture();require(c.GraphOnceBegin(input,k,0),"actual Begin refused healthy capacity")
+ // Replace only the recording producer boundary: all captured layers have
+ // appended one row in Go, but no native kernel ran in this host fixture.
+ for _,rows:=range [3][]dslice{k.K,k.Kraw,k.V}{for i:=range rows{rows[i].len=k.stride()}}
+ k.pos=append(k.pos,0)
+ out:=&cudaBuf{be:c,ptr:unsafe.Pointer(new([4]float32)),n:16,class:MemoryActivation};fakeTrackBuffer(out);c.graphOncePinLocked(out)
+ c.GraphOnceEnd();output:=Tensor{buf:out,Dtype:F32};c.GraphOnceSave(output)
+ return c,k,output
+}
+
 `
 const graphOnceRetirementGoMain = `
 func main(){
+ kvReservationControls()
  reservationControls()
  dependencyControls()
  c,b:=setup();c.graphOnceReleaseLocked();require(c.graphOnce==nil&&cudaGraphOnceOwner==nil&&calls==3&&graphCalls==1&&len(uploadCache)==0,"healthy owner retirement")
@@ -346,7 +404,7 @@ func main(){
  }
  c,b=setup();graphStatus=700;require(caught(c.graphOnceReleaseLocked)!=nil&&calls==0&&c.graphOnce.owner!=nil&&b[0].graphOncePinned,"failed graph retirement unpinned arena")
  c,b=setup();b[1].scales=unsafe.Pointer(new(int));require(caught(c.graphOnceReleaseLocked)!=nil&&calls==0&&graphCalls==0&&c.graphOnce!=nil,"malformed later member partially retired")
- c,b=setup();foreign:=&cudaBuf{};uploadCache[ucKey{1,F32,0}]=Tensor{foreign};c.graphOnceReleaseLocked();require(uploadCache[ucKey{1,F32,0}].buf==foreign,"retiring stale input evicted foreign cache owner")
+ c,b=setup();foreign:=&cudaBuf{};uploadCache[ucKey{1,F32,0}]=Tensor{buf:foreign,Dtype:F32};c.graphOnceReleaseLocked();require(uploadCache[ucKey{1,F32,0}].buf==foreign,"retiring stale input evicted foreign cache owner")
  c,b=setup();c.graphOnce.capturing=true;require(caught(c.graphOnceReleaseLocked)!=nil&&calls==0&&graphCalls==0&&b[0].graphOncePinned,"capture cleanup reached native")
  c,b=setup();cudaGraphOnceOwner=&cudaBackend{};require(caught(c.graphOnceReleaseLocked)!=nil&&calls==0&&graphCalls==0,"foreign owner retired")
  c,b=setup();require(graphOnceArenaBufferLegal(b[0],true)&&!graphOnceArenaBufferLegal(b[0],false),"F32 input role lost")
@@ -416,15 +474,75 @@ func reservationControls(){
   c,owned=setup();s=c.graphOnce;before:=ticketBatches
   switch mode{
   case 0:s.reservationIDs=s.reservationIDs[:len(s.reservationIDs)-1]
-  case 1:s.reservationPointers[0]=unsafe.Pointer(new(int))
-  case 2:s.reservationIDs[0]=0
+  case 1:s.reservationPointers[s.dependencies[owned[0]].reservationIndex]=unsafe.Pointer(new(int))
+  case 2:s.reservationIDs[s.dependencies[owned[0]].reservationIndex]=0
   case 3:r:=s.dependencies[owned[1]];r.reservationIndex=int(^uint(0)>>1);s.dependencies[owned[1]]=r
-  case 4:s.reservationBytes[0]++
-  case 5:fakeTrack(owned[0].ptr,uintptr(owned[0].n));s.reservationIDs[0]=fakeReservations[owned[0].ptr].id
+  case 4:s.reservationBytes[s.dependencies[owned[0]].reservationIndex]++
+  case 5:fakeTrack(owned[0].ptr,uintptr(owned[0].n));s.reservationIDs[s.dependencies[owned[0]].reservationIndex]=fakeReservations[owned[0].ptr].id
   }
   require(!s.graphOnceDependenciesValid()&&ticketBatches==before,"malformed ticket array crossed cgo or refreshed immutable receipt")
  }
  c,_=setup();s=c.graphOnce;ticketSupported=false
  require(!s.graphOnceDependenciesValid(),"default native profile accepted a saved nonzero ticket")
 }
+func kvReservationControls(){
+ // Mathematical metadata boundary only: these fake registry extents do not
+ // allocate a multi-gigabyte buffer or claim a native allocator observation.
+ boundC,boundK,_:=beginFixture();limit:=int(^uint(0)>>1)/4;if limit>2147483647{limit=2147483647}
+ for _,rows:=range [3][]dslice{boundK.K,boundK.Kraw,boundK.V}{for i:=range rows{rows[i].cap=limit;fakeTrack(rows[i].ptr,uintptr(limit*4))}}
+ boundary:=&cudaGraphOnceState{kv:boundK};require(boundary.graphOnceBindKVLocked(boundC,0),"exact signed/host byte capacity boundary refused")
+ slots,ok:=boundary.graphOnceKVSlotsValid();require(ok&&slots==6,"boundary slots not retained")
+ boundK.K[0].cap=limit+1;queriesBefore:=ticketQueries
+ tooLarge:=&cudaGraphOnceState{kv:boundK};require(!tooLarge.graphOnceBindKVLocked(boundC,0)&&ticketQueries==queriesBefore,"above-bound capacity queried native identity")
+ boundC,boundK,_=beginFixture();boundK.maxPos=2147483646;boundK.cfg.NumKVHeads=2;boundK.cfg.HeadDim=1
+ queriesBefore=ticketQueries;tooLarge=&cudaGraphOnceState{kv:boundK};require(!tooLarge.graphOnceBindKVLocked(boundC,0)&&ticketQueries==queriesBefore,"position-times-width bound applied after identity acquisition")
+ c,k,output:=captureFixture();s:=c.graphOnce;ids:=append([]uint64(nil),s.kvTickets...);queries:=ticketQueries
+ for pos:=1;pos<4;pos++{
+  input:=fixtureInput(c);batches:=ticketBatches
+  got,used:=c.GraphOnceReplay(input,k,pos)
+  require(used&&got.buf==output.buf&&s.next==pos+1&&len(k.pos)==pos+1&&ticketQueries==queries&&ticketBatches==batches+1,"actual replay changed ticket identity or failed bookkeeping")
+  for _,rows:=range [3][]dslice{k.K,k.Kraw,k.V}{for _,row:=range rows{require(row.len==(pos+1)*k.stride()&&row.cap==8,"replay changed capacity instead of logical rows")}}
+  for i,id:=range ids{require(s.kvTickets[i]==id&&uint64(s.reservationIDs[i])==id,"append refreshed frozen KV ticket")}
+ }
+ require(prewarms==1&&creates==1&&begins==1&&ends==1&&replays==3&&cudaGraphOnceWitnessReplays==3&&c.fenceGen==4,"actual capture/replay boundary counters wrong")
+ _,used:=c.GraphOnceReplay(fixtureInput(c),k,4)
+ require(!used&&c.graphOnce==nil&&graphCalls==1&&calls==2,"full store did not retire graph before refusing further replay")
+ for _,rows:=range [3][]dslice{k.K,k.Kraw,k.V}{for _,row:=range rows{_,live:=fakeReservations[row.ptr];require(live&&row.len==8,"arena retirement freed or rewrote borrowed KV")}}
+ for plane:=0;plane<3;plane++{
+  c,k,_=captureFixture();s=c.graphOnce;row:=[3]dslice{k.K[1],k.Kraw[1],k.V[1]}[plane];slot:=3+plane;id:=s.kvTickets[slot];oldNext,oldRows:=s.next,len(k.pos);fence:=c.fenceGen
+  fakeTrack(row.ptr,uintptr(row.cap*4)) // same exact base/capacity, distinct native reservation
+  require(caught(func(){c.GraphOnceReplay(fixtureInput(c),k,1)})!=nil,"KV ABA replay returned normally")
+  require(copies==0&&replays==0&&calls==0&&graphCalls==0&&c.fenceGen==fence&&s.next==oldNext&&len(k.pos)==oldRows,"KV refusal occurred after effects")
+  require(stopped==-75092&&s.kvTickets[slot]==id&&c.graphOnce==s&&s.kv==k&&cudaGraphOnceOwner==c,"KV refusal lost owner or refreshed identity")
+ }
+ for _,boundary:=range []string{"end","save","release"}{
+  c,k,output=captureFixture();s=c.graphOnce;row:=k.V[1];fakeTrack(row.ptr,uintptr(row.cap*4));beforeEnd:=ends
+  if boundary=="end" {s.capturing=true;c.capturing=true;require(caught(c.GraphOnceEnd)!=nil,"stale KV End returned normally")}else if boundary=="save" {require(caught(func(){c.GraphOnceSave(output)})!=nil,"stale KV Save returned normally")}else{require(caught(c.graphOnceReleaseLocked)!=nil,"stale KV release returned normally")}
+  require(ends==beforeEnd&&calls==0&&graphCalls==0&&c.graphOnce==s&&s.kv==k,"stale KV boundary crossed native effect")
+ }
+ mutations:=[]func(*cudaKV){
+  func(k *cudaKV){k.Kraw=k.Kraw[:1]},func(k *cudaKV){k.V=k.V[:1]},func(k *cudaKV){k.cfg.NumLayers=1},
+  func(k *cudaKV){k.K[1].ptr=nil},func(k *cudaKV){k.Kraw[1].dtype=F32+1},func(k *cudaKV){k.V[1].cap=7},
+  func(k *cudaKV){k.K[0].cap=int(^uint(0)>>1)/4+1},func(k *cudaKV){k.K[0].len=-1},
+  func(k *cudaKV){k.cfg.NumKVHeads=int(^uint(0)>>1);k.cfg.HeadDim=2},func(k *cudaKV){k.cfg.Precision=1},
+  func(k *cudaKV){k.Kraw[1]=k.K[0]},func(k *cudaKV){k.releaseRetained=true},func(k *cudaKV){k.snapshotCopy=&cudaKVSnapshotCopy{}},
+ }
+ for _,mutate:=range mutations{
+  var input Tensor;c,k,input=beginFixture();mutate(k)
+  require(!c.GraphOnceBegin(input,k,0)&&c.graphOnce==nil&&cudaGraphOnceOwner==nil&&prewarms==0&&creates==0&&begins==0,"invalid KV crossed graph creation/prewarm")
+ }
+ c,k,_=beginFixture();local:=&cudaGraphOnceState{kv:k};last:=k.V[1];delete(fakeReservations,last.ptr)
+ require(!local.graphOnceBindKVLocked(c,0)&&!local.kvBound,"missing capacity ticket admitted")
+ fakeTrack(last.ptr,uintptr(last.cap*4));beforeQueries:=ticketQueries
+ require(!local.graphOnceBindKVLocked(c,0)&&ticketQueries==beforeQueries&&!local.kvBound,"failed observation refreshed KV tickets")
+ c,k,_=captureFixture();s=c.graphOnce;k.cfg.NumKVHeads=2;k.cfg.HeadDim=1
+ require(!s.graphOnceDependenciesValid(),"equal-stride geometry rebind accepted")
+ c,k,_=captureFixture();s=c.graphOnce;k.Kraw=k.Kraw[:1]
+ require(!s.graphOnceDependenciesValid(),"short plane indexed before inventory refusal")
+ c,k,_=captureFixture();s=c.graphOnce;k.V[1].len=k.V[1].cap+1
+ require(!s.graphOnceDependenciesValid(),"logical row beyond retained capacity admitted")
+ c,k,_=captureFixture();s=c.graphOnce;row:=k.K[0];slot:=0;id:=s.kvTickets[slot];fakeReservations[row.ptr]=fakeReservation{bytes:uintptr(row.len*4),id:id}
+ require(!s.graphOnceDependenciesValid(),"logical row byte count substituted for full allocation capacity")
+}
+
 `

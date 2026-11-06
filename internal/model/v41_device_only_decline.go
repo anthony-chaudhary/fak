@@ -30,6 +30,7 @@ func (s *Session) v41BindDeviceOnlyDeclineRefusals(st *v41ForwardState) {
 	st.expertGateUp = v41DeviceOnlyGateUp(s, st.expertGateUp)
 	st.expertDown = v41DeviceOnlyDown(s, st.expertDown)
 	st.routedExpert = v41DeviceOnlyRoutedExpert(s, st.routedExpert)
+	st.expertPanel = v41DeviceOnlyExpertPanel(s, st.expertPanel)
 }
 
 func v41DeviceOnlyDense(s *Session, f v41DenseProjectionFunc) v41DenseProjectionFunc {
@@ -101,5 +102,20 @@ func v41DeviceOnlyDown(s *Session, f v41ExpertDownFunc) v41ExpertDownFunc {
 			}
 		}
 		return nil, v41DownError, s.v41DeviceOnlyDeclined(layer, "routed-expert-down")
+	}
+}
+
+// v41DeviceOnlyExpertPanel is the device-only wrapper for the batched
+// prefill-expert panel seam: an unbound or declining panel refuses typed
+// instead of handing the group back to the host stream.
+func v41DeviceOnlyExpertPanel(s *Session, f v41ExpertPanelFunc) v41ExpertPanelFunc {
+	return func(layer int, stem string, rows []v41ExpertRow, inputs [][]float32, weights []float32) ([][]float32, v41ExpertPanelOutcome, error) {
+		if f != nil {
+			y, outcome, err := f(layer, stem, rows, inputs, weights)
+			if outcome != v41PanelDeclined {
+				return y, outcome, err
+			}
+		}
+		return nil, v41PanelError, s.v41DeviceOnlyDeclined(layer, "routed-expert-panel")
 	}
 }

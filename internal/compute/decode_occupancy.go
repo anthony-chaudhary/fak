@@ -308,17 +308,17 @@ type DecodeGeometry struct {
 	KVLen    int // N: KV-cache length streamed by the flash inner loop this step
 }
 
-// DecodeTraffic is the HBM traffic of one decode attention layer: the bytes the kernel AS WRITTEN
-// streams, the bytes a GQA-reuse-optimal kernel would stream, the wasted re-read between them, and
-// the arithmetic intensity. Every field is an exact operand count (f32), host-identical. The
-// waste term is what the __ldcs / one-block-per-KV-head reuse candidates target; the intensity is
-// the memory-bound verdict (~0.5 FLOP/byte) that makes decode attention a streaming problem.
+// DecodeTraffic is the analytical operand traffic of one decode attention layer:
+// independent-query-head streaming, ideal GQA reuse, redundant K/V reads, and
+// arithmetic intensity. DecodeHBMTraffic uses F32; DecodeHBMTrafficForKV uses its
+// explicit attended K/V layout with F32 Q/O. These counts do not measure cache
+// or physical HBM traffic and do not establish that a backend realizes the layout.
 type DecodeTraffic struct {
-	Streamed     int64   // HBM bytes k_flash_attention actually moves (K/V re-read per query head)
-	ReuseOptimal int64   // HBM bytes if GQA siblings shared one K/V stream (per KV head)
+	Streamed     int64   // modeled operand bytes with K/V re-read per query head
+	ReuseOptimal int64   // modeled operand bytes with one K/V stream per KV head
 	KVReuseWaste int64   // Streamed − ReuseOptimal — the redundant K/V re-read (≥ 0)
 	KVStreamFrac float64 // K/V stream bytes / Streamed — how much of decode traffic is the KV stream
-	Intensity    float64 // FLOPs / Streamed bytes — the roofline intensity (memory-bound ≈ 0.5)
+	Intensity    float64 // modeled FLOPs / Streamed operand bytes
 }
 
 // DecodeHBMTraffic models one decode attention layer at geometry g. Both the as-written and the
@@ -353,6 +353,68 @@ func DecodeHBMTraffic(g DecodeGeometry) DecodeTraffic {
 		KVStreamFrac: ratio(kvStreamed, streamed),
 		Intensity:    ratio(flops, streamed),
 	}
+}
+
+// DecodeHBMTrafficForKV models the same independent-query-head and ideal GQA
+// reuse streams as DecodeHBMTraffic with an explicit attended storage layout.
+// elementBytes is the width of each K or V code. scaleBytes is charged ONCE per
+// position, KV head and plane, not per element: FP8 has two four-byte scales per
+// paired K/V row. Accepted layouts are (4,0), (2,0), and (1,4).
+//
+// Q and O stay F32. Exact raw-K eviction storage is not read by attention and is
+// excluded. These are analytical operand counts, not measured HBM/cache traffic,
+// a claim about a selected kernel, or a capability/precision activation. A path
+// that widens separate workspace needs its own additional traffic accounting.
+// Invalid geometry/layout or any unrepresentable count returns false; saturation
+// must not manufacture a valid-looking reuse or intensity result. Existing F32
+// callers and DecodeGapReport continue using the unchanged legacy helper.
+func DecodeHBMTrafficForKV(g DecodeGeometry, elementBytes, scaleBytes int) (DecodeTraffic, bool) {
+	if !((elementBytes == 4 || elementBytes == 2) && scaleBytes == 0 ||
+		elementBytes == 1 && scaleBytes == 4) ||
+		g.NHeads <= 0 || g.NKVHeads <= 0 || g.HeadDim <= 0 || g.KVLen <= 0 ||
+		g.NHeads%g.NKVHeads != 0 {
+		return DecodeTraffic{}, false
+	}
+	const maxCount int64 = 1<<63 - 1
+	multiply := func(values ...int64) (int64, bool) {
+		product := int64(1)
+		for _, value := range values {
+			if value <= 0 || product > maxCount/value {
+				return 0, false
+			}
+			product *= value
+		}
+		return product, true
+	}
+	nH, nKV, hd, n := int64(g.NHeads), int64(g.NKVHeads), int64(g.HeadDim), int64(g.KVLen)
+	qo, ok := multiply(8, nH, hd)
+	if !ok {
+		return DecodeTraffic{}, false
+	}
+	perPlane, ok := multiply(hd, int64(elementBytes))
+	if !ok || int64(scaleBytes) > maxCount-perPlane {
+		return DecodeTraffic{}, false
+	}
+	perPlane += int64(scaleBytes)
+	kvStreamed, ok := multiply(2, nH, n, perPlane)
+	if !ok || qo > maxCount-kvStreamed {
+		return DecodeTraffic{}, false
+	}
+	kvOptimal, ok := multiply(2, nKV, n, perPlane)
+	if !ok || qo > maxCount-kvOptimal {
+		return DecodeTraffic{}, false
+	}
+	flops, ok := multiply(4, nH, n, hd)
+	if !ok {
+		return DecodeTraffic{}, false
+	}
+	streamed, optimal := qo+kvStreamed, qo+kvOptimal
+	return DecodeTraffic{
+		Streamed: streamed, ReuseOptimal: optimal,
+		KVReuseWaste: streamed - optimal,
+		KVStreamFrac: ratio(kvStreamed, streamed),
+		Intensity:    ratio(flops, streamed),
+	}, true
 }
 
 // decodeMemoryBoundRidge is the roofline ridge point (FLOP/byte) below which a kernel is memory-

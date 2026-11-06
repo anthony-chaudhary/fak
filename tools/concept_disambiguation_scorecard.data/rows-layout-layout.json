@@ -1,0 +1,303 @@
+{
+  "rows": [
+    {
+      "id": "layout-model-cache-layout",
+      "canonical": "ModelCacheLayout (cachelayout)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "The per-layer cache-type registry derived once at load from a config's layer_types plus shared recurrent geometry, whose per-layer Kind/Sliceable/axis answers are the single source of truth the swap, checkpoint and block-store seams route through.",
+      "distinction": "It is the DERIVED per-layer registry the seams consume, not the input geometry struct (CacheLayoutGeometry) and not a tensor element-order Layout; its constructor NewModelCacheLayout classifies unknown layers as boundary-only, never sliceable.",
+      "distinct_from": [
+        "layout-cache-layout-geometry",
+        "layout-tensor"
+      ],
+      "aliases": [
+        "NewModelCacheLayout"
+      ],
+      "grounding": "ModelCacheLayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "layout-cache-layout-geometry",
+      "canonical": "CacheLayoutGeometry (cachelayout)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "The plain geometry struct (KV-head count, head dim, linear value heads, conv kernel dim) callers adapt from model.Config so the cachelayout registry stays dependency-free.",
+      "distinction": "It is the INPUT geometry fed to NewModelCacheLayout, not the derived per-layer registry (ModelCacheLayout) it produces and not a byte-level KV record format.",
+      "distinct_from": [
+        "layout-model-cache-layout",
+        "layout-v41-kv-cache-layout"
+      ],
+      "aliases": [],
+      "grounding": "CacheLayoutGeometry",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "layout-v41-kv-cache-layout",
+      "canonical": "V4.1 paged KV record byte geometry (v41kv.V41KVCacheLayout)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "The typed byte geometry of one V4.1 paged KV record for a single token (per-format NoPE/RoPE widths, tile size and bytes-per-token), derived from the published FlashMLA get_meta()/get_bytes_per_token() and fail-closed validated before it may size or address a cache.",
+      "distinction": "It is the per-record TYPE whose instances come from the closed published table, not that whole-set census map itself (V41KVCacheLayouts), not the per-layer KV state arrangement selected by compression ratio (V4FlashKVLayout), not the standard-vs-MLA cache variant seam, and not the key-vs-value plane selector of an already-materialized paged pool.",
+      "distinct_from": [
+        "layout-v4-flash-kv-layout",
+        "kvlayout-interface",
+        "layout-paged-kv-key-plane"
+      ],
+      "aliases": [
+        "ErrV41KVCacheLayout"
+      ],
+      "grounding": "V41KVCacheLayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "layout-v4-flash-kv-layout",
+      "canonical": "V4FlashKVLayout (model)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "The closed per-layer V4 Flash KV state layout selected by one published compression ratio - window-only (ratio 0: the 128-token circular window with no compressor) or overlapping (ratio 4: window plus overlapping compressor and a separate indexer cache).",
+      "distinction": "It arranges per-layer KV STATE (window/compressor/indexer) by ratio, not the byte geometry of one paged KV record (V41KVCacheLayout) and not a quantization scale placement.",
+      "distinct_from": [
+        "layout-v41-kv-cache-layout",
+        "kvlayout-interface"
+      ],
+      "aliases": [],
+      "grounding": "V4FlashKVLayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "layout-v41-engram-layout",
+      "canonical": "V41EngramLayout (model)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "The checkpoint-materialized V4.1 Engram hash layout (per-layer TokenMap, Multipliers, Primes and Rows with ngram/head geometry) whose conversion artifacts the runtime consumes without reproducing the tokenizer normalization or NumPy RNG that made them.",
+      "distinction": "It is the Engram hash-table layout carried by GGUF metadata and checked against its published derivation, not a KV-cache record format and not an mHC mix-weight geometry; cloneV41EngramLayout deep-copies it and ValidateV41PublishedEngramLayout checks the published geometry against its derivation.",
+      "distinct_from": [
+        "layout-v41-kv-cache-layout",
+        "layout-v41-mhc-weight-layout"
+      ],
+      "aliases": [
+        "cloneV41EngramLayout",
+        "ValidateV41PublishedEngramLayout"
+      ],
+      "grounding": "V41EngramLayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "layout-v41-mhc-weight-layout",
+      "canonical": "v41MHCWeightLayout (model forward)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "The Model method reporting how an admitted mHC mixes weight tensor is laid out - flat for the published flattened-four-stream projection (24 x 4H logical or the artifact's 4H x 24 storage transpose) versus the reduced form - failing closed when the leaf is absent or holds neither admitted geometry.",
+      "distinction": "It interprets one mHC weight tensor's storage arrangement at forward time, not the Engram hash-table layout and not a KV-cache record format; the Named variant takes the leaf tensor name while the plain form fixes mhc.mixes.weight.",
+      "distinct_from": [
+        "layout-v41-engram-layout",
+        "layout-v41-kv-cache-layout"
+      ],
+      "aliases": [
+        "v41MHCWeightLayoutNamed"
+      ],
+      "grounding": "v41MHCWeightLayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "layout-moe-expert-dispatch",
+      "canonical": "expert-dispatch layout declaration (Config.MoELayout)",
+      "family": "layout",
+      "kind": "config",
+      "definition": "The Config.MoELayout admission field naming an explicit expert-dispatch layout a checkpoint declares beyond the default routed-MoE path, where only DeepSeek-V4's w4a4_megamoe (MXFP4 weights, 32-element block scale, E8M0 shared scale) is admitted today and empty keeps every legacy checkpoint on the byte-identical path.",
+      "distinction": "It is a checkpoint admission claim checked as a unit with its weight format and block-scale fields, not the modelLayout model selector, not a tensor element order, and not a serving dispatch mechanism (no dispatch path consumes it yet).",
+      "distinct_from": [
+        "x-layout-modellayout",
+        "layout-tensor"
+      ],
+      "aliases": [],
+      "grounding": "MoELayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "layout-nvfp4-scale-offset",
+      "canonical": "nvfp4ScaleLayoutOffset (compute)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "The compute helper computing one scale byte's offset inside the 128x4-tiled NVFP4 scale image, shared by SwizzleNVFP4Scales/UnswizzleNVFP4Scales and the CUDA block-scaled KV packing path.",
+      "distinction": "It is the per-byte OFFSET arithmetic within one tiled scale image, not the tile-dimension and padding arithmetic (nvfp4ScaleLayoutGeometry) and not the family-level scale-placement enum.",
+      "distinct_from": [
+        "nvfp4-scale-layout-geometry",
+        "layout-scale-placement"
+      ],
+      "aliases": [],
+      "grounding": "nvfp4ScaleLayoutOffset",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "layout-contract",
+      "canonical": "layoutcontract (compute tensor-layout contract registry)",
+      "family": "layout",
+      "kind": "subsystem",
+      "definition": "The internal/compute/layoutcontract package: the declarative registry of tensor layout contracts (weight storage order, scale placement, interleave width, padding rule) for every quantized kernel family in-tree - Q4_K, Q8_0, NVFP4, MXFP4 - failing closed on unknown families.",
+      "distinction": "It is the per-family CONTRACT registry (typed Contract entries with Validate), not the element-order Layout type and not any single kernel's runtime repack path.",
+      "distinct_from": [
+        "layout-tensor",
+        "layout-scale-placement",
+        "x-layout-layoutcontract-verb",
+        "x-layout-layoutcontract-registry"
+      ],
+      "aliases": [],
+      "grounding": "layoutcontract",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "layout-scale-placement",
+      "canonical": "per-block scale placement (layoutcontract.ScaleLayout)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "The typed ScaleLayout enum naming where a quantized family's per-block scales live relative to the weight payload - ScaleLinear row-major arrays or the ScaleTiled128x4 TensorRT-LLM NVFP4 tile image - a vocabulary studymonitor's scale_layout evidence field mirrors.",
+      "distinction": "It names scale PLACEMENT inside a contract entry (linear vs 128x4-tiled), not the per-byte offset arithmetic inside the tiled image (nvfp4ScaleLayoutOffset), not the tile geometry, and not the weight storage order.",
+      "distinct_from": [
+        "layout-contract",
+        "nvfp4-scale-layout-geometry",
+        "layout-nvfp4-scale-offset"
+      ],
+      "aliases": [],
+      "grounding": "ScaleLayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "layout-paged-kv-key-plane",
+      "canonical": "paged KV key-plane selector (cudaPagedKV keyLayout)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "The boolean keyLayout parameter on the CUDA paged-KV gather/view/snapshot path selecting whether the operation addresses the key plane or the value plane of the resident paged pool.",
+      "distinction": "It selects WHICH plane of an already-materialized paged pool a read gathers, not how a KV record's bytes are formatted (V41KVCacheLayout) and not a per-layer state arrangement.",
+      "distinct_from": [
+        "layout-v41-kv-cache-layout",
+        "layout-v4-flash-kv-layout"
+      ],
+      "aliases": [],
+      "grounding": "keyLayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "layout-field-layout-info",
+      "canonical": "FieldLayoutInfo (strix)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "The strix false-sharing analysis record capturing one struct field's layout and domain placement - name, byte offset, size and cache-line placement - reported per field in the line-alignment verdict.",
+      "distinction": "It describes HOST struct-field placement for cache-line alignment analysis, not a tensor payload contract and not a KV-cache layout.",
+      "distinct_from": [
+        "layout-contract",
+        "layout-tensor"
+      ],
+      "aliases": [],
+      "grounding": "FieldLayoutInfo",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "layout-expected-input-layout",
+      "canonical": "ExpectedInputLayout (studymonitor)",
+      "family": "layout",
+      "kind": "config",
+      "definition": "The InventorySourceEvidence field (expected_input_layout) recording the input storage order a kernel study observed so the loader packing path can be checked against it, empty until a study fills it and validated against the KnownExpectedInputLayouts starter vocabulary.",
+      "distinction": "It is one of four layout-obligation evidence fields on a kernel inventory record (with swizzle_pattern, scale_layout, packing_source), not the predicate that checks them (HasLayoutObligation) and not a runtime layout contract.",
+      "distinct_from": [
+        "layout-has-layout-obligation",
+        "layout-scale-placement",
+        "layout-contract"
+      ],
+      "aliases": [],
+      "grounding": "ExpectedInputLayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "layout-has-layout-obligation",
+      "canonical": "HasLayoutObligation (studymonitor)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "The InventorySourceEvidence predicate reporting whether at least one layout-obligation field (expected_input_layout, swizzle_pattern, scale_layout, packing_source) is filled, whitespace counting as unfilled.",
+      "distinction": "It is the boolean OBLIGATION CHECK over the four evidence fields, used to refuse layout fields on non-kernel records, not any single field's value and not a kernel layout itself.",
+      "distinct_from": [
+        "layout-expected-input-layout",
+        "layout-contract"
+      ],
+      "aliases": [],
+      "grounding": "HasLayoutObligation",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "layout-diag-vsf",
+      "canonical": "diag_vsf_layout (RTX5090 NVFP4 study diagnostic)",
+      "family": "layout",
+      "kind": "doc-term",
+      "definition": "The diag_vsf_layout.py numerical diagnostic from the RTX 5090 (SM120) concept study that builds structured-lognormal-gain synthetic caches and measures 2.7x-10x higher relative L2 error for the in-tree swizzled V-scale layout versus the linear overlay, proving the overlay required.",
+      "distinction": "It is the study's evidence SCRIPT for the NVFP4 V-scale arrangement question, not the scale-tile geometry arithmetic and not a shipped fak kernel or layout contract.",
+      "distinct_from": [
+        "nvfp4-scale-layout-geometry",
+        "layout-scale-placement"
+      ],
+      "aliases": [],
+      "grounding": "diag_vsf_layout",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

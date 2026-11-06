@@ -1,0 +1,425 @@
+{
+  "rows": [
+    {
+      "id": "wp-assumption-witnessed",
+      "canonical": "AssumptionWitnessed (ctxplan assumption-source value)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The ctxplan.AssumptionSource value marking a planning assumption as backed by independently witnessed evidence rather than user statement, inference, or staleness.",
+      "distinction": "An assumption-provenance label inside ctxplan; it neither records a world-state witness nor grades a completion claim.",
+      "distinct_from": [
+        "claim"
+      ],
+      "aliases": [],
+      "grounding": "AssumptionWitnessed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "wp-benchmark-witnesses",
+      "canonical": "BenchmarkWitnesses (debtlane related-evidence mentions)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The debtlane lane Related field listing the benchmark-authority mentions that witness a debt lane's benchmark claims.",
+      "distinction": "A mention list attached to a debt lane; it is not a benchmark run, a WitnessRecord evidence type, or a witness outcome.",
+      "distinct_from": [
+        "x-witness-proof-witnessrecord",
+        "w4a-benchmarkwitnesses"
+      ],
+      "aliases": [],
+      "grounding": "BenchmarkWitnesses",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "wp-derive-file-witness",
+      "canonical": "deriveFileWitness (vdso file-call world-state witness)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The unexported vdso helper that derives the external world-state witness string for a file or directory tool call from its arguments.",
+      "distinction": "Produces the witness string for a file call; it does not resolve or corroborate claims, which is the WitnessResolver's job.",
+      "distinct_from": [
+        "witness-resolver"
+      ],
+      "aliases": [],
+      "grounding": "deriveFileWitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "wp-disp-claim-unwitnessed-continue",
+      "canonical": "DispClaimUnwitnessedContinue (stopgate disposition)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The stopgate Disposition returned when a completion claim lacks a verified receipt but the gate refuses to end the run, continuing to demand the witness.",
+      "distinction": "Keeps the loop alive after an unwitnessed claim; contrasts with DispClaimUnwitnessedGiveUp, which terminates, and DispClaimWitnessed, which accepts.",
+      "distinct_from": [
+        "wp-disp-claim-unwitnessed-giveup",
+        "wp-disp-claim-witnessed",
+        "w4a-dispclaimunwitnessedcontinue"
+      ],
+      "aliases": [],
+      "grounding": "DispClaimUnwitnessedContinue",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "wp-disp-claim-unwitnessed-giveup",
+      "canonical": "DispClaimUnwitnessedGiveUp (stopgate disposition)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The stopgate Disposition terminating a run whose completion claim stays unwitnessed past the gate's continuation budget.",
+      "distinction": "Ends the run on persistent unwitnessed claims; contrasts with DispClaimUnwitnessedContinue, which still demands the witness, and DispClaimWitnessed, which accepts a verified one.",
+      "distinct_from": [
+        "wp-disp-claim-unwitnessed-continue",
+        "wp-disp-claim-witnessed",
+        "w4a-dispclaimunwitnessedgiveup"
+      ],
+      "aliases": [],
+      "grounding": "DispClaimUnwitnessedGiveUp",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "wp-disp-claim-witnessed",
+      "canonical": "DispClaimWitnessed (stopgate disposition)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The stopgate Disposition accepting a completion claim because its receipt verified as witnessed.",
+      "distinction": "Accepts a verified claim; contrasts with the two unwitnessed dispositions that reject or defer it.",
+      "distinct_from": [
+        "wp-disp-claim-unwitnessed-continue",
+        "wp-disp-claim-unwitnessed-giveup",
+        "w4a-dispclaimwitnessed"
+      ],
+      "aliases": [],
+      "grounding": "DispClaimWitnessed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "wp-err-unwitnessed-diff",
+      "canonical": "ErrUnwitnessedDiff (observer sentinel error)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The observer sentinel error returned when a mutating step's claimed effect has no confirmed diff witness.",
+      "distinction": "A Go error value signaling the failure; the closed-vocabulary verdict recording the same state is WitnessUnwitnessedClaim.",
+      "distinct_from": [
+        "wp-witness-unwitnessed-claim",
+        "w4a-errunwitnesseddiff"
+      ],
+      "aliases": [],
+      "grounding": "ErrUnwitnessedDiff",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "wp-execution-witness",
+      "canonical": "ExecutionWitness (roofline receipt field)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The physical-execution witness string a roofline receipt must carry whenever it claims Simulated=false, naming the device or kernel evidence that the run actually executed on hardware.",
+      "distinction": "A receipt field gating physical versus simulated claims; it is not a world-state binding and not a self-reported claim.",
+      "distinct_from": [
+        "world-state-witness",
+        "w4a-executionwitness"
+      ],
+      "aliases": [],
+      "grounding": "ExecutionWitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "wp-glm-witness-record",
+      "canonical": "glm_witness_record (grandfathered GLM witness recorder tool)",
+      "family": "witness-proof",
+      "kind": "doc-term",
+      "definition": "The grandfathered Python tool tools/glm_witness_record.py that records GLM model witnesses, kept in the branch-role ref audit and mapped to platform/cluster/glm_witness.go by the factory migration.",
+      "distinction": "A legacy script artifact named in inventories; it is not the WitnessRecord evidence type and not a live witness resolver.",
+      "distinct_from": [
+        "x-witness-proof-witnessrecord",
+        "w4b-glmwitnessrecord"
+      ],
+      "aliases": [],
+      "grounding": "glm_witness_record",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "wp-import-witness",
+      "canonical": "IMPORT_WITNESS (committed-tree import hook gate)",
+      "family": "witness-proof",
+      "kind": "subsystem",
+      "definition": "The pre-push hook gate (fak hooks import-witness) that flags committed .go files importing module-local packages with zero tracked files at the witnessed revision, i.e. a forgotten git add of a whole package.",
+      "distinction": "A cheap structural tree-level build witness reading only the committed tree; it is not the heavy compile-integrity pre-push build gate and archives nothing.",
+      "distinct_from": [
+        "witness-proof-buildwitness",
+        "w4b-importwitness"
+      ],
+      "aliases": [],
+      "grounding": "IMPORT_WITNESS",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "wp-reason-integrity-refuted",
+      "canonical": "ReasonIntegrityRefuted (abi integrity-refuted refusal reason)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The abi refusal reason (wire INTEGRITY_REFUTED) raised when the witness resolver actively refutes a claimed effect, so the produced proof contradicts the claim instead of being merely absent.",
+      "distinction": "Positive contradiction of a claim; contrasts with UNWITNESSED, where no usable proof exists at all.",
+      "distinct_from": [
+        "x-witness-proof-unwitnessed",
+        "w4b-integrityrefuted"
+      ],
+      "aliases": [
+        "ReasonIntegrityRefuted"
+      ],
+      "grounding": "INTEGRITY_REFUTED",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "wp-launch-witness",
+      "canonical": "LaunchWitness (goal-runner launch result field)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The goal-runner launch witness string recorded on a goal launch result, e.g. the PLAN_ONLY marker proving which mode the runner actually entered.",
+      "distinction": "Launch-time provenance for a goal run; it is not a completion or stop-gate witness and carries no refusal reason.",
+      "distinct_from": [
+        "witness-outcome",
+        "w4b-launchwitness"
+      ],
+      "aliases": [],
+      "grounding": "LaunchWitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "wp-lfak-vulkan-v41-indexer-witness",
+      "canonical": "lfakvulkan_v41_indexer_witness (witness-instrumented Vulkan static library)",
+      "family": "witness-proof",
+      "kind": "config",
+      "definition": "The witness-instrumented Vulkan compute static library linked into internal/compute when the v41_indexer_witness build tag selects the V4.1 indexer witness variant instead of plain libfakvulkan.",
+      "distinction": "The link-time library artifact itself; the build tag that selects it, v41_indexer_witness, is a different concept.",
+      "distinct_from": [
+        "wp-v41-indexer-witness",
+        "w4b-lfakvulkanv41indexerwitness"
+      ],
+      "aliases": [],
+      "grounding": "lfakvulkan_v41_indexer_witness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "wp-reason-closure-witness-missing",
+      "canonical": "ReasonClosureWitnessMissing (issue closure-gate reason)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The issue-policy closure-gate reason (wire ISSUE_CLOSURE_WITNESS_MISSING) emitted when a ship or close request names no independently witnessed completion standard, or the witness grade falls below strong.",
+      "distinction": "The witness is absent or too weak; contrasts with ReasonClosureWitnessMismatch, where a witnessed standard exists but differs from the claimed one.",
+      "distinct_from": [
+        "wp-reason-closure-witness-mismatch",
+        "w4b-reasonclosurewitnessmissing"
+      ],
+      "aliases": [],
+      "grounding": "ReasonClosureWitnessMissing",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "wp-reason-closure-witness-mismatch",
+      "canonical": "ReasonClosureWitnessMismatch (issue closure-gate reason)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The issue-policy closure-gate reason (wire ISSUE_CLOSURE_WITNESS_MISMATCH) emitted when the closure's claimed completion standard differs from the independently witnessed standard.",
+      "distinction": "The witness exists but disagrees with the claim; contrasts with ReasonClosureWitnessMissing, where no adequate witness standard is named at all.",
+      "distinct_from": [
+        "wp-reason-closure-witness-missing",
+        "w4b-reasonclosurewitnessmismatch"
+      ],
+      "aliases": [],
+      "grounding": "ReasonClosureWitnessMismatch",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "wp-reason-stop-unwitnessed",
+      "canonical": "ReasonStopUnwitnessed (gateway stop-gate refusal reason)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The gateway stop-gate refusal reason (code 1070, wire STOP_UNWITNESSED, outside the frozen core reason range) raised when a turn wants to stop without a verified terminal receipt.",
+      "distinction": "The refusal reason that fires; the stopgate dispositions (DispClaimUnwitnessedContinue/GiveUp) are what the boundary decides afterwards.",
+      "distinct_from": [
+        "wp-disp-claim-unwitnessed-continue",
+        "w4c-stopunwitnessed"
+      ],
+      "aliases": [],
+      "grounding": "STOP_UNWITNESSED",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "wp-unwitnessed-count",
+      "canonical": "UnwitnessedCount (loop-recovery result counter)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The loop-recovery result counter of runs found in the ledger with no completion witness, recovered alongside orphaned runs by fak loop recover.",
+      "distinction": "A recovery-ledger counter over runs; it is not a refusal reason, a verdict, or the conceptbench claim-unwitnessed episode count.",
+      "distinct_from": [
+        "claim",
+        "w4c-unwitnessedcount"
+      ],
+      "aliases": [],
+      "grounding": "UnwitnessedCount",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "wp-v41-host-bf16-witness",
+      "canonical": "v41HostBF16Witness (V4.1 BF16 test-only witness switch)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The test-only atomic.Bool switch in the V4.1 BF16 publication path that turns on host-round and device-publication counters so a test can witness where each round was computed.",
+      "distinction": "An instrumentation switch read by production hot paths only while a test holds it on; it is not a published witness artifact nor a build-tag witness variant.",
+      "distinct_from": [
+        "wp-v41-indexer-witness",
+        "w4c-v41hostbf16witness"
+      ],
+      "aliases": [],
+      "grounding": "v41HostBF16Witness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "wp-v41-indexer-witness",
+      "canonical": "v41_indexer_witness (Vulkan witness build tag)",
+      "family": "witness-proof",
+      "kind": "config",
+      "definition": "The Go build tag that makes internal/compute link the witness-instrumented V4.1 indexer Vulkan static library instead of the plain libfakvulkan.",
+      "distinction": "The build tag selecting the witness variant; the library it links, lfakvulkan_v41_indexer_witness, is the separate artifact.",
+      "distinct_from": [
+        "wp-lfak-vulkan-v41-indexer-witness",
+        "w4c-v41indexerwitness"
+      ],
+      "aliases": [],
+      "grounding": "v41_indexer_witness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "wp-with-witness",
+      "canonical": "WithWitness (cachemeta entry option)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The cachemeta entry option that attaches an external world-state witness string, e.g. git:c0ffee, to a cache metadata entry.",
+      "distinction": "Attaches a witness to cache metadata; it does not create or verify the witness, unlike deriveFileWitness or the WitnessResolver.",
+      "distinct_from": [
+        "witness-resolver",
+        "x-goal25-witness-proof-pathwitness"
+      ],
+      "aliases": [],
+      "grounding": "WithWitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "wp-witness-unwitnessed-claim",
+      "canonical": "WitnessUnwitnessedClaim (observer mutation-evidence verdict)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The observer mutation-evidence verdict stating that a mutating step's claimed effect came back unwitnessed by the diff screen.",
+      "distinction": "A closed-vocabulary verdict value; the sentinel error reporting the same state is ErrUnwitnessedDiff, and the positive counterpart is WITNESS_DIFF_CONFIRMED.",
+      "distinct_from": [
+        "wp-err-unwitnessed-diff",
+        "w4c-witnessunwitnessedclaim"
+      ],
+      "aliases": [],
+      "grounding": "WitnessUnwitnessedClaim",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "wp-witness-verdict",
+      "canonical": "WitnessVerdict (observer mutation-evidence verdict type)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "The observer closed-vocabulary type for mutation-evidence verification verdicts, whose members are WITNESS_DIFF_CONFIRMED and WITNESS_UNWITNESSED_CLAIM.",
+      "distinction": "The verdict type over mutation evidence; it is not the abi kernel Verdict and not either of its member values.",
+      "distinct_from": [
+        "wp-witness-unwitnessed-claim",
+        "w4c-witnessverdict"
+      ],
+      "aliases": [],
+      "grounding": "WitnessVerdict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

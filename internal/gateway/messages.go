@@ -27,6 +27,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
+	"github.com/anthony-chaudhary/fak/pkg/anthropicbridge"
 )
 
 // anthropicMessageResponse is the buffered (non-streaming) /v1/messages body.
@@ -50,19 +51,16 @@ type anthropicMessageResponse struct {
 	Fak          *FakExt                   `json:"fak,omitempty"`
 }
 
-// anthropicUsage mirrors the Messages API usage object. The cache counters are
+// anthropicUsage is the Messages API usage object, aliased to the public shape
+// (pkg/anthropicbridge.MessagesUsage) so the gateway wire and the routed
+// /v1/messages translation share one definition. The cache counters are
 // load-bearing for the anthropic→anthropic proxy: when fak fronts the real API and
 // forwards the client's cache_control prefix byte-for-byte, the upstream returns a
 // cache_read_input_tokens hit — which the client (Claude Code) needs to see to
 // account a turn correctly. They are reported INDEPENDENTLY of input_tokens
 // (Anthropic's input_tokens is already the uncached remainder), and omitted when
 // zero so a local-model turn's usage shape is unchanged.
-type anthropicUsage struct {
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
-}
+type anthropicUsage = anthropicbridge.MessagesUsage
 
 type anthropicTurn struct {
 	ID     string
@@ -1288,38 +1286,12 @@ func anthropicSSESender(w http.ResponseWriter, flusher http.Flusher) func(event 
 	}
 }
 
+// streamAnthropicBlocks emits one finished turn's content blocks as Anthropic SSE
+// and closes the turn with the terminal pair. The rendering lives in the public
+// translator (pkg/anthropicbridge.StreamBlocks) — the exact code the routed
+// /v1/messages arm runs — so both wires stay byte-identical by construction.
 func streamAnthropicBlocks(send func(string, any), blocks []agent.AnthropicBlockOut, stop string, usage anthropicUsage) {
-	for i, blk := range blocks {
-		switch blk.Type {
-		case "tool_use":
-			send("content_block_start", map[string]any{
-				"type": "content_block_start", "index": i,
-				"content_block": map[string]any{"type": "tool_use", "id": blk.ID, "name": blk.Name, "input": map[string]any{}},
-			})
-			// The whole (already-validated) argument object as one input_json_delta.
-			send("content_block_delta", map[string]any{
-				"type": "content_block_delta", "index": i,
-				"delta": map[string]any{"type": "input_json_delta", "partial_json": string(blk.Input)},
-			})
-		default: // text
-			send("content_block_start", map[string]any{
-				"type": "content_block_start", "index": i,
-				"content_block": map[string]any{"type": "text", "text": ""},
-			})
-			send("content_block_delta", map[string]any{
-				"type": "content_block_delta", "index": i,
-				"delta": map[string]any{"type": "text_delta", "text": blk.Text},
-			})
-		}
-		send("content_block_stop", map[string]any{"type": "content_block_stop", "index": i})
-	}
-
-	// The terminal message_delta carries the REAL usage from the finished turn — the
-	// message_start figure was a pre-completion estimate. Report the upstream's true
-	// input_tokens (the uncached remainder) plus the cache counters, so a passthrough
-	// turn's cache hit reaches the client's accounting. Counters are omitted when zero
-	// (a local-model turn streams the same shape as before).
-	sendAnthropicTerminal(send, stop, usage)
+	anthropicbridge.StreamBlocks(send, blocks, stop, usage)
 }
 
 // handleAnthropicCountTokens answers POST /v1/messages/count_tokens with a cheap,

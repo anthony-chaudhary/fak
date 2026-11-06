@@ -83,7 +83,7 @@ func TestObservedPrefillRetargetAndLateCompletion(t *testing.T) {
 	finishOld := r.startObservedPrefill(old, r.prefillEpoch, 100, 0)
 	_, err := r.Retarget("", nil, map[string]struct{}{"a": {}}, func([]WorkerStatus) (fleetReservationPickResult, bool) {
 		return fleetReservationPickResult{workerID: "b", bookedOutputBlocks: 3}, true
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,12 +247,12 @@ func TestObservedPrefillPlacementEpochFencesABA(t *testing.T) {
 			return fleetReservationPickResult{workerID: id}, true
 		}
 	}
-	if _, err := r.Retarget("", nil, nil, pick("b")); err != nil {
+	if _, err := r.Retarget("", nil, nil, pick("b"), nil); err != nil {
 		t.Fatal(err)
 	}
 	// Restore A's health, deliberately allowing API-level same-worker reuse.
 	m.ProbeOnce(context.Background())
-	if _, err := r.Retarget("", nil, nil, pick("a")); err != nil {
+	if _, err := r.Retarget("", nil, nil, pick("a"), nil); err != nil {
 		t.Fatal(err)
 	}
 	if r.worker != oldWorker {

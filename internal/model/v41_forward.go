@@ -205,6 +205,14 @@ type v41ForwardState struct {
 	// routedPrefill binds full-forward EP work separately from incremental Step.
 	// It consumes original absolute positions and is never snapshot data.
 	routedPrefill v41RoutedPrefillFunc
+	// expertPanel is the OPTIONAL batched prefill-expert panel callback (DRC-K17).
+	// The session installs it only when its backend implements
+	// compute.V41PrefillExpertPanelBackend AND qualifies the panel for serving;
+	// when non-nil the grouped multi-token contraction offers each expert group's
+	// rows in bounded panels to it before the host cohort and the per-row stream.
+	// A nil callback (every build today) preserves the historical per-row stream
+	// byte-for-byte.
+	expertPanel v41ExpertPanelFunc
 	// cpuMiss is the OPTIONAL FAK_EXPERT_CPU_MISS=exact host arm beside
 	// routedLayer; nil keeps every pick on the device.
 	cpuMiss *v41CPUMissArm
@@ -402,7 +410,7 @@ func (m *Model) forwardV41WithHeadModeCore(ids []int, st *v41ForwardState, lastH
 		// The step-local run state carries the session-owned device gate/up callback
 		// (#13358) so the MoE loop offers each pick to the device seam. It is not
 		// step-local continuation data and is never written back below.
-		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, projectionRoute: st.projectionRoute, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, headNorm: st.headNorm, logitScaleBinding: st.logitScaleBinding, attentionNormBinding: st.attentionNormBinding, queryNorm: st.queryNorm, queryPrefix: st.queryPrefix, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScoreBinding: st.indexerScoreBinding, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, gatherOps: st.gatherOps, routedSumBinding: st.routedSumBinding, sharedAdd: st.sharedAdd, routedExpert: st.routedExpert, routedLayer: st.routedLayer, cpuMiss: st.cpuMiss, routedPrefill: st.routedPrefill, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
+		runState = &v41ForwardState{history: seq, expertGateUp: st.expertGateUp, expertDown: st.expertDown, projectionRoute: st.projectionRoute, groupedOutput: st.groupedOutput, engramProjection: st.engramProjection, mhcProjection: st.mhcProjection, mhcFFNProjection: st.mhcFFNProjection, headNorm: st.headNorm, logitScaleBinding: st.logitScaleBinding, attentionNormBinding: st.attentionNormBinding, queryNorm: st.queryNorm, queryPrefix: st.queryPrefix, kvNorm: st.kvNorm, ffnNorm: st.ffnNorm, compressorNorm: st.compressorNorm, indexKeyNorm: st.indexKeyNorm, indexerScoreBinding: st.indexerScoreBinding, indexScoreHealth: st.indexScoreHealth, sharedActivation: st.sharedActivation, tailRoPE: st.tailRoPE, gatherOps: st.gatherOps, routedSumBinding: st.routedSumBinding, sharedAdd: st.sharedAdd, routedExpert: st.routedExpert, routedLayer: st.routedLayer, cpuMiss: st.cpuMiss, routedPrefill: st.routedPrefill, expertPanel: st.expertPanel, mhcDevice: st.mhcDevice, callbackOwner: st.callbackOwner}
 		runState.copySharedAttentionFrom(st)
 		inputRun := st.beginAttentionInputRun(runState)
 		defer inputRun.close()
@@ -1061,6 +1069,7 @@ func (s *Session) v41State() *v41ForwardState {
 		s.v41Forward.routedSumBinding = s.v41CanonicalRoutedSumBinding()
 		s.v41Forward.sharedAdd = s.v41SharedAddFunc()
 		s.v41Forward.gatherOps = s.v41DeviceGatherOpsFunc()
+		s.v41Forward.expertPanel = s.v41ExpertPanelFunc()
 		s.v41Forward.kvNorm = s.v41BindKVNorm()
 		s.v41Forward.queryNorm = s.v41BindQueryNorm()
 		s.v41Forward.ffnNorm = s.v41BindFFNNorm()

@@ -1,0 +1,567 @@
+{
+  "rows": [
+    {
+      "id": "gep2-kernellaunchcount",
+      "canonical": "KernelLaunchCount",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Pointer-to-uint64 v3 receipt witness field counting the GPU kernels launched during the measured window, part of the host-overhead decomposition.",
+      "distinction": "A counted witness on one receipt, not the InterKernelGapSumUs gap metric beside it and not the coordinator kernel concept the family root names.",
+      "distinct_from": [
+        "receipt-v3-gateway-engine-interkernelgapsumus",
+        "kernel"
+      ],
+      "aliases": [
+        "kernel_launch_count"
+      ],
+      "grounding": "KernelLaunchCount",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-kernelobject",
+      "canonical": "KernelObject",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "uint64 AQL/HSA dispatch-packet field holding the GPU virtual address of the kernel code object or descriptor being dispatched.",
+      "distinction": "An address slot inside a dispatch packet, not a kernel decision ledger, not a Windows live-kernel fault event, and not the coordinator kernel concept.",
+      "distinct_from": [
+        "x-disambig-kernelledger",
+        "gateway-engine-livekernelevent",
+        "kernel"
+      ],
+      "aliases": [
+        "kernel_object"
+      ],
+      "grounding": "KernelObject",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-kernelpath",
+      "canonical": "KernelPath",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "String axis of the fitplan CalibrationKey identifying which kernel path a bandwidth or calibration row was measured under.",
+      "distinction": "A calibration-row identity axis, not a kernel timing-delta metric and not the coordinator kernel concept.",
+      "distinct_from": [
+        "kerneltimestampdelta",
+        "kernel"
+      ],
+      "aliases": [
+        "kernel_path"
+      ],
+      "grounding": "KernelPath",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-kernelprofiledelta",
+      "canonical": "KernelProfileDelta",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "compute-package function returning the per-kernel work accumulated between two cumulative KernelProfile snapshots, joined by revision.",
+      "distinction": "The difference of two snapshots, not the snapshot read itself and not the reader-registration predicate.",
+      "distinct_from": [
+        "gep2-kernelprofilesnapshot",
+        "gep2-kernelprofilereaderregistered",
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "KernelProfileDelta",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-kernelprofilereaderregistered",
+      "canonical": "KernelProfileReaderRegistered",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "compute-package predicate reporting whether a kernel profile reader is currently registered in the process-wide reader slot.",
+      "distinction": "A registration probe, not the cumulative snapshot read and not the delta join between two snapshots.",
+      "distinct_from": [
+        "gep2-kernelprofilesnapshot",
+        "gep2-kernelprofiledelta",
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "KernelProfileReaderRegistered",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-kernelprofilesnapshot",
+      "canonical": "KernelProfileSnapshot",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "compute-package function reading the registered backend's cumulative kernel profile, returning nil when no reader is registered.",
+      "distinction": "A point-in-time cumulative read, not the delta between two reads and not the registration probe.",
+      "distinct_from": [
+        "gep2-kernelprofiledelta",
+        "gep2-kernelprofilereaderregistered",
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "KernelProfileSnapshot",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-loadserveinkernelmodelplacederr",
+      "canonical": "loadServeInKernelModelPlacedErr",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "cmd/fak serve load helper performing the placed in-kernel model load while returning errors plus the memory plan it planned against instead of exiting via must().",
+      "distinction": "The error-returning twin driven by the two-phase fit-commit back-off, not the fatal-must loadServeInKernelModelPlaced it wraps.",
+      "distinct_from": [
+        "x2-gateway-engine-inkernelchat",
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "loadServeInKernelModelPlacedErr",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-megakernel",
+      "canonical": "MegaKernel",
+      "family": "gateway-engine",
+      "kind": "doc-term",
+      "definition": "Research design term for compiling an entire LLM forward pass into one persistent GPU kernel, as analyzed in the Metal fused-decode study for Qwen3.6-27B.",
+      "distinction": "A whole-model fused-kernel architecture idea from a research note, not a concrete launchable kernel struct such as the Wave32 GEMV decode kernel, and not the coordinator kernel concept.",
+      "distinct_from": [
+        "gep2-wave32gemvdecodekernel",
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "MegaKernel",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-mggraphsetgemvkernel",
+      "canonical": "mg_graph_set_gemv_kernel",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "cgo-bound Metal projection-graph entry point that pins which P=1 GEMV kernel mode the graph encodes, called from ProjectionGraph.SetGEMVKernel before first encode.",
+      "distinction": "The C-side pinning call for one Metal graph, not the Go GEMVKernelSet selector and receipt vocabulary it serves.",
+      "distinct_from": [
+        "gateway-engine-gemvkernelset",
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "mg_graph_set_gemv_kernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-newdockerengine",
+      "canonical": "NewDockerEngine",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "tb4bench constructor returning a Docker/Podman daemon client bound to a Unix socket or Windows named pipe for sandboxed benchmark runs.",
+      "distinction": "A container-daemon client constructor for tb4bench sandboxes, not a model-serving engine adapter such as NewVLLMEngine, and not the engine dispatch-seam concept.",
+      "distinct_from": [
+        "x-disambig-newvllmengine",
+        "engine"
+      ],
+      "aliases": [],
+      "grounding": "NewDockerEngine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+{
+      "id": "gep2-newturnkeyinkernelplanner",
+      "canonical": "newTurnkeyInKernelPlanner",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "cmd/fak constructor building the turnkey fak-up InKernelPlanner with resolved KV precision, derived compact-history budget, batch decode and the Halo device-execution requirement.",
+      "distinction": "The turnkey planner factory used by fak up, not the configured in-kernel planner construction seam positioned for the gateway planner binding.",
+      "distinct_from": [
+        "issue10046-gateway-configured-inkernelplanner-construction",
+        "x-gateway-engine-inkernelplanner",
+        "engine"
+      ],
+      "aliases": [],
+      "grounding": "newTurnkeyInKernelPlanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-phasekernel",
+      "canonical": "PhaseKernel",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "nativeperf.Phase constant kernel marking the exclusive GPU-kernel-execution slice of a request's decode host-work timeline.",
+      "distinction": "A per-request native performance phase label, not the subagent-trace gpu_kernel bucket and not the coordinator kernel concept.",
+      "distinct_from": [
+        "gep2-subagentphasegpukernel",
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "PhaseKernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-primaryengine",
+      "canonical": "PrimaryEngine",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Receipt and campaign field recording which Qwen3.8 engine (MTP or target-decode) ran as primary in a shadow or fan-out trial.",
+      "distinction": "A recorded role label on a receipt, not the engine type it stores and not the resolved effective-engine label of the all-in-one view.",
+      "distinct_from": [
+        "gep2-qwen38mtpengine",
+        "runtime-third-resolvedengine",
+        "engine"
+      ],
+      "aliases": [
+        "primary_engine"
+      ],
+      "grounding": "PrimaryEngine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-qwen35gdnkernelstage",
+      "canonical": "qwen35GDNKernelStage",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "compute-package mapper turning a Qwen3.5 GDN CUDA status code into the named failure stage from preflight through output-projection carried by Qwen35GDNKernelError.",
+      "distinction": "The stage-label derivation for GDN kernel errors, not the error type itself and not a kernel phase label.",
+      "distinct_from": [
+        "cov-debt250-gateway-engine-qwen35gdnkernelerror",
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "qwen35GDNKernelStage",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-qwen38enginemtp",
+      "canonical": "Qwen38EngineMTP",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Qwen38MTPEngine constant fak-native-qwen3.8-mtp naming the speculative multi-token-prediction execution path for Qwen3.8 requests.",
+      "distinction": "One closed enum value of the Qwen38MTPEngine type, not the type itself, not its target-decode sibling value, and not the validity predicate over the values.",
+      "distinct_from": [
+        "gep2-qwen38mtpengine",
+        "gep2-qwen38enginetargetdecode",
+        "gep2-validqwen38mtpengine",
+        "engine"
+      ],
+      "aliases": [],
+      "grounding": "Qwen38EngineMTP",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-qwen38enginetargetdecode",
+      "canonical": "Qwen38EngineTargetDecode",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Qwen38MTPEngine constant fak-native-qwen3.8-target-decode naming the non-speculative target-model-only decode path for Qwen3.8.",
+      "distinction": "The fallback and target-only enum value, not the MTP speculative value, not the engine type, and not the generic fak-native verification engine label.",
+      "distinct_from": [
+        "gep2-qwen38enginemtp",
+        "gep2-qwen38mtpengine",
+        "gep2-targetverificationengine",
+        "engine"
+      ],
+      "aliases": [],
+      "grounding": "Qwen38EngineTargetDecode",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-qwen38mtpengine",
+      "canonical": "Qwen38MTPEngine",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "String type identifying the fak-native execution path selected for a Qwen3.8 request, with closed values Qwen38EngineMTP and Qwen38EngineTargetDecode.",
+      "distinction": "The engine-identity type, not either of its two constant values and not the validQwen38MTPEngine closed-set predicate.",
+      "distinct_from": [
+        "gep2-qwen38enginemtp",
+        "gep2-qwen38enginetargetdecode",
+        "gep2-validqwen38mtpengine",
+        "engine"
+      ],
+      "aliases": [],
+      "grounding": "Qwen38MTPEngine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+{
+      "id": "gep2-routedexpertdevicekernel",
+      "canonical": "RoutedExpertDeviceKernel",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Optional compute.Backend capability interface whose implementations serve routed-expert FP8/MXFP4 GEMVs natively on the device, failing closed with ErrExpertDeviceKernelAbsent when absent.",
+      "distinction": "A device capability interface for expert GEMVs, not the host-side P=1 GEMV kernel selector and receipt set and not a concrete kernel symbol.",
+      "distinct_from": [
+        "gateway-engine-gemvkernelset",
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "RoutedExpertDeviceKernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-runkerneloracle",
+      "canonical": "runKernelOracle",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "fak-dev command handler implementing the kernel-oracle verb, joining llama.cpp test-backend-ops perf rows with fak Vulkan kernel timings at matching op, dtype and shape.",
+      "distinction": "The external-oracle comparison command, not the SelectedKernels ledger rows it consumes and not the coordinator kernel concept.",
+      "distinct_from": [
+        "gep2-selectedkernels",
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "runKernelOracle",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-runsubkernels",
+      "canonical": "RunSubkernels",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Strix validation option flag requesting that the selected subkernels be executed and parity-checked during amd-strix-validate runs.",
+      "distinction": "The run-the-list switch, not the subkernel parity unit itself and not the Subkernels selection list it gates.",
+      "distinct_from": [
+        "gep2-subkernels",
+        "gep2-subkernel",
+        "kernel"
+      ],
+      "aliases": [
+        "run_subkernels"
+      ],
+      "grounding": "RunSubkernels",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-selectedkernels",
+      "canonical": "SelectedKernels",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "NativeKernels ledger field holding the smallest prefix of per-kernel GPU-time rows whose share reaches the selected-coverage target, followed by one KernelOther row.",
+      "distinction": "A bounded summary of which kernels a native decode spent time in, not the kernel-oracle command that reads it and not raw kernel counters.",
+      "distinct_from": [
+        "gep2-runkerneloracle",
+        "x-gateway-engine-kernelcounters",
+        "kernel"
+      ],
+      "aliases": [
+        "selected_kernels"
+      ],
+      "grounding": "SelectedKernels",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-streamcopyavx512kernel",
+      "canonical": "streamCopyAVX512Kernel",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "amd64-only AVX-512 assembly stream-copy routine with store-only and load-only companions, used by the Strix weight-streaming path and gated by a physical CPUID check.",
+      "distinction": "A host-CPU memcpy optimization kernel, not a GPU decode GEMV kernel and not the coordinator kernel concept.",
+      "distinct_from": [
+        "gep2-wave32gemvdecodekernel",
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "streamCopyAVX512Kernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-subagentphasegpukernel",
+      "canonical": "SubagentPhaseGPUKernel",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "SubagentTraceSchema phase-bucket constant gpu_kernel attributing subagent execution time to raw GPU kernel work in the subagent timing decomposition.",
+      "distinction": "A subagent-trace attribution bucket, not the per-request nativeperf PhaseKernel phase label and not a concrete kernel symbol.",
+      "distinct_from": [
+        "gep2-phasekernel",
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "SubagentPhaseGPUKernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-subkernel",
+      "canonical": "Subkernel",
+      "family": "gateway-engine",
+      "kind": "concept",
+      "definition": "One named Strix op-level parity unit such as qwen35-embedding-gather, qwen35-sequence-kv or qwen35-partial-rope, validated against a typed oracle during amd-strix subkernel runs.",
+      "distinction": "The singular parity unit, not the plural Subkernels selection and result lists and not the RunSubkernels switch that triggers them.",
+      "distinct_from": [
+        "gep2-subkernels",
+        "gep2-runsubkernels",
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "subkernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-subkernels",
+      "canonical": "Subkernels",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Strix validation fields naming which subkernels were selected (option list) and how each parity-checked (receipt results).",
+      "distinction": "The plural selection and result lists, not one subkernel parity unit and not the RunSubkernels boolean gate.",
+      "distinct_from": [
+        "gep2-subkernel",
+        "gep2-runsubkernels",
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "Subkernels",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-targetverificationengine",
+      "canonical": "targetVerificationEngine",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "model-package constant fak-native stamped as the Engine label on verification receipts across the Qwen3.5 and Qwen3.8 verification paths.",
+      "distinction": "The generic fak-native engine label on verification receipts, not the Qwen3.8 target-decode enum value it sits beside and not the engine dispatch-seam concept.",
+      "distinct_from": [
+        "gep2-qwen38enginetargetdecode",
+        "engine"
+      ],
+      "aliases": [],
+      "grounding": "targetVerificationEngine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-validqwen38mtpengine",
+      "canonical": "validQwen38MTPEngine",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "model-package closed-set predicate accepting exactly the Qwen38MTPEngine values Qwen38EngineMTP and Qwen38EngineTargetDecode, enforced by Qwen38MTP receipt validation.",
+      "distinction": "The value-domain guard, not the engine type it guards and not either engine value.",
+      "distinct_from": [
+        "gep2-qwen38mtpengine",
+        "gep2-qwen38enginemtp",
+        "gep2-qwen38enginetargetdecode",
+        "engine"
+      ],
+      "aliases": [],
+      "grounding": "validQwen38MTPEngine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep2-wave32gemvdecodekernel",
+      "canonical": "Wave32GEMVDecodeKernel",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "gfx1151 Wave32 Q2_K decode GEMV struct owning the physical launch shape and the fail-closed admission gate that refuses dispatch without a validated hsaco/AQL launch proof instead of degrading to CPU.",
+      "distinction": "A concrete GPU decode GEMV kernel with an admission gate, not the host-side P=1 GEMV selector set and not the research megakernel idea.",
+      "distinct_from": [
+        "gateway-engine-gemvkernelset",
+        "gep2-megakernel",
+        "kernel"
+      ],
+      "aliases": [],
+      "grounding": "Wave32GEMVDecodeKernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

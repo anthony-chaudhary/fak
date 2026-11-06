@@ -744,6 +744,9 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 		// sizing predicate (serveArtifactCPUOffloadExperts) so arm selection and plan cannot disagree,
 		// and load the routed experts raw-resident on the host via the same Q4_K resident loader the
 		// pure-CPU FAK_Q4K arm uses.
+		if err := reportDroppedExpertRing("device-less --cpu-offload-experts host", os.Getenv); err != nil {
+			return nil, false, nil, gateway.StartupPhase{}, nil, err
+		}
 		loadMessages = append(loadMessages, serveQuantProvenance(artifactQuant, true))
 		if streamedOffload {
 			if err := fitServeStreamedCPUOffloadPathOnHost(ggufPath, residentRanks, contextBudgetTokens, hostFit); err != nil {
@@ -765,6 +768,9 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 		profile := withServeStartupMessages(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k-host", ggufPath, loadNanos)), loadMessages...)
 		return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}, nil, nil
 	case backend != nil && cpuOffloadExperts && cpuOffloadArm:
+		if err := reportDroppedExpertRing("--cpu-offload-experts", os.Getenv); err != nil {
+			return nil, false, nil, gateway.StartupPhase{}, nil, err
+		}
 		loadMessages = append(loadMessages, serveQuantProvenance(artifactQuant, true))
 		if !backend.Caps().UploadDtype {
 			return nil, false, nil, gateway.StartupPhase{}, nil, fmt.Errorf("fak serve: --cpu-offload-experts requires backend %q to advertise quantized UploadDtype (Q8_0 upload); use a quantized-upload backend or omit --cpu-offload-experts", backend.Name())
@@ -843,6 +849,12 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 			var memPlan compute.MemoryPlan
 			var err error
 			if residentRanks > 1 {
+				// A sharded rank never takes the ring placement: its band arithmetic is unsharded
+				// (the WithExpertShard veto inside serveActivatedExpertRingPathPlacement), so a
+				// named ring size would be silently ignored without this line.
+				if err := reportDroppedExpertRing("sharded expert-parallel resident-Q4_K", os.Getenv); err != nil {
+					return nil, false, nil, gateway.StartupPhase{}, nil, err
+				}
 				memPlan, err = fitAndPlanServeGGUFExpertParallelPathOnDevice(ggufPath, backend, residentRanks, contextBudgetTokens, fit)
 			} else {
 				memPlan, err = fitAndPlanServeGGUFPathOnDevice(ggufPath, backend, false, contextBudgetTokens, fit)
@@ -879,6 +891,9 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 		// Apple-Silicon Metal resident load (backend is nil, Metal device available):
 		// hold raw Q4_K / k-quant weights RESIDENT in Unified Memory (raw super-blocks, resident decode,
 		// dequant-fused Metal MSL GEMM kernels), eliminating the silent CPU Q8 dequantization loop.
+		if err := reportDroppedExpertRing("Apple-Silicon Metal resident-Q4_K", os.Getenv); err != nil {
+			return nil, false, nil, gateway.StartupPhase{}, nil, err
+		}
 		if err := fitServeGGUFPathOnHostForArm(ggufPath, serveLoadArmResidentQ4K, contextBudgetTokens, fit); err != nil {
 			return nil, false, nil, gateway.StartupPhase{}, nil, err
 		}
@@ -898,6 +913,9 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 		profile := withServeStartupMessages(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k", ggufPath, loadNanos)), loadMessages...)
 		return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}, nil, nil
 	case backend != nil:
+		if err := reportDroppedExpertRing("mixed-precision/f32 device", os.Getenv); err != nil {
+			return nil, false, nil, gateway.StartupPhase{}, nil, err
+		}
 		loadMessages = append(loadMessages, serveQuantProvenance(artifactQuant, false))
 		if backend.Caps().UploadDtype {
 			// A device backend that can consume Q8_0 uploads should not be forced through
@@ -948,6 +966,9 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 		return mm, false, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}, memPlan, nil
 	case (os.Getenv("FAK_Q4K") != "" && os.Getenv("FAK_Q4K") != "0") && artifactQuant.Q4KResident ||
 		servePQ2Artifact(artifactQuant) && os.Getenv("FAK_Q4K") != "0":
+		if err := reportDroppedExpertRing("pure-CPU FAK_Q4K", os.Getenv); err != nil {
+			return nil, false, nil, gateway.StartupPhase{}, nil, err
+		}
 		// CPU-path memory-fit pre-flight (#974): refuse cleanly with a typed FitTooBig BEFORE the
 		// all-resident load can drive MemAvailable to ~0 and OOM-wedge the host (parity with the
 		// device path's fit plan). Fail-open where host RAM is not probeable.
@@ -978,6 +999,9 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 		profile := withServeStartupMessages(toGatewayLoadProfile(prof.Snapshot("gguf-resident-q4k", ggufPath, loadNanos)), loadMessages...)
 		return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}, nil, nil
 	default:
+		if err := reportDroppedExpertRing("lean CPU", os.Getenv); err != nil {
+			return nil, false, nil, gateway.StartupPhase{}, nil, err
+		}
 		// CPU-path memory-fit pre-flight (#974): same clean FitTooBig refusal as the FAK_Q4K arm
 		// above, so the default lean CPU serve cannot OOM-wedge the host either.
 		if err := fitServeGGUFPathOnHost(ggufPath, false, contextBudgetTokens, fit); err != nil {

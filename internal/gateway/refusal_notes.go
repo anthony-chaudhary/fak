@@ -87,6 +87,15 @@ func defaultDenyOperatorRemedy(a ToolAdjudication) string {
 		if !known {
 			return "recovery=" + leaseRecoveryInspectAdmission + ": " + tool + " was refused by lease admission. Inspect the actual refusal claim and authority state before choosing a recovery; missing or unrecognized diagnostic metadata does not identify a failure class."
 		}
+		// The sanctioned-alternative note (remedyNote) already carries this exact
+		// sentence from Detail["remedy"]; repeating it here doubled every
+		// lease-admission refusal on the content channel. When the wire stored the
+		// same remedy, render only the typed recovery token, which tests and
+		// `fak recover <TOKEN>` key on. Wires with an empty or different
+		// Detail["remedy"] keep the full sentence below.
+		if remedy := strings.TrimSpace(a.Verdict.Detail["remedy"]); remedy != "" && remedy == diagnostic.remedy {
+			return "recovery=" + diagnostic.recovery
+		}
 		return "recovery=" + diagnostic.recovery + ": " + diagnostic.remedy
 	}
 	if reasonOrKind(a.Verdict) != "DEFAULT_DENY" {
@@ -261,7 +270,7 @@ func denySummary(adjs []ToolAdjudication) string {
 func adjudicationNote(adjs []ToolAdjudication) string {
 	denied := make([]string, 0, len(adjs))
 	deniedAdjs := make([]ToolAdjudication, 0, len(adjs))
-	repaired := make([]string, 0, len(adjs))
+	repairs := make([]ToolAdjudication, 0, len(adjs))
 	allowedLoops := make([]string, 0, len(adjs))
 	hasConfirmRecipe := false
 	hasCompiledSidestep := false
@@ -287,11 +296,11 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 			deniedAdjs = append(deniedAdjs, a)
 		case a.Admitted && a.Livelock != nil:
 			allowedLoops = append(allowedLoops, livelockInBandNote(a))
-		case a.Verdict.Kind == "TRANSFORM":
-			repaired = append(repaired, a.Tool)
+		case len(a.RepairedArguments) > 0:
+			repairs = append(repairs, a)
 		}
 	}
-	if len(denied) == 0 && len(repaired) == 0 && len(allowedLoops) == 0 {
+	if len(denied) == 0 && len(repairs) == 0 && len(allowedLoops) == 0 {
 		return ""
 	}
 	fragments := make([]negframe.Fragment, 0, 12)
@@ -330,16 +339,14 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 		writeOpaque(recoveryHint(deniedAdjs))
 		writeOpaque(complaintHint(deniedAdjs))
 	}
-	if len(repaired) > 0 {
+	if len(repairs) > 0 {
 		if len(denied) > 0 {
 			writeFak(" ")
 		}
-		writeFak("repaired arguments for: ")
-		writeOpaque(strings.Join(repaired, ", "))
-		writeFak(".")
+		renderRepairSummary(writeFak, writeOpaque, repairs)
 	}
 	if len(allowedLoops) > 0 {
-		if len(denied) > 0 || len(repaired) > 0 {
+		if len(denied) > 0 || len(repairs) > 0 {
 			writeFak(" ")
 		}
 		writeFak("observed repeated admitted tool call(s): ")
@@ -350,6 +357,83 @@ func adjudicationNote(adjs []ToolAdjudication) string {
 	// positive-voice pass. Tool names, remedies, notes, and other external spans remain
 	// byte-identical, even when they contain text that resembles a reframe idiom.
 	return journalReframeFragments(reframeJournalPath(), "", "gateway.refusal_note", reframeJournalArm(), fragments, time.Now())
+}
+
+// maxRepairGroups bounds the per-turn repair tally rendered on the content
+// channel; deeper tails collapse into one "+N more call(s)" clause.
+const maxRepairGroups = 5
+
+// repairGroup is one tool+mechanism tally entry of the per-turn repair summary.
+type repairGroup struct {
+	tool  string
+	tag   string
+	count int
+}
+
+// repairReasonTag names the mechanism that repaired one call, from the wire
+// verdict's bounded disclosure (Detail["autorepair"],
+// Detail["pattern_canonicalized"]) — constant tokens, never arg values.
+func repairReasonTag(a ToolAdjudication) string {
+	switch autorepair := a.Verdict.Detail["autorepair"]; autorepair {
+	case "read_to_fak_read":
+		return "path anchors"
+	case "grep_to_fak_grep", "glob_to_fak_glob":
+		if a.Verdict.Detail["pattern_canonicalized"] != "" {
+			return "brace escape"
+		}
+		return "path anchors"
+	case "sidestep":
+		return "sanctioned verb"
+	default:
+		if strings.Contains(a.Verdict.By, "reversibility") {
+			return "sanctioned verb"
+		}
+		return "args normalized"
+	}
+}
+
+// renderRepairSummary writes ONE bounded per-turn tally for every repaired
+// call — "repaired 4 call(s): Read x2 (path anchors), Grep x2 (brace escape)."
+// — instead of a per-call "repaired arguments for: <tool>" fragment each.
+// A session that repairs on every turn (the transparent rewrite canonicalizes
+// each admitted Read/Grep/Glob) previously injected one fragment per call per
+// turn; the audited session carried 83 of them and collapsed into malformed-call
+// churn. The tally keeps the per-turn cost constant regardless of call count.
+// Tool names are opaque spans; counts, mechanism tags, and the tail clause are
+// fak-authored framing.
+func renderRepairSummary(writeFak, writeOpaque func(string), repairs []ToolAdjudication) {
+	writeFak("repaired ")
+	writeFak(strconv.Itoa(len(repairs)))
+	writeFak(" call(s): ")
+	groups := make([]repairGroup, 0, len(repairs))
+	index := make(map[string]int, len(repairs))
+	for _, a := range repairs {
+		tag := repairReasonTag(a)
+		key := a.Tool + "\x00" + tag
+		if i, ok := index[key]; ok {
+			groups[i].count++
+			continue
+		}
+		index[key] = len(groups)
+		groups = append(groups, repairGroup{tool: a.Tool, tag: tag, count: 1})
+	}
+	shown := groups
+	if len(shown) > maxRepairGroups {
+		shown = shown[:maxRepairGroups]
+	}
+	shownCalls := 0
+	for i, g := range shown {
+		if i > 0 {
+			writeFak(", ")
+		}
+		writeOpaque(g.tool)
+		writeFak(" x" + strconv.Itoa(g.count) + " (" + g.tag + ")")
+		shownCalls += g.count
+	}
+	if rest := len(repairs) - shownCalls; rest > 0 {
+		writeFak(" +" + strconv.Itoa(rest) + " more call(s)")
+	}
+	writeFak(".")
 }
 
 func prependAdjudicationContentNote(content string, adjs []ToolAdjudication) string {

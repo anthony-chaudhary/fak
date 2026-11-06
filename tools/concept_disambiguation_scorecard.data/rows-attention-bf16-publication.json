@@ -23,30 +23,10 @@
       "canonical": "SupportsV41AttentionBF16 (attention eligibility method)",
       "family": "attention",
       "kind": "symbol",
-      "definition": "The backend method reporting whether the ordinary checked module is available and the requested positive row count fits the selected device geometry. The Vulkan implementation evaluates both predicates under its mutex.",
-      "distinction": "This is stable operation and geometry eligibility, not the execution call or a transient submission-health probe. It deliberately excludes active-batch, restore and sticky-fault state. The support-domain row describes the limits of the same method's affirmative result; this row describes its backend eligibility implementation.",
+      "definition": "The backend method reporting whether the ordinary checked module is available and the requested positive row count fits the selected device geometry - the loaded-operation and count-domain predicate consulted before selecting ordinary attention BF16 publication. The Vulkan implementation evaluates both predicates under its mutex.",
+      "distinction": "This is stable operation and geometry eligibility, not the execution call or a transient submission-health probe. It deliberately excludes active-batch, restore and sticky-fault state, and a true result is not physical qualification or a guarantee that the next operation will succeed: the operation separately checks transient state and tensor ownership.",
       "distinct_from": [
-        "v41-attention-bf16-operation",
-        "v41-attention-bf16-supports-domain"
-      ],
-      "aliases": [],
-      "grounding": "SupportsV41AttentionBF16",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "",
-      "parent": "",
-      "verdict": "defined",
-      "gaps": []
-    },
-    {
-      "id": "v41-attention-bf16-supports-domain",
-      "canonical": "SupportsV41AttentionBF16 (support domain)",
-      "family": "support-maturity",
-      "kind": "symbol",
-      "definition": "The loaded-operation and count-domain predicate used before selecting ordinary attention BF16 publication. It requires the native module capability and checked row geometry after host integer bounds.",
-      "distinction": "A true result is not physical qualification or a guarantee that the next operation will succeed. The operation separately checks transient state and tensor ownership. This is the support meaning of the same method, rather than a second operation: the attention-eligibility row describes its backend implementation.",
-      "distinct_from": [
-        "support",
-        "v41-attention-bf16-supports"
+        "v41-attention-bf16-operation"
       ],
       "aliases": [],
       "grounding": "SupportsV41AttentionBF16",
@@ -152,11 +132,11 @@
       "canonical": "fvk_v41_attention_bf16_count_supported (native geometry predicate)",
       "family": "attention",
       "kind": "symbol",
-      "definition": "The ordinary native count predicate for one attention BF16 row. It reuses the checked count helper, including signed count, byte extent, buffer cap and grid-stride workgroup limits.",
-      "distinction": "It bounds allocation and dispatch geometry; fvk_have_v41_attention_bf16 separately reports successful module initialization. Neither predicate performs arithmetic. The supported-domain row describes the scope of this same predicate's claim; this row describes the native geometry check.",
+      "definition": "The ordinary-exported native count predicate for one attention BF16 row. It delegates to the shared checked-BF16 count implementation, applying the same positive INT32 count, four-byte extent, device buffer cap and grid-stride workgroup limits as the historical witness count predicate.",
+      "distinction": "It bounds allocation and dispatch geometry; fvk_have_v41_attention_bf16 separately reports successful module initialization, and neither predicate performs arithmetic. This ordinary symbol is distinct from the witness-only fvk_v41_bf16_checked_count_supported export: both share geometry semantics without implying device or numerical qualification.",
       "distinct_from": [
         "v41-attention-bf16-have",
-        "v41-attention-bf16-count-domain"
+        "bf16-checked-count-supported"
       ],
       "aliases": [],
       "grounding": "fvk_v41_attention_bf16_count_supported",
@@ -178,25 +158,6 @@
       ],
       "aliases": [],
       "grounding": "fvk_have_v41_attention_bf16",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "",
-      "parent": "",
-      "verdict": "defined",
-      "gaps": []
-    },
-    {
-      "id": "v41-attention-bf16-count-domain",
-      "canonical": "fvk_v41_attention_bf16_count_supported (supported geometry domain)",
-      "family": "support-maturity",
-      "kind": "symbol",
-      "definition": "The ordinary-exported geometry predicate that delegates to the shared checked-BF16 count implementation. It applies the same positive INT32, four-byte extent, device buffer and grid-stride bounds as the historical witness count predicate.",
-      "distinction": "This ordinary symbol is distinct from the witness-only fvk_v41_bf16_checked_count_supported export. Both share geometry semantics without implying device or numerical qualification. This is the supported-domain meaning of the same export; the native-geometry row describes its implementation, not a separate predicate.",
-      "distinct_from": [
-        "bf16-checked-count-supported",
-        "v41-attention-bf16-count"
-      ],
-      "aliases": [],
-      "grounding": "fvk_v41_attention_bf16_count_supported",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
       "parent": "",

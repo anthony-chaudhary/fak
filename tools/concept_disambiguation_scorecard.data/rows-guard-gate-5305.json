@@ -781,7 +781,8 @@
       "distinction": "INSTALLS the token-rate admission gate - NOT gateRestoreByDigest (a context-restore gate) and NOT a triage-gate report switch; it wires a rate limiter into serve.",
       "distinct_from": [
         "cov5305-gate-restore-by-digest",
-        "gate"
+        "gate",
+        "guardgate-newtokenrategate"
       ],
       "aliases": [],
       "grounding": "SetTokenRateGate",

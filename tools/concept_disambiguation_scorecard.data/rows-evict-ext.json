@@ -71,7 +71,8 @@
         "evict-kvcache",
         "evict-evictor",
         "x-evict-evicted",
-        "evictkvowned"
+        "evictkvowned",
+        "evict-kv-evict-label"
       ],
       "aliases": [],
       "grounding": "evictkv",
@@ -91,7 +92,8 @@
       "distinct_from": [
         "Evictions (radixkv LRU counter)",
         "EvictColdest (kvmmu)",
-        "evict-kvcache"
+        "evict-kvcache",
+        "evict-one"
       ],
       "aliases": [],
       "grounding": "evictnode",
@@ -110,7 +112,8 @@
       "distinction": "It is the LRU/memory-pressure eviction counter, reported SEPARATELY from PolicyEvictions; a poison/quarantine purge increments PolicyEvictions (EvictNode), not this opportunistic counter.",
       "distinct_from": [
         "EvictNode (radixkv policy)",
-        "evict-kvcache"
+        "evict-kvcache",
+        "evict-one"
       ],
       "aliases": [],
       "grounding": "evictions",

@@ -18,8 +18,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-attngate",
       "canonical": "attn_gate",
@@ -37,8 +36,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-attnqnorm",
       "canonical": "attn_q_norm",
@@ -56,8 +54,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-fullattentioninterval",
       "canonical": "full_attention_interval",
@@ -76,8 +73,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-cmdpolicy",
       "canonical": "cmdPolicy",
@@ -95,8 +91,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-firepolicy",
       "canonical": "FirePolicy",
@@ -114,8 +109,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-fleetpolicydir",
       "canonical": "FLEET_POLICY_DIR",
@@ -133,8 +127,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-fleetpolicypath",
       "canonical": "FLEET_POLICY_PATH",
@@ -152,8 +145,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-fakcontext",
       "canonical": "fak_context",
@@ -172,8 +164,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-fakcontextplanner",
       "canonical": "fak_context_planner",
@@ -191,8 +182,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-contextcompacted",
       "canonical": "context_compacted",
@@ -210,8 +200,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-costevictions",
       "canonical": "CostEvictions",
@@ -229,8 +218,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-evictionlru",
       "canonical": "EvictionLRU",
@@ -248,8 +236,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-dispatchpool",
       "canonical": "DISPATCH_POOL",
@@ -267,8 +254,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-dispatchwitnessrequirement",
       "canonical": "DISPATCH_WITNESS_REQUIREMENT",
@@ -286,8 +272,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-witnessedfiles",
       "canonical": "WitnessedFiles",
@@ -305,8 +290,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-witnesspath",
       "canonical": "witnessPath",
@@ -325,8 +309,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-witnesstooldescriptors",
       "canonical": "WitnessToolDescriptors",
@@ -344,8 +327,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-errreplicaunsupported",
       "canonical": "errReplicaUnsupported",
@@ -363,8 +345,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-familycoverage",
       "canonical": "FamilyCoverage",
@@ -382,8 +363,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-qwen35gdnparitycosinemin",
       "canonical": "Qwen35GDNParityCosineMin",
@@ -401,8 +381,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-testverbtiercoverageistotal",
       "canonical": "TestVerbTierCoverageIsTotal",
@@ -420,8 +399,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-fakawqkernel",
       "canonical": "FAK_AWQ_KERNEL",
@@ -439,8 +417,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-fakinkernelbatch",
       "canonical": "FAK_INKERNEL_BATCH",
@@ -458,8 +435,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-fakinkernelradix",
       "canonical": "FAK_INKERNEL_RADIX",
@@ -477,8 +453,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-featurevdso",
       "canonical": "FeatureVDSO",
@@ -496,8 +471,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-kernelledger",
       "canonical": "KernelLedger",
@@ -515,8 +489,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-newvllmengine",
       "canonical": "NewVLLMEngine",
@@ -534,8 +507,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-faksecretgate",
       "canonical": "FAK_SECRETGATE",
@@ -553,8 +525,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-fleetcodexloopgate",
       "canonical": "FLEET_CODEX_LOOP_GATE",
@@ -572,8 +543,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-fleetdogfoodguard",
       "canonical": "FLEET_DOGFOOD_GUARD",
@@ -591,8 +561,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-gatedungraded",
       "canonical": "GATED_UNGRADED",
@@ -610,8 +579,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-gatefileadmissiontree",
       "canonical": "gateFileAdmissionTree",
@@ -629,8 +597,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-gateweight",
       "canonical": "gate_weight",
@@ -648,8 +615,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-guardlifecyclesocketenv",
       "canonical": "guardLifecycleSocketEnv",
@@ -667,8 +633,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-guardlifecycletokenenv",
       "canonical": "guardLifecycleTokenEnv",
@@ -686,8 +651,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-guardformatlayout",
       "canonical": "guard_format_layout",
@@ -705,8 +669,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-modeldecision",
       "canonical": "ModelDecision",
@@ -724,8 +687,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-replanning",
       "canonical": "replanning",
@@ -734,7 +696,8 @@
       "definition": "The property/act of re-deriving a plan for the same turn (ctxplan PlanView, supervisoragent action) - a deterministic re-admission that reuses the existing admit receipt, not a new authority.",
       "distinction": "Re-deriving the SAME turn's plan (idempotent re-admission) - NOT the initial plan step (planstep) and NOT a new authorization; replanning the same turn twice cannot drift.",
       "distinct_from": [
-        "x-cov-plan-planstep"
+        "x-cov-plan-planstep",
+        "planp2-isplanning"
       ],
       "aliases": [],
       "grounding": "replanning",
@@ -743,8 +706,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-kernelfamily",
       "canonical": "KernelFamily",
@@ -763,8 +725,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-renderprometheus",
       "canonical": "RenderPrometheus",
@@ -782,8 +743,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "x-disambig-nativeperfcoverage",
       "canonical": "nativeperfcoverage",

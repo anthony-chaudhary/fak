@@ -46,7 +46,8 @@
       "distinction": "A CLI test-run plan, not the planner Plan that lays out context spans.",
       "distinct_from": [
         "plan-planner",
-        "x-goal25-plan-plantest"
+        "x-goal25-plan-plantest",
+        "mopup6-nextplan"
       ],
       "aliases": [],
       "grounding": "testPlan",
@@ -1120,7 +1121,8 @@
       "distinction": "An EXISTENCE witness over paths; ShapeWitness additionally checks the artifact's shape.",
       "distinct_from": [
         "x-goal25-witness-proof-shapewitness",
-        "x-disambig-witnesspath"
+        "x-disambig-witnesspath",
+        "wp-with-witness"
       ],
       "aliases": [],
       "grounding": "PathWitness",

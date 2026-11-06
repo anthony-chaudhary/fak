@@ -63,7 +63,7 @@ func TestTopologyReconcileObservedCapacity(t *testing.T) {
 	}
 	// Explicit unhealthy capacity is excluded; unknown replacement must retain
 	// incumbent until a new supplied binding/epoch is accepted.
-	m.markDispatchFailure("r2")
+	m.markDispatchFailure("r2", nil)
 	if r := tick(now.Add(2 * time.Second)); r.Decision.CurrentReplicas != 2 {
 		t.Fatalf("unhealthy counted %+v", r)
 	}

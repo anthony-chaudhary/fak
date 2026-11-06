@@ -32,6 +32,12 @@ import "sort"
 // mark and no loaded profile the decisions degenerate to the legacy ones, with two documented
 // default-case deltas: HotSet displays in heat-descending order rather than identity order, and an
 // exact-heat victim tie evicts the HIGHEST (layer, expert) index rather than the lowest.
+//
+// Exported integration point: ExpertHotSetAdvisor (expert_hot_set_advisor.go) implements
+// ctxmmu.ExpertResidencyAdvisor, feeding this learner's committed hot-set and displacement band
+// into ctxmmu's expert-residency decisions (decode hot-set LRU admission/eviction, prefill
+// transient-ring sizing); cmd/hotsetcheck drives that loop on fixtures and reports the
+// routed-expert cache hit rate [SW-VERIFIED].
 
 // DefaultExpertHotSetHysteresis is the displacement margin FRACTION that reproduces the offline
 // policy's `victim/4` band for integer heat: the offline rule computes `vHeat/4` as integer division

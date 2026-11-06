@@ -30,6 +30,11 @@ import (
 // so it is provable here with a counting fake and remains reproducible when a real
 // disk-backed store is wired behind the same interface. A real-workload warm-start benefit
 // is [HW-WITNESSED] and explicitly out of scope (see the issue's gold-plating boundary).
+//
+// Online-learning seam (P2-4): ExpertResidencyAdvisor (expert_residency_advisor.go) lets an
+// external hot-set learner gate cold-miss admission with its hysteresis band and seed the
+// hot set from its committed pins; the public engine's learner implements it via
+// model.ExpertHotSetAdvisor. A nil advisor keeps every decision above byte-for-byte.
 
 // ErrExpertResidencyBudget is returned when a ring's byte budget cannot hold a single entry.
 var ErrExpertResidencyBudget = errors.New("ctxmmu: expert residency budget too small for one descriptor")
@@ -78,12 +83,21 @@ const (
 // transient ring hit is tracked separately from a resident hit so a prefill sweep's churn is
 // measurable rather than indistinguishable from useful decode reuse.
 type ExpertResidencyStats struct {
-	ResidentHits     int64 `json:"resident_hits"`
-	TransientHits    int64 `json:"transient_hits"`
-	ColdMisses       int64 `json:"cold_misses"`
-	Promotions       int64 `json:"promotions"`
-	HotEvictions     int64 `json:"hot_evictions"`
-	TransientEvicts  int64 `json:"transient_evictions"`
+	ResidentHits    int64 `json:"resident_hits"`
+	TransientHits   int64 `json:"transient_hits"`
+	ColdMisses      int64 `json:"cold_misses"`
+	Promotions      int64 `json:"promotions"`
+	HotEvictions    int64 `json:"hot_evictions"`
+	TransientEvicts int64 `json:"transient_evictions"`
+	// DecodeBypasses counts decode misses an advisor's displacement band declined to admit:
+	// served from backing without becoming resident (the offline policy's bypass rung). Zero
+	// for a policy with no advisor wired.
+	DecodeBypasses int64 `json:"decode_bypasses"`
+	// DemandMisses counts every touch served from backing because NEITHER ring held it — the
+	// hit-rate denominator partner: hit rate is (ResidentHits+TransientHits) /
+	// (ResidentHits+TransientHits+DemandMisses). ColdMisses (backing refusals) is a different
+	// event: a refusal serves nothing and returns ok=false.
+	DemandMisses     int64 `json:"demand_misses"`
 	ResidentBytes    int64 `json:"resident_bytes"`
 	TransientBytes   int64 `json:"transient_bytes"`
 	ResidentEntries  int   `json:"resident_entries"`
@@ -104,7 +118,11 @@ type ExpertResidencyPolicy struct {
 	resident  *expertLRURing
 	transient *expertLRURing
 	backing   ResidencyBacking
-	stats     ExpertResidencyStats
+	// advisor gates cold-miss admission with an online learner's displacement band and is the
+	// source of WarmStartFromAdvisor; nil keeps the plain-LRU behavior byte-for-byte
+	// (expert_residency_advisor.go).
+	advisor ExpertResidencyAdvisor
+	stats   ExpertResidencyStats
 }
 
 type expertResidencyKey struct{ layer, expert int }
@@ -149,13 +167,20 @@ func (p *ExpertResidencyPolicy) Prefill(layer, expert int) (ExpertDescriptor, bo
 		p.stats.ColdMisses++
 		return ExpertDescriptor{}, false
 	}
+	// Served from backing: a demand miss by definition (neither ring held it), even though the
+	// descriptor is now staged in the transient ring.
+	p.stats.DemandMisses++
 	p.stageTransient(key, d)
 	return d, true
 }
 
 // Decode touches an expert during post-prefill token generation. A hot-set hit is decoded
 // directly. A transient hit PROMOTES the descriptor into the hot set by overlap: swapping
-// the same descriptor in, with no backing read. A cold touch loads into the hot set.
+// the same descriptor in, with no backing read. A cold touch loads into the hot set — UNLESS
+// the policy carries an advisor and the load would evict a resident: then the touch is
+// admitted only when its heat beats the victim's through the advisor's displacement band;
+// inside the band it is BYPASSED (served from backing, not made resident, counted in
+// DecodeBypasses), the offline hysteresis decision (expert_residency_lfu.go).
 func (p *ExpertResidencyPolicy) Decode(layer, expert int) (ExpertDescriptor, bool) {
 	if p == nil {
 		return ExpertDescriptor{}, false
@@ -175,6 +200,22 @@ func (p *ExpertResidencyPolicy) Decode(layer, expert int) (ExpertDescriptor, boo
 	if !ok {
 		p.stats.ColdMisses++
 		return ExpertDescriptor{}, false
+	}
+	// Served from backing: a demand miss by definition (neither ring held it), whether it is
+	// admitted below or bypassed.
+	p.stats.DemandMisses++
+	if p.advisor != nil {
+		if victim, willEvict := p.resident.evictsOnInsert(d.Bytes); willEvict {
+			chHeat := p.advisor.Heat(layer, expert)
+			vHeat := p.advisor.Heat(victim.layer, victim.expert)
+			if !p.advisor.Admit(chHeat, vHeat) {
+				// Inside the band: the incumbent stays. The touch is still served — a bypassed
+				// weight must reach the forward — but it earns no residency, so the hot set does
+				// not churn for a lukewarm one-off.
+				p.stats.DecodeBypasses++
+				return d, true
+			}
+		}
 	}
 	p.promote(key, d)
 	return d, true
@@ -288,11 +329,20 @@ func (p *ExpertResidencyPolicy) load(layer, expert int) (ExpertDescriptor, bool)
 	return d, true
 }
 
-// promote inserts a descriptor into the hot set, evicting hot-set victims as needed.
+// promote inserts a descriptor into the hot set, evicting hot-set victims as needed, and keeps
+// the advisor's resident partition in step with the ring: the newcomer is marked resident and
+// every evicted victim cleared, so the learner's resident-first ranking tracks what the ring
+// actually holds. With no advisor wired this is the plain insert exactly as before.
 func (p *ExpertResidencyPolicy) promote(key expertResidencyKey, d ExpertDescriptor) {
 	evicted := p.resident.insert(key, d)
-	for range evicted {
+	for _, v := range evicted {
 		p.stats.HotEvictions++
+		if p.advisor != nil {
+			p.advisor.ClearResident(v.layer, v.expert)
+		}
+	}
+	if p.advisor != nil {
+		p.advisor.MarkResident(key.layer, key.expert)
 	}
 }
 
@@ -324,6 +374,20 @@ func (r *expertLRURing) len() int { return len(r.items) }
 func (r *expertLRURing) has(key expertResidencyKey) bool {
 	_, ok := r.items[key]
 	return ok
+}
+
+// evictsOnInsert reports whether inserting bytes would evict at least one existing entry, and
+// names the first (least-recently-used) victim — the resident a hysteresis gate weighs the
+// newcomer against. A descriptor that cannot fit even an empty ring never evicts: insert
+// refuses it outright, so the answer is false and no gate may run on its behalf.
+func (r *expertLRURing) evictsOnInsert(bytes int64) (victim expertResidencyKey, ok bool) {
+	if bytes > r.budget || len(r.order) == 0 {
+		return expertResidencyKey{}, false
+	}
+	if r.used+bytes <= r.budget {
+		return expertResidencyKey{}, false
+	}
+	return r.order[0], true
 }
 
 // get returns a copy without changing recency.

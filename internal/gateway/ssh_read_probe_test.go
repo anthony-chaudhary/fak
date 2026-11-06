@@ -145,13 +145,13 @@ func TestPositiveSSHReadProbeRejectsAmbiguityAndSideEffects(t *testing.T) {
 }
 
 // fak-test:runtime fast est=1s
-func TestSSHReadProbeFootprintRequiresHintAndRecognizedShell(t *testing.T) {
+func TestSSHReadProbeFootprintPromotesWithoutWireHint(t *testing.T) {
 	for _, tool := range []string{"Bash", "exec_command", "functions.exec_command", "shell_command", "powershell"} {
 		for _, hint := range []bool{false, true} {
 			for _, field := range []string{"command", "cmd"} {
 				raw, _ := json.Marshal(map[string]string{field: sshReadProbeCommand()})
 				_, targets, mutating, known := adjudicateRawWriteTargets(tool, string(raw), hint)
-				if mutating == hint || known != hint || len(targets) != 0 {
+				if mutating || !known || len(targets) != 0 {
 					t.Errorf("tool=%s field=%s hint=%t: targets=%v mutating=%t known=%t", tool, field, hint, targets, mutating, known)
 				}
 			}
@@ -211,7 +211,7 @@ func installSSHReadProbeLeaseAuthority(t *testing.T) {
 }
 
 // fak-test:runtime fast est=1s
-func TestSSHReadProbeStrictGatewayAllowsOnlyCanonicalHintedProbe(t *testing.T) {
+func TestSSHReadProbeStrictGatewayAllowsOnlyCanonicalProbe(t *testing.T) {
 	srv, adj := newReloadLatencyServer(t)
 	installSSHReadProbeLeaseAuthority(t)
 	if srv.workspaceAdmissionPermissive {
@@ -230,7 +230,7 @@ func TestSSHReadProbeStrictGatewayAllowsOnlyCanonicalHintedProbe(t *testing.T) {
 		wantAllow     bool
 	}{
 		{"canonical hinted", sshReadProbeCommand(), true, true},
-		{"canonical unhinted", sshReadProbeCommand(), false, false},
+		{"canonical unhinted", sshReadProbeCommand(), false, true},
 		{"ordinary bare SSH", "ssh operator@node.example hostname", true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

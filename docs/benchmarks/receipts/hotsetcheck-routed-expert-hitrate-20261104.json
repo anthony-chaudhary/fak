@@ -1,0 +1,68 @@
+{
+  "schema": "fak.hotsetcheck/v1",
+  "measurement": "simulated",
+  "fixture": {
+    "kind": "zipf(s=1.2)",
+    "seed": 1,
+    "tokens": 200,
+    "layers": 40,
+    "experts": 384,
+    "top_k": 6,
+    "hot_set_size": 96,
+    "zipf_exponent": 1.2,
+    "expert_bytes": 1048576,
+    "hot_bytes": 536870912,
+    "transient_bytes": 134217728,
+    "learn_tokens": 50,
+    "turn_tokens": 50,
+    "sweep_every": 20,
+    "sweep_width": 64
+  },
+  "arms": [
+    {
+      "name": "baseline-lru",
+      "resident_hits": 22124,
+      "transient_hits": 79,
+      "demand_misses": 14309,
+      "decode_bypasses": 0,
+      "cold_misses": 0,
+      "promotions": 79,
+      "hot_evictions": 13376,
+      "transient_evictions": 303,
+      "resident_entries": 512,
+      "transient_entries": 118,
+      "total_touches": 36512,
+      "hit_rate": 0.6081014460999123,
+      "backing_loads": 14309
+    },
+    {
+      "name": "learner-wired",
+      "resident_hits": 25613,
+      "transient_hits": 64,
+      "demand_misses": 10835,
+      "decode_bypasses": 10257,
+      "cold_misses": 0,
+      "promotions": 64,
+      "hot_evictions": 157,
+      "transient_evictions": 303,
+      "resident_entries": 512,
+      "transient_entries": 118,
+      "total_touches": 36512,
+      "hit_rate": 0.7032482471516214,
+      "backing_loads": 11347,
+      "learn_turns": 2,
+      "learn_swaps": 22,
+      "final_hot_set_size": 512,
+      "observed_units": 3888
+    }
+  ],
+  "delta_hit_rate": 0.09514680105170903,
+  "transient_sizing": {
+    "recommended": 134217728,
+    "configured": 134217728,
+    "observed": 3888,
+    "hot_set": 512,
+    "avg_expert_bytes": 1048576,
+    "cap_bytes": 134217728
+  }
+}

@@ -1,0 +1,483 @@
+{
+  "rows": [
+    {
+      "id": "session-runtime-p2-seensessions",
+      "canonical": "SeenSessions (v41 step-cohort alias guard)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Per-batch dedupe map marking *model.Sessions already consumed while validating V41 step-cohort lanes, so an aliased lane referencing the same session is rejected.",
+      "distinction": "Ephemeral validation scratch local to one batch call; it neither owns nor persists sessions and plays no scheduling role.",
+      "distinct_from": [
+        "session-runtime-p2-takesessionformodellocked",
+        "x-goal25-session-runtime-sessiondescriptor"
+      ],
+      "aliases": [],
+      "grounding": "seenSessions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-sessiondecorator",
+      "canonical": "SessionDecorator (modelengine lane-session hook)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "NativeScheduler hook func(*model.Session) applied to every lane session the scheduler mints (fresh or restored) before use, e.g. binding the device backend a P/D decode role resolved.",
+      "distinction": "A mutation hook installed once via SetSessionDecorator before the first Admit; it is not a session record, makes no scheduling decision, and owns no session state.",
+      "distinct_from": [
+        "session-runtime-p2-takesessionformodellocked",
+        "x-goal25-session-runtime-sessiondurability"
+      ],
+      "aliases": [],
+      "grounding": "sessionDecorator",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-sessionmap",
+      "canonical": "SessionMap (continuous-batcher session index)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "ContinuousBatcher field mapping active session IDs to their *Slot so each step can look up the slot that owns a submitted session.",
+      "distinction": "An in-flight lookup index over live batching slots; it is not completedMap (finished sessions), not a gateway session registry, not the SessionCap capacity field, and persists nothing.",
+      "distinct_from": [
+        "session-runtime-p2-slotstateempty",
+        "x-goal25-session-runtime-publishsession",
+        "x-session-runtime-sessioncapfield"
+      ],
+      "aliases": [],
+      "grounding": "sessionMap",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-sessionscope",
+      "canonical": "SessionScope",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The unit classifying which store/durability tier a session's context belongs to (ctxplan.SessionScope int) and carrying WIP-attribution options (wipattr.SessionScope struct).",
+      "distinction": "Classifies where a session's data lives; it is not a lifecycle phase, not a gateway seat, and allocates no resources.",
+      "distinct_from": [
+        "x-goal25-session-runtime-sessiondurability",
+        "session-runtime-p2-sessionsetup"
+      ],
+      "aliases": [],
+      "grounding": "SessionScope",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-sessionsetup",
+      "canonical": "SessionSetup (bench stage label)",
+      "family": "session-runtime",
+      "kind": "metric",
+      "definition": "The first timed bench stage - bringing the backend session up before prefill - reported under the \"session_setup\" key in modelbench and qwen38campaign phase maps.",
+      "distinction": "A stage label naming a phase; it is not the measured duration of that phase (SessionSetupDuration) and not any other stage such as prefill or teardown.",
+      "distinct_from": [
+        "session-runtime-p2-sessionsetupduration"
+      ],
+      "aliases": [],
+      "grounding": "session_setup",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-sessionsetupduration",
+      "canonical": "SessionSetupDuration",
+      "family": "session-runtime",
+      "kind": "metric",
+      "definition": "Wall time spent setting up the backend session before prefill in a raw-decode trial, exposed as TimingObservation.SessionSetupDuration() and execution.Runs[i].SessionSetupDuration.",
+      "distinction": "The measured duration of the session_setup stage; it is not the stage label itself and not PrefillDuration, FirstSampleDuration, or DecodeDuration.",
+      "distinct_from": [
+        "session-runtime-p2-sessionsetup"
+      ],
+      "aliases": [],
+      "grounding": "SessionSetupDuration",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-sessiontitle",
+      "canonical": "SessionTitle",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Display title (json \"session_title\") attached to a spawned opencode session, e.g. \"Issue #N: <title>\", carried on debtlane UnitOfWork and issueorchestrator spawn records.",
+      "distinction": "A human-readable label for a spawned session; it is not a session ID, not a verdict, not part of the drive record, not the SessionTime clock snapshot, and not the SessionFile image filename.",
+      "distinct_from": [
+        "x-goal25-session-runtime-sessiondescriptor",
+        "session-runtime-p2-writesessionjson",
+        "x-goal25b-session-runtime-sessiontime",
+        "x-session-runtime-sessionfile"
+      ],
+      "aliases": [],
+      "grounding": "SessionTitle",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-setslotutilization",
+      "canonical": "SetSlotUtilization (shard size-tracker setter)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "valueSizeTracker method storing the observed slot-utilization ratio so shard rebalancing can compare it against its target.",
+      "distinction": "Writes the tracker's stored value; it is not the allocator's read-only SlotUtilization(requestSize) ratio method and reports no metric itself.",
+      "distinct_from": [
+        "session-runtime-p2-slotutilization",
+        "session-runtime-p2-usedslots"
+      ],
+      "aliases": [],
+      "grounding": "setSlotUtilization",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-slotbytes",
+      "canonical": "SlotBytes",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Byte capacity of one transfer/stream slot - the AMD GPUDirect APU TBV2 per-slot payload budget and the ExpertStreamQueue.SlotBytes() accessor.",
+      "distinction": "A size in bytes; it is not a position (SlotIndex), not occupancy (UsedSlots), and not expert weight-slot bindings (fusedVulkanSlotBytesOKLocked).",
+      "distinct_from": [
+        "session-runtime-p2-slotindex",
+        "session-runtime-p2-usedslots"
+      ],
+      "aliases": [],
+      "grounding": "SlotBytes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-slotdata",
+      "canonical": "SlotData",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The raw byte-payload view of an allocated L3-server slot (BitmapAllocator.SlotData(offset)) and the decoded expert-weight buffer handed to GLM5NextExpertCodec.Decode.",
+      "distinction": "The content of a slot; it is not the slot's position (SlotIndex), its key (SlotKey), or its utilization (SlotUtilization).",
+      "distinct_from": [
+        "session-runtime-p2-slotindex",
+        "session-runtime-p2-slotkey"
+      ],
+      "aliases": [],
+      "grounding": "SlotData",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-slotindex",
+      "canonical": "SlotIndex",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Positional index of a slot within a fixed slot array or queue - AQL doorbell queues, pacing leases (json slot_index), transient Vulkan plans, and MoE double buffers.",
+      "distinction": "A zero-based position; it is not an identity key (SlotKey), not a byte size (SlotBytes), not occupancy (UsedSlots), and not the short SlotID wire form.",
+      "distinct_from": [
+        "session-runtime-p2-slotkey",
+        "session-runtime-p2-slotbytes",
+        "session-runtime-p2-usedslots",
+        "cov-20260903-session-runtime-slotid"
+      ],
+      "aliases": [
+        "slotIdx"
+      ],
+      "grounding": "SlotIndex",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-slotkey",
+      "canonical": "SlotKey",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Deterministic key identifying a slot - the cron fire-slot key that dedupes scheduled fires (cronFireSlot) and the cuckoo CAS table-slot key.",
+      "distinction": "An identity used for lookup and dedupe; it is not a positional index (SlotIndex) and not the slot's content (SlotData).",
+      "distinct_from": [
+        "session-runtime-p2-slotindex",
+        "session-runtime-p2-slotdata"
+      ],
+      "aliases": [],
+      "grounding": "slotKey",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-slotslist",
+      "canonical": "SlotsList",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "The candidate KV slot-count list enumerated during fit-plan search, crossed with context lengths to score deployment rows.",
+      "distinction": "A search dimension over hypothetical configurations; it is not live occupancy (UsedSlots) and not an actual slot array.",
+      "distinct_from": [
+        "session-runtime-p2-usedslots",
+        "session-runtime-p2-slotindex"
+      ],
+      "aliases": [],
+      "grounding": "slotsList",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-slotstateempty",
+      "canonical": "SlotStateEmpty",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Continuous-batcher slot lifecycle phase meaning the slot holds no session and is ready for admission.",
+      "distinction": "The idle phase of a continuous-batching slot; it is not the model-package Slot free/busy signal and not any other lifecycle phase.",
+      "distinct_from": [
+        "session-runtime-p2-slotstateactivedecode",
+        "session-runtime-p2-slotstateprefilling",
+        "session-runtime-p2-slotstateyieldedio",
+        "session-runtime-p2-slotstatefinished",
+        "slot"
+      ],
+      "aliases": [],
+      "grounding": "SlotStateEmpty",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-slotstateactivedecode",
+      "canonical": "SlotStateActiveDecode",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Continuous-batcher slot lifecycle phase in which the slot is resident and emitting decode tokens one at a time.",
+      "distinction": "The steady-state decode phase of a continuous-batching slot; it is not the prefill phase, not a yield, and not the model-package Slot free/busy signal.",
+      "distinct_from": [
+        "session-runtime-p2-slotstateempty",
+        "session-runtime-p2-slotstateprefilling",
+        "session-runtime-p2-slotstateyieldedio",
+        "session-runtime-p2-slotstatefinished",
+        "slot"
+      ],
+      "aliases": [],
+      "grounding": "SlotStateActiveDecode",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-slotstateprefilling",
+      "canonical": "SlotStatePrefilling",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Continuous-batcher slot lifecycle phase in which the slot runs budgeted, resumable prompt chunks before it activates for decode.",
+      "distinction": "The chunked-prompt phase of a continuous-batching slot; it is not active decode, not a yield, and not the model-package Slot free/busy signal.",
+      "distinct_from": [
+        "session-runtime-p2-slotstateempty",
+        "session-runtime-p2-slotstateactivedecode",
+        "session-runtime-p2-slotstateyieldedio",
+        "session-runtime-p2-slotstatefinished",
+        "slot"
+      ],
+      "aliases": [],
+      "grounding": "SlotStatePrefilling",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-slotstateyieldedio",
+      "canonical": "SlotStateYieldedIO",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Continuous-batcher slot lifecycle phase in which the slot yielded mid-step awaiting I/O and will resume later.",
+      "distinction": "A paused-awaiting-I/O phase of a continuous-batching slot; it is not active decode, not finished, and not the model-package Slot free/busy signal.",
+      "distinct_from": [
+        "session-runtime-p2-slotstateempty",
+        "session-runtime-p2-slotstateactivedecode",
+        "session-runtime-p2-slotstateprefilling",
+        "session-runtime-p2-slotstatefinished",
+        "slot"
+      ],
+      "aliases": [],
+      "grounding": "SlotStateYieldedIO",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-slotstatefinished",
+      "canonical": "SlotStateFinished",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Continuous-batcher slot lifecycle phase in which the slot has produced its output and is being drained back to empty.",
+      "distinction": "The terminal phase of a continuous-batching slot; it is not active decode, not a yield, and not the model-package Slot free/busy signal.",
+      "distinct_from": [
+        "session-runtime-p2-slotstateempty",
+        "session-runtime-p2-slotstateactivedecode",
+        "session-runtime-p2-slotstateprefilling",
+        "session-runtime-p2-slotstateyieldedio",
+        "slot"
+      ],
+      "aliases": [],
+      "grounding": "SlotStateFinished",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-slotutilization",
+      "canonical": "SlotUtilization",
+      "family": "session-runtime",
+      "kind": "metric",
+      "definition": "Ratio of average request bytes to slot-class size (1.0 = perfect fit, lower = more waste) returned by the L3 Allocator interface and reported in slab metrics.",
+      "distinction": "A waste-measuring ratio; it is not the count of occupied slots (UsedSlots), not a byte size (SlotBytes), and not the shard-tracker setter (SetSlotUtilization).",
+      "distinct_from": [
+        "session-runtime-p2-usedslots",
+        "session-runtime-p2-setslotutilization",
+        "session-runtime-p2-slotbytes"
+      ],
+      "aliases": [
+        "slotUtil"
+      ],
+      "grounding": "SlotUtilization",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-takesessionformodellocked",
+      "canonical": "TakeSessionForModelLocked",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "schedLane method that, under lock, acquires the next *model.Session to run on a model from the native scheduler's pending set.",
+      "distinction": "Acquires a session for scheduling; it is not the SeenSessions alias guard, not the sessionDecorator hook, and mutates no session content.",
+      "distinct_from": [
+        "session-runtime-p2-seensessions",
+        "session-runtime-p2-sessiondecorator"
+      ],
+      "aliases": [],
+      "grounding": "takeSessionForModelLocked",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-togatewaysessionverdict",
+      "canonical": "ToGatewaySessionVerdict",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Adapter converting session.Verdict to gateway.SessionVerdict when session-admission outcomes cross into the gateway plane.",
+      "distinction": "A type-conversion helper between two verdict types; it is not a verdict itself and makes no admission decision.",
+      "distinct_from": [
+        "x-ci-coverage-session-runtime-limitsession",
+        "x-goal25-session-runtime-sessiondescriptor"
+      ],
+      "aliases": [],
+      "grounding": "toGatewaySessionVerdict",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-usedslots",
+      "canonical": "UsedSlots",
+      "family": "session-runtime",
+      "kind": "metric",
+      "definition": "Count of slots currently occupied in an L3 slab class or shard (SlabClassSnapshot.UsedSlots), the numerator of slot utilization.",
+      "distinction": "A count of occupied slots; it is not the utilization ratio (SlotUtilization), not the total slot count, and not a free-slot event (SlotFreed).",
+      "distinct_from": [
+        "session-runtime-p2-slotutilization",
+        "x2-session-runtime-slotfreed"
+      ],
+      "aliases": [],
+      "grounding": "UsedSlots",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-workspaceslot",
+      "canonical": "WorkspaceSlot",
+      "family": "session-runtime",
+      "kind": "subsystem",
+      "definition": "internal/workspaceslot package providing a leased slot ring (SlotRing with TryAcquire/release) that bounds concurrent workspace dispatch.",
+      "distinction": "A concurrency-lease primitive for workspaces; it is not an engine continuous-batching slot (SlotState phases), not an L3 memory-allocation slot, and not a bench stage.",
+      "distinct_from": [
+        "session-runtime-p2-slotstateempty",
+        "session-runtime-p2-slotindex"
+      ],
+      "aliases": [],
+      "grounding": "workspaceslot",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "session-runtime-p2-writesessionjson",
+      "canonical": "WriteSessionJSON (session-image branch writer)",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "sessionimage helper marshaling a drive's session State to session.json when BranchDir writes a fresh drive; harnessweb carries a same-spelled HTTP JSON envelope writer for session cards.",
+      "distinction": "Persists or emits session state as JSON; it is not the session-move journal writer and changes no session content.",
+      "distinct_from": [
+        "x-goal25-session-runtime-sessiondescriptor",
+        "session-runtime-p2-sessiontitle"
+      ],
+      "aliases": [],
+      "grounding": "writeSessionJSON",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

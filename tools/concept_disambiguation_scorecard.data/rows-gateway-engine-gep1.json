@@ -1,0 +1,544 @@
+{
+  "rows": [
+    {
+      "id": "gep1-aql-kernel-dispatch-packet",
+      "canonical": "AQLKernelDispatchPacket",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The 64-byte AMD AQL kernel dispatch packet structure matching the HSA ABI hsa_kernel_dispatch_packet_t layout, used to launch a compute kernel on AMD GPUs.",
+      "distinction": "The packet payload structure itself; it is not the packet-type tag AQLPacketTypeKernelDispatch that classifies its header, nor the doorbell path that submits it.",
+      "distinct_from": [
+        "gep1-aql-packet-type-kernel-dispatch"
+      ],
+      "aliases": [],
+      "grounding": "AQLKernelDispatchPacket",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-aql-packet-type-kernel-dispatch",
+      "canonical": "AQLPacketTypeKernelDispatch",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The AQL packet-type constant (value 2) marking a standard compute kernel dispatch in the AMD AQL/HSA ABI.",
+      "distinction": "A header classification tag on AQL packets; it is not the 64-byte dispatch packet structure AQLKernelDispatchPacket it labels.",
+      "distinct_from": [
+        "gep1-aql-kernel-dispatch-packet"
+      ],
+      "aliases": [],
+      "grounding": "AQLPacketTypeKernelDispatch",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-arm-gateway",
+      "canonical": "ArmGateway",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The conceptbench ArmKind value ('gateway') that registers the internal/gateway transport as a frontier-tier benchmark arm.",
+      "distinction": "A benchmark arm registration in conceptbench; it is not a runtime gateway instance, a gateway URL, or the gateway package itself.",
+      "distinct_from": [
+        "gateway-engine-demoengine"
+      ],
+      "aliases": [],
+      "grounding": "ArmGateway",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-campaign-engine",
+      "canonical": "CampaignEngine",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The execution-identity field naming which engine (fak-native or llama.cpp) a Qwen3.8 quant-run campaign trial was executed on.",
+      "distinction": "A per-trial identity assertion checked by ValidateFakNativeRequestIdentity; it is not the ExecutionEngine campaign-evidence type nor the registered engine directory.",
+      "distinct_from": [
+        "gateway-engine-execution-engine"
+      ],
+      "aliases": [],
+      "grounding": "CampaignEngine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-container-engine",
+      "canonical": "ContainerEngine",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The tb4bench interface abstracting the container daemon (Docker or Podman) that runs sandboxed task workspaces.",
+      "distinction": "The daemon abstraction interface; it is not the concrete DockerEngine implementation that talks to the Docker/Podman socket.",
+      "distinct_from": [
+        "gep1-docker-engine"
+      ],
+      "aliases": [],
+      "grounding": "ContainerEngine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-cuda-kernel-profile-on",
+      "canonical": "cudaKernelProfileOn",
+      "family": "gateway-engine",
+      "kind": "config",
+      "definition": "The process-wide bool set once at init when FAK_CUDA_TIMESTAMP_PROFILE=1, enabling CUDA kernel timestamp profiling and gating graph-once capture.",
+      "distinction": "A CUDA profiling toggle inside the compute shim; it is not an in-kernel radix/KVMMU environment knob nor a reported metric.",
+      "distinct_from": [
+        "x-disambig-fakinkernelradix"
+      ],
+      "aliases": [],
+      "grounding": "cudaKernelProfileOn",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-default-creditable-subkernel-selectors",
+      "canonical": "DefaultCreditableSubkernelSelectors",
+      "family": "gateway-engine",
+      "kind": "config",
+      "definition": "The default list of verified physical Vulkan compute subkernel selectors that a Strix receipt credits when no explicit CreditSubkernelSelectors override is given.",
+      "distinction": "The default selector roster for receipt crediting; it is not a single subkernel, the kernel registry, or the receipt verification path that consumes it.",
+      "distinct_from": [
+        "gateway-engine-kernelcheck"
+      ],
+      "aliases": [],
+      "grounding": "DefaultCreditableSubkernelSelectors",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-docker-engine",
+      "canonical": "DockerEngine",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The tb4bench container-daemon client that communicates with the Docker/Podman daemon over a Unix domain socket or Windows named pipe.",
+      "distinction": "The concrete Docker/Podman daemon client; it is not the generic ContainerEngine interface it implements.",
+      "distinct_from": [
+        "gep1-container-engine"
+      ],
+      "aliases": [],
+      "grounding": "DockerEngine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-engine-identity",
+      "canonical": "EngineIdentity",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The receipt provenance field naming the model execution engine (for example 'fak-native/vulkan') stamped on Strix and nativeperfcorrelation receipts.",
+      "distinction": "A provenance stamp on a completed receipt; it is not the live engine registry entry EngineID nor the webbench EngineReceiptDigest digest.",
+      "distinct_from": [
+        "webbench-engine-receipt-digest",
+        "x-gateway-engine-engineid"
+      ],
+      "aliases": [],
+      "grounding": "EngineIdentity",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-engine-name",
+      "canonical": "EngineName",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The SubagentFanoutEngine method resolving the authoritative engine name from available receipt fields for acceptance validation.",
+      "distinction": "A name-resolution accessor on fanout receipts; it is not the engine registry id EngineID nor the provenance EngineModel.",
+      "distinct_from": [
+        "x-gateway-engine-engineid",
+        "x-gateway-engine-enginemodel"
+      ],
+      "aliases": [],
+      "grounding": "EngineName",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-engine-step",
+      "canonical": "EngineStep (continuous-batching step observer)",
+      "family": "gateway-engine",
+      "kind": "subsystem",
+      "definition": "The internal/enginestep package observing the native continuous-batching cycle step-by-step and emitting the fak_engine_* metric families.",
+      "distinction": "The step-observation package and its process-wide Default observer; it is not the 'engine' dispatch seam, the engines registry, or any single fak_engine_* series.",
+      "distinct_from": [
+        "engine",
+        "engines"
+      ],
+      "aliases": [],
+      "grounding": "enginestep",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-err-expert-device-kernel-absent",
+      "canonical": "ErrExpertDeviceKernelAbsent",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The fail-closed error returned when a routed expert's device kernel is absent, forcing the memory-bound scalar loop instead of the fused device path.",
+      "distinction": "An error sentinel pinned by errors.Is in the fp8_block32 expert path; it is not the OOM/capacity error family nor the expert-spill seam.",
+      "distinct_from": [
+        "x-gateway-engine-inkernelcapacityerror"
+      ],
+      "aliases": [],
+      "grounding": "ErrExpertDeviceKernelAbsent",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-fak-engine-metric-family",
+      "canonical": "fak_engine (metric family)",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "The Prometheus metric family prefix (fak_engine_*) reporting the native continuous-batching cycle step-by-step, per request and process-wide.",
+      "distinction": "The family prefix rendered by enginestep and the gateway observation endpoints; it is not any single fak_engine_* series such as the planner-step or kernel subfamilies.",
+      "distinct_from": [
+        "stepobs-kernel-family-prefix",
+        "stepobs-planner-step-family-prefix"
+      ],
+      "aliases": [],
+      "grounding": "fak_engine",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-fak-gateway-inference-family",
+      "canonical": "fak_gateway_inference (counter family)",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "The gateway Prometheus counter family prefix (fak_gateway_inference_*) covering inference throughput counters such as output tokens per second.",
+      "distinction": "The inference counter family prefix; it is not the KV-prefix reuse family (fak_gateway_kv_prefix_*), the scope-refusal counter, or a single series like fak_gateway_inference_output_tokens_per_second.",
+      "distinct_from": [
+        "issue9909-output-tokens-per-second",
+        "x2-gateway-engine-fakgatewaykvprefix"
+      ],
+      "aliases": [],
+      "grounding": "fak_gateway_inference",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-fak-gateway-kv-prefix-prompt-tokens-total",
+      "canonical": "fak_gateway_kv_prefix_prompt_tokens_total",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "The gateway counter of prompt tokens served from the KV prefix cache, exposed in the KV-prefix reuse metric family.",
+      "distinction": "A prompt-token total; it is not the by-source breakdown fak_gateway_kv_prefix_prompt_tokens_by_source_total nor the turn counters of the same family.",
+      "distinct_from": [
+        "fakgatewaykvprefixprompttokensbysourcetotal",
+        "gep1-fak-gateway-kv-prefix-turns-total"
+      ],
+      "aliases": [],
+      "grounding": "fak_gateway_kv_prefix_prompt_tokens_total",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-fak-gateway-kv-prefix-turns-by-regime-total",
+      "canonical": "fak_gateway_kv_prefix_turns_by_regime_total",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "The gateway counter of KV-prefix turns labeled by serving-latency regime (for example frozen), cut for the #5630 regime analysis.",
+      "distinction": "The regime-labeled turn counter; it is not the unlabeled turn total fak_gateway_kv_prefix_turns_total nor the prompt-token counter.",
+      "distinct_from": [
+        "gep1-fak-gateway-kv-prefix-turns-total",
+        "gep1-fak-gateway-kv-prefix-prompt-tokens-total"
+      ],
+      "aliases": [],
+      "grounding": "fak_gateway_kv_prefix_turns_by_regime_total",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-fak-gateway-kv-prefix-turns-total",
+      "canonical": "fak_gateway_kv_prefix_turns_total",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "The gateway counter of turns observed through the KV prefix cache, equal to cacheobs.Default.Snapshot().Turns.",
+      "distinction": "The unlabeled turn total; it is not the regime-labeled variant fak_gateway_kv_prefix_turns_by_regime_total nor the prompt-token total.",
+      "distinct_from": [
+        "gep1-fak-gateway-kv-prefix-turns-by-regime-total",
+        "gep1-fak-gateway-kv-prefix-prompt-tokens-total"
+      ],
+      "aliases": [],
+      "grounding": "fak_gateway_kv_prefix_turns_total",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-fak-gateway-scope-refusals-total",
+      "canonical": "fak_gateway_scope_refusals_total",
+      "family": "gateway-engine",
+      "kind": "metric",
+      "definition": "The gateway counter of scope-guard route-class refusals, labeled by the closed scope/route_class label set.",
+      "distinction": "A scope-admission refusal observation; it is not an HTTP 502 status, a readiness bit, or the KV-prefix reuse counters.",
+      "distinct_from": [
+        "x-gateway-engine-statusbadgateway",
+        "x2-gateway-engine-fakgatewaykvprefix"
+      ],
+      "aliases": [],
+      "grounding": "fak_gateway_scope_refusals_total",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-fallback-engine",
+      "canonical": "FallbackEngine",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The Qwen3.8 MTP receipt field naming the target-decode engine used when the MTP speculative path falls back, from a closed fak-native vocabulary.",
+      "distinction": "A receipt field recording which engine actually served after fallback; it is not the primary Engine field, the NativeEngine descriptor, or an engine registry entry.",
+      "distinct_from": [
+        "gateway-engine-native-engine-descriptor"
+      ],
+      "aliases": [],
+      "grounding": "FallbackEngine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-gateway-auth",
+      "canonical": "GatewayAuth (key-proof wire package)",
+      "family": "gateway-engine",
+      "kind": "subsystem",
+      "definition": "The pkg/gatewayauth package providing the gateway health key-possession proof wire (KeyProofPath, ServeKeyProof, WriteHealthProof).",
+      "distinction": "The key-possession proof wire package; it is not the FAK_GATEWAY_KEY credential environment variable, the GatewayKey HIL field, or the gateway server itself.",
+      "distinct_from": [
+        "x-gateway-engine-fakgatewaykey",
+        "gep1-gateway-key"
+      ],
+      "aliases": [],
+      "grounding": "gatewayauth",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-gateway-key",
+      "canonical": "GatewayKey",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The Strix HIL/installer field carrying the gateway bearer key for guarded router launches, resolved via resolveGatewayKey.",
+      "distinction": "A receipt/installer credential field; it is not the FAK_GATEWAY_KEY environment variable name, the key-proof wire package, or the default gateway bearer token.",
+      "distinct_from": [
+        "x-gateway-engine-fakgatewaykey",
+        "x-gateway-engine-defaultgatewaybearertoken",
+        "gep1-gateway-auth"
+      ],
+      "aliases": [],
+      "grounding": "GatewayKey",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-gdn-wyf-kernel",
+      "canonical": "gdn_wyf_kernel (upstream ferrite GDN chunkwise kernel)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The upstream ferrite CUDA kernel implementing the WYF chunkwise parallel GatedDeltaNet recurrence, cited in the GLM5.3 concept study as a DIRECT-PORT target for internal/compute.",
+      "distinction": "An upstream reference kernel name from the ferrite project; it is not a fak-owned compute kernel selector, the qwen3.5 GDN kernel-error path, or the coordinator kernel.",
+      "distinct_from": [
+        "cov-debt250-gateway-engine-qwen35gdnkernelerror"
+      ],
+      "aliases": [],
+      "grounding": "gdn_wyf_kernel",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-gpu-engine-active-ns",
+      "canonical": "GPUEngineActiveNS",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The measured GPU-engine active-time delta in nanoseconds captured by the llamacppinterop Strix comparator authority as part of its resource evidence.",
+      "distinction": "A comparator resource-evidence field; it is not a Prometheus gauge, the host-overhead InterKernelGapSumUs decomposition, or a kernel counter.",
+      "distinct_from": [
+        "receipt-v3-gateway-engine-interkernelgapsumus"
+      ],
+      "aliases": [],
+      "grounding": "GPUEngineActiveNS",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-gpu-kernel-bucket",
+      "canonical": "gpu_kernel (time-burndown bucket)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The closed phase/bucket label ('gpu_kernel') marking raw GPU kernel execution and tensor GEMM time in time-burndown buckets and native-perf trace phases.",
+      "distinction": "An observation-phase label for wall-time accounting; it is not a compute kernel selector (q4Kernel/q8Kernel/backendKernel) nor the kernel coordinator.",
+      "distinct_from": [
+        "x-gateway-engine-q4kernel",
+        "x-gateway-engine-backendkernel"
+      ],
+      "aliases": [],
+      "grounding": "gpu_kernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-inkernel-backend-prefix-reuse-supported",
+      "canonical": "InKernelBackendPrefixReuseSupported",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The model.Config predicate reporting whether PrefixSnapshot owns every in-kernel backend's prefix state, making in-kernel prefix reuse fail-closed supported.",
+      "distinction": "The all-backends predicate; it is not the per-backend variant InKernelBackendPrefixReuseSupportedFor, nor the shared system/tools boundary hint.",
+      "distinct_from": [
+        "gep1-inkernel-backend-prefix-reuse-supported-for",
+        "gateway-engine-inkernel-shared-prefix-boundary-from-context"
+      ],
+      "aliases": [],
+      "grounding": "InKernelBackendPrefixReuseSupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-inkernel-backend-prefix-reuse-supported-for",
+      "canonical": "InKernelBackendPrefixReuseSupportedFor",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The model.Config predicate reporting whether PrefixSnapshot owns the prefix state of one specific in-kernel backend, the qualified check used by warm-route decisions.",
+      "distinction": "The per-backend qualified predicate; it is not the all-backends InKernelBackendPrefixReuseSupported, nor the shared boundary hint from context.",
+      "distinct_from": [
+        "gep1-inkernel-backend-prefix-reuse-supported",
+        "gateway-engine-inkernel-shared-prefix-boundary-from-context"
+      ],
+      "aliases": [],
+      "grounding": "InKernelBackendPrefixReuseSupportedFor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-inkernel-decode-file",
+      "canonical": "inkernel_decode.go (in-kernel decode lane)",
+      "family": "gateway-engine",
+      "kind": "doc-term",
+      "definition": "The internal/agent/inkernel_decode.go source file implementing the in-kernel decode lane (snapshot checkpoint, PrimeCacheState, generated-continuation steps).",
+      "distinction": "A source-file seam referenced by comments and the godfile ceiling baseline; it is not the inkernel engine id, the expert-spill seam file, or the decode V41 lane helpers.",
+      "distinct_from": [
+        "x-gateway-engine-inkernel",
+        "issue10229-inkernel-expert-spill"
+      ],
+      "aliases": [],
+      "grounding": "inkernel_decode",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-inkernel-suppress-qwen-thinking",
+      "canonical": "inKernelSuppressQwenThinking",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The agent predicate deciding whether to suppress Qwen thinking-mode rendering (enable_thinking=false) for an in-kernel request based on config and span.",
+      "distinction": "A render-time thinking-suppression predicate; it is not the Qwen Q4_K prefill chunk setting, the FAK_INKERNEL_BATCH knob, or the jinja template variables themselves.",
+      "distinct_from": [
+        "coverage-9678-gateway-engine-fakinkernelqwenq4kprefillchunktokens",
+        "x-disambig-fakinkernelbatch"
+      ],
+      "aliases": [],
+      "grounding": "inKernelSuppressQwenThinking",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "gep1-kernel-decide",
+      "canonical": "kernel_decide (provenance label)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The closed tool-routing provenance value ('kernel_decide') marking calls adjudicated through the fak kernel without execution.",
+      "distinction": "A provenance label on routing records; it is not the fak_kernel_decisions_total counter, the KernelCheck preflight, or the kernel coordinator itself.",
+      "distinct_from": [
+        "x-gateway-engine-fakkerneldecisionstotal",
+        "gateway-engine-kernelcheck"
+      ],
+      "aliases": [],
+      "grounding": "kernel_decide",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

@@ -574,6 +574,14 @@ concurrent = [
   # drift; reconciled here like the moecache/turncost precedent.
   "billing",
   "routerlaunch",
+  # pkg/anthropicbridge (TICKET-01 claude-router): the public Anthropic-Messages <->
+  # OpenAI Chat Completions translator leaf; declared so the `(fak anthropicbridge)`
+  # ship-stamp binds and the arbiter protects pkg/anthropicbridge/** edits.
+  "anthropicbridge",
+  # pkg/routerfront (0396591517) landed without a lane declaration, so the
+  # undeclared-leaf detector resolved it as drift; reconciled here like the
+  # billing/routerlaunch precedent.
+  "routerfront",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -761,6 +769,8 @@ autopick = [
   "fitplan",
   "billing",
   "routerlaunch",
+  "anthropicbridge",
+  "routerfront",
   # new-leaf:lane
 ]
 
@@ -1757,6 +1767,8 @@ moecache     = ["pkg/moecache/**"]
 turncost     = ["pkg/turncost/**"]
 billing      = ["pkg/billing/**"]
 routerlaunch = ["pkg/routerlaunch/**"]
+anthropicbridge = ["pkg/anthropicbridge/**"]
+routerfront  = ["pkg/routerfront/**"]
 # Root docs/index files are part of the docs lane too. Without these exact
 # entries, `fak sweep` can only surface README/llms churn as no-lane residuals,
 # so the shared tree never fully drains through `fak sweep --apply --lane docs`.

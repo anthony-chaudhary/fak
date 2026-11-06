@@ -250,3 +250,107 @@ func TestDecodeOccupancyWitnessReport(t *testing.T) {
 	}
 	t.Logf("device corroboration: NOT run here — exact analytic arm only; GPU harness = tools/dgx_decode_occupancy_ncu.sh; baseline = docs/notes/2026-07-11-decode-occupancy-witness-measurement.md")
 }
+
+// fak-test:runtime fast est=1ms lane=default
+func TestDecodeTrafficKVWidths(t *testing.T) {
+	g := DecodeGeometry{NHeads: 24, NKVHeads: 4, HeadDim: 256, KVLen: 32768}
+	for _, tc := range []struct {
+		name              string
+		element, scale    int
+		optimal, streamed int64 // all 16 full-attention layers, including F32 Q/O
+	}{
+		{"f32", 4, 0, 4295753728, 25770590208},
+		{"f16", 2, 0, 2148270080, 12885688320},
+		{"bf16", 2, 0, 2148270080, 12885688320},
+		{"fp8-e4m3-per-head-scale", 1, 4, 1091305472, 6543900672},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := DecodeHBMTrafficForKV(g, tc.element, tc.scale)
+			if !ok || 16*got.ReuseOptimal != tc.optimal || 16*got.Streamed != tc.streamed ||
+				got.KVReuseWaste != (tc.streamed-tc.optimal)/16 {
+				t.Fatalf("wrong modeled bytes: %+v ok=%v", got, ok)
+			}
+			if math.IsNaN(got.KVStreamFrac) || math.IsInf(got.KVStreamFrac, 0) ||
+				math.IsNaN(got.Intensity) || math.IsInf(got.Intensity, 0) {
+				t.Fatalf("non-finite analytical ratio: %+v", got)
+			}
+			qo := int64(8 * 24 * 256)
+			flops := int64(4) * 24 * 32768 * 256
+			decApprox(t, "KVStreamFrac", got.KVStreamFrac, float64(got.Streamed-qo)/float64(got.Streamed), 1e-15)
+			decApprox(t, "Intensity", got.Intensity, float64(flops)/float64(got.Streamed), 1e-15)
+			t.Logf("analytical operand bytes only: layout=%s Q=24 KV=4 hd=256 positions=32768 layers=16 streamed=%d reuseOptimal=%d; device traffic/performance UNRUN",
+				tc.name, tc.streamed, tc.optimal)
+		})
+	}
+	// One paired FP8 K/V row contains 512 code bytes and 8 scale bytes.
+	one := DecodeGeometry{NHeads: 1, NKVHeads: 1, HeadDim: 256, KVLen: 1}
+	got, ok := DecodeHBMTrafficForKV(one, 1, 4)
+	if !ok || got.Streamed != 2048+520 || got.ReuseOptimal != got.Streamed || got.KVReuseWaste != 0 {
+		t.Fatalf("scale unit or Q/O cost changed: %+v ok=%v", got, ok)
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestDecodeTrafficKVLegacyParity(t *testing.T) {
+	for _, g := range []DecodeGeometry{
+		smolLM2_135M,
+		{NHeads: 24, NKVHeads: 4, HeadDim: 256, KVLen: 32768},
+		{NHeads: 4, NKVHeads: 4, HeadDim: 65, KVLen: 1},
+		{NHeads: 1, NKVHeads: 1, HeadDim: 1, KVLen: 1},
+	} {
+		got, ok := DecodeHBMTrafficForKV(g, 4, 0)
+		if !ok || got != DecodeHBMTraffic(g) {
+			t.Fatalf("legacy F32 changed for %+v: %+v ok=%v", g, got, ok)
+		}
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestDecodeTrafficKVRefusesInvalid(t *testing.T) {
+	valid := DecodeGeometry{NHeads: 24, NKVHeads: 4, HeadDim: 256, KVLen: 32768}
+	for _, layout := range [][2]int{{0, 0}, {-1, 0}, {1, 0}, {1, 8}, {2, 4}, {4, 4}, {4, -1}, {8, 0}} {
+		got, ok := DecodeHBMTrafficForKV(valid, layout[0], layout[1])
+		if ok || got != (DecodeTraffic{}) {
+			t.Fatalf("unsupported layout %v: %+v ok=%v", layout, got, ok)
+		}
+	}
+	maxInt := int(^uint(0) >> 1)
+	for _, g := range []DecodeGeometry{
+		{},
+		{NHeads: -1, NKVHeads: 1, HeadDim: 1, KVLen: 1},
+		{NHeads: 1, NKVHeads: 0, HeadDim: 1, KVLen: 1},
+		{NHeads: 24, NKVHeads: 5, HeadDim: 256, KVLen: 32768},
+		{NHeads: 1, NKVHeads: 2, HeadDim: 1, KVLen: 1},
+		{NHeads: 1, NKVHeads: 1, HeadDim: 0, KVLen: 1},
+		{NHeads: 1, NKVHeads: 1, HeadDim: 1, KVLen: -1},
+		{NHeads: maxInt, NKVHeads: 1, HeadDim: maxInt, KVLen: 1},
+		{NHeads: 4, NKVHeads: 1, HeadDim: maxInt, KVLen: maxInt},
+	} {
+		for _, layout := range [][2]int{{4, 0}, {2, 0}, {1, 4}} {
+			got, ok := DecodeHBMTrafficForKV(g, layout[0], layout[1])
+			if ok || got != (DecodeTraffic{}) {
+				t.Fatalf("invalid/overflow geometry %+v layout=%v: %+v ok=%v", g, layout, got, ok)
+			}
+		}
+	}
+	// These int64-boundary geometries cannot be represented by a 32-bit int.
+	// The ordinary rejection controls above still cover overflow on 32-bit hosts.
+	if int64(maxInt) > 2147483647 {
+		limit := int64(1<<63 - 1)
+		n := int((limit - 8) / 8)
+		g := DecodeGeometry{NHeads: 1, NKVHeads: 1, HeadDim: 1, KVLen: n}
+		got, ok := DecodeHBMTrafficForKV(g, 4, 0)
+		if !ok || got.Streamed != limit-7 || got.ReuseOptimal != got.Streamed {
+			t.Fatalf("last representable row rejected: %+v ok=%v", got, ok)
+		}
+		g.KVLen++
+		if got, ok := DecodeHBMTrafficForKV(g, 4, 0); ok || got != (DecodeTraffic{}) {
+			t.Fatalf("Q/O addition overflow accepted: %+v ok=%v", got, ok)
+		}
+		// FP8 byte counts still fit here, but the modeled FLOP count does not.
+		g.HeadDim, g.KVLen = 256, int(limit/1024+1)
+		if got, ok := DecodeHBMTrafficForKV(g, 1, 4); ok || got != (DecodeTraffic{}) {
+			t.Fatalf("FLOP overflow accepted: %+v ok=%v", got, ok)
+		}
+	}
+}

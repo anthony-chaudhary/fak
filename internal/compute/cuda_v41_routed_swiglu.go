@@ -21,11 +21,34 @@ import (
 
 var _ V41RoutedSwiGLUBackend = (*cudaBackend)(nil)
 
-// Compilation is not numerical qualification. Ordinary model selection stays
-// closed until exact module/device evidence is accepted.
-func (c *cudaBackend) V41RoutedSwiGLUAvailable() bool { return false }
+// Availability reports live candidate state, not compilation: the opt-in tag
+// put the module into this artifact, and device-0 stream admission, capture
+// and sticky-fault state are probed under cudaMu exactly as the routed mmid
+// candidates do. Numerical qualification stays per-device: the witness test
+// bounds every lane against the scalar oracle on the target arch, and its
+// recorded receipt is what admits the tag into an arch default set. A build
+// without the tag does not compile this file at all, so untagged and
+// non-CUDA artifacts keep the host routes byte for byte.
+func (c *cudaBackend) V41RoutedSwiGLUAvailable() bool {
+	if c == nil {
+		return false
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	if c.capturing {
+		return false
+	}
+	if e := c.faultLatch.Admit("V41RoutedSwiGLU"); e != nil {
+		return false
+	}
+	return int(C.fak_v41_routed_swiglu_state()) == 0
+}
+
+// V41RoutedSwiGLU runs one synchronous checked dispatch; the output stays
+// resident for the down projection and only the 16-byte status record crosses
+// to the host. No public Upload, Read or Free method runs while cudaMu is held.
 func (c *cudaBackend) V41RoutedSwiGLU(gate, up Tensor, limit, weight float32) (Tensor, error) {
-	return c.cudaV41RoutedSwiGLU(gate, up, limit, weight, false)
+	return c.cudaV41RoutedSwiGLU(gate, up, limit, weight)
 }
 func (c *cudaBackend) cudaV41RoutedSwiGLUError(status int, cause error) error {
 	if c != nil && status > 0 {
@@ -34,9 +57,9 @@ func (c *cudaBackend) cudaV41RoutedSwiGLUError(status int, cause error) error {
 	return &BackendError{Backend: "cuda", Site: "V41RoutedSwiGLU", Class: "cuda-routed-swiglu-failed", Message: fmt.Sprintf("checked routed SwiGLU refused (status %d)", status), Err: cause}
 }
 
-// The private witness enables qualification without selecting unproven math in
-// the model. Input/output values never cross the host; only 16 status bytes do.
-func (c *cudaBackend) cudaV41RoutedSwiGLU(gate, up Tensor, limit, weight float32, witness bool) (out Tensor, err error) {
+// Input/output values never cross the host; only the 16-byte status record
+// does. The output tensor stays resident for the down projection.
+func (c *cudaBackend) cudaV41RoutedSwiGLU(gate, up Tensor, limit, weight float32) (out Tensor, err error) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	var output, statusBuf *cudaBuf
@@ -84,9 +107,6 @@ func (c *cudaBackend) cudaV41RoutedSwiGLU(gate, up Tensor, limit, weight float32
 		if x := int(C.fak_v41_routed_swiglu_input(ptrs[i], C.uint64_t(count))); x != 0 {
 			return Tensor{}, c.cudaV41RoutedSwiGLUError(x, nil)
 		}
-	}
-	if !witness {
-		return Tensor{}, c.cudaV41RoutedSwiGLUError(-3, fmt.Errorf("exact module/device numerical qualification absent"))
 	}
 	output, err = c.dallocDeviceOnlyClass(count*4, MemoryActivation, "v41-routed-swiglu-output")
 	if err != nil {

@@ -161,8 +161,8 @@
         "loopsession"
       ],
       "aliases": [],
-      "grounding": "loopsession",
-      "grounding_kind": "path",
+      "grounding": "drainsteer",
+      "grounding_kind": "symbol",
       "glossary_anchor": "",
       "parent": "",
       "verdict": "defined",
@@ -249,7 +249,7 @@
         "witnessedempty",
         "witnessedindex"
       ],
-      "grounding": "statuswitnessrefused",
+      "grounding": "statuswitnessunavailable",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
       "parent": "",
@@ -344,12 +344,13 @@
       "canonical": "cachewitness (KV-prefix value seam)",
       "family": "witness-proof",
       "kind": "subsystem",
-      "definition": "internal/cachewitness is the observation seam that folds the WITNESSED kv_prefix metric family (KVPrefixWitness.ReuseRatio over fak_gateway_kv_prefix_reused_tokens_total) into a provenance-labeled Record, keeping WITNESSED reuse strictly distinct from OBSERVED provider cache_read and exposing the honesty-fence SingleSessionMarginalX.",
-      "distinction": "Not a world-state witness on the coherence bus: cachewitness measures realized KV-prefix REUSE value with WITNESSED/OBSERVED provenance discipline, never admitting or refuting a cache entry's correctness.",
+      "definition": "internal/cachewitness reads a live fak gateway's /metrics and folds the WITNESSED kv_prefix metric family (KVPrefixWitness.ReuseRatio over fak_gateway_kv_prefix_reused_tokens_total) into ONE provenance-labeled Record, keeping WITNESSED reuse strictly distinct from OBSERVED provider cache_read and exposing the honesty-fence SingleSessionMarginalX.",
+      "distinction": "Not a world-state witness on the coherence bus and not the cachevalue ledger that persists ledgered observations: cachewitness is the provenance-labeled evidence fold over /metrics, measuring realized KV-prefix REUSE value with WITNESSED/OBSERVED provenance discipline, never admitting or refuting a cache entry's correctness.",
       "distinct_from": [
         "World-state witness",
         "WitnessResolver",
-        "x2-cache-cachewitness"
+        "Provider cache",
+        "vCache"
       ],
       "aliases": [],
       "grounding": "cachewitness",

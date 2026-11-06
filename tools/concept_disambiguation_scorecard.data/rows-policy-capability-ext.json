@@ -201,7 +201,8 @@
         "policy-capability-mempolicy",
         "policy-capability-t-policy",
         "x-policy-capability-defaultresetpolicy",
-        "agent-with-policy-snapshot"
+        "agent-with-policy-snapshot",
+        "pc-new-policy-constructor"
       ],
       "aliases": [],
       "grounding": "setpolicy",

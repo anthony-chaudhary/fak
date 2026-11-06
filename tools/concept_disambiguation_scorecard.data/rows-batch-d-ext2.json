@@ -38,8 +38,7 @@
       ],
       "aliases": [
         "inkernelq4k",
-        "loadserveinkernelmodel",
-        "newinkernelplanner"
+        "loadserveinkernelmodel"
       ],
       "grounding": "inkernelchat",
       "grounding_kind": "symbol",
@@ -156,7 +155,6 @@
       "distinct_from": [
         "EngineID (registry)",
         "engine",
-        "cov5307-engine-route",
         "x-gateway-engine-engineroute"
       ],
       "aliases": [],

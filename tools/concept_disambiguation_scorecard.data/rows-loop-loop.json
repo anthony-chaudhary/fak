@@ -1,0 +1,325 @@
+{
+  "rows": [
+    {
+      "id": "loop-clone-loop-metrics",
+      "canonical": "cloneLoopMetrics",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Deep-copy helper (cmd/fak/loop_helpers.go) that snapshots a loop run's int64 metrics map so fired-loop counters can be carried forward or diffed without aliasing the live ledger.",
+      "distinction": "A value-copy utility over loop metrics maps; it neither schedules fires (loopmgr) nor drives turns (loopdrive).",
+      "distinct_from": [
+        "loopmgr",
+        "loopdrive"
+      ],
+      "aliases": [],
+      "grounding": "cloneLoopMetrics",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "loop-collect-loop",
+      "canonical": "CollectLoop",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Fleetpane collector (internal/fleetpane/fleetpane.go) that runs one named loop spec once and returns its LoopCheck, the per-loop probe the `fak info` fleet pane folds over every configured loop.",
+      "distinction": "One-shot per-loop collection for the fleet info pane; not the durable fire ledger (loopmgr) and not the stage-coverage scorecard (loop-index).",
+      "distinct_from": [
+        "cov-debt250-loop-loopcheck",
+        "loopindex"
+      ],
+      "aliases": [],
+      "grounding": "CollectLoop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "loop-default-loop-run-id",
+      "canonical": "defaultLoopRunID",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Derivation helper (cmd/fak/loop_helpers.go) that mints the default run-id for a fire of a given loop id when a loop fire carries no explicit run id.",
+      "distinction": "Mints a run-identifier string; it is not the session identity a run records (loopsession) nor the ledger that stores runs (loopmgr).",
+      "distinct_from": [
+        "loopsession",
+        "loopmgr"
+      ],
+      "aliases": [],
+      "grounding": "defaultLoopRunID",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "loop-fak-bgloop-metric-family",
+      "canonical": "fak_bgloop metric family",
+      "family": "loop",
+      "kind": "metric",
+      "definition": "Prometheus metric family (fak_bgloop_registered/_ticks_total/_errors_total/_panics_total/_restarts_total/_pauses_total/_last_tick_timestamp_seconds/_up) rendered by gateway.writeBgloopMetrics for every in-kernel supervised background loop.",
+      "distinction": "Observability counters for the in-kernel supervisor's ticks; they measure bgloop runtime, not the durable externally-scheduled fires recorded by loopmgr.",
+      "distinct_from": [
+        "bgloop",
+        "loopmgr"
+      ],
+      "aliases": [],
+      "grounding": "fak_bgloop",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "loop-loopback-fallback-url",
+      "canonical": "LoopbackFallbackURL",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "fakclient helper (pkg/fakclient/loopback.go) that computes an alternative URL to retry when a probe of a configured gateway address fails, falling the client back to the local loopback endpoint.",
+      "distinction": "A client-side URL-retry rule for unreachable gateways; not the loopback network-address concept itself (loopback) and not a routing decision made by the router.",
+      "distinct_from": [
+        "loopback-network"
+      ],
+      "aliases": [],
+      "grounding": "LoopbackFallbackURL",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "loop-loop-executable",
+      "canonical": "loopExecutable",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Injectable os.Executable seam (cmd/fak/loop.go) that resolves the fak binary path a loop fire re-invokes itself with, letting tests point loop self-spawns at a fixture binary.",
+      "distinction": "A binary-path resolution seam for loop self-execution; it does not schedule or record loops (loopmgr) and is not the per-turn driver that consumes it (loopdrive).",
+      "distinct_from": [
+        "loopdrive",
+        "loopmgr"
+      ],
+      "aliases": [],
+      "grounding": "loopExecutable",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "loop-loop-kv-list",
+      "canonical": "loopKVList",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Repeatable CLI flag type (cmd/fak/loop_helpers.go) that accumulates key=value evidence/metrics strings for `fak loop` runs, one entry per flag occurrence.",
+      "distinction": "A command-line accumulation type for loop-fire inputs; not the loop ledger storage (loopmgr) and not a reported metric (fak_bgloop family).",
+      "distinct_from": [
+        "loopmgr"
+      ],
+      "aliases": [],
+      "grounding": "loopKVList",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "loop-performance-rsi-output-env",
+      "canonical": "loopPerformanceRSIOutputEnv",
+      "family": "loop",
+      "kind": "config",
+      "definition": "Constant (cmd/fak/loop.go) naming FAK_PERFORMANCE_RSI_OUTPUT, the environment variable through which a loop fire's child process reports its performance-RSI output file path.",
+      "distinction": "An env-var-name constant wiring the RSI performance readout into a loop fire; not the RSI keep-or-revert loop itself (rsiloop) and not a loop ledger record (loopmgr).",
+      "distinct_from": [
+        "rsiloop",
+        "loopmgr"
+      ],
+      "aliases": [],
+      "grounding": "loopPerformanceRSIOutputEnv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "loop-new-bgloop-supervisor",
+      "canonical": "newBgloopSupervisor",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Constructor (internal/gateway/bgloops.go) that builds the serve gateway's in-kernel bgloop.Supervisor and registers its built-in loops (heartbeat, marketing, fleet-health, upstream-context-window).",
+      "distinction": "Builds and arms the in-kernel loop runtime; it does not start or stop the loops (startLoops/stopLoops) and is not the durable loop ledger (loopmgr).",
+      "distinct_from": [
+        "bgloop",
+        "loopmgr"
+      ],
+      "aliases": [],
+      "grounding": "newBgloopSupervisor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "loop-num-loops",
+      "canonical": "NumLoops",
+      "family": "loop",
+      "kind": "config",
+      "definition": "Model-config field (internal/model/config.go, json num_loops) giving a transformer architecture's number of stacked block layers.",
+      "distinction": "A static model-architecture depth knob counting stacked layers; not the batcher's admitted-recurrent-work counter (RecurrentLoops) and not any scheduled execution loop.",
+      "distinct_from": [
+        "RecurrentLoops",
+        "loop-ring"
+      ],
+      "aliases": [],
+      "grounding": "NumLoops",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "loop-recurrent-loops",
+      "canonical": "RecurrentLoops",
+      "family": "loop",
+      "kind": "config",
+      "definition": "Continuous-batcher request field (internal/engine/continuous_batcher_types.go) declaring how many recurrent loops of work one request admits, used as the effective execution depth when it exceeds ExecutionDepth.",
+      "distinction": "An admission-depth counter on a batcher request governing accepted recurrent work; not the model's layer count (NumLoops) and not scheduled loop fires (loopmgr).",
+      "distinct_from": [
+        "NumLoops",
+        "loopmgr"
+      ],
+      "aliases": [],
+      "grounding": "RecurrentLoops",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "loop-register-garden-loop",
+      "canonical": "registerGardenLoop",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Shared registrar (cmd/fak/garden.go) behind the durable garden loops that loads the persisted OS task-schedule registry and adds one persistent garden tick/walk/loop entry with interval and jitter.",
+      "distinction": "Registers durable OS-scheduled garden jobs; not the in-kernel supervisor registration (newBgloopSupervisor) and not loop-ledger governance (loopmgr).",
+      "distinct_from": [
+        "loopmgr",
+        "newBgloopSupervisor"
+      ],
+      "aliases": [],
+      "grounding": "registerGardenLoop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "loop-run-fleet-health-loop",
+      "canonical": "runFleetHealthLoop",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Server method (internal/gateway/replica_membership.go) forming the fleet-health in-kernel loop body: it arms the replica router after its first probe and then runs RunHealthLoop continuously until the serve context ends.",
+      "distinction": "The continuous driver hosting RunHealthLoop inside the bgloop supervisor; not the probe-and-interval body itself (RunHealthLoop) and not the supervisor owning its lifecycle (newBgloopSupervisor).",
+      "distinct_from": [
+        "cov-debt250-loop-runhealthloop",
+        "newBgloopSupervisor"
+      ],
+      "aliases": [],
+      "grounding": "runFleetHealthLoop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "loop-start-loops",
+      "canonical": "startLoops",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Server method (internal/gateway/bgloops.go) called once from Serve after the listener binds, launching every registered in-kernel background loop on the serve lifecycle context.",
+      "distinction": "The start half of the in-kernel loop lifecycle; inverse of stopLoops, and it starts the runtime rather than registering loops (newBgloopSupervisor) or recording durable fires (loopmgr).",
+      "distinct_from": [
+        "stopLoops",
+        "newBgloopSupervisor"
+      ],
+      "aliases": [],
+      "grounding": "startLoops",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "loop-stop-loops",
+      "canonical": "stopLoops",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Server method (internal/gateway/bgloops.go) that cancels the in-kernel background loops and joins their goroutines within a bounded 5-second window so a wedged loop cannot hang gateway shutdown.",
+      "distinction": "The stop/join half of the in-kernel loop lifecycle; inverse of startLoops, and distinct from loop crash recovery (looprecover) which restarts a failed durable loop.",
+      "distinct_from": [
+        "startLoops",
+        "looprecover"
+      ],
+      "aliases": [],
+      "grounding": "stopLoops",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "loop-superloop-drive-exec",
+      "canonical": "superloopDriveExec",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Struct (cmd/fak/superloop_drive_exec.go) recording how `fak superloop drive --execute` handled one driven member's own front door: requested flag, kind, command, note, and outcome.",
+      "distinction": "The per-member execute receipt of a superloop drive; not the read-only intent walker (superloop) nor the Ralph loop driver (loopdrive).",
+      "distinct_from": [
+        "superloop",
+        "loopdrive"
+      ],
+      "aliases": [],
+      "grounding": "superloopDriveExec",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "loop-write-loop-run-report",
+      "canonical": "writeLoopRunReport",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Emitter (cmd/fak/loop_performance_rsi.go) that renders one `fak loop run --json` report to stdout/stderr from the run's ledger, loop id, run id, and outcome map.",
+      "distinction": "The JSON report renderer for a single loop run; it emits a report, it does not store the run (loopmgr) or mint its identifiers (defaultLoopRunID).",
+      "distinct_from": [
+        "loopmgr",
+        "defaultLoopRunID"
+      ],
+      "aliases": [],
+      "grounding": "writeLoopRunReport",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

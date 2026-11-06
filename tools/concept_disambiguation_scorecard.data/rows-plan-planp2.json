@@ -1,0 +1,845 @@
+{
+  "rows": [
+    {
+      "id": "planp2-envelopeplan",
+      "canonical": "EnvelopePlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The classed memory-demand plan ([]EnvelopeDemand over weights/kv_cache/activation) that is the reservation-side counterpart of a model load plan in local admission.",
+      "distinction": "A demand vector used to size session residency envelopes; it is not itself the SessionResidencyPlan aggregate that admission enforces, nor a compute.MemoryPlan pricing artifact.",
+      "distinct_from": [
+        "plan-sessionresidency",
+        "x-plan-memoryplan"
+      ],
+      "aliases": [],
+      "grounding": "EnvelopePlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-newsessionresidencyplan",
+      "canonical": "NewSessionResidencyPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The constructor that builds a SessionResidencyPlan envelope from weight-class demands, one-session KV/state demands, the enforced MaxSessions bound, and cohort scratch.",
+      "distinction": "Builds the enforced resident-footprint envelope for native serve admission; it does not price model loads (that is the ggufload estimators) and is not the EnvelopePlan element type it composes.",
+      "distinct_from": [
+        "plan-sessionresidency",
+        "planp2-envelopeplan"
+      ],
+      "aliases": [],
+      "grounding": "NewSessionResidencyPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-errcandidateexists",
+      "canonical": "ErrCandidateExists",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The ctxmmu sentinel error returned when COWPageTable.ForkCandidate is asked to fork a speculative candidate branch whose id is already registered.",
+      "distinction": "A duplicate-fork refusal on the CoW page table; it is not the lookup miss ErrCandidateNotFound nor the released-branch mutation refusal ErrCandidateReleased.",
+      "distinct_from": [
+        "planp2-errcandidatenotfound",
+        "planp2-forkedcandidate"
+      ],
+      "aliases": [],
+      "grounding": "ErrCandidateExists",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-errcandidatenotfound",
+      "canonical": "ErrCandidateNotFound",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The ctxmmu sentinel error returned when a squash, promote, or lookup names a speculative candidate branch that is not present in the CoW page table.",
+      "distinction": "An absent-candidate lookup failure; it is not the duplicate-registration refusal ErrCandidateExists nor the already-released state refusal ErrCandidateReleased.",
+      "distinct_from": [
+        "planp2-errcandidateexists",
+        "planp2-forkedcandidate"
+      ],
+      "aliases": [],
+      "grounding": "ErrCandidateNotFound",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-errcandidatereleased",
+      "canonical": "ErrCandidateReleased",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The ctxmmu sentinel error returned when append, mutate, or fork-from targets a speculative candidate branch that has already been released back to the page table.",
+      "distinction": "A use-after-release refusal on a dead branch; it is not the never-registered case ErrCandidateNotFound nor the double-fork case ErrCandidateExists.",
+      "distinct_from": [
+        "planp2-errcandidatenotfound",
+        "planp2-forkedcandidate"
+      ],
+      "aliases": [],
+      "grounding": "ErrCandidateReleased",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-estimatecpuoffloadexpertsboundeddensememoryplan",
+      "canonical": "EstimateCPUOffloadExpertsBoundedDenseMemoryPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The ggufload WeightSource estimator arm that prices a CPU-offloaded-experts serve under the bounded dense policy (fak#13209), folding eligible dense k-quant bytes into one bounded host working-set row instead of the full device dense charge.",
+      "distinction": "Bounds only the dense side while experts stay fully resident-host; it is not the streamed-expert arm, not the combined streamed+bounded-dense arm, and not the base EstimateCPUOffloadExpertsMemoryPlan it refines.",
+      "distinct_from": [
+        "planp2-estimatecpuoffloadexpertsstreamedmemoryplan",
+        "planp2-estimatecpuoffloadexpertsstreamedboundeddensememoryplan",
+        "x-plan-estimateloadmemoryplan"
+      ],
+      "aliases": [],
+      "grounding": "EstimateCPUOffloadExpertsBoundedDenseMemoryPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-estimatecpuoffloadexpertsstreamedboundeddensememoryplan",
+      "canonical": "EstimateCPUOffloadExpertsStreamedBoundedDenseMemoryPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The COMBINED ggufload estimator arm (fak#13215) that applies the bounded-resident NVMe-streamed expert policy and the bounded dense policy at once, declaring both a stream-resident expert set and a bounded dense working set.",
+      "distinction": "Declares BOTH bounds through the shared kernel; the plain streamed arm pins the dense side unbounded, and the bounded-dense arm keeps experts fully resident, so this entry point exists only for serves carrying both declared bounds.",
+      "distinct_from": [
+        "planp2-estimatecpuoffloadexpertsstreamedmemoryplan",
+        "planp2-estimatecpuoffloadexpertsboundeddensememoryplan"
+      ],
+      "aliases": [],
+      "grounding": "EstimateCPUOffloadExpertsStreamedBoundedDenseMemoryPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-estimatecpuoffloadexpertsstreamedmemoryplan",
+      "canonical": "EstimateCPUOffloadExpertsStreamedMemoryPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The ggufload estimator arm that prices a CPU-offloaded-experts serve under the bounded-resident NVMe-streamed expert policy (fak#13121), charging only the residentExpertBytes working set the loader keeps instead of the full routed payload.",
+      "distinction": "Streams experts from staged shards with an unbounded dense device charge; it differs from the bounded-dense arm (which keeps experts resident) and from the combined arm that declares both bounds.",
+      "distinct_from": [
+        "planp2-estimatecpuoffloadexpertsboundeddensememoryplan",
+        "planp2-estimatecpuoffloadexpertsstreamedboundeddensememoryplan",
+        "x-plan-estimateloadmemoryplan"
+      ],
+      "aliases": [],
+      "grounding": "EstimateCPUOffloadExpertsStreamedMemoryPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-estimatemoeboundeddensehostmemoryplan",
+      "canonical": "EstimateMoEBoundedDenseHostMemoryPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The MoE-capable sibling of the bounded dense fold: the ggufload estimator that prices eligible dense k-quant bytes as a bounded host working set for MoE artifacts whose routed experts are handled by the streamed fold.",
+      "distinction": "The MoE/bounded-dense host estimator mirroring the loader dispatch exactly; it is not the non-MoE EstimateCPUOffloadExperts* arms and not the generic Q4_K/Q8 load estimators.",
+      "distinct_from": [
+        "planp2-estimateq4kloadmemoryplan",
+        "planp2-estimateq8loadmemoryplan",
+        "x-goal25b-plan-estimateexpertparallelloadmemoryplan"
+      ],
+      "aliases": [],
+      "grounding": "EstimateMoEBoundedDenseHostMemoryPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-estimateq4kloadmemoryplan",
+      "canonical": "EstimateQ4KLoadMemoryPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The primary ggufload WeightSource estimator that prices logical stored weights for dense models at their Q4_K-class representation, producing the compute.MemoryPlan every serve-fit path starts from.",
+      "distinction": "The dense-model load-pricing entry point with option overrides (resident k-quant, streamed dense working set, MTP retention); its near-twin EstimateQ8LoadMemoryPlan is the classed Q8 form, and neither is the CPU-offload-experts arm family.",
+      "distinct_from": [
+        "planp2-estimateq8loadmemoryplan",
+        "x-plan-estimateloadmemoryplan",
+        "x-plan-memoryplan"
+      ],
+      "aliases": [],
+      "grounding": "EstimateQ4KLoadMemoryPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-estimateq8loadmemoryplan",
+      "canonical": "EstimateQ8LoadMemoryPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The classed form of EstimateQ8LoadBytes: the ggufload estimator that prices every quant matmul weight at native Q8 plus non-quant tensors at their stored class, yielding a compute.MemoryPlan.",
+      "distinction": "Prices at native Q8 rather than the Q4_K-class fold of its near-twin EstimateQ4KLoadMemoryPlan; it is a load-time pricing estimator, not a runtime MemoryPlan snapshot or a CPU-offload arm.",
+      "distinct_from": [
+        "planp2-estimateq4kloadmemoryplan",
+        "x-plan-estimateloadmemoryplan",
+        "x-plan-memoryplan"
+      ],
+      "aliases": [],
+      "grounding": "EstimateQ8LoadMemoryPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-expertwarmplanfor",
+      "canonical": "ExpertWarmPlanFor",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The ExpertCheckpointTier method that turns a recorded demand-access profile plus the tier's index into a deduplicated, budget-bounded ExpertWarmPlan of routed-expert projections to warm (CW-10, #13349).",
+      "distinction": "Deterministic SELECTION only - it reads no payload and faults nothing; executing the plan (issuing reads, populating the retained host cache) is the separate #13343 leaf, and its outcome reason is ExpertWarmReasonPlanned.",
+      "distinct_from": [
+        "planp2-expertwarmreasonplanned",
+        "x-plan-memoryplan"
+      ],
+      "aliases": [],
+      "grounding": "ExpertWarmPlanFor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-expertwarmreasonplanned",
+      "canonical": "ExpertWarmReasonPlanned",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The ExpertWarmReason value stamped on an ExpertWarmResult when at least one projection was selected and retained by the deterministic expert-warm selection leaf.",
+      "distinction": "A closed-vocabulary result REASON (the wire string \"planned\"); it names why a warm result succeeded, whereas ExpertWarmPlanFor is the selector that produces the plan carrying it.",
+      "distinct_from": [
+        "planp2-expertwarmplanfor",
+        "plan-closednotplanned"
+      ],
+      "aliases": [],
+      "grounding": "ExpertWarmReasonPlanned",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-fallbackplan",
+      "canonical": "FallbackPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The quarantined unpartitioned MALLPartitionPlan that MALLPartitioner.createFallbackPlan constructs when strict capacity calculation fails, instructing the runtime to stream from unpinned DRAM instead of partitioning the 32MB MALL.",
+      "distinction": "The Strix MALL partitioner's degraded-mode plan (status FALLBACK_DRAM); the same local identifier in modelreg/local_admission.go merely names the CPU-fallback target plan for local admission, a different mechanism reusing the word.",
+      "distinct_from": [
+        "planp2-mallpartitionplan",
+        "plan-sessionresidency"
+      ],
+      "aliases": [],
+      "grounding": "fallbackPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-findjsoneventcandidates",
+      "canonical": "FindJSONEventCandidates",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The amdgpu helper that extracts balanced JSON objects containing a named schema token from raw Strix subkernel/ablation command output, yielding candidate event records for parsing.",
+      "distinction": "A text-extraction step over benchmark subprocess output; it finds CANDIDATE JSON blobs, not decode candidates, factory-migration candidates, or topology candidates, and parses nothing itself.",
+      "distinct_from": [
+        "candidate-planner",
+        "planp2-nextcandidates"
+      ],
+      "aliases": [],
+      "grounding": "findJSONEventCandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-fitplancalibrationpath",
+      "canonical": "FitPlanCalibrationPath",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The cmd/fak resolver for the fit-plan calibration store location: FAK_FITPLAN_CALIBRATION when set, else <UserConfigDir>/fak/fitplan/calibration.json.",
+      "distinction": "Only resolves WHERE the calibration store lives; it neither ingests receipts (IngestFitPlanCalibration) nor fingerprints the hardware epoch (FitPlanHardwareEpoch) that rows are keyed by.",
+      "distinct_from": [
+        "planp2-ingestfitplancalibration",
+        "planp2-fitplanhardwareepoch",
+        "fitplan-planner"
+      ],
+      "aliases": [],
+      "grounding": "fitPlanCalibrationPath",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-fitplanhardwareepoch",
+      "canonical": "FitPlanHardwareEpoch",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The cmd/fak fingerprint of the host+backend hardware a fit plan prices and a probe measures, producing the compute.HardwareEpochFingerprint digest that keys calibration rows.",
+      "distinction": "A hardware IDENTITY digest for calibration keying; it does not read or write the store (that is IngestFitPlanCalibration / FitPlanCalibrationPath) and is not the FitPlanModel facts a plan prices against.",
+      "distinct_from": [
+        "planp2-fitplancalibrationpath",
+        "planp2-ingestfitplancalibration",
+        "fitplan-model-facts"
+      ],
+      "aliases": [],
+      "grounding": "fitPlanHardwareEpoch",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-forkedcandidate",
+      "canonical": "ForkedCandidate",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The ctxmmu lightweight speculative candidate branch (aliased CandidateBranch) forked off a CoW page-table parent, carrying depth, page/block counts, release state, and append/mutate/squash/promote operations bounded by MaxCandidateTreeDepth.",
+      "distinction": "The live speculative BRANCH object in ctxmmu; it is not the sentinel errors guarding its lifecycle, not the COWPageTable.HasCandidate probe, and not a decode-side SpeculationCandidate or factory-migration candidate.",
+      "distinct_from": [
+        "planp2-hascandidate",
+        "planp2-maxcandidatetreedepth",
+        "cov-debt-tail-plan-candidatetree"
+      ],
+      "aliases": [],
+      "grounding": "ForkedCandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-hascandidate",
+      "canonical": "HasCandidate",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The COWPageTable method reporting whether a speculative candidate branch with the given id is registered and active in the ctxmmu page table.",
+      "distinction": "A membership PROBE on the CoW page table; same-named local booleans in mcpbroker/transport_stdio.go and model/metal_mtp_tree.go are incidental flags, and this is not the ForkedCandidate object itself.",
+      "distinct_from": [
+        "planp2-forkedcandidate",
+        "planp2-errcandidatenotfound"
+      ],
+      "aliases": [],
+      "grounding": "HasCandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-ingestfitplancalibration",
+      "canonical": "IngestFitPlanCalibration",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The cmd/fak writer that adds fit-plan calibration receipts to the CalibrationStore at a path and persists the store, used by both the manual probe CLI and serve fit-confirm.",
+      "distinction": "Appends + saves RECEIPTS to the store; it does not resolve the default path (FitPlanCalibrationPath) or mint the hardware epoch digest (FitPlanHardwareEpoch) embedded in each receipt key.",
+      "distinct_from": [
+        "planp2-fitplancalibrationpath",
+        "planp2-fitplanhardwareepoch"
+      ],
+      "aliases": [],
+      "grounding": "ingestFitPlanCalibration",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-installturnkeyagentwarmforplanner",
+      "canonical": "InstallTurnkeyAgentWarmForPlanner",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The cmd/fak setup half of turnkey agent-startup warming: installs the agent-warm profile plus gate onto the given agent.Planner so the first chat request can run the warm-up, returning false when the workspace is absent.",
+      "distinction": "INSTALLS the planner+gate wiring for `fak up` turnkey mode; it performs no warm-up itself (runTurnkeyAgentWarmup does) and configures no planner retry budget or session-planner cache.",
+      "distinct_from": [
+        "plan-planless",
+        "plan-maxsessionplanners"
+      ],
+      "aliases": [],
+      "grounding": "installTurnkeyAgentWarmForPlanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-isplanning",
+      "canonical": "IsPlanning",
+      "family": "plan",
+      "kind": "config",
+      "definition": "The per-turn input flag (json is_planning) marking a turn as planning/reasoning-intensive, consumed by the intra-model router, bench effort accounting, and gateway dynamic-effort context.",
+      "distinction": "A turn-level CLASSIFICATION flag fed to routing/effort decisions; it is not a planner object, not the trajctl planless reading, and not the ClosedNotPlanned closure bucket.",
+      "distinct_from": [
+        "plan-planless",
+        "plan-closednotplanned",
+        "plan-planner",
+        "x-disambig-replanning"
+      ],
+      "aliases": [],
+      "grounding": "IsPlanning",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-loadcandidatefragmentfile",
+      "canonical": "LoadCandidateFragmentFile",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The readmenext loader that reads a staged README front-page change fragment from a file and parses it into a CandidateFragment with safe defaults.",
+      "distinction": "A FILE I/O + parse entry point for staged README candidate fragments; it does not publish or apply fragments, and is not the CandidateFragment record type itself.",
+      "distinct_from": [
+        "candidate-fragment",
+        "candidate-planner"
+      ],
+      "aliases": [],
+      "grounding": "LoadCandidateFragmentFile",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-mallpartitionplan",
+      "canonical": "MALLPartitionPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The deterministic capacity-partitioning layout across the Strix 32MB MALL (root/draft/reserve/headroom), produced by MALLPartitioner.Partition or its quarantined fallback path.",
+      "distinction": "The PARTITIONED capacity result for the MALL arena; it is not the MALLTilerPlan working-set geometry, not a generic compute MemoryPlan, and not the local-admission SessionResidencyPlan envelope.",
+      "distinct_from": [
+        "planp2-malltilerplan",
+        "planp2-fallbackplan",
+        "x-plan-memoryplan"
+      ],
+      "aliases": [],
+      "grounding": "MALLPartitionPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-malltilerplan",
+      "canonical": "MALLTilerPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The calculated working-set geometry, capacity margins, and RDNA 3.5 cache policies captured by AttentionMALLTiler.Plan() for tiling attention work onto the MALL.",
+      "distinction": "The TILER's geometry/capacity plan for attention tiling; it is not the MALLPartitionPlan partition layout and carries no allocation side effect of its own.",
+      "distinct_from": [
+        "planp2-mallpartitionplan",
+        "x-plan-memoryplan"
+      ],
+      "aliases": [],
+      "grounding": "MALLTilerPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-manifestfromsafetensorsplan",
+      "canonical": "ManifestFromSafetensorsPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The cmd/fak mapper that projects a header-only safetensors preflight plan onto the shared ggufload.ManifestPreflight report used by serve load-manifest admission.",
+      "distinction": "A HEADER-ONLY projection from safetensors preflight to the manifest-preflight wire shape; it performs no weight loading and is not the GGUF fit/estimation plans in ggufload.",
+      "distinct_from": [
+        "x-plan-estimateloadmemoryplan",
+        "cov-debt250-plan-modelloadplan"
+      ],
+      "aliases": [],
+      "grounding": "manifestFromSafetensorsPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-matrixcompileplan",
+      "canonical": "MatrixCompilePlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The buildwitness value encapsulating the exact go command and environment needed to compile-check one release-matrix entry, consumed by devcmd runBuildMatrixCompileCheck.",
+      "distinction": "A BUILD-WITNESS compile-check recipe for one matrix cell; it is not a model load/serving memory plan, not a dispatch ExecutionPlan, and runs no inference.",
+      "distinct_from": [
+        "x-plan-executionplan",
+        "x-plan-memoryplan"
+      ],
+      "aliases": [],
+      "grounding": "MatrixCompilePlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-maxcandidatetreedepth",
+      "canonical": "MaxCandidateTreeDepth",
+      "family": "plan",
+      "kind": "config",
+      "definition": "The ctxmmu constant (=8) bounding the maximum recursion depth of speculative candidate trees forked off the CoW page table (#12319).",
+      "distinction": "A DEPTH BOUND on ForkedCandidate trees; it is not a candidate object, not a lifecycle sentinel error, and not a planner retry budget.",
+      "distinct_from": [
+        "planp2-forkedcandidate",
+        "planp2-hascandidate",
+        "cov5306-fak-planner-retry-budget"
+      ],
+      "aliases": [],
+      "grounding": "MaxCandidateTreeDepth",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-memoryplandiff",
+      "canonical": "MemoryPlanDiff",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The first-prefill planner-vs-allocation-ledger diff value: InKernelPlanner.MemoryPlanDiff() reports the stored compute.MemoryPlanLedgerDiff, and the gateway debug-vars response exposes it as the memory_plan_diff field.",
+      "distinction": "The REPORTED DIFF VALUE (method + wire field); it is not the reporter interface (MemoryPlanDiffReporter), not the diff struct itself (MemoryPlanLedgerDiff), and not the observation hook that takes it (ObserveFirstPrefillPlanLedgerDiff).",
+      "distinct_from": [
+        "planp2-memoryplandiffreporter",
+        "planp2-memoryplanledgerdiff",
+        "planp2-observefirstprefillplanledgerdiff"
+      ],
+      "aliases": [],
+      "grounding": "MemoryPlanDiff",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-memoryplandiffreporter",
+      "canonical": "MemoryPlanDiffReporter",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The agent capability interface implemented by local planners that can compare their planned device memory against the observed allocation ledger, exposing MemoryPlanDiff() (compute.MemoryPlanLedgerDiff, bool).",
+      "distinction": "A CAPABILITY INTERFACE the gateway probes via type assertion; it defines the reporting seam, whereas MemoryPlanLedgerDiff is the payload and ObserveFirstPrefillPlanLedgerDiff is the InKernelPlanner method that fills it once after first prefill.",
+      "distinct_from": [
+        "planp2-memoryplanledgerdiff",
+        "planp2-memoryplandiff",
+        "issue10046-plan-inkernelplannerconfig"
+      ],
+      "aliases": [],
+      "grounding": "MemoryPlanDiffReporter",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-memoryplanledgerdiff",
+      "canonical": "MemoryPlanLedgerDiff",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The compute struct comparing a device MemoryPlan to a DeviceAllocSnapshot at a named phase: per-class predicted-vs-actual rows, delta bytes, and the TopPositive overruns (TopN = 3).",
+      "distinction": "The DIFF PAYLOAD struct built by DiffMemoryPlanAgainstLedger; it is not the reporter interface that exposes it, not the gateway wire field name MemoryPlanDiff, and not a MemoryPlan pricing artifact.",
+      "distinct_from": [
+        "planp2-memoryplandiffreporter",
+        "x-plan-memoryplan",
+        "model-plan-memory-components"
+      ],
+      "aliases": [],
+      "grounding": "MemoryPlanLedgerDiff",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-modelcandidates",
+      "canonical": "model_candidates.cuh",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The CUDA header internal/compute/cuda/model_candidates.cuh holding candidate whole-sequence kernel bindings (embedding gather, v41 bf16 publish, v41 tail rope) that deliberately do not extend the public cuda_backend.h ABI.",
+      "distinction": "A source-file home for CANDIDATE kernel implementations under development behind cgo-local entry points; it is not a Go candidate type, not the computebuild build manifests that reference it, and not decode-side speculation candidates.",
+      "distinct_from": [
+        "candidate-planner",
+        "cov5306-speculation-candidate"
+      ],
+      "aliases": [
+        "model_candidates"
+      ],
+      "grounding": "model_candidates",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-nativebeamsearchplanner",
+      "canonical": "NativeBeamSearchPlanner",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The agent capability interface marking a planner that supports native beam search, probed by the gateway (chatBeamSearchSupported) before routing plain-text beam requests to it.",
+      "distinction": "A CAPABILITY MARKER for native beam search; it is not a planner implementation (the in-kernel planner implements it), not the NativeBeamSearchWireReceipt redacted wire form, and not speculative decoding.",
+      "distinct_from": [
+        "issue10046-plan-inkernelplannerconfig",
+        "x-plan-streamingplanner",
+        "cov5306-speculation-candidate"
+      ],
+      "aliases": [],
+      "grounding": "NativeBeamSearchPlanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-newcandidatesession",
+      "canonical": "NewCandidateSession",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The rawdecode loadedModel method that opens the session a verification candidate runs in: a checked backend session when a backend is present, otherwise a plain CPU session, with candidate metal/quant flags applied either way.",
+      "distinction": "Opens the SESSION for one verification-candidate run inside rawdecode; it is not a topology-candidate verify checkout (workerworktree), not a look-ahead SpeculationCandidate, and not a planner.",
+      "distinct_from": [
+        "planp2-newtopologycandidatesession",
+        "cov5306-speculation-candidate"
+      ],
+      "aliases": [],
+      "grounding": "NewCandidateSession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-newspeculativegraphplanner",
+      "canonical": "NewSpeculativeGraphPlanner",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The compute constructor that builds a SpeculativeGraphPlanner from a SpeculativeGraphConfig for graph-based speculative decoding.",
+      "distinction": "Constructs the SPECULATIVE-GRAPH planner in compute; it is not the agent NativeBeamSearchPlanner capability, not a rawdecode verification-candidate session, and not the model-side speculative batch wrapper.",
+      "distinct_from": [
+        "planp2-nativebeamsearchplanner",
+        "cov5306-speculation-candidate"
+      ],
+      "aliases": [],
+      "grounding": "NewSpeculativeGraphPlanner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-newtopologycandidatesession",
+      "canonical": "NewTopologyCandidateSession",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The workerworktree constructor for a topologyCandidateSession: one land's verify-only checkout, reused across the land's candidate topology verifications.",
+      "distinction": "Creates the VERIFY-ONLY CHECKOUT SESSION for topology candidates during worker-worktree landing; it is not a rawdecode verification-candidate decode session and performs no commit of its own.",
+      "distinct_from": [
+        "planp2-newcandidatesession",
+        "wwt-topology-candidate-verify"
+      ],
+      "aliases": [],
+      "grounding": "newTopologyCandidateSession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-nextcandidates",
+      "canonical": "NextCandidates",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The factorymigrate selector returning the next unmigrated or partial migration candidates from a Report in priority order, optionally filtered by cohort and bounded by count.",
+      "distinction": "Selects the NEXT FACTORY-MIGRATION items to process; it is not a decode/look-ahead speculation candidate, not the safecommit NextIndexCandidate lock-owner record, and does not mutate anything.",
+      "distinct_from": [
+        "planp2-nextindexcandidate",
+        "cov5306-speculation-candidate"
+      ],
+      "aliases": [],
+      "grounding": "NextCandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-nextindexcandidate",
+      "canonical": "NextIndexCandidate",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The safecommit record of one candidate git next-index lock owner (PID, ModTime, Alive) gathered when attributing index.lock residue after a killed commit.",
+      "distinction": "A KILLED-COMMIT INDEX-LOCK ATTRIBUTION record in safecommit/commitlane; it is not a factory-migration NextCandidates selection, not a speculative decode candidate, and names no work to plan.",
+      "distinct_from": [
+        "planp2-nextcandidates",
+        "candidate-planner"
+      ],
+      "aliases": [],
+      "grounding": "NextIndexCandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-noplanner",
+      "canonical": "NoPlanner",
+      "family": "plan",
+      "kind": "config",
+      "definition": "The typed \"no_planner\" refusal class stamped on live micro-backend dispatch ticks (enrollFailureNoPlanner / errHostEnrollNoPlanner) and aux-warm decisions (serveAuxWarmNoPlanner) when no real planner can be selected.",
+      "distinction": "A WIRE LABEL for the typed de-mock failure of planner selection on live ticks; it is not the trajctl planless reading, not a planner implementation, and not the ClosedNotPlanned closure bucket.",
+      "distinct_from": [
+        "plan-planless",
+        "plan-closednotplanned",
+        "x-plan-httpplanner",
+        "fitplan-search-new-planner"
+      ],
+      "aliases": [],
+      "grounding": "no_planner",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-numareplicaplaninsufficientnodes",
+      "canonical": "NUMAReplicaPlanInsufficientNodes",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The NUMAReplicaPlanReason refusal value returned when the host has fewer CPU-bearing NUMA nodes than the replica layout requires, so no eligible NUMAReplicaPlan can be produced.",
+      "distinction": "One closed-vocabulary REFUSAL reason on the pre-allocation NUMA replica verdict; it is not the plan type itself (NUMAReplicaPlan), not the invalid-size or unsupported refusals, and allocates nothing.",
+      "distinct_from": [
+        "cov5306-numa-replica-plan",
+        "planp2-numareplicaplaninvalidsize",
+        "planp2-numareplicaplanunsupported"
+      ],
+      "aliases": [],
+      "grounding": "NUMAReplicaPlanInsufficientNodes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-numareplicaplaninvalidsize",
+      "canonical": "NUMAReplicaPlanInvalidSize",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The NUMAReplicaPlanReason refusal value returned when the requested replica/reserve byte sizes are non-positive or otherwise unrepresentable for a NUMA weight-replica plan.",
+      "distinction": "A SIZE VALIDATION refusal on the NUMA replica eligibility verdict; it is distinct from the topology-shape refusals (insufficient nodes, unsupported host) and from the eligible plan itself.",
+      "distinct_from": [
+        "cov5306-numa-replica-plan",
+        "planp2-numareplicaplaninsufficientnodes",
+        "planp2-numareplicaplanunsupported"
+      ],
+      "aliases": [],
+      "grounding": "NUMAReplicaPlanInvalidSize",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-numareplicaplanunsupported",
+      "canonical": "NUMAReplicaPlanUnsupported",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The NUMAReplicaPlanReason refusal value returned when the host topology evidence is unsupported or incomplete, so PlanNUMAReplicasForTopology declines to guess a replica layout.",
+      "distinction": "The HOST-EVIDENCE refusal on the NUMA replica verdict (fail-closed against unknown topologies); it is not a size validation refusal, not an insufficient-nodes refusal, and never returns a partial plan.",
+      "distinct_from": [
+        "cov5306-numa-replica-plan",
+        "planp2-numareplicaplaninsufficientnodes",
+        "planp2-numareplicaplaninvalidsize"
+      ],
+      "aliases": [],
+      "grounding": "NUMAReplicaPlanUnsupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "planp2-observefirstprefillplanledgerdiff",
+      "canonical": "ObserveFirstPrefillPlanLedgerDiff",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The InKernelPlanner hook that takes the planner-vs-ledger memory diff exactly once, after the first prefill completes, storing the MemoryPlanLedgerDiff at phase first_prefill for later reporting.",
+      "distinction": "The ONE-SHOT OBSERVATION HOOK at first prefill; it produces the stored diff but is not the reporter interface, not the diff struct, and not the read side MemoryPlanDiff() that reports it.",
+      "distinct_from": [
+        "planp2-memoryplandiff",
+        "planp2-memoryplanledgerdiff",
+        "planp2-memoryplandiffreporter"
+      ],
+      "aliases": [],
+      "grounding": "observeFirstPrefillPlanLedgerDiff",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

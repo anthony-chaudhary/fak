@@ -10,7 +10,9 @@ import (
 
 type cudaV41RoutedSwiGLUKey struct{}
 
-// The explicit SM120 candidate does not qualify public routed-SwiGLU capability.
+// The explicit SM90/SM120 candidate does not qualify public routed-SwiGLU
+// capability: untagged builds never compile it, and each arch owes its own
+// witness receipt before the tag may join that arch's default set.
 // Preserve the same-repository oracle noncontracted binary32 operation order.
 // These numeric flags apply to the monolithic object, including peer candidates.
 func prepareCUDAV41RoutedSwiGLU(cfg *CUDAConfig) error {

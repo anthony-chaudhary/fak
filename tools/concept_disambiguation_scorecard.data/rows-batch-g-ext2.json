@@ -104,7 +104,6 @@
       "distinct_from": [
         "Policy (loaded)",
         "policy manifest",
-        "cov5307-view-policy",
         "sharedtask-viewpolicy",
         "expert-tier-policy"
       ],
@@ -232,7 +231,6 @@
         "maturitydebt",
         "supportmaturitydebt",
         "dogfooddebt",
-        "sessionobsdebt",
         "bdebt",
         "cdebt",
         "debtkey"
@@ -416,12 +414,11 @@
       "canonical": "SupportMaturity Rung (M0-M7 ladder)",
       "family": "support-maturity",
       "kind": "concept",
-      "definition": "supportmaturity.Rung is the uint8-backed closed M0-M7 support-maturity ladder type (M0 unsupported through M7 beyond-SOTA, with M6Parity the SOTA-local parity rung), and FromSupport lowers a covmatrix Support value onto that ladder (UNDEFINED/FENCED/PROOF-PATH/SUPPORTED to M0/M1/M3/M4).",
-      "distinction": "It is the explicit ordinal LADDER type quantizing readiness into rungs, distinct from the prose concept of maturity and from raw support, which only says a path exists without a rung.",
+      "definition": "supportmaturity.Rung is the uint8-backed closed M0-M7 support-maturity ladder type (M0 unsupported through M7 beyond-SOTA, with M6Parity the SOTA-local parity rung), and FromSupport lowers a covmatrix Support value onto that ladder (UNDEFINED/FENCED/PROOF-PATH/SUPPORTED to M0/M1/M3/M4); internal/milestonereport scores milestone readiness against it (maturedRung = M4Correct is the top rung a milestone requires).",
+      "distinction": "It is the explicit ordinal LADDER type quantizing readiness into rungs and the scale milestones are scored against - distinct from the prose concept of maturity, from raw support (which only says a path exists without a rung), and from any single milestone report.",
       "distinct_from": [
         "maturity",
-        "support",
-        "cov5307-support-maturity"
+        "support"
       ],
       "aliases": [
         "fromsupport",
@@ -492,7 +489,6 @@
         "cov5307-decision-record"
       ],
       "aliases": [
-        "decisionrecord",
         "recorddecision"
       ],
       "grounding": "decisionjournal",
@@ -516,7 +512,6 @@
         "x2-guard-gate-launchcfg"
       ],
       "aliases": [
-        "guardlocalmodeldecision"
       ],
       "grounding": "routedecision",
       "grounding_kind": "symbol",

@@ -55,7 +55,7 @@ func TestTopologyPressureScrapeLag(t *testing.T) {
 	add()
 	fresh := book()
 	r2.Release()
-	_, _ = r3.Retarget("", nil, map[string]struct{}{"a": {}}, pick)
+	_, _ = r3.Retarget("", nil, map[string]struct{}{"a": {}}, pick, nil)
 	r3.Release()
 	st := m.Snapshot()[0]
 	if st.Inflight != 1 || st.BookedOutputBlocks != 2 || st.Health != HealthHealthy {

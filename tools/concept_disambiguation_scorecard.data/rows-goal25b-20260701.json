@@ -1530,7 +1530,8 @@
         "session",
         "cov5303-session-live",
         "x-session-runtime-sessionfile",
-        "x2-session-runtime-sessiontype"
+        "x2-session-runtime-sessiontype",
+        "session-runtime-p2-sessiontitle"
       ],
       "aliases": [],
       "grounding": "SessionTime",
@@ -1962,25 +1963,6 @@
       "gaps": []
     },
     {
-      "id": "x-goal25b-policy-capability-defaultlooppolicy",
-      "canonical": "defaultLoopPolicy",
-      "family": "policy-capability",
-      "kind": "symbol",
-      "definition": "defaultLoopPolicy (cmd/fak/loop.go) returns the default policy name a `fak loop` run uses when none is given.",
-      "distinction": "The loop-run policy DEFAULT, not the policy manifest.",
-      "distinct_from": [
-        "policy-manifest",
-        "default-loop-policy"
-      ],
-      "aliases": [],
-      "grounding": "defaultLoopPolicy",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "",
-      "parent": "",
-      "verdict": "defined",
-      "gaps": []
-    },
-    {
       "id": "x-goal25b-policy-capability-defaultresumesourcepolicy",
       "canonical": "defaultResumeSourcePolicy",
       "family": "policy-capability",
@@ -2043,7 +2025,8 @@
       "definition": "preflights (internal/qwen36nodereports; dispatch docs) are the pre-dispatch check reports a run loads or performs before committing to work.",
       "distinction": "PRE-run checks, not a policy document or capability floor.",
       "distinct_from": [
-        "capability-floor"
+        "capability-floor",
+        "pc-preflighted-term"
       ],
       "aliases": [],
       "grounding": "preflights",
@@ -2420,8 +2403,7 @@
       "parent": "",
       "verdict": "defined",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "aggregateanswers",
       "canonical": "aggregateAnswers",
