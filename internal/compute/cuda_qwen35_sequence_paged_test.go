@@ -384,7 +384,31 @@ func reqFor(c *cudaBackend,k *cudaPagedKV,start,tokens int)Qwen35SequencePrefill
  }
  return r
 }
-func reset()(*cudaBackend,*cudaPagedKV){C.test_reset();cudaQwen35PagedOwners=nil;cudaPagedPools=map[cudaPagedPoolKey]*cudaKVPagePool{};splitSelected=false;cudaKernelProfileOn=false;qwen35SequenceIQ2Qualification=false;cudaQ56KMMQQualification=false;os.Setenv("FAK_CUDA_PAGED_KV","1");c:=&cudaBackend{faultLatch:&latch{}};cudaDev=c;return c,c.NewKV(KVConfig{NumLayers:2,NumKVHeads:4,HeadDim:256}).(*cudaPagedKV)}
+// Each reset destroys a synchronous fake-C world, not a real CUDA context.
+// Archive failed Go owners first: their deliberately retained table pins must
+// remain reachable through subprocess exit. Never execute archived operations,
+// Unpin uncertain transfers, or report this as successful native retirement.
+type fixtureQuarantinedOwner struct{owner *cudaQwen35PagedSequence;table *int32;pinned bool;length int;lens []int;terminal int32}
+var fixtureQuarantine []fixtureQuarantinedOwner
+func checkFixtureQuarantine()int{
+ if len(fixtureQuarantine)>0{runtime.GC()}
+ pins:=0
+ for _,q:=range fixtureQuarantine{p:=q.owner;var table *int32;if len(p.table)>0{table=&p.table[0]}
+  must(p.started&&!p.completed&&p.pinned==q.pinned&&table==q.table,"archived owner/table pin changed after GC")
+  must(len(p.k.pos)==q.length&&len(p.k.lens)==len(q.lens)&&p.k.pool.copyFailure.Load()==q.terminal&&q.terminal!=0,"archived terminal/frontier changed after GC")
+  for i,n:=range q.lens{must(p.k.lens[i]==n,"archived layer frontier changed after GC")}
+  if p.pinned{pins++}
+ }
+ return pins
+}
+func resetFixtureWorld()int{
+ for p:=cudaQwen35PagedOwners;p!=nil;p=p.next{var table *int32;if len(p.table)>0{table=&p.table[0]};fixtureQuarantine=append(fixtureQuarantine,fixtureQuarantinedOwner{p,table,p.pinned,len(p.k.pos),append([]int(nil),p.k.lens...),p.k.pool.copyFailure.Load()})}
+ // All fake work is inline or represented by the queued vector that reset
+ // discards. The archived Go owners are never reused after native world reset.
+ C.test_reset();cudaQwen35PagedOwners=nil;cudaPagedPools=map[cudaPagedPoolKey]*cudaKVPagePool{};cudaDev=nil
+ return checkFixtureQuarantine()
+}
+func reset()(*cudaBackend,*cudaPagedKV){resetFixtureWorld();splitSelected=false;cudaKernelProfileOn=false;qwen35SequenceIQ2Qualification=false;cudaQ56KMMQQualification=false;os.Setenv("FAK_CUDA_PAGED_KV","1");c:=&cudaBackend{faultLatch:&latch{}};cudaDev=c;return c,c.NewKV(KVConfig{NumLayers:2,NumKVHeads:4,HeadDim:256}).(*cudaPagedKV)}
 func must(v bool,s string){if !v{panic(s)}}
 func rows(c *cudaBackend,n,width,seed int)Tensor{t,b,e:=c.tensor([]int{n,width},MemoryScratchpad,"fixture-rows");if e!=nil{panic(e)};a:=unsafe.Slice((*float32)(b.ptr),n*width);for i:=range a{a[i]=float32(seed+i%width)};return t}
 func preparePrefix(c *cudaBackend,k *cudaPagedKV,n int){r:=reqFor(c,k,0,n);p:=&cudaQwen35PagedSequence{c:c,k:k};must(p.validateHostLocked(r)==nil,"prefix validation");must(p.prepareLocked()==nil,"prefix reserve");for l:=0;l<2;l++{x:=rows(c,n,1024,l+1);must(p.appendLocked(l,x,x,x)==nil,"prefix write")};must(c.qwen35SequenceSyncLocked()==nil,"prefix fence");p.drained=true;p.executing=false;must(p.completeLocked()==nil,"prefix commit")}
@@ -438,6 +462,7 @@ func main(){
   must(C.test_counter(4)==retireBefore&&k.Len()==14&&k.pool.K[0]!=nil,"terminal path released source")
   if mode==2||mode==3||mode==4{must(clone.table[0]==oldTable[0]&&clone.pool.K[0]==oldArena,"failed prep published reservation")}
   if mode==3{must(C.test_counter(8)>0,"deferred copy was not accepted");C.test_finish_deferred();must(C.test_counter(7)!=0&&clone.Len()==14,"late completion upgraded failure")}
+  if mode==3||mode==5{must(cudaQwen35PagedOwners.pinned&&!cudaQwen35PagedOwners.completed&&len(cudaQwen35PagedOwners.table)>0,"uncertain table transfer lost its retained pin")}
  }
  // Runtime unwinds execute the real preparation defer; normal-return checks
  // distinguish Goexit from success and preserve retained operation identity.
@@ -446,6 +471,8 @@ func main(){
   select{case recovered:=<-done:must(!returned,"abnormal preparation returned");if exit{must(recovered==nil,"Goexit became panic")}else{must(recovered=="allocation panic","panic changed")};case <-time.After(2*time.Second):panic("unwind hung")}
   must(cudaQwen35PagedOwners==p&&p.k==k&&k.pool.copyFailure.Load()!=0&&k.Len()==0,"unwind lost roots")
  }
+ must(resetFixtureWorld()==2,"expected both failed table-transfer pins retained through final GC")
+ fmt.Println("terminal owner archive retained both table pins through GC; no unpin or rehabilitation")
  fmt.Println("actual NewKV/Clone/sequence + native write/gather/retirement controls PASS")
 }
 `
