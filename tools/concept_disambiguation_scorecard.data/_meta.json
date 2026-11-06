@@ -18161,9 +18161,27 @@
           "category": "incidental",
           "reason": "Private accessor for the existing Responses-stream force flag on an already selected planner; not a new planning or routing abstraction.",
           "token": "plannerForcesResponsesStream"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Numeric K or V storage-plane image with per-position/head FP8 codes and scales; the Plane substring is not a planning or execution-plan concept.",
+          "token": "KVFP8Plane"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Numerical conversion from F32 values into an FP8 K/V storage-plane image; it does not create, select, or execute a plan.",
+          "token": "QuantizeKVFP8Plane"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Numerical widening of an FP8 K/V storage-plane image with F32 scales; it is unrelated to planning or execution-plan authority.",
+          "token": "DequantizeKVFP8Plane"
         }
       ],
       "exclude": [
+        "DequantizeKVFP8Plane",
+        "KVFP8Plane",
+        "QuantizeKVFP8Plane",
         "ReferenceOverCandidate",
         "candidate_fak_share_gross",
         "candidate_fak_share_net",
