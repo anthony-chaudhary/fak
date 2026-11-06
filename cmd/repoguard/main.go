@@ -284,7 +284,7 @@ func liveMonitorIDsForRead(payload hookPayload, workspaceRoot string, stderr io.
 // internal/<leaf> tree — every other call reads no files at all.
 func leafDeclarationsForWrite(payload hookPayload, workspaceRoot string) repoguard.LeafDeclarations {
 	switch payload.ToolName {
-	case "Write", "Edit", "MultiEdit", "NotebookEdit":
+	case "Write", "Edit", "NotebookEdit":
 	default:
 		return repoguard.LeafDeclarations{}
 	}
