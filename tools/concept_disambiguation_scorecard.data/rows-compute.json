@@ -8,7 +8,8 @@
       "definition": "Vulkan fused wrapper helper checking all selected weight-slot pointers have sufficient nominal resident buffer bytes while their live owners and command-stream lock are retained.",
       "distinction": "These slots are expert weight bindings, unlike the scheduler Slot free/busy signal. The helper checks nominal bytes only and does not validate stale aliases, device generations, or dispatch-grid limits.",
       "distinct_from": [
-        "slot"
+        "slot",
+        "cudagraphoncedependency-reservationslotsmatch"
       ],
       "aliases": [],
       "grounding": "fusedVulkanSlotBytesOKLocked",
@@ -786,6 +787,25 @@
       ],
       "aliases": [],
       "grounding": "kvFP8HybridPreflight",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "cudagraphoncedependency-reservationslotsmatch",
+      "canonical": "cudaGraphOnceDependency.reservationSlotsMatch",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Correspondence check between a frozen graph allocation receipt and its capture-built primary/scale pointer, extent and nonzero reservation-ID array slots. Under the caller complete-array-length validation, it checks slot bounds before accessing and comparing each required entry.",
+      "distinction": "Unlike fusedVulkanSlotBytesOKLocked checking live expert-weight nominal extents, this compares immutable graph receipt slots. It performs no native lookup, synchronization or ownership transfer and does not prove model, content or completion identity.",
+      "distinct_from": [
+        "fused-vulkan-slot-bytes-ok-locked"
+      ],
+      "aliases": [],
+      "grounding": "reservationSlotsMatch",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

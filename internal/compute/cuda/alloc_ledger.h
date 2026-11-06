@@ -65,6 +65,9 @@ struct fak_alloc_tag {
   int kind;
   int site;
   size_t bytes;
+#ifdef FAK_CUDA_CAPTURE_ONCE_QUALIFICATION
+  uint64_t reservation;
+#endif
 };
 
 static fak_alloc_cell g_alloc_cells[FAK_ALLOC_CELLS];
@@ -83,6 +86,19 @@ struct fak_alloc_tags_guard {
   fak_alloc_tags_guard(const fak_alloc_tags_guard &) = delete;
   fak_alloc_tags_guard &operator=(const fak_alloc_tags_guard &) = delete;
 };
+
+#ifdef FAK_CUDA_CAPTURE_ONCE_QUALIFICATION
+// A reservation changes on BOTH track and retag, including a same-class retag
+// and each idle-pool return/borrow. The existing tag lock serializes the counter;
+// it is not a CUDA completion stamp or a cross-process/device-context identity.
+static uint64_t g_alloc_reservation_next = 0;
+static inline uint64_t fak_alloc_next_reservation_locked() {
+  // Never wrap and never reset this counter in accounting or cleanup. Zero is
+  // permanently unqualified after exhaustion; live older reservations stay valid.
+  if (g_alloc_reservation_next == ~uint64_t(0)) return 0;
+  return ++g_alloc_reservation_next;
+}
+#endif
 
 static inline int fak_alloc_norm_class(int cls) {
   return (cls < 0 || cls >= FAK_ALLOC_CLASS_COUNT) ? FAK_ALLOC_OTHER : cls;
@@ -143,8 +159,15 @@ static inline int fak_alloc_site_intern(const char *name) {
 // tracked is retagged, so a double track never double-counts its bytes.
 static inline void fak_alloc_track(const void *p, int cls, int kind, int site, size_t bytes) {
   if (!p) return;
-  fak_alloc_tag t{fak_alloc_norm_class(cls), fak_alloc_norm_kind(kind), fak_alloc_norm_site(site), bytes};
+  fak_alloc_tag t{};
+  t.cls = fak_alloc_norm_class(cls);
+  t.kind = fak_alloc_norm_kind(kind);
+  t.site = fak_alloc_norm_site(site);
+  t.bytes = bytes;
   fak_alloc_tags_guard guard;
+#ifdef FAK_CUDA_CAPTURE_ONCE_QUALIFICATION
+  t.reservation = fak_alloc_next_reservation_locked();
+#endif
   auto it = g_alloc_tags.find(p);
   if (it != g_alloc_tags.end()) {
     fak_alloc_cell_sub(it->second);
@@ -183,6 +206,9 @@ static inline void fak_alloc_retag(const void *p, int cls, int site) {
   fak_alloc_cell_sub(it->second);
   it->second.cls = fak_alloc_norm_class(cls);
   it->second.site = fak_alloc_norm_site(site);
+#ifdef FAK_CUDA_CAPTURE_ONCE_QUALIFICATION
+  it->second.reservation = fak_alloc_next_reservation_locked();
+#endif
   g_alloc_sites[it->second.site].cls.store(it->second.cls, std::memory_order_relaxed);
   fak_alloc_cell_add(it->second.cls, it->second.kind, it->second.site, it->second.bytes);
 }
@@ -191,6 +217,27 @@ static inline void fak_alloc_retag(const void *p, int cls, int site) {
 #define FAK_ALLOC_SITE(literal) ([]() { static const int id = fak_alloc_site_intern(literal); return id; }())
 
 extern "C" int fcuda_alloc_site_intern(const char *name) { return fak_alloc_site_intern(name); }
+
+// A qualification-only, exact-base/extent reservation ticket. It never dereferences
+// p, allocates, drains a stream or claims ownership. Caller holds cudaMu and must
+// retain the allocation across reading AND checking the ticket; the tag lock only
+// makes this metadata lookup atomic. Never call while already holding that lock.
+extern "C" uint64_t fcuda_alloc_reservation_id(const void *p, size_t bytes) {
+#ifdef FAK_CUDA_CAPTURE_ONCE_QUALIFICATION
+  if (!p || !bytes) return 0;
+  fak_alloc_tags_guard guard;
+  auto found = g_alloc_tags.find(p);
+  if (found == g_alloc_tags.end()) return 0;
+  const fak_alloc_tag &tag = found->second;
+  if (tag.bytes != bytes || tag.cls == FAK_ALLOC_IDLE_POOL ||
+      tag.kind == FAK_ALLOC_PINNED_HOST) return 0;
+  return tag.reservation;
+#else
+  (void)p; (void)bytes;
+  return 0; // Ordinary archives have no generation field, counter or capability.
+#endif
+}
+
 
 // fcuda_alloc_ledger_read copies FAK_ALLOC_CELLS cells, each {live, peak,
 // live_count, allocs, frees}, into out (5*cells int64s), class-major. It
@@ -234,4 +281,31 @@ extern "C" void fcuda_alloc_ledger_reset_peak(void) {
   int n = g_alloc_site_n.load(std::memory_order_acquire);
   for (int i = 0; i < n; ++i)
     g_alloc_sites[i].peak.store(g_alloc_sites[i].live.load(std::memory_order_relaxed), std::memory_order_relaxed);
+}
+
+// One observational check for all primary/scale tickets of a retained graph.
+// Arrays must each contain count readable entries and remain live for this call.
+// The caller retains all subject allocations and holds cudaMu across this check
+// and use. A matching ID is not an execution, content or expected-class proof.
+extern "C" int fcuda_alloc_reservations_match(const void *const *pointers,
+    const size_t *bytes, const uint64_t *ids, int count) {
+#ifdef FAK_CUDA_CAPTURE_ONCE_QUALIFICATION
+  if (!pointers || !bytes || !ids || count <= 0 ||
+      (size_t)count > SIZE_MAX / sizeof(*pointers) ||
+      (size_t)count > SIZE_MAX / sizeof(*bytes) ||
+      (size_t)count > SIZE_MAX / sizeof(*ids)) return 0;
+  fak_alloc_tags_guard guard;
+  for (int i = 0; i < count; ++i) {
+    if (!pointers[i] || !bytes[i] || !ids[i]) return 0;
+    auto found = g_alloc_tags.find(pointers[i]);
+    if (found == g_alloc_tags.end()) return 0;
+    const fak_alloc_tag &tag = found->second;
+    if (tag.bytes != bytes[i] || tag.reservation != ids[i] ||
+        tag.cls == FAK_ALLOC_IDLE_POOL || tag.kind == FAK_ALLOC_PINNED_HOST) return 0;
+  }
+  return 1;
+#else
+  (void)pointers; (void)bytes; (void)ids; (void)count;
+  return 0;
+#endif
 }
