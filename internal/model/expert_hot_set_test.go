@@ -581,9 +581,11 @@ func TestExpertHotSetLearnerPinsStayWithinBudgetUnderWarmPrior(t *testing.T) {
 // internal/model, and it must be the canonical wired one.
 //
 // The scan is deterministic and source-level: it reads the package's own non-test .go files (the
-// authoritative declarations), finds every `type <Name> struct` whose name contains `HotSet` (excluding the value type
-// ExpertHotSetSwap), and asserts the learner set is exactly {ExpertHotSetLearner}. A reintroduced
-// OnlineExpertHotSet -- under any casing -- fails by name.
+// authoritative declarations), finds every `type <Name> struct` whose name contains `HotSet` (excluding the value
+// type ExpertHotSetSwap and the ctxmmu-seam adapter ExpertHotSetAdvisor, which holds NO learning
+// state of its own — only a pointer to the canonical learner, expert_hot_set_advisor.go), and
+// asserts the learner set is exactly {ExpertHotSetLearner}. A reintroduced OnlineExpertHotSet --
+// under any casing -- fails by name.
 func TestExpertHotSetLearnerHasExactlyOneLearnerSymbol(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -602,7 +604,7 @@ func TestExpertHotSetLearnerHasExactlyOneLearnerSymbol(t *testing.T) {
 			t.Fatalf("read %s: %v", name, err)
 		}
 		for _, m := range typeDecl.FindAllStringSubmatch(string(src), -1) {
-			if strings.Contains(m[1], "HotSet") && m[1] != "ExpertHotSetSwap" {
+			if strings.Contains(m[1], "HotSet") && m[1] != "ExpertHotSetSwap" && m[1] != "ExpertHotSetAdvisor" {
 				hotSetTypes = append(hotSetTypes, m[1])
 			}
 		}
