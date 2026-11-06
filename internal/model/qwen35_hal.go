@@ -268,7 +268,7 @@ func (q *qwen35HALState) graphCaptureReady(cfg Config) bool {
 		}
 		if st.owner != nil {
 			st.owner.mu.Lock()
-			shared := st.owner.refs > 1
+			shared := st.owner.refs != 1 || st.owner.graphMutating || st.owner.graphInvalid
 			st.owner.mu.Unlock()
 			if shared {
 				return false
@@ -279,11 +279,16 @@ func (q *qwen35HALState) graphCaptureReady(cfg Config) bool {
 }
 
 type qwen35HALLayerOwner struct {
-	mu        sync.Mutex
-	refs      int
-	backend   compute.Backend
-	conv      compute.Tensor
-	recurrent compute.Tensor
+	// Host mutation-attempt identity, not device completion or content identity.
+	// These fields are protected by mu and never refreshed on graph validation.
+	graphEpoch    uint64
+	graphMutating bool
+	graphInvalid  bool
+	mu            sync.Mutex
+	refs          int
+	backend       compute.Backend
+	conv          compute.Tensor
+	recurrent     compute.Tensor
 }
 
 func newQwen35HALLayerState(backend compute.Backend, conv, recurrent compute.Tensor) qwen35HALLayerState {
@@ -391,15 +396,21 @@ func (q *qwen35HALState) mutateLayer(
 			return compute.Tensor{}, compute.Tensor{}, compute.Tensor{}, fmt.Errorf("model: Qwen3.5 recurrent layer %d out of bounds", layer)
 		}
 		l := &q.layers[layer]
+		inheritedGraphFailure := l.graphInheritedFailureLocked()
 		owner, mutableErr := l.mutableOwnerLocked(backend, &cleanup)
 		if mutableErr != nil {
 			return compute.Tensor{}, compute.Tensor{}, compute.Tensor{}, mutableErr
 		}
 		defer owner.mu.Unlock()
+		owner.graphInvalid = owner.graphInvalid || inheritedGraphFailure
+		owner.graphMutationBeginLocked()
+		graphComplete := false
+		defer func() { owner.graphMutationFinishLocked(graphComplete) }()
 		out, conv, recurrent, mutateErr := fn(owner.conv, owner.recurrent)
 		if mutateErr == nil && conv.Buf() == owner.conv.Buf() && recurrent.Buf() == owner.recurrent.Buf() {
 			owner.conv, owner.recurrent = conv, recurrent
 			l.conv, l.recurrent = conv, recurrent
+			graphComplete = true
 		}
 		return out, conv, recurrent, mutateErr
 	}()
@@ -439,14 +450,29 @@ func (q *qwen35HALState) mutateSequence(
 			if state.conv.Buf() == nil && state.recurrent.Buf() == nil {
 				continue
 			}
+			inheritedGraphFailure := state.graphInheritedFailureLocked()
 			owner, mutableErr := state.mutableOwnerLocked(backend, &cleanup)
 			if mutableErr != nil {
 				return compute.Qwen35SequencePrefillResult{}, fmt.Errorf("layer %d: %w", layer, mutableErr)
 			}
 			locked = append(locked, owner)
+			owner.graphInvalid = owner.graphInvalid || inheritedGraphFailure
 			states[layer] = compute.Qwen35SequenceState{Conv: owner.conv, Recurrent: owner.recurrent}
 		}
-		return fn(states)
+		// Clone failures above issue no mutation attempt. Once the callback starts,
+		// every locked pair participates and an abnormal exit invalidates them all.
+		for _, owner := range locked {
+			owner.graphMutationBeginLocked()
+		}
+		graphComplete := false
+		defer func() {
+			for _, owner := range locked {
+				owner.graphMutationFinishLocked(graphComplete)
+			}
+		}()
+		result, mutationErr := fn(states)
+		graphComplete = mutationErr == nil
+		return result, mutationErr
 	}()
 	complete = err == nil
 	return result, err
