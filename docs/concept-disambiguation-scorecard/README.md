@@ -15,23 +15,23 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **595** (clarity 1 + coverage 594) |
-| **Crystal-clear concepts (and climbing)** | **1579** crystal of 3463 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3531 / 4125** (85.6% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **599** (clarity 1 + coverage 598) |
+| **Crystal-clear concepts (and climbing)** | **1580** crystal of 3464 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3532 / 4130** (85.5% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 239 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **99** of 4854 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **99** of 4855 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 90.3/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 90.2/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3463 concepts - score 90.3/100 (grade A) - disambiguation-debt 595
+concept-disambiguation chart - 3464 concepts - score 90.2/100 (grade A) - disambiguation-debt 599
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #######################..... 1579
+  * crystal       #######################..... 1580
   o defined       ############################ 1884
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -51,7 +51,7 @@ clarity mix by family (each cell = one concept):
   layout           ***********************************ooooooooo (44 concept(s); 35 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
   plan             *********************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (475 concept(s); 189 crystal)
-  policy-capability ****************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (231 concept(s); 124 crystal)
+  policy-capability *****************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (232 concept(s); 125 crystal)
   pool             **************************************oooooooooooooooooooooooooooooooooo (72 concept(s); 38 crystal)
   render-materialize *************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (206 concept(s); 49 crystal)
   score-debt       ***********************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (100 concept(s); 35 crystal)
@@ -68,12 +68,12 @@ coverage by family (positioned / discovered):
   context-ctx      ########################.... 288/334
   guard-gate       ##########################.. 535/578
   support-maturity ####################........ 99/142
-  attention        #######################..... 198/236
-  pool             ###################......... 74/110
+  attention        #######################..... 198/238
+  pool             ##################.......... 74/112
   cache            ##########################.. 403/435
   render-materialize #########################... 224/253
   evict            ####################........ 65/93
-  policy-capability #########################... 255/282
+  policy-capability #########################... 256/283
   score-debt       #######################..... 115/141
   witness-proof    #########################... 176/199
   layout           ##################.......... 35/55
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [############################....] 85.6%  (3531/4125 confusable tokens positioned)
+namespace coverage  [############################....] 85.5%  (3532/4130 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 239
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 239/239
 
-name index: 4854 lookup name(s) -> 3463 concept(s), 99 ambiguous
+name index: 4855 lookup name(s) -> 3464 concept(s), 99 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **239 / 239** (239 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2986 / 6408 |
+| Boundaries drawn (mutual / total) | 2990 / 6412 |
 | Dangling `distinct_from` references (drive to 0) | 1 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4854 over 3463 concepts |
+| Lookup names indexed | 4855 over 3464 concepts |
 | Lookup names landing on several concepts | 99 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3463 |
+| Concepts carrying a contrast set | 3464 |
 
 ## The concepts (best verdict first)
 
@@ -1181,6 +1181,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | policy-capability | **Qwen35GDNPackedInputCapability** - Versioned backend source declaration that the existing whole-GDN decode and sequence implementations understand canonical row-major block-256 Q4_K or Q6_K QKV/Z weights with F32 mutable state. |
 | * | crystal | symbol | policy-capability | **Qwen35GDNPackedInputPolicy** - Immutable per-load Q4_K/Q6_K admission decision resolved from explicit enable and force-off controls, the versioned whole-GDN implementation contract and actual backend residency/upload/dtype probes. Its zero value admits no packed GDN inputs. |
 | * | crystal | symbol | policy-capability | **ResolveQwen35GDNPackedInputPolicy** - Resolver that honors default-off and both force-off controls, checks actual whole-GDN decode and sequence method/path contracts, validates the versioned declaration and probes each admitted resident dtype before returning a copied per-load policy or typed refusal. |
+| * | crystal | symbol | policy-capability | **kvFP8HybridPreflight** - Private prerequisite check for one FP8 owner and an exact three-GDN/one-attention layer map: validates canonical position range, fixed partial-RoPE binding, supported selected modes, live GDN invalid-bit roots and non-overlapping storage before whole-forward admission. |
 | * | crystal | symbol | policy-capability | **policy-capability implementation surface for adjudicatereceipt** - `adjudicateReceipt` is the policy-capability symbol declared at `internal/gateway/tool_routing.go:71`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | policy-capability | **policy-capability implementation surface for gatepolicy** - `GatePolicy` is the policy-capability symbol declared or used at `cmd/fak/native_performance_test.go:594`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | policy-capability | **policy-capability implementation surface for faklooppolicy** - `FAK_LOOP_POLICY` is the policy-capability environment variable declared or used at `cmd/fak/loop.go`. This row positions that concrete implementation surface, not merely the family label. |
@@ -3744,8 +3745,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `reference_resolves` | 86 | 1 | 1 dangling distinct_from reference(s) |
 | honesty | `kind_grounding_soft` | 60 | 0 | 31 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3422/6408 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3463 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3422/6412 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3464 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3753,7 +3754,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4854 lookup name(s) resolves - 99 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4855 lookup name(s) resolves - 99 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3766,12 +3767,12 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | context-ctx | 288 | 334 | 46 |
 | guard-gate | 535 | 578 | 43 |
 | support-maturity | 99 | 142 | 43 |
-| attention | 198 | 236 | 38 |
-| pool | 74 | 110 | 36 |
+| attention | 198 | 238 | 40 |
+| pool | 74 | 112 | 38 |
 | cache | 403 | 435 | 32 |
 | render-materialize | 224 | 253 | 29 |
 | evict | 65 | 93 | 28 |
-| policy-capability | 255 | 282 | 27 |
+| policy-capability | 256 | 283 | 27 |
 | score-debt | 115 | 141 | 26 |
 | witness-proof | 176 | 199 | 23 |
 | layout | 35 | 55 | 20 |

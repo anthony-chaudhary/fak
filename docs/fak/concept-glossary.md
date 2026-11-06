@@ -2315,3 +2315,10 @@ Uncalled qualification-only typed query gate and binding of the retained staged-
 Private native five-plane, query, output and status provenance/extent/alias gate around the existing scalar FP8 attention submission, returning a selected diagnostic receipt.
 
 **Distinct from:** Unlike the qualification-only typed adapter and the F16/BF16 fcuda_kv_attention_typed entry, this wrapper admits private FP8 planes and fresh output; zero status means accepted submission only, not checked completion, numerical validity, publication or H200 qualification.
+
+
+### kvFP8HybridPreflight
+
+Private prerequisite check for one FP8 owner and an exact three-GDN/one-attention layer map: validates canonical position range, fixed partial-RoPE binding, supported selected modes, live GDN invalid-bit roots and non-overlapping storage before whole-forward admission.
+
+**Distinct from:** This checks the supplied hybrid state descriptors, not the default-off packed-GDN dtype policy or its backend capability declaration. It does not validate every model weight, native GDN allocation provenance, output-consumer arithmetic or a public serving route.

@@ -450,7 +450,8 @@
       "distinct_from": [
         "qwen35gdnpackedinputcapability",
         "qwen35gdnpackedinputplan",
-        "resolveqwen35gdnpackedinputpolicy"
+        "resolveqwen35gdnpackedinputpolicy",
+        "kvfp8hybridpreflight"
       ],
       "aliases": [],
       "grounding": "Qwen35GDNPackedInputPolicy",
@@ -471,7 +472,8 @@
       "distinct_from": [
         "qwen35gdnpackedinputpolicy",
         "qwen35gdnpackedinputcapability",
-        "qwen35gdnpackedinputplan"
+        "qwen35gdnpackedinputplan",
+        "kvfp8hybridpreflight"
       ],
       "aliases": [],
       "grounding": "ResolveQwen35GDNPackedInputPolicy",
@@ -764,6 +766,26 @@
       ],
       "aliases": [],
       "grounding": "fcuda_kv_fp8_attention_owned",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "kvfp8hybridpreflight",
+      "canonical": "kvFP8HybridPreflight",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Private prerequisite check for one FP8 owner and an exact three-GDN/one-attention layer map: validates canonical position range, fixed partial-RoPE binding, supported selected modes, live GDN invalid-bit roots and non-overlapping storage before whole-forward admission.",
+      "distinction": "This checks the supplied hybrid state descriptors, not the default-off packed-GDN dtype policy or its backend capability declaration. It does not validate every model weight, native GDN allocation provenance, output-consumer arithmetic or a public serving route.",
+      "distinct_from": [
+        "qwen35gdnpackedinputpolicy",
+        "resolveqwen35gdnpackedinputpolicy"
+      ],
+      "aliases": [],
+      "grounding": "kvFP8HybridPreflight",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

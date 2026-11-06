@@ -2401,6 +2401,11 @@
           "category": "incidental",
           "reason": "Diagnostic phase code 14 used to select native failure provenance. It is not an attention implementation, completion proof, numerical-validity claim or hardware qualification.",
           "token": "FCUDA_KV_FP8_PHASE_ATTENTION"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local error result from kvFP8AttendEager inside the rooted Qwen transaction; it names no separate attention mechanism, capability, or execution policy.",
+          "token": "attentionErr"
         }
       ],
       "exclude": [
@@ -2423,6 +2428,7 @@
         "TreeAttentionMask",
         "ValidateTreeAttentionMask",
         "attentionContinuation",
+        "attentionErr",
         "attentionFunc",
         "attentionInput",
         "attentionInputPanel",
