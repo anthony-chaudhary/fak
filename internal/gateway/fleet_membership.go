@@ -146,6 +146,8 @@ type memberWorker struct {
 	inflight           int                                  // in-flight requests acquired against this worker
 	bookedOutputBlocks int                                  // anticipated decode blocks owned by those requests
 	observedPrefills   map[*observedPrefillAttempt]struct{} // active measured attempts, guarded by FleetMembership.mu
+	ejections          int                                  // escalation level of the current dispatch-ejection run (replica_ejection.go)
+	ejectedUntil       time.Time                            // probes cannot re-admit before this instant
 }
 
 // admissible reports whether a worker may receive NEW work: healthy and not
@@ -199,6 +201,9 @@ type FleetMembership struct {
 	healthyAfter   int // consecutive OK probes to (re)admit a worker
 	unhealthyAfter int // consecutive failed probes to evict a healthy worker (hysteresis)
 	probe          Probe
+	ejectBase      time.Duration // first dispatch-ejection window and per-repeat increment
+	ejectMax       time.Duration // ejection window cap and escalation reset period
+	now            func() time.Time
 
 	mu              sync.Mutex
 	workers         map[string]*memberWorker
@@ -235,11 +240,16 @@ type fleetReservationPick func([]WorkerStatus) (fleetReservationPickResult, bool
 
 // MembershipConfig tunes the health-loop hysteresis. Zero values fall back to
 // safe defaults (HealthyAfter=1, UnhealthyAfter=2) so a single missed beat does
-// not flap a worker out of the admissible set.
+// not flap a worker out of the admissible set. EjectBase/EjectMax tune the
+// dispatch-ejection window (defaults 30s/5m, see replica_ejection.go); Now is the
+// clock, time.Now when nil.
 type MembershipConfig struct {
 	HealthyAfter   int
 	UnhealthyAfter int
 	Probe          Probe
+	EjectBase      time.Duration
+	EjectMax       time.Duration
+	Now            func() time.Time
 }
 
 // NewFleetMembership builds an empty registry. Register workers with Add and drive
@@ -253,10 +263,28 @@ func NewFleetMembership(cfg MembershipConfig) *FleetMembership {
 	if ua < 1 {
 		ua = 2
 	}
+	eb := cfg.EjectBase
+	if eb <= 0 {
+		eb = defaultEjectBase
+	}
+	em := cfg.EjectMax
+	if em < eb {
+		em = defaultEjectMax
+		if em < eb {
+			em = eb
+		}
+	}
+	now := cfg.Now
+	if now == nil {
+		now = time.Now
+	}
 	return &FleetMembership{
 		healthyAfter:   ha,
 		unhealthyAfter: ua,
 		probe:          cfg.Probe,
+		ejectBase:      eb,
+		ejectMax:       em,
+		now:            now,
 		workers:        make(map[string]*memberWorker),
 	}
 }
@@ -424,7 +452,7 @@ func (m *FleetMembership) reserveForModelLocked(model string, engine EngineKind,
 			continue
 		}
 		w := m.workers[id]
-		if w == nil || !w.admissible() {
+		if w == nil {
 			continue
 		}
 		if engine != "" && w.spec.Engine != engine {
@@ -447,7 +475,7 @@ func (m *FleetMembership) reserveForModelLocked(model string, engine EngineKind,
 		return fleetReservationPickResult{}, ErrNoHealthyWorker
 	}
 	w := m.workers[decision.workerID]
-	if w == nil || !w.admissible() {
+	if w == nil {
 		return fleetReservationPickResult{}, ErrNoHealthyWorker
 	}
 	if decision.bookedOutputBlocks < 0 {
@@ -583,7 +611,7 @@ func (m *FleetMembership) applyProbeLocked(w *memberWorker, ok bool) {
 	if ok {
 		w.failStreak = 0
 		w.okStreak++
-		if w.health != HealthHealthy && w.okStreak >= m.healthyAfter {
+		if w.health != HealthHealthy && w.okStreak >= m.healthyAfter && !m.ejectedLocked(w) {
 			m.setHealthLocked(w, HealthHealthy)
 		}
 		return
@@ -798,9 +826,14 @@ func (m *FleetMembership) CandidatesForModel(model string) ([]WorkerSpec, error)
 // The empty-roster arm is deliberate: with nothing registered there is no
 // evidence distinguishing a bad model id from a fleet that has not come up, so
 // it keeps the pre-existing verdict rather than inventing a configuration fault.
+//
+// Fail-open: when holders exist but none is admissible, the non-draining
+// UNHEALTHY holders (ejected ones included) are returned instead of
+// ErrNoHealthyWorker (see replica_ejection.go). Only an all-draining or
+// never-probed holder set still yields ErrNoHealthyWorker.
 // The caller must hold the registry lock.
 func (m *FleetMembership) classifyForModelLocked(model string) ([]string, error) {
-	var ids []string
+	var ids, failOpen []string
 	held := false
 	for _, id := range m.order {
 		w := m.workers[id]
@@ -810,10 +843,15 @@ func (m *FleetMembership) classifyForModelLocked(model string) ([]string, error)
 		held = true
 		if w.admissible() {
 			ids = append(ids, id)
+		} else if w.failOpenCandidate() {
+			failOpen = append(failOpen, id)
 		}
 	}
 	if !held && len(m.order) > 0 {
 		return nil, fmt.Errorf("%w: %q", ErrNoWorkerForModel, model)
+	}
+	if len(ids) == 0 {
+		ids = failOpen
 	}
 	if len(ids) == 0 {
 		return nil, ErrNoHealthyWorker
@@ -923,6 +961,8 @@ func (m *FleetMembership) DispatchForModel(ctx context.Context, model string, se
 // worker that fails dispatches crosses to unhealthy under the same hysteresis) and
 // emits a failover transition labeled with the worker the request moved off of.
 // A neutral cause (dispatchOutcomeNeutral) emits the transition but is not a probe.
+// A failure that crosses the worker to unhealthy also ejects it (replica_ejection.go),
+// so the next successful probe cannot re-admit it before the window ends.
 func (m *FleetMembership) markDispatchFailure(id string, cause error) {
 	m.withWorkerLockVoid(id, func(w *memberWorker) {
 		m.markDispatchFailureWorkerLocked(id, w, cause)
@@ -942,7 +982,11 @@ func (m *FleetMembership) markDispatchFailureWorkerLocked(id string, w *memberWo
 	if dispatchOutcomeNeutral(cause) {
 		return
 	}
+	wasUnhealthy := w.health == HealthUnhealthy
 	m.applyProbeLocked(w, false)
+	if !wasUnhealthy && w.health == HealthUnhealthy {
+		m.ejectLocked(w)
+	}
 }
 
 // dispatchOutcomeNeutral reports whether a dispatch error proves the worker alive

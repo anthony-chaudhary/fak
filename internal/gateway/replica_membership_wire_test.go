@@ -174,9 +174,10 @@ func TestReplicaMembershipWireDrainExcludesReplica(t *testing.T) {
 	}
 }
 
-// TestReplicaMembershipWireAllUnhealthyVerdict asserts that emptying the
-// admissible set yields ErrNoHealthyWorker — a typed verdict, never a silent drop
-// or a nil completion.
+// TestReplicaMembershipWireAllUnhealthyVerdict asserts that an all-unhealthy fleet
+// fails open (the request is still served), while a fleet with no placeable worker
+// at all (every replica draining) yields ErrNoHealthyWorker — a typed verdict, never
+// a silent drop or a nil completion.
 func TestReplicaMembershipWireAllUnhealthyVerdict(t *testing.T) {
 	a := &fleetWireReplica{name: "ra"}
 	b := &fleetWireReplica{name: "rb"}
@@ -200,6 +201,18 @@ func TestReplicaMembershipWireAllUnhealthyVerdict(t *testing.T) {
 	router.WithMembership(fm)
 	fm.ProbeOnce(context.Background()) // both cross to unhealthy
 
+	if comp, err := router.Complete(context.Background(), nil, nil); err != nil || comp == nil {
+		t.Fatalf("all-unhealthy Complete = %+v, %v; want a fail-open completion", comp, err)
+	}
+
+	for _, id := range []string{"w-a", "w-b"} {
+		fm.mu.Lock()
+		fm.workers[id].inflight++ // an in-flight request keeps the drained worker registered
+		fm.mu.Unlock()
+		if err := fm.Drain(id); err != nil {
+			t.Fatalf("Drain(%s): %v", id, err)
+		}
+	}
 	comp, err := router.Complete(context.Background(), nil, nil)
 	if err == nil {
 		t.Fatalf("all-unhealthy Complete returned comp=%+v err=nil, want ErrNoHealthyWorker", comp)
