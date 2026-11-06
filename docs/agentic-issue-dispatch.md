@@ -537,3 +537,41 @@ recovered witness is independently reproducible.
       as part of the wave.
 - [ ] Any remaining `unwitnessed`, `failed`, or `blocked` row is explicitly carried into
       the parent orchestrator handoff.
+
+## Repository-bound error inventory
+
+Before implementing an error report, use `fak-dev issue inventory --from-issues
+issues.json --from-observations observations.json --root <repository>` to resolve
+its source provenance. `--trunk-ref` defaults to `refs/heads/main`; it must name
+exactly the commit covered by the current tested-state receipt. The command only
+reads local Git history and input files. It never executes issue-body commands,
+fetches, contacts GitHub, closes an issue, or changes a ref.
+Every Git read uses `--no-lazy-fetch`; missing promised objects and Git versions
+without that option fail closed rather than downloading repository data.
+
+Observed failure, proven fix, and current tested state retain separate full
+commit IDs and historical `module@rN+gSHA` values derived by `modver.SnapshotAt`.
+A supplied ref must agree with its commit, and a supplied module version must
+match the historical snapshot. Missing, mismatched, or shallow-history facts
+produce evidence-required rows rather than fixed claims. A receipt against an
+older trunk commit is stale even if its module happened not to change.
+
+Release containment is recomputed from the immutable tag object IDs captured at
+the start, not from later tag-name values or a caller's `fix_ancestor` boolean.
+Annotated tags are peeled by their captured object ID. The earliest containing stable release is selected by the
+existing numeric release-tag convention, not the supplied list order. Tags and
+resolved refs are rechecked before the report is emitted, and the snapshot digest
+binds the actual trunk, tag identities, and resolved evidence. Release-specific
+passing receipts remain a supported independent source of qualification, but
+must name a real stable tag and a compatible historical module version.
+
+Pass/fail statuses and witness identities still come from trusted CI or isolated
+worker receipts. A valid Git commit or module stamp does not authenticate a test
+result or prove physical execution. The inventory does not manufacture receipts
+for already-published source that has never been tested.
+
+Use `--require-actionable N` to gate dispatch: 0 means actionable, 3 means proven
+duplicate or fixed, and 4 means evidence or review is required. Operational/input
+errors remain 1/2. Provenance-refused rows cannot become canonical duplicate
+owners for another row. No hardware qualification or issue-closure authority is
+conferred by this read-only check.

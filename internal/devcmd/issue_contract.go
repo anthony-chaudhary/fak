@@ -21,6 +21,8 @@ func RunIssue(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	switch argv[0] {
+	case "inventory":
+		return RunIssueInventory(stdout, stderr, argv[1:])
 	case "audit":
 		return runIssueAudit(stdout, stderr, argv[1:])
 	case "audit-loop":
@@ -1255,6 +1257,8 @@ func issueUsage(w io.Writer) {
   fak-dev issue audit-loop --snapshot SUBJECTS.json [--ledger P] [--cursor P]
                      [--scan-cap N] [--batch-cap N] [--replay N,M] [--json]
   fak-dev issue audit-loop --status [--ledger P] [--cursor P] [--json]
+  fak-dev issue inventory --from-issues I.json --from-observations O.json
+                     [--root DIR --trunk-ref REF] [--require-actionable N] [--json]
   fak-dev issue contract --file CANDIDATE.json [--json]
   fak-dev issue contract --from-plan PLAN.json [--json]
   fak-dev issue contract --from-issues ISSUES.json [--json]
