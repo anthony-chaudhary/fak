@@ -2472,3 +2472,25 @@ kernels" section above.
 - Witness: `TestQwen38MTP_Adaptive_ModeledCostPricing` in
   `internal/model/qwen38_mtp_adaptive_test.go` pins the modeled keep/more
   pricing and the per-step EMA fold (software evidence only).
+
+## vLLM O(1)-amortized KV-load bookkeeping
+
+`internal/modelengine/kv_load_bookkeeping.go` adapts the per-block CPU-cost
+reduction of async KV-load lifecycle bookkeeping from vLLM PR #65831
+("[Perf][Core] Reduce per-block CPU cost of KV block allocation and caching"),
+merged at `518c624a1c731cfc6c73369ced6351cb03754ddf`:
+https://github.com/vllm-project/vllm/blob/518c624a1c731cfc6c73369ced6351cb03754ddf/vllm/v1/core/block_pool.py
+plus `vllm/v1/core/kv_cache_manager.py` at the same revision.
+
+Copyright contributors to the vLLM project. SPDX-License-Identifier: Apache-2.0.
+Changed for Fak: idiomatic Go re-expression (no upstream code copied) as a
+standalone per-request KV-load bookkeeper — amortized-constant per-request
+state, cached running-sum aggregates updated by O(1) deltas on start,
+promote-to-running, finish and release, and an explicit pool-touch counter that
+pins N load transitions to O(N) total pool-slot accesses so schedule() never
+re-walks the whole pool per step. Scheduler integration into
+`internal/modelengine/nativesched.go` is a follow-on. Witnessed by
+`TestKVLoadBookkeepingTransitionsCostLinearInTransitions` in
+`internal/modelengine/kv_load_bookkeeping_test.go` (software evidence only).
+The full Apache License, Version 2.0 reproduced in the "TensorFold benchmark
+evidence" section above applies to this adaptation.
