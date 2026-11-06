@@ -9,8 +9,18 @@ struct fak_graph_once {
   bool terminal;
   cudaGraph_t graph;
   cudaGraphExec_t exec;
+  // POD fields keep calloc construction and existing create extraction valid.
+  void *quant_ops;
+  void *quant_scratch[3];
+  size_t quant_bytes[3];
+  bool quant_tracked[3];
+  int quant_count, quant_cursor, quant_error;
+  bool quant_prepared;
 };
 static fak_graph_once *g_graph_once_capture = nullptr;
+static bool graph_once_quant_ready(fak_graph_once *s);
+static bool graph_once_quant_idle(fak_graph_once *s);
+static int graph_once_quant_retire(fak_graph_once *s);
 
 __global__ void k_graph_once_position(int *state, int pos) {
   state[0] = pos;
@@ -66,6 +76,8 @@ extern "C" int fak_graph_once_begin(void *owner, int pos) {
   if (!s || s->terminal || !s->position || s->graph || s->exec ||
       g_capture_open || g_graph_once_capture || pos < 0 || pos >= s->capacity ||
       v41_candidates_stream_uncertain()) return 1;
+  if (!graph_once_quant_idle(s)) { s->terminal = true; return 1; }
+  s->quant_cursor = 0;
   int rc = graph_once_set_position(s, pos);
   if (rc) return rc;
   if (graph_once_drain(s)) return 5;
@@ -82,6 +94,7 @@ extern "C" int fak_graph_once_begin(void *owner, int pos) {
 static int graph_once_capture_admit(fak_graph_once *s) {
   return s && s == g_graph_once_capture && g_capture_open && !s->terminal;
 }
+#include "graph_quant_workspace.cuh"
 extern "C" int fak_graph_once_rope(void *owner, float *x, int heads, int hd, double theta) {
   fak_graph_once *s = (fak_graph_once *)owner;
   if (!graph_once_capture_admit(s)) return 1;
@@ -191,6 +204,8 @@ static int graph_once_launch(fak_graph_once *s) {
 extern "C" int fak_graph_once_end(void *owner) {
   fak_graph_once *s = (fak_graph_once *)owner;
   if (!s || s != g_graph_once_capture || !g_capture_open) return 1;
+  // Incomplete/invalid quant recording must close capture but never launch it.
+  if (!graph_once_quant_ready(s) || s->quant_cursor != s->quant_count) s->terminal = true;
   g_graph_once_capture = nullptr;
   g_capture_open = false;
   cudaError_t e = cudaStreamEndCapture(g_stream, &s->graph);
@@ -202,6 +217,7 @@ extern "C" int fak_graph_once_replay(void *owner, int pos) {
   fak_graph_once *s = (fak_graph_once *)owner;
   if (!s || s->terminal || !s->exec || g_capture_open || g_graph_once_capture ||
       pos != s->next || pos < 0 || pos >= s->capacity || v41_candidates_stream_uncertain()) return 1;
+  if (!graph_once_quant_idle(s)) { s->terminal = true; return 1; }
   int rc = graph_once_set_position(s, pos);
   if (rc) return rc;
   rc = graph_once_launch(s);
@@ -222,6 +238,8 @@ extern "C" int fak_graph_once_release(void **owner) {
     if (cudaGraphDestroy(s->graph) != cudaSuccess) { s->terminal = true; return 3; }
     s->graph = nullptr;
   }
+  int quant_rc = graph_once_quant_retire(s);
+  if (quant_rc) return quant_rc;
   if (s->position) {
     if (cudaFree(s->position) != cudaSuccess) { s->terminal = true; return 2; }
     s->position = nullptr;
