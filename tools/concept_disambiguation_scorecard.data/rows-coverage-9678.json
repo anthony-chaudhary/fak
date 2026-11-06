@@ -134,7 +134,9 @@
       "definition": "`candidatens` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
       "distinction": "Use `candidatens` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
       "distinct_from": [
-        "x-ci-coverage-plan-blockplan"
+        "x-ci-coverage-plan-blockplan",
+        "planp1-candidatecv",
+        "planp1-candidatems"
       ],
       "aliases": [],
       "grounding": "candidatens",
@@ -800,8 +802,7 @@
       "definition": "`witnesspolicy` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
       "distinction": "Use `witnesspolicy` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
       "distinct_from": [
-        "egressposture",
-        "coverage-9678-witness-proof-witnesspolicy"
+        "egressposture"
       ],
       "aliases": [],
       "grounding": "witnesspolicy",
@@ -1288,8 +1289,7 @@
       "definition": "`guardcacheargs` is a concrete tree symbol classified in the `cache` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
       "distinction": "Use `guardcacheargs` for this exact implementation surface. Unlike `promptcachekey`, it names this distinct symbol; unlike `cache`, it is not the umbrella domain.",
       "distinct_from": [
-        "promptcachekey",
-        "coverage-9678-guard-gate-guardcacheargs"
+        "promptcachekey"
       ],
       "aliases": [],
       "grounding": "guardcacheargs",
@@ -1589,25 +1589,6 @@
       "gaps": []
     },
     {
-      "id": "coverage-9678-guard-gate-ctxexpensegate",
-      "canonical": "guard-gate implementation surface for ctxexpensegate",
-      "family": "guard-gate",
-      "kind": "symbol",
-      "definition": "`ctxexpensegate` is a concrete tree symbol classified in the `guard-gate` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
-      "distinction": "Use `ctxexpensegate` for this exact implementation surface. Unlike `insufficientaggregatehbm`, it names this distinct symbol; unlike `guard-gate`, it is not the umbrella domain.",
-      "distinct_from": [
-        "insufficientaggregatehbm",
-        "coverage-9678-context-ctx-ctxexpensegate"
-      ],
-      "aliases": [],
-      "grounding": "ctxexpensegate",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
-      "parent": "",
-      "verdict": "crystal",
-      "gaps": []
-    },
-    {
       "id": "coverage-9678-guard-gate-dispatchwaveprelaunchgatefromaudit",
       "canonical": "guard-gate implementation surface for dispatchwaveprelaunchgatefromaudit",
       "family": "guard-gate",
@@ -1637,25 +1618,6 @@
       ],
       "aliases": [],
       "grounding": "gatecartbeforehorse",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
-      "parent": "",
-      "verdict": "crystal",
-      "gaps": []
-    },
-    {
-      "id": "coverage-9678-guard-gate-guardcacheargs",
-      "canonical": "guard-gate implementation surface for guardcacheargs",
-      "family": "guard-gate",
-      "kind": "symbol",
-      "definition": "`guardcacheargs` is a concrete tree symbol classified in the `guard-gate` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
-      "distinction": "Use `guardcacheargs` for this exact implementation surface. Unlike `insufficientaggregatehbm`, it names this distinct symbol; unlike `guard-gate`, it is not the umbrella domain.",
-      "distinct_from": [
-        "insufficientaggregatehbm",
-        "coverage-9678-cache-guardcacheargs"
-      ],
-      "aliases": [],
-      "grounding": "guardcacheargs",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
       "parent": "",
@@ -1780,8 +1742,7 @@
       "definition": "`ctxexpensegate` is a concrete tree symbol classified in the `context-ctx` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
       "distinction": "Use `ctxexpensegate` for this exact implementation surface. Unlike `x2-context-ctx-commandcontext`, it names this distinct symbol; unlike `context-ctx`, it is not the umbrella domain.",
       "distinct_from": [
-        "x2-context-ctx-commandcontext",
-        "coverage-9678-guard-gate-ctxexpensegate"
+        "x2-context-ctx-commandcontext"
       ],
       "aliases": [],
       "grounding": "ctxexpensegate",
@@ -2147,25 +2108,6 @@
       "grounding": "turningressengine",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
-      "parent": "",
-      "verdict": "crystal",
-      "gaps": []
-    },
-    {
-      "id": "coverage-9678-witness-proof-witnesspolicy",
-      "canonical": "witness-proof implementation surface for witnesspolicy",
-      "family": "witness-proof",
-      "kind": "symbol",
-      "definition": "`witnesspolicy` is a concrete tree symbol classified in the `witness-proof` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
-      "distinction": "Use `witnesspolicy` for this exact implementation surface. Unlike `x2-witness-proof-witnessstatus`, it names this distinct symbol; unlike `witness-proof`, it is not the umbrella domain.",
-      "distinct_from": [
-        "x2-witness-proof-witnessstatus",
-        "coverage-9678-policy-capability-witnesspolicy"
-      ],
-      "aliases": [],
-      "grounding": "witnesspolicy",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
       "parent": "",
       "verdict": "crystal",
       "gaps": []

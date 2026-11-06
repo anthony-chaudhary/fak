@@ -1,0 +1,82 @@
+{
+  "rows": [
+    {
+      "id": "decision-dispatch-edf",
+      "canonical": "DispatchDecision (dispatchtick EDF slot order)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "One admitted slot of the dispatchtick EDFPlan: a DeadlineItem plus its simulated serial-lane timeline (PredictedStartTick, PredictedFinishTick) and a PredictedLate flag marking non-degradable items predicted to miss their deadline, which are retained and flagged rather than shed.",
+      "distinction": "It is the tick-level admission-ordering evidence for a serial dispatch lane, NOT modelroute's DispatchDecision (the ALLOW/REROUTE/DENY adjudication of a pre-dispatch payload residency check) nor the planner's ShedDecision (items dropped up front).",
+      "distinct_from": [
+        "decision-dispatch-residency",
+        "x-decision-drivedecision"
+      ],
+      "aliases": [],
+      "grounding": "DispatchDecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "decision-dispatch-residency",
+      "canonical": "modelroute.DispatchDecision (residency adjudication)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "The adjudicated outcome of modelroute's pre-dispatch payload residency check: a DispatchAction (ALLOW/REROUTE/DENY) over Target/OriginalTarget with the classification evidence (Classified, ClassifiedBytes, TotalBytes, Matches, RulesEvaluated) that PayloadResidencyEnforcer records into the EgressWitness audit artifact.",
+      "distinction": "It is the egress-gate verdict on whether classified payload bytes may reach a remote model target, NOT dispatchtick's DispatchDecision (one admitted EDF slot carrying predicted start/finish ticks) nor guardroute's RouteDecision (the routing choice itself this verdict acts upon).",
+      "distinct_from": [
+        "decision-dispatch-edf",
+        "x2-decision-routedecision"
+      ],
+      "aliases": [],
+      "grounding": "DispatchDecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "decision-lrugooddecisionratio",
+      "canonical": "LRUGoodDecisionRatio (expert-ring regret gauge)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "A field of ExpertRingEvictDecision: the incumbent LRU policy's GoodDecisionRatio scored against the same offline Belady oracle as the candidate, so the expert-ring eviction promotion gate argues in measured regret (#4233) rather than raw hit counts; expert_cache_telemetry derives BeladyRegret as 1 minus this ratio.",
+      "distinction": "It is the LRU half of the twin oracle ratios inside the ring eviction gate, NOT its sibling CandidateGoodDecisionRatio (the value-aware candidate's ratio) nor the derived BeladyRegret telemetry value that inverts it.",
+      "distinct_from": [
+        "cov-debt-tail-evict-expertringevict",
+        "cov-debt250-policy-capability-selectexpertringevictpolicy"
+      ],
+      "aliases": [
+        "lru_good_decision_ratio"
+      ],
+      "grounding": "LRUGoodDecisionRatio",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "decision-qwen38canarydecision",
+      "canonical": "Qwen38CanaryDecision (MTP canary envelope verdict)",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "The per-request result of evaluating a Qwen38CanaryRequest against the certified MTP operational envelope: whether MTP runs default-on (CanaryDefaultOn, OptInActive), which engine is selected, whether the request is InsideEnvelope, and the DowngradeReason/CircuitTripped/RejectionReason fields when it is not.",
+      "distinction": "It is the live canary admission verdict produced by Qwen38MTPCanaryManager.EvaluateCanary and held by the agent InKernelPlanner, NOT the time-bounded Qwen38MTPCanaryReceipt that witnesses a finished campaign, nor the qwen38MTPTensorLayout the envelope's format prescribes.",
+      "distinct_from": [
+        "qwen38cachecampaign",
+        "cov-20260902-layout-qwen38mtptensorlayout"
+      ],
+      "aliases": [],
+      "grounding": "Qwen38CanaryDecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

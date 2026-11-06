@@ -380,7 +380,7 @@
   ,
     {
       "id": "issue9181-guard-gate-nativeperf-gate-check",
-      "canonical": "GateCheck (native-performance predicate result)",
+      "canonical": "NativePerfGateCheck (native-performance predicate result)",
       "family": "guard-gate",
       "kind": "symbol",
       "definition": "internal/nativeperf.GateCheck is one named Status and Detail result inside a native-performance GateVerdict, preserving the evidence for an individual quality, engine, or performance predicate.",
@@ -390,7 +390,7 @@
         "x2-guard-gate-checkgate"
       ],
       "aliases": [],
-      "grounding": "GateCheck",
+      "grounding": "nativeperf",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
       "parent": "",

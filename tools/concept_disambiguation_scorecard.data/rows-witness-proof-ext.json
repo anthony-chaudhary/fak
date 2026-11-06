@@ -336,7 +336,7 @@
         "WitnessRefuted (witness outcome)",
         "x2-witness-proof-witnessstatus"
       ],
-      "aliases": [],
+      "aliases": [ "StatusWitnessRefused" ],
       "grounding": "witnessrefused",
       "grounding_kind": "symbol",
       "glossary_anchor": "",

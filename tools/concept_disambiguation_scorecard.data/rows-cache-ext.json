@@ -313,11 +313,11 @@
     },
     {
       "id": "x-cache-newlinearattncache",
-      "canonical": "linearAttnCache (Qwen3.5 recurrent)",
+      "canonical": "newLinearAttnCache (Qwen3.5 hybrid cache constructor)",
       "family": "cache",
       "kind": "symbol",
-      "definition": "model.linearAttnCache (constructed by newLinearAttnCache) is the per-session recurrent/conv state cache for Qwen3.5 hybrid linear-attention layers, held in the KVCache.linear field.",
-      "distinction": "It holds recurrent linear-attention state, not the per-position key/value tensors of the dense cache that NewKVCache allocates.",
+      "definition": "model.newLinearAttnCache builds the per-session recurrent/conv state cache for Qwen3.5 hybrid linear-attention layers (nil for non-hybrid configs): one linearAttnLayerState slot per layer, zero-initialized recurrent state on the linear-attention layers, held in the KVCache.linear field.",
+      "distinction": "It CONSTRUCTS the recurrent/conv state cache - NOT linearAttnCache itself (the per-layer state collection it builds) and NOT the per-position key/value tensors of the dense cache that NewKVCache allocates.",
       "distinct_from": [
         "kv-cache",
         "NewKVCache (dense allocator)",

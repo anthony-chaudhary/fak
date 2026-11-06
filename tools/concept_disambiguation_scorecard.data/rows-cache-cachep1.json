@@ -1,0 +1,617 @@
+{
+  "rows": [
+    {
+      "id": "cachep1-gemini-cached-content-token-count",
+      "canonical": "CachedContentTokenCount",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Gemini usageMetadata wire field reporting how many prompt tokens were served from the provider's content cache on a completed request.",
+      "distinction": "Provider-reported cached-read token count on the Gemini usage envelope; not fak's KV cache or vCache page table, and not the normalized CachedTokens class consumed by the token profile.",
+      "distinct_from": [
+        "x-cache-cachedtokens",
+        "kv-cache",
+        "provider-cache"
+      ],
+      "aliases": [],
+      "grounding": "CachedContentTokenCount",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-cachedoc-numbers-audit",
+      "canonical": "cachedoc-numbers-audit (doc-numbers gate CLI)",
+      "family": "cache",
+      "kind": "cli-verb",
+      "definition": "Top-level `fak cachedoc-numbers-audit` verb that runs the doc-numbers gate over operational cachevalue docs, tracing every headline number to its committed snapshot field.",
+      "distinction": "The CLI entry point that launches the audit; not the internal/cachedocaudit package that implements the gate, and not the retired Python tool tools/cachedoc_numbers_audit.py it replaced.",
+      "distinct_from": [
+        "cachep1-cachedocaudit-package",
+        "x2-cache-cachevaluepnl"
+      ],
+      "aliases": [
+        "cachedoc"
+      ],
+      "grounding": "runCachedocNumbersAudit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-cachedocaudit-package",
+      "canonical": "cachedocaudit (doc-numbers gate package)",
+      "family": "cache",
+      "kind": "subsystem",
+      "definition": "internal/cachedocaudit package implementing the doc-numbers gate: verifying that every headline number in operational cachevalue documents traces to a committed snapshot field, renders to the right rounding, and stays internally consistent.",
+      "distinction": "The Go package implementing the gate; not the `fak cachedoc-numbers-audit` CLI verb that invokes it, and not the retired Python tool it was ported from.",
+      "distinct_from": [
+        "cachep1-cachedoc-numbers-audit",
+        "x2-cache-cachevaluepnl"
+      ],
+      "aliases": [],
+      "grounding": "cachedocaudit",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-observer-cached-prefix",
+      "canonical": "CachedPrefix",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Per-step boolean on the observer pool observation record marking that the step's KV prefix was warm, i.e. served from cache instead of re-prefilled.",
+      "distinction": "A per-step warmth witness feeding the pool's cacheHits counter; not the in-kernel planner's cachedPrefixLen length, and not the provider-side prefix_cache mechanism.",
+      "distinct_from": [
+        "runtime-burndown-cachedprefixlen",
+        "c4681-prefixcache"
+      ],
+      "aliases": [],
+      "grounding": "CachedPrefix",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-cache-geometry-epoch",
+      "canonical": "cacheGeometryEpoch",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Monotonic uint64 session counter incremented on every rebuild of the model session's KV cache geometry; prefix snapshots and Gemma4 continuations stamp it so stale owners are rejected.",
+      "distinction": "The version stamp of cache-geometry rebuilds; not the sticky failed-maintenance latch (cacheGeometryFailed), and not the rebuild function or its lock.",
+      "distinct_from": [
+        "cachep1-cache-geometry-failed",
+        "rebuildcachegeometryowned",
+        "coverage-9678-cache-cachegeometrymu"
+      ],
+      "aliases": [],
+      "grounding": "cacheGeometryEpoch",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-cache-geometry-failed",
+      "canonical": "cacheGeometryFailed",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Session bool latched true when a cache-geometry rebuild rollback fails, blocking further rebuild attempts until the session is closed.",
+      "distinction": "The sticky failure latch for cache maintenance; not the epoch counter that stamps successful rebuilds, and not the rebuild function itself.",
+      "distinct_from": [
+        "cachep1-cache-geometry-epoch",
+        "rebuildcachegeometryowned"
+      ],
+      "aliases": [],
+      "grounding": "cacheGeometryFailed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-deepseek-cache-groups",
+      "canonical": "CacheGroups",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Report field counting how many routed-expert groups sit resident in the deepseekv4moe expert cache at a swept capacity step (capacity bytes divided by group bytes, capped at Layers*Experts).",
+      "distinction": "The resident group count at one sweep step; not the GiB capacity input (CacheGiB), the byte footprint, or the resulting hit-rate curve.",
+      "distinct_from": [
+        "coalescebench-cachegib",
+        "cov5304-expert-cache-plan",
+        "expert-tier-cache-tier"
+      ],
+      "aliases": [],
+      "grounding": "CacheGroups",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-cache-headlines-package",
+      "canonical": "cacheheadlines (cache-headline gate package)",
+      "family": "cache",
+      "kind": "subsystem",
+      "definition": "internal/cacheheadlines package enforcing the cache-headline gate: a cache win headline must name its plane (provider/kernel/context/forecast) and provenance.",
+      "distinction": "The gate implementation package; not the `fak check-cache-headlines` CLI verb that drives it, and not the doc-numbers gate (cachedocaudit) which audits numbers rather than headline labels.",
+      "distinct_from": [
+        "cachep1-cachedocaudit-package",
+        "x3-cache-cacheattribution"
+      ],
+      "aliases": [],
+      "grounding": "cacheheadlines",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-cache-hint-streaming-bypass",
+      "canonical": "CacheHintStreamingBypass",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Predefined RDNA 3.5 CachePolicyHint constant (SLC=1, GLC=0, NT=1) directing CUs to stream loads non-temporally, bypassing MALL to prevent pollution from divergent tokens or streaming weights.",
+      "distinction": "The bypass/pinned-DRAM half of the Strix Halo hint pair; not the temporal-pinning hint that keeps hot blocks in MALL, and not the generic CachePolicyHint type.",
+      "distinct_from": [
+        "cachep1-cache-hint-temporal-pinned",
+        "cachep1-cache-policy-hint"
+      ],
+      "aliases": [],
+      "grounding": "CacheHintStreamingBypass",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-cache-hint-temporal-pinned",
+      "canonical": "CacheHintTemporalPinned",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Predefined RDNA 3.5 CachePolicyHint constant (SLC=0, GLC=0, NT=0) directing CUs to fetch tokens with temporal caching, pinning hot KV blocks in the 32 MiB MALL Infinity Cache.",
+      "distinction": "The MALL-pinning half of the Strix Halo hint pair; not the streaming-bypass hint that keeps divergent traffic out of MALL, and not the generic CachePolicyHint type.",
+      "distinct_from": [
+        "cachep1-cache-hint-streaming-bypass",
+        "cachep1-cache-policy-hint"
+      ],
+      "aliases": [],
+      "grounding": "CacheHintTemporalPinned",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-cache-layout-package",
+      "canonical": "cachelayout (per-layer hybrid cache-type registry)",
+      "family": "cache",
+      "kind": "subsystem",
+      "definition": "internal/cachelayout package (#942) deriving the per-layer hybrid cache-type registry (LayerKind/LayerCacheDescriptor/ModelCacheLayout) from checkpoint layer_types, giving swap, checkpoint and block-store seams one shared storage-granularity answer.",
+      "distinction": "The per-layer storage-granularity registry; not the session KV-geometry rebuild stamped by cacheGeometryEpoch, not the KVLayout tensor layout, and not the V41 KV-cache layout helpers.",
+      "distinct_from": [
+        "kvlayout",
+        "cachep2-v41kvcachelayoutfor",
+        "cachep1-cache-geometry-epoch"
+      ],
+      "aliases": [],
+      "grounding": "cachelayout",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-cacheline-term",
+      "canonical": "Cacheline (hardware line term)",
+      "family": "cache",
+      "kind": "doc-term",
+      "definition": "The hardware coherence granule (64 bytes on Zen 5 / RDNA 3.5 paths, 128-bit on ROCm FP4 alignment) referenced throughout internal/compute streaming, doorbell and alignment code.",
+      "distinction": "The prose term for the hardware line; not the 64-byte size constant (CacheLineBytes), not the per-block payload line count (CacheLineCount), and not the false-sharing struct line count (CacheLines).",
+      "distinct_from": [
+        "cachep1-cache-line-bytes",
+        "cachep1-cache-line-count",
+        "cachep1-cache-lines",
+        "cachep2-umacachelinealignment"
+      ],
+      "aliases": [],
+      "grounding": "cacheline",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-cache-line-bytes",
+      "canonical": "CacheLineBytes",
+      "family": "cache",
+      "kind": "config",
+      "definition": "The 64-byte hardware coherency granule constant across AMD Strix Halo Infinity Fabric and Zen 5 / RDNA 3.5 caches, used for alignment math and explicit padding.",
+      "distinction": "The size of one cache line; not the count of lines in a payload (CacheLineCount), not the struct-spanning line count (CacheLines), and not the UMA line-alignment helper.",
+      "distinct_from": [
+        "cachep1-cache-line-count",
+        "cachep1-cache-lines",
+        "cachep2-umacachelinealignment"
+      ],
+      "aliases": [],
+      "grounding": "CacheLineBytes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-cache-line-count",
+      "canonical": "CacheLineCount",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Field on Strix Halo block descriptors and invalidate commands reporting how many valid 64-byte cache lines a payload or invalidation range spans.",
+      "distinction": "The line count of one block or range; not the 64-byte granule size constant (CacheLineBytes), and not the false-sharing report's struct-wide line count (CacheLines).",
+      "distinct_from": [
+        "cachep1-cache-line-bytes",
+        "cachep1-cache-lines"
+      ],
+      "aliases": [],
+      "grounding": "CacheLineCount",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-cache-lines",
+      "canonical": "CacheLines",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "False-sharing report field (and alignment-helper local) counting the 64-byte cache lines a struct spans, used to detect cross-line pointer sharing.",
+      "distinction": "The struct-spanning line count in the false-sharing audit; not the per-block payload line count (CacheLineCount), and not the 64-byte granule size (CacheLineBytes).",
+      "distinct_from": [
+        "cachep1-cache-line-count",
+        "cachep1-cache-line-bytes",
+        "cachep1-cacheline-term"
+      ],
+      "aliases": [],
+      "grounding": "CacheLines",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-cache-mode-field",
+      "canonical": "CacheMode",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "String field on benchmark trial manifests (amdgpu warm-disk restart, llama.cpp comparator, qwen38quant environment) declaring the trial's cache state such as cold, warm or isolated-default.",
+      "distinction": "The declared cold/warm setup dimension of a bench trial; not the observed session posture (CachePosture), not the managed-cache posture flag, and not the vCache warmth label.",
+      "distinct_from": [
+        "x4-cache-cacheposture",
+        "x3-cache-managedcacheposture",
+        "x-goal25-cache-vcachewarmth"
+      ],
+      "aliases": [],
+      "grounding": "CacheMode",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-cache-modifier-flags",
+      "canonical": "CacheModifierFlags",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Strix Halo tiler struct carrying the RDNA 3.5 SLC/GLC/NT cache modifier flags for one load class (root KV prefix, streaming weights, divergent subagent tokens).",
+      "distinction": "The per-load-class flag bundle resolved by the MALL tiler; not a predefined hint constant (CacheHintTemporalPinned/CacheHintStreamingBypass), and not the per-span CachePolicyHint directive.",
+      "distinct_from": [
+        "cachep1-cache-policy-hint",
+        "cachep1-cache-hint-temporal-pinned",
+        "cachep1-cache-hint-streaming-bypass"
+      ],
+      "aliases": [],
+      "grounding": "CacheModifierFlags",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-timings-cache-n",
+      "canonical": "Timings.CacheN",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "llama.cpp native timings field (JSON cache_n) reporting how many prompt-prefix tokens were served from the KV cache without re-prefill on a completed generation.",
+      "distinction": "The cached-prefix token count inside native timings; not the total prompt tokens (PromptN), not the provider-reported cached token class, and not the kvCacheN KV-size figure.",
+      "distinct_from": [
+        "native-receipt-prefix-accounting",
+        "x-cache-cachedtokens",
+        "cachep2-kvcachen"
+      ],
+      "aliases": [],
+      "grounding": "CacheN",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-cache-policy-label",
+      "canonical": "CachePolicy",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "String designation attached to a work unit declaring which cache treatment applies: agentbench replay plans carry the provider cache policy under test, and Strix Halo MALL partition entries carry per-partition residency labels (TEMPORAL_PINNED, TRANSIENT_PINNED, RESERVE, UNALLOCATED).",
+      "distinction": "The declared policy label on a plan or partition; not the RDNA 3.5 allocation hint struct (CachePolicyHint), not the offline replay input stream (CachePolicyStream), and not the provider cache mechanism itself.",
+      "distinct_from": [
+        "cachep1-cache-policy-hint",
+        "cache-policy-stream",
+        "provider-cache"
+      ],
+      "aliases": [],
+      "grounding": "CachePolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-cache-policy-hint",
+      "canonical": "CachePolicyHint",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Strix Halo struct specifying the RDNA 3.5 cache allocation directive (SLC/GLC/NT plus pinned/bypass token counts) for one token span or weight tensor.",
+      "distinction": "The per-span directive type; not the predefined hint constants built from it (CacheHintTemporalPinned/CacheHintStreamingBypass), not the per-load-class flag bundle (CacheModifierFlags), and not the partition label string (CachePolicy).",
+      "distinct_from": [
+        "cachep1-cache-hint-temporal-pinned",
+        "cachep1-cache-hint-streaming-bypass",
+        "cachep1-cache-modifier-flags",
+        "cachep1-cache-policy-label"
+      ],
+      "aliases": [],
+      "grounding": "CachePolicyHint",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-causal-receipt-cache-reuse-bytes",
+      "canonical": "CacheReuseBytes",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "causalreceipt phase/metric field accumulating the bytes served from cache during a phase, reported alongside tokens and overhead in the causal receipt.",
+      "distinction": "Byte accounting of cache reuse inside the causal receipt; not the token-based cache-value metrics, not the Radix CPU cache byte count, and not the device cache budget.",
+      "distinct_from": [
+        "runtime-next-cpucachebytes",
+        "device-cache-capacity-bytes",
+        "x2-cache-cachevaluepnl"
+      ],
+      "aliases": [],
+      "grounding": "CacheReuseBytes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-l3-cache-state-provider",
+      "canonical": "CacheStateProvider",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "l3server metrics callback type (func() (allocBytes, entries int64)) exposing the L3 cache allocator's current allocation bytes and entry count for scrape and server-state reporting.",
+      "distinction": "The L3 allocator state probe; not the free-text session CacheState label, not the slab metrics provider, and not the vacuum or pressure providers on the same collector.",
+      "distinct_from": [
+        "c4681-cachestate",
+        "x-cache-l3cache"
+      ],
+      "aliases": [],
+      "grounding": "CacheStateProvider",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-radix-cpu-cache-bypasses",
+      "canonical": "CPUCacheBypasses",
+      "family": "cache",
+      "kind": "metric",
+      "definition": "RadixKV stats counter counting how many times host CPU cache admission bypassed allocation (skipped caching) under the LRU byte budget.",
+      "distinction": "The cumulative bypass event counter; not the last bypass reason string (CPUCacheLastBypass), not the retained byte count, and not the retention limit.",
+      "distinct_from": [
+        "cachep1-radix-cpu-cache-last-bypass",
+        "runtime-next-cpucachebytes",
+        "runtime-next-maxcpucachebytes"
+      ],
+      "aliases": [],
+      "grounding": "CPUCacheBypasses",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-radix-cpu-cache-last-bypass",
+      "canonical": "CPUCacheLastBypass",
+      "family": "cache",
+      "kind": "metric",
+      "definition": "RadixKV stats field recording the reason label of the most recent CPU cache admission bypass, for operator diagnosis of why entries were skipped.",
+      "distinction": "The most-recent bypass reason label; not the cumulative bypass counter (CPUCacheBypasses), and not the byte counters around it.",
+      "distinct_from": [
+        "cachep1-radix-cpu-cache-bypasses",
+        "runtime-next-cpucachebytes"
+      ],
+      "aliases": [],
+      "grounding": "CPUCacheLastBypass",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-enable-page-cache",
+      "canonical": "enablePageCache",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "ggufExpertSource method opting a shard source into the #1302 page-cache-aware zero-copy read path; refuses unless the mapped data exactly matches the declared source extent.",
+      "distinction": "The opt-in seam arming the modeled host page cache for expert reads; not the readExpertPageCache read-through itself, not the WithExpertPageCache loader option, and not the FAK_EXPERT_PAGE_CACHE env knob.",
+      "distinct_from": [
+        "read-expert-page-cache",
+        "cachep2-withexpertpagecache",
+        "runtime-third-fakexpertpagecache"
+      ],
+      "aliases": [],
+      "grounding": "enablePageCache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-expert-cache-receipt",
+      "canonical": "ExpertCacheReceipt",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Locked-schema JSON document capturing one routed-expert cache measurement at a model shape, with provenance fields (simulated vs hardware) that must be read before any hit-rate or throughput number.",
+      "distinction": "The measurement receipt; not the simulated trace it summarizes (ExpertCacheTrace), not the residency plan (ExpertCachePlan), and not the tier vocabulary (ExpertCacheTier).",
+      "distinct_from": [
+        "cov5304-expert-cache-trace",
+        "cov5304-expert-cache-plan",
+        "expert-tier-cache-tier"
+      ],
+      "aliases": [],
+      "grounding": "ExpertCacheReceipt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-expert-page-cache",
+      "canonical": "ExpertPageCache",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "The #1302 zero-copy expert read-through option flag on the GGUF loader options, requesting that repeat reads of faulted experts be served from the mapped region instead of the device.",
+      "distinction": "The loader-level opt-in flag; not the source-level enablePageCache arm, not the readExpertPageCache read path, and not the FAK_EXPERT_PAGE_CACHE env knob that seeds it.",
+      "distinct_from": [
+        "cachep1-enable-page-cache",
+        "read-expert-page-cache",
+        "runtime-third-fakexpertpagecache"
+      ],
+      "aliases": [],
+      "grounding": "ExpertPageCache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-fits-in-mall-cache",
+      "canonical": "FitsInMALLCache",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Scratchpad predicate (FlashAttnDequantScratchpad, VulkanKVScratchpad) reporting whether the whole scratch allocation fits within the 32 MiB Strix Halo MALL Infinity Cache.",
+      "distinction": "The fit predicate for attention/KV scratchpads; not the MALL size constant itself (StrixHaloInfinityCacheBytes/MALLCacheSizeMB), not the MALL partition model, and not the cache policy hints deciding what goes into MALL.",
+      "distinct_from": [
+        "cachep2-strixhaloinfinitycachebytes",
+        "cachep2-mallcachemodel",
+        "cachep1-cache-policy-hint"
+      ],
+      "aliases": [],
+      "grounding": "FitsInMALLCache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-gemma4-cached-continuation",
+      "canonical": "gemma4Cached",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Session field holding the Gemma4 cached continuation state (model, cache-geometry epoch, config digest, computed rows) that lets prefill continue without recomputing the cached context.",
+      "distinction": "The Gemma4-specific continuation holder; not the general cache-geometry epoch it stamps, not the prefix snapshot it clones, and not the ErrGemma4CachedContinuation sentinel.",
+      "distinct_from": [
+        "cachep1-cache-geometry-epoch",
+        "cachep1-cache-geometry-failed"
+      ],
+      "aliases": [],
+      "grounding": "gemma4Cached",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-go-mod-cache",
+      "canonical": "GOMODCACHE",
+      "family": "cache",
+      "kind": "config",
+      "definition": "Go module cache directory pinned as an environment variable in fak's hermetic build paths (computebuild owner-build env, harnessinit offline Go resolution, envconfiglint allowlist).",
+      "distinction": "The module download cache location; not the GOCACHE build artifact cache, not the worker-shared Go cache path, and not the Go cache lifecycle sweep knobs.",
+      "distinct_from": [
+        "x3-cache-gocache",
+        "workerworktree-shared-go-cache-path",
+        "gocache-lifecycle-options"
+      ],
+      "aliases": [],
+      "grounding": "GOMODCACHE",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "cachep1-gpu-prefix-cache-hit-rate",
+      "canonical": "GPUPrefixCacheHitRate",
+      "family": "cache",
+      "kind": "metric",
+      "definition": "External serving metric (vLLM/Metal gpu_prefix_cache_hit_rate) parsed by gateway, macobs and webbench to report the fraction of requests whose prompt prefix was served from the GPU prefix cache.",
+      "distinction": "The external GPU prefix-cache hit ratio as observed; not fak's own prefix_cache mechanism, not the per-surface CacheHitRatio, and not the provider cached-prompt hit ratio.",
+      "distinct_from": [
+        "c4681-prefixcache",
+        "x4-cache-cachehitratio",
+        "issue9909-cached-prompt-hit-ratio"
+      ],
+      "aliases": [],
+      "grounding": "gpu_prefix_cache_hit_rate",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

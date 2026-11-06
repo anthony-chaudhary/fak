@@ -252,7 +252,8 @@
       "definition": "internal/ggufload's WeightSource.EstimateLoadMemoryPlan builds a classed compute.MemoryPlan for loading a GGUF model's weights grouped by dtype; the F32-resident and CPU-offload-experts variants specialise it.",
       "distinction": "It is the WEIGHT-load estimator that produces a MemoryPlan, NOT compute's KV/transient estimators (EstimateKVStoreMemoryPlan).",
       "distinct_from": [
-        "MemoryPlan (compute)"
+        "MemoryPlan (compute)",
+        "planp2-estimateq8loadmemoryplan"
       ],
       "aliases": [
         "estimatef32loadmemoryplan",

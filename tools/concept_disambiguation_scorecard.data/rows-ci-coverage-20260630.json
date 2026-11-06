@@ -641,7 +641,8 @@
       "definition": "guardgo is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts.",
       "distinction": "guardgo is a specific tree identifier in the guard-gate namespace, not the broader sibling concept referenced by x2-guard-gate-guardrsi.",
       "distinct_from": [
-        "x2-guard-gate-guardrsi"
+        "x2-guard-gate-guardrsi",
+        "guardgate-guardpi"
       ],
       "aliases": [],
       "grounding": "guardgo",

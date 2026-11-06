@@ -586,7 +586,8 @@
       "definition": "`candidateTokens` is the plan symbol at `internal/qwen38quantrun/amd_scoreboard.go:334`. This row positions that concrete implementation surface, not merely the family label.",
       "distinction": "Use `candidateTokens` for the operation evidenced at `internal/qwen38quantrun/amd_scoreboard.go:334`. Unlike `covg-plan-buildknownbadissueplan`, it names this exact implementation surface; unlike `plan`, it is not the umbrella domain.",
       "distinct_from": [
-        "covg-plan-buildknownbadissueplan"
+        "covg-plan-buildknownbadissueplan",
+        "planp1-candidatetoken"
       ],
       "aliases": [
         "candidatetokens"

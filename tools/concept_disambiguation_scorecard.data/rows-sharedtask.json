@@ -17,8 +17,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "sharedtask-artifactwitnessmissing",
       "canonical": "ARTIFACT_WITNESS_MISSING",
@@ -36,8 +35,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "sharedtask-reasonbodywitness",
       "canonical": "ReasonBodyWitness",
@@ -55,8 +53,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "sharedtask-bodywitnessmissing",
       "canonical": "BODY_WITNESS_MISSING",
@@ -74,8 +71,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "sharedtask-reasonmissingdecision",
       "canonical": "ReasonMissingDecision",
@@ -93,8 +89,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "sharedtask-missingdecision",
       "canonical": "MISSING_DECISION",
@@ -112,8 +107,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "sharedtask-decisionid",
       "canonical": "DecisionID",
@@ -136,8 +130,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "sharedtask-opendecisions",
       "canonical": "OpenDecisions",
@@ -155,8 +148,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "sharedtask-approvaldecisionid",
       "canonical": "ApprovalDecisionID",
@@ -174,8 +166,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "sharedtask-replacedecisionstate",
       "canonical": "replaceDecisionState",
@@ -193,8 +184,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "sharedtask-duplicatedecision",
       "canonical": "DUPLICATE_DECISION",
@@ -212,8 +202,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "sharedtask-decisionstatepath",
       "canonical": "decisionStatePath",
@@ -231,8 +220,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "sharedtask-reasonunsupportedpatch",
       "canonical": "ReasonUnsupportedPatch",
@@ -250,8 +238,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "sharedtask-unsupportedpatch",
       "canonical": "UNSUPPORTED_PATCH",
@@ -269,8 +256,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "sharedtask-resultforunsupported",
       "canonical": "resultForUnsupported",
@@ -288,8 +274,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "sharedtask-denialpolicy",
       "canonical": "DenialPolicy",
@@ -307,19 +292,20 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "sharedtask-viewpolicy",
       "canonical": "ViewPolicy",
       "family": "policy-capability",
       "kind": "symbol",
       "definition": "Reader-scope redaction policy for shared-task views: MaxScope plus IncludeQuarantined decide what View and EventsView reveal to a caller.",
-      "distinction": "Read-side redaction policy; DenialPolicy shapes write-side verdicts on the same surface.",
+      "distinction": "Read-side redaction policy; DenialPolicy shapes write-side verdicts on the same surface. NOT SourcePolicy (a resume governor), NOT PolicyKnobRegistry, and NOT NewPolicy (the manifest/eviction constructor - ViewPolicy is a scope cap, not a policy factory); it limits visibility, not resumption or amendment.",
       "distinct_from": [
         "sharedtask-denialpolicy",
-        "cov5307-view-policy",
-        "x2-policy-capability-tierpolicy"
+        "x2-policy-capability-tierpolicy",
+        "cov5307-source-policy",
+        "cov5307-policy-knob-registry",
+        "pc-new-policy-constructor"
       ],
       "aliases": [],
       "grounding": "ViewPolicy",
@@ -328,8 +314,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "sharedtask-normalizeviewpolicy",
       "canonical": "normalizeViewPolicy",
@@ -347,8 +332,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "sharedtask-disaggregatedstore",
       "canonical": "disaggregatedStore",
@@ -366,8 +350,7 @@
       "parent": "",
       "verdict": "crystal",
       "gaps": []
-    }
-  ,
+    },
     {
       "id": "sharedtask-disaggregatedbodyref",
       "canonical": "disaggregatedBodyRef",

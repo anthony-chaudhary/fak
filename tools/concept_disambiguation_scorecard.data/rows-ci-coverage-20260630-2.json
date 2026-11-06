@@ -52,7 +52,8 @@
    "distinct_from": [
      "x2-render-materialize-renderer",
      "rendered-ctxplan",
-     "render-materialize-renderer-id-native-prompt"
+     "render-materialize-renderer-id-native-prompt",
+     "rm-rendererr"
    ],
    "aliases": [],
    "grounding": "renderers",
@@ -456,7 +457,8 @@
    "definition": "seatpool is the concrete pool identifier in fleet: it the pool of account seats available to assign.",
    "distinction": "seatpool the pool of account seats available to assign; it is a specific tree identifier in the pool namespace, not the broader sibling concept referenced by x2-pool-pagedkvpool.",
    "distinct_from": [
-    "x2-pool-pagedkvpool"
+     "x2-pool-pagedkvpool",
+     "pool-p-slotpool"
    ],
    "aliases": [],
    "grounding": "seatpool",

@@ -1,0 +1,566 @@
+{
+  "rows": [
+    {
+      "id": "rm-defaultdrmrenderpath",
+      "canonical": "DefaultDRMRenderPath",
+      "family": "render-materialize",
+      "kind": "config",
+      "definition": "The constant /dev/dri/renderD128 - the primary Linux DRM render node used by the Strix KFD allocators on AMDGPU GFX1151.",
+      "distinction": "A device-path constant; it is not the accessibility probe (ProbeDRMRenderNode), not the Vulkan backend node-identity reporter (VulkanDRMRenderNode), and not the allocator config field RenderPath that carries this value.",
+      "distinct_from": [
+        "rm-probedrmrendernode",
+        "rm-vulkandrmrendernode",
+        "rm-renderpath"
+      ],
+      "aliases": [],
+      "grounding": "DefaultDRMRenderPath",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-jinjamaxmaterialized",
+      "canonical": "jinjaMaxMaterialized",
+      "family": "render-materialize",
+      "kind": "config",
+      "definition": "The 16 MiB byte cap on materialized Jinja template output enforced by the agent in-kernel Jinja runtime and builtins.",
+      "distinction": "A size bound on template materialization; it neither plans or pages context (MaterializePlan) nor bounds lazy weight reads (q4kMaterializeWindowBytes).",
+      "distinct_from": [
+        "rm-materializeplan",
+        "rm-q4kmaterializewindowbytes"
+      ],
+      "aliases": [],
+      "grounding": "jinjaMaxMaterialized",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-materializenanbeigesharedweights",
+      "canonical": "MaterializeNanbeigeSharedWeights",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The model-arch step that maps NanBeige's 22 physical block tensors across recurrent loops so shared weights are materialized once.",
+      "distinction": "An architecture-specific weight mapping at load time; it is not the GGUF-load MTP bookkeeping marker (mtpMaterialized) and not a lazy-read byte window (q4kMaterializeWindowBytes).",
+      "distinct_from": [
+        "rm-mtpmaterialized",
+        "rm-q4kmaterializewindowbytes"
+      ],
+      "aliases": [],
+      "grounding": "MaterializeNanbeigeSharedWeights",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-materializeplan",
+      "canonical": "MaterializePlan",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The plan-materialization entry points that turn a reuse plan into concrete state: ctxplan.materializePlan builds a View over spans, while radixkv.MaterializePlan fences and materializes a ReusePlan against candidate compatibility fences.",
+      "distinction": "It materializes a context-reuse plan; it is not the prompt-assembly layout (RenderPlan), not memq cell rendering (RenderItem), and not a Jinja byte cap (jinjaMaxMaterialized).",
+      "distinct_from": [
+        "renderplan-context",
+        "renderitem-memq",
+        "rm-jinjamaxmaterialized"
+      ],
+      "aliases": [],
+      "grounding": "MaterializePlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-mtpmaterialized",
+      "canonical": "mtpMaterialized",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The tensorWork field recording the canonical name of the Qwen3.5 MTP module materialized during GGUF loading, feeding validateQwen35MTPMaterialized.",
+      "distinction": "A load-time bookkeeping marker for MTP weights; it is not the validation function itself (validateQwen35MTPMaterialized) and not a lazy-read byte window (q4kMaterializeWindowBytes).",
+      "distinct_from": [
+        "rm-q4kmaterializewindowbytes",
+        "runtime-fourth-validateqwen35mtpmaterialized"
+      ],
+      "aliases": [],
+      "grounding": "mtpMaterialized",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-noderenderunit",
+      "canonical": "nodeRenderUnit",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The shared parse-and-execute helper behind fak node-install's three unit renderers (plist, systemd unit, Windows runner), also reused for garden-plist.",
+      "distinction": "It executes a Go text/template for service units; it does not format wave-plan reports (RenderWaves) and does not render session cards to HTML (renderSessionCardsHTML).",
+      "distinct_from": [
+        "rm-renderwaves",
+        "rm-rendersessioncardshtml"
+      ],
+      "aliases": [],
+      "grounding": "nodeRenderUnit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-notedsurrender",
+      "canonical": "NotedSurrender",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The stopgate BoundaryInput flag set when the assistant's final message is detected as a surrender note via stopgate.IsSurrenderNote.",
+      "distinction": "A boolean detection outcome; the raw content it derives from sits in SurrenderNote, and the detector predicate is IsSurrenderNote.",
+      "distinct_from": [
+        "rm-surrendernote",
+        "runtime-fourth-issurrendernote"
+      ],
+      "aliases": [],
+      "grounding": "NotedSurrender",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-probedrmrendernode",
+      "canonical": "ProbeDRMRenderNode",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The KFD allocator probe that checks whether a DRM render node exists and is accessible, returning a DRMAccessProbeResult (defaulting to DefaultDRMRenderPath).",
+      "distinction": "A one-shot accessibility probe; it is not the default path constant (DefaultDRMRenderPath) and not the Vulkan backend's node-identity reporter (VulkanDRMRenderNode).",
+      "distinct_from": [
+        "rm-defaultdrmrenderpath",
+        "rm-vulkandrmrendernode"
+      ],
+      "aliases": [],
+      "grounding": "ProbeDRMRenderNode",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-q4kmaterializewindowbytes",
+      "canonical": "q4kMaterializeWindowBytes",
+      "family": "render-materialize",
+      "kind": "config",
+      "definition": "The 64 MiB constant bounding each non-mmap lazy ReadAt request when materializing Q4K quantized weights.",
+      "distinction": "A per-request read-window bound for lazy quant loading; it is not the Jinja output cap (jinjaMaxMaterialized) and not a weight-mapping step (MaterializeNanbeigeSharedWeights).",
+      "distinct_from": [
+        "rm-jinjamaxmaterialized",
+        "rm-materializenanbeigesharedweights"
+      ],
+      "aliases": [],
+      "grounding": "q4kMaterializeWindowBytes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-rematerialized",
+      "canonical": "rematerialized",
+      "family": "render-materialize",
+      "kind": "doc-term",
+      "definition": "The wire value of relay's WipRematerialized RematerializeVerdict: a WipTree delta was re-applied cleanly onto the working tree.",
+      "distinction": "A WipTree re-apply verdict string; it is not the paged-prefix CoW counter RematerializedBytes and not a ctxplan/radixkv plan materialization (MaterializePlan).",
+      "distinct_from": [
+        "rm-materializeplan"
+      ],
+      "aliases": [],
+      "grounding": "rematerialized",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-renderarrivalservicereadout",
+      "canonical": "RenderArrivalServiceReadout",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The flowmetrics writer that renders the human-readable arrival-vs-service report; RenderIntakeReport is an alias for it.",
+      "distinction": "A metrics readout printer; it does not fold CLI usage journals into fleet exposition (renderFleetCLIUsageExposition) and does not format debt-lane reports (RenderCrossIndex).",
+      "distinct_from": [
+        "rm-renderfleetcliusageexposition",
+        "rm-rendercrossindex"
+      ],
+      "aliases": [],
+      "grounding": "RenderArrivalServiceReadout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-rendercrossindex",
+      "canonical": "RenderCrossIndex",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The debtlane formatter that renders a Report focusing on cross-indexed related items and companions.",
+      "distinction": "A debt-lane cross-reference view; it is not the wave-plan terminal formatter (RenderWaves) and not perfscout's cross-innovation reports (RenderCrossInnovationsJSON/Markdown).",
+      "distinct_from": [
+        "rm-renderwaves",
+        "rm-rendercrossinnovationsjson"
+      ],
+      "aliases": [],
+      "grounding": "RenderCrossIndex",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-rendercrossinnovationsjson",
+      "canonical": "RenderCrossInnovationsJSON",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The perfscout formatter that serializes CrossInnovation entries as indented JSON.",
+      "distinction": "The machine-readable half of the cross-innovation pair; its human Markdown twin is RenderCrossInnovationsMarkdown.",
+      "distinct_from": [
+        "rm-rendercrossinnovationsmarkdown",
+        "rm-rendercrossindex"
+      ],
+      "aliases": [],
+      "grounding": "RenderCrossInnovationsJSON",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-rendercrossinnovationsmarkdown",
+      "canonical": "RenderCrossInnovationsMarkdown",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The perfscout formatter that renders CrossInnovation entries as a formatted Markdown report.",
+      "distinction": "The human-readable half of the cross-innovation pair; its machine JSON twin is RenderCrossInnovationsJSON.",
+      "distinct_from": [
+        "rm-rendercrossinnovationsjson",
+        "rm-rendercrossindex"
+      ],
+      "aliases": [],
+      "grounding": "RenderCrossInnovationsMarkdown",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-renderd",
+      "canonical": "renderD",
+      "family": "render-materialize",
+      "kind": "doc-term",
+      "definition": "The Linux DRM render-node device-path prefix /dev/dri/renderD checked by the llamacppinterop comparator authority and formatted as renderD<minor> in host-environment DRM verification.",
+      "distinction": "A device-path fragment naming a card's render node; it is not the full default path constant (DefaultDRMRenderPath), not the concrete card-0 node name (renderD128), and not the generic render verb.",
+      "distinct_from": [
+        "rm-rendererr",
+        "x-render-materialize-render",
+        "rendered-ctxplan",
+        "x2-render-materialize-renderer",
+        "rm-defaultdrmrenderpath",
+        "rm-renderd128"
+      ],
+      "aliases": [],
+      "grounding": "renderD",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-renderd128",
+      "canonical": "renderD128",
+      "family": "render-materialize",
+      "kind": "doc-term",
+      "definition": "The concrete Linux DRM render-node device name /dev/dri/renderD128 (card 0) used as the default KFD/UMA render path on Strix AMDGPU hosts.",
+      "distinction": "The specific card-0 render node; it is the value of DefaultDRMRenderPath but not the constant itself, the probe function, or the bare renderD prefix.",
+      "distinct_from": [
+        "rm-defaultdrmrenderpath",
+        "rm-renderd",
+        "rm-probedrmrendernode"
+      ],
+      "aliases": [],
+      "grounding": "renderD128",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-renderdetailed",
+      "canonical": "RenderDetailed",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The issuesolved report mode that writes the summary plus issue numbers, titles, and timestamps grouped by repository.",
+      "distinction": "One of the three issuesolved output modes (JSON/Detailed/Summary); it is not the duplicate-fix advisory printer (RenderDuplicateFixes).",
+      "distinct_from": [
+        "rm-renderduplicatefixes"
+      ],
+      "aliases": [],
+      "grounding": "RenderDetailed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-renderduplicatefixes",
+      "canonical": "RenderDuplicateFixes",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The safesync writer that prints advisory lines for duplicate fixes found against upstream (nothing when empty).",
+      "distinction": "Trunk-red claim advisory output; it is not the issuesolved detailed report (RenderDetailed).",
+      "distinct_from": [
+        "rm-renderdetailed"
+      ],
+      "aliases": [],
+      "grounding": "RenderDuplicateFixes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-rendererr",
+      "canonical": "renderErr",
+      "family": "render-materialize",
+      "kind": "doc-term",
+      "definition": "The conventional local error binding returned by native chat-template and prompt-encoding render calls (agent/prompt_encoding, ggufload quant-integrity, issues-solved CLI).",
+      "distinction": "A failure channel out of a render call; it is not the short device-path fragment renderD, not the RendererID receipt field, and not the Rendered ctxplan span paging.",
+      "distinct_from": [
+        "rm-renderd",
+        "render-materialize-renderer-id-native-prompt",
+        "rendered-ctxplan",
+        "x-ci-coverage-render-materialize-renderers",
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "renderErr",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-rendererutilizationpct",
+      "canonical": "RendererUtilizationPct",
+      "family": "render-materialize",
+      "kind": "metric",
+      "definition": "The macobs hardware telemetry gauge reporting GPU renderer utilization as a percentage (json renderer_utilization_pct).",
+      "distinction": "A reported utilization percentage; it is not a render function and not the fleet CLI usage journal fold (renderFleetCLIUsageExposition).",
+      "distinct_from": [
+        "rm-renderfleetcliusageexposition"
+      ],
+      "aliases": [],
+      "grounding": "RendererUtilizationPct",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-renderfleetcliusageexposition",
+      "canonical": "renderFleetCLIUsageExposition",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The cmd/fak section that folds the local CLI-invocation usage journal into the fleet-metrics exposition text.",
+      "distinction": "A usage-journal fold appended to fleet metrics; it is not the arrival/service readout (RenderArrivalServiceReadout) and not a utilization gauge (RendererUtilizationPct).",
+      "distinct_from": [
+        "rm-renderarrivalservicereadout",
+        "rm-rendererutilizationpct"
+      ],
+      "aliases": [],
+      "grounding": "renderFleetCLIUsageExposition",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-rendernativechattemplate",
+      "canonical": "renderNativeChatTemplate",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The InKernelPlanner method that renders admitted messages and tools into tokenizer segments via the native Jinja chat template.",
+      "distinction": "In-kernel prompt assembly; it is not the Jinja byte cap (jinjaMaxMaterialized), not the DeepSeek V4.1 chat renderer, and not the gateway upstream template-render error code.",
+      "distinct_from": [
+        "rm-jinjamaxmaterialized",
+        "render-materialize-deepseek-v41-chat",
+        "runtime-fourth-codeupstreamtemplaterender"
+      ],
+      "aliases": [],
+      "grounding": "renderNativeChatTemplate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-renderpath",
+      "canonical": "RenderPath",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The KFD allocator config field (json render_path) carrying the DRM render-node path, defaulted to DefaultDRMRenderPath and consumed by the UMA zero-copy allocator.",
+      "distinction": "A config field holding a device path; it is not the default constant itself (DefaultDRMRenderPath), not the probe (ProbeDRMRenderNode), and not the generic render verb.",
+      "distinct_from": [
+        "rm-defaultdrmrenderpath",
+        "rm-probedrmrendernode",
+        "x-render-materialize-render",
+        "render-materialize-render-gate"
+      ],
+      "aliases": [],
+      "grounding": "RenderPath",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-renderprettyreceipt",
+      "canonical": "renderPrettyReceipt",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The fak-dev bench subagent-fanout pretty-printer that writes a SubagentFanoutReceipt to stdout.",
+      "distinction": "A bench receipt printer; it is not the agent receipt+verification-verdict renderer (RenderReceipt) and not the issues-solved detailed report (RenderDetailed).",
+      "distinct_from": [
+        "c729-render-receipt",
+        "rm-renderdetailed"
+      ],
+      "aliases": [],
+      "grounding": "renderPrettyReceipt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-rendersessioncardshtml",
+      "canonical": "renderSessionCardsHTML",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The harnessweb renderer that turns session cards into HTML markup; also the captured-render witness seam for the web surface.",
+      "distinction": "An HTML card renderer for the harness web UI; it is not the shared install-unit template executor (nodeRenderUnit) and not a TUI pane renderer.",
+      "distinct_from": [
+        "rm-noderenderunit",
+        "x-render-materialize-rendertuiloops"
+      ],
+      "aliases": [],
+      "grounding": "renderSessionCardsHTML",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-renderwaves",
+      "canonical": "RenderWaves",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The terminal-text formatters for wave plans, present in both debtlane (WavePlan + ProductionGrade) and issueorchestrator (Plan).",
+      "distinction": "Human wave-plan output; it is not the cross-index report view (RenderCrossIndex) and not the dispatch-wave plan-row materializer (renderDispatchWavePlanRows).",
+      "distinct_from": [
+        "rm-rendercrossindex",
+        "cov-debt250-render-materialize-renderdispatchwaveplanrows"
+      ],
+      "aliases": [],
+      "grounding": "RenderWaves",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-surrendering",
+      "canonical": "surrendering",
+      "family": "render-materialize",
+      "kind": "doc-term",
+      "definition": "The run-end flag phrase matched by headlesslint's surrender-detection regex (i surrender | surrendering) marking a session that gave up mid-task.",
+      "distinction": "A prose flag word linted at run end; it is not the stopgate boundary fields (NotedSurrender/SurrenderNote) and not the detector predicate (IsSurrenderNote).",
+      "distinct_from": [
+        "rm-notedsurrender",
+        "rm-surrendernote",
+        "runtime-fourth-issurrendernote"
+      ],
+      "aliases": [],
+      "grounding": "surrendering",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-surrendernote",
+      "canonical": "SurrenderNote",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The stopgate BoundaryInput field holding the raw assistant content examined for surrender-note detection.",
+      "distinction": "The raw content input; the derived boolean is NotedSurrender and the predicate is IsSurrenderNote.",
+      "distinct_from": [
+        "rm-notedsurrender",
+        "runtime-fourth-issurrendernote"
+      ],
+      "aliases": [],
+      "grounding": "SurrenderNote",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "rm-vulkandrmrendernode",
+      "canonical": "VulkanDRMRenderNode",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The host-environment/Vulkan backend method reporting the DRM render-node identity (major/minor) of the initialized Vulkan device.",
+      "distinction": "A device-identity reporter on the live Vulkan backend; it is not the KFD path constant (DefaultDRMRenderPath), not the existence probe (ProbeDRMRenderNode), and not the config field (RenderPath).",
+      "distinct_from": [
+        "rm-defaultdrmrenderpath",
+        "rm-probedrmrendernode",
+        "rm-renderpath"
+      ],
+      "aliases": [],
+      "grounding": "VulkanDRMRenderNode",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

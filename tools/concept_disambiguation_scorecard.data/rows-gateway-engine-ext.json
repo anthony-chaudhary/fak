@@ -467,7 +467,6 @@
       "distinct_from": [
         "modelroute",
         "EngineID (registry)",
-        "cov5307-engine-route",
         "x2-gateway-engine-routeengine"
       ],
       "aliases": [],

@@ -181,7 +181,8 @@
       "distinct_from": [
         "policy-loaded",
         "policy-capability-policy-bytes",
-        "x-policy-capability-setpolicy"
+        "x-policy-capability-setpolicy",
+        "pc-new-policy-constructor"
       ],
       "aliases": [],
       "grounding": "mempolicy",

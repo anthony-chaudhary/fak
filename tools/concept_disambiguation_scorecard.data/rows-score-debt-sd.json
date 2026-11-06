@@ -1,0 +1,485 @@
+{
+  "rows": [
+    {
+      "id": "sd-appeal-debt",
+      "canonical": "appeal_debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "The doc-appeal card's defect integer: AI-voice tells, em-dash floods past the line budget, and un-glossed jargon in reader-facing docs.",
+      "distinction": "One control-pane CARD integer - NOT the control pane that folds all cards, NOT doc_debt (whole-corpus structure/freshness defects), and NOT readme_debt (front-page freshness only).",
+      "distinct_from": [
+        "control-pane",
+        "sd-doc-debt",
+        "sd-readme-debt"
+      ],
+      "aliases": [],
+      "grounding": "appeal_debt",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "control-pane",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-readme-debt",
+      "canonical": "readme_debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "The readme-freshness card's defect integer: README.md lagging current CLI syntax, broken quickstart snippets, or unverifiable benchmark citations.",
+      "distinction": "Front-PAGE freshness only - NOT doc_debt's whole-corpus audit and NOT appeal_debt's prose-voice defects.",
+      "distinct_from": [
+        "control-pane",
+        "sd-doc-debt",
+        "sd-appeal-debt"
+      ],
+      "aliases": [],
+      "grounding": "readme_debt",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "control-pane",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-doc-debt",
+      "canonical": "doc_debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "The docs card's defect integer: dead local links, stale install pins behind VERSION, unresolved placeholders, missing H1 titles, and orphaned docs across the reader-reachable corpus.",
+      "distinction": "Whole-CORPUS structure and freshness audit - NOT readme_debt (the front page only) and NOT appeal_debt (prose voice and jargon).",
+      "distinct_from": [
+        "control-pane",
+        "sd-readme-debt",
+        "sd-appeal-debt"
+      ],
+      "aliases": [],
+      "grounding": "doc_debt",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "control-pane",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-demo-debt",
+      "canonical": "demo_debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "The demo-quality card's defect integer: runnable demonstration scripts that fail to execute cleanly, lack stated prerequisites, or produce failed output.",
+      "distinction": "Baseline DEMO QUALITY (clean runs, no hidden assumptions) - NOT robustness_debt (surviving boundary inputs and odd environments), NOT seo_debt (published-page front-matter/crawlability/JSON-LD), and NOT the control pane fold.",
+      "distinct_from": [
+        "control-pane",
+        "sd-robustness-debt",
+        "score-debt-seo-debt"
+      ],
+      "aliases": [],
+      "grounding": "demo_debt",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "control-pane",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-robustness-debt",
+      "canonical": "robustness_debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "The demo-robustness card's defect integer: sample apps that fail under malformed user input, abnormal flags, or missing environment variables.",
+      "distinction": "Hostile-input RESILIENCE of demos - NOT demo_debt's baseline clean-run quality and NOT stability_debt (repo-wide regression vectors and rollbacks).",
+      "distinct_from": [
+        "control-pane",
+        "sd-demo-debt"
+      ],
+      "aliases": [],
+      "grounding": "robustness_debt",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "control-pane",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-parity-debt",
+      "canonical": "parity_debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "The industry-parity card's defect integer: LLM-serving feature gaps against production engines (vLLM, SGLang, TensorRT-LLM, llama.cpp).",
+      "distinction": "External FEATURE PARITY vs SOTA runtimes - NOT persona_fit_debt (whether named developer/enterprise personas are served) and NOT agent-readiness adoption lenses.",
+      "distinct_from": [
+        "control-pane",
+        "sd-persona-fit-debt"
+      ],
+      "aliases": [],
+      "grounding": "parity_debt",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "control-pane",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-stability-debt",
+      "canonical": "stability_debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "The stability card's defect integer: untracked regression vectors, tail-wagging dependencies, and rollback procedures without a verified exit.",
+      "distinction": "Repo-wide REGRESSION and rollback hygiene - NOT robustness_debt (demo resilience under bad input) and NOT the control pane's pinned ratchet.",
+      "distinct_from": [
+        "control-pane",
+        "sd-robustness-debt"
+      ],
+      "aliases": [],
+      "grounding": "stability_debt",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "control-pane",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-intent-literal-debt",
+      "canonical": "intent_literal_debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "The intent-literal card's defect integer: divergences between the human-stated intent in a test name and the literal assertion it evaluates.",
+      "distinction": "TEST-NAME-vs-ASSERTION honesty - NOT claim_repro_debt (unfalsifiable CLAIMS.md witness claims) and NOT doc_debt (reader-facing docs).",
+      "distinct_from": [
+        "control-pane",
+        "sd-claim-repro-debt"
+      ],
+      "aliases": [],
+      "grounding": "intent_literal_debt",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "control-pane",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-claim-repro-debt",
+      "canonical": "claim_repro_debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "The claim-repro card's defect integer: unfalsifiable witness claims in CLAIMS.md that no reproducible command or receipt can settle.",
+      "distinction": "CLAIM falsifiability - NOT intent_literal_debt (test-name drift) and NOT disambiguation-debt (concept-naming clarity, a different honesty axis).",
+      "distinct_from": [
+        "control-pane",
+        "sd-intent-literal-debt",
+        "disambiguation-debt"
+      ],
+      "aliases": [],
+      "grounding": "claim_repro_debt",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "control-pane",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-observability-debt",
+      "canonical": "observability_debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "The observability card's defect integer: metrics referenced by dashboards or alerts that the binary does not actively export.",
+      "distinction": "EXPORTED-METRIC completeness - NOT repo-hygiene tree-cleanliness debt and NOT the control pane's own fold integer.",
+      "distinct_from": [
+        "control-pane",
+        "repo-hygiene-scorecard"
+      ],
+      "aliases": [],
+      "grounding": "observability_debt",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "control-pane",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-rsi-debt",
+      "canonical": "rsi_debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "The RSI-maturity card's defect integer: self-improvement loops that do not close on real telemetry.",
+      "distinction": "Self-improvement loop CLOSURE on telemetry - NOT guard_rsi_debt (structured explanations for kernel guard decisions, a separate card) and NOT total_debt's raw portfolio sum.",
+      "distinct_from": [
+        "control-pane",
+        "total-debt"
+      ],
+      "aliases": [],
+      "grounding": "rsi_debt",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "control-pane",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-py-debt",
+      "canonical": "py_debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "The tooling-quality card's defect integer: maintenance-script defects - missing type annotations, unhandled subprocess errors, and unquarantined external dependencies.",
+      "distinction": "PYTHON TOOLING quality - NOT code_debt (the Go module's quality surface) and NOT the control pane fold.",
+      "distinct_from": [
+        "control-pane",
+        "cov-20260903-score-debt-codedebt"
+      ],
+      "aliases": [],
+      "grounding": "py_debt",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "control-pane",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-bench-dx-debt",
+      "canonical": "bench_dx_debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "The bench-DX card's defect integer: concrete defects that make fak's benchmarks harder to discover, cold-start, learn, read, or compare.",
+      "distinction": "Benchmark DEVELOPER EXPERIENCE - NOT process_debt (CUDA build reproducibility and isolation) and NOT stability_debt (regression vectors).",
+      "distinct_from": [
+        "control-pane",
+        "sd-process-debt"
+      ],
+      "aliases": [],
+      "grounding": "bench_dx_debt",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "control-pane",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-process-debt",
+      "canonical": "process_debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "The CUDA-development card's defect integer: CUDA build reproducibility failures, environment-isolation leaks, and unsafe host fallback behavior.",
+      "distinction": "CUDA BUILD PROCESS safety - NOT bench_dx_debt (benchmark usability), NOT py_debt (Python tooling quality), and NOT qa_process_debt (test-process gaps like reverted landings without a regression test).",
+      "distinct_from": [
+        "control-pane",
+        "sd-bench-dx-debt",
+        "score-debt-qa-process-debt"
+      ],
+      "aliases": [],
+      "grounding": "process_debt",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "control-pane",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-persona-fit-debt",
+      "canonical": "persona_fit_debt",
+      "family": "score-debt",
+      "kind": "metric",
+      "definition": "The persona-fit card's defect integer: matrix-integrity and grounding gaps for the named developer and enterprise user workflows.",
+      "distinction": "Per-PERSONA service check - NOT parity_debt (feature gaps vs SOTA engines) and NOT the popularization-readiness scorecard's visitor-conversion funnel.",
+      "distinct_from": [
+        "control-pane",
+        "sd-parity-debt"
+      ],
+      "aliases": [],
+      "grounding": "persona_fit_debt",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "parent": "control-pane",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-check-scoreboard-debt-doc",
+      "canonical": "CheckScoreboardDebtDoc",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "The scorecardpane check that verifies docs/scoreboard-debt.md is fresh against the current control-pane fold.",
+      "distinction": "READ-side freshness CHECK - NOT WriteScoreboardDebtDoc (which regenerates the doc) and NOT the scoreboard debt page content itself.",
+      "distinct_from": [
+        "sd-write-scoreboard-debt-doc",
+        "scorecardpane-native-fold"
+      ],
+      "aliases": [],
+      "grounding": "CheckScoreboardDebtDoc",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "scorecardpane-native-fold",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-write-scoreboard-debt-doc",
+      "canonical": "WriteScoreboardDebtDoc",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "The scorecardpane writer that regenerates docs/scoreboard-debt.md so CheckScoreboardDebtDoc reads it fresh again.",
+      "distinction": "WRITE-side regeneration - NOT CheckScoreboardDebtDoc (the read-only freshness check) and NOT the control pane fold it renders.",
+      "distinct_from": [
+        "sd-check-scoreboard-debt-doc",
+        "control-pane"
+      ],
+      "aliases": [],
+      "grounding": "WriteScoreboardDebtDoc",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "scorecardpane-native-fold",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-debt-before",
+      "canonical": "DebtBefore",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "The pre-change debt count paired with DebtAfter on doc-freshness RSI verdicts and session-reset card deltas.",
+      "distinction": "The BEFORE half of one before/after pair - NOT DebtAfter (the post-change count) and NOT total_debt (the portfolio sum across cards).",
+      "distinct_from": [
+        "sd-debt-after",
+        "total-debt"
+      ],
+      "aliases": [],
+      "grounding": "DebtBefore",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-debt-after",
+      "canonical": "DebtAfter",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "The post-change debt count paired with DebtBefore on doc-freshness RSI verdicts and session-reset card deltas.",
+      "distinction": "The AFTER half of one before/after pair - NOT DebtBefore (the pre-change count) and NOT grade_debt (severity-weighted grades).",
+      "distinct_from": [
+        "sd-debt-before",
+        "grade-debt"
+      ],
+      "aliases": [],
+      "grounding": "DebtAfter",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-dim-coverage-debt",
+      "canonical": "DimCoverageDebt",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "The debtlane detector dimension 'coverage_debt': unknown, unsupported, or unreadable content inside a lane's source.",
+      "distinction": "A DEBT-LANE detector dimension - NOT the control pane's per-card debt integers and NOT DimStubDebt (TODO/FIXME/unimplemented panics).",
+      "distinct_from": [
+        "sd-dim-stub-debt",
+        "cov-20260903-score-debt-debtlane"
+      ],
+      "aliases": [],
+      "grounding": "DimCoverageDebt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-dim-stub-debt",
+      "canonical": "DimStubDebt",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "The debtlane detector dimension 'stub_debt': TODO/FIXME markers and unimplemented panics left in a lane's source.",
+      "distinction": "A DEBT-LANE detector dimension - NOT DimCoverageDebt (unknown/unsupported/unreadable content) and NOT the control pane's per-card debt keys.",
+      "distinct_from": [
+        "sd-dim-coverage-debt",
+        "cov-20260903-score-debt-debtlane"
+      ],
+      "aliases": [],
+      "grounding": "DimStubDebt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-debtwave2",
+      "canonical": "debtwave2",
+      "family": "score-debt",
+      "kind": "doc-term",
+      "definition": "Wave 2 of the debt-lane maturity campaign: the flow-ticket set (debtwave2-internal-*, debtwave2-pkg-*) advancing packages toward their maturity targets.",
+      "distinction": "The SECOND wave label of the debt-lane campaign - NOT debtwave3 (the later wave) and NOT any single debt-lane ticket it contains.",
+      "distinct_from": [
+        "sd-debtwave3",
+        "cov-20260903-score-debt-debtlane"
+      ],
+      "aliases": [],
+      "grounding": "debtwave2",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-debtwave3",
+      "canonical": "debtwave3",
+      "family": "score-debt",
+      "kind": "doc-term",
+      "definition": "Wave 3 of the debt-lane maturity campaign: the flow-ticket set (debtwave3-internal-*, debtwave3-pkg-*, debtwave3-cmd-*) advancing packages toward their maturity targets.",
+      "distinction": "The THIRD wave label of the debt-lane campaign - NOT debtwave2 (the earlier wave) and NOT any single debt-lane ticket it contains.",
+      "distinct_from": [
+        "sd-debtwave2",
+        "cov-20260903-score-debt-debtlane"
+      ],
+      "aliases": [],
+      "grounding": "debtwave3",
+      "grounding_kind": "doc",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-popularization-readiness-scorecard",
+      "canonical": "popularization_readiness_scorecard",
+      "family": "score-debt",
+      "kind": "subsystem",
+      "definition": "The Python scorecard that grades fak's front door as an ordered conversion funnel (land, orient, trust, install, act) against real-tree affordances.",
+      "distinction": "The POPULARIZATION lens (does a first-time visitor convert?) - NOT persona_fit_debt's per-persona readiness and NOT agent_readiness's agent-adoption lens.",
+      "distinct_from": [
+        "scorecard",
+        "sd-persona-fit-debt"
+      ],
+      "aliases": [],
+      "grounding": "popularization_readiness_scorecard",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "scorecard",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "sd-skill-slop-scorecard",
+      "canonical": "skill_slop_scorecard",
+      "family": "score-debt",
+      "kind": "subsystem",
+      "definition": "The structural admission gate (#2911) that scores agent-authored SKILL.md candidates on verbatim dumps, vacuous bodies, marketing voice, session narration, missing verification, and duplicate bodies.",
+      "distinction": "A SKILL-authoring structural gate - NOT a code test-coverage gate and NOT the rsiloop skill-quarantine gate that reuses its flagged vocabulary.",
+      "distinct_from": [
+        "scorecard",
+        "sd-popularization-readiness-scorecard"
+      ],
+      "aliases": [],
+      "grounding": "skill_slop_scorecard",
+      "grounding_kind": "path",
+      "glossary_anchor": "",
+      "parent": "scorecard",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}
