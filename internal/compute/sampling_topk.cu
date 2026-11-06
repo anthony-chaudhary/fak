@@ -24,18 +24,26 @@
 //     requires the deterministic order.
 //   * the repetition penalty is the additive OpenAI frequency/presence form
 //     the host chain applies (upstream applies a multiplicative GPT-2 form).
-// UNWIRED: this fragment is not yet #included into cuda_kernels.cu and its ABI
-// is not yet declared in cuda_backend.h; the successor wiring packet lands
-// both. Until then the host applyCPUSamplingTruncation chain remains the
-// correctness oracle and fallback. The host face (sampling_topk.go) is the
-// exact float64 twin of these kernels' contract; device results are an Approx
-// peer held to the argmax-exact + mass-gate tolerance, not max|Δ|=0.
+// UNWIRED: this approximate float32 structural family is not #included into
+// cuda_kernels.cu and its ABI is not declared in cuda_backend.h. The served
+// applyCPUSamplingTruncation chain remains the oracle/fallback; sampling_topk.go
+// is an independent float64 host reference, not an exact twin of this fragment.
+// Activation under #14198 requires exact per-stage rounding, signed-zero/tie
+// order, ascending-token-ID mass/CDF and request-local 53-bit seeded parity,
+// plus transactional refusal, lifetime/completion and served transfer evidence.
+// Argmax agreement or a mass tolerance cannot substitute for those gates.
+
+// This remains an UNWIRED approximate f32 primitive family. Structural repairs
+// below do not establish the float64 / request-local 53-bit seeded law required
+// by #14198. Do not enable resident served sampling with this fragment.
+#include <limits.h>
+#include <float.h>
 
 #define SAMPLING_TOPK_THREADS 1024
 #define SAMPLING_TOPK_BINS 256
 
-// Per-row status codes written to dStatus[row]: 0 ok, 1 non-finite row,
-// 2 zero post-truncation mass. The host face maps both refusals onto its
+// Per-row status codes written to dStatus[row]: 0 ok, 1 invalid probability
+// (non-finite or negative), 2 invalid post-truncation mass. The host face maps both refusals onto its
 // ErrNonFiniteLogits-equivalent sentinel.
 #define SAMPLING_STATUS_OK 0
 #define SAMPLING_STATUS_NON_FINITE 1
@@ -146,10 +154,16 @@ __device__ __forceinline__ unsigned int sampling_cutoff_key_f32(
     }
     __syncthreads();
     // Suffix counts: histB[b] = #{matching items with bin > b}.
-    for (int b = threadIdx.x; b < SAMPLING_TOPK_BINS; b += SAMPLING_TOPK_THREADS) histB[b] = histA[b];
+    for (int b = threadIdx.x; b < SAMPLING_TOPK_BINS; b += SAMPLING_TOPK_THREADS) {
+      histB[b] = (b + 1 < SAMPLING_TOPK_BINS) ? histA[b + 1] : 0;
+    }
     __syncthreads();
     for (int stride = 1; stride < SAMPLING_TOPK_BINS; stride <<= 1) {
-      if (threadIdx.x < SAMPLING_TOPK_BINS - stride) histB[threadIdx.x] += histB[threadIdx.x + stride];
+      const int add = (threadIdx.x < SAMPLING_TOPK_BINS - stride)
+          ? histB[threadIdx.x + stride] : 0;
+      // Every lane reads the previous round before any lane writes this round.
+      __syncthreads();
+      if (threadIdx.x < SAMPLING_TOPK_BINS) histB[threadIdx.x] += add;
       __syncthreads();
     }
     const int rem = k - offset;
@@ -180,25 +194,27 @@ __global__ void __launch_bounds__(SAMPLING_TOPK_THREADS)
   extern __shared__ char smem_raw[];
   SamplingTopKSmem& s = *reinterpret_cast<SamplingTopKSmem*>(smem_raw);
   const int row = blockIdx.x;
+  float* p = probs + (size_t)row * n;
 
   // Pass 1: classify against nothing yet — just refuse non-finite rows early.
   int bad = 0;
   for (int i = threadIdx.x; i < n; i += SAMPLING_TOPK_THREADS) {
-    if (sampling_nonfinite(probs[i])) bad = 1;
+    if (sampling_nonfinite(p[i]) || p[i] < 0.f) bad = 1;
   }
-  s.scalars[0] = sampling_block_sum_int(bad, s.scan);
+  const int badCount = sampling_block_sum_int(bad, s.scan);
+  if (threadIdx.x == 0) s.scalars[0] = badCount;
   __syncthreads();
   if (s.scalars[0] != 0) {
     if (threadIdx.x == 0) status[row] = SAMPLING_STATUS_NON_FINITE;
     return;
   }
 
-  const unsigned int cutoff = sampling_cutoff_key_f32(probs, n, k, s.hist[0], s.hist[1]);
+  const unsigned int cutoff = sampling_cutoff_key_f32(p, n, k, s.hist[0], s.hist[1]);
 
   // Pass 2: count items strictly above the cutoff.
   int aboveLocal = 0;
   for (int i = threadIdx.x; i < n; i += SAMPLING_TOPK_THREADS) {
-    if (sampling_key(probs[i]) > cutoff) aboveLocal++;
+    if (sampling_key(p[i]) > cutoff) aboveLocal++;
   }
   const int above = sampling_block_sum_int(aboveLocal, s.scan);
   __syncthreads();
@@ -211,25 +227,27 @@ __global__ void __launch_bounds__(SAMPLING_TOPK_THREADS)
   // index rank r is kept iff r < need. The running chunk base lives in shared
   // memory because every lane needs the updated value on the next chunk.
   float massLocal = 0.f;
-  s.scalars[2] = 0;
+  if (threadIdx.x == 0) s.scalars[2] = 0;
   __syncthreads();
   for (int chunkStart = 0; chunkStart < n; chunkStart += SAMPLING_TOPK_THREADS) {
     const int i = chunkStart + threadIdx.x;
     const bool inRow = i < n;
-    const unsigned int key = inRow ? sampling_key(probs[i]) : 0u;
+    const unsigned int key = inRow ? sampling_key(p[i]) : 0u;
     const int val = inRow && key == cutoff ? 1 : 0;
     s.scan[threadIdx.x] = val;
     __syncthreads();
     for (int stride = 1; stride < SAMPLING_TOPK_THREADS; stride <<= 1) {
       const int j = threadIdx.x - stride;
-      if (j >= 0) s.scan[threadIdx.x] += s.scan[j];
+      const int add = (j >= 0) ? s.scan[j] : 0;
+      __syncthreads();
+      s.scan[threadIdx.x] += add;
       __syncthreads();
     }
     const int excl = s.scan[threadIdx.x] - val;
     if (inRow) {
       const bool keep = key > cutoff || (key == cutoff && excl + s.scalars[2] < need);
-      if (!keep) probs[i] = 0.f;
-      massLocal += keep ? probs[i] : 0.f;
+      if (!keep) p[i] = 0.f;
+      massLocal += keep ? p[i] : 0.f;
     }
     __syncthreads();
     if (threadIdx.x == 0) s.scalars[2] += s.scan[SAMPLING_TOPK_THREADS - 1];
@@ -239,7 +257,8 @@ __global__ void __launch_bounds__(SAMPLING_TOPK_THREADS)
   __syncthreads();
   if (threadIdx.x == 0) {
     massOut[row] = mass;
-    status[row] = (mass > 0.f) ? SAMPLING_STATUS_OK : SAMPLING_STATUS_ZERO_MASS;
+    status[row] = (mass > 0.f && !sampling_nonfinite(mass))
+        ? SAMPLING_STATUS_OK : SAMPLING_STATUS_ZERO_MASS;
   }
 }
 
@@ -261,6 +280,7 @@ struct SamplingNucleusSmem {
   float massScan[SAMPLING_TOPK_THREADS]; // chunked exclusive-scan scratch
   float chunkBase;                       // running tie-mass base across chunks
   float sufBroadcast;                    // thread-0 broadcast of the boundary suffix
+  int badScratch[SAMPLING_TOPK_THREADS / 32]; // typed integer reduction storage
   int scalars[4];                        // [0] bad flag, [1] boundary bin
 };
 
@@ -271,19 +291,29 @@ __global__ void __launch_bounds__(SAMPLING_TOPK_THREADS)
   extern __shared__ char smem_raw[];
   SamplingNucleusSmem& s = *reinterpret_cast<SamplingNucleusSmem*>(smem_raw);
   const int row = blockIdx.x;
+  float* p = probs + (size_t)row * n;
 
   int bad = 0;
   for (int i = threadIdx.x; i < n; i += SAMPLING_TOPK_THREADS) {
-    if (sampling_nonfinite(probs[i])) bad = 1;
+    if (sampling_nonfinite(p[i]) || p[i] < 0.f) bad = 1;
   }
-  s.scalars[0] = sampling_block_sum_int(bad, s.massScan + SAMPLING_TOPK_THREADS / 2);
+  const int badCount = sampling_block_sum_int(bad, s.badScratch);
+  if (threadIdx.x == 0) s.scalars[0] = badCount;
   __syncthreads();
   if (s.scalars[0] != 0) {
     if (threadIdx.x == 0) status[row] = SAMPLING_STATUS_NON_FINITE;
     return;
   }
 
-  const float target = (float)(topP * (double)massInOut[row]);
+  const float incomingMass = massInOut[row];
+  if (!(incomingMass > 0.f) || sampling_nonfinite(incomingMass)) {
+    if (threadIdx.x == 0) status[row] = SAMPLING_STATUS_ZERO_MASS;
+    return;
+  }
+  // Keep the narrowest positive nucleus nonempty even if the product underflows.
+  // DBL_MIN is below every positive f32 weight, so this floor only selects rank 0.
+  const double product = topP * (double)incomingMass;
+  const double target = product > 0.0 ? product : DBL_MIN;
 
   // Byte-refinement descent over bin masses. offsetMass carries the mass of
   // items strictly above the current prefix level; rem is what still has to be
@@ -300,28 +330,30 @@ __global__ void __launch_bounds__(SAMPLING_TOPK_THREADS)
     // fixedMask covers exactly the bytes fixed so far (see the top-k kernel).
     const unsigned int fixedMask = (shift + 8 >= 32) ? 0u : (0xFFFFFFFFu << (shift + 8));
     for (int i = threadIdx.x; i < n; i += SAMPLING_TOPK_THREADS) {
-      const unsigned int key = sampling_key(probs[i]);
+      const unsigned int key = sampling_key(p[i]);
       if ((key & fixedMask) == (prefix & fixedMask)) {
-        atomicAdd(&s.binMass[(key >> shift) & 0xFF], probs[i]);
+        atomicAdd(&s.binMass[(key >> shift) & 0xFF], p[i]);
       }
     }
     __syncthreads();
     // Suffix masses: massSuffix[b] = mass of matching items with bin > b.
     for (int b = threadIdx.x; b < SAMPLING_TOPK_BINS; b += SAMPLING_TOPK_THREADS) {
-      s.massSuffix[b] = s.binMass[b];
+      s.massSuffix[b] = (b + 1 < SAMPLING_TOPK_BINS) ? s.binMass[b + 1] : 0.f;
     }
     __syncthreads();
     for (int stride = 1; stride < SAMPLING_TOPK_BINS; stride <<= 1) {
-      if (threadIdx.x < SAMPLING_TOPK_BINS - stride) {
-        s.massSuffix[threadIdx.x] += s.massSuffix[threadIdx.x + stride];
-      }
+      const float add = (threadIdx.x < SAMPLING_TOPK_BINS - stride)
+          ? s.massSuffix[threadIdx.x + stride] : 0.f;
+      __syncthreads();
+      if (threadIdx.x < SAMPLING_TOPK_BINS) s.massSuffix[threadIdx.x] += add;
       __syncthreads();
     }
-    const float rem = target - offsetMass;
+    const double rem = target - (double)offsetMass;
     if (threadIdx.x == 0) {
       int boundary = -1;
       for (int b = SAMPLING_TOPK_BINS - 1; b >= 0; b--) {
-        if (s.massSuffix[b] < rem && s.massSuffix[b] + s.binMass[b] >= rem) {
+        if ((double)s.massSuffix[b] < rem &&
+            (double)s.massSuffix[b] + (double)s.binMass[b] >= rem) {
           boundary = b;
           s.sufBroadcast = s.massSuffix[b];
           break;
@@ -348,34 +380,36 @@ __global__ void __launch_bounds__(SAMPLING_TOPK_THREADS)
   // Mass of items strictly above the cutoff.
   float aboveLocal = 0.f;
   for (int i = threadIdx.x; i < n; i += SAMPLING_TOPK_THREADS) {
-    if (sampling_key(probs[i]) > cutoff) aboveLocal += probs[i];
+    if (sampling_key(p[i]) > cutoff) aboveLocal += p[i];
   }
   const float massAbove = sampling_block_sum_f32(aboveLocal, s.massScan);
   __syncthreads();
-  const float tieTarget = target - massAbove;
+  const double tieTarget = target - (double)massAbove;
 
   // Chunked exclusive scan over tie WEIGHTS; a tie is kept iff its cumulative
   // mass before it stays below tieTarget (the host walk's stop rule).
   float massLocal = 0.f;
-  s.chunkBase = 0.f;
+  if (threadIdx.x == 0) s.chunkBase = 0.f;
   __syncthreads();
   for (int chunkStart = 0; chunkStart < n; chunkStart += SAMPLING_TOPK_THREADS) {
     const int i = chunkStart + threadIdx.x;
     const bool inRow = i < n;
-    const unsigned int key = inRow ? sampling_key(probs[i]) : 0u;
-    const float val = inRow && key == cutoff ? probs[i] : 0.f;
+    const unsigned int key = inRow ? sampling_key(p[i]) : 0u;
+    const float val = inRow && key == cutoff ? p[i] : 0.f;
     s.massScan[threadIdx.x] = val;
     __syncthreads();
     for (int stride = 1; stride < SAMPLING_TOPK_THREADS; stride <<= 1) {
       const int j = threadIdx.x - stride;
-      if (j >= 0) s.massScan[threadIdx.x] += s.massScan[j];
+      const float add = (j >= 0) ? s.massScan[j] : 0.f;
+      __syncthreads();
+      s.massScan[threadIdx.x] += add;
       __syncthreads();
     }
     const float excl = s.massScan[threadIdx.x] - val;
     if (inRow) {
-      const bool keep = key > cutoff || (key == cutoff && excl + s.chunkBase < tieTarget);
-      if (!keep) probs[i] = 0.f;
-      massLocal += keep ? probs[i] : 0.f;
+      const bool keep = key > cutoff || (key == cutoff && (double)excl + (double)s.chunkBase < tieTarget);
+      if (!keep) p[i] = 0.f;
+      massLocal += keep ? p[i] : 0.f;
     }
     __syncthreads();
     if (threadIdx.x == 0) s.chunkBase += s.massScan[SAMPLING_TOPK_THREADS - 1];
@@ -385,7 +419,8 @@ __global__ void __launch_bounds__(SAMPLING_TOPK_THREADS)
   __syncthreads();
   if (threadIdx.x == 0) {
     massInOut[row] = mass;
-    status[row] = (mass > 0.f) ? SAMPLING_STATUS_OK : SAMPLING_STATUS_ZERO_MASS;
+    status[row] = (mass > 0.f && !sampling_nonfinite(mass))
+        ? SAMPLING_STATUS_OK : SAMPLING_STATUS_ZERO_MASS;
   }
 }
 
@@ -411,7 +446,9 @@ __device__ __forceinline__ void sampling_chunk_scan(float* buf, const float* src
   __syncthreads();
   for (int stride = 1; stride < SAMPLING_TOPK_THREADS; stride <<= 1) {
     const int j = threadIdx.x - stride;
-    if (j >= 0) buf[threadIdx.x] += buf[j];
+    const float add = (j >= 0) ? buf[j] : 0.f;
+    __syncthreads();
+    buf[threadIdx.x] += add;
     __syncthreads();
   }
 }
@@ -455,10 +492,11 @@ __global__ void __launch_bounds__(SAMPLING_TOPK_THREADS)
     sampling_chunk_scan(s.cdf, p, n, i0);
     if (threadIdx.x == 0) {
       // First position whose inclusive cumulative mass exceeds the goal.
-      int lo = 0, hi = SAMPLING_TOPK_THREADS - 1;
+      const float before = (winChunk == 0) ? 0.f : s.chunkEnd[winChunk - 1];
+      int lo = 0, hi = min(SAMPLING_TOPK_THREADS, n - i0) - 1;
       while (lo < hi) {
         const int mid = (lo + hi) / 2;
-        if (base + s.cdf[mid] > goal) hi = mid;
+        if (before + s.cdf[mid] > goal) hi = mid;
         else lo = mid + 1;
       }
       token = i0 + lo;
@@ -486,7 +524,8 @@ __global__ void __launch_bounds__(SAMPLING_TOPK_THREADS)
 extern "C" int fcuda_sampling_repetition_penalty_f32(
     float* dLogits, const int32_t* dCounts, int countsLen,
     int rows, int vocab, double freq, double pres) {
-  if (!dLogits || rows <= 0 || vocab <= 0 || countsLen < 0 ||
+  if (!dLogits || rows <= 0 || vocab <= 0 ||
+      vocab > INT_MAX - (SAMPLING_TOPK_THREADS - 1) || countsLen < 0 ||
       (countsLen > 0 && !dCounts)) {
     return -1;
   }
@@ -503,7 +542,7 @@ extern "C" int fcuda_sampling_repetition_penalty_f32(
 extern "C" int fcuda_sampling_topk_truncate_f32(
     float* dProbs, int* dStatus, float* dMass, int rows, int vocab, int topK) {
   if (!dProbs || !dStatus || !dMass || rows <= 0 || vocab <= 0 ||
-      topK <= 0 || topK >= vocab) {
+      vocab > INT_MAX - (SAMPLING_TOPK_THREADS - 1) || topK <= 0 || topK >= vocab) {
     return -1;
   }
   const size_t smem = sizeof(SamplingTopKSmem);
@@ -524,7 +563,7 @@ extern "C" int fcuda_sampling_topk_truncate_f32(
 extern "C" int fcuda_sampling_nucleus_f32(
     float* dProbs, int* dStatus, float* dMass, int rows, int vocab, double topP) {
   if (!dProbs || !dStatus || !dMass || rows <= 0 || vocab <= 0 ||
-      !(topP > 0.0) || !(topP < 1.0) || !isfinite(topP)) {
+      vocab > INT_MAX - (SAMPLING_TOPK_THREADS - 1) || !(topP > 0.0) || !(topP < 1.0) || !isfinite(topP)) {
     return -1;
   }
   const size_t smem = sizeof(SamplingNucleusSmem);
