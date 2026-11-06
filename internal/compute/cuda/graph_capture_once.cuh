@@ -95,6 +95,7 @@ static int graph_once_capture_admit(fak_graph_once *s) {
   return s && s == g_graph_once_capture && g_capture_open && !s->terminal;
 }
 #include "graph_quant_workspace.cuh"
+#include "graph_gdn_capture.cuh"
 extern "C" int fak_graph_once_rope(void *owner, float *x, int heads, int hd, double theta) {
   fak_graph_once *s = (fak_graph_once *)owner;
   if (!graph_once_capture_admit(s)) return 1;

@@ -1,9 +1,9 @@
 // sampling_topk.go — the device sampling-truncation family for wide-vocabulary
-// rows: the host-runnable exact twin of the CUDA kernels in sampling_topk.cu,
-// serving the samplingTruncationCluster path declared at
-// internal/agent/inkernel_sampling.go (currently unwired; the successor
-// packet wires the .cu into the backend and this face behind
-// selectSamplingTruncationPath).
+// rows: the float64 host reference for the CUDA family in sampling_topk.cu.
+// Both remain unwired from samplingTruncationCluster in internal/agent. The
+// current float32 CUDA primitives do not establish this reference's exact law;
+// source-bound seeded parity and served-caller qualification are still required
+// before any device implementation can replace the host fallback.
 //
 // The host applyCPUSamplingTruncation chain (heap/sort based) remains the
 // correctness oracle and fallback; this face reproduces its closed contract —
@@ -36,8 +36,8 @@ import (
 )
 
 // ErrNonFiniteLogits refuses a row that cannot yield a valid sample: any
-// weight NaN or ±Inf (the device-family twin of agent.ErrNonFiniteLogits), or
-// a post-truncation mass that is zero or infinite. It is the single closed
+// negative/non-finite weight, or an invalid incoming or surviving mass.
+// It is the device-family counterpart of agent.ErrNonFiniteLogits and the closed
 // refusal of the family; callers fall back to the host CPU chain on it. A
 // refused row is left unmodified.
 var ErrNonFiniteLogits = errors.New("compute: sampling top-k: logits contain NaN or +Inf, or no finite entry")
@@ -80,30 +80,50 @@ func ApplyRepetitionPenalties(logits []float32, frequencyPenalty, presencePenalt
 //     under the (value desc, index asc) total order; otherwise top-k is inert.
 //   - topP in (0,1) keeps the smallest prefix of that total order whose mass
 //     reaches topP times the post-top-k mass; rank 0 is always kept.
-//   - A row holding any NaN or ±Inf weight, or whose post-truncation mass is
-//     zero or infinite, is refused with ErrNonFiniteLogits and left unmodified.
+//   - Negative or non-finite weights, empty support, and non-positive or
+//     non-finite incoming/surviving mass are refused with ErrNonFiniteLogits.
+//     Refusal preserves every input bit, even when a finite row overflows
+//     during a later accumulation. A successful truncation commits in place.
 func DeviceSamplingTruncation(probs []float64, sum, topP float64, topK int) (float64, error) {
 	n := len(probs)
-	if n == 0 {
+	if n == 0 || !(sum > 0) || math.IsInf(sum, 0) {
 		return 0, ErrNonFiniteLogits
 	}
-	keys := make([]uint64, n)
-	for i, p := range probs {
-		if math.IsNaN(p) || math.IsInf(p, 0) {
+	positive := false
+	for _, p := range probs {
+		if p < 0 || math.IsNaN(p) || math.IsInf(p, 0) {
 			return 0, ErrNonFiniteLogits
 		}
+		positive = positive || p > 0
+	}
+	if !positive {
+		return 0, ErrNonFiniteLogits
+	}
+	truncateK := topK > 0 && topK < n
+	truncateP := topP > 0 && topP < 1
+	if !truncateK && !truncateP {
+		return sum, nil
+	}
+
+	// Stage only active truncations. The mass is checked after the complete
+	// pipeline, so a later refusal must not expose an earlier in-place mask.
+	// This host oracle is not the served allocation-free sampler or CUDA ABI.
+	staged := append([]float64(nil), probs...)
+	keys := make([]uint64, n)
+	for i, p := range staged {
 		keys[i] = samplingWeightKey(p)
 	}
 	mass := sum
-	if topK > 0 && topK < n {
-		mass = truncateTopKInPlace(probs, keys, topK)
+	if truncateK {
+		mass = truncateTopKInPlace(staged, keys, topK)
 	}
-	if topP > 0 && topP < 1 {
-		mass = nucleusTruncateInPlace(probs, keys, mass, topP)
+	if truncateP {
+		mass = nucleusTruncateInPlace(staged, keys, mass, topP)
 	}
 	if !(mass > 0) || math.IsInf(mass, 0) {
 		return 0, ErrNonFiniteLogits
 	}
+	copy(probs, staged)
 	return mass, nil
 }
 
@@ -137,6 +157,11 @@ func DrawToken(probs []float64, mass, coin float64) int {
 // radix transform). NaN and infinities are out of contract: the face rejects
 // non-finite rows before keying.
 func samplingWeightKey(w float64) uint64 {
+	// IEEE signed zeros compare equal in the host total order. Preserve the
+	// lower token ID tie-break without rewriting a retained input zero.
+	if w == 0 {
+		return samplingZeroKey
+	}
 	b := math.Float64bits(w)
 	if b&(1<<63) != 0 {
 		return ^b
