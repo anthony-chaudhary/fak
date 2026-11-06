@@ -16,6 +16,15 @@ struct fak_graph_once {
   bool quant_tracked[3];
   int quant_count, quant_cursor, quant_error;
   bool quant_prepared;
+  // Optional immutable GDN manifest. POD callbacks keep unprepared dense and
+  // quant-only owners independent of the GDN producer and its test harness.
+  enum { GDN_BEGIN=1, GDN_END=2, GDN_REPLAY=3, GDN_COPY=4 };
+  void *gdn_plan;
+  int gdn_count, gdn_cursor;
+  const void *gdn_quant_plan;
+  int gdn_quant_count;
+  bool (*gdn_check)(fak_graph_once *,int);
+  void (*gdn_retire)(fak_graph_once *);
 };
 static fak_graph_once *g_graph_once_capture = nullptr;
 static bool graph_once_quant_ready(fak_graph_once *s);
@@ -76,6 +85,7 @@ extern "C" int fak_graph_once_begin(void *owner, int pos) {
   if (!s || s->terminal || !s->position || s->graph || s->exec ||
       g_capture_open || g_graph_once_capture || pos < 0 || pos >= s->capacity ||
       v41_candidates_stream_uncertain()) return 1;
+  if (s->gdn_check && !s->gdn_check(s,fak_graph_once::GDN_BEGIN)) { s->terminal = true; return 1; }
   if (!graph_once_quant_idle(s)) { s->terminal = true; return 1; }
   s->quant_cursor = 0;
   int rc = graph_once_set_position(s, pos);
@@ -207,6 +217,7 @@ extern "C" int fak_graph_once_end(void *owner) {
   if (!s || s != g_graph_once_capture || !g_capture_open) return 1;
   // Incomplete/invalid quant recording must close capture but never launch it.
   if (!graph_once_quant_ready(s) || s->quant_cursor != s->quant_count) s->terminal = true;
+  if (s->gdn_check && !s->gdn_check(s,fak_graph_once::GDN_END)) s->terminal = true;
   g_graph_once_capture = nullptr;
   g_capture_open = false;
   cudaError_t e = cudaStreamEndCapture(g_stream, &s->graph);
@@ -218,6 +229,7 @@ extern "C" int fak_graph_once_replay(void *owner, int pos) {
   fak_graph_once *s = (fak_graph_once *)owner;
   if (!s || s->terminal || !s->exec || g_capture_open || g_graph_once_capture ||
       pos != s->next || pos < 0 || pos >= s->capacity || v41_candidates_stream_uncertain()) return 1;
+  if (s->gdn_check && !s->gdn_check(s,fak_graph_once::GDN_REPLAY)) { s->terminal = true; return 1; }
   if (!graph_once_quant_idle(s)) { s->terminal = true; return 1; }
   int rc = graph_once_set_position(s, pos);
   if (rc) return rc;
@@ -241,6 +253,7 @@ extern "C" int fak_graph_once_release(void **owner) {
   }
   int quant_rc = graph_once_quant_retire(s);
   if (quant_rc) return quant_rc;
+  if (s->gdn_retire) s->gdn_retire(s); // graph and exec no longer refer to borrowed GDN data
   if (s->position) {
     if (cudaFree(s->position) != cudaSuccess) { s->terminal = true; return 2; }
     s->position = nullptr;
@@ -256,6 +269,7 @@ extern "C" int fak_graph_once_copy_input(void *owner, void *dst, const void *src
   fak_graph_once *s = (fak_graph_once *)owner;
   if (!s || s->terminal || !s->exec || !dst || !src || !bytes || g_capture_open ||
       v41_candidates_stream_uncertain()) return 1;
+  if (s->gdn_check && !s->gdn_check(s,fak_graph_once::GDN_COPY)) { s->terminal = true; return 1; }
   cudaError_t e;
   FCUDA_TS("d2d_copy", dim3(0, 0), e = cudaMemcpyAsync(dst, src, bytes, cudaMemcpyDeviceToDevice, g_stream));
   return e == cudaSuccess ? 0 : graph_once_fail(s, 3);
@@ -269,4 +283,62 @@ extern "C" int fak_graph_once_abort(void *owner) {
   cudaError_t e = cudaStreamEndCapture(g_stream, &s->graph);
   int drain = graph_once_drain(s);
   return drain ? drain : (e == cudaSuccess ? 0 : 3);
+}
+
+// Graph arena retirement is deliberately physical, not a pool transfer. A zero
+// return certifies the exact allocation was freed; any nonzero return retains
+// the live record and Go root, closes shared admission, and forbids retry. This
+// cold invalidation path cannot lose the subject to a later pool eviction error.
+extern "C" int fak_graph_once_arena_failed(int status) {
+  if (!status) status = (int)cudaErrorInvalidValue;
+  if (!g_cuda_cleanup_status) g_cuda_cleanup_status = status;
+  return g_cuda_cleanup_status;
+}
+extern "C" int fak_graph_once_arena_release_checked(void *expected, size_t bytes, int f32_input) {
+  if (g_cuda_cleanup_status) return g_cuda_cleanup_status;
+  if (!expected || !bytes || (f32_input != 0 && f32_input != 1) ||
+      g_capture_open || g_graph_once_capture || v41_candidates_stream_uncertain() ||
+      kv_snapshot_release_refused(expected))
+    return fak_graph_once_arena_failed((int)cudaErrorNotReady);
+  cudaError_t status = cudaPeekAtLastError();
+  if (status != cudaSuccess) return fak_graph_once_arena_failed((int)status);
+  cudaStreamCaptureStatus capture;
+  status = cudaStreamIsCapturing(g_stream, &capture);
+  if (status != cudaSuccess) return fak_graph_once_arena_failed((int)status);
+  if (capture != cudaStreamCaptureStatusNone)
+    return fak_graph_once_arena_failed((int)cudaErrorNotReady);
+  auto ordinary = g_live.find(expected);
+  auto managed = g_managed_live.find(expected);
+  auto panel = g_panel_live.find(expected);
+  if ((ordinary != g_live.end()) + (managed != g_managed_live.end()) +
+      (panel != g_panel_live.end()) != 1 ||
+      (ordinary != g_live.end() && ordinary->second != bytes) ||
+      (managed != g_managed_live.end() && managed->second != bytes) ||
+      (panel != g_panel_live.end() && (panel->second != bytes || g_panel_live_bytes < bytes)))
+    return fak_graph_once_arena_failed((int)cudaErrorInvalidValue);
+  {
+    fak_alloc_tags_guard guard;
+    auto found = g_alloc_tags.find(expected);
+    if (found == g_alloc_tags.end()) return fak_graph_once_arena_failed((int)cudaErrorInvalidValue);
+    const fak_alloc_tag &tag = found->second;
+    const bool scratch = tag.cls == FAK_ALLOC_ACTIVATIONS_SCRATCH ||
+        tag.cls == FAK_ALLOC_PREFILL_SCRATCH || tag.cls == FAK_ALLOC_ATTENTION_SCRATCH ||
+        tag.cls == FAK_ALLOC_SAMPLING;
+    // The Go adapter proves F32 input identity and no scale side-channel. All
+    // other arena members come from transient allocators, never packed weights.
+    const bool input_weight = f32_input && ordinary != g_live.end() && tag.cls == FAK_ALLOC_WEIGHTS;
+    const int kind = managed != g_managed_live.end() ? FAK_ALLOC_MANAGED : FAK_ALLOC_DEVICE_LOCAL;
+    if (tag.bytes != bytes || tag.kind != kind || (!scratch && !input_weight) ||
+        (panel != g_panel_live.end() && tag.cls != FAK_ALLOC_PREFILL_SCRATCH))
+      return fak_graph_once_arena_failed((int)cudaErrorInvalidValue);
+  }
+  // Caller has already destroyed graph/exec and completed its final checked
+  // drain under cudaMu. No new work, second drain, cache hook or pool allocation.
+  status = cudaFree(expected);
+  if (status != cudaSuccess) return fak_graph_once_arena_failed((int)status);
+  fak_alloc_untrack(expected);
+  if (ordinary != g_live.end()) g_live.erase(ordinary);
+  else if (managed != g_managed_live.end()) g_managed_live.erase(managed);
+  else { g_panel_live_bytes -= bytes; g_panel_live.erase(panel); }
+  return 0;
 }

@@ -47,7 +47,7 @@ static bool graph_gdn_weight(const void *p, const float *scale, int kind,
   return graph_quant_live(p,bytes,weight);
 }
 static bool graph_gdn_preflight(fak_graph_once *s,const fak_graph_gdn_record *r,
-                                 graph_gdn_geometry *g) {
+                                 graph_gdn_geometry *g,int quant_cursor=-1) {
   if (!s || !r || !g || !s->position || r->producer!=FAK_GRAPH_GDN_BASELINE_V1 ||
       (r->register_state!=0 && r->register_state!=1) || r->hidden<=0 ||
       r->hidden>INT_MAX-255 || r->hidden%32 || r->key_heads<=0 || r->value_heads<=0 ||
@@ -88,7 +88,7 @@ static bool graph_gdn_preflight(fak_graph_once *s,const fak_graph_gdn_record *r,
   }
   // Validate BOTH packed projections before recording the first one. Fused Q8
   // is not the activation-quantized Q8 MatMul arm and must not be substituted.
-  int next=s->quant_cursor;
+  int next=quant_cursor<0?s->quant_cursor:quant_cursor;
   for (int i=0;i<2;++i) {
     if (r->kind[i]!=2) { if (r->quant_operation[i]!=-1) return false; continue; }
     if (!s->quant_prepared || !s->quant_ops || next<0 || next>=s->quant_count ||
@@ -101,6 +101,144 @@ static bool graph_gdn_preflight(fak_graph_once *s,const fak_graph_gdn_record *r,
   }
   return true;
 }
+
+// A manifest freezes native descriptor values and allocation extents, not Go
+// object generations or contents. The caller still owns/pins every borrowed
+// weight/state/transient under the live outer execution scope and cudaMu.
+// Exact-address ABA, COW/privacy and arbitrary in-place weight mutation require
+// the future Go dependency bridge. No native allocation map proves those facts.
+struct graph_gdn_dependency {
+  fak_graph_gdn_record record;
+  const void *base[26];
+  size_t extent[26]; // actual complete allocation extent captured at preparation
+};
+static void graph_gdn_bases(const fak_graph_gdn_record &r,const void **base) {
+  for (int i=0;i<5;++i) { base[i]=r.weights[i];base[5+i]=r.scales[i]; }
+  const void *tail[16]={r.input,r.conv_weight,r.a_log,r.dt_bias,r.norm,
+    r.conv_state,r.recurrent_state,r.output,r.mixed,r.z,r.b,r.a,r.conv_out,r.q_norm,r.k_norm,r.core};
+  for (int i=0;i<16;++i) base[10+i]=tail[i];
+}
+static int graph_gdn_quant_start(const fak_graph_gdn_record &r) {
+  for (int i=0;i<2;++i) if (r.kind[i]==2) return r.quant_operation[i];
+  return 0;
+}
+static bool graph_gdn_entry_live(fak_graph_once *s,const graph_gdn_dependency &d) {
+  graph_gdn_geometry geometry;
+  if (!graph_gdn_preflight(s,&d.record,&geometry,graph_gdn_quant_start(d.record))) return false;
+  const void *base[26];graph_gdn_bases(d.record,base);
+  for (int i=0;i<26;++i) {
+    if (base[i]!=d.base[i]) return false;
+    if (!base[i]) { if (d.extent[i]) return false;continue; }
+    auto found=g_live.find((void *)base[i]);
+    if (found==g_live.end() || found->second!=d.extent[i] ||
+        d.extent[i]>UINTPTR_MAX-(uintptr_t)base[i]) return false;
+  }
+  return true;
+}
+static graph_quant_span graph_gdn_extent(const graph_gdn_dependency &d,int i) {
+  uintptr_t lo=(uintptr_t)d.base[i];return {lo,lo+d.extent[i]};
+}
+static bool graph_gdn_manifest_valid(fak_graph_once *s,const graph_gdn_dependency *plan,int count,bool cross) {
+  if (!s || !plan || count<=0 || count>256) return false;
+  int previous_quant=-1;
+  for (int i=0;i<count;++i) {
+    if (!graph_gdn_entry_live(s,plan[i])) return false;
+    for (int q=0;q<2;++q) if (plan[i].record.kind[q]==2) {
+      int operation=plan[i].record.quant_operation[q];
+      if (operation<=previous_quant) return false;
+      previous_quant=operation; // interleaved non-GDN quant operations are legal
+    }
+    if (!cross) continue;
+    // State pairs must be private to their block. Reusing transient storage
+    // across sequential blocks is legal; aliasing any state pair is not.
+    for (int j=0;j<count;++j) {
+      for (int w=15;w<26;++w) {
+        graph_quant_span writable=graph_gdn_extent(plan[i],w);
+        for (int k=0;k<15;++k) {
+          if (k==10) continue; // a previous output may feed a later input
+          if (graph_quant_overlap(writable,graph_gdn_extent(plan[j],k))) return false;
+        }
+      }
+      if (i==j) continue;
+      for (int state=15;state<=16;++state)
+        for (int k=0;k<26;++k)
+          if (graph_quant_overlap(graph_gdn_extent(plan[i],state),graph_gdn_extent(plan[j],k))) return false;
+    }
+    // Include frozen quant operations outside GDN, e.g. FFN/output heads.
+    // None may overwrite private GDN state or immutable GDN weight/constant
+    // storage; no GDN writer may overwrite any frozen quant weight or scale.
+    for (int q=0;q<s->quant_count;++q) {
+      graph_quant_span quant[4];
+      if (!s->quant_ops || !graph_quant_op_spans(((const fak_graph_quant_op *)s->quant_ops)[q],quant)) return false;
+      for (int k=0;k<17;++k) {
+        if (k==10) continue;
+        if (graph_quant_overlap(quant[1],graph_gdn_extent(plan[i],k))) return false;
+      }
+      for (int w=15;w<26;++w)
+        if (graph_quant_overlap(graph_gdn_extent(plan[i],w),quant[2]) ||
+            graph_quant_overlap(graph_gdn_extent(plan[i],w),quant[3])) return false;
+    }
+  }
+  return true;
+}
+static bool graph_gdn_manifest_check(fak_graph_once *s,int phase) {
+  if (!s || s->terminal || !s->gdn_plan || !s->gdn_retire ||
+      phase<fak_graph_once::GDN_BEGIN || phase>fak_graph_once::GDN_COPY ||
+      v41_candidates_stream_uncertain()) return false;
+  if (s->quant_ops!=s->gdn_quant_plan || s->quant_count!=s->gdn_quant_count) return false;
+  if (phase!=fak_graph_once::GDN_BEGIN && s->gdn_cursor!=s->gdn_count) return false;
+  cudaStreamCaptureStatus capture;
+  cudaError_t e=cudaStreamIsCapturing(g_stream,&capture);
+  if (e!=cudaSuccess) { graph_quant_error(s,e,3);return false; }
+  const bool recording=phase==fak_graph_once::GDN_END;
+  if (capture!=(recording?cudaStreamCaptureStatusActive:cudaStreamCaptureStatusNone)) return false;
+  e=cudaPeekAtLastError();
+  if (e!=cudaSuccess) { graph_quant_error(s,e,3);return false; }
+  if (!recording && !graph_once_quant_idle(s)) return false;
+  if (!graph_gdn_manifest_valid(s,(const graph_gdn_dependency *)s->gdn_plan,s->gdn_count,false)) return false;
+  if (phase==fak_graph_once::GDN_BEGIN) s->gdn_cursor=0;
+  return true;
+}
+// Called only after checked drain, graph/exec destruction and quant retirement.
+// Manifest retirement NEVER frees borrowed state, weights or transient buffers.
+static void graph_gdn_manifest_retire(fak_graph_once *s) {
+  free(s->gdn_plan);s->gdn_plan=nullptr;s->gdn_count=s->gdn_cursor=0;
+  s->gdn_quant_plan=nullptr;s->gdn_quant_count=0;
+  s->gdn_check=nullptr;s->gdn_retire=nullptr;
+}
+// host_budget bounds only the immutable host manifest, not device capacity.
+// Prepare once before capture. Caller source descriptors may then go away.
+extern "C" int fak_graph_once_gdn_prepare(void *owner,const fak_graph_gdn_record *records,
+                                         int count,size_t host_budget) {
+  auto *s=(fak_graph_once *)owner;
+  if (!s || s->terminal || !s->position || s->graph || s->exec || s->gdn_plan ||
+      s->gdn_check || s->gdn_retire || g_capture_open || g_graph_once_capture ||
+      v41_candidates_stream_uncertain() || !records || count<=0 || count>256) return 1;
+  if ((size_t)count>host_budget/sizeof(graph_gdn_dependency)) return 2;
+  cudaStreamCaptureStatus capture;
+  cudaError_t e=cudaStreamIsCapturing(g_stream,&capture);
+  if (e!=cudaSuccess) return graph_quant_error(s,e,3);
+  if (capture!=cudaStreamCaptureStatusNone) return 1;
+  e=cudaPeekAtLastError();if (e!=cudaSuccess) return graph_quant_error(s,e,3);
+  if (!graph_once_quant_idle(s)) return 1;
+  auto *plan=(graph_gdn_dependency *)calloc((size_t)count,sizeof(graph_gdn_dependency));
+  if (!plan) return 2; // no submitted work or caller state mutation
+  for (int i=0;i<count;++i) {
+    plan[i].record=records[i];graph_gdn_bases(records[i],plan[i].base);
+    for (int b=0;b<26;++b) {
+      if (!plan[i].base[b]) continue;
+      auto found=g_live.find((void *)plan[i].base[b]);
+      if (found==g_live.end()) { free(plan);return 1; }
+      plan[i].extent[b]=found->second;
+    }
+  }
+  if (!graph_gdn_manifest_valid(s,plan,count,true)) { free(plan);return 1; }
+  s->gdn_plan=plan;s->gdn_count=count;s->gdn_cursor=0;
+  s->gdn_quant_plan=s->quant_ops;s->gdn_quant_count=s->quant_count;
+  s->gdn_check=graph_gdn_manifest_check;s->gdn_retire=graph_gdn_manifest_retire;
+  return 0;
+}
+
 static int graph_gdn_record_status(fak_graph_once *s) {
   cudaError_t e=cudaGetLastError();
   return e==cudaSuccess?0:graph_quant_error(s,e,3);
@@ -112,6 +250,13 @@ static int graph_gdn_record_status(fak_graph_once *s) {
 extern "C" int fak_graph_once_gdn_record(void *owner,const fak_graph_gdn_record *r) {
   fak_graph_once *s=(fak_graph_once *)owner;
   if (!graph_once_capture_admit(s)) return 1;
+  if (s->gdn_plan) {
+    const auto *plan=(const graph_gdn_dependency *)s->gdn_plan;
+    if (s->gdn_cursor<0 || s->gdn_cursor>=s->gdn_count ||
+        r!=&plan[s->gdn_cursor].record || !graph_gdn_entry_live(s,plan[s->gdn_cursor])) {
+      s->terminal=true;return 1;
+    }
+  }
   graph_gdn_geometry g;
   if (v41_candidates_stream_uncertain() || !graph_gdn_preflight(s,r,&g)) { s->terminal=true;return 1; }
   cudaStreamCaptureStatus capture;
@@ -144,6 +289,17 @@ extern "C" int fak_graph_once_gdn_record(void *owner,const fak_graph_gdn_record 
   if (int rc=graph_gdn_record_status(s)) return rc;
   FCUDA_TS("k_qwen35_gdn_out_proj", r->hidden, k_qwen35_gdn_out_proj<<<r->hidden,256,0,g_stream>>>(r->weights[4],r->scales[4],r->kind[4],r->core,r->output,r->hidden,g.value));
   if (int rc=graph_gdn_record_status(s)) return rc;
+  if (s->gdn_plan) ++s->gdn_cursor; // accepted recording only, not completed execution
   return 0; // No fence, operation counter, completion generation or host-state publication.
+}
+// Ordinal entry cannot accept a caller-rebound descriptor or skip a GDN block.
+extern "C" int fak_graph_once_gdn_record_at(void *owner,int operation) {
+  auto *s=(fak_graph_once *)owner;
+  if (!s || !graph_once_capture_admit(s)) return 1;
+  if (!s->gdn_plan || operation!=s->gdn_cursor || operation<0 || operation>=s->gdn_count) {
+    s->terminal=true;return 1;
+  }
+  const auto *plan=(const graph_gdn_dependency *)s->gdn_plan;
+  return fak_graph_once_gdn_record(s,&plan[operation].record);
 }
 #endif

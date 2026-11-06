@@ -4,6 +4,9 @@ package compute
 
 /*
 #include "cuda_backend.h"
+// Qualification-local ABI; not a general arbitrary-pointer free.
+int fak_graph_once_arena_release_checked(void *expected, size_t bytes, int f32_input);
+int fak_graph_once_arena_failed(int status);
 */
 import "C"
 
@@ -35,6 +38,16 @@ func (c *cudaBackend) graphOnceCheck(code C.int) {
 	panic(fmt.Errorf("cuda capture-once failed code=%d; no eager retry", int(code)))
 }
 
+// A weight-class arena member is only the F32 input already checked by Begin.
+// Quantized weights, secondary devices, side channels and residency-budget
+// owners are never silently passed to this dedicated physical retirement seam.
+func graphOnceArenaBufferLegal(b *cudaBuf, input bool) bool {
+	return b != nil && b.ptr != nil && b.n > 0 && b.device == 0 && b.scales == nil && b.scalesN == 0 &&
+		b.budgetedWeightBytes == 0 && !b.managedWeight &&
+		(b.class == MemoryScratchpad || b.class == MemoryActivation || (input && b.class == MemoryWeights && !b.managed)) &&
+		(b.host == 0 || (input && b.hostDt == F32))
+}
+
 func (c *cudaBackend) graphOnceReleaseLocked() {
 	s := c.graphOnce
 	if s == nil {
@@ -46,21 +59,44 @@ func (c *cudaBackend) graphOnceReleaseLocked() {
 	if s.capturing {
 		panic("cuda capture-once release during capture")
 	}
-	c.graphOnceCheck(C.fak_graph_once_release(&s.owner))
-	// Native exec is gone and its final fence succeeded before ANY unpin/free.
+	if err := c.faultLatch.Admit("capture-once-release"); err != nil {
+		panic(err)
+	}
+	// Root the remaining arena in the shared owner even if a caller catches a
+	// cleanup panic. An interrupted/partial release can never resume replay.
+	s.invalidated = true
 	for _, b := range s.buffers {
+		if b != nil && b.ptr == nil && !b.graphOncePinned {
+			continue
+		} // already retired
+		if !graphOnceArenaBufferLegal(b, b == s.input.buf) || !b.graphOncePinned {
+			c.graphOnceCheck(C.fak_graph_once_arena_failed(-75091))
+		}
+	}
+	c.graphOnceCheck(C.fak_graph_once_release(&s.owner))
+	// Native graph, exec, fixed quant scratch and position are gone and the final
+	// fence succeeded. Each arena pointer/root remains pinned until ITS free succeeds.
+	for _, b := range s.buffers {
+		if b.ptr == nil {
+			continue
+		}
+		input := C.int(0)
+		if b == s.input.buf {
+			input = 1
+		}
+		c.graphOnceCheck(C.fak_graph_once_arena_release_checked(b.ptr, C.size_t(b.n), input))
+		b.ptr = nil
 		b.graphOncePinned = false
 		if b.host != 0 {
-			delete(uploadCache, ucKey{b.host, b.hostDt, b.hostLo})
-		}
-		if b.ptr != nil {
-			C.fcuda_free(b.ptr)
-			b.ptr = nil
+			key := ucKey{b.host, b.hostDt, b.hostLo}
+			if cached, ok := uploadCache[key]; ok && cached.buf == b {
+				delete(uploadCache, key)
+			}
 		}
 		b.hostKeep = nil
 	}
 	c.graphOnce = nil
-	cudaGraphOnceOwner = nil // only after checked native release and matching ownership
+	cudaGraphOnceOwner = nil // only after every exact pointer has a successful receipt
 }
 func (c *cudaBackend) GraphOnceInvalidate() {
 	cudaMu.Lock()
@@ -177,7 +213,7 @@ func (c *cudaBackend) GraphOnceBegin(input Tensor, kv KVStore, pos int) bool {
 		}
 	}
 	b := c.cudaBufForSubmit(input)
-	if b.device != 0 || b.managed || b.scales != nil {
+	if b.device != 0 || b.managed || b.scales != nil || !graphOnceArenaBufferLegal(b, true) {
 		return false
 	}
 	if err := c.faultLatch.Admit("capture-once"); err != nil {
