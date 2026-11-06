@@ -245,6 +245,18 @@ void fcuda_hostxfer_reset(void);
 size_t fcuda_h2dxfer_bytes(void);
 void fcuda_h2dxfer_reset(void);
 
+/* Explicit opt-in F32 MTP pre-layer; same private CUDA stream/owner as ordinary
+ * execution. Negative status refuses before producers; positive status closes
+ * the shared stream. Success includes final checked completion. Caller retains
+ * all pointers until success or process teardown. No capture/profile support. */
+int fcuda_qwen35_mtp_admit(const float *prior, const float *embedding,
+    const float *hidden_norm, const float *embedding_norm, const float *fc,
+    int hidden, float eps);
+int fcuda_qwen35_mtp_f32(const float *prior, const float *embedding,
+    const float *hidden_norm, const float *embedding_norm, const float *fc,
+    float *joined, float *out, int hidden, float eps);
+void fcuda_qwen35_mtp_stop(void);
+
 /* Async H2D for compute.AsyncUploader (cuda/async_upload.cuh). fcuda_upload_async stages
  * through a bounded pinned slot pool onto a non-blocking copy stream ordered after g_stream's
  * position at issue: 0 = issued (slot/gen name the fence), 1 = not issued (slot pool exhausted,
