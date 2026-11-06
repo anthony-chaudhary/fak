@@ -199,6 +199,18 @@ func (c Config) expertIntermediate() int {
 	return c.IntermediateSize
 }
 
+// ScratchFFNWidth is the per-token FFN width transient-scratch estimators price. The dense
+// IntermediateSize wins when declared; an MoE-only width declaration (real DeepSeek-V4
+// checkpoints declare only moe_intermediate_size) falls back to the expert width so the
+// estimate does not degenerate to zero or one row. Unlike expertIntermediate, a declared
+// dense width keeps precedence: it is the conservative (wider) transient.
+func (c Config) ScratchFFNWidth() int {
+	if c.IntermediateSize <= 0 && c.MoEIntermediateSize > 0 {
+		return c.MoEIntermediateSize
+	}
+	return c.IntermediateSize
+}
+
 // routedExpertKQuantActive reports whether mat is backed by a session whose
 // backend explicitly supports resident routed k-quant experts. Such a backend
 // must reach the per-expert loop: the older host-batched GLM shortcut otherwise

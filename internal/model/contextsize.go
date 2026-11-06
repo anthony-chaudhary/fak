@@ -142,7 +142,7 @@ func (c Config) ContextSizeConfigWithPrecision(prec compute.KVPrecision) compute
 		CompressedKV: compressedKV,
 		Scratch: compute.TransformerScratchConfig{
 			HiddenSize:       c.HiddenSize,
-			IntermediateSize: c.IntermediateSize,
+			IntermediateSize: c.ScratchFFNWidth(),
 			VocabSize:        c.VocabSize,
 			NumLayers:        c.NumLayers,
 			NumHeads:         c.NumHeads,

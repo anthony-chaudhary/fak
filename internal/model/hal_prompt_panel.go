@@ -114,16 +114,11 @@ func (s *Session) promptPanelChunkTokens() int {
 		return promptPanelChunkOverride
 	}
 	c := s.M.Cfg
-	ffnWidth := c.IntermediateSize
-	if ffnWidth <= 0 && c.MoEIntermediateSize > 0 {
-		// An MoE-only width declaration (deepseek_v4): price the row's FFN transient at the
-		// expert width instead of letting the incomplete geometry degenerate the chunk to
-		// one row. The live-expert transients are hidden/router-wide, so this over-prices
-		// conservatively; the estimate only ever refuses MORE rows.
-		ffnWidth = c.MoEIntermediateSize
-	}
+	// An MoE-only width declaration (deepseek_v4) prices the row's FFN transient at the
+	// expert width; the live-expert transients are hidden/router-wide, so this over-prices
+	// conservatively and the estimate only ever refuses MORE rows.
 	return compute.PromptPanelChunkTokens(compute.TransformerScratchConfig{
-		HiddenSize: c.HiddenSize, IntermediateSize: ffnWidth, VocabSize: c.VocabSize,
+		HiddenSize: c.HiddenSize, IntermediateSize: c.ScratchFFNWidth(), VocabSize: c.VocabSize,
 		NumLayers: c.NumLayers, NumHeads: c.NumHeads, NumKVHeads: c.NumKVHeads, HeadDim: c.HeadDim,
 		IncludeLogits: true,
 	}, promptPanelMaxTokens)

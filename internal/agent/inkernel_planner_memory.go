@@ -461,12 +461,13 @@ func (p *InKernelPlanner) cudaDequantScratchDemand(promptTokens int) compute.Mem
 		return nil
 	}
 	cfg := p.m.Cfg
-	if cfg.HiddenSize <= 0 || cfg.IntermediateSize <= 0 || cfg.NumHeads <= 0 || cfg.NumKVHeads <= 0 || cfg.HeadDim <= 0 {
+	ffnWidth := cfg.ScratchFFNWidth()
+	if cfg.HiddenSize <= 0 || ffnWidth <= 0 || cfg.NumHeads <= 0 || cfg.NumKVHeads <= 0 || cfg.HeadDim <= 0 {
 		return nil
 	}
 	return compute.DequantScratchDemand(compute.TransformerScratchConfig{
 		HiddenSize:       cfg.HiddenSize,
-		IntermediateSize: cfg.IntermediateSize,
+		IntermediateSize: ffnWidth,
 		NumHeads:         cfg.NumHeads,
 		NumKVHeads:       cfg.NumKVHeads,
 		HeadDim:          cfg.HeadDim,
