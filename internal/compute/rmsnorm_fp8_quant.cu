@@ -55,13 +55,13 @@ union RfqBits {
   uint32_t u;
 };
 
-static inline uint32_t rfq_float_bits(float x) {
+static __device__ __forceinline__ uint32_t rfq_float_bits(float x) {
   RfqBits b;
   b.f = x;
   return b.u;
 }
 
-static inline float rfq_bits_float(uint32_t u) {
+static __device__ __forceinline__ float rfq_bits_float(uint32_t u) {
   RfqBits b;
   b.u = u;
   return b.f;
@@ -123,9 +123,13 @@ __global__ void k_rfq_rmsnorm_fp8_quant(
       const float v = __ldg(xr + i);
       sumsq = __fadd_rn(sumsq, __fmul_rn(v, v));
     }
+    uint8_t *orow = out + row * width;
+    if (sumsq == 0.0f) {
+      for (int32_t i = 0; i < width; ++i) orow[i] = 0;
+      continue;
+    }
     const float denom = __fadd_rn(__fdiv_rn(sumsq, (float)width), epsilon);
     const float inv = __fdiv_rn(1.0f, sqrtf(denom));
-    uint8_t *orow = out + row * width;
     for (int32_t i = 0; i < width; ++i) {
       const float n = __fmul_rn(__fmul_rn(__ldg(xr + i), inv), __ldg(weight + i));
       orow[i] = rfq_e4m3_encode(__fmul_rn(n, scale_inv));
@@ -150,18 +154,22 @@ __global__ void k_rfq_fused_add_rmsnorm_fp8_quant(
   for (int64_t row = (int64_t)blockIdx.x * blockDim.x + threadIdx.x; row < rows; row += stride) {
     const float *xr = x + row * width;
     const float *rr = residual + row * width;
-    float *or = out_residual + row * width;
+    float *residual_row = out_residual + row * width;
     float sumsq = 0.0f;
     for (int32_t i = 0; i < width; ++i) {
       const float s = __fadd_rn(__ldg(xr + i), __ldg(rr + i));
-      or[i] = s;
+      residual_row[i] = s;
       sumsq = __fadd_rn(sumsq, __fmul_rn(s, s));
+    }
+    uint8_t *orow = out + row * width;
+    if (sumsq == 0.0f) {
+      for (int32_t i = 0; i < width; ++i) orow[i] = 0;
+      continue;
     }
     const float denom = __fadd_rn(__fdiv_rn(sumsq, (float)width), epsilon);
     const float inv = __fdiv_rn(1.0f, sqrtf(denom));
-    uint8_t *orow = out + row * width;
     for (int32_t i = 0; i < width; ++i) {
-      const float n = __fmul_rn(__fmul_rn(or[i], inv), __ldg(weight + i));
+      const float n = __fmul_rn(__fmul_rn(residual_row[i], inv), __ldg(weight + i));
       orow[i] = rfq_e4m3_encode(__fmul_rn(n, scale_inv));
     }
   }
@@ -185,9 +193,10 @@ static bool rfq_geometry(int32_t rows, int32_t width, bool fused, rfq_geom *g) {
 }
 
 // rfq_params admits the static scale and epsilon: finite, scale strictly
-// positive, epsilon non-negative.
+// positive with a finite reciprocal, epsilon non-negative.
 static bool rfq_params(float scale, float epsilon) {
-  return std::isfinite(scale) && scale > 0.0f && std::isfinite(epsilon) && epsilon >= 0.0f;
+  return std::isfinite(scale) && scale > 0.0f && std::isfinite(1.0f / scale) &&
+         std::isfinite(epsilon) && epsilon >= 0.0f;
 }
 
 static size_t g_rfq_launches = 0;
@@ -225,7 +234,7 @@ extern "C" int fcuda_rmsnorm_fp8_quant(
   if ((e = cudaMemcpy(dW, weight, g.weight, cudaMemcpyHostToDevice)) != cudaSuccess) { status = (int)e; goto done; }
   g_h2d_bytes += g.weight;
   {
-    unsigned int grid = (unsigned int)((rows + RFQ_THREADS - 1) / RFQ_THREADS);
+    unsigned int grid = (unsigned int)(((int64_t)rows + RFQ_THREADS - 1) / RFQ_THREADS);
     if (grid > RFQ_MAX_BLOCKS) grid = RFQ_MAX_BLOCKS;
     FCUDA_TS("k_rfq_rmsnorm_fp8_quant", grid,
              k_rfq_rmsnorm_fp8_quant<<<grid, RFQ_THREADS, 0, g_stream>>>(
@@ -284,7 +293,7 @@ extern "C" int fcuda_rmsnorm_fp8_quant_fused_add(
   if ((e = cudaMemcpy(dW, weight, g.weight, cudaMemcpyHostToDevice)) != cudaSuccess) { status = (int)e; goto done; }
   g_h2d_bytes += g.weight;
   {
-    unsigned int grid = (unsigned int)((rows + RFQ_THREADS - 1) / RFQ_THREADS);
+    unsigned int grid = (unsigned int)(((int64_t)rows + RFQ_THREADS - 1) / RFQ_THREADS);
     if (grid > RFQ_MAX_BLOCKS) grid = RFQ_MAX_BLOCKS;
     FCUDA_TS("k_rfq_fused_add_rmsnorm_fp8_quant", grid,
              k_rfq_fused_add_rmsnorm_fp8_quant<<<grid, RFQ_THREADS, 0, g_stream>>>(

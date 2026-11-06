@@ -39,7 +39,9 @@
 // squared sum) is refused on the host with ErrRmsNormFp8ZeroVariance instead
 // of silently emitting an all-zero code row. The device twin keeps the
 // graceful all-zero-code fallback so a bad row mid-batch cannot abort the
-// forward pass. Library + oracle only: no serving path changes until an FP8
+// forward pass. The host also refuses non-finite arithmetic intermediates;
+// device execution outside that admitted domain remains unqualified.
+// Library + oracle only: no serving path changes until an FP8
 // activation consumer exists. No GPU or throughput claim.
 
 package compute
@@ -56,12 +58,12 @@ var (
 	ErrRmsNormFp8Geometry = errors.New("compute: rmsnorm fp8 quant: geometry refused")
 
 	// ErrRmsNormFp8Params is the closed refusal for a non-finite or out-of-range
-	// static scale or epsilon.
+	// static scale, its reciprocal, or epsilon.
 	ErrRmsNormFp8Params = errors.New("compute: rmsnorm fp8 quant: invalid scale or epsilon")
 
 	// ErrRmsNormFp8NonFinite is the closed refusal for a NaN or infinite value in
-	// x, residual or weight before any quantization, so a non-finite can never
-	// become a plausible byte code.
+	// x, residual, weight or arithmetic intermediates before quantization, so
+	// a non-finite can never become a plausible byte code.
 	ErrRmsNormFp8NonFinite = errors.New("compute: rmsnorm fp8 quant: non-finite value")
 
 	// ErrRmsNormFp8ZeroVariance is the closed refusal for a row whose f32
@@ -78,7 +80,7 @@ type RmsNormFp8QuantArgs struct {
 	// Residual is an optional [rows][width] f32 residual stream; nil selects
 	// the plain variant, non-nil the fused add-first variant.
 	Residual []float32
-	// Scale is the static per-tensor FP8 scale (finite, > 0).
+	// Scale is the static per-tensor FP8 scale (finite, > 0, finite reciprocal).
 	Scale float32
 	// Epsilon is the RMSNorm stabilizer added to the mean square (finite, >= 0).
 	Epsilon float32
@@ -105,8 +107,7 @@ func rfqValidate(args RmsNormFp8QuantArgs) (rows, width int, err error) {
 		return 0, 0, fmt.Errorf("%w: x length %d is not a positive multiple of width %d",
 			ErrRmsNormFp8Geometry, len(args.X), width)
 	}
-	const maxInt32 = int32(1<<31 - 1)
-	if rows > int(maxInt32) || width > int(maxInt32) {
+	if !rfqGeometryOK(rows, width) {
 		return 0, 0, fmt.Errorf("%w: rows=%d width=%d overflow the int32 ABI",
 			ErrRmsNormFp8Geometry, rows, width)
 	}
@@ -136,10 +137,17 @@ func rfqValidate(args RmsNormFp8QuantArgs) (rows, width int, err error) {
 	return rows, width, nil
 }
 
+// rfqGeometryOK matches the CUDA total-element limit without multiplying ints.
+func rfqGeometryOK(rows, width int) bool {
+	const maxInt32 = int(1<<31 - 1)
+	return rows > 0 && width > 0 && width <= maxInt32 && rows <= maxInt32/width
+}
+
 // rfqParamOK admits the static scale and epsilon: finite, scale strictly
-// positive, epsilon non-negative.
+// positive with a finite reciprocal, epsilon non-negative.
 func rfqParamOK(scale, epsilon float32) bool {
 	return scale > 0 && math.Float32bits(scale)&0x7f800000 != 0x7f800000 &&
+		!rfqNonFinite(1.0/scale) &&
 		epsilon >= 0 && math.Float32bits(epsilon)&0x7f800000 != 0x7f800000
 }
 
@@ -230,18 +238,34 @@ func RmsNormFp8Quant(args RmsNormFp8QuantArgs) (*RmsNormFp8QuantResult, error) {
 				sumsq += v * v
 			}
 		}
+		if rfqNonFinite(sumsq) {
+			return nil, fmt.Errorf("%w: sum of squares at row %d", ErrRmsNormFp8NonFinite, r)
+		}
 		if sumsq == 0 {
 			return nil, fmt.Errorf("%w: row %d", ErrRmsNormFp8ZeroVariance, r)
 		}
 		denom := sumsq/float32(width) + args.Epsilon
+		if rfqNonFinite(denom) {
+			return nil, fmt.Errorf("%w: denominator at row %d", ErrRmsNormFp8NonFinite, r)
+		}
 		inv := 1.0 / float32(math.Sqrt(float64(denom)))
+		if rfqNonFinite(inv) {
+			return nil, fmt.Errorf("%w: reciprocal RMS at row %d", ErrRmsNormFp8NonFinite, r)
+		}
 		src := args.X
 		if fused {
 			src = resOut
 		}
 		for i := 0; i < width; i++ {
 			n := src[base+i] * inv * args.Weight[i]
-			codes[base+i] = rfqEncodeE4M3(n * scaleInv)
+			if rfqNonFinite(n) {
+				return nil, fmt.Errorf("%w: normalization at row %d column %d", ErrRmsNormFp8NonFinite, r, i)
+			}
+			q := n * scaleInv
+			if rfqNonFinite(q) {
+				return nil, fmt.Errorf("%w: scaling at row %d column %d", ErrRmsNormFp8NonFinite, r, i)
+			}
+			codes[base+i] = rfqEncodeE4M3(q)
 		}
 	}
 	return &RmsNormFp8QuantResult{Codes: codes, ResidualOut: resOut}, nil

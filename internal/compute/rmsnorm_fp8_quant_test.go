@@ -2,13 +2,16 @@ package compute
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fak-test:runtime fast est=5ms lane=default
@@ -270,6 +273,125 @@ func TestRmsNormFp8QuantMatchesOracle(t *testing.T) {
 			t.Error("rmsnorm_fp8_quant.cu lacks the upstream vLLM pin citation")
 		}
 	})
+}
+
+// fak-test:runtime fast est=5ms lane=default
+func TestRmsNormFp8QuantArithmeticClosure(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		args RmsNormFp8QuantArgs
+		want error
+	}{
+		{"scale_reciprocal", RmsNormFp8QuantArgs{X: []float32{0, 1}, Weight: []float32{1, 1}, Scale: math.SmallestNonzeroFloat32}, ErrRmsNormFp8Params},
+		{"sum_of_squares", RmsNormFp8QuantArgs{X: []float32{math.MaxFloat32}, Weight: []float32{1}, Scale: 1}, ErrRmsNormFp8NonFinite},
+		{"residual_add", RmsNormFp8QuantArgs{X: []float32{math.MaxFloat32}, Residual: []float32{math.MaxFloat32}, Weight: []float32{1}, Scale: 1}, ErrRmsNormFp8NonFinite},
+		{"denominator", RmsNormFp8QuantArgs{X: []float32{1.3e19}, Weight: []float32{1}, Scale: 1, Epsilon: math.MaxFloat32}, ErrRmsNormFp8NonFinite},
+		{"reciprocal_rms", RmsNormFp8QuantArgs{X: []float32{float32(math.Ldexp(1, -74)), 0, 0, 0}, Weight: []float32{1, 1, 1, 1}, Scale: 1}, ErrRmsNormFp8NonFinite},
+		{"normalization", RmsNormFp8QuantArgs{X: []float32{2, 0}, Weight: []float32{math.MaxFloat32, 1}, Scale: 1}, ErrRmsNormFp8NonFinite},
+		{"scaled_value", RmsNormFp8QuantArgs{X: []float32{1}, Weight: []float32{math.MaxFloat32}, Scale: 0.5}, ErrRmsNormFp8NonFinite},
+		{"late_row", RmsNormFp8QuantArgs{X: []float32{1, math.MaxFloat32}, Weight: []float32{1}, Scale: 1}, ErrRmsNormFp8NonFinite},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := RmsNormFp8Quant(tc.args)
+			if !errors.Is(err, tc.want) || got != nil {
+				t.Fatalf("got result=%+v err=%v; want nil result and %v", got, err, tc.want)
+			}
+		})
+	}
+	t.Run("finite_saturation_preserved", func(t *testing.T) {
+		got, err := RmsNormFp8Quant(RmsNormFp8QuantArgs{
+			X: []float32{1, -1}, Weight: []float32{500, 500}, Scale: 1,
+		})
+		if err != nil || got == nil || !bytes.Equal(got.Codes, []byte{0x7E, 0xFE}) {
+			t.Fatalf("finite saturation: result=%+v err=%v", got, err)
+		}
+	})
+	t.Run("device_geometry_without_allocation", func(t *testing.T) {
+		const maxInt32 = int(1<<31 - 1)
+		for _, tc := range []struct {
+			rows, width int
+			want        bool
+		}{{1, maxInt32, true}, {maxInt32, 1, true}, {32768, 65536, false}, {32767, 65536, true}, {0, 1, false}, {1, 0, false}} {
+			if got := rfqGeometryOK(tc.rows, tc.width); got != tc.want {
+				t.Errorf("geometry(%d,%d)=%v, want %v", tc.rows, tc.width, got, tc.want)
+			}
+		}
+	})
+}
+
+// fak-test:runtime medium est=1s lane=default
+// This compiles and executes the actual kernel bodies with one-thread host
+// scheduling/intrinsic shims. It is a C++ syntax and arithmetic witness, not
+// CUDA compilation, device execution, or a GPU precision qualification.
+func TestRmsNormFp8KernelHostContract(t *testing.T) {
+	t.Parallel()
+	cxx, err := exec.LookPath("c++")
+	if err != nil {
+		t.Skip("host C++ compiler unavailable; kernel host witness not executed")
+	}
+	cu, err := os.ReadFile("rmsnorm_fp8_quant.cu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	end := bytes.Index(cu, []byte("// rfq_geom is the validated byte geometry"))
+	if end < 0 {
+		t.Fatal("kernel body boundary not found")
+	}
+	const prelude = `
+#include <cmath>
+#include <cstdint>
+#define __device__
+#define __global__
+#define __forceinline__ inline
+struct host_dim { unsigned x; };
+static const host_dim blockIdx{0}, threadIdx{0}, blockDim{1}, gridDim{1};
+template<typename T> static T __ldg(const T *p) { return *p; }
+static float __fadd_rn(float a, float b) { volatile float r = a + b; return r; }
+static float __fmul_rn(float a, float b) { volatile float r = a * b; return r; }
+static float __fdiv_rn(float a, float b) { volatile float r = a / b; return r; }
+`
+	const witness = `
+int main() {
+  const float weight[] = {1.0f, 0.5f, -1.0f, 2.0f};
+  const float x[] = {1.0f, 1.0f, 1.0f, 1.0f};
+  uint8_t codes[4] = {};
+  k_rfq_rmsnorm_fp8_quant(x, weight, codes, 2.0f, 0.0f, 1, 4);
+  const uint8_t expected[] = {0x40, 0x38, 0xC0, 0x48};
+  for (int i = 0; i < 4; ++i) if (codes[i] != expected[i]) return 1;
+  const float zero[] = {0.0f, -0.0f, 0.0f, -0.0f};
+  k_rfq_rmsnorm_fp8_quant(zero, weight, codes, 2.0f, 0.0f, 1, 4);
+  for (int i = 0; i < 4; ++i) if (codes[i] != 0) return 2;
+  const float fused_x[] = {1, 1, 1, 1, 1, 1, 1, 1};
+  const float residual[] = {-1, -1, -1, -1, 1, 1, 1, 1};
+  uint8_t fused_codes[8];
+  float residual_out[8];
+  for (int i = 0; i < 8; ++i) { fused_codes[i] = 0xA5; residual_out[i] = 123.0f; }
+  k_rfq_fused_add_rmsnorm_fp8_quant(fused_x, residual, weight, residual_out,
+                                 fused_codes, 2.0f, 0.0f, 2, 4);
+  for (int i = 0; i < 4; ++i) {
+    if (fused_codes[i] != 0 || residual_out[i] != 0.0f) return 3;
+    if (fused_codes[i + 4] != expected[i] || residual_out[i + 4] != 2.0f) return 4;
+  }
+  return 0;
+}
+`
+	dir := t.TempDir()
+	source := filepath.Join(dir, "rmsnorm_fp8_host.cpp")
+	binary := filepath.Join(dir, "rmsnorm_fp8_host.exe")
+	if err := os.WriteFile(source, []byte(prelude+string(cu[:end])+witness), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	compile := exec.CommandContext(ctx, cxx, "-std=c++17", "-O0", "-ffp-contract=off", "-fno-fast-math", source, "-o", binary)
+	if output, err := compile.CombinedOutput(); err != nil {
+		t.Fatalf("kernel host compile: %v\n%s", err, output)
+	}
+	if output, err := exec.CommandContext(ctx, binary).CombinedOutput(); err != nil {
+		t.Fatalf("kernel host execution: %v\n%s", err, output)
+	}
 }
 
 // rfqErr runs RmsNormFp8Quant and returns only the error, for the closed
