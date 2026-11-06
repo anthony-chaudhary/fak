@@ -16,27 +16,28 @@ import (
 )
 
 // This operation owns preparation and all paged sequence mutations under the
-// existing cudaMu/ForwardExecutionOwner. It is not a graph or batch capability.
+// existing cudaMu/ForwardExecutionOwner, including eager independent batch lanes.
+// It is not a graph capability.
 // Retained operations are rooted before any native allocation/submission.
 type cudaQwen35PagedSequence struct {
-	c                                                *cudaBackend
-	k                                                *cudaPagedKV
-	start, tokens, end, width                        int
-	table                                            []int32
-	positions                                        []int
-	frontiers                                        []int
-	blocks                                           pagedKVBlocks
-	planes                                           [3][]unsafe.Pointer
-	capacity                                         int
-	tableBuf                                         *cudaBuf
-	gatherBuf                                        *cudaBuf
-	fresh                                            []*cudaBuf
-	old                                              []cudaQwen35PagedRetirement
-	tablePin                                         runtime.Pinner
-	pinned                                           bool
-	started, prepared, executing, drained, completed bool
-	failure                                          error
-	next                                             *cudaQwen35PagedSequence
+	c                                                         *cudaBackend
+	k                                                         *cudaPagedKV
+	start, tokens, end, width                                 int
+	table                                                     []int32
+	positions                                                 []int
+	frontiers                                                 []int
+	blocks                                                    pagedKVBlocks
+	planes                                                    [3][]unsafe.Pointer
+	capacity                                                  int
+	tableBuf                                                  *cudaBuf
+	gatherBuf                                                 *cudaBuf
+	fresh                                                     []*cudaBuf
+	old                                                       []cudaQwen35PagedRetirement
+	tablePin                                                  runtime.Pinner
+	pinned                                                    bool
+	started, prepared, executing, drained, retired, completed bool
+	failure                                                   error
+	next                                                      *cudaQwen35PagedSequence
 }
 type cudaQwen35PagedRetirement struct {
 	ptr       unsafe.Pointer
@@ -431,7 +432,7 @@ func (p *cudaQwen35PagedSequence) prepareLocked() (err error) {
 }
 
 func (p *cudaQwen35PagedSequence) appendLocked(layer int, kRaw, kRoPE, value Tensor) (err error) {
-	if !p.prepared || p.completed || layer < 0 || layer >= len(p.frontiers) || p.frontiers[layer] != p.start {
+	if !p.prepared || p.retired || p.completed || layer < 0 || layer >= len(p.frontiers) || p.frontiers[layer] != p.start {
 		return p.reject("paged append frontier mismatch")
 	}
 	normal := false
@@ -467,7 +468,13 @@ func (p *cudaQwen35PagedSequence) appendLocked(layer int, kRaw, kRoPE, value Ten
 	return nil
 }
 func (p *cudaQwen35PagedSequence) attentionLocked(q Tensor, layer, heads int, scale float32) (out Tensor, b *cudaBuf, err error) {
-	if !p.prepared || p.completed || layer < 0 || layer >= len(p.frontiers) || p.frontiers[layer] != p.end {
+	return p.attentionIntoLocked(q, layer, heads, scale, Tensor{})
+}
+
+// A supplied output is a borrowed row of the batch's live activation panel.
+// An empty output preserves the single-sequence allocation and gather order.
+func (p *cudaQwen35PagedSequence) attentionIntoLocked(q Tensor, layer, heads int, scale float32, out Tensor) (_ Tensor, b *cudaBuf, err error) {
+	if !p.prepared || p.retired || p.completed || layer < 0 || layer >= len(p.frontiers) || p.frontiers[layer] != p.end {
 		return out, nil, p.reject("paged attention frontier mismatch")
 	}
 	normal := false
@@ -484,6 +491,11 @@ func (p *cudaQwen35PagedSequence) attentionLocked(q Tensor, layer, heads int, sc
 	}
 	if err = p.c.validateQwen35SequenceTensor("paged query", q, false, p.tokens, heads*p.k.cfg.HeadDim); err != nil {
 		return out, nil, err
+	}
+	if out.Buf() != nil {
+		if err = p.c.validateQwen35SequenceTensor("paged output", out, false, p.tokens, heads*p.k.cfg.HeadDim); err != nil {
+			return out, nil, err
+		}
 	}
 	kp := p.gatherBuf.ptr
 	vp := offsetF(kp, p.end*p.width)
@@ -504,9 +516,11 @@ func (p *cudaQwen35PagedSequence) attentionLocked(q Tensor, layer, heads int, sc
 			return out, nil, err
 		}
 	}
-	out, b, err = p.c.qwen35SequenceAllocLocked([]int{p.tokens, heads * p.k.cfg.HeadDim}, "paged-causal-attention")
-	if err != nil {
-		return out, b, err
+	if out.Buf() == nil {
+		out, b, err = p.c.qwen35SequenceAllocLocked([]int{p.tokens, heads * p.k.cfg.HeadDim}, "paged-causal-attention")
+		if err != nil {
+			return out, b, err
+		}
 	}
 	if err = p.statusLocked("paged-attention-admission", 0); err != nil {
 		return out, b, err
@@ -519,7 +533,17 @@ func (p *cudaQwen35PagedSequence) attentionLocked(q Tensor, layer, heads int, sc
 	return out, b, nil
 }
 func (p *cudaQwen35PagedSequence) completeLocked() error {
-	if !p.prepared || p.completed || !p.drained || p.executing {
+	if err := p.retireLocked(); err != nil {
+		return err
+	}
+	p.publishLocked()
+	return nil
+}
+
+// Retire all fallible resources without making the logical sequence reusable.
+// A batch retires every lane before publishing any lane.
+func (p *cudaQwen35PagedSequence) retireLocked() error {
+	if !p.prepared || p.retired || p.completed || !p.drained || p.executing {
 		return p.reject("paged completion repeated, unprepared or not drained")
 	}
 	if err := p.statusLocked("paged-completion", 0); err != nil {
@@ -542,6 +566,13 @@ func (p *cudaQwen35PagedSequence) completeLocked() error {
 	if err := p.statusLocked("paged-gather-retirement", status); err != nil {
 		return err
 	}
+	p.retired = true
+	return nil
+}
+
+// Called only after successful retirement of the complete group under cudaMu.
+// Keep this phase allocation-free and incapable of submitting native work.
+func (p *cudaQwen35PagedSequence) publishLocked() {
 	p.k.lens, p.k.pos = p.frontiers, p.positions
 	p.drained = true
 	p.executing = false
@@ -555,5 +586,4 @@ func (p *cudaQwen35PagedSequence) completeLocked() error {
 	p.next = nil
 	p.fresh = nil
 	p.old = nil
-	return nil
 }
