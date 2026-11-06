@@ -95,31 +95,32 @@ type validateWSLProbeAttempt struct {
 }
 
 type validateResult struct {
-	TestEvents       *validateTestWitness `json:"test_events,omitempty"`
-	retainTestEvents bool
-	Schema           string                         `json:"schema"`
-	Mode             string                         `json:"mode"`
-	Ref              string                         `json:"ref"`
-	Tip              string                         `json:"tip"`
-	Mine             []string                       `json:"mine"`
-	Tested           []string                       `json:"tested,omitempty"`
-	Runner           string                         `json:"runner,omitempty"`
-	TestRun          string                         `json:"test_run,omitempty"`
-	TestScope        string                         `json:"test_scope,omitempty"`
-	OK               bool                           `json:"ok"`
-	Partial          bool                           `json:"partial"`
-	TimedOut         bool                           `json:"timed_out"`
-	Reason           string                         `json:"reason,omitempty"`
-	TimeoutMS        int64                          `json:"timeout_ms"`
-	ElapsedMS        int64                          `json:"elapsed_ms"`
-	Phases           []validatePhase                `json:"phases"`
-	SkippedPhases    []string                       `json:"skipped_phases"`
-	Overlays         validateOverlayProgress        `json:"overlays"`
-	WSLPreflight     *validateWSLCapabilityVerdict  `json:"wsl_preflight,omitempty"`
-	StrixValidation  *amdgpu.StrixValidationReceipt `json:"strix_validation,omitempty"`
-	StrixReceipt     *hwReceiptAdmission            `json:"strix_receipt_admission,omitempty"`
-	Failures         []ciPreflightFailure           `json:"failures"`
-	SelectionAudit   *validateSelectionAudit        `json:"selection_audit,omitempty"`
+	TestEvents            *validateTestWitness `json:"test_events,omitempty"`
+	retainTestEvents      bool
+	Schema                string                         `json:"schema"`
+	Mode                  string                         `json:"mode"`
+	Ref                   string                         `json:"ref"`
+	Tip                   string                         `json:"tip"`
+	Mine                  []string                       `json:"mine"`
+	Tested                []string                       `json:"tested,omitempty"`
+	Runner                string                         `json:"runner,omitempty"`
+	TestRun               string                         `json:"test_run,omitempty"`
+	TestScope             string                         `json:"test_scope,omitempty"`
+	OK                    bool                           `json:"ok"`
+	Partial               bool                           `json:"partial"`
+	TimedOut              bool                           `json:"timed_out"`
+	Reason                string                         `json:"reason,omitempty"`
+	TimeoutMS             int64                          `json:"timeout_ms"`
+	ElapsedMS             int64                          `json:"elapsed_ms"`
+	Phases                []validatePhase                `json:"phases"`
+	SkippedPhases         []string                       `json:"skipped_phases"`
+	Overlays              validateOverlayProgress        `json:"overlays"`
+	WSLPreflight          *validateWSLCapabilityVerdict  `json:"wsl_preflight,omitempty"`
+	StrixValidation       *amdgpu.StrixValidationReceipt `json:"strix_validation,omitempty"`
+	HardwareQualification *HardwareQualification         `json:"hardware_qualification,omitempty"`
+	StrixReceipt          *hwReceiptAdmission            `json:"strix_receipt_admission,omitempty"`
+	Failures              []ciPreflightFailure           `json:"failures"`
+	SelectionAudit        *validateSelectionAudit        `json:"selection_audit,omitempty"`
 }
 
 type validateSelectionAudit struct {
@@ -237,8 +238,8 @@ func parseValidateFlags(stderr io.Writer, argv []string) (validateOptions, int) 
 	testEvents := fs.Bool("test-events", false, "retain private selected Go JSON test events and exact isolated source binding; requires --json, native GOWORK=off, no audit-selection")
 	auditSelection := fs.Bool("audit-selection", false, "compare affected tests with a full-suite truth run")
 	smoke := fs.Bool("smoke", false, "run real-world binary smoke tests against the freshly compiled fak binary in the isolated checkout")
-	strix := fs.Bool("strix", false, "execute physical device validation on AMD Strix Halo appliance")
-	strixHost := fs.String("strix-host", "", "target hostname for AMD Strix Halo validation (default: strix1)")
+	strix := fs.Bool("strix", false, "explicit physical Strix qualification; requires separately admitted target authority (retired appliances are not capacity)")
+	strixHost := fs.String("strix-host", "", "independently admitted target for explicit Strix qualification")
 	subkernels := fs.String("subkernels", "", "sub-kernel functions to validate on Strix Halo (comma-separated, or 'all')")
 	ablate := fs.String("ablate", "", "ablation arms to evaluate on Strix Halo (comma-separated, or 'all')")
 	strixReceipt := fs.String("strix-receipt", "", "admit a fresh source-bound `fak-dev amd-strix-validate` receipt for this exact prospective tree instead of running hardware in-process (env "+hwReceiptEnv+")")
@@ -456,13 +457,7 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 				return code
 			}
 		}
-		if receiptPath := hwReceiptPath(opts.strixReceipt); receiptPath != "" && shouldRunStrixValidation(opts.strix, paths) {
-			admitHWReceipt(ctx, &res, &recorder, r, receiptPath, paths)
-		} else if shouldRunStrixValidation(opts.strix, paths) {
-			if err := executeStrixValidationPhase(ctx, stdout, stderr, &res, &recorder, r, opts.strix, opts.strixHost, opts.subkernels, opts.ablate, paths); err != nil {
-				res.OK = false
-			}
-		}
+		runValidateHardwarePhase(ctx, stdout, stderr, &res, &recorder, r, opts, paths)
 	}
 	recorder.finish()
 	emitValidateResult(stdout, res, opts.asJSON)
@@ -1358,6 +1353,13 @@ func emitValidateResult(stdout io.Writer, res validateResult, asJSON bool) {
 }
 
 func renderValidate(w io.Writer, res validateResult) {
+	if q := res.HardwareQualification; q != nil {
+		fmt.Fprintf(w, "Hardware qualification: %s", q.Status)
+		if len(q.Backends) > 0 {
+			fmt.Fprintf(w, " (%s)", strings.Join(q.Backends, ", "))
+		}
+		fmt.Fprintf(w, "\n  %s\n", q.Detail)
+	}
 	if res.TimedOut {
 		fmt.Fprintf(w, "PARTIAL: validation timed out after %s during %s\n",
 			time.Duration(res.ElapsedMS)*time.Millisecond, validateTimeoutPhase(res))

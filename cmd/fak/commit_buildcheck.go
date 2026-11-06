@@ -173,7 +173,11 @@ func runCommitBuildCheck(stderr io.Writer, root string, paths []string, timeout 
 	if err != nil {
 		return couldNotRun(err)
 	}
-	defer os.RemoveAll(propDir)
+	defer func() {
+		if propDir != "" {
+			_ = os.RemoveAll(propDir)
+		}
+	}()
 	propPkgs := commitBuildCheckExistingPackages(propDir, pkgs)
 	if len(propPkgs) == 0 {
 		// e.g. the commit deletes the package outright: nothing left to compile.
@@ -181,6 +185,14 @@ func runCommitBuildCheck(stderr io.Writer, root string, paths []string, timeout 
 	}
 	buildDetail, buildOK := goBuildPackages(propDir, propPkgs)
 	if buildOK || commitBuildCheckOnlyUnbuildable(buildDetail) {
+		// The validator materializes its own exact candidate. Release this completed
+		// build's private snapshot first instead of retaining two whole source trees.
+		if err := os.RemoveAll(propDir); err != nil {
+			detail := fmt.Sprintf("release prospective build snapshot before validation: %v", err)
+			fmt.Fprintf(stderr, "fak commit: %s\n", detail)
+			return safecommit.BuildCheckFailed, detail
+		}
+		propDir = "" // relinquished: deferred cleanup must not touch a reused path
 		return commitValidateOwnedPaths(stderr, root, paths, timeout)
 	}
 
@@ -239,7 +251,14 @@ func commitValidateOwnedPaths(stderr io.Writer, root string, paths []string, tim
 		return safecommit.BuildCheckSkippedInfra, detail
 	}
 	if code == 0 && res.OK {
-		return safecommit.BuildCheckPassed, ""
+		// A software pass does not qualify a device. Preserve the validator's
+		// outstanding obligations in both stderr and the commit's build_check.detail.
+		var detail string
+		if hw := res.HardwareQualification; hw != nil {
+			detail = fmt.Sprintf("hardware qualification: %s (%s): %s", hw.Status, strings.Join(hw.Backends, ", "), hw.Detail)
+			fmt.Fprintf(stderr, "fak commit: %s\n", detail)
+		}
+		return safecommit.BuildCheckPassed, detail
 	}
 	detail := formatCommitValidationFailure(res, paths)
 	if res.TimedOut || res.Reason == "TIMEOUT" {

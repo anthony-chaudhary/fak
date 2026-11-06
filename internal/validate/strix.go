@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -18,15 +19,9 @@ import (
 
 const publicFakModulePath = "github.com/anthony-chaudhary/fak"
 
-// automaticStrixValidationEligible limits implicit physical validation to the
-// public runtime module whose source archive contains the compute implementation
-// and shaders. fak-validate is also used against companion repositories; a GPU
-// word in those control-plane paths must not build a public runtime candidate
-// from the companion repository's unrelated Git tree.
-func automaticStrixValidationEligible(root string, mine []string) bool {
-	if !isGPURelatedValidation(mine) {
-		return false
-	}
+// isPublicValidationModule keeps runtime qualification separate from companion
+// control-plane code. A backend name in a factory path does not change a device.
+func isPublicValidationModule(root string) bool {
 	f, err := os.Open(filepath.Join(root, "go.mod"))
 	if err != nil {
 		return false
@@ -247,9 +242,129 @@ var (
 	buildStrixCandidateArchiveFn = amdgpu.BuildStrixCandidateArchive
 )
 
-// shouldRunStrixValidation determines whether Strix Halo validation should run.
-func shouldRunStrixValidation(explicitStrix bool, mine []string) bool {
-	return explicitStrix || isGPURelatedValidation(mine)
+// HardwareQualification records missing evidence, not a physical execution pass.
+// Software validation can finish while these backend-specific obligations remain.
+type HardwareQualification struct {
+	Status   string   `json:"status"`
+	Backends []string `json:"pending_backends"`
+	Detail   string   `json:"detail"`
+}
+
+// hardwareQualificationBackends selects evidence by changed implementation,
+// rather than treating every compute path as an AMD appliance workload. Unknown
+// production compute code remains shared; unmarked Go tests do not ship kernels.
+// The separate, conservative isGPURelatedValidation predicate is retained for
+// stale-receipt interval checks, where narrowing relevance could admit old proof.
+func hardwareQualificationBackends(mine []string) []string {
+	backends := make(map[string]bool)
+	for _, changed := range mine {
+		norm := strings.ReplaceAll(changed, "\\", "/")
+		if strings.HasPrefix(norm, "/") || strings.Contains(norm, ":") || strings.Contains("/"+norm+"/", "/../") {
+			backends["shared"] = true
+			continue
+		}
+		norm = path.Clean(norm)
+		if !isSourcePath(norm) {
+			continue
+		}
+		if isCUDAOnlyComputeValidationPath(norm) {
+			backends["cuda"] = true
+			continue
+		}
+		compute := strings.HasPrefix(norm, "internal/compute/")
+		model := strings.HasPrefix(norm, "internal/model/")
+		amd := strings.HasPrefix(norm, "internal/amdgpu/")
+		if !compute && !model && !amd && !keywordArmApplies(norm) {
+			continue
+		}
+		matched := false
+		// Native device-language extensions retain their backend even when the
+		// filename has no framework prefix; bridge markers can add another one.
+		switch strings.ToLower(path.Ext(norm)) {
+		case ".cu", ".cuh":
+			backends["cuda"], matched = true, true
+		case ".metal":
+			backends["metal"], matched = true, true
+		case ".hip":
+			backends["rocm"], matched = true, true
+		case ".comp", ".spv":
+			backends["amd-vulkan"], matched = true, true
+		}
+		for _, token := range strings.FieldsFunc(strings.ToLower(norm), func(r rune) bool {
+			return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
+		}) {
+			backend := ""
+			switch {
+			case token == "amd64":
+				// amd64 is a CPU ISA, not an AMD device backend.
+			case strings.HasPrefix(token, "cuda"), strings.HasPrefix(token, "gpudirect"):
+				if compute || model {
+					backend = "cuda"
+				}
+			case strings.HasPrefix(token, "metal"):
+				if compute || model || path.Ext(norm) == ".metal" {
+					backend = "metal"
+				}
+			case strings.HasPrefix(token, "hip"), strings.HasPrefix(token, "rocm"):
+				backend = "rocm"
+			case strings.HasPrefix(token, "vulkan"), strings.HasPrefix(token, "strix"), token == "halo", token == "amd", token == "amdgpu", strings.HasPrefix(token, "gfx"):
+				backend = "amd-vulkan"
+			}
+			if backend != "" {
+				backends[backend], matched = true, true
+			}
+		}
+		if amd {
+			backends["amd-vulkan"], matched = true, true
+		}
+		if !matched && ((compute && !strings.HasSuffix(norm, "_test.go")) || strings.HasPrefix(norm, "internal/roofline/") || strings.HasPrefix(norm, "cmd/fak/validate_acceptance")) {
+			backends["shared"] = true
+		}
+	}
+	result := make([]string, 0, len(backends))
+	for backend := range backends {
+		result = append(result, backend)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func recordPendingHardware(res *validateResult, root string, mine []string) {
+	if !isPublicValidationModule(root) {
+		return
+	}
+	backends := hardwareQualificationBackends(mine)
+	if len(backends) == 0 {
+		return
+	}
+	res.HardwareQualification = &HardwareQualification{
+		Status: "PENDING_HARDWARE", Backends: backends,
+		Detail: "Software checks do not qualify physical execution or performance. Strix Halo appliances are retired; use an independently authorized, currently admitted target for the selected backend and return source-bound evidence.",
+	}
+}
+
+func runValidateHardwarePhase(ctx context.Context, stdout, stderr io.Writer, res *validateResult, recorder *validateRecorder, root string, opts validateOptions, mine []string) {
+	recordPendingHardware(res, root, mine)
+	useReceipt := opts.strix || strings.TrimSpace(opts.strixReceipt) != ""
+	if q := res.HardwareQualification; q != nil {
+		for _, backend := range q.Backends {
+			useReceipt = useReceipt || backend == "amd-vulkan" || backend == "shared"
+		}
+	}
+	// An ambient Strix receipt is relevant only to its backend. Explicit
+	// requests remain fail closed even when no changed path selects that backend.
+	if receiptPath := hwReceiptPath(opts.strixReceipt); useReceipt && receiptPath != "" {
+		// Supplying a receipt is an explicit qualification request, even for a
+		// host-only delta. Missing, stale and invalid evidence must fail closed.
+		// Archive binding proves which source was tested, not which kernels
+		// executed. Keep broader qualification pending: argmax or SSD-restart
+		// evidence cannot discharge arbitrary changed GPU operations.
+		admitHWReceipt(ctx, res, recorder, root, receiptPath, mine)
+		return
+	}
+	if err := executeStrixValidationPhase(ctx, stdout, stderr, res, recorder, root, opts.strix, opts.strixHost, opts.subkernels, opts.ablate, mine); err != nil {
+		res.OK = false
+	}
 }
 
 // executeStrixValidationPhase runs physical validation on Strix Halo during fak
@@ -267,8 +382,12 @@ func executeStrixValidationPhase(
 	ablateArg string,
 	mine []string,
 ) error {
-	// Implicit hardware validation applies only to GPU paths in the public runtime module.
-	if !explicitStrix && !automaticStrixValidationEligible(root, mine) {
+	// Runtime paths select qualification obligations, never permission to wake
+	// or dispatch a retired appliance. Explicit requests retain every authority,
+	// candidate-binding and receipt gate below.
+	if !explicitStrix {
+		recordPendingHardware(res, root, mine)
+		recorder.skip("strix_validation", "no implicit hardware dispatch; backend qualification is reported separately")
 		res.SkippedPhases = append(res.SkippedPhases, "strix_validation")
 		return nil
 	}

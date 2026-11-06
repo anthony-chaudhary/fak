@@ -84,7 +84,7 @@ func TestExecuteStrixValidationScopesAutomaticHardwareToPublicModule(t *testing.
 		root     string
 		explicit bool
 	}{
-		{name: "public module invokes automatic hardware", root: publicRoot},
+		{name: "public module explicit hardware remains fail closed", root: publicRoot, explicit: true},
 		{name: "explicit hardware remains fail closed for private module", root: privateRoot, explicit: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -282,11 +282,11 @@ func TestStrixValidationCUDAOnlySkipsBeforeControllerAuthority(t *testing.T) {
 		{name: "automatic CUDA-only scope", mine: cudaOnlyComputeValidationPaths},
 		{name: "automatic host framework scope", mine: []string{"internal/validate/strix.go", "internal/validate/strix_test.go"}},
 		{name: "explicit host framework remains protected", mine: []string{"internal/validate/strix.go"}, explicit: true, wantAuthority: 1},
-		{name: "mixed host framework remains protected", mine: []string{"internal/validate/strix.go", "internal/compute/vulkan.go"}, wantAuthority: 1},
+		{name: "mixed host framework is pending", mine: []string{"internal/validate/strix.go", "internal/compute/vulkan.go"}},
 		{name: "explicit CUDA scope remains protected", mine: []string{"internal/compute/cuda.go"}, explicit: true, wantAuthority: 1},
-		{name: "generic compute remains protected", mine: []string{"internal/compute/backend.go"}, wantAuthority: 1},
-		{name: "Strix scope remains protected", mine: []string{"internal/amdgpu/strixhalo.go"}, wantAuthority: 1},
-		{name: "mixed compute remains protected", mine: []string{"internal/compute/cuda.go", "internal/compute/vulkan.go"}, wantAuthority: 1},
+		{name: "generic compute is pending", mine: []string{"internal/compute/backend.go"}},
+		{name: "Strix scope is pending", mine: []string{"internal/amdgpu/strixhalo.go"}},
+		{name: "mixed compute is pending", mine: []string{"internal/compute/cuda.go", "internal/compute/vulkan.go"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			authorityErr := errors.New("test controller authority unavailable")
