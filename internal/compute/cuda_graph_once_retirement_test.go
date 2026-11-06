@@ -68,6 +68,42 @@ func TestCUDAGraphOnceRetirementContract(t *testing.T) {
 	ordered(methods["GraphOnceBegin"], "input.Dtype != F32", "!graphOnceArenaBufferLegal(b, true)", "C.fcuda_graph_prewarm", "C.fak_graph_once_begin")
 	root := readCUDASource(t, "cuda_kernels.cu")
 	ordered(root, "#include \"cuda/kv_precision.cuh\"", "#include \"cuda/graph_capture_once.cuh\"")
+	state := readCUDASource(t, "cuda_graph_once_state.go")
+	for _, token := range []string{"dependencyInvalidated", "hostKeep", "b.bornGen == d.bornGen", "b.scales == d.scales", "b.be == d.be", "b.graphOncePinned == d.pinned", "d.arenaIndex != i", "len(s.dependencies) != len(s.buffers)+len(s.borrowed)"} {
+		if !strings.Contains(state, token) {
+			t.Fatalf("missing immutable dependency contract %q", token)
+		}
+	}
+	ordered(methods["graphOnceRequireDependenciesLocked"], "s.graphOnceDependenciesValid()", "s.dependencyInvalidated = true", "C.fak_graph_once_arena_failed(-75092)")
+	ordered(methods["GraphOnceSave"], "graphOnceRequireDependenciesLocked()", "s.dependencies[b]", "s.output = output")
+	ordered(methods["GraphOnceEnd"], "graphOnceRequireDependenciesLocked()", "s.capturing = false", "C.fak_graph_once_end")
+	ordered(methods["GraphOnceReplay"], "graphOnceRequireDependenciesLocked()", "C.fak_graph_once_copy_input", "C.fak_graph_once_replay")
+	ordered(methods["graphOnceReleaseLocked"], "graphOnceRequireDependenciesLocked()", "C.fak_graph_once_release", "C.fak_graph_once_arena_release_checked")
+	// Both default and qualification archives export the batch definition. Keep
+	// its declaration in the shared ABI root enrolled by tools/cuda_abi_parity.py,
+	// not a Go-local preamble that the parity collector does not enroll.
+	header := readCUDASource(t, "cuda_backend.h")
+	compact := strings.NewReplacer(" ", "", "\t", "", "\r", "", "\n", "").Replace(header)
+	prototype := "intfcuda_alloc_reservations_match(constvoid*const*pointers,constsize_t*bytes,constuint64_t*ids,intcount);"
+	if strings.Count(compact, prototype) != 1 {
+		t.Fatal("batch reservation ABI must be declared exactly once in the shared header")
+	}
+	preamble, _, ok := strings.Cut(state, "import \"C\"")
+	if !ok || !strings.Contains(preamble, "#include \"cuda_backend.h\"") || strings.Contains(preamble, "fcuda_alloc_reservations_match") {
+		t.Fatal("graph state must obtain the batch ABI from the shared header")
+	}
+	ledger := readCUDASource(t, "cuda/alloc_ledger.h")
+	nativeBatch := cudaFunctionBody(t, ledger, "fcuda_alloc_reservations_match")
+	ordered(nativeBatch, "count <= 0", "SIZE_MAX / sizeof(*pointers)", "fak_alloc_tags_guard guard", "if (!pointers[i] || !bytes[i] || !ids[i])", "tag.reservation != ids[i]", "FAK_ALLOC_IDLE_POOL", "FAK_ALLOC_PINNED_HOST", "return 1;", "#else", "return 0;")
+	if strings.Count(state, "C.fcuda_alloc_reservations_match(") != 1 {
+		t.Fatal("one batch validation call required")
+	}
+	ordered(state, "valid := C.fcuda_alloc_reservations_match(", "runtime.KeepAlive(s)", "return valid")
+	for _, token := range []string{"reservationSlotsMatch", "d.reservationIndex > len(s.reservationPointers)-count", "len(s.reservationPointers) > 2147483647", "len(s.reservationBytes) != len(s.reservationPointers)", "expectedTickets != len(s.reservationPointers)"} {
+		if !strings.Contains(state, token) {
+			t.Fatalf("missing ticket bound %q", token)
+		}
+	}
 	// kv_snapshot_release_refused itself is bound to generic Free's full refusal
 	// inventory by TestCUDAKVSnapshotReleaseSourceContract, not reimplemented here.
 }
@@ -111,7 +147,7 @@ func TestCUDAGraphOnceRetirementHost(t *testing.T) {
 			}
 			args := []string{"-std=c++17", "-O0", cpp, "-o", binary}
 			if selected {
-				args = append([]string{"-DSNAPSHOT_TEST_SELECTED=1"}, args...)
+				args = append([]string{"-DSNAPSHOT_TEST_SELECTED=1", "-DFAK_CUDA_CAPTURE_ONCE_QUALIFICATION=1"}, args...)
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 			cmd := exec.CommandContext(ctx, compiler, args...)
@@ -136,8 +172,15 @@ func TestCUDAGraphOnceRetirementHost(t *testing.T) {
 		}
 		methods := graphOnceRetirementMethods(t)
 		program := graphOnceRetirementGoShim
-		replace := strings.NewReplacer("C.fak_graph_once_arena_release_checked", "fakeArenaRelease", "C.fak_graph_once_arena_failed", "fakeFailed", "C.fak_graph_once_release", "fakeGraphRelease", "C.int", "int", "C.size_t", "uintptr")
-		for _, name := range []string{"graphOnceCheck", "graphOnceArenaBufferLegal", "graphOnceReleaseLocked"} {
+		state := readCUDASource(t, "cuda_graph_once_state.go")
+		start := strings.Index(state, "var cudaGraphOnceOwner *cudaBackend")
+		if start < 0 {
+			t.Fatal("actual graph state declarations missing")
+		}
+
+		replace := strings.NewReplacer("C.fak_graph_once_arena_release_checked", "fakeArenaRelease", "C.fak_graph_once_arena_failed", "fakeFailed", "C.fak_graph_once_release", "fakeGraphRelease", "C.fcuda_alloc_reservation_id", "fakeReservationID", "C.fcuda_alloc_reservations_match", "fakeReservationBatch", "C.uint64_t", "uint64", "C.int", "int", "C.size_t", "uintptr")
+		program += "\n" + replace.Replace(state[start:]) + "\n"
+		for _, name := range []string{"graphOnceCheck", "graphOnceArenaBufferLegal", "graphOnceRequireDependenciesLocked", "graphOnceReleaseLocked"} {
 			if methods[name] == "" {
 				t.Fatalf("missing production method %s", name)
 			}
@@ -179,7 +222,32 @@ static cudaError_t cudaStreamIsCapturing(int,cudaStreamCaptureStatus *out){*out=
 `
 const graphOnceRetirementNativeMain = `
 static void setup(void *p,int type=0){reset();g_graph_once_capture=nullptr;capture_query_status=actual_capture=prior_error=0;own(p,16,type,"transient");}
+
+static void reservation_controls(){
+ int a=0,b=0;void *pointers[2]={&a,&b};size_t bytes[2]={sizeof(a),sizeof(b)};uint64_t ids[2]={1,1};
+ reset();own(&a,sizeof(a),0,"transient");own(&b,sizeof(b),0,"transient");
+#ifdef FAK_CUDA_CAPTURE_ONCE_QUALIFICATION
+ ids[0]=fcuda_alloc_reservation_id(&a,sizeof(a));ids[1]=fcuda_alloc_reservation_id(&b,sizeof(b));
+ require(ids[0]&&ids[1]&&fcuda_alloc_reservations_match(pointers,bytes,ids,2)==1,"actual native batch positive");
+ uint64_t first=ids[1];fak_alloc_retag(&b,FAK_ALLOC_ACTIVATIONS_SCRATCH,FAK_ALLOC_SITE("transient"));
+ require(fcuda_alloc_reservations_match(pointers,bytes,ids,2)==0,"actual native batch missed retag");
+ ids[1]=fcuda_alloc_reservation_id(&b,sizeof(b));require(ids[1]!=first&&fcuda_alloc_reservations_match(pointers,bytes,ids,2)==1,"fresh owner batch positive");
+ require(fak_alloc_untrack(&b),"fake release metadata");fak_alloc_track(&b,FAK_ALLOC_ACTIVATIONS_SCRATCH,FAK_ALLOC_DEVICE_LOCAL,FAK_ALLOC_SITE("transient"),sizeof(b));
+ require(fcuda_alloc_reservations_match(pointers,bytes,ids,2)==0,"actual same-address reuse accepted");ids[1]=fcuda_alloc_reservation_id(&b,sizeof(b));
+ uint64_t saved=ids[1];ids[1]=0;require(fcuda_alloc_reservations_match(pointers,bytes,ids,2)==0,"zero ticket accepted");ids[1]=saved;
+ bytes[1]--;require(fcuda_alloc_reservations_match(pointers,bytes,ids,2)==0,"partial scale extent accepted");bytes[1]++;
+ pointers[1]=(char*)&b+1;require(fcuda_alloc_reservations_match(pointers,bytes,ids,2)==0,"interior base accepted");pointers[1]=&b;
+ fak_alloc_retag(&b,FAK_ALLOC_IDLE_POOL,FAK_ALLOC_SITE("device-pool"));ids[1]=g_alloc_tags[&b].reservation;
+ require(fcuda_alloc_reservations_match(pointers,bytes,ids,2)==0,"idle pool accepted with current generation");
+#else
+ require(fcuda_alloc_reservations_match(pointers,bytes,ids,2)==0,"default batch profile accepted tickets");
+#endif
+ require(fcuda_alloc_reservations_match(nullptr,bytes,ids,2)==0&&fcuda_alloc_reservations_match(pointers,nullptr,ids,2)==0&&fcuda_alloc_reservations_match(pointers,bytes,nullptr,2)==0&&fcuda_alloc_reservations_match(pointers,bytes,ids,0)==0&&fcuda_alloc_reservations_match(pointers,bytes,ids,-1)==0,"malformed array admission");
+ require(frees==0&&syncs==0&&g_cuda_cleanup_status==0,"observational ticket query changed runtime state");
+ reset();
+}
 int main(){
+ reservation_controls();
  int storage[2]={};void *p=&storage[0];
  for(int type=0;type<3;++type){setup(p,type);require(fak_graph_once_arena_release_checked(p,16,0)==0&&frees==1&&g_live.empty()&&g_managed_live.empty()&&g_panel_live.empty()&&g_alloc_tags.empty()&&g_panel_live_bytes==0&&g_pool.empty()&&g_panel_pool.empty()&&syncs==0,"exact physical retirement");}
  for(int mode=0;mode<13;++mode){
@@ -211,38 +279,60 @@ int main(){
 }
 `
 const graphOnceRetirementGoShim = `package main
-import("fmt";"unsafe")
+import("fmt";"runtime";"unsafe")
 type MemoryClass int
 const(MemoryScratchpad MemoryClass=iota;MemoryActivation;MemoryWeights)
 const F32=1
 const DeviceFaultExecution=1
-type cudaBuf struct{ptr unsafe.Pointer;n,device,scalesN int;scales unsafe.Pointer;budgetedWeightBytes int64;managedWeight,managed,graphOncePinned bool;class MemoryClass;host uintptr;hostDt,hostLo int;hostKeep any}
+type cudaBuf struct{be *cudaBackend;bornGen uint64;invalid bool;ptr unsafe.Pointer;n,device,scalesN int;scales unsafe.Pointer;budgetedWeightBytes int64;managedWeight,managed,graphOncePinned bool;class MemoryClass;host uintptr;hostDt,hostLo int;hostKeep any}
+func(b *cudaBuf)invalidForSubmit()bool{return b!=nil&&b.invalid}
 type Tensor struct{buf any}
 type ucKey struct{host uintptr;dt,lo int}
 var uploadCache=map[ucKey]Tensor{}
-type cudaGraphOnceState struct{owner unsafe.Pointer;capturing,invalidated bool;buffers []*cudaBuf;input Tensor}
+type cudaKV struct{}
+type dslice struct{}
+type Dtype = int
+type Layout = int
+type HostBuffer = any
 type latch struct{code int}
 func(l *latch)Observe(_ int,_ string,code int){if l.code==0 {l.code=code}}
 func(l *latch)Admit(_ string)error{if l.code!=0{return fmt.Errorf("stopped %d",l.code)};return nil}
-type cudaBackend struct{graphOnce *cudaGraphOnceState;faultLatch *latch}
-var cudaGraphOnceOwner *cudaBackend
+type cudaBackend struct{graphOnce *cudaGraphOnceState;faultLatch *latch;fenceGen uint64}
+
+type fakeReservation struct{bytes uintptr;id uint64}
+var fakeReservations map[unsafe.Pointer]fakeReservation
+var nextReservation uint64
+var ticketQueries,ticketBatches int
+var ticketSupported bool
+func fakeTrack(p unsafe.Pointer,n uintptr){nextReservation++;fakeReservations[p]=fakeReservation{n,nextReservation}}
+func fakeTrackBuffer(b *cudaBuf){fakeTrack(b.ptr,uintptr(b.n));if b.scales!=nil{fakeTrack(b.scales,uintptr(b.scalesN))}}
+func fakeReservationID(p unsafe.Pointer,n uintptr)uint64{ticketQueries++;r,ok:=fakeReservations[p];if !ticketSupported||!ok||n==0||r.bytes!=n{return 0};return r.id}
+func fakeReservationBatch(p *unsafe.Pointer,n *uintptr,ids *uint64,count int)int{
+ ticketBatches++;if !ticketSupported||count<=0||p==nil||n==nil||ids==nil{return 0}
+ pointers,bytes,want:=unsafe.Slice(p,count),unsafe.Slice(n,count),unsafe.Slice(ids,count)
+ for i,q:=range pointers{got,ok:=fakeReservations[q];if !ok||want[i]==0||got.id!=want[i]||got.bytes!=bytes[i]{return 0}}
+ return 1
+}
 var calls,graphCalls,failAt,graphStatus,stopped int
 func fakeFailed(code int)int{if stopped==0 {if code==0 {code=1};stopped=code};return stopped}
 func fakeGraphRelease(owner *unsafe.Pointer)int{graphCalls++;if graphStatus!=0{return graphStatus};*owner=nil;return 0}
-func fakeArenaRelease(_ unsafe.Pointer,_ uintptr,_ int)int{if stopped!=0{return stopped};calls++;if calls==failAt{return fakeFailed(719)};return 0}
+func fakeArenaRelease(p unsafe.Pointer,_ uintptr,_ int)int{if stopped!=0{return stopped};calls++;if calls==failAt{return fakeFailed(719)};delete(fakeReservations,p);return 0}
 func require(ok bool,why string){if !ok{panic(why)}}
 func caught(f func())(value any){defer func(){value=recover()}();f();return nil}
 func setup()(*cudaBackend,[]*cudaBuf){
+ fakeReservations=map[unsafe.Pointer]fakeReservation{};nextReservation=0;ticketQueries=0;ticketBatches=0;ticketSupported=true
  calls=0;graphCalls=0;failAt=0;graphStatus=0;stopped=0;uploadCache=map[ucKey]Tensor{}
  buffers:=make([]*cudaBuf,3)
- for i:=range buffers {buffers[i]=&cudaBuf{ptr:unsafe.Pointer(new(int)),n:16,class:MemoryScratchpad,graphOncePinned:true,hostKeep:new(int)}}
+ for i:=range buffers {buffers[i]=&cudaBuf{ptr:unsafe.Pointer(new(int)),n:16,class:MemoryScratchpad,hostKeep:new(int)}}
  buffers[0].class=MemoryWeights;buffers[0].host=1;buffers[0].hostDt=F32;uploadCache[ucKey{1,F32,0}]=Tensor{buffers[0]}
- c:=&cudaBackend{graphOnce:&cudaGraphOnceState{owner:unsafe.Pointer(new(int)),buffers:buffers,input:Tensor{buffers[0]}},faultLatch:&latch{}}
- cudaGraphOnceOwner=c;return c,buffers
+ c:=&cudaBackend{graphOnce:&cudaGraphOnceState{owner:unsafe.Pointer(new(int)),capturing:true,input:Tensor{buffers[0]}},faultLatch:&latch{}}
+ cudaGraphOnceOwner=c;for _,b:=range buffers{fakeTrackBuffer(b);c.graphOncePinLocked(b)};c.graphOnce.capturing=false;return c,buffers
 }
 `
 const graphOnceRetirementGoMain = `
 func main(){
+ reservationControls()
+ dependencyControls()
  c,b:=setup();c.graphOnceReleaseLocked();require(c.graphOnce==nil&&cudaGraphOnceOwner==nil&&calls==3&&graphCalls==1&&len(uploadCache)==0,"healthy owner retirement")
  for _,x:=range b{require(x.ptr==nil&&!x.graphOncePinned&&x.hostKeep==nil,"healthy buffer not cleared")}
  for failure:=1;failure<=3;failure++{
@@ -260,5 +350,81 @@ func main(){
  c,b=setup();c.graphOnce.capturing=true;require(caught(c.graphOnceReleaseLocked)!=nil&&calls==0&&graphCalls==0&&b[0].graphOncePinned,"capture cleanup reached native")
  c,b=setup();cudaGraphOnceOwner=&cudaBackend{};require(caught(c.graphOnceReleaseLocked)!=nil&&calls==0&&graphCalls==0,"foreign owner retired")
  c,b=setup();require(graphOnceArenaBufferLegal(b[0],true)&&!graphOnceArenaBufferLegal(b[0],false),"F32 input role lost")
+}
+
+func dependencyControls(){
+ mutations:=[]func(*cudaBuf){
+  func(b *cudaBuf){b.ptr=unsafe.Pointer(new(int))},func(b *cudaBuf){b.n++},func(b *cudaBuf){b.device++},
+  func(b *cudaBuf){b.scales=unsafe.Pointer(new(int));b.scalesN=4},func(b *cudaBuf){b.be=&cudaBackend{}},
+  func(b *cudaBuf){b.bornGen++},func(b *cudaBuf){b.managed=!b.managed},func(b *cudaBuf){b.class=MemoryActivation},
+  func(b *cudaBuf){b.host++},func(b *cudaBuf){b.hostDt++},func(b *cudaBuf){b.hostLo++},
+  func(b *cudaBuf){b.budgetedWeightBytes++},func(b *cudaBuf){b.managedWeight=true},func(b *cudaBuf){b.graphOncePinned=!b.graphOncePinned},func(b *cudaBuf){b.invalid=true},
+ }
+ for _,borrowed:=range []bool{false,true}{for _,mutate:=range mutations{
+  c,owned:=setup();s:=c.graphOnce;b:=owned[1]
+  if borrowed {b=&cudaBuf{ptr:unsafe.Pointer(new(int)),n:16,class:MemoryWeights,hostKeep:new(int)};fakeTrackBuffer(b);s.capturing=true;c.graphOnceObserveLocked(b);s.capturing=false}
+  original:=s.dependencies[b];mutate(b)
+  require(!s.graphOnceDependenciesValid(),"allocation mutation accepted")
+  require(caught(c.graphOnceRequireDependenciesLocked)!=nil&&stopped==-75092&&s.dependencyInvalidated&&s.invalidated&&calls==0&&graphCalls==0,"mutation did not stop before effects")
+  require(s.dependencies[b].ptr==original.ptr&&s.dependencies[b].hostKeep==original.hostKeep&&c.graphOnce==s&&cudaGraphOnceOwner==c,"mutation lost original roots")
+  require(caught(c.graphOnceReleaseLocked)!=nil&&calls==0&&graphCalls==0,"mutation retired a rebound pointer")
+ }}
+ c,b:=setup();s:=c.graphOnce;s.capturing=true
+ borrowed:=&cudaBuf{ptr:unsafe.Pointer(new(int)),n:16,class:MemoryWeights,scales:unsafe.Pointer(new(int)),scalesN:4}
+ fakeTrackBuffer(borrowed);c.graphOnceObserveLocked(borrowed);original:=s.dependencies[borrowed];borrowed.scalesN=8;c.graphOnceObserveLocked(borrowed);borrowed.scalesN=4;c.graphOnceObserveLocked(borrowed)
+ require(s.dependencies[borrowed].scalesN==original.scalesN&&s.dependencyInvalidated&&!s.graphOnceDependenciesValid(),"re-observation laundered changed metadata")
+ c,b=setup();s=c.graphOnce;original=s.dependencies[b[1]];s.capturing=true;b[1].n++;c.graphOnceObserveLocked(b[1]);b[1].n=original.n
+ require(s.dependencyInvalidated&&!s.graphOnceDependenciesValid(),"owned re-observation missed change")
+ c,b=setup();s=c.graphOnce;delete(s.dependencies,b[1]);require(!s.graphOnceDependenciesValid(),"missing receipt accepted")
+ c,b=setup();s=c.graphOnce;s.buffers=append(s.buffers,b[1]);require(!s.graphOnceDependenciesValid(),"duplicate arena entry accepted")
+ c,b=setup();s=c.graphOnce;s.input.buf=b[1];require(!s.graphOnceDependenciesValid(),"input rebound to another arena member")
+ c,b=setup();s=c.graphOnce;s.buffers[1],s.buffers[2]=s.buffers[2],s.buffers[1];require(!s.graphOnceDependenciesValid(),"arena ordinal rebound accepted")
+ c,b=setup();s=c.graphOnce;s.buffers[2]=b[1];require(!s.graphOnceDependenciesValid(),"same-count duplicate arena member accepted")
+ c,b=setup();s=c.graphOnce;s.borrowed=map[*cudaBuf]struct{}{b[1]:{}};require(!s.graphOnceDependenciesValid(),"owned/borrowed role collision accepted")
+ c,b=setup();s=c.graphOnce;root:=s.dependencies[b[1]].hostKeep;b[1].hostKeep=new(int);c.fenceGen++
+ require(s.graphOnceDependenciesValid()&&s.dependencies[b[1]].hostKeep==root,"host root not retained or unrelated completion falsely invalidates receipt")
+ c,b=setup();s=c.graphOnce;s.capturing=true
+ borrowed=&cudaBuf{ptr:unsafe.Pointer(new(int)),n:16,class:MemoryWeights,scales:unsafe.Pointer(new(int)),scalesN:4,be:c,bornGen:7}
+ fakeTrackBuffer(borrowed);c.graphOnceObserveLocked(borrowed);c.graphOnceObserveLocked(borrowed);s.capturing=false;c.fenceGen+=3
+ require(s.graphOnceDependenciesValid(),"unchanged Q8 borrowed receipt rejected")
+}
+
+func addBorrowed(c *cudaBackend,scales bool)*cudaBuf{
+ b:=&cudaBuf{ptr:unsafe.Pointer(new(int)),n:16,class:MemoryWeights,hostKeep:new(int)}
+ if scales{b.scales=unsafe.Pointer(new(int));b.scalesN=4}
+ fakeTrackBuffer(b);s:=c.graphOnce;s.capturing=true;c.graphOnceObserveLocked(b);s.capturing=false;return b
+}
+func reservationControls(){
+ c,_:=setup();s:=c.graphOnce;for i:=0;i<64;i++{addBorrowed(c,i%2==0)}
+ queries,batches:=ticketQueries,ticketBatches
+ require(s.graphOnceDependenciesValid()&&ticketQueries==queries&&ticketBatches==batches+1,"replay validation must use one batch and no reacquisition")
+ for _,scale:=range []bool{false,true}{
+  c,_=setup();s=c.graphOnce;b:=addBorrowed(c,true);original:=s.dependencies[b]
+  p,n:=b.ptr,uintptr(b.n);if scale{p,n=b.scales,uintptr(b.scalesN)}
+  delete(fakeReservations,p);fakeTrack(p,n) // same pointer and full extent, new native owner
+  require(!s.graphOnceDependenciesValid(),"same-address reservation ABA accepted")
+  require(caught(c.graphOnceRequireDependenciesLocked)!=nil&&stopped==-75092&&calls==0&&graphCalls==0,"stale ticket did not stop before effects")
+  require(s.dependencies[b].reservation==original.reservation&&s.dependencies[b].scaleReservation==original.scaleReservation&&s.dependencies[b].hostKeep==original.hostKeep,"stale native ticket silently refreshed")
+ }
+ c,owned:=setup();s=c.graphOnce;fakeTrack(owned[1].ptr,uintptr(owned[1].n))
+ require(caught(c.graphOnceReleaseLocked)!=nil&&calls==0&&graphCalls==0&&owned[1].graphOncePinned,"owned reservation changed before retirement")
+ c,_=setup();s=c.graphOnce;ticketSupported=false;b:=addBorrowed(c,true);ticketSupported=true
+ require(s.dependencies[b].reservation==0&&s.dependencyInvalidated&&!s.graphOnceDependenciesValid(),"zero ticket later promoted after native support changed")
+ c,_=setup();s=c.graphOnce;b=addBorrowed(c,true);fakeReservations[b.scales]=fakeReservation{bytes:8,id:s.dependencies[b].scaleReservation}
+ require(!s.graphOnceDependenciesValid(),"native scale extent drift accepted")
+ for mode:=0;mode<6;mode++{
+  c,owned=setup();s=c.graphOnce;before:=ticketBatches
+  switch mode{
+  case 0:s.reservationIDs=s.reservationIDs[:len(s.reservationIDs)-1]
+  case 1:s.reservationPointers[0]=unsafe.Pointer(new(int))
+  case 2:s.reservationIDs[0]=0
+  case 3:r:=s.dependencies[owned[1]];r.reservationIndex=int(^uint(0)>>1);s.dependencies[owned[1]]=r
+  case 4:s.reservationBytes[0]++
+  case 5:fakeTrack(owned[0].ptr,uintptr(owned[0].n));s.reservationIDs[0]=fakeReservations[owned[0].ptr].id
+  }
+  require(!s.graphOnceDependenciesValid()&&ticketBatches==before,"malformed ticket array crossed cgo or refreshed immutable receipt")
+ }
+ c,_=setup();s=c.graphOnce;ticketSupported=false
+ require(!s.graphOnceDependenciesValid(),"default native profile accepted a saved nonzero ticket")
 }
 `

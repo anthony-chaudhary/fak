@@ -48,6 +48,20 @@ func graphOnceArenaBufferLegal(b *cudaBuf, input bool) bool {
 		(b.host == 0 || (input && b.hostDt == F32))
 }
 
+// Metadata rebinding cannot be repaired by releasing whatever a mutable buffer
+// now points at. Keep the original receipt/root and close shared admission before
+// launch, input copy or retirement. This is not an allocation-ABA detector.
+func (c *cudaBackend) graphOnceRequireDependenciesLocked() {
+	s := c.graphOnce
+	if s == nil || !s.graphOnceDependenciesValid() {
+		if s != nil {
+			s.invalidated = true
+			s.dependencyInvalidated = true
+		}
+		c.graphOnceCheck(C.fak_graph_once_arena_failed(-75092))
+	}
+}
+
 func (c *cudaBackend) graphOnceReleaseLocked() {
 	s := c.graphOnce
 	if s == nil {
@@ -62,6 +76,7 @@ func (c *cudaBackend) graphOnceReleaseLocked() {
 	if err := c.faultLatch.Admit("capture-once-release"); err != nil {
 		panic(err)
 	}
+	c.graphOnceRequireDependenciesLocked()
 	// Root the remaining arena in the shared owner even if a caller catches a
 	// cleanup panic. An interrupted/partial release can never resume replay.
 	s.invalidated = true
@@ -138,7 +153,11 @@ func (c *cudaBackend) GraphOnceReplay(input Tensor, kv KVStore, pos int) (Tensor
 	if s == nil {
 		return Tensor{}, false
 	}
-	if cudaGraphOnceOwner != c || s.invalidated {
+	if cudaGraphOnceOwner != c {
+		panic("cuda capture-once invalid replay owner")
+	}
+	c.graphOnceRequireDependenciesLocked()
+	if s.invalidated {
 		panic("cuda capture-once invalid replay owner")
 	}
 	k, ok := kv.(*cudaKV)
@@ -149,12 +168,6 @@ func (c *cudaBackend) GraphOnceReplay(input Tensor, kv KVStore, pos int) (Tensor
 	}
 	if err := c.faultLatch.Admit("capture-once"); err != nil {
 		panic(err)
-	}
-	for b := range s.borrowed {
-		if b.ptr == nil || b.invalidForSubmit() {
-			c.graphOnceReleaseLocked()
-			panic("cuda capture-once invalid borrowed dependency")
-		}
 	}
 	src := c.cudaBufForSubmit(input)
 	dst := c.cudaBufForSubmit(s.input)
@@ -237,14 +250,12 @@ func (c *cudaBackend) GraphOnceEnd() {
 	if s == nil || !s.capturing {
 		panic("cuda capture-once end without capture")
 	}
-	if cudaGraphOnceOwner != c || s.invalidated {
+	if cudaGraphOnceOwner != c {
 		panic("cuda capture-once invalidated before initial launch")
 	}
-	for b := range s.borrowed {
-		if b.ptr == nil || b.invalidForSubmit() {
-			s.invalidated = true
-			panic("cuda capture-once borrowed dependency lost before initial launch")
-		}
+	c.graphOnceRequireDependenciesLocked()
+	if s.invalidated {
+		panic("cuda capture-once invalidated before initial launch")
 	}
 	s.capturing = false
 	c.capturing = false
@@ -260,9 +271,13 @@ func (c *cudaBackend) GraphOnceSave(output Tensor) {
 	if s == nil || s.capturing || output.Dtype != F32 {
 		panic("cuda capture-once invalid output")
 	}
+	c.graphOnceRequireDependenciesLocked()
 	b := c.cudaBufForSubmit(output)
-	if !b.graphOncePinned {
-		panic("cuda capture-once output outside arena")
+	d, ok := s.dependencies[b]
+	if !ok || !d.pinned || !d.matches(b) {
+		s.invalidated = true
+		s.dependencyInvalidated = true
+		c.graphOnceCheck(C.fak_graph_once_arena_failed(-75092))
 	}
 	s.output = output
 }

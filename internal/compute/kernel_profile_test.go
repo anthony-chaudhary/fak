@@ -1,13 +1,18 @@
 package compute
 
 import (
+	"context"
+	"flag"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func kernelProfileFixture() *KernelProfile {
@@ -1073,3 +1078,140 @@ func TestKernelOpClassGraphOnceNames(t *testing.T) {
 		}
 	}
 }
+
+var cudaProfileRecycleHost = flag.Bool("fak-cuda-profile-recycle-host", false, "run exact Recycle source against host timing-fault ownership controls; no CUDA arithmetic")
+
+func cudaProfileRecycleMethod(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile("cuda.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(data)
+	start := strings.Index(src, "func (c *cudaBackend) Recycle() {")
+	if start < 0 {
+		t.Fatal("Recycle source missing")
+	}
+	end := strings.Index(src[start:], "\n// compactTransientLocked")
+	if end < 0 {
+		t.Fatal("Recycle source boundary missing")
+	}
+	return src[start : start+end]
+}
+
+// fak-test:runtime fast est=10ms lane=default
+func TestCUDAKernelProfileRecycleBoundaryContract(t *testing.T) {
+	body := cudaProfileRecycleMethod(t)
+	boundary := strings.Index(body, "C.fcuda_ts_boundary()")
+	loop := strings.Index(body, "for _, b := range c.transient")
+	if boundary < 0 || loop <= boundary {
+		t.Fatal("missing timing boundary before recycling")
+	}
+	between := body[boundary:loop]
+	if !strings.Contains(between, "if cudaQ56KMMVQReleaseBlocked() {\n\t\t\treturn\n\t\t}") {
+		t.Fatal("timing boundary can detach roots after a newly terminal stream")
+	}
+	if strings.Count(body, "C.fcuda_ts_boundary()") != 1 || strings.Count(body, "cudaQ56KMMVQReleaseBlocked()") != 2 {
+		t.Fatal("unexpected timing/shared-stop control flow")
+	}
+	if strings.Index(body, "C.fcuda_free(b.ptr)") < loop || strings.Index(body, "clear(c.transient)") < loop {
+		t.Fatal("ownership mutation moved before the release loop")
+	}
+}
+
+// Uses the complete unchanged production method. Only external native/owner
+// calls are substituted. This proves Go control/root behavior, not that a void
+// native free always retires or that actual asynchronous CUDA work completed.
+// fak-test:runtime medium est=5s lane=optin
+func TestCUDAKernelProfileRecycleBoundaryHost(t *testing.T) {
+	if !*cudaProfileRecycleHost {
+		t.Skip("requires -fak-cuda-profile-recycle-host; host controls only")
+	}
+	goexe := filepath.Join(runtime.GOROOT(), "bin", "go")
+	if runtime.GOOS == "windows" {
+		goexe += ".exe"
+	}
+	if _, err := os.Stat(goexe); err != nil {
+		t.Fatal("required same-toolchain Go executable unavailable:", err)
+	}
+	path := filepath.Join(t.TempDir(), "main.go")
+	program := cudaProfileRecycleFixture + "\n" + cudaProfileRecycleMethod(t) + "\n" + cudaProfileRecycleMain
+	if err := os.WriteFile(path, []byte(program), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, goexe, "run", path)
+	cmd.Env = append(os.Environ(), "GOWORK=off", "GOTOOLCHAIN=local")
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil || err != nil {
+		t.Fatalf("Recycle host controls failed: %v / %v\n%s", err, ctx.Err(), out)
+	}
+	if !strings.Contains(string(out), "Recycle boundary controls passed: 7") {
+		t.Fatalf("missing complete host control receipt: %s", out)
+	}
+	t.Logf("%s", out)
+}
+
+const cudaProfileRecycleFixture = `package main
+import("fmt";"runtime";"sync";"time";"unsafe")
+type cudaBuf struct{ptr unsafe.Pointer;graphOncePinned bool}
+type cudaBackend struct{transient []*cudaBuf}
+var cudaMu sync.Mutex
+var cudaKernelProfileOn bool
+var terminal,queries,boundaries,frees,dependencies,drains,mode int
+func cudaQ56KMMVQReleaseBlocked()bool{queries++;return terminal!=0}
+func cudaQ4KAsyncReleaseBlockedLocked()bool{return false}
+func cudaV41CompressorDrainLocked(*cudaBackend){drains++}
+func cudaQ4KAsyncRequireDrainLocked(*cudaBackend){drains++}
+func(*cudaBackend)graphOnceFreeDependencyLocked(*cudaBuf){dependencies++}
+var C=struct{fcuda_ts_boundary func();fcuda_free func(unsafe.Pointer)}{
+ func(){boundaries++;switch mode{case 1:terminal=73;case 2:panic("timing panic");case 3:runtime.Goexit()}},
+ func(unsafe.Pointer){frees++;if terminal!=0{return}},
+}
+func require(ok bool,msg string){if !ok{panic(msg)}}
+type outcome struct{returned bool;thrown any}
+func invoke(c *cudaBackend)outcome{
+ done:=make(chan outcome,1)
+ go func(){returned:=false;defer func(){done<-outcome{returned,recover()}}();c.Recycle();returned=true}()
+ select{case r:=<-done:return r;case <-time.After(2*time.Second):panic("Recycle unwind did not finish")}
+}
+`
+
+const cudaProfileRecycleMain = `
+func check(profile bool,which,prior int){
+ terminal,queries,boundaries,frees,dependencies,drains,mode=prior,0,0,0,0,0,which
+ cudaKernelProfileOn=profile
+ backing:=[2]byte{1,2}
+ ordinary:=&cudaBuf{ptr:unsafe.Pointer(&backing[0])}
+ pinned:=&cudaBuf{ptr:unsafe.Pointer(&backing[1]),graphOncePinned:true}
+ empty:=&cudaBuf{}
+ c:=&cudaBackend{transient:[]*cudaBuf{ordinary,pinned,empty}}
+ before:=append([]*cudaBuf(nil),c.transient...)
+ capBefore:=cap(c.transient);baseBefore:=&c.transient[0]
+ r:=invoke(c)
+ require(cudaMu.TryLock(),"mutex stranded by timing fault");cudaMu.Unlock()
+ stopped:=prior!=0 || profile&&which!=0
+ if stopped{
+  require(len(c.transient)==len(before)&&cap(c.transient)==capBefore&&&c.transient[0]==baseBefore,"transient roots/slice changed on stop")
+  for i,b:=range before{require(c.transient[i]==b,"transient owner identity changed")}
+  require(ordinary.ptr==unsafe.Pointer(&backing[0])&&pinned.ptr==unsafe.Pointer(&backing[1])&&empty.ptr==nil,"buffer pointer changed on stop")
+  require(frees==0&&dependencies==0,"native free/dependency release reached after stop")
+ }else{
+  require(len(c.transient)==0&&ordinary.ptr==nil,"healthy transient not recycled")
+  require(pinned.ptr==unsafe.Pointer(&backing[1])&&frees==1&&dependencies==1,"graph-pinned storage freed or wrong free count")
+ }
+ if prior!=0{require(terminal==prior&&boundaries==0&&drains==0,"preexisting failure overwritten or boundary reached")
+ }else if profile{require(boundaries==1&&drains==2,"profile boundary/drain count")}else{require(boundaries==0&&drains==2,"profile-off behavior changed")}
+ if profile&&prior==0&&which==1{require(terminal==73&&queries==2,"new timing failure not rechecked")}
+ if profile&&prior==0&&which==2{require(!r.returned&&r.thrown=="timing panic","panic replaced or swallowed")
+ }else if profile&&prior==0&&which==3{require(!r.returned&&r.thrown==nil,"Goexit replaced or swallowed")
+ }else{require(r.returned&&r.thrown==nil,"normal return contract changed")}
+ runtime.KeepAlive(backing)
+}
+func main(){
+ check(true,1,0);check(true,0,0);check(false,1,0);check(true,1,19);
+ check(true,2,0);check(true,3,0);check(false,0,19)
+ fmt.Println("Recycle boundary controls passed: 7")
+}
+`

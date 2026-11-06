@@ -128,8 +128,17 @@ func TestKVFP8OwnerTransaction(t *testing.T) {
 		if view.Ready() || o.image.positions != 2 {
 			t.Fatal("successful eviction did not invalidate old view")
 		}
-		if err := plan.apply(nil, 1<<30, f.ops(), nil); err == nil {
-			t.Fatal("stale plan reused")
+		allocs, releases := f.allocs, f.releases
+		image, stamp := o.image, o.stamp.Load()
+		stageCalls := 0
+		if err := plan.apply(nil, 1<<30, f.ops(), func(dst, src *kvFP8Image, p *kvFP8EvictionPlan) kvFP8Completion {
+			stageCalls++
+			return kvFP8OwnerComplete(dst, src)
+		}); !errors.Is(err, errKVFP8Owner) {
+			t.Fatal("stale plan reused", err)
+		}
+		if stageCalls != 0 || f.allocs != allocs || f.releases != releases || o.image != image || o.stamp.Load() != stamp {
+			t.Fatal("stale plan refusal happened after effects")
 		}
 		if err := o.free(f.ops()); err != nil || o.allocatedBytes() != 0 {
 			t.Fatal("five-plane free", err)
@@ -298,6 +307,9 @@ func TestKVFP8OwnerTransaction(t *testing.T) {
 				if mode == "panic" && recovered != "cleanup interruption" {
 					t.Fatal("original panic replaced", recovered)
 				}
+				if mode == "Goexit" && recovered != nil {
+					t.Fatal("Goexit replaced by panic", recovered)
+				}
 			}
 		}
 	})
@@ -328,8 +340,11 @@ func TestKVFP8OwnerTransaction(t *testing.T) {
 				t.Fatal(err)
 			}
 			done := make(chan struct{})
+			var recovered any
+			normal := false
 			go func() {
 				defer close(done)
+				defer func() { recovered = recover() }()
 				stop := func(_, _ *kvFP8Image) kvFP8Completion { runtime.Goexit(); return kvFP8Completion{} }
 				switch operation {
 				case "replace":
@@ -341,14 +356,15 @@ func TestKVFP8OwnerTransaction(t *testing.T) {
 					ops.release = func(kvFP8Allocation) kvFP8Retirement { runtime.Goexit(); return kvFP8Retirement{} }
 					_ = o.free(ops)
 				}
+				normal = true
 			}()
 			select {
 			case <-done: // no concurrent metadata inspection or shared root mutation
 			case <-time.After(5 * time.Second):
 				t.Fatal("Goexit lifecycle witness timed out", operation)
 			}
-			if !o.retained || !o.backend.stopped.Load() {
-				t.Fatal("Goexit lost owner", operation)
+			if normal || recovered != nil || !o.retained || !o.backend.stopped.Load() {
+				t.Fatal("Goexit changed control transfer or lost owner", operation, normal, recovered)
 			}
 			if operation == "clone" {
 				destination := false

@@ -124,9 +124,24 @@ static uint64_t g_ts_batches = 0, g_ts_ops = 0, g_ts_truncated = 0, g_ts_untimed
 static double g_ts_gpu_ns = 0, g_ts_wall_ns = 0;
 static std::chrono::steady_clock::time_point g_ts_batch_start;
 
-// A profile call clears only the CUDA last-error it raised itself, never an op's earlier one.
-static void ts_clear_own_error(cudaError_t prior) {
-  if (prior == cudaSuccess && cudaPeekAtLastError() != cudaSuccess) (void)cudaGetLastError();
+// Event APIs may surface an earlier asynchronous execution fault. A clean prior
+// last-error is not proof that a later error belongs to profiling. Preserve the
+// first observed cause before another CUDA call can replace it, without clearing
+// the runtime slot. A failed ring stays quarantined, with all event handles rooted
+// until process teardown. This does not replace each operation's status contract.
+static bool ts_observe_status(cudaError_t prior, cudaError_t status) {
+  const cudaError_t observed = prior != cudaSuccess ? prior :
+      (status != cudaSuccess ? status : cudaPeekAtLastError());
+  if (g_cuda_cleanup_status == 0 && observed != cudaSuccess)
+    g_cuda_cleanup_status = (int)observed;
+  if (g_cuda_cleanup_status == 0) return true;
+  g_ts_usable = false;
+  return false;
+}
+
+static void ts_discard_pending(void) {
+  g_ts_truncated += g_ts_pending.size();
+  g_ts_pending.clear(); // metadata only; g_ts_events retains every native owner
 }
 
 static uint32_t ts_kid(const char *name) {
@@ -146,18 +161,18 @@ static uint64_t ts_key(uint32_t kid, uint32_t gx, uint32_t gy) {
 static void ts_init(void) {
   g_ts_init_tried = true;
   fprintf(stderr, "fak-cuda ts-profile mode=per_launch_event_pairs timing=event_pairs coverage=g_stream_launches graphs=disabled\n");
-  std::vector<cudaEvent_t> events(kTsPairs * 2, nullptr);
-  const cudaError_t prior = cudaPeekAtLastError();
-  for (size_t i = 0; i < events.size(); ++i) {
-    cudaError_t e = cudaEventCreate(&events[i]);
-    if (e != cudaSuccess) {
-      for (size_t j = 0; j < i; ++j) cudaEventDestroy(events[j]);
-      ts_clear_own_error(prior);
-      fprintf(stderr, "fak-cuda ts-profile unavailable: cudaEventCreate failed: %s\n", cudaGetErrorString(e));
+  if (!ts_observe_status(cudaPeekAtLastError(), cudaSuccess)) return;
+  // Attach each handle before the next fallible call. Even a failed create may
+  // publish a handle; do not destroy or lose partial owners on an uncertain path.
+  g_ts_events.assign(kTsPairs * 2, nullptr);
+  for (size_t i = 0; i < g_ts_events.size(); ++i) {
+    const cudaError_t prior = cudaPeekAtLastError();
+    const cudaError_t e = cudaEventCreate(&g_ts_events[i]);
+    if (!ts_observe_status(prior, e)) {
+      fprintf(stderr, "fak-cuda ts-profile unavailable: event initialization failed: %s\n", cudaGetErrorString((cudaError_t)g_cuda_cleanup_status));
       return;
     }
   }
-  g_ts_events.swap(events);
   g_ts_pending.reserve(kTsPairs);
   g_ts_usable = true;
 }
@@ -165,18 +180,37 @@ static void ts_init(void) {
 // ts_drain folds every pending pair after one wait on the newest stop event. A pair whose
 // interval cannot be read counts truncated, so rows and gpu_ns add the same intervals.
 static void ts_drain(void) {
-  if (g_ts_pending.empty() || g_capture_open) return;
-  const cudaError_t prior = cudaPeekAtLastError();
+  if (g_ts_pending.empty() || g_capture_open || !g_ts_usable) return;
+  if (!ts_observe_status(cudaPeekAtLastError(), cudaSuccess)) {
+    ts_discard_pending();
+    return;
+  }
   for (size_t i = g_ts_pending.size(); i-- > 0;) {
     if (g_ts_pending[i].kid != kTsLost) {
-      (void)cudaEventSynchronize(g_ts_events[2 * i + 1]);
+      const cudaError_t prior = cudaPeekAtLastError();
+      const cudaError_t e = cudaEventSynchronize(g_ts_events[2 * i + 1]);
+      if (!ts_observe_status(prior, e)) {
+        ts_discard_pending();
+        return; // no completion proof: do not read intervals or reuse the ring
+      }
       break;
     }
   }
   for (size_t i = 0; i < g_ts_pending.size(); ++i) {
     const TsPending &p = g_ts_pending[i];
+    if (p.kid == kTsLost) {
+      ++g_ts_truncated;
+      continue;
+    }
     float ms = 0;
-    if (p.kid == kTsLost || cudaEventElapsedTime(&ms, g_ts_events[2 * i], g_ts_events[2 * i + 1]) != cudaSuccess || !(ms >= 0)) {
+    const cudaError_t prior = cudaPeekAtLastError();
+    const cudaError_t e = cudaEventElapsedTime(&ms, g_ts_events[2 * i], g_ts_events[2 * i + 1]);
+    if (!ts_observe_status(prior, e)) {
+      g_ts_truncated += g_ts_pending.size() - i;
+      g_ts_pending.clear();
+      return; // already folded intervals stay valid; the suffix is incomplete
+    }
+    if (!(ms >= 0)) {
       ++g_ts_truncated;
       continue;
     }
@@ -187,7 +221,6 @@ static void ts_drain(void) {
     g_ts_gpu_ns += ns;
     ++g_ts_ops;
   }
-  ts_clear_own_error(prior);
   g_ts_pending.clear();
 }
 
@@ -196,20 +229,26 @@ static void ts_drain(void) {
 static int ts_begin_slow(const char *name, uint32_t gx, uint32_t gy) {
   if (!g_ts_init_tried) ts_init();
   if (!g_ts_usable) return -1;
+  if (!ts_observe_status(cudaPeekAtLastError(), cudaSuccess)) {
+    ts_discard_pending();
+    return -1;
+  }
   if (g_capture_open) {
     ++g_ts_untimed_compute;
     return -1;
   }
   if (g_ts_pending.size() >= kTsPairs) ts_drain();
+  if (!g_ts_usable) return -1; // a failed ring-full drain cannot recycle slots
   if (!g_ts_batch_open) {
     g_ts_batch_open = true;
     g_ts_batch_start = std::chrono::steady_clock::now();
   }
   const size_t slot = g_ts_pending.size();
   const cudaError_t prior = cudaPeekAtLastError();
-  if (cudaEventRecord(g_ts_events[2 * slot], g_stream) != cudaSuccess) {
-    ts_clear_own_error(prior);
-    ++g_ts_truncated;
+  const cudaError_t e = cudaEventRecord(g_ts_events[2 * slot], g_stream);
+  if (!ts_observe_status(prior, e)) {
+    ts_discard_pending();
+    ++g_ts_truncated; // this start has no pending entry yet
     return -1;
   }
   g_ts_pending.push_back(TsPending{ts_kid(name), gx, gy});
@@ -225,10 +264,12 @@ static inline int fcuda_ts_begin(const char *name, dim3 grid) {
 static inline void fcuda_ts_end(int slot) {
   if (slot < 0) return;
   const cudaError_t prior = cudaPeekAtLastError();
-  if (cudaEventRecord(g_ts_events[2 * (size_t)slot + 1], g_stream) != cudaSuccess) {
-    ts_clear_own_error(prior);
-    g_ts_pending[(size_t)slot].kid = kTsLost;
+  if (!ts_observe_status(prior, cudaSuccess)) {
+    ts_discard_pending();
+    return; // preserve an operation fault before a stop-event call can mask it
   }
+  const cudaError_t e = cudaEventRecord(g_ts_events[2 * (size_t)slot + 1], g_stream);
+  if (!ts_observe_status(prior, e)) ts_discard_pending();
 }
 
 // Synchronous host<->device copies run on the legacy stream, outside every pair.
@@ -269,7 +310,7 @@ static void ts_report(void) {
 extern "C" void fcuda_ts_boundary(void) {
   if (!g_ts_on || !g_ts_usable || g_capture_open) return;
   ts_drain();
-  if (!g_ts_batch_open) return;
+  if (!g_ts_usable || !g_ts_batch_open) return;
   g_ts_batch_open = false;
   g_ts_wall_ns += (double)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - g_ts_batch_start).count();
   if ((++g_ts_batches % g_ts_every) == 0) ts_report();

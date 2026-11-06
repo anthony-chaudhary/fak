@@ -112,6 +112,12 @@ static bool g_capture_open,uncertain,throw_track,miss_untrack,allocation_with_er
 static int device,device_error,pending_error,fail_alloc,fail_host_alloc,fail_copy,fail_fence,fail_free,fail_freehost;
 static int alloc_calls,hostalloc_calls,copy_calls,sync_calls,free_calls,hostfree_calls,transfer_calls;
 static uint64_t g_host_bytes;
+// Optional deferred D2H transport: no destination write before explicit completion.
+static bool defer_status_copy;
+static void *pending_status_dst;
+static const void *pending_status_src;
+static size_t pending_status_bytes;
+static int completed_status_copies;
 static void *quarantined;
 struct fak_alloc_tag { int cls,kind,site; size_t bytes; };
 struct Site { char name[64]; };
@@ -145,12 +151,26 @@ static cudaError_t cudaMalloc(void **p,size_t n) {
 }
 static cudaError_t cudaHostAlloc(void **p,size_t n,unsigned) {
  ++hostalloc_calls;if(fail_host_alloc)return fail_host_alloc;
- *p=malloc(n);assert(*p);host_blocks.insert(*p);return 0;
+ *p=malloc(n);assert(*p);memset(*p,0xa5,n);host_blocks.insert(*p);return 0;
 }
-static cudaError_t cudaMemcpyAsync(void *d,const void *s,size_t n,int,int) {
- ++copy_calls;if(fail_copy)return fail_copy;memcpy(d,s,n);return 0;
+static void complete_status_copy() {
+ if(!pending_status_dst)return;
+ assert(host_blocks.count(pending_status_dst)==1 && device_blocks.count((void *)pending_status_src)==1);
+ memcpy(pending_status_dst,pending_status_src,pending_status_bytes);
+ ++completed_status_copies;
+ pending_status_dst=nullptr;pending_status_src=nullptr;pending_status_bytes=0;
 }
-static cudaError_t cudaStreamSynchronize(int) {++sync_calls;return fail_fence;}
+static cudaError_t cudaMemcpyAsync(void *d,const void *s,size_t n,int kind,int) {
+ ++copy_calls;if(fail_copy)return fail_copy;
+ if(defer_status_copy && kind==cudaMemcpyDeviceToHost) {
+  assert(!pending_status_dst);
+  pending_status_dst=d;pending_status_src=s;pending_status_bytes=n;return 0;
+ }
+ memcpy(d,s,n);return 0;
+}
+static cudaError_t cudaStreamSynchronize(int) {
+ ++sync_calls;if(fail_fence)return fail_fence;complete_status_copy();return 0;
+}
 static cudaError_t cudaFree(void *p) {
  ++free_calls;if(fail_free)return fail_free;assert(device_blocks.erase(p)==1);free(p);return 0;
 }
@@ -163,6 +183,8 @@ static int fcuda_kv_fp8_begin_async(int *status) {*status=0;return 0;}
 
 const kvFP8LifecycleMain = `
 static void reset() {
+ assert(!pending_status_dst); // never hide an outstanding simulated DMA by freeing its owners
+ defer_status_copy=false;pending_status_src=nullptr;pending_status_bytes=0;completed_status_copies=0;
  for(void *p:device_blocks) { free(p); } device_blocks.clear();
  for(void *p:host_blocks) { free(p); } host_blocks.clear();
  while(fak_kv_fp8_lifecycle::readbacks) {
@@ -238,6 +260,44 @@ int main() {
   if(phase<3) assert(!r.completed && !r.numerical_checked && !r.numerical && !hostfree_calls && !g_host_bytes);
   else assert(r.completed && r.numerical_checked && r.numerical==2 && hostfree_calls==1 && g_host_bytes==4);
  }
+ // Completed status readback may physically retire before ledger untracking fails.
+ reset();st=status_allocation();*st=6;miss_untrack=true;
+ r=fcuda_kv_fp8_finish_owned(st,1);
+ auto *holder=fak_kv_fp8_lifecycle::readbacks;
+ assert(r.status==FCUDA_KV_FP8_RECEIPT_FAILED && r.phase==FCUDA_KV_FP8_PHASE_HOST_RETIRE && r.terminal);
+ assert(r.completed && r.numerical_checked && r.numerical==6 && g_host_bytes==4);
+ assert(holder && !holder->host && holder->device==st && !holder->next);
+ assert(host_blocks.empty() && hostfree_calls==1 && device_blocks.count(st)==1 && g_alloc_tags.size()==2);
+ auto retry=fcuda_kv_fp8_finish_owned(st,1);
+ auto retired=fcuda_kv_fp8_release_owned(st,4);
+ assert(retry.status==r.status && retired.status==r.status && !retry.completed && !retired.retired);
+ assert(hostalloc_calls==1 && copy_calls==1 && sync_calls==1 && hostfree_calls==1 && free_calls==0);
+ assert(fak_kv_fp8_lifecycle::readbacks==holder && !holder->host && holder->device==st);
+
+ // Positive deferred transport control: successful fence completes before status use/free.
+ reset();st=status_allocation();*st=8;defer_status_copy=true;
+ r=fcuda_kv_fp8_finish_owned(st,1);
+ assert(!r.status && r.completed && r.numerical_checked && r.numerical==8);
+ assert(completed_status_copies==1 && !pending_status_dst && hostfree_calls==1 && !fak_kv_fp8_lifecycle::readbacks);
+
+ // Failed fence returns BEFORE the queued D2H destination is written.
+ reset();st=status_allocation();*st=8;defer_status_copy=true;fail_fence=7;
+ r=fcuda_kv_fp8_finish_owned(st,1);holder=fak_kv_fp8_lifecycle::readbacks;
+ assert(r.status==7 && r.phase==FCUDA_KV_FP8_PHASE_FENCE && r.terminal);
+ assert(!r.completed && !r.numerical_checked && !r.numerical && !g_host_bytes);
+ assert(holder && holder->host==pending_status_dst && holder->device==pending_status_src &&
+        holder->device==st && !holder->next && pending_status_bytes==sizeof(int));
+ assert(!completed_status_copies && !hostfree_calls && !free_calls);
+ for(size_t i=0;i<sizeof(int);i++)assert(((unsigned char *)holder->host)[i]==0xa5);
+ retry=fcuda_kv_fp8_finish_owned(st,1);retired=fcuda_kv_fp8_release_owned(st,4);
+ assert(retry.status==7 && retired.status==7 && !retired.retired);
+ assert(hostalloc_calls==1 && copy_calls==1 && sync_calls==1 && !hostfree_calls && !free_calls);
+ // Simulate the already-accepted DMA finishing later, without calling native admission
+ // or clearing its terminal latch. Both exact allocations must still exist.
+ complete_status_copy();
+ assert(completed_status_copies==1 && *(const int *)holder->host==8 && !pending_status_dst);
+ assert(fak_kv_fp8_lifecycle::readbacks==holder && host_blocks.count(holder->host)==1 && device_blocks.count(st)==1);
+ assert(g_cuda_cleanup_status==7 && !r.completed && !r.numerical_checked && !g_host_bytes);
  for(int phase=0;phase<3;phase++) {
   reset();p=allocation(32);
   if(phase==0)fail_fence=7;

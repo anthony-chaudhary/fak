@@ -2322,3 +2322,10 @@ Private native five-plane, query, output and status provenance/extent/alias gate
 Private prerequisite check for one FP8 owner and an exact three-GDN/one-attention layer map: validates canonical position range, fixed partial-RoPE binding, supported selected modes, live GDN invalid-bit roots and non-overlapping storage before whole-forward admission.
 
 **Distinct from:** This checks the supplied hybrid state descriptors, not the default-off packed-GDN dtype policy or its backend capability declaration. It does not validate every model weight, native GDN allocation provenance, output-consumer arithmetic or a public serving route.
+
+
+### cudaGraphOnceDependency.reservationSlotsMatch
+
+Correspondence check between a frozen graph allocation receipt and its capture-built primary/scale pointer, extent and nonzero reservation-ID array slots. Under the caller complete-array-length validation, it checks slot bounds before accessing and comparing each required entry.
+
+**Distinct from:** Unlike fusedVulkanSlotBytesOKLocked checking live expert-weight nominal extents, this compares immutable graph receipt slots. It performs no native lookup, synchronization or ownership transfer and does not prove model, content or completion identity.

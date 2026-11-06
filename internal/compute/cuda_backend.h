@@ -88,6 +88,21 @@ int fcuda_alloc_site_intern(const char *name);
 int fcuda_alloc_ledger_read(int64_t *out, int cells, int64_t *untracked_frees);
 int fcuda_alloc_site_read(int i, char *name, int namelen, int64_t *out5);
 void fcuda_alloc_ledger_reset_peak(void);
+/* Capture-once qualification reservation ID for an exact base and complete byte
+ * extent. Zero means unsupported, unknown, idle, host-only, wrong extent or
+ * exhausted identity space; never accept zero as a matching ticket. The caller
+ * holds cudaMu and retains the allocation while checking/using it. Track/retag
+ * changes the ID; peak reset does not. This is neither a fence nor content/COW
+ * identity. Ordinary native archives return zero without generation bookkeeping. */
+uint64_t fcuda_alloc_reservation_id(const void *p, size_t bytes);
+/* Observational all-or-nothing batch comparison of previously acquired nonzero
+ * reservation IDs. Each of the three arrays is readable for count entries and
+ * borrowed only for this call. Exact bases and complete extents must still match.
+ * The caller holds cudaMu and retains every allocation through check and use.
+ * Returns 1 only on a complete qualification match, otherwise 0 (also on ordinary
+ * native profiles). This is not a completion fence, ownership grant or content ID. */
+int fcuda_alloc_reservations_match(const void *const *pointers,
+                                  const size_t *bytes, const uint64_t *ids, int count);
 /* Test seam: the Nth next dequant + fp16 GEMM scratch allocation misses (1 = the f32 dequant
  * copy, 2..5 = the fp16 split halves); 0 disarms. */
 void fcuda_scratch_alloc_test_fault(int nth);

@@ -21,14 +21,15 @@ import (
 // backend call is in progress or being retried. Overflow applies the
 // configured OverflowPolicy with a typed counter.
 //
-// Write, Flush, and Close are safe for concurrent use; Close stops the
-// flusher goroutine.
+// Write, Flush, Close, and Stats are safe for concurrent use; Close
+// stops the flusher goroutine.
 type Ring struct {
 	b    Backend
 	opts RingOptions
 
 	mu       sync.Mutex
 	buf      []billing.UsageRecord // fixed-size ring storage
+	enqAt    []time.Time           // parallel to buf: each record's enqueue time
 	head     int                   // index of the oldest queued record
 	tail     int                   // index of the next free slot
 	count    int                   // queued records
@@ -39,9 +40,16 @@ type Ring struct {
 	// held is the in-flight prefix: records accepted but not yet
 	// delivered - mid-Append or awaiting retry after a failed Append.
 	// It is always delivered before any newer record. Guarded by mu;
-	// written only by the flusher goroutine.
-	held []billing.UsageRecord
+	// written only by the flusher goroutine. heldAt parallels held with
+	// each record's enqueue time.
+	held   []billing.UsageRecord
+	heldAt []time.Time
 
+	// lastFlushOK is the wall-clock time of the last successful
+	// backend delivery; zero until the first success. Guarded by mu.
+	lastFlushOK time.Time
+
+	accepted  atomic.Uint64
 	dropped   atomic.Uint64
 	rejected  atomic.Uint64
 	failures  atomic.Uint64
@@ -81,6 +89,7 @@ func NewRing(b Backend, opts RingOptions) (*Ring, error) {
 		b:       b,
 		opts:    opts,
 		buf:     make([]billing.UsageRecord, opts.Capacity),
+		enqAt:   make([]time.Time, opts.Capacity),
 		dataSig: make(chan struct{}, 1),
 		closeCh: make(chan struct{}),
 		stopped: make(chan struct{}),
@@ -111,17 +120,28 @@ func (r *Ring) Write(rec billing.UsageRecord) error {
 		}
 	case RejectNew:
 		if r.count == cap(r.buf) {
-			r.mu.Unlock()
+			// A refused record still entered the accounting universe:
+			// credit it under the same lock so the Stats identity keeps
+			// holding in every snapshot.
+			r.accepted.Add(1)
 			r.rejected.Add(1)
+			r.mu.Unlock()
 			return ErrFull
 		}
 	}
 	r.buf[r.tail] = rec
+	// Stamp the ENQUEUE time, not rec.RequestedAt: the request time is
+	// when the attempt was received, which can predate acceptance by an
+	// unbounded margin; backlog age must measure waiting in this ring.
+	r.enqAt[r.tail] = time.Now()
 	r.tail++
 	if r.tail == cap(r.buf) {
 		r.tail = 0
 	}
 	r.count++
+	// Credit under the same lock that enqueues so a Stats snapshot can
+	// never see the record without its Accepted credit.
+	r.accepted.Add(1)
 	r.mu.Unlock()
 
 	r.signalData()
@@ -212,20 +232,22 @@ func (r *Ring) advanceHead(n int) {
 }
 
 // popFront copies the first n queued records (n <= count), in queue
-// order, into a fresh slice and removes them from the ring. Callers
-// hold mu.
-func (r *Ring) popFront(n int) []billing.UsageRecord {
+// order, into fresh slices and removes them from the ring, returning
+// the records and their enqueue times together. Callers hold mu.
+func (r *Ring) popFront(n int) ([]billing.UsageRecord, []time.Time) {
 	out := make([]billing.UsageRecord, n)
+	at := make([]time.Time, n)
 	pos := r.head
 	for i := 0; i < n; i++ {
 		out[i] = r.buf[pos]
+		at[i] = r.enqAt[pos]
 		pos++
 		if pos == cap(r.buf) {
 			pos = 0
 		}
 	}
 	r.advanceHead(n)
-	return out
+	return out, at
 }
 
 // flusher is the sole goroutine that calls the backend. It delivers a
@@ -314,10 +336,15 @@ func (r *Ring) drainAll() error {
 			if n > r.opts.BatchSize {
 				n = r.opts.BatchSize
 			}
-			chunk = r.popFront(n)
+			// Declare enq separately: a combined := here would shadow
+			// the outer chunk, strand the claimed batch in held
+			// unappended, and lose the last claimed batch at Close.
+			var enq []time.Time
+			chunk, enq = r.popFront(n)
 			// Claim the chunk as in-flight under the lock so Pending
 			// counts it while its Append is in progress.
 			r.held = append(r.held, chunk...)
+			r.heldAt = append(r.heldAt, enq...)
 		}
 		r.mu.Unlock()
 
@@ -332,9 +359,15 @@ func (r *Ring) drainAll() error {
 			break
 		}
 		r.mu.Lock()
-		r.held = r.held[len(chunk):]
-		r.mu.Unlock()
+		// Credit delivery before releasing the chunk, under the same
+		// lock: a Stats snapshot then never sees a record in neither
+		// bucket, so the accounting identity holds in every snapshot,
+		// not just at quiescence.
 		r.delivered.Add(uint64(len(chunk)))
+		r.lastFlushOK = time.Now()
+		r.held = r.held[len(chunk):]
+		r.heldAt = r.heldAt[len(chunk):]
+		r.mu.Unlock()
 	}
 	return lastErr
 }
