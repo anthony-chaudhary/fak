@@ -2451,3 +2451,24 @@ execution. No upstream source code is copied; the adaptation is witnessed by
 `internal/model/v41_dspark_gguf_contract_test.go`. The ds4 MIT copyright and
 permission notice is reproduced in the "antirez/ds4 (DwarfStar) V4 Flash CUDA
 kernels" section above.
+
+## TensorFold cost-modeled MTP draft depth (governor pricing)
+
+- Upstream: ashhart/TensorFold, commit
+  `9e8c368b0b4c2c7892a0c9f0f302d7c164016209` (Apache-2.0), source
+  `zig/src/core/draft_depth.zig` (`Costs`, `DepthRule`):
+  https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/core/draft_depth.zig
+- Adaptation: `internal/model/qwen38_mtp_adaptive.go` attaches the
+  `DraftDepthRule` from `internal/model/draft_depth_cost.go` to
+  `Qwen38MTPAdaptiveDepthGovernor` via `SetCostRule`/`CostRule` (nil detaches),
+  prices draft rows through `ModeledKeep`/`ModeledMore` (fail-closed while no
+  rule is attached), and folds every observed step into the rule's token/ms
+  EMAs from the cost model - a drafting step prices proposed+1 verify rows
+  plus one chain level, a target-only step one row plus one level; never wall
+  clock, so split ranks price alike. No Zig code blocks are copied; the
+  algorithm, defaults and test vectors are adapted.
+- License: Apache License 2.0, already reproduced above under "TensorFold
+  benchmark evidence".
+- Witness: `TestQwen38MTP_Adaptive_ModeledCostPricing` in
+  `internal/model/qwen38_mtp_adaptive_test.go` pins the modeled keep/more
+  pricing and the per-step EMA fold (software evidence only).

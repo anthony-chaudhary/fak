@@ -175,6 +175,7 @@ type Qwen38MTPAdaptiveDepthGovernor struct {
 	sumSpeedup        float64
 	sumAcceptanceRate float64
 	trace             []Qwen38AdaptiveTraceRecord
+	costRule          *DraftDepthRule // optional modeled-cost pricing; nil until SetCostRule
 }
 
 // NewQwen38MTPAdaptiveDepthGovernor creates and initializes an adaptive depth governor.
@@ -228,6 +229,46 @@ func (g *Qwen38MTPAdaptiveDepthGovernor) IsProbing() bool {
 	return g.isProbing
 }
 
+// SetCostRule attaches a modeled draft-depth cost rule so per-row keep/more
+// adjudication and round accounting price from measured verify costs instead
+// of wall-clock latency. Passing nil detaches it. The rule is not safe for
+// concurrent use; this governor serializes all access under its lock.
+func (g *Qwen38MTPAdaptiveDepthGovernor) SetCostRule(rule *DraftDepthRule) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.costRule = rule
+}
+
+// CostRule returns the attached modeled cost rule, or nil when detached.
+func (g *Qwen38MTPAdaptiveDepthGovernor) CostRule() *DraftDepthRule {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.costRule
+}
+
+// ModeledKeep prices draft k at running chain confidence run with the
+// attached cost model; row 1 is always kept. Fail-closed (false) while no
+// rule is attached: an unpriced row is never silently free.
+func (g *Qwen38MTPAdaptiveDepthGovernor) ModeledKeep(k int, run float64) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.costRule == nil {
+		return false
+	}
+	return g.costRule.Keep(k, run)
+}
+
+// ModeledMore prices level k+1 (its row plus one chain level) the same way;
+// fail-closed (false) while no rule is attached.
+func (g *Qwen38MTPAdaptiveDepthGovernor) ModeledMore(k int, run float64) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.costRule == nil {
+		return false
+	}
+	return g.costRule.More(k, run)
+}
+
 // ObserveStep processes an execution step observation, updates EMAs, evaluates target-only escape
 // and hysteresis transitions, and returns the next draft depth along with the deterministic trace record.
 func (g *Qwen38MTPAdaptiveDepthGovernor) ObserveStep(obs Qwen38AdaptiveStepObservation) (int, Qwen38AdaptiveTraceRecord, error) {
@@ -263,6 +304,19 @@ func (g *Qwen38MTPAdaptiveDepthGovernor) ObserveStep(obs Qwen38AdaptiveStepObser
 	netNegative := speedup < g.config.TargetOnlyThreshold
 	if netNegative {
 		g.netNegativeSteps++
+	}
+
+	// Fold this step into the attached cost model's token/ms EMAs from the
+	// modeled costs only, never wall clock, so split ranks price alike: a
+	// drafting step earns accepted+1 tokens against a proposed+1-row verify
+	// window plus one chain level; a target-only step earns one token
+	// against a one-row verify plus one level.
+	if g.costRule != nil {
+		if obs.ProposedTokens > 0 {
+			g.costRule.Done(obs.AcceptedTokens+1, obs.ProposedTokens+1, 1)
+		} else {
+			g.costRule.Done(1, 1, 1)
+		}
 	}
 
 	action := "hold"
@@ -451,7 +505,9 @@ func (g *Qwen38MTPAdaptiveDepthGovernor) Receipt() Qwen38AdaptiveDepthReceipt {
 	}
 }
 
-// Reset clears recorded steps and restarts from cold start depth.
+// Reset clears recorded steps and restarts from cold start depth. The
+// attached cost rule, if any, is retained: it is device-measured pricing,
+// not step state.
 func (g *Qwen38MTPAdaptiveDepthGovernor) Reset() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
