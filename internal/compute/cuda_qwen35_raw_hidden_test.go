@@ -75,10 +75,10 @@ func TestCUDARawHiddenSourceLifetime(t *testing.T) {
 		strings.Index(tail, "rawHiddenRows, rawHiddenBuf = x, xBuf") > strings.Index(tail, "qwen35SequenceRMSNormLocked") {
 		t.Fatal("raw capture must bind the original residual before output normalization")
 	}
-	if strings.Index(tail, "result = Qwen35SequencePrefillResult") < strings.Index(tail, "if err := finalFenceErr") ||
-		strings.Index(tail, "result = Qwen35SequencePrefillResult") < strings.Index(tail, "if transfers.ActivationH2DBytes") {
-		t.Fatal("publication must follow completion and transfer checks")
+	if !cudaRawHiddenPublicationOrdered(tail) {
+		t.Fatal("unique raw publication must follow returning completion and transfer checks")
 	}
+	cudaRawHiddenPublicationOrderControls(t)
 	bridgeSource, err := os.ReadFile("cuda.go")
 	if err != nil {
 		t.Fatal(err)
@@ -129,6 +129,128 @@ func TestCUDARawHiddenSourceLifetime(t *testing.T) {
 		t.Fatalf("actual raw-hidden source control failed: %v\n%s", err, out)
 	}
 	t.Log(strings.TrimSpace(string(out)))
+}
+
+// Empty result resets on failure are not publication. Check the syntax of the
+// actual tail rather than the first textual mention of its result type. This is
+// a source guard, not a substitute for the extracted lifetime fixture below.
+func cudaRawHiddenPublicationOrdered(tail string) bool {
+	file, err := parser.ParseFile(token.NewFileSet(), "tail.go", "package p\nfunc check() {\n"+tail+"\n}", 0)
+	if err != nil || len(file.Decls) != 1 {
+		return false
+	}
+	fn, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok || fn.Body == nil {
+		return false
+	}
+	ident := func(e ast.Expr, name string) bool { id, ok := e.(*ast.Ident); return ok && id.Name == name }
+	returnsFailure := func(body *ast.BlockStmt) bool {
+		if body == nil || len(body.List) == 0 {
+			return false
+		}
+		ret, ok := body.List[len(body.List)-1].(*ast.ReturnStmt)
+		return ok && len(ret.Results) == 2 && ident(ret.Results[0], "result") && !ident(ret.Results[1], "nil")
+	}
+	transferNonzero := func(e ast.Expr, field string) bool {
+		cmp, ok := e.(*ast.BinaryExpr)
+		if !ok || cmp.Op != token.NEQ {
+			return false
+		}
+		sel, ok := cmp.X.(*ast.SelectorExpr)
+		zero, zok := cmp.Y.(*ast.BasicLit)
+		return ok && ident(sel.X, "transfers") && sel.Sel.Name == field && zok && zero.Kind == token.INT && zero.Value == "0"
+	}
+	top := make(map[ast.Stmt]bool)
+	var fence, transfer token.Pos
+	fenceCount, transferCount := 0, 0
+	for _, stmt := range fn.Body.List {
+		top[stmt] = true
+		gate, ok := stmt.(*ast.IfStmt)
+		if !ok || gate.Else != nil || !returnsFailure(gate.Body) {
+			continue
+		}
+		if init, ok := gate.Init.(*ast.AssignStmt); ok && init.Tok == token.DEFINE && len(init.Lhs) == 1 && len(init.Rhs) == 1 && ident(init.Lhs[0], "err") && ident(init.Rhs[0], "finalFenceErr") {
+			if cmp, ok := gate.Cond.(*ast.BinaryExpr); ok && cmp.Op == token.NEQ && ident(cmp.X, "err") && ident(cmp.Y, "nil") {
+				fence, fenceCount = gate.End(), fenceCount+1
+			}
+		}
+		if either, ok := gate.Cond.(*ast.BinaryExpr); ok && gate.Init == nil && either.Op == token.LOR && transferNonzero(either.X, "ActivationH2DBytes") && transferNonzero(either.Y, "ActivationD2HBytes") {
+			transfer, transferCount = gate.End(), transferCount+1
+		}
+	}
+	var publication token.Pos
+	publications, valid := 0, true
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		assignment, ok := node.(*ast.AssignStmt)
+		if !ok {
+			return true
+		}
+		writesResult := false
+		for _, lhs := range assignment.Lhs {
+			writesResult = writesResult || ident(lhs, "result")
+		}
+		if !writesResult {
+			return true
+		}
+		if assignment.Tok != token.ASSIGN || len(assignment.Lhs) != 1 || len(assignment.Rhs) != 1 {
+			valid = false
+			return true
+		}
+		literal, ok := assignment.Rhs[0].(*ast.CompositeLit)
+		if !ok || !ident(literal.Type, "Qwen35SequencePrefillResult") {
+			valid = false
+			return true
+		}
+		if len(literal.Elts) == 0 {
+			return true
+		}
+		publications++
+		publication = assignment.Pos()
+		rawFields := 0
+		for _, element := range literal.Elts {
+			field, ok := element.(*ast.KeyValueExpr)
+			if ok && ident(field.Key, "RawHiddenRows") && ident(field.Value, "rawHiddenRows") {
+				rawFields++
+			}
+		}
+		valid = valid && top[assignment] && rawFields == 1
+		return true
+	})
+	return valid && publications == 1 && fenceCount == 1 && transferCount == 1 && fence < publication && transfer < publication
+}
+
+func cudaRawHiddenPublicationOrderControls(t *testing.T) {
+	t.Helper()
+	reset := "if splitErr != nil { result = Qwen35SequencePrefillResult{}; return result, splitErr }\n"
+	fence := "if err := finalFenceErr; err != nil { return result, err }\n"
+	transfer := "if transfers.ActivationH2DBytes != 0 || transfers.ActivationD2HBytes != 0 { return result, transferError() }\n"
+	publish := "result = Qwen35SequencePrefillResult{LastHidden: last, RawHiddenRows: rawHiddenRows}\n"
+	for _, control := range []struct {
+		name, source string
+		want         bool
+	}{
+		{"empty-reset-before-checks", reset + fence + transfer + publish, true},
+		{"no-reset", fence + transfer + publish, true},
+		{"before-fence", reset + publish + fence + transfer, false},
+		{"before-transfer", reset + fence + publish + transfer, false},
+		{"missing-fence", reset + transfer + publish, false},
+		{"missing-transfer", reset + fence + publish, false},
+		{"missing-publication", reset + fence + transfer, false},
+		{"duplicate-publication", reset + fence + transfer + publish + publish, false},
+		{"nested-publication", reset + fence + transfer + "if choose {\n" + publish + "}\n", false},
+		{"wrong-raw-value", reset + fence + transfer + strings.Replace(publish, "RawHiddenRows: rawHiddenRows", "RawHiddenRows: last", 1), false},
+		{"nonreturning-fence", reset + strings.Replace(fence, "return result, err", "observe(err)", 1) + transfer + publish, false},
+		{"successful-fence-return", reset + strings.Replace(fence, "return result, err", "return result, nil", 1) + transfer + publish, false},
+		{"nonreturning-transfer", reset + fence + strings.Replace(transfer, "return result, transferError()", "observe(transfers)", 1) + publish, false},
+		{"duplicate-fence", reset + fence + fence + transfer + publish, false},
+		{"syntax-error", reset + fence + transfer + publish + "{", false},
+	} {
+		t.Run("publication-order/"+control.name, func(t *testing.T) {
+			if got := cudaRawHiddenPublicationOrdered(control.source); got != control.want {
+				t.Fatalf("publication order = %v, want %v", got, control.want)
+			}
+		})
+	}
 }
 
 const cudaRawHiddenFixture = `package compute

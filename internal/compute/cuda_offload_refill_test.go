@@ -93,11 +93,24 @@ func TestCUDAOffloadRefillSource(t *testing.T) {
 			"cudaBuf": false, "*cudaBuf.Ready": false, "*cudaBuf.invalidForSubmit": false, "cudaRawUploadIsVerbatim": false,
 			"OwnedTransferState": false, "OwnedTransferResult": false, "OwnedTransferUnknown": false, "ErrOwnedTransferUnknown": false,
 			"*cudaBackend.OffloadRefillEnabled": false,
-			"NewRawIQ":                          false, "newRawKQuant": false, "RawIQBlockBytes": false,
+			"NewRawIQ":                          false, "NewIQ2XXS": false, "newRawKQuant": false, "RawIQBlockBytes": false,
+			"q4kSuper": false, "rawIQSuper": false, "iq2xxsSuper": false, "iq2xxsSuperBlock": false,
+			"iq2xsSuperBlock": false, "iq1mSuperBlock": false, "iq4nlBlockBytes": false,
+			"iq4nlSuperBlock": false, "iq4xsSuperBlock": false,
+			"*cudaBackend.devRawKQuantWithAllocator":          false,
+			"*cudaBackend.uploadRawKQuantClassWithOperations": false,
+		}
+		// Registry is a fixture boundary, but its selected block associations
+		// must match production, not only the test's nominal dtype names.
+		registry := strings.Join(strings.Fields(read("quant_rawiq.go")), "")
+		for _, pair := range []string{"IQ2_XXS:{blockBytes:iq2xxsSuperBlock,", "IQ2_XS:{blockBytes:iq2xsSuperBlock,", "IQ1_M:{blockBytes:iq1mSuperBlock,", "IQ4_NL:{blockBytes:iq4nlSuperBlock,", "IQ4_XS:{blockBytes:iq4xsSuperBlock,"} {
+			if !strings.Contains(registry, pair) {
+				t.Fatalf("raw IQ registry changed: %s", pair)
+			}
 		}
 		var program strings.Builder
 		program.WriteString(cudaOffloadRefillGoFixture)
-		for _, path := range []string{"compute.go", "cpuref.go", "cuda_backend_state.go", "cuda_device_ops.go", "owned_transfer.go", "cuda_offload_refill.go", "quant_rawiq.go", "quant_q4k.go"} {
+		for _, path := range []string{"compute.go", "cpuref.go", "cuda_backend_state.go", "cuda_device_ops.go", "owned_transfer.go", "cuda_offload_refill.go", "quant_rawiq.go", "quant_q4k.go", "quant_iq2_xxs.go", "cuda_tensor_allocation.go", "cuda_raw_k_offload.go"} {
 			src := read(path)
 			fs := token.NewFileSet()
 			f, e := parser.ParseFile(fs, path, src, 0)
@@ -124,6 +137,8 @@ func TestCUDAOffloadRefillSource(t *testing.T) {
 						for _, s := range n.Specs {
 							if v, ok := s.(*ast.ValueSpec); ok && len(v.Names) > 0 && v.Names[0].Name == "OwnedTransferUnknown" {
 								emit("OwnedTransferUnknown", n, "")
+							} else if v, ok := s.(*ast.ValueSpec); ok && len(v.Names) == 1 && len(v.Values) == 1 {
+								emit(v.Names[0].Name, v, "const ")
 							}
 						}
 					} else {
@@ -291,6 +306,7 @@ import("errors";"fmt";"os";"runtime";"slices";"sync/atomic";"testing";"time";"un
 type Backend=any
 type MemoryClass string
 const MemoryOffload MemoryClass="offload"
+const MemoryWeights MemoryClass="weights"
 type Dtype int
 const(F32 Dtype=iota;Q2_K;Q3_K;Q4_K;Q5_K;Q6_K;IQ2_XXS;IQ2_XS;IQ1_M;IQ4_NL;IQ4_XS;Q8_0)
 type Layout int
@@ -310,10 +326,8 @@ var cudaAsyncPending=map[unsafe.Pointer]*cudaUploadFence{}
 var uploadCache=map[ucKey]Tensor{}
 // Raw-IQ registry is an explicit fixture boundary; the production byte/metadata
 // validator and whitelist are copied intact below, not reimplemented here.
-const q4kSuper=256
-const rawIQSuper=256
 type rawIQFormat struct{blockBytes int}
-var rawIQFormats=map[Dtype]rawIQFormat{IQ2_XXS:{66},IQ2_XS:{74},IQ1_M:{56},IQ4_NL:{144},IQ4_XS:{136}}
+var rawIQFormats=map[Dtype]rawIQFormat{IQ2_XXS:{iq2xxsSuperBlock},IQ2_XS:{iq2xsSuperBlock},IQ1_M:{iq1mSuperBlock},IQ4_NL:{iq4nlSuperBlock},IQ4_XS:{iq4xsSuperBlock}}
 func(d Dtype)String()string{return fmt.Sprintf("%d",int(d))}
 `
 
@@ -327,6 +341,24 @@ func refillFixture()(c *cudaBackend,dst,src Tensor,b *cudaBuf){
  q:=&QuantSpec{Block:256,Axis:2,Bits:4}
  dst=makeTensor(c,Q4_K,RowMajor,[]int{1,256},q,b)
  v:=*q;src=makeTensor(nil,Q4_K,RowMajor,[]int{1,256},&v,&hostBuf{i8:raw})
+ return
+}
+func refillIQFixture(t *testing.T,dt Dtype,block int,dedicated bool,shape []int)(c *cudaBackend,dst,src Tensor,b *cudaBuf){
+ t.Helper();c,_,_,_=refillFixture()
+ n:=shape[0]*(shape[1]/256)*block;raw:=make([]byte,n);victimRaw:=make([]byte,n)
+ for i:=range raw{raw[i]=byte(i*7+31);victimRaw[i]=raw[i]^0xff}
+ makeHost:=func(data []byte)Tensor{if dedicated{return NewIQ2XXS(nil,shape,data)};return NewRawIQ(nil,dt,shape,data)}
+ src=makeHost(raw);victim:=makeHost(victimRaw)
+ allocs,copies,releases:=0,0,0
+ dst=c.uploadRawKQuantClassWithOperations(victim,victim.buf.(HostBuffer),MemoryOffload,
+  func(Tensor,HostBuffer)Tensor{t.Fatal("offload entered immutable cache");return Tensor{}},
+  func(size int)*cudaBuf{
+   allocs++;if size!=n{t.Fatal("initial offload extent")}
+   storage:=make([]int8,size);b=&cudaBuf{ptr:unsafe.Pointer(&storage[0]),n:size,class:MemoryOffload};return b
+  },
+  func(p unsafe.Pointer,data []int8){copies++;if p!=b.ptr||len(data)!=n{t.Fatal("initial offload copy")};copy(unsafe.Slice((*int8)(p),n),data)},
+  func(unsafe.Pointer){releases++})
+ if allocs!=1||copies!=1||releases!=0||dst.buf!=b||dst.Quant==victim.Quant||!slices.Equal(unsafe.Slice((*int8)(b.ptr),n),victim.buf.(*hostBuf).i8){t.Fatal("actual initial offload ownership")}
  return
 }
 func TestOwner(t *testing.T){
@@ -384,8 +416,88 @@ func TestOwner(t *testing.T){
  for _,dt:=range []Dtype{IQ2_XXS,IQ2_XS,IQ1_M,IQ4_NL,IQ4_XS}{
   n,_:=RawIQBlockBytes(dt);src:=NewRawIQ(nil,dt,[]int{1,256},make([]byte,n))
   if src.Quant.Bits!=4{t.Fatal("constructor contract changed")}
-  got,ok:=cudaOffloadRefillBytes(src);want:=dt==IQ4_NL||dt==IQ4_XS
-  if ok!=want || ok&&got!=n{t.Fatalf("actual IQ constructor envelope %v",dt)}
+  got,ok:=cudaOffloadRefillBytes(src)
+  if !ok||got!=n{t.Fatalf("actual IQ constructor envelope %v",dt)}
+ }
+ // Constructor-derived IQ cases use the actual owner transition, not just
+ // the geometry helper. Distinct allocations model host/native storage only.
+ for _,g:=range []struct{dt Dtype;block int;dedicated bool}{{IQ2_XXS,66,false},{IQ2_XXS,66,true},{IQ2_XS,74,false},{IQ1_M,56,false}}{
+  // The real allocator retains its incumbent nominal Bits on opt-out.
+  t.Setenv("FAK_CUDA_EXPERT_RING_REFILL","")
+  c,d,s,b=refillIQFixture(t,g.dt,g.block,g.dedicated,[]int{1,256})
+  legacy:=uint8(2);if g.dt==IQ1_M{legacy=1}
+  if d.Quant.Bits!=legacy||c.OffloadRefillEnabled(){t.Fatal("opt-out descriptor changed")}
+  t.Setenv("FAK_CUDA_EXPERT_RING_REFILL","1")
+  // Invalid source metadata keeps the incumbent upload descriptor; it never
+  // becomes a refillable descriptor merely because the selector is enabled.
+  badSource:=s;badQuant:=*s.Quant;badQuant.Bits=7;badSource.Quant=&badQuant
+  allocated,copied:=0,0
+  legacyOut:=c.uploadRawKQuantClassWithOperations(badSource,badSource.buf.(HostBuffer),MemoryOffload,
+   func(Tensor,HostBuffer)Tensor{t.Fatal("invalid metadata entered weights");return Tensor{}},
+   func(n int)*cudaBuf{allocated++;storage:=make([]int8,n);return &cudaBuf{ptr:unsafe.Pointer(&storage[0]),n:n,class:MemoryOffload}},
+   func(p unsafe.Pointer,data []int8){copied++;copy(unsafe.Slice((*int8)(p),len(data)),data)},
+   func(unsafe.Pointer){t.Fatal("legacy upload unexpectedly retired")})
+  if allocated!=1||copied!=1||legacyOut.Quant.Bits!=legacy{t.Fatal("unvalidated source descriptor preserved")}
+  for _,shape:=range [][]int{{1,256},{3,512}}{
+   c,d,s,b=refillIQFixture(t,g.dt,g.block,g.dedicated,shape);p=b.ptr
+   n:=shape[0]*(shape[1]/256)*g.block;bits:=uint8(4);if g.dedicated{bits=2}
+   if s.Quant.Bits!=bits||d.Quant.Bits!=bits{t.Fatal("actual upload constructor metadata")}
+   if slices.Equal(unsafe.Slice((*int8)(p),n),s.buf.(*hostBuf).i8){t.Fatal("overwrite control has identical old bytes")}
+   // Non-offload classes still delegate immediately to the old weight route.
+   weights:=0
+   cached:=c.uploadRawKQuantClassWithOperations(s,s.buf.(HostBuffer),MemoryWeights,
+    func(x Tensor,h HostBuffer)Tensor{weights++;if x.buf!=s.buf||h!=s.buf{t.Fatal("weight input changed")};return d},
+    func(int)*cudaBuf{t.Fatal("weight allocation bypass");return nil},
+    func(unsafe.Pointer,[]int8){t.Fatal("weight copy bypass")},func(unsafe.Pointer){t.Fatal("weight release bypass")})
+   if weights!=1||cached.buf!=b{t.Fatal("immutable delegation changed")}
+   copied,stopped,probed:=0,0,0;sourceBytes:=slices.Clone(s.buf.(*hostBuf).i8)
+   out,r:=c.offloadRefillWithOperations(d,s,int64(n),true,
+    func(x,y unsafe.Pointer,z int)bool{probed++;return x==p&&y==unsafe.Pointer(&s.buf.(*hostBuf).i8[0])&&z==n},
+    func(x,y unsafe.Pointer,z int)int{
+     copied++;a:=cudaOffloadRefillActive
+     if a==nil||a.source.buf!=s.buf||a.destination.buf!=b||a.replacement.buf==b||b.ptr!=nil||!b.invalidForSubmit()||x!=p||z!=n{t.Fatal("IQ copy transition")}
+     copy(unsafe.Slice((*int8)(x),z),unsafe.Slice((*int8)(y),z));return 0
+    },func(unsafe.Pointer){stopped++})
+   fresh,ok:=out.buf.(*cudaBuf)
+   if !ok||r.State!=OwnedTransferComplete||r.Err!=nil||fresh==b||fresh.ptr!=p||!fresh.Ready()||b.Ready()||cudaOffloadRefillActive!=nil||copied!=1||probed!=1||stopped!=0{t.Fatal("IQ copy ownership")}
+   if !slices.Equal(unsafe.Slice((*int8)(p),n),sourceBytes)||!slices.Equal(s.buf.(*hostBuf).i8,sourceBytes){t.Fatal("IQ payload/source changed")}
+   if out.Dtype!=g.dt||out.Quant==s.Quant||out.Quant==d.Quant||out.Quant.Bits!=bits||out.Quant.Block!=256||out.Quant.Axis!=2||out.Quant.Symmetric||out.Quant.StaticAct||len(out.Quant.Scale)!=0||len(out.Quant.ZeroPoint)!=0{t.Fatal("IQ metadata identity")}
+   s.Shape[0]++;s.Quant.Bits=7
+   if out.Shape[0]!=shape[0]||out.Quant.Bits!=bits{t.Fatal("IQ descriptor alias")}
+  }
+  for _,bad:=range []string{"bits","block","axis","shape","host-extent","device-extent","limit"}{
+   c,d,s,b=refillIQFixture(t,g.dt,g.block,g.dedicated,[]int{1,256});p=b.ptr
+   switch bad{
+   case "bits":s.Quant.Bits=1;if g.dt==IQ2_XS{s.Quant.Bits=2};if g.dt==IQ2_XXS{s.Quant.Bits=3}
+   case "block":s.Quant.Block=32
+   case "axis":s.Quant.Axis=1
+   case "shape":s.Shape[1]=257;d.Shape[1]=257
+   case "host-extent":s.buf.(*hostBuf).i8=s.buf.(*hostBuf).i8[:g.block-1]
+   case "device-extent":b.n--
+   case "limit":d.Shape=[]int{(64<<20)/g.block+1,256};s.Shape=slices.Clone(d.Shape)
+   }
+   if _,_,ok:=c.offloadRefillOperands(d,s,int64(g.block));ok||b.ptr!=p||b.invalidForSubmit()||cudaOffloadRefillActive!=nil{t.Fatalf("IQ pure refusal %v/%s",g,bad)}
+  }
+  if g.dt==IQ2_XXS{
+   c,d,s,b=refillIQFixture(t,g.dt,g.block,g.dedicated,[]int{1,256});p=b.ptr
+   s.Quant.Bits=6-d.Quant.Bits // each descriptor is valid alone; the pair is not.
+   if _,ok:=cudaOffloadRefillBytes(d);!ok{t.Fatal("XXS destination control")}
+   if _,ok:=cudaOffloadRefillBytes(s);!ok{t.Fatal("XXS source control")}
+   if _,_,ok:=c.offloadRefillOperands(d,s,int64(g.block));ok||b.ptr!=p||b.invalidForSubmit()||cudaOffloadRefillActive!=nil{t.Fatal("cross-descriptor XXS reuse")}
+  }
+  c,d,s,b=refillIQFixture(t,g.dt,g.block,g.dedicated,[]int{1,256});p=b.ptr
+  copied,stopped:=0,0
+  _,r:=c.offloadRefillWithOperations(d,s,int64(g.block),true,
+   func(unsafe.Pointer,unsafe.Pointer,int)bool{return true},
+   func(unsafe.Pointer,unsafe.Pointer,int)int{copied++;return 77},
+   func(x unsafe.Pointer){stopped++;if x!=p{t.Fatal("IQ stop pointer")}})
+  a:=cudaOffloadRefillActive
+  if a==nil||a.source.buf!=s.buf||a.destination.buf!=b||a.pointer!=p||a.failure==nil||b.ptr!=nil||!b.invalidForSubmit()||r.State!=OwnedTransferUnknown||r.Err!=a.failure||copied!=1||stopped!=1{t.Fatal("IQ failure retention")}
+  fresh,ok:=a.replacement.buf.(*cudaBuf)
+  if !ok||fresh==b||fresh.ptr!=p||!fresh.invalidForSubmit(){t.Fatal("IQ replacement retention")}
+  _,retry:=c.offloadRefillWithOperations(d,s,int64(g.block),true,nil,
+   func(unsafe.Pointer,unsafe.Pointer,int)int{copied++;return 0},func(unsafe.Pointer){stopped++})
+  if retry.State!=OwnedTransferUnknown||copied!=1||cudaOffloadRefillActive!=a{t.Fatal("IQ failure retried/replaced roots")}
  }
  c,d,s,b=refillFixture();d.Dtype=F32;d.Quant=nil;d.Shape=[]int{2,3}
  if n,ok:=cudaOffloadRefillBytes(d);!ok||n!=24{t.Fatal("f32 geometry")}

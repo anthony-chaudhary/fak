@@ -92,15 +92,20 @@ func cudaOffloadRefillBytes(t Tensor) (int, bool) {
 		block, bits = 176, 5
 	case Q6_K:
 		block, bits = 210, 6
-	case IQ4_NL, IQ4_XS:
+	case IQ2_XXS, IQ2_XS, IQ1_M, IQ4_NL, IQ4_XS:
 		var ok bool
 		block, ok = RawIQBlockBytes(t.Dtype)
 		if !ok {
 			return 0, false
 		}
+		// NewRawIQ uses Bits=4 for every raw-IQ dtype. The dedicated
+		// NewIQ2XXS constructor also produces Bits=2 for the same verbatim
+		// bytes. Preserve either existing descriptor; do not infer Bits from
+		// the nominal format name or reinterpret the payload.
+		if t.Dtype == IQ2_XXS && q.Bits == 2 {
+			bits = 2
+		}
 	default:
-		// Initial IQ arm is IQ4 only. IQ2/IQ1 constructor metadata has multiple
-		// existing conventions; do not infer a new source/device descriptor law.
 		return 0, false
 	}
 	if q.Bits != bits || block <= 0 || cols/256 > capBytes/block {
@@ -125,6 +130,11 @@ func (c *cudaBackend) offloadRefillOperands(dst, src Tensor, bytes int64) (*cuda
 	dn, ok := cudaOffloadRefillBytes(dst)
 	sn, sok := cudaOffloadRefillBytes(src)
 	if !ok || !sok || dn != sn || int64(dn) != bytes {
+		return nil, nil, false
+	}
+	// Reuse preserves the exact descriptor population, even when two valid
+	// constructors describe identical IQ2_XXS storage with different Bits.
+	if dst.Dtype != F32 && dst.Quant.Bits != src.Quant.Bits {
 		return nil, nil, false
 	}
 	b, ok := dst.buf.(*cudaBuf)
