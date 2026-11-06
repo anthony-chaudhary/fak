@@ -6,10 +6,10 @@ description: "Generated reference for fak CLI verbs, their purpose, implementati
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
 
-parsed files: 1353<br>
-rows: 1316<br>
-unverified rows: 0 / 1316<br>
-source-only rows absent from help: 1080
+parsed files: 1354<br>
+rows: 1319<br>
+unverified rows: 0 / 1319<br>
+source-only rows absent from help: 1083
 
 ## Surface table
 
@@ -108,9 +108,12 @@ source-only rows absent from help: 1080
 | `fak bench effort` |  | runBenchEffort / internal/agent, internal/agentopt, internal/gateway | `case` arm of the dispatch switch in cmdBench() | NONE | — | **SOURCE ONLY** |
 | `fak bench gitspawn` |  | runGitSpawnBench / internal/windowgate | `case` arm of the dispatch switch in cmdBench() | RUNTIME | — | **SOURCE ONLY** |
 | `fak bench h2h` |  | runBenchH2H / internal/h2hbench | `case` arm of the dispatch switch in cmdBench() | NONE | — | **SOURCE ONLY** |
+| `fak bench h2h gpu-idle` | polls nvidia-smi until at least --require GPUs sit at or below --max-util-pct utilization AND --max-mem-used-mib used VRAM, or the deadline passes | runBenchH2HGPUIde / internal/compute | `case` arm of the dispatch switch in runBenchH2H() | NONE | — | **SOURCE ONLY** |
 | `fak bench h2h help` |  |  | `if` arm of the dispatch in runBenchH2H() | N/A | — | **SOURCE ONLY** |
+| `fak bench h2h plan` | emits, for each --arm in the order given, the exact single-arm `fak bench h2h run` invocation with its own ledger under --ledger-dir | runBenchH2HPlan / internal/h2hbench | `case` arm of the dispatch switch in runBenchH2H() | NONE | — | **SOURCE ONLY** |
 | `fak bench h2h report` |  | runBenchH2HReport / internal/h2hbench | `case` arm of the dispatch switch in runBenchH2H() | NONE | — | **SOURCE ONLY** |
 | `fak bench h2h run` |  | runBenchH2HRun / internal/h2hbench | `case` arm of the dispatch switch in runBenchH2H() | NONE | — | **SOURCE ONLY** |
+| `fak bench h2h serve-wait` | polls GET <armURL>/models on every --arm until each one answers 200 (and lists --model when set) or the deadline passes | runBenchH2HServeWait / internal/h2hbench | `case` arm of the dispatch switch in runBenchH2H() | RUNTIME | — | **SOURCE ONLY** |
 | `fak bench local` |  | runBenchLocal / internal/localbench | `case` arm of the dispatch switch in cmdBench() | NONE | — | **SOURCE ONLY** |
 | `fak bench post` | handles `fak bench post`. | runBenchPost / internal/benchpost, internal/scoreboard, internal/slackenv, internal/slackoutbox, internal/slackwire | `case` arm of the dispatch switch in cmdBench() | NONE | — | **SOURCE ONLY** |
 | `fak bench request` | handles `fak bench request` — the next-test-per-machine run-request | runBenchRequest / internal/benchpost, internal/scoreboard, internal/slackenv, internal/slackoutbox, internal/slackwire, internal/windowgate | `case` arm of the dispatch switch in cmdBench() | RUNTIME | — | **SOURCE ONLY** |
