@@ -1244,18 +1244,18 @@ func (s *Session) prefillOwnedContext(ctx context.Context, ids []int) []float32 
 		if s.q8Qwen35HybridPrefillSessionOK(len(ids)) {
 			return s.prefillQwen35HybridQ(ids)
 		}
-		if cfg := s.M.Cfg; q8PrefillNeedsTokenLoop(cfg) {
+		if s.prefillNeedsTokenLoop() {
 			return s.headQ(s.tokenLoopHidden(s.tokenHiddenQ, ids))
 		}
 		return s.headQ(s.prefillBatchedQ(ids))
 	}
-	if s.f32PrefillNeedsTokenLoop() {
+	if s.prefillNeedsTokenLoop() {
 		// The batched f32 GEMM is one-weight-many-rows and still hardcodes the PreNorm
 		// block copy and one shared RoPE table. DenseMLP removes the up-projection, ALiBi
 		// replaces RoPE with score bias, non-PreNorm topology changes the residual/norm
 		// graph, and Gemma3-style per-layer RoPE theta changes the rotation by layer; these
 		// axes run through blockStep here, where the FFN/topology/RoPE dispatch lives. The
-		// f32PrefillBatchedMoEOK subset is the exception: its attention is batched and its
+		// prefillBatchedMoEOK subset is the exception: its attention is batched and its
 		// routed FFN runs per row through blockStep's exact call.
 		return s.prefillTokenLoop(ids)
 	}
@@ -1406,7 +1406,7 @@ func (s *Session) prefillNoLogitsOwnedContext(ctx context.Context, ids []int) {
 			s.prefillQwen35HybridQNoLogits(ids)
 			return
 		}
-		if q8PrefillNeedsTokenLoop(s.M.Cfg) {
+		if s.prefillNeedsTokenLoop() {
 			for _, id := range ids {
 				s.tokenHiddenQ(id, s.Cache.Len())
 			}
@@ -1415,7 +1415,7 @@ func (s *Session) prefillNoLogitsOwnedContext(ctx context.Context, ids []int) {
 		s.prefillBatchedQ(ids)
 		return
 	}
-	if s.f32PrefillNeedsTokenLoop() {
+	if s.prefillNeedsTokenLoop() {
 		for _, id := range ids {
 			s.tokenHidden(id, s.Cache.Len())
 		}
@@ -1428,36 +1428,39 @@ func q8PrefillNeedsTokenLoop(cfg Config) bool {
 	return cfg.IsMoE() || cfg.DenseMLP || cfg.Alibi || cfg.IsQwen35Hybrid() || cfg.AttnOutputGate || cfg.BlockTopology != PreNorm || cfg.hasLayerSpecificRopeTheta()
 }
 
-// f32PrefillNeedsTokenLoop gates the f32 prefillBatched lane only. It keeps every
-// q8PrefillNeedsTokenLoop refusal except the MoE subset f32PrefillBatchedMoEOK admits;
-// the Q8/Q4K/verify/HAL lanes keep calling q8PrefillNeedsTokenLoop unchanged.
-func f32PrefillNeedsTokenLoop(m *Model) bool {
-	return q8PrefillNeedsTokenLoop(m.Cfg) && !f32PrefillBatchedMoEOK(m)
+// prefillNeedsTokenLoop gates the batched host prefill lanes (f32 prefillBatched, Q8
+// prefillBatchedQ). It keeps every q8PrefillNeedsTokenLoop refusal except the MoE subset
+// prefillBatchedMoEOK admits; the Q4K/verify/HAL lanes keep calling
+// q8PrefillNeedsTokenLoop until they gain the per-row routed FFN.
+func prefillNeedsTokenLoop(m *Model) bool {
+	return q8PrefillNeedsTokenLoop(m.Cfg) && !prefillBatchedMoEOK(m)
 }
 
-// f32PrefillNeedsTokenLoop is the session form the f32 prefill callers use. An admitted
-// MoE session with a hidden-state tap or an enabled residual hook keeps the token loop,
-// because only blockStep invokes those observers; the MoE admission must not silently
-// drop them where the token loop used to run them.
-func (s *Session) f32PrefillNeedsTokenLoop() bool {
+// prefillNeedsTokenLoop is the session form the batched prefill callers use. An admitted
+// MoE session with a hidden-state tap, an enabled residual hook, or target-hidden capture
+// keeps the token loop, because only blockStep / tokenHidden* invoke those observers; the
+// MoE admission must not silently drop them where the token loop used to run them.
+func (s *Session) prefillNeedsTokenLoop() bool {
 	cfg := s.M.Cfg
 	if !q8PrefillNeedsTokenLoop(cfg) {
 		return false
 	}
-	if s.activeTap() != nil || (cfg.EnableResidualHook && cfg.residualHook != nil) {
+	if s.activeTap() != nil || s.captureTargetHidden || (cfg.EnableResidualHook && cfg.residualHook != nil) {
 		return true
 	}
-	return !f32PrefillBatchedMoEOK(s.M)
+	return !prefillBatchedMoEOK(s.M)
 }
 
-// f32PrefillBatchedMoEOK names the MoE arches whose every non-FFN axis prefillBatched
-// already models, so batching their attention sublayer and running the FFN per row
-// through ffnForLayer(l).apply with f32Kernel is bit-identical to blockStep. Families
+// prefillBatchedMoEOK names the MoE arches whose every non-FFN axis the batched prefill
+// lanes already model, so batching their attention sublayer and running the FFN per row
+// through ffnForLayer(l).apply with the token loop's own kernel (prefillRowFFN) matches
+// blockStep: bit-identical on f32Kernel, and within the lane's existing quantized-batched
+// tolerance on q8Kernel. Families
 // with their own attention or session path (MLA/DSA, MiniMax sparse attention, Gemma4,
 // DeepSeek-V4/V4.1), attention sinks (GPT-OSS, or any layer carrying self_attn.sinks,
-// which prefillBatched's softmax does not apply), or linear-attention layers keep the
+// which the batched softmax does not apply), or linear-attention layers keep the
 // token loop.
-func f32PrefillBatchedMoEOK(m *Model) bool {
+func prefillBatchedMoEOK(m *Model) bool {
 	cfg := m.Cfg
 	if !cfg.IsMoE() || cfg.DenseMLP || cfg.Alibi || cfg.IsQwen35Hybrid() || cfg.AttnOutputGate ||
 		cfg.BlockTopology != PreNorm || cfg.hasLayerSpecificRopeTheta() {
@@ -1490,7 +1493,7 @@ func (s *Session) tokenLoopHidden(step func(id, pos int) []float32, ids []int) [
 
 // prefillTokenLoop runs the per-token f32 forward (tokenHidden) over ids in cache order and
 // returns the head logits of the final token — the non-batched prefill path taken by the
-// arches f32PrefillNeedsTokenLoop selects out of the one-GEMM batched lane.
+// arches prefillNeedsTokenLoop selects out of the one-GEMM batched lane.
 func (s *Session) prefillTokenLoop(ids []int) []float32 {
 	return s.head(s.tokenLoopHidden(s.tokenHidden, ids))
 }

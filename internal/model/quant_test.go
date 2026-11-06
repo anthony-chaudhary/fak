@@ -378,6 +378,13 @@ func TestQ8MoEQuantizesRouterExperts(t *testing.T) {
 	m := NewSyntheticMoE(cfg)
 	m.Quantize()
 
+	// Q8 MoE Prefill now takes the batched prefillBatchedQ lane (attention batched, routed
+	// FFN per row on q8Kernel); it is bit-identical to the per-token loop in the legacy
+	// GEMM mode, as the dense Q8 lane is (TestQ8PrefillAppliesAttentionSoftcap).
+	oldMode := qgemmMode
+	qgemmMode = qgemmModeLegacy
+	defer func() { qgemmMode = oldMode }()
+
 	for _, name := range []string{
 		routerName(0),
 		expertName(0, 0, "gate_proj.weight"),
