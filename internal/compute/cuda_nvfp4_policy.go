@@ -47,3 +47,11 @@ func nvfp4CUBLASLtPolicy(sm, libraryVersion int) (eligible, skipAlgo66 bool) {
 		(libraryVersion < 130602 || libraryVersion >= 130700 && libraryVersion < 130800)
 	return true, skipAlgo66
 }
+
+// NVFP4CUBLASLtEligible exports the eligibility half of nvfp4CUBLASLtPolicy so
+// capability adjudicators (fp4meta.CUDACapabilities) gate on the same floors
+// the CUDA W4A4 dispatch enforces.
+func NVFP4CUBLASLtEligible(sm, libraryVersion int) bool {
+	eligible, _ := nvfp4CUBLASLtPolicy(sm, libraryVersion)
+	return eligible
+}

@@ -322,5 +322,9 @@ func (m *Model) residentMatRowsBase(name string, x []float32, out, in int) []flo
 		}
 		return gptqMatRows(qt, x)
 	}
+	if qt := m.nvfp4w[name]; qt != nil {
+		requireResidentShape("resident NVFP4", name, qt.out, qt.in, out, in)
+		return nvfp4MatRows(name, qt, x)
+	}
 	panic("model: missing tensor " + name)
 }

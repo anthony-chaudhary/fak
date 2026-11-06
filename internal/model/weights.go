@@ -337,6 +337,9 @@ type Model struct {
 	// GPTQModel qweight/qzeros/scales triples. It is consumed only by Session.GPTQ via
 	// residentMatRows; the f32/Q8/Q4/Q4_K paths never read it.
 	gptqw map[string]*gptqTensor
+	// nvfp4w holds resident ModelOpt NVFP4 projections (LoadModelOptNVFP4Dir),
+	// served through compute.MatMulNVFP4 by residentMatRowsBase.
+	nvfp4w map[string]*nvfp4Weight
 
 	// MLA holds the DeepSeek V2/V3 Multi-head Latent Attention projection geometry
 	// when this model uses the MLA kvLayout (issue #25). It is nil for Llama/Qwen
@@ -746,6 +749,11 @@ func (m *Model) hasWeight(name string) bool {
 			return true
 		}
 	}
+	if m.nvfp4w != nil {
+		if _, ok := m.nvfp4w[name]; ok {
+			return true
+		}
+	}
 	return false
 }
 
@@ -808,6 +816,9 @@ func (m *Model) residentShape(name string) (out, in int, ok bool) {
 	if qt := m.gptqw[name]; qt != nil {
 		return qt.out, qt.in, true
 	}
+	if qt := m.nvfp4w[name]; qt != nil {
+		return qt.out, qt.in, true
+	}
 	if m.v41PackedWKVPresent(name) {
 		return 512, 5120, true
 	}
@@ -828,7 +839,8 @@ func (m *Model) residentHeadName() string {
 		m.q4kw["lm_head.weight"] != nil ||
 		m.kqw["lm_head.weight"] != nil ||
 		m.q2w["lm_head.weight"] != nil ||
-		m.gptqw["lm_head.weight"] != nil {
+		m.gptqw["lm_head.weight"] != nil ||
+		m.nvfp4w["lm_head.weight"] != nil {
 		return "lm_head.weight"
 	}
 	return "model.embed_tokens.weight"
