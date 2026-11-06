@@ -55,7 +55,7 @@ func planCUDASequenceSplitScratch(req Qwen35SequencePrefillRequest, arm CUDAQ4KP
 	}
 	generic := func(weight Tensor) error {
 		switch weight.Dtype {
-		case Q8_0, Q2_K, IQ4_XS:
+		case Q8_0, Q2_K, Q3_K, IQ4_XS:
 			return add(weight)
 		case Q4_K:
 			// An invalid Q4 selection is irrelevant unless this request will
@@ -72,7 +72,7 @@ func planCUDASequenceSplitScratch(req Qwen35SequencePrefillRequest, arm CUDAQ4KP
 				return fmt.Errorf("unsupported CUDA Q4_K prefill arm %q", arm)
 			}
 		default:
-			// Only Q8_0/Q2_K/Q4_K/IQ4_XS reach the compensated split dispatch;
+			// Only Q8_0/Q2_K/Q3_K/Q4_K/IQ4_XS reach the compensated split dispatch;
 			// every other dtype contributes no split-half bytes.
 			return nil
 		}
