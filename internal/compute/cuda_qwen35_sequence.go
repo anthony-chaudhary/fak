@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -56,6 +57,15 @@ func (*cudaBackend) CUDAQwen35SequenceLockProfileSnapshot() (completed, waitNS, 
 }
 
 func (*cudaBackend) Qwen35SequencePrefillPath() string { return Qwen35SequencePrefillPath }
+
+// Raw hidden rows are an explicit MTP prerequisite, not prefix-replay or target
+// transaction admission. The existing request-resource lifetime still applies.
+func (c *cudaBackend) Qwen35SequenceRawHiddenPath() string {
+	if c != nil && c == cudaDev && os.Getenv("FAK_CUDA_QWEN35_MTP") == "1" {
+		return Qwen35SequenceRawHiddenPath
+	}
+	return ""
+}
 
 // Qwen35SequenceAllLogitsPath advertises the all-row final projection: with
 // NeedAllLogits the result carries a device-resident [tokens, vocab] panel.
@@ -236,6 +246,11 @@ func (c *cudaBackend) validateQwen35SequenceTensor(name string, t Tensor, matrix
 }
 
 func (c *cudaBackend) validateQwen35SequenceRequestLocked(req Qwen35SequencePrefillRequest) (*cudaKV, error) {
+	if req.CaptureRawHidden && (c.Qwen35SequenceRawHiddenPath() != Qwen35SequenceRawHiddenPath ||
+		c.capturing || c.graphOnce != nil || req.CapturePrefixReplay || len(req.FeatureLayers) != 0) {
+		return nil, qwen35SequenceFailure("raw-hidden-preflight", -1,
+			"raw-hidden capture requires explicit CUDA MTP admission without graph, prefix replay or feature capture")
+	}
 	if err := validateQwen35SequenceGeometry(req); err != nil {
 		return nil, err
 	}
@@ -512,10 +527,15 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 		return result, &Qwen35SequenceError{Stage: "device-admission", Layer: -1, Cause: admitErr}
 	}
 	transientStart := len(c.transient)
+	var rawHiddenRows Tensor
+	var rawHiddenBuf *cudaBuf
 	failed := true
 	statesMayHaveAdvanced := false
 	defer func() {
 		if failed {
+			if rawHiddenBuf != nil {
+				atomic.StoreUint32(&rawHiddenBuf.invalid, 1)
+			}
 			var launch *CUDAOpError
 			if statesMayHaveAdvanced || (errors.As(err, &launch) && (launch.Op == cudaQwen35IQ2SequenceOp || launch.Op == cudaQ56KMMQOp)) {
 				// Stateful execution cannot be rolled back. Allocation errors,
@@ -567,9 +587,12 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 		splitToken = 0 // one retirement attempt, including panic/Goexit unwind
 		var status C.fcuda_sequence_split_status
 		if code := int(C.fcuda_sequence_split_end(token, &status)); code != 0 {
-			if qwen35SequenceIQ2Qualification || cudaQ56KMMQQualification {
-				// cudaMu still excludes all cleanup/submission. Preserve the
-				// exact retirement failure before any outer owner can recycle.
+			if req.CaptureRawHidden || qwen35SequenceIQ2Qualification || cudaQ56KMMQQualification {
+				// cudaMu still excludes all cleanup/submission. Raw capture must
+				// close the always-linked stop bridge even in ordinary builds:
+				// the split owner's private quarantine alone does not stop the
+				// generic transient cleanup from detaching retained raw rows.
+				// Preserve the first retirement failure before any cleanup.
 				cudaQwen35IQ2SequenceRetirementFailedLocked(code)
 			}
 			c.faultLatch.Observe(DeviceFaultExecution, "qwen35-sequence-split-end", int(status.code))
@@ -730,6 +753,12 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 		C.fcuda_add_f32(c.cf(x), c.cf(delta), C.int(tokens*req.Hidden))
 		c.releaseTransientBuffers([]*cudaBuf{postNormBuf, gateBuf, upBuf, activatedBuf, deltaBuf})
 	}
+	// BEGIN CUDA raw-hidden publication tail.
+	// Preserve the exact final residual, not the normalized last row. No copy or
+	// new allocation is needed; the optional panel remains a token transient.
+	if req.CaptureRawHidden {
+		rawHiddenRows, rawHiddenBuf = x, xBuf
+	}
 	finalPanel, finalPanelBuf, finalErr := c.qwen35SequenceRMSNormLocked(x, req.OutputNorm, tokens, req.RMSNormEpsilon, "output-norm")
 	if finalErr != nil {
 		return result, finalErr
@@ -760,7 +789,12 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 		}
 		logitsRows.Shape = []int{tokens, req.Output.Shape[0]}
 	}
-	c.releaseTransientBuffers([]*cudaBuf{xBuf, finalPanelBuf})
+	if rawHiddenBuf == nil {
+		// The unrequested path keeps its original early-release order.
+		c.releaseTransientBuffers([]*cudaBuf{xBuf, finalPanelBuf})
+	} else {
+		c.releaseTransientBuffers([]*cudaBuf{finalPanelBuf})
+	}
 	var logits Tensor
 	var logitsBuf *cudaBuf
 	if req.NeedLogits {
@@ -798,10 +832,11 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 		c.qwen35SequencePoisonStates(req)
 		return result, qwen35SequenceFailure("transfer-witness", -1, fmt.Sprintf("activation traffic H2D=%d D2H=%d", transfers.ActivationH2DBytes, transfers.ActivationD2HBytes))
 	}
-	result = Qwen35SequencePrefillResult{LastHidden: last, Logits: logits, LogitsRows: logitsRows, Tokens: tokens, Transfers: transfers}
-	c.qwen35SequenceReleaseSinceLocked(transientStart, lastBuf, logitsBuf, logitsRowsBuf)
+	result = Qwen35SequencePrefillResult{LastHidden: last, RawHiddenRows: rawHiddenRows, Logits: logits, LogitsRows: logitsRows, Tokens: tokens, Transfers: transfers}
+	c.qwen35SequenceReleaseSinceLocked(transientStart, lastBuf, logitsBuf, logitsRowsBuf, rawHiddenBuf)
 	failed = false
 	return result, nil
+	// END CUDA raw-hidden publication tail.
 }
 
 // Admit only weights that will actually select the new P1..3 arm, before KV,
