@@ -158,11 +158,12 @@ func TestVerificationWidthScoreBlindToMeasuredLatencyWhenBaselineUnset(t *testin
 		}
 		return gov
 	}
-	// One round executed at the given depth: full-minus-one acceptance.
+	// One round executed at the given depth: full-minus-one acceptance while
+	// drafting, or zero draft proposals/acceptances after target-only escape.
 	roundAt := func(depth int, targetLat, stepLat time.Duration) Qwen38AdaptiveStepObservation {
 		return Qwen38AdaptiveStepObservation{
 			ProposedTokens: depth,
-			AcceptedTokens: depth - 1,
+			AcceptedTokens: max(0, depth-1),
 			StepLatency:    stepLat,
 			TargetLatency:  targetLat,
 		}
@@ -202,6 +203,11 @@ func TestVerificationWidthScoreBlindToMeasuredLatencyWhenBaselineUnset(t *testin
 	}
 	if traceArmed[0].Action != "escape" {
 		t.Fatalf("armed expensive-world step 1 action = %q, want escape", traceArmed[0].Action)
+	}
+	for i, r := range traceArmed[1:] {
+		if r.DepthBefore != 0 || r.ProposedTokens != 0 || r.AcceptedTokens != 0 {
+			t.Fatalf("armed expensive-world step %d: want target-only with no draft tokens, got %+v", i+2, r)
+		}
 	}
 	t.Logf("baseline unset: 40ms and 400ms step costs score identically (%.4f on the final round); baseline armed: 400ms step cost escapes to target-only", traceExpensive[5].Speedup)
 }
