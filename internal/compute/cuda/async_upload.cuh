@@ -53,11 +53,15 @@ static int fcuda_async_init(void) {
 }
 
 // fcuda_upload_async: 0 = issued (*slot/*gen name the fence), 1 = not issued (caller copies
-// synchronously), >=1000 = CUDA failure (1000 + cudaError_t), and the destination is untouched.
+// synchronously), >=1000 = CUDA failure (1000 + cudaError_t). An attempted
+// copy may have touched the destination even when submission/recording failed.
+// Drain that attempt before cleanup; a failed drain closes the shared terminal
+// boundary, retaining both its pinned source and the native device allocation.
 extern "C" int fcuda_upload_async(void *d, const void *h, size_t n, int *slot, uint64_t *gen) {
   if (!slot || !gen) return -1;
   *slot = -1;
   *gen = 0;
+  if (g_cuda_cleanup_status != 0) return 1000 + g_cuda_cleanup_status;
   if (n == 0 || n > FCUDA_ASYNC_SLOT_CAP || g_capture_open) { g_async_fallback++; return 1; }
   int st = fcuda_async_init();
   if (st) return st;
@@ -93,9 +97,23 @@ extern "C" int fcuda_upload_async(void *d, const void *h, size_t n, int *slot, u
   st = fcuda_async_status(cudaEventRecord(g_copy_order, g_stream), "order record");
   if (!st) st = fcuda_async_status(cudaStreamWaitEvent(g_copy_stream, g_copy_order, 0), "order wait");
   fcuda_ts_untimed_transfer(); // copy-stream H2D: overlap is read from the ring fences, not a g_stream row
-  if (!st) st = fcuda_async_status(cudaMemcpyAsync(d, s.host, n, cudaMemcpyHostToDevice, g_copy_stream), "memcpy");
+  bool copy_attempted = false;
+  if (!st) {
+    // An error from cudaMemcpyAsync does not prove that no DMA was queued.
+    copy_attempted = true;
+    st = fcuda_async_status(cudaMemcpyAsync(d, s.host, n, cudaMemcpyHostToDevice, g_copy_stream), "memcpy");
+  }
   if (!st) st = fcuda_async_status(cudaEventRecord(s.done, g_copy_stream), "done record");
-  if (st) return st;
+  if (st) {
+    if (copy_attempted) {
+      const cudaError_t drain = cudaStreamSynchronize(g_copy_stream);
+      if (drain != cudaSuccess && !g_cuda_cleanup_status)
+        g_cuda_cleanup_status = (int)drain;
+    }
+    // Keep the original issue error. The separate shared terminal retains a
+    // failed drain and prevents Free, later slot reuse, and sync fallback.
+    return st;
+  }
   s.inflight = true;
   s.gen++;
   g_h2d_bytes += n;
@@ -107,6 +125,7 @@ extern "C" int fcuda_upload_async(void *d, const void *h, size_t n, int *slot, u
 
 // fcuda_upload_async_fence: 1 = landed, 0 = still in flight (block=0 only), >=1000 = failure.
 extern "C" int fcuda_upload_async_fence(int slot, uint64_t gen, int block) {
+  if (g_cuda_cleanup_status != 0) return 1000 + g_cuda_cleanup_status;
   if (slot < 0 || slot >= FCUDA_ASYNC_SLOTS) return 1;
   fcuda_async_slot &s = g_async_slots[slot];
   if (s.gen != gen || !s.inflight) return 1;
