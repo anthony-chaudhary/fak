@@ -336,6 +336,11 @@ func (a *Adjudicator) testImmunityVerdict(ctx context.Context, p Policy, c *abi.
 	if isTestImmunityExempt(ctx, p, c, args, a) {
 		return abi.Verdict{}, false
 	}
+	if !isWriteOrEditTool(lowerTool) {
+		if cmd, ok := commandArg(args); ok && isHeadRestoreCommand(cmd) {
+			return abi.Verdict{}, false
+		}
+	}
 	targets := extractWriteTargets(c.Tool, lowerTool, args, p)
 	if len(targets) == 0 {
 		return abi.Verdict{}, false
