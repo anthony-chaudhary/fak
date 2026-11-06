@@ -516,7 +516,16 @@ func (c *cudaBackend) qwen35SequenceSyncLocked() error {
 		status = int(C.fak_qwen35_sequence_sync())
 	}
 	if status != 0 {
-		return &Qwen35SequenceError{Stage: "final-fence", Layer: -1, Reason: fmt.Sprintf("CUDA status %d", status)}
+		// Failed completion is not proof that shared-stream storage can be
+		// reused. Close the always-linked native cleanup latch before unwind,
+		// including the ordinary no-split-owner path and DeviceContextProbe.
+		cudaQ56KMMQRetirementFailedLocked(status)
+		if !qwen35SequenceIQ2Qualification && !cudaQ56KMMQQualification {
+			// The qualification-specific fences already observe this status.
+			c.faultLatch.Observe(DeviceFaultExecution, "qwen35-sequence-final-fence", status)
+		}
+		return &Qwen35SequenceError{Stage: "final-fence", Layer: -1, Reason: fmt.Sprintf("CUDA status %d", status),
+			Cause: &CUDAOpError{Op: "Qwen35SequencePrefill", Site: "final-fence", Code: status, Msg: "failed completion retains shared stream owners"}}
 	}
 	atomic.AddUint64(&c.fenceGen, 1)
 	return nil

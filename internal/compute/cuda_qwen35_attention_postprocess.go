@@ -10,11 +10,17 @@ int fak_qwen35_attention_postprocess_f32(
     const float *QW, const float *KW, float *QOut,
     float *KRawCache, float *KCache, float *VCache,
     int tokens, int start, int rotary, float eps, double theta);
+int fak_qwen35_attention_postprocess_typed(
+    const float *Q, const float *K, const float *V,
+    const float *QW, const float *KW, float *QOut,
+    float *KRawCache, void *KCache, void *VCache,
+    int tokens, int start, int rotary, float eps, double theta, int kv_dtype);
 unsigned long long fak_qwen35_attention_postprocess_launch_count(void);
 */
 import "C"
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -37,10 +43,21 @@ func (c *cudaBackend) qwen35SequenceAttentionPostprocessLocked(q, k, value, qWei
 	if kv == nil || kv.be != c || layer < 0 || layer >= len(kv.Kraw) || layer >= len(kv.K) || layer >= len(kv.V) {
 		return fail("KV cache does not own the requested compact attention layer")
 	}
-	// This fused writer has a fixed F32 ABI. Decline before mutation so the
-	// ordinary norm/RoPE plus typed append composition handles narrowed KV.
-	if kv.K[layer].dtype != F32 || kv.V[layer].dtype != F32 {
+	// KVPrecision is not the CUDA dtype enum. Keep the mapping explicit and
+	// require both attended planes to match the consumer's single dtype.
+	storage, storageCode := F32, 0
+	switch kv.cfg.Precision {
+	case KVPrecisionF32:
+	case KVPrecisionF16:
+		storage, storageCode = F16, 1
+	case KVPrecisionBF16:
+		storage, storageCode = BF16, 2
+	default:
+		// Unsupported storage retains the ordinary composition without effects.
 		return Tensor{}, nil, false, nil
+	}
+	if kv.Kraw[layer].dtype != F32 || kv.K[layer].dtype != storage || kv.V[layer].dtype != storage {
+		return fail("KV shadow or attended storage disagrees with configured precision")
 	}
 	if err := validateQwen35CausalAttentionPanelGeometry(tokens, start, 24, kv.cfg.NumKVHeads, kv.cfg.HeadDim); err != nil {
 		return Tensor{}, nil, true, err
@@ -77,16 +94,16 @@ func (c *cudaBackend) qwen35SequenceAttentionPostprocessLocked(q, k, value, qWei
 	if err != nil {
 		return Tensor{}, nil, true, err
 	}
-	status := int(C.fak_qwen35_attention_postprocess_f32(c.cf(q), c.cf(k), c.cf(value), c.cf(qWeight), c.cf(kWeight), c.cf(out), (*C.float)(kv.Kraw[layer].ptr), (*C.float)(kv.K[layer].ptr), (*C.float)(kv.V[layer].ptr), C.int(tokens), C.int(start), C.int(rotary), C.float(eps), C.double(theta)))
+	status := int(C.fak_qwen35_attention_postprocess_typed(c.cf(q), c.cf(k), c.cf(value), c.cf(qWeight), c.cf(kWeight), c.cf(out), (*C.float)(kv.Kraw[layer].ptr), kv.K[layer].ptr, kv.V[layer].ptr, C.int(tokens), C.int(start), C.int(rotary), C.float(eps), C.double(theta), C.int(storageCode)))
 	if status != 0 {
 		// Match sequence lifetime ownership: drain before releasing the transient;
 		// a drain fault is surfaced and latched, never treated as permission to retry.
+		selectedErr := &Qwen35SequenceError{Stage: "attention-postprocess", Layer: layer, Reason: fmt.Sprintf("CUDA status %d", status)}
 		if drainErr := c.qwen35SequenceSyncLocked(); drainErr != nil {
-			c.faultLatch.ObserveError(drainErr, "attention-postprocess-drain")
-			return Tensor{}, nil, true, drainErr
+			return Tensor{}, nil, true, errors.Join(selectedErr, drainErr)
 		}
 		c.releaseTransientBuffers([]*cudaBuf{buf})
-		return fail(fmt.Sprintf("CUDA status %d", status))
+		return Tensor{}, nil, true, selectedErr
 	}
 	// Exactly the existing AppendKV publication point: all three writes enqueued
 	// on the one stream before any metadata advances. The sequence final fence
