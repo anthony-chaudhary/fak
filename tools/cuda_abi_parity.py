@@ -287,6 +287,8 @@ def strip_comments(text: str) -> str:
 
 # Enroll the qualified paged-copy CGo contract without changing symbol parsing.
 BINDINGS += ("internal/compute/cuda_paged_kv.go",)
+# Actual eager refill CGo calls/prototypes participate in the same strict gate.
+BINDINGS += ("internal/compute/cuda_offload_refill.go",)
 BINDINGS_LABEL = ", ".join(BINDINGS)
 
 
