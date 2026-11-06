@@ -439,3 +439,77 @@ extern "C" int fcuda_kv_snapshot_release_checked(void *expected, size_t bytes, i
   return v41_candidates_stream_uncertain()
       ? fcuda_kv_snapshot_release_failed((int)cudaErrorNotReady) : 0;
 }
+
+
+// BEGIN checked detached paged-sequence owner (#13881).
+// Exact sites distinguish pool arenas/table from arbitrary KV views or weights.
+static bool kv_paged_owner_site(const char *s) {
+  if (!s) return false;
+  if (!strcmp(s, "kv-paged-block-table") || !strcmp(s, "qwen35-paged-table") ||
+      !strcmp(s, "qwen35-paged-key-arena") || !strcmp(s, "qwen35-paged-raw-arena") ||
+      !strcmp(s, "qwen35-paged-value-arena") || !strcmp(s, "qwen35-paged-gather")) return true;
+  const char *prefixes[] = {"kv-paged-key-arena layer ", "kv-paged-pre-rope-key-arena layer ", "kv-paged-value-arena layer "};
+  for (const char *prefix : prefixes) {
+    const size_t n = strlen(prefix);
+    if (strncmp(s, prefix, n)) continue;
+    const char *digit = s + n;
+    if (!*digit) return false;
+    for (; *digit; ++digit) if (*digit < '0' || *digit > '9') return false;
+    return true;
+  }
+  return false;
+}
+// Inspection does not transfer ownership. Every CUDA error is returned and
+// latched; no diagnostic-only cache hook may consume it first.
+extern "C" int fcuda_paged_kv_owner_checked(const void *expected, size_t bytes) {
+  if (g_cuda_cleanup_status) return g_cuda_cleanup_status;
+  if (!expected || !bytes || g_capture_open || v41_candidates_stream_uncertain() ||
+      kv_snapshot_release_refused(const_cast<void *>(expected))) return (int)cudaErrorInvalidValue;
+  auto live = g_live.find(const_cast<void *>(expected));
+  if (live == g_live.end() || live->second != bytes ||
+      g_managed_live.count(const_cast<void *>(expected)) || g_panel_live.count(const_cast<void *>(expected)))
+    return (int)cudaErrorInvalidValue;
+  {
+    fak_alloc_tags_guard guard;
+    auto found = g_alloc_tags.find(const_cast<void *>(expected));
+    const int sites = g_alloc_site_n.load(std::memory_order_relaxed);
+    if (found == g_alloc_tags.end()) return (int)cudaErrorInvalidValue;
+    const fak_alloc_tag &tag = found->second;
+    if (tag.bytes != bytes || tag.cls != FAK_ALLOC_KV_CACHE || tag.kind != FAK_ALLOC_DEVICE_LOCAL ||
+        tag.site <= FAK_ALLOC_SITE_OVERFLOW || tag.site >= sites || tag.site >= FAK_ALLOC_SITE_CAP ||
+        !kv_paged_owner_site(g_alloc_sites[tag.site].name)) return (int)cudaErrorInvalidValue;
+  }
+  int device = -1;
+  cudaError_t status = cudaGetDevice(&device);
+  if (status != cudaSuccess) return kv_snapshot_status((int)status);
+  if (device != 0) return (int)cudaErrorInvalidDevice;
+  cudaStreamCaptureStatus capture;
+  status = cudaStreamIsCapturing(g_stream, &capture);
+  if (status != cudaSuccess) return kv_snapshot_status((int)status);
+  if (capture != cudaStreamCaptureStatusNone) return (int)cudaErrorInvalidValue;
+  return g_cuda_cleanup_status;
+}
+// Caller holds cudaMu, has completed all prior uses and detached this exact
+// base from EVERY pool/table consumer. RETIRED means relinquished/nonretryable,
+// not successful pool acceptance or physical free if bookkeeping throws.
+// The Go operation retains the exact base. Pool eviction may concern another base.
+extern "C" int fcuda_paged_kv_release_checked(void *expected, size_t bytes, int *disposition) {
+  if (disposition) *disposition = FCUDA_PAGED_KV_RETAINED;
+  if (!disposition) return kv_snapshot_status((int)cudaErrorInvalidValue);
+  const int checked = fcuda_paged_kv_owner_checked(expected, bytes);
+  if (checked) return kv_snapshot_status(checked);
+  auto live = g_live.find(expected);
+  g_live.erase(live);
+  *disposition = FCUDA_PAGED_KV_RETIRED; // never retry, even if pool bookkeeping fails
+  try {
+    fcuda_pool_put(expected, bytes);
+  } catch (...) {
+    // The Go operation retains its exact pointer/receipt. Do not attempt a
+    // second free or silently reopen the allocator after a partial handoff.
+    return kv_snapshot_status((int)cudaErrorMemoryAllocation);
+  }
+  if (g_cuda_cleanup_status) return g_cuda_cleanup_status;
+  if (v41_candidates_stream_uncertain()) return kv_snapshot_status((int)cudaErrorNotReady);
+  return 0;
+}
+// END checked detached paged-sequence owner (#13881).

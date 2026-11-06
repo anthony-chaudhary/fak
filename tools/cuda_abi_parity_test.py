@@ -400,6 +400,41 @@ class TestCollectIncludes(unittest.TestCase):
                 self.assertIn(name, payload["corpus"]["undefined"])
 
     # fak-test:runtime fast est=100ms lane=default
+    def test_paged_sequence_binding_and_real_omissions(self):
+        binding = "internal/compute/cuda_qwen35_sequence_paged.go"
+        self.assertIn(binding, m.BINDINGS)
+        signatures = {
+            "fcuda_paged_kv_owner_checked": "int fcuda_paged_kv_owner_checked(const void *p, size_t n)",
+            "fcuda_paged_kv_release_checked": "int fcuda_paged_kv_release_checked(void *p, size_t n, int *d)",
+            "fak_qwen35_causal_attention_panel_f32": "int fak_qwen35_causal_attention_panel_f32(const float *q, const float *k, const float *v, float *o, int t, int p, int h, int kh, int hd, float s)",
+            "fak_v41_checked_stream_terminal": "int fak_v41_checked_stream_terminal(void)",
+        }
+        self.assertFalse(signatures.keys() & m.UNDECLARED_DEF_OK.keys())
+        calls = "\n".join(("C.fcuda_paged_kv_owner_checked(0, 16)",
+            "C.fcuda_paged_kv_release_checked(0, 16, 0)",
+            "C.fak_qwen35_causal_attention_panel_f32(0, 0, 0, 0, 2, 0, 24, 4, 256, 0.0625)",
+            "C.fak_v41_checked_stream_terminal()"))
+        def seed(omit_decl=None, omit_def=None):
+            self.write(binding, '/*\n#include <stddef.h>\n' +
+                "\n".join("extern " + signature + ";" for name, signature in signatures.items() if name != omit_decl) +
+                '\n*/\nimport "C"\n' + calls + "\n")
+            self.write(m.KERNELS[0], 'extern "C" int fcuda_test(void) { return 0; }\n' +
+                "\n".join('extern "C" ' + signature + ' { return 0; }' for name, signature in signatures.items() if name != omit_def))
+            return m.collect(self.root)
+        payload = seed()
+        self.assertEqual(payload["verdict"], "OK", payload)
+        self.assertEqual(payload["corpus"]["n_called"], 5, payload)
+        for name in signatures:
+            with self.subTest(symbol=name, missing="prototype"):
+                payload=seed(omit_decl=name)
+                self.assertEqual(payload["verdict"], "ACTION", payload)
+                self.assertIn(name, payload["corpus"]["undeclared_calls"])
+            with self.subTest(symbol=name, missing="definition"):
+                payload=seed(omit_def=name)
+                self.assertEqual(payload["verdict"], "ACTION", payload)
+                self.assertIn(name, payload["corpus"]["undefined"])
+
+    # fak-test:runtime fast est=100ms lane=default
     def test_offload_refill_binding_and_real_omissions(self):
         binding = "internal/compute/cuda_offload_refill.go"
         source = "internal/compute/cuda/async_upload.cuh"

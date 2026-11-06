@@ -246,6 +246,11 @@ func (c *cudaBackend) validateQwen35SequenceTensor(name string, t Tensor, matrix
 }
 
 func (c *cudaBackend) validateQwen35SequenceRequestLocked(req Qwen35SequencePrefillRequest) (*cudaKV, error) {
+	// Independent decode batching retains its original contiguous-only contract.
+	return c.validateQwen35SequenceStoreRequestLocked(req, nil)
+}
+
+func (c *cudaBackend) validateQwen35SequenceStoreRequestLocked(req Qwen35SequencePrefillRequest, paged *cudaQwen35PagedSequence) (*cudaKV, error) {
 	if req.CaptureRawHidden && (c.Qwen35SequenceRawHiddenPath() != Qwen35SequenceRawHiddenPath ||
 		c.capturing || c.graphOnce != nil || req.CapturePrefixReplay || len(req.FeatureLayers) != 0) {
 		return nil, qwen35SequenceFailure("raw-hidden-preflight", -1,
@@ -282,16 +287,24 @@ func (c *cudaBackend) validateQwen35SequenceRequestLocked(req Qwen35SequencePref
 	if err := c.validateQwen35SequenceTensor("output", req.Output, true, vocab, req.Hidden); err != nil {
 		return nil, err
 	}
-	kv, ok := req.KV.(*cudaKV)
-	if !ok || kv == nil || kv.be != c || kv.Len() != req.StartPos {
-		return nil, qwen35SequenceFailure("kv-preflight", -1, "KV must belong to this CUDA backend and match start_pos")
-	}
-	if kv.cfg.NumKVHeads != req.NumKVHeads || kv.cfg.HeadDim != req.HeadDim || len(kv.K) < len(req.Layers)/4 || len(kv.Kraw) < len(req.Layers)/4 || len(kv.V) < len(req.Layers)/4 {
-		return nil, qwen35SequenceFailure("kv-preflight", -1, "KV geometry or compact layer capacity does not match the request")
-	}
-	for pos, absolute := range kv.pos {
-		if absolute != pos {
-			return nil, qwen35SequenceFailure("kv-preflight", -1, "Qwen recurrent sequence path requires an unevicted contiguous position prefix")
+	var kv *cudaKV
+	if paged != nil {
+		if err := paged.validateHostLocked(req); err != nil {
+			return nil, err
+		}
+	} else {
+		var ok bool
+		kv, ok = req.KV.(*cudaKV)
+		if !ok || kv == nil || kv.be != c || kv.Len() != req.StartPos {
+			return nil, qwen35SequenceFailure("kv-preflight", -1, "KV must belong to this CUDA backend and match start_pos")
+		}
+		if kv.cfg.NumKVHeads != req.NumKVHeads || kv.cfg.HeadDim != req.HeadDim || len(kv.K) < len(req.Layers)/4 || len(kv.Kraw) < len(req.Layers)/4 || len(kv.V) < len(req.Layers)/4 {
+			return nil, qwen35SequenceFailure("kv-preflight", -1, "KV geometry or compact layer capacity does not match the request")
+		}
+		for pos, absolute := range kv.pos {
+			if absolute != pos {
+				return nil, qwen35SequenceFailure("kv-preflight", -1, "Qwen recurrent sequence path requires an unevicted contiguous position prefix")
+			}
 		}
 	}
 	keyDim := req.NumKeyHeads * req.KeyHeadDim
@@ -427,10 +440,12 @@ func (c *cudaBackend) validateQwen35SequenceRequestLocked(req Qwen35SequencePref
 			if (layer.QNorm.Buf() == nil) != (layer.KNorm.Buf() == nil) {
 				return nil, qwen35SequenceFailure("tensor-preflight", index, "Q/K normalization weights must be both present or both absent")
 			}
-			width := kv.stride()
-			for _, cache := range []dslice{kv.Kraw[compactAttention], kv.K[compactAttention], kv.V[compactAttention]} {
-				if cache.len != req.StartPos*width {
-					return nil, qwen35SequenceFailure("kv-preflight", index, "compact attention cache length does not match start_pos")
+			if paged == nil {
+				width := kv.stride()
+				for _, cache := range []dslice{kv.Kraw[compactAttention], kv.K[compactAttention], kv.V[compactAttention]} {
+					if cache.len != req.StartPos*width {
+						return nil, qwen35SequenceFailure("kv-preflight", index, "compact attention cache length does not match start_pos")
+					}
 				}
 			}
 			compactAttention++
@@ -526,6 +541,10 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 	if admitErr := c.faultLatch.Admit("qwen35-sequence-prefill"); admitErr != nil {
 		return result, &Qwen35SequenceError{Stage: "device-admission", Layer: -1, Cause: admitErr}
 	}
+	var paged *cudaQwen35PagedSequence
+	if k, ok := req.KV.(*cudaPagedKV); ok {
+		paged = &cudaQwen35PagedSequence{c: c, k: k}
+	}
 	transientStart := len(c.transient)
 	var rawHiddenRows Tensor
 	var rawHiddenBuf *cudaBuf
@@ -533,6 +552,9 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 	statesMayHaveAdvanced := false
 	defer func() {
 		if failed {
+			if paged != nil {
+				paged.abortLocked()
+			}
 			if rawHiddenBuf != nil {
 				atomic.StoreUint32(&rawHiddenBuf.invalid, 1)
 			}
@@ -546,7 +568,7 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 			c.qwen35SequenceReleaseSinceLocked(transientStart)
 		}
 	}()
-	kv, err := c.validateQwen35SequenceRequestLocked(req)
+	kv, err := c.validateQwen35SequenceStoreRequestLocked(req, paged)
 	if err != nil {
 		return result, err
 	}
@@ -587,7 +609,7 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 		splitToken = 0 // one retirement attempt, including panic/Goexit unwind
 		var status C.fcuda_sequence_split_status
 		if code := int(C.fcuda_sequence_split_end(token, &status)); code != 0 {
-			if req.CaptureRawHidden || qwen35SequenceIQ2Qualification || cudaQ56KMMQQualification {
+			if paged != nil || req.CaptureRawHidden || qwen35SequenceIQ2Qualification || cudaQ56KMMQQualification {
 				// cudaMu still excludes all cleanup/submission. Raw capture must
 				// close the always-linked stop bridge even in ordinary builds:
 				// the split owner's private quarantine alone does not stop the
@@ -614,10 +636,29 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 			err = errors.Join(err, cleanupErr)
 		}
 	}()
-	if err := c.qwen35SequenceReserveKVLocked(kv, len(req.Layers)/4, (req.StartPos+tokens)*kv.stride()); err != nil {
-		return result, err
+	// BEGIN sequence KV reservation.
+	var pagedControlH2D uint64
+	if paged != nil {
+		before := uint64(C.fcuda_h2dxfer_bytes())
+		if err := paged.prepareLocked(); err != nil {
+			return result, err
+		}
+		after := uint64(C.fcuda_h2dxfer_bytes())
+		if after < before {
+			return result, qwen35SequenceFailure("paged-control-counter", -1, "H2D counter wrapped during preparation")
+		}
+		pagedControlH2D = after - before
+	} else {
+		if err := c.qwen35SequenceReserveKVLocked(kv, len(req.Layers)/4, (req.StartPos+tokens)*kv.stride()); err != nil {
+			return result, err
+		}
 	}
+	// END sequence KV reservation.
 	h2dStart, d2hStart := uint64(C.fcuda_h2dxfer_bytes()), uint64(C.fcuda_hostxfer_bytes())
+	if paged != nil {
+		paged.executing = true
+		paged.drained = false
+	}
 	var x Tensor
 	var xBuf *cudaBuf
 	if req.TokenEmbeddingRows {
@@ -675,7 +716,13 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 				return result, &Qwen35SequenceError{Stage: "attention-split", Layer: index, Cause: splitErr}
 			}
 			c.releaseTransientBuffers([]*cudaBuf{qgBuf})
-			qRoPE, qRoPEBuf, fused, postErr := c.qwen35SequenceAttentionPostprocessLocked(q, kRaw, value, layer.QNorm, layer.KNorm, kv, compactAttention, tokens, req.StartPos, req.RotaryDim, req.RMSNormEpsilon, req.RoPEThetaForLayer[index])
+			var qRoPE Tensor
+			var qRoPEBuf *cudaBuf
+			fused := false
+			var postErr error
+			if paged == nil {
+				qRoPE, qRoPEBuf, fused, postErr = c.qwen35SequenceAttentionPostprocessLocked(q, kRaw, value, layer.QNorm, layer.KNorm, kv, compactAttention, tokens, req.StartPos, req.RotaryDim, req.RMSNormEpsilon, req.RoPEThetaForLayer[index])
+			}
 			if postErr != nil {
 				c.qwen35SequencePoisonStates(req)
 				return result, postErr
@@ -700,12 +747,25 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 				if ropeErr != nil {
 					return result, &Qwen35SequenceError{Stage: "attention-rope", Layer: index, Cause: ropeErr}
 				}
-				if appendErr := c.qwen35SequenceAppendKVLocked(kv, compactAttention, kRaw, kRoPE, value, req.StartPos, tokens); appendErr != nil {
+				var appendErr error
+				if paged != nil {
+					appendErr = paged.appendLocked(compactAttention, kRaw, kRoPE, value)
+				} else {
+					appendErr = c.qwen35SequenceAppendKVLocked(kv, compactAttention, kRaw, kRoPE, value, req.StartPos, tokens)
+				}
+				if appendErr != nil {
 					return result, appendErr
 				}
 			}
 			c.releaseTransientBuffers([]*cudaBuf{qBuf})
-			attn, attnBuf, attnErr := c.qwen35SequenceAttentionLocked(qRoPE, kv, compactAttention, tokens, req.StartPos, req.NumHeads, float32(1/math.Sqrt(float64(req.HeadDim))))
+			var attn Tensor
+			var attnBuf *cudaBuf
+			var attnErr error
+			if paged != nil {
+				attn, attnBuf, attnErr = paged.attentionLocked(qRoPE, compactAttention, req.NumHeads, float32(1/math.Sqrt(float64(req.HeadDim))))
+			} else {
+				attn, attnBuf, attnErr = c.qwen35SequenceAttentionLocked(qRoPE, kv, compactAttention, tokens, req.StartPos, req.NumHeads, float32(1/math.Sqrt(float64(req.HeadDim))))
+			}
 			if attnErr != nil {
 				return result, &Qwen35SequenceError{Stage: "causal-attention", Layer: index, Cause: attnErr}
 			}
@@ -823,17 +883,37 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 		c.faultLatch.ObserveError(err, "qwen35-sequence-final-fence")
 		return result, err
 	}
+	if paged != nil {
+		paged.drained = true
+		paged.executing = false
+	}
 	h2dEnd, d2hEnd := uint64(C.fcuda_h2dxfer_bytes()), uint64(C.fcuda_hostxfer_bytes())
 	transfers := Qwen35SequenceTransferCounters{
 		H2DBytes: h2dEnd - h2dStart, D2HBytes: d2hEnd - d2hStart,
 		ActivationH2DBytes: h2dEnd - h2dAfterGather, ActivationD2HBytes: d2hEnd - d2hAfterGather,
 	}
+	if paged != nil {
+		if pagedControlH2D > ^uint64(0)-transfers.H2DBytes {
+			return result, qwen35SequenceFailure("paged-control-counter", -1, "total H2D overflow")
+		}
+		transfers.H2DBytes += pagedControlH2D
+	}
 	if transfers.ActivationH2DBytes != 0 || transfers.ActivationD2HBytes != 0 {
 		c.qwen35SequencePoisonStates(req)
 		return result, qwen35SequenceFailure("transfer-witness", -1, fmt.Sprintf("activation traffic H2D=%d D2H=%d", transfers.ActivationH2DBytes, transfers.ActivationD2HBytes))
 	}
+	if paged != nil {
+		// Cleanup is still inside the retained transaction: a panic, Goexit or
+		// terminal latch must not publish a reusable partial paged sequence.
+		c.qwen35SequenceReleaseSinceLocked(transientStart, lastBuf, logitsBuf, logitsRowsBuf, rawHiddenBuf)
+		if err := paged.completeLocked(); err != nil {
+			return result, err
+		}
+	}
 	result = Qwen35SequencePrefillResult{LastHidden: last, RawHiddenRows: rawHiddenRows, Logits: logits, LogitsRows: logitsRows, Tokens: tokens, Transfers: transfers}
-	c.qwen35SequenceReleaseSinceLocked(transientStart, lastBuf, logitsBuf, logitsRowsBuf, rawHiddenBuf)
+	if paged == nil {
+		c.qwen35SequenceReleaseSinceLocked(transientStart, lastBuf, logitsBuf, logitsRowsBuf, rawHiddenBuf)
+	}
 	failed = false
 	return result, nil
 	// END CUDA raw-hidden publication tail.

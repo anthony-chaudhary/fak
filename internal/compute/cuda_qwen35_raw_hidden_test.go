@@ -50,12 +50,12 @@ func TestCUDARawHiddenSourceLifetime(t *testing.T) {
 		}
 		return s[i : i+j]
 	}
-	prefix := between(entry, "transientStart := len(c.transient)", "kv, err := c.validateQwen35SequenceRequestLocked(req)")
+	prefix := between(entry, "transientStart := len(c.transient)", "kv, err := c.validateQwen35SequenceStoreRequestLocked(req, paged)")
 	tail := between(entry, "// BEGIN CUDA raw-hidden publication tail.", "// END CUDA raw-hidden publication tail.")
-	split := between(entry, "finishSplit := func() error {", "if err := c.qwen35SequenceReserveKVLocked")
+	split := between(entry, "finishSplit := func() error {", "// BEGIN sequence KV reservation.")
 	release := functions["qwen35SequenceReleaseSinceLocked"]
 	capability := functions["Qwen35SequenceRawHiddenPath"]
-	preflight := functions["validateQwen35SequenceRequestLocked"]
+	preflight := functions["validateQwen35SequenceStoreRequestLocked"]
 	gate := between(preflight[strings.Index(preflight, "{")+1:], "if req.CaptureRawHidden", "if err := validateQwen35SequenceGeometry(req)")
 	if release == "" || capability == "" {
 		t.Fatal("missing real lifetime/capability methods")
@@ -113,7 +113,7 @@ func TestCUDARawHiddenSourceLifetime(t *testing.T) {
 	program := cudaRawHiddenFixture + capability + "\n" + release + "\n" + bridge +
 		"\nfunc (c *cudaBackend) preflight(req Qwen35SequencePrefillRequest) (*cudaKV,error) {\n" + gate + "\nreturn nil,nil\n}\n" +
 		"func (c *cudaBackend) sequenceTail(req Qwen35SequencePrefillRequest) (result Qwen35SequencePrefillResult, err error) {\n" +
-		prefix + cudaRawHiddenTailSetup + split + tail + "\n}\n" + cudaRawHiddenControls
+		"var paged *rawHiddenUnselectedPaged\n" + prefix + cudaRawHiddenTailSetup + split + tail + "\n}\n" + cudaRawHiddenControls
 	t.Logf("production source %x; extracted host fixture %x", sha256.Sum256(source), sha256.Sum256([]byte(program)))
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "owner_test.go"), []byte(program), 0600); err != nil {
@@ -343,9 +343,15 @@ func(c *cudaBackend) releaseTransientBuffers(buffers []*cudaBuf){
 	for _,b:=range buffers{if b!=nil{b.ptr=nil}}
 	kept:=c.transient[:0];for _,b:=range c.transient{if b.ptr!=nil{kept=append(kept,b)}};c.transient=kept
 }
+type rawHiddenUnselectedPaged struct { executing,drained bool }
+func(*rawHiddenUnselectedPaged)abortLocked(){panic("raw-hidden fixture unexpectedly selected paged")}
+func(*rawHiddenUnselectedPaged)completeLocked()error{panic("raw-hidden fixture unexpectedly selected paged")}
 `
 
+// Paged is deliberately unselected in this contiguous raw-hidden witness. The
+// separate paged source witness executes the real selected ownership adapter.
 const cudaRawHiddenTailSetup = `
+var pagedControlH2D uint64
 tokens:=len(req.TokenIDs)
 x,xBuf:=c.make([]int{tokens,req.Hidden},"raw")
 for i:=range xBuf.data{xBuf.data[i]=float32(i+1)}

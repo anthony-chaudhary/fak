@@ -118,6 +118,7 @@ BINDINGS_LABEL = ", ".join(BINDINGS)
 # Explicit candidate ABI only: do not sweep every fak_* helper into this gate.
 # The C++-only prefill_launch helper is deliberately outside the C/CGo seam.
 CANDIDATE_SYMBOLS = (
+    "fak_qwen35_causal_attention_panel_f32", "fak_v41_checked_stream_terminal",
     "fak_v41_compressor_ring_store_f32", "fak_v41_compressor_ring_store_pending_f32",
     "fak_v41_engram_state", "fak_v41_engram_input", "fak_v41_engram_run",
     "fak_v41_engram_readback", "fak_flashmla_decode_host",
@@ -288,7 +289,8 @@ def strip_comments(text: str) -> str:
 # Enroll the qualified paged-copy CGo contract without changing symbol parsing.
 BINDINGS += ("internal/compute/cuda_paged_kv.go",)
 # Actual eager refill CGo calls/prototypes participate in the same strict gate.
-BINDINGS += ("internal/compute/cuda_offload_refill.go", "internal/compute/cuda_qwen35_mtp.go")
+BINDINGS += ("internal/compute/cuda_offload_refill.go", "internal/compute/cuda_qwen35_mtp.go",
+             "internal/compute/cuda_qwen35_sequence_paged.go")
 BINDINGS_LABEL = ", ".join(BINDINGS)
 
 

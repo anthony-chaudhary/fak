@@ -17,6 +17,11 @@ int fcuda_paged_kv_snapshot_gather_checked(float *dst, const float *cache, const
 enum { FCUDA_KV_SNAPSHOT_RETAINED = 0, FCUDA_KV_SNAPSHOT_RETIRED = 1 };
 int fcuda_kv_snapshot_release_checked(void *expected, size_t bytes, int *disposition);
 int fcuda_kv_snapshot_release_failed(int status);
+// Exact default-device paged arena/table provenance. Inspection is not retirement.
+int fcuda_paged_kv_owner_checked(const void *expected, size_t bytes);
+enum { FCUDA_PAGED_KV_RETAINED = 0, FCUDA_PAGED_KV_RETIRED = 1 };
+// Caller must prove completion and detachment from every shared pool/table.
+int fcuda_paged_kv_release_checked(void *expected, size_t bytes, int *disposition);
 int fcuda_kv_attention_typed(const float *q, const void *k, const void *v, float *out, int tokens, int prefix, int heads, int kvheads, int hd, float scale, int dtype);
 #ifdef __cplusplus
 }

@@ -18226,6 +18226,11 @@
           "category": "false-positive",
           "reason": "perPlane is the checked byte count for one attended K or V storage row in analytical decode traffic arithmetic. Plane denotes physical storage, not an execution plan.",
           "token": "perPlane"
+        },
+        {
+          "category": "false-positive",
+          "reason": "oldPlanes is the saved Kraw/K/V allocation pointer slice used for staged arena growth and copying, not an execution or scheduling plan.",
+          "token": "oldPlanes"
         }
       ],
       "exclude": [
@@ -18239,6 +18244,7 @@
         "explanat",
         "hasTextToolCandidate",
         "kvFP8Planes",
+        "oldPlanes",
         "perPlane",
         "plane",
         "planeBytes",

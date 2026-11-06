@@ -15,20 +15,20 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **10** (clarity 0 + coverage 10) |
+| **Disambiguation-debt (drive to 0)** | **12** (clarity 0 + coverage 12) |
 | **Crystal-clear concepts (and climbing)** | **1622** crystal of 4065 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **4132 / 4142** (99.8% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **4132 / 4144** (99.7% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 303 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **92** of 5516 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 99.9/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 99.8/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 4065 concepts - score 99.9/100 (grade A) - disambiguation-debt 10
+concept-disambiguation chart - 4065 concepts - score 99.8/100 (grade A) - disambiguation-debt 12
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ###################......... 1622
@@ -62,11 +62,11 @@ clarity mix by family (each cell = one concept):
   witness-proof    ************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (213 concept(s); 84 crystal)
 
 coverage by family (positioned / discovered):
-  evict            ###########################. 93/96
+  evict            ###########################. 93/97
   policy-capability ############################ 283/286
   cache            ############################ 438/440
   support-maturity ############################ 142/144
-  attention        ############################ 238/238
+  attention        ############################ 238/239
   context-ctx      ############################ 335/335
   cross-cluster    ............................ 0/0
   decision         ############################ 68/68
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   vfs              ............................ 0/0
   witness-proof    ############################ 199/199
 
-namespace coverage  [################################] 99.8%  (4132/4142 confusable tokens positioned)
+namespace coverage  [################################] 99.7%  (4132/4144 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 303
@@ -4362,11 +4362,11 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| evict | 93 | 96 | 3 |
+| evict | 93 | 97 | 4 |
 | policy-capability | 283 | 286 | 3 |
 | cache | 438 | 440 | 2 |
 | support-maturity | 142 | 144 | 2 |
-| attention | 238 | 238 | 0 |
+| attention | 238 | 239 | 1 |
 | context-ctx | 335 | 335 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | decision | 68 | 68 | 0 |
