@@ -2196,3 +2196,10 @@ Configured bounded serving targets for one role pool: replica minimum/maximum an
 PlanDensePrefixCapture validates a dense-FP32 cache and optional bit-identical retained prefix, computes an upper bound on additional retained numeric backing, and returns a synchronous one-shot DensePrefixCapture for later Capture under the same external tree lock; unsupported/malformed layouts refuse before page allocation or reference changes.
 
 **Distinct from:** Unlike v41PlanHostRawGateUp, which selects deferred host raw-weight projection, this plans immutable prefix-page ownership and byte-budget admission; unlike compute MemoryPlan's classed demands, it binds an actual source/prefix and must not outlive their locked stability. It may allocate plan/pool metadata and inspect existing numeric bytes, but acquires no page references until Capture.
+
+
+### Explicit logical token-pool capacity
+
+NewSharedTokenPoolWithCapacity constructs a device-neutral logical token and byte admission ledger from positive, finite, representable capacity and geometry, without Halo defaults or environment values.
+
+**Distinct from:** Unlike PagedKVPool, this constructor admits logical token reservations only; it allocates no physical KV blocks and supplies no device-memory availability evidence. Existing Halo constructors retain their permissive defaults.

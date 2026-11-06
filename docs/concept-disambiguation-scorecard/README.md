@@ -15,24 +15,24 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **622** (clarity 1 + coverage 621) |
-| **Crystal-clear concepts (and climbing)** | **1545** crystal of 3397 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3479 / 4100** (84.9% of the discovered confusable space) |
-| **Undrawn twin-pairs (drive to 0)** | **0** of 229 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **95** of 4786 indexed names |
+| **Disambiguation-debt (drive to 0)** | **590** (clarity 1 + coverage 589) |
+| **Crystal-clear concepts (and climbing)** | **1546** crystal of 3430 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3511 / 4100** (85.6% of the discovered confusable space) |
+| **Undrawn twin-pairs (drive to 0)** | **0** of 237 confusable name-pairs |
+| **Ambiguous lookup names (drive to 0)** | **95** of 4820 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 89.8/100 (grade B) |
+| Legacy bounded score (saturates; not the driver) | 90.3/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3397 concepts - score 89.8/100 (grade B) - disambiguation-debt 622
+concept-disambiguation chart - 3430 concepts - score 90.3/100 (grade A) - disambiguation-debt 590
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #######################..... 1545
-  o defined       ############################ 1852
+  * crystal       #######################..... 1546
+  o defined       ############################ 1884
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
@@ -40,7 +40,7 @@ clarity ladder (count of concepts, best -> fog):
 
 clarity mix by family (each cell = one concept):
   attention        *********************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (197 concept(s); 93 crystal)
-  cache            **************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (328 concept(s); 146 crystal)
+  cache            **************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (358 concept(s); 146 crystal)
   context-ctx      ********************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (263 concept(s); 104 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         ***************************************ooooooooooooooooooooo (60 concept(s); 39 crystal)
@@ -52,31 +52,31 @@ clarity mix by family (each cell = one concept):
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
   plan             ******************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (472 concept(s); 186 crystal)
   policy-capability *************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (228 concept(s); 121 crystal)
-  pool             *************************************oooooooooooooooooooooooooooooooooo (71 concept(s); 37 crystal)
+  pool             **************************************oooooooooooooooooooooooooooooooooo (72 concept(s); 38 crystal)
   render-materialize *************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (206 concept(s); 49 crystal)
-  score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (99 concept(s); 35 crystal)
+  score-debt       ***********************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (100 concept(s); 35 crystal)
   session-runtime  ***************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (309 concept(s); 135 crystal)
   support-maturity *******************************************************************oooooooooooooooooooooooooooo (95 concept(s); 67 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
-  witness-proof    *************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (177 concept(s); 85 crystal)
+  witness-proof    *************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (178 concept(s); 85 crystal)
 
 coverage by family (positioned / discovered):
   plan             ########################.... 534/626
-  cache            ########################.... 373/434
   gateway-engine   #######################..... 266/324
-  session-runtime  ########################.... 327/381
+  session-runtime  ########################.... 328/381
   context-ctx      ########################.... 288/334
   guard-gate       ##########################.. 535/578
   support-maturity ####################........ 99/142
-  attention        #######################..... 191/229
+  attention        #######################..... 192/229
   pool             ###################......... 74/110
+  cache            ##########################.. 403/434
   render-materialize #########################... 224/253
   evict            ###################......... 61/89
   policy-capability #########################... 252/279
-  score-debt       #######################..... 114/141
-  witness-proof    #########################... 175/199
-  layout           ###############............. 27/50
+  score-debt       #######################..... 115/141
+  witness-proof    #########################... 176/199
+  layout           ################............ 29/50
   loop             ########################.... 100/118
   decision         ###########################. 65/68
   cross-cluster    ............................ 0/0
@@ -84,15 +84,15 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###########################.....] 84.9%  (3479/4100 confusable tokens positioned)
+namespace coverage  [############################....] 85.6%  (3511/4100 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
-  mutual       ############################ 229
+  mutual       ############################ 237
   one-sided    ............................ 0
   undrawn      ............................ 0
-  pairs separated   [################################] 229/229
+  pairs separated   [################################] 237/237
 
-name index: 4786 lookup name(s) -> 3397 concept(s), 95 ambiguous
+name index: 4820 lookup name(s) -> 3430 concept(s), 95 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -114,11 +114,11 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 
 | Separation metric | Value |
 |---|---|
-| Confusable name-pairs discovered | 229 |
-| **Separated from each other (drive to all)** | **229 / 229** (229 mutual, 0 one-sided) |
+| Confusable name-pairs discovered | 237 |
+| **Separated from each other (drive to all)** | **237 / 237** (237 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2816 / 6197 |
+| Boundaries drawn (mutual / total) | 2856 / 6264 |
 | Dangling `distinct_from` references (drive to 0) | 1 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4786 over 3397 concepts |
+| Lookup names indexed | 4820 over 3430 concepts |
 | Lookup names landing on several concepts | 95 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3397 |
+| Concepts carrying a contrast set | 3430 |
 
 ## The concepts (best verdict first)
 
@@ -1262,6 +1262,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | policy-capability | **DefaultCrossAuditPolicy** - The calibrated CrossAuditPolicy instance built from the measured issue-3854 calibration evidence (two independent families at issue-resolution-audit/v2) with the issue-3859 dogfood loop not green, so the closure gate ships enforcement-capable but in dry-run (#3860). |
 | * | crystal | symbol | policy-capability | **AdjudicateClosure** - The fail-closed shipgate decision function for a high-risk issue closure: structural deny first, then a calibrated, independent, fresh PASS receipt or an audited break-glass; runs dry-run while the calibration and dogfood prerequisites are unmet (#3860). |
 | * | crystal | symbol | policy-capability | **supervision policy** - Typed platform-neutral decision policy for fault-domain restart, reattach, hold, and escalation. |
+| * | crystal | symbol | pool | **Explicit logical token-pool capacity** - NewSharedTokenPoolWithCapacity constructs a device-neutral logical token and byte admission ledger from positive, finite, representable capacity and geometry, without Halo defaults or environment values. |
 | * | crystal | config | pool | **DISPATCH_POOL** - The env var (DISPATCH_POOL) naming which dispatch worker POOL a worker belongs to, forwarded into the guard Pool field alongside DISPATCH_LEASE. |
 | * | crystal | symbol | pool | **FakExpertRingPoolFractionEnv (auto expert-ring host-memory fraction)** - FakExpertRingPoolFractionEnv names FAK_EXPERT_RING_POOL_FRACTION. For auto activated-expert ring sizing with known host MemTotal, the fraction contributes a sizing bound before the activated-layer minimum is applied. The default is 0.10, accepted values satisfy 0 < f <= 0.5, and invalid values are refused. Explicit byte sizes are unaffected; the activated-layer minimum can exceed the fraction-derived bound. |
 | * | crystal | symbol | pool | **MemoryPool** - A declared physical memory allocation pool with an identity and usable capacity for model placement accounting. |
@@ -1807,6 +1808,36 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | cache | **VCacheContextJoinReport (vCache context-join report path)** - cmd/fak/cachevalue_status.go: the filesystem PATH source for the vCache CONTEXT-JOIN report (how the modeled cache joins against the live context) folded into cache-value status. |
 | o | defined | symbol | cache | **VCacheContextWitnessReport (vCache context-witness report path)** - cmd/fak/cachevalue_status.go + cachevalue_status_vcachewitness.go: the PATH source for the vCache CONTEXT-WITNESS report, whose rows witness that a modeled vCache context matched the real one; rowsFromVCacheContextWitnessReport turns it into status rows. |
 | o | defined | symbol | cache | **vcache_context_snapshot (vCache context state dump)** - cmd/fak/cachevalue_status.go + cachevalue_status_session.go: the vCache CONTEXT SNAPSHOT dependency - a point-in-time dump of the modeled virtual-cache context state that the status report and session analysis read. |
+| o | defined | symbol | cache | **inferCachedTokensByClient** - Per-client map of inferred cached prompt tokens held by the gateway metrics snapshot when a provider does not report cache reads. |
+| o | defined | metric | cache | **KVCacheBytes** - Byte footprint of resident KV tensors as reported by the device-spine gauge and the componentized memory plan. |
+| o | defined | symbol | cache | **kvCacheN** - llama.cpp-shaped timings.cache_n counter recording how many prompt tokens were served from cache, tracked in the gateway perf ledger. |
+| o | defined | doc-term | cache | **kvcache_q8** - Source module internal/model/kvcache_q8.go implementing the Q8_0 quantized KV cache realization (#12981) with its KVPackedRow int8-code scheme. |
+| o | defined | symbol | cache | **KVCacheStationary** - Continuous-batcher admission flag marking a request whose KV cache remains resident in UMA between turns instead of being evicted. |
+| o | defined | metric | cache | **KVCacheUsage** - Unitless fraction (0..1) of engine KV cache in use, accumulated by the vLLM, SGLang and MLX engine adapters from their scrapes. |
+| o | defined | metric | cache | **KVCacheUsagePct** - Percent of KV cache in use exposed by macobs MLX serving telemetry (json kv_cache_usage_pct). |
+| o | defined | metric | cache | **kv_cache_usage_perc** - vLLM wire metric label reporting KV cache usage as a percentage, ingested by the vLLM adapter and mirrored into macobs scrapes. |
+| o | defined | symbol | cache | **MALLCacheModel** - Software model of the AMD Strix Halo 32 MiB on-die MALL Infinity Cache used by the strix compute package for tiling and eviction simulation. |
+| o | defined | config | cache | **MALLCacheSizeMB** - Megabyte knob (json mall_cache_size_mb, default 32) declaring the MALL Infinity Cache size consumed by roofline probes and campaign fanout contracts. |
+| o | defined | config | cache | **MaxKVCacheBytes** - Continuous-batcher configuration cap on total KV cache bytes across active slots, where 0 means unconstrained. |
+| o | defined | doc-term | cache | **mem_cache** - SGLang upstream python module path (python/sglang/srt/mem_cache/) cited in provenance comments behind fak's RadixKV eviction and prefix-ownership adaptations. |
+| o | defined | subsystem | cache | **moecache** - Public pkg/moecache owning the closed routed-expert weight-cache tier vocabulary (DRAM/checkpoint/NVMe) and its typed metric envelope. |
+| o | defined | symbol | cache | **NewMALLCacheModel** - Constructor instantiating the MALL Infinity Cache model with 32,768 sets and 16 ways at 32 MiB. |
+| o | defined | symbol | cache | **PrefixCacheTelemetry** - macobs telemetry block carrying observed provider prefix-cache behavior collected during MLX serving scrapes. |
+| o | defined | doc-term | cache | **radix_cache** - SGLang upstream radix_cache.py module cited in provenance comments backing fak's RadixKV eviction and dense-prefix ownership logic. |
+| o | defined | concept | cache | **RecurrentPrefixCache** - Extend-only prefix cache enabled by the continuous batcher for hybrid models so recurrent-state prefixes are retained without full recompute. |
+| o | defined | config | cache | **StrixHaloInfinityCacheBytes** - Byte capacity of the Strix Halo Infinity Cache (L3) used by ROCm compute planning to check scratch fit. |
+| o | defined | config | cache | **StrixHaloMALLCacheSizeMB** - Megabyte capacity constant (32 MB) of the Strix Halo Infinity/MALL cache feeding roofline probes and qwen38campaign fanout contracts. |
+| o | defined | symbol | cache | **TokenCountsServerUsageNoCacheRpt** - agentxbench token-counts status constant "server_usage_cache_unreported" marking receipts where server usage is present but the cache breakdown is unreported. |
+| o | defined | config | cache | **UMACacheLineAlignment** - 64-byte cache-line alignment matching Zen 5 CPU MMU expectations, applied to Strix UMA pool-allocator allocations. |
+| o | defined | symbol | cache | **uncachedPrompt** - Local prompt-token delta not served from cache, computed as total minus cached in bench effort scoring and gateway ctx-value observation. |
+| o | defined | metric | cache | **UncachedTokens** - Uncached-token count fed to cache regime classification (cacheobs) and effort-bench receipts. |
+| o | defined | symbol | cache | **updateCachedSnapshot** - l3server shard size-tracker method refreshing the cached shard-size snapshot after shard operations and rebalance. |
+| o | defined | symbol | cache | **v41AttentionRolesCached** - V4.1 model method resolving per-layer KV/index execution roles, memoized across forward steps. |
+| o | defined | symbol | cache | **V41EngramRowCache** - Byte-oriented cache of V4.1 engram rows (Q2_K packed) read geometry-agnostic from GGUF checkpoints. |
+| o | defined | symbol | cache | **V41KVCacheLayoutFor** - Resolver returning the published V4.1 KV cache layout for one record quant format. |
+| o | defined | symbol | cache | **V41KVCacheLayouts** - Closed set of published V4.1 KV record layouts (fp8 first) returned for census and enumeration. |
+| o | defined | cli-verb | cache | **vcache_codex_session_extract** - fak vcache codex-session-extract verb sanitizing a raw Codex session JSONL into vCache observed-window rows, optionally emitting a snapshot and score artifact. |
+| o | defined | symbol | cache | **WithExpertPageCache** - ggufload functional option enabling the expert checkpoint page cache (issue #1302) on expert sources, keeping the historical ReadAt path when off. |
 | o | defined | metric | cache | **CacheReadFraction (prompt-served-from-cache share)** - cachevaluereport.CacheReadFraction is the share of prompt tokens the provider served from its prompt cache (cache_read / prompt_tokens), surfaced in the cache-value audit row and the TUI savings overview. |
 | o | defined | metric | cache | **FakCompactionCacheReadTokens (compaction-point cache_read counter)** - gateway.FakCompactionCacheReadTokens is the OBSERVED provider cache_read token count at a session's compaction point - the tokens the provider evidenced as cache_reads, surfaced in cache_pricing and the /debug/vars attribution block. |
 | o | defined | metric | cache | **CacheTTLUpgradesUpgraded (managed-cache TTL-upgrade counter)** - gatewayusageledger.CacheTTLUpgradesUpgraded (with CacheTTLUpgradeReasons) is the usage-ledger counter pair recording how many times the managed-cache posture AUTHORED a 1h-TTL upgrade of a stable prefix (wrote ttl:1h into the outbound body) and why, surfaced in the weekly cache-value report. It counts fak AUTHORING, NOT the provider ACCEPTING: on a subscription-OAuth seat the provider 400s the 1h body, so a nonzero count there is a crash signal, not realized 1h caching. |
@@ -3192,6 +3223,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | score-debt | **tooling_quality_scorecard** - tools/tooling_quality_scorecard.py is the Python-tooling quality scorecard on the control pane (py_debt) - the meter for Python not yet ported to the Go-first hygiene path. |
 | o | defined | metric | score-debt | **ui_quality_debt** - ui_quality_debt (internal/uiquality DebtKey) is the debt key of the uiquality scorecard over fak's render surfaces. |
 | o | defined | concept | score-debt | **code_slop_scorecard (slop surface)** - code_slop_scorecard is the batch code-slop scorecard (tools/code_slop_scorecard.py; ported engine in internal/clonescan) that grades duplication and other slop KPIs into a slop_score / slop_debt over the Go corpus. |
+| o | defined | symbol | score-debt | **tDEBT (tab-separated DEBT column label)** - The identifier spelling tDEBT that the scorecard's identifier scanner reads out of the tab-escape-prefixed DEBT column labels in fak's tab-separated status table headers - the loop status table (cmd/fak/loop.go), the superloop member table (cmd/fak/superloop.go), and the debtlane wave slot table (internal/debtlane/wave.go); the leading t is the tail of the \t tab escape fused onto the DEBT column label by the identifier regex, so the token names the DEBT header column, not a debt measurement. |
 | o | defined | symbol | score-debt | **cmdConflationScorecard verb** - The cmd/fak Go func that implements `fak conflation-scorecard`, folding internal/conflationscore's findings into the shared scorecard control-pane payload. |
 | o | defined | symbol | score-debt | **cmdLoopIndexScorecard verb** - The cmd/fak Go func that implements the agentic-coding loop-index scorecard: derives each loop stage's witness probes (orient/plan/act/verify/ship/learn) from the tracked tree and folds them into loopindex_debt via internal/loopindex.Score. |
 | o | defined | symbol | score-debt | **cmdMilestoneScorecard verb** - The cmd/fak Go func for `fak milestone-scorecard` (issue #1444): folds the milestone report's maturity-CLIMB and epic-ROADMAP dimensions into a deterministic milestone_debt integer plus a worst-first retire worklist. |
@@ -3488,6 +3520,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | witness-proof | **WitnessWindow** - WitnessWindow (internal/cachewitness/cachewitness.go) is the bounded record window a cache-usage witness folds over. |
 | o | defined | symbol | witness-proof | **WitnessCommands (observed proof commands)** - WitnessCommands is the recorded list of build, test, or verification commands observed in fleet/session summaries as evidence for a claimed change. |
 | o | defined | symbol | witness-proof | **WitnessOK (diff-witnessed constant)** - WitnessOK is the dispatchtick constant value diff-witnessed that marks a claimed resolution as corroborated by the required witness rung. |
+| o | defined | symbol | witness-proof | **ReasonIntegrityRefuted (ABI integrity-refutation reason)** - abi.ReasonIntegrityRefuted is the core ABI refusal reason code (wire name INTEGRITY_REFUTED) attached to a deny verdict when the witness resolver actively refutes the claimed effect - the proof presented contradicts the claim, so the call is refused even though a witness was supplied. |
 | o | defined | subsystem | witness-proof | **buildwitness (default-build compile guard)** - internal/buildwitness is a structural CI-guard package whose test runs `go build ./cmd/fak` under default build tags from a clean checkout, proving the default build is green independent of any WIP file left tagless in the shared tree. |
 | o | defined | symbol | witness-proof | **CommitWitnessed (dispatch-tick audit-row grader)** - internal/dispatchtick.CommitWitnessed(verdict, witness string) bool grades one `dos commit-audit` row into a dispatch-tick worker slot's productive keep-bit, true only when verdict is OK AND witness equals the diff-witnessed constant WitnessOK. |
 | o | defined | symbol | witness-proof | **InvalidationExternalRefutation (cachemeta invalidation-mode)** - internal/cachemeta.InvalidationExternalRefutation ("external_refutation") is the InvalidationMode enum value recording that a cache entry's Coherence.InvalidationMode was set because its bound external world-state witness was refuted, as opposed to LRU, TTL, write-epoch, or policy eviction. |
@@ -3676,18 +3709,18 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
 | separation | `reference_resolves` | 86 | 1 | 1 dangling distinct_from reference(s) |
-| honesty | `kind_grounding_soft` | 60 | 0 | 29 kind/grounding mismatch |
+| honesty | `kind_grounding_soft` | 60 | 0 | 30 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3381/6197 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3397 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3408/6264 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3430 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
-| separation | `pair_separated` | 100 | 0 | all 229 confusable name-pair(s) are separated |
+| separation | `pair_separated` | 100 | 0 | all 237 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4786 lookup name(s) resolves - 95 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4820 lookup name(s) resolves - 95 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3695,20 +3728,20 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
 | plan | 534 | 626 | 92 |
-| cache | 373 | 434 | 61 |
 | gateway-engine | 266 | 324 | 58 |
-| session-runtime | 327 | 381 | 54 |
+| session-runtime | 328 | 381 | 53 |
 | context-ctx | 288 | 334 | 46 |
 | guard-gate | 535 | 578 | 43 |
 | support-maturity | 99 | 142 | 43 |
-| attention | 191 | 229 | 38 |
+| attention | 192 | 229 | 37 |
 | pool | 74 | 110 | 36 |
+| cache | 403 | 434 | 31 |
 | render-materialize | 224 | 253 | 29 |
 | evict | 61 | 89 | 28 |
 | policy-capability | 252 | 279 | 27 |
-| score-debt | 114 | 141 | 27 |
-| witness-proof | 175 | 199 | 24 |
-| layout | 27 | 50 | 23 |
+| score-debt | 115 | 141 | 26 |
+| witness-proof | 176 | 199 | 23 |
+| layout | 29 | 50 | 21 |
 | loop | 100 | 118 | 18 |
 | decision | 65 | 68 | 3 |
 | cross-cluster | 0 | 0 | 0 |

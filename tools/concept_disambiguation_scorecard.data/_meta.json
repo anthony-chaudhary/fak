@@ -18922,6 +18922,16 @@
           "category": "build-tag-only",
           "reason": "Compile-time selector or preprocessor define for the explicitly named CUDA candidate, not an independent resource pool or policy gate; runtime qualification remains separate.",
           "token": "DFAK_CUDA_V41_COMPRESSOR_POOL"
+        },
+        {
+          "category": "incidental",
+          "reason": "Error sentinel for malformed explicit logical capacity facts; not a distinct pool abstraction.",
+          "token": "ErrInvalidPoolCapacity"
+        },
+        {
+          "category": "incidental",
+          "reason": "Checked arithmetic helper for the logical token-pool admission limit; not a distinct pool abstraction.",
+          "token": "checkedTokenCapacity"
         }
       ],
       "exclude": [
@@ -18933,6 +18943,7 @@
         "DeviceTransientPool",
         "DeviceTransientPoolReporter",
         "EnableV41CompressorPool",
+        "ErrInvalidPoolCapacity",
         "ErrNotPoolable",
         "FAK_EXPERT_RING_POOL_FRACTION",
         "FLEET_WORKER_WORKTREE_POOL",
@@ -18956,6 +18967,7 @@
         "TransientPoolBackend",
         "TransientPoolStats",
         "canonicalPoolLane",
+        "checkedTokenCapacity",
         "cudaV41CompressorPoolFlags",
         "cudaV41CompressorPoolKey",
         "cudaV41CompressorPoolTags",

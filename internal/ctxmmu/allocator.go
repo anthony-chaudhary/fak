@@ -2,6 +2,7 @@ package ctxmmu
 
 import (
 	"errors"
+	"math"
 	"math/bits"
 	"os"
 	"sort"
@@ -30,6 +31,9 @@ var (
 	// ErrInvalidTokens is returned when a requested token count is zero or negative.
 	ErrInvalidTokens = errors.New("ctxmmu: token count must be greater than zero")
 
+	// ErrInvalidPoolCapacity reports missing, non-finite or unrepresentable capacity facts.
+	ErrInvalidPoolCapacity = errors.New("ctxmmu: invalid token pool capacity")
+
 	// ErrEmptyStreamID is returned when an empty stream or session ID is provided.
 	ErrEmptyStreamID = errors.New("ctxmmu: stream ID cannot be empty")
 
@@ -40,19 +44,20 @@ var (
 	ErrStreamNotFound = errors.New("ctxmmu: stream reservation not found")
 )
 
-// SharedTokenPool represents a contiguous slab of GTT attention pages for public core runtime
-// context-MMU token management. It arbitrates multi-session KV-cache allocations with dynamic
-// capacity admission, two-phase reservation/commit cycles, and immediate headroom reclamation.
+// SharedTokenPool is a logical token and byte admission ledger. Reservations do
+// not allocate or prove the availability of physical host or device memory.
+// It supports two-phase reservation/commit cycles and headroom reclamation.
 type SharedTokenPool struct {
-	mu              sync.RWMutex
-	maxTokens       int            // Default 524,288 tokens
-	committedTokens int            // Sum of tokens committed across all active streams
-	reservedTokens  int            // Sum of uncommitted output headroom reserved across active streams
-	bytesPerToken   int64          // Default 65,536 bytes/token (FP8 GQA)
-	totalGTTBytes   int64          // Default 35 GiB aperture
-	downscaleFactor float64        // Default 1.0, or derived from HALOGEN_KV_POOL_FIT
-	reservations    map[string]int // session/stream ID -> reserved uncommitted output headroom
-	committed       map[string]int // session/stream ID -> committed tokens
+	mu               sync.RWMutex
+	explicitCapacity bool           // Explicit profiles never read the legacy Halo environment.
+	maxTokens        int            // Default 524,288 tokens
+	committedTokens  int            // Sum of tokens committed across all active streams
+	reservedTokens   int            // Sum of uncommitted output headroom reserved across active streams
+	bytesPerToken    int64          // Default 65,536 bytes/token (FP8 GQA)
+	totalGTTBytes    int64          // Default 35 GiB aperture
+	downscaleFactor  float64        // Default 1.0, or derived from HALOGEN_KV_POOL_FIT
+	reservations     map[string]int // session/stream ID -> reserved uncommitted output headroom
+	committed        map[string]int // session/stream ID -> committed tokens
 }
 
 // NewSharedTokenPool initializes a SharedTokenPool with default Strix Halo GTT parameters:
@@ -76,7 +81,9 @@ func NewSharedTokenPool() *SharedTokenPool {
 	}
 }
 
-// NewSharedTokenPoolWithConfig creates a SharedTokenPool with explicit capacity parameters.
+// NewSharedTokenPoolWithConfig is the legacy permissive Halo configuration API.
+// Nonpositive capacities retain Halo defaults; new device-neutral consumers should
+// use NewSharedTokenPoolWithCapacity instead.
 // If downscaleFactor <= 0, it falls back to 1.0 (or HALOGEN_KV_POOL_FIT if set).
 func NewSharedTokenPoolWithConfig(maxTokens int, totalGTTBytes int64, bytesPerToken int64, downscaleFactor float64) *SharedTokenPool {
 	if maxTokens <= 0 {
@@ -106,14 +113,48 @@ func NewSharedTokenPoolWithConfig(maxTokens int, totalGTTBytes int64, bytesPerTo
 	}
 }
 
+// NewSharedTokenPoolWithCapacity creates a device-neutral logical admission ledger.
+// All capacity facts are required; no Halo defaults or environment values are used.
+// Both nominal and scaled token-byte products must fit int64. The effective token
+// ceiling is truncated toward zero and must be positive and representable by int.
+// The byte budget may impose a smaller admission ceiling than the token limit.
+func NewSharedTokenPoolWithCapacity(maxTokens int, totalBytes, bytesPerToken int64, factor float64) (*SharedTokenPool, error) {
+	if maxTokens <= 0 {
+		return nil, ErrInvalidTokens
+	}
+	effective := checkedTokenCapacity(maxTokens, factor)
+	if totalBytes <= 0 || bytesPerToken <= 0 || effective <= 0 ||
+		totalBytes < bytesPerToken || int64(maxTokens) > math.MaxInt64/bytesPerToken ||
+		int64(effective) > math.MaxInt64/bytesPerToken {
+		return nil, ErrInvalidPoolCapacity
+	}
+	return &SharedTokenPool{
+		explicitCapacity: true,
+		maxTokens:        maxTokens, totalGTTBytes: totalBytes, bytesPerToken: bytesPerToken,
+		downscaleFactor: factor, reservations: make(map[string]int), committed: make(map[string]int),
+	}, nil
+}
+
+// checkedTokenCapacity rejects conversions outside int's range before converting.
+func checkedTokenCapacity(tokens int, factor float64) int {
+	if tokens <= 0 || factor <= 0 || math.IsNaN(factor) || math.IsInf(factor, 0) {
+		return 0
+	}
+	// Avoid rounding MaxInt up to the exclusive bound when no scaling is needed.
+	if factor == 1 {
+		return tokens
+	}
+	scaled := float64(tokens) * factor
+	if scaled < 1 || scaled >= math.Ldexp(1, strconv.IntSize-1) || math.IsInf(scaled, 0) {
+		return 0
+	}
+	return int(scaled)
+}
+
 // effectiveMaxLocked calculates the dynamic effective token capacity of the pool,
 // scaling maxTokens by downscaleFactor. Must be called while holding mu.
 func (p *SharedTokenPool) effectiveMaxLocked() int {
-	eff := int(float64(p.maxTokens) * p.downscaleFactor)
-	if eff < 0 {
-		return 0
-	}
-	return eff
+	return checkedTokenCapacity(p.maxTokens, p.downscaleFactor)
 }
 
 // Reserve performs dynamic capacity admission and reserves requested uncommitted output headroom
@@ -132,16 +173,17 @@ func (p *SharedTokenPool) Reserve(streamID string, requested int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	effectiveMax := p.effectiveMaxLocked()
-	projectedTokens := p.committedTokens + p.reservedTokens + requested
-
-	// Check 1: Token limit against effectiveMax
-	if projectedTokens > effectiveMax {
+	// Subtract before adding: neither token sums nor byte products may wrap
+	// into successful admission. All refusal paths leave both ledgers untouched.
+	limit := p.effectiveMaxLocked()
+	if p.bytesPerToken <= 0 || p.totalGTTBytes < 0 {
 		return ErrPoolExhausted
 	}
-
-	// Check 2: Byte limit against total GTT capacity
-	if p.bytesPerToken > 0 && int64(projectedTokens)*p.bytesPerToken > p.totalGTTBytes {
+	if byteLimit := p.totalGTTBytes / p.bytesPerToken; byteLimit < int64(limit) {
+		limit = int(byteLimit)
+	}
+	if p.committedTokens < 0 || p.reservedTokens < 0 || p.committedTokens > limit ||
+		p.reservedTokens > limit-p.committedTokens || requested > limit-p.committedTokens-p.reservedTokens {
 		return ErrPoolExhausted
 	}
 
@@ -185,8 +227,7 @@ func (p *SharedTokenPool) Commit(streamID string, tokens int) error {
 	return nil
 }
 
-// Release releases both committed and reserved tokens for streamID, returning all
-// associated GTT pages back to the shared pool.
+// Release returns the stream's committed and reserved counts to the logical ledger.
 func (p *SharedTokenPool) Release(streamID string) {
 	if streamID == "" {
 		return
@@ -224,26 +265,29 @@ func (p *SharedTokenPool) ReleaseHeadroom(streamID string) {
 
 // FitPoolToAvailableMemory dynamically adjusts the pool to available GTT memory,
 // clamping maxTokens to what availableGTTBytes can support per the HALOGEN_KV_POOL_FIT pattern.
-// If HALOGEN_KV_POOL_FIT is set in the environment, downscaleFactor is refreshed.
+// Legacy pools refresh downscaleFactor from HALOGEN_KV_POOL_FIT; explicit
+// capacity pools retain their supplied factor.
 // It returns the new effective maximum token capacity.
 func (p *SharedTokenPool) FitPoolToAvailableMemory(availableGTTBytes int64) int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if val := os.Getenv(EnvHalogenKVPoolFit); val != "" {
-		if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
-			p.downscaleFactor = f
+	if !p.explicitCapacity {
+		if val := os.Getenv(EnvHalogenKVPoolFit); val != "" {
+			if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
+				p.downscaleFactor = f
+			}
 		}
 	}
 
 	p.totalGTTBytes = availableGTTBytes
 	if p.bytesPerToken > 0 {
-		memTokens := int(availableGTTBytes / p.bytesPerToken)
+		memTokens := availableGTTBytes / p.bytesPerToken
 		if memTokens < 0 {
 			memTokens = 0
 		}
-		if memTokens < p.maxTokens {
-			p.maxTokens = memTokens
+		if memTokens < int64(p.maxTokens) {
+			p.maxTokens = int(memTokens)
 		}
 	}
 	return p.effectiveMaxLocked()
@@ -276,14 +320,21 @@ func (p *SharedTokenPool) FreeTokens() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
+	if p.totalGTTBytes <= 0 {
+		return 0
+	}
+
 	effectiveMax := p.effectiveMaxLocked()
 	used := p.committedTokens + p.reservedTokens
 	freeTokens := effectiveMax - used
 
 	if p.bytesPerToken > 0 {
-		byteFree := int(p.totalGTTBytes/p.bytesPerToken) - used
-		if byteFree < freeTokens {
-			freeTokens = byteFree
+		byteFree := p.totalGTTBytes/p.bytesPerToken - int64(used)
+		if byteFree < 0 {
+			return 0
+		}
+		if byteFree < int64(freeTokens) {
+			freeTokens = int(byteFree)
 		}
 	}
 
@@ -293,7 +344,8 @@ func (p *SharedTokenPool) FreeTokens() int {
 	return freeTokens
 }
 
-// AllocatedBytes returns the total GTT bytes currently tied up by committed and reserved tokens.
+// AllocatedBytes returns logical bytes charged to committed and reserved tokens,
+// not a physical allocation measurement.
 func (p *SharedTokenPool) AllocatedBytes() int64 {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
