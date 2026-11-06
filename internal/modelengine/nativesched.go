@@ -114,6 +114,10 @@ type NativeScheduler struct {
 	maxTokensPerStep int
 	promotionPicker  PromotionPicker
 	sessionAffinity  map[string]int
+	// longPrefillTokenThreshold caps a lone long prefill's per-step advance
+	// while other requests are queued (waiting or preempted); 0 disables it.
+	// Guarded by mu; set before publication like maxTokensPerStep.
+	longPrefillTokenThreshold int
 	// maxObservedRunning is the high-water mark of the running set, written only by the
 	// run goroutine under mu. It lets a witness assert the waiting queue actually gated
 	// (peak == maxRunning) without racing on a live concurrency count.
@@ -1200,6 +1204,94 @@ func (s *NativeScheduler) SetPrefillInterval(n int) {
 	s.mu.Unlock()
 }
 
+// SetLongPrefillTokenThreshold arms the cross-request fairness cap on a lone
+// long prefill: while other requests are queued (waiting or preempted), that
+// prefill advances at most n prompt tokens per scheduler step. The clamp lands
+// on the step's chunk without touching the p0-prefill-budget resumable
+// chunking: the admission-time nominal chunk is restored after each step, and
+// the clamped cursor simply resumes next step. n<=0 disables the cap (the
+// default). A positive n below the resident minimum chunk is refused and
+// leaves the cap disabled rather than starving the lane into sub-minimum
+// chunks. Source: vllm-project/vllm, vllm/config/scheduler.py:79-90 and
+// vllm/v1/core/sched/scheduler.py:728-742, revision
+// ae065918640a198a56f6f17eb45e251c3229fe41 (Apache-2.0):
+// https://github.com/vllm-project/vllm/blob/ae065918640a198a56f6f17eb45e251c3229fe41/vllm/v1/core/sched/scheduler.py
+// Adapted for Fak as idiomatic Go (no upstream code blocks copied): only the
+// queued-others trigger and the min(chunk, threshold) clamp are ported; the
+// adaptive fair-share floor arrives with the serve-knob wiring leaf.
+func (s *NativeScheduler) SetLongPrefillTokenThreshold(n int) error {
+	if n > 0 && n < nativeQwenPrefillMinChunkTokens {
+		s.mu.Lock()
+		s.longPrefillTokenThreshold = 0
+		s.mu.Unlock()
+		return fmt.Errorf("modelengine: long prefill token threshold %d is below resident minimum %d", n, nativeQwenPrefillMinChunkTokens)
+	}
+	if n < 0 {
+		n = 0
+	}
+	s.mu.Lock()
+	s.longPrefillTokenThreshold = n
+	s.mu.Unlock()
+	s.signal()
+	return nil
+}
+
+// longPrefillStepCapLocked reports this step's cross-request fairness cap for
+// the running prefill lane: the armed threshold while other requests are
+// queued (waiting or preempted), zero when nobody waits or the cap is
+// disabled. Caller holds s.mu.
+func (s *NativeScheduler) longPrefillStepCapLocked() int {
+	if s.longPrefillTokenThreshold <= 0 || len(s.waiting)+len(s.preempted) == 0 {
+		return 0
+	}
+	return s.longPrefillTokenThreshold
+}
+
+// clampLongPrefillStep bounds one prefill step's chunk to the cross-request
+// fairness cap by temporarily lowering the lane's nominal chunk for the
+// duration of a single advanceQwenPrefill call, and returns the values needed
+// to undo it. The admission-time nominal survives the resume, so the
+// p0-prefill-budget resumable chunking keeps its own economics and the
+// clamped cursor resumes from where the clamped chunk stopped - no token
+// dropped or replayed. A cap below the resident minimum chunk floors at the
+// minimum so the lane stays live instead of tripping the not-decode-ready
+// guard. limit<=0 or a nominal already within the cap leaves the lane
+// untouched. Caller holds the executor lock; the brief s.mu takes fence the
+// shared queue and lane-field access against Admit-side publishers.
+func (s *NativeScheduler) clampLongPrefillStep(ln *schedLane, limit int) (orig, clamped int) {
+	orig = ln.prefillChunkTokens
+	if limit <= 0 || orig <= limit {
+		return orig, orig
+	}
+	if limit < nativeQwenPrefillMinChunkTokens {
+		limit = nativeQwenPrefillMinChunkTokens
+	}
+	if orig <= limit {
+		return orig, orig
+	}
+	s.mu.Lock()
+	ln.prefillChunkTokens = limit
+	s.mu.Unlock()
+	return orig, limit
+}
+
+// restoreLongPrefillStep undoes clampLongPrefillStep once the step's model
+// call has published its cursor, restoring the admission-time nominal
+// unconditionally: the clamp never permanently alters the lane's chunk plan.
+// For a lane that left PREFILLING this step - a final clamped chunk, or a
+// full prefix hit's explicit zero - the field is inert afterwards: every
+// reader (laneStepTokens, the prefill advance, dedup donor/twin matching)
+// gates on schedLanePrefilling before consulting it. No-op when the clamp
+// left the lane untouched. Caller holds the executor lock.
+func (s *NativeScheduler) restoreLongPrefillStep(ln *schedLane, orig, clamped int) {
+	if clamped == orig {
+		return
+	}
+	s.mu.Lock()
+	ln.prefillChunkTokens = orig
+	s.mu.Unlock()
+}
+
 // laneStepTokens is a lane's per-step token cost under maxTokensPerStep.
 func laneStepTokens(ln *schedLane) int {
 	if ln.state != schedLanePrefilling && (ln.sess != nil || ln.prefillChunkTokens == 0) {
@@ -1640,6 +1732,14 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 	closed = s.closed
 	waitingDepth := len(s.waiting)
 	idle = len(s.lanes) == 0 && len(s.waiting) == 0 && len(s.preempted) == 0
+	// Cross-request fairness cap (vLLM long_prefill_token_threshold): while
+	// other requests are queued, a lone long prefill advances at most the
+	// armed threshold this step. Packed prefill keeps its own packing
+	// economics and stays uncapped.
+	longPrefillLimit := 0
+	if prefill != nil && !prefill.packedPrefill {
+		longPrefillLimit = s.longPrefillStepCapLocked()
+	}
 	s.mu.Unlock()
 
 	s.recorder.SetQueueDepth(waitingDepth)
@@ -1656,7 +1756,9 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 			packedReady = s.advancePackedPrefill(iteration)
 			s.notePackedPrefillSkipDrafts(iteration, packedCandidates, packedCandidateCursors)
 		} else {
+			origChunk, clampedChunk := s.clampLongPrefillStep(prefill, longPrefillLimit)
 			s.advanceQwenPrefill(prefill, iteration)
+			s.restoreLongPrefillStep(prefill, origChunk, clampedChunk)
 			s.noteQwenPrefillSkipDrafts(iteration, prefill, prefillCursorBefore)
 		}
 		// PhasePrefill only: ObservePrefillChunk counts prompt tokens forwarded by
