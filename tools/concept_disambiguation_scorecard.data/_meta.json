@@ -18221,6 +18221,11 @@
           "category": "false-positive",
           "reason": "Count of the five physical FP8 KV storage planes per layer, not an execution plan or planning operation.",
           "token": "kvFP8Planes"
+        },
+        {
+          "category": "false-positive",
+          "reason": "perPlane is the checked byte count for one attended K or V storage row in analytical decode traffic arithmetic. Plane denotes physical storage, not an execution plan.",
+          "token": "perPlane"
         }
       ],
       "exclude": [
@@ -18234,6 +18239,7 @@
         "explanat",
         "hasTextToolCandidate",
         "kvFP8Planes",
+        "perPlane",
         "plane",
         "planeBytes",
         "plank",
