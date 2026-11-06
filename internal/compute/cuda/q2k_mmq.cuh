@@ -5,6 +5,9 @@
 // mmq-config-ampere.cuh, mma.cuh, vecdotq.cuh; block ABI from ggml-common.h.
 // Launch/writeback/stream-k scaffolding reused from Fak q4k_mmq.cuh, whose
 // upstream pin is 0e1d9185c5fe82e905d1f5ae6b2e5dcd607a8dfd.
+// The useful-work Stream-K cap follows llama.cpp change
+// 4c1004c49221b07c3b8108977e3d1991fc9f45cc, retained at
+// 0ec4027a2a0183de87c007069adddc06e665f7de and already adapted in Fak Q4_K.
 // Copyright (c) 2023-2026 The ggml authors. MIT text follows.
 /*
 MIT License
@@ -730,13 +733,17 @@ static int launch_mul_mat_q(const char * x, const int * y, float * dst, int nrow
     // For the stream-k kernel it is possible to run it with tiling by setting the number of CUDA blocks equal to the number of tiles.
     // This is worthwhile if the efficiency of tiling is high and skipping the fixup kernel is more important.
     const int ntiles_dst = ntx * nty;
-    const int64_t tiles_nwaves = ((int64_t)ntiles_dst + info.nsm - 1) / info.nsm;
-    const int tiles_efficiency_percent = (int)(100LL * ntiles_dst / (info.nsm*tiles_nwaves));
-    const dim3 block_nums_stream_k(tiles_efficiency_percent >= 90 ? ntiles_dst : info.nsm, 1, 1);
-
-    if ((int64_t) ntiles_dst * blocks_per_ne00_fd.z >= (1 << 30)) { // kbc would overflow.
+    const int64_t nwork = (int64_t) ntiles_dst * blocks_per_ne00_fd.z;
+    if (nwork >= (1 << 30)) { // kbc would overflow; refuse before narrowing the grid.
         return (int)cudaErrorInvalidValue;
     }
+    const int64_t tiles_nwaves = ((int64_t)ntiles_dst + info.nsm - 1) / info.nsm;
+    const int tiles_efficiency_percent = (int)(100LL * ntiles_dst / (info.nsm*tiles_nwaves));
+    // Q2_K has qk == ITER_K: one quant block is one useful K iteration.
+    // Below the SM count, omit only empty CTAs; ordered nonempty intervals and
+    // reverse fixup contributions are unchanged from the old one-CTA-per-SM grid.
+    const int stream_k_blocks = nwork < info.nsm ? (int) nwork : info.nsm;
+    const dim3 block_nums_stream_k(tiles_efficiency_percent >= 90 ? ntiles_dst : stream_k_blocks, 1, 1);
 
     const bool fixup_needed = ntiles_dst % block_nums_stream_k.x != 0;
 
