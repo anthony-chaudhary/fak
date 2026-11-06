@@ -68,7 +68,21 @@ type TPConfig struct {
 	// (each id/logit has exactly one owning rank). Requires the f32-resident embed table
 	// and head; fails closed on quant-resident/prism/LoRA head seams.
 	VocabRanks int
-	Coll       Collective
+	// SequenceRanks arms MEGATRON SEQUENCE PARALLELISM (tensor_parallel_sequence.go,
+	// adapted from Megatron-LM megatron/core/tensor_parallel/mappings.py's
+	// gather_from_sequence_parallel_region / reduce_scatter_to_sequence_parallel_region):
+	// the residual stream is SHARDED ALONG THE SEQUENCE dimension outside the tensor-
+	// parallel cores. 0/1 keeps the sequence unsharded (bit-identical to the non-SP path,
+	// the transitive-HF-gate leg); N>1 tiles [0,seq) into N near-even contiguous bands and
+	// runs the band-composed loop — each rank norms only its band, the full sequence is
+	// AllGather-ed into each TP core, and row-parallel outputs are ReduceScatter-ed back to
+	// bands by composition (the existing AllReduceSum, then a band slice — byte-identical to
+	// a device ReduceScatter by the pinned identity in internal/compute/collective.go).
+	// BIT-EXACT vs the unsharded path at every N (SP changes only WHERE data lives, never
+	// the arithmetic or the reduce order). Composes with AttnRanks / FFNRanks / VocabRanks;
+	// fails closed on any topology other than PreNorm / PostNorm / SandwichNorm.
+	SequenceRanks int
+	Coll          Collective
 	// SharedAttentionGeometry makes ForwardTP consult the shared-attention shape contract
 	// (shared_attention_geometry.go, ADAPTED from TensorFold shared_attention.zig) before any
 	// sharded-attention dispatch: NumHeads/NumKVHeads/HeadDim/rotary width must pass
@@ -598,33 +612,60 @@ func (m *Model) ForwardTP(ids []int, tp TPConfig) (*Activations, error) {
 	}
 	act := &Activations{Seq: seq, Hidden: [][]float32{flatten(x)}}
 
-	var subErr error
-	for l := 0; l < cfg.NumLayers; l++ {
-		rp := newRopeForLayer(cfg, l, seq)
-		attnSub := guardedSublayer(&subErr, seq, H, func(xn [][]float32) ([][]float32, error) {
-			return m.tpAttnLayer(l, xn, rp, attnPlan, coll)
-		})
-		mlpSub := guardedSublayer(&subErr, seq, H, func(xn [][]float32) ([][]float32, error) {
-			return m.tpFFNLayer(l, xn, ffnPlan, coll)
-		})
-		composeSeqSublayer(cfg.BlockTopology, x, m.attentionNorms(l), eps, cfg, attnSub)
-		composeSeqSublayer(cfg.BlockTopology, x, m.mlpNorms(l), eps, cfg, mlpSub)
-		if subErr != nil {
-			return nil, subErr
+	// The sequence-parallel outer lever (tensor_parallel_sequence.go): when armed, the
+	// residual stream is sharded along the SEQUENCE dimension outside the TP cores. All
+	// fail-closed checks run HERE, before any compute.
+	spRanks := clampRanks(tp.SequenceRanks, seq)
+	spArmed := spRanks > 1
+	var spPlan TPPlan
+	if spArmed {
+		if err := spTopologySupported(cfg.BlockTopology); err != nil {
+			return nil, err
 		}
-		act.Hidden = append(act.Hidden, flatten(x))
+		sp, err := NewTPPlan(seq, spRanks)
+		if err != nil {
+			return nil, fmt.Errorf("model: ForwardTP sequence plan: %w", err)
+		}
+		spPlan = sp
+	}
+
+	var xFinal [][]float32
+	if spArmed {
+		xFinal, err = m.forwardTPSP(x, spPlan, attnPlan, ffnPlan, coll, act)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		var subErr error
+		for l := 0; l < cfg.NumLayers; l++ {
+			rp := newRopeForLayer(cfg, l, seq)
+			attnSub := guardedSublayer(&subErr, seq, H, func(xn [][]float32) ([][]float32, error) {
+				return m.tpAttnLayer(l, xn, rp, attnPlan, coll)
+			})
+			mlpSub := guardedSublayer(&subErr, seq, H, func(xn [][]float32) ([][]float32, error) {
+				return m.tpFFNLayer(l, xn, ffnPlan, coll)
+			})
+			composeSeqSublayer(cfg.BlockTopology, x, m.attentionNorms(l), eps, cfg, attnSub)
+			composeSeqSublayer(cfg.BlockTopology, x, m.mlpNorms(l), eps, cfg, mlpSub)
+			if subErr != nil {
+				return nil, subErr
+			}
+			act.Hidden = append(act.Hidden, flatten(x))
+		}
+		xFinal = x
 	}
 
 	// The logits tail: the vocab-parallel head (ParallelLMHead) when armed, the monolith
-	// fillSeqLogits otherwise. Both end with the arch logit scale applied once.
+	// fillSeqLogits otherwise. Both end with the arch logit scale applied once. Under
+	// sequence parallelism it runs on the AllGather-ed final full sequence.
 	if vocabParallel {
-		logits, err := m.tpHeadLogits(x, vocabPlan, coll)
+		logits, err := m.tpHeadLogits(xFinal, vocabPlan, coll)
 		if err != nil {
 			return nil, fmt.Errorf("model: ForwardTP vocab-parallel head: %w", err)
 		}
 		act.Logits = logits
 	} else {
-		m.fillSeqLogits(act, x)
+		m.fillSeqLogits(act, xFinal)
 	}
 	return act, nil
 }

@@ -1,0 +1,39 @@
+Megatron-LM sequence-parallel region mappings
+
+Copyright (c) 2019-2025, NVIDIA CORPORATION. All rights reserved.
+Licensed under the NVIDIA license reproduced in this directory (see LICENSE).
+
+Source: NVIDIA/Megatron-LM, megatron/core/tensor_parallel/mappings.py
+Revision: 685fb8bd970185e9ac3283fe32a5d6667bf4b268 (tag core_v0.20.0)
+https://github.com/NVIDIA/Megatron-LM/blob/685fb8bd970185e9ac3283fe32a5d6667bf4b268/megatron/core/tensor_parallel/mappings.py
+
+Adaptation: Go implementation of the sequence-parallel region protocol for
+fak's native engine (internal/model/tensor_parallel_sequence.go). Ported
+mechanisms, in upstream terms:
+
+  - scatter_to_sequence_parallel_region: split the activation along the
+    FIRST (sequence) dimension across tensor-parallel ranks; each rank keeps
+    its contiguous band (_split_along_first_dim).
+  - gather_from_sequence_parallel_region: AllGather the per-rank sequence
+    bands in rank order before a tensor-parallel core
+    (_gather_along_first_dim).
+  - reduce_scatter_to_sequence_parallel_region: after a row-parallel core,
+    ReduceScatter the per-rank partials back to sequence bands
+    (_reduce_scatter_along_first_dim).
+
+Divergences (fak adaptation, documented in the port file header):
+
+  - fak's reduce-scatter is COMPOSED as AllReduceSum (the existing rank-order
+    sum) followed by an ordered slice, byte-identical to a real ReduceScatter
+    by the identity pinned in internal/compute/collective.go (ReduceScatter
+    reuses the identical rank-order sum and slices it). The device seam
+    (compute.CollectiveBackend) exposes a real ReduceScatter for the swap-in.
+  - fak's validated TPPlan tiling (near-even contiguous bands, remainder on
+    the first shards) replaces upstream's exact-divisibility assert on the
+    first dimension.
+  - Inference forward only: upstream's autograd backward pairings (gather's
+    backward reduce-scatter, etc.) are not ported — fak has no training path.
+  - fak materializes full-sequence activation snapshots for its Activations
+    witness bookkeeping by concatenating the per-rank bands in rank order; a
+    real deployment keeps the bands resident (the memory win is a deployment
+    property, not observable in the single-box witness).

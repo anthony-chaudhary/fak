@@ -20,6 +20,13 @@
 //     VOCABULARY dimension are BIT-EXACT vs the monolith at EVERY rank count — each token
 //     id / logit has exactly one owning rank, so the reduce adds zeros and the gather
 //     concatenates in token-id order (no reassociation anywhere).
+//   - SEQUENCE-PARALLEL outer lever (tensor_parallel_sequence.go, the Megatron-LM
+//     mappings.py adaptation): the residual stream sharded along the SEQUENCE dimension
+//     outside the tensor-parallel cores is BIT-EXACT vs the unsharded path at EVERY band
+//     count P — the bands AllGather into each TP core and the row-parallel outputs
+//     ReduceScatter back to bands by composition (the existing rank-order AllReduceSum,
+//     then a band slice); SP moves data between the collectives, it never reorders or
+//     reassociates a reduction (max|Δ|=0 over the full logits AND every hidden layer).
 //
 // The single-rank TP result is the monolithic reference here; the unit test
 // (tensor_parallel_test.go) pins that 1-rank result bit-for-bit to matRows/the SwiGLU FFN,
@@ -248,6 +255,9 @@ func runWired(ranks []int, coll model.Collective) error {
 	if err := runVocab(ranks, coll); err != nil {
 		return err
 	}
+	if err := runSequence(ranks, coll); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -309,6 +319,78 @@ func runVocab(ranks []int, coll model.Collective) error {
 		return fmt.Errorf("vocab-parallel witness failed")
 	}
 	fmt.Println("tpcheck: OK — vocab-parallel embedding+head bit-exact vs the monolith at every rank count (each id/logit has exactly one owning rank).")
+	return nil
+}
+
+// runSequence witnesses the SEQUENCE-PARALLEL subsystem (tensor_parallel_sequence.go, the
+// Megatron-LM mappings.py adaptation): the residual stream sharded along the SEQUENCE
+// dimension outside the tensor-parallel cores. Entering a TP core the full sequence is
+// re-materialized with an AllGather over the sequence bands; leaving a row-parallel core
+// the per-rank partials are ReduceScatter-ed back to bands by composition (the existing
+// rank-order AllReduceSum, then a band slice — byte-identical to a device ReduceScatter by
+// the pinned identity in internal/compute/collective.go). Because SP changes only WHERE
+// data lives, never the arithmetic or the reduce order, ForwardTP(SequenceRanks=P) must be
+// BIT-EXACT (max|Δ|=0 over the full logits AND every hidden snapshot) vs the unsharded
+// ForwardTP reference at EVERY P — non-zero drift is a BUG.
+func runSequence(ranks []int, coll model.Collective) error {
+	cfg := model.Config{
+		HiddenSize: 64, NumLayers: 4, NumHeads: 8, NumKVHeads: 4, HeadDim: 8,
+		IntermediateSize: 256, VocabSize: 64, RMSNormEps: 1e-5, RopeTheta: 10000,
+		ModelType: "llama", EOSTokenID: -1,
+	}
+	m := model.NewSynthetic(cfg)
+	ids := []int{1, 2, 3, 4, 5, 6, 7, 8} // seq=8: P=3 and P=5 exercise uneven bands
+	ref, err := m.ForwardTP(ids, model.TPConfig{Coll: coll})
+	if err != nil {
+		return fmt.Errorf("ForwardTP sequence reference: %v", err)
+	}
+
+	fmt.Printf("\n  sequence-parallel: ForwardTP(SequenceRanks=P) vs unsharded ForwardTP  (seq=%d H=%d L=%d)\n", len(ids), cfg.HiddenSize, cfg.NumLayers)
+	fmt.Printf("  bands AllGather into each TP core; row-parallel outputs ReduceScatter back to bands (by composition)\n")
+	fmt.Printf("  %-6s | %-26s | %-26s\n", "P", "logits vs ref (all pos)", "hidden vs ref (all layers)")
+	fmt.Printf("  %s\n", strings.Repeat("-", 62))
+
+	seqFailed := false
+	for _, p := range ranks {
+		if p < 1 {
+			continue
+		}
+		act, err := m.ForwardTP(ids, model.TPConfig{SequenceRanks: p, Coll: coll})
+		if err != nil {
+			return fmt.Errorf("ForwardTP sequence P=%d: %v", p, err)
+		}
+		var lm float64
+		for pos := range act.Logits {
+			if d := maxAbs(act.Logits[pos], ref.Logits[pos]); d > lm {
+				lm = d
+			}
+		}
+		if len(act.Hidden) != len(ref.Hidden) {
+			return fmt.Errorf("ForwardTP sequence P=%d: %d hidden snapshots, want %d", p, len(act.Hidden), len(ref.Hidden))
+		}
+		var hm float64
+		for l := range act.Hidden {
+			if d := maxAbs(act.Hidden[l], ref.Hidden[l]); d > hm {
+				hm = d
+			}
+		}
+		logitsMsg := "max|Δ|=0 (bit-exact)"
+		if lm != 0 {
+			logitsMsg = fmt.Sprintf("max|Δ|=%.2e (DRIFT BUG)", lm)
+			seqFailed = true
+		}
+		hiddenMsg := "max|Δ|=0 (bit-exact)"
+		if hm != 0 {
+			hiddenMsg = fmt.Sprintf("max|Δ|=%.2e (DRIFT BUG)", hm)
+			seqFailed = true
+		}
+		fmt.Printf("  %-6d | %-26s | %-26s\n", p, logitsMsg, hiddenMsg)
+	}
+	fmt.Println()
+	if seqFailed {
+		return fmt.Errorf("sequence-parallel witness failed")
+	}
+	fmt.Println("tpcheck: OK — sequence-parallel ForwardTP bit-exact vs the unsharded path at every P (SP moves data, not arithmetic).")
 	return nil
 }
 

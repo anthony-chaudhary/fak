@@ -2,9 +2,132 @@ package model
 
 import (
 	"context"
+	"math"
+	"reflect"
 	"testing"
 	"time"
 )
+
+// fak-test:runtime fast est=10ms lane=default
+func TestQwen38MTP_Adaptive_RejectInvalidFeedbackWithoutMutation(t *testing.T) {
+	state := func(g *Qwen38MTPAdaptiveDepthGovernor) []any {
+		return []any{g.Receipt(), g.initialized, g.emaAcceptanceRate, g.emaSpeedup, g.emaStepLatency,
+			g.highStreak, g.lowStreak, g.stepsInTargetOnly, g.isProbing, g.sumSpeedup, g.sumAcceptanceRate}
+	}
+	for _, field := range []string{"alpha", "high", "low", "target", "acceptance"} {
+		for _, invalid := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+			cfg := DefaultQwen38AdaptiveConfig()
+			switch field {
+			case "alpha":
+				cfg.AlphaEMA = invalid
+			case "high":
+				cfg.SpeedupThresholdHigh = invalid
+			case "low":
+				cfg.SpeedupThresholdLow = invalid
+			case "target":
+				cfg.TargetOnlyThreshold = invalid
+			case "acceptance":
+				cfg.MinAcceptanceRate = invalid
+			}
+			if _, err := NewQwen38MTPAdaptiveDepthGovernor(cfg); err == nil {
+				t.Errorf("accepted non-finite %s=%v", field, invalid)
+			}
+		}
+	}
+	for _, invalid := range []float64{-0.01, 1.01} {
+		cfg := DefaultQwen38AdaptiveConfig()
+		cfg.MinAcceptanceRate = invalid
+		if _, err := NewQwen38MTPAdaptiveDepthGovernor(cfg); err == nil {
+			t.Errorf("accepted acceptance threshold %v", invalid)
+		}
+	}
+	for _, endpoint := range []float64{0, 1} {
+		cfg := DefaultQwen38AdaptiveConfig()
+		cfg.MinAcceptanceRate = endpoint
+		if _, err := NewQwen38MTPAdaptiveDepthGovernor(cfg); err != nil {
+			t.Fatalf("valid acceptance endpoint %v: %v", endpoint, err)
+		}
+	}
+	for name, invalid := range map[string]Qwen38AdaptiveStepObservation{
+		"negative proposed": {ProposedTokens: -1},
+		"negative accepted": {ProposedTokens: 1, AcceptedTokens: -1},
+		"excess accepted":   {ProposedTokens: 1, AcceptedTokens: 2},
+		"negative step":     {StepLatency: -time.Nanosecond},
+		"negative target":   {TargetLatency: -time.Nanosecond},
+		"negative speedup":  {Speedup: -1},
+		"nan speedup":       {Speedup: math.NaN()},
+		"infinite speedup":  {Speedup: math.Inf(1)},
+		"negative infinity": {Speedup: math.Inf(-1)},
+		"overflow rows":     {ProposedTokens: int(^uint(0) >> 1), Speedup: 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := DefaultQwen38AdaptiveConfig()
+			gov, err := NewQwen38MTPAdaptiveDepthGovernor(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			costs, err := NewDraftDepthCosts([]float64{0, 1, 2, 3, 4}, 1, 4)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rule, err := NewDraftDepthRule(costs, 3, nil, 2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gov.SetCostRule(rule)
+			valid := Qwen38AdaptiveStepObservation{ProposedTokens: 2, AcceptedTokens: 2, Speedup: 1.5}
+			if _, _, err := gov.ObserveStep(valid); err != nil {
+				t.Fatal(err)
+			}
+			before := gov.Receipt()
+			beforeState, beforeTokens, beforeMS := state(gov), rule.Tokens(), rule.MS()
+			next, _, err := gov.ObserveStep(invalid)
+			if err == nil {
+				t.Fatal("malformed observation was accepted")
+			}
+			if next != before.FinalDepth || !reflect.DeepEqual(state(gov), beforeState) || rule.Tokens() != beforeTokens || rule.MS() != beforeMS {
+				t.Fatal("refused observation changed governor state")
+			}
+			if _, _, err := gov.ObserveStep(valid); err != nil || gov.highStreak != 2 || gov.CurrentDepth() != cfg.ColdStartDepth {
+				t.Fatalf("valid follow-up changed by refusal: %v", err)
+			}
+		})
+	}
+	gov, _ := NewQwen38MTPAdaptiveDepthGovernor(DefaultQwen38AdaptiveConfig())
+	large := Qwen38AdaptiveStepObservation{Speedup: math.MaxFloat64}
+	if _, _, err := gov.ObserveStep(large); err != nil {
+		t.Fatal(err)
+	}
+	before := gov.Receipt()
+	if _, _, err := gov.ObserveStep(large); err == nil || !reflect.DeepEqual(before, gov.Receipt()) {
+		t.Fatal("finite observation overflowed or changed the cumulative receipt")
+	}
+	for _, probe := range []bool{false, true} {
+		cfg := DefaultQwen38AdaptiveConfig()
+		cfg.ProbeInterval = 1
+		g, _ := NewQwen38MTPAdaptiveDepthGovernor(cfg)
+		_, _, _ = g.ObserveStep(Qwen38AdaptiveStepObservation{Speedup: 0.5})
+		if probe {
+			_, _, _ = g.ObserveStep(Qwen38AdaptiveStepObservation{Speedup: 1})
+		}
+		before := state(g)
+		if _, _, err := g.ObserveStep(Qwen38AdaptiveStepObservation{Speedup: math.NaN()}); err == nil || !reflect.DeepEqual(before, state(g)) {
+			t.Fatalf("invalid feedback advanced target-only/probe state (probe=%v)", probe)
+		}
+	}
+	for _, observation := range []Qwen38AdaptiveStepObservation{
+		{}, {StepLatency: time.Second}, {TargetLatency: time.Second},
+		{ProposedTokens: 2, AcceptedTokens: 1, StepLatency: 2 * time.Second, TargetLatency: time.Second},
+		{ProposedTokens: 5, AcceptedTokens: 5, Speedup: 1.1},
+		{StepLatency: time.Second, TargetLatency: time.Hour, Speedup: 1.1},
+	} {
+		g, _ := NewQwen38MTPAdaptiveDepthGovernor(DefaultQwen38AdaptiveConfig())
+		_, record, err := g.ObserveStep(observation)
+		if err != nil || record.Speedup != observation.ComputeSpeedup() {
+			t.Fatalf("valid zero/analytic/override behavior changed: %+v, %v", observation, err)
+		}
+	}
+}
 
 // TestQwen38MTP_Adaptive_ColdStartConvergence verifies that the governor starts at ColdStartDepth
 // and smoothly initializes EMA metrics on the first step.

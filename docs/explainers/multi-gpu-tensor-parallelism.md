@@ -72,6 +72,20 @@ result is exact. The head computes each rank's logits band and the bands are
 weight rows as the monolith, so the vocab tail is **bit-exact vs the single-device path at
 every rank count** — no reassociation anywhere, unlike the row-parallel blocks.
 
+**Sequence-parallel** (the fourth building block, `internal/model/tensor_parallel_sequence.go`,
+adapted from Megatron-LM's `megatron/core/tensor_parallel/mappings.py` at `core_v0.20.0`):
+the residual stream itself shards along the **sequence** dimension outside the TP cores
+(upstream `scatter_to_sequence_parallel_region`). Entering a TP core, the full sequence is
+re-materialized by an **AllGather** over bands (`gather_from_sequence_parallel_region`);
+leaving a row-parallel core, the per-rank partials are **ReduceScatter**-ed back to bands
+(`reduce_scatter_to_sequence_parallel_region`). Norms are per-position elementwise, so each
+rank norms only its band, and the residual is position-local. fak composes the reduce-scatter
+as `AllReduceSum` + ordered slice — byte-identical to a real ReduceScatter by the pinned
+`AllReduceSum ≅ AllGather∘ReduceScatter` identity — so SP is **bit-exact vs the unsharded
+path at every rank count**: it moves data, not arithmetic. The activation-memory win is a
+deployment property (bands stay resident on a real device); the single-box witness proves
+the protocol and its identities.
+
 The algebra the wired forward path obeys:
 
 ```
@@ -90,6 +104,7 @@ witnessable on a CPU, with **no multi-GPU hardware**.
 |---|---|---|
 | `Model.ForwardTP(ids, TPConfig{AttnRanks, FFNRanks, Coll})` | `internal/model/tensor_parallel_forward.go` | The wired TP forward. `AttnRanks` shards attention over the kv-head groups; `FFNRanks` shards the FFN over the intermediate dim. `Coll == nil` → `LocalCollective`. |
 | `TPConfig.VocabRanks` | `internal/model/tensor_parallel_vocab.go` | Arms the **vocab-parallel tail**: the embedding table and LM head shard across the vocabulary dimension (the vLLM `VocabParallelEmbedding`/`ParallelLMHead` port). 0/1 keeps the monolithic tail; N>1 is bit-exact vs the monolith at any rank count. Fails closed on a quant-resident/prism/LoRA head seam or an out-of-range id. |
+| `TPConfig.SequenceRanks` | `internal/model/tensor_parallel_sequence.go` | Arms **sequence parallelism** (the Megatron-LM port): the residual stream shards along the sequence dimension outside the TP cores; AllGather into each core, ReduceScatter-by-composition out. 0/1 keeps the sequence unsharded; N>1 is bit-exact vs the unsharded path at every N. Composes with AttnRanks/FFNRanks/VocabRanks; fails closed on non-sequential topologies. |
 | `NewTPPlan(dim, ranks)` → `TPPlan` / `TPShard` | `internal/model/tensor_parallel.go` | Validated tiling of one dimension into `ranks` contiguous, non-overlapping, complete shards. Fails closed on a degenerate plan (a rank with no work). |
 | `Collective` (`LocalCollective`) | `internal/model/tensor_parallel.go` | The host-`[]float32` AllGather/AllReduce seam; `LocalCollective` is the single-box, bit-exact default. |
 | `CollectiveBackend` | `internal/compute/compute.go` | The **device-tensor** cross-rank seam at the HAL — the swap-in point for real hardware (see §5). |
@@ -176,7 +191,11 @@ no GPU required:
 | **Vocab-parallel head** == monolith `logitsFromHidden` at every rank count (tied + untied) | `model.TestVocabParallelHeadLogitsMatchesMonolith` |
 | `ForwardTP(VocabRanks=N)` == `ForwardTP(VocabRanks=1)` == `Forward` (**bit-exact**) | `model.TestForwardTPVocabRanksMatchesRanks1AndForward` |
 | Vocab-parallel fail-closed (OOB id, quant-resident/prism/LoRA head, Q2K table) | `model.TestForwardTPVocabFailClosed` |
+| **Sequence-parallel** == unsharded `ForwardTP` at every P (logits + all hidden snapshots) | `model.TestSequenceParallelMatchesNonSP`, `TestSequenceParallelBandRoundTrip` |
+| SP composes with Attn/FFN/Vocab ranks; three topologies bit-exact | `model.TestSequenceParallelComposesWithShardedSublayers`, `TestSequenceParallelTopologyCoverage` |
+| SP fail-closed (ParallelResidual named refusal) | `model.TestSequenceParallelFailClosed` |
 | `tpcheck` vocab-parallel witness (max\|Δ\|=0 at ranks 1/2/4/8) | `go run ./cmd/tpcheck` (the `vocab-parallel tail` table) |
+| `tpcheck` sequence-parallel witness (max\|Δ\|=0 at P 1/2/4/8) | `go run ./cmd/tpcheck` (the `sequence-parallel` table) |
 | Reduction order is rank-order pinned | `model.TestTPForwardReductionRankOrderPinned` |
 | HAL collective bridge == `LocalCollective` byte-for-byte | `model.TestBackendCollectiveMatchesLocal`, `TestForwardTPViaBackendCollective` |
 | **Real cross-process** `ForwardTP` over `DistComm` == single-process `ForwardTP` | `model.TestForwardTPDistCommRanksMatchLocalForwardTP`, `TestForwardTPViaDistCommCollective` |
@@ -211,6 +230,7 @@ and the real multi-GPU run** are the remaining work, and they need multi-GPU har
 internal/model/tensor_parallel.go          # TPPlan/TPShard, TensorParallelFFN, Collective/LocalCollective
 internal/model/tensor_parallel_attn.go     # TensorParallelAttention
 internal/model/tensor_parallel_vocab.go    # vocab-parallel embedding + LM head (the vLLM port)
+internal/model/tensor_parallel_sequence.go # sequence parallelism (the Megatron-LM port)
 internal/model/tensor_parallel_forward.go  # ForwardTP, TPConfig (the wired forward)
 internal/model/collective_bridge.go        # BackendCollective (model→HAL bridge)
 internal/model/dist_collective.go          # DistComm (cross-process communicator over TCP)
