@@ -169,6 +169,39 @@ canonical **Candidate** (a scored context span) or **Plan (planner)** (a residen
 - **MLA KV layout seam** - attention cache variant seam interface: standardKVLayout vs mlaKVLayout.
   *Not* Layout (tensor) (that is element ordering, not cache variant).
 
+- **LayoutContract registry (`internal/compute/layoutcontract`)** - declarative registry of
+  tensor layout contracts per quantized kernel family (Q4_K, Q8_0, NVFP4, MXFP4): each
+  Contract pins storage order, interleave width, scale layout, padding rule, packing path,
+  and a source ref at path:line@sha. *Not* layoutoracle (the oracle COMPUTES byte geometry
+  from first principles; the registry DECLARES the expected packed layout), *not* Layout
+  (tensor) element ordering, and *not* `fak pack` (the OCI image bundler - "pack" there
+  means archive an image, not pack weights).
+
+- **`fak-dev layoutcontract` (verb)** - read-only CLI over the registry (families / show /
+  check / orphans; receipts `fak.layoutcontract/1`, `fak.layoutcontract-check/1`,
+  `fak.layoutcontract-orphans/1`). *Not* the registry itself and *not* `fak-dev
+  kernel-oracle` (kernel performance ranking, not layout).
+
+- **layoutoracle (`internal/layoutoracle`)** - independent geometry/stride oracle: computes
+  byte geometry from shape/strides/dtype (min/max offset over the strided box times dtype
+  size, overflow-checked) and refuses declared-vs-actual Descriptor mismatches before
+  dispatch (CheckGeometry, ExpectedBytes; sentinels ErrGeometryMismatch,
+  ErrGroupingMismatch, ErrInvalidDescriptor, ErrOverflow). *Not* the layoutcontract
+  registry (declarative facts, no computation) - total-byte agreement does not imply
+  layout agreement (LML-02: flattened vs grouped share bytes, differ in axis
+  partitioning).
+
+- **CheckLoaderPackingAgainstInventory (studymonitor)** - fail-closed check comparing a
+  kernel_inventory record's filled layout obligations against a declared loader packing
+  path (PackingPathFacts) on four string axes; refuses ErrLayoutMismatch (both sides
+  declare, they differ - the LML-07 class) or ErrLayoutUnknown (out-of-vocabulary value or
+  undeclared axis). *Not* the layoutcontract registry (declaration) and *not* layoutoracle
+  (numeric byte geometry) - this check never inspects bytes. Its starter vocabularies are
+  KnownExpectedInputLayouts (row-major / tile-swizzled / column-interleaved /
+  value-head-tiled / grouped) and KnownScaleLayouts (linear / 128x4-tiled).
+
+Full symbol-level map: [the layout disambiguation page](../concepts/disambiguation-layout.md).
+
 ---
 
 ## The loop family

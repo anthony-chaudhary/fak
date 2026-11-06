@@ -1,0 +1,337 @@
+{
+ "rows": [
+  {
+   "id": "x-layout-layoutcontract-registry",
+   "canonical": "LayoutContract registry (compute)",
+   "family": "layout",
+   "kind": "subsystem",
+   "definition": "internal/compute/layoutcontract is the declarative registry of tensor layout contracts for every quantized kernel family present in-tree (Q4_K, Q8_0, NVFP4, MXFP4): each Contract pins the closed fact set a loader must satisfy - storage order, interleave width, scale layout, padding rule, packing path - plus a source ref pinned at path:line@sha, so loader/kernel drift shows up as a stale ref to re-pin instead of a silent runtime transpose or repack.",
+   "distinction": "A declarative registry of EXPECTED packed layouts (facts about what the loader must produce). Not layoutoracle (which recomputes byte geometry from first principles and refuses declared-vs-actual descriptor mismatches), not Layout (tensor) element ordering, not the newmodel WeightLayout checkpoint-packing envelope, and not `fak pack` (the OCI image bundler - 'pack' there means archive an image, not pack weights).",
+   "distinct_from": [
+    "x-layout-layoutoracle-package",
+    "x-layout-layoutcontract-verb",
+    "layout-tensor",
+    "newmodel-native-weight-layout"
+   ],
+   "aliases": [],
+   "grounding": "layoutcontract",
+   "grounding_kind": "path",
+   "glossary_anchor": "docs/concepts/disambiguation-layout.md",
+   "parent": "",
+   "verdict": "crystal",
+   "gaps": []
+  },
+  {
+   "id": "x-layout-layoutcontract-verb",
+   "canonical": "layoutcontract (fak-dev verb)",
+   "family": "layout",
+   "kind": "cli-verb",
+   "definition": "The read-only `fak-dev layoutcontract` CLI surface over the layoutcontract registry: families lists registered kernel families, show FAMILY emits the full contract (receipt schema fak.layoutcontract/1), check FAMILY --observed FILE compares an observed-layout file against the contract under the closed field vocabulary storage_order / scale_layout / interleave_width / padding_rule / packing_stage (receipt fak.layoutcontract-check/1; exit 0 match, 1 mismatch, 2 usage-or-unknown-family), and orphans reports registered families with no production call site (receipt fak.layoutcontract-orphans/1). No subcommand mutates state.",
+   "distinction": "A CLI query surface, not the registry itself (LayoutContract registry (compute)) - it adds no layout facts and mutates nothing. Not `fak-dev kernel-oracle` either, which ranks Vulkan kernels against ggml test-backend-ops per op and shape (kernel performance ranking, not layout).",
+   "distinct_from": [
+    "x-layout-layoutcontract-registry",
+    "x-layout-layoutoracle-package"
+   ],
+   "aliases": [
+    "runLayoutContract"
+   ],
+   "grounding": "layoutcontract",
+   "grounding_kind": "verb",
+   "glossary_anchor": "docs/concepts/disambiguation-layout.md",
+   "parent": "",
+   "verdict": "crystal",
+   "gaps": []
+  },
+  {
+   "id": "x-layout-errunknownfamily",
+   "canonical": "ErrUnknownFamily (layoutcontract)",
+   "family": "layout",
+   "kind": "symbol",
+   "definition": "Fail-closed sentinel error returned by layoutcontract.Get/Must for a family tag the registry does not register; callers pin it with errors.Is, and the fak-dev layoutcontract verb maps it to exit code 2 (usage-or-unknown-family).",
+   "distinction": "A registry lookup-refusal identity. Not studymonitor's ErrLayoutMismatch/ErrLayoutUnknown (packing-check sentinels comparing a record's layout obligations against a declared packing path) and not layoutoracle's sentinels (geometry/grouping/invalid-descriptor/overflow refusals on descriptors).",
+   "distinct_from": [
+    "x-layout-layoutcontract-registry",
+    "lg-lml-errlayoutmismatch",
+    "x-layoutoracle-errgeometrymismatch"
+   ],
+   "aliases": [],
+   "grounding": "ErrUnknownFamily",
+   "grounding_kind": "symbol",
+   "glossary_anchor": "docs/concepts/disambiguation-layout.md",
+   "parent": "",
+   "verdict": "crystal",
+   "gaps": []
+  },
+  {
+   "id": "lg-lml-checkloaderpacking",
+   "canonical": "CheckLoaderPackingAgainstInventory (studymonitor)",
+   "family": "layout",
+   "kind": "symbol",
+   "definition": "studymonitor.CheckLoaderPackingAgainstInventory compares the layout obligations a kernel_inventory evidence record fills (expected_input_layout, swizzle_pattern, scale_layout, packing_source) against a declared loader packing path (PackingPathFacts) and refuses typed instead of accepting: nil when every filled obligation matches, ErrLayoutMismatch when both sides declare differing values on an obligated axis, ErrLayoutUnknown when a filled value falls outside the closed starter vocabulary or the packing path leaves the obligated axis undeclared. The first failing axis in field declaration order is reported; whitespace-only fields count as unfilled.",
+   "distinction": "A fail-closed CHECK comparing two declarations on four string axes. Not the layoutcontract registry (which declares the expected contract per kernel family) and not layoutoracle (which recomputes byte geometry from shape/stride/dtype) - it never inspects bytes, only whether record and packing path agree on the obligated axes.",
+   "distinct_from": [
+    "lg-lml-packingpathfacts",
+    "lg-lml-errlayoutmismatch",
+    "x-layout-layoutcontract-registry",
+    "x-layout-layoutoracle-package"
+   ],
+   "aliases": [],
+   "grounding": "CheckLoaderPackingAgainstInventory",
+   "grounding_kind": "doc",
+   "glossary_anchor": "docs/concepts/disambiguation-layout.md",
+   "parent": "",
+   "verdict": "crystal",
+   "gaps": []
+  },
+  {
+   "id": "lg-lml-packingpathfacts",
+   "canonical": "PackingPathFacts (studymonitor)",
+   "family": "layout",
+   "kind": "symbol",
+   "definition": "The struct declaring what a loader packing path produces for one kernel family's tensors at load time, on the same four layout axes as the kernel_inventory record it is checked against: ExpectedInputLayout, SwizzlePattern, ScaleLayout, PackingSource. Every field is optional - an empty string means the packing path does not declare that axis, which CheckLoaderPackingAgainstInventory treats as unverifiable whenever the record obligates it.",
+   "distinction": "Declared packing-path FACTS (what the loader produces), not the check that consumes them (CheckLoaderPackingAgainstInventory) and not the registry contract (LayoutContract registry (compute)).",
+   "distinct_from": [
+    "lg-lml-checkloaderpacking",
+    "x-layout-layoutcontract-registry"
+   ],
+   "aliases": [],
+   "grounding": "PackingPathFacts",
+   "grounding_kind": "doc",
+   "glossary_anchor": "docs/concepts/disambiguation-layout.md",
+   "parent": "",
+   "verdict": "crystal",
+   "gaps": []
+  },
+  {
+   "id": "lg-lml-errlayoutmismatch",
+   "canonical": "ErrLayoutMismatch (studymonitor)",
+   "family": "layout",
+   "kind": "symbol",
+   "definition": "Closed sentinel refusal from the studymonitor packing check for a kernel_inventory record whose filled layout obligation differs from the value the declared loader packing path produces on the same axis; the witnessed class is LML-07 (ssm_out value-head-tiled GGUF columns fed through the Q8_0 deinterleave packing path). Callers pin the refusal class with errors.Is and never assert on the wrapped message prose.",
+   "distinction": "Record-vs-packing-path DISAGREEMENT on a layout axis (both sides declare a value, they differ). Not ErrLayoutUnknown (unverifiable: out-of-vocabulary value or undeclared axis) and not layoutoracle.ErrGeometryMismatch (byte-geometry disagreement between two numeric descriptors).",
+   "distinct_from": [
+    "lg-lml-errlayoutunknown",
+    "x-layoutoracle-errgeometrymismatch",
+    "lg-lml-checkloaderpacking"
+   ],
+   "aliases": [],
+   "grounding": "ErrLayoutMismatch",
+   "grounding_kind": "doc",
+   "glossary_anchor": "docs/concepts/disambiguation-layout.md",
+   "parent": "",
+   "verdict": "crystal",
+   "gaps": []
+  },
+  {
+   "id": "lg-lml-errlayoutunknown",
+   "canonical": "ErrLayoutUnknown (studymonitor)",
+   "family": "layout",
+   "kind": "symbol",
+   "definition": "Closed sentinel refusal from the studymonitor packing check for a filled layout obligation that cannot be verified: the record value falls outside the closed starter vocabulary, or the packing path leaves the obligated axis undeclared. Novel values and undeclared packing axes refuse as ErrLayoutUnknown rather than being coerced to match.",
+   "distinction": "UNVERIFIABILITY, not disagreement: ErrLayoutMismatch fires when both sides declare different values; ErrLayoutUnknown fires when one side is missing or out of vocabulary. Not layoutoracle.ErrInvalidDescriptor (a descriptor violating the closed geometry policy).",
+   "distinct_from": [
+    "lg-lml-errlayoutmismatch",
+    "x-layoutoracle-errinvaliddescriptor",
+    "lg-lml-checkloaderpacking"
+   ],
+   "aliases": [],
+   "grounding": "ErrLayoutUnknown",
+   "grounding_kind": "doc",
+   "glossary_anchor": "docs/concepts/disambiguation-layout.md",
+   "parent": "",
+   "verdict": "crystal",
+   "gaps": []
+  },
+  {
+   "id": "lg-lml-knownexpectedinputlayouts",
+   "canonical": "KnownExpectedInputLayouts (studymonitor)",
+   "family": "layout",
+   "kind": "config",
+   "definition": "Starter closed vocabulary for the kernel_inventory expected_input_layout axis: row-major, tile-swizzled, column-interleaved, value-head-tiled, grouped. The value-head-tiled/grouped order pair names the Qwen3.5-family ssm_out arrangement (GGUF input columns stored value-head-tiled while the GDN core emits grouped order, commit 36d3e634c3, ledger row LML-07). Registry readers stay open to newer values; only the packing check fails closed.",
+   "distinction": "A starter VALUE LIST for one record axis, not a layout implementation. Not KnownScaleLayouts (the scale_layout axis: linear vs 128x4-tiled) and not the layoutcontract StorageOrder Go enum (RowMajor/TileSwizzled/ColumnInterleaved constants).",
+   "distinct_from": [
+    "lg-lml-knownscalelayouts",
+    "x-layout-layoutcontract-registry"
+   ],
+   "aliases": [],
+   "grounding": "KnownExpectedInputLayouts",
+   "grounding_kind": "doc",
+   "glossary_anchor": "docs/concepts/disambiguation-layout.md",
+   "parent": "",
+   "verdict": "crystal",
+   "gaps": []
+  },
+  {
+   "id": "lg-lml-knownscalelayouts",
+   "canonical": "KnownScaleLayouts (studymonitor)",
+   "family": "layout",
+   "kind": "config",
+   "definition": "Starter closed vocabulary for the kernel_inventory scale_layout axis: linear (separate row-major scale array aligned to the weight grid) versus 128x4-tiled (the TensorRT-LLM NVFP4 block-scale image), aligned with the scale layouts fak registers per kernel family.",
+   "distinction": "Value list for the scale_layout RECORD AXIS. Not KnownExpectedInputLayouts (the input-layout axis) and not layoutcontract.ScaleLayout (the Go enum naming the same arrangements as ScaleLinear/ScaleTiled128x4/ScalePackedInRecord).",
+   "distinct_from": [
+    "lg-lml-knownexpectedinputlayouts",
+    "x-layout-layoutcontract-registry"
+   ],
+   "aliases": [],
+   "grounding": "KnownScaleLayouts",
+   "grounding_kind": "doc",
+   "glossary_anchor": "docs/concepts/disambiguation-layout.md",
+   "parent": "",
+   "verdict": "crystal",
+   "gaps": []
+  },
+  {
+   "id": "x-layout-layoutoracle-package",
+   "canonical": "layoutoracle (package)",
+   "family": "layout",
+   "kind": "subsystem",
+   "definition": "internal/layoutoracle is an independent geometry/stride oracle for tensor descriptors: given a declared descriptor (what the admission plan expects) and an actual descriptor (what the artifact's real header carries), it computes byte geometry from first principles - min/max offset over the strided box times dtype size, overflow-checked - and refuses mismatches before dispatch. It exists because total-byte agreement does not imply layout agreement: LML-02 witnessed published native-safetensors inventory shapes applied unchanged to converted GGUF where mHC [4H,24] flattened vs grouped share the same element count but different axis partitionings.",
+   "distinction": "FIRST-PRINCIPLES byte-geometry computation and declared-vs-actual refusal. Not the layoutcontract registry (declarative expected-packed-layout facts per kernel family - the oracle computes, the registry declares), not Layout (tensor) element-ordering metadata, and not `fak-dev kernel-oracle` (kernel performance ranking). Per the TensorLayoutPlan.ParityCommand doctrine, parity evidence must come from an independent oracle such as this one; a candidate-produced golden is not an independent oracle.",
+   "distinct_from": [
+    "x-layout-layoutcontract-registry",
+    "x-layout-layoutcontract-verb",
+    "layout-tensor"
+   ],
+   "aliases": [],
+   "grounding": "layoutoracle",
+   "grounding_kind": "doc",
+   "glossary_anchor": "docs/concepts/disambiguation-layout.md",
+   "parent": "",
+   "verdict": "crystal",
+   "gaps": []
+  },
+  {
+   "id": "x-layoutoracle-descriptor",
+   "canonical": "Descriptor (layoutoracle)",
+   "family": "layout",
+   "kind": "symbol",
+   "definition": "One side of a layoutoracle geometry check - the declared expectation or the artifact's actual header geometry: Shape (outermost-first logical extents; nil/empty is a rank-0 scalar), Strides (ELEMENT strides, not bytes; nil means row-major contiguous, a zero stride marks a padded/broadcast axis), DTypeSize (bytes per element, >= 1), Groups (leading-axis partition: 1 = flat, G > 1 = G blocks of Shape[0]/G along axis 0, requiring Shape[0] % G == 0).",
+   "distinction": "A geometry DECLARATION, not a computed result: ExpectedBytes derives its byte span and CheckGeometry compares two of them. Two descriptors with identical shape/strides/dtype but different Groups describe different logical layouts (group-major vs flat storage) and refuse even though their total bytes match.",
+   "distinct_from": [
+    "x-layoutoracle-expectedbytes",
+    "x-layoutoracle-checkgeometry"
+   ],
+   "aliases": [],
+   "grounding": "Descriptor",
+   "grounding_kind": "doc",
+   "glossary_anchor": "docs/concepts/disambiguation-layout.md",
+   "parent": "",
+   "verdict": "crystal",
+   "gaps": []
+  },
+  {
+   "id": "x-layoutoracle-expectedbytes",
+   "canonical": "ExpectedBytes (layoutoracle)",
+   "family": "layout",
+   "kind": "symbol",
+   "definition": "layoutoracle.ExpectedBytes computes a descriptor's byte geometry from first principles: with the closed policy (non-negative strides) the minimum offset over the strided box is always 0, so the element span is maxOffset+1 where maxOffset sums (Shape[i]-1)*Strides[i]; zero-size tensors occupy 0 bytes, rank-0 returns DTypeSize, and arithmetic that would overflow int64 errors with ErrOverflow instead of wrapping.",
+   "distinction": "A pure byte-span COMPUTATION on one descriptor. Not CheckGeometry (declared-vs-actual comparison) and not a layout fact registry (layoutcontract) - it takes a Descriptor and returns bytes, refusing invalid inputs with *InvalidDescriptor.",
+   "distinct_from": [
+    "x-layoutoracle-checkgeometry",
+    "x-layoutoracle-descriptor",
+    "x-layoutoracle-erroverflow"
+   ],
+   "aliases": [],
+   "grounding": "ExpectedBytes",
+   "grounding_kind": "doc",
+   "glossary_anchor": "docs/concepts/disambiguation-layout.md",
+   "parent": "",
+   "verdict": "crystal",
+   "gaps": []
+  },
+  {
+   "id": "x-layoutoracle-checkgeometry",
+   "canonical": "CheckGeometry (layoutoracle)",
+   "family": "layout",
+   "kind": "symbol",
+   "definition": "layoutoracle.CheckGeometry refuses a declared-vs-actual Descriptor pair whose byte geometry or logical grouping disagrees, BEFORE dispatch: both sides validate first (an invalid side yields *InvalidDescriptor naming the side), then rank, per-axis shape, per-axis element stride, dtype size, byte span, and leading-axis grouping are compared in order; the first disagreement is reported as a *Mismatch naming the axis and both values, unwrapping to ErrGroupingMismatch for grouping disagreements and ErrGeometryMismatch for all others. Identical geometry (including nil-vs-explicit row-major strides) passes.",
+   "distinction": "PAIRWISE declared-vs-actual refusal on numeric geometry. Not the studymonitor packing check (string-axis record-vs-packing-path comparison) and not the fak-dev layoutcontract check subcommand (contract-field verdicts over an observed file) - it operates on shape/stride/dtype numbers, not strings.",
+   "distinct_from": [
+    "x-layoutoracle-descriptor",
+    "x-layoutoracle-expectedbytes",
+    "lg-lml-checkloaderpacking"
+   ],
+   "aliases": [],
+   "grounding": "CheckGeometry",
+   "grounding_kind": "doc",
+   "glossary_anchor": "docs/concepts/disambiguation-layout.md",
+   "parent": "",
+   "verdict": "crystal",
+   "gaps": []
+  },
+  {
+   "id": "x-layoutoracle-errgeometrymismatch",
+   "canonical": "ErrGeometryMismatch (layoutoracle)",
+   "family": "layout",
+   "kind": "symbol",
+   "definition": "Sentinel pinning a structural disagreement between two VALID layoutoracle descriptors: rank, per-axis shape, per-axis element stride, dtype size, or computed byte span. The concrete *Mismatch values carrying those kinds Unwrap to it, so callers pin behavior with errors.Is rather than rendered text.",
+   "distinction": "Byte-geometry disagreement between two valid descriptors. Not ErrGroupingMismatch (identical bytes, different leading-axis partitioning) and not studymonitor.ErrLayoutMismatch (record-vs-packing-path string-axis disagreement).",
+   "distinct_from": [
+    "x-layoutoracle-errgroupingmismatch",
+    "lg-lml-errlayoutmismatch"
+   ],
+   "aliases": [],
+   "grounding": "ErrGeometryMismatch",
+   "grounding_kind": "doc",
+   "glossary_anchor": "docs/concepts/disambiguation-layout.md",
+   "parent": "",
+   "verdict": "crystal",
+   "gaps": []
+  },
+  {
+   "id": "x-layoutoracle-errgroupingmismatch",
+   "canonical": "ErrGroupingMismatch (layoutoracle)",
+   "family": "layout",
+   "kind": "symbol",
+   "definition": "Sentinel pinning a leading-axis partitioning disagreement: the descriptors agree on every byte-level property (rank, shape, strides, dtype, span) but declare different group counts - flat vs grouped storage of the same element set, the LML-02 defect shape. Compared only after all byte properties agree.",
+   "distinction": "SAME BYTES, different logical layout. Not ErrGeometryMismatch (some byte-level property differs) - if the spans disagree, that is geometry, not grouping.",
+   "distinct_from": [
+    "x-layoutoracle-errgeometrymismatch"
+   ],
+   "aliases": [],
+   "grounding": "ErrGroupingMismatch",
+   "grounding_kind": "doc",
+   "glossary_anchor": "docs/concepts/disambiguation-layout.md",
+   "parent": "",
+   "verdict": "crystal",
+   "gaps": []
+  },
+  {
+   "id": "x-layoutoracle-errinvaliddescriptor",
+   "canonical": "ErrInvalidDescriptor (layoutoracle)",
+   "family": "layout",
+   "kind": "symbol",
+   "definition": "Sentinel pinning a descriptor that violates the closed layoutoracle policy: negative dim or stride, non-positive dtype size, inconsistent group partitioning, or stride/rank length mismatch. The concrete *InvalidDescriptor refusal names which side ('declared' or 'actual'), which field (shape/strides/dtype_size/groups), the offending axis (-1 for whole-field), and the offending value.",
+   "distinction": "SINGLE-SIDE validity refusal, raised before any pairwise comparison. Not the mismatch sentinels (both sides valid but disagreeing) and not studymonitor.ErrLayoutUnknown (an out-of-vocabulary record value, not a malformed descriptor).",
+   "distinct_from": [
+    "x-layoutoracle-errgeometrymismatch",
+    "lg-lml-errlayoutunknown"
+   ],
+   "aliases": [],
+   "grounding": "ErrInvalidDescriptor",
+   "grounding_kind": "doc",
+   "glossary_anchor": "docs/concepts/disambiguation-layout.md",
+   "parent": "",
+   "verdict": "crystal",
+   "gaps": []
+  },
+  {
+   "id": "x-layoutoracle-erroverflow",
+   "canonical": "ErrOverflow (layoutoracle)",
+   "family": "layout",
+   "kind": "symbol",
+   "definition": "Sentinel pinning byte-geometry arithmetic in layoutoracle that exceeds int64 (the mulChecked/addChecked guards in the effectiveStrides/ExpectedBytes paths); huge dims error with ErrOverflow instead of wrapping.",
+   "distinction": "Arithmetic-range refusal, orthogonal to correctness: a descriptor can be valid and well-formed yet overflow int64 byte math. Not any mismatch sentinel (those require finite, comparable geometry on both sides).",
+   "distinct_from": [
+    "x-layoutoracle-expectedbytes"
+   ],
+   "aliases": [],
+   "grounding": "ErrOverflow",
+   "grounding_kind": "doc",
+   "glossary_anchor": "docs/concepts/disambiguation-layout.md",
+   "parent": "",
+   "verdict": "crystal",
+   "gaps": []
+  }
+ ]
+}

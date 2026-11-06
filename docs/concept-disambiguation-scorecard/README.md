@@ -15,23 +15,23 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **590** (clarity 1 + coverage 589) |
-| **Crystal-clear concepts (and climbing)** | **1546** crystal of 3430 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **3511 / 4100** (85.6% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **589** (clarity 1 + coverage 588) |
+| **Crystal-clear concepts (and climbing)** | **1563** crystal of 3447 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **3517 / 4105** (85.7% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 237 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **95** of 4820 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **96** of 4838 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 90.3/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 90.4/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 3430 concepts - score 90.3/100 (grade A) - disambiguation-debt 590
+concept-disambiguation chart - 3447 concepts - score 90.4/100 (grade A) - disambiguation-debt 589
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #######################..... 1546
+  * crystal       #######################..... 1563
   o defined       ############################ 1884
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -48,7 +48,7 @@ clarity mix by family (each cell = one concept):
   evict            **********************oooooooooooooooooooooooooooooooo (54 concept(s); 22 crystal)
   gateway-engine   *************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (219 concept(s); 97 crystal)
   guard-gate       ***************************************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (474 concept(s); 231 crystal)
-  layout           ******************ooooooooo (27 concept(s); 18 crystal)
+  layout           ***********************************ooooooooo (44 concept(s); 35 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooo (89 concept(s); 51 crystal)
   plan             ******************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (472 concept(s); 186 crystal)
   policy-capability *************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (228 concept(s); 121 crystal)
@@ -76,7 +76,7 @@ coverage by family (positioned / discovered):
   policy-capability #########################... 252/279
   score-debt       #######################..... 115/141
   witness-proof    #########################... 176/199
-  layout           ################............ 29/50
+  layout           ##################.......... 35/55
   loop             ########################.... 100/118
   decision         ###########################. 65/68
   cross-cluster    ............................ 0/0
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [############################....] 85.6%  (3511/4100 confusable tokens positioned)
+namespace coverage  [############################....] 85.7%  (3517/4105 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 237
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 237/237
 
-name index: 4820 lookup name(s) -> 3430 concept(s), 95 ambiguous
+name index: 4838 lookup name(s) -> 3447 concept(s), 96 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **237 / 237** (237 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 2856 / 6264 |
+| Boundaries drawn (mutual / total) | 2884 / 6306 |
 | Dangling `distinct_from` references (drive to 0) | 1 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 4820 over 3430 concepts |
-| Lookup names landing on several concepts | 95 |
+| Lookup names indexed | 4838 over 3447 concepts |
+| Lookup names landing on several concepts | 96 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 3430 |
+| Concepts carrying a contrast set | 3447 |
 
 ## The concepts (best verdict first)
 
@@ -892,6 +892,23 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | subsystem | layout | **guard_format_layout** - The guard exit-summary block LAYOUT (guard_format_layout.go) - the pure text layout of the guard summary onto which color is layered at print time (guardColorizeSummary). |
 | * | crystal | symbol | layout | **LayoutDigest (runtime topology search)** - SHA-256 identity of canonical configured runtime topology groups and ranks, including device incarnations, KV ownership and configured resource commitments, binding measured observations to their exact placement. |
 | * | crystal | symbol | layout | **layout implementation surface for daylayout** - `DayLayout` is the layout symbol declared or used at `cmd/fak/git_daily.go:347` as `// LOCAL date, matching gitdaily.DayLayout — the ledger's day keys are local, so a`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | subsystem | layout | **LayoutContract registry (compute)** - internal/compute/layoutcontract is the declarative registry of tensor layout contracts for every quantized kernel family present in-tree (Q4_K, Q8_0, NVFP4, MXFP4): each Contract pins the closed fact set a loader must satisfy - storage order, interleave width, scale layout, padding rule, packing path - plus a source ref pinned at path:line@sha, so loader/kernel drift shows up as a stale ref to re-pin instead of a silent runtime transpose or repack. |
+| * | crystal | cli-verb | layout | **layoutcontract (fak-dev verb)** - The read-only `fak-dev layoutcontract` CLI surface over the layoutcontract registry: families lists registered kernel families, show FAMILY emits the full contract (receipt schema fak.layoutcontract/1), check FAMILY --observed FILE compares an observed-layout file against the contract under the closed field vocabulary storage_order / scale_layout / interleave_width / padding_rule / packing_stage (receipt fak.layoutcontract-check/1; exit 0 match, 1 mismatch, 2 usage-or-unknown-family), and orphans reports registered families with no production call site (receipt fak.layoutcontract-orphans/1). No subcommand mutates state. |
+| * | crystal | symbol | layout | **ErrUnknownFamily (layoutcontract)** - Fail-closed sentinel error returned by layoutcontract.Get/Must for a family tag the registry does not register; callers pin it with errors.Is, and the fak-dev layoutcontract verb maps it to exit code 2 (usage-or-unknown-family). |
+| * | crystal | symbol | layout | **CheckLoaderPackingAgainstInventory (studymonitor)** - studymonitor.CheckLoaderPackingAgainstInventory compares the layout obligations a kernel_inventory evidence record fills (expected_input_layout, swizzle_pattern, scale_layout, packing_source) against a declared loader packing path (PackingPathFacts) and refuses typed instead of accepting: nil when every filled obligation matches, ErrLayoutMismatch when both sides declare differing values on an obligated axis, ErrLayoutUnknown when a filled value falls outside the closed starter vocabulary or the packing path leaves the obligated axis undeclared. The first failing axis in field declaration order is reported; whitespace-only fields count as unfilled. |
+| * | crystal | symbol | layout | **PackingPathFacts (studymonitor)** - The struct declaring what a loader packing path produces for one kernel family's tensors at load time, on the same four layout axes as the kernel_inventory record it is checked against: ExpectedInputLayout, SwizzlePattern, ScaleLayout, PackingSource. Every field is optional - an empty string means the packing path does not declare that axis, which CheckLoaderPackingAgainstInventory treats as unverifiable whenever the record obligates it. |
+| * | crystal | symbol | layout | **ErrLayoutMismatch (studymonitor)** - Closed sentinel refusal from the studymonitor packing check for a kernel_inventory record whose filled layout obligation differs from the value the declared loader packing path produces on the same axis; the witnessed class is LML-07 (ssm_out value-head-tiled GGUF columns fed through the Q8_0 deinterleave packing path). Callers pin the refusal class with errors.Is and never assert on the wrapped message prose. |
+| * | crystal | symbol | layout | **ErrLayoutUnknown (studymonitor)** - Closed sentinel refusal from the studymonitor packing check for a filled layout obligation that cannot be verified: the record value falls outside the closed starter vocabulary, or the packing path leaves the obligated axis undeclared. Novel values and undeclared packing axes refuse as ErrLayoutUnknown rather than being coerced to match. |
+| * | crystal | config | layout | **KnownExpectedInputLayouts (studymonitor)** - Starter closed vocabulary for the kernel_inventory expected_input_layout axis: row-major, tile-swizzled, column-interleaved, value-head-tiled, grouped. The value-head-tiled/grouped order pair names the Qwen3.5-family ssm_out arrangement (GGUF input columns stored value-head-tiled while the GDN core emits grouped order, commit 36d3e634c3, ledger row LML-07). Registry readers stay open to newer values; only the packing check fails closed. |
+| * | crystal | config | layout | **KnownScaleLayouts (studymonitor)** - Starter closed vocabulary for the kernel_inventory scale_layout axis: linear (separate row-major scale array aligned to the weight grid) versus 128x4-tiled (the TensorRT-LLM NVFP4 block-scale image), aligned with the scale layouts fak registers per kernel family. |
+| * | crystal | subsystem | layout | **layoutoracle (package)** - internal/layoutoracle is an independent geometry/stride oracle for tensor descriptors: given a declared descriptor (what the admission plan expects) and an actual descriptor (what the artifact's real header carries), it computes byte geometry from first principles - min/max offset over the strided box times dtype size, overflow-checked - and refuses mismatches before dispatch. It exists because total-byte agreement does not imply layout agreement: LML-02 witnessed published native-safetensors inventory shapes applied unchanged to converted GGUF where mHC [4H,24] flattened vs grouped share the same element count but different axis partitionings. |
+| * | crystal | symbol | layout | **Descriptor (layoutoracle)** - One side of a layoutoracle geometry check - the declared expectation or the artifact's actual header geometry: Shape (outermost-first logical extents; nil/empty is a rank-0 scalar), Strides (ELEMENT strides, not bytes; nil means row-major contiguous, a zero stride marks a padded/broadcast axis), DTypeSize (bytes per element, >= 1), Groups (leading-axis partition: 1 = flat, G > 1 = G blocks of Shape[0]/G along axis 0, requiring Shape[0] % G == 0). |
+| * | crystal | symbol | layout | **ExpectedBytes (layoutoracle)** - layoutoracle.ExpectedBytes computes a descriptor's byte geometry from first principles: with the closed policy (non-negative strides) the minimum offset over the strided box is always 0, so the element span is maxOffset+1 where maxOffset sums (Shape[i]-1)*Strides[i]; zero-size tensors occupy 0 bytes, rank-0 returns DTypeSize, and arithmetic that would overflow int64 errors with ErrOverflow instead of wrapping. |
+| * | crystal | symbol | layout | **CheckGeometry (layoutoracle)** - layoutoracle.CheckGeometry refuses a declared-vs-actual Descriptor pair whose byte geometry or logical grouping disagrees, BEFORE dispatch: both sides validate first (an invalid side yields *InvalidDescriptor naming the side), then rank, per-axis shape, per-axis element stride, dtype size, byte span, and leading-axis grouping are compared in order; the first disagreement is reported as a *Mismatch naming the axis and both values, unwrapping to ErrGroupingMismatch for grouping disagreements and ErrGeometryMismatch for all others. Identical geometry (including nil-vs-explicit row-major strides) passes. |
+| * | crystal | symbol | layout | **ErrGeometryMismatch (layoutoracle)** - Sentinel pinning a structural disagreement between two VALID layoutoracle descriptors: rank, per-axis shape, per-axis element stride, dtype size, or computed byte span. The concrete *Mismatch values carrying those kinds Unwrap to it, so callers pin behavior with errors.Is rather than rendered text. |
+| * | crystal | symbol | layout | **ErrGroupingMismatch (layoutoracle)** - Sentinel pinning a leading-axis partitioning disagreement: the descriptors agree on every byte-level property (rank, shape, strides, dtype, span) but declare different group counts - flat vs grouped storage of the same element set, the LML-02 defect shape. Compared only after all byte properties agree. |
+| * | crystal | symbol | layout | **ErrInvalidDescriptor (layoutoracle)** - Sentinel pinning a descriptor that violates the closed layoutoracle policy: negative dim or stride, non-positive dtype size, inconsistent group partitioning, or stride/rank length mismatch. The concrete *InvalidDescriptor refusal names which side ('declared' or 'actual'), which field (shape/strides/dtype_size/groups), the offending axis (-1 for whole-field), and the offending value. |
+| * | crystal | symbol | layout | **ErrOverflow (layoutoracle)** - Sentinel pinning byte-geometry arithmetic in layoutoracle that exceeds int64 (the mulChecked/addChecked guards in the effectiveStrides/ExpectedBytes paths); huge dims error with ErrOverflow instead of wrapping. |
 | * | crystal | symbol | layout | **WeightLayout (newmodel native envelope)** - newmodel.NativeHardwareEnvelope.WeightLayout names the checkpoint weight packing/storage contract that native obligation compilation must match before allocation, such as gguf-q4-k. |
 | * | crystal | symbol | layout | **StateLayout (newmodel native envelope)** - newmodel.NativeHardwareEnvelope.StateLayout names the physical organization of recurrent/KV state admitted by obligation compilation, such as contiguous, independent of state kind and residency. |
 | * | crystal | symbol | layout | **Layout (tensor)** - Tensor element physical arrangement: RowMajor, ColMajor, or other ordering |
@@ -3709,10 +3726,10 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
 | separation | `reference_resolves` | 86 | 1 | 1 dangling distinct_from reference(s) |
-| honesty | `kind_grounding_soft` | 60 | 0 | 30 kind/grounding mismatch |
+| honesty | `kind_grounding_soft` | 60 | 0 | 31 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 3408/6264 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 3430 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 3422/6306 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 3447 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -3720,7 +3737,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 4820 lookup name(s) resolves - 95 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 4838 lookup name(s) resolves - 96 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -3741,7 +3758,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | policy-capability | 252 | 279 | 27 |
 | score-debt | 115 | 141 | 26 |
 | witness-proof | 176 | 199 | 23 |
-| layout | 29 | 50 | 21 |
+| layout | 35 | 55 | 20 |
 | loop | 100 | 118 | 18 |
 | decision | 65 | 68 | 3 |
 | cross-cluster | 0 | 0 | 0 |
