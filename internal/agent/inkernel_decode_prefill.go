@@ -24,6 +24,32 @@ type inKernelContextPrefillSession interface {
 	PrefillNoLogitsContext(context.Context, []int) error
 }
 
+type inKernelPrefillBoundaryKey struct{}
+
+// The request retains its partially appended Session while its cohort owner
+// advances existing decoders. Once admitted, even cancellation must wait for the
+// acknowledgement: returning early could close that Session during device work.
+type inKernelPrefillBoundary struct {
+	ready  chan struct{}
+	resume chan error
+}
+
+func yieldInKernelPrefillBoundary(ctx context.Context) error {
+	boundary, _ := ctx.Value(inKernelPrefillBoundaryKey{}).(*inKernelPrefillBoundary)
+	if boundary == nil {
+		return nil
+	}
+	select {
+	case boundary.ready <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if err := <-boundary.resume; err != nil {
+		return err
+	}
+	return ctx.Err()
+}
+
 func prefillSessionContext(ctx context.Context, s inKernelPrefillSession, ids []int, wantLogits bool) ([]float32, error) {
 	if contextual, ok := s.(inKernelContextPrefillSession); ok {
 		if wantLogits {
@@ -83,6 +109,9 @@ func (p *InKernelPlanner) prefillDivergentSuffix(ctx context.Context, s inKernel
 		enginestep.Default.ObservePrefillChunkContext(ctx, len(chunk), time.Since(chunkStart))
 		recordQwen35SequencePrefillRoute(measurement, s, len(chunk))
 		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if err := yieldInKernelPrefillBoundary(ctx); err != nil {
 			return nil, err
 		}
 		ids = ids[chunkTokens:]
