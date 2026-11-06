@@ -48,6 +48,18 @@ var ErrServeExpertRingTooBig = errors.New("fak serve: activated-expert device ri
 // ErrServeExpertRingSize marks an --expert-ring-bytes value that cannot name a ring.
 var ErrServeExpertRingSize = errors.New("fak serve: invalid --expert-ring-bytes")
 
+// ErrServeExpertRingDropped marks an operator-named --expert-ring-bytes / FAK_EXPERT_RING_BYTES
+// value that the chosen load arm never evaluates: only the resident-Q4_K device arm takes the
+// activated-expert ring placement (and only when the full plan is FitTooBig), so every other arm
+// would load with the named ring silently ignored.
+var ErrServeExpertRingDropped = errors.New("fak serve: --expert-ring-bytes names a ring the chosen load arm does not evaluate")
+
+// FakExpertRingStrictEnv turns the dropped-arm warning into a typed refusal: at "1" (or any
+// ParseBool-true value) a serve whose chosen arm never evaluates the activated-expert ring
+// placement refuses to load instead of loading with the named ring silently ignored. Unset or
+// "0" keeps the default loud warning.
+const FakExpertRingStrictEnv = "FAK_EXPERT_RING_STRICT"
+
 const (
 	serveExpertRingHostMarginFloor    int64   = 6 << 30
 	serveExpertRingHostMarginFraction float64 = 0.05
@@ -397,6 +409,42 @@ func applyServeExpertRingBytes(v string) error {
 		return fmt.Errorf("fak serve: --%s: %w", serveExpertRingBytesFlag, err)
 	}
 	return os.Setenv(FakExpertRingBytesEnv, size.String())
+}
+
+// serveExpertRingStrict reports whether FAK_EXPERT_RING_STRICT asks for the typed refusal
+// instead of the default warning when a named ring size reaches an arm that never evaluates
+// the activated-expert ring placement.
+func serveExpertRingStrict(getenv func(string) string) bool {
+	v := strings.TrimSpace(getenv(FakExpertRingStrictEnv))
+	if v == "" || v == "0" {
+		return false
+	}
+	if v == "1" {
+		return true
+	}
+	b, err := strconv.ParseBool(v)
+	return err == nil && b
+}
+
+// reportDroppedExpertRing is the hardening for an operator-named --expert-ring-bytes /
+// FAK_EXPERT_RING_BYTES value on a load arm that never evaluates the activated-expert ring
+// placement: the streamed --cpu-offload-experts arms, the Metal-native arm, the pure-CPU and
+// lean-CPU arms, the mixed-precision/f32 device arm, and sharded expert-parallel ranks. By
+// default it prints one loud typed warning naming the dropping arm and the environment
+// variable that carries the value to the ring arm; under FAK_EXPERT_RING_STRICT it returns
+// the typed refusal ErrServeExpertRingDropped instead of loading a serve that ignores the
+// named ring. A host-defaulted size (neither flag nor env set) names nothing, so it never
+// warns.
+func reportDroppedExpertRing(arm string, getenv func(string) string) error {
+	v := strings.TrimSpace(getenv(FakExpertRingBytesEnv))
+	if v == "" {
+		return nil
+	}
+	if serveExpertRingStrict(getenv) {
+		return fmt.Errorf("%w: --%s=%q on the %s load arm", ErrServeExpertRingDropped, serveExpertRingBytesFlag, v, arm)
+	}
+	fmt.Fprintf(os.Stderr, "fak serve: WARNING: --%s=%q is dropped by the %s load arm: it never evaluates the activated-expert device ring placement, so no ring allocation was made; only the resident-Q4_K device arm takes it, and only when the full plan does not fit. The value reaches that arm through %s.\n", serveExpertRingBytesFlag, v, arm, FakExpertRingBytesEnv)
+	return nil
 }
 
 // enableServeSharedExpertRing gives the loaded model ONE routed-expert ring for the serve's
