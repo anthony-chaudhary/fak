@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -157,6 +158,17 @@ type NativeScheduler struct {
 	// still acquiring their owner when Close returns. Never detach it at Close.
 	prefixStateMu sync.RWMutex
 	prefixState   *nativePrefixState
+
+	// LoRA slot-cache currency, adapted from llama.cpp's slot reset: the server
+	// compares the global adapter configuration and resets slots whose cached
+	// prompt was produced under a previous one, because a prefix hit installed
+	// from cache replays KV and logits that only the producing adapters justify.
+	// loraAdapters is the last-applied global adapter list and loraGeneration
+	// bumps once per genuine change; both are guarded by mu (not prefixStateMu).
+	// A genuine change invalidates every recorded prefix hit so affected lanes
+	// cold-prefill under the new adapters instead of consuming stale KV.
+	loraAdapters   []string
+	loraGeneration uint64
 
 	prefixFlights     *radixkv.PrefixFlightGroup
 	prefixFlightsMu   sync.Mutex
@@ -400,6 +412,82 @@ func (s *NativeScheduler) SharedWorkReceipt() SharedWorkReceipt {
 		Panels: s.sharedPanels,
 		MACs:   s.sharedMACs,
 	}
+}
+
+// SetLoRAAdapters applies the global LoRA adapter configuration to the
+// scheduler's prefix-cache currency. A configuration that differs from the
+// last-applied one bumps the LoRA generation and invalidates every recorded
+// prefix hit, so a lane that would have consumed cached KV or logits produced
+// under the previous adapters cold-prefills instead (llama.cpp slot reset:
+// common/server.cpp compares the global adapter list per request and resets
+// slots whose cached prompt predates the change). Re-applying the identical
+// configuration is a no-op that preserves recorded hits. Adapter loading is
+// untouched; the shared radix tree's entries are not yet generation-keyed, so
+// only the recorded per-slot hits are invalidated here.
+func (s *NativeScheduler) SetLoRAAdapters(adapters []string) {
+	s.mu.Lock()
+	changed := !slices.Equal(s.loraAdapters, adapters)
+	if changed {
+		s.loraAdapters = append([]string(nil), adapters...)
+		s.loraGeneration++
+	}
+	s.mu.Unlock()
+	if changed {
+		s.invalidateRecordedPrefixHits()
+	}
+}
+
+// LoRAGeneration reports the current LoRA configuration generation: bumped
+// exactly once per genuine global adapter-config change and stable across
+// identical re-application.
+func (s *NativeScheduler) LoRAGeneration() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.loraGeneration
+}
+
+// invalidateRecordedPrefixHits releases every recorded prefix-hit boundary
+// lease and drops the per-session and per-lane hit records, so the next
+// prefill iteration cold-prefills instead of consuming KV produced under a
+// superseded LoRA configuration. Lane hits alias their holder's record, so
+// each distinct record is released exactly once; this mirrors the per-session
+// cleanup in clearPrefixLookup at scheduler scope.
+func (s *NativeScheduler) invalidateRecordedPrefixHits() {
+	st := s.getPrefixState()
+	if st == nil {
+		return
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	released := make(map[*prefixHitInfo]struct{}, len(st.holderLookups)+len(st.laneLookups))
+	for _, info := range st.holderLookups {
+		if info == nil {
+			continue
+		}
+		if _, seen := released[info]; seen {
+			continue
+		}
+		released[info] = struct{}{}
+		if info.boundary != nil && info.ownerTree != nil {
+			info.ownerTree.Done(info.boundary)
+			info.boundary = nil
+		}
+	}
+	for _, info := range st.laneLookups {
+		if info == nil {
+			continue
+		}
+		if _, seen := released[info]; seen {
+			continue
+		}
+		released[info] = struct{}{}
+		if info.boundary != nil && info.ownerTree != nil {
+			info.ownerTree.Done(info.boundary)
+			info.boundary = nil
+		}
+	}
+	st.holderLookups = make(map[*model.Session]*prefixHitInfo)
+	st.laneLookups = make(map[*schedLane]*prefixHitInfo)
 }
 
 // SpecAdmissionPadReceipt reports pad_spec_decode admission activity: how many

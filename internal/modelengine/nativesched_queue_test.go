@@ -10,6 +10,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
 
 // TestNativeSchedulerWaitingQueueGatesAndPreservesOutput is the issue-#36 acceptance-#2
@@ -272,5 +273,150 @@ func TestNativeSchedulerBatchSequenceCheck(t *testing.T) {
 			}(r)
 		}
 		wg.Wait()
+	})
+}
+
+// TestNativeSchedulerSlotLoraInvalidation pins the llama.cpp slot-cache LoRA
+// invalidation adaptation (llama.cpp PR #3325 family: changing the global LoRA
+// configuration clears per-slot prompt caches keyed on the old config). The
+// native scheduler's per-slot prompt cache is the recorded prefix hit a lane
+// would install at its next prefill iteration, so the pinned contract is:
+// a genuine global adapter-config change turns a former hit into a cold
+// prefill (record gone, boundary lease released), an unchanged configuration
+// still hits, and the generation counter bumps exactly once per genuine
+// change. Adapter loading is untouched.
+//
+// Estimate only; this test has not been timed.
+// fak-test:runtime fast est=100ms lane=default
+func TestNativeSchedulerSlotLoraInvalidation(t *testing.T) {
+	m := nativeSchedulerPrefillModel(t)
+	prompt := nativeSchedulerQwenPrompt(48)
+	const cached = 32
+
+	// seedTree builds a radix tree holding prompt[:cached] backed by real KV
+	// and returns the boundary lease a recorded hit would carry.
+	seedTree := func(t *testing.T) (*radixkv.Tree, *radixkv.Node, int) {
+		t.Helper()
+		ctl := m.NewSession()
+		ctl.Quant = true
+		ctl.Q4K = true
+		ctl.PrefillNoLogits(prompt[:cached])
+		tree := radixkv.New(0)
+		root, _ := tree.Lookup(prompt[:cached])
+		tree.Done(tree.InsertWithLogits(root, prompt[:cached], ctl.Cache, nil))
+		ctl.Close()
+		boundary, matched := tree.Lookup(prompt)
+		if matched != cached || boundary == nil {
+			t.Fatalf("seeded lookup matched=%d boundary=%v, want %d/non-nil", matched, boundary, cached)
+		}
+		return tree, boundary, matched
+	}
+
+	// coldScheduler pairs a bare scheduler with one prefilling lane whose
+	// session is empty, mirroring the apply-clamps harness.
+	coldScheduler := func(t *testing.T) (*NativeScheduler, *schedLane, *model.Session) {
+		t.Helper()
+		s := &NativeScheduler{m: m}
+		sess := m.NewSession()
+		sess.Quant = true
+		sess.Q4K = true
+		t.Cleanup(sess.Close)
+		ln := &schedLane{sess: sess, prompt: prompt, state: schedLanePrefilling, prefillChunkTokens: nativeQwenPrefillMinChunkTokens}
+		s.getOrCreatePrefixState()
+		s.lanes = []*schedLane{ln}
+		return s, ln, sess
+	}
+
+	t.Run("generation_bumps_only_on_genuine_change", func(t *testing.T) {
+		s := NewNativeScheduler(m)
+		defer s.Close()
+		if got := s.LoRAGeneration(); got != 0 {
+			t.Fatalf("initial LoRA generation = %d, want 0", got)
+		}
+		s.SetLoRAAdapters([]string{"math-lora"})
+		if got := s.LoRAGeneration(); got != 1 {
+			t.Fatalf("generation after first config = %d, want 1", got)
+		}
+		s.SetLoRAAdapters([]string{"math-lora"})
+		if got := s.LoRAGeneration(); got != 1 {
+			t.Fatalf("identical re-application bumped generation to %d, want 1", got)
+		}
+		s.SetLoRAAdapters([]string{"math-lora", "code-lora"})
+		if got := s.LoRAGeneration(); got != 2 {
+			t.Fatalf("generation after changed config = %d, want 2", got)
+		}
+		s.SetLoRAAdapters(nil)
+		if got := s.LoRAGeneration(); got != 3 {
+			t.Fatalf("generation after clearing config = %d, want 3", got)
+		}
+		s.SetLoRAAdapters([]string{})
+		if got := s.LoRAGeneration(); got != 3 {
+			t.Fatalf("empty list is not a distinct config, generation = %d, want 3", got)
+		}
+	})
+
+	t.Run("config_change_turns_former_hit_into_cold_prefill", func(t *testing.T) {
+		tree, boundary, matched := seedTree(t)
+		s, ln, sess := coldScheduler(t)
+		s.SetLoRAAdapters([]string{"math-lora"})
+		s.recordPrefixLookup(sess, prompt, matched, matched, boundary, tree)
+		if s.getPrefixHitInfo(ln) == nil {
+			t.Fatal("hit not recorded under the first config")
+		}
+		if got := tree.Stats().ProtectedTokens; got != cached {
+			t.Fatalf("protected=%d before the change, want %d (boundary lease live)", got, cached)
+		}
+
+		s.SetLoRAAdapters([]string{"code-lora"})
+		if s.getPrefixHitInfo(ln) != nil {
+			t.Fatal("config change left the recorded hit in place")
+		}
+		if got := tree.Stats().ProtectedTokens; got != 0 {
+			t.Fatalf("stale boundary lease survived the change: protected=%d, want 0", got)
+		}
+		s.applyPrefixHitsLocked()
+		if ln.promptCursor != 0 || ln.promptLen != 0 || ln.state != schedLanePrefilling {
+			t.Fatalf("cursor=%d promptLen=%d state=%d, want cold prefill 0/0/PREFILLING",
+				ln.promptCursor, ln.promptLen, ln.state)
+		}
+		if ln.sess.Cache != nil && ln.sess.Cache.Len() != 0 {
+			t.Fatalf("cold prefill consumed %d cached KV tokens", ln.sess.Cache.Len())
+		}
+	})
+
+	t.Run("unchanged_config_still_hits", func(t *testing.T) {
+		tree, boundary, matched := seedTree(t)
+		s, ln, sess := coldScheduler(t)
+		s.SetLoRAAdapters([]string{"math-lora"})
+		s.recordPrefixLookup(sess, prompt, matched, matched, boundary, tree)
+		s.SetLoRAAdapters([]string{"math-lora"})
+		if s.getPrefixHitInfo(ln) == nil {
+			t.Fatal("identical re-application dropped the recorded hit")
+		}
+		s.applyPrefixHitsLocked()
+		if ln.promptCursor != cached || ln.promptLen != cached {
+			t.Fatalf("cursor=%d promptLen=%d, want both %d (hit applied)", ln.promptCursor, ln.promptLen, cached)
+		}
+		if got := ln.sess.Cache.Len(); got != cached {
+			t.Fatalf("installed KV len = %d, want %d", got, cached)
+		}
+		s.clearPrefixLookup(sess)
+	})
+
+	t.Run("aliased_lane_and_holder_hits_release_lease_once", func(t *testing.T) {
+		tree, boundary, matched := seedTree(t)
+		s, ln, sess := coldScheduler(t)
+		s.recordPrefixLookup(sess, prompt, matched, matched, boundary, tree)
+		s.getOrCreatePrefixState().laneLookups[ln] = s.getPrefixHitInfo(ln)
+		if s.getPrefixHitInfo(ln) == nil {
+			t.Fatal("aliased hit not recorded")
+		}
+		s.SetLoRAAdapters([]string{"code-lora"})
+		if s.getPrefixHitInfo(ln) != nil {
+			t.Fatal("config change left the aliased hit in place")
+		}
+		if got := tree.Stats().ProtectedTokens; got != 0 {
+			t.Fatalf("aliased lease released more than once or retained: protected=%d, want 0", got)
+		}
 	})
 }
