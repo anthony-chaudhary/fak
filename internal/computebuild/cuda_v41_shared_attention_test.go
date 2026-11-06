@@ -2,6 +2,7 @@ package computebuild
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -32,9 +33,9 @@ func TestCUDAV41SharedAttentionBuildContract(t *testing.T) {
 	}
 	root := t.TempDir()
 	cfg.RepoRoot = root
-	for _, arch := range []string{"", "sm_80", "sm_100a", "sm_103f"} {
+	for _, arch := range []string{"", "sm_80", "sm_100a", "sm_103f", "sm_89", "sm_90a", "sm_90,sm_120"} {
 		cfg.Arch = arch
-		if err := prepareCUDAV41SharedAttention(cfg); err == nil {
+		if err := prepareCUDAV41SharedAttention(cfg); !errors.Is(err, ErrCUDAV41Arch) {
 			t.Fatalf("accepted non-Raider arm %q", arch)
 		}
 	}
@@ -43,7 +44,7 @@ func TestCUDAV41SharedAttentionBuildContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixture := map[string]string{
-		"cuda_arch.txt":                "sm_120\n",
+		"cuda_arch.txt":                "sm_120\nsm_90\n",
 		"cuda_kernels.cu":              "#include \"cuda_v41_shared_attention.cu\"\n",
 		"cuda_v41_shared_attention.cu": "#ifdef FAK_CUDA_V41_SHARED_ATTENTION\n#endif\n",
 		"cuda_v41_shared_attention.go": "//go:build cuda && cgo && fak_cuda_v41_shared_attention\n",
@@ -53,7 +54,7 @@ func TestCUDAV41SharedAttentionBuildContract(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, arch := range []string{"sm_120", "120"} {
+	for _, arch := range []string{"sm_90", "90", "sm_120", "120"} {
 		cfg.Arch = arch
 		if err := prepareCUDAV41SharedAttention(cfg); err != nil {
 			t.Fatal(err)

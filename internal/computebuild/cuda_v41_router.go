@@ -14,8 +14,8 @@ type cudaV41RouterKey struct{}
 // Require the matching port and completion-retention/full-score corrections,
 // not an invented native define. Source selection is not hardware acceptance.
 func prepareCUDAV41Router(cfg *CUDAConfig) error {
-	if cfg.Arch != "sm_120" && cfg.Arch != "120" {
-		return fmt.Errorf("V4.1 router selection requires explicit --arch sm_120")
+	if err := requireCUDAV41Arch(cfg.Arch, "V4.1 router selection"); err != nil {
+		return err
 	}
 	if _, _, err := LoadCUDAArchMatrix(cfg.RepoRoot, cfg.Arch); err != nil {
 		return err

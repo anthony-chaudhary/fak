@@ -95,7 +95,7 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 	bf16Publish := fs.Bool("v41-bf16-publish", false, "compile explicit SM120 ordinary V4.1 finite BF16 publication candidate; build selection is not hardware qualification")
 	mhc := fs.Bool("v41-mhc", false, "compile explicit SM120 V4.1 mHC witness candidate; public capability remains unqualified")
 	sharedAttention := fs.Bool("v41-shared-attention", false, "compile explicit SM120 V4.1 shared-attention candidate (paired CUDA define and Go tag; not full-model qualification)")
-	v41Defaults := fs.Bool("v41-defaults", !computebuild.CUDAV41DefaultsDisabledByEnv(), "on a single-arch sm_120 build, select the device-witnessed V4.1 set ("+strings.Join(computebuild.CUDAV41DefaultTags(), ",")+"); false or FAK_CUDA_V41=0 opts out")
+	v41Defaults := fs.Bool("v41-defaults", !computebuild.CUDAV41DefaultsDisabledByEnv(), "on a single-arch sm_120 or sm_90 build, select the default V4.1 set ("+strings.Join(computebuild.CUDAV41DefaultTags(), ",")+"); false or FAK_CUDA_V41=0 opts out")
 	requireDevice := fs.String("require-device", "", "coverage: comma-separated V4.1 op contracts (e.g. V41RouterTopKBackend) that must report device; exit 1 otherwise")
 	nccl := fs.Bool("nccl", os.Getenv("FAK_CUDA_NCCL") == "1", "compile with NCCL collectives enabled (-tags cuda,nccl)")
 	ncclHome := fs.String("nccl-home", os.Getenv("NCCL_HOME"), "optional path to NCCL installation directory")
@@ -232,7 +232,7 @@ func runBuildCUDAWith(stdout, stderr io.Writer, argv []string, run func(context.
 	}
 	if sub != "check" {
 		if applied := computebuild.ApplyCUDAV41Defaults(cfg); len(applied) > 0 {
-			fmt.Fprintf(stderr, "[cuda] sm_120 V4.1 default tags: %s (--v41-defaults=false or FAK_CUDA_V41=0 opts out)\n", strings.Join(applied, ","))
+			fmt.Fprintf(stderr, "[cuda] %s V4.1 default tags: %s (--v41-defaults=false or FAK_CUDA_V41=0 opts out)\n", cfg.Arch, strings.Join(applied, ","))
 		}
 	}
 

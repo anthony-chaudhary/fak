@@ -13,8 +13,8 @@ type cudaV41MHCKey struct{}
 // The explicit SM120 witness build does not qualify SupportsV41MHC. Its
 // numerical policy is carried by the same monolithic object as the candidate.
 func prepareCUDAV41MHC(cfg *CUDAConfig) error {
-	if cfg.Arch != "sm_120" && cfg.Arch != "120" {
-		return fmt.Errorf("V4.1 mHC candidate requires explicit --arch sm_120")
+	if err := requireCUDAV41Arch(cfg.Arch, "V4.1 mHC candidate"); err != nil {
+		return err
 	}
 	if _, _, err := LoadCUDAArchMatrix(cfg.RepoRoot, cfg.Arch); err != nil {
 		return err

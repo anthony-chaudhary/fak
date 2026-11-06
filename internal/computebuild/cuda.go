@@ -663,7 +663,7 @@ func SignArtifact(ctx context.Context, tc *Toolchain, cfg *CUDAConfig, artifactP
 }
 
 // CUDAGoTags composes the Go build tag list for cfg's selections. Call
-// ApplyCUDAV41Defaults first to include the default sm_120 V4.1 set (the
+// ApplyCUDAV41Defaults first to include the default sm_120/sm_90 V4.1 set (the
 // fak-dev build-cuda CLI does; library callers keep their explicit config).
 func CUDAGoTags(cfg *CUDAConfig) string {
 	goTags := "cuda"

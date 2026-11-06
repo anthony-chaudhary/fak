@@ -16,8 +16,8 @@ func prepareCUDAV41Compressor(cfg *CUDAConfig) error {
 	if cfg.EnableV41CompressorPool {
 		return fmt.Errorf("--v41-compressor and --v41-compressor-pool are mutually exclusive")
 	}
-	if cfg.Arch != "sm_120" && cfg.Arch != "120" {
-		return fmt.Errorf("V4.1 compressor candidate requires explicit --arch sm_120")
+	if err := requireCUDAV41Arch(cfg.Arch, "V4.1 compressor candidate"); err != nil {
+		return err
 	}
 	if _, _, err := LoadCUDAArchMatrix(cfg.RepoRoot, cfg.Arch); err != nil {
 		return err

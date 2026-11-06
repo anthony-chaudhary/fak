@@ -15,8 +15,8 @@ type cudaV41SharedAttentionKey struct{}
 // separate translation unit. Source presence is required: older trees must not
 // silently build a tagged binary whose archive omits the candidate ABI.
 func prepareCUDAV41SharedAttention(cfg *CUDAConfig) error {
-	if cfg.Arch != "sm_120" && cfg.Arch != "120" {
-		return fmt.Errorf("V4.1 shared attention candidate requires explicit --arch sm_120")
+	if err := requireCUDAV41Arch(cfg.Arch, "V4.1 shared attention candidate"); err != nil {
+		return err
 	}
 	if _, _, err := LoadCUDAArchMatrix(cfg.RepoRoot, cfg.Arch); err != nil {
 		return err

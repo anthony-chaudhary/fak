@@ -59,6 +59,7 @@ build entry point validates before invoking `nvcc`. Single-arch builds remain th
 path, including first-class Blackwell targets:
 
 ```bash
+make cuda-build-sm90   # H100 / H200 (Hopper; admits the DeepSeek V4.1 kernel set)
 make cuda-build-sm100  # B200 / GB200
 make cuda-build-sm103  # B300 / GB300 (CUDA 12.9+)
 make cuda-build-sm120  # RTX 50-series / consumer Blackwell

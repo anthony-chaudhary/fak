@@ -13,8 +13,8 @@ type cudaV41TailRoPEKey struct{}
 // Select only the existing ordinary QK/Rows candidate. Its idle-stream and
 // exact-base retention contract is required; exact arithmetic remains gated.
 func prepareCUDAV41TailRoPE(cfg *CUDAConfig) error {
-	if cfg.Arch != "sm_120" && cfg.Arch != "120" {
-		return fmt.Errorf("V4.1 tail RoPE selection requires explicit --arch sm_120")
+	if err := requireCUDAV41Arch(cfg.Arch, "V4.1 tail RoPE selection"); err != nil {
+		return err
 	}
 	if _, _, err := LoadCUDAArchMatrix(cfg.RepoRoot, cfg.Arch); err != nil {
 		return err

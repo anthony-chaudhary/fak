@@ -14,8 +14,8 @@ type cudaV41BF16PublishKey struct{}
 // five cleanup guards after its failed-drain latch. This is not a general
 // cleanup-drain guarantee or a native/device numerical qualification.
 func prepareCUDAV41BF16Publish(cfg *CUDAConfig) error {
-	if cfg.Arch != "sm_120" && cfg.Arch != "120" {
-		return fmt.Errorf("V4.1 BF16 publication selection requires explicit --arch sm_120")
+	if err := requireCUDAV41Arch(cfg.Arch, "V4.1 BF16 publication selection"); err != nil {
+		return err
 	}
 	if _, _, err := LoadCUDAArchMatrix(cfg.RepoRoot, cfg.Arch); err != nil {
 		return err

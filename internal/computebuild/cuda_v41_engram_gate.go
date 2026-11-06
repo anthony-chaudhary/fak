@@ -14,8 +14,8 @@ type cudaV41EngramGateKey struct{}
 // Preserve the same-repository oracle noncontracted binary32 operation order.
 // These numeric flags apply to the monolithic object, including peer candidates.
 func prepareCUDAV41EngramGate(cfg *CUDAConfig) error {
-	if cfg.Arch != "sm_120" && cfg.Arch != "120" {
-		return fmt.Errorf("V4.1 Engram-gate candidate requires explicit --arch sm_120")
+	if err := requireCUDAV41Arch(cfg.Arch, "V4.1 Engram-gate candidate"); err != nil {
+		return err
 	}
 	if _, _, err := LoadCUDAArchMatrix(cfg.RepoRoot, cfg.Arch); err != nil {
 		return err

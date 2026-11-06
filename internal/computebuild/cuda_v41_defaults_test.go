@@ -8,7 +8,7 @@ import (
 )
 
 // fak-test:runtime fast est=5ms lane=default
-// The default sm_120 set is the closed device-witnessed list; the ds4-port
+// The default sm_120/sm_90 set is the closed device-witnessed list; the ds4-port
 // compressor is the default and yields to an explicit pool-only selection.
 func TestCUDAV41DefaultTags(t *testing.T) {
 	want := []string{"fak_cuda_v41_compressor", "fak_cuda_v41_router", "fak_cuda_v41_shared_attention"}
@@ -23,10 +23,16 @@ func TestCUDAV41DefaultTags(t *testing.T) {
 	}{
 		{"sm_120", CUDAConfig{Arch: "sm_120"}, want, "cuda,fak_cuda_v41_compressor,fak_cuda_v41_router,fak_cuda_v41_shared_attention"},
 		{"bare 120", CUDAConfig{Arch: "120"}, want, "cuda,fak_cuda_v41_compressor,fak_cuda_v41_router,fak_cuda_v41_shared_attention"},
+		{"sm_90", CUDAConfig{Arch: "sm_90"}, want, "cuda,fak_cuda_v41_compressor,fak_cuda_v41_router,fak_cuda_v41_shared_attention"},
+		{"bare 90", CUDAConfig{Arch: "90"}, want, "cuda,fak_cuda_v41_compressor,fak_cuda_v41_router,fak_cuda_v41_shared_attention"},
+		{"sm_90 opt out", CUDAConfig{Arch: "sm_90", DisableV41Defaults: true}, nil, "cuda"},
+		{"sm_90a", CUDAConfig{Arch: "sm_90a"}, nil, "cuda"},
+		{"multi-arch list", CUDAConfig{Arch: "sm_90,sm_120"}, nil, "cuda"},
 		{"opt out", CUDAConfig{Arch: "sm_120", DisableV41Defaults: true}, nil, "cuda"},
 		{"fat build", CUDAConfig{}, nil, "cuda"},
 		{"sm_89", CUDAConfig{Arch: "sm_89"}, nil, "cuda"},
 		{"pool explicit", CUDAConfig{Arch: "sm_120", EnableV41CompressorPool: true}, want[1:], "cuda,fak_cuda_v41_compressor_pool,fak_cuda_v41_router,fak_cuda_v41_shared_attention"},
+		{"sm_90 pool explicit", CUDAConfig{Arch: "sm_90", EnableV41CompressorPool: true}, want[1:], "cuda,fak_cuda_v41_compressor_pool,fak_cuda_v41_router,fak_cuda_v41_shared_attention"},
 		{"router explicit", CUDAConfig{Arch: "sm_120", EnableV41Router: true}, []string{want[0], want[2]}, "cuda,fak_cuda_v41_compressor,fak_cuda_v41_router,fak_cuda_v41_shared_attention"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

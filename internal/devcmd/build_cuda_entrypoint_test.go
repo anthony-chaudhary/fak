@@ -93,7 +93,7 @@ func TestCUDABuildMakeEntrypoints(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, target := range []string{"cuda-check", "cuda-build", "cuda-test", "cuda-build-sm100", "cuda-build-sm103", "cuda-build-sm120", "cuda-accept-model", "cuda-accept"} {
+	for _, target := range []string{"cuda-check", "cuda-build", "cuda-test", "cuda-build-sm90", "cuda-build-sm100", "cuda-build-sm103", "cuda-build-sm120", "cuda-accept-model", "cuda-accept"} {
 		start := strings.Index(text, "\n"+target+":")
 		if start < 0 {
 			t.Fatalf("target %s missing", target)
