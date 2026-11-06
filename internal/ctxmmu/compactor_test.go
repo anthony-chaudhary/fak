@@ -739,3 +739,146 @@ func BenchmarkCompactor100kTokensCompactInPlace(b *testing.B) {
 		_, _ = c.CompactInPlace(workSlice, &report)
 	}
 }
+
+// fak-test:runtime fast est=1ms lane=default
+func TestCtxmmuPreserveCurrentTurnReasoning(t *testing.T) {
+	asst := func(id uint64, turn int, gate string) ctxmmu.TokenPage {
+		return ctxmmu.TokenPage{
+			ID:        id,
+			TurnIndex: turn,
+			Kind:      ctxmmu.PageKindAssistant,
+			Role:      "assistant",
+			Content:   []byte(gate),
+			Tokens:    ctxmmu.EstimateTokens([]byte(gate)),
+			Resident:  true,
+		}
+	}
+	user := func(id uint64, turn int, text string) ctxmmu.TokenPage {
+		return ctxmmu.TokenPage{
+			ID:        id,
+			TurnIndex: turn,
+			Kind:      ctxmmu.PageKindUser,
+			Role:      "user",
+			Content:   []byte(text),
+			Tokens:    ctxmmu.EstimateTokens([]byte(text)),
+			Resident:  true,
+		}
+	}
+	toolCall := func(id uint64, turn int, tool string) ctxmmu.TokenPage {
+		return ctxmmu.TokenPage{
+			ID:        id,
+			TurnIndex: turn,
+			Kind:      ctxmmu.PageKindToolCall,
+			Role:      "assistant",
+			ToolName:  tool,
+			Content:   []byte(`{"cmd":"ls"}`),
+			Tokens:    8,
+			Resident:  true,
+		}
+	}
+
+	t.Run("EditedHistoryKeepsCurrentReasoningSpan", func(t *testing.T) {
+		pages := []ctxmmu.TokenPage{
+			user(1, 1, "q1"), asst(2, 1, "A"),
+			user(3, 2, "q2"), asst(4, 2, "B-edited"),
+			user(5, 3, "q3"), asst(6, 3, "C"),
+		}
+		committed := []ctxmmu.CommittedReasoning{
+			{Interior: "R1", Gate: "A"},
+			{Interior: "R2", Gate: "B"},
+			{Interior: "R3", Gate: "C"},
+		}
+		out, n := ctxmmu.SubstituteCommittedReasoning(pages, committed)
+		if n != 2 {
+			t.Fatalf("substituted = %d, want 2 (turn 1 by the walk, current turn by the carve-out)", n)
+		}
+		if got := out[1].Reasoning; got != "R1" {
+			t.Fatalf("turn 1 reasoning = %q, want %q", got, "R1")
+		}
+		if got := out[3].Reasoning; got != "" {
+			t.Fatalf("edited turn 2 reasoning = %q, want empty (walk closed on its mismatch)", got)
+		}
+		if got := out[5].Reasoning; got != "R3" {
+			t.Fatalf("current turn 3 reasoning = %q, want %q (carve-out survives the earlier edit)", got, "R3")
+		}
+	})
+
+	t.Run("UneditedHistoryUnchanged", func(t *testing.T) {
+		pages := []ctxmmu.TokenPage{
+			user(1, 1, "q1"), asst(2, 1, "A"),
+			user(3, 2, "q2"), asst(4, 2, "B"),
+			user(5, 3, "q3"), asst(6, 3, "C"),
+		}
+		committed := []ctxmmu.CommittedReasoning{
+			{Interior: "R1", Gate: "A"},
+			{Interior: "R2", Gate: "B"},
+			{Interior: "R3", Gate: "C"},
+		}
+		out, n := ctxmmu.SubstituteCommittedReasoning(pages, committed)
+		if n != 3 {
+			t.Fatalf("substituted = %d, want 3", n)
+		}
+		for i, want := range []string{"", "R1", "", "R2", "", "R3"} {
+			if got := out[i].Reasoning; got != want {
+				t.Fatalf("page %d reasoning = %q, want %q", i, got, want)
+			}
+		}
+		for i := range pages {
+			if !bytes.Equal(out[i].Content, pages[i].Content) {
+				t.Fatalf("page %d content changed: %q -> %q", i, pages[i].Content, out[i].Content)
+			}
+			if pages[i].Reasoning != "" {
+				t.Fatalf("input page %d mutated in place", i)
+			}
+		}
+	})
+
+	t.Run("EditedCurrentTurnCarriesNothing", func(t *testing.T) {
+		pages := []ctxmmu.TokenPage{
+			user(1, 1, "q1"), asst(2, 1, "A"),
+			user(3, 2, "q2"), asst(4, 2, "B-edited"),
+		}
+		committed := []ctxmmu.CommittedReasoning{
+			{Interior: "R1", Gate: "A"},
+			{Interior: "R2", Gate: "B"},
+		}
+		out, n := ctxmmu.SubstituteCommittedReasoning(pages, committed)
+		if n != 1 {
+			t.Fatalf("substituted = %d, want 1 (only turn 1 matched)", n)
+		}
+		if out[1].Reasoning != "R1" || out[3].Reasoning != "" {
+			t.Fatalf("reasonings = (%q, %q), want (R1, empty): the carve-out verifies its own gate before carrying", out[1].Reasoning, out[3].Reasoning)
+		}
+	})
+
+	t.Run("ToolIdentityMismatchClosesWalkButCarveOutHolds", func(t *testing.T) {
+		pages := []ctxmmu.TokenPage{
+			user(1, 1, "q1"), asst(2, 1, "X"), toolCall(7, 1, "bash"),
+			user(3, 2, "q2"), asst(4, 2, "Y"), toolCall(8, 2, "grep"),
+			user(5, 3, "q3"), asst(6, 3, "Z"),
+		}
+		committed := []ctxmmu.CommittedReasoning{
+			{Interior: "R1", Gate: "X", Tools: []string{"bash"}},
+			{Interior: "R2", Gate: "Y", Tools: []string{"bash"}},
+			{Interior: "R3", Gate: "Z"},
+		}
+		out, n := ctxmmu.SubstituteCommittedReasoning(pages, committed)
+		if n != 2 {
+			t.Fatalf("substituted = %d, want 2 (branch switch on turn 2 must not inherit old-call reasoning)", n)
+		}
+		if out[1].Reasoning != "R1" || out[4].Reasoning != "" || out[7].Reasoning != "R3" {
+			t.Fatalf("reasonings = (%q, %q, %q), want (R1, empty, R3)", out[1].Reasoning, out[4].Reasoning, out[7].Reasoning)
+		}
+	})
+
+	t.Run("EmptyInputsAreNoOps", func(t *testing.T) {
+		if out, n := ctxmmu.SubstituteCommittedReasoning(nil, nil); n != 0 || out != nil {
+			t.Fatalf("nil pages: out=%v n=%d, want (nil, 0)", out, n)
+		}
+		pages := []ctxmmu.TokenPage{user(1, 1, "q1"), asst(2, 1, "A")}
+		out, n := ctxmmu.SubstituteCommittedReasoning(pages, nil)
+		if n != 0 || len(out) != len(pages) || out[1].Reasoning != "" {
+			t.Fatalf("no committed spans: n=%d reason=%q, want no-op", n, out[1].Reasoning)
+		}
+	})
+}
