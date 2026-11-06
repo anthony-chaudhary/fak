@@ -356,10 +356,11 @@ __global__ void k_qwen38_causal_attention_panel_hd256_splitkv_partial(
                          (QWEN38_PROMPT_HEAD_DIM + 2);
   if (j0 >= j1) {
     // Empty partition: the sentinel partial the merge drops exactly.
-    slot[0] = -INFINITY;
-    slot[1] = 0.f;
-    int k = 0;
-    for (int d = tid; d < QWEN38_PROMPT_HEAD_DIM; d += FLASH_THREADS, k++) slot[2 + k] = 0.f;
+    if (tid == 0) {
+      slot[0] = -INFINITY;
+      slot[1] = 0.f;
+    }
+    for (int d = tid; d < QWEN38_PROMPT_HEAD_DIM; d += FLASH_THREADS) slot[2 + d] = 0.f;
     return;
   }
   float m = 0.f, l = 0.f;
@@ -399,10 +400,12 @@ __global__ void k_qwen38_causal_attention_panel_hd256_splitkv_partial(
     }
     m = nextM;
   }
-  slot[0] = m;
-  slot[1] = l;
+  if (tid == 0) {
+    slot[0] = m;
+    slot[1] = l;
+  }
   int k = 0;
-  for (int d = tid; d < QWEN38_PROMPT_HEAD_DIM; d += FLASH_THREADS, k++) slot[2 + k] = acc[k];
+  for (int d = tid; d < QWEN38_PROMPT_HEAD_DIM; d += FLASH_THREADS, k++) slot[2 + d] = acc[k];
 }
 // Merge kernel: one block per (row, head); every thread strides the head dims exactly as
 // the panel kernels do. The LSE fold rescales each partial onto the row max M and divides
@@ -422,8 +425,7 @@ __global__ void k_qwen38_splitkv_lse_merge_hd256(
   float *outRow = Out + (size_t)token * nH * QWEN38_PROMPT_HEAD_DIM +
                    (size_t)h * QWEN38_PROMPT_HEAD_DIM;
   if (mMax == -INFINITY) {
-    int k = 0;
-    for (int d = tid; d < QWEN38_PROMPT_HEAD_DIM; d += FLASH_THREADS, k++) outRow[d] = 0.f;
+    for (int d = tid; d < QWEN38_PROMPT_HEAD_DIM; d += FLASH_THREADS) outRow[d] = 0.f;
     return;
   }
   float lSum = 0.f;
@@ -436,7 +438,7 @@ __global__ void k_qwen38_splitkv_lse_merge_hd256(
     lSum += slot[1] * weight;
     int k = 0;
     for (int d = tid; d < QWEN38_PROMPT_HEAD_DIM; d += FLASH_THREADS, k++) {
-      acc[k] += slot[2 + k] * weight;
+      acc[k] += slot[2 + d] * weight;
     }
   }
   float invL = lSum > 0.f ? 1.f / lSum : 0.f;
