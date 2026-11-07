@@ -15,11 +15,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **29** (clarity 0 + coverage 29) |
-| **Crystal-clear concepts (and climbing)** | **1628** crystal of 4071 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **4139 / 4168** (99.3% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **30** (clarity 0 + coverage 30) |
+| **Crystal-clear concepts (and climbing)** | **1629** crystal of 4072 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **4140 / 4170** (99.3% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 303 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **92** of 5528 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **92** of 5529 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 99.5/100 (grade A) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 4071 concepts - score 99.5/100 (grade A) - disambiguation-debt 29
+concept-disambiguation chart - 4072 concepts - score 99.5/100 (grade A) - disambiguation-debt 30
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ###################......... 1628
+  * crystal       ###################......... 1629
   o defined       ############################ 2443
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -47,7 +47,7 @@ clarity mix by family (each cell = one concept):
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            **************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (85 concept(s); 26 crystal)
   gateway-engine   *************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (275 concept(s); 97 crystal)
-  guard-gate       *************************************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (516 concept(s); 229 crystal)
+  guard-gate       **************************************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (517 concept(s); 230 crystal)
   layout           ***********************************oooooooooooooooooooooooo (59 concept(s); 35 crystal)
   loop             ***************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooo (107 concept(s); 51 crystal)
   plan             **********************************************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (570 concept(s); 238 crystal)
@@ -66,9 +66,9 @@ coverage by family (positioned / discovered):
   evict            ###########################. 93/97
   cache            ############################ 438/441
   policy-capability ############################ 283/286
+  session-runtime  ############################ 384/387
   support-maturity ###########################. 142/145
   attention        ############################ 238/240
-  session-runtime  ############################ 384/386
   gateway-engine   ############################ 324/325
   loop             ############################ 118/119
   render-materialize ############################ 253/254
@@ -76,7 +76,7 @@ coverage by family (positioned / discovered):
   cross-cluster    ............................ 0/0
   decision         ############################ 68/68
   dev-tier         ............................ 0/0
-  guard-gate       ############################ 578/578
+  guard-gate       ############################ 579/579
   layout           ############################ 55/55
   pool             ############################ 112/112
   score-debt       ############################ 141/141
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   vfs              ............................ 0/0
   witness-proof    ############################ 200/200
 
-namespace coverage  [################################] 99.3%  (4139/4168 confusable tokens positioned)
+namespace coverage  [################################] 99.3%  (4140/4170 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 303
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 303/303
 
-name index: 5528 lookup name(s) -> 4071 concept(s), 92 ambiguous
+name index: 5529 lookup name(s) -> 4072 concept(s), 92 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **303 / 303** (303 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 3538 / 7753 |
+| Boundaries drawn (mutual / total) | 3538 / 7754 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 5528 over 4071 concepts |
+| Lookup names indexed | 5529 over 4072 concepts |
 | Lookup names landing on several concepts | 92 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 4071 |
+| Concepts carrying a contrast set | 4072 |
 
 ## The concepts (best verdict first)
 
@@ -802,6 +802,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | guard-gate | **guard-gate implementation surface for gatemodedefault** - `gateModeDefault` is the guard-gate symbol declared or used at `cmd/fak/commit_msg_advisory.go:50` as `mode, escaped := gateModeDefault("FLEET_MSG_GUARD", "FLEET_ALLOW_MSG", "warn")`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | guard-gate | **guard-gate implementation surface for gateprimary** - `GatePrimary` is the guard-gate symbol declared or used at `cmd/fak/main_legacy_helpers.go:388` as `fmt.Printf("PRIMARY GATE : %s (%s)\n", rep.GatePrimary, rep.PrimaryDetail)`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | subsystem | guard-gate | **guardaccuracy (guard-classifier accuracy corpus)** - The internal/guardaccuracy package: a labeled command corpus (testdata/corpus.json, schema fak-guard-accuracy-corpus/1) that measures the guard reversibility preview classifier's accuracy. Each row pairs a (tool, args) command with the reversibility class the guard MUST assign, so a benign row escalated counts as a false positive and a dangerous row left reversible as a false negative; the corpus is grown as a ratchet - every wild misfire becomes a permanent row, never just a local test patch. |
+| * | crystal | config | guard-gate | **gate_lower_bound (Kimi K3.1 KDA decay-gate floor)** - `gate_lower_bound` is the scalar floor of the linear-attention decay gate: the GGUF key `<arch>.kda.gate_lower_bound` (Kimi K3.1 ships -5.0) is read at `internal/ggufload/kimik31.go:269` into `model.Config.LinearGateLowerBound` (`internal/model/config.go:288`), and the same conceptual axis appears nested as GLM-5.3-Flash `linear_attn_config.gate_lower_bound` (`internal/model/config.go:506`, propagated at `:586`). This row positions that wire-level config axis. |
 | * | crystal | symbol | guard-gate | **guardChildWaitEvent (supervision outcome envelope)** - The tagged outcome returned by the guard child wait multiplexer, carrying exactly one completion, restart, time-budget, or resource-containment result back to the supervision loop. |
 | * | crystal | symbol | guard-gate | **guardCrashRestartDelay (bounded child relaunch backoff)** - The function that computes the bounded exponential pause before a child relaunch attempt, shared by generic crash recovery and child resource-containment recovery. |
 | * | crystal | symbol | guard-gate | **guardSameTraceRelaunchHop (restart lineage constructor)** - The constructor for one restart-chain lineage hop whose source, destination, and child remain on the same guard trace, marking recognized resume handbacks engaged and unsupported agents orphaned. |
@@ -4351,8 +4352,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 32 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 4215/7753 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 4071 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 4216/7754 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 4072 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -4361,7 +4362,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 5528 lookup name(s) resolves - 92 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 5529 lookup name(s) resolves - 92 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -4372,9 +4373,9 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | evict | 93 | 97 | 4 |
 | cache | 438 | 441 | 3 |
 | policy-capability | 283 | 286 | 3 |
+| session-runtime | 384 | 387 | 3 |
 | support-maturity | 142 | 145 | 3 |
 | attention | 238 | 240 | 2 |
-| session-runtime | 384 | 386 | 2 |
 | gateway-engine | 324 | 325 | 1 |
 | loop | 118 | 119 | 1 |
 | render-materialize | 253 | 254 | 1 |
@@ -4382,7 +4383,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | cross-cluster | 0 | 0 | 0 |
 | decision | 68 | 68 | 0 |
 | dev-tier | 0 | 0 | 0 |
-| guard-gate | 578 | 578 | 0 |
+| guard-gate | 579 | 579 | 0 |
 | layout | 55 | 55 | 0 |
 | pool | 112 | 112 | 0 |
 | score-debt | 141 | 141 | 0 |

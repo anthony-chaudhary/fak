@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "kimik31-l1-gatelowerbound",
+      "canonical": "gate_lower_bound (Kimi K3.1 KDA decay-gate floor)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "`gate_lower_bound` is the scalar floor of the linear-attention decay gate: the GGUF key `<arch>.kda.gate_lower_bound` (Kimi K3.1 ships -5.0) is read at `internal/ggufload/kimik31.go:269` into `model.Config.LinearGateLowerBound` (`internal/model/config.go:288`), and the same conceptual axis appears nested as GLM-5.3-Flash `linear_attn_config.gate_lower_bound` (`internal/model/config.go:506`, propagated at `:586`). This row positions that wire-level config axis.",
+      "distinction": "Use `gate_lower_bound` for the decay-gate floor value carried in a GGUF header or a linear-attention config block. Unlike `GatedDeltaNet` (the linear-attention SSM layer family, row guardgate-gateddeltanet), it is a scalar knob inside such a layer, not the layer family; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "guardgate-gateddeltanet"
+      ],
+      "aliases": [],
+      "grounding": "gate_lower_bound",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

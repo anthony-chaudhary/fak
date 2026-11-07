@@ -77,6 +77,41 @@ func TestCanonicalGGUFArchNormalizesKimi(t *testing.T) {
 	if got := canonicalGGUFArch("llama"); got != "llama" {
 		t.Errorf("canonicalGGUFArch(llama) = %q, want llama (must not over-normalize)", got)
 	}
+	// Alias precedence (K3.1 bring-up): this list is exact-spelling only, so the
+	// planned K3.1 spelling must NOT be captured by the no-indexer alias above —
+	// it normalizes onto its own distinct internal arch instead.
+	if got := canonicalGGUFArch("kimi-k31"); got == "deepseek2" {
+		t.Fatalf("canonicalGGUFArch(kimi-k31) = deepseek2: the K2/K3 alias captured K3.1")
+	}
+	if got := canonicalGGUFArch("kimi-k31"); got != "kimik31" {
+		t.Errorf("canonicalGGUFArch(kimi-k31) = %q, want kimik31", got)
+	}
+}
+
+// TestKimiK3HeaderStillRoutesToDeepSeek2 pins the sibling-leak from the other
+// side: a GENUINE K3 header (branded "kimi-k3", the spelling llama.cpp's K3
+// converter emits) still routes to the deepseek2 MLA+MoE forward end to end —
+// the K3.1 admission must have changed nothing for real K2/K3 files.
+func TestKimiK3HeaderStillRoutesToDeepSeek2(t *testing.T) {
+	f := &File{Metadata: synthKimiMeta("kimi-k3")}
+	cfg, err := f.Config()
+	if err != nil {
+		t.Fatalf("Config: %v", err)
+	}
+	if cfg.ModelType != "deepseek2" {
+		t.Fatalf("ModelType = %q, want deepseek2 (genuine K3 keeps the old alias)", cfg.ModelType)
+	}
+	got, err := model.ClassifyForwardPath(cfg, nil)
+	if err != nil {
+		t.Fatalf("a recognized K3 MLA+MoE model must classify, got refusal: %v", err)
+	}
+	if got != model.ForwardGLMDsaMLA {
+		t.Fatalf("ClassifyForwardPath = %q, want %q", got, model.ForwardGLMDsaMLA)
+	}
+	// And K3 stays indexer-free: the DSA axis must remain zero on the K3 seam.
+	if cfg.IndexNHeads != 0 || cfg.IndexTopK != 0 {
+		t.Errorf("K3 indexer axes = heads:%d topk:%d, want 0/0 (K3 has no DSA indexer)", cfg.IndexNHeads, cfg.IndexTopK)
+	}
 }
 
 // TestKimiConfigDerivesDeepSeekMLAMoE is the done-condition witness: a Kimi GGUF (branded
