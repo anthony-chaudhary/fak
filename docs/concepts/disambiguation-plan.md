@@ -327,3 +327,45 @@ ensemblePlan returns the routing Plan for a multi-member ensemble tool call, re-
 EnterPlanMode is the tool name in the guard/adjudicator default-policy allow-list that permits agents to request plan mode.
 
 **Distinct from:** It is one ALLOWLISTED TOOL NAME; the surrounding read-only-MCP surface and its sibling tools Monitor and ReportFindings are distinct entries. Use `enterplanmode` for this exact symbol; unlike `x-ci-coverage-plan-blockplan`, it is not the family umbrella identifier.
+
+
+### OptimizePlan (fak optimize)
+
+The read-only output of fak optimize plan (internal/optimize.OptimizePlan): the next dependency-ready unwitnessed lever from the committed native-performance hill-climb graph plus the exact follow-on measure and verify invocations and the lever's expected planning band.
+
+**Distinct from:** The DRIVER verb's plan artifact naming the next lever and its exact commands - NOT the committed lever graph itself (nativeperf.Graph), NOT the per-wave execution plan dispatchwaveexecutionplan, and NOT the umbrella plan domain.
+
+
+### BuildPlanFromProfile (fak optimize plan --profile)
+
+The profile-classified selection route optimize.BuildPlanFromProfile (internal/optimize): picks the lever the native profile classifier names instead of graph order, then emits the same OptimizePlan artifact with that lever's measure and verify commands.
+
+**Distinct from:** The PROFILE-CLASSIFIED route into OptimizePlan - NOT the default graph-order selection BuildPlan and NOT the nativeperf profile classifier itself, which only names the lever.
+
+
+### ClassNoPlanningBand (optimize refusal class)
+
+The closed optimize refusal class optimize.ClassNoPlanningBand: verify refuses when the lever has no registered planning band to judge the candidate against - a typed refusal, never a guessed verdict.
+
+**Distinct from:** One closed refusal CLASS in the optimize verb family's vocabulary - NOT the missing band itself and NOT the no_arm_mapping class that measure refuses with when the lever has no trace-backed arm.
+
+
+### LedgerPlanned (optimize loop verdict)
+
+The fak optimize loop ledger verdict constant optimize.LedgerPlanned: the iteration stopped at plan (dry-run or an upstream refusal) so no measurement exists and the throughput fields are omitted rather than zero-filled.
+
+**Distinct from:** A loop LEDGER state meaning planned-only, nothing measured - NOT the verify verdict VerdictAccept or VerdictReject and NOT the LedgerRefused ledger state that carries a refusal class.
+
+
+### planningRungs (optimize band binding)
+
+The internal binding optimize.planningRungs that projects a lever's expected floor and roof band from the native-performance graph rungs the lever is planned against, feeding verify's banded criterion.
+
+**Distinct from:** The band-BINDING helper over committed graph rungs - NOT the rungs themselves (nativeperf graph data) and NOT the comparison criterion nativeperf resolves for nativeperf experiment receipts.
+
+
+### CandidateTokS (optimize receipt arm)
+
+The single-lever arm throughput optimize.OptimizeReceipt.CandidateTokS: end-to-end decode tok/s replayed from the frozen trace with the lever's mapped ablate feature enabled, paired against BaselineTokS, the all-off arm.
+
+**Distinct from:** The measured CANDIDATE arm of the optimize A/B - NOT the all-off baseline arm BaselineTokS and NOT a predicted or roof value from the planning band.

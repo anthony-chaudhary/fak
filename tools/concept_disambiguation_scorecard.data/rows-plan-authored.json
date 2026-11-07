@@ -224,5 +224,136 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "cov-optimize-verbs-plan-optimizeplan",
+      "canonical": "OptimizePlan (fak optimize)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The read-only output of fak optimize plan (internal/optimize.OptimizePlan): the next dependency-ready unwitnessed lever from the committed native-performance hill-climb graph plus the exact follow-on measure and verify invocations and the lever's expected planning band.",
+      "distinction": "The DRIVER verb's plan artifact naming the next lever and its exact commands - NOT the committed lever graph itself (nativeperf.Graph), NOT the per-wave execution plan dispatchwaveexecutionplan, and NOT the umbrella plan domain.",
+      "distinct_from": [
+        "cov-debt-tail2-plan-waveplan",
+        "cov-optimize-verbs-plan-buildplanfromprofile",
+        "cov-optimize-verbs-plan-classnoplanningband",
+        "cov-optimize-verbs-plan-planningrungs",
+        "cov-optimize-verbs-plan-candidatetoks"
+      ],
+      "aliases": [
+        "internal/optimize.OptimizePlan"
+      ],
+      "grounding": "OptimizePlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "cov-optimize-verbs-plan-buildplanfromprofile",
+      "canonical": "BuildPlanFromProfile (fak optimize plan --profile)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The profile-classified selection route optimize.BuildPlanFromProfile (internal/optimize): picks the lever the native profile classifier names instead of graph order, then emits the same OptimizePlan artifact with that lever's measure and verify commands.",
+      "distinction": "The PROFILE-CLASSIFIED route into OptimizePlan - NOT the default graph-order selection BuildPlan and NOT the nativeperf profile classifier itself, which only names the lever.",
+      "distinct_from": [
+        "cov-optimize-verbs-plan-optimizeplan"
+      ],
+      "aliases": [
+        "internal/optimize.BuildPlanFromProfile"
+      ],
+      "grounding": "BuildPlanFromProfile",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "cov-optimize-verbs-plan-classnoplanningband",
+      "canonical": "ClassNoPlanningBand (optimize refusal class)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The closed optimize refusal class optimize.ClassNoPlanningBand: verify refuses when the lever has no registered planning band to judge the candidate against - a typed refusal, never a guessed verdict.",
+      "distinction": "One closed refusal CLASS in the optimize verb family's vocabulary - NOT the missing band itself and NOT the no_arm_mapping class that measure refuses with when the lever has no trace-backed arm.",
+      "distinct_from": [
+        "cov-optimize-verbs-plan-optimizeplan",
+        "cov-optimize-verbs-plan-ledgerplanned"
+      ],
+      "aliases": [
+        "internal/optimize.ClassNoPlanningBand"
+      ],
+      "grounding": "ClassNoPlanningBand",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "cov-optimize-verbs-plan-ledgerplanned",
+      "canonical": "LedgerPlanned (optimize loop verdict)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The fak optimize loop ledger verdict constant optimize.LedgerPlanned: the iteration stopped at plan (dry-run or an upstream refusal) so no measurement exists and the throughput fields are omitted rather than zero-filled.",
+      "distinction": "A loop LEDGER state meaning planned-only, nothing measured - NOT the verify verdict VerdictAccept or VerdictReject and NOT the LedgerRefused ledger state that carries a refusal class.",
+      "distinct_from": [
+        "cov-optimize-verbs-plan-classnoplanningband"
+      ],
+      "aliases": [
+        "internal/optimize.LedgerPlanned"
+      ],
+      "grounding": "LedgerPlanned",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "cov-optimize-verbs-plan-planningrungs",
+      "canonical": "planningRungs (optimize band binding)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The internal binding optimize.planningRungs that projects a lever's expected floor and roof band from the native-performance graph rungs the lever is planned against, feeding verify's banded criterion.",
+      "distinction": "The band-BINDING helper over committed graph rungs - NOT the rungs themselves (nativeperf graph data) and NOT the comparison criterion nativeperf resolves for nativeperf experiment receipts.",
+      "distinct_from": [
+        "cov-optimize-verbs-plan-optimizeplan"
+      ],
+      "aliases": [
+        "internal/optimize.planningRungs"
+      ],
+      "grounding": "planningRungs",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "cov-optimize-verbs-plan-candidatetoks",
+      "canonical": "CandidateTokS (optimize receipt arm)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The single-lever arm throughput optimize.OptimizeReceipt.CandidateTokS: end-to-end decode tok/s replayed from the frozen trace with the lever's mapped ablate feature enabled, paired against BaselineTokS, the all-off arm.",
+      "distinction": "The measured CANDIDATE arm of the optimize A/B - NOT the all-off baseline arm BaselineTokS and NOT a predicted or roof value from the planning band.",
+      "distinct_from": [
+        "cov-optimize-verbs-plan-optimizeplan"
+      ],
+      "aliases": [
+        "internal/optimize.OptimizeReceipt.CandidateTokS"
+      ],
+      "grounding": "CandidateTokS",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }
