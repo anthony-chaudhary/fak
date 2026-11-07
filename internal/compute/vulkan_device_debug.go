@@ -436,22 +436,29 @@ func (v *vulkanBackend) backendExecutionSnapshotLocked() (BackendExecutionSnapsh
 	if memoryObserved && (total <= 0 || free < 0 || free > total) {
 		return BackendExecutionSnapshot{}, fmt.Errorf("compute: Vulkan device-memory observation is invalid")
 	}
+	counters := BackendCounterSnapshot{
+		ComputeDispatches: dispatch.ComputeDispatches, Q4KMatmulDispatches: dispatch.Q4KMatmulDispatches,
+		Q2KMatmulDispatches: dispatch.Q2KMatmulDispatches, Q3KMatmulDispatches: dispatch.Q3KMatmulDispatches,
+		Q2KScalarDispatches: dispatch.Q2KScalarDispatches, Q2KTileDispatches: dispatch.Q2KTileDispatches,
+		Q3KScalarDispatches: dispatch.Q3KScalarDispatches, Q3KTileDispatches: dispatch.Q3KTileDispatches,
+		OtherDispatches: dispatch.ComputeDispatches - dispatch.Q4KMatmulDispatches,
+		DispatchSubmits: dispatch.BatchSubmits + dispatch.OneShotSubmits,
+		H2DBytes:        uint64(h2dBytes), H2DCount: uint64(h2dCount),
+		D2HBytes: uint64(d2hBytes), D2HCount: uint64(d2hCount),
+		D2DCopies: uint64(d2dCount), D2DBytes: uint64(d2dBytes),
+		Q4KStageCalls: uint64(stageCalls), Q4KStageBytes: uint64(stageBytes), Fallbacks: uint64(fallbacks),
+		TensorHomeHits: uint64(hits), TensorHomeAdmissions: uint64(admissions),
+		TensorHomeBypasses: uint64(bypasses), TensorHomeCopiedBytes: uint64(copiedBytes),
+	}
+	if err := validateBackendDispatchCounterScope(counters); err != nil {
+		return BackendExecutionSnapshot{}, fmt.Errorf("compute: Vulkan %w", err)
+	}
 
 	return BackendExecutionSnapshot{
 		Identity: BackendRuntimeIdentity{
 			Backend: v.Name(), Device: device, Driver: driverIdentity, Runtime: runtimeIdentity,
 		},
-		Counters: BackendCounterSnapshot{
-			ComputeDispatches: dispatch.ComputeDispatches, Q4KMatmulDispatches: dispatch.Q4KMatmulDispatches,
-			OtherDispatches: dispatch.ComputeDispatches - dispatch.Q4KMatmulDispatches,
-			DispatchSubmits: dispatch.BatchSubmits + dispatch.OneShotSubmits,
-			H2DBytes:        uint64(h2dBytes), H2DCount: uint64(h2dCount),
-			D2HBytes: uint64(d2hBytes), D2HCount: uint64(d2hCount),
-			D2DCopies: uint64(d2dCount), D2DBytes: uint64(d2dBytes),
-			Q4KStageCalls: uint64(stageCalls), Q4KStageBytes: uint64(stageBytes), Fallbacks: uint64(fallbacks),
-			TensorHomeHits: uint64(hits), TensorHomeAdmissions: uint64(admissions),
-			TensorHomeBypasses: uint64(bypasses), TensorHomeCopiedBytes: uint64(copiedBytes),
-		},
+		Counters:          counters,
 		TensorHomeEntries: uint64(entries), TensorHomeResidentBytes: uint64(residentBytes),
 		DeviceMemoryTotalBytes: uint64(total), DeviceMemoryFreeBytes: uint64(free), DeviceMemoryObserved: memoryObserved,
 		TransferCountersObserved: true, DeviceAllocationLiveBytes: uint64(allocationLive), DeviceAllocationObserved: true,
@@ -1080,13 +1087,18 @@ func (v *vulkanBackend) VulkanDebugQ4KProfileSnapshot() (enabled bool, deviceCal
 }
 
 type VulkanDispatchProfile struct {
-	ComputeDispatches, Q4KMatmulDispatches, Q2KMatmulDispatches, OtherComputeDispatches uint64
-	ComputeBarriers, D2DCopies, BatchSubmits, BatchFlushes, OneShotSubmits              uint64
-	OtherMatmulDispatches, OtherNormDispatches, OtherRoPEDispatches                     uint64
-	OtherSwiGLUDispatches, OtherAddDispatches, OtherAttentionDispatches                 uint64
-	OtherArgmaxDispatches, OtherGDNDispatches, OtherUnclassifiedDispatches              uint64
-	OneShotComputeSubmits, OneShotH2DSubmits                                            uint64
-	OneShotD2HSubmits, OneShotD2DSubmits                                                uint64
+	ComputeDispatches, Q4KMatmulDispatches, Q2KMatmulDispatches, Q3KMatmulDispatches uint64
+	// Issued Q2_K/Q3_K kernel identity (Ref #13860): each format total folds its
+	// scalar (historical per-token scalar/batched path) and tile (V4.1 token
+	// panel/pair) sub-counters exactly; both are sub-scopes of OtherComputeDispatches.
+	Q2KScalarDispatches, Q2KTileDispatches, Q3KScalarDispatches, Q3KTileDispatches uint64
+	OtherComputeDispatches                                                         uint64
+	ComputeBarriers, D2DCopies, BatchSubmits, BatchFlushes, OneShotSubmits         uint64
+	OtherMatmulDispatches, OtherNormDispatches, OtherRoPEDispatches                uint64
+	OtherSwiGLUDispatches, OtherAddDispatches, OtherAttentionDispatches            uint64
+	OtherArgmaxDispatches, OtherGDNDispatches, OtherUnclassifiedDispatches         uint64
+	OneShotComputeSubmits, OneShotH2DSubmits                                       uint64
+	OneShotD2HSubmits, OneShotD2DSubmits                                           uint64
 }
 
 func (v *vulkanBackend) VulkanDebugDispatchProfileSnapshot() VulkanDispatchProfile {
@@ -1102,6 +1114,11 @@ func vulkanDebugDispatchProfileSnapshotLocked() VulkanDispatchProfile {
 		ComputeDispatches:           uint64(p.compute_dispatches),
 		Q4KMatmulDispatches:         uint64(p.q4k_matmul_dispatches),
 		Q2KMatmulDispatches:         uint64(p.q2k_matmul_dispatches),
+		Q3KMatmulDispatches:         uint64(p.q3k_matmul_dispatches),
+		Q2KScalarDispatches:         uint64(p.q2k_scalar_dispatches),
+		Q2KTileDispatches:           uint64(p.q2k_tile_dispatches),
+		Q3KScalarDispatches:         uint64(p.q3k_scalar_dispatches),
+		Q3KTileDispatches:           uint64(p.q3k_tile_dispatches),
 		OtherComputeDispatches:      uint64(p.other_compute_dispatches),
 		ComputeBarriers:             uint64(p.compute_barriers),
 		D2DCopies:                   uint64(p.d2d_copies),

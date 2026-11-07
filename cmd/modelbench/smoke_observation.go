@@ -195,6 +195,12 @@ func (o smokePrefillObservation) backendResult(be compute.Backend) map[string]an
 	if dispatchObserved {
 		counters["compute_dispatches"] = c.ComputeDispatches
 		counters["q4k_matmul_dispatches"] = c.Q4KMatmulDispatches
+		counters["q2k_matmul_dispatches"] = c.Q2KMatmulDispatches
+		counters["q3k_matmul_dispatches"] = c.Q3KMatmulDispatches
+		counters["q2k_scalar_dispatches"] = c.Q2KScalarDispatches
+		counters["q2k_tile_dispatches"] = c.Q2KTileDispatches
+		counters["q3k_scalar_dispatches"] = c.Q3KScalarDispatches
+		counters["q3k_tile_dispatches"] = c.Q3KTileDispatches
 		counters["other_dispatches"] = c.OtherDispatches
 		counters["dispatch_submits"] = c.DispatchSubmits
 	}

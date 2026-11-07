@@ -32,8 +32,9 @@ type backendDeviceWorkCounter interface {
 type BackendCounterRead struct {
 	Counters BackendCounterSnapshot
 	// DispatchCountsLive is false when ComputeDispatches, Q4KMatmulDispatches,
-	// OtherDispatches and DispatchSubmits stay zero because the backend's
-	// startup profile switch is off; a zero then does not mean no work.
+	// the Q2_K/Q3_K kernel-identity counters, OtherDispatches and
+	// DispatchSubmits stay zero because the backend's startup profile switch is
+	// off; a zero then does not mean no work.
 	DispatchCountsLive bool
 	// Submits is the backend's always-on cumulative queue-submit count,
 	// meaningful only when SubmitsObserved; it does not wait on a profile.
@@ -133,6 +134,12 @@ func AddBackendCounters(a, b BackendCounterSnapshot) BackendCounterSnapshot {
 	return BackendCounterSnapshot{
 		ComputeDispatches:     a.ComputeDispatches + b.ComputeDispatches,
 		Q4KMatmulDispatches:   a.Q4KMatmulDispatches + b.Q4KMatmulDispatches,
+		Q2KMatmulDispatches:   a.Q2KMatmulDispatches + b.Q2KMatmulDispatches,
+		Q3KMatmulDispatches:   a.Q3KMatmulDispatches + b.Q3KMatmulDispatches,
+		Q2KScalarDispatches:   a.Q2KScalarDispatches + b.Q2KScalarDispatches,
+		Q2KTileDispatches:     a.Q2KTileDispatches + b.Q2KTileDispatches,
+		Q3KScalarDispatches:   a.Q3KScalarDispatches + b.Q3KScalarDispatches,
+		Q3KTileDispatches:     a.Q3KTileDispatches + b.Q3KTileDispatches,
 		OtherDispatches:       a.OtherDispatches + b.OtherDispatches,
 		DispatchSubmits:       a.DispatchSubmits + b.DispatchSubmits,
 		H2DBytes:              a.H2DBytes + b.H2DBytes,

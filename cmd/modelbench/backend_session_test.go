@@ -1128,7 +1128,7 @@ func TestModelbenchInitialPrefillObservation(t *testing.T) {
 			if observation["dispatch_observed"] != dispatchKnown {
 				t.Fatal("dispatch availability was fabricated")
 			}
-			for key, value := range map[string]float64{"compute_dispatches": float64(prefillCalls), "q4k_matmul_dispatches": 0, "other_dispatches": float64(prefillCalls), "dispatch_submits": float64(prefillCalls)} {
+			for key, value := range map[string]float64{"compute_dispatches": float64(prefillCalls), "q4k_matmul_dispatches": 0, "q2k_matmul_dispatches": 0, "q3k_matmul_dispatches": 0, "q2k_scalar_dispatches": 0, "q2k_tile_dispatches": 0, "q3k_scalar_dispatches": 0, "q3k_tile_dispatches": 0, "other_dispatches": float64(prefillCalls), "dispatch_submits": float64(prefillCalls)} {
 				got, present := counters[key]
 				if !dispatchKnown {
 					if present {

@@ -63,6 +63,13 @@ using fak::vulkan::spirv::v41TokenGridModuleABI;
 
 struct DispatchProfileCounters {
     std::atomic<uint64_t> compute{0}, q4k{0}, q2k{0}, other{0};
+    // Issued Q2_K/Q3_K kernel identity (Ref #13860): q3k folds its scalar and
+    // tile sub-counters exactly as q2k folds q2kScalar/q2kTile.
+    std::atomic<uint64_t> q3k{0};
+    std::atomic<uint64_t> q2kScalar{0};
+    std::atomic<uint64_t> q2kTile{0};
+    std::atomic<uint64_t> q3kScalar{0};
+    std::atomic<uint64_t> q3kTile{0};
     std::atomic<uint64_t> otherMatmul{0}, otherNorm{0}, otherRope{0}, otherSwiGLU{0};
     std::atomic<uint64_t> otherAdd{0}, otherAttention{0}, otherArgmax{0}, otherGDN{0}, otherUnclassified{0};
     std::atomic<uint64_t> barriers{0}, d2d{0}, batchSubmits{0}, batchFlushes{0}, oneShotSubmits{0};
@@ -416,12 +423,14 @@ struct Kernel {
 enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL_DECODE, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_Q8_IN_PROJ, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_QWEN35_GDN_PREFILL_TILED, K_QWEN35_GDN_PREFILL_NORM, K_QWEN35_GDN_VERIFY_TILED, K_GLM_KDA_REREAD, K_GLM_KDA_WAVE32, K_Q4K_MATMUL, K_Q4K_MATMUL_WAVE32, K_Q4K_MATMUL_COOPMAT, K_Q6K_MATMUL, K_Q5K_MATMUL, K_Q3K_MATMUL, K_RMSNORM_Q4K_MATMUL2, K_SWIGLU_Q4K_MATMUL_ADD, K_Q2K_MATMUL, K_RMSNORM_Q2K_MATMUL2, K_QWEN35_SPLIT_QG_PANEL, K_QWEN35_PARTIAL_ROPE_PANEL, K_QWEN35_CAUSAL_ATTENTION_PANEL, K_ATTENTION_SPLIT_KV, K_SIGMOID_MUL, K_Q2K_MATVEC, K_RMSNORM_Q8_MATMUL2_COOP, K_IQ4XS_MATVEC, K_IQ3XXS_MATVEC, K_IQ2S_MATVEC, K_IQ3S_MATVEC, K_IQ2XXS_MATVEC, K_IQ2XS_MATVEC, K_IQ1S_MATVEC, K_V41_TAIL_ROPE_QK, K_V41_SHARED_ATTENTION, K_V41_INDEXER_SCORE, K_V41_MHC, K_V41_ROUTER_TOPK, K_V41_INDEX_SELECT, K_V41_Q2K_EMBED_GATHER, K_V41_EXACT_RMSNORM, K_V41_BF16_BOUNDARY, K_V41_LOGIT_SCALE, K_V41_BF16_CHECKED, K_V41_ROUTED_SWIGLU, K_V41_ENGRAM_GATE, K_V41_COMPRESSOR_POOL, K_V41_TAIL_ROPE_EXACT, K_V41_SCALE_EXACT, K_V41_ENGRAM_ROW_DECODE, K_V41_Q2K_MATVEC_ID, K_V41_Q3K_MATVEC_ID, K_V41_ROUTED_SWIGLU_ID, K_V41_ROUTED_PUBLISH_SUM, K_V41_SHARED_ATTENTION_FAST, K_V41_ROUTED_GATE_UP_SWIGLU_ID, K_V41_ROUTED_DOWN_SUM, K_V41_Q2K_TOKEN_PANEL, K_V41_Q3K_TOKEN_PANEL, K_V41_ROUTED_SWIGLU_PANEL_ROW, K_V41_ROUTED_DOWN_PANEL_ROW, K_V41_INDEX_SCALE_BF16, K_V41_ROUTED_SWIGLU_PANEL_CHUNK, K_V41_ROUTED_DOWN_PANEL_CHUNK, K_V41_Q2K_TOKEN_PAIR, K_MM_CM1_Q2K, K_MM_CM1_IQ2XXS, K_MM_CM1_IQ2XS, K_MM_CM1_IQ2S, K_MM_CM1_IQ3XXS, K_MM_CM1_IQ3S, K_MM_CM1_IQ1S, K_MM_CM1_IQ4XS, K_MM_CM1_Q4K, K_V41_F32_FINITE, K_QWEN35_VALUE_HEAD_TILE, K_V41_ROUTER_GATE_TOPK, K_V41_COMPRESSOR_RING, K_V41_SHARED_ATTENTION_SPLIT, K_QWEN35_GDN_Q8_IN_PROJ_PANEL, K_QWEN35_ATTN_POSTPROCESS, K_Q6K_MATMUL_PANEL, K_QWEN35_RESIDUAL_NORM, K_Q5K_MATMUL_PANEL, K_QWEN35_ATTN_QG, K_COUNT };
 Kernel g_kern[K_COUNT];
 
-// Every non-Q4_K/Q2_K kernel belongs to exactly one primary operation family. Fused
+// Every non-Q4_K/Q2_K/Q3_K kernel belongs to exactly one primary operation family. Fused
 // kernels follow their public operation prefix so these fields sum to `other`.
+// Q4_K/Q2_K/Q3_K kernels have dedicated buckets in dpDispatch; their case labels here are
+// unreachable defensive entries kept beside the other identity kernels.
 std::atomic<uint64_t>& dpOtherFamily(KId id) {
     switch (id) {
     case K_MATMUL: case K_MATMUL_ADD: case K_MATMUL_ARGMAX: case K_MATMUL_ARGMAX_BLOCKS:
-    case K_MATMUL2: case K_MATMUL3: case K_Q8_MATMUL: case K_Q8_MATMUL_DECODE: case K_Q8_MATMUL2: case K_Q8_MATMUL3: case K_Q6K_MATMUL: case K_Q6K_MATMUL_PANEL: case K_Q5K_MATMUL: case K_Q5K_MATMUL_PANEL: case K_Q3K_MATMUL: case K_V41_Q3K_MATVEC_ID: case K_V41_Q3K_TOKEN_PANEL:
+    case K_MATMUL2: case K_MATMUL3: case K_Q8_MATMUL: case K_Q8_MATMUL_DECODE: case K_Q8_MATMUL2: case K_Q8_MATMUL3: case K_Q6K_MATMUL: case K_Q6K_MATMUL_PANEL: case K_Q5K_MATMUL: case K_Q5K_MATMUL_PANEL:
     case K_IQ4XS_MATVEC: case K_IQ1S_MATVEC: case K_IQ2XS_MATVEC: case K_IQ2XXS_MATVEC: case K_IQ3S_MATVEC: case K_IQ2S_MATVEC: case K_IQ3XXS_MATVEC:
     case K_MM_CM1_Q2K: case K_MM_CM1_IQ2XXS: case K_MM_CM1_IQ2XS: case K_MM_CM1_IQ2S: case K_MM_CM1_IQ3XXS: case K_MM_CM1_IQ3S: case K_MM_CM1_IQ1S: case K_MM_CM1_IQ4XS: case K_MM_CM1_Q4K:
         return g_dp.otherMatmul;
@@ -450,7 +459,7 @@ std::atomic<uint64_t>& dpOtherFamily(KId id) {
     case K_V41_ROUTED_DOWN_PANEL_CHUNK: case K_V41_ROUTED_DOWN_PANEL_ROW: case K_V41_INDEX_SCALE_BF16: case K_V41_MHC: case K_V41_Q2K_EMBED_GATHER: case K_V41_BF16_BOUNDARY: case K_V41_LOGIT_SCALE: case K_V41_BF16_CHECKED:
     case K_V41_ENGRAM_GATE: case K_V41_COMPRESSOR_POOL: case K_V41_SCALE_EXACT: case K_V41_ENGRAM_ROW_DECODE: case K_V41_ROUTED_PUBLISH_SUM:
     case K_V41_COMPRESSOR_RING:
-    case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q4K_MATMUL_COOPMAT: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_Q2K_MATVEC: case K_V41_Q2K_MATVEC_ID: case K_V41_Q2K_TOKEN_PANEL: case K_V41_Q2K_TOKEN_PAIR: case K_COUNT:
+    case K_QWEN35_SPLIT_QG_PANEL: case K_Q4K_MATMUL: case K_Q4K_MATMUL_WAVE32: case K_Q4K_MATMUL_COOPMAT: case K_Q2K_MATMUL: case K_RMSNORM_Q2K_MATMUL2: case K_Q2K_MATVEC: case K_V41_Q2K_MATVEC_ID: case K_V41_Q2K_TOKEN_PANEL: case K_V41_Q2K_TOKEN_PAIR: case K_Q3K_MATMUL: case K_V41_Q3K_MATVEC_ID: case K_V41_Q3K_TOKEN_PANEL: case K_COUNT:
         return g_dp.otherUnclassified;
     }
     return g_dp.otherUnclassified;
@@ -463,8 +472,14 @@ static inline void dpDispatch(const Kernel& k) {
     const KId id = static_cast<KId>(&k - g_kern);
     if (id == K_Q4K_MATMUL || id == K_Q4K_MATMUL_WAVE32 || id == K_Q4K_MATMUL_COOPMAT) {
         g_dp.q4k.fetch_add(1, std::memory_order_relaxed);
-    } else if (id == K_Q2K_MATMUL || id == K_RMSNORM_Q2K_MATMUL2 || id == K_Q2K_MATVEC || id == K_V41_Q2K_MATVEC_ID || id == K_V41_Q2K_TOKEN_PANEL || id == K_V41_Q2K_TOKEN_PAIR) {
-        g_dp.q2k.fetch_add(1, std::memory_order_relaxed);
+    } else if (id == K_Q2K_MATMUL || id == K_RMSNORM_Q2K_MATMUL2 || id == K_Q2K_MATVEC || id == K_V41_Q2K_MATVEC_ID) {
+        g_dp.q2kScalar.fetch_add(1, std::memory_order_relaxed); g_dp.q2k.fetch_add(1, std::memory_order_relaxed);
+    } else if (id == K_V41_Q2K_TOKEN_PANEL || id == K_V41_Q2K_TOKEN_PAIR) {
+        g_dp.q2kTile.fetch_add(1, std::memory_order_relaxed); g_dp.q2k.fetch_add(1, std::memory_order_relaxed);
+    } else if (id == K_Q3K_MATMUL || id == K_V41_Q3K_MATVEC_ID) {
+        g_dp.q3kScalar.fetch_add(1, std::memory_order_relaxed); g_dp.q3k.fetch_add(1, std::memory_order_relaxed);
+    } else if (id == K_V41_Q3K_TOKEN_PANEL) {
+        g_dp.q3kTile.fetch_add(1, std::memory_order_relaxed); g_dp.q3k.fetch_add(1, std::memory_order_relaxed);
     } else {
         g_dp.other.fetch_add(1, std::memory_order_relaxed);
         dpOtherFamily(id).fetch_add(1, std::memory_order_relaxed);
@@ -472,8 +487,12 @@ static inline void dpDispatch(const Kernel& k) {
     uint64_t n = g_dp.compute.fetch_add(1, std::memory_order_relaxed) + 1;
     if ((n & 255) == 0) {
         fprintf(stderr,
-            "fak-vulkan profile compute=%llu q4k=%llu other=%llu other_ops=matmul:%llu,norm:%llu,rope:%llu,swiglu:%llu,add:%llu,attention:%llu,argmax:%llu,gdn:%llu,unclassified:%llu barriers=%llu d2d=%llu batch_submits=%llu batch_flushes=%llu one_shot_submits=%llu one_shot_calls=compute:%llu,h2d:%llu,d2h:%llu,d2d:%llu h2d_bytes=%llu d2h_bytes=%llu\n",
-            (unsigned long long)n, (unsigned long long)g_dp.q4k.load(), (unsigned long long)g_dp.other.load(),
+            "fak-vulkan profile compute=%llu q4k=%llu q2k=%llu q2k_scalar=%llu q2k_tile=%llu q3k=%llu q3k_scalar=%llu q3k_tile=%llu other=%llu other_ops=matmul:%llu,norm:%llu,rope:%llu,swiglu:%llu,add:%llu,attention:%llu,argmax:%llu,gdn:%llu,unclassified:%llu barriers=%llu d2d=%llu batch_submits=%llu batch_flushes=%llu one_shot_submits=%llu one_shot_calls=compute:%llu,h2d:%llu,d2h:%llu,d2d:%llu h2d_bytes=%llu d2h_bytes=%llu\n",
+            (unsigned long long)n, (unsigned long long)g_dp.q4k.load(),
+            (unsigned long long)g_dp.q2k.load(), (unsigned long long)g_dp.q2kScalar.load(),
+            (unsigned long long)g_dp.q2kTile.load(), (unsigned long long)g_dp.q3k.load(),
+            (unsigned long long)g_dp.q3kScalar.load(), (unsigned long long)g_dp.q3kTile.load(),
+            (unsigned long long)g_dp.other.load(),
             (unsigned long long)g_dp.otherMatmul.load(), (unsigned long long)g_dp.otherNorm.load(),
             (unsigned long long)g_dp.otherRope.load(), (unsigned long long)g_dp.otherSwiGLU.load(),
             (unsigned long long)g_dp.otherAdd.load(), (unsigned long long)g_dp.otherAttention.load(),
@@ -9065,6 +9084,11 @@ extern "C" void fvk_dispatch_profile_snapshot(fvk_dispatch_profile* out) {
     out->compute_dispatches = g_dp.compute.load();
     out->q4k_matmul_dispatches = g_dp.q4k.load();
     out->q2k_matmul_dispatches = g_dp.q2k.load();
+    out->q3k_matmul_dispatches = g_dp.q3k.load();
+    out->q2k_scalar_dispatches = g_dp.q2kScalar.load();
+    out->q2k_tile_dispatches = g_dp.q2kTile.load();
+    out->q3k_scalar_dispatches = g_dp.q3kScalar.load();
+    out->q3k_tile_dispatches = g_dp.q3kTile.load();
     out->other_compute_dispatches = g_dp.other.load();
     out->compute_barriers = g_dp.barriers.load();
     out->d2d_copies = g_dp.d2d.load();
@@ -9121,7 +9145,8 @@ extern "C" int fvk_ts_snapshot(fvk_ts_totals* tot, fvk_ts_row* rows, int cap) {
     return (int)g_tsAgg.size();
 }
 extern "C" void fvk_dispatch_profile_reset(void) {
-    g_dp.compute.store(0); g_dp.q4k.store(0); g_dp.q2k.store(0); g_dp.other.store(0);
+    g_dp.compute.store(0); g_dp.q4k.store(0); g_dp.q2k.store(0); g_dp.q3k.store(0); g_dp.other.store(0);
+    g_dp.q2kScalar.store(0); g_dp.q2kTile.store(0); g_dp.q3kScalar.store(0); g_dp.q3kTile.store(0);
     g_dp.barriers.store(0); g_dp.d2d.store(0); g_dp.batchSubmits.store(0);
     g_dp.batchFlushes.store(0); g_dp.oneShotSubmits.store(0);
     g_dp.otherMatmul.store(0); g_dp.otherNorm.store(0); g_dp.otherRope.store(0);

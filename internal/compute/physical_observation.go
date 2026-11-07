@@ -17,9 +17,23 @@ type BackendRuntimeIdentity struct {
 
 // BackendCounterSnapshot contains cumulative backend-owned counters. Consumers
 // must use BackendExecutionDelta rather than publishing these process totals.
+//
+// The Q2_K/Q3_K kernel-identity counters (Ref #13860) are the issued dispatch
+// counts of each format: Q2KMatmulDispatches/Q3KMatmulDispatches are the format
+// totals, and each folds exactly into its scalar (historical per-token
+// scalar/batched path) and tile (V4.1 token panel/pair) sub-counters. Every one
+// is a sub-scope of OtherDispatches (the non-Q4_K compute remainder);
+// validateBackendDispatchCounterScope enforces that aggregate scope. Backends
+// that do not track kernel identity report zeros.
 type BackendCounterSnapshot struct {
 	ComputeDispatches     uint64
 	Q4KMatmulDispatches   uint64
+	Q2KMatmulDispatches   uint64
+	Q3KMatmulDispatches   uint64
+	Q2KScalarDispatches   uint64
+	Q2KTileDispatches     uint64
+	Q3KScalarDispatches   uint64
+	Q3KTileDispatches     uint64
 	OtherDispatches       uint64
 	DispatchSubmits       uint64
 	H2DBytes              uint64
@@ -171,6 +185,9 @@ func BackendExecutionDelta(before, after BackendExecutionSnapshot) (BackendExecu
 	if err != nil {
 		return BackendExecutionObservation{}, err
 	}
+	if err := validateBackendDispatchCounterScope(delta); err != nil {
+		return BackendExecutionObservation{}, fmt.Errorf("compute: invalid backend dispatch counter delta: %w", err)
+	}
 	attribution, err := subtractBackendH2DAttribution(before.H2DAttribution, after.H2DAttribution)
 	if err != nil {
 		return BackendExecutionObservation{}, err
@@ -200,6 +217,38 @@ func BackendExecutionDelta(before, after BackendExecutionSnapshot) (BackendExecu
 		TransferCountersObserved: after.TransferCountersObserved,
 		H2DAttribution:           attribution, H2DAttributionObserved: after.H2DAttributionObserved,
 	}, nil
+}
+
+// validateBackendDispatchCounterScope checks the explicit aggregate scope of
+// the issued Q2_K/Q3_K kernel-identity counters (Ref #13860): each format's
+// scalar and tile sub-counters fold exactly into its format total, and both
+// format totals fit inside OtherDispatches, the non-Q4_K compute remainder.
+// All-zero counters (a backend that does not track kernel identity, or a
+// profile-off read) are in scope: zeros never mean no work without the
+// backend's own live gate.
+func validateBackendDispatchCounterScope(counters BackendCounterSnapshot) error {
+	for _, scope := range []struct {
+		name   string
+		total  uint64
+		scalar uint64
+		tile   uint64
+	}{
+		{name: "Q2_K", total: counters.Q2KMatmulDispatches, scalar: counters.Q2KScalarDispatches, tile: counters.Q2KTileDispatches},
+		{name: "Q3_K", total: counters.Q3KMatmulDispatches, scalar: counters.Q3KScalarDispatches, tile: counters.Q3KTileDispatches},
+	} {
+		// Overflow-safe fold: scalar <= total and tile == total - scalar.
+		if scope.scalar > scope.total || scope.tile != scope.total-scope.scalar {
+			return fmt.Errorf("compute: %s scalar (%d) and tile (%d) dispatch counters do not fold into the %s total (%d)",
+				scope.name, scope.scalar, scope.tile, scope.name, scope.total)
+		}
+	}
+	// Overflow-safe sub-scope: Q2_K + Q3_K <= OtherDispatches.
+	if counters.Q2KMatmulDispatches > counters.OtherDispatches ||
+		counters.Q3KMatmulDispatches > counters.OtherDispatches-counters.Q2KMatmulDispatches {
+		return fmt.Errorf("compute: Q2_K (%d) and Q3_K (%d) dispatch counters exceed the non-Q4_K compute total (%d)",
+			counters.Q2KMatmulDispatches, counters.Q3KMatmulDispatches, counters.OtherDispatches)
+	}
+	return nil
 }
 
 func validateBackendTransferCounterPairs(counters BackendCounterSnapshot) error {
@@ -254,14 +303,18 @@ func validateBackendRuntimeIdentity(identity BackendRuntimeIdentity, backendName
 
 func subtractBackendCounters(before, after BackendCounterSnapshot) (BackendCounterSnapshot, error) {
 	b := []uint64{
-		before.ComputeDispatches, before.Q4KMatmulDispatches, before.OtherDispatches, before.DispatchSubmits,
+		before.ComputeDispatches, before.Q4KMatmulDispatches, before.Q2KMatmulDispatches, before.Q3KMatmulDispatches,
+		before.Q2KScalarDispatches, before.Q2KTileDispatches, before.Q3KScalarDispatches, before.Q3KTileDispatches,
+		before.OtherDispatches, before.DispatchSubmits,
 		before.H2DBytes, before.H2DCount, before.D2HBytes, before.D2HCount, before.D2DCopies, before.D2DBytes,
 		before.Q4KStageCalls, before.Q4KStageBytes,
 		before.Fallbacks, before.TensorHomeHits, before.TensorHomeAdmissions, before.TensorHomeBypasses,
 		before.TensorHomeCopiedBytes,
 	}
 	a := []uint64{
-		after.ComputeDispatches, after.Q4KMatmulDispatches, after.OtherDispatches, after.DispatchSubmits,
+		after.ComputeDispatches, after.Q4KMatmulDispatches, after.Q2KMatmulDispatches, after.Q3KMatmulDispatches,
+		after.Q2KScalarDispatches, after.Q2KTileDispatches, after.Q3KScalarDispatches, after.Q3KTileDispatches,
+		after.OtherDispatches, after.DispatchSubmits,
 		after.H2DBytes, after.H2DCount, after.D2HBytes, after.D2HCount, after.D2DCopies, after.D2DBytes,
 		after.Q4KStageCalls, after.Q4KStageBytes,
 		after.Fallbacks, after.TensorHomeHits, after.TensorHomeAdmissions, after.TensorHomeBypasses,
@@ -274,10 +327,12 @@ func subtractBackendCounters(before, after BackendCounterSnapshot) (BackendCount
 		a[i] -= b[i]
 	}
 	return BackendCounterSnapshot{
-		ComputeDispatches: a[0], Q4KMatmulDispatches: a[1], OtherDispatches: a[2], DispatchSubmits: a[3],
-		H2DBytes: a[4], H2DCount: a[5], D2HBytes: a[6], D2HCount: a[7], D2DCopies: a[8], D2DBytes: a[9],
-		Q4KStageCalls: a[10], Q4KStageBytes: a[11], Fallbacks: a[12], TensorHomeHits: a[13],
-		TensorHomeAdmissions: a[14], TensorHomeBypasses: a[15], TensorHomeCopiedBytes: a[16],
+		ComputeDispatches: a[0], Q4KMatmulDispatches: a[1], Q2KMatmulDispatches: a[2], Q3KMatmulDispatches: a[3],
+		Q2KScalarDispatches: a[4], Q2KTileDispatches: a[5], Q3KScalarDispatches: a[6], Q3KTileDispatches: a[7],
+		OtherDispatches: a[8], DispatchSubmits: a[9],
+		H2DBytes: a[10], H2DCount: a[11], D2HBytes: a[12], D2HCount: a[13], D2DCopies: a[14], D2DBytes: a[15],
+		Q4KStageCalls: a[16], Q4KStageBytes: a[17], Fallbacks: a[18], TensorHomeHits: a[19],
+		TensorHomeAdmissions: a[20], TensorHomeBypasses: a[21], TensorHomeCopiedBytes: a[22],
 	}, nil
 }
 

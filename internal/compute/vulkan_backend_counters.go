@@ -29,8 +29,11 @@ func (v *vulkanBackend) BackendCounters() (BackendCounterSnapshot, error) {
 			return BackendCounterSnapshot{}, fmt.Errorf("compute: Vulkan backend counter is negative")
 		}
 	}
-	return BackendCounterSnapshot{
+	counters := BackendCounterSnapshot{
 		ComputeDispatches: dispatch.ComputeDispatches, Q4KMatmulDispatches: dispatch.Q4KMatmulDispatches,
+		Q2KMatmulDispatches: dispatch.Q2KMatmulDispatches, Q3KMatmulDispatches: dispatch.Q3KMatmulDispatches,
+		Q2KScalarDispatches: dispatch.Q2KScalarDispatches, Q2KTileDispatches: dispatch.Q2KTileDispatches,
+		Q3KScalarDispatches: dispatch.Q3KScalarDispatches, Q3KTileDispatches: dispatch.Q3KTileDispatches,
 		OtherDispatches: dispatch.ComputeDispatches - dispatch.Q4KMatmulDispatches,
 		DispatchSubmits: dispatch.BatchSubmits + dispatch.OneShotSubmits,
 		H2DBytes:        uint64(h2dBytes), H2DCount: uint64(h2dCount),
@@ -39,7 +42,11 @@ func (v *vulkanBackend) BackendCounters() (BackendCounterSnapshot, error) {
 		Q4KStageCalls: uint64(goSide[0]), Q4KStageBytes: uint64(goSide[1]), Fallbacks: uint64(goSide[2]),
 		TensorHomeHits: uint64(goSide[3]), TensorHomeAdmissions: uint64(goSide[4]),
 		TensorHomeBypasses: uint64(goSide[5]), TensorHomeCopiedBytes: uint64(goSide[6]),
-	}, nil
+	}
+	if err := validateBackendDispatchCounterScope(counters); err != nil {
+		return BackendCounterSnapshot{}, fmt.Errorf("compute: Vulkan %w", err)
+	}
+	return counters, nil
 }
 
 // DispatchCountsLive reports the native profiler's startup decision: without

@@ -1096,6 +1096,14 @@ typedef struct fvk_dispatch_profile {
     uint64_t compute_dispatches;
     uint64_t q4k_matmul_dispatches;
     uint64_t q2k_matmul_dispatches;
+    /* Issued Q2_K/Q3_K kernel identity (Ref #13860): the format total plus its
+     * scalar (historical per-token scalar/batched path) and tile (V4.1 token
+     * panel/pair) sub-counters. Sub-scopes of other_compute_dispatches. */
+    uint64_t q3k_matmul_dispatches;
+    uint64_t q2k_scalar_dispatches;
+    uint64_t q2k_tile_dispatches;
+    uint64_t q3k_scalar_dispatches;
+    uint64_t q3k_tile_dispatches;
     uint64_t other_compute_dispatches;
     uint64_t compute_barriers;
     uint64_t d2d_copies;

@@ -197,7 +197,7 @@ func TestVulkanV41TokenPanelNativeParity(t *testing.T) {
 								want = append(want, values...)
 							}()
 						}
-						v41TokenPanelNativeDispatches(t, dtype, beforeScalar, v.VulkanDebugDispatchProfileSnapshot(), uint64(rows))
+						v41TokenPanelNativeDispatches(t, dtype, false, beforeScalar, v.VulkanDebugDispatchProfileSnapshot(), uint64(rows))
 						got := v41TokenPanelNativeRead(t, v, dtype, w, x, rows, rows >= 8)
 						v41TokenPanelNativeEqual(t, got, want)
 						assertBitIdentical(t, "input remains unchanged", values, v.Read(x))
@@ -209,17 +209,33 @@ func TestVulkanV41TokenPanelNativeParity(t *testing.T) {
 	}
 }
 
-func v41TokenPanelNativeDispatches(t *testing.T, dtype Dtype, before, after VulkanDispatchProfile, want uint64) {
+func v41TokenPanelNativeDispatches(t *testing.T, dtype Dtype, tile bool, before, after VulkanDispatchProfile, want uint64) {
 	t.Helper()
 	compute := after.ComputeDispatches - before.ComputeDispatches
 	q2 := after.Q2KMatmulDispatches - before.Q2KMatmulDispatches
+	q2Scalar := after.Q2KScalarDispatches - before.Q2KScalarDispatches
+	q2Tile := after.Q2KTileDispatches - before.Q2KTileDispatches
+	q3 := after.Q3KMatmulDispatches - before.Q3KMatmulDispatches
+	q3Scalar := after.Q3KScalarDispatches - before.Q3KScalarDispatches
+	q3Tile := after.Q3KTileDispatches - before.Q3KTileDispatches
 	q4 := after.Q4KMatmulDispatches - before.Q4KMatmulDispatches
 	other := after.OtherComputeDispatches - before.OtherComputeDispatches
 	matmul := after.OtherMatmulDispatches - before.OtherMatmulDispatches
-	if compute != want || q4 != 0 ||
-		(dtype == Q2_K && (q2 != want || other != 0 || matmul != 0)) ||
-		(dtype == Q3_K && (q2 != 0 || other != want || matmul != want)) {
-		t.Fatalf("UNQUALIFIED: dtype=%s want %d native matmul dispatches, got compute=%d q2=%d q4=%d other=%d other_matmul=%d", dtype, want, compute, q2, q4, other, matmul)
+	// Ref #13860: the Q3_K scalar path (q3k_matmul, routed id) and the Q3_K tile
+	// panel now carry their own issued counters instead of landing in other.
+	split, format, tileSplit := q2Scalar, q2, q2Tile
+	if dtype == Q3_K {
+		split, format, tileSplit = q3Scalar, q3, q3Tile
+	}
+	wantSplit, wantTile := want, uint64(0)
+	if tile {
+		wantSplit, wantTile = 0, want
+	}
+	if compute != want || q4 != 0 || other != 0 || matmul != 0 ||
+		(dtype == Q2_K && (q2 != want || q3 != 0)) ||
+		(dtype == Q3_K && (q3 != want || q2 != 0)) ||
+		split != wantSplit || tileSplit != wantTile || format != wantSplit+wantTile {
+		t.Fatalf("UNQUALIFIED: dtype=%s tile=%t want %d native matmul dispatches, got compute=%d q2=%d(q2_scalar=%d,q2_tile=%d) q3=%d(q3_scalar=%d,q3_tile=%d) q4=%d other=%d other_matmul=%d", dtype, tile, want, compute, q2, q2Scalar, q2Tile, q3, q3Scalar, q3Tile, q4, other, matmul)
 	}
 }
 
@@ -260,7 +276,7 @@ func v41TokenPanelNativeRead(t *testing.T, v *vulkanBackend, dtype Dtype, w, x T
 	if err != nil || delta.Counters.ComputeDispatches != 1 || delta.Counters.H2DCount != 0 || delta.Counters.H2DBytes != 0 || delta.Counters.D2HCount != 0 || delta.Counters.D2HBytes != 0 || delta.Counters.D2DCopies != 0 || delta.Counters.D2DBytes != 0 || delta.Counters.Fallbacks != 0 {
 		t.Fatalf("tile did not issue exactly one resident native dispatch: %+v %v", delta.Counters, err)
 	}
-	v41TokenPanelNativeDispatches(t, dtype, beforeDispatch, v.VulkanDebugDispatchProfileSnapshot(), 1)
+	v41TokenPanelNativeDispatches(t, dtype, true, beforeDispatch, v.VulkanDebugDispatchProfileSnapshot(), 1)
 	return append([]float32(nil), v.Read(output)...)
 }
 
@@ -459,7 +475,7 @@ func TestVulkanV41TokenPanelNativeQ3Only(t *testing.T) {
 					want = append(want, v.Read(dy)...)
 				}()
 			}
-			v41TokenPanelNativeDispatches(t, Q3_K, beforeScalar, v.VulkanDebugDispatchProfileSnapshot(), rows)
+			v41TokenPanelNativeDispatches(t, Q3_K, false, beforeScalar, v.VulkanDebugDispatchProfileSnapshot(), rows)
 			got := v41TokenPanelNativeRead(t, v, Q3_K, w, x, rows, false)
 			v41TokenPanelNativeEqual(t, got, want)
 			t.Run("disabled-q3", func(t *testing.T) {
