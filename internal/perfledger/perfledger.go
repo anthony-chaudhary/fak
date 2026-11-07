@@ -80,8 +80,8 @@ type Record struct {
 	PrefillTPS           float64        `json:"prefill_tps,omitempty"`
 	DecodeTPS            float64        `json:"decode_tps,omitempty"`
 	NativeTiming         *NativeTiming  `json:"native_timing,omitempty"`
-	// PrefillRoute is the request's whole-sequence prefill route decision when the
-	// native engine made one; absent on a proxied, mock or non-Qwen turn.
+	// PrefillRoute preserves observed and unobserved executed native prefill
+	// calls. Absent means no aggregate with executed calls was supplied.
 	PrefillRoute *PrefillRoute `json:"prefill_route,omitempty"`
 
 	PartialNativePhases *PartialNativePhases `json:"partial_native_phases,omitempty"`
@@ -208,17 +208,22 @@ type PartialNativePhases struct {
 	DecodeObservations  uint64   `json:"decode_observations,omitempty"`
 }
 
-// PrefillRoute is one request's whole-sequence prefill route decision, when the
-// native engine made one. EffectivePath is the route that actually ran; on a
-// decline it is the scalar token-replay fallback and DeclineReason names why, in
-// the same stable vocabulary the model receipt carries. Absent means no eligible
-// decision was observed, never a measured native route.
+// PrefillRoute preserves the request aggregate's call counts, completeness and
+// route qualification. Paths, decline reason and fallback flag describe only
+// its representative observed status, not every call in a mixed request.
+// An executed but wholly unobserved aggregate has no representative strings.
+// Qualification summarizes route evidence, not numerical or hardware parity.
+// Historical rows without counts decode with zero calls: their completeness is
+// unmeasured, and a historical qualification flag is not upgraded by this schema.
 type PrefillRoute struct {
+	PrefillCalls                int    `json:"prefill_calls"`
+	ObservedCalls               int    `json:"observed_calls"`
+	Complete                    bool   `json:"complete"`
 	RequestedPath               string `json:"requested_path,omitempty"`
 	EffectivePath               string `json:"effective_path,omitempty"`
 	DeclineReason               string `json:"decline_reason,omitempty"`
 	FallbackActive              bool   `json:"fallback_active,omitempty"`
-	NativePerformanceQualifying bool   `json:"native_performance_qualifying,omitempty"`
+	NativePerformanceQualifying bool   `json:"native_performance_qualifying"`
 }
 
 // NativeTiming is the engine-measured phase split for a native request. It is

@@ -4,18 +4,24 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // Qwen38MTPBatchedReceiptSchema is the canonical schema for batched MTP verification receipts.
 const Qwen38MTPBatchedReceiptSchema = "fak/qwen38-mtp-batched-receipt/v1"
 
-// Qwen38MTPBatchedReceipt records the outcome, token disposition, and end-to-end latency
-// accounting of a single-operation target verification for Qwen3.8 MTP blocks.
+// Qwen38MTPBatchedReceipt records verification and commit work separately.
+// OneOperation concerns verification, not accepted-prefix replay or end-to-end
+// speedup. FullTargetReplaySteps and RecurrentRepairTokens describe commit work.
 type Qwen38MTPBatchedReceipt struct {
 	SchemaVersion                string                    `json:"schema_version"`
 	Engine                       Qwen38MTPEngine           `json:"engine"`
 	FallbackEngine               Qwen38MTPEngine           `json:"fallback_engine,omitempty"`
 	OneOperation                 bool                      `json:"one_operation"`
+	TargetVerificationPath       string                    `json:"target_verification_path"`
+	FullTargetReplaySteps        int                       `json:"full_target_replay_steps"`
+	RecurrentRepairTokens        int                       `json:"recurrent_repair_tokens"`
 	TargetVerificationOperations int                       `json:"target_verification_operations"`
 	TargetDecodeSteps            int                       `json:"target_decode_steps"`
 	DraftTokens                  []int                     `json:"draft_tokens"`
@@ -81,14 +87,14 @@ func (v *Qwen38BatchedVerifier) VerifyBlock(draftTokens []int, boundaryLogits []
 	return v.VerifyBlockWithDraftTime(draftTokens, boundaryLogits, 0)
 }
 
-// VerifyBlockWithDraftTime evaluates draft tokens in a single batched target forward operation,
-// incorporating the measured draft time into total wall time accounting.
-func (v *Qwen38BatchedVerifier) VerifyBlockWithDraftTime(draftTokens []int, boundaryLogits []float32, draftTime time.Duration) (*Qwen38MTPBatchedReceipt, error) {
+// VerifyBlockWithDraftTime verifies and commits one accepted prefix through the
+// existing target transaction, retaining explicit ordinary native downgrade.
+// The caller must own Target exclusively until this synchronous method returns.
+// Inclusive wall time includes setup, commit and the supplied measured draft time.
+func (v *Qwen38BatchedVerifier) VerifyBlockWithDraftTime(draftTokens []int, boundaryLogits []float32, draftTime time.Duration) (result *Qwen38MTPBatchedReceipt, err error) {
 	if v == nil || v.Target == nil || v.Target.M == nil {
 		return nil, errors.New("model: qwen3.8 batched verifier requires active target session")
 	}
-
-	setupStart := time.Now()
 	if len(draftTokens) == 0 {
 		return &Qwen38MTPBatchedReceipt{
 			SchemaVersion:                Qwen38MTPBatchedReceiptSchema,
@@ -100,169 +106,250 @@ func (v *Qwen38BatchedVerifier) VerifyBlockWithDraftTime(draftTokens []int, boun
 		}, nil
 	}
 
-	// Capture pre-round verified snapshot for exact rollback.
-	snap, err := v.Target.PrefixSnapshot()
+	started := time.Now()
+	tx, err := beginQwen35MTPTargetTransaction(v.Target, boundaryLogits)
 	if err != nil {
-		return nil, fmt.Errorf("model: snapshot target before batched verification: %w", err)
+		return nil, err
 	}
-	defer snap.Close()
-	setupDuration := time.Since(setupStart)
+	// Keep a rollback owner beyond tx.finish: a resident release callback can
+	// fail after Commit has published accepted state and retired its snapshot.
+	// An ordinary error return permits the persistent caller to retry scalar
+	// decode, so it must always refer to the exact pre-round target state.
+	var rollback *PrefixSnapshot
+	committed, returned := false, false
+	defer func() {
+		retirementStarted := time.Now()
+		retireQwen38BatchedRound(tx, rollback, committed, returned, &result, &err)
+		if result != nil && err == nil {
+			result.Accounting.Synchronization.Nanoseconds += time.Since(retirementStarted).Nanoseconds()
+			result.Accounting.Synchronization.Measured = true
+			result.SyncTimeNS = time.Duration(result.Accounting.Synchronization.Nanoseconds)
+			result.TotalWallTimeNS = draftTime + time.Since(started)
+		}
+	}()
+	setupStarted := time.Now()
+	rollback, err = tx.snapshot.Clone()
+	if err != nil {
+		returned = true
+		return nil, err
+	}
+	tx.receipt.Accounting.Setup.Nanoseconds += time.Since(setupStarted).Nanoseconds()
+	tx.receipt.Accounting.KnownMemoryBytes += rollback.ResidentBytes()
+	result, err = func() (*Qwen38MTPBatchedReceipt, error) {
 
-	// Single-operation target forward verification.
-	verifyStart := time.Now()
-	rows, _, vErr := v.Target.VerifyForwardOneOperation(draftTokens, boundaryLogits)
-
-	isOneOp := true
-	targetOps := 1
-	targetSteps := 0
-	fallbackEngine := Qwen38MTPEngine("")
-	downgradeReason := Qwen38MTPDowngradeReason("")
-
-	if vErr != nil {
-		// Clean fail-closed downgrade to ordinary fak-native target decode.
-		// Never delegates to foreign runtimes (llama.cpp).
-		isOneOp = false
-		targetOps = 0
-		targetSteps = len(draftTokens)
-		fallbackEngine = Qwen38EngineTargetDecode
-
-		var dgErr *TargetVerificationDowngradeError
-		if errors.As(vErr, &dgErr) {
-			downgradeReason = Qwen38MTPDowngradeReason(dgErr.Reason)
-		} else {
-			downgradeReason = Qwen38MTPAttemptFailed
+		// Preserve the existing ordinary-model verifier. It mutates live state only
+		// on its actual batched path; the cacheless path must never earn adoption.
+		// A device with no raw-hidden panel capability keeps scalar HAL fallback,
+		// which captures raw residuals. An advertised but wrong identity is still
+		// refused by the canonical transaction rather than treated as absence.
+		legacy := !v.Target.M.Cfg.IsQwen35Hybrid()
+		if v.Target.captureTargetHidden && qwen35DevicePanelAdvertised(v.Target) {
+			_, rawHiddenDeclared := v.Target.Backend.(compute.Qwen35SequenceRawHiddenBackend)
+			legacy = legacy || !rawHiddenDeclared
+		}
+		if legacy {
+			tx.verify = func(draft []int) ([][]float32, TargetVerificationReceipt, error) {
+				if !v.Target.M.Cfg.IsQwen35Hybrid() && v.Target.captureTargetHidden {
+					// Generic batched verification does not retain raw hidden rows.
+					// Ordinary Step does; decline before any panel mutation.
+					return nil, TargetVerificationReceipt{
+						Schema: targetVerificationReceiptSchema, Engine: targetVerificationEngine,
+						Path: targetVerificationDecodePath, DraftTokens: len(draft),
+					}, targetVerificationDowngrade("generic batched verification cannot preserve raw target-hidden history")
+				}
+				// Verify already owns the execution domain. Reentering the public
+				// acquiring method here would deadlock an execution-owned backend.
+				rows, receipt, verifyErr := v.Target.verifyForwardOneOperation(draft, tx.beforeLogits, nil)
+				tx.verifiedLive = verifyErr == nil && receipt.Path == targetVerificationBatchedPath
+				return rows, receipt, verifyErr
+			}
+		}
+		rows, err := tx.Verify(draftTokens)
+		if err != nil {
+			return nil, fmt.Errorf("model: batched MTP target verification: %w", err)
 		}
 
-		// Restore pre-round snapshot before sequential step decode.
-		clone, cErr := snap.Clone()
-		if cErr != nil {
-			return nil, fmt.Errorf("model: clone pre-round snapshot for downgrade: %w", cErr)
+		rejectionStart := time.Now()
+		if len(rows) != len(draftTokens) {
+			return nil, errors.New("model: batched MTP verification returned an incomplete draft panel")
 		}
-		if rErr := clone.Restore(v.Target); rErr != nil {
-			clone.Close()
-			return nil, fmt.Errorf("model: restore pre-round snapshot for downgrade: %w", rErr)
+		for _, row := range rows {
+			if len(row) != v.Target.M.Cfg.VocabSize {
+				return nil, errors.New("model: batched MTP verification returned malformed logits")
+			}
 		}
-
-		rows = v.Target.verifyForwardSequential(draftTokens)
-	}
-	verifyDuration := time.Since(verifyStart)
-	if verifyDuration == 0 {
-		verifyDuration = 1 * time.Nanosecond
-	}
-
-	// Compute acceptance count: all matching tokens up to the first divergence.
-	rejectionStart := time.Now()
-	accepted := 0
-	if len(boundaryLogits) > 0 && len(draftTokens) > 0 {
-		target0 := argmaxF32(boundaryLogits)
-		if draftTokens[0] == target0 {
+		accepted := 0
+		if len(boundaryLogits) > 0 && draftTokens[0] == argmaxF32(boundaryLogits) {
 			accepted = 1
 			for i := 1; i < len(draftTokens); i++ {
-				if i-1 < len(rows) {
-					targetI := argmaxF32(rows[i-1])
-					if draftTokens[i] == targetI {
-						accepted++
-					} else {
-						break
-					}
+				if draftTokens[i] != argmaxF32(rows[i-1]) {
+					break
 				}
+				accepted++
 			}
 		}
-	}
-	rejected := len(draftTokens) - accepted
-	rejectionDuration := time.Since(rejectionStart)
-
-	// Handle atomic commit or rollback of target state.
-	var rollbackDuration time.Duration
-	var syncDuration time.Duration
-	var lastLogits []float32
-	bonusToken := -1
-
-	if accepted == len(draftTokens) {
-		// Full accept: advance/commit all draft tokens into target session.
-		syncStart := time.Now()
-		if isOneOp {
-			// Cacheless operation didn't mutate live target; step accepted prefix.
-			for _, tok := range draftTokens {
-				lastLogits = v.Target.Step(tok)
-			}
-		} else {
-			// Sequential decode already stepped all draft tokens.
-			if len(rows) > 0 {
-				lastLogits = rows[len(rows)-1]
-			}
-		}
-		syncDuration = time.Since(syncStart)
-
-		if len(rows) > 0 && len(rows[len(rows)-1]) > 0 {
+		rejection := measuredSpeculativeCost(rejectionStart)
+		bonusToken := -1
+		if accepted == len(draftTokens) {
 			bonusToken = argmaxF32(rows[len(rows)-1])
+			// The canonical ordinary fallback also advances the complete live
+			// target. Adopt only its proven full prefix, avoiding a second scalar
+			// replay. Partial/zero acceptance still uses transaction restoration.
+			verified := tx.VerificationReceipt()
+			if !tx.verifiedLive && !verified.OneOperation && verified.Path == targetVerificationDecodePath && verified.TargetDecodeSteps == len(draftTokens) {
+				tx.verifiedLive = true
+				tx.lastLogits = append([]float32(nil), rows[len(rows)-1]...)
+				tx.receipt.Accounting.KnownMemoryBytes += int64(len(tx.lastLogits)) * 4
+			}
 		}
-	} else if accepted == 0 {
-		// Total rejection: restore exact pre-round snapshot if mutated.
-		rollbackStart := time.Now()
-		if !isOneOp {
-			clone, _ := snap.Clone()
-			_ = clone.Restore(v.Target)
+		lastLogits, err := tx.Commit(accepted)
+		if err != nil {
+			return nil, fmt.Errorf("model: batched MTP target commit: %w", err)
 		}
-		rollbackDuration = time.Since(rollbackStart)
-		if rollbackDuration == 0 {
-			rollbackDuration = 1 * time.Nanosecond
+		committed = true
+		verified := tx.VerificationReceipt()
+		accounting := verified.Accounting
+		accounting.Drafting = SpeculativeCostComponent{Nanoseconds: draftTime.Nanoseconds(), Measured: draftTime > 0}
+		accounting.Rejection = rejection
+		// The transaction measured its snapshot and retained result storage before
+		// retirement. This is known transaction memory, not process/device peak.
+		accounting.MemoryMeasured = true
+		fallback, reason := Qwen38MTPEngine(""), Qwen38MTPDowngradeReason("")
+		if !verified.OneOperation {
+			fallback = Qwen38EngineTargetDecode
+			reason = Qwen38MTPDowngradeReason(verified.DowngradeReason)
 		}
-		lastLogits = append([]float32(nil), boundaryLogits...)
-	} else {
-		// Partial accept: rollback unverified suffix, advance only accepted prefix.
-		rollbackStart := time.Now()
-		if !isOneOp {
-			clone, _ := snap.Clone()
-			_ = clone.Restore(v.Target)
-		}
-		rollbackDuration = time.Since(rollbackStart)
-		if rollbackDuration == 0 {
-			rollbackDuration = 1 * time.Nanosecond
-		}
+		return &Qwen38MTPBatchedReceipt{
+			SchemaVersion:                Qwen38MTPBatchedReceiptSchema,
+			Engine:                       Qwen38EngineMTP,
+			FallbackEngine:               fallback,
+			OneOperation:                 verified.OneOperation,
+			TargetVerificationPath:       verified.Path,
+			TargetVerificationOperations: verified.TargetVerificationOperations,
+			TargetDecodeSteps:            verified.TargetDecodeSteps,
+			FullTargetReplaySteps:        verified.FullTargetReplaySteps,
+			RecurrentRepairTokens:        verified.RecurrentRepairTokens,
+			DraftTokens:                  append([]int(nil), draftTokens...),
+			AcceptedTokens:               append([]int(nil), draftTokens[:accepted]...),
+			AcceptedCount:                accepted,
+			RejectedCount:                len(draftTokens) - accepted,
+			BonusToken:                   bonusToken,
+			DowngradeReason:              reason,
+			DraftTimeNS:                  draftTime,
+			VerifyTimeNS:                 time.Duration(accounting.TargetVerification.Nanoseconds),
+			RejectionTimeNS:              time.Duration(rejection.Nanoseconds),
+			RollbackTimeNS:               time.Duration(accounting.Rollback.Nanoseconds),
+			SyncTimeNS:                   time.Duration(accounting.Synchronization.Nanoseconds),
+			TotalWallTimeNS:              draftTime + time.Since(started),
+			AcceptedLogits:               lastLogits,
+			Accounting:                   accounting,
+		}, nil
+	}()
+	returned = true
+	return result, err
+}
 
-		syncStart := time.Now()
-		for _, tok := range draftTokens[:accepted] {
-			lastLogits = v.Target.Step(tok)
+// qwen38BatchedCleanup contains only a nested cleanup panic. An outer unwind
+// remains untouched, and Goexit still runs the caller's registered siblings.
+func qwen38BatchedCleanup(action func() error) (err error) {
+	completed := false
+	defer func() {
+		if !completed {
+			value := recover()
+			if cause, ok := value.(error); ok {
+				err = cause
+			} else {
+				err = fmt.Errorf("model: batched MTP cleanup interrupted: %v", value)
+			}
 		}
-		syncDuration = time.Since(syncStart)
+	}()
+	err = action()
+	completed = true
+	return err
+}
+
+func retireQwen38BatchedRound(tx *qwen35MTPTargetTransaction, rollback *PrefixSnapshot, committed, returned bool, result **Qwen38MTPBatchedReceipt, err *error) {
+	normal := returned
+	// Register all independent owners first. Fail-closed panics are reserved for
+	// a normal return with no proven retry state; they never replace an unwind.
+	defer func() {
+		if rollback == nil {
+			return
+		}
+		wasNormal := normal
+		normal = false
+		closeErr := qwen38BatchedCleanup(func() error { rollback.Close(); return nil })
+		normal = wasNormal
+		if closeErr != nil && normal {
+			*result = nil
+			*err = errors.Join(*err, closeErr)
+			if committed {
+				panic(*err)
+			}
+		}
+	}()
+	defer func() {
+		if committed || rollback == nil {
+			return
+		}
+		wasNormal := normal
+		normal = false
+		restoreErr := qwen38BatchedCleanup(func() error {
+			if restoreErr := rollback.Restore(tx.target); restoreErr != nil {
+				return restoreErr
+			}
+			tx.target.halStep, tx.target.halLogitsWarm = tx.beforeHALStep, tx.beforeHALWarm
+			return nil
+		})
+		normal = wasNormal
+		if restoreErr != nil && normal {
+			*result = nil
+			*err = errors.Join(*err, restoreErr)
+			normal = false
+			panic(*err)
+		}
+	}()
+	if !tx.closed {
+		wasNormal := normal
+		normal = false
+		abortErr := qwen38BatchedCleanup(func() error { return abortQwen38BatchedTransaction(tx) })
+		normal = wasNormal
+		if abortErr != nil && normal {
+			*result = nil
+			*err = errors.Join(*err, abortErr)
+			if rollback == nil {
+				normal = false
+				panic(*err)
+			}
+		}
 	}
+}
 
-	totalDuration := draftTime + verifyDuration + rejectionDuration + rollbackDuration + syncDuration
-
-	receipt := &Qwen38MTPBatchedReceipt{
-		SchemaVersion:                Qwen38MTPBatchedReceiptSchema,
-		Engine:                       Qwen38EngineMTP,
-		FallbackEngine:               fallbackEngine,
-		OneOperation:                 isOneOp,
-		TargetVerificationOperations: targetOps,
-		TargetDecodeSteps:            targetSteps,
-		DraftTokens:                  append([]int(nil), draftTokens...),
-		AcceptedTokens:               append([]int(nil), draftTokens[:accepted]...),
-		AcceptedCount:                accepted,
-		RejectedCount:                rejected,
-		BonusToken:                   bonusToken,
-		DowngradeReason:              downgradeReason,
-		DraftTimeNS:                  draftTime,
-		VerifyTimeNS:                 verifyDuration,
-		RejectionTimeNS:              rejectionDuration,
-		RollbackTimeNS:               rollbackDuration,
-		SyncTimeNS:                   syncDuration,
-		TotalWallTimeNS:              totalDuration,
-		AcceptedLogits:               lastLogits,
-		Accounting: SpeculativeCostAccounting{
-			Setup:              SpeculativeCostComponent{Nanoseconds: setupDuration.Nanoseconds(), Measured: true},
-			Drafting:           SpeculativeCostComponent{Nanoseconds: draftTime.Nanoseconds(), Measured: draftTime > 0},
-			TargetVerification: SpeculativeCostComponent{Nanoseconds: verifyDuration.Nanoseconds(), Measured: true},
-			Rejection:          SpeculativeCostComponent{Nanoseconds: rejectionDuration.Nanoseconds(), Measured: true},
-			Rollback:           SpeculativeCostComponent{Nanoseconds: rollbackDuration.Nanoseconds(), Measured: true},
-			Synchronization:    SpeculativeCostComponent{Nanoseconds: syncDuration.Nanoseconds(), Measured: true},
-			KnownMemoryBytes:   snap.ResidentBytes(),
-			MemoryMeasured:     true,
-		},
+// abortQwen38BatchedTransaction terminally detaches all owners even if restoring
+// the target panics or exits the goroutine. Restoration failure still fails the
+// round; releasing the snapshot does not assert that the target was restored.
+func abortQwen38BatchedTransaction(tx *qwen35MTPTargetTransaction) (err error) {
+	if tx == nil || tx.closed {
+		return nil
 	}
-
-	return receipt, nil
+	scope := tx.target.beginBackendExecution()
+	defer scope.finishError(&err)
+	returned := false
+	// This cleanup must run before releasing the execution domain. Secondary
+	// cleanup panics must not replace a restore panic or an existing error.
+	defer func() {
+		finished := false
+		suppressBackendCleanupPanic(func() {
+			tx.finish()
+			finished = true
+		})
+		if !finished && returned {
+			err = errors.Join(err, errors.New("model: batched MTP transaction release interrupted"))
+		}
+	}()
+	err = tx.abortOwned()
+	returned = true
+	return err
 }
 
 // VerifyMTPBlockBatched evaluates draft tokens against the target session in a single

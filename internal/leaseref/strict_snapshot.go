@@ -2,8 +2,10 @@ package leaseref
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -25,6 +27,10 @@ func (s *Store) readRefStrict(ctx context.Context, ref string) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
+	return validateStrictRecord(ref, rec)
+}
+
+func validateStrictRecord(ref string, rec Record) (Record, error) {
 	expectedID := strings.TrimPrefix(ref, refPrefix)
 	if !validID(rec.ID) {
 		return Record{}, fmt.Errorf("leaseref: invalid lease id %q in ref %s", rec.ID, ref)
@@ -46,7 +52,13 @@ func (s *Store) StrictSnapshot(ctx context.Context) ([]Record, error) {
 	if s == nil {
 		return nil, fmt.Errorf("leaseref: nil store")
 	}
-	recs, err := listRefsStrict(ctx, s, isLeaseRef, s.readRefStrict)
+	var recs []Record
+	var err error
+	if s.runStdin != nil {
+		recs, err = s.strictSnapshotBatch(ctx)
+	} else {
+		recs, err = listRefsStrict(ctx, s, isLeaseRef, s.readRefStrict)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -54,6 +66,76 @@ func (s *Store) StrictSnapshot(ctx context.Context) ([]Record, error) {
 		recs = []Record{}
 	}
 	sort.Slice(recs, func(i, j int) bool { return recs[i].ID < recs[j].ID })
+	return recs, nil
+}
+
+func (s *Store) strictSnapshotBatch(ctx context.Context) ([]Record, error) {
+	out, code, err := s.run(ctx, s.dir, "for-each-ref", "--format=%(refname) %(objectname)", refPrefix)
+	if err != nil {
+		return nil, fmt.Errorf("leaseref: enumerate strict snapshot: %w", err)
+	}
+	if code != 0 {
+		return nil, fmt.Errorf("leaseref: git for-each-ref %s exited %d", refPrefix, code)
+	}
+	type pinnedRef struct{ ref, oid string }
+	var refs []pinnedRef
+	var input strings.Builder
+	seen := make(map[string]bool)
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if len(fields) != 2 || !strings.HasPrefix(fields[0], refPrefix) || !validObjectID(fields[1]) || seen[fields[0]] {
+			return nil, &CorruptRefError{Ref: fields[0], Err: fmt.Errorf("invalid strict ref enumeration")}
+		}
+		seen[fields[0]] = true
+		if !isLeaseRef(fields[0]) {
+			continue
+		}
+		refs = append(refs, pinnedRef{fields[0], fields[1]})
+		input.WriteString(fields[1])
+		input.WriteByte('\n')
+	}
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	// Read the observed objects, never mutable ref names or the tolerant parser.
+	stream, code, err := s.runStdin(ctx, s.dir, input.String(), "cat-file", "--batch")
+	if err != nil {
+		return nil, fmt.Errorf("leaseref: read strict snapshot: %w", err)
+	}
+	if code != 0 {
+		return nil, fmt.Errorf("leaseref: git cat-file --batch exited %d", code)
+	}
+	var recs []Record
+	for _, ref := range refs {
+		header, rest, ok := strings.Cut(stream, "\n")
+		fields := strings.Fields(header)
+		if !ok || len(fields) != 3 || fields[0] != ref.oid || fields[1] != "blob" {
+			return nil, &CorruptRefError{Ref: ref.ref, Err: fmt.Errorf("missing or invalid strict object header")}
+		}
+		size, err := strconv.ParseUint(fields[2], 10, 64)
+		if err != nil || size >= uint64(len(rest)) || rest[int(size)] != '\n' {
+			return nil, &CorruptRefError{Ref: ref.ref, Err: fmt.Errorf("invalid or truncated strict object payload")}
+		}
+		var rec Record
+		if err := json.Unmarshal([]byte(rest[:int(size)]), &rec); err != nil {
+			return nil, &CorruptRefError{Ref: ref.ref, Err: err}
+		}
+		if rec.ID == "" {
+			rec.ID = leaseIDFromRef(ref.ref)
+		}
+		rec, err = validateStrictRecord(ref.ref, rec)
+		if err != nil {
+			return nil, &CorruptRefError{Ref: ref.ref, Err: err}
+		}
+		recs = append(recs, rec)
+		stream = rest[int(size)+1:]
+	}
+	if stream != "" {
+		return nil, fmt.Errorf("leaseref: trailing strict object data")
+	}
 	return recs, nil
 }
 
