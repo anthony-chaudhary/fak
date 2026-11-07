@@ -127,7 +127,7 @@ func TestCUDAGDNSharedSplitDevice(t *testing.T) {
 				weightCalls += row.Calls
 			case "cublas_gemm_ex":
 				gemmCalls += row.Calls
-			case "k_qwen35_gdn_fused_in_proj":
+			case "k_qwen35_gdn_fused_in_proj", "k_qwen35_gdn_fused_in_proj_warp":
 				scalarCalls += row.Calls
 			}
 		}

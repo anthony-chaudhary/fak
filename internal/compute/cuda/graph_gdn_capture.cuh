@@ -269,10 +269,15 @@ extern "C" int fak_graph_once_gdn_record(void *owner,const fak_graph_gdn_record 
     int rc=fak_graph_once_quant_matmul(s,r->quant_operation[i]);
     if (rc) return rc;
   }
-  FCUDA_TS("k_qwen35_gdn_fused_in_proj", g.fused, k_qwen35_gdn_fused_in_proj<<<g.fused,256,0,g_stream>>>(
+  if (!qwen35_gdn_fused_in_proj_warp_launch(
       r->input,r->weights[0],r->scales[0],r->kind[0],r->weights[1],r->scales[1],r->kind[1],
       r->weights[2],r->scales[2],r->kind[2],r->weights[3],r->scales[3],r->kind[3],
-      r->mixed,r->z,r->b,r->a,r->hidden,g.conv,g.value,r->value_heads));
+      r->mixed,r->z,r->b,r->a,r->hidden,g.conv,g.value,r->value_heads,1)) {
+    FCUDA_TS("k_qwen35_gdn_fused_in_proj", g.fused, k_qwen35_gdn_fused_in_proj<<<g.fused,256,0,g_stream>>>(
+        r->input,r->weights[0],r->scales[0],r->kind[0],r->weights[1],r->scales[1],r->kind[1],
+        r->weights[2],r->scales[2],r->kind[2],r->weights[3],r->scales[3],r->kind[3],
+        r->mixed,r->z,r->b,r->a,r->hidden,g.conv,g.value,r->value_heads));
+  }
   if (int rc=graph_gdn_record_status(s)) return rc;
   unsigned blocks=(unsigned)g.conv/256+(g.conv%256!=0);
   FCUDA_TS("k_qwen35_gdn_conv_state", blocks, k_qwen35_gdn_conv_state<<<blocks,256,0,g_stream>>>(r->mixed,r->conv_weight,r->conv_state,r->conv_out,g.conv,r->conv_kernel));
@@ -287,7 +292,9 @@ extern "C" int fak_graph_once_gdn_record(void *owner,const fak_graph_gdn_record 
         r->conv_out,r->q_norm,r->k_norm,r->z,r->b,r->a,r->a_log,r->dt_bias,r->norm,r->recurrent_state,r->core,r->key_heads,r->value_heads,r->key_dim,r->value_dim,r->rms_eps));
   }
   if (int rc=graph_gdn_record_status(s)) return rc;
-  FCUDA_TS("k_qwen35_gdn_out_proj", r->hidden, k_qwen35_gdn_out_proj<<<r->hidden,256,0,g_stream>>>(r->weights[4],r->scales[4],r->kind[4],r->core,r->output,r->hidden,g.value));
+  if (!qwen35_gdn_out_proj_warp_launch(r->weights[4],r->scales[4],r->kind[4],r->core,r->output,r->hidden,g.value,1)) {
+    FCUDA_TS("k_qwen35_gdn_out_proj", r->hidden, k_qwen35_gdn_out_proj<<<r->hidden,256,0,g_stream>>>(r->weights[4],r->scales[4],r->kind[4],r->core,r->output,r->hidden,g.value));
+  }
   if (int rc=graph_gdn_record_status(s)) return rc;
   if (s->gdn_plan) ++s->gdn_cursor; // accepted recording only, not completed execution
   return 0; // No fence, operation counter, completion generation or host-state publication.

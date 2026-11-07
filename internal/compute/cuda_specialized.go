@@ -190,6 +190,15 @@ func qwen35GDNDecodeForceGlobalStateForTest(on bool) {
 	C.fcuda_qwen35_gdn_decode_force_global_state(C.int(flag))
 }
 
+// qwen35GDNRowDotForceForTest selects the GDN in/out projection row-dot kernels:
+// -1 follows FAK_CUDA_GDN_ROWDOT_WARP, 0 forces the one-block-per-row kernels and
+// 1 the warp-per-row kernels, so -tags cuda tests can hold both to the same bits.
+func qwen35GDNRowDotForceForTest(mode int) {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	C.fcuda_qwen35_gdn_rowdot_force(C.int(mode))
+}
+
 // qwen35GDNDecodeRegisterStateLaunchesForTest counts register-state recurrence launches.
 func qwen35GDNDecodeRegisterStateLaunchesForTest() uint64 {
 	cudaMu.Lock()

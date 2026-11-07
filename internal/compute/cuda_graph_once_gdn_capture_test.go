@@ -115,9 +115,14 @@ func TestCUDAGraphOnceGDNHostRecord(t *testing.T) {
 	if lo < 0 || hi <= lo {
 		t.Fatal("register-state envelope missing")
 	}
-	program := graphOnceQuantHarness + "\n#include <cmath>\nusing std::isfinite;\n" + graph[start:end] + "\nstatic fak_graph_once *g_graph_once_capture=nullptr;\n" +
+	// The warp row-dot launch helpers are host-only; FCUDA_TS discards their launch here.
+	rowLo, rowHi := strings.Index(gdn, "// GDN row-dot host policy (begin)"), strings.Index(gdn, "// GDN row-dot host policy (end)")
+	if rowLo < 0 || rowHi <= rowLo {
+		t.Fatal("row-dot host policy missing")
+	}
+	program := graphOnceQuantHarness + "\n#include <cmath>\n#include <cstdlib>\nusing std::isfinite;\n" + graph[start:end] + "\nstatic fak_graph_once *g_graph_once_capture=nullptr;\n" +
 		"static int graph_once_capture_admit(fak_graph_once *s) " + cudaFunctionBody(t, graph, "graph_once_capture_admit") + "\n" +
-		"static int qwen35_gdn_threads(int n) " + cudaFunctionBody(t, gdn, "qwen35_gdn_threads") + "\n" + gdn[lo:hi] +
+		"static int qwen35_gdn_threads(int n) " + cudaFunctionBody(t, gdn, "qwen35_gdn_threads") + "\n" + gdn[lo:hi] + gdn[rowLo:rowHi] +
 		strings.TrimPrefix(readCUDASource(t, "cuda/alloc_status.h"), "#pragma once\n") +
 		readCUDASource(t, "cuda/graph_quant_workspace.cuh") + readCUDASource(t, "cuda/graph_gdn_capture.cuh")
 	definition := func(prefix, name string) string {

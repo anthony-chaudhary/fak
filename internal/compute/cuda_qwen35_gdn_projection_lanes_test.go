@@ -111,7 +111,7 @@ func TestCUDAQwen35GDNFourLaneProjectionMatchesSequence(t *testing.T) {
 				if row.GX != uint32(g.convDim()+g.valueDim()+2*g.nV) || row.GY != 1 {
 					t.Fatalf("lane projection grid: %+v", row)
 				}
-			case "k_qwen35_gdn_fused_in_proj":
+			case "k_qwen35_gdn_fused_in_proj", "k_qwen35_gdn_fused_in_proj_warp":
 				scalarCalls += row.Calls
 			}
 		}

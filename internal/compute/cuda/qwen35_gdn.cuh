@@ -941,6 +941,221 @@ __global__ void k_qwen35_gdn_out_proj(
   }
 }
 
+// Warp-per-row GDN projections (#gdn-inproj-warp). The one-block-per-row kernels
+// above read x as float4 at a 128-byte lane stride, so every x load instruction
+// touches 32 L1 lines and the Q8 projection runs L1-wavefront bound (~370 GB/s of
+// 1.125 B/param weights on an RTX 5090 Laptop) instead of DRAM bound. Here one warp
+// owns a row and x is staged once per block in bank-padded shared memory.
+//
+// Bitwise contract: lane l plays the old block's virtual threads t = l + 32*v
+// (v = 0..7). Each virtual thread keeps the same blocks/elements, the same fmaf
+// order, and the same two-level __shfl_down_sync tree (per virtual warp, then over
+// the eight warp sums with lanes >= 8 zero), so every output is bitwise the block
+// kernel's and the *_lanes kernels' bitwise-equal contract is unchanged.
+// FAK_CUDA_GDN_ROWDOT_WARP=0 restores the block kernels.
+constexpr int kQwen35GDNRowDotVirtualThreads = 256;
+
+__device__ __forceinline__ int qwen35_gdn_rowdot_pad(int i) { return i + (i >> 5); }
+
+__device__ __forceinline__ float qwen35_gdn_rowdot_warp(
+    const void *w, const float *scale, int q8, int row,
+    const float *xs, int n, int lane) {
+  float part[8];
+  const size_t base = (size_t)row * n;
+  int limit;
+  if (q8) {
+    const signed char *codes = (const signed char *)w + base;
+    const int nblk = n / 32;
+    limit = nblk;
+    const float *rowScale = scale + (size_t)row * nblk;
+    const bool vec = (((size_t)codes) & 15) == 0;
+#pragma unroll
+    for (int v = 0; v < 8; ++v) {
+      float sum = 0.0f;
+      for (int blk = lane + 32 * v; blk < nblk; blk += kQwen35GDNRowDotVirtualThreads) {
+        const signed char *qb = codes + (size_t)blk * 32;
+        union { int4 v4[2]; char4 c[8]; } q;
+        if (vec) {
+          q.v4[0] = __ldg((const int4 *)qb);
+          q.v4[1] = __ldg((const int4 *)qb + 1);
+        } else {
+#pragma unroll
+          for (int i = 0; i < 8; ++i) q.c[i] = *(const char4 *)(qb + 4 * i);
+        }
+        const float *xb = xs + blk * 33;
+        float blockSum = 0.0f;
+#pragma unroll
+        for (int i = 0; i < 8; ++i) {
+          blockSum = fmaf((float)q.c[i].x, xb[4 * i + 0], blockSum);
+          blockSum = fmaf((float)q.c[i].y, xb[4 * i + 1], blockSum);
+          blockSum = fmaf((float)q.c[i].z, xb[4 * i + 2], blockSum);
+          blockSum = fmaf((float)q.c[i].w, xb[4 * i + 3], blockSum);
+        }
+        sum = fmaf(blockSum, rowScale[blk], sum);
+      }
+      part[v] = sum;
+    }
+  } else {
+    const float *wf = (const float *)w + base;
+    limit = n;
+#pragma unroll
+    for (int v = 0; v < 8; ++v) {
+      float sum = 0.0f;
+      for (int i = lane + 32 * v; i < n; i += kQwen35GDNRowDotVirtualThreads)
+        sum += __ldg(wf + i) * xs[qwen35_gdn_rowdot_pad(i)];
+      part[v] = sum;
+    }
+  }
+  // A virtual warp with no work holds +0.0 in every lane; its tree is +0.0 exactly.
+#pragma unroll
+  for (int v = 0; v < 8; ++v) {
+    if (32 * v < limit) {
+#pragma unroll
+      for (int off = 16; off > 0; off >>= 1) part[v] += __shfl_down_sync(0xffffffff, part[v], off);
+    }
+  }
+  float sum = 0.0f;
+#pragma unroll
+  for (int v = 0; v < 8; ++v) {
+    const float warpSum = __shfl_sync(0xffffffff, part[v], 0);
+    if (lane == v) sum = warpSum;
+  }
+#pragma unroll
+  for (int off = 16; off > 0; off >>= 1) sum += __shfl_down_sync(0xffffffff, sum, off);
+  return sum; // lane 0
+}
+
+__device__ __forceinline__ void qwen35_gdn_rowdot_stage_x(const float *x, float *xs, int n) {
+  for (int i = threadIdx.x; i < n; i += blockDim.x) xs[qwen35_gdn_rowdot_pad(i)] = x[i];
+  __syncthreads();
+}
+
+__global__ void k_qwen35_gdn_fused_in_proj_warp(
+    const float *x,
+    const void *wQKV, const float *sQKV, int qQKV,
+    const void *wZ, const float *sZ, int qZ,
+    const void *wB, const float *sB, int qB,
+    const void *wA, const float *sA, int qA,
+    float *mixed, float *z, float *b, float *a,
+    int hidden, int convDim, int valueDim, int nV, int rowsPerWarp) {
+  extern __shared__ float xs[];
+  const int token = blockIdx.y;
+  x += (size_t)token * hidden;
+  mixed += (size_t)token * convDim;
+  z += (size_t)token * valueDim;
+  b += (size_t)token * nV;
+  a += (size_t)token * nV;
+  qwen35_gdn_rowdot_stage_x(x, xs, hidden);
+  const int lane = threadIdx.x & 31, warp = threadIdx.x >> 5, warps = blockDim.x >> 5;
+  const int totalRows = convDim + valueDim + 2 * nV;
+  for (int r = 0; r < rowsPerWarp; ++r) {
+    const int globalRow = (blockIdx.x * rowsPerWarp + r) * warps + warp;
+    if (globalRow >= totalRows) break;
+    int row = globalRow;
+    const void *w = wQKV;
+    const float *scale = sQKV;
+    int q8 = qQKV;
+    float *dst = mixed;
+    if (row >= convDim) {
+      row -= convDim;
+      w = wZ; scale = sZ; q8 = qZ; dst = z;
+      if (row >= valueDim) {
+        row -= valueDim;
+        w = wB; scale = sB; q8 = qB; dst = b;
+        if (row >= nV) {
+          row -= nV;
+          w = wA; scale = sA; q8 = qA; dst = a;
+        }
+      }
+    }
+    // Packed QKV/Z rows were filled by the preceding native matmul (warp-uniform).
+    if (q8 >= 2) continue;
+    const float sum = qwen35_gdn_rowdot_warp(w, scale, q8, row, xs, hidden, lane);
+    if (lane == 0) dst[row] = sum;
+  }
+}
+
+__global__ void k_qwen35_gdn_out_proj_warp(
+    const void *w, const float *scale, int q8,
+    const float *x, float *out, int hidden, int valueDim, int rowsPerWarp) {
+  extern __shared__ float xs[];
+  const int token = blockIdx.y;
+  x += (size_t)token * valueDim;
+  out += (size_t)token * hidden;
+  qwen35_gdn_rowdot_stage_x(x, xs, valueDim);
+  const int lane = threadIdx.x & 31, warp = threadIdx.x >> 5, warps = blockDim.x >> 5;
+  for (int r = 0; r < rowsPerWarp; ++r) {
+    const int row = (blockIdx.x * rowsPerWarp + r) * warps + warp;
+    if (row >= hidden) break;
+    const float sum = qwen35_gdn_rowdot_warp(w, scale, q8, row, xs, valueDim, lane);
+    if (lane == 0) out[row] = sum;
+  }
+}
+
+// GDN row-dot host policy (begin). Host-only, so the GDN graph-record witness
+// compiles this exact block with plain c++ (FCUDA_TS discards the launch there).
+// Shared memory holds n + n/32 floats; refuse past the 48 KiB default so no launch
+// needs a dynamic-smem opt-in (the block kernels remain the fallback).
+// Test seam: -1 follows FAK_CUDA_GDN_ROWDOT_WARP, 0 forces the block kernels,
+// 1 forces the warp kernels wherever their shared-memory bound admits them.
+static int g_qwen35_gdn_rowdot_test_mode = -1;
+extern "C" void fcuda_qwen35_gdn_rowdot_force(int mode) {
+  g_qwen35_gdn_rowdot_test_mode = mode < 0 ? -1 : (mode ? 1 : 0);
+}
+static int qwen35_gdn_rowdot_rows_per_warp() {
+  static int rows = -1;
+  if (rows < 0) {
+    const char *env = getenv("FAK_CUDA_GDN_ROWDOT_ROWS");
+    int v = env ? atoi(env) : 0;
+    rows = (v >= 1 && v <= 64) ? v : 4;
+  }
+  return rows;
+}
+static size_t qwen35_gdn_rowdot_smem(int n) { return ((size_t)n + (size_t)n / 32 + 1) * sizeof(float); }
+static bool qwen35_gdn_rowdot_eligible(int n, int q8a, int q8b, int q8c, int q8d) {
+  static int envEnabled = -1;
+  if (envEnabled < 0) {
+    const char *env = getenv("FAK_CUDA_GDN_ROWDOT_WARP");
+    envEnabled = !(env && env[0] == '0' && env[1] == 0);
+  }
+  const int enabled = g_qwen35_gdn_rowdot_test_mode >= 0 ? g_qwen35_gdn_rowdot_test_mode : envEnabled;
+  if (!enabled || n <= 0 || qwen35_gdn_rowdot_smem(n) > 48 * 1024) return false;
+  // q8 rows need n % 32 (already a preflight requirement); f32 rows need nothing extra.
+  if ((q8a == 1 || q8b == 1 || q8c == 1 || q8d == 1) && n % 32) return false;
+  return true;
+}
+static unsigned int qwen35_gdn_rowdot_blocks(long long rows) {
+  const long long perBlock = 8LL * qwen35_gdn_rowdot_rows_per_warp();
+  return (unsigned int)((rows + perBlock - 1) / perBlock);
+}
+
+// Launch the warp-per-row kernels when admitted; false leaves the caller's block launch.
+static bool qwen35_gdn_fused_in_proj_warp_launch(
+    const float *dX,
+    const void *wQKV, const float *sQKV, int qQKV,
+    const void *wZ, const float *sZ, int qZ,
+    const void *wB, const float *sB, int qB,
+    const void *wA, const float *sA, int qA,
+    float *dMixed, float *dZ, float *dB, float *dA,
+    int hidden, int convDim, int valueDim, int nV, int tokens) {
+  if (!qwen35_gdn_rowdot_eligible(hidden, qQKV, qZ, qB, qA)) return false;
+  const dim3 grid(qwen35_gdn_rowdot_blocks((long long)convDim + valueDim + 2LL * nV), (unsigned int)tokens);
+  FCUDA_TS("k_qwen35_gdn_fused_in_proj_warp", grid, k_qwen35_gdn_fused_in_proj_warp<<<grid, 256, qwen35_gdn_rowdot_smem(hidden), g_stream>>>(
+      dX, wQKV, sQKV, qQKV, wZ, sZ, qZ, wB, sB, qB, wA, sA, qA,
+      dMixed, dZ, dB, dA, hidden, convDim, valueDim, nV, qwen35_gdn_rowdot_rows_per_warp()));
+  return true;
+}
+static bool qwen35_gdn_out_proj_warp_launch(
+    const void *w, const float *scale, int q8, const float *dCore, float *dOut,
+    int hidden, int valueDim, int tokens) {
+  if (!qwen35_gdn_rowdot_eligible(valueDim, q8, 0, 0, 0)) return false;
+  const dim3 grid(qwen35_gdn_rowdot_blocks(hidden), (unsigned int)tokens);
+  FCUDA_TS("k_qwen35_gdn_out_proj_warp", grid, k_qwen35_gdn_out_proj_warp<<<grid, 256, qwen35_gdn_rowdot_smem(valueDim), g_stream>>>(
+      w, scale, q8, dCore, dOut, hidden, valueDim, qwen35_gdn_rowdot_rows_per_warp()));
+  return true;
+}
+// GDN row-dot host policy (end).
+
 static int qwen35_gdn_threads(int n) {
   int threads = 1;
   while (threads < n && threads < 1024) threads <<= 1;
@@ -1083,13 +1298,17 @@ extern "C" int fcuda_qwen35_gdn_decode_f32(
   status = qwen35_gdn_packed_projection(dInQKV, inQKVQ8, dX, dMixed, convDim, hidden, 1);
   if (status == 0) status = qwen35_gdn_packed_projection(dInZ, inZQ8, dX, dZ, valueDim, hidden, 1);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
-  FCUDA_TS("k_qwen35_gdn_fused_in_proj", (int)fusedRows64, k_qwen35_gdn_fused_in_proj<<<(int)fusedRows64, 256, 0, g_stream>>>(
-      dX,
-      dInQKV, dInQKVScale, inQKVQ8,
-      dInZ, dInZScale, inZQ8,
-      dInB, dInBScale, inBQ8,
-      dInA, dInAScale, inAQ8,
-      dMixed, dZ, dB, dA, hidden, convDim, valueDim, nV));
+  if (!qwen35_gdn_fused_in_proj_warp_launch(dX, dInQKV, dInQKVScale, inQKVQ8,
+          dInZ, dInZScale, inZQ8, dInB, dInBScale, inBQ8, dInA, dInAScale, inAQ8,
+          dMixed, dZ, dB, dA, hidden, convDim, valueDim, nV, 1)) {
+    FCUDA_TS("k_qwen35_gdn_fused_in_proj", (int)fusedRows64, k_qwen35_gdn_fused_in_proj<<<(int)fusedRows64, 256, 0, g_stream>>>(
+        dX,
+        dInQKV, dInQKVScale, inQKVQ8,
+        dInZ, dInZScale, inZQ8,
+        dInB, dInBScale, inBQ8,
+        dInA, dInAScale, inAQ8,
+        dMixed, dZ, dB, dA, hidden, convDim, valueDim, nV));
+  }
   status = qwen35_gdn_launch_status(2);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
 
@@ -1132,8 +1351,10 @@ extern "C" int fcuda_qwen35_gdn_decode_f32(
     if (registerState) g_qwen35_gdn_decode_register_state_launches++;
   }
 
-  FCUDA_TS("k_qwen35_gdn_out_proj", hidden, k_qwen35_gdn_out_proj<<<hidden, 256, 0, g_stream>>>(
-      dOutW, dOutWScale, outWQ8, dCore, dOut, hidden, valueDim));
+  if (!qwen35_gdn_out_proj_warp_launch(dOutW, dOutWScale, outWQ8, dCore, dOut, hidden, valueDim, 1)) {
+    FCUDA_TS("k_qwen35_gdn_out_proj", hidden, k_qwen35_gdn_out_proj<<<hidden, 256, 0, g_stream>>>(
+        dOutW, dOutWScale, outWQ8, dCore, dOut, hidden, valueDim));
+  }
   status = qwen35_gdn_launch_status(6);
   if (status != 0) return qwen35_gdn_drain_after_error(status);
 
@@ -1541,7 +1762,9 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
       dX, tokens, dInQKV, dInQKVScale, inQKVQ8, dInZ, dInZScale, inZQ8,
       dInB, dInBScale, inBQ8, dInA, dInAScale, inAQ8,
       dMixed, dZ, dB, dA, hidden, convDim, nV * vHd, nV));
-  } else {
+  } else if (!qwen35_gdn_fused_in_proj_warp_launch(dX, dInQKV, dInQKVScale, inQKVQ8,
+                 dInZ, dInZScale, inZQ8, dInB, dInBScale, inBQ8, dInA, dInAScale, inAQ8,
+                 dMixed, dZ, dB, dA, hidden, convDim, nV * vHd, nV, tokens)) {
     FCUDA_TS("k_qwen35_gdn_fused_in_proj", dim3(fusedRows, tokens), k_qwen35_gdn_fused_in_proj<<<dim3(fusedRows, tokens), 256, 0, g_stream>>>(
       dX, dInQKV, dInQKVScale, inQKVQ8, dInZ, dInZScale, inZQ8,
       dInB, dInBScale, inBQ8, dInA, dInAScale, inAQ8,
@@ -1600,7 +1823,7 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
   if (tokens >= 128 && outWQ8) {
     int dq = qwen35_gdn_q8_prefill(dOutW, dOutWScale, dCore, dOut, hidden, nV * vHd, tokens, 32);
     if (dq != 0) return qwen35_gdn_drain_after_error(dq);
-  } else {
+  } else if (!qwen35_gdn_out_proj_warp_launch(dOutW, dOutWScale, outWQ8, dCore, dOut, hidden, nV * vHd, tokens)) {
     FCUDA_TS("k_qwen35_gdn_out_proj", dim3(hidden, tokens), k_qwen35_gdn_out_proj<<<dim3(hidden, tokens), 256, 0, g_stream>>>(
         dOutW, dOutWScale, outWQ8, dCore, dOut, hidden, nV * vHd));
   }

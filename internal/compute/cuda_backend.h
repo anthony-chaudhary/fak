@@ -363,6 +363,7 @@ void fcuda_qwen35_gdn_test_fault(int stage);
  * global-state kernel where the register-state kernel would run; the counter reports
  * register-state launches, so a test can prove which path a decode took. */
 void fcuda_qwen35_gdn_decode_force_global_state(int on);
+void fcuda_qwen35_gdn_rowdot_force(int mode);
 size_t fcuda_qwen35_gdn_decode_register_state_launches(void);
 
 /* y[P,out] = x[P,in] @ W[out,in]^T   (all row-major f32) via cuBLAS SGEMM. */
