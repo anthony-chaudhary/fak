@@ -110,7 +110,11 @@ func TestReservedNamespaceLeaseReadersAndReap(t *testing.T) {
 			}
 			assertRefs("List", before)
 			strict, err := store.StrictSnapshot(ctx)
-			if err != nil || !slices.Equal(reservedNamespaceIDs(strict), wantAll) {
+			if mode == "batch-read-fallback" {
+				if err == nil || strict != nil {
+					t.Errorf("failed strict batch returned records=%v, err=%v", reservedNamespaceIDs(strict), err)
+				}
+			} else if err != nil || !slices.Equal(reservedNamespaceIDs(strict), wantAll) {
 				t.Errorf("StrictSnapshot = %v, %v; want %v", reservedNamespaceIDs(strict), err, wantAll)
 			}
 			assertRefs("StrictSnapshot", before)
