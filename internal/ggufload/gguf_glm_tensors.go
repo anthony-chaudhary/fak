@@ -135,7 +135,11 @@ const (
 
 func archUsesGGUFBatchedMoEExperts(arch string) bool {
 	switch arch {
-	case "glm_moe_dsa", "qwen3moe", "deepseek2", "deepseek41":
+	case "glm_moe_dsa", "qwen3moe", "deepseek2", "deepseek41", "kimik31":
+		// kimi-k31 (Kimi K3.1) ships its routed band as the same three batched
+		// slabs per MoE layer (ffn_gate_exps / ffn_down_exps / ffn_up_exps), so
+		// it rides the shared 1->E splitter; its per-expert canonical leaves are
+		// composed by batchedExpertCanonicalName's kimik31 arm.
 		return true
 	}
 	return false
@@ -151,7 +155,7 @@ func deepseek41Arch(arch string) bool { return arch == "deepseek41" }
 // batchedExpertCanonicalName is the ONE place the batched routed-expert 1->E
 // splitter composes a per-expert canonical name, arch-aware so the splitter's
 // output matches what the arch's forward actually reads. Default (every arch but
-// deepseek41): the deepseek2/GLM spelling
+// deepseek41/kimik31): the deepseek2/GLM spelling
 // model.layers.<layer>.mlp.experts.<e>.<proj>.weight. For deepseek41:
 // model.layers.<layer>.ffn.experts.<e>.{w1,w3,w2}.weight, mapping the GGUF
 // projection (gate_proj/up_proj/down_proj) onto the V4 w1/w3/w2 leaves
@@ -161,6 +165,11 @@ func deepseek41Arch(arch string) bool { return arch == "deepseek41" }
 // V4 name BEFORE model.ResidentKQuantEligible is consulted (quant_q4k_loader.go:1113):
 // otherwise the resident raw-quant store would be keyed on a name the V4 forward
 // never looks up and the whole Q2_K routed-expert bulk falls back to eager f32.
+// For kimik31: model.layers.<layer>.block_sparse_moe.experts.<e>.{w1,w2,w3}.weight,
+// mapping gate_proj->w1, down_proj->w2, up_proj->w3 — the converter's own
+// _MXFP4_PROJ order (conversion/kimi_k3.py), which also names the official
+// checkpoint's per-expert dialect, so both expert dialects converge on one leaf
+// set (see kimik31_tensors.go).
 func batchedExpertCanonicalName(arch string, layer int, expert int, proj string) string {
 	if deepseek41Arch(arch) {
 		leaf := map[string]string{
@@ -170,6 +179,16 @@ func batchedExpertCanonicalName(arch string, layer int, expert int, proj string)
 		}[proj]
 		if leaf != "" {
 			return fmt.Sprintf("model.layers.%d.ffn.experts.%d.%s.weight", layer, expert, leaf)
+		}
+	}
+	if archIsKimiK31(arch) {
+		leaf := map[string]string{
+			"gate_proj": "w1",
+			"down_proj": "w2",
+			"up_proj":   "w3",
+		}[proj]
+		if leaf != "" {
+			return fmt.Sprintf("model.layers.%d.block_sparse_moe.experts.%d.%s.weight", layer, expert, leaf)
 		}
 	}
 	return fmt.Sprintf("model.layers.%d.mlp.experts.%d.%s.weight", layer, expert, proj)

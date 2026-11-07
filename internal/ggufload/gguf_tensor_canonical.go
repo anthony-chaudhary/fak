@@ -343,6 +343,13 @@ func CanonicalTensorNameArch(name, arch string) (string, bool) {
 			return g, true
 		}
 	}
+	// kimi-k31 carries one model-global tensor the shared switch does not cover:
+	// the fused cross-layer residual-scoring vector (see kimik31_tensors.go).
+	if archIsKimiK31(arch) {
+		if g, ok := kimik31GlobalTensorNames[name]; ok {
+			return g, true
+		}
+	}
 	if !strings.HasPrefix(name, "blk.") {
 		return "", false
 	}
@@ -373,8 +380,10 @@ func CanonicalTensorNameArch(name, arch string) (string, bool) {
 	// Falling through to this branch rewrote the artifact's ffn_gate_inp.weight
 	// to a name the native forward never reads, so admission refused a tensor
 	// the file DOES carry (fak#13266). deepseek41's router gate is resolved by
-	// its own suffix arm in deepseek41CanonicalSuffix instead.
-	if archUsesGGUFBatchedMoEExperts(arch) && !archIsDeepSeek41(arch) && suffix == glmGGUFRouter {
+	// its own suffix arm in deepseek41CanonicalSuffix instead. kimi-k31 is
+	// excluded the same way: its forward reads the census spelling
+	// block_sparse_moe.gate.weight, resolved by kimik31CanonicalSuffix.
+	if archUsesGGUFBatchedMoEExperts(arch) && !archIsDeepSeek41(arch) && !archIsKimiK31(arch) && suffix == glmGGUFRouter {
 		return "model.layers." + layer + ".mlp.gate.weight", true
 	}
 	if archUsesMLAMoELayout(arch) {
@@ -395,6 +404,21 @@ func CanonicalTensorNameArch(name, arch string) (string, bool) {
 			if strings.HasPrefix(mapped, deepseek41EngramPrefix) {
 				return strings.Replace(mapped, deepseek41EngramLayerPlaceholder, layer, 1), true
 			}
+			return "model.layers." + layer + "." + mapped, true
+		}
+	}
+	// kimi-k31 (Kimi K3.1): the KDA / Gated-DSA / latent-MoE families resolve
+	// through kimik31CanonicalSuffix; the official-checkpoint per-expert MXFP4
+	// entries through kimik31PerExpertMXFP4Suffix. The batched routed slabs are
+	// deliberately NOT mapped here: the 1->E splitter expands them onto
+	// block_sparse_moe.experts.<e>.{w1,w2,w3}.weight BEFORE this map is
+	// consulted (batchedExpertCanonicalName's kimik31 arm). Everything else
+	// falls through to the shared base map.
+	if archIsKimiK31(arch) {
+		if mapped, ok := kimik31CanonicalSuffix(suffix); ok {
+			return "model.layers." + layer + "." + mapped, true
+		}
+		if mapped, ok := kimik31PerExpertMXFP4Suffix(suffix); ok {
 			return "model.layers." + layer + "." + mapped, true
 		}
 	}

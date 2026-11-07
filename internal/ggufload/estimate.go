@@ -1311,9 +1311,14 @@ func ggufMemoryPlanByDType(class compute.MemoryClass, scope compute.MemoryScope,
 // ".mlp.shared_experts." / ".ffn.shared_experts." substrings, so the load-time planner and the
 // runtime PLACEMENT split agree on the shared expert's home: DEVICE-resident, never the host-scoped
 // routed-expert pool (#1304). The V4.1 forward spells the shared expert
-// model.layers.<L>.ffn.shared_experts.{w1,w3,w2}.weight (fak#13271).
+// model.layers.<L>.ffn.shared_experts.{w1,w3,w2}.weight (fak#13271). Kimi-K3.1 (the only arch
+// that produces the census spelling) spells it
+// model.layers.<L>.block_sparse_moe.shared_experts.{gate,up,down}_proj.weight
+// (kimik31_tensors.go), matched here so its always-on shared experts stay device-resident too.
 func isSharedExpertCanonicalName(name string) bool {
-	return strings.Contains(name, ".mlp.shared_experts.") || strings.Contains(name, ".ffn.shared_experts.")
+	return strings.Contains(name, ".mlp.shared_experts.") ||
+		strings.Contains(name, ".ffn.shared_experts.") ||
+		strings.Contains(name, ".block_sparse_moe.shared_experts.")
 }
 
 func tensorCPUOffloadExpert(name, modelType string) (bool, error) {

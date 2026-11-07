@@ -11,12 +11,15 @@ import (
 // internal model_type, a config applier for the KDA + Gated-DSA + latent-MoE
 // axes, and fail-closed typed refusals naming the offending GGUF key.
 //
-// SCOPE (deliberate, ticket 1611-kimi-k31 leaf L1): arch recognition + header
-// /metadata parsing ONLY. There is no tensor map here (L2), no tokenizer work
-// (L3), and no forward path (L5–L8). A loaded kimi-k31 checkpoint therefore
-// admits its header cleanly and stays execution-gated until the native K3.1
-// forward lands; model.ClassifyForwardPath is deliberately NOT wired to a
-// K3.1 path in this slice (internal/model owns that seam).
+// SCOPE (ticket 1611-kimi-k31): this file owns arch recognition + header/
+// metadata parsing (leaf L1) plus the L1 tail hook into the L2 required-
+// tensor-family census (validateKimiK31RequiredTensors, kimik31_tensors.go —
+// the GGUF→canonical tensor map, the fail-closed family guard, and the map-
+// level routed-expert shard census live there). No tokenizer work (L3), no
+// forward path (L5–L8). A loaded kimi-k31 checkpoint therefore admits its
+// header AND tensor directory cleanly and stays execution-gated until the
+// native K3.1 forward lands; model.ClassifyForwardPath is deliberately NOT
+// wired to a K3.1 path (internal/model owns that seam).
 //
 // WHY DISTINCT FROM "deepseek2": the existing Moonshot alias
 // (canonicalGGUFArch, gguf_config.go) collapses every K2/K3 spelling onto
@@ -302,7 +305,12 @@ func applyKimiK31Config(f *File, p string, cfg *model.Config, ropeDim int) error
 		return fmt.Errorf("gguf: kimi-k31 ships %d tensors but %s is absent: the per-layer KDA/DSA schedule is unresolved (broken or incomplete K3.1 checkpoint)",
 			len(f.Tensors), p+k31KeyHeadCountKV)
 	}
-	return nil
+	// L2 required-tensor-family census (kimik31_tensors.go): a file carrying a
+	// tensor directory must carry every arch-defining family, else it is a
+	// mislabeled or stripped artifact and the load refuses here naming the
+	// first missing family. Header-only fixtures are a valid no-op, so config
+	// estimation and arch-normalization goldens stay admitted exactly as at L1.
+	return validateKimiK31RequiredTensors(f, cfg)
 }
 
 // requireKimiK31Positive reads a required positive integer GGUF key, refusing
