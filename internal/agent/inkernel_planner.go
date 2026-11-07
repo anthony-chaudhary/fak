@@ -253,6 +253,14 @@ type InKernelPlanner struct {
 	// degradation policy (inkernel_batch_health.go) budgets batched steps'
 	// per-token cost against it.
 	batchSerialPerLaneNS atomic.Int64
+	// batchSeedSamples counts the per-token samples folded into
+	// batchSerialPerLaneNS while the calibration window (batchStepSeedSamples)
+	// is open: the window folds as MAX so one warmup micro-forward or one
+	// backlog-drained step cannot alone define the floor.
+	batchSeedSamples atomic.Int32
+	// batchSeedCalibrating records that the calibration window opened on the
+	// first fold into an unknown floor; a preset floor never opens it.
+	batchSeedCalibrating atomic.Bool
 	// v41EngramLookAhead is an explicit serial-only construction setting.
 	v41EngramLookAhead bool
 

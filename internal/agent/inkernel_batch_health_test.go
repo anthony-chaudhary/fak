@@ -71,6 +71,41 @@ func TestBatchStepHealth(t *testing.T) {
 		}
 	})
 
+	t.Run("calibration window folds as MAX then ratchets MIN", func(t *testing.T) {
+		// Measured failure this pins: the serve warmup's micro-forward
+		// (337us for a 1-lane serial step on the q2kxl H200 route) seeded a
+		// garbage-low floor that the MIN ratchet could never raise, forcing
+		// every cell to serial. The first batchStepSeedSamples samples fold as
+		// MAX; afterwards the MIN ratchet takes over.
+		p, h := batchHealthWithFloor(t, 0)
+		h.observeSerial(337*time.Microsecond, 1) // warmup-class micro-forward
+		assertFloor(t, p, 337*time.Microsecond)
+		h.observeSerial(60*time.Millisecond, 2) // real 2-lane serial step: per = 30ms
+		assertFloor(t, p, 30*time.Millisecond)  // calibration MAX raised it
+		h.observeBatched(50*time.Millisecond, 2)
+		assertFloor(t, p, 30*time.Millisecond) // per = 25ms < 30ms inside the window: MAX keeps 30ms
+		// Window closed: the MIN ratchet takes over.
+		h.observeSerial(40*time.Millisecond, 2) // per = 20ms lowers
+		assertFloor(t, p, 20*time.Millisecond)
+		h.observeSerial(80*time.Millisecond, 2) // per = 40ms: MIN keeps 20ms
+		assertFloor(t, p, 20*time.Millisecond)
+		if got := p.batchSeedSamples.Load(); got != batchStepSeedSamples {
+			t.Fatalf("seed samples=%d, want exactly %d (the window closed)", got, batchStepSeedSamples)
+		}
+		if !p.batchSeedCalibrating.Load() {
+			t.Fatal("calibration window never opened for an unknown floor")
+		}
+	})
+
+	t.Run("preset floor skips the calibration window", func(t *testing.T) {
+		p, h := batchHealthWithFloor(t, 40*time.Millisecond)
+		h.observeSerial(160*time.Millisecond, 2) // per = 80ms > preset 40ms
+		assertFloor(t, p, 40*time.Millisecond)   // MIN ratchet: never raised
+		if p.batchSeedCalibrating.Load() {
+			t.Fatal("preset floor opened the calibration window")
+		}
+	})
+
 	t.Run("per-token violation boundary", func(t *testing.T) {
 		// floor 40ms, margin 1250 -> budget 50ms per token.
 		p, h := batchHealthWithFloor(t, 40*time.Millisecond)

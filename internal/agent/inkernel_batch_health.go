@@ -19,6 +19,18 @@ const batchStepHealthEnv = "FAK_INKERNEL_BATCH_HEALTH_MARGIN"
 // inflated budget would let a collapsing batched path run forever).
 const batchStepProbeEvery = 8
 
+// batchStepSeedSamples is the floor calibration window: while it is open the
+// floor folds as the MAX of the samples, and the MIN ratchet takes over after.
+// A single seed sample is unreliable in both directions: a serve warmup can
+// produce a micro-forward (measured on the q2kxl H200 route: a 337us 1-lane
+// serial step seeding a garbage-low floor that would force every cell to
+// serial forever, because the MIN ratchet cannot move the floor up), and the
+// first step of a busy episode can queue behind the shared stream's backlog
+// (measured 2.84s wall for 8 lanes - a garbage-high seed that probes must
+// correct). The calibration MAX bounds the low side; the MIN ratchet bounds
+// the high side.
+const batchStepSeedSamples = 3
+
 // batchHealthDiagEnabled gates the typed policy-transition lines
 // (fak_batch_health ...) used by the q2kxl concurrency-collapse investigation.
 // Off by default; FAK_BATCH_DIAG=1 turns it on. Pure observation: no behavior change.
@@ -87,15 +99,38 @@ func (h *batchStepHealth) floor() time.Duration {
 	return 0
 }
 
-// foldFloor folds one per-token sample into the planner floor as a ratcheting
-// MIN: the floor only moves down, so a slow regime (a queued prefill backlog
-// absorbed by one step) cannot inflate the budget that guards the batched path.
-// It reports the value the sample replaced, so callers can witness a seed
-// (old==0) versus a lowering (old>sample).
+// foldFloor folds one per-token sample into the planner floor. The
+// calibration window opens on the first fold into an UNKNOWN floor and covers
+// batchStepSeedSamples samples, folding as MAX (a warmup micro-forward or a
+// backlog drain must not alone define the floor); a floor that was never
+// unknown (operator/test preset) skips the window and ratchets MIN from the
+// first sample. After the window closes the fold is the ratcheting MIN (the
+// floor only moves down, so a slow regime cannot inflate the budget that
+// guards the batched path). It reports the value the sample replaced, so
+// callers can witness a seed versus a lowering.
 func (h *batchStepHealth) foldFloor(per int64) (old int64, changed bool) {
 	for {
 		cur := h.p.batchSerialPerLaneNS.Load()
-		if cur > 0 && cur <= per {
+		if cur == 0 {
+			// First sample into an unknown floor: open the calibration window.
+			h.p.batchSeedCalibrating.Store(true)
+			h.p.batchSeedSamples.Store(1)
+			if h.p.batchSerialPerLaneNS.CompareAndSwap(cur, per) {
+				return cur, true
+			}
+			continue
+		}
+		if h.p.batchSeedCalibrating.Load() && h.p.batchSeedSamples.Load() < batchStepSeedSamples {
+			h.p.batchSeedSamples.Add(1)
+			if per <= cur {
+				return cur, false
+			}
+			if h.p.batchSerialPerLaneNS.CompareAndSwap(cur, per) {
+				return cur, true
+			}
+			continue
+		}
+		if cur <= per {
 			return cur, false
 		}
 		if h.p.batchSerialPerLaneNS.CompareAndSwap(cur, per) {
@@ -117,13 +152,23 @@ func (h *batchStepHealth) observeSerial(d time.Duration, lanes int) {
 		return
 	}
 	old, changed := h.foldFloor(per)
-	if !batchHealthDiagEnabled || !changed {
+	h.witnessFloor(per, old, changed, lanes, "serial")
+}
+
+// witnessFloor emits the typed policy lines: one floor_seed when the
+// calibration window closes (the MAX of its samples becomes the armed floor),
+// and floor_update when a post-calibration sample lowers the floor. Pure
+// observation under FAK_BATCH_DIAG=1.
+func (h *batchStepHealth) witnessFloor(per, old int64, changed bool, lanes int, source string) {
+	if h == nil || !batchHealthDiagEnabled || !changed {
 		return
 	}
-	if old == 0 {
-		fmt.Fprintf(os.Stderr, "fak_batch_health floor_seed_ns=%d source=serial lanes=%d\n", per, lanes)
-	} else if !h.degraded {
-		fmt.Fprintf(os.Stderr, "fak_batch_health floor_update_ns=%d old_ns=%d source=probe\n", per, old)
+	switch {
+	case h.p.batchSeedSamples.Load() == batchStepSeedSamples:
+		fmt.Fprintf(os.Stderr, "fak_batch_health floor_seed_ns=%d source=calibration-max samples=%d last_sample=%s lanes=%d\n",
+			h.p.batchSerialPerLaneNS.Load(), batchStepSeedSamples, source, lanes)
+	case h.p.batchSeedSamples.Load() > batchStepSeedSamples && !h.degraded:
+		fmt.Fprintf(os.Stderr, "fak_batch_health floor_update_ns=%d old_ns=%d source=%s lanes=%d\n", per, old, source, lanes)
 	}
 }
 
@@ -146,14 +191,12 @@ func (h *batchStepHealth) observeBatched(d time.Duration, lanes int) {
 	per := d / time.Duration(lanes)
 	if floor <= 0 {
 		// No floor yet: a batched step cannot violate, and its per-token cost
-		// seeds the floor like any healthy sample.
+		// joins the calibration window like any serial sample.
 		if per.Nanoseconds() <= 0 {
 			return
 		}
 		old, changed := h.foldFloor(per.Nanoseconds())
-		if batchHealthDiagEnabled && changed && old == 0 {
-			fmt.Fprintf(os.Stderr, "fak_batch_health floor_seed_ns=%d source=batched lanes=%d\n", per.Nanoseconds(), lanes)
-		}
+		h.witnessFloor(per.Nanoseconds(), old, changed, lanes, "batched")
 		return
 	}
 	if per > floor*time.Duration(h.marginNum)/1000 {
@@ -171,7 +214,8 @@ func (h *batchStepHealth) observeBatched(d time.Duration, lanes int) {
 	if per.Nanoseconds() <= 0 {
 		return
 	}
-	h.foldFloor(per.Nanoseconds())
+	old, changed := h.foldFloor(per.Nanoseconds())
+	h.witnessFloor(per.Nanoseconds(), old, changed, lanes, "batched")
 }
 
 // probeDue reports whether the next step should be a serial probe (floor
