@@ -138,6 +138,130 @@ func TestKimiK3RejectsUnsupportedReasoningEffort(t *testing.T) {
 	}
 }
 
+func TestKimiK31ModelRecognition(t *testing.T) {
+	recognized := []string{
+		"kimi-k3.1-pro",
+		"kimi-k3.1-pro-highspeed",
+		"k3.1-pro",
+		"k3.1-pro-highspeed",
+		"moonshotai/kimi-k3.1-pro",
+		"MOONSHOTAI/Kimi-K3.1-Pro-HighSpeed",
+		"  k3.1-pro  ",
+	}
+	for _, id := range recognized {
+		if !isKimiK31Model(id) {
+			t.Errorf("isKimiK31Model(%q) = false, want true", id)
+		}
+		if isKimiK3Model(id) {
+			t.Errorf("isKimiK3Model(%q) = true, want false (K3.1 is not K3)", id)
+		}
+	}
+	notRecognized := []string{
+		"kimi-k3", "k3",
+		"kimi-k3.1", "k3.1", // bare family names are not documented API IDs
+		"kimi-k3.1-flash", // hypothetical sibling variant
+		"kimi-k3.2-pro",   // next-generation spelling
+		"gpt-test", "",
+	}
+	for _, id := range notRecognized {
+		if isKimiK31Model(id) {
+			t.Errorf("isKimiK31Model(%q) = true, want false", id)
+		}
+	}
+	// K3 recognition stays an exact closed set with no prefix bleed onto K3.1.
+	for _, id := range []string{"kimi-k3", "k3", "moonshotai/kimi-k3"} {
+		if !isKimiK3Model(id) {
+			t.Errorf("isKimiK3Model(%q) = false, want true", id)
+		}
+	}
+	if isKimiK3Model("kimi-k3.1-pro") || isKimiK3Model("kimi-k3.1") {
+		t.Error("isKimiK3Model must not match K3.1 spellings")
+	}
+}
+
+func TestKimiK31ProAndHighspeedEffortContract(t *testing.T) {
+	cases := []struct {
+		model      string
+		extraBody  string
+		wantErr    string
+		wantEffort string
+	}{
+		{model: "kimi-k3.1-pro", extraBody: `{"reasoning_effort":"low"}`, wantEffort: "low"},
+		{model: "kimi-k3.1-pro", extraBody: `{"reasoning_effort":"high"}`, wantEffort: "high"},
+		{model: "kimi-k3.1-pro", extraBody: `{"reasoning_effort":"max"}`, wantEffort: "max"},
+		{model: "kimi-k3.1-pro", extraBody: `{}`, wantEffort: "max"}, // absent defaults to max
+		{model: "kimi-k3.1-pro", extraBody: `{"reasoning_effort":"medium"}`, wantErr: `kimi k3.1 reasoning_effort must be "low", "high" or "max", got medium`},
+		// Highspeed is a serving mode of the same weights: identical effort mapping.
+		{model: "kimi-k3.1-pro-highspeed", extraBody: `{"reasoning_effort":"high"}`, wantEffort: "high"},
+		{model: "kimi-k3.1-pro-highspeed", extraBody: `{}`, wantEffort: "max"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.model+" "+tc.extraBody, func(t *testing.T) {
+			var got map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				_ = json.Unmarshal(body, &got)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"model":"`+tc.model+`","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+			}))
+			defer server.Close()
+
+			planner := NewHTTPPlanner(server.URL, tc.model, "moonshot-test-key")
+			if err := planner.SetExtraBodyJSON(tc.extraBody); err != nil {
+				t.Fatal(err)
+			}
+			_, err := planner.Complete(context.Background(), []Message{{Role: RoleUser, Content: "x"}}, nil)
+			if tc.wantErr != "" {
+				if err == nil || err.Error() != tc.wantErr {
+					t.Fatalf("error = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Complete: %v", err)
+			}
+			if got["model"] != tc.model || got["reasoning_effort"] != tc.wantEffort {
+				t.Fatalf("model/effort = %v/%v, want %q/%q", got["model"], got["reasoning_effort"], tc.model, tc.wantEffort)
+			}
+			for _, forbidden := range []string{"temperature", "top_p", "thinking"} {
+				if _, ok := got[forbidden]; ok {
+					t.Errorf("request unexpectedly contains %s: %#v", forbidden, got[forbidden])
+				}
+			}
+		})
+	}
+}
+
+func TestKimiUnknownVariantPassesThroughUnchanged(t *testing.T) {
+	var got map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &got)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"model":"kimi-k3.1","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+
+	planner := NewHTTPPlanner(server.URL, "kimi-k3.1", "moonshot-test-key")
+	topP := 0.4
+	_, err := planner.Complete(context.Background(), []Message{{Role: RoleUser, Content: "x"}}, nil,
+		WithTemperature(func() *float64 { v := 0.2; return &v }()), WithTopP(&topP))
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	// Bare "kimi-k3.1" is not a documented API ID: the K3/K3.1 contract must not
+	// apply, so sampling fields survive and no effort field is injected.
+	if got["model"] != "kimi-k3.1" {
+		t.Fatalf("model = %v", got["model"])
+	}
+	if got["temperature"] != 0.2 || got["top_p"] != 0.4 {
+		t.Fatalf("sampling fields = %#v", got)
+	}
+	if _, ok := got["reasoning_effort"]; ok {
+		t.Fatalf("reasoning_effort unexpectedly injected: %#v", got["reasoning_effort"])
+	}
+}
+
 func TestNonKimiOpenAIKeepsSamplingFields(t *testing.T) {
 	adapter, err := NewTranscriptAdapter(ProviderOpenAI)
 	if err != nil {

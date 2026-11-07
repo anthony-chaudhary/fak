@@ -627,9 +627,9 @@ func (p *HTTPPlanner) prepareUpstreamContext(ctx context.Context, messages []Mes
 		if err != nil {
 			return nil, err
 		}
-		if adapter.Provider() == ProviderOpenAI && isKimiK3Model(modelID) {
-			// Moonshot fixes K3 sampling server-side and accepts native effort only.
-			reqBody, err = normalizeKimiK3Request(reqBody)
+		if adapter.Provider() == ProviderOpenAI && (isKimiK3Model(modelID) || isKimiK31Model(modelID)) {
+			// Moonshot fixes K3/K3.1 sampling server-side and accepts native effort only.
+			reqBody, err = normalizeKimiK3Request(modelID, reqBody)
 			if err != nil {
 				return nil, err
 			}
