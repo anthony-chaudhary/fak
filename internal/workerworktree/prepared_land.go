@@ -240,7 +240,12 @@ func revalidatePreparedLandWithRootState(root, wtPath string, receipt PreparedLa
 	if rc != 0 || strings.TrimSpace(parent) != receipt.ParentSHA {
 		return preparedMismatch("prepared candidate parent mismatch", tail(parent, 200))
 	}
-	rc, names := run(git, root, []string{"diff", "--name-only", "-z", receipt.ParentSHA, receipt.CandidateSHA})
+	// The name list must enumerate the SAME path sides prepare recorded:
+	// expandLandPaths builds CandidatePaths with --no-ext-diff --no-renames, so a
+	// rename lands as two entries (source deletion + destination addition). Git's
+	// default rename detection would collapse each pair to its destination only,
+	// making every rename-bearing candidate fail this digest check.
+	rc, names := run(git, root, []string{"diff", "--no-ext-diff", "--no-renames", "--name-only", "-z", receipt.ParentSHA, receipt.CandidateSHA})
 	if rc != 0 {
 		return preparedMismatch("could not read prepared candidate paths", tail(names, 200))
 	}
