@@ -449,6 +449,17 @@ func (a *Adjudicator) testImmunityVerdict(ctx context.Context, p Policy, c *abi.
 				// gating suite; admit it even under an implementation lane.
 				continue
 			}
+			if a.devEditAttested(ctx, c, target) {
+				// Explicitly assigned worker worktree (#11471): the host-installed
+				// DevEditAttestation (never tool-supplied) proves this guard serves a
+				// sanctioned detached worktree whose live exclusive lease tree names
+				// the target. The orchestrator assigned this regression test to the
+				// worker, so refusing it is a false positive. devEditAttested already
+				// fails closed: trace match, worktree containment, lease-tree match,
+				// live Verify, and .git / runtime-policy exclusions — a released or
+				// stale lease falls back to the refusal below.
+				continue
+			}
 			lane := resolveLane(ctx, p, c, args, a)
 			if lane == "" {
 				lane = "implementation"
