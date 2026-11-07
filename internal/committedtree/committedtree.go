@@ -31,6 +31,29 @@ const (
 	gitlinkMode        = "160000"
 )
 
+// extractionBudgetEnv lets a loaded host raise the extraction budget per
+// invocation without moving the bounded default: a Go duration (e.g. 20m).
+// Measured on a saturated Windows host, extracting the committed tree of this
+// repo can exceed the 2m default, turning every commit's build gate into a
+// retryable BUILD_CHECK_TIMEOUT. The default stays tight so a wedged
+// extraction still fails closed fast as a typed timeout, never a stall.
+const extractionBudgetEnv = "FAK_COMMITTEDTREE_EXTRACT_BUDGET"
+
+// extractionBudget resolves the per-invocation extraction budget: the env
+// override when it parses to a positive duration, defaultTimeout otherwise.
+func extractionBudget() time.Duration {
+	if v := strings.TrimSpace(os.Getenv(extractionBudgetEnv)); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return defaultTimeout
+}
+
+// budgetKey carries the resolved extraction budget on the extraction context so
+// timeout diagnostics report the budget that actually bounded the run.
+type budgetKey struct{}
+
 type commandFactory func(context.Context, string, ...string) *exec.Cmd
 
 type treeEntry struct {
@@ -198,7 +221,9 @@ func extractTemp(repo, object, tempParent string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	budget := extractionBudget()
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	ctx = context.WithValue(ctx, budgetKey{}, budget)
 	defer cancel()
 	if err := extract(ctx, repo, object, dir); err != nil {
 		_ = os.RemoveAll(dir)
@@ -546,7 +571,11 @@ func commandError(ctx context.Context, stage string, err error) error {
 
 func extractionStopError(ctx context.Context) error {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return fmt.Errorf("committed tree extraction timed out after %s: %w", defaultTimeout, ctx.Err())
+		budget := defaultTimeout
+		if v, ok := ctx.Value(budgetKey{}).(time.Duration); ok {
+			budget = v
+		}
+		return fmt.Errorf("committed tree extraction timed out after %s: %w", budget, ctx.Err())
 	}
 	return fmt.Errorf("committed tree extraction canceled: %w", ctx.Err())
 }

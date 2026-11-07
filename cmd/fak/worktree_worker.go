@@ -204,6 +204,14 @@ type worktreePrepareOut struct {
 	PreserveExisting  bool                            `json:"preserve_existing,omitempty"`
 }
 
+// defaultWorkerPrepareBudget bounds one worker-worktree prepare's
+// materialize→verify→stamp sequence. Bounded admission is the doctrine: fail
+// closed fast, never hang. --prepare-budget raises it per invocation for hosts
+// where a cold checkout of the tree legitimately exceeds the default (measured
+// >10m on a loaded Windows host with ~30k tracked files); the default stays
+// tight so contention surfaces as a typed PREPARE_TIMEOUT, not a stall.
+const defaultWorkerPrepareBudget = 2 * time.Minute
+
 func worktreeWorkerPrepare(argv []string) {
 	fs := flag.NewFlagSet("worktree worker prepare", flag.ExitOnError)
 	lane := fs.String("lane", "", "worker's lane (e.g. cmd, gateway) — a segment of the worktree dir name")
@@ -224,6 +232,7 @@ func worktreeWorkerPrepare(argv []string) {
 	fs.Var(&paths, "path", "explicit intended land path (repeatable; required with --message for LAND_READY inventory)")
 	wtRoot := fs.String("wt-root", "", "parent dir for the worktree (default: FLEET_WORKER_WORKTREE_ROOT or per-OS scratch)")
 	root := fs.String("root", "", "repo root (default: discover from cwd)")
+	prepareBudget := fs.Duration("prepare-budget", defaultWorkerPrepareBudget, "wall-clock budget for one prepare's materialize→verify→stamp sequence (default 2m); a loaded Windows host materializing a ~30k-file checkout can need more — raise per invocation, never remove the bound")
 	fs.Parse(argv)
 
 	// Refuse a malformed intent before any side effect: refusing it after
@@ -264,9 +273,9 @@ func worktreeWorkerPrepare(argv []string) {
 	if *preserveExisting {
 		preservingGate = worktreePreservingGate(repoRoot, workerworktree.Path(*lane, *key, *wtRoot),
 			owner, *leaseHolder, *leaseGeneration, admittedPaths, *baseSHA, *reserveBytes)
-		res = workerworktree.PreparePreservingBounded(repoRoot, *lane, *key, *baseSHA, *wtRoot, owner, 2*time.Minute, preservingGate, workerworktree.PreservingIntent{Message: *message, Paths: paths, AdmittedPaths: admittedPaths})
+		res = workerworktree.PreparePreservingBounded(repoRoot, *lane, *key, *baseSHA, *wtRoot, owner, *prepareBudget, preservingGate, workerworktree.PreservingIntent{Message: *message, Paths: paths, AdmittedPaths: admittedPaths})
 	} else {
-		res = workerworktree.PrepareOwnedBounded(repoRoot, *lane, *key, strings.TrimSpace(*baseSHA), strings.TrimSpace(*wtRoot), owner, 2*time.Minute)
+		res = workerworktree.PrepareOwnedBounded(repoRoot, *lane, *key, strings.TrimSpace(*baseSHA), strings.TrimSpace(*wtRoot), owner, *prepareBudget)
 	}
 	prospectiveCount := len(capacityCensus.Paths)
 	if res.OK && !res.Reused {
