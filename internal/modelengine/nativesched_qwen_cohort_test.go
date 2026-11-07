@@ -202,7 +202,7 @@ func TestNativeSchedulerBoundedDecodeCohorts(t *testing.T) {
 					}
 				}
 				snap := s.recorder.Snapshot(0, "")
-				if snap.Cohorts.Steps != 2 || snap.Cohorts.MaxLanes != tc.n ||
+				if snap.Cohorts.Steps != 2 || snap.Cohorts.MaxLanes != float64(tc.n) ||
 					snap.Decode[enginestep.PathBatched].Steps != uint64(len(wantWidths)) ||
 					s.sharedPanels != uint64(len(wantWidths)*3) || s.sharedMACs != uint64(tc.n*2*7) {
 					t.Fatalf("offered/executed receipts disagree: %+v panels=%d macs=%d", snap, s.sharedPanels, s.sharedMACs)
