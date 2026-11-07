@@ -298,6 +298,7 @@ func (c *KVCache) CloneWithReserve(extraPositions int) *KVCache {
 		pos:     cloneIntsWithReserve(c.pos, extraPositions),
 		lineage: c.lineage.clone(extraPositions),
 		linear:  c.linear.clone(),
+		mutGen:  c.mutGen,
 	}
 	if c.quantized() {
 		n.kQ8 = make([]kvPackedRow, len(c.kQ8))
@@ -374,6 +375,11 @@ func (c *KVCache) reserveTokenKVLayer(layer int) bool {
 }
 
 func cloneFloat32WithReserve(src []float32, extra int) []float32 {
+	// Preserve absent planes when no capacity was requested. Snapshots must not
+	// turn a hybrid layer's nil token-KV state into a present empty slice.
+	if src == nil && extra == 0 {
+		return nil
+	}
 	dst := make([]float32, len(src), len(src)+extra)
 	copy(dst, src)
 	return dst

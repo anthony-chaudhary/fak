@@ -237,9 +237,14 @@ func (c *linearAttnCache) clone() *linearAttnCache {
 }
 
 func (s linearAttnLayerState) clone() linearAttnLayerState {
-	out := linearAttnLayerState{
-		recurrent: make([][]float32, len(s.recurrent)),
-		conv:      make([][]float32, len(s.conv)),
+	var out linearAttnLayerState
+	// Full-attention layers and an untouched convolution window have absent
+	// state. Preserve that distinction across speculative snapshot rollback.
+	if s.recurrent != nil {
+		out.recurrent = make([][]float32, len(s.recurrent))
+	}
+	if s.conv != nil {
+		out.conv = make([][]float32, len(s.conv))
 	}
 	for h := range s.recurrent {
 		out.recurrent[h] = cloneFloat32WithReserve(s.recurrent[h], 0)
