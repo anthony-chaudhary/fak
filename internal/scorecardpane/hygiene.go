@@ -109,6 +109,9 @@ var rootAllowedOther = map[string]bool{
 	".mcp.json": true, ".gitmodules": true, ".markdownlint.json": true,
 	"server.json": true, "glama.json": true, "smithery.yaml": true,
 	"fak-mac.local.ps1.example": true,
+	// .worktreeinclude is the canonical worker-worktree sparse-checkout policy
+	// (fak#12493) — root placement is the contract internal/dojocal resolves.
+	".worktreeinclude": true,
 }
 
 // HygieneKPI is one KPI's result. defects = HARD units of hygiene-debt; soft =

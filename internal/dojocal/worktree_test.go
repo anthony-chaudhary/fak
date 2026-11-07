@@ -403,3 +403,118 @@ func TestApplyWorktreeIncludeEmptyNoop(t *testing.T) {
 		t.Errorf("expected docs/readme.md to exist: %v", err)
 	}
 }
+
+// TestRootWorktreeIncludePolicy pins the committed root .worktreeinclude
+// contract (fak#12493): a detached worker worktree filtered by the canonical
+// policy keeps every Go package (source, assembly, tests), the module/build/CI
+// config, and package-local //go:embed assets, while omitting the heavy
+// non-code trees — docs/research/inventory corpora, visuals media, docs data
+// bulk, and tools. It also pins the docs-lane override: a worker explicitly
+// targeting docs copies the root policy into its worktree, appends the extra
+// include lines, and the engine prefers that file over the root policy.
+func TestRootWorktreeIncludePolicy(t *testing.T) {
+	// 1. The canonical policy must be committed at the repository root.
+	policyData, err := os.ReadFile(filepath.Join("..", "..", ".worktreeinclude"))
+	if err != nil {
+		t.Fatalf("root .worktreeinclude not committed: %v", err)
+	}
+
+	// 2. Shape a temp repo like fak: Go packages (with assembly and an
+	// embedded asset), the heavy corpora/media/docs/tools trees, and the
+	// build/CI config the policy must keep.
+	repo := t.TempDir()
+	write := func(rel, content string) {
+		t.Helper()
+		p := filepath.Join(repo, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitRun := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
+		}
+	}
+	write("go.mod", "module example.com/shaped\n\ngo 1.26\n")
+	write("Makefile", "test:\n\tgo test ./...\n")
+	write("README.md", "# shaped repo\n")
+	write(".github/workflows/ci.yml", "on: push\n")
+	write("cmd/demo/main.go", "package main\n\nimport _ \"embed\"\n\n//go:embed page.html\nvar page string\n\nfunc main() { _ = page }\n")
+	write("cmd/demo/page.html", "<html>demo</html>\n")
+	write("pkg/a/a.go", "package a\n")
+	write("pkg/a/a_test.go", "package a\n")
+	write("pkg/a/accel_amd64.s", "// asm\n")
+	write("docs/research/inventory/corpus.jsonl.gz", "corpus-bytes")
+	write("docs/research/inventory/a2a.json", "{}")
+	write("docs/data/big.json", "{}")
+	write("docs/guide.md", "# guide\n")
+	write("visuals/hero.png", "png-bytes")
+	write("visuals/demo.mp4", "mp4-bytes")
+	write("tools/probe.py", "print('x')\n")
+	gitRun("init", "-q")
+	gitRun("config", "user.name", "Tester")
+	gitRun("config", "user.email", "tester@test.com")
+	gitRun("add", ".")
+	gitRun("commit", "-q", "-m", "initial commit")
+
+	// 3. Install the canonical root policy (committed, as in the real repo)
+	// and filter a fresh worktree.
+	if err := os.WriteFile(filepath.Join(repo, ".worktreeinclude"), policyData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun("add", ".worktreeinclude")
+	gitRun("commit", "-q", "-m", "install root worktree include policy")
+	wtDir := createTestWorktree(t, repo)
+	if err := ApplyWorktreeInclude(wtDir, nil); err != nil {
+		t.Fatalf("ApplyWorktreeInclude: %v", err)
+	}
+
+	// 4. Kept: Go source, tests, assembly, module/build/CI config, embedded
+	// assets, and the policy file itself.
+	for _, kept := range []string{
+		"pkg/a/a.go", "pkg/a/a_test.go", "pkg/a/accel_amd64.s",
+		"go.mod", "Makefile", "README.md", ".github/workflows/ci.yml",
+		"cmd/demo/main.go", "cmd/demo/page.html", ".worktreeinclude",
+	} {
+		if _, err := os.Stat(filepath.Join(wtDir, filepath.FromSlash(kept))); err != nil {
+			t.Errorf("policy must keep %s: %v", kept, err)
+		}
+	}
+	// Omitted: corpora, media, docs bulk, non-code tools.
+	for _, omitted := range []string{
+		"docs/research/inventory/corpus.jsonl.gz", "docs/research/inventory/a2a.json",
+		"docs/data/big.json", "docs/guide.md",
+		"visuals/hero.png", "visuals/demo.mp4", "tools/probe.py",
+	} {
+		if _, err := os.Stat(filepath.Join(wtDir, filepath.FromSlash(omitted))); !os.IsNotExist(err) {
+			t.Errorf("policy must omit %s", omitted)
+		}
+	}
+
+	// 5. Docs-lane override: copy the root policy into the worktree and append
+	// the docs include; the engine must prefer the worktree-local file and
+	// restore docs without dropping the code the root policy keeps.
+	override := string(policyData) + "\ndocs/\n"
+	if err := os.WriteFile(filepath.Join(wtDir, ".worktreeinclude"), []byte(override), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyWorktreeInclude(wtDir, nil); err != nil {
+		t.Fatalf("ApplyWorktreeInclude (override): %v", err)
+	}
+	for _, restored := range []string{
+		"docs/research/inventory/a2a.json", "docs/guide.md",
+		"pkg/a/a.go", "go.mod",
+	} {
+		if _, err := os.Stat(filepath.Join(wtDir, filepath.FromSlash(restored))); err != nil {
+			t.Errorf("docs-lane override must restore %s: %v", restored, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(wtDir, "visuals", "hero.png")); !os.IsNotExist(err) {
+		t.Errorf("docs-lane override must stay surgical (visuals/ still omitted)")
+	}
+}

@@ -211,6 +211,9 @@ ROOT_ALLOWED_OTHER = {
     # a *.example template a contributor copies to a gitignored local override —
     # the public-safe seed for `fak claude-mac-fak` (see fak-mac.local.ps1).
     "fak-mac.local.ps1.example",
+    # the canonical worker-worktree sparse-checkout policy (fak#12493) — root
+    # placement is the contract internal/dojocal resolves.
+    ".worktreeinclude",
 }
 
 # This tool's own published snapshot: never scored (it would oscillate — the report

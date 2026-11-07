@@ -1,0 +1,82 @@
+# fak .worktreeinclude — canonical sparse-checkout policy for detached worker
+# worktrees. `fak worktree worker prepare` applies it after checkout (engine:
+# internal/dojocal/worktree.go — non-cone gitignore-style include patterns;
+# comments and blank lines are skipped).
+#
+# Semantics: a tracked file is checked out iff it matches ANY pattern below;
+# everything not matched is omitted from the worker worktree. Pattern shapes
+# verified empirically against git non-cone sparse-checkout (2.55):
+#   - unanchored dir patterns ("testdata/") match that dir name at any depth
+#     and keep its contents;
+#   - root-anchored dir patterns ("/.github/") DO NOT match — use the
+#     unanchored form (or a root-anchored glob like "/.github/**") instead;
+#   - root-anchored file patterns ("/*.md", "/go.mod") do match.
+#
+# Excluded by omission (fak#12493 — the reason this policy exists; sizes are
+# tracked-checkout approximations):
+#   docs/        ~203 MB: docs/research/inventory corpora (jsonl.gz/json),
+#                docs data json/jsonl bulk, prose
+#   visuals/     ~85 MB: png/gif/mp4/svg media
+#   tools/       ~21 MB python tooling;  experiments/ ~12 MB;  l3/ ~2 MB
+#   third_party/ ~26 MB vendored C++/CUDA headers (not go-build inputs;
+#                the one vendored asset a package embeds is re-included below)
+# A worker that explicitly targets an omitted tree (e.g. a docs-lane worker)
+# copies this policy into its worktree directory as .worktreeinclude, appends
+# the extra include lines, and the engine prefers that file over this root
+# policy.
+
+# --- Go source, tests, and Go assembly: every package must build and test ---
+*.go
+*.s
+
+# --- Module, build, and CI configuration ---
+/go.mod
+/go.sum
+/Makefile
+/VERSION
+/Dockerfile
+/Dockerfile.cuda
+/.gitignore
+/.gitattributes
+/.worktreeinclude
+.githooks/
+.github/
+scripts/
+
+# --- Package-local assets: //go:embed targets and test fixtures ---
+testdata/
+*.html
+*.metal
+*.comp
+*.golden
+*.txt
+*.js
+internal/**/*.json
+cmd/**/*.json
+internal/egresslist/lists/
+internal/syspromptmmu/third_party/
+internal/**/*.h
+internal/**/*.hpp
+internal/**/*.cuh
+internal/**/*.cu
+internal/**/*.c
+cmd/**/*.h
+cmd/**/*.hpp
+
+# --- Small self-contained trees workers demo or extend ---
+examples/
+pkg/
+.agents/
+.claude/
+
+# --- Root orientation, license, and config files ---
+/*.md
+/*.toml
+/*.json
+/*.cff
+/*.yaml
+/*.yml
+/*.sh
+/*.ps1
+/*.example
+/LICENSE

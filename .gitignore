@@ -928,6 +928,7 @@ Microsoft/
 !/.gopls
 !/.junie
 !/.mcp.json
+!/.worktreeinclude
 
 # Video-generation scratch output. Keep project JSON/tools, review proofs, and
 # published final media committable; ignore only regenerable frame/output trees.
