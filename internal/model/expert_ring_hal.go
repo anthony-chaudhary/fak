@@ -286,6 +286,10 @@ type ExpertRingStats struct {
 	// computed against it, so it says nothing about overlap.
 	AsyncOverlapped int `json:"async_overlapped"`
 	AsyncWaited     int `json:"async_waited"`
+	// StableCapBytes / StableBytes are the scan-resistant stable set (expert_ring_stable.go): the
+	// pinned-on-admit ceiling and the bytes it holds. Both 0 when the stable set is off.
+	StableCapBytes int64 `json:"stable_cap_bytes,omitempty"`
+	StableBytes    int64 `json:"stable_bytes,omitempty"`
 }
 
 // AsyncOverlapFraction is the share of fenced activated-expert transfers that had already landed
@@ -338,6 +342,8 @@ func (r *pagedRing) stats() ExpertRingStats {
 		Lookups:          r.lookups,
 		Refusals:         r.refused,
 		PageInBytes:      r.pageInBytes,
+		StableCapBytes:   r.stableCap,
+		StableBytes:      r.stableBytes,
 		PinnedCount:      r.pins.Len(),
 
 		Prefetched:       r.prefetched,

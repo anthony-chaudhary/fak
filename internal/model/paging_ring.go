@@ -67,6 +67,11 @@ type pagedRing struct {
 	// High-water mark of pool.Used(): the boundedness witness, unrecoverable from used() alone.
 	peak int64
 
+	// Scan-resistant stable set (expert_ring_stable.go): cold admits are pinned while their bytes
+	// fit stableCap, so a layer-cyclic sweep larger than the ring cannot flush them. 0 = off.
+	stableCap   int64
+	stableBytes int64
+
 	// Live hold() spans per weight; a held weight is pinned in the pool for the span, so a later
 	// admit cannot evict a handle its caller is still using.
 	holds map[polymodel.ModelID]int
@@ -271,6 +276,10 @@ func (r *pagedRing) stageWithError(name string, mk func() compute.Tensor, dtype 
 	}
 	// Reuse the pool's snapshot check rather than duplicating its pinned/held feasibility
 	// rule. This is no reservation: the final Admit still rechecks.
+	stable := !pinned && r.stableAdmit(weightBytes)
+	if stable {
+		pinned = true
+	}
 	if r.pool.CheckAdmission(polymodel.Model{ID: id, WeightBytes: weightBytes, Pinned: pinned}) == polymodel.ErrPinnedNoRoom {
 		return compute.Tensor{}, polymodel.ErrPinnedNoRoom
 	}
@@ -280,6 +289,7 @@ func (r *pagedRing) stageWithError(name string, mk func() compute.Tensor, dtype 
 	source := mk()
 	m := polymodel.Model{ID: id, WeightBytes: weightBytes, Pinned: pinned}
 	if wt, reused := r.tryRefill(source, m, dtype); reused {
+		r.noteStableAdmit(stable, weightBytes)
 		r.pageIn++
 		booked = true
 		r.pageInBytes += weightBytes // Reusing storage does not remove H2D traffic.
@@ -304,6 +314,7 @@ func (r *pagedRing) stageWithError(name string, mk func() compute.Tensor, dtype 
 		}
 		return compute.Tensor{}, err
 	}
+	r.noteStableAdmit(stable, weightBytes)
 	r.pageIn++
 	booked = true
 	r.pageInBytes += weightBytes
@@ -467,6 +478,7 @@ func (r *pagedRing) freeAll() {
 	}
 	r.pending = nil
 	r.holds, r.heldPins = nil, nil
+	r.stableBytes = 0
 }
 
 // matMul runs y = w·x for the named f32 weight under the ring budget — a thin f32 specialization
