@@ -2069,7 +2069,8 @@ func (s *NativeScheduler) stepSolo(ln *schedLane, iteration uint64) {
 	}
 }
 
-// stepOnce stages a token per active lane, advances it with ONE shared StepBatch,
+// stepOnce stages a token per active lane, advances it through the selected model
+// route (bounded groups for eligible independent Qwen cohorts),
 // then publishes that prior token and stages its successor. A terminal staged token
 // is retired before the batch so it never enters StepBatch's id panel.
 //
@@ -2116,25 +2117,105 @@ func (s *NativeScheduler) stepOnce(active []*schedLane, iteration uint64) {
 	if len(cont) == 0 {
 		return
 	}
-	execLanes := make([]*schedLane, 0, len(cont))
-	execIDs := make([]int, 0, len(cont))
-	seqs := make([]*model.Session, 0, len(cont))
-	for i, ln := range cont {
+	limit := s.decodeCohortLimit(cont)
+	// One generation belongs to this logical iteration, even when its eligible
+	// cohort needs several existing bounded model calls.
+	gen := s.fwd.Load()
+	for start := 0; start < len(cont); {
+		width := len(cont) - start
+		if limit > 0 && width > limit {
+			width = limit
+			if len(cont)-start-width == 1 && width > 2 {
+				width-- // 9 -> 7+2; 17 -> 8+7+2, never an avoidable singleton.
+			}
+		}
+		end := start + width
+		s.stepDecodeCohort(cont[start:end], ids[start:end], iteration, gen)
+		start = end
+	}
+	s.noteStepSkipDrafts(iteration, false, active)
+}
+
+// decodeCohortLimit observes the complete offered owner set while the serialized
+// executor owns mutation. Do not borrow future groups just to inspect them.
+func (s *NativeScheduler) decodeCohortLimit(lanes []*schedLane) int {
+	if len(lanes) <= 8 {
+		return 0 // The established call already fits; avoid preflight on this path.
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seqs := make([]*model.Session, 0, len(lanes))
+	for _, ln := range lanes {
+		if !s.runningDecodeLaneLocked(ln) || ln.sess == nil ||
+			ln.sess == ln.statsSess || ln.inflightSess != nil {
+			return 0
+		}
+		seqs = append(seqs, ln.sess)
+	}
+	return (&model.BatchSession{M: s.m, Seqs: seqs}).Qwen35IndependentDecodeCohortLimit()
+}
+
+// retireDecodeBorrow is also a defer boundary: a model, observer or publication
+// panic/Goexit must not leave a real session stranded behind a statistics shell.
+// Register one defer per borrow so every remaining owner is visited even if
+// another owner's cleanup itself panics. Normal published owners are a no-op.
+func (s *NativeScheduler) retireDecodeBorrow(ln *schedLane, sess *model.Session) {
+	// Cleanup must not replace the original forward/observer panic being
+	// unwound. finish publishes a failed terminal result if cleanup aborts.
+	defer func() { _ = recover() }()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ln == nil || ln.inflightSess != sess {
+		return
+	}
+	if ln.restoreSessionFromModelLocked(sess) {
+		err := ln.ctx.Err()
+		if err == nil {
+			err = errNativeSchedulerLaneNotDecodeReady
+		}
+		ln.finish(nil, err)
+	} else {
+		ln.inflightSess = nil
+		s.closeLaneSession(sess)
+	}
+}
+
+func (s *NativeScheduler) stepDecodeCohort(lanes []*schedLane, ids []int, iteration uint64, gen ForwardGen) {
+	execLanes := make([]*schedLane, 0, len(lanes))
+	execIDs := make([]int, 0, len(lanes))
+	seqs := make([]*model.Session, 0, len(lanes))
+	for i, ln := range lanes {
 		if sess := s.takeDecodeSession(ln); sess != nil {
+			defer s.retireDecodeBorrow(ln, sess)
 			execLanes = append(execLanes, ln)
 			execIDs = append(execIDs, ids[i])
 			seqs = append(seqs, sess)
 		}
 	}
-	if len(execLanes) == 0 {
+	for _, ln := range execLanes {
+		s.beforeModelExecution(nativeSchedulerEventDecode, ln)
+	}
+	// Cancellation may occur in a preceding group's execution or even in the
+	// callbacks above. Compact only this unsubmitted group; never replay an
+	// earlier group or pull an already advanced lane back into the panel.
+	live := 0
+	for i, ln := range execLanes {
+		s.mu.Lock()
+		ready := s.runningDecodeLaneLocked(ln) && ln.inflightSess == seqs[i] && ln.ctx.Err() == nil
+		s.mu.Unlock()
+		if !ready {
+			s.retireDecodeBorrow(ln, seqs[i])
+			continue
+		}
+		execLanes[live], execIDs[live], seqs[live] = ln, execIDs[i], seqs[i]
+		live++
+	}
+	execLanes, execIDs, seqs = execLanes[:live], execIDs[:live], seqs[:live]
+	if live == 0 {
 		return
 	}
-	if len(execLanes) == 1 {
-		s.beforeModelExecution(nativeSchedulerEventDecode, execLanes[0])
+	if live == 1 {
 		decodeStarted := s.now()
-		// Load the live forward generation once, BEFORE the forward call, so
-		// this whole step runs on one generation (in-flight continuity).
-		gen := s.fwd.Load()
 		logits := RunWithOp(s.coupler, OpDecode, func() []float32 {
 			return gen.Impl.Step(seqs[0], execIDs[0])
 		})
@@ -2145,31 +2226,21 @@ func (s *NativeScheduler) stepOnce(active []*schedLane, iteration uint64) {
 			execLanes[0].retireDeferredToken(iteration)
 			execLanes[0].stageDeferredToken()
 		}
-		s.noteStepSkipDrafts(iteration, false, active)
 		return
 	}
-	// The shared, weight-stream-amortised decode step: ONE StepBatch over every
-	// still-running lane's own Session (each owns its KV). This is the exact
-	// continuous-batching primitive a real native scheduler is built on.
 	bs := &model.BatchSession{M: s.m, Seqs: seqs}
 	if s.recorder != nil {
 		bs.ObserveSerialStep = s.recorder.ObserveSerialFallback
 	}
-	for _, ln := range execLanes {
-		s.beforeModelExecution(nativeSchedulerEventDecode, ln)
-	}
 	decodeStarted := s.now()
-	// Load the live forward generation once, BEFORE the forward call, so this
-	// whole batch step runs on one generation (in-flight continuity).
-	gen := s.fwd.Load()
 	out := RunWithOp(s.coupler, OpBatch, func() [][]float32 {
 		return gen.Impl.StepBatch(bs, execIDs)
 	})
 	elapsed := s.now().Sub(decodeStarted)
 	s.cachePhaseLatency.Observe(modelperfobs.CachePipelinePhaseDecode, elapsed)
 	if panels := bs.LastStepSharedPanels(); panels > 0 {
-		// Scheduling a cohort is not shared execution: declined batches are
-		// observed per actual scalar forward by ObserveSerialStep instead.
+		// Offered cohort size is observed by the outer iteration. These receipts
+		// describe only the actual shared call, including cancellation shrinkage.
 		s.recorder.ObserveDecodeStep(enginestep.PathBatched, len(execLanes), elapsed)
 		s.mu.Lock()
 		s.sharedBatchSteps++
@@ -2177,13 +2248,15 @@ func (s *NativeScheduler) stepOnce(active []*schedLane, iteration uint64) {
 		s.sharedMACs += uint64(bs.LastStepMACs())
 		s.mu.Unlock()
 	}
+	if len(out) != len(execLanes) {
+		panic(errNativeSchedulerLaneNotDecodeReady)
+	}
 	for i, ln := range execLanes {
 		if s.publishDecodeSession(ln, seqs[i], copyF32(out[i])) {
 			ln.retireDeferredToken(iteration)
 			ln.stageDeferredToken()
 		}
 	}
-	s.noteStepSkipDrafts(iteration, false, active)
 }
 
 // decodeBatchBucket selects the fixed-shape decode graph bucket that a live
@@ -2456,8 +2529,8 @@ func (ln *schedLane) Cancel() {
 	}
 }
 
-// Reclaimed reports whether the lane released its KV-bearing session (slot
-// reclaim). True once terminal, on done AND on cancellation. Blocks until terminal.
+// Reclaimed reports whether terminal cleanup completed, including cancellation.
+// It blocks until terminal; an aborted cleanup closes done but reports false.
 func (ln *schedLane) Reclaimed() bool {
 	<-ln.done
 	return ln.reclaimed
@@ -2469,28 +2542,42 @@ func (ln *schedLane) finish(res *abi.Result, err error) {
 	if ln.terminal {
 		return
 	}
-	ln.res, ln.err, ln.reclaimed = res, err, true
+	ln.res, ln.err, ln.reclaimed = res, err, false
+	retired := false
+	defer func() {
+		ln.reclaimed = retired
+		if !retired {
+			ln.res = nil
+			if ln.err == nil {
+				ln.err = errNativeSchedulerLaneNotDecodeReady
+			}
+		}
+		ln.cancel()
+		close(ln.tokens)
+		close(ln.done)
+	}()
 	ln.hostKV = nil
 	ln.savedLogits = nil
 	ln.terminal = true
 	published, inflight, shell := ln.sess, ln.inflightSess, ln.statsSess
 	ln.sess, ln.inflightSess, ln.statsSess = nil, nil, nil
-	ln.closeRealSession(published, shell)
-	if inflight != published {
-		ln.closeRealSession(inflight, shell)
-	}
-	if ln.gpuDirectKV != nil {
-		if ln.sched != nil && ln.sched.preemption.GPUDirectSwapper != nil {
-			ln.sched.preemption.GPUDirectSwapper.FreeDescriptor(ln.gpuDirectKV)
+	descriptor := ln.gpuDirectKV
+	ln.gpuDirectKV = nil
+	func() {
+		// Every retirement phase runs even when an earlier backend callback
+		// panics or Goexits. Detach handles before handing them to callbacks.
+		if ln.sched != nil {
+			defer ln.sched.elastic.laneFinished(ln)
+			if descriptor != nil && ln.sched.preemption.GPUDirectSwapper != nil {
+				defer ln.sched.preemption.GPUDirectSwapper.FreeDescriptor(descriptor)
+			}
 		}
-		ln.gpuDirectKV = nil
-	}
-	if ln.sched != nil {
-		ln.sched.elastic.laneFinished(ln)
-	}
-	ln.cancel() // release the derived context
-	close(ln.tokens)
-	close(ln.done)
+		if inflight != published {
+			defer ln.closeRealSession(inflight, shell)
+		}
+		ln.closeRealSession(published, shell)
+	}()
+	retired = true
 }
 
 func (ln *schedLane) closeRealSession(sess, shell *model.Session) {

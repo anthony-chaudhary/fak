@@ -9,6 +9,118 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
+// fak-test:runtime fast est=200ms lane=default
+func TestQwen35IndependentDecodeCohortLimit(t *testing.T) {
+	old := qwen35HybridQ4KBatchStep
+	qwen35HybridQ4KBatchStep = nil
+	t.Cleanup(func() { qwen35HybridQ4KBatchStep = old })
+	query := func(t *testing.T, bs *BatchSession) int {
+		t.Helper()
+		q, ok := any(bs).(interface{ Qwen35IndependentDecodeCohortLimit() int })
+		if !ok {
+			t.Fatal("missing model-owned independent cohort preflight")
+		}
+		return q.Qwen35IndependentDecodeCohortLimit()
+	}
+	for _, n := range []int{1, 2, 8, 9, 16, 17} {
+		t.Run(fmt.Sprintf("width_%d", n), func(t *testing.T) {
+			bs, be, _ := newPortableQwen35Batch(t, n)
+			allocs, reads, hosts := len(be.classes), be.readCalls, be.hostCalls
+			want := 8
+			if n == 1 {
+				want = 0
+			}
+			if got := query(t, bs); got != want {
+				t.Fatalf("limit=%d want=%d", got, want)
+			}
+			if len(be.classes) != allocs || be.readCalls != reads || be.hostCalls != hosts ||
+				be.cloneCalls != 0 || be.batchCalls != 0 || be.gdnCalls != 0 {
+				t.Fatal("preflight materialized or executed backend work")
+			}
+			for _, s := range bs.Seqs {
+				if s.halKV.Len() != 0 || len(s.halLineage.ids) != 0 || s.BackendSessionClosed() {
+					t.Fatal("preflight advanced or retired a session")
+				}
+			}
+		})
+	}
+	for _, name := range []string{
+		"wrong_marker", "mixed_backend", "mixed_model", "session_alias", "kv_alias",
+		"state_alias", "owner_alias", "buffer_alias", "shared_cow", "missing_owner",
+		"retired", "invalid_owner", "unexpected_state", "native_override",
+	} {
+		t.Run(name, func(t *testing.T) {
+			bs, be, _ := newPortableQwen35Batch(t, 9)
+			first, last := bs.Seqs[0], bs.Seqs[8]
+			// Opposite sides of the 7+2 boundary: checking only each submitted
+			// batch would incorrectly admit these aliases.
+			switch name {
+			case "wrong_marker":
+				be.batchPath = "wrong"
+			case "mixed_backend":
+				other := &portableQwen35BatchBackend{sequencePrefillBackend: newSequencePrefillBackend(bs.M), batchPath: compute.Qwen35IndependentDecodeBatchPath}
+				saved := last.Backend
+				last.Backend = other
+				defer func() { last.Backend = saved }()
+			case "mixed_model":
+				bs.M = NewSynthetic(qwen35HybridTestCfg())
+			case "session_alias":
+				bs.Seqs[8] = first
+			case "kv_alias":
+				saved := last.halKV
+				last.halKV = first.halKV
+				defer func() { last.halKV = saved }()
+			case "state_alias":
+				saved := last.qwen35HAL
+				last.qwen35HAL = first.qwen35HAL
+				defer func() { last.qwen35HAL = saved }()
+			case "owner_alias":
+				saved := last.qwen35HAL.layers[0]
+				last.qwen35HAL.layers[0] = first.qwen35HAL.layers[0]
+				defer func() { last.qwen35HAL.layers[0] = saved }()
+			case "buffer_alias":
+				st := &last.qwen35HAL.layers[0]
+				savedState, savedOwned := st.conv, st.owner.conv
+				st.conv = first.qwen35HAL.layers[0].conv
+				st.owner.conv = st.conv
+				defer func() { st.conv, st.owner.conv = savedState, savedOwned }()
+			case "shared_cow":
+				owner := last.qwen35HAL.layers[0].owner
+				owner.refs++
+				defer func() { owner.refs-- }()
+			case "missing_owner":
+				st := &last.qwen35HAL.layers[0]
+				saved := st.owner
+				st.owner = nil
+				defer func() { st.owner = saved }()
+			case "retired":
+				last.halClosed = true
+				defer func() { last.halClosed = false }()
+			case "invalid_owner":
+				owner := last.qwen35HAL.layers[0].owner
+				owner.graphInvalid = true
+				defer func() { owner.graphInvalid = false }()
+			case "unexpected_state":
+				saved := last.qwen35HAL.layers[3]
+				last.qwen35HAL.layers[3] = first.qwen35HAL.layers[0]
+				defer func() { last.qwen35HAL.layers[3] = saved }()
+			case "native_override":
+				qwen35HybridQ4KBatchStep = func(*BatchSession, []int) ([][]float32, bool) {
+					t.Fatal("preflight invoked platform override")
+					return nil, false
+				}
+				defer func() { qwen35HybridQ4KBatchStep = nil }()
+			}
+			if got := query(t, bs); got != 0 {
+				t.Fatalf("unsafe/unsupported cohort limit=%d", got)
+			}
+			if be.batchCalls != 0 || be.gdnCalls != 0 || be.cloneCalls != 0 {
+				t.Fatal("declined preflight executed or cloned state")
+			}
+		})
+	}
+}
+
 // This provider witnesses model dispatch and ownership, not a device kernel or
 // numerical parity. Its projection receipts and logits are deliberately synthetic.
 type portableQwen35BatchBackend struct {
