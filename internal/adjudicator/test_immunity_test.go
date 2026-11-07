@@ -63,15 +63,15 @@ func TestImmunityRefusesTestFileWrites(t *testing.T) {
 			meta: map[string]string{"lane": "witness"},
 		},
 		{
-			name: "Write targeting *_test.go",
+			name: "Write overwriting an EXISTING *_test.go (tamper case stays gated)",
 			tool: "Write",
-			args: `{"filePath":"cmd/fak/main_test.go","content":"package main"}`,
+			args: `{"filePath":"decide_test.go","content":"package adjudicator"}`,
 			meta: map[string]string{"lane": "cmd"},
 		},
 		{
-			name: "write_file targeting *_test.go",
+			name: "write_file overwriting an EXISTING *_test.go (tamper case stays gated)",
 			tool: "write_file",
-			args: `{"path":"internal/policy/policy_test.go","content":"package policy"}`,
+			args: `{"path":"decide_test.go","content":"package policy"}`,
 			meta: map[string]string{"lane": "policy"},
 		},
 		{

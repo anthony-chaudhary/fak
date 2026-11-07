@@ -250,6 +250,16 @@ type Config struct {
 	// WorkspaceAdmissionPermissive explicitly admits lease DEFAULT_DENY failures.
 	// Peer LEASE_HELD conflicts and kernel policy denials remain enforced.
 	WorkspaceAdmissionPermissive bool
+	// SessionLane is the LAUNCH-TIME lane designation the host (fak guard) stamps
+	// onto every served tool call as trusted Meta["lane"] (#3707/#3708/#3709). It
+	// is the coordinator's spawn-time designation — the same trust level as the
+	// env the dispatcher sets for fleet workers — never wire input: the agent
+	// cannot set or spoof it. Lane-aware floors (test immunity) resolve the
+	// acting lane from it, so a designated test-author session launched with
+	// --lane test (or FAK_LANE=test) gets truthful lane semantics on the serving
+	// path instead of the historical "no lane attribution" default. Empty keeps
+	// the historical behavior byte-for-byte.
+	SessionLane string
 	// ControlIngress optionally supplies the operator control request handler.
 	// Nil leaves the control ingress disabled.
 	ControlIngress ControlIngress

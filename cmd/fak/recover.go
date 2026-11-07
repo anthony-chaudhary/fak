@@ -255,6 +255,7 @@ var emittedRecoveryReasons = []string{
 	"SYSTEM_COMMIT_HEADROOM",
 	"TAINT_EGRESS",
 	"TARGET_MOVED",
+	"TEST_TAMPER_REFUSED",
 	"TRUST_VIOLATION",
 	"UNKNOWN_TOOL",
 	"UNWITNESSED",
@@ -337,6 +338,19 @@ func treeRecoveryPlans(trunk string) map[string]recoveryPlan {
 			},
 			Notes: []string{
 				"re-verify divergence status and retry the push once the target settles",
+			},
+		},
+		"TEST_TAMPER_REFUSED": {
+			Reason:     "TEST_TAMPER_REFUSED",
+			Summary:    "the test-immunity gate refused a write/edit to a gating test file under a non-test lane (#10923)",
+			Executable: false,
+			Steps: []recoveryStep{
+				{Argv: []string{"git", "restore", "--source=HEAD", "--staged", "--worktree", "--", "<test-file>"}, Summary: "restore a corrupted test file to its committed HEAD content — the one test-file mutation the gate admits by shape (#14209; --source=HEAD --staged --worktree is the exact admitted form)", Safe: false},
+			},
+			Notes: []string{
+				"writing a NEW *_test.go file (typed Write tool, no TestMain in the body) is admitted as pure test authorship under any lane; if the refusal was on a new file carrying TestMain, drop the TestMain or use a designated test lane",
+				"editing an EXISTING test file is admitted only from a designated test lane: launch the session with `fak guard --lane test` (or FAK_LANE=test / DISPATCH_LANE=test at spawn) — the coordinator's launch-time designation, not an in-session bypass",
+				"never weaken an existing gating test to make your own implementation pass; when a source flip requires the test update in the same change, run that update from a designated test-author session",
 			},
 		},
 		"DIVERGED_DISJOINT": {

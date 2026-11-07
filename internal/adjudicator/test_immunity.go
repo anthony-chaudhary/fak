@@ -2,6 +2,7 @@ package adjudicator
 
 import (
 	"context"
+	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -207,6 +208,101 @@ func isTestConfigFile(baseLower string) bool {
 	return false
 }
 
+// newTestFileAuthorshipExempt reports whether this call is the pure authorship of
+// a Go test file that does not yet exist on disk: a brand-new *_test.go can only
+// ADD assertions, never weaken an existing gating suite, so refusing it is a false
+// positive for every designated-test-author workflow (fak-private guard complaints
+// #3707/#3708/#3709). The exemption is deliberately narrow and fail-closed:
+//   - typed write tools only — a shell/exec tool is a wildcard (it can move,
+//     delete, or append to existing tests), so it never gets this exemption;
+//   - Go test files only (*_test.go) — testdata, fixtures, and test configs can
+//     change how EXISTING tests run (a new conftest.py can skip them), so they
+//     stay gated;
+//   - the written content must be present and must not carry the vacuous-pass
+//     vectors: a TestMain definition (any whitespace spelling — a TestMain that
+//     skips m.Run() would make the whole package report ok without running a
+//     single test), an os.Exit call, or a flag.Set call (an init-time
+//     test.run filter runs zero tests and still reports ok). Everything exotic
+//     fails closed into the designated-test-lane route; plain test authorship
+//     (testing, t.Run, errors.Is) sails through;
+//   - the target must resolve inside the process working directory for RELATIVE
+//     paths (a relative path is only meaningful against the guard's CWD — the
+//     session workspace); an ABSOLUTE target is statted directly, because the
+//     existence check is the real gate and a serving router that hosts many
+//     workspaces has no single CWD to contain it. An unresolvable relative
+//     path fails closed, and a target that already exists stays gated (that is
+//     the tamper case the gate exists for).
+func newTestFileAuthorshipExempt(lowerTool string, args map[string]any, target string) bool {
+	if _, isCmd := commandArg(args); isCmd {
+		return false
+	}
+	if !writeShapedLower(lowerTool) {
+		return false
+	}
+	content, ok := argString(args, "content")
+	if !ok || strings.TrimSpace(content) == "" {
+		return false
+	}
+	baseLower := strings.ToLower(filepath.ToSlash(filepath.Base(target)))
+	if !strings.HasSuffix(baseLower, "_test.go") {
+		return false
+	}
+	resolved := workspaceResolvedPath(target)
+	if resolved == "" {
+		return false
+	}
+	if _, err := os.Stat(resolved); err == nil {
+		return false
+	} else if !os.IsNotExist(err) {
+		return false
+	}
+	// Whitespace-normalized vacuous-pass screen: `func TestMain (` (space before
+	// the paren) is valid Go and compiles clean, and a TestMain that skips
+	// m.Run() makes the whole package report ok without running a single test.
+	// Stripping every whitespace rune closes the spelling variants; os.Exit and
+	// flag.Set in a NEW test file are the init-based skip-all vectors
+	// (init{os.Exit(0)} / init{flag.Set("test.run","zzz")} both report ok
+	// vacuously). Anything exotic fails closed into the designated-test-lane
+	// route; plain authorship (testing, t.Run, errors.Is) sails through.
+	normalized := strings.Map(func(r rune) rune {
+		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			return -1
+		}
+		return r
+	}, content)
+	if strings.Contains(normalized, "funcTestMain(") ||
+		strings.Contains(normalized, "os.Exit(") ||
+		strings.Contains(normalized, "flag.Set(") {
+		return false
+	}
+	return true
+}
+
+// workspaceResolvedPath resolves a tool-call target for the authorship check.
+// An ABSOLUTE target is returned cleaned as-is — the existence stat is
+// unambiguous and the serving side may host many workspaces with no single CWD
+// to contain it. A RELATIVE target resolves against the process working
+// directory (the guard's CWD is the session workspace) and returns "" (the
+// fail-closed answer) when it cannot be resolved or escapes the CWD.
+func workspaceResolvedPath(target string) string {
+	clean := filepath.Clean(strings.Trim(filepath.ToSlash(strings.TrimSpace(target)), `"'`+"`"))
+	if clean == "" || clean == "." {
+		return ""
+	}
+	if filepath.IsAbs(clean) {
+		return clean
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	resolved := filepath.Join(wd, clean)
+	if !pathWithin(wd, resolved) {
+		return ""
+	}
+	return resolved
+}
+
 func isWriteOrEditTool(lowerTool string) bool {
 	if writeShapedLower(lowerTool) {
 		return true
@@ -348,6 +444,11 @@ func (a *Adjudicator) testImmunityVerdict(ctx context.Context, p Policy, c *abi.
 
 	for _, target := range targets {
 		if isTest, desc := IsTestImmunityTarget(target); isTest {
+			if newTestFileAuthorshipExempt(lowerTool, args, target) {
+				// Pure authorship of a NEW Go test file cannot weaken an existing
+				// gating suite; admit it even under an implementation lane.
+				continue
+			}
 			lane := resolveLane(ctx, p, c, args, a)
 			if lane == "" {
 				lane = "implementation"

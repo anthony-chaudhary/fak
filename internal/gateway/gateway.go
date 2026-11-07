@@ -269,6 +269,7 @@ func New(cfg Config) (*Server, error) {
 	s := &Server{
 		causalEmbeddings:             causalEmbeddings,
 		workspaceAdmissionPermissive: cfg.WorkspaceAdmissionPermissive,
+		sessionLane:                  strings.TrimSpace(cfg.SessionLane),
 		k:                            k,
 		toolPlugins:                  append([]toolplugin.Plugin(nil), cfg.ToolPlugins...),
 		toolPreferences:              cfg.ToolPreferences,

@@ -388,11 +388,14 @@ type Server struct {
 	// (prefix_reuse_attribution.go). Zero value is ready.
 	prefixReuse                  prefixReuseAttribution
 	workspaceAdmissionPermissive bool
-	featureCatalog               atomic.Pointer[FeatureCatalog]
-	responsesContinuationOnce    sync.Once
-	responsesContinuations       *responsesContinuationStore
-	remoteMaintenanceMu          sync.RWMutex
-	remoteMaintenanceAuthority   remotemaint.Authority
+	// sessionLane mirrors Config.SessionLane: the launch-time lane designation
+	// stamped as trusted Meta["lane"] on every served tool call. Empty = unset.
+	sessionLane                string
+	featureCatalog             atomic.Pointer[FeatureCatalog]
+	responsesContinuationOnce  sync.Once
+	responsesContinuations     *responsesContinuationStore
+	remoteMaintenanceMu        sync.RWMutex
+	remoteMaintenanceAuthority remotemaint.Authority
 
 	nativeProgress  nativeProgressReplay
 	k               *kernel.Kernel

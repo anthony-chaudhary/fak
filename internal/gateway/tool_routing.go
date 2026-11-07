@@ -808,6 +808,12 @@ func (s *Server) buildCall(ctx context.Context, tool, rawArgs string, readOnly b
 		return nil, fmt.Errorf("resolver: %w", err)
 	}
 	meta := metaFor(canonical, readOnly)
+	// Launch-time lane designation (Config.SessionLane): trusted host-side Meta,
+	// never wire input, so lane-aware floors resolve the acting lane the
+	// coordinator designated at spawn (#3707/#3708/#3709).
+	if s.sessionLane != "" {
+		meta["lane"] = s.sessionLane
+	}
 	if execRequest {
 		meta["requested_tool"] = requestedTool
 		meta["canonical_tool"] = "exec_command"

@@ -123,6 +123,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	preCompactHook := fs.String("precompact-hook", guardPreCompactModeShadow, "Claude Code PreCompact hook actuator for auto-compaction: off|shadow|enforce. shadow logs would-block/would-allow while exiting 0; enforce returns the compactcohere posture exit code.")
 	arbitrateConfig := guardArbitrateConfig{Mode: guardArbitrateModeShadow}
 	fs.Var(guardArbitrateFlagValue{cfg: &arbitrateConfig}, "lease", "guard launch lease admission as comma-separated mode=off|shadow|enforce,lane=<lane>,tree=<glob>,force=true (tree repeatable within one value; defaults to **/*)")
+	laneFlag := fs.String("lane", "", "launch-time lane designation stamped as trusted Meta[\"lane\"] on every served tool call (default: FAK_LANE, then DISPATCH_LANE, else unset). Lane-aware floors (test immunity) resolve the acting lane from it: a designated test-author session launched with --lane test (or FAK_LANE=test) gets truthful test-lane adjudication on the serving path instead of the historical no-attribution default. The agent cannot set or spoof it — it is the coordinator's spawn-time choice, logged at startup. Empty keeps the historical behavior.")
 	denyAllSettings := newDenyAllRetrySettings()
 	fs.Var(&denyAllSettings, "deny-all-continue", "Claude Code Stop hook that auto-RESUMES the agent after a deny-all turn: off|shadow|enforce, optionally followed by warn=N,final=N,max=N,same-stop=N. ENFORCE by default; the limits form one bounded retry policy. Example: --deny-all-continue=enforce,warn=2,final=4,max=6,same-stop=6. Claude children only.")
 	toolprocHooks := fs.String("toolproc-hooks", guardToolprocModeObserve, "Claude Code tool-process observation hooks (off|observe, observe by default): PreToolUse/PostToolUse/SessionEnd append spawn/exit/session_end rows to the workspace toolproc journal (fail-open; `fak toolproc ps --events .fak/toolproc/journal.jsonl` reads the live table). Claude children only.")
@@ -875,8 +876,24 @@ func cmdManageCommand(commandName string, argv []string) {
 	// exit funnel reads it when it writes the witness.
 	setGuardCompactionAnchorMode(*compactAnchorHead)
 
+	// Launch-time lane designation (#3707/#3708/#3709): --lane wins, then the
+	// coordinator-controlled spawn env the dispatcher already sets for fleet
+	// workers. Resolved BEFORE the gateway binds so the served Meta and the
+	// startup log can never disagree about which lane this session runs under.
+	sessionLane := strings.TrimSpace(*laneFlag)
+	if sessionLane == "" {
+		sessionLane = strings.TrimSpace(os.Getenv("FAK_LANE"))
+	}
+	if sessionLane == "" {
+		sessionLane = strings.TrimSpace(os.Getenv("DISPATCH_LANE"))
+	}
+	if sessionLane != "" {
+		gwLogf("guard: session lane designated at launch: %s (test-lane floors resolve this lane for every served tool call)", sessionLane)
+	}
+
 	srv, err := gateway.New(gateway.Config{
 		WorkspaceAdmissionPermissive: *workspaceAdmissionPermissive,
+		SessionLane:                  sessionLane,
 		EngineID:                     "mock",
 		Model:                        gatewayModel,
 		BaseURL:                      resolvedBase,
