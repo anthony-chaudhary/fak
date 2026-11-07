@@ -140,10 +140,16 @@ func TestNativeExactCommandGrantChatAdjudication(t *testing.T) {
 	defaultSrv := newNativeExactCommandServer(t, nil)
 	defaultCtx, cancelDefault := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancelDefault()
-	kept, _, dropped, served, hits := defaultSrv.adjudicateProposedServed(defaultCtx,
-		nativeBashCalls(t, granted, focusedDefault), "default-chat-proposal")
-	if len(kept) != 0 || dropped != 2 || served != "" || hits != 0 {
-		t.Fatalf("default chat adjudication kept=%+v dropped=%d served=%q hits=%d, want both Bash proposals denied", kept, dropped, served, hits)
+	defaultCalls := nativeBashCalls(t, granted, focusedDefault)
+	kept, adjs, dropped, served, hits := defaultSrv.adjudicateProposedServed(defaultCtx,
+		defaultCalls, "default-chat-proposal")
+	// Positive read-only CLI proposals do not require a lease. An exact native
+	// command grant must not be needed for, or widen, that existing read path.
+	if len(kept) != 1 || kept[0] != defaultCalls[1] || dropped != 1 || served != "" || hits != 0 {
+		t.Fatalf("default chat adjudication kept=%+v dropped=%d served=%q hits=%d, want only the positive read proposal retained", kept, dropped, served, hits)
+	}
+	if len(adjs) != 2 || adjs[0].Verdict.Reason != "DEFAULT_DENY" || adjs[0].Verdict.By != "lease-admission" || !adjs[1].Admitted {
+		t.Fatalf("default chat adjudications=%+v, want ungranted command denied and positive read admitted", adjs)
 	}
 
 	grants := []string{granted}
@@ -151,9 +157,9 @@ func TestNativeExactCommandGrantChatAdjudication(t *testing.T) {
 	grants[0] = granted + " && echo suffix"
 	exactCtx, cancelExact := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancelExact()
-	kept, adjs, dropped, served, hits := exactSrv.adjudicateProposedServed(exactCtx,
-		nativeBashCalls(t, granted, granted+" && echo suffix", "go env GOPATH"), "granted-chat-proposal")
-	if len(kept) != 0 || dropped != 3 || served != "" || hits != 0 {
+	kept, adjs, dropped, served, hits = exactSrv.adjudicateProposedServed(exactCtx,
+		nativeBashCalls(t, granted, granted+" && echo suffix", "go env GOPATH", focusedDefault+" && echo suffix"), "granted-chat-proposal")
+	if len(kept) != 0 || len(adjs) != 4 || dropped != 4 || served != "" || hits != 0 {
 		t.Fatalf("chat proxy must remain fail-closed: kept=%+v dropped=%d served=%q hits=%d adjs=%+v", kept, dropped, served, hits, adjs)
 	}
 	for _, adj := range adjs {
