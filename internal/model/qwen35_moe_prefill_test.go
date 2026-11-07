@@ -1,6 +1,7 @@
 package model
 
 import (
+	"math"
 	"strings"
 	"testing"
 )
@@ -313,76 +314,130 @@ func newQ4KQwen35MoEHybrid(t *testing.T, mutate func(*Config)) *Model {
 	return m
 }
 
-// TestQwen35MoEHybridQ4KBatchedPrefillMatchesTokenLoop pins the resident-Q4_K hybrid lane
-// for qwen3_5_moe to its per-token loop (tokenHiddenQ on sessionQ4KKernel) across a fresh
-// prefill and an appended one at a non-zero base. The routed FFN runs per row on the token
-// loop's kernel, so the only residual is the documented Q8-minority prefill-GEMM vs
-// decode-GEMV reduction order (TestPrefillQwen35HybridQ4KMatchesTokenLoop). Under the legacy
-// per-element GEMM that order is shared, and the dense lane's strict tolerances hold. Under
-// the default tile GEMM the drift is amplified by top-k routing (logits cosine measured
-// 0.999995 here), so that leg holds the cosine >= 0.9999 bar the Q4_K MoE lane uses
-// (TestPrefillBatchedQ4KMoEMatchesTokenLoop). [SW-VERIFIED, synthetic]
-// fak-test:runtime fast est=2s lane=default
+// TestQwen35MoEHybridQ4KBatchedPrefillMatchesTokenLoop checks the mixed resident-Q4_K
+// hybrid across fresh and appended prefills. The strict leg matches the Q8 minority's
+// scalar decode and legacy prefill reductions; legacy GEMM alone does not select that
+// decode reduction. Native Q8 minority legs retain the existing 0.9999 cosine contract.
+// Q4_K activation quantization is disabled in every leg to isolate Q8 reduction drift;
+// these are not full configured-Q4_K decode qualification. [SW-VERIFIED, synthetic]
+// fak-test:runtime fast est=3s lane=default
 func TestQwen35MoEHybridQ4KBatchedPrefillMatchesTokenLoop(t *testing.T) {
+	oldSDOT := q4kSDOTForce
 	setQ4KSDOTForTest(false)
-	t.Cleanup(func() { setQ4KSDOTForTest(true) })
-	m := newQ4KQwen35MoEHybrid(t, nil)
+	t.Cleanup(func() { q4kSDOTForce = oldSDOT })
 	first := qwen35MoEPromptA
 	second := []int{2, 13, 89, 41, 8, 77, 30, 64, 9, 15, 50, 21, 33, 44, 6, 90, 101, 255}
 
-	run := func(t *testing.T, mode string) (ref, got *Session, want, have [2][]float32) {
-		oldMode := qgemmMode
-		qgemmMode = mode
-		t.Cleanup(func() { qgemmMode = oldMode })
-		ref = m.NewSession()
-		ref.Q4K = true
+	runQ8MoEParityModes(t, func(t *testing.T, strict bool) {
+		m := newQ4KQwen35MoEHybrid(t, nil)
+		ref, got := m.NewSession(), m.NewSession()
+		ref.Q4K, got.Q4K = true, true
 		if _, ok := ref.tokenHiddenQKernel().(sessionQ4KKernel); !ok {
 			t.Fatal("premise broken: the Q4_K MoE token loop does not run sessionQ4KKernel")
+		}
+		got.PhaseProfiler = NewPhaseProfiler()
+		// Synthetic-fixture ceilings, not analytical roundoff or model-quality bounds.
+		// Across native AVX-512 legacy and AVX2 tiled reductions, measured scaled
+		// maxima are 0.03438 logits, 0.01918 K and 0.04095 V. Recurrent-state
+		// max absolute error is 6.834e-5; conv stays below the original 1e-5 bar.
+		// Cosine and greedy-token agreement remain separate gates.
+		const nativeLogitScaledTol, nativeKScaledTol, nativeVScaledTol = 0.04, 0.02, 0.05
+		const nativeRecurrentAbsTol = 1e-4
+		check := func(label string, want, have []float32, nativeScaledTol, nativeAbsTol float64) {
+			t.Helper()
+			if len(want) != len(have) {
+				t.Fatalf("%s length got %d want %d", label, len(have), len(want))
+			}
+			if len(want) == 0 {
+				return
+			}
+			var maxAbs, maxScaled, sumError, sumRef float64
+			for i, w := range want {
+				g := have[i]
+				if math.IsNaN(float64(w)) || math.IsInf(float64(w), 0) || math.IsNaN(float64(g)) || math.IsInf(float64(g), 0) {
+					t.Fatalf("%s[%d] is not finite: got %v want %v", label, i, g, w)
+				}
+				diff := math.Abs(float64(g) - float64(w))
+				maxAbs = math.Max(maxAbs, diff)
+				maxScaled = math.Max(maxScaled, diff/math.Max(1, math.Abs(float64(w))))
+				sumError += diff * diff
+				sumRef += float64(w) * float64(w)
+			}
+			c := cosine(want, have)
+			t.Logf("%s max-abs=%.3e max-scaled=%.3e error-RMS=%.3e reference-RMS=%.3e cosine=%.9f", label, maxAbs, maxScaled,
+				math.Sqrt(sumError/float64(len(want))), math.Sqrt(sumRef/float64(len(want))), c)
+			if !strict && nativeScaledTol > 0 && maxScaled > nativeScaledTol {
+				t.Errorf("%s scaled error %.3e > %.3e", label, maxScaled, nativeScaledTol)
+			}
+			if !strict && nativeAbsTol > 0 && maxAbs > nativeAbsTol {
+				t.Errorf("%s absolute error %.3e > %.3e", label, maxAbs, nativeAbsTol)
+			}
+			if !strict && nativeScaledTol > 0 && maxAbs != 0 && !(c >= 0.9999) {
+				t.Errorf("%s cosine %.9f < 0.9999", label, c)
+			}
+		}
+		checkState := func(label string) {
+			t.Helper()
+			if got.Cache.Len() != ref.Cache.Len() {
+				t.Fatalf("%s cache length got %d want %d", label, got.Cache.Len(), ref.Cache.Len())
+			}
+			if !intsEqual(ref.Cache.pos, got.Cache.pos) {
+				t.Fatalf("%s cache positions differ", label)
+			}
+			for l := 0; l < m.Cfg.NumLayers; l++ {
+				if m.Cfg.isLinearAttnLayer(l) {
+					continue
+				}
+				for name, pair := range map[string][2][]float32{
+					"K": {ref.Cache.K[l], got.Cache.K[l]}, "Kraw": {ref.Cache.Kraw[l], got.Cache.Kraw[l]}, "V": {ref.Cache.V[l], got.Cache.V[l]},
+				} {
+					tol := nativeKScaledTol
+					if name == "V" {
+						tol = nativeVScaledTol
+					}
+					check(label+" layer "+itoa(l)+" "+name, pair[0], pair[1], tol, 0)
+				}
+			}
+			wl, gl := ref.Cache.linear, got.Cache.linear
+			if wl == nil || gl == nil || len(wl.layers) != len(gl.layers) {
+				t.Fatal("linear cache shape mismatch")
+			}
+			for l, w := range wl.layers {
+				g := gl.layers[l]
+				if len(w.recurrent) != len(g.recurrent) || len(w.conv) != len(g.conv) {
+					t.Fatalf("linear layer %d state shape mismatch", l)
+				}
+				for h := range w.recurrent {
+					check(label+" layer "+itoa(l)+" recurrent "+itoa(h), w.recurrent[h], g.recurrent[h], 0, nativeRecurrentAbsTol)
+				}
+				for row := range w.conv {
+					check(label+" layer "+itoa(l)+" conv "+itoa(row), w.conv[row], g.conv[row], 0, 1e-5)
+				}
+			}
+			if strict {
+				assertKVCacheQuantCloseTol(t, label, ref.Cache, got.Cache, prefillQ4KKTol(), prefillQ4KVTol())
+				assertLinearAttnCacheQuantClose(t, label, ref.Cache.linear, got.Cache.linear)
+			}
 		}
 		for i, prompt := range [][]int{first, second} {
 			var h []float32
 			for _, id := range prompt {
 				h = ref.tokenHiddenQ(id, ref.Cache.Len())
 			}
-			want[i] = ref.headResident(h)
+			want, have := ref.headResident(h), got.Prefill(prompt)
+			label := "prefill " + itoa(i)
+			check(label+" logits", want, have, nativeLogitScaledTol, 0)
+			if len(want) == 0 || argmax(want) != argmax(have) {
+				t.Errorf("%s logits have no matching greedy token", label)
+			}
+			if strict {
+				assertQuantLogitsClose(t, label, want, have)
+			}
+			checkState(label)
 		}
-		got = m.NewSession()
-		got.Q4K = true
-		got.PhaseProfiler = NewPhaseProfiler()
-		have[0] = got.Prefill(first)
-		have[1] = got.Prefill(second)
 		prof := got.PhaseProfiler.Snapshot("prefill", len(first)+len(second), 0, 1)
 		if n := phaseCalls(prof, "qwen35_moe_row_ffn"); n != 2*m.Cfg.NumLayers {
 			t.Fatalf("qwen35_moe_row_ffn calls = %d, want %d: the batched Q4_K hybrid lane was not taken", n, 2*m.Cfg.NumLayers)
-		}
-		return ref, got, want, have
-	}
-
-	t.Run("legacy-gemm-strict", func(t *testing.T) {
-		ref, got, want, have := run(t, qgemmModeLegacy)
-		assertQuantLogitsClose(t, "qwen3_5_moe q4k batched prefill logits", want[0], have[0])
-		assertQuantLogitsClose(t, "qwen3_5_moe q4k batched appended prefill logits", want[1], have[1])
-		assertKVCacheQuantCloseTol(t, "qwen3_5_moe q4k batched prefill", ref.Cache, got.Cache, prefillQ4KKTol(), prefillQ4KVTol())
-		assertLinearAttnCacheQuantClose(t, "qwen3_5_moe q4k batched prefill", ref.Cache.linear, got.Cache.linear)
-	})
-	t.Run("tile-gemm-cosine", func(t *testing.T) {
-		ref, got, want, have := run(t, qgemmModeTile)
-		for i := range want {
-			if c := cosine(want[i], have[i]); c < 0.9999 {
-				t.Fatalf("prefill %d logits cosine %.7f < 0.9999", i, c)
-			}
-		}
-		for l := 0; l < m.Cfg.NumLayers; l++ {
-			if m.Cfg.isLinearAttnLayer(l) {
-				continue
-			}
-			for name, pair := range map[string][2][]float32{
-				"K": {ref.Cache.K[l], got.Cache.K[l]}, "Kraw": {ref.Cache.Kraw[l], got.Cache.Kraw[l]}, "V": {ref.Cache.V[l], got.Cache.V[l]},
-			} {
-				if c := cosine(pair[0], pair[1]); c < 0.9999 {
-					t.Fatalf("layer %d %s cache cosine %.7f < 0.9999", l, name, c)
-				}
-			}
 		}
 	})
 }
