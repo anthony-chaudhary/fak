@@ -1104,8 +1104,8 @@ func reconcileNarrowOwnership(ctx context.Context, run Runner, dir, path, peerOw
 	}
 
 	// 4. Compare hunk deltas between HEAD, checkpoint, and working tree.
-	workerDiff, codeW, errW := run(ctx, dir, "diff", "--no-ext-diff", "HEAD", "--", path)
-	peerDiff, codeP, errP := run(ctx, dir, "diff", "--no-ext-diff", "HEAD", peerOID, "--", path)
+	workerDiff, codeW, errW := run(ctx, dir, "diff", "--no-ext-diff", "-U0", "HEAD", "--", path)
+	peerDiff, codeP, errP := run(ctx, dir, "diff", "--no-ext-diff", "-U0", "HEAD", peerOID, "--", path)
 	if errW == nil && errP == nil && codeW == 0 && codeP == 0 {
 		peerDiffTrimmed := strings.TrimSpace(peerDiff)
 		if peerDiffTrimmed == "" {
@@ -1223,22 +1223,18 @@ func parseHunkRange(s string) (start, count int) {
 	return start, count
 }
 
+// hunksOverlap reports whether two zero-context (-U0) hunk sets touch the same
+// region of the base file. Positions are mapped onto a doubled axis: old line L
+// sits at 2L and the gap after it at 2L+1. A pure insertion (oldCount 0) is the
+// single gap point after oldStart; a change spans its lines plus both bounding
+// gaps, so an insertion adjacent to or inside a changed range collides, as do two
+// insertions at the same anchor, while edits a few lines apart stay disjoint.
 func hunksOverlap(hunks1, hunks2 []diffHunk) bool {
 	for _, h1 := range hunks1 {
+		lo1, hi1 := hunkSpan(h1)
 		for _, h2 := range hunks2 {
-			end1 := h1.oldStart + h1.oldCount
-			if h1.oldCount == 0 {
-				end1 = h1.oldStart + 1
-			}
-			end2 := h2.oldStart + h2.oldCount
-			if h2.oldCount == 0 {
-				end2 = h2.oldStart + 1
-			}
-
-			start1 := h1.oldStart
-			start2 := h2.oldStart
-
-			if start1 < end2 && start2 < end1 {
+			lo2, hi2 := hunkSpan(h2)
+			if lo1 <= hi2 && lo2 <= hi1 {
 				if len(h1.editLines) > 0 && len(h2.editLines) > 0 && reflect.DeepEqual(h1.editLines, h2.editLines) {
 					continue
 				}
@@ -1247,6 +1243,14 @@ func hunksOverlap(hunks1, hunks2 []diffHunk) bool {
 		}
 	}
 	return false
+}
+
+func hunkSpan(h diffHunk) (lo, hi int) {
+	if h.oldCount == 0 {
+		gap := 2*h.oldStart + 1
+		return gap, gap
+	}
+	return 2*h.oldStart - 1, 2*(h.oldStart+h.oldCount-1) + 1
 }
 
 func peerWIPObjectID(s string) bool {

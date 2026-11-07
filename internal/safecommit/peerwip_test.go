@@ -628,8 +628,8 @@ func TestNarrowOwnershipReconciliation(t *testing.T) {
 		rep, opts := peerSetup(" M corpus/file.txt\n")
 		workerDiff := "diff --git a/corpus/file.txt b/corpus/file.txt\n@@ -10,5 +10,6 @@\n context\n+worker edit\n"
 		peerDiff := "diff --git a/corpus/file.txt b/corpus/file.txt\n@@ -100,5 +100,6 @@\n context\n+peer edit\n"
-		rep["diff --no-ext-diff HEAD -- corpus/file.txt"] = reply{out: workerDiff, code: 0}
-		rep["diff --no-ext-diff HEAD "+oid+" -- corpus/file.txt"] = reply{out: peerDiff, code: 0}
+		rep["diff --no-ext-diff -U0 HEAD -- corpus/file.txt"] = reply{out: workerDiff, code: 0}
+		rep["diff --no-ext-diff -U0 HEAD "+oid+" -- corpus/file.txt"] = reply{out: peerDiff, code: 0}
 		g := &fakeGit{reply: rep}
 		attrOpts := PathAttributionOptions{
 			SessionID:                opts.SessionID,
@@ -652,8 +652,8 @@ func TestNarrowOwnershipReconciliation(t *testing.T) {
 		rep, opts := peerSetup(" M corpus/file.txt\n")
 		workerDiff := "diff --git a/corpus/file.txt b/corpus/file.txt\n@@ -10,5 +10,6 @@\n context\n+worker edit\n"
 		peerDiff := "diff --git a/corpus/file.txt b/corpus/file.txt\n@@ -10,5 +10,6 @@\n context\n+peer edit\n"
-		rep["diff --no-ext-diff HEAD -- corpus/file.txt"] = reply{out: workerDiff, code: 0}
-		rep["diff --no-ext-diff HEAD "+oid+" -- corpus/file.txt"] = reply{out: peerDiff, code: 0}
+		rep["diff --no-ext-diff -U0 HEAD -- corpus/file.txt"] = reply{out: workerDiff, code: 0}
+		rep["diff --no-ext-diff -U0 HEAD "+oid+" -- corpus/file.txt"] = reply{out: peerDiff, code: 0}
 		g := &fakeGit{reply: rep}
 		attrOpts := PathAttributionOptions{
 			SessionID:                opts.SessionID,

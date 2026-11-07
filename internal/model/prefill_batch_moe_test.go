@@ -3,7 +3,7 @@ package model
 import "testing"
 
 // prefillBatchedMoETestConfig is a Qwen3-MoE-shaped synthetic config (routed experts,
-// QK-norm, GQA, PreNorm, shared RoPE theta): the arch f32PrefillBatchedMoEOK admits.
+// QK-norm, GQA, PreNorm, shared RoPE theta): the arch prefillBatchedMoEOK admits.
 func prefillBatchedMoETestConfig() Config {
 	cfg := llamaArchConfig()
 	cfg.NumExperts = 5
@@ -11,6 +11,15 @@ func prefillBatchedMoETestConfig() Config {
 	cfg.NormTopKProb = true
 	cfg.IntermediateSize = 24
 	cfg.QKNorm = true
+	return cfg
+}
+
+// prefillBatchedQMoETestConfig is the same arch with a Q8_0-blockable expert width:
+// Quantize needs every reduction dim (the expert down_proj's is IntermediateSize) to be a
+// multiple of 32, and 64 keeps it distinct from HiddenSize.
+func prefillBatchedQMoETestConfig() Config {
+	cfg := prefillBatchedMoETestConfig()
+	cfg.IntermediateSize = 64
 	return cfg
 }
 
@@ -45,11 +54,11 @@ func assertPrefillCachesBitEqual(t *testing.T, cfg Config, ref, bat *Session) {
 func TestPrefillBatchedMoEMatchesTokenLoop(t *testing.T) {
 	cfg := prefillBatchedMoETestConfig()
 	m := NewSyntheticMoE(cfg)
-	if !f32PrefillBatchedMoEOK(m) || f32PrefillNeedsTokenLoop(m) {
+	if !prefillBatchedMoEOK(m) || prefillNeedsTokenLoop(m) {
 		t.Fatal("premise broken: the synthetic MoE config is not admitted to prefillBatched")
 	}
 	if !q8PrefillNeedsTokenLoop(m.Cfg) {
-		t.Fatal("q8PrefillNeedsTokenLoop must still refuse MoE for the Q8/Q4K/verify/HAL lanes")
+		t.Fatal("q8PrefillNeedsTokenLoop must still refuse MoE for the Q4K/verify/HAL lanes")
 	}
 
 	first := prefillBatchedMoEPrompt(cfg, 11)
@@ -136,7 +145,7 @@ func TestPrefillMoEExcludedAxesKeepTokenLoop(t *testing.T) {
 			cfg := prefillBatchedMoETestConfig()
 			tc.mutate(&cfg)
 			m := NewSyntheticMoE(cfg)
-			if f32PrefillBatchedMoEOK(m) || !f32PrefillNeedsTokenLoop(m) {
+			if prefillBatchedMoEOK(m) || !prefillNeedsTokenLoop(m) {
 				t.Fatal("excluded MoE axis was admitted to prefillBatched")
 			}
 			if tc.name == "attn-output-gate" || tc.name == "gpt-oss" {
@@ -174,7 +183,7 @@ func TestPrefillMoEExcludedAxesKeepTokenLoop(t *testing.T) {
 	cfg := prefillBatchedMoETestConfig()
 	m := NewSyntheticMoE(cfg)
 	addSyntheticTensor(m, layerName(1, "self_attn.sinks"), cfg.NumHeads)
-	if f32PrefillBatchedMoEOK(m) {
+	if prefillBatchedMoEOK(m) {
 		t.Fatal("MoE layer with self_attn.sinks was admitted to prefillBatched")
 	}
 }
@@ -184,4 +193,104 @@ func addSyntheticTensor(m *Model, name string, n int) {
 	off := len(m.raw)
 	m.raw = append(m.raw, make([]byte, n*4)...)
 	m.manifest[name] = tensorMeta{Dtype: "F32", Shape: []int{n}, Offset: off, Nbytes: n * 4}
+}
+
+// TestPrefillBatchedQMoEMatchesTokenLoop pins the Q8 lane (prefillBatchedQ) for the
+// admitted MoE subset to its per-token loop (tokenHiddenQ, whose MoE blockStep runs on
+// q8Kernel). Under FAK_QGEMM=legacy, the same mode TestQ8PrefillAppliesAttentionSoftcap
+// pins the dense Q8 lane in, it is bit-for-bit: logits and every layer's K/Kraw/V across
+// two appended prefills. In the default mode the tiled qGemm8 batched GEMM accumulates
+// its Q8_0 block partials in a different float order than the qMatRows GEMV (~1 ulp per
+// output, the reduction-order shift the Q4K lane's parity test also tolerates), so there
+// the gate is argmax-equal logits with cosine >= 0.99999. [SW-VERIFIED]
+// fak-test:runtime fast est=100ms lane=default
+func TestPrefillBatchedQMoEMatchesTokenLoop(t *testing.T) {
+	oldMode := qgemmMode
+	qgemmMode = qgemmModeLegacy
+	defer func() { qgemmMode = oldMode }()
+
+	cfg := prefillBatchedQMoETestConfig()
+	m := NewSyntheticMoE(cfg)
+	m.Quantize()
+	if m.q8layers != nil {
+		t.Fatal("premise broken: an MoE model built the dense q8layers cache")
+	}
+
+	first := prefillBatchedMoEPrompt(cfg, 11)
+	second := []int{4, 60, 9, 33}
+
+	ref := m.NewSession()
+	ref.Quant = true
+	ref.tokenLoopHidden(ref.tokenHiddenQ, first)
+	refLogits := ref.headQ(ref.tokenLoopHidden(ref.tokenHiddenQ, second))
+
+	bat := m.NewSession()
+	bat.Quant = true
+	bat.prefillBatchedQ(first)
+	batLogits := bat.headQ(bat.prefillBatchedQ(second))
+
+	if !float32BitsEqual(refLogits, batLogits) {
+		d, i := maxAbsDiff(refLogits, batLogits)
+		t.Fatalf("batched Q8 MoE prefill logits differ from the token loop: max abs diff %.3e at %d", d, i)
+	}
+	assertPrefillCachesBitEqual(t, cfg, ref, bat)
+
+	qgemmMode = oldMode
+	tiled := m.NewSession()
+	tiled.Quant = true
+	tiled.prefillBatchedQ(first)
+	tiledLogits := tiled.headQ(tiled.prefillBatchedQ(second))
+	if c := cosine(refLogits, tiledLogits); c < 0.99999 || argmaxF32(refLogits) != argmaxF32(tiledLogits) {
+		d, _ := maxAbsDiff(refLogits, tiledLogits)
+		t.Fatalf("default-mode batched Q8 MoE prefill drifted from the token loop: cosine %.7f, max abs %.3e", c, d)
+	}
+}
+
+// TestPrefillQRoutesAdmittedMoEToBatchedLane proves quantized Prefill and PrefillNoLogits
+// take prefillBatchedQ for the admitted subset (no per-token blockStep attention) and that
+// a target-hidden capture session keeps the token loop, since only tokenHiddenQ records
+// the per-position hidden rows. [SW-VERIFIED]
+// fak-test:runtime fast est=100ms lane=default
+func TestPrefillQRoutesAdmittedMoEToBatchedLane(t *testing.T) {
+	oldMode := qgemmMode
+	qgemmMode = qgemmModeLegacy // bit-exact mode; see TestPrefillBatchedQMoEMatchesTokenLoop
+	defer func() { qgemmMode = oldMode }()
+
+	cfg := prefillBatchedQMoETestConfig()
+	m := NewSyntheticMoE(cfg)
+	m.Quantize()
+	prompt := prefillBatchedMoEPrompt(cfg, 7)
+
+	s := m.NewSession()
+	s.Quant = true
+	s.PhaseProfiler = NewPhaseProfiler()
+	got := s.Prefill(prompt)
+	if st := s.PhaseProfiler.stat["full_attn_decode"]; st != nil {
+		t.Fatalf("admitted Q8 MoE ran blockStep attention %d times, want prefillBatchedQ", st.Calls)
+	}
+	ref := m.NewSession()
+	ref.Quant = true
+	if want := ref.headQ(ref.tokenLoopHidden(ref.tokenHiddenQ, prompt)); !float32BitsEqual(got, want) {
+		t.Fatal("quantized Prefill logits on the batched MoE lane differ from the token loop")
+	}
+
+	nl := m.NewSession()
+	nl.Quant = true
+	nl.PhaseProfiler = NewPhaseProfiler()
+	nl.PrefillNoLogits(prompt)
+	if st := nl.PhaseProfiler.stat["full_attn_decode"]; st != nil {
+		t.Fatalf("admitted Q8 MoE PrefillNoLogits ran blockStep attention %d times", st.Calls)
+	}
+	assertPrefillCachesBitEqual(t, cfg, ref, nl)
+
+	for _, quant := range []bool{false, true} {
+		c := m.NewSession()
+		c.Quant = quant
+		c.captureTargetHidden = true
+		c.PhaseProfiler = NewPhaseProfiler()
+		c.Prefill(prompt)
+		if st := c.PhaseProfiler.stat["full_attn_decode"]; st == nil || st.Calls != len(prompt)*cfg.NumLayers {
+			t.Fatalf("target-hidden capture session left the token loop (quant=%v, full_attn_decode=%v)", quant, st)
+		}
+	}
 }
