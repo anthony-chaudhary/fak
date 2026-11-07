@@ -371,7 +371,11 @@ func verifyForwardBatchedOK(s *Session) bool {
 		return false
 	}
 	cfg := s.M.Cfg
-	if cfg.usesMLAMoELayout() || q8PrefillNeedsTokenLoop(cfg) {
+	// s.prefillNeedsTokenLoop keeps every q8PrefillNeedsTokenLoop refusal except the MoE
+	// subset prefillBatchedMoEOK admits (attention batched, routed FFN per row through
+	// prefillRowFFN), and still sends an admitted MoE session with a tap, residual hook or
+	// target-hidden capture to the sequential Step loop that runs those observers.
+	if cfg.usesMLAMoELayout() || s.prefillNeedsTokenLoop() {
 		return false
 	}
 	return true
@@ -531,6 +535,14 @@ func (s *Session) verifyForwardBatched(ids []int, pos []int, allow func(q, k int
 		}
 		for i := range X {
 			X[i] += O[i]
+		}
+
+		if cfg.IsMoE() {
+			// prefillBatchedMoEOK admitted this arch: each panel row routes to its own
+			// top-k experts, so the FFN runs per row through blockStep's exact PreNorm
+			// sublayer on f32Kernel, the kernel the sequential Step fallback uses.
+			m.prefillRowFFN(l, X, P, H, eps, cfg, f32Kernel{m})
+			continue
 		}
 
 		Xn2 := make([]float32, P*H)
