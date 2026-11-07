@@ -539,19 +539,24 @@ func (ln *schedLane) deferredForForward() (int, bool) {
 // the only operation that publishes a staged token or advances generated state.
 func (ln *schedLane) retireDeferredToken(iteration uint64) bool {
 	s := ln.sched
-	s.mu.Lock()
-	if ln.terminal || ln.deferredToken == nil {
-		s.mu.Unlock()
+	var pending nativeDeferredToken
+	ready := func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if ln.terminal || ln.deferredToken == nil {
+			return false
+		}
+		if err := ln.ctx.Err(); err != nil {
+			ln.finish(nil, err)
+			return false
+		}
+		pending = *ln.deferredToken
+		ln.deferredToken = nil
+		return true
+	}()
+	if !ready {
 		return false
 	}
-	if err := ln.ctx.Err(); err != nil {
-		ln.finish(nil, err)
-		s.mu.Unlock()
-		return false
-	}
-	pending := *ln.deferredToken
-	ln.deferredToken = nil
-	s.mu.Unlock()
 
 	var publishStarted time.Time
 	if s.recorder != nil {
@@ -572,33 +577,40 @@ func (ln *schedLane) retireDeferredToken(iteration uint64) bool {
 		}
 	}
 	if publishCanceled {
-		s.mu.Lock()
-		ln.finish(nil, ln.ctx.Err())
-		s.mu.Unlock()
+		func() {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			ln.finish(nil, ln.ctx.Err())
+		}()
 		return false
 	}
 
-	s.mu.Lock()
-	ln.gen = append(ln.gen, pending.id)
-	if !pending.accounted {
-		ln.emitted++
-	}
-	state := ln.state
+	var state schedLaneState
 	var res *abi.Result
-	if pending.done {
-		modelName := s.modelName
-		if modelName == "" {
-			modelName = Default.ModelName()
+	func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		ln.gen = append(ln.gen, pending.id)
+		if !pending.accounted {
+			ln.emitted++
 		}
-		res = assembleSyscallResult(ln.putCtx, ln.tool, EngineID, modelName, ln.promptLen, append([]int(nil), ln.gen...), ln.tok)
-	}
-	s.mu.Unlock()
+		state = ln.state
+		if pending.done {
+			modelName := s.modelName
+			if modelName == "" {
+				modelName = Default.ModelName()
+			}
+			res = assembleSyscallResult(ln.putCtx, ln.tool, EngineID, modelName, ln.promptLen, append([]int(nil), ln.gen...), ln.tok)
+		}
+	}()
 
 	s.observeEvent(nativeSchedulerEvent{Iteration: iteration, Kind: nativeSchedulerEventDecode, Lane: ln, State: state, Token: pending.id})
 	if pending.done {
-		s.mu.Lock()
-		ln.finish(res, nil)
-		s.mu.Unlock()
+		func() {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			ln.finish(res, nil)
+		}()
 		return false
 	}
 	return true
@@ -725,11 +737,20 @@ func (s *NativeScheduler) decodeCohortLimit(lanes []*schedLane) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	seqs := make([]*model.Session, 0, len(lanes))
+	outboxes := make(map[chan abi.EngineToken]bool, len(lanes))
 	for _, ln := range lanes {
 		if !s.runningDecodeLaneLocked(ln) || ln.sess == nil ||
 			ln.sess == ln.statsSess || ln.inflightSess != nil {
 			return 0
 		}
+		// Each subgroup publishes before the next forwards. The executor is
+		// the sole sender, so a distinct buffered outbox with one free slot
+		// reserves nonblocking publication. Consumers only free capacity.
+		// Otherwise preserve legacy whole-cohort forwarding before blocking.
+		if outboxes[ln.tokens] || len(ln.tokens) >= cap(ln.tokens) {
+			return 0
+		}
+		outboxes[ln.tokens] = true
 		seqs = append(seqs, ln.sess)
 	}
 	return (&model.BatchSession{M: s.m, Seqs: seqs}).Qwen35IndependentDecodeCohortLimit()
@@ -737,8 +758,8 @@ func (s *NativeScheduler) decodeCohortLimit(lanes []*schedLane) int {
 
 // retireDecodeBorrow is also a defer boundary: a model, observer or publication
 // panic/Goexit must not leave a real session stranded behind a statistics shell.
-// Register one defer per borrow so every remaining owner is visited even if
-// another owner's cleanup itself panics. Normal published owners are a no-op.
+// Group cleanup registers one defer per borrow so every remaining owner is
+// visited even if another cleanup panics or Goexits. Published owners are a no-op.
 func (s *NativeScheduler) retireDecodeBorrow(ln *schedLane, sess *model.Session) {
 	// Cleanup must not replace the original forward/observer panic being
 	// unwound. finish publishes a failed terminal result if cleanup aborts.
@@ -764,9 +785,30 @@ func (s *NativeScheduler) stepDecodeCohort(lanes []*schedLane, ids []int, iterat
 	execLanes := make([]*schedLane, 0, len(lanes))
 	execIDs := make([]int, 0, len(lanes))
 	seqs := make([]*model.Session, 0, len(lanes))
+	defer func() {
+		s.mu.Lock()
+		pending := false
+		for i, ln := range execLanes {
+			pending = pending || ln.inflightSess == seqs[i]
+		}
+		s.mu.Unlock()
+		if !pending {
+			return
+		}
+		// Cleanup Goexit on the initiating goroutine would consume its model
+		// panic. Contain only abnormal outstanding borrows in a joined child,
+		// registering every retirement before any callback can exit it.
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for i, ln := range execLanes {
+				defer s.retireDecodeBorrow(ln, seqs[i])
+			}
+		}()
+		<-done
+	}()
 	for i, ln := range lanes {
 		if sess := s.takeDecodeSession(ln); sess != nil {
-			defer s.retireDecodeBorrow(ln, sess)
 			execLanes = append(execLanes, ln)
 			execIDs = append(execIDs, ids[i])
 			seqs = append(seqs, sess)

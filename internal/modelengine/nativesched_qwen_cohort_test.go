@@ -6,10 +6,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"reflect"
 	"runtime"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -29,6 +32,45 @@ type boundedQwenBackend struct {
 	failAt      int
 	failure     string
 	onBatch     func(int)
+	knownKV     map[compute.KVStore]bool
+}
+
+func (b *boundedQwenBackend) NewKV(cfg compute.KVConfig) compute.KVStore {
+	kv := b.Backend.NewKV(cfg)
+	if b.knownKV == nil {
+		b.knownKV = make(map[compute.KVStore]bool)
+	}
+	b.knownKV[kv] = true
+	return kv
+}
+
+func (b *boundedQwenBackend) Qwen35IndependentDecodeCohortOwned(kvs []compute.KVStore, states [][]compute.Qwen35SequenceState) bool {
+	var ranges [][2]uintptr
+	for i, kv := range kvs {
+		if !b.knownKV[kv] {
+			return false
+		}
+		for _, state := range states[i] {
+			for _, tensor := range []compute.Tensor{state.Conv, state.Recurrent} {
+				if tensor.Buf() == nil {
+					continue
+				}
+				data := b.Backend.Read(tensor)
+				if len(data) == 0 {
+					return false
+				}
+				lo := uintptr(unsafe.Pointer(unsafe.SliceData(data)))
+				hi := lo + uintptr(len(data))*4
+				for _, prior := range ranges {
+					if lo < prior[1] && prior[0] < hi {
+						return false
+					}
+				}
+				ranges = append(ranges, [2]uintptr{lo, hi})
+			}
+		}
+	}
+	return true
 }
 
 func (*boundedQwenBackend) Name() string { return "bounded-qwen-host-test" }
@@ -36,12 +78,6 @@ func (*boundedQwenBackend) Qwen35GDNPath() string {
 	return model.Qwen35GDNCapabilityIdentity
 }
 func (b *boundedQwenBackend) Qwen35IndependentDecodeBatchPath() string { return b.path }
-
-// Explicit synthetic ownership evidence keeps the scheduler grouping witness
-// independent of CUDA. Unknown real providers still decline in the model query.
-func (*boundedQwenBackend) Qwen35IndependentDecodeCohortOwned(stores []compute.KVStore, states [][]compute.Qwen35SequenceState) bool {
-	return len(stores) >= 2 && len(stores) == len(states)
-}
 
 func (b *boundedQwenBackend) Qwen35GDNDecode(
 	input, qkv, z, beta, alpha, conv, aLog, bias, norm, output, convState, recurrentState compute.Tensor,
@@ -167,8 +203,196 @@ func boundedQwenWidths(b *boundedQwenBackend) []int {
 	return out
 }
 
-// fak-test:runtime fast est=2s lane=default
+type boundedQwenRetireContext struct {
+	context.Context
+	err func() error
+}
+
+func (c *boundedQwenRetireContext) Err() error { return c.err() }
+
+func boundedQwenRetirementUnwind(t *testing.T, boundary, failure string) {
+	t.Helper()
+	count := 2
+	if boundary == "terminal" {
+		count = 1
+	}
+	s, b, lanes := boundedQwenFixture(t, count)
+	first, owner := lanes[0], lanes[0].sess
+	owners := make([]*model.Session, len(lanes))
+	for i, ln := range lanes {
+		owners[i] = ln.sess
+	}
+	closed := make(map[*model.Session]int)
+	s.closeSession = func(sess *model.Session) {
+		closed[sess]++
+		sess.Close()
+		if sess == owner {
+			if failure == "goexit" {
+				runtime.Goexit()
+			}
+			panic("publication retirement panic")
+		}
+	}
+	defer func() { s.closeSession = func(sess *model.Session) { sess.Close() } }()
+	if boundary == "terminal" {
+		if !first.stageDeferredToken() {
+			t.Fatal("failed to stage terminal control")
+		}
+		first.deferredToken.done = true
+	} else {
+		// The first Err after forwarding is inside publishDecodeSession. The
+		// second is retirement after its real session was restored. Cancellation
+		// is deterministic at that boundary, not a wall-clock race.
+		afterForward, queries := false, 0
+		ctx := first.ctx
+		first.ctx = &boundedQwenRetireContext{Context: ctx, err: func() error {
+			if afterForward {
+				queries++
+				if queries == 2 && boundary == "before_select" {
+					first.cancel()
+				}
+			}
+			return ctx.Err()
+		}}
+		b.onBatch = func(int) { afterForward = true }
+		if boundary == "during_select" {
+			first.tokens = make(chan abi.EngineToken)
+			s.now = func() time.Time {
+				if queries == 2 {
+					first.cancel()
+				}
+				return time.Unix(100, 0)
+			}
+		}
+	}
+	finished := make(chan struct{})
+	var raised any
+	returned := false
+	go func() {
+		defer close(finished)
+		defer func() { raised = recover() }()
+		boundedQwenStep(s, 0)
+		returned = true
+	}()
+	<-finished // The parent subprocess deadline contains a leaked-mutex regression.
+	if returned || (failure == "panic" && raised != "publication retirement panic") || (failure == "goexit" && raised != nil) {
+		t.Fatalf("retirement outcome returned=%t panic=%v", returned, raised)
+	}
+	if !s.mu.TryLock() {
+		t.Fatal("retirement abandoned the scheduler mutex")
+	}
+	s.mu.Unlock()
+	if len(closed) != count || closed[owner] != 1 {
+		t.Fatalf("borrowed owners not retired exactly once: closes=%v", closed)
+	}
+	for i, ln := range lanes {
+		if closed[owners[i]] != 1 {
+			t.Fatalf("lane %d owner retired %d times", i, closed[owners[i]])
+		}
+		select {
+		case <-ln.done:
+		default:
+			t.Fatalf("lane %d terminal edge stranded", i)
+		}
+		if result, err := ln.Result(); result != nil || err == nil || ln.inflightSess != nil || ln.sess != nil {
+			t.Fatalf("lane %d reported success or retained an owner: result=%v err=%v", i, result, err)
+		}
+		if i == 0 && ln.Reclaimed() {
+			t.Fatal("interrupted retirement reported reclaimed")
+		}
+	}
+}
+
+// The six contained retirement controls add about six seconds under -race,
+// including the race runtime's normal process-exit delay.
+// fak-test:runtime fast est=8s lane=default
 func TestNativeSchedulerBoundedDecodeCohorts(t *testing.T) {
+	for _, boundary := range []string{"before_select", "during_select", "terminal"} {
+		for _, failure := range []string{"panic", "goexit"} {
+			name := "retire_" + boundary + "_" + failure
+			t.Run(name, func(t *testing.T) {
+				const childKey = "FAK_TEST_COHORT_RETIREMENT_CHILD"
+				if os.Getenv(childKey) == name {
+					boundedQwenRetirementUnwind(t, boundary, failure)
+					return
+				}
+				// A broken cleanup can strand the fixture's mutex and its cleanup.
+				// Isolate that regression instead of force-unlocking another owner.
+				executable, err := os.Executable()
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, executable, "-test.v", "-test.run=^TestNativeSchedulerBoundedDecodeCohorts$/^"+name+"$")
+				cmd.Env = append(os.Environ(), childKey+"="+name)
+				cmd.WaitDelay = time.Second
+				output, err := cmd.CombinedOutput()
+				t.Logf("retirement child:\n%s", output)
+				if err != nil {
+					t.Fatalf("retirement child failed: %v (deadline=%v)\n%s", err, ctx.Err(), output)
+				}
+			})
+		}
+	}
+	for _, mode := range []string{"full", "unbuffered", "aliased"} {
+		t.Run("outbox_"+mode, func(t *testing.T) {
+			s, b, lanes := boundedQwenFixture(t, 9)
+			switch mode {
+			case "full":
+				lanes[0].tokens = make(chan abi.EngineToken, 1)
+				lanes[0].tokens <- abi.EngineToken{ID: -99}
+			case "unbuffered":
+				lanes[0].tokens = make(chan abi.EngineToken)
+			case "aliased":
+				original := lanes[8].tokens
+				lanes[8].tokens = lanes[0].tokens
+				defer func() { lanes[8].tokens = original }()
+			}
+			var offered []int
+			modelDone, finished := make(chan struct{}, 1), make(chan struct{})
+			base := DefaultForwardImpl()
+			s.fwd = NewForwardSlot(ForwardImpl{Name: "observe-outbox", Step: base.Step, StepBatch: func(bs *model.BatchSession, ids []int) [][]float32 {
+				offered = append(offered, len(ids))
+				out := base.StepBatch(bs, ids)
+				select {
+				case modelDone <- struct{}{}:
+				default:
+				}
+				return out
+			}})
+			var raised any
+			go func() {
+				defer close(finished)
+				defer func() { raised = recover() }()
+				boundedQwenStep(s, 0)
+			}()
+			// Model work must precede release of the obstructed publication.
+			select {
+			case <-modelDone:
+			case <-finished:
+				select {
+				case <-modelDone:
+				default:
+					t.Fatalf("no completed model forward: %v", raised)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("model forward blocked before publication")
+			}
+			if mode != "aliased" {
+				<-lanes[0].tokens
+			}
+			<-finished
+			if raised != nil || !reflect.DeepEqual(offered, []int{9}) || len(b.batches) != 0 {
+				t.Fatalf("backpressure changed forwarding: offered=%v batches=%v panic=%v", offered, b.batches, raised)
+			}
+			for i, ln := range lanes {
+				if !reflect.DeepEqual(ln.gen, []int{i + 3}) {
+					t.Fatalf("lane %d gen=%v", i, ln.gen)
+				}
+			}
+		})
+	}
 	for _, tc := range []struct {
 		n      int
 		widths []int
@@ -343,7 +567,7 @@ func TestNativeSchedulerBoundedDecodeCohorts(t *testing.T) {
 		}
 	})
 
-	for _, failure := range []string{"mutated_error", "panic", "goexit", "observer_panic", "cleanup_panic"} {
+	for _, failure := range []string{"mutated_error", "panic", "goexit", "observer_panic", "cleanup_panic", "cleanup_goexit"} {
 		t.Run("later_group_"+failure, func(t *testing.T) {
 			s, b, lanes := boundedQwenFixture(t, 9)
 			var err error
@@ -355,7 +579,7 @@ func TestNativeSchedulerBoundedDecodeCohorts(t *testing.T) {
 				s.elastic.laneStarted(ln, 1)
 			}
 			b.failAt, b.failure = 2, failure
-			if failure == "cleanup_panic" {
+			if failure == "cleanup_panic" || failure == "cleanup_goexit" {
 				b.failure = "panic"
 			}
 			if failure == "observer_panic" {
@@ -369,6 +593,9 @@ func TestNativeSchedulerBoundedDecodeCohorts(t *testing.T) {
 			s.closeSession = func(sess *model.Session) {
 				closed[sess]++
 				sess.Close()
+				if failure == "cleanup_goexit" {
+					runtime.Goexit()
+				}
 				if failure == "cleanup_panic" {
 					panic("cleanup-panic-must-not-replace-forward")
 				}
@@ -392,7 +619,7 @@ func TestNativeSchedulerBoundedDecodeCohorts(t *testing.T) {
 			if returned || (failure != "goexit" && raised == nil) {
 				t.Fatalf("abnormal exit reported success: returned=%t panic=%v", returned, raised)
 			}
-			if failure == "cleanup_panic" && raised != "cohort-forward-panic" {
+			if (failure == "cleanup_panic" || failure == "cleanup_goexit") && raised != "cohort-forward-panic" {
 				t.Fatalf("cleanup replaced initiating panic: %v", raised)
 			}
 			for _, ln := range lanes[:7] {
@@ -412,7 +639,7 @@ func TestNativeSchedulerBoundedDecodeCohorts(t *testing.T) {
 				if !ln.terminal || ln.err == nil || ln.inflightSess != nil || ln.sess != nil || len(ln.gen) != 0 || closed[owners[i]] != 1 {
 					t.Fatalf("failed lane leaked/published: lane=%+v closes=%d", ln, closed[owners[i]])
 				}
-				if got, want := ln.Reclaimed(), failure != "cleanup_panic"; got != want {
+				if got, want := ln.Reclaimed(), failure != "cleanup_panic" && failure != "cleanup_goexit"; got != want {
 					t.Fatalf("cleanup completion claim=%t want=%t", got, want)
 				}
 			}
