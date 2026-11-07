@@ -381,6 +381,7 @@ func (s *NativeScheduler) dropCanceledPreemptedLocked() {
 		}
 		kept = append(kept, ln)
 	}
+	clear(s.preempted[len(kept):])
 	s.preempted = kept
 }
 

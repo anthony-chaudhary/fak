@@ -102,6 +102,7 @@ func (s *NativeScheduler) promoteWaitingLocked(maxRun int) (queueWaits []time.Du
 			}
 		}
 	}
+	clear(s.waiting[len(kept):])
 	s.waiting = kept
 	return queueWaits
 }
@@ -208,6 +209,7 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 			live = append(live, ln)
 		}
 	}
+	clear(s.lanes[len(live):])
 	s.lanes = live
 	maxRun := s.effectiveMaxRunningLocked()
 	// 2. Retire cancelled preempted lanes, then readmit older preempted lanes before
