@@ -1,4 +1,4 @@
-package compute
+package gpubinding
 
 import (
 	"context"
@@ -50,7 +50,7 @@ func usb4EnvelopeFixture() string {
 // fak-test:runtime fast est=10ms lane=default
 func TestGPUBinding_ParentChainAndUSB4HostRouter(t *testing.T) {
 	rep := windowsBindingReport(t, usb4EnvelopeFixture(), postRebootINFs(t), 0, smiFixture(smiThreeGPUs, nil))
-	assertVerdicts(t, rep, GPUReady, GPUReady)
+	assertVerdicts(t, rep, VerdictReady, VerdictReady)
 	internal, egpu := rep.Devices[0], rep.Devices[1]
 	if internal.RootPort != "00:01.0" || internal.USB4HostRouter != "" {
 		t.Fatalf("internal root_port=%q router=%q, want 00:01.0 and none", internal.RootPort, internal.USB4HostRouter)
@@ -119,7 +119,7 @@ func TestGPUBinding_DriverPackageRanksMostSpecificINF(t *testing.T) {
 		pnpFixtureRow(fixtureEGPU1ID, "Microsoft Basic Display Adapter", "display.inf", "Microsoft", 10, 88, fixtureGPUCompat),
 		pnpFixtureRow(raider, "Microsoft Basic Display Adapter", "display.inf", "Microsoft", 10, 2, fixtureGPUCompat),
 	)
-	rep := diagnoseGPUBindingWindows(GPUBindingOptions{
+	rep := diagnoseWindows(Options{
 		INFDir:        postRebootINFs(t),
 		PackageINFDir: pkg,
 		pnpQuery:      func(context.Context) (string, error) { return pnp, nil },
@@ -155,7 +155,7 @@ func TestGPUBinding_DriverPackageRanksMostSpecificINF(t *testing.T) {
 func TestGPUBinding_DriverPackageIsWindowsOnly(t *testing.T) {
 	root := t.TempDir()
 	writeSysfsGPU(t, root, "0000:58:00.0", fixtureModalias)
-	rep := diagnoseGPUBindingLinux(root, GPUBindingOptions{PackageINFDir: t.TempDir(), smiQuery: smiMustNotRun(t)})
+	rep := diagnoseLinux(root, Options{PackageINFDir: t.TempDir(), smiQuery: smiMustNotRun(t)})
 	if rep.Package == nil || len(rep.Package.Issues) != 1 || len(rep.Package.Devices) != 0 {
 		t.Fatalf("linux package coverage = %+v, want one issue and no devices", rep.Package)
 	}

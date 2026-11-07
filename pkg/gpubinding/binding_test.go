@@ -1,4 +1,4 @@
-package compute
+package gpubinding
 
 import (
 	"context"
@@ -64,26 +64,26 @@ func writeINF(t *testing.T, dir, name string, ids ...string) {
 	}
 }
 
-func smiFixture(stdout string, err error) func(context.Context) (gpuQueryOutput, error) {
-	return func(context.Context) (gpuQueryOutput, error) { return gpuQueryOutput{Stdout: stdout}, err }
+func smiFixture(stdout string, err error) func(context.Context) (queryOutput, error) {
+	return func(context.Context) (queryOutput, error) { return queryOutput{Stdout: stdout}, err }
 }
 
-func smiExit(stdout, stderr string, code int) func(context.Context) (gpuQueryOutput, error) {
-	return func(context.Context) (gpuQueryOutput, error) {
-		return gpuQueryOutput{Stdout: stdout, Stderr: stderr, ExitCode: code}, nil
+func smiExit(stdout, stderr string, code int) func(context.Context) (queryOutput, error) {
+	return func(context.Context) (queryOutput, error) {
+		return queryOutput{Stdout: stdout, Stderr: stderr, ExitCode: code}, nil
 	}
 }
 
-func smiMustNotRun(t *testing.T) func(context.Context) (gpuQueryOutput, error) {
-	return func(context.Context) (gpuQueryOutput, error) {
+func smiMustNotRun(t *testing.T) func(context.Context) (queryOutput, error) {
+	return func(context.Context) (queryOutput, error) {
 		t.Error("nvidia-smi queried although no device has a started NVIDIA driver")
-		return gpuQueryOutput{}, errors.New("unexpected")
+		return queryOutput{}, errors.New("unexpected")
 	}
 }
 
-func windowsBindingReport(t *testing.T, pnp, infDir string, expect int, smi func(context.Context) (gpuQueryOutput, error)) GPUBindingReport {
+func windowsBindingReport(t *testing.T, pnp, infDir string, expect int, smi func(context.Context) (queryOutput, error)) Report {
 	t.Helper()
-	return diagnoseGPUBindingWindows(GPUBindingOptions{
+	return diagnoseWindows(Options{
 		ExpectGPUs: expect,
 		INFDir:     infDir,
 		pnpQuery:   func(context.Context) (string, error) { return pnp, nil },
@@ -91,15 +91,15 @@ func windowsBindingReport(t *testing.T, pnp, infDir string, expect int, smi func
 	})
 }
 
-func reportVerdicts(rep GPUBindingReport) []GPUBindingVerdict {
-	out := make([]GPUBindingVerdict, 0, len(rep.Devices))
+func reportVerdicts(rep Report) []Verdict {
+	out := make([]Verdict, 0, len(rep.Devices))
 	for _, d := range rep.Devices {
 		out = append(out, d.Verdict)
 	}
 	return out
 }
 
-func assertVerdicts(t *testing.T, rep GPUBindingReport, want ...GPUBindingVerdict) {
+func assertVerdicts(t *testing.T, rep Report, want ...Verdict) {
 	t.Helper()
 	if got := reportVerdicts(rep); !reflect.DeepEqual(got, want) {
 		t.Fatalf("verdicts = %v, want %v (status %s)", got, want, rep.Status)
@@ -126,8 +126,8 @@ func TestGPUBinding_PreInstallOEMDriverLacksEGPUID(t *testing.T) {
 		pnpFixtureRow(fixtureAudioID, "High Definition Audio Controller", "hdaudbus.inf", "Microsoft", 0, 130, fixtureAudioCompat),
 	)
 	rep := windowsBindingReport(t, pnp, infDir, 0, smiFixture(smiInternalOnly, nil))
-	assertVerdicts(t, rep, GPUReady, GPUDriverLacksDeviceID, GPUDriverLacksDeviceID)
-	if rep.Status != CUDADiscoveryObserved || rep.Ready {
+	assertVerdicts(t, rep, VerdictReady, VerdictDriverLacksDeviceID, VerdictDriverLacksDeviceID)
+	if rep.Status != DiscoveryObserved || rep.Ready {
 		t.Fatalf("status=%s ready=%v, want observed/false", rep.Status, rep.Ready)
 	}
 }
@@ -144,7 +144,7 @@ func TestGPUBinding_CleanInstallRemovedInternalDriver(t *testing.T) {
 		pnpFixtureRow(fixtureEGPU1ID, "NVIDIA GeForce RTX 5070 Ti", "oem400.inf", "NVIDIA", 12, 88, fixtureGPUCompat),
 	)
 	rep := windowsBindingReport(t, pnp, infDir, 0, smiMustNotRun(t))
-	assertVerdicts(t, rep, GPUDriverLacksDeviceID, GPUUnbound, GPUUnbound)
+	assertVerdicts(t, rep, VerdictDriverLacksDeviceID, VerdictUnbound, VerdictUnbound)
 	for _, d := range rep.Devices[1:] {
 		if d.ProblemCode == nil || *d.ProblemCode != 12 {
 			t.Fatalf("eGPU problem code = %v, want 12", d.ProblemCode)
@@ -160,9 +160,9 @@ func TestGPUBinding_StagedDriverPendingRebootIsUnbound(t *testing.T) {
 		pnpFixtureRow(fixtureEGPU1ID, "NVIDIA GeForce RTX 5070 Ti", "oem327.inf", "NVIDIA", 12, 88, fixtureGPUCompat),
 	)
 	rep := windowsBindingReport(t, pnp, postRebootINFs(t), 0, smiMustNotRun(t))
-	assertVerdicts(t, rep, GPUUnbound, GPUUnbound, GPUUnbound)
+	assertVerdicts(t, rep, VerdictUnbound, VerdictUnbound, VerdictUnbound)
 	for _, d := range rep.Devices {
-		if d.IDListed != GPULayerYes {
+		if d.IDListed != LayerYes {
 			t.Fatalf("%s device_id_listed = %s, want yes", d.PCIAddress, d.IDListed)
 		}
 	}
@@ -187,8 +187,8 @@ func postRebootINFs(t *testing.T) string {
 // fak-test:runtime fast est=10ms lane=default
 func TestGPUBinding_PostRebootAllReady(t *testing.T) {
 	rep := windowsBindingReport(t, postRebootPnP(), postRebootINFs(t), 3, smiFixture(smiThreeGPUs, nil))
-	assertVerdicts(t, rep, GPUReady, GPUReady, GPUReady)
-	if !rep.Ready || rep.Verdicts[GPUReady] != 3 {
+	assertVerdicts(t, rep, VerdictReady, VerdictReady, VerdictReady)
+	if !rep.Ready || rep.Verdicts[VerdictReady] != 3 {
 		t.Fatalf("ready=%v verdicts=%v, want ready with 3 GPU_READY", rep.Ready, rep.Verdicts)
 	}
 }
@@ -196,7 +196,7 @@ func TestGPUBinding_PostRebootAllReady(t *testing.T) {
 // fak-test:runtime fast est=10ms lane=default
 func TestGPUBinding_BoundButMissingFromNVML(t *testing.T) {
 	rep := windowsBindingReport(t, postRebootPnP(), postRebootINFs(t), 0, smiFixture(smiInternalOnly, nil))
-	assertVerdicts(t, rep, GPUReady, GPUBoundNotCUDAVisible, GPUBoundNotCUDAVisible)
+	assertVerdicts(t, rep, VerdictReady, VerdictBoundNotCUDAVisible, VerdictBoundNotCUDAVisible)
 }
 
 // fak-test:runtime fast est=10ms lane=default
@@ -207,8 +207,8 @@ func TestGPUBinding_NVMLPartialListingSurvivesExitAndWarnings(t *testing.T) {
 		"1, 00000000:58:00.0, GPU-248188e5, NVIDIA GeForce RTX 5070 Ti\n"
 	smi := smiExit(stdout, "Unable to determine the device handle for GPU2: 0000:82:00.0: Unknown Error\n", 15)
 	rep := windowsBindingReport(t, postRebootPnP(), postRebootINFs(t), 0, smi)
-	assertVerdicts(t, rep, GPUReady, GPUReady, GPUBoundNotCUDAVisible)
-	if rep.CUDA.State != GPULayerYes || len(rep.CUDA.Unparsed) != 1 {
+	assertVerdicts(t, rep, VerdictReady, VerdictReady, VerdictBoundNotCUDAVisible)
+	if rep.CUDA.State != LayerYes || len(rep.CUDA.Unparsed) != 1 {
 		t.Fatalf("cuda state=%s unparsed=%d, want yes with 1 unparsed row", rep.CUDA.State, len(rep.CUDA.Unparsed))
 	}
 }
@@ -216,28 +216,28 @@ func TestGPUBinding_NVMLPartialListingSurvivesExitAndWarnings(t *testing.T) {
 // fak-test:runtime fast est=10ms lane=default
 func TestGPUBinding_NVMLInitFailureIsNotVisible(t *testing.T) {
 	rep := windowsBindingReport(t, postRebootPnP(), postRebootINFs(t), 0, smiExit("Failed to initialize NVML: Not Found\n", "", 9))
-	assertVerdicts(t, rep, GPUBoundNotCUDAVisible, GPUBoundNotCUDAVisible, GPUBoundNotCUDAVisible)
+	assertVerdicts(t, rep, VerdictBoundNotCUDAVisible, VerdictBoundNotCUDAVisible, VerdictBoundNotCUDAVisible)
 }
 
 // fak-test:runtime fast est=10ms lane=default
 func TestGPUBinding_NVMLUnavailableIsUnknownNotReady(t *testing.T) {
 	notFound := &exec.Error{Name: "nvidia-smi", Err: exec.ErrNotFound}
 	rep := windowsBindingReport(t, postRebootPnP(), postRebootINFs(t), 0, smiFixture("", notFound))
-	assertVerdicts(t, rep, GPUBindingUnknown, GPUBindingUnknown, GPUBindingUnknown)
-	if rep.Ready || rep.CUDA.State != GPULayerUnknown {
+	assertVerdicts(t, rep, VerdictUnknown, VerdictUnknown, VerdictUnknown)
+	if rep.Ready || rep.CUDA.State != LayerUnknown {
 		t.Fatalf("ready=%v cuda=%s, want not ready and unknown NVML", rep.Ready, rep.CUDA.State)
 	}
 }
 
 // fak-test:runtime fast est=10ms lane=default
 func TestGPUBinding_EnumerationFailureReportsNoDevices(t *testing.T) {
-	rep := diagnoseGPUBindingWindows(GPUBindingOptions{
+	rep := diagnoseWindows(Options{
 		ExpectGPUs: 3,
 		INFDir:     t.TempDir(),
 		pnpQuery:   func(context.Context) (string, error) { return "", errors.New("powershell: exit status 1") },
 		smiQuery:   smiMustNotRun(t),
 	})
-	if rep.Status != CUDADiscoveryError || rep.Ready || len(rep.Devices) != 0 {
+	if rep.Status != DiscoveryError || rep.Ready || len(rep.Devices) != 0 {
 		t.Fatalf("status=%s ready=%v devices=%d, want error/false/0", rep.Status, rep.Ready, len(rep.Devices))
 	}
 }
@@ -248,7 +248,7 @@ func TestGPUBinding_PropertyReadFailureIsUnknown(t *testing.T) {
 	// an empty INF path is not evidence of "no driver".
 	pnp := `[{"instance_id":` + jsonString(fixtureEGPU0ID) + `,"friendly_name":"NVIDIA GeForce RTX 5070 Ti","class":"Display"}]`
 	rep := windowsBindingReport(t, pnp, postRebootINFs(t), 0, smiMustNotRun(t))
-	assertVerdicts(t, rep, GPUBindingUnknown)
+	assertVerdicts(t, rep, VerdictUnknown)
 	if rep.Ready {
 		t.Fatal("ready with an unobserved binding")
 	}
@@ -258,7 +258,7 @@ func TestGPUBinding_PropertyReadFailureIsUnknown(t *testing.T) {
 func TestGPUBinding_ExpectedButAbsentIsNotEnumerated(t *testing.T) {
 	pnp := pnpFixture(pnpFixtureRow(fixtureInternalID, "NVIDIA GeForce RTX 4070 Laptop GPU", "oem19.inf", "NVIDIA", 0, 1, fixtureInternalCompat))
 	rep := windowsBindingReport(t, pnp, postRebootINFs(t), 3, smiFixture(smiInternalOnly, nil))
-	assertVerdicts(t, rep, GPUReady, GPUNotEnumerated, GPUNotEnumerated)
+	assertVerdicts(t, rep, VerdictReady, VerdictNotEnumerated, VerdictNotEnumerated)
 	if rep.Ready {
 		t.Fatal("ready with two expected GPUs absent")
 	}
@@ -275,7 +275,7 @@ func TestGPUBinding_SubsystemSpecificINFEntry(t *testing.T) {
 		pnpFixtureRow(fixtureEGPU1ID, "Microsoft Basic Display Adapter", "display.inf", "Microsoft", 10, 88, fixtureGPUCompat),
 	)
 	rep := windowsBindingReport(t, pnp, infDir, 0, smiMustNotRun(t))
-	assertVerdicts(t, rep, GPUUnbound, GPUDriverLacksDeviceID)
+	assertVerdicts(t, rep, VerdictUnbound, VerdictDriverLacksDeviceID)
 }
 
 // fak-test:runtime fast est=10ms lane=default
@@ -287,7 +287,7 @@ func TestGPUBinding_CommentedINFEntryIsNotAListing(t *testing.T) {
 	}
 	pnp := pnpFixture(pnpFixtureRow(fixtureEGPU0ID, "Microsoft Basic Display Adapter", "display.inf", "Microsoft", 10, 130, fixtureGPUCompat))
 	rep := windowsBindingReport(t, pnp, infDir, 0, smiMustNotRun(t))
-	assertVerdicts(t, rep, GPUDriverLacksDeviceID)
+	assertVerdicts(t, rep, VerdictDriverLacksDeviceID)
 }
 
 // fak-test:runtime fast est=10ms lane=default
@@ -304,7 +304,7 @@ func TestGPUBinding_UTF16INFIsRead(t *testing.T) {
 	}
 	pnp := pnpFixture(pnpFixtureRow(fixtureEGPU0ID, "Microsoft Basic Display Adapter", "display.inf", "Microsoft", 10, 130, fixtureGPUCompat))
 	rep := windowsBindingReport(t, pnp, infDir, 0, smiMustNotRun(t))
-	assertVerdicts(t, rep, GPUUnbound)
+	assertVerdicts(t, rep, VerdictUnbound)
 }
 
 // failOpenFS refuses to open one file, standing in for an unreadable INF.
@@ -326,14 +326,14 @@ func TestGPUBinding_UnreadableVendorINFLeavesCoverageUnknown(t *testing.T) {
 	writeINF(t, infDir, "oem308.inf", `PCI\VEN_10DE&DEV_2820&SUBSYS_0BDA1028`)
 	writeINF(t, infDir, "oem999.inf", `PCI\VEN_10DE&DEV_2C05`)
 	pnp := pnpFixture(pnpFixtureRow(fixtureEGPU0ID, "Microsoft Basic Display Adapter", "display.inf", "Microsoft", 10, 130, fixtureGPUCompat))
-	rep := diagnoseGPUBindingWindows(GPUBindingOptions{
+	rep := diagnoseWindows(Options{
 		INFDir:   infDir,
 		infFS:    failOpenFS{FS: os.DirFS(infDir), bad: "oem999.inf"},
 		pnpQuery: func(context.Context) (string, error) { return pnp, nil },
 		smiQuery: smiMustNotRun(t),
 	})
-	assertVerdicts(t, rep, GPUUnbound)
-	if rep.Devices[0].IDListed != GPULayerUnknown || rep.Status != CUDADiscoveryPartial {
+	assertVerdicts(t, rep, VerdictUnbound)
+	if rep.Devices[0].IDListed != LayerUnknown || rep.Status != DiscoveryPartial {
 		t.Fatalf("device_id_listed=%s status=%s, want unknown/partial", rep.Devices[0].IDListed, rep.Status)
 	}
 }
@@ -348,7 +348,7 @@ func TestGPUBinding_BusNumberBeatsLocalizedLocation(t *testing.T) {
 	}
 	pnp := pnpFixture(row(fixtureEGPU0ID, `"DEVPKEY_Device_BusNumber":130,"DEVPKEY_Device_Address":0,`), row(fixtureEGPU1ID, ""))
 	rep := windowsBindingReport(t, pnp, postRebootINFs(t), 0, smiFixture(smiThreeGPUs, nil))
-	assertVerdicts(t, rep, GPUBindingUnknown, GPUReady)
+	assertVerdicts(t, rep, VerdictUnknown, VerdictReady)
 	if rep.Devices[1].PCIAddress != "82:00.0" {
 		t.Fatalf("pci_address = %q, want 82:00.0", rep.Devices[1].PCIAddress)
 	}
@@ -364,7 +364,7 @@ func TestGPUBinding_NonDisplayFunctionsDropped(t *testing.T) {
 		`{"instance_id":"PCI\\VEN_10DE&DEV_1AED&SUBSYS_0BDA1028&REV_A1\\4&1","class":"USB","DEVPKEY_Device_ProblemCode":0}`,
 	)
 	rep := windowsBindingReport(t, pnp, postRebootINFs(t), 0, smiFixture(smiInternalOnly, nil))
-	assertVerdicts(t, rep, GPUReady)
+	assertVerdicts(t, rep, VerdictReady)
 }
 
 // fak-test:runtime fast est=5ms lane=default
@@ -372,22 +372,22 @@ func TestClassifyGPUBinding_ClosedSet(t *testing.T) {
 	code12 := 12
 	cases := []struct {
 		name string
-		dev  GPUBindingDevice
-		want GPUBindingVerdict
+		dev  Device
+		want Verdict
 	}{
-		{"ready", GPUBindingDevice{Enumerated: true, VendorDriver: GPULayerYes, DriverStarted: GPULayerYes, CUDAVisible: GPULayerYes}, GPUReady},
-		{"absent", GPUBindingDevice{TunnelAuthorized: GPULayerUnknown}, GPUNotEnumerated},
-		{"tunnel", GPUBindingDevice{TunnelAuthorized: GPULayerNo}, GPUTunnelUnauthorized},
-		{"no driver, id listed", GPUBindingDevice{Enumerated: true, VendorDriver: GPULayerNo, DriverStarted: GPULayerNo, IDListed: GPULayerYes}, GPUUnbound},
-		{"no driver, coverage unknown", GPUBindingDevice{Enumerated: true, VendorDriver: GPULayerNo, DriverStarted: GPULayerNo, IDListed: GPULayerUnknown}, GPUUnbound},
-		{"bound, problem code", GPUBindingDevice{Enumerated: true, VendorDriver: GPULayerYes, DriverStarted: GPULayerNo, ProblemCode: &code12, IDListed: GPULayerYes}, GPUUnbound},
-		{"no driver lists id", GPUBindingDevice{Enumerated: true, VendorDriver: GPULayerNo, DriverStarted: GPULayerYes, IDListed: GPULayerNo}, GPUDriverLacksDeviceID},
-		{"bound, NVML blind", GPUBindingDevice{Enumerated: true, VendorDriver: GPULayerYes, DriverStarted: GPULayerYes, CUDAVisible: GPULayerNo}, GPUBoundNotCUDAVisible},
-		{"bound, NVML unknown", GPUBindingDevice{Enumerated: true, VendorDriver: GPULayerYes, DriverStarted: GPULayerYes, CUDAVisible: GPULayerUnknown}, GPUBindingUnknown},
-		{"provider unknown", GPUBindingDevice{Enumerated: true, VendorDriver: GPULayerUnknown, DriverStarted: GPULayerYes, CUDAVisible: GPULayerYes}, GPUBindingUnknown},
+		{"ready", Device{Enumerated: true, VendorDriver: LayerYes, DriverStarted: LayerYes, CUDAVisible: LayerYes}, VerdictReady},
+		{"absent", Device{TunnelAuthorized: LayerUnknown}, VerdictNotEnumerated},
+		{"tunnel", Device{TunnelAuthorized: LayerNo}, VerdictTunnelUnauthorized},
+		{"no driver, id listed", Device{Enumerated: true, VendorDriver: LayerNo, DriverStarted: LayerNo, IDListed: LayerYes}, VerdictUnbound},
+		{"no driver, coverage unknown", Device{Enumerated: true, VendorDriver: LayerNo, DriverStarted: LayerNo, IDListed: LayerUnknown}, VerdictUnbound},
+		{"bound, problem code", Device{Enumerated: true, VendorDriver: LayerYes, DriverStarted: LayerNo, ProblemCode: &code12, IDListed: LayerYes}, VerdictUnbound},
+		{"no driver lists id", Device{Enumerated: true, VendorDriver: LayerNo, DriverStarted: LayerYes, IDListed: LayerNo}, VerdictDriverLacksDeviceID},
+		{"bound, NVML blind", Device{Enumerated: true, VendorDriver: LayerYes, DriverStarted: LayerYes, CUDAVisible: LayerNo}, VerdictBoundNotCUDAVisible},
+		{"bound, NVML unknown", Device{Enumerated: true, VendorDriver: LayerYes, DriverStarted: LayerYes, CUDAVisible: LayerUnknown}, VerdictUnknown},
+		{"provider unknown", Device{Enumerated: true, VendorDriver: LayerUnknown, DriverStarted: LayerYes, CUDAVisible: LayerYes}, VerdictUnknown},
 	}
 	for _, c := range cases {
-		if got := ClassifyGPUBinding(c.dev); got != c.want {
+		if got := Classify(c.dev); got != c.want {
 			t.Errorf("%s: verdict = %s, want %s", c.name, got, c.want)
 		}
 	}
@@ -433,13 +433,13 @@ func writeSysfsGPU(t *testing.T, root, bdf, modalias string) string {
 
 const fixtureModalias = "pci:v000010DEd00002C05sv0000196Esd0000143Cbc03sc00i00"
 
-func linuxReportWithAliases(t *testing.T, root, aliases string) GPUBindingReport {
+func linuxReportWithAliases(t *testing.T, root, aliases string) Report {
 	t.Helper()
 	alias := filepath.Join(t.TempDir(), "modules.alias")
 	if err := os.WriteFile(alias, []byte(aliases), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return diagnoseGPUBindingLinux(root, GPUBindingOptions{ModulesAliasPath: alias, smiQuery: smiMustNotRun(t)})
+	return diagnoseLinux(root, Options{ModulesAliasPath: alias, smiQuery: smiMustNotRun(t)})
 }
 
 // fak-test:runtime fast est=20ms lane=default
@@ -449,23 +449,23 @@ func TestGPUBindingLinux_UnboundCoverageFromModulesAlias(t *testing.T) {
 
 	// The nvidia module aliases by display class: that proves nothing per device.
 	rep := linuxReportWithAliases(t, root, "alias pci:v000010DEd*sv*sd*bc03sc00i00* nvidia\n")
-	assertVerdicts(t, rep, GPUUnbound)
-	if rep.Devices[0].IDListed != GPULayerUnknown {
+	assertVerdicts(t, rep, VerdictUnbound)
+	if rep.Devices[0].IDListed != LayerUnknown {
 		t.Fatalf("class-wide alias: device_id_listed = %s, want unknown", rep.Devices[0].IDListed)
 	}
 
 	rep = linuxReportWithAliases(t, root, "alias pci:v000010DEd00002C05sv*sd*bc*sc*i* nvidia\n")
-	assertVerdicts(t, rep, GPUUnbound)
-	if rep.Devices[0].IDListed != GPULayerYes {
+	assertVerdicts(t, rep, VerdictUnbound)
+	if rep.Devices[0].IDListed != LayerYes {
 		t.Fatalf("device-specific alias: device_id_listed = %s, want yes", rep.Devices[0].IDListed)
 	}
 
 	// No nvidia module for the running kernel.
 	rep = linuxReportWithAliases(t, root, "alias pci:v000010DEd*sv*sd*bc03sc00i00* nouveau\n")
-	assertVerdicts(t, rep, GPUDriverLacksDeviceID)
+	assertVerdicts(t, rep, VerdictDriverLacksDeviceID)
 
-	rep = diagnoseGPUBindingLinux(root, GPUBindingOptions{smiQuery: smiMustNotRun(t)})
-	assertVerdicts(t, rep, GPUUnbound)
+	rep = diagnoseLinux(root, Options{smiQuery: smiMustNotRun(t)})
+	assertVerdicts(t, rep, VerdictUnbound)
 }
 
 // fak-test:runtime fast est=10ms lane=default
@@ -475,16 +475,16 @@ func TestGPUBindingLinux_SupportedGPUsJSONDecidesCoverage(t *testing.T) {
 	supported := filepath.Join(t.TempDir(), "supported-gpus.json")
 	for _, c := range []struct {
 		body string
-		want GPUBindingVerdict
+		want Verdict
 	}{
-		{`{"chips":[{"name":"NVIDIA GeForce RTX 5070 Ti","devid":"0x2C05"}]}`, GPUUnbound},
-		{`{"chips":[{"name":"NVIDIA GeForce RTX 5070 Ti","devid":"0x2C05","legacybranch":"470.xx"}]}`, GPUDriverLacksDeviceID},
-		{`{"chips":[{"name":"NVIDIA GeForce RTX 4070","devid":"0x2786"}]}`, GPUDriverLacksDeviceID},
+		{`{"chips":[{"name":"NVIDIA GeForce RTX 5070 Ti","devid":"0x2C05"}]}`, VerdictUnbound},
+		{`{"chips":[{"name":"NVIDIA GeForce RTX 5070 Ti","devid":"0x2C05","legacybranch":"470.xx"}]}`, VerdictDriverLacksDeviceID},
+		{`{"chips":[{"name":"NVIDIA GeForce RTX 4070","devid":"0x2786"}]}`, VerdictDriverLacksDeviceID},
 	} {
 		if err := os.WriteFile(supported, []byte(c.body), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		rep := diagnoseGPUBindingLinux(root, GPUBindingOptions{SupportedGPUsPath: supported, smiQuery: smiMustNotRun(t)})
+		rep := diagnoseLinux(root, Options{SupportedGPUsPath: supported, smiQuery: smiMustNotRun(t)})
 		assertVerdicts(t, rep, c.want)
 	}
 }
@@ -500,8 +500,8 @@ func TestGPUBindingLinux_UnauthorizedTunnelExplainsAbsentGPU(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(tb, "authorized"), []byte("0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	rep := diagnoseGPUBindingLinux(root, GPUBindingOptions{ExpectGPUs: 3, smiQuery: smiMustNotRun(t)})
-	assertVerdicts(t, rep, GPUUnbound, GPUTunnelUnauthorized, GPUNotEnumerated)
+	rep := diagnoseLinux(root, Options{ExpectGPUs: 3, smiQuery: smiMustNotRun(t)})
+	assertVerdicts(t, rep, VerdictUnbound, VerdictTunnelUnauthorized, VerdictNotEnumerated)
 }
 
 // fak-test:runtime fast est=10ms lane=default
@@ -512,17 +512,17 @@ func TestGPUBindingLinux_PartialEnumerationClaimsNoAbsentRows(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "bus", "pci", "devices", "0000_02_00.0", "vendor"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	rep := diagnoseGPUBindingLinux(root, GPUBindingOptions{ExpectGPUs: 2, smiQuery: smiMustNotRun(t)})
-	assertVerdicts(t, rep, GPUUnbound)
-	if rep.Ready || rep.Status != CUDADiscoveryPartial {
+	rep := diagnoseLinux(root, Options{ExpectGPUs: 2, smiQuery: smiMustNotRun(t)})
+	assertVerdicts(t, rep, VerdictUnbound)
+	if rep.Ready || rep.Status != DiscoveryPartial {
 		t.Fatalf("ready=%v status=%s, want not ready/partial", rep.Ready, rep.Status)
 	}
 }
 
 // fak-test:runtime fast est=10ms lane=default
 func TestGPUBindingLinux_MissingSysfsReportsNoDevices(t *testing.T) {
-	rep := diagnoseGPUBindingLinux(filepath.Join(t.TempDir(), "absent"), GPUBindingOptions{ExpectGPUs: 2, smiQuery: smiMustNotRun(t)})
-	if rep.Status != CUDADiscoveryError || rep.Ready || len(rep.Devices) != 0 {
+	rep := diagnoseLinux(filepath.Join(t.TempDir(), "absent"), Options{ExpectGPUs: 2, smiQuery: smiMustNotRun(t)})
+	if rep.Status != DiscoveryError || rep.Ready || len(rep.Devices) != 0 {
 		t.Fatalf("status=%s ready=%v devices=%d, want error/false/0", rep.Status, rep.Ready, len(rep.Devices))
 	}
 }
@@ -545,16 +545,16 @@ func TestGPUBindingLinux_DriverSymlinkDecidesBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	smi := smiFixture("0, 00000000:01:00.0, GPU-1, NVIDIA GeForce RTX 5070 Ti\n", nil)
-	rep := diagnoseGPUBindingLinux(root, GPUBindingOptions{smiQuery: smi})
-	assertVerdicts(t, rep, GPUReady, GPUUnbound)
+	rep := diagnoseLinux(root, Options{smiQuery: smi})
+	assertVerdicts(t, rep, VerdictReady, VerdictUnbound)
 }
 
 // ---- Payload floor (driver branch, module flavor, compute capability) ----
 
-func readyFloorRow(driverVersion, flavor string, cc int) GPUBindingDevice {
-	return GPUBindingDevice{
-		Enumerated: true, VendorDriver: GPULayerYes, DriverStarted: GPULayerYes,
-		CUDAVisible: GPULayerYes, DriverVersion: driverVersion, DriverFlavor: flavor,
+func readyFloorRow(driverVersion, flavor string, cc int) Device {
+	return Device{
+		Enumerated: true, VendorDriver: LayerYes, DriverStarted: LayerYes,
+		CUDAVisible: LayerYes, DriverVersion: driverVersion, DriverFlavor: flavor,
 		ComputeCapability: cc,
 	}
 }
@@ -563,32 +563,32 @@ func readyFloorRow(driverVersion, flavor string, cc int) GPUBindingDevice {
 func TestClassifyGPUBinding_DriverFloorDemotesReadyRows(t *testing.T) {
 	cases := []struct {
 		name  string
-		dev   GPUBindingDevice
-		floor GPUDriverFloor
-		want  GPUBindingVerdict
+		dev   Device
+		floor DriverFloor
+		want  Verdict
 	}{
-		{"below floor", readyFloorRow("610.43.02", DriverFlavorOpen, 120), BlackwellDriverFloor, GPUDriverBelowFloor},
-		{"at floor", readyFloorRow("615.71.09", DriverFlavorOpen, 120), BlackwellDriverFloor, GPUReady},
-		{"above floor", readyFloorRow("615.75.01", DriverFlavorOpen, 120), BlackwellDriverFloor, GPUReady},
-		{"proprietary flavor", readyFloorRow("615.71.09", DriverFlavorProprietary, 120), BlackwellDriverFloor, GPUModuleFlavorProprietary},
-		{"low compute capability", readyFloorRow("615.71.09", DriverFlavorOpen, 90), BlackwellDriverFloor, GPUComputeCapInsufficient},
-		{"zero floor keeps legacy behavior", readyFloorRow("610.43.02", DriverFlavorOpen, 90), GPUDriverFloor{}, GPUReady},
-		{"unparseable version is unknown not below", readyFloorRow("weird-build", DriverFlavorOpen, 120), BlackwellDriverFloor, GPUReady},
-		{"priority: version beats flavor and capability", readyFloorRow("610.43.02", DriverFlavorProprietary, 90), BlackwellDriverFloor, GPUDriverBelowFloor},
-		{"priority: flavor beats capability", readyFloorRow("615.71.09", DriverFlavorProprietary, 90), BlackwellDriverFloor, GPUModuleFlavorProprietary},
-		{"floor does not mask a binding failure", func() GPUBindingDevice {
+		{"below floor", readyFloorRow("610.43.02", DriverFlavorOpen, 120), BlackwellFloor, VerdictDriverBelowFloor},
+		{"at floor", readyFloorRow("615.71.09", DriverFlavorOpen, 120), BlackwellFloor, VerdictReady},
+		{"above floor", readyFloorRow("615.75.01", DriverFlavorOpen, 120), BlackwellFloor, VerdictReady},
+		{"proprietary flavor", readyFloorRow("615.71.09", DriverFlavorProprietary, 120), BlackwellFloor, VerdictModuleFlavorProprietary},
+		{"low compute capability", readyFloorRow("615.71.09", DriverFlavorOpen, 90), BlackwellFloor, VerdictComputeCapInsufficient},
+		{"zero floor keeps legacy behavior", readyFloorRow("610.43.02", DriverFlavorOpen, 90), DriverFloor{}, VerdictReady},
+		{"unparseable version is unknown not below", readyFloorRow("weird-build", DriverFlavorOpen, 120), BlackwellFloor, VerdictReady},
+		{"priority: version beats flavor and capability", readyFloorRow("610.43.02", DriverFlavorProprietary, 90), BlackwellFloor, VerdictDriverBelowFloor},
+		{"priority: flavor beats capability", readyFloorRow("615.71.09", DriverFlavorProprietary, 90), BlackwellFloor, VerdictModuleFlavorProprietary},
+		{"floor does not mask a binding failure", func() Device {
 			d := readyFloorRow("610.43.02", DriverFlavorOpen, 120)
-			d.DriverStarted = GPULayerNo
+			d.DriverStarted = LayerNo
 			return d
-		}(), BlackwellDriverFloor, GPUUnbound},
+		}(), BlackwellFloor, VerdictUnbound},
 	}
 	for _, c := range cases {
-		if got := ClassifyGPUBindingWithFloor(c.dev, c.floor); got != c.want {
+		if got := ClassifyWithFloor(c.dev, c.floor); got != c.want {
 			t.Errorf("%s: verdict = %s, want %s", c.name, got, c.want)
 		}
 	}
 	// The base classifier is untouched by any floor.
-	if got := ClassifyGPUBinding(readyFloorRow("610.43.02", DriverFlavorOpen, 90)); got != GPUReady {
+	if got := Classify(readyFloorRow("610.43.02", DriverFlavorOpen, 90)); got != VerdictReady {
 		t.Errorf("base verdict = %s, want GPU_READY (no floor)", got)
 	}
 }
@@ -629,37 +629,37 @@ func TestParseNvidiaSMIBusIDs_ComputeCapColumn(t *testing.T) {
 	// Legacy four-column rows keep parsing with an unobserved capability.
 	old, _ := ParseNvidiaSMIBusIDs(smiInternalOnly)
 	if len(old) != 1 || old[0].Name != "NVIDIA GeForce RTX 4070 Laptop GPU" || old[0].ComputeCapability != 0 {
-		t.Fatalf("legacy row = %+v, want name kept and capability 0", old)
+		t.Fatalf("legacy row = %+v, want name kept and capability 0", old[0])
 	}
 }
 
 // fak-test:runtime fast est=5ms lane=default
 func TestGPUBindingReport_FloorDemotesReadyRows(t *testing.T) {
-	base := func() GPUBindingInputs {
-		return GPUBindingInputs{
-			Method:     CUDASourceSysfs,
+	base := func() Inputs {
+		return Inputs{
+			Method:     SourceSysfs,
 			ExpectGPUs: 1,
-			CUDA: GPUCUDAView{State: GPULayerYes, Devices: []GPUCUDADevice{{
+			CUDA: CUDAView{State: LayerYes, Devices: []CUDADevice{{
 				Index: 0, BusID: "0000:01:00.0", UUID: "GPU-1", Name: "NVIDIA GeForce RTX 5090",
 				ComputeCapability: 120,
 			}}},
-			Devices: []GPUBindingDevice{{
+			Devices: []Device{{
 				PCIAddress: "0000:01:00.0", Enumerated: true,
-				VendorDriver: GPULayerYes, DriverStarted: GPULayerYes, IDListed: GPULayerYes,
+				VendorDriver: LayerYes, DriverStarted: LayerYes, IDListed: LayerYes,
 				DriverVersion: "610.43.02", DriverFlavor: DriverFlavorOpen,
 			}},
 		}
 	}
-	rep := BuildGPUBindingReport(base())
-	assertVerdicts(t, rep, GPUReady)
+	rep := BuildReport(base())
+	assertVerdicts(t, rep, VerdictReady)
 	if !rep.Ready {
 		t.Fatal("no floor: report must stay ready")
 	}
 	floored := base()
-	floored.Floor = BlackwellDriverFloor
-	rep = BuildGPUBindingReport(floored)
-	assertVerdicts(t, rep, GPUDriverBelowFloor)
-	if rep.Ready || rep.Verdicts[GPUDriverBelowFloor] != 1 {
+	floored.Floor = BlackwellFloor
+	rep = BuildReport(floored)
+	assertVerdicts(t, rep, VerdictDriverBelowFloor)
+	if rep.Ready || rep.Verdicts[VerdictDriverBelowFloor] != 1 {
 		t.Fatalf("ready=%v verdicts=%v, want not ready with one below-floor row", rep.Ready, rep.Verdicts)
 	}
 }
@@ -703,15 +703,15 @@ func TestGPUBindingLinux_FloorUsesObservedDriverAndNVMLCapability(t *testing.T) 
 	smi := smiFixture("0, 00000000:01:00.0, GPU-1, NVIDIA GeForce RTX 5090, 12.0\n", nil)
 
 	// Without a floor the observed driver branch still reads ready.
-	rep := diagnoseGPUBindingLinux(root, GPUBindingOptions{smiQuery: smi})
-	assertVerdicts(t, rep, GPUReady)
+	rep := diagnoseLinux(root, Options{smiQuery: smi})
+	assertVerdicts(t, rep, VerdictReady)
 	if rep.Devices[0].DriverVersion != observedDriver || rep.Devices[0].ComputeCapability != 120 {
 		t.Fatalf("device = %+v, want observed driver version and NVML capability", rep.Devices[0])
 	}
 
 	// With the sm_120 floor the same host is demoted to the typed token.
-	rep = diagnoseGPUBindingLinux(root, GPUBindingOptions{smiQuery: smi, Floor: BlackwellDriverFloor})
-	assertVerdicts(t, rep, GPUDriverBelowFloor)
+	rep = diagnoseLinux(root, Options{smiQuery: smi, Floor: BlackwellFloor})
+	assertVerdicts(t, rep, VerdictDriverBelowFloor)
 	if rep.Ready {
 		t.Fatal("floored host must not be ready")
 	}
