@@ -251,6 +251,7 @@ var generatedVerbIndex = []generatedVerb{
 	{Name: "operator", Synopsis: "the human pacing brief: fold cadence/program/milestone into human/agent/watch/background buckets", Tier: "dev"},
 	{Name: "ops", Synopsis: "production operational tooling, health probes, and cluster telemetry", Tier: "dev"},
 	{Name: "opt", Synopsis: "the optimization-fuser / RSI opt-target loop", Tier: "dev"},
+	{Name: "optimize", Synopsis: "not yet cataloged — `fak optimize -h` for usage", Tier: ""},
 	{Name: "org", Synopsis: "inspect org-policy posture and which control channel owns each capability", Tier: "dev"},
 	{Name: "pack", Synopsis: "hermetic OCI bundle packaging and verification for harness collections", Tier: "dev"},
 	{Name: "perf", Synopsis: "per-request serving perf: TTFT/prefill/decode/e2e quantiles and cache share from the durable ledger", Tier: "dev"},
