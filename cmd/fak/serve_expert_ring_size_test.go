@@ -288,6 +288,7 @@ func TestSizeServeExpertRingBinding(t *testing.T) {
 		{"auto_unmeasured", auto, f, compute.FreeUnknown, serveExpertRingHost{}, serveExpertRingBindingNone},
 		{"token", serveExpertRingSize{Mode: serveExpertRingToken}, f, 200 * ringGiB, gtt(118 * ringGiB), serveExpertRingBindingNone},
 		{"explicit", serveExpertRingSize{Mode: serveExpertRingExplicit, Bytes: 20 * ringGiB}, f, 200 * ringGiB, gtt(118 * ringGiB), serveExpertRingBindingNone},
+		{"explicit_clamped_to_band", serveExpertRingSize{Mode: serveExpertRingExplicit, Bytes: 64 * ringGiB}, ggufload.ActivatedExpertFit{DeviceBaseBytes: f.DeviceBaseBytes, RoutedBandBytes: 20 * ringGiB, ActivatedLayerBytes: f.ActivatedLayerBytes, ActivatedTokenBytes: f.ActivatedTokenBytes, HostGatheredBytes: f.HostGatheredBytes}, 200 * ringGiB, gtt(118 * ringGiB), serveExpertRingBindingBand},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, err := sizeServeExpertRing(tc.size, tc.fit, token, nonRing, tc.deviceAvail, tc.host)
@@ -659,4 +660,77 @@ func TestServeTokenExpertRingContextAdmission(t *testing.T) {
 	if reader.reads != 0 {
 		t.Fatalf("header admission read %d payloads", reader.reads)
 	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+// An explicitly set --expert-ring-bytes must never be silently ignored: a non-ring arm names the
+// drop, a band-clamped ring names the bound and the requested bytes on the sizing log line, a
+// below-floor ring keeps its typed refusal, and an unset flag adds nothing.
+func TestExplicitExpertRingSilentAcceptanceClosed(t *testing.T) {
+	f := ringSizingFit() // band 180 GiB, floor 72 MiB
+	const token = 3 * ringGiB
+	nonRing := ringSizingNonRing(f, 2*ringGiB)
+	roomyHost := serveExpertRingHost{Total: 125 * ringGiB, Avail: 118 * ringGiB, Known: true, RSSAnonPeak: 2 * ringGiB, SharedPool: true}
+	narrow := ggufload.ActivatedExpertFit{DeviceBaseBytes: f.DeviceBaseBytes, RoutedBandBytes: 20 * ringGiB, ActivatedLayerBytes: f.ActivatedLayerBytes, ActivatedTokenBytes: f.ActivatedTokenBytes, HostGatheredBytes: f.HostGatheredBytes}
+
+	t.Run("non_ring_arm_names_the_drop", func(t *testing.T) {
+		env := func(k string) string {
+			if k == FakExpertRingBytesEnv {
+				return "32g"
+			}
+			return ""
+		}
+		var err error
+		got := captureServeStderr(t, func() { err = reportDroppedExpertRing("--cpu-offload-experts", env) })
+		if err != nil {
+			t.Fatalf("default mode must warn, not refuse: %v", err)
+		}
+		const wantLine = `fak serve: WARNING: --expert-ring-bytes="32g" is dropped by the --cpu-offload-experts load arm: it never evaluates the activated-expert device ring placement, so no ring allocation was made; only the resident-Q4_K device arm takes it, and only when the full plan does not fit. The value reaches that arm through FAK_EXPERT_RING_BYTES.`
+		if !strings.Contains(got, wantLine+"\n") {
+			t.Fatalf("dropped-arm warning missing: got %q", got)
+		}
+	})
+	t.Run("explicit_clamped_by_ceiling_notices", func(t *testing.T) {
+		s, err := sizeServeExpertRing(serveExpertRingSize{Mode: serveExpertRingExplicit, Bytes: 32 * ringGiB}, narrow, token, nonRing, 102*ringGiB, roomyHost)
+		if err != nil || s.RingBytes != 20*ringGiB || s.Binding != serveExpertRingBindingBand || s.ClampedFrom != 32*ringGiB {
+			t.Fatalf("clamped explicit ring=%d binding=%s clamped_from=%d err=%v, want band %d", s.RingBytes, s.Binding, s.ClampedFrom, err, 20*ringGiB)
+		}
+		for _, frag := range []string{"binding=band ", "clamped_from=" + bytesText(uint64(32*ringGiB)) + " (--expert-ring-bytes)"} {
+			if !strings.Contains(s.Text(), frag) {
+				t.Fatalf("log line lacks %q:\n%s", frag, s.Text())
+			}
+		}
+	})
+	t.Run("explicit_equal_to_ceiling_is_not_a_clamp", func(t *testing.T) {
+		s, err := sizeServeExpertRing(serveExpertRingSize{Mode: serveExpertRingExplicit, Bytes: 20 * ringGiB}, narrow, token, nonRing, 102*ringGiB, roomyHost)
+		if err != nil || s.RingBytes != 20*ringGiB || s.Binding != serveExpertRingBindingNone || s.ClampedFrom != 0 {
+			t.Fatalf("at-ceiling explicit ring=%d binding=%s clamped_from=%d err=%v, want unclamped", s.RingBytes, s.Binding, s.ClampedFrom, err)
+		}
+		if strings.Contains(s.Text(), "clamped_from=") {
+			t.Fatalf("log line claims a clamp it did not take:\n%s", s.Text())
+		}
+	})
+	t.Run("explicit_below_floor_refusal_unchanged", func(t *testing.T) {
+		_, err := sizeServeExpertRing(serveExpertRingSize{Mode: serveExpertRingExplicit, Bytes: 1 << 20}, narrow, token, nonRing, 102*ringGiB, roomyHost)
+		if !errors.Is(err, ErrServeExpertRingSize) {
+			t.Fatalf("explicit below one layer err=%v, want ErrServeExpertRingSize", err)
+		}
+	})
+	t.Run("no_flag_zero_new_output", func(t *testing.T) {
+		for name, size := range map[string]serveExpertRingSize{
+			"token":     {Mode: serveExpertRingToken},
+			"auto":      {Mode: serveExpertRingAuto},
+			"unclamped": {Mode: serveExpertRingExplicit, Bytes: 64 * ringGiB},
+		} {
+			s, err := sizeServeExpertRing(size, f, token, nonRing, 102*ringGiB, roomyHost)
+			if err != nil || strings.Contains(s.Text(), "clamped_from=") {
+				t.Fatalf("%s: err=%v, log line gained a clamp notice:\n%s", name, err, s.Text())
+			}
+		}
+		var err error
+		got := captureServeStderr(t, func() { err = reportDroppedExpertRing("lean CPU", func(string) string { return "" }) })
+		if err != nil || got != "" {
+			t.Fatalf("no named size: err=%v stderr=%q, want silence", err, got)
+		}
+	})
 }

@@ -230,12 +230,17 @@ const (
 // serveExpertRingSizing is the size choice and every input it was made from, for the log line.
 type serveExpertRingSizing struct {
 	Mode serveExpertRingMode
-	// Binding is the bound an auto ring took; none for token, explicit and unmeasured auto.
+	// Binding is the bound that set the ring: the chosen bound for an auto ring, the band ceiling
+	// for an explicit ring it clamped down, and none for token, unclamped explicit and unmeasured
+	// auto.
 	Binding    serveExpertRingBinding
 	RingBytes  int64
 	TokenBytes int64
 	Floor      int64
 	Ceiling    int64
+	// ClampedFrom is the operator-requested --expert-ring-bytes when the routed band ceiling
+	// clamped an explicit ring down; 0 when the ring was not clamped.
+	ClampedFrom int64
 	// DeviceBound / HostBound are the room each bound leaves the ring; Known=false when the
 	// bound could not be measured and did not constrain the choice.
 	DeviceBound, HostBound           int64
@@ -326,6 +331,10 @@ func sizeServeExpertRing(size serveExpertRingSize, f ggufload.ActivatedExpertFit
 		s.Binding = binding
 	case serveExpertRingExplicit:
 		s.RingBytes = min(size.Bytes, s.Ceiling)
+		if s.Ceiling > 0 && s.RingBytes < size.Bytes {
+			// The band ceiling set the ring: name the bound that chose it, like the auto path.
+			s.Binding, s.ClampedFrom = serveExpertRingBindingBand, size.Bytes
+		}
 	default:
 		return s, fmt.Errorf("%w: mode %q", ErrServeExpertRingSize, size.Mode)
 	}
@@ -374,7 +383,7 @@ func (s serveExpertRingSizing) Text() string {
 	if s.HostDefaultAuto {
 		mode += " default=auto (high-RAM host)"
 	}
-	return fmt.Sprintf("ring size mode=%s binding=%s chosen=%s token=%s floor=%s band=%s device_bound=%s (device_avail=%s non_ring_device=%s) host_bound=%s (mem_available=%s rss_anon_peak=%s margin=%s non_ring_host=%s shared_pool=%t) pool_cap=%s guard_trim=%s host_gathered=%s page_reserve=%s",
+	text := fmt.Sprintf("ring size mode=%s binding=%s chosen=%s token=%s floor=%s band=%s device_bound=%s (device_avail=%s non_ring_device=%s) host_bound=%s (mem_available=%s rss_anon_peak=%s margin=%s non_ring_host=%s shared_pool=%t) pool_cap=%s guard_trim=%s host_gathered=%s page_reserve=%s",
 		mode, binding, bytesText(uint64(max(s.RingBytes, 0))), bytesText(uint64(max(s.TokenBytes, 0))),
 		bytesText(uint64(max(s.Floor, 0))), bytesText(uint64(max(s.Ceiling, 0))),
 		bound(s.DeviceBound, s.DeviceBoundKnown), bytesText(uint64(max(s.DeviceAvail, 0))), bytesText(uint64(max(s.NonRingDevice, 0))),
@@ -383,6 +392,10 @@ func (s serveExpertRingSizing) Text() string {
 		s.poolCapText(),
 		bytesText(uint64(max(s.GuardTrimBytes, 0))),
 		bytesText(uint64(max(s.HostGatheredBytes, 0))), bytesText(uint64(max(s.HostGatheredReserve, 0))))
+	if s.ClampedFrom > 0 {
+		text += fmt.Sprintf(" clamped_from=%s (--%s)", bytesText(uint64(s.ClampedFrom)), serveExpertRingBytesFlag)
+	}
+	return text
 }
 
 func (s serveExpertRingSizing) poolCapText() string {
