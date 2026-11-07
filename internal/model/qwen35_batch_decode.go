@@ -42,6 +42,8 @@ func (bs *BatchSession) Qwen35IndependentDecodeCohortLimit() int {
 		return true
 	}
 	var backend compute.Backend
+	stores := make([]compute.KVStore, len(bs.Seqs))
+	states := make([][]compute.Qwen35SequenceState, len(bs.Seqs))
 	for i, session := range bs.Seqs {
 		if session == nil || session.M != bs.M || session.halClosed || session.halFailure != nil ||
 			!unique(session) || !unique(session.halKV) || !unique(session.qwen35HAL) ||
@@ -57,6 +59,8 @@ func (bs *BatchSession) Qwen35IndependentDecodeCohortLimit() int {
 			return 0
 		}
 		q := session.qwen35HAL
+		stores[i] = session.halKV
+		states[i] = make([]compute.Qwen35SequenceState, cfg.NumLayers)
 		valid := func() bool {
 			q.mu.Lock()
 			defer q.mu.Unlock()
@@ -106,6 +110,7 @@ func (bs *BatchSession) Qwen35IndependentDecodeCohortLimit() int {
 				if !private {
 					return false
 				}
+				states[i][layer] = compute.Qwen35SequenceState{Conv: state.conv, Recurrent: state.recurrent}
 			}
 			return linear > 0
 		}()
@@ -113,8 +118,15 @@ func (bs *BatchSession) Qwen35IndependentDecodeCohortLimit() int {
 			return 0
 		}
 	}
-	// Opaque handle identity is model-owned evidence. Native pointer/range alias
-	// validation remains the backend's existing obligation, not a GPU claim here.
+	// Distinct opaque handles do not prove physical storage independence. Require
+	// positive whole-cohort backend evidence, outside the model ownership locks.
+	// The caller's session serialization still spans this query and submissions.
+	proof, ok := backend.(interface {
+		Qwen35IndependentDecodeCohortOwned([]compute.KVStore, [][]compute.Qwen35SequenceState) bool
+	})
+	if !ok || !proof.Qwen35IndependentDecodeCohortOwned(stores, states) {
+		return 0
+	}
 	return 8
 }
 

@@ -914,7 +914,7 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 					if loadErr != nil {
 						return nil, false, nil, gateway.StartupPhase{}, ringPlan, loadErr
 					}
-					if err := enableServeSharedExpertRing(mm, backend); err != nil {
+					if err := enableServeSharedExpertRing(mm, backend, ring.Sizing, os.Getenv); err != nil {
 						// The historical request-scoped ring still bounds residency; only reuse is lost.
 						fmt.Fprintln(os.Stderr, "fak serve: activated-expert device ring stays request-scoped:", err)
 					}

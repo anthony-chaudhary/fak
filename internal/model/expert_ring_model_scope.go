@@ -30,6 +30,20 @@ var (
 // is the checkpoint tier's declared device ring budget, which is the budget every session already
 // validates against. Sessions created on be afterwards attach to it; it is freed by CloseWeights.
 func (m *Model) EnableSharedExpertRing(be compute.Backend) (*SharedExpertRing, error) {
+	return m.EnableSharedExpertRingWith(be, SharedExpertRingOptions{})
+}
+
+// SharedExpertRingOptions are the construction-time ring knobs a serve may set; the zero value is
+// the plain LRU ring EnableSharedExpertRing has always built.
+type SharedExpertRingOptions struct {
+	Evict ExpertRingEvictPolicy
+	// StableBytes is the scan-resistant stable-set ceiling (expert_ring_stable.go); 0 = off.
+	StableBytes int64
+}
+
+// EnableSharedExpertRingWith is EnableSharedExpertRing with construction-time options (fixed for
+// the ring's life). A ring that already exists for be is returned unchanged.
+func (m *Model) EnableSharedExpertRingWith(be compute.Backend, opts SharedExpertRingOptions) (*SharedExpertRing, error) {
 	if m == nil {
 		return nil, ErrSharedRingModel
 	}
@@ -45,7 +59,7 @@ func (m *Model) EnableSharedExpertRing(be compute.Backend) (*SharedExpertRing, e
 	if sh := m.sharedExpertRings[be]; sh != nil {
 		return sh, nil
 	}
-	sh, err := NewSharedExpertRing(SharedExpertRingConfig{Model: m, Backend: be, BudgetBytes: budget})
+	sh, err := NewSharedExpertRing(SharedExpertRingConfig{Model: m, Backend: be, BudgetBytes: budget, Evict: opts.Evict, StableBytes: opts.StableBytes})
 	if err != nil {
 		return nil, err
 	}

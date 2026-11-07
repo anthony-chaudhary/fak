@@ -100,6 +100,9 @@ type SharedExpertRingConfig struct {
 	// Evict is R4/#5615's victim ranking, fixed for the ring's life for the reason R4 gives — scoring
 	// one window under two policies makes the next measurement uninterpretable. The zero value is LRU.
 	Evict ExpertRingEvictPolicy
+	// StableBytes is the scan-resistant stable-set ceiling (expert_ring_stable.go); 0 keeps the
+	// plain ring. Values at or above BudgetBytes are refused.
+	StableBytes int64
 }
 
 // SharedExpertRing is the bounded routed-expert residency of ONE (model, device) pair, shared by
@@ -207,6 +210,9 @@ func NewSharedExpertRing(cfg SharedExpertRingConfig) (*SharedExpertRing, error) 
 	if cfg.BudgetBytes <= 0 {
 		return nil, errors.New("model: shared expert ring needs a positive byte budget")
 	}
+	if cfg.StableBytes < 0 || (cfg.StableBytes > 0 && cfg.StableBytes >= cfg.BudgetBytes) {
+		return nil, errors.New("model: shared expert ring stable set must be smaller than the byte budget")
+	}
 	sh := &SharedExpertRing{
 		m:        cfg.Model,
 		be:       cfg.Backend,
@@ -217,6 +223,7 @@ func NewSharedExpertRing(cfg SharedExpertRingConfig) (*SharedExpertRing, error) 
 	sh.ledger.servedState = map[polymodel.ModelID]uint8{}
 	sh.ring = newPagedRing(cfg.Backend, cfg.BudgetBytes)
 	sh.ring.policy = cfg.Evict
+	sh.ring.stableCap = cfg.StableBytes
 	sh.ring.shared = sh
 	return sh, nil
 }
