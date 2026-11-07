@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
 
 // fak-test:runtime medium est=45s lane=default
@@ -58,14 +60,31 @@ func TestCUDAQwen35IndependentDecodeCohortOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal("required host Go compiler unavailable: ", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	deadline := time.Now().Add(90 * time.Second)
+	if suiteDeadline, ok := t.Deadline(); ok && suiteDeadline.Add(-2*time.Second).Before(deadline) {
+		deadline = suiteDeadline.Add(-2 * time.Second)
+	}
+	if !time.Now().Before(deadline) {
+		t.Fatal("insufficient test budget for ownership controls and subprocess drain")
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, goTool, "run", path)
+	// Only this synthetic child is path independent. Keep the parent test's
+	// source paths intact, and do not inherit unbounded package compilation.
+	cmd := exec.CommandContext(ctx, goTool, "run", "-p=1", "-trimpath", path)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOWORK=off", "GOTOOLCHAIN=local", "GOFLAGS=", "CGO_ENABLED=0")
-	if out, err := cmd.CombinedOutput(); err != nil {
+	procguard.ConfigureProcessTreeCancel(cmd)
+	cmd.WaitDelay = time.Second
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		t.Fatalf("source-bound ownership controls: %v\n%s", err, out)
 	}
+	const complete = "PASS CUDA metadata ownership controls; no device execution"
+	if !bytes.Equal(bytes.TrimSpace(out), []byte(complete)) {
+		t.Fatalf("source-bound ownership controls did not report completion:\n%s", out)
+	}
+	t.Logf("%s", bytes.TrimSpace(out))
 }
 
 const cudaQwen35CohortOwnershipFixture = `
@@ -104,9 +123,9 @@ var owners [][]byte
 func allocate(n int) unsafe.Pointer { b := make([]byte, n); owners = append(owners, b); return unsafe.Pointer(&b[0]) }
 func must(ok bool, why string) { if !ok { panic(why) } }
 func emptyKV(k *cudaKV) { k.pos=nil;for _, p:=range [][]dslice{k.K,k.Kraw,k.V}{for i:=range p{p[i]=dslice{}}} }
-func fixture() (*cudaBackend, []KVStore, [][]Qwen35SequenceState) {
+func fixture(n int) (*cudaBackend, []KVStore, [][]Qwen35SequenceState) {
  c := &cudaBackend{faultLatch: &DeviceFaultLatch{}}
- kvs := make([]KVStore, 17); states := make([][]Qwen35SequenceState, len(kvs))
+ kvs := make([]KVStore, n); states := make([][]Qwen35SequenceState, len(kvs))
  for i := range kvs {
   k := &cudaKV{be:c, cfg:KVConfig{NumLayers:2,NumKVHeads:1,HeadDim:4},pos:[]int{0}, K:make([]dslice,2),Kraw:make([]dslice,2),V:make([]dslice,2)}
   for _, plane := range [][]dslice{k.K,k.Kraw,k.V} { plane[0]=dslice{ptr:allocate(64),len:4,cap:16} }
@@ -123,10 +142,14 @@ func snapshot(c *cudaBackend,kvs []KVStore,states [][]Qwen35SequenceState) strin
  return s
 }
 func main() {
+ for _, n := range []int{2,8,9,16,17} {
+  c,k,s:=fixture(n);must(c.Qwen35IndependentDecodeCohortOwned(k,s),fmt.Sprint("disjoint cohort ",n))
+ }
  cases:=[]struct{name string; mutate func(*cudaBackend,[]KVStore,[][]Qwen35SequenceState); want bool}{
   {"disjoint-full-capacities",nil,true},
   {"fresh-empty-kv",func(c *cudaBackend,k []KVStore,s [][]Qwen35SequenceState){ for _, raw:=range k { kv:=raw.(*cudaKV);kv.pos=nil;for _, plane:=range [][]dslice{kv.K,kv.Kraw,kv.V}{for i:=range plane{plane[i]=dslice{}}} } },true},
   {"narrowed-kv",func(c *cudaBackend,k []KVStore,s [][]Qwen35SequenceState){ for _, raw:=range k { kv:=raw.(*cudaKV);kv.cfg.Precision=KVPrecisionF16;for _, plane:=range [][]dslice{kv.K,kv.V}{for i:=range plane{plane[i].dtype=F16}} } },true},
+  {"bf16-kv",func(c *cudaBackend,k []KVStore,s [][]Qwen35SequenceState){ for _, raw:=range k { kv:=raw.(*cudaKV);kv.cfg.Precision=KVPrecisionBF16;for _, plane:=range [][]dslice{kv.K,kv.V}{for i:=range plane{plane[i].dtype=BF16}} } },true},
   {"adjacent-state-ranges",func(c *cudaBackend,k []KVStore,s [][]Qwen35SequenceState){ p:=allocate(128);s[0][0].Conv.buf.(*cudaBuf).ptr=p;s[8][0].Conv.buf.(*cudaBuf).ptr=unsafe.Add(p,64) },true},
   {"unrelated-transient",func(c *cudaBackend,k []KVStore,s [][]Qwen35SequenceState){ c.transient=[]*cudaBuf{{ptr:allocate(64),n:64}} },true},
   {"gdngdn-cross-group",func(c *cudaBackend,k []KVStore,s [][]Qwen35SequenceState){ b:=*s[0][0].Conv.buf.(*cudaBuf);s[8][0].Conv.buf=&b },false},
@@ -169,12 +192,13 @@ func main() {
   {"device-fault",func(c *cudaBackend,k []KVStore,s [][]Qwen35SequenceState){ c.faultLatch.health=1 },false},
  }
  for _, tc:=range cases {
-  c,k,s:=fixture();if tc.mutate!=nil{tc.mutate(c,k,s)};before:=snapshot(c,k,s)
+  c,k,s:=fixture(17);if tc.mutate!=nil{tc.mutate(c,k,s)};before:=snapshot(c,k,s)
   must(c.Qwen35IndependentDecodeCohortOwned(k,s)==tc.want,tc.name)
   must(snapshot(c,k,s)==before,"query mutated "+tc.name)
   must(cudaMu.TryLock(),"query retained mutex");cudaMu.Unlock()
  }
- c,k,s:=fixture();must(!c.Qwen35IndependentDecodeCohortOwned(k,s[:1]),"mismatched lane count")
+ c,k,s:=fixture(17);must(!c.Qwen35IndependentDecodeCohortOwned(k,s[:1]),"mismatched lane count")
+ must(!c.Qwen35IndependentDecodeCohortOwned(k[:1],s[:1]),"singleton")
  must(!(*cudaBackend)(nil).Qwen35IndependentDecodeCohortOwned(k,s),"nil backend")
  fmt.Println("PASS CUDA metadata ownership controls; no device execution")
 }
