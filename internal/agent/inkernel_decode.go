@@ -21,6 +21,11 @@ import (
 
 const inKernelCPUPrefixFlightMinShared = 64
 
+// batchDiagAgentEnabled gates the agent-level batch-step diagnostic line
+// (fak_batch_agent_diag) used by the q2kxl concurrency-collapse investigation.
+// Off by default; FAK_BATCH_DIAG=1 turns it on. Pure observation: no behavior change.
+var batchDiagAgentEnabled = os.Getenv("FAK_BATCH_DIAG") == "1"
+
 const inKernelLegacyPrefixFlightNamespace = "legacy/unscoped"
 
 // inKernelPrefixFlightNamespace follows the same tenant ownership boundary as
@@ -1353,10 +1358,49 @@ func newInKernelDecodeIteration(lanes []*decodeLane, m *model.Model, quant bool)
 	return d
 }
 
+// stepSerial advances every active lane through its own Session.Step - the
+// pre-batch serial driver. Per-lane results are bit-for-bit identical to the
+// batched driver (the same contract StepBatchActive pins for StepBatch), so
+// the cohort's adaptive batched->serial degradation changes only wall time.
+// It reports whether any lane advanced.
+func (d *inKernelDecodeIteration) stepSerial(ctx context.Context) bool {
+	anyActive := false
+	for i, ln := range d.lanes {
+		d.active[i] = false
+		if ln.done || ln.gen >= ln.maxNew {
+			continue // finished lane: dropped from the active set, never re-stepped.
+		}
+		laneCtx := ctx
+		if ln.ctx != nil {
+			laneCtx = ln.ctx
+		}
+		next, advance := ln.decodeOne(laneCtx)
+		if !advance {
+			continue
+		}
+		stepStart := time.Now()
+		if err := ln.step(laneCtx, next); err != nil {
+			ln.err, ln.done = err, true
+			continue
+		}
+		enginestep.Default.ObserveDecodeStep(enginestep.PathSerial, 1, time.Since(stepStart))
+		if ln.logits != nil {
+			ln.vocab = len(ln.logits)
+		}
+		if ln.forwarded != nil {
+			ln.forwarded = append(ln.forwarded, next)
+		}
+		d.active[i] = true
+		anyActive = true
+	}
+	return anyActive
+}
+
 // step completes at most one shared forward. False means all lanes are terminal;
 // sampling the final emitted token may finish a lane without forwarding it.
 func (d *inKernelDecodeIteration) step(ctx context.Context) bool {
 	lanes, bs, ids, active, greedy := d.lanes, d.bs, d.ids, d.active, d.greedy
+	agentDiagT0 := time.Now()
 	anyActive := false
 	for i, ln := range lanes {
 		active[i] = false
@@ -1375,6 +1419,7 @@ func (d *inKernelDecodeIteration) step(ctx context.Context) bool {
 		active[i] = true
 		anyActive = true
 	}
+	agentDiagSample := time.Since(agentDiagT0)
 	if !anyActive {
 		return false
 	}
@@ -1416,6 +1461,10 @@ func (d *inKernelDecodeIteration) step(ctx context.Context) bool {
 	}
 	if d.serialSteps == 0 {
 		enginestep.Default.ObserveDecodeStep(enginestep.PathBatched, activeLanes, time.Since(stepStart))
+	}
+	if batchDiagAgentEnabled {
+		fmt.Fprintf(os.Stderr, "fak_batch_agent_diag lanes=%d sample_us=%d step_us=%d total_us=%d\n",
+			activeLanes, agentDiagSample.Microseconds(), time.Since(stepStart).Microseconds(), time.Since(agentDiagT0).Microseconds())
 	}
 	if forwardNow != nil {
 		// This trace preserves outer call provenance and duration even when

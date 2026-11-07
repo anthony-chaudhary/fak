@@ -13,6 +13,10 @@ import (
 // caller to drain the planner queue does not make that caller wait for work in
 // a later cohort after its own result and receipt are complete.
 func TestInKernelCoalescedLeaderReturnsBeforeLaterCohort(t *testing.T) {
+	// Probe-replaced forwards assume every cohort step takes the batched
+	// driver; disable the adaptive batched->serial governor so driver selection
+	// stays out of this mechanical witness.
+	t.Setenv(batchStepHealthEnv, "0")
 	restoreProbe := installQwenSharedReceiptProbeForTest(func(bs *model.BatchSession, ids []int, active []bool) ([][]float32, int, int64, bool) {
 		out := make([][]float32, len(ids))
 		lanes := 0

@@ -57,6 +57,11 @@ func TestCoalescedMetalStallReturnsRequestError(t *testing.T) {
 }
 
 func TestInKernelPlannerCoalescesConcurrentQwenTurns(t *testing.T) {
+	// The probe-replaced forward and the "shared work executed" receipt
+	// assertions assume every cohort step takes the batched driver; disable the
+	// adaptive batched->serial governor so driver selection stays out of this
+	// mechanical witness.
+	t.Setenv(batchStepHealthEnv, "0")
 	restoreProbe := installQwenSharedReceiptProbeForTest(func(bs *model.BatchSession, ids []int, active []bool) ([][]float32, int, int64, bool) {
 		out := make([][]float32, len(ids))
 		lanes := 0

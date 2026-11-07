@@ -16,6 +16,10 @@ import (
 // qualification. The separate HTTP witness covers scoped hybrid prefix restore.
 // fak-test:runtime fast est=100ms lane=default
 func TestInKernelQwenLiveJoin(t *testing.T) {
+	// Probe-call-count synchronization assumes every cohort step takes the
+	// batched driver; disable the adaptive batched->serial governor so driver
+	// selection cannot divert steps out of the probe.
+	t.Setenv(batchStepHealthEnv, "0")
 	m := model.NewSynthetic(tinyCfg())
 	p := &InKernelPlanner{m: m, coalesceReadyHook: func() {}}
 	prompts := [][]int{{1, 2, 3}, {1, 2, 4, 5}}
@@ -165,6 +169,9 @@ func TestInKernelQwenLiveJoin(t *testing.T) {
 // drainer or replay a forward whose sessions have already advanced.
 // fak-test:runtime fast est=100ms lane=default
 func TestInKernelQwenLiveJoinPanicClosesBeforeHandoff(t *testing.T) {
+	// Same probe-synchronization assumption as TestInKernelQwenLiveJoin: keep
+	// every cohort step on the batched driver.
+	t.Setenv(batchStepHealthEnv, "0")
 	for _, phase := range []string{"shared_forward", "preparation"} {
 		t.Run(phase, func(t *testing.T) {
 			m := model.NewSynthetic(tinyCfg())

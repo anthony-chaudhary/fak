@@ -95,6 +95,11 @@ func TestEngineStepWiringSerialCompleteFeedsDefault(t *testing.T) {
 
 // fak-test:runtime fast est=2s lane=default
 func TestEngineStepWiringCoalescedCohortFeedsDefault(t *testing.T) {
+	// This witness pins exact PathBatched token attribution through the
+	// coalescer; disable the adaptive batched->serial governor so driver
+	// selection (calibration step, probes, degradation) stays out of the
+	// accounting.
+	t.Setenv(batchStepHealthEnv, "0")
 	restoreProbe := installQwenSharedReceiptProbeForTest(func(bs *model.BatchSession, ids []int, active []bool) ([][]float32, int, int64, bool) {
 		out := make([][]float32, len(ids))
 		for i, on := range active {

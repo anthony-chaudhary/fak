@@ -66,6 +66,12 @@ type qwenInterleaveFixture struct {
 
 func newQwenInterleaveFixture(t *testing.T, budgets ...int) *qwenInterleaveFixture {
 	t.Helper()
+	// These fixtures pin the #14226 interleaving choreography through probe-hook
+	// synchronization that assumes every cohort step takes the batched driver.
+	// Disable the adaptive batched->serial governor so driver selection cannot
+	// divert steps out of the probe; the governor itself is pinned by
+	// TestBatchStepHealth.
+	t.Setenv(batchStepHealthEnv, "0")
 	m := model.NewSyntheticQwen38MTP()
 	f := &qwenInterleaveFixture{
 		t: t, p: &InKernelPlanner{m: m, q4k: true, qwenQ4KPrefillChunkTokens: 2, coalesceReadyHook: func() {}},
@@ -254,7 +260,10 @@ func TestInKernelQwenPrefillInterleaveNativeRequests(t *testing.T) {
 	}{
 		{"selected", "0.5", 12, true},
 		{"old_lane_retires", "0.5", 3, false},
-		{"default", "", 12, false},
+		// Unset now defaults to share 0.5, so the default row interleaves exactly
+		// like the explicit 0.5 row; only an explicit out-of-(0,1) value keeps
+		// whole-prompt arrival ordering.
+		{"default", "", 12, true},
 		{"invalid", "junk", 12, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

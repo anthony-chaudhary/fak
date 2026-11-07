@@ -2,11 +2,18 @@ package model
 
 import (
 	"fmt"
+	"os"
 	"reflect"
 	"slices"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
+
+// qwen35BatchDiagEnabled gates the model-level batch-step stage-timing diagnostic
+// line (fak_batch_model_diag) used by the q2kxl concurrency-collapse investigation.
+// Off by default; FAK_BATCH_DIAG=1 turns it on. Pure observation: no behavior change.
+var qwen35BatchDiagEnabled = os.Getenv("FAK_BATCH_DIAG") == "1"
 
 // qwen35HybridQ4KBatchStep is an optional exact native batch override.
 // Without an override, dispatch requires the existing backend capability.
@@ -221,6 +228,8 @@ func stepBatchQwen35HybridQ4KIndependent(bs *BatchSession, ids []int) ([][]float
 	if bs == nil || bs.M == nil || len(ids) < 2 || len(ids) > 8 || len(ids) != len(bs.Seqs) {
 		return nil, false
 	}
+	diagT0 := time.Now()
+	var diagPrep, diagLineage, diagCall, diagRead, diagSplit time.Duration
 	var be compute.Backend
 	lanes := make([]compute.Qwen35SequencePrefillRequest, len(ids))
 	finishes := make([]func(), 0, len(ids))
@@ -250,6 +259,7 @@ func stepBatchQwen35HybridQ4KIndependent(bs *BatchSession, ids []int) ([][]float
 		}
 		lanes[i] = req
 	}
+	diagPrep = time.Since(diagT0)
 	batch, ok := qwen35IndependentDecodeBatchFor(be)
 	if !ok {
 		return nil, false
@@ -262,6 +272,7 @@ func stepBatchQwen35HybridQ4KIndependent(bs *BatchSession, ids []int) ([][]float
 			finishes[i]()
 		}
 	}()
+	diagLineage = time.Since(diagT0) - diagPrep
 	var result compute.Qwen35IndependentDecodeBatchResult
 	var call func(int) error
 	call = func(i int) error {
@@ -276,6 +287,7 @@ func stepBatchQwen35HybridQ4KIndependent(bs *BatchSession, ids []int) ([][]float
 		})
 		return err
 	}
+	diagCall = time.Since(diagT0) - diagPrep - diagLineage
 	if err := call(0); err != nil {
 		if compute.Qwen35IndependentDecodeBatchMutated(err) {
 			failQwen35IndependentDecodeBatchSessions(bs.Seqs, err)
@@ -290,6 +302,7 @@ func stepBatchQwen35HybridQ4KIndependent(bs *BatchSession, ids []int) ([][]float
 	}
 	flat := be.Read(result.Logits)
 	be.Free(result.Logits)
+	diagRead = time.Since(diagT0) - diagPrep - diagLineage - diagCall
 	if len(flat) != len(ids)*bs.M.Cfg.VocabSize {
 		cause := fmt.Errorf("model: malformed Qwen Vulkan independent decode logits")
 		failQwen35IndependentDecodeBatchSessions(bs.Seqs, cause)
@@ -297,5 +310,10 @@ func stepBatchQwen35HybridQ4KIndependent(bs *BatchSession, ids []int) ([][]float
 	}
 	bs.lastStepSharedPanels = result.SharedProjectionPanels
 	bs.lastStepMACs = result.ProjectionMACs
+	diagSplit = time.Since(diagT0) - diagPrep - diagLineage - diagCall - diagRead
+	if qwen35BatchDiagEnabled {
+		fmt.Fprintf(os.Stderr, "fak_batch_model_diag ids=%d prep_us=%d lineage_us=%d call_us=%d read_us=%d split_us=%d total_us=%d\n",
+			len(ids), diagPrep.Microseconds(), diagLineage.Microseconds(), diagCall.Microseconds(), diagRead.Microseconds(), diagSplit.Microseconds(), time.Since(diagT0).Microseconds())
+	}
 	return splitScaledLogits(nil, flat, len(ids), bs.M.Cfg.VocabSize, bs.M.Cfg), true
 }

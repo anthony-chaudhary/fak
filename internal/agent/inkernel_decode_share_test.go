@@ -77,19 +77,19 @@ func TestDecodeShareDebtOwedAndZeroKeepsWholePromptOrder(t *testing.T) {
 		}
 	})
 
-	t.Run("debt saturates instead of overflowing", func(t *testing.T) {
+	t.Run("debt caps at the 2s window instead of unbounded", func(t *testing.T) {
 		share := newInKernelDecodeShare(0.99, 0)
 		share.stepped(math.MaxInt64, true)
-		if share.debtNs <= 0 {
-			t.Fatalf("max step owed no debt")
+		if share.debtNs != inKernelDecodeShareDebtCapNs {
+			t.Fatalf("max step left debt %d, want capped %d", share.debtNs, inKernelDecodeShareDebtCapNs)
 		}
 		share.stepped(math.MaxInt64, true)
-		if share.debtNs != math.MaxInt64 {
-			t.Fatalf("debt=%d, want saturated MaxInt64", share.debtNs)
+		if share.debtNs != inKernelDecodeShareDebtCapNs {
+			t.Fatalf("debt=%d, want capped %d", share.debtNs, inKernelDecodeShareDebtCapNs)
 		}
 		share.rounded(1000)
-		if share.debtNs >= math.MaxInt64 {
-			t.Fatal("rounded did not reduce the saturated debt")
+		if share.debtNs != inKernelDecodeShareDebtCapNs-1000 {
+			t.Fatal("rounded did not reduce the capped debt")
 		}
 	})
 

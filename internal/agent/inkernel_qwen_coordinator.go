@@ -28,8 +28,15 @@ var errInKernelQwenCohortAborted = errors.New("agent: Qwen cohort aborted; no re
 // copied). See THIRD_PARTY_NOTICES.md.
 const inKernelDecodeShareMinPrompt = 0.01 // below it a step's debt is minutes of decoding, and is no share
 
+// inKernelDecodeShareDebtCapNs caps the owed-debt accumulator at 2s so a long
+// prompt fill cannot silence decode rounds for minutes: decode rounds resume
+// at least every cap window, bounding how long live lanes can be starved by
+// one prepare visit.
+const inKernelDecodeShareDebtCapNs = int64(2_000_000_000)
+
 // FAK_INKERNEL_DECODE_SHARE gives live decode rounds a wall-time share in
-// (0,1); unset or anything outside (0,1) keeps whole-prompt arrival ordering.
+// (0,1); an explicit value outside (0,1) keeps whole-prompt arrival ordering,
+// and an unset value defaults to 0.5.
 const inKernelDecodeShareEnv = "FAK_INKERNEL_DECODE_SHARE"
 
 // FAK_INKERNEL_PROMPT_ROW_BUDGET caps the prompt rows a visit fills beside
@@ -55,13 +62,22 @@ func newInKernelDecodeShare(decodeShare float64, rowBudget int) inKernelDecodeSh
 }
 
 // inKernelDecodeShareFromEnv reads the operator knobs once per cohort episode;
-// every parse failure falls back to the default (no debt, no cap).
+// an unset share defaults to 0.5 and every parse failure falls back to the
+// historical no-debt ordering.
 func inKernelDecodeShareFromEnv() inKernelDecodeShare {
 	fraction := 0.0
 	if raw := os.Getenv(inKernelDecodeShareEnv); raw != "" {
 		if value, err := strconv.ParseFloat(raw, 64); err == nil {
 			fraction = value
 		}
+	} else {
+		// Default ON (0.5): live decode rounds get half the wall beside prompt
+		// steps. The q2kxl rank-1 sweep measured the unset default starving
+		// decode lanes of mid-episode prompt fills (cohort_wait 251s average,
+		// decode window 370s holding ~23s of steps, aggregate decode 25.3 ->
+		// 0.9 tok/s from C=1 to C=16). An explicit 0 preserves the historical
+		// whole-prompt arrival ordering.
+		fraction = 0.5
 	}
 	budget := 0
 	if raw := os.Getenv(inKernelPromptRowBudgetEnv); raw != "" {
@@ -83,8 +99,8 @@ func (s *inKernelDecodeShare) stepped(ns int64, decoding bool) {
 		owed = math.MaxInt64 / 2
 	}
 	charge := int64(owed)
-	if s.debtNs > math.MaxInt64-charge {
-		s.debtNs = math.MaxInt64
+	if s.debtNs > inKernelDecodeShareDebtCapNs-charge {
+		s.debtNs = inKernelDecodeShareDebtCapNs
 		return
 	}
 	s.debtNs += charge
@@ -169,6 +185,8 @@ func (p *InKernelPlanner) runDecodeCohort(cohort []*inKernelCoalesceRequest) (fi
 	var iteration *inKernelDecodeIteration
 	var stepRound func() bool
 	share := inKernelDecodeShareFromEnv()
+	health := newBatchStepHealth(p)
+	healthCalibrated := health.calibrated()
 	setPrimary := func(value any, request *inKernelCoalesceRequest) {
 		if primary != nil {
 			return
@@ -377,7 +395,35 @@ func (p *InKernelPlanner) runDecodeCohort(cohort []*inKernelCoalesceRequest) (fi
 		}
 		beforePanels, beforeMACs := iteration.sharedPanels, iteration.sharedMACs
 		stepStart := time.Now()
-		iteration.step(context.Background())
+		switch {
+		case !health.enabled():
+			// Policy disabled (margin 0): the historical all-batched step loop,
+			// no calibration step, probes or degradation.
+			iteration.step(context.Background())
+		case !healthCalibrated:
+			// Seed the per-token floor from one real serial step.
+			iteration.stepSerial(context.Background())
+			health.observeSerial(time.Since(stepStart), len(active))
+			healthCalibrated = true
+		case health.useSerial():
+			iteration.stepSerial(context.Background())
+			health.observeSerial(time.Since(stepStart), len(active))
+		case health.probeDue():
+			// Periodic serial probe: refresh the floor so a backlog-inflated
+			// seed cannot permanently excuse a collapsing batched path.
+			iteration.stepSerial(context.Background())
+			health.observeSerial(time.Since(stepStart), len(active))
+			health.sinceProbe = 0
+		default:
+			iteration.step(context.Background())
+			if iteration.serialSteps == 0 {
+				// Only a truly batched forward is guarded: a scalar fallback
+				// already ran serially, and its timing must neither pollute the
+				// floor nor trip the violation budget - the same invariant HEAD
+				// uses to withhold the PathBatched observation.
+				health.observeBatched(time.Since(stepStart), len(active))
+			}
+		}
 		share.rounded(time.Since(stepStart).Nanoseconds())
 		stepPanels := iteration.sharedPanels - beforePanels
 		stepMACs := iteration.sharedMACs - beforeMACs

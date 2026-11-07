@@ -246,6 +246,13 @@ type InKernelPlanner struct {
 	// Seqs[0].Step, so the served tokens are unchanged — the batched glm_moe_dsa GEMM that
 	// yields throughput is the separate, box-gated lever, not this flag.
 	batchDecode bool
+	// batchSerialPerLaneNS is the planner-level per-token decode-step floor in
+	// nanoseconds: a ratcheting MIN over timed serial steps AND healthy batched
+	// steps (both folded as wall/lanes), seeded by the first cohort episode's
+	// calibration step and refreshed by serial probes. The cohort batched->serial
+	// degradation policy (inkernel_batch_health.go) budgets batched steps'
+	// per-token cost against it.
+	batchSerialPerLaneNS atomic.Int64
 	// v41EngramLookAhead is an explicit serial-only construction setting.
 	v41EngramLookAhead bool
 
