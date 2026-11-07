@@ -154,6 +154,21 @@ func TestQueryProductOutcomesFindsNativePerformanceStages(t *testing.T) {
 	}
 }
 
+// The optimize driver must be the first answer for optimization intent, and
+// must not displace the stage-specific outcomes it composes.
+func TestQueryProductOutcomesFindsInferenceOptimization(t *testing.T) {
+	for _, query := range []string{"inference optimization", "optimize inference", "hill climb", "next lever"} {
+		got := QueryProductOutcomes(query, 1)
+		if len(got) != 1 || got[0].ID != "inference-optimization" {
+			t.Fatalf("QueryProductOutcomes(%q, 1) = %#v, want inference-optimization first", query, got)
+		}
+		want := []string{"fak", "optimize", "plan", "--json"}
+		if !reflect.DeepEqual(got[0].Command, want) {
+			t.Fatalf("inference-optimization command = %#v, want %#v", got[0].Command, want)
+		}
+	}
+}
+
 func TestNativePerformanceStagesDoNotCaptureUnrelatedIntents(t *testing.T) {
 	tests := []struct {
 		query string
