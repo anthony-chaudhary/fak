@@ -372,55 +372,46 @@ func TestQ8PrefillFallsBackForDispatchedAxes(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=300ms lane=default
 func TestQ8MoEQuantizesRouterExperts(t *testing.T) {
-	cfg := moeCfgForTest()
-	cfg.NumLayers = 1
-	m := NewSyntheticMoE(cfg)
-	m.Quantize()
+	runQ8MoEParityModes(t, func(t *testing.T, exact bool) {
+		cfg := moeCfgForTest()
+		cfg.NumLayers = 1
+		m := NewSyntheticMoE(cfg)
+		m.Quantize()
 
-	// Q8 MoE Prefill now takes the batched prefillBatchedQ lane (attention batched, routed
-	// FFN per row on q8Kernel); it is bit-identical to the per-token loop in the legacy
-	// GEMM mode, as the dense Q8 lane is (TestQ8PrefillAppliesAttentionSoftcap).
-	oldMode := qgemmMode
-	qgemmMode = qgemmModeLegacy
-	defer func() { qgemmMode = oldMode }()
-
-	for _, name := range []string{
-		routerName(0),
-		expertName(0, 0, "gate_proj.weight"),
-		expertName(0, 0, "up_proj.weight"),
-		expertName(0, 0, "down_proj.weight"),
-		m.headName(),
-	} {
-		if m.q8w[name] == nil {
-			t.Fatalf("Quantize did not build Q8 tensor %s", name)
-		}
-	}
-
-	prompt := []int{3, 17, 5, 23, 41, 2, 19, 11}
-	ref := m.NewSession()
-	ref.Quant = true
-	var refHidden []float32
-	for _, id := range prompt {
-		refHidden = ref.tokenHiddenQ(id, ref.Cache.Len())
-	}
-	want := ref.headQ(refHidden)
-
-	gotSession := m.NewSession()
-	gotSession.Quant = true
-	got := gotSession.Prefill(prompt)
-	if d, _ := maxAbsDiff(got, want); d != 0 {
-		t.Fatalf("Q8 MoE prefill != Q8 per-token reference: max abs diff %.3e", d)
-	}
-
-	for _, id := range []int{29, 7} {
-		logits := gotSession.Step(id)
-		for i, v := range logits {
-			if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
-				t.Fatalf("Q8 MoE decode logit[%d] not finite: %v", i, v)
+		for _, name := range []string{
+			routerName(0),
+			expertName(0, 0, "gate_proj.weight"),
+			expertName(0, 0, "up_proj.weight"),
+			expertName(0, 0, "down_proj.weight"),
+			m.headName(),
+		} {
+			if m.q8w[name] == nil {
+				t.Fatalf("Quantize did not build Q8 tensor %s", name)
 			}
 		}
-	}
+
+		prompt := []int{3, 17, 5, 23, 41, 2, 19, 11}
+		ref := m.NewSession()
+		ref.Quant = true
+		var refHidden []float32
+		for _, id := range prompt {
+			refHidden = ref.tokenHiddenQ(id, ref.Cache.Len())
+		}
+		want := ref.headQ(refHidden)
+
+		gotSession := m.NewSession()
+		gotSession.Quant = true
+		got := gotSession.Prefill(prompt)
+		assertQ8MoELogitsParity(t, want, got, exact)
+		assertQ8MoECachesParity(t, cfg, ref, gotSession, exact)
+
+		for _, id := range []int{29, 7} {
+			assertQ8MoELogitsParity(t, ref.Step(id), gotSession.Step(id), exact)
+			assertQ8MoECachesParity(t, cfg, ref, gotSession, exact)
+		}
+	})
 }
 
 // TestQuantTeacherForcedAgreement is the headline quality gate, measured the way a
