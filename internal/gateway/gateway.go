@@ -331,6 +331,7 @@ func New(cfg Config) (*Server, error) {
 		exposeProfile:                cfg.ExposeProfile,
 		elideResultBytes:             ablateUncachedTrimBytes(cfg.ElideResultBytes),
 		elideStaleReads:              cfg.ElideStaleReads,
+		modelPassthrough:             cfg.ModelPassthrough,
 		provider:                     strings.TrimSpace(cfg.Provider),
 		prefixGuard:                  cfg.PrefixGuard || envEnabled("FAK_ABLATE_PREFIX_GUARD"),
 		contextEpoch:                 newContextEpochGate(envEnabled("FAK_ABLATE_CONTEXT_EPOCH")),

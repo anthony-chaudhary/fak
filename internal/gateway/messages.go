@@ -927,11 +927,9 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 		agent.WithTopP(req.TopP),
 		agent.WithStop(req.StopSequences),
 	}
-	// The dual planner (local model alongside the API upstream) routes on the
-	// requested model, so forward it — ONLY there: on the single-planner paths this
-	// wire historically never forwarded the client model, and adding it would change
-	// the proxy upstream bytes.
-	if _, dual := s.planner.(*DualPlanner); dual {
+	// Forward the requested model only where the upstream routes on it: the dual
+	// planner, or a proxy armed with Config.ModelPassthrough (see forwardsRequestModel).
+	if s.forwardsRequestModel() {
 		opts = append(opts, agent.WithModel(req.Model))
 	}
 	// anthropic→anthropic passthrough: when the upstream IS the real Anthropic API,

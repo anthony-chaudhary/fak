@@ -770,6 +770,13 @@ type Config struct {
 	// shrinker for results outside the active working set. The command surfaces default this
 	// to DefaultElideResultBytes.
 	ElideResultBytes int
+	// ModelPassthrough forwards the client's requested model upstream on the Anthropic
+	// /v1/messages wire when the planner is a single proxy (the DualPlanner already
+	// forwards it). Off by default: that wire historically sent the configured Model for
+	// every request. Arm it when the upstream is itself a model router (the Claude Code
+	// front door) so a client-selected model reaches the router instead of being
+	// silently replaced by --model. An omitted client model still sends the configured Model.
+	ModelPassthrough bool
 	// ElideStaleReads arms the read-lifecycle STALE elision: a Read tool_result whose file was
 	// Edited/Written in a LATER in-session turn is replaced (in the same cache-safe working-set band
 	// as ElideResultBytes) by a restorable marker, the pre-edit snapshot stashed behind a

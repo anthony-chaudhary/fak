@@ -198,6 +198,7 @@ func claudeFrontDoorArgv(addr, routerOrigin, model string) []string {
 		"--base-url", strings.TrimRight(routerOrigin, "/") + "/v1",
 		"--api-key-env", claudeRouterKeyEnv,
 		"--model", model,
+		"--model-passthrough",
 		"--addr", addr,
 		"--require-key-env", claudeRouterFrontDoorKeyEnv,
 		"--session-state", "off",

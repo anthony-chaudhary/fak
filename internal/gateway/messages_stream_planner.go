@@ -302,9 +302,8 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 }
 
 // plannerSampleOpts assembles the agent.SampleOpt set for a planner stream from the
-// inbound request and the served turn's token ceiling. The dual planner (local model
-// alongside the API upstream) routes on the requested model, so forward it — ONLY there:
-// the single-planner paths historically never forwarded the client model on this wire.
+// inbound request and the served turn's token ceiling. The requested model is forwarded
+// only where the upstream routes on it (see forwardsRequestModel).
 func (s *Server) plannerSampleOpts(req *agent.AnthropicMessagesRequest, sessionTurn servedSessionTurn) []agent.SampleOpt {
 	var temp *float64
 	if req.Temperature != 0 {
@@ -317,10 +316,23 @@ func (s *Server) plannerSampleOpts(req *agent.AnthropicMessagesRequest, sessionT
 		agent.WithTopK(req.TopK),
 		agent.WithStop(req.StopSequences),
 	}
-	if _, dual := s.planner.(*DualPlanner); dual {
+	if s.forwardsRequestModel() {
 		opts = append(opts, agent.WithModel(req.Model))
 	}
 	return opts
+}
+
+// forwardsRequestModel reports whether the Anthropic /v1/messages wire forwards the
+// client's requested model upstream. The dual planner (local model alongside the API
+// upstream) routes on it. A single proxy forwards it only when Config.ModelPassthrough
+// is armed: by default this wire never forwarded the client model, and changing that
+// would change every proxy's upstream bytes. An empty model is a WithModel no-op, so
+// an omitted client model still sends the configured --model.
+func (s *Server) forwardsRequestModel() bool {
+	if _, dual := s.planner.(*DualPlanner); dual {
+		return true
+	}
+	return s.modelPassthrough
 }
 
 // emitAnthropicToolUseBlocks streams the surviving tool_use blocks as

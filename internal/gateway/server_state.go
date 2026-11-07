@@ -952,6 +952,8 @@ type Server struct {
 	// bounded head+tail form (agent.ElideAnthropicResults), keeping the cached-prefix bytes
 	// verbatim and never touching a cache_control-bearing message. 0 leaves the body
 	// byte-for-byte unchanged. The bounded-loss sibling of compactHistoryBudget.
+	// modelPassthrough mirrors Config.ModelPassthrough (see forwardsRequestModel).
+	modelPassthrough bool
 	elideResultBytes int
 
 	// elideStaleReads mirrors Config.ElideStaleReads: when true the flagship Anthropic passthrough

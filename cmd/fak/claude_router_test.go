@@ -77,6 +77,7 @@ func TestClaudeFrontDoorArgvTranslatesAnthropicToOpenAI(t *testing.T) {
 		"--require-key-env " + claudeRouterFrontDoorKeyEnv,
 		"--session-state off",
 		"--claude",
+		"--model-passthrough",
 	}
 	for _, w := range want {
 		if !strings.Contains(joined, w) {
