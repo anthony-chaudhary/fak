@@ -33,6 +33,20 @@ func TestQwen35IndependentDecodeCohortLimit(t *testing.T) {
 			if got := query(t, bs); got != want {
 				t.Fatalf("limit=%d want=%d", got, want)
 			}
+			if n > 1 && (be.cohortCalls != 1 || len(be.cohortStores) != n || len(be.cohortStates) != n) {
+				t.Fatal("backend did not observe the entire offered cohort exactly once")
+			}
+			for i, row := range be.cohortStates {
+				if be.cohortStores[i] != bs.Seqs[i].halKV || len(row) != bs.M.Cfg.NumLayers {
+					t.Fatal("ownership metadata lost a lane or layer")
+				}
+				for layer, st := range row {
+					owned := bs.Seqs[i].qwen35HAL.layers[layer]
+					if st.Conv.Buf() != owned.conv.Buf() || st.Recurrent.Buf() != owned.recurrent.Buf() {
+						t.Fatal("ownership metadata differs from the offered state")
+					}
+				}
+			}
 			if len(be.classes) != allocs || be.readCalls != reads || be.hostCalls != hosts ||
 				be.cloneCalls != 0 || be.batchCalls != 0 || be.gdnCalls != 0 {
 				t.Fatal("preflight materialized or executed backend work")
@@ -47,7 +61,7 @@ func TestQwen35IndependentDecodeCohortLimit(t *testing.T) {
 	for _, name := range []string{
 		"wrong_marker", "mixed_backend", "mixed_model", "session_alias", "kv_alias",
 		"state_alias", "owner_alias", "buffer_alias", "shared_cow", "missing_owner",
-		"retired", "invalid_owner", "unexpected_state", "native_override",
+		"retired", "invalid_owner", "unexpected_state", "native_override", "physical_alias",
 	} {
 		t.Run(name, func(t *testing.T) {
 			bs, be, _ := newPortableQwen35Batch(t, 9)
@@ -55,6 +69,10 @@ func TestQwen35IndependentDecodeCohortLimit(t *testing.T) {
 			// Opposite sides of the 7+2 boundary: checking only each submitted
 			// batch would incorrectly admit these aliases.
 			switch name {
+			case "physical_alias":
+				// Distinct model handles are insufficient when the backend cannot
+				// prove whole-cohort physical independence.
+				be.cohortDecline = true
 			case "wrong_marker":
 				be.batchPath = "wrong"
 			case "mixed_backend":
@@ -114,25 +132,74 @@ func TestQwen35IndependentDecodeCohortLimit(t *testing.T) {
 			if got := query(t, bs); got != 0 {
 				t.Fatalf("unsafe/unsupported cohort limit=%d", got)
 			}
+			wantProofCalls := 0
+			if name == "physical_alias" {
+				wantProofCalls = 1
+			}
+			if be.cohortCalls != wantProofCalls {
+				t.Fatalf("physical proof calls=%d want=%d", be.cohortCalls, wantProofCalls)
+			}
 			if be.batchCalls != 0 || be.gdnCalls != 0 || be.cloneCalls != 0 {
 				t.Fatal("declined preflight executed or cloned state")
 			}
 		})
 	}
+	t.Run("missing_physical_proof", func(t *testing.T) {
+		bs, be, _ := newPortableQwen35Batch(t, 9)
+		// Limit the exposed method set while retaining the same real fixture
+		// backend. Unknown providers must not inherit the positive host witness.
+		unknown := &portableQwen35BatchWithoutCohort{portableQwen35BatchCapabilities: be}
+		for _, s := range bs.Seqs {
+			s.Backend, s.qwen35HAL.backend = unknown, unknown
+			for i := range s.qwen35HAL.layers {
+				if owner := s.qwen35HAL.layers[i].owner; owner != nil {
+					owner.backend = unknown
+				}
+			}
+		}
+		if got := query(t, bs); got != 0 || be.cohortCalls != 0 {
+			t.Fatalf("unknown physical owner admitted: limit=%d proof calls=%d", got, be.cohortCalls)
+		}
+		if be.batchCalls != 0 || be.gdnCalls != 0 || be.cloneCalls != 0 {
+			t.Fatal("unknown-owner preflight executed backend work")
+		}
+	})
+}
+
+type portableQwen35BatchCapabilities interface {
+	compute.Backend
+	Qwen35GDNBackend
+	compute.Qwen35IndependentDecodeBatchBackend
+}
+
+type portableQwen35BatchWithoutCohort struct {
+	portableQwen35BatchCapabilities
 }
 
 // This provider witnesses model dispatch and ownership, not a device kernel or
 // numerical parity. Its projection receipts and logits are deliberately synthetic.
 type portableQwen35BatchBackend struct {
 	*sequencePrefillBackend
-	batchPath   string
-	batchCalls  int
-	batchErr    error
-	badReceipt  bool
-	shortLogits bool
-	mutatedKV   []int
-	request     compute.Qwen35IndependentDecodeBatchRequest
-	logits      compute.Tensor
+	batchPath     string
+	batchCalls    int
+	batchErr      error
+	badReceipt    bool
+	shortLogits   bool
+	mutatedKV     []int
+	request       compute.Qwen35IndependentDecodeBatchRequest
+	logits        compute.Tensor
+	cohortDecline bool
+	cohortCalls   int
+	cohortStores  []compute.KVStore
+	cohortStates  [][]compute.Qwen35SequenceState
+}
+
+// Synthetic host ownership witness only. The real CUDA provider must validate
+// physical ranges; this fixture records the model-to-backend metadata boundary.
+func (b *portableQwen35BatchBackend) Qwen35IndependentDecodeCohortOwned(stores []compute.KVStore, states [][]compute.Qwen35SequenceState) bool {
+	b.cohortCalls++
+	b.cohortStores, b.cohortStates = stores, states
+	return !b.cohortDecline && len(stores) >= 2 && len(stores) == len(states)
 }
 
 func (*portableQwen35BatchBackend) Name() string { return "portable-batch-test" }

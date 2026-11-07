@@ -37,6 +37,12 @@ func (*boundedQwenBackend) Qwen35GDNPath() string {
 }
 func (b *boundedQwenBackend) Qwen35IndependentDecodeBatchPath() string { return b.path }
 
+// Explicit synthetic ownership evidence keeps the scheduler grouping witness
+// independent of CUDA. Unknown real providers still decline in the model query.
+func (*boundedQwenBackend) Qwen35IndependentDecodeCohortOwned(stores []compute.KVStore, states [][]compute.Qwen35SequenceState) bool {
+	return len(stores) >= 2 && len(stores) == len(states)
+}
+
 func (b *boundedQwenBackend) Qwen35GDNDecode(
 	input, qkv, z, beta, alpha, conv, aLog, bias, norm, output, convState, recurrentState compute.Tensor,
 	keyHeads, valueHeads, keyDim, valueDim, kernel int, epsilon float32,
