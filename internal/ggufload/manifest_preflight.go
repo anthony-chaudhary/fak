@@ -124,6 +124,7 @@ func BuildManifestPreflight(in ManifestPreflightInput) ManifestPreflight {
 	// Trace a private copy so the caller's File is untouched by Config's side effects.
 	f := *in.File
 	f.DeepSeek41Engram = nil
+	f.KimiK31Tokenizer = nil
 	f.TraceKeyReads()
 	out.Arch, _ = f.String("general.architecture")
 

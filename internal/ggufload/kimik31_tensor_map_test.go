@@ -41,7 +41,7 @@ type kimiK31Pair struct{ gguf, want string }
 func synthKimiK31ReducedMeta() map[string]Value {
 	const arch = "kimi-k31"
 	p := arch + "."
-	return map[string]Value{
+	meta := map[string]Value{
 		"general.architecture":                 {Type: TypeString, Value: arch},
 		p + "context_length":                   {Type: TypeUint64, Value: uint64(4096)},
 		p + "embedding_length":                 {Type: TypeUint64, Value: uint64(256)},
@@ -77,6 +77,13 @@ func synthKimiK31ReducedMeta() map[string]Value {
 		p + "ssm.conv_kernel": {Type: TypeUint64, Value: uint64(4)},
 		p + "kda.head_dim":    {Type: TypeUint64, Value: uint64(32)},
 	}
+	// Leaf L3 pin: an admitted kimi-k31 header must carry the K3-inherited
+	// embedded BPE table the shared GGMLTokenizer -> tokenizer.FromGGML path
+	// rides; the reduced complete-file fixture carries it too.
+	for k, v := range kimiK31SynthTokenizerTable(true) {
+		meta[k] = v
+	}
+	return meta
 }
 
 // k31LayerPrefix / k31CanonPrefix compose the per-layer name prefixes.
@@ -599,6 +606,16 @@ func writeKimiK31SplitShard(t *testing.T, shardNo, count uint32, config bool, te
 			func(b *bytes.Buffer) { writeKVUint64(b, p+"attention.indexer.top_k", 8) },
 			func(b *bytes.Buffer) { writeKVUint64(b, p+"ssm.conv_kernel", 4) },
 			func(b *bytes.Buffer) { writeKVUint64(b, p+"kda.head_dim", 32) },
+			// Leaf L3 pin: the K3-inherited embedded BPE table the merged
+			// Config() must carry to ride the shared GGML loader path.
+			func(b *bytes.Buffer) { writeKVString(b, "tokenizer.ggml.model", "gpt2") },
+			func(b *bytes.Buffer) { writeKVString(b, "tokenizer.ggml.pre", "kimi-k2") },
+			func(b *bytes.Buffer) {
+				writeKVStringArray(b, "tokenizer.ggml.tokens", []string{"!", "!!", "<|end_of_msg|>", "[PAD3]"})
+			},
+			func(b *bytes.Buffer) { writeKVStringArray(b, "tokenizer.ggml.merges", []string{"! !"}) },
+			func(b *bytes.Buffer) { writeKVIntArrayForTest(b, "tokenizer.ggml.token_type", []int32{0, 0, 3, 2}) },
+			func(b *bytes.Buffer) { writeKVUint32(b, "tokenizer.ggml.eos_token_id", 2) },
 		)
 	}
 	kvs = append(kvs,

@@ -240,6 +240,11 @@ type File struct {
 	// applyDeepSeek41Config (deepseek41.go). model.Config has no Engram fields, so
 	// the axes live here; nil for every non-deepseek41 file.
 	DeepSeek41Engram *DeepSeek41Engram
+	// KimiK31Tokenizer retains the pinned K3-inherited tokenizer contract read by
+	// applyKimiK31Config (kimik31.go, leaf L3). model.Config has no
+	// tokenizer-family fields, so the pin lives here; nil for every non-kimik31
+	// file and on a refused header.
+	KimiK31Tokenizer *KimiK31Tokenizer
 	// Bound only by a WeightSource; a header-only File never reads payloads.
 	readEngramAux func(*File, string, *model.Config) (*File, error)
 	// keyReads, when non-nil, records every metadata key a reader looks up, so the

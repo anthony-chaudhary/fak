@@ -11,15 +11,19 @@ import (
 // internal model_type, a config applier for the KDA + Gated-DSA + latent-MoE
 // axes, and fail-closed typed refusals naming the offending GGUF key.
 //
-// SCOPE (ticket 1611-kimi-k31): this file owns arch recognition + header/
-// metadata parsing (leaf L1) plus the L1 tail hook into the L2 required-
-// tensor-family census (validateKimiK31RequiredTensors, kimik31_tensors.go —
-// the GGUF→canonical tensor map, the fail-closed family guard, and the map-
-// level routed-expert shard census live there). No tokenizer work (L3), no
-// forward path (L5–L8). A loaded kimi-k31 checkpoint therefore admits its
-// header AND tensor directory cleanly and stays execution-gated until the
-// native K3.1 forward lands; model.ClassifyForwardPath is deliberately NOT
-// wired to a K3.1 path (internal/model owns that seam).
+// SCOPE (ticket 1611-kimi-k31 leaves L1+L2+L3): this file owns arch
+// recognition + header/metadata parsing (leaf L1), the L1 tail hook into the
+// L2 required-tensor-family census (validateKimiK31RequiredTensors,
+// kimik31_tensors.go — the GGUF→canonical tensor map, the fail-closed family
+// guard, and the map-level routed-expert shard census live there), and the
+// L3 pinned K3-inherited tokenizer contract (validateKimiK31Tokenizer below —
+// the embedded byte-level BPE table a kimi-k31 file must carry to ride the
+// shared GGMLTokenizer -> tokenizer.FromGGML path). No forward path (L5–L8).
+// A loaded kimi-k31 checkpoint therefore admits its header AND tensor
+// directory cleanly — including the embedded BPE table it must carry to ride
+// the K3 tokenizer path — and stays execution-gated until the native K3.1
+// forward lands; model.ClassifyForwardPath is deliberately NOT wired to a
+// K3.1 path (internal/model owns that seam).
 //
 // WHY DISTINCT FROM "deepseek2": the existing Moonshot alias
 // (canonicalGGUFArch, gguf_config.go) collapses every K2/K3 spelling onto
@@ -310,7 +314,15 @@ func applyKimiK31Config(f *File, p string, cfg *model.Config, ropeDim int) error
 	// mislabeled or stripped artifact and the load refuses here naming the
 	// first missing family. Header-only fixtures are a valid no-op, so config
 	// estimation and arch-normalization goldens stay admitted exactly as at L1.
-	return validateKimiK31RequiredTensors(f, cfg)
+	if err := validateKimiK31RequiredTensors(f, cfg); err != nil {
+		return err
+	}
+
+	// ---- Tokenizer pin (leaf L3) ---------------------------------------------
+	// A kimi-k31 file must carry the K3 embedded BPE table to ride the shared
+	// GGMLTokenizer -> tokenizer.FromGGML path; refuse here at the header when
+	// it does not, and record the resolved pin on f.
+	return validateKimiK31Tokenizer(f)
 }
 
 // requireKimiK31Positive reads a required positive integer GGUF key, refusing
@@ -327,4 +339,126 @@ func requireKimiK31Positive(f *File, key string) (int, error) {
 		return 0, fmt.Errorf("gguf: %s overflows int", key)
 	}
 	return int(v), nil
+}
+
+// ---------------------------------------------------------------------------
+// Tokenizer pin (leaf L3): route the kimi-k31 tokenizer through the K3 path
+// explicitly instead of by accident.
+//
+// K3.1 inherits K3's tokenizer and chat format unchanged (study §1.3; the
+// community converter borrows K3's set_vocab verbatim — csabakecskemeti/
+// llama.cpp@kimi-k31 conversion/kimi_k3.py, KimiK31Model embedding
+// KimiK3Model.set_vocab). A valid kimi-k31 GGUF therefore carries the K3
+// embedded byte-level BPE table under the standard global keys:
+//
+//   - tokenizer.ggml.tokens   the vocab (byte-level BPE strings);
+//   - tokenizer.ggml.merges   the BPE merge ranks;
+//   - tokenizer.ggml.token_type the per-id NORMAL(0)/UNUSED(2)/CONTROL(3)/
+//     USER_DEFINED(4) marks — K3's special tokens live outside get_vocab()
+//     and reach the GGUF only as CONTROL-marked entries (m5it PR #26397
+//     finding), so an absent or short array silently degrades special-token
+//     handling to the "<|...|>" shape fallback and changes encoding semantics;
+//   - tokenizer.ggml.{model,pre,bos_token_id,eos_token_id} the family hints
+//     and declared bounds, recorded best-effort: older conversions omit pre,
+//     and the shared loader then falls back to general.architecture.
+//
+// The LOADER PATH itself stays arch-agnostic on purpose: File.GGMLTokenizer
+// extracts these keys for every arch and tokenizer.FromGGML dispatches the
+// pre-tokenizer on the file's own .pre hint (the K3/K3.1 hint "kimi-k2"
+// resolves to the GPT-2 ByteLevel default, which is what a TikToken-derived
+// byte-level BPE wants). This leaf does not change that dispatch; it makes
+// the kimi-k31 arch DECLARE its dependency on it. validateKimiK31Tokenizer
+// refuses a kimi-k31 header missing any required table key, naming the exact
+// key, and records the resolved pin on the File (File.KimiK31Tokenizer) so an
+// admitted checkpoint proves it routed through the same
+// GGMLTokenizer -> tokenizer.FromGGML path every K3 file rides today, rather
+// than silently degrading to an external tokenizer.json fallback.
+//
+// DEFERRED (no surface invented here): byte-parity against the HF reference
+// tokenizer (PF-27 Unicode pin, MBL-206 failure class) and the published-
+// value pin (vocab 163840 / bos 163584 / eos 163586 measured on the official
+// checkpoint at L0) stay gated on a real staged kimi-k31 GGUF header read
+// (PF-06); this leaf pins the loader contract, not the alphabet.
+const (
+	kimiK31TokModel  = "tokenizer.ggml.model"
+	kimiK31TokPre    = "tokenizer.ggml.pre"
+	kimiK31TokTokens = "tokenizer.ggml.tokens"
+	kimiK31TokMerges = "tokenizer.ggml.merges"
+	kimiK31TokTypes  = "tokenizer.ggml.token_type"
+	kimiK31TokBOS    = "tokenizer.ggml.bos_token_id"
+	kimiK31TokEOS    = "tokenizer.ggml.eos_token_id"
+)
+
+// kimiK31TokenizerFamily names the tokenizer family every admitted kimi-k31
+// checkpoint carries: the K3 byte-level BPE (TikToken-derived) that K3.1
+// reuses unchanged.
+const kimiK31TokenizerFamily = "kimi-k3"
+
+// KimiK31Tokenizer is the pinned tokenizer contract of an admitted kimi-k31
+// checkpoint: the K3-inherited embedded byte-level BPE table plus the family
+// hints the shared GGML loader path honors. It is set by
+// validateKimiK31Tokenizer during File.Config and is nil on every
+// non-kimik31 file and on a refused header — the same retention pattern as
+// DeepSeek41Engram (model.Config has no tokenizer-family fields).
+type KimiK31Tokenizer struct {
+	// Family names the tokenizer family the pin routes to.
+	Family string
+	// Model and Pre are the file's own tokenizer.ggml.model / .pre hints as
+	// written ("" when absent); the shared loader dispatches on Pre.
+	Model string
+	Pre   string
+	// VocabSize is len(tokenizer.ggml.tokens).
+	VocabSize int
+	// BOS/EOS are the declared ids (-1 when the file declares none).
+	BOS int
+	EOS int
+}
+
+// validateKimiK31Tokenizer pins the K3.1 tokenizer to the K3 loader path: it
+// requires the embedded byte-level BPE table under the standard
+// tokenizer.ggml.* keys, refuses with a typed error naming the offending key
+// when one is absent, mis-shaped, or out of range, and records the resolved
+// pin on f. Called from applyKimiK31Config so the refusal lands at the
+// header, exactly like the arch-defining axis refusals above it.
+func validateKimiK31Tokenizer(f *File) error {
+	tokens, ok := f.StringArray(kimiK31TokTokens)
+	if !ok || len(tokens) == 0 {
+		return fmt.Errorf("gguf: kimi-k31 requires %s: the K3-inherited embedded BPE vocab is missing, so the checkpoint cannot load its tokenizer through the K3 path", kimiK31TokTokens)
+	}
+	merges, ok := f.StringArray(kimiK31TokMerges)
+	if !ok || len(merges) == 0 {
+		return fmt.Errorf("gguf: kimi-k31 requires %s: the K3-inherited BPE merge ranks are missing, so the checkpoint cannot load its tokenizer through the K3 path", kimiK31TokMerges)
+	}
+	types, ok := f.Int32Array(kimiK31TokTypes)
+	if !ok {
+		return fmt.Errorf("gguf: kimi-k31 requires %s: K3's special tokens reach the GGUF only as CONTROL-marked entries, so an absent token_type array silently degrades special-token handling", kimiK31TokTypes)
+	}
+	if len(types) != len(tokens) {
+		return fmt.Errorf("gguf: kimi-k31 %s has %d entries, want %d (one per %s entry)",
+			kimiK31TokTypes, len(types), len(tokens), kimiK31TokTokens)
+	}
+	bos, eos := -1, -1
+	if v, ok := f.Uint64(kimiK31TokBOS); ok {
+		if v >= uint64(len(tokens)) {
+			return fmt.Errorf("gguf: kimi-k31 %s=%d points past the %d-entry %s", kimiK31TokBOS, v, len(tokens), kimiK31TokTokens)
+		}
+		bos = int(v)
+	}
+	if v, ok := f.Uint64(kimiK31TokEOS); ok {
+		if v >= uint64(len(tokens)) {
+			return fmt.Errorf("gguf: kimi-k31 %s=%d points past the %d-entry %s", kimiK31TokEOS, v, len(tokens), kimiK31TokTokens)
+		}
+		eos = int(v)
+	}
+	pre, _ := f.String(kimiK31TokPre)
+	modelName, _ := f.String(kimiK31TokModel)
+	f.KimiK31Tokenizer = &KimiK31Tokenizer{
+		Family:    kimiK31TokenizerFamily,
+		Model:     modelName,
+		Pre:       pre,
+		VocabSize: len(tokens),
+		BOS:       bos,
+		EOS:       eos,
+	}
+	return nil
 }

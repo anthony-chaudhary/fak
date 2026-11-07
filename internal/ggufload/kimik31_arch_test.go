@@ -41,13 +41,50 @@ func kimiK31HeadCountKVArray() Value {
 	return Value{Type: TypeArray, Value: items}
 }
 
+// kimiK31SynthTokenizerTable returns the pinned K3-inherited embedded BPE table
+// as global tokenizer.ggml.* keys (leaf L3 fixture), shaped like the community
+// K3/K3.1 converter output (kimi-linear set_vocab): model "gpt2", pre "kimi-k2",
+// CONTROL-marked special at id 2, UNUSED pad slot at id 3. The four-entry vocab
+// is byte-level BPE: ids 0/1 spell "!" / "!!" and the "! !" merge fires inside
+// one pre-tokenization chunk (punctuation never splits per rune), so Encode("!!")
+// resolves to [1] through the shared loader path; ASCII passes the byte-level
+// encode unchanged. withPre=false drops tokenizer.ggml.pre to exercise the
+// general.architecture fallback the legacy K3 files rely on.
+func kimiK31SynthTokenizerTable(withPre bool) map[string]Value {
+	table := map[string]Value{
+		"tokenizer.ggml.model": {Type: TypeString, Value: "gpt2"},
+		"tokenizer.ggml.tokens": {Type: TypeArray, Value: []Value{
+			{Type: TypeString, Value: "!"},
+			{Type: TypeString, Value: "!!"},
+			{Type: TypeString, Value: "<|end_of_msg|>"},
+			{Type: TypeString, Value: "[PAD3]"},
+		}},
+		"tokenizer.ggml.merges": {Type: TypeArray, Value: []Value{
+			{Type: TypeString, Value: "! !"},
+		}},
+		"tokenizer.ggml.token_type": {Type: TypeArray, Value: []Value{
+			{Type: TypeInt32, Value: int32(0)}, // NORMAL
+			{Type: TypeInt32, Value: int32(0)}, // NORMAL
+			{Type: TypeInt32, Value: int32(3)}, // CONTROL (<|end_of_msg|>)
+			{Type: TypeInt32, Value: int32(2)}, // UNUSED ([PAD3])
+		}},
+		"tokenizer.ggml.eos_token_id": {Type: TypeUint32, Value: uint32(2)},
+	}
+	if withPre {
+		table["tokenizer.ggml.pre"] = Value{Type: TypeString, Value: "kimi-k2"}
+	}
+	return table
+}
+
 // synthKimiK31Meta is the minimal Kimi-K3.1-Pro-shaped MLA+DSA+MoE metadata,
 // keyed on the file's OWN "<arch>." prefix (not "kimik31.") to prove the
 // metadata reads use the raw arch prefix while recognition normalizes the arch
-// string — the same contract synthKimiMeta pins for K2.
+// string — the same contract synthKimiMeta pins for K2. It carries the complete
+// pinned K3-inherited tokenizer table (leaf L3): an admitted kimi-k31 header
+// must expose the embedded BPE table the K3 loader path rides.
 func synthKimiK31Meta(arch string) map[string]Value {
 	p := arch + "."
-	return map[string]Value{
+	meta := map[string]Value{
 		"general.architecture":                 {Type: TypeString, Value: arch},
 		p + "context_length":                   {Type: TypeUint64, Value: uint64(1048576)},
 		p + "embedding_length":                 {Type: TypeUint64, Value: uint64(7168)},
@@ -86,6 +123,10 @@ func synthKimiK31Meta(arch string) map[string]Value {
 		p + "kda.head_dim":         {Type: TypeUint64, Value: uint64(128)},
 		p + "kda.gate_lower_bound": {Type: TypeFloat32, Value: float32(-5.0)},
 	}
+	for k, v := range kimiK31SynthTokenizerTable(true) {
+		meta[k] = v
+	}
+	return meta
 }
 
 // TestCanonicalGGUFArchNormalizesKimiK31 pins the arch-string normalization AND
