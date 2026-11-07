@@ -545,7 +545,9 @@ func (s *NativeScheduler) qwenPrefillChunkBudget(prep schedPrepare, sess *model.
 // nativeQwenResidentAppendEligible exactly mirrors the model-owned
 // q4kQwen35HybridPrefillOK architecture and diagnostic gate. Keeping the scheduler
 // qualification no broader than the operation it intends to schedule ensures every
-// unsupported Qwen configuration stays on historical synchronous admission.
+// unsupported Qwen configuration stays on historical synchronous admission. The
+// qwen3_5_moe hybrid is admitted like the model gate admits it: each chunk's Prefill
+// still applies the model's MoE session limits and falls back to the token loop there.
 func nativeQwenResidentAppendEligible(cfg model.Config, promptLen int) bool {
 	if os.Getenv("FAK_QWEN35_PREFILL_TOKEN_LOOP") != "" {
 		return false
@@ -553,7 +555,6 @@ func nativeQwenResidentAppendEligible(cfg model.Config, promptLen int) bool {
 	if !cfg.IsQwen35Hybrid() ||
 		promptLen < nativeQwenPrefillMinChunkTokens ||
 		!cfg.AttnOutputGate ||
-		cfg.IsMoE() ||
 		cfg.DenseMLP ||
 		cfg.Alibi ||
 		!cfg.NormGain1p ||

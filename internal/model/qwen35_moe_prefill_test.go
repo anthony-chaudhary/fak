@@ -108,8 +108,11 @@ func TestQwen35MoEHybridQuantBatchedPrefillMatchesTokenLoop(t *testing.T) {
 	if !q8Qwen35HybridPrefillOK(cfg, len(qwen35MoEPromptA)) {
 		t.Fatal("q8Qwen35HybridPrefillOK refused the qwen3_5_moe hybrid")
 	}
-	if q4kQwen35HybridPrefillOK(cfg, len(qwen35MoEPromptA)) || metalQwen35HybridPrefillOK(cfg, len(qwen35MoEPromptA)) {
-		t.Fatal("resident-Q4_K / Metal hybrid lanes have no per-row FFN seam and must still refuse MoE")
+	if !q4kQwen35HybridPrefillOK(cfg, len(qwen35MoEPromptA)) {
+		t.Fatal("q4kQwen35HybridPrefillOK refused the qwen3_5_moe hybrid")
+	}
+	if metalQwen35HybridPrefillOK(cfg, len(qwen35MoEPromptA)) {
+		t.Fatal("the Metal hybrid twin has no per-row FFN seam and must still refuse MoE")
 	}
 
 	ref := m.NewSession()
@@ -264,6 +267,173 @@ func TestQwen35MoEHybridObserversKeepTokenLoop(t *testing.T) {
 		s.Prefill(prompt)
 		if want := len(prompt) * cfg.NumLayers; calls != want {
 			t.Fatalf("residual hook fired %d times, want %d (session left the token loop)", calls, want)
+		}
+	})
+}
+
+// newQ4KQwen35MoEHybrid is the qwen3_5_moe hybrid at qwen35HybridQ4KTestCfg's Q4_K-legal
+// geometry (every reduction dim a multiple of 256). Full-attention v/o and every routed
+// and shared expert gate/up are resident Q4_K; q/k, linear_attn.*, the router and every
+// down projection resolve through sessionQ4KKernel's Q8 minority, as on a q4_k_m GGUF.
+func newQ4KQwen35MoEHybrid(t *testing.T, mutate func(*Config)) *Model {
+	t.Helper()
+	cfg := qwen35HybridQ4KTestCfg()
+	cfg.ModelType = "qwen3_5_moe_text"
+	cfg.NumExperts = 4
+	cfg.NumExpertsPerTok = 2
+	cfg.NormTopKProb = true
+	cfg.SharedIntermediateSize = 256
+	if mutate != nil {
+		mutate(&cfg)
+	}
+	m := newSyntheticQwen35MoEHybrid(cfg)
+	m.Quantize()
+	var projs [][2]any
+	nKVhd := cfg.NumKVHeads * cfg.HeadDim
+	for l := 0; l < cfg.NumLayers; l++ {
+		p := layerPrefix(l)
+		if !cfg.isLinearAttnLayer(l) {
+			projs = append(projs,
+				[2]any{p + "self_attn.v_proj.weight", nKVhd},
+				[2]any{p + "self_attn.o_proj.weight", cfg.HiddenSize},
+			)
+		}
+		projs = append(projs,
+			[2]any{qwen35SharedExpertName(l, "gate_proj.weight"), cfg.SharedIntermediateSize},
+			[2]any{qwen35SharedExpertName(l, "up_proj.weight"), cfg.SharedIntermediateSize},
+		)
+		for e := 0; e < cfg.NumExperts; e++ {
+			projs = append(projs,
+				[2]any{expertName(l, e, "gate_proj.weight"), cfg.expertIntermediate()},
+				[2]any{expertName(l, e, "up_proj.weight"), cfg.expertIntermediate()},
+			)
+		}
+	}
+	fillQ4KW(t, m, projs, 11)
+	return m
+}
+
+// TestQwen35MoEHybridQ4KBatchedPrefillMatchesTokenLoop pins the resident-Q4_K hybrid lane
+// for qwen3_5_moe to its per-token loop (tokenHiddenQ on sessionQ4KKernel) across a fresh
+// prefill and an appended one at a non-zero base. The routed FFN runs per row on the token
+// loop's kernel, so the only residual is the documented Q8-minority prefill-GEMM vs
+// decode-GEMV reduction order (TestPrefillQwen35HybridQ4KMatchesTokenLoop). Under the legacy
+// per-element GEMM that order is shared, and the dense lane's strict tolerances hold. Under
+// the default tile GEMM the drift is amplified by top-k routing (logits cosine measured
+// 0.999995 here), so that leg holds the cosine >= 0.9999 bar the Q4_K MoE lane uses
+// (TestPrefillBatchedQ4KMoEMatchesTokenLoop). [SW-VERIFIED, synthetic]
+// fak-test:runtime fast est=2s lane=default
+func TestQwen35MoEHybridQ4KBatchedPrefillMatchesTokenLoop(t *testing.T) {
+	setQ4KSDOTForTest(false)
+	t.Cleanup(func() { setQ4KSDOTForTest(true) })
+	m := newQ4KQwen35MoEHybrid(t, nil)
+	first := qwen35MoEPromptA
+	second := []int{2, 13, 89, 41, 8, 77, 30, 64, 9, 15, 50, 21, 33, 44, 6, 90, 101, 255}
+
+	run := func(t *testing.T, mode string) (ref, got *Session, want, have [2][]float32) {
+		oldMode := qgemmMode
+		qgemmMode = mode
+		t.Cleanup(func() { qgemmMode = oldMode })
+		ref = m.NewSession()
+		ref.Q4K = true
+		if _, ok := ref.tokenHiddenQKernel().(sessionQ4KKernel); !ok {
+			t.Fatal("premise broken: the Q4_K MoE token loop does not run sessionQ4KKernel")
+		}
+		for i, prompt := range [][]int{first, second} {
+			var h []float32
+			for _, id := range prompt {
+				h = ref.tokenHiddenQ(id, ref.Cache.Len())
+			}
+			want[i] = ref.headResident(h)
+		}
+		got = m.NewSession()
+		got.Q4K = true
+		got.PhaseProfiler = NewPhaseProfiler()
+		have[0] = got.Prefill(first)
+		have[1] = got.Prefill(second)
+		prof := got.PhaseProfiler.Snapshot("prefill", len(first)+len(second), 0, 1)
+		if n := phaseCalls(prof, "qwen35_moe_row_ffn"); n != 2*m.Cfg.NumLayers {
+			t.Fatalf("qwen35_moe_row_ffn calls = %d, want %d: the batched Q4_K hybrid lane was not taken", n, 2*m.Cfg.NumLayers)
+		}
+		return ref, got, want, have
+	}
+
+	t.Run("legacy-gemm-strict", func(t *testing.T) {
+		ref, got, want, have := run(t, qgemmModeLegacy)
+		assertQuantLogitsClose(t, "qwen3_5_moe q4k batched prefill logits", want[0], have[0])
+		assertQuantLogitsClose(t, "qwen3_5_moe q4k batched appended prefill logits", want[1], have[1])
+		assertKVCacheQuantCloseTol(t, "qwen3_5_moe q4k batched prefill", ref.Cache, got.Cache, prefillQ4KKTol(), prefillQ4KVTol())
+		assertLinearAttnCacheQuantClose(t, "qwen3_5_moe q4k batched prefill", ref.Cache.linear, got.Cache.linear)
+	})
+	t.Run("tile-gemm-cosine", func(t *testing.T) {
+		ref, got, want, have := run(t, qgemmModeTile)
+		for i := range want {
+			if c := cosine(want[i], have[i]); c < 0.9999 {
+				t.Fatalf("prefill %d logits cosine %.7f < 0.9999", i, c)
+			}
+		}
+		for l := 0; l < m.Cfg.NumLayers; l++ {
+			if m.Cfg.isLinearAttnLayer(l) {
+				continue
+			}
+			for name, pair := range map[string][2][]float32{
+				"K": {ref.Cache.K[l], got.Cache.K[l]}, "Kraw": {ref.Cache.Kraw[l], got.Cache.Kraw[l]}, "V": {ref.Cache.V[l], got.Cache.V[l]},
+			} {
+				if c := cosine(pair[0], pair[1]); c < 0.9999 {
+					t.Fatalf("layer %d %s cache cosine %.7f < 0.9999", l, name, c)
+				}
+			}
+		}
+	})
+}
+
+// TestQwen35MoEHybridQ4KPrefillTakesBatchedLane proves resident-Q4_K Prefill and
+// PrefillNoLogits route qwen3_5_moe to the batched hybrid lane (no blockStep FFN, one
+// per-row FFN pass per layer), and that tap / residual-hook sessions keep the token loop.
+// fak-test:runtime fast est=1s lane=default
+func TestQwen35MoEHybridQ4KPrefillTakesBatchedLane(t *testing.T) {
+	prompt := qwen35MoEPromptA
+	m := newQ4KQwen35MoEHybrid(t, nil)
+	for _, noLogits := range []bool{false, true} {
+		s := m.NewSession()
+		s.Q4K = true
+		pp := NewPhaseProfiler()
+		s.PhaseProfiler = pp
+		if noLogits {
+			s.PrefillNoLogits(prompt)
+		} else {
+			s.Prefill(prompt)
+		}
+		prof := pp.Snapshot("prefill", len(prompt), 0, 1)
+		if n := phaseCalls(prof, "mlp_decode"); n != 0 {
+			t.Fatalf("noLogits=%v: Q4_K qwen3_5_moe Prefill ran blockStep's FFN %d times", noLogits, n)
+		}
+		if n := phaseCalls(prof, "qwen35_moe_row_ffn"); n != m.Cfg.NumLayers {
+			t.Fatalf("noLogits=%v: qwen35_moe_row_ffn calls = %d, want %d", noLogits, n, m.Cfg.NumLayers)
+		}
+	}
+
+	t.Run("tap", func(t *testing.T) {
+		s := m.NewSession()
+		s.Q4K = true
+		s.tap = &hiddenTap{dir: t.TempDir(), pos: 999} // armed, never reached
+		pp := NewPhaseProfiler()
+		s.PhaseProfiler = pp
+		s.Prefill(prompt)
+		prof := pp.Snapshot("prefill", len(prompt), 0, 1)
+		if n, want := phaseCalls(prof, "mlp_decode"), len(prompt)*m.Cfg.NumLayers; n != want {
+			t.Fatalf("tapped Q4_K session mlp_decode = %d, want token loop %d", n, want)
+		}
+	})
+	t.Run("residual-hook", func(t *testing.T) {
+		hm := newQ4KQwen35MoEHybrid(t, func(c *Config) { c.EnableResidualHook = true })
+		calls := 0
+		hm.SetResidualHook(func(int, []float32) { calls++ })
+		s := hm.NewSession()
+		s.Q4K = true
+		s.Prefill(prompt)
+		if want := len(prompt) * hm.Cfg.NumLayers; calls != want {
+			t.Fatalf("residual hook fired %d times, want %d (Q4_K session left the token loop)", calls, want)
 		}
 	})
 }
