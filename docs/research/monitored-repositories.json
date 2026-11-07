@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-09-12",
+  "updated_at": "2026-11-07",
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
 {
@@ -1790,8 +1790,18 @@
           "#9312"
         ],
         "study_receipt": "study_a5808ac41de4fbff614b981d1e4950c1e0caa458c56fc31ca0365127fac1ec82"
-      }
-    },
+      },
+    "study_progress": {
+      "state": "in_progress",
+      "observed_at": "2026-11-07",
+      "checked_revision": "403ead2f65ef30941e4a6e848915caf24a64ff69",
+      "stars_at_check": 8452,
+      "last_push_at_check": "2026-11-07T03:50:00Z",
+      "note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+      "coverage": "Source-bound partial study; remaining history, provenance and runtime checks are recorded in the note.",
+      "runtime_validation": "not_run"
+    }
+},
     {
       "repository": "ai-dynamo/nixl",
       "url": "https://github.com/ai-dynamo/nixl",
@@ -2527,8 +2537,18 @@
           "#9139",
           "#9209"
         ]
-      }
-    },
+      },
+    "study_progress": {
+      "state": "in_progress",
+      "observed_at": "2026-11-07",
+      "checked_revision": "9e0e726ffb76aba152e4f1d15564d11d82961349",
+      "stars_at_check": 6867,
+      "last_push_at_check": "2026-11-07T03:40:05Z",
+      "note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+      "coverage": "Source-bound partial study; remaining history, provenance and runtime checks are recorded in the note.",
+      "runtime_validation": "not_run"
+    }
+},
     {
       "repository": "sgl-project/mini-sglang",
       "url": "https://github.com/sgl-project/mini-sglang",
@@ -2773,8 +2793,18 @@
       "checked_revision": "a56654d6de060495ff2db3b1d9ff0b187084d1a9",
       "stars_at_check": 90799,
       "last_push_at_check": "2026-09-02T19:43:08Z",
-      "study_note": "docs/notes/CONCEPT-STUDY-PERFORMANCE-OSS-PROCESS-FAILURES-2026-09-03.md"
-    },
+      "study_note": "docs/notes/CONCEPT-STUDY-PERFORMANCE-OSS-PROCESS-FAILURES-2026-09-03.md",
+    "study_progress": {
+      "state": "in_progress",
+      "observed_at": "2026-11-07",
+      "checked_revision": "5629b26146a39705c814ddae6a0f98321e14d2a6",
+      "stars_at_check": 96487,
+      "last_push_at_check": "2026-11-07T04:05:52Z",
+      "note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+      "coverage": "Source-bound partial study; remaining history, provenance and runtime checks are recorded in the note.",
+      "runtime_validation": "not_run"
+    }
+},
     {
       "repository": "sgl-project/sglang",
       "url": "https://github.com/sgl-project/sglang",
@@ -2784,8 +2814,18 @@
       "last_checked": "2026-08-25",
       "checked_revision": "edff717ef0106b4413b371bf7a05a5193ffeee85",
       "stars_at_check": 32437,
-      "last_push_at_check": "2026-08-25T20:42:49Z"
-    },
+      "last_push_at_check": "2026-08-25T20:42:49Z",
+    "study_progress": {
+      "state": "in_progress",
+      "observed_at": "2026-11-07",
+      "checked_revision": "b8529362f52cf5c0ed9f732f26fc973977f79c10",
+      "stars_at_check": 38545,
+      "last_push_at_check": "2026-11-07T03:54:19Z",
+      "note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+      "coverage": "Source-bound partial study; remaining history, provenance and runtime checks are recorded in the note.",
+      "runtime_validation": "not_run"
+    }
+},
     {
       "repository": "LMCache/LMCache",
       "url": "https://github.com/LMCache/LMCache",
@@ -2795,8 +2835,18 @@
       "last_checked": "2026-08-25",
       "checked_revision": "23cca67908e17b193eb8fab08ba1beb0115881cd",
       "stars_at_check": 11364,
-      "last_push_at_check": "2026-08-25T18:39:04Z"
-    },
+      "last_push_at_check": "2026-08-25T18:39:04Z",
+    "study_progress": {
+      "state": "in_progress",
+      "observed_at": "2026-11-07",
+      "checked_revision": "bd9f0f4833e503c1ec91489ccfa27086a71435bf",
+      "stars_at_check": 12302,
+      "last_push_at_check": "2026-11-07T01:14:33Z",
+      "note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+      "coverage": "Source-bound partial study; remaining history, provenance and runtime checks are recorded in the note.",
+      "runtime_validation": "not_run"
+    }
+},
     {
       "repository": "NVIDIA/Model-Optimizer",
       "url": "https://github.com/NVIDIA/Model-Optimizer",
@@ -5207,6 +5257,414 @@
           "#11749"
         ]
       }
-    }
+    },
+{
+  "repository": "BytedTsinghua-SIA/CUDA-Agent",
+  "url": "https://github.com/BytedTsinghua-SIA/CUDA-Agent",
+  "status": "candidate",
+  "priority": 2,
+  "why": "Example CUDA synthesis workspace; study verification/timing limits and avoid unlicensed source copying.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "473025c8af7878e928525138b5cb327d6bcdf9dd",
+  "stars_at_check": 1353,
+  "last_push_at_check": "2026-07-08T12:01:09Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "ScalingIntelligence/KernelBench",
+  "url": "https://github.com/ScalingIntelligence/KernelBench",
+  "status": "candidate",
+  "priority": 1,
+  "why": "Kernel evaluation and adversarial controls for result reuse, input modification, stream timing, and precision downgrade.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "423217d9fda91e0c2d67e4a43bf62f96f6d104f1",
+  "stars_at_check": 1317,
+  "last_push_at_check": "2026-03-24T04:29:13Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "facebookresearch/kernel_bench_verified",
+  "url": "https://github.com/facebookresearch/kernel_bench_verified",
+  "status": "candidate",
+  "priority": 1,
+  "why": "Distribution-diverse correctness and precision-matched baselines for kernel evaluation.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "3fdf6fec7372a4d0cb682635f00e7bdcbc55d50e",
+  "stars_at_check": 17,
+  "last_push_at_check": "2026-07-17T20:13:48Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "TongmingLAIC/AKO4ALL",
+  "url": "https://github.com/TongmingLAIC/AKO4ALL",
+  "status": "candidate",
+  "priority": 1,
+  "why": "Fresh-input timing and same-storage mutation sentinel, plus bounded optimizer logging.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "bbd0e1cf1ce2fb19d4322a932680f4c3d175d80e",
+  "stars_at_check": 382,
+  "last_push_at_check": "2026-09-15T02:49:41Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "qhy991/Awesome-LLM-Kernel-Agent",
+  "url": "https://github.com/qhy991/Awesome-LLM-Kernel-Agent",
+  "status": "candidate",
+  "priority": 2,
+  "why": "Discovery index only; follow primary source links rather than credit the list as kernel implementation.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "f9d7c24e9cb043d83b50b5166f751f5168aad9cd",
+  "stars_at_check": 27,
+  "last_push_at_check": "2026-10-30T06:42:44Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "giveen/KernelOPT",
+  "url": "https://github.com/giveen/KernelOPT",
+  "status": "candidate",
+  "priority": 2,
+  "why": "Measured-shape correctness, whole-engine attribution, repeated confirmation, explicit unverified and skipped gate states.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "516a36f32edf8b1f1503a9876a29dd9430c03858",
+  "stars_at_check": 3,
+  "last_push_at_check": "2026-11-02T01:14:06Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "vllm-project/agentic-api",
+  "url": "https://github.com/vllm-project/agentic-api",
+  "status": "candidate",
+  "priority": 2,
+  "why": "Typed provider prompt-cache options and capability gates for agentic inference.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "647bdf22febfb924ba5cc9f4330497c607b7f53f",
+  "stars_at_check": 342,
+  "last_push_at_check": "2026-11-07T00:40:57Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "mlc-ai/xgrammar",
+  "url": "https://github.com/mlc-ai/xgrammar",
+  "status": "candidate",
+  "priority": 1,
+  "why": "Compiled-schema reuse, immutable grammar ownership and per-request matcher isolation.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "11f65251738b0a1a24618a7bf81505a87fa99ce5",
+  "stars_at_check": 1993,
+  "last_push_at_check": "2026-11-06T20:17:25Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "LMCache/lmcache-agentic",
+  "url": "https://github.com/LMCache/lmcache-agentic",
+  "status": "candidate",
+  "priority": 2,
+  "why": "Agent application examples; license and benchmark rigor require explicit review.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "9e5188158471aeb328752bf2374c1564dd928b20",
+  "stars_at_check": 5,
+  "last_push_at_check": "2025-09-08T04:58:03Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "kvcache-ai/Mooncake",
+  "url": "https://github.com/kvcache-ai/Mooncake",
+  "status": "candidate",
+  "priority": 2,
+  "why": "KV semantic identity, transfer lifecycle and topology-aware placement.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "0ff71517f0f80a198eebff3009834ed00504b982",
+  "stars_at_check": 6995,
+  "last_push_at_check": "2026-11-06T18:25:57Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "taratt/cutegen",
+  "url": "https://github.com/taratt/cutegen",
+  "status": "candidate",
+  "priority": 2,
+  "why": "CuTe generation and delayed profiling; full runtime/test/license provenance pass pending.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "ea2931ac5398b11acaf5f41598f16fa3768ac469",
+  "stars_at_check": 8,
+  "last_push_at_check": "2026-09-04T11:59:06Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "RightNow-AI/autokernel",
+  "url": "https://github.com/RightNow-AI/autokernel",
+  "status": "candidate",
+  "priority": 2,
+  "why": "Kernel optimization with multi-stage correctness and application-level replacement verification.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "78435821cc3d5756ba6ee1785c397f6d8fa8c90d",
+  "stars_at_check": 1619,
+  "last_push_at_check": "2026-11-05T11:03:22Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "pgg3/EvoEngineer",
+  "url": "https://github.com/pgg3/EvoEngineer",
+  "status": "candidate",
+  "priority": 2,
+  "why": "Located repository is a code-not-yet-released placeholder; verify paper-author provenance and watch for implementation.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "3d5f9f50f87e7f3eacbbd92029715c220906a4ef",
+  "stars_at_check": 0,
+  "last_push_at_check": "2026-06-01T15:23:30Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "TongmingLAIC/AKO4X",
+  "url": "https://github.com/TongmingLAIC/AKO4X",
+  "status": "candidate",
+  "priority": 2,
+  "why": "Separate multi-round kernel archive and master orchestration. Complete source, benchmark and review-gate study remains pending.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "ce030ebd855dffb7ba6bdaef7ba7504a92cb9393",
+  "stars_at_check": 87,
+  "last_push_at_check": "2026-09-15T02:49:45Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "Arize-ai/phoenix",
+  "url": "https://github.com/Arize-ai/phoenix",
+  "status": "candidate",
+  "priority": 2,
+  "why": "Agent trace and evaluation observability; verify custom license and payload privacy before integration.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "f9382db47424df20a427c00acc193f87084598a2",
+  "stars_at_check": 12181,
+  "last_push_at_check": "2026-11-07T02:12:59Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "facebookincubator/dynolog",
+  "url": "https://github.com/facebookincubator/dynolog",
+  "status": "candidate",
+  "priority": 2,
+  "why": "Low-overhead host/GPU observability and on-demand profiling controls.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "b0a9c1cea3c5b731c6be3e1437f8c8c3ae355c3c",
+  "stars_at_check": 388,
+  "last_push_at_check": "2026-11-07T00:31:31Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "pytorch/kineto",
+  "url": "https://github.com/pytorch/kineto",
+  "status": "candidate",
+  "priority": 2,
+  "why": "CPU/GPU tracing substrate and scoped trace provenance; repository is archived at discovery.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "ae1f4eb2db483b0e31952566d6b834f339501dcf",
+  "stars_at_check": 997,
+  "last_push_at_check": "2026-09-28T10:52:26Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "eunomia-bpf/gpu_ext",
+  "url": "https://github.com/eunomia-bpf/gpu_ext",
+  "status": "candidate",
+  "priority": 2,
+  "why": "GPU instrumentation experiments; determine actual supported hooks, overhead and safety boundary.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "50a51ad4e8584d295df7c1942fe7e736cdd101ba",
+  "stars_at_check": 72,
+  "last_push_at_check": "2026-09-24T14:33:32Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "traceloop/openllmetry",
+  "url": "https://github.com/traceloop/openllmetry",
+  "status": "candidate",
+  "priority": 2,
+  "why": "OpenTelemetry instrumentation for LLM calls and tool spans.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "e3d651a0c9f2f5f5019819df5b6320273fd65049",
+  "stars_at_check": 7523,
+  "last_push_at_check": "2026-11-05T16:26:50Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "eunomia-bpf/bpftime",
+  "url": "https://github.com/eunomia-bpf/bpftime",
+  "status": "candidate",
+  "priority": 2,
+  "why": "User-space eBPF runtime mechanisms and bounded dynamic instrumentation.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "25e250d651ad1d2a2608bbbaeaf7b9ee90cca401",
+  "stars_at_check": 1601,
+  "last_push_at_check": "2026-11-03T04:45:41Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "NVIDIA/NVTX",
+  "url": "https://github.com/NVIDIA/NVTX",
+  "status": "candidate",
+  "priority": 2,
+  "why": "Explicit host/device profiling annotations and correlation metadata.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "aeda87dd3a913acce29407b6555ddebff98a9e53",
+  "stars_at_check": 568,
+  "last_push_at_check": "2026-11-02T21:19:18Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "facebookresearch/HolisticTraceAnalysis",
+  "url": "https://github.com/facebookresearch/HolisticTraceAnalysis",
+  "status": "candidate",
+  "priority": 2,
+  "why": "Analysis of CPU/GPU trace correlation, critical paths and idle periods.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "eb0b6d6ee288641abe06174216db920909a196b3",
+  "stars_at_check": 565,
+  "last_push_at_check": "2026-10-30T06:36:02Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "langfuse/langfuse",
+  "url": "https://github.com/langfuse/langfuse",
+  "status": "candidate",
+  "priority": 2,
+  "why": "Agent trace/evaluation lifecycle and observability, with enterprise-license boundaries.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "f257bef7c17b489ebd79a230e906abcc2d5ef5d7",
+  "stars_at_check": 37121,
+  "last_push_at_check": "2026-11-07T03:25:48Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+},
+{
+  "repository": "NVIDIA/dcgm-exporter",
+  "url": "https://github.com/NVIDIA/dcgm-exporter",
+  "status": "candidate",
+  "priority": 2,
+  "why": "GPU fleet metric collection and Prometheus exposition, not per-request causality by itself.",
+  "last_checked": "2026-11-07",
+  "checked_revision": "4e663a526c4624ad0e18ad816f09b7be2c5348a7",
+  "stars_at_check": 1923,
+  "last_push_at_check": "2026-11-06T18:51:30Z",
+  "study_note": "docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md",
+  "study_progress": {
+    "state": "in_progress",
+    "coverage": "Partial source study. See the note for unverified source classes and next witnesses.",
+    "runtime_validation": "not_run"
+  }
+}
   ]
 }

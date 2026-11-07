@@ -300,6 +300,8 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Agentic inference, kernel evaluation and observability source study (2026-11-07)](docs/notes/CONCEPT-STUDY-AGENTIC-INFERENCE-SOURCES-2026-11-07.md) — 29 pinned repositories from two source lists, source-bound candidate decisions, license boundaries and an explicit continuation queue; no runtime or performance qualification.
+
 - [Loader packing coverage matrix — baseline (2026-11-03)](docs/notes/PACKING-COVERAGE-MATRIX-2026-11-03.md) -- auto-indexed dated note.
 - [Existing hardware request: DS4.1 Raider / CUDA quick-fill and receipt lookup](docs/notes/REQUEST-DS41-RAIDER-HARDWARE-VERIFICATION-2026-10-28.md#quick-fill--lookup-fields) — includes the [CPU concept-freshness build handoff](docs/notes/REQUEST-DS41-RAIDER-HARDWARE-VERIFICATION-2026-10-28.md#cpu-build-verification-handoff--concept-freshness-2026-10-31-1705-utc) and the [isolated session-tool CPU artifact handoff](docs/notes/REQUEST-DS41-RAIDER-HARDWARE-VERIFICATION-2026-10-28.md#cpu-artifact-qualification-handoff--isolated-session-tool-2026-10-31-2206-utc); use existing request D41-HW-20261028-0310 and linked #12640/#13993 reports; reuse scoped evidence, request only remaining changed-path qualification, retain six-expert/cap/stops. Halo retired; no coordinator desktop prerequisite; software landing need not wait for physical qualification.
 - [Guard operator approval](docs/notes/GUARD-OPERATOR-APPROVAL-2026-10-23.md) -- auto-indexed dated note.
