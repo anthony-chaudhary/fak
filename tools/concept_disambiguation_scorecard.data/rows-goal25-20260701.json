@@ -251,6 +251,7 @@
       "definition": "RunPlan (internal/fleetmon/plan.go, schema fak-fleet-runplan/1) is the fleet run-plan JSON mapping issues to workers for a fleet run.",
       "distinction": "A FLEET orchestration document, not the ctxplan planner's Plan over context spans.",
       "distinct_from": [
+        "plan-ffn-plan",
         "plan-planner"
       ],
       "aliases": [],

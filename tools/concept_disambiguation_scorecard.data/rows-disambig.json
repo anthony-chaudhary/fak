@@ -209,6 +209,7 @@
       "definition": "The radixkv counter (Stats.CostEvictions) tallying evictions made by the legacy cost-aware eviction strategy.",
       "distinction": "The COUNTER for cost-aware evictions - NOT the eviction policy enum (EvictionLRU) that selects a strategy and NOT a single evicted entry (evictionvictim); it is a running tally.",
       "distinct_from": [
+        "evict-hot-evictions",
         "x2-evict-evictedcount"
       ],
       "aliases": [],

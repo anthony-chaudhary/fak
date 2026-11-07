@@ -1,0 +1,46 @@
+{
+  "rows": [
+    {
+      "id": "attn-attentionlocked-paged-seq",
+      "canonical": "attentionLocked",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Method on cudaQwen35PagedSequence (internal/compute/cuda_qwen35_sequence_paged.go) that computes causal GQA attention for one Qwen3.5 sequence lane over paged KV blocks: it gathers the layer's K/V pages into contiguous scratch, runs the qwen35 causal-attention panel kernel, and allocates its own output when none is supplied (it delegates to attentionIntoLocked). The 'Locked' suffix is the backend naming convention: the caller already holds the CUDA device mutex (cudaMu), as Qwen35SequencePrefill does, so the helper never re-acquires it.",
+      "distinction": "It is a lock-convention kernel helper on one device, NOT a state flag or a rank count: unlike graphOnceAttentionLocked (the CUDA graph-capture attention seam) and stagedAttentionLocked (the FP8 qualification-only helper), it is the live paged prefill/decode compute path, and unlike TPConfig.AttnRanks it computes attention on one device instead of sharding it across ranks.",
+      "distinct_from": [
+        "att-graph-once-attention-locked",
+        "stagedattentionlocked",
+        "x-attention-pagedattention",
+        "AttnRanks"
+      ],
+      "aliases": [],
+      "grounding": "attentionlocked",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "attn-attnranks-tpconfig",
+      "canonical": "AttnRanks",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Field on model.TPConfig (internal/model/tensor_parallel_forward.go): the number of tensor-parallel ranks the attention sublayer is sharded over, by KV-head group, in ForwardTP. ForwardTP clamps it to [1, NumKVHeads] via clampRanks before NewTPPlan builds the head-shard plan; 0 or negative means 1 (monolithic attention).",
+      "distinction": "It is a sharding-dimension COUNT on the forward config, NOT a per-request rank list or routing table: it parameterizes the Megatron attention-shard implementation (tensor_parallel_attn.go) and sits beside its siblings FFNRanks (shards the FFN intermediate dim) and VocabRanks (shards the vocab/LM-head axis via tpVocabPlan).",
+      "distinct_from": [
+        "mopup6b-tensorparallelattn",
+        "mopup6b-tpvocabplan",
+        "x-attention-attnseq",
+        "attentionLocked"
+      ],
+      "aliases": [],
+      "grounding": "attnranks",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

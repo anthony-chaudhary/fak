@@ -131,6 +131,7 @@
       "definition": "evicted is the return count of internal/vdso VDSO.Revoke (and the Revocation/RevokeResponse.Evicted field in gateway/coherence.go) \u2014 how many pooled cache entries were causally dropped when an external trust witness was refuted, every entry admitted under that witness invalidated MESI-invalidate style.",
       "distinction": "It is a CAUSAL witness-refutation eviction count (a coherence invalidation that fires only on the entries bound to the refuted witness), NOT the radix LRU Evictions memory-pressure counter nor a span-policy EvictNode drop.",
       "distinct_from": [
+        "evict-unevicted-prefix",
         "Evictions (radixkv LRU counter)",
         "EvictNode (radixkv policy)",
         "evict-kvcache",

@@ -860,6 +860,7 @@
       "definition": "internal/model's NewTPPlan builds a tensor-parallel plan: the row/column tiling of a layer's matrices across TP ranks.",
       "distinction": "It is TENSOR-parallel intra-layer sharding, NOT the pipeline-parallel layer partition PartitionPlan.",
       "distinct_from": [
+        "plan-sp-plan",
         "PartitionPlan (model)",
         "v41-ep-panel-plan"
       ],

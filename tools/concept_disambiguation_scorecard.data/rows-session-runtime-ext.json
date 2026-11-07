@@ -433,6 +433,7 @@
       "definition": "gateway.SessionPace is the wire form of internal/session.Pace, carrying MaxTokensPerTurn and MinTurnGapMs (zero on either axis means unset).",
       "distinction": "Not SessionBudget (the run/token allotment): SessionPace governs throttling \u2014 per-turn token cap and inter-turn gap \u2014 not how much budget remains.",
       "distinct_from": [
+        "sessrt-sessionlane",
         "pace",
         "SessionBudget (wire)"
       ],

@@ -1,0 +1,82 @@
+{
+  "rows": [
+    {
+      "id": "sessrt-sessionlane",
+      "canonical": "SessionLane",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Gateway Config field (internal/gateway/config.go) holding the LAUNCH-TIME lane designation the host (fak guard) resolves from the --lane flag, then FAK_LANE, then DISPATCH_LANE, and stamps as trusted Meta[\"lane\"] on every served tool call; Server.sessionLane mirrors it and buildCall injects meta[\"lane\"] only when non-empty. It is the coordinator's spawn-time lane label - same trust level as the dispatcher env for fleet workers, never wire input - so lane-aware floors (test immunity) resolve the acting lane from it. Empty keeps the historical no-lane-attribution behavior byte-for-byte.",
+      "distinction": "Unlike modelengine schedLane objects inside NativeScheduler's continuous-batching loop, SessionLane is a per-server string on the gateway serving path, not scheduler state; unlike servedSessionTurn, which records one admitted turn, it is set once at New() and constant for the server's life.",
+      "distinct_from": [
+        "cov5303-session-live",
+        "x-session-runtime-sessionpace",
+        "x-session-runtime-nativescheduler",
+        "x-session-runtime-servedsessionturn"
+      ],
+      "aliases": [],
+      "grounding": "SessionLane",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "gaps": [],
+      "verdict": "crystal"
+    },
+    {
+      "id": "sessrt-nativeschedulereventkind",
+      "canonical": "nativeSchedulerEventKind",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Unexported uint8 type in internal/modelengine/nativesched_prefill.go classifying NativeScheduler-local witness events, with constants nativeSchedulerEventPrefill, nativeSchedulerEventTransition and nativeSchedulerEventDecode (iota + 1, zero means none). It is the Kind field of nativeSchedulerEvent, which observeEvent emits at prefill, transition and decode edges so focused tests can prove exact iteration ordering through the observeNativeEvent hook without process-global counters or timing.",
+      "distinction": "It is the closed vocabulary of event kinds, not the event record itself: nativeSchedulerEvent carries iteration, lane, state and token alongside its Kind, and NativeScheduler is the actor emitting both. Production observability stays in the existing scheduler receipts; this seam is intentionally unexported and test-only.",
+      "distinct_from": [
+        "srp1-native-scheduler-event",
+        "x-session-runtime-nativescheduler"
+      ],
+      "aliases": [],
+      "grounding": "nativeSchedulerEventKind",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "gaps": [],
+      "verdict": "defined"
+    },
+    {
+      "id": "sessrt-requireglm5nextsessionunsupported",
+      "canonical": "requireGLM5NextSessionUnsupported",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Fail-closed guard method on *model.Session (internal/model/kv.go): when the session's model config has GLM5Next set, it panics naming the entrypoint path because the glm5_next family's executable path is the stepwise engine session GLM5NextSession in glm5next_forward.go, while the batched KV/HAL substrate does not own the KDA/DSA/mHC state yet. Callers cover BatchSession.StepBatch plus the Session Prefill, PrefillContext, PrefillNoLogits, PrefillNoLogitsContext, Step, StepGreedy and StepSamplingCandidates entrypoints, where silently running the generic GQA loop would emit wrong logits instead of an error.",
+      "distinction": "It refuses execution on the generic batched path rather than refusing model load: loaders and forward selection already refuse glm5_next elsewhere, and this guard closes the hole left by a directly-constructed *Model. Its sibling requireV41NativeUnsupported plays the same fail-closed role for DeepSeek V4.1 configs, and it points at GLM5NextSession, the supported stepwise path, rather than being a session type itself.",
+      "distinct_from": [
+        "x-session-runtime-batchsession",
+        "srp1-glm-dsa-session"
+      ],
+      "aliases": [],
+      "grounding": "requireGLM5NextSessionUnsupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "gaps": [],
+      "verdict": "defined"
+    },
+    {
+      "id": "loop-prefillneedstokenloop",
+      "canonical": "prefillNeedsTokenLoop",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Pair of gates in internal/model/kv.go deciding whether a session's prompt processing falls back to the sequential per-token loop instead of the batched host prefill lanes (f32 prefillBatched, Q8 prefillBatchedQ, resident-Q4_K prefillBatchedQ4K). The Model-level function returns q8PrefillNeedsTokenLoop(cfg) && !prefillBatchedMoEOK(m); the Session method additionally keeps the token loop when a hidden-state tap, residual hook or target-hidden capture is active, because only blockStep / tokenHidden* invoke those observers.",
+      "distinction": "It is a routing predicate, not a kernel: the token loop it selects is the existing tokenHidden/blockStep path and the batched lanes it rejects are separate functions. It refines the raw config-shape refusal list q8PrefillNeedsTokenLoop (MoE, DenseMLP, Alibi, Qwen3.5 hybrid, AttnOutputGate, non-PreNorm topology, layer-specific RoPE theta) by admitting the MoE subset prefillBatchedMoEOK covers, and it is distinct from per-model prefill kernels such as qwen35PrefillTiledAttentionInto.",
+      "distinct_from": [
+        "coverage-9678-loop-fakqwen35prefilltokenloop",
+        "att-qwen35-prefill-tiled-into"
+      ],
+      "aliases": [],
+      "grounding": "prefillNeedsTokenLoop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "gaps": [],
+      "verdict": "defined"
+    }
+  ]
+}

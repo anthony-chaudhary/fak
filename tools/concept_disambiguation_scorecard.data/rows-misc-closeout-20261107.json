@@ -1,0 +1,84 @@
+{
+  "rows": [
+    {
+      "id": "gwengine-tokenhiddenqkernel",
+      "canonical": "tokenHiddenQKernel",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Unexported method on *model.Session that selects which matKernel implementation drives the blockStep skeleton on tokenHiddenQ's non-fast path. It returns sessionQ4Kernel for resident int4, sessionQ4KKernel for raw Q4_K, q8Kernel for MoE arches, or sessionQ8Kernel otherwise. Batched resident-quant prefill lanes reuse the same kernel through prefillRowFFN so routed FFN arithmetic cannot drift from the token loop.",
+      "distinction": "It is a selector, not a kernel: matKernel is the interface it returns and q8Kernel/sessionQ4Kernel/sessionQ4KKernel are the concrete implementations it may pick. It performs no GEMM work itself, unlike the kernels or the resident host kernel it can hand out.",
+      "distinct_from": [
+        "x-gateway-engine-matkernel",
+        "x-gateway-engine-q8kernel",
+        "x-gateway-engine-residentkernel"
+      ],
+      "aliases": [],
+      "grounding": "tokenHiddenQKernel",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "gaps": [],
+      "verdict": "defined"
+    },
+    {
+      "id": "maturity-errnvfp4gemmunsupported",
+      "canonical": "ErrNVFP4GEMMUnsupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Sentinel error declared in internal/compute/nvfp4_native.go reporting that a backend has no native NVFP4 W4A4 matrix multiplication capability. MatMulNVFP4 wraps it when the backend is nil or does not implement NVFP4MatMulBackend, and the CUDA path wraps it for open graph capture, unknown architecture, or unqualified sm/cuBLASLt combinations. Loaders such as modelopt_nvfp4_load match it with errors.Is to fail loudly instead of silently widening precision.",
+      "distinction": "It is a refusal sentinel, not a capability predicate like SupportsQ6KMatMul that reports availability up front. Unlike ErrV41NativeUnsupported or ErrNativeBeamSearchUnsupported, it covers NVFP4 W4A4 GEMM specifically across all backends.",
+      "distinct_from": [
+        "sm-errv41nativeunsupported",
+        "sm-errnativebeamsearchunsupported",
+        "halo-mtp-support-supportsq6kmatmul"
+      ],
+      "aliases": [],
+      "grounding": "ErrNVFP4GEMMUnsupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "gaps": [],
+      "verdict": "defined"
+    },
+    {
+      "id": "maturity-coveragestatus",
+      "canonical": "CoverageStatus",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "String type in internal/modelroute/coverage.go classifying how an account roster serves one routed model id: CoverageBound (explicit binding), CoverageViaDefault (served by the roster default account), CoverageUnbound (no binding and no default, so the route fails at dispatch). Roster.Cover cross-checks every manifest-routed id against the roster and folds these statuses into Coverage rows plus bound/via-default/unbound tallies.",
+      "distinction": "It is not fleetsearch.CoverageStatus, which instead classifies whether an ingested operational store was completely read (COMPLETE, PARTIAL, UNAVAILABLE, SKIPPED). It is also not the generic coverage metric or a serialized receipt such as CoverageReceipt; it is a per-model-id routing disposition, not a measured fraction.",
+      "distinct_from": [
+        "coverage",
+        "sm-coveragereceipt",
+        "c729-coverage-report-name"
+      ],
+      "aliases": [],
+      "grounding": "CoverageStatus",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "gaps": [],
+      "verdict": "defined"
+    },
+    {
+      "id": "rendermat-canmaterializelanelocked",
+      "canonical": "canMaterializeLaneLocked",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "Locked-state admission check on *modelengine.NativeScheduler deciding whether a candidate schedLane can materialize into the running set. It combines state-slot reservations (effectiveMaxRunning) with paged-KV block capacity, excludes preempted lanes and the candidate itself from existing reservations, and returns nativeAllocationOK, nativeAllocationLater, or nativeAllocationNever; recompute-preemption mode applies a hard prompt-block cap.",
+      "distinction": "Despite its name it is a scheduler admission decision, not a render or view materialization. Unlike Materialize/MaterializePlan (ctxplan views) or MaterializeVerdict (cachemeta gate), it allocates KV blocks and state slots for decode lanes and gates promotion rechecks.",
+      "distinct_from": [
+        "x-render-materialize-materialize",
+        "rm-materializeplan",
+        "x-render-materialize-materializeverdict"
+      ],
+      "aliases": [],
+      "grounding": "canMaterializeLaneLocked",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "gaps": [],
+      "verdict": "defined"
+    }
+  ]
+}

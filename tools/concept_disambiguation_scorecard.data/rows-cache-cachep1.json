@@ -360,7 +360,7 @@
       "canonical": "CachePolicy",
       "family": "cache",
       "kind": "symbol",
-      "definition": "String designation attached to a work unit declaring which cache treatment applies: agentbench replay plans carry the provider cache policy under test, and Strix Halo MALL partition entries carry per-partition residency labels (TEMPORAL_PINNED, TRANSIENT_PINNED, RESERVE, UNALLOCATED).",
+      "definition": "Bare-name designation for which cache treatment applies to a unit of work: the deepseekv4moe CachePolicy int arms the offline expert-cache eviction replay (LRU/LFU/Heat/Random/OPT/LFRU/ScoreEMA), agentbench trial configs declare a provider cache-accounting policy string, and Strix Halo MALL partition entries carry a per-partition residency label (TEMPORAL_PINNED, TRANSIENT_PINNED, RESERVE, UNALLOCATED).",
       "distinction": "The declared policy label on a plan or partition; not the RDNA 3.5 allocation hint struct (CachePolicyHint), not the offline replay input stream (CachePolicyStream), and not the provider cache mechanism itself.",
       "distinct_from": [
         "cachep1-cache-policy-hint",
@@ -516,18 +516,20 @@
     },
     {
       "id": "cachep1-expert-page-cache",
-      "canonical": "ExpertPageCache",
+      "canonical": "expertPageCache (resolved GGUF expert page-cache gate)",
       "family": "cache",
       "kind": "symbol",
-      "definition": "The #1302 zero-copy expert read-through option flag on the GGUF loader options, requesting that repeat reads of faulted experts be served from the mapped region instead of the device.",
-      "distinction": "The loader-level opt-in flag; not the source-level enablePageCache arm, not the readExpertPageCache read path, and not the FAK_EXPERT_PAGE_CACHE env knob that seeds it.",
+      "definition": "Resolved #1302 boolean gate on the GGUF Q4K load options (set via WithExpertPageCache) opting expert reads into the page-cache/mmap-aware source seam, so repeat reads of faulted experts are served from the mapped region instead of the device.",
+      "distinction": "The loader-level resolved gate; not the source-level enablePageCache arm that instantiates the state, not the readExpertPageCache read path, and not the FAK_EXPERT_PAGE_CACHE env knob that seeds it.",
       "distinct_from": [
         "cachep1-enable-page-cache",
         "read-expert-page-cache",
         "runtime-third-fakexpertpagecache"
       ],
-      "aliases": [],
-      "grounding": "ExpertPageCache",
+      "aliases": [
+        "expert_pagecache"
+      ],
+      "grounding": "expertPageCache",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
       "parent": "",

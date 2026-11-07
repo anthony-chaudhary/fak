@@ -23,7 +23,7 @@
       "kind": "symbol",
       "definition": "cmd/fak/resume_watchdog_cli.go sessionLive: reports whether any live OS process's command line names the given session id - the resume-watchdog's liveness check.",
       "distinction": "A LIVENESS PROBE (is a process for this session still running?) - NOT SessionMeta (static identity) and NOT sessionStartSHA (the base git ref); it answers running-vs-dead, not identity.",
-      "distinct_from": ["cov5303-session-meta", "session", "x-goal25b-session-runtime-sessiontime", "x-session-runtime-sessionfile"],
+      "distinct_from": ["cov5303-session-meta", "session", "x-goal25b-session-runtime-sessiontime", "x-session-runtime-sessionfile", "sessrt-sessionlane"],
       "aliases": [],
       "grounding": "sessionLive",
       "grounding_kind": "symbol",

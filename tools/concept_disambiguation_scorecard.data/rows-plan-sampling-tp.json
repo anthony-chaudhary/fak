@@ -1,0 +1,206 @@
+{
+  "rows": [
+    {
+      "id": "plan-sampling-candidates",
+      "canonical": "SamplingCandidates",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "The raw candidate extraction operation of compute.SamplingCandidateBackend (internal/compute/sampling_candidates.go): given a full F32 logit row and k, the producer inspects the entire row on device and writes the global k+1 maxima with their original token IDs and raw float32 payloads into a caller-owned packet. Implemented by *cudaBackend under the cuda build tag (cuda_sampling_candidates.go), which refuses quantized, capturing, or non-F32 rows and returns available=false without error when capability or state cannot admit the work. No probability or RNG calculation belongs in the producer.",
+      "distinction": "The backend-side EXTRACTION primitive over one logit row; not StepSamplingCandidates (the session-level step that drives one decode step through this backend and falls back to full logits), not deviceSamplingCandidates (the agent-lane gate deciding whether compact transport is used at all), and not SamplingCandidatePacket (the storage the result lands in).",
+      "distinct_from": [
+        "StepSamplingCandidates",
+        "deviceSamplingCandidates",
+        "SamplingCandidatePacket"
+      ],
+      "aliases": [],
+      "grounding": "SamplingCandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "plan-sampling-candidate-maxk",
+      "canonical": "SamplingCandidateMaxK",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A constant equal to 64 in internal/compute/sampling_candidates.go that bounds host transport for compact sampling candidates, not the vocabulary on the device. It sizes the fixed ID/Raw arrays of SamplingCandidatePacket (MaxK+1 entries) and is the upper bound on k accepted by SamplingCandidateBackend.SamplingCandidates, Session.StepSamplingCandidates, and Certify.",
+      "distinction": "A transport-size bound on how many candidate slots cross from device to host; not a caller-chosen sampler top-k (which merely must fall within [1, MaxK]), not a vocabulary size, and not a CUDA workspace limit.",
+      "distinct_from": [
+        "SamplingCandidatePacket",
+        "SamplingCandidates"
+      ],
+      "aliases": [],
+      "grounding": "SamplingCandidateMaxK",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "plan-sampling-candidate-packet",
+      "canonical": "SamplingCandidatePacket",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A caller-owned scratch struct in internal/compute holding a compact raw logit row: Vocab, Count, and Valid flags plus fixed [65]int IDs and [65]float32 Raw arrays, and a pointer-free nativeWords uint32 staging buffer that keeps the lane free of per-token CGo buffers. The device producer fills it with the global k+1 maxima; Certify(temp, k) validates it, insertion-sorts it, trims it to k, and converts it to the host sampler's compact row.",
+      "distinction": "The STORAGE container for raw candidates; not the extraction operation that fills it (SamplingCandidates), not the session step that produces it (StepSamplingCandidates), and not the final sampled token - the draw stays with the caller.",
+      "distinct_from": [
+        "SamplingCandidates",
+        "StepSamplingCandidates",
+        "SamplingCandidateMaxK"
+      ],
+      "aliases": [],
+      "grounding": "SamplingCandidatePacket",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "plan-sampling-candidate-backend",
+      "canonical": "SamplingCandidateBackend",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "An optional interface in internal/compute declaring the single method SamplingCandidates(row Tensor, k int, retain bool, out *SamplingCandidatePacket) (kept Tensor, available bool, err error). model.Session type-asserts s.Backend to it before attempting compact extraction, and *cudaBackend implements it under the cuda build tag. A false available result is legal only before candidate work is submitted, and failure is never a numeric fallback.",
+      "distinction": "A CAPABILITY interface over a compute backend; not a concrete backend (*cudaBackend), not the packet it fills (SamplingCandidatePacket), and not the session call site (StepSamplingCandidates).",
+      "distinct_from": [
+        "SamplingCandidates",
+        "SamplingCandidatePacket",
+        "StepSamplingCandidates"
+      ],
+      "aliases": [],
+      "grounding": "SamplingCandidateBackend",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "plan-step-sampling-candidates",
+      "canonical": "StepSamplingCandidates",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A method on model.Session (internal/model/hal_sampling_candidates.go) that advances exactly once through the ordinary Step lifecycle while attempting compact candidate extraction. On acceptance the packet holds a compact raw row and it returns compact=true with full=nil; otherwise it falls back to the ordinary full logits readback, and a numeric or capability refusal is never a second model step. The draw remains with the caller.",
+      "distinction": "The SESSION-level driver of one decode step; not the backend extraction primitive (SamplingCandidates), not the agent-lane eligibility gate (deviceSamplingCandidates), and not the ordinary Step path, which always returns full logits.",
+      "distinct_from": [
+        "SamplingCandidates",
+        "deviceSamplingCandidates",
+        "SamplingCandidatePacket"
+      ],
+      "aliases": [],
+      "grounding": "StepSamplingCandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "plan-device-sampling-candidates",
+      "canonical": "deviceSamplingCandidates",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A method on agent.decodeLane (internal/agent/inkernel_sampling_candidates.go) reporting whether this serial decode lane may use compact device-side candidate transport: FAK_CUDA_SAMPLING_COMPACT=1, finite temp>0, topK within [1, SamplingCandidateMaxK] and below the vocab size, no logit bias or frequency/presence penalties, and no engram-attempt or structured-output interference. When true the lane routes its next step through stepSamplingCandidates into Session.StepSamplingCandidates. It changes transport only, never the RNG or sampler implementation.",
+      "distinction": "The AGENT-LANE eligibility gate (env opt-in plus lane state); not the session step (StepSamplingCandidates), not the backend primitive (SamplingCandidates), and not a performance claim - source presence does not performance-qualify it.",
+      "distinct_from": [
+        "StepSamplingCandidates",
+        "SamplingCandidates",
+        "SamplingCandidateMaxK"
+      ],
+      "aliases": [
+        "FAK_CUDA_SAMPLING_COMPACT"
+      ],
+      "grounding": "deviceSamplingCandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "plan-attn-plan",
+      "canonical": "attnPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A local TPPlan value built in Model.ForwardTP via NewTPPlan(cfg.NumKVHeads, clampRanks(tp.AttnRanks, cfg.NumKVHeads)) at internal/model/tensor_parallel_forward.go:569: it tiles the KV-head dimension into near-even contiguous shards that drive the column-parallel Q/K/V and row-parallel output projection across attention ranks. It is passed to tpAttnLayer and forwardTPSP for every layer.",
+      "distinction": "The tensor-parallel plan over the ATTENTION head axis (NumKVHeads); not ffnPlan (tiles IntermediateSize for the MLP), not spPlan (tiles the sequence dimension for sequence parallelism), and not the generic TPPlan type or the vocab-axis plan (tpVocabPlan).",
+      "distinct_from": [
+        "ffnPlan",
+        "spPlan",
+        "x-plan-tpplan",
+        "mopup6b-tpvocabplan"
+      ],
+      "aliases": [],
+      "grounding": "attnPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "plan-ffn-plan",
+      "canonical": "ffnPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A local TPPlan value built in Model.ForwardTP via NewTPPlan(cfg.IntermediateSize, clampRanks(tp.FFNRanks, cfg.IntermediateSize)) at internal/model/tensor_parallel_forward.go:573: it tiles the FFN intermediate dimension into contiguous shards for the column/row-parallel MLP matmul across FFN ranks. Consumed by tpFFNLayer and forwardTPSP.",
+      "distinction": "The tensor-parallel plan over the FFN INTERMEDIATE axis (IntermediateSize); not attnPlan (tiles KV heads for attention), not spPlan (tiles the sequence dimension), and not the vocab-axis plan (tpVocabPlan).",
+      "distinct_from": [
+        "x-goal25-plan-runplan",
+        "attnPlan",
+        "spPlan",
+        "mopup6b-tpvocabplan"
+      ],
+      "aliases": [],
+      "grounding": "ffnPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "plan-sp-plan",
+      "canonical": "spPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A local TPPlan value built in Model.ForwardTP only when sequence parallelism is armed (clampRanks(tp.SequenceRanks, seq) > 1): NewTPPlan(seq, spRanks) tiles the SEQUENCE dimension so the residual stream is sharded along the sequence axis outside the TP cores. forwardTPSP, spSublayer, spSliceBands, and spGatherBands in tensor_parallel_sequence.go consume it. SP here means sequence parallelism, not single-pass.",
+      "distinction": "The outer SEQUENCE-DIMENSION plan wrapping the TP cores; not attnPlan (KV-head tiling inside attention), not ffnPlan (intermediate tiling inside the MLP), and not a single-pass flag.",
+      "distinct_from": [
+        "attnPlan",
+        "ffnPlan",
+        "x-plan-tpplan"
+      ],
+      "aliases": [],
+      "grounding": "spPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "plan-fail-open-candidate",
+      "canonical": "failOpenCandidate",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "A method on gateway.memberWorker (internal/gateway/replica_ejection.go) reporting whether a worker may be admitted when no holder of a model is admissible: unhealthy on evidence but not draining. FleetMembership.classifyForModelLocked collects such workers into a failOpen list and, when zero admissible holders survive, returns them instead of ErrNoHealthyWorker - a degraded answer beats a guaranteed outage. Draining and never-probed workers are never resurrected.",
+      "distinction": "A per-worker FAIL-OPEN ADMISSIBILITY predicate in fleet placement; not the ejection window machinery (ejectLocked/ejectedLocked), not the admissible-holder fast path (CandidatesForModel), and not the health probe loop (RunHealthLoop).",
+      "distinct_from": [
+        "cov-debt250-plan-candidatesformodel",
+        "cov-debt250-loop-runhealthloop"
+      ],
+      "aliases": [],
+      "grounding": "failOpenCandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

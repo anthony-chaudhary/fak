@@ -1,0 +1,145 @@
+{
+  "rows": [
+    {
+      "id": "evict-expert-ring-lru",
+      "canonical": "ExpertRingEvictLRU",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Zero-value arm of the model.ExpertRingEvictPolicy enum (internal/model/expert_ring_policy.go) selecting pure-recency victim ranking for the routed-expert paged ring, i.e. polymodel.Pool's own coldestUnpinned choice inherited by the ring. Under this policy the ring allocates no heat state and never pre-evicts victims; polymodel Admit's own LRU choice stands byte-for-byte.",
+      "distinction": "A LIVE ring victim-policy arm; not the offline replay-benchmark label compute.KVEvictLRU that scores KV traces inside ReplayKVCache, and not the deepseekv4moe CachePolicy int arms (LRU/LFU/Heat/Random/OPT/LFRU/ScoreEMA) that drive the offline expert-cache eviction simulation. Its only sibling arm is ExpertRingEvictValueAware, promoted only through the SelectExpertRingEvictPolicy gate.",
+      "distinct_from": [
+        "evict-kvevictlru",
+        "cachep1-cache-policy-label",
+        "cov-debt250-policy-capability-expertringevictpolicy"
+      ],
+      "aliases": [],
+      "grounding": "ExpertRingEvictLRU",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-hot-evictions",
+      "canonical": "HotEvictions",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Counter field on ctxmmu.ExpertResidencyStats (internal/ctxmmu/expert_residency.go, json tag hot_evictions) incremented in promote() when a resident hot-set expert is evicted to admit a newcomer into the decode hot-set ring. The same counter is mirrored as HotEvictions on the armCounters of the cmd/hotsetcheck replay report.",
+      "distinction": "Counts evictions from the RESIDENT hot-set ring only; its sibling TransientEvicts counts churn of the separate prefill transient ring, and Promotions counts the transient-to-resident descriptor swaps that are what trigger these hot evictions.",
+      "distinct_from": [
+        "x-disambig-costevictions",
+        "TransientEvicts",
+        "evict-page-evictions"
+      ],
+      "aliases": [
+        "hot_evictions"
+      ],
+      "grounding": "HotEvictions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-transient-evictions",
+      "canonical": "TransientEvicts",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Counter field on ctxmmu.ExpertResidencyStats (internal/ctxmmu/expert_residency.go, json tag transient_evictions) incremented in stageTransient() when the bounded prefill transient ring evicts entries while staging a cold descriptor. The cmd/hotsetcheck replay report renames the same ctxmmu counter to TransientEvictions on its armCounters struct.",
+      "distinction": "Counts churn of the PREFILL-only transient ring, which by construction can never evict the decode hot set; its sibling HotEvictions counts resident-ring evictions caused by promotions, and neither touches the radixkv page-aware PageEvictions counter.",
+      "distinct_from": [
+        "HotEvictions",
+        "evict-page-evictions"
+      ],
+      "aliases": [
+        "transient_evictions",
+        "TransientEvictions"
+      ],
+      "grounding": "TransientEvicts",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "evict-unevicted-prefix",
+      "canonical": "unevicted (Qwen3.5 sequence KV-preflight invariant)",
+      "family": "evict",
+      "kind": "symbol",
+      "definition": "Prose invariant named in the Qwen3.5 recurrent-sequence KV-preflight error strings (internal/compute/cuda_qwen35_sequence.go, cuda_qwen35_sequence_paged.go, vulkan_qwen35_sequence.go): the request's position prefix must be contiguous and unevicted, enforced by requiring the KV position table to be the identity mapping (each stored absolute position equals its slot index) before the sequence kernel runs.",
+      "distinction": "A preflight REJECTION condition on qwen35 sequence position bookkeeping; not an eviction policy or counter, not the radixkv EvictPrefix token-path eviction operation, and not the kvcost 'unevictable' pinned-span boost that keeps pinned KV spans out of cost-based eviction.",
+      "distinct_from": [
+        "x-evict-evicted",
+        "evict-evictprefix",
+        "evict-kvevictioncostpinned"
+      ],
+      "aliases": [],
+      "grounding": "unevicted",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "expcache-trace-event",
+      "canonical": "ExpertCacheTraceEvent",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Struct in internal/model/expert_cache_bench.go holding one routed-expert touch of the simulated V4.1 expert-cache trace: the (Layer, Expert) pair the router selected and the WeightBytes its staged weight accounts for. Events are drawn by GenerateV41ExpertCacheTrace and driven through the shipped paged ring by ReplayExpertCacheTrace.",
+      "distinction": "The event element of the SIMULATED synthetic trace (ExpertCacheTrace); not the live ring's own recorded access event ExpertAccessTraceEvent (internal/model/expert_replay.go) that the SelectExpertRingEvictPolicy gauge replays, and not the locked measurement document ExpertCacheReceipt that folds the replay counters.",
+      "distinct_from": [
+        "cov5304-expert-cache-trace",
+        "cachep1-expert-cache-receipt"
+      ],
+      "aliases": [],
+      "grounding": "ExpertCacheTraceEvent",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "expcache-init-q8-guard",
+      "canonical": "initQ8CacheIfComplete",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Private *Model method (internal/model/quant.go) called at the end of Quantize and from the safetensors quantized-load paths: it returns true and builds the dense per-layer q8layers cache plus q8head via initQ8Cache only when the on-demand q8w map already holds the head and every attention/MLP projection tensor for all layers; Qwen3.5 hybrid models return false early because they have no dense mlp.* tensors.",
+      "distinction": "The COMPLETENESS GUARD that lazily builds the layer cache; not the unconditional builder initQ8Cache (which panics on a missing tensor), not the per-tensor lazy quantizer quantizeOnDemand, and not the Q8 packed-decode kernel tiles that later consume the quantized weights.",
+      "distinct_from": [
+        "host-q8-packed-decode-tile",
+        "gateway-engine-q8decodekernel"
+      ],
+      "aliases": [],
+      "grounding": "initQ8CacheIfComplete",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "expcache-v41-shape-default",
+      "canonical": "V41ExpertCacheShapeDefault",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Function in internal/model/expert_cache_bench.go returning the pinned V4.1 routed geometry for the simulated expert-cache driver: 40 layers, 384 routed experts (V41RouterExperts), top-6 picks (V41RouterTopK), 2304 expert intermediate width, 5120 hidden. It is the fallback when ExpertCacheTraceOptions.Shape is zero and stamps the receipt's MoE axes.",
+      "distinction": "The DEFAULT GEOMETRY constant of the simulated expert-cache bench; not the V41ExpertCacheShape type it returns, not DeepSeekV41AttentionGeometry (the attention-side pinned constants it reuses for Layers/HiddenSize), and not the live expert-ring budget sizing governed by FakExpertRingPoolFractionEnv.",
+      "distinct_from": [
+        "att-deepseek-v41-attention-geometry",
+        "pool-expert-ring-host-memory-fraction"
+      ],
+      "aliases": [],
+      "grounding": "V41ExpertCacheShapeDefault",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}
