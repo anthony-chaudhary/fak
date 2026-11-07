@@ -17,7 +17,7 @@ package model
 // twin feeds it a GPU f16 GEMM (#71).
 
 // metalQwen35HybridPrefillOK gates the Metal hybrid prefill. It is the dense-only hybrid gate
-// the resident-Q4_K path uses (qwen35HybridDensePrefillOK): the Q8 architecture gate minus MoE,
+// (qwen35HybridDensePrefillOK): the Q8 / resident-Q4_K architecture gate minus MoE,
 // since the Metal twin batches the MLP as one dense GEMM. Only the projection backend differs.
 func metalQwen35HybridPrefillOK(cfg Config, promptLen int) bool {
 	return qwen35HybridDensePrefillOK(cfg, promptLen)

@@ -386,7 +386,6 @@ func TestNativeSchedulerInterleavesBoundedQwenPrefill(t *testing.T) {
 			env    bool
 		}{
 			{name: "attention_output_gate", mutate: func(cfg *model.Config) { cfg.AttnOutputGate = false }},
-			{name: "moe", mutate: func(cfg *model.Config) { cfg.NumExperts, cfg.NumExpertsPerTok = 2, 1 }},
 			{name: "dense_mlp", mutate: func(cfg *model.Config) { cfg.DenseMLP = true }},
 			{name: "alibi", mutate: func(cfg *model.Config) { cfg.Alibi = true }},
 			{name: "norm_gain", mutate: func(cfg *model.Config) { cfg.NormGain1p = false }},
@@ -396,6 +395,12 @@ func TestNativeSchedulerInterleavesBoundedQwenPrefill(t *testing.T) {
 				cfg.RopeThetaPerLayer = []float64{cfg.RopeTheta, cfg.RopeTheta * 2}
 			}},
 			{name: "diagnostic_token_loop", env: true},
+		}
+		// The qwen3_5_moe hybrid mirrors the model's resident-Q4_K gate, which admits it.
+		moeCfg := nativeSchedulerPrefillConfig()
+		moeCfg.NumExperts, moeCfg.NumExpertsPerTok = 2, 1
+		if !nativeQwenResidentAppendEligible(moeCfg, len(longPrompt)) {
+			t.Fatal("qwen3_5_moe hybrid refused resident append qualification")
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {

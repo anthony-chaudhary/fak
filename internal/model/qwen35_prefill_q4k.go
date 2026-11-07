@@ -48,12 +48,13 @@ import (
 // covers. The recurrence is the same f32 math fed by those projections. Pinned by
 // TestPrefillQwen35HybridQ4KMatchesTokenLoop and the Metal Q4K/Q8 gates.
 
-// q4kQwen35HybridPrefillOK gates the batched resident-Q4_K hybrid prefill. It is the
-// dense-only hybrid gate (qwen35HybridDensePrefillOK): the Q8 hybrid path's architecture
-// gate minus MoE, because this lane's MLP is a batched dense GEMM with no per-row
-// routed-FFN seam yet. Only the projection kernel differs from the Q8 path.
+// q4kQwen35HybridPrefillOK gates the batched resident-Q4_K hybrid prefill. It is the Q8
+// hybrid path's architecture gate (qwen35HybridPrefillArchOK), including the qwen3_5_moe
+// hybrid: an MoE layer keeps its attention/GDN sublayer batched and runs the routed FFN
+// per row on the token loop's kernel (prefillQwen35RowFFNQ). Only the projection kernel
+// differs from the Q8 path. tryPrefillQwen35HybridQ4K applies the MoE session limits.
 func q4kQwen35HybridPrefillOK(cfg Config, promptLen int) bool {
-	return qwen35HybridDensePrefillOK(cfg, promptLen)
+	return qwen35HybridPrefillArchOK(cfg, promptLen)
 }
 
 // q4kQwen35HybridPrefillAtPositionOK preserves the established fresh-prefill
@@ -448,6 +449,9 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 	if !q4kQwen35HybridPrefillAtPositionOKFor(s.M.Cfg, len(ids), s.Cache.Len(), s.qwen35HybridMetalResidentPrefill()) {
 		return nil, false
 	}
+	if s.M.Cfg.IsMoE() {
+		return s.tryPrefillQwen35MoEHybridQ4K(ids, wantLogits)
+	}
 	// Keystone decode lever (W1): the exact resident-Q4_K Qwen3.8 hybrid can run its
 	// linear-attention layers through the one-command-buffer fused decode block once the
 	// whole-sequence owner has been admitted and its recurrent state promoted. That
@@ -644,6 +648,21 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 		}
 	}
 	hidden = s.prefillQwen35HybridQ4KHidden(ids)
+	if !wantLogits {
+		return nil, true
+	}
+	return s.headResident(hidden), true
+}
+
+// tryPrefillQwen35MoEHybridQ4K is the qwen3_5_moe arm of tryPrefillQwen35HybridQ4K: the
+// host batched hybrid panel with the routed FFN per row. It declines (token loop) for any
+// session whose observers run only inside blockStep, and for the Metal / backend / HAL
+// resident lanes, whose whole-sequence graph and bulk weight upload model only a dense MLP.
+func (s *Session) tryPrefillQwen35MoEHybridQ4K(ids []int, wantLogits bool) ([]float32, bool) {
+	if s.MetalQ4K || s.Metal || s.Backend != nil || s.qwen35HAL != nil || !s.qwen35HybridPrefillObserversOK() {
+		return nil, false
+	}
+	hidden := s.prefillQwen35HybridQ4KHidden(ids)
 	if !wantLogits {
 		return nil, true
 	}
@@ -1026,6 +1045,15 @@ func (s *Session) prefillQwen35HybridQ4KLayerWithGDNMode(l int, X []float32, P, 
 		}
 	})
 	s.phaseEnd("attn_residual", t)
+
+	if cfg.IsMoE() {
+		// Routed FFN: each row picks its own top-k experts, so it runs per row through
+		// the token loop's exact PreNorm sublayer on the token loop's kernel.
+		t = s.phaseStart()
+		s.prefillQwen35RowFFNQ(l, X, P)
+		s.phaseEnd("qwen35_moe_row_ffn", t)
+		return
+	}
 
 	Xn2 := normWorkspace.panel(P, H)
 	wPost := m.tensor(lp("post_attention_layernorm.weight"))
