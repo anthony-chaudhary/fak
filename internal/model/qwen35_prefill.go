@@ -18,17 +18,9 @@ const qwen35HybridQBatchMinPrompt = 16
 // Qwen3.5/3.6 MoE hybrid (qwen3_5_moe, e.g. Qwen3.6-35B-A3B): the attention and
 // linear-attention sublayers stay batched and only the routed FFN runs per row
 // (prefillQwen35RowFFNQ), through the token loop's exact ffnForLayer(l).apply call on
-// the token loop's kernel. The resident-Q4_K lane shares this gate; the Metal twin has
-// no per-row FFN seam yet, so it keeps the dense-only verdict (qwen35HybridDensePrefillOK).
+// the token loop's kernel. The resident-Q4_K lane and the Metal twin share this gate.
 func q8Qwen35HybridPrefillOK(cfg Config, promptLen int) bool {
 	return qwen35HybridPrefillArchOK(cfg, promptLen)
-}
-
-// qwen35HybridDensePrefillOK is the pre-MoE hybrid verdict: the architecture gate
-// minus every MoE config. It is the gate for lanes whose MLP is a batched dense GEMM
-// with no per-row routed-FFN fallback (the Metal twin).
-func qwen35HybridDensePrefillOK(cfg Config, promptLen int) bool {
-	return qwen35HybridPrefillArchOK(cfg, promptLen) && !cfg.IsMoE()
 }
 
 // qwen35HybridPrefillArchOK holds every non-FFN axis the batched hybrid panel models.

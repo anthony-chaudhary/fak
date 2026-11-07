@@ -111,8 +111,8 @@ func TestQwen35MoEHybridQuantBatchedPrefillMatchesTokenLoop(t *testing.T) {
 	if !q4kQwen35HybridPrefillOK(cfg, len(qwen35MoEPromptA)) {
 		t.Fatal("q4kQwen35HybridPrefillOK refused the qwen3_5_moe hybrid")
 	}
-	if metalQwen35HybridPrefillOK(cfg, len(qwen35MoEPromptA)) {
-		t.Fatal("the Metal hybrid twin has no per-row FFN seam and must still refuse MoE")
+	if !metalQwen35HybridPrefillOK(cfg, len(qwen35MoEPromptA)) {
+		t.Fatal("metalQwen35HybridPrefillOK refused the qwen3_5_moe hybrid")
 	}
 
 	ref := m.NewSession()
@@ -436,4 +436,85 @@ func TestQwen35MoEHybridQ4KPrefillTakesBatchedLane(t *testing.T) {
 			t.Fatalf("residual hook fired %d times, want %d (Q4_K session left the token loop)", calls, want)
 		}
 	})
+}
+
+// TestQwen35MoEHybridViaMMMatchesTokenLoop is the host-independent witness for the Metal
+// hybrid twin's qwen3_5_moe arm: drive the backend-agnostic core prefillQwen35HybridViaMM
+// with the CPU Q8 mm TestQwen35HybridViaMMMatchesCPUTemplate uses, and require logits, KV and
+// linear state to match both the per-token tokenHiddenQ loop and the proven batched Q8 hybrid
+// (prefillQwen35HybridQHidden), with the routed FFN taken per row once per layer. What this
+// cannot witness off-device is the GPU f16 GEMM and the darwin wiring around the core.
+// [SW-VERIFIED, synthetic; Metal runtime not exercised]
+// fak-test:runtime fast est=300ms lane=default
+func TestQwen35MoEHybridViaMMMatchesTokenLoop(t *testing.T) {
+	m := newQuantQwen35MoEHybrid(t)
+	prompt := qwen35MoEPromptA
+	P := len(prompt)
+
+	loop := m.NewSession()
+	loop.Quant = true
+	var h []float32
+	for _, id := range prompt {
+		h = loop.tokenHiddenQ(id, loop.Cache.Len())
+	}
+	wantLoop := loop.headQ(h)
+
+	tmpl := m.NewSession()
+	tmpl.Quant = true
+	wantTmpl := tmpl.headQ(tmpl.prefillQwen35HybridQHidden(prompt))
+
+	got := m.NewSession()
+	got.Quant = true
+	if got.qwen35MetalHybridMoEKeepsTokenLoop() {
+		t.Fatal("a plain qwen3_5_moe session must not be held on the token loop")
+	}
+	pp := NewPhaseProfiler()
+	got.PhaseProfiler = pp
+	cpuMM := func(name string, X []float32, out int) []float32 {
+		var panel q8Panel
+		quantizeBatchPanelInto(&panel, X, P, len(X)/P)
+		Y := make([]float32, P*out)
+		qGemm8Into(got.M.q8(name), &panel, Y)
+		return Y
+	}
+	gotLogits := got.headQ(got.prefillQwen35HybridViaMM(prompt, cpuMM))
+	prof := pp.Snapshot("prefill", P, 0, 1)
+	if n := phaseCalls(prof, "qwen35_moe_row_ffn"); n != m.Cfg.NumLayers {
+		t.Fatalf("via-mm core qwen35_moe_row_ffn calls = %d, want %d", n, m.Cfg.NumLayers)
+	}
+	if n := phaseCalls(prof, "mlp_decode"); n != 0 {
+		t.Fatalf("via-mm core ran blockStep's FFN %d times", n)
+	}
+
+	assertQuantLogitsClose(t, "qwen3_5_moe via-mm core vs token loop logits", wantLoop, gotLogits)
+	assertKVCacheQuantClose(t, "qwen3_5_moe via-mm core vs token loop", loop.Cache, got.Cache)
+	assertLinearAttnCacheQuantClose(t, "qwen3_5_moe via-mm core vs token loop", loop.Cache.linear, got.Cache.linear)
+	assertQuantLogitsClose(t, "qwen3_5_moe via-mm core vs Q8 template logits", wantTmpl, gotLogits)
+	assertKVCacheQuantClose(t, "qwen3_5_moe via-mm core vs Q8 template", tmpl.Cache, got.Cache)
+}
+
+// TestQwen35MetalHybridMoEKeepsTokenLoop pins the Metal route's MoE session half: the
+// cfg-only metalQwen35HybridPrefillOK admits qwen3_5_moe, so a session carrying a tap or a
+// residual hook must be held on the token loop by qwen35MetalHybridMoEKeepsTokenLoop, while
+// the dense hybrid's Metal routing is never affected by it.
+// fak-test:runtime fast est=50ms lane=default
+func TestQwen35MetalHybridMoEKeepsTokenLoop(t *testing.T) {
+	m := newQuantQwen35MoEHybrid(t)
+	tapped := m.NewSession()
+	tapped.tap = &hiddenTap{dir: t.TempDir(), pos: 999}
+	if !tapped.qwen35MetalHybridMoEKeepsTokenLoop() {
+		t.Fatal("tapped qwen3_5_moe Metal session was not held on the token loop")
+	}
+	hookCfg := qwen35MoEHybridTestCfg()
+	hookCfg.EnableResidualHook = true
+	hm := newSyntheticQwen35MoEHybrid(hookCfg)
+	if !hm.NewSession().qwen35MetalHybridMoEKeepsTokenLoop() {
+		t.Fatal("residual-hook qwen3_5_moe Metal session was not held on the token loop")
+	}
+	dense := NewSynthetic(qwen35HybridTestCfg())
+	ds := dense.NewSession()
+	ds.tap = &hiddenTap{dir: t.TempDir(), pos: 999}
+	if ds.qwen35MetalHybridMoEKeepsTokenLoop() {
+		t.Fatal("the dense hybrid's Metal routing must not change")
+	}
 }

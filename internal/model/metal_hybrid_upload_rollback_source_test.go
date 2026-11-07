@@ -61,7 +61,7 @@ func TestMetalHybridUploadRollbackActualSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("actual-source rollback regression: %v", err)
 	}
-	for _, name := range []string{"TestLateNilRollsBack", "TestUploadPanicRollsBack", "TestSuccessAndCacheHit", "TestPrimaryGoexitDrains", "TestCleanupPanicPreservesPrimary", "TestCleanupGoexitDrains", "TestInvalidLayerCountPrecedesUpload"} {
+	for _, name := range []string{"TestLateNilRollsBack", "TestUploadPanicRollsBack", "TestSuccessAndCacheHit", "TestPrimaryGoexitDrains", "TestCleanupPanicPreservesPrimary", "TestCleanupGoexitDrains", "TestInvalidLayerCountPrecedesUpload", "TestMoESkipsDenseMLPUpload"} {
 		if !strings.Contains(string(b), "--- PASS: "+name) {
 			t.Fatalf("required ownership control did not pass: %s", name)
 		}
@@ -89,8 +89,9 @@ func metalRollbackSourceDecl(t *testing.T, path, name string) string {
 }
 
 const metalRollbackModelFixture = `
-type Config struct { NumLayers int; Linear bool }
+type Config struct { NumLayers int; Linear bool; MoE bool }
 func (c Config) isLinearAttnLayer(int) bool { return c.Linear }
+func (c Config) IsMoE() bool { return c.MoE }
 type Model struct { Cfg Config }
 type q8Tensor struct { out,in int }
 func (*Model) q8(string) *q8Tensor { return &q8Tensor{1,1} }
@@ -137,6 +138,7 @@ func TestInvalidLayerCountPrecedesUpload(t *testing.T){reset();m:=&Model{Cfg:Con
 func TestLateNilRollsBack(t *testing.T){
  for _,linear:=range []bool{false,true}{reset();runtime.LockOSThread();m:=&Model{Cfg:Config{NumLayers:2,Linear:linear}};prior:=&Model{};borrowed:=&metalgemm.Weight{ID:99};metalHybridWt[prior]=map[string]*metalgemm.Weight{"prior":borrowed};metalgemm.FailAt=6;p:=caught(func(){m.metalWeightsQwen35Hybrid()});runtime.UnlockOSThread();if s,ok:=p.(string);!ok||!strings.HasPrefix(s,"model: metal hybrid weight upload failed for "){t.Fatalf("primary panic %v",p)};checkRollback(t,m,5);for i:=0;i<5;i++ {if !metalgemm.Retired[i]{t.Fatalf("handle%d not retired",i)}};if metalHybridWt[prior]["prior"]!=borrowed {t.Fatal("prior cache changed")}}
 }
+func TestMoESkipsDenseMLPUpload(t *testing.T){reset();m:=&Model{Cfg:Config{NumLayers:2,MoE:true}};w:=m.metalWeightsQwen35Hybrid();if metalgemm.Calls!=8||len(w)!=8 {t.Fatalf("MoE uploads=%d published=%d, want 8 attention weights",metalgemm.Calls,len(w))};for name:=range w {if strings.Contains(name,".mlp."){t.Fatalf("MoE uploaded dense FFN weight %s",name)}}}
 func TestUploadPanicRollsBack(t *testing.T){reset();m:=&Model{Cfg:Config{NumLayers:1}};metalgemm.PanicAt=4;p:=caught(func(){m.metalWeightsQwen35Hybrid()});if p!="upload-primary"{t.Fatalf("primary %v",p)};checkRollback(t,m,3)}
 func TestSuccessAndCacheHit(t *testing.T){for _,linear:=range []bool{false,true}{reset();m:=&Model{Cfg:Config{NumLayers:2,Linear:linear}};a:=m.metalWeightsQwen35Hybrid();want:=14;if linear {want=16};if len(a)!=want||len(metalgemm.Acquired)!=want||len(metalgemm.Frees)!=0{t.Fatalf("bad success len=%d acquired=%d frees=%v",len(a),len(metalgemm.Acquired),metalgemm.Frees)};b:=m.metalWeightsQwen35Hybrid();if reflect.ValueOf(a).Pointer()!=reflect.ValueOf(b).Pointer()||metalgemm.Calls!=want||len(metalgemm.Frees)!=0{t.Fatal("cache hit acquired or retired handles")};if metalgemm.WrongOwner{t.Fatal("wrong owner")}}}
 func TestPrimaryGoexitDrains(t *testing.T){reset();m:=&Model{Cfg:Config{NumLayers:1}};metalgemm.ExitAt=4;metalgemm.FreePanicID=1;done:=make(chan struct{});returned:=false;go func(){defer close(done);metalgemm.Owner=metalgemm.Goroutine();m.metalWeightsQwen35Hybrid();returned=true}();awaitExit(done);if returned{t.Fatal("Goexit became success")};checkRollback(t,m,3);if metalgemm.Retired[1]{t.Fatal("failed retirement claimed success")}}

@@ -1434,9 +1434,13 @@ func (m *Model) metalWeightsQwen35Hybrid() map[string]*metalgemm.Weight {
 		w[name] = h
 	}
 	for l := 0; l < cfg.NumLayers; l++ {
-		upload(layerName(l, "mlp.gate_proj.weight"))
-		upload(layerName(l, "mlp.up_proj.weight"))
-		upload(layerName(l, "mlp.down_proj.weight"))
+		if !cfg.IsMoE() {
+			// A qwen3_5_moe layer has no dense mlp.* tensors: its routed FFN runs per row
+			// on the CPU token-loop kernel (prefillQwen35RowFFNQ), so nothing to upload.
+			upload(layerName(l, "mlp.gate_proj.weight"))
+			upload(layerName(l, "mlp.up_proj.weight"))
+			upload(layerName(l, "mlp.down_proj.weight"))
+		}
 		if cfg.isLinearAttnLayer(l) {
 			upload(layerName(l, "linear_attn.in_proj_qkv.weight"))
 			upload(layerName(l, "linear_attn.in_proj_z.weight"))
@@ -1461,6 +1465,9 @@ func (m *Model) metalWeightsQwen35Hybrid() map[string]*metalgemm.Weight {
 // CPU hybrid paths build (so decode stays valid) and returns the last token's post-final-norm
 // hidden (caller applies the head). Reached only for a fresh prefill via metalQwen35HybridPrefillOK.
 func (s *Session) prefillBatchedMetalQwen35Hybrid(ids []int) []float32 {
+	if s.qwen35MetalHybridMoEKeepsTokenLoop() {
+		return s.tokenLoopHidden(s.tokenHiddenQ, ids)
+	}
 	// The hybrid f16 projections require MPS in addition to the shared Metal
 	// device. Decline before uploading weights or mutating prompt state when that
 	// capability is absent; the established Q8 implementation remains fak-native

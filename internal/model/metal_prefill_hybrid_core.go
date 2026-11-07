@@ -123,6 +123,16 @@ func (s *Session) prefillQwen35HybridViaMM(ids []int, mm hybridGemmFn) []float32
 			}
 		})
 
+		if cfg.IsMoE() {
+			// Routed FFN: each row picks its own top-k experts, so it runs per row on the
+			// CPU through the token loop's exact PreNorm sublayer and kernel; only the
+			// attention/GDN projections above ride the backend GEMM.
+			t := s.phaseStart()
+			s.prefillQwen35RowFFNQ(l, X, P)
+			s.phaseEnd("qwen35_moe_row_ffn", t)
+			continue
+		}
+
 		Xn2 := make([]float32, P*H)
 		wPost := m.tensor(lp("post_attention_layernorm.weight"))
 		parFor(P, dispatchWorkers, func(lo, hi int) {
@@ -177,6 +187,15 @@ func (s *Session) prefillQwen35HybridViaMM(ids []int, mm hybridGemmFn) []float32
 			P, ms(total), ms(gemmTime), ms(gdnCPU), ms(attnCPU), ms(qkNorm), ms(norm))
 	}
 	return out
+}
+
+// qwen35MetalHybridMoEKeepsTokenLoop reports whether a qwen3_5_moe session admitted by
+// metalQwen35HybridPrefillOK must still take the token loop: the cfg-only Metal route has no
+// session half, so the session observers that run only inside blockStep (tap, residual hook,
+// target-hidden capture, PRISM, packed KV, sinks) are checked here for the MoE arm. The dense
+// hybrid's historical Metal routing is unchanged.
+func (s *Session) qwen35MetalHybridMoEKeepsTokenLoop() bool {
+	return s.M.Cfg.IsMoE() && !s.qwen35HybridPrefillObserversOK()
 }
 
 // prefillQwen35LinearLayerMM is the backend-agnostic twin of prefillQwen35LinearLayerQ: the five
