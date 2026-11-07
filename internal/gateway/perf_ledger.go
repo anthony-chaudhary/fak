@@ -140,22 +140,26 @@ func perfDetailFromCompletion(comp *agent.Completion) perfDetail {
 	return d
 }
 
-// prefillRouteFromReceipt lifts the request's whole-sequence prefill route
-// decision off a native receipt. A receipt with no route block (a non-Qwen turn,
-// or a turn that made no eligible decision) yields nil, so the perf row omits the
-// field rather than fabricating a route.
+// prefillRouteFromReceipt preserves request-level completeness and qualification.
+// Status describes only the representative observed call, not every chunk.
+// Executed but unobserved calls remain present without invented route strings;
+// absent aggregates and aggregates with no executed calls are omitted.
 func prefillRouteFromReceipt(receipt *model.NativeInferenceReceipt) *perfledger.PrefillRoute {
-	if receipt == nil || receipt.Qwen35SequencePrefillRoute == nil || receipt.Qwen35SequencePrefillRoute.Status == nil {
+	if receipt == nil || receipt.Qwen35SequencePrefillRoute == nil || receipt.Qwen35SequencePrefillRoute.PrefillCalls <= 0 {
 		return nil
 	}
-	status := receipt.Qwen35SequencePrefillRoute.Status
-	return &perfledger.PrefillRoute{
-		RequestedPath:               status.RequestedPath,
-		EffectivePath:               status.EffectivePath,
-		DeclineReason:               status.DeclineReason,
-		FallbackActive:              status.FallbackActive,
-		NativePerformanceQualifying: status.NativePerformanceQualifying,
+	aggregate := receipt.Qwen35SequencePrefillRoute
+	route := &perfledger.PrefillRoute{
+		PrefillCalls:                aggregate.PrefillCalls,
+		ObservedCalls:               aggregate.ObservedCalls,
+		Complete:                    aggregate.Complete,
+		NativePerformanceQualifying: aggregate.NativePerformanceQualifying,
 	}
+	if status := aggregate.Status; status != nil {
+		route.RequestedPath, route.EffectivePath = status.RequestedPath, status.EffectivePath
+		route.DeclineReason, route.FallbackActive = status.DeclineReason, status.FallbackActive
+	}
+	return route
 }
 
 func completionBenchEvidence(comp *agent.Completion) *perfledger.BenchEvidence {
