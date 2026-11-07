@@ -1,227 +1,87 @@
+// The GPU binding doctor moved to pkg/gpubinding (the public seam companion
+// repositories import). This file keeps the historical compute.* names as thin
+// aliases and wrappers INTO that package so every existing caller compiles
+// unchanged; the implementation, verdicts and tests live at the seam now.
 package compute
 
 import (
-	"bufio"
-	"bytes"
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"io/fs"
-	"os"
-	"os/exec"
-	"path"
-	"path/filepath"
-	"runtime"
-	"sort"
-	"strconv"
-	"strings"
-	"time"
-	"unicode/utf16"
-
-	"github.com/anthony-chaudhary/fak/internal/windowgate"
+	"github.com/anthony-chaudhary/fak/pkg/gpubinding"
 )
 
-// GPUBindingVerdict is the closed per-device outcome of the GPU binding doctor,
-// which compares four views of one NVIDIA PCI display device: PCI enumeration,
-// driver binding, whether the vendor driver lists the device ID, and NVML
-// visibility. A GPU missing from nvidia-smi can fail at any of these layers and
-// the fix differs per layer.
-type GPUBindingVerdict string
+// GPUBindingVerdict is the closed per-device outcome of the GPU binding doctor.
+type GPUBindingVerdict = gpubinding.Verdict
 
 const (
 	// GPUReady means enumerated, bound to the started NVIDIA driver, and NVML-visible.
-	GPUReady GPUBindingVerdict = "GPU_READY"
+	GPUReady = gpubinding.VerdictReady
 	// GPUNotEnumerated means an expected GPU is absent from a complete PCI enumeration.
-	GPUNotEnumerated GPUBindingVerdict = "GPU_NOT_ENUMERATED"
-	// GPUUnbound means enumerated but the NVIDIA driver is not bound or not
-	// started (Windows carries the problem code), while an installed driver lists
-	// the ID or coverage is unknown.
-	GPUUnbound GPUBindingVerdict = "GPU_UNBOUND"
-	// GPUDriverLacksDeviceID means enumerated and not driven, and no installed
-	// NVIDIA INF/driver lists the device ID (including none installed): only a
-	// package that lists the ID can bind it.
-	GPUDriverLacksDeviceID GPUBindingVerdict = "GPU_DRIVER_LACKS_DEVICE_ID"
+	GPUNotEnumerated = gpubinding.VerdictNotEnumerated
+	// GPUUnbound means enumerated but the NVIDIA driver is not bound or not started.
+	GPUUnbound = gpubinding.VerdictUnbound
+	// GPUDriverLacksDeviceID means no installed NVIDIA INF/driver lists the device ID.
+	GPUDriverLacksDeviceID = gpubinding.VerdictDriverLacksDeviceID
 	// GPUBoundNotCUDAVisible means bound to the started NVIDIA driver but absent from NVML.
-	GPUBoundNotCUDAVisible GPUBindingVerdict = "GPU_BOUND_NOT_CUDA_VISIBLE"
-	// GPUDriverBelowFloor means a row that would be GPU_READY whose observed
-	// driver branch is below the payload floor's minimum; the floor demotes it.
-	GPUDriverBelowFloor GPUBindingVerdict = "GPU_DRIVER_BELOW_FLOOR"
-	// GPUModuleFlavorProprietary means a row that would be GPU_READY whose loaded
-	// kernel module is the proprietary flavor while the payload floor requires the
-	// open module.
-	GPUModuleFlavorProprietary GPUBindingVerdict = "GPU_MODULE_FLAVOR_PROPRIETARY"
-	// GPUComputeCapInsufficient means a row that would be GPU_READY whose observed
-	// compute capability is below the payload floor's minimum.
-	GPUComputeCapInsufficient GPUBindingVerdict = "GPU_COMPUTE_CAP_INSUFFICIENT"
-	// GPUTunnelUnauthorized means an expected GPU is absent while a Thunderbolt/USB4
-	// device on the host is not authorized (Linux sysfs authorized=0, as boltctl shows).
-	GPUTunnelUnauthorized GPUBindingVerdict = "GPU_TUNNEL_UNAUTHORIZED"
+	GPUBoundNotCUDAVisible = gpubinding.VerdictBoundNotCUDAVisible
+	// GPUDriverBelowFloor means a ready row whose driver branch is below the payload floor.
+	GPUDriverBelowFloor = gpubinding.VerdictDriverBelowFloor
+	// GPUModuleFlavorProprietary means a ready row on the proprietary module while the floor requires open.
+	GPUModuleFlavorProprietary = gpubinding.VerdictModuleFlavorProprietary
+	// GPUComputeCapInsufficient means a ready row below the floor's minimum compute capability.
+	GPUComputeCapInsufficient = gpubinding.VerdictComputeCapInsufficient
+	// GPUTunnelUnauthorized means an expected GPU is absent behind an unauthorized Thunderbolt/USB4 device.
+	GPUTunnelUnauthorized = gpubinding.VerdictTunnelUnauthorized
 	// GPUBindingUnknown means a layer the verdict depends on was not observed.
-	GPUBindingUnknown GPUBindingVerdict = "unknown"
+	GPUBindingUnknown = gpubinding.VerdictUnknown
+
+	// Kernel-module flavors a floor can require.
+	DriverFlavorOpen        = gpubinding.DriverFlavorOpen
+	DriverFlavorProprietary = gpubinding.DriverFlavorProprietary
 )
 
-// Kernel-module flavors a floor can require.
-const (
-	DriverFlavorOpen        = "open"
-	DriverFlavorProprietary = "proprietary"
-)
-
-// GPUDriverFloor is the admission floor a payload places on a bound GPU row:
-// the minimum driver branch, the required kernel-module flavor and the minimum
-// CUDA compute capability. A zero floor admits every bound row; each dimension
-// that is not observed (unparseable version, empty flavor, zero capability) is
-// unknown and never counts as a violation. MinDriverVersion is the Linux nvidia
-// branch form read from /sys/module/nvidia/version ("615.71.09"); Windows PnP
-// driver versions use a different scheme and are not comparable against it,
-// so consumers must not floor Windows rows with this field.
-type GPUDriverFloor struct {
-	// MinDriverVersion is the minimum nvidia driver branch, major.minor.patch.
-	MinDriverVersion [3]int
-	// RequireOpenModule demands the open-source kernel-module build.
-	RequireOpenModule bool
-	// MinComputeCapability is the minimum CUDA compute capability encoded as
-	// major*10+minor (120 == 12.0).
-	MinComputeCapability int
-}
-
-// Active reports whether the floor gates any dimension.
-func (f GPUDriverFloor) Active() bool {
-	return f.MinDriverVersion != [3]int{} || f.RequireOpenModule || f.MinComputeCapability > 0
-}
-
-// BlackwellDriverFloor is the sm_120 (Blackwell) payload floor: the documented
-// pacman spec nvidia-open>=615.71.09 plus compute capability 12.0.
-var BlackwellDriverFloor = GPUDriverFloor{
-	MinDriverVersion:     [3]int{615, 71, 9},
-	RequireOpenModule:    true,
-	MinComputeCapability: 120,
-}
-
-// ParseDriverVersion splits a leading "major.minor.patch" from a driver version
-// string such as "615.71.09". ok is false when the first three dotted
-// components are not all decimal.
-func ParseDriverVersion(v string) (major, minor, patch int, ok bool) {
-	parts := strings.Split(strings.TrimSpace(v), ".")
-	if len(parts) < 3 {
-		return 0, 0, 0, false
-	}
-	vals := make([]int, 3)
-	for i, p := range parts[:3] {
-		n, err := strconv.Atoi(strings.TrimSpace(p))
-		if err != nil || n < 0 {
-			return 0, 0, 0, false
-		}
-		vals[i] = n
-	}
-	return vals[0], vals[1], vals[2], true
-}
-
-// DriverBranchBelow reports whether an observed version is strictly below min;
-// an unparseable version is unknown, not below.
-func DriverBranchBelow(version string, min [3]int) bool {
-	major, minor, patch, ok := ParseDriverVersion(version)
-	if !ok {
-		return false
-	}
-	got := [3]int{major, minor, patch}
-	for i := range got {
-		if got[i] != min[i] {
-			return got[i] < min[i]
-		}
-	}
-	return false
-}
-
-// GPULayerState is a tri-state observation of one layer; unknown is never
-// collapsed into yes or no.
-type GPULayerState string
+// GPULayerState is a tri-state observation of one layer; unknown is never collapsed into yes or no.
+type GPULayerState = gpubinding.LayerState
 
 const (
-	GPULayerYes     GPULayerState = "yes"
-	GPULayerNo      GPULayerState = "no"
-	GPULayerUnknown GPULayerState = "unknown"
+	// GPULayerYes means the layer was observed present.
+	GPULayerYes = gpubinding.LayerYes
+	// GPULayerNo means the layer was observed absent.
+	GPULayerNo = gpubinding.LayerNo
+	// GPULayerUnknown means the layer was not observed.
+	GPULayerUnknown = gpubinding.LayerUnknown
 )
 
-// Binding-doctor provenance labels.
+// Discovery source labels kept under their historical names.
 const (
-	CUDASourceWindowsPnP = "windows_pnp"
-	CUDASourceNvidiaSMI  = "nvidia_smi"
-	gpuBindingExpected   = "expected"
+	// CUDASourceWindowsPnP marks observations from the Windows PnP binding query.
+	CUDASourceWindowsPnP = gpubinding.SourceWindowsPnP
+	// CUDASourceNvidiaSMI marks observations from nvidia-smi.
+	CUDASourceNvidiaSMI = gpubinding.SourceNvidiaSMI
 )
 
-// GPUBindingDevice is one NVIDIA PCI display device (or one expected but absent
-// GPU) with every layer observation that decides its verdict.
-type GPUBindingDevice struct {
-	PCIAddress     string `json:"pci_address,omitempty"`
-	InstanceID     string `json:"instance_id,omitempty"`
-	VendorID       string `json:"vendor_id,omitempty"`
-	DeviceID       string `json:"device_id,omitempty"`
-	SubsystemID    string `json:"subsystem_id,omitempty"`
-	Name           string `json:"name,omitempty"`
-	Enumerated     bool   `json:"enumerated"`
-	Driver         string `json:"driver,omitempty"`
-	DriverModule   string `json:"driver_module,omitempty"`
-	DriverProvider string `json:"driver_provider,omitempty"`
-	DriverVersion  string `json:"driver_version,omitempty"`
-	// DriverFlavor is the loaded kernel-module build (DriverFlavorOpen or
-	// DriverFlavorProprietary); empty is unobserved.
-	DriverFlavor string `json:"driver_flavor,omitempty"`
-	// ComputeCapability is the CUDA compute capability NVML reported, encoded as
-	// major*10+minor (120 == 12.0); 0 is unobserved.
-	ComputeCapability int               `json:"compute_capability,omitempty"`
-	VendorDriver      GPULayerState     `json:"vendor_driver"`
-	DriverStarted     GPULayerState     `json:"driver_started"`
-	ProblemCode       *int              `json:"problem_code,omitempty"`
-	ProblemName       string            `json:"problem_name,omitempty"`
-	IDListed          GPULayerState     `json:"device_id_listed"`
-	IDListedBy        []string          `json:"device_id_listed_by,omitempty"`
-	IDCheckedIn       []string          `json:"device_id_checked_in,omitempty"`
-	CUDAVisible       GPULayerState     `json:"cuda_visible"`
-	CUDAIndex         *int              `json:"cuda_index,omitempty"`
-	CUDAUUID          string            `json:"cuda_uuid,omitempty"`
-	TunnelAuthorized  GPULayerState     `json:"tunnel_authorized,omitempty"`
-	Tunnel            string            `json:"tunnel,omitempty"`
-	ParentChain       []GPUPnPHop       `json:"parent_chain,omitempty"`
-	RootPort          string            `json:"root_port,omitempty"`
-	USB4HostRouter    string            `json:"usb4_host_router,omitempty"`
-	USB4RouterBasis   string            `json:"usb4_router_basis,omitempty"`
-	Source            string            `json:"source,omitempty"`
-	Verdict           GPUBindingVerdict `json:"verdict"`
-	UnknownFields     []string          `json:"unknown_fields,omitempty"`
+// GPUDriverFloor is the admission floor a payload places on a bound GPU row.
+type GPUDriverFloor = gpubinding.DriverFloor
 
-	// hardwareIDs are the upper-cased PnP hardware/compatible IDs that carry a
-	// device ID; an INF entry equal to one of them lists this device.
-	hardwareIDs []string
-	// modalias is the Linux PCI modalias matched against modules.alias.
-	modalias string
-}
+// BlackwellDriverFloor is the sm_120 (Blackwell) payload floor.
+var BlackwellDriverFloor = gpubinding.BlackwellFloor
+
+// GPUBindingDevice is one NVIDIA PCI display device with its layer observations.
+type GPUBindingDevice = gpubinding.Device
 
 // GPUCUDADevice is one GPU as NVML (nvidia-smi) reports it.
-type GPUCUDADevice struct {
-	Index int    `json:"index"`
-	BusID string `json:"pci_bus_id"`
-	UUID  string `json:"uuid,omitempty"`
-	Name  string `json:"name,omitempty"`
-	// ComputeCapability is the compute_cap column, encoded as major*10+minor
-	// (120 == 12.0); 0 when the column was absent or unparseable.
-	ComputeCapability int `json:"compute_capability,omitempty"`
-}
+type GPUCUDADevice = gpubinding.CUDADevice
 
-// GPUCUDAView is the NVML layer: State is yes when nvidia-smi listed devices
-// (even if it then exited non-zero), no when it ran and listed none, unknown
-// when it could not run, its output did not parse, or it was not needed
-// because no device had a started driver.
-type GPUCUDAView struct {
-	State    GPULayerState   `json:"state"`
-	Source   string          `json:"source,omitempty"`
-	Error    string          `json:"error,omitempty"`
-	Devices  []GPUCUDADevice `json:"devices,omitempty"`
-	Unparsed []string        `json:"unparsed_rows,omitempty"`
-}
+// GPUCUDAView is the NVML layer.
+type GPUCUDAView = gpubinding.CUDAView
 
-// GPUBindingReport is the binding doctor's host-level result.
+// GPUBindingInputs are the collected observations BuildGPUBindingReport folds.
+type GPUBindingInputs = gpubinding.Inputs
+
+// GPUBindingOptions tunes DiagnoseGPUBinding; zero values select host defaults.
+type GPUBindingOptions = gpubinding.Options
+
+// GPUBindingReport is the binding doctor's host-level result. Status stays the
+// discovery status type so existing callers keep comparing against
+// CUDADiscovery*; every other field aliases the seam's shape.
 type GPUBindingReport struct {
 	Status     CUDADiscoveryStatus       `json:"status"`
 	Method     string                    `json:"method,omitempty"`
@@ -238,349 +98,66 @@ type GPUBindingReport struct {
 	Package *GPUDriverPackage `json:"package,omitempty"`
 }
 
-// GPUBindingInputs are the collected observations BuildGPUBindingReport folds.
-type GPUBindingInputs struct {
-	Method              string
-	Devices             []GPUBindingDevice
-	CUDA                GPUCUDAView
-	ExpectGPUs          int
-	UnauthorizedTunnels []string
-	Issues              []CUDADiscoveryIssue
-	// EnumerationIncomplete means some PCI function could not be read, so a
-	// missing expected GPU may be that function: no absent rows are claimed.
-	EnumerationIncomplete bool
-	USB4HostRouters       []GPUUSB4HostRouter
-	Package               *GPUDriverPackage
-	Floor                 GPUDriverFloor
+// bindingReportFrom maps the seam report onto the compute-shaped one: the
+// status word converts between the two named types (same underlying values),
+// everything else is aliased.
+func bindingReportFrom(r gpubinding.Report) GPUBindingReport {
+	issues := make([]CUDADiscoveryIssue, len(r.Issues))
+	for i, is := range r.Issues {
+		issues[i] = CUDADiscoveryIssue{Path: is.Path, Error: is.Error}
+	}
+	return GPUBindingReport{
+		Status:          CUDADiscoveryStatus(r.Status),
+		Method:          r.Method,
+		Issues:          issues,
+		ExpectGPUs:      r.ExpectGPUs,
+		CUDA:            r.CUDA,
+		Devices:         r.Devices,
+		Verdicts:        r.Verdicts,
+		Ready:           r.Ready,
+		USB4HostRouters: r.USB4HostRouters,
+		Package:         r.Package,
+	}
 }
 
-// GPUBindingOptions tunes DiagnoseGPUBinding; zero values select host defaults.
-type GPUBindingOptions struct {
-	// ExpectGPUs adds GPU_NOT_ENUMERATED / GPU_TUNNEL_UNAUTHORIZED rows when a
-	// complete enumeration finds fewer NVIDIA display devices.
-	ExpectGPUs int
-	// ModulesAliasPath is the Linux modules.alias; empty derives
-	// /lib/modules/<release>/modules.alias for the live /sys only.
-	ModulesAliasPath string
-	// SupportedGPUsPath is the NVIDIA driver's supported-gpus.json; empty tries
-	// the driver's install locations for the live /sys only.
-	SupportedGPUsPath string
-	// INFDir is the Windows INF directory; empty means %SystemRoot%\INF.
-	INFDir string
-	// PackageINFDir is an extracted NVIDIA driver package; when set, the report
-	// names the package INF that lists each present GPU and the pnputil plan
-	// (never run) that would bind them. Windows only.
-	PackageINFDir string
-	// Floor demotes rows that would read GPU_READY when they violate the
-	// payload's driver-branch / module-flavor / compute-capability floor.
-	Floor GPUDriverFloor
-
-	pnpQuery func(ctx context.Context) (string, error)
-	smiQuery func(ctx context.Context) (gpuQueryOutput, error)
-	infFS    fs.FS
+// ParseDriverVersion splits a leading "major.minor.patch" from a driver version string such as "615.71.09".
+func ParseDriverVersion(v string) (major, minor, patch int, ok bool) {
+	return gpubinding.ParseDriverVersion(v)
 }
 
-// gpuQueryOutput is one external query's result; the query's error is reserved
-// for "could not run", so a non-zero exit is data, not a failure to observe.
-type gpuQueryOutput struct {
-	Stdout   string
-	Stderr   string
-	ExitCode int
+// DriverBranchBelow reports whether an observed version is strictly below min; an unparseable version is unknown, not below.
+func DriverBranchBelow(version string, min [3]int) bool {
+	return gpubinding.DriverBranchBelow(version, min)
 }
 
-// gpuBindingQueryTimeout bounds the nvidia-smi query; the PnP query walks one
-// property read per device-tree hop and gets the longer gpuBindingPnPTimeout.
-const (
-	gpuBindingQueryTimeout = 60 * time.Second
-	gpuBindingPnPTimeout   = 120 * time.Second
-)
+// ParseComputeCapability reads an NVML compute_cap field ("12.0") as major*10+minor; an unparseable field stays 0 (unobserved).
+func ParseComputeCapability(s string) int {
+	return gpubinding.ParseComputeCapability(s)
+}
+
+// ParseNvidiaSMIBusIDs parses `nvidia-smi --query-gpu=index,pci.bus_id,uuid,name --format=csv,noheader` output.
+func ParseNvidiaSMIBusIDs(out string) (devs []GPUCUDADevice, unparsed []string) {
+	return gpubinding.ParseNvidiaSMIBusIDs(out)
+}
+
+// ParseWindowsGPUBindingJSON parses the PnP binding query into enumerated NVIDIA display devices.
+func ParseWindowsGPUBindingJSON(raw string) ([]GPUBindingDevice, error) {
+	return gpubinding.ParseWindowsBindingJSON(raw)
+}
 
 // ClassifyGPUBinding folds one device's layer observations into its verdict.
 func ClassifyGPUBinding(dev GPUBindingDevice) GPUBindingVerdict {
-	return classifyGPUBindingBase(dev)
+	return gpubinding.Classify(dev)
 }
 
-// ClassifyGPUBindingWithFloor applies the payload floor on top of the base
-// verdict: only a row that would read GPU_READY is demoted, and only on an
-// observed violation. Violation priority is driver branch, then module flavor,
-// then compute capability.
+// ClassifyGPUBindingWithFloor applies the payload floor on top of the base verdict.
 func ClassifyGPUBindingWithFloor(dev GPUBindingDevice, floor GPUDriverFloor) GPUBindingVerdict {
-	v := classifyGPUBindingBase(dev)
-	if v != GPUReady || !floor.Active() {
-		return v
-	}
-	switch {
-	case DriverBranchBelow(dev.DriverVersion, floor.MinDriverVersion):
-		return GPUDriverBelowFloor
-	case floor.RequireOpenModule && dev.DriverFlavor == DriverFlavorProprietary:
-		return GPUModuleFlavorProprietary
-	case dev.ComputeCapability > 0 && dev.ComputeCapability < floor.MinComputeCapability:
-		return GPUComputeCapInsufficient
-	}
-	return GPUReady
+	return gpubinding.ClassifyWithFloor(dev, floor)
 }
 
-func classifyGPUBindingBase(dev GPUBindingDevice) GPUBindingVerdict {
-	if !dev.Enumerated {
-		if dev.TunnelAuthorized == GPULayerNo {
-			return GPUTunnelUnauthorized
-		}
-		return GPUNotEnumerated
-	}
-	if dev.VendorDriver == GPULayerNo || dev.DriverStarted == GPULayerNo {
-		if dev.IDListed == GPULayerNo {
-			return GPUDriverLacksDeviceID
-		}
-		return GPUUnbound
-	}
-	if dev.VendorDriver != GPULayerYes || dev.DriverStarted != GPULayerYes {
-		return GPUBindingUnknown
-	}
-	switch dev.CUDAVisible {
-	case GPULayerYes:
-		return GPUReady
-	case GPULayerNo:
-		return GPUBoundNotCUDAVisible
-	case GPULayerUnknown:
-		// unknown visibility is never collapsed into ready or not-visible
-		return GPUBindingUnknown
-	}
-	return GPUBindingUnknown // unreachable for the closed tri-state; guard against foreign strings
-}
-
-// gpuDriverStarted reports whether a device has a started NVIDIA driver, the
-// only case in which NVML visibility decides the verdict.
-func gpuDriverStarted(dev GPUBindingDevice) bool {
-	return dev.VendorDriver == GPULayerYes && dev.DriverStarted == GPULayerYes
-}
-
-// BuildGPUBindingReport joins the enumerated devices with the NVML view, adds
-// rows for expected but absent GPUs after a complete enumeration
-// (tunnel-unauthorized first, one per unauthorized tunnel device), and
-// classifies every row. Status follows the topology discovery rule: zero
-// devices with read issues is an error, never absence. Ready needs every row
-// GPU_READY and at least ExpectGPUs devices enumerated.
+// BuildGPUBindingReport joins the enumerated devices with the NVML view and classifies every row.
 func BuildGPUBindingReport(in GPUBindingInputs) GPUBindingReport {
-	rep := GPUBindingReport{
-		Method:     in.Method,
-		Issues:     in.Issues,
-		ExpectGPUs: in.ExpectGPUs,
-		CUDA:       in.CUDA,
-		Devices:    make([]GPUBindingDevice, 0, len(in.Devices)),
-		Verdicts:   map[GPUBindingVerdict]int{},
-
-		USB4HostRouters: in.USB4HostRouters,
-		Package:         in.Package,
-	}
-	for _, dev := range in.Devices {
-		dev.Enumerated = true
-		dev.CUDAVisible, dev.CUDAIndex, dev.CUDAUUID, dev.ComputeCapability = matchCUDAView(dev.PCIAddress, in.CUDA)
-		if dev.CUDAVisible == GPULayerUnknown {
-			dev.UnknownFields = appendUnique(dev.UnknownFields, "cuda_visible")
-		}
-		rep.Devices = append(rep.Devices, dev)
-	}
-	sort.SliceStable(rep.Devices, func(i, j int) bool { return rep.Devices[i].PCIAddress < rep.Devices[j].PCIAddress })
-	enumerated := len(rep.Devices)
-	if !in.EnumerationIncomplete {
-		for i := 0; i < in.ExpectGPUs-enumerated; i++ {
-			missing := GPUBindingDevice{
-				VendorDriver:     GPULayerUnknown,
-				DriverStarted:    GPULayerUnknown,
-				IDListed:         GPULayerUnknown,
-				CUDAVisible:      GPULayerUnknown,
-				TunnelAuthorized: GPULayerUnknown,
-				Source:           gpuBindingExpected,
-			}
-			if i < len(in.UnauthorizedTunnels) {
-				missing.TunnelAuthorized = GPULayerNo
-				missing.Tunnel = in.UnauthorizedTunnels[i]
-			}
-			rep.Devices = append(rep.Devices, missing)
-		}
-	}
-	rep.Ready = len(rep.Devices) > 0 && enumerated >= in.ExpectGPUs
-	for i := range rep.Devices {
-		v := ClassifyGPUBindingWithFloor(rep.Devices[i], in.Floor)
-		rep.Devices[i].Verdict = v
-		rep.Verdicts[v]++
-		if v != GPUReady {
-			rep.Ready = false
-		}
-	}
-	switch {
-	case enumerated > 0 && len(in.Issues) > 0:
-		rep.Status = CUDADiscoveryPartial
-	case enumerated > 0:
-		rep.Status = CUDADiscoveryObserved
-	case len(in.Issues) > 0:
-		rep.Status = CUDADiscoveryError
-	default:
-		rep.Status = CUDADiscoveryAbsent
-	}
-	if rep.Status == CUDADiscoveryError {
-		rep.Ready = false
-	}
-	return rep
-}
-
-func matchCUDAView(addr string, cuda GPUCUDAView) (GPULayerState, *int, string, int) {
-	switch cuda.State {
-	case GPULayerNo:
-		return GPULayerNo, nil, "", 0
-	case GPULayerYes:
-	default:
-		return GPULayerUnknown, nil, "", 0
-	}
-	if addr == "" {
-		return GPULayerUnknown, nil, "", 0
-	}
-	for _, c := range cuda.Devices {
-		if samePCIDevice(addr, c.BusID) {
-			idx := c.Index
-			return GPULayerYes, &idx, c.UUID, c.ComputeCapability
-		}
-	}
-	return GPULayerNo, nil, "", 0
-}
-
-// pciBusKey splits a PCI address into its domain (leading zeros trimmed, "" when
-// absent) and its lower-cased bus:dev.fn part, so nvidia-smi's
-// "00000000:58:00.0", sysfs "0000:58:00.0" and Windows-derived "58:00.0" agree.
-func pciBusKey(addr string) (domain, bdf string) {
-	parts := strings.Split(strings.ToLower(strings.TrimSpace(addr)), ":")
-	switch len(parts) {
-	case 3:
-		domain = strings.TrimLeft(parts[0], "0")
-		if domain == "" {
-			domain = "0"
-		}
-		return domain, parts[1] + ":" + parts[2]
-	case 2:
-		return "", parts[0] + ":" + parts[1]
-	}
-	return "", ""
-}
-
-func samePCIDevice(a, b string) bool {
-	da, ba := pciBusKey(a)
-	db, bb := pciBusKey(b)
-	if ba == "" || ba != bb {
-		return false
-	}
-	return da == "" || db == "" || da == db
-}
-
-// ParseNvidiaSMIBusIDs parses `nvidia-smi --query-gpu=index,pci.bus_id,uuid,name
-// --format=csv,noheader` output. A row that is not a GPU record (a warning, an
-// NVML error line) is returned in unparsed instead of voiding the other rows.
-func ParseNvidiaSMIBusIDs(out string) (devs []GPUCUDADevice, unparsed []string) {
-	sc := bufio.NewScanner(strings.NewReader(out))
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		f := strings.Split(line, ",")
-		if len(f) < 3 {
-			unparsed = append(unparsed, line)
-			continue
-		}
-		idx, err := strconv.Atoi(strings.TrimSpace(f[0]))
-		_, bdf := pciBusKey(f[1])
-		if err != nil || bdf == "" {
-			unparsed = append(unparsed, line)
-			continue
-		}
-		d := GPUCUDADevice{Index: idx, BusID: strings.TrimSpace(f[1]), UUID: strings.TrimSpace(f[2])}
-		if len(f) > 3 {
-			d.Name = strings.TrimSpace(f[3])
-		}
-		if len(f) > 4 {
-			d.ComputeCapability = ParseComputeCapability(f[4])
-		}
-		devs = append(devs, d)
-	}
-	return devs, unparsed
-}
-
-// ParseComputeCapability reads an NVML compute_cap field ("12.0") as
-// major*10+minor; an unparseable field stays 0 (unobserved).
-func ParseComputeCapability(s string) int {
-	parts := strings.SplitN(strings.TrimSpace(s), ".", 2)
-	major, err := strconv.Atoi(parts[0])
-	if err != nil || major < 0 {
-		return 0
-	}
-	minor := 0
-	if len(parts) == 2 {
-		minor, _ = strconv.Atoi(parts[1])
-	}
-	return major*10 + minor
-}
-
-// nvidiaSMIBindingArgs is the NVML query the doctor runs; compute_cap feeds
-// the payload floor's capability dimension.
-var nvidiaSMIBindingArgs = []string{"--query-gpu=index,pci.bus_id,uuid,name,compute_cap", "--format=csv,noheader"}
-
-func execNvidiaSMIBinding(ctx context.Context) (gpuQueryOutput, error) {
-	cmd := exec.CommandContext(ctx, "nvidia-smi", nvidiaSMIBindingArgs...)
-	windowgate.ConfigureBackgroundCommand(cmd)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	res := gpuQueryOutput{Stdout: string(out), Stderr: stderr.String()}
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && ctx.Err() == nil {
-			res.ExitCode = exitErr.ExitCode()
-			return res, nil
-		}
-		return res, err
-	}
-	return res, nil
-}
-
-// collectCUDAView runs the NVML query. Rows nvidia-smi printed count even when
-// it exits non-zero; a non-zero exit with no GPU row (for example "Failed to
-// initialize NVML: Not Found") observes that NVML sees no GPU; a query that
-// cannot start or whose output does not parse leaves the layer unknown.
-func collectCUDAView(query func(ctx context.Context) (gpuQueryOutput, error)) GPUCUDAView {
-	view := GPUCUDAView{State: GPULayerUnknown, Source: CUDASourceNvidiaSMI}
-	ctx, cancel := context.WithTimeout(context.Background(), gpuBindingQueryTimeout)
-	defer cancel()
-	res, err := query(ctx)
-	if err != nil {
-		view.Error = err.Error()
-		return view
-	}
-	view.Devices, view.Unparsed = ParseNvidiaSMIBusIDs(res.Stdout)
-	exitNote := fmt.Sprintf("nvidia-smi exit %d", res.ExitCode)
-	switch {
-	case len(view.Devices) > 0:
-		view.State = GPULayerYes
-		if res.ExitCode != 0 {
-			view.Error = exitNote + ": " + firstNonEmptyLine(res.Stderr+"\n"+strings.Join(view.Unparsed, "\n"), "partial listing")
-		}
-	case res.ExitCode != 0:
-		view.State = GPULayerNo
-		view.Error = exitNote + ": " + firstNonEmptyLine(res.Stdout+"\n"+res.Stderr, "no output")
-	case len(view.Unparsed) > 0:
-		view.Error = "nvidia-smi output not parseable"
-	default:
-		view.State = GPULayerNo
-		view.Error = "nvidia-smi listed no GPU"
-	}
-	return view
-}
-
-func firstNonEmptyLine(out, fallback string) string {
-	for _, l := range strings.Split(out, "\n") {
-		if l = strings.TrimSpace(l); l != "" {
-			return l
-		}
-	}
-	return fallback
+	return bindingReportFrom(gpubinding.BuildReport(in))
 }
 
 // DiagnoseGPUBinding runs the binding doctor with the discovery's platform
@@ -588,849 +165,13 @@ func firstNonEmptyLine(out, fallback string) string {
 // PnP on Windows, otherwise an unsupported report. It never substitutes a
 // representative device; an unobserved layer stays unknown.
 func (d *CUDAPCIeTopologyDiscovery) DiagnoseGPUBinding(opts GPUBindingOptions) GPUBindingReport {
-	if opts.smiQuery == nil {
-		opts.smiQuery = execNvidiaSMIBinding
+	if opts.SysfsRoot == "" {
+		opts.SysfsRoot = d.SysfsRoot
 	}
-	switch {
-	case d.SysfsRoot != "" || runtime.GOOS == "linux":
-		root := d.SysfsRoot
-		if root == "" {
-			root = "/sys"
-		}
-		return diagnoseGPUBindingLinux(root, opts)
-	case runtime.GOOS == "windows":
-		return diagnoseGPUBindingWindows(opts)
+	rep := gpubinding.Diagnose(opts)
+	if rep.Status == gpubinding.DiscoveryUnsupported {
+		// Preserve the legacy side effect: record the unsupported platform on the orchestrator.
+		_ = d.Discover()
 	}
-	// No platform method: topology discovery owns the unsupported status.
-	_ = d.Discover()
-	rep := gpuBindingEnumerationFailed(d.Method, opts.ExpectGPUs, nil)
-	rep.Status = d.Status
-	return rep
-}
-
-// gpuBindingEnumerationFailed reports an enumeration that did not complete: it
-// carries no rows, not even expected-but-absent ones, since absence was not observed.
-func gpuBindingEnumerationFailed(method string, expect int, issues []CUDADiscoveryIssue) GPUBindingReport {
-	return BuildGPUBindingReport(GPUBindingInputs{
-		Method:                method,
-		CUDA:                  GPUCUDAView{State: GPULayerUnknown},
-		ExpectGPUs:            expect,
-		Issues:                issues,
-		EnumerationIncomplete: true,
-	})
-}
-
-// cudaViewIfNeeded queries NVML only when some device has a started NVIDIA
-// driver; otherwise NVML cannot change any verdict.
-func cudaViewIfNeeded(devs []GPUBindingDevice, query func(ctx context.Context) (gpuQueryOutput, error)) GPUCUDAView {
-	for _, dev := range devs {
-		if gpuDriverStarted(dev) {
-			return collectCUDAView(query)
-		}
-	}
-	return GPUCUDAView{State: GPULayerUnknown, Source: CUDASourceNvidiaSMI, Error: "not queried: no device has a started NVIDIA driver"}
-}
-
-// ---- Windows: PnP problem code, bound INF, INF device-ID coverage ----
-
-// windowsPnPBindingScript lists present NVIDIA PCI functions with the device
-// properties the doctor reads, each GPU's PnP parent chain up to the first
-// non-PCI ancestor (the root complex), and the USB4 host routers. A failed
-// enumeration must exit non-zero, never print an empty list; a failed
-// per-device property read leaves that property null (unknown).
-const windowsPnPBindingScript = `$ErrorActionPreference='Stop'; ` +
-	`$k='DEVPKEY_Device_ProblemCode','DEVPKEY_Device_DriverInfPath','DEVPKEY_Device_DriverVersion','DEVPKEY_Device_DriverProvider','DEVPKEY_Device_BusNumber','DEVPKEY_Device_Address','DEVPKEY_Device_LocationInfo','DEVPKEY_Device_HardwareIds','DEVPKEY_Device_CompatibleIds','DEVPKEY_Device_DeviceDesc','DEVPKEY_Device_Parent'; ` +
-	`$hk='DEVPKEY_Device_FriendlyName','DEVPKEY_Device_DeviceDesc','DEVPKEY_Device_BusNumber','DEVPKEY_Device_Address','DEVPKEY_Device_LocationPaths','DEVPKEY_Device_Parent'; ` +
-	`$hops=@{}; ` +
-	`function Props($id,$keys){ $h=[ordered]@{instance_id=$id}; foreach($q in (Get-PnpDeviceProperty -InstanceId $id -KeyName $keys -ErrorAction SilentlyContinue)){ $h[$q.KeyName]=$q.Data }; $h }; ` +
-	`function Hop($id){ if(-not $hops.ContainsKey($id)){ $hops[$id]=Props $id $hk }; $hops[$id] }; ` +
-	`$all=@(Get-PnpDevice -PresentOnly); ` +
-	`$r=@($all | Where-Object { $_.InstanceId -like 'PCI\VEN_10DE*' } | ForEach-Object { $o=Props $_.InstanceId $k; $o['friendly_name']=$_.FriendlyName; $o['class']=$_.Class; $c=@(); if(($_.Class -eq 'Display') -or (@($o['DEVPKEY_Device_CompatibleIds']) -like '*CC_03*')){ $cur=$o['DEVPKEY_Device_Parent']; for($i=0; $i -lt 12 -and $cur; $i++){ $h=Hop $cur; $c+=[pscustomobject]$h; if($cur -notlike 'PCI\*'){ break }; $cur=$h['DEVPKEY_Device_Parent'] } }; $o['parent_chain']=$c; [pscustomobject]$o }); ` +
-	`$u=@($all | Where-Object { $_.HardwareID -contains 'PCI\USB4_MS_CM' } | ForEach-Object { [pscustomobject](Props $_.InstanceId $hk) }); ` +
-	`ConvertTo-Json -InputObject ([pscustomobject]@{devices=$r; usb4_host_routers=$u}) -Compress -Depth 8`
-
-func execWindowsPnPBinding(ctx context.Context) (string, error) {
-	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", windowsPnPBindingScript)
-	windowgate.ConfigureBackgroundCommand(cmd)
-	out, err := cmd.Output()
-	return string(out), err
-}
-
-// psStrings accepts a PowerShell string-list property serialized either as a
-// JSON array or, for one element, a bare string.
-type psStrings []string
-
-func (s *psStrings) UnmarshalJSON(b []byte) error {
-	var list []string
-	if err := json.Unmarshal(b, &list); err == nil {
-		*s = list
-		return nil
-	}
-	var one string
-	if err := json.Unmarshal(b, &one); err != nil {
-		return err
-	}
-	*s = psStrings{one}
-	return nil
-}
-
-type winPnPBindingRaw struct {
-	InstanceID    string         `json:"instance_id"`
-	FriendlyName  string         `json:"friendly_name"`
-	Class         string         `json:"class"`
-	ProblemCode   *int           `json:"DEVPKEY_Device_ProblemCode"`
-	DriverInfPath string         `json:"DEVPKEY_Device_DriverInfPath"`
-	DriverVersion string         `json:"DEVPKEY_Device_DriverVersion"`
-	Provider      string         `json:"DEVPKEY_Device_DriverProvider"`
-	BusNumber     *uint32        `json:"DEVPKEY_Device_BusNumber"`
-	Address       *uint32        `json:"DEVPKEY_Device_Address"`
-	LocationInfo  string         `json:"DEVPKEY_Device_LocationInfo"`
-	HardwareIDs   psStrings      `json:"DEVPKEY_Device_HardwareIds"`
-	CompatibleIDs psStrings      `json:"DEVPKEY_Device_CompatibleIds"`
-	DeviceDesc    string         `json:"DEVPKEY_Device_DeviceDesc"`
-	ParentChain   []winPnPHopRaw `json:"parent_chain"`
-}
-
-// windowsProblemNames names the CM_PROB_* codes seen in GPU bring-up.
-var windowsProblemNames = map[int]string{
-	1:  "CM_PROB_NOT_CONFIGURED",
-	3:  "CM_PROB_OUT_OF_MEMORY",
-	10: "CM_PROB_FAILED_START",
-	12: "CM_PROB_NORMAL_CONFLICT",
-	14: "CM_PROB_NEED_RESTART",
-	18: "CM_PROB_REINSTALL",
-	22: "CM_PROB_DISABLED",
-	24: "CM_PROB_DEVICE_NOT_THERE",
-	28: "CM_PROB_FAILED_INSTALL",
-	31: "CM_PROB_FAILED_ADD",
-	37: "CM_PROB_FAILED_DRIVER_ENTRY",
-	39: "CM_PROB_DRIVER_FAILED_LOAD",
-	43: "CM_PROB_FAILED_POST_START",
-	48: "CM_PROB_DRIVER_BLOCKED",
-	52: "CM_PROB_UNSIGNED_DRIVER",
-}
-
-// ParseWindowsGPUBindingJSON parses the PnP binding query into enumerated
-// NVIDIA display devices (PCI class 03; audio and USB functions are dropped).
-// Device-ID coverage is not judged here; it stays unknown until an INF check.
-func ParseWindowsGPUBindingJSON(raw string) ([]GPUBindingDevice, error) {
-	devs, _, err := parseWindowsPnPBinding(raw)
-	return devs, err
-}
-
-// parseWindowsPnPBinding accepts the query's {devices, usb4_host_routers}
-// envelope, a bare device array, or one device object.
-func parseWindowsPnPBinding(raw string) ([]GPUBindingDevice, []GPUUSB4HostRouter, error) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return nil, nil, errors.New("cudatopology: empty PnP binding JSON")
-	}
-	var items []winPnPBindingRaw
-	var routers []GPUUSB4HostRouter
-	switch {
-	case strings.HasPrefix(trimmed, "["):
-		if err := json.Unmarshal([]byte(trimmed), &items); err != nil {
-			return nil, nil, err
-		}
-	case strings.HasPrefix(trimmed, "{"):
-		var env struct {
-			Devices *[]winPnPBindingRaw `json:"devices"`
-			Routers []winPnPHopRaw      `json:"usb4_host_routers"`
-		}
-		if err := json.Unmarshal([]byte(trimmed), &env); err != nil {
-			return nil, nil, err
-		}
-		if env.Devices != nil {
-			items = *env.Devices
-			for _, r := range env.Routers {
-				hop := r.hop()
-				routers = append(routers, GPUUSB4HostRouter(hop))
-			}
-			break
-		}
-		var one winPnPBindingRaw
-		if err := json.Unmarshal([]byte(trimmed), &one); err != nil {
-			return nil, nil, err
-		}
-		items = append(items, one)
-	default:
-		return nil, nil, errors.New("cudatopology: invalid PnP binding JSON structure")
-	}
-
-	devs := make([]GPUBindingDevice, 0, len(items))
-	for _, it := range items {
-		classKnown, display := windowsDisplayClass(it.Class, it.HardwareIDs, it.CompatibleIDs)
-		if classKnown && !display {
-			continue
-		}
-		dev := GPUBindingDevice{
-			InstanceID:     it.InstanceID,
-			VendorID:       pnpHardwareID(it.InstanceID, "VEN_"),
-			DeviceID:       pnpHardwareID(it.InstanceID, "DEV_"),
-			SubsystemID:    pnpSubsystemID(it.InstanceID),
-			Name:           firstNonEmpty(it.FriendlyName, it.DeviceDesc),
-			Driver:         it.DriverInfPath,
-			DriverProvider: it.Provider,
-			DriverVersion:  it.DriverVersion,
-			IDListed:       GPULayerUnknown,
-			Source:         CUDASourceWindowsPnP,
-			hardwareIDs:    windowsDeviceHardwareIDs(it.InstanceID, it.HardwareIDs, it.CompatibleIDs),
-		}
-		var unknown []string
-		if !classKnown {
-			unknown = append(unknown, "pci_class")
-		}
-		if dev.PCIAddress = windowsPCIAddress(it.BusNumber, it.Address, it.LocationInfo); dev.PCIAddress == "" {
-			unknown = append(unknown, "pci_address")
-		}
-		// An empty INF path means "no driver" only when the problem code was
-		// read for the same device; otherwise the property read itself failed.
-		switch {
-		case dev.Driver == "" && it.ProblemCode != nil:
-			dev.VendorDriver = GPULayerNo
-		case dev.Driver == "":
-			dev.VendorDriver = GPULayerUnknown
-			unknown = append(unknown, "driver")
-		case strings.Contains(strings.ToUpper(dev.DriverProvider), "NVIDIA"):
-			dev.VendorDriver = GPULayerYes
-		case dev.DriverProvider != "":
-			dev.VendorDriver = GPULayerNo
-		default:
-			dev.VendorDriver = GPULayerUnknown
-			unknown = append(unknown, "driver_provider")
-		}
-		if it.ProblemCode == nil {
-			dev.DriverStarted = GPULayerUnknown
-			unknown = append(unknown, "problem_code")
-		} else {
-			code := *it.ProblemCode
-			dev.ProblemCode = &code
-			dev.ProblemName = windowsProblemNames[code]
-			dev.DriverStarted = GPULayerNo
-			if code == 0 {
-				dev.DriverStarted = GPULayerYes
-			}
-		}
-		dev.ParentChain, dev.RootPort = windowsParentChain(it.ParentChain)
-		dev.UnknownFields = unknown
-		devs = append(devs, dev)
-	}
-	return devs, routers, nil
-}
-
-// pciClassFromIDs returns the two-hex-digit PCI base class carried by a
-// "PCI\CC_xx..." or "...&CC_xx..." ID, or "".
-func pciClassFromIDs(lists ...[]string) string {
-	for _, list := range lists {
-		for _, id := range list {
-			u := strings.ToUpper(id)
-			for off := 0; ; {
-				i := strings.Index(u[off:], "CC_")
-				if i < 0 {
-					break
-				}
-				at := off + i
-				if at > 0 && (u[at-1] == '\\' || u[at-1] == '&') && len(u) >= at+5 {
-					return u[at+3 : at+5]
-				}
-				off = at + 3
-			}
-		}
-	}
-	return ""
-}
-
-// windowsDisplayClass reports whether the PCI class is known and is a display
-// controller (class 03). The class code in the hardware/compatible IDs decides;
-// without one, a PnP setup class other than Display marks a non-GPU function.
-func windowsDisplayClass(pnpClass string, hw, compat []string) (known, display bool) {
-	if cc := pciClassFromIDs(hw, compat); cc != "" {
-		return true, cc == "03"
-	}
-	switch {
-	case strings.EqualFold(pnpClass, "Display"):
-		return true, true
-	case pnpClass != "":
-		return true, false
-	}
-	return false, false
-}
-
-// windowsPCIAddress formats "BB:DD.F" from the locale-independent bus number
-// and PCI address (device in the high word, function in the low word), falling
-// back to the English LocationInfo text. Windows reports no PCI domain, so none
-// is claimed.
-func windowsPCIAddress(bus, addr *uint32, loc string) string {
-	if bus != nil && addr != nil {
-		return fmt.Sprintf("%02x:%02x.%x", *bus, *addr>>16, *addr&0xffff)
-	}
-	var b, d, f int
-	if _, err := fmt.Sscanf(strings.TrimSpace(loc), "PCI bus %d, device %d, function %d", &b, &d, &f); err != nil {
-		return ""
-	}
-	return fmt.Sprintf("%02x:%02x.%x", b, d, f)
-}
-
-// pnpSubsystemID extracts the 8-hex-digit SUBSYS_ value, lower-cased.
-func pnpSubsystemID(pnp string) string {
-	u := strings.ToUpper(pnp)
-	i := strings.Index(u, "SUBSYS_")
-	if i < 0 || len(u) < i+15 {
-		return ""
-	}
-	id := u[i+7 : i+15]
-	if _, err := strconv.ParseUint(id, 16, 32); err != nil {
-		return ""
-	}
-	return strings.ToLower(id)
-}
-
-// windowsDeviceHardwareIDs returns the device-ID-bearing hardware IDs an INF
-// entry can match: the reported hardware and compatible IDs plus those implied
-// by the instance ID (full, without REV, and VEN&DEV).
-func windowsDeviceHardwareIDs(instanceID string, hw, compat []string) []string {
-	seen := map[string]bool{}
-	var out []string
-	add := func(id string) {
-		u := strings.ToUpper(strings.TrimSpace(id))
-		if u == "" || !strings.Contains(u, "&DEV_") || seen[u] {
-			return
-		}
-		seen[u] = true
-		out = append(out, u)
-	}
-	for _, id := range hw {
-		add(id)
-	}
-	for _, id := range compat {
-		add(id)
-	}
-	base := strings.ToUpper(instanceID)
-	if i := strings.Index(base, `\`); i >= 0 {
-		if j := strings.Index(base[i+1:], `\`); j >= 0 {
-			base = base[:i+1+j]
-		}
-	}
-	add(base)
-	var noRev, venDev []string
-	for _, s := range strings.Split(base, "&") {
-		if !strings.HasPrefix(s, "REV_") {
-			noRev = append(noRev, s)
-		}
-		if strings.HasPrefix(s, `PCI\VEN_`) || strings.HasPrefix(s, "DEV_") {
-			venDev = append(venDev, s)
-		}
-	}
-	add(strings.Join(noRev, "&"))
-	add(strings.Join(venDev, "&"))
-	return out
-}
-
-// infHardwareIDs extracts every upper-cased PCI\VEN_10DE&DEV_ hardware ID an INF
-// names outside ";" comments.
-func infHardwareIDs(text string) map[string]bool {
-	ids := map[string]bool{}
-	const marker = `PCI\VEN_10DE&DEV_`
-	sc := bufio.NewScanner(strings.NewReader(text))
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for sc.Scan() {
-		line, _, _ := strings.Cut(sc.Text(), ";")
-		u := strings.ToUpper(line)
-		for off := 0; ; {
-			i := strings.Index(u[off:], marker)
-			if i < 0 {
-				break
-			}
-			start := off + i
-			end := start + len(marker)
-			for end < len(u) && !strings.ContainsRune(", \t\"%", rune(u[end])) {
-				end++
-			}
-			ids[u[start:end]] = true
-			off = end
-		}
-	}
-	return ids
-}
-
-// decodeINF returns an INF's text, decoding UTF-16 (BOM-marked) INFs.
-func decodeINF(b []byte) string {
-	var be bool
-	switch {
-	case len(b) >= 2 && b[0] == 0xFF && b[1] == 0xFE:
-	case len(b) >= 2 && b[0] == 0xFE && b[1] == 0xFF:
-		be = true
-	default:
-		return string(bytes.TrimPrefix(b, []byte{0xEF, 0xBB, 0xBF}))
-	}
-	b = b[2:]
-	u := make([]uint16, len(b)/2)
-	for i := range u {
-		if be {
-			u[i] = uint16(b[2*i])<<8 | uint16(b[2*i+1])
-		} else {
-			u[i] = uint16(b[2*i+1])<<8 | uint16(b[2*i])
-		}
-	}
-	return string(utf16.Decode(u))
-}
-
-// infIsNVIDIADisplay reports whether an INF's [Version] declares Class=Display
-// with an NVIDIA provider.
-func infIsNVIDIADisplay(text string) bool {
-	var display, nvidia bool
-	sc := bufio.NewScanner(strings.NewReader(text))
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for n := 0; sc.Scan() && n < 200; n++ {
-		line, _, _ := strings.Cut(sc.Text(), ";")
-		key, val, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		switch strings.ToLower(strings.TrimSpace(key)) {
-		case "class":
-			display = strings.EqualFold(strings.TrimSpace(val), "Display")
-		case "provider":
-			nvidia = strings.Contains(strings.ToUpper(val), "NVIDIA")
-		}
-	}
-	return display && nvidia
-}
-
-// infIndex lazily reads INFs from one directory and caches their NVIDIA IDs.
-// unreadable counts oem*.inf files whose header could not be read: any of them
-// may be the NVIDIA INF that lists a device.
-type infIndex struct {
-	fsys       fs.FS
-	ids        map[string]map[string]bool
-	vendor     []string
-	unreadable int
-	listed     bool
-	err        error
-	issues     []CUDADiscoveryIssue
-}
-
-func (x *infIndex) hardwareIDs(name string) (map[string]bool, bool) {
-	if ids, ok := x.ids[name]; ok {
-		return ids, ids != nil
-	}
-	b, err := fs.ReadFile(x.fsys, name)
-	if err != nil {
-		x.ids[name] = nil
-		if !errors.Is(err, fs.ErrNotExist) {
-			x.issues = append(x.issues, CUDADiscoveryIssue{Path: name, Error: err.Error()})
-		}
-		return nil, false
-	}
-	ids := infHardwareIDs(decodeINF(b))
-	x.ids[name] = ids
-	return ids, true
-}
-
-// vendorINFs lists installed third-party INFs (oem*.inf) that declare an NVIDIA display driver.
-func (x *infIndex) vendorINFs() ([]string, error) {
-	if x.listed {
-		return x.vendor, x.err
-	}
-	x.listed = true
-	entries, err := fs.ReadDir(x.fsys, ".")
-	if err != nil {
-		x.err = err
-		return nil, err
-	}
-	for _, e := range entries {
-		name := strings.ToLower(e.Name())
-		if e.IsDir() || !strings.HasPrefix(name, "oem") || !strings.HasSuffix(name, ".inf") {
-			continue
-		}
-		head, err := readINFHead(x.fsys, e.Name())
-		if err != nil {
-			x.unreadable++
-			x.issues = append(x.issues, CUDADiscoveryIssue{Path: e.Name(), Error: err.Error()})
-			continue
-		}
-		if infIsNVIDIADisplay(decodeINF(head)) {
-			x.vendor = append(x.vendor, e.Name())
-		}
-	}
-	sort.Strings(x.vendor)
-	return x.vendor, nil
-}
-
-func readINFHead(fsys fs.FS, name string) ([]byte, error) {
-	f, err := fsys.Open(name)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	head := make([]byte, 16*1024)
-	n, err := io.ReadFull(f, head)
-	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
-		return nil, err
-	}
-	return head[:n], nil
-}
-
-// applyINFCoverage judges whether the device ID is listed: by the bound INF for
-// a device bound to the NVIDIA driver, else by any installed NVIDIA display INF.
-// No match is "no" only when every candidate (and, for the scan, every oem INF)
-// was read.
-func applyINFCoverage(dev *GPUBindingDevice, x *infIndex) {
-	var candidates []string
-	scanned := false
-	if dev.VendorDriver == GPULayerYes && dev.Driver != "" {
-		candidates = []string{dev.Driver}
-	} else {
-		vendor, err := x.vendorINFs()
-		if err != nil {
-			dev.IDListed = GPULayerUnknown
-			dev.UnknownFields = appendUnique(dev.UnknownFields, "device_id_listed")
-			return
-		}
-		candidates, scanned = vendor, true
-	}
-	dev.IDListed = GPULayerNo
-	read := 0
-	for _, name := range candidates {
-		ids, ok := x.hardwareIDs(name)
-		if !ok {
-			continue
-		}
-		read++
-		dev.IDCheckedIn = append(dev.IDCheckedIn, name)
-		for _, hw := range dev.hardwareIDs {
-			if ids[hw] {
-				dev.IDListedBy = append(dev.IDListedBy, name)
-				dev.IDListed = GPULayerYes
-				break
-			}
-		}
-	}
-	incomplete := read < len(candidates) || (scanned && x.unreadable > 0)
-	if incomplete && dev.IDListed != GPULayerYes {
-		dev.IDListed = GPULayerUnknown
-		dev.UnknownFields = appendUnique(dev.UnknownFields, "device_id_listed")
-	}
-}
-
-func diagnoseGPUBindingWindows(opts GPUBindingOptions) GPUBindingReport {
-	query := opts.pnpQuery
-	if query == nil {
-		query = execWindowsPnPBinding
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), gpuBindingPnPTimeout)
-	out, err := query(ctx)
-	cancel()
-	if err != nil {
-		return gpuBindingEnumerationFailed(CUDASourceWindowsPnP, opts.ExpectGPUs, []CUDADiscoveryIssue{{Path: "Get-PnpDevice", Error: err.Error()}})
-	}
-	devs, routers, err := parseWindowsPnPBinding(out)
-	if err != nil {
-		return gpuBindingEnumerationFailed(CUDASourceWindowsPnP, opts.ExpectGPUs, []CUDADiscoveryIssue{{Path: "Get-PnpDevice", Error: err.Error()}})
-	}
-	for i := range devs {
-		associateUSB4HostRouter(&devs[i], routers)
-	}
-	infDir := opts.INFDir
-	if infDir == "" {
-		root := os.Getenv("SystemRoot")
-		if root == "" {
-			root = `C:\Windows`
-		}
-		infDir = filepath.Join(root, "INF")
-	}
-	fsys := opts.infFS
-	if fsys == nil {
-		fsys = os.DirFS(infDir)
-	}
-	x := &infIndex{fsys: fsys, ids: map[string]map[string]bool{}}
-	for i := range devs {
-		applyINFCoverage(&devs[i], x)
-	}
-	var issues []CUDADiscoveryIssue
-	for _, is := range x.issues {
-		issues = append(issues, CUDADiscoveryIssue{Path: filepath.ToSlash(filepath.Join(infDir, is.Path)), Error: is.Error})
-	}
-	if x.err != nil {
-		issues = append(issues, CUDADiscoveryIssue{Path: filepath.ToSlash(infDir), Error: x.err.Error()})
-	}
-	var pkg *GPUDriverPackage
-	if opts.PackageINFDir != "" {
-		pkg = matchDriverPackage(devs, opts.PackageINFDir)
-	}
-	return BuildGPUBindingReport(GPUBindingInputs{
-		Method:          CUDASourceWindowsPnP,
-		Devices:         devs,
-		CUDA:            cudaViewIfNeeded(devs, opts.smiQuery),
-		ExpectGPUs:      opts.ExpectGPUs,
-		Issues:          issues,
-		USB4HostRouters: routers,
-		Package:         pkg,
-		Floor:           opts.Floor,
-	})
-}
-
-// ---- Linux: sysfs driver symlink, module, ID coverage, TB authorization ----
-
-// linuxSupportedGPUsPaths are where NVIDIA driver installs place supported-gpus.json.
-var linuxSupportedGPUsPaths = []string{
-	"/usr/share/doc/NVIDIA_GLX-1.0/supported-gpus/supported-gpus.json",
-	"/usr/share/nvidia/supported-gpus/supported-gpus.json",
-}
-
-// nvidiaSupportedGPUs is the device-ID view of the driver's supported-gpus.json.
-// Chips carrying a legacybranch are served only by that older branch.
-type nvidiaSupportedGPUs struct {
-	Chips []struct {
-		DevID        string `json:"devid"`
-		LegacyBranch string `json:"legacybranch"`
-	} `json:"chips"`
-}
-
-// listsDevice reports whether the current branch lists the PCI device ID ("0x2c05").
-func (s nvidiaSupportedGPUs) listsDevice(deviceID string) bool {
-	want, err := strconv.ParseUint(strings.TrimPrefix(strings.ToLower(deviceID), "0x"), 16, 16)
-	if err != nil {
-		return false
-	}
-	for _, c := range s.Chips {
-		got, err := strconv.ParseUint(strings.TrimPrefix(strings.ToLower(c.DevID), "0x"), 16, 16)
-		if err == nil && got == want && c.LegacyBranch == "" {
-			return true
-		}
-	}
-	return false
-}
-
-// linuxModuleAliases returns the modalias patterns modules.alias assigns to module.
-func linuxModuleAliases(text, module string) []string {
-	var pats []string
-	sc := bufio.NewScanner(strings.NewReader(text))
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		f := strings.Fields(sc.Text())
-		if len(f) == 3 && f[0] == "alias" && f[2] == module && strings.HasPrefix(f[1], "pci:") {
-			pats = append(pats, f[1])
-		}
-	}
-	return pats
-}
-
-// modaliasDeviceWildcard reports whether a pci: alias pattern leaves the device
-// ID open (pci:v000010DEd*sv...): such a class-wide alias matches every NVIDIA
-// display device and proves nothing about one device ID.
-func modaliasDeviceWildcard(pattern string) bool {
-	rest := strings.TrimPrefix(pattern, "pci:v")
-	i := strings.IndexByte(rest, 'd')
-	if i < 0 {
-		return true
-	}
-	dev := rest[i+1:]
-	if j := strings.Index(dev, "sv"); j >= 0 {
-		dev = dev[:j]
-	}
-	return dev == "" || strings.ContainsAny(dev, "*?[")
-}
-
-// aliasCoverage judges a modalias against a module's aliases: yes on a
-// device-specific match, unknown when only class-wide aliases match, no when
-// none match (or the module has no aliases, i.e. is not installed).
-func aliasCoverage(modalias string, patterns []string) GPULayerState {
-	state := GPULayerNo
-	for _, p := range patterns {
-		if ok, err := path.Match(p, modalias); err != nil || !ok {
-			continue
-		}
-		if !modaliasDeviceWildcard(p) {
-			return GPULayerYes
-		}
-		state = GPULayerUnknown
-	}
-	return state
-}
-
-func diagnoseGPUBindingLinux(sysfsRoot string, opts GPUBindingOptions) GPUBindingReport {
-	d := NewCUDAPCIeTopologyDiscovery(sysfsRoot)
-	pciDevicesDir := filepath.Join(sysfsRoot, "bus", "pci", "devices")
-	entries, err := os.ReadDir(pciDevicesDir)
-	if err != nil {
-		d.addIssue(pciDevicesDir, err)
-		return gpuBindingEnumerationFailed(CUDASourceSysfs, opts.ExpectGPUs, d.Issues)
-	}
-	live := sysfsRoot == "/sys"
-
-	var supported *nvidiaSupportedGPUs
-	supportedPaths := linuxSupportedGPUsPaths
-	if opts.SupportedGPUsPath != "" {
-		supportedPaths = []string{opts.SupportedGPUsPath}
-	} else if !live {
-		supportedPaths = nil
-	}
-	for _, p := range supportedPaths {
-		b, err := os.ReadFile(p)
-		if err != nil {
-			if !errors.Is(err, fs.ErrNotExist) {
-				d.addIssue(p, err)
-			}
-			continue
-		}
-		var s nvidiaSupportedGPUs
-		if err := json.Unmarshal(b, &s); err != nil {
-			d.addIssue(p, err)
-			continue
-		}
-		supported = &s
-		break
-	}
-
-	aliasLoaded, nvidiaAliases := false, []string(nil)
-	aliasPath := opts.ModulesAliasPath
-	if aliasPath == "" && live {
-		if rel, err := os.ReadFile("/proc/sys/kernel/osrelease"); err == nil {
-			aliasPath = filepath.Join("/lib/modules", strings.TrimSpace(string(rel)), "modules.alias")
-		}
-	}
-	if aliasPath != "" {
-		if b, err := os.ReadFile(aliasPath); err == nil {
-			nvidiaAliases = linuxModuleAliases(string(b), "nvidia")
-			aliasLoaded = true
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			d.addIssue(aliasPath, err)
-		}
-	}
-
-	incomplete := false
-	var devs []GPUBindingDevice
-	for _, entry := range entries {
-		devDir := filepath.Join(pciDevicesDir, entry.Name())
-		before := len(d.Issues)
-		vendor, ok := d.readSysfsAttr(devDir, "vendor")
-		class, _ := d.readSysfsAttr(devDir, "class")
-		if len(d.Issues) > before {
-			incomplete = true
-		}
-		if !ok || !strings.EqualFold(vendor, "0x10de") {
-			continue
-		}
-		if class != "" && !strings.HasPrefix(strings.ToLower(class), "0x03") {
-			continue
-		}
-		dev := GPUBindingDevice{
-			PCIAddress: strings.ReplaceAll(entry.Name(), "_", ":"),
-			VendorID:   strings.ToLower(vendor),
-			Source:     CUDASourceSysfs,
-		}
-		if addr, ok := d.readSysfsAttr(devDir, "address"); ok && addr != "" {
-			dev.PCIAddress = addr
-		}
-		if resolved, err := filepath.EvalSymlinks(devDir); err == nil {
-			dev.ParentChain, dev.RootPort = linuxParentChain(resolved)
-		}
-		dev.DeviceID, _ = d.readSysfsAttr(devDir, "device")
-		dev.DeviceID = strings.ToLower(dev.DeviceID)
-		sv, _ := d.readSysfsAttr(devDir, "subsystem_vendor")
-		sd, _ := d.readSysfsAttr(devDir, "subsystem_device")
-		if sv != "" && sd != "" {
-			dev.SubsystemID = strings.ToLower(strings.TrimPrefix(sd, "0x") + strings.TrimPrefix(sv, "0x"))
-		}
-		dev.Name, _ = d.readSysfsAttr(devDir, "label")
-		dev.modalias, _ = d.readSysfsAttr(devDir, "modalias")
-
-		var unknown []string
-		link, err := os.Readlink(filepath.Join(devDir, "driver"))
-		switch {
-		case err == nil:
-			dev.Driver = path.Base(filepath.ToSlash(link))
-			dev.DriverStarted = GPULayerYes
-			dev.VendorDriver = GPULayerNo
-			if dev.Driver == "nvidia" {
-				dev.VendorDriver = GPULayerYes
-			}
-			if mod, err := os.Readlink(filepath.Join(devDir, "driver", "module")); err == nil {
-				dev.DriverModule = path.Base(filepath.ToSlash(mod))
-				dev.DriverVersion, _ = d.readSysfsAttr(filepath.Join(sysfsRoot, "module", dev.DriverModule), "version")
-			}
-		case errors.Is(err, fs.ErrNotExist):
-			dev.VendorDriver, dev.DriverStarted = GPULayerNo, GPULayerNo
-		default:
-			d.addIssue(filepath.Join(devDir, "driver"), err)
-			dev.VendorDriver, dev.DriverStarted = GPULayerUnknown, GPULayerUnknown
-			unknown = append(unknown, "driver")
-		}
-
-		dev.IDListed = GPULayerUnknown
-		switch {
-		case supported != nil && dev.DeviceID != "":
-			dev.IDCheckedIn = []string{"supported-gpus.json"}
-			dev.IDListed = GPULayerNo
-			if supported.listsDevice(dev.DeviceID) {
-				dev.IDListed = GPULayerYes
-				dev.IDListedBy = dev.IDCheckedIn
-			}
-		case aliasLoaded && dev.modalias != "":
-			dev.IDCheckedIn = []string{"modules.alias:nvidia"}
-			if dev.IDListed = aliasCoverage(dev.modalias, nvidiaAliases); dev.IDListed == GPULayerYes {
-				dev.IDListedBy = dev.IDCheckedIn
-			}
-		}
-		if dev.IDListed == GPULayerUnknown {
-			unknown = append(unknown, "device_id_listed")
-		}
-		dev.UnknownFields = unknown
-		devs = append(devs, dev)
-	}
-
-	var pkg *GPUDriverPackage
-	if opts.PackageINFDir != "" {
-		pkg = &GPUDriverPackage{Dir: opts.PackageINFDir, Issues: []CUDADiscoveryIssue{{Path: filepath.ToSlash(opts.PackageINFDir), Error: "package coverage matches Windows PnP hardware IDs; sysfs devices carry none"}}}
-	}
-	return BuildGPUBindingReport(GPUBindingInputs{
-		Package:               pkg,
-		Method:                CUDASourceSysfs,
-		Devices:               devs,
-		CUDA:                  cudaViewIfNeeded(devs, opts.smiQuery),
-		ExpectGPUs:            opts.ExpectGPUs,
-		UnauthorizedTunnels:   linuxUnauthorizedTunnels(d, sysfsRoot),
-		Issues:                d.Issues,
-		EnumerationIncomplete: incomplete,
-		Floor:                 opts.Floor,
-	})
-}
-
-// linuxUnauthorizedTunnels lists Thunderbolt/USB4 devices whose sysfs
-// authorized attribute is 0; a PCIe device behind one cannot enumerate.
-func linuxUnauthorizedTunnels(d *CUDAPCIeTopologyDiscovery, sysfsRoot string) []string {
-	dir := filepath.Join(sysfsRoot, "bus", "thunderbolt", "devices")
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if !errors.Is(err, fs.ErrNotExist) {
-			d.addIssue(dir, err)
-		}
-		return nil
-	}
-	var out []string
-	for _, e := range entries {
-		if auth, ok := d.readSysfsAttr(filepath.Join(dir, e.Name()), "authorized"); ok && auth == "0" {
-			out = append(out, e.Name())
-		}
-	}
-	return out
-}
-
-func appendUnique(list []string, s string) []string {
-	for _, v := range list {
-		if v == s {
-			return list
-		}
-	}
-	return append(list, s)
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
+	return bindingReportFrom(rep)
 }

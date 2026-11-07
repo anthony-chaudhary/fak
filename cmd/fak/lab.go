@@ -13,7 +13,7 @@ package main
 // self-report — never a misleading score-0 "outage".
 //
 //	fak lab status [--roster F] [--reports DIR] [--group G] [--class C] [--all] [--json]
-//	fak lab report --id ID --state live|idle|draining|down [--version V] [--note N] [--inference ready|degraded|warming|blocked|unknown] [--reports DIR]
+//	fak lab report --id ID --state live|idle|draining|down [--version V] [--note N] [--inference ready|degraded|warming|blocked|unknown] [--gpu-probe | --gpu-total N --gpu-busy N --gpu-util P] [--reports DIR]
 //	fak lab readiness [--file F] [--phase CLEAR|WAITING|WORKING [--detail D]|--from-reports] [--write F|--write-default] [--json]
 //	fak lab target ALIAS [--targets F] [--readiness F] [--roster F] [--reports DIR] [--json]
 //	fak lab ls     [--roster F] [--group G] [--class C] [--json]
@@ -27,6 +27,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"flag"
 	"fmt"
@@ -39,6 +40,9 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/fleet"
 	"github.com/anthony-chaudhary/fak/internal/linkstate"
 )
+
+// gpuFlagUnset marks an unset explicit --gpu-* flag; any value >= 0 is a real one.
+const gpuFlagUnset = -1
 
 // labDefaultRosterJSON is the generic lab roster embedded at compile time. go:embed
 // cannot traverse parent dirs, so the file is a sibling here (the same pattern
@@ -218,12 +222,16 @@ func labReport(stdout, stderr io.Writer, argv []string) int {
 	outputTPS := fs.Float64("output-tps", 0, "observed output tokens/sec for --inference (optional)")
 	probeLatencyMS := fs.Float64("probe-latency-ms", 0, "scrubbed end-to-end probe latency in milliseconds for --inference (optional)")
 	reason := fs.String("reason", "", "short generic inference reason for --inference (optional)")
+	gpuProbe := fs.Bool("gpu-probe", false, "sample nvidia-smi now and fold per-GPU utilization into the gpu block (fail-soft: omits it on probe failure)")
+	gpuTotal := fs.Int("gpu-total", gpuFlagUnset, "GPUs present on this box (explicit value; overrides the probe)")
+	gpuBusy := fs.Int("gpu-busy", gpuFlagUnset, "GPUs actively executing (explicit value; overrides the probe)")
+	gpuUtil := fs.Int("gpu-util", gpuFlagUnset, "aggregate busy percent 0-100 across the box's GPUs (explicit value; overrides the probe)")
 	reports := fs.String("reports", "", "reports dir (default: $FAK_FLEET_REPORTS or ~/.config/fak/fleet/reports)")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
 	if *id == "" || *state == "" {
-		fmt.Fprintln(stderr, "usage: fak lab report --id ID --state live|idle|draining|down [--version V] [--note N]")
+		fmt.Fprintln(stderr, "usage: fak lab report --id ID --state live|idle|draining|down [--version V] [--note N] [--gpu-probe | --gpu-total N --gpu-busy N --gpu-util P]")
 		return 2
 	}
 	st := fleet.State(*state)
@@ -239,6 +247,37 @@ func labReport(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak lab report: --probe-latency-ms must be non-negative")
 		return 2
 	}
+	totalSet := *gpuTotal != gpuFlagUnset
+	busySet := *gpuBusy != gpuFlagUnset
+	utilSet := *gpuUtil != gpuFlagUnset
+	if totalSet && *gpuTotal < 0 {
+		fmt.Fprintln(stderr, "fak lab report: --gpu-total must be non-negative")
+		return 2
+	}
+	if busySet && *gpuBusy < 0 {
+		fmt.Fprintln(stderr, "fak lab report: --gpu-busy must be non-negative")
+		return 2
+	}
+	if utilSet && (*gpuUtil < 0 || *gpuUtil > 100) {
+		fmt.Fprintln(stderr, "fak lab report: --gpu-util must be 0-100")
+		return 2
+	}
+	if totalSet && busySet && *gpuBusy > *gpuTotal {
+		fmt.Fprintln(stderr, "fak lab report: --gpu-busy must not exceed --gpu-total")
+		return 2
+	}
+
+	var probedGPU *fleet.GPUStats
+	if *gpuProbe {
+		stats, perr := fleet.ProbeGPUUtilization(context.Background())
+		if perr != nil {
+			// Fail-soft: a box that cannot probe its GPUs still self-reports its
+			// state; the gpu block simply stays absent (unknown-utilization).
+			fmt.Fprintf(stderr, "fak lab report: gpu probe: %v (omitting gpu block)\n", perr)
+		} else {
+			probedGPU = &stats
+		}
+	}
 
 	dir, err := labReportsDir(*reports)
 	if err != nil {
@@ -246,6 +285,7 @@ func labReport(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	rep := fleet.Report{State: st, Version: *version, Note: *note}
+	rep.GPU = mergeGPUFlags(probedGPU, *gpuTotal, *gpuBusy, *gpuUtil, totalSet, busySet, utilSet)
 	if *inference != "" || *engine != "" || *model != "" || *outputTPS > 0 || *probeLatencyMS > 0 || *reason != "" {
 		status := fleet.InferenceStatus(*inference)
 		if status == "" {
@@ -266,6 +306,31 @@ func labReport(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprintf(stdout, "[fak lab] wrote %s state=%s -> %s\n", *id, st, filepath.Join(dir, *id+".json"))
 	return 0
+}
+
+// mergeGPUFlags folds the probe reading (nil when absent or failed) with the
+// explicit --gpu-* flags: an explicit value wins per field, so a box that knows
+// its stats another way can correct or replace any probe field. It returns nil
+// when there is no GPU signal at all — the report then carries no gpu block and
+// the fold reads unknown-utilization, never 0%-idle.
+func mergeGPUFlags(probed *fleet.GPUStats, total, busy, util int, totalSet, busySet, utilSet bool) *fleet.GPUStats {
+	if probed == nil && !totalSet && !busySet && !utilSet {
+		return nil
+	}
+	gpu := fleet.GPUStats{}
+	if probed != nil {
+		gpu = *probed
+	}
+	if totalSet {
+		gpu.Total = total
+	}
+	if busySet {
+		gpu.Busy = busy
+	}
+	if utilSet {
+		gpu.UtilPct = util
+	}
+	return &gpu
 }
 
 func labReadiness(stdout, stderr io.Writer, argv []string) int {

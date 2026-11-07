@@ -260,6 +260,12 @@ func readReportFile(dir, key, id string) Report {
 	if err := normalizeInference(r.Inference); err != nil {
 		return Report{ID: id, State: StateUnknown, Err: err.Error()}
 	}
+	// A corrupt GPU block is dropped, not trusted: unknown-utilization beats a
+	// poisoned aggregate (busy>total would render a negative idle count). The
+	// rest of the report stays reachable — one bad optional field is not an outage.
+	if !validGPUStats(r.GPU) {
+		r.GPU = nil
+	}
 	// Freshness backstop: age_sec only ages a box if the bridge keeps re-stamping it,
 	// so a dead bridge would leave a frozen "live, age 5s" file reading green forever.
 	// Floor the age at the file's own mtime age so a stale file trips the stale warn.
@@ -291,6 +297,9 @@ func WriteReport(dir, id string, r Report) error {
 	if err := normalizeInference(r.Inference); err != nil {
 		return err
 	}
+	if !validGPUStats(r.GPU) {
+		return fmt.Errorf("gpu block must have non-negative counts, busy<=total and util_pct 0-100, got %+v", r.GPU)
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create reports dir: %w", err)
 	}
@@ -306,6 +315,21 @@ func WriteReport(dir, id string, r Report) error {
 		return fmt.Errorf("write report: %w", err)
 	}
 	return nil
+}
+
+// validGPUStats reports whether a GPU block is physically possible: non-negative
+// counts, busy within total, and an aggregate percent inside 0-100. A nil block
+// (the box cannot probe) is valid — absence is unknown-utilization, not a fault.
+// The writer refuses an invalid block at the producer; the reader drops one found
+// on the wire instead of folding it into the fleet aggregate.
+func validGPUStats(g *GPUStats) bool {
+	if g == nil {
+		return true
+	}
+	if g.Total < 0 || g.Busy < 0 || g.Busy > g.Total {
+		return false
+	}
+	return g.UtilPct >= 0 && g.UtilPct <= 100
 }
 
 func normalizeInference(inf *InferenceStats) error {
