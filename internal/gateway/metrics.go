@@ -643,7 +643,11 @@ type gatewayMetrics struct {
 	perfRecords        []perfledger.Record
 	perfRecordsDropped bool
 	perfSink           atomic.Pointer[perfledger.Writer]
-	perfServedBy       atomic.Pointer[perfledger.ServedBy]
+	// phaseSink is the durable sibling of perfSink (phase_ledger_writer.go):
+	// committed native phase receipts appended beside the perf ledger so the
+	// six-bucket breakdown survives the process. Offer never blocks the turn.
+	phaseSink    atomic.Pointer[phaseLedgerWriter]
+	perfServedBy atomic.Pointer[perfledger.ServedBy]
 	// requestPhases is the fak-request-phases/1 ring (request_phase_receipt.go).
 	requestPhases requestPhaseRing
 	// httpWriteTimeout is the serving http.Server's effective WriteTimeout (ns; 0 =

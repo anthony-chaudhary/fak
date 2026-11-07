@@ -168,5 +168,8 @@ func installServePerfLedger(srv *gateway.Server, flagPath string, stderr io.Writ
 		if err := w.Close(); err != nil {
 			fmt.Fprintf(stderr, "fak: perf ledger close (non-fatal): %v (dropped=%d)\n", err, w.Dropped())
 		}
+		if err := srv.ClosePhaseLedger(); err != nil {
+			fmt.Fprintf(stderr, "fak: phase ledger close (non-fatal): %v\n", err)
+		}
 	}
 }

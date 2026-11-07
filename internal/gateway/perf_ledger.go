@@ -496,7 +496,10 @@ func (m *gatewayMetrics) perfRecordsSnapshot() ([]perfledger.Record, bool, uint6
 // SetPerfLedger installs the durable perf sink and seeds the in-memory ring
 // with prior history (oldest first) so the read survives a restart. seedCapped
 // reports that the seed was itself a bounded tail of a longer ledger. A nil sink
-// leaves the ring memory-only.
+// leaves the ring memory-only. With a non-nil sink it also opens the phase
+// receipt writer at the sink's sibling path, so the six-bucket breakdown is
+// durable alongside the latency axes; replacing the sink closes any previously
+// installed phase writer.
 func (s *Server) SetPerfLedger(sink *perfledger.Writer, seed []perfledger.Record, seedCapped bool) {
 	if s == nil || s.metrics == nil {
 		return
@@ -514,6 +517,27 @@ func (s *Server) SetPerfLedger(sink *perfledger.Writer, seed []perfledger.Record
 	}
 	m.perfMu.Unlock()
 	m.perfSink.Store(sink)
+	var pw *phaseLedgerWriter
+	if sink != nil {
+		pw = OpenPhaseLedgerWriter(PhaseLedgerSiblingPath(sink.Path()), perfledger.DefaultMaxBytes)
+	}
+	if prev := m.phaseSink.Swap(pw); prev != nil {
+		_ = prev.Close()
+	}
+}
+
+// ClosePhaseLedger flushes and closes the durable phase-receipt writer
+// installed by SetPerfLedger. Safe to call when none is installed or when the
+// default ledger was off.
+func (s *Server) ClosePhaseLedger() error {
+	if s == nil || s.metrics == nil {
+		return nil
+	}
+	pw := s.metrics.phaseSink.Swap(nil)
+	if pw == nil {
+		return nil
+	}
+	return pw.Close()
 }
 
 // PerfReport folds the last n retained per-request perf rows.

@@ -120,6 +120,12 @@ func (m *gatewayMetrics) recordRequestPhases(rec perfledger.Record, decode nativ
 		return
 	}
 	m.requestPhases.add(row)
+	// The durable sibling gets the same complete envelope; a nil sink (no
+	// default ledger installed) leaves the ring memory-only. Offer sits after
+	// the successful build, so partial rows are never persisted.
+	if sink := m.phaseSink.Load(); sink != nil {
+		sink.Offer(row)
+	}
 }
 
 // buildRequestPhaseReceipt reconciles the row's measured phases to a complete
