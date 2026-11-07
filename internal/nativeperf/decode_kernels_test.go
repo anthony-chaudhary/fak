@@ -61,8 +61,9 @@ func TestDecodeSpanKernelsNilWhenOff(t *testing.T) {
 	ctx, acc := WithDecodeHostWork(context.Background())
 	starts := nonDecodeWorkStarts.Load()
 	nd := BeginNonDecodeWork()
-	if nonDecodeWorkStarts.Load() != starts || nonDecodeWorkInFlight.Load() != 0 {
-		t.Fatal("non-decode marks must stay inert while no kernel profile is kept")
+	defer nd.End()
+	if nonDecodeWorkStarts.Load() != starts+1 || nonDecodeWorkInFlight.Load() != 1 {
+		t.Fatal("non-decode ownership must cover CPU and sync counters even with kernel profiling off")
 	}
 	nd.End()
 	span := StartDecodeSpan()
@@ -179,8 +180,8 @@ func TestDecodeSpanKernelsDroppedWhenDecodeStartsDuringClosingSnapshot(t *testin
 	defer unregister()
 	w := span.Finish(context.Background(), 6)
 	late.Abandon()
-	if w.Overlapped || w.NonDecodeOverlap || w.Kernels != nil {
-		t.Fatalf("window = %+v, want a kernel gap with no host overlap verdict", w)
+	if !w.Overlapped || w.NonDecodeOverlap || w.Kernels != nil || w.CPU != nil {
+		t.Fatalf("window = %+v, want late overlap to invalidate kernel and host measurements", w)
 	}
 	if reads != 2 {
 		t.Fatalf("kernel reads = %d, want the closing read plus the late span's start", reads)

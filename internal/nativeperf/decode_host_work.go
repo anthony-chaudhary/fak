@@ -29,18 +29,17 @@ var decodeSpansInFlight, decodeSpanStarts atomic.Int64
 
 // nonDecodeWorkInFlight and nonDecodeWorkStarts detect device work that is not
 // a decode step (prefill, restore, admission) running inside a decode window.
-// The kernel profile is process-wide, so such a window's kernels are dropped.
+// CPU, transfer, graph and device counters are process-wide, so their
+// attribution must be dropped even when kernel timestamp profiling is off.
 var nonDecodeWorkInFlight, nonDecodeWorkStarts atomic.Int64
 
 // NonDecodeWork marks one stretch of non-decode device work. The zero value is
-// inert, and so is every mark while no kernel profile is kept.
+// inert. Marks remain active without kernel profiling because other global
+// counters still need ownership boundaries.
 type NonDecodeWork struct{ active bool }
 
 // BeginNonDecodeWork marks non-decode device work as in flight until End.
 func BeginNonDecodeWork() NonDecodeWork {
-	if !compute.KernelProfileReaderRegistered() {
-		return NonDecodeWork{}
-	}
 	nonDecodeWorkInFlight.Add(1)
 	nonDecodeWorkStarts.Add(1)
 	return NonDecodeWork{active: true}
@@ -68,8 +67,8 @@ type DecodeSpan struct {
 	finished  bool
 	measuring bool
 	kernels   *compute.KernelProfile
-	// nonDecodeSeq and nonDecodeBusy are read before the kernel snapshot, so
-	// work that starts between the two reads still drops the window.
+	// nonDecodeSeq and nonDecodeBusy are read before every opening snapshot,
+	// so work that starts inside a snapshot still drops the window.
 	nonDecodeSeq  int64
 	nonDecodeBusy bool
 	// witnessEngaged/witnessDegraded/witnessArmed snapshot the graph-replay
@@ -91,10 +90,10 @@ func StartDecodeSpan() DecodeSpan {
 	s := DecodeSpan{measuring: true}
 	s.inFlight = decodeSpansInFlight.Add(1)
 	s.startSeq = decodeSpanStarts.Add(1)
+	s.nonDecodeSeq = nonDecodeWorkStarts.Load()
+	s.nonDecodeBusy = nonDecodeWorkInFlight.Load() > 0
 	s.device = compute.DeviceWorkSnapshot()
 	if compute.KernelProfileReaderRegistered() {
-		s.nonDecodeSeq = nonDecodeWorkStarts.Load()
-		s.nonDecodeBusy = nonDecodeWorkInFlight.Load() > 0
 		s.kernels = compute.KernelProfileSnapshot()
 	}
 	s.witnessEngaged, s.witnessDegraded, s.witnessArmed = graphReplayWitness()
@@ -115,7 +114,8 @@ func (s *DecodeSpan) Abandon() {
 }
 
 // DecodeHostWork is one decode window's host/device split. CPU fields are nil
-// when the platform cannot read process CPU time or another decode overlapped;
+// when the platform cannot read process CPU time or another decode/non-decode
+// operation overlapped;
 // Kernel is nil unless the selected backend explicitly reports complete
 // host submit-to-fence timing coverage. This compatibility field is host wall
 // elapsed time, never GPU event time or device-active execution time.
@@ -136,22 +136,23 @@ type DecodeHostWork struct {
 	// DeviceIdle is the window's device-idle host wall and SyncSites its host
 	// syncs by site and stage (see compute.DeviceWork). Both stay absent (nil,
 	// SyncsObserved false) unless the backend observed every submit and wait at
-	// both ends, no other decode overlapped, and no counter went backwards;
+	// both ends, no other decode/non-decode work overlapped, and no counter went backwards;
 	// DeviceIdle is also absent when it exceeds Wall or the window submitted,
 	// drained or began with a pipelined batch (compute.DeviceIdleDelta).
 	DeviceIdle    *time.Duration
 	SyncSites     []compute.DeviceSyncSite
 	SyncsObserved bool
 	// H2DCopyBytes is the window's FAK_H2D_CENSUS byte delta; nil when the census
-	// was off or a counter went backwards. A measured zero stays present.
+	// was off, a counter went backwards, or another decode/non-decode operation
+	// overlapped. A measured zero stays present.
 	H2DCopyBytes *uint64
 	// GraphEngaged and GraphDegraded are the window's graph-replay engagement
 	// delta (model.GraphReplayWitness): tokens served by the captured-graph fast
 	// path versus tokens that fell to the per-layer host loop on a
 	// capture-once-capable backend. GraphArmed reports whether any step ran on
 	// such a backend at all, which separates "unsupported" from "unobserved";
-	// GraphObserved is false unless armed, the window had steps, no other decode
-	// overlapped, and neither counter went backwards.
+	// GraphObserved is false unless armed, the window had steps, no other
+	// decode/non-decode work overlapped, and neither counter went backwards.
 	GraphEngaged  uint64
 	GraphDegraded uint64
 	GraphArmed    bool
@@ -166,10 +167,12 @@ func (s *DecodeSpan) Finish(ctx context.Context, steps int) DecodeHostWork {
 		return DecodeHostWork{}
 	}
 	s.finished = true
+	// Closing snapshots may block while peer work begins. Keep this span visible
+	// through every read, and release it even when a snapshot panics.
+	defer decodeSpansInFlight.Add(-1)
 	w := DecodeHostWork{Wall: time.Since(s.started), Steps: max(steps, 0)}
 	cpu, cpuOK := processCPUTime()
 	w.Overlapped = s.inFlight > 1 || decodeSpanStarts.Load() != s.startSeq
-	decodeSpansInFlight.Add(-1)
 	// A zero delta is below the clock's resolution (a Windows tick is ~15.6ms),
 	// not a decode loop that used no CPU, so it stays absent.
 	if cpuOK && s.cpuOK && !w.Overlapped && cpu > s.cpu {
@@ -211,12 +214,7 @@ func (s *DecodeSpan) Finish(ctx context.Context, steps int) DecodeHostWork {
 	}
 	if s.kernels != nil {
 		after := compute.KernelProfileSnapshot()
-		w.NonDecodeOverlap = s.nonDecodeBusy || nonDecodeWorkStarts.Load() != s.nonDecodeSeq
-		// The closing snapshot can wait on the device lock while a decode span
-		// that started after the Overlapped verdict runs its first batches, so the
-		// decode sequence is read again once the snapshot is in hand.
-		decodeOverlap := w.Overlapped || decodeSpanStarts.Load() != s.startSeq
-		if !decodeOverlap && !w.NonDecodeOverlap && w.Steps > 0 {
+		if w.Steps > 0 {
 			w.Kernels = compute.KernelProfileDelta(s.kernels, after)
 		}
 	}
@@ -233,6 +231,18 @@ func (s *DecodeSpan) Finish(ctx context.Context, steps int) DecodeHostWork {
 			b := uint64(bytesAfter - s.h2dBytes)
 			w.H2DCopyBytes = &b
 		}
+	}
+	// One final ownership verdict covers all closing snapshots, including work
+	// that starts inside their callbacks. Wall/steps belong to this span and
+	// backend/graph capability remain useful, but global deltas do not.
+	w.Overlapped = s.inFlight > 1 || decodeSpanStarts.Load() != s.startSeq
+	w.NonDecodeOverlap = s.nonDecodeBusy || nonDecodeWorkStarts.Load() != s.nonDecodeSeq
+	if w.Overlapped || w.NonDecodeOverlap {
+		w.CPU, w.Kernel, w.Kernels = nil, nil, nil
+		w.DeviceIdle, w.SyncSites, w.SyncsObserved = nil, nil, false
+		w.Dispatches, w.Readback = 0, 0
+		w.H2DCopyBytes = nil
+		w.GraphEngaged, w.GraphDegraded, w.GraphObserved = 0, 0, false
 	}
 	if acc := decodeHostWorkFrom(ctx); acc != nil {
 		acc.add(w)

@@ -51,6 +51,173 @@ func installFakeH2DCensus(t *testing.T, on bool, bytes *atomic.Int64) {
 	t.Cleanup(func() { h2dCensusSnapshot, h2dCensusEnabled = savedSnap, savedOn })
 }
 
+// fak-test:runtime fast est=20ms lane=default
+func TestHostOverheadRejectsContaminatedCounters(t *testing.T) {
+	if compute.KernelProfileReaderRegistered() || compute.DeviceBackendRegistered() {
+		t.Skip("a backend counter reader is registered in this process")
+	}
+	for _, tc := range []struct {
+		name, at, kind           string
+		profile, census, cpuOnly bool
+	}{
+		{"overlapping_decode", "before", "decode", false, true, false},
+		{"active_nondecode_without_profile", "before", "nondecode", false, true, false},
+		{"opening_nondecode", "open_device", "nondecode", false, true, false},
+		{"closing_cpu", "cpu", "decode", false, true, false},
+		{"closing_device", "device", "decode", false, true, false},
+		{"closing_kernel", "kernel", "decode", true, true, false},
+		{"closing_graph", "graph", "decode", false, true, false},
+		{"closing_h2d", "h2d", "decode", false, true, false},
+		{"closing_nondecode", "h2d", "nondecode", false, true, false},
+		{"sync_only_nondecode", "device", "nondecode", false, false, false},
+		{"cpu_only_nondecode", "before", "nondecode", false, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var peer *DecodeSpan
+			var nondecode NonDecodeWork
+			defer func() { peer.Abandon(); nondecode.End() }()
+			closing, fired := false, false
+			contaminate := func(at string) {
+				if fired || at != tc.at || (!closing && at != "before" && at != "open_device") {
+					return
+				}
+				fired = true
+				if tc.kind == "decode" {
+					p := StartDecodeSpan()
+					peer = &p
+				} else {
+					nondecode = BeginNonDecodeWork()
+					if at == "open_device" {
+						nondecode.End()
+					}
+				}
+			}
+			oldCPU, oldGraph := processCPUTime, graphReplayWitness
+			oldSnapshot, oldEnabled := h2dCensusSnapshot, h2dCensusEnabled
+			t.Cleanup(func() {
+				processCPUTime, graphReplayWitness = oldCPU, oldGraph
+				h2dCensusSnapshot, h2dCensusEnabled = oldSnapshot, oldEnabled
+			})
+			var cpu time.Duration
+			var bytes, engaged int64
+			processCPUTime = func() (time.Duration, bool) { contaminate("cpu"); return cpu, true }
+			graphReplayWitness = func() (uint64, uint64, bool) { contaminate("graph"); return uint64(engaged), 0, !tc.cpuOnly }
+			h2dCensusEnabled = func() bool { return tc.census }
+			h2dCensusSnapshot = func() (int64, int64) { contaminate("h2d"); return 1, bytes }
+			work := compute.DeviceWork{SubmitWaitObserved: true, SyncObserved: true}
+			if !tc.cpuOnly {
+				t.Cleanup(compute.RegisterDeviceWorkReader("ownership-test", func() compute.DeviceWork {
+					if !closing {
+						contaminate("open_device")
+					}
+					contaminate("device")
+					return work
+				}))
+			}
+			var profile compute.KernelProfile
+			if tc.profile {
+				t.Cleanup(compute.RegisterKernelProfileReader("ownership-test", func() (compute.KernelProfile, bool) {
+					contaminate("kernel")
+					return profile, true
+				}))
+			}
+			contaminate("before")
+			ctx, acc := WithDecodeHostWork(context.Background())
+			span := StartDecodeSpan()
+			defer span.Abandon()
+			cpu, bytes, engaged = time.Millisecond, 123, 2
+			work.Dispatches, work.SubmitWaitNS = 1, 1
+			work.ReadbackBytes = 17
+			work.SyncSites = []compute.DeviceSyncSite{{Site: compute.SyncSiteStepEnd, Syncs: 1, WaitNS: 1}}
+			profile = compute.KernelProfile{Batches: 1, Ops: 1, GPUNS: 1, WallNS: 2,
+				Rows: []compute.KernelRow{{Kernel: "decode", Calls: 1, NS: 1}}}
+			closing = true
+			w := span.Finish(ctx, 1)
+			if !fired || !(w.Overlapped || w.NonDecodeOverlap) {
+				t.Errorf("contamination was not observed: fired=%v window=%+v", fired, w)
+			}
+			if w.CPU != nil || w.Kernel != nil || w.Kernels != nil || w.DeviceIdle != nil || w.SyncsObserved || len(w.SyncSites) != 0 || w.Dispatches != 0 || w.Readback != 0 ||
+				w.H2DCopyBytes != nil || w.GraphObserved || w.GraphEngaged != 0 || w.GraphDegraded != 0 {
+				t.Errorf("global measurements attributed to a contaminated request: %+v", w)
+			}
+			if w.Wall < 0 || w.Steps != 1 || w.GraphArmed == tc.cpuOnly {
+				t.Errorf("owned wall/steps or capability evidence lost: %+v", w)
+			}
+			var rep Repetition
+			if !acc.ClaimHostOverhead(&rep) || rep.HostPhaseUs != nil || rep.KernelLaunchCount != nil || rep.InterKernelGapSumUs != nil ||
+				rep.H2DCopyBytes != nil || rep.SyncRoundtrips != nil || rep.GraphReplayEngagedTokens != nil || rep.GraphReplayDegradedTokens != nil {
+				t.Errorf("contaminated global measurements persisted: %+v", rep)
+			}
+			h2dReason, graphReason := HostOverheadGapUnobserved, HostOverheadGapUnobserved
+			if !tc.census {
+				h2dReason = HostOverheadGapDisabled
+			}
+			if tc.cpuOnly {
+				graphReason = HostOverheadGapUnsupported
+			}
+			wantGaps := map[string]string{
+				"host_phase_us": HostOverheadGapUnobserved, "sync_roundtrips": HostOverheadGapUnobserved,
+				"kernel_launch_count": HostOverheadGapDisabled, "inter_kernel_gap_sum_us": HostOverheadGapDisabled,
+				"h2d_copy_bytes": h2dReason, "graph_replay_engaged_tokens": graphReason, "graph_replay_degraded_tokens": graphReason,
+			}
+			for _, gap := range rep.HostOverheadGaps {
+				field, reason, found := strings.Cut(gap, "=")
+				if !found || wantGaps[field] != reason {
+					t.Errorf("unexpected gap %q", gap)
+				}
+				delete(wantGaps, field)
+			}
+			if len(wantGaps) != 0 || acc.ClaimHostOverhead(&Repetition{}) {
+				t.Errorf("missing gaps %v or repeated claim accepted", wantGaps)
+			}
+			if peer != nil {
+				other := peer.Finish(context.Background(), 1)
+				if !other.Overlapped || other.H2DCopyBytes != nil || other.GraphObserved {
+					t.Errorf("the overlapping peer inherited attribution: %+v", other)
+				}
+			}
+		})
+	}
+
+	t.Run("uncontaminated_zero_and_reset", func(t *testing.T) {
+		var bytes atomic.Int64
+		installFakeH2DCensus(t, true, &bytes)
+		ctx, acc := WithDecodeHostWork(context.Background())
+		span := StartDecodeSpan()
+		w := span.Finish(ctx, 1)
+		var rep Repetition
+		if w.H2DCopyBytes == nil || *w.H2DCopyBytes != 0 || !acc.ClaimHostOverhead(&rep) || rep.H2DCopyBytes == nil || *rep.H2DCopyBytes != 0 {
+			t.Fatalf("uncontaminated measured zero lost: window=%+v repetition=%+v", w, rep)
+		}
+		bytes.Store(10)
+		span = StartDecodeSpan()
+		bytes.Store(9)
+		if w := span.Finish(context.Background(), 1); w.H2DCopyBytes != nil {
+			t.Fatalf("reset census became a measurement: %+v", w)
+		}
+	})
+
+	t.Run("snapshot_panic_releases_span", func(t *testing.T) {
+		var bytes atomic.Int64
+		installFakeH2DCensus(t, true, &bytes)
+		before := decodeSpansInFlight.Load()
+		span := StartDecodeSpan()
+		defer span.Abandon()
+		h2dCensusSnapshot = func() (int64, int64) { panic("snapshot") }
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Error("snapshot did not panic")
+				}
+			}()
+			span.Finish(context.Background(), 1)
+		}()
+		if got := decodeSpansInFlight.Load(); got != before {
+			t.Errorf("closing snapshot stranded an active span: got %d, want %d", got, before)
+		}
+	})
+}
+
 // fakeDeviceWork is a cumulative device-work reader with observed sync cells.
 type fakeDeviceWork struct {
 	mu sync.Mutex
