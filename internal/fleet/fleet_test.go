@@ -810,6 +810,72 @@ func TestGPUStatOnlyFromReachable(t *testing.T) {
 	}
 }
 
+// TestGPUSelfReportFileFoldAndRender is the producer->reader fixture witness: a
+// report FILE carrying GPU{total:8,busy:3,util_pct:41} folds into the exact
+// "GPU UTIL" line, while a nil-GPU report renders NO line at all —
+// unknown-utilization must never read as 0%-idle.
+func TestGPUSelfReportFileFoldAndRender(t *testing.T) {
+	dir := t.TempDir()
+	ro := Roster{Boxes: []Box{{ID: "box-a"}}}
+	if err := WriteReport(dir, "box-a", Report{State: StateLive, Version: "1.0.0", GPU: &GPUStats{Total: 8, Busy: 3, UtilPct: 41}}); err != nil {
+		t.Fatalf("WriteReport with gpu block: %v", err)
+	}
+	snap := Fold(ro, ReadReports(dir, ro), FoldOpts{})
+	if snap.GPUUtil == nil || snap.GPUUtil.Total != 8 || snap.GPUUtil.Busy != 3 || snap.GPUUtil.UtilPct != 41 {
+		t.Fatalf("GPUUtil = %+v, want {Total:8 Busy:3 UtilPct:41}", snap.GPUUtil)
+	}
+	out := Render(snap, false, 72)
+	if !strings.Contains(out, "GPU UTIL   busy=3/8 idle=5 (41%)") {
+		t.Fatalf("render missing the GPU UTIL line:\n%s", out)
+	}
+
+	// The nil-GPU twin: a box that cannot probe its GPUs produces no line.
+	empty := t.TempDir()
+	if err := WriteReport(empty, "box-b", Report{State: StateLive}); err != nil {
+		t.Fatalf("WriteReport without gpu block: %v", err)
+	}
+	roB := Roster{Boxes: []Box{{ID: "box-b"}}}
+	snapB := Fold(roB, ReadReports(empty, roB), FoldOpts{})
+	if snapB.GPUUtil != nil {
+		t.Fatalf("nil-GPU report must not yield an aggregate, got %+v", snapB.GPUUtil)
+	}
+	if strings.Contains(Render(snapB, false, 72), "GPU UTIL") {
+		t.Fatal("nil-GPU report rendered a GPU UTIL line; unknown-utilization must stay silent")
+	}
+}
+
+// TestReportGPUBlockValidated pins the seam guard on both sides of the transport:
+// the writer refuses an impossible block (fail-closed at the producer) and the
+// reader drops a hand-corrupted one found on the wire (unknown beats poisoned).
+func TestReportGPUBlockValidated(t *testing.T) {
+	dir := t.TempDir()
+	for _, bad := range []Report{
+		{State: StateLive, GPU: &GPUStats{Total: -1}},
+		{State: StateLive, GPU: &GPUStats{Total: 4, Busy: 5}},
+		{State: StateLive, GPU: &GPUStats{Total: 4, Busy: 1, UtilPct: 101}},
+	} {
+		if err := WriteReport(dir, "x", bad); err == nil {
+			t.Fatalf("WriteReport accepted an invalid GPU block %+v", bad.GPU)
+		}
+	}
+	// A file written by a hostile/buggy producer with busy>total: the box stays
+	// reachable, its GPU block is dropped, and the fold sees no utilization signal.
+	if err := os.WriteFile(filepath.Join(dir, "box-c.json"),
+		[]byte(`{"state":"live","version":"1.0.0","gpu":{"total":4,"busy":9,"util_pct":41}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reps := ReadReports(dir, Roster{Boxes: []Box{{ID: "box-c"}}})
+	if reps[0].GPU != nil {
+		t.Fatalf("corrupt GPU block must be dropped, got %+v", reps[0].GPU)
+	}
+	if !reps[0].Reachable() || reps[0].Version != "1.0.0" {
+		t.Fatalf("the rest of the report must survive the drop, got %+v", reps[0])
+	}
+	if snap := Fold(Roster{Boxes: []Box{{ID: "box-c"}}}, reps, FoldOpts{}); snap.GPUUtil != nil {
+		t.Fatalf("dropped block must not feed the aggregate, got %+v", snap.GPUUtil)
+	}
+}
+
 // ---- inference usefulness ---------------------------------------------------
 
 func TestInferenceUsefulnessFoldAndRender(t *testing.T) {

@@ -30,6 +30,12 @@ A decision table for the 13 benchmark/diagnostic tools in `cmd/`. Each entry car
 - `go run -tags cuda` is required for GPU backend tools (`gpucheck`).
 - Most tools exit non-zero on failure/dismatch for CI gating.
 
+## Lab fleet (`fak lab`)
+
+| Action | Invocation | Notes |
+|---|---|---|
+| Self-report box state + GPU utilization | `go run ./cmd/fak lab report --id <box> --state live --gpu-probe` | Samples `nvidia-smi` now and folds per-GPU util into the report's `gpu` block; explicit `--gpu-total/--gpu-busy/--gpu-util` override probe fields (util 0-100, busy<=total). |
+
 ## Detailed writeups
 
 (Per‑tool `*-RESULTS.md` files will be linked here once produced.)
