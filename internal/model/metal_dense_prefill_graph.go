@@ -58,7 +58,9 @@ func (s *Session) denseQ4KPrefillGraphEligible() bool {
 	}
 	m := s.M
 	cfg := m.Cfg
-	if m.prism != nil || cfg.LayerNorm || cfg.NormGain1p || !siluGatedMLP(cfg) || cfg.HiddenSize%32 != 0 {
+	// The dense layer graph encodes a dense SwiGLU tail; an admitted MoE arch's routed FFN
+	// runs per row on the host (prefillRowFFN), so it never enters the graph.
+	if m.prism != nil || cfg.IsMoE() || cfg.LayerNorm || cfg.NormGain1p || !siluGatedMLP(cfg) || cfg.HiddenSize%32 != 0 {
 		return false
 	}
 	for l := 0; l < cfg.NumLayers; l++ {

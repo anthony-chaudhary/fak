@@ -253,6 +253,8 @@ func (s *Session) prefillBatchedQ4KPanel(ids []int, useGraph bool) []float32 {
 		m.metalQ8Weights()  // upload Q8-minority projection weights upfront for Metal Q8 prefill (#1087)
 	}
 
+	moe := cfg.IsMoE()
+
 	// Normalization fully overwrites this request-local panel; synchronous projections
 	// finish consuming it before the next normalization, including across layers.
 	normPanel := make([]float32, P*H)
@@ -269,9 +271,13 @@ func (s *Session) prefillBatchedQ4KPanel(ids []int, useGraph bool) []float32 {
 			wIn := m.tensor(lp("input_layernorm.weight"))
 			bIn := m.tensorOptional(lp("input_layernorm.bias"))
 			for t := lo; t < hi; t++ {
-				if cfg.NormGain1p || cfg.LayerNorm {
+				switch {
+				case cfg.NormGain1p || cfg.LayerNorm:
 					copy(Xn[t*H:(t+1)*H], normCfg(X[t*H:(t+1)*H], wIn, bIn, eps, cfg))
-				} else {
+				case moe:
+					// The MoE token loop is blockStep's serial normCfg, so take its reduction.
+					prefillNormIntoDisjoint(Xn[t*H:(t+1)*H], X[t*H:(t+1)*H], wIn, bIn, eps, cfg)
+				default:
 					rmsnormInto(Xn[t*H:(t+1)*H], X[t*H:(t+1)*H], wIn, eps)
 				}
 			}
@@ -295,6 +301,15 @@ func (s *Session) prefillBatchedQ4KPanel(ids []int, useGraph bool) []float32 {
 				X[i] += O[i]
 			}
 		})
+
+		if moe {
+			// prefillBatchedMoEOK admitted this arch: each row routes to its own top-k
+			// experts, so the FFN runs per row through blockStep's exact PreNorm sublayer
+			// on the kernel tokenHiddenQ hands blockStep (sessionQ4KKernel when Q4_K
+			// weights are resident).
+			m.prefillRowFFN(l, X, P, H, eps, cfg, s.tokenHiddenQKernel())
+			return
+		}
 
 		Xn2 := normPanel
 		parForWork(P, dispatchWorkers, H, func(lo, hi int) {

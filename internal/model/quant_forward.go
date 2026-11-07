@@ -300,23 +300,7 @@ func (s *Session) tokenHiddenQ(id, pos int) (out []float32) {
 				return out
 			}
 		}
-		mat := matKernel(sessionQ8Kernel{s})
-		if s.Q4 && m.q4w != nil {
-			// Resident int4 decode: the Qwen3.6 hybrid (and every non-fast-PreNorm arch)
-			// runs the shared blockStep skeleton; swapping the kernel to int4 streams ~1.8×
-			// fewer weight bytes/token than Q8, raising the decode ceiling. The block
-			// orchestration (RMSNorm, RoPE, GQA, GDN recurrent scan, SwiGLU) is unchanged.
-			mat = matKernel(sessionQ4Kernel{s})
-		} else if s.Q4K && (m.q4kw != nil || len(m.kqw) > 0 || len(m.q2w) > 0) {
-			// Resident raw Q4_K decode (plan P1): same blockStep skeleton, but the q4_k_m
-			// matmul majority streams at 0.5625 B/weight (raw GGUF bytes, no round-trip) and
-			// the Q6_K minority (attn_qkv/ffn_down) falls back to the Q8 GEMV inside the kernel.
-			mat = matKernel(sessionQ4KKernel{s})
-		} else if cfg.IsMoE() {
-			// MoE routing reuses the original prepared router/expert operand after nested
-			// down-projection prep calls, so keep the allocation-safe kernel for that path.
-			mat = q8Kernel{m}
-		}
+		mat := s.tokenHiddenQKernel()
 		var x []float32
 		if m.Q2KEmbedding != nil {
 			x = make([]float32, H)
@@ -619,6 +603,32 @@ func (s *Session) attnDecodeQSA(
 	}
 
 	return db.scores
+}
+
+// tokenHiddenQKernel is the matKernel tokenHiddenQ hands blockStep on its non-fast path.
+// The batched resident-quant prefill lanes run an admitted MoE arch's per-row FFN on this
+// same kernel (prefillRowFFN), so the routed FFN arithmetic cannot drift from the token loop.
+func (s *Session) tokenHiddenQKernel() matKernel {
+	m := s.M
+	if s.Q4 && m.q4w != nil {
+		// Resident int4 decode: the Qwen3.6 hybrid (and every non-fast-PreNorm arch)
+		// runs the shared blockStep skeleton; swapping the kernel to int4 streams ~1.8×
+		// fewer weight bytes/token than Q8, raising the decode ceiling. The block
+		// orchestration (RMSNorm, RoPE, GQA, GDN recurrent scan, SwiGLU) is unchanged.
+		return sessionQ4Kernel{s}
+	}
+	if s.Q4K && (m.q4kw != nil || len(m.kqw) > 0 || len(m.q2w) > 0) {
+		// Resident raw Q4_K decode (plan P1): same blockStep skeleton, but the q4_k_m
+		// matmul majority streams at 0.5625 B/weight (raw GGUF bytes, no round-trip) and
+		// the Q6_K minority (attn_qkv/ffn_down) falls back to the Q8 GEMV inside the kernel.
+		return sessionQ4KKernel{s}
+	}
+	if m.Cfg.IsMoE() {
+		// MoE routing reuses the original prepared router/expert operand after nested
+		// down-projection prep calls, so keep the allocation-safe kernel for that path.
+		return q8Kernel{m}
+	}
+	return sessionQ8Kernel{s}
 }
 
 // q8AttnProj returns layer l's Q8 attention projections. Dense arches read the prebuilt

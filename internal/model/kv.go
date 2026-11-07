@@ -1205,9 +1205,11 @@ func (s *Session) prefillOwnedContext(ctx context.Context, ids []int) []float32 
 		// one pass — each weight super-block dequantized once and reused across all P prompt
 		// tokens. Architectures the batched q4 lane does not yet cover (MoE / DenseMLP /
 		// Alibi / Qwen35-hybrid / non-PreNorm / layer-specific RoPE theta) fall back to the
-		// per-token blockStep, exactly as the Q8 token-loop fallback does. The LM head is
-		// whichever resident format it loaded as (headResident).
-		if !q8PrefillNeedsTokenLoop(s.M.Cfg) {
+		// per-token blockStep, exactly as the Q8 token-loop fallback does; the
+		// prefillBatchedMoEOK MoE subset is batched too, its routed FFN run per row on the
+		// token loop's kernel. The LM head is whichever resident format it loaded as
+		// (headResident).
+		if !s.prefillNeedsTokenLoop() {
 			return s.headResident(s.prefillBatchedQ4K(ids))
 		}
 		// Qwen3.5/3.6 hybrid (the q8PrefillNeedsTokenLoop case the generic batched-Q4K lane
@@ -1368,7 +1370,7 @@ func (s *Session) prefillNoLogitsOwnedContext(ctx context.Context, ids []int) {
 		return
 	}
 	if s.Q4K {
-		if !q8PrefillNeedsTokenLoop(s.M.Cfg) {
+		if !s.prefillNeedsTokenLoop() {
 			s.prefillBatchedQ4K(ids)
 			return
 		}
@@ -1429,9 +1431,9 @@ func q8PrefillNeedsTokenLoop(cfg Config) bool {
 }
 
 // prefillNeedsTokenLoop gates the batched host prefill lanes (f32 prefillBatched, Q8
-// prefillBatchedQ). It keeps every q8PrefillNeedsTokenLoop refusal except the MoE subset
-// prefillBatchedMoEOK admits; the Q4K/verify/HAL lanes keep calling
-// q8PrefillNeedsTokenLoop until they gain the per-row routed FFN.
+// prefillBatchedQ, resident-Q4_K prefillBatchedQ4K). It keeps every
+// q8PrefillNeedsTokenLoop refusal except the MoE subset prefillBatchedMoEOK admits; the
+// HAL prompt panel keeps calling q8PrefillNeedsTokenLoop.
 func prefillNeedsTokenLoop(m *Model) bool {
 	return q8PrefillNeedsTokenLoop(m.Cfg) && !prefillBatchedMoEOK(m)
 }
