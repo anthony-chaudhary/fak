@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -61,7 +62,8 @@ func TestQwen35IndependentDecodeCohortLimit(t *testing.T) {
 	for _, name := range []string{
 		"wrong_marker", "mixed_backend", "mixed_model", "session_alias", "kv_alias",
 		"state_alias", "owner_alias", "buffer_alias", "shared_cow", "missing_owner",
-		"retired", "invalid_owner", "unexpected_state", "native_override", "physical_alias",
+		"retired", "invalid_owner", "unexpected_state", "native_override",
+		"physical_alias", "opaque_kv", "ownership_refusal", "no_ownership_query",
 	} {
 		t.Run(name, func(t *testing.T) {
 			bs, be, _ := newPortableQwen35Batch(t, 9)
@@ -70,9 +72,32 @@ func TestQwen35IndependentDecodeCohortLimit(t *testing.T) {
 			// batch would incorrectly admit these aliases.
 			switch name {
 			case "physical_alias":
-				// Distinct model handles are insufficient when the backend cannot
-				// prove whole-cohort physical independence.
-				be.cohortDecline = true
+				st := &last.qwen35HAL.layers[0]
+				savedState, savedOwned := st.conv, st.owner.conv
+				firstConv := first.qwen35HAL.layers[0].conv
+				st.conv = compute.NewF32(be, firstConv.Shape, be.Backend.Read(firstConv))
+				st.owner.conv = st.conv
+				defer func() { st.conv, st.owner.conv = savedState, savedOwned }()
+			case "opaque_kv":
+				saved := last.halKV
+				last.halKV = &struct{ compute.KVStore }{first.halKV}
+				defer func() { last.halKV = saved }()
+			case "ownership_refusal":
+				be.refuseCohort = true
+			case "no_ownership_query":
+				without := &struct {
+					compute.Backend
+					Qwen35GDNBackend
+					qwen35IndependentDecodeBatchBackend
+				}{be, be, be}
+				for i := range bs.Seqs {
+					session, err := bs.M.NewBackendSessionChecked(without)
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(session.Close)
+					bs.Seqs[i] = session
+				}
 			case "wrong_marker":
 				be.batchPath = "wrong"
 			case "mixed_backend":
@@ -133,7 +158,7 @@ func TestQwen35IndependentDecodeCohortLimit(t *testing.T) {
 				t.Fatalf("unsafe/unsupported cohort limit=%d", got)
 			}
 			wantProofCalls := 0
-			if name == "physical_alias" {
+			if name == "physical_alias" || name == "opaque_kv" || name == "ownership_refusal" {
 				wantProofCalls = 1
 			}
 			if be.cohortCalls != wantProofCalls {
@@ -144,62 +169,70 @@ func TestQwen35IndependentDecodeCohortLimit(t *testing.T) {
 			}
 		})
 	}
-	t.Run("missing_physical_proof", func(t *testing.T) {
-		bs, be, _ := newPortableQwen35Batch(t, 9)
-		// Limit the exposed method set while retaining the same real fixture
-		// backend. Unknown providers must not inherit the positive host witness.
-		unknown := &portableQwen35BatchWithoutCohort{portableQwen35BatchCapabilities: be}
-		for _, s := range bs.Seqs {
-			s.Backend, s.qwen35HAL.backend = unknown, unknown
-			for i := range s.qwen35HAL.layers {
-				if owner := s.qwen35HAL.layers[i].owner; owner != nil {
-					owner.backend = unknown
-				}
-			}
-		}
-		if got := query(t, bs); got != 0 || be.cohortCalls != 0 {
-			t.Fatalf("unknown physical owner admitted: limit=%d proof calls=%d", got, be.cohortCalls)
-		}
-		if be.batchCalls != 0 || be.gdnCalls != 0 || be.cloneCalls != 0 {
-			t.Fatal("unknown-owner preflight executed backend work")
-		}
-	})
-}
-
-type portableQwen35BatchCapabilities interface {
-	compute.Backend
-	Qwen35GDNBackend
-	compute.Qwen35IndependentDecodeBatchBackend
-}
-
-type portableQwen35BatchWithoutCohort struct {
-	portableQwen35BatchCapabilities
 }
 
 // This provider witnesses model dispatch and ownership, not a device kernel or
 // numerical parity. Its projection receipts and logits are deliberately synthetic.
 type portableQwen35BatchBackend struct {
 	*sequencePrefillBackend
-	batchPath     string
-	batchCalls    int
-	batchErr      error
-	badReceipt    bool
-	shortLogits   bool
-	mutatedKV     []int
-	request       compute.Qwen35IndependentDecodeBatchRequest
-	logits        compute.Tensor
-	cohortDecline bool
-	cohortCalls   int
-	cohortStores  []compute.KVStore
-	cohortStates  [][]compute.Qwen35SequenceState
+	batchPath    string
+	batchCalls   int
+	batchErr     error
+	badReceipt   bool
+	shortLogits  bool
+	mutatedKV    []int
+	request      compute.Qwen35IndependentDecodeBatchRequest
+	logits       compute.Tensor
+	knownKV      map[compute.KVStore]bool
+	refuseCohort bool
+	cohortCalls  int
+	cohortStores []compute.KVStore
+	cohortStates [][]compute.Qwen35SequenceState
 }
 
-// Synthetic host ownership witness only. The real CUDA provider must validate
-// physical ranges; this fixture records the model-to-backend metadata boundary.
-func (b *portableQwen35BatchBackend) Qwen35IndependentDecodeCohortOwned(stores []compute.KVStore, states [][]compute.Qwen35SequenceState) bool {
+func (b *portableQwen35BatchBackend) NewKV(cfg compute.KVConfig) compute.KVStore {
+	kv := b.Backend.NewKV(cfg)
+	if b.knownKV == nil {
+		b.knownKV = make(map[compute.KVStore]bool)
+	}
+	b.knownKV[kv] = true
+	return kv
+}
+
+// This host-only witness recognizes its own KV allocations and complete host
+// state ranges. It does not qualify native storage or perform backend work.
+func (b *portableQwen35BatchBackend) Qwen35IndependentDecodeCohortOwned(kvs []compute.KVStore, states [][]compute.Qwen35SequenceState) bool {
 	b.cohortCalls++
-	b.cohortStores, b.cohortStates = stores, states
-	return !b.cohortDecline && len(stores) >= 2 && len(stores) == len(states)
+	b.cohortStores, b.cohortStates = kvs, states
+	if b.refuseCohort {
+		return false
+	}
+	var ranges [][2]uintptr
+	for i, kv := range kvs {
+		if !b.knownKV[kv] {
+			return false
+		}
+		for _, state := range states[i] {
+			for _, tensor := range []compute.Tensor{state.Conv, state.Recurrent} {
+				if tensor.Buf() == nil {
+					continue
+				}
+				data := b.Backend.Read(tensor)
+				if len(data) == 0 {
+					return false
+				}
+				lo := uintptr(unsafe.Pointer(unsafe.SliceData(data)))
+				hi := lo + uintptr(len(data))*4
+				for _, prior := range ranges {
+					if lo < prior[1] && prior[0] < hi {
+						return false
+					}
+				}
+				ranges = append(ranges, [2]uintptr{lo, hi})
+			}
+		}
+	}
+	return true
 }
 
 func (*portableQwen35BatchBackend) Name() string { return "portable-batch-test" }
