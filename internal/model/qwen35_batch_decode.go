@@ -2,6 +2,8 @@ package model
 
 import (
 	"fmt"
+	"reflect"
+	"slices"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -9,6 +11,120 @@ import (
 // qwen35HybridQ4KBatchStep is an optional exact native batch override.
 // Without an override, dispatch requires the existing backend capability.
 var qwen35HybridQ4KBatchStep func(*BatchSession, []int) ([][]float32, bool)
+
+// Qwen35IndependentDecodeCohortLimit returns the existing independent decode
+// width only when the complete offered cohort has known, private owners. It is
+// an observation, not an ownership transfer: the caller must serialize session
+// mutation through submission. It never uploads rows, adopts missing owners,
+// retains snapshots, clones COW state, or invokes a forward operation.
+//
+// Check the whole cohort before splitting it. Per-group checks alone would miss
+// KV or recurrent aliases on opposite sides of a group boundary. Platform
+// overrides and unknown/shared ownership retain the established unsplit route.
+func (bs *BatchSession) Qwen35IndependentDecodeCohortLimit() int {
+	if bs == nil || bs.M == nil || len(bs.Seqs) < 2 || qwen35HybridQ4KBatchStep != nil ||
+		!bs.M.Cfg.IsQwen35Hybrid() || bs.M.Cfg.BlockTopology != PreNorm || bs.M.Cfg.IsMoE() {
+		return 0
+	}
+	cfg := bs.M.Cfg
+	layout, err := ComputeQwen35StateLayout(cfg, "f32")
+	if err != nil || cfg.NumLayers <= 0 || layout.ConvElements == 0 {
+		return 0
+	}
+	// Only nonnil pointer-backed identities can establish known ownership. This
+	// also refuses noncomparable interface implementations without panicking.
+	seen := make(map[any]bool)
+	unique := func(v any) bool {
+		if !qwen35IndependentDecodePointer(v) || seen[v] {
+			return false
+		}
+		seen[v] = true
+		return true
+	}
+	var backend compute.Backend
+	for i, session := range bs.Seqs {
+		if session == nil || session.M != bs.M || session.halClosed || session.halFailure != nil ||
+			!unique(session) || !unique(session.halKV) || !unique(session.qwen35HAL) ||
+			!qwen35IndependentDecodePointer(session.Backend) {
+			return 0
+		}
+		if i == 0 {
+			backend = session.Backend
+			if _, ok := qwen35IndependentDecodeBatchFor(backend); !ok {
+				return 0
+			}
+		} else if session.Backend != backend {
+			return 0
+		}
+		q := session.qwen35HAL
+		valid := func() bool {
+			q.mu.Lock()
+			defer q.mu.Unlock()
+			if q.sequenceFailure != nil || len(q.layers) != cfg.NumLayers ||
+				!qwen35IndependentDecodePointer(q.backend) || any(q.backend) != any(backend) {
+				return false
+			}
+			linear := 0
+			for layer := range q.layers {
+				if !cfg.isLinearAttnLayer(layer) {
+					if state := q.layers[layer]; state.owner != nil || state.conv.Buf() != nil || state.recurrent.Buf() != nil {
+						return false
+					}
+					continue
+				}
+				linear++
+				state := &q.layers[layer]
+				owner := state.owner
+				if !unique(owner) {
+					return false
+				}
+				private := func() bool {
+					owner.mu.Lock()
+					defer owner.mu.Unlock()
+					if owner.refs != 1 || owner.graphInvalid || owner.graphMutating ||
+						!qwen35IndependentDecodePointer(owner.backend) || owner.backend != backend {
+						return false
+					}
+					pairs := []struct {
+						state, owned compute.Tensor
+						shape        []int
+					}{
+						{state.conv, owner.conv, []int{layout.ConvRows, layout.ConvDim}},
+						{state.recurrent, owner.recurrent, []int{layout.RecurrentHeads, layout.KeyHeadDim, layout.ValueHeadDim}},
+					}
+					for _, pair := range pairs {
+						if !unique(pair.owned.Buf()) || !qwen35IndependentDecodePointer(pair.state.Buf()) ||
+							pair.state.Buf() != pair.owned.Buf() || pair.state.Dtype != compute.F32 || pair.owned.Dtype != compute.F32 ||
+							pair.state.Layout != compute.RowMajor || pair.owned.Layout != compute.RowMajor ||
+							pair.state.Quant != nil || pair.owned.Quant != nil ||
+							!slices.Equal(pair.state.Shape, pair.shape) || !slices.Equal(pair.owned.Shape, pair.shape) {
+							return false
+						}
+					}
+					return true
+				}()
+				if !private {
+					return false
+				}
+			}
+			return linear > 0
+		}()
+		if !valid {
+			return 0
+		}
+	}
+	// Opaque handle identity is model-owned evidence. Native pointer/range alias
+	// validation remains the backend's existing obligation, not a GPU claim here.
+	return 8
+}
+
+func qwen35IndependentDecodePointer(v any) bool {
+	if v == nil {
+		return false
+	}
+	rv := reflect.ValueOf(v)
+	return rv.Kind() == reflect.Pointer && !rv.IsNil()
+}
 
 func (bs *BatchSession) qwen35HybridQ4KBatchOK(batch int) bool {
 	if bs == nil || bs.M == nil || batch < 2 || batch > 8 ||
