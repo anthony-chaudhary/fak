@@ -95,6 +95,7 @@ KERNEL_LEAVES = ("internal/compute/cuda_flashmla_sparse_decode.cu",
 KERNELS_LABEL = ", ".join(KERNELS + KERNEL_LEAVES)
 BINDINGS = (
     "internal/compute/cuda.go",
+    "internal/compute/cuda_sampling_candidates.go",
     "internal/compute/cuda_collective.go",
     "internal/compute/cuda_collective_pg.go",
     "internal/compute/cuda_qwen4exp_ple_hash_cuda.go",

@@ -923,6 +923,15 @@ int fcuda_nccl_pg_allreduce_f32(void *dbuf, int count);
  * (no-op). Called on serve shutdown. */
 void fcuda_nccl_pg_destroy(void);
 
+/* Checked raw top-k+1 transport for the opt-in serial sampler. */
+size_t fcuda_sampling_candidates_workspace_bytes(void);
+int fcuda_sampling_candidates_capability(void);
+/* Read and latch pending non-OOM allocation errors before owner release. */
+int fcuda_sampling_candidates_allocation_status(void);
+int fcuda_sampling_candidates(const uint32_t *row, int vocab, int k,
+    void *workspace, uint32_t *retained, uint32_t *host_words);
+int fcuda_sampling_candidates_release(void *owned);
+
 #ifdef __cplusplus
 }
 #endif

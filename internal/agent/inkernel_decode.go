@@ -770,6 +770,7 @@ type decodeLane struct {
 	// life so every served token reuses the size-V probability row, index permutation
 	// and sort/heap buffers instead of allocating them per token.
 	sampling samplerWorkspace
+	compact  compactSamplingState
 	// forwardCoverageSource is an injected observation seam for the token/coverage
 	// pairing witness. Production leaves it nil and reads the live Session.
 	forwardCoverageSource nativeForwardCoverageSource
@@ -1095,6 +1096,13 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 			ln.err, ln.done = ErrNonFiniteLogits, true
 			return 0, false
 		}
+		if ln.compact.ready {
+			if next < 0 || next >= ln.compact.packet.Count {
+				ln.err, ln.done = fmt.Errorf("native sampler: compact index %d outside candidate row", next), true
+				return 0, false
+			}
+			next = ln.compact.packet.IDs[next]
+		}
 	}
 	enginestep.Default.ObservePhase(enginestep.PhaseSample, time.Since(sampleStart))
 	if ln.structured != nil {
@@ -1162,6 +1170,9 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 }
 
 func (ln *decodeLane) vocabSize() int {
+	if ln.compact.ready {
+		return ln.vocab
+	}
 	if ln.logits != nil {
 		return len(ln.logits)
 	}
@@ -1185,6 +1196,11 @@ func (ln *decodeLane) step(ctx context.Context, id int) error {
 	if ln.engramAttempt != nil {
 		return ln.stepWithEngramLookAhead(ctx, id)
 	}
+	if ln.deviceSamplingCandidates() {
+		ln.stepSamplingCandidates(id)
+		return nil
+	}
+	ln.compact.ready = false
 	if !ln.deviceGreedy() {
 		ln.logits = ln.s.Step(id)
 		return nil
@@ -1244,7 +1260,7 @@ func (ln *decodeLane) retainGreedyLogits() {
 // continuationLogits returns the distribution after the last forwarded token, reading a
 // device-selected step's retained logits back once.
 func (ln *decodeLane) continuationLogits() []float32 {
-	if ln.logits == nil && ln.greedyReady {
+	if ln.compact.ready || (ln.logits == nil && ln.greedyReady) {
 		return ln.s.TakeGreedyLogits()
 	}
 	return ln.logits
@@ -1421,6 +1437,7 @@ func (d *inKernelDecodeIteration) step(ctx context.Context) bool {
 			if ln.logits != nil {
 				ln.vocab = len(ln.logits)
 			}
+			ln.compact.ready = false
 			ln.logits = out[i]
 			ln.greedyReady = next != nil && greedy[i] && out[i] == nil
 			if ln.greedyReady {

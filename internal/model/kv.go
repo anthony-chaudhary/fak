@@ -185,6 +185,7 @@ type Session struct {
 	halFailure error
 	// retainGreedyLogits keeps each device-selected StepGreedy distribution as the owned
 	// device clone greedyLogits until the next step, TakeGreedyLogits or Close.
+	// Compact sampled steps reuse this single-owner slot after checked completion.
 	retainGreedyLogits   bool
 	greedyLogits         compute.Tensor
 	executionPolicy      ExecutionPolicy
@@ -678,8 +679,9 @@ func (s *Session) SetRetainGreedyLogits(on bool) {
 	}
 }
 
-// TakeGreedyLogits reads back the distribution of the most recent retained StepGreedy
-// and releases its device copy. It returns nil when no distribution is retained.
+// TakeGreedyLogits reads back the most recent retained device distribution
+// (greedy selection or compact sampling) and releases its device copy.
+// It returns nil when no distribution is retained.
 func (s *Session) TakeGreedyLogits() []float32 {
 	if s == nil || s.greedyLogits.Buf() == nil {
 		return nil
@@ -1536,6 +1538,12 @@ func (s *Session) stepOwned(id int) []float32 {
 }
 
 func (s *Session) stepOwnedMode(id int, greedy bool) ([]float32, int) {
+	return s.stepOwnedOutput(id, greedy, nil)
+}
+
+// output is consumed only by the ordinary fully backend-resident HAL branch.
+// Architecture-specific paths preserve their existing full-logit behavior.
+func (s *Session) stepOwnedOutput(id int, greedy bool, output func(int, int) ([]float32, int)) ([]float32, int) {
 	s.releaseGreedyLogits()
 	if err := s.refuseUnimplementedV4FlashAttention(); err != nil {
 		panic(err)
@@ -1574,6 +1582,9 @@ func (s *Session) stepOwnedMode(id int, greedy bool) ([]float32, int) {
 	}
 	if s.Backend != nil {
 		s.ensureOpenBackendSession()
+		if output != nil {
+			return output(id, s.halKV.Len())
+		}
 		if greedy && s.activeTap() == nil {
 			return s.tokenGreedy(id, s.halKV.Len())
 		}
