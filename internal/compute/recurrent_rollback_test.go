@@ -1,3 +1,10 @@
+// Ported from modular/modular max/python/max/nn/_graph_ops/state_space/kimi_delta.py@88ab8913af6b9298fe914e0f20d87a49e4172d0d (Apache-2.0 WITH LLVM-exception; Copyright (c) 2026 Modular Inc.). Adapted to fak-owned Go.
+//
+// The attribution above covers the GDN spec-verify ring-record oracle in this
+// file (TestGDNVerifyRingFoldOracle and its geometry helper, plus the
+// ring-path assertions in TestGDNVerifyRingManagerFold); the surrounding
+// slot-shadow rollback tests are pre-existing fak code.
+
 package compute
 
 import (
@@ -262,5 +269,255 @@ func TestRecurrentRollbackBatchMultiSlot(t *testing.T) {
 		if rcpt.D2HBytes != 0 || rcpt.D2HEvents != 0 || !rcpt.ZeroD2HVerified {
 			t.Fatalf("receipt[%d] D2H violation: %+v", i, rcpt)
 		}
+	}
+}
+
+// gdnVerifyRingOracleGeometry pins the GDN spec-verify ring contract for one
+// head geometry: (1) fold(j ring records) equals the sequential j-token
+// recurrence bit-for-bit on pinned-FMA float32 for j = 0..len(toks); (2) ring
+// wraparound retains the most recent ringLen records in order and folding that
+// window from the window-start state matches the sequential run over it;
+// (3) a zero-width fold is a no-op returning the input state unchanged.
+func gdnVerifyRingOracleGeometry(t *testing.T, name string, keyHeadDim, valueHeadDim int, base []float32, toks []GDNVerifyRingToken) {
+	t.Helper()
+
+	// Build records against the evolving state and capture the sequential
+	// reference state after each token.
+	seqStates := make([][]float32, len(toks)+1)
+	seqStates[0] = base
+	records := make([]GDNVerifyRingRecord, len(toks))
+	state := base
+	for j, tok := range toks {
+		rec, err := GDNVerifyRingRecordFromState(state, tok, keyHeadDim, valueHeadDim)
+		if err != nil {
+			t.Fatalf("%s: record %d: %v", name, j, err)
+		}
+		records[j] = rec
+		state, err = GDNVerifyRingStep(state, tok, keyHeadDim, valueHeadDim)
+		if err != nil {
+			t.Fatalf("%s: step %d: %v", name, j, err)
+		}
+		seqStates[j+1] = state
+	}
+
+	// (1) fold(j records) == sequential j-token recurrence, bit-for-bit, j = 0..len(toks).
+	for j := 0; j <= len(toks); j++ {
+		got, err := GDNVerifyRingFold(base, records[:j], keyHeadDim, valueHeadDim)
+		if err != nil {
+			t.Fatalf("%s: j=%d fold: %v", name, j, err)
+		}
+		want := seqStates[j]
+		if j == 0 && &got[0] != &base[0] {
+			t.Fatalf("%s: j=0 zero-width fold must return the input state unchanged", name)
+		}
+		if len(got) != len(want) {
+			t.Fatalf("%s: j=%d fold len %d, want %d", name, j, len(got), len(want))
+		}
+		for i := range want {
+			if math.Float32bits(got[i]) != math.Float32bits(want[i]) {
+				t.Fatalf("%s: j=%d idx=%d: fold %v (bits %08x) != sequential %v (bits %08x)",
+					name, j, i, got[i], math.Float32bits(got[i]), want[i], math.Float32bits(want[i]))
+			}
+		}
+	}
+
+	// (2) ring wraparound: writing past ringLen overwrites the oldest slots.
+	const ringLen = 4
+	ring, err := NewGDNVerifyRing(ringLen)
+	if err != nil {
+		t.Fatalf("%s: ring: %v", name, err)
+	}
+	for _, rec := range records {
+		ring.Write(rec)
+	}
+	if ring.Count() != len(toks) {
+		t.Fatalf("%s: ring count %d, want %d", name, ring.Count(), len(toks))
+	}
+	retained := ring.Retained()
+	if len(retained) != ringLen {
+		t.Fatalf("%s: retained len %d, want ringLen %d", name, len(retained), ringLen)
+	}
+	windowStart := len(toks) - ringLen
+	for i := 0; i < ringLen; i++ {
+		refRec, err := GDNVerifyRingRecordFromState(seqStates[windowStart+i], toks[windowStart+i], keyHeadDim, valueHeadDim)
+		if err != nil {
+			t.Fatalf("%s: retained ref record %d: %v", name, i, err)
+		}
+		for e := range refRec.Data {
+			if math.Float32bits(retained[i].Data[e]) != math.Float32bits(refRec.Data[e]) {
+				t.Fatalf("%s: retained[%d][%d] = %v (bits %08x), want record %d element %d %v (bits %08x)",
+					name, i, e, retained[i].Data[e], math.Float32bits(retained[i].Data[e]),
+					windowStart+i, e, refRec.Data[e], math.Float32bits(refRec.Data[e]))
+			}
+		}
+	}
+	// Folding the retained window from the window-start state matches the
+	// sequential run over that window, bit-for-bit.
+	got, err := GDNVerifyRingFold(seqStates[windowStart], retained, keyHeadDim, valueHeadDim)
+	if err != nil {
+		t.Fatalf("%s: window fold: %v", name, err)
+	}
+	want := seqStates[len(toks)]
+	for i := range want {
+		if math.Float32bits(got[i]) != math.Float32bits(want[i]) {
+			t.Fatalf("%s: window fold idx=%d: got %v (bits %08x), want sequential %v (bits %08x)",
+				name, i, got[i], math.Float32bits(got[i]), want[i], math.Float32bits(want[i]))
+		}
+	}
+
+	// (3) zero-width (no records) fold is a no-op returning the input state unchanged.
+	empty, err := NewGDNVerifyRing(ringLen)
+	if err != nil {
+		t.Fatalf("%s: empty ring: %v", name, err)
+	}
+	if empty.Count() != 0 || len(empty.Retained()) != 0 {
+		t.Fatalf("%s: fresh ring must retain nothing, got count=%d retained=%d", name, empty.Count(), len(empty.Retained()))
+	}
+	noop, err := GDNVerifyRingFold(base, empty.Retained(), keyHeadDim, valueHeadDim)
+	if err != nil {
+		t.Fatalf("%s: zero-width fold: %v", name, err)
+	}
+	if &noop[0] != &base[0] {
+		t.Fatalf("%s: zero-width fold must return the input state unchanged", name)
+	}
+	noopNil, err := GDNVerifyRingFold(base, nil, keyHeadDim, valueHeadDim)
+	if err != nil {
+		t.Fatalf("%s: nil-record fold: %v", name, err)
+	}
+	if &noopNil[0] != &base[0] {
+		t.Fatalf("%s: nil-record fold must return the input state unchanged", name)
+	}
+}
+
+func TestGDNVerifyRingFoldOracle(t *testing.T) {
+	// Pinned nontrivial decay/update matrix sets: mixed-sign raw keys and values,
+	// near-unity and fast per-channel decays, beta away from 0/1. Fixed constants
+	// keep the witness reproducible.
+	gdnVerifyRingOracleGeometry(t, "k3v4", 3, 4,
+		[]float32{0.5, -1.25, 0.125, 2.0, -0.75, 1.5, -0.25, 0.375, 3.0, -0.125, 0.625, -2.5},
+		[]GDNVerifyRingToken{
+			{Gate: []float32{-0.1, -0.5, -2.0}, Key: []float32{0.5, -1.0, 0.25}, Val: []float32{1.0, -0.5, 0.75, -2.0}, Beta: 0.3},
+			{Gate: []float32{-0.01, -0.2, -1.0}, Key: []float32{-0.75, 0.5, 1.5}, Val: []float32{-1.5, 0.25, 0.5, 0.125}, Beta: 0.8},
+			{Gate: []float32{-0.3, -0.3, -0.3}, Key: []float32{0.125, 0.125, -0.875}, Val: []float32{0.5, 0.5, -0.5, -0.5}, Beta: 0.5},
+			{Gate: []float32{-0.05, -1.5, -0.75}, Key: []float32{1.0, -0.25, 0.5}, Val: []float32{-0.125, 2.0, -1.0, 0.375}, Beta: 0.6},
+			{Gate: []float32{-0.9, -0.1, -0.4}, Key: []float32{-0.5, 0.75, -1.25}, Val: []float32{0.25, -0.75, 1.5, -0.25}, Beta: 0.4},
+			{Gate: []float32{-0.2, -0.6, -0.2}, Key: []float32{0.375, -0.375, 0.625}, Val: []float32{-2.0, 0.125, -0.625, 1.25}, Beta: 0.9},
+			{Gate: []float32{-0.02, -0.02, -0.8}, Key: []float32{-1.5, 0.25, 0.75}, Val: []float32{0.625, -0.375, 0.875, -1.75}, Beta: 0.2},
+			{Gate: []float32{-0.4, -0.8, -0.15}, Key: []float32{0.875, -0.625, 0.125}, Val: []float32{-0.5, 1.75, -0.875, 0.0625}, Beta: 0.7},
+			{Gate: []float32{-0.15, -0.35, -0.55}, Key: []float32{-0.25, 1.25, -0.5}, Val: []float32{1.25, -1.25, 0.4375, -0.9375}, Beta: 0.55},
+		})
+
+	gdnVerifyRingOracleGeometry(t, "k4v2", 4, 2,
+		[]float32{1.0, -0.5, 0.25, 2.5, -1.5, 0.75, -0.125, 3.0},
+		[]GDNVerifyRingToken{
+			{Gate: []float32{-0.2, -0.4, -0.6, -0.8}, Key: []float32{0.5, -0.25, 1.0, -0.75}, Val: []float32{0.5, -1.5}, Beta: 0.4},
+			{Gate: []float32{-0.05, -0.9, -0.1, -0.3}, Key: []float32{-1.25, 0.5, 0.25, 0.875}, Val: []float32{-0.75, 0.25}, Beta: 0.7},
+			{Gate: []float32{-0.5, -0.5, -0.5, -0.5}, Key: []float32{0.125, -0.875, 0.625, -0.375}, Val: []float32{1.25, -0.5}, Beta: 0.5},
+			{Gate: []float32{-0.1, -0.2, -0.3, -0.4}, Key: []float32{2.0, -1.0, 0.5, -0.5}, Val: []float32{-0.25, 0.75}, Beta: 0.9},
+			{Gate: []float32{-0.7, -0.05, -1.1, -0.25}, Key: []float32{-0.625, 0.125, -1.5, 0.375}, Val: []float32{0.875, -1.25}, Beta: 0.3},
+			{Gate: []float32{-0.3, -0.6, -0.9, -0.15}, Key: []float32{0.75, -0.5, 0.25, -0.9375}, Val: []float32{-1.5, 0.625}, Beta: 0.6},
+			{Gate: []float32{-0.02, -0.8, -0.4, -0.6}, Key: []float32{-0.375, 1.25, -0.75, 0.5}, Val: []float32{0.125, -0.875}, Beta: 0.8},
+			{Gate: []float32{-0.45, -0.35, -0.25, -0.55}, Key: []float32{0.9375, -0.4375, 0.625, -0.125}, Val: []float32{-0.625, 1.0}, Beta: 0.5},
+			{Gate: []float32{-0.12, -0.22, -0.32, -0.42}, Key: []float32{-1.0, 0.875, -0.5, 0.25}, Val: []float32{0.5, -0.25}, Beta: 0.45},
+		})
+}
+
+func TestGDNVerifyRingManagerFold(t *testing.T) {
+	const keyDim, valDim = 3, 4
+	draftK := 4
+	mgr, err := NewRecurrentRollbackManager(2, draftK)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	base := RecurrentDeviceState{
+		ConvState: []float32{1.0, 2.0, 3.0},
+		RecState:  []float32{0.5, -1.25, 0.125, 2.0, -0.75, 1.5, -0.25, 0.375, 3.0, -0.125, 0.625, -2.5},
+	}
+	if err := mgr.RegisterSlot(0, base); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.EnableGDNRingRecording(0, keyDim, valDim); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.ShadowSlot(0); err != nil {
+		t.Fatal(err)
+	}
+
+	ops := []GDNVerifyRingToken{
+		{Gate: []float32{-0.1, -0.5, -2.0}, Key: []float32{0.5, -1.0, 0.25}, Val: []float32{1.0, -0.5, 0.75, -2.0}, Beta: 0.3},
+		{Gate: []float32{-0.01, -0.2, -1.0}, Key: []float32{-0.75, 0.5, 1.5}, Val: []float32{-1.5, 0.25, 0.5, 0.125}, Beta: 0.8},
+		{Gate: []float32{-0.3, -0.3, -0.3}, Key: []float32{0.125, 0.125, -0.875}, Val: []float32{0.5, 0.5, -0.5, -0.5}, Beta: 0.5},
+		{Gate: []float32{-0.05, -1.5, -0.75}, Key: []float32{1.0, -0.25, 0.5}, Val: []float32{-0.125, 2.0, -1.0, 0.375}, Beta: 0.6},
+	}
+	if err := mgr.RecordDraftTokensGDN(0, ops); err != nil {
+		t.Fatal(err)
+	}
+
+	// Sequential reference prefix states.
+	prefix := make([][]float32, draftK+1)
+	prefix[0] = base.RecState
+	for i, op := range ops {
+		var err error
+		prefix[i+1], err = GDNVerifyRingStep(prefix[i], op, keyDim, valDim)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for accept := 0; accept <= draftK; accept++ {
+		receipt, err := mgr.RollbackSlot(0, accept)
+		if err != nil {
+			t.Fatalf("accept=%d: %v", accept, err)
+		}
+		if receipt.Strategy != "gdn-verify-ring-fold" {
+			t.Fatalf("accept=%d: strategy %q, want gdn-verify-ring-fold", accept, receipt.Strategy)
+		}
+		wantBytes := int64(accept) * int64(GDNVerifyRingRecordElements(keyDim, valDim)) * 4
+		if receipt.D2DBytesCopied != wantBytes {
+			t.Fatalf("accept=%d: D2DBytesCopied %d, want %d", accept, receipt.D2DBytesCopied, wantBytes)
+		}
+		live, err := mgr.GetLiveState(0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range live.ConvState {
+			if math.Float32bits(live.ConvState[i]) != math.Float32bits(base.ConvState[i]) {
+				t.Fatalf("accept=%d: conv[%d]=%v, want shadow %v", accept, i, live.ConvState[i], base.ConvState[i])
+			}
+		}
+		for i := range prefix[accept] {
+			if math.Float32bits(live.RecState[i]) != math.Float32bits(prefix[accept][i]) {
+				t.Fatalf("accept=%d: rec[%d]=%v (bits %08x), want sequential %v (bits %08x)",
+					accept, i, live.RecState[i], math.Float32bits(live.RecState[i]),
+					prefix[accept][i], math.Float32bits(prefix[accept][i]))
+			}
+		}
+	}
+
+	// Fallback switch: a ring-recorded round fails closed while the ring fold is disabled.
+	mgr.SetRingRecording(false)
+	if _, err := mgr.RollbackSlot(0, 2); err == nil {
+		t.Fatal("expected fail-closed error rolling back a ring round with ring recording disabled")
+	}
+	mgr.SetRingRecording(true)
+
+	// The legacy full-state-clone path remains available for scalar rounds.
+	legacy := RecurrentDeviceState{ConvState: []float32{1.0}, RecState: []float32{2.0}}
+	if err := mgr.RegisterSlot(1, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.ShadowSlot(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.RecordDraftTokens(1, []float32{0.5, 0.25, -0.5, 1.0}); err != nil {
+		t.Fatal(err)
+	}
+	rcpt, err := mgr.RollbackSlot(1, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rcpt.Strategy != "device-slot-shadow-rewind" {
+		t.Fatalf("legacy strategy %q, want device-slot-shadow-rewind", rcpt.Strategy)
 	}
 }
