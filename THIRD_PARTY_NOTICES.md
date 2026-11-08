@@ -2494,3 +2494,28 @@ re-walks the whole pool per step. Scheduler integration into
 `internal/modelengine/kv_load_bookkeeping_test.go` (software evidence only).
 The full Apache License, Version 2.0 reproduced in the "TensorFold benchmark
 evidence" section above applies to this adaptation.
+
+## SGLang DSV4.1 Engram packed-gather (MXFP4 lookup tables, in-register E2M1 decode)
+
+`internal/compute/engram_packed_gather.go` adapts the packed conditional-memory
+(Engram) gather of SGLang PR #47935 ("DSV4.1 Engram packed-gather"), merged at
+`3f5b1bec8e00115bc8439b5b9a9da902822d2f82` on 2026-11-04:
+https://github.com/sgl-project/sglang/pull/47935
+Sources at that revision: `python/sglang/kernels/ops/embeddings/engram_gather.py`
+and `test/registered/kernels/ops/embeddings/test_engram_gather.py`.
+
+Copyright contributors to the SGLang project. SPDX-License-Identifier: Apache-2.0.
+Changed for Fak: idiomatic Go re-expression (no upstream code copied) as a closed
+in-memory component. The packed storage contract is kept bit-exact: two E2M1
+values per payload byte (even column in the low nibble), unchanged per-32 E8M0
+scales, and the gather decodes each element in-register so no widened copy of the
+table is materialized. Two deliberate deviations, both pinned by tests: the output
+carries the upstream bf16-rounded value as float32 instead of a bf16 ABI, and the
+reserved E8M0 scale byte 0xFF is refused at construction instead of being bitcast
+to +Inf. Witnessed by `TestEngramPackedGatherMatchesExpandedReferenceBitForBit`,
+`TestEngramPackedGatherNoExpansionAllocation`,
+`TestEngramPackedGatherSentinelErrors` and
+`TestEngramPackedGatherHalvesTableRowBytes` in
+`internal/compute/engram_packed_gather_test.go` (software evidence only; no
+hardware or whole-model performance claim). The full Apache License, Version 2.0
+text is reproduced in the "TensorFold benchmark evidence" section above.
