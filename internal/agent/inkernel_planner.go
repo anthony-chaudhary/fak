@@ -50,6 +50,7 @@ type InKernelPlanner struct {
 	dflash2                *DFlash2Target
 	m                      *model.Model
 	tok                    *tokenizer.Tokenizer
+	promptEncodeMemo       tokenizer.EncodeMemo
 	modelID                string
 	q4k                    bool            // resident-Q4_K load: decode runs Session.Q4K (SDOT int8 GEMV)
 	quant                  bool            // Q8_0 decode/prefill path (the served default); tests flip it to exercise the proven f32 reuse path
