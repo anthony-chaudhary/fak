@@ -61,6 +61,7 @@ import "fmt"
 // It fails closed exactly where NewTPPlan does — ranks must be in [1, len(load)] so no band is
 // empty — and additionally rejects a negative load entry (a pick histogram is a count, never
 // negative; a negative would be a miscomputed load vector, so refuse rather than balance garbage).
+// The aggregate load must also fit in int, the prefix-sum representation.
 func LoadBalancedExpertBands(load []int, ranks int) (TPPlan, error) {
 	n := len(load)
 	if n <= 0 {
@@ -81,6 +82,9 @@ func LoadBalancedExpertBands(load []int, ranks int) (TPPlan, error) {
 	// prefix[i] = sum of load[0..i). Band [a,b)'s load is prefix[b]-prefix[a] in O(1).
 	prefix := make([]int, n+1)
 	for i := 0; i < n; i++ {
+		if load[i] > int(^uint(0)>>1)-prefix[i] {
+			return TPPlan{}, fmt.Errorf("model: LoadBalancedExpertBands total load overflows int at expert %d", i)
+		}
 		prefix[i+1] = prefix[i] + load[i]
 	}
 	bandLoad := func(a, b int) int { return prefix[b] - prefix[a] }
@@ -89,7 +93,8 @@ func LoadBalancedExpertBands(load []int, ranks int) (TPPlan, error) {
 	//   best[k][i]  = the minimized largest band-load for that sub-partition (i >= k).
 	//   cut[k][i]   = the split index j so band k-1 is [j,i) — used to reconstruct boundaries.
 	// best[1][i] is just band [0,i). best[k][i] = min over j in [k-1,i-1] of
-	// max(best[k-1][j], load([j,i))). Ties break to the SMALLEST j (strict <), so the plan is
+	// max(best[k-1][j], load([j,i))). After the first candidate, strict < breaks ties to
+	// the SMALLEST j, so the plan is
 	// deterministic — the same load vector always yields byte-identical bands, matching the
 	// numeric discipline the rest of the EP path relies on.
 	const inf = int(^uint(0) >> 1)
@@ -110,14 +115,13 @@ func LoadBalancedExpertBands(load []int, ranks int) (TPPlan, error) {
 		// A k-band split of [0,i) needs i >= k experts; the last band [j,i) needs j >= k-1.
 		for i := k; i <= n; i++ {
 			for j := k - 1; j < i; j++ {
-				if best[k-1][j] == inf {
-					continue
-				}
+				// Every predecessor in this range is reachable (j >= k-1).
+				// MaxInt is also a valid load, not an unreachable-state marker.
 				cand := best[k-1][j]
 				if tail := bandLoad(j, i); tail > cand {
 					cand = tail
 				}
-				if cand < best[k][i] {
+				if cut[k][i] == 0 || cand < best[k][i] {
 					best[k][i] = cand
 					cut[k][i] = j
 				}
