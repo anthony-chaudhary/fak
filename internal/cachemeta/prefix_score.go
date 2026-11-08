@@ -1,6 +1,7 @@
 package cachemeta
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -171,11 +172,12 @@ func (t *PrefixStabilityTracker) Observe(turn []PromptSegment) PrefixStabilitySc
 		BreakEvenTokens:       t.breakEven(),
 	}
 
-	if t.baseline == nil {
+	// An observed empty span is still a baseline; its copied slice may be nil.
+	if t.baselineTurn == 0 {
 		score.State = PrefixUnknown
 		score.BaselineTurn = t.turns
 		score.Reason = "no baseline observed yet; this turn becomes the baseline"
-		t.baseline = append([]PromptSegment(nil), turn...)
+		t.baseline = clonePrefixScoreBaseline(turn)
 		t.baselineTurn = t.turns
 		return score
 	}
@@ -216,9 +218,18 @@ func (t *PrefixStabilityTracker) Observe(turn []PromptSegment) PrefixStabilitySc
 		}
 	}
 
-	t.baseline = append([]PromptSegment(nil), turn...)
+	t.baseline = clonePrefixScoreBaseline(turn)
 	t.baselineTurn = t.turns
 	return score
+}
+
+// Keep observed bytes independent of caller-owned buffers reused for later turns.
+func clonePrefixScoreBaseline(turn []PromptSegment) []PromptSegment {
+	baseline := append([]PromptSegment(nil), turn...)
+	for i := range baseline {
+		baseline[i].Content = bytes.Clone(baseline[i].Content)
+	}
+	return baseline
 }
 
 // breakEven answers the working-spine break-even question with RetainCheaperThanRecompute
