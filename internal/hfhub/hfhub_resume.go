@@ -145,6 +145,11 @@ func (c *Client) attemptTransfer(ctx context.Context, url, part, dst string, wan
 	resumed := false
 	switch resp.StatusCode {
 	case http.StatusPartialContent:
+		if offset == 0 {
+			// We requested the entire object. Without a digest, accepting an
+			// unsolicited suffix could publish incomplete bytes as a cache hit.
+			return errors.New("hfhub: download: unsolicited partial response to full-object request")
+		}
 		resumed = true
 		logf(progress, "resuming from byte %d", offset)
 	case http.StatusOK:

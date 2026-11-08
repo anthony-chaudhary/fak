@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,6 +20,55 @@ import (
 	"testing"
 	"time"
 )
+
+type unsolicitedPartialTransport func(*http.Request) (*http.Response, error)
+
+func (f unsolicitedPartialTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestDownloadRejectsUnsolicitedPartial(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing=%v", existing), func(t *testing.T) {
+			dst := filepath.Join(t.TempDir(), "object")
+			part := dst + partSuffix
+			if existing {
+				if err := os.WriteFile(dst, []byte("existing complete object"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(part, []byte("retained partial"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			calls := 0
+			client := &Client{HTTP: &http.Client{Transport: unsolicitedPartialTransport(func(r *http.Request) (*http.Response, error) {
+				calls++
+				if got := r.Header.Get("Range"); got != "" {
+					t.Fatalf("full-object request sent Range %q", got)
+				}
+				return &http.Response{StatusCode: http.StatusPartialContent, Header: http.Header{"Content-Range": {"bytes 7-12/13"}}, Body: io.NopCloser(strings.NewReader("suffix"))}, nil
+			})}}
+			want := "" // No trusted digest exists to catch a truncated object later.
+			if err := client.attemptTransfer(context.Background(), "https://fixture.invalid/object", part, dst, &want, nil); err == nil {
+				t.Fatal("unsolicited partial response was accepted")
+			}
+			if calls != 1 {
+				t.Fatalf("attempt made %d requests", calls)
+			}
+			for path, content := range map[string]string{dst: "existing complete object", part: "retained partial"} {
+				got, err := os.ReadFile(path)
+				if existing {
+					if err != nil || string(got) != content {
+						t.Fatalf("refusal changed existing file %s: %q, %v", path, got, err)
+					}
+				} else if !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("refusal created file %s: %v", path, err)
+				}
+			}
+		})
+	}
+}
 
 func TestParseURI(t *testing.T) {
 	cases := []struct {
