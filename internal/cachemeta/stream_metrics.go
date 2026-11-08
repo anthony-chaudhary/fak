@@ -70,6 +70,14 @@ func (m *StreamMetrics) Observe(kind string, e Entry) {
 		m.byKey = map[streamKey]*streamAgg{}
 	}
 	key := streamKey{plane: string(e.Plane), tier: string(e.Residency.Tier), kind: kind}
+	// Bucket by rendered label identity: empty and explicit "unknown" must
+	// not become duplicate Prometheus samples with the same label set.
+	if key.plane == "" {
+		key.plane = "unknown"
+	}
+	if key.tier == "" {
+		key.tier = "unknown"
+	}
 	agg := m.byKey[key]
 	if agg == nil {
 		agg = &streamAgg{}
