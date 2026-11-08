@@ -898,3 +898,68 @@ func TestStepPhaseBoundsDecodeStarvationByWaitingServedRatio(t *testing.T) {
 		t.Fatalf("ratio-satisfied phases = %v, want %v", got, want)
 	}
 }
+
+// TestContinuousBatcherStepPhaseStarvationBound pins the borrow leaf's closed
+// phase and counter matrix. It uses the batcher's model-free scheduler path;
+// these checks do not qualify device execution or throughput.
+// fak-test:runtime fast est=10ms lane=default
+func TestContinuousBatcherStepPhaseStarvationBound(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		resident int
+		ratio    float64
+		maxWait  int
+		phases   []BatchPhase
+		counters []int
+	}{
+		{name: "zero defaults without resident decode", phases: []BatchPhase{PhasePrefill}, counters: []int{0}},
+		{name: "zero defaults with one decoder", resident: 1, phases: []BatchPhase{PhasePrefill}, counters: []int{0}},
+		{name: "zero defaults with four decoders", resident: 4, phases: []BatchPhase{PhasePrefill}, counters: []int{0}},
+		{name: "zero defaults with seven decoders", resident: 7, phases: []BatchPhase{PhasePrefill}, counters: []int{0}},
+		{name: "four decodes then one prefill then decode", resident: 4, ratio: 1, maxWait: 4,
+			phases:   []BatchPhase{PhaseDecode, PhaseDecode, PhaseDecode, PhaseDecode, PhasePrefill, PhaseDecode},
+			counters: []int{1, 2, 3, 4, 0, 1}},
+		{name: "no resident decode bypasses nonzero gate", ratio: 1, maxWait: 4,
+			phases: []BatchPhase{PhasePrefill}, counters: []int{0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := DefaultContinuousBatcherConfig()
+			cfg.MaxSlots = 8
+			cfg.PrefillBudget = 2
+			cfg.WaitingServedRatio = tc.ratio
+			cfg.MaxWaitingDecodeSteps = tc.maxWait
+			cb, err := NewContinuousBatcher(cfg)
+			if err != nil {
+				t.Fatalf("NewContinuousBatcher: %v", err)
+			}
+			t.Cleanup(func() { _ = cb.Close() })
+			for i := 0; i < tc.resident; i++ {
+				if _, err := cb.Submit(&SubagentRequest{SessionID: fmt.Sprintf("resident-%d", i), PromptTokens: []int{i + 1}, TargetTokens: 100}); err != nil {
+					t.Fatalf("Submit decoder %d: %v", i, err)
+				}
+			}
+			if _, err := cb.Submit(&SubagentRequest{SessionID: "prefilling", PromptTokens: []int{1, 2, 3, 4, 5, 6, 7, 8}, TargetTokens: 100, ChunkedPrefill: true}); err != nil {
+				t.Fatalf("Submit prefilling: %v", err)
+			}
+			for i, want := range tc.phases {
+				res, err := cb.StepPhase(context.Background())
+				if err != nil {
+					t.Fatalf("step %d: %v", i+1, err)
+				}
+				if res.Phase != want {
+					t.Fatalf("step %d phase = %v, want %v", i+1, res.Phase, want)
+				}
+				if got := cb.decodeSinceRefill; got != tc.counters[i] {
+					t.Fatalf("step %d decodeSinceRefill = %d, want %d", i+1, got, tc.counters[i])
+				}
+				wantPrefill := 0
+				if want == PhasePrefill {
+					wantPrefill = cfg.PrefillBudget
+				}
+				if res.PrefillTokens != wantPrefill {
+					t.Fatalf("step %d PrefillTokens = %d, want %d", i+1, res.PrefillTokens, wantPrefill)
+				}
+			}
+		})
+	}
+}
