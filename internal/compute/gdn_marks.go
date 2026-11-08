@@ -204,6 +204,10 @@ func SelectGDNSlotKernel(peak float32, kernels []GDNSlotKernel) (GDNSlotKernel, 
 	if math.IsNaN(p) {
 		return GDNSlotKernel{}, ErrGDNSlotNaN
 	}
+	// A caller-provided infinite cap must not qualify non-finite state.
+	if math.IsInf(p, 0) {
+		return GDNSlotKernel{}, ErrGDNSlotOverflow
+	}
 	for _, k := range kernels {
 		if p <= float64(k.PeakCap) {
 			return k, nil
