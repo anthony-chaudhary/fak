@@ -2720,3 +2720,11 @@ Copyright contributors to the vLLM project. SPDX-License-Identifier: Apache-2.0.
 Reuse decision: ADAPT. No Python source copied; the Go component only selects
 a declaration and does not implement a cache backend. The Apache-2.0 license
 text already reproduced in this file applies.
+
+## Mooncake TENT fabric memory-registration contract
+
+Source: https://github.com/kvcache-ai/Mooncake at 2d41f1a62cf49cf464a8e2acee800708f34ee4af. Copyright 2026 KVCache.AI. Apache License 2.0, https://github.com/kvcache-ai/Mooncake/blob/2d41f1a62cf49cf464a8e2acee800708f34ee4af/LICENSE-APACHE.
+
+Adapted source: mooncake-transfer-engine/tent/include/tent/transport/fabric/fabric_attrs.h and fabric_transport.h, plus tent/src/transport/fabric/fabric_context.cpp and fabric_transport.cpp.
+
+The new internal/l3kv/device_mem_registration.go is a Go host planner adapting the host-versus-CUDA registration classification, ordinal propagation, CUDA-build/FI_HMEM refusal and all-context capability gate. It adds closed metadata validation and explicit unsupported-device refusal. It does not port CUDA/libfabric execution, registration resources, transport fallback, memory ownership or hardware transfer.

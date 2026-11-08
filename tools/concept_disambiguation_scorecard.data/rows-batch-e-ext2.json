@@ -13,7 +13,8 @@
         "x2-context-ctx-reasoncompactionthrash",
         "context-ctx-parallelquantloadcontextbudget",
         "context-ctx-quantmodelq4kprofileoptionscontext",
-        "native-structured-constraint-from-context"
+        "native-structured-constraint-from-context",
+        "registration-context-caps"
       ],
       "aliases": [
         "newrequestwithcontext",

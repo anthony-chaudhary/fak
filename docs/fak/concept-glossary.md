@@ -2469,3 +2469,31 @@ Pure V41DSparkResidency helper in internal/model/v41_dspark_residency.go checkin
 Constructor error sentinel in internal/compute/graph_cache_policy.go returned by NewGraphCachePolicy when a nonempty Voters slice contains a nil callback. Validation follows engine, capacity and minimum-retention checks and rejects the policy before any capture or replay. An absent or empty voter slice remains valid single-rank agreement.
 
 **Distinct from:** This reports an invalid graph-capture agreement callback configuration, not CachePolicyStream offline replay input data, a negative runtime rank vote, nil engine, invalid capacity or retention bounds, or a capture/replay engine failure. A non-nil callback returning false is valid and selects eager execution on a cache miss. Callback presence proves neither rank reachability nor hardware consensus.
+
+
+### ErrDeviceMemoryUnsupported
+
+Sentinel returned by the L3 KV host registration planner when a CUDA-resident buffer lacks enabled CUDA support or any installed transport context lacks CUDA-memory capability.
+
+**Distinct from:** This is a typed registration-capability refusal, not a generic support maturity grade, allocation failure, device probe or evidence that a transport executed.
+
+
+### RegistrationContextCaps
+
+Caller-supplied readiness and CUDA-memory capability flags for one installed transport context, consumed across the complete context set by the L3 KV registration planner.
+
+**Distinct from:** This is transport capability metadata, not Go context.Context cancellation plumbing, model context tokens or attestation of device ownership.
+
+
+### MemoryRegistrationPlan
+
+Successful L3 KV registration-planning result containing a scalar copy of buffer metadata, semantic host-or-CUDA interface classification and installed context count.
+
+**Distinct from:** This is a metadata result only, not a SessionResidencyPlan capacity reservation, registration handle, resource lifetime or completed transfer.
+
+
+### PlanMemoryRegistration
+
+Pure L3 KV function validating nonzero representable buffer spans, declared residency and ordinal consistency, and readiness/CUDA capability across the caller-supplied complete context set before returning a MemoryRegistrationPlan.
+
+**Distinct from:** This constructs checked registration metadata, not the passive MemoryRegistrationPlan result itself, a residency capacity plan, live memory registration or host-staging fallback. It cannot discover omitted contexts or prove physical pointer residency; the caller must supply truthful complete metadata.

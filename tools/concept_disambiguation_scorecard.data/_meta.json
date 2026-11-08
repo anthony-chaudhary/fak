@@ -13216,6 +13216,11 @@
           "category": "incidental",
           "reason": "Private io.Reader adapter checking Go context.Context cancellation before bounded payload copy reads. It is request lifecycle plumbing, not LLM prompt context, context-window planning, compaction or memory ownership.",
           "token": "conversionContextReader"
+        },
+        {
+          "category": "incidental",
+          "reason": "Appears only as the pinned upstream Mooncake fabric_context.cpp filename in the attribution comment of internal/l3kv/device_mem_registration.go. It identifies foreign donor source provenance, not a declared or invoked Fak Go API or transport context implementation. Actual RegistrationContextCaps is separately positioned.",
+          "token": "fabric_context"
         }
       ],
       "exclude": [
@@ -13340,6 +13345,7 @@
         "ctxsleep",
         "dflash2ContextKV",
         "engramLookAheadContext",
+        "fabric_context",
         "fak_fleet_repo_pulse_context_tokens_saved_total",
         "fak_gateway_compaction_thrash_sessions_total",
         "featureActivationContextKey",

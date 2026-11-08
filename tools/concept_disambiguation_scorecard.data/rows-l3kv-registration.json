@@ -1,0 +1,81 @@
+{
+  "rows": [
+    {
+      "id": "err-device-memory-unsupported",
+      "canonical": "ErrDeviceMemoryUnsupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "Sentinel returned by the L3 KV host registration planner when a CUDA-resident buffer lacks enabled CUDA support or any installed transport context lacks CUDA-memory capability.",
+      "distinction": "This is a typed registration-capability refusal, not a generic support maturity grade, allocation failure, device probe or evidence that a transport executed.",
+      "distinct_from": [
+        "fitplan-runtime-unsupported"
+      ],
+      "aliases": [],
+      "grounding": "ErrDeviceMemoryUnsupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "registration-context-caps",
+      "canonical": "RegistrationContextCaps",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Caller-supplied readiness and CUDA-memory capability flags for one installed transport context, consumed across the complete context set by the L3 KV registration planner.",
+      "distinction": "This is transport capability metadata, not Go context.Context cancellation plumbing, model context tokens or attestation of device ownership.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "RegistrationContextCaps",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "memory-registration-plan",
+      "canonical": "MemoryRegistrationPlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Successful L3 KV registration-planning result containing a scalar copy of buffer metadata, semantic host-or-CUDA interface classification and installed context count.",
+      "distinction": "This is a metadata result only, not a SessionResidencyPlan capacity reservation, registration handle, resource lifetime or completed transfer.",
+      "distinct_from": [
+        "plan-sessionresidency",
+        "plan-memory-registration"
+      ],
+      "aliases": [],
+      "grounding": "MemoryRegistrationPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "plan-memory-registration",
+      "canonical": "PlanMemoryRegistration",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Pure L3 KV function validating nonzero representable buffer spans, declared residency and ordinal consistency, and readiness/CUDA capability across the caller-supplied complete context set before returning a MemoryRegistrationPlan.",
+      "distinction": "This constructs checked registration metadata, not the passive MemoryRegistrationPlan result itself, a residency capacity plan, live memory registration or host-staging fallback. It cannot discover omitted contexts or prove physical pointer residency; the caller must supply truthful complete metadata.",
+      "distinct_from": [
+        "plan-sessionresidency",
+        "memory-registration-plan"
+      ],
+      "aliases": [],
+      "grounding": "PlanMemoryRegistration",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

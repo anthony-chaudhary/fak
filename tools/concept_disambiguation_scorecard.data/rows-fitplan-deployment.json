@@ -47,7 +47,8 @@
       "definition": "The placement planner value declaring that the requested model placement lacks runtime support in the caller supplied execution envelope.",
       "distinction": "A caller declaration that prevents eligibility even when memory fits; it is neither a hardware qualification result nor a capacity overflow.",
       "distinct_from": [
-        "support"
+        "support",
+        "err-device-memory-unsupported"
       ],
       "aliases": [],
       "grounding": "SupportUnsupported",
