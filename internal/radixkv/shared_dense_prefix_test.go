@@ -270,11 +270,12 @@ func TestSharedDensePrefixStaleBoundaryPreservesLeases(t *testing.T) {
 	}
 }
 
-// assertSharedDenseCoverageCache compares semantic metadata through clones (which
-// reset transient mutation generations) and checks every numeric bit explicitly.
+// assertSharedDenseCoverageCache compares every semantic field and numeric bit.
+// Clone preserves mutation generations, which describe cache history rather than
+// prefix contents: splitting a legacy cache increments one, materializing does not.
 func assertSharedDenseCoverageCache(t *testing.T, want, got *model.KVCache) {
 	t.Helper()
-	if want == nil || got == nil || !reflect.DeepEqual(want.Clone(), got.Clone()) {
+	if !sharedDenseCoverageStateEqual(want, got) {
 		t.Fatal("retained configuration/positions/lineage/payload differ from fresh oracle")
 	}
 	for plane, rows := range [][][]float32{want.K, want.Kraw, want.V} {
@@ -285,6 +286,129 @@ func assertSharedDenseCoverageCache(t *testing.T, want, got *model.KVCache) {
 		for l := range rows {
 			assertSharedDenseCoverageFloats(t, rows[l], other[l])
 		}
+	}
+}
+
+// fak-test:runtime fast est=500ms lane=default
+func TestSharedDenseCoverageSemanticEquality(t *testing.T) {
+	m := denseSharingModel()
+	s := m.NewSession()
+	defer s.Close()
+	s.Prefill([]int{1, 2, 3})
+	truncated := s.Cache.ClonePrefixExact(2)
+	fresh := m.NewSession()
+	defer fresh.Close()
+	fresh.Prefill([]int{1, 2})
+	if reflect.DeepEqual(truncated, fresh.Cache) {
+		t.Fatal("fixture must retain distinct mutation histories")
+	}
+	if !sharedDenseCoverageStateEqual(truncated, fresh.Cache) {
+		t.Fatal("equal prefix contents rejected for different histories")
+	}
+	changed := truncated.Clone()
+	changed.K[0][0] = changed.K[0][0] + 1
+	if sharedDenseCoverageStateEqual(changed, truncated) {
+		t.Fatal("changed payload accepted")
+	}
+	// Private fields are substantive, including nested fields named mutGen.
+	type metadata struct {
+		positions []int
+		lineage   []uint32
+		config    map[string]string
+		mutGen    uint64
+	}
+	want := metadata{[]int{0, 1}, []uint32{1, 2}, map[string]string{"model": "a"}, 1}
+	for _, got := range []metadata{
+		{[]int{0, 2}, []uint32{1, 2}, map[string]string{"model": "a"}, 1},
+		{[]int{0, 1}, []uint32{1, 3}, map[string]string{"model": "a"}, 1},
+		{[]int{0, 1}, []uint32{1, 2}, map[string]string{"model": "b"}, 1},
+		{[]int{0, 1}, []uint32{1, 2}, map[string]string{"model": "a"}, 2},
+	} {
+		if sharedDenseCoverageValueEqual(reflect.ValueOf(want), reflect.ValueOf(got), 0) {
+			t.Fatal("changed private metadata accepted")
+		}
+	}
+	if !sharedDenseCoverageValueEqual(reflect.ValueOf(want), reflect.ValueOf(want), 0) {
+		t.Fatal("equal private metadata rejected")
+	}
+	if sharedDenseCoverageValueEqual(reflect.ValueOf([]int(nil)), reflect.ValueOf([]int{}), 0) {
+		t.Fatal("nil and empty metadata conflated")
+	}
+}
+
+func sharedDenseCoverageStateEqual(want, got *model.KVCache) bool {
+	if want == nil || got == nil {
+		return false
+	}
+	a, b := reflect.ValueOf(want).Elem(), reflect.ValueOf(got).Elem()
+	for i := 0; i < a.NumField(); i++ {
+		if a.Type().Field(i).Name == "mutGen" && a.Field(i).Kind() == reflect.Uint64 {
+			continue // Only this top-level historical counter is excluded.
+		}
+		if !sharedDenseCoverageValueEqual(a.Field(i), b.Field(i), 0) {
+			return false
+		}
+	}
+	return true
+}
+
+// Read fields through reflection without unsafe or Interface on private fields.
+// Unlike DeepEqual's identity shortcuts, inspect pointed-to/sliced contents too.
+// Unexpected recursive shapes fail closed rather than silently losing coverage.
+func sharedDenseCoverageValueEqual(a, b reflect.Value, depth int) bool {
+	if depth > 64 || a.Type() != b.Type() {
+		return false
+	}
+	switch a.Kind() {
+	case reflect.Bool:
+		return a.Bool() == b.Bool()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return a.Int() == b.Int()
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return a.Uint() == b.Uint()
+	case reflect.String:
+		return a.String() == b.String()
+	case reflect.Float32, reflect.Float64:
+		return a.Float() == b.Float()
+	case reflect.Complex64, reflect.Complex128:
+		return a.Complex() == b.Complex()
+	case reflect.Pointer, reflect.Interface:
+		if a.IsNil() || b.IsNil() {
+			return a.IsNil() == b.IsNil()
+		}
+		return sharedDenseCoverageValueEqual(a.Elem(), b.Elem(), depth+1)
+	case reflect.Struct:
+		for i := 0; i < a.NumField(); i++ {
+			if !sharedDenseCoverageValueEqual(a.Field(i), b.Field(i), depth+1) {
+				return false
+			}
+		}
+		return true
+	case reflect.Slice, reflect.Array:
+		if a.Len() != b.Len() || (a.Kind() == reflect.Slice && a.IsNil() != b.IsNil()) {
+			return false
+		}
+		for i := 0; i < a.Len(); i++ {
+			if !sharedDenseCoverageValueEqual(a.Index(i), b.Index(i), depth+1) {
+				return false
+			}
+		}
+		return true
+	case reflect.Map:
+		if a.IsNil() != b.IsNil() || a.Len() != b.Len() {
+			return false
+		}
+		for _, key := range a.MapKeys() {
+			other := b.MapIndex(key)
+			if !other.IsValid() || !sharedDenseCoverageValueEqual(a.MapIndex(key), other, depth+1) {
+				return false
+			}
+		}
+		return true
+	case reflect.Func:
+		return a.IsNil() && b.IsNil()
+	default:
+		return false
 	}
 }
 
