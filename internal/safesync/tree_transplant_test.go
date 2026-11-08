@@ -858,3 +858,102 @@ func TestSyntheticTreeTransplantSignsOffEffectiveCommitter(t *testing.T) {
 		t.Fatalf("want exactly one %q trailer, got %d in commit message %q", wantSignoff, signoffs, body)
 	}
 }
+
+// fak-test:justify regression issue=14249 real Git tracked/staged incoming collisions must preserve all local state.
+func TestDisjointTrackedIncomingCollision(t *testing.T) {
+	for _, entry := range []string{"reconcile", "transplant"} {
+		for _, mode := range []string{"unstaged", "staged", "mixed", "index-only", "deleted", "renamed", "whitespace-path", "inspection-error", "remote-rename-index-only"} {
+			t.Run(entry+"/"+mode, func(t *testing.T) {
+				origin, repo := setupTestOriginAndClone(t)
+				path := "incoming name.txt"
+				if mode == "whitespace-path" {
+					path = " incoming\nname.txt "
+				}
+				writeFile(t, filepath.Join(origin, path), "base\n")
+				git(t, origin, "add", path)
+				git(t, origin, "commit", "-m", "base incoming")
+				git(t, repo, "fetch", "origin")
+				git(t, repo, "merge", "--ff-only", "origin/work")
+				if mode == "remote-rename-index-only" {
+					git(t, origin, "mv", path, "remote-renamed.txt")
+				} else {
+					writeFile(t, filepath.Join(origin, path), "remote\n")
+					git(t, origin, "add", path)
+				}
+				git(t, origin, "commit", "-m", "remote incoming")
+				writeFile(t, filepath.Join(repo, "local.txt"), "local committed\n")
+				git(t, repo, "add", "local.txt")
+				git(t, repo, "commit", "-m", "disjoint local")
+				git(t, repo, "fetch", "origin")
+				writeFile(t, filepath.Join(repo, path), "uncommitted\n")
+				if mode == "staged" || mode == "mixed" || mode == "index-only" || mode == "remote-rename-index-only" {
+					git(t, repo, "add", path)
+				}
+				if mode == "index-only" || mode == "remote-rename-index-only" {
+					writeFile(t, filepath.Join(repo, path), "base\n")
+				}
+				if mode == "mixed" {
+					writeFile(t, filepath.Join(repo, path), "different worktree\n")
+				}
+				if mode == "deleted" {
+					if err := os.Remove(filepath.Join(repo, path)); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if mode == "renamed" {
+					git(t, repo, "add", path)
+					git(t, repo, "mv", path, "renamed.txt")
+				}
+				head := revString(t, repo, "HEAD")
+				index := gitOutput(t, repo, "ls-files", "--stage", "-z")
+				status := gitOutput(t, repo, "status", "--porcelain=v1", "-z")
+				before, beforeErr := os.ReadFile(filepath.Join(repo, path))
+				inspectedFailure := false
+				runner := func(ctx context.Context, repo string, args ...string) RunResult {
+					if mode == "inspection-error" && strings.Join(args, " ") == "diff --name-only --no-renames -z --cached --" {
+						inspectedFailure = true
+						return RunResult{Code: 1, Stderr: []byte("injected index inspection failure")}
+					}
+					return RealRunner(ctx, repo, args...)
+				}
+				if entry == "transplant" {
+					sha, err := TransplantDisjointTreeWithRunner(context.Background(), runner, repo, "work", head, revString(t, repo, "origin/work"), "origin/work")
+					if err == nil || sha != "" {
+						t.Errorf("transplant must refuse before ref mutation: sha=%s err=%v", sha, err)
+					}
+				} else {
+					res, err := RouteReconciliation(context.Background(), ReconcileOptions{Repo: repo, Remote: "origin", Branch: "work", Goal: "publish", Apply: true, Runner: runner})
+					if mode == "inspection-error" {
+						if err == nil {
+							t.Error("inspection failure must refuse")
+						}
+					} else if err != nil {
+						t.Fatal(err)
+					}
+					if mode != "inspection-error" && (res.Route != RouteHoldDirtyCollision || res.Applied || res.OK) {
+						t.Errorf("expected collision refusal: %+v", res)
+					}
+				}
+				if mode == "inspection-error" && !inspectedFailure {
+					t.Error("injection was not exercised")
+				}
+				if got := revString(t, repo, "HEAD"); got != head {
+					t.Errorf("HEAD changed: %s -> %s", head, got)
+				}
+				if got := gitOutput(t, repo, "ls-files", "--stage", "-z"); got != index {
+					t.Error("index changed")
+				}
+				if got := gitOutput(t, repo, "status", "--porcelain=v1", "-z"); got != status {
+					t.Error("dirty status changed")
+				}
+				after, afterErr := os.ReadFile(filepath.Join(repo, path))
+				if string(after) != string(before) || os.IsNotExist(afterErr) != os.IsNotExist(beforeErr) {
+					t.Error("tracked WIP changed")
+				}
+				if mode == "renamed" && readFile(t, filepath.Join(repo, "renamed.txt")) != "uncommitted\n" {
+					t.Error("renamed WIP changed")
+				}
+			})
+		}
+	}
+}

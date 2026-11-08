@@ -759,6 +759,18 @@ func (r *ReconcileRouter) routeInternal(ctx context.Context, phases *reconcilePh
 
 	divergence := classifyDivergedPaths(ctx, run, repo, headSHA, targetSHA)
 	if divergence == ReasonDivergedDisjoint {
+		trackedCollisions, err := trackedIncomingCollisions(ctx, run, repo, headSHA+"..."+targetSHA)
+		if err != nil {
+			return ReconcileAssessment{}, err
+		}
+		if len(trackedCollisions) > 0 {
+			assessment.Route = RouteHoldDirtyCollision
+			assessment.OK = false
+			assessment.Reason = ReasonCollisionRisk
+			assessment.CollidingPaths = trackedCollisions
+			assessment.Detail = fmt.Sprintf("refusing disjoint integrate: tracked dirty incoming paths: %q", trackedCollisions)
+			return assessment, nil
+		}
 		incomingFiles := incomingDisjointPaths(ctx, run, repo, headSHA, targetSHA)
 		collidingUntracked := detectCollidingUntracked(ctx, run, repo, incomingFiles)
 		quarantineEnabled := r.opts.AutoQuarantine || r.opts.QuarantineScratch

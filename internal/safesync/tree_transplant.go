@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -202,6 +203,16 @@ func TransplantDisjointTreeWithRunner(ctx context.Context, run Runner, repo, bra
 		return "", errors.New("git merge-tree returned empty tree OID")
 	}
 	treeOID := strings.TrimSpace(lines[0])
+
+	// Guard the actual merged write set before minting a commit or moving refs.
+	// Committed branch disjointness says nothing about uncommitted tracked edits.
+	collisions, err := trackedIncomingCollisions(ctx, run, repo, headSHA+".."+treeOID)
+	if err != nil {
+		return "", err
+	}
+	if len(collisions) > 0 {
+		return "", fmt.Errorf("refusing disjoint transplant: tracked dirty incoming paths: %q", collisions)
+	}
 
 	// 2. Mint two-parent merge commit object directly in Git ODB
 	// Git's effective committer honors environment overrides that user config does not.
@@ -466,4 +477,69 @@ func EnsureIncomingOnDisk(ctx context.Context, run Runner, repo, headSHA, commit
 		lastErr = checkoutPaths(ctx, run, repo, commit, unsynced)
 	}
 	return &TransplantWorktreeError{Commit: commit, Missing: unsynced, Err: lastErr}
+}
+
+// trackedIncomingCollisions preserves exact NUL-delimited Git paths, including
+// whitespace. Separate index and worktree diffs catch staged edits even when
+// the worktree has been restored to HEAD, and both sides of local renames.
+func trackedIncomingCollisions(ctx context.Context, run Runner, repo, incomingRevision string) ([]string, error) {
+	paths := func(extra ...string) ([]string, error) {
+		args := []string{"diff", "--name-only", "--no-renames", "-z"}
+		args = append(args, extra...)
+		args = append(args, "--")
+		result := run(ctx, repo, args...)
+		if result.Err != nil || result.Code != 0 {
+			return nil, fmt.Errorf("tracked incoming collision inspection: %s", runDetail(result))
+		}
+		var out []string
+		for _, path := range strings.Split(string(result.Stdout), "\x00") {
+			if path != "" {
+				out = append(out, path)
+			}
+		}
+		return out, nil
+	}
+	// Deleted rename sources are preserved by existing clean-only removal;
+	// guard the added/modified/type-changed destinations that checkout writes.
+	incoming, err := paths("--diff-filter=AMT", incomingRevision)
+	if err != nil {
+		return nil, err
+	}
+	writes := make(map[string]bool, len(incoming))
+	for _, path := range incoming {
+		writes[path] = true
+	}
+	// Index synchronization and rename cleanup can also remove deleted sources.
+	// Unlike an unstaged dirty rename source (which removal preserves), staged
+	// source edits must be refused even when the worktree equals the old HEAD.
+	stagedIncoming, err := paths(incomingRevision)
+	if err != nil {
+		return nil, err
+	}
+	stagedWrites := make(map[string]bool, len(stagedIncoming))
+	for _, path := range stagedIncoming {
+		stagedWrites[path] = true
+	}
+	dirty := make(map[string]bool)
+	for i, extra := range [][]string{nil, {"--cached"}} {
+		changed, err := paths(extra...)
+		if err != nil {
+			return nil, err
+		}
+		affected := writes
+		if i == 1 {
+			affected = stagedWrites
+		}
+		for _, path := range changed {
+			if affected[path] {
+				dirty[path] = true
+			}
+		}
+	}
+	collisions := make([]string, 0, len(dirty))
+	for path := range dirty {
+		collisions = append(collisions, path)
+	}
+	sort.Strings(collisions)
+	return collisions, nil
 }
