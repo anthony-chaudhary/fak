@@ -718,6 +718,62 @@ func TestElasticBlockAllocator_LIFOInvariantTransitions(t *testing.T) {
 	})
 }
 
+// fak-test:runtime fast est=10ms lane=default
+func TestElasticBlockAllocator_CachedReleaseQueueing(t *testing.T) {
+	for _, draining := range []bool{false, true} {
+		t.Run(fmt.Sprintf("draining=%v", draining), func(t *testing.T) {
+			a, err := NewElasticBlockAllocator(ElasticBlockAllocatorConfig{InitialBlocks: 3, ModelCfg: testModelConfig(), BlockTokens: 16})
+			if err != nil {
+				t.Fatal(err)
+			}
+			check := func(err error) {
+				t.Helper()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := a.VerifyInvariant(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			check(a.RegisterSequence("s", 0))
+			var ids [3]int
+			for i := range ids {
+				ids[i], err = a.AllocBlock("s")
+				check(err)
+			}
+			if draining {
+				check(a.RequestDrain(2))
+				if a.State() != StateDraining {
+					t.Fatal("expected drain pending owned blocks")
+				}
+				check(a.ReleaseCachedBlock("s", ids[0]))
+				if a.currentTotal != 2 || a.freeBlocks[ids[0]] || a.cachedFree[ids[0]] || len(a.cachedBlocks) != 0 || a.State() != StateStable {
+					t.Fatal("cached release during drain was queued instead of retired")
+				}
+				return
+			}
+			check(a.FreeBlock("s", ids[0]))
+			check(a.ReleaseCachedBlock("s", ids[1]))
+			if !a.freeBlocks[ids[0]] || !a.freeBlocks[ids[1]] || a.cachedFree[ids[0]] || !a.cachedFree[ids[1]] || len(a.recycledBlocks) != 1 || a.recycledBlocks[0] != ids[0] || len(a.cachedBlocks) != 1 || a.cachedBlocks[0] != ids[1] {
+				t.Fatal("release queues do not preserve uncached/cached ownership")
+			}
+			// Ordering hints may outlive a block; neither stale entry is free.
+			a.recycledBlocks = append(a.recycledBlocks, -1)
+			a.cachedBlocks = append([]int{-1}, a.cachedBlocks...)
+			for _, want := range []int{ids[0], ids[1]} {
+				got, err := a.AllocBlock("s")
+				check(err)
+				if got != want {
+					t.Fatalf("allocated %d want %d after stale entry", got, want)
+				}
+			}
+			if len(a.recycledBlocks) != 0 || len(a.cachedBlocks) != 0 {
+				t.Fatal("stale ordering entries not discarded")
+			}
+		})
+	}
+}
+
 func TestElasticBlockAllocatorReusesCachedBlocksFIFOAfterUncachedLIFO(t *testing.T) {
 	alloc, err := NewElasticBlockAllocator(ElasticBlockAllocatorConfig{
 		InitialBlocks: 6,
@@ -730,21 +786,31 @@ func TestElasticBlockAllocatorReusesCachedBlocksFIFOAfterUncachedLIFO(t *testing
 	if err := alloc.RegisterSequence("seq", 0); err != nil {
 		t.Fatalf("register: %v", err)
 	}
+	checkInvariant := func(stage string) {
+		t.Helper()
+		if err := alloc.VerifyInvariant(); err != nil {
+			t.Fatalf("invariant after %s: %v", stage, err)
+		}
+	}
+	checkInvariant("registration")
 	first := make([]int, 4)
 	for i := range first {
 		if first[i], err = alloc.AllocBlock("seq"); err != nil {
 			t.Fatalf("alloc %d: %v", i, err)
 		}
+		checkInvariant(fmt.Sprintf("initial allocation %d", i))
 	}
 	for _, id := range first[:2] {
 		if err := alloc.FreeBlock("seq", id); err != nil {
 			t.Fatalf("free uncached %d: %v", id, err)
 		}
+		checkInvariant(fmt.Sprintf("uncached release %d", id))
 	}
 	for _, id := range first[2:] {
 		if err := alloc.ReleaseCachedBlock("seq", id); err != nil {
 			t.Fatalf("release cached %d: %v", id, err)
 		}
+		checkInvariant(fmt.Sprintf("cached release %d", id))
 	}
 
 	var fresh []int
@@ -770,4 +836,5 @@ func TestElasticBlockAllocatorReusesCachedBlocksFIFOAfterUncachedLIFO(t *testing
 	if _, err := alloc.AllocBlock("seq"); !errors.Is(err, ErrAllocCapacityExceeded) {
 		t.Fatalf("alloc past capacity err = %v, want ErrAllocCapacityExceeded", err)
 	}
+	checkInvariant("capacity refusal")
 }
