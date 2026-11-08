@@ -2462,3 +2462,10 @@ Shared pure architecture and runtime eligibility rule in fp4meta for the cuBLASL
 Pure V41DSparkResidency helper in internal/model/v41_dspark_residency.go checking that declared draft and target byte counts are both nonnegative and their int64 sum is representable before residency admission uses that sum. FitsHost requires it before comparing ResidentBytes with HostBudgetBytes.
 
 **Distinct from:** This establishes arithmetic validity of two declared model byte counts, not SessionResidencyPlan total enforced serving footprint, available host capacity, node-count sufficiency, or proof that weights are loaded; a valid byte plan can still fail FitsHost or resident-claim admission.
+
+
+### ErrGraphCacheNilVoter
+
+Constructor error sentinel in internal/compute/graph_cache_policy.go returned by NewGraphCachePolicy when a nonempty Voters slice contains a nil callback. Validation follows engine, capacity and minimum-retention checks and rejects the policy before any capture or replay. An absent or empty voter slice remains valid single-rank agreement.
+
+**Distinct from:** This reports an invalid graph-capture agreement callback configuration, not CachePolicyStream offline replay input data, a negative runtime rank vote, nil engine, invalid capacity or retention bounds, or a capture/replay engine failure. A non-nil callback returning false is valid and selects eager execution on a cache miss. Callback presence proves neither rank reachability nor hardware consensus.

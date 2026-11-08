@@ -58,6 +58,46 @@ func (e *fakeGraphCacheExecutable) Release() {
 
 var errGraphCacheBodyFailed = errors.New("graph cache policy test: body failed")
 
+// fak-test:runtime fast est=1ms lane=default
+func TestGraphCachePolicyVoterOwnership(t *testing.T) {
+	for _, allow := range []bool{false, true} {
+		t.Run(fmt.Sprintf("allow=%v", allow), func(t *testing.T) {
+			eng := newFakeGraphCacheEngine()
+			votes := 0
+			voters := []func() bool{func() bool { votes++; return allow }}
+			p, err := NewGraphCachePolicy(eng, GraphCachePolicyOptions{On: true, Cap: 1, Voters: voters})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if allow {
+				voters[0] = nil // Must not turn an admitted callback into a panic.
+			} else {
+				voters[0] = func() bool { return true } // Must not bypass the declining rank.
+			}
+			bodies := 0
+			out, err := p.Run("a", 1, func() error { bodies++; return nil })
+			if err != nil || votes != 1 {
+				t.Fatalf("vote lost: outcome=%v votes=%d error=%v", out, votes, err)
+			}
+			if allow {
+				if out != GraphRunCaptured || bodies != 1 || eng.begins != 1 || p.Len() != 1 {
+					t.Fatal("owned allowing vote failed to capture")
+				}
+				p.RecordPeerFailure() // Release the fake executable through its owner.
+			} else if out != GraphRunEager || bodies != 0 || eng.begins != 0 || eng.eagres != 1 || p.Len() != 0 {
+				t.Fatal("caller replacement bypassed declining vote")
+			}
+		})
+	}
+	for _, on := range []bool{false, true} {
+		eng := newFakeGraphCacheEngine()
+		p, err := NewGraphCachePolicy(eng, GraphCachePolicyOptions{On: on, Cap: 1, Voters: []func() bool{func() bool { return true }, nil}})
+		if p != nil || !errors.Is(err, ErrGraphCacheNilVoter) || eng.begins != 0 || eng.eagres != 0 {
+			t.Fatalf("malformed voter list accepted: policy=%v error=%v", p, err)
+		}
+	}
+}
+
 // TestGraphCachePolicyCaptureReplayEvict pins the TensorFold graph-cache
 // contract adapted in graph_cache_policy.go (zig/src/cuda/graph_cache.zig:178
 // @9e8c368b0b4c2c7892a0c9f0f302d7c164016209): capture-once/replay-on-hit,

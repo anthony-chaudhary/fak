@@ -117,7 +117,7 @@ type GraphCachePolicyOptions struct {
 	Hold bool
 	// Voters are per-rank agree votes consulted on misses only. Every voter
 	// must return true before a capture is attempted; nil or empty means a
-	// single rank that always agrees.
+	// single rank that always agrees. A nonempty list must not contain nil.
 	Voters []func() bool
 }
 
@@ -128,13 +128,17 @@ var (
 	ErrGraphCacheBadCap = errors.New("compute: graph cache policy cap must be positive")
 	// ErrGraphCacheBadMinKeep reports MinKeep outside [0, Cap).
 	ErrGraphCacheBadMinKeep = errors.New("compute: graph cache policy min_keep must be below cap")
+	// ErrGraphCacheNilVoter reports an absent callback in a nonempty voter list.
+	ErrGraphCacheNilVoter = errors.New("compute: graph cache policy voter must be non-nil")
 )
 
 type graphPolicyEntry struct {
 	exec GraphCacheExecutable
 }
 
-// NewGraphCachePolicy validates opts and returns an empty policy.
+// NewGraphCachePolicy validates opts and returns an empty policy. It owns a copy
+// of the voter list; callers must not mutate that list during construction.
+// State captured by each callback remains the caller's responsibility.
 func NewGraphCachePolicy(eng GraphCacheEngine, opts GraphCachePolicyOptions) (*GraphCachePolicy, error) {
 	if eng == nil {
 		return nil, ErrGraphCacheNilEngine
@@ -145,12 +149,18 @@ func NewGraphCachePolicy(eng GraphCacheEngine, opts GraphCachePolicyOptions) (*G
 	if opts.MinKeep < 0 || opts.MinKeep >= opts.Cap {
 		return nil, ErrGraphCacheBadMinKeep
 	}
+	voters := append([]func() bool(nil), opts.Voters...)
+	for _, vote := range voters {
+		if vote == nil {
+			return nil, ErrGraphCacheNilVoter
+		}
+	}
 	return &GraphCachePolicy{
 		eng:     eng,
 		cap:     opts.Cap,
 		minKeep: opts.MinKeep,
 		hold:    opts.Hold,
-		voters:  opts.Voters,
+		voters:  voters,
 		on:      opts.On,
 		entries: make(map[string]graphPolicyEntry),
 	}, nil

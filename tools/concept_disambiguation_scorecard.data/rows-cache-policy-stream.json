@@ -8,7 +8,8 @@
       "definition": "A flat deterministic sequence of unit-sized expert groups consumed by offline cache-policy replay.",
       "distinction": "Offline replay input data; it neither selects serving eviction policy nor owns a runtime cache or route-trace emitter.",
       "distinct_from": [
-        "expert-tier-cache-tier"
+        "expert-tier-cache-tier",
+        "graph-cache-nil-voter"
       ],
       "aliases": [],
       "grounding": "CachePolicyStream",

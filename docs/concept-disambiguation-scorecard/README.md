@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **1** (clarity 0 + coverage 1) |
-| **Crystal-clear concepts (and climbing)** | **1651** crystal of 4122 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **4190 / 4191** (100.0% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **1652** crystal of 4123 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **4191 / 4192** (100.0% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 311 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **93** of 5581 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **93** of 5582 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 100.0/100 (grade A) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 4122 concepts - score 100.0/100 (grade A) - disambiguation-debt 1
+concept-disambiguation chart - 4123 concepts - score 100.0/100 (grade A) - disambiguation-debt 1
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ###################......... 1651
+  * crystal       ###################......... 1652
   o defined       ############################ 2471
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -40,7 +40,7 @@ clarity ladder (count of concepts, best -> fog):
 
 clarity mix by family (each cell = one concept):
   attention        ***************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (246 concept(s); 99 crystal)
-  cache            ****************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (406 concept(s); 160 crystal)
+  cache            *****************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (407 concept(s); 161 crystal)
   context-ctx      ********************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (308 concept(s); 104 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         ***************************************ooooooooooooooooooooooooo (64 concept(s); 39 crystal)
@@ -64,7 +64,7 @@ clarity mix by family (each cell = one concept):
 coverage by family (positioned / discovered):
   session-runtime  ############################ 388/389
   attention        ############################ 241/241
-  cache            ############################ 455/455
+  cache            ############################ 456/456
   context-ctx      ############################ 335/335
   cross-cluster    ............................ 0/0
   decision         ############################ 68/68
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   vfs              ............................ 0/0
   witness-proof    ############################ 200/200
 
-namespace coverage  [################################] 100.0%  (4190/4191 confusable tokens positioned)
+namespace coverage  [################################] 100.0%  (4191/4192 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 311
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 311/311
 
-name index: 5581 lookup name(s) -> 4122 concept(s), 93 ambiguous
+name index: 5582 lookup name(s) -> 4123 concept(s), 93 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **311 / 311** (311 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 3616 / 7889 |
+| Boundaries drawn (mutual / total) | 3618 / 7891 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 5581 over 4122 concepts |
+| Lookup names indexed | 5582 over 4123 concepts |
 | Lookup names landing on several concepts | 93 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 4122 |
+| Concepts carrying a contrast set | 4123 |
 
 ## The concepts (best verdict first)
 
@@ -336,6 +336,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | config | cache | **CacheTTL1h** - CacheTTL1h (internal/gateway/cache_pricing.go) is the extended 1-hour ephemeral provider prompt-cache TTL tier, priced above the 5-minute default. |
 | * | crystal | symbol | cache | **UpgradeAnthropicStableCacheTTL1h** - UpgradeAnthropicStableCacheTTL1h (internal/agent/anthropic_cachebp.go) rewrites an Anthropic request body to upgrade stable cache_control breakpoints to the 1h TTL tier, returning a typed upgrade outcome. |
 | * | crystal | metric | cache | **fak_gateway_cache_ttl_upgrade_total** - fak_gateway_cache_ttl_upgrade_total is the /metrics counter witnessing managed-cache TTL upgrades by outcome label. |
+| * | crystal | symbol | cache | **ErrGraphCacheNilVoter** - Constructor error sentinel in internal/compute/graph_cache_policy.go returned by NewGraphCachePolicy when a nonempty Voters slice contains a nil callback. Validation follows engine, capacity and minimum-retention checks and rejects the policy before any capture or replay. An absent or empty voter slice remains valid single-rank agreement. |
 | * | crystal | metric | cache | **fak_gateway_inference_cached_prompt_hit_ratio (provider-cache turn ratio)** - fak_gateway_inference_cached_prompt_hit_ratio is the gateway Prometheus gauge dividing provider prompt-cache-hit turns by all served model turns, reported as zero before the first turn. |
 | * | crystal | symbol | cache | **KVCacheShape** - The model.Config method that reads a loaded model header and returns the kvbudget.Shape sizing that model's KV cache: MLA geometry (layers, KVLoraRank, QKRopeHeadDim) when the header declares a compressed latent, plus the DSA/NSA indexer key over an upper bound of NumLayers when it declares an indexer, and otherwise MHA/GQA geometry (NumKVHeads, HeadDim, VHeadDim). It replaces kvbudget's hardcoded GLM52DSA estimate with the served model's own declared widths (#5242). |
 | * | crystal | doc-term | cache | **kv_cache_calculator (ktransformers KV sizing reference)** - ktransformers' external KV-sizing utility python/cli/utils/kv_cache_calculator.py, studied in docs/notes/CONCEPT-STUDY-KTRANSFORMERS-2026-07-18.md, whose MLA / NSA-indexer / MHA branch over a loaded ModelConfig is the named prior art fak ports into AttnKind and Config.KVCacheShape (#5242). It appears in this repo only as a pinned citation coordinate in doc comments (kv_cache_calculator.py:LINES@0c2912a). |
@@ -4402,8 +4403,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 32 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 4273/7889 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 4122 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 4273/7891 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 4123 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -4412,7 +4413,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 5581 lookup name(s) resolves - 93 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 5582 lookup name(s) resolves - 93 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -4421,7 +4422,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---:|---:|---:|
 | session-runtime | 388 | 389 | 1 |
 | attention | 241 | 241 | 0 |
-| cache | 455 | 455 | 0 |
+| cache | 456 | 456 | 0 |
 | context-ctx | 335 | 335 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | decision | 68 | 68 | 0 |
