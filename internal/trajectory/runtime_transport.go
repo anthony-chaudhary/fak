@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 )
@@ -33,6 +34,11 @@ const (
 func EncodeRuntimeEvent(event RuntimeEvent, transport RuntimeTransport) ([]byte, error) {
 	if err := ValidateRuntimeEvent(event); err != nil {
 		return nil, err
+	}
+	// SSE IDs are raw field values, unlike the JSON-escaped envelope. Line
+	// breaks inject fields/frames; NUL makes EventSource ignore the ID.
+	if transport == RuntimeSSE && strings.ContainsAny(event.EventID, "\r\n\x00") {
+		return nil, fmt.Errorf("runtime SSE event ID contains a forbidden field character")
 	}
 	canonical, err := json.Marshal(event)
 	if err != nil {
