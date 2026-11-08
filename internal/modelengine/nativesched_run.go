@@ -520,9 +520,13 @@ func (ln *schedLane) stageDeferredToken() bool {
 		ln.specAdmissionPad = 0
 	}
 	next := argmax(ln.logits)
+	budget := genTokens
+	if ln.genBudget > 0 {
+		budget = ln.genBudget
+	}
 	ln.deferredToken = &nativeDeferredToken{
 		id:   next,
-		done: ln.sess.M.Cfg.IsEOS(next) || ln.emitted+1 >= genTokens,
+		done: ln.sess.M.Cfg.IsEOS(next) || ln.emitted+1 >= budget,
 	}
 	return true
 }
@@ -1082,12 +1086,16 @@ type schedLane struct {
 	// Model execution is serialized by executor. Fields consumed by live stats
 	// (sess, promptLen, emitted, terminal) and completed prefill/decode publication
 	// are additionally synchronized by sched.mu.
-	sess               *model.Session
-	statsSess          *model.Session // immutable non-nil shell exposed while inflightSess mutates
-	inflightSess       *model.Session // real session owned by the executor during model execution
-	logits             []float32
-	gen                []int
-	emitted            int
+	sess         *model.Session
+	statsSess    *model.Session // immutable non-nil shell exposed while inflightSess mutates
+	inflightSess *model.Session // real session owned by the executor during model execution
+	logits       []float32
+	gen          []int
+	emitted      int
+	// genBudget is this lane's generated-token retirement budget; zero keeps
+	// the engine-wide genTokens default. Set at admission by imported lanes
+	// that carry a request-level max_tokens (P/D front door); guarded by mu.
+	genBudget          int
 	tool               string
 	prompt             []int
 	promptLen          int

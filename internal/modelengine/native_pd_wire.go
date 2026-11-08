@@ -51,9 +51,10 @@ import (
 // diverging from it.
 const PDWireProtocol = "fak-pd-wire/v1"
 
-// PDGenTokens is the per-request decode budget the P/D front door inherits from
-// the native scheduler: a lane retires at EOS or after this many generated
-// tokens, imported lanes included.
+// PDGenTokens is the default per-request decode budget the P/D front door
+// inherits from the native scheduler: a lane retires at EOS or after this many
+// generated tokens, imported lanes included. A request-level max_tokens rides
+// the wire as GenBudget and narrows the budget for that lane only.
 const PDGenTokens = genTokens
 
 // Closed wire error codes, mirroring the fak-pdbench/v1 vocabulary.
@@ -65,10 +66,12 @@ const (
 
 // Per-frame byte limits. They mirror the fak-pdbench/v1 bounds so a bench
 // receipt and a serve handoff stay comparable; the KV frame limit is sized for
-// real-model paged spans (host f32, block-granular).
+// real-model paged spans (host f32, block-granular). The 2 GiB cap covers the
+// mix-extension planning bound (8192 tokens x 240 KiB/token ~= 1.92 GiB) that
+// the 512 MiB pin-era cap refused at cold-2048 prompts.
 const (
 	pdWireMaxHeaderBytes  = uint64(1 << 20)
-	pdWireMaxKVFrameBytes = uint64(512 << 20)
+	pdWireMaxKVFrameBytes = uint64(2 << 30)
 	pdWireMaxLogitsBytes  = uint64(16 << 20)
 	pdWireMaxReplyBytes   = uint64(1 << 20)
 	// PDWireMaxPromptTokens caps the prompt a single handoff may carry, the same
@@ -85,6 +88,11 @@ var (
 	// model configuration or vocabulary across the two roles). Callers may use
 	// errors.Is.
 	ErrPDWireIdentity = errors.New("modelengine: P/D wire identity mismatch")
+	// ErrPDStreamConsumerStopped marks a ShipStream whose token sink refused a
+	// token (the front-door response writer failed or the client left). The
+	// handoff is aborted WITHOUT a peer retry: the caller's request is over.
+	// Callers may use errors.Is.
+	ErrPDStreamConsumerStopped = errors.New("modelengine: P/D stream consumer stopped")
 )
 
 // PDShipRequest is one prefill-to-decode handoff across the wire: the paged-KV
@@ -95,6 +103,9 @@ type PDShipRequest struct {
 	Logits  []float32
 	Prompt  []int
 	Tool    string
+	// GenBudget is the imported lane's generated-token retirement budget; zero
+	// keeps the engine-wide default. The front door sets it from max_tokens.
+	GenBudget int
 }
 
 // PDShipResult is the decode worker's answer: the tokens its continuous-
@@ -113,6 +124,22 @@ type PDHandoffTransport interface {
 	Ship(ctx context.Context, req PDShipRequest) (PDShipResult, error)
 }
 
+// PDTokenSink receives generated tokens as the decode lane produces them, one
+// call per token, in generation order. Returning a non-nil error aborts the
+// handoff: the wire client stops reading, tears down the connection, and
+// surfaces ErrPDStreamConsumerStopped so no peer retry is spent on a consumer
+// that stopped listening.
+type PDTokenSink func(token int) error
+
+// PDHandoffTransportStream extends the handoff seam with incremental delivery:
+// ShipStream streams each generated token to sink as the decode lane emits it
+// and returns the full result after the terminal frame. The front door uses it
+// for SSE responses; plain Ship keeps the single-reply shape.
+type PDHandoffTransportStream interface {
+	PDHandoffTransport
+	ShipStream(ctx context.Context, req PDShipRequest, sink PDTokenSink) (PDShipResult, error)
+}
+
 // pdWireHeader is the JSON metadata frame that opens every handoff. It carries
 // only identities and declared lengths — the KV bytes themselves follow in
 // their own frames after the acknowledgement.
@@ -124,6 +151,35 @@ type pdWireHeader struct {
 	PromptSHA256 string `json:"prompt_sha256"`
 	KVFrameBytes int    `json:"kv_frame_bytes"`
 	LogitsBytes  int    `json:"logits_bytes"`
+	// StreamTokens asks for incremental delivery: one token frame per generated
+	// token, then a terminal reply frame. Absent (the historical shape) keeps
+	// the single-reply exchange, so an older peer still pairs correctly.
+	StreamTokens bool `json:"stream_tokens,omitempty"`
+	// GenBudget is the imported lane's generated-token retirement budget; zero
+	// keeps the engine-wide default.
+	GenBudget int `json:"gen_budget,omitempty"`
+}
+
+// Closed P/D stream-frame kinds. A streaming reply is a sequence of token
+// frames followed by exactly one reply frame; clients branch on kind, never on
+// prose.
+const (
+	pdWireFrameToken = "token"
+	pdWireFrameReply = "reply"
+)
+
+// pdWireStreamFrame is one frame of a streaming reply: either a single
+// generated token or the terminal reply carrying the handoff metadata. The
+// legacy non-streaming reply keeps its own pdWireReply shape byte-for-byte.
+type pdWireStreamFrame struct {
+	Kind         string `json:"kind"`
+	Token        int    `json:"token,omitempty"`
+	Protocol     string `json:"protocol,omitempty"`
+	DecodeWorker string `json:"decode_worker,omitempty"`
+	SpanDigest   string `json:"span_digest,omitempty"`
+	BytesMoved   int64  `json:"bytes_moved,omitempty"`
+	ErrorCode    string `json:"error_code,omitempty"`
+	Error        string `json:"error,omitempty"`
 }
 
 // pdWireAck is the receiver's verdict on the header, written before any
@@ -307,6 +363,24 @@ func NewPDWireClient(cluster *NativePDCluster, addr string, dialTimeout time.Dur
 // surfaces the context error; a mispaired or malformed peer surfaces
 // ErrPDWireIdentity / ErrPDWireProtocol.
 func (c *PDWireClient) Ship(ctx context.Context, req PDShipRequest) (PDShipResult, error) {
+	return c.ship(ctx, req, nil)
+}
+
+// ShipStream is Ship with incremental delivery: every generated token reaches
+// sink in generation order as the decode lane produces it, and the returned
+// result carries the accumulated token list plus the terminal metadata. A
+// sink error aborts the handoff with ErrPDStreamConsumerStopped.
+func (c *PDWireClient) ShipStream(ctx context.Context, req PDShipRequest, sink PDTokenSink) (PDShipResult, error) {
+	if sink == nil {
+		return PDShipResult{}, errors.New("modelengine: P/D wire stream requires a token sink")
+	}
+	return c.ship(ctx, req, sink)
+}
+
+// ship runs the shared handshake: header, acknowledgement, payload frames —
+// then either the legacy single reply (sink nil) or the streamed token frames
+// plus terminal reply.
+func (c *PDWireClient) ship(ctx context.Context, req PDShipRequest, sink PDTokenSink) (PDShipResult, error) {
 	if c == nil || c.cluster == nil || c.cluster.m == nil {
 		return PDShipResult{}, errors.New("modelengine: P/D wire client has no cluster")
 	}
@@ -320,6 +394,9 @@ func (c *PDWireClient) Ship(ctx context.Context, req PDShipRequest) (PDShipResul
 	if len(req.KVFrame) == 0 || uint64(len(req.KVFrame)) > pdWireMaxKVFrameBytes {
 		return PDShipResult{}, fmt.Errorf("%w: KV frame must be 1..%d bytes", ErrPDWireProtocol, pdWireMaxKVFrameBytes)
 	}
+	if req.GenBudget < 0 || req.GenBudget > PDWireMaxPromptTokens {
+		return PDShipResult{}, fmt.Errorf("%w: gen budget must be 0..%d", ErrPDWireProtocol, PDWireMaxPromptTokens)
+	}
 	header := pdWireHeader{
 		Protocol:     PDWireProtocol,
 		ConfigSHA256: pdWireConfigDigest(m.Cfg),
@@ -328,6 +405,8 @@ func (c *PDWireClient) Ship(ctx context.Context, req PDShipRequest) (PDShipResul
 		PromptSHA256: pdWirePromptDigest(req.Prompt),
 		KVFrameBytes: len(req.KVFrame),
 		LogitsBytes:  4 * len(req.Logits),
+		StreamTokens: sink != nil,
+		GenBudget:    req.GenBudget,
 	}
 	headerJSON, err := json.Marshal(header)
 	if err != nil {
@@ -370,6 +449,14 @@ func (c *PDWireClient) Ship(ctx context.Context, req PDShipRequest) (PDShipResul
 	if err := pdWireWriteFrame(conn, logitsWire, pdWireMaxLogitsBytes); err != nil {
 		return PDShipResult{}, preferContextError(connCtx, fmt.Errorf("%w: send logits frame: %v", ErrPDWireProtocol, err))
 	}
+	if sink == nil {
+		return c.readLegacyReply(conn, connCtx)
+	}
+	return c.readStreamedReply(conn, connCtx, sink)
+}
+
+// readLegacyReply consumes the historical single-reply exchange.
+func (c *PDWireClient) readLegacyReply(conn net.Conn, connCtx context.Context) (PDShipResult, error) {
 	replyRaw, err := pdWireReadFrame(conn, pdWireMaxReplyBytes)
 	if err != nil {
 		return PDShipResult{}, preferContextError(connCtx, fmt.Errorf("%w: read reply: %v", ErrPDWireProtocol, err))
@@ -390,6 +477,47 @@ func (c *PDWireClient) Ship(ctx context.Context, req PDShipRequest) (PDShipResul
 		SpanDigest:   reply.SpanDigest,
 		BytesMoved:   reply.BytesMoved,
 	}, nil
+}
+
+// readStreamedReply consumes the streaming reply: one token frame per
+// generated token, then the terminal reply frame carrying the metadata. The
+// accumulated tokens mirror what the sink received.
+func (c *PDWireClient) readStreamedReply(conn net.Conn, connCtx context.Context, sink PDTokenSink) (PDShipResult, error) {
+	var res PDShipResult
+	for {
+		raw, err := pdWireReadFrame(conn, pdWireMaxReplyBytes)
+		if err != nil {
+			return PDShipResult{}, preferContextError(connCtx, fmt.Errorf("%w: read stream frame: %v", ErrPDWireProtocol, err))
+		}
+		var fr pdWireStreamFrame
+		if err := json.Unmarshal(raw, &fr); err != nil {
+			return PDShipResult{}, fmt.Errorf("%w: malformed stream frame JSON", ErrPDWireProtocol)
+		}
+		switch fr.Kind {
+		case pdWireFrameToken:
+			res.Tokens = append(res.Tokens, fr.Token)
+			if err := sink(fr.Token); err != nil {
+				// The consumer stopped listening: tear the socket down so the
+				// peer stops decoding, and surface the closed sentinel so no
+				// peer retry is spent on a dead request.
+				_ = conn.Close()
+				return PDShipResult{}, fmt.Errorf("%w: %v", ErrPDStreamConsumerStopped, err)
+			}
+		case pdWireFrameReply:
+			if fr.Error != "" {
+				return PDShipResult{}, decodePDWireError(fr.ErrorCode, fr.Error)
+			}
+			if fr.Protocol != PDWireProtocol {
+				return PDShipResult{}, fmt.Errorf("%w: reply version %q", ErrPDWireProtocol, fr.Protocol)
+			}
+			res.DecodeWorker = fr.DecodeWorker
+			res.SpanDigest = fr.SpanDigest
+			res.BytesMoved = fr.BytesMoved
+			return res, nil
+		default:
+			return PDShipResult{}, fmt.Errorf("%w: unknown stream frame kind %q", ErrPDWireProtocol, fr.Kind)
+		}
+	}
 }
 
 // PDWireServer is the decode-side receiver path over a NativePDCluster: it
@@ -586,9 +714,37 @@ func (s *PDWireServer) serveHandoff(ctx context.Context, conn net.Conn) error {
 		defer cancelFn()
 	}
 
-	res, err := s.admitImported(laneCtx, &header, kvFrame, logits)
+	var observe func(int) error
+	if header.StreamTokens {
+		observe = func(tok int) error {
+			frame := pdWireStreamFrame{Kind: pdWireFrameToken, Token: tok}
+			raw, jerr := json.Marshal(frame)
+			if jerr != nil {
+				return jerr
+			}
+			return pdWireWriteFrame(conn, raw, pdWireMaxReplyBytes)
+		}
+	}
+
+	res, err := s.admitImported(laneCtx, &header, kvFrame, logits, observe)
 	if err != nil {
 		return s.replyError(conn, ctx, err)
+	}
+	if header.StreamTokens {
+		// The tokens already flowed as frames; the terminal frame carries only
+		// the handoff metadata.
+		reply := pdWireStreamFrame{
+			Kind:         pdWireFrameReply,
+			Protocol:     PDWireProtocol,
+			DecodeWorker: res.DecodeWorker,
+			SpanDigest:   res.SpanDigest,
+			BytesMoved:   res.BytesMoved,
+		}
+		replyJSON, jerr := json.Marshal(reply)
+		if jerr != nil {
+			return jerr
+		}
+		return preferContextError(ctx, pdWireWriteFrame(conn, replyJSON, pdWireMaxReplyBytes))
 	}
 	reply := pdWireReply{
 		Protocol:     PDWireProtocol,
@@ -638,6 +794,12 @@ func (s *PDWireServer) validateHeader(h *pdWireHeader) error {
 	if h.LogitsBytes != 4*h.VocabSize {
 		return fmt.Errorf("%w: logits frame %d bytes, want %d for vocabulary %d", ErrPDWireProtocol, h.LogitsBytes, 4*h.VocabSize, h.VocabSize)
 	}
+	// The lane retirement budget is bounded like the prompt itself: a hostile
+	// or misconfigured producer cannot force unbounded decode work on this
+	// role. Zero keeps the engine-wide default.
+	if h.GenBudget < 0 || h.GenBudget > PDWireMaxPromptTokens {
+		return fmt.Errorf("%w: gen budget %d outside 0..%d", ErrPDWireProtocol, h.GenBudget, PDWireMaxPromptTokens)
+	}
 	return nil
 }
 
@@ -646,8 +808,10 @@ func (s *PDWireServer) validateHeader(h *pdWireHeader) error {
 // AdmitImported (no re-prefill), and drain the generated tokens. It mirrors
 // NativePDCluster.Admit's post-transfer bookkeeping: ownership stamped onto
 // the receiving worker, import recorded before admission, residency observed
-// after it.
-func (s *PDWireServer) admitImported(ctx context.Context, header *pdWireHeader, kvFrame []byte, logits []float32) (PDShipResult, error) {
+// after it. When observe is non-nil (streaming handoff) every generated token
+// is forwarded to it BEFORE the drain continues; an observe failure aborts the
+// handoff and retires the lane through the connection context.
+func (s *PDWireServer) admitImported(ctx context.Context, header *pdWireHeader, kvFrame []byte, logits []float32, observe func(int) error) (PDShipResult, error) {
 	c := s.cluster
 	prompt := append([]int(nil), header.PromptIDs...)
 	segments := []string{NativePDPrefixKey(prompt)}
@@ -675,6 +839,7 @@ func (s *PDWireServer) admitImported(ctx context.Context, header *pdWireHeader, 
 		Prompt:    prompt,
 		PromptLen: len(prompt),
 		Tool:      tool,
+		GenBudget: header.GenBudget,
 	})
 	if err != nil {
 		return PDShipResult{}, fmt.Errorf("modelengine: P/D wire import admission: %w", err)
@@ -693,6 +858,16 @@ func (s *PDWireServer) admitImported(ctx context.Context, header *pdWireHeader, 
 
 	tokens := make([]int, 0, PDGenTokens)
 	for tok := range r.Tokens() {
+		if observe != nil {
+			if err := observe(tok.ID); err != nil {
+				// The consumer stopped reading: stop spending decode steps for
+				// it. The import was already recorded, so the worker owns the
+				// span (suppress the deferred free), and the lane retires when
+				// this connection's context cancels.
+				freed = true
+				return PDShipResult{}, err
+			}
+		}
 		tokens = append(tokens, tok.ID)
 	}
 	if _, err := r.Result(); err != nil {

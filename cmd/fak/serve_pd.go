@@ -10,7 +10,9 @@ package main
 // Prefill role (front door):
 //
 //	fak serve pd --role prefill --gguf <path> --listen 127.0.0.1:8090 \
-//	    --decode-addr 127.0.0.1:8091 [--backend auto] [--q4k] [--tokenizer <path>]
+//	    --decode-addr 127.0.0.1:8091[,127.0.0.1:8092,...] \
+//	    [--decode-control 127.0.0.1:8094[,127.0.0.1:8095,...]] \
+//	    [--backend auto] [--q4k] [--tokenizer <path>]
 //
 // Decode role (KV receiver):
 //
@@ -21,6 +23,13 @@ package main
 // for HTTP (chat completions + /healthz + /metrics), the decode role listens
 // for the P/D wire data plane. The decode role may additionally expose an HTTP
 // control plane (--http-addr) with /healthz + /metrics.
+//
+// The prefill role may front N decode peers: --decode-addr takes a comma list
+// of wire addresses and --decode-control the parallel comma list of each
+// peer's control-plane address. Every handoff routes to the peer with the
+// fewest active imported lanes (scraped from its control plane /metrics),
+// ties broken by lowest peer index, with one bounded retry on a different
+// peer before the typed 502 handoff_failed.
 
 import (
 	"context"
@@ -33,6 +42,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"time"
 
@@ -57,6 +67,12 @@ var (
 	// ErrServePDMissingDecodeAddr marks a prefill role with no --decode-addr to
 	// ship its paged-KV frames to.
 	ErrServePDMissingDecodeAddr = errors.New("fak serve pd: the prefill role requires --decode-addr (the decode role's wire listener)")
+	// ErrServePDBadDecodeAddr marks a --decode-addr / --decode-control entry
+	// that is not a host:port address.
+	ErrServePDBadDecodeAddr = errors.New("fak serve pd: every --decode-addr and --decode-control entry must be a host:port address")
+	// ErrServePDBadControlAddrs marks a --decode-control list that is neither
+	// empty nor parallel to --decode-addr.
+	ErrServePDBadControlAddrs = errors.New("fak serve pd: --decode-control must be empty or carry one address per --decode-addr entry")
 	// ErrServePDBadDecodeWorkers marks a decode role whose --decode-workers is
 	// below the one-worker minimum.
 	ErrServePDBadDecodeWorkers = errors.New("fak serve pd: --decode-workers must be >= 1")
@@ -70,12 +86,31 @@ type servePDConfig struct {
 	Role          string
 	GGUF          string
 	Listen        string
-	DecodeAddr    string // prefill role: the decode role's wire listener
-	DecodeWorkers int    // decode role: worker count
+	DecodeAddrs   []string // prefill role: the decode peers' wire listeners (peer index = position)
+	ControlAddrs  []string // prefill role: parallel control-plane addresses; empty = no lane counters
+	DecodeWorkers int      // decode role: worker count
 	BackendName   string
 	Q4K           bool
 	TokenizerPath string
 	HTTPAddr      string // decode role: optional HTTP control plane
+}
+
+// parseCSVHostPortList splits a comma list into trimmed host:port entries,
+// dropping empties. An entry that does not split into host:port reports
+// ErrServePDBadDecodeAddr wrapped with the offending value.
+func parseCSVHostPortList(flag, raw string) ([]string, error) {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if _, _, err := net.SplitHostPort(part); err != nil {
+			return nil, fmt.Errorf("%w: %s entry %q is not host:port", ErrServePDBadDecodeAddr, flag, part)
+		}
+		out = append(out, part)
+	}
+	return out, nil
 }
 
 // validateServePD is the pure closed-contract check over the parsed flags. It
@@ -95,8 +130,12 @@ func validateServePD(cfg servePDConfig) error {
 	}
 	switch cfg.Role {
 	case "prefill":
-		if cfg.DecodeAddr == "" {
+		if len(cfg.DecodeAddrs) == 0 {
 			return ErrServePDMissingDecodeAddr
+		}
+		if len(cfg.ControlAddrs) > 0 && len(cfg.ControlAddrs) != len(cfg.DecodeAddrs) {
+			return fmt.Errorf("%w: %d control address(es) for %d decode peer(s)",
+				ErrServePDBadControlAddrs, len(cfg.ControlAddrs), len(cfg.DecodeAddrs))
 		}
 	case "decode":
 		if cfg.DecodeWorkers <= 0 {
@@ -114,7 +153,8 @@ func runServePD(stdout, stderr io.Writer, argv []string) int {
 	role := fs.String("role", "", `P/D role: "prefill" (front door + prefill half) or "decode" (KV receiver)`)
 	gguf := fs.String("gguf", "", "GGUF checkpoint path; both roles must load the same artifact")
 	listen := fs.String("listen", "", "this role's listen address (prefill: HTTP front door; decode: P/D wire data plane)")
-	decodeAddr := fs.String("decode-addr", "", "the decode role's wire address (prefill role only)")
+	decodeAddrs := fs.String("decode-addr", "", "comma-separated decode peer wire addresses (prefill role only)")
+	controlAddrs := fs.String("decode-control", "", "comma-separated decode peer control-plane addresses, parallel to --decode-addr (prefill role only)")
 	decodeWorkers := fs.Int("decode-workers", 1, "decode-role worker count (decode role only)")
 	backendName := fs.String("backend", "", `device backend: one of the registered names, "auto", or "cpu"`)
 	q4k := fs.Bool("q4k", os.Getenv("FAK_Q4K") != "", "load the resident Q4_K arm (default: FAK_Q4K env)")
@@ -123,11 +163,22 @@ func runServePD(stdout, stderr io.Writer, argv []string) int {
 	if rc, ok := parseFlagsOrHelp(fs, argv); !ok {
 		return rc
 	}
+	wireAddrs, err := parseCSVHostPortList("--decode-addr", *decodeAddrs)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	ctrlAddrs, err := parseCSVHostPortList("--decode-control", *controlAddrs)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
 	cfg := servePDConfig{
 		Role:          *role,
 		GGUF:          pathutil.ExpandTilde(*gguf),
 		Listen:        *listen,
-		DecodeAddr:    *decodeAddr,
+		DecodeAddrs:   wireAddrs,
+		ControlAddrs:  ctrlAddrs,
 		DecodeWorkers: *decodeWorkers,
 		BackendName:   *backendName,
 		Q4K:           *q4k,
@@ -210,13 +261,21 @@ func runServePDPrefillRole(ctx context.Context, stdout, stderr io.Writer, cfg se
 		return 2
 	}
 
-	ship := modelengine.NewPDWireClient(cluster, cfg.DecodeAddr, 10*time.Second)
+	peers := make([]modelengine.PDDecodePeer, len(cfg.DecodeAddrs))
+	for i, addr := range cfg.DecodeAddrs {
+		peers[i] = modelengine.PDDecodePeer{WireAddr: addr}
+		if i < len(cfg.ControlAddrs) {
+			peers[i].ControlAddr = cfg.ControlAddrs[i]
+		}
+	}
+	router := modelengine.NewPDPeerRouter(cluster, peers, nil)
 	h := &servePDChatHandler{
-		cluster:    cluster,
-		ship:       ship,
-		encode:     tok.Encode,
-		decode:     tok.Decode,
-		modelLabel: "fak-serve-pd",
+		cluster:          cluster,
+		ship:             router,
+		encode:           tok.Encode,
+		decode:           tok.Decode,
+		newStreamDecoder: func() pdStreamDecoder { return tok.NewIncrementalDecoder() },
+		modelLabel:       "fak-serve-pd",
 	}
 
 	mux := http.NewServeMux()
@@ -228,6 +287,7 @@ func runServePDPrefillRole(ctx context.Context, stdout, stderr io.Writer, cfg se
 	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 		_, _ = io.WriteString(w, cluster.Metrics())
+		_, _ = io.WriteString(w, router.Metrics())
 	})
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
@@ -238,8 +298,8 @@ func runServePDPrefillRole(ctx context.Context, stdout, stderr io.Writer, cfg se
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.Serve(ln) }()
 
-	fmt.Fprintf(stdout, "fak serve pd: prefill role listening on %s; shipping to %s; vocab=%d\n",
-		cfg.Listen, cfg.DecodeAddr, cluster.VocabSize())
+	fmt.Fprintf(stdout, "fak serve pd: prefill role listening on %s; routing across %d decode peer(s) [%s]; vocab=%d\n",
+		cfg.Listen, len(peers), strings.Join(cfg.DecodeAddrs, ", "), cluster.VocabSize())
 	select {
 	case <-ctx.Done():
 	case err := <-errCh:
@@ -313,11 +373,10 @@ const pdChatMaxBodyBytes = 1 << 20 // 1 MiB request cap
 
 // Closed chat-front-door error codes. Clients branch on code, never prose.
 const (
-	pdChatCodeInvalidRequest    = "invalid_request"
-	pdChatCodeStreamUnsupported = "stream_not_supported"
-	pdChatCodePrefillFailed     = "prefill_failed"
-	pdChatCodeHandoffFailed     = "handoff_failed"
-	pdChatCodeInternal          = "internal"
+	pdChatCodeInvalidRequest = "invalid_request"
+	pdChatCodePrefillFailed  = "prefill_failed"
+	pdChatCodeHandoffFailed  = "handoff_failed"
+	pdChatCodeInternal       = "internal"
 )
 
 type pdChatMessage struct {
@@ -353,6 +412,101 @@ type pdChatErrorBody struct {
 	} `json:"error"`
 }
 
+// SSE (stream:true) reply shape: OpenAI chat.completion.chunk frames, one per
+// generated token, a final frame carrying finish_reason + usage, then the
+// terminal "data: [DONE]" line. Clients that read usage (the h2h bench client)
+// take it from any chunk that carries one.
+type pdChatStreamDelta struct {
+	Role    string `json:"role,omitempty"`
+	Content string `json:"content,omitempty"`
+}
+
+type pdChatStreamChoice struct {
+	Index        int               `json:"index"`
+	Delta        pdChatStreamDelta `json:"delta"`
+	FinishReason *string           `json:"finish_reason"` // null until the final frame
+}
+
+type pdChatStreamUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+type pdChatStreamChunk struct {
+	ID      string                 `json:"id"`
+	Object  string                 `json:"object"`
+	Created int64                  `json:"created"`
+	Model   string                 `json:"model"`
+	Choices []pdChatStreamChoice   `json:"choices"`
+	Usage   *pdChatStreamUsage     `json:"usage,omitempty"`
+	Error   *pdChatStreamErrorBody `json:"error,omitempty"`
+}
+
+type pdChatStreamErrorBody struct {
+	Message string `json:"message"`
+	Code    string `json:"code"`
+}
+
+// pdStreamDecoder turns generated token ids into safe-to-emit text deltas,
+// holding bytes that end in a not-yet-complete UTF-8 code point. The loaded
+// tokenizer's incremental decoder satisfies it; front-door tests inject a
+// byte-level stand-in.
+type pdStreamDecoder interface {
+	Push(id int) (string, error)
+	Finalize() (string, error)
+}
+
+// pdSSEWriter emits server-sent events on an http.ResponseWriter and reports
+// write failures so a dead client stops the handoff instead of decoding into
+// the void.
+type pdSSEWriter struct {
+	w       http.ResponseWriter
+	flusher http.Flusher
+	started bool // the status line has committed with the first event
+}
+
+func newPDSSEResponse(w http.ResponseWriter) (*pdSSEWriter, error) {
+	fl, ok := w.(http.Flusher)
+	if !ok {
+		return nil, errors.New("response writer does not support flushing")
+	}
+	// Headers are set now but the status line only commits with the first
+	// event, so a prefill or handoff failure BEFORE any token can still answer
+	// with the typed JSON error body.
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	return &pdSSEWriter{w: w, flusher: fl}, nil
+}
+
+// event writes one "data: <payload>\n\n" event and flushes it. The first
+// event commits the 200 status line, arming started, which tells the caller
+// no JSON error body can follow from here on.
+func (s *pdSSEWriter) event(payload []byte) error {
+	if !s.started {
+		s.w.WriteHeader(http.StatusOK)
+		s.started = true
+	}
+	if _, err := s.w.Write(append([]byte("data: "), payload...)); err != nil {
+		return err
+	}
+	if _, err := s.w.Write([]byte("\n\n")); err != nil {
+		return err
+	}
+	s.flusher.Flush()
+	return nil
+}
+
+func (s *pdSSEWriter) chunk(chunk pdChatStreamChunk) error {
+	raw, err := json.Marshal(chunk)
+	if err != nil {
+		return err
+	}
+	return s.event(raw)
+}
+
+func (s *pdSSEWriter) done() error { return s.event([]byte("[DONE]")) }
+
 func writePDChatError(w http.ResponseWriter, status int, code, message string) {
 	body := pdChatErrorBody{}
 	body.Error.Code = code
@@ -364,13 +518,16 @@ func writePDChatError(w http.ResponseWriter, status int, code, message string) {
 
 // servePDChatHandler serves POST /v1/chat/completions on the prefill role. The
 // encode/decode seams stand in for the loaded tokenizer so the contract is
-// exercisable without a checkpoint; ship is the P/D wire transport.
+// exercisable without a checkpoint; ship is the P/D handoff transport (the
+// peer router in production); newStreamDecoder mints one incremental decoder
+// per streamed request.
 type servePDChatHandler struct {
-	cluster    *modelengine.NativePDCluster
-	ship       modelengine.PDHandoffTransport
-	encode     func(string) ([]int, error)
-	decode     func([]int) (string, error)
-	modelLabel string
+	cluster          *modelengine.NativePDCluster
+	ship             modelengine.PDHandoffTransportStream
+	encode           func(string) ([]int, error)
+	decode           func([]int) (string, error)
+	newStreamDecoder func() pdStreamDecoder
+	modelLabel       string
 
 	mu    sync.Mutex
 	reqNo uint64
@@ -385,9 +542,10 @@ func (h *servePDChatHandler) nextID() string {
 }
 
 // handleChat runs one chat completion: tokenize the last user message,
-// prefill, ship the paged-KV frame to the decode role, and detokenize the
-// generated tokens. Truncation honors max_tokens with finish_reason "length";
-// otherwise the lane retires with "stop".
+// prefill, route the paged-KV frame to a decode peer, and detokenize the
+// generated tokens. stream:true answers over SSE (handleChatStream); otherwise
+// the whole reply arrives in one JSON body. Truncation honors max_tokens with
+// finish_reason "length"; otherwise the lane retires with "stop".
 func (h *servePDChatHandler) handleChat(w http.ResponseWriter, r *http.Request) {
 	fail := func(status int, code, msg string) { writePDChatError(w, status, code, msg) }
 
@@ -395,10 +553,6 @@ func (h *servePDChatHandler) handleChat(w http.ResponseWriter, r *http.Request) 
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, pdChatMaxBodyBytes))
 	if err := dec.Decode(&req); err != nil {
 		fail(http.StatusBadRequest, pdChatCodeInvalidRequest, "request body is not valid chat-completions JSON")
-		return
-	}
-	if req.Stream {
-		fail(http.StatusBadRequest, pdChatCodeStreamUnsupported, "stream:true is not supported by fak serve pd")
 		return
 	}
 	content := ""
@@ -433,7 +587,15 @@ func (h *servePDChatHandler) handleChat(w http.ResponseWriter, r *http.Request) 
 		fail(http.StatusInternalServerError, pdChatCodePrefillFailed, "prefill half failed")
 		return
 	}
-	res, err := h.ship.Ship(r.Context(), modelengine.PDShipRequest{KVFrame: frame, Logits: logits, Prompt: ids})
+	// max_tokens rides the wire as the imported lane's retirement budget, so a
+	// long answer stops burning decode steps at the caller's cap instead of
+	// post-truncating a longer generation.
+	shipReq := modelengine.PDShipRequest{KVFrame: frame, Logits: logits, Prompt: ids, GenBudget: req.MaxTokens}
+	if req.Stream {
+		h.handleChatStream(w, r, &req, ids, shipReq)
+		return
+	}
+	res, err := h.ship.Ship(r.Context(), shipReq)
 	if err != nil {
 		fail(http.StatusBadGateway, pdChatCodeHandoffFailed, "the decode role refused or dropped the handoff")
 		return
@@ -459,4 +621,97 @@ func (h *servePDChatHandler) handleChat(w http.ResponseWriter, r *http.Request) 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(reply)
+}
+
+// handleChatStream serves a stream:true completion over SSE: each generated
+// token streams out as the decode lane produces it, and the final chunk
+// carries finish_reason plus the usage block the bench clients read. A
+// prefill or handoff failure BEFORE the first event still answers with the
+// typed JSON error; a failure mid-stream emits an SSE error event and closes
+// without [DONE], because the status line is already committed.
+func (h *servePDChatHandler) handleChatStream(w http.ResponseWriter, r *http.Request, req *pdChatRequest, ids []int, shipReq modelengine.PDShipRequest) {
+	if h.newStreamDecoder == nil {
+		writePDChatError(w, http.StatusInternalServerError, pdChatCodeInternal, "no incremental decoder configured")
+		return
+	}
+	sse, err := newPDSSEResponse(w)
+	if err != nil {
+		writePDChatError(w, http.StatusInternalServerError, pdChatCodeInternal, "response writer cannot stream")
+		return
+	}
+	id := h.nextID()
+	created := time.Now().Unix()
+	incr := h.newStreamDecoder()
+	limit := req.MaxTokens // 0 = no request-level cap
+
+	emitted := 0
+	firstDelta := true
+	sink := func(tok int) error {
+		delta, derr := incr.Push(tok)
+		if derr != nil {
+			return derr
+		}
+		if delta == "" || (limit > 0 && emitted >= limit) {
+			return nil
+		}
+		chunk := pdChatStreamChunk{
+			ID:      id,
+			Object:  "chat.completion.chunk",
+			Created: created,
+			Model:   h.modelLabel,
+			Choices: []pdChatStreamChoice{{Index: 0, Delta: pdChatStreamDelta{Content: delta}}},
+		}
+		if firstDelta {
+			chunk.Choices[0].Delta.Role = "assistant"
+			firstDelta = false
+		}
+		emitted++
+		return sse.chunk(chunk)
+	}
+
+	res, err := h.ship.ShipStream(r.Context(), shipReq, sink)
+	if err != nil {
+		if errors.Is(err, modelengine.ErrPDStreamConsumerStopped) {
+			return // the response writer failed or the client left; nothing more can be said
+		}
+		if sse.started {
+			_ = sse.chunk(pdChatStreamChunk{
+				ID:      id,
+				Object:  "chat.completion.chunk",
+				Created: created,
+				Model:   h.modelLabel,
+				Error:   &pdChatStreamErrorBody{Message: "the decode role refused or dropped the handoff", Code: pdChatCodeHandoffFailed},
+			})
+			return
+		}
+		writePDChatError(w, http.StatusBadGateway, pdChatCodeHandoffFailed, "the decode role refused or dropped the handoff")
+		return
+	}
+
+	// Flush any UTF-8 tail belonging to an already-counted token.
+	if tail, ferr := incr.Finalize(); ferr == nil && tail != "" {
+		_ = sse.chunk(pdChatStreamChunk{
+			ID:      id,
+			Object:  "chat.completion.chunk",
+			Created: created,
+			Model:   h.modelLabel,
+			Choices: []pdChatStreamChoice{{Index: 0, Delta: pdChatStreamDelta{Content: tail}}},
+		})
+	}
+
+	completed := len(res.Tokens)
+	finish := "stop"
+	if limit > 0 && completed > limit {
+		completed = limit
+		finish = "length"
+	}
+	_ = sse.chunk(pdChatStreamChunk{
+		ID:      id,
+		Object:  "chat.completion.chunk",
+		Created: created,
+		Model:   h.modelLabel,
+		Choices: []pdChatStreamChoice{{Index: 0, FinishReason: &finish}},
+		Usage:   &pdChatStreamUsage{PromptTokens: len(ids), CompletionTokens: completed, TotalTokens: len(ids) + completed},
+	})
+	_ = sse.done()
 }
