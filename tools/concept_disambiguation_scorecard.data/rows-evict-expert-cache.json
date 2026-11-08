@@ -26,7 +26,7 @@
       "family": "evict",
       "kind": "symbol",
       "definition": "Counter field on ctxmmu.ExpertResidencyStats (internal/ctxmmu/expert_residency.go, json tag hot_evictions) incremented in promote() when a resident hot-set expert is evicted to admit a newcomer into the decode hot-set ring. The same counter is mirrored as HotEvictions on the armCounters of the cmd/hotsetcheck replay report.",
-      "distinction": "Counts evictions from the RESIDENT hot-set ring only; its sibling TransientEvicts counts churn of the separate prefill transient ring, and Promotions counts the transient-to-resident descriptor swaps that are what trigger these hot evictions.",
+      "distinction": "Counts evictions from the RESIDENT hot-set ring only; its sibling TransientEvicts counts churn of the separate prefill transient ring, and Promotions counts the transient-to-resident descriptor swaps whose promote() path - including WarmStart seeding - increments this counter.",
       "distinct_from": [
         "x-disambig-costevictions",
         "TransientEvicts",

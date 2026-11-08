@@ -25,7 +25,7 @@
       "canonical": "ErrNVFP4GEMMUnsupported",
       "family": "support-maturity",
       "kind": "symbol",
-      "definition": "Sentinel error declared in internal/compute/nvfp4_native.go reporting that a backend has no native NVFP4 W4A4 matrix multiplication capability. MatMulNVFP4 wraps it when the backend is nil or does not implement NVFP4MatMulBackend, and the CUDA path wraps it for open graph capture, unknown architecture, or unqualified sm/cuBLASLt combinations. Loaders such as modelopt_nvfp4_load match it with errors.Is to fail loudly instead of silently widening precision.",
+      "definition": "Sentinel error declared in internal/compute/nvfp4_native.go reporting that a backend has no native NVFP4 W4A4 matrix multiplication capability. MatMulNVFP4 wraps it when the backend is nil or does not implement NVFP4MatMulBackend, and the CUDA path wraps it for open graph capture, unknown architecture, or unqualified sm/cuBLASLt combinations. Loaders such as modelopt_nvfp4_load wrap it into their load-refusal chain to fail loudly instead of silently widening precision; consumers match the wrapped chain via errors.Is.",
       "distinction": "It is a refusal sentinel, not a capability predicate like SupportsQ6KMatMul that reports availability up front. Unlike ErrV41NativeUnsupported or ErrNativeBeamSearchUnsupported, it covers NVFP4 W4A4 GEMM specifically across all backends.",
       "distinct_from": [
         "sm-errv41nativeunsupported",

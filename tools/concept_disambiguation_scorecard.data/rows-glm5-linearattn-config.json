@@ -1,0 +1,46 @@
+{
+  "rows": [
+    {
+      "id": "attn-linear-attn-config",
+      "canonical": "linear_attn_config",
+      "family": "attention",
+      "kind": "config",
+      "definition": "The nested linear_attn_config object inside text_config of the HF config.json of GLM-5.3-Flash (glm5_next) and Kimi-K3.1-Pro checkpoints, carrying the KDA linear-attention geometry num_heads, head_dim, short_conv_kernel_size and gate_lower_bound. model.Config.UnmarshalJSON (internal/model/config.go) decodes it through glm5LinearAttnConfigJSON and folds it at parse time onto the flat axes LinearNumKeyHeads, LinearNumValueHeads, LinearKeyHeadDim, LinearValueHeadDim, LinearConvKernelDim and LinearGateLowerBound so the native forward reads one surface. glm5NextIdentity (internal/model/glm5next_spine.go) carries the same object as its LinearAttn field and pins it to 64 heads, head dim 128 and conv kernel 4 for checkpoint admission.",
+      "distinction": "It is the container config block, not any of the fields it carries: gate_lower_bound (row kimik31-l1-gatelowerbound) and short_conv_kernel_size (row gwengine-short-conv-kernel-size) are scalars inside it. GatedDeltaNet (row guardgate-gateddeltanet) is the layer family whose geometry the block describes, not the block itself.",
+      "distinct_from": [
+        "kimik31-l1-gatelowerbound",
+        "gwengine-short-conv-kernel-size",
+        "guardgate-gateddeltanet"
+      ],
+      "aliases": [],
+      "grounding": "linear_attn_config",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "gaps": [],
+      "verdict": "defined"
+    },
+    {
+      "id": "gwengine-short-conv-kernel-size",
+      "canonical": "short_conv_kernel_size",
+      "family": "gateway-engine",
+      "kind": "config",
+      "definition": "The short_conv_kernel_size field of the linear_attn_config object in the HF config.json of GLM-5.3-Flash and Kimi-K3.1-Pro checkpoints: the width of the causal depthwise conv1d applied per q/k/v stream in each KDA linear-attention layer. Go parses it as ShortConvKernelSize (internal/model/config.go, internal/model/glm5next_spine.go) and folds it into model.Config.LinearConvKernelDim; on the GGUF path the same axis arrives as the ssm.conv_kernel header key (internal/ggufload/gguf_config.go), and isExactGLM5NextConfig pins it to 4.",
+      "distinction": "A scalar conv-width config value, not a compute kernel: matKernel (row x-gateway-engine-matkernel) and glmDsaMatKernel (row x2-gateway-engine-glmdsamatkernel) select GEMM arithmetic, while this value sizes the KDA conv filters and their history state. It lives inside the linear_attn_config block (row attn-linear-attn-config), which is the container, not the width.",
+      "distinct_from": [
+        "attn-linear-attn-config",
+        "x-gateway-engine-matkernel",
+        "x2-gateway-engine-glmdsamatkernel"
+      ],
+      "aliases": [
+        "ssm.conv_kernel"
+      ],
+      "grounding": "short_conv_kernel_size",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "gaps": [],
+      "verdict": "defined"
+    }
+  ]
+}
