@@ -399,3 +399,28 @@ func TestRunIssueInventoryCanonicalObservationOrder(t *testing.T) {
 		}
 	}
 }
+
+// fak-test:runtime fast est=5ms lane=default
+func TestIssueInventoryTrunkRefUsesBranchRole(t *testing.T) {
+	t.Setenv("FLEET_BRANCH_PILOT", "")
+	root := t.TempDir()
+	if got, err := issueInventoryTrunkRef(root, ""); err != nil || got != "refs/heads/main" {
+		t.Fatalf("unconfigured ref=%q err=%v", got, err)
+	}
+	path := filepath.Join(root, "dos.toml")
+	if err := os.WriteFile(path, []byte("[branch_roles]\ndevelopment_branch = \"integration\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := issueInventoryTrunkRef(root, ""); err != nil || got != "refs/heads/integration" {
+		t.Fatalf("configured ref=%q err=%v", got, err)
+	}
+	if err := os.WriteFile(path, []byte("[branch_roles]\ndevelopment_branch = 123\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := issueInventoryTrunkRef(root, ""); err == nil {
+		t.Fatal("malformed roles silently accepted")
+	}
+	if got, err := issueInventoryTrunkRef(root, "refs/heads/reviewed"); err != nil || got != "refs/heads/reviewed" {
+		t.Fatalf("explicit ref=%q err=%v", got, err)
+	}
+}

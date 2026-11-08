@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/issuededup"
 	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 	"github.com/anthony-chaudhary/fak/internal/modver"
@@ -38,7 +39,7 @@ func RunIssueInventory(stdout, stderr io.Writer, argv []string) int {
 	asJSON := fs.Bool("json", false, "emit fak.issue-error-inventory/1 JSON")
 	requireActionable := fs.Int("require-actionable", 0, "gate dispatch for one issue number")
 	root := fs.String("root", ".", "local repository root for read-only provenance resolution")
-	trunkRef := fs.String("trunk-ref", "refs/heads/main", "trunk ref whose exact commit was tested")
+	trunkRef := fs.String("trunk-ref", "", "trunk ref whose exact commit was tested (default: configured development branch)")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -80,7 +81,12 @@ func RunIssueInventory(stdout, stderr io.Writer, argv []string) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	proof, err := newIssueInventoryProof(ctx, *root, *trunkRef)
+	resolvedTrunk, err := issueInventoryTrunkRef(*root, *trunkRef)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak-dev issue inventory: branch roles: %v\n", err)
+		return 1
+	}
+	proof, err := newIssueInventoryProof(ctx, *root, resolvedTrunk)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak-dev issue inventory: %v\n", err)
 		return 1
@@ -460,4 +466,23 @@ func renderIssueInventory(w io.Writer, rep issuepolicy.ErrorInventory) {
 	for _, row := range rep.Issues {
 		fmt.Fprintf(w, "#%s %-20s canonical=#%s %s\n", strconv.Itoa(row.Issue), row.Disposition, strconv.Itoa(row.CanonicalIssue), row.ReasonCodes[0])
 	}
+}
+
+// issueInventoryTrunkRef resolves the local repository's development role while
+// preserving an explicit evidence ref and the legacy default for unconfigured repos.
+func issueInventoryTrunkRef(root, explicit string) (string, error) {
+	if explicit != "" {
+		return explicit, nil
+	}
+	path := filepath.Join(root, "dos.toml")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return "refs/heads/" + branchrole.Defaults().DevelopmentBranch, nil
+	} else if err != nil {
+		return "", err
+	}
+	roles, err := branchrole.LoadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return "refs/heads/" + roles.DevelopmentBranch, nil
 }
