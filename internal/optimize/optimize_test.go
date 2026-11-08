@@ -132,7 +132,7 @@ func TestPlanRefusesWhenNoReadyLever(t *testing.T) {
 
 func TestMeasureRefusesUnknownLever(t *testing.T) {
 	cfg := Config{Graph: syntheticGraph()}
-	_, err := Measure(context.Background(), cfg, "nope", smokeTrace)
+	_, err := Measure(context.Background(), cfg, "nope", smokeTrace, "")
 	if got := refusalClass(t, err); got != ClassUnknownLever {
 		t.Fatalf("OptimizeRefusal class = %q, want %q", got, ClassUnknownLever)
 	}
@@ -141,7 +141,7 @@ func TestMeasureRefusesUnknownLever(t *testing.T) {
 func TestMeasureRefusesMissingTrace(t *testing.T) {
 	cfg := Config{Graph: syntheticGraph(), Mappings: map[string]string{"synth.a": "vdso"}}
 	missing := filepath.Join(t.TempDir(), "absent.json")
-	_, err := Measure(context.Background(), cfg, "synth.a", missing)
+	_, err := Measure(context.Background(), cfg, "synth.a", missing, "")
 	if got := refusalClass(t, err); got != ClassTraceUnreadable {
 		t.Fatalf("OptimizeRefusal class = %q, want %q", got, ClassTraceUnreadable)
 	}
@@ -151,7 +151,7 @@ func TestMeasureRefusesWithoutArmMapping(t *testing.T) {
 	// The committed graph's levers are Metal/CUDA hardware levers: none maps to
 	// an ablate runtime feature, so measure must refuse with the mapping class.
 	cfg := Config{Graph: nativeperf.ActiveGraph()}
-	_, err := Measure(context.Background(), cfg, "metal.command-buffer-amortization", smokeTrace)
+	_, err := Measure(context.Background(), cfg, "metal.command-buffer-amortization", smokeTrace, "")
 	if got := refusalClass(t, err); got != ClassNoArmMapping {
 		t.Fatalf("OptimizeRefusal class = %q, want %q", got, ClassNoArmMapping)
 	}
@@ -161,7 +161,7 @@ func TestMeasureRefusesEnvGatedMapping(t *testing.T) {
 	// An env-gated feature cannot be flipped in-process; mapping one must refuse
 	// rather than measure a silent no-op.
 	cfg := Config{Graph: syntheticGraph(), Mappings: map[string]string{"synth.a": "normgate"}}
-	_, err := Measure(context.Background(), cfg, "synth.a", smokeTrace)
+	_, err := Measure(context.Background(), cfg, "synth.a", smokeTrace, "")
 	if got := refusalClass(t, err); got != ClassNoArmMapping {
 		t.Fatalf("OptimizeRefusal class = %q, want %q", got, ClassNoArmMapping)
 	}
@@ -169,7 +169,7 @@ func TestMeasureRefusesEnvGatedMapping(t *testing.T) {
 
 func TestMeasureRunsMappedSweepAndBindsWorkload(t *testing.T) {
 	cfg := Config{Graph: syntheticGraph(), Mappings: map[string]string{"synth.a": "vdso"}, Now: func() time.Time { return pinnedNow }}
-	rec, err := Measure(context.Background(), cfg, "synth.a", smokeTrace)
+	rec, err := Measure(context.Background(), cfg, "synth.a", smokeTrace, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,5 +408,203 @@ func TestMarkWitnessedAdvancesSelection(t *testing.T) {
 	}
 	if next == nil || next.ID != "synth.b" {
 		t.Fatalf("selection after witness = %+v, want synth.b", next)
+	}
+}
+
+const rtx5090EnvelopeID = "qwen38-27b-q4km-rtx5090-p1-decode"
+
+func TestPlanEnvelopeFilterSelectsRTX5090ReadyLever(t *testing.T) {
+	cfg := Config{Graph: nativeperf.ActiveGraph(), EnvelopeID: rtx5090EnvelopeID, Now: func() time.Time { return pinnedNow }}
+	plan, err := BuildPlan(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.LeverID != "rtx5090.q8_1-activation-quant" || plan.Envelope != rtx5090EnvelopeID || !plan.DependencyReady {
+		t.Fatalf("unexpected envelope-filtered plan: %+v", plan)
+	}
+	wantMeasure := "fak optimize measure --lever rtx5090.q8_1-activation-quant --envelope " + rtx5090EnvelopeID + " --trace " + DefaultTracePath + " --out rtx5090.q8_1-activation-quant.json"
+	wantVerify := "fak optimize verify --baseline rtx5090.q8_1-activation-quant.baseline.json --candidate rtx5090.q8_1-activation-quant.json --envelope " + rtx5090EnvelopeID + " --json"
+	if plan.MeasureCmd != wantMeasure || plan.VerifyCmd != wantVerify {
+		t.Fatalf("commands drifted: measure=%q verify=%q", plan.MeasureCmd, plan.VerifyCmd)
+	}
+	if plan.GeneratedAt != pinnedNow.Format(time.RFC3339) {
+		t.Fatalf("generated_at = %q", plan.GeneratedAt)
+	}
+}
+
+func TestPlanEnvelopeFilterSelectsA100ReadyLever(t *testing.T) {
+	cfg := Config{Graph: nativeperf.ActiveGraph(), EnvelopeID: "qwen38-27b-q4k-a100-p1-decode"}
+	plan, err := BuildPlan(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.LeverID != "cuda.q8_1-activation-quant" || plan.Envelope != "qwen38-27b-q4k-a100-p1-decode" {
+		t.Fatalf("unexpected A100 filtered plan: %+v", plan)
+	}
+}
+
+func TestPlanUnknownEnvelopeRefusesTyped(t *testing.T) {
+	_, err := BuildPlan(Config{Graph: nativeperf.ActiveGraph(), EnvelopeID: "no-such-envelope"})
+	if got := refusalClass(t, err); got != ClassUnknownEnvelope {
+		t.Fatalf("OptimizeRefusal class = %q, want %q", got, ClassUnknownEnvelope)
+	}
+}
+
+func TestPlanKnownEnvelopeWithoutReadyLeverRefuses(t *testing.T) {
+	graph := syntheticGraph()
+	envB := nativeperf.Envelope{
+		ID: "synth-env-b", Model: "m", ModelRevision: "r", ArtifactSHA256: "a", Quantization: "Q4_K_M",
+		Hardware: "hw", MemoryGiB: 36, Engine: "fak-native", Backend: "metal", ForwardPath: "fp",
+		PromptTokens: 32, DecodeTokens: 64, Repetitions: 3, Temperature: 0,
+		ThroughputMetric: "end_to_end_decode_tokens_per_second", ComparabilityRule: "rule",
+	}
+	applyB := nativeperf.Applicability{EnvelopeID: envB.ID, Platform: "darwin/arm64", Backend: "metal"}
+	issue := nativeperf.IssueRef{Number: 1, URL: "https://github.com/anthony-chaudhary/fak/issues/1"}
+	done := nativeperf.Lever{
+		ID: "synth.done", Name: "done", Applicability: applyB, Enabled: true, Status: nativeperf.StatusPresent,
+		Expected:    nativeperf.PlanningEffect{Summary: "s", Classification: nativeperf.ClassHypothesis, Provenance: "p"},
+		OwningIssue: issue, NextWitness: "w",
+	}
+	graph.Envelopes = append(graph.Envelopes, envB)
+	graph.Levers = append(graph.Levers, done)
+	_, err := BuildPlan(Config{Graph: graph, EnvelopeID: envB.ID})
+	if got := refusalClass(t, err); got != ClassNoReadyLever {
+		t.Fatalf("OptimizeRefusal class = %q, want %q", got, ClassNoReadyLever)
+	}
+}
+
+// rtx5090ReceiptPair builds a minimal valid baseline/candidate ExperimentReceipt
+// pair for a committed RTX 5090 lever, mirroring the fixture shape the
+// nativeperf receipt tests use (BaselineTemplate plus filled capture fields).
+func rtx5090ReceiptPair(t *testing.T, lever string, baseTPS, candTPS float64) []nativeperf.ExperimentReceipt {
+	t.Helper()
+	mk := func(role string, tps float64) nativeperf.ExperimentReceipt {
+		r, err := nativeperf.BaselineTemplate(nativeperf.ActiveGraph(), lever)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Role = role
+		r.Revision = "rev-" + role
+		r.Machine.ScrubbedID = "lab-node-class-a"
+		r.Memory = nativeperf.MemoryMetrics{PeakBytes: 1000, ResidentBytes: 900}
+		r.Quality = nativeperf.QualityMetric{Name: "exact_match", Score: 1, HigherIsBetter: true}
+		r.ModuleVersions = []nativeperf.ModuleRevision{{Module: "internal/model", Revision: "r1+gaaaaaaa"}}
+		r.Commands = []string{"fak run-model --native --receipt-out receipt.json"}
+		r.ProfilerArtifacts = []nativeperf.ArtifactRef{{Path: "profiles/run.json", SHA256: strings.Repeat("a", 64)}}
+		for i := range r.Repetitions {
+			r.Repetitions[i] = nativeperf.Repetition{EndToEndMilliseconds: 100, TokensPerSecond: tps}
+		}
+		if role == nativeperf.RoleCandidate {
+			r.ChangedAxes = []string{"lever:" + lever}
+		}
+		return r
+	}
+	return []nativeperf.ExperimentReceipt{mk(nativeperf.RoleBaseline, baseTPS), mk(nativeperf.RoleCandidate, candTPS)}
+}
+
+func writeReceiptPair(t *testing.T, dir, name string, pair []nativeperf.ExperimentReceipt) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	raw, err := json.Marshal(pair)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestMeasureReceiptAcceptsMatchedPair(t *testing.T) {
+	cfg := Config{Graph: nativeperf.ActiveGraph(), Now: func() time.Time { return pinnedNow }}
+	dir := t.TempDir()
+	path := writeReceiptPair(t, dir, "pair.json", rtx5090ReceiptPair(t, "rtx5090.q8_1-activation-quant", 100, 105))
+	rec, err := Measure(context.Background(), cfg, "rtx5090.q8_1-activation-quant", "", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(raw)
+	if rec.Schema != ReceiptSchema || rec.LeverID != "rtx5090.q8_1-activation-quant" || rec.EngineID != "fak-native" {
+		t.Fatalf("OptimizeReceipt identity drifted: %+v", rec)
+	}
+	if rec.TracePath != path || rec.TraceSHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatalf("workload binding drifted: %+v", rec)
+	}
+	if rec.BaselineTokS != 100 || rec.CandidateTokS != 105 || rec.DeltaPct != 5 || rec.Reps != 3 {
+		t.Fatalf("arm means drifted: %+v", rec)
+	}
+	if rec.Revision != "rev-candidate" || rec.ArtifactSHA256 != "issue-8635-pinned-artifact" || rec.ForwardPath != "cuda/q4km-p1-decode" {
+		t.Fatalf("execution identity drifted: %+v", rec)
+	}
+	if rec.MeasuredAt != pinnedNow.Format(time.RFC3339) {
+		t.Fatalf("measured_at = %q", rec.MeasuredAt)
+	}
+}
+
+func TestMeasureReceiptRefusesLeverMismatch(t *testing.T) {
+	cfg := Config{Graph: nativeperf.ActiveGraph()}
+	dir := t.TempDir()
+	path := writeReceiptPair(t, dir, "pair.json", rtx5090ReceiptPair(t, "rtx5090.dp4a-q4k-mmvq", 100, 105))
+	_, err := Measure(context.Background(), cfg, "rtx5090.q8_1-activation-quant", "", path)
+	if got := refusalClass(t, err); got != ClassReceiptLeverMismatch {
+		t.Fatalf("OptimizeRefusal class = %q, want %q", got, ClassReceiptLeverMismatch)
+	}
+}
+
+func TestMeasureReceiptRefusesEnvelopeMismatch(t *testing.T) {
+	cfg := Config{Graph: nativeperf.ActiveGraph()}
+	dir := t.TempDir()
+	pair := rtx5090ReceiptPair(t, "rtx5090.q8_1-activation-quant", 100, 105)
+	for i := range pair {
+		pair[i].EnvelopeID = "qwen38-27b-q4k-a100-p1-decode"
+	}
+	path := writeReceiptPair(t, dir, "pair.json", pair)
+	_, err := Measure(context.Background(), cfg, "rtx5090.q8_1-activation-quant", "", path)
+	if got := refusalClass(t, err); got != ClassReceiptEnvelopeMismatch {
+		t.Fatalf("OptimizeRefusal class = %q, want %q", got, ClassReceiptEnvelopeMismatch)
+	}
+}
+
+func TestMeasureReceiptRefusesUndecodableFile(t *testing.T) {
+	cfg := Config{Graph: nativeperf.ActiveGraph()}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "garbage.json")
+	if err := os.WriteFile(path, []byte(`{"not":"a receipt array"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Measure(context.Background(), cfg, "rtx5090.q8_1-activation-quant", "", path)
+	if got := refusalClass(t, err); got != ClassInvalidInput {
+		t.Fatalf("OptimizeRefusal class = %q, want %q", got, ClassInvalidInput)
+	}
+}
+
+func TestMeasureReceiptRefusesMissingArm(t *testing.T) {
+	cfg := Config{Graph: nativeperf.ActiveGraph()}
+	dir := t.TempDir()
+	pair := rtx5090ReceiptPair(t, "rtx5090.q8_1-activation-quant", 100, 105)
+	path := writeReceiptPair(t, dir, "one-arm.json", pair[:1])
+	_, err := Measure(context.Background(), cfg, "rtx5090.q8_1-activation-quant", "", path)
+	if got := refusalClass(t, err); got != ClassInvalidInput {
+		t.Fatalf("OptimizeRefusal class = %q, want %q", got, ClassInvalidInput)
+	}
+}
+
+func TestMeasureRefusesBothWorkloadSources(t *testing.T) {
+	cfg := Config{Graph: syntheticGraph()}
+	_, err := Measure(context.Background(), cfg, "synth.a", smokeTrace, "pair.json")
+	if got := refusalClass(t, err); got != ClassInvalidInput {
+		t.Fatalf("OptimizeRefusal class = %q, want %q", got, ClassInvalidInput)
+	}
+}
+
+func TestMeasureRefusesEnvelopeFlagMismatch(t *testing.T) {
+	cfg := Config{Graph: nativeperf.ActiveGraph(), EnvelopeID: "qwen38-27b-q4k-a100-p1-decode"}
+	_, err := Measure(context.Background(), cfg, "rtx5090.q8_1-activation-quant", smokeTrace, "")
+	if got := refusalClass(t, err); got != ClassInvalidInput {
+		t.Fatalf("OptimizeRefusal class = %q, want %q", got, ClassInvalidInput)
 	}
 }

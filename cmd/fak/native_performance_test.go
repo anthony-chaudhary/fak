@@ -28,7 +28,7 @@ func TestNativePerformanceJSONIsValidAndSeparatesEvidence(t *testing.T) {
 	if graph.Schema != nativeperf.Schema || graph.Rungs[0].Witnessed == nil || graph.Rungs[0].Witnessed.TokensPerSecond != 3.3 {
 		t.Fatalf("unexpected native graph: %+v", graph)
 	}
-	if graph.Comparison.TokensPerSecond != 6.966061 || graph.Rungs[1].Witnessed != nil || len(graph.Envelopes) != 2 {
+	if graph.Comparison.TokensPerSecond != 6.966061 || graph.Rungs[1].Witnessed != nil || len(graph.Envelopes) != 3 {
 		t.Fatalf("comparison, pending witness, or envelope was conflated: %+v", graph)
 	}
 }

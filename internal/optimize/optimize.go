@@ -6,7 +6,9 @@
 //	OptimizePlan    selects the next dependency-ready unwitnessed lever (or the
 //	        profile-classified one) and emits the exact follow-on commands.
 //	measure replays one frozen tool-call trace through ablate.Sweep under the
-//	        lever's mapped runtime feature and reports the tok/s delta.
+//	        lever's mapped runtime feature and reports the tok/s delta, or folds
+//	        a nativeperf baseline/candidate receipt pair captured on real hardware
+//	        into the same OptimizeReceipt (--receipt; exactly one source).
 //	verify  folds two receipts into an accept/reject OptimizeVerdict under either the
 //	        preregistered nativeperf comparison criterion or the OptimizePlan's
 //	        expected floor..roof band for the shared lever.
@@ -43,12 +45,15 @@ const DefaultTracePath = "testdata/tau2/tau2-smoke.json"
 
 // Config pins everything a core needs: the lever graph, the closed
 // lever->ablate-feature mapping, the sweep engine, and the clock. Zero fields
-// fall back to the committed defaults below.
+// fall back to the committed defaults below. EnvelopeID optionally restricts
+// plan/measure/verify to one pinned execution envelope; empty means the whole
+// committed graph.
 type Config struct {
-	Graph    nativeperf.Graph
-	Mappings map[string]string
-	EngineID string
-	Now      func() time.Time
+	Graph      nativeperf.Graph
+	Mappings   map[string]string
+	EngineID   string
+	EnvelopeID string
+	Now        func() time.Time
 }
 
 func (c Config) engineID() string {
@@ -92,23 +97,62 @@ var planningRungs = map[string]string{
 
 // BuildPlan selects the next lever in graph order and renders the exact
 // follow-on invocations. Read-only: it loads nothing but the committed graph.
+// When Config.EnvelopeID names a pinned envelope, selection is restricted to
+// that envelope's levers; an envelope no graph row or lever applicability
+// carries refuses with ClassUnknownEnvelope instead of planning elsewhere.
 func BuildPlan(cfg Config) (*OptimizePlan, error) {
 	return planForLever(cfg, func() (*nativeperf.Lever, error) {
-		lever, err := nativeperf.NextLever(cfg.Graph)
+		if cfg.EnvelopeID == "" {
+			lever, err := nativeperf.NextLever(cfg.Graph)
+			if err != nil {
+				return nil, err
+			}
+			if lever == nil {
+				return nil, NewOptimizeRefusal(ClassNoReadyLever, "no dependency-ready unwitnessed lever in the graph")
+			}
+			return lever, nil
+		}
+		if !envelopeKnown(cfg.Graph, cfg.EnvelopeID) {
+			return nil, NewOptimizeRefusal(ClassUnknownEnvelope, fmt.Sprintf("envelope %q is not pinned in the graph: no envelope row or lever applicability carries it", cfg.EnvelopeID))
+		}
+		ready, err := nativeperf.ReadyLevers(cfg.Graph)
 		if err != nil {
 			return nil, err
 		}
-		if lever == nil {
-			return nil, NewOptimizeRefusal(ClassNoReadyLever, "no dependency-ready unwitnessed lever in the graph")
+		for i := range ready {
+			if ready[i].Applicability.EnvelopeID == cfg.EnvelopeID {
+				return &ready[i], nil
+			}
 		}
-		return lever, nil
+		return nil, NewOptimizeRefusal(ClassNoReadyLever, fmt.Sprintf("no dependency-ready unwitnessed lever in envelope %q", cfg.EnvelopeID))
 	})
+}
+
+// envelopeKnown reports whether the graph carries the envelope: a pinned
+// envelope row or at least one lever applicability names it.
+func envelopeKnown(graph nativeperf.Graph, id string) bool {
+	for _, e := range graph.Envelopes {
+		if e.ID == id {
+			return true
+		}
+	}
+	for _, l := range graph.Levers {
+		if l.Applicability.EnvelopeID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // PlanFromProfile selects the next lever from a decoded native profile bundle
 // through the same classifier path `fak native-performance --profile-next`
-// uses. A profile without bottleneck evidence refuses as no ready lever.
+// uses. A profile without bottleneck evidence refuses as no ready lever. The
+// optional EnvelopeID pin refuses unknown envelopes and levers outside the
+// requested envelope.
 func BuildPlanFromProfile(cfg Config, profile nativeperf.ProfileBundle) (*OptimizePlan, error) {
+	if cfg.EnvelopeID != "" && !envelopeKnown(cfg.Graph, cfg.EnvelopeID) {
+		return nil, NewOptimizeRefusal(ClassUnknownEnvelope, fmt.Sprintf("envelope %q is not pinned in the graph: no envelope row or lever applicability carries it", cfg.EnvelopeID))
+	}
 	lever, _, err := nativeperf.NextLeverFromProfile(cfg.Graph, profile)
 	if err != nil {
 		if errors.Is(err, nativeperf.ErrProfileEvidenceUnavailable) {
@@ -117,9 +161,15 @@ func BuildPlanFromProfile(cfg Config, profile nativeperf.ProfileBundle) (*Optimi
 		return nil, err
 	}
 	if lever == nil {
+		if cfg.EnvelopeID != "" {
+			return nil, NewOptimizeRefusal(ClassNoReadyLever, fmt.Sprintf("profile selected no lever in envelope %q", cfg.EnvelopeID))
+		}
 		return nil, NewOptimizeRefusal(ClassNoReadyLever, "profile selected no lever")
 	}
 	chosen := *lever
+	if cfg.EnvelopeID != "" && chosen.Applicability.EnvelopeID != cfg.EnvelopeID {
+		return nil, NewOptimizeRefusal(ClassNoReadyLever, fmt.Sprintf("profile selected lever %q outside the requested envelope %q", chosen.ID, cfg.EnvelopeID))
+	}
 	return planForLever(cfg, func() (*nativeperf.Lever, error) { return &chosen, nil })
 }
 
@@ -131,13 +181,17 @@ func planForLever(cfg Config, pick func() (*nativeperf.Lever, error)) (*Optimize
 	if err != nil {
 		return nil, err
 	}
+	envFlag := ""
+	if cfg.EnvelopeID != "" {
+		envFlag = " --envelope " + cfg.EnvelopeID
+	}
 	OptimizePlan := &OptimizePlan{
 		Schema:          PlanSchema,
 		LeverID:         lever.ID,
 		Envelope:        lever.Applicability.EnvelopeID,
 		DependencyReady: dependenciesReady(cfg.Graph, *lever),
-		MeasureCmd:      "fak optimize measure --lever " + lever.ID + " --trace " + DefaultTracePath + " --out " + lever.ID + ".json",
-		VerifyCmd:       "fak optimize verify --baseline " + lever.ID + ".baseline.json --candidate " + lever.ID + ".json --json",
+		MeasureCmd:      "fak optimize measure --lever " + lever.ID + envFlag + " --trace " + DefaultTracePath + " --out " + lever.ID + ".json",
+		VerifyCmd:       "fak optimize verify --baseline " + lever.ID + ".baseline.json --candidate " + lever.ID + ".json" + envFlag + " --json",
 		GeneratedAt:     cfg.now().Format(time.RFC3339),
 	}
 	if floor, roof, ok := planningBand(cfg.Graph, lever.ID); ok {
@@ -175,11 +229,18 @@ func dependenciesReady(graph nativeperf.Graph, lever nativeperf.Lever) bool {
 	return true
 }
 
-// Measure runs the frozen-trace A/B sweep for one lever's mapped ablate arm.
-// It refuses (never fabricates) when the lever is unknown to the graph, when
-// the lever has no trace-backed arm mapping among ablate's known features, or
-// when the trace will not load.
-func Measure(ctx context.Context, cfg Config, leverID, tracePath string) (*OptimizeReceipt, error) {
+// Measure runs the frozen-trace A/B sweep for one lever's mapped ablate arm,
+// or folds a nativeperf baseline/candidate receipt pair captured on real
+// hardware into the same OptimizeReceipt. Exactly one of tracePath or
+// receiptPath must name the workload source; supplying both refuses. It
+// refuses (never fabricates) when the lever is unknown to the graph, when the
+// requested envelope does not pin the lever, when the lever has no trace-backed
+// arm mapping among ablate's known features, when the trace will not load, or
+// when a receipt misses an identity gate or an arm.
+func Measure(ctx context.Context, cfg Config, leverID, tracePath, receiptPath string) (*OptimizeReceipt, error) {
+	if tracePath != "" && receiptPath != "" {
+		return nil, NewOptimizeRefusal(ClassInvalidInput, "--trace and --receipt are mutually exclusive; supply exactly one workload source")
+	}
 	var lever *nativeperf.Lever
 	for i := range cfg.Graph.Levers {
 		if cfg.Graph.Levers[i].ID == leverID {
@@ -189,6 +250,15 @@ func Measure(ctx context.Context, cfg Config, leverID, tracePath string) (*Optim
 	}
 	if lever == nil {
 		return nil, NewOptimizeRefusal(ClassUnknownLever, fmt.Sprintf("lever %q is not in the graph", leverID))
+	}
+	if cfg.EnvelopeID != "" && lever.Applicability.EnvelopeID != cfg.EnvelopeID {
+		return nil, NewOptimizeRefusal(ClassInvalidInput, fmt.Sprintf("lever %q is pinned to envelope %q, not the requested %q", leverID, lever.Applicability.EnvelopeID, cfg.EnvelopeID))
+	}
+	if receiptPath != "" {
+		return measureFromReceipt(cfg, lever, receiptPath)
+	}
+	if tracePath == "" {
+		return nil, NewOptimizeRefusal(ClassInvalidInput, "exactly one of --trace or --receipt is required")
 	}
 	token, mapped := cfg.mappings()[leverID]
 	if !mapped || !knownAblateFeature(token) {
@@ -248,6 +318,79 @@ func Measure(ctx context.Context, cfg Config, leverID, tracePath string) (*Optim
 		DeltaPct:      delta,
 		Reps:          1,
 		MeasuredAt:    cfg.now().Format(time.RFC3339),
+	}, nil
+}
+
+// measureFromReceipt folds one nativeperf A/B receipt pair into the
+// OptimizeReceipt. The file must hold a JSON array of exactly two
+// ExperimentReceipts, baseline then candidate; every identity gate fails
+// closed with a typed refusal, and a missing arm refuses instead of reporting
+// a fabricated zero. BaselineTokS/CandidateTokS are the means over each arm's
+// repetitions; Revision/ArtifactSHA256/ForwardPath carry the candidate arm's
+// execution identity.
+func measureFromReceipt(cfg Config, lever *nativeperf.Lever, receiptPath string) (*OptimizeReceipt, error) {
+	raw, err := os.ReadFile(receiptPath)
+	if err != nil {
+		return nil, NewOptimizeRefusal(ClassInvalidInput, fmt.Sprintf("read receipt %s: %v", receiptPath, err))
+	}
+	var elements []json.RawMessage
+	if err := json.Unmarshal(raw, &elements); err != nil {
+		return nil, NewOptimizeRefusal(ClassInvalidInput, fmt.Sprintf("decode receipt %s: expected a JSON array of exactly two nativeperf receipts: %v", receiptPath, err))
+	}
+	if len(elements) != 2 {
+		return nil, NewOptimizeRefusal(ClassInvalidInput, fmt.Sprintf("receipt %s carries %d values; the A/B pair requires exactly two (baseline then candidate)", receiptPath, len(elements)))
+	}
+	receipts := make([]nativeperf.ExperimentReceipt, 2)
+	for i, element := range elements {
+		r, err := nativeperf.DecodeReceipt(element)
+		if err != nil {
+			return nil, NewOptimizeRefusal(ClassInvalidInput, fmt.Sprintf("decode receipt %s[%d]: %v", receiptPath, i, err))
+		}
+		receipts[i] = r
+	}
+	base, cand := receipts[0], receipts[1]
+	if base.Role != nativeperf.RoleBaseline || cand.Role != nativeperf.RoleCandidate {
+		return nil, NewOptimizeRefusal(ClassInvalidInput, "receipt pair requires baseline then candidate roles")
+	}
+	if base.ChangedLeverID != lever.ID || cand.ChangedLeverID != lever.ID {
+		return nil, NewOptimizeRefusal(ClassReceiptLeverMismatch, fmt.Sprintf("receipt pair targets lever(s) %q/%q, not the requested %q", base.ChangedLeverID, cand.ChangedLeverID, lever.ID))
+	}
+	if base.EnvelopeID != lever.Applicability.EnvelopeID || cand.EnvelopeID != lever.Applicability.EnvelopeID {
+		return nil, NewOptimizeRefusal(ClassReceiptEnvelopeMismatch, fmt.Sprintf("receipt pair targets envelope(s) %q/%q, not the lever's pinned %q", base.EnvelopeID, cand.EnvelopeID, lever.Applicability.EnvelopeID))
+	}
+	if err := nativeperf.ValidateReceipt(cfg.Graph, base); err != nil {
+		return nil, NewOptimizeRefusal(ClassInvalidInput, "baseline receipt: "+err.Error())
+	}
+	if err := nativeperf.ValidateReceipt(cfg.Graph, cand); err != nil {
+		return nil, NewOptimizeRefusal(ClassInvalidInput, "candidate receipt: "+err.Error())
+	}
+	if len(base.Repetitions) == 0 || len(cand.Repetitions) == 0 {
+		return nil, NewOptimizeRefusal(ClassInvalidInput, "receipt pair is missing an arm; a missing arm refuses instead of zero-filling")
+	}
+	if len(base.Repetitions) != len(cand.Repetitions) {
+		return nil, NewOptimizeRefusal(ClassInvalidInput, fmt.Sprintf("arms disagree on repetition count (%d vs %d)", len(base.Repetitions), len(cand.Repetitions)))
+	}
+	baseTokS := meanTPS(base.Repetitions)
+	candTokS := meanTPS(cand.Repetitions)
+	if baseTokS <= 0 || candTokS <= 0 {
+		return nil, NewOptimizeRefusal(ClassInvalidInput, "arm mean throughput is not positive")
+	}
+	sum := sha256.Sum256(raw)
+	delta := (candTokS - baseTokS) / baseTokS * 100
+	return &OptimizeReceipt{
+		Schema:         ReceiptSchema,
+		LeverID:        lever.ID,
+		EngineID:       cand.Execution.Engine,
+		TracePath:      receiptPath,
+		TraceSHA256:    hex.EncodeToString(sum[:]),
+		BaselineTokS:   baseTokS,
+		CandidateTokS:  candTokS,
+		DeltaPct:       delta,
+		Reps:           len(base.Repetitions),
+		MeasuredAt:     cfg.now().Format(time.RFC3339),
+		Revision:       cand.Revision,
+		ArtifactSHA256: cand.ArtifactSHA256,
+		ForwardPath:    cand.Execution.ForwardPath,
 	}, nil
 }
 
@@ -338,6 +481,9 @@ func Verify(cfg Config, baselinePath, candidatePath, qualityPath string) (*Optim
 		if baseOpt.TraceSHA256 != candOpt.TraceSHA256 {
 			return nil, NewOptimizeRefusal(ClassInvalidInput, "receipts bind different trace workloads")
 		}
+		if err := verifyEnvelopeAgainstLever(cfg, baseOpt.LeverID); err != nil {
+			return nil, err
+		}
 		return decideBanded(cfg, baseOpt.LeverID, baseOpt.BaselineTokS, candOpt.CandidateTokS, quality)
 	case !baseIsOpt && !candIsOpt:
 		base, err := nativeperf.DecodeReceipt(baseRaw)
@@ -348,10 +494,32 @@ func Verify(cfg Config, baselinePath, candidatePath, qualityPath string) (*Optim
 		if err != nil {
 			return nil, NewOptimizeRefusal(ClassInvalidInput, "candidate is neither an optimize receipt nor a nativeperf receipt: "+err.Error())
 		}
+		if cfg.EnvelopeID != "" && (base.EnvelopeID != cfg.EnvelopeID || cand.EnvelopeID != cfg.EnvelopeID) {
+			return nil, NewOptimizeRefusal(ClassInvalidInput, fmt.Sprintf("receipts target envelope(s) %q/%q, not the requested %q", base.EnvelopeID, cand.EnvelopeID, cfg.EnvelopeID))
+		}
 		return decideNative(cfg, base, cand, quality)
 	default:
 		return nil, NewOptimizeRefusal(ClassInvalidInput, "mixed OptimizeReceipt kinds: baseline and candidate must both be optimize receipts or both nativeperf receipts")
 	}
+}
+
+// verifyEnvelopeAgainstLever enforces the optional --envelope pin against the
+// lever the optimize receipts bind to. An unknown lever leaves verification to
+// the planning-band gate; a known lever pinned to another envelope refuses.
+func verifyEnvelopeAgainstLever(cfg Config, leverID string) error {
+	if cfg.EnvelopeID == "" {
+		return nil
+	}
+	for i := range cfg.Graph.Levers {
+		if cfg.Graph.Levers[i].ID != leverID {
+			continue
+		}
+		if cfg.Graph.Levers[i].Applicability.EnvelopeID != cfg.EnvelopeID {
+			return NewOptimizeRefusal(ClassInvalidInput, fmt.Sprintf("receipts target lever %q pinned to envelope %q, not the requested %q", leverID, cfg.Graph.Levers[i].Applicability.EnvelopeID, cfg.EnvelopeID))
+		}
+		return nil
+	}
+	return nil
 }
 
 // decodeOptimizeReceipt decodes raw bytes as this package's OptimizeReceipt schema.
@@ -504,7 +672,7 @@ func RunLoop(ctx context.Context, cfg Config, maxIters int, dryRun bool, tracePa
 			lines = append(lines, line)
 			return lines, nil
 		}
-		rec, err := Measure(ctx, cfg, OptimizePlan.LeverID, tracePath)
+		rec, err := Measure(ctx, cfg, OptimizePlan.LeverID, tracePath, "")
 		if err != nil {
 			if refuse := refusalOf(err); refuse != nil {
 				line.Verdict = LedgerRefused

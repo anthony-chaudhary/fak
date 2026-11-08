@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 )
 
 // runOptimizeTest drives the testable runOptimize core with captured streams.
@@ -176,5 +178,229 @@ func TestOptimizeUsageErrors(t *testing.T) {
 		if code != 2 {
 			t.Fatalf("args=%v: exit=%d, want 2", args, code)
 		}
+	}
+}
+
+const rtx5090EnvelopeID = "qwen38-27b-q4km-rtx5090-p1-decode"
+
+// rtx5090ReceiptPairFile writes a minimal valid baseline/candidate nativeperf
+// receipt pair for a committed RTX 5090 lever as one JSON array file.
+func rtx5090ReceiptPairFile(t *testing.T, dir, name, lever string, baseTPS, candTPS float64) string {
+	t.Helper()
+	mk := func(role string, tps float64) nativeperf.ExperimentReceipt {
+		r, err := nativeperf.BaselineTemplate(nativeperf.ActiveGraph(), lever)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Role = role
+		r.Revision = "rev-" + role
+		r.Machine.ScrubbedID = "lab-node-class-a"
+		r.Memory = nativeperf.MemoryMetrics{PeakBytes: 1000, ResidentBytes: 900}
+		r.Quality = nativeperf.QualityMetric{Name: "exact_match", Score: 1, HigherIsBetter: true}
+		r.ModuleVersions = []nativeperf.ModuleRevision{{Module: "internal/model", Revision: "r1+gaaaaaaa"}}
+		r.Commands = []string{"fak run-model --native --receipt-out receipt.json"}
+		r.ProfilerArtifacts = []nativeperf.ArtifactRef{{Path: "profiles/run.json", SHA256: strings.Repeat("a", 64)}}
+		for i := range r.Repetitions {
+			r.Repetitions[i] = nativeperf.Repetition{EndToEndMilliseconds: 100, TokensPerSecond: tps}
+		}
+		if role == nativeperf.RoleCandidate {
+			r.ChangedAxes = []string{"lever:" + lever}
+		}
+		return r
+	}
+	pair := []nativeperf.ExperimentReceipt{mk(nativeperf.RoleBaseline, baseTPS), mk(nativeperf.RoleCandidate, candTPS)}
+	raw, err := json.Marshal(pair)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// plan --envelope restricts selection to the pinned envelope and emits the
+// follow-on commands with the --envelope flag carried through.
+func TestOptimizePlanEnvelopeJSON(t *testing.T) {
+	code, out, errb := runOptimizeTest("plan", "--envelope", rtx5090EnvelopeID, "--json")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, errb)
+	}
+	var plan struct {
+		LeverID         string `json:"lever_id"`
+		Envelope        string `json:"envelope"`
+		DependencyReady bool   `json:"dependency_ready"`
+		MeasureCmd      string `json:"measure_cmd"`
+		VerifyCmd       string `json:"verify_cmd"`
+	}
+	if err := json.Unmarshal([]byte(out), &plan); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	if plan.LeverID != "rtx5090.q8_1-activation-quant" || plan.Envelope != rtx5090EnvelopeID || !plan.DependencyReady {
+		t.Fatalf("envelope-filtered plan drifted: %+v", plan)
+	}
+	if !strings.Contains(plan.MeasureCmd, "--envelope "+rtx5090EnvelopeID) || !strings.Contains(plan.VerifyCmd, "--envelope "+rtx5090EnvelopeID) {
+		t.Fatalf("follow-on commands lost the envelope pin: measure=%q verify=%q", plan.MeasureCmd, plan.VerifyCmd)
+	}
+}
+
+// plan with an envelope no graph row or lever carries refuses typed (exit 1,
+// the plan sub-verb's typed-refusal code).
+func TestOptimizePlanUnknownEnvelope(t *testing.T) {
+	code, out, _ := runOptimizeTest("plan", "--envelope", "no-such-envelope", "--json")
+	if code != 1 {
+		t.Fatalf("exit=%d, want 1\nstdout=%s", code, out)
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(out), &body); err != nil {
+		t.Fatalf("refusal json: %v\n%s", err, out)
+	}
+	if body.Error != "unknown_envelope" {
+		t.Fatalf("refusal class = %q, want unknown_envelope", body.Error)
+	}
+}
+
+// loop --envelope dry-run plans only inside the pinned envelope.
+func TestOptimizeLoopEnvelopeDryRun(t *testing.T) {
+	code, out, errb := runOptimizeTest("loop", "--max-iters", "1", "--dry-run", "--envelope", rtx5090EnvelopeID, "--json")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, errb)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("want one ledger line, got %d: %s", len(lines), out)
+	}
+	var line struct {
+		LeverID string `json:"lever_id"`
+		Verdict string `json:"verdict"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &line); err != nil {
+		t.Fatalf("ledger line json: %v\n%s", err, lines[0])
+	}
+	if line.LeverID != "rtx5090.q8_1-activation-quant" || line.Verdict != "planned" {
+		t.Fatalf("ledger line = %+v", line)
+	}
+}
+
+// measure --trace and --receipt together refuse typed (exit 2).
+func TestOptimizeMeasureReceiptMutualExclusion(t *testing.T) {
+	code, out, _ := runOptimizeTest("measure", "--lever", "rtx5090.q8_1-activation-quant", "--trace", "t.json", "--receipt", "r.json", "--json")
+	if code != 2 {
+		t.Fatalf("exit=%d, want 2\nstdout=%s", code, out)
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(out), &body); err != nil {
+		t.Fatalf("refusal json: %v\n%s", err, out)
+	}
+	if body.Error != "invalid_input" {
+		t.Fatalf("refusal class = %q, want invalid_input", body.Error)
+	}
+}
+
+// measure --receipt folds a matched nativeperf A/B pair into the receipt.
+func TestOptimizeMeasureReceiptAcceptsPair(t *testing.T) {
+	dir := t.TempDir()
+	path := rtx5090ReceiptPairFile(t, dir, "pair.json", "rtx5090.q8_1-activation-quant", 100, 105)
+	code, out, errb := runOptimizeTest("measure", "--lever", "rtx5090.q8_1-activation-quant", "--receipt", path, "--json")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, errb)
+	}
+	var rec struct {
+		Schema        string  `json:"schema"`
+		LeverID       string  `json:"lever_id"`
+		EngineID      string  `json:"engine_id"`
+		BaselineTokS  float64 `json:"baseline_tok_s"`
+		CandidateTokS float64 `json:"candidate_tok_s"`
+		DeltaPct      float64 `json:"delta_pct"`
+		Reps          int     `json:"reps"`
+		Revision      string  `json:"revision"`
+		ArtifactSHA   string  `json:"artifact_sha256"`
+		ForwardPath   string  `json:"forward_path"`
+	}
+	if err := json.Unmarshal([]byte(out), &rec); err != nil {
+		t.Fatalf("receipt json: %v\n%s", err, out)
+	}
+	if rec.Schema != "fak-optimize-receipt/v1" || rec.LeverID != "rtx5090.q8_1-activation-quant" || rec.EngineID != "fak-native" {
+		t.Fatalf("receipt identity drifted: %+v", rec)
+	}
+	if rec.BaselineTokS != 100 || rec.CandidateTokS != 105 || rec.DeltaPct != 5 || rec.Reps != 3 {
+		t.Fatalf("arm means drifted: %+v", rec)
+	}
+	if rec.Revision != "rev-candidate" || rec.ArtifactSHA != "issue-8635-pinned-artifact" || rec.ForwardPath != "cuda/q4km-p1-decode" {
+		t.Fatalf("execution identity drifted: %+v", rec)
+	}
+}
+
+// measure --receipt against a pair that targets another lever refuses typed.
+func TestOptimizeMeasureReceiptLeverMismatch(t *testing.T) {
+	dir := t.TempDir()
+	path := rtx5090ReceiptPairFile(t, dir, "pair.json", "rtx5090.dp4a-q4k-mmvq", 100, 105)
+	code, out, _ := runOptimizeTest("measure", "--lever", "rtx5090.q8_1-activation-quant", "--receipt", path, "--json")
+	if code != 2 {
+		t.Fatalf("exit=%d, want 2\nstdout=%s", code, out)
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(out), &body); err != nil {
+		t.Fatalf("refusal json: %v\n%s", err, out)
+	}
+	if body.Error != "receipt_lever_mismatch" {
+		t.Fatalf("refusal class = %q, want receipt_lever_mismatch", body.Error)
+	}
+}
+
+// measure --receipt against a pair stamped with another envelope refuses typed.
+func TestOptimizeMeasureReceiptEnvelopeMismatch(t *testing.T) {
+	dir := t.TempDir()
+	lever := "rtx5090.q8_1-activation-quant"
+	mk := func(role string, tps float64) nativeperf.ExperimentReceipt {
+		r, err := nativeperf.BaselineTemplate(nativeperf.ActiveGraph(), lever)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Role = role
+		r.EnvelopeID = "qwen38-27b-q4k-a100-p1-decode"
+		r.Revision = "rev-" + role
+		r.Machine.ScrubbedID = "lab-node-class-a"
+		r.Memory = nativeperf.MemoryMetrics{PeakBytes: 1000, ResidentBytes: 900}
+		r.Quality = nativeperf.QualityMetric{Name: "exact_match", Score: 1, HigherIsBetter: true}
+		r.ModuleVersions = []nativeperf.ModuleRevision{{Module: "internal/model", Revision: "r1+gaaaaaaa"}}
+		r.Commands = []string{"fak run-model --native --receipt-out receipt.json"}
+		r.ProfilerArtifacts = []nativeperf.ArtifactRef{{Path: "profiles/run.json", SHA256: strings.Repeat("a", 64)}}
+		for i := range r.Repetitions {
+			r.Repetitions[i] = nativeperf.Repetition{EndToEndMilliseconds: 100, TokensPerSecond: tps}
+		}
+		if role == nativeperf.RoleCandidate {
+			r.ChangedAxes = []string{"lever:" + lever}
+		}
+		return r
+	}
+	pair := []nativeperf.ExperimentReceipt{mk(nativeperf.RoleBaseline, 100), mk(nativeperf.RoleCandidate, 105)}
+	raw, err := json.Marshal(pair)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "pair.json")
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ := runOptimizeTest("measure", "--lever", lever, "--receipt", path, "--json")
+	if code != 2 {
+		t.Fatalf("exit=%d, want 2\nstdout=%s", code, out)
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(out), &body); err != nil {
+		t.Fatalf("refusal json: %v\n%s", err, out)
+	}
+	if body.Error != "receipt_envelope_mismatch" {
+		t.Fatalf("refusal class = %q, want receipt_envelope_mismatch", body.Error)
 	}
 }

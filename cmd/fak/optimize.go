@@ -23,10 +23,10 @@ import (
 // stacked when witnessed. Unrunnable paths refuse with a closed-vocabulary
 // class instead of fabricating numbers.
 //
-//	fak optimize plan [--profile FILE] [--json]
-//	fak optimize measure --lever ID --trace FILE [--out FILE] [--json]
-//	fak optimize verify --baseline FILE --candidate FILE [--quality FILE] [--json]
-//	fak optimize loop --max-iters N [--dry-run] [--json]
+//	fak optimize plan [--envelope ID] [--profile FILE] [--json]
+//	fak optimize measure --lever ID (--trace FILE | --receipt FILE) [--envelope ID] [--out FILE] [--json]
+//	fak optimize verify --baseline FILE --candidate FILE [--quality FILE] [--envelope ID] [--json]
+//	fak optimize loop --max-iters N [--envelope ID] [--dry-run] [--json]
 //
 // Exit codes: 0 success (verify: accept), 1 failure (plan: no ready lever;
 // verify: reject; any internal error), 2 typed OptimizeRefusal / usage error.
@@ -58,14 +58,16 @@ func runOptimize(stdout, stderr io.Writer, args []string) int {
 func printOptimizeUsage(w io.Writer) {
 	fmt.Fprintln(w, `usage: fak optimize <sub> [flags]
 
-  plan      [--profile FILE] [--json]
-          select the next dependency-ready unwitnessed lever (or the
-          profile-classified one) and emit the OptimizePlan JSON
-  measure --lever ID --trace FILE [--out FILE] [--json]
-          replay the frozen trace A/B under the lever's mapped ablate arm
-  verify  --baseline FILE --candidate FILE [--quality FILE] [--json]
+  plan      [--envelope ID] [--profile FILE] [--json]
+          select the next dependency-ready unwitnessed lever (optionally
+          restricted to pinned envelope ID; or the profile-classified one)
+          and emit the OptimizePlan JSON
+  measure --lever ID (--trace FILE | --receipt FILE) [--envelope ID] [--out FILE] [--json]
+          replay the frozen trace A/B under the lever's mapped ablate arm, or
+          fold a nativeperf baseline/candidate receipt pair into the receipt
+  verify  --baseline FILE --candidate FILE [--quality FILE] [--envelope ID] [--json]
           fold two receipts into an accept/reject OptimizeVerdict
-  loop    --max-iters N [--dry-run] [--json]
+  loop    --max-iters N [--envelope ID] [--dry-run] [--json]
           bounded OptimizePlan->measure->verify hill-climb over the default suite trace`)
 }
 
@@ -97,12 +99,13 @@ func encodeOptimizeJSON(stdout, stderr io.Writer, value any) int {
 func runOptimizePlan(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("optimize OptimizePlan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	envelope := fs.String("envelope", "", "restrict selection to the pinned envelope ID")
 	profilePath := fs.String("profile", "", "select the next lever from native profile FILE (the --profile-next classifier path)")
 	_ = fs.Bool("json", false, "emit the OptimizePlan JSON (the default rendering)")
 	if rc, ok := parseFlagsOrHelp(fs, args); !ok {
 		return rc
 	}
-	cfg := optimize.Config{Graph: nativeperf.ActiveGraph()}
+	cfg := optimize.Config{Graph: nativeperf.ActiveGraph(), EnvelopeID: *envelope}
 	var OptimizePlan *optimize.OptimizePlan
 	var err error
 	if *profilePath != "" {
@@ -132,17 +135,26 @@ func runOptimizeMeasure(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("optimize measure", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	lever := fs.String("lever", "", "lever id to measure (required)")
-	tracePath := fs.String("trace", "", "frozen trace FILE to replay (required)")
+	tracePath := fs.String("trace", "", "frozen trace FILE to replay (exactly one of --trace/--receipt)")
+	receiptPath := fs.String("receipt", "", "nativeperf baseline/candidate receipt-pair FILE to fold (exactly one of --trace/--receipt)")
+	envelope := fs.String("envelope", "", "pinned envelope ID the lever must belong to")
 	out := fs.String("out", "", "write the OptimizeReceipt JSON to this path")
 	asJSON := fs.Bool("json", false, "emit the OptimizeReceipt JSON to stdout")
 	if rc, ok := parseFlagsOrHelp(fs, args); !ok {
 		return rc
 	}
-	if *lever == "" || *tracePath == "" {
-		fmt.Fprintln(stderr, "fak optimize measure: --lever and --trace are required")
+	if *lever == "" {
+		fmt.Fprintln(stderr, "fak optimize measure: --lever is required")
 		return 2
 	}
-	rec, err := optimize.Measure(ctx(), optimize.Config{Graph: nativeperf.ActiveGraph()}, *lever, *tracePath)
+	if *tracePath != "" && *receiptPath != "" {
+		return emitOptimizeRefusal(stdout, optimize.NewOptimizeRefusal(optimize.ClassInvalidInput, "--trace and --receipt are mutually exclusive; supply exactly one workload source"), 2)
+	}
+	if *tracePath == "" && *receiptPath == "" {
+		fmt.Fprintln(stderr, "fak optimize measure: --trace or --receipt is required")
+		return 2
+	}
+	rec, err := optimize.Measure(ctx(), optimize.Config{Graph: nativeperf.ActiveGraph(), EnvelopeID: *envelope}, *lever, *tracePath, *receiptPath)
 	if err != nil {
 		if refuse := optimizeRefusalOf(err); refuse != nil {
 			return emitOptimizeRefusal(stdout, refuse, 2)
@@ -185,6 +197,7 @@ func runOptimizeVerify(stdout, stderr io.Writer, args []string) int {
 	baseline := fs.String("baseline", "", "baseline OptimizeReceipt FILE (required)")
 	candidate := fs.String("candidate", "", "candidate OptimizeReceipt FILE (required)")
 	quality := fs.String("quality", "", "fak quality run --json result FILE; a failing gate forces reject")
+	envelope := fs.String("envelope", "", "pinned envelope ID both receipts must target")
 	_ = fs.Bool("json", false, "emit the OptimizeVerdict JSON (the default rendering)")
 	if rc, ok := parseFlagsOrHelp(fs, args); !ok {
 		return rc
@@ -193,7 +206,7 @@ func runOptimizeVerify(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, "fak optimize verify: --baseline and --candidate are required")
 		return 2
 	}
-	verdict, err := optimize.Verify(optimize.Config{Graph: nativeperf.ActiveGraph()}, *baseline, *candidate, *quality)
+	verdict, err := optimize.Verify(optimize.Config{Graph: nativeperf.ActiveGraph(), EnvelopeID: *envelope}, *baseline, *candidate, *quality)
 	if err != nil {
 		if refuse := optimizeRefusalOf(err); refuse != nil {
 			return emitOptimizeRefusal(stdout, refuse, 2)
@@ -215,11 +228,12 @@ func runOptimizeLoop(stdout, stderr io.Writer, args []string) int {
 	fs.SetOutput(stderr)
 	maxIters := fs.Int("max-iters", 0, "bounded iteration count (required, positive)")
 	dryRun := fs.Bool("dry-run", false, "stop after the first OptimizePlan; never measure")
+	envelope := fs.String("envelope", "", "restrict every iteration to the pinned envelope ID")
 	_ = fs.Bool("json", false, "ledger lines are JSONL regardless; accepted for surface parity")
 	if rc, ok := parseFlagsOrHelp(fs, args); !ok {
 		return rc
 	}
-	lines, err := optimize.RunLoop(ctx(), optimize.Config{Graph: nativeperf.ActiveGraph()}, *maxIters, *dryRun, optimize.DefaultTracePath)
+	lines, err := optimize.RunLoop(ctx(), optimize.Config{Graph: nativeperf.ActiveGraph(), EnvelopeID: *envelope}, *maxIters, *dryRun, optimize.DefaultTracePath)
 	if err != nil {
 		if refuse := optimizeRefusalOf(err); refuse != nil {
 			return emitOptimizeRefusal(stdout, refuse, 2)

@@ -144,9 +144,9 @@ type Graph struct {
 	Levers     []Lever    `json:"levers"`
 }
 
-// ActiveGraph returns the committed, independently attributable Metal and CUDA
-// Qwen3.8-27B planning graph. Existing primary-envelope/rung fields remain so v1
-// readers retain their previous view.
+// ActiveGraph returns the committed, independently attributable Metal, CUDA
+// A100, and CUDA RTX 5090 Qwen3.8-27B planning graph. Existing
+// primary-envelope/rung fields remain so v1 readers retain their previous view.
 func ActiveGraph() Graph {
 	metal := Envelope{
 		ID:                "qwen38-27b-q4km-m3pro-p32-t64",
@@ -184,6 +184,24 @@ func ActiveGraph() Graph {
 		ThroughputMetric:  "end_to_end_decode_tokens_per_second",
 		ComparabilityRule: "same issue-#8635 pinned artifact, A100, P=1 decode path, sampling, repetitions, quality gates, and fak-native identity",
 	}
+	rtx5090 := Envelope{
+		ID:                "qwen38-27b-q4km-rtx5090-p1-decode",
+		Model:             "Qwen3.8-27B GGUF pinned by issue #8635",
+		ModelRevision:     "issue-8635-pinned-revision",
+		ArtifactSHA256:    "issue-8635-pinned-artifact",
+		Quantization:      "Q4_K_M",
+		Hardware:          "NVIDIA RTX 5090",
+		MemoryGiB:         32,
+		Engine:            "fak-native",
+		Backend:           "cuda",
+		ForwardPath:       "cuda/q4km-p1-decode",
+		PromptTokens:      1,
+		DecodeTokens:      64,
+		Repetitions:       3,
+		Temperature:       0,
+		ThroughputMetric:  "end_to_end_decode_tokens_per_second",
+		ComparabilityRule: "same issue-#8635 pinned artifact, RTX 5090, P=1 decode path, sampling, repetitions, quality gates, and fak-native identity",
+	}
 	comparison := Throughput{
 		TokensPerSecond: 6.966061,
 		Classification:  ClassComparison,
@@ -218,6 +236,7 @@ func ActiveGraph() Graph {
 	}
 	metalApply := Applicability{EnvelopeID: metal.ID, Platform: "darwin/arm64", Backend: "metal"}
 	cudaApply := Applicability{EnvelopeID: cuda.ID, Platform: "linux/amd64+nvidia-a100", Backend: "cuda"}
+	rtx5090Apply := Applicability{EnvelopeID: rtx5090.ID, Platform: "linux/amd64+nvidia-rtx5090", Backend: "cuda"}
 	levers := []Lever{
 		lever("metal.resident-q4k-weights", "Resident Q4_K weights", metalApply, true, StatusPresent, nil, nil, "Retain the resident-weight baseline while isolating later submissions.", "docs/benchmarks/QWEN38-27B-LATEST.md and issue #8697", &WitnessedEffect{Summary: "3.3 tok/s fak-native after 31 prompt tokens and 64 decode tokens; approximate to this P32 envelope", Classification: ClassWitnessed, Provenance: "https://github.com/anthony-chaudhary/fak/issues/8697", Receipt: "issue #8697 evidence captured 2026-08-23"}, 8324, "Capture an exact P32/T64 three-repetition fak-native baseline receipt with artifact hash and execution identity."),
 		lever("metal.command-buffer-amortization", "Command-buffer and synchronization amortization", metalApply, false, StatusPartial, []string{"metal.resident-q4k-weights"}, nil, "Reduce repeated synchronous Q4_K projection submission overhead; no throughput gain is assumed.", "issues #8324 and #8697 profile diagnosis", nil, 8324, "Run one-lever OFF/ON P32/T64 A/B on the pinned M3 Pro envelope; receipt must include commands, revisions, artifact hash, per-repetition latency/tok/s, quality, fak-native identity, and before/after profile."),
@@ -231,8 +250,12 @@ func ActiveGraph() Graph {
 		lever("cuda.q8_1-activation-quant", "Q8_1 activation quantization", cudaApply, false, StatusAbsent, nil, []string{"cuda.scalar-f32-activation-baseline"}, "Quantize each current resident activation vector under cosine >=0.995, exact-argmax, and maxAbs <=0.02 gates; no throughput gain is assumed.", "issue #8635", nil, 8635, "Run the strict Q4_K numerical gate for the Q8_1 OFF/ON arm and retain cosine, exact argmax, maxAbs, artifact identity, and raw output."),
 		lever("cuda.dp4a-q4k-mmvq", "Signed DP4A Q4_K MMVQ", cudaApply, false, StatusAbsent, []string{"cuda.q8_1-activation-quant"}, nil, "Target the issue #8635 >=47.36 tok/s operating envelope without treating that target as witnessed fak-native throughput.", "issue #8635", nil, 8635, "With Q8_1 fixed ON, run DP4A MMVQ OFF/ON repeated same-artifact A100 decode A/B; retain per-run end-to-end tok/s, quality gates, raw logs, and fak-native identity."),
 		lever("cuda.default-decode-routing", "Default P=1 decode routing", cudaApply, false, StatusAbsent, []string{"cuda.dp4a-q4k-mmvq"}, nil, "Route the validated MMVQ path by default only after full-model correctness and end-to-end gain.", "issue #8635", nil, 8635, "Capture full-model text/JSON/tool correctness without fallback, repeated A100 decode gain, and default-path inspection proving fak-native Q8_1/DP4A routing."),
+		lever("rtx5090.scalar-f32-activation-baseline", "Scalar f32 activation-product baseline", rtx5090Apply, true, StatusPresent, nil, []string{"rtx5090.q8_1-activation-quant"}, "No fak-native RTX 5090 baseline receipt exists yet; the expected band stays unplanned until the first repeated same-artifact receipt.", "issue #8635", nil, 8635, "Capture the repeated same-artifact RTX 5090 baseline receipt with strict quality and fak-native execution identity before enabling Q8_1."),
+		lever("rtx5090.q8_1-activation-quant", "Q8_1 activation quantization", rtx5090Apply, false, StatusAbsent, nil, []string{"rtx5090.scalar-f32-activation-baseline"}, "Quantize each current resident activation vector under cosine >=0.995, exact-argmax, and maxAbs <=0.02 gates on the qwen38-27b-q4km-rtx5090-p1-decode envelope; no throughput gain is assumed.", "issue #8635", nil, 8635, "Run the strict Q4_K_M numerical gate for the Q8_1 OFF/ON arm on the qwen38-27b-q4km-rtx5090-p1-decode envelope and retain cosine, exact argmax, maxAbs, artifact identity, and raw output."),
+		lever("rtx5090.dp4a-q4k-mmvq", "Signed DP4A Q4_K MMVQ", rtx5090Apply, false, StatusAbsent, []string{"rtx5090.q8_1-activation-quant"}, nil, "Target the RTX 5090 P=1 decode operating envelope; the A100 operating-envelope target is not transferable; the 5090 band is unplanned until its own baseline receipt.", "issue #8635", nil, 8635, "With Q8_1 fixed ON, run DP4A MMVQ OFF/ON repeated same-artifact RTX 5090 decode A/B; retain per-run end-to-end tok/s, quality gates, raw logs, and fak-native identity."),
+		lever("rtx5090.default-decode-routing", "Default P=1 decode routing", rtx5090Apply, false, StatusAbsent, []string{"rtx5090.dp4a-q4k-mmvq"}, nil, "Route the validated MMVQ path by default on the RTX 5090 envelope only after full-model correctness and end-to-end gain.", "issue #8635", nil, 8635, "Capture full-model text/JSON/tool correctness without fallback, repeated RTX 5090 decode gain, and default-path inspection proving fak-native Q8_1/DP4A routing."),
 	}
-	return Graph{Schema: Schema, Envelope: metal, Comparison: comparison, Rungs: rungs, Features: features, Envelopes: []Envelope{metal, cuda}, Levers: levers}
+	return Graph{Schema: Schema, Envelope: metal, Comparison: comparison, Rungs: rungs, Features: features, Envelopes: []Envelope{metal, cuda, rtx5090}, Levers: levers}
 }
 
 func lever(id, name string, applicability Applicability, enabled bool, status Status, deps, conflicts []string, expected, provenance string, witnessed *WitnessedEffect, owner int, next string) Lever {
@@ -257,8 +280,8 @@ func NextLever(graph Graph) (*Lever, error) {
 	return &ready[0], nil
 }
 
-// DOT renders deterministic Graphviz DOT. Envelope clusters prevent Metal and
-// CUDA throughput or edges from appearing as one curve.
+// DOT renders deterministic Graphviz DOT. Envelope clusters prevent Metal,
+// CUDA A100, and CUDA RTX 5090 throughput or edges from appearing as one curve.
 func DOT(graph Graph) (string, error) {
 	if err := Validate(graph); err != nil {
 		return "", err
@@ -462,7 +485,7 @@ func Validate(graph Graph) error {
 }
 
 func validPlatform(platform, backend string) bool {
-	return (backend == "metal" && platform == "darwin/arm64") || (backend == "cuda" && platform == "linux/amd64+nvidia-a100")
+	return (backend == "metal" && platform == "darwin/arm64") || (backend == "cuda" && platform == "linux/amd64+nvidia-a100") || (backend == "cuda" && platform == "linux/amd64+nvidia-rtx5090")
 }
 
 func contains(values []string, value string) bool {

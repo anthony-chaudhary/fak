@@ -19,6 +19,7 @@ func TestReadyLeversReturnsEveryDependencyReadyArm(t *testing.T) {
 		"metal.paged-kv",
 		"metal.chunked-prefill",
 		"cuda.q8_1-activation-quant",
+		"rtx5090.q8_1-activation-quant",
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("ready levers = %v, want %v", got, want)
@@ -83,7 +84,7 @@ func TestCurrentSnapshotCoversConstraintsWavesAndOSSWalk(t *testing.T) {
 	if packetByID["profile.real-metal"].Issue != 9495 || packetByID["profile.real-cuda"].Issue != 9497 || packetByID["profile.returned-receipt-gate"].Issue != 9498 {
 		t.Fatalf("profile-control-loop owners are stale: metal=#%d cuda=#%d gate=#%d", packetByID["profile.real-metal"].Issue, packetByID["profile.real-cuda"].Issue, packetByID["profile.returned-receipt-gate"].Issue)
 	}
-	if len(snapshot.ReadyWaves) != 2 || snapshot.ReadyWaves[0].ID != "metal" || snapshot.ReadyWaves[1].ID != "cuda" {
+	if len(snapshot.ReadyWaves) != 3 || snapshot.ReadyWaves[0].ID != "metal" || snapshot.ReadyWaves[1].ID != "cuda" || snapshot.ReadyWaves[2].ID != "rtx5090" {
 		t.Fatalf("unexpected independent waves: %+v", snapshot.ReadyWaves)
 	}
 	if len(snapshot.Collisions) < 2 {

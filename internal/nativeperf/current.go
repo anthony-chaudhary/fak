@@ -218,6 +218,7 @@ func BuildCurrentSnapshot(graph Graph) (CurrentSnapshot, error) {
 
 	const metalEnvelope = "qwen38-27b-q4km-m3pro-p32-t64"
 	const cudaEnvelope = "qwen38-27b-q4k-a100-p1-decode"
+	const rtx5090Envelope = "qwen38-27b-q4km-rtx5090-p1-decode"
 	snapshot := CurrentSnapshot{
 		Schema:     CurrentSchema,
 		AsOf:       "2026-08-27",
@@ -341,8 +342,9 @@ func BuildCurrentSnapshot(graph Graph) (CurrentSnapshot, error) {
 			{ID: "profile.returned-receipt-gate", Name: "Scheduled/manual returned-receipt gate", ProgramID: "profile-control-loop", ConstraintIDs: []string{"measurement-control-loop"}, Issue: 9498, ProgramOrder: 3, State: WorkWaitingEvidence, Owner: "unassigned", Lane: "ci+nativeperf", Paths: []string{".github/workflows/native-performance-regression.yml", "internal/nativeperf/**"}, HardDependencyIDs: []string{"profile.real-metal", "profile.real-cuda"}, NextAction: "After #9495/#9497 validate, dispatch #9498 to consume the returned scrubbed request instead of only printing the handoff.", ExitWhen: "One scheduled/manual run records the returned request's gate verdict and fails closed on an unavailable source."},
 		},
 		ReadyWaves: []ReadyWave{
-			{ID: "metal", EnvelopeID: metalEnvelope, ReadyLeverIDs: append([]string(nil), readyByEnvelope[metalEnvelope]...), ParallelWith: []string{"cuda"}, SerialWithinWave: true, SerialReason: "Every arm shares one matched Metal envelope and must retain one-lever attribution without device contention."},
-			{ID: "cuda", EnvelopeID: cudaEnvelope, ReadyLeverIDs: append([]string(nil), readyByEnvelope[cudaEnvelope]...), ParallelWith: []string{"metal"}, SerialWithinWave: true, SerialReason: "The Q8_1 candidate explicitly toggles the conflicting scalar-f32 baseline OFF inside one matched A/B."},
+			{ID: "metal", EnvelopeID: metalEnvelope, ReadyLeverIDs: append([]string(nil), readyByEnvelope[metalEnvelope]...), ParallelWith: []string{"cuda", "rtx5090"}, SerialWithinWave: true, SerialReason: "Every arm shares one matched Metal envelope and must retain one-lever attribution without device contention."},
+			{ID: "cuda", EnvelopeID: cudaEnvelope, ReadyLeverIDs: append([]string(nil), readyByEnvelope[cudaEnvelope]...), ParallelWith: []string{"metal", "rtx5090"}, SerialWithinWave: true, SerialReason: "The Q8_1 candidate explicitly toggles the conflicting scalar-f32 baseline OFF inside one matched A/B."},
+			{ID: "rtx5090", EnvelopeID: rtx5090Envelope, ReadyLeverIDs: append([]string(nil), readyByEnvelope[rtx5090Envelope]...), ParallelWith: []string{"metal", "cuda"}, SerialWithinWave: true, SerialReason: "The Q8_1 candidate explicitly toggles the conflicting scalar-f32 baseline OFF inside one matched A/B on the RTX 5090."},
 		},
 		Collisions: []ReadyCollision{
 			{ID: "live-model-compute-lease", Kind: "live-coordination", Members: []string{"cuda.cache-weight-residency", "cuda.q8_1-numerical-gate"}, Reason: "The current #9420 DOS leases overlap the CUDA source packet after #9420's implementation landed. #8635 requires a fresh live readback and its own lease."},

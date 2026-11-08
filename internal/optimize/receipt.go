@@ -11,14 +11,17 @@ const (
 // OptimizeRefusal classes are the closed vocabulary every typed `fak optimize`
 // OptimizeRefusal carries. Tests and CI consumers switch on Class, never on prose.
 const (
-	ClassNoReadyLever          = "no_ready_lever"
-	ClassUnknownLever          = "unknown_lever"
-	ClassTraceUnreadable       = "trace_unreadable"
-	ClassNoArmMapping          = "no_arm_mapping"
-	ClassInvalidInput          = "invalid_input"
-	ClassNonPositiveIterations = "non_positive_iterations"
-	ClassNoPlanningBand        = "no_planning_band"
-	ClassCriterionUnresolved   = "criterion_unresolved"
+	ClassNoReadyLever            = "no_ready_lever"
+	ClassUnknownLever            = "unknown_lever"
+	ClassUnknownEnvelope         = "unknown_envelope"
+	ClassTraceUnreadable         = "trace_unreadable"
+	ClassNoArmMapping            = "no_arm_mapping"
+	ClassInvalidInput            = "invalid_input"
+	ClassNonPositiveIterations   = "non_positive_iterations"
+	ClassNoPlanningBand          = "no_planning_band"
+	ClassCriterionUnresolved     = "criterion_unresolved"
+	ClassReceiptLeverMismatch    = "receipt_lever_mismatch"
+	ClassReceiptEnvelopeMismatch = "receipt_envelope_mismatch"
 )
 
 // OptimizeRefusal is one typed, structured refusal: a closed-vocabulary class plus a
@@ -79,22 +82,30 @@ type OptimizePlan struct {
 	GeneratedAt     string   `json:"generated_at"`
 }
 
-// OptimizeReceipt is the measured output of `fak optimize measure`: one frozen-trace A/B
-// sweep of the lever's mapped ablate arm. BaselineTokS is the all-off arm,
-// CandidateTokS the single-lever arm, Reps the trace replays per arm. Every
-// number comes from bench counters over a real replay — nothing here is
-// fabricated, and an unmeasurable arm refuses instead of reporting zero.
+// OptimizeReceipt is the measured output of `fak optimize measure`: either one
+// frozen-trace A/B sweep of the lever's mapped ablate arm (BaselineTokS is the
+// all-off arm, CandidateTokS the single-lever arm, Reps the trace replays per
+// arm) or the fold of a nativeperf baseline/candidate receipt pair captured on
+// real hardware (the means over each arm's repetitions). Every number comes
+// from bench counters over a real replay or from a decoded native receipt —
+// nothing here is fabricated, and an unmeasurable or missing arm refuses
+// instead of reporting zero. The revision/artifact/forward-path fields are
+// populated only by the --receipt path and stay out of the encoded JSON for
+// trace sweeps, keeping the emitted keys byte-stable.
 type OptimizeReceipt struct {
-	Schema        string  `json:"schema"`
-	LeverID       string  `json:"lever_id"`
-	EngineID      string  `json:"engine_id"`
-	TracePath     string  `json:"trace_path"`
-	TraceSHA256   string  `json:"trace_sha256"`
-	BaselineTokS  float64 `json:"baseline_tok_s"`
-	CandidateTokS float64 `json:"candidate_tok_s"`
-	DeltaPct      float64 `json:"delta_pct"`
-	Reps          int     `json:"reps"`
-	MeasuredAt    string  `json:"measured_at"`
+	Schema         string  `json:"schema"`
+	LeverID        string  `json:"lever_id"`
+	EngineID       string  `json:"engine_id"`
+	TracePath      string  `json:"trace_path"`
+	TraceSHA256    string  `json:"trace_sha256"`
+	BaselineTokS   float64 `json:"baseline_tok_s"`
+	CandidateTokS  float64 `json:"candidate_tok_s"`
+	DeltaPct       float64 `json:"delta_pct"`
+	Reps           int     `json:"reps"`
+	MeasuredAt     string  `json:"measured_at"`
+	Revision       string  `json:"revision,omitempty"`
+	ArtifactSHA256 string  `json:"artifact_sha256,omitempty"`
+	ForwardPath    string  `json:"forward_path,omitempty"`
 }
 
 // OptimizeVerdict is the output of `fak optimize verify`: the folded accept/reject
