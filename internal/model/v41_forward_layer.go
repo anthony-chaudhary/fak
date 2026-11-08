@@ -856,6 +856,12 @@ func (m *Model) v41LayerAttentionContractWithQueryScratch(l, seq, nH, hd int, sr
 	if coldAttentionOwner != nil && (plan.Ratio > 0 || plan.Role == V41AttentionRoleReader) {
 		coldProof = newV41ColdSharedAttentionContinuation(m, l, plan, st, coldAttentionOwner, scratch)
 	}
+	// The position loop stays scalar per token: no landed bit-preserving
+	// multi-row attention panel kernel exists for this contraction (the PHL-147
+	// prototype is unmerged), and score/softmax/value must keep their exact
+	// per-position reduction order. Routed-expert prefill batching lives in the
+	// cohort's grouped GEMM arm instead; attention projections already batch
+	// through the dense funnel when rows > 1.
 	for t := 0; t < seq; t++ {
 		// The reference concatenates this layer's window with selected source
 		// groups before ONE sink contraction, even before a group completes.

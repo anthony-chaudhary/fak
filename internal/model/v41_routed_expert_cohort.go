@@ -9,6 +9,25 @@ import (
 
 const v41ExpertCohortRows = 32
 
+// v41GroupedGEMMAdmitted reports whether `rows` rows through weight w may run as one
+// BatchedMatMul while staying bit-identical to the per-row MatMul route. Q2_K is admitted
+// only when the token-panel kernel (which preserves the pinned q2k_matvec reduction tree)
+// admits the width; plain multi-row Q2_K uses a different reduction order and declines.
+// Q4_K is admitted below the wide-row wave32 threshold and at or under the mm_cm1 matvec
+// boundary so the fp16 tiled GEMM never fires. Every other dtype declines and keeps the
+// historical per-row scalar path.
+func v41GroupedGEMMAdmitted(be compute.Backend, w compute.Tensor, rows int) bool {
+	switch w.Dtype {
+	case compute.Q2_K:
+		op, ok := be.(compute.V41Q2KTokenPanelBackend)
+		return ok && op.SupportsV41Q2KTokenPanel(w, rows)
+	case compute.Q4_K:
+		return len(w.Shape) == 2 && w.Shape[0] < 65536 && rows <= 8
+	default:
+		return false
+	}
+}
+
 // v41RoutedExpertCohort keeps the expert-major row order and shares the final
 // status/output fence. An explicitly available Q2_K token tile may share only
 // gate/up; scalar activation/down retain their row order. The ID panel's
@@ -332,6 +351,205 @@ func (s *Session) v41RunExpertCohortInputs(deferred compute.V41DeferredStatusBac
 		var downTile *v41ExpertDownTile
 		var activations []compute.Tensor
 		groupStart, groupEnd, chunkStart := 0, 0, 0
+		// handleGrouped batches one down-schedule chunk of the cold cohort through one
+		// grouped GEMM per projection instead of per-row MatMul. It engages only when the
+		// historical Q2_K/Q3_K token tiles are absent, every projection's dtype stays
+		// bit-identical under BatchedMatMul, the backend exposes the matching panel
+		// consumer, and row gathers are available. Gate/up and down engagement are
+		// independent caps, but the chunk processor engages atomically for safety. On
+		// success it records every activation status before any down status for the
+		// chunk, stamps each record at its own row (chunk-level records keep the chunk
+		// start), moves current to the chunk's last row, and reports handled so the
+		// caller continues. A selected fault sets cause, parks current at the chunk
+		// start (the grouped cleanup boundary), and reports handled so the caller breaks
+		// without scalar replay. Capability refusal is not a fault: the panel consumers
+		// degrade to row gathers plus the ordinary per-row activation/publication.
+		handleGrouped := func(gate, up, down compute.Tensor) bool {
+			if options != nil || current != chunkStart || tile != nil || downTile != nil {
+				return false
+			}
+			rows := v41ExpertTileSize(groupEnd - current)
+			if rows < 2 {
+				return false
+			}
+			copies, haveCopies := s.Backend.(compute.V41RowLogBackend)
+			swigluChunk, haveSwigluChunk := s.Backend.(compute.V41RoutedSwiGLUPanelChunkBackend)
+			swigluRow, haveSwigluRow := s.Backend.(compute.V41RoutedSwiGLUPanelRowBackend)
+			downChunk, haveDownChunk := s.Backend.(compute.V41RoutedDownPanelChunkBackend)
+			downRow, haveDownRow := s.Backend.(compute.V41RoutedDownPanelRowBackend)
+			if !haveCopies || !copies.V41RowLogAvailable() ||
+				(!haveSwigluChunk && !haveSwigluRow) || (!haveDownChunk && !haveDownRow) ||
+				!v41GroupedGEMMAdmitted(s.Backend, gate, rows) || !v41GroupedGEMMAdmitted(s.Backend, up, rows) || !v41GroupedGEMMAdmitted(s.Backend, down, rows) {
+				return false
+			}
+			panelValid := func(t compute.Tensor, n, width int) bool {
+				return t.Buf() != nil && t.Dtype == compute.F32 && t.Layout == compute.RowMajor && t.Quant == nil && len(t.Shape) == 2 && t.Shape[0] == n && t.Shape[1] == width
+			}
+			var x compute.Tensor
+			var inputErr error
+			if input != nil {
+				x, inputErr = input.gather(current, rows, borrow)
+			} else {
+				packed := make([]float32, rows*H)
+				for r := 0; r < rows; r++ {
+					copy(packed[r*H:(r+1)*H], inputs[current+r])
+				}
+				x = s.uploadHostF32([]int{rows * H}, packed, compute.MemoryActivation, "V4.1 grouped expert gate/up activation")
+			}
+			freshX := own(x)
+			if inputErr != nil {
+				cause, current = inputErr, chunkStart
+				return true
+			}
+			if !freshX || !valid(x, rows*H) {
+				cause, current = errV41ExpertResult, chunkStart
+				return true
+			}
+			*stage = "gate/up"
+			noteDispatch(current, true)
+			gPanel := s.Backend.BatchedMatMul(gate, x, rows)
+			if !own(gPanel) || !panelValid(gPanel, rows, I) {
+				cause, current = errV41ExpertResult, chunkStart
+				return true
+			}
+			uPanel := s.Backend.BatchedMatMul(up, x, rows)
+			if !own(uPanel) || !panelValid(uPanel, rows, I) {
+				cause, current = errV41ExpertResult, chunkStart
+				return true
+			}
+			*stage = "activation"
+			var actChunk []compute.Tensor
+			rowAdmits := func(probe func(int) bool) bool {
+				for r := 0; r < rows; r++ {
+					if !probe(r) {
+						return false
+					}
+				}
+				return true
+			}
+			switch {
+			case haveSwigluChunk && swigluChunk.SupportsV41RoutedSwiGLUPanelChunk(gPanel, uPanel, 0, rows):
+				usedActivationChunk = true
+				a, st, err := swigluChunk.V41RoutedSwiGLUPanelChunkDeferred(gPanel, uPanel, 0, limit, weights[current:current+rows])
+				if cause = recordMany(a, st, I, rows, compute.V41DeferredRoutedSwiGLU, 0, err); cause != nil {
+					current = chunkStart
+					return true
+				}
+				actChunk = []compute.Tensor{a}
+			case haveSwigluRow && rowAdmits(func(r int) bool { return swigluRow.SupportsV41RoutedSwiGLUPanelRow(gPanel, uPanel, r) }):
+				for r := 0; r < rows; r++ {
+					current = chunkStart + r // Records belong to their own row.
+					a, st, err := swigluRow.V41RoutedSwiGLUPanelRowDeferred(gPanel, uPanel, r, limit, weights[current])
+					if cause = record(a, st, I, compute.V41DeferredRoutedSwiGLU, 0, err); cause != nil {
+						current = chunkStart
+						return true
+					}
+					actChunk = append(actChunk, a)
+				}
+			default:
+				for r := 0; r < rows; r++ {
+					current = chunkStart + r // Records belong to their own row.
+					gr, err := copies.V41RowLogGather([]compute.V41RowSpan{{Src: gPanel, Row: r, Rows: 1}}, I)
+					freshGr := own(gr)
+					gr.Shape = []int{I}
+					if err != nil || !freshGr || !valid(gr, I) {
+						cause, current = errV41ExpertResult, chunkStart
+						return true
+					}
+					ur, err := copies.V41RowLogGather([]compute.V41RowSpan{{Src: uPanel, Row: r, Rows: 1}}, I)
+					freshUr := own(ur)
+					ur.Shape = []int{I}
+					if err != nil || !freshUr || !valid(ur, I) {
+						cause, current = errV41ExpertResult, chunkStart
+						return true
+					}
+					a, st, err := deferred.V41RoutedSwiGLUDeferred(gr, ur, limit, weights[current])
+					if cause = record(a, st, I, compute.V41DeferredRoutedSwiGLU, 0, err); cause != nil {
+						current = chunkStart
+						return true
+					}
+					actChunk = append(actChunk, a)
+				}
+			}
+			*stage = "down"
+			var aPacked compute.Tensor
+			if len(actChunk) == 1 {
+				aPacked = actChunk[0]
+			} else {
+				spans := make([]compute.V41RowSpan, len(actChunk))
+				for r, activation := range actChunk {
+					activation.Shape = []int{1, I}
+					spans[r] = compute.V41RowSpan{Src: activation, Rows: 1}
+				}
+				packedAct, err := copies.V41RowLogGather(spans, I)
+				if err != nil || !own(packedAct) || !panelValid(packedAct, rows, I) {
+					cause, current = errV41ExpertResult, chunkStart
+					return true
+				}
+				packedAct.Shape = []int{rows * I}
+				aPacked = packedAct
+			}
+			noteDispatch(chunkStart, false)
+			dPanel := s.Backend.BatchedMatMul(down, aPacked, rows)
+			if !own(dPanel) || !panelValid(dPanel, rows, H) {
+				cause, current = errV41ExpertResult, chunkStart
+				return true
+			}
+			// The grouped publication reads back through the native panel reader; a
+			// backend without it keeps the row/gather publication instead.
+			downChunkOK := false
+			if haveDownChunk && (handoff == nil || handoff.canCompleteUnretained(count)) && downChunk.SupportsV41RoutedDownPanelChunk(dPanel, 0, rows) {
+				if !panelReadChecked {
+					panelRead = compute.BindV41DeferredPanelReader(deferred)
+					panelReadChecked = true
+				}
+				downChunkOK = panelRead != nil
+			}
+			switch {
+			case downChunkOK:
+				if !usedPublicationChunk {
+					publicationRows = make([]int, len(published))
+					for i := range publicationRows {
+						publicationRows[i] = 1
+					}
+					usedPublicationChunk = true
+				}
+				p, st, err := downChunk.V41RoutedDownPanelChunkDeferred(dPanel, 0, rows)
+				if cause = recordMany(p, st, H, rows, compute.V41DeferredBF16Publish, compute.V41BF16PublishRoutedDown, err); cause != nil {
+					current = chunkStart
+					return true
+				}
+				appendPublication(p, rows)
+			case haveDownRow && rowAdmits(func(r int) bool { return downRow.SupportsV41RoutedDownPanelRow(dPanel, r) }):
+				for r := 0; r < rows; r++ {
+					current = chunkStart + r // Records belong to their own row.
+					p, st, err := downRow.V41RoutedDownPanelRowDeferred(dPanel, r)
+					if cause = record(p, st, H, compute.V41DeferredBF16Publish, compute.V41BF16PublishRoutedDown, err); cause != nil {
+						current = chunkStart
+						return true
+					}
+					appendPublication(p, 1)
+				}
+			default:
+				for r := 0; r < rows; r++ {
+					current = chunkStart + r // Records belong to their own row.
+					dRow, err := copies.V41RowLogGather([]compute.V41RowSpan{{Src: dPanel, Row: r, Rows: 1}}, H)
+					freshDRow := own(dRow)
+					dRow.Shape = []int{H}
+					if err != nil || !freshDRow || !valid(dRow, H) {
+						cause, current = errV41ExpertResult, chunkStart
+						return true
+					}
+					if cause = publishDown(dRow); cause != nil {
+						current = chunkStart
+						return true
+					}
+				}
+			}
+			last := chunkStart + rows - 1
+			current, chunkStart = last, last+1
+			return true
+		}
 	recordRows:
 		for current = 0; current < count; current++ {
 			*stage = "gate/up"
@@ -359,6 +577,12 @@ func (s *Session) v41RunExpertCohortInputs(deferred compute.V41DeferredStatusBac
 						downTile.note = func() { noteDispatch(current, false) }
 					}
 				}
+			}
+			if handleGrouped(gate, up, down) {
+				if cause != nil {
+					break
+				}
+				continue
 			}
 			chunkRows := 0
 			if options == nil && downTile != nil && current == chunkStart {
