@@ -2519,3 +2519,24 @@ to +Inf. Witnessed by `TestEngramPackedGatherMatchesExpandedReferenceBitForBit`,
 `internal/compute/engram_packed_gather_test.go` (software evidence only; no
 hardware or whole-model performance claim). The full Apache License, Version 2.0
 text is reproduced in the "TensorFold benchmark evidence" section above.
+
+## vLLM DeepSeek-V4.1-Flash forward-requested cache-class enumeration
+
+`internal/model/arch.go` adapts the one-pass forward-requested cache-class
+enumeration of the DeepSeek-V4.1-Flash H200 recipe from
+`recipes/models/deepseek-ai/DeepSeek-V4.1-Flash.yaml` at pin
+`e740badc2e3df13a5c2abfca04ed0ac917985c5f`:
+https://github.com/vllm-project/vllm/blob/e740badc2e3df13a5c2abfca04ed0ac917985c5f/recipes/models/deepseek-ai/DeepSeek-V4.1-Flash.yaml
+
+Copyright contributors to the vLLM project. SPDX-License-Identifier: Apache-2.0.
+Changed for Fak: idiomatic Go re-expression (no upstream code copied) as a
+CacheClassManifest registration schema — per-layer 128-token sliding-window KV,
+FP4 compressed latents at ratios 1 and 2 on layers 2/8/14/20, mxfp4 sparse-indexer
+KV, and compressor recurrent state — plus a fail-closed pre-load gate that refuses
+a declared-but-unregistered class with the ErrUnregisteredCacheClass sentinel so
+loader, admission and device-op checks derive their class listings from the
+registration instead of ad-hoc lists. Witnessed by
+`TestCacheClassRegistration*` in `internal/model/cache_class_test.go`
+(software evidence only; no hardware or whole-model claim). The full Apache
+License, Version 2.0 reproduced in the "TensorFold benchmark evidence" section
+above applies to this adaptation.

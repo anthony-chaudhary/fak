@@ -1,6 +1,8 @@
 package model
 
 import (
+	"errors"
+	"fmt"
 	"math"
 
 	"github.com/anthony-chaudhary/fak/internal/model/ffn"
@@ -794,4 +796,256 @@ func composeSublayer(t BlockTopology, x []float32, n normWeights, eps float32, c
 			x[i] += out[i]
 		}
 	}
+}
+
+// ---- forward-requested cache-class registration ------------------------------------
+//
+// A hybrid checkpoint's forward pass requests more state than its weight tensors:
+// per-layer token-indexed K/V (possibly window-bounded), compressed KV latents on a
+// declared layer subset, a sparse-attention indexer's own KV in its own dtype, and an
+// accumulated compressor/recurrent state. The serving engines enumerate exactly these
+// classes up front — vLLM's DeepSeek-V4.1-Flash recipe pins the attention backend,
+// the indexer KV dtype, the compressed-latent ratios and layers, and the per-layer
+// sliding window in one recipe document, and TRT-LLM's DeepseekV4CacheManager maps
+// the same classes per layer — so that loader coverage, memory admission, and
+// device-op planning all DERIVE from that one listing instead of re-enumerating it
+// ad hoc at each site.
+//
+// This section lands the fak arch-metadata half of that pattern: a CacheClassManifest
+// that registers every forward-requested tensor/cache class once, plus a fail-closed
+// check (CheckForwardRequests) that refuses a declared-but-unregistered class with
+// ErrUnregisteredCacheClass BEFORE load. It is schema + gate only: no loader rewrite,
+// no kernel, no hardware claim. Consumers (the offline tensor-coverage preflight and
+// the admission/device-op planners) derive their class lists from the manifest in
+// follow-ons; until then the manifest is the single source of truth for the listing.
+//
+// Provenance (ADAPT): the enumeration shape is adapted from the vLLM project's
+// DeepSeek-V4.1-Flash H200 recipe (Apache-2.0),
+// recipes/models/deepseek-ai/DeepSeek-V4.1-Flash.yaml at pin
+// e740badc2e3df13a5c2abfca04ed0ac917985c5f — see THIRD_PARTY_NOTICES.md. No upstream
+// code is copied; the recipe facts are re-expressed as Go registration data.
+
+// CacheClassKind classifies what one forward-requested cache entry holds. It is the
+// vocabulary the manifest budgets and checks against; it is orthogonal to which
+// kernel serves the layer (two layers of one kind may run different kernels).
+type CacheClassKind uint8
+
+const (
+	// CacheClassTokenKV is a token-indexed K/V span: full causal history when Window
+	// is 0, or a bounded sliding window when Window > 0 (a position older than the
+	// window is provably un-attended, so the resident footprint caps at the window).
+	CacheClassTokenKV CacheClassKind = iota
+	// CacheClassCompressedLatent is a compressed KV latent written at a declared
+	// compression ratio — fewer latent rows than tokens, held in its own dtype.
+	CacheClassCompressedLatent
+	// CacheClassIndexerKV is a sparse-attention indexer's own KV, kept in the
+	// indexer's dtype (distinct from the main KV) so the top-k selection can score
+	// positions without touching the main cache.
+	CacheClassIndexerKV
+	// CacheClassRecurrentState is an ACCUMULATED O(1)-per-sequence state (compressor
+	// or recurrent core); its footprint is constant in context length.
+	CacheClassRecurrentState
+)
+
+// String renders the kind for witnesses and operator readouts.
+func (k CacheClassKind) String() string {
+	switch k {
+	case CacheClassTokenKV:
+		return "token-kv"
+	case CacheClassCompressedLatent:
+		return "compressed-latent"
+	case CacheClassIndexerKV:
+		return "indexer-kv"
+	case CacheClassRecurrentState:
+		return "recurrent-state"
+	default:
+		return fmt.Sprintf("cache-class-kind(%d)", int(k))
+	}
+}
+
+// CacheClassSpec is one registered forward-requested tensor/cache class. Fields are
+// closed metadata: empty/zero values mean "unspecified" (DType), "full history"
+// (Window), or "every decoder layer" (Layers), never "unknown at runtime".
+type CacheClassSpec struct {
+	// Name is the stable class identity a forward request names (e.g. "kv", "indexer_kv").
+	Name string
+	// Kind classifies the state the class holds.
+	Kind CacheClassKind
+	// DType is the element dtype the class is stored in ("mxfp4", "fp4", …). Empty =
+	// the recipe did not pin one.
+	DType string
+	// Window is the sliding-window size in tokens for CacheClassTokenKV classes; 0 =
+	// full history. Ignored by the other kinds.
+	Window int
+	// Ratios are the declared compression ratios for CacheClassCompressedLatent
+	// classes (e.g. {1, 2}). Empty for the other kinds.
+	Ratios []int
+	// Layers lists the decoder layers this class applies to; empty = every layer.
+	Layers []int
+}
+
+// ErrUnregisteredCacheClass is the sentinel returned before load when a forward
+// request names a cache class the arch manifest does not register. Callers match it
+// with errors.Is; the wrapped error carries the offending class name.
+var ErrUnregisteredCacheClass = errors.New("model: forward-requested cache class is not registered in the arch manifest")
+
+// ErrDuplicateCacheClass is returned when a second spec tries to register a name a
+// manifest already owns. Registration is one-class-per-name so a silent overwrite
+// could not quietly change what a later admission check derives.
+var ErrDuplicateCacheClass = errors.New("model: cache class is already registered")
+
+// CacheClassManifest is the ordered registration table of a model's forward-requested
+// tensor/cache classes. Loader coverage, admission fit, and device-op planning derive
+// their class listings from it instead of keeping ad-hoc copies; CheckForwardRequests
+// is the fail-closed gate that turns an unregistered declaration into a typed refusal
+// before any weight I/O.
+type CacheClassManifest struct {
+	specs map[string]CacheClassSpec
+	order []string // registration order, preserved for deterministic readouts
+}
+
+// NewCacheClassManifest builds a manifest from specs in the given order. It fails
+// closed on an empty name, an out-of-range layer index, a non-positive compression
+// ratio, or a duplicate name — a malformed listing must not become the thing every
+// downstream check derives from.
+func NewCacheClassManifest(specs ...CacheClassSpec) (*CacheClassManifest, error) {
+	m := &CacheClassManifest{specs: make(map[string]CacheClassSpec, len(specs))}
+	for _, s := range specs {
+		if err := m.Register(s); err != nil {
+			return nil, err
+		}
+	}
+	return m, nil
+}
+
+// Register adds one class to the manifest. The spec is validated by validateCacheClass
+// and stored by value (the caller's slice headers are not retained beyond the copy).
+func (m *CacheClassManifest) Register(spec CacheClassSpec) error {
+	if err := validateCacheClass(spec); err != nil {
+		return err
+	}
+	if _, exists := m.specs[spec.Name]; exists {
+		return fmt.Errorf("%w: %q", ErrDuplicateCacheClass, spec.Name)
+	}
+	m.specs[spec.Name] = spec
+	m.order = append(m.order, spec.Name)
+	return nil
+}
+
+// Has reports whether name is a registered class.
+func (m *CacheClassManifest) Has(name string) bool {
+	_, ok := m.specs[name]
+	return ok
+}
+
+// Spec returns the registered spec for name.
+func (m *CacheClassManifest) Spec(name string) (CacheClassSpec, bool) {
+	s, ok := m.specs[name]
+	return s, ok
+}
+
+// Names returns the registered class names in registration order.
+func (m *CacheClassManifest) Names() []string {
+	out := make([]string, len(m.order))
+	copy(out, m.order)
+	return out
+}
+
+// LayersFor expands a class's layer scope against a concrete layer count: an empty
+// Layers list means every layer [0, numLayers); an explicit list is returned as-is
+// after each index is checked against numLayers. Out-of-range indices fail closed —
+// a recipe that names layer 20 for a 16-layer checkpoint is a bad listing, not a
+// silently-truncated one.
+func (m *CacheClassManifest) LayersFor(name string, numLayers int) ([]int, error) {
+	s, ok := m.specs[name]
+	if !ok {
+		return nil, fmt.Errorf("%w: %q", ErrUnregisteredCacheClass, name)
+	}
+	if numLayers <= 0 {
+		return nil, fmt.Errorf("model: cache class %q needs a positive layer count, got %d", name, numLayers)
+	}
+	if len(s.Layers) == 0 {
+		all := make([]int, numLayers)
+		for i := range all {
+			all[i] = i
+		}
+		return all, nil
+	}
+	for _, l := range s.Layers {
+		if l < 0 || l >= numLayers {
+			return nil, fmt.Errorf("model: cache class %q declares layer %d outside the 0..%d range", name, l, numLayers-1)
+		}
+	}
+	out := make([]int, len(s.Layers))
+	copy(out, s.Layers)
+	return out, nil
+}
+
+// CheckForwardRequests is the pre-load gate: every class name a forward request
+// declares must be registered, else the first offender is refused with
+// ErrUnregisteredCacheClass (wrapped, carrying the name). An empty request list is
+// vacuously satisfied. This is the seam loader-coverage, admission, and device-op
+// checks call so the refusal happens BEFORE weight I/O, not mid-load.
+func (m *CacheClassManifest) CheckForwardRequests(requested []string) error {
+	for _, name := range requested {
+		if !m.Has(name) {
+			return fmt.Errorf("%w: %q", ErrUnregisteredCacheClass, name)
+		}
+	}
+	return nil
+}
+
+// validateCacheClass enforces the closed spec contract: a non-empty name, a known
+// kind, non-negative window, positive compression ratios, and non-negative layer
+// indices. (Layer counts are checked against the concrete model in LayersFor; the
+// spec alone cannot know them.)
+func validateCacheClass(s CacheClassSpec) error {
+	if s.Name == "" {
+		return errors.New("model: cache class spec needs a non-empty name")
+	}
+	if s.Kind > CacheClassRecurrentState {
+		return fmt.Errorf("model: cache class %q has unknown kind %s", s.Name, s.Kind.String())
+	}
+	if s.Window < 0 {
+		return fmt.Errorf("model: cache class %q has negative window %d", s.Name, s.Window)
+	}
+	for _, r := range s.Ratios {
+		if r <= 0 {
+			return fmt.Errorf("model: cache class %q has non-positive compression ratio %d", s.Name, r)
+		}
+	}
+	for _, l := range s.Layers {
+		if l < 0 {
+			return fmt.Errorf("model: cache class %q has negative layer index %d", s.Name, l)
+		}
+	}
+	return nil
+}
+
+// DeepSeekV41FlashCacheClasses registers the four forward-requested cache classes of
+// the DeepSeek-V4.1-Flash H200 recipe in one pass (PF-06 one-pass forward-request
+// listing): the per-layer 128-token sliding-window KV, the FP4 compressed latents at
+// ratios 1 and 2 on layers 2/8/14/20, the mxfp4 sparse-indexer KV, and the
+// compressor recurrent state. numLayers must exceed the highest declared layer;
+// a smaller checkpoint is refused rather than silently losing a class.
+func DeepSeekV41FlashCacheClasses(numLayers int) (*CacheClassManifest, error) {
+	if numLayers <= 0 {
+		return nil, errors.New("model: DeepSeek-V4.1-Flash cache manifest needs a positive layer count")
+	}
+	compressedLayers := []int{2, 8, 14, 20}
+	for _, l := range compressedLayers {
+		if l >= numLayers {
+			return nil, fmt.Errorf("model: DeepSeek-V4.1-Flash compressed latents declare layer %d but the checkpoint has %d layers", l, numLayers)
+		}
+	}
+	manifest, err := NewCacheClassManifest(
+		CacheClassSpec{Name: "kv", Kind: CacheClassTokenKV, Window: 128},
+		CacheClassSpec{Name: "compressed_latent", Kind: CacheClassCompressedLatent, DType: "fp4", Ratios: []int{1, 2}, Layers: compressedLayers},
+		CacheClassSpec{Name: "indexer_kv", Kind: CacheClassIndexerKV, DType: "mxfp4"},
+		CacheClassSpec{Name: "compressor_state", Kind: CacheClassRecurrentState},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return manifest, nil
 }
