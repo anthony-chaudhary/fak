@@ -29,6 +29,17 @@ func TestLinearRopeModelLoading(t *testing.T) {
 			if err := json.Unmarshal([]byte(`{`+base+`,`+tc.fields+`}`), &cfg); err != nil {
 				t.Fatal(err)
 			}
+			uncached := invFreq(cfg, 0)
+			_ = cachedInvFreq(cfg, 0) // Warm the cache before checking its hit path.
+			cached := cachedInvFreq(cfg, 0)
+			if len(cached) != len(uncached) {
+				t.Fatalf("cached frequency count=%d want %d", len(cached), len(uncached))
+			}
+			for j := range uncached {
+				if math.Float64bits(cached[j]) != math.Float64bits(uncached[j]) {
+					t.Fatalf("cached frequency[%d]=%.17g differs from uncached %.17g", j, cached[j], uncached[j])
+				}
+			}
 			for _, got := range [][]float64{invFreq(cfg, 0), cachedInvFreq(cfg, 0)} {
 				if len(got) != cfg.rotaryDim()/2 {
 					t.Fatalf("frequency count=%d", len(got))
