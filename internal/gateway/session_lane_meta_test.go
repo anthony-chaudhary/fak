@@ -11,11 +11,14 @@ import (
 	"testing"
 )
 
+// fak-test:runtime fast est=10ms lane=default
 func TestNewWiresSessionLaneIntoCallMeta(t *testing.T) {
-	srv, err := New(Config{SessionLane: "  test  "})
+	// Metadata assembly needs no inference; select the package-registered mock explicitly.
+	srv, err := New(Config{EngineID: "mock", SessionLane: "  test  "})
 	if err != nil {
 		t.Fatalf("New(Config{SessionLane}): %v", err)
 	}
+	t.Cleanup(srv.Close)
 	if srv.sessionLane != "test" {
 		t.Fatalf("New must trim the configured session lane, got %q", srv.sessionLane)
 	}
@@ -37,13 +40,15 @@ func TestNewWiresSessionLaneIntoCallMeta(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=10ms lane=default
 func TestBuildCallNoSessionLaneKeepsMetaUnset(t *testing.T) {
-	srv, err := New(Config{})
+	srv, err := New(Config{EngineID: "mock"})
 	if err != nil {
-		t.Fatalf("New(Config{}): %v", err)
+		t.Fatalf("New(Config{EngineID: mock}): %v", err)
 	}
+	t.Cleanup(srv.Close)
 	if srv.sessionLane != "" {
-		t.Fatalf("zero Config must default to an unset session lane, got %q", srv.sessionLane)
+		t.Fatalf("unset SessionLane must default to an unset session lane, got %q", srv.sessionLane)
 	}
 	tc, err := srv.buildCall(context.Background(), "get_doc", `{"id":"x"}`, true, "", "trace-nolane")
 	if err != nil {
