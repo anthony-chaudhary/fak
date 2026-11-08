@@ -223,7 +223,11 @@ func (p *V41DSparkVarlenPolicy) UpdateRuntime(numSeqs, graphSize int, forwardMS,
 		return fmt.Errorf("%w: graph_size=%d beyond profile", ErrV41DSparkVarlenBatchExceedsProfile, graphSize)
 	}
 	baseline := p.curve[idx].BaselineMS
-	p.slope.Update(graphSize, (forwardMS-baseline)/float64(graphSize))
+	residual := (forwardMS - baseline) / float64(graphSize)
+	if math.IsNaN(residual) || math.IsInf(residual, 0) {
+		return fmt.Errorf("%w: non-finite derived forward residual", ErrV41DSparkVarlenInvalidRequest)
+	}
+	p.slope.Update(graphSize, residual)
 	est := p.samplerBySeqs[numSeqs]
 	if est == nil {
 		est = &V41DSparkSamplerTimeEstimator{}
@@ -243,6 +247,11 @@ func (p *V41DSparkVarlenPolicy) Schedule(reqs []V41DSparkVarlenRequest) ([]int, 
 	for i, r := range reqs {
 		if err := v41DSparkValidateRequest(r); err != nil {
 			return nil, fmt.Errorf("request %d: %w", i, err)
+		}
+		// Every sequence also needs one golden token. Bound the combined
+		// count before addition, allocation, or an individual 1+DraftCount.
+		if r.DraftCount > int(^uint(0)>>1)-numSeqs-totalDrafts {
+			return nil, fmt.Errorf("request %d: %w: total verification tokens overflow int", i, ErrV41DSparkVarlenInvalidRequest)
 		}
 		totalDrafts += r.DraftCount
 	}
@@ -361,7 +370,7 @@ func (p *V41DSparkVarlenPolicy) Schedule(reqs []V41DSparkVarlenRequest) ([]int, 
 
 func v41DSparkValidateRequest(r V41DSparkVarlenRequest) error {
 	if r.DraftCount < 0 || r.ScheduleCnt < 0 || r.ProcessCnt < 0 ||
-		r.ProcessCnt > r.ScheduleCnt || r.ScheduleCnt > r.ProcessCnt+1 {
+		r.ProcessCnt > r.ScheduleCnt || r.ScheduleCnt-r.ProcessCnt > 1 {
 		return fmt.Errorf("%w: draft=%d schedule=%d process=%d", ErrV41DSparkVarlenInvalidRequest, r.DraftCount, r.ScheduleCnt, r.ProcessCnt)
 	}
 	checkRates := func(name string, rates []float64) error {

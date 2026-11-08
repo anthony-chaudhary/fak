@@ -488,3 +488,75 @@ func TestV41DSparkVarlenEstimatorUnits(t *testing.T) {
 		t.Fatalf("capped slope = %v, want 51 (median of 2 and 100)", v)
 	}
 }
+
+// fak-test:runtime fast est=1ms
+func TestV41DSparkVarlenIntegerBoundaries(t *testing.T) {
+	t.Parallel()
+	maxInt := int(^uint(0) >> 1)
+	policy, err := NewV41DSparkVarlenPolicy(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, reqs := range [][]V41DSparkVarlenRequest{
+		{{DraftCount: maxInt}},
+		{{DraftCount: maxInt - 1}, {DraftCount: 1}},
+		{{DraftCount: maxInt - 3}, {DraftCount: 2}},
+		{{DraftCount: maxInt - 1}, {DraftCount: maxInt - 1}},
+	} {
+		if _, err := policy.Schedule(reqs); !errors.Is(err, ErrV41DSparkVarlenInvalidRequest) {
+			t.Fatalf("overflowing token count: got %v, want invalid-request refusal", err)
+		}
+	}
+	// This boundary fits exactly and allocates only a one-element result:
+	// an empty profile returns lengths without materializing draft positions.
+	got, err := policy.Schedule([]V41DSparkVarlenRequest{{DraftCount: maxInt - 1}})
+	if err != nil || len(got) != 1 || got[0] != maxInt {
+		t.Fatalf("exact maximum: got %v, %v", got, err)
+	}
+	// Two golden tokens plus both drafts fit exactly; the second request
+	// consumes the final representable slot after the first was accumulated.
+	got, err = policy.Schedule([]V41DSparkVarlenRequest{{DraftCount: maxInt - 3}, {DraftCount: 1}})
+	if err != nil || len(got) != 2 || got[0] != maxInt-2 || got[1] != 2 {
+		t.Fatalf("exact aggregate maximum: got %v, %v", got, err)
+	}
+	for _, process := range []int{maxInt, maxInt - 1} {
+		got, err := policy.Schedule([]V41DSparkVarlenRequest{{ScheduleCnt: maxInt, ProcessCnt: process}})
+		if err != nil || len(got) != 1 || got[0] != 1 {
+			t.Fatalf("valid maximum counters (process=%d): got %v, %v", process, got, err)
+		}
+	}
+}
+
+// fak-test:runtime fast est=1s lane=default
+func TestV41DSparkRuntimeResidualOverflowIsAtomic(t *testing.T) {
+	for _, sign := range []float64{-1, 1} {
+		p, err := NewV41DSparkVarlenPolicy([]V41DSparkPerfPoint{{GraphSize: 1, BaselineMS: -sign * math.MaxFloat64}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := p.UpdateRuntime(1, 1, -sign*math.MaxFloat64, 3); err != nil {
+			t.Fatal(err)
+		}
+		slopeBefore := append([]v41DSparkSlopeSample(nil), p.slope.window...)
+		samplerBefore, fallbackBefore := *p.samplerBySeqs[1], *p.samplerFallback
+		for _, seqs := range []int{1, 2} {
+			if err := p.UpdateRuntime(seqs, 1, sign*math.MaxFloat64, 7); !errors.Is(err, ErrV41DSparkVarlenInvalidRequest) {
+				t.Fatalf("sign %v: overflow error = %v", sign, err)
+			}
+			if len(p.slope.window) != len(slopeBefore) || p.slope.window[0] != slopeBefore[0] ||
+				*p.samplerBySeqs[1] != samplerBefore || *p.samplerFallback != fallbackBefore || len(p.samplerBySeqs) != 1 {
+				t.Fatal("rejected residual mutated observation state")
+			}
+		}
+	}
+	p, err := NewV41DSparkVarlenPolicy([]V41DSparkPerfPoint{{GraphSize: 2, BaselineMS: 10}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.UpdateRuntime(1, 2, -10, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.slope.window[0].residual; got != -10 {
+		t.Fatalf("finite negative residual = %v, want -10", got)
+	}
+}
