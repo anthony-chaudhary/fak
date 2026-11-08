@@ -415,8 +415,33 @@ func preparePrefix(c *cudaBackend,k *cudaPagedKV,n int){r:=reqFor(c,k,0,n);p:=&c
 `
 
 const cudaPagedSequenceGoControls = `
+func checkHeadlessPrefix(){
+ c,k:=reset();r:=reqFor(c,k,0,2);r.Output=Tensor{};r.NeedLogits=false
+ result,e:=c.Qwen35SequencePrefill(r)
+ must(e==nil&&result.Tokens==2&&result.LastHidden.Buf()!=nil&&result.Logits.Buf()==nil&&result.LogitsRows.Buf()==nil,"actual headless paged prefix")
+ must(k.Len()==2&&k.lens[0]==2&&k.lens[1]==2&&c.gdn==6&&C.test_counter(6)==2,"headless prefix did not execute full stateful stack")
+ must(cudaQwen35PagedOwners==nil&&C.test_counter(7)==0,"headless prefix did not retire successfully")
+ // Continue the same recurrent tensors and KV with a real requested head.
+ next:=reqFor(c,k,2,1);next.States=r.States;next.Layers=r.Layers;next.TokenEmbedding=r.TokenEmbedding;next.OutputNorm=r.OutputNorm
+ continued,e:=c.Qwen35SequencePrefill(next)
+ must(e==nil&&continued.Tokens==1&&continued.Logits.Buf()!=nil&&k.Len()==3&&k.lens[0]==3&&k.lens[1]==3,"logits continuation after headless prefix")
+ for i,l:=range r.Layers{if l.Linear{must(*(*float32)(r.States[i].Conv.buf.(*cudaBuf).ptr)==2&&*(*float32)(r.States[i].Recurrent.buf.(*cudaBuf).ptr)==2,"headless continuation replaced or lost recurrent state")}}
+ must(cudaQwen35PagedOwners==nil&&C.test_counter(7)==0,"headless continuation did not retire successfully")
+ for _,mode:=range []string{"last-logits","all-logits","supplied-malformed-head"}{
+  c,k=reset();r=reqFor(c,k,0,2);r.NeedLogits=false
+  if mode=="supplied-malformed-head"{r.Output.Shape=[]int{1,8}}else{r.Output=Tensor{};r.NeedLogits=mode=="last-logits";r.NeedAllLogits=mode=="all-logits"}
+  allocBefore,copyBefore,writeBefore,gatherBefore:=C.test_counter(0),C.test_counter(1),C.test_counter(2),C.test_counter(3)
+  got,e:=c.Qwen35SequencePrefill(r)
+  must(e!=nil&&strings.Contains(e.Error(),"output")&&got.Tokens==0,"required or supplied head escaped validation: "+mode)
+  must(C.test_counter(0)==allocBefore&&C.test_counter(1)==copyBefore&&C.test_counter(2)==writeBefore&&C.test_counter(3)==gatherBefore&&c.gdn==0,"head refusal occurred after effects: "+mode)
+  must(k.Len()==0&&k.lens[0]==0&&k.lens[1]==0&&cudaQwen35PagedOwners==nil,"head refusal changed KV ownership: "+mode)
+  for i,l:=range r.Layers{if l.Linear{must(*(*float32)(r.States[i].Conv.buf.(*cudaBuf).ptr)==0&&*(*float32)(r.States[i].Recurrent.buf.(*cudaBuf).ptr)==0,"head refusal changed recurrent state: "+mode)}}
+ }
+ fmt.Println("headless prefix, logits continuation and pre-effect head refusals PASS")
+}
 func main(){
  must(C.test_retire_probe()==0,"actual native provenance/disposition controls")
+ checkHeadlessPrefix()
  c,k:=reset();r:=reqFor(c,k,0,18);before:=uint64(C.fcuda_h2dxfer_bytes());result,e:=c.Qwen35SequencePrefill(r)
  must(e==nil&&result.Tokens==18&&k.Len()==18&&k.lens[0]==18&&k.lens[1]==18,"actual initial sequence")
  must(c.gdn==6&&C.test_counter(6)==2,"actual full layer consumer")

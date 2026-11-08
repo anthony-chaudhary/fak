@@ -15,6 +15,17 @@ const Qwen35SequenceEmbeddingRowsPath = "qwen35-hybrid-sequence-embedding-rows-v
 // which returns one device-resident logits row per input token.
 const Qwen35SequenceAllLogitsPath = "qwen35-hybrid-sequence-all-logits-v1"
 
+// Qwen35SequenceHeadlessPrefixPath identifies backends which accept an absent
+// Output weight when neither NeedLogits nor NeedAllLogits is requested. The
+// normalized LastHidden result and all state/retirement contracts are unchanged.
+const Qwen35SequenceHeadlessPrefixPath = "qwen35-hybrid-sequence-headless-prefix-v1"
+
+// Qwen35SequenceHeadlessPrefixBackend prevents the model from omitting an unused
+// vocabulary head on older sequence implementations that still require it.
+type Qwen35SequenceHeadlessPrefixBackend interface {
+	Qwen35SequenceHeadlessPrefixPath() string
+}
+
 // Qwen35SequencePrefixReplayPath identifies the optional transaction extension
 // which retains the GDN projections needed to commit a causal prefix without
 // rerunning the complete model for its accepted tokens.
@@ -187,10 +198,12 @@ type Qwen35SequencePrefillRequest struct {
 	TokenEmbeddingRows  bool
 	TokenEmbeddingVocab int
 	OutputNorm          Tensor
-	Output              Tensor
-	Layers              []Qwen35SequenceLayer
-	States              []Qwen35SequenceState
-	KV                  KVStore
+	// Output may be absent only for an explicitly advertised headless prefix
+	// when NeedLogits and NeedAllLogits are both false. OutputNorm remains required.
+	Output Tensor
+	Layers []Qwen35SequenceLayer
+	States []Qwen35SequenceState
+	KV     KVStore
 
 	Hidden, Intermediate int
 	NumHeads, NumKVHeads int

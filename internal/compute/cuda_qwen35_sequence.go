@@ -58,6 +58,10 @@ func (*cudaBackend) CUDAQwen35SequenceLockProfileSnapshot() (completed, waitNS, 
 
 func (*cudaBackend) Qwen35SequencePrefillPath() string { return Qwen35SequencePrefillPath }
 
+func (*cudaBackend) Qwen35SequenceHeadlessPrefixPath() string {
+	return Qwen35SequenceHeadlessPrefixPath
+}
+
 // Raw hidden rows are an explicit MTP prerequisite, not prefix-replay or target
 // transaction admission. The existing request-resource lifetime still applies.
 func (c *cudaBackend) Qwen35SequenceRawHiddenPath() string {
@@ -277,15 +281,20 @@ func (c *cudaBackend) validateQwen35SequenceStoreRequestLocked(req Qwen35Sequenc
 	if err := c.validateQwen35SequenceTensor("output_norm", req.OutputNorm, false, req.Hidden); err != nil {
 		return nil, err
 	}
-	outputTokens := 1
-	if req.NeedAllLogits {
-		outputTokens = len(req.TokenIDs)
-	}
-	if err := validateQwen35SequenceIQ2(req.Output, outputTokens, qwen35SequenceIQ2Qualification); err != nil {
-		return nil, err
-	}
-	if err := c.validateQwen35SequenceTensor("output", req.Output, true, vocab, req.Hidden); err != nil {
-		return nil, err
+	// Prefix-only calls never submit the vocabulary projection. Preserve the
+	// original validation for a supplied head and require it for either logits
+	// mode, but do not force an unused matrix to be uploaded or kept resident.
+	if req.Output.Buf() != nil || req.NeedLogits || req.NeedAllLogits {
+		outputTokens := 1
+		if req.NeedAllLogits {
+			outputTokens = len(req.TokenIDs)
+		}
+		if err := validateQwen35SequenceIQ2(req.Output, outputTokens, qwen35SequenceIQ2Qualification); err != nil {
+			return nil, err
+		}
+		if err := c.validateQwen35SequenceTensor("output", req.Output, true, vocab, req.Hidden); err != nil {
+			return nil, err
+		}
 	}
 	var kv *cudaKV
 	if paged != nil {
