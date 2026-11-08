@@ -15,10 +15,55 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
+
+// fak-test:runtime fast est=10ms
+func TestSamplingWorkspaceParity(t *testing.T) {
+	negInf := float32(math.Inf(-1))
+	rows := []struct {
+		logits     []float32
+		temp, topP float64
+		topK       int
+	}{
+		{[]float32{2, -1, 0, 3, 1, -2}, 0.8, 0, 0},
+		{[]float32{1, 1, 1, 1}, 1, 0.6, 2},
+		{[]float32{negInf, negInf, negInf}, 1, 0.9, 2},
+		{[]float32{-2, 0, 4, -1, 2, 3}, 0.7, 0.8, 3},
+		{[]float32{0, 0}, 0, 0.5, 1},
+		{[]float32{1, -1, 2, 0, 3}, 1.2, 0.9, 0},
+	}
+	const rounds = 64
+	want, got := make([]int, rounds*len(rows)), make([]int, rounds*len(rows))
+	oneShotRNG := rand.New(rand.NewSource(731))
+	reuseRNG := rand.New(rand.NewSource(731))
+	var workspace samplerWorkspace
+	for i := range got {
+		row := rows[i%len(rows)]
+		want[i] = sampleLogits(row.logits, row.temp, row.topP, row.topK, oneShotRNG)
+		got[i] = sampleLogitsWS(row.logits, row.temp, row.topP, row.topK, reuseRNG, &workspace)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("continuous seeded draws differ: reused=%v one-shot=%v", got, want)
+	}
+	// The sequence above warms every shape and truncation buffer. Measure only
+	// reuse, not fixture/RNG construction or the allocating one-shot oracle.
+	allocs := testing.AllocsPerRun(1, func() {
+		for i := 0; i < rounds; i++ {
+			for _, row := range rows {
+				_ = sampleLogitsWS(row.logits, row.temp, row.topP, row.topK, reuseRNG, &workspace)
+			}
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("warmed sequence allocated %v objects per run, want zero", allocs)
+	}
+	// An all-negative-infinity row exercises the zero-mass fallback only.
+	// Equality here does not qualify that row as valid model output.
+}
 
 // captureUpstream is an OpenAI-compatible stub that records the request body and
 // returns a minimal valid completion. The captured body is what the assertions read.
