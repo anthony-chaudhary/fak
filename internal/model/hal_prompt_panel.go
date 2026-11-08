@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
@@ -58,16 +59,113 @@ var promptPanelProjections = [...]string{
 	"self_attn.o_proj.weight", "mlp.gate_proj.weight", "mlp.up_proj.weight", "mlp.down_proj.weight",
 }
 
+// promptPanelWitnessReason names one outcome axis of promptPanelFor: the positive selection
+// plus every refusal axis the seam can take. The fixed set is the coverage matrix itself: a
+// new refusal axis must add its reason here or TestPromptPanelSelectionMatrix cannot name it.
+type promptPanelWitnessReason int
+
+const (
+	promptPanelSelected promptPanelWitnessReason = iota
+	promptPanelRefusalShortPrompt
+	promptPanelRefusalNoBackend
+	promptPanelRefusalNoHALKV
+	promptPanelRefusalBackendLacksSeam
+	promptPanelRefusalArchQ8TokenLoop
+	promptPanelRefusalArchDeepSeekV4NonPanel
+	promptPanelRefusalArchQKNorm
+	promptPanelRefusalArchMLAMoELayout
+	promptPanelRefusalArchMiniMaxSparseAttn
+	promptPanelRefusalArchGemma4
+	promptPanelRefusalCaptureTarget
+	promptPanelRefusalQ2KEmbedding
+	promptPanelRefusalSplitGPULayers
+	promptPanelRefusalDtypeNotRowExact
+	promptPanelWitnessReasons
+)
+
+// promptPanelWitness counts every promptPanelFor outcome at the selection seam. Downstream
+// fallback counters count declines-after-selection only, so they are structurally blind to
+// exclusions-at-selection: without this witness a landed fast path can go uninvoked on the
+// live serve path and nothing downstream names why. Fixed reasons, one atomic add per call,
+// no locks on the hot path.
+var promptPanelWitness [promptPanelWitnessReasons]atomic.Int64
+
+func notePromptPanelSelection(r promptPanelWitnessReason) {
+	promptPanelWitness[r].Add(1)
+}
+
+// PromptPanelSelectionCounts is a point-in-time copy of the prompt-panel selection witness:
+// how many prompts took the panel and how many each refusal axis kept on the token loop.
+type PromptPanelSelectionCounts struct {
+	Selected               int64
+	ShortPrompt            int64
+	NoBackend              int64
+	NoHALKV                int64
+	BackendLacksSeam       int64
+	ArchQ8TokenLoop        int64
+	ArchDeepSeekV4NonPanel int64
+	ArchQKNorm             int64
+	ArchMLAMoELayout       int64
+	ArchMiniMaxSparseAttn  int64
+	ArchGemma4             int64
+	CaptureTarget          int64
+	Q2KEmbedding           int64
+	SplitGPULayers         int64
+	DtypeNotRowExact       int64
+}
+
+// Total is every counted promptPanelFor outcome, selected or refused.
+func (c PromptPanelSelectionCounts) Total() int64 {
+	return c.Selected + c.ShortPrompt + c.NoBackend + c.NoHALKV + c.BackendLacksSeam +
+		c.ArchQ8TokenLoop + c.ArchDeepSeekV4NonPanel + c.ArchQKNorm + c.ArchMLAMoELayout +
+		c.ArchMiniMaxSparseAttn + c.ArchGemma4 + c.CaptureTarget + c.Q2KEmbedding +
+		c.SplitGPULayers + c.DtypeNotRowExact
+}
+
+// PromptPanelSelectionWitness snapshots the current witness counts. Each field is a plain
+// atomic load, so the copy is race-free; fields loaded later may include calls that landed
+// between loads.
+func PromptPanelSelectionWitness() PromptPanelSelectionCounts {
+	return PromptPanelSelectionCounts{
+		Selected:               promptPanelWitness[promptPanelSelected].Load(),
+		ShortPrompt:            promptPanelWitness[promptPanelRefusalShortPrompt].Load(),
+		NoBackend:              promptPanelWitness[promptPanelRefusalNoBackend].Load(),
+		NoHALKV:                promptPanelWitness[promptPanelRefusalNoHALKV].Load(),
+		BackendLacksSeam:       promptPanelWitness[promptPanelRefusalBackendLacksSeam].Load(),
+		ArchQ8TokenLoop:        promptPanelWitness[promptPanelRefusalArchQ8TokenLoop].Load(),
+		ArchDeepSeekV4NonPanel: promptPanelWitness[promptPanelRefusalArchDeepSeekV4NonPanel].Load(),
+		ArchQKNorm:             promptPanelWitness[promptPanelRefusalArchQKNorm].Load(),
+		ArchMLAMoELayout:       promptPanelWitness[promptPanelRefusalArchMLAMoELayout].Load(),
+		ArchMiniMaxSparseAttn:  promptPanelWitness[promptPanelRefusalArchMiniMaxSparseAttn].Load(),
+		ArchGemma4:             promptPanelWitness[promptPanelRefusalArchGemma4].Load(),
+		CaptureTarget:          promptPanelWitness[promptPanelRefusalCaptureTarget].Load(),
+		Q2KEmbedding:           promptPanelWitness[promptPanelRefusalQ2KEmbedding].Load(),
+		SplitGPULayers:         promptPanelWitness[promptPanelRefusalSplitGPULayers].Load(),
+		DtypeNotRowExact:       promptPanelWitness[promptPanelRefusalDtypeNotRowExact].Load(),
+	}
+}
+
 // promptPanelFor returns the backend's panel seam when this prompt can take it. The panel
 // mirrors tokenHALOutput's plain dense branch plus deepseek_v4's per-row live-expert FFN, and
 // only weight dtypes with a per-row exact GEMM, so every arch, capture, placement and dtype
-// that does not qualify keeps the token loop.
+// that does not qualify keeps the token loop. Every outcome notes its typed reason in the
+// selection witness (notePromptPanelSelection): a refusal is attributed to the first matching
+// axis in the order below, mirroring the original left-to-right OR.
 func (s *Session) promptPanelFor(ids []int) (promptPanelBackend, bool) {
-	if len(ids) < 2 || s.Backend == nil || s.halKV == nil {
+	switch {
+	case len(ids) < 2:
+		notePromptPanelSelection(promptPanelRefusalShortPrompt)
+		return nil, false
+	case s.Backend == nil:
+		notePromptPanelSelection(promptPanelRefusalNoBackend)
+		return nil, false
+	case s.halKV == nil:
+		notePromptPanelSelection(promptPanelRefusalNoHALKV)
 		return nil, false
 	}
 	panel, ok := s.Backend.(promptPanelBackend)
 	if !ok {
+		notePromptPanelSelection(promptPanelRefusalBackendLacksSeam)
 		return nil, false
 	}
 	cfg := s.M.Cfg
@@ -77,17 +175,38 @@ func (s *Session) promptPanelFor(ids []int) (promptPanelBackend, bool) {
 	// token loop, which owns those FFNs; the non-MoE refusals stay unchanged.
 	panelMoE := cfg.IsDeepSeekV4() && !cfg.QKNorm && !cfg.DenseMLP && !cfg.Alibi &&
 		!cfg.AttnOutputGate && cfg.BlockTopology == PreNorm && !cfg.hasLayerSpecificRopeTheta()
-	if !panelMoE && (q8PrefillNeedsTokenLoop(cfg) || cfg.IsDeepSeekV4() || cfg.QKNorm ||
-		cfg.usesMLAMoELayout() || cfg.isMiniMaxSparseAttn() || cfg.isGemma4()) {
-		return nil, false
+	if !panelMoE {
+		switch {
+		case q8PrefillNeedsTokenLoop(cfg):
+			notePromptPanelSelection(promptPanelRefusalArchQ8TokenLoop)
+			return nil, false
+		case cfg.IsDeepSeekV4():
+			notePromptPanelSelection(promptPanelRefusalArchDeepSeekV4NonPanel)
+			return nil, false
+		case cfg.QKNorm:
+			notePromptPanelSelection(promptPanelRefusalArchQKNorm)
+			return nil, false
+		case cfg.usesMLAMoELayout():
+			notePromptPanelSelection(promptPanelRefusalArchMLAMoELayout)
+			return nil, false
+		case cfg.isMiniMaxSparseAttn():
+			notePromptPanelSelection(promptPanelRefusalArchMiniMaxSparseAttn)
+			return nil, false
+		case cfg.isGemma4():
+			notePromptPanelSelection(promptPanelRefusalArchGemma4)
+			return nil, false
+		}
 	}
 	if s.captureTargetHidden || s.qwen35TargetFeatureTxn != nil || s.qwen35TargetLayerCapture != nil {
+		notePromptPanelSelection(promptPanelRefusalCaptureTarget)
 		return nil, false
 	}
 	if s.M.Q2KEmbedding != nil {
+		notePromptPanelSelection(promptPanelRefusalQ2KEmbedding)
 		return nil, false
 	}
 	if _, split := s.validateDenseGPULayers(); split {
+		notePromptPanelSelection(promptPanelRefusalSplitGPULayers)
 		return nil, false
 	}
 	// The panel GEMMs are the attention projections; a dense layer adds the MLP triple.
@@ -100,10 +219,12 @@ func (s *Session) promptPanelFor(ids []int) (promptPanelBackend, bool) {
 	for l := 0; l < cfg.NumLayers; l++ {
 		for _, name := range projections {
 			if !panel.PromptPanelRowExact(s.matWeightHAL(layerName(l, name)).Dtype) {
+				notePromptPanelSelection(promptPanelRefusalDtypeNotRowExact)
 				return nil, false
 			}
 		}
 	}
+	notePromptPanelSelection(promptPanelSelected)
 	return panel, true
 }
 
