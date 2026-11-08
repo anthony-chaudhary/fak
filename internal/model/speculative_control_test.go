@@ -3,8 +3,11 @@ package model
 import (
 	"errors"
 	"math"
+	"math/rand"
 	"sync"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 func TestSpeculativeControl_InitializationAndClamping(t *testing.T) {
@@ -446,5 +449,184 @@ func TestSpeculativeControl_PreallocatedBuffers(t *testing.T) {
 	slice[0] = 42
 	if ctrl.DraftTokensIntBuffer()[0] != 42 {
 		t.Fatalf("ActiveDraftSlice should share backing array with DraftTokensIntBuffer")
+	}
+}
+
+// TestBatchedBlockVerifyGate pins the StepBlockVerify admission rule through
+// SpeculativeControl's hot-swapped drafter state: batched only when the
+// drafter is live AND the block holds more than one token; otherwise the
+// serial verifyNative path remains the only visible route.
+func TestBatchedBlockVerifyGate(t *testing.T) {
+	ctrl := NewSpeculativeControl(8, 4, 0.5)
+	var batchedCalls, serialCalls int
+	batchedFn := func() error { batchedCalls++; return nil }
+	serialFn := func() error { serialCalls++; return nil }
+
+	// Drafter absent (default) -> serial, zero batched operations.
+	receipt, err := ctrl.StepBlockVerify(4, batchedFn, serialFn)
+	if err != nil {
+		t.Fatalf("StepBlockVerify failed: %v", err)
+	}
+	if receipt.Mode != "serial" || receipt.BatchedOps != 0 || receipt.SerialOps != 1 || receipt.DrafterAvailable {
+		t.Errorf("drafter-absent receipt = %+v, want serial with zero batched ops", receipt)
+	}
+	if batchedCalls != 0 || serialCalls != 1 {
+		t.Errorf("calls = batched %d / serial %d, want 0/1", batchedCalls, serialCalls)
+	}
+
+	// Block size 1 -> serial even with the drafter live.
+	ctrl.SetDrafterAvailable(true)
+	receipt, err = ctrl.StepBlockVerify(1, batchedFn, serialFn)
+	if err != nil {
+		t.Fatalf("StepBlockVerify(block=1) failed: %v", err)
+	}
+	if receipt.Mode != "serial" || receipt.BatchedOps != 0 || !receipt.DrafterAvailable {
+		t.Errorf("block-size-1 receipt = %+v, want serial despite live drafter", receipt)
+	}
+	if batchedCalls != 0 || serialCalls != 2 {
+		t.Errorf("calls = batched %d / serial %d, want 0/2", batchedCalls, serialCalls)
+	}
+
+	// Drafter live + block >= 2 -> batched, exactly one batched operation.
+	receipt, err = ctrl.StepBlockVerify(4, batchedFn, serialFn)
+	if err != nil {
+		t.Fatalf("StepBlockVerify(live, 4) failed: %v", err)
+	}
+	if receipt.Mode != "batched" || receipt.BatchedOps != 1 || receipt.SerialOps != 0 {
+		t.Errorf("live+block4 receipt = %+v, want batched with one batched op", receipt)
+	}
+	if batchedCalls != 1 || serialCalls != 2 {
+		t.Errorf("calls = batched %d / serial %d, want 1/2", batchedCalls, serialCalls)
+	}
+
+	// Hot-swap back to unavailable -> serial again.
+	ctrl.SetDrafterAvailable(false)
+	receipt, _ = ctrl.StepBlockVerify(4, batchedFn, serialFn)
+	if receipt.Mode != "serial" || receipt.BatchedOps != 0 {
+		t.Errorf("after hot-swap off receipt = %+v, want serial", receipt)
+	}
+
+	// Nil receiver admits serial with zero depth.
+	var nilCtrl *SpeculativeControl
+	before := serialCalls
+	receipt, err = nilCtrl.StepBlockVerify(4, batchedFn, serialFn)
+	if err != nil {
+		t.Fatalf("nil-receiver StepBlockVerify failed: %v", err)
+	}
+	if receipt.Mode != "serial" || receipt.BatchedOps != 0 || receipt.DrafterAvailable {
+		t.Errorf("nil-receiver receipt = %+v, want serial with zero depth", receipt)
+	}
+	if serialCalls != before+1 {
+		t.Errorf("nil-receiver serial calls = %d, want %d", serialCalls, before+1)
+	}
+
+	// A fn error propagates while the admission decision stays observable.
+	boom := errors.New("verify boom")
+	ctrl.SetDrafterAvailable(true)
+	receipt, err = ctrl.StepBlockVerify(4, func() error { return boom }, serialFn)
+	if !errors.Is(err, boom) {
+		t.Errorf("fn error = %v, want boom", err)
+	}
+	if receipt.Mode != "batched" || receipt.BatchedOps != 1 {
+		t.Errorf("error-path receipt = %+v, want batched admission still recorded", receipt)
+	}
+}
+
+// TestSpeculativeControl_BatchedBlockVerifyParity pins the owed parity at the
+// gate: over a pinned step count at a fixed seed, the greedy token stream
+// emitted through the admitted batched whole-block verify is identical to the
+// serial per-position walk over the same fused logit rows.
+func TestSpeculativeControl_BatchedBlockVerifyParity(t *testing.T) {
+	const (
+		vocab     = 89
+		k         = 4
+		steps     = 128
+		seed      = int64(0xCAFEBABE)
+		acceptPct = 70
+	)
+	rng := rand.New(rand.NewSource(seed))
+	ctrl := NewSpeculativeControl(k, k, 0.5)
+	ctrl.SetDrafterAvailable(true)
+
+	total := steps*(k+1) + k
+	truth := make([]int, total)
+	for i := range truth {
+		truth[i] = rng.Intn(vocab)
+	}
+
+	rowFor := func(winner int) []float32 {
+		row := make([]float32, vocab)
+		for i := range row {
+			row[i] = rng.Float32()
+		}
+		row[winner] = 2.0 // unique argmax
+		return row
+	}
+
+	pos := 0
+	batchedStream, serialStream := make([]int, 0, total), make([]int, 0, total)
+	for s := 0; s < steps; s++ {
+		draft := make([]int, k)
+		for i := 0; i < k; i++ {
+			if rng.Intn(100) < acceptPct {
+				draft[i] = truth[pos+i]
+			} else {
+				draft[i] = (truth[pos+i] + 1 + rng.Intn(vocab-1)) % vocab // guaranteed wrong
+			}
+		}
+		rows := make([][]float32, k+1)
+		for j := 0; j <= k; j++ {
+			rows[j] = rowFor(truth[pos+j])
+		}
+
+		// Serial reference: per-position walk over the same fused rows, emitted
+		// independently of the gate's admission decision.
+		serialOut := make([]int, 0, len(rows))
+		for j, row := range rows {
+			target := -1
+			for tok, v := range row {
+				if target < 0 || v > row[target] {
+					target = tok
+				}
+			}
+			if j < len(draft) && draft[j] == target {
+				serialOut = append(serialOut, draft[j])
+				continue
+			}
+			serialOut = append(serialOut, target)
+			break
+		}
+		serialStream = append(serialStream, serialOut...)
+
+		var batchedOut []int
+		batchedFn := func() error {
+			res, err := compute.BatchedBlockVerify(draft, rows)
+			if err != nil {
+				return err
+			}
+			batchedOut = res.NextTokens
+			return nil
+		}
+
+		receipt, err := ctrl.StepBlockVerify(k, batchedFn, nil)
+		if err != nil {
+			t.Fatalf("step %d: StepBlockVerify failed: %v", s, err)
+		}
+		if receipt.Mode != "batched" || receipt.BatchedOps != 1 {
+			t.Fatalf("step %d: receipt = %+v, want batched admission", s, receipt)
+		}
+		if len(batchedOut) == 0 {
+			t.Fatalf("step %d: batched verify emitted no tokens", s)
+		}
+		batchedStream = append(batchedStream, batchedOut...)
+		pos += len(batchedOut)
+	}
+	if len(batchedStream) != len(serialStream) {
+		t.Fatalf("stream lengths differ: batched %d vs serial %d", len(batchedStream), len(serialStream))
+	}
+	for i := range batchedStream {
+		if batchedStream[i] != serialStream[i] {
+			t.Fatalf("parity broken at emission %d: batched %d vs serial %d", i, batchedStream[i], serialStream[i])
+		}
 	}
 }

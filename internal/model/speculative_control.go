@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math"
 	"sync/atomic"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // ErrInvalidAcceptanceThreshold indicates that a requested speculative acceptance threshold
@@ -36,6 +38,10 @@ type SpeculativeControl struct {
 	draftTokensIntBuffer    []int
 	acceptedTokensIntBuffer []int
 	acceptanceMaskBuffer    []bool
+
+	// drafterAvailable is hot-swapped co-resident drafter liveness for block
+	// verify admission; false keeps the serial verifyNative path visible.
+	drafterAvailable atomic.Bool
 }
 
 // NewSpeculativeControl creates a new SpeculativeControl instance with buffer capacities pre-allocated
@@ -257,4 +263,63 @@ func (c *SpeculativeControl) ActiveDraftSlice32() []int32 {
 	}
 	k := c.GetDepth()
 	return c.draftTokensBuffer[:k]
+}
+
+// SetDrafterAvailable hot-swaps whether a co-resident drafter is live. This
+// operation is thread-safe and lock-free; it only affects future block-verify
+// admission decisions, never an in-flight verification.
+func (c *SpeculativeControl) SetDrafterAvailable(available bool) {
+	if c == nil {
+		return
+	}
+	c.drafterAvailable.Store(available)
+}
+
+// DrafterAvailable reports whether a co-resident drafter is currently live.
+func (c *SpeculativeControl) DrafterAvailable() bool {
+	if c == nil {
+		return false
+	}
+	return c.drafterAvailable.Load()
+}
+
+// BlockVerifyReceipt records one block-verify admission decision: the selected
+// mode, the drafter state that drove it, and how many operations ran in each
+// mode. BatchedOps > 0 means the whole drafted block verified in one target
+// pass; SerialOps > 0 means the serial verifyNative path was the route taken.
+type BlockVerifyReceipt struct {
+	Mode             string `json:"mode"` // "serial" or "batched" (compute.BlockVerifyMode.String)
+	DrafterAvailable bool   `json:"drafter_available"`
+	BlockSize        int    `json:"block_size"`
+	BatchedOps       int    `json:"batched_ops"`
+	SerialOps        int    `json:"serial_ops"`
+}
+
+// StepBlockVerify admits one drafted block to a verification mode using the
+// shared compute.SelectBlockVerifyMode rule so gate and seam cannot drift:
+// batched only when the drafter is live AND the block holds more than one
+// token; otherwise the serial verifyNative path remains the only visible
+// route - no mixed-precision draft admission. A nil receiver admits serial
+// with zero depth. Exactly the admitted fn runs; a nil fn is a no-op. The
+// receipt is returned even on fn error so the admission decision stays
+// observable.
+func (c *SpeculativeControl) StepBlockVerify(blockSize int, batchedFn, serialFn func() error) (BlockVerifyReceipt, error) {
+	receipt := BlockVerifyReceipt{BlockSize: blockSize}
+	if c != nil {
+		receipt.DrafterAvailable = c.DrafterAvailable()
+	}
+	if compute.SelectBlockVerifyMode(receipt.DrafterAvailable, blockSize) == compute.BlockVerifyModeBatched {
+		receipt.Mode = compute.BlockVerifyModeBatched.String()
+		receipt.BatchedOps = 1
+		if batchedFn != nil {
+			return receipt, batchedFn()
+		}
+		return receipt, nil
+	}
+	receipt.Mode = compute.BlockVerifyModeSerial.String()
+	receipt.SerialOps = 1
+	if serialFn != nil {
+		return receipt, serialFn()
+	}
+	return receipt, nil
 }

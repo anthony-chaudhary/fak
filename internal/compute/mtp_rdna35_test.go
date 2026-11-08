@@ -1,7 +1,9 @@
 package compute
 
 import (
+	"errors"
 	"math"
+	"math/rand"
 	"testing"
 )
 
@@ -220,6 +222,291 @@ func TestMTPAcceptanceScoringAndRollback(t *testing.T) {
 	}
 	if speedup85 < 3.5 || speedup85 > 3.9 {
 		t.Errorf("speedup85 = %g, want ~3.71", speedup85)
+	}
+}
+
+// batchedVerifyRow builds a deterministic fused logit row of the given width
+// whose unique argmax is winner: every distractor stays below 1.0 while the
+// winner sits at 2.0.
+func batchedVerifyRow(width, winner int, rng *rand.Rand) []float32 {
+	row := make([]float32, width)
+	for i := range row {
+		row[i] = rng.Float32()
+	}
+	row[winner] = 2.0
+	return row
+}
+
+// TestBatchedBlockVerifyWholeBlockAccept pins the all-drafts-match outcome:
+// every drafted token is accepted, nothing rolls back, and the optional final
+// fused row contributes the trailing bonus token.
+func TestBatchedBlockVerifyWholeBlockAccept(t *testing.T) {
+	rng := rand.New(rand.NewSource(0xBADC0FFEE))
+	draft := []int{101, 102, 103, 104}
+	targets := []int{101, 102, 103, 104, 105}
+
+	rows := make([][]float32, len(targets))
+	for i, want := range targets {
+		rows[i] = batchedVerifyRow(512, want, rng)
+	}
+	res, err := BatchedBlockVerify(draft, rows)
+	if err != nil {
+		t.Fatalf("BatchedBlockVerify failed: %v", err)
+	}
+	if res.AcceptedCount != len(draft) {
+		t.Errorf("AcceptedCount = %d, want %d", res.AcceptedCount, len(draft))
+	}
+	if res.RejectedAt != -1 {
+		t.Errorf("RejectedAt = %d, want -1 (whole block accepted)", res.RejectedAt)
+	}
+	if res.RollbackCount != 0 {
+		t.Errorf("RollbackCount = %d, want 0", res.RollbackCount)
+	}
+	if len(res.NextTokens) != len(targets) || res.NextTokens[len(targets)-1] != 105 {
+		t.Errorf("NextTokens = %+v, want %d tokens ending with bonus 105", res.NextTokens, len(targets))
+	}
+
+	// Without the bonus row the whole block still accepts, carrying no bonus.
+	resNoBonus, err := BatchedBlockVerify(draft, rows[:len(draft)])
+	if err != nil {
+		t.Fatalf("BatchedBlockVerify (k rows) failed: %v", err)
+	}
+	if resNoBonus.AcceptedCount != len(draft) || resNoBonus.RejectedAt != -1 {
+		t.Errorf("k-row whole-block accept = %+v, want all accepted", resNoBonus)
+	}
+	if len(resNoBonus.NextTokens) != len(draft) {
+		t.Errorf("k-row NextTokens = %+v, want exactly the %d accepted drafts", resNoBonus.NextTokens, len(draft))
+	}
+}
+
+// TestBatchedBlockVerifyMidBlockReject pins a divergence at a pinned interior
+// position: the prefix accepts, the tail rejects, and the correction token is
+// the diverging row's argmax.
+func TestBatchedBlockVerifyMidBlockReject(t *testing.T) {
+	rng := rand.New(rand.NewSource(0x5EED))
+	draft := []int{101, 102, 103, 104}
+	targets := []int{101, 102, 300, 104} // divergence at position 2
+
+	rows := make([][]float32, len(targets))
+	for i, want := range targets {
+		rows[i] = batchedVerifyRow(512, want, rng)
+	}
+	res, err := BatchedBlockVerify(draft, rows)
+	if err != nil {
+		t.Fatalf("BatchedBlockVerify failed: %v", err)
+	}
+	if res.RejectedAt != 2 {
+		t.Errorf("RejectedAt = %d, want 2", res.RejectedAt)
+	}
+	if res.AcceptedCount != 2 {
+		t.Errorf("AcceptedCount = %d, want 2", res.AcceptedCount)
+	}
+	if res.RollbackCount != len(draft)-2 {
+		t.Errorf("RollbackCount = %d, want %d", res.RollbackCount, len(draft)-2)
+	}
+	wantNext := []int{101, 102, 300} // accepted prefix + correction = argmax(row 2)
+	if len(res.NextTokens) != len(wantNext) {
+		t.Fatalf("NextTokens = %+v, want %v", res.NextTokens, wantNext)
+	}
+	for i, tok := range wantNext {
+		if res.NextTokens[i] != tok {
+			t.Errorf("NextTokens[%d] = %d, want %d", i, res.NextTokens[i], tok)
+		}
+	}
+}
+
+// TestBatchedBlockVerifyTailOnlyAccept pins a divergence at the last draft
+// position: every earlier token accepts, only the tail rejects.
+func TestBatchedBlockVerifyTailOnlyAccept(t *testing.T) {
+	rng := rand.New(rand.NewSource(0x7A1D0))
+	draft := []int{101, 102, 103, 104}
+	targets := []int{101, 102, 103, 300} // divergence at position 3 (tail)
+
+	rows := make([][]float32, len(targets))
+	for i, want := range targets {
+		rows[i] = batchedVerifyRow(512, want, rng)
+	}
+	res, err := BatchedBlockVerify(draft, rows)
+	if err != nil {
+		t.Fatalf("BatchedBlockVerify failed: %v", err)
+	}
+	if res.RejectedAt != len(draft)-1 {
+		t.Errorf("RejectedAt = %d, want %d", res.RejectedAt, len(draft)-1)
+	}
+	if res.AcceptedCount != len(draft)-1 {
+		t.Errorf("AcceptedCount = %d, want %d", res.AcceptedCount, len(draft)-1)
+	}
+	if res.RollbackCount != 1 {
+		t.Errorf("RollbackCount = %d, want 1", res.RollbackCount)
+	}
+	wantNext := []int{101, 102, 103, 300}
+	if len(res.NextTokens) != len(wantNext) || res.NextTokens[len(wantNext)-1] != 300 {
+		t.Errorf("NextTokens = %+v, want %v", res.NextTokens, wantNext)
+	}
+}
+
+// TestBatchedBlockVerifyParityFixedSeed pins the owed parity: over a pinned
+// step count at a fixed seed, the greedy token stream emitted by batched
+// whole-block verify is identical to the serial per-position walk over the
+// same fused logit rows.
+func TestBatchedBlockVerifyParityFixedSeed(t *testing.T) {
+	const (
+		vocab     = 97
+		k         = 4
+		steps     = 256
+		seed      = int64(0x5EEDF00D)
+		acceptPct = 70 // drafter hits the true token 70% of the time
+	)
+	rng := rand.New(rand.NewSource(seed))
+
+	// True greedy target stream long enough for every step's full panel.
+	total := steps*(k+1) + k
+	truth := make([]int, total)
+	for i := range truth {
+		truth[i] = rng.Intn(vocab)
+	}
+
+	emitSerial := func(draft []int, rows [][]float32) []int {
+		out := make([]int, 0, len(rows))
+		for j, row := range rows {
+			target := argmaxFloat32(row)
+			if j < len(draft) && draft[j] == target {
+				out = append(out, draft[j])
+				continue
+			}
+			out = append(out, target) // correction at the first divergence
+			break
+		}
+		return out
+	}
+
+	pos := 0
+	batchedStream, serialStream := make([]int, 0, total), make([]int, 0, total)
+	for s := 0; s < steps; s++ {
+		draft := make([]int, k)
+		for i := 0; i < k; i++ {
+			if rng.Intn(100) < acceptPct {
+				draft[i] = truth[pos+i]
+			} else {
+				draft[i] = (truth[pos+i] + 1 + rng.Intn(vocab-1)) % vocab // guaranteed wrong
+			}
+		}
+		rows := make([][]float32, k+1)
+		for j := 0; j <= k; j++ {
+			rows[j] = batchedVerifyRow(vocab, truth[pos+j], rng)
+		}
+		res, err := BatchedBlockVerify(draft, rows)
+		if err != nil {
+			t.Fatalf("step %d: BatchedBlockVerify failed: %v", s, err)
+		}
+		if len(res.NextTokens) == 0 {
+			t.Fatalf("step %d: batched verify emitted no tokens", s)
+		}
+		batchedStream = append(batchedStream, res.NextTokens...)
+		serialStream = append(serialStream, emitSerial(draft, rows)...)
+		pos += len(res.NextTokens)
+	}
+	if len(batchedStream) != len(serialStream) {
+		t.Fatalf("stream lengths differ: batched %d vs serial %d", len(batchedStream), len(serialStream))
+	}
+	for i := range batchedStream {
+		if batchedStream[i] != serialStream[i] {
+			t.Fatalf("parity broken at emission %d: batched %d vs serial %d", i, batchedStream[i], serialStream[i])
+		}
+	}
+}
+
+// TestBatchedBlockVerifySentinels pins the closed error contract: malformed
+// panels report ErrBatchedBlockVerifyShape, non-finite logits report
+// ErrBatchedBlockVerifyNonFinite, and an empty draft with no rows is a clean
+// no-op.
+func TestBatchedBlockVerifySentinels(t *testing.T) {
+	rng := rand.New(rand.NewSource(1))
+	draft := []int{101, 102, 103, 104}
+	goodRows := func(n int) [][]float32 {
+		rows := make([][]float32, n)
+		for i := range rows {
+			rows[i] = batchedVerifyRow(64, rng.Intn(64), rng)
+		}
+		return rows
+	}
+
+	shapeCases := map[string]func() [][]float32{
+		"k-1 rows":     func() [][]float32 { return goodRows(len(draft) - 1) },
+		"k+2 rows":     func() [][]float32 { return goodRows(len(draft) + 2) },
+		"draft+rows 0": func() [][]float32 { return goodRows(0) }, // k>=1 needs at least k rows
+		"empty draft with rows": func() [][]float32 {
+			rows := goodRows(1)
+			_ = draft
+			return rows
+		},
+	}
+	for name, build := range shapeCases {
+		var d []int
+		if name != "empty draft with rows" {
+			d = draft
+		}
+		if _, err := BatchedBlockVerify(d, build()); !errors.Is(err, ErrBatchedBlockVerifyShape) {
+			t.Errorf("%s: err = %v, want ErrBatchedBlockVerifyShape", name, err)
+		}
+	}
+	ragged := goodRows(len(draft))
+	ragged[2] = ragged[2][:4] // narrower than the panel width
+	if _, err := BatchedBlockVerify(draft, ragged); !errors.Is(err, ErrBatchedBlockVerifyShape) {
+		t.Errorf("ragged rows: err = %v, want ErrBatchedBlockVerifyShape", err)
+	}
+	emptyRow := goodRows(len(draft))
+	emptyRow[0] = emptyRow[0][:0]
+	if _, err := BatchedBlockVerify(draft, emptyRow); !errors.Is(err, ErrBatchedBlockVerifyShape) {
+		t.Errorf("empty row: err = %v, want ErrBatchedBlockVerifyShape", err)
+	}
+
+	nanRow := goodRows(len(draft))
+	nanRow[1][3] = float32(math.NaN())
+	if _, err := BatchedBlockVerify(draft, nanRow); !errors.Is(err, ErrBatchedBlockVerifyNonFinite) {
+		t.Errorf("NaN row: err = %v, want ErrBatchedBlockVerifyNonFinite", err)
+	}
+	infRow := goodRows(len(draft))
+	infRow[2][5] = float32(math.Inf(1))
+	if _, err := BatchedBlockVerify(draft, infRow); !errors.Is(err, ErrBatchedBlockVerifyNonFinite) {
+		t.Errorf("+Inf row: err = %v, want ErrBatchedBlockVerifyNonFinite", err)
+	}
+
+	res, err := BatchedBlockVerify(nil, nil)
+	if err != nil {
+		t.Fatalf("empty draft with no rows must be a clean no-op, got %v", err)
+	}
+	if res.RejectedAt != -1 || res.AcceptedCount != 0 || len(res.NextTokens) != 0 {
+		t.Errorf("empty-draft no-op result = %+v, want zero acceptance with RejectedAt=-1", res)
+	}
+}
+
+// TestBatchedBlockVerifyModeSelection pins the admission probe: batched only
+// when the drafter is live AND the block holds more than one token; otherwise
+// the serial path remains the selected mode.
+func TestBatchedBlockVerifyModeSelection(t *testing.T) {
+	cases := []struct {
+		drafterAvailable bool
+		blockSize        int
+		want             BlockVerifyMode
+	}{
+		{false, 0, BlockVerifyModeSerial},
+		{false, 1, BlockVerifyModeSerial},
+		{false, 4, BlockVerifyModeSerial},
+		{true, 0, BlockVerifyModeSerial},
+		{true, 1, BlockVerifyModeSerial},
+		{true, 2, BlockVerifyModeBatched},
+		{true, 3, BlockVerifyModeBatched},
+		{true, 4, BlockVerifyModeBatched},
+	}
+	for _, tc := range cases {
+		got := SelectBlockVerifyMode(tc.drafterAvailable, tc.blockSize)
+		if got != tc.want {
+			t.Errorf("SelectBlockVerifyMode(%v, %d) = %v, want %v", tc.drafterAvailable, tc.blockSize, got, tc.want)
+		}
+	}
+	if BlockVerifyModeSerial.String() != "serial" || BlockVerifyModeBatched.String() != "batched" {
+		t.Errorf("mode String() = %q / %q, want serial / batched", BlockVerifyModeSerial.String(), BlockVerifyModeBatched.String())
 	}
 }
 

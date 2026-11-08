@@ -3,6 +3,7 @@ package compute
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 )
 
@@ -288,6 +289,105 @@ func EvaluateDraftAcceptance(draftTokens []int, targetTokens []int) MTPAcceptanc
 	res.ExpectedTokensPerStep = CalculateExpectedSpeedup(res.AcceptanceRate, k)
 
 	return res
+}
+
+// BlockVerifyMode selects how a drafted speculative block is verified against
+// the target model.
+type BlockVerifyMode int
+
+const (
+	// BlockVerifyModeSerial re-verifies the draft token-by-token, one target
+	// step per position (the serial verifyNative reference path).
+	BlockVerifyModeSerial BlockVerifyMode = iota
+	// BlockVerifyModeBatched verifies the whole drafted block in ONE target
+	// pass and reads per-position accept/reject from the fused logit rows.
+	BlockVerifyModeBatched
+)
+
+func (m BlockVerifyMode) String() string {
+	switch m {
+	case BlockVerifyModeBatched:
+		return "batched"
+	default:
+		return "serial"
+	}
+}
+
+// ErrBatchedBlockVerifyShape indicates that the fused logit panel does not
+// match the drafted block shape: row count outside {k, k+1} for k draft
+// tokens, or ragged or empty rows.
+var ErrBatchedBlockVerifyShape = errors.New("compute: batched block verify fused logit shape mismatch")
+
+// ErrBatchedBlockVerifyNonFinite indicates that a fused logit row contains a
+// NaN or Inf value; the block is rejected before any acceptance decision.
+var ErrBatchedBlockVerifyNonFinite = errors.New("compute: batched block verify fused logits are non-finite")
+
+// SelectBlockVerifyMode is the admission probe shared by every caller that
+// chooses between batched and serial block verification: batched only when the
+// drafter is live AND the block holds more than one token. Otherwise the
+// serial verifyNative path remains the only visible route - no mixed-precision
+// draft admission when the drafter is unavailable or the block size is 1.
+func SelectBlockVerifyMode(drafterAvailable bool, blockSize int) BlockVerifyMode {
+	if drafterAvailable && blockSize > 1 {
+		return BlockVerifyModeBatched
+	}
+	return BlockVerifyModeSerial
+}
+
+// argmaxFloat32 returns the index of the first maximum in logits (ties resolve
+// to the lowest index), matching the greedy temperature-zero oracle the serial
+// verify path uses, so batched and serial verify pick identical tokens.
+func argmaxFloat32(logits []float32) int {
+	best := 0
+	for i := 1; i < len(logits); i++ {
+		if logits[i] > logits[best] {
+			best = i
+		}
+	}
+	return best
+}
+
+// BatchedBlockVerify verifies a whole drafted speculative block in ONE pass
+// over the fused target logit rows instead of serial per-token
+// re-verification. fusedLogitRows[i] is the target next-token distribution at
+// position i: row 0 predicts draftTokens[0] at the boundary position, row i>0
+// predicts draftTokens[i] after consuming draftTokens[:i], and an optional
+// final row (k+1 total) carries the bonus-token distribution after the whole
+// block. Each row's argmax is exactly the token the serial walk would have
+// predicted at that position, so acceptance is delegated to
+// EvaluateDraftAcceptance's closed contract: prefix accept until the first
+// argmax divergence, tail rejected, correction/bonus taken from the diverging
+// row. Adapted from vLLM PR #61994 (merge af6665b5) and SGLang PR #44848
+// (merge 4cbea9d3); see THIRD_PARTY_NOTICES.md.
+func BatchedBlockVerify(draftTokens []int, fusedLogitRows [][]float32) (MTPAcceptanceResult, error) {
+	k := len(draftTokens)
+	rows := len(fusedLogitRows)
+	if k == 0 {
+		if rows != 0 {
+			return MTPAcceptanceResult{}, fmt.Errorf("%w: empty draft with %d fused rows", ErrBatchedBlockVerifyShape, rows)
+		}
+		return MTPAcceptanceResult{RejectedAt: -1}, nil
+	}
+	if rows != k && rows != k+1 {
+		return MTPAcceptanceResult{}, fmt.Errorf("%w: %d fused rows for %d draft tokens (need %d or %d)", ErrBatchedBlockVerifyShape, rows, k, k, k+1)
+	}
+	width := len(fusedLogitRows[0])
+	if width == 0 {
+		return MTPAcceptanceResult{}, fmt.Errorf("%w: empty fused logit row", ErrBatchedBlockVerifyShape)
+	}
+	targetTokens := make([]int, 0, rows)
+	for i, row := range fusedLogitRows {
+		if len(row) != width {
+			return MTPAcceptanceResult{}, fmt.Errorf("%w: row %d has width %d, want %d", ErrBatchedBlockVerifyShape, i, len(row), width)
+		}
+		for _, value := range row {
+			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+				return MTPAcceptanceResult{}, fmt.Errorf("%w: row %d", ErrBatchedBlockVerifyNonFinite, i)
+			}
+		}
+		targetTokens = append(targetTokens, argmaxFloat32(row))
+	}
+	return EvaluateDraftAcceptance(draftTokens, targetTokens), nil
 }
 
 // CalculateExpectedSpeedup computes the theoretical speculative decoding speedup multiplier:

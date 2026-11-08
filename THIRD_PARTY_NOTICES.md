@@ -2598,3 +2598,32 @@ fabricating an address), and a strided-reference oracle that pins tile identity 
 fixtures. No CUDA kernel, no copied upstream code block, and no performance claim are included.
 The upstream license is the MIT License reproduced under "llama.cpp Q4_K MMQ prompt-panel GEMM"
 above (Copyright (c) 2023-2026 The ggml authors).
+## vLLM + SGLang batched speculative block verification
+
+`internal/compute/mtp_rdna35.go` adapts whole-block speculative verification
+from vLLM PR #61994 ("batched target verification of a drafted speculative
+block in one forward pass"), merged at `af6665b5`, and SGLang PR #44848
+(same mechanism: per-position accept/reject read from fused logits, tail
+rejected on argmax divergence), merged at `4cbea9d3`:
+https://github.com/vllm-project/vllm/pull/61994
+https://github.com/sgl-project/sglang/pull/44848
+
+Copyright contributors to the vLLM project / SGLang project.
+SPDX-License-Identifier: Apache-2.0.
+Changed for Fak: idiomatic Go re-expression (no upstream code copied) as
+`SelectBlockVerifyMode` (admission probe: batched only when the drafter is
+live and the block holds more than one token; the serial verifyNative path
+remains the only visible route otherwise), `argmaxFloat32` (first-maximum
+greedy oracle, ties resolve to the lowest index), and `BatchedBlockVerify`,
+which maps each fused logit row to its argmax and delegates acceptance to
+`EvaluateDraftAcceptance`'s closed contract so batched and serial verify emit
+identical greedy token streams at a fixed seed. Wired into the speculative
+control gate by `SpeculativeControl.StepBlockVerify` in
+`internal/model/speculative_control.go`. Witnessed by `TestBatchedBlockVerify*`
+in `internal/compute/mtp_rdna35_test.go` and
+`TestBatchedBlockVerifyGate` /
+`TestSpeculativeControl_BatchedBlockVerifyParity` in
+`internal/model/speculative_control_test.go` (software evidence only; no
+throughput or hardware claim). The full Apache License, Version 2.0
+reproduced in the "TensorFold benchmark evidence" section above applies to
+this adaptation.
