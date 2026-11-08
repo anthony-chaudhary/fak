@@ -302,7 +302,34 @@ func (f *File) Config() (model.Config, error) {
 		cfg.AttnOutputGate = true
 		cfg.NormGain1p = true
 		cfg.QKNorm = true
-		if cfg.FullAttentionInterval > 0 && len(cfg.LayerTypes) == 0 {
+		// The Qwen converter records the per-layer schedule explicitly as
+		// attention.recurrent_layers (true = GDN linear-attention layer) when the HF
+		// config carries layer_types; full_attention_interval is the scalar it derives
+		// from. The explicit array wins over the interval (the qwen4exp reader's
+		// precedence), must have one entry per target layer, and must agree with the
+		// interval when both are present. qwen4exp keeps its own dedicated reader.
+		if (canonArch == "qwen35" || canonArch == "qwen35moe") && f.hasKey(p+"attention.recurrent_layers") {
+			rec, ok := f.BoolArray(p + "attention.recurrent_layers")
+			if !ok || len(rec) != cfg.NumLayers {
+				return model.Config{}, fmt.Errorf("gguf: %sattention.recurrent_layers must be a %d-entry bool array", p, cfg.NumLayers)
+			}
+			cfg.LayerTypes = make([]string, cfg.NumLayers)
+			for l, r := range rec {
+				cfg.LayerTypes[l] = "full_attention"
+				if r {
+					cfg.LayerTypes[l] = "linear_attention"
+				}
+			}
+			if cfg.FullAttentionInterval > 0 {
+				for l := range rec {
+					intervalFull := (l+1)%cfg.FullAttentionInterval == 0
+					arrayFull := cfg.LayerTypes[l] == "full_attention"
+					if intervalFull != arrayFull {
+						return model.Config{}, fmt.Errorf("gguf: %sattention.recurrent_layers contradicts %sfull_attention_interval=%d at layer %d", p, p, cfg.FullAttentionInterval, l)
+					}
+				}
+			}
+		} else if cfg.FullAttentionInterval > 0 && len(cfg.LayerTypes) == 0 {
 			cfg.LayerTypes = make([]string, cfg.NumLayers)
 			for l := range cfg.LayerTypes {
 				if (l+1)%cfg.FullAttentionInterval == 0 {
