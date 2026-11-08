@@ -94,6 +94,7 @@ var (
 	ErrEmbeddingWorkerVocab      = errors.New("embedding token ID outside the worker vocabulary")
 	ErrEmbeddingWorkerCompletion = errors.New("embedding worker did not reach a clean terminal completion")
 	ErrEmbeddingWorkerUnwritten  = errors.New("embedding worker left a vector row unwritten")
+	ErrEmbeddingWorkerNonFinite  = errors.New("embedding worker vector is non-finite in the requested encoding")
 )
 
 // embeddingRefusal wraps one class sentinel plus the parent so errors.Is
@@ -463,6 +464,12 @@ func (s *Server) handleEncoderEmbeddings(w http.ResponseWriter, r *http.Request,
 	if row := firstUnwrittenRow(out, len(admitted.rows), wk.HiddenDim); row >= 0 {
 		writeErr(w, http.StatusUnprocessableEntity, refuseEmbedding(ErrEmbeddingWorkerUnwritten).Error())
 		return
+	}
+	for _, value := range out {
+		if math.IsInf(value, 0) || (admitted.b64 && math.IsInf(float64(float32(value)), 0)) {
+			writeErr(w, http.StatusUnprocessableEntity, refuseEmbedding(ErrEmbeddingWorkerNonFinite).Error())
+			return
+		}
 	}
 	data := make([]EmbeddingData, len(admitted.rows))
 	for i := range admitted.rows {

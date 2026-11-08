@@ -59,6 +59,53 @@ func (f *encoderContractFake) encode(ctx context.Context, rows [][]int, out []fl
 	return f.finish, f.generated
 }
 
+// fak-test:runtime fast est=1ms lane=default
+func TestEmbeddingsEncoderFiniteOutput(t *testing.T) {
+	for _, format := range []string{"float", "base64"} {
+		for _, tc := range []struct {
+			name  string
+			value float64
+		}{
+			{"positive infinity", math.Inf(1)},
+			{"negative infinity", math.Inf(-1)},
+			{"float32 maximum", math.MaxFloat32},
+			{"float64 maximum", math.MaxFloat64},
+		} {
+			t.Run(format+"/"+tc.name, func(t *testing.T) {
+				wk := encoderWorkerFixture(t, &encoderContractFake{})
+				wk.Encode = func(_ context.Context, _ [][]int, out []float64) (EmbeddingFinish, bool) {
+					for i := range out {
+						out[i] = 1
+					}
+					out[len(out)-1] = tc.value // A bad final component refuses the whole batch.
+					return EmbeddingFinishLength, false
+				}
+				w := httptest.NewRecorder()
+				r := httptest.NewRequest(http.MethodPost, "/v1/embeddings", nil)
+				(&Server{}).handleEncoderEmbeddings(w, r, EmbeddingsRequest{Input: json.RawMessage(`[[1],[2]]`), EncodingFormat: format}, wk)
+				bad := math.IsInf(tc.value, 0) || (format == "base64" && tc.value == math.MaxFloat64)
+				if bad {
+					if w.Code != http.StatusUnprocessableEntity || strings.Contains(w.Body.String(), `"data"`) || !strings.Contains(w.Body.String(), ErrEmbeddingWorkerNonFinite.Error()) {
+						t.Fatalf("non-finite batch response: %d %s", w.Code, w.Body.String())
+					}
+				} else {
+					var response EmbeddingsResponse
+					if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || w.Code != http.StatusOK || len(response.Data) != 2 {
+						t.Fatalf("finite batch response: %d %s error=%v", w.Code, w.Body.String(), err)
+					}
+				}
+				if wk.outstandingVectors() != 0 {
+					t.Fatal("output refusal or success leaked borrowed storage")
+				}
+			})
+		}
+	}
+	err := refuseEmbedding(ErrEmbeddingWorkerNonFinite)
+	if !errors.Is(err, ErrEmbeddingWorkerNonFinite) || !errors.Is(err, ErrEmbeddingWorker) {
+		t.Fatal("non-finite refusal lost typed classification")
+	}
+}
+
 func encoderWorkerFixture(t *testing.T, fake *encoderContractFake) *EmbeddingEncoderWorker {
 	t.Helper()
 	wk, err := NewEmbeddingEncoderWorker(EmbeddingEncoderConfig{
