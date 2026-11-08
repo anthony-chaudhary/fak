@@ -15,84 +15,84 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **30** (clarity 0 + coverage 30) |
-| **Crystal-clear concepts (and climbing)** | **1629** crystal of 4072 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **4140 / 4170** (99.3% of the discovered confusable space) |
-| **Undrawn twin-pairs (drive to 0)** | **0** of 303 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **92** of 5529 indexed names |
+| **Disambiguation-debt (drive to 0)** | **0** (clarity 0 + coverage 0) |
+| **Crystal-clear concepts (and climbing)** | **1633** crystal of 4104 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **4173 / 4173** (100.0% of the discovered confusable space) |
+| **Undrawn twin-pairs (drive to 0)** | **0** of 309 confusable name-pairs |
+| **Ambiguous lookup names (drive to 0)** | **92** of 5564 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 99.5/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 100.0/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 4072 concepts - score 99.5/100 (grade A) - disambiguation-debt 30
+concept-disambiguation chart - 4104 concepts - score 100.0/100 (grade A) - disambiguation-debt 0
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ###################......... 1629
-  o defined       ############################ 2443
+  * crystal       ###################......... 1633
+  o defined       ############################ 2471
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
 
 clarity mix by family (each cell = one concept):
-  attention        ***************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (243 concept(s); 99 crystal)
-  cache            **************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (389 concept(s); 146 crystal)
+  attention        ***************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (246 concept(s); 99 crystal)
+  cache            **************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (392 concept(s); 146 crystal)
   context-ctx      ********************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (308 concept(s); 104 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         ***************************************ooooooooooooooooooooooooo (64 concept(s); 39 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
-  evict            **************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (85 concept(s); 26 crystal)
-  gateway-engine   *************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (275 concept(s); 97 crystal)
+  evict            **************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (89 concept(s); 26 crystal)
+  gateway-engine   *************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (277 concept(s); 97 crystal)
   guard-gate       **************************************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (517 concept(s); 230 crystal)
   layout           ***********************************oooooooooooooooooooooooo (59 concept(s); 35 crystal)
-  loop             ***************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooo (107 concept(s); 51 crystal)
-  plan             **********************************************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (570 concept(s); 238 crystal)
-  policy-capability *****************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (256 concept(s); 125 crystal)
+  loop             ***************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (108 concept(s); 51 crystal)
+  plan             **********************************************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (580 concept(s); 238 crystal)
+  policy-capability ********************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (259 concept(s); 128 crystal)
   pool             **************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (106 concept(s); 38 crystal)
-  render-materialize *************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (235 concept(s); 49 crystal)
+  render-materialize *************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (236 concept(s); 49 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (125 concept(s); 35 crystal)
-  session-runtime  *****************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (362 concept(s); 137 crystal)
-  support-maturity *******************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (129 concept(s); 67 crystal)
+  session-runtime  ******************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (365 concept(s); 138 crystal)
+  support-maturity *******************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (131 concept(s); 67 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
   witness-proof    ************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (213 concept(s); 84 crystal)
 
 coverage by family (positioned / discovered):
-  plan             ############################ 637/647
-  evict            ###########################. 93/97
-  cache            ############################ 438/441
-  policy-capability ############################ 283/286
-  session-runtime  ############################ 384/387
-  support-maturity ###########################. 142/145
-  attention        ############################ 238/240
-  gateway-engine   ############################ 324/325
-  loop             ############################ 118/119
-  render-materialize ############################ 253/254
+  attention        ############################ 241/241
+  cache            ############################ 441/441
   context-ctx      ############################ 335/335
   cross-cluster    ............................ 0/0
   decision         ############################ 68/68
   dev-tier         ............................ 0/0
+  evict            ############################ 97/97
+  gateway-engine   ############################ 326/326
   guard-gate       ############################ 579/579
-  layout           ############################ 55/55
+  layout           ############################ 56/56
+  loop             ############################ 119/119
+  plan             ############################ 647/647
+  policy-capability ############################ 286/286
   pool             ############################ 112/112
+  render-materialize ############################ 254/254
   score-debt       ############################ 141/141
+  session-runtime  ############################ 387/387
+  support-maturity ############################ 145/145
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
   witness-proof    ############################ 200/200
 
-namespace coverage  [################################] 99.3%  (4140/4170 confusable tokens positioned)
+namespace coverage  [################################] 100.0%  (4173/4173 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
-  mutual       ############################ 303
+  mutual       ############################ 309
   one-sided    ............................ 0
   undrawn      ............................ 0
-  pairs separated   [################################] 303/303
+  pairs separated   [################################] 309/309
 
-name index: 5529 lookup name(s) -> 4072 concept(s), 92 ambiguous
+name index: 5564 lookup name(s) -> 4104 concept(s), 92 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -114,11 +114,11 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 
 | Separation metric | Value |
 |---|---|
-| Confusable name-pairs discovered | 303 |
-| **Separated from each other (drive to all)** | **303 / 303** (303 mutual, 0 one-sided) |
+| Confusable name-pairs discovered | 309 |
+| **Separated from each other (drive to all)** | **309 / 309** (309 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 3538 / 7754 |
+| Boundaries drawn (mutual / total) | 3580 / 7853 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 5529 over 4072 concepts |
+| Lookup names indexed | 5564 over 4104 concepts |
 | Lookup names landing on several concepts | 92 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 4072 |
+| Concepts carrying a contrast set | 4104 |
 
 ## The concepts (best verdict first)
 
@@ -1263,6 +1263,9 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | config | policy-capability | **FLEET_POLICY_PATH** - The env var (FLEET_POLICY_PATH) naming a SINGLE fleet dispatch-policy file loaded at tick preflight. |
 | * | crystal | symbol | policy-capability | **V41EngramLookAheadReadPolicy** - V41EngramLookAheadReadPolicy(rowBytes) declares whether an Engram producer supports immutable, concurrent-safe look-ahead reads at the exact requested row width, returning its maximum staging bytes per row. |
 | * | crystal | symbol | policy-capability | **InKernelPlannerConfig.V41EngramLookAhead** - InKernelPlannerConfig.V41EngramLookAhead is a default-false typed operator selection for attached V4.1 Engram in explicitly serial, non-speculative, non-expert-parallel serving. It routes greedy and sampled incremental forwards through the per-call look-ahead API while preserving greedy accounting, effective request cancellation and terminal selected-forward failures. |
+| * | crystal | symbol | policy-capability | **ExpertResidencyPolicy** - ctxmmu.ExpertResidencyPolicy (internal/ctxmmu/expert_residency.go) is the MoE expert-residency policy for the unified-memory serving tier: it holds a byte-budgeted resident hot-set LRU ring and a separate bounded transient prefill ring over a ResidencyBacking store, deciding per touch whether a routed expert's weights sit resident, transient, or cold. Prefill touches stage cold descriptors only into the transient ring so a sweep can never evict the decode hot set; Decode promotes a transient hit into the hot set by descriptor swap with no payload re-read, and loads a cold miss into the hot set. WarmStart seeds the hot set from a frequency-ranked access trace and Stats() reports the hit/miss/promotion/eviction accounting. |
+| * | crystal | symbol | policy-capability | **NewExpertResidencyPolicy** - NewExpertResidencyPolicy (internal/ctxmmu/expert_residency.go) constructs an ExpertResidencyPolicy over a ResidencyBacking: it substitutes DefaultExpertHotBytes (6 GiB) and DefaultExpertTransientBytes (2 GiB) for non-positive budgets, builds the two expertLRURings, and leaves the advisor field nil. With no advisor, cold-miss decode admission is plain LRU - every admitted cold touch becomes resident, DecodeBypasses stays 0, and no advisor warm-start source exists. A nil backing is admitted because a synthetic warm-start caller may supply descriptors through Load anyway. |
+| * | crystal | symbol | policy-capability | **NewExpertResidencyPolicyWithAdvisor** - NewExpertResidencyPolicyWithAdvisor (internal/ctxmmu/expert_residency_advisor.go) builds an ExpertResidencyPolicy through NewExpertResidencyPolicy and then wires an ExpertResidencyAdvisor into it. The advisor gates cold-miss decode admission with its displacement band - a challenger that would evict a resident is admitted only when its heat beats the victim's, otherwise the touch is bypassed (served from backing, counted in DecodeBypasses) - and supplies the committed hot set behind WarmStartFromAdvisor, with every insert/eviction reported back via MarkResident/ClearResident. A nil advisor is equivalent to NewExpertResidencyPolicy. |
 | * | crystal | symbol | policy-capability | **checkPolicyFile** - The fak policy --check entry point that reads the named policy file once and routes it by payload shape: a plain runtime manifest goes to the manifest validator, a fak-org-policy/v1 envelope goes to the signed-envelope verifier. |
 | * | crystal | symbol | policy-capability | **policyExclusion** - The operator-configured exclude / include_only gate that drops a discovered account row from the fleet registry, extracted from the inline discovery checks so the discovery path and the seat-stamping path share one decision. |
 | * | crystal | concept | policy-capability | **policy_exceeds_measured_capacity** - Typed shadow HOLD reason when explicit queue or group safety policy exceeds the slots or group count of an accepted supplied measured-search candidate. |
@@ -1591,6 +1594,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | session-runtime | **LlamaSlotAffinity (planner opt-in)** - The HTTPPlanner / gateway Config opt-in (fed by `fak serve --llama-slot-affinity`) that lets an OpenAI-provider planner discover a llama-server upstream's total_slots via /props and pin requests sharing a system prompt and tool catalog to one slot; false sends no probe and leaves the body untouched. |
 | * | crystal | symbol | session-runtime | **withLlamaSlotAffinity (request rewrite)** - The prepareUpstream step that, for an opted-in planner whose upstream has answered /props with llama-server total_slots, adds id_slot = crc32(stable prefix) % total_slots and cache_prompt=true to the outbound ExtraBody without overriding operator-set keys; otherwise returns the body unchanged and kicks off background discovery. |
 | * | crystal | symbol | session-runtime | **id_slot (llama-server request field)** - The llama-server completion request field naming which server slot (KV cache) serves the request; fak sets it to crc32(shared prefix) % total_slots so sibling subagents reuse the parent's prefix KV. |
+| * | crystal | symbol | session-runtime | **SessionLane** - Gateway Config field (internal/gateway/config.go) holding the LAUNCH-TIME lane designation the host (fak guard) resolves from the --lane flag, then FAK_LANE, then DISPATCH_LANE, and stamps as trusted Meta["lane"] on every served tool call; Server.sessionLane mirrors it and buildCall injects meta["lane"] only when non-empty. It is the coordinator's spawn-time lane label - same trust level as the dispatcher env for fleet workers, never wire input - so lane-aware floors (test immunity) resolve the acting lane from it. Empty keeps the historical no-lane-attribution behavior byte-for-byte. |
 | * | crystal | subsystem | session-runtime | **Session** - The full drive record for one served run (run-state, budget, priority, pace), keyed by TraceID and persisting across turns. |
 | * | crystal | concept | session-runtime | **Turn** - One model round-trip within a session: the agent submits input, the model generates output, and results are admitted to context. |
 | * | crystal | symbol | session-runtime | **Slot** - The immutable free/busy signal emitted when a session leaves the eligible set (budget exhaustion, pause, drain, stop), freeing scheduling capacity. |
@@ -1865,6 +1869,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | subsystem | attention | **attnsnrsi (attention-S/N RSI command)** - The cmd/attnsnrsi command that closes the attention signal/noise RSI loop in SHADOW (#867), replaying a session's Forecast scored on attention attribution through rsiloop. |
 | o | defined | symbol | attention | **SetAttnObserver (install observer)** - m.SetAttnObserver — installs (or clears with nil) the default-off attention-mass witness observer on the model, used to capture post-softmax weights without perturbing the forward pass. |
 | o | defined | symbol | attention | **emitAttnRow (emit attention row)** - emitAttnRow — the hot-path helper that copies the post-softmax weights for one (layer, query position, head) window and hands the fresh slices to the installed observer. |
+| o | defined | symbol | attention | **attentionLocked** - Method on cudaQwen35PagedSequence (internal/compute/cuda_qwen35_sequence_paged.go) that computes causal GQA attention for one Qwen3.5 sequence lane over paged KV blocks: it gathers the layer's K/V pages into contiguous scratch, runs the qwen35 causal-attention panel kernel, and allocates its own output when none is supplied (it delegates to attentionIntoLocked). The 'Locked' suffix is the backend naming convention: the caller already holds the CUDA device mutex (cudaMu), as Qwen35SequencePrefill does, so the helper never re-acquires it. |
+| o | defined | symbol | attention | **AttnRanks** - Field on model.TPConfig (internal/model/tensor_parallel_forward.go): the number of tensor-parallel ranks the attention sublayer is sharded over, by KV-head group, in ForwardTP. ForwardTP clamps it to [1, NumKVHeads] via clampRanks before NewTPPlan builds the head-shard plan; 0 or negative means 1 (monolithic attention). |
 | o | defined | symbol | attention | **AttnObserver** - A callback that receives post-softmax attention distributions one (layer, query, head) row at a time for span attribution. |
 | o | defined | symbol | attention | **Attended (span field)** - The per-turn witnessed post-softmax attention mass a span accumulated during one forward pass, reset at the turn boundary. |
 | o | defined | symbol | attention | **AttendedMass (method)** - The total witnessed attention mass currently attributed across all live segments - the denominator that normalizes each span's attention into [0,1]. |
@@ -1888,6 +1894,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | concept | attention | **self_attention (Falcon checkpoint tensor namespace)** - internal/model: the FALCON-family checkpoint tensor namespace - self_attention.query_key_value.weight (a fused QKV panel split at materialize time) and self_attention.dense, which fak canonicalizes to self_attn.o_proj. |
 | o | defined | symbol | attention | **FullAttentionDevice (graph attention over a persistent device KV)** - internal/metalgemm/graph.go: the ProjectionGraph full-attention op whose KV prefix lives in a caller-owned DeviceKV that persists across graphs; it applies optional QK-norm and rotate-half RoPE, appends the panel's K/V rows on the device, and attends (gated, or ungated when gate is nil). The dense whole-token Q4_K decode and the Qwen3.5 hybrid route use it so no host prefix is uploaded per token. |
 | o | defined | symbol | attention | **HasQSASparseAttn (QSA sparse-attention config predicate)** - internal/model Config predicate reporting that the checkpoint declares the QSA sparse-attention layout; routes that only reproduce dense full attention (for example the dense whole-token Q4_K decode admission) decline when it is true. |
+| o | defined | config | attention | **linear_attn_config** - The nested linear_attn_config object inside text_config of the HF config.json of GLM-5.3-Flash (glm5_next) and Kimi-K3.1-Pro checkpoints, carrying the KDA linear-attention geometry num_heads, head_dim, short_conv_kernel_size and gate_lower_bound. model.Config.UnmarshalJSON (internal/model/config.go) decodes it through glm5LinearAttnConfigJSON and folds it at parse time onto the flat axes LinearNumKeyHeads, LinearNumValueHeads, LinearKeyHeadDim, LinearValueHeadDim, LinearConvKernelDim and LinearGateLowerBound so the native forward reads one surface. glm5NextIdentity (internal/model/glm5next_spine.go) carries the same object as its LinearAttn field and pins it to 64 heads, head dim 128 and conv kernel 4 for checkpoint admission. |
 | o | defined | symbol | attention | **k_flash_attention** - k_flash_attention (internal/compute/cuda.go) is the CUDA flash-attention decode kernel - tiled over the KV window with a running max/sum so no full score buffer materializes. |
 | o | defined | symbol | attention | **linearAttnDims** - Config.linearAttnDims (internal/model/qwen35.go) returns the linear-attention head/dim geometry for hybrid models. |
 | o | defined | symbol | attention | **hc_attn_base (GLM-5.3-Flash hyper-connection attention base)** - The per-layer GLM-5.3-Flash (glm5_next) checkpoint tensor layers.N.hc_attn_base: the base term of the hyper-connection attention parameter set (hc_attn_fn/hc_attn_base/hc_attn_scale) consumed by the Sinkhorn-projected stream combiner; glm5next_forward requires it in the pinned manifest for every layer. |
@@ -1949,7 +1956,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | cache | **CacheMode** - String field on benchmark trial manifests (amdgpu warm-disk restart, llama.cpp comparator, qwen38quant environment) declaring the trial's cache state such as cold, warm or isolated-default. |
 | o | defined | symbol | cache | **CacheModifierFlags** - Strix Halo tiler struct carrying the RDNA 3.5 SLC/GLC/NT cache modifier flags for one load class (root KV prefix, streaming weights, divergent subagent tokens). |
 | o | defined | symbol | cache | **Timings.CacheN** - llama.cpp native timings field (JSON cache_n) reporting how many prompt-prefix tokens were served from the KV cache without re-prefill on a completed generation. |
-| o | defined | symbol | cache | **CachePolicy** - String designation attached to a work unit declaring which cache treatment applies: agentbench replay plans carry the provider cache policy under test, and Strix Halo MALL partition entries carry per-partition residency labels (TEMPORAL_PINNED, TRANSIENT_PINNED, RESERVE, UNALLOCATED). |
+| o | defined | symbol | cache | **CachePolicy** - Bare-name designation for which cache treatment applies to a unit of work: the deepseekv4moe CachePolicy int arms the offline expert-cache eviction replay (LRU/LFU/Heat/Random/OPT/LFRU/ScoreEMA), agentbench trial configs declare a provider cache-accounting policy string, and Strix Halo MALL partition entries carry a per-partition residency label (TEMPORAL_PINNED, TRANSIENT_PINNED, RESERVE, UNALLOCATED). |
 | o | defined | symbol | cache | **CachePolicyHint** - Strix Halo struct specifying the RDNA 3.5 cache allocation directive (SLC/GLC/NT plus pinned/bypass token counts) for one token span or weight tensor. |
 | o | defined | symbol | cache | **CacheReuseBytes** - causalreceipt phase/metric field accumulating the bytes served from cache during a phase, reported alongside tokens and overhead in the causal receipt. |
 | o | defined | symbol | cache | **CacheStateProvider** - l3server metrics callback type (func() (allocBytes, entries int64)) exposing the L3 cache allocator's current allocation bytes and entry count for scrape and server-state reporting. |
@@ -1957,7 +1964,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | metric | cache | **CPUCacheLastBypass** - RadixKV stats field recording the reason label of the most recent CPU cache admission bypass, for operator diagnosis of why entries were skipped. |
 | o | defined | symbol | cache | **enablePageCache** - ggufExpertSource method opting a shard source into the #1302 page-cache-aware zero-copy read path; refuses unless the mapped data exactly matches the declared source extent. |
 | o | defined | symbol | cache | **ExpertCacheReceipt** - Locked-schema JSON document capturing one routed-expert cache measurement at a model shape, with provenance fields (simulated vs hardware) that must be read before any hit-rate or throughput number. |
-| o | defined | symbol | cache | **ExpertPageCache** - The #1302 zero-copy expert read-through option flag on the GGUF loader options, requesting that repeat reads of faulted experts be served from the mapped region instead of the device. |
+| o | defined | symbol | cache | **expertPageCache (resolved GGUF expert page-cache gate)** - Resolved #1302 boolean gate on the GGUF Q4K load options (set via WithExpertPageCache) opting expert reads into the page-cache/mmap-aware source seam, so repeat reads of faulted experts are served from the mapped region instead of the device. |
 | o | defined | symbol | cache | **FitsInMALLCache** - Scratchpad predicate (FlashAttnDequantScratchpad, VulkanKVScratchpad) reporting whether the whole scratch allocation fits within the 32 MiB Strix Halo MALL Infinity Cache. |
 | o | defined | symbol | cache | **gemma4Cached** - Session field holding the Gemma4 cached continuation state (model, cache-geometry epoch, config digest, computed rows) that lets prefill continue without recomputing the cached context. |
 | o | defined | config | cache | **GOMODCACHE** - Go module cache directory pinned as an environment variable in fak's hermetic build paths (computebuild owner-build env, harnessinit offline Go resolution, envconfiglint allowlist). |
@@ -2114,6 +2121,9 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | cache | **recordCacheBreak (gateway break witness seam)** - internal/gateway/metrics_observe.go: the gateway-side CONSUMER seam that witnesses one cache-break event - the caller supplies cause and cold-rebuild token cost, internal/metrics normalizes them, a nil metrics is a no-op, and the append is off the hot path under its own lock. |
 | o | defined | metric | cache | **fak_gateway_cache_breakpoint_placement_total (placement outcomes)** - internal/gateway/metrics_render.go: the counter of cache_control BREAKPOINT PLACEMENT attempts on the outbound body, labelled by outcome (placed, or the refusal reason). |
 | o | defined | metric | cache | **fak_vcache_saved_token_equiv (net realized saving)** - internal/gateway/metrics_render.go: the gauge of NET realized provider-cache saving in input-token-equivalents (baseline minus actual). It is NEGATIVE on a cold-write-dominated session until reads repay the writes, and is the same engine and number as `fak vcache observe`. |
+| o | defined | symbol | cache | **ExpertCacheTraceEvent** - Struct in internal/model/expert_cache_bench.go holding one routed-expert touch of the simulated V4.1 expert-cache trace: the (Layer, Expert) pair the router selected and the WeightBytes its staged weight accounts for. Events are drawn by GenerateV41ExpertCacheTrace and driven through the shipped paged ring by ReplayExpertCacheTrace. |
+| o | defined | symbol | cache | **initQ8CacheIfComplete** - Private *Model method (internal/model/quant.go) called at the end of Quantize and from the safetensors quantized-load paths: it returns true and builds the dense per-layer q8layers cache plus q8head via initQ8Cache only when the on-demand q8w map already holds the head and every attention/MLP projection tensor for all layers; Qwen3.5 hybrid models return false early because they have no dense mlp.* tensors. |
+| o | defined | symbol | cache | **V41ExpertCacheShapeDefault** - Function in internal/model/expert_cache_bench.go returning the pinned V4.1 routed geometry for the simulated expert-cache driver: 40 layers, 384 routed experts (V41RouterExperts), top-6 picks (V41RouterTopK), 2304 expert intermediate width, 5120 hidden. It is the fallback when ExpertCacheTraceOptions.Shape is zero and stamps the receipt's MoE axes. |
 | o | defined | symbol | cache | **CacheAffinity** - CacheAffinity (internal/gateway/gateway.go session state) carries the SessionCacheAffinity verdict for a session - whether continuations stick to the same provider cache prefix lineage. |
 | o | defined | symbol | cache | **SessionCacheAffinity** - SessionCacheAffinity (internal/gateway/gateway.go) is the struct carrying a session's cache-affinity verdict and reason, with an IsZero test. |
 | o | defined | symbol | cache | **CacheAffinityDecision** - CacheAffinityDecision (internal/session/cache_affinity.go) is the typed verdict on whether a child session continues its parent's cache lineage, with a reason string. |
@@ -2429,6 +2439,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | metric | evict | **MALLEvictions (strix MALL tiling counter)** - strix MALL tiling/stream counter of MALL cache block evictions observed during weight streaming, which must remain 0 under temporal pinning. |
 | o | defined | metric | evict | **PageEvictions (radixkv page-aware counter)** - radixkv counter of page-aware leaf evictions performed, tracked alongside the global Evictions/CostEvictions totals in admin stats. |
 | o | defined | symbol | evict | **PhaseKVEvict (nativeperf phase constant)** - nativeperf Phase constant whose value is the kv_evict label, classifying KV-eviction work in trace phases and CPU-work burndown buckets. |
+| o | defined | symbol | evict | **ExpertRingEvictLRU** - Zero-value arm of the model.ExpertRingEvictPolicy enum (internal/model/expert_ring_policy.go) selecting pure-recency victim ranking for the routed-expert paged ring, i.e. polymodel.Pool's own coldestUnpinned choice inherited by the ring. Under this policy the ring allocates no heat state and never pre-evicts victims; polymodel Admit's own LRU choice stands byte-for-byte. |
+| o | defined | symbol | evict | **HotEvictions** - Counter field on ctxmmu.ExpertResidencyStats (internal/ctxmmu/expert_residency.go, json tag hot_evictions) incremented in promote() when a resident hot-set expert is evicted to admit a newcomer into the decode hot-set ring. The same counter is mirrored as HotEvictions on the armCounters of the cmd/hotsetcheck replay report. |
+| o | defined | symbol | evict | **TransientEvicts** - Counter field on ctxmmu.ExpertResidencyStats (internal/ctxmmu/expert_residency.go, json tag transient_evictions) incremented in stageTransient() when the bounded prefill transient ring evicts entries while staging a cold descriptor. The cmd/hotsetcheck replay report renames the same ctxmmu counter to TransientEvictions on its armCounters struct. |
+| o | defined | symbol | evict | **unevicted (Qwen3.5 sequence KV-preflight invariant)** - Prose invariant named in the Qwen3.5 recurrent-sequence KV-preflight error strings (internal/compute/cuda_qwen35_sequence.go, cuda_qwen35_sequence_paged.go, vulkan_qwen35_sequence.go): the request's position prefix must be contiguous and unevicted, enforced by requiring the KV position table to be the identity mapping (each stored absolute position equals its slot index) before the sequence kernel runs. |
 | o | defined | symbol | evict | **EvictColdest (kvmmu)** - EvictColdest (internal/kvmmu/attention.go) drops the coldest-by-attention-EMA UNPINNED KV spans from a Context until at least targetPositions cache positions are freed (or no unpinned live spans remain), excluding pinned (e.g. system) spans from the candidate set entirely. |
 | o | defined | symbol | evict | **ActionEvict (cachemeta)** - ActionEvict (internal/cachemeta/placement.go) is the PlacementAction constant "evict" — the placement planner's verdict to drop a cache entry entirely and recompute it on demand (FromTier -> TierRecompute), the last resort taken after demote/spill/compress_demote are exhausted or refused. |
 | o | defined | symbol | evict | **evictExcessLocked (bounded-FIFO)** - evictExcessLocked (internal/ctxmmu/mmu.go, and the parallel guards in preflight/normgate/secretgate) drops the OLDEST held entries FIFO until the held set is back within its maxHeld bound, releasing each dropped entry's resource (CAS pin / handle) and bumping an evicted counter — a memory bound on a quarantine / negative-cache, called under the owner's lock. |
@@ -2602,6 +2616,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | subsystem | gateway-engine | **modelengine** - The binding that wires the in-kernel model into the kernel as a registered EngineDriver under the id 'inkernel'. |
 | o | defined | subsystem | gateway-engine | **modelroute** - The model-routing policy spine: a version-tagged JSON manifest that classifies a tool call by aspect into a plan for which model(s) serve each aspect. |
 | o | defined | subsystem | gateway-engine | **xenginekv** - The cross-engine zero-copy KV co-residence seam: a RegionBackend that maps an external engine's KV cache and fak's args/results into one shared addressable arena. |
+| o | defined | config | gateway-engine | **short_conv_kernel_size** - The short_conv_kernel_size field of the linear_attn_config object in the HF config.json of GLM-5.3-Flash and Kimi-K3.1-Pro checkpoints: the width of the causal depthwise conv1d applied per q/k/v stream in each KDA linear-attention layer. Go parses it as ShortConvKernelSize (internal/model/config.go, internal/model/glm5next_spine.go) and folds it into model.Config.LinearConvKernelDim; on the GGUF path the same axis arrives as the ssm.conv_kernel header key (internal/ggufload/gguf_config.go), and isExactGLM5NextConfig pins it to 4. |
 | o | defined | config | gateway-engine | **DefaultGatewayBaseURL** - DefaultGatewayBaseURL (internal/frontierswe/env_adapter.go) is the default OpenAI-compatible fak gateway base URL (http://127.0.0.1:8080/v1) the SWE-bench env adapter wires the shim to. |
 | o | defined | config | gateway-engine | **GatewayBaseURL** - GatewayBaseURL (frontierswe EnvAdapterConfig; cmd/fak swebench_fleet gatewayBaseURL) carries the fak gateway base URL a run should point its client at. |
 | o | defined | symbol | gateway-engine | **gatewayBase** - gatewayBase (internal/frontierswe/env_adapter.go) is the resolved gateway base URL variable threaded through env-adapter boundary validation and job YAML. |
@@ -2618,6 +2633,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | gateway-engine | **persistGatewayUsageObservation (ledger exit-writer)** - persistGatewayUsageObservation (cmd/fak/serve.go) appends ONE 'exit' row to the gateway-usage ledger at session teardown, capturing the served session's final usage summary including the cache-TTL and compaction tallies. |
 | o | defined | symbol | gateway-engine | **inKernelTok (serve tokenizer handle)** - inKernelTok is the tokenizer handle resolved for an in-kernel GGUF model serve or guard run and stored on the serve runtime. |
 | o | defined | symbol | gateway-engine | **DecisionRecord (recorded routing decision)** - internal/modelroute (gateway/routing_observability.go): DecisionRecord is the recorded routing DECISION (version, chosen target, overhead) emitted for observability after a route resolves. |
+| o | defined | symbol | gateway-engine | **tokenHiddenQKernel** - Unexported method on *model.Session that selects which matKernel implementation drives the blockStep skeleton on tokenHiddenQ's non-fast path. It returns sessionQ4Kernel for resident int4, sessionQ4KKernel for raw Q4_K, q8Kernel for MoE arches, or sessionQ8Kernel otherwise. Batched resident-quant prefill lanes reuse the same kernel through prefillRowFFN so routed FFN arithmetic cannot drift from the token loop. |
 | o | defined | symbol | guard-gate | **acceptancegate (guard-gate identifier)** - acceptancegate is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts. |
 | o | defined | symbol | guard-gate | **evaluateprocguard (guard-gate identifier)** - evaluateprocguard is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts. |
 | o | defined | symbol | guard-gate | **fakstalebaseguard (guard-gate identifier)** - fakstalebaseguard is the concrete guard-gate identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring guard-gate concepts. |
@@ -2985,6 +3001,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | config | loop | **FAK_LOOP_REGISTRY (loop-registry path env)** - cmd/fak/loop.go: env overriding the path to the loop REGISTRY (the on-disk record of known loops), when set. |
 | o | defined | symbol | loop | **gardenTickLoopID (garden stale-work tick loop id)** - cmd/fak/garden.go gardenTickLoopID = 'garden-stale-work-tick': the fixed loop-id constant identifying the garden stale-work tick loop in the registry. |
 | o | defined | symbol | loop | **SuccessLoops (succeeded-loop signature rows)** - internal/codexlifecycle/taskpath.go SuccessLoops: the list of loop signature rows (SigRow) for loops that reached success on a task path - the record of which loops closed out. |
+| o | defined | symbol | loop | **prefillNeedsTokenLoop** - Pair of gates in internal/model/kv.go deciding whether a session's prompt processing falls back to the sequential per-token loop instead of the batched host prefill lanes (f32 prefillBatched, Q8 prefillBatchedQ, resident-Q4_K prefillBatchedQ4K). The Model-level function returns q8PrefillNeedsTokenLoop(cfg) && !prefillBatchedMoEOK(m); the Session method additionally keeps the token loop when a hidden-state tap, residual hook or target-hidden capture is active, because only blockStep / tokenHidden* invoke those observers. |
 | o | defined | symbol | plan | **blockplan (plan identifier)** - blockplan is the concrete plan identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring plan concepts. |
 | o | defined | symbol | plan | **dispatchplan (plan identifier)** - dispatchplan is the concrete plan identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring plan concepts. |
 | o | defined | symbol | plan | **fakplannermaxattempts (plan identifier)** - fakplannermaxattempts is the concrete plan identifier discovered in the tree and positioned here so the scorecard distinguishes it from neighboring plan concepts. |
@@ -3313,6 +3330,16 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | plan | **validateEventCandidateScope (validate test-event scope checker)** - A validate package function checking that test events' candidate scopes stay inside the validated root before acceptance. |
 | o | defined | symbol | plan | **ValidateStrixComparatorPlan (device-free strix comparator validator)** - A llamacppinterop function performing fail-closed device-free validation of a proposed StrixComparatorManifest's immutable identity, returning a StrixComparatorPlanValidation. |
 | o | defined | symbol | plan | **VulkanHazardPlan (Vulkan batch hazard lowering)** - A compute package deterministic lowering result for one Vulkan batch window, capturing barrier floors and hazard statistics. |
+| o | defined | symbol | plan | **SamplingCandidates** - The raw candidate extraction operation of compute.SamplingCandidateBackend (internal/compute/sampling_candidates.go): given a full F32 logit row and k, the producer inspects the entire row on device and writes the global k+1 maxima with their original token IDs and raw float32 payloads into a caller-owned packet. Implemented by *cudaBackend under the cuda build tag (cuda_sampling_candidates.go), which refuses quantized, capturing, or non-F32 rows and returns available=false without error when capability or state cannot admit the work. No probability or RNG calculation belongs in the producer. |
+| o | defined | symbol | plan | **SamplingCandidateMaxK** - A constant equal to 64 in internal/compute/sampling_candidates.go that bounds host transport for compact sampling candidates, not the vocabulary on the device. It sizes the fixed ID/Raw arrays of SamplingCandidatePacket (MaxK+1 entries) and is the upper bound on k accepted by SamplingCandidateBackend.SamplingCandidates, Session.StepSamplingCandidates, and Certify. |
+| o | defined | symbol | plan | **SamplingCandidatePacket** - A caller-owned scratch struct in internal/compute holding a compact raw logit row: Vocab, Count, and Valid flags plus fixed [65]int IDs and [65]float32 Raw arrays, and a pointer-free nativeWords uint32 staging buffer that keeps the lane free of per-token CGo buffers. The device producer fills it with the global k+1 maxima; Certify(temp, k) validates it, insertion-sorts it, trims it to k, and converts it to the host sampler's compact row. |
+| o | defined | symbol | plan | **SamplingCandidateBackend** - An optional interface in internal/compute declaring the single method SamplingCandidates(row Tensor, k int, retain bool, out *SamplingCandidatePacket) (kept Tensor, available bool, err error). model.Session type-asserts s.Backend to it before attempting compact extraction, and *cudaBackend implements it under the cuda build tag. A false available result is legal only before candidate work is submitted, and failure is never a numeric fallback. |
+| o | defined | symbol | plan | **StepSamplingCandidates** - A method on model.Session (internal/model/hal_sampling_candidates.go) that advances exactly once through the ordinary Step lifecycle while attempting compact candidate extraction. On acceptance the packet holds a compact raw row and it returns compact=true with full=nil; otherwise it falls back to the ordinary full logits readback, and a numeric or capability refusal is never a second model step. The draw remains with the caller. |
+| o | defined | symbol | plan | **deviceSamplingCandidates** - A method on agent.decodeLane (internal/agent/inkernel_sampling_candidates.go) reporting whether this serial decode lane may use compact device-side candidate transport: FAK_CUDA_SAMPLING_COMPACT=1, finite temp>0, topK within [1, SamplingCandidateMaxK] and below the vocab size, no logit bias or frequency/presence penalties, and no engram-attempt or structured-output interference. When true the lane routes its next step through stepSamplingCandidates into Session.StepSamplingCandidates. It changes transport only, never the RNG or sampler implementation. |
+| o | defined | symbol | plan | **attnPlan** - A local TPPlan value built in Model.ForwardTP via NewTPPlan(cfg.NumKVHeads, clampRanks(tp.AttnRanks, cfg.NumKVHeads)) at internal/model/tensor_parallel_forward.go:569: it tiles the KV-head dimension into near-even contiguous shards that drive the column-parallel Q/K/V and row-parallel output projection across attention ranks. It is passed to tpAttnLayer and forwardTPSP for every layer. |
+| o | defined | symbol | plan | **ffnPlan** - A local TPPlan value built in Model.ForwardTP via NewTPPlan(cfg.IntermediateSize, clampRanks(tp.FFNRanks, cfg.IntermediateSize)) at internal/model/tensor_parallel_forward.go:573: it tiles the FFN intermediate dimension into contiguous shards for the column/row-parallel MLP matmul across FFN ranks. Consumed by tpFFNLayer and forwardTPSP. |
+| o | defined | symbol | plan | **spPlan** - A local TPPlan value built in Model.ForwardTP only when sequence parallelism is armed (clampRanks(tp.SequenceRanks, seq) > 1): NewTPPlan(seq, spRanks) tiles the SEQUENCE dimension so the residual stream is sharded along the sequence axis outside the TP cores. forwardTPSP, spSublayer, spSliceBands, and spGatherBands in tensor_parallel_sequence.go consume it. SP here means sequence parallelism, not single-pass. |
+| o | defined | symbol | plan | **failOpenCandidate** - A method on gateway.memberWorker (internal/gateway/replica_ejection.go) reporting whether a worker may be admitted when no holder of a model is admissible: unhealthy on evidence but not draining. FleetMembership.classifyForModelLocked collects such workers into a failOpen list and, when zero admissible holders survive, returns them instead of ErrNoHealthyWorker - a degraded answer beats a guaranteed outage. Draining and never-probed workers are never resurrected. |
 | o | defined | symbol | plan | **PlanTick (gardenbundle)** - gardenbundle.PlanTick(results, dryRun) computes a TickPlan - the decided set of stale-work reap and surface actions for one garden tick from the member results. |
 | o | defined | symbol | plan | **TickPlan (gardenbundle)** - gardenbundle.TickPlan is the value PlanTick returns: the decided reap/surface counts for one garden tick, with Acted() true when the tick will change anything. |
 | o | defined | symbol | plan | **LaneCandidate (dispatchtick)** - dispatchtick.LaneCandidate is one orderable issue in a dispatch lane: its number and the priority signal orderLaneCandidates ranks it by. |
@@ -3576,6 +3603,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | concept | render-materialize | **RenderSlack (sidecar Slack renderer)** - RenderSlack (internal/sidecar/render.go) materializes a sidecar Pane as a Slack Block Kit payload ([]any of blocks), walking the same Sections() sequence its sibling RenderText walks so terminal and Slack carry the identical core-field order by construction. |
 | o | defined | symbol | render-materialize | **RenderLeakReport (toolproc leak report renderer)** - RenderLeakReport formats a parsed toolproc leak report for the fak toolproc CLI surface. |
 | o | defined | symbol | render-materialize | **renderSleepReason (repo-guard sleep refusal text)** - renderSleepReason formats repo-guard foreground-sleep violations into a human-readable refusal block. |
+| o | defined | symbol | render-materialize | **canMaterializeLaneLocked** - Locked-state admission check on *modelengine.NativeScheduler deciding whether a candidate schedLane can materialize into the running set. It combines state-slot reservations (effectiveMaxRunning) with paged-KV block capacity, excludes preempted lanes and the candidate itself from existing reservations, and returns nativeAllocationOK, nativeAllocationLater, or nativeAllocationNever; recompute-preemption mode applies a hard prompt-block cap. |
 | o | defined | symbol | render-materialize | **ConsoleRendererExit (console fault class)** - ConsoleFaultClass constant marking that a TUI render surface exited unexpectedly with no string signature, asserted directly by the embedder that owns the renderer (internal/toolprocgate/consolefault.go). |
 | o | defined | symbol | render-materialize | **ConsoleSurfaceRenderer (console surface value)** - ConsoleSurface constant value "renderer", naming the child-owned surface (as opposed to stdout/stderr/pty) a console fault was observed on (internal/toolprocgate/consolefault.go). |
 | o | defined | symbol | render-materialize | **RenderAdoption (issuefanout adoption report)** - Prints the fanout adoption report for a human: the headline ratio, one line per shipped leaf, the gap list naming unfiled fan-outs, and any orphan markers (internal/issuefanout/adoption.go). |
@@ -3957,6 +3985,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | session-runtime | **StoppedBySession** - StoppedBySession is the ArmMetrics field (json stopped_by_session) carrying the session-control stop reason (BudgetTurns, BudgetContext, Paused, Drained, Terminated) when a wired session.Table ended the arm. |
 | o | defined | symbol | session-runtime | **handleFakSession** - handleFakSession is the HTTP handler behind POST/GET /v1/fak/session/{id}/{verb}, the session DRIVE-state control surface routing pause/resume/priority/pace/subscribe/observe verbs. |
 | o | defined | symbol | session-runtime | **launchHostSessionPlatform** - launchHostSessionPlatform is the S4U watchdog's session-0 resurrection launcher, called by resurrectHostCrashSessions to hand a typed hostresurrect.Request to the interactive broker after a host crash. |
+| o | defined | symbol | session-runtime | **nativeSchedulerEventKind** - Unexported uint8 type in internal/modelengine/nativesched_prefill.go classifying NativeScheduler-local witness events, with constants nativeSchedulerEventPrefill, nativeSchedulerEventTransition and nativeSchedulerEventDecode (iota + 1, zero means none). It is the Kind field of nativeSchedulerEvent, which observeEvent emits at prefill, transition and decode edges so focused tests can prove exact iteration ordering through the observeNativeEvent hook without process-global counters or timing. |
+| o | defined | symbol | session-runtime | **requireGLM5NextSessionUnsupported** - Fail-closed guard method on *model.Session (internal/model/kv.go): when the session's model config has GLM5Next set, it panics naming the entrypoint path because the glm5_next family's executable path is the stepwise engine session GLM5NextSession in glm5next_forward.go, while the batched KV/HAL substrate does not own the KDA/DSA/mHC state yet. Callers cover BatchSession.StepBatch plus the Session Prefill, PrefillContext, PrefillNoLogits, PrefillNoLogitsContext, Step, StepGreedy and StepSamplingCandidates entrypoints, where silently running the generic GQA loop would emit wrong logits instead of an error. |
 | o | defined | symbol | session-runtime | **SeenSessions (v41 step-cohort alias guard)** - Per-batch dedupe map marking *model.Sessions already consumed while validating V41 step-cohort lanes, so an aliased lane referencing the same session is rejected. |
 | o | defined | symbol | session-runtime | **SessionDecorator (modelengine lane-session hook)** - NativeScheduler hook func(*model.Session) applied to every lane session the scheduler mints (fresh or restored) before use, e.g. binding the device backend a P/D decode role resolved. |
 | o | defined | symbol | session-runtime | **SessionMap (continuous-batcher session index)** - ContinuousBatcher field mapping active session IDs to their *Slot so each step can look up the slot that owns a submitted session. |
@@ -4036,6 +4066,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | subsystem | support-maturity | **sotacoverage** - Package sotacoverage (internal/sotacoverage) drives the sota-coverage scorecard (sota_debt) over the prior-art matrix. |
 | o | defined | subsystem | support-maturity | **toolcoverage** - Package toolcoverage (internal/toolcoverage) audits which load-bearing tools modules have sibling tests. |
 | o | defined | symbol | support-maturity | **CorrectnessLaw (vCache cache-safety statement)** - CorrectnessLaw is the vCache action/report field that states the correctness invariant: full uncached prompt execution remains the authoritative path and cache hits are only rebates. |
+| o | defined | symbol | support-maturity | **ErrNVFP4GEMMUnsupported** - Sentinel error declared in internal/compute/nvfp4_native.go reporting that a backend has no native NVFP4 W4A4 matrix multiplication capability. MatMulNVFP4 wraps it when the backend is nil or does not implement NVFP4MatMulBackend, and the CUDA path wraps it for open graph capture, unknown architecture, or unqualified sm/cuBLASLt combinations. Loaders such as modelopt_nvfp4_load wrap it into their load-refusal chain to fail loudly instead of silently widening precision; consumers match the wrapped chain via errors.Is. |
+| o | defined | symbol | support-maturity | **CoverageStatus** - String type in internal/modelroute/coverage.go classifying how an account roster serves one routed model id: CoverageBound (explicit binding), CoverageViaDefault (served by the roster default account), CoverageUnbound (no binding and no default, so the route fails at dispatch). Roster.Cover cross-checks every manifest-routed id against the roster and folds these statuses into Coverage rows plus bound/via-default/unbound tallies. |
 | o | defined | subsystem | support-maturity | **eveparity** - Package eveparity (internal/eveparity) is the CI-runnable witness for issue #2605: it runs a fixture Eve-shaped eval suite once raw and once fak-routed through the real gateway proxy, then Compare folds the two arms into a Witness proving fak never silently downgrades a hard Eve gate failure into a soft pass. |
 | o | defined | config | support-maturity | **MONITOR_NO_FAILURE_COVERAGE** - The closed arm-time refusal token (ReasonMonitorNoFailureCoverage, abi.ReasonCode 1044, internal/toolproc/monitor.go) ArmMonitor cites when a monitor's filter declares no failure-signature class alongside its progress pattern, so a monitor that would stay silent-on-failure by construction is refused instead of armed. |
 | o | defined | symbol | support-maturity | **ParityVerdict (eveparity witness)** - The eveparity.Witness.ParityVerdict string field ('pass' | 'divergent') Compare sets: pass only when every case agrees on pass/fail with a byte-identical reason and no hard-gate failure was downgraded to a soft score; any disagreement or downgrade flips it to divergent. |
@@ -4352,41 +4384,41 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 32 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 4216/7754 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 4072 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 4273/7853 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 4104 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
 | separation | `reference_resolves` | 100 | 0 | every distinct_from reference resolves to a real concept |
-| separation | `pair_separated` | 100 | 0 | all 303 confusable name-pair(s) are separated |
+| separation | `pair_separated` | 100 | 0 | all 309 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 5529 lookup name(s) resolves - 92 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 5564 lookup name(s) resolves - 92 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| plan | 637 | 647 | 10 |
-| evict | 93 | 97 | 4 |
-| cache | 438 | 441 | 3 |
-| policy-capability | 283 | 286 | 3 |
-| session-runtime | 384 | 387 | 3 |
-| support-maturity | 142 | 145 | 3 |
-| attention | 238 | 240 | 2 |
-| gateway-engine | 324 | 325 | 1 |
-| loop | 118 | 119 | 1 |
-| render-materialize | 253 | 254 | 1 |
+| attention | 241 | 241 | 0 |
+| cache | 441 | 441 | 0 |
 | context-ctx | 335 | 335 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | decision | 68 | 68 | 0 |
 | dev-tier | 0 | 0 | 0 |
+| evict | 97 | 97 | 0 |
+| gateway-engine | 326 | 326 | 0 |
 | guard-gate | 579 | 579 | 0 |
-| layout | 55 | 55 | 0 |
+| layout | 56 | 56 | 0 |
+| loop | 119 | 119 | 0 |
+| plan | 647 | 647 | 0 |
+| policy-capability | 286 | 286 | 0 |
 | pool | 112 | 112 | 0 |
+| render-materialize | 254 | 254 | 0 |
 | score-debt | 141 | 141 | 0 |
+| session-runtime | 387 | 387 | 0 |
+| support-maturity | 145 | 145 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |
 | witness-proof | 200 | 200 | 0 |
