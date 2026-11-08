@@ -2540,3 +2540,18 @@ registration instead of ad-hoc lists. Witnessed by
 (software evidence only; no hardware or whole-model claim). The full Apache
 License, Version 2.0 reproduced in the "TensorFold benchmark evidence" section
 above applies to this adaptation.
+
+## llama.cpp CUDA MoE layout linearization
+
+`internal/compute/moe_linear_layout.go` adapts the linearized MoE expert weight layout of
+ggml-org/llama.cpp PR #31047 (`ggml/src/ggml-cuda/mmf.cu` and `ggml/src/ggml-cuda/mmf.cuh`), at
+llama.cpp revision `69ee2ecc0150ba7d1204a7f7393dfd651569db8c`:
+https://github.com/ggml-org/llama.cpp/tree/69ee2ecc0150ba7d1204a7f7393dfd651569db8c/ggml/src/ggml-cuda
+
+Changed for Fak: host-side Go layout contract only — resident expert rows compacted into one
+contiguous pool behind a per-expert byte-offset table, a launch planner that consumes those
+offsets instead of runtime gathers (counting an unserved request as a gather step rather than
+fabricating an address), and a strided-reference oracle that pins tile identity on fixed
+fixtures. No CUDA kernel, no copied upstream code block, and no performance claim are included.
+The upstream license is the MIT License reproduced under "llama.cpp Q4_K MMQ prompt-panel GEMM"
+above (Copyright (c) 2023-2026 The ggml authors).
