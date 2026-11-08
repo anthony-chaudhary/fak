@@ -1676,22 +1676,17 @@ extern "C" int fcuda_qwen35_gdn_decode_lanes_f32(
   return 0;
 }
 
-// Qualification-only sequence routing reuses the ordinary Q8 entry's admission,
-// scratch ownership and pre-enqueue-only fallback. Keep separate from its opt-in:
-// sequence state/logit parity must be measured independently of isolated MatMul.
+// Sequence-spine Q8 prefill delegates to the ordinary Q8 entry so eligible P>=128 panels take
+// the same rowtile panel lane every other prefill caller gets. oss-port-cuda-perf-gdn-q8-dequant-retire
+// retired the dequant -> fp16 split + 3x cuBLAS arm inside fcuda_q8_matmul_f32, but this seam kept
+// serving it directly, leaving the landed routing uninvoked on the live serve path. The entry keeps
+// q8_dequant_sgemm as its argument-bounds last resort and carries the mmq qualification opt-in
+// (FAK_CUDA_Q8_PREFILL=mmq under FAK_CUDA_Q8_MMQ_PREFILL builds). Any launch/runtime error is
+// propagated to the sequence's existing drain.
 static int qwen35_gdn_q8_prefill(
     const void *codes, const float *scales, const float *x, float *y,
     int out, int in, int tokens, int block) {
-#ifdef FAK_CUDA_Q8_MMQ_PREFILL
-  const char *sequence_arm = getenv("FAK_CUDA_Q8_SEQUENCE_PREFILL");
-  if (sequence_arm && strcmp(sequence_arm, "mmq") == 0) {
-    // Do not retry here: the ordinary entry alone handles pre-enqueue refusal.
-    // Any launch/runtime error is propagated to the sequence's existing drain.
-    return fcuda_q8_matmul_f32((const int8_t *)codes, scales, x, y,
-                                out, in, tokens, block);
-  }
-#endif
-  return q8_dequant_sgemm(codes, scales, x, y, out, in, tokens, block);
+  return fcuda_q8_matmul_f32((const int8_t *)codes, scales, x, y, out, in, tokens, block);
 }
 
 /* Sequence spine adapted from llama.cpp gated_delta_net.cu at
