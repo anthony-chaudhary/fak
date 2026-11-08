@@ -45,6 +45,7 @@ func TestCUDAQwen35PagedIndependentDecodeBatch(t *testing.T) {
 	selectNames("qwen35SequenceFailure", "validateQwen35SequenceGeometry", "qwen35SequenceSameShape", "qwen35SequenceMatrixBytes", "*cudaBackend.validateQwen35SequenceTensor", "*cudaBackend.validateQwen35SequenceRequestLocked", "*cudaBackend.validateQwen35SequenceStoreRequestLocked", "*cudaBackend.Qwen35SequencePrefill", "*cudaBackend.qwen35SequenceReleaseSinceLocked", "*cudaBackend.qwen35SequencePoisonStates", "*cudaBackend.Qwen35SequenceRawHiddenPath")
 	selectNames("*cudaBackend.Qwen35IndependentDecodeBatchPath", "*cudaBackend.cudaQwen35LaneRowView", "*cudaBackend.Qwen35IndependentDecodeBatch", "qwen35DecodeBatchKVChunk")
 	selectNames("*BatchSession.StepBatch", "*BatchSession.stepBatchSerial", "qwen35HybridQ4KBatchStep", "*BatchSession.qwen35HybridQ4KBatchOK", "*BatchSession.stepBatchQwen35HybridQ4K", "qwen35IndependentDecodeBatchBackend", "qwen35IndependentDecodeBatchFor", "failQwen35IndependentDecodeBatchSessions", "stepBatchQwen35HybridQ4KIndependent")
+	selectNames("batchDiagEnabled", "qwen35BatchDiagEnabled")
 	preamble := strings.NewReplacer(
 		"\"errors\";", "\"errors\";\"reflect\";",
 		"type Backend interface{}", "type Backend interface{Read(Tensor)[]float32;Free(Tensor)}",
