@@ -13,6 +13,105 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
 
+// fak-test:runtime fast est=1ms
+func TestNativeSchedulerLaneStepTokenCost(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name                  string
+		state                 schedLaneState
+		prompt, cursor, chunk int
+		materialized          bool
+		want                  int
+	}{
+		{"decode", schedLaneDecode, 8, 0, 4, true, 1},
+		{"prefill chunk", schedLanePrefilling, 8, 2, 4, true, 4},
+		{"prefill tail", schedLanePrefilling, 8, 6, 4, true, 2},
+		{"unchunked remainder", schedLanePrefilling, 8, 3, 0, true, 5},
+		{"exhausted prompt", schedLanePrefilling, 8, 8, 4, true, 1},
+		{"empty prompt", schedLanePrefilling, 0, 0, 0, false, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ln := &schedLane{state: tc.state, prompt: make([]int, tc.prompt), promptCursor: tc.cursor, prefillChunkTokens: tc.chunk}
+			if tc.materialized {
+				ln.sess = &model.Session{}
+			}
+			if got := laneStepTokens(ln); got != tc.want {
+				t.Fatalf("laneStepTokens = %d, want %d", got, tc.want)
+			}
+		})
+	}
+	// No model or run loop is required to inspect the setter's budget contract.
+	s := &NativeScheduler{}
+	for _, disabled := range []int{0, -1} {
+		s.SetMaxTokensPerStep(8)
+		s.SetMaxTokensPerStep(disabled)
+		s.mu.Lock()
+		got := s.maxTokensPerStep
+		s.mu.Unlock()
+		if got > 0 {
+			t.Fatalf("SetMaxTokensPerStep(%d) left budget enabled at %d", disabled, got)
+		}
+	}
+}
+
+// fak-test:runtime fast est=1ms
+func TestNativeSchedulerPromotionSkipNotBreakLiveness(t *testing.T) {
+	t.Parallel()
+	lane := func(seq int64, chunk int) *schedLane {
+		ln := &schedLane{ctx: context.Background(), state: schedLaneDecode, seqNo: seq, sess: &model.Session{}}
+		if chunk > 0 {
+			ln.state = schedLanePrefilling
+			ln.prompt = make([]int, chunk)
+			ln.prefillChunkTokens = chunk
+		}
+		return ln
+	}
+	ids := func(lanes []*schedLane) []int64 {
+		out := make([]int64, len(lanes))
+		for i, ln := range lanes {
+			out[i] = ln.seqNo
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name                 string
+		budget, maxRun       int
+		running, waiting     []*schedLane
+		wantRun, wantWaiting []int64
+	}{
+		{
+			name: "skip oversized and charge promoted cost", budget: 8,
+			running: []*schedLane{lane(1, 0), lane(2, 0), lane(3, 0)},
+			waiting: []*schedLane{lane(4, 6), lane(5, 4), lane(6, 2)},
+			wantRun: []int64{1, 2, 3, 5}, wantWaiting: []int64{4, 6},
+		},
+		{
+			name: "empty set admits first oversized only", budget: 2,
+			waiting: []*schedLane{lane(1, 6), lane(2, 0)},
+			wantRun: []int64{1}, wantWaiting: []int64{2},
+		},
+		{
+			name: "disabled budget retains lane cap and FIFO", budget: 0, maxRun: 4,
+			running: []*schedLane{lane(1, 0), lane(2, 0), lane(3, 0)},
+			waiting: []*schedLane{lane(4, 6), lane(5, 4)},
+			wantRun: []int64{1, 2, 3, 4}, wantWaiting: []int64{5},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Inert lanes isolate promotion accounting: no model, KV capacity
+			// policy, device allocation, or scheduler goroutine is involved.
+			s := &NativeScheduler{maxTokensPerStep: tc.budget, lanes: tc.running, waiting: tc.waiting}
+			s.mu.Lock()
+			s.promoteWaitingLocked(tc.maxRun)
+			running, waiting := ids(s.lanes), ids(s.waiting)
+			s.mu.Unlock()
+			if !reflect.DeepEqual(running, tc.wantRun) || !reflect.DeepEqual(waiting, tc.wantWaiting) {
+				t.Fatalf("running=%v waiting=%v, want running=%v waiting=%v", running, waiting, tc.wantRun, tc.wantWaiting)
+			}
+		})
+	}
+}
+
 // TestNativeSchedulerWaitingQueueGatesAndPreservesOutput is the issue-#36 acceptance-#2
 // witness: the continuous-batching scheduler carries an explicit WAITING/RUNNING queue
 // whose running set is recomputed each iteration. Driving the SAME admissions twice —
