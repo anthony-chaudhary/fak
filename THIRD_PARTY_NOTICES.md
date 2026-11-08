@@ -2690,3 +2690,14 @@ SPDX-License-Identifier: Apache-2.0.
 Changed for Fak: a Go host geometric selector bounded to M<=32, N<=64 and positive K aligned to1024 and representable by uint32. Unsupported positive shapes use a general-path decision. No kernel is copied or invoked; numeric kernel parity and device qualification are not established.
 The full Apache License, Version 2.0 reproduced in the "TensorFold benchmark
 evidence" section above applies to this adaptation.
+
+## vLLM sequence and pipeline boundary contract
+
+`internal/model/sp_pp_boundary.go` adapts the contract described at:
+https://github.com/vllm-project/vllm/blob/213e64562ba6e82ffce95774fa37fd294f3bc8ee/vllm/models/minimax_m3/nvidia/model.py
+
+Copyright contributors to the vLLM project.
+SPDX-License-Identifier: Apache-2.0.
+Changed for Fak: an independently written Go host oracle for contiguous padded token shards, gathering and trimming to the true token count, and re-sharding at receiving stages. Geometry checks prevent representability overflow, not practical out-of-memory failures. No distributed transport or hardware execution is implemented.
+The full Apache License, Version 2.0 reproduced in the "TensorFold benchmark
+evidence" section above applies to this adaptation.
