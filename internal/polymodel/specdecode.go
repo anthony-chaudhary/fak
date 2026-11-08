@@ -93,6 +93,16 @@ type SpecDecodeConfig struct {
 	// id space. When set, SpecDecode automatically wraps draft via VocabMap.BridgeDrafter
 	// so heterogeneous-vocabulary drafting runs seamlessly without manual wrapping (#4208).
 	VocabMap *VocabMap
+	// Throttle, when non-nil, adapts the per-round draft length from observed acceptance —
+	// the automatic-selection control for "how far should the next round draft". After each
+	// round that proposed at least one token, the loop feeds the round's (accepted,
+	// proposed) counts to Throttle.Record; the NEXT round's draft is then capped at the
+	// throttle's verdict Length (combined with MaxDraft by min), shrinking toward the floor
+	// and stopping drafting entirely (plain single-token decode) when acceptance stays poor,
+	// growing back when it recovers. nil keeps the static MaxDraft cap (current behavior).
+	// The stream stays token-identical either way: capping how far a round drafts changes
+	// only Rounds/DraftedTokens, never Output.
+	Throttle *DraftLengthThrottle
 }
 
 // SpecDecodeRun is the outcome of a SpecDecode run: the emitted tokens plus the accounting
@@ -177,8 +187,18 @@ func SpecDecode(prompt []int, draft Drafter, verify Verifier, cfg SpecDecodeConf
 		if draft != nil {
 			d = draft(committed)
 		}
-		if cfg.MaxDraft > 0 && len(d) > cfg.MaxDraft {
-			d = d[:cfg.MaxDraft]
+		// Per-round draft cap: the static MaxDraft AND, when an adaptive throttle is bound,
+		// its verdict Length from the previous round (0 = drafting stopped → plain decode).
+		draftCap := cfg.MaxDraft
+		if th := cfg.Throttle; th != nil {
+			if l := th.Length(); draftCap <= 0 || l < draftCap {
+				draftCap = l
+			}
+		}
+		if draftCap == 0 {
+			d = nil // drafting off this round: no proposal to verify
+		} else if draftCap > 0 && len(d) > draftCap {
+			d = d[:draftCap]
 		}
 
 		targetArgmax := verify(committed, d)
@@ -191,6 +211,12 @@ func SpecDecode(prompt []int, draft Drafter, verify Verifier, cfg SpecDecodeConf
 		run.DraftedTokens += len(d)
 		run.AcceptedDrafts += res.Accepted
 		profile.record(len(d), res.Accepted)
+		// Feed the adaptive throttle this draft round's outcome so its next verdict caps the
+		// following round. Only rounds that actually proposed carry acceptance information; a
+		// no-draft round is not folded in (Record would fail closed on zero proposals).
+		if cfg.Throttle != nil && len(d) > 0 {
+			cfg.Throttle.Record(res.Accepted, len(d))
+		}
 		if res.EvictKV > 0 {
 			run.EvictKV += res.EvictKV
 			if cfg.Rollback != nil {
