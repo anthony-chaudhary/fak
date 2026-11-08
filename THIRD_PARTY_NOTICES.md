@@ -2668,3 +2668,14 @@ capacity limits are not modeled. This does not register a serving forward
 path, copy CUDA kernels, or establish hardware or served-token parity.
 The full Apache License, Version 2.0 reproduced in the "TensorFold benchmark
 evidence" section above applies to this adaptation.
+
+## SGLang expert residency sizing
+
+`internal/modelloadplan/expert_residency_autosize.go` adapts the contract described at:
+https://github.com/sgl-project/sglang/blob/8a0edcf799d06bdee8832356d382495e7fb50f22/docs/docs/advanced_features/paged_experts.mdx
+
+Copyright contributors to the SGLang project.
+SPDX-License-Identifier: Apache-2.0.
+Changed for Fak: a pure Go slot-budget policy over caller-established free and reserved bytes, equal per-layer costs, minimum router capacity and expert-count cap. It does not implement observed-load ranking, loader integration, runtime memory reservation or upstream KV fallback.
+The full Apache License, Version 2.0 reproduced in the "TensorFold benchmark
+evidence" section above applies to this adaptation.
