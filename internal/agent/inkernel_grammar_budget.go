@@ -217,11 +217,13 @@ func (b *nativeGrammarBudgetProbe) allowedAt(prefix []int) (allowed []int, eosOK
 
 // nativeGrammarBudgetKey encodes a (prefix, limit) memo key.
 func nativeGrammarBudgetKey(prefix []int, limit int) string {
-	buf := make([]byte, 4*len(prefix)+4)
+	buf := make([]byte, 4*len(prefix)+8)
 	for i, id := range prefix {
 		binary.LittleEndian.PutUint32(buf[4*i:], uint32(id))
 	}
-	binary.LittleEndian.PutUint32(buf[4*len(prefix):], uint32(limit))
+	// Limits are native ints, not vocabulary IDs. Retain all their bits on
+	// 64-bit hosts so budgets separated by 2^32 never reuse a memo result.
+	binary.LittleEndian.PutUint64(buf[4*len(prefix):], uint64(int64(limit)))
 	return string(buf)
 }
 
