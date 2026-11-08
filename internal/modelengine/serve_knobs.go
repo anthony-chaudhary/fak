@@ -14,6 +14,10 @@ import (
 // (fak-private#3630). Every knob is read once when the Engine builds its native
 // scheduler (the `fak serve` in-kernel path) and is OFF unless its env var holds an
 // explicit value, so an unset environment keeps today's scheduler byte-for-byte.
+// The one exception is the per-step token budget: when its env var is unset it is
+// default-armed from the model's declared context window (nativeTokenBudgetDefault);
+// an explicit value still wins verbatim, and an explicit 0 keeps the unlimited
+// behavior.
 const (
 	envNativeMaxTokensPerStep = "FAK_NATIVE_MAX_TOKENS_PER_STEP"
 	envNativeDeterministic    = "FAK_NATIVE_DETERMINISTIC"
@@ -62,14 +66,64 @@ func kvFreeBytesFromBackend(b compute.Backend) (uint64, bool) {
 	return uint64(free), true
 }
 
+// nativeTokenBudgetContextFraction is the denominator the default per-step token
+// budget divides the model's declared context window by. One quarter lets even a
+// full-window prompt prefill in four steps while keeping any realistic decode step
+// (one token per running lane) far inside the budget; the budget is admission-shaped
+// (it defers waiting-lane promotion, never preempts running lanes), so the fraction
+// errs large on purpose.
+const nativeTokenBudgetContextFraction = 4
+
+// nativeModelContextTokens is the context window the scheduler's model declares
+// (MaxPositionEmbeddings). 0 when the model is absent or declares no window —
+// e.g. the synthetic checkpoint — which is "nothing to derive from".
+func nativeModelContextTokens(sched *NativeScheduler) int {
+	if sched == nil || sched.m == nil {
+		return 0
+	}
+	return sched.m.Cfg.MaxPositionEmbeddings
+}
+
+// nativeTokenBudgetDefault derives the per-step token budget armed on the serve
+// path when FAK_NATIVE_MAX_TOKENS_PER_STEP is unset: one quarter of the model's
+// declared context window, minimum 1. A model that declares no window yields 0,
+// which keeps the scheduler's unlimited promotion byte-for-byte (the historical
+// default-off behavior). The derivation is deliberately conservative: the budget
+// only defers waiting-lane promotion that does not fit the remaining step budget
+// (skip-not-break) and an empty running set always admits its first candidate, so
+// the armed default cannot stall a step.
+func nativeTokenBudgetDefault(contextTokens int) int {
+	if contextTokens <= 0 {
+		return 0
+	}
+	if b := contextTokens / nativeTokenBudgetContextFraction; b > 0 {
+		return b
+	}
+	return 1
+}
+
 // applyNativeServeKnobs arms the env-selected scheduler ports on a freshly built
-// scheduler. Each setter runs only for an explicit opt-in value.
+// scheduler. Each setter runs only for an explicit opt-in value, except the
+// per-step token budget, which is default-armed from the model's declared context
+// window when its env var is unset (explicit values win verbatim, and an explicit
+// 0 keeps the unlimited behavior).
 func applyNativeServeKnobs(sched *NativeScheduler, blockTokens int) {
 	if sched == nil {
 		return
 	}
-	if n := nativeEnvPositiveInt(envNativeMaxTokensPerStep); n > 0 {
-		sched.SetMaxTokensPerStep(n)
+	// Per-step token budget (fak cb8cb8d405, landed default-off). An explicit
+	// FAK_NATIVE_MAX_TOKENS_PER_STEP wins verbatim; an explicit 0 — or any value
+	// that does not parse to a positive integer — keeps today's unlimited
+	// behavior. Unset, the budget is default-armed from the model's declared
+	// context window so a single step can never prefill the whole window while
+	// other lanes wait; a model that declares no window keeps the unlimited
+	// promotion byte-for-byte.
+	if raw := strings.TrimSpace(os.Getenv(envNativeMaxTokensPerStep)); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			sched.SetMaxTokensPerStep(n)
+		}
+	} else if b := nativeTokenBudgetDefault(nativeModelContextTokens(sched)); b > 0 {
+		sched.SetMaxTokensPerStep(b)
 	}
 	if nativeEnvOn(envNativeDeterministic) {
 		sched.SetDeterministicMode(true)

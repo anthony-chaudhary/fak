@@ -30,6 +30,63 @@ func TestServeKnobMaxTokensPerStepReachesScheduler(t *testing.T) {
 	}
 }
 
+// TestServeKnobTokenBudgetDefaultArmedWhenEnvUnset pins the default-armed
+// per-step token budget on the serve path (Engine.nativeScheduler): env unset
+// arms a positive budget derived from the model's declared context window, an
+// explicit env value wins verbatim, an explicit 0 keeps the unlimited behavior,
+// and a model that declares no window keeps the historical unlimited promotion
+// (which is why TestServeKnobMaxTokensPerStepReachesScheduler's default-0
+// assertion stays true). The exact fraction is pinned at the derivation helper,
+// not at the serve-path assertion, so the fraction can move without rewriting
+// the behavioral contract.
+func TestServeKnobTokenBudgetDefaultArmedWhenEnvUnset(t *testing.T) {
+	clearServeKnobEnv(t)
+
+	withDeclaredCtx := func() *Engine {
+		e := &Engine{cfg: SyntheticConfig()}
+		e.cfg.MaxPositionEmbeddings = 4096
+		return e
+	}
+
+	// (1) Env unset + a declared context window: the serve path arms a positive
+	// budget derived from the model context, bounded by the window.
+	if got := withDeclaredCtx().nativeScheduler().maxTokensPerStep; got <= 0 || got > 4096 {
+		t.Fatalf("env unset, declared context 4096: maxTokensPerStep = %d, want a positive budget derived from the context (0 < b <= 4096)", got)
+	}
+
+	// (2) An explicit env value wins verbatim over the derived default.
+	t.Setenv(envNativeMaxTokensPerStep, "77")
+	if got := withDeclaredCtx().nativeScheduler().maxTokensPerStep; got != 77 {
+		t.Fatalf("%s=77 with a declared context: maxTokensPerStep = %d, want 77 verbatim", envNativeMaxTokensPerStep, got)
+	}
+
+	// (3) An explicit 0 keeps today's unlimited behavior even with a declared
+	// context: the default derivation must not override an explicit value.
+	t.Setenv(envNativeMaxTokensPerStep, "0")
+	if got := withDeclaredCtx().nativeScheduler().maxTokensPerStep; got != 0 {
+		t.Fatalf("%s=0 with a declared context: maxTokensPerStep = %d, want 0 (unlimited)", envNativeMaxTokensPerStep, got)
+	}
+
+	// No declared window (the synthetic default): nothing to derive from, the
+	// scheduler keeps today's unlimited promotion byte-for-byte.
+	t.Setenv(envNativeMaxTokensPerStep, "")
+	if got := New().nativeScheduler().maxTokensPerStep; got != 0 {
+		t.Fatalf("env unset, no declared window: maxTokensPerStep = %d, want 0 (unlimited)", got)
+	}
+
+	// The derivation contract: one quarter of the declared window, minimum 1;
+	// 0 for a model that declares no (positive) window.
+	for _, tc := range []struct{ ctx, want int }{
+		{ctx: 0, want: 0}, {ctx: -5, want: 0},
+		{ctx: 3, want: 1}, {ctx: 4, want: 1},
+		{ctx: 4096, want: 1024}, {ctx: 262144, want: 65536},
+	} {
+		if got := nativeTokenBudgetDefault(tc.ctx); got != tc.want {
+			t.Fatalf("nativeTokenBudgetDefault(%d) = %d, want %d", tc.ctx, got, tc.want)
+		}
+	}
+}
+
 func TestServeKnobDeterministicModeReachesScheduler(t *testing.T) {
 	clearServeKnobEnv(t)
 	if New().nativeScheduler().DeterministicMode() {

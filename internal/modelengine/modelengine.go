@@ -362,7 +362,9 @@ func (e *Engine) nativeScheduler() *NativeScheduler {
 		if p.MaxBlocks > 0 {
 			sched.SetKVPreemptionPolicy(p)
 		}
-		// Env-selected ports (fak-private#3630); all off unless explicitly set.
+		// Env-selected ports (fak-private#3630); off unless explicitly set, except
+		// the per-step token budget, which is default-armed from the model's
+		// declared context window when FAK_NATIVE_MAX_TOKENS_PER_STEP is unset.
 		applyNativeServeKnobs(sched, p.BlockTokens)
 		if e.coupler != nil {
 			sched.SetWorkerCoupler(e.coupler)
