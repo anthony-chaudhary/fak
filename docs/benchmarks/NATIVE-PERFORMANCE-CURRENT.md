@@ -61,8 +61,9 @@ This is the semantic lever view, not a dispatch queue. Every dependency-ready gr
 
 | Wave | Envelope | Ready arms | Parallel with | Within-wave rule |
 |---|---|---|---|---|
-| `metal` | `qwen38-27b-q4km-m3pro-p32-t64` | `metal.command-buffer-amortization`, `metal.paged-kv`, `metal.chunked-prefill` | `cuda` | Every arm shares one matched Metal envelope and must retain one-lever attribution without device contention. |
-| `cuda` | `qwen38-27b-q4k-a100-p1-decode` | `cuda.q8_1-activation-quant` | `metal` | The Q8_1 candidate explicitly toggles the conflicting scalar-f32 baseline OFF inside one matched A/B. |
+| `metal` | `qwen38-27b-q4km-m3pro-p32-t64` | `metal.command-buffer-amortization`, `metal.paged-kv`, `metal.chunked-prefill` | `cuda`, `rtx5090` | Every arm shares one matched Metal envelope and must retain one-lever attribution without device contention. |
+| `cuda` | `qwen38-27b-q4k-a100-p1-decode` | `cuda.q8_1-activation-quant` | `metal`, `rtx5090` | The Q8_1 candidate explicitly toggles the conflicting scalar-f32 baseline OFF inside one matched A/B. |
+| `rtx5090` | `qwen38-27b-q4km-rtx5090-p1-decode` | `rtx5090.q8_1-activation-quant` | `metal`, `cuda` | The Q8_1 candidate explicitly toggles the conflicting scalar-f32 baseline OFF inside one matched A/B on the RTX 5090. |
 
 | Collision | Kind | Members | Why |
 |---|---|---|---|
