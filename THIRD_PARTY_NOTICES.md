@@ -2647,3 +2647,24 @@ and response-channel boundaries. Auto mode, raw text parsing and sampler
 integration are outside this bounded contract. The full Apache License,
 Version 2.0 reproduced in the "TensorFold benchmark evidence" section above
 applies to this adaptation.
+
+## SGLang Kimi-K3.1 sparse-MLA bring-up contract
+
+`internal/model/kimik31_trio.go` adapts the sparse-MLA/indexer dependency
+and paged top-k mapping described by SGLang PR #48415, merged at
+`61a3c7f2a45f6cfd5fdcec90fd5019d2334c2f0e`:
+https://github.com/sgl-project/sglang/pull/48415
+https://github.com/sgl-project/sglang/blob/61a3c7f2a45f6cfd5fdcec90fd5019d2334c2f0e/python/sglang/kernels/ops/attention/dsv4/topk.py
+
+Copyright contributors to the SGLang project.
+SPDX-License-Identifier: Apache-2.0.
+Changed for Fak: an independently written Go host contract requiring the
+canonical K3.1 architecture, sparse MLA and a top-k indexer; unavailable
+capabilities fail closed without a dense-MLA fallback. A fixed-page-table
+oracle maps selected causal token indices to physical page offsets,
+pads missing selections with -1, rejects malformed geometry and visible
+NaNs, and reuses Fak's deterministic DSA selection. Device row/top-k
+capacity limits are not modeled. This does not register a serving forward
+path, copy CUDA kernels, or establish hardware or served-token parity.
+The full Apache License, Version 2.0 reproduced in the "TensorFold benchmark
+evidence" section above applies to this adaptation.
