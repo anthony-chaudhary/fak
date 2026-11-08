@@ -176,6 +176,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunCompanionStrix(stdout, stderr, argv[1:])
 	case "kernel-oracle":
 		return runKernelOracle(stdout, stderr, argv[1:])
+	case "layoutcontract":
+		return runLayoutContract(stdout, stderr, argv[1:])
 	case "inference-topology":
 		return devcmd.RunInferenceTopology(stdout, stderr, argv[1:])
 	case "regime":
@@ -286,6 +288,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  factory-migrate [status|list|next|audit-boundary|scaffold] [flags] audit and track autonomous dev factory Python to Go migration")
 	fmt.Fprintln(w, "  bench-subagent-fanout [flags]          apples-to-apples subagent fanout benchmark harness (SGLang/vLLM/FAK)")
 	fmt.Fprintln(w, "  kernel-oracle <shapes|rank> [flags]    rank fak Vulkan kernels against ggml test-backend-ops per op and shape")
+	fmt.Fprintln(w, "  layoutcontract <families|show|check|orphans> [flags] query the tensor-layout contract registry (read-only)")
 	fmt.Fprintln(w, "  inference-topology <validate|analyze|inventory|render> [flags] model per-rank decode resource and collective constraints")
 	fmt.Fprintln(w, "  regime [PATH...] [--latest N] [--fail-on R] classify decode-step overhead regime (launch/compute/mem/unknown) from receipt signals")
 	fmt.Fprintln(w, "  hostshare [--receipts DIR] [--latest N]   read host_share from receipts/profile notes; gate launch-bound decode at --threshold")
