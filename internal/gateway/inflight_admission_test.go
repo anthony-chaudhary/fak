@@ -18,6 +18,49 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ratelimit"
 )
 
+// fak-test:runtime fast est=1ms lane=default
+func TestInflightAdmissionPolicyOwnership(t *testing.T) {
+	t.Parallel()
+	t.Run("deleting caller cap cannot bypass live lease", func(t *testing.T) {
+		limits := map[string]int{"k": 1}
+		g := NewInflightGate(InflightPolicy{PerKey: limits})
+		first, err := g.Acquire("p", "k")
+		if err != nil || first == nil {
+			t.Fatalf("first acquire: lease=%v error=%v", first, err)
+		}
+		defer first.Release()
+		delete(limits, "k")
+		denied, err := g.Acquire("p", "k")
+		if denied != nil || !errors.Is(err, ErrInflightKey) || !errors.Is(err, ErrInflight) {
+			t.Fatalf("caller mutation bypassed cap: lease=%v error=%v", denied, err)
+		}
+		if got := g.Snapshot(); got.Admitted != 1 || got.RejectedKey != 1 || got.InFlight != 1 {
+			t.Fatalf("refusal changed live accounting: %+v", got)
+		}
+		first.Release()
+		next, err := g.Acquire("p", "k")
+		if err != nil || next == nil {
+			t.Fatalf("release did not restore capacity: lease=%v error=%v", next, err)
+		}
+		next.Release()
+	})
+	t.Run("adding caller cap cannot arm inert gate", func(t *testing.T) {
+		limits := map[string]int{}
+		g := NewInflightGate(InflightPolicy{PerKey: limits})
+		limits["k"] = 1
+		for i := 0; i < 2; i++ {
+			lease, err := g.Acquire("p", "k")
+			if err != nil || lease != nil {
+				lease.Release()
+				t.Fatalf("caller mutation armed inert gate: lease=%v error=%v", lease, err)
+			}
+		}
+		if got := g.Snapshot(); got != (InflightSnapshot{}) {
+			t.Fatalf("inert gate retained accounting: %+v", got)
+		}
+	})
+}
+
 func TestInflightAdmissionLeasesRefusals(t *testing.T) {
 	t.Run("caps", func(t *testing.T) {
 		g := NewInflightGate(InflightPolicy{MaxInflight: 2})

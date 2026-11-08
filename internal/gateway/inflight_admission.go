@@ -129,8 +129,17 @@ type inflightPrincipalEntry struct {
 	gate *TokenRateGate
 }
 
-// NewInflightGate builds a gate under the given policy.
+// NewInflightGate builds a gate under an owned snapshot of the given policy.
+// Callers may reuse or change PerKey after construction, but must not mutate it
+// concurrently with construction. Reconfiguration requires a new gate.
 func NewInflightGate(p InflightPolicy) *InflightGate {
+	if p.PerKey != nil {
+		limits := make(map[string]int, len(p.PerKey))
+		for key, limit := range p.PerKey {
+			limits[key] = limit
+		}
+		p.PerKey = limits
+	}
 	return &InflightGate{
 		policy:     p,
 		slots:      p.slots(),
