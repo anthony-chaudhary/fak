@@ -12,6 +12,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	_ "github.com/anthony-chaudhary/fak/internal/blob" // register the Ref resolver (CAS backend)
 	"github.com/anthony-chaudhary/fak/internal/kernel"
+	"github.com/anthony-chaudhary/fak/internal/kvbudget"
 	"github.com/anthony-chaudhary/fak/internal/model"
 
 	"github.com/anthony-chaudhary/fak/internal/refutil"
@@ -313,6 +314,53 @@ func TestEngineResultsIdentifyOwningModel(t *testing.T) {
 			admit := check("Admit", res)
 			if !equalInts(admit.Tokens, streamed) || !equalInts(complete.Tokens, streamed) {
 				t.Errorf("generated tokens differ: Complete=%v Admit=%v stream=%v", complete.Tokens, admit.Tokens, streamed)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=1ms
+func TestNativeKVMaxBlocksProbePrecedenceMatrix(t *testing.T) {
+	t.Setenv("FAK_NATIVE_KV_BLOCK_TOKENS", "")
+	t.Setenv("FAK_NATIVE_KV_PREEMPT_MODE", "")
+	t.Setenv("FAK_NATIVE_KV_VICTIM_RULE", "")
+	const freeBytes, bytesPerToken = uint64(10 << 20), uint64(1024)
+	derived, err := kvbudget.DeriveMaxBlocks(freeBytes, 0, 0.9, 16*bytesPerToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, env             string
+		probeOK, nilProbe     bool
+		wantBlocks, wantCalls int
+	}{
+		{name: "unset available", probeOK: true, wantBlocks: derived, wantCalls: 1},
+		{name: "explicit zero", env: "0", probeOK: true},
+		{name: "explicit positive", env: "7", probeOK: true, wantBlocks: 7},
+		{name: "unavailable", wantCalls: 1},
+		{name: "nil probe", nilProbe: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("FAK_NATIVE_KV_MAX_BLOCKS", tc.env)
+			if tc.env == "" {
+				if err := os.Unsetenv("FAK_NATIVE_KV_MAX_BLOCKS"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			calls := 0
+			probe := func() (uint64, bool) {
+				calls++
+				return freeBytes, tc.probeOK
+			}
+			if tc.nilProbe {
+				probe = nil
+			}
+			got := nativePreemptionPolicyFromEnvWithProbe(probe, bytesPerToken)
+			if got.MaxBlocks != tc.wantBlocks || calls != tc.wantCalls {
+				t.Fatalf("MaxBlocks=%d probe calls=%d, want %d and %d", got.MaxBlocks, calls, tc.wantBlocks, tc.wantCalls)
+			}
+			if got.Mode != NativePreemptSwap || got.VictimRule != NativePreemptVictimMostRecent {
+				t.Fatalf("probe path changed default policy: mode=%v victim=%v", got.Mode, got.VictimRule)
 			}
 		})
 	}
