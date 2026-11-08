@@ -172,8 +172,36 @@ func TestKernelOpClassClosed(t *testing.T) {
 		t.Fatalf("parsed %d kernel names, want the full table", len(names))
 	}
 	pseudo := regexp.MustCompile(`case kTs[A-Za-z0-9]+: return "([a-z0-9_]+)";`).FindAllStringSubmatch(src, -1)
-	if len(pseudo) != len(kernelTransferNames) {
-		t.Fatalf("shim pseudo-kernel names = %d, Go transfer names = %d", len(pseudo), len(kernelTransferNames))
+	// Vulkan's pseudo rows are one backend's inventory, not the union of all
+	// timed transfer aliases. Keep both the backend set and the union exact.
+	vulkanTransfers := map[string]bool{
+		"d2d_copy": true, "h2d_upload": true, "d2d_gather": true, "fill": true, "readback": true,
+	}
+	seenVulkan := map[string]bool{}
+	for _, p := range pseudo {
+		name := p[1]
+		if !vulkanTransfers[name] || seenVulkan[name] {
+			t.Fatalf("unexpected or duplicate Vulkan transfer %q", name)
+		}
+		seenVulkan[name] = true
+	}
+	if len(seenVulkan) != len(vulkanTransfers) {
+		t.Fatalf("Vulkan transfer inventory = %v, want %v", seenVulkan, vulkanTransfers)
+	}
+	expectedTransfers := map[string]bool{}
+	for name := range vulkanTransfers {
+		expectedTransfers[name] = true
+	}
+	for _, name := range []string{"sampling_candidates_fill", "sampling_candidates_retain"} {
+		expectedTransfers[name] = true
+	}
+	if len(kernelTransferNames) != len(expectedTransfers) {
+		t.Fatalf("cross-backend transfer inventory = %v, want %v", kernelTransferNames, expectedTransfers)
+	}
+	for name := range expectedTransfers {
+		if !kernelTransferNames[name] || KernelOpClass(name) != KernelOpCopy {
+			t.Errorf("expected transfer %s is missing or not classified copy", name)
+		}
 	}
 	closed := map[string]bool{}
 	for _, c := range KernelOpClasses {
@@ -623,18 +651,80 @@ func TestCUDATimestampSemanticAliases(t *testing.T) {
 	}
 }
 
-// cudaTSEnclosing returns the FCUDA_TS name whose argument list holds offset
-// at, or "" when the call sits outside every FCUDA_TS statement.
+// cudaTSEnclosing returns the FCUDA_TS name whose variadic body holds at.
+// The name and grid arguments run before timing begins. Guard semicolons in
+// the body do not end the macro; an unclosed or malformed wrapper proves nothing.
 func cudaTSEnclosing(src string, at int) string {
+	if at < 0 || at >= len(src) {
+		return ""
+	}
 	var name string
 	for _, m := range cudaTSWrap.FindAllStringSubmatchIndex(src[:at], -1) {
-		if !strings.Contains(src[m[1]:at], ";") {
+		body, end, ok := cudaTSBody(src, m[1])
+		if ok && body <= at && at < end {
 			name = src[m[2]:m[3]]
-		} else {
-			name = ""
 		}
 	}
 	return name
+}
+
+// cudaTSBody scans from the first comma to the matching macro close. Source
+// comments are already stripped. This is a structural checker, not a C++ lexer.
+func cudaTSBody(src string, start int) (body, end int, ok bool) {
+	body = -1
+	var stack []byte
+	var quote byte
+	for i := start; i < len(src); i++ {
+		ch := src[i]
+		if quote != 0 {
+			if ch == '\\' {
+				i++
+			} else if ch == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch ch {
+		case '\'', '"':
+			quote = ch
+		case '(', '[', '{':
+			stack = append(stack, ch)
+		case ')', ']', '}':
+			if len(stack) == 0 {
+				return body, i, ch == ')' && body >= 0 && strings.TrimSpace(src[body:i]) != ""
+			}
+			open := stack[len(stack)-1]
+			if !(open == '(' && ch == ')' || open == '[' && ch == ']' || open == '{' && ch == '}') {
+				return 0, 0, false
+			}
+			stack = stack[:len(stack)-1]
+		case ',':
+			if body < 0 && len(stack) == 0 {
+				if strings.TrimSpace(src[start:i]) == "" {
+					return 0, 0, false
+				}
+				body = i + 1
+			}
+		case ';':
+			if body < 0 && len(stack) == 0 {
+				return 0, 0, false
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+func cudaAsyncTimingValid(path, call, row, args string) bool {
+	want, valid := cudaAsyncTimingName(call, args)
+	if !valid {
+		return false
+	}
+	if row == want {
+		return true
+	}
+	return path == "cuda/sampling_candidates.cuh" &&
+		(call == "cudaMemsetAsync" && want == "fill" && row == "sampling_candidates_fill" ||
+			call == "cudaMemcpyAsync" && want == "d2d_copy" && row == "sampling_candidates_retain")
 }
 
 func cudaEnclosingFunc(src string, at int) string {
@@ -746,6 +836,76 @@ func TestCUDAAsyncTimestampDirections(t *testing.T) {
 		}
 	}
 
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestCUDATimestampGuardedBody(t *testing.T) {
+	for _, tc := range []struct {
+		name, src, want string
+	}{
+		{"guard", `FCUDA_TS("row", grid, if (closed()) return status(); target(););`, "row"},
+		{"nested grid", `FCUDA_TS("row", dim3(f(1, 2), 0), if (closed()) return; target(););`, "row"},
+		{"braces", `FCUDA_TS("row", grid, if (ready()) { int x[2] = {1, 2}; target(x[0]); });`, "row"},
+		{"quoted delimiters", `FCUDA_TS("row", grid, log(";,])"); char ch = ')'; target(););`, "row"},
+		{"escaped quote", `FCUDA_TS("row", grid, log("a\\\"),;"); target(););`, "row"},
+		{"variadic comma", `FCUDA_TS("row", grid, target<<<grid, 256, 0, stream>>>(x););`, "row"},
+		{"closed wrapper", `FCUDA_TS("row", grid, noop()); target();`, ""},
+		{"unwrapped", `target();`, ""},
+		{"grid is not timed", `FCUDA_TS("row", target(), noop());`, ""},
+		{"nested grid is not timed", `FCUDA_TS("row", dim3(target(), 0), noop());`, ""},
+		{"unclosed wrapper", `FCUDA_TS("row", grid, if (ready()) target();`, ""},
+		{"mismatched brackets", `FCUDA_TS("row", grid, if (ready(]) target(););`, ""},
+		{"unclosed quote", `FCUDA_TS("row", grid, target(); log("unterminated););`, ""},
+		{"empty grid", `FCUDA_TS("row", , target());`, ""},
+		{"no body", `FCUDA_TS("row", target());`, ""},
+		{"latest wrapper", `FCUDA_TS("old", grid, noop()); FCUDA_TS("new", grid, if (ready()) return; target(););`, "new"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			at := strings.Index(tc.src, "target")
+			if got := cudaTSEnclosing(tc.src, at); got != tc.want {
+				t.Fatalf("row=%q want=%q: %s", got, tc.want, tc.src)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestCUDATimestampSamplingTransferAliases(t *testing.T) {
+	const path = "cuda/sampling_candidates.cuh"
+	for _, tc := range []struct {
+		path, call, row, args string
+		want                  bool
+	}{
+		{path, "cudaMemsetAsync", "sampling_candidates_fill", "dst, 0, bytes, stream)", true},
+		{path, "cudaMemcpyAsync", "sampling_candidates_retain", "dst, src, bytes, cudaMemcpyDeviceToDevice, stream)", true},
+		{"cuda/other.cuh", "cudaMemsetAsync", "sampling_candidates_fill", "dst, 0, bytes, stream)", false},
+		{"cuda/other.cuh", "cudaMemcpyAsync", "sampling_candidates_retain", "dst, src, bytes, cudaMemcpyDeviceToDevice, stream)", false},
+		{path, "cudaMemcpyAsync", "sampling_candidates_retain", "dst, src, bytes, cudaMemcpyDeviceToHost, stream)", false},
+		{path, "cudaMemcpyAsync", "sampling_candidates_fill", "dst, src, bytes, cudaMemcpyDeviceToDevice, stream)", false},
+		{path, "cudaMemsetAsync", "sampling_candidates_retain", "dst, 0, bytes, stream)", false},
+		{path, "cudaMemsetAsync", "sampling_candidates_unknown", "dst, 0, bytes, stream)", false},
+		{path, "cudaMemcpyAsync", "sampling_candidates_retain", "dst, src, bytes, cudaMemcpyDefault, stream)", false},
+		{path, "cudaMemsetAsync", "sampling_candidates_fill", "dst, 0, bytes)", false},
+		{path, "cudaMemcpyAsync", "d2d_copy", "dst, src, bytes, cudaMemcpyDeviceToDevice, stream)", true},
+	} {
+		if got := cudaAsyncTimingValid(tc.path, tc.call, tc.row, tc.args); got != tc.want {
+			t.Fatalf("%s %s row=%q valid=%t want=%t", tc.path, tc.call, tc.row, got, tc.want)
+		}
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestKernelOpClassSamplingRows(t *testing.T) {
+	for name, want := range map[string]string{
+		"sampling_candidates_fill": KernelOpCopy, "sampling_candidates_retain": KernelOpCopy,
+		"k_sampling_candidates_histogram": KernelOpOther, "k_sampling_candidates_cutoff": KernelOpOther,
+		"k_sampling_candidates_emit": KernelOpOther, "sampling_candidates_unknown": KernelOpOther,
+		"sampling_candidates_fill_extra": KernelOpOther, "sampling_candidates_retain_extra": KernelOpOther,
+	} {
+		if got := KernelOpClass(name); got != want {
+			t.Fatalf("KernelOpClass(%q)=%s want=%s", name, got, want)
+		}
+	}
 }
 
 // cudaUntimedTransferSites lists the async copies that run outside the event
@@ -993,7 +1153,7 @@ func TestCUDATimestampSourceCoversEveryLaunch(t *testing.T) {
 				t.Errorf("%s:%d %s has no supported timestamp transfer direction", path, at(src, m[0]), call)
 				continue
 			}
-			if got == want || cudaTokenomosAccountingSite(srcs, path, m[0], false) {
+			if cudaAsyncTimingValid(path, call, got, src[m[1]:]) || cudaTokenomosAccountingSite(srcs, path, m[0], false) {
 				continue
 			}
 			line := src[:strings.LastIndex(src[:m[0]], "\n")+1]
@@ -1041,6 +1201,8 @@ func TestCUDATimestampSourceCoversEveryLaunch(t *testing.T) {
 // dtype conversions, dequantization and activation quantization, elementwise
 // glue, gathers and status publication.
 var cudaKernelOtherAllowlist = map[string]bool{
+	// Candidate selection is integer histogram/cutoff/publication, not argmax.
+	"k_sampling_candidates_histogram": true, "k_sampling_candidates_cutoff": true, "k_sampling_candidates_emit": true,
 	// Graph position publication and indexed row copies match existing glue rows.
 	"k_graph_once_position": true, "k_graph_once_copyrow": true,
 	"k_kv_store_typed": true, "k_kv_load_typed": true, "k_mxfp8_cast_f32": true,

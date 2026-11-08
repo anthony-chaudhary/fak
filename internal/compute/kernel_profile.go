@@ -222,9 +222,10 @@ var KernelOpClasses = []string{
 }
 
 // Timestamp pseudo-kernels: transfer and fill commands recorded into a timed
-// batch. Their names come from the shim's fvk_ts_kernel_name.
+// batch. Names include Vulkan fvk_ts_kernel_name rows and CUDA transfer aliases.
 var kernelTransferNames = map[string]bool{
 	"d2d_copy": true, "h2d_upload": true, "d2d_gather": true, "fill": true, "readback": true,
+	"sampling_candidates_fill": true, "sampling_candidates_retain": true,
 }
 
 // KernelOpClass maps a kernel name to its op class. A fused kernel takes the
