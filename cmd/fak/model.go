@@ -11,6 +11,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 )
@@ -22,6 +23,7 @@ const modelUsage = "usage: fak model <fit|plan|load|pull|quantize|ls|provider-co
 	"  fak model pull <ref>   download a model ref into the local cache (alias-aware)\n" +
 	"  fak model quantize     convert local F32 GGUF matrices to q4_k/q5_k/q6_k; new output only\n" +
 	"  fak model ls           list known model aliases and which are cached locally\n" +
+	"  fak model info <ref>   report cached checkpoint metadata (family/format/context/weights/memory floor) from the local cache\n" +
 	"  fak model provider-contracts inspect canonical provider behavior and provenance (--json for complete records)\n" +
 	"  fak model qwen38-ladder prove concepts cheaply, then promote to exact Qwen3.8-27B evidence\n" +
 	"  " + modelCanaryGateSynopsis + "  fold exact-model observations into PROMOTE/ROLLBACK/HOLD\n" +
@@ -58,6 +60,8 @@ func cmdModel(args []string) {
 		cmdModelPull(args[1:])
 	case "ls", "list":
 		cmdModelLs(args[1:])
+	case "info":
+		os.Exit(runModelInfo(os.Stdout, os.Stderr, args[1:]))
 	case "provider-contracts":
 		os.Exit(runModelProviderContracts(os.Stdout, os.Stderr, args[1:]))
 	case "qwen38-ladder":
@@ -143,6 +147,246 @@ func cmdModelLs(args []string) {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", e.Name, coding, cached, size, e.Source, e.Target)
 	}
 	_ = tw.Flush()
+}
+
+// modelInfoRuntimeMargin is the fixed reserve the memory floor adds on top of the
+// weight bytes: runtime scaffolding (tokenizer, allocator slack, KV-cache setup)
+// that any in-kernel load pays before a single token is served. It is a constant,
+// not a measurement — the floor is a LOWER BOUND on what loading needs, never a
+// live-serving-capacity claim (KV state grows with context length and batch, so
+// serving capacity stays the job of fak model fit / preflight).
+const modelInfoRuntimeMargin int64 = 2 << 30 // 2 GiB
+
+// ErrModelNotCached is the closed-contract sentinel for a model ref whose target
+// has no local cache entry yet: the refusal carries the pull hint, and callers
+// match it with errors.Is instead of parsing prose.
+var ErrModelNotCached = errors.New("model not present in the local model cache")
+
+// ErrModelFormatUnreadable is the closed-contract sentinel for a cached target
+// that is not a readable GGUF checkpoint (a safetensors directory or an
+// unrecognized artifact): header inspection of those belongs to
+// `fak model preflight --safetensors`, not to this verb.
+var ErrModelFormatUnreadable = errors.New("checkpoint format is not readable by model info")
+
+// modelInfoNotFoundError marks a ref that is neither a registered alias, an
+// hf:// URI, nor an existing path — the registry miss case.
+type modelInfoNotFoundError struct{ arg string }
+
+func (e *modelInfoNotFoundError) Error() string {
+	return fmt.Sprintf("%q is not in the model registry, and is neither an hf:// URI nor an existing path", e.arg)
+}
+
+// modelInfoGateRefusal wraps the pre-transfer capability gate's refusal so the
+// message names the registry the type was looked up in; the wrapped error keeps
+// the ErrUnknownModelType chain intact for errors.Is.
+type modelInfoGateRefusal struct {
+	family string
+	gate   error
+}
+
+func (e *modelInfoGateRefusal) Error() string {
+	return fmt.Sprintf("model type %q is not registered in the capability registry that gates every fak model transfer", e.family)
+}
+
+func (e *modelInfoGateRefusal) Unwrap() error { return e.gate }
+
+// modelInfoNotCachedError names the requested ref on the ErrModelNotCached
+// sentinel so the refusal doubles as the pull hint.
+type modelInfoNotCachedError struct{ arg string }
+
+func (e *modelInfoNotCachedError) Error() string {
+	return fmt.Sprintf("%s is not in the local model cache; run: fak model pull %s", e.arg, e.arg)
+}
+
+func (e *modelInfoNotCachedError) Unwrap() error { return ErrModelNotCached }
+
+// modelInfoFormatError names the offending path on the ErrModelFormatUnreadable
+// sentinel and points at the existing safetensors seam.
+type modelInfoFormatError struct{ path string }
+
+func (e *modelInfoFormatError) Error() string {
+	return fmt.Sprintf("%s is not a readable GGUF checkpoint; safetensors checkpoints are inspected by 'fak model preflight --safetensors <dir>'", e.path)
+}
+
+func (e *modelInfoFormatError) Unwrap() error { return ErrModelFormatUnreadable }
+
+// modelInfoReport is the closed contract `fak model info` emits: one cached
+// checkpoint's family (the GGUF general.architecture), weight format (the
+// classified quant recipe, falling back to the encoding inventory), declared
+// context length, weight payload in bytes, and the memory floor (weights plus
+// the fixed runtime margin). FloorBytes - RuntimeMarginBytes == WeightsBytes
+// always holds, so a consumer can recover both bounds from the JSON alone.
+type modelInfoReport struct {
+	Schema             string `json:"schema"`
+	Ref                string `json:"ref,omitempty"`    // the ref the operator typed
+	Target             string `json:"target,omitempty"` // resolved concrete ref (hf:// URI or path)
+	Path               string `json:"path"`             // the local file that was read
+	Family             string `json:"family"`
+	Format             string `json:"format"`
+	Context            int    `json:"context,omitempty"` // declared context length; absent when the header carries none
+	WeightsBytes       int64  `json:"weights_bytes"`
+	FloorBytes         int64  `json:"floor_bytes"`
+	RuntimeMarginBytes int64  `json:"runtime_margin_bytes"`
+}
+
+// resolveModelInfoTarget resolves a model ref to a LOCAL checkpoint without
+// transferring a byte: the blocked-source and pre-transfer capability refusals
+// come straight off planModelTransfer (the same table pull/load gate on), a
+// known alias expands to its target and probes the exact cache path hfhub uses
+// for downloads, and a bare path passes through. An uncached hf:// target is
+// refused with ErrModelNotCached rather than downloaded — pulling stays the
+// operator's explicit choice.
+func resolveModelInfoTarget(arg string) (path, target string, expanded bool, err error) {
+	plan := planModelTransfer(arg, "model info", 2)
+	switch plan.kind {
+	case modelTransferBlocked:
+		if plan.err != nil {
+			return "", "", false, &modelInfoGateRefusal{family: modelFamilyOfAlias(arg), gate: plan.err}
+		}
+		return "", "", false, errors.New(plan.message) // blocked source: fail closed, no expansion happened
+	case modelTransferNotFound:
+		return "", "", false, &modelInfoNotFoundError{arg: arg}
+	case modelTransferLocal:
+		return plan.ref, plan.ref, plan.expanded, nil
+	default: // modelTransferFetch: an hf:// ref cleared the gate; probe the cache only
+		ref, perr := hfhub.ParseURI(plan.ref)
+		if perr != nil {
+			return "", plan.ref, plan.expanded, perr
+		}
+		candidate := hfhub.NewClient().CachePath(ref)
+		if _, serr := os.Stat(candidate); serr == nil {
+			// Both a single-file checkpoint and a cached repo directory (a
+			// repo-only ref pulled into its cache dir) count as cached; the
+			// report reader decides readability (a directory gets the preflight
+			// redirect). Only a genuinely absent target gets the pull hint.
+			return candidate, plan.ref, plan.expanded, nil
+		}
+		return "", plan.ref, plan.expanded, &modelInfoNotCachedError{arg: arg}
+	}
+}
+
+// ggufMagicHeader is the four-byte GGUF signature the report reader checks before
+// handing the path to the full header parser, so a non-GGUF artifact gets the
+// typed format refusal instead of a parse error.
+const ggufMagicHeader = "GGUF"
+
+// readModelInfoReport reads ONLY the header of a locally cached GGUF checkpoint
+// (no tensor bytes, no network) and fills the closed report: family from
+// general.architecture, context from <arch>.context_length, format from the
+// classified tensor inventory, weights as the summed on-disk tensor payloads
+// (split shards merge into one directory via OpenHeaders), and the floor as
+// weights plus the fixed runtime margin.
+func readModelInfoReport(path string) (modelInfoReport, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return modelInfoReport{}, err
+	}
+	magic := make([]byte, len(ggufMagicHeader))
+	_, rerr := io.ReadFull(f, magic)
+	f.Close()
+	if rerr != nil || string(magic) != ggufMagicHeader {
+		return modelInfoReport{}, &modelInfoFormatError{path: path}
+	}
+	hdr, err := ggufload.OpenHeaders(path)
+	if err != nil {
+		return modelInfoReport{}, err
+	}
+	family, _ := hdr.String("general.architecture")
+	ctx, _ := hdr.Uint64(family + ".context_length")
+	quant := ggufload.ClassifyTensorQuant(hdr.Tensors)
+	format := quant.Recipe // the authoritative mixture recipe (Q4_K_M, UD-Q2_K_XL) when matched
+	if format == "" {
+		format = quant.Name // otherwise the raw encoding inventory (Q8_0, unquantized, ...)
+	}
+	var weights int64
+	for _, t := range hdr.Tensors {
+		weights += t.OnDiskBytes()
+	}
+	return modelInfoReport{
+		Path:               path,
+		Family:             family,
+		Format:             format,
+		Context:            int(ctx),
+		WeightsBytes:       weights,
+		FloorBytes:         weights + modelInfoRuntimeMargin,
+		RuntimeMarginBytes: modelInfoRuntimeMargin,
+	}, nil
+}
+
+// renderModelInfo renders the report in the upstream line shape (family, format,
+// context, weights, floor) with the local path appended so the operator knows
+// exactly which artifact was read. Context is omitted when the header declares
+// none, matching the upstream print-if-present rule.
+func renderModelInfo(w io.Writer, r modelInfoReport) {
+	gib := func(b int64) float64 { return float64(b) / float64(1<<30) }
+	family := r.Family
+	if family == "" {
+		family = "-"
+	}
+	format := r.Format
+	if format == "" {
+		format = "-"
+	}
+	fmt.Fprintf(w, "family: %s\n", family)
+	fmt.Fprintf(w, "format: %s\n", format)
+	if r.Context > 0 {
+		fmt.Fprintf(w, "context: %d\n", r.Context)
+	}
+	fmt.Fprintf(w, "weights: %.2f GiB (%d bytes)\n", gib(r.WeightsBytes), r.WeightsBytes)
+	fmt.Fprintf(w, "memory floor: %.2f GiB (weights plus a %.2f GiB runtime margin; not a live-serving-capacity claim)\n",
+		gib(r.FloorBytes), gib(r.RuntimeMarginBytes))
+	fmt.Fprintf(w, "path: %s\n", r.Path)
+}
+
+// runModelInfo is `fak model info <ref>`: report a CACHED checkpoint's family,
+// format, context, weights and memory floor from local metadata only. Adapted
+// from TensorFold's info command (zig/src/cli/info.zig:15 @9e8c368b0b4c2c7892a0c9f0f302d7c164016209,
+// Apache-2.0): resolve the ref to a locally cached checkpoint, read its header,
+// report the axes, refuse an uncached ref with a pull hint, and refuse an
+// unregistered model type by naming the registry. No byte is downloaded and no
+// tensor payload is read; the floor is a lower bound, not a capacity claim.
+// Exit 0 reported, 1 refused, 2 usage/registry-miss.
+func runModelInfo(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("model info", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: fak model info <alias | hf://owner/repo[@rev]/file | path>")
+		fmt.Fprintln(stderr, "  run `fak model ls` to see known aliases")
+		fs.PrintDefaults()
+	}
+	asJSON := fs.Bool("json", false, "emit the report as JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return 2
+	}
+	arg := fs.Arg(0)
+	path, target, expanded, err := resolveModelInfoTarget(arg)
+	if err != nil {
+		var notFound *modelInfoNotFoundError
+		if errors.As(err, &notFound) {
+			fmt.Fprintf(stderr, "fak model info: %v (run 'fak model ls' for registered aliases)\n", err)
+			return 2
+		}
+		fmt.Fprintf(stderr, "fak model info: %v\n", err)
+		return 1
+	}
+	if expanded {
+		fmt.Fprintf(stderr, "fak model info: %s → %s\n", arg, target)
+	}
+	report, err := readModelInfoReport(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak model info: %v\n", err)
+		return 1
+	}
+	report.Schema = "fak.model-info/1"
+	report.Ref = arg
+	report.Target = target
+	return emitJSONOrRender(stdout, stderr, "fak model info", *asJSON, report, func(w io.Writer) {
+		renderModelInfo(w, report)
+	})
 }
 
 // cmdModelLoad downloads (or cache-hits) the file a model ref names and prints its
@@ -288,13 +532,17 @@ const (
 // modelTransferPlan is the decision of planModelTransfer: which outcome the
 // caller takes, the concrete ref (or local path) involved, the human-facing
 // refusal text, and the process exit code. kind==modelTransferFetch means the
-// ref cleared every check up to the byte transfer itself.
+// ref cleared every check up to the byte transfer itself. err carries the
+// underlying typed refusal (today only the pre-transfer capability gate's
+// ErrUnknownModelType chain) so callers can match it with errors.Is instead of
+// re-parsing the rendered message.
 type modelTransferPlan struct {
 	kind     modelTransferKind
 	ref      string
 	message  string
 	exit     int
 	expanded bool
+	err      error
 }
 
 // planModelTransfer performs every step of resolveAndFetchModelRef up to (but
@@ -324,6 +572,7 @@ func planModelTransfer(arg, label string, notFoundExit int) modelTransferPlan {
 			message:  fmt.Sprintf("fak %s: %v", label, err),
 			exit:     1,
 			expanded: expanded,
+			err:      err,
 		}
 	}
 	return modelTransferPlan{kind: modelTransferFetch, ref: ref, expanded: expanded}

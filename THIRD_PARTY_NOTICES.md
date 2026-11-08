@@ -287,6 +287,27 @@ The full upstream LICENSE at the pinned revision follows:
    limitations under the License.
 ```
 
+## TensorFold checkpoint metadata discovery (model info)
+
+- Upstream: ashhart/TensorFold, commit
+  `9e8c368b0b4c2c7892a0c9f0f302d7c164016209` (Apache-2.0), source
+  `zig/src/cli/info.zig:15` (`run`):
+  https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/cli/info.zig
+- Adaptation: `cmd/fak/model.go` (`runModelInfo`, `resolveModelInfoTarget`,
+  `readModelInfoReport`) re-expresses the cached-checkpoint report in Go:
+  resolve a ref to a locally cached checkpoint, read its header only, report
+  family / weight format / declared context / weight bytes / memory floor
+  (weights plus a fixed runtime margin), refuse an uncached ref with a pull
+  hint, and refuse an unregistered model type by naming the registry. No Zig
+  code blocks are copied; the line-oriented report shape and the floor-is-not-
+  capacity contract are adapted.
+- License: Apache License 2.0, already reproduced above under "TensorFold
+  benchmark evidence".
+- Witness: `TestModelInfoReportsCachedCheckpointMetadata` in
+  `cmd/fak/model_info_test.go` pins the exact report values, the pull-hint
+  refusal, the registry-naming refusal, the `ErrUnknownModelType` gate chain,
+  and the non-GGUF redirect (software evidence only).
+
 ## TensorFold draft-depth pooled verify costs
 
 - Upstream: ashhart/TensorFold, commit
