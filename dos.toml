@@ -326,7 +326,7 @@ concurrent = [
   "dispatchpost", "dispatchsweep", "dispatchtick", "docfreshrsi", "dogfoodissues",
   "dogfoodscore", "dojocal", "dojopost", "doomloop", "dormancy",
   "edittx", "egressfloor", "envconfiglint", "epicprogress",
-  "evebridge", "eveimport", "eveparity", "execrollup", "findingsink", "fleet", "fleetaccounts",
+  "evebridge", "eveimport", "eveparity", "execrollup", "expertaccess", "findingsink", "fleet", "fleetaccounts",
   "fleetbottleneck", "fleetbus", "fleetcap", "fleetcompare",
   "fleetmetrics",
   "fleetmon", "fleetpane", "fleetreap", "fleetspine", "fleettrend",
@@ -582,6 +582,8 @@ concurrent = [
   # undeclared-leaf detector resolved it as drift; reconciled here like the
   # billing/routerlaunch precedent.
   "routerfront",
+  "hostapproval", "hostshare", "reasoneval", "regime", "remotemaintresult",
+  "skilldiscovery", "gpubinding", "mcpinstall", "layoutoracle", "optimize", "hwspecs",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -786,6 +788,9 @@ autopick = [
 # stripped to the real layout, and the leaves that existed in internal/ but had no
 # lane are added, so arbitrate now actually detects same-tree collisions.
 [lanes.trees]
+layoutoracle = ["internal/layoutoracle/**"]
+optimize = ["internal/optimize/**"]
+hwspecs = ["pkg/hwspecs/**"]
 gpubinding = ["pkg/gpubinding/**"]
 mcpinstall = ["pkg/mcpinstall/**"]
 hostapproval = ["internal/hostapproval/**"]
@@ -905,7 +910,7 @@ metrics = ["internal/metrics/**"]
 model = ["internal/model/**", "internal/v41kv/**"]
 normgate = ["internal/normgate/**"]
 plancfi = ["internal/plancfi/**"]
-policy = ["internal/policy/**"]
+policy = ["internal/policy/**", "pkg/policy/**"]
 preflight = ["internal/preflight/**"]
 provenance = ["internal/provenance/**"]
 recall = ["internal/recall/**"]
@@ -1187,6 +1192,7 @@ evebridge = ["internal/evebridge/**"]
 eveimport = ["internal/eveimport/**"]
 eveparity = ["internal/eveparity/**"]
 execrollup = ["internal/execrollup/**"]
+expertaccess = ["internal/expertaccess/**"]
 findingsink = ["internal/findingsink/**"]
 fleet = ["internal/fleet/**"]
 fleetaccounts = ["internal/fleetaccounts/**"]
@@ -1724,7 +1730,7 @@ sysproc = ["pkg/sysproc/**"]
 hwutil = ["pkg/hwutil/**"]
 agentbench = ["internal/agentbench/**"]
 hostgrant = ["internal/hostgrant/**"]
-runtimeobs = ["internal/runtimeobs/**"]
+runtimeobs = ["internal/runtimeobs/**", "pkg/runtimeobs/**"]
 servewarmup = ["internal/servewarmup/**"]
 validate = ["internal/validate/**"]
 enginestep = ["internal/enginestep/**"]

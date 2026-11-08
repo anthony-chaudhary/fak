@@ -2448,3 +2448,10 @@ One ExpertCacheLRFU.Plan transition result in modelloadplan: counts logical hits
 NewExpertCacheLRFU constructor parameter fixing the number of logical resident expert slots across the policy layers; it must be positive and no greater than layers times experts.
 
 **Distinct from:** This is simulated expert-residency capacity, not scheduler running-session slots, a byte budget, or device allocation; Plan rejects selections whose distinct experts exceed it.
+
+
+### CUBLASLtNVFP4Policy
+
+Shared pure architecture and runtime eligibility rule in fp4meta for the cuBLASLt NVFP4 path: SM100 requires at least version120803, SM103 requires at least version120900, SM120 requires at least version120804, and other architectures are refused. For admitted SM103, skipAlgo66 is true on versions130501 through130601 and130700 through130799.
+
+**Distinct from:** This selects supported architecture/version combinations and known algorithm exclusions; it does not adjudicate FP4 tensor metadata, enqueue a kernel, prove measured hardware support, or change policy thresholds when the compute wrapper delegates to it.

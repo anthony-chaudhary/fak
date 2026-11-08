@@ -6,6 +6,9 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 )
 
+// The model adapter satisfies the policy seam without a production upward import.
+var _ ctxmmu.ExpertResidencyAdvisor = (*ExpertHotSetAdvisor)(nil)
+
 // expert_hot_set_advisor_test.go — witnesses for ExpertHotSetAdvisor (expert_hot_set_advisor.go),
 // the exported integration point that feeds ExpertHotSetLearner into ctxmmu's expert-residency
 // decisions: the band Admit answers with must be the EXACT band Learn() commits under, and every

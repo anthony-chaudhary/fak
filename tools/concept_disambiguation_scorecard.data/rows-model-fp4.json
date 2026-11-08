@@ -90,7 +90,8 @@
       "distinction": "Adjudicates a document already read; ParseFP4Metadata is the strict reader that produces it, and a parse failure never reaches here. It also decides nothing about a RUN: it says whether these bytes are decodable and by whom, never that a kernel is fast or a speedup is real.",
       "distinct_from": [
         "fp4hardwarecapability",
-        "fp4reasonsupported"
+        "fp4reasonsupported",
+        "cublasltnvfp4policy"
       ],
       "aliases": [],
       "grounding": "AdjudicateFP4Metadata",

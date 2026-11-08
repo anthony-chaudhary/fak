@@ -1,14 +1,14 @@
 package model
 
-import "github.com/anthony-chaudhary/fak/internal/ctxmmu"
+import "github.com/anthony-chaudhary/fak/internal/expertaccess"
 
 // expert_hot_set_advisor.go — the exported integration point that feeds ExpertHotSetLearner's
 // output (hot-set pins with hysteresis) into ctxmmu's expert-residency decisions
 // (cluster-bringup P2-4; parent plan fak-private#cluster-bringup-rtx6000-b300-readiness-20261104).
 //
 // The learner (expert_hot_set.go) and the residency policy (ctxmmu.ExpertResidencyPolicy) are two
-// packages that must not import each other's tier in one direction: ctxmmu is a low tier that
-// declares the seam (ctxmmu.ExpertResidencyAdvisor), and this file implements it from the learner.
+// packages that share only the primitive expertaccess descriptor: ctxmmu declares the
+// consumer interface, and this file implements it without importing the policy package.
 // The serve-path hookup is the documented one-line follow-up: build an advisor over the session's
 // pin budget, wire it through ctxmmu.NewExpertResidencyPolicyWithAdvisor, observe routed touches
 // into it, call Learn() at the turn boundary, and warm-start from its HotSet(). Until that line
@@ -18,9 +18,6 @@ import "github.com/anthony-chaudhary/fak/internal/ctxmmu"
 // Nothing here changes the learner itself: every method either forwards to it or applies the
 // SAME displacement band Learn() commits under, so the gate a caller sees at admission time is
 // the exact band the committed hot-set was selected with.
-
-// Compile-time proof of the seam: the adapter IS the ctxmmu interface.
-var _ ctxmmu.ExpertResidencyAdvisor = (*ExpertHotSetAdvisor)(nil)
 
 // ExpertHotSetAdvisor adapts ExpertHotSetLearner to ctxmmu.ExpertResidencyAdvisor. It owns no
 // state of its own — heat, the committed set, the resident partition, and the warm-start profile
@@ -106,14 +103,14 @@ func (a *ExpertHotSetAdvisor) Admit(chHeat, vHeat float64) bool {
 // HotSet returns the committed units, hottest first under the learner's total order, adapted to
 // the ctxmmu shape: WeightBytes is 0 because the learner tracks activations, not bytes — the
 // policy loads each descriptor from backing when it seeds the ring.
-func (a *ExpertHotSetAdvisor) HotSet() []ctxmmu.ExpertAccess {
+func (a *ExpertHotSetAdvisor) HotSet() []expertaccess.Access {
 	if a == nil || a.l == nil {
 		return nil
 	}
 	units := a.l.HotSet()
-	out := make([]ctxmmu.ExpertAccess, len(units))
+	out := make([]expertaccess.Access, len(units))
 	for i, u := range units {
-		out[i] = ctxmmu.ExpertAccess{Layer: u.Layer, Expert: u.Expert}
+		out[i] = expertaccess.Access{Layer: u.Layer, Expert: u.Expert}
 	}
 	return out
 }

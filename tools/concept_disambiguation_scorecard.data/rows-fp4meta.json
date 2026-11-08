@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "cublasltnvfp4policy",
+      "canonical": "CUBLASLtNVFP4Policy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Shared pure architecture and runtime eligibility rule in fp4meta for the cuBLASLt NVFP4 path: SM100 requires at least version120803, SM103 requires at least version120900, SM120 requires at least version120804, and other architectures are refused. For admitted SM103, skipAlgo66 is true on versions130501 through130601 and130700 through130799.",
+      "distinction": "This selects supported architecture/version combinations and known algorithm exclusions; it does not adjudicate FP4 tensor metadata, enqueue a kernel, prove measured hardware support, or change policy thresholds when the compute wrapper delegates to it.",
+      "distinct_from": [
+        "adjudicatefp4metadata"
+      ],
+      "aliases": [],
+      "grounding": "CUBLASLtNVFP4Policy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

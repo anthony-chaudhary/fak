@@ -3,6 +3,8 @@ package ctxmmu
 import (
 	"errors"
 	"sort"
+
+	"github.com/anthony-chaudhary/fak/internal/expertaccess"
 )
 
 // expert_residency.go — the MoE expert-residency policy for the unified-memory serving tier
@@ -221,15 +223,9 @@ func (p *ExpertResidencyPolicy) Decode(layer, expert int) (ExpertDescriptor, boo
 	return d, true
 }
 
-// ExpertAccess is one observed (layer,expert) touch a warm-start trace is built from. It is
-// deliberately ctxmmu-local: this package is a low tier that must not import internal/model,
-// so a caller adapts its own trace events to this shape (the model-side adapter lives in
-// internal/model/v41_expert_policy.go and the private serving consumer joins the two).
-type ExpertAccess struct {
-	Layer       int
-	Expert      int
-	WeightBytes int64
-}
+// ExpertAccess is one observed expert touch. The alias preserves the policy API
+// while model-side learners and residency policy share a primitive descriptor.
+type ExpertAccess = expertaccess.Access
 
 // WarmStart seeds the resident hot set from an ordered access trace: the most FREQUENT
 // (layer,expert) identities are pre-loaded (not counted as a demand hit), so the first

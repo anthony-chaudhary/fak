@@ -6,9 +6,9 @@ package ctxmmu
 //
 // The learner lives in internal/model (ExpertHotSetLearner, expert_hot_set.go): it accumulates
 // EPLB-style activation statistics and commits a hot-set under a hysteresis band, so a lukewarm
-// challenger cannot displace a hot incumbent. This package is a low tier that must not import
-// internal/model, so the seam runs the other way: the policy declares the decisions it wants to
-// delegate (ExpertResidencyAdvisor), and the model side ships an adapter
+// challenger cannot displace a hot incumbent. The shared expertaccess descriptor keeps
+// the model-side learner independent of this higher-tier policy. The policy declares
+// the decisions it delegates (ExpertResidencyAdvisor), and the model side ships an adapter
 // (model.ExpertHotSetAdvisor) that implements it from the learner. The serve-path hookup of that
 // adapter is the documented one-line follow-up; this file lands the loop fully unit-tested.
 //
