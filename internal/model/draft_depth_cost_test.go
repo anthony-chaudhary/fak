@@ -8,6 +8,37 @@ import (
 
 const draftDepthTol = 1e-9
 
+// fak-test:runtime fast est=1ms
+func TestDraftDepthRejectsForgedTableShape(t *testing.T) {
+	t.Parallel()
+	maxInt := int(^uint(0) >> 1)
+	for _, rows := range []int{-1, 0, 1, DraftDepthMaxRows + 1, maxInt} {
+		costs := DraftDepthCosts{Rows: rows}
+		if rule, err := NewDraftDepthRule(costs, 1, nil, 1); !errors.Is(err, ErrDraftDepthVerifyTable) || rule != nil {
+			t.Fatalf("Rows=%d: rule=%v error=%v, want table-shape refusal", rows, rule, err)
+		}
+		for _, k := range []int{1, DraftDepthMaxRows, maxInt - 1} {
+			if got := costs.Row(k); got != 0 {
+				t.Fatalf("Rows=%d Row(%d)=%v, want unpriceable zero", rows, k, got)
+			}
+		}
+	}
+	// The widest representable table remains legal and prices its final row.
+	costs := DraftDepthCosts{Rows: DraftDepthMaxRows}
+	for i := range costs.Verify {
+		costs.Verify[i] = float64(i)
+	}
+	if _, err := NewDraftDepthRule(costs, DraftDepthMaxRows-1, nil, 1); err != nil {
+		t.Fatal(err)
+	}
+	if got := costs.Row(DraftDepthMaxRows - 1); got != 1 {
+		t.Fatalf("last valid row=%v, want 1", got)
+	}
+	if got := costs.Row(DraftDepthMaxRows); got != 0 {
+		t.Fatalf("past last row=%v, want 0", got)
+	}
+}
+
 func draftDepthApproxEq(t *testing.T, what string, got, want float64) {
 	t.Helper()
 	if math.Abs(got-want) > draftDepthTol {

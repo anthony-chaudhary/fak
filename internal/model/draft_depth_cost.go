@@ -96,9 +96,10 @@ func NewDraftDepthCosts(verify []float64, level float64, regime int) (DraftDepth
 }
 
 // Row is the ms the row carrying draft k adds to its window, floored at zero.
-// It returns 0 for k outside [1, Rows-1], which callers treat as unpriceable.
+// It returns 0 for an invalid table shape or k outside [1, Rows-1], which
+// callers treat as unpriceable.
 func (c DraftDepthCosts) Row(k int) float64 {
-	if k < 1 || k >= c.Rows {
+	if c.Rows < 2 || c.Rows > DraftDepthMaxRows || k < 1 || k >= c.Rows {
 		return 0
 	}
 	d := c.Verify[k+1] - c.Verify[k]
@@ -130,7 +131,7 @@ type DraftDepthRule struct {
 // optional confidence floor, and a confidence power. The initial token EMA is
 // 2.0 and the initial ms EMA is the two-row verify plus one level.
 func NewDraftDepthRule(costs DraftDepthCosts, most int, floor *float64, power float64) (*DraftDepthRule, error) {
-	if costs.Rows < 2 {
+	if costs.Rows < 2 || costs.Rows > DraftDepthMaxRows {
 		return nil, ErrDraftDepthVerifyTable
 	}
 	if most < 1 || most > costs.Rows-1 {
