@@ -322,6 +322,7 @@ var verbTiers = map[string]VerbTier{
 	"hostsetup-bench":               TierDev,
 	"hil":                           TierDev,
 	"hwgate-lint":                   TierDev,
+	"hwspecs":                       TierDev,
 	"hygiene":                       TierDev,
 	"idea-scout":                    TierDev,
 	"idempotency":                   TierDev,

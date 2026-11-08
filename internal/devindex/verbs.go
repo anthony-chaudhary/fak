@@ -277,6 +277,7 @@ var verbManifest = []Verb{
 	{Name: "hostshare", Synopsis: "read host_share from perf receipts/profile notes; gate launch-bound decode at --threshold", Lane: "cmd"},
 	{Name: "hostsetup-bench", Synopsis: "per-layer host-setup vs kernel microbench at batch 1 (Planner seam); gates LAUNCH_SETUP_DOMINANT", Lane: "cmd"},
 	{Name: "hwgate-lint", Synopsis: "scan agent output for local-hardware stops (no GPU here) and redirect each to a sanctioned compute node", Lane: "cmd"},
+	{Name: "hwspecs", Synopsis: "cited hardware-spec inventory: list every accelerator class, resolve a card or a live device name to its cited specs", Lane: "cmd"},
 	{Name: "hygiene", Synopsis: "the whole-tree hygiene gates in one process (the --audit-tree twin of fak hooks)", Lane: "cmd"},
 	{Name: "idea-scout", Synopsis: "research-to-issue feeder: score arXiv/GitHub/HN/Reddit hits, dedupe, plan issues; --live FILES them for real", Lane: "cmd", Doc: "docs/idea-scout.md"},
 	{Name: "idempotency", Synopsis: "durable intent for non-idempotent ops: run/selfcheck; UNKNOWN_APPLIED recovery via status/resolve", Lane: "cmd", Doc: "docs/cli-reference.md"},

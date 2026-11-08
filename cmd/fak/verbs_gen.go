@@ -182,6 +182,7 @@ var generatedVerbIndex = []generatedVerb{
 	{Name: "host-relaunch-broker", Synopsis: "drain the control-plane->desktop relaunch spool and launch the queued Windows Terminal sessions", Tier: "dev"},
 	{Name: "hostdiag", Synopsis: "census, correlate, or trend host diagnostic evidence", Tier: "dev"},
 	{Name: "hwgate-lint", Synopsis: "scan agent output for local-hardware stops (no GPU here) and redirect each to a sanctioned compute node", Tier: "dev"},
+	{Name: "hwspecs", Synopsis: "cited hardware-spec inventory: list every accelerator class, resolve a card or a live device name to its cited specs", Tier: "dev"},
 	{Name: "hygiene", Synopsis: "the whole-tree hygiene gates in one process (the --audit-tree twin of fak hooks)", Tier: "dev"},
 	{Name: "idempotency", Synopsis: "durable intent for non-idempotent ops: run/selfcheck; UNKNOWN_APPLIED recovery via status/resolve", Tier: "dev"},
 	{Name: "info", Synopsis: "the live fak-info overlay: poll a gateway's /debug/vars and print one plain-words line per tick", Tier: "frontdoor"},

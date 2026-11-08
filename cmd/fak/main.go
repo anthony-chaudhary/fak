@@ -566,6 +566,8 @@ func dispatchExtendedVerbA(name string, args []string) bool {
 		cmdWebbench(args)
 	case "ailuminate":
 		cmdAILuminate(args)
+	case "hwspecs":
+		cmdHWSpecs(args)
 	case "model":
 		cmdModel(args)
 	case "model-default":

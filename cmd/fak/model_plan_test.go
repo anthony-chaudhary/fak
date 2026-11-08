@@ -131,3 +131,103 @@ func TestRunModelPlanAutoProbesHostMemory(t *testing.T) {
 		}
 	}
 }
+
+// fak-test:runtime fast est=1s lane=default
+func TestRunModelPlanDeviceSpecNamed(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := runModelPlan(&out, &errOut, []string{"qwen38:27b", "--device-spec", "h200", "--json"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s, want 0", code, errOut.String())
+	}
+	var plan modelloadplan.Plan
+	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
+		t.Fatalf("plan JSON: %v", err)
+	}
+	if plan.Request.DeviceBytes != 141<<30 {
+		t.Fatalf("device bytes = %d, want %d (cited H200 141 GiB)", plan.Request.DeviceBytes, int64(141)<<30)
+	}
+	found := false
+	for _, p := range plan.Provenance {
+		if strings.Contains(p, "cited hardware spec h200") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("provenance missing the device-spec citation: %v", plan.Provenance)
+	}
+}
+
+// fak-test:runtime fast est=1s lane=default
+func TestRunModelPlanDeviceSpecAutoProbe(t *testing.T) {
+	orig := modelPlanProbeGPUName
+	modelPlanProbeGPUName = func() (string, bool) { return "NVIDIA H200 NVL 141GB PCIe", true }
+	t.Cleanup(func() { modelPlanProbeGPUName = orig })
+	var out, errOut bytes.Buffer
+	code := runModelPlan(&out, &errOut, []string{"qwen38:27b", "--device-spec", "auto", "--json"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s, want 0", code, errOut.String())
+	}
+	var plan modelloadplan.Plan
+	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
+		t.Fatalf("plan JSON: %v", err)
+	}
+	if plan.Request.DeviceBytes != 141<<30 {
+		t.Fatalf("device bytes = %d, want %d (auto-probed H200 NVL)", plan.Request.DeviceBytes, int64(141)<<30)
+	}
+	found := false
+	for _, p := range plan.Provenance {
+		if strings.Contains(p, "cited hardware spec h200-nvl") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("provenance missing the h200-nvl citation: %v", plan.Provenance)
+	}
+}
+
+// fak-test:runtime fast est=1s lane=default
+func TestRunModelPlanDeviceSpecAutoNoGPURefused(t *testing.T) {
+	orig := modelPlanProbeGPUName
+	modelPlanProbeGPUName = func() (string, bool) { return "", false }
+	t.Cleanup(func() { modelPlanProbeGPUName = orig })
+	var out, errOut bytes.Buffer
+	code := runModelPlan(&out, &errOut, []string{"qwen38:27b", "--device-spec", "auto"})
+	if code != 2 {
+		t.Fatalf("code=%d, want 2", code)
+	}
+	if !strings.Contains(errOut.String(), "no GPU surface") {
+		t.Fatalf("stderr missing the no-GPU refusal:\n%s", errOut.String())
+	}
+}
+
+// fak-test:runtime fast est=1s lane=default
+func TestRunModelPlanDeviceSpecUnknownRefused(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := runModelPlan(&out, &errOut, []string{"qwen38:27b", "--device-spec", "totally-unknown-card"})
+	if code != 2 {
+		t.Fatalf("code=%d, want 2", code)
+	}
+	if !strings.Contains(errOut.String(), "no cited hardware spec") {
+		t.Fatalf("stderr missing the unknown-card refusal:\n%s", errOut.String())
+	}
+}
+
+// fak-test:runtime fast est=1s lane=default
+func TestRunModelPlanDeviceSpecConflictsRefused(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := runModelPlan(&out, &errOut, []string{"qwen38:27b", "--device-spec", "h200", "--device-gib", "27"})
+	if code != 2 {
+		t.Fatalf("code=%d, want 2", code)
+	}
+	if !strings.Contains(errOut.String(), "mutually exclusive") {
+		t.Fatalf("stderr missing the mutual-exclusion refusal:\n%s", errOut.String())
+	}
+	var out2, errOut2 bytes.Buffer
+	code = runModelPlan(&out2, &errOut2, []string{"deepseek-v41-flash", "--device-spec", "h200"})
+	if code != 2 {
+		t.Fatalf("v41 code=%d, want 2", code)
+	}
+	if !strings.Contains(errOut2.String(), "not applicable to deepseek-v41-flash") {
+		t.Fatalf("stderr missing the v41 refusal:\n%s", errOut2.String())
+	}
+}

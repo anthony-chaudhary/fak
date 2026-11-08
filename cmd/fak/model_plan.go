@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -12,11 +13,48 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	v41 "github.com/anthony-chaudhary/fak/internal/model/v41"
 	"github.com/anthony-chaudhary/fak/internal/modelloadplan"
+	"github.com/anthony-chaudhary/fak/pkg/hwspecs"
+	"github.com/anthony-chaudhary/fak/pkg/hwutil"
 )
+
+// modelPlanProbeGPUName resolves the host's primary telemetry GPU name for
+// `fak model plan --device-spec auto` (first device from the hwutil probe);
+// stubbed in tests.
+var modelPlanProbeGPUName = func() (string, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	snap, err := hwutil.Collect(ctx, hwutil.DefaultOptions())
+	if err != nil || len(snap.GPUs) == 0 {
+		return "", false
+	}
+	return snap.GPUs[0].Name, true
+}
+
+// resolveModelPlanDeviceSpec turns a --device-spec value (a catalog key, a
+// human spelling, or "auto") into a cited spec row, printing the typed refusal
+// and returning false when unresolvable.
+func resolveModelPlanDeviceSpec(name string, stderr io.Writer) (hwspecs.DeviceSpec, bool) {
+	query := name
+	if name == "auto" {
+		probed, ok := modelPlanProbeGPUName()
+		if !ok {
+			fmt.Fprintln(stderr, "fak model plan: --device-spec auto found no GPU surface on this host (nvidia-smi/rocm probe empty); name the card instead")
+			return hwspecs.DeviceSpec{}, false
+		}
+		query = probed
+	}
+	sp, ok := hwspecs.Lookup(query)
+	if !ok {
+		fmt.Fprintf(stderr, "fak model plan: no cited hardware spec for %q (catalog: %s)\n", query, strings.Join(hwspecs.Keys(), ", "))
+		return hwspecs.DeviceSpec{}, false
+	}
+	return sp, true
+}
 
 // ErrModelPlanMultiGPUUnsupported marks a non-V4.1 placement leaf asked for
 // more than one GPU. The qwen38 leaf places the full model on exactly one
@@ -47,6 +85,7 @@ func runModelPlan(stdout, stderr io.Writer, args []string) int {
 	local := fs.String("local", "auto", "local loading policy: auto, require, or disable")
 	memory := fs.String("memory", "unified", "memory topology: unified or split")
 	deviceGiB := fs.Float64("device-gib", 0, "usable device or unified memory in GiB (0 means unknown)")
+	deviceSpec := fs.String("device-spec", "", "resolve device memory from a cited hardware spec: card key/spelling (e.g. h200) or auto (probe the host GPU); mutually exclusive with --device-gib")
 	hostGiB := fs.Float64("host-gib", 0, "usable host GiB; V4.1: cache budget AFTER OS/CPU decoder/pinned-transfer reserves (0 unknown)")
 	diskGiB := fs.Float64("disk-gib", 0, "usable model-cache disk in GiB (0 means unknown)")
 	jsonOut := fs.Bool("json", false, "emit the versioned plan as JSON")
@@ -57,7 +96,7 @@ func runModelPlan(stdout, stderr io.Writer, args []string) int {
 	contextTokens := fs.Int("context-tokens", 256, "V4.1 context charge in tokens")
 	workspaceGiB := fs.Float64("workspace-gib", 0, "V4.1 DEVICE activation/staging/runtime-cast reserve; host reserves must already be subtracted from --host-gib")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: fak model plan [qwen38:27b] [--setup personal|shared|batch] [--goal balanced|quality|latency|cost] [--local auto|require|disable] [--memory unified|split] [--device-gib N] [--host-gib N] [--disk-gib N] [--json]")
+		fmt.Fprintln(stderr, "usage: fak model plan [qwen38:27b] [--setup personal|shared|batch] [--goal balanced|quality|latency|cost] [--local auto|require|disable] [--memory unified|split] [--device-gib N | --device-spec KEY|auto] [--host-gib N] [--disk-gib N] [--json]")
 		fmt.Fprintln(stderr, "       fak model plan deepseek-v41-flash --memory split --hf-config config.json --hf-index model.safetensors.index.json --device-gib N --host-gib N --disk-gib N --workspace-gib N [--gpus 1] [--context-tokens 256] [--revision SHA] [--json]")
 	}
 	modelArg := ""
@@ -80,6 +119,28 @@ func runModelPlan(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
+	deviceSpecNote := ""
+	var deviceSpecRow hwspecs.DeviceSpec
+	if *deviceSpec != "" {
+		if isV41 {
+			fmt.Fprintln(stderr, "fak model plan: --device-spec is not applicable to deepseek-v41-flash (its planner declares its own device bytes)")
+			return 2
+		}
+		if *deviceGiB != 0 {
+			fmt.Fprintln(stderr, "fak model plan: --device-spec and --device-gib are mutually exclusive")
+			return 2
+		}
+		sp, ok := resolveModelPlanDeviceSpec(*deviceSpec, stderr)
+		if !ok {
+			return 2
+		}
+		if sp.VRAMGiB <= 0 || sp.VRAMGiB >= float64(math.MaxInt64)/(1<<30) {
+			fmt.Fprintf(stderr, "fak model plan: cited spec %s carries an unusable VRAM figure (%g)\n", sp.Key, sp.VRAMGiB)
+			return 2
+		}
+		deviceSpecRow = sp
+		deviceSpecNote = fmt.Sprintf("cited hardware spec %s (%s, %s, %g GiB %s @ %g GB/s): %s", sp.Key, sp.Name, sp.Architecture, sp.VRAMGiB, sp.MemoryType, sp.BandwidthGBps, sp.Source)
+	}
 	toBytes := func(name string, n float64) (int64, bool) {
 		if n < 0 || math.IsNaN(n) || math.IsInf(n, 0) || n >= float64(math.MaxInt64)/(1<<30) {
 			fmt.Fprintf(stderr, "fak model plan: --%s must be finite, nonnegative and representable in bytes\n", name)
@@ -98,6 +159,9 @@ func runModelPlan(stdout, stderr io.Writer, args []string) int {
 	disk, ok := toBytes("disk-gib", *diskGiB)
 	if !ok {
 		return 2
+	}
+	if deviceSpecRow.Key != "" {
+		device = int64(deviceSpecRow.VRAMGiB * (1 << 30))
 	}
 	if isV41 {
 		// Do not infer this split-device capacity from the host running the CLI.
@@ -177,6 +241,9 @@ func runModelPlan(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stderr, "fak model plan: %v\n", err)
 		return 2
 	}
+	if deviceSpecNote != "" {
+		plan.Provenance = append(plan.Provenance, deviceSpecNote)
+	}
 	if *jsonOut {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
@@ -187,6 +254,9 @@ func runModelPlan(stdout, stderr io.Writer, args []string) int {
 		return 0
 	}
 	fmt.Fprintf(stdout, "model: %s\nsetup: %s  goal: %s  local: %s  memory: %s\n", plan.Model, plan.Request.Setup, plan.Request.Goal, plan.Request.LocalPolicy, plan.Request.Memory)
+	if deviceSpecNote != "" {
+		fmt.Fprintf(stdout, "device basis: %s\n", deviceSpecNote)
+	}
 	if plan.Selected == nil {
 		fmt.Fprintln(stdout, "selected: NONE (no candidate fits the declared policy and capacities)")
 	} else {
