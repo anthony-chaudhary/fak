@@ -2679,3 +2679,14 @@ SPDX-License-Identifier: Apache-2.0.
 Changed for Fak: a pure Go slot-budget policy over caller-established free and reserved bytes, equal per-layer costs, minimum router capacity and expert-count cap. It does not implement observed-load ranking, loader integration, runtime memory reservation or upstream KV fallback.
 The full Apache License, Version 2.0 reproduced in the "TensorFold benchmark
 evidence" section above applies to this adaptation.
+
+## SGLang small-M dispatch window
+
+`internal/compute/smallm_dispatch.go` adapts the contract described at:
+https://github.com/sgl-project/sglang/blob/58484246d26523eaf1a7f16ab524deee288d2120/python/sglang/kernels/jit/csrc/gemm/hopper_bf16_tiny_gemv.cuh
+
+Copyright contributors to the SGLang project.
+SPDX-License-Identifier: Apache-2.0.
+Changed for Fak: a Go host geometric selector bounded to M<=32, N<=64 and positive K aligned to1024 and representable by uint32. Unsupported positive shapes use a general-path decision. No kernel is copied or invoked; numeric kernel parity and device qualification are not established.
+The full Apache License, Version 2.0 reproduced in the "TensorFold benchmark
+evidence" section above applies to this adaptation.
