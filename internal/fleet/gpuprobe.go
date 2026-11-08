@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -63,6 +64,63 @@ func ProbeGPUUtilization(ctx context.Context) (stats GPUStats, err error) {
 // when no valid row remains, ok=false. CRLF endings are accepted.
 func ParseGPUUtilizationCSV(out string) (stats GPUStats, ok bool) {
 	return parseGPUUtilizationCSV(out, gpuProbeBusyThreshold)
+}
+
+// CapacityLearner is the traffic-learned capacity signal: a per-replica EWMA of
+// observed output-token rate (tokens/second) over served completions. Unlike
+// ProbeGPUUtilization — which reads a hardware label from nvidia-smi — the
+// estimate derives entirely from served traffic, so a mixed heterogeneous pool
+// self-calibrates with no device metadata. Borrowed shape: vllm-project/aibrix
+// pkg/plugins/gateway/algorithms/load_balance.go:316-339@a89b94a574b2
+// (Apache-2.0, ADAPT — re-expressed in Go, not copied).
+type CapacityLearner struct {
+	mu    sync.Mutex
+	decay float64
+	rates map[string]float64
+}
+
+// NewCapacityLearner builds a learner whose EWMA gain is decay: each new
+// observation moves the estimate decay-fractions of the way toward the
+// observed rate (decay 0.2 keeps roughly a five-sample memory, so a degraded or
+// upgraded replica re-prices itself within seconds of traffic). decay must lie
+// in (0, 1].
+func NewCapacityLearner(decay float64) (*CapacityLearner, error) {
+	if !(decay > 0 && decay <= 1) {
+		return nil, fmt.Errorf("fleet: capacity learner decay %g out of range (0,1]", decay)
+	}
+	return &CapacityLearner{decay: decay, rates: make(map[string]float64)}, nil
+}
+
+// ObserveOutput folds one served completion into the named replica's learned
+// output rate. A zero-token or zero-duration observation carries no rate
+// information and is ignored; the first observation for a replica seeds its
+// estimate directly instead of blending with an absent prior.
+func (l *CapacityLearner) ObserveOutput(name string, outputTokens int, elapsed time.Duration) {
+	if l == nil || name == "" || outputTokens <= 0 || elapsed <= 0 {
+		return
+	}
+	rate := float64(outputTokens) / elapsed.Seconds()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	prev, ok := l.rates[name]
+	if !ok {
+		l.rates[name] = rate
+		return
+	}
+	l.rates[name] = l.decay*rate + (1-l.decay)*prev
+}
+
+// OutputRate reports the replica's current learned output-token rate. ok=false
+// means the learner has no observation for that replica yet — unknown, never a
+// fabricated zero.
+func (l *CapacityLearner) OutputRate(name string) (float64, bool) {
+	if l == nil {
+		return 0, false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	rate, ok := l.rates[name]
+	return rate, ok
 }
 
 func parseGPUUtilizationCSV(out string, busyThreshold int) (stats GPUStats, ok bool) {

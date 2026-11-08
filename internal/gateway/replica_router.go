@@ -6,11 +6,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	neturl "net/url"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/fleet"
 )
 
 var ErrReplicaDispatchEmpty = errors.New("gateway: replica dispatch has no replicas")
@@ -250,6 +253,155 @@ func (r *ReplicaDispatch) WithPickPolicy(p PickPolicy) *ReplicaDispatch {
 	return r
 }
 
+// servedOutputObserver is the optional capability a PickPolicy may carry: the
+// dispatch feeds it each successfully-served turn's output volume so the policy
+// can learn per-replica capacity from traffic (CapacityAwarePolicy does). A
+// policy that does not implement it is unaffected by the feed.
+type servedOutputObserver interface {
+	ObserveServedOutput(replica string, outputTokens int, elapsed time.Duration)
+}
+
+const (
+	// capacityAlpha weights the squared KV-pressure term of the capacity-aware
+	// score: score = load/capacity × (1 + capacityAlpha·kvUsed²). At 1.0 a
+	// half-full KV cache doubles the replica's placement cost.
+	capacityAlpha = 1.0
+	// capacityCriticalFreeKV vetoes a replica whose free-KV fraction drops
+	// below this floor: its score becomes +Inf and it is placed on only when
+	// every candidate is vetoed (the borrowed critical-free-KV guard).
+	capacityCriticalFreeKV = 0.05
+	// capacityLearnerDecay is the EWMA gain for learned output rates: recent
+	// completions dominate (~five-sample memory) so a degraded or upgraded
+	// replica re-prices itself within seconds of traffic.
+	capacityLearnerDecay = 0.2
+)
+
+// CapacityAwarePolicy places turns by NORMALIZED load instead of raw count:
+// each candidate scores load/capacity × (1 + α·kvUsed²) and the lowest score
+// wins. capacity is the replica's LEARNED output-token rate (an EWMA over the
+// completions the dispatch served on it — see ObserveServedOutput and the
+// servedOutputObserver feed), so a mixed heterogeneous pool self-calibrates
+// from traffic with no hardware labels; a replica without observations yet is
+// imputed at the cohort's mean learned capacity, so unproven replicas compete
+// on the same scale instead of systematically beating or losing to proven
+// ones. kvUsed is an optional operator-wired KV-pressure signal (fraction used,
+// [0,1]); when absent the pressure factor is 1 and the critical-free-KV veto
+// never fires. Borrowed mechanism: vllm-project/aibrix
+// pkg/plugins/gateway/algorithms/load_balance.go:198@a89b94a574b2 (Apache-2.0,
+// ADAPT — re-expressed in Go against the fak PickPolicy seam, not copied).
+type CapacityAwarePolicy struct {
+	learn  *fleet.CapacityLearner
+	kvUsed func(name string) (float64, bool)
+}
+
+// NewCapacityAwarePolicy builds the policy. kvUsed reports each replica's
+// current KV-cache usage fraction in [0,1]; ok=false means unknown (the
+// pressure factor degrades to 1 and the veto stays off for that replica); nil
+// disables KV pressure entirely. The learned capacities start empty and fill
+// as the dispatch serves turns.
+func NewCapacityAwarePolicy(kvUsed func(name string) (float64, bool)) *CapacityAwarePolicy {
+	learn, err := fleet.NewCapacityLearner(capacityLearnerDecay)
+	if err != nil {
+		// capacityLearnerDecay is a validated package constant; reaching this
+		// branch would be a build-time invariant break, not runtime input.
+		panic(fmt.Sprintf("gateway: capacity learner construction: %v", err))
+	}
+	return &CapacityAwarePolicy{learn: learn, kvUsed: kvUsed}
+}
+
+// ObserveServedOutput implements servedOutputObserver: it folds one completed
+// turn's output volume into the replica's learned capacity. Zero-token or
+// zero-duration turns carry no rate information and are ignored.
+func (p *CapacityAwarePolicy) ObserveServedOutput(replica string, outputTokens int, elapsed time.Duration) {
+	p.learn.ObserveOutput(replica, outputTokens, elapsed)
+}
+
+// capacityScore is one candidate's placement cost under the borrowed
+// heterogeneous-capacity rule: load/capacity × (1 + α·kvUsed²), +Inf when the
+// replica's free-KV fraction falls below the critical floor. Unknown capacity
+// is imputed at the cohort baseline (baseline ≤ 0 ⇒ capacity-neutral raw-load
+// scoring); kvKnown=false leaves the pressure factor at 1.
+func capacityScore(load int, capacity, baseline float64, kvUsedFrac float64, kvKnown bool, alpha, criticalFreeKV float64) float64 {
+	if kvKnown {
+		if kvUsedFrac < 0 {
+			kvUsedFrac = 0
+		} else if kvUsedFrac > 1 {
+			kvUsedFrac = 1
+		}
+		if 1-kvUsedFrac < criticalFreeKV {
+			return math.Inf(1)
+		}
+	}
+	effective := capacity
+	if effective <= 0 {
+		effective = baseline
+	}
+	if effective <= 0 {
+		effective = 1
+	}
+	score := float64(load) / effective
+	if kvKnown {
+		score *= 1 + alpha*kvUsedFrac*kvUsedFrac
+	}
+	return score
+}
+
+// Pick scores every candidate and returns the lowest-scoring replica. Ties fall
+// to the lower raw load, then the lexicographically smaller name, so the
+// decision is a pure function of its inputs. A vetoed candidate (free KV below
+// the critical floor) is remembered as the least-loaded last resort and is
+// returned only when every candidate is vetoed — the dispatch still places
+// rather than stranding the request. An empty candidate set declines (false)
+// so the dispatch falls back to its keyed rendezvous.
+func (p *CapacityAwarePolicy) Pick(candidates []PlannerReplica, prefix []string, load func(name string) int) (PlannerReplica, bool) {
+	if p == nil || len(candidates) == 0 {
+		return PlannerReplica{}, false
+	}
+	if load == nil {
+		load = func(string) int { return 0 }
+	}
+	capacities := make(map[string]float64, len(candidates))
+	var capSum float64
+	capCount := 0
+	for _, c := range candidates {
+		if rate, ok := p.learn.OutputRate(c.Name); ok && rate > 0 {
+			capacities[c.Name] = rate
+			capSum += rate
+			capCount++
+		}
+	}
+	baseline := 0.0
+	if capCount > 0 {
+		baseline = capSum / float64(capCount)
+	}
+	var best, lastResort PlannerReplica
+	var bestScore, bestLoad, lastResortLoad float64
+	haveBest, haveLastResort := false, false
+	for _, c := range candidates {
+		l := float64(load(c.Name))
+		kvFrac, kvKnown := 0.0, false
+		if p.kvUsed != nil {
+			kvFrac, kvKnown = p.kvUsed(c.Name)
+		}
+		score := capacityScore(int(l), capacities[c.Name], baseline, kvFrac, kvKnown, capacityAlpha, capacityCriticalFreeKV)
+		switch {
+		case math.IsInf(score, 1):
+			if !haveLastResort || l < lastResortLoad || (l == lastResortLoad && c.Name < lastResort.Name) {
+				lastResort, lastResortLoad, haveLastResort = c, l, true
+			}
+		case !haveBest || score < bestScore || (score == bestScore && (l < bestLoad || (l == bestLoad && c.Name < best.Name))):
+			best, bestScore, bestLoad, haveBest = c, score, l, true
+		}
+	}
+	if haveBest {
+		return best, true
+	}
+	if haveLastResort {
+		return lastResort, true
+	}
+	return PlannerReplica{}, false
+}
+
 func (r *ReplicaDispatch) Model() string {
 	if r == nil {
 		return ""
@@ -324,15 +476,18 @@ func (r *ReplicaDispatch) completeReserved(ctx context.Context, route reservedPl
 	defer func() { route.finish(ctx, comp, err, false) }()
 	tried := make(map[string]struct{}, len(r.replicas))
 	var previous error
+	var callStart time.Time
 	for {
 		callCtx := agent.WithReplicaFailover(ctx, r.hasUntriedReplica(route, tried))
 		callCtx = route.withObservedPrefill(callCtx)
+		callStart = time.Now()
 		comp, err = route.replica.Planner.Complete(callCtx, messages, tools, opts...)
 		if err == agent.ErrSerialRetryBudgetExhausted && previous != nil {
 			err = errors.Join(err, previous)
 		}
 		agent.RecordSerialReplicaError(ctx, err)
 		if err == nil {
+			r.observeServedOutput(route.replica.Name, comp, time.Since(callStart))
 			return comp, nil
 		}
 		if !replicaFallbackAllowed(ctx, err) || (route.reservation == nil && !agent.SerialReplicaFallbackAllowed(err)) {
@@ -476,12 +631,14 @@ func (r *ReplicaDispatch) CompleteStream(ctx context.Context, sink agent.StreamS
 		}
 		callCtx := agent.WithReplicaFailover(ctx, r.hasUntriedReplica(route, tried))
 		callCtx = route.withObservedPrefill(callCtx)
+		callStart := time.Now()
 		comp, err = sp.CompleteStream(callCtx, guarded, messages, tools, opts...)
 		if err == agent.ErrSerialRetryBudgetExhausted && previous != nil {
 			err = errors.Join(err, previous)
 		}
 		agent.RecordSerialReplicaError(ctx, err)
 		if err == nil {
+			r.observeServedOutput(route.replica.Name, comp, time.Since(callStart))
 			return comp, nil
 		}
 		// Static and reserved routes share the irreversible emission boundary.
@@ -826,6 +983,23 @@ func (r *ReplicaDispatch) pickKeyed(prefix []string) (PlannerReplica, error) {
 		return PlannerReplica{}, ErrNoHealthyWorker
 	}
 	return best, nil
+}
+
+// observeServedOutput feeds a completed turn's output volume into the attached
+// policy when it carries the servedOutputObserver capability — the traffic
+// signal CapacityAwarePolicy learns per-replica capacity from. It observes
+// whichever replica ultimately served the turn (after any failover retargeting)
+// and is a no-op for policies that do not learn. Hedged buffered calls take
+// their own path and are not observed here.
+func (r *ReplicaDispatch) observeServedOutput(name string, comp *agent.Completion, elapsed time.Duration) {
+	if r == nil || comp == nil {
+		return
+	}
+	obs, ok := r.policy.(servedOutputObserver)
+	if !ok {
+		return
+	}
+	obs.ObserveServedOutput(name, comp.Usage.CompletionTokens, elapsed)
 }
 
 // pickByPolicy runs the attached cache-aware policy over the admissible candidate set.
