@@ -23,7 +23,7 @@ var allowedRootMD = map[string]bool{
 	"HERO-BENCHMARK-2026-06-21.md": true,
 	"CODE_OF_CONDUCT.md":           true, "CHANGELOG.md": true, "GOVERNANCE.md": true, "MAINTAINERS.md": true,
 	"ROADMAP.md": true, "AUTHORS.md": true, "NOTICE.md": true, "SUPPORT.md": true, "HISTORY.md": true,
-	"TRADEMARK.md": true, "LICENSING.md": true,
+	"TRADEMARK.md": true, "LICENSING.md": true, "THIRD_PARTY_NOTICES.md": true,
 }
 
 // isAllowedRootMD returns true if the root markdown file is allowlisted or is a unique goal file (GOAL-*.md).

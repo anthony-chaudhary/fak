@@ -563,3 +563,24 @@ func TestParseUnifiedAddedLines_lineNumbers(t *testing.T) {
 		t.Errorf("text wrong: %q", lines[0].Text)
 	}
 }
+
+// fak-test:runtime fast est=1ms lane=default
+func TestDocPlacementThirdPartyNoticesExact(t *testing.T) {
+	d := diffOf("/r", map[string][]string{})
+	d.StagedPaths = []string{"THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES-extra.md", "third_party_notices.md", "THIRD_PARTY_NOTICE.md", "RANDOM.md"}
+	findings, err := gateDocPlacement(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 4 {
+		t.Fatalf("got %d findings, want four rejected near names: %+v", len(findings), findings)
+	}
+	if hasFindingFor(findings, "DOC_PLACEMENT", "THIRD_PARTY_NOTICES.md") {
+		t.Fatal("canonical license notice rejected")
+	}
+	for _, path := range d.StagedPaths[1:] {
+		if !hasFindingFor(findings, "DOC_PLACEMENT", path) {
+			t.Errorf("unapproved root doc %q accepted", path)
+		}
+	}
+}

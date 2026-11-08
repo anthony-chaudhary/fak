@@ -207,6 +207,9 @@ func TestParity_FileAdmission(t *testing.T) {
 func TestParity_DocPlacement(t *testing.T) {
 	runParity(t, "DOC_PLACEMENT", "check_doc_placement.py", []parityCase{
 		{"clean-allowlisted", map[string]string{"ROADMAP.md": "# roadmap\n"}, false},
+		{"clean-third-party-notices", map[string]string{"THIRD_PARTY_NOTICES.md": "# Third-party notices\n"}, false},
+		{"bad-third-party-near-name", map[string]string{"THIRD_PARTY_NOTICES-extra.md": "# stray\n"}, true},
+		{"bad-third-party-lowercase", map[string]string{"third_party_notices.md": "# stray\n"}, true},
 		{"clean-subdir", map[string]string{"docs/note.md": "# note\n"}, false},
 		{"clean-goal", map[string]string{"GOAL-my-feature.md": "# goal\n"}, false},
 		{"bad-root", map[string]string{"MY-RANDOM-DOC.md": "# stray\n"}, true},
