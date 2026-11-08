@@ -322,7 +322,7 @@ def check_mode(workspace: Path, data_dir: Path | None, baseline_path: Path,
             print(f"  {fam}: {shown}")
         print(f"receipt: {rp}")
         if auto_ticket:
-            auto_ticket(workspace, debt_delta, [t for v in ubf.values() for t in v])
+            create_drift_ticket(workspace, debt_delta, [t for v in ubf.values() for t in v])
         return EXIT_DRIFT
     print(f"OK: coverage-debt held at {snap['coverage_debt']} (baseline {b_debt}); "
           f"discovered {snap['discovered']} ({disc_delta:+d}); no re-opening")
@@ -330,7 +330,7 @@ def check_mode(workspace: Path, data_dir: Path | None, baseline_path: Path,
     return EXIT_OK
 
 
-def auto_ticket(workspace: Path, n_reopened: int, tokens: list[str]) -> None:
+def create_drift_ticket(workspace: Path, n_reopened: int, tokens: list[str]) -> None:
     """Best-effort positioning ticket on a real drift. Never fatal: a missing
     fak-run or a refused create is reported and swallowed."""
     exe = shutil.which("fak-run")

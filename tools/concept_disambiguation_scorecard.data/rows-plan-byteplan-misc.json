@@ -1,0 +1,63 @@
+{
+  "rows": [
+    {
+      "id": "plan-validbyteplan",
+      "canonical": "validBytePlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Unexported V41DSparkResidency method in internal/model/v41_dspark_residency.go that reports whether the declared DraftBytes and TargetBytes are both nonnegative and their int64 sum is representable (DraftBytes <= math.MaxInt64 - TargetBytes). FitsHost, Validate, and AdmitResidentClaim each require it before using the resident-byte arithmetic.",
+      "distinction": "It establishes only arithmetic validity of two declared model byte counts; it is not the SessionResidencyPlan total enforced serving footprint, not a host-budget fit refusal such as RefusePagedHostPlanIfTooBig, and not proof that weights load or a resident claim is admitted.",
+      "distinct_from": [
+        "SessionResidencyPlan",
+        "refusepagedhostplaniftoobig"
+      ],
+      "aliases": [],
+      "grounding": "validBytePlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "residency-cublasltnvfp4policy",
+      "canonical": "CUBLASLtNVFP4Policy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Shared pure architecture and runtime eligibility rule in internal/fp4meta/cuda_capabilities.go for the NVFP4 cuBLASLt path: SM100 requires cuBLAS version at least 120803, SM103 at least 120900, SM120 at least 120804, and every other architecture is refused. For eligible SM103 it additionally reports skipAlgo66 for cuBLAS versions 130501 through 130601 and 130700 through 130799. fp4meta.CUDACapabilities and compute.nvfp4CUBLASLtPolicy gate on it.",
+      "distinction": "It selects supported architecture/version combinations and known algorithm exclusions; it does not adjudicate an FP4 metadata document (AdjudicateFP4Metadata) and carries no producer-declared device capability (FP4HardwareCapability).",
+      "distinct_from": [
+        "adjudicatefp4metadata",
+        "fp4hardwarecapability"
+      ],
+      "aliases": [
+        "nvfp4CUBLASLtPolicy"
+      ],
+      "grounding": "CUBLASLtNVFP4Policy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "sessrt-residentslots",
+      "canonical": "residentSlots",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Third parameter of NewExpertCacheLRFU in internal/modelloadplan/expert_cache_lrfu.go fixing how many logical expert slots the bounded ClassLRU policy holds resident across its layers; it must be positive and no greater than layers times experts. Plan refuses a selection whose distinct experts exceed it with ErrExpertCacheLRFUCapacity.",
+      "distinction": "It is simulated expert-residency capacity for the LRFU cache policy, not a serving scheduler running-session slot, not the upstream soft-slot residency field (slotResidency), and not a byte budget or device allocation.",
+      "distinct_from": [
+        "upstream-slot-residency-field",
+        "llama-soft-slot-residency-proof"
+      ],
+      "aliases": [],
+      "grounding": "residentSlots",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
