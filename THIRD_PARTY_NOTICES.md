@@ -2627,3 +2627,23 @@ in `internal/compute/mtp_rdna35_test.go` and
 throughput or hardware claim). The full Apache License, Version 2.0
 reproduced in the "TensorFold benchmark evidence" section above applies to
 this adaptation.
+
+## SGLang Kimi-K3 tool-choice terminal contract
+
+`internal/grammar/toolchoice_terminal.go` adapts the required/none structural
+suffix rules in SGLang PR #48480 at commit
+`ebeed893722150a29303d9eb9bd975abec4072a5`:
+https://github.com/sgl-project/sglang/blob/ebeed893722150a29303d9eb9bd975abec4072a5/python/sglang/srt/function_call/kimik3_structural_tag.py
+
+Copyright contributors to the SGLang project.
+SPDX-License-Identifier: Apache-2.0.
+Changed for Fak: an independently written Go state machine over validated
+structural events. Required mode permits completion only after a nonempty
+tools section closes, including multiple calls when parallel mode is enabled;
+none mode refuses tools and requires a complete validated nonempty response.
+An optional message close remains consumable after completion becomes
+available. The caller validates text, argument syntax, selected tool names
+and response-channel boundaries. Auto mode, raw text parsing and sampler
+integration are outside this bounded contract. The full Apache License,
+Version 2.0 reproduced in the "TensorFold benchmark evidence" section above
+applies to this adaptation.
