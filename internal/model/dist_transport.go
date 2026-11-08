@@ -222,20 +222,20 @@ func (t *distTransport) Send(peer int, payload []byte) error {
 // link's FIFO inbox.
 func (t *distTransport) Recv(buf []byte) (int, int, bool) {
 	t.mu.Lock()
+	defer t.mu.Unlock()
+	// Linearize polling against failLink: after a failure is recorded, queued
+	// controls from that peer cannot escape through an otherwise healthy inbox.
 	size := t.g.size
 	start := t.cursor
-	t.mu.Unlock()
 	for i := 0; i < size; i++ {
 		peer := (start + i) % size
 		ch := t.inbox[peer]
-		if ch == nil {
+		if ch == nil || !t.links[peer].Up {
 			continue
 		}
 		select {
 		case data := <-ch:
-			t.mu.Lock()
 			t.cursor = peer + 1
-			t.mu.Unlock()
 			if len(data) > len(buf) {
 				// Mailbox contract: a message that does not fit is dropped,
 				// not truncated — keep polling the remaining links.

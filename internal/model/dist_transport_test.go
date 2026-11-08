@@ -16,6 +16,35 @@ import (
 // or not at all), and the closed failure classes (peer timeout/down -> one
 // retryable ErrPeerTimeout; anything else -> ErrCorrupt).
 
+// fak-test:runtime fast est=1ms lane=default
+func TestDistTransportFailedLinkDropsQueuedControls(t *testing.T) {
+	transport := &distTransport{
+		g:     &DistComm{size: 3, rank: 0},
+		links: []DistLink{{Peer: 0}, {Peer: 1, Up: true}, {Peer: 2, Up: true}},
+		inbox: []chan []byte{nil, make(chan []byte, 2), make(chan []byte, 2)},
+	}
+	transport.inbox[1] <- []byte("stale-1")
+	transport.inbox[1] <- []byte("stale-2")
+	transport.inbox[2] <- []byte("live-1")
+	transport.inbox[2] <- []byte("live-2")
+	transport.failLink(1, ErrPeerTimeout)
+	transport.failLink(1, ErrCorrupt) // The first failure class remains authoritative.
+	buf := make([]byte, 32)
+	for _, want := range []string{"live-1", "live-2"} {
+		peer, n, ok := transport.Recv(buf)
+		if !ok || peer != 2 || string(buf[:n]) != want {
+			t.Fatalf("failed link leaked or healthy FIFO changed: peer=%d n=%d ok=%v payload=%q", peer, n, ok, buf[:n])
+		}
+	}
+	if _, _, ok := transport.Recv(buf); ok {
+		t.Fatal("queued control from failed link was delivered")
+	}
+	links := transport.Links()
+	if links[0].Peer != 1 || links[0].Up || !errors.Is(links[0].Last, ErrPeerTimeout) || !links[1].Up {
+		t.Fatalf("failure classification changed: %+v", links)
+	}
+}
+
 // distFormGroup forms a size-rank DistComm over a loopback TCP listener and
 // returns every rank's group plus the workers' raw connections (so a test can
 // inject raw frames or drop a link). The caller owns both ends.
@@ -108,8 +137,9 @@ func TestDistTransportPayloadLimitLinkState(t *testing.T) {
 		t1 := NewDistTransport(groups[1])
 		defer t1.Close()
 
-		if t0.Limit() != distTransportLimit || t1.Limit() != distTransportLimit {
-			t.Fatalf("Limit() = %d/%d, want %d on both ends", t0.Limit(), t1.Limit(), distTransportLimit)
+		const expectedLimit = 1 << 20
+		if t0.Limit() != expectedLimit || t1.Limit() != expectedLimit {
+			t.Fatalf("Limit() = %d/%d, want %d on both ends", t0.Limit(), t1.Limit(), expectedLimit)
 		}
 
 		// Oversize refuses BEFORE any byte reaches the wire.
@@ -127,15 +157,23 @@ func TestDistTransportPayloadLimitLinkState(t *testing.T) {
 		}
 
 		// Exactly-at-limit sends and round-trips intact.
-		exact := make([]byte, distTransportLimit)
-		exact[len(exact)-1] = 0xAB
+		exact := make([]byte, expectedLimit)
+		for i := range exact {
+			exact[i] = byte(i*31 + i/251)
+		}
 		if err := t0.Send(1, exact); err != nil {
 			t.Fatalf("Send(%d bytes) = %v, want nil", len(exact), err)
 		}
 		bigBuf := make([]byte, distTransportLimit)
 		distPollUntil(t, "at-limit delivery", func() bool {
-			_, n, ok := t1.Recv(bigBuf)
-			return ok && n == distTransportLimit && bigBuf[distTransportLimit-1] == 0xAB
+			peer, n, ok := t1.Recv(bigBuf)
+			if !ok {
+				return false
+			}
+			if peer != 0 || n != len(exact) || string(bigBuf[:n]) != string(exact) {
+				t.Fatalf("at-limit delivery not byte-intact: peer=%d bytes=%d", peer, n)
+			}
+			return true
 		})
 
 		// Self and out-of-range peers refuse as ErrLinkDown.
