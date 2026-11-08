@@ -14,8 +14,10 @@ import "C"
 
 import (
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 )
 
@@ -118,9 +120,14 @@ func (p *cudaKVPagePool) growLocked(need int) {
 			arena[l] = np
 		}
 	}
+	growStart := time.Now()
 	move(p.K, "kv-paged-key-arena")
 	move(p.Kraw, "kv-paged-pre-rope-key-arena")
 	move(p.V, "kv-paged-value-arena")
+	if batchDiagEnabled {
+		fmt.Fprintf(os.Stderr, "fak_paged_pool_grow_diag from_blocks=%d to_blocks=%d need=%d live=%d us=%d\n",
+			p.capBlocks, n, need, p.blocks.live, time.Since(growStart).Microseconds())
+	}
 	p.capBlocks = n
 	p.blocks.grow(n)
 }

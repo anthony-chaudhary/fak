@@ -403,16 +403,16 @@ func (p *InKernelPlanner) runDecodeCohort(cohort []*inKernelCoalesceRequest) (fi
 		case !healthCalibrated:
 			// Seed the per-token floor from one real serial step.
 			iteration.stepSerial(context.Background())
-			health.observeSerial(time.Since(stepStart), len(active))
+			health.observeSerial(time.Since(stepStart), iteration.forwarded)
 			healthCalibrated = true
 		case health.useSerial():
 			iteration.stepSerial(context.Background())
-			health.observeSerial(time.Since(stepStart), len(active))
+			health.observeSerial(time.Since(stepStart), iteration.forwarded)
 		case health.probeDue():
 			// Periodic serial probe: refresh the floor so a backlog-inflated
 			// seed cannot permanently excuse a collapsing batched path.
 			iteration.stepSerial(context.Background())
-			health.observeSerial(time.Since(stepStart), len(active))
+			health.observeSerial(time.Since(stepStart), iteration.forwarded)
 			health.sinceProbe = 0
 		default:
 			iteration.step(context.Background())
@@ -421,7 +421,7 @@ func (p *InKernelPlanner) runDecodeCohort(cohort []*inKernelCoalesceRequest) (fi
 				// already ran serially, and its timing must neither pollute the
 				// floor nor trip the violation budget - the same invariant HEAD
 				// uses to withhold the PathBatched observation.
-				health.observeBatched(time.Since(stepStart), len(active))
+				health.observeBatched(time.Since(stepStart), iteration.forwarded)
 			}
 		}
 		share.rounded(time.Since(stepStart).Nanoseconds())

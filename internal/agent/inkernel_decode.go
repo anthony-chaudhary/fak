@@ -1342,6 +1342,10 @@ type inKernelDecodeIteration struct {
 	serialSteps    int
 	sharedPanels   int
 	sharedMACs     int64
+	// forwarded counts the lanes the last step or stepSerial actually advanced
+	// through a forward. A round in which every lane only sampled its final
+	// token forwards nothing, so its wall time is not a per-token sample.
+	forwarded int
 }
 
 func newInKernelDecodeIteration(lanes []*decodeLane, m *model.Model, quant bool) *inKernelDecodeIteration {
@@ -1365,6 +1369,16 @@ func newInKernelDecodeIteration(lanes []*decodeLane, m *model.Model, quant bool)
 // It reports whether any lane advanced.
 func (d *inKernelDecodeIteration) stepSerial(ctx context.Context) bool {
 	anyActive := false
+	d.forwarded = 0
+	var diagLanes int
+	var diagStepSum, diagStepMax time.Duration
+	if batchDiagAgentEnabled {
+		roundStart := time.Now()
+		defer func() {
+			fmt.Fprintf(os.Stderr, "fak_batch_serial_diag lanes=%d step_sum_us=%d step_max_us=%d round_us=%d\n",
+				diagLanes, diagStepSum.Microseconds(), diagStepMax.Microseconds(), time.Since(roundStart).Microseconds())
+		}()
+	}
 	for i, ln := range d.lanes {
 		d.active[i] = false
 		if ln.done || ln.gen >= ln.maxNew {
@@ -1383,7 +1397,11 @@ func (d *inKernelDecodeIteration) stepSerial(ctx context.Context) bool {
 			ln.err, ln.done = err, true
 			continue
 		}
-		enginestep.Default.ObserveDecodeStep(enginestep.PathSerial, 1, time.Since(stepStart))
+		stepDur := time.Since(stepStart)
+		enginestep.Default.ObserveDecodeStep(enginestep.PathSerial, 1, stepDur)
+		diagLanes++
+		diagStepSum += stepDur
+		diagStepMax = max(diagStepMax, stepDur)
 		if ln.logits != nil {
 			ln.vocab = len(ln.logits)
 		}
@@ -1391,6 +1409,7 @@ func (d *inKernelDecodeIteration) stepSerial(ctx context.Context) bool {
 			ln.forwarded = append(ln.forwarded, next)
 		}
 		d.active[i] = true
+		d.forwarded++
 		anyActive = true
 	}
 	return anyActive
@@ -1420,6 +1439,7 @@ func (d *inKernelDecodeIteration) step(ctx context.Context) bool {
 		anyActive = true
 	}
 	agentDiagSample := time.Since(agentDiagT0)
+	d.forwarded = 0
 	if !anyActive {
 		return false
 	}
@@ -1459,6 +1479,7 @@ func (d *inKernelDecodeIteration) step(ctx context.Context) bool {
 		panels = bs.LastStepSharedPanels()
 		macs = bs.LastStepMACs()
 	}
+	d.forwarded = activeLanes
 	if d.serialSteps == 0 {
 		enginestep.Default.ObserveDecodeStep(enginestep.PathBatched, activeLanes, time.Since(stepStart))
 	}

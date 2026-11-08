@@ -53,8 +53,10 @@ func (c *cudaBackend) Qwen35IndependentDecodeBatch(req Qwen35IndependentDecodeBa
 	if admitErr := c.faultLatch.Admit("qwen35-independent-decode-batch"); admitErr != nil {
 		return result, &Qwen35IndependentDecodeBatchError{Stage: "device-admission", Cause: admitErr}
 	}
+	lockStart := time.Now()
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
+	diagLockWait := time.Since(lockStart)
 	if admitErr := c.faultLatch.Admit("qwen35-independent-decode-batch"); admitErr != nil {
 		return result, &Qwen35IndependentDecodeBatchError{Stage: "device-admission", Cause: admitErr}
 	}
@@ -415,8 +417,8 @@ func (c *cudaBackend) Qwen35IndependentDecodeBatch(req Qwen35IndependentDecodeBa
 	}
 	completed = true
 	if batchDiagEnabled {
-		fmt.Fprintf(os.Stderr, "fak_batch_step_diag lanes=%d pre_us=%d kv_us=%d emb_us=%d gdn_us=%d attn_us=%d ffn_us=%d head_us=%d fence_us=%d total_us=%d h2d=%d d2h=%d\n",
-			lanes, diagPre.Microseconds(), diagKV.Microseconds(), diagEmb.Microseconds(), diagGDN.Microseconds(), diagAttn.Microseconds(), diagFFN.Microseconds(), diagHead.Microseconds(), diagFence.Microseconds(), time.Since(diagStart).Microseconds(), transfers.H2DBytes, transfers.D2HBytes)
+		fmt.Fprintf(os.Stderr, "fak_batch_step_diag lanes=%d pre_us=%d kv_us=%d emb_us=%d gdn_us=%d attn_us=%d ffn_us=%d head_us=%d fence_us=%d total_us=%d lockwait_us=%d h2d=%d d2h=%d\n",
+			lanes, diagPre.Microseconds(), diagKV.Microseconds(), diagEmb.Microseconds(), diagGDN.Microseconds(), diagAttn.Microseconds(), diagFFN.Microseconds(), diagHead.Microseconds(), diagFence.Microseconds(), time.Since(diagStart).Microseconds(), diagLockWait.Microseconds(), transfers.H2DBytes, transfers.D2HBytes)
 	}
 	return result, nil
 }

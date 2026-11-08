@@ -274,11 +274,14 @@ func stepBatchQwen35HybridQ4KIndependent(bs *BatchSession, ids []int) ([][]float
 	}()
 	diagLineage = time.Since(diagT0) - diagPrep
 	var result compute.Qwen35IndependentDecodeBatchResult
+	var diagBackend time.Duration
 	var call func(int) error
 	call = func(i int) error {
 		if i == len(bs.Seqs) {
 			var err error
+			backendT0 := time.Now()
 			result, err = batch.Qwen35IndependentDecodeBatch(compute.Qwen35IndependentDecodeBatchRequest{Path: compute.Qwen35IndependentDecodeBatchPath, Lanes: lanes})
+			diagBackend = time.Since(backendT0)
 			return err
 		}
 		_, err := bs.Seqs[i].qwen35HAL.mutateSequence(be, func(states []compute.Qwen35SequenceState) (compute.Qwen35SequencePrefillResult, error) {
@@ -287,8 +290,9 @@ func stepBatchQwen35HybridQ4KIndependent(bs *BatchSession, ids []int) ([][]float
 		})
 		return err
 	}
+	callErr := call(0)
 	diagCall = time.Since(diagT0) - diagPrep - diagLineage
-	if err := call(0); err != nil {
+	if err := callErr; err != nil {
 		if compute.Qwen35IndependentDecodeBatchMutated(err) {
 			failQwen35IndependentDecodeBatchSessions(bs.Seqs, err)
 			panic(err)
@@ -312,8 +316,8 @@ func stepBatchQwen35HybridQ4KIndependent(bs *BatchSession, ids []int) ([][]float
 	bs.lastStepMACs = result.ProjectionMACs
 	diagSplit = time.Since(diagT0) - diagPrep - diagLineage - diagCall - diagRead
 	if qwen35BatchDiagEnabled {
-		fmt.Fprintf(os.Stderr, "fak_batch_model_diag ids=%d prep_us=%d lineage_us=%d call_us=%d read_us=%d split_us=%d total_us=%d\n",
-			len(ids), diagPrep.Microseconds(), diagLineage.Microseconds(), diagCall.Microseconds(), diagRead.Microseconds(), diagSplit.Microseconds(), time.Since(diagT0).Microseconds())
+		fmt.Fprintf(os.Stderr, "fak_batch_model_diag ids=%d prep_us=%d lineage_us=%d call_us=%d backend_us=%d hal_us=%d read_us=%d split_us=%d total_us=%d\n",
+			len(ids), diagPrep.Microseconds(), diagLineage.Microseconds(), diagCall.Microseconds(), diagBackend.Microseconds(), (diagCall - diagBackend).Microseconds(), diagRead.Microseconds(), diagSplit.Microseconds(), time.Since(diagT0).Microseconds())
 	}
 	return splitScaledLogits(nil, flat, len(ids), bs.M.Cfg.VocabSize, bs.M.Cfg), true
 }
