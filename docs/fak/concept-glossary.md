@@ -2455,3 +2455,10 @@ NewExpertCacheLRFU constructor parameter fixing the number of logical resident e
 Shared pure architecture and runtime eligibility rule in fp4meta for the cuBLASLt NVFP4 path: SM100 requires at least version120803, SM103 requires at least version120900, SM120 requires at least version120804, and other architectures are refused. For admitted SM103, skipAlgo66 is true on versions130501 through130601 and130700 through130799.
 
 **Distinct from:** This selects supported architecture/version combinations and known algorithm exclusions; it does not adjudicate FP4 tensor metadata, enqueue a kernel, prove measured hardware support, or change policy thresholds when the compute wrapper delegates to it.
+
+
+### validBytePlan (V41DSparkResidency byte validation)
+
+Pure V41DSparkResidency helper in internal/model/v41_dspark_residency.go checking that declared draft and target byte counts are both nonnegative and their int64 sum is representable before residency admission uses that sum. FitsHost requires it before comparing ResidentBytes with HostBudgetBytes.
+
+**Distinct from:** This establishes arithmetic validity of two declared model byte counts, not SessionResidencyPlan total enforced serving footprint, available host capacity, node-count sufficiency, or proof that weights are loaded; a valid byte plan can still fail FitsHost or resident-claim admission.

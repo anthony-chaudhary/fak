@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "v41-dspark-valid-byte-plan",
+      "canonical": "validBytePlan (V41DSparkResidency byte validation)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Pure V41DSparkResidency helper in internal/model/v41_dspark_residency.go checking that declared draft and target byte counts are both nonnegative and their int64 sum is representable before residency admission uses that sum. FitsHost requires it before comparing ResidentBytes with HostBudgetBytes.",
+      "distinction": "This establishes arithmetic validity of two declared model byte counts, not SessionResidencyPlan total enforced serving footprint, available host capacity, node-count sufficiency, or proof that weights are loaded; a valid byte plan can still fail FitsHost or resident-claim admission.",
+      "distinct_from": [
+        "plan-sessionresidency"
+      ],
+      "aliases": [],
+      "grounding": "validBytePlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

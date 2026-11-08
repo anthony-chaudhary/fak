@@ -533,3 +533,33 @@ func TestV41DSparkResidencyAcceptanceConstants(t *testing.T) {
 		t.Fatalf("prose AcceptanceRate = %v, want 0.55", prose.AcceptanceRate)
 	}
 }
+
+// fak-test:runtime fast est=1ms
+func TestV41DSparkResidencyRejectsInvalidBytePlan(t *testing.T) {
+	t.Parallel()
+	for _, amounts := range [][2]int64{{-1, 2}, {2, -1}, {math.MaxInt64, 1}} {
+		s := DefaultV41DSparkStudy()
+		s.Residency.DraftBytes, s.Residency.TargetBytes = amounts[0], amounts[1]
+		s.Residency.HostBudgetBytes = math.MaxInt64
+		if s.Residency.FitsHost() {
+			t.Fatalf("invalid byte plan %v fits host", amounts)
+		}
+		if err := s.Validate(); err == nil {
+			t.Fatalf("invalid byte plan %v validated", amounts)
+		}
+		for _, nodes := range []int{1, 2} {
+			for _, loadPassed := range []bool{false, true} {
+				if err := s.AdmitResidentClaim(nodes, loadPassed); !errors.Is(err, ErrV41DSparkResidencyOverclaim) {
+					t.Fatalf("plan=%v nodes=%d load=%v: got %v", amounts, nodes, loadPassed, err)
+				}
+			}
+		}
+	}
+	boundary := V41DSparkResidency{DraftBytes: math.MaxInt64 - 1, TargetBytes: 1, HostBudgetBytes: math.MaxInt64}
+	if !boundary.FitsHost() || boundary.ResidentBytes() != math.MaxInt64 {
+		t.Fatal("representable exact-fit boundary refused")
+	}
+	if !(V41DSparkResidency{}).FitsHost() {
+		t.Fatal("zero-value arithmetic fit contract changed")
+	}
+}

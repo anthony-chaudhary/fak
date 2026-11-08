@@ -258,18 +258,26 @@ type V41DSparkResidency struct {
 }
 
 // ResidentBytes is the total bytes the plan would have to hold resident: DraftBytes + TargetBytes,
-// the quantity compared against the host budget, computed in one place so FitsHost and
+// for a valid nonnegative, representable byte plan. Admission validates that
+// precondition before using this arithmetic. This is the quantity compared against
+// the host budget, computed in one place so FitsHost and
 // AdmitResidentClaim cannot drift.
 func (r V41DSparkResidency) ResidentBytes() int64 {
 	return r.DraftBytes + r.TargetBytes
 }
 
 // FitsHost reports whether the resident bytes fit the per-node host budget: exactly
-// ResidentBytes() <= HostBudgetBytes. The zero value (0 <= 0) trivially fits; AdmitResidentClaim
+// valid byte counts and ResidentBytes() <= HostBudgetBytes. The zero value (0 <= 0) trivially fits; AdmitResidentClaim
 // separately refuses a zero-value plan at one node so "fits" cannot be confused with "claims
 // residency".
 func (r V41DSparkResidency) FitsHost() bool {
-	return r.ResidentBytes() <= r.HostBudgetBytes
+	return r.validBytePlan() && r.ResidentBytes() <= r.HostBudgetBytes
+}
+
+// validBytePlan checks individual declarations before adding them, so a
+// negative component cannot cancel a real requirement or hide overflow.
+func (r V41DSparkResidency) validBytePlan() bool {
+	return r.DraftBytes >= 0 && r.TargetBytes >= 0 && r.DraftBytes <= math.MaxInt64-r.TargetBytes
 }
 
 // V41DSparkStudy is the whole port study: the pinned sources, the residency plan, and the
@@ -381,6 +389,9 @@ func (s V41DSparkStudy) Validate() error {
 		return err
 	}
 	r := s.Residency
+	if !r.validBytePlan() {
+		return fmt.Errorf("model: V4.1 Flash DSpark residency has negative or overflowing byte counts")
+	}
 	if r.NodeCount < V41DSparkDefaultNodeCount {
 		return fmt.Errorf("model: V4.1 Flash DSpark residency needs at least %d nodes, got %d", V41DSparkDefaultNodeCount, r.NodeCount)
 	}
@@ -429,6 +440,9 @@ func (s V41DSparkStudy) Validate() error {
 func (s V41DSparkStudy) AdmitResidentClaim(nodeCount int, loadPassed bool) error {
 	if nodeCount < 1 {
 		return fmt.Errorf("model: V4.1 Flash DSpark resident claim needs at least one node, got %d", nodeCount)
+	}
+	if !s.Residency.validBytePlan() {
+		return fmt.Errorf("%w: negative or overflowing residency byte counts", ErrV41DSparkResidencyOverclaim)
 	}
 	if nodeCount >= V41DSparkDefaultNodeCount {
 		if s.Residency.ResidentBytes() <= 0 || !s.Residency.DraftResident || !s.Residency.TargetStreamed {
