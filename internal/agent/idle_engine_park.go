@@ -201,6 +201,11 @@ func (m *IdleEngineManager) Tick(now time.Time, idle time.Duration) error {
 	err := m.shutFn()
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	defer m.cond.Broadcast()
+	if m.state == IdleEngineStopped {
+		// Stop is terminal even when the close callback was already in flight.
+		return err
+	}
 	if err != nil {
 		// Close failed: the engine is still loaded; keep serving.
 		m.state = IdleEngineResident

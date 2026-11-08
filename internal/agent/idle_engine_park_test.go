@@ -8,10 +8,85 @@ package agent
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 )
+
+// fak-test:runtime fast est=100ms lane=default
+func TestIdleEngineUnloadCompletionWakesAndPreservesStop(t *testing.T) {
+	for _, stop := range []bool{false, true} {
+		for _, fail := range []bool{false, true} {
+			t.Run(fmt.Sprintf("stop=%v/fail=%v", stop, fail), func(t *testing.T) {
+				started, release := make(chan struct{}), make(chan struct{})
+				var once sync.Once
+				unblock := func() { once.Do(func() { close(release) }) }
+				closeFailure := errors.New("injected close failure")
+				opens := 0
+				now := time.Unix(0, 0)
+				m := NewIdleEngineManager(now, func() error { opens++; return nil }, func() error {
+					close(started)
+					<-release
+					if fail {
+						return closeFailure
+					}
+					return nil
+				})
+				t.Cleanup(func() { m.Stop(); unblock() })
+				tickDone, wakeDone := make(chan error, 1), make(chan error, 1)
+				go func() { tickDone <- m.Tick(now.Add(time.Second), time.Second) }()
+				select {
+				case <-started:
+				case <-time.After(time.Second):
+					t.Fatal("close did not start")
+				}
+				go func() { wakeDone <- m.Wake(now.Add(time.Second)) }()
+				deadline := time.Now().Add(time.Second)
+				for m.Waiting() != 1 && time.Now().Before(deadline) {
+					time.Sleep(time.Millisecond)
+				}
+				if m.Waiting() != 1 {
+					t.Fatal("wake did not join unloading")
+				}
+				if stop {
+					m.Stop()
+				}
+				unblock()
+				select {
+				case err := <-tickDone:
+					if (fail && !errors.Is(err, closeFailure)) || (!fail && err != nil) {
+						t.Fatalf("close error changed: %v", err)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("unload did not finish")
+				}
+				select {
+				case err := <-wakeDone:
+					if (stop && !errors.Is(err, ErrIdleEngineStopped)) || (!stop && err != nil) {
+						t.Fatalf("wake result: %v", err)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("unload completion left wake blocked")
+				}
+				if stop {
+					if m.State() != IdleEngineStopped || m.Active() != 0 || opens != 0 {
+						t.Fatal("unload completion resurrected stopped engine")
+					}
+				} else {
+					wantOpens := 1
+					if fail {
+						wantOpens = 0
+					}
+					if m.State() != IdleEngineResident || m.Active() != 1 || opens != wantOpens {
+						t.Fatal("wake did not acquire the correct resident engine")
+					}
+					m.Release(now.Add(time.Second))
+				}
+			})
+		}
+	}
+}
 
 // fakeEngine counts open/shut calls and can fail or block its open so the
 // lifecycle's failure and coalescing paths are deterministic.
