@@ -42,8 +42,74 @@ func TestSamplingCUDAUnwiredStructuralContract(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(string(body), "sampling_topk.cu") || strings.Contains(string(body), "fcuda_sampling_") {
+		if samplingCUDAApproximateWiring(string(body)) {
 			t.Fatalf("%s activated the approximate sampler before an exact-law successor", name)
+		}
+	}
+}
+
+// samplingCUDAApproximateWiring fences the actual approximate family, not the
+// independent compact candidate API that happens to share its naming prefix.
+// Identifier matching is intentionally conservative: even a legacy identifier
+// in a comment remains fenced, but a longer independent identifier is not one.
+func samplingCUDAApproximateWiring(body string) bool {
+	if strings.Contains(body, "sampling_topk.cu") {
+		return true
+	}
+	for _, ident := range strings.FieldsFunc(body, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_')
+	}) {
+		switch ident {
+		case "fcuda_sampling_repetition_penalty_f32", "fcuda_sampling_topk_truncate_f32",
+			"fcuda_sampling_nucleus_f32", "fcuda_sampling_draw_f32":
+			return true
+		}
+	}
+	return false
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestSamplingCUDAApproximateWiringFence(t *testing.T) {
+	for _, symbol := range []string{
+		"fcuda_sampling_repetition_penalty_f32",
+		"fcuda_sampling_topk_truncate_f32",
+		"fcuda_sampling_nucleus_f32",
+		"fcuda_sampling_draw_f32",
+	} {
+		t.Run(symbol, func(t *testing.T) {
+			for _, body := range []string{
+				`extern "C" int ` + symbol + `(void);`,
+				`return ` + symbol + `(p);`,
+				`auto entry = &` + symbol + `;`,
+			} {
+				if !samplingCUDAApproximateWiring(body) {
+					t.Fatalf("legacy export escaped the fence: %s", body)
+				}
+			}
+		})
+	}
+	for _, body := range []string{
+		`#include "sampling_topk.cu"`,
+		`#include <sampling_topk.cu>`,
+		`#include "./sampling_topk.cu"`,
+	} {
+		if !samplingCUDAApproximateWiring(body) {
+			t.Fatalf("direct approximate fragment escaped the fence: %s", body)
+		}
+	}
+	for _, body := range []string{
+		`int fcuda_sampling_candidates(const uint32_t *row, int vocab, int k);`,
+		`size_t fcuda_sampling_candidates_workspace_bytes(void);`,
+		`int fcuda_sampling_candidates_capability(void);`,
+		`int fcuda_sampling_candidates_allocation_status(void);`,
+		`int fcuda_sampling_candidates_release(void *owned);`,
+		`#include "cuda/sampling_candidates.cuh"`,
+		`int independent_fcuda_sampling_draw_f32(void);`,
+		`int fcuda_sampling_draw_f32_independent(void);`,
+		"",
+	} {
+		if samplingCUDAApproximateWiring(body) {
+			t.Fatalf("independent name/header was mistaken for approximate wiring: %s", body)
 		}
 	}
 }
