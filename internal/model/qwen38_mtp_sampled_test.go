@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -424,6 +425,36 @@ func TestQwen38MTP_Sampled_VerificationReceipt(t *testing.T) {
 // its receipt is identical to VerifyDraftSequence over ApplySamplerToLogits one-hot rows,
 // and its allocation count does not grow with the number of draft positions.
 func TestQwen38MTPSampledGreedyAvoidsVocabMaterialization(t *testing.T) {
+	t.Run("greedy_modes_ties_and_empty_rows", func(t *testing.T) {
+		for _, cfg := range []Qwen38SamplerConfig{
+			{Temperature: 0, Seed: 7},
+			{Greedy: true, Temperature: 1, Seed: 7},
+		} {
+			v, err := NewQwen38SampledSpeculativeVerifier(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// First maximum wins, including when greedy is explicitly enabled
+			// at a positive temperature.
+			tie := []float32{0, 4, 4}
+			got, err := v.VerifyDraftSequenceLogits([]int{1}, [][]float32{tie}, [][]float32{tie})
+			if err != nil || !reflect.DeepEqual(got.AcceptedTokens, []int{1}) {
+				t.Fatalf("cfg=%+v tie receipt=%+v err=%v", cfg, got, err)
+			}
+			for _, tc := range []struct {
+				position      string
+				target, draft [][]float32
+			}{
+				{"target logits position 1:", [][]float32{tie, nil}, [][]float32{tie, tie}},
+				{"draft logits position 1:", [][]float32{tie, tie}, [][]float32{tie, nil}},
+			} {
+				_, err := v.VerifyDraftSequenceLogits([]int{1, 1}, tc.target, tc.draft)
+				if !errors.Is(err, errQwen38EmptyLogits) || !strings.Contains(err.Error(), tc.position) {
+					t.Fatalf("cfg=%+v position=%s err=%v", cfg, tc.position, err)
+				}
+			}
+		}
+	})
 	const vocab = 512
 	row := func(top int) []float32 {
 		r := make([]float32, vocab)
