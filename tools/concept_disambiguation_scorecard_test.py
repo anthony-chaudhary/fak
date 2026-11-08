@@ -12,9 +12,9 @@ the coverage discovery over the watched families (presence threshold, ignore, ex
 (3) The disk shell + the fold to the composite.
 
 Closes with the load-bearing live smoke: the REAL committed catalog must fold to ZERO
-clarity-debt (every positioned concept is clean), carry nonzero coverage-debt (the
-confusable namespace is only partly mapped - that is the honest birth state), and
-score in the intended 2/10-5/10 band.
+clarity-debt (every positioned concept is clean), with the confusable namespace
+substantially positioned (coverage >= 95% - the debt retired, not the birth state),
+and score in the clean+mapped A-band (>= 90).
 
 Run: `python tools/concept_disambiguation_scorecard_test.py`  (exit 0 = all pass),
 or `python -m pytest tools/concept_disambiguation_scorecard_test.py -q`.
@@ -141,6 +141,69 @@ def test_grounded_strictly_refuses_fabricated_token() -> None:
     # the strict cross-check must still refuse it.
     k = cd.kpi_grounded([row(grounding="alphafabricated")], t["in_tree"])
     assert any("does not appear" in d for d in k["defects"])
+
+
+def test_alias_resolved_refuses_fabricated_alias() -> None:
+    t = tree()
+    # 'alphafabricated' contains the real token 'alpha' but is NOT itself present,
+    # and is not shaped like a wire key: the strict cross-check must refuse it,
+    # exactly as it refuses a fabricated grounding.
+    k = cd.kpi_alias_resolved([row(aliases=["alphafabricated"])], t["in_tree"],
+                              lambda key: False)
+    assert any("alias 'alphafabricated'" in d and "resolves nowhere" in d
+               for d in k["defects"])
+
+
+def test_alias_resolved_accepts_in_tree_alias() -> None:
+    t = tree()
+    # 'gamma' is a real corpus token: normalized identity resolves it, so the wire
+    # scan is never consulted.
+    assert cd.kpi_alias_resolved([row(aliases=["Gamma", "gamma"])], t["in_tree"],
+                                 lambda key: False)["defects"] == []
+
+
+def test_alias_resolved_accepts_dotted_wire_key_present_verbatim() -> None:
+    t = tree()
+    # Dotted keys are regex-split in the identifier corpus, so token identity cannot
+    # see them; a verbatim raw-text hit in the Go source is the only resolution they
+    # can carry.
+    wire = {"ssm.conv_kernel": True}
+    k = cd.kpi_alias_resolved([row(aliases=["ssm.conv_kernel"])], t["in_tree"],
+                              lambda key: wire.get(key, False))
+    assert k["defects"] == []
+
+
+def test_alias_resolved_refuses_wire_key_absent_from_source() -> None:
+    t = tree()
+    # Shaped like a wire key but nowhere in the Go source: shape alone is not proof.
+    k = cd.kpi_alias_resolved([row(aliases=["FAK_GHOST_ENV_VAR"])], t["in_tree"],
+                              lambda key: False)
+    assert any("alias 'FAK_GHOST_ENV_VAR'" in d for d in k["defects"])
+    # Same for a dotted key the source does not spell verbatim.
+    k2 = cd.kpi_alias_resolved([row(aliases=["ghost.dot.key"])], t["in_tree"],
+                               lambda key: False)
+    assert len(k2["defects"]) == 1
+
+
+def test_is_wire_key_shapes() -> None:
+    assert cd.is_wire_key("FAK_CUDA_SAMPLING_COMPACT")   # ALLCAPS_WITH_UNDERSCORE
+    assert cd.is_wire_key("ssm.conv_kernel")            # dotted
+    assert cd.is_wire_key("kv-cache-ttl")               # hyphenated
+    assert not cd.is_wire_key("TransientEvictions")     # camelCase is an identifier
+    assert not cd.is_wire_key("hot_evictions")          # snake_case is an identifier
+    assert not cd.is_wire_key(None)
+
+
+def test_build_payload_threads_wire_present_into_alias_gate() -> None:
+    # The payload fold must consult the tree's wire-present fact: the same alias is a
+    # defect without it and clean with it - proving the gate is wired, not just defined.
+    rows = [row(aliases=["ssm.conv_kernel"]), sibling()]
+    base = tree()
+    p_bad = cd.build_payload(workspace=".", data=_data(rows), tree=base)
+    assert p_bad["corpus"]["debt_by_kpi"]["alias_resolved"] == 1
+    base["wire_present"] = lambda key: key == "ssm.conv_kernel"
+    p_good = cd.build_payload(workspace=".", data=_data(rows), tree=base)
+    assert p_good["corpus"]["debt_by_kpi"]["alias_resolved"] == 0
 
 
 def test_anchored_catches_crystal_without_anchor_and_dangling() -> None:

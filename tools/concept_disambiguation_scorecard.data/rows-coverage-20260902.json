@@ -171,9 +171,7 @@
       "distinct_from": [
         "x2-guard-gate-envtoggles"
       ],
-      "aliases": [
-        "qwen38gate"
-      ],
+      "aliases": [],
       "grounding": "qwen38-ladder",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",

@@ -6,7 +6,7 @@
       "family": "policy-capability",
       "kind": "symbol",
       "definition": "ctxmmu.ExpertResidencyPolicy (internal/ctxmmu/expert_residency.go) is the MoE expert-residency policy for the unified-memory serving tier: it holds a byte-budgeted resident hot-set LRU ring and a separate bounded transient prefill ring over a ResidencyBacking store, deciding per touch whether a routed expert's weights sit resident, transient, or cold. Prefill touches stage cold descriptors only into the transient ring so a sweep can never evict the decode hot set; Decode promotes a transient hit into the hot set by descriptor swap with no payload re-read, and loads a cold miss into the hot set. WarmStart seeds the hot set from a frequency-ranked access trace and Stats() reports the hit/miss/promotion/eviction accounting.",
-      "distinction": "It is the policy TYPE owning the two rings and their admission logic - not its two constructors, not the ExpertResidencyAdvisor interface it consults, and not the offline KVEvictPolicy replay labels or the model-side ExpertRingPolicy victim ranking. Its 'residency' is expert-weight ring placement, not the engine-residency tool-call adjudicator residencyGate.",
+      "distinction": "It is the policy TYPE owning the two rings and their admission logic - not its two constructors, not the ExpertResidencyAdvisor interface it consults, and not the offline KVEvictPolicy replay labels or the model-side ExpertRingEvictPolicy victim ranking. Its 'residency' is expert-weight ring placement, not the engine-residency tool-call adjudicator residencyGate.",
       "distinct_from": [
         "NewExpertResidencyPolicy",
         "NewExpertResidencyPolicyWithAdvisor",

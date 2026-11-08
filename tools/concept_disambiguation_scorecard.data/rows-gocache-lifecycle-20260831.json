@@ -11,9 +11,7 @@
         "gocache-lifecycle-freebytes",
         "gocache-lifecycle-options"
       ],
-      "aliases": [
-        "GoCacheReport.Err"
-      ],
+      "aliases": [],
       "grounding": "cacheerr",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
@@ -32,9 +30,7 @@
         "gocache-lifecycle-freebytes",
         "gocache-lifecycle-options"
       ],
-      "aliases": [
-        "GoCacheReport.CandidateBytes"
-      ],
+      "aliases": [],
       "grounding": "candidatebytes",
       "grounding_kind": "symbol",
       "glossary_anchor": "",

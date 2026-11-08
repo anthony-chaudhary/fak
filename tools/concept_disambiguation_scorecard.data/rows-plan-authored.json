@@ -239,9 +239,7 @@
         "cov-optimize-verbs-plan-planningrungs",
         "cov-optimize-verbs-plan-candidatetoks"
       ],
-      "aliases": [
-        "internal/optimize.OptimizePlan"
-      ],
+      "aliases": [],
       "grounding": "OptimizePlan",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/concepts/disambiguation-plan.md",
@@ -260,9 +258,7 @@
       "distinct_from": [
         "cov-optimize-verbs-plan-optimizeplan"
       ],
-      "aliases": [
-        "internal/optimize.BuildPlanFromProfile"
-      ],
+      "aliases": [],
       "grounding": "BuildPlanFromProfile",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/concepts/disambiguation-plan.md",
@@ -282,9 +278,7 @@
         "cov-optimize-verbs-plan-optimizeplan",
         "cov-optimize-verbs-plan-ledgerplanned"
       ],
-      "aliases": [
-        "internal/optimize.ClassNoPlanningBand"
-      ],
+      "aliases": [],
       "grounding": "ClassNoPlanningBand",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/concepts/disambiguation-plan.md",
@@ -303,9 +297,7 @@
       "distinct_from": [
         "cov-optimize-verbs-plan-classnoplanningband"
       ],
-      "aliases": [
-        "internal/optimize.LedgerPlanned"
-      ],
+      "aliases": [],
       "grounding": "LedgerPlanned",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/concepts/disambiguation-plan.md",
@@ -324,9 +316,7 @@
       "distinct_from": [
         "cov-optimize-verbs-plan-optimizeplan"
       ],
-      "aliases": [
-        "internal/optimize.planningRungs"
-      ],
+      "aliases": [],
       "grounding": "planningRungs",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/concepts/disambiguation-plan.md",
@@ -345,9 +335,7 @@
       "distinct_from": [
         "cov-optimize-verbs-plan-optimizeplan"
       ],
-      "aliases": [
-        "internal/optimize.OptimizeReceipt.CandidateTokS"
-      ],
+      "aliases": [],
       "grounding": "CandidateTokS",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/concepts/disambiguation-plan.md",

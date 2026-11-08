@@ -11,9 +11,7 @@
         "covg-plan-ncandidate",
         "candidate-planner"
       ],
-      "aliases": [
-        "explicit non-candidate disposition"
-      ],
+      "aliases": [],
       "grounding": "NonCandidate",
       "grounding_kind": "doc",
       "glossary_anchor": "docs/fak/concept-glossary.md",

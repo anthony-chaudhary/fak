@@ -32,15 +32,17 @@ clarity axes a confused reader actually feels:
   INDEXED       - a reader who meets any SPELLING of the name (canonical / alias /
                   grounding token) lands on exactly one concept. See "indexing" below.
 
-The clarity **verdict** ladder folds those into one honest label per concept:
+The clarity **verdict** ladder folds the row's OWN evidence into one honest label per
+concept. Grounding and reference resolution are cross-checked by their own KPIs
+(`kpi_grounded`, `kpi_reference_resolves`) and are NOT folded into the verdict:
 
-  crystal       grounded + defined + distinction + distinct_from resolves + anchor exists
-  defined       grounded + defined + distinction, but the line is not written in a doc
-  drifting      grounded + defined, but NO line drawn against its siblings
+  crystal       defined + distinction drawn + anchored on disk
+  defined       defined + distinction drawn, but the line is not written in a doc
+  drifting      defined, but NO line drawn against its siblings
   entangled     defined and draws SOME line, but not against the twin its own NAME is
                 confusable with - per-row clean, pairwise still fog
   colliding     shares a canonical name with another concept (a true ambiguity)
-  undocumented  appears in the tree, but the catalog gives no definition
+  undocumented  no definition at all
 
 SEPARATION - disambiguating concepts FROM EACH OTHER. The catalog's own names are swept
 for the pairs a reader cannot keep apart: ``permuted`` (identical word multiset in a
@@ -59,10 +61,11 @@ names cannot show, because both canonicals can be unique while one row quietly c
 other's name as an ALIAS. Rendered to the generated ``INDEX.md``.
 
 Every check CROSS-CHECKS the row against the real tree: the grounding token must
-appear in the production corpus, the glossary anchor must exist on disk, a
-``distinct_from`` reference must resolve to a real catalog id. So the score CANNOT be
-gamed by editing the data alone; to drop debt you fix the real thing (rename a true
-collision, write a definition, draw + anchor the distinction).
+appear in the production corpus, every ALIAS must resolve in the tree (as a real
+token, or as a wire key present verbatim in the Go source), the glossary anchor must
+exist on disk, a ``distinct_from`` reference must resolve to a real catalog id. So the
+score CANNOT be gamed by editing the data alone; to drop debt you fix the real thing
+(rename a true collision, write a definition, draw + anchor the distinction).
 
 For scale, an optional ``parent`` edge rolls a concept up to the abstraction that HEADS
 it, and ``--rollup`` folds the forest into a higher-level operator view. The fold is
@@ -162,6 +165,7 @@ KPI_GROUP: dict[str, str] = {
     "pair_separated": "separation",
     "pair_mutual": "separation",
     "grounded": "grounded",
+    "alias_resolved": "grounded",
     "anchored": "grounded",
     "index_resolves": "indexed",
     "clarity_consistent": "honesty",
@@ -174,7 +178,8 @@ KPI_WEIGHTS: dict[str, float] = {
     "reference_resolves": 0.07,
     "pair_separated": 0.12,
     "pair_mutual": 0.05,
-    "grounded": 0.10,
+    "grounded": 0.05,
+    "alias_resolved": 0.05,
     "anchored": 0.05,
     "index_resolves": 0.07,
     "clarity_consistent": 0.07,
@@ -188,6 +193,7 @@ KPI_PENALTY: dict[str, int] = {
     "pair_separated": 20,
     "pair_mutual": 10,
     "grounded": 16,
+    "alias_resolved": 12,
     "anchored": 12,
     "index_resolves": 18,
     "clarity_consistent": 18,
@@ -961,6 +967,52 @@ def kpi_grounded(rows: list[dict[str, Any]], in_tree: Callable[[str], bool]) -> 
                 bad_detail=f"{len(defects)} ungrounded concept(s)")
 
 
+# Wire keys - env vars, json tags, metric names, GGUF header keys - are spelled with
+# '.', '-' or ALLCAPS_WITH_UNDERSCORE. The identifier corpus regex-splits such keys
+# (ssm.conv_kernel -> ssm / conv / kernel), so token identity cannot see them; only a
+# verbatim raw-text scan of the Go source can.
+_WIRE_KEY_RE = re.compile(r"^[A-Z0-9]+(?:_[A-Z0-9]+)+$")
+
+
+def is_wire_key(name: Any) -> bool:
+    """Does the spelling look like a wire/config key rather than a tree identifier?"""
+    if not isinstance(name, str):
+        return False
+    return ("." in name) or ("-" in name) or bool(_WIRE_KEY_RE.match(name))
+
+
+def kpi_alias_resolved(rows: list[dict[str, Any]], in_tree: Callable[[str], bool],
+                       wire_present: Callable[[str], bool]) -> dict[str, Any]:
+    """Every alias a row claims must RESOLVE against the tree, the way its grounding
+    does - or the alias silently retires coverage debt for a name nobody uses: in the
+    coverage fold a fabricated alias is indistinguishable from a real one, and it pads
+    the index with a pointer to nothing.
+
+    Two ways to resolve:
+      in-tree   the normalized alias is a real identifier / dir / heading token - the
+                strict identity check grounding uses;
+      wire key  a config/env/metric key shaped like one ('.', '-', or
+                ALLCAPS_WITH_UNDERSCORE) that appears VERBATIM in a non-test
+                internal/ or cmd/ .go file - dotted keys are regex-split in the
+                identifier corpus, so they are matched as raw substrings."""
+    defects: list[str] = []
+    for i, r in enumerate(rows):
+        rid = r.get("id", i)
+        seen: set[str] = set()
+        for a in r.get("aliases") or []:
+            if not isinstance(a, str) or not a.strip() or a in seen:
+                continue
+            seen.add(a)
+            if in_tree(norm_token(a)):
+                continue
+            if is_wire_key(a) and wire_present(a):
+                continue
+            defects.append(f"{rid}: alias '{a}' resolves nowhere in the tree - "
+                           f"a fabricated or stale alias retires coverage debt dishonestly")
+    return _kpi("alias_resolved", defects, "every alias resolves in the tree (token or wire key)",
+                bad_detail=f"{len(defects)} unresolvable alias(es)")
+
+
 def kpi_anchored(rows: list[dict[str, Any]], exists: Callable[[str], bool]) -> dict[str, Any]:
     """A concept claiming CRYSTAL clarity must have its distinction WRITTEN somewhere
     discoverable: a glossary_anchor that exists. And any non-empty anchor (at any
@@ -1458,6 +1510,7 @@ def run_kpis(rows: list[dict[str, Any]], families: set[str], colliding_ids: set[
               sep: dict[str, Any], unresolved: list[str], index: dict[str, Any],
               ipairs: list[dict[str, Any]], edges: set[tuple[str, str]],
               entangled: dict[str, str],
+              wire_present: Callable[[str], bool],
               expected_by_row: dict[int, tuple[str, str]] | None = None
               ) -> list[dict[str, Any]]:
     return [
@@ -1469,6 +1522,7 @@ def run_kpis(rows: list[dict[str, Any]], families: set[str], colliding_ids: set[
         kpi_pair_separated(sep),
         kpi_pair_mutual(sep),
         kpi_grounded(rows, in_tree),
+        kpi_alias_resolved(rows, in_tree, wire_present),
         kpi_anchored(rows, exists),
         kpi_index_resolves(ipairs, rows, edges, index),
         kpi_clarity_consistent(rows, colliding_ids, exists, sizes, entangled,
@@ -1497,6 +1551,7 @@ def build_payload(*, workspace: str, data: dict[str, Any] | None, tree: dict[str
     in_tree = tree.get("in_tree") or (lambda t: False)
     exists = tree.get("exists") or (lambda p: False)
     doc_verbs = tree.get("doc_verbs") or set()
+    wire_present = tree.get("wire_present") or (lambda k: False)
     if indexed:
         # One fold observes one immutable tree. Cache repeated anchor probes so the KPI,
         # verdict consistency check, and leaderboard consume exactly the same fact.
@@ -1533,6 +1588,7 @@ def build_payload(*, workspace: str, data: dict[str, Any] | None, tree: dict[str
     kpis = run_kpis(rows, families, colliding_ids, sizes, in_tree, exists, doc_verbs,
                     sep=sep, unresolved=unresolved, index=index, ipairs=ipairs,
                     edges=edges, entangled=entangled,
+                    wire_present=wire_present,
                     expected_by_row=expected_by_row)
     by_name = {k["kpi"]: k for k in kpis}
     clarity_score = round(sum(KPI_WEIGHTS[n] * by_name[n]["score"]
@@ -1731,6 +1787,7 @@ def load_corpus(root: Path) -> dict[str, Any]:
     """
     sym_files: dict[str, set[str]] = {}
     structural: set[str] = set()
+    go_raw: list[str] = []
 
     for base in ("internal", "cmd"):
         bdir = root / base
@@ -1749,6 +1806,7 @@ def load_corpus(root: Path) -> dict[str, Any]:
                 text = gp.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
+            go_raw.append(text)
             rel = str(gp.relative_to(root)).replace("\\", "/")
             seen: set[str] = set()
             for m in _IDENT_RE.finditer(text):
@@ -1785,6 +1843,15 @@ def load_corpus(root: Path) -> dict[str, Any]:
 
     grounded_tokens = set(sym_files) | structural
 
+    # Wire keys (env vars, json tags, metric names, GGUF headers) are SPLIT by the
+    # identifier regex, so token identity cannot see them; a verbatim raw-text scan of
+    # the same non-test source files is the only check that can. One joined blob keeps
+    # each probe a single substring scan.
+    go_blob = "\x00".join(go_raw)
+
+    def wire_present(key: str) -> bool:
+        return bool(key) and ("\x00" not in key) and (key in go_blob)
+
     def in_tree(tok: str) -> bool:
         # STRICT identity only. A tolerant substring match would let a fabricated
         # grounding ('policyloaded') pass because it contains a real token ('policy') -
@@ -1804,6 +1871,7 @@ def load_corpus(root: Path) -> dict[str, Any]:
     return {
         "corpus": {"sym_files": sym_files, "structural": structural},
         "in_tree": in_tree,
+        "wire_present": wire_present,
         "exists": lambda p: bool(p) and (root / p).exists(),
         "doc_verbs": doc_verbs,
     }
@@ -2329,12 +2397,12 @@ def render_doc_index(payload: dict[str, Any], *, stamp: str | None = None) -> st
     out.append("")
     out.append("| Verdict | Means |")
     out.append("|---|---|")
-    out.append("| * crystal | grounded + defined + a line drawn against siblings + that line anchored in a doc that exists |")
-    out.append("| o defined | grounded + defined + a distinction line, but the line is not written in a discoverable doc |")
-    out.append("| ~ drifting | grounded + defined, but no line drawn against its siblings (you know what it is, not what it is NOT) |")
+    out.append("| * crystal | defined + a line drawn against siblings + that line anchored in a doc that exists |")
+    out.append("| o defined | defined + a distinction line, but the line is not written in a discoverable doc |")
+    out.append("| ~ drifting | defined, but no line drawn against its siblings (you know what it is, not what it is NOT) |")
     out.append("| = entangled | defined and draws SOME line, but not against the twin its own NAME is confusable with - per-row clean, pairwise still fog |")
     out.append("| x colliding | shares a canonical name with another concept - a true ambiguity, fixable only by a rename |")
-    out.append("| . undocumented | appears in the tree, but the catalog gives no definition |")
+    out.append("| . undocumented | the catalog gives no definition |")
     out.append("")
     sp = c.get("separation") or {}
     ix = c.get("index") or {}

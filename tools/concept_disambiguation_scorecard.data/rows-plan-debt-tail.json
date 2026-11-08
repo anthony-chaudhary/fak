@@ -30,9 +30,7 @@
         "covg-plan-candidateblockedby",
         "v41candidatesource"
       ],
-      "aliases": [
-        "CandidateTree (speculative)"
-      ],
+      "aliases": [],
       "grounding": "CandidateTree",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/concepts/disambiguation-plan.md",
