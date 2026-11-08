@@ -2709,3 +2709,14 @@ evidence" section above applies to this adaptation.
 Copyright (c) 2023-2026 The ggml authors. SPDX-License-Identifier: MIT. The complete permission and warranty notice is preserved in the adapted source file and the upstream LICENSE.
 
 The Go policy preserves per-layer token clocks, retained recency/frequency scores, eight class-specific LRU lists, current-batch protection, and maximum normalized-age victim selection. This component does not load weights, change cache defaults or claim hardware/performance qualification.
+
+## vLLM draft KV dtype inheritance
+
+`internal/model/draft_kv_dtype.go` adapts the draft KV dtype selection contract
+from vLLM at revision `31f84f6b957b5f5309f66130efc3c1df07d8a995`:
+https://github.com/vllm-project/vllm/blob/31f84f6b957b5f5309f66130efc3c1df07d8a995/vllm/config/speculative.py
+(`kv_cache_dtype`: an unspecified draft dtype inherits the target declaration).
+Copyright contributors to the vLLM project. SPDX-License-Identifier: Apache-2.0.
+Reuse decision: ADAPT. No Python source copied; the Go component only selects
+a declaration and does not implement a cache backend. The Apache-2.0 license
+text already reproduced in this file applies.
