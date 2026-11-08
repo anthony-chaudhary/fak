@@ -23,8 +23,13 @@ var (
 	// KnownExpectedInputLayouts is the starter vocabulary for
 	// expected_input_layout, aligned with the storage orders fak registers per
 	// kernel family: row-major payloads, tile-swizzled activations, and
-	// column-interleaved quant blocks.
-	KnownExpectedInputLayouts = []string{"row-major", "tile-swizzled", "column-interleaved"}
+	// column-interleaved quant blocks. The Qwen3.5-family ssm_out order pair is
+	// named by internal/compute/qwen35_value_head_tiling.go at commit
+	// 36d3e634c3: GGUF input columns are stored value-head-tiled while the GDN
+	// core emits grouped order; layout ledger row LML-07 (lessons PHL-045 and
+	// PHL-127) witnessed the cost of riding tiled columns through the Q8_0
+	// deinterleave.
+	KnownExpectedInputLayouts = []string{"row-major", "tile-swizzled", "column-interleaved", "value-head-tiled", "grouped"}
 	// KnownSwizzlePatterns is the starter vocabulary for swizzle_pattern, named
 	// after the transform pairs shipped in-tree: compute.SwizzleNVFP4Scales and
 	// bench.RepackQ4KInterleaved.

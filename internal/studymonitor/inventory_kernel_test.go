@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -518,6 +519,90 @@ func TestKernelInventoryEvidenceCarriesLayoutObligationFields(t *testing.T) {
 	registry := registryWithInventoryForTest(contract)
 	if err := registry.Validate(); err == nil || !strings.Contains(err.Error(), "layout obligation fields belong to the kernel_inventory record") {
 		t.Fatalf("Validate() error = %v, want layout fields refused off the kernel_inventory record", err)
+	}
+}
+
+// TestInventoryCheckCatchesValueHeadTileDeinterleave_LML07 is the layout-ledger
+// flip witness for row LML-07: a kernel_inventory record that obligates the
+// Qwen3.5-family ssm_out value-head-tiled input columns (lessons PHL-045 and
+// PHL-127; fix 36d3e634c3 keeps the GGUF bytes and tiles the GDN core instead
+// of deinterleaving into a Q8_0 copy) must be refused when the declared loader
+// packing path feeds those columns through the Q8_0 deinterleave, and accepted
+// when the packing path keeps the tiled order. Assertions pin the sentinels
+// with errors.Is, never error prose.
+func TestInventoryCheckCatchesValueHeadTileDeinterleave_LML07(t *testing.T) {
+	ssmOutRecord := InventorySourceEvidence{
+		Class:               KernelInventorySourceClass,
+		Evidence:            []string{"docs/research/o-up2/kernel-inventory.json"},
+		ExpectedInputLayout: "value-head-tiled",
+		SwizzlePattern:      "none",
+		ScaleLayout:         "linear",
+		PackingSource:       "loader-native",
+	}
+	q8Deinterleave := PackingPathFacts{
+		ExpectedInputLayout: "grouped", // Q8_0 copy whose columns were deinterleaved into grouped order
+		SwizzlePattern:      "none",
+		ScaleLayout:         "linear",
+		PackingSource:       "runtime-repack",
+	}
+	nativeTiledRoute := PackingPathFacts{
+		ExpectedInputLayout: "value-head-tiled", // GGUF bytes kept; the core is tiled before the projection
+		SwizzlePattern:      "none",
+		ScaleLayout:         "linear",
+		PackingSource:       "loader-native",
+	}
+
+	tests := []struct {
+		name    string
+		rec     InventorySourceEvidence
+		packing PackingPathFacts
+		want    error
+	}{
+		{name: "LML07 value-head-tiled ssm_out vs Q8_0 deinterleave packing", rec: ssmOutRecord, packing: q8Deinterleave, want: ErrLayoutMismatch},
+		{name: "LML07 value-head-tiled ssm_out vs native tiled packing", rec: ssmOutRecord, packing: nativeTiledRoute, want: nil},
+		{name: "novel record value refuses as unknown even when the packing side repeats it", rec: InventorySourceEvidence{
+			Class:          KernelInventorySourceClass,
+			Evidence:       []string{"docs/research/o-up2/kernel-inventory.json"},
+			SwizzlePattern: "flash-attention-3-paged",
+		}, packing: PackingPathFacts{SwizzlePattern: "flash-attention-3-paged"}, want: ErrLayoutUnknown},
+		{name: "obligated axis undeclared by the packing path refuses as unknown", rec: ssmOutRecord, packing: PackingPathFacts{}, want: ErrLayoutUnknown},
+		{name: "whitespace-only obligations carry nothing", rec: InventorySourceEvidence{
+			Class:               KernelInventorySourceClass,
+			Evidence:            []string{"docs/research/o-up2/kernel-inventory.json"},
+			ExpectedInputLayout: "  ",
+			PackingSource:       "\t",
+		}, packing: PackingPathFacts{}, want: nil},
+		{name: "legacy record without obligations passes", rec: InventorySourceEvidence{
+			Class:    KernelInventorySourceClass,
+			Evidence: []string{"docs/research/o-up2/kernel-inventory.json"},
+		}, packing: PackingPathFacts{}, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := CheckLoaderPackingAgainstInventory(tt.rec, tt.packing); !errors.Is(err, tt.want) {
+				t.Fatalf("CheckLoaderPackingAgainstInventory() error = %v, want sentinel %v", err, tt.want)
+			}
+		})
+	}
+}
+
+// TestInventoryVocabularyNamesTheSSMOutOrderPair verifies the LML-07 class is
+// representable inside the closed vocabularies: both the GGUF value-head-tiled
+// order and the deinterleaved grouped order are known expected_input_layout
+// values, so a record naming either reads back without an unknown flag.
+func TestInventoryVocabularyNamesTheSSMOutOrderPair(t *testing.T) {
+	for _, value := range []string{"value-head-tiled", "grouped"} {
+		if !slices.Contains(KnownExpectedInputLayouts, value) {
+			t.Fatalf("KnownExpectedInputLayouts = %v, want %q named", KnownExpectedInputLayouts, value)
+		}
+	}
+	rec := InventorySourceEvidence{
+		Class:               KernelInventorySourceClass,
+		Evidence:            []string{"docs/research/o-up2/kernel-inventory.json"},
+		ExpectedInputLayout: "value-head-tiled",
+	}
+	if got := rec.UnknownLayoutValues(); len(got) != 0 {
+		t.Fatalf("UnknownLayoutValues() = %v, want the value-head-tiled order to read back known", got)
 	}
 }
 
