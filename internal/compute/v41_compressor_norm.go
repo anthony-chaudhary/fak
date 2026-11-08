@@ -26,7 +26,7 @@ func V41CompressorNormDomain(width int, eps float32) bool {
 }
 
 // v41CompressorFinite32 reports whether v is a finite binary32 value.
-func v41CompressorFinite32(v float32) bool { return math.Float32bits(v) < 0x7f800000 }
+func v41CompressorFinite32(v float32) bool { return math.Float32bits(v)&0x7fffffff < 0x7f800000 }
 
 // v41CompressorBF16Round rounds a finite binary32 value to the nearest BF16
 // value, ties to even, and returns its binary32 widening. The increment is
