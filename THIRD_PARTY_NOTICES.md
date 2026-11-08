@@ -306,6 +306,28 @@ The full upstream LICENSE at the pinned revision follows:
   `internal/model/draft_depth_cost_test.go` pins the pooled verify-cost
   table and the confidence-priced keep/stop rule (software evidence only).
 
+## TensorFold embeddings encoder worker
+
+- Upstream: ashhart/TensorFold, commit
+  `9e8c368b0b4c2c7892a0c9f0f302d7c164016209` (Apache-2.0), sources
+  `zig/src/server/embeddings.zig` and `zig/src/server/embedding_request.zig`:
+  https://github.com/ashhart/TensorFold/blob/9e8c368b0b4c2c7892a0c9f0f302d7c164016209/zig/src/server/embeddings.zig
+- Adaptation: `internal/gateway/embedding_worker.go` re-expresses the
+  embeddings reply contract in Go: capability and input validation before
+  encoder work, sequence-boundary-preserving text/token batch admission under
+  per-input limits, declared dimensions/float/base64 capabilities, refusal of
+  out-of-vocabulary tokens and non-length finishes, borrowed output storage
+  that survives cancellation to completion, and unwritten vectors or
+  generated tokens that cannot become successful embeddings;
+  `handleEmbeddings` in `internal/gateway/embeddings.go` consults the
+  installed worker ahead of the causal and hashing fallbacks. No Zig code
+  blocks are copied; the contract is adapted.
+- License: Apache License 2.0, already reproduced above under "TensorFold
+  benchmark evidence".
+- Witness: `TestEmbeddingsEncoderWorkerContract` in
+  `internal/gateway/embeddings_worker_test.go` pins the wired 200/refusal
+  matrix over handleEmbeddings (software evidence only).
+
 ## TensorFold decode/prefill wall-time share
 
 `internal/agent/inkernel_qwen_coordinator.go` and
