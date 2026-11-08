@@ -110,6 +110,11 @@ func ReadRanges(src io.ReaderAt, ranges []Range, parallelism int) error {
 				}
 				r := ranges[i]
 				got, err := src.ReadAt(r.Dst, r.Offset)
+				// ReaderAt permits either nil or EOF when a full read ends
+				// exactly at the source boundary. All other errors still fail.
+				if got == len(r.Dst) && err == io.EOF {
+					err = nil
+				}
 				if err != nil {
 					fail(fmt.Errorf("model: ReadRanges: read %d bytes at offset %d: %w", len(r.Dst), r.Offset, err))
 					return
