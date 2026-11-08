@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const cudaFlashMLADecodeManifestSHA256 = "97dd0fce45408709cd30a9b27ccb91ba9b4f4b11923e218a913db7433cbeb2c8"
+const cudaFlashMLADecodeManifestSHA256 = "59d142e92bde05a639663b265d59a12f2437b827bfe35626de7d99ed4f1394d8"
 
 type cudaFlashMLADecodeKey struct{}
 

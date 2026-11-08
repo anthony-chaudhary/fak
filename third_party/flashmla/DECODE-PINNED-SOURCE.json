@@ -15,8 +15,8 @@
     },
     {
       "path": "third_party/flashmla/csrc/cuda_kernels/sm100/decode/sparse/head64/kernel.cuh",
-      "bytes": 37759,
-      "sha256": "26af7d06f4b16c54b36452c0456dd557bb3b0ee48a8b89930dd446e5864bf137"
+      "bytes": 37832,
+      "sha256": "ed9d0d7a2543a0b0124365c9da2774ffb9eaa6961a23aa21f0f44339e7fdfcf0"
     },
     {
       "path": "third_party/flashmla/csrc/cuda_kernels/sm100/dequant_utils.cuh",
@@ -52,6 +52,13 @@
       "path": "third_party/flashmla/csrc/cuda_kernels/smxx/decode/get_decoding_sched_meta/get_decoding_sched_meta.h",
       "bytes": 179,
       "sha256": "8cda7a2ae5f7ba72774d7a38367ab4a51b68331806f6914d4fc29ffa0ca9f528"
+    }
+  ],
+  "forward_sync": [
+    {
+      "path": "third_party/flashmla/csrc/cuda_kernels/sm100/decode/sparse/head64/kernel.cuh",
+      "upstream_commit": "395cb3afbb331fef7b1b21e9340861b9436b42d8",
+      "reason": "PR #241: synchronize rowwise_max_buf before li exchange; other files retain base pin"
     }
   ]
 }

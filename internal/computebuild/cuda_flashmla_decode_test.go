@@ -2,6 +2,7 @@ package computebuild
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -84,5 +85,20 @@ func TestFlashMLADecodeGenericMatrixComposition(t *testing.T) {
 	// Ordinary matrix support does not qualify an unrelated FlashMLA architecture.
 	if _, _, err := ParseCUDAArchMatrix(matrix, "sm_120"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// fak-test:runtime fast est=10ms
+func TestFlashMLADecodeManifestIntegrity(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := verifyCUDAVendorSources(root, "third_party/flashmla/DECODE-PINNED-SOURCE.json", cudaFlashMLADecodeManifestSHA256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.FlashMLACommit != "2e5429fc5653bab6e081f09477126f731882a6a9" {
+		t.Fatalf("base pin unexpectedly changed: %s", manifest.FlashMLACommit)
 	}
 }
