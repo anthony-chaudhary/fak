@@ -2701,3 +2701,11 @@ SPDX-License-Identifier: Apache-2.0.
 Changed for Fak: an independently written Go host oracle for contiguous padded token shards, gathering and trimming to the true token count, and re-sharding at receiving stages. Geometry checks prevent representability overflow, not practical out-of-memory failures. No distributed transport or hardware execution is implemented.
 The full Apache License, Version 2.0 reproduced in the "TensorFold benchmark
 evidence" section above applies to this adaptation.
+
+## llama.cpp expert-cache ClassLRU policy
+
+`internal/modelloadplan/expert_cache_lrfu.go` adapts the logical expert-cache ClassLRU policy from `ggml-org/llama.cpp`, `src/llama-moe-cache.cpp:17-228`, at revision `c4fb579695320929b6a453f4f3a56951bda332ee`.
+
+Copyright (c) 2023-2026 The ggml authors. SPDX-License-Identifier: MIT. The complete permission and warranty notice is preserved in the adapted source file and the upstream LICENSE.
+
+The Go policy preserves per-layer token clocks, retained recency/frequency scores, eight class-specific LRU lists, current-batch protection, and maximum normalized-age victim selection. This component does not load weights, change cache defaults or claim hardware/performance qualification.

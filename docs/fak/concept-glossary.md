@@ -2336,3 +2336,115 @@ Correspondence check between a frozen graph allocation receipt and its capture-b
 Bounds-first correspondence check for a capture-owned immutable K/Kraw/V reservation-ticket prefix and the current dense F32 KV store, geometry and full-capacity plane descriptors. It accepts logical row growth within retained capacity and returns the validated prefix length without reacquiring tickets.
 
 **Distinct from:** Unlike cudaGraphOnceDependency.reservationSlotsMatch checking primary/scale slots for one cudaBuf receipt, this validates all selected KV plane slots and retained store metadata. Native allocation identity is checked separately by the shared batch validator; this method does not prove physical ownership, content, CUDA completion or complete captured producer inventory.
+
+
+### ExpertCacheLRFU
+
+Bounded logical resident-slot replacement policy in modelloadplan, adapted from llama.cpp ClassLRU: eight frequency-class LRU lists retain exponentially decayed CRF across eviction and choose the oldest unselected candidate with largest age divided by two to its class. Plan serializes state changes using per-layer token clocks.
+
+**Distinct from:** This is host-side logical residency planning, not ExpertCacheTier physical weight placement, loader I/O, device synchronization or evidence that weights occupy a returned slot.
+
+
+### ExpertCacheLRFUMaxEntries
+
+Maximum logical layer-times-expert entries accepted by NewExpertCacheLRFU: 1 shifted left by 20, checked using division before allocating arrays.
+
+**Distinct from:** This bounds policy metadata geometry, not the requested resident slot count, byte capacity, or frequency-class count.
+
+
+### expertCacheLRFUClasses
+
+Eight frequency buckets used by ExpertCacheLRFU to organize resident slots into separate LRU lists.
+
+**Distinct from:** The bucket count is not metadata entry capacity and does not encode physical weight-storage tiers.
+
+
+### expertCacheLRFUHalfLife
+
+Float32 value 128 used as the per-layer token-clock half-life when decaying ExpertCacheLRFU CRF with Exp2.
+
+**Distinct from:** This is a token-age decay constant, not wall-clock duration, class count or an eviction deadline.
+
+
+### ErrExpertCacheLRFUConfig
+
+Constructor refusal sentinel for nonpositive geometry, excessive logical entries or resident slots exceeding layer-times-expert entries.
+
+**Distinct from:** This rejects policy construction, unlike ErrExpertCacheLRFUInput which rejects an access to an existing policy.
+
+
+### ErrExpertCacheLRFUInput
+
+Access refusal sentinel for a nil ExpertCacheLRFU, out-of-range layer or expert ID, or negative token increment.
+
+**Distinct from:** This is malformed access input, not valid selections exceeding resident slots or token-clock overflow.
+
+
+### ErrExpertCacheLRFUCapacity
+
+Plan refusal sentinel when distinct selected experts exceed available logical resident slots, before policy state changes.
+
+**Distinct from:** This is selected-set cardinality overflow, not constructor metadata geometry or physical memory allocation failure.
+
+
+### ErrExpertCacheLRFUClock
+
+Plan refusal sentinel when a nonnegative token increment would overflow the selected layer int64 clock.
+
+**Distinct from:** This protects logical token arithmetic, not a timeout, wall-clock fault or resident-capacity refusal.
+
+
+### ExpertCacheKey
+
+Layer and Expert integer pair identifying one logical expert in the ExpertCacheLRFU policy and its fill or eviction observations.
+
+**Distinct from:** This identifies an expert, not a resident slot, physical pointer, payload digest or access-frequency score.
+
+
+### ExpertCacheLRFUFill
+
+One logical cache-plan miss result: selected ExpertCacheKey, assigned slot and optional owned copy of the evicted expert key.
+
+**Distinct from:** This records simulated placement, not completed weight transfer; nil Evicted means an unused slot, not an unknown victim.
+
+
+### ExpertCacheLRFUPlan
+
+Plan result containing resident hit count, layer clock before and after the token increment, and ordered logical fill observations.
+
+**Distinct from:** This summarizes one policy transition rather than a single fill or proof of loader and device completion.
+
+
+### ExpertCacheLRFUEntry
+
+Owned scalar Inspect snapshot of an expert: resident slot/class, retained CRF, current decayed CRF, last-use token and layer clock.
+
+**Distinct from:** This is an observation without mutation, not a Plan result; class remains the last-use resident bucket and CRF persists after eviction.
+
+
+### NewExpertCacheLRFU
+
+Constructor validating layer, expert and slot geometry and allocating the bounded logical ClassLRU policy with empty slots and zero layer clocks.
+
+**Distinct from:** This initializes policy metadata only, not weight allocation, cache warm-start or a per-token Plan transition.
+
+
+### expertCacheLRFUClass (frequency bucket function)
+
+Internal bucket calculation that converts log2 of post-use CRF to float32 before integer truncation and caps the result at the last of eight classes.
+
+**Distinct from:** This computes frequency class, not victim age score or live class recomputation during Inspect; float32 rounding follows donor bucket boundaries.
+
+
+### ExpertCacheLRFUPlan (policy transition result)
+
+One ExpertCacheLRFU.Plan transition result in modelloadplan: counts logical hits, records the selected layer token-clock interval, and lists ordered fill and eviction decisions.
+
+**Distinct from:** This is the returned description of one policy transition, not a scheduler execution plan or proof that loader I/O succeeded; the cache-family entry describes its logical residency observations.
+
+
+### residentSlots (ExpertCacheLRFU constructor)
+
+NewExpertCacheLRFU constructor parameter fixing the number of logical resident expert slots across the policy layers; it must be positive and no greater than layers times experts.
+
+**Distinct from:** This is simulated expert-residency capacity, not scheduler running-session slots, a byte budget, or device allocation; Plan rejects selections whose distinct experts exceed it.

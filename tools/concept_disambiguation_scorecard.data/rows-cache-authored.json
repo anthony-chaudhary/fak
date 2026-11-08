@@ -29,7 +29,8 @@
       "distinct_from": [
         "cov5304-expert-cache-plan",
         "expertcachebatchadmission",
-        "cache-policy-stream"
+        "cache-policy-stream",
+        "expertcachelrfu"
       ],
       "aliases": [],
       "grounding": "ExpertCacheTier",
