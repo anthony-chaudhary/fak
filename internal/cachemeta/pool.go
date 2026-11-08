@@ -206,7 +206,7 @@ func PoolReuseVerdict(stored Entry, want MaterializationKey) LookupVerdict {
 		return Quarantine(stored, ReasonTaintDenied)
 	}
 	// (2) The producer must have declared the cell shareable beyond itself.
-	if stored.Security.Scope == abi.ScopeAgent {
+	if stored.Security.Scope != abi.ScopeFleet && stored.Security.Scope != abi.ScopeTenant {
 		return Miss(ReasonScopeDenied)
 	}
 	// (3) Only an adjudicated-trusted cell may be aliased across a tenant boundary.
