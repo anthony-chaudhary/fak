@@ -191,6 +191,180 @@ func TestFleetMembershipFailOpenWhenEveryHolderUnhealthy(t *testing.T) {
 	}
 }
 
+// Leaf 1 witness (oss-port-llmd-replica-fail-open-ejection-20261105): the
+// escalating ejection state machine — N-1 consecutive failures do not eject, the
+// Nth ejects for the base window, repeats escalate one step up to the cap,
+// 500/504 responses never increment the failure streak, and an all-ejected pool
+// still returns a replica (fail-open).
+//
+// fak-test:runtime fast est=10ms lane=default
+func TestReplicaEjectionEscalation(t *testing.T) {
+	m, _, clk := ejectionFleet(t)
+	ctx := context.Background()
+	n := m.unhealthyAfter // N: consecutive counted failures that cross to unhealthy
+
+	// N-1 consecutive failures do not eject; the Nth ejects for the base window.
+	for i := 0; i < n-1; i++ {
+		m.markDispatchFailure("w1", io.ErrUnexpectedEOF)
+	}
+	if h := healthOf(t, m, "w1"); h != HealthHealthy {
+		t.Fatalf("N-1 failures: w1 health = %s, want healthy", h)
+	}
+	if got := ejectionWindow(m, "w1"); got > 0 {
+		t.Fatalf("N-1 failures opened a %s ejection window, want none", got)
+	}
+	m.markDispatchFailure("w1", io.ErrUnexpectedEOF)
+	if h := healthOf(t, m, "w1"); h != HealthUnhealthy {
+		t.Fatalf("Nth failure: w1 health = %s, want unhealthy", h)
+	}
+	if got := ejectionWindow(m, "w1"); got != defaultEjectBase {
+		t.Fatalf("first ejection window = %s, want %s", got, defaultEjectBase)
+	}
+
+	// A repeat ejection escalates one step and caps at the maximum window.
+	for step := 2; ; step++ {
+		clk.advance(ejectionWindow(m, "w1")) // expire the current window exactly
+		m.ProbeOnce(ctx)                     // re-admit right at the window edge
+		if h := healthOf(t, m, "w1"); h != HealthHealthy {
+			t.Fatalf("ejection %d: not re-admitted at window end (health %s)", step, h)
+		}
+		for i := 0; i < n; i++ {
+			m.markDispatchFailure("w1", io.ErrUnexpectedEOF)
+		}
+		want := time.Duration(step) * defaultEjectBase
+		if want > defaultEjectMax {
+			want = defaultEjectMax
+		}
+		if got := ejectionWindow(m, "w1"); got != want {
+			t.Fatalf("ejection %d window = %s, want %s", step, got, want)
+		}
+		if want == defaultEjectMax {
+			break
+		}
+	}
+
+	// A 500 or 504 response never increments the failure streak: request-specific
+	// errors and slow-but-working timeouts are not evidence the replica is broken.
+	for i := 0; i < 3*n; i++ {
+		m.markDispatchFailure("w2", &agent.UpstreamStatusError{Status: 500})
+		m.markDispatchFailure("w2", &agent.UpstreamStatusError{Status: 504})
+	}
+	if h := healthOf(t, m, "w2"); h != HealthHealthy {
+		t.Fatalf("500/504 responses drove w2 to %s, want healthy", h)
+	}
+	m.mu.Lock()
+	fs := m.workers["w2"].failStreak
+	m.mu.Unlock()
+	if fs != 0 {
+		t.Fatalf("500/504 responses left failStreak = %d, want 0", fs)
+	}
+	if got := ejectionWindow(m, "w2"); got > 0 {
+		t.Fatalf("500/504 responses opened a %s ejection window, want none", got)
+	}
+
+	// With every replica ejected, selection still returns a replica (fail-open).
+	ejectByDispatch(t, m, "w2") // w1 is inside its capped window from above
+	cands, err := m.CandidatesForModel("")
+	if err != nil || len(cands) != 2 {
+		t.Fatalf("all ejected: candidates = %v, %v; want both (fail-open)", cands, err)
+	}
+	if _, err := m.PickForModel(""); err != nil {
+		t.Fatalf("all ejected: PickForModel err = %v, want fail-open pick", err)
+	}
+}
+
+// Leaf 2 witness (oss-port-llmd-replica-fail-open-ejection-20261105): the state
+// machine wired into the live fleet health loop — an ejected replica leaves
+// rotation for its window and returns when it expires, an all-ejected fleet keeps
+// returning replicas, and the flat unhealthyAfter hysteresis remains the fallback
+// when no dispatch ejection engages.
+//
+// fak-test:runtime fast est=10ms lane=default
+func TestReplicaEjectionMembershipWiring(t *testing.T) {
+	m, sp, clk := ejectionFleet(t)
+	ctx := context.Background()
+
+	// An ejected replica leaves rotation for its window and returns when it
+	// expires: live probe ticks keep answering OK but cannot pull it back in.
+	ejectByDispatch(t, m, "w1")
+	ticks := 3
+	for i := 0; i < ticks; i++ {
+		clk.advance(fleetHealthInterval)
+		m.ProbeOnce(ctx)
+		adm := m.Admissible()
+		if len(adm) != 1 || adm[0].ID != "w2" {
+			t.Fatalf("tick %d inside the window: admissible = %v, want [w2]", i+1, admIDs(adm))
+		}
+		spec, ok := m.Pick()
+		if !ok || spec.ID != "w2" {
+			t.Fatalf("tick %d inside the window: Pick = %q, ok=%v; want w2", i+1, spec.ID, ok)
+		}
+	}
+	clk.advance(defaultEjectBase - time.Duration(ticks)*fleetHealthInterval) // land exactly on expiry
+	m.ProbeOnce(ctx)
+	if h := healthOf(t, m, "w1"); h != HealthHealthy {
+		t.Fatalf("after window expiry: w1 health = %s, want healthy", h)
+	}
+	adm := m.Admissible()
+	if len(adm) != 2 {
+		t.Fatalf("after window expiry: admissible = %v, want both back in rotation", admIDs(adm))
+	}
+
+	// An all-ejected fleet keeps returning replicas (fail-open); rotation never
+	// empties even though no replica is admissible.
+	ejectByDispatch(t, m, "w1")
+	ejectByDispatch(t, m, "w2")
+	spec, ok := m.Pick()
+	if !ok || spec.ID == "" {
+		t.Fatalf("all ejected: Pick = %q, ok=%v; want a fail-open replica", spec.ID, ok)
+	}
+	r, err := m.reserveForModel("", "", nil, nil, func(s []WorkerStatus) (fleetReservationPickResult, bool) {
+		return fleetReservationPickResult{workerID: s[0].Spec.ID}, len(s) == 2
+	})
+	if err != nil {
+		t.Fatalf("all ejected: reserveForModel err = %v, want a fail-open booking", err)
+	}
+	r.Release()
+	if served, err := m.Dispatch(ctx, func(context.Context, WorkerSpec) error { return nil }); err != nil || served.ID == "" {
+		t.Fatalf("all ejected: Dispatch = %q, %v; want served fail-open", served.ID, err)
+	}
+
+	// The flat unhealthyAfter hysteresis remains the fallback when no dispatch
+	// ejection engages: a probe-driven outage crosses on N failed probes, opens no
+	// ejection window, and the next OK probe re-admits under healthyAfter.
+	fresh := NewFleetMembership(MembershipConfig{Probe: sp.probe, Now: clk.now})
+	mustAdd(t, fresh, WorkerSpec{ID: "p1"})
+	sp.set("p1", true)
+	fresh.ProbeOnce(ctx)
+	sp.set("p1", false)
+	for i := 0; i < fresh.unhealthyAfter-1; i++ {
+		fresh.ProbeOnce(ctx)
+	}
+	if h := healthOf(t, fresh, "p1"); h != HealthHealthy {
+		t.Fatalf("N-1 failed probes: p1 health = %s, want healthy", h)
+	}
+	fresh.ProbeOnce(ctx)
+	if h := healthOf(t, fresh, "p1"); h != HealthUnhealthy {
+		t.Fatalf("Nth failed probe: p1 health = %s, want unhealthy", h)
+	}
+	if got := ejectionWindow(fresh, "p1"); got > 0 {
+		t.Fatalf("probe-only outage opened a %s ejection window, want none", got)
+	}
+	sp.set("p1", true)
+	fresh.ProbeOnce(ctx)
+	if h := healthOf(t, fresh, "p1"); h != HealthHealthy {
+		t.Fatalf("next OK probe: p1 health = %s, want healthy (flat hysteresis fallback)", h)
+	}
+}
+
+func admIDs(specs []WorkerSpec) []string {
+	out := make([]string, 0, len(specs))
+	for _, s := range specs {
+		out = append(out, s.ID)
+	}
+	return out
+}
+
 // fak-test:runtime fast est=10ms lane=default
 func TestFleetMembershipFailOpenSkipsDrainingAndUnprobed(t *testing.T) {
 	m, sp, _ := ejectionFleet(t)

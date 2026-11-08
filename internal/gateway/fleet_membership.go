@@ -992,15 +992,20 @@ func (m *FleetMembership) markDispatchFailureWorkerLocked(id string, w *memberWo
 // dispatchOutcomeNeutral reports whether a dispatch error proves the worker alive
 // but busy: it answered with an overload/rate-limit status, so the request moves
 // on without counting toward ejection (nor resetting a failure streak). Transport
-// errors, timeouts and 502/504 remain failures.
-// Concept: sglang sgl-router/src/health/circuit_breaker.rs@9285994a (Apache-2.0).
+// errors, timeouts and 502 remain failures. 500 and 504 are excluded from the
+// failure count: a model server answers 500 for errors specific to one request,
+// and a proxy answers 504 when a slow-but-working replica exceeds its timeout,
+// so neither proves the replica broken.
+// Concepts: sglang sgl-router/src/health/circuit_breaker.rs@9285994a (Apache-2.0);
+// llm-d-inference-scheduler pkg/epp/framework/plugins/scheduling/filter/
+// endpointhealth/filter.go:46-53@329a52efb001905378a98b38435a69b4feab88c2 (Apache-2.0).
 func dispatchOutcomeNeutral(err error) bool {
 	var status *agent.UpstreamStatusError
 	if !errors.As(err, &status) {
 		return false
 	}
 	switch status.Status {
-	case 429, 500, 503, 529:
+	case 429, 500, 503, 504, 529:
 		return true
 	}
 	return false

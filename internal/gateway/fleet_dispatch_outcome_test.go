@@ -95,7 +95,10 @@ func TestDispatchOutcomeNeutralClassifier(t *testing.T) {
 		{"529", &agent.UpstreamStatusError{Status: 529}, true},
 		{"wrapped_503", fmt.Errorf("upstream: %w", &agent.UpstreamStatusError{Status: 503}), true},
 		{"502", &agent.UpstreamStatusError{Status: 502}, false},
-		{"504", &agent.UpstreamStatusError{Status: 504}, false},
+		// 504 is neutral per the llm-d pin (filter.go:46-53@329a52e): the proxy timed
+		// out waiting on a slow-but-working replica, so it is excluded from the
+		// failure count like 500.
+		{"504", &agent.UpstreamStatusError{Status: 504}, true},
 		{"net_error", &net.OpError{Op: "read", Net: "tcp", Err: errors.New("reset")}, false},
 		{"eof", io.EOF, false},
 		{"plain", errors.New("down"), false},
