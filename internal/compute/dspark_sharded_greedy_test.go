@@ -261,3 +261,28 @@ func TestDSparkShardedGreedySentinels(t *testing.T) {
 		}
 	})
 }
+
+// fak-test:runtime fast est=1ms
+func TestDSparkShardedGreedyFinishRejectsNegativeIndex(t *testing.T) {
+	t.Parallel()
+	for _, value := range []float32{1, float32(math.NaN())} {
+		for _, index := range []int32{-1, math.MinInt32} {
+			_, err := DSparkShardedGreedyFinish([]DSparkShardedGreedyPartial{
+				{Value: 2, Index: 0},
+				{Value: value, Index: index},
+			})
+			if !errors.Is(err, ErrDSparkShardedGreedyIndexRange) {
+				t.Fatalf("value=%v index=%d: got %v, want index-range refusal", value, index, err)
+			}
+		}
+	}
+	// The declared masked sentinel remains ignorable even with a NaN value;
+	// zero is a valid token index and must still win the remaining row.
+	got, err := DSparkShardedGreedyFinish([]DSparkShardedGreedyPartial{
+		{Value: float32(math.NaN()), Index: DSparkShardedGreedyInvalidIndex},
+		{Value: 2, Index: 0},
+	})
+	if err != nil || got != 0 {
+		t.Fatalf("masked sentinel plus token zero: got (%d, %v)", got, err)
+	}
+}

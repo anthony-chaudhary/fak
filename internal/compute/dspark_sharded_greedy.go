@@ -61,7 +61,8 @@ var (
 	ErrDSparkShardedGreedyVocabStart = errors.New("compute: dspark sharded greedy: negative vocab start")
 
 	// ErrDSparkShardedGreedyIndexRange rejects rows whose global indices
-	// would overflow the int32 index space the transport carries.
+	// would overflow the int32 index space the transport carries, and finish
+	// partials with negative token indices.
 	ErrDSparkShardedGreedyIndexRange = errors.New("compute: dspark sharded greedy: global index exceeds int32 range")
 
 	// ErrDSparkShardedGreedyNoWinner rejects a finish stage whose partials
@@ -155,6 +156,8 @@ func DSparkShardedGreedyPartials(bias, baseLocal []float32, vocabStart int) ([]D
 // DSparkShardedGreedyFinish runs the finish stage: combine the per-block
 // partials into the single winning global token id. Invalid slots are
 // dropped; a NaN partial dominates and resolves to the smallest NaN index.
+// Negative indices are malformed, not masked slots, and are refused before
+// score comparison (including NaNs).
 func DSparkShardedGreedyFinish(partials []DSparkShardedGreedyPartial) (int, error) {
 	var (
 		hasNaN bool
@@ -163,6 +166,9 @@ func DSparkShardedGreedyFinish(partials []DSparkShardedGreedyPartial) (int, erro
 	)
 	bestIdx := int32(-1) // -1 means "no valid partial yet"; 0 is a real index
 	for _, p := range partials {
+		if p.Index < 0 {
+			return 0, ErrDSparkShardedGreedyIndexRange
+		}
 		if p.Index == DSparkShardedGreedyInvalidIndex {
 			continue
 		}
