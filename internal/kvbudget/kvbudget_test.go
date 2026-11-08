@@ -306,3 +306,38 @@ func TestDeriveMaxBlocksFromFreeBytesAndUtilization(t *testing.T) {
 		})
 	}
 }
+
+// TestKvBudgetDeriveMaxBlocksArithmeticAndSentinels pins the closed acceptance
+// matrix from the leaf spec: exact integer block counts, the three sentinels
+// via errors.Is, and no float-drag loss of whole free bytes at utilization 1.0.
+func TestKvBudgetDeriveMaxBlocksArithmeticAndSentinels(t *testing.T) {
+	cases := []struct {
+		name          string
+		free, nonKV   uint64
+		util          float64
+		bytesPerBlock uint64
+		want          int
+		wantErr       error
+	}{
+		{name: "full free bytes at util one", free: 1_000_000_000, util: 1.0, bytesPerBlock: 1_000_000, want: 1000},
+		{name: "utilized minus non-KV", free: 1_000_000_000, nonKV: 400_000_000, util: 0.8, bytesPerBlock: 1_000_000, want: 400},
+		{name: "nine-tenths at odd block size", free: 1_000_000_000, util: 0.9, bytesPerBlock: 300_000, want: 3000},
+		{name: "zero utilization", free: GiB, util: 0, bytesPerBlock: 1, wantErr: ErrUtilizationOutOfRange},
+		{name: "utilization above one", free: GiB, util: 1.5, bytesPerBlock: 1, wantErr: ErrUtilizationOutOfRange},
+		{name: "zero block size", free: GiB, util: 0.9, bytesPerBlock: 0, wantErr: ErrZeroBlockSize},
+		{name: "non-KV one byte over budget", free: 1_000_000_000, nonKV: 900_000_001, util: 0.9, bytesPerBlock: 1, wantErr: ErrNonKVExceedsBudget},
+		// A >2^53-byte pool discriminates the util==1 fast path: without it, float64(2^53+1) ties-to-even down to 2^53 and the derivation loses one whole byte.
+		{name: "no float drag at util one, >2^53 pool", free: (1 << 53) + 1, nonKV: 0, util: 1.0, bytesPerBlock: 1, want: (1 << 53) + 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := DeriveMaxBlocks(tc.free, tc.nonKV, tc.util, tc.bytesPerBlock)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tc.wantErr)
+			}
+			if got != tc.want {
+				t.Fatalf("blocks = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
