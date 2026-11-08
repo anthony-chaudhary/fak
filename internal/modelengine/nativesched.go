@@ -385,6 +385,32 @@ func (s *NativeScheduler) MaxObservedRunning() int {
 	return s.maxObservedRunning
 }
 
+// ActiveLanes reports the live lane population: non-terminal lanes across the
+// WAITING, RUNNING, and preempted sets. The P/D gateway router reads it as the
+// peer load counter behind fewest-active-lanes selection; zero means no work
+// is queued or running on this scheduler.
+func (s *NativeScheduler) ActiveLanes() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, ln := range s.lanes {
+		if !ln.terminal {
+			n++
+		}
+	}
+	for _, ln := range s.waiting {
+		if !ln.terminal {
+			n++
+		}
+	}
+	for _, ln := range s.preempted {
+		if !ln.terminal {
+			n++
+		}
+	}
+	return n
+}
+
 // MaxObservedKVBlocks reports the peak live paged-KV block estimate observed
 // before pressure enforcement. It proves the ON arm crossed its configured
 // budget rather than merely carrying a nonzero swap counter.

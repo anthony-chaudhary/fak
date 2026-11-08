@@ -51,6 +51,11 @@ type ImportedSequence struct {
 	Tool      string
 	Tokenizer NLTokenizer
 	Q4K       bool
+	// GenBudget is the lane's generated-token retirement budget; zero keeps
+	// the engine-wide default (genTokens). The P/D front door sets it from the
+	// request's max_tokens so a long answer does not burn decode steps past
+	// what the caller asked for.
+	GenBudget int
 }
 
 // AdmitImported admits a sequence whose prompt KV was built elsewhere. It is the
@@ -98,6 +103,7 @@ func (s *NativeScheduler) AdmitImported(ctx context.Context, c *abi.ToolCall, se
 		putCtx:    ctx,
 		tok:       seq.Tokenizer,
 		q4k:       seq.Q4K,
+		genBudget: seq.GenBudget,
 		tokens:    newNativeRequestOutbox(),
 		done:      make(chan struct{}),
 	}
@@ -206,6 +212,17 @@ func (w *NativePDWorker) Stats() NativePDWorkerStats {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.stats
+}
+
+// ActiveLanes reports the decode worker's live imported-lane population
+// (waiting + running + preempted, non-terminal). Prefill-role workers have no
+// scheduler and report zero. The P/D gateway router sums this over a peer's
+// control-plane /metrics as its fewest-active-lanes routing key.
+func (w *NativePDWorker) ActiveLanes() int {
+	if w == nil || w.sched == nil {
+		return 0
+	}
+	return w.sched.ActiveLanes()
 }
 
 // TransferEntry returns the trust/residency descriptor the decode worker received
@@ -669,6 +686,13 @@ func (c *NativePDCluster) Metrics() string {
 			promQuote(string(st.Role)), promQuote(st.Worker), n)
 		fmt.Fprintf(&b, "fak_native_pd_worker_bytes_moved_total{role=%s,worker=%s} %d\n",
 			promQuote(string(st.Role)), promQuote(st.Worker), st.BytesMoved)
+	}
+	b.WriteString("# HELP fak_native_pd_active_lanes Active imported decode lanes (waiting + running + preempted) per worker.\n")
+	b.WriteString("# TYPE fak_native_pd_active_lanes gauge\n")
+	for _, w := range c.decode {
+		st := w.Stats()
+		fmt.Fprintf(&b, "fak_native_pd_active_lanes{role=%s,worker=%s} %d\n",
+			promQuote(string(st.Role)), promQuote(st.Worker), w.ActiveLanes())
 	}
 	c.mu.Lock()
 	hits, cold := c.localityHits, c.coldRoutes
