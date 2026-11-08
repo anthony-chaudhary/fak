@@ -283,9 +283,13 @@ func adjudicateToolTokens(tool string) []string {
 }
 
 func adjudicateHasWriteLikeArgs(args map[string]any) bool {
+	// Selector keys ("mode", "permissions") describe how an operation runs, not
+	// what it writes, so they are not write evidence: dos_arbitrate(mode=shared)
+	// and similar MCP verbs were refused DEFAULT_DENY/unknown_write_footprint on
+	// the live Claude Code surface for exactly this reason (2026-11-05).
 	for _, key := range []string{
 		"content", "contents", "data", "patch", "replacement", "new_content", "newContent",
-		"append", "text", "bytes", "mode", "permissions",
+		"append", "text", "bytes",
 	} {
 		if value, ok := args[key]; ok && value != nil {
 			return true

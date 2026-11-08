@@ -16,7 +16,7 @@
             "type": "command"
           }
         ],
-        "matcher": "Bash|Read|Write|Edit|NotebookEdit"
+        "matcher": "Bash|Read|Write|Edit"
       },
       {
         "hooks": [
@@ -29,7 +29,7 @@
             "type": "command"
           }
         ],
-        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*dos.*"
+        "matcher": "Bash|Write|Edit|mcp__.*dos.*"
       }
     ],
     "Stop": [
