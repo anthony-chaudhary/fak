@@ -809,3 +809,144 @@ func TestGenericSpeculativeBoundaryRejectUsesNoTargetWork(t *testing.T) {
 		assertSpeculativeRequestStateReleased(t, p, prompt, proposal)
 	})
 }
+
+// fak-test:runtime medium est=8s lane=default
+func TestServeGreedyVerifyAvoidsUnusedBoundaryCopies(t *testing.T) {
+	cfg := tinyConcurrencyConfig()
+	cfg.VocabSize = 1 << 16
+	m := model.NewSynthetic(cfg)
+	target, oracle := m.NewSession(), m.NewSession()
+	defer target.Close()
+	defer oracle.Close()
+	prompt := []int{3, 7, 11}
+	target.Prefill(prompt)
+	oracle.Prefill(prompt)
+	boundary := make([]float32, cfg.VocabSize)
+	boundary[7], boundary[8] = 9, 8
+	before := append([]float32(nil), boundary...)
+	for _, draft := range [][]int{nil, {9, 10}} {
+		proposal := model.NewLinearProposal(draft, nil)
+		bench := testing.Benchmark(func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				res, err := verifyGreedySpeculativeRound(context.Background(), target, prompt, proposal, boundary, nil, nil)
+				if err != nil || res.NumAccepted != 0 || res.CorrectionToken != 7 || res.RollbackKVCount != 0 || res.TargetLogits != nil {
+					b.Fatalf("non-forwarding verification=%+v err=%v", res, err)
+				}
+			}
+		})
+		t.Logf("draft=%v allocated bytes/op=%d", draft, bench.AllocedBytesPerOp())
+		if bench.AllocedBytesPerOp() >= int64(cfg.VocabSize) {
+			t.Errorf("non-forwarding verifier allocates vocabulary-sized storage: %d bytes/op", bench.AllocedBytesPerOp())
+		}
+	}
+	if !reflect.DeepEqual(boundary, before) || target.Cache.Len() != len(prompt) {
+		t.Fatal("non-forwarding verifier mutated boundary or committed cache")
+	}
+	if !reflect.DeepEqual(target.Step(7), oracle.Step(7)) {
+		t.Fatal("correction continuation changed after boundary-only verification")
+	}
+}
+
+// fak-test:runtime medium est=8s lane=default
+func TestServeGreedyVerifySkipsInactiveCountClone(t *testing.T) {
+	cfg := tinyConcurrencyConfig()
+	cfg.VocabSize = 1 << 16
+	m := model.NewSynthetic(cfg)
+	prompt := []int{3, 7, 11}
+	counts := make([]int32, cfg.VocabSize)
+	counts[7] = 3
+	beforeCounts := append([]int32(nil), counts...)
+	measure := func(inputCounts []int32) (int64, model.VerificationResult) {
+		target := m.NewSession()
+		defer target.Close()
+		boundary := append([]float32(nil), target.Prefill(prompt)...)
+		first := 0
+		for i := 1; i < len(boundary); i++ {
+			if boundary[i] > boundary[first] {
+				first = i
+			}
+		}
+		proposal := model.NewLinearProposal([]int{first}, nil)
+		var last model.VerificationResult
+		bench := testing.Benchmark(func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				var err error
+				last, err = verifyGreedySpeculativeRound(context.Background(), target, prompt, proposal, boundary, model.NewRepetitionPenaltySanitizer(0, 0), inputCounts)
+				if err != nil || last.NumAccepted != 1 || len(last.TargetLogits) != 1 {
+					b.Fatalf("matching verification=%+v err=%v", last, err)
+				}
+				target.RollbackResidentSuffix(1)
+				if target.Cache.Len() != len(prompt) {
+					b.Fatal("benchmark did not restore committed prefix")
+				}
+			}
+		})
+		return bench.AllocedBytesPerOp(), last
+	}
+	without, a := measure(nil)
+	with, b := measure(counts)
+	t.Logf("inactive counts bytes/op=%d; absent counts bytes/op=%d", with, without)
+	if with-without >= int64(cfg.VocabSize) {
+		t.Errorf("inactive counts add vocabulary-sized allocation: %d bytes/op", with-without)
+	}
+	if a.CorrectionToken != b.CorrectionToken || !reflect.DeepEqual(a.AcceptedTokens, b.AcceptedTokens) || !reflect.DeepEqual(a.TargetLogits, b.TargetLogits) || !reflect.DeepEqual(counts, beforeCounts) {
+		t.Fatal("inactive counts changed verification output or caller counts")
+	}
+}
+
+// fak-test:runtime fast est=1s lane=default
+func TestServeGreedyVerifySnapshotContract(t *testing.T) {
+	for _, quantized := range []bool{false, true} {
+		for _, penalized := range []bool{false, true} {
+			cfg := tinyConcurrencyConfig()
+			m := model.NewSynthetic(cfg)
+			if quantized {
+				m.Quantize()
+			}
+			target, oracle := m.NewSession(), m.NewSession()
+			t.Cleanup(target.Close)
+			t.Cleanup(oracle.Close)
+			prompt := []int{3, 7, 11}
+			boundary := target.Prefill(prompt) // deliberately session-backed in Q8 mode
+			refBoundary := oracle.Prefill(prompt)
+			counts := make([]int32, cfg.VocabSize)
+			counts[7] = 2
+			beforeCounts := append([]int32(nil), counts...)
+			var sanitizer *model.RepetitionPenaltySanitizer
+			if penalized {
+				sanitizer = model.NewRepetitionPenaltySanitizer(1, 0.5)
+			}
+			argmax := func(row []float32) int {
+				best := 0
+				for i := 1; i < len(row); i++ {
+					if row[i] > row[best] {
+						best = i
+					}
+				}
+				return best
+			}
+			first := argmax(sanitizer.ApplyPenalty(refBoundary, counts))
+			refRow := append([]float32(nil), oracle.Step(first)...)
+			sim := append([]int32(nil), counts...)
+			sim[first]++
+			correction := argmax(sanitizer.ApplyPenalty(refRow, sim))
+			res, err := verifyGreedySpeculativeRound(context.Background(), target, prompt, model.NewLinearProposal([]int{first}, nil), boundary, sanitizer, counts)
+			if err != nil || res.NumAccepted != 1 || res.CorrectionToken != correction || len(res.TargetLogits) != 1 || !reflect.DeepEqual(res.TargetLogits[0], refRow) || !reflect.DeepEqual(counts, beforeCounts) {
+				t.Fatalf("quant=%v penalty=%v verification=%+v err=%v", quantized, penalized, res, err)
+			}
+			if !reflect.DeepEqual(target.Step(correction), oracle.Step(correction)) {
+				t.Fatal("verified continuation diverged from serial oracle")
+			}
+		}
+	}
+	cfg := tinyConcurrencyConfig()
+	target := model.NewSynthetic(cfg).NewSession()
+	defer target.Close()
+	boundary := append([]float32(nil), target.Prefill([]int{3, 7, 11})...)
+	boundary[len(boundary)-1] = float32(math.NaN())
+	beforeLen := target.Cache.Len()
+	_, err := verifyGreedySpeculativeRound(context.Background(), target, nil, model.NewLinearProposal([]int{9}, nil), boundary, nil, nil)
+	if !errors.Is(err, model.ErrSpeculativeNonFiniteLogits) || target.Cache.Len() != beforeLen {
+		t.Fatalf("nonfinite boundary lost fail-closed state: err=%v", err)
+	}
+}
