@@ -66,6 +66,9 @@ type inferenceSnapshot struct {
 	ttftHist latencySnapshot
 	tpotHist latencySnapshot
 	e2eHist  latencySnapshot
+	// Token distributions carry their own scaled bucket edges.
+	inputTokenHist  tokenHistogramSnapshot
+	outputTokenHist tokenHistogramSnapshot
 	// regimeHists is the #5630 cache-regime cut of the three histograms above.
 	regimeHists map[string]regimeLatencySnapshot
 }
@@ -162,6 +165,8 @@ func (m *gatewayMetrics) inferenceSnapshotData() inferenceSnapshot {
 		ttftHist:           histSnapshot(m.inferTTFTHist),
 		tpotHist:           histSnapshot(m.inferTPOTHist),
 		e2eHist:            histSnapshot(m.inferE2EHist),
+		inputTokenHist:     m.inferInputTokenHist.snapshot(),
+		outputTokenHist:    m.inferOutputTokenHist.snapshot(),
 		regimeHists:        regimeHistSnapshot(m.inferRegimeHists),
 	}
 }

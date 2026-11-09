@@ -124,7 +124,8 @@
       "distinct_from": [
         "x2-gateway-engine-fakgatewaykvprefix",
         "gateway-feature-proof-receipt",
-        "kernel-completion-timing"
+        "kernel-completion-timing",
+        "gateway-output-token-histogram-gateway-engine"
       ],
       "aliases": [],
       "grounding": "fak_gateway_kv_prefix_prompt_tokens_by_source_total",
@@ -185,7 +186,8 @@
       "distinction": "Not a capacity precondition like INSUFFICIENT_AGGREGATE_HBM (insufficientaggregatehbm) or a measured capacity like AggregateHBMBytes (aggregatehbmbytes): those describe whether a workload CAN be admitted at all, while this counts sessions that were admitted and served but whose context lever stopped paying for itself.",
       "distinct_from": [
         "insufficientaggregatehbm",
-        "aggregatehbmbytes"
+        "aggregatehbmbytes",
+        "gateway-output-token-histogram-guard-gate"
       ],
       "aliases": [],
       "grounding": "fak_gateway_compaction_thrash_sessions_total",
@@ -407,6 +409,46 @@
       ],
       "aliases": [],
       "grounding": "PoolObjective",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "gateway-output-token-histogram-guard-gate",
+      "canonical": "fak_gateway_inference_output_tokens (per-turn histogram; guard-gate)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "Prometheus histogram of positive completion-token counts per accounted gateway model turn. observeInferenceTokenCountsLocked records the same completion-count axis as fak_gateway_inference_completion_tokens_total under inferenceMu; the render path exports cumulative buckets, sum and count. Synthetic accounted turns are included; omitted, zero and negative counts are excluded.",
+      "distinction": "A per-turn output-token count distribution, not aggregate completion tokens, output tokens per second, prompt-token provenance or a latency histogram. Despite its gateway/guard vocabulary, this metric does not authorize admission, prove a runtime feature executed, or establish real GPU throughput.",
+      "distinct_from": [
+        "x2-guard-gate-compactionthrashsessionstotal",
+        "gateway-output-token-histogram-gateway-engine"
+      ],
+      "aliases": [],
+      "grounding": "fak_gateway_inference_output_tokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "gateway-output-token-histogram-gateway-engine",
+      "canonical": "fak_gateway_inference_output_tokens (per-turn histogram; gateway-engine)",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "Prometheus histogram of positive completion-token counts per accounted gateway model turn. observeInferenceTokenCountsLocked records the same completion-count axis as fak_gateway_inference_completion_tokens_total under inferenceMu; the render path exports cumulative buckets, sum and count. Synthetic accounted turns are included; omitted, zero and negative counts are excluded.",
+      "distinction": "A per-turn output-token count distribution, not aggregate completion tokens, output tokens per second, prompt-token provenance or a latency histogram. Despite its gateway/guard vocabulary, this metric does not authorize admission, prove a runtime feature executed, or establish real GPU throughput. The guard-gate row for this token is a second vocabulary position of this same histogram, not another metric or a guard decision.",
+      "distinct_from": [
+        "fakgatewaykvprefixprompttokensbysourcetotal",
+        "gateway-output-token-histogram-guard-gate"
+      ],
+      "aliases": [],
+      "grounding": "fak_gateway_inference_output_tokens",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

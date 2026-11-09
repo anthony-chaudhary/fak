@@ -2651,3 +2651,17 @@ Field of PromptPanelSelectionCounts loaded from the promptPanelRefusalArchMiniMa
 Field of tokenizer.EncodeWork accumulating logical bytes retained for ordinary-run memo entries: UTF-8 text bytes plus token-ID count times native int width, subject to the one-MiB payload budget.
 
 **Distinct from:** Logical retained key/ID payload, not heap usage, map overhead, total tokenizer input or an inference KV cache.
+
+
+### fak_gateway_inference_output_tokens (per-turn histogram; guard-gate)
+
+Prometheus histogram of positive completion-token counts per accounted gateway model turn. observeInferenceTokenCountsLocked records the same completion-count axis as fak_gateway_inference_completion_tokens_total under inferenceMu; the render path exports cumulative buckets, sum and count. Synthetic accounted turns are included; omitted, zero and negative counts are excluded.
+
+**Distinct from:** A per-turn output-token count distribution, not aggregate completion tokens, output tokens per second, prompt-token provenance or a latency histogram. Despite its gateway/guard vocabulary, this metric does not authorize admission, prove a runtime feature executed, or establish real GPU throughput.
+
+
+### fak_gateway_inference_output_tokens (per-turn histogram; gateway-engine)
+
+Prometheus histogram of positive completion-token counts per accounted gateway model turn. observeInferenceTokenCountsLocked records the same completion-count axis as fak_gateway_inference_completion_tokens_total under inferenceMu; the render path exports cumulative buckets, sum and count. Synthetic accounted turns are included; omitted, zero and negative counts are excluded.
+
+**Distinct from:** A per-turn output-token count distribution, not aggregate completion tokens, output tokens per second, prompt-token provenance or a latency histogram. Despite its gateway/guard vocabulary, this metric does not authorize admission, prove a runtime feature executed, or establish real GPU throughput. The guard-gate row for this token is a second vocabulary position of this same histogram, not another metric or a guard decision.

@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **9** (clarity 9 + coverage 0) |
-| **Crystal-clear concepts (and climbing)** | **1681** crystal of 4153 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **4218 / 4218** (100.0% of the discovered confusable space) |
-| **Undrawn twin-pairs (drive to 0)** | **3** of 317 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **96** of 5478 indexed names |
+| **Crystal-clear concepts (and climbing)** | **1683** crystal of 4155 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **4219 / 4219** (100.0% of the discovered confusable space) |
+| **Undrawn twin-pairs (drive to 0)** | **3** of 318 confusable name-pairs |
+| **Ambiguous lookup names (drive to 0)** | **97** of 5479 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 95.0/100 (grade A) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 4153 concepts - score 95.0/100 (grade A) - disambiguation-debt 9
+concept-disambiguation chart - 4155 concepts - score 95.0/100 (grade A) - disambiguation-debt 9
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ###################......... 1681
+  * crystal       ###################......... 1683
   o defined       ############################ 2472
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -46,8 +46,8 @@ clarity mix by family (each cell = one concept):
   decision         ***************************************ooooooooooooooooooooooooo (64 concept(s); 39 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            **************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (89 concept(s); 26 crystal)
-  gateway-engine   *************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (277 concept(s); 97 crystal)
-  guard-gate       **************************************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (517 concept(s); 230 crystal)
+  gateway-engine   **************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (278 concept(s); 98 crystal)
+  guard-gate       ***************************************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (518 concept(s); 231 crystal)
   layout           *************************************oooooooooooooooooooooooo (61 concept(s); 37 crystal)
   loop             *****************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (110 concept(s); 53 crystal)
   plan             ***************************************************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (585 concept(s); 243 crystal)
@@ -69,7 +69,7 @@ coverage by family (positioned / discovered):
   decision         ############################ 68/68
   dev-tier         ............................ 0/0
   evict            ############################ 97/97
-  gateway-engine   ############################ 326/326
+  gateway-engine   ############################ 327/327
   guard-gate       ############################ 579/579
   layout           ############################ 58/58
   loop             ############################ 121/121
@@ -84,15 +84,15 @@ coverage by family (positioned / discovered):
   vfs              ............................ 0/0
   witness-proof    ############################ 204/204
 
-namespace coverage  [################################] 100.0%  (4218/4218 confusable tokens positioned)
+namespace coverage  [################################] 100.0%  (4219/4219 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
-  mutual       ############################ 314
+  mutual       ############################ 315
   one-sided    ............................ 0
   undrawn      #........................... 3
-  pairs separated   [################################] 314/317
+  pairs separated   [################################] 315/318
 
-name index: 5478 lookup name(s) -> 4153 concept(s), 96 ambiguous
+name index: 5479 lookup name(s) -> 4155 concept(s), 97 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -114,11 +114,11 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 
 | Separation metric | Value |
 |---|---|
-| Confusable name-pairs discovered | 317 |
-| **Separated from each other (drive to all)** | **314 / 317** (314 mutual, 0 one-sided) |
+| Confusable name-pairs discovered | 318 |
+| **Separated from each other (drive to all)** | **315 / 318** (315 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **3** |
 | Entangled concepts (own twin undrawn) | 6 |
-| Boundaries drawn (mutual / total) | 3684 / 7976 |
+| Boundaries drawn (mutual / total) | 3690 / 7982 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 5478 over 4153 concepts |
-| Lookup names landing on several concepts | 96 |
+| Lookup names indexed | 5479 over 4155 concepts |
+| Lookup names landing on several concepts | 97 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 4153 |
+| Concepts carrying a contrast set | 4155 |
 
 ## The concepts (best verdict first)
 
@@ -669,6 +669,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | gateway-engine | **EngineReceiptDigest (declared serving engine identity)** - A sha256 digest declaration binding a serving sweep or bounded QPS probe to the same operator-supplied engine receipt identity. |
 | * | crystal | symbol | gateway-engine | **fak_gateway_kv_prefix_prompt_tokens_by_source_total** - The gateway's per-turn split of in-kernel prompt tokens by PROVENANCE source (local_compute / local_cache_hit / external_kv_transfer), orthogonal to the reuse-depth family; the three sum to the by-source prompt tokens. external_kv_transfer isolates the disaggregation dividend — tokens a remote / L3 KV tier served that a single box would otherwise have re-prefilled. |
 | * | crystal | symbol | gateway-engine | **FieldCompletionTiming** - Opaque completion attestation minted by the kernel around an actual successful engine execution, binding a measured wall-clock duration to the exact call and result contents. |
+| * | crystal | symbol | gateway-engine | **fak_gateway_inference_output_tokens (per-turn histogram; gateway-engine)** - Prometheus histogram of positive completion-token counts per accounted gateway model turn. observeInferenceTokenCountsLocked records the same completion-count axis as fak_gateway_inference_completion_tokens_total under inferenceMu; the render path exports cumulative buckets, sum and count. Synthetic accounted turns are included; omitted, zero and negative counts are excluded. |
 | * | crystal | symbol | gateway-engine | **ComparisonEngine** - HIL ComparisonScope value declaring an engine or optimization comparison on the same named hardware, used to admit a descriptive ratio only when both producer-reported arms have compatible dimensions. |
 | * | crystal | subsystem | gateway-engine | **inkernel_expert_spill.go (served graded expert-spill seam)** - inkernel_expert_spill.go is the agent planner seam that resolves a loaded model’s graded MoE expert-spill placement once from operator intent and measured device budget, then applies that placement to each request session. |
 | * | crystal | symbol | gateway-engine | **InKernelQwenQ4KPrefillChunkConfigError (deferred native-prefill bounds error)** - InKernelQwenQ4KPrefillChunkConfigError is the typed error retained when an explicit resident-Qwen Q4_K prefill chunk size lies outside 128..8192; a targeted request returns it before tokenization or model execution. |
@@ -728,6 +729,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | guard-gate | **guard disable (one-child break-glass launcher)** - The fak guard/manage disable operator subcommand implemented by runGuardDisable: it launches exactly one raw repair child with loud warnings, child-scoped recovery variables, inherited guard-routing removal, and exit-status propagation, then leaves later launches guarded by default. |
 | * | crystal | symbol | guard-gate | **guardCodexAuthManagementCommand** - Recognizes the exact Codex CLI authentication-management commands that must execute without FAK provider or credential injection. |
 | * | crystal | symbol | guard-gate | **fak_gateway_compaction_thrash_sessions_total (metric)** - The gateway metrics counter naming how many served sessions reached the COMPACTION_THRASH verdict. It is the operator-visible half of the thrash detector: incremented on every thrash session regardless of whether the stop is armed, so the signal is readable before anything acts on it. |
+| * | crystal | symbol | guard-gate | **fak_gateway_inference_output_tokens (per-turn histogram; guard-gate)** - Prometheus histogram of positive completion-token counts per accounted gateway model turn. observeInferenceTokenCountsLocked records the same completion-count axis as fak_gateway_inference_completion_tokens_total under inferenceMu; the render path exports cumulative buckets, sum and count. Synthetic accounted turns are included; omitted, zero and negative counts are excluded. |
 | * | crystal | symbol | guard-gate | **aggregateAnswers** - Typed exhaustive corpus-level gold facts and candidate outputs for state counts, label counts, and chronology top-k grading. |
 | * | crystal | symbol | guard-gate | **gateVerbTierTree (whole-tree verb-tier gate)** - Whole-tree fak hygiene gate (internal/hooks/gate_verbtier.go, reason VERB_UNTIERED) that refuses a dispatched cmd/fak verb whose token devindex.TierOf cannot resolve to a tier — the pre-push twin of devindex.TestVerbTierCoverageIsTotal (epic #2653). |
 | * | crystal | config | guard-gate | **Q4_K gate/up output slab (session-owned Metal buffer)** - Q4KGateUpOutputSlab is the explicit session setting that reuses one bounded Metal output buffer across eligible Q4_K gate and up MLP projections within that session. |
@@ -4435,8 +4437,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_separated` | 40 | 3 | 3 confusable pair(s) with no line drawn |
 | honesty | `kind_grounding_soft` | 60 | 0 | 32 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 4292/7976 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 4153 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 4292/7982 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 4155 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -4445,7 +4447,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `alias_resolved` | 100 | 0 | every alias resolves in the tree (token or wire key) |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 5478 lookup name(s) resolves - 96 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 5479 lookup name(s) resolves - 97 land on several concepts, all separated |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
@@ -4458,7 +4460,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | decision | 68 | 68 | 0 |
 | dev-tier | 0 | 0 | 0 |
 | evict | 97 | 97 | 0 |
-| gateway-engine | 326 | 326 | 0 |
+| gateway-engine | 327 | 327 | 0 |
 | guard-gate | 579 | 579 | 0 |
 | layout | 58 | 58 | 0 |
 | loop | 121 | 121 | 0 |

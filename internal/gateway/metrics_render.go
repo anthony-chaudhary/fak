@@ -1261,6 +1261,10 @@ func (m *gatewayMetrics) writeInferenceMetrics(b *strings.Builder) inferenceSnap
 
 	writeCounter(b, "fak_gateway_inference_prompt_tokens_total", "Prompt (input) tokens summed across served model turns.", int64(snap.promptTok))
 	writeCounter(b, "fak_gateway_inference_completion_tokens_total", "Completion (generated) tokens summed across served model turns.", int64(snap.complTok))
+	writeHelpType(b, "fak_gateway_inference_input_tokens", "Positive uncached prompt-token counts per accounted model turn, normalized like fak_gateway_inference_prompt_tokens_total. Includes synthetic turns; omitted or nonpositive counts are excluded.", "histogram")
+	writeTokenHistogram(b, "fak_gateway_inference_input_tokens", "", snap.inputTokenHist)
+	writeHelpType(b, "fak_gateway_inference_output_tokens", "Positive completion-token counts per accounted model turn, matching fak_gateway_inference_completion_tokens_total. Includes synthetic turns; omitted or nonpositive counts are excluded.", "histogram")
+	writeTokenHistogram(b, "fak_gateway_inference_output_tokens", "", snap.outputTokenHist)
 	writeCounter(b, "fak_gateway_inference_cached_prompt_tokens_total", "Prompt (input) tokens the upstream PROVIDER served from its own prompt cache (cache_read) across served turns, normalized across Anthropic/OpenAI/Gemini. This is provider-side reuse — distinct from the local fak_vdso_*/fak_cache_* caches — and reads 0 on the in-kernel path (no provider).", int64(snap.cachedTok))
 	writeInferenceByClientMetrics(b, snap)
 

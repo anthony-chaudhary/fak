@@ -1020,6 +1020,7 @@ func (m *gatewayMetrics) observeInferenceTimedDetail(loc servingLocality, prompt
 		m.inferE2EHist = newLatencyCounter()
 	}
 	m.inferReqs[finishReason]++
+	m.observeInferenceTokenCountsLocked(promptTok, complTok)
 	if promptTok > 0 {
 		m.inferPromptTokens += uint64(promptTok)
 	}

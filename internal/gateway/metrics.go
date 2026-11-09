@@ -152,12 +152,18 @@ func (m *gatewayMetrics) scaleTokenHistograms(maxTokens int) {
 }
 
 // observeInferenceTokenCountsLocked folds one served turn's provider-reported token counts
-// into the input/output token distributions. Callers hold inferenceMu; the follow-on
-// wiring calls it from the same critical section that books inferPromptTokens /
-// inferComplTokens, so the distributions and the gauges can never disagree.
+// into the input/output token distributions. Callers hold inferenceMu; the production
+// accounting fold calls it in the same critical section as inferPromptTokens /
+// inferComplTokens, using the same normalized uncached input and output axes.
 func (m *gatewayMetrics) observeInferenceTokenCountsLocked(promptTok, complTok int) {
 	if m == nil {
 		return
+	}
+	if m.inferInputTokenHist == nil {
+		m.inferInputTokenHist = newTokenHistogram(defaultTokenHistogramMax)
+	}
+	if m.inferOutputTokenHist == nil {
+		m.inferOutputTokenHist = newTokenHistogram(defaultTokenHistogramMax)
 	}
 	m.inferInputTokenHist.observeLocked(promptTok)
 	m.inferOutputTokenHist.observeLocked(complTok)
@@ -292,10 +298,10 @@ type gatewayMetrics struct {
 	// inferPromptTokens/inferComplTokens gauges only summarize as running totals. Their
 	// bucket ladders scale to the deployment's token ceiling (tokenBuckets, TGI-adapted)
 	// instead of the fixed seconds ladder, so P50/P95/P99 stay resolvable at any window
-	// size. Registered here so the families exist from the first scrape (empty, count 0);
-	// the turn-completion feed and the /metrics render call land in the follow-on wiring
-	// (observeInferenceTimedDetail / writeInferenceMetrics), which this ticket's fence
-	// does not cover. Guarded by inferenceMu like the latency histograms above.
+	// size. observeInferenceTimedDetail feeds both from the normalized counter axes;
+	// writeInferenceMetrics renders their copied snapshots, empty at startup. Synthetic
+	// turns remain included like token totals, unlike latency distributions. Omitted or
+	// nonpositive counts do not enter either histogram. Guarded by inferenceMu.
 	inferInputTokenHist  *tokenHistogram
 	inferOutputTokenHist *tokenHistogram
 	// inferRegimeHists cuts the same three distributions by the turn's cache regime
