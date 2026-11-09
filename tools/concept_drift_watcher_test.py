@@ -22,7 +22,6 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
-from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import concept_drift_watcher as dw  # noqa: E402
@@ -215,30 +214,6 @@ def test_check_mode_without_baseline_is_operational_error() -> None:
         rc = _cli("--workspace", str(ws), "--data", str(data),
                   "--baseline", str(root / "nope.json"))
         assert rc == 2, rc
-
-
-def test_all_background_spawns_suppress_windows_console() -> None:
-    # Mock every launch: this test never creates a ticket or a child process.
-    for flags in (0, 0x08000000):
-        with mock.patch.object(dw, "no_window_creationflags", return_value=flags):
-            with mock.patch.object(dw.subprocess, "run") as run:
-                run.return_value.returncode = 0
-                run.return_value.stdout = b"abc123\n"
-                assert dw.git_head(Path(".")) == "abc123"
-                assert run.call_args.kwargs["creationflags"] == flags
-                assert run.call_args.kwargs["timeout"] == dw.GIT_TIMEOUT_S
-            with mock.patch.object(dw.subprocess, "run") as run:
-                run.return_value.returncode = 0
-                run.return_value.stdout = b'{}'
-                assert dw.run_scorecard(Path(".")) == ({}, "")
-                assert run.call_args.kwargs["creationflags"] == flags
-                assert run.call_args.kwargs["timeout"] == dw.SCORECARD_TIMEOUT_S
-            with mock.patch.object(dw.shutil, "which", return_value="fak-run"):
-                with mock.patch.object(dw.subprocess, "run") as run:
-                    run.return_value.returncode = 0
-                    dw.create_drift_ticket(Path("."), 1, ["demo"])
-                    assert run.call_args.kwargs["creationflags"] == flags
-                    assert run.call_args.kwargs["timeout"] == dw.TICKET_TIMEOUT_S
 
 
 def main() -> int:

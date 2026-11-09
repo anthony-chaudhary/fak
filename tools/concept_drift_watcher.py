@@ -52,8 +52,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from dispatch_worker import no_window_creationflags
-
 BASELINE_SCHEMA = "fak-concept-coverage-drift-baseline/1"
 RECEIPT_SCHEMA = "fak-concept-coverage-drift-receipt/1"
 SCORECARD_NAME = "concept_disambiguation_scorecard.py"
@@ -132,8 +130,7 @@ def git_head(workspace: Path) -> str:
     """The workspace HEAD sha, best-effort ('' when not a git checkout)."""
     try:
         p = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(workspace),
-                           capture_output=True, timeout=GIT_TIMEOUT_S,
-                           creationflags=no_window_creationflags())
+                           capture_output=True, timeout=GIT_TIMEOUT_S)
         if p.returncode == 0:
             return p.stdout.decode("utf-8", "replace").strip()
     except (OSError, subprocess.SubprocessError):
@@ -158,8 +155,7 @@ def run_scorecard(workspace: Path, data_dir: Path | None = None,
     if data_dir is not None:
         cmd += ["--data", str(data_dir)]
     try:
-        p = subprocess.run(cmd, cwd=str(workspace), capture_output=True, timeout=timeout,
-                           creationflags=no_window_creationflags())
+        p = subprocess.run(cmd, cwd=str(workspace), capture_output=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return None, f"scorecard timed out after {timeout}s"
     except OSError as exc:
@@ -349,7 +345,7 @@ def create_drift_ticket(workspace: Path, n_reopened: int, tokens: list[str]) -> 
     cmd = [exe, "fak-ticket", "create", tid, "--lane", TICKET_LANE, "--intent", intent]
     try:
         p = subprocess.run(cmd, cwd=str(workspace), capture_output=True,
-                           timeout=TICKET_TIMEOUT_S, creationflags=no_window_creationflags())
+                           timeout=TICKET_TIMEOUT_S)
         if p.returncode == 0:
             print(f"auto-ticket: created {tid}")
         else:
