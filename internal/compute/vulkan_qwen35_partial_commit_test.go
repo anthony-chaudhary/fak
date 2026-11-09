@@ -4,6 +4,7 @@ package compute
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"testing"
 )
@@ -12,9 +13,14 @@ import (
 // compute-owned half of partial target commit directly. The fixture deliberately
 // gives a one-attention-layer hybrid panel four backing slots: the active compact
 // slot must expose only the accepted K/Kraw/V prefix, while the surplus unused
-// slots must remain byte-for-byte untouched.
+// slots must remain byte-for-byte untouched. Each recurrent/conv state must also
+// match a separate full-GDN dispatch from its own distinct pre-round state.
+// fak-test:runtime integration est=5s lane=optin
 func TestVulkanQwen35PrefixReplayTruncatesEveryActiveKVPlane(t *testing.T) {
 	be := vk(t)
+	if be.IsVectorGDNDisabled() {
+		t.Fatal("same-device reference requires the native full-GDN path")
+	}
 	const (
 		tokens        = 4
 		startPos      = 2
@@ -38,6 +44,17 @@ func TestVulkanQwen35PrefixReplayTruncatesEveryActiveKVPlane(t *testing.T) {
 	upload := func(shape []int, values []float32, class MemoryClass, name string) Tensor {
 		return be.UploadClass(NewF32(Default(), shape, values), F32, class, name)
 	}
+	assertSameBits := func(t *testing.T, label string, got, want []float32) {
+		t.Helper()
+		if len(got) != len(want) {
+			t.Fatalf("%s length=%d, want %d", label, len(got), len(want))
+		}
+		for i := range want {
+			if math.Float32bits(got[i]) != math.Float32bits(want[i]) {
+				t.Fatalf("%s[%d]=%08x, want %08x", label, i, math.Float32bits(got[i]), math.Float32bits(want[i]))
+			}
+		}
+	}
 
 	for accepted := 1; accepted < tokens; accepted++ {
 		t.Run(fmt.Sprintf("accepted_%d", accepted), func(t *testing.T) {
@@ -57,8 +74,8 @@ func TestVulkanQwen35PrefixReplayTruncatesEveryActiveKVPlane(t *testing.T) {
 					Recurrent: upload([]int{numValueHeads, keyHeadDim, valueHeadDim}, makeValues(numValueHeads*keyHeadDim*valueHeadDim, .02), MemoryKVCache, fmt.Sprintf("partial commit layer %d live recurrent", layer)),
 				}
 				before[layer] = Qwen35SequenceState{
-					Conv:      upload([]int{convKernel - 1, convDim}, makeValues((convKernel-1)*convDim, .01), MemoryKVCache, fmt.Sprintf("partial commit layer %d before conv", layer)),
-					Recurrent: upload([]int{numValueHeads, keyHeadDim, valueHeadDim}, makeValues(numValueHeads*keyHeadDim*valueHeadDim, .01), MemoryKVCache, fmt.Sprintf("partial commit layer %d before recurrent", layer)),
+					Conv:      upload([]int{convKernel - 1, convDim}, makeValues((convKernel-1)*convDim, .01*float32(layer+1)), MemoryKVCache, fmt.Sprintf("partial commit layer %d before conv", layer)),
+					Recurrent: upload([]int{numValueHeads, keyHeadDim, valueHeadDim}, makeValues(numValueHeads*keyHeadDim*valueHeadDim, .01*float32(layer+1)), MemoryKVCache, fmt.Sprintf("partial commit layer %d before recurrent", layer)),
 				}
 				for _, tensor := range []Tensor{layers[layer].GDNConv, layers[layer].GDNALog, layers[layer].GDNDTBias, layers[layer].GDNNorm, states[layer].Conv, states[layer].Recurrent, before[layer].Conv, before[layer].Recurrent} {
 					value := tensor
@@ -106,8 +123,46 @@ func TestVulkanQwen35PrefixReplayTruncatesEveryActiveKVPlane(t *testing.T) {
 				layers: layers, states: states, projections: projections, owned: owned,
 			}
 			t.Cleanup(replay.Close)
+
+			wantConv := make([][]float32, len(projections))
+			wantRecurrent := make([][]float32, len(projections))
+			for i, projection := range projections {
+				base := before[projection.layer]
+				refConv := upload(base.Conv.Shape, be.Read(base.Conv), MemoryKVCache, "partial commit reference conv")
+				t.Cleanup(func() { be.Free(refConv) })
+				refRecurrent := upload(base.Recurrent.Shape, be.Read(base.Recurrent), MemoryKVCache, "partial commit reference recurrent")
+				t.Cleanup(func() { be.Free(refRecurrent) })
+				// Metadata-only prefix views borrow the retained projection buffers.
+				prefix := func(tensor Tensor, width int) Tensor {
+					tensor.Shape = []int{accepted, width}
+					return tensor
+				}
+				layer := layers[projection.layer]
+				core, err := be.Qwen35GDNPreprojected(
+					prefix(projection.mixed, convDim), prefix(projection.z, valueDim),
+					prefix(projection.beta, numValueHeads), prefix(projection.alpha, numValueHeads),
+					layer.GDNConv, layer.GDNALog, layer.GDNDTBias, layer.GDNNorm, refConv, refRecurrent,
+					accepted, numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel, 1e-5,
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { be.Free(core) })
+				wantConv[i], wantRecurrent[i] = be.Read(refConv), be.Read(refRecurrent)
+				be.Free(core)
+			}
+
+			transients, transientBytes := be.VulkanDebugTransientSnapshot()
 			if err := replay.CommitPrefix(accepted, before); err != nil {
 				t.Fatal(err)
+			}
+			if buffers, bytes := be.VulkanDebugTransientSnapshot(); buffers != transients || bytes != transientBytes {
+				t.Fatalf("commit retained scratch: buffers/bytes=%d/%d, want %d/%d", buffers, bytes, transients, transientBytes)
+			}
+			for i, projection := range projections {
+				live := states[projection.layer]
+				assertSameBits(t, fmt.Sprintf("layer_%d_conv", projection.layer), be.Read(live.Conv), wantConv[i])
+				assertSameBits(t, fmt.Sprintf("layer_%d_recurrent", projection.layer), be.Read(live.Recurrent), wantRecurrent[i])
 			}
 
 			wantRows := startPos + accepted

@@ -134,6 +134,10 @@ func (p *vulkanQwen35PrefixReplay) CommitPrefix(accepted int, before []Qwen35Seq
 		p.backend.qwen35VulkanSequenceReleaseLocked(start)
 	}()
 
+	// Every replay layer has the same output shape, and none consumes core.
+	// Existing dispatch dependencies order writes to this shared scratch. Keep
+	// its allocation before any live-state copy and retain it through the fence.
+	core, _ := p.backend.devTr([]int{accepted, p.valueDim}, F32)
 	C.fvk_batch_begin()
 	batchOpen = true
 	var operationErr error
@@ -147,7 +151,6 @@ func (p *vulkanQwen35PrefixReplay) CommitPrefix(accepted int, before []Qwen35Seq
 		C.fvk_d2d(liveConv.ptr, baseConv.ptr, C.size_t(liveConv.n))
 		C.fvk_d2d(liveRecurrent.ptr, baseRecurrent.ptr, C.size_t(liveRecurrent.n))
 
-		core, _ := p.backend.devTr([]int{accepted, p.valueDim}, F32)
 		layer := p.layers[projection.layer]
 		code := C.fvk_qwen35_gdn_preprojected_f32(
 			p.backend.vp(projection.mixed), p.backend.vp(projection.z), p.backend.vp(projection.beta), p.backend.vp(projection.alpha),
