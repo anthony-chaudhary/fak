@@ -157,7 +157,10 @@ func newTestServer(t *testing.T) *Server {
 	// invariant that it is always registered.
 	abi.RegisterEngine("mock", engine.MockEngine)
 	abi.RegisterAdjudicator(0, toolAdj{})
-	srv, err := New(Config{EngineID: "test", Model: "test-model", VDSO: true})
+	// The fixture pins the LEGACY strict lease-admission posture explicitly: the
+	// zero-value mode now resolves to open (the going-forward default), and the
+	// suite's refusal expectations were written against the shipped strict floor.
+	srv, err := New(Config{EngineID: "test", Model: "test-model", VDSO: true, WorkspaceAdmission: string(WorkspaceAdmissionStrict)})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

@@ -32,7 +32,10 @@ func newReloadLatencyServer(t *testing.T) (*Server, *adjudicator.Adjudicator) {
 	abi.RegisterEngine("test", echoEngine{})
 	abi.RegisterAdjudicator(0, adj) // the REAL floor, not toolAdj
 
-	srv, err := New(Config{EngineID: "test", Model: "test-model", VDSO: true})
+	// Pin the legacy strict lease-admission posture explicitly: the zero-value
+	// mode now resolves to open, and the probe witnesses built on this fixture
+	// assert strict unknown-footprint denials.
+	srv, err := New(Config{EngineID: "test", Model: "test-model", VDSO: true, WorkspaceAdmission: string(WorkspaceAdmissionStrict)})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

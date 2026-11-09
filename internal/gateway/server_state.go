@@ -388,6 +388,11 @@ type Server struct {
 	// (prefix_reuse_attribution.go). Zero value is ready.
 	prefixReuse                  prefixReuseAttribution
 	workspaceAdmissionPermissive bool
+	// workspaceAdmissionMode is the resolved gateway lease-admission posture
+	// (open|permissive|strict; zero value resolves to the open default). It
+	// drives every admission decision; the legacy permissive bool above is
+	// retained for compat and test assertions only.
+	workspaceAdmissionMode WorkspaceAdmissionMode
 	// sessionLane mirrors Config.SessionLane: the launch-time lane designation
 	// stamped as trusted Meta["lane"] on every served tool call. Empty = unset.
 	sessionLane                string

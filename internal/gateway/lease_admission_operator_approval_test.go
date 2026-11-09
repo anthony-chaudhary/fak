@@ -39,7 +39,9 @@ func TestLeaseAdmissionHonorsOperatorApproval(t *testing.T) {
 	const approved = "rm -rf build"
 	newTestServer(t)
 	abi.RegisterAdjudicator(-1, approvedBashAdj{approvedCmd: approved})
-	srv, err := New(Config{EngineID: "test", Model: "test-model", VDSO: true})
+	// Pin the legacy strict posture explicitly: the zero-value mode now resolves to
+	// open, which would admit the unapproved call this witness refuses.
+	srv, err := New(Config{EngineID: "test", Model: "test-model", VDSO: true, WorkspaceAdmission: string(WorkspaceAdmissionStrict)})
 	if err != nil {
 		t.Fatal(err)
 	}

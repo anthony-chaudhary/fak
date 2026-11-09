@@ -117,6 +117,9 @@ func newNativeExactCommandServer(t *testing.T, grants []string) *Server {
 	t.Helper()
 	agent.Configure()
 	abi.RegisterRegionBackend(inlineBackend{})
+	// Pin the legacy strict lease-admission posture explicitly: the zero-value
+	// mode now resolves to open, which would admit the ungranted unknown-footprint
+	// Bash calls these witnesses refuse.
 	srv, err := New(Config{
 		EngineID:                   "localtools",
 		Model:                      "test-model",
@@ -124,6 +127,7 @@ func newNativeExactCommandServer(t *testing.T, grants []string) *Server {
 		Native:                     true,
 		NativeCodeWorkspace:        t.TempDir(),
 		NativeExactAllowedCommands: grants,
+		WorkspaceAdmission:         string(WorkspaceAdmissionStrict),
 	})
 	if err != nil {
 		t.Fatalf("New native gateway: %v", err)

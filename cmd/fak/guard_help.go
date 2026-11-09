@@ -75,7 +75,7 @@ var guardFlagGroups = []guardFlagGroup{
 		"anthropic-oauth", "oauth-token-env", "env", "require-key-env", "rotate",
 	}},
 	{"Policy, floor & audit", []string{
-		"workspace-admission-permissive", "policy", "posture", "profile", "sandbox", "self-modify", "allow-tool", "lane", "dump-policy", "dump-strict-policy", "audit", "log", "landlock-hooks", "toolcall-control",
+		"workspace-admission", "workspace-admission-permissive", "policy", "posture", "profile", "sandbox", "self-modify", "allow-tool", "lane", "dump-policy", "dump-strict-policy", "audit", "log", "landlock-hooks", "toolcall-control",
 	}},
 	{"Token economy (cache & context savers)", []string{
 		"compact-history-budget", "compact-anchor-head", "assume-session-turns",

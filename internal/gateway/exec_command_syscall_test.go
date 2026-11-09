@@ -48,7 +48,8 @@ func (a execCommandVerdictAdjudicator) Adjudicate(ctx context.Context, call *abi
 func TestFakSyscallExecCommandRefusesUnclaimedCommandRoute(t *testing.T) {
 	wrong := &generatedResultEngine{}
 	srv := newTestServer(t)
-	srv.workspaceAdmissionPermissive = true
+	// The legacy permissive bool no longer drives admission; pin the resolved mode.
+	srv.workspaceAdmissionMode = WorkspaceAdmissionPermissive
 	abi.RegisterEngine("test", wrong)
 	abi.RegisterAdjudicator(5, execCommandAllowAdjudicator{})
 
@@ -97,7 +98,8 @@ func (e *commandResultEngine) Complete(context.Context, *abi.ToolCall) (*abi.Res
 func execCommandFixture(t *testing.T, wrong *generatedResultEngine) (*Server, string, string) {
 	t.Helper()
 	srv := newTestServer(t)
-	srv.workspaceAdmissionPermissive = true
+	// The legacy permissive bool no longer drives admission; pin the resolved mode.
+	srv.workspaceAdmissionMode = WorkspaceAdmissionPermissive
 	abi.RegisterEngine("test", wrong)
 	abi.RegisterAdjudicator(5, execCommandAllowAdjudicator{})
 	command := "printf 'sentinel-out'; printf 'sentinel-err' >&2; exit 7"
@@ -191,7 +193,8 @@ func TestFakSyscallExecCommandRejectsDispatchingNonAllowVerdicts(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			wrongDefault := &generatedResultEngine{}
 			srv := newTestServer(t)
-			srv.workspaceAdmissionPermissive = true
+			// The legacy permissive bool no longer drives admission; pin the resolved mode.
+			srv.workspaceAdmissionMode = WorkspaceAdmissionPermissive
 			abi.RegisterEngine("test", wrongDefault)
 			abi.RegisterAdjudicator(5, execCommandVerdictAdjudicator{original: tc.original, adapted: tc.adapted})
 			command := "echo must-not-run"
@@ -221,7 +224,8 @@ func TestFakSyscallExecCommandRejectsDispatchingNonAllowVerdicts(t *testing.T) {
 func TestFakSyscallExecCommandPolicyDenyCannotExecute(t *testing.T) {
 	wrongDefault := &generatedResultEngine{}
 	srv := newTestServer(t)
-	srv.workspaceAdmissionPermissive = true
+	// The legacy permissive bool no longer drives admission; pin the resolved mode.
+	srv.workspaceAdmissionMode = WorkspaceAdmissionPermissive
 	abi.RegisterEngine("test", wrongDefault)
 	abi.RegisterAdjudicator(5, execCommandVerdictAdjudicator{original: abi.VerdictDeny, adapted: abi.VerdictAllow})
 	command := "echo must-not-run"
@@ -373,7 +377,8 @@ func TestFakSyscallExecCommandRejectsInvalidArguments(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			wrongDefault := &generatedResultEngine{}
 			srv := newTestServer(t)
-			srv.workspaceAdmissionPermissive = true
+			// The legacy permissive bool no longer drives admission; pin the resolved mode.
+			srv.workspaceAdmissionMode = WorkspaceAdmissionPermissive
 			abi.RegisterEngine("test", wrongDefault)
 			abi.RegisterAdjudicator(5, execCommandAllowAdjudicator{})
 

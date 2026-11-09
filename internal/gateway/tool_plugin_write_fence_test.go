@@ -56,11 +56,14 @@ func TestPluginTransformedReadToWorkspaceWriteIsFencedBeforeEngine(t *testing.T)
 	abi.RegisterRegionBackend(inlineBackend{})
 	abi.RegisterEngine("plugin-write-fence", engine)
 	abi.RegisterAdjudicator(0, toolAdj{})
+	// Pin the legacy strict posture explicitly: the zero-value mode now resolves
+	// to open, which would admit the transformed write this fence refuses.
 	srv, err := New(Config{
-		EngineID:    "plugin-write-fence",
-		Model:       "test-model",
-		VDSO:        true,
-		ToolPlugins: []toolplugin.Plugin{transform},
+		EngineID:           "plugin-write-fence",
+		Model:              "test-model",
+		VDSO:               true,
+		ToolPlugins:        []toolplugin.Plugin{transform},
+		WorkspaceAdmission: string(WorkspaceAdmissionStrict),
 	})
 	if err != nil {
 		t.Fatal(err)

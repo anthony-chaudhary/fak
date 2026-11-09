@@ -150,14 +150,14 @@ func (s *Server) adjudicateWithSeq(ctx context.Context, tool, rawArgs string, re
 				return wv, repaired, nil
 			}
 			offerOperatorApproval(&leaseVerdict, tc.Tool, effectiveArgs)
-			if s.workspaceAdmissionPermissive && leaseVerdict.Reason == abi.ReasonName(abi.ReasonDefaultDeny) {
+			if admit, by := s.workspaceAdmissionDowngrade(leaseVerdict.Reason); admit {
 				// Preserve TRANSFORM so clients still apply the repaired arguments.
 				if wv.Detail == nil {
 					wv.Detail = make(map[string]string)
 				}
 				wv.Detail["kernel_by"] = wv.By
-				wv.By = "lease-admission-permissive"
-				wv.Detail["workspace_admission"] = "permissive"
+				wv.By = by
+				wv.Detail["workspace_admission"] = workspaceAdmissionDetailKind(s.workspaceAdmissionMode)
 				wv.Detail["would_deny"] = leaseVerdict.Reason
 				wv.Detail["would_deny_by"] = leaseVerdict.By
 				wv.Detail["would_deny_claim"] = leaseVerdict.Detail["claim"]
@@ -167,6 +167,33 @@ func (s *Server) adjudicateWithSeq(ctx context.Context, tool, rawArgs string, re
 		}
 	}
 	return wv, repaired, nil
+}
+
+// workspaceAdmissionDowngrade reports whether the gateway's own lease-admission
+// refusal is downgraded to an admit-and-log Allow under the resolved admission
+// mode, and the By label the admitted verdict carries. "" (unresolved direct
+// construction) resolves to the open default.
+func (s *Server) workspaceAdmissionDowngrade(reason string) (bool, string) {
+	switch s.workspaceAdmissionMode {
+	case WorkspaceAdmissionPermissive:
+		if reason == abi.ReasonName(abi.ReasonDefaultDeny) {
+			return true, "lease-admission-permissive"
+		}
+		return false, ""
+	case WorkspaceAdmissionStrict:
+		return false, ""
+	default: // "" and open — the going-forward default
+		return true, "lease-admission-open"
+	}
+}
+
+// workspaceAdmissionDetailKind is the workspace_admission detail value the
+// admitted verdict carries under the resolved mode.
+func workspaceAdmissionDetailKind(mode WorkspaceAdmissionMode) string {
+	if mode == WorkspaceAdmissionPermissive {
+		return "permissive"
+	}
+	return "open"
 }
 
 // (k.Syscall: adjudicate -> vDSO -> dispatch to the registered engine ->
@@ -290,10 +317,14 @@ func (s *Server) syscall(ctx context.Context, tool, rawArgs string, readOnly boo
 }
 
 // strictInitialWorkspaceExecution retains the pre-existing strict mutation fence.
+// The atomic-guard refusal is downgraded under open AND permissive (both admit
+// the mutating syscall when the atomic guard is unavailable); strict refuses it.
 func (s *Server) strictInitialWorkspaceExecution(ctx context.Context, call *abi.ToolCall, readOnly bool) (WireVerdict, bool) {
 	_, _, mutating, _ := adjudicateRawWriteTargets(call.Tool, string(resolveBytes(ctx, call.Args)), readOnly)
-	if mutating && !s.workspaceAdmissionPermissive {
-		return leaseAdmissionRefusal(abi.ReasonDefaultDeny, leaseFailureAtomicGuardUnavailable, "atomic workspace lease guard is unavailable for mutating syscall"), true
+	if mutating {
+		if admit, _ := s.workspaceAdmissionDowngrade(abi.ReasonName(abi.ReasonDefaultDeny)); !admit {
+			return leaseAdmissionRefusal(abi.ReasonDefaultDeny, leaseFailureAtomicGuardUnavailable, "atomic workspace lease guard is unavailable for mutating syscall"), true
+		}
 	}
 	return WireVerdict{}, false
 }
@@ -307,18 +338,20 @@ func (s *Server) prepareWorkspaceExecution(ctx context.Context, call *abi.ToolCa
 		return nil, WireVerdict{}, false
 	}
 	atomicRefusal := leaseAdmissionRefusal(abi.ReasonDefaultDeny, leaseFailureAtomicGuardUnavailable, "atomic workspace lease guard is unavailable for mutating syscall")
-	if !s.workspaceAdmissionPermissive {
+	if admit, _ := s.workspaceAdmissionDowngrade(atomicRefusal.Reason); !admit {
 		return nil, atomicRefusal, true
 	}
 	details := map[string]string{
-		"workspace_admission":    "permissive",
+		"workspace_admission":    workspaceAdmissionDetailKind(s.workspaceAdmissionMode),
 		"would_deny":             atomicRefusal.Reason,
 		"would_deny_by":          atomicRefusal.By,
 		"would_deny_claim":       atomicRefusal.Detail["claim"],
 		"atomic_workspace_guard": "unavailable",
 	}
 	if snapshot, refused := s.adjudicateLeaseAdmission(ctx, call.Tool, rawArgs, readOnly); refused {
-		if snapshot.Reason != abi.ReasonName(abi.ReasonDefaultDeny) {
+		// Permissive keeps peer LEASE_HELD conflicts enforced; open downgrades
+		// them too, recording the snapshot refusal instead of refusing.
+		if snapshotAdmit, _ := s.workspaceAdmissionDowngrade(snapshot.Reason); !snapshotAdmit {
 			return nil, snapshot, true
 		}
 		details["snapshot_would_deny"] = snapshot.Reason
@@ -488,7 +521,12 @@ func annotateWorkspaceExecution(verdict *WireVerdict, details map[string]string)
 		verdict.Detail = make(map[string]string)
 	}
 	verdict.Detail["kernel_by"] = verdict.By
-	verdict.By = "lease-admission-permissive"
+	switch details["workspace_admission"] {
+	case "permissive":
+		verdict.By = "lease-admission-permissive"
+	default:
+		verdict.By = "lease-admission-open"
+	}
 	for key, value := range details {
 		verdict.Detail[key] = value
 	}

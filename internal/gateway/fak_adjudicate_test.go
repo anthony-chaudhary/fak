@@ -440,7 +440,9 @@ func TestFakAdjudicateChecksTransformedWriteTarget(t *testing.T) {
 	abi.RegisterRegionBackend(inlineBackend{})
 	abi.RegisterEngine("test", echoEngine{})
 	abi.RegisterAdjudicator(0, protectedWriteTransformAdj{target: "protected/transformed.txt"})
-	srv, err := New(Config{EngineID: "test", Model: "test-model", VDSO: true})
+	// Pin the legacy strict posture explicitly: the zero-value mode now resolves
+	// to open, which would admit the peer-held transformed write this witness refuses.
+	srv, err := New(Config{EngineID: "test", Model: "test-model", VDSO: true, WorkspaceAdmission: string(WorkspaceAdmissionStrict)})
 	if err != nil {
 		t.Fatal(err)
 	}

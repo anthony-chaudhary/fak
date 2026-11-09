@@ -91,11 +91,14 @@ func TestCanonicalToolNormalization(t *testing.T) {
 	adj := adjudicator.New(pol.Adjudicator)
 	abi.RegisterAdjudicator(0, adj)
 
+	// Pin the legacy strict posture explicitly: the zero-value mode now resolves
+	// to open, which would admit the unknown-footprint commands this witness denies.
 	srv, err := New(Config{
-		EngineID:      "test",
-		Model:         "test-model",
-		VDSO:          true,
-		PolicyRuntime: pol,
+		EngineID:           "test",
+		Model:              "test-model",
+		VDSO:               true,
+		PolicyRuntime:      pol,
+		WorkspaceAdmission: string(WorkspaceAdmissionStrict),
 	})
 	if err != nil {
 		t.Fatalf("New server: %v", err)

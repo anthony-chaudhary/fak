@@ -93,7 +93,8 @@ func cmdManageCommand(commandName string, argv []string) {
 	apiKeyEnv := fs.String("api-key-env", "", "env var holding the UPSTREAM API key. For --provider anthropic this is the explicit opt-IN to API billing (e.g. --api-key-env ANTHROPIC_API_KEY); the default is your Claude Pro/Max subscription via OAuth, even when ANTHROPIC_API_KEY is exported. For other providers the default forwards the client's own key (passthrough).")
 	anthropicOAuth := fs.Bool("anthropic-oauth", false, "force the Claude Pro/Max SUBSCRIPTION OAuth token upstream (sourced, in precedence order, from CLAUDE_CODE_OAUTH_TOKEN, then <claude-config>/.credentials.json, then <claude-config>/.oauth-token) sent as Authorization: Bearer + the oauth beta. This is ALREADY the default for --provider anthropic (even when ANTHROPIC_API_KEY is set); the flag forces it and fails loud if no token is found.")
 	oauthTokenEnv := fs.String("oauth-token-env", "CLAUDE_CODE_OAUTH_TOKEN", "env var to read the subscription OAuth token from first")
-	workspaceAdmissionPermissive := fs.Bool("workspace-admission-permissive", rwEnvBool("FAK_WORKSPACE_ADMISSION_PERMISSIVE"), "explicitly admit workspace lease DEFAULT_DENY failures with observable would_deny details; peer LEASE_HELD and kernel policy denies remain enforced (env: FAK_WORKSPACE_ADMISSION_PERMISSIVE)")
+	workspaceAdmission := fs.String("workspace-admission", os.Getenv("FAK_WORKSPACE_ADMISSION"), "gateway lease-admission posture: open|permissive|strict (default: open — the gateway's own floor admits refused writes with would_deny forensic records after a kernel allow; permissive is the legacy lever (DEFAULT_DENY-class only, LEASE_HELD enforced); strict is the legacy shipped default where every lease-admission refusal stands. Kernel policy denials are never affected. env: FAK_WORKSPACE_ADMISSION)")
+	workspaceAdmissionPermissive := fs.Bool("workspace-admission-permissive", rwEnvBool("FAK_WORKSPACE_ADMISSION_PERMISSIVE"), "legacy compat lever superseded by --workspace-admission (default open); true resolves the mode to permissive when no explicit mode is set (env: FAK_WORKSPACE_ADMISSION_PERMISSIVE)")
 	policyPath := fs.String("policy", "", "capability-floor manifest to enforce (default: the built-in guard floor; see --dump-policy)")
 	postureFlag := fs.String("posture", "", "adjudication posture: default_open|fail_closed|admit_and_log (default: default_open; overrides policy manifest posture; env: FAK_GUARD_POSTURE)")
 	selfModifyFlag := fs.String("self-modify", "", "self-modification mode: permissive|strict (default: permissive; overrides policy manifest self_modify_mode; env: FAK_GUARD_SELF_MODIFY)")
@@ -198,6 +199,14 @@ func cmdManageCommand(commandName string, argv []string) {
 		os.Exit(2)
 	}
 	_ = fs.Parse(argv)
+	// The lease-admission posture is a security boundary (it decides whether the
+	// gateway's own floor stands or admits-and-logs), so an unknown token fails
+	// loud at flag-parse time with the valid set rather than booting on a silent
+	// default. An empty value (no flag, no env) is the open default and parses clean.
+	if _, err := gateway.ParseWorkspaceAdmissionMode(*workspaceAdmission); err != nil {
+		fmt.Fprintln(os.Stderr, "fak guard:", err)
+		os.Exit(2)
+	}
 	if err := validateNativeQwenQ4KPrefillChunk(*guardNativeFlags.prefillChunk); err != nil {
 		fmt.Fprintln(os.Stderr, "fak guard:", err)
 		os.Exit(2)
@@ -891,7 +900,18 @@ func cmdManageCommand(commandName string, argv []string) {
 		gwLogf("guard: session lane designated at launch: %s (test-lane floors resolve this lane for every served tool call)", sessionLane)
 	}
 
+	// Gateway lease-admission posture (--workspace-admission): an explicit mode
+	// (flag or FAK_WORKSPACE_ADMISSION) wins; the legacy permissive bool resolves
+	// to permissive; otherwise the going-forward open default. An unknown token
+	// already failed loud at flag-parse time; New re-validates defensively.
+	wsAdmissionMode, err := resolveWorkspaceAdmission(*workspaceAdmission, *workspaceAdmissionPermissive)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "fak guard:", err)
+		os.Exit(2)
+	}
+
 	srv, err := gateway.New(gateway.Config{
+		WorkspaceAdmission:           wsAdmissionMode,
 		WorkspaceAdmissionPermissive: *workspaceAdmissionPermissive,
 		SessionLane:                  sessionLane,
 		EngineID:                     "mock",

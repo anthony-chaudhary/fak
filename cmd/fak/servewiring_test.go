@@ -135,6 +135,47 @@ func TestServeWiringSteerRowIsHonest(t *testing.T) {
 	}
 }
 
+// TestServeWiringWorkspaceAdmissionRowsAreHonest pins the lease-admission wiring rows to the
+// shipped posture: the mode row is ON_BY_DEFAULT (open admit-and-log after a kernel allow) and
+// wired through serve.go, while the legacy permissive bool row stays off-by-default and names
+// its supersession by the mode flag. It fails if either row regresses to the stale
+// "permissive is the only relief" claim or drops out of the audited baseline.
+func TestServeWiringWorkspaceAdmissionRowsAreHonest(t *testing.T) {
+	var modeRow, legacyRow *wiringRow
+	for i := range servewiringData {
+		switch servewiringData[i].Feature {
+		case "workspaceadmission":
+			modeRow = &servewiringData[i]
+		case "workspaceadmissionpermissive":
+			legacyRow = &servewiringData[i]
+		}
+	}
+	if modeRow == nil {
+		t.Fatal("workspaceadmission row missing from the audited baseline")
+	}
+	if legacyRow == nil {
+		t.Fatal("workspaceadmissionpermissive row missing from the audited baseline")
+	}
+	if modeRow.Verdict != verdictWired {
+		t.Fatalf("workspaceadmission row verdict=%q, want %q (open is the going-forward default)", modeRow.Verdict, verdictWired)
+	}
+	if modeRow.Field != "WorkspaceAdmission" || !strings.Contains(modeRow.Flag, "--workspace-admission") {
+		t.Fatalf("workspaceadmission row mis-traced: %+v", modeRow)
+	}
+	blob := modeRow.CallSite + " " + modeRow.Note
+	for _, want := range []string{"open", "permissive", "strict", "LEASE_HELD"} {
+		if !strings.Contains(blob, want) {
+			t.Fatalf("workspaceadmission row missing %q; got: %q", want, blob)
+		}
+	}
+	if legacyRow.Verdict != verdictOffByDefault {
+		t.Fatalf("workspaceadmissionpermissive row verdict=%q, want %q (the legacy bool still defaults OFF)", legacyRow.Verdict, verdictOffByDefault)
+	}
+	if !strings.Contains(legacyRow.Note, "superseded") {
+		t.Fatalf("legacy row no longer names its supersession by workspaceadmission: %q", legacyRow.Note)
+	}
+}
+
 // repoRootFromTest walks up from the test's working dir to the module root (the dir holding
 // go.mod), so the test is independent of repoRoot()'s git assumptions.
 func repoRootFromTest(t *testing.T) string {

@@ -36,6 +36,7 @@ contracts that expose the same posture to external products.
 | **Plan CFI** | plan control-flow integrity adjudicator | `internal/plancfi` | a plan that drifts from its approved shape raises `RequireApproval` |
 | **Durable-memory gate** | expire-by-default promotion | `internal/ctxmmu` `GateEphemeral`, `disposition.go` | a situational fact cannot silently become a standing belief |
 | **KV/context containment** | quarantined taint refused for attention | `internal/ctxmmu`, `internal/contextq` | a quarantined span is mechanically denied to attention |
+| **Gateway lease admission** | open admit-and-log (`would_deny` records; kernel floor untouched) | `internal/gateway/tool_routing.go` (`adjudicateLeaseAdmission`) | after a kernel ALLOW/TRANSFORM, the gateway's own workspace-ownership floor refuses nothing by default: DEFAULT_DENY-class refusals AND peer `LEASE_HELD` conflicts are admitted with `would_deny` forensic detail (`By: lease-admission-open`). Kernel policy denials stand in every mode — lease admission only runs after a kernel allow. `--workspace-admission permissive` keeps peer `LEASE_HELD` enforced; `strict` enforces every refusal (the legacy shipped default) |
 
 Each row has a witness test in its package; the consolidated claim is
 `docs/claims/security-substrate-the-kernel-stops-believing-the-model.md`.
@@ -139,10 +140,20 @@ The normative contracts are `PublicContract()` / `ContractJSON()`
 
 - **Default-on, no action required:** normgate runs at rank 5 in front of ctxmmu
   (one blank import); the default floor is the registered `adjudicator.Default`.
+- **Gateway lease admission posture** (`fak serve` / `fak guard`, env
+  `FAK_WORKSPACE_ADMISSION`): `--workspace-admission open|permissive|strict`
+  selects what the gateway's OWN workspace-ownership floor does with a refused
+  write after the kernel allowed the call — `open` (default) admits-and-logs
+  DEFAULT_DENY-class and peer `LEASE_HELD` refusals with `would_deny` records;
+  `permissive` (the legacy lever, also reachable via
+  `--workspace-admission-permissive`) admits DEFAULT_DENY-class only; `strict`
+  enforces every refusal. The built-in kernel floor is untouched by all three
+  modes; a custom/strict floor stays an operator lever (`--policy`).
 - **Tighten:** supply a reviewed `--policy` (never the bare default in prod);
   keep irreversible tools off the allow-list; add `arg_rules` /
   `self_modify_globs`; opt into the fail-closed secret posture for unattended
-  contexts.
+  contexts; select `--workspace-admission strict` to stand the gateway's own
+  lease-admission floor back up.
 - **Escape hatches (blunt, reversible, per-process):**
   - `FAK_NORMGATE=off` makes `Admit` a no-op `Defer` (also disables the
     injection screen — a dev escape hatch, not a prod posture).

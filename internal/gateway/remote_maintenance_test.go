@@ -363,7 +363,9 @@ func TestRemoteMaintenanceExemptionDoesNotAdmitOrdinaryBash(t *testing.T) {
 		Posture: adjudicator.PostureFailClosed,
 		Allow:   map[string]bool{remoteMaintenanceTool: true, "Bash": true},
 	}))
-	srv, err := New(Config{EngineID: "test", Model: "remote-maintenance-bash-floor", VDSO: true})
+	// Pin the legacy strict posture explicitly: the zero-value mode now resolves
+	// to open, which would admit the unknown-footprint Bash calls this witness denies.
+	srv, err := New(Config{EngineID: "test", Model: "remote-maintenance-bash-floor", VDSO: true, WorkspaceAdmission: string(WorkspaceAdmissionStrict)})
 	if err != nil {
 		t.Fatal(err)
 	}

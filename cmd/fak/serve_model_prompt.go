@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
 
 // partitionServeArgs partitions argv into flag arguments (to be passed to FlagSet.Parse)
@@ -45,6 +47,15 @@ func parseServeArgs(fs *flag.FlagSet, sf *serveFlags, argv []string) error {
 	flagArgs, posArgs := partitionServeArgs(fs, argv)
 	if err := fs.Parse(flagArgs); err != nil {
 		return err
+	}
+	// The lease-admission posture is a security boundary (it decides whether the
+	// gateway's own floor stands or admits-and-logs), so an unknown token fails
+	// loud at flag-parse time with the valid set rather than booting on a silent
+	// default. An empty value (no flag, no env) is the open default and parses clean.
+	if sf.workspaceAdmission != nil {
+		if _, err := gateway.ParseWorkspaceAdmissionMode(*sf.workspaceAdmission); err != nil {
+			return fmt.Errorf("fak serve: --workspace-admission: %w", err)
+		}
 	}
 
 	// Consume leading "model" keyword if present (e.g. `fak serve model --gguf ...` or `fak serve model <ref>`)

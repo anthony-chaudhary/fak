@@ -2,7 +2,9 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -18,6 +20,61 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
 )
+
+// WorkspaceAdmissionMode selects what the gateway's own lease-admission floor
+// does with a refused write after the kernel allowed the call.
+//
+//   - "open" (going-forward default): the gateway's own floor is admit-and-log —
+//     DEFAULT_DENY-class refusals AND peer LEASE_HELD conflicts are admitted
+//     with would_deny forensic records (By "lease-admission-open"); kernel
+//     policy denials are structurally untouched (lease admission only runs
+//     after a kernel ALLOW/TRANSFORM).
+//   - "permissive": the legacy opt-in — DEFAULT_DENY-class refusals admitted;
+//     peer LEASE_HELD conflicts remain enforced.
+//   - "strict": the legacy shipped default — every lease-admission refusal stands.
+type WorkspaceAdmissionMode string
+
+const (
+	WorkspaceAdmissionOpen       WorkspaceAdmissionMode = "open"
+	WorkspaceAdmissionPermissive WorkspaceAdmissionMode = "permissive"
+	WorkspaceAdmissionStrict     WorkspaceAdmissionMode = "strict"
+)
+
+// DefaultWorkspaceAdmissionMode is the shipped going-forward default.
+const DefaultWorkspaceAdmissionMode = WorkspaceAdmissionOpen
+
+// ParseWorkspaceAdmissionMode accepts the three mode tokens (trim + lowercase).
+// An empty value is NOT an error: it returns "" so callers can resolve it
+// through ResolveWorkspaceAdmissionMode. An unknown token fails loud with the
+// valid set.
+func ParseWorkspaceAdmissionMode(v string) (WorkspaceAdmissionMode, error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "":
+		return "", nil
+	case string(WorkspaceAdmissionOpen):
+		return WorkspaceAdmissionOpen, nil
+	case string(WorkspaceAdmissionPermissive):
+		return WorkspaceAdmissionPermissive, nil
+	case string(WorkspaceAdmissionStrict):
+		return WorkspaceAdmissionStrict, nil
+	default:
+		return "", fmt.Errorf("invalid workspace admission mode %q: want open|permissive|strict", v)
+	}
+}
+
+// ResolveWorkspaceAdmissionMode folds the explicit mode and the legacy permissive
+// bool into the single resolved posture: an explicit cfg.WorkspaceAdmission wins
+// (New validates it parses); else the permissive bool true resolves to
+// permissive; else the going-forward open default.
+func ResolveWorkspaceAdmissionMode(cfg Config) WorkspaceAdmissionMode {
+	if mode, err := ParseWorkspaceAdmissionMode(cfg.WorkspaceAdmission); err == nil && mode != "" {
+		return mode
+	}
+	if cfg.WorkspaceAdmissionPermissive {
+		return WorkspaceAdmissionPermissive
+	}
+	return DefaultWorkspaceAdmissionMode
+}
 
 // DefaultCompactHistoryBudget is the resident-token line the cache-prefix-preserving
 // history compaction trims the kept window to BY DEFAULT on the Anthropic passthrough.
@@ -247,8 +304,13 @@ type Config struct {
 	// Adjudicators optionally supplies a complete per-server kernel chain. A nil
 	// chain preserves the registered pipeline; callers must retain every floor.
 	Adjudicators []abi.Adjudicator
-	// WorkspaceAdmissionPermissive explicitly admits lease DEFAULT_DENY failures.
-	// Peer LEASE_HELD conflicts and kernel policy denials remain enforced.
+	// WorkspaceAdmission explicitly selects the gateway's own lease-admission mode
+	// (open|permissive|strict). Empty defers to the legacy permissive bool below,
+	// then to the open default; a non-empty value that does not parse fails New loud.
+	WorkspaceAdmission string
+	// WorkspaceAdmissionPermissive is the legacy compat lever superseded by
+	// WorkspaceAdmission: when no explicit mode is set, true resolves the mode to
+	// permissive. It no longer drives admission on its own.
 	WorkspaceAdmissionPermissive bool
 	// SessionLane is the LAUNCH-TIME lane designation the host (fak guard) stamps
 	// onto every served tool call as trusted Meta["lane"] (#3707/#3708/#3709). It

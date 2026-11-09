@@ -480,7 +480,14 @@ curl -s http://127.0.0.1:8080/metrics | head                # Prometheus scrape
 
 Point any OpenAI client at `http://127.0.0.1:8080/v1`. `fak serve` also speaks the
 Anthropic `/v1/messages` wire, exposes `/metrics` + `/debug/vars`, and takes
-`--policy floor.json` + `--require-key-env VAR` to harden it. One caveat worth
+`--policy floor.json` + `--require-key-env VAR` to harden it. The gateway's own
+lease-admission posture (what its floor does with a refused write after the kernel
+allowed the call) is set by `--workspace-admission open|permissive|strict`
+(default `open`: admit-and-log with `would_deny` forensic records; `permissive`
+admits DEFAULT_DENY-class only; `strict` enforces every refusal; env:
+`FAK_WORKSPACE_ADMISSION`). `--workspace-admission-permissive` remains as the legacy
+compat lever (env: `FAK_WORKSPACE_ADMISSION_PERMISSIVE`); kernel policy denials are
+never affected. One caveat worth
 knowing up front: `stream:true` SSE is **synthesized from the finished,
 already-adjudicated turn** — well-formed, but not true token-by-token streaming. (The
 client's `max_tokens`/`temperature`/`top_p`/`stop` are now forwarded per request, so
@@ -712,6 +719,18 @@ Fronts an interactive or autonomous agent with the in-process capability floor, 
 - `--policy <path>`: capability-floor manifest to enforce (default: built-in guard floor).
 - `--dump-policy`: print the built-in guard capability floor (an editable manifest) to stdout and exit.
 - `--dump-strict-policy`: print the strict fail-closed capability floor manifest (`posture: fail_closed`) to stdout and exit.
+
+### Gateway lease admission
+
+The kernel's capability floor decides whether a call may run in principle; the gateway's own lease-admission floor then decides whether this guarded session may write the named workspace tree *now* (unknown write footprint, unavailable authority, targets outside the workspace, or a peer lease holding the trees). Its posture is set by:
+
+- `--workspace-admission open|permissive|strict`: gateway lease-admission posture (default `open`; env: `FAK_WORKSPACE_ADMISSION`).
+  - `open` (going-forward default): admit-and-log — DEFAULT_DENY-class refusals **and** peer `LEASE_HELD` conflicts are admitted with `would_deny` forensic records after a kernel allow.
+  - `permissive`: the legacy lever — DEFAULT_DENY-class refusals admitted; peer `LEASE_HELD` conflicts remain enforced.
+  - `strict`: the legacy shipped default — every lease-admission refusal stands.
+- `--workspace-admission-permissive`: legacy compat lever superseded by `--workspace-admission`; true resolves the mode to `permissive` when no explicit mode is set (env: `FAK_WORKSPACE_ADMISSION_PERMISSIVE`).
+
+Kernel policy denials are never affected: lease admission only runs after a kernel ALLOW/TRANSFORM. An unknown `--workspace-admission` token fails loud at flag-parse time with the valid set.
 
 ### Dangerous Gotchas catalog and carveouts
 

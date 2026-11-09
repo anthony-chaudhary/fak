@@ -113,6 +113,7 @@ func configureServeToolEngines() {
 type serveFlags struct {
 	embeddingPooling             *string
 	topologyShadowInput          *string
+	workspaceAdmission           *string
 	workspaceAdmissionPermissive *bool
 	configPath                   *string
 	printEffectiveConfig         *bool
@@ -283,7 +284,8 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.printEffectiveConfig = fs.Bool("print-effective-config", false, "print supported effective serve configuration with value provenance, then exit without binding a listener")
 	sf.printFeatures = fs.Bool("print-features", false, "print the evaluated feature matrix and provenance before initialization, then exit without model I/O")
 	sf.addr = fs.String("addr", "127.0.0.1:8080", "HTTP listen address (OpenAI + fak + /mcp surface); ignored with --stdio")
-	sf.workspaceAdmissionPermissive = fs.Bool("workspace-admission-permissive", rwEnvBool("FAK_WORKSPACE_ADMISSION_PERMISSIVE"), "explicitly admit workspace lease DEFAULT_DENY failures with observable would_deny details; peer LEASE_HELD and kernel policy denies remain enforced (env: FAK_WORKSPACE_ADMISSION_PERMISSIVE)")
+	sf.workspaceAdmission = fs.String("workspace-admission", os.Getenv("FAK_WORKSPACE_ADMISSION"), "gateway lease-admission posture: open|permissive|strict (default: open — the gateway's own floor admits refused writes with would_deny forensic records after a kernel allow; permissive is the legacy lever (DEFAULT_DENY-class only, LEASE_HELD enforced); strict is the legacy shipped default where every lease-admission refusal stands. Kernel policy denials are never affected. env: FAK_WORKSPACE_ADMISSION)")
+	sf.workspaceAdmissionPermissive = fs.Bool("workspace-admission-permissive", rwEnvBool("FAK_WORKSPACE_ADMISSION_PERMISSIVE"), "legacy compat lever superseded by --workspace-admission (default open); true resolves the mode to permissive when no explicit mode is set (env: FAK_WORKSPACE_ADMISSION_PERMISSIVE)")
 	sf.stdio = fs.Bool("stdio", false, "serve MCP over stdin/stdout (newline-delimited JSON-RPC) instead of HTTP")
 	sf.provider = fs.String("provider", "openai", "upstream provider transcript wire: openai, anthropic, gemini, or xai")
 	sf.armLeaseStore = fs.String("arm-lease-store", "", "private durable research-arm lease snapshot (Linux/Darwin; fresh store requires initial exclusive lease before inference)")
@@ -1357,7 +1359,17 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableCon
 		return nil, err
 	}
 
+	// Gateway lease-admission posture (--workspace-admission): an explicit mode
+	// (flag or FAK_WORKSPACE_ADMISSION) wins; the legacy permissive bool resolves
+	// to permissive; otherwise the going-forward open default. An unknown token
+	// already failed loud at flag-parse time; New re-validates defensively.
+	wsAdmissionMode, err := resolveWorkspaceAdmission(*sf.workspaceAdmission, *sf.workspaceAdmissionPermissive)
+	if err != nil {
+		return nil, err
+	}
+
 	srv, err := gateway.New(gateway.Config{
+		WorkspaceAdmission:           wsAdmissionMode,
 		WorkspaceAdmissionPermissive: *sf.workspaceAdmissionPermissive,
 		EngineID:                     *sf.engineID,
 		OTLPEndpoint:                 *sf.otlpEndpoint,

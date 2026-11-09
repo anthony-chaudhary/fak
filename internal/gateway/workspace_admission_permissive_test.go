@@ -29,7 +29,13 @@ func newPermissiveAdmissionTestServer(t *testing.T, permissive bool) *Server {
 	// subject with the operator setting rather than mutating a live server.
 	newTestServer(t)
 	abi.RegisterAdjudicator(-1, permissiveAdmissionTestAdj{})
-	srv, err := New(Config{EngineID: "test", Model: "test-model", VDSO: true, WorkspaceAdmissionPermissive: permissive})
+	cfg := Config{EngineID: "test", Model: "test-model", VDSO: true, WorkspaceAdmissionPermissive: permissive}
+	if !permissive {
+		// Zero-value semantics changed: an unset mode now resolves to open, so the
+		// legacy strict arm names strict explicitly.
+		cfg.WorkspaceAdmission = string(WorkspaceAdmissionStrict)
+	}
+	srv, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,6 +203,11 @@ func TestWorkspaceAdmissionPermissiveSyscallExecution(t *testing.T) {
 				abi.RegisterEngine("permissive-execution", engine)
 				abi.RegisterAdjudicator(0, toolAdj{})
 				cfg := Config{EngineID: "permissive-execution", Model: "test-model", VDSO: true, WorkspaceAdmissionPermissive: tc.permissive}
+				if !tc.permissive {
+					// Zero-value semantics changed: an unset mode now resolves to open,
+					// so the legacy strict arm names strict explicitly.
+					cfg.WorkspaceAdmission = string(WorkspaceAdmissionStrict)
+				}
 				if plugins {
 					cfg.ToolPlugins = []toolplugin.Plugin{&gatewayTestPlugin{
 						profile: gatewayPinned("permissive-execution-pass", toolplugin.StageCanonicalize, 1),

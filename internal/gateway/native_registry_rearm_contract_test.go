@@ -80,6 +80,10 @@ func TestNativeCodeToolsSetupAfterCompletedRegistryReset(t *testing.T) {
 		proxyCfg := cfg
 		proxyCfg.EngineID, proxyCfg.Model = "localtools", "test-model"
 		proxyCfg.VDSO, proxyCfg.Native = true, true
+		// Pin the legacy strict lease-admission posture explicitly: the zero-value
+		// mode now resolves to open, which would admit the unowned unknown-footprint
+		// Bash proposal this witness refuses.
+		proxyCfg.WorkspaceAdmission = string(WorkspaceAdmissionStrict)
 		srv, err := New(proxyCfg)
 		if err != nil {
 			t.Fatal(err)
