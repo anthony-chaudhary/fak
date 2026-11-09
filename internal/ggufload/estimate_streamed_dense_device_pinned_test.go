@@ -17,7 +17,7 @@ import (
 // device charge in BOTH the estimate and the loader, so the fit guard judges what the kernel
 // actually needs instead of a plan the kernel refuses.
 
-const pinnedFixtureFFNBytes = int64(256 * 144)   // one [256,256] Q4_K tensor: 256 super-blocks x 144 B
+const pinnedFixtureFFNBytes = int64(256 * 144)  // one [256,256] Q4_K tensor: 256 super-blocks x 144 B
 const pinnedFixtureLMHeadBytes = int64(4 * 144) // the fixture's [256,vocab=4] Q4_K head: 4 super-blocks x 144 B
 
 // qwen35PinnedTestConfig is the parsed config of buildQwen35GGUFFixture("qwen35"): two layers,
