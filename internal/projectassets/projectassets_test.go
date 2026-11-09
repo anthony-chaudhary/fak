@@ -750,16 +750,17 @@ func TestVerifyOpenCodePlugin(t *testing.T) {
 		t.Fatalf("expected missing live_leases error, got: %v", err)
 	}
 
-	// Test missing 120s timeout. The fixture must carry the COMPLIANT live_leases probe
-	// (`live_leases(cfg, expire_dead=True)`), otherwise verification stops at the earlier
-	// live_leases check and this fixture never reaches the timeout assertion it is testing.
+	// Test missing budgeted-preflight markers. The fixture must carry the COMPLIANT
+	// live_leases probe (`live_leases(cfg, expire_dead=True)`), otherwise verification
+	// stops at the earlier live_leases check and this fixture never reaches the budget
+	// assertion it is testing.
 	write(t, tmp, OpenCodePluginPath, "export default function() { return { 'tool.execute.before': async () => { const m = ['write', 'edit', 'apply_patch']; fak('leaseref'); fak('loop'); live_leases(cfg, expire_dead=True); arbitrate; } }; }")
-	if err := VerifyOpenCodePlugin(tmp); err == nil || !strings.Contains(err.Error(), "timeout: 120000") {
-		t.Fatalf("expected missing timeout: 120000 error, got: %v", err)
+	if err := VerifyOpenCodePlugin(tmp); err == nil || !strings.Contains(err.Error(), "FAK_WRITE_GUARD_BUDGET_MS") {
+		t.Fatalf("expected missing FAK_WRITE_GUARD_BUDGET_MS error, got: %v", err)
 	}
 
 	// Test missing Windows platform binary extension check
-	write(t, tmp, OpenCodePluginPath, "export default function() { return { 'tool.execute.before': async () => { const m = ['write', 'edit', 'apply_patch']; fak('leaseref'); fak('loop'); live_leases(cfg, expire_dead=True); arbitrate; timeout: 120000; } }; }")
+	write(t, tmp, OpenCodePluginPath, "export default function() { return { 'tool.execute.before': async () => { const m = ['write', 'edit', 'apply_patch']; fak('leaseref'); fak('loop'); live_leases(cfg, expire_dead=True); arbitrate; FAK_WRITE_GUARD_BUDGET_MS; FAK_WRITE_GUARD_STRICT; fak.queueus.pending.v1; } }; }")
 	if err := VerifyOpenCodePlugin(tmp); err == nil || !strings.Contains(err.Error(), "win32") {
 		t.Fatalf("expected missing win32 error, got: %v", err)
 	}
@@ -1025,8 +1026,9 @@ func TestGeneratedMirrorPreservesHarnessMetadataFences(t *testing.T) {
 	}
 }
 
-func TestOpenCodePluginWindowsExtensionAndTimeout(t *testing.T) {
-	// Verify DefaultOpenCodePlugin contains Windows command extension resolution and 120000ms timeout.
+func TestOpenCodePluginWindowsExtensionAndPreflightBudget(t *testing.T) {
+	// Verify DefaultOpenCodePlugin contains Windows command extension resolution and the
+	// budgeted-preflight contract (budget env, strict escape hatch, QUEUEUS ledger schema).
 	if !strings.Contains(DefaultOpenCodePlugin, `process.platform === "win32"`) &&
 		!strings.Contains(DefaultOpenCodePlugin, `process.platform === 'win32'`) {
 		t.Fatal("DefaultOpenCodePlugin missing win32 platform check")
@@ -1035,8 +1037,10 @@ func TestOpenCodePluginWindowsExtensionAndTimeout(t *testing.T) {
 		!strings.Contains(DefaultOpenCodePlugin, `.endsWith('.exe')`) {
 		t.Fatal("DefaultOpenCodePlugin missing .endsWith('.exe') check")
 	}
-	if !strings.Contains(DefaultOpenCodePlugin, "timeout: 120000") {
-		t.Fatal("DefaultOpenCodePlugin missing 120000ms timeout")
+	for _, marker := range []string{"FAK_WRITE_GUARD_BUDGET_MS", "FAK_WRITE_GUARD_STRICT", "fak.queueus.pending.v1"} {
+		if !strings.Contains(DefaultOpenCodePlugin, marker) {
+			t.Fatalf("DefaultOpenCodePlugin missing budgeted-guard marker %q", marker)
+		}
 	}
 	if strings.Contains(DefaultOpenCodePlugin, "timeout: 30000") {
 		t.Fatal("DefaultOpenCodePlugin must not contain obsolete 30000ms timeout")
@@ -1076,8 +1080,10 @@ func TestOpenCodePluginWindowsExtensionAndTimeout(t *testing.T) {
 		!strings.Contains(content, `.endsWith('.exe')`) {
 		t.Fatal("disk plugin missing .endsWith('.exe') check")
 	}
-	if !strings.Contains(content, "timeout: 120000") {
-		t.Fatal("disk plugin missing 120000ms timeout")
+	for _, marker := range []string{"FAK_WRITE_GUARD_BUDGET_MS", "FAK_WRITE_GUARD_STRICT", "fak.queueus.pending.v1"} {
+		if !strings.Contains(content, marker) {
+			t.Fatalf("disk plugin missing budgeted-guard marker %q", marker)
+		}
 	}
 	if strings.Contains(content, "timeout: 30000") {
 		t.Fatal("disk plugin must not contain obsolete 30000ms timeout")
@@ -1099,6 +1105,23 @@ func TestOpenCodePluginWindowsExtensionAndTimeout(t *testing.T) {
 	}
 }
 
+// seedWitnessTargets creates the named workspace-relative files under root so
+// completed mutations in the JS witnesses are never phantom writes (the guard
+// notes PHANTOM_WRITE instead of the proof reminder when the target is absent
+// on disk).
+func seedWitnessTargets(t *testing.T, root string, rels ...string) {
+	t.Helper()
+	for _, rel := range rels {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("seed\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestOpenCodeMutationPathsAndProofReminders(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("node is required for OpenCode plugin witness")
@@ -1108,6 +1131,7 @@ func TestOpenCodeMutationPathsAndProofReminders(t *testing.T) {
 	if err := os.WriteFile(plugin, []byte(DefaultOpenCodePlugin), 0644); err != nil {
 		t.Fatal(err)
 	}
+	seedWitnessTargets(t, root, "internal/compute/example.go", "docs/test.md")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "node", "--input-type=module", "-", plugin, root)
@@ -1115,7 +1139,7 @@ func TestOpenCodeMutationPathsAndProofReminders(t *testing.T) {
 import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
 
-const hooks = await (await import(pathToFileURL(process.argv[2]).href)).default({directory:process.argv[3]});
+const hooks = await (await import(pathToFileURL(process.argv[2]).href)).default.server({directory:process.argv[3]});
 
 const callAfter = async (tool, args, output) => {
   await hooks['tool.execute.after']({tool, args, sessionID:'witness', callID:'test'}, output);
@@ -1204,7 +1228,7 @@ func TestOpenCodePluginAlternativePathKeysAndUnifiedDiffs(t *testing.T) {
 			t.Fatalf("DefaultOpenCodePlugin missing unified diff header pattern %q (#12071)", pattern)
 		}
 	}
-	for _, prop := range []string{"output.result", "output.text"} {
+	for _, prop := range []string{"result.output", "result.content"} {
 		if !strings.Contains(DefaultOpenCodePlugin, prop) {
 			t.Fatalf("DefaultOpenCodePlugin missing proof reminder target property %q (#12071)", prop)
 		}
@@ -1354,7 +1378,7 @@ import { pathToFileURL } from 'node:url';
 
 const [pluginFile, root] = process.argv.slice(2);
 const plugin = (await import(pathToFileURL(pluginFile).href)).default;
-const hooks = await plugin({ directory: root });
+const hooks = await plugin.server({ directory: root });
 
 // 1. Out-of-workspace scratch writes are ADMITTED; non-scratch out-of-tree
 //    writes refuse with the structured OUT_OF_LEASE marker and no shell steerage.
@@ -1390,10 +1414,15 @@ const hooks = await plugin({ directory: root });
   const patched = code.replace('const execute = promisify(execFile);', mockExec) +
     '\nexport { execCallCount };';
   const mod = await import('data:text/javascript;base64,' + Buffer.from(patched).toString('base64'));
-  const collisionPlugin = await mod.default({ directory: root });
+  const collisionPlugin = await mod.default.server({ directory: root });
 
   const collisionSession = 'sess-collision';
   const collisionPath = 'collision-file.go';
+
+  // The mock crashes every admission subprocess: an AVAILABILITY failure. The
+  // budgeted guard degrades those by default; the strict escape hatch restores
+  // the fail-closed steerage this section witnesses, so scope it here.
+  process.env.FAK_WRITE_GUARD_STRICT = '1';
 
   // Failure 1: encounters COLLISION_RISK and receives [RECOVERY] steerage
   await assert.rejects(
@@ -1432,6 +1461,24 @@ const hooks = await plugin({ directory: root });
 
   // Verify child CLI command was not dispatched on 3rd attempt
   assert.equal(mod.execCallCount, countBefore3rd, 'Circuit breaker must refuse without dispatching child CLI commands');
+  delete process.env.FAK_WRITE_GUARD_STRICT;
+
+  // 2b. New default (non-strict): the same availability failure degrades to an
+  //     ADMISSION_UNVERIFIED admit recorded in the QUEUEUS pending ledger.
+  const degradedSession = 'sess-degraded';
+  await assert.doesNotReject(
+    collisionPlugin['tool.execute.before']({ tool: 'edit', sessionID: degradedSession }, { args: { filePath: 'degraded-target.go' } })
+  );
+  const degradedResult = { output: 'ok' };
+  await collisionPlugin['tool.execute.after'](
+    { tool: 'edit', sessionID: degradedSession, args: { filePath: 'degraded-target.go' } },
+    degradedResult
+  );
+  assert.ok(degradedResult.output.includes('[dos-proof-guard:ADMISSION_UNVERIFIED]'), 'degraded note missing: ' + degradedResult.output);
+  const pending = JSON.parse(await readFile(path.join(root, '.fak', 'queueus', 'admission-pending.json'), 'utf8'));
+  assert.equal(pending.schema, 'fak.queueus.pending.v1');
+  assert.equal(pending.records.length, 1);
+  assert.equal(pending.records[0].kind, 'admission_unverified');
 }
 
 // 3. Circuit breaker on string-matching failure and reset on success

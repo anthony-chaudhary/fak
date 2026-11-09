@@ -89,7 +89,7 @@ import { pathToFileURL } from 'node:url';
 
 const [pluginFile, root] = process.argv.slice(2);
 const plugin = (await import(pathToFileURL(pluginFile).href)).default;
-const hooks = await plugin({ directory: root });
+const hooks = await plugin.server({ directory: root });
 
 // 1. Out-of-workspace scratch writes are ADMITTED (no throw, no lease call);
 //    non-scratch out-of-tree writes still refuse with the structured marker.
@@ -141,10 +141,15 @@ const hooks = await plugin({ directory: root });
   const patched = code.replace('const execute = promisify(execFile);', mockExec) +
     '\nexport { execCallCount };';
   const mod = await import('data:text/javascript;base64,' + Buffer.from(patched).toString('base64'));
-  const collisionPlugin = await mod.default({ directory: root });
+  const collisionPlugin = await mod.default.server({ directory: root });
 
   const collisionSession = 'sess-collision';
   const collisionPath = 'collision-target.go';
+
+  // The mock crashes every admission subprocess: an AVAILABILITY failure. The
+  // budgeted guard degrades those by default; the strict escape hatch restores
+  // the fail-closed steerage this section witnesses, so scope it here.
+  process.env.FAK_WRITE_GUARD_STRICT = '1';
 
   // Failure 1: encounters COLLISION_RISK and receives [RECOVERY] steerage
   await assert.rejects(
@@ -184,6 +189,24 @@ const hooks = await plugin({ directory: root });
 
   // Verify no subprocess commands were dispatched on 3rd attempt
   assert.equal(mod.execCallCount, countBefore3rd, 'Circuit breaker must refuse without dispatching child CLI commands');
+  delete process.env.FAK_WRITE_GUARD_STRICT;
+
+  // 3b. New default (non-strict): the same availability failure degrades to an
+  //     ADMISSION_UNVERIFIED admit recorded in the QUEUEUS pending ledger.
+  const degradedSession = 'sess-degraded';
+  await assert.doesNotReject(
+    collisionPlugin['tool.execute.before']({ tool: 'edit', sessionID: degradedSession }, { args: { filePath: 'degraded-target.go' } })
+  );
+  const degradedResult = { output: 'ok' };
+  await collisionPlugin['tool.execute.after'](
+    { tool: 'edit', sessionID: degradedSession, args: { filePath: 'degraded-target.go' } },
+    degradedResult
+  );
+  assert.ok(degradedResult.output.includes('[dos-proof-guard:ADMISSION_UNVERIFIED]'), 'degraded note missing: ' + degradedResult.output);
+  const pending = JSON.parse(await readFile(path.join(root, '.fak', 'queueus', 'admission-pending.json'), 'utf8'));
+  assert.equal(pending.schema, 'fak.queueus.pending.v1');
+  assert.equal(pending.records.length, 1);
+  assert.equal(pending.records[0].kind, 'admission_unverified');
 }
 
 // 4. Circuit breaker on string-matching failure and reset on success
@@ -273,7 +296,7 @@ invoke('git', ['init', '--quiet', root]);
 const target = path.join(root, 'owned', 'file.txt');
 await writeFile(target, 'before');
 const plugin = (await import(pathToFileURL(pluginPath).href)).default;
-const hooks = await plugin({directory:root});
+const hooks = await plugin.server({directory:root});
 async function mutate(sessionID, filename, content, tool='write', extra={}) {
   if (hooks['tool.execute.before']) await hooks['tool.execute.before'](
     {tool, sessionID, callID:'witness'}, {args:{filePath:filename, content, ...extra}});
@@ -307,7 +330,12 @@ await mutate('dos-self', target, 'dos-owner');
 assert.equal(await readFile(target, 'utf8'), 'dos-owner');
 const journal = path.join(root, '.dos', 'lane-journal.jsonl');
 await writeFile(journal, (await readFile(journal, 'utf8')) + '{corrupt}\n');
+// A corrupt snapshot is an AVAILABILITY failure; the budgeted guard degrades
+// those by default, so scope the strict escape hatch here to keep this case
+// fail-closed per the new contract.
+process.env.FAK_WRITE_GUARD_STRICT = '1';
 await assert.rejects(mutate('dos-self', path.join(root, 'free', 'file.txt'), 'corrupt-admit'), /dos-proof-guard/);
+delete process.env.FAK_WRITE_GUARD_STRICT;
 assert.equal(await readFile(path.join(root, 'free', 'file.txt'), 'utf8'), 'disjoint');
 console.log(JSON.stringify({schema:'fak.opencode-lease-witness.v1', foreign_ref_blocked:true, own_ref_admitted:true, disjoint_admitted:true, release_admitted:true, patch_blocked:true, foreign_dos_blocked:true, own_dos_admitted:true, reads_admitted:true, corrupt_dos_blocked:true}));
 `
