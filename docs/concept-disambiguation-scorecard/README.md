@@ -15,9 +15,9 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **9** (clarity 9 + coverage 0) |
+| **Disambiguation-debt (drive to 0)** | **11** (clarity 9 + coverage 2) |
 | **Crystal-clear concepts (and climbing)** | **1683** crystal of 4155 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **4219 / 4219** (100.0% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **4219 / 4221** (100.0% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **3** of 318 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **97** of 5479 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
@@ -28,7 +28,7 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 4155 concepts - score 95.0/100 (grade A) - disambiguation-debt 9
+concept-disambiguation chart - 4155 concepts - score 95.0/100 (grade A) - disambiguation-debt 11
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ###################......... 1683
@@ -62,8 +62,9 @@ clarity mix by family (each cell = one concept):
   witness-proof    ****************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (217 concept(s); 88 crystal)
 
 coverage by family (positioned / discovered):
+  cache            ############################ 467/468
+  session-runtime  ############################ 389/390
   attention        ############################ 243/243
-  cache            ############################ 467/467
   context-ctx      ############################ 336/336
   cross-cluster    ............................ 0/0
   decision         ############################ 68/68
@@ -78,13 +79,12 @@ coverage by family (positioned / discovered):
   pool             ############################ 112/112
   render-materialize ############################ 254/254
   score-debt       ############################ 141/141
-  session-runtime  ############################ 389/389
   support-maturity ############################ 146/146
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
   witness-proof    ############################ 204/204
 
-namespace coverage  [################################] 100.0%  (4219/4219 confusable tokens positioned)
+namespace coverage  [################################] 100.0%  (4219/4221 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 315
@@ -4453,8 +4453,9 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
+| cache | 467 | 468 | 1 |
+| session-runtime | 389 | 390 | 1 |
 | attention | 243 | 243 | 0 |
-| cache | 467 | 467 | 0 |
 | context-ctx | 336 | 336 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | decision | 68 | 68 | 0 |
@@ -4469,7 +4470,6 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | pool | 112 | 112 | 0 |
 | render-materialize | 254 | 254 | 0 |
 | score-debt | 141 | 141 | 0 |
-| session-runtime | 389 | 389 | 0 |
 | support-maturity | 146 | 146 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |
