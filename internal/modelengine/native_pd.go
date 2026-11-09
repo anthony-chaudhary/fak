@@ -276,6 +276,7 @@ func (w *NativePDWorker) addImport(receipt model.PagedKVTransferReceipt) {
 // composes NativeScheduler and model.KVTransport instead of inventing a second
 // decode loop.
 type NativePDCluster struct {
+	costAdmission  *nativePDCostAdmission
 	receiverFabric map[string]*NativePDReceiverFabric
 	m              *model.Model
 	prefill        *NativePDWorker
@@ -406,6 +407,9 @@ func (c *NativePDCluster) Admit(ctx context.Context, req NativePDRequest) (Nativ
 	}
 	prefixSegments := c.prefixSegments(req, prefixKey)
 	decode, _, hit := c.routeDecode(prefixSegments)
+	if err := c.checkAdmissionCost(ctx, len(prompt), decode.name); err != nil {
+		return NativePDAdmission{}, err
+	}
 
 	// The prefill-half session takes the cluster's optional decorator exactly
 	// like the decode lane sessions do; without one this is byte-for-byte the
