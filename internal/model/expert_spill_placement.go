@@ -271,9 +271,8 @@ func gradedExpertSpillPredicate(spilled map[int]bool) func(string) bool {
 
 // ApplyExpertSpillPlacement installs a resolved plan on this session: the spill count grades the
 // split predicate, and the ring budget bounds what the non-spilled experts may hold on the device.
-// It turns the split ON only when the plan actually moves layers — a zero-layer spill leaves the
-// all-device placement untouched, so a plan that spills nothing never quietly routes every expert
-// GEMM to the host.
+// It enables the split exactly when the plan moves layers. A zero-layer spill restores all-device
+// placement, including when an earlier plan or the legacy offload flag enabled the split.
 //
 // Applying a plan REPLACES any earlier one, so a session re-planned mid-life cannot keep running the
 // previous grade. It installs the predicate the plan already resolved rather than clearing it for a
@@ -285,9 +284,7 @@ func (s *Session) ApplyExpertSpillPlacement(p ExpertSpillPlacement) {
 	}
 	s.ExpertSpillLayers = p.Fit.SpillLayers
 	s.ExpertRingBytes = p.RingBytes
-	if p.Fit.SpillLayers > 0 {
-		s.CPUOffloadExperts = true
-	}
+	s.CPUOffloadExperts = p.Fit.SpillLayers > 0
 	s.spillOnHost = gradedExpertSpillPredicate(p.spilled)
 }
 

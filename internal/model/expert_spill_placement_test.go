@@ -3,6 +3,8 @@ package model
 import (
 	"errors"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
 // expert_spill_placement_test.go — the R1 witnesses for #5612 (epic #5606). R0 bounded the activated set
@@ -310,5 +312,69 @@ func TestPlanExpertSpillRefusesOutOfRangeN(t *testing.T) {
 	}
 	if p.Fit.SpillLayers != 1 {
 		t.Fatalf("explicit N=1 resolved to spill=%d", p.Fit.SpillLayers)
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestApplyExpertSpillPlacementReplacesDispatch(t *testing.T) {
+	layers := []int{2, 5, 8, 11}
+	m := expertSpillTestModel(layers, []int{0, 1}, 2, 128)
+	plans := make([]ExpertSpillPlacement, len(layers)+1)
+	for n := range plans {
+		p, ok, err := m.ResolveExpertSpillPlacement(1<<30, n)
+		if err != nil || !ok {
+			t.Fatalf("resolve spill=%d: ok=%v err=%v", n, ok, err)
+		}
+		plans[n] = p
+	}
+
+	for _, tc := range []struct {
+		name    string
+		backend compute.Backend
+	}{
+		{name: "resident"},
+		{name: "backend", backend: compute.Default()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Session{M: m, Backend: tc.backend, CPUOffloadExperts: true}
+			if _, ok := s.glmDsaMatKernel().(splitKernel); !ok {
+				t.Fatal("ungraded legacy offload no longer selects the split")
+			}
+			// Reuse one session: clear a legacy bit, then exercise partial-to-partial,
+			// partial-to-zero, zero-to-full and full-to-zero replacements.
+			for _, n := range []int{0, 1, 2, 0, 4, 0} {
+				p := plans[n]
+				s.ApplyExpertSpillPlacement(p)
+				if s.CPUOffloadExperts != (n > 0) || s.ExpertSpillLayers != n || s.ExpertRingBytes != p.RingBytes {
+					t.Errorf("spill=%d: offload=%v layers=%d ring=%d; want %v/%d/%d", n,
+						s.CPUOffloadExperts, s.ExpertSpillLayers, s.ExpertRingBytes, n > 0, n, p.RingBytes)
+				}
+				k := s.glmDsaMatKernel()
+				split, isSplit := k.(splitKernel)
+				if isSplit != (n > 0) {
+					t.Errorf("spill=%d: selected %T, want split=%v", n, k, n > 0)
+					continue
+				}
+				if !isSplit {
+					if tc.backend != nil {
+						if _, ok := k.(backendKernel); !ok {
+							t.Errorf("zero spill selected %T, want all-device backendKernel", k)
+						}
+					} else if _, ok := k.(sessionResidentKernel); !ok {
+						t.Errorf("zero spill selected %T, want sessionResidentKernel", k)
+					}
+					continue
+				}
+				for i, layer := range layers {
+					name := expertName(layer, 0, "gate_proj.weight")
+					if got := split.onHost(name); got != (i < n) {
+						t.Errorf("spill=%d: host(%s)=%v, want %v", n, name, got, i < n)
+					}
+				}
+				if split.onHost("model.layers.2.mlp.shared_experts.gate_proj.weight") || split.onHost(routerName(2)) {
+					t.Errorf("spill=%d: shared expert or router moved to host", n)
+				}
+			}
+		})
 	}
 }
