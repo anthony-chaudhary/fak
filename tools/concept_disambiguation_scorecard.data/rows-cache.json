@@ -17,10 +17,11 @@
         "v41-indexer-key-cache",
         "v41-rope-table-cache",
         "cachep2-kvcachen",
-        "cachep2-kvcacheq8"
+        "cachep2-kvcacheq8",
+        "integration-devbuildcache",
+        "integration-cachedpayloadbytes"
       ],
       "aliases": [
-        "model KV",
         "local KV"
       ],
       "grounding": "kvcache",
@@ -44,7 +45,6 @@
         "x3-cache-gocache"
       ],
       "aliases": [
-        "virtual API cache",
         "vcachegov",
         "vcachechain"
       ],
@@ -67,9 +67,7 @@
         "kv-cache",
         "enginecache"
       ],
-      "aliases": [
-        "cache metadata contract"
-      ],
+      "aliases": [],
       "grounding": "cachemeta",
       "grounding_kind": "path",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -90,7 +88,6 @@
         "cache-read"
       ],
       "aliases": [
-        "Anthropic prompt cache",
         "cachereadinputtokens"
       ],
       "grounding": "cachereadinputtokens",
@@ -132,9 +129,7 @@
         "cache-read",
         "cache-creation-tokens"
       ],
-      "aliases": [
-        "cache breakpoint"
-      ],
+      "aliases": [],
       "grounding": "cachecontrol",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -196,9 +191,7 @@
         "vcache",
         "prepareforcache"
       ],
-      "aliases": [
-        "radix tree KV"
-      ],
+      "aliases": [],
       "grounding": "radixkv",
       "grounding_kind": "path",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -218,9 +211,7 @@
         "vcache",
         "xenginekv"
       ],
-      "aliases": [
-        "remote cache bridge"
-      ],
+      "aliases": [],
       "grounding": "enginecache",
       "grounding_kind": "path",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -239,9 +230,7 @@
         "memoryview",
         "kv-cache"
       ],
-      "aliases": [
-        "derived view cache"
-      ],
+      "aliases": [],
       "grounding": "viewcache",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -261,8 +250,7 @@
         "kv-cache"
       ],
       "aliases": [
-        "memview",
-        "semantic view contract"
+        "memview"
       ],
       "grounding": "memview",
       "grounding_kind": "path",
@@ -282,9 +270,7 @@
         "kv-cache",
         "kv-transfer"
       ],
-      "aliases": [
-        "tiered cache policy"
-      ],
+      "aliases": [],
       "grounding": "planplacement",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -303,9 +289,7 @@
         "hardware-aware-cache",
         "kv-cache"
       ],
-      "aliases": [
-        "KV relocation"
-      ],
+      "aliases": [],
       "grounding": "kvtransfer",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -324,9 +308,7 @@
         "vcache",
         "kv-cache"
       ],
-      "aliases": [
-        "virtual block"
-      ],
+      "aliases": [],
       "grounding": "vblock",
       "grounding_kind": "symbol",
       "glossary_anchor": "",
@@ -450,9 +432,7 @@
         "prompt-cache",
         "x-cache-cacheobs"
       ],
-      "aliases": [
-        "cachefill fixture"
-      ],
+      "aliases": [],
       "grounding": "cachefill",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",

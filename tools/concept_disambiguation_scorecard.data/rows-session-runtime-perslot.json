@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "session-runtime-perslot-metric",
+      "canonical": "MSPerSlotStep",
+      "family": "session-runtime",
+      "kind": "metric",
+      "definition": "Wall milliseconds per allocated lane-slot step (BatchWallMS/AllocatedSteps): what one batched slot actually cost. Heads the per-slot cost family - perSlot sizing and the ObservedPerSlotTokens probes measure how dear a slot is versus sequential tokens.",
+      "distinction": "Not SlotBytes (one slot's byte footprint) nor SlotFreed (the wire event releasing a slot): MSPerSlotStep is a TIME cost per step, not a size or a lifecycle event.",
+      "distinct_from": [
+        "x2-session-runtime-slotfreed"
+      ],
+      "aliases": [
+        "perslot"
+      ],
+      "grounding": "MSPerSlotStep",
+      "grounding_kind": "metric",
+      "glossary_anchor": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

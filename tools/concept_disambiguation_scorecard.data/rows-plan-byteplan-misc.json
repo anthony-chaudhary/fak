@@ -1,0 +1,42 @@
+{
+  "rows": [
+    {
+      "id": "plan-validbyteplan",
+      "canonical": "validBytePlan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "Unexported V41DSparkResidency method in internal/model/v41_dspark_residency.go that reports whether the declared DraftBytes and TargetBytes are both nonnegative and their int64 sum is representable (DraftBytes <= math.MaxInt64 - TargetBytes). FitsHost, Validate, and AdmitResidentClaim each require it before using the resident-byte arithmetic.",
+      "distinction": "It establishes only arithmetic validity of two declared model byte counts; it is not the SessionResidencyPlan total enforced serving footprint, not a host-budget fit refusal such as RefusePagedHostPlanIfTooBig, and not proof that weights load or a resident claim is admitted.",
+      "distinct_from": [
+        "SessionResidencyPlan",
+        "refusepagedhostplaniftoobig"
+      ],
+      "aliases": [],
+      "grounding": "validBytePlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "sessrt-residentslots",
+      "canonical": "residentSlots",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "Third parameter of NewExpertCacheLRFU in internal/modelloadplan/expert_cache_lrfu.go fixing how many logical expert slots the bounded ClassLRU policy holds resident across its layers; it must be positive and no greater than layers times experts. Plan refuses a selection whose distinct experts exceed it with ErrExpertCacheLRFUCapacity.",
+      "distinction": "It is simulated expert-residency capacity for the LRFU cache policy, not a serving scheduler running-session slot, not the upstream soft-slot residency field (slotResidency), and not a byte budget or device allocation.",
+      "distinct_from": [
+        "upstream-slot-residency-field",
+        "llama-soft-slot-residency-proof"
+      ],
+      "aliases": [],
+      "grounding": "residentSlots",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

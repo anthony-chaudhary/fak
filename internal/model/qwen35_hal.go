@@ -1423,17 +1423,26 @@ func (s *Session) LastQSAScratchBytes() (int64, bool) {
 }
 
 func (s *Session) qwen35SequencePrefillRequestWithEmbedding(ids []int, needLogits bool, embedding compute.Tensor, embeddingRows bool, embeddingVocab int) compute.Qwen35SequencePrefillRequest {
+	// Verification builds with NeedLogits=false and sets NeedAllLogits later.
+	// Preserve its complete request; only the admitted prefix caller opts out.
+	return s.qwen35SequencePrefillRequestWithOutput(ids, needLogits, embedding, embeddingRows, embeddingVocab, true)
+}
+
+func (s *Session) qwen35SequencePrefillRequestWithOutput(ids []int, needLogits bool, embedding compute.Tensor, embeddingRows bool, embeddingVocab int, includeOutput bool) compute.Qwen35SequencePrefillRequest {
 	cfg := s.M.Cfg
 	nK, nV, kHd, vHd, _, _, _ := cfg.linearAttnDims()
 	req := compute.Qwen35SequencePrefillRequest{
 		Path: compute.Qwen35SequencePrefillPath, TokenIDs: append([]int(nil), ids...), StartPos: s.halKV.Len(),
 		TokenEmbedding: embedding, TokenEmbeddingRows: embeddingRows, TokenEmbeddingVocab: embeddingVocab,
-		OutputNorm: s.normWeightHAL("model.norm.weight"), Output: s.lmHeadMatHAL(),
-		Layers: make([]compute.Qwen35SequenceLayer, cfg.NumLayers), States: make([]compute.Qwen35SequenceState, cfg.NumLayers), KV: s.halKV,
+		OutputNorm: s.normWeightHAL("model.norm.weight"),
+		Layers:     make([]compute.Qwen35SequenceLayer, cfg.NumLayers), States: make([]compute.Qwen35SequenceState, cfg.NumLayers), KV: s.halKV,
 		Hidden: cfg.HiddenSize, Intermediate: cfg.IntermediateSize, NumHeads: cfg.NumHeads, NumKVHeads: cfg.NumKVHeads,
 		HeadDim: cfg.HeadDim, RotaryDim: cfg.rotaryDim(), NumKeyHeads: nK, NumValueHeads: nV, KeyHeadDim: kHd, ValueHeadDim: vHd,
 		ConvKernel: cfg.LinearConvKernelDim, RMSNormEpsilon: float32(cfg.RMSNormEps), RoPEThetaForLayer: make([]float64, cfg.NumLayers), NeedLogits: needLogits,
 		CaptureRawHidden: s.captureTargetHidden,
+	}
+	if includeOutput {
+		req.Output = s.lmHeadMatHAL()
 	}
 	for l := 0; l < cfg.NumLayers; l++ {
 		req.RoPEThetaForLayer[l] = cfg.ropeThetaForLayer(l)
@@ -1480,6 +1489,18 @@ func (s *Session) tryQwen35SequencePrefill(ids []int, needLogits bool) (compute.
 	if err != nil || !advertised {
 		return compute.Qwen35SequencePrefillResult{}, advertised, err
 	}
+	includeOutput := true
+	if !needLogits {
+		if headless, ok := s.Backend.(compute.Qwen35SequenceHeadlessPrefixBackend); ok {
+			path := headless.Qwen35SequenceHeadlessPrefixPath()
+			if path != compute.Qwen35SequenceHeadlessPrefixPath {
+				return compute.Qwen35SequencePrefillResult{}, true, &UnsupportedSequencePrefillError{
+					Backend: s.Backend.Name(), Path: path, Reason: "wrong headless-prefix capability identity",
+				}
+			}
+			includeOutput = false
+		}
+	}
 	if s.captureTargetHidden {
 		raw, ok := s.Backend.(compute.Qwen35SequenceRawHiddenBackend)
 		if !ok {
@@ -1519,7 +1540,7 @@ func (s *Session) tryQwen35SequencePrefill(ids []int, needLogits bool) (compute.
 		s.notePrefillFallback(s.qwen35HAL.prefillRoute)
 		return compute.Qwen35SequencePrefillResult{}, false, nil
 	}
-	if useEmbeddingRows && !packedRows && !s.qwen35SequenceOutputHeadFits() {
+	if includeOutput && useEmbeddingRows && !packedRows && !s.qwen35SequenceOutputHeadFits() {
 		s.qwen35HAL.prefillRoute = Qwen35SequencePrefillRouteStatus{
 			RequestedPath:       compute.Qwen35SequencePrefillPath,
 			EffectivePath:       Qwen35SequencePrefillFallbackPath,
@@ -1570,10 +1591,10 @@ func (s *Session) tryQwen35SequencePrefill(ids []int, needLogits bool) (compute.
 		}
 		panel := s.uploadHostF32(panelShape, data, compute.MemoryActivation, uploadSite)
 		defer s.Backend.Free(panel)
-		request = s.qwen35SequencePrefillRequestWithEmbedding(ids, needLogits, panel, true, s.M.Cfg.VocabSize)
+		request = s.qwen35SequencePrefillRequestWithOutput(ids, needLogits, panel, true, s.M.Cfg.VocabSize, includeOutput)
 	} else {
 		panelBytes = 0
-		request = s.qwen35SequencePrefillRequest(ids, needLogits)
+		request = s.qwen35SequencePrefillRequestWithOutput(ids, needLogits, s.tokenEmbeddingHAL(), false, 0, includeOutput)
 	}
 	startPos := s.halKV.Len()
 	finishLineage := s.beginHALTokenLineageWrite(ids)

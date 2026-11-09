@@ -1,0 +1,438 @@
+{
+  "rows": [
+    {
+      "id": "integration-devbuildcache",
+      "canonical": "devbuildcache (target integration semantics)",
+      "family": "cache",
+      "kind": "subsystem",
+      "definition": "The fak-dev source-checkout handoff cache implemented by devbuildcache.go: a source mtime/size digest names a linked executable, with a 24-hour TTL and executable-magic lookup check; failures fall back to go run.",
+      "distinction": "Linked development-command executable reuse, not model KV tensor storage or a proof that all transitive dependencies are unchanged. The lowercase buildcache path fragment refers to this same artifact cache.",
+      "distinct_from": [
+        "kv-cache",
+        "integration-devbuildcachedfakdev",
+        "integration-fakdevbuildcache",
+        "integration-devbuildcachettl",
+        "integration-devbuildcachenow",
+        "integration-devbuildcachediroverride",
+        "integration-devbuildcachebuildfn",
+        "integration-devbuildcachepath",
+        "integration-devbuildcachelookup"
+      ],
+      "aliases": [
+        "buildcache"
+      ],
+      "grounding": "devbuildcache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "integration-devbuildcachedfakdev",
+      "canonical": "devBuildCachedFakDev (target integration semantics)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Returns a usable cached fak-dev executable and true after enabled-switch, source-digest and path checks, then lookup or build followed by lookup; returns false on any failure so the caller can use its legacy handoff.",
+      "distinction": "The orchestration function, not the cache entry path, lookup-only predicate, or an execution of the returned program.",
+      "distinct_from": [
+        "integration-devbuildcache"
+      ],
+      "aliases": [],
+      "grounding": "devBuildCachedFakDev",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "integration-fakdevbuildcache",
+      "canonical": "FAK_DEV_BUILDCACHE (target integration semantics)",
+      "family": "cache",
+      "kind": "config",
+      "definition": "Environment switch disabling the fak-dev executable cache when trimmed case-insensitive value is off, 0, false or no; other values leave cache use enabled.",
+      "distinction": "Controls an optional development handoff optimization, not the Go build cache or a mandatory safety guard.",
+      "distinct_from": [
+        "integration-devbuildcache",
+        "integration-devbuildcachedisabled"
+      ],
+      "aliases": [],
+      "grounding": "FAK_DEV_BUILDCACHE",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "integration-devbuildcachettl",
+      "canonical": "devBuildCacheTTL (target integration semantics)",
+      "family": "cache",
+      "kind": "config",
+      "definition": "The 24-hour duration bounding entry reuse by modification time even when the direct-source digest remains equal.",
+      "distinction": "Expiry duration, not the injectable clock, a complete dependency digest or a lease.",
+      "distinct_from": [
+        "integration-devbuildcache"
+      ],
+      "aliases": [],
+      "grounding": "devBuildCacheTTL",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "integration-devbuildcachenow",
+      "canonical": "devBuildCacheNow (target integration semantics)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Injectable time.Now function used by fak-dev cache lookup to compare entry modification time against its TTL.",
+      "distinction": "Clock dependency for age calculation, not the TTL duration or a timer that launches work.",
+      "distinct_from": [
+        "integration-devbuildcache"
+      ],
+      "aliases": [],
+      "grounding": "devBuildCacheNow",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "integration-devbuildcachediroverride",
+      "canonical": "devBuildCacheDirOverride (target integration semantics)",
+      "family": "cache",
+      "kind": "config",
+      "definition": "Optional directory override for the fak-dev linked-executable cache; empty uses os.UserCacheDir and tests can supply a fixture directory.",
+      "distinction": "Cache base directory override, not the digest-derived entry filename or an access permission.",
+      "distinct_from": [
+        "integration-devbuildcache"
+      ],
+      "aliases": [],
+      "grounding": "devBuildCacheDirOverride",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "integration-devbuildcachebuildfn",
+      "canonical": "devBuildCacheBuildFn (target integration semantics)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Injectable function producing the fak-dev executable at the selected output path; production uses devBuildGoBuildFakDev while tests can supply a fake builder.",
+      "distinction": "Builder dependency, not cached binary validity, an already completed build, or permission to execute untrusted code.",
+      "distinct_from": [
+        "integration-devbuildcache"
+      ],
+      "aliases": [],
+      "grounding": "devBuildCacheBuildFn",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "integration-devbuildcachedisabled",
+      "canonical": "devBuildCacheDisabled (target integration semantics)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Predicate reading FAK_DEV_BUILDCACHE and recognizing the four disabled spellings after trimming and lowercasing.",
+      "distinction": "Switch interpretation only, not an entry expiry or executable-magic test.",
+      "distinct_from": [
+        "integration-fakdevbuildcache"
+      ],
+      "aliases": [],
+      "grounding": "devBuildCacheDisabled",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "integration-devbuildcachepath",
+      "canonical": "devBuildCachePath (target integration semantics)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Derives the fak/dev-buildcache/fak-dev-\u003cdigest16\u003e entry pathname under the configured or user cache directory, adding .exe on Windows.",
+      "distinction": "Names the entry from the supplied digest; it does not itself read, validate, build or execute the file.",
+      "distinct_from": [
+        "integration-devbuildcache"
+      ],
+      "aliases": [],
+      "grounding": "devBuildCachePath",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "integration-devbuildcachelookup",
+      "canonical": "devBuildCacheLookup (target integration semantics)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Checks that a candidate path is a regular file, is no older than devBuildCacheTTL according to devBuildCacheNow, and passes platform executable-magic inspection; returns the path and true only then.",
+      "distinction": "Lookup eligibility, not a cryptographic authenticity check, full dependency validation or execution.",
+      "distinct_from": [
+        "integration-devbuildcache"
+      ],
+      "aliases": [],
+      "grounding": "devBuildCacheLookup",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "integration-adjudicateagainstfloor",
+      "canonical": "AdjudicateAgainstFloor (target integration semantics)",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Compares a finite nonnegative observed relative error against a matching-version FloorReceipt with finite nonnegative RelativeError: at or below the receipt value yields within_floor, above yields above_floor; invalid inputs return an error.",
+      "distinction": "Numerical port-versus-reference floor comparison, not a hardware capability census, security permission or permission to ignore an invalid receipt.",
+      "distinct_from": [
+        "capability-floor"
+      ],
+      "aliases": [],
+      "grounding": "AdjudicateAgainstFloor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "integration-promptpanelwitnessreason",
+      "canonical": "promptPanelWitnessReason (target integration semantics)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "Integer enumeration identifying the selected outcome and each ordered refusal axis of Session.promptPanelFor; it indexes the fixed atomic selection counter array.",
+      "distinction": "Selection outcome identity, not an execution-success proof, a counter value or the array size sentinel.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus",
+        "integration-promptpanelwitnessreasons",
+        "integration-promptpanelwitness"
+      ],
+      "aliases": [],
+      "grounding": "promptPanelWitnessReason",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "integration-promptpanelwitnessreasons",
+      "canonical": "promptPanelWitnessReasons (target integration semantics)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "Terminal enumeration value sizing the prompt-panel selection counter array after the selected outcome and all refusal reasons.",
+      "distinction": "Count of defined reason slots, not a real selected/refused outcome or observed prompt total.",
+      "distinct_from": [
+        "integration-promptpanelwitnessreason"
+      ],
+      "aliases": [],
+      "grounding": "promptPanelWitnessReasons",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "integration-promptpanelwitness",
+      "canonical": "promptPanelWitness (target integration semantics)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "Fixed array of atomic.Int64 counters indexed by promptPanelWitnessReason; notePromptPanelSelection increments the selected reason once at each selector outcome.",
+      "distinction": "Process-local selection counters, not downstream execution witnesses, performance measurements or synchronized global snapshots.",
+      "distinct_from": [
+        "integration-promptpanelwitnessreason",
+        "integration-promptpanelselectionwitness"
+      ],
+      "aliases": [],
+      "grounding": "promptPanelWitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "integration-promptpanelselectionwitness",
+      "canonical": "PromptPanelSelectionWitness (target integration semantics)",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "Returns PromptPanelSelectionCounts by loading each reason counter atomically; later fields may include calls arriving between loads.",
+      "distinction": "Race-free field reads rather than a single-time consistent snapshot or proof that selected panels completed execution.",
+      "distinct_from": [
+        "integration-promptpanelwitness"
+      ],
+      "aliases": [],
+      "grounding": "PromptPanelSelectionWitness",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "integration-promptpanelrefusalarchq8tokenloop",
+      "canonical": "promptPanelRefusalArchQ8TokenLoop (target integration semantics)",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Prompt-panel refusal enumeration recorded when q8PrefillNeedsTokenLoop(cfg) is true in the ordered non-panel-MoE architecture checks, after earlier selection checks have passed.",
+      "distinction": "A first-matching selector refusal reason, not the architecture predicate itself, a runtime fault or a count of all models satisfying that predicate.",
+      "distinct_from": [
+        "loop-agent-goal-loop-seam",
+        "integration-archq8tokenloop"
+      ],
+      "aliases": [],
+      "grounding": "promptPanelRefusalArchQ8TokenLoop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "integration-archq8tokenloop",
+      "canonical": "ArchQ8TokenLoop (target integration semantics)",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "Field of PromptPanelSelectionCounts loaded from the promptPanelRefusalArchQ8TokenLoop counter; counts calls attributed to that first-matching prompt-panel refusal axis.",
+      "distinction": "Snapshot counter for a selector refusal, not an architecture configuration flag, kernel layout or completed-token loop count.",
+      "distinct_from": [
+        "integration-promptpanelrefusalarchq8tokenloop"
+      ],
+      "aliases": [],
+      "grounding": "ArchQ8TokenLoop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "integration-promptpanelrefusalarchmlamoelayout",
+      "canonical": "promptPanelRefusalArchMLAMoELayout (target integration semantics)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "Prompt-panel refusal enumeration recorded when cfg.usesMLAMoELayout() is true in the ordered non-panel-MoE architecture checks, after earlier selection checks have passed.",
+      "distinction": "A first-matching selector refusal reason, not the architecture predicate itself, a runtime fault or a count of all models satisfying that predicate.",
+      "distinct_from": [
+        "c729-gguf-arch-stores-hf-rotary-layout",
+        "integration-archmlamoelayout"
+      ],
+      "aliases": [],
+      "grounding": "promptPanelRefusalArchMLAMoELayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "integration-archmlamoelayout",
+      "canonical": "ArchMLAMoELayout (target integration semantics)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "Field of PromptPanelSelectionCounts loaded from the promptPanelRefusalArchMLAMoELayout counter; counts calls attributed to that first-matching prompt-panel refusal axis.",
+      "distinction": "Snapshot counter for a selector refusal, not an architecture configuration flag, kernel layout or completed-token loop count.",
+      "distinct_from": [
+        "integration-promptpanelrefusalarchmlamoelayout"
+      ],
+      "aliases": [],
+      "grounding": "ArchMLAMoELayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "integration-promptpanelrefusalarchminimaxsparseattn",
+      "canonical": "promptPanelRefusalArchMiniMaxSparseAttn (target integration semantics)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Prompt-panel refusal enumeration recorded when cfg.isMiniMaxSparseAttn() is true in the ordered non-panel-MoE architecture checks, after earlier selection checks have passed.",
+      "distinction": "A first-matching selector refusal reason, not the architecture predicate itself, a runtime fault or a count of all models satisfying that predicate.",
+      "distinct_from": [
+        "attention-newlinearattnlayerstate",
+        "integration-archminimaxsparseattn"
+      ],
+      "aliases": [],
+      "grounding": "promptPanelRefusalArchMiniMaxSparseAttn",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "integration-archminimaxsparseattn",
+      "canonical": "ArchMiniMaxSparseAttn (target integration semantics)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "Field of PromptPanelSelectionCounts loaded from the promptPanelRefusalArchMiniMaxSparseAttn counter; counts calls attributed to that first-matching prompt-panel refusal axis.",
+      "distinction": "Snapshot counter for a selector refusal, not an architecture configuration flag, kernel layout or completed-token loop count.",
+      "distinct_from": [
+        "integration-promptpanelrefusalarchminimaxsparseattn"
+      ],
+      "aliases": [],
+      "grounding": "ArchMiniMaxSparseAttn",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "integration-cachedpayloadbytes",
+      "canonical": "CachedPayloadBytes (target integration semantics)",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Field of tokenizer.EncodeWork accumulating logical bytes retained for ordinary-run memo entries: UTF-8 text bytes plus token-ID count times native int width, subject to the one-MiB payload budget.",
+      "distinction": "Logical retained key/ID payload, not heap usage, map overhead, total tokenizer input or an inference KV cache.",
+      "distinct_from": [
+        "kv-cache"
+      ],
+      "aliases": [],
+      "grounding": "CachedPayloadBytes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

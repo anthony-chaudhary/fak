@@ -1779,7 +1779,8 @@
       "distinction": "A per-architecture LAYOUT question about how q/k weights are STORED - NOT the rotary computation itself, and NOT UnsupportedArchError (whether the arch is implemented at all).",
       "distinct_from": [
         "c729-unsupported-arch-error",
-        "c729-arch-support-file"
+        "c729-arch-support-file",
+        "integration-promptpanelrefusalarchmlamoelayout"
       ],
       "aliases": [],
       "grounding": "ggufArchStoresHFRotaryLayout",

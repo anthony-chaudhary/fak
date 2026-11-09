@@ -25,7 +25,10 @@ var (
 
 // runBuildHandoff preserves the exact top-level `fak build` spelling. It prefers
 // the separately installed fak-dev artifact, but a source checkout can bootstrap
-// that same process boundary through the local Go toolchain.
+// that same process boundary through the local Go toolchain. The bootstrap
+// re-exec's the built fak-dev from devbuildcache when the entry sources are
+// unchanged (one build, then direct execs — see devbuildcache.go), and falls
+// open to the legacy per-call `go run` whenever the cache does not apply.
 func runBuildHandoff(stdin io.Reader, stdout, stderr io.Writer, argv []string) int {
 	if path, err := findFakDev(); err == nil {
 		return runDevChild(stdin, stdout, stderr, "", path, append([]string{"build"}, argv...))
@@ -41,8 +44,11 @@ func runBuildHandoff(stdin io.Reader, stdout, stderr io.Writer, argv []string) i
 		fmt.Fprintf(stderr, "fak build: checkout fallback requires the Go toolchain: %v\n", err)
 		return 2
 	}
-	args := []string{"run", "./cmd/fak-dev", "build"}
-	args = append(args, argv...)
+	childArgv := append([]string{"build"}, argv...)
+	if exe, ok := devBuildCachedFakDev(root, goTool); ok {
+		return runDevChild(stdin, stdout, stderr, root, exe, childArgv)
+	}
+	args := append([]string{"run", "./cmd/fak-dev"}, childArgv...)
 	return runDevChild(stdin, stdout, stderr, root, goTool, args)
 }
 

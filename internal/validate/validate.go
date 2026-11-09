@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/affectedtests"
 	"github.com/anthony-chaudhary/fak/internal/amdgpu"
@@ -1201,35 +1202,88 @@ func cleanupValidateWSLDir(dir string) {
 	_, _ = validateWSLCommand(ctx, "-e", "bash", "-lc", "rm -rf -- "+posixQuote(dir))
 }
 
-func runValidateWSLCommandWithin(ctx context.Context, root string, args ...string) ([]byte, error) {
+func validateWSLShellCommand(root string, args ...string) string {
 	command := "set -euo pipefail; cd " + posixQuote(root) + "; exec"
 	for _, arg := range args {
 		command += " " + posixQuote(arg)
 	}
-	cmd := windowgate.CommandContext(ctx, "wsl.exe", "-e", "bash", "-lc", command)
+	return command
+}
+
+func runValidateWSLCommandWithin(ctx context.Context, root string, args ...string) ([]byte, error) {
+	cmd := windowgate.CommandContext(ctx, "wsl.exe", "-e", "bash", "-lc", validateWSLShellCommand(root, args...))
 	windowgate.ConfigureBackgroundCommand(cmd)
 	return cmd.CombinedOutput()
+}
+
+// runValidateWSLGoListMetadata runs the `go list -e -json ./...` metadata call in
+// WSL but captures stdout and stderr into separate buffers. Metadata must not
+// contain successful module-download chatter from stderr (the same rule the host
+// path in goListGraphWithin and validateBuildImportersWithin follow):
+// parseGoList reads a pure JSON package stream, and one stderr line (`go:
+// downloading ...`, a cache-lock wait, or an error line when go exits nonzero)
+// corrupts it. runValidateWSLCommandWithin's CombinedOutput stays correct for the
+// other phases, whose output is line-oriented, not a JSON object stream.
+func runValidateWSLGoListMetadata(ctx context.Context, root string) (stdout, stderr []byte, err error) {
+	cmd := windowgate.CommandContext(ctx, "wsl.exe", "-e", "bash", "-lc", validateWSLShellCommand(root, "go", "list", "-e", "-json", "./..."))
+	windowgate.ConfigureBackgroundCommand(cmd)
+	var out, errOut bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errOut
+	runErr := cmd.Run()
+	return out.Bytes(), errOut.Bytes(), runErr
+}
+
+// goListMetadataFromStreams parses the separated streams of a go-list metadata
+// run: stdout alone is the JSON package stream; stderr is surfaced only inside
+// error details (trimmed, bounded) so diagnosis keeps working. A successful parse
+// with packages stays success even when go exited nonzero, because `go list -e`
+// deliberately continues past per-package errors while emitting the rest.
+func goListMetadataFromStreams(stdout, stderr []byte, runErr error) (fileToPkg map[string]string, edges map[string][]string, total int, err error) {
+	fileToPkg, edges, total, err = parseGoList(bytes.NewReader(stdout))
+	if err != nil {
+		if detail := boundGoListStderrDetail(stderr); detail != "" {
+			return nil, nil, 0, fmt.Errorf("%w (stderr: %s)", err, detail)
+		}
+		return nil, nil, 0, err
+	}
+	if total == 0 {
+		if runErr != nil {
+			if detail := boundGoListStderrDetail(stderr); detail != "" {
+				return nil, nil, 0, fmt.Errorf("go list produced no packages: %w (stderr: %s)", runErr, detail)
+			}
+			return nil, nil, 0, fmt.Errorf("go list produced no packages: %w", runErr)
+		}
+		return nil, nil, 0, fmt.Errorf("go list produced no packages")
+	}
+	return fileToPkg, edges, total, nil
+}
+
+// goListStderrDetailLimit bounds the stderr detail appended to go-list failures
+// so a runaway module-download log cannot flood the land-failure line.
+const goListStderrDetailLimit = 2048
+
+func boundGoListStderrDetail(stderr []byte) string {
+	detail := strings.TrimSpace(string(stderr))
+	if detail == "" || len(detail) <= goListStderrDetailLimit {
+		return detail
+	}
+	cut := goListStderrDetailLimit
+	for cut > 0 && !utf8.RuneStart(detail[cut]) {
+		cut--
+	}
+	return detail[:cut] + fmt.Sprintf(" [...truncated %d bytes]", len(detail)-cut)
 }
 
 func validateGoListGraphWithin(ctx context.Context, root string, wsl bool) (fileToPkg map[string]string, edges map[string][]string, total int, err error) {
 	if !wsl {
 		return goListGraphWithin(ctx, root)
 	}
-	out, runErr := runValidateWSLCommandWithin(ctx, root, "go", "list", "-e", "-json", "./...")
+	stdout, stderr, runErr := runValidateWSLGoListMetadata(ctx, root)
 	if ctx.Err() != nil {
 		return nil, nil, 0, ctx.Err()
 	}
-	fileToPkg, edges, total, err = parseGoList(bytes.NewReader(out))
-	if err != nil {
-		return nil, nil, 0, err
-	}
-	if total == 0 {
-		if runErr != nil {
-			return nil, nil, 0, fmt.Errorf("go list produced no packages: %w", runErr)
-		}
-		return nil, nil, 0, fmt.Errorf("go list produced no packages")
-	}
-	return fileToPkg, edges, total, nil
+	return goListMetadataFromStreams(stdout, stderr, runErr)
 }
 
 func validateGofmtOwnedPathsWithin(ctx context.Context, sourceRoot, root string, paths []string, wsl bool) ([]string, error) {

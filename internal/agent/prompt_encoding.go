@@ -143,7 +143,11 @@ func (p *InKernelPlanner) preparePrompt(ctx context.Context, messages []Message,
 		ids, err = p.tok.EncodeSegments(segs)
 	} else {
 		rendered = inKernelRenderPrompt(renderMessages, tools, p.m.Cfg, sp)
-		ids, err = p.tok.Encode(rendered)
+		if raw || len(images) > 0 {
+			ids, err = p.tok.Encode(rendered)
+		} else {
+			ids, _, err = p.promptEncodeMemo.Encode(p.tok, rendered)
+		}
 	}
 	if err != nil {
 		if p.nativeChatTemplate != nil {

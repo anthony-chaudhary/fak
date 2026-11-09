@@ -32,9 +32,7 @@
         "expert-tier-cache-tier",
         "cov5304-expert-cache-plan"
       ],
-      "aliases": [
-        "moemisscandidates"
-      ],
+      "aliases": [],
       "grounding": "MoEMissCandidate",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",

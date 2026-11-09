@@ -12,8 +12,7 @@
         "trajctl-regime-gate"
       ],
       "aliases": [
-        "trajctl",
-        "trajectory-control plane"
+        "trajctl"
       ],
       "grounding": "trajctl",
       "grounding_kind": "path",
@@ -34,8 +33,7 @@
         "trajctl-control-plane"
       ],
       "aliases": [
-        "score row",
-        "trajctl score row"
+        "score row"
       ],
       "grounding": "ScoreRow",
       "grounding_kind": "symbol",
@@ -78,10 +76,7 @@
         "trajctl-control-plane",
         "trajctl-detour-objective"
       ],
-      "aliases": [
-        "regime-gated steering",
-        "HEALTHY gate"
-      ],
+      "aliases": [],
       "grounding": "SignalHealthy",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -101,8 +96,7 @@
         "trajctl-control-plane"
       ],
       "aliases": [
-        "detour",
-        "child objective"
+        "detour"
       ],
       "grounding": "SignalDetourOverrun",
       "grounding_kind": "symbol",

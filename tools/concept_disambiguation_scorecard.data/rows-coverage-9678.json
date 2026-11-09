@@ -2703,9 +2703,7 @@
         "issue10229-inkernel-expert-spill",
         "issue10229-inkernel-qwen-q4k-prefill-chunk-config-error"
       ],
-      "aliases": [
-        "fakinkernelqwenq4kprefillchunktokens"
-      ],
+      "aliases": [],
       "grounding": "QwenQ4KPrefillChunkTokens",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",

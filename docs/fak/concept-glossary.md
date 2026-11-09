@@ -2497,3 +2497,157 @@ Successful L3 KV registration-planning result containing a scalar copy of buffer
 Pure L3 KV function validating nonzero representable buffer spans, declared residency and ordinal consistency, and readiness/CUDA capability across the caller-supplied complete context set before returning a MemoryRegistrationPlan.
 
 **Distinct from:** This constructs checked registration metadata, not the passive MemoryRegistrationPlan result itself, a residency capacity plan, live memory registration or host-staging fallback. It cannot discover omitted contexts or prove physical pointer residency; the caller must supply truthful complete metadata.
+
+
+### devbuildcache (target integration semantics)
+
+The fak-dev source-checkout handoff cache implemented by devbuildcache.go: a source mtime/size digest names a linked executable, with a 24-hour TTL and executable-magic lookup check; failures fall back to go run.
+
+**Distinct from:** Linked development-command executable reuse, not model KV tensor storage or a proof that all transitive dependencies are unchanged. The lowercase buildcache path fragment refers to this same artifact cache.
+
+
+### devBuildCachedFakDev (target integration semantics)
+
+Returns a usable cached fak-dev executable and true after enabled-switch, source-digest and path checks, then lookup or build followed by lookup; returns false on any failure so the caller can use its legacy handoff.
+
+**Distinct from:** The orchestration function, not the cache entry path, lookup-only predicate, or an execution of the returned program.
+
+
+### FAK_DEV_BUILDCACHE (target integration semantics)
+
+Environment switch disabling the fak-dev executable cache when trimmed case-insensitive value is off, 0, false or no; other values leave cache use enabled.
+
+**Distinct from:** Controls an optional development handoff optimization, not the Go build cache or a mandatory safety guard.
+
+
+### devBuildCacheTTL (target integration semantics)
+
+The 24-hour duration bounding entry reuse by modification time even when the direct-source digest remains equal.
+
+**Distinct from:** Expiry duration, not the injectable clock, a complete dependency digest or a lease.
+
+
+### devBuildCacheNow (target integration semantics)
+
+Injectable time.Now function used by fak-dev cache lookup to compare entry modification time against its TTL.
+
+**Distinct from:** Clock dependency for age calculation, not the TTL duration or a timer that launches work.
+
+
+### devBuildCacheDirOverride (target integration semantics)
+
+Optional directory override for the fak-dev linked-executable cache; empty uses os.UserCacheDir and tests can supply a fixture directory.
+
+**Distinct from:** Cache base directory override, not the digest-derived entry filename or an access permission.
+
+
+### devBuildCacheBuildFn (target integration semantics)
+
+Injectable function producing the fak-dev executable at the selected output path; production uses devBuildGoBuildFakDev while tests can supply a fake builder.
+
+**Distinct from:** Builder dependency, not cached binary validity, an already completed build, or permission to execute untrusted code.
+
+
+### devBuildCacheDisabled (target integration semantics)
+
+Predicate reading FAK_DEV_BUILDCACHE and recognizing the four disabled spellings after trimming and lowercasing.
+
+**Distinct from:** Switch interpretation only, not an entry expiry or executable-magic test.
+
+
+### devBuildCachePath (target integration semantics)
+
+Derives the fak/dev-buildcache/fak-dev-<digest16> entry pathname under the configured or user cache directory, adding .exe on Windows.
+
+**Distinct from:** Names the entry from the supplied digest; it does not itself read, validate, build or execute the file.
+
+
+### devBuildCacheLookup (target integration semantics)
+
+Checks that a candidate path is a regular file, is no older than devBuildCacheTTL according to devBuildCacheNow, and passes platform executable-magic inspection; returns the path and true only then.
+
+**Distinct from:** Lookup eligibility, not a cryptographic authenticity check, full dependency validation or execution.
+
+
+### AdjudicateAgainstFloor (target integration semantics)
+
+Compares a finite nonnegative observed relative error against a matching-version FloorReceipt with finite nonnegative RelativeError: at or below the receipt value yields within_floor, above yields above_floor; invalid inputs return an error.
+
+**Distinct from:** Numerical port-versus-reference floor comparison, not a hardware capability census, security permission or permission to ignore an invalid receipt.
+
+
+### promptPanelWitnessReason (target integration semantics)
+
+Integer enumeration identifying the selected outcome and each ordered refusal axis of Session.promptPanelFor; it indexes the fixed atomic selection counter array.
+
+**Distinct from:** Selection outcome identity, not an execution-success proof, a counter value or the array size sentinel.
+
+
+### promptPanelWitnessReasons (target integration semantics)
+
+Terminal enumeration value sizing the prompt-panel selection counter array after the selected outcome and all refusal reasons.
+
+**Distinct from:** Count of defined reason slots, not a real selected/refused outcome or observed prompt total.
+
+
+### promptPanelWitness (target integration semantics)
+
+Fixed array of atomic.Int64 counters indexed by promptPanelWitnessReason; notePromptPanelSelection increments the selected reason once at each selector outcome.
+
+**Distinct from:** Process-local selection counters, not downstream execution witnesses, performance measurements or synchronized global snapshots.
+
+
+### PromptPanelSelectionWitness (target integration semantics)
+
+Returns PromptPanelSelectionCounts by loading each reason counter atomically; later fields may include calls arriving between loads.
+
+**Distinct from:** Race-free field reads rather than a single-time consistent snapshot or proof that selected panels completed execution.
+
+
+### promptPanelRefusalArchQ8TokenLoop (target integration semantics)
+
+Prompt-panel refusal enumeration recorded when q8PrefillNeedsTokenLoop(cfg) is true in the ordered non-panel-MoE architecture checks, after earlier selection checks have passed.
+
+**Distinct from:** A first-matching selector refusal reason, not the architecture predicate itself, a runtime fault or a count of all models satisfying that predicate.
+
+
+### ArchQ8TokenLoop (target integration semantics)
+
+Field of PromptPanelSelectionCounts loaded from the promptPanelRefusalArchQ8TokenLoop counter; counts calls attributed to that first-matching prompt-panel refusal axis.
+
+**Distinct from:** Snapshot counter for a selector refusal, not an architecture configuration flag, kernel layout or completed-token loop count.
+
+
+### promptPanelRefusalArchMLAMoELayout (target integration semantics)
+
+Prompt-panel refusal enumeration recorded when cfg.usesMLAMoELayout() is true in the ordered non-panel-MoE architecture checks, after earlier selection checks have passed.
+
+**Distinct from:** A first-matching selector refusal reason, not the architecture predicate itself, a runtime fault or a count of all models satisfying that predicate.
+
+
+### ArchMLAMoELayout (target integration semantics)
+
+Field of PromptPanelSelectionCounts loaded from the promptPanelRefusalArchMLAMoELayout counter; counts calls attributed to that first-matching prompt-panel refusal axis.
+
+**Distinct from:** Snapshot counter for a selector refusal, not an architecture configuration flag, kernel layout or completed-token loop count.
+
+
+### promptPanelRefusalArchMiniMaxSparseAttn (target integration semantics)
+
+Prompt-panel refusal enumeration recorded when cfg.isMiniMaxSparseAttn() is true in the ordered non-panel-MoE architecture checks, after earlier selection checks have passed.
+
+**Distinct from:** A first-matching selector refusal reason, not the architecture predicate itself, a runtime fault or a count of all models satisfying that predicate.
+
+
+### ArchMiniMaxSparseAttn (target integration semantics)
+
+Field of PromptPanelSelectionCounts loaded from the promptPanelRefusalArchMiniMaxSparseAttn counter; counts calls attributed to that first-matching prompt-panel refusal axis.
+
+**Distinct from:** Snapshot counter for a selector refusal, not an architecture configuration flag, kernel layout or completed-token loop count.
+
+
+### CachedPayloadBytes (target integration semantics)
+
+Field of tokenizer.EncodeWork accumulating logical bytes retained for ordinary-run memo entries: UTF-8 text bytes plus token-ID count times native int width, subject to the one-MiB payload budget.
+
+**Distinct from:** Logical retained key/ID payload, not heap usage, map overhead, total tokenizer input or an inference KV cache.

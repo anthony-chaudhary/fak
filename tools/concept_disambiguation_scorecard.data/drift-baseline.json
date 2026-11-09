@@ -1,0 +1,16 @@
+{
+  "coverage_debt": 0,
+  "covered": 4174,
+  "discovered": 4174,
+  "git_head": "22fae7367e1c8777ad6538ce253c978eff750f1b",
+  "recorded_at": "2026-11-08T14:48:32Z",
+  "schema": "fak-concept-coverage-drift-baseline/1",
+  "standing": {
+    "colliding": 0,
+    "crystal": 1633,
+    "defined": 2471,
+    "drifting": 0,
+    "entangled": 0,
+    "undocumented": 0
+  }
+}

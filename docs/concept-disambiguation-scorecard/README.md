@@ -15,32 +15,32 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **1** (clarity 0 + coverage 1) |
-| **Crystal-clear concepts (and climbing)** | **1656** crystal of 4127 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **4195 / 4196** (100.0% of the discovered confusable space) |
-| **Undrawn twin-pairs (drive to 0)** | **0** of 312 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **93** of 5586 indexed names |
+| **Disambiguation-debt (drive to 0)** | **9** (clarity 9 + coverage 0) |
+| **Crystal-clear concepts (and climbing)** | **1681** crystal of 4153 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **4218 / 4218** (100.0% of the discovered confusable space) |
+| **Undrawn twin-pairs (drive to 0)** | **3** of 317 confusable name-pairs |
+| **Ambiguous lookup names (drive to 0)** | **96** of 5478 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 100.0/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 95.0/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 4127 concepts - score 100.0/100 (grade A) - disambiguation-debt 1
+concept-disambiguation chart - 4153 concepts - score 95.0/100 (grade A) - disambiguation-debt 9
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ###################......... 1656
-  o defined       ############################ 2471
+  * crystal       ###################......... 1681
+  o defined       ############################ 2472
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
   . undocumented  ............................ 0
 
 clarity mix by family (each cell = one concept):
-  attention        ***************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (246 concept(s); 99 crystal)
-  cache            *****************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (407 concept(s); 161 crystal)
+  attention        *****************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (248 concept(s); 101 crystal)
+  cache            *****************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (419 concept(s); 173 crystal)
   context-ctx      *********************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (309 concept(s); 105 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         ***************************************ooooooooooooooooooooooooo (64 concept(s); 39 crystal)
@@ -48,23 +48,22 @@ clarity mix by family (each cell = one concept):
   evict            **************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (89 concept(s); 26 crystal)
   gateway-engine   *************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (277 concept(s); 97 crystal)
   guard-gate       **************************************************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (517 concept(s); 230 crystal)
-  layout           ***********************************oooooooooooooooooooooooo (59 concept(s); 35 crystal)
-  loop             ***************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (108 concept(s); 51 crystal)
-  plan             **************************************************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (584 concept(s); 242 crystal)
-  policy-capability *********************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (260 concept(s); 129 crystal)
+  layout           *************************************oooooooooooooooooooooooo (61 concept(s); 37 crystal)
+  loop             *****************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (110 concept(s); 53 crystal)
+  plan             ***************************************************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (585 concept(s); 243 crystal)
+  policy-capability **********************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (261 concept(s); 130 crystal)
   pool             **************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (106 concept(s); 38 crystal)
   render-materialize *************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (236 concept(s); 49 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (125 concept(s); 35 crystal)
-  session-runtime  *******************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (366 concept(s); 139 crystal)
+  session-runtime  ********************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (368 concept(s); 140 crystal)
   support-maturity ********************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (132 concept(s); 68 crystal)
   trajectory-control *****              (5 concept(s); 5 crystal)
   vfs              ******             (6 concept(s); 6 crystal)
-  witness-proof    ************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (213 concept(s); 84 crystal)
+  witness-proof    ****************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (217 concept(s); 88 crystal)
 
 coverage by family (positioned / discovered):
-  session-runtime  ############################ 388/389
-  attention        ############################ 241/241
-  cache            ############################ 456/456
+  attention        ############################ 243/243
+  cache            ############################ 467/467
   context-ctx      ############################ 336/336
   cross-cluster    ............................ 0/0
   decision         ############################ 68/68
@@ -72,27 +71,28 @@ coverage by family (positioned / discovered):
   evict            ############################ 97/97
   gateway-engine   ############################ 326/326
   guard-gate       ############################ 579/579
-  layout           ############################ 56/56
-  loop             ############################ 119/119
+  layout           ############################ 58/58
+  loop             ############################ 121/121
   plan             ############################ 651/651
-  policy-capability ############################ 287/287
+  policy-capability ############################ 288/288
   pool             ############################ 112/112
   render-materialize ############################ 254/254
   score-debt       ############################ 141/141
+  session-runtime  ############################ 389/389
   support-maturity ############################ 146/146
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
-  witness-proof    ############################ 200/200
+  witness-proof    ############################ 204/204
 
-namespace coverage  [################################] 100.0%  (4195/4196 confusable tokens positioned)
+namespace coverage  [################################] 100.0%  (4218/4218 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
-  mutual       ############################ 312
+  mutual       ############################ 314
   one-sided    ............................ 0
-  undrawn      ............................ 0
-  pairs separated   [################################] 312/312
+  undrawn      #........................... 3
+  pairs separated   [################################] 314/317
 
-name index: 5586 lookup name(s) -> 4127 concept(s), 93 ambiguous
+name index: 5478 lookup name(s) -> 4153 concept(s), 96 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -101,12 +101,12 @@ legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undoc
 
 | Verdict | Means |
 |---|---|
-| * crystal | grounded + defined + a line drawn against siblings + that line anchored in a doc that exists |
-| o defined | grounded + defined + a distinction line, but the line is not written in a discoverable doc |
-| ~ drifting | grounded + defined, but no line drawn against its siblings (you know what it is, not what it is NOT) |
+| * crystal | defined + a line drawn against siblings + that line anchored in a doc that exists |
+| o defined | defined + a distinction line, but the line is not written in a discoverable doc |
+| ~ drifting | defined, but no line drawn against its siblings (you know what it is, not what it is NOT) |
 | = entangled | defined and draws SOME line, but not against the twin its own NAME is confusable with - per-row clean, pairwise still fog |
 | x colliding | shares a canonical name with another concept - a true ambiguity, fixable only by a rename |
-| . undocumented | appears in the tree, but the catalog gives no definition |
+| . undocumented | the catalog gives no definition |
 
 ## Separation - is each concept disambiguated FROM THE OTHERS?
 
@@ -114,11 +114,11 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 
 | Separation metric | Value |
 |---|---|
-| Confusable name-pairs discovered | 312 |
-| **Separated from each other (drive to all)** | **312 / 312** (312 mutual, 0 one-sided) |
-| **Undrawn twin-pairs (drive to 0)** | **0** |
-| Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 3628 / 7901 |
+| Confusable name-pairs discovered | 317 |
+| **Separated from each other (drive to all)** | **314 / 317** (314 mutual, 0 one-sided) |
+| **Undrawn twin-pairs (drive to 0)** | **3** |
+| Entangled concepts (own twin undrawn) | 6 |
+| Boundaries drawn (mutual / total) | 3684 / 7976 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 5586 over 4127 concepts |
-| Lookup names landing on several concepts | 93 |
+| Lookup names indexed | 5478 over 4153 concepts |
+| Lookup names landing on several concepts | 96 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 4127 |
+| Concepts carrying a contrast set | 4153 |
 
 ## The concepts (best verdict first)
 
@@ -177,6 +177,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | attention | **AttnLayers** - fitplan.Model field: the number of KV-bearing attention layers (ContextSizeConfig.KV.NumLayers): every decoder layer that keeps token-indexed KV, sliding-window layers included, Qwen3.5-hybrid linear-attention layers excluded when their recurrent geometry is known. Its per-position width (layers x heads x head dim) prices decode KV FLOPs and the quadratic prefill attention term, an upper bound for windowed models. |
 | * | crystal | symbol | attention | **qwen35FullAttentionHAL (resident Qwen3.5 full-attention step)** - The internal/model Session method that executes one ordinary Qwen3.5 full-attention layer through the compute HAL over a device-resident residual and the session KV store; the retained MTP draft reuses it for its decoder layer. |
 | * | crystal | symbol | attention | **attnDecodeQ8Packed** - Experimental default-off host B=1 Q8-KV attention consumer. It reconstructs one bounded F32 head-row tile per worker from packed codes and block scales, shares that tile across grouped query heads, and uses existing native dot, softmax and value kernels without expanding full-layer K/V panels. The separately guarded tokenHiddenQ branch selects it only for admitted contiguous host Q8 cache geometry. |
+| * | crystal | symbol | attention | **promptPanelRefusalArchMiniMaxSparseAttn (target integration semantics)** - Prompt-panel refusal enumeration recorded when cfg.isMiniMaxSparseAttn() is true in the ordered non-panel-MoE architecture checks, after earlier selection checks have passed. |
+| * | crystal | symbol | attention | **ArchMiniMaxSparseAttn (target integration semantics)** - Field of PromptPanelSelectionCounts loaded from the promptPanelRefusalArchMiniMaxSparseAttn counter; counts calls attributed to that first-matching prompt-panel refusal axis. |
 | * | crystal | symbol | attention | **preparePrefillAttention (cache and output setup)** - preparePrefillAttention appends one layer's raw key, transformed key, and value panels to the KV cache, resolves that layer's sliding window, and allocates the zeroed attention output panel for the incoming prefill rows. |
 | * | crystal | symbol | attention | **fillAttentionScores (raw single-head score fill)** - fillAttentionScores writes scaled query-key dot products for one query head across a contiguous key-position range without applying softmax or mixing values. |
 | * | crystal | symbol | attention | **fillSoftmaxAttentionScores (single-head score and softmax)** - fillSoftmaxAttentionScores fills one query head's scaled query-key scores and then normalizes that score row in place with softmax. |
@@ -272,6 +274,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | cache | **GoCacheReport** - GoCacheReport is the tree-doctor report for one Go build-cache lifecycle inspection, including observed bytes, reclaimable bytes, completeness, and retained-entry reasons. |
 | * | crystal | symbol | cache | **GoCacheRootFromEnv** - GoCacheRootFromEnv resolves the Go build-cache root from the process environment for reporting and lifecycle operations. |
 | * | crystal | symbol | cache | **SweepGoCache** - SweepGoCache inventories Go build-cache entries and, only when explicitly applied, removes eligible old entries while returning a GoCacheReport. |
+| * | crystal | symbol | cache | **expertCacheLRFUClass** - Unexported bucketing function mapping a post-use CRF to a frequency class: log2 of the CRF is computed as float32 before integer truncation, preserving the donor std::log2(float) rounding near powers of two, and the result is capped at the last of eight classes. |
 | * | crystal | symbol | cache | **CachePolicyStream (offline expert access replay input)** - A flat deterministic sequence of unit-sized expert groups consumed by offline cache-policy replay. |
 | * | crystal | symbol | cache | **sharedCache (requested worker Go build-cache path)** - sharedCache is the requested Go build-cache path read by internal/workerworktree.WorktreeEnv from an explicit caller-map FAK_SHARED_GOCACHE value, otherwise the process environment. An explicit empty value suppresses ambient opt-in. After trimming, an absolute path without NUL selects GOCACHE; invalid or disabled input retains the worktree-local default. |
 | * | crystal | symbol | cache | **SharedGoCacheEnv (Go constant naming worker shared-cache opt-in)** - SharedGoCacheEnv is the exported workerworktree Go constant whose value is FAK_SHARED_GOCACHE. Callers use it as the explicit WorktreeEnv map key for a requested shared Go build-cache path; it names the control rather than storing the selected directory. |
@@ -337,6 +340,17 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | cache | **UpgradeAnthropicStableCacheTTL1h** - UpgradeAnthropicStableCacheTTL1h (internal/agent/anthropic_cachebp.go) rewrites an Anthropic request body to upgrade stable cache_control breakpoints to the 1h TTL tier, returning a typed upgrade outcome. |
 | * | crystal | metric | cache | **fak_gateway_cache_ttl_upgrade_total** - fak_gateway_cache_ttl_upgrade_total is the /metrics counter witnessing managed-cache TTL upgrades by outcome label. |
 | * | crystal | symbol | cache | **ErrGraphCacheNilVoter** - Constructor error sentinel in internal/compute/graph_cache_policy.go returned by NewGraphCachePolicy when a nonempty Voters slice contains a nil callback. Validation follows engine, capacity and minimum-retention checks and rejects the policy before any capture or replay. An absent or empty voter slice remains valid single-rank agreement. |
+| * | crystal | subsystem | cache | **devbuildcache (target integration semantics)** - The fak-dev source-checkout handoff cache implemented by devbuildcache.go: a source mtime/size digest names a linked executable, with a 24-hour TTL and executable-magic lookup check; failures fall back to go run. |
+| * | crystal | symbol | cache | **devBuildCachedFakDev (target integration semantics)** - Returns a usable cached fak-dev executable and true after enabled-switch, source-digest and path checks, then lookup or build followed by lookup; returns false on any failure so the caller can use its legacy handoff. |
+| * | crystal | config | cache | **FAK_DEV_BUILDCACHE (target integration semantics)** - Environment switch disabling the fak-dev executable cache when trimmed case-insensitive value is off, 0, false or no; other values leave cache use enabled. |
+| * | crystal | config | cache | **devBuildCacheTTL (target integration semantics)** - The 24-hour duration bounding entry reuse by modification time even when the direct-source digest remains equal. |
+| * | crystal | symbol | cache | **devBuildCacheNow (target integration semantics)** - Injectable time.Now function used by fak-dev cache lookup to compare entry modification time against its TTL. |
+| * | crystal | config | cache | **devBuildCacheDirOverride (target integration semantics)** - Optional directory override for the fak-dev linked-executable cache; empty uses os.UserCacheDir and tests can supply a fixture directory. |
+| * | crystal | symbol | cache | **devBuildCacheBuildFn (target integration semantics)** - Injectable function producing the fak-dev executable at the selected output path; production uses devBuildGoBuildFakDev while tests can supply a fake builder. |
+| * | crystal | symbol | cache | **devBuildCacheDisabled (target integration semantics)** - Predicate reading FAK_DEV_BUILDCACHE and recognizing the four disabled spellings after trimming and lowercasing. |
+| * | crystal | symbol | cache | **devBuildCachePath (target integration semantics)** - Derives the fak/dev-buildcache/fak-dev-<digest16> entry pathname under the configured or user cache directory, adding .exe on Windows. |
+| * | crystal | symbol | cache | **devBuildCacheLookup (target integration semantics)** - Checks that a candidate path is a regular file, is no older than devBuildCacheTTL according to devBuildCacheNow, and passes platform executable-magic inspection; returns the path and true only then. |
+| * | crystal | symbol | cache | **CachedPayloadBytes (target integration semantics)** - Field of tokenizer.EncodeWork accumulating logical bytes retained for ordinary-run memo entries: UTF-8 text bytes plus token-ID count times native int width, subject to the one-MiB payload budget. |
 | * | crystal | metric | cache | **fak_gateway_inference_cached_prompt_hit_ratio (provider-cache turn ratio)** - fak_gateway_inference_cached_prompt_hit_ratio is the gateway Prometheus gauge dividing provider prompt-cache-hit turns by all served model turns, reported as zero before the first turn. |
 | * | crystal | symbol | cache | **KVCacheShape** - The model.Config method that reads a loaded model header and returns the kvbudget.Shape sizing that model's KV cache: MLA geometry (layers, KVLoraRank, QKRopeHeadDim) when the header declares a compressed latent, plus the DSA/NSA indexer key over an upper bound of NumLayers when it declares an indexer, and otherwise MHA/GQA geometry (NumKVHeads, HeadDim, VHeadDim). It replaces kvbudget's hardcoded GLM52DSA estimate with the served model's own declared widths (#5242). |
 | * | crystal | doc-term | cache | **kv_cache_calculator (ktransformers KV sizing reference)** - ktransformers' external KV-sizing utility python/cli/utils/kv_cache_calculator.py, studied in docs/notes/CONCEPT-STUDY-KTRANSFORMERS-2026-07-18.md, whose MLA / NSA-indexer / MHA branch over a loaded ModelConfig is the named prior art fak ports into AttnKind and Config.KVCacheShape (#5242). It appears in this repo only as a pinned citation coordinate in doc comments (kv_cache_calculator.py:LINES@0c2912a). |
@@ -347,19 +361,19 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | config | cache | **FAK_ABLATE_TTL_1H** - FAK_ABLATE_TTL_1H is the ablation-harness env arm (internal/ablate) that force-enables the gateway's 1h TTL upgrade lever (Config.CacheTTL1H) independently of the guard's managed-cache posture, so the upgrade's effect can be measured A/B. |
 | * | crystal | concept | cache | **managed-cache restart plan** - The managed-cache restart plan (internal/resume) is the OTHER sense of the phrase: Plan prices restarting a dormant rate-limit-crashed session (RESUME_FULL vs CUT, with RESET always priced) against the projected provider-cache posture, and Diagnose detects which transcripts need one - turning a blind cold re-prefill into a restart with the cache managed. |
 | * | crystal | symbol | cache | **rebuildCacheGeometryOwned** - Private Session cache-pool rebuild body invoked after its public boundary acquires the optional backend recording-domain owner; replaces expert, KV, recurrent and window pools while preserving maintenance locking and rollback. |
-| * | crystal | symbol | cache | **ExpertCacheLRFU** - Bounded logical resident-slot replacement policy in modelloadplan, adapted from llama.cpp ClassLRU: eight frequency-class LRU lists retain exponentially decayed CRF across eviction and choose the oldest unselected candidate with largest age divided by two to its class. Plan serializes state changes using per-layer token clocks. |
-| * | crystal | symbol | cache | **ExpertCacheLRFUMaxEntries** - Maximum logical layer-times-expert entries accepted by NewExpertCacheLRFU: 1 shifted left by 20, checked using division before allocating arrays. |
-| * | crystal | symbol | cache | **expertCacheLRFUClasses** - Eight frequency buckets used by ExpertCacheLRFU to organize resident slots into separate LRU lists. |
-| * | crystal | symbol | cache | **expertCacheLRFUHalfLife** - Float32 value 128 used as the per-layer token-clock half-life when decaying ExpertCacheLRFU CRF with Exp2. |
-| * | crystal | symbol | cache | **ErrExpertCacheLRFUConfig** - Constructor refusal sentinel for nonpositive geometry, excessive logical entries or resident slots exceeding layer-times-expert entries. |
-| * | crystal | symbol | cache | **ErrExpertCacheLRFUInput** - Access refusal sentinel for a nil ExpertCacheLRFU, out-of-range layer or expert ID, or negative token increment. |
-| * | crystal | symbol | cache | **ErrExpertCacheLRFUCapacity** - Plan refusal sentinel when distinct selected experts exceed available logical resident slots, before policy state changes. |
-| * | crystal | symbol | cache | **ErrExpertCacheLRFUClock** - Plan refusal sentinel when a nonnegative token increment would overflow the selected layer int64 clock. |
+| * | crystal | symbol | cache | **ExpertCacheLRFU** - Bounded logical resident-slot replacement policy in modelloadplan adapted from llama.cpp ClassLRU (src/llama-moe-cache.cpp, MIT). Eight frequency-class LRU lists retain exponentially decayed CRF across eviction, and Plan chooses, among the oldest unselected candidate of each class, the one with the largest age divided by 2^class. Per-layer int64 token clocks advance per Plan call, methods serialize access through a mutex, and a returned slot is not evidence that weights are loaded. |
+| * | crystal | symbol | cache | **ExpertCacheLRFUMaxEntries** - Public constant 1<<20 bounding the logical layer-times-expert entries accepted by NewExpertCacheLRFU; the constructor checks it using division before allocating arrays. |
+| * | crystal | symbol | cache | **expertCacheLRFUClasses** - Unexported constant 8 fixing the number of frequency buckets into which ExpertCacheLRFU organizes its resident slots, one LRU list per bucket with matching head/tail arrays. |
+| * | crystal | symbol | cache | **expertCacheLRFUHalfLife** - Unexported float32 constant 128 giving the per-layer token-clock half-life used by the decayed method: retained CRF is multiplied by Exp2(-age/halfLife), where age is measured in layer-clock tokens since last use. |
+| * | crystal | symbol | cache | **ErrExpertCacheLRFUConfig** - Sentinel error refused by NewExpertCacheLRFU for nonpositive geometry, excessive logical entries, or resident slots exceeding layer-times-expert entries. |
+| * | crystal | symbol | cache | **ErrExpertCacheLRFUInput** - Sentinel error refused by Plan and Inspect for a nil receiver, an out-of-range layer or expert ID, a negative token increment, or a selected expert id outside the configured range. |
+| * | crystal | symbol | cache | **ErrExpertCacheLRFUCapacity** - Sentinel error refused by Plan when the distinct selected experts exceed the available logical resident slots, before any policy state changes. |
+| * | crystal | symbol | cache | **ErrExpertCacheLRFUClock** - Sentinel error refused by Plan when a nonnegative token increment would overflow the selected layer's int64 token clock; policy state stays unchanged on refusal. |
 | * | crystal | symbol | cache | **ExpertCacheKey** - Layer and Expert integer pair identifying one logical expert in the ExpertCacheLRFU policy and its fill or eviction observations. |
-| * | crystal | symbol | cache | **ExpertCacheLRFUFill** - One logical cache-plan miss result: selected ExpertCacheKey, assigned slot and optional owned copy of the evicted expert key. |
-| * | crystal | symbol | cache | **ExpertCacheLRFUPlan** - Plan result containing resident hit count, layer clock before and after the token increment, and ordered logical fill observations. |
-| * | crystal | symbol | cache | **ExpertCacheLRFUEntry** - Owned scalar Inspect snapshot of an expert: resident slot/class, retained CRF, current decayed CRF, last-use token and layer clock. |
-| * | crystal | symbol | cache | **NewExpertCacheLRFU** - Constructor validating layer, expert and slot geometry and allocating the bounded logical ClassLRU policy with empty slots and zero layer clocks. |
+| * | crystal | symbol | cache | **ExpertCacheLRFUFill** - One logical cache-plan miss result: the selected ExpertCacheKey, the assigned resident slot, and an optional owned copy of the evicted expert key. Nil Evicted means an unused slot rather than an unknown victim. |
+| * | crystal | symbol | cache | **ExpertCacheLRFUPlan** - Result of one ExpertCacheLRFU.Plan transition: the resident hit count, the selected layer's token clock before and after the increment, and the ordered list of fill observations. Invalid, capacity, and clock refusals leave policy state unchanged. |
+| * | crystal | symbol | cache | **ExpertCacheLRFUEntry** - Owned scalar snapshot returned by Inspect for one expert: resident slot (-1 when nonresident), resident class as of last use, retained CRF, currently decayed CRF, last-use token (-1 before first access), and layer clock. It is an observation without mutation. |
+| * | crystal | symbol | cache | **NewExpertCacheLRFU** - Constructor validating layers, experts, and residentSlots geometry: all positive, experts <= ExpertCacheLRFUMaxEntries, layers*experts bounded via a division check before allocation, and residentSlots <= layers*experts; refusal returns ErrExpertCacheLRFUConfig. On success it allocates empty slots and zero layer clocks, with all unused slots linked in class 0 and the other seven class lists empty. |
 | * | crystal | symbol | cache | **expertCacheLRFUClass (frequency bucket function)** - Internal bucket calculation that converts log2 of post-use CRF to float32 before integer truncation and caps the result at the last of eight classes. |
 | * | crystal | symbol | cache | **PrepareForCache** - PrefixSnapshot cache-admission method that seals independently owned V4.1 publication rows into immutable shared prefix storage before publishing an admitted snapshot, retaining private mutable continuation fields. |
 | * | crystal | symbol | cache | **FAK_RESUME_CACHE_AFFINITY** - Env-var name carrying the transcript-UUID-derived relaunch cache-affinity route onto a resumed claude --resume child, so the warm provider cache route survives the OS relaunch (#4140/#5189). |
@@ -504,7 +518,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | cross-cluster | **core-image manifest** - internal/recall's Manifest: the persisted core image of a finished session - the page table, the frozen quarantine-clearance state, and a frozen world-version marker, with the bytes themselves living in a sibling cas.json swap device. |
 | * | crystal | symbol | cross-cluster | **policy manifest (on-disk JSON)** - internal/policy's Manifest: the on-disk capability-floor JSON an operator edits to configure the authorization intent - the abstract policy is compiled from this into an in-memory decision table. |
 | * | crystal | symbol | cross-cluster | **session.Verdict** - internal/session's Verdict: what Decide returns to the agent turn loop at each boundary - Proceed (gate the next turn), MaxTokens (per-turn output cap), the drive State, Stop, and a closed Reason naming why the slot freed. |
-| * | crystal | symbol | cross-cluster | **abi.Verdict (adjudication decision)** - internal/abi's Verdict: the discriminated-union adjudication decision type (Allow, Deny, Defer, Transform, Quarantine, RequireWitness) - the kernel's tool-call authorization decision surface. |
+| * | crystal | symbol | cross-cluster | **abi.Verdict (adjudication decision)** - internal/abi's Verdict: the discriminated-union adjudication decision type (Allow, Deny, Defer, Transform, Quarantine, RequireWitness, Indeterminate) - the kernel's tool-call authorization decision surface. |
 | * | crystal | symbol | cross-cluster | **compute backend** - internal/compute's Backend: the small whole-op HAL interface the forward loop targets (MatMul, RMSNorm, RoPE, Attention, NewKV ...), carrying a Tier capability probe and a CorrectnessClass; the CPU reference delegates to the model's exact arithmetic. |
 | * | crystal | symbol | cross-cluster | **memq cell backend** - internal/memq's Backend: supplies memory cells (the page table as SAFE-metadata cells) and trust-gated byte access (Materialize pages one cell's bytes in through the trust gate); optional Tombstoner/Pruner add the durable mutations a backend chooses to support. |
 | * | crystal | symbol | cross-cluster | **rung observer** - internal/rungobs's Observer: the passive rung-decision distribution counter - registered via abi.RegisterEmitter, it dedups by call SeqNo and histograms adjudication decisions (rung x kind x reason), read out with Snapshot. |
@@ -825,7 +839,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | guard-gate | **guardEmitRestartHop (restart lineage persistence)** - The supervision helper that persists an already-constructed restart-chain hop to the audit journal and reports the same lineage status to the operator surface. |
 | * | crystal | symbol | guard-gate | **guardReportChildResourceMonitorFailure** - Reports a typed child resource-monitor diagnostic without treating missing telemetry as a measured resource breach. |
 | * | crystal | subsystem | guard-gate | **guard (fak guard kernel)** - The kernel itself: the in-process adjudication system that runs the decision chain and admits results, launched as `fak guard`. |
-| * | crystal | concept | guard-gate | **gate (decision point)** - One decision point inside a guard, splitting by WHEN it fires: pre-call adjudicators, post-call result admitters, and git-hook gates. |
+| * | crystal | concept | guard-gate | **gate (decision point)** - One decision point inside a guard, splitting by WHEN it fires: pre-call adjudicators, post-call result admitters, git-hook gates, plus promotion gates and capability-floor gates. |
 | * | crystal | symbol | guard-gate | **ResultAdmitter (post-call gate)** - A post-call gate: inspects a tool RESULT after execution and admits / quarantines / transforms it (ctxmmu, normgate, secretgate). |
 | * | crystal | subsystem | guard-gate | **git-hook gate** - A commit-boundary check at git pre-commit / commit-msg (gate_brokenlink, gate_secretshape, gate_provenance, ...). |
 | * | crystal | doc-term | guard-gate | **trunk guard** - A git hook that refuses commits made off the trunk (the OFF_TRUNK law), keeping all work on main. |
@@ -916,6 +930,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | layout | **layout implementation surface for refusalunknownnativelayout** - `refusalunknownnativelayout` is a concrete tree symbol classified in the `layout` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | subsystem | layout | **guard_format_layout** - The guard exit-summary block LAYOUT (guard_format_layout.go) - the pure text layout of the guard summary onto which color is layered at print time (guardColorizeSummary). |
 | * | crystal | symbol | layout | **LayoutDigest (runtime topology search)** - SHA-256 identity of canonical configured runtime topology groups and ranks, including device incarnations, KV ownership and configured resource commitments, binding measured observations to their exact placement. |
+| * | crystal | symbol | layout | **promptPanelRefusalArchMLAMoELayout (target integration semantics)** - Prompt-panel refusal enumeration recorded when cfg.usesMLAMoELayout() is true in the ordered non-panel-MoE architecture checks, after earlier selection checks have passed. |
+| * | crystal | symbol | layout | **ArchMLAMoELayout (target integration semantics)** - Field of PromptPanelSelectionCounts loaded from the promptPanelRefusalArchMLAMoELayout counter; counts calls attributed to that first-matching prompt-panel refusal axis. |
 | * | crystal | symbol | layout | **layout implementation surface for daylayout** - `DayLayout` is the layout symbol declared or used at `cmd/fak/git_daily.go:347` as `// LOCAL date, matching gitdaily.DayLayout — the ledger's day keys are local, so a`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | subsystem | layout | **LayoutContract registry (compute)** - internal/compute/layoutcontract is the declarative registry of tensor layout contracts for every quantized kernel family present in-tree (Q4_K, Q8_0, NVFP4, MXFP4): each Contract pins the closed fact set a loader must satisfy - storage order, interleave width, scale layout, padding rule, packing path - plus a source ref pinned at path:line@sha, so loader/kernel drift shows up as a stale ref to re-pin instead of a silent runtime transpose or repack. |
 | * | crystal | cli-verb | layout | **layoutcontract (fak-dev verb)** - The read-only `fak-dev layoutcontract` CLI surface over the layoutcontract registry: families lists registered kernel families, show FAMILY emits the full contract (receipt schema fak.layoutcontract/1), check FAMILY --observed FILE compares an observed-layout file against the contract under the closed field vocabulary storage_order / scale_layout / interleave_width / padding_rule / packing_stage (receipt fak.layoutcontract-check/1; exit 0 match, 1 mismatch, 2 usage-or-unknown-family), and orphans reports registered families with no production call site (receipt fak.layoutcontract-orphans/1). No subcommand mutates state. |
@@ -963,6 +979,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | loop | **loop implementation surface for loopcheckneedsaction** - `loopcheckneedsaction` is a concrete tree symbol classified in the `loop` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | loop | **loop implementation surface for loopspec** - `loopspec` is a concrete tree symbol classified in the `loop` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | metric | loop | **loop_count** - The dispatch codex-loop iteration counter (LoopCount, JSON loop_count) reported per session tick - how many times the codex loop has re-entered for one session. |
+| * | crystal | symbol | loop | **promptPanelRefusalArchQ8TokenLoop (target integration semantics)** - Prompt-panel refusal enumeration recorded when q8PrefillNeedsTokenLoop(cfg) is true in the ordered non-panel-MoE architecture checks, after earlier selection checks have passed. |
+| * | crystal | symbol | loop | **ArchQ8TokenLoop (target integration semantics)** - Field of PromptPanelSelectionCounts loaded from the promptPanelRefusalArchQ8TokenLoop counter; counts calls attributed to that first-matching prompt-panel refusal axis. |
 | * | crystal | symbol | loop | **loop implementation surface for resolvedcodexloophome** - `resolvedCodexLoopHome` is the loop symbol declared or used at `cmd/fak/orchestration.go:184` as `home, err := resolvedCodexLoopHome(codexHome)`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | loop | **loop implementation surface for codexloop** - `CodexLoop` is the loop symbol declared or used at `cmd/fak/codexloopissues.go:162` as `"A regression test reproduces the `%s` no-progress loop fixture and asserts the gate refuses it; `go test ./cmd/fak/ -run CodexLoop` passes.",`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | loop | **loop implementation surface for applycodexloopsessionmeta** - `applyCodexLoopSessionMeta` is the loop symbol declared or used at `cmd/fak/sessions_codex_loop.go:1221` as `applyCodexLoopSessionMeta(&d, rec.Timestamp, rec.Payload)`. This row positions that concrete implementation surface, not merely the family label. |
@@ -1108,6 +1126,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | plan | **LedgerPlanned (optimize loop verdict)** - The fak optimize loop ledger verdict constant optimize.LedgerPlanned: the iteration stopped at plan (dry-run or an upstream refusal) so no measurement exists and the throughput fields are omitted rather than zero-filled. |
 | * | crystal | symbol | plan | **planningRungs (optimize band binding)** - The internal binding optimize.planningRungs that projects a lever's expected floor and roof band from the native-performance graph rungs the lever is planned against, feeding verify's banded criterion. |
 | * | crystal | symbol | plan | **CandidateTokS (optimize receipt arm)** - The single-lever arm throughput optimize.OptimizeReceipt.CandidateTokS: end-to-end decode tok/s replayed from the frozen trace with the lever's mapped ablate feature enabled, paired against BaselineTokS, the all-off arm. |
+| * | crystal | symbol | plan | **validBytePlan** - Unexported V41DSparkResidency method in internal/model/v41_dspark_residency.go that reports whether the declared DraftBytes and TargetBytes are both nonnegative and their int64 sum is representable (DraftBytes <= math.MaxInt64 - TargetBytes). FitsHost, Validate, and AdmitResidentClaim each require it before using the resident-byte arithmetic. |
 | * | crystal | symbol | plan | **CandidateBlockedBy (dispatch prereq grammar)** - dispatchtick.CandidateBlockedBy parses a dispatch candidate's blocked-by grammar - which other candidates a candidate must wait on before it becomes eligible for a lane. |
 | * | crystal | symbol | plan | **buildKnownBadIssuePlan (known-bad issue-filing plan)** - cmd/fak/knownbad.go buildKnownBadIssuePlan builds the create/update PLAN for filing a known-bad record as a deduped GitHub issue (title, body, occurrence escalation). |
 | * | crystal | symbol | plan | **candidateIDs (rescore/route candidate id vector)** - candidateIDs (internal/kvmmu/rescore.go, internal/modelroute/audit_route.go) is the parallel vector of identifiers for the items being scored - KV spans under rescore, or routes under audit - whose results line up index-for-index. |
@@ -1288,11 +1307,12 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | policy-capability | **NewExpertResidencyPolicyWithAdvisor** - NewExpertResidencyPolicyWithAdvisor (internal/ctxmmu/expert_residency_advisor.go) builds an ExpertResidencyPolicy through NewExpertResidencyPolicy and then wires an ExpertResidencyAdvisor into it. The advisor gates cold-miss decode admission with its displacement band - a challenger that would evict a resident is admitted only when its heat beats the victim's, otherwise the touch is bypassed (served from backing, counted in DecodeBypasses) - and supplies the committed hot set behind WarmStartFromAdvisor, with every insert/eviction reported back via MarkResident/ClearResident. A nil advisor is equivalent to NewExpertResidencyPolicy. |
 | * | crystal | symbol | policy-capability | **checkPolicyFile** - The fak policy --check entry point that reads the named policy file once and routes it by payload shape: a plain runtime manifest goes to the manifest validator, a fak-org-policy/v1 envelope goes to the signed-envelope verifier. |
 | * | crystal | symbol | policy-capability | **policyExclusion** - The operator-configured exclude / include_only gate that drops a discovered account row from the fleet registry, extracted from the inline discovery checks so the discovery path and the seat-stamping path share one decision. |
-| * | crystal | symbol | policy-capability | **CUBLASLtNVFP4Policy** - Shared pure architecture and runtime eligibility rule in fp4meta for the cuBLASLt NVFP4 path: SM100 requires at least version120803, SM103 requires at least version120900, SM120 requires at least version120804, and other architectures are refused. For admitted SM103, skipAlgo66 is true on versions130501 through130601 and130700 through130799. |
+| * | crystal | symbol | policy-capability | **CUBLASLtNVFP4Policy** - Shared pure architecture and runtime eligibility rule in internal/fp4meta/cuda_capabilities.go for the NVFP4 cuBLASLt path: SM100 requires cuBLAS version at least 120803, SM103 at least 120900, SM120 at least 120804, and every other architecture is refused. For eligible SM103 it additionally reports skipAlgo66 for cuBLAS versions 130501 through 130601 and 130700 through 130799. fp4meta.CUDACapabilities and compute.nvfp4CUBLASLtPolicy gate on it. |
 | * | crystal | concept | policy-capability | **policy_exceeds_measured_capacity** - Typed shadow HOLD reason when explicit queue or group safety policy exceeds the slots or group count of an accepted supplied measured-search candidate. |
 | * | crystal | symbol | policy-capability | **ManifestPreflight** - Header-only aggregate validation report from GGUF metadata and tensor descriptors, optional HF-config parity, loader key/tensor census and host-kernel availability; it reads no tensor payload. |
 | * | crystal | symbol | policy-capability | **ExecutionPolicyDeviceOnly (model-session compute residency)** - The internal/model session policy that admits inference only when the active compute backend has device memory and every architecture-specific operation needed by that session remains on the device; an attempted host-compute fallback records the observation, retires the session, and returns the typed backend-operation refusal. |
 | * | crystal | symbol | policy-capability | **SetExecutionPolicy (model Session mutator)** - The internal/model Session mutator that pins the compute-residency policy before inference and propagates that choice through prefix snapshots, cloned sessions, restored sessions, and retained MTP draft sessions. |
+| * | crystal | symbol | policy-capability | **AdjudicateAgainstFloor (target integration semantics)** - Compares a finite nonnegative observed relative error against a matching-version FloorReceipt with finite nonnegative RelativeError: at or below the receipt value yields within_floor, above yields above_floor; invalid inputs return an error. |
 | * | crystal | config | policy-capability | **runtimecap fallback policy (pin/refuse or local CPU degrade)** - runtimecap fallback policy selects whether an unavailable requested backend stays pinned and refuses or may degrade into a declared local CPU envelope; Probe records the selected posture in the runtime-capabilities receipt. |
 | * | crystal | config | policy-capability | **FastIntent.FallbackPolicy (fast-profile fallback action)** - FastIntent.FallbackPolicy is the portable orchestration request field that chooses degrade or refuse when the requested fast harness binding is unsupported during fast-plan resolution. |
 | * | crystal | symbol | policy-capability | **policyRef (attestation policy digest)** - policyRef is the attestation wire object that binds the exact capability-floor manifest path to its SHA-256 digest so a compliance proof can be rechecked against the same policy bytes. |
@@ -1519,6 +1539,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | session-runtime | **NewBackendSessionCheckedDeferredState (deferred-state HAL construction)** - Model.NewBackendSessionCheckedDeferredState constructs a checked HAL model.Session without the eager Qwen3.5-hybrid zero conv/recurrent upload; the caller must install snapshot device state through PrefixSnapshot.Restore before forward, otherwise the first forward fails closed with the missing-Qwen35-GDN-backend-state refusal. |
 | * | crystal | symbol | session-runtime | **suffixPrefillSession** - Modelbench interface for owned prefix prefill, suffix continuation, next-token step, between-call sequence position and terminal close in checkpoint replay comparisons. |
 | * | crystal | symbol | session-runtime | **residentSlots (ExpertCacheLRFU constructor)** - NewExpertCacheLRFU constructor parameter fixing the number of logical resident expert slots across the policy layers; it must be positive and no greater than layers times experts. |
+| * | crystal | symbol | session-runtime | **residentSlots** - Third parameter of NewExpertCacheLRFU in internal/modelloadplan/expert_cache_lrfu.go fixing how many logical expert slots the bounded ClassLRU policy holds resident across its layers; it must be positive and no greater than layers times experts. Plan refuses a selection whose distinct experts exceed it with ErrExpertCacheLRFUCapacity. |
 | * | crystal | symbol | session-runtime | **ErrSessionReleased (ctxmmu)** - Signals that an operation encountered a session branch that has already been released. |
 | * | crystal | symbol | session-runtime | **LoadSessionCheckpoint (agent)** - Reads a session checkpoint from an explicit path or a session ID resolved under the default directory. |
 | * | crystal | symbol | session-runtime | **LlamaSoftSlot (HTTP planner)** - Opts a planner into soft per-conversation selection of a llama-server slot. |
@@ -1727,6 +1748,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | witness-proof | **FeatureProofReceipt** - Bounded process-local observation of applied Anthropic or native typed compaction, result elision, or accepted real-vDSO serving, retaining quantitative digests or an explicit proof-generation failure. |
 | * | crystal | symbol | witness-proof | **FeatureRewriteWitness** - Input to the pure Anthropic byte-rewrite verifier specifying protected prefix and suffix bounds, exact claimed byte delta and labeled token estimates. |
 | * | crystal | symbol | witness-proof | **guardCompactionWitness (durable per-session compaction-health row)** - cmd/fak/guard_compaction_witness.go guardCompactionWitness: the durable per-session compaction-health row `fak guard` appends at session exit -- {schema, recorded_at, session, anchor_mode, fired, bailed, off, anchor_starved, solvency_forced, shed_tokens, budget, cache_read_at_fire, bail_reasons} folded from the one gateway.Server that guard constructs and tears down per launch, and pinned to the append-only JSONL .fak/nightrun/compaction-health.jsonl so 'did compaction fire for THAT session?' outlives the process that measured it. |
+| * | crystal | symbol | witness-proof | **promptPanelWitnessReason (target integration semantics)** - Integer enumeration identifying the selected outcome and each ordered refusal axis of Session.promptPanelFor; it indexes the fixed atomic selection counter array. |
+| * | crystal | symbol | witness-proof | **promptPanelWitnessReasons (target integration semantics)** - Terminal enumeration value sizing the prompt-panel selection counter array after the selected outcome and all refusal reasons. |
+| * | crystal | symbol | witness-proof | **promptPanelWitness (target integration semantics)** - Fixed array of atomic.Int64 counters indexed by promptPanelWitnessReason; notePromptPanelSelection increments the selected reason once at each selector outcome. |
+| * | crystal | symbol | witness-proof | **PromptPanelSelectionWitness (target integration semantics)** - Returns PromptPanelSelectionCounts by loading each reason counter atomically; later fields may include calls arriving between loads. |
 | * | crystal | symbol | witness-proof | **DisambiguationWitnesses (worker-land scorecard proof bundle)** - DisambiguationWitnesses is the workerworktree landing receipt that groups the before, isolated-worktree, and post-apply concept-scorecard witnesses under one shared timeout authority. |
 | * | crystal | symbol | witness-proof | **q2_0_witness_test** - The stub-build (non-Apple-Silicon) test file q2_0_witness_test.go: it pins the ternary Q2_0 reference's math obligations -- bit layout, ternary code set, round-trip error bound, and ref-GEMV-vs-dense parity -- in every build that cannot execute the Metal kernel. |
 | * | crystal | symbol | witness-proof | **ClassWitnessed** - Evidence classification for observed throughput backed by named benchmark or issue evidence. |
@@ -4010,6 +4035,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | session-runtime | **launchHostSessionPlatform** - launchHostSessionPlatform is the S4U watchdog's session-0 resurrection launcher, called by resurrectHostCrashSessions to hand a typed hostresurrect.Request to the interactive broker after a host crash. |
 | o | defined | symbol | session-runtime | **nativeSchedulerEventKind** - Unexported uint8 type in internal/modelengine/nativesched_prefill.go classifying NativeScheduler-local witness events, with constants nativeSchedulerEventPrefill, nativeSchedulerEventTransition and nativeSchedulerEventDecode (iota + 1, zero means none). It is the Kind field of nativeSchedulerEvent, which observeEvent emits at prefill, transition and decode edges so focused tests can prove exact iteration ordering through the observeNativeEvent hook without process-global counters or timing. |
 | o | defined | symbol | session-runtime | **requireGLM5NextSessionUnsupported** - Fail-closed guard method on *model.Session (internal/model/kv.go): when the session's model config has GLM5Next set, it panics naming the entrypoint path because the glm5_next family's executable path is the stepwise engine session GLM5NextSession in glm5next_forward.go, while the batched KV/HAL substrate does not own the KDA/DSA/mHC state yet. Callers cover BatchSession.StepBatch plus the Session Prefill, PrefillContext, PrefillNoLogits, PrefillNoLogitsContext, Step, StepGreedy and StepSamplingCandidates entrypoints, where silently running the generic GQA loop would emit wrong logits instead of an error. |
+| o | defined | metric | session-runtime | **MSPerSlotStep** - Wall milliseconds per allocated lane-slot step (BatchWallMS/AllocatedSteps): what one batched slot actually cost. Heads the per-slot cost family - perSlot sizing and the ObservedPerSlotTokens probes measure how dear a slot is versus sequential tokens. |
 | o | defined | symbol | session-runtime | **SeenSessions (v41 step-cohort alias guard)** - Per-batch dedupe map marking *model.Sessions already consumed while validating V41 step-cohort lanes, so an aliased lane referencing the same session is rejected. |
 | o | defined | symbol | session-runtime | **SessionDecorator (modelengine lane-session hook)** - NativeScheduler hook func(*model.Session) applied to every lane session the scheduler mints (fresh or restored) before use, e.g. binding the device backend a P/D decode role resolved. |
 | o | defined | symbol | session-runtime | **SessionMap (continuous-batcher session index)** - ContinuousBatcher field mapping active session IDs to their *Slot so each step can look up the slot that owns a submitted session. |
@@ -4405,28 +4431,28 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
+| honesty | `clarity_consistent` | 0 | 6 | 6 verdict overclaim(s) |
+| separation | `pair_separated` | 40 | 3 | 3 confusable pair(s) with no line drawn |
 | honesty | `kind_grounding_soft` | 60 | 0 | 32 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 33 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 4273/7901 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 4127 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 4292/7976 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 4153 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
 | separation | `reference_resolves` | 100 | 0 | every distinct_from reference resolves to a real concept |
-| separation | `pair_separated` | 100 | 0 | all 312 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
+| grounded | `alias_resolved` | 100 | 0 | every alias resolves in the tree (token or wire key) |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 5586 lookup name(s) resolves - 93 land on several concepts, all separated |
-| honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
+| indexed | `index_resolves` | 100 | 0 | every one of 5478 lookup name(s) resolves - 96 land on several concepts, all separated |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| session-runtime | 388 | 389 | 1 |
-| attention | 241 | 241 | 0 |
-| cache | 456 | 456 | 0 |
+| attention | 243 | 243 | 0 |
+| cache | 467 | 467 | 0 |
 | context-ctx | 336 | 336 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | decision | 68 | 68 | 0 |
@@ -4434,15 +4460,16 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | evict | 97 | 97 | 0 |
 | gateway-engine | 326 | 326 | 0 |
 | guard-gate | 579 | 579 | 0 |
-| layout | 56 | 56 | 0 |
-| loop | 119 | 119 | 0 |
+| layout | 58 | 58 | 0 |
+| loop | 121 | 121 | 0 |
 | plan | 651 | 651 | 0 |
-| policy-capability | 287 | 287 | 0 |
+| policy-capability | 288 | 288 | 0 |
 | pool | 112 | 112 | 0 |
 | render-materialize | 254 | 254 | 0 |
 | score-debt | 141 | 141 | 0 |
+| session-runtime | 389 | 389 | 0 |
 | support-maturity | 146 | 146 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |
-| witness-proof | 200 | 200 | 0 |
+| witness-proof | 204 | 204 | 0 |
 

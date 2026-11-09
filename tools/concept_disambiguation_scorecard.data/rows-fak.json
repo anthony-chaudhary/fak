@@ -152,10 +152,7 @@
         "guard-gate-guardallow",
         "guardcodexauthmanagementcommand"
       ],
-      "aliases": [
-        "fak guard disable",
-        "fak manage disable"
-      ],
+      "aliases": [],
       "grounding": "runGuardDisable",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",

@@ -7,11 +7,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/harnessres"
+	"github.com/anthony-chaudhary/fak/internal/modelperfobs"
 	"github.com/anthony-chaudhary/fak/internal/runtimeobs"
 )
 
@@ -100,12 +102,36 @@ func TestDebugVarsCarriesGoRuntimeReceipt(t *testing.T) {
 		t.Fatalf("scheduler latency summary = %+v, want the histogram's count %d", s, g.Sched.Latencies.Count)
 	}
 
-	second, _ := getDebugVarsRaw(t, ts.URL)
+	second, secondRaw := getDebugVarsRaw(t, ts.URL)
 	d, err := runtimeobs.Diff(first.Runtime.GoRuntime, second.Runtime.GoRuntime)
 	if err != nil {
 		t.Fatalf("successive scrapes must diff within one epoch: %v", err)
 	}
 	if d.ToSeq <= d.FromSeq || !d.GCCycles.OK || !d.CPUTotalSeconds.OK {
 		t.Fatalf("delta = %+v", d)
+	}
+	// Feed the actual handler bodies to the burndown consumer so a producer/
+	// reader envelope mismatch cannot hide behind a hand-built fixture.
+	before, err := modelperfobs.ReadGoRuntimeReceipt(strings.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := modelperfobs.ReadGoRuntimeReceipt(strings.NewReader(secondRaw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, first.Runtime.GoRuntime) || !reflect.DeepEqual(after, second.Runtime.GoRuntime) {
+		t.Fatal("burndown reader changed the gateway runtime receipt")
+	}
+	line, err := modelperfobs.GoRuntimeLineFrom(before, after)
+	if err != nil {
+		t.Fatalf("burndown could not diff real gateway scrapes: %v", err)
+	}
+	wantLine := modelperfobs.GoRuntimeLine{
+		IntervalSeconds: d.IntervalSeconds, GCCycles: d.GCCycles,
+		GCCPUSeconds: d.CPUGCSeconds, GCPauseSeconds: d.CPUGCPauseSeconds, GCCPUFraction: d.GCCPUFraction,
+	}
+	if !reflect.DeepEqual(*line, wantLine) {
+		t.Fatalf("burndown runtime delta = %+v, want %+v", *line, wantLine)
 	}
 }

@@ -8,7 +8,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/newmodel"
@@ -257,5 +259,68 @@ func TestQwen35HybridHeaderRefusesInconsistentFallbackKeys(t *testing.T) {
 		if _, err := (&File{Metadata: meta}).Config(); err == nil {
 			t.Fatalf("qwen35.%s=%v admitted", key, v.Value)
 		}
+	}
+}
+
+// Converter-shaped qwen35 header carrying the explicit attention.recurrent_layers
+// array the llama.cpp converter emits alongside full_attention_interval: manifest
+// preflight must read the key (no KEY_UNREAD) and derive the same layer schedule as
+// the interval fallback (prefill-gguf-recurrent-layers-keyunread-20261108).
+// fak-test:runtime fast est=10ms
+func TestQwen35RecurrentLayersPreflightReadsKeyAndMatchesInterval(t *testing.T) {
+	base, err := (&File{Metadata: synthQwen38Meta("qwen35")}).Config()
+	if err != nil {
+		t.Fatalf("interval-only Config: %v", err)
+	}
+
+	meta := synthQwen38Meta("qwen35")
+	rec := make([]Value, synthQwen38BlockCount)
+	for l := range rec {
+		rec[l] = Value{Type: TypeBool, Value: base.LayerTypes[l] == "linear_attention"}
+	}
+	meta["qwen35.attention.recurrent_layers"] = Value{Type: TypeArray, Value: rec}
+	f := &File{Metadata: meta}
+
+	p := BuildManifestPreflight(ManifestPreflightInput{File: f})
+	if p.Keys.Unread != 0 || p.Counts[string(newmodel.RefusalKeyUnread)] != 0 {
+		t.Fatalf("preflight still reports unread keys: %+v (%v)", p.Keys, preflightTokens(p))
+	}
+	cfg, err := f.Config()
+	if err != nil {
+		t.Fatalf("Config with recurrent_layers: %v", err)
+	}
+	if !reflect.DeepEqual(cfg.LayerTypes, base.LayerTypes) {
+		t.Fatalf("LayerTypes = %v, want the interval fallback %v", cfg.LayerTypes, base.LayerTypes)
+	}
+	if cfg.FullAttentionInterval != base.FullAttentionInterval {
+		t.Fatalf("FullAttentionInterval = %d, want %d", cfg.FullAttentionInterval, base.FullAttentionInterval)
+	}
+	if !cfg.IsQwen35Hybrid() {
+		t.Fatalf("IsQwen35Hybrid = false; layer_types = %v", cfg.LayerTypes)
+	}
+}
+
+// A wrong-length or interval-contradicting recurrent_layers array is refused with a
+// typed reason naming the key; the consistent array above is admitted, so the refusal
+// is the shape/contradiction, not the key's presence.
+// fak-test:runtime fast est=10ms
+func TestQwen35RecurrentLayersRefusesWrongLengthAndContradiction(t *testing.T) {
+	short := synthQwen38Meta("qwen35")
+	short["qwen35.attention.recurrent_layers"] = Value{Type: TypeArray, Value: []Value{{Type: TypeBool, Value: false}}}
+	if _, err := (&File{Metadata: short}).Config(); err == nil || !strings.Contains(err.Error(), "attention.recurrent_layers") {
+		t.Fatalf("short array: err %v, want refusal naming attention.recurrent_layers", err)
+	}
+
+	// Interval 4 makes layers 3 and 7 full attention; the array below marks layer 3
+	// linear instead.
+	meta := synthQwen38Meta("qwen35")
+	rec := make([]Value, synthQwen38BlockCount)
+	for l := range rec {
+		rec[l] = Value{Type: TypeBool, Value: (l+1)%4 != 0}
+	}
+	rec[3] = Value{Type: TypeBool, Value: true}
+	meta["qwen35.attention.recurrent_layers"] = Value{Type: TypeArray, Value: rec}
+	if _, err := (&File{Metadata: meta}).Config(); err == nil || !strings.Contains(err.Error(), "attention.recurrent_layers") {
+		t.Fatalf("contradicting array: err %v, want refusal naming attention.recurrent_layers", err)
 	}
 }

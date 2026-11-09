@@ -11,7 +11,8 @@
         "loopconstraint",
         "loopobserve",
         "looppark",
-        "loop-ring"
+        "loop-ring",
+        "integration-promptpanelrefusalarchq8tokenloop"
       ],
       "aliases": [],
       "grounding": "agentGoalLoop",

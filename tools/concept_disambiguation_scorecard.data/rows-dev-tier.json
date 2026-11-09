@@ -13,7 +13,6 @@
         "dev-tier-devindex"
       ],
       "aliases": [
-        "frontdoor tier verb",
         "TierFrontdoor"
       ],
       "grounding": "TierFrontdoor",
@@ -35,7 +34,6 @@
         "dev-tier-fak-dev-namespace"
       ],
       "aliases": [
-        "dev tier verb",
         "TierDev"
       ],
       "grounding": "TierDev",
@@ -56,10 +54,7 @@
         "dev-tier-devindex",
         "dev-tier-dev-verb"
       ],
-      "aliases": [
-        "fak dev tooling",
-        "developer command surface"
-      ],
+      "aliases": [],
       "grounding": "fak-dev",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -79,8 +74,7 @@
         "dev-tier-frontdoor-verb"
       ],
       "aliases": [
-        "dev index",
-        "verb-tier catalog"
+        "dev index"
       ],
       "grounding": "devindex",
       "grounding_kind": "path",

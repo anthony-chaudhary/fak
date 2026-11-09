@@ -519,6 +519,250 @@ func greedySHA256(seq []int) string {
 	return fmt.Sprintf("%x", sha256.Sum256(buf))
 }
 
+// promptPanelWitnessCount reads one reason's count out of a witness snapshot. The switch
+// pins the field/reason pairing, so renaming either side fails compilation here.
+func promptPanelWitnessCount(c PromptPanelSelectionCounts, r promptPanelWitnessReason) int64 {
+	switch r {
+	case promptPanelSelected:
+		return c.Selected
+	case promptPanelRefusalShortPrompt:
+		return c.ShortPrompt
+	case promptPanelRefusalNoBackend:
+		return c.NoBackend
+	case promptPanelRefusalNoHALKV:
+		return c.NoHALKV
+	case promptPanelRefusalBackendLacksSeam:
+		return c.BackendLacksSeam
+	case promptPanelRefusalArchQ8TokenLoop:
+		return c.ArchQ8TokenLoop
+	case promptPanelRefusalArchDeepSeekV4NonPanel:
+		return c.ArchDeepSeekV4NonPanel
+	case promptPanelRefusalArchQKNorm:
+		return c.ArchQKNorm
+	case promptPanelRefusalArchMLAMoELayout:
+		return c.ArchMLAMoELayout
+	case promptPanelRefusalArchMiniMaxSparseAttn:
+		return c.ArchMiniMaxSparseAttn
+	case promptPanelRefusalArchGemma4:
+		return c.ArchGemma4
+	case promptPanelRefusalCaptureTarget:
+		return c.CaptureTarget
+	case promptPanelRefusalQ2KEmbedding:
+		return c.Q2KEmbedding
+	case promptPanelRefusalSplitGPULayers:
+		return c.SplitGPULayers
+	case promptPanelRefusalDtypeNotRowExact:
+		return c.DtypeNotRowExact
+	default:
+		panic(fmt.Sprintf("model: unknown prompt-panel witness reason %d", r))
+	}
+}
+
+// fak-test:runtime fast est=20ms lane=default
+// TestPromptPanelSelectionMatrix is the coverage-matrix tripwire at the prompt-panel
+// selection seam: every refusal axis of promptPanelFor must emit its typed, counted reason,
+// so a batched-capable arch served the token loop can never do so silently. Each row drives
+// one session to a known decision and asserts (a) the decision, (b) the expected reason's
+// witness delta, and (c) no silent refusal - exactly one outcome is counted per call.
+// Refusals attribute to the first matching axis in left-to-right order, mirroring the
+// original OR: a deepseek_v4 MoE with QKNorm therefore lands on the q8-token-loop axis
+// (IsMoE), while the bare QKNorm axis needs a non-MoE config to be reachable.
+// [SW-VERIFIED]: cpu-ref witness, no GPU host.
+func TestPromptPanelSelectionMatrix(t *testing.T) {
+	dense := func() Config { return promptPanelBiasModel().Cfg }
+	minimal := func(cfg Config, be compute.Backend) *Session {
+		return &Session{M: &Model{Cfg: cfg}, Backend: be, halKV: be.NewKV(halKVConfig(cfg))}
+	}
+	rows := []struct {
+		name      string
+		session   func(t *testing.T) *Session
+		ids       []int
+		wantPanel bool
+		reason    promptPanelWitnessReason
+	}{
+		{
+			name: "dense-f32-panel",
+			session: func(t *testing.T) *Session {
+				return promptPanelBiasModel().NewBackendSession(newPromptPanelRecordingBackend())
+			},
+			ids: []int{3, 7}, wantPanel: true, reason: promptPanelSelected,
+		},
+		{
+			name: "deepseek-v4-moe-panel",
+			session: func(t *testing.T) *Session {
+				return promptPanelV4Model().NewBackendSession(newPromptPanelRecordingBackend())
+			},
+			ids: []int{3, 7}, wantPanel: true, reason: promptPanelSelected,
+		},
+		{
+			name: "short-prompt",
+			session: func(t *testing.T) *Session {
+				return promptPanelBiasModel().NewBackendSession(newPromptPanelRecordingBackend())
+			},
+			ids: []int{3}, wantPanel: false, reason: promptPanelRefusalShortPrompt,
+		},
+		{
+			name: "no-backend",
+			session: func(t *testing.T) *Session {
+				return &Session{M: promptPanelBiasModel()}
+			},
+			ids: []int{3, 7}, wantPanel: false, reason: promptPanelRefusalNoBackend,
+		},
+		{
+			name: "no-hal-kv",
+			session: func(t *testing.T) *Session {
+				return &Session{M: promptPanelBiasModel(), Backend: newPromptPanelRecordingBackend()}
+			},
+			ids: []int{3, 7}, wantPanel: false, reason: promptPanelRefusalNoHALKV,
+		},
+		{
+			name: "backend-lacks-seam",
+			session: func(t *testing.T) *Session {
+				m := promptPanelBiasModel()
+				be := compute.Pick("cpu-ref")
+				return &Session{M: m, Backend: be, halKV: be.NewKV(halKVConfig(m.Cfg))}
+			},
+			ids: []int{3, 7}, wantPanel: false, reason: promptPanelRefusalBackendLacksSeam,
+		},
+		{
+			name: "dense-attn-output-gate-q8-token-loop",
+			session: func(t *testing.T) *Session {
+				cfg := dense()
+				cfg.AttnOutputGate = true
+				return minimal(cfg, newPromptPanelRecordingBackend())
+			},
+			ids: []int{3, 7}, wantPanel: false, reason: promptPanelRefusalArchQ8TokenLoop,
+		},
+		{
+			name: "moe-generic-q8-token-loop",
+			session: func(t *testing.T) *Session {
+				cfg := dense()
+				cfg.NumExperts = 4
+				cfg.NumExpertsPerTok = 2
+				return minimal(cfg, newPromptPanelRecordingBackend())
+			},
+			ids: []int{3, 7}, wantPanel: false, reason: promptPanelRefusalArchQ8TokenLoop,
+		},
+		{
+			name: "deepseek-v4-moe-qknorm-attributes-to-q8-axis",
+			session: func(t *testing.T) *Session {
+				cfg := dense()
+				cfg.ModelType = "deepseek_v4"
+				cfg.NumExperts = 4
+				cfg.NumExpertsPerTok = 2
+				cfg.QKNorm = true
+				return minimal(cfg, newPromptPanelRecordingBackend())
+			},
+			ids: []int{3, 7}, wantPanel: false, reason: promptPanelRefusalArchQ8TokenLoop,
+		},
+		{
+			name: "deepseek-v4-non-panel",
+			session: func(t *testing.T) *Session {
+				cfg := dense()
+				cfg.ModelType = "deepseek_v4"
+				cfg.QKNorm = true // breaks panelMoE; NumExperts stays 0 so the q8 axis stays off
+				return minimal(cfg, newPromptPanelRecordingBackend())
+			},
+			ids: []int{3, 7}, wantPanel: false, reason: promptPanelRefusalArchDeepSeekV4NonPanel,
+		},
+		{
+			name: "qknorm",
+			session: func(t *testing.T) *Session {
+				cfg := dense()
+				cfg.QKNorm = true
+				return minimal(cfg, newPromptPanelRecordingBackend())
+			},
+			ids: []int{3, 7}, wantPanel: false, reason: promptPanelRefusalArchQKNorm,
+		},
+		{
+			name: "mla-moe-layout",
+			session: func(t *testing.T) *Session {
+				cfg := dense()
+				cfg.ModelType = "deepseek2"
+				return minimal(cfg, newPromptPanelRecordingBackend())
+			},
+			ids: []int{3, 7}, wantPanel: false, reason: promptPanelRefusalArchMLAMoELayout,
+		},
+		{
+			name: "minimax-sparse-attn",
+			session: func(t *testing.T) *Session {
+				cfg := dense()
+				cfg.ModelType = "minimax_m3"
+				return minimal(cfg, newPromptPanelRecordingBackend())
+			},
+			ids: []int{3, 7}, wantPanel: false, reason: promptPanelRefusalArchMiniMaxSparseAttn,
+		},
+		{
+			name: "gemma4",
+			session: func(t *testing.T) *Session {
+				cfg := dense()
+				cfg.ModelType = "gemma4"
+				return minimal(cfg, newPromptPanelRecordingBackend())
+			},
+			ids: []int{3, 7}, wantPanel: false, reason: promptPanelRefusalArchGemma4,
+		},
+		{
+			name: "capture-target",
+			session: func(t *testing.T) *Session {
+				s := promptPanelBiasModel().NewBackendSession(newPromptPanelRecordingBackend())
+				s.captureTargetHidden = true
+				return s
+			},
+			ids: []int{3, 7}, wantPanel: false, reason: promptPanelRefusalCaptureTarget,
+		},
+		{
+			name: "q2k-embedding",
+			session: func(t *testing.T) *Session {
+				cfg := dense()
+				cfg.HiddenSize = 256 // Q2_K rows pack in 256-wide superblocks
+				q2k, err := NewQ2KEmbedding(makeTestQ2KPayload(cfg.VocabSize, cfg.HiddenSize), cfg.VocabSize, cfg.HiddenSize)
+				if err != nil {
+					t.Fatal(err)
+				}
+				be := newPromptPanelRecordingBackend()
+				return &Session{M: &Model{Cfg: cfg, Q2KEmbedding: q2k}, Backend: be, halKV: be.NewKV(halKVConfig(cfg))}
+			},
+			ids: []int{3, 7}, wantPanel: false, reason: promptPanelRefusalQ2KEmbedding,
+		},
+		{
+			name: "split-gpu-layers",
+			session: func(t *testing.T) *Session {
+				s := promptPanelBiasModel().NewBackendSession(newPromptPanelRecordingBackend())
+				s.DenseGPULayers = 1 // of 2 layers: partial placement
+				return s
+			},
+			ids: []int{3, 7}, wantPanel: false, reason: promptPanelRefusalSplitGPULayers,
+		},
+		{
+			name: "dtype-not-row-exact",
+			session: func(t *testing.T) *Session {
+				be := newPromptPanelRecordingBackend()
+				be.rowExact = false
+				return promptPanelBiasModel().NewBackendSession(be)
+			},
+			ids: []int{3, 7}, wantPanel: false, reason: promptPanelRefusalDtypeNotRowExact,
+		},
+	}
+	for _, tc := range rows {
+		t.Run(tc.name, func(t *testing.T) {
+			s := tc.session(t)
+			defer s.Close()
+			before := PromptPanelSelectionWitness()
+			_, ok := s.promptPanelFor(tc.ids)
+			after := PromptPanelSelectionWitness()
+			if ok != tc.wantPanel {
+				t.Fatalf("panel = %t, want %t", ok, tc.wantPanel)
+			}
+			if got := promptPanelWitnessCount(after, tc.reason) - promptPanelWitnessCount(before, tc.reason); got != 1 {
+				t.Fatalf("reason %v: witness delta = %d, want 1", tc.reason, got)
+			}
+			if got := after.Total() - before.Total(); got != 1 {
+				t.Fatalf("total witness delta = %d, want 1 (every outcome must count exactly one typed reason)", got)
+			}
+		})
+	}
+}
+
 // TestHALPromptPrefillMoEFallbackKeepsTokenLoop pins the named-subset boundary: a generic MoE
 // arch (not deepseek_v4) keeps the per-token loop even when the backend offers the panel seam,
 // because its routed FFN has no per-row HAL primitive yet; a deepseek_v4 config carrying an

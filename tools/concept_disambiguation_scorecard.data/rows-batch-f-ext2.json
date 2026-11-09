@@ -238,7 +238,8 @@
       "distinct_from": [
         "StatusWitnessRefused (loop run status)",
         "StatusWitnessedDone (loop run status)",
-        "WitnessOutcome"
+        "WitnessOutcome",
+        "integration-promptpanelwitnessreason"
       ],
       "aliases": [
         "statuswitnessunavailable",

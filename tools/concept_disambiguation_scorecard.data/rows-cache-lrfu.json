@@ -1,0 +1,24 @@
+{
+  "rows": [
+    {
+      "id": "cachelrfu-class-fn",
+      "canonical": "expertCacheLRFUClass",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "Unexported bucketing function mapping a post-use CRF to a frequency class: log2 of the CRF is computed as float32 before integer truncation, preserving the donor std::log2(float) rounding near powers of two, and the result is capped at the last of eight classes.",
+      "distinction": "Computes the frequency bucket for a CRF value - not the victim age score (which divides age by 2^class in victim) and not the stored per-slot class observed by Inspect.",
+      "distinct_from": [
+        "expertcachelrfuclasses",
+        "expertcachelrfuentry",
+        "expertcachelrfu"
+      ],
+      "aliases": [],
+      "grounding": "expertCacheLRFUClass",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

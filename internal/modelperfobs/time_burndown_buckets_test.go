@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -211,6 +212,62 @@ func TestTimeBurndownBucketsRefusesMissingTokens(t *testing.T) {
 }
 
 // fak-test:justify why=contract when=changed:internal/modelperfobs/**
+// fak-test:runtime fast est=5ms
+func TestReadGoRuntimeReceipt(t *testing.T) {
+	want := runtimeobs.Receipt{
+		Schema: runtimeobs.Schema, GoVersion: "go-test", Epoch: "process", Seq: 7, SampledAtUnixNano: 123,
+		GC:          runtimeobs.GC{Cycles: runtimeobs.U64{V: 3, OK: true}},
+		CPU:         runtimeobs.CPU{GCTotalSeconds: runtimeobs.F64{V: .5, OK: true}},
+		Unavailable: []runtimeobs.Unavailable{{Field: "memory.process_rss_bytes", Reason: runtimeobs.ReasonNoReader}},
+	}
+	other := want
+	other.Epoch = "lower-priority"
+	bare, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bareWithMetadata map[string]any
+	if err := json.Unmarshal(bare, &bareWithMetadata); err != nil {
+		t.Fatal(err)
+	}
+	bareWithMetadata["runtime"] = 42
+	for _, tc := range []struct {
+		name    string
+		wire    any
+		wantErr bool
+	}{
+		{"bare", want, false},
+		{"top-level", map[string]any{"go_runtime": want}, false},
+		{"gateway", map[string]any{"runtime": map[string]any{"go_runtime": want}}, false},
+		{"top-level-precedence", map[string]any{"go_runtime": want, "runtime": map[string]any{"go_runtime": other}}, false},
+		{"top-level-irrelevant-runtime", map[string]any{"go_runtime": want, "runtime": 42}, false},
+		{"bare-irrelevant-runtime", bareWithMetadata, false},
+		{"top-level-invalid-schema", map[string]any{"go_runtime": want, "schema": 42}, true},
+		{"gateway-invalid-receipt", map[string]any{"runtime": map[string]any{"go_runtime": 42}}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := json.Marshal(tc.wire)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := ReadGoRuntimeReceipt(bytes.NewReader(raw))
+			if tc.wantErr {
+				if !errors.Is(err, ErrInvalidTimeBurndown) {
+					t.Fatalf("invalid receipt error = %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("runtime receipt changed in transit: got %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+// fak-test:justify why=contract when=changed:internal/modelperfobs/**
 // fak-test:runtime fast est=30ms
 func TestTimeBurndownBucketsCommand(t *testing.T) {
 	dir := t.TempDir()
@@ -247,7 +304,7 @@ func TestTimeBurndownBucketsCommand(t *testing.T) {
 	gcAfter.Seq, gcAfter.SampledAtUnixNano = 2, 2e9
 	gcAfter.GC.Cycles = runtimeobs.U64{V: 5, OK: true}
 	gcAfter.CPU.TotalSeconds, gcAfter.CPU.GCTotalSeconds = runtimeobs.F64{V: 20, OK: true}, runtimeobs.F64{V: 1.5, OK: true}
-	rtBefore := write("vars-before.json", map[string]any{"go_runtime": gcBefore, "cmdline": []string{"fak"}})
+	rtBefore := write("vars-before.json", map[string]any{"runtime": map[string]any{"go_runtime": gcBefore}})
 	rtAfter := write("vars-after.json", gcAfter)
 	var out bytes.Buffer
 	if err := RunTimeBurndown([]string{"--input", input, "--phases", phases, "--baseline", baseline, "--go-runtime-before", rtBefore, "--go-runtime-after", rtAfter, "--format", "json"}, &out); err != nil {

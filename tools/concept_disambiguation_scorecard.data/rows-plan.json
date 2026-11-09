@@ -7,7 +7,9 @@
       "kind": "symbol",
       "definition": "Planner's chosen resident view: selected set, elided set, and accounting",
       "distinction": "Planner's resident view selection - NOT Plan (memq) (static explain output)",
-      "distinct_from": ["plan-memq"],
+      "distinct_from": [
+        "plan-memq"
+      ],
       "aliases": [],
       "grounding": "Plan",
       "grounding_kind": "symbol",
@@ -23,7 +25,9 @@
       "kind": "symbol",
       "definition": "Static pre-execution Explain output: pipeline steps, effects, and mutations",
       "distinction": "Static pre-execution explain output - NOT Plan (planner) (resident view)",
-      "distinct_from": ["plan-planner"],
+      "distinct_from": [
+        "plan-planner"
+      ],
       "aliases": [],
       "grounding": "Plan",
       "grounding_kind": "symbol",
@@ -39,7 +43,19 @@
       "kind": "symbol",
       "definition": "Scored span the planner may keep resident with cost, benefit, and density metrics",
       "distinction": "Scored span input to planner - NOT Plan (planner's output)",
-      "distinct_from": ["plan-planner", "covg-plan-ncandidate", "wwt-topology-candidate-verify", "wwt-topology-candidate-sweep", "wwt-topology-candidate-sweep-options", "wwt-topology-candidate-legacy-max-age", "wwt-topology-candidate-parent", "wwt-topology-candidate-pattern", "wwt-topology-candidate-cleanup", "wwt-topology-candidate-sweep-before-create", "nativeperf-selected-candidate-id"],
+      "distinct_from": [
+        "plan-planner",
+        "covg-plan-ncandidate",
+        "wwt-topology-candidate-verify",
+        "wwt-topology-candidate-sweep",
+        "wwt-topology-candidate-sweep-options",
+        "wwt-topology-candidate-legacy-max-age",
+        "wwt-topology-candidate-parent",
+        "wwt-topology-candidate-pattern",
+        "wwt-topology-candidate-cleanup",
+        "wwt-topology-candidate-sweep-before-create",
+        "nativeperf-selected-candidate-id"
+      ],
       "aliases": [],
       "grounding": "Candidate",
       "grounding_kind": "symbol",
@@ -55,7 +71,9 @@
       "kind": "symbol",
       "definition": "The deterministic candidate archive the Strix validation path stages for hardware: the repo's base git tip plus exactly the owned paths, packaged with the tarball bytes and their source SHA-256, built by BuildStrixCandidateArchive.",
       "distinction": "The staged validation candidate SOURCE ARCHIVE (base tip + owned paths, digest-bound) - NOT Candidate (a scored planner span) and NOT the per-loop CandidatesExamined/candidateTokens counters.",
-      "distinct_from": ["candidate-planner"],
+      "distinct_from": [
+        "candidate-planner"
+      ],
       "aliases": [],
       "grounding": "CandidateArchive",
       "grounding_kind": "symbol",
@@ -71,8 +89,12 @@
       "kind": "config",
       "definition": "The goalrunner launch option `PlanOnly` (`plan_only`) that resolves the account, runs the shift-left preflight, formats and writes the prompt plus a plan-only receipt, then returns WITHOUT spawning a worker.",
       "distinction": "The DRY-RUN launch mode that spawns nothing - NOT the executed dispatch plan `LaunchPlan` (pricing's wave-grouped targets) and NOT the campaign `WavePlan` (debtlane's ordered waves).",
-      "distinct_from": ["x-plan-launchplan"],
-      "aliases": ["plan_only"],
+      "distinct_from": [
+        "x-plan-launchplan"
+      ],
+      "aliases": [
+        "plan_only"
+      ],
       "grounding": "PlanOnly",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
@@ -87,8 +109,10 @@
       "kind": "symbol",
       "definition": "The canonical schema identifier constant `WavePlanSchema` (`internal/debtlane/wave.go`, `\"fak.debt-orchestrator-wave-plan.v1\"`) stamped onto every concurrent-safe wave plan so a consumer can verify the wire format of a plan it reads back.",
       "distinction": "The wire-format VERSION ID stamped on a plan - NOT the campaign plan data itself (`WavePlan`) and NOT the per-wave execution plan (`dispatchWaveExecutionPlan`).",
-      "distinct_from": ["cov-debt-tail2-plan-waveplan"],
-      "aliases": ["debtlane.WavePlanSchema"],
+      "distinct_from": [
+        "cov-debt-tail2-plan-waveplan"
+      ],
+      "aliases": [],
       "grounding": "WavePlanSchema",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/concepts/disambiguation-plan.md",
@@ -103,7 +127,10 @@
       "kind": "symbol",
       "definition": "Package-level function VALUE bound to amdgpu.BuildStrixCandidateArchive in each validating package (internal/validate, internal/devcmd, cmd/fak); it is the test seam a probing harness swaps to replace the archive builder without touching the real builder.",
       "distinction": "The swappable builder INDIRECTION (a package var holding a func value) - NOT the deterministic archive it produces (StrixCandidateArchive) and NOT candidate-planner's scored planner span.",
-      "distinct_from": ["plan-candidatearchive", "candidate-planner"],
+      "distinct_from": [
+        "plan-candidatearchive",
+        "candidate-planner"
+      ],
       "aliases": [],
       "grounding": "buildStrixCandidateArchiveFn",
       "grounding_kind": "symbol",
@@ -119,7 +146,13 @@
       "kind": "symbol",
       "definition": "The complete enforced resident footprint for a native serve - weights + aggregate per-session KV/recurrent state for the enforced simultaneous-session bound + per-cohort scratch - preserved with class breakdown so admission can refuse before a loader when weights fit but the full enrolled state envelope does not.",
       "distinction": "A classed MEMORY-BUDGET envelope for admission (weights + MaxSessions * per-session state + cohort scratch) - NOT the planner's chosen resident view (Plan (planner)) and NOT memq's static pre-execution explain output (Plan (memq)).",
-      "distinct_from": ["plan-planner", "plan-memq", "v41-dspark-valid-byte-plan", "memory-registration-plan", "plan-memory-registration"],
+      "distinct_from": [
+        "plan-planner",
+        "plan-memq",
+        "v41-dspark-valid-byte-plan",
+        "memory-registration-plan",
+        "plan-memory-registration"
+      ],
       "aliases": [],
       "grounding": "SessionResidencyPlan",
       "grounding_kind": "symbol",
@@ -135,7 +168,10 @@
       "kind": "symbol",
       "definition": "The adaptive-discovery accounting block riding on an issueorchestrator campaign plan: scanned candidates, discovery-window size, window expansions, unplannable ratio, and advisory warnings about how the plan widened its horizon.",
       "distinction": "The issueorchestrator campaign plan's discovery ACCOUNTING (how the plan window expanded) - NOT Plan (planner)'s chosen resident view, NOT Plan (memq)'s static pre-execution explain output, and NOT internal/compute's MatMulPlan.Diagnostics preparation/break-even run timings.",
-      "distinct_from": ["plan-planner", "plan-memq"],
+      "distinct_from": [
+        "plan-planner",
+        "plan-memq"
+      ],
       "aliases": [],
       "grounding": "PlanDiagnostics",
       "grounding_kind": "symbol",
@@ -151,7 +187,9 @@
       "kind": "symbol",
       "definition": "readmenext's staged README-front-page change unit: one target section plus the candidate_content text, its retire_target, its witness provenance, and the laws checklist, carried from proposal to publication.",
       "distinction": "readmenext's staged README change FRAGMENT - NOT Candidate (the planner's scored resident span) and NOT the StrixCandidateArchive (the deterministic hardware-validation source archive).",
-      "distinct_from": ["candidate-planner"],
+      "distinct_from": [
+        "candidate-planner"
+      ],
       "aliases": [],
       "grounding": "CandidateFragment",
       "grounding_kind": "symbol",
@@ -167,7 +205,10 @@
       "kind": "symbol",
       "definition": "The single context binding the gateway applies before every planner call (buffered Complete and streaming CompleteStream): it binds the authenticated principal to the in-kernel prefix-cache identity at tenant scope and carries the harness session id for prefix-reuse attribution.",
       "distinction": "The per-turn CONTEXT PREAMBLE that stamps cache identity and session id before a planner call - NOT Plan (planner)'s chosen resident view and NOT Plan (memq)'s static pre-execution explain output.",
-      "distinct_from": ["plan-planner", "plan-memq"],
+      "distinct_from": [
+        "plan-planner",
+        "plan-memq"
+      ],
       "aliases": [],
       "grounding": "plannerTurnContext",
       "grounding_kind": "symbol",
@@ -183,7 +224,10 @@
       "kind": "symbol",
       "definition": "The per-domain candidate-ADJUDICATION verb that scores one staged candidate against its baseline: strix's StrixCandidateRegistry.EvaluateCandidate turns an ablation arm into PROMOTED/NEUTRAL/REGRESSED, docfreshrsi's EvaluateCandidate measures one README fragment against an isolated base clone, and conceptbench's EvaluateCandidate applies a floor threshold.",
       "distinction": "The verb that SCORES a staged candidate against a baseline - NOT the Candidate being scored (candidate-planner) and NOT the Strix hardware-validation source archive the builder stages (plan-candidatearchive).",
-      "distinct_from": ["candidate-planner", "plan-candidatearchive"],
+      "distinct_from": [
+        "candidate-planner",
+        "plan-candidatearchive"
+      ],
       "aliases": [],
       "grounding": "EvaluateCandidate",
       "grounding_kind": "symbol",

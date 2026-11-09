@@ -17,6 +17,7 @@ import (
 
 var _ Qwen35SequenceRawHiddenBackend = (*vulkanBackend)(nil)
 var _ Qwen35SequenceFeatureRowsBackend = (*vulkanBackend)(nil)
+var _ Qwen35SequenceHeadlessPrefixBackend = (*vulkanBackend)(nil)
 
 func (*vulkanBackend) Qwen35SequencePrefillPath() string { return Qwen35SequencePrefillPath }
 
@@ -25,6 +26,10 @@ func (*vulkanBackend) Qwen35SequenceEmbeddingRowsPath() string {
 }
 
 func (*vulkanBackend) Qwen35SequenceAllLogitsPath() string { return Qwen35SequenceAllLogitsPath }
+
+func (*vulkanBackend) Qwen35SequenceHeadlessPrefixPath() string {
+	return Qwen35SequenceHeadlessPrefixPath
+}
 
 func (*vulkanBackend) Qwen35SequenceRawHiddenPath() string { return Qwen35SequenceRawHiddenPath }
 
@@ -141,7 +146,10 @@ func (v *vulkanBackend) validateQwen35VulkanSequence(req Qwen35SequencePrefillRe
 	if err != nil {
 		return nil, err
 	}
-	if int64(vocab) > math.MaxInt32 || int64(vocab)*4 > int64(^uint(0)>>1) || singleResourceCapExceeded(vocab*4, v.maxBufferBytes) {
+	// Prefix-only calls do not submit a vocabulary projection. Keep validation
+	// for supplied heads and both logits modes without requiring unused storage.
+	requireOutput := req.Output.Buf() != nil || req.NeedLogits || req.NeedAllLogits
+	if int64(vocab) > math.MaxInt32 || (requireOutput && (int64(vocab)*4 > int64(^uint(0)>>1) || singleResourceCapExceeded(vocab*4, v.maxBufferBytes))) {
 		return fail("geometry", "output vector exceeds shader/device allocation limits")
 	}
 	if req.NeedAllLogits {
@@ -157,7 +165,9 @@ func (v *vulkanBackend) validateQwen35VulkanSequence(req Qwen35SequencePrefillRe
 	}
 	add(-1, "embedding", req.TokenEmbedding, false, embeddingShape...)
 	add(-1, "output_norm", req.OutputNorm, false, req.Hidden)
-	add(-1, "output", req.Output, true, vocab, req.Hidden)
+	if requireOutput {
+		add(-1, "output", req.Output, true, vocab, req.Hidden)
+	}
 	kv, ok := req.KV.(*vulkanKV)
 	if !ok || kv == nil || kv.be != v || kv.Len() != req.StartPos || kv.cfg.NumKVHeads != req.NumKVHeads || kv.cfg.HeadDim != req.HeadDim || len(kv.K) < len(req.Layers)/4 || len(kv.Kraw) < len(req.Layers)/4 || len(kv.V) < len(req.Layers)/4 {
 		return fail("kv-preflight", "KV ownership, prefix length, or compact attention geometry mismatch")

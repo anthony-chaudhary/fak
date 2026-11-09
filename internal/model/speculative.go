@@ -585,7 +585,9 @@ func parallelVerifyKernelOwned(
 		return parallelVerifyTree(ctx, target, committed, proposal, lastLogits, sanitizer, counts)
 	}
 
-	lastLogitsCopy := append([]float32(nil), lastLogits...)
+	// Read the boundary in place until a target forward can reuse its backing.
+	// Empty drafts and known first-token rejections never mutate it.
+	lastLogitsCopy := lastLogits
 	draft := proposal.Tokens
 	if len(draft) == 0 {
 		penalizedLast := lastLogitsCopy
@@ -631,6 +633,10 @@ func parallelVerifyKernelOwned(
 			CorrectionToken: boundaryArgmax,
 		}, nil
 	}
+
+	// Snapshot before any target operation: quantized Step may reuse the caller
+	// boundary buffer. The non-forwarding fast returns above need no copy.
+	lastLogitsCopy = append([]float32(nil), lastLogits...)
 
 	// Single target forward pass for all K draft tokens (cloning row buffers to avoid aliasing in quantized modes)
 	var rows [][]float32
@@ -708,7 +714,10 @@ func parallelVerifyKernelOwned(
 	targetArgmax[0] = boundaryArgmax
 
 	// Simulate running count for speculative steps to properly penalize each draft step
-	simCounts := append([]int32(nil), counts...)
+	var simCounts []int32
+	if sanitizer.penalizes(counts) {
+		simCounts = append([]int32(nil), counts...)
+	}
 	for i, row := range rows {
 		if targetArgmax[i] >= 0 && targetArgmax[i] < len(simCounts) {
 			simCounts[targetArgmax[i]]++

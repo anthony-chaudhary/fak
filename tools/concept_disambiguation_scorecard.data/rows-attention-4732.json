@@ -7,7 +7,7 @@
       "kind": "symbol",
       "definition": "The internal/model/qwen35.go constructor allocates independently owned zero recurrent matrices for each value head and empty convolution history for one Gated-DeltaNet layer. The cacheless batched mixer uses it when no persistent layer state is supplied.",
       "distinction": "It allocates one layer's initial state; newLinearAttnCache allocates the model-wide layer collection, while linearAttnStep and linearAttnSeq compute mixer outputs and advance or scan state.",
-      "distinct_from": ["x-cache-newlinearattncache", "x-attention-linearattnstep", "x-attention-linearattnseq"],
+      "distinct_from": ["x-cache-newlinearattncache", "x-attention-linearattnstep", "x-attention-linearattnseq", "integration-promptpanelrefusalarchminimaxsparseattn"],
       "aliases": ["newLinearAttnLayerState"],
       "grounding": "newlinearattnlayerstate",
       "grounding_kind": "symbol",
