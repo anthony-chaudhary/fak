@@ -19,16 +19,28 @@ func requiredCUDAQwen35SequenceBackend(t *testing.T) (cudaGDNParityBackend, Qwen
 	return be, sequence
 }
 
+func cudaQwen35SequenceParityTestCfg() Config {
+	cfg := qwen35HybridTestCfg()
+	// Match the CUDA prompt-attention panel contract while keeping the other
+	// fixture axes small. The generic 4/2/8 host fixture is not CUDA-admissible.
+	cfg.HiddenSize, cfg.IntermediateSize = 64, 128
+	cfg.NumHeads, cfg.NumKVHeads, cfg.HeadDim = 24, 4, 256
+	cfg.PartialRotaryFactor = 0.25
+	return cfg
+}
+
 func TestCUDAQwen35SequencePrefillMatchesCPUAndPersistsDecodeState(t *testing.T) {
 	be, sequence := requiredCUDAQwen35SequenceBackend(t)
 	if compute.Qwen35SequenceParityCosineMin != Qwen35GDNParityCosineMin {
 		t.Fatalf("sequence parity floor %.3f drifted from established GDN floor %.3f", compute.Qwen35SequenceParityCosineMin, Qwen35GDNParityCosineMin)
 	}
-	m := NewSynthetic(qwen35HybridTestCfg())
+	m := NewSynthetic(cudaQwen35SequenceParityTestCfg())
 	prompt := []int{3, 7, 11, 5, 17, 19, 23}
 	next := 29
 	cpu := m.NewSession()
-	wantPrefill := cpu.Prefill(prompt)
+	defer cpu.Close()
+	// Step may reuse the CPU logits buffer; preserve the prefill oracle first.
+	wantPrefill := append([]float32(nil), cpu.Prefill(prompt)...)
 	wantStep := cpu.Step(next)
 
 	device, err := m.NewBackendSessionChecked(be)
@@ -39,13 +51,28 @@ func TestCUDAQwen35SequencePrefillMatchesCPUAndPersistsDecodeState(t *testing.T)
 	defer be.Recycle()
 	req := device.qwen35SequencePrefillRequest(prompt, true)
 	stateHandles := make([][2]compute.Buffer, len(req.States))
-	for layer, state := range req.States {
-		stateHandles[layer] = [2]compute.Buffer{state.Conv.Buf(), state.Recurrent.Buf()}
-	}
-	be.ResetHostXfer()
-	be.ResetH2DXfer()
-	be.ResetQwen35GDNOperationCount()
-	result, err := sequence.Qwen35SequencePrefill(req)
+	result, err := func() (compute.Qwen35SequencePrefillResult, error) {
+		scope := device.beginBackendExecution()
+		defer scope.finish()
+		return device.qwen35HAL.mutateSequence(be, func(states []compute.Qwen35SequenceState) (compute.Qwen35SequencePrefillResult, error) {
+			req.States = states
+			for layer, state := range req.States {
+				if !req.Layers[layer].Linear {
+					continue
+				}
+				if state.Conv.Buf() == nil || !state.Conv.Ready() || state.Recurrent.Buf() == nil || !state.Recurrent.Ready() {
+					t.Fatalf("layer %d missing ready owned recurrent state", layer)
+				}
+				stateHandles[layer] = [2]compute.Buffer{state.Conv.Buf(), state.Recurrent.Buf()}
+			}
+			// Exclude fixture construction and any owner COW from the operation's
+			// transfer witness, exactly as the original measurement intended.
+			be.ResetHostXfer()
+			be.ResetH2DXfer()
+			be.ResetQwen35GDNOperationCount()
+			return sequence.Qwen35SequencePrefill(req)
+		})
+	}()
 	if err != nil {
 		t.Fatalf("complete resident CUDA sequence: %v", err)
 	}
@@ -101,7 +128,7 @@ func TestCUDAQwen35SequencePrefillMatchesCPUAndPersistsDecodeState(t *testing.T)
 
 func TestCUDAQwen35SequenceMalformedRequestFailsBeforeMutation(t *testing.T) {
 	be, sequence := requiredCUDAQwen35SequenceBackend(t)
-	m := NewSynthetic(qwen35HybridTestCfg())
+	m := NewSynthetic(cudaQwen35SequenceParityTestCfg())
 	device, err := m.NewBackendSessionChecked(be)
 	if err != nil {
 		t.Fatal(err)
@@ -117,6 +144,9 @@ func TestCUDAQwen35SequenceMalformedRequestFailsBeforeMutation(t *testing.T) {
 	var sequenceErr *compute.Qwen35SequenceError
 	if err == nil || !errors.As(err, &sequenceErr) {
 		t.Fatalf("malformed request error = %v, want typed sequence refusal", err)
+	}
+	if sequenceErr.Stage != "embedding-gather" {
+		t.Fatalf("malformed token refused at %q, want embedding-gather: %v", sequenceErr.Stage, err)
 	}
 	if device.halKV.Len() != 0 || be.Qwen35GDNOperationCount() != 0 || be.H2DXferBytes() != 0 || be.HostXferBytes() != 0 {
 		t.Fatalf("malformed request mutated execution state: kv=%d ops=%d h2d=%d d2h=%d", device.halKV.Len(), be.Qwen35GDNOperationCount(), be.H2DXferBytes(), be.HostXferBytes())
