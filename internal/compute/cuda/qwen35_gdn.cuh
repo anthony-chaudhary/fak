@@ -1185,6 +1185,11 @@ static int qwen35_gdn_launch_status(int stage) {
 static cudaError_t qwen35_gdn_fence(void) {
   cudaError_t status = g_capture_open ? cudaSuccess : cudaStreamSynchronize(g_stream);
   sequence_split_note_failed_fence(status);
+  // A failed completion is not permission to pool any operand, including
+  // ordinary F32 owners with no split loan. Close shared cleanup before Go
+  // observes the error; preserve the first cause across later successful fences.
+  if (status != cudaSuccess && !g_cuda_cleanup_status)
+    g_cuda_cleanup_status = (int)status;
   return status;
 }
 
@@ -1826,6 +1831,8 @@ extern "C" int fcuda_qwen35_gdn_sequence_f32(
   if (status != 0) return qwen35_gdn_drain_after_error(status);
   cudaError_t sync = cudaStreamSynchronize(g_stream);
   sequence_split_note_failed_fence(sync);
+  if (sync != cudaSuccess && !g_cuda_cleanup_status)
+    g_cuda_cleanup_status = (int)sync;
   if (sync != cudaSuccess) return 70000 + (int) sync;
   g_qwen35_gdn_operations += (size_t) tokens;
   return 0;
