@@ -324,7 +324,7 @@ func (s *Session) v41ExpertPanelFunc() v41ExpertPanelFunc {
 				return nil, v41PanelError, closeFailure(err)
 			}
 			clampSwiGLUProjections(gate, up, limit)
-			weighted := make([]float32, I)
+			weighted := v41PrefillPanelWeightedRow(operands, r, I, publish)
 			for i := range weighted {
 				fused := silu(gate[i]) * up[i]
 				if !finite32(fused) {
@@ -360,4 +360,14 @@ func (s *Session) v41ExpertPanelFunc() v41ExpertPanelFunc {
 		}
 		return result, v41PanelHandled, nil
 	}
+}
+
+// Host-only publication may round a private packed row in place. Selected
+// publication keeps its historical independent input allocation and ownership.
+func v41PrefillPanelWeightedRow(operands []float32, row, width int, publish v41BF16BoundaryFunc) []float32 {
+	if publish != nil {
+		return make([]float32, width)
+	}
+	first, last := row*width, (row+1)*width
+	return operands[first:last:last]
 }
