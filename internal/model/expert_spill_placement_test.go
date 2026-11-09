@@ -85,6 +85,74 @@ func TestExpertSpillLayersAreMoEOrdinals(t *testing.T) {
 	}
 }
 
+// fak-test:runtime fast est=1s lane=default
+func TestExpertSpillQ2ResidentLayers(t *testing.T) {
+	for _, mixed := range []bool{false, true} {
+		name := "q2_only"
+		if mixed {
+			name = "mixed_stores"
+		}
+		t.Run(name, func(t *testing.T) {
+			shared := "model.layers.1.mlp.shared_experts.gate_proj.weight"
+			dense := layerName(0, "self_attn.q_proj.weight")
+			m := &Model{q2w: map[string]*q2Tensor{
+				expertName(6, 0, "up_proj.weight"):   {raw: make([]byte, 34)},
+				expertName(2, 0, "gate_proj.weight"): {q: make([]byte, 8), d: []float32{1}},
+				expertName(4, 0, "down_proj.weight"): {raw: make([]byte, 34)},
+				shared:                               {raw: make([]byte, 34)},
+				dense:                                {raw: make([]byte, 34)},
+				"lm_head.weight":                     {raw: make([]byte, 34)},
+			}}
+			want := []int{2, 4, 6}
+			if mixed {
+				m.q4kw = map[string]*q4kTensor{
+					expertName(4, 1, "up_proj.weight"): {raw: make([]byte, 144)},
+					expertName(8, 0, "up_proj.weight"): {raw: make([]byte, 144)},
+				}
+				want = append(want, 8)
+			}
+			replicated, expert, resident := m.MoEResidentWeightBytes()
+			if !resident || expert <= 0 {
+				t.Fatalf("fixture has no routed resident bytes: resident=%v expert=%d", resident, expert)
+			}
+			// Use the loaded-model resolver before inspecting its layer set: Q2-only
+			// models used to skip placement even with real resident expert bytes.
+			p, ok, err := m.ResolveExpertSpillPlacement(replicated+expert, 2)
+			if err != nil || !ok {
+				t.Fatalf("ResolveExpertSpillPlacement: ok=%v err=%v", ok, err)
+			}
+			if p.Budget.MoELayers != len(want) || p.Fit.SpillLayers != 2 || !p.Fit.Fits {
+				t.Fatalf("placement = %+v, want %d MoE layers and two spilled", p, len(want))
+			}
+			got := m.MoEExpertLayers()
+			if len(got) != len(want) {
+				t.Fatalf("MoEExpertLayers() = %v, want %v", got, want)
+			}
+			for i, layer := range want {
+				if got[i] != layer {
+					t.Fatalf("MoEExpertLayers() = %v, want sorted unique %v", got, want)
+				}
+			}
+			s := &Session{M: m}
+			s.ApplyExpertSpillPlacement(p)
+			if !s.CPUOffloadExperts || s.ExpertSpillLayers != 2 || s.ExpertRingBytes != p.RingBytes {
+				t.Fatal("resolved placement was not installed")
+			}
+			onHost := s.expertSpillOnHost()
+			for i, layer := range want {
+				if got := onHost(expertName(layer, 0, "gate_proj.weight")); got != (i < 2) {
+					t.Errorf("layer %d host placement = %v, want %v", layer, got, i < 2)
+				}
+			}
+			for _, name := range []string{shared, dense, "lm_head.weight"} {
+				if onHost(name) {
+					t.Errorf("non-routed Q2 tensor %q was spilled", name)
+				}
+			}
+		})
+	}
+}
+
 // TestExpertSpillUngradedMatchesLegacyPredicate is the default-unchanged witness: an unset grade —
 // every session in the tree today — and a grade at or above the MoE layer count both resolve to
 // exactly hostOffloadWeight on ROUTED experts, so the split placement is byte-for-byte what it was

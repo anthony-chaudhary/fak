@@ -82,6 +82,9 @@ func (m *Model) MoEExpertLayers() []int {
 	for name := range m.q4kw {
 		note(name)
 	}
+	for name := range m.q2w {
+		note(name)
+	}
 	for name := range m.q8w {
 		note(name)
 	}
