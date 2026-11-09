@@ -432,38 +432,6 @@ func TestGuardOpenCodeConfigInjection(t *testing.T) {
 	}
 }
 
-// fak-test:runtime fast est=5ms
-func TestGuardOpenCodeConfigUsesRouterProviderNamespace(t *testing.T) {
-	injected, install := installGuardOpenCodeConfig(
-		[]string{"opencode", "run", "--standalone", "--model", "fak-router/deepseek-ai/DeepSeek-V4.1-Flash"},
-		"http://127.0.0.1:54321",
-		"deepseek-ai/DeepSeek-V4.1-Flash",
-		nil,
-	)
-	if install.ProviderID != "fak-router" || install.Model != "fak-router/deepseek-ai/DeepSeek-V4.1-Flash" {
-		t.Fatalf("guard route = %s/%s, want fak-router/deepseek-ai/DeepSeek-V4.1-Flash", install.ProviderID, strings.TrimPrefix(install.Model, install.ProviderID+"/"))
-	}
-	var config map[string]any
-	if err := json.Unmarshal([]byte(injected[0][1]), &config); err != nil {
-		t.Fatal(err)
-	}
-	providers := config["provider"].(map[string]any)
-	routerProvider, ok := providers["fak-router"].(map[string]any)
-	if !ok {
-		t.Fatal("session config does not declare the routed provider allowed by project policy")
-	}
-	if _, ok := providers["fak"]; ok {
-		t.Fatal("session config declared the policy-denied legacy fak provider")
-	}
-	models := routerProvider["models"].(map[string]any)
-	if len(models) != 1 || models["deepseek-ai/DeepSeek-V4.1-Flash"] == nil {
-		t.Fatalf("routed provider models = %#v, want only the exact requested upstream model", models)
-	}
-	if got := strings.Join(install.Command, " "); got != "opencode run --standalone --model fak-router/deepseek-ai/DeepSeek-V4.1-Flash" {
-		t.Fatalf("guarded command = %q", got)
-	}
-}
-
 func TestGuardOpenCodeConfigPreservesExplicitModelLimits(t *testing.T) {
 	existing := `{"provider":{"fak":{"options":{"custom":"kept"},"models":{"qwen38":{"name":"Custom Qwen","limit":{"context":8192,"output":512},"custom":"kept"}}}}}`
 	injected, install := installGuardOpenCodeConfig([]string{"opencode"}, "http://127.0.0.1:54321", "qwen38", func(key string) string {
@@ -571,7 +539,7 @@ func TestGuardOpenCodeExistingConfigContentPreserved(t *testing.T) {
 
 // TestGuardOpenCodeSubagentOverlayRepointsChildPins is the guard-escape witness:
 // OpenCode gives agent.<name>.model precedence over the session default, so a
-// child left on its own pinned model (hosted or local router) would bypass the
+// child left on its own pinned model (hosted or local `fak/`) would bypass the
 // guarded provider. Every explicit child pin must be rewritten onto the guarded
 // model, while an agent with no model stays free to inherit the parent.
 func TestGuardOpenCodeSubagentOverlayRepointsChildPins(t *testing.T) {
@@ -888,5 +856,77 @@ func TestGuardOpenCodeKeepsValidAdvertisedOutput(t *testing.T) {
 	}
 	if limit["context"] != float64(32768) || limit["output"] != float64(1024) {
 		t.Fatalf("valid advertised limit not preserved: %#v", limit)
+	}
+}
+
+// TestGuardOpenCodeConfigUsesRouterProviderNamespace pins the Router-namespace
+// leg of the config injection: a model the launch plan qualified with the
+// registered Router provider ID composes the config under that provider, and
+// the session plus command model pins all carry the same qualified form — an
+// unqualified or legacy-prefixed pin would let a child escape the kernel
+// adjudication the guard exists to enforce.
+func TestGuardOpenCodeConfigUsesRouterProviderNamespace(t *testing.T) {
+	command := []string{"opencode", "run", "--model", "fak-router/boostrun.medium", "--model=fak-router/other", "hi"}
+	gwURL := "http://127.0.0.1:54321"
+	const qualified = "fak-router/boostrun.medium"
+	getenv := func(string) string { return "" }
+
+	injected, install := installGuardOpenCodeConfig(command, gwURL, qualified, getenv)
+	if !install.Applied {
+		t.Fatalf("install.Applied = false, want true (reason %q)", install.Reason)
+	}
+	if install.ProviderID != "fak-router" {
+		t.Errorf("install.ProviderID = %q, want %q", install.ProviderID, "fak-router")
+	}
+	if install.Model != qualified {
+		t.Errorf("install.Model = %q, want %q", install.Model, qualified)
+	}
+
+	envMap := make(map[string]string)
+	for _, pair := range injected {
+		envMap[pair[0]] = pair[1]
+	}
+	configRaw, ok := envMap["OPENCODE_CONFIG_CONTENT"]
+	if !ok || strings.TrimSpace(configRaw) == "" {
+		t.Fatalf("injected missing OPENCODE_CONFIG_CONTENT: %v", injected)
+	}
+	var config map[string]any
+	if err := json.Unmarshal([]byte(configRaw), &config); err != nil {
+		t.Fatalf("failed to unmarshal OPENCODE_CONFIG_CONTENT JSON: %v", err)
+	}
+	if got := config["model"]; got != qualified {
+		t.Errorf("config.model = %v, want %q", got, qualified)
+	}
+	if got := config["small_model"]; got != qualified {
+		t.Errorf("config.small_model = %v, want %q", got, qualified)
+	}
+	providerMap, ok := config["provider"].(map[string]any)
+	if !ok {
+		t.Fatalf("config.provider is not a map: %T", config["provider"])
+	}
+	if _, ok := providerMap["fak-router"].(map[string]any); !ok {
+		t.Fatalf("config.provider.fak-router is not a map: %T", providerMap["fak-router"])
+	}
+
+	// Every model pin on the guarded command is rewritten to the qualified
+	// form; a duplicate pin cannot carry a different model past the guard.
+	for i, arg := range install.Command {
+		switch {
+		case arg == "--model" || arg == "-m":
+			if i+1 >= len(install.Command) {
+				t.Fatalf("command %v: dangling %q", install.Command, arg)
+			}
+			if got := install.Command[i+1]; got != qualified {
+				t.Errorf("command %v: pin %q carries %q, want %q", install.Command, arg, got, qualified)
+			}
+		case strings.HasPrefix(arg, "--model="):
+			if got := strings.TrimPrefix(arg, "--model="); got != qualified {
+				t.Errorf("command %v: pin %q carries %q, want %q", install.Command, arg, got, qualified)
+			}
+		case strings.HasPrefix(arg, "-m="):
+			if got := strings.TrimPrefix(arg, "-m="); got != qualified {
+				t.Errorf("command %v: pin %q carries %q, want %q", install.Command, arg, got, qualified)
+			}
+		}
 	}
 }
