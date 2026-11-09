@@ -1,3 +1,12 @@
+# 2026-11-09 blanket normalization: ends the Windows CRLF-materialization churn class
+# (census: 792 tracked files with i/lf blobs materialized CRLF/mixed in the worktree under a
+# converting core.autocrlf; text=auto makes EOL-only worktree drift status-invisible and
+# normalizes on check-in; binaries are skipped by git's auto-detection at add time).
+# Specific pins below still override this blanket for their paths (last-match-wins).
+* text=auto
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
 # Shell scripts run inside WSL — they must keep LF endings even when this repo
 # is checked out on Windows with core.autocrlf=true. CRLF would break the bash
 # shebang / parsing of fak/test.sh.
