@@ -61,21 +61,44 @@ func compareVulkanSequenceVector(t *testing.T, label string, got, want []float32
 	}
 }
 
+// fak-test:runtime integration est=5s lane=optin
 func TestVulkanQwen35SequencePrefillMatchesCPUAndPersistsDecodeState(t *testing.T) {
 	be, sequence := requiredVulkanSequenceBackend(t)
 	cfg := qwen35HybridTestCfg()
 	cfg.PartialRotaryFactor = .5
 	m := NewSynthetic(cfg)
 	cpu := m.NewSession()
+	defer cpu.Close()
 	device, err := m.NewBackendSessionChecked(be)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer device.Close()
+	// The builder reserves state slots but deliberately does not lend mutable
+	// handles. Match production ownership before recording any sequence work.
+	runSequence := func(req *compute.Qwen35SequencePrefillRequest, handles [][2]compute.Buffer) (compute.Qwen35SequencePrefillResult, error) {
+		scope := device.beginBackendExecution()
+		defer scope.finish()
+		return device.qwen35HAL.mutateSequence(be, func(states []compute.Qwen35SequenceState) (compute.Qwen35SequencePrefillResult, error) {
+			req.States = states
+			for l, st := range states {
+				if !req.Layers[l].Linear {
+					continue
+				}
+				if st.Conv.Buf() == nil || !st.Conv.Ready() || st.Recurrent.Buf() == nil || !st.Recurrent.Ready() {
+					t.Fatalf("layer %d missing ready owned recurrent state", l)
+				}
+				if handles != nil {
+					handles[l] = [2]compute.Buffer{st.Conv.Buf(), st.Recurrent.Buf()}
+				}
+			}
+			return sequence.Qwen35SequencePrefill(*req)
+		})
+	}
 	invalid := device.qwen35SequencePrefillRequest([]int{3, m.Cfg.VocabSize}, true)
-	_, err = sequence.Qwen35SequencePrefill(invalid)
+	_, err = runSequence(&invalid, nil)
 	var sequenceErr *compute.Qwen35SequenceError
-	if !errors.As(err, &sequenceErr) || device.halKV.Len() != 0 {
+	if !errors.As(err, &sequenceErr) || sequenceErr.Stage != "embedding-gather" || device.halKV.Len() != 0 {
 		t.Fatalf("invalid token must fail before KV mutation: err=%v kv=%d", err, device.halKV.Len())
 	}
 	// Two panels exercise both zero-origin and nonzero-prefix attention, while
@@ -88,11 +111,8 @@ func TestVulkanQwen35SequencePrefillMatchesCPUAndPersistsDecodeState(t *testing.
 		}
 		req := device.qwen35SequencePrefillRequest(ids, panel != 0)
 		start := device.halKV.Len()
-		handles := make([][2]compute.Buffer, len(req.States))
-		for l, st := range req.States {
-			handles[l] = [2]compute.Buffer{st.Conv.Buf(), st.Recurrent.Buf()}
-		}
-		result, err := sequence.Qwen35SequencePrefill(req)
+		handles := make([][2]compute.Buffer, len(req.Layers))
+		result, err := runSequence(&req, handles)
 		if err != nil {
 			t.Fatalf("panel %d: %v", panel, err)
 		}
