@@ -1,5 +1,7 @@
 package tokenizer
 
+import "unicode/utf8"
+
 // bpe applies the tokenizer's merge ranks to one byte-level / metaspace-encoded piece,
 // returning the merged symbols. It reproduces the naive "find the single lowest-rank
 // adjacent pair, apply it everywhere, repeat" rewrite (bpeNaive in bpe_merge_test.go)
@@ -21,11 +23,19 @@ func (t *Tokenizer) bpe(encoded string) ([]string, error) {
 	if len(encoded) == 0 {
 		return nil, nil
 	}
+	nodeCapacity := len(encoded)
+	// The old rune-to-string nodes replaced each invalid UTF-8 byte with RuneError.
+	// Normalize only that uncommon input so span boundaries preserve those symbols.
+	if !utf8.ValidString(encoded) {
+		encoded = string([]rune(encoded))
+	}
 
-	// One node per rune, linked in order. cap by byte length (>= rune count).
-	nodes := make([]bpeNode, 0, len(encoded))
-	for _, r := range encoded {
-		nodes = append(nodes, bpeNode{text: string(r)})
+	// Every live symbol is a contiguous span of encoded. Merges extend the left
+	// span instead of allocating a new concatenated string. Node storage is unchanged.
+	// One node per rune, linked in order; cap by byte length (>= rune count).
+	nodes := make([]bpeNode, 0, nodeCapacity)
+	for start, r := range encoded {
+		nodes = append(nodes, bpeNode{start: start, end: start + utf8.RuneLen(r)})
 	}
 	n := len(nodes)
 	for i := range nodes {
@@ -41,7 +51,7 @@ func (t *Tokenizer) bpe(encoded string) ([]string, error) {
 		if nx < 0 {
 			return
 		}
-		if rank, ok := t.mergeRank[tokenPair{left: nodes[pos].text, right: nodes[nx].text}]; ok {
+		if rank, ok := t.mergeRank[tokenPair{left: encoded[nodes[pos].start:nodes[pos].end], right: encoded[nodes[nx].start:nodes[nx].end]}]; ok {
 			h.push(mergeCandidate{rank: rank, pos: pos})
 		}
 	}
@@ -56,13 +66,13 @@ func (t *Tokenizer) bpe(encoded string) ([]string, error) {
 			continue // this node was absorbed, or lost its right neighbor
 		}
 		right := &nodes[left.next]
-		rank, ok := t.mergeRank[tokenPair{left: left.text, right: right.text}]
+		rank, ok := t.mergeRank[tokenPair{left: encoded[left.start:left.end], right: encoded[right.start:right.end]}]
 		if !ok || rank != c.rank {
 			continue // stale: the boundary changed since this candidate was queued
 		}
 
 		// Apply the merge: left absorbs right, right leaves the list.
-		left.text += right.text
+		left.end = right.end
 		right.dead = true
 		left.next = right.next
 		if right.next >= 0 {
@@ -80,7 +90,7 @@ func (t *Tokenizer) bpe(encoded string) ([]string, error) {
 
 	syms := make([]string, 0, n)
 	for i := 0; i >= 0; i = nodes[i].next { // node 0 is never a right operand, so it heads the list
-		syms = append(syms, nodes[i].text)
+		syms = append(syms, encoded[nodes[i].start:nodes[i].end])
 	}
 	return syms, nil
 }
@@ -88,10 +98,11 @@ func (t *Tokenizer) bpe(encoded string) ([]string, error) {
 // bpeNode is one symbol in the doubly linked list bpe merges in place. dead marks a node
 // absorbed by its left neighbor; prev/next index into the node slice (-1 = none).
 type bpeNode struct {
-	text string
-	prev int
-	next int
-	dead bool
+	start int
+	end   int
+	prev  int
+	next  int
+	dead  bool
 }
 
 // mergeCandidate is a pending "merge the pair whose left symbol is node pos" entry. rank is
