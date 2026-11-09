@@ -810,17 +810,15 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 		if upErr != nil {
 			return result, &Qwen35SequenceError{Stage: "ffn-up", Layer: index, Cause: upErr}
 		}
-		activated, activatedBuf, allocErr := c.qwen35SequenceAllocLocked([]int{tokens, req.Intermediate}, "ffn-swiglu")
-		if allocErr != nil {
-			return result, &Qwen35SequenceError{Stage: "ffn-swiglu", Layer: index, Cause: allocErr}
-		}
-		C.fcuda_swiglu_f32(c.cf(gate), c.cf(up), c.cf(activated), C.int(tokens*req.Intermediate))
-		delta, deltaBuf, downErr := c.qwen35SequenceMatMulLocked(layer.Down, activated, tokens, "ffn-down")
+		// k_swiglu reads each gate element before writing the same element.
+		// The original gate has no later reader; keep its owner until down ends.
+		C.fcuda_swiglu_f32(c.cf(gate), c.cf(up), c.cf(gate), C.int(tokens*req.Intermediate))
+		delta, deltaBuf, downErr := c.qwen35SequenceMatMulLocked(layer.Down, gate, tokens, "ffn-down")
 		if downErr != nil {
 			return result, &Qwen35SequenceError{Stage: "ffn-down", Layer: index, Cause: downErr}
 		}
 		C.fcuda_add_f32(c.cf(x), c.cf(delta), C.int(tokens*req.Hidden))
-		c.releaseTransientBuffers([]*cudaBuf{postNormBuf, gateBuf, upBuf, activatedBuf, deltaBuf})
+		c.releaseTransientBuffers([]*cudaBuf{postNormBuf, gateBuf, upBuf, deltaBuf})
 	}
 	// BEGIN CUDA raw-hidden publication tail.
 	// Preserve the exact final residual, not the normalized last row. No copy or

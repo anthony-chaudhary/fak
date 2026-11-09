@@ -108,17 +108,52 @@ func TestCUDAQwenPagedSequenceOwnership(t *testing.T) {
 			t.Fatalf("missing actual declaration %s", name)
 		}
 	}
-	body.WriteString(cudaPagedSequenceGoShims)
-	body.WriteString(cudaPagedSequenceGoControls)
+	// Keep the shared fixture constants unchanged: the independent decode
+	// witness also uses them. This extension qualifies only sequence prefill.
+	replace := func(s, old, next string) string {
+		if strings.Count(s, old) != 1 {
+			t.Fatalf("ambiguous FFN fixture seam %q", old)
+		}
+		return strings.Replace(s, old, next, 1)
+	}
+	shims := replace(cudaPagedSequenceGoShims, `if e==nil&&site=="attention-v"`, `if e==nil&&(site=="ffn-gate"||site=="ffn-up"){a:=unsafe.Slice((*float32)(b.ptr),t.Numel());for i:=range a{a[i]=float32(i%13-6)/4}};if e==nil&&site=="ffn-down"{must(C.test_ffn_down(c.cf(x),C.int(x.Numel()))==0,"FFN down lost live activated gate")};if e==nil&&site=="attention-v"`)
+	body.WriteString(shims)
+	body.WriteString(replace(cudaPagedSequenceGoControls, "func main(){", `
+func checkFFNGateReuse(){
+ must(C.test_swiglu_alias()==0,"source-extracted SwiGLU alias/tail control")
+ for _,tokens:=range []int{1,2,17}{for _,allLogits:=range []bool{false,true}{
+  c,k:=reset();r:=reqFor(c,k,0,tokens);r.NeedAllLogits=allLogits
+  result,e:=c.Qwen35SequencePrefill(r)
+  must(e==nil&&result.Tokens==tokens,"FFN gate reuse actual entry failed")
+  must(C.test_counter(11)==8&&C.test_counter(12)==0&&C.test_counter(13)==0,"FFN gate reuse still allocates or writes a separate activation")
+  must(C.test_counter(14)==8&&C.test_counter(15)==8,"FFN gate lifetime/down consumer mismatch")
+  must(cudaQwen35PagedOwners==nil&&C.test_counter(7)==0,"FFN reuse changed owner settlement")
+ }}
+ fmt.Println("actual prefill FFN gate alias, down-consumer and retirement controls PASS")
+}
+func main(){
+ checkFFNGateReuse()`))
 	kv := read("cuda/kv_precision.cuh")
+	nativeShims := replace(cudaPagedSequenceNativeShims,
+		`extern "C" void fcuda_swiglu_f32(const float*x,const float*y,float*z,int n){for(int i=0;i<n;++i)z[i]=x[i]*y[i]/(1+expf(-x[i]));}`,
+		`extern "C" void fcuda_swiglu_f32(const float*x,const float*y,float*z,int n){++ffn_calls;if(z!=x)++ffn_separate;ffn_gate=x;ffn_out=z;ffn_n=n;run_swiglu(x,y,z,n);}`)
+	nativeShims = replace(nativeShims, `++allocs;if(mode==1`, `if(!strcmp(name,"ffn-swiglu"))++ffn_allocs;++allocs;if(mode==1`)
+	nativeShims = replace(nativeShims, `extern "C" void test_reset(){`, `extern "C" void test_reset(){ffn_calls=ffn_separate=ffn_allocs=ffn_down=ffn_retired=0;ffn_gate=ffn_out=nullptr;ffn_n=0;`)
+	nativeShims = replace(nativeShims, `case 10:return pool_faults;`, `case 10:return pool_faults;case 11:return ffn_calls;case 12:return ffn_separate;case 13:return ffn_allocs;case 14:return ffn_down;case 15:return ffn_retired;`)
+	nativeShims = replace(nativeShims, `if(!g_cuda_cleanup_status){++retires;g_live.erase(p);}`, `if(!g_cuda_cleanup_status){if(p==ffn_gate){++ffn_retired;ffn_gate=nullptr;}++retires;g_live.erase(p);}`)
+	// Execute the real pointwise kernel body with host block/thread indices.
+	// This checks alias indexing and identical host arithmetic, not CUDA math.
+	swiglu := section(read("cuda/transformer_ops.cuh"), "__global__ void k_swiglu(", "extern \"C\" void fcuda_swiglu_f32(")
 	native := cudaPagedSequenceNativePreamble +
+		swiglu + cudaPagedSequenceFFNAliasControls +
 		section(kv, "static int kv_clone_copy_status(", "// Snapshot-only completion handling.") +
 		section(kv, "static int kv_snapshot_status(", "extern \"C\" int fcuda_kv_snapshot_load_checked(") +
 		section(read("cuda/paged_attention_vllm.cuh"), "__global__ void reshape_and_cache_run_kernel(", "// Current vLLM reshape_and_cache_kernel") +
 		section(read("cuda/paged_attention_vllm.cuh"), "__global__ void paged_gather_rows_kernel(", "__global__ void paged_store_int_kernel(") +
-		section(kv, "// BEGIN checked detached paged-sequence owner (#13881).", "// END checked detached paged-sequence owner (#13881).") + cudaPagedSequenceNativeShims
+		section(kv, "// BEGIN checked detached paged-sequence owner (#13881).", "// END checked detached paged-sequence owner (#13881).") + nativeShims
 	dir := t.TempDir()
-	for name, data := range map[string]string{"main.go": body.String(), "fixture.h": cudaPagedSequenceFixtureHeader, "fixture.cc": native, "cuda_kv_precision.h": read("cuda_kv_precision.h")} {
+	header := cudaPagedSequenceFixtureHeader + "\n#ifdef __cplusplus\nextern \"C\" {\n#endif\nint test_swiglu_alias(void);\nint test_ffn_down(const float*,int);\n#ifdef __cplusplus\n}\n#endif\n"
+	for name, data := range map[string]string{"main.go": body.String(), "fixture.h": header, "fixture.cc": native, "cuda_kv_precision.h": read("cuda_kv_precision.h")} {
 		if e := os.WriteFile(filepath.Join(dir, name), []byte(data), 0600); e != nil {
 			t.Fatal(e)
 		}
@@ -138,6 +173,34 @@ func TestCUDAQwenPagedSequenceOwnership(t *testing.T) {
 	}
 	t.Log(strings.TrimSpace(string(out)))
 }
+
+const cudaPagedSequenceFFNAliasControls = `
+static int ffn_calls=0,ffn_separate=0,ffn_allocs=0,ffn_down=0,ffn_retired=0,ffn_n=0;
+static const float *ffn_gate=nullptr,*ffn_out=nullptr;
+static void run_swiglu(const float*g,const float*u,float*y,int n){
+ blockDim=dim3(256);for(int b=0;b<(n+255)/256;++b){blockIdx=dim3(b);for(int t=0;t<256;++t){threadIdx=dim3(t);k_swiglu(g,u,y,n);}}
+}
+extern "C" int test_ffn_down(const float*p,int n){
+ if(p!=ffn_out||n!=ffn_n||g_live.find((void*)p)==g_live.end())return 1;
+ ++ffn_down;return 0;
+}
+extern "C" int test_swiglu_alias(){
+ for(int n: {1,255,256,257,1025}){
+  std::vector<float>g(n+1),u(n+1),y(n+1,12345.f);
+  for(int i=0;i<n;++i){g[i]=(float)(i%37-18)/4;u[i]=(float)(i%29-14)/3;}
+  g[n]=u[n]=12345.f;auto original=g,up=u;
+  run_swiglu(g.data(),u.data(),y.data(),n);run_swiglu(g.data(),u.data(),g.data(),n);
+  if(memcmp(g.data(),y.data(),n*sizeof(float))||memcmp(u.data(),up.data(),(n+1)*sizeof(float)))return 1;
+  if(g[n]!=12345.f||u[n]!=12345.f||y[n]!=12345.f)return 2;
+  // Explicit exceptional values use the same kernel body in both arms.
+  for(float value: {0.f,-0.f,INFINITY,-INFINITY,NAN}){
+   float a=value,b=2.f,c=0;run_swiglu(&a,&b,&c,1);run_swiglu(&a,&b,&a,1);
+   if(!(std::isnan(a)&&std::isnan(c))&&memcmp(&a,&c,sizeof(float)))return 3;
+  }
+ }
+ return 0;
+}
+`
 
 const cudaPagedSequenceFixtureHeader = `
 #include <stddef.h>
