@@ -94,6 +94,7 @@ const cudaQ8RetirementHarness = `
 #include <unordered_map>
 using cudaError_t = int;
 static constexpr int cudaSuccess=0, cudaErrorMemoryAllocation=2;
+static inline cudaError_t cudaGetLastError() { return cudaSuccess; }
 #define FCUDA_SCRATCH_ALLOC_FAILED 80001
 static int mallocs=0, frees=0, launches=0, free_fail_at=0, alloc_fail_at=0;
 static std::unordered_map<void *, size_t> physical;

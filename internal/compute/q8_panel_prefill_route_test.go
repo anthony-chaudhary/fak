@@ -242,6 +242,14 @@ func TestQ8PanelPrefillRoute(t *testing.T) {
 			"gdn-in-proj":  "k_q8_quant_act k_q8_gemm_rowtile",
 			"gdn-out-proj": "k_q8_quant_act k_q8_gemm_rowtile",
 			"gdn-fallback": "q8_dequant_sgemm",
+			// Immediate errors are positive CUDA statuses, never argument refusals:
+			// failed quantization must not submit a dependent GEMM or legacy fallback.
+			"quant-rowtile-error": "k_q8_quant_act",
+			"quant-perrow-error":  "k_q8_quant_act",
+			"gemm-rowtile-error":  "k_q8_quant_act k_q8_gemm_rowtile",
+			"gemm-perrow-error":   "k_q8_quant_act k_q8_gemm",
+			"gdn-quant-error":     "k_q8_quant_act",
+			"gdn-gemm-error":      "k_q8_quant_act k_q8_gemm_rowtile",
 		}
 		for scenario, seq := range want {
 			t.Run(scenario, func(t *testing.T) {
@@ -272,12 +280,24 @@ using cudaError_t = int;
 static constexpr int cudaSuccess = 0, cudaErrorMemoryAllocation = 2;
 #define FCUDA_SCRATCH_ALLOC_FAILED 80001
 static std::vector<std::string> launched;
+static const char *fail_kernel = "";
+static cudaError_t launch_error = cudaSuccess;
+static constexpr cudaError_t injected_error = 719;
+static inline cudaError_t cudaGetLastError() {
+  const cudaError_t status = launch_error;
+  launch_error = cudaSuccess;
+  return status;
+}
+static void record_launch(const char *name) {
+  launched.push_back(name);
+  if (std::strcmp(name, fail_kernel) == 0) launch_error = injected_error;
+}
 template<class T> static cudaError_t cudaMalloc(T **out, size_t bytes) {
   *out = static_cast<T *>(std::malloc(bytes));
   return *out ? cudaSuccess : cudaErrorMemoryAllocation;
 }
 static cudaError_t cudaFree(void *) { return cudaSuccess; }
-#define FCUDA_TS(name, grid, ...) launched.push_back(name)
+#define FCUDA_TS(name, grid, ...) record_launch(name)
 // The production translation unit gets this declaration from cuda_backend.h; the host slice
 // does not include the header, so carry the flat ABI prototype here.
 extern "C" int fcuda_q8_matmul_rows_f32(const int8_t *, const float *, const float *, float *,
@@ -293,8 +313,9 @@ static int q8_dequant_sgemm(const int8_t *, const float *, const float *, float 
 // decode lane, and the P>65535 argument-bounds refusal (legacy dequant fallback). The gdn-*
 // cases drive the extracted production GDN sequence-spine caller over the Qwen3.8-27B geometry.
 const q8RouteMain = `
-static int scenario(int p, int block, int misalign) {
+static int scenario(int p, int block, int misalign, const char *failure = "") {
   launched.clear();
+  fail_kernel = failure;
   alignas(16) static int8_t codes[256] = {};
   static float scale[256] = {};
   const int out = 8, in = 256;
@@ -305,8 +326,9 @@ static int scenario(int p, int block, int misalign) {
   const int rc = fcuda_q8_matmul_f32(c, scale, x, y, out, in, p, block);
   delete[] x;
   delete[] y;
-  if (rc != 0) {
-    std::fprintf(stderr, "rc=%d\n", rc);
+  const int expected = *failure ? injected_error : 0;
+  if (rc != expected) {
+    std::fprintf(stderr, "rc=%d want=%d\n", rc, expected);
     return 1;
   }
   for (size_t i = 0; i < launched.size(); ++i)
@@ -314,8 +336,9 @@ static int scenario(int p, int block, int misalign) {
   std::fprintf(stdout, "\n");
   return 0;
 }
-static int spineScenario(int out, int in, int p, int block) {
+static int spineScenario(int out, int in, int p, int block, const char *failure = "") {
   launched.clear();
+  fail_kernel = failure;
   alignas(16) static int8_t codes[256] = {};
   static float scale[256] = {};
   // The argument-bounds refusal reads no operand, so only in-bounds panels allocate; the
@@ -329,8 +352,9 @@ static int spineScenario(int out, int in, int p, int block) {
   const int rc = qwen35_gdn_q8_prefill(codes, scale, x, y, out, in, p, block);
   delete[] x;
   delete[] y;
-  if (rc != 0) {
-    std::fprintf(stderr, "rc=%d\n", rc);
+  const int expected = *failure ? injected_error : 0;
+  if (rc != expected) {
+    std::fprintf(stderr, "rc=%d want=%d\n", rc, expected);
     return 1;
   }
   for (size_t i = 0; i < launched.size(); ++i)
@@ -349,6 +373,12 @@ int main(int argc, char **argv) {
   if (!std::strcmp(s, "gdn-in-proj")) return spineScenario(10240, 5120, 128, 32);
   if (!std::strcmp(s, "gdn-out-proj")) return spineScenario(5120, 6144, 512, 32);
   if (!std::strcmp(s, "gdn-fallback")) return spineScenario(10240, 5120, 70000, 32);
+  if (!std::strcmp(s, "quant-rowtile-error")) return scenario(200, 32, 0, "k_q8_quant_act");
+  if (!std::strcmp(s, "quant-perrow-error")) return scenario(64, 32, 0, "k_q8_quant_act");
+  if (!std::strcmp(s, "gemm-rowtile-error")) return scenario(200, 32, 0, "k_q8_gemm_rowtile");
+  if (!std::strcmp(s, "gemm-perrow-error")) return scenario(200, 32, 1, "k_q8_gemm");
+  if (!std::strcmp(s, "gdn-quant-error")) return spineScenario(10240, 5120, 128, 32, "k_q8_quant_act");
+  if (!std::strcmp(s, "gdn-gemm-error")) return spineScenario(5120, 6144, 512, 32, "k_q8_gemm_rowtile");
   return 2;
 }
 `

@@ -159,6 +159,7 @@ static float __shfl_xor_sync(unsigned mask,float value,int offset,int width) {
 static int g_stream=19;
 using cudaError_t=int;
 static constexpr int cudaSuccess=0,FCUDA_SCRATCH_ALLOC_FAILED=80001;
+static inline cudaError_t cudaGetLastError() { return cudaSuccess; }
 static constexpr int FAK_ALLOC_ACTIVATIONS_SCRATCH=1,FAK_ALLOC_DEVICE_LOCAL=2;
 #define FAK_ALLOC_SITE(x) (x)
 template<class T> static cudaError_t cudaMalloc(T **p,size_t n) { ++mallocs; *p=static_cast<T *>(std::malloc(n)); return *p?0:2; }

@@ -330,7 +330,8 @@ static int g_q8_xScale_cap = 0; // floats
 #define FCUDA_Q8_SCRATCH_RETIRE_FAILED_BASE 92000
 static int g_q8_scratch_retire_status = 0;
 // q8_quant_rows grows the activation scratch, then quantizes every row of X on its own. Returns 0
-// or an allocation/retirement failure before any launch.
+// or an allocation/retirement failure or immediate CUDA launch error. Callers must not
+// submit a dependent GEMM when activation quantization failed to launch.
 static int q8_quant_rows(const float *dX, int in, int P, int block) {
 #ifdef FAK_CUDA_V41_CHECKED_STREAM
   if (v41_candidates_stream_uncertain()) return 90003;
@@ -379,18 +380,18 @@ static int q8_quant_rows(const float *dX, int in, int P, int block) {
   }
   const int quant_threads = block == 32 ? 32 : 64;
   FCUDA_TS("k_q8_quant_act", dim3(nblk, P), k_q8_quant_act<<<dim3(nblk, P), quant_threads, 0, g_stream>>>(dX, g_q8_qX, g_q8_xScale, P, in, block));
-  return 0;
+  return (int)cudaGetLastError();
 }
 // q8_rows_matmul is the per-row Q8_0 GEMM: each activation row is quantized on its own and
 // each (row, output) dot runs the same k_q8_gemm warp sum whatever P is, so a row's result is
-// bitwise the P=1 decode GEMV's. Returns 0 or an allocation/retirement failure before any launch.
+// bitwise the P=1 decode GEMV's. Propagates scratch and immediate launch errors.
 static int q8_rows_matmul(const int8_t *dCodes, const float *dScales, const float *dX,
                           float *dY, int out, int in, int P, int block) {
   int rc = q8_quant_rows(dX, in, P, block);
   if (rc != 0) return rc;
   FCUDA_TS("k_q8_gemm", dim3((out + 7) / 8, P), k_q8_gemm<<<dim3((out + 7) / 8, P), 256, 0, g_stream>>>((const signed char *)dCodes, dScales, g_q8_qX, g_q8_xScale,
                                                 dY, out, in, P, block));
-  return 0;
+  return (int)cudaGetLastError();
 }
 // fcuda_q8_matmul_rows_f32 is the BitExact prompt-panel GEMM: every row bitwise the P=1 decode
 // GEMV for every P. Block-32 weights with 16-byte aligned codes run k_q8_gemm_rowtile over
@@ -409,7 +410,7 @@ extern "C" int fcuda_q8_matmul_rows_f32(const int8_t *dCodes, const float *dScal
   int rowsPerTile = (P + tiles - 1) / tiles;
   FCUDA_TS("k_q8_gemm_rowtile", dim3(tiles, outGroups), k_q8_gemm_rowtile<<<dim3(tiles, outGroups), kQ8TileWarps * 32, 0, g_stream>>>(
       (const signed char *)dCodes, dScales, g_q8_qX, g_q8_xScale, dY, out, in, P, rowsPerTile));
-  return 0;
+  return (int)cudaGetLastError();
 }
 extern "C" int fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float *dX,
                                    float *dY, int out, int in, int P, int block) {
