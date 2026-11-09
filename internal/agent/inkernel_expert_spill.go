@@ -115,7 +115,8 @@ func (p *InKernelPlanner) expertSpillDeviceBudget() int64 {
 		return 0
 	}
 	avail := free
-	if avail <= 0 {
+	// A negative free count is unknown; zero is measured exhaustion.
+	if avail < 0 {
 		avail = total
 	}
 	if avail <= 0 {

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
@@ -251,4 +252,51 @@ func TestSetExpertSpillRefusesOnlyAnActualSpillOnADenseModel(t *testing.T) {
 			t.Fatalf("SetExpertSpill(%d) installed a placement on a model with no experts to place", n)
 		}
 	}
+}
+
+// fak-test:runtime fast est=5ms lane=default
+func TestExpertSpillBudgetPreservesKnownZero(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		p    *InKernelPlanner
+		want int64
+	}{
+		{name: "nil planner"},
+		{name: "no backend", p: &InKernelPlanner{}},
+		{name: "unavailable probe", p: &InKernelPlanner{backend: capacityProbeBackend{total: 1000, free: 1000}}, want: 0},
+		{name: "known zero", p: &InKernelPlanner{backend: capacityProbeBackend{total: 1000, free: 0, known: true}}, want: 0},
+		{name: "positive free", p: &InKernelPlanner{backend: capacityProbeBackend{total: 1000, free: 400, known: true}}, want: 340},
+		{name: "unknown free", p: &InKernelPlanner{backend: capacityProbeBackend{total: 1000, free: compute.FreeUnknown, known: true}}, want: 850},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.p.expertSpillDeviceBudget(); got != tc.want {
+				t.Errorf("expert budget=%d, want %d", got, tc.want)
+			}
+		})
+	}
+
+	t.Run("exhausted auto preserves placement", func(t *testing.T) {
+		m := model.NewSyntheticMoE(tinyMoECfg())
+		p := &InKernelPlanner{m: m, backend: capacityProbeBackend{total: 1 << 30, free: 0, known: true}}
+		if err := p.SetExpertSpill(ExpertSpillAuto, 0); err == nil {
+			t.Error("AUTO accepted known exhausted capacity")
+		}
+		if _, ok := p.ExpertSpillPlacement(); ok {
+			t.Error("refused AUTO installed a placement")
+		}
+		// An explicit count remains authoritative even when capacity is zero.
+		if err := p.SetExpertSpill(2, 0); err != nil {
+			t.Fatalf("explicit count with exhausted capacity: %v", err)
+		}
+		before := p.expertSpill
+		if before.Fit.SpillLayers != 2 || before.Budget.BudgetBytes != 0 || before.RingBytes != 0 {
+			t.Errorf("explicit exhausted plan=%+v, want two layers and zero budget/ring", *before)
+		}
+		if err := p.SetExpertSpill(ExpertSpillAuto, 0); err == nil {
+			t.Error("AUTO replaced an existing plan despite exhausted capacity")
+		}
+		if p.expertSpill != before {
+			t.Error("refused AUTO replaced the prior placement")
+		}
+	})
 }
