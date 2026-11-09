@@ -16,6 +16,7 @@ func TestBeginServedAdmissionOrdersClientDeadlines(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name     string
+		mode     AdmissionMode
 		requests []request
 		want     []string
 	}{
@@ -37,9 +38,18 @@ func TestBeginServedAdmissionOrdersClientDeadlines(t *testing.T) {
 			},
 			want: []string{"high", "urgent-low"},
 		},
+		{
+			name: "edf_precedes_static_priority",
+			mode: AdmissionModeEDF,
+			requests: []request{
+				{"background", "1800000", 1},
+				{"urgent", "600000", 4},
+			},
+			want: []string{"urgent", "background"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctl := NewAdmissionController(AdmissionPolicy{MaxNumSeqs: 1, MaxWaiting: 8, AgingRounds: 1_000_000})
+			ctl := NewAdmissionController(AdmissionPolicy{Mode: tc.mode, MaxNumSeqs: 1, MaxWaiting: 8, AgingRounds: 1_000_000})
 			s := &Server{}
 			s.SetAdmissionController(ctl)
 			running, err := s.beginServedAdmission(context.Background(), servedSessionTurn{traceID: "running"}, nil, nil, 1)

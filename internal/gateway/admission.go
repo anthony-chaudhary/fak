@@ -75,9 +75,24 @@ import (
 // admission, top-up re-admitting in chunks via Grow as it generates.
 const DefaultPreallocCeiling = 2048
 
+// AdmissionMode selects the primary waiting-queue ordering. The zero value keeps
+// the existing priority/aging or separately configured weighted-fair policy.
+type AdmissionMode uint8
+
+const (
+	AdmissionModePriority AdmissionMode = iota
+	// AdmissionModeEDF serves the earliest effective deadline first. It takes
+	// precedence over weighted-fair ordering; equal or absent deadlines retain
+	// priority/aging and deterministic FIFO tie-breaking. Deadline-free requests
+	// follow deadline-bearing work, so EDF does not promise them bounded waiting.
+	AdmissionModeEDF
+)
+
 // AdmissionPolicy holds the admission knobs. Each cap is disabled by a non-positive value
 // (so a test can isolate a single axis); DefaultAdmissionPolicy fills shipping defaults.
 type AdmissionPolicy struct {
+	// Mode is opt-in. Unrecognized values preserve the default ordering.
+	Mode AdmissionMode
 	// MaxNumSeqs caps the running set (vLLM's max-num-seqs): no request is admitted while
 	// the running count is at this bound. ≤0 disables the seq cap.
 	MaxNumSeqs int
@@ -174,6 +189,10 @@ type SeqRequest struct {
 	Trust     AdmissionTrust
 	CreatedAt time.Time
 	DecodeTTL time.Duration
+	// Deadline is an optional absolute admission-ordering target. The earlier of
+	// Deadline and CreatedAt+DecodeTTL is used when both are present. It does not
+	// replace context cancellation or change DecodeTTL expiration semantics.
+	Deadline time.Time
 	// PromptTokens is the prefill share of Tokens, charged against PrefillTokenBudget.
 	// ≤0 charges all of Tokens.
 	PromptTokens int
@@ -1146,13 +1165,13 @@ func (c *AdmissionController) admissionTraceID(traceID string) string {
 }
 
 // Schedule runs ONE admission round: it advances the aging clock, orders the waiting queue
-// by effective priority, and promotes waiters into the running set while the token budget
+// by the configured priority or EDF policy, and promotes waiters while the token budget
 // and the max-num-seqs cap have headroom — stopping at the first request that does not fit
-// so a lower-priority request can never jump ahead of a blocked higher-priority one
+// so a lower-ranked request cannot bypass the selected queue head
 // (head-of-line discipline). It returns the requests admitted this round, in admission
 // order. The native loop calls it each iteration; a host with a freed slot calls it after
-// Complete. Because the clock advances every call, a request passed over this round ages
-// toward the head — the starvation guard.
+// Complete. Each call advances priority aging; in EDF mode that aging resolves
+// equal deadlines and cannot overtake an earlier deadline.
 func (c *AdmissionController) Schedule() []SeqRequest {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1186,9 +1205,15 @@ func (c *AdmissionController) scheduleLocked() []SeqRequest {
 		return nil
 	}
 
-	isWeightedFair := c.orderPolicy == session.WeightedFair || (c.scheduler != nil && c.scheduler.Policy() == session.WeightedFair)
+	isEDF := c.policy.Mode == AdmissionModeEDF
+	isWeightedFair := !isEDF && (c.orderPolicy == session.WeightedFair || (c.scheduler != nil && c.scheduler.Policy() == session.WeightedFair))
 	if !isWeightedFair {
 		sort.SliceStable(c.waiting, func(i, j int) bool {
+			if isEDF {
+				if before, decided := deadlineOrder(c.waiting[i].req, c.waiting[j].req); decided {
+					return before
+				}
+			}
 			ei, ej := c.effectivePriorityLocked(c.waiting[i]), c.effectivePriorityLocked(c.waiting[j])
 			if ei != ej {
 				return ei < ej // lower effective priority value served first
@@ -1622,9 +1647,9 @@ func (c *AdmissionController) prefillFitsLocked(tickPrompt int, req SeqRequest) 
 	return budget <= 0 || tickPrompt == 0 || tickPrompt+req.promptTokens() <= budget
 }
 
-// deadlineOrder is the EDF tiebreak within equal effective priority, adapted from
-// microsoft/vidur EDF request queue ordering: the earlier deadline (CreatedAt+DecodeTTL)
-// is served first and a request with no deadline sorts after every one that has one.
+// deadlineOrder is the primary EDF order or the default policy's equal-priority
+// tiebreak, adapted from microsoft/vidur EDF request queue ordering. The earlier
+// effective deadline is served first; requests without deadlines sort last.
 // decided is false when neither carries a deadline or both deadlines are equal, so the
 // FIFO tiebreak stands.
 func deadlineOrder(a, b SeqRequest) (before, decided bool) {
@@ -1643,10 +1668,14 @@ func deadlineOrder(a, b SeqRequest) (before, decided bool) {
 }
 
 func requestDeadline(r SeqRequest) (time.Time, bool) {
-	if r.DecodeTTL <= 0 || r.CreatedAt.IsZero() {
-		return time.Time{}, false
+	deadline := r.Deadline
+	if r.DecodeTTL > 0 && !r.CreatedAt.IsZero() {
+		ttl := r.CreatedAt.Add(r.DecodeTTL)
+		if deadline.IsZero() || ttl.Before(deadline) {
+			deadline = ttl
+		}
 	}
-	return r.CreatedAt.Add(r.DecodeTTL), true
+	return deadline, !deadline.IsZero()
 }
 
 // effectivePriorityLocked is a waiting request's priority adjusted for how long it has

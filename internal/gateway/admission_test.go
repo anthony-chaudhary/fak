@@ -873,3 +873,82 @@ func TestAdmissionSplitPrefillAndTotalBudget(t *testing.T) {
 		t.Fatalf("prefill budget disabled: second round admitted %v, want none", ids(second))
 	}
 }
+
+// fak-test:runtime fast est=2ms lane=default
+func TestAdmissionEDFMode(t *testing.T) {
+	at := time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name     string
+		mode     AdmissionMode
+		weighted bool
+		want     []string
+	}{
+		{"default", AdmissionModePriority, false, []string{"none", "late", "ttl", "early", "tie"}},
+		{"edf", AdmissionModeEDF, false, []string{"ttl", "early", "tie", "late", "none"}},
+		{"edf_over_weighted_fair", AdmissionModeEDF, true, []string{"ttl", "early", "tie", "late", "none"}},
+		{"unknown_mode", AdmissionMode(255), false, []string{"none", "late", "ttl", "early", "tie"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := NewAdmissionController(AdmissionPolicy{Mode: tc.mode, MaxNumSeqs: 1, TokenBudget: 4, MaxWaiting: 8})
+			c.SetClock(func() time.Time { return at })
+			if tc.weighted {
+				c.SetOrder(session.WeightedFair)
+			}
+			if v := c.Offer(SeqRequest{TraceID: "blocker", Tokens: 4}); v != VerdictAdmitted {
+				t.Fatal(v)
+			}
+			for _, req := range []SeqRequest{
+				{TraceID: "none", Priority: 0, Tokens: 2},
+				{TraceID: "late", Priority: 1, Tokens: 2, Deadline: at.Add(time.Minute)},
+				{TraceID: "tie", Priority: 4, Tokens: 2, Deadline: at.Add(10 * time.Second)},
+				{TraceID: "early", Priority: 3, Tokens: 2, Deadline: at.Add(10 * time.Second)},
+				{TraceID: "ttl", Priority: 2, Tokens: 2, Deadline: at.Add(30 * time.Second), CreatedAt: at, DecodeTTL: time.Second},
+			} {
+				if v := c.Offer(req); v != VerdictQueued {
+					t.Fatalf("%s = %s, want queued", req.TraceID, v)
+				}
+			}
+			running := "blocker"
+			for i, want := range tc.want {
+				if !c.Complete(running) {
+					t.Fatalf("Complete(%s) failed", running)
+				}
+				got := c.Schedule()
+				if len(got) != 1 || got[0].TraceID != want {
+					t.Fatalf("dequeue[%d] = %+v, want %s", i, got, want)
+				}
+				running = got[0].TraceID
+			}
+			c.Complete(running)
+			if st := c.Stats(); st.Running != 0 || st.Waiting != 0 || st.TokensInUse != 0 || st.QueuedTokens != 0 {
+				t.Fatalf("final accounting = %+v", st)
+			}
+		})
+	}
+}
+
+// fak-test:runtime fast est=1ms lane=default
+func TestAdmissionEDFPreservesBudgetHeadOfLine(t *testing.T) {
+	at := time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC)
+	c := NewAdmissionController(AdmissionPolicy{Mode: AdmissionModeEDF, MaxNumSeqs: 3,
+		TokenBudget: 6, PrefillTokenBudget: 3, MaxWaiting: 8})
+	c.SetClock(func() time.Time { return at })
+	c.Offer(SeqRequest{TraceID: "blocker", Tokens: 4})
+	c.Offer(SeqRequest{TraceID: "urgent", Priority: 9, Tokens: 4, PromptTokens: 2, Deadline: at.Add(time.Second)})
+	c.Offer(SeqRequest{TraceID: "later", Priority: 1, Tokens: 2, PromptTokens: 2, Deadline: at.Add(time.Minute)})
+	if got := c.Schedule(); len(got) != 0 {
+		t.Fatalf("urgent over-budget head was bypassed: %+v", got)
+	}
+	c.Complete("blocker")
+	if got := c.Schedule(); len(got) != 1 || got[0].TraceID != "urgent" {
+		t.Fatalf("prefill round budget not preserved: %+v", got)
+	}
+	if got := c.Schedule(); len(got) != 1 || got[0].TraceID != "later" {
+		t.Fatalf("next round did not fill remaining token capacity: %+v", got)
+	}
+	if st := c.Stats(); st.Running != 2 || st.TokensInUse != 6 || st.Waiting != 0 || st.QueuedTokens != 0 {
+		t.Fatalf("budget accounting = %+v", st)
+	}
+	c.Complete("urgent")
+	c.Complete("later")
+}
