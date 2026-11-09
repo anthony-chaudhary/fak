@@ -34,8 +34,17 @@ func q4kMatRowsRangeArchRaw(raw []byte, qt *q4kTensor, x, y []float32, lo, hi in
 		return false
 	}
 	nblk := qt.nblk
-	ds := make([]float32, nblk*8)
-	ms := make([]float32, nblk*8)
+	// Scale/min factors are call-local and the assembly does not retain them.
+	// Bound stack use at 8 KiB for ordinary projections; wider inputs retain
+	// the existing heap path. Every consumed entry is overwritten per row.
+	const stackBlocks = 128 // 32,768 input elements.
+	var dsLocal, msLocal [stackBlocks * 8]float32
+	var ds, ms []float32
+	if nblk <= stackBlocks {
+		ds, ms = dsLocal[:nblk*8], msLocal[:nblk*8]
+	} else {
+		ds, ms = make([]float32, nblk*8), make([]float32, nblk*8)
+	}
 	rowBytes := qt.q4kRowBytes()
 	for o := lo; o < hi; o++ {
 		row := raw[o*rowBytes : o*rowBytes+rowBytes]
