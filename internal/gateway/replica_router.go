@@ -452,6 +452,7 @@ func (r *ReplicaDispatch) pickDistinctReplica(primary string) (PlannerReplica, b
 	return PlannerReplica{}, false
 }
 func (r *ReplicaDispatch) Complete(ctx context.Context, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+	opts = r.resolveHTTPSampleOpts(opts)
 	route, err := r.reserveForMessages(messages, opts)
 	if err != nil {
 		return nil, err
@@ -593,6 +594,7 @@ func (r *ReplicaDispatch) StreamingSupported() bool {
 }
 
 func (r *ReplicaDispatch) CompleteStream(ctx context.Context, sink agent.StreamSink, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (comp *agent.Completion, err error) {
+	opts = r.resolveHTTPSampleOpts(opts)
 	route, err := r.reserveForMessages(messages, opts)
 	if err != nil {
 		return nil, err
