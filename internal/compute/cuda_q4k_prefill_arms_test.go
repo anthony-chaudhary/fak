@@ -68,6 +68,46 @@ func TestCheckCUDAQ4KPrefillArmArchAndImplementation(t *testing.T) {
 	}
 }
 
+// TestResolveCUDAQ4KPrefillArmDefaultIsArchAware pins the unset-env default: mmq from its sm_80
+// floor up (the same-card sm_120 ABBA receipt, greedy output byte-identical), compensated below
+// it and when the arch is unknown, and an explicit env value always wins over the default.
+//
+// fak-test:runtime fast est=1s
+func TestResolveCUDAQ4KPrefillArmDefaultIsArchAware(t *testing.T) {
+	cases := []struct {
+		env  string
+		sm   int
+		want CUDAQ4KPrefillArm
+	}{
+		{"", 0, CUDAQ4KPrefillCompensated},
+		{"", 75, CUDAQ4KPrefillCompensated},
+		{"", 80, CUDAQ4KPrefillMMQ},
+		{"", 89, CUDAQ4KPrefillMMQ},
+		{"", 90, CUDAQ4KPrefillMMQ},
+		{"", 120, CUDAQ4KPrefillMMQ},
+		{"compensated", 120, CUDAQ4KPrefillCompensated},
+		{"mmq", 80, CUDAQ4KPrefillMMQ},
+	}
+	for _, tc := range cases {
+		got, err := resolveCUDAQ4KPrefillArm(tc.env, tc.sm)
+		if err != nil || got != tc.want {
+			t.Errorf("resolveCUDAQ4KPrefillArm(%q, %d) = %q, %v; want %q", tc.env, tc.sm, got, err, tc.want)
+		}
+		if tc.env == "" && DefaultCUDAQ4KPrefillArm(tc.sm) != tc.want {
+			t.Errorf("DefaultCUDAQ4KPrefillArm(%d) = %q; want %q", tc.sm, DefaultCUDAQ4KPrefillArm(tc.sm), tc.want)
+		}
+		// The default must itself pass the arch admission it is resolved under.
+		if tc.env == "" && tc.sm > 0 {
+			if err := CheckCUDAQ4KPrefillArm(got, tc.sm); err != nil {
+				t.Errorf("default arm %q refused on sm_%d: %v", got, tc.sm, err)
+			}
+		}
+	}
+	if _, err := resolveCUDAQ4KPrefillArm("mmq", 75); !errors.Is(err, ErrCUDAQ4KPrefillArmArch) {
+		t.Errorf("explicit mmq on sm_75 = %v; want ErrCUDAQ4KPrefillArmArch", err)
+	}
+}
+
 // TestSetCUDAQ4KPrefillArmRefusalKeepsCurrentArm drives the runtime setter. A refused arm returns
 // its typed error and leaves the arm in use unchanged, with or without a CUDA device.
 //

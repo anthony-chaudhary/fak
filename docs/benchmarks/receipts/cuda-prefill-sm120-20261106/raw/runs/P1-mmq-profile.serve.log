@@ -1,0 +1,183 @@
+fak-cuda: q4k prefill arm=mmq
+fak-cuda: q4k decode arm=mmvq
+fak-cuda ts-profile mode=per_launch_event_pairs timing=event_pairs coverage=g_stream_launches graphs=disabled
+fak serve: WARNING — this is not a fak workspace; the dojo corpus, devindex, and session-state planes will bind THIS cwd, not a fak repo
+  reason: NOT_A_WORKSPACE
+  config: cwd /home/fak/cuda-prefill-sm120-20261106 = no dos.toml found walking upward  (want: a directory inside your fak checkout)
+  check:  git rev-parse --show-toplevel   # the repo this cwd actually resolves to
+          launch fak serve from a fak checkout, or set the MCP server entry's "cwd" to your fak workspace root
+  next:   fak recover NOT_A_WORKSPACE
+fak: loaded capability floor from /etc/fak/policy.json
+fak: cold resume (#629) — re-attached 926 session(s) drive state from /home/fak/.config/fak/session-state.snap
+{"schema":"fak.watchdog-autoheal.v1","verb":"serve","summary":true,"elapsed_ms":17,"specs":3,"noop":3}
+fak capabilities: version=go1.26.10 chip=linux/amd64 backends=cpu-ref
+  family=glm-5.3-flash formats=bf16,fp8 flags=- env=-
+  family=glm53 formats=bf16,fp8 flags=- env=-
+  family=ornith formats=fp8,q4_k_m flags=--gguf env=FAK_Q4K
+  family=qwen2.5 formats=q4_k_m,q8_0 flags=--gguf env=FAK_Q4K
+  family=qwen2.5-coder formats=q4_k_m flags=--gguf env=FAK_Q4K
+  family=qwen3.8 formats=fp8,q4_k_m,ud_q2_k_xl flags=--gguf env=FAK_Q4K,FAK_STREAM_Q4K
+  family=qwen38 formats=fp8,q4_k_m,ud_q2_k_xl flags=--gguf env=FAK_Q4K,FAK_STREAM_Q4K
+  family=smollm2 formats=q8_0 flags=--gguf env=-
+
+fak serve: host-peak admission: predicted host peak 21.07 GiB (steady 18.58 + transient 2.49) fits 26.75 GiB available with a 2.00 GiB margin
+fak serve: go memory limit: Go memory limit source=fitplan: 23.07 GiB
+fak: WARNING: quantized load conversion: source_quant=Q4_K class=dense dequant_tensors=104 source_bytes=2170552320 converted through temporary F32 during loading emitted_f32_bytes=15435038720 observed_conversion_tensors=104/104 (payload, not peak or final residency)
+fak: WARNING: quantized load conversion: source_quant=Q5_K class=dense dequant_tensors=48 source_bytes=1038090240 converted through temporary F32 during loading emitted_f32_bytes=6039797760 observed_conversion_tensors=48/48 (payload, not peak or final residency)
+fak: WARNING: quantized load conversion: source_quant=Q6_K class=dense dequant_tensors=24 source_bytes=1032192000 converted through temporary F32 during loading emitted_f32_bytes=5033164800 observed_conversion_tensors=24/24 (payload, not peak or final residency)
+fak serve: fit_confirm model=Qwen3.8-27B-Q4_K_M.gguf backend=cuda | device: total=25244663808 free_after=24863768576 weights=19952961536 kv=962199552 compute/staging=23578624 unaccounted=-20557844480 | host: total=33039650816 free_after=5179801600 unaccounted=27859849216
+fak serve: fak_mem_plan_diff phase=load predicted=20938739712 actual=33554432 delta=-20905185280 unaccounted=347340800 mem_info_known=true top=workspace_cublas:33554432 weights=19952961536/0/-19952961536 kv_cache=805306368/0/-805306368 recurrent_state=156893184/0/-156893184 activations_scratch=23578624/0/-23578624 workspace_cublas=0/33554432/33554432
+fak serve: go memory limit: Go memory limit already in force (23.07 GiB) kept; host_fraction target 26.15 GiB not applied
+fak serve: lm_head=cpu-q6k resident_total=19028.63MiB q6k_embed=0.00MiB tied_embed_f32=0.00MiB tied_head_q8=0.00MiB decode=17.91GiB/tok
+fak serve: agent cache warm unconfigured (no readable AGENTS.md under "")
+2026/11/06 23:51:38 fak gateway listening on http://127.0.0.1:18181 (planner=inkernel engine=inkernel model=Qwen3.8-27B-Q4_K_M vdso=true auth=false)
+2026/11/06 23:51:38 fak cache: idle — realized KV-prefix reuse appears here per in-kernel turn (scrape /metrics fak_gateway_kv_prefix_* for the full family)
+2026/11/06 23:51:38 {"bytes":962,"duration_ms":0.224,"event":"gateway_http_request","method":"GET","path":"/readyz","route":"other","status":503,"trace_id":"unkeyed-96005d3a8fb7224b","user_agent":"curl/8.23.0"}
+2026/11/06 23:51:39 fak_mem_plan_diff phase=first_prefill predicted=20136382464 actual=19488197632 delta=-648184832 unaccounted=622703616 mem_info_known=true top=kv_cache:47382528,workspace_cublas:33554432,idle_pool:9537792 weights=19952961536/19237799936/-715161600 kv_cache=2949120/50331648/47382528 recurrent_state=156893184/156893184/0 activations_scratch=23578624/80640/-23497984 workspace_cublas=0/33554432/33554432 idle_pool=0/9537792/9537792
+2026/11/06 23:51:39 inkernel_chat model=Qwen3.8-27B-Q4_K_M backend=cuda forward_path=cuda/qwen35-gdn-ssm-decode-v1 host=sample q4k=true prompt=14tok cacheable=0tok reused=0tok prefill=14tok/1.48s/9.5tok/s decode=1tok/0.00s/0.0tok/s gemm=none kv=fp32
+2026/11/06 23:51:41 {"bytes":962,"duration_ms":0.095,"event":"gateway_http_request","method":"GET","path":"/readyz","route":"other","status":503,"trace_id":"unkeyed-c00c612f12a9e7d0","user_agent":"curl/8.23.0"}
+2026/11/06 23:51:41 inkernel_chat model=Qwen3.8-27B-Q4_K_M backend=cuda forward_path=cuda/qwen35-gdn-ssm-decode-v1 host=sample,embedding_row_upload q4k=true prompt=31tok cacheable=0tok reused=0tok prefill=31tok/0.69s/44.9tok/s decode=20tok/1.14s/16.7tok/s gemm=none kv=fp32
+fak-cuda ts-profile batches=32 ops/batch=1225.8 gpu_ms/batch=86.413 wall_ms/batch=90.366 truncated=0 timing=event_pairs graphs=disabled
+fak-cuda ts-stage kernel=k_qwen35_gdn_fused_in_proj groups=16480x31 calls/batch=1.50 ms/batch=11.336 us/call=7557.31 share=13.1%
+fak-cuda ts-stage kernel=k_qwen35_gdn_fused_in_proj groups=16480x1 calls/batch=43.50 ms/batch=10.997 us/call=252.79 share=12.7%
+fak-cuda ts-stage kernel=k_q4k_mmvq_gemv groups=17408x1 calls/batch=116.00 ms/batch=10.523 us/call=90.71 share=12.2%
+fak-cuda ts-stage kernel=k_qwen35_gdn_fused_in_proj groups=16480x14 calls/batch=3.00 ms/batch=7.831 us/call=2610.32 share=9.1%
+fak-cuda ts-stage kernel=k_q6k_gemm groups=640x1 calls/batch=29.00 ms/batch=5.464 us/call=188.43 share=6.3%
+fak-cuda ts-stage kernel=k_qwen35_gdn_out_proj groups=5120x1 calls/batch=43.50 ms/batch=4.334 us/call=99.63 share=5.0%
+fak-cuda ts-stage kernel=k_qwen35_gdn_out_proj groups=5120x31 calls/batch=1.50 ms/batch=4.152 us/call=2768.14 share=4.8%
+fak-cuda ts-stage kernel=k_q4k_mmvq_gemv groups=5120x1 calls/batch=43.50 ms/batch=3.123 us/call=71.79 share=3.6%
+fak-cuda ts-stage kernel=k_q6k_gemm_panel groups=640x8 calls/batch=1.00 ms/batch=2.940 us/call=2939.56 share=3.4%
+fak-cuda ts-stage kernel=k_qwen35_gdn_out_proj groups=5120x14 calls/batch=3.00 ms/batch=2.848 us/call=949.28 share=3.3%
+fak-cuda ts-stage kernel=k_rmsnorm groups=1x1 calls/batch=116.91 ms/batch=2.505 us/call=21.43 share=2.9%
+fak-cuda ts-stage kernel=k_q6k_gemm_panel groups=640x4 calls/batch=2.00 ms/batch=2.142 us/call=1071.08 share=2.5%
+fak-cuda ts-stage kernel=k_q6k_gemm groups=31040x1 calls/batch=1.00 ms/batch=2.112 us/call=2111.92 share=2.4%
+fak-cuda ts-stage kernel=mul_mat_q groups=82x1 calls/batch=17.25 ms/batch=1.888 us/call=109.45 share=2.2%
+fak-cuda ts-stage kernel=k_q8_gemm groups=1536x1 calls/batch=14.50 ms/batch=1.862 us/call=128.40 share=2.2%
+fak-cuda ts-stage kernel=k_qwen35_gdn_recurrent_gated_norm_regstate groups=48x1 calls/batch=43.50 ms/batch=1.618 us/call=37.20 share=1.9%
+fak-cuda ts-stage kernel=k_flash_attention groups=24x1 calls/batch=14.50 ms/batch=1.417 us/call=97.74 share=1.6%
+fak-cuda ts-stage kernel=k_q8_gemm groups=1536x31 calls/batch=0.50 ms/batch=1.143 us/call=2286.24 share=1.3%
+fak-cuda ts-stage kernel=k_q8_gemm groups=1536x14 calls/batch=1.00 ms/batch=0.918 us/call=917.51 share=1.1%
+fak-cuda ts-stage kernel=quantize_q8_1 groups=20x1 calls/batch=123.25 ms/batch=0.696 us/call=5.65 share=0.8%
+fak-cuda ts-stage kernel=k_add groups=20x1 calls/batch=116.00 ms/batch=0.695 us/call=5.99 share=0.8%
+fak-cuda ts-stage kernel=k_rmsnorm groups=14x1 calls/batch=8.06 ms/batch=0.643 us/call=79.73 share=0.7%
+fak-cuda ts-stage kernel=k_argmax groups=1x1 calls/batch=0.91 ms/batch=0.447 us/call=493.06 share=0.5%
+fak-cuda ts-stage kernel=k_qwen35_gdn_conv_state groups=40x1 calls/batch=43.50 ms/batch=0.410 us/call=9.42 share=0.5%
+fak-cuda ts-stage kernel=k_qwen35_gdn_qk_norm groups=16x1 calls/batch=43.50 ms/batch=0.395 us/call=9.09 share=0.5%
+fak-cuda ts-stage kernel=k_swiglu groups=68x1 calls/batch=58.00 ms/batch=0.394 us/call=6.78 share=0.5%
+fak-cuda ts-stage kernel=k_qwen35_gdn_recurrent_panel_cols groups=192x1 calls/batch=4.50 ms/batch=0.319 us/call=70.84 share=0.4%
+fak-cuda ts-stage kernel=k_q8_gemm groups=128x1 calls/batch=14.50 ms/batch=0.251 us/call=17.34 share=0.3%
+fak-cuda ts-stage kernel=k_copyrow groups=4x1 calls/batch=43.50 ms/batch=0.223 us/call=5.13 share=0.3%
+fak-cuda ts-stage kernel=k_qwen35_gdn_conv_panel_tiled groups=40x1 calls/batch=4.50 ms/batch=0.206 us/call=45.76 share=0.2%
+fak-cuda ts-stage kernel=k_q8_quant_act groups=160x1 calls/batch=29.00 ms/batch=0.181 us/call=6.25 share=0.2%
+fak-cuda ts-stage kernel=k_q6k_gemm groups=128x1 calls/batch=7.25 ms/batch=0.179 us/call=24.67 share=0.2%
+fak-cuda ts-stage kernel=k_partial_rope_copy groups=24x1 calls/batch=14.50 ms/batch=0.171 us/call=11.77 share=0.2%
+fak-cuda ts-stage kernel=quantize_q8_1 groups=68x1 calls/batch=29.00 ms/batch=0.162 us/call=5.58 share=0.2%
+fak-cuda ts-stage kernel=k_partial_rope_copy groups=4x1 calls/batch=14.50 ms/batch=0.159 us/call=10.93 share=0.2%
+fak-cuda ts-stage kernel=mul_mat_q_stream_k_fixup groups=82x4 calls/batch=17.25 ms/batch=0.141 us/call=8.18 share=0.2%
+fak-cuda ts-stage kernel=k_rmsnorm groups=24x1 calls/batch=14.50 ms/batch=0.103 us/call=7.12 share=0.1%
+fak-cuda ts-stage kernel=k_rmsnorm groups=4x1 calls/batch=14.50 ms/batch=0.100 us/call=6.91 share=0.1%
+fak-cuda ts-stage kernel=k_q8_gemm groups=128x31 calls/batch=0.50 ms/batch=0.095 us/call=190.56 share=0.1%
+fak-cuda ts-stage kernel=k_q4k_mmvq_gemv groups=1024x1 calls/batch=7.25 ms/batch=0.087 us/call=11.96 share=0.1%
+2026/11/06 23:51:43 {"bytes":962,"duration_ms":0.113,"event":"gateway_http_request","method":"GET","path":"/readyz","route":"other","status":503,"trace_id":"unkeyed-eb4d1cfff3d9d6a8","user_agent":"curl/8.23.0"}
+2026/11/06 23:51:43 inkernel_chat model=Qwen3.8-27B-Q4_K_M backend=cuda forward_path=cuda/qwen35-gdn-ssm-decode-v1 host=sample,embedding_row_upload q4k=true prompt=14tok cacheable=0tok reused=0tok prefill=14tok/0.27s/51.7tok/s decode=32tok/1.78s/17.4tok/s gemm=none kv=fp32
+2026/11/06 23:51:43 [DECODE-CONFIRM] 32 tokens in 2.092s (55.6 ms/step)
+fak serve: decode_confirm: no fitplan nominal available (fits); measurement not recorded
+2026/11/06 23:51:43 [READY] server warmup completed in 5.596s — gateway is ready on http://127.0.0.1:18181
+2026/11/06 23:51:45 {"bytes":963,"duration_ms":0.244,"event":"gateway_http_request","method":"GET","path":"/readyz","route":"other","status":200,"trace_id":"unkeyed-a087541133092fde","user_agent":"curl/8.23.0"}
+2026/11/06 23:51:45 leaseref: no git object DB in /home/fak/cuda-prefill-sm120-20261106; session side-ref publishing disabled
+2026/11/06 23:51:50 inkernel_chat model=Qwen3.8-27B-Q4_K_M backend=cuda forward_path=cuda/qwen35-gdn-ssm-decode-v1 host=sample q4k=true prompt=625tok cacheable=0tok reused=0tok prefill=625tok/5.34s/117.1tok/s decode=1tok/0.00s/0.0tok/s gemm=none kv=fp32
+2026/11/06 23:51:50 {"cache_creation_input_tokens":0,"cache_creation_span":"none","cache_read_input_tokens":0,"cached_prompt_tokens":0,"compaction_fired":false,"completion_tokens":1,"context_event":false,"duration_ms":5399.399,"event":"gateway_inference_turn","finish_reason":"length","model":"Qwen3.8-27B-Q4_K_M","prompt_tokens":625,"stream":true,"total_tokens":626,"trace_id":"unkeyed-conversation-938b9311a0e5f43a2213d15fedff056db6908b1feb0e71a6d5203a4a320c261f","wire":"openai_chat_completions"}
+2026/11/06 23:51:50 {"cache_aligned":false,"cache_ratio":0,"cache_write_tokens":0,"cached_tokens":0,"event":"gateway_usage_record","family":"unkeyed-conversation-938b9311a0e5f43a2213d15fedff056db6908b1feb0e71a6d5203a4a320c261f","input_tokens":625,"output_tokens":1,"reasoning_tokens":0,"request_ordinal":1,"stream":true,"trace_id":"unkeyed-conversation-938b9311a0e5f43a2213d15fedff056db6908b1feb0e71a6d5203a4a320c261f","unix_millis":1794009110481,"wire":"openai_chat_completions"}
+2026/11/06 23:51:50 {"bytes":1180,"duration_ms":5428.919,"event":"gateway_http_request","feature_used":[],"method":"POST","path":"/v1/chat/completions","route":"/v1/chat/completions","status":200,"trace_id":"unkeyed-conversation-938b9311a0e5f43a2213d15fedff056db6908b1feb0e71a6d5203a4a320c261f","user_agent":"Go-http-client/1.1"}
+2026/11/06 23:52:05 inkernel_chat model=Qwen3.8-27B-Q4_K_M backend=cuda forward_path=cuda/qwen35-gdn-ssm-decode-v1 host=sample q4k=true prompt=2354tok cacheable=0tok reused=0tok prefill=2354tok/15.04s/156.5tok/s decode=1tok/0.00s/0.0tok/s gemm=none kv=fp32
+2026/11/06 23:52:05 {"cache_creation_input_tokens":0,"cache_creation_span":"none","cache_read_input_tokens":0,"cached_prompt_tokens":0,"compaction_fired":false,"completion_tokens":1,"context_event":false,"duration_ms":15085.693,"event":"gateway_inference_turn","finish_reason":"length","model":"Qwen3.8-27B-Q4_K_M","prompt_tokens":2354,"stream":true,"total_tokens":2355,"trace_id":"unkeyed-conversation-cb212cb5ed00a2d364834af5768dfbf19c0a3cd37435f2e1b8a3e3bee9749cc5","wire":"openai_chat_completions"}
+2026/11/06 23:52:05 {"cache_aligned":false,"cache_ratio":0,"cache_write_tokens":0,"cached_tokens":0,"event":"gateway_usage_record","family":"unkeyed-conversation-cb212cb5ed00a2d364834af5768dfbf19c0a3cd37435f2e1b8a3e3bee9749cc5","input_tokens":2354,"output_tokens":1,"reasoning_tokens":0,"request_ordinal":1,"stream":true,"trace_id":"unkeyed-conversation-cb212cb5ed00a2d364834af5768dfbf19c0a3cd37435f2e1b8a3e3bee9749cc5","unix_millis":1794009125578,"wire":"openai_chat_completions"}
+2026/11/06 23:52:05 {"bytes":1220,"duration_ms":15095.707,"event":"gateway_http_request","feature_used":[],"method":"POST","path":"/v1/chat/completions","route":"/v1/chat/completions","status":200,"trace_id":"unkeyed-conversation-cb212cb5ed00a2d364834af5768dfbf19c0a3cd37435f2e1b8a3e3bee9749cc5","user_agent":"Go-http-client/1.1"}
+fak-cuda ts-profile batches=64 ops/batch=1359.0 gpu_ms/batch=404.993 wall_ms/batch=409.912 truncated=0 timing=event_pairs graphs=disabled
+fak-cuda ts-stage kernel=k_q6k_gemm_panel groups=640x128 calls/batch=2.50 ms/batch=121.344 us/call=48537.71 share=30.0%
+fak-cuda ts-stage kernel=k_qwen38_causal_attention_panel_hd256_splitkv_partial groups=24576x1 calls/batch=0.50 ms/batch=23.016 us/call=46032.52 share=5.7%
+fak-cuda ts-stage kernel=k_qwen35_gdn_fused_in_proj groups=16480x113 calls/batch=0.75 ms/batch=20.287 us/call=27048.86 share=5.0%
+fak-cuda ts-stage kernel=cublas_gemm_ex groups=10240x512 calls/batch=11.25 ms/batch=14.633 us/call=1300.71 share=3.6%
+fak-cuda ts-stage kernel=mul_mat_q groups=544x1 calls/batch=10.00 ms/batch=14.511 us/call=1451.12 share=3.6%
+fak-cuda ts-stage kernel=k_q6k_gemm_panel groups=640x77 calls/batch=0.50 ms/batch=14.010 us/call=28020.40 share=3.5%
+fak-cuda ts-stage kernel=k_q6k_gemm_panel groups=640x71 calls/batch=0.50 ms/batch=13.394 us/call=26787.96 share=3.3%
+fak-cuda ts-stage kernel=k_q8_gemm_rowtile groups=64x384 calls/batch=1.25 ms/batch=11.569 us/call=9255.19 share=2.9%
+fak-cuda ts-stage kernel=k_qwen38_causal_attention_panel_hd256 groups=12288x1 calls/batch=0.75 ms/batch=10.724 us/call=14299.17 share=2.6%
+fak-cuda ts-stage kernel=k_qwen38_causal_attention_panel_hd256_splitkv_partial groups=22032x1 calls/batch=0.25 ms/batch=10.100 us/call=40399.12 share=2.5%
+fak-cuda ts-stage kernel=k_qwen35_gdn_fused_in_proj groups=16480x1 calls/batch=39.75 ms/batch=9.962 us/call=250.62 share=2.5%
+fak-cuda ts-stage kernel=k_q4k_mmvq_gemv groups=17408x1 calls/batch=106.00 ms/batch=9.602 us/call=90.58 share=2.4%
+fak-cuda ts-stage kernel=k_qwen35_gdn_recurrent_panel_cols groups=192x1 calls/batch=8.25 ms/batch=8.943 us/call=1083.99 share=2.2%
+fak-cuda ts-stage kernel=cublas_gemm_ex groups=6144x512 calls/batch=11.25 ms/batch=8.324 us/call=739.88 share=2.1%
+fak-cuda ts-stage kernel=cublas_gemm_ex groups=5120x512 calls/batch=11.25 ms/batch=8.296 us/call=737.40 share=2.0%
+fak-cuda ts-stage kernel=k_qwen35_gdn_out_proj groups=5120x113 calls/batch=0.75 ms/batch=7.726 us/call=10301.54 share=1.9%
+fak-cuda ts-stage kernel=k_qwen35_gdn_fused_in_proj groups=16480x31 calls/batch=0.75 ms/batch=5.668 us/call=7557.31 share=1.4%
+fak-cuda ts-stage kernel=k_q8_dequant_split groups=122880x1 calls/batch=10.50 ms/batch=5.341 us/call=508.66 share=1.3%
+fak-cuda ts-stage kernel=k_q6k_gemm groups=640x1 calls/batch=26.50 ms/batch=4.964 us/call=187.33 share=1.2%
+fak-cuda ts-stage kernel=k_q6k_gemm_panel groups=640x29 calls/batch=0.50 ms/batch=4.955 us/call=9910.41 share=1.2%
+fak-cuda ts-stage kernel=k_q8_dequant_split groups=204800x1 calls/batch=5.25 ms/batch=4.420 us/call=841.84 share=1.1%
+fak-cuda ts-stage kernel=mul_mat_q groups=160x1 calls/batch=3.75 ms/batch=4.266 us/call=1137.58 share=1.1%
+fak-cuda ts-stage kernel=k_qwen35_gdn_out_proj groups=5120x1 calls/batch=39.75 ms/batch=3.930 us/call=98.88 share=1.0%
+fak-cuda ts-stage kernel=k_qwen35_gdn_fused_in_proj groups=16480x14 calls/batch=1.50 ms/batch=3.915 us/call=2610.32 share=1.0%
+fak-cuda ts-stage kernel=mul_mat_q groups=408x1 calls/batch=4.00 ms/batch=3.634 us/call=908.56 share=0.9%
+fak-cuda ts-stage kernel=mul_mat_q groups=82x1 calls/batch=13.88 ms/batch=3.045 us/call=219.43 share=0.8%
+fak-cuda ts-stage kernel=k_q4k_mmvq_gemv groups=5120x1 calls/batch=39.75 ms/batch=2.848 us/call=71.65 share=0.7%
+fak-cuda ts-stage kernel=k_rmsnorm groups=1x1 calls/batch=106.83 ms/batch=2.288 us/call=21.42 share=0.6%
+fak-cuda ts-stage kernel=k_qwen35_gdn_conv_panel_tiled groups=40x8 calls/batch=3.75 ms/batch=2.155 us/call=574.55 share=0.5%
+fak-cuda ts-stage kernel=k_qwen35_gdn_out_proj groups=5120x31 calls/batch=0.75 ms/batch=2.076 us/call=2768.14 share=0.5%
+fak-cuda ts-stage kernel=k_q6k_gemm_panel groups=128x128 calls/batch=0.62 ms/batch=1.972 us/call=3155.33 share=0.5%
+fak-cuda ts-stage kernel=k_q8_gemm groups=1536x113 calls/batch=0.25 ms/batch=1.966 us/call=7864.42 share=0.5%
+fak-cuda ts-stage kernel=k_q6k_gemm groups=31040x1 calls/batch=0.92 ms/batch=1.950 us/call=2115.48 share=0.5%
+fak-cuda ts-stage kernel=k_qwen35_gdn_out_norm_panel groups=512x48 calls/batch=3.75 ms/batch=1.708 us/call=455.59 share=0.4%
+fak-cuda ts-stage kernel=k_q8_gemm groups=1536x1 calls/batch=13.25 ms/batch=1.702 us/call=128.43 share=0.4%
+fak-cuda ts-stage kernel=k_flash_attention groups=24x1 calls/batch=13.25 ms/batch=1.627 us/call=122.82 share=0.4%
+fak-cuda ts-stage kernel=cublas_gemm_ex groups=10240x283 calls/batch=2.25 ms/batch=1.561 us/call=693.79 share=0.4%
+fak-cuda ts-stage kernel=cublas_gemm_ex groups=10240x306 calls/batch=2.25 ms/batch=1.511 us/call=671.42 share=0.4%
+fak-cuda ts-stage kernel=k_qwen35_gdn_recurrent_gated_norm_regstate groups=48x1 calls/batch=39.75 ms/batch=1.474 us/call=37.08 share=0.4%
+fak-cuda ts-stage kernel=k_q6k_gemm_panel groups=640x8 calls/batch=0.50 ms/batch=1.470 us/call=2939.56 share=0.4%
+fak-cuda ts-profile batches=96 ops/batch=1304.3 gpu_ms/batch=289.031 wall_ms/batch=293.701 truncated=0 timing=event_pairs graphs=disabled
+fak-cuda ts-stage kernel=k_q6k_gemm_panel groups=640x128 calls/batch=1.67 ms/batch=80.896 us/call=48537.71 share=28.0%
+fak-cuda ts-stage kernel=k_qwen38_causal_attention_panel_hd256_splitkv_partial groups=24576x1 calls/batch=0.33 ms/batch=15.344 us/call=46032.52 share=5.3%
+fak-cuda ts-stage kernel=k_qwen35_gdn_fused_in_proj groups=16480x113 calls/batch=0.50 ms/batch=13.524 us/call=27048.86 share=4.7%
+fak-cuda ts-stage kernel=k_qwen35_gdn_fused_in_proj groups=16480x1 calls/batch=42.50 ms/batch=9.991 us/call=235.09 share=3.5%
+fak-cuda ts-stage kernel=k_q4k_mmvq_gemv groups=17408x1 calls/batch=113.33 ms/batch=9.828 us/call=86.72 share=3.4%
+fak-cuda ts-stage kernel=cublas_gemm_ex groups=10240x512 calls/batch=7.50 ms/batch=9.755 us/call=1300.71 share=3.4%
+fak-cuda ts-stage kernel=mul_mat_q groups=544x1 calls/batch=6.67 ms/batch=9.674 us/call=1451.12 share=3.3%
+fak-cuda ts-stage kernel=k_q6k_gemm_panel groups=640x77 calls/batch=0.33 ms/batch=9.340 us/call=28020.40 share=3.2%
+fak-cuda ts-stage kernel=k_q6k_gemm_panel groups=640x71 calls/batch=0.33 ms/batch=8.929 us/call=26787.96 share=3.1%
+fak-cuda ts-stage kernel=k_q8_gemm_rowtile groups=64x384 calls/batch=0.83 ms/batch=7.713 us/call=9255.19 share=2.7%
+fak-cuda ts-stage kernel=k_qwen38_causal_attention_panel_hd256 groups=12288x1 calls/batch=0.50 ms/batch=7.150 us/call=14299.17 share=2.5%
+fak-cuda ts-stage kernel=k_qwen38_causal_attention_panel_hd256_splitkv_partial groups=22032x1 calls/batch=0.17 ms/batch=6.733 us/call=40399.12 share=2.3%
+fak-cuda ts-stage kernel=k_qwen35_gdn_recurrent_panel_cols groups=192x1 calls/batch=5.50 ms/batch=5.962 us/call=1083.99 share=2.1%
+fak-cuda ts-stage kernel=cublas_gemm_ex groups=6144x512 calls/batch=7.50 ms/batch=5.549 us/call=739.88 share=1.9%
+fak-cuda ts-stage kernel=cublas_gemm_ex groups=5120x512 calls/batch=7.50 ms/batch=5.530 us/call=737.40 share=1.9%
+fak-cuda ts-stage kernel=k_qwen35_gdn_out_proj groups=5120x113 calls/batch=0.50 ms/batch=5.151 us/call=10301.54 share=1.8%
+fak-cuda ts-stage kernel=k_q6k_gemm groups=640x1 calls/batch=28.33 ms/batch=5.015 us/call=177.00 share=1.7%
+fak-cuda ts-stage kernel=k_flash_attention groups=24x1 calls/batch=14.17 ms/batch=4.930 us/call=348.02 share=1.7%
+fak-cuda ts-stage kernel=k_qwen35_gdn_out_proj groups=5120x1 calls/batch=42.50 ms/batch=3.956 us/call=93.08 share=1.4%
+fak-cuda ts-stage kernel=k_qwen35_gdn_fused_in_proj groups=16480x31 calls/batch=0.50 ms/batch=3.779 us/call=7557.31 share=1.3%
+fak-cuda ts-stage kernel=k_q8_dequant_split groups=122880x1 calls/batch=7.00 ms/batch=3.561 us/call=508.66 share=1.2%
+fak-cuda ts-stage kernel=k_q6k_gemm_panel groups=640x29 calls/batch=0.33 ms/batch=3.303 us/call=9910.41 share=1.1%
+fak-cuda ts-stage kernel=k_q8_dequant_split groups=204800x1 calls/batch=3.50 ms/batch=2.946 us/call=841.84 share=1.0%
+fak-cuda ts-stage kernel=k_q4k_mmvq_gemv groups=5120x1 calls/batch=42.50 ms/batch=2.910 us/call=68.48 share=1.0%
+fak-cuda ts-stage kernel=mul_mat_q groups=160x1 calls/batch=2.50 ms/batch=2.844 us/call=1137.58 share=1.0%
+fak-cuda ts-stage kernel=k_qwen35_gdn_fused_in_proj groups=16480x14 calls/batch=1.00 ms/batch=2.610 us/call=2610.32 share=0.9%
+fak-cuda ts-stage kernel=mul_mat_q groups=408x1 calls/batch=2.67 ms/batch=2.423 us/call=908.56 share=0.8%
+fak-cuda ts-stage kernel=k_rmsnorm groups=1x1 calls/batch=114.22 ms/batch=2.381 us/call=20.84 share=0.8%
+fak-cuda ts-stage kernel=mul_mat_q groups=82x1 calls/batch=9.25 ms/batch=2.030 us/call=219.43 share=0.7%
+fak-cuda ts-stage kernel=k_q6k_gemm groups=31040x1 calls/batch=0.95 ms/batch=1.895 us/call=1999.31 share=0.7%
+fak-cuda ts-stage kernel=k_q8_gemm groups=1536x1 calls/batch=14.17 ms/batch=1.762 us/call=124.35 share=0.6%
+fak-cuda ts-stage kernel=k_qwen35_gdn_recurrent_gated_norm_regstate groups=48x1 calls/batch=42.50 ms/batch=1.519 us/call=35.75 share=0.5%
+fak-cuda ts-stage kernel=k_qwen35_gdn_conv_panel_tiled groups=40x8 calls/batch=2.50 ms/batch=1.436 us/call=574.55 share=0.5%
+fak-cuda ts-stage kernel=k_qwen35_gdn_out_proj groups=5120x31 calls/batch=0.50 ms/batch=1.384 us/call=2768.14 share=0.5%
+fak-cuda ts-stage kernel=k_q6k_gemm_panel groups=128x128 calls/batch=0.42 ms/batch=1.315 us/call=3155.33 share=0.5%
+fak-cuda ts-stage kernel=k_q8_gemm groups=1536x113 calls/batch=0.17 ms/batch=1.311 us/call=7864.42 share=0.5%
+fak-cuda ts-stage kernel=k_qwen35_gdn_out_norm_panel groups=512x48 calls/batch=2.50 ms/batch=1.139 us/call=455.59 share=0.4%
+fak-cuda ts-stage kernel=cublas_gemm_ex groups=10240x283 calls/batch=1.50 ms/batch=1.041 us/call=693.79 share=0.4%
+fak-cuda ts-stage kernel=cublas_gemm_ex groups=10240x306 calls/batch=1.50 ms/batch=1.007 us/call=671.42 share=0.3%
+fak-cuda ts-stage kernel=k_q6k_gemm_panel groups=640x8 calls/batch=0.33 ms/batch=0.980 us/call=2939.56 share=0.3%
+2026/11/06 23:52:11 inkernel_chat model=Qwen3.8-27B-Q4_K_M backend=cuda forward_path=cuda/qwen35-gdn-ssm-decode-v1 host=sample,embedding_row_upload q4k=true prompt=283tok cacheable=0tok reused=0tok prefill=283tok/1.62s/175.2tok/s decode=64tok/3.90s/16.1tok/s gemm=none kv=fp32
+2026/11/06 23:52:11 {"cache_creation_input_tokens":0,"cache_creation_span":"none","cache_read_input_tokens":0,"cached_prompt_tokens":0,"compaction_fired":false,"completion_tokens":64,"context_event":false,"duration_ms":5576.221,"event":"gateway_inference_turn","finish_reason":"length","model":"Qwen3.8-27B-Q4_K_M","prompt_tokens":283,"stream":false,"total_tokens":347,"trace_id":"unkeyed-conversation-21550beb64f5324d289b44b6ad690d2bb87a78058ebc6cf2d0e3b6b40567eea6","wire":"openai_chat_completions"}
+2026/11/06 23:52:11 {"cache_aligned":false,"cache_ratio":0,"cache_write_tokens":0,"cached_tokens":0,"event":"gateway_usage_record","family":"unkeyed-conversation-21550beb64f5324d289b44b6ad690d2bb87a78058ebc6cf2d0e3b6b40567eea6","input_tokens":283,"output_tokens":64,"reasoning_tokens":0,"request_ordinal":1,"stream":false,"trace_id":"unkeyed-conversation-21550beb64f5324d289b44b6ad690d2bb87a78058ebc6cf2d0e3b6b40567eea6","unix_millis":1794009131173,"wire":"openai_chat_completions"}
+2026/11/06 23:52:11 {"bytes":904,"duration_ms":5583.485,"event":"gateway_http_request","feature_used":[],"method":"POST","path":"/v1/chat/completions","route":"/v1/chat/completions","status":200,"trace_id":"unkeyed-conversation-21550beb64f5324d289b44b6ad690d2bb87a78058ebc6cf2d0e3b6b40567eea6","user_agent":"curl/8.23.0"}
+2026/11/06 23:52:11 fak gateway shutdown: drain_timeout=5s inflight_requests=0
+fak: persisted live session drive state → /home/fak/.config/fak/session-state.snap (#629)

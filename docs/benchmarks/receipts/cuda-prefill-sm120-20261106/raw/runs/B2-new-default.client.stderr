@@ -1,0 +1,10 @@
+h2h run B2-new-default -> /home/fak/cuda-prefill-sm120-20261106/runs/B2-new-default.h2h.jsonl
+cold      fak        size=128    rep=0 prompt=191    cached=0      ttft=  1228.6ms prefill=  155.5t/s decode= 19.57t/s ok
+cold      fak        size=128    rep=1 prompt=191    cached=0      ttft=  1156.1ms prefill=  165.2t/s decode= 15.31t/s ok
+cold      fak        size=128    rep=2 prompt=191    cached=0      ttft=  1164.2ms prefill=  164.1t/s decode= 19.14t/s ok
+cold      fak        size=512    rep=0 prompt=624    cached=0      ttft=  5237.1ms prefill=  119.2t/s decode= 14.42t/s ok
+cold      fak        size=512    rep=1 prompt=623    cached=0      ttft=  5312.6ms prefill=  117.3t/s decode= 14.80t/s ok
+cold      fak        size=512    rep=2 prompt=623    cached=0      ttft=  5176.9ms prefill=  120.3t/s decode= 15.04t/s ok
+cold      fak        size=2048   rep=0 prompt=2353   cached=0      ttft= 15014.9ms prefill=  156.7t/s decode=  9.34t/s ok
+cold      fak        size=2048   rep=1 prompt=2352   cached=0      ttft= 15295.8ms prefill=  153.8t/s decode=  9.28t/s ok
+cold      fak        size=2048   rep=2 prompt=2353   cached=0      ttft= 15449.5ms prefill=  152.3t/s decode=  9.29t/s ok

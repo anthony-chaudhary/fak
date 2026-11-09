@@ -1,0 +1,10 @@
+h2h run L1-llama-b11870 -> /home/fak/cuda-prefill-sm120-20261106/runs/L1-llama-b11870.h2h.jsonl
+cold      llama      size=128    rep=0 prompt=199    cached=0      ttft=   407.8ms prefill=  488.0t/s decode= 29.82t/s ok
+cold      llama      size=128    rep=1 prompt=199    cached=0      ttft=   307.9ms prefill=  646.4t/s decode= 18.98t/s ok
+cold      llama      size=128    rep=2 prompt=199    cached=0      ttft=   322.3ms prefill=  617.5t/s decode= 29.08t/s ok
+cold      llama      size=512    rep=0 prompt=632    cached=0      ttft=   706.8ms prefill=  894.1t/s decode= 23.82t/s ok
+cold      llama      size=512    rep=1 prompt=631    cached=0      ttft=   690.9ms prefill=  913.2t/s decode= 23.37t/s ok
+cold      llama      size=512    rep=2 prompt=631    cached=0      ttft=   697.9ms prefill=  904.1t/s decode= 25.54t/s ok
+cold      llama      size=2048   rep=0 prompt=2361   cached=0      ttft=  2214.7ms prefill= 1066.0t/s decode= 23.70t/s ok
+cold      llama      size=2048   rep=1 prompt=2360   cached=0      ttft=  2240.7ms prefill= 1053.2t/s decode= 24.71t/s ok
+cold      llama      size=2048   rep=2 prompt=2361   cached=0      ttft=  2254.7ms prefill= 1047.2t/s decode= 24.94t/s ok

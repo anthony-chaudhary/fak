@@ -17,10 +17,11 @@ const cudaQ4KMMQMinCols = 8
 
 const (
 	// CUDAQ4KPrefillCompensated dequantizes the weight to an f32 transient and runs three
-	// compensated FP16 cuBLAS GEMMs. It is the default.
+	// compensated FP16 cuBLAS GEMMs. It is the default below sm_80, where mmq is not admitted.
 	CUDAQ4KPrefillCompensated CUDAQ4KPrefillArm = "compensated"
 	// CUDAQ4KPrefillMMQ is llama.cpp's int8 tensor-core Q4_K MMQ (cuda/q4k_mmq.cuh); it never
-	// expands the weight but quantizes the activation to int8 per 32 values.
+	// expands the weight but quantizes the activation to int8 per 32 values. It is the default
+	// on sm_80 and newer (DefaultCUDAQ4KPrefillArm).
 	CUDAQ4KPrefillMMQ CUDAQ4KPrefillArm = "mmq"
 	// CUDAQ4KPrefillFP8LT is experimental: both operands are rounded to per-tensor E4M3
 	// and one cuBLASLt GEMM accumulates to F32. Only sm_89/sm_90 are admitted.
@@ -73,7 +74,9 @@ var cudaQ4KPrefillArms = map[CUDAQ4KPrefillArm]cudaQ4KPrefillArmSpec{
 // FCUDA_Q4K_PREFILL_ARM_REFUSED, so an invalid selection never falls back silently.
 const cudaQ4KPrefillArmRefusedCode = -1
 
-// ParseCUDAQ4KPrefillArm reads a FAK_CUDA_Q4K_PREFILL value. Empty selects the default.
+// ParseCUDAQ4KPrefillArm reads a FAK_CUDA_Q4K_PREFILL value without device context. Empty
+// selects compensated, the arch-independent arm; device init resolves an empty value through
+// DefaultCUDAQ4KPrefillArm instead.
 func ParseCUDAQ4KPrefillArm(s string) (CUDAQ4KPrefillArm, error) {
 	if s == "" {
 		return CUDAQ4KPrefillCompensated, nil
@@ -100,8 +103,24 @@ func CheckCUDAQ4KPrefillArm(arm CUDAQ4KPrefillArm, sm int) error {
 	return nil
 }
 
-// resolveCUDAQ4KPrefillArm parses and checks an env value in one step.
+// DefaultCUDAQ4KPrefillArm is the arm an unset FAK_CUDA_Q4K_PREFILL selects on a device of
+// compute capability sm: mmq from its sm_80 floor up, compensated below it or when the arch is
+// unknown (sm <= 0). Same-card witness (RTX 5090 Laptop sm_120, Qwen3.8-27B Q4_K_M, cold
+// P=128/512/2048, ABBA): mmq is 1.31-1.47x compensated prefill with the greedy output
+// byte-identical (docs/benchmarks/receipts/cuda-prefill-sm120-20261106).
+func DefaultCUDAQ4KPrefillArm(sm int) CUDAQ4KPrefillArm {
+	if sm >= cudaQ4KPrefillArms[CUDAQ4KPrefillMMQ].minSM {
+		return CUDAQ4KPrefillMMQ
+	}
+	return CUDAQ4KPrefillCompensated
+}
+
+// resolveCUDAQ4KPrefillArm parses and checks an env value in one step. An empty value selects
+// DefaultCUDAQ4KPrefillArm(sm); an explicit value (including "compensated") always wins.
 func resolveCUDAQ4KPrefillArm(s string, sm int) (CUDAQ4KPrefillArm, error) {
+	if s == "" {
+		return DefaultCUDAQ4KPrefillArm(sm), nil
+	}
 	arm, err := ParseCUDAQ4KPrefillArm(s)
 	if err != nil {
 		return "", err

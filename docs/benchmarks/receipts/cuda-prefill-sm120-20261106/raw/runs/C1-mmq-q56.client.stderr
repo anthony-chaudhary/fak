@@ -1,0 +1,10 @@
+h2h run C1-mmq-q56 -> /home/fak/cuda-prefill-sm120-20261106/runs/C1-mmq-q56.h2h.jsonl
+cold      fak        size=128    rep=0 prompt=194    cached=0      ttft=   641.1ms prefill=  302.6t/s decode= 19.21t/s ok
+cold      fak        size=128    rep=1 prompt=194    cached=0      ttft=   544.6ms prefill=  356.2t/s decode= 19.54t/s ok
+cold      fak        size=128    rep=2 prompt=194    cached=0      ttft=   548.2ms prefill=  353.9t/s decode= 19.32t/s ok
+cold      fak        size=512    rep=0 prompt=627    cached=0      ttft=  3424.2ms prefill=  183.1t/s decode= 15.75t/s ok
+cold      fak        size=512    rep=1 prompt=626    cached=0      ttft=  3396.1ms prefill=  184.3t/s decode= 15.38t/s ok
+cold      fak        size=512    rep=2 prompt=626    cached=0      ttft=  3374.0ms prefill=  185.5t/s decode= 15.12t/s ok
+cold      fak        size=2048   rep=0 prompt=2356   cached=0      ttft=  6357.8ms prefill=  370.6t/s decode=  9.50t/s ok
+cold      fak        size=2048   rep=1 prompt=2355   cached=0      ttft=  6515.2ms prefill=  361.5t/s decode=  9.48t/s ok
+cold      fak        size=2048   rep=2 prompt=2356   cached=0      ttft=  6523.0ms prefill=  361.2t/s decode=  9.42t/s ok

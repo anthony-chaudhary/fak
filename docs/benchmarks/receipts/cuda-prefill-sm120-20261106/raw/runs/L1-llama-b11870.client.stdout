@@ -1,0 +1,9 @@
+h2h run L1-llama-b11870  host=raider-fak  model=Qwen3.8-27B-Q4_K_M  rows=9
+
+scenario    size arm             n  err busy   prompt   ttft_p50   ttft_p90 prefill t/s decode t/s  cache
+cold         128 llama           3    0    0      199      322.3      407.8       617.5      29.08     0%
+cold         512 llama           3    0    0      631      697.9      706.8       904.1      23.82     0%
+cold        2048 llama           3    0    0     2361     2240.7     2254.7      1053.2      24.71     0%
+
+where fak loses (gap > 5%):
+  none

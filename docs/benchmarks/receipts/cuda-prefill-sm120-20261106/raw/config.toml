@@ -1,0 +1,17 @@
+# FAK serving configuration (fak serve --config)
+# Backend: native CUDA GPU acceleration on NVIDIA RTX 5090 Laptop.
+# Model: /var/lib/fak/models/Qwen3.8-27B-UD-Q2_K_XL.gguf (see fak.service).
+# LAN clients are allowed without a key by default (allow_lan = true).
+# Remote/WAN clients require the bearer key in /etc/fak/gateway.env.
+[observability]
+bind = "127.0.0.1:18090"
+metrics = true
+
+[auth]
+allow_lan = true
+
+[budgets]
+default_tokens = 32768
+
+[policy]
+floor = "/etc/fak/policy.json"

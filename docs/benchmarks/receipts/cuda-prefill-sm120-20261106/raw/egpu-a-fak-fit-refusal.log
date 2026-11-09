@@ -1,0 +1,18 @@
+fak-cuda: q4k prefill arm=compensated
+fak-cuda: q4k decode arm=mmvq
+{"schema":"fak.watchdog-autoheal.v1","verb":"serve","summary":true,"elapsed_ms":97,"specs":3,"noop":3}
+fak: cold resume (#629) — re-attached 1081 session(s) drive state from /root/.config/fak/session-state.snap
+fak capabilities: version=go1.26.10 chip=linux/amd64 backends=cpu-ref
+  family=glm-5.3-flash formats=bf16,fp8 flags=- env=-
+  family=glm53 formats=bf16,fp8 flags=- env=-
+  family=ornith formats=fp8,q4_k_m flags=--gguf env=FAK_Q4K
+  family=qwen2.5 formats=q4_k_m,q8_0 flags=--gguf env=FAK_Q4K
+  family=qwen2.5-coder formats=q4_k_m flags=--gguf env=FAK_Q4K
+  family=qwen3.8 formats=fp8,q4_k_m,ud_q2_k_xl flags=--gguf env=FAK_Q4K,FAK_STREAM_Q4K
+  family=qwen38 formats=fp8,q4_k_m,ud_q2_k_xl flags=--gguf env=FAK_Q4K,FAK_STREAM_Q4K
+  family=smollm2 formats=q8_0 flags=--gguf env=-
+
+fak: native context sizing clamped requested=4096 resolved=512 fitted_bound=512 source=explicit (kv=96.000MiB, weights=26.451GiB, fit_budget=13.510GiB, headroom=2.384GiB)
+fak serve: fit-commit back-off: attempt 1 failed (compute: memory plan {weights=26.45 GiB, kv_cache=245.62 MiB, scratchpad=21.52 MiB, activation=990.00 KiB} needs 26.71 GiB, device has 13.51 GiB (FitTooBig: request exceeds the reported device capacity; capacity pre-check turned a would-be OOM into a typed refusal); viable offload arm(s): host-pool-headroom; activated-expert device ring unavailable: checkpoint has no stageable routed-expert slab); next attempt cuts believed free to 99.0% of the original reading
+fak serve: fit-commit back-off: repeated layout ctx=512;arm=device;rows=/activation:1013760:hal-token-activation;/kv_cache:100663296:hal-kv-store;/kv_cache:156893184:qwen35-gdn-recurrent-conv-state;/scratchpad:22564864:hal-token-scratch;device/weights:476282880:gguf-native-q4k-logical-weights;device/weights:58490880:gguf-native-q4k-logical-weights;device/weights:76595200:gguf-native-q4k-logical-weights;device/weights:774144000:gguf-native-q4k-logical-weights;device/weights:7208960:gguf-native-q4k-logical-weights;device/weights:20670382080:gguf-native-q4k-logical-weights;device/weights:5096175616:gguf-native-q4k-logical-weights;device/weights:743424000:gguf-native-q4k-logical-weights;device/weights:498606080:gguf-native-q4k-logical-weights;; stopping
+fak: fak serve: fit-commit back-off stopped without a committed load after 2 attempt(s); last layout: ctx=512;arm=device;rows=/activation:1013760:hal-token-activation;/kv_cache:100663296:hal-kv-store;/kv_cache:156893184:qwen35-gdn-recurrent-conv-state;/scratchpad:22564864:hal-token-scratch;device/weights:476282880:gguf-native-q4k-logical-weights;device/weights:58490880:gguf-native-q4k-logical-weights;device/weights:76595200:gguf-native-q4k-logical-weights;device/weights:774144000:gguf-native-q4k-logical-weights;device/weights:7208960:gguf-native-q4k-logical-weights;device/weights:20670382080:gguf-native-q4k-logical-weights;device/weights:5096175616:gguf-native-q4k-logical-weights;device/weights:743424000:gguf-native-q4k-logical-weights;device/weights:498606080:gguf-native-q4k-logical-weights;; cause: compute: memory plan {weights=26.45 GiB, kv_cache=245.62 MiB, scratchpad=21.52 MiB, activation=990.00 KiB} needs 26.71 GiB, device has 13.38 GiB (FitTooBig: request exceeds the reported device capacity; capacity pre-check turned a would-be OOM into a typed refusal); viable offload arm(s): host-pool-headroom; activated-expert device ring unavailable: checkpoint has no stageable routed-expert slab

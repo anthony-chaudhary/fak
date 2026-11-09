@@ -1,0 +1,9 @@
+h2h run C1-mmq-q56  host=raider-fak  model=Qwen3.8-27B-Q4_K_M  rows=9
+
+scenario    size arm             n  err busy   prompt   ttft_p50   ttft_p90 prefill t/s decode t/s  cache
+cold         128 fak             3    0    0      194      548.2      641.1       353.9      19.32     0%
+cold         512 fak             3    0    0      626     3396.1     3424.2       184.3      15.38     0%
+cold        2048 fak             3    0    0     2356     6515.2     6523.0       361.5       9.48     0%
+
+where fak loses (gap > 5%):
+  none

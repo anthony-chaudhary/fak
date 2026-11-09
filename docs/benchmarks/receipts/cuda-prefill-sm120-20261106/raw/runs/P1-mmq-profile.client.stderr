@@ -1,0 +1,3 @@
+h2h run P1-mmq-profile -> /home/fak/cuda-prefill-sm120-20261106/runs/P1-mmq-profile.h2h.jsonl
+cold      fak        size=512    rep=0 prompt=625    cached=0      ttft=  5425.2ms prefill=  115.2t/s decode=  0.00t/s ok
+cold      fak        size=2048   rep=0 prompt=2354   cached=0      ttft= 15086.3ms prefill=  156.0t/s decode=  0.00t/s ok

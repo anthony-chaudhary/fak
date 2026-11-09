@@ -1,0 +1,13 @@
+h2h run M-spec-mtp -> /home/fak/cuda-prefill-sm120-20261106/runs/M-spec-mtp.h2h.jsonl
+cold      fak        size=128    rep=0 prompt=191    cached=0      ttft=  1287.5ms prefill=  148.3t/s decode= 19.33t/s ok
+cold      fak        size=128    rep=1 prompt=191    cached=0      ttft=  1226.6ms prefill=  155.7t/s decode= 15.33t/s ok
+cold      fak        size=128    rep=2 prompt=191    cached=0      ttft=  1190.7ms prefill=  160.4t/s decode= 17.77t/s ok
+cold      fak        size=512    rep=0 prompt=624    cached=0      ttft=  5349.7ms prefill=  116.6t/s decode= 15.59t/s ok
+cold      fak        size=512    rep=1 prompt=623    cached=0      ttft=  5320.8ms prefill=  117.1t/s decode= 15.52t/s ok
+cold      fak        size=512    rep=2 prompt=623    cached=0      ttft=  5306.5ms prefill=  117.4t/s decode= 15.06t/s ok
+cold      fak        size=2048   rep=0 prompt=2353   cached=0      ttft= 15303.6ms prefill=  153.8t/s decode=  9.05t/s ok
+cold      fak        size=2048   rep=1 prompt=2352   cached=0      ttft= 15490.8ms prefill=  151.8t/s decode=  9.22t/s ok
+cold      fak        size=2048   rep=2 prompt=2353   cached=0      ttft= 15561.1ms prefill=  151.2t/s decode=  9.30t/s ok
+decode    fak        size=128    rep=0 prompt=55     cached=0      ttft=  1197.3ms prefill=   45.9t/s decode= 17.81t/s ok
+decode    fak        size=128    rep=1 prompt=55     cached=0      ttft=  1158.5ms prefill=   47.5t/s decode= 17.83t/s ok
+decode    fak        size=128    rep=2 prompt=55     cached=0      ttft=  1168.3ms prefill=   47.1t/s decode= 17.81t/s ok

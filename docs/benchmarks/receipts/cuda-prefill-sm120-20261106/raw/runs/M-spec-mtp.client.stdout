@@ -1,0 +1,10 @@
+h2h run M-spec-mtp  host=raider-fak  model=Qwen3.8-27B-Q4_K_M  rows=12
+
+scenario    size arm             n  err busy   prompt   ttft_p50   ttft_p90 prefill t/s decode t/s  cache
+cold         128 fak             3    0    0      191     1226.6     1287.5       155.7      17.77     0%
+cold         512 fak             3    0    0      623     5320.8     5349.7       117.1      15.52     0%
+cold        2048 fak             3    0    0     2353    15490.8    15561.1       151.8       9.22     0%
+decode       128 fak             3    0    0       55     1168.3     1197.3        47.1      17.81     0%
+
+where fak loses (gap > 5%):
+  none

@@ -1,0 +1,8 @@
+1310932e1f40eb2d89a0cf022704fe7c4b1694b567db62c27f1a9ecec7927a32  fak-base
+b9978b9a9ec99dccc8918ad9858f1dc80ffc75fdddf174a22161ef612e5b4918  fak-new
+ca18c17a66a9d5c92ad9845a3226de857a245ca6f243ec212d084852921bfbba  fak-q56
+8453c97a0243d3feceea0340110b846c9516cd82f34ef16f553d668476080310  /home/fak/oss-engines/llama.cpp-b11870/build-cuda/bin/llama-server
+fbcab944b2d3da23bdc9021d94cd442159eb0b650d2452faee261de5e3e74854  /home/fak/oss-engines/fak-h2h-c9870f151d
+NVIDIA GeForce RTX 5090 Laptop GPU, GPU-2a2a837f-c82d-0f22-4538-e3a063903380, 615.78.08, [N/A], 24463 MiB
+7.2.11-arch1-1
+model sha256 7e78da5d... (Qwen3.8-27B-Q4_K_M, same file as nvidia-cuda-perf-gap receipt; not re-hashed this run)
