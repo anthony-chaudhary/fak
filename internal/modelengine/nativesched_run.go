@@ -426,12 +426,33 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 	}
 	s.iteration++
 	iteration := s.iteration
+	mixedExecuted := false
 	if prefill != nil && !deferPrefill {
 		prefillStarted := s.now()
 		var packedReady []*schedLane
+		var packedGen ForwardGen
 		if prefill.packedPrefill {
-			packedReady = s.advancePackedPrefill(iteration)
-			s.notePackedPrefillSkipDrafts(iteration, packedCandidates, packedCandidateCursors)
+			var mixed []*schedLane
+			packedGen = s.fwd.Load()
+			packedReady, mixed = s.advanceMixedPackedPrefill(iteration, active, packedGen)
+			mixedExecuted = len(mixed) > 0
+			remaining := active[:0]
+			for _, ln := range active {
+				executed := false
+				for _, done := range mixed {
+					if ln == done {
+						executed = true
+						break
+					}
+				}
+				if !executed {
+					remaining = append(remaining, ln)
+				}
+			}
+			active = remaining
+			if len(mixed) == 0 {
+				s.notePackedPrefillSkipDrafts(iteration, packedCandidates, packedCandidateCursors)
+			}
 		} else {
 			origChunk, clampedChunk := s.clampLongPrefillStep(prefill, longPrefillLimit)
 			s.advanceQwenPrefill(prefill, iteration)
@@ -451,7 +472,11 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 		}
 		if len(active) > 0 {
 			s.recorder.ObserveCohort(len(active))
-			s.stepOnce(active, iteration)
+			if prefill.packedPrefill {
+				s.stepOnceGeneration(active, iteration, packedGen)
+			} else {
+				s.stepOnce(active, iteration)
+			}
 		}
 	} else if solo != nil {
 		s.recorder.ObserveCohort(1)
@@ -471,7 +496,7 @@ func (s *NativeScheduler) runIteration(donated bool) (didWork, idle, closed bool
 	s.mu.Lock()
 	carried := prefill != nil && !deferPrefill &&
 		(prefill.promptCursor != prefillStartCursor || prefill.state != prefillStartState)
-	if solo != nil || len(active) > 0 || carried {
+	if solo != nil || len(active) > 0 || mixedExecuted || carried {
 		s.executedSteps++
 	}
 	if carried {
@@ -695,6 +720,12 @@ func (s *NativeScheduler) stepSolo(ln *schedLane, iteration uint64) {
 // claimed, and StepBatch already guarantees per-user logits are bit-identical to a
 // serial Step, so ordering cannot change any lane's output.
 func (s *NativeScheduler) stepOnce(active []*schedLane, iteration uint64) {
+	s.stepOnceGeneration(active, iteration, s.fwd.Load())
+}
+
+// stepOnceGeneration shares the iteration's forward identity with a preceding
+// packed mixed panel, including no-effects declines and overflow decode rows.
+func (s *NativeScheduler) stepOnceGeneration(active []*schedLane, iteration uint64, gen ForwardGen) {
 	sort.SliceStable(active, func(i, j int) bool { return active[i].seqNo < active[j].seqNo })
 	cont := make([]*schedLane, 0, len(active))
 	ids := make([]int, 0, len(active))
@@ -716,9 +747,6 @@ func (s *NativeScheduler) stepOnce(active []*schedLane, iteration uint64) {
 		return
 	}
 	limit := s.decodeCohortLimit(cont)
-	// One generation belongs to this logical iteration, even when its eligible
-	// cohort needs several existing bounded model calls.
-	gen := s.fwd.Load()
 	for start := 0; start < len(cont); {
 		width := len(cont) - start
 		if limit > 0 && width > limit {
