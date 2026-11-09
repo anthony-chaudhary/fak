@@ -365,12 +365,13 @@ func ReadTimeBurndownBaseline(r io.Reader) (*TimeBurndownV2, error) {
 	return &prior, nil
 }
 
-// ReadGoRuntimeReceipt accepts a /debug/vars scrape (go_runtime key) or a bare
-// runtime receipt.
+// ReadGoRuntimeReceipt accepts a gateway /debug/vars scrape (runtime.go_runtime),
+// a top-level go_runtime envelope, or a bare runtime receipt.
 func ReadGoRuntimeReceipt(r io.Reader) (runtimeobs.Receipt, error) {
 	var vars struct {
 		GoRuntime *runtimeobs.Receipt `json:"go_runtime"`
 		Schema    string              `json:"schema"`
+		Runtime   json.RawMessage     `json:"runtime"`
 	}
 	raw, err := io.ReadAll(r)
 	if err != nil {
@@ -381,6 +382,19 @@ func ReadGoRuntimeReceipt(r io.Reader) (runtimeobs.Receipt, error) {
 	}
 	if vars.GoRuntime != nil {
 		return *vars.GoRuntime, nil
+	}
+	// Resolve the existing top-level and bare formats before decoding gateway
+	// metadata, which may be unrelated in those already-supported formats.
+	if vars.Schema == "" && len(vars.Runtime) != 0 {
+		var nested struct {
+			GoRuntime *runtimeobs.Receipt `json:"go_runtime"`
+		}
+		if err := json.Unmarshal(vars.Runtime, &nested); err != nil {
+			return runtimeobs.Receipt{}, fmt.Errorf("%w: go runtime scrape: %v", ErrInvalidTimeBurndown, err)
+		}
+		if nested.GoRuntime != nil {
+			return *nested.GoRuntime, nil
+		}
 	}
 	var receipt runtimeobs.Receipt
 	if err := json.Unmarshal(raw, &receipt); err != nil {
