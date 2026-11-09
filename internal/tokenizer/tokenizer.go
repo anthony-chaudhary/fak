@@ -395,9 +395,11 @@ func (t *Tokenizer) encode(text string, memo *encodeRunMemo) ([]int, error) {
 			pieces = split(chunk)
 		}
 		for _, piece := range pieces {
-			encoded := byteLevelEncode(piece)
+			var encoded string
 			if t.metaspace {
 				encoded = metaspaceEncode(piece)
+			} else {
+				encoded = byteLevelEncode(piece)
 			}
 			if t.ignoreMerges {
 				if id, ok := t.tokenToID[encoded]; ok {
@@ -512,9 +514,11 @@ func (t *Tokenizer) appendOrdinary(ids []int, chunk string, added map[int]bool) 
 		pieces = split(chunk)
 	}
 	for _, piece := range pieces {
-		encoded := byteLevelEncode(piece)
+		var encoded string
 		if t.metaspace {
 			encoded = metaspaceEncode(piece)
+		} else {
+			encoded = byteLevelEncode(piece)
 		}
 		if t.ignoreMerges {
 			if id, ok := t.tokenToID[encoded]; ok && !added[id] {
