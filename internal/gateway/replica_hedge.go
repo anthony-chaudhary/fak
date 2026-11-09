@@ -194,6 +194,12 @@ func (r *ReplicaDispatch) completeHedged(ctx context.Context, primary reservedPl
 		case res := <-result:
 			finishAttempt(&receipt.Primary, res, policy)
 			emit()
+			// The existing classification is the validator's one decision for this
+			// late primary. Abstaining from a second attempt cannot accept output
+			// that this same receipt rejected, or call a stateful validator again.
+			if res.err == nil && receipt.Primary.TerminalClass != "valid" {
+				return nil, errors.New("primary completion after hedge abstention: invalid_completion")
+			}
 			return res.completion, res.err
 		case <-familyCtx.Done():
 			receipt.Primary.TerminalClass = classifyHedgeError(familyCtx.Err())
