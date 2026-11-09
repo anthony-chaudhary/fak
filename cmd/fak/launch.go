@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/launchshim"
+	"github.com/anthony-chaudhary/fak/pkg/deploykit/swap"
 )
 
 func cmdLaunch(argv []string) { os.Exit(runLaunch(os.Stdout, os.Stderr, argv)) }
@@ -362,6 +363,11 @@ func stableLaunchTarget(dir, fak string) string {
 	return filepath.Join(dir, name)
 }
 
+// stableTargetSwapper is the activation seam behind installStableLaunchTarget:
+// tests substitute a failing swapper to prove a failed activation leaves the
+// prior stable target intact. It defaults to the real atomic swap.
+var stableTargetSwapper = swap.Swap
+
 func installStableLaunchTarget(dir, fak string) (string, error) {
 	target := stableLaunchTarget(dir, fak)
 	if samePath(target, fak) {
@@ -371,8 +377,15 @@ func installStableLaunchTarget(dir, fak string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(target, raw, 0o755); err != nil {
+	// Stage the new bytes beside the target, then activate atomically: a
+	// failure mid-swap can never leave a partial or missing stable target.
+	tmp := filepath.Join(dir, ".fak-launch.staging")
+	if err := os.WriteFile(tmp, raw, 0o755); err != nil {
 		return "", err
+	}
+	if err := stableTargetSwapper(tmp, target); err != nil {
+		_ = os.Remove(tmp)
+		return "", fmt.Errorf("activate stable launch target %s: %w", target, err)
 	}
 	if err := launchshim.BindStableExecutable(target, fak); err != nil {
 		return "", err

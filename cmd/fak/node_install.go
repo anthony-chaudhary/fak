@@ -20,9 +20,43 @@ import (
 	"strings"
 	"text/template"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/pkg/deploykit/service"
 )
 
 // ── install ──────────────────────────────────────────────────────────────────
+
+// nodeServiceBoundary is the injectable command boundary behind the deploykit
+// service facade that `fak node install` drives (systemctl / launchctl /
+// schtasks). Nil keeps the platform default (real commands); tests substitute
+// a fake so the control + rollback path runs without touching a live service.
+var nodeServiceBoundary service.Command
+
+// nodeHealthGate is the post-install health probe seam: success-path tests
+// stub it so they never wait ~10s on a gateway that will never answer.
+var nodeHealthGate = nodeWaitHealthy
+
+// newNodeServiceManager builds the user-scope deploykit service Manager for
+// this host's control plane: the com.fak.serve-gateway LaunchAgent on darwin,
+// the fak-serve-gateway systemd --user unit on linux, and the FakServeGateway
+// Scheduled Task on windows. The node-specific templates stay here; only
+// control and rollback moved to the facade.
+func newNodeServiceManager(in nodeInstallParams) (*service.Manager, error) {
+	var opts []service.Option
+	if nodeServiceBoundary != nil {
+		opts = append(opts, service.WithCommand(nodeServiceBoundary))
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		return service.New(service.ScopeUser, nodeGatewayLabel, opts...)
+	case "linux":
+		return service.New(service.ScopeUser, "fak-serve-gateway", opts...)
+	case "windows":
+		return service.New(service.ScopeUser, nodeWindowsTaskName, opts...)
+	default:
+		return nil, fmt.Errorf("not yet supported on %s", runtime.GOOS)
+	}
+}
 
 func nodeInstall(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("node install", flag.ContinueOnError)
@@ -397,12 +431,18 @@ func nodeInstallDarwin(stdout, stderr io.Writer, in nodeInstallParams) int {
 		return 1
 	}
 
-	// Unload any existing unit before overwriting. One label per host: switching upstreams
-	// re-renders THIS unit rather than adding a second one (#5555).
-	_ = exec.Command("launchctl", "unload", "-w", plistPath).Run()
-
-	if err := os.WriteFile(plistPath, []byte(plist), 0644); err != nil {
-		fmt.Fprintf(stderr, "fak node install: write plist: %v\n", err)
+	// The deploykit facade owns control + rollback: it snapshots the prior agent,
+	// bootouts, publishes this plist atomically, bootstraps, and — on any failure
+	// after the snapshot — restores the prior agent AND its running state. One
+	// label per host: switching upstreams re-renders THIS unit rather than adding
+	// a second one (#5555).
+	svc, err := newNodeServiceManager(in)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak node install: %v\n", err)
+		return 1
+	}
+	if err := svc.Update(service.Definition{Path: plistPath, Text: plist}); err != nil {
+		fmt.Fprintf(stderr, "fak node install: %v\n", err)
 		return 1
 	}
 
@@ -420,11 +460,6 @@ func nodeInstallDarwin(stdout, stderr io.Writer, in nodeInstallParams) int {
 		}
 	}
 
-	// Load the unit.
-	if out, err := exec.Command("launchctl", "load", "-w", plistPath).CombinedOutput(); err != nil {
-		fmt.Fprintf(stderr, "fak node install: launchctl load: %v\n%s\n", err, out)
-		return 1
-	}
 	fmt.Fprintf(stdout, "[fak node] loaded %s\n", nodeGatewayLabel)
 	fmt.Fprintf(stdout, "           plist:   %s\n", plistPath)
 	fmt.Fprintf(stdout, "           log:     %s/serve.log\n", logDir)
@@ -444,7 +479,7 @@ func nodeInstallFinalize(stdout, stderr io.Writer, in nodeInstallParams, gateway
 	nodePrintUnitSummary(stdout, in)
 	nodePersistInstallState(stderr, in, gatewayKey, requireKeyEnv)
 	localPort := in.localPort
-	if !nodeWaitHealthy(stdout, "http://127.0.0.1:"+localPort) {
+	if !nodeHealthGate(stdout, "http://127.0.0.1:"+localPort) {
 		nodeWarnUnhealthy(stderr, logDir)
 		return 1
 	}
@@ -675,14 +710,16 @@ func nodeInstallLinux(stdout, stderr io.Writer, in nodeInstallParams) int {
 		fmt.Fprintf(stderr, "fak node install: render unit: %v\n", err)
 		return 1
 	}
-	if err := os.WriteFile(unitPath, []byte(unit), 0644); err != nil {
-		fmt.Fprintf(stderr, "fak node install: write unit: %v\n", err)
+	// The deploykit facade owns control + rollback: it snapshots the prior unit,
+	// publishes this one atomically, daemon-reloads, enables, starts, and — on any
+	// failure after the snapshot — restores the prior unit AND its running state.
+	svc, err := newNodeServiceManager(in)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak node install: %v\n", err)
 		return 1
 	}
-
-	_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
-	if out, err := exec.Command("systemctl", "--user", "enable", "--now", "fak-serve-gateway").CombinedOutput(); err != nil {
-		fmt.Fprintf(stderr, "fak node install: systemctl enable: %v\n%s\n", err, out)
+	if err := svc.Update(service.Definition{Path: unitPath, Text: unit}); err != nil {
+		fmt.Fprintf(stderr, "fak node install: %v\n", err)
 		return 1
 	}
 	fmt.Fprintf(stdout, "[fak node] enabled fak-serve-gateway (systemd --user)\n")
@@ -758,7 +795,16 @@ func nodeInstallWindows(stdout, stderr io.Writer, in nodeInstallParams) int {
 	// kept the port and answered the health probe, making install falsely report the OLD
 	// process healthy. End the task and wait for the port to free; if a foreign process still
 	// holds it, fail loudly rather than blessing whatever answers the probe.
-	_ = nodeHelperCommand("schtasks", "/End", "/TN", nodeWindowsTaskName).Run()
+	svc, err := newNodeServiceManager(in)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak node install: %v\n", err)
+		return 1
+	}
+	if err := svc.Stop(); err != nil {
+		// A missing or already-stopped task makes /End fail; the port-free preflight below
+		// is the real gate (#3), so note and continue.
+		fmt.Fprintf(stderr, "[fak node] note: stop prior task: %v\n", err)
+	}
 	if !nodeWaitPortFree(localPort) {
 		fmt.Fprintf(stderr, "\n[fak node] ERROR: 127.0.0.1:%s is still in use after stopping the task.\n", localPort)
 		fmt.Fprintf(stderr, "           Another process holds the port; the install would falsely report IT healthy.\n")
@@ -770,21 +816,14 @@ func nodeInstallWindows(stdout, stderr io.Writer, in nodeInstallParams) int {
 	// failure semantics (#6) — the Windows analog of launchd KeepAlive / systemd Restart=always
 	// the simple `schtasks /Create /SC ONSTART` form cannot express. The XML triggers at boot
 	// (BootTrigger) AND restarts the runner on failure (RestartOnFailure, 1-min interval).
+	// The deploykit facade owns control + rollback: it snapshots the prior task, publishes
+	// this XML atomically, registers, runs, and — on any failure after the snapshot —
+	// restores the prior task AND its running state.
 	taskXML := nodeWindowsTaskXML(runnerPath)
 	xmlPath := filepath.Join(cfgDir, "serve-task.xml")
-	if err := os.WriteFile(xmlPath, []byte(taskXML), 0644); err != nil {
-		fmt.Fprintf(stderr, "fak node install: write task xml: %v\n", err)
+	if err := svc.Update(service.Definition{Path: xmlPath, Text: taskXML}); err != nil {
+		fmt.Fprintf(stderr, "fak node install: %v\n", err)
 		return 1
-	}
-	if out, err := nodeHelperCommand("schtasks", "/Create", "/TN", nodeWindowsTaskName,
-		"/XML", xmlPath, "/F").CombinedOutput(); err != nil {
-		fmt.Fprintf(stderr, "fak node install: schtasks /Create: %v\n%s\n", err, out)
-		return 1
-	}
-	if out, err := nodeHelperCommand("schtasks", "/Run", "/TN", nodeWindowsTaskName).CombinedOutput(); err != nil {
-		// Non-fatal: the task is registered and will start at boot even if the immediate
-		// run could not be kicked off.
-		fmt.Fprintf(stderr, "[fak node] note: schtasks /Run did not start the task now (%v): %s\n", err, out)
 	}
 	fmt.Fprintf(stdout, "[fak node] registered Scheduled Task %s (boot + restart-on-failure)\n", nodeWindowsTaskName)
 	fmt.Fprintf(stdout, "           runner:  %s\n", runnerPath)

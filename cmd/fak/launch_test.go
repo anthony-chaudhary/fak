@@ -250,6 +250,60 @@ func TestStableLaunchTargetSurvivesSourceReplacement(t *testing.T) {
 	}
 }
 
+// TestLaunchInstallFailedSwapLeavesPriorTargetIntact is the failed-activation
+// witness: when the atomic swap fails, the prior stable target must survive
+// byte-for-byte and no staging residue may remain in the bin dir.
+func TestLaunchInstallFailedSwapLeavesPriorTargetIntact(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "install", "fak.exe")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("v1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shimDir := filepath.Join(dir, "shims")
+	if err := os.MkdirAll(shimDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target, err := installStableLaunchTarget(shimDir, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("v2"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := stableTargetSwapper
+	defer func() { stableTargetSwapper = old }()
+	staged := false
+	stableTargetSwapper = func(src, dst string) error {
+		staged = true
+		return errors.New("injected swap failure")
+	}
+	if _, err := installStableLaunchTarget(shimDir, source); err == nil {
+		t.Fatal("expected the failing swapper to surface an error")
+	}
+	if !staged {
+		t.Fatal("swapper was not invoked with the staged copy")
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("prior stable target missing: %v", err)
+	}
+	if string(got) != "v1" {
+		t.Fatalf("prior stable target changed after failed install: %q", got)
+	}
+	entries, err := os.ReadDir(shimDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".fak-launch.staging") {
+			t.Fatalf("staging residue left behind: %s", e.Name())
+		}
+	}
+}
+
 func TestRepairLaunchShimsRefreshesStableTarget(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("FAK_LAUNCH_CONFIG", filepath.Join(dir, "launch.json"))
