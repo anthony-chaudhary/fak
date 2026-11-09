@@ -479,15 +479,21 @@ func (c *cudaBackend) qwen35SequenceGDNLocked(x Tensor, layer Qwen35SequenceLaye
 	valueDim := req.NumValueHeads * req.ValueHeadDim
 	convDim := 2*keyDim + valueDim
 	allocations := qwen35GDNAllocations("gdn-", "-", tokens, tokens, req.Hidden, keyDim, valueDim, req.NumValueHeads, convDim)
-	tensors := make([]Tensor, 0, len(allocations))
-	buffers := make([]*cudaBuf, 0, len(allocations))
-	for _, allocation := range allocations {
+	tensors := make([]Tensor, len(allocations))
+	buffers := make([]*cudaBuf, 0, len(allocations)-2)
+	for index, allocation := range allocations {
+		if index == 5 || index == 6 {
+			// Native sequence convolution and history finish reading mixed on
+			// g_stream before Q/K normalization. Reuse its first two key panels;
+			// convDim == 2*keyDim + valueDim proves both fit without overlap.
+			continue
+		}
 		t, b, err := c.qwen35SequenceAllocLocked(allocation.shape, allocation.name)
 		if err != nil {
 			c.releaseTransientBuffers(buffers)
 			return Tensor{}, nil, &Qwen35SequenceError{Stage: allocation.name, Layer: layerIndex, Cause: err}
 		}
-		tensors = append(tensors, t)
+		tensors[index] = t
 		buffers = append(buffers, b)
 	}
 	qkvPtr, qkvScale, qkvQ8 := c.qwen35GDNQ8Args(layer.GDNInQKV)
@@ -495,14 +501,16 @@ func (c *cudaBackend) qwen35SequenceGDNLocked(x Tensor, layer Qwen35SequenceLaye
 	bPtr, bScale, bQ8 := c.qwen35GDNQ8Args(layer.GDNInB)
 	aPtr, aScale, aQ8 := c.qwen35GDNQ8Args(layer.GDNInA)
 	outPtr, outScale, outQ8 := c.qwen35GDNQ8Args(layer.GDNOut)
-	status := int(C.fcuda_qwen35_gdn_sequence_f32(c.cf(x), C.int(tokens), qkvPtr, qkvScale, qkvQ8, zPtr, zScale, zQ8, bPtr, bScale, bQ8, aPtr, aScale, aQ8, c.cf(layer.GDNConv), c.cf(layer.GDNALog), c.cf(layer.GDNDTBias), c.cf(layer.GDNNorm), outPtr, outScale, outQ8, c.cf(state.Conv), c.cf(state.Recurrent), c.cf(tensors[8]), c.cf(tensors[0]), c.cf(tensors[1]), c.cf(tensors[2]), c.cf(tensors[3]), c.cf(tensors[4]), c.cf(tensors[5]), c.cf(tensors[6]), c.cf(tensors[7]), C.int(req.Hidden), C.int(req.NumKeyHeads), C.int(req.NumValueHeads), C.int(req.KeyHeadDim), C.int(req.ValueHeadDim), C.int(req.ConvKernel), C.float(req.RMSNormEpsilon)))
+	status := int(C.fcuda_qwen35_gdn_sequence_f32(c.cf(x), C.int(tokens), qkvPtr, qkvScale, qkvQ8, zPtr, zScale, zQ8, bPtr, bScale, bQ8, aPtr, aScale, aQ8, c.cf(layer.GDNConv), c.cf(layer.GDNALog), c.cf(layer.GDNDTBias), c.cf(layer.GDNNorm), outPtr, outScale, outQ8, c.cf(state.Conv), c.cf(state.Recurrent), c.cf(tensors[8]), c.cf(tensors[0]), c.cf(tensors[1]), c.cf(tensors[2]), c.cf(tensors[3]), c.cf(tensors[4]), c.cf(tensors[0]), (*C.float)(offsetF(unsafe.Pointer(c.cf(tensors[0])), tokens*keyDim)), c.cf(tensors[7]), C.int(req.Hidden), C.int(req.NumKeyHeads), C.int(req.NumValueHeads), C.int(req.KeyHeadDim), C.int(req.ValueHeadDim), C.int(req.ConvKernel), C.float(req.RMSNormEpsilon)))
 	if status != 0 {
 		kernelErr := c.failQwen35GDN(buffers, state.Conv, state.Recurrent, status, "qwen35-sequence-gdn")
 		return Tensor{}, nil, &Qwen35SequenceError{Stage: "gdn", Layer: layerIndex, Cause: kernelErr}
 	}
 	atomic.AddUint64(&c.fenceGen, 1)
-	output, outputBuffer := tensors[8], buffers[8]
-	c.releaseTransientBuffers(buffers[:8])
+	// Only physical owners enter failure invalidation and retirement. The Q/K
+	// regions are not additional owners, and the output remains the final one.
+	output, outputBuffer := tensors[8], buffers[len(buffers)-1]
+	c.releaseTransientBuffers(buffers[:len(buffers)-1])
 	return output, outputBuffer, nil
 }
 
