@@ -42,9 +42,19 @@ func stringSlice(v any) []string {
 func envMap(kvs []string) map[string]string {
 	out := map[string]string{}
 	for _, kv := range kvs {
-		if i := strings.IndexByte(kv, '='); i >= 0 {
-			out[kv[:i]] = kv[i+1:]
+		i := strings.IndexByte(kv, '=')
+		if i <= 0 {
+			// Windows' os.Environ() surfaces per-drive current-directory pseudo-
+			// variables ("=C:=C:\\path", "=ExitCode=00000000", "=::=::\\ ") whose
+			// NAME is empty once split on the first '='. They are cmd.exe internals
+			// a spawned child never needs; Go's own os/exec forwards them harmlessly.
+			// Downstream seams treat an empty name as EMPTY_ENV_NAME and would
+			// fail-close the ENTIRE spawn — so drop them here (matching
+			// toolprocgate.EnvFromStrings and envMapFromStrings) rather than hand
+			// an empty key to the broker. Entries without any '=' were already skipped.
+			continue
 		}
+		out[kv[:i]] = kv[i+1:]
 	}
 	return out
 }
