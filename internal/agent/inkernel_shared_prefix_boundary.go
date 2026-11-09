@@ -67,15 +67,15 @@ func inKernelSharedPrefixBoundaryFromContext(ctx context.Context) int {
 // its length when it is an exact token prefix of the full prompt ids. Special-token
 // delimiters make the split stable for ChatML, but the prefix check keeps any
 // tokenizer whose merges cross the seam from producing an off-by-some offset.
-func inKernelSharedPrefixBoundaryTokens(tok *tokenizer.Tokenizer, rendered string, ids []int) int {
-	if tok == nil || len(ids) == 0 {
+func inKernelSharedPrefixBoundaryTokens(encode func(string) ([]int, error), rendered string, ids []int) int {
+	if encode == nil || len(ids) == 0 {
 		return 0
 	}
 	shared := inKernelSharedPrefixText(rendered)
 	if shared == "" || len(shared) >= len(rendered) {
 		return 0
 	}
-	prefix, err := tok.Encode(shared)
+	prefix, err := encode(shared)
 	if err != nil || len(prefix) == 0 || len(prefix) >= len(ids) {
 		return 0
 	}
@@ -117,11 +117,22 @@ func inKernelPrefillCheckpoints(matched, cacheable, sharedBoundary, promptTokens
 // be admitted (the same predicate the prefill checkpoint uses), so routes that never
 // admit snapshots pay no extra tokenization.
 func (p *InKernelPlanner) sharedPrefixBoundaryTokens(rendered string, ids []int) int {
-	if p == nil || p.tree == nil || p.m == nil || !inKernelPlannerPrefixReuseSupported(p.m, p.backend) {
-		return 0
+	boundary, _ := p.sharedPrefixBoundaryTokensWithWork(rendered, ids)
+	return boundary
+}
+
+func (p *InKernelPlanner) sharedPrefixBoundaryTokensWithWork(rendered string, ids []int) (int, tokenizer.EncodeWork) {
+	var work tokenizer.EncodeWork
+	if p == nil || p.tree == nil || p.m == nil || p.tok == nil || !inKernelPlannerPrefixReuseSupported(p.m, p.backend) {
+		return 0, work
 	}
 	if p.backend == nil && !inKernelHostSnapshotReuse(p) {
-		return 0
+		return 0, work
 	}
-	return inKernelSharedPrefixBoundaryTokens(p.tok, rendered, ids)
+	boundary := inKernelSharedPrefixBoundaryTokens(func(shared string) ([]int, error) {
+		prefix, measured, err := p.promptEncodeMemo.EncodeTransient(p.tok, shared)
+		work = measured
+		return prefix, err
+	}, rendered, ids)
+	return boundary, work
 }

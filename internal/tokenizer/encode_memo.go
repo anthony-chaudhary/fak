@@ -44,6 +44,18 @@ type encodedRun struct {
 // reuse IDs. It never joins separately encoded arbitrary string segments.
 // SPM remains on its original path; EncodeSegments does not use this memo.
 func (m *EncodeMemo) Encode(t *Tokenizer, text string) ([]int, EncodeWork, error) {
+	return m.encode(t, text, true)
+}
+
+// EncodeTransient reuses retained ordinary runs without replacing the memo's
+// successful full-request generation. Auxiliary prefix measurements can reuse
+// the same work without evicting the conversation's remaining runs.
+// CachedPayloadBytes describes this call's temporary runs, not a published cache.
+func (m *EncodeMemo) EncodeTransient(t *Tokenizer, text string) ([]int, EncodeWork, error) {
+	return m.encode(t, text, false)
+}
+
+func (m *EncodeMemo) encode(t *Tokenizer, text string, publish bool) ([]int, EncodeWork, error) {
 	if t == nil {
 		return nil, EncodeWork{}, ErrEncodeUnsupported
 	}
@@ -55,7 +67,7 @@ func (m *EncodeMemo) Encode(t *Tokenizer, text string) ([]int, EncodeWork, error
 	defer m.mu.Unlock()
 	if t.spm != nil || len(t.addedByContent) == 0 {
 		ids, err := t.Encode(text)
-		if err == nil {
+		if err == nil && publish {
 			m.tokenizer, m.previous = t, nil
 		}
 		return ids, EncodeWork{}, err
@@ -68,7 +80,9 @@ func (m *EncodeMemo) Encode(t *Tokenizer, text string) ([]int, EncodeWork, error
 	if err != nil {
 		return nil, run.work, err
 	}
-	m.tokenizer, m.previous = t, run.next
+	if publish {
+		m.tokenizer, m.previous = t, run.next
+	}
 	return ids, run.work, nil
 }
 
