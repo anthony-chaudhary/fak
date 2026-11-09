@@ -314,10 +314,12 @@ func stepBatchQwen35HybridQ4KIndependent(bs *BatchSession, ids []int) ([][]float
 	}
 	bs.lastStepSharedPanels = result.SharedProjectionPanels
 	bs.lastStepMACs = result.ProjectionMACs
+	rows := splitScaledLogits(nil, flat, len(ids), bs.M.Cfg.VocabSize, bs.M.Cfg)
 	diagSplit = time.Since(diagT0) - diagPrep - diagLineage - diagCall - diagRead
 	if qwen35BatchDiagEnabled {
+		// This dispatcher span excludes the deferred lineage and embedding-row cleanup.
 		fmt.Fprintf(os.Stderr, "fak_batch_model_diag ids=%d prep_us=%d lineage_us=%d call_us=%d backend_us=%d hal_us=%d read_us=%d split_us=%d total_us=%d\n",
 			len(ids), diagPrep.Microseconds(), diagLineage.Microseconds(), diagCall.Microseconds(), diagBackend.Microseconds(), (diagCall - diagBackend).Microseconds(), diagRead.Microseconds(), diagSplit.Microseconds(), time.Since(diagT0).Microseconds())
 	}
-	return splitScaledLogits(nil, flat, len(ids), bs.M.Cfg.VocabSize, bs.M.Cfg), true
+	return rows, true
 }
