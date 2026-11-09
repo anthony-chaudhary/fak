@@ -159,6 +159,7 @@ int test_fence(void);
 int test_retire_probe(void);
 int fcuda_h2d_checked(void*,const void*,size_t);
 void fcuda_d2d(void*,const void*,size_t);
+void fcuda_rmsnorm_f32(const float*,const float*,float*,int,int,float);
 void fcuda_free(void*);
 int fcuda_paged_kv_copy_terminal(void);
 int fak_v41_checked_stream_terminal(void);
@@ -242,6 +243,8 @@ extern "C" int test_fence(){++fences;if(mode==3)return 53;test_finish_deferred()
 extern "C" void test_control_h2d(size_t n){h2d+=n;}
 extern "C" int fcuda_h2d_checked(void*d,const void*s,size_t n){if(mode==5)return 55;memcpy(d,s,n);h2d+=n;return 0;}
 extern "C" void fcuda_d2d(void*d,const void*s,size_t n){memcpy(d,s,n);}
+// Explicit identity norm model, matching the existing full-panel Go shim.
+extern "C" void fcuda_rmsnorm_f32(const float*x,const float*,float*y,int rows,int n,float){memcpy(y,x,(size_t)rows*n*sizeof(float));}
 extern "C" void fcuda_free(void*p){if(!g_cuda_cleanup_status){++retires;g_live.erase(p);}}
 extern "C" int fcuda_paged_kv_copy_terminal(){return g_cuda_cleanup_status;}
 extern "C" int fak_v41_checked_stream_terminal(){return g_cuda_cleanup_status;}

@@ -828,15 +828,33 @@ func (c *cudaBackend) Qwen35SequencePrefill(req Qwen35SequencePrefillRequest) (r
 	if req.CaptureRawHidden {
 		rawHiddenRows, rawHiddenBuf = x, xBuf
 	}
-	finalPanel, finalPanelBuf, finalErr := c.qwen35SequenceRMSNormLocked(x, req.OutputNorm, tokens, req.RMSNormEpsilon, "output-norm")
-	if finalErr != nil {
-		return result, finalErr
+	var finalPanel Tensor
+	var finalPanelBuf *cudaBuf
+	var last Tensor
+	var lastBuf *cudaBuf
+	if !req.NeedAllLogits {
+		var allocErr error
+		last, lastBuf, allocErr = c.qwen35SequenceAllocLocked([]int{req.Hidden}, "last-hidden")
+		if allocErr != nil {
+			return result, allocErr
+		}
+		// Only the last normalized row escapes in prefix/last-logits mode.
+		// Use the same row-local kernel and reduction, directly into its owner;
+		// keep the original residual panel intact for optional raw-hidden capture.
+		C.fcuda_rmsnorm_f32((*C.float)(offsetF(unsafe.Pointer(c.cf(x)), (tokens-1)*req.Hidden)), c.cf(req.OutputNorm), c.cf(last), C.int(1), C.int(req.Hidden), C.float(req.RMSNormEpsilon))
+	} else {
+		var finalErr error
+		finalPanel, finalPanelBuf, finalErr = c.qwen35SequenceRMSNormLocked(x, req.OutputNorm, tokens, req.RMSNormEpsilon, "output-norm")
+		if finalErr != nil {
+			return result, finalErr
+		}
+		var allocErr error
+		last, lastBuf, allocErr = c.qwen35SequenceAllocLocked([]int{req.Hidden}, "last-hidden")
+		if allocErr != nil {
+			return result, allocErr
+		}
+		C.fcuda_d2d(lastBuf.ptr, offsetF(finalPanelBuf.ptr, (tokens-1)*req.Hidden), C.size_t(req.Hidden*F32.Bytes()))
 	}
-	last, lastBuf, allocErr := c.qwen35SequenceAllocLocked([]int{req.Hidden}, "last-hidden")
-	if allocErr != nil {
-		return result, allocErr
-	}
-	C.fcuda_d2d(lastBuf.ptr, offsetF(finalPanelBuf.ptr, (tokens-1)*req.Hidden), C.size_t(req.Hidden*F32.Bytes()))
 	var logitsRows Tensor
 	var logitsRowsBuf *cudaBuf
 	if req.NeedAllLogits {
