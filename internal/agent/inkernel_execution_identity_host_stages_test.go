@@ -25,7 +25,7 @@ func captureExecutionSummary(t *testing.T, p *InKernelPlanner, q8kern, q8fusedMa
 	old := log.Writer()
 	log.SetOutput(&buf)
 	defer log.SetOutput(old)
-	p.logExecutionSummary(q8kern, q8fusedMark, 20, 0, 0, 20, 0.1, 200, 9, 1.0, 8)
+	p.logExecutionSummary(q8kern, q8fusedMark, 20, 0, 0, 20, 0.1, 200, 9, 1.0, 8, "")
 	return strings.TrimSpace(buf.String())
 }
 

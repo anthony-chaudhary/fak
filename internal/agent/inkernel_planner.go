@@ -2697,7 +2697,7 @@ func (p *InKernelPlanner) completeResolvedNative(ctx context.Context, messages [
 				q8fusedMark = "+fused"
 			}
 			if p.dflash2 == nil {
-				p.logExecutionSummary(q8kern, q8fusedMark, promptTok, genRes.cacheable, matched, computed, prefillS, prefTPS, gen, decodeS, decTPS)
+				p.logExecutionSummary(q8kern, q8fusedMark, promptTok, genRes.cacheable, matched, computed, prefillS, prefTPS, gen, decodeS, decTPS, inKernelCohortReceiptClause(genRes.batchReceipt))
 			}
 			// Feed the process-global KV-prefix reuse tap so this turn's split hit-rate reaches
 			// /metrics, not just this log line — the live measurement of the frozen-trajectory
@@ -2901,11 +2901,30 @@ func nativeDecodeRate(gen int, decodeS float64) (float64, bool) {
 	return float64(gen-1) / decodeS, true
 }
 
-func (p *InKernelPlanner) logExecutionSummary(q8kern, q8fusedMark string, promptTok, cacheable, matched, computed int, prefillS, prefTPS float64, generated int, decodeS, decTPS float64) {
+func (p *InKernelPlanner) logExecutionSummary(q8kern, q8fusedMark string, promptTok, cacheable, matched, computed int, prefillS, prefTPS float64, generated int, decodeS, decTPS float64, cohortClause string) {
 	backend, forwardPath := p.executionIdentity()
 	hostClause, q8Clause := p.executionPlacementClauses(q8kern, q8fusedMark)
-	log.Printf("inkernel_chat model=%s backend=%s forward_path=%s%s q4k=%v%s prompt=%dtok cacheable=%dtok reused=%dtok prefill=%dtok/%.2fs/%.1ftok/s decode=%dtok/%.2fs/%.1ftok/s%s gemm=%s%s%s kv=%s",
-		p.modelID, backend, forwardPath, hostClause, p.q4k, q8Clause, promptTok, cacheable, matched, computed, prefillS, prefTPS, generated, decodeS, decTPS, p.v41FaultAttributionClause(), p.prefillQ4KGEMMLabel(), p.hostPathDegradedClause(), p.requantizedWeightsClause(), p.kvPrecisionLabel())
+	log.Printf("inkernel_chat model=%s backend=%s forward_path=%s%s q4k=%v%s prompt=%dtok cacheable=%dtok reused=%dtok prefill=%dtok/%.2fs/%.1ftok/s decode=%dtok/%.2fs/%.1ftok/s%s%s gemm=%s%s%s kv=%s",
+		p.modelID, backend, forwardPath, hostClause, p.q4k, q8Clause, promptTok, cacheable, matched, computed, prefillS, prefTPS, generated, decodeS, decTPS, p.v41FaultAttributionClause(), cohortClause, p.prefillQ4KGEMMLabel(), p.hostPathDegradedClause(), p.requantizedWeightsClause(), p.kvPrecisionLabel())
+}
+
+// inKernelCohortReceiptClause renders the decode coalescer's batch receipt as
+// the execution summary's cohort= clause: the cohort id, the peak lane count
+// the request ran beside, and the shared projection panels the batched
+// forwards attributed to this request. Empty for a non-coalesced turn
+// (CohortID 0), so every pre-existing summary line and its parsers stay
+// byte-identical. The clause is what lets a served device run PROVE the
+// coalescer engaged from its own serve log: cohort=<id>/lanes=1/panels=0 is
+// the honest solo-cohort shape (a B==1 coalesced turn is bit-identical to
+// serial), lanes>1 with panels>0 is the shared-weight batched forward —
+// without it a concurrency receipt can only infer engagement from aggregate
+// tok/s, which cannot distinguish never-coalesced from coalesced-then-
+// governed-to-serial (fak#8395 device witness).
+func inKernelCohortReceiptClause(r InKernelBatchReceipt) string {
+	if r.CohortID == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" cohort=%d/lanes=%d/panels=%d", r.CohortID, r.CohortSize, r.SharedPanels)
 }
 
 // kvPrecisionLabel is the kv= value of the execution summary: the realized KV tier,

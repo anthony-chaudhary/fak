@@ -140,7 +140,7 @@ func TestInKernelExecutionLogNamesQwen35CUDAPath(t *testing.T) {
 	old := log.Writer()
 	log.SetOutput(&buf)
 	t.Cleanup(func() { log.SetOutput(old) })
-	p.logExecutionSummary("avx512", "+fused", 23, 0, 0, 23, 192.63, 0.1, 1, 7.08, 0.1)
+	p.logExecutionSummary("avx512", "+fused", 23, 0, 0, 23, 192.63, 0.1, 1, 7.08, 0.1, "")
 	got := buf.String()
 	for _, want := range []string{"backend=cuda", "forward_path=" + model.Qwen35GDNCUDAPath, "host="} {
 		if !strings.Contains(got, want) {
@@ -159,7 +159,7 @@ func TestInKernelExecutionLogNamesQwen35MetalPath(t *testing.T) {
 	old := log.Writer()
 	log.SetOutput(&buf)
 	t.Cleanup(func() { log.SetOutput(old) })
-	p.logExecutionSummary("neon", "", 22, 3, 0, 22, 6.41, 3.4, 3, 1.07, 2.8)
+	p.logExecutionSummary("neon", "", 22, 3, 0, 22, 6.41, 3.4, 3, 1.07, 2.8, "")
 	got := buf.String()
 	for _, want := range []string{"backend=metal", "forward_path=metal/qwen35-hybrid-session-v1", "q4k=true"} {
 		if !strings.Contains(got, want) {
@@ -188,7 +188,7 @@ func TestInKernelExecutionLogAppendsPrefillGEMM(t *testing.T) {
 		if tc.stored != "" {
 			p.prefillQ4KGEMM.Store(tc.stored)
 		}
-		p.logExecutionSummary("neon", "", 12, 0, 0, 12, 0.9, 13.3, 1, 0, 0)
+		p.logExecutionSummary("neon", "", 12, 0, 0, 12, 0.9, 13.3, 1, 0, 0, "")
 		got := strings.TrimSpace(buf.String())
 		if !strings.HasSuffix(got, " "+tc.want+" kv=fp32") {
 			t.Fatalf("execution log %q does not end with %q", got, tc.want+" kv=fp32")
@@ -217,7 +217,7 @@ func TestInKernelExecutionLogRecordsKVPrecisionDefault(t *testing.T) {
 	} {
 		buf.Reset()
 		p := &InKernelPlanner{m: m, modelID: "m", kvPrecision: tc.prec}
-		p.logExecutionSummary("neon", "", 1, 0, 0, 1, 0.1, 10, 1, 0, 0)
+		p.logExecutionSummary("neon", "", 1, 0, 0, 1, 0.1, 10, 1, 0, 0, "")
 		if got := strings.TrimSpace(buf.String()); !strings.HasSuffix(got, tc.want) {
 			t.Fatalf("execution log %q does not end with %q", got, tc.want)
 		}
