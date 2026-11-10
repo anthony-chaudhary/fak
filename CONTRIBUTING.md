@@ -10,6 +10,8 @@ explicitly scoped change on `main`. The sections are sequential: complete the si
 next action below first, then continue to route selection and setup. Product evaluation
 starts at [`README.md`](README.md);
 production operation starts at [`docs/operator/`](docs/operator/).
+Day-one orientation for a fresh clone lives in
+[`docs/engineering/first-day.md`](docs/engineering/first-day.md).
 
 **Next action:** from the repository root, run `go version` and confirm Go 1.26 or newer
 (the `go.mod` toolchain directive can fetch the required toolchain automatically).
@@ -76,9 +78,12 @@ Keeping your fork current:
 git fetch upstream && git merge upstream/main
 ```
 
-**Windows:** `go build` and `go vet` work natively. Running the *test suite* can hit an OS
-Application-Control policy that blocks freshly compiled test binaries — that is an OS quirk,
-not a code failure. Run the tests under WSL if you need them; see the Windows note in
+**Windows:** `go build` and `go vet` work natively. Running the *test suite* can hit
+Microsoft Defender Antivirus real-time ML detections that quarantine freshly compiled test
+binaries — that is an OS quirk, not a code failure (the 2026-08-25 audit for issue #8919
+supersedes the earlier Application-Control diagnosis — see
+[`docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md`](docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md)).
+Run the tests under WSL if you need them; see the Windows note in
 [`GETTING-STARTED.md`](GETTING-STARTED.md).
 
 ## Connect the change to an operator problem
@@ -135,7 +140,10 @@ integration, and network failures and verify the actual remote result.
    `git config --get core.hooksPath` does not report `tools/githooks`. The guard polices
    direct commits to *this* shared `main`; it has no role in a fork, so skip it entirely if
    you are opening a pull request.
-2. **Everyone — the compile check.** Compile without writing an in-tree binary:
+2. **Everyone — the compile check.** If `fak-dev` is not already on your `PATH`, install it
+   once from the checkout with `go install ./cmd/fak-dev`; it lands in your Go bin directory
+   (`%USERPROFILE%\go\bin` on Windows, `$HOME/go/bin` elsewhere) — add that directory to your
+   `PATH` if it is missing. Then compile without writing an in-tree binary:
    `fak-dev buildcheck --vet`. It exists because this checkout is shared and a peer's untracked
    Go files would otherwise change the answer; from a fork, plain
    `go build ./... && go vet ./...` is the same check. If no usable `fak` binary exists yet,
@@ -152,8 +160,10 @@ integration, and network failures and verify the actual remote result.
    save `make ci` for the commit itself. From a fork you do not run it at all: the tests for
    the package you touched are enough, and CI runs the full gate on the PR — see
    [What your PR needs to pass](#what-your-pr-needs-to-pass). On native Windows, run
-   tests through `./test.ps1` under WSL because host application control blocks newly
-   compiled test executables. Build and vet remain native-safe.
+   tests through `./test.ps1` under WSL because Microsoft Defender Antivirus real-time ML
+   quarantines newly compiled test executables (see
+   [`docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md`](docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md),
+   which supersedes the earlier Application-Control diagnosis). Build and vet remain native-safe.
 4. **Maintainers and in-repo agents only — direct-to-`main`.** After the explicit-path commit
    and before push, run `fak-dev ci-preflight` as the
    **required committed-tip gate** in a clean temporary checkout, independent of the
@@ -277,6 +287,11 @@ change must update the allowlist in the same reviewed change.
   (whole suite) or `.\test.ps1 ./internal/<pkg>/`. The selected WSL distro needs Go 1.26+; the Windows-host Go install is not visible inside WSL, and `GOTOOLCHAIN=auto` cannot bootstrap without a base `go` command. Follow the [`One-time Windows developer setup`](#one-time-windows-developer-setup). `go build` / `go vet` work natively; only test
   *execution* is blocked on the Windows host. See the Windows note in
   [`GETTING-STARTED.md`](GETTING-STARTED.md) for why. **Never commit a red tree.**
+- **Declare the wall-clock of any new cost-shaped test.** A new test that adds meaningful
+  runtime to its package suite must carry the marker
+  `// fak-test:runtime <fast|medium|slow|integration> est=<duration> [lane=<lane>]` above
+  the test function; the companion `fak-testruntime` gate refuses a cost-shaped test without
+  one. Full contract: [`AGENTS.md`](AGENTS.md) ("Calibrate test breadth").
 - **Add a feature as a leaf, not a core edit** — `fak new-leaf <name> --tier
   <tier> [--register]` stamps a conforming skeleton and wires the layering/registration.
   The frozen ABI (`internal/abi`) is additive-only and human-owned; everything else
@@ -310,7 +325,8 @@ change must update the allowlist in the same reviewed change.
   claims-lint; tests run under WSL via `./test.ps1` on Windows), after which the
   commit-message / file-admission / public-leak / trunk guards run as git hooks. Pull
   before you start and again before each push; push promptly after each green commit, on the
-  trunk, with `git commit -s` (DCO) — never force-push. If a guard refuses (`OFF_TRUNK`), a
+  trunk, with `git commit -s` (DCO) — never force-push; the safe-push verb is
+  `fak sync push`. If a guard refuses (`OFF_TRUNK`), a
   peer merge is in flight, or a blocker stands, reconcile in place or STOP first.
 - **Stamp every commit so it can be verified.** Fleet writes Conventional-Commits
   subjects (`feat(scope): …`, `fix(scope): …`, `docs(scope): …`) with a `(fak <leaf>)`

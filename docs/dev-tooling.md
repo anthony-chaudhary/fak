@@ -443,8 +443,10 @@ For a single package, `go test ./internal/<pkg>/... -count=1` is the direct form
 > **Windows host caveat.** The selected WSL distro needs Go 1.26+; the Windows-host
 > Go install is not visible inside WSL, and `GOTOOLCHAIN=auto` cannot bootstrap without a
 > base `go` command. Native `go build` / `go vet` / `go run` work,
-> but native `go test` is blocked by an OS Application-Control policy on the freshly-compiled
-> test binaries. Run the suite under WSL with `./test.ps1` from the repo root (it
+> but native `go test` is disrupted by Microsoft Defender Antivirus real-time ML
+> detections on the freshly-compiled test binaries (the 2026-08-25 audit for issue
+> #8919 supersedes the earlier Application-Control diagnosis). Run the suite under
+> WSL with `./test.ps1` from the repo root (it
 > shells the same `go test` inside WSL and defaults to the ext4 mirror fast path,
 > `FAK_FAST=1`, so test source enumeration does not run from slow `/mnt/c` drvfs).
 > This is an OS quirk, not a code failure; `fak affected` and every `make test*`

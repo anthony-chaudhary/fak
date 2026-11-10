@@ -1,10 +1,12 @@
 # fak/test.ps1 — Windows entry point for the canonical test runner.
 #
-# Running `go test ./...` natively on this host is blocked intermittently by a
-# Windows Application Control policy (it refuses to exec the unsigned per-package
-# test .exe files from %TEMP%). This wrapper runs the suite inside WSL instead,
-# where Linux ELF test binaries aren't subject to that policy. See fak/test.sh
-# for the full rationale.
+# Running `go test ./...` natively on this host is disrupted intermittently by
+# Microsoft Defender Antivirus real-time ML detections (they quarantine the
+# freshly compiled per-package test .exe files from %TEMP%). The 2026-08-25 audit
+# for issue #8919 supersedes the earlier Application Control attribution — see
+# docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md. This wrapper runs the
+# suite inside WSL instead, where Linux ELF test binaries aren't subject to it.
+# See fak/test.sh for the full rationale.
 #
 # Usage:
 #   .\fak\test.ps1                       # whole suite (./...)

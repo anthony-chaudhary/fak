@@ -2,13 +2,13 @@
 
 *`README.md` is the single canonical front door for product overview, value proposition, and quick proof. This page owns one job: human task routing. It takes a goal you have right now and routes you to the single authoritative document without circular loops.*
 
-> **TL;DR:** Newcomers should focus on the 16 core pages in the Newcomer Tier below. For immediate tasks, use the Task Router table to jump directly to the right guide.
+> **TL;DR:** Newcomers should focus on the 18 core pages in the Newcomer Tier below. For immediate tasks, use the Task Router table to jump directly to the right guide.
 
-The documentation repository contains over 1,200 pages spanning specifications, historical research notes, and benchmarks. To prevent navigation confusion, documentation is split into two distinct tiers: the **Newcomer Tier** (the essential 16 core pages) and the **Operator/Maintainer Tier**.
+The documentation repository contains over 1,200 pages spanning specifications, historical research notes, and benchmarks. To prevent navigation confusion, documentation is split into two distinct tiers: the **Newcomer Tier** (the essential 18 core pages) and the **Operator/Maintainer Tier**.
 
 ---
 
-## The Newcomer Tier (Essential 16 pages)
+## The Newcomer Tier (Essential 18 pages)
 
 If you are new to fak, focus exclusively on these core documents. They cover everything required to understand, install, configure, and operate the runtime:
 
@@ -65,6 +65,7 @@ Select the task you need to accomplish to find its primary guide and immediate n
 | Fix a command that failed or misbehaved | [`docs/adoption/troubleshooting-first-run.md`](docs/adoption/troubleshooting-first-run.md) | Match your symptom to its cause and apply the one-line fix. |
 | Understand how fak coordinates execution | [`docs/architecture.md`](docs/architecture.md) | Review the five-layer observation to typed-effect architecture. |
 | Contribute code or documentation | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Check prerequisites, sign the DCO, and follow the contribution workflow. |
+| Work on the fak codebase itself (day 1) | [`docs/engineering/first-day.md`](docs/engineering/first-day.md) | Run the 10-minute sanity loop, learn the platform rules, and pick a first task. |
 
 ---
 

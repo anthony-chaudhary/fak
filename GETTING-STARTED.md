@@ -77,7 +77,7 @@ go build -o fak ./cmd/fak
 ./fak help
 ```
 
-> **Windows note:** Build natively with `go build -o fak.exe ./cmd/fak`. Windows host Application-Control policies may block compiled test binaries; run test suites inside WSL with `./test.ps1`. The binary itself runs natively without issues.
+> **Windows note:** Build natively with `go build -o fak.exe ./cmd/fak`. Microsoft Defender Antivirus real-time ML detections repeatedly quarantine freshly compiled test binaries (the 2026-08-25 audit for issue #8919 supersedes the earlier Application-Control diagnosis — see [docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md](docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md)); run test suites inside WSL with `./test.ps1`. The binary itself runs natively without issues.
 
 ---
 
@@ -275,7 +275,7 @@ Kernel developers working on native forward passes and KV-cache mechanics should
 | Symptom | Cause and resolution |
 |---|---|
 | `go: go.mod requires go >= 1.26` | Upgrade Go to 1.26+ or enable `GOTOOLCHAIN=auto`. |
-| `Application Control policy has blocked this file` (Windows) | OS restriction on fresh test executables. Run test suites in WSL with `./test.ps1`. |
+| `Application Control policy has blocked this file` (Windows) | Microsoft Defender Antivirus real-time ML quarantines fresh test executables (supersedes the older Application-Control diagnosis — see [docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md](docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md)). Run test suites in WSL with `./test.ps1`. |
 | `no such file testdata/...` | Run commands from the repository root, or supply an absolute path to `--trace`. |
 | `address already in use` | Another service is using port 8080. Choose a different port using `--addr`. |
 

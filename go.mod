@@ -4,9 +4,9 @@
 //
 // The module is the repository root, so it installs directly:
 //   go install github.com/anthony-chaudhary/fak/cmd/fak@latest
-// The entire external dependency set is two golang.org/x extended-standard-library
-// modules — golang.org/x/term (the CLI's terminal probe and size/raw-mode handling)
-// and golang.org/x/sys indirectly through it — pinned by a 4-line go.sum.
+// The entire external dependency set is four pinned golang.org/x
+// extended-standard-library modules — x/image, x/sys, x/term, and x/text —
+// pinned by an 8-line go.sum.
 module github.com/anthony-chaudhary/fak
 
 go 1.26.0

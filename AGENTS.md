@@ -183,8 +183,9 @@ When prioritizing design, implementation, architecture, triage, or backlog work,
 
 ## Build / test / run
 
-The Go module is the repository root and needs Go 1.26+ (`GOTOOLCHAIN=auto`). Zero external
-dependencies means no `go.sum`.
+The Go module is the repository root and needs Go 1.26+ (`GOTOOLCHAIN=auto`). The dependency
+set is minimal and pinned: four golang.org/x modules in an 8-line `go.sum`; additions require
+the dependency-budget review — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
 go build ./cmd/fak        # build ./fak (fak.exe on Windows)
