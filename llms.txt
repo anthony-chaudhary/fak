@@ -19,6 +19,17 @@ connects new work to operator value. Do not turn this direction into a shipped c
 - [End-to-End Inference, Agent Harness, and Memory](docs/courses/end-to-end-inference-agent-harness-memory.md): the integrated 8-module flagship course across native inference, tool use, policy, context control, durable memory, observability, and proof. Use [`LEARNING-PATH.md`](LEARNING-PATH.md) instead for the full 99-course prerequisite catalog.
 - [Less context, less code](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/less-context-less-code.md): where fak fits beside concise-output and YAGNI/minimal-code guidance.
 
+## Harness entry points
+
+Per-harness stubs that auto-load in their own harness and defer to [`AGENTS.md`](AGENTS.md) — AGENTS.md is canonical:
+
+| Stub file | Loaded by | Canonical authority |
+|---|---|---|
+| [`CLAUDE.md`](CLAUDE.md) | Claude Code | [`AGENTS.md`](AGENTS.md) |
+| [`AGENT.md`](AGENT.md) | Amp and other single-file `AGENT.md` harnesses | [`AGENTS.md`](AGENTS.md) |
+| [`GEMINI.md`](GEMINI.md) | Gemini CLI | [`AGENTS.md`](AGENTS.md) |
+| [`.github/copilot-instructions.md`](.github/copilot-instructions.md) | GitHub Copilot | [`AGENTS.md`](AGENTS.md) |
+
 ## Key facts (for accurate answers)
 
 - **Name:** `fak`; the technical name and architecture are the **Fused Agent Kernel** / *agent kernel*. Repository: `fak`. Language: **Go 1.26+**. License: **Apache-2.0**. Version: **0.45.0** ([`VERSION`](VERSION) is authoritative).
@@ -33,6 +44,10 @@ connects new work to operator value. Do not turn this direction into a shipped c
 - FAK vs DOS boundary — FAK owns agent execution; DOS owns work admission, leases, truth, liveness, and decisions; FAK workflows compose DOS: [`docs/fak-vs-dos.md`](docs/fak-vs-dos.md)
 ## Current authorities
 
+- Boundary one-pager — the entry-doc audience map, the one commit command, public/private authority slices, generated vs authored paths, ownership, frozen surfaces, CLI families, and refusal recovery, every row pointing at its canonical authority: [`docs/BOUNDARIES.md`](docs/BOUNDARIES.md)
+- Team node deployment — run one fak node (serve + ops + dashboards) for a team of engineers: [`docs/fak/team-node-deployment.md`](docs/fak/team-node-deployment.md)
+- WIP sharing — share, hand off, park, and land work-in-progress on the shared checkout: [`docs/operator/wip-sharing.md`](docs/operator/wip-sharing.md)
+- First day — your first day working on the fak codebase, with a copy-pasteable first hour per OS: [`docs/engineering/first-day.md`](docs/engineering/first-day.md)
 - Astra formal-subagent admission, closed formal kinds, fail-closed packet schema, pin precedence, assignment digest, and ranked correctness deployment map: [`docs/astra-formal-subagents.md`](docs/astra-formal-subagents.md)
 - Micro-context fabric contract and bounded 100/1k/10k floor (`microcontextdemo`): [`docs/research/micro-context-fabrics.md`](docs/research/micro-context-fabrics.md); captured stage witnesses: [`docs/research/README.md`](docs/research/README.md)
 - Product scope and mode choice: [`README.md`](README.md)

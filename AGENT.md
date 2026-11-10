@@ -28,8 +28,9 @@ malformed calls, quarantine poisoned results. Its MCP server is wired in `.mcp.j
   **detached** per-worker worktree that lands on `main` via `fak worktree worker
   prepare|land|reap` (build isolation, #1334) — detached and lane-serialized, it is not a
   branch and never trips `OFF_TRUNK`. Feature branches and off-trunk commits stay forbidden.
-- Commit by explicit path (`git commit -- <paths>`, never `git add -A`); sign off with
-  `git commit -s` (DCO).
+- Commit via `fak commit --path <p> -m "<subject> (fak <leaf>)"` (or `fak sweep --apply`);
+  DCO sign-off is automatic. Raw `git commit -s -m "<subject> (fak <leaf>)" -- <paths>` is
+  emergency-only when the `fak` binary is unbuilt; never `git add -A`.
 - Subdivide work, practice scoped fail-to-abstain, and persist through recoverable
   blockers — smaller or worker models must keep tasks bounded to atomic S0/S1 leaf
   units (1–3 files, single package, one witness), advance independent safe sub-components,

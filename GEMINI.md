@@ -25,8 +25,9 @@ Must-know rules (enforced below the agent layer):
   **detached** per-worker worktree that lands on `main` via `fak worktree worker
   prepare|land|reap` (build isolation, #1334) — detached and lane-serialized, it is not a
   branch and never trips `OFF_TRUNK`. Feature branches and off-trunk commits stay forbidden.
-- Commit by explicit path (`git commit -- <paths>`, never `git add -A`); sign off with
-  `git commit -s` (DCO).
+- Commit via `fak commit --path <p> -m "<subject> (fak <leaf>)"` (or `fak sweep --apply`);
+  DCO sign-off is automatic. Raw `git commit -s -m "<subject> (fak <leaf>)" -- <paths>` is
+  emergency-only when the `fak` binary is unbuilt; never `git add -A`.
 - The Go module is the repository root — run `go` commands from the clone root
   (`go install github.com/anthony-chaudhary/fak/cmd/fak@latest` resolves directly).
 

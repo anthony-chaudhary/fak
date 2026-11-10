@@ -1,0 +1,41 @@
+# CODEOWNERS — fak
+#
+# Default owner for the whole repo: @anthony-chaudhary (the repo owner on GitHub).
+# The specific rows below mark the frozen / core-locked surfaces that carry extra
+# review weight:
+#   - the hard-self core-lock globs declared in internal/corelocks/testdata/core_locks.toml
+#     (internal/adjudicator/**, internal/abi/**, internal/corelocks/**) raise
+#     CORE_SELF_MODIFY at commit time without an independent maintenance witness;
+#   - the frozen ABI (internal/abi) is golden-pinned and human-owned per GOVERNANCE.md
+#     (additive-only); pkg/abi is its exported alias surface for external consumers;
+#   - dos.toml carries the closed [reasons.*] refusal vocabulary and [lanes] lane roots;
+#     PARTITION.md carries the leaf-per-directory partitioning;
+#   - the doc front doors are the entry points every reader walks first.
+# GitHub ignores lines that reference teams/users that do not exist, so this file
+# names only @anthony-chaudhary.
+
+* @anthony-chaudhary
+
+# Frozen / core-locked surfaces (hard-self globs, internal/corelocks/testdata/core_locks.toml)
+/internal/abi/ @anthony-chaudhary
+/internal/adjudicator/ @anthony-chaudhary
+/internal/corelocks/ @anthony-chaudhary
+/pkg/abi/ @anthony-chaudhary
+
+# Closed refusal vocabulary + lane roots
+/dos.toml @anthony-chaudhary
+
+# Leaf-per-directory partitioning
+/PARTITION.md @anthony-chaudhary
+
+# Repo governance + CI/workflow config
+/.github/ @anthony-chaudhary
+
+# Doc front doors
+/README.md @anthony-chaudhary
+/llms.txt @anthony-chaudhary
+/INDEX.md @anthony-chaudhary
+/START-HERE.md @anthony-chaudhary
+/CONTRIBUTING.md @anthony-chaudhary
+/AGENTS.md @anthony-chaudhary
+/docs/BOUNDARIES.md @anthony-chaudhary
