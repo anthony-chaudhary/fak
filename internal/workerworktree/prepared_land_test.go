@@ -275,40 +275,46 @@ func TestPreparedLocalizedWorktreeBridge(t *testing.T) {
 
 func TestAcceptPreparedLandRejectsAlteredBindingsWithoutRefMovement(t *testing.T) {
 	tests := []struct {
-		name  string
-		alter func(*testing.T, preparedFixture, PreparedLandReceipt, *PreparedLandExpectation)
+		name       string
+		wantDetail string
+		alter      func(*testing.T, preparedFixture, PreparedLandReceipt, *PreparedLandExpectation)
 	}{
-		{"parent", func(t *testing.T, f preparedFixture, r PreparedLandReceipt, _ *PreparedLandExpectation) {
+		{"parent", "", func(t *testing.T, f preparedFixture, r PreparedLandReceipt, _ *PreparedLandExpectation) {
 			rewritePrepared(t, f, r, func(v *PreparedLandReceipt) { v.ParentSHA = strings.Repeat("a", 40) })
 		}},
-		{"tree", func(t *testing.T, f preparedFixture, r PreparedLandReceipt, _ *PreparedLandExpectation) {
+		{"tree", "", func(t *testing.T, f preparedFixture, r PreparedLandReceipt, _ *PreparedLandExpectation) {
 			rewritePrepared(t, f, r, func(v *PreparedLandReceipt) { v.TreeSHA = strings.Repeat("b", 40) })
 		}},
-		{"candidate", func(t *testing.T, f preparedFixture, r PreparedLandReceipt, _ *PreparedLandExpectation) {
+		{"candidate", "", func(t *testing.T, f preparedFixture, r PreparedLandReceipt, _ *PreparedLandExpectation) {
 			rewritePrepared(t, f, r, func(v *PreparedLandReceipt) { v.CandidateSHA = strings.Repeat("c", 40) })
 		}},
-		{"paths", func(_ *testing.T, _ preparedFixture, _ PreparedLandReceipt, e *PreparedLandExpectation) {
+		{"paths", "paths", func(_ *testing.T, _ preparedFixture, _ PreparedLandReceipt, e *PreparedLandExpectation) {
 			e.Paths = []string{"other.txt"}
 		}},
-		{"command", func(_ *testing.T, _ preparedFixture, _ PreparedLandReceipt, e *PreparedLandExpectation) {
+		{"command", "verification_command", func(_ *testing.T, _ preparedFixture, _ PreparedLandReceipt, e *PreparedLandExpectation) {
 			e.Verification.Command = "go test ./other"
 		}},
-		{"tags", func(_ *testing.T, _ preparedFixture, _ PreparedLandReceipt, e *PreparedLandExpectation) {
+		{"tags", "tags", func(_ *testing.T, _ preparedFixture, _ PreparedLandReceipt, e *PreparedLandExpectation) {
 			e.Verification.Tags = []string{"other"}
 		}},
-		{"contract", func(t *testing.T, f preparedFixture, r PreparedLandReceipt, _ *PreparedLandExpectation) {
+		{"combined", "paths,verification_command,tags", func(_ *testing.T, _ preparedFixture, _ PreparedLandReceipt, e *PreparedLandExpectation) {
+			e.Paths = []string{"other.txt"}
+			e.Verification.Command = "go test ./other"
+			e.Verification.Tags = []string{"other"}
+		}},
+		{"contract", "", func(t *testing.T, f preparedFixture, r PreparedLandReceipt, _ *PreparedLandExpectation) {
 			rewritePrepared(t, f, r, func(v *PreparedLandReceipt) { v.GateContract = "other" })
 		}},
-		{"verdict", func(t *testing.T, f preparedFixture, r PreparedLandReceipt, _ *PreparedLandExpectation) {
+		{"verdict", "", func(t *testing.T, f preparedFixture, r PreparedLandReceipt, _ *PreparedLandExpectation) {
 			rewritePrepared(t, f, r, func(v *PreparedLandReceipt) { v.Verdict = "FAIL" })
 		}},
-		{"recovery", func(t *testing.T, f preparedFixture, r PreparedLandReceipt, _ *PreparedLandExpectation) {
+		{"recovery", "", func(t *testing.T, f preparedFixture, r PreparedLandReceipt, _ *PreparedLandExpectation) {
 			rewritePrepared(t, f, r, func(v *PreparedLandReceipt) { v.RecoveryRef += "-altered" })
 		}},
-		{"missing recovery", func(t *testing.T, f preparedFixture, r PreparedLandReceipt, _ *PreparedLandExpectation) {
+		{"missing recovery", "", func(t *testing.T, f preparedFixture, r PreparedLandReceipt, _ *PreparedLandExpectation) {
 			mustGit(t, f.root, "update-ref", "-d", r.RecoveryRef)
 		}},
-		{"malformed", func(t *testing.T, f preparedFixture, r PreparedLandReceipt, _ *PreparedLandExpectation) {
+		{"malformed", "", func(t *testing.T, f preparedFixture, r PreparedLandReceipt, _ *PreparedLandExpectation) {
 			path, err := PreparedLandReceiptPath(f.root, r.ReceiptID, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -332,6 +338,9 @@ func TestAcceptPreparedLandRejectsAlteredBindingsWithoutRefMovement(t *testing.T
 			got := AcceptPreparedLand(f.root, f.wt, want, nil)
 			if got.OK || got.Code != LandResultPreparedMismatch || !got.Preserved {
 				t.Fatalf("altered %s accepted: %+v", tc.name, got)
+			}
+			if tc.wantDetail != "" && got.Detail != tc.wantDetail {
+				t.Fatalf("mismatch detail = %q, want %q", got.Detail, tc.wantDetail)
 			}
 			if got.CommitSHA != "" {
 				t.Fatalf("altered %s returned commit SHA %q", tc.name, got.CommitSHA)

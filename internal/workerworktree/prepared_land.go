@@ -135,10 +135,18 @@ func AcceptPreparedLand(root, wtPath string, expected PreparedLandExpectation, g
 	if _, refusal := landSourceSnapshot(root, cfg, git); refusal != nil {
 		return *refusal
 	}
-	if receipt.PathsDigest != digestStrings(expectedPaths) ||
-		receipt.VerifyCommandDigest != digestStrings([]string{expectedBinding.Command}) ||
-		receipt.TagsDigest != digestStrings(expectedBinding.Tags) {
-		return preparedMismatch("prepared landing expectations do not match receipt", "")
+	var mismatches []string
+	if receipt.PathsDigest != digestStrings(expectedPaths) {
+		mismatches = append(mismatches, "paths")
+	}
+	if receipt.VerifyCommandDigest != digestStrings([]string{expectedBinding.Command}) {
+		mismatches = append(mismatches, "verification_command")
+	}
+	if receipt.TagsDigest != digestStrings(expectedBinding.Tags) {
+		mismatches = append(mismatches, "tags")
+	}
+	if len(mismatches) > 0 {
+		return preparedMismatch("prepared landing expectations do not match receipt", strings.Join(mismatches, ","))
 	}
 	receiptPaths, err := normalizePreparedPaths(receipt.Paths)
 	if err != nil || len(receiptPaths) == 0 || digestStrings(receiptPaths) != receipt.PathsDigest {
