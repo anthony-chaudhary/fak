@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fak · your router's default: raw pass-through</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#151b23; --panel2:#1b2330; --line:#2c3644;
+    --txt:#e6edf3; --dim:#8b949e; --dim2:#a8b3c2; --accent:#58a6ff;
+    --bad:#f85149; --badbg:#221114; --badln:#57282c;
+    --good:#3fb950; --goodbg:#102015; --goodln:#245236;
+    --warn:#d29922; --mark:#4d3806; --marktxt:#ffd873;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--txt);font:13px/1.5 ui-monospace,Menlo,Consolas,"SF Mono",monospace;margin:0}
+  h1{font-size:18px;font-weight:600;margin:0}
+  code{color:var(--accent)}
+  .wrap{max-width:1120px;margin:0 auto;padding:22px 20px 60px}
+  .top{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+  .pill{font-size:11px;color:var(--dim2);border:1px solid var(--line);border-radius:20px;padding:2px 9px}
+  .sub{color:var(--dim2);font-size:13.5px;margin-bottom:16px;line-height:1.65;max-width:920px}
+  .sub b{color:var(--txt)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:16px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+  button{background:var(--accent);color:#fff;border:none;border-radius:7px;padding:8px 16px;font:inherit;font-weight:600;cursor:pointer}
+  button:hover{filter:brightness(1.08)}
+  button:disabled{opacity:.45;cursor:default}
+  .cfg{color:var(--dim);font-size:12px}
+
+  /* the two-column scoreboard */
+  .board{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:4px 0 14px}
+  .score{border-radius:10px;padding:12px 14px;border:1px solid var(--line);background:var(--panel2)}
+  .score .hd{font-weight:700;font-size:13px;letter-spacing:.02em}
+  .score .desc{font-size:11px;color:var(--dim);margin-top:2px}
+  .score .big{font-size:34px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.1;margin-top:6px}
+  .score.left{background:var(--badbg);border-color:var(--badln)}
+  .score.left .hd,.score.left .big{color:var(--bad)}
+  .score.right{background:var(--goodbg);border-color:var(--goodln)}
+  .score.right .hd,.score.right .big{color:var(--good)}
+
+  /* the two side-by-side arm panels */
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .col{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .col h2{font-size:13px;margin:0 0 2px}
+  .col .pose{font-size:11px;color:var(--dim);margin-bottom:10px}
+  .col.raw h2{color:var(--bad)}
+  .col.guarded h2{color:var(--good)}
+  .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin:12px 0 4px}
+  pre{background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:9px 11px;font:12px/1.55 inherit;white-space:pre-wrap;word-break:break-word;margin:0}
+  mark{background:var(--mark);color:var(--marktxt);border-radius:3px;padding:0 2px}
+  mark.mask{background:#12351f;color:var(--good)}
+  .none{color:var(--dim);font-style:italic;font-size:12px}
+  .v{font-size:12px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;margin:4px 0;background:var(--panel2)}
+  .v b{color:var(--txt)}
+  .v .k{font-weight:700}
+  .v .k.TRANSFORM{color:var(--good)}
+  .v .k.ALLOW{color:var(--accent)}
+  .v .k.DENY{color:var(--bad)}
+  .v .k.QUARANTINE{color:var(--warn)}
+  .v span.by{color:var(--dim)}
+  .lat{font-size:11px;color:var(--dim);margin-top:10px}
+  .note{font-size:11px;color:var(--dim);margin-top:14px;line-height:1.6}
+  @media(max-width:860px){.board,.cols{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>fak · your router's default: raw pass-through</h1>
+    <span class="pill">two real gateway servers · in-process</span>
+    <span class="pill">deterministic mock model · no weights</span>
+    <span class="pill">synthetic data only</span>
+  </div>
+  <div class="sub">
+    Your router's default: <b>raw pass-through — nothing is filtered, nothing is processed.</b>
+    A PII-bearing tool result reaches the model <b>byte-identical</b>: zero admissions, no note, no mask.
+    Arm the guard (<code>--guard</code> / <code>FAK_GUARD=on</code>) and the <b>same tool result comes back PII-masked</b> —
+    email, phone, SSN, card, credential — with the in-band <code>[fak] masked …</code> note rendered on the wire.
+  </div>
+
+  <div class="panel">
+    <div class="row">
+      <button id="runBtn">Run both arms</button>
+      <span class="cfg" id="cfg"></span>
+    </div>
+    <div class="board">
+      <div class="score left">
+        <div class="hd">RAW — ToolGuard off (the serve default)</div>
+        <div class="desc">intercepts nothing · forwards byte-identical</div>
+        <div class="big" id="scoreLeft">–</div>
+        <div class="desc" id="scoreLeftLbl">protected spans reaching the model unmasked</div>
+      </div>
+      <div class="score right">
+        <div class="hd">GUARDED — ToolGuard on (--guard)</div>
+        <div class="desc">kernel admission chain screens every tool result</div>
+        <div class="big" id="scoreRight">–</div>
+        <div class="desc" id="scoreRightLbl">protected spans masked in place</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cols">
+    <div class="col raw">
+      <h2>RAW — raw pass-through</h2>
+      <div class="pose">gateway.Config{ToolGuard:"off"} · the router intercepts NOTHING</div>
+      <div class="lbl">tool results as sent</div><pre id="sentRaw">loading…</pre>
+      <div class="lbl">verdicts</div><div id="verdRaw"><div class="none">run both arms</div></div>
+      <div class="lbl">[fak] note (in-band)</div><div id="noteRaw"><div class="none">run both arms</div></div>
+      <div class="lbl">model-visible bytes</div><pre id="visRaw"></pre>
+      <div class="lat" id="latRaw"></div>
+    </div>
+    <div class="col guarded">
+      <h2>GUARDED — armed floor</h2>
+      <div class="pose">gateway.Config{ToolGuard:"on"} · normgate rank-5 · ctxmmu rank-10</div>
+      <div class="lbl">tool results as sent</div><pre id="sentGuarded">loading…</pre>
+      <div class="lbl">verdicts</div><div id="verdGuarded"><div class="none">run both arms</div></div>
+      <div class="lbl">[fak] note (in-band)</div><div id="noteGuarded"><div class="none">run both arms</div></div>
+      <div class="lbl">model-visible bytes (post-admission)</div><pre id="visGuarded"></pre>
+      <div class="lat" id="latGuarded"></div>
+    </div>
+  </div>
+
+  <div class="note">
+    Every value above is produced by the REAL gateway HTTP seams — POST /v1/messages on two in-process
+    gateway servers (ephemeral loopback listeners) and, on the guarded arm only, POST /v1/fak/admit
+    (explicit caller intent: it runs the admission chain under either posture, so the raw arm proves
+    pass-through with the chat response itself — zero admissions, no note). The model behind both arms
+    is fak's deterministic offline mock planner, so the demo reproduces identically on any box.
+    All data is <b>synthetic</b> (fake person, fake SSN/card, placeholder credential) — no real PII.
+    Headless witness: <code>go run ./cmd/piidemo -selfcheck</code>. Ref #14327.
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let spans = [];
+
+function esc(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// highlight the protected spans in "as sent" / raw model-visible text.
+function highlightSent(s){
+  let out = esc(s);
+  for(const sp of spans){
+    const e = esc(sp);
+    out = out.split(e).join('<mark>'+e+'</mark>');
+  }
+  return out;
+}
+// highlight the kernel's [redacted:…] marks in post-admission text.
+function highlightMasked(s){
+  return esc(s).replace(/\[redacted:[^\]]*\]/g, m => '<mark class="mask">'+m+'</mark>');
+}
+
+function verdictsHTML(j){
+  const parts = [];
+  (j.admissions||[]).forEach(a=>{
+    const v=a.verdict||{};
+    parts.push('<div class="v"><b>'+esc(a.tool)+'</b> <span class="k '+esc(v.kind||'')+'">'+esc(v.kind||'?')+
+      '</span>'+(v.reason?' · '+esc(v.reason):'')+(v.by?' <span class="by">by '+esc(v.by)+'</span>':'')+'</div>');
+  });
+  (j.adjudications||[]).forEach(a=>{
+    const v=a.verdict||{};
+    parts.push('<div class="v"><b>'+esc(a.tool)+'</b> <span class="k '+esc(v.kind||'')+'">'+esc(v.kind||'?')+
+      '</span>'+(v.reason?' · '+esc(v.reason):'')+' <span class="by">(proposed call)</span></div>');
+  });
+  if(!parts.length) parts.push('<div class="none">none — zero admissions, zero adjudications</div>');
+  return parts.join('');
+}
+
+function fillCol(suffix, j){
+  $('#verd'+suffix).innerHTML = verdictsHTML(j);
+  const notes = j.notes||[];
+  $('#note'+suffix).innerHTML = notes.length
+    ? notes.map(n => '<pre style="margin:4px 0">'+esc(n)+'</pre>').join('')
+    : '<div class="none">— none — the router never spoke in-band</div>';
+  const vis = j.model_visible||{};
+  let visText = '';
+  for(const [tool, content] of Object.entries(vis)){
+    visText += (visText ? '\n\n' : '') + tool+':\n'+content;
+  }
+  if(!visText) visText = '(unavailable)';
+  // raw arm: the model-visible bytes ARE the fixtures — highlight the live spans.
+  // guarded arm: show the kernel's redaction marks instead.
+  $('#vis'+suffix).innerHTML = (suffix==='Raw') ? highlightSent(visText) : highlightMasked(visText);
+  $('#lat'+suffix).textContent = 'latency: '+j.elapsed_ms+' ms · HTTP '+j.status+(j.stop_reason?' · stop='+j.stop_reason:'');
+}
+
+// how many protected spans still reach the model UNMASKED on this arm.
+function countUnmasked(j){
+  let n = 0;
+  for(const c of Object.values(j.model_visible||{}))
+    for(const sp of spans) if(c.includes(sp)) n++;
+  return n;
+}
+// how many [redacted:…] marks the kernel left in the model-visible bytes.
+function countMasked(j){
+  let n = 0;
+  for(const c of Object.values(j.model_visible||{})) n += (c.match(/\[redacted:/g)||[]).length;
+  return n;
+}
+
+async function runArm(arm){
+  const r = await fetch('run', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({arm})});
+  if(!r.ok) throw new Error(arm+': HTTP '+r.status+' '+(await r.text()));
+  return r.json();
+}
+
+async function run(){
+  $('#runBtn').disabled = true;
+  $('#cfg').textContent = 'running the same scenario through both real gateways…';
+  try{
+    const [raw, guarded] = await Promise.all([runArm('raw'), runArm('guarded')]);
+    fillCol('Raw', raw);
+    fillCol('Guarded', guarded);
+    $('#scoreLeft').textContent = String(countUnmasked(raw));
+    $('#scoreRight').textContent = String(countMasked(guarded));
+    const adm = (guarded.admissions||[]).length;
+    $('#scoreLeftLbl').textContent = 'protected spans reaching the model unmasked · '+raw.proof.admissions+' admissions · no note';
+    $('#scoreRightLbl').textContent = 'protected spans masked in place · '+adm+' admission(s) · [fak] note in-band';
+    $('#cfg').textContent = 'done · raw '+raw.elapsed_ms+' ms · guarded '+guarded.elapsed_ms+' ms';
+  }catch(e){
+    $('#cfg').textContent = 'error: '+e.message;
+  }finally{
+    $('#runBtn').disabled = false;
+  }
+}
+
+$('#runBtn').onclick = run;
+
+(async function init(){
+  try{
+    const r = await fetch('scenario');
+    const j = await r.json();
+    spans = j.spans||[];
+    const sent = 'crm_lookup:\n'+j.pii_result+'\n\nenv_dump:\n'+j.secret_result;
+    $('#sentRaw').innerHTML = highlightSent(sent);
+    $('#sentGuarded').innerHTML = highlightSent(sent);
+  }catch(e){
+    $('#cfg').textContent = 'failed to load scenario: '+e.message;
+  }
+})();
+</script>
+</body>
+</html>
