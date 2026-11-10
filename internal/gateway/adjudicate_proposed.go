@@ -103,6 +103,15 @@ const ReasonSubagentDepthExceeded = "SUBAGENT_DEPTH_EXCEEDED"
 // on len(kept)) collapses a fully-served turn to end_turn/stop correctly, and the
 // deny-all guard must exclude servedHits (a served turn is a SUCCESS, not a deny).
 func (s *Server) adjudicateProposedServed(ctx context.Context, calls []agent.ToolCall, reqTrace string) (kept []agent.ToolCall, adjs []ToolAdjudication, dropped int, servedText string, servedHits int) {
+	// RAW PASS-THROUGH (ToolGuard off, #14327): the router intercepts nothing —
+	// every proposed call reaches the client unadjudicated, no vDSO/reuse probe
+	// runs, and the kernel Decide fold never starts. Zero interception processing.
+	// That deliberately includes the Responses-restore branch and the
+	// principal-authority gate below: raw mode makes the router a dumb pipe, and
+	// the client harness owns safety.
+	if s.toolGuardOff {
+		return calls, nil, 0, "", 0
+	}
 	// PRINCIPAL AUTHORITY FLOOR (#2412): before any adjudication (or vDSO fast-path
 	// probe), type-check the turn's authority-consuming acts against the inbound
 	// principal. A confirmation token is a consent-shaped act, honored only under the
