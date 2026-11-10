@@ -41,6 +41,13 @@ func runProjectAssets(stdout, stderr io.Writer, args []string) int {
 			x := r.Harnesses[h]
 			fmt.Fprintf(stdout, "%s canonical=%d imported=%d excluded=%d duplicate=%d stale=%d\n", h, len(x.Canonical), len(x.Imported), len(x.Excluded), len(x.Duplicate), len(x.Stale))
 		}
+		for _, p := range r.Plugins {
+			if p.Reason != "" {
+				fmt.Fprintf(stdout, "plugin %s status=%s reason=%s\n", p.Path, p.Status, p.Reason)
+			} else {
+				fmt.Fprintf(stdout, "plugin %s status=%s\n", p.Path, p.Status)
+			}
+		}
 	}
 	if !r.ZeroUnexplainedGaps {
 		return 1

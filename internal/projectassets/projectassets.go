@@ -2,6 +2,7 @@ package projectassets
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,6 +44,10 @@ type Manifest struct {
 	Memories    Policy             `json:"memories"`
 	GoalPrompts Policy             `json:"goal_prompts"`
 	Harnesses   map[string]Harness `json:"harnesses"`
+	// Plugins declares the workspace-relative .opencode/plugins/** assets whose
+	// integrity parity must observe. Each entry is verified against its canonical
+	// asset; drift is a reported gap, never a silent one-way revert.
+	Plugins []string `json:"plugins,omitempty"`
 }
 type Excluded struct {
 	Kind   string `json:"kind"`
@@ -56,10 +61,17 @@ type HarnessReceipt struct {
 	Duplicate []string   `json:"duplicate"`
 	Stale     []string   `json:"stale"`
 }
+// PluginReceipt is the parity verdict for one manifest-declared .opencode/plugins/** asset.
+type PluginReceipt struct {
+	Path   string `json:"path"`
+	Status string `json:"status"` // ok | drifted | missing | invalid | unsupported
+	Reason string `json:"reason,omitempty"`
+}
 type Receipt struct {
 	Schema              string                    `json:"schema"`
 	Manifest            string                    `json:"manifest"`
 	Harnesses           map[string]HarnessReceipt `json:"harnesses"`
+	Plugins             []PluginReceipt           `json:"plugins,omitempty"`
 	ZeroUnexplainedGaps bool                      `json:"zero_unexplained_gaps"`
 }
 
@@ -500,7 +512,15 @@ func Build(root string, write bool) (Receipt, error) {
 	// generated .agents/skills mirrors can be driven by `fak pi --skill`, so its
 	// receipt must exist and carry no stale entries, exactly like codex/opencode.
 	piStale := len(r.Harnesses["pi"].Stale) == 0
-	r.ZeroUnexplainedGaps = len(dup) == 0 && len(stale) == 0 && cok && nok && ook && piStale
+	pluginsOK := true
+	for _, rel := range m.Plugins {
+		pr := verifyDeclaredPlugin(root, rel)
+		r.Plugins = append(r.Plugins, pr)
+		if pr.Status != pluginStatusOK {
+			pluginsOK = false
+		}
+	}
+	r.ZeroUnexplainedGaps = len(dup) == 0 && len(stale) == 0 && cok && nok && ook && piStale && pluginsOK
 	if write {
 		opencodeDir := filepath.Join(root, ".opencode")
 		pluginPath := filepath.Join(root, filepath.FromSlash(OpenCodePluginPath))
@@ -537,7 +557,9 @@ func EnsureSync(root string) (Receipt, bool, error) {
 
 	pluginNeedsSync := false
 	if hasOpenCode {
-		if pluginErr := VerifyOpenCodePlugin(root); pluginErr != nil {
+		if pluginErr := VerifyOpenCodePlugin(root); pluginErr != nil && !errors.Is(pluginErr, ErrOpenCodePluginDrifted) {
+			// Drift alone never arms a sync: a present, structurally valid guard is
+			// preserved and reported by parity, not reverted (fak-private#2960).
 			pluginNeedsSync = true
 		}
 	}
@@ -617,15 +639,25 @@ const OpenCodePluginPath = ".opencode/plugins/dos-proof-guard.js"
 // it raises TypeError and blocks every mutation.
 const DOSMinVersion = "0.22.0"
 
-// VerifyOpenCodePlugin asserts that .opencode/plugins/dos-proof-guard.js exists in root,
-// is non-empty, and enforces cross-harness lease admission before native OpenCode mutations.
-func VerifyOpenCodePlugin(root string) error {
-	path := filepath.Join(root, filepath.FromSlash(OpenCodePluginPath))
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read opencode plugin %s: %w", path, err)
-	}
-	content := string(b)
+// ErrOpenCodePluginDrifted marks a plugin that is present and structurally valid
+// but not byte-identical to its canonical asset. Drift is a reported condition
+// (parity receipt, verify CLI); it never triggers an overwrite of the local copy.
+var ErrOpenCodePluginDrifted = errors.New("opencode plugin present but diverges from canonical asset")
+
+const (
+	pluginStatusOK          = "ok"
+	pluginStatusDrifted     = "drifted"
+	pluginStatusMissing     = "missing"
+	pluginStatusInvalid     = "invalid"
+	pluginStatusUnsupported = "unsupported"
+)
+
+// verifyOpenCodePluginContent checks the structural admission contract of a
+// dos-proof-guard.js body: every required hook/pattern is present and the DOS
+// probe does not emit the removed strict kwarg. It deliberately does NOT compare
+// bytes against DefaultOpenCodePlugin, so a locally evolved guard that still
+// enforces the full admission chain verifies as valid and is preserved by sync.
+func verifyOpenCodePluginContent(path, content string) error {
 	if strings.TrimSpace(content) == "" {
 		return fmt.Errorf("opencode plugin %s is empty", path)
 	}
@@ -657,11 +689,70 @@ func VerifyOpenCodePlugin(root string) error {
 	if strings.Contains(content, "strict=") {
 		return fmt.Errorf("opencode plugin %s emits strict= in the DOS live_leases probe; incompatible with DOS >= %s (remove the strict kwarg)", path, DOSMinVersion)
 	}
+	return nil
+}
+
+// verifyDeclaredPlugin checks one manifest-declared plugin against its canonical
+// asset. It is the read-only parity surface for .opencode/plugins/**: drift is
+// observable here, while the write path (SyncOpenCodePlugin) preserves any
+// structurally valid local copy.
+func verifyDeclaredPlugin(root, rel string) PluginReceipt {
+	abs := filepath.Join(root, filepath.FromSlash(rel))
+	switch filepath.Base(rel) {
+	case "dos-proof-guard.js":
+		b, err := os.ReadFile(abs)
+		if err != nil {
+			return PluginReceipt{Path: rel, Status: pluginStatusMissing, Reason: "declared plugin not present"}
+		}
+		if e := verifyOpenCodePluginContent(rel, string(b)); e != nil {
+			return PluginReceipt{Path: rel, Status: pluginStatusInvalid, Reason: e.Error()}
+		}
+		if string(b) != DefaultOpenCodePlugin {
+			return PluginReceipt{Path: rel, Status: pluginStatusDrifted, Reason: "differs from canonical DefaultOpenCodePlugin"}
+		}
+		return PluginReceipt{Path: rel, Status: pluginStatusOK}
+	case "fak-grep.js":
+		b, err := os.ReadFile(abs)
+		if err != nil {
+			return PluginReceipt{Path: rel, Status: pluginStatusMissing, Reason: "declared plugin not present"}
+		}
+		if string(b) != defaultOpenCodeGrep {
+			return PluginReceipt{Path: rel, Status: pluginStatusDrifted, Reason: "differs from canonical fak-grep asset"}
+		}
+		return PluginReceipt{Path: rel, Status: pluginStatusOK}
+	default:
+		return PluginReceipt{Path: rel, Status: pluginStatusUnsupported, Reason: "no canonical asset for this plugin name"}
+	}
+}
+
+// VerifyOpenCodePlugin asserts that .opencode/plugins/dos-proof-guard.js exists in root,
+// is non-empty, enforces cross-harness lease admission before native OpenCode mutations,
+// and is byte-identical to the canonical asset (drift is reported as
+// ErrOpenCodePluginDrifted, mirroring verifyOpenCodeGrep's byte-equality contract).
+func VerifyOpenCodePlugin(root string) error {
+	path := filepath.Join(root, filepath.FromSlash(OpenCodePluginPath))
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read opencode plugin %s: %w", path, err)
+	}
+	content := string(b)
+	if err := verifyOpenCodePluginContent(OpenCodePluginPath, content); err != nil {
+		return err
+	}
+	if content != DefaultOpenCodePlugin {
+		return fmt.Errorf("opencode plugin %s: %w", OpenCodePluginPath, ErrOpenCodePluginDrifted)
+	}
 	return verifyOpenCodeGrep(root)
 }
 
-// SyncOpenCodePlugin writes the canonical dos-proof-guard.js plugin into .opencode/plugins/
-// under root, ensuring cross-harness lease admission is active for OpenCode.
+// SyncOpenCodePlugin installs the canonical dos-proof-guard.js plugin into
+// .opencode/plugins/ under root, ensuring cross-harness lease admission is active
+// for OpenCode. Anti-clobber contract (fak-private#2960): a present guard that
+// still passes the structural admission check is hand-authored or locally
+// evolved and is preserved byte-for-byte, exactly the way the SKILL.md adapter
+// write treats a hand-authored SKILL.md; only a missing or structurally broken
+// guard is (re)written from the canonical constant. Drift from canonical is a
+// reported condition (VerifyOpenCodePlugin / parity), never a silent revert.
 func SyncOpenCodePlugin(root string) error {
 	path := filepath.Join(root, filepath.FromSlash(OpenCodePluginPath))
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -670,6 +761,11 @@ func SyncOpenCodePlugin(root string) error {
 	if err := syncOpenCodeGrep(root); err != nil {
 		return err
 	}
+	if existing, readErr := os.ReadFile(path); readErr == nil {
+		if verifyOpenCodePluginContent(OpenCodePluginPath, string(existing)) == nil {
+			return nil
+		}
+	}
 	if err := os.WriteFile(path, []byte(DefaultOpenCodePlugin), 0644); err != nil {
 		return fmt.Errorf("write opencode plugin: %w", err)
 	}
@@ -677,14 +773,23 @@ func SyncOpenCodePlugin(root string) error {
 }
 
 // EnsureOpenCodePlugin verifies that the OpenCode plugin asset exists and enforces cross-harness
-// lease admission. When autoSync is true and the plugin is missing or invalid, it synchronizes it first.
+// lease admission. When autoSync is true and the plugin is missing or structurally invalid, it
+// synchronizes it first. A drifting-but-valid plugin is preserved and reported, not reverted.
 func EnsureOpenCodePlugin(root string, autoSync bool) error {
-	if autoSync {
-		if err := VerifyOpenCodePlugin(root); err != nil {
-			if syncErr := SyncOpenCodePlugin(root); syncErr != nil {
-				return syncErr
-			}
-		}
+	err := VerifyOpenCodePlugin(root)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, ErrOpenCodePluginDrifted) {
+		// Present, structurally valid, locally evolved: parity reports the drift;
+		// the ordinary startup path stays green and the local copy is untouched.
+		return nil
+	}
+	if !autoSync {
+		return err
+	}
+	if syncErr := SyncOpenCodePlugin(root); syncErr != nil {
+		return syncErr
 	}
 	return VerifyOpenCodePlugin(root)
 }

@@ -9,11 +9,11 @@ import (
 )
 
 // TestDefaultOpenCodePluginMatchesPrivateGuardSource witnesses that the
-// canonical const renders byte-identical to the private worktree's committed
+// canonical const renders byte-identical to the private tree's committed
 // dos-proof-guard.js (closes the flowspec gap "opencode-plugin-divergence":
 // SyncOpenCodePlugin generation stays lossless with the private guard).
 // The public repo does not track its own .opencode/plugins asset, so the
-// comparison source is the sibling private worktree path when present;
+// comparison source is the sibling private root's tracked copy when present;
 // FAK_DOS_PROOF_GUARD_SOURCE overrides it. Absent both, the test skips.
 func TestDefaultOpenCodePluginMatchesPrivateGuardSource(t *testing.T) {
 	candidates := []string{}
@@ -24,7 +24,7 @@ func TestDefaultOpenCodePluginMatchesPrivateGuardSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidates = append(candidates, filepath.Join(root, "..", "fak-private", ".worktrees", "ticket-queueus-guard-budget-20261108", ".opencode", "plugins", "dos-proof-guard.js"))
+	candidates = append(candidates, filepath.Join(root, "..", "fak-private", ".opencode", "plugins", "dos-proof-guard.js"))
 
 	var src []byte
 	for _, c := range candidates {

@@ -8,10 +8,19 @@ import (
 
 const openCodeGrepPath = ".opencode/plugins/fak-grep.js"
 
+// syncOpenCodeGrep installs the canonical fak-grep.js plugin only where it is
+// absent. Anti-clobber contract (fak-private#2960): a present copy is never
+// overwritten; divergence from canonical is reported by verifyOpenCodeGrep
+// (and the parity plugin scope), not silently reverted here.
 func syncOpenCodeGrep(root string) error {
 	path := filepath.Join(root, filepath.FromSlash(openCodeGrepPath))
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
+	}
+	if _, statErr := os.Stat(path); statErr == nil {
+		return nil
+	} else if !os.IsNotExist(statErr) {
+		return statErr
 	}
 	return os.WriteFile(path, []byte(defaultOpenCodeGrep), 0644)
 }
@@ -22,7 +31,7 @@ func verifyOpenCodeGrep(root string) error {
 		return err
 	}
 	if string(data) != defaultOpenCodeGrep {
-		return fmt.Errorf("OpenCode grep plugin differs from canonical asset")
+		return fmt.Errorf("%s: %w", openCodeGrepPath, ErrOpenCodePluginDrifted)
 	}
 	return nil
 }
