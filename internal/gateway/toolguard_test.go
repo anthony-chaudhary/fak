@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"context"
+	"fmt"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -9,6 +11,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
+	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 	"github.com/anthony-chaudhary/fak/internal/engine"
 	"github.com/anthony-chaudhary/fak/internal/ifc"
 )
@@ -204,4 +207,76 @@ func TestToolGuardFailLoud(t *testing.T) {
 	if !strings.Contains(err.Error(), "tool guard") {
 		t.Fatalf("error must name the tool guard boundary: %v", err)
 	}
+}
+
+// TestToolGuardRawResponsesRestoreContinuation closes the third interception
+// seam (#14327 cross-validation finding 1): the buffered /v1/responses restore
+// continuation is fak-owned serving, but its kernel folds (the Decide fold on
+// the restore call and the result-admission fold on the restored bytes) are
+// guard processing. With hostile rungs registered — an everything-Defer
+// adjudicator (DEFAULT_DENY via the fold) and an everything-quarantine result
+// admitter — raw mode must STILL deliver the restored bytes: both folds
+// provably never ran.
+func TestToolGuardRawResponsesRestoreContinuation(t *testing.T) {
+	srv := newTestServerWithConfig(t, Config{EngineID: "test", Model: "test-model", ToolGuard: ToolGuardOff})
+	abi.RegisterAdjudicator(1, deferReadAdj{})
+	abi.RegisterResultAdmitter(0, quarantineAdmitter{})
+	const trace = "toolguard-raw-restore"
+	const body = "restorable evidence under raw pass-through"
+	id := ctxplan.Digest([]byte(body))
+	srv.stashRestore(trace, id, "evidence", []byte(body))
+	planner := &scriptedMultiTurnPlanner{turns: []*agent.Completion{
+		toolCallTurn("restore", "fak_context_restore", fmt.Sprintf(`{"id":%q}`, id)),
+		{Message: agent.Message{Role: agent.RoleAssistant, Content: "done"}},
+	}}
+	srv.planner = planner
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	resp := postResponsesTrace(t, ts.URL, trace, map[string]any{"input": "Finish the original task."})
+	if planner.turn != 2 {
+		t.Fatalf("raw restore did not continue to the next sample: samples=%d resp=%+v", planner.turn, resp)
+	}
+	sawRestored := false
+	for _, msg := range planner.capturedMsgs[1] {
+		if msg.Role == agent.RoleTool && msg.ToolCallID == "restore" && strings.Contains(msg.Content, "restorable evidence") {
+			sawRestored = true
+		}
+	}
+	if !sawRestored {
+		t.Fatalf("raw mode did not deliver the restored bytes to the model (a kernel fold ran): %+v", planner.capturedMsgs[1])
+	}
+}
+
+// TestToolGuardArmedResponsesRestoreStillScreens is the armed mirror of the raw
+// witness: the SAME hostile rungs with the guard armed (the default) refuse the
+// restore — the Decide fold DEFAULT_DENYs the call and the restored bytes never
+// reach the model. Locks that the raw-mode skip above is a posture change, not
+// a hole punched in the armed floor.
+func TestToolGuardArmedResponsesRestoreStillScreens(t *testing.T) {
+	srv := newTestServerWithConfig(t, Config{EngineID: "test", Model: "test-model"})
+	abi.RegisterAdjudicator(1, deferReadAdj{})
+	abi.RegisterResultAdmitter(0, quarantineAdmitter{})
+	const trace = "toolguard-armed-restore"
+	const body = "restorable evidence the armed floor must withhold"
+	id := ctxplan.Digest([]byte(body))
+	srv.stashRestore(trace, id, "evidence", []byte(body))
+	planner := &scriptedMultiTurnPlanner{turns: []*agent.Completion{
+		toolCallTurn("restore", "fak_context_restore", fmt.Sprintf(`{"id":%q}`, id)),
+		{Message: agent.Message{Role: agent.RoleAssistant, Content: "done"}},
+	}}
+	srv.planner = planner
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	resp := postResponsesTrace(t, ts.URL, trace, map[string]any{"input": "Finish the original task."})
+	for _, msg := range planner.capturedMsgs[1] {
+		if msg.Role == agent.RoleTool && msg.ToolCallID == "restore" {
+			if strings.Contains(msg.Content, body) {
+				t.Fatalf("armed floor delivered the restored bytes to the model: %q", msg.Content)
+			}
+			if !strings.Contains(msg.Content, `"error"`) {
+				t.Fatalf("armed floor neither withheld nor explained the restore: %q", msg.Content)
+			}
+		}
+	}
+	_ = resp
 }
