@@ -156,7 +156,12 @@ You can inspect or dump the strict fail-closed capability floor anytime with `fa
 
 ## 3. Step 2: Gateway setup (Tier 1 — practical serving path)
 
-`fak serve` acts as an OpenAI-compatible gateway that intercepts and adjudicates tool calls. Upstream models generate proposals; `fak` checks them against your capability floor before your client executes them.
+`fak serve` acts as an OpenAI-compatible gateway. **By default it is a raw inference
+pipe** — requests pass through with zero interception processing. Pass `--guard` (or
+set `FAK_GUARD=on`) to arm the tool guard: upstream models generate proposals; `fak`
+checks them against your capability floor before your client executes them, and inbound
+tool results are screened (secret/PII masking, injection quarantine). The startup
+messages state the resolved posture.
 
 ### Example with Ollama
 

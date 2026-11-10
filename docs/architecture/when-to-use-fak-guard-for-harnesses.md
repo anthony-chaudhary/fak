@@ -11,6 +11,12 @@ description: "Architectural evaluation, trade-off analysis, and decision matrix 
 > **Date:** September 2026  
 > **Authors:** fak Architecture Guild  
 
+> **Default posture note (#14327):** the interception this page describes is the
+> **armed** posture. `fak serve` (the raw router) defaults to raw pass-through —
+> no tool-call adjudication, no tool-result screening — and the guard is armed
+> with `--guard` / `FAK_GUARD=on` (or by using `fak guard`, which pins it on).
+> See [router tool-guard defaults](router-tool-guard-defaults.md).
+
 ---
 
 ## 1. Executive Summary & Problem Statement
