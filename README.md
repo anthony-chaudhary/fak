@@ -11,11 +11,33 @@ Our first milestone combines native inference, speculative decoding, and reuse o
 the work-so-far (agentic *KV caching*) so qualified acceleration is automatic.
 A capability floor bounds what tools the agent may execute.
 
-**Why now:** agent iteration collapsed from days to minutes, and the bottleneck
-moved downstream with it — review throughput, verification, and trust, not
-typing, now cap what an agent fleet ships. fak is the middle path between *a
-human gates every step* and *just trust the AI*: a runtime where you define
-what the agent may do, and the kernel proves the rest. The market framing:
+## Why fak, now
+
+Coding agents crossed from demo to daily driver, and iteration collapsed from
+days to minutes. The bottleneck moved downstream with it: review throughput,
+verification, and trust — not typing — now cap what an agent fleet ships. The
+faster the loop, the more PRs pile up at the review gate, and the more the human
+becomes the serialization point in an otherwise parallel system.
+
+The two answers the market offers are binary, and both fail at fleet scale.
+**Gate every step by hand** and review load scales with agent output — the speed
+the agent was bought for is thrown away at the review step. **Just trust the
+AI** and the queue disappears along with the safety net: silent breakage, a
+"tests pass" that was never run, no audit trail.
+
+fak is the third option: trust as a definition you write down, not a leap.
+
+| The binary | fak's middle path |
+|---|---|
+| A human approves every tool call ↔ the model calls anything | A **default-deny capability floor** (only the tools you allow may run): everything else refuses by structure, not by a recognizer that can fail open |
+| Believe the agent's "done" ↔ verify every claim yourself | The **kernel checks the claim against git evidence** — the subject is forgeable, the diff is not |
+| Hope parallel agents don't collide ↔ coordinate them by hand | **Lane leases and arbitration** decide who may run on what, and refuse with a structured reason a peer can act on |
+| Silent overrides ↔ permanent human locks | **Graduated exceptions**: an attending operator approves one exact refused call — the agent cannot approve itself |
+
+Every row is the scar of a failure observed running agent work for real — fak
+is not a forecast, it is the recorded list of what broke. The same shift
+reshapes serving: fleets need batching, cache reuse, failover, and preemption,
+the runtime's other half. Full framing:
 [why fak, now](docs/explainers/why-fak-the-market-moment.md).
 
 **Status:** automatic setup and cache reuse have specific model/backend limits today;
@@ -31,8 +53,9 @@ an explicit external reference for comparison only; fak never selects it as a
 fallback ([native inference goal](docs/native-inference-goal.md)).
 
 **Pick your path:** run a local agent → [Try fak](#try-fak) · guard an agent you
-already use → [`fak guard`](#governance-for-external-agents-fak-guard) · check the
-evidence → [benchmarks](docs/benchmarks/README.md) and [claims](CLAIMS.md).
+already use → [`fak guard`](#governance-for-external-agents-fak-guard) ·
+understand why → [the market framing](docs/explainers/why-fak-the-market-moment.md) ·
+check the evidence → [benchmarks](docs/benchmarks/README.md) and [claims](CLAIMS.md).
 
 ## Latest hardware results — 2026-11-02
 
