@@ -464,9 +464,12 @@ poisoned instruction while the task still completes.
 
 The boundary above is offline. To put the gate **in front of a real model** over
 OpenAI-compatible HTTP, run `fak serve`: it fronts any OpenAI-compatible upstream
-(Ollama / vLLM / llama.cpp / a cloud provider), and on every `/v1/chat/completions`
-it denies / repairs / quarantines the tool calls the model proposes before returning
-the survivors.
+(Ollama / vLLM / llama.cpp / a cloud provider). By default `fak serve` is a **raw
+inference pipe**: requests and tool calls/results pass through with zero interception
+processing. Arm the tool guard with `--guard` (or `FAK_GUARD=on`) and every
+`/v1/chat/completions` then denies / repairs / quarantines the tool calls the model
+proposes and screens inbound tool results (secret/PII masking, injection quarantine)
+before returning the survivors.
 
 ```bash
 ollama serve &                         # any OpenAI-compatible server on :11434
@@ -480,7 +483,11 @@ curl -s http://127.0.0.1:8080/metrics | head                # Prometheus scrape
 
 Point any OpenAI client at `http://127.0.0.1:8080/v1`. `fak serve` also speaks the
 Anthropic `/v1/messages` wire, exposes `/metrics` + `/debug/vars`, and takes
-`--policy floor.json` + `--require-key-env VAR` to harden it. The gateway's own
+`--policy floor.json` + `--require-key-env VAR` to harden it. The tool-guard posture —
+whether the router intercepts the tool plane at all — is **raw pass-through by
+default**; `--guard` (env `FAK_GUARD`) arms tool-call adjudication + tool-result
+screening, and the resolved posture is stated in the startup messages
+([router tool-guard defaults](architecture/router-tool-guard-defaults.md)). The gateway's own
 lease-admission posture (what its floor does with a refused write after the kernel
 allowed the call) is set by `--workspace-admission open|permissive|strict`
 (default `open`: admit-and-log with `would_deny` forensic records; `permissive`

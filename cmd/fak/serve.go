@@ -115,6 +115,7 @@ type serveFlags struct {
 	topologyShadowInput          *string
 	workspaceAdmission           *string
 	workspaceAdmissionPermissive *bool
+	guard                        *bool
 	configPath                   *string
 	printEffectiveConfig         *bool
 	launchEvidencePath           *string
@@ -286,6 +287,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.addr = fs.String("addr", "127.0.0.1:8080", "HTTP listen address (OpenAI + fak + /mcp surface); ignored with --stdio")
 	sf.workspaceAdmission = fs.String("workspace-admission", os.Getenv("FAK_WORKSPACE_ADMISSION"), "gateway lease-admission posture: open|permissive|strict (default: open — the gateway's own floor admits refused writes with would_deny forensic records after a kernel allow; permissive is the legacy lever (DEFAULT_DENY-class only, LEASE_HELD enforced); strict is the legacy shipped default where every lease-admission refusal stands. Kernel policy denials are never affected. env: FAK_WORKSPACE_ADMISSION)")
 	sf.workspaceAdmissionPermissive = fs.Bool("workspace-admission-permissive", rwEnvBool("FAK_WORKSPACE_ADMISSION_PERMISSIVE"), "legacy compat lever superseded by --workspace-admission (default open); true resolves the mode to permissive when no explicit mode is set (env: FAK_WORKSPACE_ADMISSION_PERMISSIVE)")
+	sf.guard = fs.Bool("guard", false, "arm the tool guard (adjudication + tool-result screening); default is raw pass-through")
 	sf.stdio = fs.Bool("stdio", false, "serve MCP over stdin/stdout (newline-delimited JSON-RPC) instead of HTTP")
 	sf.provider = fs.String("provider", "openai", "upstream provider transcript wire: openai, anthropic, gemini, or xai")
 	sf.armLeaseStore = fs.String("arm-lease-store", "", "private durable research-arm lease snapshot (Linux/Darwin; fresh store requires initial exclusive lease before inference)")
@@ -481,6 +483,32 @@ func resolveSpeculativeMode(flagValue string, getenv func(string) string) (strin
 	default:
 		return "", fmt.Errorf("%w: %q (admitted: mtp, ngram, dflash2, empty)", ErrSpeculativeModeUnknown, effective)
 	}
+}
+
+// resolveServeToolGuard maps the --guard flag + FAK_GUARD env onto the gateway
+// ToolGuard posture. The DEFAULT is raw pass-through (off): the router is an
+// inference pipe with zero interception processing unless the operator arms the
+// guard. An explicitly passed --guard wins over the env; an explicit
+// FAK_GUARD wins over the flag default; an unparsable FAK_GUARD fails loud
+// (a misconfigured security boundary never silently resolves).
+func resolveServeToolGuard(guard bool, explicit map[string]bool, getenv func(string) string) (string, error) {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	if explicit != nil && explicit["guard"] {
+		if guard {
+			return gateway.ToolGuardOn, nil
+		}
+		return gateway.ToolGuardOff, nil
+	}
+	if raw := strings.TrimSpace(getenv("FAK_GUARD")); raw != "" {
+		mode, err := gateway.ParseToolGuardMode(raw)
+		if err != nil {
+			return "", fmt.Errorf("FAK_GUARD: %v", err)
+		}
+		return mode, nil
+	}
+	return gateway.ToolGuardOff, nil
 }
 
 // serveDFlash2SidecarDecision resolves the per-load DFlash2 sidecar retention
@@ -1368,9 +1396,26 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) (result *gateway.DurableCon
 		return nil, err
 	}
 
+	// Tool-guard posture (--guard / FAK_GUARD): the serve default is RAW PASS-THROUGH
+	// (off) — the router is an inference pipe with zero interception processing unless
+	// the operator arms the guard by name. An explicitly passed --guard wins over
+	// FAK_GUARD; an unparsable FAK_GUARD fails loud here instead of booting with a
+	// silently-resolved security posture. The resolved posture is stated on the
+	// startup banner so the served surface can never disagree about its own floor.
+	toolGuardMode, err := resolveServeToolGuard(*sf.guard, rt.explicitFlags, os.Getenv)
+	if err != nil {
+		return nil, err
+	}
+	if toolGuardMode == gateway.ToolGuardOn {
+		startupMessages = append(startupMessages, gateway.StartupMessage{Source: "serve", Kind: "tool-guard", Level: "info", Text: "tool guard: on — tool-call adjudication + tool-result screening armed"})
+	} else {
+		startupMessages = append(startupMessages, gateway.StartupMessage{Source: "serve", Kind: "tool-guard", Level: "info", Text: "tool guard: off — raw pass-through (arm with --guard or FAK_GUARD=on)"})
+	}
+
 	srv, err := gateway.New(gateway.Config{
 		WorkspaceAdmission:           wsAdmissionMode,
 		WorkspaceAdmissionPermissive: *sf.workspaceAdmissionPermissive,
+		ToolGuard:                    toolGuardMode,
 		EngineID:                     *sf.engineID,
 		OTLPEndpoint:                 *sf.otlpEndpoint,
 		OrgAudit:                     orgAudit,

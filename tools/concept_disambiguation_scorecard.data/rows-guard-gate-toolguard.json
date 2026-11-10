@@ -1,0 +1,20 @@
+{
+  "rows": [
+    {
+      "id": "tool-guard-posture",
+      "canonical": "ToolGuard (router tool-plane posture)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The gateway's tool-plane interception posture switch (gateway.Config.ToolGuard, resolved by ParseToolGuardMode): ON arms proposed-call adjudication, inbound-result admission, and the Responses restore continuation's kernel folds (the historical floor); OFF is raw pass-through with zero interception processing. fak serve resolves it from --guard / FAK_GUARD and defaults OFF; fak guard pins ON; an empty Config value resolves ON so every library caller keeps the armed floor; an unparsable value fails New loud (issue #14327).",
+      "distinction": "A POSTURE SWITCH on the served router - NOT the guard kernel (fak guard, which pins it ON), NOT a single gate or result admitter (it arms/disarms whole families of them), and NOT the token-saver stack (compaction/elision - a separate serving-efficiency axis it does not control).",
+      "distinct_from": ["guard-kernel", "gate", "result-admitter"],
+      "aliases": ["ToolGuardOn", "ToolGuardOff", "ParseToolGuardMode"],
+      "grounding": "toolguard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "guard-kernel",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

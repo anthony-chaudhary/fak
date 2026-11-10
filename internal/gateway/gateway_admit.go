@@ -183,6 +183,13 @@ func originSeqIDKey(traceID, callID string) string {
 // session is refused. messages is mutated in place (request-local). The per-result
 // admissions are returned for the fak response extension.
 func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Message, tools []agent.ToolDef, traceID string) ([]ResultAdmission, error) {
+	// RAW PASS-THROUGH (ToolGuard off, #14327): no kernel admission fold runs —
+	// no digest, no admit-once ledger entry, no resolver Put, no screen, no
+	// masking, no taint stamp. Inbound tool results reach the model byte-identical
+	// and the response carries zero ResultAdmissions (the fak ext stays absent).
+	if s.toolGuardOff {
+		return nil, nil
+	}
 	// Snapshot each message's ORIGINAL content before admission rewrites any quarantined
 	// payload in place. The in-kernel poison-eviction hook needs the original (poisoned)
 	// bytes to render the token path that was actually cached, not the paged-out form.

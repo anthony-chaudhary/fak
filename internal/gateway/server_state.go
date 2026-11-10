@@ -393,6 +393,10 @@ type Server struct {
 	// drives every admission decision; the legacy permissive bool above is
 	// retained for compat and test assertions only.
 	workspaceAdmissionMode WorkspaceAdmissionMode
+	// toolGuardOff mirrors Config.ToolGuard resolved OFF (raw pass-through):
+	// no proposed-call adjudication and no inbound-result admission run on the
+	// served path. Zero value (guard armed) preserves the historical floor.
+	toolGuardOff bool
 	// sessionLane mirrors Config.SessionLane: the launch-time lane designation
 	// stamped as trusted Meta["lane"] on every served tool call. Empty = unset.
 	sessionLane                string

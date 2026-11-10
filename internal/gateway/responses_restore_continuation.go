@@ -118,26 +118,42 @@ func (r *responsesRestoreContinuation) continueRestores(ctx context.Context, s *
 			var result CtxRestoreResult
 			err := decodeErr
 			if err == nil {
-				var repaired string
-				adj.Verdict, repaired, err = s.adjudicateWithSeq(ctx, call.Function.Name, string(keyBytes), true, "", turn.traceID, seq)
-				if err == nil && adj.Verdict.Kind != "ALLOW" && adj.Verdict.Kind != "TRANSFORM" {
-					err = fmt.Errorf("context restoration refused: %s", adj.Verdict.Reason)
-				}
-				if err == nil && repaired != "" {
-					// Execute only the policy's repaired request, provided it remains
-					// within this continuation's resource envelope. Do not rewrite a
-					// policy decision back into the model's original arguments.
-					req = ContextRestoreRequest{}
-					err = json.Unmarshal([]byte(repaired), &req)
-					if err == nil && (req.Range != "" || req.Offset < 0 || req.Limit <= 0 || req.Limit > responsesRestorePageLimit || req.Limit > responsesRestoreByteLimit-r.bytes) {
-						err = fmt.Errorf("repaired restore request exceeds the continuation bounds; reissue a bounded request")
-					}
-				}
-				if err == nil {
+				if s.toolGuardOff {
+					// RAW PASS-THROUGH (ToolGuard off, #14327): the restore
+					// continuation itself is fak-owned serving (the gateway
+					// reading its own CAS), but the Decide fold and the
+					// result-admission fold below are guard processing — both
+					// are skipped raw. The model's request runs as-is under
+					// this continuation's own byte/page bounds (clamped above),
+					// and restored bytes enter without result admission.
+					adj.Verdict = WireVerdict{Kind: "ALLOW", Reason: "RAW_PASSTHROUGH", By: "toolguard"}
 					caller, _ := s.traceOwnerOf(turn.traceID)
 					result, err = s.restoreContext(caller, req)
 					if len(result.Excerpt) > 512 {
 						result.Excerpt = result.Excerpt[:512]
+					}
+				} else {
+					var repaired string
+					adj.Verdict, repaired, err = s.adjudicateWithSeq(ctx, call.Function.Name, string(keyBytes), true, "", turn.traceID, seq)
+					if err == nil && adj.Verdict.Kind != "ALLOW" && adj.Verdict.Kind != "TRANSFORM" {
+						err = fmt.Errorf("context restoration refused: %s", adj.Verdict.Reason)
+					}
+					if err == nil && repaired != "" {
+						// Execute only the policy's repaired request, provided it remains
+						// within this continuation's resource envelope. Do not rewrite a
+						// policy decision back into the model's original arguments.
+						req = ContextRestoreRequest{}
+						err = json.Unmarshal([]byte(repaired), &req)
+						if err == nil && (req.Range != "" || req.Offset < 0 || req.Limit <= 0 || req.Limit > responsesRestorePageLimit || req.Limit > responsesRestoreByteLimit-r.bytes) {
+							err = fmt.Errorf("repaired restore request exceeds the continuation bounds; reissue a bounded request")
+						}
+					}
+					if err == nil {
+						caller, _ := s.traceOwnerOf(turn.traceID)
+						result, err = s.restoreContext(caller, req)
+						if len(result.Excerpt) > 512 {
+							result.Excerpt = result.Excerpt[:512]
+						}
 					}
 				}
 			}
@@ -162,9 +178,11 @@ func (r *responsesRestoreContinuation) continueRestores(ctx context.Context, s *
 			if len(content) > responsesRestoreByteLimit-r.bytes {
 				return r.incomplete(comp, "the serialized context result exceeds the remaining retrieval budget"), messages
 			}
-			if adj.Admitted {
+			if adj.Admitted && !s.toolGuardOff {
 				// Restored bytes cross the same result admission boundary as MCP
-				// output before they can enter the next model sample.
+				// output before they can enter the next model sample. Raw
+				// pass-through (#14327) skips the fold: the bytes are the
+				// gateway's own CAS content and the guard is disarmed.
 				wv, env, admitErr := s.admitOpWithSeq(ctx, "restore_admit", call.Function.Name, string(content), "", turn.traceID, seq)
 				if wv.Kind == "QUARANTINE" {
 					admitErr = s.resetEngineCacheAfterQuarantine(ctx, []ResultAdmission{{Verdict: wv}})
