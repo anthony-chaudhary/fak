@@ -913,12 +913,14 @@ func cmdManageCommand(commandName string, argv []string) {
 	srv, err := gateway.New(gateway.Config{
 		WorkspaceAdmission:           wsAdmissionMode,
 		WorkspaceAdmissionPermissive: *workspaceAdmissionPermissive,
-		SessionLane:                  sessionLane,
-		EngineID:                     "mock",
-		Model:                        gatewayModel,
-		BaseURL:                      resolvedBase,
-		Provider:                     up,
-		APIKey:                       apiKey,
+		// The guard product pins the interception floor ON regardless of FAK_GUARD: an operator env must not be able to silently disarm the harness guard.
+		ToolGuard:   "on",
+		SessionLane: sessionLane,
+		EngineID:    "mock",
+		Model:       gatewayModel,
+		BaseURL:     resolvedBase,
+		Provider:    up,
+		APIKey:      apiKey,
 		// The child is the only caller of a normal guard's loopback gateway, so surface
 		// the upstream's scrubbed, bounded 400 detail there. This turns an opaque fakc
 		// "check model/roles/ranges" failure into the provider's exact rejected field
