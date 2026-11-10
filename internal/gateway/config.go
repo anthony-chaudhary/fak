@@ -312,6 +312,16 @@ type Config struct {
 	// WorkspaceAdmission: when no explicit mode is set, true resolves the mode to
 	// permissive. It no longer drives admission on its own.
 	WorkspaceAdmissionPermissive bool
+	// ToolGuard selects the gateway's tool-plane interception posture ("on" or
+	// "off"; empty resolves ON). OFF is raw pass-through: proposed tool calls
+	// reach the client unadjudicated and inbound tool results reach the model
+	// byte-identical, with zero interception processing on the hot path. ON (the
+	// library default, and the harness products) arms the historical floor:
+	// tool-call adjudication + the kernel result-admission chain (context-MMU
+	// quarantine, normgate secret/PII masking, IFC taint). `fak serve` resolves
+	// this from --guard / FAK_GUARD and defaults OFF (the raw router posture);
+	// `fak guard` pins it ON. An explicit unparsable value fails New loud.
+	ToolGuard string
 	// SessionLane is the LAUNCH-TIME lane designation the host (fak guard) stamps
 	// onto every served tool call as trusted Meta["lane"] (#3707/#3708/#3709). It
 	// is the coordinator's spawn-time designation — the same trust level as the

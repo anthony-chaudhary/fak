@@ -115,6 +115,13 @@ func New(cfg Config) (*Server, error) {
 	if _, err := ParseWorkspaceAdmissionMode(cfg.WorkspaceAdmission); err != nil {
 		return nil, fmt.Errorf("gateway: workspace admission mode: %w", err)
 	}
+	// The tool-guard posture is the SAME class of boundary (it decides whether
+	// the tool-call/result interception floor stands at all), so an explicit but
+	// unparsable value fails loud at boot rather than silently raw-passing.
+	toolGuardMode, err := ParseToolGuardMode(cfg.ToolGuard)
+	if err != nil {
+		return nil, fmt.Errorf("gateway: tool guard mode: %w", err)
+	}
 	// A misconfigured routing policy is a security boundary (it decides which model
 	// — local or remote — a tenant payload reaches), so validate it at New and fail
 	// loud rather than fall through to a silent default model at dispatch time.
@@ -277,6 +284,7 @@ func New(cfg Config) (*Server, error) {
 		causalEmbeddings:             causalEmbeddings,
 		workspaceAdmissionPermissive: cfg.WorkspaceAdmissionPermissive,
 		workspaceAdmissionMode:       ResolveWorkspaceAdmissionMode(cfg),
+		toolGuardOff:                 toolGuardMode == ToolGuardOff,
 		sessionLane:                  strings.TrimSpace(cfg.SessionLane),
 		k:                            k,
 		toolPlugins:                  append([]toolplugin.Plugin(nil), cfg.ToolPlugins...),
