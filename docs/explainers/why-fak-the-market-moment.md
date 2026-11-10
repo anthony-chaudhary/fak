@@ -33,7 +33,24 @@ floor, the verdict kernel, evidence-checked done-claims, and fleet serving exist
 at all. This page is the *why*; the *how* lives in the sibling explainers linked
 below.
 
-## Where the market is today
+**The pieces.** This is a modular narrative: seven self-contained pieces, each of
+which stands on its own. The rendered presentation is
+[`market-moment.html`](../market-moment.html).
+
+| # | Piece | The one line |
+|---|---|---|
+| 01 | [Where the market is today](#piece-01) | agents are a daily driver; the unit of work is shifting to machine-paced change with human checkpoints. |
+| 02 | [The bottleneck migrates downstream](#piece-02) | generation compresses to minutes; review, verification, and trust stay human-paced - the queue moves. |
+| 03 | [The two answers, and why both fail](#piece-03) | gate everything by hand (serial) or trust the AI (forgeable); audit observes without governing. |
+| 04 | [The middle ground fak builds](#piece-04) | trust as a definition, not a leap: six binary-to-middle paths, each a mechanism you can run. |
+| 05 | [Born from real problems](#piece-05) | each mechanism is the scar of a specific observed failure, not a forecast. |
+| 06 | [The serving side](#piece-06) | fleets change what inference must do: batch, reuse, fail over, preempt, meter. |
+| 07 | [What this frame is not](#piece-07) | not "fully autonomous," not "review is dead," not "every layer is finished." |
+
+---
+
+<a id="piece-01"></a>
+## 01 · Where the market is today
 
 Coding agents are no longer a demo layer. They are a daily driver: harnesses run
 inside terminals and IDEs, file real PRs, and increasingly run unattended on
@@ -48,7 +65,8 @@ produce most of the change; humans direct, review, and own the decisions that
 matter." Nobody has to believe the end state for the trend to matter - only
 that the *direction* is machine-paced change with human checkpoints.
 
-## Where it is moving: the bottleneck migrates downstream
+<a id="piece-02"></a>
+## 02 · Where it is moving: the bottleneck migrates downstream
 
 Walk the loop and watch where the time goes.
 
@@ -73,7 +91,8 @@ So the market's open question is no longer whether agents can write code. It is
 **what is the review-and-trust substrate for machine-paced change** - and the
 current answers do not fill that gap.
 
-## The two answers the market offers today, and why both fail at fleet scale
+<a id="piece-03"></a>
+## 03 · The two answers the market offers today, and why both fail at fleet scale
 
 **Answer 1: gate everything by hand.** A human reviews every PR, approves every
 tool call, verifies every "done." This is the world most teams live in, and it
@@ -100,7 +119,8 @@ What is missing is the layer between: a runtime that governs the boundary
 *while the agent runs* - fast enough not to become the new human queue, and
 defined enough not to be a leap of faith.
 
-## The middle ground fak builds: trust as a definition, not a leap
+<a id="piece-04"></a>
+## 04 · The middle ground fak builds: trust as a definition, not a leap
 
 The binary framing - "a human has to do it" or "just trust the AI" - treats
 trust as a switch. It is actually a dial, and the design space between the
@@ -127,7 +147,8 @@ human," but **define what you trust, and make the runtime prove the rest.**
 The sentence to keep: **the model proposes, the kernel disposes - and the
 kernel checks.**
 
-## Born from real problems, not from a thesis
+<a id="piece-05"></a>
+## 05 · Born from real problems, not from a thesis
 
 None of the mechanisms above were designed forward from a vision of autonomous
 agents. Each is the scar of a specific failure observed running agent work for
@@ -149,7 +170,8 @@ not a forecast about what agents will need - it is the recorded list of what
 broke when agents ran for real.** The roadmap is downstream of the scars, not
 ahead of them.
 
-## The serving side of the same story
+<a id="piece-06"></a>
+## 06 · The serving side of the same story
 
 Fleets change what inference has to do, not just how much of it. A fleet's
 serving layer must batch concurrent lanes into one decode, reuse the prefixes
@@ -162,7 +184,8 @@ and the [honest boundary](what-fak-is-not.md) for what is measured today versus
 what is not. Running the loop on your own machine keeps it fast and keeps the
 code local - the same trust argument applied to data.
 
-## What this frame is not
+<a id="piece-07"></a>
+## 07 · What this frame is not
 
 - **Not "fully autonomous."** The durable guarantee is the enforcement layer,
   not the model's judgment; the human keeps review responsibility for the

@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<!--
+  fak — the agent kernel · the market-moment presentation.
+
+  Served by GitHub Pages at https://anthony-chaudhary.github.io/fak/market-moment.html .
+  Raw HTML with NO Jekyll front matter (like showcase.html / demos.html) so Pages copies it
+  verbatim (full-bleed dark page, its own <head>) instead of wrapping it in the cayman theme.
+  Because it skips jekyll-seo-tag, the SEO/OG/Twitter tags are hand-written below.
+
+  This page renders the market-moment narrative as seven modular pieces:
+    01 where the market is today   02 the bottleneck migrates downstream
+    03 the two answers, and why both fail   04 the middle ground fak builds
+    05 born from real problems      06 the serving side   07 what this frame is not
+  The canonical text source is docs/explainers/why-fak-the-market-moment.md; keep the two in
+  sync when the narrative changes. No media is pulled in — this is a text presentation.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%23070a10'/%3E%3Ccircle%20cx='16'%20cy='16'%20r='8'%20fill='%2338bdf8'/%3E%3C/svg%3E" />
+
+<!-- ---- SEO / AEO (hand-written; this page opts out of the Jekyll theme + jekyll-seo-tag) ---- -->
+<title>Why fak, now — the market moved from writing code to checking it</title>
+<meta name="description" content="Agent iteration collapsed from days to minutes, so the bottleneck migrated downstream: review, verification, and trust now cap what agent fleets ship. The market's two live answers are binary and both fail at fleet scale. fak is the third option: a runtime where you define what you trust and the kernel proves the rest." />
+<link rel="canonical" href="https://anthony-chaudhary.github.io/fak/market-moment.html" />
+<meta name="author" content="Anthony Chaudhary" />
+
+<!-- Open Graph / Twitter card -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="fak — the agent kernel" />
+<meta property="og:title" content="Why fak, now — the market moved from writing code to checking it" />
+<meta property="og:description" content="The bottleneck moved from generation to trust. The market's two live answers are binary and both fail at fleet scale. fak is the third option: define what you trust, and make the runtime prove the rest." />
+<meta property="og:url" content="https://anthony-chaudhary.github.io/fak/market-moment.html" />
+<meta property="og:image" content="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/social-preview.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Why fak, now — the market moved from writing code to checking it" />
+<meta name="twitter:description" content="The bottleneck moved from generation to trust. fak is the third option: define what you trust, and make the runtime prove the rest." />
+<meta name="twitter:image" content="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/social-preview.png" />
+
+<style>
+  :root{
+    --bg:#070a10;
+    --bg-soft:#0b1019;
+    --panel:#0e1420;
+    --panel-2:#121a28;
+    --line:#1c2636;
+    --ink:#e6edf6;
+    --ink-soft:#aab8cb;
+    --ink-dim:#6b7a90;
+    --fak:#38bdf8;
+    --fak-2:#2563eb;
+    --dos:#c084fc;
+    --next:#34d399;
+    --warn:#f59e0b;
+    --bad:#ff7b72;
+    --mono:"SFMono-Regular",ui-monospace,"JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --maxw:1080px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);
+    font-family:var(--sans);line-height:1.6;
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+    overflow-x:hidden;
+  }
+  body::before{
+    content:"";position:fixed;inset:0;z-index:-2;
+    background:
+      radial-gradient(900px 520px at 12% -8%, rgba(56,189,248,.16), transparent 60%),
+      radial-gradient(820px 520px at 92% 4%, rgba(192,132,252,.14), transparent 60%),
+      radial-gradient(700px 700px at 50% 116%, rgba(52,211,153,.08), transparent 60%);
+    pointer-events:none;
+  }
+  body::after{
+    content:"";position:fixed;inset:0;z-index:-1;opacity:.35;pointer-events:none;
+    background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),
+                     linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);
+    background-size:48px 48px;
+    -webkit-mask-image:radial-gradient(ellipse 100% 60% at 50% 0%,#000,transparent 75%);
+            mask-image:radial-gradient(ellipse 100% 60% at 50% 0%,#000,transparent 75%);
+  }
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
+
+  /* ---------- nav ---------- */
+  nav{
+    position:sticky;top:0;z-index:50;
+    backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+    background:rgba(7,10,16,.72);border-bottom:1px solid var(--line);
+  }
+  .nav-in{display:flex;align-items:center;gap:22px;height:60px;max-width:var(--maxw);margin:0 auto;padding:0 24px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.2px}
+  .brand .dot{width:11px;height:11px;border-radius:50%;
+    background:conic-gradient(from 200deg,var(--fak),var(--dos),var(--next),var(--fak));
+    box-shadow:0 0 16px rgba(120,160,255,.55)}
+  .brand .mono{font-family:var(--mono)}
+  .nav-links{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+  .nav-links a{font-size:13px;color:var(--ink-soft);padding:7px 11px;border-radius:8px;transition:.18s}
+  .nav-links a:hover{color:var(--ink);background:rgba(255,255,255,.05)}
+
+  /* ---------- hero ---------- */
+  header.hero{padding:96px 0 56px;text-align:center;position:relative}
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:9px;font-family:var(--mono);
+    font-size:12.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);
+    border:1px solid var(--line);background:var(--panel);padding:7px 14px;border-radius:999px;
+  }
+  .eyebrow b{color:var(--fak);font-weight:600}
+  h1.title{
+    font-size:clamp(2.1rem,5.4vw,3.5rem);line-height:1.06;margin:26px auto 0;max-width:24ch;
+    font-weight:800;letter-spacing:-.02em;
+    background:linear-gradient(180deg,#ffffff 0%,#bcd0ea 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  .lede{max-width:68ch;margin:24px auto 0;font-size:clamp(1.05rem,2.1vw,1.24rem);color:var(--ink-soft)}
+  .lede .k{color:var(--fak);font-weight:600}
+  .lede .d{color:var(--dos);font-weight:600}
+
+  /* the two poles + the middle — the pitch in one visual */
+  .poles{margin:44px auto 0;max-width:760px;display:grid;grid-template-columns:1fr auto 1fr;gap:14px;align-items:stretch;text-align:left}
+  .pole{border:1px solid var(--line);border-radius:14px;padding:16px 18px;
+    background:linear-gradient(180deg,var(--panel),var(--bg-soft))}
+  .pole .p-tag{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}
+  .pole.human .p-tag{color:var(--warn)}
+  .pole.ai .p-tag{color:var(--bad)}
+  .pole h3{margin:0 0 6px;font-size:1.05rem}
+  .pole p{margin:0;color:var(--ink-soft);font-size:.92rem}
+  .pole-mid{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
+    border:1px solid rgba(56,189,248,.4);border-radius:14px;padding:16px 18px;min-width:150px;
+    background:radial-gradient(120px 120px at 50% 0%,rgba(56,189,248,.14),transparent 70%),var(--panel);
+    box-shadow:0 0 30px rgba(56,189,248,.12)}
+  .pole-mid .m-tag{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--fak)}
+  .pole-mid h3{margin:0;font-size:1.02rem;color:var(--ink)}
+  .pole-mid p{margin:0;color:var(--ink-soft);font-size:.86rem}
+  @media (max-width:720px){.poles{grid-template-columns:1fr}.pole-mid{order:-1}}
+
+  /* ---------- section scaffold ---------- */
+  section{padding:60px 0;position:relative}
+  .sec-head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+  .sec-num{font-family:var(--mono);font-size:13px;color:var(--ink-dim)}
+  .sec-head h2{font-size:clamp(1.6rem,3.4vw,2.3rem);font-weight:800;letter-spacing:-.02em;margin:0}
+  .sec-sub{color:var(--ink-soft);max-width:74ch;font-size:1.05rem;margin:10px 0 0}
+  .sec-body{color:var(--ink-soft);max-width:74ch;font-size:1.02rem;margin:16px 0 0}
+  .sec-body p{margin:0 0 14px}
+  .sec-body p:last-child{margin-bottom:0}
+  .sec-body b,.sec-body strong{color:var(--ink)}
+  .sec-body em{color:var(--ink)}
+
+  /* ---------- piece cards ---------- */
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-top:26px}
+  .card{
+    border:1px solid var(--line);border-radius:16px;padding:22px;
+    background:linear-gradient(180deg,var(--panel),var(--bg-soft));
+    display:flex;flex-direction:column;gap:10px;
+    transition:border-color .16s,transform .16s,box-shadow .16s;
+  }
+  .card:hover{border-color:var(--fak);transform:translateY(-3px);box-shadow:0 18px 44px rgba(0,0,0,.45)}
+  .card .kicker{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-dim)}
+  .card h3{margin:0;font-size:1.18rem;letter-spacing:-.01em}
+  .card p{margin:0;color:var(--ink-soft);font-size:.95rem}
+  .card code{font-family:var(--mono);font-size:.85em;background:var(--panel-2);
+    border:1px solid var(--line);border-radius:6px;padding:1px 6px;color:var(--ink)}
+  .card .tag{align-self:flex-start;font-family:var(--mono);font-size:11px;letter-spacing:.04em;
+    color:var(--ink-soft);border:1px solid var(--line);border-radius:999px;padding:3px 10px}
+  .card.pole-human .tag{color:var(--warn);border-color:rgba(245,158,11,.4)}
+  .card.pole-ai .tag{color:var(--bad);border-color:rgba(255,123,114,.4)}
+  .card.pole-audit .tag{color:var(--dos);border-color:rgba(192,132,252,.4)}
+
+  .gap-note{margin-top:22px;border:1px dashed var(--line);border-radius:14px;padding:16px 18px;
+    background:rgba(56,189,248,.04);color:var(--ink-soft);font-size:.98rem;max-width:80ch}
+  .gap-note b{color:var(--ink)}
+
+  /* the binary -> middle table (piece 04) */
+  .mm-table{margin-top:26px;border:1px solid var(--line);border-radius:16px;overflow:hidden;
+    background:linear-gradient(180deg,var(--panel),var(--bg-soft))}
+  .mm-row{display:grid;grid-template-columns:1fr 1.35fr;gap:0;border-bottom:1px solid var(--line)}
+  .mm-row:last-child{border-bottom:none}
+  .mm-row .bin{padding:16px 18px;color:var(--ink-soft);font-size:.94rem;border-right:1px solid var(--line);
+    background:rgba(255,255,255,.015)}
+  .mm-row .mid{padding:16px 18px;color:var(--ink-soft);font-size:.94rem}
+  .mm-row .mid b{color:var(--ink)}
+  .mm-row .mid a{color:var(--fak);text-decoration:underline;text-underline-offset:2px}
+  .mm-head{display:grid;grid-template-columns:1fr 1.35fr;background:var(--panel-2)}
+  .mm-head div{padding:11px 18px;font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--ink-dim)}
+  .mm-head div:last-child{border-left:1px solid var(--line);color:var(--fak)}
+  @media (max-width:640px){.mm-row,.mm-head{grid-template-columns:1fr}.mm-row .bin{border-right:none;border-bottom:1px solid var(--line)}}
+
+  /* the failure -> mechanism table (piece 05) */
+  .scar-table{margin-top:26px;border:1px solid var(--line);border-radius:16px;overflow:hidden;
+    background:linear-gradient(180deg,var(--panel),var(--bg-soft))}
+  .scar-row{display:grid;grid-template-columns:1.35fr 1fr;gap:0;border-bottom:1px solid var(--line)}
+  .scar-row:last-child{border-bottom:none}
+  .scar-row .fail{padding:15px 18px;color:var(--ink-soft);font-size:.94rem;border-right:1px solid var(--line);
+    background:rgba(255,123,114,.03)}
+  .scar-row .mech{padding:15px 18px;color:var(--ink);font-size:.94rem}
+  .scar-row .mech a{color:var(--fak);text-decoration:underline;text-underline-offset:2px}
+  .scar-head{display:grid;grid-template-columns:1.35fr 1fr;background:var(--panel-2)}
+  .scar-head div{padding:11px 18px;font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--ink-dim)}
+  .scar-head div:last-child{border-left:1px solid var(--line);color:var(--next)}
+  @media (max-width:640px){.scar-row,.scar-head{grid-template-columns:1fr}.scar-row .fail{border-right:none;border-bottom:1px solid var(--line)}}
+
+  /* the "not" list (piece 07) */
+  .not-list{margin-top:24px;display:flex;flex-direction:column;gap:14px}
+  .not-item{border:1px solid var(--line);border-radius:14px;padding:18px 20px;
+    background:rgba(245,158,11,.04)}
+  .not-item .n-h{font-family:var(--mono);font-size:12px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--warn);margin-bottom:6px}
+  .not-item p{margin:0;color:var(--ink-soft);font-size:.97rem}
+  .not-item b{color:var(--ink)}
+
+  /* the keep-sentence band */
+  .band{border:1px solid var(--line);border-radius:18px;padding:24px 26px;margin-top:26px;
+    background:
+      radial-gradient(600px 200px at 0% 0%,rgba(56,189,248,.10),transparent 60%),
+      radial-gradient(600px 200px at 100% 100%,rgba(192,132,252,.10),transparent 60%),
+      var(--panel);}
+  .band p{margin:0 0 14px;color:var(--ink-soft);max-width:82ch}
+  .band p:last-child{margin-bottom:0}
+  .band .one-idea{font-family:var(--mono);color:var(--ink);font-weight:600}
+  .band ul{margin:6px 0 0;padding-left:20px;color:var(--ink-soft);font-size:.96rem}
+  .band li{margin:6px 0}
+  .band li b{color:var(--ink)}
+
+  /* ---------- footer ---------- */
+  footer{border-top:1px solid var(--line);margin-top:40px;padding:42px 0 60px;color:var(--ink-dim)}
+  .foot-in{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;align-items:center}
+  .foot-in a{color:var(--ink-soft)}
+  .foot-in a:hover{color:var(--ink)}
+  .foot-links{display:flex;gap:10px;flex-wrap:wrap}
+  .foot-links a{font-size:13.5px;border:1px solid var(--line);background:var(--panel-2);
+    padding:8px 13px;border-radius:9px}
+  .foot-note{font-size:13px;max-width:74ch;margin-top:18px;color:var(--ink-dim)}
+  .foot-note a{color:var(--ink-soft);text-decoration:underline;text-underline-offset:2px}
+
+  .reveal{opacity:0;transform:translateY(16px);transition:opacity .6s ease,transform .6s ease}
+  .reveal.in{opacity:1;transform:none}
+  @media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}html{scroll-behavior:auto}}
+
+  @media (max-width:760px){
+    header.hero{padding:64px 0 40px}
+    .cards{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-in">
+    <a class="brand" href="#top"><span class="dot"></span><span class="mono">fak</span></a>
+    <div class="nav-links">
+      <a href="#market">01 · market</a>
+      <a href="#bottleneck">02 · bottleneck</a>
+      <a href="#answers">03 · two answers</a>
+      <a href="#middle">04 · middle ground</a>
+      <a href="#scars">05 · real problems</a>
+      <a href="#serving">06 · serving</a>
+      <a href="#not">07 · what it's not</a>
+      <a href="https://github.com/anthony-chaudhary/fak" rel="noopener">GitHub ↗</a>
+    </div>
+  </div>
+</nav>
+
+<a id="top"></a>
+<header class="hero">
+  <div class="wrap">
+    <span class="eyebrow"><b>●</b> the market moment · 2026-11-10</span>
+    <h1 class="title">The market moved from writing code to checking it</h1>
+    <p class="lede">
+      Agent iteration collapsed from days to minutes, so the bottleneck moved downstream — to
+      <span class="k">review</span>, <span class="k">verification</span>, and <span class="k">trust</span>.
+      The market's two live answers are binary, and both fail at fleet scale.
+      <span class="d">fak is the third option: a runtime where you define what you trust, and the
+      kernel proves the rest.</span>
+    </p>
+
+    <div class="poles" aria-label="The two poles and the middle ground">
+      <div class="pole human">
+        <div class="p-tag">pole 1 · safe, but serial</div>
+        <h3>Gate everything by hand</h3>
+        <p>A human reviews every PR, approves every tool call, verifies every "done." The human
+        becomes the serialization point.</p>
+      </div>
+      <div class="pole-mid">
+        <div class="m-tag">the middle ground</div>
+        <h3>define what you trust</h3>
+        <p>…and make the runtime prove the rest.</p>
+      </div>
+      <div class="pole ai">
+        <div class="p-tag">pole 2 · fast, but forgeable</div>
+        <h3>Just trust the AI</h3>
+        <p>Auto-accept the calls, auto-merge the PRs, read the summary as ground truth. The agent
+        grades its own homework.</p>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ============================ 01 · WHERE THE MARKET IS TODAY ============================ -->
+<section id="market">
+  <div class="wrap reveal">
+    <div class="sec-head">
+      <span class="sec-num">01</span>
+      <h2>Where the market is today</h2>
+    </div>
+    <div class="sec-body">
+      <p>Coding agents are no longer a demo layer. They are a daily driver: harnesses run inside
+      terminals and IDEs, file real PRs, and increasingly run unattended on recurring repo work.
+      The industry conversation has moved with them — from benchmarking models on code generation
+      to governing what agents are allowed to do (the existence of an OWASP Agentic Top-10 and an
+      MCP Top-10 is the symptom: a risk list is published only for a practice that is already
+      widespread).</p>
+      <p>The unit of software work is shifting with it. The old unit was "a developer writes a
+      change and files a PR, peers review it." The new unit is "agents produce most of the change;
+      humans direct, review, and own the decisions that matter." Nobody has to believe the end
+      state for the trend to matter — only that the <em>direction</em> is machine-paced change with
+      human checkpoints.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 02 · THE BOTTLENECK MIGRATES ============================ -->
+<section id="bottleneck">
+  <div class="wrap reveal">
+    <div class="sec-head">
+      <span class="sec-num">02</span>
+      <h2>The bottleneck migrates downstream</h2>
+    </div>
+    <p class="sec-sub">Walk the loop and watch where the time goes.</p>
+
+    <div class="cards">
+      <div class="card">
+        <span class="kicker">the old loop</span>
+        <h3>think → write → test → PR → review</h3>
+        <p>Days per cycle. The human wrote the code, so review load scaled with writing load — one
+        human, one reviewer, roughly matched.</p>
+      </div>
+      <div class="card">
+        <span class="kicker">the agent loop</span>
+        <h3>generation compresses to minutes</h3>
+        <p>An agent drafts, tests, and re-works a change while you read its first summary. A fleet
+        of agents runs many such cycles in parallel lanes at once.</p>
+      </div>
+    </div>
+
+    <div class="gap-note">
+      <b>Nothing in that compression makes the human checkpoints faster.</b> Review throughput,
+      acceptance testing, and trust decisions stay human-paced while generation becomes
+      machine-paced. The queue does not disappear — it moves. A fleet that can produce fifty
+      changes a day behind a review gate that absorbs five is a five-change-a-day fleet. The
+      speedup is real and it is thrown away at exactly one step.
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 03 · THE TWO ANSWERS ============================ -->
+<section id="answers">
+  <div class="wrap reveal">
+    <div class="sec-head">
+      <span class="sec-num">03</span>
+      <h2>The two answers the market offers — and why both fail at fleet scale</h2>
+    </div>
+
+    <div class="cards">
+      <div class="card pole-human">
+        <span class="tag">answer 1 · safe, but serial</span>
+        <h3>Gate everything by hand</h3>
+        <p>A human reviews every PR, approves every tool call, verifies every "done." This is the
+        world most teams live in, and it rebuilds the old bottleneck one step downstream: review
+        load now scales with agent output instead of human output. It is safe, it does not scale,
+        and it cancels the very speed the agent was bought for.</p>
+      </div>
+      <div class="card pole-ai">
+        <span class="tag">answer 2 · fast, but forgeable</span>
+        <h3>Just trust the AI</h3>
+        <p>Auto-accept the tool calls, auto-merge the PRs, read the agent's summary as ground
+        truth. This removes the human queue — and removes the safety net at the same time. And it
+        fails in a way that is worse than slow: <em>unauditable</em>. When the agent grades its own
+        homework, neither the human nor the next agent can tell which parts of the story were
+        checked.</p>
+      </div>
+      <div class="card pole-audit">
+        <span class="tag">the bolt-on middle that isn't one</span>
+        <h3>After-the-fact audit</h3>
+        <p>Observability platforms record what the agent did and alert afterward — useful, but they
+        <em>observe</em> the loop without <em>governing</em> it. A log entry does not stop the bad
+        tool call; it files the report. Prevention and audit are different layers, and the market
+        mostly sells the second.</p>
+      </div>
+    </div>
+
+    <div class="gap-note">
+      <b>What is missing is the layer between:</b> a runtime that governs the boundary <em>while
+      the agent runs</em> — fast enough not to become the new human queue, and defined enough not
+      to be a leap of faith.
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 04 · THE MIDDLE GROUND ============================ -->
+<section id="middle">
+  <div class="wrap reveal">
+    <div class="sec-head">
+      <span class="sec-num">04</span>
+      <h2>The middle ground fak builds: trust as a definition, not a leap</h2>
+    </div>
+    <p class="sec-sub">
+      The binary framing treats trust as a switch. It is actually a dial, and the design space
+      between the extremes is where fleets become usable. Each mechanism moves one class of
+      decision off both extremes and onto the kernel.
+    </p>
+
+    <div class="mm-table">
+      <div class="mm-head"><div>the binary</div><div>the middle path fak implements</div></div>
+      <div class="mm-row">
+        <div class="bin">Human runs every tool ↔ model calls anything</div>
+        <div class="mid"><b>A default-deny capability floor.</b> You enumerate what the agent may do;
+        everything else refuses <em>by structure</em>, without a recognizer that can fail open.
+        (<a href="explainers/default-deny-vs-classifier.md">why default-deny beats a classifier</a>)</div>
+      </div>
+      <div class="mm-row">
+        <div class="bin">Human verifies every done-claim ↔ believe the agent's summary</div>
+        <div class="mid"><b>The kernel re-checks the claim against evidence.</b> A done-claim is
+        graded against git — the subject is forgeable, the diff is not.
+        (<a href="explainers/verify-dont-trust.md">verify, don't trust</a>)</div>
+      </div>
+      <div class="mm-row">
+        <div class="bin">Human coordinates who touches what ↔ hope parallel agents don't collide</div>
+        <div class="mid"><b>Lane leases and arbitration.</b> The kernel decides whether two agents
+        may run at once on the same files, and refuses with a structured reason a peer can act on.
+        (<a href="agentic-issue-dispatch.md">lane leases</a>, <a href="cli/sync.md">lane arbiter</a>)</div>
+      </div>
+      <div class="mm-row">
+        <div class="bin">Human approves every exception forever ↔ silent override</div>
+        <div class="mid"><b>Graduated exceptions.</b> An attending operator can approve <em>one
+        exact refused call</em> — the agent cannot approve itself
+        (<a href="notes/GUARD-OPERATOR-APPROVAL-2026-10-23.md">operator approval</a>); blocked gates
+        have recorded, expiring, scope-bound waiver paths instead of a permanent lock or a silent
+        bypass.</div>
+      </div>
+      <div class="mm-row">
+        <div class="bin">Human triages every failure ↔ agent retries blindly</div>
+        <div class="mid"><b>Structured refusals from a closed vocabulary</b> — a machine-checkable
+        reason token, not free-text "I couldn't do it."
+        (<a href="explainers/verify-dont-trust.md">verify, don't trust</a>)</div>
+      </div>
+      <div class="mm-row">
+        <div class="bin">Trust the model's word about what ran ↔ read raw logs yourself</div>
+        <div class="mid"><b>The verdict fold at the boundary.</b> Proposed call → verdict → only an
+        allowed call executes; suspicious results are quarantined.
+        (<a href="explainers/tool-call-is-a-syscall.md">the tool call is a syscall</a>)</div>
+      </div>
+    </div>
+
+    <div class="band">
+      <p>The pattern in every row: the human keeps the <span class="one-idea">decision</span> (what
+      is allowed, what a gate means, whether this exception is worth its risk) and stops being the
+      <span class="one-idea">serialization point</span> (approving each instance, coordinating each
+      pair of agents, reading each log). Policy moves into the kernel; judgment stays with the
+      person.</p>
+      <p>That is the middle ground — not "trust the AI," not "do it as a human," but
+      <span class="one-idea">define what you trust, and make the runtime prove the rest.</span></p>
+      <p>The sentence to keep: <span class="one-idea">the model proposes, the kernel disposes — and
+      the kernel checks.</span></p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 05 · BORN FROM REAL PROBLEMS ============================ -->
+<section id="scars">
+  <div class="wrap reveal">
+    <div class="sec-head">
+      <span class="sec-num">05</span>
+      <h2>Born from real problems, not from a thesis</h2>
+    </div>
+    <p class="sec-sub">None of the mechanisms above were designed forward from a vision of
+    autonomous agents. Each is the scar of a specific failure observed running agent work for
+    real, day after day.</p>
+
+    <div class="scar-table">
+      <div class="scar-head"><div>the failure that actually happened</div><div>the mechanism it forced</div></div>
+      <div class="scar-row">
+        <div class="fail">Two agents edited the same files at once and trampled each other's work</div>
+        <div class="mech">Lane leases + arbitration before a worker takes a lane</div>
+      </div>
+      <div class="scar-row">
+        <div class="fail">An agent reported "done" and the work was not done</div>
+        <div class="mech">Done-claims verified against git evidence, not the worker's word</div>
+      </div>
+      <div class="scar-row">
+        <div class="fail">A worker sat blocked behind a gate nobody would ever clear</div>
+        <div class="mech">Time-boxed, scope-bound exception paths instead of indefinite human locks</div>
+      </div>
+      <div class="scar-row">
+        <div class="fail">A refused action came back as prose nobody could route on</div>
+        <div class="mech">Refusals as tokens from a closed reason vocabulary</div>
+      </div>
+      <div class="scar-row">
+        <div class="fail">Injected content tried to drive a tool call</div>
+        <div class="mech">Default-deny floor + result quarantine at the boundary</div>
+      </div>
+      <div class="scar-row">
+        <div class="fail">Long sessions drowned in their own accumulated context</div>
+        <div class="mech">Context management that sheds stale history instead of hoarding it
+        (<a href="explainers/cache.md">context</a>)</div>
+      </div>
+      <div class="scar-row">
+        <div class="fail">One paused model provider stopped every worker at once</div>
+        <div class="mech">Router failover across providers
+        (<a href="gateway-governance-parity-audit.md">provider failover audit</a>)</div>
+      </div>
+      <div class="scar-row">
+        <div class="fail">A serial server turned a multi-turn agent into a waiting queue</div>
+        <div class="mech">Batching, prefix reuse, and capacity admission with backpressure
+        (<a href="supported/features.md">continuous batching</a>,
+        <a href="explainers/kv-cache-agentic-context.md">KV cache for agentic context</a>)</div>
+      </div>
+    </div>
+
+    <div class="gap-note">
+      <b>The honest claim, and a stronger one than a prediction:</b> fak is not a forecast about
+      what agents will need — it is the recorded list of what broke when agents ran for real. The
+      roadmap is downstream of the scars, not ahead of them.
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 06 · THE SERVING SIDE ============================ -->
+<section id="serving">
+  <div class="wrap reveal">
+    <div class="sec-head">
+      <span class="sec-num">06</span>
+      <h2>The serving side of the same story</h2>
+    </div>
+    <div class="sec-body">
+      <p>Fleets change what inference has to do, not just how much of it. A fleet's serving layer
+      must batch concurrent lanes into one decode, reuse the prefixes that multi-turn tool loops
+      share, fail over when a provider pauses, let the operator's interactive turn preempt
+      background batch work, and meter against budgets — or the coordination layer above it
+      starves.</p>
+      <p>fak's serving runtime exists because those are the observed failure modes of agent
+      serving, not speculative ones; see the
+      <a href="supported/features.md" style="color:var(--fak)">capability floor</a> and the
+      <a href="explainers/what-fak-is-not.md" style="color:var(--fak)">honest boundary</a> for what
+      is measured today versus what is not. Running the loop on your own machine keeps it fast and
+      keeps the code local — the same trust argument applied to data.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 07 · WHAT THIS FRAME IS NOT ============================ -->
+<section id="not">
+  <div class="wrap reveal">
+    <div class="sec-head">
+      <span class="sec-num">07</span>
+      <h2>What this frame is not</h2>
+    </div>
+    <p class="sec-sub">The part to read before citing the pitch.</p>
+
+    <div class="not-list">
+      <div class="not-item">
+        <div class="n-h">not "fully autonomous"</div>
+        <p>The durable guarantee is the enforcement layer, not the model's judgment; the human
+        keeps review responsibility for the decisions that matter. fak moves work off the human's
+        desk; it does not remove the human.</p>
+      </div>
+      <div class="not-item">
+        <div class="n-h">not "review is dead"</div>
+        <p>Review changes shape: from reading every change to defining what the runtime must prove
+        about every change, then sampling the residue with evidence in hand.</p>
+      </div>
+      <div class="not-item">
+        <div class="n-h">not "every layer is finished"</div>
+        <p>What is measured, limited, or planned is tracked in
+        <a href="../CLAIMS.md" style="color:var(--fak)">CLAIMS</a> and the
+        <a href="../STATUS.md" style="color:var(--fak)">status page</a>; the motivation frame does
+        not upgrade any claim tier.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-in">
+      <div>
+        <strong style="color:var(--ink-soft)">fak — the agent kernel</strong><br/>
+        <span style="font-size:13px">the market-moment narrative · 2026-11-10</span>
+      </div>
+      <div class="foot-links">
+        <a href="explainers/why-fak-the-market-moment.md">the text source</a>
+        <a href="showcase.html">the showcase</a>
+        <a href="demos.html">live demos</a>
+        <a href="https://github.com/anthony-chaudhary/fak" rel="noopener">GitHub ↗</a>
+      </div>
+    </div>
+    <p class="foot-note">
+      Where to go deeper:
+      <a href="explainers/tool-call-is-a-syscall.md">the tool call is a syscall</a> ·
+      <a href="explainers/verify-dont-trust.md">verify, don't trust</a> ·
+      <a href="explainers/default-deny-vs-classifier.md">why default-deny beats a classifier</a> ·
+      <a href="explainers/what-fak-is-not.md">what fak is not</a> ·
+      <a href="../README.md">the README</a>.
+    </p>
+  </div>
+</footer>
+
+<script>
+  // reveal-on-scroll, matching showcase.html
+  (function(){
+    var els = document.querySelectorAll('.reveal');
+    if(!('IntersectionObserver' in window)){
+      els.forEach(function(e){e.classList.add('in')});
+      return;
+    }
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){
+        if(en.isIntersecting){en.target.classList.add('in');io.unobserve(en.target);}
+      });
+    },{threshold:0.12});
+    els.forEach(function(e){io.observe(e)});
+  })();
+</script>
+</body>
+</html>
