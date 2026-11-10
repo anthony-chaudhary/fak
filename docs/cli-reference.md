@@ -706,6 +706,29 @@ this reference stays the front door; every section is preserved verbatim:
 - the out-of-band operator control plane (session, signal, ps, top): [operator-control-plane.md](operator-control-plane.md)
 - the kernel map: file table, one-breath contract, witness-closed shipped table, honest limits, and wave-0 build history: [kernel-map.md](cli/kernel-map.md)
 
+## `fak wip`: working-tree checkpoint/restore
+
+`fak wip` gives a session a durable, gc-safe snapshot of its uncommitted tracked
+changes under `refs/fak/wip/<session>` without touching the index, the working
+tree, or any branch. The capture is deliberately tree-wide (peer edits included);
+`--path` records what the session claims so a later `land` commits only those
+paths. Full reference: `fak wip help`. Human sharing/hand-off guide:
+[operator/wip-sharing.md](operator/wip-sharing.md).
+
+| Subcommand | Purpose |
+|---|---|
+| `checkpoint` | Snapshot the tracked delta to `refs/fak/wip/<session>`; `--path` records claimed scope. |
+| `status` | List live checkpoints graded REPLICATED / STALE_REMOTE / LOCAL_ONLY; `--fleet` enumerates peer hosts. |
+| `sync` | Opt-in replication to a remote (push then fetch into `refs/fak/remotewip/<remote>/*`; `--push-only` / `--fetch-only`). |
+| `restore` | Print the checkpointed delta as an apply-able diff, or `--apply` it onto the tree. |
+| `land` | Turn a checkpoint into a real commit of the declared file set; refuses undeclared tree-wide snapshots. |
+| `park` | Suspend owner-authorized dirty paths across in-place integration (dry-run by default). |
+| `reconcile` / `adopt` | Decide DISCARD / RECLAIM / QUARANTINE for crashed sessions; `adopt` claims and materializes one. |
+| `reap` | Delete checkpoints whose delta has landed in HEAD (`--census` reports only). |
+| `queue` | Deterministic action queue with the exact next command for every checkpoint/worktree. |
+| `inventory` | Read-only census of main WIP, ignored files, worktrees, residue, checkpoints. |
+| `attribute` | Attribute every dirty hunk to the session that checkpointed it (OWNED / SHARED / ORPHAN). |
+
 ## `fak guard`
 
 ```text
