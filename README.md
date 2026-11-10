@@ -11,6 +11,13 @@ Our first milestone combines native inference, speculative decoding, and reuse o
 the work-so-far (agentic *KV caching*) so qualified acceleration is automatic.
 A capability floor bounds what tools the agent may execute.
 
+**Why now:** agent iteration collapsed from days to minutes, and the bottleneck
+moved downstream with it — review throughput, verification, and trust, not
+typing, now cap what an agent fleet ships. fak is the middle path between *a
+human gates every step* and *just trust the AI*: a runtime where you define
+what the agent may do, and the kernel proves the rest. The market framing:
+[why fak, now](docs/explainers/why-fak-the-market-moment.md).
+
 **Status:** automatic setup and cache reuse have specific model/backend limits today;
 speculative decoding and physical GPU Direct paths are not yet default-on or
 universally qualified. See the [local-agent milestone](docs/local-agent-milestone.md)
@@ -129,4 +136,4 @@ is linked instead of an unrecorded mirror.
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-11-03 vs VERSION 0.57.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-09 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py + /refresh-readme -->
+<!-- readme-verified: 2026-11-10 vs VERSION 0.57.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-09-09 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py + /refresh-readme -->
