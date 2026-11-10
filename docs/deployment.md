@@ -65,6 +65,8 @@ TLS, authentication, secrets, observability, backup, and rollback ownership.
 
 - Start local and single-process unless availability or platform ownership requires a
   fleet.
+- Point a **team of engineers at one node** — per-person gateway keys, the ops plane,
+  and dashboards on a single always-on box — see [team-node deployment](fak/team-node-deployment.md).
 - Use the cloud GPU route when fak and model serving belong on a rented accelerator host.
 - Treat air-gapped operation as a dependency-staging and network-boundary requirement,
   then choose either the single-process or fleet topology inside that boundary.

@@ -216,6 +216,7 @@ session control-verb writes, and from the live Paused→Running resume the
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--require-key-env` | string | `""` | Environment variable holding a bearer token REQUIRED on every request (except `/healthz`). Empty means no auth. |
+| `--key-principal` | string (repeatable) | *(unset)* | Bind an ADDITIONAL api key to a named PRINCIPAL as `PRINCIPAL=ENV_VAR`, so N keys authenticate against one gateway and every session is attributed to that principal in the access log and `/v1/fak/events` (joinable by `X-Trace-Id`). The value names the env var HOLDING that tenant's key, never the key itself. Additive to `--require-key-env`; refuses to boot on a malformed spec, an unset/empty env var, or two principals sharing one key. |
 | `--allow-lan` | bool | `false` | When true, exempts callers originating from private/local networks (RFC 1918 IPv4, link-local, loopback) from mandatory bearer authentication. Off-LAN / public callers still require authentication. |
 
 ---

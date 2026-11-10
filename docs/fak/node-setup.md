@@ -90,7 +90,9 @@ restrict the gateway listener to trusted clients with the host firewall.
 Do not enable `--allow-lan`, which exempts local-network callers from bearer
 authentication. A direct LAN bind of `fak up` does not provide this gateway bearer
 check; use the authenticated `fak node install --remote` or `fak serve` path above for
-off-host clients.
+off-host clients. Standing up ONE node for a TEAM of engineers — per-person keys,
+per-person audit attribution, the ops plane, and dashboards — is covered in
+[team-node-deployment.md](team-node-deployment.md).
 
 ## Disaggregated / hyperscaler — a fleet of nodes
 
