@@ -514,6 +514,72 @@ func TestMergeJournalCrashesUsesCodexOnlyWithStateRequest(t *testing.T) {
 	}
 }
 
+func TestMergeJournalCrashesAdmitsOpenCodeSessionWithVerifiedShape(t *testing.T) {
+	const id = "ses_e3861b794ffeKK5UOg25IFE1mR"
+	classified := []sessionjournal.Classified{{Session: sessionjournal.Session{ID: id, CWD: `D:\repos\open`, Agent: "opencode"}, Status: sessionjournal.StatusCrashed, Reason: "MACHINE_REBOOT"}}
+	got := MergeJournalCrashes(nil, classified, Options{Limit: 1, ReceiptDir: t.TempDir()})
+	want := []string{"fak", "guard", "--", "opencode", "run", "--session", id}
+	if len(got) != 1 || got[0].Status != "candidate" || got[0].Provider != ProviderOpenCode || !reflect.DeepEqual(got[0].Argv, want) {
+		t.Fatalf("requests=%+v want=%q", got, want)
+	}
+}
+
+func TestMergeJournalCrashesBlocksOpenCodeSessionWithoutVerifiedShape(t *testing.T) {
+	classified := []sessionjournal.Classified{{Session: sessionjournal.Session{ID: "not-a-session-id", CWD: `D:\repos\open`, Agent: "opencode"}, Status: sessionjournal.StatusCrashed, Reason: "MACHINE_REBOOT"}}
+	got := MergeJournalCrashes(nil, classified, Options{Limit: 1, ReceiptDir: t.TempDir()})
+	if len(got) != 1 || got[0].Status != "identity_blocked" || got[0].Category != CategoryIdentityBlocked || got[0].Action != ActionResolveIdentity || got[0].Reason != "opencode_journal_id_unverified" || len(got[0].Argv) != 0 {
+		t.Fatalf("unverified OpenCode journal row became actionable: %+v", got)
+	}
+}
+
+func TestSelectAdmitsOpenCodeHarnessWithSessionShape(t *testing.T) {
+	const id = "ses_e3861b794ffeKK5UOg25IFE1mR"
+	report := InventoryReport{Sessions: []Session{{
+		Thread:  &Thread{ID: id, Source: "session_registration", CWD: `C:\work\fak`},
+		Harness: ProviderOpenCode, HarnessSource: "session_registration", Category: CategorySubstantive, Action: ActionRecover,
+	}}}
+	got := Select(report, Options{Limit: 1, ReceiptDir: t.TempDir(), ManagerBin: "fak"})
+	if len(got) != 1 || got[0].Status != "candidate" || got[0].Provider != ProviderOpenCode {
+		t.Fatalf("requests=%+v", got)
+	}
+	want := []string{"fak", "guard", "--", "opencode", "run", "--session", id}
+	if !reflect.DeepEqual(got[0].Argv, want) {
+		t.Fatalf("argv=%q want=%q", got[0].Argv, want)
+	}
+}
+
+func TestSelectFailsClosedWhenOpenCodeHarnessHasMalformedID(t *testing.T) {
+	report := InventoryReport{Sessions: []Session{{
+		Thread:  &Thread{ID: "bad id with spaces", Source: "session_registration", CWD: `C:\work\fak`},
+		Harness: ProviderOpenCode, HarnessSource: "session_registration", Category: CategorySubstantive, Action: ActionRecover,
+	}}}
+	got := Select(report, Options{Limit: 1, ReceiptDir: t.TempDir(), ManagerBin: "fak"})
+	if len(got) != 1 || got[0].Status != "identity_blocked" || got[0].Reason != "opencode_identity_shape_invalid" || len(got[0].Argv) != 0 {
+		t.Fatalf("malformed OpenCode id must fail closed: %+v", got)
+	}
+}
+
+func TestSelectOpenCodeManagedReentryOmitsCodexFlag(t *testing.T) {
+	const id = "ses_e3861b794ffeKK5UOg25IFE1mR"
+	report := InventoryReport{Sessions: []Session{{
+		Thread:  &Thread{ID: id, Source: "session_registration", CWD: `C:\work\fak`},
+		Harness: ProviderOpenCode, HarnessSource: "session_registration", Category: CategorySubstantive, Action: ActionRecover,
+	}}}
+	got := Select(report, Options{Limit: 1, ReceiptDir: t.TempDir(), ManagerBin: "fak", Prompt: "continue exactly"})
+	if len(got) != 1 || got[0].Status != "candidate" {
+		t.Fatalf("requests=%+v", got)
+	}
+	want := []string{"fak", "session", "recover", "--provider-launch", ProviderOpenCode, "--thread", id, "--cwd", `C:\work\fak`, "--prompt-file", got[0].PromptPath}
+	if !reflect.DeepEqual(got[0].Argv, want) {
+		t.Fatalf("argv=%q want=%q", got[0].Argv, want)
+	}
+	for _, arg := range got[0].Argv {
+		if arg == "--codex" {
+			t.Fatalf("codex-only flag leaked into opencode argv: %q", got[0].Argv)
+		}
+	}
+}
+
 func TestMergeJournalCrashesAccountsAllRowsAndLimitsOnlyCandidates(t *testing.T) {
 	requests := []Request{
 		{ThreadID: "probe", Provider: ProviderClaude, Category: CategoryProbe, Action: ActionExcludeProbe, Status: "probe"},

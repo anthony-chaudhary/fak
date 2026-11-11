@@ -41,13 +41,17 @@ func TestMergeCodexHostCohortNormalizesExtendedWindowsCWDAndRejectsOlderThread(t
 
 func TestMergeHostCohortAccountsOpenCodeAndCoalescesClaudeTrace(t *testing.T) {
 	const claudeID = "92600001-0000-4000-8000-000000000001"
-	report := InventoryReport{Sessions: []Session{{
-		Thread: &Thread{ID: claudeID, Source: "claude_transcript", CWD: `C:\work`}, Provider: ProviderClaude,
-		Category: CategoryProbe, Action: ActionExcludeProbe, Reason: "semantic_probe",
-	}}}
+	const openID = "ses_e3861b794ffeKK5UOg25IFE1mR"
+	report := InventoryReport{Sessions: []Session{
+		{
+			Thread: &Thread{ID: claudeID, Source: "claude_transcript", CWD: `C:\work`}, Provider: ProviderClaude,
+			Category: CategoryProbe, Action: ActionExcludeProbe, Reason: "semantic_probe",
+		},
+		{Thread: &Thread{ID: openID, Source: "cli", CWD: `C:\work`}, Provider: ProviderOpenCode},
+	}}
 	guards := []HostEvidenceRow{
 		{Handle: "claude-h", TraceID: "claude-trace", PID: 11, StartedAt: "2026-08-24T01:00:00Z", CWD: `C:\work`, Command: []string{"claude"}},
-		{Handle: "open-h", PID: 12, StartedAt: "2026-08-24T01:00:00Z", CWD: `C:\work`, Command: []string{"opencode"}},
+		{Handle: "open-h", PID: 12, StartedAt: "2026-08-24T01:00:00Z", CWD: `C:\work`, Command: []string{"fak", "guard", "--", "opencode", "run", "--session", openID}},
 	}
 	cohort := []HostCohortEntry{{Handle: "claude-h", PID: 11, StartedAt: guards[0].StartedAt}, {Handle: "open-h", PID: 12, StartedAt: guards[1].StartedAt}}
 	got := MergeCodexHostCohort(report, guards, cohort, map[string]string{"claude-trace": claudeID})
@@ -58,9 +62,36 @@ func TestMergeHostCohortAccountsOpenCodeAndCoalescesClaudeTrace(t *testing.T) {
 	if claude.HostHandle != "claude-h" || claude.Category != CategoryProbe || claude.Action != ActionExcludeProbe || claude.IdentityProvenance != IdentityTraceLedger {
 		t.Fatalf("Claude trace did not coalesce safely: %+v", claude)
 	}
-	blocked := got.Sessions[1]
-	if blocked.Provider != "opencode" || blocked.Category != CategoryIdentityBlocked || blocked.Action != ActionResolveIdentity || blocked.Reason != "exact_resume_provider_blocked:opencode" {
-		t.Fatalf("OpenCode cohort row not accounted: %+v", blocked)
+	open := got.Sessions[1]
+	if open.Thread.ID != openID || open.HostHandle != "open-h" || open.Provider != ProviderOpenCode || open.Category != CategorySubstantive || open.Action != ActionRecover || open.IdentityProvenance != IdentityArgvExact {
+		t.Fatalf("OpenCode argv-exact identity did not coalesce into state: %+v", open)
+	}
+}
+
+func TestMergeHostCohortBlocksOpenCodeGuardWithoutSessionIdentity(t *testing.T) {
+	guards := []HostEvidenceRow{{Handle: "open-h", PID: 12, StartedAt: "2026-08-24T01:00:00Z", CWD: `C:\work`, Command: []string{"fak", "guard", "--", "opencode", "run"}}}
+	cohort := []HostCohortEntry{{Handle: "open-h", PID: 12, StartedAt: guards[0].StartedAt}}
+	got := MergeCodexHostCohort(InventoryReport{}, guards, cohort, nil)
+	if len(got.Sessions) != 1 {
+		t.Fatalf("got=%+v", got.Sessions)
+	}
+	blocked := got.Sessions[0]
+	if blocked.Provider != ProviderOpenCode || blocked.Category != CategoryIdentityBlocked || blocked.Action != ActionResolveIdentity || blocked.Reason != "exact_identity_missing" || blocked.IdentityProvenance != "" {
+		t.Fatalf("blocked=%+v", blocked)
+	}
+}
+
+func TestMergeHostCohortBlocksOpenCodeSessionNotInState(t *testing.T) {
+	const absent = "ses_0000000000000000000000000A"
+	guards := []HostEvidenceRow{{Handle: "open-h", PID: 12, StartedAt: "2026-08-24T01:00:00Z", CWD: `C:\work`, Command: []string{"fak", "guard", "--", "opencode", "run", "--session=" + absent}}}
+	cohort := []HostCohortEntry{{Handle: "open-h", PID: 12, StartedAt: guards[0].StartedAt}}
+	got := MergeCodexHostCohort(InventoryReport{}, guards, cohort, nil)
+	if len(got.Sessions) != 1 {
+		t.Fatalf("got=%+v", got.Sessions)
+	}
+	blocked := got.Sessions[0]
+	if blocked.Provider != ProviderOpenCode || blocked.Category != CategoryIdentityBlocked || blocked.Action != ActionResolveIdentity || blocked.Reason != "exact_session_id_not_in_state" || blocked.IdentityProvenance != IdentityArgvExact {
+		t.Fatalf("blocked=%+v", blocked)
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/guardsessions"
 	"github.com/anthony-chaudhary/fak/internal/hostresurrect"
+	"github.com/anthony-chaudhary/fak/internal/opencoderesume"
 	"github.com/anthony-chaudhary/fak/internal/resume"
 	resumesweep "github.com/anthony-chaudhary/fak/internal/resume/sweep"
 	"github.com/anthony-chaudhary/fak/internal/sessiondiag"
@@ -42,6 +43,11 @@ var recoveryInventoryRegistryPath = sessionregistry.DefaultPath
 
 var recoveryInventory = collectRecoveryInventory
 var recoveryProviderCommand = exec.Command
+
+// sessionRecoverVerifyOpencode is the anti-fabrication witness for
+// --provider-launch opencode: opencode run --session CREATES missing sessions,
+// so launch proceeds only on VerdictResumable. A var so tests can stub it.
+var sessionRecoverVerifyOpencode = opencoderesume.Verify
 
 func collectRecoveryInventory(since time.Duration) (sessionrecovery.InventoryReport, error) {
 	now := recoveryNow()
@@ -493,7 +499,7 @@ func runSessionRecoverProviderLaunch(stdout, stderr io.Writer, args []string) in
 		return 2
 	}
 	if fs.NArg() != 0 || strings.TrimSpace(*thread) == "" || strings.TrimSpace(*cwd) == "" || strings.TrimSpace(*promptFile) == "" {
-		fmt.Fprintln(stderr, "usage: fak session recover --provider-launch claude|codex --thread ID --cwd DIR --prompt-file FILE [--codex BIN] [--interactive]")
+		fmt.Fprintln(stderr, "usage: fak session recover --provider-launch claude|codex|opencode --thread ID --cwd DIR --prompt-file FILE [--codex BIN] [--interactive]")
 		return 2
 	}
 	prompt, err := os.ReadFile(*promptFile)
@@ -518,6 +524,25 @@ func runSessionRecoverProviderLaunch(stdout, stderr io.Writer, args []string) in
 			argv = append(argv, *codexBin, "resume", *thread)
 		} else {
 			argv = append(argv, *codexBin, "exec", "--cd", *cwd, "resume", *thread, "-")
+		}
+	case sessionrecovery.ProviderOpenCode:
+		// Preflight gate (anti-fabrication witness): `opencode run --session`
+		// CREATES the session when the id does not exist, so an unverified id
+		// would silently fabricate a fresh empty session and call it recovery.
+		// Launch only on VerdictResumable; every other verdict or error blocks.
+		verdict, verifyErr := sessionRecoverVerifyOpencode(context.Background(), opencoderesume.Options{SessionID: *thread, Dir: *cwd})
+		if verifyErr != nil || verdict != opencoderesume.VerdictResumable {
+			fmt.Fprintf(stderr, "fak session recover: opencode session %s not resumable in %s: %s — opencode run --session would CREATE a new session\n", *thread, *cwd, verdict)
+			return 2
+		}
+		if *interactive {
+			argv = append(argv, "opencode", "--session", *thread)
+		} else {
+			// opencode run takes the message as args; there is no --prompt-file.
+			argv = append(argv, "opencode", "run", "--session", *thread)
+			if promptText := strings.TrimSpace(string(prompt)); promptText != "" {
+				argv = append(argv, promptText)
+			}
 		}
 	default:
 		fmt.Fprintf(stderr, "fak session recover provider launch: unsupported provider %q\n", *provider)

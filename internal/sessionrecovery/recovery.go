@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/opencoderesume"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
 )
@@ -24,8 +25,9 @@ import (
 const ReceiptSchema = "fak-session-recovery-receipt/1"
 
 const (
-	ProviderClaude = "claude"
-	ProviderCodex  = "codex"
+	ProviderClaude   = "claude"
+	ProviderCodex    = "codex"
+	ProviderOpenCode = "opencode"
 
 	CategoryProbe           = "probe"
 	CategorySubstantive     = "substantive"
@@ -276,6 +278,16 @@ func Select(report InventoryReport, opts Options) []Request {
 		switch provider {
 		case ProviderClaude, ProviderCodex:
 			req.Argv = recoveryResumeArgv(opts, provider, id, cwd)
+		case ProviderOpenCode:
+			if !opencoderesume.IsSessionID(id) {
+				req.Status = "identity_blocked"
+				req.Category = CategoryIdentityBlocked
+				req.Action = ActionResolveIdentity
+				req.Reason = "opencode_identity_shape_invalid"
+				out = append(out, req)
+				continue
+			}
+			req.Argv = opencodeResumeArgv(opts, id, cwd)
 		default:
 			req.Status = "identity_blocked"
 			req.Category = CategoryIdentityBlocked
@@ -359,6 +371,24 @@ func codexResumeArgv(managerBin, codexBin, threadID, cwd string, interactive boo
 
 func claudeResumeArgv(managerBin, sessionID string) []string {
 	return []string{managerBin, "guard", "--", "claude", "--resume", sessionID}
+}
+
+// opencodeResumeArgv builds the guarded exact-resume argv for an OpenCode
+// session id. At Select time no prompt is staged inline: headless rows launch
+// `opencode run --session <id>` without a message, and managed re-entry
+// (PromptPath set) mirrors the Codex branch of recoveryResumeArgv minus the
+// Codex-only --codex flag. Callers must pass an id that already passed
+// opencoderesume.IsSessionID; only the provider-launch site may execute the
+// existence oracle before launch.
+func opencodeResumeArgv(opts Options, threadID, cwd string) []string {
+	if opts.PromptPath == "" {
+		return []string{opts.ManagerBin, "guard", "--", "opencode", "run", "--session", threadID}
+	}
+	argv := []string{opts.ManagerBin, "session", "recover", "--provider-launch", ProviderOpenCode, "--thread", threadID, "--cwd", cwd, "--prompt-file", opts.PromptPath}
+	if opts.Interactive {
+		argv = append(argv, "--interactive")
+	}
+	return argv
 }
 
 func recoveryEligibility(row Session, explicit bool) (string, string) {
@@ -645,8 +675,8 @@ func providerName(value string) string {
 		return ProviderClaude
 	case base == ProviderCodex || strings.Contains(base, ProviderCodex):
 		return ProviderCodex
-	case base == "opencode" || strings.Contains(base, "opencode"):
-		return "opencode"
+	case base == ProviderOpenCode || strings.Contains(base, ProviderOpenCode):
+		return ProviderOpenCode
 	default:
 		return ""
 	}
@@ -681,6 +711,20 @@ func prepareJournalRequest(req *Request, hasStateRequest bool, opts Options) {
 			return
 		}
 		req.Argv = recoveryResumeArgv(opts, req.Provider, req.ThreadID, req.CWD)
+	case ProviderOpenCode:
+		// OpenCode ids are ses_-prefixed, not UUIDs, so the Codex state_5
+		// join does not apply. The journal row is admitted only when its id
+		// has the verified OpenCode shape; existence itself is witnessed at
+		// the provider-launch site (opencoderesume.Verify), never here.
+		if !opencoderesume.IsSessionID(req.ThreadID) {
+			req.Category = CategoryIdentityBlocked
+			req.Action = ActionResolveIdentity
+			req.Status = "identity_blocked"
+			req.Reason = "opencode_journal_id_unverified"
+			req.Argv = nil
+			return
+		}
+		req.Argv = opencodeResumeArgv(opts, req.ThreadID, req.CWD)
 	default:
 		req.Category = CategoryIdentityBlocked
 		req.Action = ActionResolveIdentity

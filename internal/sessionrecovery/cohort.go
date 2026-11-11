@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/opencoderesume"
 )
 
 // HostEvidenceRow is the closed host-resurrection evidence needed to join a dead
@@ -31,17 +33,22 @@ const (
 )
 
 // MergeCodexHostCohort accounts for every exact handle+pid+start member of the
-// pre-crash cohort. A Codex guard handle is never itself a thread identity. The
-// only admissible joins are a full UUID already present in argv or a durable
-// trace->UUID identity row. Every candidate UUID is finally verified against
-// state_5-derived inventory; cwd and timestamps are never identity evidence.
+// pre-crash cohort. A guard handle is never itself a thread identity. The only
+// admissible joins are a full UUID already present in argv or a durable
+// trace->UUID identity row (Codex/Claude), or a ses_-shaped OpenCode session id
+// present in argv. Every candidate identity is finally verified against the
+// report's state rows; cwd and timestamps are never identity evidence.
 func MergeCodexHostCohort(report InventoryReport, guards []HostEvidenceRow, cohort []HostCohortEntry, uuidByTrace map[string]string) InventoryReport {
 	state := make(map[string]int)
 	for i := range report.Sessions {
-		if report.Sessions[i].Thread == nil || !isUUID(report.Sessions[i].Thread.ID) {
+		if report.Sessions[i].Thread == nil {
 			continue
 		}
-		state[strings.ToLower(report.Sessions[i].Thread.ID)] = i
+		id := report.Sessions[i].Thread.ID
+		if !isUUID(id) && !opencoderesume.IsSessionID(id) {
+			continue
+		}
+		state[strings.ToLower(id)] = i
 	}
 	sort.SliceStable(guards, func(i, j int) bool { return guards[i].Handle < guards[j].Handle })
 	sort.SliceStable(cohort, func(i, j int) bool {
@@ -81,7 +88,7 @@ func MergeCodexHostCohort(report InventoryReport, guards []HostEvidenceRow, coho
 		}
 		guard := exact[0]
 		provider := guardProvider(guard.Command)
-		if provider != ProviderCodex && provider != ProviderClaude {
+		if provider != ProviderCodex && provider != ProviderClaude && provider != ProviderOpenCode {
 			report.Sessions = append(report.Sessions, blockedCohortRow(guard, provider, "exact_resume_provider_blocked:"+provider, ""))
 			continue
 		}
@@ -93,7 +100,11 @@ func MergeCodexHostCohort(report InventoryReport, guards []HostEvidenceRow, coho
 		}
 		if id == "" || !verified {
 			if reason == "" {
-				reason = "exact_uuid_not_in_state_5"
+				if provider == ProviderOpenCode {
+					reason = "exact_session_id_not_in_state"
+				} else {
+					reason = "exact_uuid_not_in_state_5"
+				}
 			}
 			report.Sessions = append(report.Sessions, blockedCohortRow(guard, provider, reason, provenance))
 			continue
@@ -153,7 +164,12 @@ func resolveHostIdentity(guard HostEvidenceRow, uuidByTrace map[string]string, p
 	exact := map[string]bool{}
 	for i := 1; i < len(guard.Command); i++ {
 		previous := strings.ToLower(strings.TrimSpace(guard.Command[i-1]))
-		if (previous == "resume" || (provider == ProviderClaude && previous == "--resume")) && isUUID(guard.Command[i]) {
+		switch {
+		case previous == "resume" && isUUID(guard.Command[i]):
+			exact[strings.ToLower(strings.TrimSpace(guard.Command[i]))] = true
+		case provider == ProviderClaude && previous == "--resume" && isUUID(guard.Command[i]):
+			exact[strings.ToLower(strings.TrimSpace(guard.Command[i]))] = true
+		case provider == ProviderOpenCode && previous == "--session" && opencoderesume.IsSessionID(guard.Command[i]):
 			exact[strings.ToLower(strings.TrimSpace(guard.Command[i]))] = true
 		}
 	}
@@ -161,6 +177,15 @@ func resolveHostIdentity(guard HostEvidenceRow, uuidByTrace map[string]string, p
 		if provider == ProviderClaude && strings.HasPrefix(strings.ToLower(strings.TrimSpace(arg)), "--resume=") {
 			id := strings.TrimSpace(strings.SplitN(arg, "=", 2)[1])
 			if isUUID(id) {
+				exact[strings.ToLower(id)] = true
+			}
+		}
+		// OpenCode ids are ses_-prefixed mixed-case alphanumerics, never UUIDs:
+		// accept only IsSessionID-shaped values, preserving case from the raw
+		// token before lower-casing into the exact set.
+		if provider == ProviderOpenCode && strings.HasPrefix(strings.ToLower(strings.TrimSpace(arg)), "--session=") {
+			id := strings.TrimSpace(strings.SplitN(arg, "=", 2)[1])
+			if opencoderesume.IsSessionID(id) {
 				exact[strings.ToLower(id)] = true
 			}
 		}

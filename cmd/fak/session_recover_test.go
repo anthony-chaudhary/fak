@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/opencoderesume"
 	"github.com/anthony-chaudhary/fak/internal/resume"
 	resumesweep "github.com/anthony-chaudhary/fak/internal/resume/sweep"
 	"github.com/anthony-chaudhary/fak/internal/sessiondiag"
@@ -688,6 +689,89 @@ func TestSessionRecoverUsesCodexJournalOnlyWithExactStateRequest(t *testing.T) {
 	want := []string{guardBin, "guard", "--", "codex", "exec", "--cd", `D:\authoritative`, "resume", id}
 	if len(got.Results) != 1 || got.Results[0].Provider != sessionrecovery.ProviderCodex || !reflect.DeepEqual(got.Results[0].Argv, want) {
 		t.Fatalf("summary=%+v want=%q", got, want)
+	}
+}
+
+func TestSessionRecoverProviderLaunchOpencodeVerifiesBeforeGuardedRun(t *testing.T) {
+	const id = "ses_e3861b794ffeKK5UOg25IFE1mR"
+	promptPath := filepath.Join(t.TempDir(), "prompt.txt")
+	if err := os.WriteFile(promptPath, []byte("continue exactly"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	capturePath := filepath.Join(t.TempDir(), "guard.json")
+	oldCommand := recoveryProviderCommand
+	t.Cleanup(func() { recoveryProviderCommand = oldCommand })
+	recoveryProviderCommand = func(command string, args ...string) *exec.Cmd {
+		helperArgs := []string{"-test.run=^TestSessionRecoverProviderLaunchHelper$", "--", command}
+		helperArgs = append(helperArgs, args...)
+		cmd := exec.Command(os.Args[0], helperArgs...)
+		cmd.Env = append(os.Environ(), "FAK_RECOVERY_PROVIDER_CAPTURE="+capturePath)
+		return cmd
+	}
+	oldVerify := sessionRecoverVerifyOpencode
+	t.Cleanup(func() { sessionRecoverVerifyOpencode = oldVerify })
+	sessionRecoverVerifyOpencode = func(_ context.Context, opts opencoderesume.Options) (string, error) {
+		if opts.SessionID != id || opts.Dir == "" {
+			t.Fatalf("verify opts=%+v", opts)
+		}
+		return opencoderesume.VerdictResumable, nil
+	}
+	var stdout, stderr bytes.Buffer
+	code := runSessionRecoverProviderLaunch(&stdout, &stderr, []string{"--provider-launch", "opencode", "--thread", id, "--cwd", t.TempDir(), "--prompt-file", promptPath})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	var got struct {
+		Argv  []string `json:"argv"`
+		Stdin string   `json:"stdin"`
+	}
+	b, err := os.ReadFile(capturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{got.Argv[0], "guard", "--", "opencode", "run", "--session", id, "continue exactly"}
+	if !reflect.DeepEqual(got.Argv, want) {
+		t.Fatalf("guard argv=%q want=%q", got.Argv, want)
+	}
+	if _, err := os.Stat(promptPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("staged prompt still exists after success: %v", err)
+	}
+}
+
+func TestSessionRecoverProviderLaunchOpencodeRefusesUnverifiedSession(t *testing.T) {
+	const id = "ses_e3861b794ffeKK5UOg25IFE1mR"
+	promptPath := filepath.Join(t.TempDir(), "prompt.txt")
+	if err := os.WriteFile(promptPath, []byte("continue exactly"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	launched := false
+	oldCommand := recoveryProviderCommand
+	t.Cleanup(func() { recoveryProviderCommand = oldCommand })
+	recoveryProviderCommand = func(string, ...string) *exec.Cmd {
+		launched = true
+		return exec.Command("true")
+	}
+	oldVerify := sessionRecoverVerifyOpencode
+	t.Cleanup(func() { sessionRecoverVerifyOpencode = oldVerify })
+	sessionRecoverVerifyOpencode = func(context.Context, opencoderesume.Options) (string, error) {
+		return opencoderesume.VerdictNotFound, nil
+	}
+	var stdout, stderr bytes.Buffer
+	code := runSessionRecoverProviderLaunch(&stdout, &stderr, []string{"--provider-launch", "opencode", "--thread", id, "--cwd", t.TempDir(), "--prompt-file", promptPath})
+	if code != 2 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	if launched {
+		t.Fatalf("unverified opencode session was launched")
+	}
+	if !strings.Contains(stderr.String(), "not_found_in_project") {
+		t.Fatalf("verdict missing from refusal: %s", stderr.String())
+	}
+	if _, err := os.ReadFile(promptPath); err != nil {
+		t.Fatalf("staged prompt lost on refusal: %v", err)
 	}
 }
 
