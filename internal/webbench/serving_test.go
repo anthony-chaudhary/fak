@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -62,6 +63,64 @@ func TestFoldServingSamplesMeasuredMetrics(t *testing.T) {
 	if stats.GoodputRPS.Status != "measured" || *stats.GoodputRPS.Value != 1 {
 		t.Fatalf("goodput = %+v, want 1 req/s", stats.GoodputRPS)
 	}
+}
+
+// fak-test:justify why=contract when=changed:internal/webbench/**
+// fak-test:runtime fast est=10ms lane=default
+func TestFoldServingSamplesJointGoodputRequiresAllSLOs(t *testing.T) {
+	ttftOK, ttftBad, tpotOK, tpotBad := 100.0, 500.0, 40.0, 80.0
+	samples := []ServingSample{
+		{ID: "fast-e2e-over-tpot", Status: "ok", TTFTMillis: &ttftOK, TPOTMillis: &tpotBad, EndToEndMillis: 500, OutputTokenEstimate: 4},
+		{ID: "slow-e2e-fast-tpot", Status: "ok", TTFTMillis: &ttftBad, TPOTMillis: &tpotOK, EndToEndMillis: 1500, OutputTokenEstimate: 4},
+		{ID: "all-within", Status: "ok", TTFTMillis: &ttftOK, TPOTMillis: &tpotOK, EndToEndMillis: 900, OutputTokenEstimate: 4},
+		{ID: "failed", Status: "fail", Error: "boom"},
+	}
+	slos := ServingSLOs{TTFT: 2 * time.Second, TPOT: 50 * time.Millisecond, EndToEnd: time.Second}
+
+	t.Run("requires-all-configured-slos", func(t *testing.T) {
+		stats := FoldServingSamplesWithSLOs(samples, 2.0, slos)
+		if stats.OK != 3 || stats.Failed != 1 {
+			t.Fatalf("counts = ok:%d failed:%d, want ok=3 failed=1", stats.OK, stats.Failed)
+		}
+		// Only "all-within" meets every SLO: fast-e2e-over-tpot is fast end to
+		// end but over the TPOT SLO, and slow-e2e-fast-tpot breaches the
+		// end-to-end SLO.
+		if stats.GoodputRPS.Status != "measured" || stats.GoodputRPS.Value == nil || *stats.GoodputRPS.Value != 0.5 {
+			t.Fatalf("joint goodput = %+v, want measured 0.5 req/s", stats.GoodputRPS)
+		}
+	})
+
+	t.Run("unset-slos-ignored", func(t *testing.T) {
+		lowTTFT := 40.0
+		onlyTTFT := []ServingSample{
+			{ID: "missing-ttft", Status: "ok", TPOTMillis: &tpotOK, EndToEndMillis: 300, OutputTokenEstimate: 2},
+			{ID: "within-ttft", Status: "ok", TTFTMillis: &lowTTFT, TPOTMillis: &tpotBad, EndToEndMillis: 5000, OutputTokenEstimate: 2},
+		}
+		stats := FoldServingSamplesWithSLOs(onlyTTFT, 2.0, ServingSLOs{TTFT: 2 * time.Second})
+		// Unset TPOT/EndToEnd thresholds are ignored; a configured threshold
+		// with a missing measurement fails closed.
+		if stats.GoodputRPS.Status != "measured" || stats.GoodputRPS.Value == nil || *stats.GoodputRPS.Value != 0.5 {
+			t.Fatalf("ttft-only goodput = %+v, want measured 0.5 req/s (unset tpot/e2e ignored)", stats.GoodputRPS)
+		}
+	})
+
+	t.Run("legacy-single-slo-path-identical", func(t *testing.T) {
+		legacy := FoldServingSamples(samples, 2.0, time.Second)
+		joint := FoldServingSamplesWithSLOs(samples, 2.0, ServingSLOs{EndToEnd: time.Second})
+		if !reflect.DeepEqual(legacy, joint) {
+			t.Fatalf("legacy single-SLO stats differ from joint e2e-only stats:\nlegacy=%+v\njoint=%+v", legacy, joint)
+		}
+		if legacy.GoodputRPS.Status != "measured" || *legacy.GoodputRPS.Value != 1 {
+			t.Fatalf("legacy goodput = %+v, want measured 1 req/s", legacy.GoodputRPS)
+		}
+	})
+
+	t.Run("no-slos-not-measured", func(t *testing.T) {
+		stats := FoldServingSamplesWithSLOs(samples, 2.0, ServingSLOs{})
+		if stats.GoodputRPS.Status != "not_measured" || stats.GoodputRPS.Value != nil {
+			t.Fatalf("goodput without configured SLOs = %+v, want not_measured", stats.GoodputRPS)
+		}
+	})
 }
 
 func TestRunServingParityReportsMissingEndpointsAsNotMeasured(t *testing.T) {

@@ -787,7 +787,77 @@ func classifyServingRequestError(err error) string {
 	return "transport"
 }
 
+// ServingSLOs holds optional per-metric latency thresholds for the joint
+// goodput definition adapted from vLLM's serving benchmark --goodput option
+// (vllm/benchmarks/serve.py@975dca5, Apache-2.0; DistServe, arXiv:2401.09670):
+// a request is good iff it meets every configured threshold, and thresholds
+// that are not positive are ignored.
+type ServingSLOs struct {
+	TTFT     time.Duration // time to first token
+	TPOT     time.Duration // time per output token
+	EndToEnd time.Duration // total request latency
+}
+
+// AnySet reports whether at least one SLO threshold is configured.
+func (s ServingSLOs) AnySet() bool {
+	return s.TTFT > 0 || s.TPOT > 0 || s.EndToEnd > 0
+}
+
+// servingMetricWithin reports whether a measured millisecond value stays within
+// slo. A missing or non-finite measurement fails closed: an unmeasured metric
+// cannot certify a request as good.
+func servingMetricWithin(value *float64, slo time.Duration) bool {
+	if value == nil {
+		return false
+	}
+	return servingFiniteNonnegative(*value) && *value <= float64(slo)/float64(time.Millisecond)
+}
+
+// servingJointWithin reports whether sample meets every configured SLO in slo,
+// mirroring upstream's all-of check over the configured keys. With no
+// threshold set, no request qualifies.
+func servingJointWithin(sample ServingSample, slo ServingSLOs) bool {
+	if !slo.AnySet() {
+		return false
+	}
+	if slo.EndToEnd > 0 && !servingWithinSLO(sample.EndToEndMillis, slo.EndToEnd) {
+		return false
+	}
+	if slo.TTFT > 0 && !servingMetricWithin(sample.TTFTMillis, slo.TTFT) {
+		return false
+	}
+	if slo.TPOT > 0 && !servingMetricWithin(sample.TPOTMillis, slo.TPOT) {
+		return false
+	}
+	return true
+}
+
+// FoldServingSamples folds samples under the legacy single end-to-end SLO: a
+// request is good iff its end-to-end latency is within slo. It maps the single
+// SLO onto the EndToEnd threshold of the joint definition, so results are
+// identical to FoldServingSamplesWithSLOs(samples, wallSeconds,
+// ServingSLOs{EndToEnd: slo}).
 func FoldServingSamples(samples []ServingSample, wallSeconds float64, slo time.Duration) ServingStats {
+	return foldServingSamples(samples, wallSeconds, func(s ServingSample) bool {
+		return servingWithinSLO(s.EndToEndMillis, slo)
+	}, slo > 0, "no positive end-to-end SLO configured", slo)
+}
+
+// FoldServingSamplesWithSLOs folds samples under the joint goodput definition
+// adapted from vLLM's serving benchmark --goodput option
+// (vllm/benchmarks/serve.py@975dca5, Apache-2.0; DistServe, arXiv:2401.09670):
+// a request is good iff ttft<=TTFT AND tpot<=TPOT AND e2e<=EndToEnd over the
+// configured thresholds, with unset thresholds ignored. When no threshold is
+// set, GoodputRPS is not measured, matching upstream's omission of the
+// goodput metric without a --goodput configuration. Exact-token SLO evidence
+// keeps mapping to the EndToEnd threshold through the legacy single-SLO path.
+func FoldServingSamplesWithSLOs(samples []ServingSample, wallSeconds float64, slo ServingSLOs) ServingStats {
+	return foldServingSamples(samples, wallSeconds, func(s ServingSample) bool {
+		return servingJointWithin(s, slo)
+	}, slo.AnySet(), "no positive SLO configured", slo.EndToEnd)
+}
+
+func foldServingSamples(samples []ServingSample, wallSeconds float64, within func(ServingSample) bool, sloConfigured bool, noSLOReason string, evidenceSLO time.Duration) ServingStats {
 	stats := ServingStats{
 		Requests:        len(samples),
 		TokenCountBasis: "stream_content_events",
@@ -799,7 +869,7 @@ func FoldServingSamples(samples []ServingSample, wallSeconds float64, slo time.D
 		if s.Status == "ok" {
 			stats.OK++
 			e2e = append(e2e, s.EndToEndMillis)
-			if servingWithinSLO(s.EndToEndMillis, slo) {
+			if within(s) {
 				good++
 			}
 			if s.TTFTMillis != nil {
@@ -816,7 +886,7 @@ func FoldServingSamples(samples []ServingSample, wallSeconds float64, slo time.D
 		}
 	}
 	stats.TokenCountBasis = servingStatsTokenBasis(tokenBases)
-	setServingExactEvidence(&stats, samples, wallSeconds, slo)
+	setServingExactEvidence(&stats, samples, wallSeconds, evidenceSLO)
 	stats.TTFTMillis = quantiles(ttft, "ms", "no streaming first-token measurements")
 	stats.ITLMillis = quantiles(itl, "ms", "no inter-token measurements")
 	stats.TPOTMillis = quantiles(tpot, "ms", "no TPOT measurements")
@@ -835,8 +905,8 @@ func FoldServingSamples(samples []ServingSample, wallSeconds float64, slo time.D
 	} else {
 		stats.ThroughputTokensS = notMeasuredScalar(throughputUnit, "no output tokens measured")
 	}
-	if slo <= 0 {
-		stats.GoodputRPS = notMeasuredScalar("requests/s", "no positive end-to-end SLO configured")
+	if !sloConfigured {
+		stats.GoodputRPS = notMeasuredScalar("requests/s", noSLOReason)
 	} else if servingFinitePositive(wallSeconds) && stats.OK > 0 {
 		rate := float64(good) / wallSeconds
 		if servingFiniteNonnegative(rate) {
