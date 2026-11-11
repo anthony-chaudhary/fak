@@ -845,6 +845,11 @@ func seedDisambiguationLockCache(t *testing.T, root, key string) {
 }
 
 func TestDisambiguationCacheLockOwnerRecovery(t *testing.T) {
+	// Pins the TRANSIENT candidate path (fresh checkout, removed on close,
+	// collected by the owner-aware sweep). The pooled path is pinned by
+	// candidate_pool_test.go; the kill switch keeps this test's contract.
+	// fak-candidate-pool-transient-pin
+	t.Setenv(CandidatePoolEnv, "off")
 	started, startOK := processstart.Start(os.Getpid())
 	liveIdentity := started.UTC().Format(time.RFC3339Nano)
 

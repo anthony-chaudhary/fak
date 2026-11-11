@@ -11,6 +11,11 @@ import (
 
 // fak-test:runtime fast est=3s lane=default
 func TestCandidateSessionMovesOneCheckoutAcrossCASAttempts(t *testing.T) {
+	// Pins the TRANSIENT candidate path (fresh checkout, removed on close,
+	// collected by the owner-aware sweep). The pooled path is pinned by
+	// candidate_pool_test.go; the kill switch keeps this test's contract.
+	// fak-candidate-pool-transient-pin
+	t.Setenv(CandidatePoolEnv, "off")
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
 	}

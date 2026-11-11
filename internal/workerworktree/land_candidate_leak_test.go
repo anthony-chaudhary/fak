@@ -25,6 +25,11 @@ func TestCandidateLeakHelperProcess(t *testing.T) {
 }
 
 func TestKilledLandLeaksCandidateUntilSweep(t *testing.T) {
+	// Pins the TRANSIENT candidate path (fresh checkout, removed on close,
+	// collected by the owner-aware sweep). The pooled path is pinned by
+	// candidate_pool_test.go; the kill switch keeps this test's contract.
+	// fak-candidate-pool-transient-pin
+	t.Setenv(CandidatePoolEnv, "off")
 	root, parent := newSiblingTopologyRepo(t)
 
 	cmd := exec.Command(os.Args[0], "-test.run=^TestCandidateLeakHelperProcess$", "-test.v")
@@ -93,6 +98,11 @@ func TestKilledLandLeaksCandidateUntilSweep(t *testing.T) {
 }
 
 func TestVerifyTopologyCandidateSweepsBeforeCreatingAndCleansUp(t *testing.T) {
+	// Pins the TRANSIENT candidate path (fresh checkout, removed on close,
+	// collected by the owner-aware sweep). The pooled path is pinned by
+	// candidate_pool_test.go; the kill switch keeps this test's contract.
+	// fak-candidate-pool-transient-pin
+	t.Setenv(CandidatePoolEnv, "off")
 	sweepTopologyCandidatesBeforeCreate = realSweepTopologyCandidatesBeforeCreate
 	t.Cleanup(func() { sweepTopologyCandidatesBeforeCreate = func(string, string, GitRunner) {} })
 	root, parent := newSiblingTopologyRepo(t)

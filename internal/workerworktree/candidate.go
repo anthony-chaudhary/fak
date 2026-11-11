@@ -256,13 +256,23 @@ func SweepTopologyCandidates(root, parent string, git GitRunner, opts CandidateS
 // candidateOwnerState reports whether a candidate's creator still runs:
 // owner_process_live, owner_exited, or owner_pid_reused (the pid now names a
 // process that started at a different time). An unreadable start time counts as
-// live.
+// live. Nil probes fall back to the real process table, so callers outside
+// SweepTopologyCandidates (which pre-fills the same defaults) get the same
+// verdict instead of a nil-function panic.
 func candidateOwnerState(owner candidateOwner, opts CandidateSweepOptions) string {
-	if !opts.ProcessAlive(owner.PID) {
+	alive := opts.ProcessAlive
+	if alive == nil {
+		alive = processalive.Check
+	}
+	if !alive(owner.PID) {
 		return "owner_exited"
 	}
 	if owner.Start != 0 {
-		if started, known := opts.ProcessStart(owner.PID); known && started.UnixMilli() != owner.Start {
+		start := opts.ProcessStart
+		if start == nil {
+			start = processstart.Start
+		}
+		if started, known := start(owner.PID); known && started.UnixMilli() != owner.Start {
 			return "owner_pid_reused"
 		}
 	}
