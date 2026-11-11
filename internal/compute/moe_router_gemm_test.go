@@ -15,11 +15,16 @@ import (
 //	(b) rows>1 accumulation order matches the Go reference (per-row MatMul) for
 //	    every row and expert;
 //	(c) hidden/experts bound overflow is refused with the closed sentinel
-//	    ErrMoeRouterGemmBounds (asserted via errors.Is, never error prose).
+//	    ErrMoeRouterGemmBounds (asserted via errors.Is, never error prose);
+//	(d) the documented device-vs-oracle ULP parity gate
+//	    (MoeRouterGemmWithinParity / MoeRouterGemmParityMaxULPs) admits
+//	    bit-exact and boundary-inclusive drift, refuses one ULP past the bound,
+//	    opposite signs, NaN/finite mixtures, and length mismatch.
 //
 // The fixture is deterministic (seeded) and mixed-sign so the FDot eight-
 // accumulator tree is exercised on both polarities. No GPU or throughput claim:
-// this is a software bit-identity witness on the CPU reference.
+// this is a software bit-identity witness on the CPU reference plus the closed
+// contract of the numeric gate the retained hardware panel applies.
 // fak-test:runtime fast est=1s
 func TestMoeRouterGemmFp32MatchesOracle(t *testing.T) {
 	be := &cpuBackend{}
@@ -104,6 +109,44 @@ func TestMoeRouterGemmFp32MatchesOracle(t *testing.T) {
 		xEdge := make([]float32, MoeRouterGemmMaxRows*MoeRouterGemmMaxHidden)
 		if _, err := MoeRouterGemmFp32(wEdge, xEdge, MoeRouterGemmMaxRows, MoeRouterGemmMaxHidden, MoeRouterGemmMaxExperts); err != nil {
 			t.Fatalf("admitted boundary (rows=%d hidden=%d experts=%d): %v", MoeRouterGemmMaxRows, MoeRouterGemmMaxHidden, MoeRouterGemmMaxExperts, err)
+		}
+	}
+
+	// (d) Documented device-vs-oracle ULP parity gate: closed contract.
+	{
+		base := float32(1.0) // positive normal; small bit shifts stay in-binade
+		shift := func(f float32, n int) float32 {
+			return math.Float32frombits(math.Float32bits(f) + uint32(n))
+		}
+		nan := float32(math.NaN())
+		posInf := float32(math.Inf(1))
+
+		cases := []struct {
+			name      string
+			got, want []float32
+			ok        bool
+			firstBad  int
+		}{
+			{"bit-exact", []float32{base, -base}, []float32{base, -base}, true, -1},
+			{"boundary-inclusive +64 ULP", []float32{shift(base, 64)}, []float32{base}, true, -1},
+			{"boundary-inclusive -64 ULP", []float32{shift(base, -64)}, []float32{base}, true, -1},
+			{"one past bound +65 ULP", []float32{shift(base, 65)}, []float32{base}, false, 0},
+			{"first bad index reported", []float32{base, shift(base, 65)}, []float32{base, base}, false, 1},
+			{"opposite signs", []float32{-base}, []float32{base}, false, 0},
+			{"both NaN", []float32{nan}, []float32{nan}, true, -1},
+			{"NaN vs finite", []float32{nan}, []float32{base}, false, 0},
+			{"finite vs NaN", []float32{base}, []float32{nan}, false, 0},
+			{"matching infinities", []float32{posInf}, []float32{posInf}, true, -1},
+			{"infinite vs finite", []float32{posInf}, []float32{base}, false, 0},
+			{"signed zeros equal", []float32{0.0}, []float32{-0.0}, true, -1},
+			{"smallest subnormal one ULP from zero", []float32{math.Float32frombits(1)}, []float32{-0.0}, true, -1},
+			{"length mismatch", []float32{base}, []float32{}, false, -1},
+		}
+		for _, tc := range cases {
+			ok, firstBad := MoeRouterGemmWithinParity(tc.got, tc.want)
+			if ok != tc.ok || firstBad != tc.firstBad {
+				t.Fatalf("%s: got (%v,%d), want (%v,%d)", tc.name, ok, firstBad, tc.ok, tc.firstBad)
+			}
 		}
 	}
 }

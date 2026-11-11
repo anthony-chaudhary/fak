@@ -29,9 +29,20 @@
 //     elements per iteration, so kHiddenDim must be a multiple of
 //     4 * kBlockSize.
 //   - The warp butterfly reduction + shared-memory finalize reproduce the
-//     upstream accumulation order; bit-identity to the Go oracle's mathx.FDot
-//     eight-accumulator tree is the follow-on device-vs-cpuref gate, not this
-//     ticket's witness.
+//     upstream accumulation order. Device-vs-oracle parity is gated by a
+//     documented per-element ULP tolerance, not bit-identity: the two summation
+//     orders differ by construction (each thread accumulates its K slice as 40
+//     sequential products, the 32-lane partials fold through a five-level warp
+//     butterfly, and the four warp partials add sequentially in the finalize;
+//     the Go oracle runs eight stride-8 accumulator chains of 640 products each
+//     folded as ((s0+s1)+(s2+s3))+((s4+s5)+(s6+s7))). Matching the oracle
+//     bit-for-bit would force every output onto a single thread reproducing the
+//     stride-8 chains, removing the K parallelism the batched GEMM exists for.
+//     Gate: every element within MoeRouterGemmParityMaxULPs ULPs of the Go
+//     oracle MoeRouterGemmFp32 (see moe_router_gemm.go); any larger deviation
+//     fails the shape. The raider-fak sm_120 panel (lease hwl-69a8382f581f24e5,
+//     2026-11-05) observed deterministic few-ULP deltas on all five shapes,
+//     consistent with the order difference.
 // Statuses: 0 ok, -1 null pointer or refused geometry, -2 graph capture open,
 // -3 device allocation failure, positive cudaError_t for copy/launch/execution.
 
@@ -131,10 +142,10 @@ template <int kNumTokens>
 static int mre_launch(float* out, const float* mat_a, const float* mat_b, cudaStream_t stream) {
   dim3 grid(MRE_MAX_EXPERTS / MRE_EPB);
   dim3 block(MRE_BLOCK);
+  void* args[] = { &out, &mat_a, &mat_b };
   cudaError_t err = cudaLaunchKernel(
-      mre_router_gemm_kernel<kNumTokens>,
-      grid, block, nullptr, 0, stream,
-      out, mat_a, mat_b);
+      (const void*)mre_router_gemm_kernel<kNumTokens>,
+      grid, block, args, 0, stream);
   return (int)err;
 }
 

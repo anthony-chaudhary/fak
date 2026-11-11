@@ -18,6 +18,7 @@ package compute
 import (
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
@@ -37,6 +38,71 @@ const MoeRouterGemmMaxRows = 48
 // ErrMoeRouterGemmBounds is the closed refusal for MoeRouterGemmFp32 inputs that
 // violate the rows/hidden/experts bounds or overflow the int32 device ABI.
 var ErrMoeRouterGemmBounds = errors.New("compute: moe router gemm geometry refused")
+
+// MoeRouterGemmParityMaxULPs bounds the per-element ULP distance the device
+// kernel (moe_router_gemm.cu) may drift from the Go oracle MoeRouterGemmFp32.
+// The contract is a documented tolerance, not bit-identity: the two summation
+// orders differ by construction (device: 128-thread K-slice chains of 40
+// products + five-level warp butterfly + sequential four-warp fold; oracle:
+// eight stride-8 chains of 640 products + fixed ((s0+s1)+(s2+s3))+((s4+s5)+
+// (s6+s7)) fold), so exact bit matching would require removing the K
+// parallelism the batched GEMM exists for. Sixty-four ULPs is magnitude-
+// independent (<= ~7.6e-6 relative at any exponent), stays ~40x tighter than
+// the Higham worst case for a 5120-term fp32 accumulation (~N*eps ~ 3e-4
+// relative), and leaves >=4x headroom over the deterministic few-ULP deltas
+// the raider-fak sm_120 panel observed on all five shapes under lease
+// hwl-69a8382f581f24e5 (2026-11-05). A real defect (wrong index, dropped
+// term, transposed operand) moves an element O(1) relative — thousands of
+// ULPs — far outside this gate.
+const MoeRouterGemmParityMaxULPs = 64
+
+// moeRouterGemmULPKey maps a float32 to a monotone uint32 key: key order
+// matches numeric order, +0/-0 share one key, and adjacent representable
+// values differ by exactly one key step (one ULP).
+func moeRouterGemmULPKey(f float32) uint32 {
+	b := math.Float32bits(f)
+	if b&0x80000000 != 0 { // negative half (incl. -0 and -Inf)
+		return 0x80000000 - (b & 0x7fffffff)
+	}
+	return b + 0x80000000
+}
+
+// moeRouterGemmULPDistance returns the ULP distance between two float32 values
+// as the absolute difference of their monotone keys. Cross-sign pairs are far
+// apart by construction; infinities sit one key step beyond the largest
+// finite magnitude of their sign.
+func moeRouterGemmULPDistance(a, b float32) int {
+	ka, kb := moeRouterGemmULPKey(a), moeRouterGemmULPKey(b)
+	if ka > kb {
+		return int(int64(ka) - int64(kb))
+	}
+	return int(int64(kb) - int64(ka))
+}
+
+// MoeRouterGemmWithinParity applies the documented device-vs-oracle parity
+// gate element-wise: every pair must be both NaN, or finite with ULP distance
+// <= MoeRouterGemmParityMaxULPs (infinities therefore must match exactly).
+// It returns (true, -1) when compliant; (false, i) naming the first violating
+// element i; and (false, -1) for a length mismatch. The retained panel harness
+// mirrors this constant and formula on the host side.
+func MoeRouterGemmWithinParity(got, want []float32) (bool, int) {
+	if len(got) != len(want) {
+		return false, -1
+	}
+	for i := range got {
+		g, w := got[i], want[i]
+		if math.IsNaN(float64(g)) || math.IsNaN(float64(w)) {
+			if !(math.IsNaN(float64(g)) && math.IsNaN(float64(w))) {
+				return false, i
+			}
+			continue
+		}
+		if moeRouterGemmULPDistance(g, w) > MoeRouterGemmParityMaxULPs {
+			return false, i
+		}
+	}
+	return true, -1
+}
 
 // MoeRouterGemmFp32 computes the batched multi-row router gate GEMM:
 //
