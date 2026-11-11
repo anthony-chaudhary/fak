@@ -519,3 +519,125 @@ func TestNativeSchedulerSlotLoraInvalidation(t *testing.T) {
 		}
 	})
 }
+
+// TestNativeSchedulerUnifiedKVManager pins the unified paged-KV manager
+// contract (fak oss-port-trtllm-kv-manager-20178): one manager owns the block
+// pool, its versioned layout, and every per-owner reservation.
+//
+//   - acquire/release round-trips blocks: grants come out ascending, Used/Free
+//     move exactly by the granted count, exhaustion refuses with the typed
+//     ErrNativeKVExhausted, and releasing then re-acquiring recovers the exact
+//     same block ids;
+//   - a layout mismatch refuses with the typed ErrNativeKVLayoutMismatch on
+//     both acquire and release, leaving the pool untouched.
+func TestNativeSchedulerUnifiedKVManager(t *testing.T) {
+	t.Run("AcquireReleaseRoundTrip", func(t *testing.T) {
+		const cap = 8
+		m := SelectNativeKVManager(cap, NativeKVLayoutV1)
+		if got := m.Layout(); got != NativeKVLayoutV1 {
+			t.Fatalf("Layout() = %d, want %d", got, NativeKVLayoutV1)
+		}
+		if m.Used() != 0 || m.Free() != cap {
+			t.Fatalf("initial Used/Free = %d/%d, want 0/%d", m.Used(), m.Free(), cap)
+		}
+
+		a, v, err := m.Acquire("lane-a", 3, NativeKVLayoutV1)
+		if err != nil {
+			t.Fatalf("Acquire(lane-a, 3): %v", err)
+		}
+		if v != NativeKVLayoutV1 || !reflect.DeepEqual(a, []int{0, 1, 2}) {
+			t.Fatalf("Acquire(lane-a, 3) = (%v, %d), want ([0 1 2], %d)", a, v, NativeKVLayoutV1)
+		}
+		if m.Used() != 3 || m.Free() != cap-3 {
+			t.Fatalf("after first grant Used/Free = %d/%d, want 3/%d", m.Used(), m.Free(), cap-3)
+		}
+
+		b, _, err := m.Acquire("lane-b", 5, NativeKVLayoutV1)
+		if err != nil {
+			t.Fatalf("Acquire(lane-b, 5): %v", err)
+		}
+		if !reflect.DeepEqual(b, []int{3, 4, 5, 6, 7}) {
+			t.Fatalf("Acquire(lane-b, 5) = %v, want [3 4 5 6 7]", b)
+		}
+		if m.Used() != cap || m.Free() != 0 {
+			t.Fatalf("pool full Used/Free = %d/%d, want %d/0", m.Used(), m.Free(), cap)
+		}
+
+		// The pool is exhausted: further grants refuse with the typed error and
+		// leave the pool untouched.
+		if _, _, err := m.Acquire("lane-c", 1, NativeKVLayoutV1); !errors.Is(err, ErrNativeKVExhausted) {
+			t.Fatalf("exhausted Acquire err = %v, want ErrNativeKVExhausted", err)
+		}
+		if m.Used() != cap || m.Free() != 0 {
+			t.Fatalf("refused grant moved the pool: Used/Free = %d/%d", m.Used(), m.Free())
+		}
+
+		if err := m.Release("lane-b", NativeKVLayoutV1); err != nil {
+			t.Fatalf("Release(lane-b): %v", err)
+		}
+		if m.Used() != 3 || m.Free() != cap-3 {
+			t.Fatalf("after release Used/Free = %d/%d, want 3/%d", m.Used(), m.Free(), cap-3)
+		}
+
+		// Round trip: re-acquiring the released count recovers the exact ids.
+		c, _, err := m.Acquire("lane-c", 5, NativeKVLayoutV1)
+		if err != nil {
+			t.Fatalf("re-Acquire(lane-c, 5): %v", err)
+		}
+		if !reflect.DeepEqual(c, b) {
+			t.Fatalf("re-Acquire(lane-c, 5) = %v, want round-tripped %v", c, b)
+		}
+
+		for _, owner := range []string{"lane-c", "lane-a"} {
+			if err := m.Release(owner, NativeKVLayoutV1); err != nil {
+				t.Fatalf("Release(%s): %v", owner, err)
+			}
+		}
+		if m.Used() != 0 || m.Free() != cap {
+			t.Fatalf("fully drained Used/Free = %d/%d, want 0/%d", m.Used(), m.Free(), cap)
+		}
+		// Releasing an unknown owner is an idempotent no-op.
+		if err := m.Release("lane-a", NativeKVLayoutV1); err != nil {
+			t.Fatalf("double Release(lane-a): %v", err)
+		}
+	})
+
+	t.Run("LayoutMismatchRefuses", func(t *testing.T) {
+		const cap = 4
+		m := SelectNativeKVManager(cap, NativeKVLayoutV1)
+		stale := NativeKVLayoutV1 + 1
+
+		if _, got, err := m.Acquire("lane-x", 1, stale); !errors.Is(err, ErrNativeKVLayoutMismatch) {
+			t.Fatalf("stale-version Acquire err = %v, want ErrNativeKVLayoutMismatch", err)
+		} else if got != NativeKVLayoutV1 {
+			t.Fatalf("stale-version Acquire reported layout %d, want %d", got, NativeKVLayoutV1)
+		}
+		if m.Used() != 0 || m.Free() != cap {
+			t.Fatalf("refused acquire moved the pool: Used/Free = %d/%d, want 0/%d", m.Used(), m.Free(), cap)
+		}
+
+		if _, _, err := m.Acquire("lane-x", 1, NativeKVLayoutV1); err != nil {
+			t.Fatalf("current-version Acquire: %v", err)
+		}
+		if err := m.Release("lane-x", stale); !errors.Is(err, ErrNativeKVLayoutMismatch) {
+			t.Fatalf("stale-version Release err = %v, want ErrNativeKVLayoutMismatch", err)
+		}
+		// The refused release must leave the reservation intact.
+		if m.Used() != 1 || m.Free() != cap-1 {
+			t.Fatalf("refused release freed blocks: Used/Free = %d/%d, want 1/%d", m.Used(), m.Free(), cap-1)
+		}
+		if err := m.Release("lane-x", NativeKVLayoutV1); err != nil {
+			t.Fatalf("current-version Release: %v", err)
+		}
+	})
+
+	t.Run("ZeroBudgetSelection", func(t *testing.T) {
+		z := SelectNativeKVManager(0, NativeKVLayoutV1)
+		if z.Used() != 0 || z.Free() != 0 {
+			t.Fatalf("zero-budget Used/Free = %d/%d, want 0/0", z.Used(), z.Free())
+		}
+		if _, _, err := z.Acquire("lane-z", 1, NativeKVLayoutV1); !errors.Is(err, ErrNativeKVExhausted) {
+			t.Fatalf("zero-budget Acquire err = %v, want ErrNativeKVExhausted", err)
+		}
+	})
+}

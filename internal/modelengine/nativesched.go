@@ -75,6 +75,157 @@ const (
 	nativeAllocationNever
 )
 
+// Unified paged-KV manager foundation (fak oss-port-trtllm-kv-manager-20178).
+//
+// Adapted from TensorRT-LLM's unified KV cache manager, which centralizes block
+// (page) ownership, per-request reservations, and storage-layout identity in a
+// single resource manager instead of scattered per-path caches:
+// NVIDIA/TensorRT-LLM tensorrt_llm/_torch/pyexecutor/kv_cache/kv_cache_manager_v2.py
+// @9c0e41287fffb691040e7a4babcf5409ad3476c1 (Apache-2.0, NVIDIA CORPORATION &
+// AFFILIATES). Go concept adaptation, not copied upstream code. This packet
+// introduces the interface and ledger behind the scheduler's call sites; it
+// does not migrate the admission/prefill bookkeeping yet.
+
+// NativeKVLayoutVersion numbers the paged-KV block layout generation a manager
+// was opened under. Every acquire and release is stamped with the version its
+// caller believes current; a mismatch means the caller holds state from before
+// a layout change and must be refused rather than mixed into the live pool.
+type NativeKVLayoutVersion uint32
+
+// NativeKVLayoutV1 is the first native paged-KV layout: one uniform block size
+// for every layer, blocks addressed by dense integer ids.
+const NativeKVLayoutV1 NativeKVLayoutVersion = 1
+
+// ErrNativeKVLayoutMismatch reports an acquire or release presented under a
+// layout version different from the one the manager was opened with. Callers
+// may use errors.Is.
+var ErrNativeKVLayoutMismatch = errors.New("modelengine: native KV layout mismatch")
+
+// ErrNativeKVExhausted reports an acquire that would exceed the manager's fixed
+// block budget. Callers may use errors.Is.
+var ErrNativeKVExhausted = errors.New("modelengine: native KV blocks exhausted")
+
+// NativeKVManager is the unified paged-KV block ledger: one owner of the block
+// pool, its versioned layout, and every per-owner reservation. Admission and
+// prefill ask the manager for blocks instead of keeping scattered per-path
+// caches. All methods are safe for concurrent use.
+type NativeKVManager interface {
+	// Acquire reserves n blocks for owner and returns the granted block ids
+	// plus the manager's layout version. It fails with
+	// ErrNativeKVLayoutMismatch when want differs from the manager's layout
+	// version and with ErrNativeKVExhausted when the pool cannot cover n.
+	// Re-acquiring an owner extends its reservation.
+	Acquire(owner string, n int, want NativeKVLayoutVersion) ([]int, NativeKVLayoutVersion, error)
+	// Release returns owner's whole reservation to the pool. It fails with
+	// ErrNativeKVLayoutMismatch when got differs from the manager's layout
+	// version, leaving the reservation intact. Releasing an unknown owner is
+	// an idempotent no-op.
+	Release(owner string, got NativeKVLayoutVersion) error
+	// Layout reports the manager's current layout version.
+	Layout() NativeKVLayoutVersion
+	// Used reports how many blocks live owners currently hold.
+	Used() int
+	// Free reports how many blocks are idle in the pool.
+	Free() int
+}
+
+// SelectNativeKVManager applies the native scheduler's manager-selection rule:
+// the unified paged manager always owns the block pool; a non-positive capacity
+// selects its zero-budget form, which refuses every acquire with
+// ErrNativeKVExhausted until a later packet sizes the pool.
+func SelectNativeKVManager(capacity int, layout NativeKVLayoutVersion) NativeKVManager {
+	return NewNativePagedKVManager(capacity, layout)
+}
+
+// NewNativePagedKVManager opens a unified paged-KV manager over capacity blocks
+// (ids 0..capacity-1) under layout version layout. A non-positive capacity
+// yields a zero-budget manager whose acquires all fail with
+// ErrNativeKVExhausted. Grants come out ascending from the low end of the pool,
+// and releases push blocks back so a re-grant round-trips the exact ids.
+func NewNativePagedKVManager(capacity int, layout NativeKVLayoutVersion) *nativePagedKVManager {
+	if capacity < 0 {
+		capacity = 0
+	}
+	m := &nativePagedKVManager{cap: capacity, layout: layout, owners: make(map[string][]int)}
+	for i := capacity - 1; i >= 0; i-- {
+		m.free = append(m.free, i)
+	}
+	return m
+}
+
+// nativePagedKVManager is the default NativeKVManager: a fixed pool of block
+// ids doled out from a free stack, with per-owner reservations tracked so
+// Release returns exactly what Acquire granted.
+type nativePagedKVManager struct {
+	mu     sync.Mutex
+	cap    int
+	layout NativeKVLayoutVersion
+	free   []int // idle block ids, top of stack last
+	owners map[string][]int
+	used   int
+}
+
+func (m *nativePagedKVManager) Acquire(owner string, n int, want NativeKVLayoutVersion) ([]int, NativeKVLayoutVersion, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if want != m.layout {
+		return nil, m.layout, ErrNativeKVLayoutMismatch
+	}
+	if n <= 0 {
+		return nil, m.layout, nil
+	}
+	if m.used+n > m.cap {
+		return nil, m.layout, ErrNativeKVExhausted
+	}
+	blocks := make([]int, n)
+	for i := range blocks {
+		top := len(m.free) - 1
+		blocks[i] = m.free[top]
+		m.free = m.free[:top]
+	}
+	m.owners[owner] = append(m.owners[owner], blocks...)
+	m.used += n
+	return blocks, m.layout, nil
+}
+
+func (m *nativePagedKVManager) Release(owner string, got NativeKVLayoutVersion) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if got != m.layout {
+		return ErrNativeKVLayoutMismatch
+	}
+	blocks, ok := m.owners[owner]
+	if !ok {
+		return nil
+	}
+	delete(m.owners, owner)
+	// Push back reversed so the next grant of the same count recovers the
+	// original ascending ids: the pool round-trips.
+	for i := len(blocks) - 1; i >= 0; i-- {
+		m.free = append(m.free, blocks[i])
+	}
+	m.used -= len(blocks)
+	return nil
+}
+
+func (m *nativePagedKVManager) Layout() NativeKVLayoutVersion {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.layout
+}
+
+func (m *nativePagedKVManager) Used() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.used
+}
+
+func (m *nativePagedKVManager) Free() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.cap - m.used
+}
+
 type schedPrepare struct {
 	prompt []int
 	tok    NLTokenizer
