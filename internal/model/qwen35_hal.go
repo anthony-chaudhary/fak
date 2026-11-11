@@ -159,6 +159,7 @@ func (e *Qwen35QKNormResidencyError) Error() string {
 
 type qwen35HALState struct {
 	mu                  sync.Mutex
+	hostMetadata        *qwen35HostMetadata
 	backend             Qwen35GDNBackend
 	layers              []qwen35HALLayerState
 	sequenceBackend     Qwen35GDNPreprojectedSequenceBackend
@@ -609,6 +610,7 @@ func (q *qwen35HALState) free(backend compute.Backend) {
 		return
 	}
 	q.mu.Lock()
+	q.hostMetadata = nil
 	releases := make([]qwen35HALLayerRelease, 0, len(q.layers))
 	for i := range q.layers {
 		if release, last := q.layers[i].detach(backend); last {
@@ -1428,21 +1430,21 @@ func (s *Session) qwen35SequencePrefillRequestWithEmbedding(ids []int, needLogit
 	return s.qwen35SequencePrefillRequestWithOutput(ids, needLogits, embedding, embeddingRows, embeddingVocab, true)
 }
 
-func (s *Session) qwen35SequencePrefillRequestWithOutput(ids []int, needLogits bool, embedding compute.Tensor, embeddingRows bool, embeddingVocab int, includeOutput bool) compute.Qwen35SequencePrefillRequest {
+// buildQwen35HostMetadata builds the stable per-session half of a sequence
+// prefill request: weight descriptors and geometry that do not change between
+// requests. Per-request fields (tokens, position, KV, embedding, logits,
+// capture, output head) are filled by qwen35SequencePrefillRequestWithOutput
+// over the cached template.
+func (s *Session) buildQwen35HostMetadata() compute.Qwen35SequencePrefillRequest {
 	cfg := s.M.Cfg
 	nK, nV, kHd, vHd, _, _, _ := cfg.linearAttnDims()
 	req := compute.Qwen35SequencePrefillRequest{
-		Path: compute.Qwen35SequencePrefillPath, TokenIDs: append([]int(nil), ids...), StartPos: s.halKV.Len(),
-		TokenEmbedding: embedding, TokenEmbeddingRows: embeddingRows, TokenEmbeddingVocab: embeddingVocab,
+		Path:       compute.Qwen35SequencePrefillPath,
 		OutputNorm: s.normWeightHAL("model.norm.weight"),
-		Layers:     make([]compute.Qwen35SequenceLayer, cfg.NumLayers), States: make([]compute.Qwen35SequenceState, cfg.NumLayers), KV: s.halKV,
-		Hidden: cfg.HiddenSize, Intermediate: cfg.IntermediateSize, NumHeads: cfg.NumHeads, NumKVHeads: cfg.NumKVHeads,
+		Layers:     make([]compute.Qwen35SequenceLayer, cfg.NumLayers),
+		Hidden:     cfg.HiddenSize, Intermediate: cfg.IntermediateSize, NumHeads: cfg.NumHeads, NumKVHeads: cfg.NumKVHeads,
 		HeadDim: cfg.HeadDim, RotaryDim: cfg.rotaryDim(), NumKeyHeads: nK, NumValueHeads: nV, KeyHeadDim: kHd, ValueHeadDim: vHd,
-		ConvKernel: cfg.LinearConvKernelDim, RMSNormEpsilon: float32(cfg.RMSNormEps), RoPEThetaForLayer: make([]float64, cfg.NumLayers), NeedLogits: needLogits,
-		CaptureRawHidden: s.captureTargetHidden,
-	}
-	if includeOutput {
-		req.Output = s.lmHeadMatHAL()
+		ConvKernel: cfg.LinearConvKernelDim, RMSNormEpsilon: float32(cfg.RMSNormEps), RoPEThetaForLayer: make([]float64, cfg.NumLayers),
 	}
 	for l := 0; l < cfg.NumLayers; l++ {
 		req.RoPEThetaForLayer[l] = cfg.ropeThetaForLayer(l)
