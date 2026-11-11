@@ -2728,3 +2728,19 @@ Source: https://github.com/kvcache-ai/Mooncake at 2d41f1a62cf49cf464a8e2acee8007
 Adapted source: mooncake-transfer-engine/tent/include/tent/transport/fabric/fabric_attrs.h and fabric_transport.h, plus tent/src/transport/fabric/fabric_context.cpp and fabric_transport.cpp.
 
 The new internal/l3kv/device_mem_registration.go is a Go host planner adapting the host-versus-CUDA registration classification, ordinal propagation, CUDA-build/FI_HMEM refusal and all-context capability gate. It adds closed metadata validation and explicit unsupported-device refusal. It does not port CUDA/libfabric execution, registration resources, transport fallback, memory ownership or hardware transfer.
+
+## vLLM Qwen4Exp QSA shared top-k scratch
+
+`internal/model/qsa_shared_scratch.go` adapts the shared top-k selection
+buffer contract from vLLM PR #65619 at revision
+`9a56d4fec6b0a30a0a989f1cd06cd3c2f7325619`:
+https://github.com/vllm-project/vllm/pull/65619
+(one hoisted int32 buffer sized max_num_batched_tokens x
+(indexer_budget + compress_ratio), owned by the model object, passed to every
+QSA sparse-attention layer and reused by the MTP drafter instead of a private
+copy — the pattern DeepSeek V4, GLM-5.3-Flash and MiniMax-M3 already use).
+Copyright contributors to the vLLM project. SPDX-License-Identifier: Apache-2.0.
+Reuse decision: ADAPT. No Python source copied; the Go component owns one
+int32 slice and hands aliasing views to the layers and the drafter, with
+fail-closed sizing sentinels. Component only; no kernel or hardware claim.
+The Apache-2.0 license text already reproduced in this file applies.
