@@ -20,6 +20,7 @@ func (c *AdmissionController) admitLocked(req SeqRequest) *AdmissionError {
 	c.running[req.TraceID] = req
 	c.tokens += req.Tokens
 	c.stats.Admitted++
+	c.chargeTenantTokensLocked(req)
 	return nil
 }
 

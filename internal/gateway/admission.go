@@ -209,6 +209,24 @@ type SeqRequest struct {
 	PromptTokens int
 }
 
+// DefaultTenantTokenBucket is the sliding-window bucket granularity a
+// TenantTokenWindow normalizes to when it leaves Bucket unset.
+const DefaultTenantTokenBucket = time.Minute
+
+// TenantTokenWindow is the borrowed VTC per-tenant token-fairness tracker config
+// (vllm-project/aibrix pkg/plugins/gateway/algorithms/vtc/token_tracker.go @
+// a89b94a574b2, Apache-2.0, ADAPT): a sliding window over per-tenant weighted
+// token charges, so a placement consumer can weight tenants by the tokens they
+// owe. Window ≤ 0 disables the tracker; Bucket ≤ 0 normalizes to
+// DefaultTenantTokenBucket; non-positive weights fall back to the vtc-basic
+// defaults (input 1, output 2).
+type TenantTokenWindow struct {
+	Window       time.Duration
+	Bucket       time.Duration
+	InputWeight  int
+	OutputWeight int
+}
+
 // baseTraceID strips any "#..." suffix from traceID and trims space.
 func baseTraceID(traceID string) string {
 	traceID = strings.TrimSpace(traceID)
@@ -426,6 +444,12 @@ type AdmissionController struct {
 	// controller field.
 	sloEstimate func(tokens int) time.Duration
 	credits     map[string]int64
+	// tenantWindow is the normalized VTC per-tenant token-fairness window (zero
+	// Window = disabled); tenantTokens maps tenant → window-bucket start → charged
+	// weighted tokens. Both are guarded by mu like every other controller field;
+	// neither affects admission capacity.
+	tenantWindow TenantTokenWindow
+	tenantTokens map[string]map[time.Time]int
 	// decisions retains the most recent admission decision per trace id (bounded ring of
 	// admissionDecisionHistory entries), guarded by mu like every other controller field.
 	decisions     map[string]AdmissionDecisionReceipt
@@ -1012,6 +1036,148 @@ func (c *AdmissionController) nowLocked() time.Time {
 		return c.clock()
 	}
 	return time.Now()
+}
+
+// SetTenantTokenWindow installs the borrowed VTC per-tenant token-fairness
+// tracker (vllm-project/aibrix pkg/plugins/gateway/algorithms/vtc/
+// token_tracker.go @ a89b94a574b2, Apache-2.0, ADAPT): when its Window is
+// positive the gate charges each tenant's admission-time estimate into a
+// sliding window of buckets; a zero/negative Window disables it and clears all
+// tracked usage. Unset Bucket and non-positive weights normalize to the
+// vtc-basic defaults (DefaultTenantTokenBucket, 1/2).
+func (c *AdmissionController) SetTenantTokenWindow(w TenantTokenWindow) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if w.Window <= 0 {
+		c.tenantWindow = TenantTokenWindow{}
+		c.tenantTokens = nil
+		return
+	}
+	if w.Bucket <= 0 {
+		w.Bucket = DefaultTenantTokenBucket
+	}
+	if w.InputWeight <= 0 {
+		w.InputWeight = 1
+	}
+	if w.OutputWeight <= 0 {
+		w.OutputWeight = 2
+	}
+	c.tenantWindow = w
+}
+
+// TenantTokenWindow returns the installed (normalized) tracker config; the zero
+// value when the tracker is disabled.
+func (c *AdmissionController) TenantTokenWindow() TenantTokenWindow {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.tenantWindow
+}
+
+// TenantTokens reports the tenant's live weighted-token total across its
+// unexpired window buckets. It returns ok=false when the tracker is disabled or
+// the tenant has no live charge — queued requests charge nothing until
+// promoted, so a waiter never shows a total here.
+func (c *AdmissionController) TenantTokens(tenant string) (int, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.tenantWindow.Window <= 0 {
+		return 0, false
+	}
+	c.pruneTenantWindowsLocked(c.nowLocked())
+	buckets := c.tenantTokens[tenant]
+	total := 0
+	for _, v := range buckets {
+		total += v
+	}
+	return total, len(buckets) > 0
+}
+
+// TenantTokenExtrema reports the smallest and largest live per-tenant totals
+// plus whether any tenant is tracked — the cross-tenant spread a placement
+// consumer weights by owed tokens. It returns (0,0,false) when the tracker is
+// disabled or no tenant carries a live charge.
+func (c *AdmissionController) TenantTokenExtrema() (min, max int, active bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.tenantWindow.Window <= 0 {
+		return 0, 0, false
+	}
+	c.pruneTenantWindowsLocked(c.nowLocked())
+	for _, buckets := range c.tenantTokens {
+		total := 0
+		for _, v := range buckets {
+			total += v
+		}
+		if !active {
+			min, max, active = total, total, true
+		} else if total < min || total > max {
+			if total < min {
+				min = total
+			} else {
+				max = total
+			}
+		}
+	}
+	return min, max, active
+}
+
+// chargeTenantTokensLocked records one request's admission-time estimate in its
+// tenant's current window bucket: the prompt share at InputWeight plus the
+// planned-decode share at OutputWeight, with a negative decode share clamped to
+// zero instead of refunding the prompt. A disabled window tracks nothing.
+// Caller holds c.mu.
+func (c *AdmissionController) chargeTenantTokensLocked(req SeqRequest) {
+	w := c.tenantWindow
+	if w.Window <= 0 {
+		return
+	}
+	prompt := req.promptTokens()
+	decode := req.Tokens - prompt
+	if decode < 0 {
+		decode = 0
+	}
+	charge := prompt*w.InputWeight + decode*w.OutputWeight
+	if charge <= 0 {
+		return
+	}
+	tenant := req.SessionID
+	if tenant == "" {
+		tenant = baseTraceID(req.TraceID)
+	}
+	now := c.nowLocked()
+	if c.tenantTokens == nil {
+		c.tenantTokens = make(map[string]map[time.Time]int)
+	}
+	buckets := c.tenantTokens[tenant]
+	if buckets == nil {
+		buckets = make(map[time.Time]int)
+		c.tenantTokens[tenant] = buckets
+	}
+	for b := range buckets {
+		if now.Sub(b) >= w.Window {
+			delete(buckets, b)
+		}
+	}
+	buckets[now.Truncate(w.Bucket)] += charge
+}
+
+// pruneTenantWindowsLocked drops every bucket that has slid out of the window
+// and removes tenants left with none. Caller holds c.mu.
+func (c *AdmissionController) pruneTenantWindowsLocked(now time.Time) {
+	w := c.tenantWindow
+	if w.Window <= 0 || len(c.tenantTokens) == 0 {
+		return
+	}
+	for tenant, buckets := range c.tenantTokens {
+		for b := range buckets {
+			if now.Sub(b) >= w.Window {
+				delete(buckets, b)
+			}
+		}
+		if len(buckets) == 0 {
+			delete(c.tenantTokens, tenant)
+		}
+	}
 }
 
 // Offer presents a new request to the gate and classifies it. It admits straight to the
