@@ -218,6 +218,75 @@ func TestErrorCodeVocabularyIsClosed(t *testing.T) {
 	if CodeOf(nil) != "" {
 		t.Fatal("CodeOf(nil) must be empty")
 	}
+
+	// DCGM health-failure field catalog (direct port from NVIDIA/dcgm-exporter
+	// @ 4e663a526c46, numeric values per go-dcgm v1.4712.2 at that pin): the
+	// receipt field set is closed — exact wire names, exact DCGM enum IDs,
+	// exact classes, and exactly sixteen rows.
+	type frRow struct {
+		literal string
+		id      int
+		class   FailureClass
+	}
+	wantFr := map[FailureCode]frRow{
+		FailureNVLinkCRCThreshold:    {"DCGM_FR_NVLINK_CRC_ERROR_THRESHOLD", 70, ClassNVLink},
+		FailureNVLinkCritical:        {"DCGM_FR_NVLINK_ERROR_CRITICAL", 71, ClassNVLink},
+		FailureRowRemap:              {"DCGM_FR_ROW_REMAP_FAILURE", 80, ClassRowRemap},
+		FailureRowRemapUncorrectable: {"DCGM_FR_UNCORRECTABLE_ROW_REMAP", 84, ClassRowRemap},
+		FailureRowRemapPending:       {"DCGM_FR_PENDING_ROW_REMAP", 85, ClassRowRemap},
+		FailureNVSwitchDown:          {"DCGM_FR_NVSWITCH_NVLINK_DOWN", 88, ClassNVSwitch},
+		FailureXID:                   {"DCGM_FR_XID_ERROR", 101, ClassXID},
+		FailureSXID:                  {"DCGM_FR_SXID_ERROR", 109, ClassSXID},
+		FailureFabricTraining:        {"DCGM_FR_FABRIC_MANAGER_TRAINING_ERROR", 112, ClassNVSwitch},
+		FailureNVLinkBEREffective:    {"DCGM_FR_NVLINK_EFFECTIVE_BER_THRESHOLD", 119, ClassNVLink},
+		FailureFallenOffBus:          {"DCGM_FR_FALLEN_OFF_BUS", 120, ClassBus},
+		FailureNVLinkBERSymbol:       {"DCGM_FR_NVLINK_SYMBOL_BER_THRESHOLD", 121, ClassNVLink},
+		FailureRecoveryReset:         {"DCGM_FR_GPU_RECOVERY_RESET", 125, ClassRecovery},
+		FailureRecoveryReboot:        {"DCGM_FR_GPU_RECOVERY_REBOOT", 126, ClassRecovery},
+		FailureRecoveryDrainP2P:      {"DCGM_FR_GPU_RECOVERY_DRAIN_P2P", 127, ClassRecovery},
+		FailureRecoveryDrainReset:    {"DCGM_FR_GPU_RECOVERY_DRAIN_RESET", 128, ClassRecovery},
+	}
+	if len(wantFr) != 16 {
+		t.Fatalf("closed DCGM failure set drifted: got %d distinct codes, want 16", len(wantFr))
+	}
+	for code, want := range wantFr {
+		if string(code) != want.literal {
+			t.Fatalf("failure code %v does not match frozen literal %q", code, want.literal)
+		}
+		if !code.Valid() {
+			t.Fatalf("failure code %q outside closed catalog", code)
+		}
+		if got := code.ID(); got != want.id {
+			t.Fatalf("failure code %q carries DCGM id %d, want %d", code, got, want.id)
+		}
+		if got := code.Class(); got != want.class {
+			t.Fatalf("failure code %q carries class %q, want %q", code, got, want.class)
+		}
+		row, err := FailureByID(want.id)
+		if err != nil || row.Code != code {
+			t.Fatalf("FailureByID(%d) = %+v, %v; want %s", want.id, row, err, code)
+		}
+		row, err = ParseFailure(want.literal)
+		if err != nil || row.Code != code {
+			t.Fatalf("ParseFailure(%q) = %+v, %v; want %s", want.literal, row, err, code)
+		}
+	}
+	if len(FailureCatalog) != len(wantFr) {
+		t.Fatalf("catalog holds %d rows, want the closed 16", len(FailureCatalog))
+	}
+	for _, row := range FailureCatalog {
+		want, ok := wantFr[row.Code]
+		if !ok || row.ID != want.id || row.Class != want.class {
+			t.Fatalf("catalog row %+v outside the closed table", row)
+		}
+	}
+	// Unknown inputs refuse with the sentinel, never prose matching.
+	if _, err := FailureByID(999); !errors.Is(err, ErrUnknownFailure) {
+		t.Fatalf("FailureByID(999) error = %v, want ErrUnknownFailure", err)
+	}
+	if _, err := ParseFailure("DCGM_FR_NOT_A_CODE"); !errors.Is(err, ErrUnknownFailure) {
+		t.Fatalf("ParseFailure unknown error = %v, want ErrUnknownFailure", err)
+	}
 }
 
 func TestNumericCounterCount(t *testing.T) {
