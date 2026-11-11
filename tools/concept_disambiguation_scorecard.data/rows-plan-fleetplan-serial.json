@@ -9,7 +9,8 @@
       "distinction": "The goalrunner FLEET-of-goals serial plan - NOT the swebench fleet RUNNER planner `FleetPlanner`/`newFleetPlanner` (which builds one swebench code planner from a gateway address) and NOT the debtlane CAMPAIGN plan `WavePlan` (debt lanes into concurrent-safe waves).",
       "distinct_from": [
         "x-plan-fleetplanner",
-        "cov-debt-tail2-plan-waveplan"
+        "cov-debt-tail2-plan-waveplan",
+        "plan-hitl-qualification-plan"
       ],
       "aliases": [
         "goalrunner.FleetPlan"

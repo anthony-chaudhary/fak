@@ -343,5 +343,25 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "plan-hitl-qualification-plan",
+      "canonical": "qualificationplan",
+      "family": "plan",
+      "kind": "doc-term",
+      "definition": "The fixed end-to-end test plan attached to a HITL verification request, pinning the workload, precision contract, reference parity witness, and before/after measurement commands that a hardware target must satisfy.",
+      "distinction": "A hardware-qualification test plan carried by a HITL verification request - NOT a dispatch or fleet plan (FleetPlan, WavePlanOptions) and NOT a planner implementation surface; it declares evidence owed by a target node, never execution authority.",
+      "distinct_from": [
+        "cov-plan-fleetplan",
+        "cov-plan-waveplanoptions"
+      ],
+      "aliases": [],
+      "grounding": "qualification_plan",
+      "grounding_kind": "doc",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

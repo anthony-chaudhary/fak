@@ -2665,3 +2665,10 @@ Prometheus histogram of positive completion-token counts per accounted gateway m
 Prometheus histogram of positive completion-token counts per accounted gateway model turn. observeInferenceTokenCountsLocked records the same completion-count axis as fak_gateway_inference_completion_tokens_total under inferenceMu; the render path exports cumulative buckets, sum and count. Synthetic accounted turns are included; omitted, zero and negative counts are excluded.
 
 **Distinct from:** A per-turn output-token count distribution, not aggregate completion tokens, output tokens per second, prompt-token provenance or a latency histogram. Despite its gateway/guard vocabulary, this metric does not authorize admission, prove a runtime feature executed, or establish real GPU throughput. The guard-gate row for this token is a second vocabulary position of this same histogram, not another metric or a guard decision.
+
+
+### qualificationplan
+
+The fixed end-to-end test plan attached to a HITL verification request, pinning the workload, precision contract, reference parity witness, and before/after measurement commands that a hardware target must satisfy.
+
+**Distinct from:** A hardware-qualification test plan carried by a HITL verification request - NOT a dispatch or fleet plan (FleetPlan, WavePlanOptions) and NOT a planner implementation surface; it declares evidence owed by a target node, never execution authority.
