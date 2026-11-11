@@ -547,6 +547,36 @@ func serveStreamedHostFit(backend compute.Backend, fit *serveFitBudget) serveFit
 	return serveHostFitBudget()
 }
 
+// serveLoadStreamedDenseOptions is the ONE derivation of the load path's bounded streamed-dense
+// working-set option (fak#13205/#13209/#13249). Gated on the SAME FAK_STREAM_Q4K/FAK_METAL_STREAM_Q4K
+// knobs as the estimate side (serveQ4KFitOptions): when the env asks for streaming, the bounded form
+// is selected (bounded is the improved form, so it supersedes the unbounded precedent). The value is
+// the SAME serveStreamedDenseQ4KWorkingSetBound(hostFit) the sizing path derives over the same host
+// fit rule (hostFit = serveStreamedHostFit(backend, fit), the true HOST budget the dense working set
+// is resident against), so the estimate and the load carry one measurement and cannot disagree.
+//
+// fak#13249: when the streamed-EXPERT fold is also active (streamedOffload), the bounded dense
+// working set must be sized from the budget REMAINING after the resident expert bound, not the whole
+// host budget - both working sets are simultaneously host-resident, and two independent
+// (1-margin)*avail bounds admitted their SUM and the kernel OOM-killed the serve mid-staging. The
+// min with serveCombinedStreamedDenseResidentBound keeps the estimate and the load on one
+// measurement there too.
+//
+// Nil means "no bounded dense option" - either the arm is not armed or the env knob is unset - and
+// the caller keeps its historical options byte-for-byte.
+func serveLoadStreamedDenseOptions(hostFit serveFitBudget, armed, streamedOffload bool, streamedExpertBound int64) []ggufload.Q4KLoadOption {
+	if !armed || (os.Getenv("FAK_STREAM_Q4K") != "1" && os.Getenv("FAK_METAL_STREAM_Q4K") != "1") {
+		return nil
+	}
+	denseBound := serveStreamedDenseQ4KWorkingSetBound(hostFit)
+	if streamedOffload {
+		if combined := serveCombinedStreamedDenseResidentBound(hostFit, streamedExpertBound); combined < denseBound {
+			denseBound = combined
+		}
+	}
+	return []ggufload.Q4KLoadOption{ggufload.WithStreamedDenseQ4KWorkingSet(denseBound)}
+}
+
 func loadServeInKernelModel(modelPath string, backend compute.Backend, cpuOffloadExperts bool, contextBudgetTokens int, expertShard *ggufload.ExpertShard, expertRanks int, fit *serveFitBudget) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
 	return loadServeInKernelModelPlaced(modelPath, backend, cpuOffloadExperts, false, contextBudgetTokens, expertShard, expertRanks, fit)
 }
@@ -732,37 +762,17 @@ func loadServeInKernelModelPlacedErr(modelPath string, backend compute.Backend, 
 			q4kOpts = append(q4kOpts, ggufload.WithStreamedExperts(streamedBound))
 		}
 	}
-	// Bounded dense working set on the streamed dense route (fak#13205). The estimate path derives
-	// the SAME bounded budget from the SAME host-fit rule over the SAME fit snapshot (see
-	// serveQ4KFitOptions), so the option list that reaches the loader charges the working set the fit
-	// guard already admitted, never the full on-disk dense side. The load's q4kOpts is built here
-	// independently of the estimate-side list, so without this threading the streamed dense route
-	// would take the UNBOUNDED form off the env fallback in loadResidentQ4KProfiled. Gated on the
-	// same FAK_STREAM_Q4K/FAK_METAL_STREAM_Q4K knobs: when the env asks for streaming, the bounded
-	// form is selected (bounded is the improved form, so it supersedes the unbounded precedent).
-	// fak#13209: the device --cpu-offload-experts arm ALSO threads the bounded dense working set
-	// when the same env knob is set, so the arm's dense router/attention staging transit is bounded
-	// instead of charged as one ~63 GiB host anon buffer. The value is the SAME
-	// serveStreamedDenseQ4KWorkingSetBound(hostFit) the sizing path derives (hostFit =
-	// serveStreamedHostFit(backend, fit), the true HOST budget the dense working set is resident
-	// against), so the estimate and the load carry one measurement and cannot disagree. On the
-	// cpu-offload arm the eligibility of the artifact's dense side is applied inside the estimator
-	// and loader via the shared denseBoundedEligible predicate: an ineligible dense side produces no
-	// bounded row and keeps the full charge (fail-closed).
-	if (residentQ4K || (cpuOffloadExperts && cpuOffloadArm)) && (os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1") {
-		// fak#13249: when the streamed-EXPERT fold is also active, the bounded dense working set must
-		// be sized from the budget REMAINING after the resident expert bound, not the whole host
-		// budget. Both working sets are simultaneously host-resident; two independent (1-margin)*avail
-		// bounds admitted their SUM and the kernel OOM-killed the serve mid-staging. Deriving the dense
-		// bound from the SAME hostFit and the SAME expert bound the sizing path used keeps the estimate
-		// and the load on one measurement (they cannot disagree).
-		denseBound := serveStreamedDenseQ4KWorkingSetBound(hostFit)
-		if streamedOffload {
-			if combined := serveCombinedStreamedDenseResidentBound(hostFit, streamedBound); combined < denseBound {
-				denseBound = combined
-			}
-		}
-		q4kOpts = append(q4kOpts, ggufload.WithStreamedDenseQ4KWorkingSet(denseBound))
+	// Bounded dense working set on the streamed dense route (fak#13205/#13209/#13249): the ONE
+	// derivation serveLoadStreamedDenseOptions carries - the same env gate, the same host-fit rule
+	// and the same combined-bound min the estimate path applies (serveQ4KFitOptions), so the option
+	// list that reaches the loader charges the working set the fit guard already admitted, never the
+	// full on-disk dense side. Without this threading the streamed dense route would take the
+	// UNBOUNDED form off the env fallback in loadResidentQ4KProfiled. On the cpu-offload arm the
+	// eligibility of the artifact's dense side is applied inside the estimator and loader via the
+	// shared denseBoundedEligible predicate: an ineligible dense side produces no bounded row and
+	// keeps the full charge (fail-closed).
+	if opts := serveLoadStreamedDenseOptions(hostFit, residentQ4K || (cpuOffloadExperts && cpuOffloadArm), streamedOffload, streamedBound); len(opts) > 0 {
+		q4kOpts = append(q4kOpts, opts...)
 	} // #1062 pre-launch load-path check: warn (don't refuse) before a large GGUF load when the
 	// weights sit on a network filesystem. NFS/CIFS read at network speed â€” the ~50-100x
 	// time-to-ready tax a CPU server hit loading GLM-5.2 off /projects (NFS, ~82 min) vs a local NVMe

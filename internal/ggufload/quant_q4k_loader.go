@@ -397,6 +397,15 @@ func ApplyQ4KLoadOptions(opts []Q4KLoadOption) Q4KLoadOptionEffects {
 	}
 }
 
+// StreamedDensePin returns the device-residency pin predicate an option list declares for eligible
+// streamed-dense tensors (WithStreamedDenseDeviceResident), or nil when the list pins nothing. It is
+// the plan-side mirror of the loader's internal q4kLoadOptions.streamedDensePinned, exposed so a
+// caller that builds one option list per side (the fit estimate and the load) can assert the two
+// agree on WHICH tensors stay device-resident without re-deriving the predicate from backend state.
+func StreamedDensePin(opts []Q4KLoadOption) func(canon string) bool {
+	return probeQ4KLoadOptions(opts).streamedDensePinned
+}
+
 func sortedTensorTypeSet(set map[TensorType]bool) string {
 	var types []TensorType
 	for t, on := range set {
