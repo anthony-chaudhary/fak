@@ -252,11 +252,21 @@ type Config struct {
 	// synthetic prompt: request i sends payloadSeq(Dataset)[i%n]. The client is
 	// owned by the caller; loadgen never closes it.
 	Dataset *DatasetClient
+	// RatePerSec paces job issuance at this absolute-deadline request rate per
+	// concurrency point; 0 disables pacing (issue as fast as workers consume).
+	RatePerSec float64
+	// MaxCatchUp bounds how far behind schedule the pacer may fall before it
+	// re-anchors to now; 0 selects defaultMaxCatchUp, negative is rejected by
+	// validateConfig.
+	MaxCatchUp time.Duration
 }
 
 var (
 	errNonPositiveConcurrency   = errors.New("loadgen: concurrency must be positive")
 	errRequestsBelowConcurrency = errors.New("loadgen: requests-per must be at least maximum concurrency")
+	errNonFiniteRate            = errors.New("loadgen: rate-per-second must be finite")
+	errNegativeRate             = errors.New("loadgen: rate-per-second must be non-negative")
+	errNegativeMaxCatchUp       = errors.New("loadgen: max-catch-up must be non-negative")
 )
 
 // validateConfig rejects sweep shapes that cannot actually put every requested
@@ -274,7 +284,103 @@ func validateConfig(cfg *Config) error {
 	if cfg.RequestsPer < maxConcurrency {
 		return fmt.Errorf("%w: requests-per=%d maximum-concurrency=%d", errRequestsBelowConcurrency, cfg.RequestsPer, maxConcurrency)
 	}
+	if math.IsNaN(cfg.RatePerSec) || math.IsInf(cfg.RatePerSec, 0) {
+		return fmt.Errorf("%w: got %g", errNonFiniteRate, cfg.RatePerSec)
+	}
+	if cfg.RatePerSec < 0 {
+		return fmt.Errorf("%w: got %g", errNegativeRate, cfg.RatePerSec)
+	}
+	if cfg.MaxCatchUp < 0 {
+		return fmt.Errorf("%w: got %s", errNegativeMaxCatchUp, cfg.MaxCatchUp)
+	}
 	return nil
+}
+
+// defaultMaxCatchUp bounds how far behind its absolute deadline schedule a paced
+// feed may fall before it re-anchors to "now". Upstream aiperf defaults its
+// MAX_CATCHUP_SECONDS to 0.01 (request_rate.py / environment.py at the pinned
+// commit); zero MaxCatchUp selects this value instead of disabling pacing.
+const defaultMaxCatchUp = 10 * time.Millisecond
+
+// pacer paces n issues against absolute deadlines with a bounded catch-up
+// window, porting aiperf's constant-rate loop mechanics (ai-dynamo/aiperf,
+// src/aiperf/timing/strategies/request_rate.py:234
+// @ ab610add4e8876fca223197596c728e17365f381, Apache-2.0):
+//
+//   - the schedule tracks cumulative absolute targets, so oversleeps never
+//     compound into drift;
+//   - it re-anchors to "now" only once the backlog exceeds maxCatchUp, so
+//     sub-window timer jitter keeps the original schedule while a genuine stall
+//     drops its missed ticks instead of firing a burst;
+//   - the next target advances BEFORE issuing, so variable issue latency cannot
+//     shift subsequent deadlines.
+//
+// The upstream asyncio high-resolution wait became a context-raced timer
+// (pacerSleep); issuance is reported through issue() so the caller owns the
+// worker channel.
+type pacer struct {
+	interval   time.Duration
+	maxCatchUp time.Duration
+	now        func() time.Time
+	sleep      func(context.Context, time.Duration) bool
+}
+
+func newPacer(interval, maxCatchUp time.Duration, now func() time.Time, sleep func(context.Context, time.Duration) bool) *pacer {
+	if now == nil {
+		now = time.Now
+	}
+	if sleep == nil {
+		sleep = pacerSleep
+	}
+	return &pacer{interval: interval, maxCatchUp: maxCatchUp, now: now, sleep: sleep}
+}
+
+// pacerSleep blocks until d elapses or ctx finishes; false means the context
+// ended first.
+func pacerSleep(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
+// run issues up to n calls through issue (each returning whether it was
+// accepted) on an absolute-deadline schedule: the first deadline is one
+// interval after start, each subsequent deadline advances by the interval from
+// the PREVIOUS deadline (never from wall-clock wake time, so oversleeps do not
+// compound). If the next deadline has fallen more than maxCatchUp in the past,
+// the schedule re-anchors to now — missed ticks are dropped, never burst-caught.
+// It stops early when ctx finishes or issue rejects, and returns how many
+// issues were actually accepted: a rejected feed is never counted, so callers
+// can slice their result arrays to the returned count safely. The deadline
+// advances BEFORE issuing so issue latency cannot shift subsequent deadlines.
+func (p *pacer) run(ctx context.Context, n int, issue func() bool) int {
+	next := p.now().Add(p.interval)
+	issued := 0
+	for i := 0; i < n; i++ {
+		if ctx.Err() != nil {
+			break
+		}
+		now := p.now()
+		if next.Add(p.maxCatchUp).Before(now) {
+			next = now // past the catch-up window: drop the backlog, keep the rate
+		}
+		if next.After(now) {
+			if !p.sleep(ctx, next.Sub(now)) {
+				break
+			}
+		}
+		next = next.Add(p.interval) // advance before issue: issue latency must not compound
+		if !issue() {
+			break // rejected feed: not counted, nothing downstream consumed it
+		}
+		issued++
+	}
+	return issued
 }
 
 func (c *Config) client() *http.Client {
@@ -446,9 +552,15 @@ func payloadSeq(ds *DatasetClient) ([][]byte, error) {
 	return seq, nil
 }
 
-// runPoint runs `requests` total requests at the given concurrency. When
+// runPoint issues up to `requests` requests at the given concurrency. When
 // cfg.Dataset is set, request i replays payloadSeq(cfg.Dataset)[i%n] verbatim;
-// otherwise the synthetic prompt from cfg is used.
+// otherwise the synthetic prompt from cfg is used. With RatePerSec > 0,
+// issuance is paced on absolute deadlines with a bounded catch-up window
+// (pacer); otherwise jobs issue as fast as workers consume. Feeding stops when
+// ctx finishes in both modes, and PointResult.Requests reports the count
+// actually issued. With pacing enabled, PointResult.WallSeconds spans the
+// paced schedule, so it includes pacing idle time and throughput denominators
+// include pacing gaps.
 func runPoint(ctx context.Context, cfg *Config, concurrency, requests int) PointResult {
 	results := make([]reqResult, requests)
 	jobs := make(chan int)
@@ -482,13 +594,39 @@ func runPoint(ctx context.Context, cfg *Config, concurrency, requests int) Point
 			}
 		}()
 	}
-	for i := 0; i < requests; i++ {
-		jobs <- i
+	feedJob := func(i int) bool {
+		select {
+		case jobs <- i:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+	var issued int
+	if cfg.RatePerSec > 0 {
+		interval := time.Duration(float64(time.Second) / cfg.RatePerSec)
+		catchUp := cfg.MaxCatchUp
+		if catchUp <= 0 {
+			catchUp = defaultMaxCatchUp
+		}
+		counter := 0
+		issued = newPacer(interval, catchUp, cfg.now, nil).run(ctx, requests, func() bool {
+			i := counter
+			counter++
+			return feedJob(i)
+		})
+	} else {
+		for i := 0; i < requests; i++ {
+			if !feedJob(i) {
+				break
+			}
+			issued++
+		}
 	}
 	close(jobs)
 	wg.Wait()
 	wall := cfg.now().Sub(wallStart)
-	result := aggregate(concurrency, requests, wall, results)
+	result := aggregate(concurrency, issued, wall, results[:issued])
 	result.PeakInFlight = inFlight.peakValue()
 	return result
 }

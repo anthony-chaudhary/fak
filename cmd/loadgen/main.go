@@ -5,6 +5,10 @@
 // cadence, and latency percentiles per concurrency point. Chunk cadence is not
 // token/decode throughput; token throughput is unavailable when usage is missing.
 //
+// Optional pacing: -rate targets requests/sec per concurrency point (0 = off,
+// issue as fast as workers consume) and -max-catch-up bounds the catch-up
+// window before the paced schedule re-anchors to now (0 = default 10ms).
+//
 //	go run ./cmd/loadgen -url http://127.0.0.1:8080/v1/chat/completions \
 //	  -model smollm2-135m -concurrency 1,4,16 -requests-per 32 -out MATRIX.json
 package main
@@ -31,6 +35,8 @@ func main() {
 		requestsPer  = flag.Int("requests-per", 32, "requests per concurrency level")
 		apiKeyEnv    = flag.String("api-key-env", "", "env var holding the API key (optional)")
 		maxErrorRate = flag.Float64("max-error-rate", 0.0, "fail if any point exceeds this error rate")
+		rate         = flag.Float64("rate", 0, "target request rate per second per concurrency point; 0 = off (issue as fast as workers consume)")
+		maxCatchUp   = flag.Duration("max-catch-up", 0, "bounded pacing catch-up window before re-anchoring to now; 0 = default 10ms")
 		timeout      = flag.Duration("timeout", 20*time.Minute, "overall timeout")
 		out          = flag.String("out", "", "write MATRIX.json here (default: stdout)")
 	)
@@ -52,6 +58,7 @@ func main() {
 	cfg := &Config{
 		URL: *url, Model: *model, Stack: *stack, Prompt: *prompt,
 		MaxTokens: *maxTokens, Concurrencies: concs, RequestsPer: *requestsPer, APIKey: apiKey,
+		RatePerSec: *rate, MaxCatchUp: *maxCatchUp,
 	}
 	if err := validateConfig(cfg); err != nil {
 		fmt.Fprintln(os.Stderr, err)

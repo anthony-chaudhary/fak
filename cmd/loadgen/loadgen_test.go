@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -360,4 +361,175 @@ func (b *validJSONThenErrorBody) Read(p []byte) (int, error) {
 func (b *validJSONThenErrorBody) Close() error {
 	b.closed.Store(true)
 	return nil
+}
+
+// sleepStep scripts one scripted sleep completion: the simulated clock lands on
+// `advance`; ok=false means the context finishes during the sleep.
+type sleepStep struct {
+	advance time.Time
+	ok      bool
+}
+
+// pacingSim is a deterministic fake clock + cancellable context driving pacer.run.
+type pacingSim struct {
+	now               time.Time
+	steps             []sleepStep
+	step              int
+	issueCost         time.Duration
+	cancelAfterIssues int
+	rejectAfter       int // once this many issues are accepted, feeds are refused (0 = never)
+	slept             []time.Duration
+	issuedAt          []time.Time
+	ctx               context.Context
+	cancel            context.CancelFunc
+}
+
+func newPacingSim(start time.Time) *pacingSim {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &pacingSim{now: start, ctx: ctx, cancel: cancel}
+}
+
+func (s *pacingSim) nowFn() time.Time { return s.now }
+
+func (s *pacingSim) sleepFn(_ context.Context, d time.Duration) bool {
+	s.slept = append(s.slept, d)
+	if s.step < len(s.steps) {
+		st := s.steps[s.step]
+		s.step++
+		if !st.ok {
+			s.cancel()
+			return false
+		}
+		s.now = st.advance
+		return true
+	}
+	s.now = s.now.Add(d)
+	return true
+}
+
+func (s *pacingSim) issueFn() bool {
+	if s.rejectAfter > 0 && len(s.issuedAt) >= s.rejectAfter {
+		return false // handoff lost the race with ctx: job never reaches a worker
+	}
+	s.issuedAt = append(s.issuedAt, s.now)
+	s.now = s.now.Add(s.issueCost)
+	if s.cancelAfterIssues > 0 && len(s.issuedAt) >= s.cancelAfterIssues {
+		s.cancel()
+	}
+	return true
+}
+
+func assertTimes(t *testing.T, what string, got []time.Time, want []time.Time) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("%s=%v want %v", what, got, want)
+	}
+	for i := range want {
+		if !got[i].Equal(want[i]) {
+			t.Errorf("%s[%d]=%s want %s", what, i, got[i], want[i])
+		}
+	}
+}
+
+func assertDurations(t *testing.T, what string, got []time.Duration, want []time.Duration) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("%s=%v want %v", what, got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("%s[%d]=%s want %s", what, i, got[i], want[i])
+		}
+	}
+}
+
+// fak-test:runtime fast est=1s
+func TestPacingCatchUp(t *testing.T) {
+	// Validation sentinels: closed contracts via errors.Is, never prose.
+	if err := validateConfig(&Config{RatePerSec: -1}); err == nil || !errors.Is(err, errNegativeRate) {
+		t.Fatalf("validateConfig(RatePerSec:-1) error=%v want errNegativeRate", err)
+	}
+	if err := validateConfig(&Config{MaxCatchUp: -time.Millisecond}); err == nil || !errors.Is(err, errNegativeMaxCatchUp) {
+		t.Fatalf("validateConfig(MaxCatchUp:-1ms) error=%v want errNegativeMaxCatchUp", err)
+	}
+	if err := validateConfig(&Config{RatePerSec: math.NaN()}); err == nil || !errors.Is(err, errNonFiniteRate) {
+		t.Fatalf("validateConfig(RatePerSec:NaN) error=%v want errNonFiniteRate", err)
+	}
+	if err := validateConfig(&Config{RatePerSec: math.Inf(1)}); err == nil || !errors.Is(err, errNonFiniteRate) {
+		t.Fatalf("validateConfig(RatePerSec:+Inf) error=%v want errNonFiniteRate", err)
+	}
+	if err := validateConfig(&Config{RatePerSec: 10, MaxCatchUp: 20 * time.Millisecond}); err != nil {
+		t.Fatalf("validateConfig(valid pacing) error=%v", err)
+	}
+
+	const (
+		interval = 100 * time.Millisecond
+		catchUp  = 20 * time.Millisecond
+	)
+	start := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
+
+	run := func(name string, sim *pacingSim, wantIssued int, wantSlept []time.Duration, wantIssuedAt []time.Time) {
+		t.Run(name, func(t *testing.T) {
+			p := newPacer(interval, catchUp, sim.nowFn, sim.sleepFn)
+			got := p.run(sim.ctx, 3, sim.issueFn)
+			if got != wantIssued {
+				t.Fatalf("issued=%d want %d", got, wantIssued)
+			}
+			assertDurations(t, "slept", sim.slept, wantSlept)
+			assertTimes(t, "issuedAt", sim.issuedAt, wantIssuedAt)
+		})
+	}
+
+	// Sub-window oversleeps stay on the original absolute schedule (no re-anchor).
+	sim := newPacingSim(start)
+	sim.steps = []sleepStep{
+		{advance: start.Add(105 * time.Millisecond), ok: true},
+		{advance: start.Add(210 * time.Millisecond), ok: true},
+		{advance: start.Add(305 * time.Millisecond), ok: true},
+	}
+	run("subWindowOversleepStaysOnSchedule", sim, 3,
+		[]time.Duration{100 * time.Millisecond, 95 * time.Millisecond, 90 * time.Millisecond},
+		[]time.Time{start.Add(105 * time.Millisecond), start.Add(210 * time.Millisecond), start.Add(305 * time.Millisecond)})
+
+	// A stall past the catch-up window re-anchors to now: the missed tick is
+	// dropped (no burst catch-up), the next tick issues immediately at now, and
+	// the schedule resumes from there.
+	sim = newPacingSim(start)
+	sim.steps = []sleepStep{
+		{advance: start.Add(100 * time.Millisecond), ok: true},
+		{advance: start.Add(350 * time.Millisecond), ok: true},
+	}
+	run("pastWindowReanchorsWithoutBurst", sim, 3,
+		[]time.Duration{100 * time.Millisecond, 100 * time.Millisecond},
+		[]time.Time{start.Add(100 * time.Millisecond), start.Add(350 * time.Millisecond), start.Add(350 * time.Millisecond)})
+
+	// The deadline advances BEFORE issuing, so issue latency cannot shift
+	// subsequent deadlines (exact sleeps, 80ms issue cost).
+	sim = newPacingSim(start)
+	sim.issueCost = 80 * time.Millisecond
+	run("advanceBeforeIssueDoesNotCompound", sim, 3,
+		[]time.Duration{100 * time.Millisecond, 20 * time.Millisecond, 20 * time.Millisecond},
+		[]time.Time{start.Add(100 * time.Millisecond), start.Add(200 * time.Millisecond), start.Add(300 * time.Millisecond)})
+
+	// Cancellation during the first sleep stops feeding with zero issues.
+	sim = newPacingSim(start)
+	sim.steps = []sleepStep{{advance: start.Add(100 * time.Millisecond), ok: false}}
+	run("cancelInFirstSleepIssuesNothing", sim, 0,
+		[]time.Duration{100 * time.Millisecond}, nil)
+
+	// Cancellation between ticks stops right after the last issued request.
+	sim = newPacingSim(start)
+	sim.cancelAfterIssues = 1
+	run("cancelBetweenTicks", sim, 1,
+		[]time.Duration{100 * time.Millisecond},
+		[]time.Time{start.Add(100 * time.Millisecond)})
+
+	// A feed that loses the handoff race with ctx is not counted as issued:
+	// callers slice results to the returned count, so counting a rejected feed
+	// would report a phantom request no worker ever consumed.
+	sim = newPacingSim(start)
+	sim.rejectAfter = 2
+	run("rejectedFeedNotCounted", sim, 2,
+		[]time.Duration{100 * time.Millisecond, 100 * time.Millisecond, 100 * time.Millisecond},
+		[]time.Time{start.Add(100 * time.Millisecond), start.Add(200 * time.Millisecond)})
 }
