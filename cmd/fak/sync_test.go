@@ -272,17 +272,23 @@ func TestRunSyncPushInternalErrorStillEmitsVelocityJSON(t *testing.T) {
 	}
 }
 
-// TestRunSyncPushPinsCapturedSource is #4221's push-side witness: `fak sync push` captures
-// the source object ONCE (rev-parse HEAD) and hands SafePush that immutable SHA as the pinned
-// SourceRef → refs/heads/<branch> refspec — never a mutable branch-tip push. So HEAD/branch
-// movement during a retry or backoff cannot sweep a later peer commit into the push: SafePush
-// re-pushes that exact refspec on every attempt (see TestSafePush_SourceRefspecClassifiesAgainstSource).
+// TestRunSyncPushPinsCapturedSource is #4221's push-side witness: `fak sync push` pins
+// its source object ONCE before transport and hands SafePush that immutable SHA as the
+// SourceRef → refs/heads/<branch> refspec — never a mutable branch-tip push. With an
+// explicit --branch the pinned source is that branch's local tip, proved once at capture
+// time (#14331); either way, HEAD/branch movement during a retry or backoff cannot sweep
+// a later peer commit into the push: SafePush re-pushes that exact refspec on every attempt
+// (see TestSafePush_SourceRefspecClassifiesAgainstSource).
 func TestRunSyncPushPinsCapturedSource(t *testing.T) {
 	const captured = "0f1e2d3c4b5a60718293a4b5c6d7e8f90a1b2c3d"
 
 	oldCapture := syncCaptureSource
 	syncCaptureSource = func(string) (string, error) { return captured, nil }
 	t.Cleanup(func() { syncCaptureSource = oldCapture })
+
+	oldTip := syncBranchTip
+	syncBranchTip = func(string, string) (string, error) { return captured, nil }
+	t.Cleanup(func() { syncBranchTip = oldTip })
 
 	var got safesync.PushOptions
 	oldPush := syncSafePush

@@ -227,3 +227,119 @@ func TestRunSyncPushSelectedSource(t *testing.T) {
 		})
 	}
 }
+
+// TestRunSyncPushBranchTip is #14331's regression witness: with an explicit --branch whose
+// local tip differs from the captured HEAD, the recorded native refspec must carry the
+// branch-tip SHA — never HEAD — and an unprovable tip refuses loudly instead of
+// publishing an unrelated commit to the named target ref.
+//
+// fak-test:runtime integration est=2s lane=default
+func TestRunSyncPushBranchTip(t *testing.T) {
+	repo := t.TempDir()
+	origin := t.TempDir()
+	syncGit(t, origin, "init", "--bare")
+	syncGit(t, repo, "init", "-b", "main")
+	syncGit(t, repo, "config", "user.name", "test")
+	syncGit(t, repo, "config", "user.email", "test@example.com")
+	syncGit(t, repo, "config", "core.autocrlf", "false")
+	syncGit(t, repo, "remote", "add", "origin", origin)
+	file := filepath.Join(repo, "file.txt")
+	syncWriteFile(t, file, "one\n")
+	syncGit(t, repo, "add", "file.txt")
+	syncGit(t, repo, "commit", "-m", "one")
+	tip := syncRev(t, repo, "HEAD")
+	syncGit(t, repo, "branch", "feature", tip)
+	syncWriteFile(t, file, "two\n")
+	syncGit(t, repo, "commit", "-am", "two")
+	head := syncRev(t, repo, "HEAD")
+	if head == tip {
+		t.Fatal("fixture must leave HEAD off the target branch")
+	}
+
+	oldPush, oldWorktree := syncSafePush, syncWorktree
+	t.Cleanup(func() {
+		syncSafePush, syncWorktree = oldPush, oldWorktree
+	})
+	syncWorktree = func(context.Context, string) (safesync.Worktree, bool) {
+		return safesync.Worktree{}, false
+	}
+	var refspecs []string
+	syncSafePush = func(ctx context.Context, opts safesync.PushOptions) (safesync.PushResult, error) {
+		opts.Runner = func(_ context.Context, root string, args ...string) safesync.RunResult {
+			if len(args) == 3 && args[0] == "push" && args[1] == "origin" {
+				refspecs = append(refspecs, args[2])
+			}
+			return safesync.RunResult{}
+		}
+		return safesync.SafePush(ctx, opts)
+	}
+
+	t.Run("branch tip published, not HEAD", func(t *testing.T) {
+		var out, errb bytes.Buffer
+		code := runSync(&out, &errb, []string{"push", "--repo", repo, "--branch", "feature", "--json"})
+		if code != syncExitOK {
+			t.Fatalf("exit=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+		}
+		var got safesync.PushResult
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.SourceRef != tip || got.TargetRef != "refs/heads/feature" || !got.Pushed {
+			t.Fatalf("receipt = %+v, want branch tip %s -> refs/heads/feature (HEAD was %s)", got, tip, head)
+		}
+		if len(refspecs) != 1 || refspecs[0] != tip+":refs/heads/feature" {
+			t.Fatalf("recorded transport refspec = %v, want %q carrying the branch-tip SHA, not HEAD %s", refspecs, tip+":refs/heads/feature", head)
+		}
+	})
+
+	t.Run("fully qualified spelling", func(t *testing.T) {
+		refspecs = nil
+		var out, errb bytes.Buffer
+		code := runSync(&out, &errb, []string{"push", "--repo", repo, "--branch", "refs/heads/feature", "--json"})
+		if code != syncExitOK {
+			t.Fatalf("exit=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+		}
+		var got safesync.PushResult
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.SourceRef != tip || got.TargetRef != "refs/heads/feature" || !got.Pushed {
+			t.Fatalf("receipt = %+v, want normalized branch tip %s -> refs/heads/feature", got, tip)
+		}
+		if len(refspecs) != 1 || refspecs[0] != tip+":refs/heads/feature" {
+			t.Fatalf("recorded transport refspec = %v, want %q", refspecs, tip+":refs/heads/feature")
+		}
+	})
+
+	t.Run("unprovable tip refuses", func(t *testing.T) {
+		pushCalls := 0
+		syncSafePush = func(context.Context, safesync.PushOptions) (safesync.PushResult, error) {
+			pushCalls++
+			t.Fatal("transport reached after an unprovable branch tip")
+			return safesync.PushResult{}, nil
+		}
+		var out, errb bytes.Buffer
+		code := runSync(&out, &errb, []string{"push", "--repo", repo, "--branch", "missing", "--json"})
+		var got safesync.PushResult
+		if code != syncExitRefused || json.Unmarshal(out.Bytes(), &got) != nil || got.Pushed ||
+			got.Reason != "SOURCE_BRANCH_UNAVAILABLE" || got.Attempts != 0 || got.Velocity.Qualified || pushCalls != 0 {
+			t.Fatalf("exit=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+		}
+	})
+
+	t.Run("default branch keeps captured HEAD", func(t *testing.T) {
+		var gotOpts safesync.PushOptions
+		syncSafePush = func(_ context.Context, opts safesync.PushOptions) (safesync.PushResult, error) {
+			gotOpts = opts
+			return safesync.PushResult{Pushed: true, Attempts: 1}, nil
+		}
+		var out, errb bytes.Buffer
+		code := runSync(&out, &errb, []string{"push", "--repo", repo, "--json"})
+		if code != syncExitOK {
+			t.Fatalf("exit=%d stderr=%s", code, errb.String())
+		}
+		if gotOpts.SourceRef != head || gotOpts.TargetRef != "" {
+			t.Fatalf("default-branch options = %+v, want captured HEAD %s with empty target ref", gotOpts, head)
+		}
+	})
+}

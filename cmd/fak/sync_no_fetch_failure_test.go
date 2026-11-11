@@ -11,6 +11,9 @@ func TestRunSyncNoFetchOnFailure(t *testing.T) {
 	oldCapture, oldPush := syncCaptureSource, syncSafePush
 	defer func() { syncCaptureSource, syncSafePush = oldCapture, oldPush }()
 	syncCaptureSource = func(string) (string, error) { return "563893c6e7df3d8e0ef5a17c06432670a327c231", nil }
+	oldTip := syncBranchTip
+	syncBranchTip = func(string, string) (string, error) { return "563893c6e7df3d8e0ef5a17c06432670a327c231", nil }
+	defer func() { syncBranchTip = oldTip }()
 	called := false
 	syncSafePush = func(_ context.Context, o safesync.PushOptions) (safesync.PushResult, error) {
 		called = true

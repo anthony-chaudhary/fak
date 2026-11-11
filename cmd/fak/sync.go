@@ -37,6 +37,12 @@ var (
 	syncExecutePacket             = safesync.ExecutePacket
 	syncHeal                      = safesync.Heal
 	syncCaptureSource             = func(repo string) (string, error) { return gitOut(repo, "rev-parse", "HEAD") }
+	// syncBranchTip proves the local tip of an explicit --branch target by ref
+	// lookup only: no object reads, no fetch, no fallback to the captured HEAD.
+	syncBranchTip = func(repo, branch string) (string, error) {
+		out, err := gitOut(repo, "rev-parse", "--verify", "refs/heads/"+branch)
+		return strings.TrimSpace(out), err
+	}
 )
 
 // The failure envelope intentionally excludes raw errors and assessment details:
@@ -177,6 +183,22 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 				return refuseSyncPushSelection(stdout, stderr, *asJSON, reason, err.Error())
 			}
 			sourceSHA, pushBranch = *sourceCommit, selectedBranch
+		} else if rawBranch := strings.TrimSpace(*branch); rawBranch != "" {
+			// An explicit --branch names the publication target: pin that branch's
+			// local tip, proved once before transport, never the captured HEAD, which
+			// in a multi-worktree flow may sit on another branch (#14331). A tip that
+			// cannot be proved refuses; there is no fallback to HEAD.
+			pushBranch = strings.TrimPrefix(rawBranch, "refs/heads/")
+			tip, tipErr := syncBranchTip(repoPath, pushBranch)
+			if tipErr != nil {
+				return refuseSyncPushSelection(stdout, stderr, *asJSON, "SOURCE_BRANCH_UNAVAILABLE",
+					fmt.Sprintf("cannot prove the local tip of branch %q: %v; no publication attempted", pushBranch, tipErr))
+			}
+			if !syncFullCommitID(tip) {
+				return refuseSyncPushSelection(stdout, stderr, *asJSON, "SOURCE_BRANCH_UNAVAILABLE",
+					fmt.Sprintf("branch %q did not resolve to a complete object ID; no publication attempted", pushBranch))
+			}
+			sourceSHA = tip
 		}
 		syncDuplicateFixAdvisory(stderr, repoPath, *remote, pushBranch)
 		res, err := syncSafePush(context.Background(), safesync.PushOptions{
@@ -643,7 +665,7 @@ bypass or soften it. apply runs the fast-forward only when every path Git would 
 HEAD or already byte-identical to the remote-tracking version. push pushes the branch
 and retries a TRANSIENT non-fast-forward race (a peer landed between fetch and push,
 but HEAD already contains origin); on a genuine behind/diverged state it stops with a
-clear integrate-then-push next step. Its velocity evidence scores only a published
+clear integrate-then-push next step. With an explicit --branch B the pinned source is B's local tip, proved once before transport and refused as SOURCE_BRANCH_UNAVAILABLE when it cannot be proved; without --branch the captured HEAD publishes to the current branch. Its velocity evidence scores only a published
 safe push against the declared --budget; refusals/errors retain timing but are UNSCORED.
 The optional --source-commit pins a readable full commit that is already an ancestor
 of the captured HEAD, and requires an explicit handoff/... destination (the fully
