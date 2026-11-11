@@ -1,6 +1,9 @@
 package gateway
 
-import "strconv"
+import (
+	"sort"
+	"strconv"
+)
 
 // KV-aware fleet routing — the cross-instance analogue of fak's on-instance
 // cache-aware scheduling (the FCFS 62.1% -> 86.7% radix-hit recovery folded into
@@ -135,6 +138,12 @@ type FleetCacheRouter struct {
 	// instance the policy currently pins it to. Nil unless the slack is armed
 	// (NewSlackTolerantFleetCacheRouter); the rigid path stays record-free.
 	home map[string]int
+
+	// idx keeps load as a bucket map so the slack path reads the fleet minimum
+	// in O(1) and tie-breaks only the tied class (the ai-dynamo/aiperf
+	// sticky-router borrow; see loadIndex). Nil until first slack-path use;
+	// rigid routers never build it.
+	idx *loadIndex
 }
 
 // NewFleetCacheRouter builds a KV-aware fleet of n instances, each able to keep
@@ -170,13 +179,13 @@ func (r *FleetCacheRouter) Route(prefixKey string) (int, bool) {
 	for i, s := range r.instances {
 		if s.holds(prefixKey) {
 			s.touch(prefixKey)
-			r.load[i]++
+			r.bumpLoad(i)
 			return i, true
 		}
 	}
 	pick := r.coldPlacement()
 	r.instances[pick].admit(prefixKey)
-	r.load[pick]++
+	r.bumpLoad(pick)
 	return pick, false
 }
 
@@ -199,7 +208,7 @@ func (r *FleetCacheRouter) routeSlack(prefixKey string) (int, bool) {
 	if liveHome && float64(r.load[home]) <= r.tolerance*float64(r.minLoad()) {
 		// Within the bounded slack: keep the sticky placement (prefix hit).
 		r.instances[home].touch(prefixKey)
-		r.load[home]++
+		r.bumpLoad(home)
 		return home, true
 	}
 	// No live sticky record (or the home evicted the prefix, or the home's load
@@ -213,34 +222,185 @@ func (r *FleetCacheRouter) routeSlack(prefixKey string) (int, bool) {
 	pick := r.leastLoaded(exclude)
 	hit := r.instances[pick].holds(prefixKey)
 	r.instances[pick].admit(prefixKey)
-	r.load[pick]++
+	r.bumpLoad(pick)
 	r.home[prefixKey] = pick
 	return pick, hit
 }
 
-// minLoad is the fleet's minimum in-flight request count — the slack bound's
-// denominator (the upstream min_load_imbalance read over the replica set).
-func (r *FleetCacheRouter) minLoad() int {
-	m := r.load[0]
-	for _, l := range r.load[1:] {
-		if l < m {
-			m = l
+// loadIndex keeps the fleet load vector as a bucket map: buckets[l] holds the
+// instance indices whose load is l, and keys lists the distinct loads in
+// ascending order, so the least-loaded class is reached in O(1) (keys[0]) and
+// a tie-break scans only the k-way tie instead of all n instances. Adapted
+// from ai-dynamo/aiperf's sticky router, which keeps _workers_by_load (load ->
+// worker set) plus a cached _min_load for exactly this reason (source:
+// src/aiperf/credit/sticky_router.py:389-391,550-581
+// @ab610add4e8876fca223197596c728e17365f381, Apache-2.0; re-expressed in Go, no
+// copied code). Upstream's tie-break secondary tuple (active sessions, virtual
+// sent credits, last-sent timestamp) has no per-instance counterpart in fak's
+// fixed-fleet model, so the total order falls back to instance index — the
+// deterministic tie-break the committed witness pins.
+//
+// The view is maintained incrementally: set moves one instance between buckets
+// when its load changes by one. It carries a slice stamp (backing-array
+// address, length, endpoints) so a wholesale reassignment of the load slice —
+// the same-package test pattern of setting r.load between Route calls — is
+// detected and the view rebuilt in O(n) before next use.
+type loadIndex struct {
+	buckets map[int][]int // load -> instance indices (order not significant)
+	keys    []int         // distinct loads, ascending; keys[0] is the minimum
+	ptr     *int          // &loads[0] at the last build
+	n       int
+	first   int
+	last    int
+}
+
+func newLoadIndex(loads []int) *loadIndex {
+	x := &loadIndex{buckets: make(map[int][]int, len(loads))}
+	x.rebuild(loads)
+	return x
+}
+
+// rebuild recomputes the view from loads in O(n): one pass into the buckets,
+// then the distinct loads sorted ascending.
+func (x *loadIndex) rebuild(loads []int) {
+	b := make(map[int][]int, len(loads))
+	for i, l := range loads {
+		b[l] = append(b[l], i)
+	}
+	keys := make([]int, 0, len(b))
+	for l := range b {
+		keys = append(keys, l)
+	}
+	sort.Ints(keys)
+	x.buckets = b
+	x.keys = keys
+	if len(loads) > 0 {
+		x.ptr = &loads[0]
+		x.first = loads[0]
+		x.last = loads[len(loads)-1]
+	} else {
+		x.ptr = nil
+	}
+	x.n = len(loads)
+}
+
+// fresh reports whether the view still describes loads: same backing array,
+// length, and endpoints. A wholesale reassignment fails at least one term and
+// forces a rebuild; in-place single-step writes keep it current through set.
+func (x *loadIndex) fresh(loads []int) bool {
+	if x.n != len(loads) || x.n == 0 {
+		return false
+	}
+	return x.ptr == &loads[0] && x.first == loads[0] && x.last == loads[x.n-1]
+}
+
+// set moves instance i from old load o to new load v, keeping buckets and keys
+// current. O(k) in the source bucket size; the target bucket is appended
+// unsorted because the tie-break scan does not rely on bucket order.
+func (x *loadIndex) set(i, o, v int) {
+	if o == v {
+		return
+	}
+	src := x.buckets[o]
+	for j := range src {
+		if src[j] == i {
+			x.buckets[o] = append(src[:j], src[j+1:]...)
+			break
 		}
 	}
-	return m
+	if len(x.buckets[o]) == 0 {
+		delete(x.buckets, o)
+		x.dropKey(o)
+	}
+	if _, ok := x.buckets[v]; !ok {
+		x.insertKey(v)
+	}
+	x.buckets[v] = append(x.buckets[v], i)
+}
+
+// dropKey removes load l from the sorted key list (no-op if absent).
+func (x *loadIndex) dropKey(l int) {
+	for j := range x.keys {
+		if x.keys[j] == l {
+			x.keys = append(x.keys[:j], x.keys[j+1:]...)
+			return
+		}
+	}
+}
+
+// insertKey adds load l to the sorted key list in ascending position.
+func (x *loadIndex) insertKey(l int) {
+	j := len(x.keys)
+	for k := range x.keys {
+		if x.keys[k] > l {
+			j = k
+			break
+		}
+	}
+	x.keys = append(x.keys, 0)
+	copy(x.keys[j+1:], x.keys[j:])
+	x.keys[j] = l
+}
+
+// ensureFresh (re)builds the load index when r.load was reassigned out-of-band
+// (same-package tests set r.load wholesale between Route calls); production
+// traffic only mutates in place through bumpLoad, which keeps it current.
+func (r *FleetCacheRouter) ensureFresh() {
+	if r.idx == nil {
+		r.idx = newLoadIndex(r.load)
+		return
+	}
+	if !r.idx.fresh(r.load) {
+		r.idx.rebuild(r.load)
+	}
+}
+
+// bumpLoad records one request landing on instance i. Every in-place write to
+// r.load goes through here while the slack path is armed, so the load index
+// stays current; wholesale reassignment of r.load is caught by the index's
+// slice stamp instead. Rigid routers skip the index entirely — they never
+// read it, so the pinned hit-rate harness pays nothing for the borrow.
+func (r *FleetCacheRouter) bumpLoad(i int) {
+	if r.tolerance <= 0 {
+		r.load[i]++
+		return
+	}
+	r.ensureFresh()
+	old := r.load[i]
+	r.load[i] = old + 1
+	r.idx.set(i, old, old+1)
+}
+
+// minLoad is the fleet's minimum in-flight request count — the slack bound's
+// denominator (the upstream min_load_imbalance read over the replica set).
+// O(1): the load index caches the minimum (the ai-dynamo/aiperf sticky
+// router's cached _min_load; see loadIndex).
+func (r *FleetCacheRouter) minLoad() int {
+	r.ensureFresh()
+	return r.idx.keys[0]
 }
 
 // leastLoaded picks the instance with the fewest in-flight requests, skipping
 // except (the sticky home being shed from, so a shed always moves the session);
-// ties break to the lower index. except may be -1 for no exclusion.
+// ties break to the lower index. except may be -1 for no exclusion. O(k) in
+// the size of the minimum-load tie: the load index hands back the tied class
+// directly (the ai-dynamo/aiperf sticky router's single-pass tie-break over
+// its min-load worker set; see loadIndex). Only when except is the sole
+// occupant of the minimum bucket does the scan advance to the next key.
 func (r *FleetCacheRouter) leastLoaded(except int) int {
+	r.ensureFresh()
 	best := -1
-	for i := range r.instances {
-		if i == except {
-			continue
+	for _, l := range r.idx.keys {
+		for _, i := range r.idx.buckets[l] {
+			if i == except {
+				continue
+			}
+			if best == -1 || i < best {
+				best = i
+			}
 		}
-		if best == -1 || r.load[i] < r.load[best] {
-			best = i
+		if best != -1 {
+			return best
 		}
 	}
 	return best
