@@ -487,7 +487,15 @@ Anthropic `/v1/messages` wire, exposes `/metrics` + `/debug/vars`, and takes
 whether the router intercepts the tool plane at all — is **raw pass-through by
 default**; `--guard` (env `FAK_GUARD`) arms tool-call adjudication + tool-result
 screening, and the resolved posture is stated in the startup messages
-([router tool-guard defaults](architecture/router-tool-guard-defaults.md)). The gateway's own
+([router tool-guard defaults](architecture/router-tool-guard-defaults.md)). The
+context plane is raw by default too: no oversize tool-result paging
+(`--ctx-paging`, env `FAK_CTX_PAGING`), no old-tool-result elision or
+restore-tool injection (`--chat-elide`, env `FAK_CHAT_ELIDE`), and the per-lever
+savers (`--ctx-view-budget`, `--compact-history-budget`, `--elide-result-bytes`,
+`--elide-stale-reads`, `--vcache-anchor`, `--defer-cold-tools`) all default off —
+each re-arms by name
+([serving-router context-plane defaults](architecture/serve-context-plane-defaults.md)).
+The gateway's own
 lease-admission posture (what its floor does with a refused write after the kernel
 allowed the call) is set by `--workspace-admission open|permissive|strict`
 (default `open`: admit-and-log with `would_deny` forensic records; `permissive`
@@ -684,7 +692,7 @@ fak agent --effort ultra --task "Refactor gateway protocol adapters"
 fak agent --subagents=false --task "Lint markdown docs"
 ```
 
-See [Native Harness Subagents & Effort Slider](../architecture/native-harness-subagents-default-and-effort-slider.md) for full architectural specifications, memory models, and empirical benchmarks.
+See [Native Harness Subagents & Effort Slider](architecture/native-harness-subagents-default-and-effort-slider.md) for full architectural specifications, memory models, and empirical benchmarks.
 
 ## Verbs
 

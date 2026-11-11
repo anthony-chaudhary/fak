@@ -30,13 +30,20 @@ type ctxPagingDecision struct {
 // spelling, or carries fak MCP tools the gateway auto-advertises the restore tool to.
 // A harness without one (OpenCode Code Mode: read/shell/glob/execute) would see an
 // unrecoverable hole and re-request the same result in a loop.
-func resolveChatCtxPaging(r *http.Request, tools []agent.ToolDef) ctxPagingDecision {
+//
+// Precedence: the per-request X-Fak-Ctx-Paging header wins, then the FAK_CTX_PAGING
+// process env, then the server's resolved Config.CtxPaging posture (empty config =
+// AUTO, the library default; `fak serve` passes OFF), then AUTO.
+func (s *Server) resolveChatCtxPaging(r *http.Request, tools []agent.ToolDef) ctxPagingDecision {
 	mode := ""
 	if r != nil {
 		mode = normalizeCtxPagingMode(r.Header.Get(HeaderCtxPaging))
 	}
 	if mode == "" {
 		mode = normalizeCtxPagingMode(os.Getenv(envCtxPaging))
+	}
+	if mode == "" && s != nil {
+		mode = s.ctxPagingMode
 	}
 	switch mode {
 	case "off":
@@ -51,6 +58,24 @@ func resolveChatCtxPaging(r *http.Request, tools []agent.ToolDef) ctxPagingDecis
 		suppressReason: ctxmmu.PagingSuppressedHarnessCannotRestore,
 		header:         "off;reason=" + ctxmmu.PagingSuppressedHarnessCannotRestore,
 	}
+}
+
+// restoreAffordanceArmed reports whether a context-plane affordance that
+// PRODUCES restore handles is armed on this server: the chat tool-result
+// elision, or oversize paging for this request's resolved paging decision (a
+// suppressed decision pages nothing). The restore-tool auto-advertisement
+// consults it so a raw context plane (the serving-router default) stops
+// injecting fak_context_restore into requests whose declared tools would
+// otherwise never produce a handle. A nil server (no posture resolution) is
+// treated as armed — the library's historical behavior.
+func (s *Server) restoreAffordanceArmed(paging ctxPagingDecision) bool {
+	if s == nil {
+		return true
+	}
+	if !s.chatToolResultElideOff {
+		return true
+	}
+	return paging.suppressReason == ""
 }
 
 func normalizeCtxPagingMode(v string) string {

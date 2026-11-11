@@ -241,8 +241,13 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	// A structured turn with no client tools stays tool-free: the native route refuses
 	// structured output alongside any tool, so the gateway-owned restore tool would turn
 	// every such json_schema request into a refusal. With client tools present the
-	// restore tool is still offered, so elided tool results stay recoverable.
-	if !restoreToolPresent && (len(responseFormat) == 0 || len(req.Tools) > 0) {
+	// restore tool is still offered, so elided tool results stay recoverable — but only
+	// while a context-plane affordance that PRODUCES restore handles is armed (the
+	// elision posture; serve: OFF) or the history already carries an elided marker an
+	// earlier-armed posture left behind. With the raw context plane the client's
+	// declared tools pass through byte-identical.
+	if !restoreToolPresent && (len(responseFormat) == 0 || len(req.Tools) > 0) &&
+		(!s.chatToolResultElideOff || hasElidedToolResult(messages)) {
 		req.Tools = append(req.Tools, responsesTool{
 			Type:        "function",
 			Name:        restoreToolName,
@@ -328,8 +333,12 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Microcontext tool result elision: elide large, older tool outputs
-	messages = s.maybeElideResponsesToolResults(reqTrace, messages, restoreToolName)
+	// Microcontext tool result elision: elide large, older tool outputs. The
+	// chat-tool-result-elide posture (serve: OFF) declines the rewrite — the
+	// messages pass through byte-identical and no elision header is set.
+	if !s.chatToolResultElideOff {
+		messages = s.maybeElideResponsesToolResults(reqTrace, messages, restoreToolName)
+	}
 	elisionsCount := 0
 	for _, m := range messages {
 		if strings.Contains(m.Content, "...[fak: tool output elided") {

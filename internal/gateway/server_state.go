@@ -397,6 +397,18 @@ type Server struct {
 	// no proposed-call adjudication and no inbound-result admission run on the
 	// served path. Zero value (guard armed) preserves the historical floor.
 	toolGuardOff bool
+	// ctxPagingMode mirrors Config.CtxPaging resolved ("auto"|"on"|"off"): the
+	// oversize-paging posture consulted when neither the per-request
+	// X-Fak-Ctx-Paging header nor the FAK_CTX_PAGING process env names a mode.
+	// Empty config resolves AUTO (the library default); `fak serve` passes OFF
+	// (the serving router does not page tool results into restore stubs).
+	ctxPagingMode string
+	// chatToolResultElideOff mirrors Config.ChatToolResultElide resolved OFF:
+	// the chat/responses tool-result elision never rewrites a message and the
+	// restore tool is never auto-advertised (only recovered from markers the
+	// history already carries). Zero value (armed) preserves the historical
+	// elider byte-for-byte.
+	chatToolResultElideOff bool
 	// sessionLane mirrors Config.SessionLane: the launch-time lane designation
 	// stamped as trusted Meta["lane"] on every served tool call. Empty = unset.
 	sessionLane                string

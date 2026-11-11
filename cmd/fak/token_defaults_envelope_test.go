@@ -48,23 +48,28 @@ func TestTokenDefaults_EnvelopeProvenanceReported(t *testing.T) {
 	}
 }
 
-// TestTokenDefaults_FrontDoorsShareEnvelopeDefaults locks BOTH front doors to the same
-// envelope-derived resident defaults so guard and serve cannot drift apart (the issue's explicit
-// "one cannot drift away from the other" acceptance). The ctxview budget (the planned resident
-// view) and the compaction budget are the two envelope-governed sizes; both entrypoints must wire
-// each to its shared constant.
+// TestTokenDefaults_FrontDoorsShareEnvelopeDefaults locks each front door to its own
+// envelope-governed posture const so neither door can drift (the issue's explicit
+// "one cannot drift away from the other" acceptance). The ctxview budget (the planned
+// resident view) and the compaction budget are the two envelope-governed sizes. The
+// 2026-11-10 hosting-simplification flip split the posture: guard keeps the armed
+// library consts (agent.DefaultCtxViewBudget / gateway.DefaultCompactHistoryBudget),
+// serve resolves its own raw serving-router consts (gateway.DefaultServe*). Each door
+// must wire its OWN const.
 func TestTokenDefaults_FrontDoorsShareEnvelopeDefaults(t *testing.T) {
 	guard := readEntrypoint(t, "guard.go")
 	serve := readEntrypoint(t, "serve.go")
-	for _, wire := range []string{
-		`fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget`,
-		`fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget`,
+	for _, wire := range []struct {
+		guard, serve string
+	}{
+		{guard: `fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget`, serve: `fs.Int("ctx-view-budget", gateway.DefaultServeCtxViewBudget`},
+		{guard: `fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget`, serve: `fs.Int("compact-history-budget", gateway.DefaultServeCompactHistoryBudget`},
 	} {
-		if !strings.Contains(guard, wire) {
-			t.Errorf("guard.go must wire the envelope-governed default: %s", wire)
+		if !strings.Contains(guard, wire.guard) {
+			t.Errorf("guard.go must wire the envelope-governed armed default: %s", wire.guard)
 		}
-		if !strings.Contains(serve, wire) {
-			t.Errorf("serve.go must wire the envelope-governed default: %s", wire)
+		if !strings.Contains(serve, wire.serve) {
+			t.Errorf("serve.go must wire the envelope-governed raw serving-router default (2026-11-10 hosting-simplification flip): %s", wire.serve)
 		}
 	}
 }

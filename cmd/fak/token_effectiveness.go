@@ -572,7 +572,7 @@ var tokenProofCatalog = map[string]tokenProofBinding{
 	},
 	"elidestale": {
 		Effect: tokenExecutableProof{Path: "internal/gateway/messages_elide_stale_test.go", Function: "TestMaybeElideStaleReadsRoundTrip", Assertions: []tokenAssertionSpec{assertion("len", "req", "Raw", "orig"), assertion("got", "Bytes", "big")}},
-		Lock:   tokenExecutableProof{Path: "cmd/fak/elide_stale_default_test.go", Function: "TestElideStaleReadsDefaultsOn", Assertions: []tokenAssertionSpec{assertion("DefaultElideStaleReads"), assertion("strings", "Contains", "elide-stale-reads")}},
+		Lock:   tokenExecutableProof{Path: "cmd/fak/elide_stale_default_test.go", Function: "TestElideStaleReadsPostureSplit", Assertions: []tokenAssertionSpec{assertion("DefaultElideStaleReads"), assertion("strings", "Contains", "elide-stale-reads")}},
 		Note:   tokenLiteralProof{Path: "cmd/fak/guard.go", Function: "cmdManageCommand", Callee: "fs.Bool", Literals: []string{"elide-stale-reads", "lossy but restorable", "Pass =false to opt out"}},
 	},
 	"ctxview": {

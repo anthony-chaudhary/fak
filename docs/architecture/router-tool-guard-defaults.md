@@ -5,7 +5,7 @@ description: "fak serve is a raw inference pipe by default — no tool-call adju
 
 # Router tool-guard defaults: raw pass-through by default, the guard is opt-in
 
-[← Architecture](README.md) · Related: [when to use fak guard for harnesses](when-to-use-fak-guard-for-harnesses.md) · Issue [#14327](https://github.com/anthony-chaudhary/fak/issues/14327)
+[← Architecture](../architecture.md) · Related: [when to use fak guard for harnesses](when-to-use-fak-guard-for-harnesses.md) · Issue [#14327](https://github.com/anthony-chaudhary/fak/issues/14327)
 
 ## The default is NOTHING
 
@@ -106,6 +106,9 @@ go run ./cmd/piidemo -selfcheck             # browserless: asserts both arms in-
   INTERCEPTION only. The token-saver stack (history compaction, result elision, prefix
   guard — the `fak serve` serving-efficiency defaults) is a separate axis with its own
   documented defaults and opt-outs; raw pass-through here does not turn those off.
+  (Later the same day the context plane got its own flip:
+  [serving-router context-plane defaults](serve-context-plane-defaults.md) — the savers
+  now default OFF on `fak serve` too, each re-armed by name.)
 - **Raw mode is raw.** The client harness owns tool safety in raw mode (it always had
   the option to route through `fak_adjudicate`/`fak_admit` explicitly). The router does
   not silently keep a partial floor under a posture named "off".

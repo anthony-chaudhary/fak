@@ -1,14 +1,19 @@
 package main
 
 // defer_cold_tools_wiring_test.go — the regression lock for the 10x floor lever's front-door
-// wiring (#3530 → flipped default-ON by #3537, under epic #3229). The gateway lever itself
+// wiring (#3530 → flipped default-ON by #3537, under epic #3229, re-split by the
+// 2026-11-10 hosting-simplification flip). The gateway lever itself
 // (internal/gateway.maybeDeferColdTools, gated on Config.DeferColdTools) shipped with #3232; the
 // flag threading shipped with #3530 default-off; #3537 flipped the default to ON once the A/B
-// (token-delta × held-accuracy × poison) gates reported PASS. This test pins the flipped posture:
-// BOTH front doors (fak guard, fak serve) declare --defer-cold-tools defaulting to
-// gateway.DefaultDeferColdTools (which is true), wire the parsed value into the gateway Config,
-// and the explicit opt-out (--defer-cold-tools=false) still parses to OFF — so a peer who silently
-// unwires the lever, or regresses the default in either direction, reds here, not in production.
+// (token-delta × held-accuracy × poison) gates reported PASS. The hosting-simplification flip
+// (2026-11-10) split the posture: the GUARD door keeps the armed library default
+// (gateway.DefaultDeferColdTools, true), while the SERVE door resolves its own raw
+// serving-router posture (gateway.DefaultDeferColdTools is still the const in guard.go; serve.go
+// wires gateway.DefaultServeDeferColdTools, false — the client's tools[] passes through
+// untouched). This test pins the split posture: each door declares --defer-cold-tools defaulting
+// to ITS OWN posture const, wires the parsed value into the gateway Config, and the explicit
+// opt-out (--defer-cold-tools=false) still parses to OFF — so a peer who silently unwires the
+// lever, or regresses either default in either direction, reds here, not in production.
 // Each assertion reads the REAL entrypoint declaration, never a copy that drifts.
 
 import (
@@ -22,18 +27,24 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 )
 
-// TestDeferColdToolsFlagDeclaredOnBothDoors pins the flag declaration on both front doors so the
-// lever is reachable without editing env. Since #3537 it is DEFAULT ON via the single named
-// gateway.DefaultDeferColdTools const — a literal true/false in a door's declaration is a drift
-// from the one authoritative default and reds here.
+// TestDeferColdToolsFlagDeclaredOnBothDoors pins each door's flag declaration to its own
+// posture const: guard.go keeps the armed library default (gateway.DefaultDeferColdTools,
+// true — the #3537 flip), serve.go keeps the raw serving-router default
+// (gateway.DefaultServeDeferColdTools, false — the 2026-11-10 hosting-simplification flip).
+// A literal true/false in a door's declaration is a drift from the one authoritative
+// default and reds here.
 func TestDeferColdToolsFlagDeclaredOnBothDoors(t *testing.T) {
 	if !gateway.DefaultDeferColdTools {
 		t.Errorf("gateway.DefaultDeferColdTools must be true (the #3537 default-on flip)")
 	}
-	for _, f := range []string{"guard.go", "serve.go"} {
-		if !strings.Contains(readEntrypoint(t, f), `fs.Bool("defer-cold-tools", gateway.DefaultDeferColdTools`) {
-			t.Errorf("%s must declare --defer-cold-tools as fs.Bool(..., gateway.DefaultDeferColdTools, ...) (the #3537 default-on flip of the 10x floor lever)", f)
-		}
+	if gateway.DefaultServeDeferColdTools {
+		t.Errorf("gateway.DefaultServeDeferColdTools must be false (the raw serving-router posture, 2026-11-10 hosting-simplification flip)")
+	}
+	if !strings.Contains(readEntrypoint(t, "guard.go"), `fs.Bool("defer-cold-tools", gateway.DefaultDeferColdTools`) {
+		t.Errorf("guard.go must declare --defer-cold-tools as fs.Bool(..., gateway.DefaultDeferColdTools, ...) (the #3537 default-on flip of the 10x floor lever)")
+	}
+	if !strings.Contains(readEntrypoint(t, "serve.go"), `fs.Bool("defer-cold-tools", gateway.DefaultServeDeferColdTools`) {
+		t.Errorf("serve.go must declare --defer-cold-tools as fs.Bool(..., gateway.DefaultServeDeferColdTools, ...) (the raw serving-router posture)")
 	}
 }
 

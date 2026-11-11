@@ -33,12 +33,12 @@ Budget size is governed separately by the [long-context defaults doctrine](../lo
 | provider_cache — provider prompt-cache prefix (byte-faithful passthrough) | lossless | **ON** | ✓ | — | `(structural)` | · | ✓ | ✓ |
 | toolfloor — tool-floor pruning (drop provably-unreachable tool defs) | lossless | **ON** | ✓ | — | `(structural)` | · | ✓ | ✓ |
 | mcptoolfilter — native MCP tools/list cold-schema filtering | bounded | **ON** | ✓ | — | `FAK_ABLATE_MCP_TOOL_FILTER=1` | · | ✓ | ✓ |
-| defercoldtools — outbound Anthropic cold-tool schema deferral | bounded | **ON** | · | #3536 OPEN: strict committed PASS receipt missing | `--defer-cold-tools` | · | ✓ | ✓ |
+| defercoldtools — outbound Anthropic cold-tool schema deferral (harness doors; the serving router resolves raw via gateway.DefaultServeDeferColdTools, re-arm --defer-cold-tools) | bounded | **ON** | · | #3536 OPEN: strict committed PASS receipt missing | `--defer-cold-tools` | · | ✓ | ✓ |
 | vdso — vDSO dedup fast path (collapse identical calls) | lossless | **ON** | ✓ | — | `--vdso` | · | ✓ | ✓ |
-| compacthistory — history compaction (drop the un-cacheable middle past the budget) | bounded | **ON** | ✓ | — | `--compact-history-budget` | · | ✓ | ✓ |
-| elideresult — oversized-result elision (shrink a scrolled-past tool_result to head+tail) | bounded | **ON** | ✓ | — | `--elide-result-bytes` | · | ✓ | ✓ |
-| elidestale — stale-read elision (replace a Read superseded by a later same-file edit with a restorable marker) | bounded | **ON** | ✓ | — | `--elide-stale-reads` | · | ✓ | ✓ |
-| ctxview — ctxplan O(1) planned view (re-materialize history under a budget) | bounded | **ON** | ✓ | — | `--ctx-view-budget` | · | ✓ | ✓ |
+| compacthistory — history compaction (drop the un-cacheable middle past the budget; harness doors, the serving router resolves raw via gateway.DefaultServeCompactHistoryBudget, re-arm --compact-history-budget) | bounded | **ON** | ✓ | — | `--compact-history-budget` | · | ✓ | ✓ |
+| elideresult — oversized-result elision (shrink a scrolled-past tool_result to head+tail; harness doors, the serving router resolves raw via gateway.DefaultServeElideResultBytes, re-arm --elide-result-bytes) | bounded | **ON** | ✓ | — | `--elide-result-bytes` | · | ✓ | ✓ |
+| elidestale — stale-read elision (replace a Read superseded by a later same-file edit with a restorable marker; harness doors, the serving router resolves raw via gateway.DefaultServeElideStaleReads, re-arm --elide-stale-reads) | bounded | **ON** | ✓ | — | `--elide-stale-reads` | · | ✓ | ✓ |
+| ctxview — ctxplan O(1) planned view (re-materialize history under a budget; harness doors, the serving router resolves raw via gateway.DefaultServeCtxViewBudget, re-arm --ctx-view-budget) | bounded | **ON** | ✓ | — | `--ctx-view-budget` | · | ✓ | ✓ |
 | headroomcompressor - registered result-compressor family | optin | **OFF** | · | matched-quality live-wire witness missing | `--compress / FAK_COMPRESSOR` | ✓ | · | · |
 
 ## KPIs

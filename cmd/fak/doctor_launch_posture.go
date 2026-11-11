@@ -81,11 +81,36 @@ func runDoctorLaunchPosture(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak doctor launch-posture: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
+	// The modeled lever defaults are per-door since the 2026-11-10
+	// hosting-simplification flip: the serve door resolves the raw serving-router
+	// posture (gateway.DefaultServe*), agent/guard keep the armed library consts the
+	// flags above declare. An EXPLICITLY passed lever flag still wins on every door.
+	explicit := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+	compactHistoryVal, ctxViewVal := *compactHistory, *ctxViewBudget
+	elideVal, deferVal, vcacheVal := *elideStaleReads, *deferColdTools, *vcacheAnchor
+	if strings.ToLower(strings.TrimSpace(*entrypoint)) == "serve" {
+		if !explicit["compact-history-budget"] {
+			compactHistoryVal = gateway.DefaultServeCompactHistoryBudget
+		}
+		if !explicit["ctx-view-budget"] {
+			ctxViewVal = gateway.DefaultServeCtxViewBudget
+		}
+		if !explicit["elide-stale-reads"] {
+			elideVal = gateway.DefaultServeElideStaleReads
+		}
+		if !explicit["defer-cold-tools"] {
+			deferVal = gateway.DefaultServeDeferColdTools
+		}
+		if !explicit["vcache-anchor"] {
+			vcacheVal = gateway.DefaultServeVCacheAnchor
+		}
+	}
 	report, err := deriveLaunchPosture(launchPostureOptions{
 		entrypoint: *entrypoint, harness: *harness, provider: *provider, baseURL: *baseURL,
 		workspace: *workspace, native: *native, nativeCodeTools: *nativeCodeTools,
-		outputProfile: *outputProfile, workProfile: *workProfile, compactHistory: *compactHistory, ctxViewBudget: *ctxViewBudget,
-		elideStaleReads: *elideStaleReads, deferColdTools: *deferColdTools, vcacheAnchor: *vcacheAnchor,
+		outputProfile: *outputProfile, workProfile: *workProfile, compactHistory: compactHistoryVal, ctxViewBudget: ctxViewVal,
+		elideStaleReads: elideVal, deferColdTools: deferVal, vcacheAnchor: vcacheVal,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "fak doctor launch-posture: %v\n", err)

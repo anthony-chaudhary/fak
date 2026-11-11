@@ -877,8 +877,10 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}()
 	req.Messages = messages
 	// Oversize tool results page out to restore stubs only for a client that can call
-	// the restore tool; the decision rides ctx into both admission passes.
-	paging := resolveChatCtxPaging(r, req.Tools)
+	// the restore tool; the decision rides ctx into both admission passes. The
+	// server's resolved CtxPaging posture (serve: OFF) sits under the per-request
+	// header and the process env.
+	paging := s.resolveChatCtxPaging(r, req.Tools)
 	w.Header().Set(HeaderCtxPaging, paging.header)
 	ctx = ctxmmu.WithOversizePagingSuppressed(ctx, paging.suppressReason)
 	resultAdmissions, err := s.admitInboundResults(ctx, req.Messages, req.Tools, reqTrace)
@@ -887,10 +889,21 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Microcontext tool result elision (#11648)
+	// Microcontext tool result elision (#11648). The chat-tool-result-elide
+	// posture (serve: OFF) declines the rewrite entirely — no marker, no stash,
+	// no restore-tool injection; the client's tools pass through untouched.
 	restoreToolName, restoreToolPresent, autoAdvertise := determineChatRestoreTool(req.Tools)
-	req.Messages = s.maybeElideResponsesToolResults(reqTrace, req.Messages, restoreToolName)
-	if len(req.Tools) > 0 && !restoreToolPresent && (autoAdvertise || hasElidedToolResult(req.Messages)) {
+	if !s.chatToolResultElideOff {
+		req.Messages = s.maybeElideResponsesToolResults(reqTrace, req.Messages, restoreToolName)
+	}
+	// The restore tool is auto-advertised only while a context-plane affordance
+	// that PRODUCES restore handles is armed (elision or oversize paging), or
+	// when the history already carries an elided marker an earlier-armed
+	// posture (or the client) left behind — the defensive recovery path. With
+	// both postures off (the serving-router default) a request's declared tools
+	// pass through byte-identical.
+	if len(req.Tools) > 0 && !restoreToolPresent &&
+		((autoAdvertise && s.restoreAffordanceArmed(paging)) || hasElidedToolResult(req.Messages)) {
 		req.Tools = append(req.Tools, agent.ToolDef{
 			Type: "function",
 			Function: agent.ToolDefFunction{

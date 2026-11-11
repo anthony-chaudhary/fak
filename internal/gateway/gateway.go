@@ -122,6 +122,17 @@ func New(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gateway: tool guard mode: %w", err)
 	}
+	// The context-plane postures are the SAME class of boundary (they decide
+	// whether the gateway rewrites the served context at all), so an explicit
+	// but unparsable value fails loud at boot rather than silently rewriting.
+	ctxPagingMode, err := ParseCtxPagingMode(cfg.CtxPaging)
+	if err != nil {
+		return nil, fmt.Errorf("gateway: ctx paging mode: %w", err)
+	}
+	chatToolResultElideMode, err := ParseChatToolResultElideMode(cfg.ChatToolResultElide)
+	if err != nil {
+		return nil, fmt.Errorf("gateway: chat tool-result elide mode: %w", err)
+	}
 	// A misconfigured routing policy is a security boundary (it decides which model
 	// — local or remote — a tenant payload reaches), so validate it at New and fail
 	// loud rather than fall through to a silent default model at dispatch time.
@@ -285,6 +296,8 @@ func New(cfg Config) (*Server, error) {
 		workspaceAdmissionPermissive: cfg.WorkspaceAdmissionPermissive,
 		workspaceAdmissionMode:       ResolveWorkspaceAdmissionMode(cfg),
 		toolGuardOff:                 toolGuardMode == ToolGuardOff,
+		ctxPagingMode:                ctxPagingMode,
+		chatToolResultElideOff:       chatToolResultElideMode == ChatToolResultElideOff,
 		sessionLane:                  strings.TrimSpace(cfg.SessionLane),
 		k:                            k,
 		toolPlugins:                  append([]toolplugin.Plugin(nil), cfg.ToolPlugins...),

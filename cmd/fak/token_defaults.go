@@ -218,14 +218,24 @@ func collectTokenDefaultsScorecardWithInputs(root string, sources tokenDefaultSo
 			defects = append(defects, msg)
 		}
 	}
-	require(strings.Contains(gateway, "const DefaultCompactHistoryBudget = 48000"), "gateway.DefaultCompactHistoryBudget must stay default-on")
+	require(strings.Contains(gateway, "const DefaultCompactHistoryBudget = 48000"), "gateway.DefaultCompactHistoryBudget must stay default-on (the guard door's legacy posture)")
 	require(strings.Contains(gateway, "DefaultElideResultBytes = DocumentedElideResultBytes"), "gateway.DefaultElideResultBytes must arm oversized-result elision on by default at the documented threshold")
-	require(bothWire(`fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget`), "both front doors must wire compact-history-budget to gateway.DefaultCompactHistoryBudget")
-	require(bothWire(`fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes`), "both front doors must wire elide-result-bytes to gateway.DefaultElideResultBytes")
+	// The 2026-11-10 hosting-simplification split posture: the GUARD door keeps the
+	// armed savers (library consts); the SERVE door resolves its own raw context-plane
+	// defaults (gateway.DefaultServe*). Each door must wire its OWN posture const —
+	// a door silently inheriting the other's posture is the drift these locks exist for.
+	require(strings.Contains(guard, `fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget`), "guard.go must wire compact-history-budget to gateway.DefaultCompactHistoryBudget (the armed harness posture)")
+	require(strings.Contains(serve, `fs.Int("compact-history-budget", gateway.DefaultServeCompactHistoryBudget`), "serve.go must wire compact-history-budget to gateway.DefaultServeCompactHistoryBudget (the raw serving-router posture, 2026-11-10 hosting-simplification flip)")
+	require(strings.Contains(guard, `fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes`), "guard.go must wire elide-result-bytes to gateway.DefaultElideResultBytes (the armed harness posture)")
+	require(strings.Contains(serve, `fs.Int("elide-result-bytes", gateway.DefaultServeElideResultBytes`), "serve.go must wire elide-result-bytes to gateway.DefaultServeElideResultBytes (the raw serving-router posture)")
 	require(strings.Contains(gateway, "const DefaultElideStaleReads = true"), "gateway.DefaultElideStaleReads must arm read-lifecycle STALE elision on by default (the restorable sibling of oversized elision)")
-	require(bothWire(`fs.Bool("elide-stale-reads", gateway.DefaultElideStaleReads`), "both front doors must wire elide-stale-reads to gateway.DefaultElideStaleReads")
+	require(strings.Contains(guard, `fs.Bool("elide-stale-reads", gateway.DefaultElideStaleReads`), "guard.go must wire elide-stale-reads to gateway.DefaultElideStaleReads (the armed harness posture)")
+	require(strings.Contains(serve, `fs.Bool("elide-stale-reads", gateway.DefaultServeElideStaleReads`), "serve.go must wire elide-stale-reads to gateway.DefaultServeElideStaleReads (the raw serving-router posture)")
 	require(strings.Contains(agentSeam, "const DefaultCtxViewBudget = 8000"), "agent.DefaultCtxViewBudget must stay default-on at the witnessed 8000-resident-token budget")
-	require(bothWire(`fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget`), "both front doors must default ctx-view-budget ON by wiring it to agent.DefaultCtxViewBudget (the witnessed 8000-resident-token budget: docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md)")
+	require(strings.Contains(guard, `fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget`), "guard.go must default ctx-view-budget ON by wiring it to agent.DefaultCtxViewBudget (the witnessed 8000-resident-token budget: docs/notes/CTXVIEW-DEFAULT-ON-WITNESS-2026-06-28.md)")
+	require(strings.Contains(serve, `fs.Int("ctx-view-budget", gateway.DefaultServeCtxViewBudget`), "serve.go must wire ctx-view-budget to gateway.DefaultServeCtxViewBudget (the raw serving-router posture, 2026-11-10 hosting-simplification flip)")
+	require(strings.Contains(serve, `fs.String("ctx-paging", gateway.DefaultServeCtxPaging`), "serve.go must wire --ctx-paging to gateway.DefaultServeCtxPaging (the raw serving-router posture)")
+	require(strings.Contains(serve, `fs.Bool("chat-elide", gateway.DefaultServeChatToolResultElide`), "serve.go must wire --chat-elide to the gateway.DefaultServeChatToolResultElide posture (the raw serving-router posture)")
 	require(strings.Contains(serve, `fs.Bool("vdso", true`), "serve.go must default vDSO on")
 	require(reVDSOTrue.MatchString(guard), "guard.go must set VDSO true")
 	require(bothWire("ToolFloorDenies:"), "both front doors must wire ToolFloorDenies")
@@ -285,8 +295,8 @@ func collectTokenDefaultsScorecardWithInputs(root string, sources tokenDefaultSo
 			witnessed: exists("internal/gateway/mcp_filter_ab_test.go"), blocker: blockerIf(!exists("internal/gateway/mcp_filter_ab_test.go"), "unwitnessed"), flag: "FAK_ABLATE_MCP_TOOL_FILTER=1", gated: false, noted: true, locked: true,
 		},
 		{
-			key: "defercoldtools", label: "defercoldtools — outbound Anthropic cold-tool schema deferral",
-			class: "bounded", on: strings.Contains(gateway, "const DefaultDeferColdTools = true") && bothWire(`fs.Bool("defer-cold-tools", gateway.DefaultDeferColdTools`),
+			key: "defercoldtools", label: "defercoldtools — outbound Anthropic cold-tool schema deferral (harness doors; the serving router resolves raw via gateway.DefaultServeDeferColdTools, re-arm --defer-cold-tools)",
+			class: "bounded", on: strings.Contains(gateway, "const DefaultDeferColdTools = true") && strings.Contains(guard, `fs.Bool("defer-cold-tools", gateway.DefaultDeferColdTools`),
 			witnessed: exists("internal/gateway/tooldefer_default_on_test.go"), blocker: blockerIf(!exists("internal/gateway/tooldefer_default_on_test.go"), "unwitnessed"), flag: "--defer-cold-tools", gated: false, noted: true, locked: true,
 		},
 		{
@@ -295,23 +305,23 @@ func collectTokenDefaultsScorecardWithInputs(root string, sources tokenDefaultSo
 			witnessed: true, blocker: "", flag: "--vdso", gated: false, noted: true, locked: true,
 		},
 		{
-			key: "compacthistory", label: "compacthistory — history compaction (drop the un-cacheable middle past the budget)",
-			class: "bounded", on: strings.Contains(gateway, "const DefaultCompactHistoryBudget = 48000") && bothWire(`fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget`),
+			key: "compacthistory", label: "compacthistory — history compaction (drop the un-cacheable middle past the budget; harness doors, the serving router resolves raw via gateway.DefaultServeCompactHistoryBudget, re-arm --compact-history-budget)",
+			class: "bounded", on: strings.Contains(gateway, "const DefaultCompactHistoryBudget = 48000") && strings.Contains(guard, `fs.Int("compact-history-budget", gateway.DefaultCompactHistoryBudget`),
 			witnessed: true, blocker: "", flag: "--compact-history-budget", gated: false, noted: true, locked: true,
 		},
 		{
-			key: "elideresult", label: "elideresult — oversized-result elision (shrink a scrolled-past tool_result to head+tail)",
-			class: "bounded", on: strings.Contains(gateway, "DefaultElideResultBytes = DocumentedElideResultBytes") && bothWire(`fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes`),
+			key: "elideresult", label: "elideresult — oversized-result elision (shrink a scrolled-past tool_result to head+tail; harness doors, the serving router resolves raw via gateway.DefaultServeElideResultBytes, re-arm --elide-result-bytes)",
+			class: "bounded", on: strings.Contains(gateway, "DefaultElideResultBytes = DocumentedElideResultBytes") && strings.Contains(guard, `fs.Int("elide-result-bytes", gateway.DefaultElideResultBytes`),
 			witnessed: elideWitnessed, blocker: blockerIf(!elideWitnessed, "unwitnessed"), flag: "--elide-result-bytes", gated: false, noted: true, locked: true,
 		},
 		{
-			key: "elidestale", label: "elidestale — stale-read elision (replace a Read superseded by a later same-file edit with a restorable marker)",
-			class: "bounded", on: strings.Contains(gateway, "const DefaultElideStaleReads = true") && bothWire(`fs.Bool("elide-stale-reads", gateway.DefaultElideStaleReads`),
+			key: "elidestale", label: "elidestale — stale-read elision (replace a Read superseded by a later same-file edit with a restorable marker; harness doors, the serving router resolves raw via gateway.DefaultServeElideStaleReads, re-arm --elide-stale-reads)",
+			class: "bounded", on: strings.Contains(gateway, "const DefaultElideStaleReads = true") && strings.Contains(guard, `fs.Bool("elide-stale-reads", gateway.DefaultElideStaleReads`),
 			witnessed: elideStaleWitnessed, blocker: blockerIf(!elideStaleWitnessed, "unwitnessed"), flag: "--elide-stale-reads", gated: false, noted: true, locked: true,
 		},
 		{
-			key: "ctxview", label: "ctxview — ctxplan O(1) planned view (re-materialize history under a budget)",
-			class: "bounded", on: strings.Contains(agentSeam, "const DefaultCtxViewBudget = 8000") && bothWire(`fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget`),
+			key: "ctxview", label: "ctxview — ctxplan O(1) planned view (re-materialize history under a budget; harness doors, the serving router resolves raw via gateway.DefaultServeCtxViewBudget, re-arm --ctx-view-budget)",
+			class: "bounded", on: strings.Contains(agentSeam, "const DefaultCtxViewBudget = 8000") && strings.Contains(guard, `fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget`),
 			witnessed: true, blocker: "", flag: "--ctx-view-budget", gated: false, noted: true, locked: true,
 		},
 		{

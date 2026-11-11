@@ -322,6 +322,33 @@ type Config struct {
 	// this from --guard / FAK_GUARD and defaults OFF (the raw router posture);
 	// `fak guard` pins it ON. An explicit unparsable value fails New loud.
 	ToolGuard string
+	// CtxPaging selects the OVERSIZE-PAGING posture for tool results on the
+	// chat/responses wires ("on" | "off" | "auto"; empty resolves AUTO). AUTO
+	// (the library default, and the harness products) pages an oversize-but-
+	// benign tool result to a {"_paged":true} restore stub whenever the client
+	// can restore one; OFF never pages — a tool result reaches the model whole,
+	// byte-identical, and no restore stub or restore affordance is created by
+	// paging. The per-request X-Fak-Ctx-Paging header and the FAK_CTX_PAGING
+	// process env still win over this posture (header > env > config). `fak
+	// serve` resolves this from --ctx-paging / FAK_CTX_PAGING and defaults OFF
+	// (the 2026-11-10 hosting-simplification flip: the serving router does not
+	// rewrite context by default); `fak guard` leaves it empty (AUTO). An
+	// explicit unparsable value fails New loud.
+	CtxPaging string
+	// ChatToolResultElide selects the chat/responses tool-result ELISION
+	// posture ("on" | "off"; empty resolves ON). ON (the library default, and
+	// the harness products) rewrites an old oversized tool result beyond the
+	// active working set into a "...[fak: tool output elided ... recover via
+	// fak_context_restore id=sha256:...]..." marker and auto-advertises the
+	// restore tool to clients that carry fak MCP tools. OFF never rewrites a
+	// tool result and never auto-advertises the restore tool — the client's
+	// declared tools pass through untouched (a restore tool already present in
+	// the history's markers stays advertised, so an earlier-armed session can
+	// still recover). `fak serve` resolves this from --chat-elide /
+	// FAK_CHAT_ELIDE and defaults OFF (the same hosting-simplification flip);
+	// `fak guard` leaves it empty (ON). An explicit unparsable value fails New
+	// loud.
+	ChatToolResultElide string
 	// SessionLane is the LAUNCH-TIME lane designation the host (fak guard) stamps
 	// onto every served tool call as trusted Meta["lane"] (#3707/#3708/#3709). It
 	// is the coordinator's spawn-time designation — the same trust level as the

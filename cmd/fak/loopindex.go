@@ -108,8 +108,8 @@ func collectLoopIndex(root string) loopindex.Loop {
 				true, hasFold("cmd/fak/recall.go", "read-time", "reverify", "re-verify")),
 			liProbe("context_gc", "context is ref-counted / GC'd (internal/contextq + internal/ctxmmu)",
 				false, exists("internal/contextq") && exists("internal/ctxmmu")),
-			liProbe("ctxview_budget_default", "the ctxplan planned view is default-on in both front doors (one-read orient under a budget)",
-				false, bothDoors(`fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget`)),
+			liProbe("ctxview_budget_default", "the ctxplan planned view is default-on in the guard door and posture-const-wired in the serve door (the 2026-11-10 hosting-simplification split: guard arms agent.DefaultCtxViewBudget, serve resolves gateway.DefaultServeCtxViewBudget)",
+				false, has("cmd/fak/guard.go", `fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget`) && has("cmd/fak/serve.go", `fs.Int("ctx-view-budget", gateway.DefaultServeCtxViewBudget`)),
 		},
 	}
 
