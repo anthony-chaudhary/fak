@@ -45,6 +45,10 @@ func TestGuardContinueFlagForAgent(t *testing.T) {
 		{"windows exe suffix", "claude.exe", "--continue", true},
 		{"windows cmd suffix", "claude.cmd", "--continue", true},
 		{"case insensitive", "CLAUDE", "--continue", true},
+		{"bare opencode", "opencode", "--continue", true},
+		{"opencode absolute path", "/usr/local/bin/opencode", "--continue", true},
+		{"opencode windows exe suffix", "opencode.exe", "--continue", true},
+		{"opencode case insensitive", "OPENCODE", "--continue", true},
 		{"unrecognized agent", "codex", "", false},
 		{"empty", "", "", false},
 	}

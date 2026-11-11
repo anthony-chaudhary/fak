@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -13,12 +14,15 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/childprocess"
+	"github.com/anthony-chaudhary/fak/internal/opencoderesume"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/projectassets"
+	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
 )
 
 type opencodeLaunchOptions struct {
@@ -45,12 +49,138 @@ type opencodeLaunchOptions struct {
 	auto            bool
 	skipPermissions bool
 	workspaceDir    string
-	passthrough     []string
+	// continueFlag / sessionID are the operator-named resume passthrough (#14330):
+	// they map onto OpenCode's NATIVE --continue / --session <id> flags, which both
+	// the TUI root command and `run` accept. sessionID is shape-validated by
+	// opencoderesume.IsSessionID before launch — an ill-shaped id would make
+	// `opencode run --session` CREATE a fresh session instead of resuming one.
+	continueFlag bool
+	sessionID    string
+	passthrough  []string
 }
 
 var opencodeLaunchRun = execOpencodeLaunchChild
 
+// opencodeLauncherVerify is the opencoderesume.Verify seam the `fak opencode resume`
+// preflight gate calls; tests replace it to pin verdicts without spawning opencode.
+var opencodeLauncherVerify = opencoderesume.Verify
+
+// opencodeLauncherAppendJournal is the sessionjournal.Append seam the launcher writes its
+// lifecycle rows through; tests replace it to capture rows or force failures.
+var opencodeLauncherAppendJournal = sessionjournal.Append
+
 const opencodeLaunchWorkingDirEnv = "FAK_OPENCODE_LAUNCH_WORKING_DIR"
+
+// opencodeLaunchCaptureLimit bounds how much child stdout the launcher retains for the
+// post-exit session-id extraction (#14330): enough for the JSONL head where OpenCode
+// announces its session, without pinning megabytes per launch.
+const opencodeLaunchCaptureLimit = 1 << 20
+
+// opencodeLaunchCapture is a bounded tee of the launched child's stdout. The terminal
+// stream is untouched (the tee only MIRRORS bytes); the retained prefix exists so the
+// open/close journal pair can be joined to the real OpenCode session id after exit.
+type opencodeLaunchCapture struct {
+	mu     sync.Mutex
+	buf    bytes.Buffer
+	capped bool
+}
+
+func (c *opencodeLaunchCapture) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.capped {
+		room := opencodeLaunchCaptureLimit - c.buf.Len()
+		if len(p) <= room {
+			c.buf.Write(p)
+		} else {
+			c.buf.Write(p[:room])
+			c.capped = true
+		}
+	}
+	return len(p), nil
+}
+
+func (c *opencodeLaunchCapture) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.buf.String()
+}
+
+var (
+	opencodeLaunchCaptureMu   sync.Mutex
+	opencodeLaunchCaptureSlot *opencodeLaunchCapture
+)
+
+// publishOpencodeLaunchCapture records the capture that the in-flight launch tees into.
+// One CLI process launches exactly one child at a time, so a single slot suffices.
+func publishOpencodeLaunchCapture(c *opencodeLaunchCapture) {
+	opencodeLaunchCaptureMu.Lock()
+	opencodeLaunchCaptureSlot = c
+	opencodeLaunchCaptureMu.Unlock()
+}
+
+// takeOpencodeLaunchCapture returns the last launch's captured child stdout and clears
+// the slot. It yields "" when the launch went through a stubbed opencodeLaunchRun.
+func takeOpencodeLaunchCapture() string {
+	opencodeLaunchCaptureMu.Lock()
+	defer opencodeLaunchCaptureMu.Unlock()
+	s := ""
+	if opencodeLaunchCaptureSlot != nil {
+		s = opencodeLaunchCaptureSlot.String()
+	}
+	opencodeLaunchCaptureSlot = nil
+	return s
+}
+
+// opencodeResumePassthrough is the launcher-owned slice of the child argv that resumes an
+// existing OpenCode session (#14330): the native --continue / --session <id> flags, placed
+// right after the command verb (`run`) or at the front of an interactive launch, ahead of
+// any operator passthrough. The id was already shape-validated by the caller.
+func opencodeResumePassthrough(o opencodeLaunchOptions) []string {
+	var args []string
+	if o.continueFlag {
+		args = append(args, "--continue")
+	}
+	if o.sessionID != "" {
+		args = append(args, "--session", o.sessionID)
+	}
+	return args
+}
+
+// opencodeLaunchJournalEvent builds one crash-journal lifecycle row for an opencode launch
+// (#14330). The open row carries CWD + Argv (the fold key `fak session recover`'s journal
+// crash merge joins on); the close row carries only Reason (the exit status) — matching
+// the row shapes `fak sessionjournal` itself writes.
+func opencodeLaunchJournalEvent(kind sessionjournal.Kind, id, cwd string, argv []string, reason string) sessionjournal.Event {
+	now := time.Now().UTC()
+	bt, _ := sessionjournal.BootTime(now)
+	ev := sessionjournal.Event{
+		Kind:  kind,
+		ID:    id,
+		TS:    now.Format(time.RFC3339),
+		Boot:  sessionjournal.BootID(bt),
+		PID:   os.Getpid(),
+		Host:  sessionJournalHost(),
+		Agent: "opencode",
+	}
+	if kind == sessionjournal.KindOpen {
+		ev.CWD = cwd
+		ev.Argv = argv
+	} else {
+		ev.Reason = reason
+	}
+	return ev
+}
+
+// opencodeLauncherRecordJournal appends one lifecycle row best-effort: a write failure logs
+// to stderr and returns false — journaling must never fail a launch (#14330).
+func opencodeLauncherRecordJournal(stderr io.Writer, ev sessionjournal.Event) bool {
+	if err := opencodeLauncherAppendJournal("", ev); err != nil {
+		fmt.Fprintf(stderr, "fak opencode: session journal: %v\n", err)
+		return false
+	}
+	return true
+}
 
 func cmdOpencode(argv []string) {
 	os.Exit(runOpencode(os.Stdout, os.Stderr, argv))
@@ -62,6 +192,9 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 	}
 	if len(argv) > 0 && argv[0] == "free-models" {
 		return runOpencodeFreeModels(stdout, stderr, argv[1:])
+	}
+	if len(argv) > 0 && argv[0] == "resume" {
+		return runOpencodeResume(stdout, stderr, argv[1:])
 	}
 
 	fs := flag.NewFlagSet("opencode", flag.ContinueOnError)
@@ -92,14 +225,19 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 	ggufPath := fs.String("gguf", "", "run a local in-kernel GGUF model as guard's upstream")
 	gpuBackend := fs.String("backend", "", "with --gguf: compute backend")
 	tokenizerPath := fs.String("tokenizer", "", "with --gguf: tokenizer override")
+	continueFlag := fs.Bool("continue", false, "pass --continue to the OpenCode child (resume its most recent session)")
+	sessionID := fs.String("session", "", "OpenCode session id to resume; passed to the child as --session <id>")
+	resumeID := fs.String("resume", "", "alias for --session")
 
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: fak opencode [launcher flags] [-- <opencode args...>]")
 		fmt.Fprintln(stderr, "       fak opencode config [--write] [--addr ADDR] [--model MODEL]")
+		fmt.Fprintln(stderr, "       fak opencode resume --session <id> [--prompt PROMPT] [--guard] [--dir DIR]")
 		fmt.Fprintln(stderr, "  e.g. fak opencode")
 		fmt.Fprintln(stderr, "       fak opencode --dry-run")
 		fmt.Fprintln(stderr, "       fak opencode --probe \"Use bash to print hello\"")
 		fmt.Fprintln(stderr, "       fak opencode --policy my-floor.json -- run \"check the repo\"")
+		fmt.Fprintln(stderr, "       fak opencode --session ses_e3861b794ffeKK5UOg25IFE1mR")
 		fmt.Fprintln(stderr, "")
 		fs.PrintDefaults()
 	}
@@ -108,6 +246,25 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 	}
 	if err := validateOpencodeLaunchSplit(*splitMode, *splitWhere); err != nil {
 		fmt.Fprintf(stderr, "fak opencode: %v\n", err)
+		return 2
+	}
+	// Resume passthrough validation (#14330): --resume is an explicit alias of --session,
+	// and an ill-shaped id is refused BEFORE any exec — `opencode run --session` CREATES
+	// the session when the id does not exist, so garbage in would fabricate a fresh empty
+	// session instead of failing. A well-shaped id is passed through natively: the operator
+	// is explicitly naming their own session, so the launcher does not re-verify existence
+	// here (the `fak opencode resume` subcommand is the verified one-touch path).
+	session := strings.TrimSpace(*sessionID)
+	resumed := strings.TrimSpace(*resumeID)
+	switch {
+	case session != "" && resumed != "" && session != resumed:
+		fmt.Fprintf(stderr, "fak opencode: --session %q and --resume %q disagree; pass exactly one\n", session, resumed)
+		return 2
+	case resumed != "":
+		session = resumed
+	}
+	if session != "" && !opencoderesume.IsSessionID(session) {
+		fmt.Fprintf(stderr, "fak opencode: --session %q is not a valid OpenCode session id (want ses_ + 16-64 alphanumerics); refusing to launch — an ill-shaped id would CREATE a new opencode session instead of resuming\n", session)
 		return 2
 	}
 	*workDir = pathutil.ExpandTilde(*workDir)
@@ -212,6 +369,8 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 		tokenizerPath:   *tokenizerPath,
 		auto:            *auto,
 		skipPermissions: (*guard || flagSet(fs, "skip-permissions")) && *skipPermissions,
+		continueFlag:    *continueFlag,
+		sessionID:       session,
 		passthrough:     fs.Args(),
 	}
 	launch.workspaceDir = resolvedWorkDir
@@ -273,6 +432,20 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak opencode: warning: %v\n", err)
 	}
 
+	// Crash-journal registration (#14330): the open row lands BEFORE the child execs so a
+	// machine-wide crash leaves a foldable record for `fak session recover`'s journal crash
+	// merge. The id is the operator-named session when known; otherwise the launch-scoped
+	// fak id — the real OpenCode session id only becomes observable AFTER exit (the child
+	// announces it on stdout), so it cannot key the pre-exec open row and is surfaced below
+	// instead. Best-effort by contract: a journal write failure never fails the launch.
+	journalID := launch.sessionID
+	if journalID == "" {
+		journalID = newLaunchSessionID("opencode")
+	}
+	if journalID != "" {
+		opencodeLauncherRecordJournal(stderr, opencodeLaunchJournalEvent(sessionjournal.KindOpen, journalID, launch.workspaceDir, argvOut, ""))
+	}
+
 	started := time.Now()
 	if launch.guard {
 		fmt.Fprintln(stderr, "fak opencode: launching OpenCode through fak guard ...")
@@ -280,8 +453,90 @@ func runOpencode(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak opencode: launching OpenCode directly (without guard) ...")
 	}
 	code := opencodeLaunchRun(stdout, stderr, argvOut, launchEnv)
+	if journalID != "" {
+		opencodeLauncherRecordJournal(stderr, opencodeLaunchJournalEvent(sessionjournal.KindClose, journalID, "", nil, fmt.Sprintf("exit %d", code)))
+	}
+	if launch.sessionID == "" {
+		// Post-exit identity join: extract the session id the child announced (when the
+		// launcher did not already know it) so operators and future recovery tooling can
+		// join the fak launch id to the real OpenCode session.
+		if id := extractOpenCodeSessionID(takeOpencodeLaunchCapture()); id != "" && opencoderesume.IsSessionID(id) && !launch.quiet {
+			fmt.Fprintf(stderr, "fak opencode: observed OpenCode session %s\n", id)
+		}
+	}
 	if code == 0 {
 		fmt.Fprintf(stderr, "fak opencode: OpenCode completed successfully in %s\n", time.Since(started).Round(time.Millisecond))
+	}
+	return code
+}
+
+// runOpencodeResume is `fak opencode resume` — the operator-facing one-touch exact-resume
+// (#14330). Unlike the plain launcher flags (which trust an operator-named id), this path
+// verifies the ses_ identity against the project-scoped OpenCode store FIRST and launches
+// ONLY on VerdictResumable: `opencode run --session <id>` CREATES the session when the id
+// does not exist, so every other verdict refuses with exit 2 rather than fabricating a
+// fresh empty session and calling it recovery. On success it execs the headless exact-resume
+// argv (`opencode run --session <id> [prompt]`, internal/opencoderesume.ResumeArgv), fronted
+// by `fak guard --` exactly like the launcher's guarded child boundary when --guard is set.
+func runOpencodeResume(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("opencode resume", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	sessionID := fs.String("session", "", "OpenCode session id to resume (required)")
+	prompt := fs.String("prompt", "", "headless prompt sent to the resumed session")
+	guard := fs.Bool("guard", false, "front the resume launch with fak guard for kernel adjudication")
+	dir := fs.String("dir", ".", "project directory the session must belong to (default: current directory)")
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: fak opencode resume --session <id> [--prompt PROMPT] [--guard] [--dir DIR]")
+		fmt.Fprintln(stderr, "  e.g. fak opencode resume --session ses_e3861b794ffeKK5UOg25IFE1mR")
+		fmt.Fprintln(stderr, "       fak opencode resume --session ses_... --prompt \"continue\" --guard")
+		fmt.Fprintln(stderr, "")
+		fs.PrintDefaults()
+	}
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	id := strings.TrimSpace(*sessionID)
+	if id == "" {
+		fmt.Fprintln(stderr, "fak opencode resume: --session is required")
+		return 2
+	}
+	if !opencoderesume.IsSessionID(id) {
+		fmt.Fprintf(stderr, "fak opencode resume: --session %q is not a valid OpenCode session id (want ses_ + 16-64 alphanumerics); refusing to launch — an ill-shaped id would CREATE a new opencode session instead of resuming\n", id)
+		return 2
+	}
+	resolvedDir, err := resolveOpencodeWorkspaceDir(*dir)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak opencode resume: --dir: %v\n", err)
+		return 2
+	}
+	verdict, verr := opencodeLauncherVerify(context.Background(), opencoderesume.Options{SessionID: id, Dir: resolvedDir})
+	if verdict != opencoderesume.VerdictResumable {
+		fmt.Fprintf(stderr, "fak opencode resume: not resumable in %s: %s\n", resolvedDir, verdict)
+		if verr != nil {
+			fmt.Fprintf(stderr, "fak opencode resume: %v\n", verr)
+		}
+		fmt.Fprintln(stderr, "refusing to launch: opencode run --session CREATES the session when the id does not exist, so an unverified id would fabricate a fresh empty session and call it recovery")
+		return 2
+	}
+	childArgv, err := opencoderesume.ResumeArgv("opencode", id, *prompt, false)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak opencode resume: %v\n", err)
+		return 2
+	}
+	argvOut := childArgv
+	if *guard {
+		argvOut = append([]string{tuiExecutable(), "guard", "--"}, childArgv...)
+	}
+	launchEnv := opencodeUpsertEnv(os.Environ(), opencodeLaunchWorkingDirEnv, resolvedDir)
+	started := time.Now()
+	if *guard {
+		fmt.Fprintln(stderr, "fak opencode resume: launching OpenCode through fak guard ...")
+	} else {
+		fmt.Fprintln(stderr, "fak opencode resume: launching OpenCode directly ...")
+	}
+	code := opencodeLaunchRun(stdout, stderr, argvOut, launchEnv)
+	if code == 0 {
+		fmt.Fprintf(stderr, "fak opencode resume: OpenCode completed successfully in %s\n", time.Since(started).Round(time.Millisecond))
 	}
 	return code
 }
@@ -355,9 +610,12 @@ func opencodeChildArgs(o opencodeLaunchOptions) []string {
 	case len(rest) > 0 && rest[0] == "run":
 		rest = rest[1:]
 	default:
-		return append([]string(nil), rest...)
+		// Interactive launch: the native resume flags ride at the front, ahead of any
+		// operator passthrough (OpenCode v2 binds a flag to the command it follows).
+		return append(opencodeResumePassthrough(o), rest...)
 	}
 	args := []string{"run"}
+	args = append(args, opencodeResumePassthrough(o)...)
 	guardedModel := ""
 	if childModel := guardOpenCodeModelName(strings.TrimSpace(o.model)); childModel != "" {
 		providerID := guardOpenCodeLegacyProviderID
@@ -548,7 +806,11 @@ func execOpencodeLaunchChildContext(ctx context.Context, stdout, stderr io.Write
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = opencodeEnvValue(env, opencodeLaunchWorkingDirEnv)
 	cmd.Env = opencodeRemoveEnv(env, opencodeLaunchWorkingDirEnv)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, stdout, stderr
+	// Tee the child's stdout into a bounded capture so the post-exit session-id
+	// extraction (#14330) sees what the operator saw; the terminal stream is untouched.
+	capture := &opencodeLaunchCapture{}
+	publishOpencodeLaunchCapture(capture)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, io.MultiWriter(stdout, capture), stderr
 	cmd.WaitDelay = 5 * time.Second
 	cmd.Cancel = func() error {
 		if cmd.Process != nil && cmd.Process.Pid > 0 {

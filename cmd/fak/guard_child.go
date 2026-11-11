@@ -514,17 +514,19 @@ func guardAuthCrashRecoverWindowDuration() time.Duration {
 
 // guardContinueFlagForAgent returns the resume/continue flag fak knows is SAFE to auto-inject
 // for a recognized wrapped agent, keyed off the same command[0] basename resolveGuardProvider
-// uses. Currently only Claude Code (`claude`) is recognized — its `--continue` flag is exactly
-// the resume path formatGuardResumeGuidance already tells an operator to run BY HAND, so
-// auto-injecting it here only automates the one case already proven safe. Any other/unrecognized
-// binary returns ok=false: fak cannot safely guess a foreign tool's continuation syntax, so it
-// never auto-relaunches for it — the crash falls through to today's manual guidance instead of
-// risking a silent, context-dropping relaunch.
+// uses. Claude Code (`claude`) and OpenCode (`opencode`) are recognized: each `--continue`
+// flag is exactly the documented native resume path — for claude the one formatGuardResumeGuidance
+// already tells an operator to run BY HAND, for opencode the session-continue flag the launcher
+// itself passes through as --continue (#14330) — so auto-injecting it here only automates cases
+// already proven safe. Any other/unrecognized binary returns ok=false: fak cannot safely guess a
+// foreign tool's continuation syntax, so it never auto-relaunches for it — the crash falls
+// through to today's manual guidance instead of risking a silent, context-dropping relaunch.
 func guardContinueFlagForAgent(agentName string) (flag string, ok bool) {
 	// guardAgentBaseName (not filepath.Base) so a Windows launcher path like
 	// `C:\tools\claude.exe` is recognized on every host OS — filepath.Base is
 	// host-specific and does not split backslash paths on the Linux CI runner.
-	if guardAgentBaseName(agentName) == "claude" {
+	switch guardAgentBaseName(agentName) {
+	case "claude", "opencode":
 		return "--continue", true
 	}
 	return "", false
