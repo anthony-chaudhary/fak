@@ -38,7 +38,12 @@ type claudeLaunchOptions struct {
 	skipPermissions bool
 	quiet           bool
 	noProbe         bool
-	passthrough     []string
+	// frontDoor records that this launch rides the live-router loopback front
+	// door: the upstream credential is the per-launch front-door bearer (already
+	// resolved into apiKey/env), so the guard wrapper must forward that bearer
+	// instead of defaulting to the Claude subscription OAuth token.
+	frontDoor   bool
+	passthrough []string
 }
 
 type claudeStatusReport struct {
@@ -188,15 +193,24 @@ func runClaude(stdout, stderr io.Writer, argv []string) int {
 	// Code through a private loopback front door to that router and use its
 	// current model. This keeps the launcher on the router's model (e.g.
 	// DeepSeek) instead of the stale hardcoded 8080 / qwen38:27b-q4 placeholder.
-	// --no-router opts out; --guard is a direct-backend mode and is left alone.
+	// --no-router opts out. --guard joins the same front door: the guarded path
+	// is the full-fak path (kernel adjudication under the permissive default_open
+	// floor in front of the router), so it must not fall back to the dead 8080
+	// default when a router is live.
 	var routerFrontDoor *claudeFrontDoor
 	useLiveRouter := false
-	if !*noRouter && !*guard && !*printEnv && !flagSet(fs, "gateway-url") && !flagSet(fs, "base-url") && !flagSet(fs, "addr") {
+	if !*noRouter && !*printEnv && !flagSet(fs, "gateway-url") && !flagSet(fs, "base-url") && !flagSet(fs, "addr") {
 		if strings.TrimSpace(os.Getenv("FAK_MAC_GATEWAY")) == "" {
 			routerOrigin := claudeRouterOrigin("")
 			rc := &http.Client{Timeout: 2 * time.Second}
 			if liveModel, live := claudeRouterLive(routerOrigin, 2*time.Second); live {
 				useLiveRouter = true
+				// The front door admits only its per-launch bearer; an operator
+				// who named --api-key-env expects that env to be the upstream
+				// credential, so say plainly that the front door shadows it.
+				if strings.TrimSpace(*apiKeyEnv) != "" && !*quiet {
+					fmt.Fprintf(stderr, "fak claude: --api-key-env %s is shadowed on the live-router front door; the per-launch front-door bearer is the upstream credential\n", *apiKeyEnv)
+				}
 				// Prefer the router's default-backend model over the first
 				// advertised id when nothing pins the model. An explicit
 				// --model or FAK_ROUTER_MODEL still wins: the preference runs
@@ -268,6 +282,7 @@ func runClaude(stdout, stderr io.Writer, argv []string) int {
 		skipPermissions: (*guard || flagSet(fs, "skip-permissions") || flagSet(fs, "dangerously-skip-permissions")) && *skipPermissions && *dangerouslySkipPermissions,
 		quiet:           *quiet,
 		noProbe:         *noProbe,
+		frontDoor:       useLiveRouter,
 		passthrough:     fs.Args(),
 	}
 
@@ -369,7 +384,14 @@ func buildClaudeGuardLaunchArgv(fakBin string, o claudeLaunchOptions, child []st
 	if o.model != "" {
 		argv = append(argv, "--model", o.model)
 	}
-	if o.apiKeyEnv != "" {
+	switch {
+	case o.frontDoor:
+		// The loopback front door admits only its per-launch bearer, which the
+		// launcher already resolved into ANTHROPIC_API_KEY. Name that env var so
+		// the guard's gateway forwards it upstream; guard's anthropic default
+		// (subscription OAuth) would be rejected by the front door.
+		argv = append(argv, "--api-key-env", "ANTHROPIC_API_KEY")
+	case o.apiKeyEnv != "":
 		argv = append(argv, "--api-key-env", o.apiKeyEnv)
 	}
 	if o.probePrompt != "" {

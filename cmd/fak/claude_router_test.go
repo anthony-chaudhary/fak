@@ -315,3 +315,117 @@ func TestClaudeFrontDoorLogPathIsTempScoped(t *testing.T) {
 		t.Errorf("log path %q does not encode the address", p)
 	}
 }
+
+// TestClaudeGuardJoinsLiveRouterFrontDoor pins the guarded end-to-end path: with
+// --guard and a live router and no explicit backend, the launcher starts the same
+// loopback front door (no dead-8080 fallback) and the guard command names
+// ANTHROPIC_API_KEY as the upstream key env, so the guard's gateway forwards the
+// per-launch front-door bearer instead of the Claude subscription OAuth token.
+func TestClaudeGuardJoinsLiveRouterFrontDoor(t *testing.T) {
+	stubClaudeRouterLive(t, "router-served-model", true)
+	stubClaudeRouterModel(t, "router-served-model")
+	t.Setenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+	t.Setenv("FAK_MAC_GATEWAY", "")
+	t.Setenv("FAK_ROUTER_URL", "http://127.0.0.1:18101")
+
+	var stdout, stderr bytes.Buffer
+	code := runClaude(&stdout, &stderr, []string{"--guard", "--dry-run", "--no-probe"})
+	if code != 0 {
+		t.Fatalf("runClaude = %d; stderr=%s", code, stderr.String())
+	}
+	out := stderr.String()
+	if !strings.Contains(out, "harness     = claude (fak guard enabled)") {
+		t.Errorf("guarded dry-run did not report the guard harness:\n%s", out)
+	}
+	if !strings.Contains(out, "backend     = live fak router via loopback front door") {
+		t.Errorf("guarded dry-run did not name the live-router front door:\n%s", out)
+	}
+	if strings.Contains(out, "gateway     = http://127.0.0.1:8080") {
+		t.Errorf("guarded dry-run fell back to the stale 8080 default:\n%s", out)
+	}
+	cmd := stdout.String()
+	for _, want := range []string{
+		"guard --provider anthropic",
+		"--base-url http://127.0.0.1:<free>",
+		"--model router-served-model",
+		"--api-key-env ANTHROPIC_API_KEY",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("guarded front-door command missing %q:\n%s", want, cmd)
+		}
+	}
+}
+
+// TestClaudeGuardExplicitGatewayKeepsSubscriptionDefault pins the non-router
+// guard path: an explicit --gateway-url keeps guard's historical upstream
+// contract (subscription OAuth default; no api-key-env injected).
+func TestClaudeGuardExplicitGatewayKeepsSubscriptionDefault(t *testing.T) {
+	t.Setenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+	t.Setenv("FAK_MAC_GATEWAY", "")
+
+	var stdout, stderr bytes.Buffer
+	code := runClaude(&stdout, &stderr, []string{"--guard", "--dry-run", "--no-probe", "--gateway-url", "http://127.0.0.1:65530", "--model", "fixture"})
+	if code != 0 {
+		t.Fatalf("runClaude = %d; stderr=%s", code, stderr.String())
+	}
+	cmd := stdout.String()
+	if strings.Contains(cmd, "--api-key-env") {
+		t.Errorf("explicit-backend guard injected an api-key-env; subscription default must stay:\n%s", cmd)
+	}
+	if !strings.Contains(cmd, "--base-url http://127.0.0.1:65530") {
+		t.Errorf("guard command lost the explicit gateway:\n%s", cmd)
+	}
+}
+
+// TestClaudeFrontDoorShadowsOperatorKeyEnvNotice pins the operator notice: when
+// an operator names --api-key-env on a live-router front-door launch, stderr
+// says the front-door bearer shadows it, and --quiet suppresses the notice.
+func TestClaudeFrontDoorShadowsOperatorKeyEnvNotice(t *testing.T) {
+	stubClaudeRouterLive(t, "router-served-model", true)
+	stubClaudeRouterModel(t, "router-served-model")
+	t.Setenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+	t.Setenv("FAK_MAC_GATEWAY", "")
+	t.Setenv("FAK_ROUTER_URL", "http://127.0.0.1:18101")
+
+	var stdout, stderr bytes.Buffer
+	code := runClaude(&stdout, &stderr, []string{"--dry-run", "--no-probe", "--api-key-env", "OPERATOR_KEY"})
+	if code != 0 {
+		t.Fatalf("runClaude = %d; stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "--api-key-env OPERATOR_KEY is shadowed on the live-router front door") {
+		t.Errorf("front-door launch did not name the shadowed key env:\n%s", stderr.String())
+	}
+
+	var qOut, qErr bytes.Buffer
+	if code := runClaude(&qOut, &qErr, []string{"--dry-run", "--no-probe", "--quiet", "--api-key-env", "OPERATOR_KEY"}); code != 0 {
+		t.Fatalf("runClaude --quiet = %d; stderr=%s", code, qErr.String())
+	}
+	if strings.Contains(qErr.String(), "shadowed") {
+		t.Errorf("--quiet did not suppress the shadow notice:\n%s", qErr.String())
+	}
+}
+
+// TestClaudeGuardLaunchArgvFrontDoorPrecedence pins the argv switch directly:
+// the front door's bearer wins over an operator-named key env, while a
+// non-front-door launch keeps the operator's env and the bare default.
+func TestClaudeGuardLaunchArgvFrontDoorPrecedence(t *testing.T) {
+	child := []string{"claude", "--dangerously-skip-permissions"}
+
+	frontDoor := buildClaudeGuardLaunchArgv("fak", claudeLaunchOptions{serverURL: "http://127.0.0.1:<free>", model: "m", apiKeyEnv: "OPERATOR_KEY", frontDoor: true}, child)
+	if !strings.Contains(strings.Join(frontDoor, " "), "--api-key-env ANTHROPIC_API_KEY") {
+		t.Errorf("front-door guard argv did not pin ANTHROPIC_API_KEY: %v", frontDoor)
+	}
+	if strings.Contains(strings.Join(frontDoor, " "), "OPERATOR_KEY") {
+		t.Errorf("front-door guard argv leaked the operator key env: %v", frontDoor)
+	}
+
+	explicit := buildClaudeGuardLaunchArgv("fak", claudeLaunchOptions{serverURL: "http://127.0.0.1:8080", apiKeyEnv: "OPERATOR_KEY"}, child)
+	if !strings.Contains(strings.Join(explicit, " "), "--api-key-env OPERATOR_KEY") {
+		t.Errorf("explicit key env lost on the direct-backend guard: %v", explicit)
+	}
+
+	bare := buildClaudeGuardLaunchArgv("fak", claudeLaunchOptions{serverURL: "http://127.0.0.1:8080"}, child)
+	if strings.Contains(strings.Join(bare, " "), "--api-key-env") {
+		t.Errorf("bare guard argv must keep the subscription OAuth default: %v", bare)
+	}
+}
