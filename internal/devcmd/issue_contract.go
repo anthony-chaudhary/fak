@@ -53,6 +53,8 @@ func RunIssue(stdout, stderr io.Writer, argv []string) int {
 		return runIssueDraft(stdout, stderr, argv[1:])
 	case "finding":
 		return runIssueFinding(stdout, stderr, argv[1:])
+	case "stale-fixed":
+		return runIssueStaleFixed(stdout, stderr, argv[1:])
 	case "audit-discoverability", "discoverability":
 		return runIssueDiscoverability(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
@@ -1299,6 +1301,9 @@ func issueUsage(w io.Writer) {
   fak-dev issue finding  (--ledger LEDGER.jsonl | --receipts RECEIPTS.json)
                      [--from-issues ISSUES.json] [--lane L] [--json]
                      [--live --dedupe-cap N --max-apply N] [--repo owner/name]
+  fak-dev issue stale-fixed [--repo owner/name] [--root DIR] [--trunk-ref REF]
+                     [--limit N] [--depth N] [--from-issues ISSUES.json|-]
+                     [--apply] [--json]
 
 The dedup command is the retrospective backlog duplicate census — the read-only
 complement of the write-time near-duplicate gate. It builds a body-aware simhash
@@ -1340,6 +1345,18 @@ does not trip the reversibility/ESCALATE preview-confirm gate (which is
 correct to keep escalating an agent's own raw gh/git calls). --dry-run
 renders the issue and the exact gh argv without calling gh. Exit 0 created
 (or dry-run ok); exit 2 bad flags; exit 1 gh failure.
+
+The stale-fixed command is the closer for open issues that trunk already fixed:
+it scans a trunk ref (--trunk-ref, default the configured development branch)
+for GitHub closing-keyword commits — fix/fixes/fixed/close/closes/closed/
+resolve/resolves/resolved followed by #N, with an optional owner/repo
+qualifier — and joins them against the open issue set, reporting every
+candidate with its SHA evidence so a closure is always traceable to the commit
+that claimed it. The default is a read-only report that never touches GitHub;
+--apply posts an evidence comment citing the SHAs and then closes each listed
+issue through the governed gh atom. Open issues come live via gh unless
+--from-issues supplies a cached array (offline-safe; '-' reads stdin). Exit 0
+report or all-applied; exit 2 bad flags/input; exit 1 git or gh failure.
 
 The audit-loop command runs one deterministic producer tick of the durable
 cross-model issue-audit background loop (#3856): it plans a bounded batch from a
