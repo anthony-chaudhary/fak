@@ -43,7 +43,7 @@ func TestCUDAQwen35PagedIndependentDecodeBatch(t *testing.T) {
 	selectNames("cudaKVPagePool", "cudaPagedPoolKey", "cudaPagedPoolsMu", "cudaPagedKV", "cudaPagedKVCopyFailure", "*cudaPagedKVCopyFailure.Error", "*cudaKVPagePool.retainCopyOwnerLocked", "*cudaKVPagePool.stopCopyLocked", "*cudaKVPagePool.copyErrorLocked", "*cudaPagedKV.requireCopyHealthyLocked", "*cudaBackend.pagedPool", "*cudaBackend.newPagedKV", "*cudaPagedKV.Len", "*cudaPagedKV.stride", "*cudaPagedKV.Clone", "*cudaPagedKV.releaseLocked", "*cudaPagedKV.Free", "*cudaBackend.NewKV")
 	selectNames("Qwen35SequenceState", "Qwen35SequenceLayer", "Qwen35SequencePrefillRequest", "Qwen35SequencePrefillResult", "Qwen35SequenceTransferCounters", "Qwen35SequenceFeatureRows", "Qwen35SequencePrefixReplay", "Qwen35SequenceError", "*Qwen35SequenceError.Error", "*Qwen35SequenceError.Unwrap", "qwen35SequenceEmbeddingContract")
 	selectNames("qwen35SequenceFailure", "validateQwen35SequenceGeometry", "qwen35SequenceSameShape", "qwen35SequenceMatrixBytes", "*cudaBackend.validateQwen35SequenceTensor", "*cudaBackend.validateQwen35SequenceRequestLocked", "*cudaBackend.validateQwen35SequenceStoreRequestLocked", "*cudaBackend.Qwen35SequencePrefill", "*cudaBackend.qwen35SequenceReleaseSinceLocked", "*cudaBackend.qwen35SequencePoisonStates", "*cudaBackend.Qwen35SequenceRawHiddenPath")
-	selectNames("*cudaBackend.Qwen35IndependentDecodeBatchPath", "*cudaBackend.cudaQwen35LaneRowView", "*cudaBackend.Qwen35IndependentDecodeBatch", "qwen35DecodeBatchKVChunk")
+	selectNames("*cudaBackend.Qwen35IndependentDecodeBatchPath", "*cudaBackend.cudaQwen35LaneRowView", "*cudaBackend.Qwen35IndependentDecodeBatch", "qwen35DecodeBatchKVChunk", "qwen35DecodeBatchScratch", "qwen35DecodeBatchScratchEntries")
 	selectNames("*BatchSession.StepBatch", "*BatchSession.stepBatchSerial", "qwen35HybridQ4KBatchStep", "*BatchSession.qwen35HybridQ4KBatchOK", "*BatchSession.stepBatchQwen35HybridQ4K", "qwen35IndependentDecodeBatchBackend", "qwen35IndependentDecodeBatchFor", "failQwen35IndependentDecodeBatchSessions", "stepBatchQwen35HybridQ4KIndependent")
 	selectNames("batchDiagEnabled", "qwen35BatchDiagEnabled")
 	preamble := strings.NewReplacer(
@@ -56,7 +56,7 @@ func TestCUDAQwen35PagedIndependentDecodeBatch(t *testing.T) {
 	).Replace(cudaPagedSequenceGoPreamble)
 	var body strings.Builder
 	body.WriteString(preamble)
-	paths := []string{"cuda_qwen35_sequence_paged.go", "cuda_paged_kv_blocks.go", "cuda_paged_kv.go", "cuda_kv.go", "qwen35_sequence_contract.go", "cuda_qwen35_sequence.go", "qwen35_decode_batch_contract.go", "cuda_qwen35_decode_batch.go", "../model/batch_step.go", "../model/qwen35_batch_decode.go"}
+	paths := []string{"cuda_qwen35_sequence_paged.go", "cuda_paged_kv_blocks.go", "cuda_paged_kv.go", "cuda_kv.go", "qwen35_sequence_contract.go", "cuda_qwen35_sequence.go", "qwen35_decode_batch_contract.go", "cuda_qwen35_decode_batch.go", "cuda_qwen35_decode_batch_scratch.go", "../model/batch_step.go", "../model/qwen35_batch_decode.go"}
 	for _, path := range paths {
 		source := read(path)
 		fs := token.NewFileSet()
@@ -94,6 +94,9 @@ func TestCUDAQwen35PagedIndependentDecodeBatch(t *testing.T) {
 					if p, ok := r.(*ast.StarExpr); ok {
 						star = "*"
 						r = p.X
+					}
+					if ix, ok := r.(*ast.IndexExpr); ok {
+						r = ix.X
 					}
 					name = star + r.(*ast.Ident).Name + "." + name
 				}
@@ -183,7 +186,7 @@ func(c *cudaBackend)cudaBufForSubmit(t Tensor)*cudaBuf{return t.buf.(*cudaBuf)}
 func(c *cudaBackend)Read(t Tensor)[]float32{return append([]float32(nil),unsafe.Slice((*float32)(t.buf.(*cudaBuf).ptr),t.Numel())...)}
 func(c *cudaBackend)Free(t Tensor){c.releaseTransientBuffers([]*cudaBuf{t.buf.(*cudaBuf)})}
 // Explicit scalar GDN stand-in. Only ownership and model dispatch are witnessed.
-func(c *cudaBackend)qwen35BatchGDNLocked(x Tensor,l Qwen35SequenceLayer,r Qwen35IndependentDecodeBatchRequest,index int)(Tensor,*cudaBuf,error){for _,lane:=range r.Lanes{s:=lane.States[index];c.gdn++;*(*float32)(s.Conv.buf.(*cudaBuf).ptr)+=1;*(*float32)(s.Recurrent.buf.(*cudaBuf).ptr)+=1};return c.qwen35SequenceRMSNormLocked(x,Tensor{},len(r.Lanes),0,"gdn-batch-standin")}
+func(c *cudaBackend)qwen35BatchGDNLocked(x Tensor,l Qwen35SequenceLayer,r Qwen35IndependentDecodeBatchRequest,index int,scratch *qwen35DecodeBatchScratch[*cudaBuf])(Tensor,*cudaBuf,error){for _,lane:=range r.Lanes{s:=lane.States[index];c.gdn++;*(*float32)(s.Conv.buf.(*cudaBuf).ptr)+=1;*(*float32)(s.Recurrent.buf.(*cudaBuf).ptr)+=1};return c.qwen35SequenceRMSNormLocked(x,Tensor{},len(r.Lanes),0,"gdn-batch-standin")}
 func reserveContiguous(c *cudaBackend,k *cudaKV,l,n int)error{if len(k.K)==0{k.K=make([]dslice,l);k.Kraw=make([]dslice,l);k.V=make([]dslice,l)};for _,p:=range [][]dslice{k.K,k.Kraw,k.V}{for i:=range p{if p[i].cap>=n{continue};b,e:=c.dallocDeviceOnlyClass(n*4,MemoryKVCache,"contiguous-control");if e!=nil{return e};if p[i].len>0{C.fcuda_d2d(b.ptr,p[i].ptr,C.size_t(p[i].len*4))};p[i].ptr=b.ptr;p[i].cap=n;p[i].dtype=F32}};return nil}
 func appendContiguous(k *cudaKV,l int,r,v,w Tensor,s,t int)error{for i,p:=range [][]dslice{k.Kraw,k.K,k.V}{src:=[]Tensor{r,v,w}[i];C.fcuda_d2d(offsetF(p[l].ptr,s*k.stride()),src.buf.(*cudaBuf).ptr,C.size_t(t*k.stride()*4));p[l].len=(s+t)*k.stride()};if l==0{for i:=0;i<t;i++{k.pos=append(k.pos,s+i)}};return nil}
 func(c *cudaBackend)qwen35BatchAttentionIntoLocked(q Tensor,k *cudaKV,l,p,h int,s float32,o Tensor)error{n:=C.fak_qwen35_causal_attention_panel_f32(c.cf(q),(*C.float)(k.K[l].ptr),(*C.float)(k.V[l].ptr),c.cf(o),1,C.int(p),C.int(h),C.int(k.cfg.NumKVHeads),C.int(k.cfg.HeadDim),C.float(s));if n!=0{return errors.New("attention")};return nil}

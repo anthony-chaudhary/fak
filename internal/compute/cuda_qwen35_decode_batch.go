@@ -223,6 +223,7 @@ func (c *cudaBackend) Qwen35IndependentDecodeBatch(req Qwen35IndependentDecodeBa
 	qWidth, kvWidth := first.NumHeads*first.HeadDim, first.NumKVHeads*first.HeadDim
 	scale := float32(1 / math.Sqrt(float64(first.HeadDim)))
 	compact := 0
+	var batchScratch qwen35DecodeBatchScratch[*cudaBuf]
 	for index, layer := range first.Layers {
 		stage = fmt.Sprintf("layer-%d", index)
 		layerMark := time.Now()
@@ -236,7 +237,7 @@ func (c *cudaBackend) Qwen35IndependentDecodeBatch(req Qwen35IndependentDecodeBa
 		var rerr error
 		if layer.Linear {
 			mutated = true
-			branch, branchBuf, gerr := c.qwen35BatchGDNLocked(normed, layer, req, index)
+			branch, branchBuf, gerr := c.qwen35BatchGDNLocked(normed, layer, req, index, &batchScratch)
 			if gerr != nil {
 				return result, fail(gerr)
 			}
@@ -425,15 +426,15 @@ func (c *cudaBackend) Qwen35IndependentDecodeBatch(req Qwen35IndependentDecodeBa
 
 // qwen35BatchGDNLocked runs one GDN mixer for every lane: shared-weight in/out projections
 // over the [lanes, hidden] panel and per-lane conv/recurrent updates in lane-owned state.
-func (c *cudaBackend) qwen35BatchGDNLocked(x Tensor, layer Qwen35SequenceLayer, req Qwen35IndependentDecodeBatchRequest, layerIndex int) (Tensor, *cudaBuf, error) {
+func (c *cudaBackend) qwen35BatchGDNLocked(x Tensor, layer Qwen35SequenceLayer, req Qwen35IndependentDecodeBatchRequest, layerIndex int, scratch *qwen35DecodeBatchScratch[*cudaBuf]) (Tensor, *cudaBuf, error) {
 	first := req.Lanes[0]
 	lanes := len(req.Lanes)
 	keyDim := first.NumKeyHeads * first.KeyHeadDim
 	valueDim := first.NumValueHeads * first.ValueHeadDim
 	convDim := 2*keyDim + valueDim
 	allocations := qwen35GDNAllocations("gdn-batch-", "-", lanes, lanes, first.Hidden, keyDim, valueDim, first.NumValueHeads, convDim)
-	tensors := make([]Tensor, 0, len(allocations))
-	buffers := make([]*cudaBuf, 0, len(allocations))
+	tensors, buffers := scratch.prepare(len(allocations))
+	defer scratch.reset()
 	for _, allocation := range allocations {
 		t, b, err := c.qwen35SequenceAllocLocked(allocation.shape, allocation.name)
 		if err != nil {
