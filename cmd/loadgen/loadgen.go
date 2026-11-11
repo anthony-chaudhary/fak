@@ -59,6 +59,7 @@ type reqResult struct {
 	streamed          bool            // completed via an SSE stream (vs plain-JSON fallback)
 	ttft              time.Duration   // start to first non-empty content chunk; 0 if none arrived
 	chunkIntervals    []time.Duration // client inter-content-chunk arrival deltas; not token timings
+	firstChunkTokens  *int            // usage.completion_tokens reported on the first content chunk (per-chunk usage); nil when not reported
 }
 
 // sseChunk is one `data:` payload of an OpenAI-compatible streaming
@@ -85,9 +86,13 @@ type sseMeasure struct {
 	nContent       int
 	usageTokens    int
 	usageKnown     bool
-	sawData        bool
-	streamErr      error
-	done           bool
+	// firstChunkTokens is usage.completion_tokens reported on the chunk that set
+	// firstContent (per-chunk usage); nil when the first content chunk carried no
+	// usage or no content chunk arrived.
+	firstChunkTokens *int
+	sawData          bool
+	streamErr        error
+	done             bool
 }
 
 // feedSSELine folds one SSE line into m at arrival time now. Non-data lines
@@ -125,6 +130,12 @@ func (m *sseMeasure) feedSSELine(line string, now time.Time) {
 		}
 		if m.firstContent.IsZero() {
 			m.firstContent = now
+			// Per-chunk usage on the first content chunk feeds the aiperf-style ITL
+			// divisor; explicit 0 is captured too (DecodeTokenDivisor's non-positive
+			// rule handles it).
+			if n := chunk.Usage.CompletionTokens; n != nil && *n >= 0 {
+				m.firstChunkTokens = n
+			}
 		} else {
 			m.chunkIntervals = append(m.chunkIntervals, now.Sub(m.lastContent))
 		}
@@ -189,6 +200,15 @@ type PointResult struct {
 	ContentChunks                int     `json:"content_chunks,omitempty"`
 	MeanInterContentChunkMS      float64 `json:"mean_inter_content_chunk_ms,omitempty"`
 	ContentChunkCadencePerSecond float64 `json:"content_chunk_cadence_per_second,omitempty"` // reciprocal mean interval, not aggregate throughput
+	// aiperf-style inter-token latency, derived from the decode window (request
+	// latency - TTFT) and server-reported usage; NOT the client chunk-cadence
+	// metric above. Populated only from streamed successes with usable usage.
+	MeanITLMS float64 `json:"mean_itl_ms,omitempty"`
+	ITLP50MS  float64 `json:"itl_p50_ms,omitempty"`
+	ITLP95MS  float64 `json:"itl_p95_ms,omitempty"`
+	// PerChunkUsageDivisorRequests counts requests whose ITL divisor came from
+	// server per-chunk usage rather than the osl-1 fallback.
+	PerChunkUsageDivisorRequests int `json:"per_chunk_usage_divisor_requests,omitempty"`
 	// Deprecated: SSE content chunks do not establish token boundaries. These
 	// legacy fields remain zero/omitted; use the explicitly named chunk metrics.
 	TPOTMS                float64 `json:"tpot_ms,omitempty"`
@@ -353,6 +373,7 @@ func measureStream(cfg *Config, br *bufio.Reader, firstLine string, firstErr err
 		rr.ttft = m.firstContent.Sub(start)
 	}
 	rr.chunkIntervals = m.chunkIntervals
+	rr.firstChunkTokens = m.firstChunkTokens
 	return rr
 }
 
@@ -454,6 +475,9 @@ func aggregate(concurrency, requests int, wall time.Duration, results []reqResul
 	var ttfts []float64
 	var chunkIntervalSum float64
 	var chunkIntervalN int
+	var itls []float64
+	var itlSum float64
+	var perChunkDivisorRequests int
 	for _, r := range results {
 		if r.err != nil {
 			pr.Errors++
@@ -479,6 +503,18 @@ func aggregate(concurrency, requests int, wall time.Duration, results []reqResul
 			chunkIntervalSum += float64(d.Nanoseconds()) / 1e6
 			chunkIntervalN++
 		}
+		// aiperf-style ITL: decode window over the per-chunk-aware decode-token
+		// divisor. Skips requests without usable usage or a measured TTFT.
+		if !r.tokenUsageMissing && r.completionTokens >= 2 && r.ttft > 0 {
+			if d, ok := DecodeTokenDivisor(r.completionTokens, r.firstChunkTokens); ok {
+				itl := ITLMS(r.latency, r.ttft, d)
+				itls = append(itls, itl)
+				itlSum += itl
+				if d.PerChunk {
+					perChunkDivisorRequests++
+				}
+			}
+		}
 	}
 	if requests > 0 {
 		pr.ErrorRate = float64(pr.Errors) / float64(requests)
@@ -503,6 +539,13 @@ func aggregate(concurrency, requests int, wall time.Duration, results []reqResul
 			pr.ContentChunkCadencePerSecond = 1000 / pr.MeanInterContentChunkMS
 		}
 	}
+	if n := len(itls); n > 0 {
+		sort.Float64s(itls)
+		pr.MeanITLMS = itlSum / float64(n)
+		pr.ITLP50MS = percentile(itls, 50)
+		pr.ITLP95MS = percentile(itls, 95)
+	}
+	pr.PerChunkUsageDivisorRequests = perChunkDivisorRequests
 	return pr
 }
 
