@@ -2744,3 +2744,21 @@ Reuse decision: ADAPT. No Python source copied; the Go component owns one
 int32 slice and hands aliasing views to the layers and the drafter, with
 fail-closed sizing sentinels. Component only; no kernel or hardware claim.
 The Apache-2.0 license text already reproduced in this file applies.
+
+## llama.cpp GLM-5.3 next-sm state-tensor arch registration
+
+`internal/model/glm53_state_tensor.go` adapts the GLM-5.3 (glm5-next) extra
+state-tensor arch-registration contract from `ggml-org/llama.cpp` PR #30499
+("meta: support GLM-5.3 next sm tensor"), commit
+`259d91709d60945911bedb9bcfb2957c6e153ea7`, `src/llama-arch.cpp` +
+`src/llama-model.cpp`:
+https://github.com/ggml-org/llama.cpp/pull/30499
+(the arch descriptor admits glm5-next to per-tensor state allocation once the
+meta backend registers the KDA recurrent latent state and the q/k/v
+short-convolution history for per-layer allocation).
+Copyright (c) 2023-2026 The ggml authors. SPDX-License-Identifier: MIT.
+Reuse decision: ADAPT. No C++ source copied; the Go component declares the
+registered state tensor classes, threads them through per-layer state
+allocation, and refuses checkpoint/descriptor mismatches in both directions
+with sentinel errors. Component only; no kernel, no forward wiring, no
+hardware claim.
