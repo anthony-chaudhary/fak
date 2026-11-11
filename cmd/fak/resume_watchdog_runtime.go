@@ -332,6 +332,8 @@ func rwHarness(p resume.WatchdogPlanRow) string {
 	switch strings.ToLower(strings.TrimSpace(p.Harness)) {
 	case "codex", "codex_exec":
 		return "codex"
+	case "opencode":
+		return "opencode"
 	default:
 		return "claude"
 	}
@@ -344,7 +346,7 @@ func rwActuatorRequest(p resume.WatchdogPlanRow, claudeExe string) resumeactuato
 	}
 	return resumeactuator.Request{
 		Harness: p.Harness, Session: p.Session, Rollout: p.Rollout,
-		GoalFile: p.GoalFile, ResultFile: p.ResultFile, CWD: rwResumeCWD(p), Prompt: prompt, ClaudeExe: claudeExe, CodexExe: rwCodexExe(),
+		GoalFile: p.GoalFile, ResultFile: p.ResultFile, CWD: rwResumeCWD(p), Prompt: prompt, ClaudeExe: claudeExe, CodexExe: rwCodexExe(), OpenCodeExe: rwOpenCodeExe(),
 	}
 }
 
@@ -375,6 +377,16 @@ func rwCodexExe() string {
 	return "codex"
 }
 
+// rwOpenCodeExe resolves the OpenCode binary the watchdog relaunches with, mirroring
+// rwCodexExe: FLEET_OPENCODE_EXE wins when set, otherwise the PATH name "opencode"
+// (the resumeactuator default).
+func rwOpenCodeExe() string {
+	if exe := strings.TrimSpace(os.Getenv("FLEET_OPENCODE_EXE")); exe != "" {
+		return exe
+	}
+	return "opencode"
+}
+
 func rwResumeBrokerAttempt(fakExe, claudeExe string, p resume.WatchdogPlanRow, resumeCfg string, postureArgs []string, carry ...resume.DriveCarryRow) launchBrokerAttempt {
 	argv, err := rwManagedResumeArgv(fakExe, claudeExe, p, postureArgs, carry...)
 	if err != nil {
@@ -385,10 +397,29 @@ func rwResumeBrokerAttempt(fakExe, claudeExe string, p resume.WatchdogPlanRow, r
 }
 
 func rwChildEnvironment(p resume.WatchdogPlanRow, resumeCfg string) map[string]string {
-	if rwHarness(p) == resumeactuator.HarnessCodex {
+	switch rwHarness(p) {
+	case resumeactuator.HarnessCodex:
 		return envMap(resume.CodexWatchdogChildEnv(os.Environ()))
+	case resumeactuator.HarnessOpenCode:
+		return rwOpenCodeChildEnv(p.Session)
+	default:
+		return rwResumeChildEnv(p.Session, resumeCfg)
 	}
-	return rwResumeChildEnv(p.Session, resumeCfg)
+}
+
+// rwOpenCodeChildEnv builds the child environment for a watchdog-relaunched OpenCode
+// session (#14330): the Claude gateway/seat/harness identity is stripped (the same closed
+// set as resume.CodexWatchdogChildEnv — the 2026-07-01 whole-wave-crash fix applies to ANY
+// child that would otherwise inherit the parent's loopback proxy wiring), but NO claude
+// state is pinned: an OpenCode child has no CLAUDE_CONFIG_DIR seat to authenticate with.
+// The harness-neutral relaunch cache affinity key (#4140) is carried so the relaunched
+// transcript keeps its warm cache route, exactly like the claude path.
+func rwOpenCodeChildEnv(session string) map[string]string {
+	env := envMap(resume.CodexWatchdogChildEnv(os.Environ()))
+	if key := resume.RelaunchCacheAffinityKey(session); key != "" {
+		env[resume.RelaunchCacheAffinityEnv] = key
+	}
+	return env
 }
 
 func rwResumeChildEnv(session, resumeCfg string) map[string]string {
@@ -485,11 +516,16 @@ func rwSpawnResume(claudeExe string, p resume.WatchdogPlanRow, resumeCfg, logDir
 	// identity, and pins CLAUDE_CONFIG_DIR to the target seat (resume.WatchdogChildEnv —
 	// the 2026-07-01 whole-wave-crash fix: a resumed child inheriting a guarded parent's
 	// ANTHROPIC_BASE_URL routes through the parent's loopback proxy and dies with it).
-	// Same base + cache-affinity carry as the broker attempt (#4140), so even the
-	// defensive empty-grant fallback keeps the transcript's warm route.
+	// Codex rows get the codex env instead; opencode rows get the neutral opencode env
+	// (no claude seat pin at all, #14330). Same base + cache-affinity carry as the broker
+	// attempt (#4140), so even the defensive empty-grant fallback keeps the transcript's
+	// warm route.
 	cmd.Env = envSliceFromMap(rwResumeChildEnv(p.Session, resumeCfg))
-	if rwHarness(p) == "codex" {
+	switch rwHarness(p) {
+	case "codex":
 		cmd.Env = resume.CodexWatchdogChildEnv(os.Environ())
+	case "opencode":
+		cmd.Env = envSliceFromMap(rwOpenCodeChildEnv(p.Session))
 	}
 	if len(grant.Env) > 0 {
 		cmd.Env = envSliceFromMap(grant.Env)
