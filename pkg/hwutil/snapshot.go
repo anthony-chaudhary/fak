@@ -235,6 +235,20 @@ type GPU struct {
 	PCIETxBytesPerS     *float64 `json:"pcie_tx_bytes_per_s"`
 	ThrottleReasons     []string `json:"throttle_reasons"`
 	ECCUncorrectedTotal *int64   `json:"ecc_uncorrected_total"`
+	// Curated default receipt fields (ADAPTED from the NVIDIA/dcgm-exporter
+	// default counter curation): thermal, ECC SBE/DBE volatile/aggregate,
+	// NVLink CRC/replay error totals (datacenter NVLink generations), and
+	// row-remap counters. Nil when the surface does not expose them.
+	TempC                     *float64 `json:"temp_c"`
+	ECCCorrectableVolatile    *int64   `json:"ecc_correctable_volatile"`
+	ECCUncorrectableVolatile  *int64   `json:"ecc_uncorrectable_volatile"`
+	ECCCorrectableAggregate   *int64   `json:"ecc_correctable_aggregate"`
+	ECCUncorrectableAggregate *int64   `json:"ecc_uncorrectable_aggregate"`
+	NVLinkCRCErrorTotal       *int64   `json:"nvlink_crc_error_total"`
+	NVLinkReplayErrorTotal    *int64   `json:"nvlink_replay_error_total"`
+	RowRemapPendingTotal      *int64   `json:"row_remap_pending_total"`
+	RowRemapTotal             *int64   `json:"row_remap_total"`
+	RowRemapDBETotal          *int64   `json:"row_remap_dbe_total"`
 }
 
 // TierKind is the closed memory-tier vocabulary.
@@ -406,11 +420,27 @@ func (s *Snapshot) Validate() error {
 		if g.MemUsedBytes != nil && *g.MemUsedBytes < 0 {
 			return NewErr(CodeSnapshotMalformed, "gpus[%d].mem_used_bytes is negative", i)
 		}
-		if err := checkNonNegFloats(fmt.Sprintf("gpus[%d]", i), g.PowerW, g.SMClockMHz, g.MaxSMClockMHz, g.PCIERxBytesPerS, g.PCIETxBytesPerS); err != nil {
+		if err := checkNonNegFloats(fmt.Sprintf("gpus[%d]", i), g.PowerW, g.SMClockMHz, g.MaxSMClockMHz, g.PCIERxBytesPerS, g.PCIETxBytesPerS, g.TempC); err != nil {
 			return err
 		}
-		if g.ECCUncorrectedTotal != nil && *g.ECCUncorrectedTotal < 0 {
-			return NewErr(CodeSnapshotMalformed, "gpus[%d].ecc_uncorrected_total is negative", i)
+		for _, f := range []struct {
+			name string
+			v    *int64
+		}{
+			{"ecc_uncorrected_total", g.ECCUncorrectedTotal},
+			{"ecc_correctable_volatile", g.ECCCorrectableVolatile},
+			{"ecc_uncorrectable_volatile", g.ECCUncorrectableVolatile},
+			{"ecc_correctable_aggregate", g.ECCCorrectableAggregate},
+			{"ecc_uncorrectable_aggregate", g.ECCUncorrectableAggregate},
+			{"nvlink_crc_error_total", g.NVLinkCRCErrorTotal},
+			{"nvlink_replay_error_total", g.NVLinkReplayErrorTotal},
+			{"row_remap_pending_total", g.RowRemapPendingTotal},
+			{"row_remap_total", g.RowRemapTotal},
+			{"row_remap_dbe_total", g.RowRemapDBETotal},
+		} {
+			if f.v != nil && *f.v < 0 {
+				return NewErr(CodeSnapshotMalformed, "gpus[%d].%s is negative", i, f.name)
+			}
 		}
 	}
 	for i, t := range s.Tiers {
@@ -502,8 +532,11 @@ func (s *Snapshot) UnreadCount() int {
 		n += nilsF(l.SpeedGBps, l.RxBytesPerS, l.TxBytesPerS)
 	}
 	for _, g := range s.GPUs {
-		n += nilsF(g.UtilPct, g.PowerW, g.SMClockMHz, g.MaxSMClockMHz, g.PCIERxBytesPerS, g.PCIETxBytesPerS)
-		n += nilsI(g.MemTotalBytes, g.MemUsedBytes, g.ECCUncorrectedTotal)
+		n += nilsF(g.UtilPct, g.PowerW, g.SMClockMHz, g.MaxSMClockMHz, g.PCIERxBytesPerS, g.PCIETxBytesPerS, g.TempC)
+		n += nilsI(g.MemTotalBytes, g.MemUsedBytes, g.ECCUncorrectedTotal,
+			g.ECCCorrectableVolatile, g.ECCUncorrectableVolatile, g.ECCCorrectableAggregate, g.ECCUncorrectableAggregate,
+			g.NVLinkCRCErrorTotal, g.NVLinkReplayErrorTotal,
+			g.RowRemapPendingTotal, g.RowRemapTotal, g.RowRemapDBETotal)
 	}
 	return n
 }
@@ -597,6 +630,16 @@ func (s *Snapshot) NumericCounterCount() int {
 		countF(g.PCIERxBytesPerS)
 		countF(g.PCIETxBytesPerS)
 		countI(g.ECCUncorrectedTotal)
+		countF(g.TempC)
+		countI(g.ECCCorrectableVolatile)
+		countI(g.ECCUncorrectableVolatile)
+		countI(g.ECCCorrectableAggregate)
+		countI(g.ECCUncorrectableAggregate)
+		countI(g.NVLinkCRCErrorTotal)
+		countI(g.NVLinkReplayErrorTotal)
+		countI(g.RowRemapPendingTotal)
+		countI(g.RowRemapTotal)
+		countI(g.RowRemapDBETotal)
 	}
 	for _, t := range s.Tiers {
 		n += 4 // layers_start, layers_end, bytes, hotness_rank

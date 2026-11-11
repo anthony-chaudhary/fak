@@ -17,13 +17,25 @@ import (
 
 const fakeCoreCSV = "GPU-abc,NVIDIA RTX 5070 Ti,PCI:0000:01:00.0,16384,8192,87,245.5,2407,2610,0\n"
 
+// Datacenter identity row: same ten core columns, H100 name.
+const fakeCoreH100CSV = "GPU-h100,NVIDIA H100 80GB HBM3,PCI:0000:07:00.0,81920,40960,91,512.25,1980,1980,2\n"
+
 // Multi-token throttle sets arrive as one quoted CSV field (the comma is
 // inside the value), exactly as nvidia-smi emits them.
 const fakeThrottleCSV = "\"HW Slowdown, SW Power Brake\"\n"
 
+// Receipt rows follow the curated default field order: thermal, ECC SBE/DBE
+// volatile/aggregate, row remap pending/total/double-bit, then (datacenter
+// NVLink generations only) NVLink CRC/replay error totals.
+const fakeReceiptDatacenterCSV = "62,3,0,12,4,2,0,5,7,1\n"
+const fakeReceiptConsumerCSV = "62,3,0,12,4,2,0,5\n"
+const fakeReceiptNADatacenterCSV = "[N/A],[N/A],[N/A],[N/A],[N/A],[N/A],[N/A],[N/A],[N/A],[N/A]\n"
+
 // installFakeSMI pins the nvidia-smi seam; when out is non-nil, every argv
 // it sees is appended there so tests can assert the exact query contract.
-func installFakeSMI(t *testing.T, core, throttle string, fail bool, out *[][]string) {
+// A non-empty receipt answers the per-row receipt-field query; empty makes
+// that query fail.
+func installFakeSMI(t *testing.T, core, throttle, receipt string, fail bool, out *[][]string) {
 	t.Helper()
 	orig := runNvidiaSMI
 	t.Cleanup(func() { runNvidiaSMI = orig })
@@ -42,6 +54,8 @@ func installFakeSMI(t *testing.T, core, throttle string, fail bool, out *[][]str
 			return nil, errors.New("unsupported key") // legacy spelling fails...
 		case strings.Contains(joined, "clocks_throttle_reasons.active"):
 			return []byte(throttle), nil // ...modern spelling answers.
+		case receipt != "" && strings.Contains(joined, "--query-gpu="):
+			return []byte(receipt), nil
 		}
 		return nil, errors.New("unexpected query: " + joined)
 	}
@@ -53,7 +67,7 @@ func installFakeSMI(t *testing.T, core, throttle string, fail bool, out *[][]str
 // NVIDIA surface on current drivers).
 func TestNvidiaQueryArgvIsStableCoreSet(t *testing.T) {
 	var calls [][]string
-	installFakeSMI(t, fakeCoreCSV, fakeThrottleCSV, false, &calls)
+	installFakeSMI(t, fakeCoreCSV, fakeThrottleCSV, "", false, &calls)
 	if gpus := nvidiaGPUs(context.Background()); len(gpus) != 1 {
 		t.Fatalf("gpus = %+v", gpus)
 	}
@@ -72,30 +86,175 @@ func TestNvidiaQueryArgvIsStableCoreSet(t *testing.T) {
 	}
 }
 
+// TestNvidiaGPUsFromFakeProbe pins the core-row contract plus the curated
+// default receipt field selection: the exact per-generation receipt argv and
+// the parsed thermal / ECC SBE-DBE vol-agg / NVLink CRC-replay / row-remap
+// values on the row.
 func TestNvidiaGPUsFromFakeProbe(t *testing.T) {
-	installFakeSMI(t, fakeCoreCSV, fakeThrottleCSV, false, nil)
+	t.Run("datacenter", func(t *testing.T) {
+		var calls [][]string
+		installFakeSMI(t, fakeCoreH100CSV, fakeThrottleCSV, fakeReceiptDatacenterCSV, false, &calls)
+		gpus := nvidiaGPUs(context.Background())
+		if len(gpus) != 1 {
+			t.Fatalf("gpus = %+v", gpus)
+		}
+		g := gpus[0]
+		if g.UUID != "GPU-h100" || g.Name != "NVIDIA H100 80GB HBM3" || g.PCI != "0000:07:00.0" {
+			t.Fatalf("identity = %+v", g)
+		}
+		if *g.MemTotalBytes != 81920*1024*1024 || *g.MemUsedBytes != 40960*1024*1024 {
+			t.Fatalf("mem = %v / %v (MiB->bytes)", *g.MemTotalBytes, *g.MemUsedBytes)
+		}
+		if *g.UtilPct != 91 || *g.PowerW != 512.25 || *g.SMClockMHz != 1980 || *g.MaxSMClockMHz != 1980 {
+			t.Fatalf("metrics = %+v", g)
+		}
+		if *g.ECCUncorrectedTotal != 2 {
+			t.Fatalf("ecc = %v", *g.ECCUncorrectedTotal)
+		}
+		// Curated default receipt fields, datacenter NVLink generation.
+		if *g.TempC != 62 {
+			t.Fatalf("temp_c = %v", *g.TempC)
+		}
+		if *g.ECCCorrectableVolatile != 3 || *g.ECCUncorrectableVolatile != 0 ||
+			*g.ECCCorrectableAggregate != 12 || *g.ECCUncorrectableAggregate != 4 {
+			t.Fatalf("ecc vol/agg = %+v", g)
+		}
+		if *g.NVLinkCRCErrorTotal != 7 || *g.NVLinkReplayErrorTotal != 1 {
+			t.Fatalf("nvlink = %+v", g)
+		}
+		if *g.RowRemapPendingTotal != 2 || *g.RowRemapTotal != 0 || *g.RowRemapDBETotal != 5 {
+			t.Fatalf("row remap = %+v", g)
+		}
+		// The receipt call carries exactly the curated datacenter list.
+		wantFields := strings.Join(nvidiaReceiptFields(genDatacenterNVLink), ",")
+		want := []string{"--id=GPU-h100", "--query-gpu=" + wantFields, "--format=csv,noheader,nounits"}
+		found := false
+		for _, c := range calls {
+			if len(c) == len(want) && c[0] == want[0] && c[1] == want[1] && c[2] == want[2] {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("receipt argv not observed; calls = %v", calls)
+		}
+	})
+
+	t.Run("consumer", func(t *testing.T) {
+		installFakeSMI(t, fakeCoreCSV, fakeThrottleCSV, fakeReceiptConsumerCSV, false, nil)
+		gpus := nvidiaGPUs(context.Background())
+		if len(gpus) != 1 {
+			t.Fatalf("gpus = %+v", gpus)
+		}
+		g := gpus[0]
+		if g.UUID != "GPU-abc" || g.Name != "NVIDIA RTX 5070 Ti" || g.PCI != "0000:01:00.0" {
+			t.Fatalf("identity = %+v", g)
+		}
+		if *g.MemTotalBytes != 16384*1024*1024 || *g.MemUsedBytes != 8192*1024*1024 {
+			t.Fatalf("mem = %v / %v (MiB->bytes)", *g.MemTotalBytes, *g.MemUsedBytes)
+		}
+		if *g.UtilPct != 87 || *g.PowerW != 245.5 || *g.SMClockMHz != 2407 || *g.MaxSMClockMHz != 2610 {
+			t.Fatalf("metrics = %+v", g)
+		}
+		if g.PCIETxBytesPerS != nil || g.PCIERxBytesPerS != nil {
+			t.Fatalf("pcie populated from nvidia-smi (NVML/DCGM-only counters): %+v", g)
+		}
+		if *g.ECCUncorrectedTotal != 0 {
+			t.Fatalf("ecc = %v", *g.ECCUncorrectedTotal)
+		}
+		if len(g.ThrottleReasons) != 2 || g.ThrottleReasons[0] != "HW Slowdown" || g.ThrottleReasons[1] != "SW Power Brake" {
+			t.Fatalf("throttle = %v", g.ThrottleReasons)
+		}
+		// Curated default receipt fields, consumer generation: no NVLink band.
+		if *g.TempC != 62 {
+			t.Fatalf("temp_c = %v", *g.TempC)
+		}
+		if *g.ECCCorrectableVolatile != 3 || *g.ECCUncorrectableVolatile != 0 ||
+			*g.ECCCorrectableAggregate != 12 || *g.ECCUncorrectableAggregate != 4 {
+			t.Fatalf("ecc vol/agg = %+v", g)
+		}
+		if *g.RowRemapPendingTotal != 2 || *g.RowRemapTotal != 0 || *g.RowRemapDBETotal != 5 {
+			t.Fatalf("row remap = %+v", g)
+		}
+		if g.NVLinkCRCErrorTotal != nil || g.NVLinkReplayErrorTotal != nil {
+			t.Fatalf("consumer row carries NVLink fields: %+v", g)
+		}
+	})
+}
+
+// TestNvidiaReceiptNAPlaceholdersStayNil pins the null-on-error contract at
+// the receipt edge: an all-[N/A] receipt answer leaves every receipt field
+// nil while the core row survives.
+func TestNvidiaReceiptNAPlaceholdersStayNil(t *testing.T) {
+	installFakeSMI(t, fakeCoreH100CSV, fakeThrottleCSV, fakeReceiptNADatacenterCSV, false, nil)
 	gpus := nvidiaGPUs(context.Background())
 	if len(gpus) != 1 {
 		t.Fatalf("gpus = %+v", gpus)
 	}
 	g := gpus[0]
-	if g.UUID != "GPU-abc" || g.Name != "NVIDIA RTX 5070 Ti" || g.PCI != "0000:01:00.0" {
-		t.Fatalf("identity = %+v", g)
+	if g.TempC != nil || g.ECCCorrectableVolatile != nil || g.ECCUncorrectableVolatile != nil ||
+		g.ECCCorrectableAggregate != nil || g.ECCUncorrectableAggregate != nil ||
+		g.NVLinkCRCErrorTotal != nil || g.NVLinkReplayErrorTotal != nil ||
+		g.RowRemapPendingTotal != nil || g.RowRemapTotal != nil || g.RowRemapDBETotal != nil {
+		t.Fatalf("[N/A] receipt values fabricated: %+v", g)
 	}
-	if *g.MemTotalBytes != 16384*1024*1024 || *g.MemUsedBytes != 8192*1024*1024 {
-		t.Fatalf("mem = %v / %v (MiB->bytes)", *g.MemTotalBytes, *g.MemUsedBytes)
+	if g.MemTotalBytes == nil || *g.MemTotalBytes != 81920*1024*1024 {
+		t.Fatalf("core row lost: %+v", g)
 	}
-	if *g.UtilPct != 87 || *g.PowerW != 245.5 || *g.SMClockMHz != 2407 || *g.MaxSMClockMHz != 2610 {
-		t.Fatalf("metrics = %+v", g)
+}
+
+// TestNvidiaReceiptFailureKeepsCoreRow pins the resilience contract: a
+// driver-era receipt-field rename that breaks the receipt query leaves the
+// core row intact with every receipt field nil.
+func TestNvidiaReceiptFailureKeepsCoreRow(t *testing.T) {
+	installFakeSMI(t, fakeCoreCSV, fakeThrottleCSV, "", false, nil) // receipt query fails
+	gpus := nvidiaGPUs(context.Background())
+	if len(gpus) != 1 {
+		t.Fatalf("gpus = %+v", gpus)
 	}
-	if g.PCIETxBytesPerS != nil || g.PCIERxBytesPerS != nil {
-		t.Fatalf("pcie populated from nvidia-smi (NVML/DCGM-only counters): %+v", g)
+	g := gpus[0]
+	if g.UUID != "GPU-abc" || g.MemTotalBytes == nil || *g.MemTotalBytes != 16384*1024*1024 {
+		t.Fatalf("core row lost on receipt failure: %+v", g)
 	}
-	if *g.ECCUncorrectedTotal != 0 {
-		t.Fatalf("ecc = %v", *g.ECCUncorrectedTotal)
+	if g.TempC != nil || g.ECCCorrectableVolatile != nil || g.ECCUncorrectableVolatile != nil ||
+		g.ECCCorrectableAggregate != nil || g.ECCUncorrectableAggregate != nil ||
+		g.NVLinkCRCErrorTotal != nil || g.NVLinkReplayErrorTotal != nil ||
+		g.RowRemapPendingTotal != nil || g.RowRemapTotal != nil || g.RowRemapDBETotal != nil {
+		t.Fatalf("receipt fields fabricated on failed query: %+v", g)
 	}
-	if len(g.ThrottleReasons) != 2 || g.ThrottleReasons[0] != "HW Slowdown" || g.ThrottleReasons[1] != "SW Power Brake" {
-		t.Fatalf("throttle = %v", g.ThrottleReasons)
+}
+
+// TestNvidiaReceiptGenerationSelection pins the closed generation vocabulary
+// and the exact per-generation default field lists.
+func TestNvidiaReceiptGenerationSelection(t *testing.T) {
+	cases := map[string]nvidiaReceiptGeneration{
+		"NVIDIA H100 80GB HBM3":            genDatacenterNVLink,
+		"NVIDIA A100-SXM4-40GB":            genDatacenterNVLink,
+		"NVIDIA B200":                      genDatacenterNVLink,
+		"NVIDIA Tesla V100S-PCIE-32GB":     genDatacenterNVLink,
+		"NVIDIA RTX A6000":                 genDatacenterNVLink,
+		"NVIDIA RTX 6000 Ada Generation":   genDatacenterNVLink,
+		"NVIDIA GeForce RTX 4090":          genConsumer,
+		"NVIDIA RTX 5090 Laptop GPU":       genConsumer,
+		"NVIDIA RTX 3060":                  genConsumer,
+		"weird-name-without-series-marker": genDatacenterNVLink,
+	}
+	for name, want := range cases {
+		if got := nvidiaReceiptGenerationOf(name); got != want {
+			t.Errorf("%s: generation = %v, want %v", name, got, want)
+		}
+	}
+	consumer := nvidiaReceiptFields(genConsumer)
+	datacenter := nvidiaReceiptFields(genDatacenterNVLink)
+	if len(consumer) != 8 || len(datacenter) != 10 {
+		t.Fatalf("field counts = consumer %d / datacenter %d, want 8 / 10", len(consumer), len(datacenter))
+	}
+	for i := 0; i < len(consumer); i++ {
+		if consumer[i] != datacenter[i] {
+			t.Fatalf("base band drifted at %d: %q vs %q", i, consumer[i], datacenter[i])
+		}
+	}
+	if datacenter[8] != "nvlink.errorcount.crc" || datacenter[9] != "nvlink.errorcount.replay" {
+		t.Fatalf("NVLink band = %v", datacenter[8:])
 	}
 }
 
@@ -143,7 +302,7 @@ func TestNvidiaFallbackRetryOnFieldRename(t *testing.T) {
 
 func TestNvidiaNAPlaceholdersStayNil(t *testing.T) {
 	na := "GPU-x,NVIDIA T4,PCI:0000:00:0e.0,15360,[N/A],[N/A],[N/A s],[N/A],[N/A],[N/A]\n"
-	installFakeSMI(t, na, "Not Active\n", false, nil)
+	installFakeSMI(t, na, "Not Active\n", "", false, nil)
 	gpus := nvidiaGPUs(context.Background())
 	if len(gpus) != 1 {
 		t.Fatalf("gpus = %+v", gpus)
@@ -162,7 +321,7 @@ func TestNvidiaNAPlaceholdersStayNil(t *testing.T) {
 }
 
 func TestNvidiaGPUsAbsentWhenProbeFails(t *testing.T) {
-	installFakeSMI(t, "", "", true, nil)
+	installFakeSMI(t, "", "", "", true, nil)
 	if gpus := nvidiaGPUs(context.Background()); len(gpus) != 0 {
 		t.Fatalf("failing probe emitted rows: %+v", gpus)
 	}
