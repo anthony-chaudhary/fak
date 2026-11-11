@@ -1,6 +1,15 @@
-package model
+// Package model_test keeps this fixture in the external test package: the
+// production joint matcher lives in internal/radixkv, which imports
+// internal/model, so an internal (package model) test file could not import it
+// back without an import cycle. pagedkv_radix_test.go sets the same precedent.
+package model_test
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/radixkv"
+)
 
 // hybrid_prefix_fixed_point_test.go — Candidate-D fixture for the 2026-11-03
 // OSS-study follow-up: joint hybrid-prefix validity is a fixed point.
@@ -23,12 +32,14 @@ import "testing"
 // and the sliding-window trim has no production caller (swa.go:14). Per-group radix
 // payloads are the declared R2 follow-on (kvgroups.go header).
 //
-// This fixture is therefore a CONTRACT-LEVEL test of the narrowing algorithm. It still
-// runs against what fak currently offers: group B's validity is the REAL
-// AlignRadixTree.MatchLongestPrefix (the existing block-aligned matcher), and group A's
-// window-band validity models the TrimToWindow / KVLayerResidentPositions fact. The
-// narrowing policies below are a tiny local reference implementation, clearly labelled
-// TEST-ONLY REFERENCE — not a product fix.
+// This fixture is therefore a CONTRACT-LEVEL test of the narrowing algorithm. Group B's
+// validity is the REAL AlignRadixTree.MatchLongestPrefix (the existing block-aligned
+// matcher) and group A's window-band validity models the TrimToWindow /
+// KVLayerResidentPositions fact; both feed the PRODUCTION joint matcher
+// (radixkv.LongestJointPrefixHit, the rust_kv/kv-core prefix_hit.rs port) through the
+// group-clamp interface below. fixedPointNarrow remains as a tiny local reference
+// implementation, clearly labelled TEST-ONLY REFERENCE, used only to cross-check that the
+// production matcher settles on the same jointly valid length.
 
 // groupClamp is one attention group's callback: given a candidate reuse length, it
 // returns the longest length <= candidate that this group can actually serve. A
@@ -102,6 +113,24 @@ func fixedPointNarrow(groups []groupClamp, candidate int) (int, int) {
 	}
 }
 
+// productionGroupHit adapts the fixture's group clamps to the PRODUCTION matcher's
+// indexed callback (radixkv.LongestJointPrefixHit) and counts NARROWING TURNS — turns in
+// which a group's answer falls strictly below the candidate it was asked about. The
+// production matcher clamps over-answers itself; pre-clamping here keeps the counter's
+// semantics identical either way.
+func productionGroupHit(groups []groupClamp, narrowingTurns *int) func(group, candidate int) int {
+	return func(gi, candidate int) int {
+		ans := groups[gi](candidate)
+		if ans > candidate {
+			ans = candidate
+		}
+		if ans < candidate {
+			*narrowingTurns++
+		}
+		return ans
+	}
+}
+
 // windowBandGroup models a sliding-window attention group whose per-group KV pool was
 // trimmed to rows [lo, hi] — the correctness fact Session.TrimToWindow (swa.go) and
 // Config.KVLayerResidentPositions (kvgroups.go) both exploit: positions older than the
@@ -130,7 +159,7 @@ func windowBandGroup(lo, hi, w int) groupClamp {
 // (gdn_align_cache.go:367) to the group-clamp interface. The matcher walks whole blocks
 // only, so its answer for a candidate is the block-aligned floor of the stored prefix —
 // a lattice validity, also not downward-closed.
-func alignBlockGroup(tree *AlignRadixTree, toks []int) groupClamp {
+func alignBlockGroup(tree *model.AlignRadixTree, toks []int) groupClamp {
 	return func(candidate int) int {
 		if candidate <= 0 {
 			return 0
@@ -143,9 +172,13 @@ func alignBlockGroup(tree *AlignRadixTree, toks []int) groupClamp {
 	}
 }
 
-// TestHybridPrefixJointValidityFixedPoint distinguishes a naive single-pass minimum
-// from iterative narrowing to a fixed point on a hybrid (window + dense-block) pair.
-func TestHybridPrefixJointValidityFixedPoint(t *testing.T) {
+// TestHybridPrefixFixedPointJointValidity distinguishes a naive single-pass minimum
+// from iterative narrowing to a fixed point on a hybrid (window + dense-block) pair,
+// running the contract through the PRODUCTION joint matcher
+// (radixkv.LongestJointPrefixHit) with the local reference kept as a cross-check oracle.
+// The name carries the HybridPrefixFixedPoint token so the qualification witness
+// (-run 'PrefixHit|HybridPrefixFixedPoint') selects it.
+func TestHybridPrefixFixedPointJointValidity(t *testing.T) {
 	const (
 		l0      = 40 // structural candidate: the shared structure sees 40 tokens
 		blockSz = 4  // dense group's restoration lattice (whole blocks only)
@@ -159,11 +192,11 @@ func TestHybridPrefixJointValidityFixedPoint(t *testing.T) {
 	for i := range toks {
 		toks[i] = 1000 + i*7
 	}
-	slabs := make([]*RecurrentStateSlab, l0/blockSz)
+	slabs := make([]*model.RecurrentStateSlab, l0/blockSz)
 	for b := range slabs {
-		slabs[b] = NewRecurrentStateSlab(b, blockSz, toks[b*blockSz:(b+1)*blockSz], nil)
+		slabs[b] = model.NewRecurrentStateSlab(b, blockSz, toks[b*blockSz:(b+1)*blockSz], nil)
 	}
-	tree := NewAlignRadixTree(blockSz)
+	tree := model.NewAlignRadixTree(blockSz)
 	if err := tree.InsertSequence(toks, slabs); err != nil {
 		t.Fatalf("InsertSequence: %v", err)
 	}
@@ -202,15 +235,16 @@ func TestHybridPrefixJointValidityFixedPoint(t *testing.T) {
 		}
 	})
 
-	t.Run("iterative-narrowing-reaches-the-fixed-point", func(t *testing.T) {
-		fp, rounds := fixedPointNarrow(groups, l0)
-		// 40 --A--> 39 --B--> 36 --agree--> 36. A second narrowing round is REQUIRED:
+	t.Run("production-matcher-reaches-the-fixed-point", func(t *testing.T) {
+		turns := 0
+		fp := radixkv.LongestJointPrefixHit(l0, len(groups), productionGroupHit(groups, &turns))
+		// 40 --A--> 39 --B--> 36 --agree--> 36. A second narrowing turn is REQUIRED:
 		// after A's window narrows 40 to 39, B's lattice rejects 39 and settles 36.
 		if fp != 36 {
-			t.Fatalf("fixed point = %d, want 36", fp)
+			t.Fatalf("production fixed point = %d, want 36", fp)
 		}
-		if rounds < 2 {
-			t.Fatalf("narrowing settled in %d round(s); the fixture needs >= 2 to distinguish the policies", rounds)
+		if turns < 2 {
+			t.Fatalf("production narrowing settled in %d turn(s); the fixture needs >= 2 to distinguish the policies", turns)
 		}
 		if !jointlyValid(groups, fp) {
 			t.Fatalf("fixed point %d is not jointly valid", fp)
@@ -224,6 +258,21 @@ func TestHybridPrefixJointValidityFixedPoint(t *testing.T) {
 			if jointlyValid(groups, L) {
 				t.Fatalf("maximality broken: %d > fixed point %d is jointly valid", L, fp)
 			}
+		}
+	})
+
+	t.Run("reference-oracle-agrees-with-production", func(t *testing.T) {
+		// TEST-ONLY REFERENCE cross-check: the local simultaneous-min iteration must
+		// settle on the same jointly valid length as the production round-robin
+		// matcher; divergence means either the port or the fixture drifted.
+		fpRef, rounds := fixedPointNarrow(groups, l0)
+		turns := 0
+		fpProd := radixkv.LongestJointPrefixHit(l0, len(groups), productionGroupHit(groups, &turns))
+		if fpRef != fpProd {
+			t.Fatalf("reference %d diverged from production %d", fpRef, fpProd)
+		}
+		if rounds < 2 || turns < 2 {
+			t.Fatalf("settled too fast: ref=%d round(s), prod=%d turn(s); the fixture needs >= 2 each to distinguish the policies", rounds, turns)
 		}
 	})
 
@@ -241,11 +290,13 @@ func TestHybridPrefixJointValidityFixedPoint(t *testing.T) {
 		gs := []groupClamp{capAt(30), capAt(24)}
 		naive := naiveSinglePassMin(gs, l0)
 		fp, rounds := fixedPointNarrow(gs, l0)
-		if naive != 24 || fp != 24 {
-			t.Fatalf("control: naive=%d fp=%d, want 24/24", naive, fp)
+		turns := 0
+		fpProd := radixkv.LongestJointPrefixHit(l0, len(gs), productionGroupHit(gs, &turns))
+		if naive != 24 || fp != 24 || fpProd != 24 {
+			t.Fatalf("control: naive=%d ref=%d prod=%d, want 24/24/24", naive, fp, fpProd)
 		}
 		if rounds != 1 {
-			t.Fatalf("control: downward-closed groups settled in %d rounds, want 1", rounds)
+			t.Fatalf("control: downward-closed groups settled in %d reference rounds, want 1", rounds)
 		}
 	})
 
@@ -253,10 +304,10 @@ func TestHybridPrefixJointValidityFixedPoint(t *testing.T) {
 		// A second REAL align tree with block size 16: lattice {0, 16, 32}. Against the
 		// same window band [33, 39] no positive length is jointly valid, so the
 		// contract degrades to a full miss (0) rather than serving an invalid length.
-		tree16 := NewAlignRadixTree(16)
-		slabs16 := make([]*RecurrentStateSlab, 40/16)
+		tree16 := model.NewAlignRadixTree(16)
+		slabs16 := make([]*model.RecurrentStateSlab, 40/16)
 		for b := range slabs16 {
-			slabs16[b] = NewRecurrentStateSlab(b, 16, toks[b*16:(b+1)*16], nil)
+			slabs16[b] = model.NewRecurrentStateSlab(b, 16, toks[b*16:(b+1)*16], nil)
 		}
 		if err := tree16.InsertSequence(toks, slabs16); err != nil {
 			t.Fatalf("InsertSequence(16): %v", err)
@@ -271,12 +322,14 @@ func TestHybridPrefixJointValidityFixedPoint(t *testing.T) {
 		if jointlyValid(gs, naive) {
 			t.Fatal("fixture broken: naive answer unexpectedly jointly valid")
 		}
+		turns := 0
+		fpProd := radixkv.LongestJointPrefixHit(l0, len(gs), productionGroupHit(gs, &turns))
 		fp, rounds := fixedPointNarrow(gs, l0)
-		if fp != 0 {
-			t.Fatalf("fixed point = %d, want 0 (no positive jointly valid length)", fp)
+		if fpProd != 0 || fp != 0 {
+			t.Fatalf("fixed points: prod=%d ref=%d, want 0/0 (no positive jointly valid length)", fpProd, fp)
 		}
-		if rounds < 2 {
-			t.Fatalf("settled in %d round(s), want >= 2", rounds)
+		if turns < 2 || rounds < 2 {
+			t.Fatalf("settled too fast: prod=%d turn(s), ref=%d round(s), want >= 2 each", turns, rounds)
 		}
 	})
 }

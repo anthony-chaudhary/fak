@@ -1,0 +1,88 @@
+{
+  "schema": "fak.modular.vendor.reconstruction.v1",
+  "upstream_repo": "https://github.com/modular/modular",
+  "upstream_revision": "8d559749621418f39f31df7da998bcce884fa5b1",
+  "vendored_tree": "rust_kv/kv-core",
+  "files": [
+    {
+      "path": "third_party/modular/rust_kv/BUILD.bazel",
+      "bytes": 1276,
+      "sha256": "127ee14abe7b4708a441bfb3fd665159075badfc493d78bd1884359388b9fa85",
+      "upstream_sha256": "127ee14abe7b4708a441bfb3fd665159075badfc493d78bd1884359388b9fa85"
+    },
+    {
+      "path": "third_party/modular/rust_kv/Cargo.toml",
+      "bytes": 343,
+      "sha256": "75f39fdac91c005f96d81e2fe9507a0598c088a22f2e91e0c1848864beab4611",
+      "upstream_sha256": "75f39fdac91c005f96d81e2fe9507a0598c088a22f2e91e0c1848864beab4611"
+    },
+    {
+      "path": "third_party/modular/rust_kv/src/geometry.rs",
+      "bytes": 24853,
+      "sha256": "b6b2f64bc9901ef9c653b764c284692ee75d6f20b35e6859b012855c8c44e718",
+      "upstream_sha256": "b6b2f64bc9901ef9c653b764c284692ee75d6f20b35e6859b012855c8c44e718"
+    },
+    {
+      "path": "third_party/modular/rust_kv/src/geometry/tests.rs",
+      "bytes": 26671,
+      "sha256": "12032807ec138d596d7f5c6c9d828e754cdb52ac6dde2869dd942dcde722c039",
+      "upstream_sha256": "12032807ec138d596d7f5c6c9d828e754cdb52ac6dde2869dd942dcde722c039"
+    },
+    {
+      "path": "third_party/modular/rust_kv/src/hash.rs",
+      "bytes": 16289,
+      "sha256": "ca4ac55ef0d7adcd54c20d256c6832f2f868d95817f2ddaca1a8f32ab25355a8",
+      "upstream_sha256": "ca4ac55ef0d7adcd54c20d256c6832f2f868d95817f2ddaca1a8f32ab25355a8"
+    },
+    {
+      "path": "third_party/modular/rust_kv/src/hash/tests.rs",
+      "bytes": 8692,
+      "sha256": "2f3453d4bbcc453db9927ac8bbfcef223ca10b5c090c9a23400a5869d9a29b26",
+      "upstream_sha256": "2f3453d4bbcc453db9927ac8bbfcef223ca10b5c090c9a23400a5869d9a29b26"
+    },
+    {
+      "path": "third_party/modular/rust_kv/src/lib.rs",
+      "bytes": 1408,
+      "sha256": "6ef92ae9c8a04922b23b69608271e892bb362c355c6f7d57b7bf2a89e2091bc1",
+      "upstream_sha256": "6ef92ae9c8a04922b23b69608271e892bb362c355c6f7d57b7bf2a89e2091bc1"
+    },
+    {
+      "path": "third_party/modular/rust_kv/src/pool/block.rs",
+      "bytes": 2900,
+      "sha256": "5a5e59da6bb653d589f5dac5228b0fd9077932c627122cfb118b73b29b057b1b",
+      "upstream_sha256": "5a5e59da6bb653d589f5dac5228b0fd9077932c627122cfb118b73b29b057b1b"
+    },
+    {
+      "path": "third_party/modular/rust_kv/src/pool/block_pool.rs",
+      "bytes": 71417,
+      "sha256": "e47c82b6e5b5912b987fe69a9a872d11334635f81eb40bb6f68e787a3b15ee98",
+      "upstream_sha256": "e47c82b6e5b5912b987fe69a9a872d11334635f81eb40bb6f68e787a3b15ee98"
+    },
+    {
+      "path": "third_party/modular/rust_kv/src/pool/free_list.rs",
+      "bytes": 16749,
+      "sha256": "979b0268c05bb8de84f9b05a4000d73a6b3ab41b8a67ff6b822f62c348776f6a",
+      "upstream_sha256": "979b0268c05bb8de84f9b05a4000d73a6b3ab41b8a67ff6b822f62c348776f6a"
+    },
+    {
+      "path": "third_party/modular/rust_kv/src/pool/mod.rs",
+      "bytes": 2712,
+      "sha256": "000b68a39ca587e479fc38a4411a76022d8978ad4b5535165f11da6a221a9fc3",
+      "upstream_sha256": "000b68a39ca587e479fc38a4411a76022d8978ad4b5535165f11da6a221a9fc3"
+    },
+    {
+      "path": "third_party/modular/rust_kv/src/prefix_hit.rs",
+      "bytes": 31563,
+      "sha256": "af1ec5636cb1f46d363dbd0f031498f56de26151402c747a57e5b3f4b934c00b",
+      "upstream_sha256": "af1ec5636cb1f46d363dbd0f031498f56de26151402c747a57e5b3f4b934c00b"
+    },
+    {
+      "path": "third_party/modular/rust_kv/LICENSE",
+      "bytes": 13223,
+      "sha256": "139faafa263a5afc867af756260b6769e7766ba3cd2c318bab0de8cf123058c4",
+      "upstream_sha256": "139faafa263a5afc867af756260b6769e7766ba3cd2c318bab0de8cf123058c4"
+    }
+  ],
+  "compile_qualified": false,
+  "adaptation": "None - vendored near-verbatim as build-time oracle and provenance; fak-native Go port lives in internal/radixkv/prefix_hit.go"
+}
