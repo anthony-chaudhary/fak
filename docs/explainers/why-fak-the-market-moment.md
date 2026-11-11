@@ -130,7 +130,7 @@ the kernel:
 
 | The binary | The middle path fak implements |
 |---|---|
-| Human runs every tool ↔ model calls anything | **A default-deny capability floor.** You enumerate what the agent may do; everything else refuses *by structure*, without a recognizer that can fail open. ([why default-deny beats a classifier](default-deny-vs-classifier.md)) |
+| Human runs every tool ↔ model calls anything | **A capability floor on every tool call.** Structural denies and danger rules refuse by structure under every posture, and the strict `fail_closed` posture lets you enumerate exactly what the agent may do — everything else refused, without a recognizer that can fail open. ([why default-deny beats a classifier](default-deny-vs-classifier.md)) |
 | Human verifies every done-claim ↔ believe the agent's summary | **The kernel re-checks the claim against evidence.** A done-claim is graded against git - the subject is forgeable, the diff is not. ([verify, don't trust](verify-dont-trust.md)) |
 | Human coordinates who touches what ↔ hope parallel agents don't collide | **Lane leases and arbitration.** The kernel decides whether two agents may run at once on the same files, and refuses with a structured reason a peer can act on. ([lane leases](../agentic-issue-dispatch.md), [lane arbiter](../cli/sync.md)) |
 | Human approves every exception forever ↔ silent override | **Graduated exceptions.** An attending operator can approve *one exact refused call* - the agent cannot approve itself ([operator approval](../notes/GUARD-OPERATOR-APPROVAL-2026-10-23.md)); blocked gates have recorded, expiring, scope-bound waiver paths instead of a permanent lock or a silent bypass. |

@@ -33,7 +33,7 @@ fak already ships:
   [#241](https://github.com/anthony-chaudhary/fak/issues/241). The in-kernel substrate the
   mode rides: addressed message passing (`internal/a2achan`), shared co-edited task state
   (`internal/sharedtask`), and wave collectives + declared topology (`internal/comm`,
-  `internal/agenttopo`) — **all** folded through the same default-deny adjudicator that
+  `internal/agenttopo`) — **all** folded through the same capability-floor adjudicator that
   gates an ordinary tool call (the §2 invariant of that RFC). A `comm.Group` here is an
   ordered set of member agents whose ranks are a deterministic function of identity, and a
   `Split`/`SplitLane` binds each color to a `dos.toml` lane.

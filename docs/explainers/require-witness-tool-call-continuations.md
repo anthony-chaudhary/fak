@@ -258,7 +258,7 @@ Recommended contract:
 
 ### 2. Adjudicator plugin
 
-An organization may add DLP, cost, compliance, ownership, or product-specific policy. It returns a core verdict or a registered restrictive verdict. Folding is monotone: an extension may narrow authority, request a witness, or defer, but cannot override the kernel's default-deny capability floor.
+An organization may add DLP, cost, compliance, ownership, or product-specific policy. It returns a core verdict or a registered restrictive verdict. Folding is monotone: an extension may narrow authority, request a witness, or defer, but cannot override the kernel's capability floor.
 
 ### 3. Witness-provider plugin
 

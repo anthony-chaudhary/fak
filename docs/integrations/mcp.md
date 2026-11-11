@@ -58,8 +58,9 @@ The shipped entry wires the example
 [dev-agent floor](https://github.com/anthony-chaudhary/fak/blob/main/examples/dev-agent-policy.json).
 Point `--policy` at your own reviewed floor
 ([POLICY.md](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md)), or drop the
-flag to run the raw fail-closed kernel (default-deny: every tool refused until you
-allow it).
+flag to run the built-in floor (shipped posture `default_open`: unlisted tools are
+admitted past the structural denies and danger rules; pin a `fail_closed` policy for
+strict default-deny).
 
 ## Setup: other clients
 

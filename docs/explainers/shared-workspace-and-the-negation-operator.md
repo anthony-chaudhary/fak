@@ -1,6 +1,6 @@
 ---
 title: "Shared workspace, positive state, and the negation operator"
-description: "fak treats an agent's bounded context as a shared workspace to manage, not a chat log to grow: shed superseded history, construct the positive state the agent should occupy, and rewrite kernel-authored negations with the deterministic negframe operator — while the default-deny capability floor still adjudicates every effect below language."
+description: "fak treats an agent's bounded context as a shared workspace to manage, not a chat log to grow: shed superseded history, construct the positive state the agent should occupy, and rewrite kernel-authored negations with the deterministic negframe operator — while the capability floor still adjudicates every effect below language."
 slug: shared-workspace-negation-operator
 keywords:
   - shared workspace

@@ -1,6 +1,6 @@
 ---
 title: "OpenCode + fak: a governed terminal agent"
-description: "Wire fak in front of the OpenCode terminal agent via MCP or an OpenAI-compatible gateway — a default-deny capability floor, malformed-call repair, and quarantine for poisoned tool results."
+description: "Wire fak in front of the OpenCode terminal agent via MCP or an OpenAI-compatible gateway — a capability floor (shipped default_open; strict fail_closed available), malformed-call repair, and quarantine for poisoned tool results."
 ---
 
 # OpenCode + fak Integration Guide

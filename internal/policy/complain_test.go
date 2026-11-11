@@ -9,7 +9,7 @@ import (
 )
 
 func TestManifestComplainLoadsIntoAdjudicatorPolicy(t *testing.T) {
-	rt, err := ParseRuntime([]byte(`{"complain":["custom_tool"," custom_tool "]}`))
+	rt, err := ParseRuntime([]byte(`{"posture":"fail_closed","complain":["custom_tool"," custom_tool "]}`))
 	if err != nil {
 		t.Fatal(err)
 	}

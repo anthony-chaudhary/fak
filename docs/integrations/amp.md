@@ -1,6 +1,6 @@
 ---
 title: "Amp + fak: a governed Sourcegraph Amp agent"
-description: "Wire fak in front of Sourcegraph's Amp coding agent via MCP or an OpenAI-compatible gateway — a default-deny capability floor, malformed-call repair, and quarantine for poisoned tool results."
+description: "Wire fak in front of Sourcegraph's Amp coding agent via MCP or an OpenAI-compatible gateway — a capability floor (shipped default_open; strict fail_closed available), malformed-call repair, and quarantine for poisoned tool results."
 ---
 
 # Amp + fak Integration Guide

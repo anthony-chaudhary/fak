@@ -24,7 +24,7 @@ description: "Frequently asked questions about fak, the agent kernel: long-sessi
       "name": "What problem does fak solve?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "It gives you control over the parts of a real agent loop that get expensive or go wrong — at one boundary, the tool call: Long sessions get expensive. A growing conversation re-sends its whole transcript every turn, and the provider only discounts it while the cached prefix stays byte-for-byte identical. fak sheds the un-cacheable middle turns by splicing on the original bytes, so the cache discount survives instead of breaking. fak guarantees prefix byte-identity; whether the provider reuses the cache is the provider's call, which fak relays rather than claims. One model rarely fits every call. fak routes an aspect — a tool call, a reasoning step, a stage — to a different model, with first-class ensembles. The routing decision is shipped and testable offline; live dispatch is the next step. Agents waste turns and tokens re-processing shared context and retrying malformed calls. fak serves a repeated read locally, repairs a malformed call in place, and makes the KV cache a kernel object so shared work is computed once. Dangerous and poisoned calls. Irreversible actions (refunds, deletes, sends) are gated by a reviewable allow-list checked inside the kernel — default-deny …"
+        "text": "It gives you control over the parts of a real agent loop that get expensive or go wrong — at one boundary, the tool call: Long sessions get expensive. A growing conversation re-sends its whole transcript every turn, and the provider only discounts it while the cached prefix stays byte-for-byte identical. fak sheds the un-cacheable middle turns by splicing on the original bytes, so the cache discount survives instead of breaking. fak guarantees prefix byte-identity; whether the provider reuses the cache is the provider's call, which fak relays rather than claims. One model rarely fits every call. fak routes an aspect — a tool call, a reasoning step, a stage — to a different model, with first-class ensembles. The routing decision is shipped and testable offline; live dispatch is the next step. Agents waste turns and tokens re-processing shared context and retrying malformed calls. fak serves a repeated read locally, repairs a malformed call in place, and makes the KV cache a kernel object so shared work is computed once. Dangerous and poisoned calls. Irreversible actions (refunds, deletes, sends) are gated by a reviewable capability floor checked inside the kernel — structural denies and danger rules always apply, and the strict fail_closed posture default-denies anything else …"
       }
     },
     {
@@ -48,7 +48,7 @@ description: "Frequently asked questions about fak, the agent kernel: long-sessi
       "name": "How is fak different from a normal firewall or API gateway?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "A normal firewall or gateway screens traffic from the outside and typically fails open when it crashes or times out. fak puts the permission check on the same call path as the tool call (one address space, no inter-process call), so it is something the call passes through, like read() through an OS kernel. It is default-deny: an action that was never allow-listed cannot run, no matter what the model was talked into."
+        "text": "A normal firewall or gateway screens traffic from the outside and typically fails open when it crashes or times out. fak puts the permission check on the same call path as the tool call (one address space, no inter-process call), so it is something the call passes through, like read() through an OS kernel. The shipped posture is default-open: unlisted tools pass the floor unless a structural deny or danger rule catches them, and the strict fail_closed posture is one flag away — under it, an action that was never allow-listed cannot run, no matter what the model was talked into."
       }
     },
     {
@@ -80,7 +80,7 @@ description: "Frequently asked questions about fak, the agent kernel: long-sessi
       "name": "What is the deployment-substrate axis?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "The deployment-substrate axis is the third axis along which the same ak kernel is invariant — from a battery-powered IoT sensor, through edge gateways and laptops, up to multi-GPU hyperscaler fleets. The scale axis runs vertical: tool call to turn to session to fleet to RSI (how much of the stack lives in one address space). The depth axis runs down through the hardware abstraction layer: CPU reference to CUDA to Vulkan to Metal (which silicon runs the matmul). The deployment-substrate axis runs across the whole deployment spectrum: different boxes, same kernel, same invariants. The claim is that the workload shape (an agent loop proposing tool calls) and the invariants (default-deny, quarantine, bit-exact reuse, tamper-evident audit) do not change with the box, so an operator who learns ak on a laptop already knows it on a fleet. See The cross-platform spine."
+        "text": "The deployment-substrate axis is the third axis along which the same ak kernel is invariant — from a battery-powered IoT sensor, through edge gateways and laptops, up to multi-GPU hyperscaler fleets. The scale axis runs vertical: tool call to turn to session to fleet to RSI (how much of the stack lives in one address space). The depth axis runs down through the hardware abstraction layer: CPU reference to CUDA to Vulkan to Metal (which silicon runs the matmul). The deployment-substrate axis runs across the whole deployment spectrum: different boxes, same kernel, same invariants. The claim is that the workload shape (an agent loop proposing tool calls) and the invariants (capability floor, quarantine, bit-exact reuse, tamper-evident audit) do not change with the box, so an operator who learns ak on a laptop already knows it on a fleet. See The cross-platform spine."
       }
     },
     {
@@ -234,8 +234,9 @@ wrong — at one boundary, the tool call:
    malformed calls. `fak` serves a repeated read locally, repairs a malformed call in
    place, and makes the KV cache a kernel object so shared work is computed once.
 4. **Dangerous and poisoned calls.** Irreversible actions (refunds, deletes, sends)
-   are gated by a reviewable allow-list checked inside the kernel — default-deny and
-   fail-closed — and suspicious tool results are quarantined so they never enter the
+   are gated by a reviewable capability floor checked inside the kernel — structural
+   denies and danger rules always apply, and the strict `fail_closed` posture
+   default-denies anything else — and suspicious tool results are quarantined so they never enter the
    model's context.
 
 ## Do I have to configure anything to save tokens?
@@ -273,7 +274,9 @@ babysitting each technique yourself. The full attribution on a real 122-turn ses
 A normal firewall or gateway screens traffic from the *outside* and typically fails
 **open** when it crashes or times out. `fak` puts the permission check on the *same call
 path* as the tool call (one address space, no inter-process call), so it is something
-the call passes *through*, like `read()` through an OS kernel. It is **default-deny**: an
+the call passes *through*, like `read()` through an OS kernel. The shipped posture is
+**default-open**: unlisted tools pass the floor unless a structural deny or danger rule
+catches them, and the strict **`fail_closed`** posture is one flag away — under it, an
 action that was never allow-listed cannot run, no matter what the model was talked into.
 
 ## How does fak prevent prompt injection?
@@ -290,7 +293,7 @@ evadable by design): it is a bonus, never the floor. An attacker has to beat two
 structural gates rather than fool one screener. In live tests, prompt injection reached the
 unprotected baseline 5/5 and `fak` walled it off 5/5. The full before/after walk-through —
 the same injected prompt against a classifier stack and against fak — is in
-[Why default-deny beats a classifier](explainers/default-deny-vs-classifier.md).
+[Why a capability floor beats a classifier](explainers/default-deny-vs-classifier.md).
 
 ## Does fak address the OWASP Agentic Top-10 and the MCP Top-10?
 

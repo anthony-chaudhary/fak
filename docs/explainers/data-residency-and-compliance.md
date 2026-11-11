@@ -67,8 +67,9 @@ data" and expects local security controls. fak's role:
   GLM are proven bit-exact in the [in-kernel reference engine](../supported/models.md), and
   DeepSeek / Yi / Baichuan / Kimi and any open-weights model are fronted over the
   OpenAI-compatible wire — so residency does not cost you a model switch.
-- **Structural containment:** default-deny means a cross-border effect must be *explicitly*
-  wired to exist at all, which is a stronger control than after-the-fact detection.
+- **Structural containment:** under the strict `fail_closed` posture, a cross-border
+  effect must be *explicitly* allow-listed to exist at all, which is a stronger control
+  than after-the-fact detection.
 - **Records:** the audit trail supports the "demonstrate your controls" expectation.
 
 ### Europe — GDPR and the EU AI Act
@@ -84,8 +85,9 @@ August 2, 2026). fak's role:
   has no third-country transfer on it. The Chapter V question dissolves for that path
   instead of needing a transfer mechanism; fak is the in-process gate, not another
   processor in the chain.
-- **Data-minimization as capability:** the default-deny allow-list *is* the enforced list
-  of what the agent may do with the data — a technical expression of Article 5(1)(c)
+- **Data-minimization as capability:** under `fail_closed`, the allow-list *is* the
+  enforced list of what the agent may do with the data — a technical expression of
+  Article 5(1)(c)
   minimization, decided on the call path rather than promised in a policy document.
 - **Accountability and Article 12:** every decision lands in an append-only,
   SHA-256-hash-chained journal that `fak audit verify` re-validates offline. The full

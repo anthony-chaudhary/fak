@@ -57,7 +57,7 @@ fak serve --addr 127.0.0.1:8080 \
   --base-url http://127.0.0.1:4000/v1 \   # your LiteLLM proxy
   --model gpt-4o \                          # a model id your LiteLLM config serves
   --api-key-env LITELLM_KEY \               # the proxy's master/virtual key
-  --policy floor.json                       # omit for the fail-closed default floor
+  --policy floor.json                       # omit to run the built-in floor (shipped posture default_open)
 ```
 
 Then point your agent at fak (`OPENAI_BASE_URL=http://127.0.0.1:8080/v1`). **What it

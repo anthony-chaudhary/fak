@@ -47,7 +47,7 @@ The kernel exposes a typed seam: `Submit` then `Reap` (the `Kernel` interface in
 
 The decision is made by an in-process reference monitor. No spawned hook, no IPC, the same call stack as the tool invocation (`Adjudicator.Adjudicate` in `internal/adjudicator/decide.go`). Three properties make it trustworthy:
 
-- **Default-deny.** An empty policy, an unknown tool, or every link abstaining all resolve to `Deny` with `DEFAULT_DENY` (`TestEmptyPolicyDefaultDeny`). No affirmative allow means no dispatch.
+- **Default-deny under the strict posture.** Under `fail_closed` — the Go zero-value policy and any manifest that pins it — an unknown tool, or every link abstaining, resolves to `Deny` with `DEFAULT_DENY` (`TestEmptyPolicyDefaultDeny`); the shipped floor instead runs `default_open`, admitting unlisted tools past the structural refusals.
 - **Provable refusal only.** A `Deny` cites one reason from a closed twelve-word vocabulary (`CoreReasonCount = 12` in `internal/abi/reasons.go`). What it cannot prove, it defers rather than guesses.
 - **Deny never reaches the engine.** A denied call returns a `DenyResult` on the `Reap` path before `engine.Complete` is ever called (witness `TestDenyNeverReachesDispatch`).
 
@@ -113,7 +113,7 @@ The diagram below is the same idea, nested.
   |  |  |  |  |       |                  (adjudicate, no engine)|  |  |  |  |
   |  |  |  |  |       v                                         |  |  |  |  |
   |  |  |  |  |   DECIDE ............... adjudicator verdict    |  |  |  |  |
-  |  |  |  |  |       |                  default-deny, 12 reasons|  |  |  |  |
+  |  |  |  |  |       |                  one of 12 closed reasons|  |  |  |  |
   |  |  |  |  |       v                                         |  |  |  |  |
   |  |  |  |  |   KERNEL DISPOSES ...... kernel.Reap            |  |  |  |  |
   |  |  |  |  |                          deny never reaches engine|  |  |  |  |
@@ -279,7 +279,7 @@ So build the loop. That part is yours, and it is the part that matters. Just don
 
 ## Read next
 
-- [Policy in the kernel](policy-in-the-kernel.md) — why a default-deny check on the call path beats an external recognizer that fails open.
+- [Policy in the kernel](policy-in-the-kernel.md) — why a structural check on the call path beats an external recognizer that fails open.
 - [Addressable KV cache](addressable-kv-cache.md) — how mid-run causal span eviction stays bit-exact.
 - [The O(1) context window](o1-context-window-economics.md) — when reconstructing a bounded context each turn beats leaning on the prefix cache.
 - [The cross-platform spine](cross-platform-spine.md) — the third axis: the *same* kernel and the *same* invariants across the whole deployment substrate, from an IoT node to a hyperscaler, the way this doc's scale axis runs from one tool call to the fleet.

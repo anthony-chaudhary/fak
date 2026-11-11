@@ -137,7 +137,7 @@ closed backend) aren't runtime boundaries a gateway can sit on in the first plac
 
 So the rule from the [index](README.md) holds across the whole field: **if your tool can
 set a base URL, fak already fronts it** — your agent, your model, your prompts unchanged,
-with a default-deny capability floor in the middle.
+with a capability floor in the middle.
 
 ## Cross-references
 

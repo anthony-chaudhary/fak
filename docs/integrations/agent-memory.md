@@ -1,6 +1,6 @@
 ---
 title: "Put fak in front of an agent-memory system (mem0 / OpenMemory / MCP)"
-description: "fak is the reference monitor beneath an agent-memory store, not a competitor to it. Wire mem0's OpenMemory MCP server behind fak manage and every add/search/delete crosses a default-deny capability floor: oversized writes refused, secret-shaped writes refused, a prompt-injected delete_all refused, and every recalled memory trust-gated before it re-enters context. Zero mem0 code."
+description: "fak is the reference monitor beneath an agent-memory store, not a competitor to it. Wire mem0's OpenMemory MCP server behind fak manage and every add/search/delete crosses a capability floor (shipped default_open; strict fail_closed available): oversized writes refused, secret-shaped writes refused, a prompt-injected delete_all refused, and every recalled memory trust-gated before it re-enters context. Zero mem0 code."
 ---
 
 # Run your memory store through fak
@@ -14,7 +14,7 @@ no trust check. mem0's own docs concede there is no request middleware and no pr
 hook.
 
 `fak` is the layer beneath: a **reference monitor at the agent's syscall boundary**. It
-keeps the store's retrieval engine intact and adds a default-deny floor in front of every
+keeps the store's retrieval engine intact and adds a capability floor in front of every
 memory operation. This guide wires mem0's local **OpenMemory MCP server** behind
 `fak manage` so the gate is invisible to your agent and you change no mem0 code.
 

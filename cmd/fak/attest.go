@@ -11,7 +11,10 @@ package main
 //   - every declared DENY is enforced, with the closed-vocabulary reason the
 //     manifest cites for it;
 //   - every declared ALLOW (and allow_prefix) is admitted;
-//   - the DEFAULT-DENY posture holds for a tool the floor does not name.
+//   - the unlisted-tool posture holds: an explicit fail_closed floor
+//     DEFAULT_DENYs a tool it does not name, while the shipped default_open
+//     floor admits it with the posture record (admit_and_log keeps the deny
+//     for names that are not read-shaped).
 //
 // An explicit --probes FILE overrides the derived set, so an operator can attest
 // arg-value cases (the manifest's arg_rules) or any other shape the name-level
@@ -39,6 +42,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/maputil"
@@ -201,8 +205,10 @@ func loadProbesFile(path string) ([]probe, error) {
 }
 
 // deriveProbes turns a manifest into its own proof obligation. The probes are
-// sorted for deterministic output; the default-deny probe is appended last as a
-// named, always-present witness that the floor is actually closed.
+// sorted for deterministic output; the unmatched-name probe is appended last as
+// a named, always-present witness of the floor's posture: a fail_closed /
+// admit_and_log floor must DEFAULT_DENY it, while the shipped default_open floor
+// admits it by posture (omitted posture resolves to default_open).
 func deriveProbes(manifestBytes []byte) ([]probe, error) {
 	m, err := policy.ParseManifest(manifestBytes)
 	if err != nil {
@@ -234,20 +240,19 @@ func deriveProbes(manifestBytes []byte) ([]probe, error) {
 		probes = append(probes, probe{Tool: prefix + "attest_probe", Args: "{}", Expect: "allow", Origin: "allow_prefix"})
 	}
 
-	// The trailing probe witnesses the floor's posture for a name it does not
-	// affirmatively allow. Under fail_closed / admit_and_log that name is denied
-	// (DEFAULT_DENY); under default_open it is admitted by default, so the probe
-	// flips to expect ALLOW — the open posture is the witness.
-	trailing := probe{Tool: "__fak_attest_unmatched__", Args: "{}"}
-	if m.Posture == "default_open" {
-		trailing.Expect = "allow"
-		trailing.Origin = "default_open"
+	// The unmatched-name probe mirrors the manifest's own posture: an explicit
+	// fail_closed floor must DEFAULT_DENY it; the shipped default_open floor
+	// admits it by posture; admit_and_log still denies it because the name is
+	// not read-shaped.
+	unmatched := probe{Tool: "__fak_attest_unmatched__", Args: "{}", Origin: "default_deny"}
+	if posture, err := policy.ParsePosture(m.Posture); err == nil && posture == adjudicator.PostureDefaultOpen {
+		unmatched.Expect = "allow"
+		unmatched.Origin = "default_open"
 	} else {
-		trailing.Expect = "deny"
-		trailing.ExpectReason = "DEFAULT_DENY"
-		trailing.Origin = "default_deny"
+		unmatched.Expect = "deny"
+		unmatched.ExpectReason = "DEFAULT_DENY"
 	}
-	probes = append(probes, trailing)
+	probes = append(probes, unmatched)
 	return probes, nil
 }
 

@@ -30,7 +30,7 @@ The thesis of this page: **`fak` is that spine for the agentic workload.** The
 deployment target changes enormously — a battery-powered IoT box, an edge gateway,
 a laptop, a fleet of datacenter GPUs — but the *workload shape* (an agent running a
 loop that proposes tool calls a kernel must adjudicate) and the *invariants the
-kernel keeps* (default-deny on every call, bit-exact reuse of work already done, a
+kernel keeps* (a capability floor on every call, bit-exact reuse of work already done, a
 tamper-evident line per decision) do not change shape with the hardware. So the
 same kernel is present at every point on the spectrum, and an operator who learns
 it on a laptop already knows it on a fleet. This is the cross-platform claim, drawn
@@ -74,7 +74,7 @@ above the contract is the spine.
    ^ HARDWARE: power, RAM, ISA, accelerator, network — all change 1000x
 
    ====================== THE SPINE (invariant) =======================
-   tool call = syscall   |  default-deny capability floor (fail closed)
+   tool call = syscall   |  capability floor (structural denies; strict fail_closed)
    result quarantine     |  bit-exact KV reuse / addressable eviction
    tamper-evident audit  |  one static pure-Go binary, CGO_ENABLED=0
    deterministic verdict |  same wire (OpenAI / Anthropic / MCP)
@@ -124,7 +124,7 @@ the substrate axis.
 | Invariant | Why it doesn't change with the box | Where it lives |
 |---|---|---|
 | **One static pure-Go binary, two `golang.org/x` deps, `CGO_ENABLED=0`** | Nothing to link or port; the same ~13 MB artifact cross-compiles to every target. The arm64 NEON Q8 path is the same one Apple silicon ships, so the edge build is not a special build. | `go.mod` (`x/term`, plus `x/sys` indirectly, in a 4-line `go.sum`); `release-artifacts.yml` (5 static targets incl. `linux/arm64`); `internal/model/quant_arm64.go` |
-| **Default-deny capability floor, fail closed** | The lever is never wired up rather than caught after the fact, so it costs the same whether the model is a 1.5B on a Pi or a frontier API. The same booby-trapped policy walls identically across a weak cloud model and a local CPU model. | `internal/adjudicator`, `internal/policy`, `POLICY.md`, `docs/repro-packet.md` |
+| **Capability floor: structural denies under every posture, strict `fail_closed` default-denies the rest** | The dangerous lever is never wired up rather than caught after the fact, so it costs the same whether the model is a 1.5B on a Pi or a frontier API. The same booby-trapped policy walls identically across a weak cloud model and a local CPU model. | `internal/adjudicator`, `internal/policy`, `POLICY.md`, `docs/repro-packet.md` |
 | **Result quarantine at the write-time boundary** | A poisoned tool result is held out of context by structure, not by a classifier — identical logic whether the "tool" is a sensor on an untrusted bus or a cloud API. | `internal/ctxmmu/mmu.go` |
 | **Bit-exact KV reuse + addressable eviction** | The deterministic metrics (token-count reuse, evict == never-saw at `max\|Δ\|=0`) are hardware-independent and reproduce **byte-for-byte** across arm64 and x86_64. | `internal/model/kvcache.go`, `internal/kvmmu`; cross-platform witness in `HARDWARE-MATRIX.md` |
 | **Tamper-evident audit: append-only, SHA-256 hash-chained** | One verifiable line per decision, the same on a regulated edge device and a fleet host; verified offline with `fak audit verify`. | `internal/journal/journal.go`, `docs/proofs/journal.md` |
@@ -147,7 +147,7 @@ The same kernel, four very different boxes, one contract:
 
 - **IoT / constrained edge node** (battery, small RAM, an MCU-class or low-end
   arm64 SoC, often air-gapped). The win here is the part fak ships and the part the
-  platform leaves thin: a default-deny gate the on-device model can't argue past, a
+  platform leaves thin: a capability floor the on-device model can't argue past, a
   poisoned-result fence, and a tamper-evident log — all CPU-only, all offline. The
   compute is somebody else's (a vendor NPU runtime behind the gate, or a tiny CPU
   model). *Honest edge: there is no measured RAM/power footprint on a real Pi or
@@ -185,7 +185,7 @@ dependency, so they don't merely *approximate* the laptop result on a bigger box
 they reproduce it exactly, the same way the [hardware matrix](../HARDWARE-MATRIX.md)
 already witnesses them reproducing across arm64 and x86_64. A datacenter host is one
 more point on that determinism axis: a faster forward pass below the contract, the
-identical verdict above it. The default-deny floor and the SHA-256 hash-chained
+identical verdict above it. The capability floor and the SHA-256 hash-chained
 audit line are likewise pure-Go and hardware-independent, so an offline
 `fak audit verify` over a fleet host's journal is the same check it is on a Pi.
 
@@ -193,7 +193,7 @@ What is **witnessed today** vs. what is a **TARGET**, kept provenance-honest:
 
 | Datacenter-end claim | Status |
 |---|---|
-| Deterministic invariants (bit-exact KV reuse, addressable eviction, default-deny, hash-chained audit) reproduce byte-for-byte on any box, fleet host included | **Witnessed by construction** — the metrics carry no hardware dependency, and the cross-ISA reproduction is recorded in `HARDWARE-MATRIX.md`. The same logic on a bigger box yields the same numbers; there is nothing silicon-specific left to drift. |
+| Deterministic invariants (bit-exact KV reuse, addressable eviction, the adjudication floor, hash-chained audit) reproduce byte-for-byte on any box, fleet host included | **Witnessed by construction** — the metrics carry no hardware dependency, and the cross-ISA reproduction is recorded in `HARDWARE-MATRIX.md`. The same logic on a bigger box yields the same numbers; there is nothing silicon-specific left to drift. |
 | A *dedicated* datacenter-scale run that re-records those same invariants on a multi-GPU fleet host, alongside [hardware matrix](../HARDWARE-MATRIX.md) Platform 4 | **TARGET / not-yet-witnessed** — the multi-GPU serving lane exists, but a fleet-host re-run of the determinism witness has not been captured yet. Until it is, the byte-for-byte claim rests on the construction argument plus the cross-ISA witness, not on a recorded datacenter row. |
 | Any hyperscaler *throughput* result | **Not claimed.** The spine is the governance/reuse/provenance band; tokens per second is the substrate-specific half the HAL and engine seam own (see the fences below). |
 

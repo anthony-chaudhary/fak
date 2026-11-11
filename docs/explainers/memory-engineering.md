@@ -129,7 +129,7 @@ verified at `max|Δ| = 0` ([Addressable KV cache](./addressable-kv-cache.md)).
 
 fak's stake in the term is the definition above plus one working assembly that
 answers all four questions at a single boundary — the same in-process,
-default-deny kernel that adjudicates tool calls ([the tool call is a
+kernel that adjudicates tool calls ([the tool call is a
 syscall](./tool-call-is-a-syscall.md)). Per the project's honesty discipline
 ([CLAIMS.md](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md)): the
 primitives are not novel — admission gates, integrity codes, and eviction are

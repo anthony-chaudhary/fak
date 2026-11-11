@@ -58,14 +58,16 @@ const (
 //
 // Field semantics mirror adjudicator.Policy exactly:
 //   - Allow / AllowPrefix: a call is affirmatively permitted if its tool name is
-//     in Allow or starts with one of AllowPrefix. Everything else is DEFAULT_DENY.
+//     in Allow or starts with one of AllowPrefix.
 //   - Deny: an explicit provable refusal, value = a closed-vocabulary reason name.
 //   - SelfModifyGlobs: path fragments that, in a write-shaped call's target, prove
 //     a SELF_MODIFY attempt.
 //   - RedactFields: arg keys whose value is stripped (TRANSFORM) before dispatch.
-//   - Posture: default-deny behavior; omitted means fail_closed. admit_and_log
-//     admits low-risk read-shaped DEFAULT_DENY calls with forensic metadata, but
-//     does not soften explicit denies, self-modify, arg-rule violations, or writes.
+//   - Posture: what happens to a call no rung decided; omitted means default_open
+//     (the permissive guard default). fail_closed keeps unlisted calls at
+//     DEFAULT_DENY — the operator/strict lever; admit_and_log admits low-risk
+//     read-shaped DEFAULT_DENY calls with forensic metadata. Neither softens
+//     explicit denies, self-modify, arg-rule violations, or writes.
 //   - SafeSinks / Authorize / Sources: IFC config for post-read egress precision
 //     and host-authored source classes.
 type Manifest struct {
@@ -689,6 +691,11 @@ func (m Manifest) ToRuntime() (Runtime, error) {
 		InheritedCapabilities: ic,
 		SubagentDepth:         sd,
 	}
+	// Mirror the manifest posture (shipped default_open when omitted) into the
+	// policy context so context readers see the same posture the adjudicator
+	// enforces; a named profile then applies its own posture, and an explicit
+	// manifest posture still wins over the profile.
+	rt.PolicyContext.Posture = posture
 	if prof != "" {
 		prof.Apply(&rt)
 		if m.Posture != "" {
@@ -711,15 +718,17 @@ func (m Manifest) validateVersion() error {
 }
 
 // ParsePosture parses a posture string into an adjudicator.Posture.
-// Accept "default_open", "", "fail_closed", "admit_and_log".
+// Accepts "default_open", "" (omitted — the shipped default), "fail_closed",
+// "admit_and_log", plus the "default_deny" / "default-deny" aliases for
+// fail_closed (the operator/strict lever).
 func ParsePosture(s string) (adjudicator.Posture, error) {
 	switch strings.TrimSpace(s) {
-	case "", postureFailClosed:
+	case "", postureDefaultOpen:
+		return adjudicator.PostureDefaultOpen, nil
+	case postureFailClosed, "default_deny", "default-deny":
 		return adjudicator.PostureFailClosed, nil
 	case postureAdmitAndLog:
 		return adjudicator.PostureAdmitAndLog, nil
-	case postureDefaultOpen:
-		return adjudicator.PostureDefaultOpen, nil
 	default:
 		return adjudicator.PostureFailClosed, fmt.Errorf(
 			"unknown posture %q (want %s|%s|%s)", s, postureFailClosed, postureAdmitAndLog, postureDefaultOpen)
@@ -742,10 +751,15 @@ func FromPolicy(p adjudicator.Policy) Manifest {
 		BlockedPathGlobs: cloneSlice(p.BlockedPathGlobs),
 		RedactFields:     cloneSlice(p.RedactFields),
 	}
-	if p.Posture == adjudicator.PostureAdmitAndLog {
+	switch p.Posture {
+	case adjudicator.PostureAdmitAndLog:
 		m.Posture = postureAdmitAndLog
-	} else if p.Posture == adjudicator.PostureDefaultOpen {
+	case adjudicator.PostureDefaultOpen:
 		m.Posture = postureDefaultOpen
+	case adjudicator.PostureFailClosed:
+		// Emit explicitly so a strict floor round-trips: FromPolicy(p).ToPolicy()
+		// must keep fail_closed instead of re-reading it as the omitted default.
+		m.Posture = postureFailClosed
 	}
 	if len(p.AdvisoryReasons) > 0 {
 		m.AdvisoryReasons = make([]string, 0, len(p.AdvisoryReasons))
@@ -878,11 +892,16 @@ func Summary(p adjudicator.Policy) string {
 		fmt.Fprintf(&b, "                     %s\n", describeArgPredicate(pred))
 	}
 	if allowN == 0 && len(p.AllowPrefix) == 0 && len(p.ResearchEgressAllowHosts) == 0 {
-		if p.Posture == adjudicator.PostureAdmitAndLog {
+		switch p.Posture {
+		case adjudicator.PostureAdmitAndLog:
 			b.WriteString("\nNOTE: nothing is affirmatively allowed; read-shaped DEFAULT_DENY\n" +
 				"calls are admitted with posture=admit_and_log/would_deny=DEFAULT_DENY,\n" +
 				"while explicit denies and write-shaped calls still fail closed.\n")
-		} else {
+		case adjudicator.PostureDefaultOpen:
+			b.WriteString("\nNOTE: nothing is affirmatively allowed, but the posture is\n" +
+				"default_open: unlisted tools are ADMITTED after the structural\n" +
+				"refusals (explicit denies, self-modify, arg rules, dangerous gotchas).\n")
+		default:
 			b.WriteString("\nNOTE: nothing is affirmatively allowed — this is the fail-closed\n" +
 				"empty floor; EVERY call resolves to DEFAULT_DENY.\n")
 		}

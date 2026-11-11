@@ -76,7 +76,7 @@ complementary, not competing — and fak is only the third:
 |---|---|---|---|
 | **Structured-output library** | Instructor, Pydantic AI, BAML, LangChain strategies | A typed object you can program against; parse / validate / retry; provider portability | Token-level enforcement (some modes are prompt-then-validate); that the value is *correct*; that the action is *allowed* |
 | **Guided-decoding engine** | XGrammar(-2), llguidance, Outlines in vLLM / SGLang / TensorRT-LLM | Every emitted token stays inside the grammar → **syntactically valid** JSON/CFG, fast, at scale | Semantic accuracy; provider-subset acceptance; and — critically — that a well-formed call is *safe to execute* |
-| **fak gate** | `fak serve` at the effect boundary | Adjudicates whether a schema-valid candidate is **allowed to have the requested effect**: default-deny floor, provenance/IFC taint, deny-as-value verdicts, audit | The structure itself — fak rides the library/engine that produces it, it does not re-implement them |
+| **fak gate** | `fak serve` at the effect boundary | Adjudicates whether a schema-valid candidate is **allowed to have the requested effect**: capability floor, provenance/IFC taint, deny-as-value verdicts, audit | The structure itself — fak rides the library/engine that produces it, it does not re-implement them |
 
 A grammar is not a security policy. A schema constrains *shape*; it says nothing about
 whether `transfer_funds` should fire. That gap is fak's entire job.

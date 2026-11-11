@@ -148,7 +148,7 @@ the correction only counts as *witnessed* once the worker both **acks** it and
 acked-alone. Neither side is trusted on its word; each move must cite the other's
 unforgeable handle.
 
-Every one of these rides the same default-deny capability floor that gates an
+Every one of these rides the same capability floor that gates an
 ordinary tool call — coordination in fak is not a side library with its own
 security surface (the full normative spec is the
 [Multi-Agent Coordination Protocol RFC](../multi-agent-coordination-protocol.md)).

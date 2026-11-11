@@ -1,6 +1,6 @@
 ---
 title: "Roo Code + fak: a governed VS Code agent"
-description: "Wire fak as a tool-governance layer for Roo Code, the VS Code AI agent — a default-deny capability floor, malformed-call repair, and quarantine for poisoned tool results — via an OpenAI-compatible gateway or MCP."
+description: "Wire fak as a tool-governance layer for Roo Code, the VS Code AI agent — a capability floor (shipped default_open; strict fail_closed available), malformed-call repair, and quarantine for poisoned tool results — via an OpenAI-compatible gateway or MCP."
 ---
 
 # Roo Code + fak Integration Guide

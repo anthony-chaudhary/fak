@@ -67,7 +67,7 @@ func newChatFlagSet() (*flag.FlagSet, *chatFlags) {
 	cf.offline = fs.Bool("offline", false, "force the deterministic mock planner (no network)")
 	cf.maxTurns = fs.Int("max-turns", 10, "max model turns the loop may take to resolve ONE human turn")
 	cf.policyPath = fs.String("policy", "", "load the capability floor from a manifest (default: the built-in production capability floor)")
-	cf.posture = fs.String("posture", "fail_closed", "adjudication posture: fail_closed|default_open|admit_and_log (default: fail_closed developer floor; env: FAK_AGENT_POSTURE or FAK_GUARD_POSTURE)")
+	cf.posture = fs.String("posture", "", "adjudication posture: default_open|fail_closed|admit_and_log (default: default_open developer floor; fail_closed/strict is the strict lever; env: FAK_AGENT_POSTURE or FAK_GUARD_POSTURE)")
 	cf.task = fs.String("task", "", "run a single non-interactive task turn (headless mode) and exit")
 	cf.taskFile = fs.String("task-file", "", "read a non-interactive UTF-8 task from a file (mutually exclusive with --task)")
 	cf.effort = fs.String("effort", "", "reasoning effort for the native task")
@@ -175,10 +175,6 @@ func cmdChat(argv []string) {
 			rawMode = env
 		}
 	}
-	if strings.TrimSpace(rawMode) == "" {
-		rawMode = "fail_closed"
-	}
-
 	var runOpts []agent.RunOption
 	policyDigest := guardPolicyDigest(guardDefaultPolicyJSON)
 	var effectivePosture adjudicator.Posture
@@ -714,11 +710,13 @@ func renderChatTermination(out io.Writer, err error) {
 
 func parseChatMode(s string) adjudicator.Posture {
 	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "default_open":
+	case "", "default_open":
+		// Omitted mode is the shipped default-open developer floor; an operator
+		// opts into the strict lever with an explicit fail_closed/strict.
 		return adjudicator.PostureDefaultOpen
 	case "admit_and_log":
 		return adjudicator.PostureAdmitAndLog
-	case "fail_closed", "strict", "":
+	case "fail_closed", "strict":
 		return adjudicator.PostureFailClosed
 	default:
 		p, err := policy.ParsePosture(s)

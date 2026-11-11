@@ -78,7 +78,7 @@ through?"* before deploying.
 | Field | Meaning |
 |---|---|
 | `version` | Schema tag. Omit it (current is assumed) or set `fak-policy/v1`. A different **major** (e.g. `fak-policy/v2`) is refused; a newer v1 **minor** — written `fak-policy/v1.x`, e.g. `fak-policy/v1.3`, and matched by the `fak-policy/v1` prefix — is forward-accepted, so any binary that speaks v1 tolerates any v1-minor manifest (there is no per-minor support matrix). |
-| `posture` | Adjudication posture: `default_open` (default for `fak guard`), `fail_closed` (strict default-deny; default for policy manifests), or `admit_and_log` (audit/telemetry mode). See [Posture modes](#posture-modes) below. |
+| `posture` | Adjudication posture: `default_open` (the shipped default whenever the field is omitted), `fail_closed` (strict default-deny; the operator lever), or `admit_and_log` (audit/telemetry mode). See [Posture modes](#posture-modes) below. |
 | `allow` | Tool names affirmatively permitted (exact match). |
 | `allow_prefix` | A call is permitted if its tool name **starts with** any of these — the read-only family (`read_`, `get_`, `search_`, …). |
 | `deny` | Explicit provable refusals: `tool → reason`. The reason **must** be a name from the closed refusal vocabulary (below), and it is a **static label** stamped on the refusal — never a runtime condition. A `deny` entry refuses *every* call to that tool name unconditionally; picking a detector-shaped code like `SECRET_EXFIL` does **not** make the deny fire only when a secret is present (that taint-conditional path is the live detector, not this static map). Prefer a structural code such as `POLICY_BLOCK` here so the label-not-condition reading is obvious. |
@@ -95,8 +95,8 @@ The policy adjudicator operates under one of three posture modes:
 
 | Posture | Behavior on unlisted tools | Default in |
 |---|---|---|
-| `default_open` | **Admitted** (`ALLOW` with `posture=default_open`). Explicit denies, arg rules, self-modification, egress restrictions, and the Dangerous Gotchas catalog remain fail-closed. | `fak guard` (when no explicit policy manifest is specified) |
-| `fail_closed` | **Refused** (`DEFAULT_DENY`). Only tools explicitly listed in `allow` or matching `allow_prefix` (or permitted by `egress.research_allow_hosts`) may execute. | Policy manifests (`fak policy`, `fak preflight`) |
+| `default_open` | **Admitted** (`ALLOW` with `posture=default_open`). Explicit denies, arg rules, self-modification, egress restrictions, and the Dangerous Gotchas catalog remain fail-closed. | Omitted posture, on every surface: `fak guard` without a manifest, and any manifest that leaves `posture` out |
+| `fail_closed` | **Refused** (`DEFAULT_DENY`). Only tools explicitly listed in `allow` or matching `allow_prefix` (or permitted by `egress.research_allow_hosts`) may execute. | An explicit pin only: `"posture": "fail_closed"` in a manifest, `--posture fail_closed`, or the strict/hardened profiles |
 | `admit_and_log` | **Admitted for read-shaped queries** (`read_`, `get_`, `search_`, `list_`, `lookup_`, `find_`, `calc`, `calculate`) with metadata `would_deny=DEFAULT_DENY`. Write-shaped calls and explicit denials still fail closed. | Opt-in via manifest or `--posture admit_and_log` |
 
 ### `default_open`: Developer convenience bounded by the safety floor
@@ -163,7 +163,7 @@ For security-sensitive deployments, compliance audits, or enterprise environment
    fak guard --dump-strict-policy > strict-policy.json
    ```
 
-Under `fail_closed`, any tool not explicitly listed in `allow` or matched by `allow_prefix` is refused with `DEFAULT_DENY`. An empty manifest (`{}`) is valid and represents the maximally paranoid floor where all tools are refused. `fak policy --check` calls this out explicitly so you never deploy an empty floor by accident.
+Under `fail_closed`, any tool not explicitly listed in `allow` or matched by `allow_prefix` is refused with `DEFAULT_DENY`. An empty manifest (`{}`) is valid: left to the omitted-posture default it runs `default_open` (unlisted tools admitted past the structural refusals), and pinned to `fail_closed` it becomes the maximally paranoid floor where every unlisted tool is refused. `fak policy --check` calls the empty-allow case out explicitly either way, so you never deploy a dead floor by accident.
 
 ## The closed refusal vocabulary
 

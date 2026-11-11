@@ -798,7 +798,10 @@ claude --dangerously-skip-permissions
 
 ## Capability Floor (Policy)
 
-With **no policy**, the kernel default-denies every tool. The dogfood launcher loads `examples/dogfood-claude-policy.json`, which:
+With **no policy**, the built-in floor stands (shipped posture `default_open`: unlisted
+tools are admitted past the structural denies and danger rules; pin
+`posture: "fail_closed"` for strict default-deny). The dogfood launcher loads
+`examples/dogfood-claude-policy.json`, which pins `fail_closed` and:
 
 - **Allows** the standard Claude Code tool set (`Bash`, `Read`, `Edit`, `Write`, `Glob`, `Grep`, etc.)
 - **Denies by argument value:** `rm -rf`, `sudo`, `git push`, RCE pipes, fork bombs

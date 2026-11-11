@@ -113,7 +113,7 @@ var PolicyKnobRegistry = []PolicyKnob{
 	// added to a FROZEN knob — the compiled-in floor caps every central grant.
 	{Field: "Posture", Class: AmendGatedWiden, Direction: DirectionWidenOnly,
 		Channels: []string{ChannelOperatorOverlay, ChannelLiveReload, ChannelOperatorEscalation, ChannelCentral},
-		Doc:      "Default-deny posture; fail_closed may loosen to admit_and_log for read-shaped default denies."},
+		Doc:      "Adjudication posture; the shipped default is default_open (omitted means default_open), fail_closed is the operator/strict lever, and fail_closed may widen to admit_and_log or default_open for read-shaped default denies. Go's zero value stays fail_closed for explicit constructions."},
 	{Field: "Allow", Class: AmendGatedWiden, Direction: DirectionWidenOnly,
 		Channels: []string{ChannelOperatorOverlay, ChannelLiveReload, ChannelCentral},
 		Doc:      "Affirmative per-tool allowlist (allow overlay); adding a name widens what is admitted."},

@@ -71,11 +71,13 @@ func TestTransparentRewriteHonorsArgRuleConfinement(t *testing.T) {
 	}
 }
 
-// A floor that never lists Read / Grep / Glob default-denies them exactly as it
-// default-denies the fak_* tools they would be rewritten to: the rewrite must not
-// admit what neither name is allowed to do.
+// A fail-closed floor that never lists Read / Grep / Glob default-denies them
+// exactly as it default-denies the fak_* tools they would be rewritten to: the
+// rewrite must not admit what neither name is allowed to do. (The pin is on the
+// strict lever: under the shipped default_open posture an unlisted tool is
+// admitted by posture, which is the point of the flip.)
 func TestTransparentRewriteHonorsAllowListOmission(t *testing.T) {
-	a := rewriteFloor(t, []byte(`{"version":"fak-policy/v1","allow":["Write"]}`))
+	a := rewriteFloor(t, []byte(`{"version":"fak-policy/v1","posture":"fail_closed","allow":["Write"]}`))
 	for _, tc := range []struct{ tool, fakTool, args string }{
 		{"Read", "fak_read", `{"file_path":"/etc/shadow"}`},
 		{"Grep", "fak_grep", `{"pattern":"x","path":"/etc"}`},

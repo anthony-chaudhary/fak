@@ -36,7 +36,7 @@ fak is the third option: trust as a definition you write down, not a leap.
 
 | The binary | fak's middle path |
 |---|---|
-| A human approves every tool call ↔ the model calls anything | A default-deny capability floor (only the tools you allow may run): everything else refuses by structure, not by a recognizer that can fail open |
+| A human approves every tool call ↔ the model calls anything | A capability floor on every tool call: structural denies and danger rules refuse by structure, not by a recognizer that can fail open — shipped `default_open`, strict `fail_closed` one flag away |
 | Believe the agent's "done" ↔ verify every claim yourself | The kernel checks the claim against git evidence: the subject is forgeable, the diff is not |
 | Hope parallel agents don't collide ↔ coordinate them by hand | Lane leases and arbitration decide who may run on what, and refuse with a structured reason a peer can act on |
 | Silent overrides ↔ permanent human locks | Graduated exceptions: an attending operator approves one exact refused call; the agent cannot approve itself |
@@ -98,8 +98,9 @@ Install with `curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak
 ### Governance for external agents (`fak guard`)
 
 Already running Claude Code or Codex? Wrap the agent you already run with one command
-to add a deny-first capability floor (default-deny): only allowed tools run,
-everything else is blocked. fak forwards your Codex subscription credentials (no API key required):
+to add a capability floor: the kernel adjudicates every tool call before it runs —
+structural denies and danger rules block by structure, and the strict `fail_closed`
+posture makes only allow-listed tools run. fak forwards your Codex subscription credentials (no API key required):
 
 ```bash
 fak guard -- codex

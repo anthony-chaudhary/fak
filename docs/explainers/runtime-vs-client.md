@@ -49,7 +49,7 @@ roles so the choice becomes mechanical.
 
 | Role | What it is | fak surface | Maturity |
 |---|---|---|---|
-| **Gateway (inference) runtime** | a long-lived server governing *model traffic*: model routing, cost/context caps, the default-deny capability floor, result quarantine, the audit journal | **`fak serve`** | shipped — the primary path today |
+| **Gateway (inference) runtime** | a long-lived server governing *model traffic*: model routing, cost/context caps, the capability floor (structural denies under every posture; strict `fail_closed` default-denies the rest), result quarantine, the audit journal | **`fak serve`** | shipped — the primary path today |
 | **Agent application runtime** | a long-lived server that *hosts and executes the agent loop*: sessions, tool dispatch, subagents, streaming, resume — every step kernel-adjudicated | **`fak serve --native`** (drives the owned `agent.RunArm` loop) | shipping — the emerging first-class surface (workstream B) |
 | **Client** | the harness or app that *calls* a runtime: Claude Code, Codex, or your own backend over an SDK | **`fak manage`** turns a harness into a governed client; or repoint one base URL yourself | shipped — witnessed live in front of Claude Code, opencode, Codex |
 

@@ -451,18 +451,27 @@ func TestHarnessProfileCoverageDetectsMissingRequiredTool(t *testing.T) {
 }
 
 // TestHarnessProfileCoverageDetectsForbiddenArtifactTool pins the #2255 Artifact verdict:
-// it is a known Claude Code surface, but the default guard floor must not silently admit a
-// tool whose job is publishing session output outside the local tool boundary.
+// it is a known Claude Code surface, and the default guard floor must not admit a tool
+// whose job is publishing session output outside the local tool boundary. Under the
+// shipped default_open posture an unlisted name is admitted by posture, so the verdict
+// is carried by an EXPLICIT deny entry on the floor — dropping that entry must surface a
+// coverage gap.
 func TestHarnessProfileCoverageDetectsForbiddenArtifactTool(t *testing.T) {
-	mutated := mutateFloorAllow(t, guardDefaultPolicyJSON, func(allow []string) []string {
-		return append(append([]string{}, allow...), "Artifact")
-	})
-	gaps, err := checkHarnessFloorCoverage(mutated)
+	var m policy.Manifest
+	if err := json.Unmarshal(guardDefaultPolicyJSON, &m); err != nil {
+		t.Fatalf("decode floor: %v", err)
+	}
+	delete(m.Deny, "Artifact")
+	out, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("encode mutated floor: %v", err)
+	}
+	gaps, err := checkHarnessFloorCoverage(out)
 	if err != nil {
 		t.Fatalf("coverage check failed to run: %v", err)
 	}
 	if !anyContains(gaps, `"Artifact"`) {
-		t.Fatalf("allowing Artifact by default should report a gap; got gaps=%v", gaps)
+		t.Fatalf("dropping the explicit Artifact deny should report a gap; got gaps=%v", gaps)
 	}
 }
 

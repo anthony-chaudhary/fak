@@ -133,7 +133,7 @@ func TestUnknownFieldRejected(t *testing.T) {
 	}
 }
 
-func TestEmptyManifestIsFailClosed(t *testing.T) {
+func TestEmptyManifestIsDefaultOpen(t *testing.T) {
 	p, err := Parse([]byte(`{}`))
 	if err != nil {
 		t.Fatalf("empty manifest should be valid: %v", err)
@@ -141,8 +141,35 @@ func TestEmptyManifestIsFailClosed(t *testing.T) {
 	if len(p.Allow) != 0 || len(p.AllowPrefix) != 0 {
 		t.Fatalf("empty manifest should allow nothing: %+v", p)
 	}
-	if !strings.Contains(Summary(p), "fail-closed") {
-		t.Fatalf("Summary should flag the empty floor as fail-closed:\n%s", Summary(p))
+	if p.Posture != adjudicator.PostureDefaultOpen {
+		t.Fatalf("omitted posture should parse to default_open (the shipped guard default), got %v", p.Posture)
+	}
+	if !strings.Contains(Summary(p), "default_open") {
+		t.Fatalf("Summary should flag the open empty floor:\n%s", Summary(p))
+	}
+}
+
+// An explicit strict manifest keeps its fail_closed posture through the
+// round-trip: FromPolicy must emit the posture so re-parsing does not fall
+// back to the omitted (default_open) default.
+func TestExplicitFailClosedRoundTrips(t *testing.T) {
+	p, err := Parse([]byte(`{"version":"fak-policy/v1","posture":"fail_closed","allow":["read"]}`))
+	if err != nil {
+		t.Fatalf("parse explicit fail_closed: %v", err)
+	}
+	if p.Posture != adjudicator.PostureFailClosed {
+		t.Fatalf("explicit fail_closed: got %v", p.Posture)
+	}
+	m := FromPolicy(p)
+	if m.Posture != "fail_closed" {
+		t.Fatalf("FromPolicy must emit explicit fail_closed, got %q", m.Posture)
+	}
+	p2, err := m.ToPolicy()
+	if err != nil {
+		t.Fatalf("re-parse FromPolicy output: %v", err)
+	}
+	if p2.Posture != adjudicator.PostureFailClosed {
+		t.Fatalf("round-tripped posture = %v, want fail_closed", p2.Posture)
 	}
 }
 
@@ -232,6 +259,7 @@ func TestUnknownPostureRejected(t *testing.T) {
 // DENY with the cited reason; an unlisted tool hits the fail-closed default.
 func TestLoadedPolicyIsLoadBearing(t *testing.T) {
 	p, err := Parse([]byte(`{
+		"posture": "fail_closed",
 		"allow": ["search_flights"],
 		"allow_prefix": ["read_"],
 		"deny": {"exfiltrate": "SECRET_EXFIL"}
@@ -304,6 +332,7 @@ func TestDeniesToolUnconditionally(t *testing.T) {
 	// A real floor: two tools affirmatively allowed, one of them narrowed by an
 	// arg-conditional rule, plus an explicit blanket deny.
 	m, err := ParseManifest([]byte(`{
+		"posture": "fail_closed",
 		"allow": ["read_file", "write_file"],
 		"deny": {"exfiltrate": "SECRET_EXFIL"},
 		"arg_rules": [

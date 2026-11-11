@@ -145,7 +145,7 @@ does not accumulate the expensive one.
   believing it, via a digest with no `claimed` field.
 - [The tool call is a syscall](tool-call-is-a-syscall.md) — the keystone model
   this sits under: the model proposes, the kernel disposes.
-- [Why default-deny beats a classifier](default-deny-vs-classifier.md) — the
+- [Why a capability floor beats a classifier](default-deny-vs-classifier.md) — the
   same distrust discipline applied to prompt injection.
 - [Memory engineering](memory-engineering.md) — the deeper treatment of
   write-time admission, verified recall, and provable forgetting.

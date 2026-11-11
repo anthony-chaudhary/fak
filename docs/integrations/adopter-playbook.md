@@ -7,7 +7,8 @@ description: "The end-to-end playbook for adopting fak from outside the repo: fr
 
 This is the playbook for adopting `fak` **from outside this repository** — you have
 your own agent, your own model, and your own CI, and you want the kernel's
-default-deny capability floor in front of them. It covers the three real integration
+capability floor in front of them (shipped posture `default_open`; pin
+`fail_closed` for a strict allow-list-only floor). It covers the three real integration
 shapes, each self-contained:
 
 | Shape | You want… | Jump to |
@@ -54,8 +55,9 @@ tool call and proxies the rest upstream. Work top to bottom.
 
 ### A.1 — Author the capability floor (`policy.json`)
 
-With **no policy, the kernel default-denies every tool** — fail-closed. So a real
-deployment ships a reviewable allow-list as a JSON manifest in git. Start from a
+The built-in floor ships with posture `default_open` (unlisted tools admitted past the
+structural denies and danger rules), so a real deployment still ships a reviewed
+manifest in git — pinning `posture: "fail_closed"` when only allow-listed tools may run. Start from a
 shipped example and check it offline before it ever binds a listener:
 
 ```bash
@@ -177,7 +179,7 @@ claude mcp add fak -- fak serve --stdio --policy policy.json
 ```
 
 Open Claude Code in that project and `fak` appears under `/mcp`. Adjust the `--policy`
-path to your own floor (see §A.1) or drop `--policy` to run the raw fail-closed kernel.
+path to your own floor (see §A.1) or drop `--policy` to run the built-in floor (shipped posture `default_open`).
 The same `mcpServers` block works for **Cursor** (`.cursor/mcp.json`) and any other MCP
 client; for HTTP transport instead of stdio, run `fak serve --addr 127.0.0.1:8080` and
 `POST /mcp`.

@@ -1,5 +1,6 @@
 {
   "version": "fak-policy/v1",
+  "posture": "fail_closed",
   "allow_prefix": ["read_", "get_", "list_", "search_"],
   "mount_view": [
     { "path": "src", "mode": "rw" },

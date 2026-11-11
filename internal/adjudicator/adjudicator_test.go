@@ -50,18 +50,25 @@ func TestEmptyPolicyDefaultDeny(t *testing.T) {
 	}
 }
 
-// Unit 15 (cont): an UNKNOWN tool under DefaultPolicy => Allow (default-open
-// posture). The floor no longer blanket-denies unlisted tools; the
-// provable-refusal rungs (Deny map, SelfModifyGlobs, the dangerous-gotcha
-// floor) still hold for the specific named dangers.
-func TestDefaultPolicyUnknownToolDefaultOpen(t *testing.T) {
+// Unit 15 (cont): an UNKNOWN tool under DefaultPolicy => Deny / DefaultDeny.
+// The shipped production floor is default_open: an unknown tool is admitted
+// with the posture record, while the explicit fail_closed lever keeps the
+// classic DEFAULT_DENY for unlisted names.
+func TestDefaultPolicyUnknownToolPosture(t *testing.T) {
 	a := New(DefaultPolicy())
 	v := a.Adjudicate(context.Background(), inlineCall("totally_unknown_tool", `{}`))
 	if v.Kind != abi.VerdictAllow {
-		t.Fatalf("unknown tool: got Kind=%v, want VerdictAllow (default-open)", v.Kind)
+		t.Fatalf("unknown tool under shipped default_open: got Kind=%v (%s), want VerdictAllow", v.Kind, abi.ReasonName(v.Reason))
 	}
 	if v.Meta["posture"] != "default_open" {
-		t.Fatalf("unknown tool: got Meta[posture]=%q, want default_open", v.Meta["posture"])
+		t.Fatalf("unknown tool: Meta[posture]=%q, want default_open", v.Meta["posture"])
+	}
+
+	strict := DefaultPolicy()
+	strict.Posture = PostureFailClosed
+	vs := New(strict).Adjudicate(context.Background(), inlineCall("totally_unknown_tool", `{}`))
+	if vs.Kind != abi.VerdictDeny || vs.Reason != abi.ReasonDefaultDeny {
+		t.Fatalf("unknown tool under explicit fail_closed: got %v/%s, want Deny/DEFAULT_DENY", vs.Kind, abi.ReasonName(vs.Reason))
 	}
 }
 

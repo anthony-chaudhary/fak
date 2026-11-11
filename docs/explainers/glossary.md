@@ -41,7 +41,7 @@ name — this page is the naming.
 
 - **[Syscall boundary](tool-call-is-a-syscall.md)** — the line a tool call crosses out of the model's hands: like a user program calling the OS, the agent proposes an action and a kernel it does not control decides — the model proposes, the kernel disposes.
 - **[Verdict](tool-call-is-a-syscall.md)** — the kernel's ruling on one proposed tool call (allow, refuse, quarantine), produced by an inspectable check — never by asking the model whether its own call looks safe.
-- **[Capability floor](default-deny-vs-classifier.md)** — the default-deny list of what an agent may do at all: anything not explicitly granted is refused by structure, so an attack is stopped without having to be recognized.
+- **[Capability floor](default-deny-vs-classifier.md)** — the reviewable boundary around what an agent may do at all: structural denies and danger rules refuse by structure under every posture, and the strict `fail_closed` posture refuses anything not explicitly granted — so an attack is stopped without having to be recognized.
 - **[Quarantine](default-deny-vs-classifier.md)** — where a suspicious tool result goes instead of straight into the model's context: held apart, screened, and admitted only if clean.
 - **[Fail-closed](policy-in-the-kernel.md)** — when a check cannot run or cannot decide, the answer is "no": an error means refusal, never a silent pass-through.
 

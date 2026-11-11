@@ -53,6 +53,7 @@ func TestIsolationTiersDoNotBypassAdjudicationFloor(t *testing.T) {
 	// customer-support-readonly policy).
 	rt, err := ParseRuntime([]byte(`{
 		"version": "fak-policy/v1",
+		"posture": "fail_closed",
 		"allow": ["search_kb"],
 		"isolation": {
 			"backends": ["goroutine", "subprocess", "container", "gvisor"],

@@ -420,7 +420,7 @@ In VS Code:
 ### All operations are being denied
 
 1. Check the policy's posture:
-   - `posture: "fail_closed"` (default) denies everything not explicitly allowed
+   - `posture: "fail_closed"` (the strict posture) denies everything not explicitly allowed — the shipped default is `default_open`, which admits unlisted tools past the structural denies and danger rules
    - Ensure your tools are in `allow` or match an `allow_prefix`
 
 2. Test a specific call:

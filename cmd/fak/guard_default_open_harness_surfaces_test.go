@@ -126,15 +126,15 @@ func TestGuardFloorAdmitsStandardHarnessSurfaces(t *testing.T) {
 				t.Errorf("posture %q: %s danger call = %v/%s, want DENY/POLICY_BLOCK", posture, d.tool, v.Kind, abi.ReasonName(v.Reason))
 			}
 		}
-		// Boundary spot-check: the census's twelfth name stays closed. Under
-		// fail_closed an unlisted name hits the default-deny rung, so Artifact
-		// must remain DEFAULT_DENY on the bare floor (#2255).
-		if posture == "fail_closed" {
-			for _, tool := range pinnedOffFloorNames {
-				v := adj.Adjudicate(ctx, guardToolCall(t, tool, map[string]any{}))
-				if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonDefaultDeny {
-					t.Errorf("posture %q: %s = %v/%s, want DENY/DEFAULT_DENY (pinned off-floor, #2255)", posture, tool, v.Kind, abi.ReasonName(v.Reason))
-				}
+		// Boundary spot-check: the census's twelfth name stays closed. #2255
+		// keeps Artifact off the public floor; since the default-open flip it is
+		// pinned by an EXPLICIT deny entry in guard-default-policy.json, which
+		// answers POLICY_BLOCK under every posture — stronger than the old
+		// DEFAULT_DENY pin that only bit under fail_closed.
+		for _, tool := range pinnedOffFloorNames {
+			v := adj.Adjudicate(ctx, guardToolCall(t, tool, map[string]any{}))
+			if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonPolicyBlock {
+				t.Errorf("posture %q: %s = %v/%s, want DENY/POLICY_BLOCK (pinned off-floor, #2255)", posture, tool, v.Kind, abi.ReasonName(v.Reason))
 			}
 		}
 	}

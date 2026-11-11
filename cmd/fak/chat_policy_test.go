@@ -16,14 +16,14 @@ func TestChatDefaultDeveloperPolicyFloor(t *testing.T) {
 
 	ctx := context.Background()
 
-	t.Run("DefaultDeveloperCapabilityFloorEnforcesFailClosedAndAllowedTools", func(t *testing.T) {
+	t.Run("DefaultDeveloperCapabilityFloorIsDefaultOpenAndKeepsStructuralDenies", func(t *testing.T) {
 		initDevRules("")
 
-		if got := agent.ConfiguredPosture(); got != adjudicator.PostureFailClosed {
-			t.Fatalf("agent.ConfiguredPosture() = %v, want PostureFailClosed", got)
+		if got := agent.ConfiguredPosture(); got != adjudicator.PostureDefaultOpen {
+			t.Fatalf("agent.ConfiguredPosture() = %v, want PostureDefaultOpen", got)
 		}
-		if got := adjudicator.Default.PolicySnapshot().Posture; got != adjudicator.PostureFailClosed {
-			t.Fatalf("adjudicator.Default Posture = %v, want PostureFailClosed", got)
+		if got := adjudicator.Default.PolicySnapshot().Posture; got != adjudicator.PostureDefaultOpen {
+			t.Fatalf("adjudicator.Default Posture = %v, want PostureDefaultOpen", got)
 		}
 
 		// Allowed standard developer tools:
@@ -78,14 +78,15 @@ func TestChatDefaultDeveloperPolicyFloor(t *testing.T) {
 			})
 		}
 
-		// Unlisted unknown tools are denied under default fail_closed
+		// Unlisted unknown tools are admitted under the default-open floor,
+		// carrying the posture record in the verdict Meta.
 		unlistedCall := guardToolCall(t, "arbitrary_exec", map[string]any{})
 		vUnlisted := adjudicator.Default.Adjudicate(ctx, unlistedCall)
-		if vUnlisted.Kind != abi.VerdictDeny {
-			t.Fatalf("unlisted tool arbitrary_exec: got Kind=%v, want VerdictDeny", vUnlisted.Kind)
+		if vUnlisted.Kind != abi.VerdictAllow {
+			t.Fatalf("unlisted tool arbitrary_exec under default_open: got Kind=%v (%s), want VerdictAllow", vUnlisted.Kind, abi.ReasonName(vUnlisted.Reason))
 		}
-		if vUnlisted.Reason != abi.ReasonDefaultDeny {
-			t.Fatalf("unlisted tool arbitrary_exec: got Reason=%s, want ReasonDefaultDeny", abi.ReasonName(vUnlisted.Reason))
+		if vUnlisted.Meta["posture"] != "default_open" {
+			t.Fatalf("unlisted tool arbitrary_exec: Meta[posture]=%q, want default_open", vUnlisted.Meta["posture"])
 		}
 	})
 
@@ -125,8 +126,8 @@ func TestChatDefaultDeveloperPolicyFloor(t *testing.T) {
 		captureAgentStdio(t, func() {
 			cmdChat([]string{"--offline", "--task", "hello", "--tools=none"})
 		})
-		if got := agent.ConfiguredPosture(); got != adjudicator.PostureFailClosed {
-			t.Fatalf("cmdChat default posture: got %v, want PostureFailClosed", got)
+		if got := agent.ConfiguredPosture(); got != adjudicator.PostureDefaultOpen {
+			t.Fatalf("cmdChat default posture: got %v, want PostureDefaultOpen", got)
 		}
 
 		captureAgentStdio(t, func() {

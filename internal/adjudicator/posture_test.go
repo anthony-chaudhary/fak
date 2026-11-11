@@ -83,3 +83,16 @@ func TestPostureDefaultOpen(t *testing.T) {
 		t.Fatalf("NeverAdmits(explicit_denied_tool) = false under PostureDefaultOpen, want true")
 	}
 }
+
+// The shipped programmatic floor is default_open; the strict lever stays an
+// explicit choice (Go's zero value remains fail_closed for explicit
+// constructions).
+func TestDefaultPolicyShipsDefaultOpen(t *testing.T) {
+	if got := DefaultPolicy().Posture; got != PostureDefaultOpen {
+		t.Fatalf("DefaultPolicy().Posture = %v, want PostureDefaultOpen", got)
+	}
+	var zero Policy
+	if zero.Posture != PostureFailClosed {
+		t.Fatalf("zero-value Policy.Posture = %v, want PostureFailClosed (explicit constructions stay strict)", zero.Posture)
+	}
+}

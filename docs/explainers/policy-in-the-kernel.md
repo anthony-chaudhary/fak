@@ -147,7 +147,7 @@ The agent makes 1,000 tool calls in a session, so that is 4,000 checks.
   agent is busiest.
 - **Run each check in-process:** 4,000 × 2.4 µs ≈ 10 ms, lost in the noise next to a
   single model call. Now "refuse if anything is wrong" costs nothing, so fail-closed
-  can be the default instead of an aspiration.
+  can be pinned without paying for it.
 
 This is why the placement is load-bearing, and why you want the gate on the call path
 early. The more checks you want and the more tool calls the agent makes, the harder an

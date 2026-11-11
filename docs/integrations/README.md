@@ -14,8 +14,9 @@ front of the agent you already run — and the same loop comes out **cheaper and
 longer-running**: the shared setup (system prompt, tools, KV cache) is computed once and
 reused, the provider's prompt-cache discount survives as the session grows, each call can
 route to the right model, and repeated reads are served locally. On that same seam, every
-tool call also passes through a default-deny capability floor before it runs — dangerous
-calls denied by structure, malformed calls repaired, poisoned results quarantined — so the
+tool call also passes through a capability floor before it runs — structural denies
+and danger rules block by structure (the strict `fail_closed` posture default-denies
+anything unlisted), malformed calls are repaired, poisoned results quarantined — so the
 loop stays controlled at no extra cost. Your agent, your model, your prompts — unchanged.
 
 ```text

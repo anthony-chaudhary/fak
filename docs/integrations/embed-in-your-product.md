@@ -160,14 +160,17 @@ ships are not written for your product's tools:
   *coding harness's* tools — `Bash`, `Read`, `Edit`, `Write`, `Grep`, … — plus the same
   read-only prefix families.
 
-Your `screen_candidate`, `send_offer`, `reject_applicant` are on neither list, and the
-kernel is **fail-closed**: an unknown tool is a `DENY (DEFAULT_DENY)`, by structure, not
-by model judgment. That is the feature working as designed — and it means step 1's
+Your `screen_candidate`, `send_offer`, `reject_applicant` are on neither allow-list —
+and under the shipped `default_open` posture an unlisted tool would be admitted, which
+is not what a screening pipeline wants. Pin `"posture": "fail_closed"` in your manifest
+so an unknown tool is a `DENY (DEFAULT_DENY)`, by structure, not by model judgment.
+That is the feature working as designed — and it means step 1's
 `--policy screener-floor.json` is not optional. Author the floor for *your* tools:
 
 ```json
 {
   "version": "fak-policy/v1",
+  "posture": "fail_closed",
   "allow": [
     "screen_candidate"
   ],

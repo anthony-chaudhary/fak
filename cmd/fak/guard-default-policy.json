@@ -93,6 +93,24 @@
     "wait",
     "wait_agent",
     "close_agent",
+    "context_control",
+    "task_spawn",
+    "task_wait",
+    "task_status",
+    "task_cancel",
+    "fak_grep",
+    "fak_glob",
+    "git_status",
+    "git_diff",
+    "git_log",
+    "go_build",
+    "go_test",
+    "run_tests",
+    "ship_release",
+    "book_reservation",
+    "update_reservation_flights",
+    "send_certificate",
+    "transfer_to_human_agents",
 
     "mcp__dos__dos_verify",
     "mcp__dos__dos_arbitrate",
@@ -254,6 +272,7 @@
   ],
 
   "deny": {
+    "Artifact": "POLICY_BLOCK",
     "delete_file": "POLICY_BLOCK",
     "mcp__atlassian__confluence_delete_page": "POLICY_BLOCK",
     "mcp__atlassian__confluence_delete_attachment": "POLICY_BLOCK"

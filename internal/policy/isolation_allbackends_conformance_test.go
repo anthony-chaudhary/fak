@@ -68,7 +68,7 @@ func TestAdjudicationFloorHoldsAcrossAllRegisteredBackends(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal isolation block: %v", err)
 	}
-	manifest := fmt.Sprintf(`{"version":"fak-policy/v1","allow":["search_kb"],"isolation":%s}`, isoJSON)
+	manifest := fmt.Sprintf(`{"version":"fak-policy/v1","posture":"fail_closed","allow":["search_kb"],"isolation":%s}`, isoJSON)
 
 	rt, err := ParseRuntime([]byte(manifest))
 	if err != nil {

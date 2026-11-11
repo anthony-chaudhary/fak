@@ -17,6 +17,10 @@ import (
 // covering default_open and fail_closed postures, dangerous gotchas, hard-won carveouts,
 // DOS bytes-not-authored protections, and immutable frozen core safety checks.
 func TestGuardPostureIntegration(t *testing.T) {
+	// Hermetic overlay stack: pin the operator allow overlay to a missing
+	// file so a host-level ~/.fak/guard/allow.json (e.g. one admitting mcp__
+	// prefixes) cannot leak into the floors this test adjudicates.
+	t.Setenv(guardAllowOverlayEnv, filepath.Join(t.TempDir(), "absent-overlay.json"))
 	ctx := context.Background()
 
 	// 1. default_open allows unlisted benign tools without explicit allow entries.

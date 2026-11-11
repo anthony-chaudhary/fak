@@ -23,8 +23,8 @@ date: 2026-07-15
 > kernel over **MCP** (newline-delimited JSON-RPC) and an **OpenAI- and
 > Anthropic-compatible HTTP** surface, so an agent written in any language routes
 > its tool calls through the syscall boundary without writing Go. It governs
-> *model traffic* — routing, cost and context caps, the default-deny capability
-> floor, result quarantine, and the audit journal — and it holds two guarantees:
+> *model traffic* — routing, cost and context caps, the capability floor,
+> result quarantine, and the audit journal — and it holds two guarantees:
 > a verdict over the wire **equals** the verdict the same kernel renders
 > in-process, and a call that fails adjudication is **dropped fail-closed**.
 
@@ -69,7 +69,7 @@ tool call the agent proposes, on the same seam, with two load-bearing guarantees
 |---|---|
 | Fronts the one kernel on the wire | one `*kernel.Kernel`, one decision seam, three wire surfaces |
 | Routes model traffic | per-aspect model routing to the configured upstreams |
-| Enforces the capability floor | default-deny adjudication of every proposed tool call |
+| Enforces the capability floor | in-process adjudication of every proposed tool call (structural denies under every posture; strict `fail_closed` default-denies the rest) |
 | Quarantines untrusted results | raises the IFC taint mark so a later egress call is gated |
 | Caps cost and context | budget and context-window limits on the served session |
 | Audits and correlates | the audit journal plus `X-Trace-Id` request correlation |
@@ -121,16 +121,16 @@ gateway; the full three-role distinction and the *which do I run* decision live 
 
 | Choice | Default | Change it with | Scope |
 |---|---|---|---|
-| Capability policy | the default-deny floor | `--policy <manifest>` | every proposed tool call is adjudicated against it |
+| Capability policy | the built-in floor (shipped posture `default_open`; pin `fail_closed` for strict default-deny) | `--policy <manifest>` | every proposed tool call is adjudicated against it |
 | Auth | bearer / `x-api-key` accepted | `--require-key-env <VAR>` to require a key | wire authentication for the served surface |
 | Model routing | the configured upstreams, per aspect | routing config | which provider serves each call |
 | Loop ownership | your harness owns the loop | add `--native` to own it in fak | gateway runtime vs agent application runtime |
 
-Limitations sit beside the option they constrain: the default-deny floor is the
+Limitations sit beside the option they constrain: the capability floor is the
 load-bearing guarantee and is always on; the built-in result detector is
 best-effort and evadable, which is *why* the capability floor — not the detector —
 is what the gateway relies on. See
-[why default-deny beats a classifier](default-deny-vs-classifier.md).
+[why a capability floor beats a classifier](default-deny-vs-classifier.md).
 
 ## Generation and support context
 

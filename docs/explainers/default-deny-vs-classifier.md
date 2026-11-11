@@ -136,6 +136,6 @@ per-attack recognition.
 ## Where to go deeper
 
 - The keystone mental model: [The tool call is a syscall](tool-call-is-a-syscall.md).
-- Why the check lives on the call path, in-process, fail-closed:
+- Why the check lives on the call path, in-process:
   [Policy in the kernel](policy-in-the-kernel.md).
 - The two-gate answer in FAQ form: [How does fak prevent prompt injection?](../FAQ.md#how-does-fak-prevent-prompt-injection)

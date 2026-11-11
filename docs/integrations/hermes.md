@@ -1,6 +1,6 @@
 ---
 title: "Hermes Agent + fak: governed self-hosted agent"
-description: "Wire fak as a tool-governance layer for Hermes Agent, NousResearch's open-source autonomous agent. Every tool call — including execute_code — crosses a default-deny capability floor, with poisoned tool results quarantined out of context."
+description: "Wire fak as a tool-governance layer for Hermes Agent, NousResearch's open-source autonomous agent. Every tool call — including execute_code — crosses a capability floor (shipped default_open; strict fail_closed available), with poisoned tool results quarantined out of context."
 ---
 
 # Hermes Agent + fak Integration Guide
@@ -355,8 +355,10 @@ Reproduce any verdict offline:
 
 ### Everything is denied
 
-The default posture is `fail_closed` — tools not on `allow`/`allow_prefix` are refused.
-Confirm your Hermes tool names match the floor:
+If your policy pins `posture: "fail_closed"` (the example above does), tools not on
+`allow`/`allow_prefix` are refused. The shipped default posture is `default_open`, which
+admits unlisted tools past the structural denies and danger rules. Confirm your Hermes
+tool names match the floor:
 ```bash
 ./fak preflight --tool read_file --args '{"path":"README.md"}' --policy hermes-policy.json
 ```

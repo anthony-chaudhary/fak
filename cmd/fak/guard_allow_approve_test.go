@@ -190,16 +190,16 @@ func TestShippedFloorsAdmitOnlyExactRemoteMaintenanceToolName(t *testing.T) {
 			t.Fatalf("%s exact typed tool verdict=%v/%s, want Allow", floor.name, v.Kind, abi.ReasonName(v.Reason))
 		}
 		lookalike := approveTestCall("fak_remote_maintenance_extra", `{}`)
-		// The default floor now ships default_open, so an unlisted lookalike is
-		// admitted by default; the strict floor stays fail-closed and still
-		// denies it with DEFAULT_DENY.
 		if floor.name == "strict" {
+			// The strict lever keeps the classic default-deny for unlisted names.
 			if v := a.Adjudicate(context.Background(), lookalike); v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonDefaultDeny {
 				t.Fatalf("%s lookalike verdict=%v/%s, want Deny/DEFAULT_DENY", floor.name, v.Kind, abi.ReasonName(v.Reason))
 			}
 		} else {
-			if v := a.Adjudicate(context.Background(), lookalike); v.Kind != abi.VerdictAllow {
-				t.Fatalf("%s lookalike verdict=%v/%s, want Allow (default-open)", floor.name, v.Kind, abi.ReasonName(v.Reason))
+			// The shipped default_open floor admits unlisted names by posture —
+			// the lookalike carries the posture record instead of a deny.
+			if v := a.Adjudicate(context.Background(), lookalike); v.Kind != abi.VerdictAllow || v.Meta["posture"] != "default_open" {
+				t.Fatalf("%s lookalike verdict=%v/%s Meta[posture]=%q, want Allow/default_open", floor.name, v.Kind, abi.ReasonName(v.Reason), v.Meta["posture"])
 			}
 		}
 	}
