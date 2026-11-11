@@ -15,24 +15,24 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **11** (clarity 9 + coverage 2) |
-| **Crystal-clear concepts (and climbing)** | **1683** crystal of 4156 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **4223 / 4225** (100.0% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **19** (clarity 13 + coverage 6) |
+| **Crystal-clear concepts (and climbing)** | **1683** crystal of 4159 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **4220 / 4226** (99.9% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **3** of 318 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **97** of 5483 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **97** of 5490 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 95.0/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 93.9/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 4156 concepts - score 95.0/100 (grade A) - disambiguation-debt 11
+concept-disambiguation chart - 4159 concepts - score 93.9/100 (grade A) - disambiguation-debt 19
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ###################......... 1683
-  o defined       ############################ 2473
+  o defined       ############################ 2476
   ~ drifting      ............................ 0
   = entangled     ............................ 0
   x colliding     ............................ 0
@@ -52,7 +52,7 @@ clarity mix by family (each cell = one concept):
   loop             *****************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (110 concept(s); 53 crystal)
   plan             ***************************************************************************************************************************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (585 concept(s); 243 crystal)
   policy-capability **********************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (261 concept(s); 130 crystal)
-  pool             **************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (106 concept(s); 38 crystal)
+  pool             **************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (109 concept(s); 38 crystal)
   render-materialize *************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (236 concept(s); 49 crystal)
   score-debt       ***********************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (125 concept(s); 35 crystal)
   session-runtime  ********************************************************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (368 concept(s); 140 crystal)
@@ -62,29 +62,29 @@ clarity mix by family (each cell = one concept):
   witness-proof    ****************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (217 concept(s); 88 crystal)
 
 coverage by family (positioned / discovered):
+  session-runtime  ############################ 389/392
   cache            ############################ 467/468
-  session-runtime  ############################ 389/390
-  attention        ############################ 243/243
-  context-ctx      ############################ 336/336
+  gateway-engine   ############################ 326/327
+  score-debt       ############################ 141/142
+  attention        ############################ 242/242
+  context-ctx      ############################ 335/335
   cross-cluster    ............................ 0/0
   decision         ############################ 68/68
   dev-tier         ............................ 0/0
-  evict            ############################ 97/97
-  gateway-engine   ############################ 327/327
-  guard-gate       ############################ 583/583
+  evict            ############################ 96/96
+  guard-gate       ############################ 581/581
   layout           ############################ 58/58
   loop             ############################ 121/121
   plan             ############################ 651/651
   policy-capability ############################ 288/288
-  pool             ############################ 112/112
+  pool             ############################ 115/115
   render-materialize ############################ 254/254
-  score-debt       ############################ 141/141
   support-maturity ############################ 146/146
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
   witness-proof    ############################ 204/204
 
-namespace coverage  [################################] 100.0%  (4223/4225 confusable tokens positioned)
+namespace coverage  [################################] 99.9%  (4220/4226 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 315
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      #........................... 3
   pairs separated   [################################] 315/318
 
-name index: 5483 lookup name(s) -> 4156 concept(s), 97 ambiguous
+name index: 5490 lookup name(s) -> 4159 concept(s), 97 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **315 / 318** (315 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **3** |
 | Entangled concepts (own twin undrawn) | 6 |
-| Boundaries drawn (mutual / total) | 3690 / 7985 |
+| Boundaries drawn (mutual / total) | 3696 / 7991 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 5483 over 4156 concepts |
+| Lookup names indexed | 5490 over 4159 concepts |
 | Lookup names landing on several concepts | 97 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 4156 |
+| Concepts carrying a contrast set | 4159 |
 
 ## The concepts (best verdict first)
 
@@ -3562,6 +3562,9 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | pool | **WarmPoolFree (prewarm pollution gate)** - compute.PrewarmCandidate.WarmPoolFree is the pollution gate of the tool-latency prewarm admission decision: a bool that is true only when the lowest-eviction-priority warm KV pool has free capacity, so a WarmNow directive never displaces a demand session's resident prefix. |
 | o | defined | symbol | pool | **SharedPool (fleet-benchmark catalog)** - FleetProfile.SharedPool (internal/turnbench) is a fleet-BENCHMARK knob: the number of DISTINCT shared reference reads the modeled agent fleet draws from (the shared catalog size), the parameter that makes the cross-agent dedup curve SATURATE as agent count rises. |
 | o | defined | subsystem | pool | **cxlpooldemo (CXL pool demo)** - cmd/cxlpooldemo is a no-model, no-GPU command that proves the value of a SWITCH-POOLED multi-host shared memory tier (CXL.mem) by computing — purely over cachemeta tier/pool profiles — the three-way fleet economics (per-host private vs copy-only pool vs coherent CXL pool) and the cross-tenant trust gate. |
+| o | defined | symbol | pool | **FitPoolToAvailableMemory explicit-capacity pool fitter** - SharedTokenPool.FitPoolToAvailableMemory (internal/ctxmmu/allocator.go) fits an already-constructed pool to an explicit available-GTT byte budget: it sets totalGTTBytes to the budget, clamps maxTokens down to availableGTTBytes/bytesPerToken (never up), refreshes downscaleFactor from HALOGEN_KV_POOL_FIT on legacy non-explicit-capacity pools while explicit-capacity pools retain their supplied factor, and returns the new effective maximum token capacity. |
+| o | defined | symbol | pool | **FitIntegratedKVPool integrated-device KV pool entrypoint** - FitIntegratedKVPool (internal/ctxmmu/igpu_sizing.go) is the integrated/UMA KV sizing entrypoint: it gates on IsIntegratedDevice (HALOGEN_IGPU override wins, non-Linux defaults to discrete, Linux uses the nvidia-marker/meminfo heuristic), probes the kernel MemAvailable fact via ProbeMemAvailable, computes the effective budget with EffectiveFreeForIntegratedDevice = max(cudaFree, min(memAvailable, total)), and drives SharedTokenPool.FitPoolToAvailableMemory with that fact; discrete devices return before touching the pool or the probe. |
+| o | defined | symbol | pool | **HALOGEN_KV_POOL_FIT downscale-ratio env knob** - EnvHalogenKVPoolFit = "HALOGEN_KV_POOL_FIT" (internal/ctxmmu/allocator.go) is the operator environment knob that carries the KV pool downscale ratio: a valid positive float read at pool construction seeds SharedTokenPool.downscaleFactor (default 1.0), and legacy non-explicit-capacity pools re-read it inside FitPoolToAvailableMemory; the factor proportionally shrinks the fitted pool capacity. |
 | o | defined | symbol | pool | **AutoReleasePool** - The Objective-C @autoreleasepool scope used in darwin Metal sources to bound ARC temporary allocations around kernel dispatch. |
 | o | defined | metric | pool | **AvailableKVPoolBytes** - The macobs headroom-snapshot field reporting how many bytes of unified-memory KV pool remain available for concurrent agent sessions. |
 | o | defined | symbol | pool | **compressorPool** - The v41DeviceGatherOps field holding the bound V4.1 gated-compressor-pool seam for device gather operations. |
@@ -4437,41 +4440,41 @@ abstraction overclaims (20) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `clarity_consistent` | 0 | 6 | 6 verdict overclaim(s) |
 | separation | `pair_separated` | 40 | 3 | 3 confusable pair(s) with no line drawn |
+| grounded | `grounded` | 52 | 3 | 3 ungrounded concept(s) |
+| grounded | `alias_resolved` | 88 | 1 | 1 unresolvable alias(es) |
 | honesty | `kind_grounding_soft` | 60 | 0 | 32 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 34 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 4295/7985 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 4156 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 4295/7991 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 4159 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
 | separation | `reference_resolves` | 100 | 0 | every distinct_from reference resolves to a real concept |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
-| grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
-| grounded | `alias_resolved` | 100 | 0 | every alias resolves in the tree (token or wire key) |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 5483 lookup name(s) resolves - 97 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 5490 lookup name(s) resolves - 97 land on several concepts, all separated |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
+| session-runtime | 389 | 392 | 3 |
 | cache | 467 | 468 | 1 |
-| session-runtime | 389 | 390 | 1 |
-| attention | 243 | 243 | 0 |
-| context-ctx | 336 | 336 | 0 |
+| gateway-engine | 326 | 327 | 1 |
+| score-debt | 141 | 142 | 1 |
+| attention | 242 | 242 | 0 |
+| context-ctx | 335 | 335 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | decision | 68 | 68 | 0 |
 | dev-tier | 0 | 0 | 0 |
-| evict | 97 | 97 | 0 |
-| gateway-engine | 327 | 327 | 0 |
-| guard-gate | 583 | 583 | 0 |
+| evict | 96 | 96 | 0 |
+| guard-gate | 581 | 581 | 0 |
 | layout | 58 | 58 | 0 |
 | loop | 121 | 121 | 0 |
 | plan | 651 | 651 | 0 |
 | policy-capability | 288 | 288 | 0 |
-| pool | 112 | 112 | 0 |
+| pool | 115 | 115 | 0 |
 | render-materialize | 254 | 254 | 0 |
-| score-debt | 141 | 141 | 0 |
 | support-maturity | 146 | 146 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |

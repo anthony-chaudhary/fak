@@ -1,0 +1,68 @@
+{
+  "rows": [
+    {
+      "id": "pool-fitpooltoavailablememory",
+      "canonical": "FitPoolToAvailableMemory explicit-capacity pool fitter",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "SharedTokenPool.FitPoolToAvailableMemory (internal/ctxmmu/allocator.go) fits an already-constructed pool to an explicit available-GTT byte budget: it sets totalGTTBytes to the budget, clamps maxTokens down to availableGTTBytes/bytesPerToken (never up), refreshes downscaleFactor from HALOGEN_KV_POOL_FIT on legacy non-explicit-capacity pools while explicit-capacity pools retain their supplied factor, and returns the new effective maximum token capacity.",
+      "distinction": "It is the byte-budget fitter applied to an existing pool; it does not detect the device class (IsIntegratedDevice / EnvHalogenIGPU gate that), does not read /proc/meminfo (ProbeMemAvailable does), and does not orchestrate the integrated-GPU sizing path (FitIntegratedKVPool does).",
+      "distinct_from": [
+        "pool-fitintegratedkvpool",
+        "pool-halogenkvpoolfit"
+      ],
+      "aliases": [
+        "FitPoolToAvailableMemory"
+      ],
+      "grounding": "FitPoolToAvailableMemory",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-fitintegratedkvpool",
+      "canonical": "FitIntegratedKVPool integrated-device KV pool entrypoint",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "FitIntegratedKVPool (internal/ctxmmu/igpu_sizing.go) is the integrated/UMA KV sizing entrypoint: it gates on IsIntegratedDevice (HALOGEN_IGPU override wins, non-Linux defaults to discrete, Linux uses the nvidia-marker/meminfo heuristic), probes the kernel MemAvailable fact via ProbeMemAvailable, computes the effective budget with EffectiveFreeForIntegratedDevice = max(cudaFree, min(memAvailable, total)), and drives SharedTokenPool.FitPoolToAvailableMemory with that fact; discrete devices return before touching the pool or the probe.",
+      "distinction": "It is the integrated-device gate plus probe orchestration around the generic fitter; it is not the fitter itself (FitPoolToAvailableMemory fits any pool to any byte budget), not the pure formula (EffectiveFreeForIntegratedDevice), and not the detection override env (HALOGEN_IGPU).",
+      "distinct_from": [
+        "pool-fitpooltoavailablememory",
+        "pool-halogenkvpoolfit"
+      ],
+      "aliases": [
+        "FitIntegratedKVPool"
+      ],
+      "grounding": "FitIntegratedKVPool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "pool-halogenkvpoolfit",
+      "canonical": "HALOGEN_KV_POOL_FIT downscale-ratio env knob",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "EnvHalogenKVPoolFit = \"HALOGEN_KV_POOL_FIT\" (internal/ctxmmu/allocator.go) is the operator environment knob that carries the KV pool downscale ratio: a valid positive float read at pool construction seeds SharedTokenPool.downscaleFactor (default 1.0), and legacy non-explicit-capacity pools re-read it inside FitPoolToAvailableMemory; the factor proportionally shrinks the fitted pool capacity.",
+      "distinction": "It is a unitless RATIO knob consumed during pool fit; it does not gate integrated-device detection (that is HALOGEN_IGPU / EnvHalogenIGPU), does not carry a byte budget, and is not a sizing function.",
+      "distinct_from": [
+        "pool-fitpooltoavailablememory",
+        "pool-fitintegratedkvpool"
+      ],
+      "aliases": [
+        "HALOGEN_KV_POOL_FIT",
+        "EnvHalogenKVPoolFit"
+      ],
+      "grounding": "HALOGEN_KV_POOL_FIT",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    }
+  ]
+}

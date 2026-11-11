@@ -135,6 +135,22 @@ func NewSharedTokenPoolWithCapacity(maxTokens int, totalBytes, bytesPerToken int
 	}, nil
 }
 
+// NewSharedTokenPoolFromDevice creates a device-neutral logical admission
+// ledger and sizes it at init from the owning device's facts: on
+// integrated/UMA devices the pool fits the effective free estimate with
+// reclaimable page cache counted as free (see igpu_sizing.go); on discrete
+// devices the pool is byte-identical to NewSharedTokenPoolWithCapacity and
+// the kernel probe is never consulted. cudaFreeBytes is the device-reported
+// free bytes at init.
+func NewSharedTokenPoolFromDevice(maxTokens int, totalBytes, bytesPerToken int64, factor float64, cudaFreeBytes int64) (*SharedTokenPool, error) {
+	p, err := NewSharedTokenPoolWithCapacity(maxTokens, totalBytes, bytesPerToken, factor)
+	if err != nil {
+		return nil, err
+	}
+	FitIntegratedKVPool(p, cudaFreeBytes)
+	return p, nil
+}
+
 // checkedTokenCapacity rejects conversions outside int's range before converting.
 func checkedTokenCapacity(tokens int, factor float64) int {
 	if tokens <= 0 || factor <= 0 || math.IsNaN(factor) || math.IsInf(factor, 0) {
