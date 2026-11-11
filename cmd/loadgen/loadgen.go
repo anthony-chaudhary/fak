@@ -95,6 +95,17 @@ type sseMeasure struct {
 	done             bool
 }
 
+// feedSSEMessage folds one complete SSE event body (possibly several physical
+// lines) into m at arrival time now, keeping the per-line contract of
+// feedSSELine for each line: non-data lines and malformed payloads are skipped,
+// never fatal; a `data: [DONE]` terminal marks the stream complete. All lines
+// of one event share the event's chunk-arrival stamp.
+func (m *sseMeasure) feedSSEMessage(body string, now time.Time) {
+	for _, line := range strings.Split(body, "\n") {
+		m.feedSSELine(line, now)
+	}
+}
+
 // feedSSELine folds one SSE line into m at arrival time now. Non-data lines
 // (comments, event:, id:, blanks) and malformed data payloads are skipped, never
 // fatal; a `data: [DONE]` terminal marks the stream complete.
@@ -340,22 +351,37 @@ func oneRequest(ctx context.Context, cfg *Config, inFlight *clientInFlight, body
 var emptyStreamBody = errors.New("empty stream body")
 
 // measureStream consumes an SSE chat-completions body, sampling the arrival time of
-// each content chunk. A clean EOF (with or without [DONE]) completes the request;
-// malformed lines are skipped and never panic. Observed non-EOF read errors fail
-// the request, including errors accompanying partial data. Completion tokens come
-// only from usage.completion_tokens; chunk counts remain a separate observation.
+// each content chunk. The body is parsed incrementally as complete SSE events:
+// event delimiters that straddle two network chunks are recovered by re-scanning
+// the overlap region, and every event is stamped with the arrival time of the
+// chunk that completed it. A clean EOF (with or without [DONE]) completes the
+// request; malformed lines are skipped and never panic. Observed non-EOF read
+// errors fail the request, including errors accompanying partial data.
+// Completion tokens come only from usage.completion_tokens; chunk counts remain
+// a separate observation.
 func measureStream(cfg *Config, br *bufio.Reader, firstLine string, firstErr error, start time.Time) reqResult {
 	var m sseMeasure
+	p := newSSEStreamParser()
 	if firstLine != "" {
-		m.feedSSELine(firstLine, cfg.now())
+		for _, msg := range p.feed([]byte(firstLine), cfg.now()) {
+			m.feedSSEMessage(msg.body, msg.at)
+		}
 	}
+	chunkBuf := make([]byte, 32*1024)
 	readErr := firstErr
 	for readErr == nil && !m.done {
-		line, err := br.ReadString('\n')
-		if line != "" {
-			m.feedSSELine(line, cfg.now())
+		n, err := br.Read(chunkBuf)
+		if n > 0 {
+			for _, msg := range p.feed(chunkBuf[:n], cfg.now()) {
+				m.feedSSEMessage(msg.body, msg.at)
+			}
 		}
 		readErr = err
+	}
+	if errors.Is(readErr, io.EOF) {
+		for _, msg := range p.finish(cfg.now()) {
+			m.feedSSEMessage(msg.body, msg.at)
+		}
 	}
 	lat := cfg.now().Sub(start)
 	if readErr != nil && !errors.Is(readErr, io.EOF) {

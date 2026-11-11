@@ -300,10 +300,24 @@ func TestRun_SSETransportErrorCannotCountMetrics(t *testing.T) {
 	}
 }
 
+// ssePieceReader serves r in pieces of at most size bytes per Read, forcing
+// consumers to observe the stream one network-ish chunk at a time.
+type ssePieceReader struct {
+	r    io.Reader
+	size int
+}
+
+func (p *ssePieceReader) Read(b []byte) (int, error) {
+	if len(b) > p.size {
+		b = b[:p.size]
+	}
+	return p.r.Read(b)
+}
+
 // fak-test:runtime fast est=100ms
 func TestRun_SSEUsageAndChunkCadenceStayDistinct(t *testing.T) {
 	t.Parallel()
-	const content = "data: {\"choices\":[{\"delta\":{\"content\":\"multiple words\"}},{\"delta\":{\"content\":\"another choice\"}}]}\n"
+	const contentEvent = "data: {\"choices\":[{\"delta\":{\"content\":\"multiple words\"}},{\"delta\":{\"content\":\"another choice\"}}]}\n\n"
 	for _, tc := range []struct {
 		name    string
 		usage   string
@@ -311,14 +325,17 @@ func TestRun_SSEUsageAndChunkCadenceStayDistinct(t *testing.T) {
 		missing int
 	}{
 		{name: "missing", missing: 1},
-		{name: "explicit zero", usage: "data: {\"usage\":{\"completion_tokens\":0}}\n"},
-		{name: "tokens differ from chunks", usage: "data: {\"usage\":{\"completion_tokens\":37}}\n", tokens: 37},
+		{name: "explicit zero", usage: "data: {\"usage\":{\"completion_tokens\":0}}\n\n"},
+		{name: "tokens differ from chunks", usage: "data: {\"usage\":{\"completion_tokens\":37}}\n\n", tokens: 37},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			start := time.Unix(1, 0)
 			now := start
 			cfg := &Config{Now: func() time.Time { now = now.Add(10 * time.Millisecond); return now }}
-			br := bufio.NewReader(strings.NewReader(content + content + tc.usage))
+			// Well-formed \n\n-terminated events delivered one network chunk at a
+			// time (piece size == one event), so each event completes in its own
+			// read and carries its own arrival stamp.
+			br := bufio.NewReader(&ssePieceReader{r: strings.NewReader(contentEvent + contentEvent + tc.usage), size: len(contentEvent)})
 			firstLine, firstErr := br.ReadString('\n')
 			r := measureStream(cfg, br, firstLine, firstErr, start)
 			if r.err != nil {
@@ -353,4 +370,82 @@ func TestRun_SSEUsageAndChunkCadenceStayDistinct(t *testing.T) {
 			}
 		})
 	}
+}
+
+// fak-test:runtime fast est=50ms
+func TestSSEParserChunkBoundary(t *testing.T) {
+	t.Parallel()
+	base := time.Unix(1, 0)
+	at := func(ms int) time.Time { return base.Add(time.Duration(ms) * time.Millisecond) }
+
+	t.Run("delimiter split across chunks", func(t *testing.T) {
+		p := newSSEStreamParser()
+		if got := p.feed([]byte("data: hello world\n"), at(10)); len(got) != 0 {
+			t.Fatalf("messages after partial feed=%d want 0 (no complete delimiter yet)", len(got))
+		}
+		got := p.feed([]byte("\ndata: second\n\n"), at(20))
+		if len(got) != 2 {
+			t.Fatalf("messages after completing feed=%d want 2", len(got))
+		}
+		if got[0].body != "data: hello world" || got[1].body != "data: second" {
+			t.Fatalf("bodies=%q/%q want the two events in order", got[0].body, got[1].body)
+		}
+		// Both events completed inside the second chunk, so both carry that
+		// chunk's arrival time, not the earlier partial feed's.
+		for i, msg := range got {
+			if !msg.at.Equal(at(20)) {
+				t.Fatalf("message %d stamped %v want the completing chunk's arrival %v", i, msg.at, at(20))
+			}
+		}
+	})
+
+	t.Run("crlf delimiter only", func(t *testing.T) {
+		p := newSSEStreamParser()
+		got := p.feed([]byte("data: crlf one\r\n\r\ndata: crlf two\r\n\r\n"), at(30))
+		if len(got) != 2 {
+			t.Fatalf("messages=%d want 2", len(got))
+		}
+		if got[0].body != "data: crlf one" || got[1].body != "data: crlf two" {
+			t.Fatalf("bodies=%q/%q want CRLF-delimited events with padding stripped", got[0].body, got[1].body)
+		}
+		if !got[0].at.Equal(at(30)) || !got[1].at.Equal(at(30)) {
+			t.Fatalf("stamps=%v/%v want the chunk arrival %v", got[0].at, got[1].at, at(30))
+		}
+	})
+
+	t.Run("mixed delimiter styles", func(t *testing.T) {
+		p := newSSEStreamParser()
+		got := p.feed([]byte("data: lf\n\ndata: crlf\r\n\r\n"), at(40))
+		if len(got) != 2 || got[0].body != "data: lf" || got[1].body != "data: crlf" {
+			t.Fatalf("messages=%v want both delimiter styles parsed", got)
+		}
+	})
+
+	t.Run("trailing unterminated message flushed at finish", func(t *testing.T) {
+		p := newSSEStreamParser()
+		if got := p.feed([]byte("data: pending\n"), at(50)); len(got) != 0 {
+			t.Fatalf("messages=%d want 0 before stream end", len(got))
+		}
+		got := p.finish(at(60))
+		if len(got) != 1 || got[0].body != "data: pending" {
+			t.Fatalf("finish messages=%v want the trailing event", got)
+		}
+		if !got[0].at.Equal(at(60)) {
+			t.Fatalf("finish stamp=%v want the end-of-stream time %v", got[0].at, at(60))
+		}
+		if again := p.finish(at(70)); len(again) != 0 {
+			t.Fatalf("second finish=%v want empty (parser drained)", again)
+		}
+	})
+
+	t.Run("empty messages skipped", func(t *testing.T) {
+		p := newSSEStreamParser()
+		got := p.feed([]byte("\n\ndata: real\n\n\n\n"), at(80))
+		if len(got) != 1 || got[0].body != "data: real" {
+			t.Fatalf("messages=%v want only the non-empty event", got)
+		}
+		if rest := p.finish(at(90)); len(rest) != 0 {
+			t.Fatalf("finish=%v want nothing left", rest)
+		}
+	})
 }
