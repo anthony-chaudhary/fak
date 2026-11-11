@@ -296,10 +296,12 @@ func TestExtractHost(t *testing.T) {
 }
 
 func TestIPClassificationHelpers(t *testing.T) {
-	// Tailscale IPs
-	tsIPv4 := net.ParseIP("100.64.0.10")
+	// Tailscale IPs (100.64.0.0/10 CGNAT range; generic test address, not any
+	// real node: the scrub placeholder Tailscale address is a public-leak-audit
+	// needle, so fixtures must not carry it).
+	tsIPv4 := net.ParseIP("100.64.0.20")
 	if !IsTailscaleIP(tsIPv4) {
-		t.Errorf("expected 100.64.0.10 to be identified as Tailscale IP")
+		t.Errorf("expected 100.64.0.20 to be identified as Tailscale IP")
 	}
 
 	tsIPv6 := net.ParseIP("fd7a:115c:a1e0::1")

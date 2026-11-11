@@ -613,7 +613,7 @@ func BenchmarkDaemonSocketBindingGuard(b *testing.B) {
 	}{
 		{"LoopbackIPv4", "127.0.0.1:8080"},
 		{"Localhost", "localhost:8080"},
-		{"TailscaleIPv4", "100.64.0.10:8000"},
+		{"TailscaleIPv4", "100.64.0.20:8000"},
 		{"Wildcard", "0.0.0.0:8080"},
 		{"LAN", "192.168.1.1:80"},
 	}
