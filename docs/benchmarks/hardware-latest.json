@@ -1,6 +1,6 @@
 {
   "schema": "fak-hardware-latest/1",
-  "as_of": "2026-11-02",
+  "as_of": "2026-11-10",
   "platforms": {
     "Mac": {
       "observed": "2026-09-03",
@@ -13,9 +13,9 @@
       "row": "| AMD | DeepSeek-V4.1-Flash-Q2_K on one 128 GB AMD Strix Halo (Ryzen AI MAX+ 395, Radeon 8060S gfx1151, Vulkan): warm single-stream decode reached 4.61 tok/s, +29% over the same-session 3.57 base, with greedy output parity in 32/32 requests; observed 2026-10-22. | Physical APU result; the 30 tok/s decode target is not yet met, so this row stands until a newer accepted AMD measurement exists. [Strix Halo V4.1 Flash results](docs/benchmarks/STRIX-HALO-DEEPSEEK-V41-FLASH.md) |"
     },
     "NVIDIA": {
-      "observed": "2026-10-31",
-      "detail": "docs/benchmarks/published/nvidia-cuda-perf-gap/RESULTS.md",
-      "row": "| NVIDIA | Qwen3.8-27B Q4_K_M on an RTX 5090 Laptop (sm_120): with three documented per-class revert knobs pinned against a witnessed trunk regression, fak reached 18.19 decode tok/s — 0.745× llama.cpp b11870, up from 0.545× — while cold prefill stayed at 0.284×; observed 2026-10-31. | HW-witnessed H2H re-measure; the regression is bisected but unfixed, so knob-free trunk serving is blocked, and the ≥0.8× decode / ≥0.5× prefill maturity bar is not yet met. [RTX 5090 perf-gap receipt](docs/benchmarks/published/nvidia-cuda-perf-gap/RESULTS.md) |"
+      "observed": "2026-11-07",
+      "detail": "docs/benchmarks/receipts/cuda-prefill-sm120-20261106/RESULTS.md",
+      "row": "| NVIDIA | Qwen3.8-27B Q4_K_M on an RTX 5090 Laptop (sm_120): the Q4_K large-batch prefill arm now defaults to the mmq route on sm_80+, a same-card ABBA re-measure of 1.30–1.49× cold prefill (fak/llama.cpp b11870 0.17×→0.26× at P=128) with byte-identical greedy output; decode is unchanged within noise; observed 2026-11-07. | HW-witnessed ABBA on sm_120; the ≥0.5× prefill maturity bar is not yet met (0.13–0.26× llama), and the Q5/Q6 MMQ arm failed the byte-parity gate and was not landed. [RTX 5090 mmq prefill receipt](docs/benchmarks/receipts/cuda-prefill-sm120-20261106/RESULTS.md) |"
     }
   }
 }

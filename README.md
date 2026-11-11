@@ -64,7 +64,7 @@ already use → [`fak guard`](#governance-for-external-agents-fak-guard) ·
 understand why → [the market framing](docs/explainers/why-fak-the-market-moment.md) ·
 check the evidence → [benchmarks](docs/benchmarks/README.md) and [claims](CLAIMS.md).
 
-## Latest hardware results — 2026-11-02
+## Latest hardware results — 2026-11-10
 
 One row per hardware family: the newest committed performance receipt for that platform,
 with its claim boundary and receipt link. A row stays historical until a newer quality-complete
@@ -74,7 +74,7 @@ measurement exists.
 |---|---|---|
 | Mac | Qwen3.8-27B Q4_K_M on Apple M3 Pro: forward-owned Metal sequence prefill was 43.8% faster, 10,284.5 vs 18,304.9 ms, and used 1 command buffer instead of 192; observed 2026-09-03. | Accepted component-path result with exact greedy continuation and zero fallbacks; it is not a full-run throughput comparison. [Qwen result index](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) |
 | AMD | DeepSeek-V4.1-Flash-Q2_K on one 128 GB AMD Strix Halo (Ryzen AI MAX+ 395, Radeon 8060S gfx1151, Vulkan): warm single-stream decode reached 4.61 tok/s, +29% over the same-session 3.57 base, with greedy output parity in 32/32 requests; observed 2026-10-22. | Physical APU result; the 30 tok/s decode target is not yet met, so this row stands until a newer accepted AMD measurement exists. [Strix Halo V4.1 Flash results](docs/benchmarks/STRIX-HALO-DEEPSEEK-V41-FLASH.md) |
-| NVIDIA | Qwen3.8-27B Q4_K_M on an RTX 5090 Laptop (sm_120): with three documented per-class revert knobs pinned against a witnessed trunk regression, fak reached 18.19 decode tok/s — 0.745× llama.cpp b11870, up from 0.545× — while cold prefill stayed at 0.284×; observed 2026-10-31. | HW-witnessed H2H re-measure; the regression is bisected but unfixed, so knob-free trunk serving is blocked, and the ≥0.8× decode / ≥0.5× prefill maturity bar is not yet met. [RTX 5090 perf-gap receipt](docs/benchmarks/published/nvidia-cuda-perf-gap/RESULTS.md) |
+| NVIDIA | Qwen3.8-27B Q4_K_M on an RTX 5090 Laptop (sm_120): the Q4_K large-batch prefill arm now defaults to the mmq route on sm_80+, a same-card ABBA re-measure of 1.30–1.49× cold prefill (fak/llama.cpp b11870 0.17×→0.26× at P=128) with byte-identical greedy output; decode is unchanged within noise; observed 2026-11-07. | HW-witnessed ABBA on sm_120; the ≥0.5× prefill maturity bar is not yet met (0.13–0.26× llama), and the Q5/Q6 MMQ arm failed the byte-parity gate and was not landed. [RTX 5090 mmq prefill receipt](docs/benchmarks/receipts/cuda-prefill-sm120-20261106/RESULTS.md) |
 
 Read the status column before comparing rates. History: [benchmark index](docs/benchmarks/README.md);
 claim boundaries: [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md).
@@ -113,7 +113,7 @@ no key, no model, and no setup, run the offline agent or take the
 fak agent --offline   # -> task completed
 ```
 
-## What changed since 2026-09-09
+## What changed since 2026-10-12
 
 - Fit planning: `fak serve --fit` jointly picks context, KV dtype and slots against a
   stated workload and SLO. It refuses live boots with typed reasons instead of guessing size.
@@ -121,7 +121,7 @@ fak agent --offline   # -> task completed
   MTP runs inside ordinary request serving. An opt-in paged KV store
   (`FAK_CUDA_PAGED_KV=1`) lets requests sharing a prefix share device pages. The Q4_K
   large-batch prefill arm now defaults to the mmq route on sm_80+. The same-card ABBA
-  receipt measured 1.31–1.47× cold prefill with byte-identical greedy output. An
+  receipt measured 1.30–1.49× cold prefill with byte-identical greedy output. An
   explicit `FAK_CUDA_Q4K_PREFILL` remains the opt-out.
 - `fak claude` routes through the live fak router by default (`FAK_ROUTER_URL`,
   else `127.0.0.1:18101`); `--no-router` keeps the direct Mac setup. OpenCode and Pi
