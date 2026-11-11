@@ -78,12 +78,22 @@ func TestBatchStepHealth(t *testing.T) {
 		// every cell to serial. The first batchStepSeedSamples samples fold as
 		// MAX; afterwards the MIN ratchet takes over.
 		p, h := batchHealthWithFloor(t, 0)
-		h.observeSerial(337*time.Microsecond, 1) // warmup-class micro-forward
+		h.observeSerial(337*time.Microsecond, 1) // sample 1: warmup-class micro-forward
 		assertFloor(t, p, 337*time.Microsecond)
-		h.observeSerial(60*time.Millisecond, 2) // real 2-lane serial step: per = 30ms
-		assertFloor(t, p, 30*time.Millisecond)  // calibration MAX raised it
-		h.observeBatched(50*time.Millisecond, 2)
-		assertFloor(t, p, 30*time.Millisecond) // per = 25ms < 30ms inside the window: MAX keeps 30ms
+		h.observeSerial(60*time.Millisecond, 2)  // sample 2: real 2-lane serial step: per = 30ms
+		assertFloor(t, p, 30*time.Millisecond)   // calibration MAX raised it
+		h.observeBatched(50*time.Millisecond, 2) // sample 3: per = 25ms < 30ms inside the window: MAX keeps 30ms
+		assertFloor(t, p, 30*time.Millisecond)
+		h.observeSerial(40*time.Millisecond, 2) // sample 4: per = 20ms: MAX keeps 30ms
+		assertFloor(t, p, 30*time.Millisecond)
+		h.observeSerial(80*time.Millisecond, 2) // sample 5: per = 40ms: MAX raises to 40ms
+		assertFloor(t, p, 40*time.Millisecond)
+		h.observeBatched(40*time.Millisecond, 2) // sample 6: per = 20ms <= 50ms budget: MAX keeps 40ms
+		assertFloor(t, p, 40*time.Millisecond)
+		h.observeSerial(100*time.Millisecond, 2) // sample 7: per = 50ms: MAX raises to 50ms
+		assertFloor(t, p, 50*time.Millisecond)
+		h.observeBatched(60*time.Millisecond, 2) // sample 8: per = 30ms <= 62.5ms budget: MAX keeps 50ms; window closes
+		assertFloor(t, p, 50*time.Millisecond)
 		// Window closed: the MIN ratchet takes over.
 		h.observeSerial(40*time.Millisecond, 2) // per = 20ms lowers
 		assertFloor(t, p, 20*time.Millisecond)
@@ -94,6 +104,43 @@ func TestBatchStepHealth(t *testing.T) {
 		}
 		if !p.batchSeedCalibrating.Load() {
 			t.Fatal("calibration window never opened for an unknown floor")
+		}
+	})
+
+	t.Run("violations suppressed while the calibration window is open", func(t *testing.T) {
+		// Typed defect this pins (q2kxl re-run): the 3-sample window closed on
+		// warmup-class micro-forwards (seeds 6.1us/17.9us observed) before real
+		// decode work arrived, so every real batched step violated the
+		// garbage-low budget and the episode degraded to serial falsely. While
+		// the window is open, violations must not count toward degradation.
+		p, h := batchHealthWithFloor(t, 0)
+		h.observeSerial(337*time.Microsecond, 1)  // warmup-class seed opens the window
+		h.observeBatched(400*time.Millisecond, 2) // per = 200ms >> 421us budget: would violate
+		if h.violations != 0 || h.useSerial() {
+			t.Fatalf("suppression window counted a violation: violations=%d degraded=%v", h.violations, h.degraded)
+		}
+		h.observeBatched(400*time.Millisecond, 2) // second consecutive: still no degradation
+		if h.violations != 0 || h.useSerial() {
+			t.Fatalf("suppression window degraded the episode: violations=%d degraded=%v", h.violations, h.degraded)
+		}
+		if got := p.batchSeedSamples.Load(); got != 1 {
+			t.Fatalf("seed samples=%d, want 1 (only the serial seed folded)", got)
+		}
+		// Close the window with the remaining samples, then violations arm again.
+		for i := 0; i < batchStepSeedSamples-1; i++ {
+			h.observeSerial(30*time.Millisecond, 1)
+		}
+		assertFloor(t, p, 30*time.Millisecond) // MAX of the warmup seed and the 30ms samples
+		if h.calibrationWindowOpen() {
+			t.Fatal("window still open after all samples folded")
+		}
+		h.observeBatched(400*time.Millisecond, 2) // per = 200ms > 37.5ms budget: violation #1
+		if h.useSerial() {
+			t.Fatal("single post-window violation degraded the episode")
+		}
+		h.observeBatched(400*time.Millisecond, 2) // violation #2 arms the policy
+		if !h.useSerial() {
+			t.Fatal("two consecutive post-window violations did not degrade the episode")
 		}
 	})
 

@@ -156,7 +156,9 @@ func (v *vulkanBackend) Qwen35IndependentDecodeBatch(req Qwen35IndependentDecode
 	x, _ := v.devTr([]int{B, H}, F32)
 	for i, lane := range req.Lanes {
 		if lane.TokenEmbeddingRows {
-			C.fvk_d2d_range(v.vp(x), C.size_t(i*H*4), v.vp(lane.TokenEmbedding), 0, C.size_t(H*4))
+			// TokenEmbeddingRow is zero for a lane's own uploaded row buffer and selects
+			// that lane's row of one shared cohort panel when the model borrows rows.
+			C.fvk_d2d_range(v.vp(x), C.size_t(i*H*4), v.vp(lane.TokenEmbedding), C.size_t(lane.TokenEmbeddingRow*H*4), C.size_t(H*4))
 		} else {
 			C.fvk_d2d_range(v.vp(x), C.size_t(i*H*4), v.vp(lane.TokenEmbedding), C.size_t(lane.TokenIDs[0]*H*4), C.size_t(H*4))
 		}

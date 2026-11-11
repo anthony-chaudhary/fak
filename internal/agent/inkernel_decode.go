@@ -1346,6 +1346,10 @@ type inKernelDecodeIteration struct {
 	// through a forward. A round in which every lane only sampled its final
 	// token forwards nothing, so its wall time is not a per-token sample.
 	forwarded int
+	// preReservedLanes records how many lanes' episode KV footprints cohort
+	// formation pre-reserved for this iteration; 0 when no lane advertised the
+	// reserve capability.
+	preReservedLanes int
 }
 
 func newInKernelDecodeIteration(lanes []*decodeLane, m *model.Model, quant bool) *inKernelDecodeIteration {
@@ -1359,6 +1363,16 @@ func newInKernelDecodeIteration(lanes []*decodeLane, m *model.Model, quant bool)
 		d.serialSteps++
 		enginestep.Default.ObserveSerialFallback(reason, duration)
 	}
+	// Cohort formation pre-reserves every lane's episode KV footprint so the
+	// episode's decode steps pay no mid-episode chunk-growth reallocation/copy.
+	// Best effort per lane; step-time reservation remains the backstop.
+	preReserved := 0
+	for i, ln := range lanes {
+		if seqs[i].ReserveHALKVEpisode(ln.maxNew) {
+			preReserved++
+		}
+	}
+	d.preReservedLanes = preReserved
 	return d
 }
 

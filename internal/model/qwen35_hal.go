@@ -1424,6 +1424,29 @@ func (s *Session) LastQSAScratchBytes() (int64, bool) {
 	return s.qwen35HAL.lastQSAScratchBytes, true
 }
 
+// ReserveHALKVEpisode pre-reserves this session's growable device KV for the
+// remaining decode episode: up to maxNew further positions appended on top of
+// the current KV length. Cohort formation calls it once per lane so the
+// episode's batched steps pay no mid-episode chunk-growth reallocation/copy -
+// the per-lane regrow that serialized the lanes=8 step behind the device lock.
+// It reports whether the backend accepted the reservation; backends without
+// the capability, and a refused reservation, leave the per-step reservation as
+// the backstop. The target only ever grows, so a mid-episode re-formation
+// re-reserving the same lane is a capacity no-op that still reports accepted.
+func (s *Session) ReserveHALKVEpisode(maxNew int) bool {
+	if s == nil || maxNew <= 0 || s.Backend == nil || s.halKV == nil || s.M == nil {
+		return false
+	}
+	if !s.M.Cfg.IsQwen35Hybrid() {
+		return false
+	}
+	r, ok := s.Backend.(compute.Qwen35SequenceKVReserveBackend)
+	if !ok {
+		return false
+	}
+	return r.Qwen35ReserveSequenceKV(s.halKV, maxNew) == nil
+}
+
 func (s *Session) qwen35SequencePrefillRequestWithEmbedding(ids []int, needLogits bool, embedding compute.Tensor, embeddingRows bool, embeddingVocab int) compute.Qwen35SequencePrefillRequest {
 	// Verification builds with NeedLogits=false and sets NeedAllLogits later.
 	// Preserve its complete request; only the admitted prefix caller opts out.

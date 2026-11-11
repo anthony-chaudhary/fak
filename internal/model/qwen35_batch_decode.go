@@ -184,6 +184,81 @@ func qwen35IndependentDecodeBatchFor(backend any) (qwen35IndependentDecodeBatchB
 	return batch, ok && batch.Qwen35IndependentDecodeBatchPath() == compute.Qwen35IndependentDecodeBatchPath
 }
 
+// qwen35CohortMutation makes every recurrent pair private across every given
+// session, installs those protected handles into the lane requests, and keeps
+// them all locked through the whole-cohort callback. It flattens the per-lane
+// nested mutateSequence recursion into one scope: an N-lane step pays one
+// states allocation and one lock/unlock pass instead of N nested frames, while
+// retaining the invariant that no other goroutine can observe a partially
+// mutated lane during the batched forward. Locks are taken in lane order - the
+// same global order the nested form established - so admission is unchanged.
+func qwen35CohortMutation(backend compute.Backend, sessions []*Session, lanes []compute.Qwen35SequencePrefillRequest, fn func() error) error {
+	var cleanup qwen35HALLayerRelease
+	complete := false
+	defer func() {
+		if complete {
+			cleanup.free()
+		} else {
+			suppressBackendCleanupPanic(cleanup.free)
+		}
+	}()
+	n := len(sessions)
+	locked := make([][]*qwen35HALLayerOwner, n)
+	states := make([][]compute.Qwen35SequenceState, n)
+	unlockAll := func() {
+		for i := n - 1; i >= 0; i-- {
+			for j := len(locked[i]) - 1; j >= 0; j-- {
+				locked[i][j].mu.Unlock()
+			}
+			sessions[i].qwen35HAL.mu.Unlock()
+		}
+	}
+	err := func() error {
+		for i, s := range sessions {
+			q := s.qwen35HAL
+			q.mu.Lock()
+			states[i] = make([]compute.Qwen35SequenceState, len(q.layers))
+			locked[i] = make([]*qwen35HALLayerOwner, 0, len(q.layers))
+			for layer := range q.layers {
+				state := &q.layers[layer]
+				if state.conv.Buf() == nil && state.recurrent.Buf() == nil {
+					continue // non-linear layer: empty pair, nothing to protect
+				}
+				inheritedGraphFailure := state.graphInheritedFailureLocked()
+				owner, mutableErr := state.mutableOwnerLocked(backend, &cleanup)
+				if mutableErr != nil {
+					return fmt.Errorf("lane %d layer %d: %w", i, layer, mutableErr)
+				}
+				locked[i] = append(locked[i], owner)
+				owner.graphInvalid = owner.graphInvalid || inheritedGraphFailure
+				states[i][layer] = compute.Qwen35SequenceState{Conv: owner.conv, Recurrent: owner.recurrent}
+			}
+			lanes[i].States = states[i]
+		}
+		// Clone failures above issue no mutation attempt. Once the callback starts,
+		// every locked pair participates and an abnormal exit invalidates them all.
+		for i := range locked {
+			for _, owner := range locked[i] {
+				owner.graphMutationBeginLocked()
+			}
+		}
+		graphComplete := false
+		defer func() {
+			for i := range locked {
+				for _, owner := range locked[i] {
+					owner.graphMutationFinishLocked(graphComplete)
+				}
+			}
+		}()
+		mutationErr := fn()
+		graphComplete = mutationErr == nil
+		return mutationErr
+	}()
+	unlockAll()
+	complete = err == nil
+	return err
+}
+
 func failQwen35IndependentDecodeBatchSessions(sessions []*Session, cause error) {
 	for _, s := range sessions {
 		if s == nil {
@@ -200,28 +275,78 @@ func failQwen35IndependentDecodeBatchSessions(sessions []*Session, cause error) 
 	}
 }
 
-// qwen35DecodeBatchLaneRequest builds one lane's one-token decode request. A resident
-// embedding table is shared by every lane; a packed (Q2_K) or oversized table instead
-// uploads this lane's gathered row, as the sequence prefill does, and returns its release.
-// ok=false is a decline before any state mutation.
-func (s *Session) qwen35DecodeBatchLaneRequest(id int) (compute.Qwen35SequencePrefillRequest, func(), bool) {
-	packed := s.M.Q2KEmbedding != nil
-	shape := []int{s.M.Cfg.VocabSize, s.M.Cfg.HiddenSize}
-	if meta, ok := s.M.manifest["model.embed_tokens.weight"]; ok && len(meta.Shape) == 2 {
+// qwen35DecodeBatchRequests builds every lane's one-token decode request in one
+// pass instead of one per-lane builder frame. A resident embedding table is
+// shared by every lane exactly as before; a packed (Q2_K) or oversized table
+// gathers all token rows in one host pass. A backend advertising
+// Qwen35IndependentDecodeSharedEmbeddingPanel uploads one [lanes, hidden] panel
+// whose row i each lane borrows; every other backend keeps one uploaded row
+// buffer per lane. ok=false is a decline before any state mutation; release
+// retires everything the call uploaded.
+func (bs *BatchSession) qwen35DecodeBatchRequests(ids []int) ([]compute.Qwen35SequencePrefillRequest, func(), bool) {
+	n := len(ids)
+	lead := bs.Seqs[0]
+	cfg := lead.M.Cfg
+	packed := lead.M.Q2KEmbedding != nil
+	shape := []int{cfg.VocabSize, cfg.HiddenSize}
+	if meta, ok := lead.M.manifest["model.embed_tokens.weight"]; ok && len(meta.Shape) == 2 {
 		shape = meta.Shape
 	}
-	if !packed && deviceEmbeddingTableFits(s.Backend, shape) {
-		return s.qwen35SequencePrefillRequest([]int{id}, true), nil, true
+	if !packed && deviceEmbeddingTableFits(lead.Backend, shape) {
+		lanes := make([]compute.Qwen35SequencePrefillRequest, n)
+		for i, s := range bs.Seqs {
+			lanes[i] = s.qwen35SequencePrefillRequest([]int{ids[i]}, true)
+		}
+		return lanes, func() {}, true
 	}
-	if rows, ok := s.Backend.(compute.Qwen35SequenceEmbeddingRowsBackend); !ok || rows.Qwen35SequenceEmbeddingRowsPath() != compute.Qwen35SequenceEmbeddingRowsPath {
-		return compute.Qwen35SequencePrefillRequest{}, nil, false
+	rows, ok := lead.Backend.(compute.Qwen35SequenceEmbeddingRowsBackend)
+	if !ok || rows.Qwen35SequenceEmbeddingRowsPath() != compute.Qwen35SequenceEmbeddingRowsPath {
+		return nil, nil, false
 	}
-	data, err := s.qwen35EmbeddingRows([]int{id})
-	if err != nil {
-		return compute.Qwen35SequencePrefillRequest{}, nil, false
+	shared := false
+	if panel, ok := lead.Backend.(compute.Qwen35IndependentDecodeSharedEmbeddingPanel); ok {
+		shared = panel.Qwen35IndependentDecodeSharedEmbeddingPanel()
 	}
-	row := s.uploadHostF32([]int{1, s.M.Cfg.HiddenSize}, data, compute.MemoryActivation, "qwen35-decode-batch-embedding-row")
-	return s.qwen35SequencePrefillRequestWithEmbedding([]int{id}, true, row, true, s.M.Cfg.VocabSize), func() { s.Backend.Free(row) }, true
+	var panel compute.Tensor
+	var releases []func()
+	releaseAll := func() {
+		for _, release := range releases {
+			release()
+		}
+	}
+	if shared {
+		data, err := lead.qwen35EmbeddingRows(ids)
+		if err != nil {
+			return nil, nil, false
+		}
+		panel = lead.uploadHostF32([]int{n, cfg.HiddenSize}, data, compute.MemoryActivation, "qwen35-decode-batch-embedding-panel")
+		owner := lead.Backend
+		releases = append(releases, func() { owner.Free(panel) })
+	}
+	lanes := make([]compute.Qwen35SequencePrefillRequest, n)
+	for i, s := range bs.Seqs {
+		req := s.qwen35SequencePrefillRequestWithOutput([]int{ids[i]}, true, compute.Tensor{}, false, 0, true)
+		if shared {
+			req.TokenEmbedding = panel
+			req.TokenEmbeddingRows = true
+			req.TokenEmbeddingRow = i
+			req.TokenEmbeddingVocab = cfg.VocabSize
+		} else {
+			data, err := s.qwen35EmbeddingRows([]int{ids[i]})
+			if err != nil {
+				releaseAll()
+				return nil, nil, false
+			}
+			row := s.uploadHostF32([]int{1, cfg.HiddenSize}, data, compute.MemoryActivation, "qwen35-decode-batch-embedding-row")
+			owner := s.Backend
+			releases = append(releases, func() { owner.Free(row) })
+			req.TokenEmbedding = row
+			req.TokenEmbeddingRows = true
+			req.TokenEmbeddingVocab = cfg.VocabSize
+		}
+		lanes[i] = req
+	}
+	return lanes, releaseAll, true
 }
 
 func stepBatchQwen35HybridQ4KIndependent(bs *BatchSession, ids []int) ([][]float32, bool) {
@@ -231,14 +356,6 @@ func stepBatchQwen35HybridQ4KIndependent(bs *BatchSession, ids []int) ([][]float
 	diagT0 := time.Now()
 	var diagPrep, diagLineage, diagCall, diagRead, diagSplit time.Duration
 	var be compute.Backend
-	lanes := make([]compute.Qwen35SequencePrefillRequest, len(ids))
-	finishes := make([]func(), 0, len(ids))
-	var releases []func()
-	defer func() {
-		for _, release := range releases {
-			release()
-		}
-	}()
 	for i, s := range bs.Seqs {
 		// Failed cleanup can retain state pointers; they do not reopen a retired lane.
 		s.ensureOpenBackendSession()
@@ -250,15 +367,13 @@ func stepBatchQwen35HybridQ4KIndependent(bs *BatchSession, ids []int) ([][]float
 		} else if s.Backend != be {
 			return nil, false
 		}
-		req, release, ok := s.qwen35DecodeBatchLaneRequest(ids[i])
-		if !ok {
-			return nil, false
-		}
-		if release != nil {
-			releases = append(releases, release)
-		}
-		lanes[i] = req
 	}
+	lanes, release, ok := bs.qwen35DecodeBatchRequests(ids)
+	if !ok {
+		return nil, false
+	}
+	defer release()
+	finishes := make([]func(), 0, len(ids))
 	diagPrep = time.Since(diagT0)
 	batch, ok := qwen35IndependentDecodeBatchFor(be)
 	if !ok {
@@ -275,22 +390,13 @@ func stepBatchQwen35HybridQ4KIndependent(bs *BatchSession, ids []int) ([][]float
 	diagLineage = time.Since(diagT0) - diagPrep
 	var result compute.Qwen35IndependentDecodeBatchResult
 	var diagBackend time.Duration
-	var call func(int) error
-	call = func(i int) error {
-		if i == len(bs.Seqs) {
-			var err error
-			backendT0 := time.Now()
-			result, err = batch.Qwen35IndependentDecodeBatch(compute.Qwen35IndependentDecodeBatchRequest{Path: compute.Qwen35IndependentDecodeBatchPath, Lanes: lanes})
-			diagBackend = time.Since(backendT0)
-			return err
-		}
-		_, err := bs.Seqs[i].qwen35HAL.mutateSequence(be, func(states []compute.Qwen35SequenceState) (compute.Qwen35SequencePrefillResult, error) {
-			lanes[i].States = states
-			return compute.Qwen35SequencePrefillResult{}, call(i + 1)
-		})
+	callErr := qwen35CohortMutation(be, bs.Seqs, lanes, func() error {
+		backendT0 := time.Now()
+		var err error
+		result, err = batch.Qwen35IndependentDecodeBatch(compute.Qwen35IndependentDecodeBatchRequest{Path: compute.Qwen35IndependentDecodeBatchPath, Lanes: lanes})
+		diagBackend = time.Since(backendT0)
 		return err
-	}
-	callErr := call(0)
+	})
 	diagCall = time.Since(diagT0) - diagPrep - diagLineage
 	if err := callErr; err != nil {
 		if compute.Qwen35IndependentDecodeBatchMutated(err) {

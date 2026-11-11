@@ -32,6 +32,42 @@ func (*cudaBackend) Qwen35IndependentDecodeBatchPath() string {
 	return Qwen35IndependentDecodeBatchPath
 }
 
+// Qwen35IndependentDecodeSharedEmbeddingPanel reports that the batch decoder
+// consumes a cohort-wide [lanes, hidden] embedding panel in place: each lane
+// borrows row TokenEmbeddingRow, so the model uploads one panel instead of one
+// row buffer per lane and the step skips the staging allocation and copies.
+func (*cudaBackend) Qwen35IndependentDecodeSharedEmbeddingPanel() bool { return true }
+
+// Qwen35ReserveSequenceKV pre-reserves a growable contiguous sequence KV store
+// for extraPositions future positions, rounding the target up to the same
+// 256-position chunk every per-step reservation uses, so a whole decode episode
+// appends without a mid-episode reallocation/copy. A fixed graph store already
+// holds its whole capacity; a paged or foreign store declines with a typed
+// error the caller may treat as best-effort.
+func (c *cudaBackend) Qwen35ReserveSequenceKV(store KVStore, extraPositions int) error {
+	if extraPositions <= 0 {
+		return nil
+	}
+	kv, ok := store.(*cudaKV)
+	if !ok || kv == nil {
+		return &Qwen35SequenceError{Stage: "kv-reserve", Layer: -1, Reason: "store is not a contiguous CUDA sequence KV"}
+	}
+	if kv.maxPos > 0 {
+		return nil // fixed graph store: whole capacity already held
+	}
+	compactLayers := len(kv.K)
+	if compactLayers == 0 {
+		return nil
+	}
+	needed := int64(kv.Len()+extraPositions) * int64(kv.stride())
+	if needed > qwen35GDNMaxCInt {
+		return &Qwen35SequenceError{Stage: "kv-reserve", Layer: -1, Reason: "episode KV reservation exceeds the bounded CUDA prompt-attention geometry"}
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return c.qwen35SequenceReserveKVLocked(kv, compactLayers, int(needed))
+}
+
 // cudaQwen35LaneRowView is a non-owning row view of a transient panel. It is never
 // registered as transient and never freed; the parent panel owns the allocation.
 func (c *cudaBackend) cudaQwen35LaneRowView(parent *cudaBuf, row, width int) Tensor {
@@ -194,12 +230,30 @@ func (c *cudaBackend) Qwen35IndependentDecodeBatch(req Qwen35IndependentDecodeBa
 	var x Tensor
 	var xBuf *cudaBuf
 	if first.TokenEmbeddingRows {
-		x, xBuf, err = c.qwen35SequenceAllocLocked([]int{lanes, hidden}, "batch-embedding-rows")
-		if err != nil {
-			return result, fail(err)
+		// A cohort-wide [lanes, hidden] panel is consumed in place: every lane borrows
+		// its own row of one model-uploaded buffer, so the step skips the staging
+		// allocation and copies. The residual stream accumulates onto that panel,
+		// which stays model-owned (never transient) until the step releases it.
+		shared := len(first.TokenEmbedding.Shape) == 2 && first.TokenEmbedding.Shape[0] == lanes && first.TokenEmbedding.Shape[1] == hidden
+		if shared {
+			for i, lane := range req.Lanes {
+				if lane.TokenEmbeddingRow != i || lane.TokenEmbedding.Buf() != first.TokenEmbedding.Buf() {
+					shared = false
+					break
+				}
+			}
 		}
-		for i, lane := range req.Lanes {
-			C.fcuda_d2d(offsetF(xBuf.ptr, i*hidden), c.cudaBufForSubmit(lane.TokenEmbedding).ptr, C.size_t(hidden*F32.Bytes()))
+		if shared {
+			x = first.TokenEmbedding
+		} else {
+			x, xBuf, err = c.qwen35SequenceAllocLocked([]int{lanes, hidden}, "batch-embedding-rows")
+			if err != nil {
+				return result, fail(err)
+			}
+			for i, lane := range req.Lanes {
+				src := offsetF(c.cudaBufForSubmit(lane.TokenEmbedding).ptr, lane.TokenEmbeddingRow*hidden)
+				C.fcuda_d2d(offsetF(xBuf.ptr, i*hidden), src, C.size_t(hidden*F32.Bytes()))
+			}
 		}
 	} else {
 		ids := make([]int, lanes)

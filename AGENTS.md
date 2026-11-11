@@ -50,9 +50,10 @@ output, and independent review; do not pull their full transcripts into the coor
   on multi-core hosts) specialized subagents (`task`: worker, researcher, explore, deep-reason, cross-validator,
   issue-auditor, tester, reviewer, scout) concurrently across pairwise tree-disjoint lanes.
 - **Astra worker reservation:** Reserve `gpt-6-astra` subagents for highly pre-specified
-  formal-mathematical leaves: the packet states fixed definitions and assumptions, the exact
-  proposition or derivation, the required output form, and a deterministic witness. Send
-  exploration, implementation, testing, review, and general reasoning to another suitable worker model.
+  formal-mathematical leaves ([routing policy](docs/notes/AGENT-DELEGATION-AND-ROUTING-2026-11-11.md)):
+  the packet states fixed definitions and assumptions, the exact proposition or derivation,
+  the required output form, and a deterministic witness. Send exploration, implementation,
+  testing, review, and general reasoning to another suitable worker model.
 - **3-Tier Parallel Pipeline**: Structure multi-agent work into three decoupled parallel cohorts:
   1. *Parallel scoping and research*: Discovery via `researcher`, `explore`, and `scout` to isolate prior art, contracts, and relevant packages.
   2. *Parallel implementation + reproduction tests*: Implementation via `worker` and `deep-reason` across disjoint lanes, authoring reproduction tests before fixes.
@@ -168,7 +169,7 @@ When prioritizing design, implementation, architecture, triage, or backlog work,
 3. **fak harness only**:
    Standalone agent harness and governance substrate (`fak guard`), default-deny tool capability floor, policy adjudication, and interception over external frontier models and harnesses.
 4. **other things**:
-   Peripheral utilities, standalone integrations, off-spine tooling, and secondary stewardship tasks not directly advancing tiers 1–3.
+   Peripheral utilities, standalone integrations, off-spine tooling, and secondary stewardship tasks not directly advancing tiers 1–3 ([harness leaf](docs/notes/AGENT-HARNESS-DSH-RUNTIME-2026-11-11.md)).
 
 ## Repo layout (where things live)
 
@@ -305,9 +306,9 @@ implementation worker, search open and closed issues for duplicates, then claim 
 issue or create one that states the problem, intended outcome, and witness. Put the issue
 number in worker packets and keep discoveries, scope changes, and follow-ons reconciled there.
 
-Before spawning one fresh task per issue (including direct Codex `create_thread` waves),
-normalize every dependency through the issue contract and run the repository's issue/dispatch
-admission surface. Newly authored work uses exactly three relations: `Start blocked by: #N`
+Before spawning one fresh task per issue (including direct Codex `create_thread` waves,
+[harness leaf](docs/notes/AGENT-HARNESS-DSH-RUNTIME-2026-11-11.md)), normalize every dependency
+through the issue contract and run the repository's issue/dispatch admission surface. Newly authored work uses exactly three relations: `Start blocked by: #N`
 may prevent pickup only when no executable disjoint slice exists; `Coordinates with: #N` is
 non-blocking alignment; `Promotion requires: #N` gates closure or performance claims, not
 implementation. A broad `After:` list or a hand-written prompt saying all dependency fences are
@@ -331,7 +332,7 @@ When referencing, quoting, or linking issue numbers across public and companion 
 
 ## New work defaults: spine first, then fan out
 
-For every new unit, align with the default priority hierarchy (1: All-in-one [serving + harness + memory], 2: Serving only, 3: Harness only, 4: Other things), classify centrality (`Core`, `Enabling`, `Stewardship`, `Peripheral`), run
+For every new unit, align with the default priority hierarchy (1: All-in-one [serving + harness + memory], 2: Serving only, 3: Harness only, 4: Other things) ([harness leaf](docs/notes/AGENT-HARNESS-DSH-RUNTIME-2026-11-11.md)), classify centrality (`Core`, `Enabling`, `Stewardship`, `Peripheral`), run
 all P1-P4 checks in [`docs/problems-we-solve.md`](docs/problems-we-solve.md), and state **For /
 Problem / Today / Better because / Witness** against the real next-best alternative. Then:
 

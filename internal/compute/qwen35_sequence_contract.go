@@ -194,8 +194,14 @@ type Qwen35SequencePrefillRequest struct {
 	TokenIDs []int
 	StartPos int
 
-	TokenEmbedding      Tensor
-	TokenEmbeddingRows  bool
+	TokenEmbedding     Tensor
+	TokenEmbeddingRows bool
+	// TokenEmbeddingRow selects which row of the token-embedding source this
+	// request consumes when TokenEmbeddingRows is true. Zero preserves the
+	// historical meaning (the tensor holds exactly this request's rows); a
+	// nonzero value borrows that row of a larger shared panel so one upload
+	// can serve every lane of an independent decode batch.
+	TokenEmbeddingRow   int
 	TokenEmbeddingVocab int
 	OutputNorm          Tensor
 	// Output may be absent only for an explicitly advertised headless prefix

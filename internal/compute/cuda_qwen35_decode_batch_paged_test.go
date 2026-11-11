@@ -202,7 +202,8 @@ func(s *Session)ensureOpenBackendSession(){if s!=nil&&(s.halClosed||s.halFailure
 func(s *Session)requireGLM5NextSessionUnsupported(string){}
 func(s *Session)closeBackendOwned(){s.halClosed=true}
 func(s *Session)beginHALTokenLineageWrite([]int)func(){return func(){}}
-func(s *Session)qwen35DecodeBatchLaneRequest(id int)(Qwen35SequencePrefillRequest,func(),bool){r:=s.req;r.TokenIDs=[]int{id};return r,nil,true}
+func qwen35CohortMutation(_ Backend,sessions []*Session,lanes []Qwen35SequencePrefillRequest,fn func()error)error{for i,s:=range sessions{lanes[i].States=s.qwen35HAL.states};return fn()}
+func(b *BatchSession)qwen35DecodeBatchRequests(ids []int)([]Qwen35SequencePrefillRequest,func(),bool){lanes:=make([]Qwen35SequencePrefillRequest,len(ids));for i,s:=range b.Seqs{r:=s.req;r.TokenIDs=[]int{ids[i]};lanes[i]=r};return lanes,func(){},true}
 var serialFallbacks int
 func(s *Session)Step(id int)[]float32{serialFallbacks++;r:=s.req;r.TokenIDs=[]int{id};v,e:=s.Backend.(*cudaBackend).Qwen35SequencePrefill(r);if e!=nil{panic(e)};out:=s.Backend.Read(v.Logits);s.Backend.Free(v.Logits);return out}
 func(s *Session)StepGreedy(id int)(int,[]float32){return 0,s.Step(id)}

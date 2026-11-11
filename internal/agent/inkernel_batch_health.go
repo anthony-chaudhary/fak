@@ -28,8 +28,15 @@ const batchStepProbeEvery = 8
 // first step of a busy episode can queue behind the shared stream's backlog
 // (measured 2.84s wall for 8 lanes - a garbage-high seed that probes must
 // correct). The calibration MAX bounds the low side; the MIN ratchet bounds
-// the high side.
-const batchStepSeedSamples = 3
+// the high side. Eight samples instead of three: the typed witness on the
+// q2kxl re-run showed the 3-sample window closing on warmup-class
+// micro-forwards (seeds 6.1us/17.9us observed) before real decode work
+// arrived, forcing false degradation; eight samples span the probe cadence
+// so real serial evidence folds in before the window arms the violation
+// budget. While the window is open, batched violations are suppressed
+// (observeBatched) - a violation against an uncalibrated floor is noise, not
+// evidence.
+const batchStepSeedSamples = 8
 
 // batchHealthDiagEnabled gates the typed policy-transition lines
 // (fak_batch_health ...) used by the q2kxl concurrency-collapse investigation.
@@ -175,13 +182,26 @@ func (h *batchStepHealth) witnessFloor(per, old int64, changed bool, lanes int, 
 // useSerial reports whether this episode has degraded to serial steps.
 func (h *batchStepHealth) useSerial() bool { return h != nil && h.degraded }
 
+// calibrationWindowOpen reports whether the planner-level floor is still being
+// calibrated: the window opened on the first fold into an unknown floor and
+// stays open until batchStepSeedSamples samples have folded. While it is open
+// the floor may still be a warmup-class seed, so batched violations against
+// it are noise rather than degradation evidence.
+func (h *batchStepHealth) calibrationWindowOpen() bool {
+	return h != nil && h.p != nil && h.p.batchSeedCalibrating.Load() &&
+		h.p.batchSeedSamples.Load() < batchStepSeedSamples
+}
+
 // observeBatched records one batched step of d for lanes lanes. It flips the
 // episode to serial on the second consecutive per-token violation of the floor
 // budget and asks for a serial probe step on the probe cadence (reported via
 // probeDue). A non-violating step resets the violation streak and feeds the
 // floor: a healthy batched step is evidence the path can run at that per-token
 // cost, and the ratcheting MIN rejects the backlog-inflated samples that
-// pollute serial probes in a mixed prefill+decode stream.
+// pollute serial probes in a mixed prefill+decode stream. While the
+// calibration window is open, violations are suppressed: degrading against an
+// uncalibrated (warmup-seeded) floor was the typed false-degradation defect on
+// the q2kxl re-run, and the window's own samples keep folding until it closes.
 func (h *batchStepHealth) observeBatched(d time.Duration, lanes int) {
 	if h == nil || h.marginNum == 0 || h.degraded || lanes <= 0 {
 		return
@@ -200,6 +220,13 @@ func (h *batchStepHealth) observeBatched(d time.Duration, lanes int) {
 		return
 	}
 	if per > floor*time.Duration(h.marginNum)/1000 {
+		if h.calibrationWindowOpen() {
+			if batchHealthDiagEnabled {
+				fmt.Fprintf(os.Stderr, "fak_batch_health violation_suppressed step_ns=%d floor_ns=%d lanes=%d samples=%d\n",
+					int64(d), int64(floor), lanes, h.p.batchSeedSamples.Load())
+			}
+			return
+		}
 		h.violations++
 		if h.violations >= 2 {
 			h.degraded = true

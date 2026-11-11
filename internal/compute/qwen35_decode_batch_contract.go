@@ -30,6 +30,15 @@ type Qwen35IndependentDecodeBatchBackend interface {
 	Qwen35IndependentDecodeBatch(Qwen35IndependentDecodeBatchRequest) (Qwen35IndependentDecodeBatchResult, error)
 }
 
+// Qwen35IndependentDecodeSharedEmbeddingPanel advertises that this backend's
+// independent decode batch accepts every lane borrowing row TokenEmbeddingRow
+// of one shared [lanes, hidden] token-embedding panel instead of one uploaded
+// row buffer per lane. Callers must keep the panel alive until the step
+// completes; backends without the marker consume only per-lane row buffers.
+type Qwen35IndependentDecodeSharedEmbeddingPanel interface {
+	Qwen35IndependentDecodeSharedEmbeddingPanel() bool
+}
+
 type Qwen35IndependentDecodeBatchError struct {
 	Stage   string
 	Mutated bool
