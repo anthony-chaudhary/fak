@@ -68,13 +68,17 @@ claude` puts it there in one command). Every tool call walks this path:
 2. **The call crosses the boundary.** It lands in the kernel's adjudicator, in-process
    — no second service, no network hop. The measured cost is **~362 ns per decision**
    (Apple M3 Pro): the check is free at the timescale of any real tool.
-3. **The kernel rules against a capability floor.** The floor is a reviewable
-   allow-list that is **default-deny**: a tool or action not explicitly granted cannot
-   run — no matter what the model says, or what an attacker convinced it to say. The
-   verdict is one of a closed set — **allowed**, **denied**, **repaired** (rewritten
-   to a safe form), or **deferred** (held for a human). Every refusal carries a
-   machine-checkable reason code (`DEFAULT_DENY`, `POLICY_BLOCK`, `SECRET_EXFIL`, …),
-   not prose.
+3. **The kernel rules against a capability floor.** The floor ships **default-open**:
+   an unlisted tool is permitted by default, so a new tool the model reaches for does
+   not stall the turn. What the floor still enforces is the set of *provable* dangers —
+   the named deny map, the self-modify globs, the dangerous-gotcha floor, the
+   credential block, egress, and the arg rules — and those run first and hold, no
+   matter what the model says, or what an attacker convinced it to say. The verdict is
+   one of a closed set — **allowed**, **denied**, **repaired** (rewritten to a safe
+   form), or **deferred** (held for a human). Every refusal carries a machine-checkable
+   reason code (`POLICY_BLOCK`, `SECRET_EXFIL`, `SELF_MODIFY`, …), not prose. An
+   operator who wants the stricter blanket-deny floor sets `posture: fail_closed` in
+   the manifest.
 4. **Only an allowed call executes.** And what comes *back* is judged too:
    a suspicious tool result can be **quarantined** — held out of the model's context —
    so poisoned output never becomes the model's next instructions.
@@ -82,7 +86,7 @@ claude` puts it there in one command). Every tool call walks this path:
 At exit you get the ledger, one line:
 `fak manage: 131 kernel decisions; 121 allowed / 5 denied / 2 repaired / 0 quarantined / 3 deferred`.
 
-![Left-to-right flow: the agent emits a tool call; the fak kernel adjudicates it against a default-deny capability floor; four verdicts branch out — ALLOW (the call runs), DENY (it never reaches the tool), TRANSFORM (rewritten to a safe form, then runs), REQUIRE_WITNESS (held) — and any result that runs is checked again before re-entering context](../adoption/diagrams/syscall-flow.svg)
+![Left-to-right flow: the agent emits a tool call; the fak kernel adjudicates it against a capability floor that ships default-open but still enforces the provable-refusal rungs; four verdicts branch out — ALLOW (the call runs), DENY (it never reaches the tool), TRANSFORM (rewritten to a safe form, then runs), REQUIRE_WITNESS (held) — and any result that runs is checked again before re-entering context](../adoption/diagrams/syscall-flow.svg)
 
 *The whole path on one frame. The model only **proposes**; the kernel **disposes** —
 a call the floor denies never reaches the tool runner (call-side gate), and a result
@@ -113,11 +117,19 @@ program.
 
 ## Try it in ten seconds
 
-No key, no model, no GPU — ask the kernel directly:
+No key, no model, no GPU, no manifest — ask the kernel directly. The floor ships
+default-open, but the provable-refusal rungs still hold:
 
 ```bash
-fak preflight --tool refund_payment --args "{}"
-# -> DENY (DEFAULT_DENY): not on the allow-list, fail-closed
+fak preflight --tool Bash --args '{"command":"rm -rf /"}'
+# -> DENY (POLICY_BLOCK): the dangerous-gotcha floor refuses it regardless of posture
+```
+
+A named danger from a manifest's deny map is refused the same way:
+
+```bash
+fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"
+# -> DENY (POLICY_BLOCK): a named danger the floor refuses regardless of posture
 ```
 
 ## The sentence to keep

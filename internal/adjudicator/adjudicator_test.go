@@ -50,16 +50,18 @@ func TestEmptyPolicyDefaultDeny(t *testing.T) {
 	}
 }
 
-// Unit 15 (cont): an UNKNOWN tool under DefaultPolicy => Deny / DefaultDeny.
-func TestDefaultPolicyUnknownToolDefaultDeny(t *testing.T) {
+// Unit 15 (cont): an UNKNOWN tool under DefaultPolicy => Allow (default-open
+// posture). The floor no longer blanket-denies unlisted tools; the
+// provable-refusal rungs (Deny map, SelfModifyGlobs, the dangerous-gotcha
+// floor) still hold for the specific named dangers.
+func TestDefaultPolicyUnknownToolDefaultOpen(t *testing.T) {
 	a := New(DefaultPolicy())
 	v := a.Adjudicate(context.Background(), inlineCall("totally_unknown_tool", `{}`))
-	if v.Kind != abi.VerdictDeny {
-		t.Fatalf("unknown tool: got Kind=%v, want VerdictDeny", v.Kind)
+	if v.Kind != abi.VerdictAllow {
+		t.Fatalf("unknown tool: got Kind=%v, want VerdictAllow (default-open)", v.Kind)
 	}
-	if v.Reason != abi.ReasonDefaultDeny {
-		t.Fatalf("unknown tool: got Reason=%v (%s), want ReasonDefaultDeny",
-			v.Reason, abi.ReasonName(v.Reason))
+	if v.Meta["posture"] != "default_open" {
+		t.Fatalf("unknown tool: got Meta[posture]=%q, want default_open", v.Meta["posture"])
 	}
 }
 

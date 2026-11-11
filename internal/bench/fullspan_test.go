@@ -105,8 +105,14 @@ func TestRunFullSpan_FourBandsAndDenyClasses(t *testing.T) {
 	if verdicts["get_user_details"] != "ALLOW" {
 		t.Errorf("get_user_details verdict = %q, want ALLOW", verdicts["get_user_details"])
 	}
-	if verdicts["write_ledger_entry"] != "DENY" {
-		t.Errorf("write_ledger_entry verdict = %q, want DENY", verdicts["write_ledger_entry"])
+	// The unlisted ledger write is the positive default_open witness: the floor
+	// admits unlisted tools once the provable-refusal rungs pass. The name-deny
+	// rung (exfiltrate, shell_rm_rf) still refuses under every posture.
+	if verdicts["write_ledger_entry"] != "ALLOW" {
+		t.Errorf("write_ledger_entry verdict = %q, want ALLOW (default_open floor)", verdicts["write_ledger_entry"])
+	}
+	if verdicts["exfiltrate"] != "DENY" {
+		t.Errorf("exfiltrate verdict = %q, want DENY (name-deny rung holds under default_open)", verdicts["exfiltrate"])
 	}
 	if verdicts["shell_rm_rf"] != "DENY" {
 		t.Errorf("shell_rm_rf verdict = %q, want DENY", verdicts["shell_rm_rf"])
@@ -144,16 +150,19 @@ func TestRunFullSpan_FourBandsAndDenyClasses(t *testing.T) {
 
 // TestRunFullSpan_IsolatedFromGlobalPolicyMutation proves issue #12063:
 // RunFullSpan's B2 scripted turn retains deterministic default-policy verdicts
-// even when process-global adjudicator.Default has been mutated into an open posture
-// (e.g. by agent.Configure() in preceding suite tests).
+// even when process-global adjudicator.Default has been mutated into the
+// opposite posture (e.g. by agent.Configure() in preceding suite tests). The
+// mutation is now fail-closed — which would deny EVERY unlisted tool if it
+// leaked into the span's isolated monitor — so the ALLOW on the unlisted ledger
+// write is both the isolation proof and the default-open floor witness, while
+// the name-deny rung still refuses.
 func TestRunFullSpan_IsolatedFromGlobalPolicyMutation(t *testing.T) {
 	snap := adjudicator.Default.PolicySnapshot()
 	t.Cleanup(func() {
 		adjudicator.Default.SetPolicy(snap)
 	})
 	adjudicator.Default.SetPolicy(adjudicator.Policy{
-		Posture: adjudicator.PostureDefaultOpen,
-		Allow:   map[string]bool{"some_unrelated_tool": true},
+		Posture: adjudicator.PostureFailClosed,
 	})
 
 	tr, err := RunFullSpan(context.Background())
@@ -167,8 +176,8 @@ func TestRunFullSpan_IsolatedFromGlobalPolicyMutation(t *testing.T) {
 			verdicts[s.Tool] = s.Verdict
 		}
 	}
-	if verdicts["write_ledger_entry"] != "DENY" {
-		t.Errorf("write_ledger_entry verdict = %q, want DENY", verdicts["write_ledger_entry"])
+	if verdicts["write_ledger_entry"] != "ALLOW" {
+		t.Errorf("write_ledger_entry verdict = %q, want ALLOW (isolated monitor keeps its own default_open policy; a leaked fail-closed global would deny every unlisted tool)", verdicts["write_ledger_entry"])
 	}
 	if verdicts["shell_rm_rf"] != "DENY" {
 		t.Errorf("shell_rm_rf verdict = %q, want DENY", verdicts["shell_rm_rf"])

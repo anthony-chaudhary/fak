@@ -12,6 +12,14 @@ import (
 func TestDefaultPolicyProductionCapabilityFloor(t *testing.T) {
 	p := DefaultPolicy()
 
+	// The floor ships default-open: unlisted tools are admitted by default, while
+	// the provable-refusal rungs (Deny map, SelfModifyGlobs, dangerous-gotcha
+	// floor) still hold. Lock the posture so a regression back to fail-closed is
+	// caught here rather than only in the adjudication verdicts.
+	if p.Posture != PostureDefaultOpen {
+		t.Errorf("DefaultPolicy.Posture = %v, want PostureDefaultOpen", p.Posture)
+	}
+
 	categories := map[string][]string{
 		"standard coding tools": {
 			"Bash", "BashOutput", "KillShell", "PowerShell", "Read", "Edit", "Write",
@@ -100,10 +108,10 @@ func TestDefaultPolicyAdjudicationVerdicts(t *testing.T) {
 		}
 	}
 
-	// Unknown tools denied fail-closed
+	// Unknown tools admitted by default (default-open posture)
 	vUnknown := a.Adjudicate(ctx, inlineCall("totally_unknown_custom_tool", `{}`))
-	if vUnknown.Kind != abi.VerdictDeny || vUnknown.Reason != abi.ReasonDefaultDeny {
-		t.Errorf("unknown tool: got %v/%s, want Deny/DEFAULT_DENY", vUnknown.Kind, abi.ReasonName(vUnknown.Reason))
+	if vUnknown.Kind != abi.VerdictAllow {
+		t.Errorf("unknown tool: got %v/%s, want Allow (default-open)", vUnknown.Kind, abi.ReasonName(vUnknown.Reason))
 	}
 
 	// Explicit deny rules honored

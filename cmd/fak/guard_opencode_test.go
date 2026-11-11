@@ -120,8 +120,10 @@ func TestGuardOpenCodeToolDialectAdjudication(t *testing.T) {
 		{"write .git/hooks blocked", "write", `{"filePath":".git/hooks/pre-commit","content":"#!/bin/sh"}`, abi.VerdictDeny, abi.ReasonSelfModify},
 		{"write .env blocked", "write", `{"filePath":".env","content":"KEY=secret"}`, abi.VerdictDeny, abi.ReasonPolicyBlock},
 
-		// Unlisted tool fails closed under default deny
-		{"unregistered tool fails closed", "arbitrary_execution", `{}`, abi.VerdictDeny, abi.ReasonDefaultDeny},
+		// Unlisted tool is admitted by default (the floor now ships default_open);
+		// the provable-refusal rungs (Deny map, SelfModifyGlobs, the
+		// dangerous-gotcha floor) still hold for the specific named dangers.
+		{"unregistered tool admitted by default", "arbitrary_execution", `{}`, abi.VerdictAllow, abi.ReasonNone},
 	}
 
 	for _, tc := range cases {

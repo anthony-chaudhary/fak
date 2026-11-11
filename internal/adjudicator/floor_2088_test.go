@@ -67,10 +67,12 @@ func TestFloor2088NativeBuiltinsAdmitted(t *testing.T) {
 	}
 }
 
-// TestFloor2088UnknownStillDefaultDeny is the negative control: the floor MUST
-// stay default-deny for genuinely unknown names. A blanket allowance of the
-// native set must not have widened the floor to admit arbitrary tools.
-func TestFloor2088UnknownStillDefaultDeny(t *testing.T) {
+// TestFloor2088UnknownNowDefaultOpen is the posture control: the floor now ships
+// default-open, so genuinely unknown names are admitted by default. The
+// provable-refusal rungs (the Deny map, SelfModifyGlobs, the dangerous-gotcha
+// floor) still hold for the specific named dangers — see
+// TestDefaultPolicyAdjudicationVerdicts for those.
+func TestFloor2088UnknownNowDefaultOpen(t *testing.T) {
 	a := New(DefaultPolicy())
 	ctx := context.Background()
 
@@ -81,11 +83,11 @@ func TestFloor2088UnknownStillDefaultDeny(t *testing.T) {
 	}
 	for _, tool := range unknowns {
 		v := a.Adjudicate(ctx, inlineCall(tool, `{}`))
-		if v.Kind != abi.VerdictDeny {
-			t.Errorf("unknown tool %q: got Kind=%v, want VerdictDeny", tool, v.Kind)
+		if v.Kind != abi.VerdictAllow {
+			t.Errorf("unknown tool %q: got Kind=%v, want VerdictAllow (default-open)", tool, v.Kind)
 		}
-		if v.Reason != abi.ReasonDefaultDeny {
-			t.Errorf("unknown tool %q: got Reason=%s, want DEFAULT_DENY", tool, abi.ReasonName(v.Reason))
+		if v.Meta["posture"] != "default_open" {
+			t.Errorf("unknown tool %q: got Meta[posture]=%q, want default_open", tool, v.Meta["posture"])
 		}
 	}
 }
@@ -114,12 +116,14 @@ func verdictDisposition(v abi.Verdict) string {
 // TestFloor2088UnknownDenialDispositionTerminal pins the deny-loopback contract:
 // a DEFAULT_DENY denial must be TERMINAL per the loopback disposition mapping
 // (verdictDisposition above), so a budget/loop driver does not retry an
-// unreachable tool forever.
+// unreachable tool forever. The mapping is posture-independent, so the
+// DEFAULT_DENY is triggered through a fail-closed floor (the production floor
+// now ships default-open and no longer emits DEFAULT_DENY for unknown tools).
 func TestFloor2088UnknownDenialDispositionTerminal(t *testing.T) {
-	a := New(DefaultPolicy())
+	a := New(Policy{Posture: PostureFailClosed})
 	v := a.Adjudicate(context.Background(), inlineCall("frobnicate_widget", `{}`))
 	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonDefaultDeny {
-		t.Fatalf("unknown tool: got %v/%s, want Deny/DEFAULT_DENY",
+		t.Fatalf("unknown tool under fail-closed: got %v/%s, want Deny/DEFAULT_DENY",
 			v.Kind, abi.ReasonName(v.Reason))
 	}
 	if got := verdictDisposition(v); got != "TERMINAL" {
@@ -135,7 +139,9 @@ func TestFloor2088UnknownDenialDispositionTerminal(t *testing.T) {
 // TestFloor2088NeverAdmitsNativeBuiltins is the promptmmu compaction guard: a
 // native built-in name that is now affirmatively allowed must NOT be reported as
 // "never admittable" (which would let the inbound tool-def compactor DROP the
-// tool definition and re-break the turn). An unknown name stays never-admittable.
+// tool definition and re-break the turn). Under the default-open posture every
+// name except a hard name-deny is admittable, so the negative control is a hard
+// name-deny (the Deny map holds regardless of posture).
 //
 // The package DOES expose Policy.NeverAdmits (decide.go), so this sub-assertion
 // is exercised rather than skipped.
@@ -157,8 +163,9 @@ func TestFloor2088NeverAdmitsNativeBuiltins(t *testing.T) {
 		})
 	}
 
-	// Negative control: an unknown name is never admittable.
-	if !p.NeverAdmits("frobnicate_widget") {
-		t.Fatalf("NeverAdmits(%q) = false; an unknown name must remain never-admittable", "frobnicate_widget")
+	// Negative control: a hard name-deny is still never admittable even under
+	// default-open (the Deny map holds regardless of posture).
+	if !p.NeverAdmits("exfiltrate") {
+		t.Fatalf("NeverAdmits(%q) = false; a hard name-deny must remain never-admittable", "exfiltrate")
 	}
 }

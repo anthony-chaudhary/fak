@@ -60,10 +60,13 @@ func TestOpenCodeLowercaseToolsUseDefaultPolicyWithoutWeakeningWriteFloor(t *tes
 		t.Fatalf("destructive bash self-modification verdict=%v/%s, want deny", verdict.Kind, abi.ReasonName(verdict.Reason))
 	}
 
+	// Unknown tools are admitted by default (default-open posture); the write
+	// floor is enforced by the provable-refusal rungs (SelfModifyGlobs, the
+	// dangerous-gotcha floor), not by a blanket default-deny.
 	unknown := inlineCall("write_text_file", `{"filePath":"notes.txt","content":"after"}`)
 	unknown.Meta = nil
-	if verdict := a.Adjudicate(ctx, unknown); verdict.Kind != abi.VerdictDeny || verdict.Reason != abi.ReasonDefaultDeny {
-		t.Fatalf("unknown write-shaped tool verdict=%v/%s, want deny/DEFAULT_DENY", verdict.Kind, abi.ReasonName(verdict.Reason))
+	if verdict := a.Adjudicate(ctx, unknown); verdict.Kind != abi.VerdictAllow {
+		t.Fatalf("unknown write-shaped tool verdict=%v/%s, want allow (default-open)", verdict.Kind, abi.ReasonName(verdict.Reason))
 	}
 }
 

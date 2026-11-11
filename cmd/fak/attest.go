@@ -234,10 +234,20 @@ func deriveProbes(manifestBytes []byte) ([]probe, error) {
 		probes = append(probes, probe{Tool: prefix + "attest_probe", Args: "{}", Expect: "allow", Origin: "allow_prefix"})
 	}
 
-	probes = append(probes, probe{
-		Tool: "__fak_attest_unmatched__", Args: "{}",
-		Expect: "deny", ExpectReason: "DEFAULT_DENY", Origin: "default_deny",
-	})
+	// The trailing probe witnesses the floor's posture for a name it does not
+	// affirmatively allow. Under fail_closed / admit_and_log that name is denied
+	// (DEFAULT_DENY); under default_open it is admitted by default, so the probe
+	// flips to expect ALLOW — the open posture is the witness.
+	trailing := probe{Tool: "__fak_attest_unmatched__", Args: "{}"}
+	if m.Posture == "default_open" {
+		trailing.Expect = "allow"
+		trailing.Origin = "default_open"
+	} else {
+		trailing.Expect = "deny"
+		trailing.ExpectReason = "DEFAULT_DENY"
+		trailing.Origin = "default_deny"
+	}
+	probes = append(probes, trailing)
 	return probes, nil
 }
 

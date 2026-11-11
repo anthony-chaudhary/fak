@@ -1,6 +1,6 @@
 ---
 title: "The Policy Runs Inside the Kernel"
-description: "Most agent safety bolts a recognizer onto the outside of the loop — a hook, a sidecar, an LLM judge — that the model can talk past and that fails open when it breaks. fak puts the permission check on the same code path as the tool call, in one address space, default-deny, with no process to talk past. This is what 'the tool call is a syscall' actually means."
+description: "Most agent safety bolts a recognizer onto the outside of the loop — a hook, a sidecar, an LLM judge — that the model can talk past and that fails open when it breaks. fak puts the permission check on the same code path as the tool call, in one address space, with no process to talk past. The floor ships default-open, but its provable-refusal rungs hold regardless of posture. This is what 'the tool call is a syscall' actually means."
 slug: policy-in-the-kernel
 keywords:
   - reference monitor
@@ -18,9 +18,11 @@ date: 2026-06-19
 # The Policy Runs Inside the Kernel
 
 > **TL;DR:** `fak` puts the "may this tool run?" check on the same code path as the
-> tool call, in one address space, default-deny, with no outside process to crash
-> open or argue with. The tool call is a syscall, and the kernel adjudicates it
-> before anything happens.
+> tool call, in one address space, with no outside process to crash open or argue
+> with. The floor ships default-open, but its provable-refusal rungs (the deny map,
+> the self-modify globs, the dangerous-gotcha floor, the credential block, egress,
+> the arg rules) hold regardless of posture. The tool call is a syscall, and the
+> kernel adjudicates it before anything happens.
 
 **Short answer:** in almost every agent stack, the thing that decides "may this
 tool run?" lives *outside* the loop. It might be a pre-tool hook in another process,
@@ -29,10 +31,12 @@ share two weaknesses. The model can argue its way past a recognizer. And when th
 outside thing crashes or times out, the call usually runs anyway (fail-open).
 
 `fak` moves that decision onto the *same* code path as the tool call: one Go address
-space, no IPC, default-deny. So the check is not a thing the agent talks to. It is a
-thing the agent's call *passes through*, the way a `read()` passes through the OS
-kernel before it touches a disk. The refusal of an irreversible action does not
-depend on catching the attack. It depends on the lever never having been wired up.
+space, no IPC. So the check is not a thing the agent talks to. It is a thing the
+agent's call *passes through*, the way a `read()` passes through the OS kernel
+before it touches a disk. The refusal of a provable danger does not depend on
+catching the attack. It depends on the lever never having been wired up — the deny
+map, the self-modify globs, the dangerous-gotcha floor, the credential block,
+egress, and the arg rules all run first and hold, no matter what the model says.
 
 That is the whole flip, and it is worth slowing down on. "Policy in the kernel"
 sounds like a slogan, but it is actually a specific, checkable claim about *where
@@ -88,16 +92,22 @@ This buys three things a recognizer-from-outside cannot have:
    conversational participant, for the same reason a process cannot `printf` its way
    into write access to a file it lacks permission for.
 
-2. **The default is closed by construction.** Anything not on the allow-list
-   resolves to `DEFAULT_DENY`. An empty policy manifest is the maximally paranoid
-   floor: it permits nothing. There is no "the checker was unreachable, so we let it
-   through" branch, because there is no remote checker to be unreachable.
-   (`TestFoldDefaultDenyEmptyPolicy` pins it.)
+2. **The gate fails closed by construction.** The floor ships default-open — an
+   unlisted tool is admitted, so a new tool the model reaches for does not stall the
+   turn — but the provable-refusal rungs run first and hold regardless of posture:
+   the named deny map, the self-modify globs, the dangerous-gotcha floor, the
+   credential block, egress, and the arg rules. There is no "the checker was
+   unreachable, so we let it through" branch, because there is no remote checker to
+   be unreachable. An operator who wants the stricter blanket-deny floor sets
+   `posture: fail_closed`, where anything not on the allow-list resolves to
+   `DEFAULT_DENY` and an empty manifest permits nothing.
 
-3. **The decision is structural, not heuristic.** Whether an irreversible tool runs
-   is decided by whether its name is on a reviewable list, rather than by whether a
-   model or a regex *recognized* this particular request as dangerous. A list is
-   something you can read, diff, and sign. A recall curve is not.
+3. **The decision is structural, not heuristic.** Whether a provable danger runs is
+   decided by the floor's reviewable rungs — the deny map, the self-modify globs, the
+   dangerous-gotcha floor, the credential block, egress, the arg rules — rather than
+   by whether a model or a regex *recognized* this particular request as dangerous.
+   A list and a set of structural rules are something you can read, diff, and sign.
+   A recall curve is not.
 
 ## Why "in-process" is load-bearing, not a micro-optimization
 
@@ -109,13 +119,15 @@ in-process versus milliseconds for a spawned-hook baseline on the same box. But
 quoting it as "fak is thousands of times faster" would compare against a baseline
 nobody actually runs, and would miss what matters.
 
-What matters is that fusing the gate into the loop is what makes the *fail-closed*
-default affordable. The reason real systems fail open is that a per-call process
-spawn or socket round-trip is expensive and flaky enough that wedging on it would be
-worse than the risk. Remove the process boundary and the round-trip, and "refuse if
-anything is wrong" stops being a liability. The cheap, local, deterministic check is
-what lets default-deny be the *default* instead of an aspiration. Security and the
-boundary's cost are the same design knob here, which is the [co-design
+What matters is that fusing the gate into the loop is what makes the *provable-refusal
+rungs* affordable to run on every call. The reason real systems fail open is that a
+per-call process spawn or socket round-trip is expensive and flaky enough that
+wedging on it would be worse than the risk. Remove the process boundary and the
+round-trip, and "refuse the provable dangers, every time" stops being a liability.
+The cheap, local, deterministic check is what lets the full rung chain — deny map,
+self-modify globs, gotcha floor, credential block, egress, arg rules — run on every
+call instead of being skipped under load. Security and the boundary's cost are the
+same design knob here, which is the [co-design
 thesis](../notes/EXPLAINER-trust-floor-two-lenses-2026-06-17.md) in miniature.
 
 ### A worked example: the cost of checking everything, every time
@@ -161,20 +173,25 @@ the call descends through, ranked, fail-closed, every rung in-process.
 This is the part to read before citing it, because the flip is powerful exactly to
 the degree you are precise about its edges.
 
-- **It bounds tool *names*, structurally.** An irreversible tool you do not
-  allow-list is refused regardless of what is in context. That is the guarantee, and
-  it holds whether the model is strong, cheap, or actively under attack.
+- **It bounds the *provable dangers*, structurally.** The floor's provable-refusal
+  rungs — the named deny map, the self-modify globs, the dangerous-gotcha floor, the
+  credential block, egress, the arg rules — refuse their targets regardless of what
+  is in context or what posture is set. That is the guarantee, and it holds whether
+  the model is strong, cheap, or actively under attack. (An unlisted tool that is not
+  a provable danger is admitted by default; set `posture: fail_closed` to make every
+  unlisted tool refuse instead.)
 
-- **It does not, by itself, bound the *arguments* of an allow-listed tool.** If you
-  allow a coarse tool like `Bash`, the floor permits `Bash`. It does not, on its own,
-  know that `Bash{command: "rm -rf /"}` is the dangerous one. `fak`'s dogfood policy
-  *does* ship argument-value deny rules (RE2 patterns that block `rm -rf` while
-  allowing `ls`, locked by `TestDogfoodManifestVerdictMatrix`). But those are
-  pattern-matching on the command string, which is **detection-shaped**: a determined
-  attacker can reword to slip a regex. So the durable advice is to keep irreversible
-  tools *off the allow-list* rather than lean on argument matching. Argument-scoped
-  *capabilities* (path/host/amount as first-class constraints, rather than regexes)
-  are the real fix. They are on the roadmap and not yet shipped.
+- **It bounds the *obvious* dangerous arguments, structurally, but not all of them.**
+  The dangerous-gotcha floor catches the canonical cases — `Bash{command: "rm -rf /"}`,
+  raw-disk writes, pipe-to-shell RCE, privilege escalation, infra teardown — by
+  structure, not by a single regex. But a coarse tool like `Bash` is still admitted,
+  and the floor's argument-level deny rules (RE2 patterns that block `rm -rf` while
+  allowing `ls`, locked by `TestDogfoodManifestVerdictMatrix`) are **detection-shaped**:
+  a determined attacker can reword to slip a regex. So the durable advice is to lean
+  on the structural rungs (the gotcha floor, the credential block, egress) and to keep
+  the highest-stakes tools behind `posture: fail_closed` or a named deny entry.
+  Argument-scoped *capabilities* (path/host/amount as first-class constraints, rather
+  than regexes) are the real fix. They are on the roadmap and not yet shipped.
 
 - **The detector feeding the result-side gate is the evadable part.** The capability
   deny (call-side) and the containment *decision* (result-side quarantine) are

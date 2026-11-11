@@ -190,8 +190,17 @@ func TestShippedFloorsAdmitOnlyExactRemoteMaintenanceToolName(t *testing.T) {
 			t.Fatalf("%s exact typed tool verdict=%v/%s, want Allow", floor.name, v.Kind, abi.ReasonName(v.Reason))
 		}
 		lookalike := approveTestCall("fak_remote_maintenance_extra", `{}`)
-		if v := a.Adjudicate(context.Background(), lookalike); v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonDefaultDeny {
-			t.Fatalf("%s lookalike verdict=%v/%s, want Deny/DEFAULT_DENY", floor.name, v.Kind, abi.ReasonName(v.Reason))
+		// The default floor now ships default_open, so an unlisted lookalike is
+		// admitted by default; the strict floor stays fail-closed and still
+		// denies it with DEFAULT_DENY.
+		if floor.name == "strict" {
+			if v := a.Adjudicate(context.Background(), lookalike); v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonDefaultDeny {
+				t.Fatalf("%s lookalike verdict=%v/%s, want Deny/DEFAULT_DENY", floor.name, v.Kind, abi.ReasonName(v.Reason))
+			}
+		} else {
+			if v := a.Adjudicate(context.Background(), lookalike); v.Kind != abi.VerdictAllow {
+				t.Fatalf("%s lookalike verdict=%v/%s, want Allow (default-open)", floor.name, v.Kind, abi.ReasonName(v.Reason))
+			}
 		}
 	}
 }

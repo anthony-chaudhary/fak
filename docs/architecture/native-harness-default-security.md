@@ -6,12 +6,13 @@ description: "What the fak native harness gives you by default — the capabilit
 # Native harness default-on security features
 
 The fak native harness is not a blank agent loop you bolt policy onto. It ships a
-security substrate that is **on by default** at the call boundary: a default-deny
-capability floor, a write-time result gate that pages poison out of context, a
-just-in-time credential path that keeps secrets out of the model context and off
-the wire, kernel-authored provenance, and effect-verify witness gates. This page
-collects the features a builder inherits for free and names the `pkg/harnesskit`
-contracts that expose the same posture to external products.
+security substrate that is **on by default** at the call boundary: a default-open
+capability floor whose provable-refusal rungs still hold, a write-time result gate
+that pages poison out of context, a just-in-time credential path that keeps secrets
+out of the model context and off the wire, kernel-authored provenance, and
+effect-verify witness gates. This page collects the features a builder inherits for
+free and names the `pkg/harnesskit` contracts that expose the same posture to
+external products.
 
 > **Read the honest scope.** As with [docs/fak/security.md](../fak/security.md) and
 > the [threat model FAQ](../faq/security-threat-model.md): the load-bearing
@@ -26,7 +27,7 @@ contracts that expose the same posture to external products.
 
 | Feature | Default | Where it lives | What it buys you |
 |---|---|---|---|
-| **Capability floor** | default-deny allow-list | `internal/adjudicator/default_policy.go` `DefaultPolicy` / `DevAgentPolicy` | an irreversible tool never allow-listed is refused regardless of context |
+| **Capability floor** | default-open (provable-refusal rungs hold) | `internal/adjudicator/default_policy.go` `DefaultPolicy` / `DevAgentPolicy` | an unlisted tool is admitted by default; the named deny map, self-modify globs, dangerous-gotcha floor, credential block, egress, and arg rules still refuse regardless of posture. Set `posture: fail_closed` in the manifest for the stricter blanket-deny floor |
 | **Result quarantine** (write-time gate) | on (rank 5, `FAK_NORMGATE!=off`) | `internal/normgate/normgate.go` | a poisoned/injection result is paged out to a stub before it can enter context |
 | **Secret handling** | warn-first redact (opt-in hard seal) | `normgate.admitSecret` → `internal/canon` `RedactSecrets` | the credential span is masked in place; the rest of the output stays in context |
 | **JIT secret paging** (harnesskit) | declared per tool, resolved at the execution boundary | `pkg/harnesskit/tool.go` `AuthBinding` / `SecretStore` | secrets never enter model context or serialized tool parameters |

@@ -1,6 +1,6 @@
 ---
-title: "Why Default-Deny Beats a Classifier for Prompt Injection"
-description: "A classifier has to catch an attack to stop it, and it fails open when it's fooled or falls over. A default-deny capability gate stops the same attack without noticing it, because the dangerous lever was never wired up. One injected prompt, two stacks, two outcomes."
+title: "Why a Capability Floor Beats a Classifier for Prompt Injection"
+description: "A classifier has to catch an attack to stop it, and it fails open when it's fooled or falls over. A capability floor stops the same attack without noticing it, because the provable dangers are refused by structure — the dangerous lever was never wired up. One injected prompt, two stacks, two outcomes."
 slug: default-deny-vs-classifier
 keywords:
   - prompt injection
@@ -18,15 +18,18 @@ keywords:
 date: 2026-07-03
 ---
 
-# Why Default-Deny Beats a Classifier for Prompt Injection
+# Why a Capability Floor Beats a Classifier for Prompt Injection
 
 > **TL;DR:** a classifier stops an attack only if it *recognizes* it — and a
-> recognizer that misses fails **open**. A default-deny capability gate stops the
-> same attack without recognizing anything, because the dangerous lever was never
-> wired up — an unrecognized attack fails **closed**. `fak` uses the second kind of
-> gate as the floor and treats its own detector as a bonus.
+> recognizer that misses fails **open**. A capability floor stops the same attack
+> without recognizing anything, because the provable dangers are refused by
+> structure — the egress sink, the credential path, the dangerous-gotcha floor, the
+> arg rules — no matter what the model says. `fak` ships that floor
+> **default-open** (an unlisted tool is admitted, so a new tool never stalls the
+> turn) and treats its own detector as a bonus; an operator who wants the stricter
+> blanket-deny floor sets `posture: fail_closed`.
 
-**Concept served:** the default-deny capability gate + prompt-injection quarantine
+**Concept served:** the capability floor (default-open with provable-refusal rungs) + prompt-injection quarantine
 (concept 4 of the [popularization epic](../notes/CONCEPT-POPULARIZATION-EPIC-2026-07-02.md)).
 
 The most common objection to `fak`'s security story is: *"isn't this just a
@@ -70,7 +73,7 @@ crashes or times out, most harnesses run the call anyway. A screen bolted onto t
 outside of the loop **fails open** — under attack *and* under ordinary breakage.
 The whole design rests on catching each attack, every time, forever.
 
-## After: the default-deny stack
+## After: the capability-floor stack
 
 Same attack, `fak` in front of the agent. Two independent, structural gates —
 neither of which is a recognizer:
@@ -80,20 +83,23 @@ neither of which is a recognizer:
    paged out to a tiny stub; the poisoned bytes never reach the model's attention.
    The attack usually ends here — not because the attack was *understood*, but
    because untrusted results don't get to sit in context by default.
-2. **The capability lock.** Suppose the screen misses — `fak` measured its own
-   detector as **≈100% evadable by design** and says so; it is a bonus, never the
-   floor. The persuaded model proposes the `shell` exfil call. The proposed call
+2. **The provable-refusal rungs.** Suppose the screen misses — `fak` measured its
+   own detector as **≈100% evadable by design** and says so; it is a bonus, never
+   the floor. The persuaded model proposes the `shell` exfil call. The proposed call
    crosses into the kernel — same process, same call path, no sidecar to time out —
-   and is checked against a reviewable allow-list. `shell` piping a private key to
-   an external host was never allow-listed. **Default-deny: the verdict is refuse,
-   and the refusal is journaled.** No amount of injected text changes the answer,
-   because there is no argument to win — the lever was never wired up.
+   and is checked against the floor's provable-refusal rungs: the egress sink-gate
+   refuses a shell that pipes bytes to an external host, and the credential block
+   refuses a read of `~/.ssh/id_rsa`. **The verdict is refuse, and the refusal is
+   journaled.** No amount of injected text changes the answer, because the check is
+   structural, not a recognition — the dangerous lever was never wired up. (An
+   operator who wants the stricter blanket-deny floor sets `posture: fail_closed`,
+   where *every* unlisted tool is refused, not just the provable dangers.)
 
 The classifier asks *"is this text bad?"* — a question the attacker controls both
-sides of. The capability gate asks *"was this action ever granted?"* — a question
-the attacker's text cannot touch. A recognizer improves the *probability* of
-stopping an attack; a capability floor changes what is *possible*. And when the
-gate itself breaks, no verdict means no call: it **fails closed**.
+sides of. The capability floor asks *"is this a provable danger, or was this action
+granted?"* — a question the attacker's text cannot touch. A recognizer improves the
+*probability* of stopping an attack; a capability floor changes what is *possible*.
+And when the gate itself breaks, no verdict means no call: it **fails closed**.
 
 In a small live A/B run on real models, the same injection reached the
 unprotected baseline **5/5** times and `fak` walled it off **5/5** times. Treat
@@ -122,8 +128,10 @@ per-attack recognition.
   steer a **policy-allowed** call with malicious arguments. Argument-level deny
   rules and egress sink-gating mitigate this; they do not eliminate it (see the
   [ShareLock triage](../notes/RESEARCH-sharelock-multitool-threshold-poisoning-triage-2026-06-26.md)).
-- Default-deny and quarantine are proven security ideas deliberately *assembled* at
-  the tool-call seam — the claim is the assembly and the floor, not novelty.
+- The capability floor (default-open with provable-refusal rungs, or
+  `posture: fail_closed` for blanket-deny) and quarantine are proven security ideas
+  deliberately *assembled* at the tool-call seam — the claim is the assembly and the
+  floor, not novelty.
 
 ## Where to go deeper
 

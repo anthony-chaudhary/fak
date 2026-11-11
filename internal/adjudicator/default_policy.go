@@ -43,12 +43,17 @@ var interpreterEvalFlags = []interpreterEvalSpec{
 	{"ruby", []string{"-e", "--eval"}},
 }
 
-// DefaultPolicy returns the production capability floor: allowing standard
-// agent tools, coding tools, read-only utilities, and safe execution tools,
-// denying dangerous self-modify globs and destructive actions, and redacting
-// common secret arg fields.
+// DefaultPolicy returns the production capability floor. It ships in the
+// default-open posture: unlisted tools are permitted by default, while the
+// provable-refusal rungs (the Deny map, SelfModifyGlobs, the dangerous-gotcha
+// floor, credential-block, egress, and arg_rules) still run first and hold.
+// This mirrors the gateway lease-admission open default (fak 5e9f75b495): the
+// floor stops being a blanket denier and instead enforces the specific,
+// provable dangers. A custom --policy manifest (e.g. posture fail_closed)
+// remains the operator lever for a stricter floor.
 func DefaultPolicy() Policy {
 	return Policy{
+		Posture: PostureDefaultOpen,
 		Allow: map[string]bool{
 			// Standard coding tools.
 			//
