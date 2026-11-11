@@ -217,6 +217,10 @@ type Config struct {
 	APIKey        string
 	HTTPClient    *http.Client
 	Now           func() time.Time
+	// Dataset optionally replays stored payload bytes verbatim instead of the
+	// synthetic prompt: request i sends payloadSeq(Dataset)[i%n]. The client is
+	// owned by the caller; loadgen never closes it.
+	Dataset *DatasetClient
 }
 
 var (
@@ -257,17 +261,24 @@ func (c *Config) now() time.Time {
 }
 
 // oneRequest issues a single chat completion as a stream (stream:true) and measures
-// wall-clock, time-to-first-content, and inter-content-chunk arrivals. If the endpoint
-// answers with a plain JSON body instead of an SSE stream, it falls back to the
-// non-streaming shape (streamed=false, no phase timing).
-func oneRequest(ctx context.Context, cfg *Config, inFlight *clientInFlight) reqResult {
-	body, _ := json.Marshal(chatRequest{
-		Model:       cfg.Model,
-		Messages:    []chatMessage{{Role: "user", Content: cfg.Prompt}},
-		MaxTokens:   cfg.MaxTokens,
-		Temperature: 0,
-		Stream:      true,
-	})
+// wall-clock, time-to-first-content, and inter-content-chunk arrivals. When
+// bodyOverride is non-nil it is sent verbatim (stored-payload replay); otherwise
+// the synthetic chat request is built from cfg. If the endpoint answers with a
+// plain JSON body instead of an SSE stream, it falls back to the non-streaming
+// shape (streamed=false, no phase timing).
+func oneRequest(ctx context.Context, cfg *Config, inFlight *clientInFlight, bodyOverride []byte) reqResult {
+	var body []byte
+	if bodyOverride != nil {
+		body = bodyOverride
+	} else {
+		body, _ = json.Marshal(chatRequest{
+			Model:       cfg.Model,
+			Messages:    []chatMessage{{Role: "user", Content: cfg.Prompt}},
+			MaxTokens:   cfg.MaxTokens,
+			Temperature: 0,
+			Stream:      true,
+		})
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.URL, bytes.NewReader(body))
 	if err != nil {
 		return reqResult{err: err}
@@ -367,19 +378,60 @@ func jsonFallback(cfg *Config, br *bufio.Reader, firstLine string, firstErr erro
 	return reqResult{latency: cfg.now().Sub(start), completionTokens: cr.Usage.CompletionTokens}
 }
 
-// runPoint runs `requests` total requests at the given concurrency.
+// errNoPayloads is reported per request when a dataset-backed sweep has no
+// payload bytes to replay.
+var errNoPayloads = errors.New("loadgen: dataset contains no payload bytes")
+
+// payloadSeq flattens a dataset's (session, turn) pairs, in index order, into
+// the ordered replay sequence a sweep round-robins over.
+func payloadSeq(ds *DatasetClient) ([][]byte, error) {
+	idx := ds.Index()
+	var seq [][]byte
+	for _, sid := range idx.ConversationIDs {
+		for turn := range idx.PayloadOffsets[sid] {
+			b, err := ds.PayloadBytes(sid, turn)
+			if err != nil {
+				return nil, err
+			}
+			seq = append(seq, b)
+		}
+	}
+	return seq, nil
+}
+
+// runPoint runs `requests` total requests at the given concurrency. When
+// cfg.Dataset is set, request i replays payloadSeq(cfg.Dataset)[i%n] verbatim;
+// otherwise the synthetic prompt from cfg is used.
 func runPoint(ctx context.Context, cfg *Config, concurrency, requests int) PointResult {
 	results := make([]reqResult, requests)
 	jobs := make(chan int)
 	inFlight := &clientInFlight{}
 	var wg sync.WaitGroup
 	wallStart := cfg.now()
+	var (
+		bodies [][]byte
+		dsErr  error
+	)
+	if cfg.Dataset != nil {
+		bodies, dsErr = payloadSeq(cfg.Dataset)
+	}
 	for w := 0; w < concurrency; w++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
-				results[i] = oneRequest(ctx, cfg, inFlight)
+				if dsErr != nil {
+					results[i] = reqResult{err: dsErr}
+					continue
+				}
+				var override []byte
+				if len(bodies) > 0 {
+					override = bodies[i%len(bodies)]
+				} else if cfg.Dataset != nil {
+					results[i] = reqResult{err: errNoPayloads}
+					continue
+				}
+				results[i] = oneRequest(ctx, cfg, inFlight, override)
 			}
 		}()
 	}

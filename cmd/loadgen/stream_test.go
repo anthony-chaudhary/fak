@@ -283,7 +283,7 @@ func TestRun_SSETransportErrorCannotCountMetrics(t *testing.T) {
 					}, nil
 				})},
 			}
-			r := oneRequest(context.Background(), cfg, &clientInFlight{})
+			r := oneRequest(context.Background(), cfg, &clientInFlight{}, nil)
 			if !errors.Is(r.err, io.ErrUnexpectedEOF) {
 				t.Fatalf("stream error=%v, want io.ErrUnexpectedEOF", r.err)
 			}
