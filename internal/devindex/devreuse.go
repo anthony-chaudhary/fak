@@ -256,6 +256,10 @@ var maintainerDevCommands = []string{
 	// port workers and CI verify a kernel's expected packed/tile layout before a port
 	// silently pays a runtime repack; fak-maintainer machinery, not a portable adopter pattern.
 	"layoutcontract",
+	// The concept-coverage drift watcher (Go port of the retired tools/concept_drift_watcher.py):
+	// checks whether the concept-disambiguation scorecard's coverage debt re-opened since the
+	// recorded baseline; fak-maintainer corpus machinery, not a portable adopter pattern.
+	"conceptdrift",
 	"leak-audit",
 	"learning-debt-dispatch",
 	"learning-observation",

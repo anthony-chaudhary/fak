@@ -93,6 +93,7 @@ var generatedVerbIndex = []generatedVerb{
 	{Name: "computetune", Synopsis: "storage-compute arbitration: recompute prompt KV on UMA DRAM vs offload to NVMe SSD", Tier: "dev"},
 	{Name: "concept", Synopsis: "position, classify, or validate entries in the concept catalog", Tier: "dev"},
 	{Name: "concept-usage-score", Synopsis: "native concept-usage scorecard control-pane payload", Tier: "dev"},
+	{Name: "conceptdrift", Synopsis: "diff the concept scorecard's coverage-debt against a recorded baseline; exit 3 when debt re-opens", Tier: "dev"},
 	{Name: "config", Synopsis: "show configuration guides and audit deployed fak posture against them", Tier: "dev"},
 	{Name: "conflation-scorecard", Synopsis: "native provenance-honesty control-pane payload (WITNESSED vs OBSERVED), folded into conflation_debt", Tier: "dev"},
 	{Name: "conformance", Synopsis: "safety-conformance suite: re-adjudicate the ABI wire contract + dogfood verdict matrix vs the compiled kernel", Tier: "dev"},

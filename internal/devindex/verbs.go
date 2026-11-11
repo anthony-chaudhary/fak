@@ -177,6 +177,7 @@ var verbManifest = []Verb{
 	{Name: "expert-trace", Synopsis: "analyze a FAK_EXPERT_TRACE route trace: unique experts, reuse, LRU/Belady curve, prewarm hot set", Lane: "cmd"},
 	{Name: "concept", Synopsis: "position, classify, or validate entries in the concept catalog", Lane: "cmd"},
 	{Name: "concept-usage-score", Synopsis: "native concept-usage scorecard control-pane payload", Lane: "cmd"},
+	{Name: "conceptdrift", Synopsis: "diff the concept scorecard's coverage-debt against a recorded baseline; exit 3 when debt re-opens", Lane: "cmd"},
 	{Name: "config", Synopsis: "show configuration guides and audit deployed fak posture against them", Lane: "cmd"},
 	{Name: "coordinate", Synopsis: "render a deterministic multi-agent coordination plan or demo", Lane: "cmd"},
 	{Name: "conflation-scorecard", Synopsis: "native provenance-honesty control-pane payload (WITNESSED vs OBSERVED), folded into conflation_debt", Lane: "cmd"},
