@@ -34,6 +34,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -540,4 +541,86 @@ func durationFrom(v float64, unit time.Duration) time.Duration {
 		return maxBudget
 	}
 	return time.Duration(f)
+}
+
+// SloFallback names why a request fell back to FIFO (arrival) ordering
+// because it could not be ranked against any SLO profile. The tokens mirror
+// the upstream mechanism's gateway_queue_fifo_fallback_total reason labels.
+type SloFallback string
+
+const (
+	// SloNone means at least one profile carried SLO info and the ranking stands.
+	SloNone SloFallback = ""
+	// SloNoProfile means no candidate profile exists at all.
+	SloNoProfile SloFallback = "no_profile"
+	// SloNoSLOInfo means candidate profiles exist but none carries SLO info.
+	SloNoSLOInfo SloFallback = "no_slo_info"
+)
+
+// SloProfile is one candidate service-level target a request may be ranked
+// against. Target ≤ 0 means the profile carries no SLO info and is skipped by
+// [RankSloProfiles].
+type SloProfile struct {
+	Name   string
+	Target time.Duration
+}
+
+// SloRank is the expected SLO-violation margin in seconds for a request that
+// has waited elapsed and is estimated to take expected under a target:
+// elapsed + expected - target. A positive margin means the request is
+// expected to miss the SLO; the larger the margin, the closer to (or past)
+// its deadline. Pure arithmetic: no clock, no I/O.
+func SloRank(elapsed, expected, target time.Duration) float64 {
+	return elapsed.Seconds() + expected.Seconds() - target.Seconds()
+}
+
+// RankSloProfiles orders candidate profiles most-relaxing-first for a request
+// that has waited elapsed and is estimated to take expected: ascending
+// violation margin, so the profile with the most slack ranks first and a
+// caller trying profiles stops at the first one already past its SLO — a
+// tighter profile can only rank worse. It returns the ordered profile names
+// plus the fallback reason: [SloNone] when at least one profile carries SLO
+// info, [SloNoProfile] when the slice is empty, and [SloNoSLOInfo] when every
+// profile lacks SLO info. A non-[SloNone] result means the request must be
+// served by FIFO (arrival) order instead of the returned ranking.
+//
+// Adapted from vllm-project/aibrix pkg/plugins/gateway/queue/slo_queue.go
+// (profileLess, rank, and the no-profile / no-SLO-info fallbacks) @
+// a89b94a574b2190a0e80ff5de1992698283a88e3 (Apache-2.0, Copyright The Aibrix
+// Team); re-expressed over fak's duration-based budgets, no source copied.
+func RankSloProfiles(profiles []SloProfile, elapsed, expected time.Duration) ([]string, SloFallback) {
+	if len(profiles) == 0 {
+		return nil, SloNoProfile
+	}
+	type rankedProfile struct {
+		name string
+		rank float64
+	}
+	ranked := make([]rankedProfile, 0, len(profiles))
+	for _, p := range profiles {
+		if p.Target <= 0 {
+			continue
+		}
+		m := SloRank(elapsed, expected, p.Target)
+		if !finite(m) {
+			// A non-finite margin cannot be compared; treat the profile as
+			// carrying no SLO info rather than poisoning the order.
+			continue
+		}
+		ranked = append(ranked, rankedProfile{name: p.Name, rank: m})
+	}
+	if len(ranked) == 0 {
+		return nil, SloNoSLOInfo
+	}
+	sort.SliceStable(ranked, func(i, j int) bool {
+		if ranked[i].rank != ranked[j].rank {
+			return ranked[i].rank < ranked[j].rank // most relaxing first
+		}
+		return ranked[i].name < ranked[j].name
+	})
+	names := make([]string, len(ranked))
+	for i, r := range ranked {
+		names[i] = r.name
+	}
+	return names, SloNone
 }

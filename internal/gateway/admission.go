@@ -67,6 +67,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/enginestep"
 	"github.com/anthony-chaudhary/fak/internal/kvbudget"
 	"github.com/anthony-chaudhary/fak/internal/session"
+	"github.com/anthony-chaudhary/fak/pkg/deadlineadmit"
 )
 
 // DefaultPreallocCeiling is the per-request ceiling on generation tokens preallocated
@@ -86,6 +87,16 @@ const (
 	// priority/aging and deterministic FIFO tie-breaking. Deadline-free requests
 	// follow deadline-bearing work, so EDF does not promise them bounded waiting.
 	AdmissionModeEDF
+	// AdmissionModeSLO serves the waiter closest to violating its own SLO
+	// first: each SLO-bearing waiter is ranked by its expected SLO-violation
+	// margin (deadlineadmit.SloRank over waited time, predicted service time,
+	// and SLO target), and the largest margin is promoted first. Waiters
+	// without an SLO target are excluded from the ranking and served in
+	// arrival order behind every ranked waiter (the aibrix SLOQueue's
+	// no-SLO-info FIFO fallback). Equal margins fall back to arrival order
+	// then TraceID. Adapted from vllm-project/aibrix
+	// pkg/plugins/gateway/queue/slo_queue.go @ a89b94a574b2.
+	AdmissionModeSLO
 )
 
 // AdmissionPolicy holds the admission knobs. Each cap is disabled by a non-positive value
@@ -408,7 +419,13 @@ type AdmissionController struct {
 	scheduler    *session.Scheduler
 	pool         *session.Pool
 	orderPolicy  session.Policy
-	credits      map[string]int64
+	// sloEstimate predicts a waiting request's service time from its token
+	// footprint for AdmissionModeSLO ranking. Nil (the default) means the gate
+	// holds no rate basis: SLO mode then orders by deadline proximity alone
+	// instead of fabricating an expectation. Guarded by mu like every other
+	// controller field.
+	sloEstimate func(tokens int) time.Duration
+	credits     map[string]int64
 	// decisions retains the most recent admission decision per trace id (bounded ring of
 	// admissionDecisionHistory entries), guarded by mu like every other controller field.
 	decisions     map[string]AdmissionDecisionReceipt
@@ -881,6 +898,20 @@ func (c *AdmissionController) Order() session.Policy {
 	return c.orderPolicy
 }
 
+// SetSLOEstimate attaches or replaces the service-time predictor that
+// AdmissionModeSLO ranks waiters with: it maps a request's token footprint to
+// its predicted service time. Pass nil to clear it; SLO mode then orders by
+// deadline proximity alone (waited time against the target), never fabricating
+// an expectation. Safe for concurrent use.
+func (c *AdmissionController) SetSLOEstimate(est func(tokens int) time.Duration) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.sloEstimate = est
+}
+
 // AdmissionLease is the live request's hold on one admitted scheduler slot, plus (when a
 // token-rate gate is wired, #2019) its reservation against the provider token window.
 // Release is idempotent and schedules the next waiting request after freeing this
@@ -1165,13 +1196,15 @@ func (c *AdmissionController) admissionTraceID(traceID string) string {
 }
 
 // Schedule runs ONE admission round: it advances the aging clock, orders the waiting queue
-// by the configured priority or EDF policy, and promotes waiters while the token budget
-// and the max-num-seqs cap have headroom — stopping at the first request that does not fit
-// so a lower-ranked request cannot bypass the selected queue head
+// by the configured priority, EDF, or SLO policy, and promotes waiters while the token
+// budget and the max-num-seqs cap have headroom — stopping at the first request that does
+// not fit so a lower-ranked request cannot bypass the selected queue head
 // (head-of-line discipline). It returns the requests admitted this round, in admission
 // order. The native loop calls it each iteration; a host with a freed slot calls it after
 // Complete. Each call advances priority aging; in EDF mode that aging resolves
-// equal deadlines and cannot overtake an earlier deadline.
+// equal deadlines and cannot overtake an earlier deadline; in SLO mode the
+// violation-margin order stands on its own (equal margins fall back to arrival
+// order then TraceID).
 func (c *AdmissionController) Schedule() []SeqRequest {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1206,9 +1239,15 @@ func (c *AdmissionController) scheduleLocked() []SeqRequest {
 	}
 
 	isEDF := c.policy.Mode == AdmissionModeEDF
-	isWeightedFair := !isEDF && (c.orderPolicy == session.WeightedFair || (c.scheduler != nil && c.scheduler.Policy() == session.WeightedFair))
+	isSLO := c.policy.Mode == AdmissionModeSLO
+	isWeightedFair := !isEDF && !isSLO && (c.orderPolicy == session.WeightedFair || (c.scheduler != nil && c.scheduler.Policy() == session.WeightedFair))
 	if !isWeightedFair {
 		sort.SliceStable(c.waiting, func(i, j int) bool {
+			if isSLO {
+				if before, decided := c.sloOrderLocked(c.waiting[i], c.waiting[j]); decided {
+					return before
+				}
+			}
 			if isEDF {
 				if before, decided := deadlineOrder(c.waiting[i].req, c.waiting[j].req); decided {
 					return before
@@ -1676,6 +1715,52 @@ func requestDeadline(r SeqRequest) (time.Time, bool) {
 		}
 	}
 	return deadline, !deadline.IsZero()
+}
+
+// sloOrderLocked is the SLO-mode order (AdmissionModeSLO), adapted from
+// vllm-project/aibrix pkg/plugins/gateway/queue/slo_queue.go @ a89b94a574b2
+// (its SLO comparator plus the no-SLO-info FIFO fallback): the waiter whose
+// expected SLO-violation margin is largest — closest to missing its own SLO —
+// is served first, and waiters without an SLO target are excluded from the
+// ranking and fall back to arrival order behind every ranked waiter. The
+// margin is deadlineadmit.SloRank over the waited time, the predicted service
+// time (c.sloEstimate when wired; zero when it is not, so the gate never
+// fabricates an expectation), and the SLO target measured from CreatedAt via
+// the shared requestDeadline seam. A waiter past its target carries the
+// largest possible urgency. Equal margins fall back to arrival order then
+// TraceID, so the order is total and a pure function of the queued set
+// (decided is always true). Caller holds c.mu.
+func (c *AdmissionController) sloOrderLocked(a, b waitEntry) (before, decided bool) {
+	da, okA := requestDeadline(a.req)
+	db, okB := requestDeadline(b.req)
+	switch {
+	case okA != okB:
+		// Ranked waiters precede the FIFO fallback set.
+		return okA, true
+	case !okA:
+		// Neither carries an SLO target: the no-SLO-info FIFO fallback serves
+		// them in arrival order, then TraceID.
+		if a.enqueuedRound != b.enqueuedRound {
+			return a.enqueuedRound < b.enqueuedRound, true
+		}
+		return a.req.TraceID < b.req.TraceID, true
+	}
+	now := c.nowLocked()
+	margin := func(req SeqRequest, d time.Time) float64 {
+		expected := time.Duration(0)
+		if c.sloEstimate != nil {
+			expected = c.sloEstimate(req.Tokens)
+		}
+		return deadlineadmit.SloRank(now.Sub(req.CreatedAt), expected, d.Sub(req.CreatedAt))
+	}
+	ma, mb := margin(a.req, da), margin(b.req, db)
+	if ma != mb {
+		return ma > mb, true // larger margin: closer to violating its own SLO
+	}
+	if a.enqueuedRound != b.enqueuedRound {
+		return a.enqueuedRound < b.enqueuedRound, true
+	}
+	return a.req.TraceID < b.req.TraceID, true
 }
 
 // effectivePriorityLocked is a waiting request's priority adjusted for how long it has
