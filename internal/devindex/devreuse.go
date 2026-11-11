@@ -229,6 +229,9 @@ var maintainerDevCommands = []string{
 	// fak's own decode-regime diagnostics, not a portable adopter pattern.
 	"hostsetup-bench",
 	"hwgate-lint",
+	// Cited hardware-spec inventory over fak's own accelerator corpus: fak-maintainer
+	// fleet diagnostics (the nativeperf/optimize evidence base), not a portable adopter pattern.
+	"hwspecs",
 	"hygiene",
 	"idea-scout",
 	"idempotency",
@@ -248,10 +251,11 @@ var maintainerDevCommands = []string{
 	"l3-serve",
 	"l3serve",
 	"launch",
-	// Verified kernel-launch/parFor census of the decode paths: recomputable
-	// launches/token metric + source-drift gate over fak's own dispatch seams
-	// (looped vs batched MoE expert dispatch), not a portable adopter pattern.
 	"launch-census",
+	// Read-only tensor-layout contract registry CLI over internal/compute/layoutcontract:
+	// port workers and CI verify a kernel's expected packed/tile layout before a port
+	// silently pays a runtime repack; fak-maintainer machinery, not a portable adopter pattern.
+	"layoutcontract",
 	"leak-audit",
 	"learning-debt-dispatch",
 	"learning-observation",
@@ -297,6 +301,10 @@ var maintainerDevCommands = []string{
 	"opencode",
 	"ops",
 	"opt",
+	// The dedicated inference-optimization driver (plan/measure/verify/loop over the
+	// committed nativeperf hill-climb graph): fak's own optimization loop, not a
+	// portable adopter pattern.
+	"optimize",
 	"org",
 	"orient",
 	"perf",

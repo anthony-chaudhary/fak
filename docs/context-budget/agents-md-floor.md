@@ -83,7 +83,7 @@ Two reading rules for the table below:
 `AGENTS.md` now has a one-way byte floor, the same two-sided ratchet its siblings
 run (`floorgate.go`, `skillfootprint/descbudget.go`):
 
-- **Floor:** `DOC_BYTES	AGENTS.md	52301` in [`agents-md-floor.tsv`](agents-md-floor.tsv),
+- **Floor:** `DOC_BYTES	AGENTS.md	52427` in [`agents-md-floor.tsv`](agents-md-floor.tsv),
   the file's size at `HEAD` on 2026-09-28 (`git cat-file -s HEAD:AGENTS.md`).
 - **Gate:** `internal/agentsindex/bytefloor.go`, enforced by
   `TestAgentsMDByteFloorAtHEAD` in every `go test ./...` run, which CI's

@@ -16,14 +16,12 @@ func TestExpensiveWorkflowsCancelOnlySupersededPushAndPullRequestRuns(t *testing
 	root := filepath.Dir(internalDir(t))
 	workflows := []string{
 		"bench.yml",
-		"dogfood.yml",
 		"dogfood-coverage.yml",
-		"garden.yml",
 		"security-audit.yml",
 	}
 
-	if len(workflows) != 5 { //boundarylint:ignore CHANGE_DETECTOR_TEST the test explicitly audits exactly five declared workflows
-		t.Fatalf("workflow concurrency gate must cover exactly five workflows; got %d", len(workflows))
+	if len(workflows) != 3 { //boundarylint:ignore CHANGE_DETECTOR_TEST the test explicitly audits exactly three declared workflows (7151f6edbc deleted the dogfood.yml/garden.yml pair)
+		t.Fatalf("workflow concurrency gate must cover exactly three workflows; got %d", len(workflows))
 	}
 
 	for _, name := range workflows {

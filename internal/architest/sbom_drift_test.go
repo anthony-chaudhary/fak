@@ -466,15 +466,15 @@ func TestSBOMDriftGateCatchesMutations(t *testing.T) {
 		{
 			name: "go.mod grows a module and the SBOM is not re-cut",
 			goMod: func(s string) string {
-				return s + "\nrequire golang.org/x/text v0.30.0 // indirect\n"
+				return s + "\nrequire golang.org/x/mod v0.17.0 // indirect\n"
 			},
 			sbom: identity,
-			want: []driftID{{driftMissing, "golang.org/x/text"}},
+			want: []driftID{{driftMissing, "golang.org/x/mod"}},
 		},
 		{
 			name: "go.mod bumps a version and the SBOM keeps the old one",
 			goMod: func(s string) string {
-				return strings.Replace(s, "golang.org/x/term v0.44.0", "golang.org/x/term v0.45.0", 1)
+				return strings.Replace(s, "golang.org/x/term v0.47.0", "golang.org/x/term v0.48.0", 1)
 			},
 			sbom: identity,
 			want: []driftID{{driftVersion, "golang.org/x/term"}},
@@ -482,7 +482,7 @@ func TestSBOMDriftGateCatchesMutations(t *testing.T) {
 		{
 			name: "go.mod stops requiring a module the SBOM still lists",
 			goMod: func(s string) string {
-				return strings.Replace(s, "require golang.org/x/sys v0.48.0", "", 1)
+				return strings.Replace(s, "require golang.org/x/sys v0.49.0", "", 1)
 			},
 			sbom: identity,
 			want: []driftID{{driftExtra, "golang.org/x/sys"}},
@@ -491,8 +491,8 @@ func TestSBOMDriftGateCatchesMutations(t *testing.T) {
 			name:  "SBOM entry half-edited: versionInfo agrees, purl left behind",
 			goMod: identity,
 			sbom: func(s string) string {
-				return strings.Replace(s, "pkg:golang/golang.org/x/term@v0.44.0",
-					"pkg:golang/golang.org/x/term@v0.43.0", 1)
+				return strings.Replace(s, "pkg:golang/golang.org/x/term@v0.47.0",
+					"pkg:golang/golang.org/x/term@v0.46.0", 1)
 			},
 			want: []driftID{{driftPurl, "golang.org/x/term"}},
 		},
@@ -500,16 +500,16 @@ func TestSBOMDriftGateCatchesMutations(t *testing.T) {
 			name:  "SBOM entry half-edited: proxy download URL left at the old version",
 			goMod: identity,
 			sbom: func(s string) string {
-				return strings.Replace(s, "golang.org/x/sys/@v/v0.48.0.zip",
-					"golang.org/x/sys/@v/v0.45.0.zip", 1)
+				return strings.Replace(s, "golang.org/x/sys/@v/v0.49.0.zip",
+					"golang.org/x/sys/@v/v0.46.0.zip", 1)
 			},
 			want: []driftID{{driftDownload, "golang.org/x/sys"}},
 		},
 		{
 			name: "a direct requirement becomes indirect and the SBOM still says direct",
 			goMod: func(s string) string {
-				return strings.Replace(s, "require golang.org/x/sys v0.48.0",
-					"require golang.org/x/sys v0.48.0 // indirect", 1)
+				return strings.Replace(s, "require golang.org/x/sys v0.49.0",
+					"require golang.org/x/sys v0.49.0 // indirect", 1)
 			},
 			sbom: identity,
 			want: []driftID{{driftDirectness, "golang.org/x/sys"}},

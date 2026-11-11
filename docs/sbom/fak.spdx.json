@@ -35,38 +35,76 @@
     {
       "SPDXID": "SPDXRef-Package-golang-org-x-term",
       "name": "golang.org/x/term",
-      "versionInfo": "v0.44.0",
-      "downloadLocation": "https://proxy.golang.org/golang.org/x/term/@v/v0.44.0.zip",
+      "versionInfo": "v0.47.0",
+      "downloadLocation": "https://proxy.golang.org/golang.org/x/term/@v/v0.47.0.zip",
       "filesAnalyzed": false,
       "licenseConcluded": "BSD-3-Clause",
       "licenseDeclared": "BSD-3-Clause",
       "copyrightText": "NOASSERTION",
       "supplier": "Organization: Go project (golang.org/x extended standard library)",
-      "sourceInfo": "Direct requirement in go.mod. go.sum module digest: h1:0rLvDRCtNj0gZkyIXhCyOb2OAzEhLVqc4B+hrsBhrmc= (dirhash H1, base64 SHA-256 over the module zip; not a hex file checksum, so it is recorded here rather than as an SPDX checksum field). go.mod digest: h1:7ze4MdzUzLXpSAoFP1H0bOI9aXDqveSvatT5vKcFh2Y=",
+      "sourceInfo": "Direct requirement in go.mod. go.sum module digest: h1:cpyOwQkr2Nzxe2p6KnrTG7Ei2wtzjsuSjhpXXepZ/BM= (dirhash H1, base64 SHA-256 over the module zip; not a hex file checksum, so it is recorded here rather than as an SPDX checksum field). go.mod digest: h1:efAfAuG6RKABvg1ArGebRkvX6LXul14SM67o2e4mUCY=",
       "externalRefs": [
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:golang/golang.org/x/term@v0.44.0"
+          "referenceLocator": "pkg:golang/golang.org/x/term@v0.47.0"
         }
       ]
     },
     {
       "SPDXID": "SPDXRef-Package-golang-org-x-sys",
       "name": "golang.org/x/sys",
-      "versionInfo": "v0.48.0",
-      "downloadLocation": "https://proxy.golang.org/golang.org/x/sys/@v/v0.48.0.zip",
+      "versionInfo": "v0.49.0",
+      "downloadLocation": "https://proxy.golang.org/golang.org/x/sys/@v/v0.49.0.zip",
       "filesAnalyzed": false,
       "licenseConcluded": "BSD-3-Clause",
       "licenseDeclared": "BSD-3-Clause",
       "copyrightText": "NOASSERTION",
       "supplier": "Organization: Go project (golang.org/x extended standard library)",
-      "sourceInfo": "Direct requirement in go.mod. go.sum module digest: h1:bbX/i/6MgT9BVLM9RT1thmxL04yeTAhbEz4SyadbXoo= (dirhash H1, base64 SHA-256 over the module zip; not a hex file checksum, so it is recorded here rather than as an SPDX checksum field). go.mod digest: h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=",
+      "sourceInfo": "Direct requirement in go.mod. go.sum module digest: h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA= (dirhash H1, base64 SHA-256 over the module zip; not a hex file checksum, so it is recorded here rather than as an SPDX checksum field). go.mod digest: h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=",
       "externalRefs": [
         {
           "referenceCategory": "PACKAGE-MANAGER",
           "referenceType": "purl",
-          "referenceLocator": "pkg:golang/golang.org/x/sys@v0.48.0"
+          "referenceLocator": "pkg:golang/golang.org/x/sys@v0.49.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-golang-org-x-image",
+      "name": "golang.org/x/image",
+      "versionInfo": "v0.47.0",
+      "downloadLocation": "https://proxy.golang.org/golang.org/x/image/@v/v0.47.0.zip",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "copyrightText": "NOASSERTION",
+      "supplier": "Organization: Go project (golang.org/x extended standard library)",
+      "sourceInfo": "Direct requirement in go.mod. go.sum module digest: h1:za/8gVz++PPZqmZJBNSISICN5Rrj5zixP/8K++fgmqo= (dirhash H1, base64 SHA-256 over the module zip; not a hex file checksum, so it is recorded here rather than as an SPDX checksum field). go.mod digest: h1:IkN5o4A7vq55vXN8FWjjnhg9Rs2GOtffqsSi9mWAKYE=",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:golang/golang.org/x/image@v0.47.0"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-golang-org-x-text",
+      "name": "golang.org/x/text",
+      "versionInfo": "v0.43.0",
+      "downloadLocation": "https://proxy.golang.org/golang.org/x/text/@v/v0.43.0.zip",
+      "filesAnalyzed": false,
+      "licenseConcluded": "BSD-3-Clause",
+      "licenseDeclared": "BSD-3-Clause",
+      "copyrightText": "NOASSERTION",
+      "supplier": "Organization: Go project (golang.org/x extended standard library)",
+      "sourceInfo": "Indirect requirement in go.mod. go.sum module digest: h1:1QivrlhwAsnMOcqgOdl9my7s9OyZl8O5/UGUTJVXoWc= (dirhash H1, base64 SHA-256 over the module zip; not a hex file checksum, so it is recorded here rather than as an SPDX checksum field). go.mod digest: h1:hbSIYA/amXcRXTFSZqh8tWHEoqRvvbKPJ2uz/KU+a+s=",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:golang/golang.org/x/text@v0.43.0"
         }
       ]
     }

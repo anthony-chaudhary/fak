@@ -325,7 +325,7 @@
     },
     {
       "class": "go_module",
-      "reference": "golang.org/x/sys@v0.48.0",
+      "reference": "golang.org/x/sys@v0.49.0",
       "consumer_domains": [
         "go.mod"
       ],
@@ -337,7 +337,31 @@
     },
     {
       "class": "go_module",
-      "reference": "golang.org/x/term@v0.44.0",
+      "reference": "golang.org/x/term@v0.47.0",
+      "consumer_domains": [
+        "go.mod"
+      ],
+      "status": "used",
+      "pin": "immutable",
+      "digest": "",
+      "license_record": "docs/sbom/fak.spdx.json",
+      "enforcement": "internal/architest/sbom_drift_test.go (version + purl + download-url drift)"
+    },
+    {
+      "class": "go_module",
+      "reference": "golang.org/x/image@v0.47.0",
+      "consumer_domains": [
+        "go.mod"
+      ],
+      "status": "used",
+      "pin": "immutable",
+      "digest": "",
+      "license_record": "docs/sbom/fak.spdx.json",
+      "enforcement": "internal/architest/sbom_drift_test.go (version + purl + download-url drift)"
+    },
+    {
+      "class": "go_module",
+      "reference": "golang.org/x/text@v0.43.0",
       "consumer_domains": [
         "go.mod"
       ],

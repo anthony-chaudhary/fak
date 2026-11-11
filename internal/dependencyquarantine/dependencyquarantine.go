@@ -19,16 +19,29 @@ import (
 	"strings"
 )
 
+// allowedRootRequires is the reviewed dependency budget (2026-11-08 review of the
+// dual-repo workspace alignment + carried videogen fix): x/term v0.47.0 and
+// x/sys v0.49.0 align the public module graph with the private x/tools v0.52.0
+// pair (a3034f8c484, 2aab0c0567f); x/image v0.47.0 is the carried fix for
+// tools/videogen's existing import (b3c4d0a1629); x/text v0.43.0 rides the same
+// module-graph resolution as an indirect requirement. All four are
+// golang.org/x extended-stdlib modules under the Go project's BSD-3-Clause.
 var allowedRootRequires = map[string]string{
-	"golang.org/x/sys":  "v0.48.0",
-	"golang.org/x/term": "v0.44.0",
+	"golang.org/x/image": "v0.47.0",
+	"golang.org/x/sys":   "v0.49.0",
+	"golang.org/x/term":  "v0.47.0",
+	"golang.org/x/text":  "v0.43.0",
 }
 
 var allowedRootSum = map[string]bool{
-	"golang.org/x/sys v0.48.0 h1:bbX/i/6MgT9BVLM9RT1thmxL04yeTAhbEz4SyadbXoo=":         true,
-	"golang.org/x/sys v0.48.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=":  true,
-	"golang.org/x/term v0.44.0 h1:0rLvDRCtNj0gZkyIXhCyOb2OAzEhLVqc4B+hrsBhrmc=":        true,
-	"golang.org/x/term v0.44.0/go.mod h1:7ze4MdzUzLXpSAoFP1H0bOI9aXDqveSvatT5vKcFh2Y=": true,
+	"golang.org/x/image v0.47.0 h1:za/8gVz++PPZqmZJBNSISICN5Rrj5zixP/8K++fgmqo=":        true,
+	"golang.org/x/image v0.47.0/go.mod h1:IkN5o4A7vq55vXN8FWjjnhg9Rs2GOtffqsSi9mWAKYE=": true,
+	"golang.org/x/sys v0.49.0 h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA=":          true,
+	"golang.org/x/sys v0.49.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=":   true,
+	"golang.org/x/term v0.47.0 h1:cpyOwQkr2Nzxe2p6KnrTG7Ei2wtzjsuSjhpXXepZ/BM=":         true,
+	"golang.org/x/term v0.47.0/go.mod h1:efAfAuG6RKABvg1ArGebRkvX6LXul14SM67o2e4mUCY=":  true,
+	"golang.org/x/text v0.43.0 h1:1QivrlhwAsnMOcqgOdl9my7s9OyZl8O5/UGUTJVXoWc=":         true,
+	"golang.org/x/text v0.43.0/go.mod h1:hbSIYA/amXcRXTFSZqh8tWHEoqRvvbKPJ2uz/KU+a+s=":  true,
 }
 
 // Violation describes an unreviewed dependency or facade policy violation.

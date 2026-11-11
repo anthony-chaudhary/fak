@@ -26,7 +26,11 @@ func TestGardenWorkflowUsesSingleCapturedPayload(t *testing.T) {
 		t.Skip("jq is required to validate the garden capture")
 	}
 	_, file, _, _ := runtime.Caller(0)
-	workflow, err := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", ".github", "workflows", "garden.yml"))
+	workflowPath := filepath.Join(filepath.Dir(file), "..", "..", ".github", "workflows", "garden.yml")
+	if _, err := os.Stat(workflowPath); err != nil {
+		t.Skip("garden.yml is deleted from trunk (7151f6edbc removed the chronically-red workflow); restore this test with the workflow")
+	}
+	workflow, err := os.ReadFile(workflowPath)
 	if err != nil {
 		t.Fatal(err)
 	}

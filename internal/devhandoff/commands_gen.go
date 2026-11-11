@@ -56,6 +56,7 @@ var Commands = []Command{
 	{Name: "issue-contract-repair", Owner: "dev", Handler: "devcmd.RunIssueContractRepair", SourceOrigin: "internal/devcmd/issue_contract_repair.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "kernel-oracle", Owner: "dev", Handler: "runKernelOracle", SourceOrigin: "cmd/fak-dev/kernel_oracle.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "launch-census", Owner: "dev", Handler: "devcmd.RunLaunchCensus", SourceOrigin: "internal/devcmd/launch_census.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
+	{Name: "layoutcontract", Owner: "dev", Handler: "runLayoutContract", SourceOrigin: "cmd/fak-dev/layout_contract.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "orient", Owner: "dev", Handler: "devcmd.RunOrient", SourceOrigin: "internal/devcmd/orient.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "papers", Owner: "dev", Handler: "devcmd.RunPapers", SourceOrigin: "internal/devcmd/papers.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},
 	{Name: "perfscout", Owner: "dev", Handler: "devcmd.RunPerfScout", SourceOrigin: "internal/devcmd/perfscout.go", DispatchTarget: "fak-dev", SourceClass: "dev-only"},

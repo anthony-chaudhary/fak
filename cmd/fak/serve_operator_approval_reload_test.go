@@ -480,7 +480,7 @@ func TestServeStdioOperatorApprovalReloadWithoutReconnect(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, fakExe, "serve", "--stdio", "--policy", policyPath)
+	cmd := exec.CommandContext(ctx, fakExe, "serve", "--stdio", "--policy", policyPath, "--workspace-admission", "permissive")
 	cmd.Dir = workspace
 	pathEnv := filepath.Dir(fakeDOS) + string(os.PathListSeparator) + os.Getenv("PATH")
 	cmd.Env = approvalChildEnv(

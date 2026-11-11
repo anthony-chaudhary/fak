@@ -890,4 +890,73 @@ var admittedPostFreeze = []string{
 	// Introduced by 15699d6468 (28 trunk advances at admission).
 	// Relocates to: a typed compute capability config once #2862 lands.
 	"FAK_CUDA_QWEN35_VLLM_QK",
+
+	// NINTH OCCURRENCE (release-unblock): four measured-mode diagnostics and toggles shipped
+	// while the ratchet was red and unwatched again. As in the earlier occurrences they are
+	// admitted by name, not absorbed into baseline.go, and they cannot relocate until the
+	// #2862 config surface exists. Admission resolves the current offenses; it does not
+	// erase that liveness failure or pay the #2862 relocation debt.
+
+	// internal/compute/cuda_offload_refill.go: FAK_CUDA_EXPERT_RING_REFILL=1 turns on
+	// measured-mode logging of the checked CUDA expert-ring refill path; OFF by default and
+	// zero-cost when unset, read once at package init from the literal call site. An
+	// observability toggle for hardware receipts, not a credential (it grants access to
+	// nothing). Introduced by 4d885f05035 (150 trunk advances at admission, the oldest
+	// offense the unwatched-red ratchet measured).
+	// Relocates to: a typed measure-mode field on the compute census config once #2862 lands.
+	"FAK_CUDA_EXPERT_RING_REFILL",
+
+	// internal/compute/cuda_qwen35_mtp.go: FAK_CUDA_QWEN35_MTP=1 arms the opt-in checked
+	// CUDA MTP pre-layer candidate (=1 arms it; default off), read once at package init
+	// from the literal call site. An experimental kernel toggle like its admitted Qwen35
+	// siblings; not a credential (it grants access to nothing). Introduced by 95b3d502782
+	// (145 trunk advances at admission).
+	// Relocates to: a typed compute capability config once #2862 lands.
+	"FAK_CUDA_QWEN35_MTP",
+
+	// internal/agent/inkernel_sampling_candidates.go: FAK_CUDA_SAMPLING_COMPACT=1 selects
+	// the compact seeded sampling transport for in-kernel candidate generation; OFF by
+	// default and zero-cost when unset, read at the literal call site. A transport toggle
+	// for hardware receipts, not a credential (it grants access to nothing). Introduced
+	// by c3160c170f5 (92 trunk advances at admission).
+	// Relocates to: a typed sampling-transport config once #2862 lands.
+	"FAK_CUDA_SAMPLING_COMPACT",
+
+	// internal/agent/inkernel_batch_health.go: FAK_BATCH_DIAG=1 turns on the batch-decode
+	// step-health diagnostics (lockwait/hal/backend split, paged pool grow, serial step
+	// lanes); OFF by default and zero-cost when unset, read at the literal call site. An
+	// observability toggle for hardware receipts, not a credential (it grants access to
+	// nothing). Introduced by a44fbfe9a4e (72 trunk advances at admission).
+	// Relocates to: a typed batch-diag config once #2862 lands.
+	"FAK_BATCH_DIAG",
+
+	// cmd/fak/devbuildcache.go: FAK_DEV_BUILDCACHE=off (or 0/false/no) disables the
+	// mtime+size-keyed fak-dev build cache so a suspicious binary can be ruled out with
+	// one env var instead of a cache-dir hunt; default on, read at the literal call
+	// site. A kill-switch for a local build cache, not a credential (it grants access
+	// to nothing). Introduced by 312bf438b31 (0 trunk advances at admission — admitted
+	// in the same window it landed, so the ratchet never went unwatched for it).
+	// Relocates to: a typed dev-build-cache config once #2862 lands.
+	"FAK_DEV_BUILDCACHE",
+
+	// cmd/fak/guard.go: FAK_WORKSPACE_ADMISSION=open|permissive|strict is the env-form
+	// twin of the --workspace-admission flag on fak serve / fak guard (eed44c26d6): the
+	// operator's explicit posture lever for the gateway lease-admission seam, read at
+	// the literal call site. An operator posture control, not a credential (it grants
+	// access to nothing, and the strict default holds when unset). Re-surfaced as an
+	// unadmitted offense 22 trunk advances ago at admission.
+	// Relocates to: the typed gateway admission config once #2862 lands.
+	"FAK_WORKSPACE_ADMISSION",
+
+	// pkg/gitindex/dirty.go + pkg/gitgraph/ancestry.go: GIT_CONFIG_NOSYSTEM,
+	// GIT_CONFIG_SYSTEM, GIT_GRAFT_FILE and GIT_REPLACE_REF_BASE are git's own
+	// documented isolation knobs, set per subprocess so fak's dirty-check and ancestry
+	// reads resolve the repo's own config and history exactly, not the host's. Read at
+	// the literal exec call sites; standard git env, not a credential (they grant
+	// access to nothing). Introduced by 29798c26e1 (6 trunk advances at admission).
+	// Relocates to: a typed git-subprocess env profile once #2862 lands.
+	"GIT_CONFIG_NOSYSTEM",
+	"GIT_CONFIG_SYSTEM",
+	"GIT_GRAFT_FILE",
+	"GIT_REPLACE_REF_BASE",
 }

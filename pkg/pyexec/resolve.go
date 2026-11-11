@@ -159,7 +159,11 @@ func (h host) candidates() []Interpreter {
 // isStoreStub reports the App Execution Alias under WindowsApps, which opens
 // the Store (exit 9009) instead of running Python.
 func isStoreStub(path string) bool {
-	p := strings.ToLower(filepath.ToSlash(path))
+	// Normalize separators by hand: filepath.ToSlash is a no-op for a
+	// Windows-style path when the process itself runs on a POSIX host (linux
+	// CI, WSL), so the WindowsApps marker check must not depend on the host
+	// separator.
+	p := strings.ToLower(strings.ReplaceAll(path, "\\", "/"))
 	return strings.Contains(p, "/microsoft/windowsapps/")
 }
 
