@@ -593,6 +593,35 @@ func loadModelQ4KStreamedExpertsContext(ctx context.Context, path string, p *Loa
 	return m, nil
 }
 
+// LoadModelQ4KRetained loads a GGUF checkpoint through the direct-resident-Q4_K path and
+// transfers the checkpoint lifetime to the returned model: the shard readers stay open for
+// the life of the model, and CloseWeights retires them when serving stops. It is the
+// ordinary (non-streamed) sibling of LoadModelQ4KStreamedDense / LoadModelQ4KStreamedExperts,
+// for callers whose load attaches stages that borrow the WeightSource's shard readers for
+// LATER reads — the DeepSeek-V4.1 Engram stage re-reads its packed table rows on every served
+// forward, so the lifetime-CLOSING LoadModelQ4K entry would hand back a model whose Engram
+// stream reads closed files on the first request (the witnessed P/D front-door panic). On
+// cancellation or load failure the checkpoint is closed before returning.
+func LoadModelQ4KRetained(path string) (*model.Model, error) {
+	return LoadModelQ4KRetainedContext(context.Background(), path)
+}
+
+// LoadModelQ4KRetainedContext is LoadModelQ4KRetained with cooperative cancellation.
+// On cancellation it closes the checkpoint before returning.
+func LoadModelQ4KRetainedContext(ctx context.Context, path string) (*model.Model, error) {
+	ws, err := OpenWeights(path)
+	if err != nil {
+		return nil, err
+	}
+	m, err := ws.QuantModelQ4KContext(ctx)
+	if err != nil {
+		_ = ws.Close()
+		return nil, err
+	}
+	m.SetWeightCloser(ws)
+	return m, nil
+}
+
 // QuantModelQ4K is the WeightSource form of LoadModelQ4K: QuantModelProfile with the
 // eligible-Q4_K branch pulled before the dequant, so those tensors never pay the f32
 // round-trip.

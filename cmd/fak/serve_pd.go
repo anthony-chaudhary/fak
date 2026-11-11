@@ -204,7 +204,13 @@ func runServePDRole(stdout, stderr io.Writer, cfg servePDConfig) int {
 	var m *fakmodel.Model
 	var loadErr error
 	if cfg.Q4K {
-		m, loadErr = ggufload.LoadModelQ4K(cfg.GGUF)
+		// The resident Q4_K arm attaches the declared V4.1 Engram stage, whose row
+		// sources borrow the checkpoint's shard readers for the life of the model
+		// (every served forward re-reads packed table rows); the retained entry keeps
+		// those handles open, and the deferred CloseWeights below retires them at
+		// shutdown. The lifetime-closing LoadModelQ4K entry panics the front door on
+		// the first served request instead (ticket pd-q4k-engram-file-closed-20261108).
+		m, loadErr = ggufload.LoadModelQ4KRetained(cfg.GGUF)
 	} else {
 		m, loadErr = ggufload.LoadModelQuant(cfg.GGUF)
 	}
