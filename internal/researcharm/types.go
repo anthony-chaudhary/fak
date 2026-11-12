@@ -61,18 +61,27 @@ type LeaseInfo struct {
 
 // ArmInfo provides an aggregated view of a research project arm's traffic and state.
 type ArmInfo struct {
-	ID              string     `json:"id"`
-	Group           string     `json:"group"`
-	DisplayName     string     `json:"display_name"`
-	MaxConcurrency  int        `json:"max_concurrency"` // 0 = unlimited
-	ActiveRequests  int        `json:"active_requests"`
-	WaitingRequests int        `json:"waiting_requests,omitempty"`
-	TotalRequests   int64      `json:"total_requests"`
-	TotalTokens     int64      `json:"total_tokens"`
-	ErrorCount      int64      `json:"error_count"`
-	RecentPIDs      []int      `json:"recent_pids,omitempty"`
-	LastSeen        time.Time  `json:"last_seen"`
-	ActiveLease     *LeaseInfo `json:"active_lease,omitempty"`
+	ID              string `json:"id"`
+	Group           string `json:"group"`
+	DisplayName     string `json:"display_name"`
+	MaxConcurrency  int    `json:"max_concurrency"` // 0 = unlimited
+	ActiveRequests  int    `json:"active_requests"`
+	WaitingRequests int    `json:"waiting_requests,omitempty"`
+
+	// Admission-queue accounting (saturation.go): how many requests entered the queue,
+	// how many of those were admitted after waiting, how many were shed for CAPACITY, and
+	// the measured average wait behind the Retry-After hint.
+	WaitedTotal       int64         `json:"waited_total,omitempty"`
+	AdmittedAfterWait int64         `json:"admitted_after_wait,omitempty"`
+	ShedsTotal        int64         `json:"sheds_total,omitempty"`
+	AvgQueueWait      time.Duration `json:"avg_queue_wait,omitempty"`
+
+	TotalRequests int64      `json:"total_requests"`
+	TotalTokens   int64      `json:"total_tokens"`
+	ErrorCount    int64      `json:"error_count"`
+	RecentPIDs    []int      `json:"recent_pids,omitempty"`
+	LastSeen      time.Time  `json:"last_seen"`
+	ActiveLease   *LeaseInfo `json:"active_lease,omitempty"`
 }
 
 // InflightRequest describes a single request currently being served.

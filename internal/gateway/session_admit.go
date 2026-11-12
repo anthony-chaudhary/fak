@@ -157,14 +157,12 @@ func (s *Server) admitServedRequest(w http.ResponseWriter, r *http.Request, mess
 			path = r.URL.Path
 		}
 		// Queue at a saturated arm instead of hard-refusing bursts (#14357): wait up to
-		// the configured budget for a slot; timeout still yields the same sentinel error
-		// and thus the same 429, now stating how long it waited.
+		// the configured budget for a slot. A shed is a TYPED 429 carrying the closed
+		// reason ARM_CONCURRENCY_SATURATED, the arm's counters, and a wait-derived
+		// Retry-After (arm_admission.go); a non-capacity refusal keeps its own rendering.
 		armLease, err := c.AdmitWithWait(ctx, r, path, trace, s.armAdmitWaitDuration())
 		if err != nil {
-			if w != nil {
-				w.Header().Set("Retry-After", "1")
-				writeErr(w, http.StatusTooManyRequests, err.Error())
-			}
+			s.refuseArmAdmission(w, err)
 			return ctx, trace, messages, turn, false
 		}
 		if armLease != nil {

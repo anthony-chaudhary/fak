@@ -223,7 +223,7 @@ func (s *Server) handleCausalEmbeddings(w http.ResponseWriter, r *http.Request, 
 		arm, err := c.AdmitWithWait(ctx, r, r.URL.Path, trace, s.armAdmitWaitDuration())
 		if err != nil {
 			lease.SettleUsage(agent.Usage{})
-			writeErr(w, http.StatusTooManyRequests, err.Error())
+			s.refuseArmAdmission(w, err)
 			return
 		}
 		if arm != nil {

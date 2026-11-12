@@ -45,6 +45,13 @@ type Coordinator struct {
 	closed                bool
 	storeErr              error
 	admissionReady        bool
+
+	// admitWait is the bounded wait the gateway passes to AdmitWithWait and the base for
+	// the Retry-After hint. 0 preserves the historical instant shed. See saturation.go.
+	admitWait time.Duration
+	// queueDepth bounds how many admissions may WAIT per arm (0 = unbounded). Beyond it a
+	// new arrival is shed at once rather than joining an unbounded backlog.
+	queueDepth int
 }
 
 type armState struct {
@@ -59,6 +66,14 @@ type armState struct {
 	recentPIDs     []int
 	lastSeen       time.Time
 	waiters        []*armWaiter // queued admissions blocked on the concurrency limit
+
+	// Admission-queue accounting (saturation.go): how many requests entered the queue,
+	// how many of those were admitted after waiting, how many were shed for capacity, and
+	// the measured average wait behind the Retry-After hint.
+	waitedTotal       int64
+	admittedAfterWait int64
+	shedsTotal        int64
+	waitEMAMicros     int64
 }
 
 // armWaiter is one queued admission blocked on an arm's concurrency limit. The
@@ -116,8 +131,9 @@ func (c *Coordinator) Admit(ctx context.Context, r *http.Request, endpoint strin
 // remaining budget and the next lease expiry, so a ceiling that rises by
 // passive lease expiry is observed without polling. ctx must be non-nil.
 // maxWait <= 0 preserves the legacy immediate refusal. Timeout or context
-// cancellation returns ErrArmConcurrencyExceeded (errors.Is keeps working),
-// stating the wait duration, so callers' 429 handling is unchanged.
+// cancellation returns a *SaturationError wrapping ErrArmConcurrencyExceeded
+// (errors.Is keeps working, and a caller's context error stays reachable too),
+// stating how long it waited — see saturation.go.
 func (c *Coordinator) AdmitWithWait(ctx context.Context, r *http.Request, endpoint string, traceID string, maxWait time.Duration) (*RequestLease, error) {
 	if maxWait <= 0 {
 		return c.admitNow(ctx, r, endpoint, traceID)
@@ -129,6 +145,8 @@ func (c *Coordinator) AdmitWithWait(ctx context.Context, r *http.Request, endpoi
 
 	waiter := &armWaiter{ch: make(chan struct{}, 1)}
 	registered := false
+	queued := false     // whether this request ever actually waited (vs. admitted on the first try)
+	var start time.Time // when this request entered the queue (for the measured wait)
 	for {
 		c.mu.Lock()
 		lease, err := c.tryAdmitLocked(origin, randomHex(8), time.Now(), endpoint, traceID)
@@ -136,14 +154,40 @@ func (c *Coordinator) AdmitWithWait(ctx context.Context, r *http.Request, endpoi
 			if registered {
 				c.removeWaiterLocked(origin.ArmID, waiter)
 			}
+			if lease != nil && queued {
+				c.recordWaitLocked(origin.ArmID, time.Since(start))
+			}
 			c.mu.Unlock()
 			return lease, err
 		}
 		if !registered {
-			if arm, ok := c.arms[origin.ArmID]; ok {
-				arm.waiters = append(arm.waiters, waiter)
-				registered = true
+			arm, ok := c.arms[origin.ArmID]
+			if !ok {
+				// tryAdmitLocked registers the arm before the ceiling check, so this is
+				// unreachable in practice; fall through to the immediate refusal rather
+				// than parking a request with no queue to wake it.
+				c.mu.Unlock()
+				return nil, err
 			}
+			// The queue is BOUNDED: past its depth a new arrival is shed at once rather
+			// than joining an unbounded backlog, which would convert a capacity signal
+			// into unbounded latency.
+			if c.queueDepth > 0 && len(arm.waiters) >= c.queueDepth {
+				active, limit, wq := c.armLoadLocked(origin.ArmID)
+				arm.shedsTotal++
+				c.mu.Unlock()
+				return nil, &SaturationError{
+					ArmID: origin.ArmID, Active: active, Limit: limit, Queued: wq,
+					Full: true, QueueBound: c.queueDepth,
+				}
+			}
+			if !queued {
+				start = time.Now()
+				queued = true
+				arm.waitedTotal++
+			}
+			arm.waiters = append(arm.waiters, waiter)
+			registered = true
 		}
 		// Park until the sooner of the budget end and the next lease expiry:
 		// an expiry can raise the effective ceiling even with no other event.
@@ -165,18 +209,28 @@ func (c *Coordinator) AdmitWithWait(ctx context.Context, r *http.Request, endpoi
 		case <-waiter.ch:
 			// Woken: loop back and re-check everything under the lock.
 		case <-ctx.Done():
-			c.removeWaiter(origin.ArmID, waiter)
-			return nil, fmt.Errorf("%w: arm %q full while waiting (%s); context canceled",
-				ErrArmConcurrencyExceeded, origin.ArmID, maxWait)
+			c.mu.Lock()
+			c.removeWaiterLocked(origin.ArmID, waiter)
+			if arm, ok := c.arms[origin.ArmID]; ok {
+				arm.shedsTotal++
+			}
+			sat := c.saturationNow(origin.ArmID, time.Since(start), ctx.Err())
+			c.mu.Unlock()
+			return nil, sat
 		case <-timer.C:
 			if time.Now().Before(budgetEnd) {
 				// A lease expired: re-check (the prune inside tryAdmitLocked
 				// applies it) and re-park with a fresh horizon.
 				continue
 			}
-			c.removeWaiter(origin.ArmID, waiter)
-			return nil, fmt.Errorf("%w: arm %q full after waiting %s",
-				ErrArmConcurrencyExceeded, origin.ArmID, maxWait)
+			c.mu.Lock()
+			c.removeWaiterLocked(origin.ArmID, waiter)
+			if arm, ok := c.arms[origin.ArmID]; ok {
+				arm.shedsTotal++
+			}
+			sat := c.saturationNow(origin.ArmID, time.Since(start), nil)
+			c.mu.Unlock()
+			return nil, sat
 		}
 	}
 }
@@ -246,8 +300,12 @@ func (c *Coordinator) tryAdmitLocked(origin Origin, reqID string, now time.Time,
 
 	// 5. Check concurrency limit.
 	if effectiveLimit > 0 && arm.activeRequests >= effectiveLimit {
-		return nil, fmt.Errorf("%w: arm %q at %d/%d active requests",
-			ErrArmConcurrencyExceeded, origin.ArmID, arm.activeRequests, effectiveLimit)
+		return nil, &SaturationError{
+			ArmID:  origin.ArmID,
+			Active: arm.activeRequests,
+			Limit:  effectiveLimit,
+			Queued: len(arm.waiters),
+		}
 	}
 
 	// 6. Record admission.
@@ -500,17 +558,23 @@ func (c *Coordinator) Snapshot() Snapshot {
 	var arms []ArmInfo
 	for _, a := range c.arms {
 		info := ArmInfo{
-			ID:              a.id,
-			Group:           a.group,
-			DisplayName:     a.displayName,
-			MaxConcurrency:  a.maxConcurrency,
-			ActiveRequests:  a.activeRequests,
-			WaitingRequests: len(a.waiters),
-			TotalRequests:   a.totalRequests,
-			TotalTokens:     a.totalTokens,
-			ErrorCount:      a.errorCount,
-			RecentPIDs:      append([]int(nil), a.recentPIDs...),
-			LastSeen:        a.lastSeen,
+			ID:                a.id,
+			Group:             a.group,
+			DisplayName:       a.displayName,
+			MaxConcurrency:    a.maxConcurrency,
+			ActiveRequests:    a.activeRequests,
+			WaitingRequests:   len(a.waiters),
+			WaitedTotal:       a.waitedTotal,
+			AdmittedAfterWait: a.admittedAfterWait,
+			ShedsTotal:        a.shedsTotal,
+			TotalRequests:     a.totalRequests,
+			TotalTokens:       a.totalTokens,
+			ErrorCount:        a.errorCount,
+			RecentPIDs:        append([]int(nil), a.recentPIDs...),
+			LastSeen:          a.lastSeen,
+		}
+		if a.waitEMAMicros > 0 {
+			info.AvgQueueWait = time.Duration(a.waitEMAMicros) * time.Microsecond
 		}
 		for _, l := range c.leases {
 			if l.ArmID == a.id && now.Before(l.ExpiresAt) {

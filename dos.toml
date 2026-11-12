@@ -2789,6 +2789,13 @@ summary  = "the served session's context window refilled to the compaction limit
 fix      = "restart the work in a FRESH window seeded from durable state (commit, plan, ledger) rather than letting the same transcript re-fill — tightening --compact-history-budget only compacts more often and changes nothing, because the binding constraint is the traffic, not the budget. Shrink the per-turn floor instead: window large reads, summarize bulky tool results, and drop tools the run does not use. Watch fak_gateway_compaction_thrash_sessions_total before arming the stop. Floor: go test ./internal/gateway -run TestCompactionThrashVerdict."
 see_also = ["internal/gateway/ctxadvice.go", "internal/gateway/ctxvalue.go", "internal/gateway/session_admit.go", "SESSION_CEILING_SATURATED", "BUDGET_CONTEXT_EXHAUSTED"]
 
+[reasons.ARM_CONCURRENCY_SATURATED]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "a research arm (X-Fak-Project-Arm / a trace-derived arm) is at its concurrency ceiling AND could not be served within its bounded admission wait: the request is refused for CAPACITY with this reason at the served boundary (429 + Retry-After). It is the shed half of the arm admission queue -- an arm at its ceiling HOLDS the request for a free slot (--arm-admit-wait, default 30s) and only refuses when that bounded wait is exhausted or the bounded queue (FAK_ARM_QUEUE_DEPTH) is full. Unlike a rate limit this is a short, self-clearing condition: the slot it waits on is the holding request finishing."
+fix      = "honor the Retry-After the refusal carries (derived from the arm's MEASURED queue wait, not a constant) and retry, or reduce concurrency against that arm. If the arm is persistently saturated rather than bursting, that is a capacity or partitioning signal, not a backoff one: raise the ceiling with 'fak arms limit <arm> --max-concurrency N' or spread the work across arms, and watch fak_gateway_arm_queued_requests / fak_gateway_arm_sheds_total to tell a burst (waits, no sheds) from sustained overload (both rise). --arm-admit-wait 0 restores the historical instant shed. Floor: go test ./internal/researcharm -run TestAdmissionQueue && go test ./internal/gateway -run TestArmAdmission."
+see_also = ["internal/gateway/arm_admission.go", "internal/researcharm/saturation.go", "internal/researcharm/coordinator.go", "docs/fak/deployment-guide.md", "SESSION_CEILING_SATURATED", "RATE_LIMITED"]
+
 # Verification-ladder INDETERMINATE (#1210, C2/G2 of the agent-programming-grammar
 # epic #1208): the first-class verdict the declarable verification ladder
 # (docs/standards/verification-ladder-spec.md) folds to when a cheap rung could NOT

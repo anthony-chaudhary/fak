@@ -222,11 +222,15 @@ func renderArmsTable(w io.Writer, snap researcharm.Snapshot) {
 	if snap.DefaultMaxConcurrency > 0 {
 		defaultLimit = strconv.Itoa(snap.DefaultMaxConcurrency)
 	}
-	fmt.Fprintf(w, "RESEARCH PROJECT ARMS (%d registered, %d active requests, %d active leases; new-arm default limit %s)\n\n",
-		snap.TotalArms, snap.TotalInflight, len(snap.ActiveLeases), defaultLimit)
+	totalWaiting := 0
+	for _, a := range snap.Arms {
+		totalWaiting += a.WaitingRequests
+	}
+	fmt.Fprintf(w, "RESEARCH PROJECT ARMS (%d registered, %d active requests, %d waiting, %d active leases; new-arm default limit %s)\n\n",
+		snap.TotalArms, snap.TotalInflight, totalWaiting, len(snap.ActiveLeases), defaultLimit)
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ARM ID\tGROUP\tACTIVE\tLIMIT\tTOTAL REQS\tTOKENS\tERRORS\tPIDS\tLEASE\tLAST SEEN")
+	fmt.Fprintln(tw, "ARM ID\tGROUP\tACTIVE\tWAITING\tLIMIT\tWAITED\tSHEDS\tTOTAL REQS\tTOKENS\tERRORS\tPIDS\tLEASE\tLAST SEEN")
 
 	now := time.Now()
 	for _, a := range snap.Arms {
@@ -255,10 +259,42 @@ func renderArmsTable(w io.Writer, snap researcharm.Snapshot) {
 			lastSeenStr = fmt.Sprintf("%s ago", ago)
 		}
 
-		fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%d\t%d\t%d\t%s\t%s\t%s\n",
-			a.ID, a.Group, a.ActiveRequests, limitStr, a.TotalRequests, a.TotalTokens, a.ErrorCount, pids, leaseStr, lastSeenStr)
+		fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%s\t%d\t%d\t%d\t%d\t%d\t%s\t%s\t%s\n",
+			a.ID, a.Group, a.ActiveRequests, a.WaitingRequests, limitStr,
+			a.WaitedTotal, a.ShedsTotal, a.TotalRequests, a.TotalTokens, a.ErrorCount,
+			pids, leaseStr, lastSeenStr)
 	}
 	_ = tw.Flush()
+
+	// The queue's own readout is a second line because it answers a DIFFERENT question
+	// from the table above: how long requests actually waited, not how many are in flight.
+	// Absent entirely when no arm has ever queued, so the historical output is unchanged
+	// for a deployment that has never saturated.
+	queued := false
+	for _, a := range snap.Arms {
+		if a.WaitedTotal > 0 || a.WaitingRequests > 0 {
+			queued = true
+			break
+		}
+	}
+	if !queued {
+		return
+	}
+	fmt.Fprintln(w, "\nADMISSION QUEUE (bounded wait; a queued request is served the moment a slot frees)")
+	tq := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tq, "ARM ID\tWAITING\tWAITED\tADMITTED AFTER WAIT\tSHEDS\tAVG WAIT")
+	for _, a := range snap.Arms {
+		if a.WaitedTotal == 0 && a.WaitingRequests == 0 {
+			continue
+		}
+		avg := "-"
+		if a.AvgQueueWait > 0 {
+			avg = a.AvgQueueWait.Round(time.Millisecond).String()
+		}
+		fmt.Fprintf(tq, "%s\t%d\t%d\t%d\t%d\t%s\n",
+			a.ID, a.WaitingRequests, a.WaitedTotal, a.AdmittedAfterWait, a.ShedsTotal, avg)
+	}
+	_ = tq.Flush()
 }
 
 func runArmsTraffic(stdout, stderr io.Writer, argv []string) int {

@@ -347,6 +347,7 @@ func (s *Server) renderMetrics() string {
 	m.writeDenyAllMetrics(&b)
 	s.writeSessionMetrics(&b)           // #1204: live session count by DRIVE run-state token
 	s.writeSessionSaturationMetrics(&b) // #3425: deployment session saturation vs the configured ceiling (FAK_MAX_SESSIONS), when armed
+	s.writeArmQueueMetrics(&b)          // research-arm bounded admission queue depth/saturation/sheds, when a coordinator is wired
 	s.writeSpendGovernorMetrics(&b)     // #3273: control-plane spend-cap breaches by scope + action
 	m.harnessCoherence.writeHarnessCoherenceMetrics(&b)
 	m.writeRoutingMetrics(&b)            // #603: per-aspect model-routing decision distribution (rule/strategy/aspect)

@@ -161,9 +161,23 @@ Clear every item before a network-facing deploy. Sources for each are in
   model and alert on `fak_gateway_session_saturation` before it hits `1.0`. Past the
   ceiling, new sessions get `503` + `SESSION_CEILING_SATURATED`; in-flight loops are
   never sacrificed. Unset = unbounded.
+- [ ] **Arm admission queue sized** (optional, for proxy/bench nodes). A research
+  **arm** (`X-Fak-Project-Arm`, or the arm a trace ID infers) has its own concurrency
+  ceiling (`--arm-max-concurrency`, default 128; per-arm via
+  `fak arms limit <arm> --max-concurrency N`). A concurrency ceiling is a SHORT,
+  self-clearing condition — the slot waits on the holding request *finishing* — so an arm
+  at its ceiling HOLDS the request for a bounded wait rather than refusing it instantly
+  (`--arm-admit-wait`, default 30s; `0` restores the immediate shed). Bound the backlog
+  with `FAK_ARM_QUEUE_DEPTH=<N>` so an unbounded queue can never convert a capacity signal
+  into unbounded latency. A shed is `429` + a measured `Retry-After` and the closed reason
+  `ARM_CONCURRENCY_SATURATED`
+  (`dos man wedge ARM_CONCURRENCY_SATURATED --explain`), with
+  `code: "arm_concurrency_saturated"` and the arm's counters in the body. Watch
+  `fak_gateway_arm_queued_requests` (waiting now) and `fak_gateway_arm_sheds_total`:
+  **waits rising with no sheds** is a burst being absorbed (healthy); **both rising** is
+  sustained overload — raise the arm ceiling or spread work across arms.
 - [ ] **Run as non-root.** The container image already runs as `nonroot`; on bare
-  metal use a dedicated service user (the systemd unit below uses `DynamicUser`).
-- [ ] **Version pinned.** Pin a release (`FAK_VERSION` for the installer, an image
+  metal use a dedicated service user (the systemd unit below uses `DynamicUser`).- [ ] **Version pinned.** Pin a release (`FAK_VERSION` for the installer, an image
   tag for containers) rather than tracking `latest`. This guide tracks
   **v0.47.0**.
 

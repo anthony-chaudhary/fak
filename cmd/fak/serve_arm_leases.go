@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -72,8 +73,18 @@ func (rt *serveRuntime) configureServeArmLeases(sf *serveFlags, srv *gateway.Ser
 		coordinator = researcharm.NewCoordinator(maxConcurrency)
 	}
 	rt.armCoordinator = coordinator
+	// Seed the coordinator's own wait/queue policy too: the gateway passes the wait per
+	// call, but the coordinator's Retry-After hint and the queue BOUND need the values,
+	// so a shed carries a sane hint and an unbounded backlog can never form.
+	wait := resolveArmAdmitWait(sf)
+	coordinator.SetAdmitWait(wait)
+	if depth, note := researcharm.ParseArmQueueDepth(os.Getenv); note != "" {
+		fmt.Fprintf(os.Stderr, "fak serve: research-arm admission queue: %s\n", note)
+	} else if depth > 0 {
+		coordinator.SetQueueDepth(depth)
+	}
 	srv.SetResearchArmCoordinator(coordinator)
-	srv.SetArmAdmitWait(resolveArmAdmitWait(sf))
+	srv.SetArmAdmitWait(wait)
 	return nil
 }
 
