@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/l3server/index"
+	"github.com/anthony-chaudhary/fak/pkg/security"
 )
 
 // Config is the top-level L3 configuration.
@@ -173,8 +174,8 @@ func DefaultConfig() Config {
 		SlabDistribution:           "auto",
 		WarmupOps:                  100,
 		AutoTuneSlabs:              true,
-		MetricsAddr:                ":9090",
-		PprofAddr:                  ":6060",
+		MetricsAddr:                "127.0.0.1:9090",
+		PprofAddr:                  "",
 		VacuumEnabled:              true,
 		VacuumIntervalSeconds:      30,
 		VacuumCooldownSeconds:      10,
@@ -471,8 +472,26 @@ func (c *Config) Validate() error {
 	}
 
 	if c.PprofAddr != "" {
-		if _, _, err := net.SplitHostPort(c.PprofAddr); err != nil {
+		host, _, err := net.SplitHostPort(c.PprofAddr)
+		if err != nil {
 			return fmt.Errorf("pprof_addr: invalid address %q: %w", c.PprofAddr, err)
+		}
+		// pprof serves heap profiles, the process command line, and CPU/trace
+		// profiling without authentication; it must never listen off loopback.
+		if !security.IsLoopback(host) {
+			return fmt.Errorf("pprof_addr %q must bind to a loopback interface (e.g. 127.0.0.1:6060); pprof exposes heap and CPU profiles unauthenticated and must not be reachable off-host", c.PprofAddr)
+		}
+	}
+
+	if c.MetricsAddr != "" {
+		host, _, err := net.SplitHostPort(c.MetricsAddr)
+		if err != nil {
+			return fmt.Errorf("metrics_addr: invalid address %q: %w", c.MetricsAddr, err)
+		}
+		// Loopback is the default; a non-loopback bind is an explicit opt-in
+		// (e.g. Prometheus scraping over a pod network) - warn, don't refuse.
+		if !security.IsLoopback(host) {
+			log.Printf("WARNING: metrics_addr %q binds a non-loopback interface; /metrics and /ready are unauthenticated (loopback 127.0.0.1 is the safe default)", c.MetricsAddr)
 		}
 	}
 

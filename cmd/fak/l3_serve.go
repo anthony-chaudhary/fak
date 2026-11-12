@@ -38,8 +38,8 @@ Flags:
 
 	configPath := fs.String("config", "", "Path to JSON config file")
 	listenAddr := fs.String("listen", "0.0.0.0:18000", "TCP listen address")
-	metricsAddr := fs.String("metrics", ":9090", "Prometheus metrics HTTP address")
-	pprofAddr := fs.String("pprof", ":6060", "pprof HTTP address (empty to disable)")
+	metricsAddr := fs.String("metrics", "127.0.0.1:9090", "Prometheus metrics HTTP address (default loopback; a non-loopback bind is an explicit opt-in and unauthenticated)")
+	pprofAddr := fs.String("pprof", "", "pprof HTTP address (empty disables; loopback bind only, e.g. 127.0.0.1:6060)")
 	numShards := fs.Int("shards", 0, "Number of shards (default: 0 = auto)")
 	maxMemGB := fs.Int("max-memory-gb", 512, "Maximum memory in GB")
 	eviction := fs.String("eviction", "wtinylfu", "Eviction policy: wtinylfu, sieve, lru")
