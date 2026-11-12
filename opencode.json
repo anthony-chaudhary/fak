@@ -80,7 +80,7 @@
       "type": "local"
     }
   },
-  "model": "hive-ai/deepseek-ai/DeepSeek-V4.1-Flash",
+  "model": "fak-router/deepseek-ai/DeepSeek-V4.1-Flash",
   "permission": {
     "dos*": "allow",
     "dos_*": "allow",
@@ -175,24 +175,6 @@
         "baseURL": "{file:~/.fak/router/base_url}",
         "timeout": 1800000
       }
-    },
-    "hive-ai": {
-      "models": {
-        "deepseek-ai/DeepSeek-V4.1-Flash": {
-          "limit": {
-            "context": 1048576,
-            "output": 131072
-          },
-          "name": "DeepSeek 4.1 Flash (via fak router)"
-        }
-      },
-      "name": "Hive AI via fak router",
-      "npm": "@ai-sdk/openai-compatible",
-      "options": {
-        "apiKey": "fak-local",
-        "baseURL": "{file:~/.fak/router/base_url}",
-        "timeout": 1800000
-      }
     }
   },
   "share": "disabled",
@@ -201,6 +183,6 @@
       ".agents/skills"
     ]
   },
-  "small_model": "hive-ai/deepseek-ai/DeepSeek-V4.1-Flash",
+  "small_model": "fak-router/qwen/qwen3.8-27b",
   "snapshot": false
 }

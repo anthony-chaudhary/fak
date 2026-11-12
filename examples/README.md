@@ -36,6 +36,18 @@ The rest of `examples/` is intentionally specialized and grouped by job:
 That split keeps the first-run path small while preserving the heavier research,
 security, and framework demos for readers who came for those tracks.
 
+## Tombstoned examples
+
+Retired by operator decision 2026-11-08: the hive-ai provider is retired
+everywhere, and the example files that existed to describe its live routing are
+tombstone stubs now (each carries `tombstoned` / `reason` / `see`) rather than
+repoints — their shape was hive-specific:
+
+| File | Was | Why tombstoned, not repointed |
+|---|---|---|
+| [`model-accounts.hosted-hive.json`](model-accounts.hosted-hive.json) | the hive-ai hosted flash-pool account roster — one OpenAI-compatible wire carrying both seats of the ops-desk hosted-flash rotation | the roster's accounts and bindings all resolved onto the retired hive-ai wire |
+| [`routing-presets/ops-desk.json`](routing-presets/ops-desk.json) | the fak-Ops worker-desk routing preset rotating those same hosted flash seats | the preset's whole shape was hive-hosted same-provider rotation, so there is no honest repoint |
+
 ## Policy manifests
 
 These files are starter floors for the gateway-first adoption path. They are not

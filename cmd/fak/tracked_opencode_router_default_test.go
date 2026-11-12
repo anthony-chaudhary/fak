@@ -48,6 +48,18 @@ type trackedOpenCodeConfig struct {
 //
 // This test fails on the parent commit (default on `fak-router`) and passes on
 // the fix (default on the routed `hive-ai`).
+//
+// TOMBSTONE 2026-11-08 (operator decision): the hive-ai provider is retired
+// everywhere, so the invariant above is INVERTED. The keyring Flash rotation
+// that preserved the hive-ai handle is gone with the provider, and the
+// default must NOT ride the hive-ai handle any more — it rides the declared
+// `fak-router` provider directly. What survives of the old contract is the
+// tombstone guard: any provider still DECLARED under a hive-ai spelling must
+// never resolve to a direct thehive.ai upstream (the paused-org outage shape
+// is now a dead route to refuse, not a live one to preserve). The default
+// model was repointed to `fak-router/deepseek-ai/DeepSeek-V4.1-Flash` (main)
+// and `fak-router/qwen/qwen3.8-27b` (small) — the ids exactly as declared in
+// the tracked config's fak-router block.
 func TestTrackedOpenCodeDefaultIsKeyringPreservable(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "opencode.json"))
 	if err != nil {
@@ -69,11 +81,12 @@ func TestTrackedOpenCodeDefaultIsKeyringPreservable(t *testing.T) {
 		t.Fatalf("default model %q carries no provider prefix", cfg.Model)
 	}
 
-	// The default provider must be a keyring Flash provider the rotation
-	// preserves. hive-ai is that provider; a router-only default is NOT
-	// preserved and re-opens the direct-Hive head.
-	if !isDirectHiveProviderName(provider) {
-		t.Fatalf("default model provider %q is not the keyring Flash provider hive-ai: the Flash rotation does not preserve it, so it prepends the keyring's own direct-Hive candidates and the launch dials a paused org (verified 2026-10-03)", provider)
+	// TOMBSTONE (2026-11-08): the default provider must NOT be the retired
+	// hive-ai provider. The keyring Flash rotation that once preserved that
+	// handle as chain head is gone with the provider, so the default rides a
+	// live provider (fak-router) directly.
+	if isTombstonedHiveProviderName(provider) {
+		t.Fatalf("default model provider %q is the RETIRED hive-ai provider (tombstoned 2026-11-08): the keyring Flash rotation that preserved it is gone, so the tracked default must ride a live declared provider (fak-router)", provider)
 	}
 
 	// ...and that provider's declared endpoint must be the loopback router, so
@@ -99,10 +112,17 @@ func TestTrackedOpenCodeDefaultIsKeyringPreservable(t *testing.T) {
 		t.Fatalf("provider.fak-router baseURL = %q, want the loopback router", router.Options.BaseURL)
 	}
 
-	// Every DECLARED hive-ai provider must traverse the router: a direct-hive
-	// base URL here would re-open the outage wherever it is resolved.
-	if hive, ok := cfg.Provider["hive-ai"]; ok && isDirectHiveURL(hive.Options.BaseURL) {
-		t.Fatalf("provider.hive-ai baseURL = %q is a DIRECT Hive upstream; it must route through the local router", hive.Options.BaseURL)
+	// TOMBSTONE GUARD: if a provider is still declared under any hive-ai
+	// spelling, it must never resolve to a DIRECT Hive upstream — the retired
+	// provider may exist only as a routed stub, never as a live direct route
+	// (the same outage shape the 2026-10-03 fix guarded, now refused outright).
+	for name, p := range cfg.Provider {
+		if !isTombstonedHiveProviderName(name) {
+			continue
+		}
+		if isDirectHiveURL(p.Options.BaseURL) {
+			t.Fatalf("provider %q (retired hive-ai, tombstoned 2026-11-08) baseURL = %q is a DIRECT Hive upstream; a tombstoned provider must never carry a live direct route", name, p.Options.BaseURL)
+		}
 	}
 }
 
@@ -119,9 +139,11 @@ func isRouterBoundBaseURL(raw string) bool {
 	return strings.HasPrefix(raw, "http://127.0.0.1:") || raw == routerFileToken
 }
 
-// isDirectHiveProviderName reports whether a provider id names the hosted Hive
-// API under its documented spellings.
-func isDirectHiveProviderName(provider string) bool {
+// isTombstonedHiveProviderName reports whether a provider id names the RETIRED
+// hosted Hive API provider under its documented spellings — the tombstone
+// path: such a provider may not be the tracked default and may not carry a
+// direct thehive.ai upstream.
+func isTombstonedHiveProviderName(provider string) bool {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "hive-ai", "hive", "hive_ai":
 		return true

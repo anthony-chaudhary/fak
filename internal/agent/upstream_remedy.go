@@ -68,7 +68,7 @@ const (
 	// follow-on — until then a SwitchModel with no switch target degrades to Terminal.)
 	RemedySwitchModel
 	// RemedyStreamRequired: the upstream refuses a BUFFERED request and serves the same turn
-	// only as a stream — a stream-only OpenAI-compatible gateway (the hive-ai case). The
+	// only as a stream — a stream-only OpenAI-compatible gateway (the hive-ai case, provider tombstoned 2026-11-08). The
 	// remedy is NOT a backoff: no amount of waiting makes a non-stream body acceptable, so
 	// the blind 5xx retry re-sends the same unacceptable request until the budget drains and
 	// the failure LOOKS like a hang. The fix is to reissue the identical request with

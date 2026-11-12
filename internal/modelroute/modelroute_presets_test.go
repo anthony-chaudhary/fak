@@ -1,6 +1,7 @@
 package modelroute
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -35,6 +36,19 @@ func TestRoutingPresetsRoundTrip(t *testing.T) {
 				t.Fatalf("read %s: %v", path, err)
 			}
 
+			// A tombstoned preset (its routing shape retired with its provider,
+			// e.g. the hive-hosted ops-desk desk) is not a live manifest: the
+			// stub contract is witnessed here and the parse/round-trip rungs
+			// are skipped — there is no canonical manifest form left to rot.
+			if stub, ok := tombstoneStub(raw); ok {
+				for _, k := range []string{"tombstoned", "reason", "see"} {
+					if stub[k] == "" {
+						t.Fatalf("%s is a tombstone stub but is missing a non-empty %q field", path, k)
+					}
+				}
+				return
+			}
+
 			// (a) loads — passes `fak route --check`.
 			m, err := ParseManifest(raw)
 			if err != nil {
@@ -56,4 +70,23 @@ func TestRoutingPresetsRoundTrip(t *testing.T) {
 			}
 		})
 	}
+}
+
+// tombstoneStub reports whether raw is a retirement tombstone — a stub body
+// carrying a "tombstoned" field rather than a live fak-route/v1 manifest — and
+// returns its string fields.
+func tombstoneStub(raw []byte) (map[string]string, bool) {
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, false
+	}
+	if _, ok := doc["tombstoned"]; !ok {
+		return nil, false
+	}
+	out := make(map[string]string, 3)
+	for _, k := range []string{"tombstoned", "reason", "see"} {
+		s, _ := doc[k].(string)
+		out[k] = s
+	}
+	return out, true
 }

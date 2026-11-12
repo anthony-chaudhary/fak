@@ -546,9 +546,9 @@ func TestGuardOpenCodeExistingConfigContentPreserved(t *testing.T) {
 // model, while an agent with no model stays free to inherit the parent.
 func TestGuardOpenCodeSubagentOverlayRepointsChildPins(t *testing.T) {
 	existingJSON := `{
-		"model": "hive-ai/deepseek-ai/DeepSeek-V4.1-Flash",
+		"model": "fak-router/deepseek-ai/DeepSeek-V4.1-Flash",
 		"agent": {
-			"worker": {"model": "hive-ai/deepseek-ai/DeepSeek-V4.1-Flash"},
+			"worker": {"model": "fak-router/deepseek-ai/DeepSeek-V4.1-Flash"},
 			"reviewer": {"model": "fak/Qwen3.8-27B-UD-Q2_K_XL", "reason": "opt-in dogfood"},
 			"scout": {"description": "no explicit model"}
 		}
