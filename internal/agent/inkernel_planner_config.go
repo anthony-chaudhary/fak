@@ -134,6 +134,9 @@ func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, mode
 		warmDiskModelIdentity:        strings.TrimSpace(cfg.WarmDiskModelIdentity),
 		deepSeekV41ChatProfile:       cfg.DeepSeekV41ChatProfile,
 		nativeChatTemplate:           cfg.ChatTemplate,
+		radixOffLockAdmit:            true,
+		radixDebug:                   radixFlagArmed("FAK_INKERNEL_RADIX_DEBUG", ""),
+		radixDebugLog:                radixFlagArmed("FAK_INKERNEL_RADIX_DEBUG_LOG", ""),
 	}
 	if cfg.IncrementalContext {
 		p.incrementalContext = EmptyIncrementalContext()

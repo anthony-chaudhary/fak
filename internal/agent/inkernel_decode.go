@@ -208,6 +208,9 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		if err != nil {
 			return
 		}
+		if _, armed := p.radixAttrBegin(); armed {
+			p.radixAttrRecordTurn(string(sourceTier), time.Since(lookupStart).Nanoseconds(), len(ids), matched)
+		}
 	}
 	if s == nil {
 		matched = 0
@@ -476,13 +479,25 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		if p.backend != nil {
 			if !skipExactDeviceL1Readmission {
 				var snap *model.PrefixSnapshot
+				captureAt, captureArmed := p.radixAttrBegin()
 				snap, err = s.PrefixSnapshot()
 				if err != nil {
 					return
 				}
+				var snapBytes int64
+				if captureArmed {
+					snapBytes = snap.ResidentBytes()
+				}
+				evBefore := p.radixEvictions()
+				insertAt, insertArmed := p.radixAttrBegin()
 				if err = p.admitPrefixSnapshot(ctx, ids, snap, logits); err != nil {
 					snap.Close()
 					return
+				}
+				if captureArmed || insertArmed {
+					p.radixAttrRecord("prompt-snapshot", promptTok, matched, string(sourceTier), 0,
+						nsSince(captureAt, captureArmed), nsSince(insertAt, insertArmed),
+						snapBytes, radixLogitsBytes(logits), false, p.radixEvictions()-evBefore)
 				}
 			}
 		} else {
@@ -494,33 +509,48 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			// later demand turn (and the warm readback) restores the full continuation
 			// state. Every non-V4.1 host route keeps its historical admission unchanged.
 			if p.hostV41CompleteSnapshot() {
+				captureAt, captureArmed := p.radixAttrBegin()
 				snap, snapErr := s.PrefixSnapshot()
 				if snapErr != nil {
 					err = snapErr
 					return
 				}
+				var snapBytes int64
+				if captureArmed {
+					snapBytes = snap.ResidentBytes()
+				}
+				evBefore := p.radixEvictions()
+				insertAt, insertArmed := p.radixAttrBegin()
 				if admitErr := p.admitPrefixSnapshot(ctx, ids, snap, logits); admitErr != nil {
 					snap.Close()
 					err = admitErr
 					return
 				}
+				if captureArmed || insertArmed {
+					p.radixAttrRecord("prompt-v41-host", promptTok, matched, string(sourceTier), 0,
+						nsSince(captureAt, captureArmed), nsSince(insertAt, insertArmed),
+						snapBytes, radixLogitsBytes(logits), false, p.radixEvictions()-evBefore)
+				}
 			} else if owner, scoped := prefixCacheIdentityFromContext(ctx); scoped && p.scopedTree != nil {
 				if cachePopulate {
 					p.captureWarmDiskCandidate(ctx, s, ids, logits)
 				}
+				evBefore := p.radixEvictions()
+				insertAt, insertArmed := p.radixAttrBegin()
 				if admitErr := p.scopedTree.AdmitPrivate(owner, ids, s.Cache, logits); admitErr != nil {
 					err = admitErr
 					return
+				}
+				if insertArmed {
+					p.radixAttrRecord("prompt-scoped", promptTok, matched, string(sourceTier), 0, 0,
+						nsSince(insertAt, insertArmed), int64(0), radixLogitsBytes(logits), false,
+						p.radixEvictions()-evBefore)
 				}
 			} else {
 				if cachePopulate {
 					p.captureWarmDiskCandidate(ctx, s, ids, logits)
 				}
-				p.mu.Lock()
-				b, m := p.tree.Lookup(ids)
-				leaf := p.tree.InsertCloneWithLogits(b, ids[m:], s.Cache, logits)
-				p.tree.Done(leaf)
-				p.mu.Unlock()
+				p.admitCPUPayload("prompt", ids, s, logits)
 			}
 		}
 		enginestep.Default.ObservePhase(enginestep.PhasePrefixAdmit, time.Since(admitStart))
@@ -1573,6 +1603,117 @@ func envFloat(key string, def float64) float64 {
 		}
 	}
 	return def
+}
+
+// admitCPUPayload admits a request-owned session's full-prefix KV into the
+// unscoped tree on the plain-CPU seam. Two admissions share it: the pre-decode
+// prompt admission (step 3) and the post-decode generated-continuation
+// admission. Both run while the session is owned exclusively by this goroutine
+// (before decode starts, or after it finished), which is what makes the off-lock
+// clone below stable.
+//
+// Ticket prefill-radix-cold-prefill-tax-20261108: the historical section held
+// p.mu across Lookup + InsertCloneWithLogits + Done — i.e. across the
+// O(prefix-bytes) session-cache clone, the lock-held memcpy that serialized
+// concurrent CPU admissions behind every cold prefill. The clone now runs
+// OUTSIDE the lock: reserve room under the lock, release it, clone, re-acquire,
+// re-validate the boundary, and attach the pre-cloned payload so the locked
+// section holds only the boundary walk + attach + bookkeeping. A topology change
+// between the reservation and the attach invalidates the speculative clone and
+// falls back to the historical fully-locked path byte-for-byte. Lease accounting
+// mirrors the historical section: the speculative lookup lease is released before
+// leaving the lock, and the insert's own handoff (leaf.refs++; boundary.refs--)
+// balances the re-lookup's lease against the single final Done.
+func (p *InKernelPlanner) admitCPUPayload(phase string, ids []int, s *model.Session, logits []float32) {
+	if p.tree == nil || s == nil || s.Cache == nil || len(ids) == 0 {
+		return
+	}
+	lookupAt, lookupArmed := p.radixAttrBegin()
+	offLockEligible := p.radixOffLockAdmit && !p.tree.SharedDensePrefixes()
+	p.mu.Lock()
+	b, m := p.tree.Lookup(ids)
+	evBefore := p.tree.Evictions()
+	var lookupNs int64
+	if lookupArmed {
+		lookupNs = time.Since(lookupAt).Nanoseconds()
+	}
+	if m >= len(ids) || !offLockEligible {
+		// Exact-hit logits-only update (or the disarmed / shared-dense-prefix arm):
+		// keep the historical single locked section; nothing large moves off-lock.
+		insertAt, insertArmed := p.radixAttrBegin()
+		leaf := p.tree.InsertCloneWithLogits(b, ids[m:], s.Cache, logits)
+		p.tree.Done(leaf)
+		var insertNs, bytesCloned int64
+		if insertArmed {
+			insertNs = time.Since(insertAt).Nanoseconds()
+			if m < len(ids) {
+				bytesCloned = s.Cache.OwnedPayloadBytes()
+			}
+		}
+		evAfter := p.tree.Evictions()
+		p.mu.Unlock()
+		if lookupArmed || insertArmed {
+			p.radixAttrRecord(phase, len(ids), m, "", lookupNs, 0, insertNs, bytesCloned, radixLogitsBytes(logits), false, evAfter-evBefore)
+		}
+		return
+	}
+	fits := p.tree.ReserveCPUAdmission(s.Cache.ClonePayloadBytes(), len(logits), b)
+	evReserved := p.tree.Evictions()
+	if !fits {
+		// Budget refusal (oversized, or full with everything pinned): no fill. Mirror
+		// the historical rejection, which returned the still-leased boundary and let
+		// the caller's Done release it.
+		p.tree.Done(b)
+		p.mu.Unlock()
+		if lookupArmed {
+			p.radixAttrRecord(phase, len(ids), m, "", lookupNs, 0, 0, 0, 0, false, evReserved-evBefore)
+		}
+		return
+	}
+	// Release the speculative lookup lease before leaving the lock: the re-lookup below
+	// takes a fresh one, and the insert's lease handoff (leaf.refs++; boundary.refs--)
+	// balances it against the final Done(leaf). Holding it across the off-lock clone
+	// would leak one ref per admission.
+	p.tree.Done(b)
+	p.mu.Unlock()
+	captureAt, captureArmed := p.radixAttrBegin()
+	cp := s.Cache.Clone()
+	var captureNs, bytesCloned int64
+	if captureArmed {
+		captureNs = time.Since(captureAt).Nanoseconds()
+		bytesCloned = cp.OwnedPayloadBytes()
+	}
+	p.mu.Lock()
+	b2, m2 := p.tree.Lookup(ids)
+	if b2 != b || m2 != m {
+		// Concurrent topology change while off-lock: fall back to the historical
+		// fully-locked path; the speculative clone is dropped.
+		insertAt, insertArmed := p.radixAttrBegin()
+		leaf := p.tree.InsertCloneWithLogits(b2, ids[m2:], s.Cache, logits)
+		p.tree.Done(leaf)
+		var insertNs int64
+		if insertArmed {
+			insertNs = time.Since(insertAt).Nanoseconds()
+		}
+		evAfter := p.tree.Evictions()
+		p.mu.Unlock()
+		if lookupArmed || captureArmed || insertArmed {
+			p.radixAttrRecord(phase, len(ids), m2, "", lookupNs, captureNs, insertNs, bytesCloned, radixLogitsBytes(logits), false, evAfter-evBefore)
+		}
+		return
+	}
+	insertAt, insertArmed := p.radixAttrBegin()
+	leaf := p.tree.AttachCloned(b2, ids[m2:], cp, logits)
+	p.tree.Done(leaf)
+	var insertNs int64
+	if insertArmed {
+		insertNs = time.Since(insertAt).Nanoseconds()
+	}
+	evAfter := p.tree.Evictions()
+	p.mu.Unlock()
+	if lookupArmed || captureArmed || insertArmed {
+		p.radixAttrRecord(phase, len(ids), m, "", lookupNs, captureNs, insertNs, bytesCloned, radixLogitsBytes(logits), true, evAfter-evBefore)
+	}
 }
 
 // finishInKernelCleanup is deferred directly by the boundary that owns the
