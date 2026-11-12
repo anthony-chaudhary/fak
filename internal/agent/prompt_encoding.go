@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -261,10 +262,38 @@ const (
 // ErrDeepSeekV41ChatProfile identifies refusal of an explicit prompt contract.
 var ErrDeepSeekV41ChatProfile = errors.New("native DeepSeek V4.1 chat profile not admitted")
 
+// admitsNonThinkingKwargs reports whether chat_template_kwargs requests exactly
+// the non-thinking renderer this profile implements: an object whose only key
+// is enable_thinking=false (any JSON case). Any other key, a true value, a
+// non-object body, or a non-bool value is an explicit contract for a renderer
+// we do not have, so it stays refused. This admits the shape our own bench
+// client sends by default (cmd/fak/bench_h2h.go), closing the typed-502
+// deviation recorded on the H200 DS4.1 runs (fak-private
+// docs/benchmarks/oss-baselines/rtp-test-h200/RESULTS.md).
+func admitsNonThinkingKwargs(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false // absent kwarg: the caller treats it as "no contract"
+	}
+	var kw map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &kw); err != nil || kw == nil || len(kw) != 1 {
+		return false
+	}
+	val, ok := kw["enable_thinking"]
+	if !ok {
+		return false
+	}
+	var thinking bool
+	if err := json.Unmarshal(val, &thinking); err != nil {
+		return false // non-bool value is not a recognized contract
+	}
+	return !thinking
+}
+
 func (p *InKernelPlanner) admitDeepSeekV41ChatProfile(messages []Message, sp SampleParams) error {
 	if p.m != nil && p.m.Cfg.IsDeepSeekV41() && !inKernelRawV41Prompt(p.m.Cfg, sp) {
 		if (sp.ReasoningEffort != "" && sp.ReasoningEffort != EffortTierNone) ||
-			(sp.ThinkingBudget != nil && *sp.ThinkingBudget != 0) || len(sp.ChatTemplateKwargs) != 0 {
+			(sp.ThinkingBudget != nil && *sp.ThinkingBudget != 0) ||
+			(len(sp.ChatTemplateKwargs) != 0 && !admitsNonThinkingKwargs(sp.ChatTemplateKwargs)) {
 			return fmt.Errorf("%w: only the non-thinking renderer is supported", ErrDeepSeekV41ChatProfile)
 		}
 		for _, message := range messages {
