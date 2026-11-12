@@ -21,6 +21,7 @@ FAK coordinates the whole agent path, not isolated components. Start with the [c
 | Handling denied tool calls in a harness | [Tool feedback continuation](explainers/tool-feedback-continuation.md) | Close the wire turn, carry the refusal into context, and resume at a bounded harness turn boundary. |
 | Improving or comparing local inference | [Fak-native inference doctrine](native-inference-goal.md) | Keep native product work inside fak, classify explicit llama.cpp uses, and apply the matched-envelope rule. |
 | Deploying or operating | [Deployment guide](fak/deployment-guide.md) | Choose an operating envelope, then configure and observe the service. |
+| Serving multiple tenants with billing | [Billing quickstart](billing/quickstart.md) | Arm the billing chain on `fak serve`, provision tenant keys and balances, and walk a billed request through to the exhausted-budget refusal. |
 | Contributing | [Contributor guide](../CONTRIBUTING.md) and [developer tooling](dev-tooling.md) | Find the owning document first, then build, test, change, and prove the repository under its current contracts. |
 | Researching design or history | [Notes archive](notes/) | Find rationale and dated evidence, then check current code and tests before relying on it. |
 
