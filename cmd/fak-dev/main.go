@@ -198,6 +198,8 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		return devcmd.RunHostSetupBench(stdout, stderr, argv[1:])
 	case "launch-census":
 		return devcmd.RunLaunchCensus(stdout, stderr, argv[1:])
+	case "remote-launch":
+		return runRemoteLaunch(stdout, stderr, argv[1:])
 	default:
 		fmt.Fprintf(stderr, "fak-dev: unknown command %q\n", argv[0])
 		fmt.Fprintln(stderr, "run 'fak-dev help' for repository-development commands")
@@ -299,6 +301,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  h2d-inventory [--preset NAME | --model-shape JSON] [--no-discover] [--snapshot PATH] per-token host->device copy inventory on decode state paths (sampler/mask/KV-append metadata)")
 	fmt.Fprintln(w, "  hostsetup-bench [--preset NAME | --layers N --out D --in D --block B] [--backend auto|NAME] [--warmup W] [--iters K] [--threshold F] [--gate] per-layer host-setup vs kernel microbench at batch 1; gates LAUNCH_SETUP_DOMINANT")
 	fmt.Fprintln(w, "  launch-census [--preset NAME | --model-shape JSON] [--check [REF]] launches/token census of decode-path kernel-launch/parFor sites (looped vs batched expert dispatch)")
+	fmt.Fprintln(w, "  remote-launch [inspect|start] --host H [--session NAME] [--command CMD] [--save PATH] ssh-inspect a benchmark host: list/resolve its screen sessions, tail the log, print the reattach banner, and save the launch receipt")
 	fmt.Fprintln(w, "  version                               print fak-dev build identity")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "companion tooling (when fak-private is present):")
