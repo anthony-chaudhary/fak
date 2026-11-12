@@ -12,18 +12,19 @@ import (
 const (
 	// defaultArmMaxConcurrency is the shipped per-arm in-flight ceiling for
 	// research arms. It is 128, not the legacy 16, because on a proxy/bench node
-	// the arm ceiling — not the engine — was the binding constraint: the
-	// 2026-10-26 Anthony concurrency sweep saw HTTP 429 at exactly C32 while the
-	// native scheduler recorded NO shedding, so the front door refused load the
-	// engine would have served. 128 is the interim rung of the concurrency
-	// witness ladder (docs/CONCURRENCY-FIRST-CLASS.md §3, C128 @ S≥0.8), so the
-	// default no longer spuriously caps a legitimate single-arm sweep.
+	// the arm ceiling — not the engine — was the binding constraint: a recorded
+	// sweep saw HTTP 429 at C32 while the native scheduler the gateway fronts
+	// recorded NO shedding, so the front door refused load the engine would have
+	// served. 128 (C128) is the interim rung of the powers-of-two concurrency
+	// witness ladder, so the default no longer spuriously caps a legitimate
+	// single-arm sweep.
 	//
 	// This remains a TUNABLE, not a law: `--arm-max-concurrency` (0 = unlimited)
 	// overrides it per node, `fak arms limit --arm <id>` overrides it per arm at
-	// runtime, and a shared/exclusive lease may carry its own concurrency. The
-	// tracked plan to replace the hand constant with a measured policy (target
-	// the S(C) knee, not a ladder rung) is the autotune ladder row
+	// runtime, and a shared/exclusive lease may carry its own concurrency. It is
+	// still a hand constant, not a measured value: the correct value is the
+	// S(C) knee of the served stack, and the tracked work to replace the
+	// constant with that measurement is the autotune ladder row
 	// `autotune.concurrency.arm-admission`.
 	defaultArmMaxConcurrency = 128
 
