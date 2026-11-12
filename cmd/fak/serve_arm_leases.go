@@ -2,8 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -12,38 +10,47 @@ import (
 )
 
 const (
-	defaultArmMaxConcurrency = 16
-	defaultArmAdmitWait      = 30 * time.Second
+	// defaultArmMaxConcurrency is the shipped per-arm in-flight ceiling for
+	// research arms. It is 128, not the legacy 16, because on a proxy/bench node
+	// the arm ceiling — not the engine — was the binding constraint: the
+	// 2026-10-26 Anthony concurrency sweep saw HTTP 429 at exactly C32 while the
+	// native scheduler recorded NO shedding, so the front door refused load the
+	// engine would have served. 128 is the interim rung of the concurrency
+	// witness ladder (docs/CONCURRENCY-FIRST-CLASS.md §3, C128 @ S≥0.8), so the
+	// default no longer spuriously caps a legitimate single-arm sweep.
+	//
+	// This remains a TUNABLE, not a law: `--arm-max-concurrency` (0 = unlimited)
+	// overrides it per node, `fak arms limit --arm <id>` overrides it per arm at
+	// runtime, and a shared/exclusive lease may carry its own concurrency. The
+	// tracked plan to replace the hand constant with a measured policy (target
+	// the S(C) knee, not a number) is recorded in the private autotune ladder:
+	// docs/knowledge/ladder/autotune.md, id `autotune.concurrency.arm-admission`.
+	defaultArmMaxConcurrency = 128
+
+	// defaultArmAdmitWait is how long a proxied request may queue at a saturated
+	// arm before the 429 refusal (0 = legacy immediate refusal).
+	defaultArmAdmitWait = 30 * time.Second
 )
 
-// armMaxConcurrencyFromEnv reads FAK_ARM_MAX_CONCURRENCY: the per-arm concurrency
-// ceiling for research arms (default 16; 0 = unlimited). Unparseable or negative
-// values fall back to the default rather than misconfiguring admission.
-func armMaxConcurrencyFromEnv() int {
-	raw := strings.TrimSpace(os.Getenv("FAK_ARM_MAX_CONCURRENCY"))
-	if raw == "" {
-		return defaultArmMaxConcurrency
+// resolveArmMaxConcurrency returns the effective per-arm ceiling from the parsed
+// serve flags: the explicit `--arm-max-concurrency` value, otherwise the
+// built-in default. 0 means unlimited. The value lives on the config surface
+// (flag), never the environment — behavioral settings are not env vars
+// (internal/envconfiglint, CONFIG_NOT_ENV).
+func resolveArmMaxConcurrency(sf *serveFlags) int {
+	if sf != nil && sf.armMaxConcurrency != nil {
+		return *sf.armMaxConcurrency
 	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n < 0 {
-		return defaultArmMaxConcurrency
-	}
-	return n
+	return defaultArmMaxConcurrency
 }
 
-// armAdmitWaitFromEnv reads FAK_ARM_ADMIT_WAIT: how long a proxied request may
-// queue at a saturated arm before the 429 refusal (default 30s; 0 = legacy
-// immediate refusal). Unparseable or negative values fall back to the default.
-func armAdmitWaitFromEnv() time.Duration {
-	raw := strings.TrimSpace(os.Getenv("FAK_ARM_ADMIT_WAIT"))
-	if raw == "" {
-		return defaultArmAdmitWait
+// resolveArmAdmitWait returns the effective admission-queue budget from the
+// parsed serve flags (0 = legacy immediate refusal).
+func resolveArmAdmitWait(sf *serveFlags) time.Duration {
+	if sf != nil && sf.armAdmitWait != nil {
+		return *sf.armAdmitWait
 	}
-	d, err := time.ParseDuration(raw)
-	if err != nil || d < 0 {
-		return defaultArmAdmitWait
-	}
-	return d
+	return defaultArmAdmitWait
 }
 
 // configureServeArmLeases runs during gateway construction, before a listener
@@ -52,7 +59,7 @@ func (rt *serveRuntime) configureServeArmLeases(sf *serveFlags, srv *gateway.Ser
 	if rt.armCoordinator != nil {
 		return fmt.Errorf("research-arm coordinator already configured")
 	}
-	maxConcurrency := armMaxConcurrencyFromEnv()
+	maxConcurrency := resolveArmMaxConcurrency(sf)
 	var coordinator *researcharm.Coordinator
 	if sf.armLeaseStore != nil && strings.TrimSpace(*sf.armLeaseStore) != "" {
 		var err error
@@ -65,7 +72,7 @@ func (rt *serveRuntime) configureServeArmLeases(sf *serveFlags, srv *gateway.Ser
 	}
 	rt.armCoordinator = coordinator
 	srv.SetResearchArmCoordinator(coordinator)
-	srv.SetArmAdmitWait(armAdmitWaitFromEnv())
+	srv.SetArmAdmitWait(resolveArmAdmitWait(sf))
 	return nil
 }
 

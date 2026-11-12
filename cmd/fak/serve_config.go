@@ -182,6 +182,8 @@ func effectiveServeConfig(sf *serveFlags, m deploymanifest.Manifest, hasManifest
 			"require_key_env":                      {Value: *sf.requireKeyEnv, Source: source("require-key-env", "auth", "require_key_env")},
 			"allow_lan":                            {Value: *sf.allowLAN, Source: source("allow-lan", "auth", "allow_lan")},
 			"context_budget_tokens":                {Value: *sf.contextBudgetTokens, Source: source("context-budget-tokens", "budgets", "default_tokens")},
+			"arm_max_concurrency":                  {Value: resolveArmMaxConcurrency(sf), Source: source("arm-max-concurrency", "", "")},
+			"arm_admit_wait_ms":                    {Value: resolveArmAdmitWait(sf).Milliseconds(), Source: source("arm-admit-wait", "", "")},
 			"native_context_tokens":                {Value: *sf.nativeContextTokens, Source: source("native-context-tokens", "", "")},
 			"native_context_resolution":            {Value: "unresolved", Source: "model-header"},
 			"native_admission_token_budget":        {Value: *sf.nativeAdmissionTokenBudget, Source: source("native-admission-token-budget", "", "")},

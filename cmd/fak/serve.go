@@ -126,6 +126,8 @@ type serveFlags struct {
 	provider                     *string
 	baseURL                      *string
 	armLeaseStore                *string
+	armMaxConcurrency            *int
+	armAdmitWait                 *time.Duration
 	replicaBaseURLs              repeatedStringFlag
 	model                        *string
 	executionPolicy              *string
@@ -293,6 +295,8 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.stdio = fs.Bool("stdio", false, "serve MCP over stdin/stdout (newline-delimited JSON-RPC) instead of HTTP")
 	sf.provider = fs.String("provider", "openai", "upstream provider transcript wire: openai, anthropic, gemini, or xai")
 	sf.armLeaseStore = fs.String("arm-lease-store", "", "private durable research-arm lease snapshot (Linux/Darwin; fresh store requires initial exclusive lease before inference)")
+	sf.armMaxConcurrency = fs.Int("arm-max-concurrency", defaultArmMaxConcurrency, "per-arm in-flight concurrency ceiling for research arms (0 = unlimited); raise it for a bench/eval arm driving more than the default 128 concurrent turns, or set one arm live with `fak arms limit --arm <id> --max-concurrency N`")
+	sf.armAdmitWait = fs.Duration("arm-admit-wait", defaultArmAdmitWait, "how long a proxied request queues at a saturated research arm before the 429 refusal (0 = legacy immediate refusal)")
 	sf.baseURL = fs.String("base-url", "", "upstream provider base URL for the /v1/chat/completions proxy (empty = offline mock planner)")
 	sf.topologyShadowInput = fs.String("topology-shadow-input", "", "bounded supplied topology observations for SHADOW-only decisions on the existing replica fleet; no live collector, routing change or capacity action")
 	fs.Var(&sf.replicaBaseURLs, "replica-base-url", "additional upstream provider base URL for a static round-robin replica fleet; repeat for N replicas. If --base-url is set, it is replica 1. Each replica's identity defaults to a stable endpoint-derived id (replica-<digest>) so the same upstream keeps its metric/residency labels regardless of flag order or a dropped peer; pass name=URL to pin an operator-chosen id.")

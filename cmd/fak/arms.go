@@ -218,8 +218,12 @@ func runArmsStatus(stdout, stderr io.Writer, argv []string) int {
 }
 
 func renderArmsTable(w io.Writer, snap researcharm.Snapshot) {
-	fmt.Fprintf(w, "RESEARCH PROJECT ARMS (%d registered, %d active requests, %d active leases)\n\n",
-		snap.TotalArms, snap.TotalInflight, len(snap.ActiveLeases))
+	defaultLimit := "unlimited"
+	if snap.DefaultMaxConcurrency > 0 {
+		defaultLimit = strconv.Itoa(snap.DefaultMaxConcurrency)
+	}
+	fmt.Fprintf(w, "RESEARCH PROJECT ARMS (%d registered, %d active requests, %d active leases; new-arm default limit %s)\n\n",
+		snap.TotalArms, snap.TotalInflight, len(snap.ActiveLeases), defaultLimit)
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "ARM ID\tGROUP\tACTIVE\tLIMIT\tTOTAL REQS\tTOKENS\tERRORS\tPIDS\tLEASE\tLAST SEEN")

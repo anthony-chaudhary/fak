@@ -86,6 +86,20 @@ func (c *Coordinator) SetEnforceLeases(enforce bool) {
 	c.enforceLeases = enforce
 }
 
+// DefaultMaxConcurrency returns the ceiling a newly registered arm inherits
+// when it holds no lease of its own (0 = unlimited). It is the configured
+// ship value, distinct from any per-arm override set by SetLimit or carried by
+// an active lease; the awareness surfaces read it so an operator can see what
+// an arm will get before it first appears.
+func (c *Coordinator) DefaultMaxConcurrency() int {
+	if c == nil {
+		return 0
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.defaultMaxConcurrency
+}
+
 // Admit checks whether an incoming request from the given origin may proceed.
 // It refuses immediately when the arm is at its concurrency ceiling; callers
 // that want bounded queueing instead use AdmitWithWait.
@@ -547,13 +561,14 @@ func (c *Coordinator) Snapshot() Snapshot {
 		}
 	}
 	return Snapshot{
-		DurableStatus: status,
-		Timestamp:     now,
-		TotalInflight: len(inflight),
-		TotalArms:     len(arms),
-		Arms:          arms,
-		Inflight:      inflight,
-		ActiveLeases:  leases,
+		DurableStatus:         status,
+		Timestamp:             now,
+		TotalInflight:         len(inflight),
+		TotalArms:             len(arms),
+		DefaultMaxConcurrency: c.defaultMaxConcurrency,
+		Arms:                  arms,
+		Inflight:              inflight,
+		ActiveLeases:          leases,
 	}
 }
 

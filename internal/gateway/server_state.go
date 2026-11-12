@@ -733,8 +733,8 @@ type Server struct {
 
 	// researchArmsMu guards researchArms and armAdmitWait. armAdmitWait is how long a
 	// proxied request may queue at a saturated research-arm concurrency limit before
-	// the 429 (0 = legacy immediate refusal); cmd/fak serve sets it from
-	// FAK_ARM_ADMIT_WAIT. See AdmitWithWait in internal/researcharm.
+	// the 429 (0 = legacy immediate refusal); cmd/fak serve sets it from the
+	// --arm-admit-wait flag. See AdmitWithWait in internal/researcharm.
 	researchArmsMu sync.RWMutex
 	researchArms   *researcharm.Coordinator
 	armAdmitWait   time.Duration
